@@ -1,0 +1,222 @@
+package tools
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os/exec"
+	"slices"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/invopop/jsonschema"
+	"github.com/jingkaihe/kodelet/pkg/state"
+)
+
+var (
+	BannedCommands = []string{
+		"vim",
+		"view",
+		"less",
+		"more",
+		"cd",
+	}
+)
+
+type BashTool struct{}
+
+type BashInput struct {
+	Description string `json:"description" jsonschema:"description=A description of the command to run"`
+	Command     string `json:"command" jsonschema:"description=The bash command to run"`
+	Timeout     int    `json:"timeout" jsonschema:"description=The timeout for the command in seconds,default=10"`
+}
+
+func (b *BashTool) GenerateSchema() *jsonschema.Schema {
+	return GenerateSchema[BashInput]()
+}
+
+func (b *BashTool) Name() string {
+	return "bash"
+}
+
+func (b *BashTool) ValidateInput(state state.State, parameters string) error {
+	input := &BashInput{}
+	err := json.Unmarshal([]byte(parameters), input)
+	if err != nil {
+		return err
+	}
+
+	if input.Command == "" {
+		return errors.New("command is required")
+	}
+
+	if input.Description == "" {
+		return errors.New("description is required")
+	}
+
+	if input.Timeout < 10 || input.Timeout > 120 {
+		return errors.New("timeout must be between 10 and 120 seconds")
+	}
+
+	validateCommand := func(command string) error {
+		command = strings.TrimSpace(command)
+		if command == "" {
+			return nil
+		}
+
+		splitted := strings.Split(command, " ")
+		if len(splitted) == 0 {
+			return errors.New("command must contain at least one word")
+		}
+
+		firstWord := splitted[0]
+		if slices.Contains(BannedCommands, firstWord) {
+			return errors.New("command is banned: " + firstWord)
+		}
+
+		return nil
+	}
+
+	// Split by all operators and validate each command
+	operators := []string{"&&", "||", ";"}
+	commands := []string{input.Command}
+
+	for _, op := range operators {
+		var newCommands []string
+		for _, cmd := range commands {
+			newCommands = append(newCommands, strings.Split(cmd, op)...)
+		}
+		commands = newCommands
+	}
+
+	for _, command := range commands {
+		if err := validateCommand(command); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (b *BashTool) Description() string {
+	return `Executes a given bash command in a persistent shell session with timeout.
+
+Before executing the command, please follow these steps:
+
+# Important
+* The command argument is required.
+* You must specify a timeout from 10 to 120 seconds.
+* Please provide a clear and concise description of what this command does in 5-10 words.
+* If the output exceeds 30000 characters, output will be truncated before being returned to you.
+* You **MUST NOT** run commands that require user interaction.
+* When issuing multiple commands, use the ';' or '&&' operator to separate them. Command MUST NOT be multiline.
+* Try to maintain your current working directory throughout the session by using absolute paths and avoid using cd directly. If you need to use cd please wrap it in parentheses.
+* DO NOT use heredoc. For any command that requires heredoc, use the "file_write" tool instead.
+
+# Examples
+<good-example>
+pytest /foo/bar/tests
+</good-example>
+
+<bad-example>
+cd /foo/bar && pytest tests
+<reasoning>
+Using cd directly changes the current working directory.
+</reasoning>
+</bad-example>
+
+<good-example>
+(cd /foo/bar && pytest tests)
+<reasoning>
+cd command is wrapped in parentheses thus avoid changing the current working directory.
+</reasoning>
+</good-example>
+
+<good-example>
+apt-get install -y python3-pytest
+</good-example>
+
+<bad-example>
+apt-get install python3-pytest
+<reasoning>
+The command requires user interaction.
+</reasoning>
+</bad-example>
+
+<bad-example>
+tail -f /var/log/nginx/access.log
+<reasoning>
+The command is running in interactive mode.
+</reasoning>
+</bad-example>
+
+<bad-example>
+vim /foo/bar/tests.py
+<reasoning>
+The command is running in interactive mode.
+</reasoning>
+</bad-example>
+
+<good-example>
+echo a; echo b
+</good-example>
+
+<bad-example>
+echo a
+echo b
+<reasoning>
+The command is multiline.
+</reasoning>
+</bad-example>
+
+<bad-example>
+cat <<EOF > /foo/bar/tests.py
+import pytest
+
+def test_foo():
+    assert 1 == 1
+EOF
+<reasoning>
+The command is using heredoc.
+</reasoning>
+</bad-example>
+`
+}
+
+func (b *BashTool) Execute(ctx context.Context, state state.State, parameters string) ToolResult {
+	input := &BashInput{}
+	err := json.Unmarshal([]byte(parameters), input)
+	if err != nil {
+		return ToolResult{
+			Error: err.Error(),
+		}
+	}
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(input.Timeout)*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "bash", "-c", input.Command)
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return ToolResult{
+				Error: "Command timed out after " + strconv.Itoa(input.Timeout) + " seconds",
+			}
+		}
+		if status, ok := err.(*exec.ExitError); ok {
+			return ToolResult{
+				Result: string(output),
+				Error:  fmt.Sprintf("Command exited with status %d", status.ExitCode()),
+			}
+		}
+		return ToolResult{
+			Error: err.Error(),
+		}
+	}
+
+	return ToolResult{
+		Result: string(output),
+	}
+}

@@ -1,0 +1,54 @@
+package utils
+
+import (
+	"fmt"
+	"os"
+	"strconv"
+)
+
+// ContentWithLineNumber formats a slice of strings by prefixing each line with its line number
+// starting from the given offset, with appropriate padding for alignment.
+func ContentWithLineNumber(lines []string, offset int) string {
+	var result string
+	maxLineWidth := 1
+
+	if len(lines) > 0 {
+		maxLineNum := offset + len(lines) - 1
+		maxLineWidth = len(strconv.Itoa(maxLineNum))
+	}
+
+	// Format lines with appropriate padding
+	for i, line := range lines {
+		lineNum := offset + i
+		paddedLineNum := fmt.Sprintf("%*d", maxLineWidth, lineNum)
+		result += fmt.Sprintf("%s: %s\n", paddedLineNum, line)
+	}
+
+	return result
+}
+
+func IsBinaryFile(filePath string) bool {
+	// Open the file
+	file, err := os.Open(filePath)
+	if err != nil {
+		return false
+	}
+	defer file.Close()
+
+	// Read the first 512 bytes
+	buf := make([]byte, 512)
+	n, err := file.Read(buf)
+	if err != nil {
+		return false
+	}
+	buf = buf[:n]
+
+	// Check for NULL bytes which indicate binary content
+	for _, b := range buf {
+		if b == 0 {
+			return true
+		}
+	}
+
+	return false
+}

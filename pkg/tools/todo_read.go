@@ -1,0 +1,103 @@
+package tools
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"sort"
+
+	"github.com/invopop/jsonschema"
+	"github.com/jingkaihe/kodelet/pkg/state"
+)
+
+type TodoReadTool struct{}
+
+type TodoReadInput struct{}
+
+func (t *TodoReadTool) Name() string {
+	return "todo_read"
+}
+
+func (t *TodoReadTool) Description() string {
+	return `Use TodoRead tool to read the current todo list.
+
+This tool is useful for reviewing the progress of your current task.
+
+# Use Cases
+* Check the current pending todo item.
+* You are asked by user to review the current todo list.
+* Check the todo items remaining and make sure you are making progress.
+* You are under the impression that you are lost track of the task.
+`
+}
+
+func (t *TodoReadTool) GenerateSchema() *jsonschema.Schema {
+	return GenerateSchema[TodoReadInput]()
+}
+
+func (t *TodoReadTool) ValidateInput(state state.State, parameters string) error {
+	return nil
+}
+
+func (t *TodoReadTool) Execute(ctx context.Context, state state.State, parameters string) ToolResult {
+	filePath := state.TodoFilePath()
+
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		return ToolResult{
+			Error: fmt.Sprintf("failed to read todos from file: %s", err.Error()),
+		}
+	}
+
+	var todos TodoWriteInput
+	if err := json.Unmarshal(content, &todos); err != nil {
+		return ToolResult{
+			Error: fmt.Sprintf("failed to unmarshal todos from file: %s", err.Error()),
+		}
+	}
+
+	sortedTodos := sortTodos(todos.Todos)
+	formattedTodos := formatTodos(sortedTodos)
+
+	return ToolResult{
+		Result: formattedTodos,
+	}
+}
+
+func sortTodos(todos []Todo) []Todo {
+	statusOrder := map[Status]int{
+		Canceled:   0,
+		Completed:  1,
+		InProgress: 2,
+		Pending:    3,
+	}
+	priorityOrder := map[Priority]int{
+		High:   0,
+		Medium: 1,
+		Low:    2,
+	}
+
+	sorted := make([]Todo, len(todos))
+	copy(sorted, todos)
+	sort.Slice(sorted, func(i, j int) bool {
+		todoA, todoB := sorted[i], sorted[j]
+		statusA, statusB := statusOrder[todoA.Status], statusOrder[todoB.Status]
+		if statusA != statusB {
+			return statusA < statusB
+		}
+		priorityA, priorityB := priorityOrder[todoA.Priority], priorityOrder[todoB.Priority]
+		return priorityA < priorityB
+	})
+	return sorted
+}
+
+func formatTodos(todos []Todo) string {
+	formatted := ""
+	formatted += "Current todos:\n"
+	formatted += "ID\tStatus\tPriority\tContent\n"
+	for idx, todo := range todos {
+		formatted += fmt.Sprintf("%d\t%s\t%s\t%s\n", idx+1, todo.Status, todo.Priority, todo.Content)
+	}
+	return formatted
+}

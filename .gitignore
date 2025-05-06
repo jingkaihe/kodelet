@@ -1,0 +1,39 @@
+# Go specific
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+go.work
+
+# Dependency directories
+vendor/
+bin/
+
+# IDE and editor specific
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Environment files
+.env
+.env.local
+
+# Build artifacts
+build/
+dist/
+
+# Anthropic API key
+.anthropic
+anthropic.json
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+./bin
+kodelet-todos-*.json
