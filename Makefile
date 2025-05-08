@@ -53,3 +53,11 @@ help:
 	@echo "  format       - Format code"
 	@echo "  docker-build - Build Docker image"
 	@echo "  docker-run   - Run with Docker (use: make docker-run query='your query')"
+
+release: cross-build
+	gh release create v$(VERSION)
+	gh release upload v$(VERSION) ./bin/kodelet-linux-amd64
+	gh release upload v$(VERSION) ./bin/kodelet-linux-arm64
+	gh release upload v$(VERSION) ./bin/kodelet-darwin-amd64
+	gh release upload v$(VERSION) ./bin/kodelet-darwin-arm64
+	gh release upload v$(VERSION) ./bin/kodelet-windows-amd64.exe
