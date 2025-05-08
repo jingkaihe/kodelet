@@ -5,6 +5,8 @@ Kodelet is a lightweight CLI tool that helps with site reliability and platform 
 
 ## Project Structure
 ```
+├── .github/             # GitHub configuration
+│   └── workflows/       # GitHub Actions workflows
 ├── bin/                 # Compiled binaries
 ├── cmd/
 │   └── kodelet/         # Application entry point

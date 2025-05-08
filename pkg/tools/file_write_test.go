@@ -31,7 +31,7 @@ func TestFileWriteTool_Description(t *testing.T) {
 	desc := tool.Description()
 
 	assert.NotEmpty(t, desc)
-	assert.Contains(t, desc, "Writes a file with the given content")
+	assert.Contains(t, desc, "Writes a file with the given text")
 }
 
 func TestFileWriteTool_ValidateInput(t *testing.T) {

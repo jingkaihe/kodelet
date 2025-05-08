@@ -123,6 +123,7 @@ func main() {
 	// Add subcommands
 	rootCmd.AddCommand(chatCmd)
 	rootCmd.AddCommand(runCmd)
+	rootCmd.AddCommand(versionCmd)
 	
 	// Execute
 	if err := rootCmd.Execute(); err != nil {
