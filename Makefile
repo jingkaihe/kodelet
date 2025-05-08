@@ -3,7 +3,7 @@
 # Build the application
 build:
 	mkdir -p bin
-	go build -o ./bin/kodelet ./cmd/kodelet/
+	go build -ldflags="-X 'github.com/jingkaihe/kodelet/pkg/version.Version=$$(cat VERSION.txt)' -X 'github.com/jingkaihe/kodelet/pkg/version.GitCommit=$$(git rev-parse --short HEAD)'" -o ./bin/kodelet ./cmd/kodelet/
 
 chat: build
 	./bin/kodelet chat
@@ -22,7 +22,7 @@ format:
 
 # Build Docker image
 docker-build:
-	docker build -t kodelet .
+	docker build --build-arg VERSION="$$(cat VERSION.txt)" --build-arg GIT_COMMIT="$$(git rev-parse --short HEAD)" -t kodelet .
 
 # Run with Docker
 docker-run:
