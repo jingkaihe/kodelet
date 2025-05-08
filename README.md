@@ -16,7 +16,7 @@ You can use Kodelet in two ways:
 #### Run Command (One-shot)
 
 ```bash
-go build -o ./bin/kodelet ./cmd/kodelet/
+make build
 ./bin/kodelet run "your query"
 
 #### Interactive Chat Mode
