@@ -2,6 +2,11 @@
 
 Kodelet is a lightweight CLI tool that helps with site reliability and platform engineering tasks.
 
+## Installation
+
+```bash
+curl -sSL https://raw.githubusercontent.com/jingkaihe/kodelet/main/install.sh | bash
+```
 
 ## Development
 
@@ -16,7 +21,7 @@ You can use Kodelet in two ways:
 #### Run Command (One-shot)
 
 ```bash
-go build -o ./bin/kodelet ./cmd/kodelet/
+make build
 ./bin/kodelet run "your query"
 
 #### Interactive Chat Mode
