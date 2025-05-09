@@ -7,6 +7,7 @@ Kodelet is a lightweight CLI tool that helps with site reliability and platform 
 ```
 ├── .github/             # GitHub configuration
 │   └── workflows/       # GitHub Actions workflows
+├── adrs/                # Architecture Decision Records
 ├── bin/                 # Compiled binaries
 ├── cmd/
 │   └── kodelet/         # Application entry point
@@ -14,7 +15,9 @@ Kodelet is a lightweight CLI tool that helps with site reliability and platform 
     ├── state/           # State management for the application
     ├── sysprompt/       # System prompt configuration and templates
     ├── tools/           # Tool implementations (bash, file operations, etc.)
-    └── utils/           # Utility functions and helpers
+    ├── tui/             # Terminal User Interface components
+    ├── utils/           # Utility functions and helpers
+    └── version/         # Version information
 ```
 
 The codebase follows a modular structure with clear separation of concerns:
@@ -22,20 +25,54 @@ The codebase follows a modular structure with clear separation of concerns:
 - State management interfaces and implementations in the `pkg/state` package
 - System prompt configuration in the `pkg/sysprompt` package
 - Tools for executing various operations in the `pkg/tools` package (bash, file operations, code search, todo management, etc.)
+- Terminal user interface components in the `pkg/tui` package for interactive chat mode
 - Common utilities and helper functions in the `pkg/utils` package
+- Version information in the `pkg/version` package
 
 ## Tech Stack
-- **Go 1.24+** - Programming language
-- **Anthropic SDK** - For Claude AI integration
+- **Go 1.24.2** - Programming language
+- **Anthropic SDK** - For Claude AI integration (anthropics/anthropic-sdk-go v0.2.0-beta.3)
+- **Charm libraries** - TUI components (bubbletea, bubbles, lipgloss)
+- **Cobra & Viper** - CLI commands and configuration
 - **Docker** - For containerization
 
 ## Key Commands
+
+### CLI Commands
+
+#### One-shot Mode (Run)
+Execute a single query and exit:
+```bash
+kodelet run "your query"
+```
+
+#### Interactive Chat Mode
+Start an interactive chat session with a modern TUI interface:
+```bash
+kodelet chat
+```
+
+Start with legacy command-line interface instead of TUI:
+```bash
+kodelet chat --legacy
+```
+
+#### Version Information
+Display version information in JSON format:
+```bash
+kodelet version
+```
 
 ### Building & Running
 
 #### Build the application
 ```bash
 make build
+```
+
+#### Build for multiple platforms
+```bash
+make cross-build
 ```
 
 #### Build the Docker image
@@ -75,6 +112,11 @@ make format
 make lint
 ```
 
+#### Create a release
+```bash
+make release
+```
+
 #### Display help information
 ```bash
 make help
@@ -89,10 +131,36 @@ make help
 - Type names use PascalCase
 
 ## Configuration
-- Requires an Anthropic API key for Claude integration
-- Uses Claude Sonnet 3.5 model by default
+Kodelet uses Viper for configuration management. You can configure Kodelet in several ways:
+
+1. **Environment Variables** - All environment variables should be prefixed with `KODELET_`:
+   ```bash
+   export ANTHROPIC_API_KEY="sk-ant-api..."
+   export KODELET_MODEL="claude-3-7-sonnet-latest"
+   export KODELET_MAX_TOKENS="8192"
+   ```
+
+2. **Configuration File** - Kodelet looks for a configuration file named `config.yaml` in:
+   - Current directory
+   - `$HOME/.kodelet/` directory
+
+Example `config.yaml`:
+```yaml
+# Anthropic model to use
+model: "claude-3-7-sonnet-latest"
+
+# Maximum tokens for responses
+max_tokens: 8192
+```
+
+3. **Command Line Flags** - Override configuration options via command line flags:
+   ```bash
+   kodelet run --model "claude-3-opus-20240229" --max-tokens 4096 "your query"
+   ```
 
 ## Important Notes
+- Requires an Anthropic API key for Claude integration
+- Uses Claude 3.7 Sonnet model by default
 - The bash tool has security restrictions to prevent dangerous commands
 - The file_read tool has a maximum output limit of 100KB
 - The kodelet.md file (this file) is used for project context

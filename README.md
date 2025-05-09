@@ -2,6 +2,13 @@
 
 Kodelet is a lightweight CLI tool that helps with site reliability and platform engineering tasks.
 
+## Key Features
+
+- **Interactive Chat**: Get AI assistance for SRE and platform engineering tasks through a modern TUI
+- **One-shot Queries**: Run single queries for quick answers without starting a chat session
+- **AI-Powered Git Commits**: Generate meaningful, conventional commits automatically from your staged changes
+
+
 ## Installation
 
 ```bash
@@ -23,6 +30,19 @@ You can use Kodelet in two ways:
 ```bash
 make build
 ./bin/kodelet run "your query"
+```
+
+#### Generate Git Commit
+
+```bash
+./bin/kodelet commit
+```
+
+This command analyzes your staged changes (git diff --cached) and uses AI to generate a meaningful commit message following conventional commits format. You must stage your changes using `git add` before running this command.
+
+Options:
+- `--no-sign`: Disable commit signing (commits are signed by default)
+- `--template` or `-t`: Use a template for the commit message
 
 #### Interactive Chat Mode
 
