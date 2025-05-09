@@ -16,14 +16,14 @@ var runCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		// Join all arguments as a single query
 		query := strings.Join(args, " ")
-		
+
 		// Create a new state for this session
 		appState := state.NewBasicState()
-		
+
 		// Print the user query
 		println(color("[user]: ") + query)
-		
+
 		// Process the query
-		ask(context.Background(), appState, query)
+		ask(context.Background(), appState, query, false)
 	},
 }
