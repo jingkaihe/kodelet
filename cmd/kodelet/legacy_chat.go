@@ -41,6 +41,6 @@ func legacyChatUI() {
 		}
 
 		// Process the query
-		ask(context.Background(), state, input)
+		ask(context.Background(), state, input, false)
 	}
 }
