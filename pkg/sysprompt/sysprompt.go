@@ -153,7 +153,7 @@ func loadContexts() map[string]string {
 	for _, filename := range filenames {
 		content, err := os.ReadFile(filename)
 		if err != nil {
-			logrus.WithError(err).WithField("filename", filename).Warn("failed to read file")
+			logrus.WithError(err).WithField("filename", filename).Debug("failed to read file")
 			continue
 		}
 		results[filename] = string(content)
