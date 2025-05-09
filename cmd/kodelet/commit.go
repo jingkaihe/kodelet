@@ -63,6 +63,7 @@ The commit message should have:
 * A short description as the title
 * Bullet points that breaks down the changes, with 2-3 sentences for each bullet point, while maintaining the accuracy and completeness of the git diff.
 
+IMPORTANT: The output of the commit message should not be wrapped with any markdown code block.
 %s`, diff)
 		}
 
@@ -70,6 +71,7 @@ The commit message should have:
 		fmt.Println("-----------------------------------------------------------")
 
 		commitMsg := ask(ctx, s, prompt, true)
+		commitMsg = sanitizeCommitMessage(commitMsg)
 
 		fmt.Println("-----------------------------------------------------------")
 		fmt.Printf("\nGenerated commit message:\n\n%s\n\n", commitMsg)
@@ -92,6 +94,13 @@ The commit message should have:
 func init() {
 	commitCmd.Flags().BoolVar(&noSign, "no-sign", false, "Disable commit signing")
 	commitCmd.Flags().StringVarP(&template, "template", "t", "", "Template for commit message")
+}
+
+func sanitizeCommitMessage(message string) string {
+	// Remove the starting and ending backticks
+	message = strings.TrimPrefix(message, "```")
+	message = strings.TrimSuffix(message, "```")
+	return message
 }
 
 // isGitRepository checks if the current directory is a git repository
