@@ -1,5 +1,8 @@
 # Kodelet
 
+## 0.0.3.alpha1 (2025-05-09)
+
+- Reduce the log level of README.md and KODELET.md to `debug` to avoid cluttering the console output.
 ## 0.0.3.alpha (2025-05-09)
 
 - Minor tweaks on the chat TUI (e.g. a rad ascii art and processing spinner)
