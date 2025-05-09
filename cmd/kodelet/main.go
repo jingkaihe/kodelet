@@ -10,6 +10,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/state"
 	"github.com/jingkaihe/kodelet/pkg/sysprompt"
 	"github.com/jingkaihe/kodelet/pkg/tools"
+	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -37,7 +38,7 @@ func init() {
 	_ = viper.ReadInConfig()
 }
 
-func ask(ctx context.Context, state state.State, query string) {
+func ask(ctx context.Context, state state.State, query string, silent bool) string {
 	messages := []anthropic.MessageParam{
 		anthropic.NewUserMessage(anthropic.NewTextBlock(query)),
 	}
@@ -58,18 +59,24 @@ func ask(ctx context.Context, state state.State, query string) {
 			Tools:    tools.ToAnthropicTools(tools.Tools),
 		})
 		if err != nil {
-			panic(err.Error())
+			logrus.WithError(err).Error("error asking")
 		}
 
+		textOutput := ""
 		for _, block := range message.Content {
 			switch block := block.AsAny().(type) {
 			case anthropic.TextBlock:
-				println(block.Text)
-				println()
+				textOutput += block.Text + "\n"
+				if !silent {
+					println(block.Text)
+					println()
+				}
 			case anthropic.ToolUseBlock:
 				inputJSON, _ := json.Marshal(block.Input)
-				println(block.Name + ": " + string(inputJSON))
-				println()
+				if !silent {
+					println(block.Name + ": " + string(inputJSON))
+					println()
+				}
 			}
 		}
 
@@ -89,7 +96,8 @@ func ask(ctx context.Context, state state.State, query string) {
 
 		}
 		if len(toolResults) == 0 {
-			break
+			return textOutput
+
 		}
 		messages = append(messages, anthropic.NewUserMessage(toolResults...))
 	}
@@ -115,16 +123,17 @@ func main() {
 	// Add global flags
 	rootCmd.PersistentFlags().String("model", "", "Anthropic model to use (overrides config)")
 	rootCmd.PersistentFlags().Int("max-tokens", 0, "Maximum tokens for response (overrides config)")
-	
+
 	// Bind flags to viper
 	viper.BindPFlag("model", rootCmd.PersistentFlags().Lookup("model"))
 	viper.BindPFlag("max_tokens", rootCmd.PersistentFlags().Lookup("max-tokens"))
-	
+
 	// Add subcommands
 	rootCmd.AddCommand(chatCmd)
 	rootCmd.AddCommand(runCmd)
 	rootCmd.AddCommand(versionCmd)
-	
+	rootCmd.AddCommand(commitCmd)
+
 	// Execute
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Println(err)
