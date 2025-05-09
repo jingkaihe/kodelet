@@ -2,9 +2,9 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
-	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/invopop/jsonschema"
 	"github.com/jingkaihe/kodelet/pkg/state"
 )
@@ -60,21 +60,29 @@ var Tools = []Tool{
 	&TodoWriteTool{},
 }
 
-func ToAnthropicTools(tools []Tool) []anthropic.ToolUnionParam {
-	anthropicTools := make([]anthropic.ToolUnionParam, len(tools))
+// GetToolDefinitions converts tools to a generic format for LLM providers
+func GetToolDefinitions(tools []Tool) []map[string]interface{} {
+	toolDefs := make([]map[string]interface{}, len(tools))
 	for i, tool := range tools {
-		anthropicTools[i] = anthropic.ToolUnionParam{
-			OfTool: &anthropic.ToolParam{
-				Name:        tool.Name(),
-				Description: anthropic.String(tool.Description()),
-				InputSchema: anthropic.ToolInputSchemaParam{
-					Properties: tool.GenerateSchema().Properties,
-				},
+		schema := tool.GenerateSchema()
+
+		// Convert properties to map
+		propertiesMap := make(map[string]interface{})
+		if schemaBytes, err := json.Marshal(schema.Properties); err == nil {
+			json.Unmarshal(schemaBytes, &propertiesMap)
+		}
+
+		toolDefs[i] = map[string]interface{}{
+			"name":        tool.Name(),
+			"description": tool.Description(),
+			"parameters": map[string]interface{}{
+				"type":       "object",
+				"properties": propertiesMap,
 			},
 		}
 	}
 
-	return anthropicTools
+	return toolDefs
 }
 
 func RunTool(ctx context.Context, state state.State, toolName string, parameters string) ToolResult {

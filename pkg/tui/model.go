@@ -2,7 +2,7 @@ package tui
 
 import (
 	"context"
-	
+
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/bubbletea"
@@ -101,7 +101,7 @@ func (m *Model) updateViewportContent() {
 	// Format and render each message
 	for i, msg := range m.messages {
 		var renderedMsg string
-		
+
 		if msg.IsSystem {
 			renderedMsg = m.systemStyle.Render("System") + ": " + msg.Content
 		} else if msg.IsUser {
@@ -109,15 +109,15 @@ func (m *Model) updateViewportContent() {
 		} else {
 			renderedMsg = m.assistantStyle.Render("Assistant") + ": " + msg.Content
 		}
-		
+
 		// Add padding between messages
 		if i > 0 {
 			content += "\n\n"
 		}
-		
+
 		content += renderedMsg
 	}
-	
+
 	// Set the viewport content
 	m.viewport.SetContent(content)
 }
@@ -201,7 +201,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewport.Width = msg.Width
 		m.viewport.Height = msg.Height - verticalMargins
 		m.textarea.SetWidth(msg.Width - 2)
-		
+
 		if !m.ready {
 			m.ready = true
 		}

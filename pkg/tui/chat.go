@@ -11,10 +11,10 @@ import (
 func StartChat() error {
 	// Check terminal capabilities
 	var teaOptions []tea.ProgramOption
-	
+
 	// Always use the full terminal screen
 	teaOptions = append(teaOptions, tea.WithAltScreen())
-	
+
 	// Try to enable mouse support, but don't fail if not available
 	if isTTY() {
 		teaOptions = append(teaOptions, tea.WithMouseCellMotion())
@@ -25,7 +25,7 @@ func StartChat() error {
 
 	// Create model separately to add welcome messages
 	model := NewModel()
-	
+
 	// Add welcome message
 	welcomeMsg := "Welcome to Kodelet Chat! Type your message and press Enter to send."
 	if !isTTY() {
@@ -33,7 +33,7 @@ func StartChat() error {
 	}
 	model.AddSystemMessage(welcomeMsg)
 	model.AddSystemMessage("Press Ctrl+H for help with keyboard shortcuts.")
-	
+
 	// Create a new program with the updated model
 	p = tea.NewProgram(model, teaOptions...)
 
