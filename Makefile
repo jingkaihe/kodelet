@@ -7,7 +7,7 @@ VERSION_FLAG=-X 'github.com/jingkaihe/kodelet/pkg/version.Version=$(VERSION)' -X
 # Build the application
 build:
 	mkdir -p bin
-	go build -ldflags="$(VERSION_FLAG)" -o ./bin/kodelet ./cmd/kodelet/
+	CGO_ENABLED=0 go build -ldflags="$(VERSION_FLAG)" -o ./bin/kodelet ./cmd/kodelet/
 
 chat: build
 	./bin/kodelet chat
@@ -27,11 +27,11 @@ format:
 # Cross-compile for multiple platforms
 cross-build:
 	mkdir -p bin
-	GOOS=linux GOARCH=amd64 go build -ldflags="$(VERSION_FLAG)" -o ./bin/kodelet-linux-amd64 ./cmd/kodelet/
-	GOOS=linux GOARCH=arm64 go build -ldflags="$(VERSION_FLAG)" -o ./bin/kodelet-linux-arm64 ./cmd/kodelet/
-	GOOS=darwin GOARCH=amd64 go build -ldflags="$(VERSION_FLAG)" -o ./bin/kodelet-darwin-amd64 ./cmd/kodelet/
-	GOOS=darwin GOARCH=arm64 go build -ldflags="$(VERSION_FLAG)" -o ./bin/kodelet-darwin-arm64 ./cmd/kodelet/
-	GOOS=windows GOARCH=amd64 go build -ldflags="$(VERSION_FLAG)" -o ./bin/kodelet-windows-amd64.exe ./cmd/kodelet/
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="$(VERSION_FLAG)" -o ./bin/kodelet-linux-amd64 ./cmd/kodelet/
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="$(VERSION_FLAG)" -o ./bin/kodelet-linux-arm64 ./cmd/kodelet/
+	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags="$(VERSION_FLAG)" -o ./bin/kodelet-darwin-amd64 ./cmd/kodelet/
+	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="$(VERSION_FLAG)" -o ./bin/kodelet-darwin-arm64 ./cmd/kodelet/
+	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="$(VERSION_FLAG)" -o ./bin/kodelet-windows-amd64.exe ./cmd/kodelet/
 
 # Build Docker image
 docker-build:
