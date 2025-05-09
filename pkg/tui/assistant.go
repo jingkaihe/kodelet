@@ -46,8 +46,10 @@ func (a *AssistantClient) SendMessage(ctx context.Context, message string, messa
 			MaxTokens: int64(viper.GetInt("max_tokens")),
 			System: []anthropic.TextBlockParam{
 				{
-					Text:         sysprompt.SystemPrompt(model),
-					CacheControl: anthropic.CacheControlEphemeralParam{},
+					Text: sysprompt.SystemPrompt(model),
+					CacheControl: anthropic.CacheControlEphemeralParam{
+						Type: "ephemeral",
+					},
 				},
 			},
 			Messages: a.messages,

@@ -54,8 +54,10 @@ func ask(ctx context.Context, state state.State, query string, silent bool, mode
 			MaxTokens: int64(viper.GetInt("max_tokens")),
 			System: []anthropic.TextBlockParam{
 				{
-					Text:         sysprompt.SystemPrompt(model),
-					CacheControl: anthropic.CacheControlEphemeralParam{},
+					Text: sysprompt.SystemPrompt(model),
+					CacheControl: anthropic.CacheControlEphemeralParam{
+						Type: "ephemeral",
+					},
 				},
 			},
 			Messages: messages,
