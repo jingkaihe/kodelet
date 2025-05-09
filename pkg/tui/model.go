@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -18,24 +19,26 @@ type Message struct {
 
 // Model represents the main TUI model
 type Model struct {
-	messageCh      chan MessageEvent
-	messages       []Message
-	viewport       viewport.Model
-	textarea       textarea.Model
-	ready          bool
-	width          int
-	height         int
-	isProcessing   bool
-	spinnerIndex   int
-	showCommands   bool
-	windowSizeMsg  tea.WindowSizeMsg
-	statusMessage  string
-	senderStyle    lipgloss.Style
-	userStyle      lipgloss.Style
-	assistantStyle lipgloss.Style
-	systemStyle    lipgloss.Style
-	assistant      *AssistantClient
-	ctx            context.Context
+	messageCh          chan MessageEvent
+	messages           []Message
+	viewport           viewport.Model
+	textarea           textarea.Model
+	ready              bool
+	width              int
+	height             int
+	isProcessing       bool
+	spinnerIndex       int
+	showCommands       bool
+	windowSizeMsg      tea.WindowSizeMsg
+	statusMessage      string
+	senderStyle        lipgloss.Style
+	userStyle          lipgloss.Style
+	assistantStyle     lipgloss.Style
+	systemStyle        lipgloss.Style
+	assistant          *AssistantClient
+	ctx                context.Context
+	ctrlCPressCount    int
+	lastCtrlCPressTime time.Time
 }
 
 // NewModel creates a new TUI model
@@ -49,14 +52,14 @@ func NewModel() Model {
 	ta.KeyMap.InsertNewline.SetEnabled(false) // Use Enter to send
 
 	// Style the textarea
-	ta.Prompt = "| "
+	ta.Prompt = "❯ "
 	ta.CharLimit = 280
 
 	// Set custom styles for the textarea
 	ta.FocusedStyle.CursorLine = lipgloss.NewStyle()
 	ta.BlurredStyle.Base = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 	ta.FocusedStyle.Base = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
-	ta.FocusedStyle.Prompt = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
+	ta.FocusedStyle.Prompt = lipgloss.NewStyle().Foreground(lipgloss.Color("205")).Bold(true)
 	ta.BlurredStyle.Prompt = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 
 	vp := viewport.New(0, 0)
@@ -117,11 +120,22 @@ func (m *Model) updateViewportContent() {
 		var renderedMsg string
 
 		if msg.IsSystem {
-			renderedMsg = m.systemStyle.Render("System") + ": " + msg.Content
+			// No prefix for system messages
+			renderedMsg = msg.Content
 		} else if msg.IsUser {
-			renderedMsg = m.userStyle.Render("You") + ": " + msg.Content
+			// Create a styled user message
+			userPrefix := m.userStyle.Render("You")
+			messageText := lipgloss.NewStyle().
+				PaddingLeft(1).
+				Render(msg.Content)
+			renderedMsg = userPrefix + " → " + messageText
 		} else {
-			renderedMsg = m.assistantStyle.Render("Assistant") + ": " + msg.Content
+			// Create a styled assistant message
+			assistantPrefix := m.assistantStyle.Render("Assistant")
+			messageText := lipgloss.NewStyle().
+				PaddingLeft(1).
+				Render(msg.Content)
+			renderedMsg = assistantPrefix + " → " + messageText
 		}
 
 		// Add padding between messages
@@ -131,6 +145,7 @@ func (m *Model) updateViewportContent() {
 
 		content += renderedMsg
 	}
+
 	// Set the viewport content
 	m.viewport.SetContent(content)
 }
@@ -138,6 +153,17 @@ func (m *Model) updateViewportContent() {
 // Init initializes the model
 func (m Model) Init() tea.Cmd {
 	return nil
+}
+
+// Custom message types
+type userInputMsg string
+type resetCtrlCMsg struct{}
+
+// resetCtrlCCmd creates a command that resets the Ctrl+C counter after a timeout
+func resetCtrlCCmd() tea.Cmd {
+	return tea.Tick(2*time.Second, func(time.Time) tea.Msg {
+		return resetCtrlCMsg{}
+	})
 }
 
 // Update handles the message updates
@@ -148,14 +174,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	)
 
 	switch msg := msg.(type) {
+	case resetCtrlCMsg:
+		if m.statusMessage == "Press Ctrl+C again to quit" {
+			m.statusMessage = "Ready"
+			m.ctrlCPressCount = 0
+		}
+		return m, nil
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "ctrl+c", "esc":
-			return m, tea.Quit
+		case "ctrl+c":
+			// Check if this is a second ctrl+c press within 2 seconds
+			now := time.Now()
+			if m.ctrlCPressCount > 0 && now.Sub(m.lastCtrlCPressTime) < 2*time.Second {
+				return m, tea.Quit
+			}
+
+			// First ctrl+c press or timeout expired
+			m.ctrlCPressCount = 1
+			m.lastCtrlCPressTime = now
+			m.statusMessage = "Press Ctrl+C again to quit"
+
+			// Schedule a reset using the proper command system
+			return m, resetCtrlCCmd()
 		case "ctrl+h":
 			// Show help/shortcuts
 			m.AddSystemMessage("Keyboard Shortcuts:\n" +
-				"Ctrl+C, Esc: Quit\n" +
+				"Ctrl+C (twice): Quit\n" +
 				"Enter: Send message\n" +
 				"Ctrl+H: Show this help\n" +
 				"Ctrl+L: Clear screen\n" +
@@ -234,7 +278,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Update spinner animation when processing
 	if m.isProcessing {
-		m.spinnerIndex = (m.spinnerIndex + 1) % 4
+		m.spinnerIndex = (m.spinnerIndex + 1) % 8
 	}
 
 	return m, tea.Batch(cmds...)
@@ -246,16 +290,40 @@ func (m Model) View() string {
 		return "Initializing..."
 	}
 
-	// Layout
+	// Create a more polished input box
+	inputBox := lipgloss.NewStyle().
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("205")).
+		Padding(0, 2).
+		PaddingTop(0).
+		PaddingBottom(0).
+		Width(m.width - 2).
+		Align(lipgloss.Left).
+		BorderBottom(true).
+		BorderTop(true).
+		BorderLeft(true).
+		BorderRight(true).
+		Bold(false).
+		Render(m.textarea.View())
+
+	// Add a subtle shadow effect
+	inputBox = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("205")).
+		Render(inputBox)
+
+	// Layout with better spacing
 	return lipgloss.JoinVertical(
 		lipgloss.Left,
-		m.viewport.View(),
+		// Add a small gap above the chat history
 		lipgloss.NewStyle().
-			BorderStyle(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("205")).
-			Padding(0, 1).
-			Width(m.width-2).
-			Render(m.textarea.View()),
+			PaddingBottom(1).
+			Render(m.viewport.View()),
+		// Add spacing around the input box
+		lipgloss.NewStyle().
+			PaddingTop(0).
+			PaddingBottom(0).
+			Render(inputBox),
+		// Style the status bar
 		m.statusView(),
 	)
 }
@@ -264,14 +332,15 @@ func (m Model) View() string {
 func (m Model) statusView() string {
 	statusText := m.statusMessage
 	if m.isProcessing {
-		spinChars := []string{"|", "/", "-", "\\"}
-		statusText += " " + spinChars[m.spinnerIndex]
+		spinChars := []string{"⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"}
+		statusText += " " + spinChars[m.spinnerIndex%8]
 	}
 
 	return lipgloss.NewStyle().
-		Foreground(lipgloss.Color("241")).
-		Render(statusText + " | Ctrl+C: Quit | Ctrl+H: Help | ↑/↓: Scroll")
+		Foreground(lipgloss.Color("205")).
+		Background(lipgloss.Color("236")).
+		Padding(0, 1).
+		MarginTop(0).
+		Bold(true).
+		Render(statusText + " │ Ctrl+C (twice): Quit │ Ctrl+H: Help │ ↑/↓: Scroll")
 }
-
-// Custom message types
-type userInputMsg string

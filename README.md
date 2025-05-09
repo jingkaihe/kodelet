@@ -6,6 +6,7 @@ Kodelet is a lightweight CLI tool that helps with site reliability and platform 
 
 - **Interactive Chat**: Get AI assistance for SRE and platform engineering tasks through a modern TUI
 - **One-shot Queries**: Run single queries for quick answers without starting a chat session
+- **General Purpose Coding**: Simple write code with Kodelet
 - **AI-Powered Git Commits**: Generate meaningful, conventional commits automatically from your staged changes
 
 
