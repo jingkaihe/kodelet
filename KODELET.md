@@ -63,6 +63,23 @@ Display version information in JSON format:
 kodelet version
 ```
 
+#### Watch Mode
+Continuously monitor file changes and provide AI assistance:
+```bash
+kodelet watch
+```
+
+Watch specific file types only:
+```bash
+kodelet watch --include "*.go"
+```
+
+Available options:
+- `--ignore` or `-i`: Directories to ignore (default: `.git,node_modules`)
+- `--include` or `-p`: File pattern to include (e.g., `*.go`, `*.{js,ts}`)
+- `--verbosity` or `-v`: Verbosity level (`quiet`, `normal`, `verbose`)
+- `--debounce` or `-d`: Debounce time in milliseconds (default: 500)
+
 ### Building & Running
 
 #### Build the application
@@ -80,19 +97,16 @@ make cross-build
 make docker-build
 ```
 
-#### Run with Docker
-```bash
-make docker-run query="your query"
-```
-
 #### Run locally (one-shot mode)
 ```bash
-go run cmd/kodelet/main.go run "your query"
+make build
+./bin/kodelet run "your query"
 ```
 
 #### Run locally (interactive chat mode)
 ```bash
-go run cmd/kodelet/main.go chat
+make build
+./bin/kodelet chat
 ```
 
 ### Development

@@ -1,5 +1,12 @@
 # Kodelet
 
+## 0.0.4.alpha (2025-05-09)
+
+- Added new `watch` command to monitor file changes and provide AI assistance, support for special `@kodelet` comments to trigger automatic code analysis and generation.
+- Improved chat TUI with better text wrapping and no character limit
+- Added `--short` flag to commit command for generating concise commit messages
+- Fix the [cache control issue](https://github.com/anthropics/anthropic-sdk-go/issues/180) via explicitly setting `{"type": "ephemeral"}` for the system prompt.
+
 ## 0.0.3.alpha1 (2025-05-09)
 
 - Reduce the log level of README.md and KODELET.md to `debug` to avoid cluttering the console output.
