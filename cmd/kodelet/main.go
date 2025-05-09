@@ -38,7 +38,7 @@ func init() {
 	_ = viper.ReadInConfig()
 }
 
-func ask(ctx context.Context, state state.State, query string, silent bool) string {
+func ask(ctx context.Context, state state.State, query string, silent bool, modelOverride ...string) string {
 	messages := []anthropic.MessageParam{
 		anthropic.NewUserMessage(anthropic.NewTextBlock(query)),
 	}
@@ -46,12 +46,18 @@ func ask(ctx context.Context, state state.State, query string, silent bool) stri
 	client := anthropic.NewClient()
 	for {
 		model := viper.GetString("model")
+		// Use the override model if provided
+		if len(modelOverride) > 0 && modelOverride[0] != "" {
+			model = modelOverride[0]
+		}
 		message, err := client.Messages.New(ctx, anthropic.MessageNewParams{
 			MaxTokens: int64(viper.GetInt("max_tokens")),
 			System: []anthropic.TextBlockParam{
 				{
-					Text:         sysprompt.SystemPrompt(model),
-					CacheControl: anthropic.CacheControlEphemeralParam{},
+					Text: sysprompt.SystemPrompt(model),
+					CacheControl: anthropic.CacheControlEphemeralParam{
+						Type: "ephemeral",
+					},
 				},
 			},
 			Messages: messages,
@@ -133,6 +139,7 @@ func main() {
 	rootCmd.AddCommand(runCmd)
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(commitCmd)
+	rootCmd.AddCommand(watchCmd)
 
 	// Execute
 	if err := rootCmd.Execute(); err != nil {

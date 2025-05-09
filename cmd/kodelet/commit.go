@@ -15,6 +15,7 @@ import (
 var (
 	noSign   bool
 	template string
+	short    bool
 )
 
 var commitCmd = &cobra.Command{
@@ -57,6 +58,12 @@ You must stage your changes (using 'git add') before running this command.`,
 		var prompt string
 		if template != "" {
 			prompt = fmt.Sprintf("Generate a commit message following this template: '%s' for the following git diff:\n\n%s", template, diff)
+		} else if short {
+			prompt = fmt.Sprintf(`Generate a concise commit message following conventional commits format for the following git diff.
+The commit message should have only a short, descriptive title that summarizes the changes.
+
+IMPORTANT: The output of the commit message should be a single line with no bullet points or additional descriptions. It should not be wrapped with any markdown code block.
+%s`, diff)
 		} else {
 			prompt = fmt.Sprintf(`Generate a concise commit message following conventional commits format for the following git diff.
 The commit message should have:
@@ -94,6 +101,7 @@ IMPORTANT: The output of the commit message should not be wrapped with any markd
 func init() {
 	commitCmd.Flags().BoolVar(&noSign, "no-sign", false, "Disable commit signing")
 	commitCmd.Flags().StringVarP(&template, "template", "t", "", "Template for commit message")
+	commitCmd.Flags().BoolVar(&short, "short", false, "Generate a short commit message with just a description, no bullet points")
 }
 
 func sanitizeCommitMessage(message string) string {

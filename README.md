@@ -8,6 +8,7 @@ Kodelet is a lightweight CLI tool that helps with site reliability and platform 
 - **One-shot Queries**: Run single queries for quick answers without starting a chat session
 - **General Purpose Coding**: Simple write code with Kodelet
 - **AI-Powered Git Commits**: Generate meaningful, conventional commits automatically from your staged changes
+- **Watch Mode**: Monitor file changes and automatically process files with AI assistance using "@kodelet" comments
 
 
 ## Installation
@@ -48,12 +49,25 @@ Options:
 #### Interactive Chat Mode
 
 ```bash
-go run cmd/kodelet/main.go chat
+./bin/kodelet chat
 ```
 Or using Make:
 ```bash
 make chat
 ```
+
+#### Watch Mode
+
+```bash
+./bin/kodelet watch
+```
+
+Monitor file changes and automatically process files with special "@kodelet" comments. Options:
+- `--ignore` or `-i`: Directories to ignore (default: `.git,node_modules`)
+- `--include` or `-p`: File pattern to include (e.g., `*.go`, `*.{js,ts}`)
+- `--verbosity` or `-v`: Verbosity level (`quiet`, `normal`, `verbose`)
+- `--debounce` or `-d`: Debounce time in milliseconds (default: 500)
+- `--auto-completion-model`: Model to use for auto-completion requests
 
 Make sure your Anthropic API key is set in your environment:
 
@@ -103,9 +117,6 @@ make format
 
 # Build Docker image
 make docker-build
-
-# Run with Docker
-make docker-run query="your query"
 
 # Display help information
 make help

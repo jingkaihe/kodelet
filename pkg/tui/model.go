@@ -60,7 +60,6 @@ func NewModel() Model {
 
 	// Style the textarea
 	ta.Prompt = "❯ "
-	ta.CharLimit = 280
 
 	// Set custom styles for the textarea
 	ta.FocusedStyle.CursorLine = lipgloss.NewStyle()
@@ -144,6 +143,7 @@ func (m *Model) updateViewportContent() {
 			userPrefix := m.userStyle.Render("You")
 			messageText := lipgloss.NewStyle().
 				PaddingLeft(1).
+				Width(m.width - 15). // Ensure text wraps within viewport width
 				Render(msg.Content)
 			renderedMsg = userPrefix + " → " + messageText
 		} else {
@@ -151,6 +151,7 @@ func (m *Model) updateViewportContent() {
 			assistantPrefix := m.assistantStyle.Render("Assistant")
 			messageText := lipgloss.NewStyle().
 				PaddingLeft(1).
+				Width(m.width - 15). // Ensure text wraps within viewport width
 				Render(msg.Content)
 			renderedMsg = assistantPrefix + " → " + messageText
 		}
