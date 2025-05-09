@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/fsnotify/fsnotify"
 	"github.com/jingkaihe/kodelet/pkg/state"
 	"github.com/sirupsen/logrus"
@@ -17,10 +18,11 @@ import (
 )
 
 var (
-	ignoreDirs     []string
-	includePattern string
-	verbosity      string
-	debounceTime   int
+	ignoreDirs          []string
+	includePattern      string
+	verbosity           string
+	debounceTime        int
+	autoCompletionModel string
 )
 
 // FileEvent represents a file system event with additional metadata
@@ -50,6 +52,7 @@ func init() {
 	watchCmd.Flags().StringVarP(&includePattern, "include", "p", "", "File pattern to include (e.g., '*.go', '*.{js,ts}')")
 	watchCmd.Flags().StringVarP(&verbosity, "verbosity", "v", "normal", "Verbosity level (quiet, normal, verbose)")
 	watchCmd.Flags().IntVarP(&debounceTime, "debounce", "d", 500, "Debounce time in milliseconds for file change events")
+	watchCmd.Flags().StringVar(&autoCompletionModel, "auto-completion-model", anthropic.ModelClaude3_7SonnetLatest, "Model to use for auto-completion")
 }
 
 func runWatchMode(ctx context.Context, s state.State) {
@@ -176,7 +179,9 @@ func debounceFileEvents(input <-chan FileEvent, output chan<- FileEvent, delay t
 	}
 }
 
-var MagicCommentPatterns = []string{"# @kodelet", "// @kodelet"}
+var (
+	MagicCommentPatterns = []string{"# @kodelet", "// @kodelet"}
+)
 
 // Process a file change event
 func processFileChange(ctx context.Context, s state.State, path string, op fsnotify.Op) {
@@ -218,6 +223,19 @@ This is a special comment that tells kodelet to make a change to the file.
 Please make the change to the file that fulfills "xyz".
 
 !IMPORTANT: Please make sure that "# @kodelet: do xyz" or "// @kodelet: do xyz" is removed after the change has been made.
+
+# Examples
+<example>
+<before>
+# @kodelet replace add with multiply
+def add(a, b):
+    return a + b
+</before>
+<after>
+def multiply(a, b):
+    return a * b
+</after>
+</example>
 `,
 		path, string(content))
 
@@ -226,8 +244,16 @@ Please make the change to the file that fulfills "xyz".
 		fmt.Println("Sending to AI for analysis...")
 	}
 
-	// Get AI response
-	response := ask(ctx, s, query, true)
+	var response string
+	// Use the auto-completion model if appropriate
+	if autoCompletionModel != "" {
+		if verbosity == "verbose" {
+			fmt.Printf("Using auto-completion model: %s\n", autoCompletionModel)
+		}
+		response = ask(ctx, s, query, true, autoCompletionModel)
+	} else {
+		response = ask(ctx, s, query, true)
+	}
 
 	// Display the AI response
 	fmt.Printf("\n===== AI Analysis for %s =====\n", path)
