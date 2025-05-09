@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/state"
 	"github.com/jingkaihe/kodelet/pkg/sysprompt"
 	"github.com/jingkaihe/kodelet/pkg/tools"
@@ -20,10 +20,6 @@ func color(s string) string {
 }
 
 func init() {
-	// Set default configuration values
-	viper.SetDefault("max_tokens", 8192)
-	viper.SetDefault("model", anthropic.ModelClaude3_7SonnetLatest)
-
 	// Environment variables
 	viper.SetEnvPrefix("KODELET")
 	viper.AutomaticEnv()
@@ -36,70 +32,89 @@ func init() {
 
 	// Load config file if it exists (ignore errors if it doesn't)
 	_ = viper.ReadInConfig()
+
+	// Initialize LLM configuration
+	llm.InitConfig()
 }
 
 func ask(ctx context.Context, state state.State, query string, silent bool) string {
-	messages := []anthropic.MessageParam{
-		anthropic.NewUserMessage(anthropic.NewTextBlock(query)),
+	// Get the configured LLM provider
+	provider, err := llm.GetProviderFromConfig()
+	if err != nil {
+		logrus.WithError(err).Fatal("failed to initialize LLM provider")
+		return "Error: " + err.Error()
 	}
 
-	client := anthropic.NewClient()
+	// Initialize conversation with user query
+	messages := []llm.Message{
+		{
+			Role:    "user",
+			Content: query,
+		},
+	}
+
+	// Get the model name for system prompt
+	modelName := viper.GetString("model")
+	if modelName == "" {
+		// Try provider-specific model
+		providerName := viper.GetString("provider")
+		modelName = viper.GetString(fmt.Sprintf("providers.%s.model", providerName))
+	}
+
 	for {
-		model := viper.GetString("model")
-		message, err := client.Messages.New(ctx, anthropic.MessageNewParams{
-			MaxTokens: int64(viper.GetInt("max_tokens")),
-			System: []anthropic.TextBlockParam{
-				{
-					Text:         sysprompt.SystemPrompt(model),
-					CacheControl: anthropic.CacheControlEphemeralParam{},
-				},
-			},
-			Messages: messages,
-			Model:    model,
-			Tools:    tools.ToAnthropicTools(tools.Tools),
-		})
+		resp, err := provider.SendMessage(
+			ctx,
+			messages,
+			sysprompt.SystemPrompt(modelName),
+			tools.Tools,
+		)
 		if err != nil {
-			logrus.WithError(err).Error("error asking")
+			logrus.WithError(err).Error("error asking LLM")
+			return "Error: " + err.Error()
 		}
 
-		textOutput := ""
-		for _, block := range message.Content {
-			switch block := block.AsAny().(type) {
-			case anthropic.TextBlock:
-				textOutput += block.Text + "\n"
-				if !silent {
-					println(block.Text)
-					println()
-				}
-			case anthropic.ToolUseBlock:
-				inputJSON, _ := json.Marshal(block.Input)
-				if !silent {
-					println(block.Name + ": " + string(inputJSON))
-					println()
-				}
-			}
+		// Handle text response
+		textOutput := resp.Content
+		if !silent && textOutput != "" {
+			println(textOutput)
+			println()
 		}
 
-		messages = append(messages, message.ToParam())
-		toolResults := []anthropic.ContentBlockParamUnion{}
-
-		for _, block := range message.Content {
-			switch variant := block.AsAny().(type) {
-			case anthropic.ToolUseBlock:
-				print(color("[user (" + block.Name + ")]: "))
-
-				output := tools.RunTool(ctx, state, block.Name, string(variant.JSON.Input.Raw()))
-				println(output.String())
-
-				toolResults = append(toolResults, anthropic.NewToolResultBlock(block.ID, output.String(), false))
-			}
-
+		// Add assistant response to messages
+		if textOutput != "" {
+			messages = append(messages, llm.Message{
+				Role:    "assistant",
+				Content: textOutput,
+			})
 		}
-		if len(toolResults) == 0 {
+
+		// Handle tool calls
+		if len(resp.ToolCalls) == 0 {
 			return textOutput
-
 		}
-		messages = append(messages, anthropic.NewUserMessage(toolResults...))
+
+		// Process tool calls
+		var toolResults []llm.ToolResult
+		for _, tc := range resp.ToolCalls {
+			print(color("[user (" + tc.Name + ")]: "))
+
+			// Convert parameters to JSON
+			paramsJSON, _ := json.Marshal(tc.Parameters)
+
+			println(string(paramsJSON))
+			output := tools.RunTool(ctx, state, tc.Name, string(paramsJSON))
+			println(output.String())
+
+			toolResults = append(toolResults, llm.ToolResult{
+				CallID:  tc.ID,
+				Content: output.String(),
+				Error:   false,
+			})
+		}
+
+		// Add tool results to messages
+		toolMessage := provider.AddToolResults(toolResults)
+		messages = append(messages, toolMessage)
 	}
 }
 
@@ -121,10 +136,12 @@ var rootCmd = &cobra.Command{
 
 func main() {
 	// Add global flags
-	rootCmd.PersistentFlags().String("model", "", "Anthropic model to use (overrides config)")
+	rootCmd.PersistentFlags().String("provider", "", "LLM provider to use (anthropic or openai)")
+	rootCmd.PersistentFlags().String("model", "", "LLM model to use (overrides config)")
 	rootCmd.PersistentFlags().Int("max-tokens", 0, "Maximum tokens for response (overrides config)")
 
 	// Bind flags to viper
+	viper.BindPFlag("provider", rootCmd.PersistentFlags().Lookup("provider"))
 	viper.BindPFlag("model", rootCmd.PersistentFlags().Lookup("model"))
 	viper.BindPFlag("max_tokens", rootCmd.PersistentFlags().Lookup("max-tokens"))
 

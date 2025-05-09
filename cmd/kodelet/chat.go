@@ -19,7 +19,7 @@ var chatCmd = &cobra.Command{
 			tui.StartChatCmd()
 			return
 		}
-		
+
 		// Use the legacy CLI interface
 		legacyChatUI()
 	},

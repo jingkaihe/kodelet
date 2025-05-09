@@ -9,7 +9,7 @@ var (
 	// Version is the current version of Kodelet
 	// This will be set during the build process from VERSION.txt
 	Version = "dev"
-	
+
 	// GitCommit is the git commit SHA that was built
 	// This will be set during the build process
 	GitCommit = "unknown"

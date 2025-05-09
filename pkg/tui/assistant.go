@@ -6,103 +6,131 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/state"
 	"github.com/jingkaihe/kodelet/pkg/sysprompt"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	"github.com/spf13/viper"
 )
 
-// AssistantClient handles the interaction with the Claude API
+// AssistantClient handles the interaction with the LLM provider
 type AssistantClient struct {
-	client   anthropic.Client
+	provider llm.Provider
 	state    state.State
-	messages []anthropic.MessageParam
+	messages []llm.Message
 }
 
 // NewAssistantClient creates a new assistant client
 func NewAssistantClient() *AssistantClient {
+	// Get the configured LLM provider
+	provider, err := llm.GetProviderFromConfig()
+	if err != nil {
+		// Fallback to default if there's an error
+		// This should be improved with better error handling
+		fmt.Printf("Error initializing LLM provider: %v, falling back to defaults\n", err)
+	}
+
 	return &AssistantClient{
-		client:   anthropic.NewClient(),
+		provider: provider,
 		state:    state.NewBasicState(),
-		messages: []anthropic.MessageParam{},
+		messages: []llm.Message{},
 	}
 }
 
 // SendMessage sends a message to the assistant and processes the response
 func (a *AssistantClient) SendMessage(ctx context.Context, message string) ([]MessageEvent, error) {
-	// Add the user message to the history
-	a.messages = append(a.messages, anthropic.NewUserMessage(anthropic.NewTextBlock(message)))
+	// Check if provider is initialized
+	if a.provider == nil {
+		return nil, fmt.Errorf("LLM provider not initialized")
+	}
 
-	// Get the model from config
-	model := viper.GetString("model")
+	// Add the user message to the history
+	a.messages = append(a.messages, llm.Message{
+		Role:    "user",
+		Content: message,
+	})
+
+	// Get the model from config for system prompt
+	modelName := viper.GetString("model")
+	if modelName == "" {
+		// Try provider-specific model
+		providerName := viper.GetString("provider")
+		modelName = viper.GetString(fmt.Sprintf("providers.%s.model", providerName))
+	}
 
 	// Initialize the response events
 	var events []MessageEvent
 
-	// Send the message to Claude
+	// Send the message to LLM
 	for {
-		claudeResponse, err := a.client.Messages.New(ctx, anthropic.MessageNewParams{
-			MaxTokens: int64(viper.GetInt("max_tokens")),
-			System: []anthropic.TextBlockParam{
-				{
-					Text:         sysprompt.SystemPrompt(model),
-					CacheControl: anthropic.CacheControlEphemeralParam{},
-				},
-			},
-			Messages: a.messages,
-			Model:    model,
-			Tools:    tools.ToAnthropicTools(tools.Tools),
-		})
+
+		// Send the message to the LLM provider
+		resp, err := a.provider.SendMessage(
+			ctx,
+			a.messages,
+			sysprompt.SystemPrompt(modelName),
+			tools.Tools,
+		)
 		if err != nil {
-			return nil, fmt.Errorf("error sending message to Claude: %w", err)
+			return nil, fmt.Errorf("error sending message to LLM: %w", err)
 		}
 
 		// Add the assistant message to history
-		a.messages = append(a.messages, claudeResponse.ToParam())
+		a.messages = append(a.messages, llm.Message{
+			Role:    "assistant",
+			Content: resp.Content,
+		})
 
-		// Process the response content
-		toolEvents := []MessageEvent{}
-		for _, block := range claudeResponse.Content {
-			switch variant := block.AsAny().(type) {
-			case anthropic.TextBlock:
-				events = append(events, MessageEvent{
-					Type:    EventTypeText,
-					Content: variant.Text,
-				})
-			case anthropic.ToolUseBlock:
-				toolName := block.Name
-				inputJSON, _ := json.Marshal(variant.JSON.Input.Raw())
-				
-				// Add the tool use event
-				events = append(events, MessageEvent{
-					Type:    EventTypeToolUse,
-					Content: fmt.Sprintf("%s: %s", toolName, string(inputJSON)),
-				})
-				
-				// Run the tool
-				output := tools.RunTool(ctx, a.state, toolName, string(variant.JSON.Input.Raw()))
-				
-				// Add the tool result event
-				toolEvents = append(toolEvents, MessageEvent{
-					Type:    EventTypeToolResult,
-					Content: output.String(),
-				})
-				
-				// Add the tool result to the messages for Claude
-				a.messages = append(a.messages, anthropic.NewUserMessage(
-					anthropic.NewToolResultBlock(block.ID, output.String(), false),
-				))
-			}
+		// Add text content to events if available
+		if resp.Content != "" {
+			events = append(events, MessageEvent{
+				Type:    EventTypeText,
+				Content: resp.Content,
+			})
 		}
-		
+
+		// Process tool calls if any
+		var toolResults []llm.ToolResult
+		var toolEvents []MessageEvent
+
+		for _, toolCall := range resp.ToolCalls {
+			// Convert parameters to JSON for display
+			paramsJSON, _ := json.Marshal(toolCall.Parameters)
+
+			// Add the tool use event
+			events = append(events, MessageEvent{
+				Type:    EventTypeToolUse,
+				Content: fmt.Sprintf("%s: %s", toolCall.Name, string(paramsJSON)),
+			})
+
+			// Run the tool
+			output := tools.RunTool(ctx, a.state, toolCall.Name, string(paramsJSON))
+
+			// Add the tool result event
+			toolEvents = append(toolEvents, MessageEvent{
+				Type:    EventTypeToolResult,
+				Content: output.String(),
+			})
+
+			// Add to tool results
+			toolResults = append(toolResults, llm.ToolResult{
+				CallID:  toolCall.ID,
+				Content: output.String(),
+				Error:   output.Error != "",
+			})
+		}
+
 		// Add all tool events after we've processed all blocks
 		events = append(events, toolEvents...)
-		
-		// If no tool was used, we're done
-		if len(toolEvents) == 0 {
+
+		// If no tool calls, we're done
+		if len(toolResults) == 0 {
 			break
 		}
+
+		// Add tool results to messages
+		toolMessage := a.provider.AddToolResults(toolResults)
+		a.messages = append(a.messages, toolMessage)
 	}
 
 	return events, nil
@@ -125,7 +153,7 @@ const (
 // and returns a formatted message
 func ProcessAssistantEvents(events []MessageEvent) string {
 	var parts []string
-	
+
 	for _, event := range events {
 		switch event.Type {
 		case EventTypeText:
@@ -136,6 +164,6 @@ func ProcessAssistantEvents(events []MessageEvent) string {
 			parts = append(parts, fmt.Sprintf("🔄 Tool result: %s", event.Content))
 		}
 	}
-	
+
 	return strings.Join(parts, "\n\n")
 }
