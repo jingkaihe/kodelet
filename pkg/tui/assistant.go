@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/jingkaihe/kodelet/pkg/state"
@@ -30,15 +29,12 @@ func NewAssistantClient() *AssistantClient {
 }
 
 // SendMessage sends a message to the assistant and processes the response
-func (a *AssistantClient) SendMessage(ctx context.Context, message string) ([]MessageEvent, error) {
+func (a *AssistantClient) SendMessage(ctx context.Context, message string, messageCh chan MessageEvent) error {
 	// Add the user message to the history
 	a.messages = append(a.messages, anthropic.NewUserMessage(anthropic.NewTextBlock(message)))
 
 	// Get the model from config
 	model := viper.GetString("model")
-
-	// Initialize the response events
-	var events []MessageEvent
 
 	// Send the message to Claude
 	for {
@@ -55,63 +51,66 @@ func (a *AssistantClient) SendMessage(ctx context.Context, message string) ([]Me
 			Tools:    tools.ToAnthropicTools(tools.Tools),
 		})
 		if err != nil {
-			return nil, fmt.Errorf("error sending message to Claude: %w", err)
+			return fmt.Errorf("error sending message to Claude: %w", err)
 		}
 
 		// Add the assistant message to history
 		a.messages = append(a.messages, claudeResponse.ToParam())
 
+		toolEventCnt := 0
 		// Process the response content
-		toolEvents := []MessageEvent{}
 		for _, block := range claudeResponse.Content {
 			switch variant := block.AsAny().(type) {
 			case anthropic.TextBlock:
-				events = append(events, MessageEvent{
+				messageCh <- MessageEvent{
 					Type:    EventTypeText,
 					Content: variant.Text,
-				})
+				}
 			case anthropic.ToolUseBlock:
 				toolName := block.Name
 				inputJSON, _ := json.Marshal(variant.JSON.Input.Raw())
-				
+				toolEventCnt++
 				// Add the tool use event
-				events = append(events, MessageEvent{
+				messageCh <- MessageEvent{
 					Type:    EventTypeToolUse,
 					Content: fmt.Sprintf("%s: %s", toolName, string(inputJSON)),
-				})
-				
+				}
+
 				// Run the tool
 				output := tools.RunTool(ctx, a.state, toolName, string(variant.JSON.Input.Raw()))
-				
+
 				// Add the tool result event
-				toolEvents = append(toolEvents, MessageEvent{
+				messageCh <- MessageEvent{
 					Type:    EventTypeToolResult,
 					Content: output.String(),
-				})
-				
+				}
+
 				// Add the tool result to the messages for Claude
 				a.messages = append(a.messages, anthropic.NewUserMessage(
 					anthropic.NewToolResultBlock(block.ID, output.String(), false),
 				))
 			}
 		}
-		
-		// Add all tool events after we've processed all blocks
-		events = append(events, toolEvents...)
-		
+
 		// If no tool was used, we're done
-		if len(toolEvents) == 0 {
+		if toolEventCnt == 0 {
 			break
 		}
 	}
+	messageCh <- MessageEvent{
+		Type:    EventTypeText,
+		Content: "Done",
+		Done:    true,
+	}
 
-	return events, nil
+	return nil
 }
 
 // MessageEvent represents an event from processing a message
 type MessageEvent struct {
 	Type    string
 	Content string
+	Done    bool
 }
 
 // Event types
@@ -121,21 +120,17 @@ const (
 	EventTypeToolResult = "tool_result"
 )
 
-// ProcessAssistantEvents processes the events from the assistant
+// ProcessAssistantEvent processes the events from the assistant
 // and returns a formatted message
-func ProcessAssistantEvents(events []MessageEvent) string {
-	var parts []string
-	
-	for _, event := range events {
-		switch event.Type {
-		case EventTypeText:
-			parts = append(parts, event.Content)
-		case EventTypeToolUse:
-			parts = append(parts, fmt.Sprintf("🔧 Using tool: %s", event.Content))
-		case EventTypeToolResult:
-			parts = append(parts, fmt.Sprintf("🔄 Tool result: %s", event.Content))
-		}
+func ProcessAssistantEvent(event MessageEvent) string {
+	switch event.Type {
+	case EventTypeText:
+		return event.Content
+	case EventTypeToolUse:
+		return fmt.Sprintf("🔧 Using tool: %s", event.Content)
+	case EventTypeToolResult:
+		return fmt.Sprintf("🔄 Tool result: %s", event.Content)
 	}
-	
-	return strings.Join(parts, "\n\n")
+
+	return ""
 }

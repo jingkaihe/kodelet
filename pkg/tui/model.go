@@ -2,10 +2,10 @@ package tui
 
 import (
 	"context"
-	
+
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
-	"github.com/charmbracelet/bubbletea"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -18,6 +18,7 @@ type Message struct {
 
 // Model represents the main TUI model
 type Model struct {
+	messageCh      chan MessageEvent
 	messages       []Message
 	viewport       viewport.Model
 	textarea       textarea.Model
@@ -51,6 +52,7 @@ func NewModel() Model {
 	vp.KeyMap.PageUp.SetEnabled(true)
 
 	return Model{
+		messageCh:      make(chan MessageEvent),
 		messages:       []Message{},
 		textarea:       ta,
 		viewport:       vp,
@@ -101,7 +103,7 @@ func (m *Model) updateViewportContent() {
 	// Format and render each message
 	for i, msg := range m.messages {
 		var renderedMsg string
-		
+
 		if msg.IsSystem {
 			renderedMsg = m.systemStyle.Render("System") + ": " + msg.Content
 		} else if msg.IsUser {
@@ -109,15 +111,14 @@ func (m *Model) updateViewportContent() {
 		} else {
 			renderedMsg = m.assistantStyle.Render("Assistant") + ": " + msg.Content
 		}
-		
+
 		// Add padding between messages
 		if i > 0 {
 			content += "\n\n"
 		}
-		
+
 		content += renderedMsg
 	}
-	
 	// Set the viewport content
 	m.viewport.SetContent(content)
 }
@@ -174,21 +175,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewport.PageDown()
 		}
 	case userInputMsg:
-		// Send the message to the assistant
-		return m, func() tea.Msg {
-			events, err := m.assistant.SendMessage(m.ctx, string(msg))
+		go func() {
+			err := m.assistant.SendMessage(m.ctx, string(msg), m.messageCh)
 			if err != nil {
-				return assistantErrorMsg(err.Error())
+				m.AddSystemMessage("Error: " + err.Error())
 			}
-			return assistantResponseMsg{events: events}
+		}()
+		return m, func() tea.Msg {
+			return <-m.messageCh
 		}
-	case assistantResponseMsg:
-		response := ProcessAssistantEvents(msg.events)
-		m.AddMessage(response, false)
-		m.SetProcessing(false)
-	case assistantErrorMsg:
-		m.AddSystemMessage("Error: " + string(msg))
-		m.SetProcessing(false)
+	case MessageEvent:
+		if !msg.Done {
+			m.AddMessage(ProcessAssistantEvent(msg), false)
+			return m, func() tea.Msg {
+				return <-m.messageCh
+			}
+		} else {
+			m.SetProcessing(false)
+		}
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -201,7 +205,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewport.Width = msg.Width
 		m.viewport.Height = msg.Height - verticalMargins
 		m.textarea.SetWidth(msg.Width - 2)
-		
+
 		if !m.ready {
 			m.ready = true
 		}
@@ -248,9 +252,3 @@ func (m Model) statusView() string {
 
 // Custom message types
 type userInputMsg string
-type assistantErrorMsg string
-
-// assistantResponseMsg contains the events from the assistant
-type assistantResponseMsg struct {
-	events []MessageEvent
-}
