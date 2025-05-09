@@ -41,6 +41,11 @@ type Model struct {
 	ctx                context.Context
 	ctrlCPressCount    int
 	lastCtrlCPressTime time.Time
+
+	// Command auto-completion
+	showCommandDropdown bool
+	availableCommands   []string
+	selectedCommandIdx  int
 }
 
 // NewModel creates a new TUI model
@@ -68,18 +73,27 @@ func NewModel() Model {
 	vp.KeyMap.PageDown.SetEnabled(true)
 	vp.KeyMap.PageUp.SetEnabled(true)
 
+	// Define available slash commands
+	availableCommands := []string{
+		"/bash",
+		"/help",
+		"/clear",
+	}
+
 	return Model{
-		messageCh:      make(chan MessageEvent),
-		messages:       []Message{},
-		textarea:       ta,
-		viewport:       vp,
-		statusMessage:  "Ready",
-		senderStyle:    lipgloss.NewStyle().Foreground(lipgloss.Color("205")).Bold(true),
-		userStyle:      lipgloss.NewStyle().Foreground(lipgloss.Color("86")).Bold(true),
-		assistantStyle: lipgloss.NewStyle().Foreground(lipgloss.Color("212")).Bold(true),
-		systemStyle:    lipgloss.NewStyle().Foreground(lipgloss.Color("yellow")).Bold(true),
-		assistant:      NewAssistantClient(),
-		ctx:            context.Background(),
+		messageCh:          make(chan MessageEvent),
+		messages:           []Message{},
+		textarea:           ta,
+		viewport:           vp,
+		statusMessage:      "Ready",
+		senderStyle:        lipgloss.NewStyle().Foreground(lipgloss.Color("205")).Bold(true),
+		userStyle:          lipgloss.NewStyle().Foreground(lipgloss.Color("86")).Bold(true),
+		assistantStyle:     lipgloss.NewStyle().Foreground(lipgloss.Color("212")).Bold(true),
+		systemStyle:        lipgloss.NewStyle().Foreground(lipgloss.Color("yellow")).Bold(true),
+		assistant:          NewAssistantClient(),
+		ctx:                context.Background(),
+		availableCommands:  availableCommands,
+		selectedCommandIdx: 0,
 	}
 }
 
@@ -184,7 +198,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.ctrlCPressCount = 0
 		}
 		return m, nil
+
+	// Handle Enter key specially when dropdown is visible
 	case tea.KeyMsg:
+		if msg.String() == "enter" && m.showCommandDropdown && !m.isProcessing {
+			// Select the command from dropdown when Enter is pressed
+			selectedCommand := m.availableCommands[m.selectedCommandIdx]
+			m.textarea.SetValue(selectedCommand + " ")
+			m.showCommandDropdown = false
+			// Return a no-op command to ensure state updates
+			return m, func() tea.Msg { return nil }
+		}
+
+		// Continue with normal message handling
 		switch msg.String() {
 		case "ctrl+c":
 			// Check if this is a second ctrl+c press within 2 seconds
@@ -210,34 +236,86 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				"PageUp/PageDown: Scroll history\n" +
 				"Up/Down: Navigate history\n\n" +
 				"Commands:\n" +
-				"/bash [command]: Execute a bash command and include result in chat context")
+				"/bash [command]: Execute a bash command and include result in chat context\n" +
+				"/help: Show this help message\n" +
+				"/clear: Clear the screen")
 		case "ctrl+l":
 			// Clear the screen
 			m.messages = []Message{}
 			m.updateViewportContent()
 			m.AddSystemMessage("Screen cleared")
-		case "enter":
-			if !m.isProcessing {
-				content := m.textarea.Value()
-				if content != "" {
-					m.AddMessage(content, true)
-					m.textarea.Reset()
-					m.SetProcessing(true)
-					return m, func() tea.Msg {
-						if strings.HasPrefix(content, "/bash") {
-							content = strings.TrimPrefix(content, "/bash")
-							return bashInputMsg(content)
-						}
-						return userInputMsg(content)
-					}
-				}
-			}
 		case "pgup":
 			// Scroll up a page
 			m.viewport.PageUp()
 		case "pgdown":
 			// Scroll down a page
 			m.viewport.PageDown()
+		case "enter":
+			// Always hide dropdown on Enter regardless of what happens next
+			m.showCommandDropdown = false
+
+			if !m.isProcessing {
+				content := m.textarea.Value()
+				if content != "" {
+					// Handle slash commands
+					if strings.HasPrefix(content, "/") {
+						// First check for exact command matches
+						command := strings.TrimSpace(content)
+						commandParts := strings.SplitN(command, " ", 2)
+
+						switch commandParts[0] {
+						case "/help":
+							m.AddMessage(content, true)
+							m.textarea.Reset()
+							// Show help message
+							m.AddSystemMessage("Keyboard Shortcuts:\n" +
+								"Ctrl+C (twice): Quit\n" +
+								"Enter: Send message\n" +
+								"Ctrl+H: Show this help\n" +
+								"Ctrl+L: Clear screen\n" +
+								"PageUp/PageDown: Scroll history\n" +
+								"Up/Down: Navigate history\n\n" +
+								"Commands:\n" +
+								"/bash [command]: Execute a bash command and include result in chat context\n" +
+								"/help: Show this help message\n" +
+								"/clear: Clear the screen")
+							return m, nil
+
+						case "/clear":
+							m.AddMessage(content, true)
+							m.textarea.Reset()
+							// Clear the screen
+							m.messages = []Message{}
+							m.updateViewportContent()
+							m.AddSystemMessage("Screen cleared")
+							return m, nil
+
+						case "/bash":
+							m.AddMessage(content, true)
+							m.textarea.Reset()
+							m.SetProcessing(true)
+
+							// Extract bash command from the input
+							var bashCommand string
+							if len(commandParts) > 1 {
+								bashCommand = commandParts[1]
+							}
+
+							return m, func() tea.Msg {
+								return bashInputMsg(bashCommand)
+							}
+						}
+					}
+
+					// Default handling for non-command messages
+					m.AddMessage(content, true)
+					m.textarea.Reset()
+					m.SetProcessing(true)
+					return m, func() tea.Msg {
+						return userInputMsg(content)
+					}
+				}
+			}
 		}
 	case userInputMsg:
 		go func() {
@@ -300,12 +378,59 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.textarea, cmd = m.textarea.Update(msg)
 	cmds = append(cmds, cmd)
 
+	// Check for slash commands in the textarea
+	currentInput := m.textarea.Value()
+	if strings.HasPrefix(currentInput, "/") && !m.commandSelectionCompleted(currentInput) && !m.isProcessing {
+		// Show dropdown if it's not already showing
+		if !m.showCommandDropdown {
+			m.showCommandDropdown = true
+			m.selectedCommandIdx = 0
+		}
+
+		// Handle slash command navigation with Tab, Up, Down
+		if _, ok := msg.(tea.KeyMsg); ok {
+			switch msg.(tea.KeyMsg).String() {
+			case "tab", "down":
+				// Move to the next suggestion
+				m.selectedCommandIdx = (m.selectedCommandIdx + 1) % len(m.availableCommands)
+			case "shift+tab", "up":
+				// Move to the previous suggestion
+				m.selectedCommandIdx = (m.selectedCommandIdx - 1)
+				if m.selectedCommandIdx < 0 {
+					m.selectedCommandIdx = len(m.availableCommands) - 1
+				}
+			case "enter":
+				// If showing dropdown and Enter is pressed, select the command
+				if m.showCommandDropdown {
+					selectedCommand := m.availableCommands[m.selectedCommandIdx]
+					m.textarea.SetValue(selectedCommand + " ")
+					m.showCommandDropdown = false
+					// Don't process the Enter key further to avoid sending the command
+					return m, tea.Batch(cmds...)
+				}
+			}
+		}
+	} else {
+		// Hide dropdown if input doesn't start with "/"
+		m.showCommandDropdown = false
+	}
+
 	// Update spinner animation when processing
 	if m.isProcessing {
 		m.spinnerIndex = (m.spinnerIndex + 1) % 8
 	}
 
 	return m, tea.Batch(cmds...)
+}
+
+func (m Model) commandSelectionCompleted(currentInput string) bool {
+	for _, cmd := range m.availableCommands {
+		if strings.HasPrefix(currentInput, cmd) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // View renders the UI
@@ -335,8 +460,52 @@ func (m Model) View() string {
 		Foreground(lipgloss.Color("205")).
 		Render(inputBox)
 
+	// Render command dropdown if needed
+	var commandDropdown string
+	if m.showCommandDropdown && len(m.availableCommands) > 0 {
+		var dropdownContent string
+
+		for i, cmd := range m.availableCommands {
+			style := lipgloss.NewStyle().PaddingLeft(1).PaddingRight(1)
+
+			// Highlight the selected command
+			if i == m.selectedCommandIdx {
+				style = style.
+					Background(lipgloss.Color("205")).
+					Foreground(lipgloss.Color("0"))
+			} else {
+				style = style.
+					Background(lipgloss.Color("236")).
+					Foreground(lipgloss.Color("252"))
+			}
+
+			// Add the styled command to the dropdown
+			dropdownContent += style.Render(cmd) + "\n"
+		}
+
+		// Create dropdown box with border
+		commandDropdown = lipgloss.NewStyle().
+			BorderStyle(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("205")).
+			Width(20).
+			Render(dropdownContent)
+
+		// Create dropdown box with border and navigation hint
+		hintText := "↑↓:Navigate Tab:Next Enter:Select"
+		hint := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("240")).
+			Align(lipgloss.Center).
+			Render(hintText)
+
+		commandDropdown = lipgloss.NewStyle().
+			BorderStyle(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("205")).
+			Width(40).
+			Render(dropdownContent + "\n" + hint)
+	}
+
 	// Layout with better spacing
-	return lipgloss.JoinVertical(
+	layout := lipgloss.JoinVertical(
 		lipgloss.Left,
 		// Add a small gap above the chat history
 		lipgloss.NewStyle().
@@ -350,6 +519,30 @@ func (m Model) View() string {
 		// Style the status bar
 		m.statusView(),
 	)
+
+	// If showing command dropdown, place it above the status bar
+	if m.showCommandDropdown {
+		// Calculate the position for the dropdown (near the textarea)
+		// This is a simple placement - in a real app, you might calculate
+		// the exact cursor position
+		dropdown := lipgloss.Place(
+			m.width,
+			5, // Height of dropdown
+			lipgloss.Left,
+			lipgloss.Top,
+			commandDropdown,
+			lipgloss.WithWhitespaceChars(" "),
+			lipgloss.WithWhitespaceForeground(lipgloss.Color("0")),
+		)
+
+		// Insert the dropdown right after the input box
+		parts := strings.Split(layout, m.statusView())
+		if len(parts) == 2 {
+			layout = parts[0] + dropdown + m.statusView()
+		}
+	}
+
+	return layout
 }
 
 // statusView renders the status bar
@@ -366,5 +559,5 @@ func (m Model) statusView() string {
 		Padding(0, 1).
 		MarginTop(0).
 		Bold(true).
-		Render(statusText + " │ Ctrl+C (twice): Quit │ Ctrl+H: Help │ /bash: Run command │ ↑/↓: Scroll")
+		Render(statusText + " │ Ctrl+C (twice): Quit │ Ctrl+H (/help): Help │ ↑/↓: Scroll")
 }
