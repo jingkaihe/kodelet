@@ -258,5 +258,5 @@ def multiply(a, b):
 	// Display the AI response
 	fmt.Printf("\n===== AI Analysis for %s =====\n", path)
 	fmt.Println(response)
-	fmt.Println("===============================\n")
+	fmt.Println("===============================")
 }
