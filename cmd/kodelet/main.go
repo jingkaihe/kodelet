@@ -133,6 +133,7 @@ func main() {
 	rootCmd.AddCommand(runCmd)
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(commitCmd)
+	rootCmd.AddCommand(watchCmd)
 
 	// Execute
 	if err := rootCmd.Execute(); err != nil {
