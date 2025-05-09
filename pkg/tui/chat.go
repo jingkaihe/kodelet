@@ -5,16 +5,17 @@ import (
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // StartChat starts the TUI chat interface
 func StartChat() error {
 	// Check terminal capabilities
 	var teaOptions []tea.ProgramOption
-	
+
 	// Always use the full terminal screen
 	teaOptions = append(teaOptions, tea.WithAltScreen())
-	
+
 	// Try to enable mouse support, but don't fail if not available
 	if isTTY() {
 		teaOptions = append(teaOptions, tea.WithMouseCellMotion())
@@ -25,15 +26,32 @@ func StartChat() error {
 
 	// Create model separately to add welcome messages
 	model := NewModel()
-	
-	// Add welcome message
-	welcomeMsg := "Welcome to Kodelet Chat! Type your message and press Enter to send."
+
+	// Add welcome message with ASCII art
+	kodaletArt := `
+
+	▗▖ ▗▖ ▗▄▖ ▗▄▄▄ ▗▄▄▄▖▗▖   ▗▄▄▄▖▗▄▄▄▖
+	▐▌▗▞▘▐▌ ▐▌▐▌  █▐▌   ▐▌   ▐▌     █
+	▐▛▚▖ ▐▌ ▐▌▐▌  █▐▛▀▀▘▐▌   ▐▛▀▀▘  █
+	▐▌ ▐▌▝▚▄▞▘▐▙▄▄▀▐▙▄▄▖▐▙▄▄▖▐▙▄▄▖  █
+
+`
+
+	// Style the ASCII art to be bold and blood red like Khorne
+	styledArt := lipgloss.NewStyle().
+		Bold(true).
+		Italic(true).
+		Foreground(lipgloss.AdaptiveColor{Light: "#990000", Dark: "#FF0000"}).
+		Margin(1).
+		Render(kodaletArt)
+
+	welcomeMsg := styledArt + "\n\nWelcome to Kodelet Chat! Type your message and press Enter to send."
 	if !isTTY() {
 		welcomeMsg += "\nLimited terminal capabilities detected. Some features may not work properly."
 	}
 	model.AddSystemMessage(welcomeMsg)
 	model.AddSystemMessage("Press Ctrl+H for help with keyboard shortcuts.")
-	
+
 	// Create a new program with the updated model
 	p = tea.NewProgram(model, teaOptions...)
 
