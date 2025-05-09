@@ -2,6 +2,8 @@ package tui
 
 import (
 	"context"
+	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/textarea"
@@ -97,6 +99,7 @@ func (m *Model) AddSystemMessage(content string) {
 		Content:  content,
 		IsSystem: true,
 	})
+	m.assistant.AddUserMessage(content)
 	m.updateViewportContent()
 	m.viewport.GotoBottom()
 }
@@ -157,6 +160,7 @@ func (m Model) Init() tea.Cmd {
 
 // Custom message types
 type userInputMsg string
+type bashInputMsg string
 type resetCtrlCMsg struct{}
 
 // resetCtrlCCmd creates a command that resets the Ctrl+C counter after a timeout
@@ -204,7 +208,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				"Ctrl+H: Show this help\n" +
 				"Ctrl+L: Clear screen\n" +
 				"PageUp/PageDown: Scroll history\n" +
-				"Up/Down: Navigate history")
+				"Up/Down: Navigate history\n\n" +
+				"Commands:\n" +
+				"/bash [command]: Execute a bash command and include result in chat context")
 		case "ctrl+l":
 			// Clear the screen
 			m.messages = []Message{}
@@ -217,8 +223,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.AddMessage(content, true)
 					m.textarea.Reset()
 					m.SetProcessing(true)
-					// Send the message to the assistant
 					return m, func() tea.Msg {
+						if strings.HasPrefix(content, "/bash") {
+							content = strings.TrimPrefix(content, "/bash")
+							return bashInputMsg(content)
+						}
 						return userInputMsg(content)
 					}
 				}
@@ -240,6 +249,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, func() tea.Msg {
 			return <-m.messageCh
 		}
+	case bashInputMsg:
+		cmd := exec.Command("bash", "-c", string(msg))
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			m.AddSystemMessage("Error: " + err.Error())
+		}
+		cmd_out := `
+## command
+` + string(msg) + `
+
+## output
+` + string(output) + `
+`
+		m.AddMessage(cmd_out, true)
+		m.SetProcessing(false)
 	case MessageEvent:
 		if !msg.Done {
 			m.AddMessage(ProcessAssistantEvent(msg), false)
@@ -342,5 +366,5 @@ func (m Model) statusView() string {
 		Padding(0, 1).
 		MarginTop(0).
 		Bold(true).
-		Render(statusText + " │ Ctrl+C (twice): Quit │ Ctrl+H: Help │ ↑/↓: Scroll")
+		Render(statusText + " │ Ctrl+C (twice): Quit │ Ctrl+H: Help │ /bash: Run command │ ↑/↓: Scroll")
 }
