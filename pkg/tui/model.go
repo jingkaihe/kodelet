@@ -60,7 +60,6 @@ func NewModel() Model {
 
 	// Style the textarea
 	ta.Prompt = "❯ "
-	ta.CharLimit = 280
 
 	// Set custom styles for the textarea
 	ta.FocusedStyle.CursorLine = lipgloss.NewStyle()

@@ -67,6 +67,7 @@ Monitor file changes and automatically process files with special "@kodelet" com
 - `--include` or `-p`: File pattern to include (e.g., `*.go`, `*.{js,ts}`)
 - `--verbosity` or `-v`: Verbosity level (`quiet`, `normal`, `verbose`)
 - `--debounce` or `-d`: Debounce time in milliseconds (default: 500)
+- `--auto-completion-model`: Model to use for auto-completion requests
 
 Make sure your Anthropic API key is set in your environment:
 
