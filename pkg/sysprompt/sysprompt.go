@@ -143,7 +143,7 @@ Here is the system information:
 Current working directory: ${pwd}
 Is this a git repository? ${isGitRepo}
 Operating system: ${platform} ${osVersion}
-Date and time: ${date}
+Date: ${date}
 </system-information>
 `
 
@@ -206,14 +206,14 @@ func SystemPrompt(model string) string {
 	isGitRepo := checkIsGitRepo(pwd)
 	platform := runtime.GOOS
 	osVersion := getOSVersion()
-	datetime := time.Now().Format("2006-01-02 15:04:05")
+	date := time.Now().Format("2006-01-02")
 
 	// Replace environment variables
 	prompt = strings.Replace(prompt, "${pwd}", pwd, -1)
 	prompt = strings.Replace(prompt, "${isGitRepo}", fmt.Sprintf("%v", isGitRepo), -1)
 	prompt = strings.Replace(prompt, "${platform}", platform, -1)
 	prompt = strings.Replace(prompt, "${osVersion}", osVersion, -1)
-	prompt = strings.Replace(prompt, "${date}", datetime, -1)
+	prompt = strings.Replace(prompt, "${date}", date, -1)
 	prompt = strings.Replace(prompt, "${model}", model, -1)
 
 	prompt += "\nHere are some useful context to help you solve the user's problem:\n"
