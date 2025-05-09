@@ -26,6 +26,7 @@ type Model struct {
 	width          int
 	height         int
 	isProcessing   bool
+	spinnerIndex   int
 	showCommands   bool
 	windowSizeMsg  tea.WindowSizeMsg
 	statusMessage  string
@@ -46,6 +47,17 @@ func NewModel() Model {
 	ta.SetHeight(3)
 	ta.ShowLineNumbers = false
 	ta.KeyMap.InsertNewline.SetEnabled(false) // Use Enter to send
+
+	// Style the textarea
+	ta.Prompt = "| "
+	ta.CharLimit = 280
+
+	// Set custom styles for the textarea
+	ta.FocusedStyle.CursorLine = lipgloss.NewStyle()
+	ta.BlurredStyle.Base = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	ta.FocusedStyle.Base = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
+	ta.FocusedStyle.Prompt = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
+	ta.BlurredStyle.Prompt = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 
 	vp := viewport.New(0, 0)
 	vp.KeyMap.PageDown.SetEnabled(true)
@@ -220,6 +232,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.textarea, cmd = m.textarea.Update(msg)
 	cmds = append(cmds, cmd)
 
+	// Update spinner animation when processing
+	if m.isProcessing {
+		m.spinnerIndex = (m.spinnerIndex + 1) % 4
+	}
+
 	return m, tea.Batch(cmds...)
 }
 
@@ -233,7 +250,12 @@ func (m Model) View() string {
 	return lipgloss.JoinVertical(
 		lipgloss.Left,
 		m.viewport.View(),
-		lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(0, 1).Render(m.textarea.View()),
+		lipgloss.NewStyle().
+			BorderStyle(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("205")).
+			Padding(0, 1).
+			Width(m.width-2).
+			Render(m.textarea.View()),
 		m.statusView(),
 	)
 }
@@ -242,7 +264,8 @@ func (m Model) View() string {
 func (m Model) statusView() string {
 	statusText := m.statusMessage
 	if m.isProcessing {
-		statusText += " 🔄"
+		spinChars := []string{"|", "/", "-", "\\"}
+		statusText += " " + spinChars[m.spinnerIndex]
 	}
 
 	return lipgloss.NewStyle().
