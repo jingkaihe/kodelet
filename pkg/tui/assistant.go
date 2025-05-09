@@ -28,6 +28,10 @@ func NewAssistantClient() *AssistantClient {
 	}
 }
 
+func (a *AssistantClient) AddUserMessage(message string) {
+	a.messages = append(a.messages, anthropic.NewUserMessage(anthropic.NewTextBlock(message)))
+}
+
 // SendMessage sends a message to the assistant and processes the response
 func (a *AssistantClient) SendMessage(ctx context.Context, message string, messageCh chan MessageEvent) error {
 	// Add the user message to the history
