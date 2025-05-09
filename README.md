@@ -109,3 +109,8 @@ make docker-run query="your query"
 # Display help information
 make help
 ```
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+Copyright (c) 2025 Jingkai He.
