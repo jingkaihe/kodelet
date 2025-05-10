@@ -6,7 +6,7 @@ Proposed
 
 ## Context
 
-Kodelet is designed to assist with site reliability and platform engineering tasks. Git is a fundamental tool in this domain, and crafting meaningful commit messages is often a time-consuming task that requires careful consideration of changes made.
+Kodelet is designed to assist with software engineering and production operations tasks. Git is a fundamental tool in this domain, and crafting meaningful commit messages is often a time-consuming task that requires careful consideration of changes made.
 
 Developers frequently need to create well-formatted, signed git commits that accurately describe the changes in their codebase. This process can be improved by leveraging Kodelet's AI capabilities to analyze git diffs and automatically generate appropriate commit messages.
 
