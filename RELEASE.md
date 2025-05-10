@@ -1,5 +1,9 @@
 # Kodelet
 
+## 0.0.5.alpha (2025-05-10)
+
+- Added new LLM architecture with Thread abstraction that unifies all interactions with Claude API
+
 ## 0.0.4.alpha (2025-05-09)
 
 - Added new `watch` command to monitor file changes and provide AI assistance, support for special `@kodelet` comments to trigger automatic code analysis and generation.
@@ -10,6 +14,7 @@
 ## 0.0.3.alpha1 (2025-05-09)
 
 - Reduce the log level of README.md and KODELET.md to `debug` to avoid cluttering the console output.
+
 ## 0.0.3.alpha (2025-05-09)
 
 - Minor tweaks on the chat TUI (e.g. a rad ascii art and processing spinner)
