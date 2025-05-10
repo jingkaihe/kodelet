@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
+	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/state"
 	"github.com/spf13/cobra"
 )
@@ -21,9 +23,12 @@ var runCmd = &cobra.Command{
 		appState := state.NewBasicState()
 
 		// Print the user query
-		println(color("[user]: ") + query)
+		fmt.Printf("\033[1;33m[user]: \033[0m%s\n", query)
+
+		// Initialize LLM client from viper config
+		client := llm.NewClient(llm.GetConfigFromViper())
 
 		// Process the query
-		ask(context.Background(), appState, query, false)
+		client.Ask(context.Background(), appState, query, false)
 	},
 }

@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/state"
 	"github.com/spf13/cobra"
 )
@@ -77,7 +78,10 @@ IMPORTANT: The output of the commit message should not be wrapped with any markd
 		fmt.Println("Analyzing staged changes and generating commit message...")
 		fmt.Println("-----------------------------------------------------------")
 
-		commitMsg := ask(ctx, s, prompt, true)
+		// Initialize LLM client from viper config
+		client := llm.NewClient(llm.GetConfigFromViper())
+
+		commitMsg := client.Ask(ctx, s, prompt, true)
 		commitMsg = sanitizeCommitMessage(commitMsg)
 
 		fmt.Println("-----------------------------------------------------------")

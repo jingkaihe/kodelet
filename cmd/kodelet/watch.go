@@ -12,6 +12,7 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/fsnotify/fsnotify"
+	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/state"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -244,15 +245,18 @@ def multiply(a, b):
 		fmt.Println("Sending to AI for analysis...")
 	}
 
+	// Initialize LLM client from viper config
+	client := llm.NewClient(llm.GetConfigFromViper())
+
 	var response string
 	// Use the auto-completion model if appropriate
 	if autoCompletionModel != "" {
 		if verbosity == "verbose" {
 			fmt.Printf("Using auto-completion model: %s\n", autoCompletionModel)
 		}
-		response = ask(ctx, s, query, true, autoCompletionModel)
+		response = client.Ask(ctx, s, query, true, autoCompletionModel)
 	} else {
-		response = ask(ctx, s, query, true)
+		response = client.Ask(ctx, s, query, true)
 	}
 
 	// Display the AI response
