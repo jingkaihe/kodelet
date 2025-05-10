@@ -16,11 +16,14 @@ func legacyChatUI() {
 	fmt.Println("Kodelet Chat Mode (Legacy UI) - Type 'exit' or 'quit' to end the session")
 	fmt.Println("----------------------------------------------------------")
 
-	state := state.NewBasicState()
-	reader := bufio.NewReader(os.Stdin)
+	// Create a persistent thread with state
+	thread := llm.NewThread(llm.GetConfigFromViper())
+	thread.SetState(state.NewBasicState())
 
-	// Initialize LLM client from viper config
-	client := llm.NewClient(llm.GetConfigFromViper())
+	// Create a console handler
+	handler := &llm.ConsoleMessageHandler{Silent: false}
+
+	reader := bufio.NewReader(os.Stdin)
 
 	for {
 		fmt.Print("\033[1;33m[user]: \033[0m")
@@ -44,7 +47,10 @@ func legacyChatUI() {
 			continue
 		}
 
-		// Process the query
-		client.Ask(context.Background(), state, input, false)
+		// Process the query using the persistent thread
+		err = thread.SendMessage(context.Background(), input, handler)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		}
 	}
 }
