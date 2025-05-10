@@ -1,7 +1,7 @@
 # Kodelet Documentation
 
 ## Project Overview
-Kodelet is a lightweight CLI tool that helps with site reliability and platform engineering tasks. It uses the Anthropic Claude API to process user queries and execute various tools.
+Kodelet is a lightweight CLI tool that helps with software engineering tasks. It uses the Anthropic Claude API to process user queries and execute various tools.
 
 ## Project Structure
 ```

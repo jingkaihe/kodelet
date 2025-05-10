@@ -1,15 +1,12 @@
 # Kodelet
 
-Kodelet is a lightweight CLI tool that helps with site reliability and platform engineering tasks.
+Kodelet is a powerful, lightweight CLI tool that transforms your ideas into robust engineering solutions using AI.
 
 ## Key Features
 
-- **Interactive Chat**: Get AI assistance for SRE and platform engineering tasks through a modern TUI
-- **One-shot Queries**: Run single queries for quick answers without starting a chat session
-- **General Purpose Coding**: Simple write code with Kodelet
-- **AI-Powered Git Commits**: Generate meaningful, conventional commits automatically from your staged changes
-- **Watch Mode**: Monitor file changes and automatically process files with AI assistance using "@kodelet" comments
-
+- **Intelligent Engineering Assistant**: Automates software engineering tasks and production operations with agentic capabilities.
+- **Interactive Architecture Design**: Collaboratively design and refine system architectures through natural dialogue.
+- **Continuous Code Intelligence**: Analyzes, understands, and improves your codebase while answering technical questions in context.
 
 ## Installation
 
@@ -25,19 +22,18 @@ curl -sSL https://raw.githubusercontent.com/jingkaihe/kodelet/main/install.sh | 
 
 ### Running locally
 
-You can use Kodelet in two ways:
+You can use Kodelet in a few ways:
 
 #### Run Command (One-shot)
 
 ```bash
-make build
-./bin/kodelet run "your query"
+kodelet run "your idea"
 ```
 
 #### Generate Git Commit
 
 ```bash
-./bin/kodelet commit
+kodelet commit
 ```
 
 This command analyzes your staged changes (git diff --cached) and uses AI to generate a meaningful commit message following conventional commits format. You must stage your changes using `git add` before running this command.
@@ -48,21 +44,20 @@ Options:
 
 #### Interactive Chat Mode
 
+The chat mode allows you to interact with Kodelet in a TUI.
+
 ```bash
-./bin/kodelet chat
-```
-Or using Make:
-```bash
-make chat
+kodelet chat
 ```
 
 #### Watch Mode
 
-```bash
-./bin/kodelet watch
-```
+The watch mode allows you to monitor file changes and automatically process files with special "@kodelet" comments.
 
-Monitor file changes and automatically process files with special "@kodelet" comments. Options:
+```bash
+kodelet watch
+```
+Options:
 - `--ignore` or `-i`: Directories to ignore (default: `.git,node_modules`)
 - `--include` or `-p`: File pattern to include (e.g., `*.go`, `*.{js,ts}`)
 - `--verbosity` or `-v`: Verbosity level (`quiet`, `normal`, `verbose`)

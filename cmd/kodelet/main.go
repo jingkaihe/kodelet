@@ -30,8 +30,8 @@ func init() {
 
 var rootCmd = &cobra.Command{
 	Use:   "kodelet",
-	Short: "Kodelet CLI tool for site reliability engineering tasks",
-	Long:  `Kodelet is a lightweight CLI tool that helps with site reliability and platform engineering tasks.`,
+	Short: "Kodelet is a CLI tool for software engineering and production operations tasks",
+	Long:  `Kodelet is a lightweight CLI tool that helps with software engineering and production operations tasks.`,
 	// Default behavior is to show help if no arguments are provided
 	Run: func(cmd *cobra.Command, args []string) {
 		if len(args) > 0 {
