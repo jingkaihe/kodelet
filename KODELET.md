@@ -12,6 +12,7 @@ Kodelet is a lightweight CLI tool that helps with site reliability and platform 
 ├── cmd/
 │   └── kodelet/         # Application entry point
 └── pkg/
+    ├── llm/             # LLM client for AI interactions
     ├── state/           # State management for the application
     ├── sysprompt/       # System prompt configuration and templates
     ├── tools/           # Tool implementations (bash, file operations, etc.)
@@ -24,6 +25,7 @@ The codebase follows a modular structure with clear separation of concerns:
 - Core application logic in the `cmd/kodelet` directory with separate files for different execution modes
 - State management interfaces and implementations in the `pkg/state` package
 - System prompt configuration in the `pkg/sysprompt` package
+- LLM client for AI interactions in the `pkg/llm` package
 - Tools for executing various operations in the `pkg/tools` package (bash, file operations, code search, todo management, etc.)
 - Terminal user interface components in the `pkg/tui` package for interactive chat mode
 - Common utilities and helper functions in the `pkg/utils` package
@@ -143,6 +145,7 @@ make help
 - State is managed through the `State` interface in pkg/state/state.go
 - Function and variable names use camelCase
 - Type names use PascalCase
+- Always run `make format && make lint` after finishing code changes to ensure code style compliance
 
 ## Configuration
 Kodelet uses Viper for configuration management. You can configure Kodelet in several ways:

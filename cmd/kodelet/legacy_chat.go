@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/state"
 )
 
@@ -18,8 +19,11 @@ func legacyChatUI() {
 	state := state.NewBasicState()
 	reader := bufio.NewReader(os.Stdin)
 
+	// Initialize LLM client from viper config
+	client := llm.NewClient(llm.GetConfigFromViper())
+
 	for {
-		fmt.Print(color("[user]: "))
+		fmt.Print("\033[1;33m[user]: \033[0m")
 		input, err := reader.ReadString('\n')
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error reading input: %s\n", err)
@@ -41,6 +45,6 @@ func legacyChatUI() {
 		}
 
 		// Process the query
-		ask(context.Background(), state, input, false)
+		client.Ask(context.Background(), state, input, false)
 	}
 }
