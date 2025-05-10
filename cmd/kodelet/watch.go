@@ -245,8 +245,8 @@ def multiply(a, b):
 		fmt.Println("Sending to AI for analysis...")
 	}
 
-	// Initialize LLM client from viper config
-	client := llm.NewClient(llm.GetConfigFromViper())
+	// Get configuration for the LLM
+	config := llm.GetConfigFromViper()
 
 	var response string
 	// Use the auto-completion model if appropriate
@@ -254,9 +254,9 @@ def multiply(a, b):
 		if verbosity == "verbose" {
 			fmt.Printf("Using auto-completion model: %s\n", autoCompletionModel)
 		}
-		response = client.Ask(ctx, s, query, true, autoCompletionModel)
+		response = llm.SendMessageAndGetText(ctx, s, query, config, true, autoCompletionModel)
 	} else {
-		response = client.Ask(ctx, s, query, true)
+		response = llm.SendMessageAndGetText(ctx, s, query, config, true)
 	}
 
 	// Display the AI response

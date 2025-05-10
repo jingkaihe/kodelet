@@ -25,10 +25,12 @@ var runCmd = &cobra.Command{
 		// Print the user query
 		fmt.Printf("\033[1;33m[user]: \033[0m%s\n", query)
 
-		// Initialize LLM client from viper config
-		client := llm.NewClient(llm.GetConfigFromViper())
+		// Process the query using the Thread abstraction
+		handler := &llm.ConsoleMessageHandler{Silent: false}
+		thread := llm.NewThread(llm.GetConfigFromViper())
+		thread.SetState(appState)
 
-		// Process the query
-		client.Ask(context.Background(), appState, query, false)
+		// Send the message and process the response
+		thread.SendMessage(context.Background(), query, handler)
 	},
 }

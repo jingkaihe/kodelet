@@ -78,10 +78,8 @@ IMPORTANT: The output of the commit message should not be wrapped with any markd
 		fmt.Println("Analyzing staged changes and generating commit message...")
 		fmt.Println("-----------------------------------------------------------")
 
-		// Initialize LLM client from viper config
-		client := llm.NewClient(llm.GetConfigFromViper())
-
-		commitMsg := client.Ask(ctx, s, prompt, true)
+		// Get the commit message using the Thread abstraction
+		commitMsg := llm.SendMessageAndGetText(ctx, s, prompt, llm.GetConfigFromViper(), true)
 		commitMsg = sanitizeCommitMessage(commitMsg)
 
 		fmt.Println("-----------------------------------------------------------")

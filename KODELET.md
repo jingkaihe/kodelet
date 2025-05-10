@@ -25,7 +25,7 @@ The codebase follows a modular structure with clear separation of concerns:
 - Core application logic in the `cmd/kodelet` directory with separate files for different execution modes
 - State management interfaces and implementations in the `pkg/state` package
 - System prompt configuration in the `pkg/sysprompt` package
-- LLM client for AI interactions in the `pkg/llm` package
+- LLM communication is handled in the `pkg/llm` package with a conversational Thread abstraction
 - Tools for executing various operations in the `pkg/tools` package (bash, file operations, code search, todo management, etc.)
 - Terminal user interface components in the `pkg/tui` package for interactive chat mode
 - Common utilities and helper functions in the `pkg/utils` package
@@ -174,6 +174,34 @@ max_tokens: 8192
    ```bash
    kodelet run --model "claude-3-opus-20240229" --max-tokens 4096 "your query"
    ```
+
+## LLM Architecture
+
+Kodelet uses a `Thread` abstraction for all interactions with the Anthropic Claude API:
+
+### Thread
+The `Thread` type in `pkg/llm/thread.go` represents a conversation thread with Claude:
+- Maintains message history and state
+- Handles tool execution and responses
+- Uses a handler-based pattern for processing responses
+
+### MessageHandler Interface
+The `MessageHandler` interface defines how message events are processed:
+```go
+type MessageHandler interface {
+    HandleText(text string)
+    HandleToolUse(toolName string, input string)
+    HandleToolResult(toolName string, result string)
+    HandleDone()
+}
+```
+
+### Handler Implementations
+- `ConsoleMessageHandler`: Prints messages directly to the console
+- `ChannelMessageHandler`: Sends messages through a channel for the TUI
+- `StringCollectorHandler`: Collects text responses into a string
+
+This architecture provides a unified approach for both interactive and one-shot uses.
 
 ## Important Notes
 - Requires an Anthropic API key for Claude integration
