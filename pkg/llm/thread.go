@@ -8,6 +8,15 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/state"
 )
 
+// Usage represents token usage information from LLM API calls
+type Usage struct {
+	InputTokens              int
+	OutputTokens             int
+	CacheCreationInputTokens int
+	CacheReadInputTokens     int
+	TotalTokens              int
+}
+
 // MessageHandler defines how message events should be processed
 type MessageHandler interface {
 	HandleText(text string)
@@ -26,6 +35,8 @@ type Thread interface {
 	AddUserMessage(message string)
 	// SendMessage sends a message to the LLM and processes the response
 	SendMessage(ctx context.Context, message string, handler MessageHandler, modelOverride ...string) error
+	// GetUsage returns the current token usage for the thread
+	GetUsage() Usage
 }
 
 // ConsoleMessageHandler prints messages to the console
@@ -170,15 +181,21 @@ func NewThread(config Config) Thread {
 	}
 }
 
-// SendMessageAndGetText is a convenience method for one-shot queries that returns the response as a string
-func SendMessageAndGetText(ctx context.Context, state state.State, query string, config Config, silent bool, modelOverride ...string) string {
+// SendMessageAndGetTextWithUsage is a convenience method for one-shot queries that returns the response as a string and usage information
+func SendMessageAndGetTextWithUsage(ctx context.Context, state state.State, query string, config Config, silent bool, modelOverride ...string) (string, Usage) {
 	thread := NewThread(config)
 	thread.SetState(state)
 
 	handler := &StringCollectorHandler{Silent: silent}
 	err := thread.SendMessage(ctx, query, handler, modelOverride...)
 	if err != nil {
-		return fmt.Sprintf("Error: %v", err)
+		return fmt.Sprintf("Error: %v", err), Usage{}
 	}
-	return handler.CollectedText()
+	return handler.CollectedText(), thread.GetUsage()
+}
+
+// SendMessageAndGetText is a convenience method for one-shot queries that returns the response as a string
+func SendMessageAndGetText(ctx context.Context, state state.State, query string, config Config, silent bool, modelOverride ...string) string {
+	text, _ := SendMessageAndGetTextWithUsage(ctx, state, query, config, silent, modelOverride...)
+	return text
 }

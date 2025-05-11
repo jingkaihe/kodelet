@@ -78,12 +78,16 @@ IMPORTANT: The output of the commit message should not be wrapped with any markd
 		fmt.Println("Analyzing staged changes and generating commit message...")
 		fmt.Println("-----------------------------------------------------------")
 
-		// Get the commit message using the Thread abstraction
-		commitMsg := llm.SendMessageAndGetText(ctx, s, prompt, llm.GetConfigFromViper(), true)
+		// Get the commit message using the Thread abstraction with usage stats
+		commitMsg, usage := llm.SendMessageAndGetTextWithUsage(ctx, s, prompt, llm.GetConfigFromViper(), true)
 		commitMsg = sanitizeCommitMessage(commitMsg)
 
 		fmt.Println("-----------------------------------------------------------")
 		fmt.Printf("\nGenerated commit message:\n\n%s\n\n", commitMsg)
+
+		// Display usage statistics
+		fmt.Printf("\033[1;36m[Usage Stats] Input tokens: %d | Output tokens: %d | Total: %d\033[0m\n",
+			usage.InputTokens, usage.OutputTokens, usage.TotalTokens)
 
 		// Confirm with user
 		if !confirmCommit(commitMsg) {

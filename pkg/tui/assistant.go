@@ -11,6 +11,7 @@ import (
 // AssistantClient handles the interaction with the LLM thread
 type AssistantClient struct {
 	thread llm.Thread
+	usage  llm.Usage
 }
 
 // NewAssistantClient creates a new assistant client
@@ -36,7 +37,19 @@ func (a *AssistantClient) SendMessage(ctx context.Context, message string, messa
 	handler := &llm.ChannelMessageHandler{MessageCh: messageCh}
 
 	// Send the message using the persistent thread
-	return a.thread.SendMessage(ctx, message, handler)
+	err := a.thread.SendMessage(ctx, message, handler)
+
+	// Update usage after message is sent
+	if err == nil {
+		a.usage = a.thread.GetUsage()
+	}
+
+	return err
+}
+
+// GetUsage returns the current token usage
+func (a *AssistantClient) GetUsage() llm.Usage {
+	return a.usage
 }
 
 // ProcessAssistantEvent processes the events from the assistant
