@@ -86,8 +86,8 @@ IMPORTANT: The output of the commit message should not be wrapped with any markd
 		fmt.Printf("\nGenerated commit message:\n\n%s\n\n", commitMsg)
 
 		// Display usage statistics
-		fmt.Printf("\033[1;36m[Usage Stats] Input tokens: %d | Output tokens: %d | Total: %d\033[0m\n",
-			usage.InputTokens, usage.OutputTokens, usage.TotalTokens)
+		fmt.Printf("\033[1;36m[Usage Stats] Input tokens: %d | Output tokens: %d | Cache write: %d | Cache read: %d | Total: %d\033[0m\n",
+			usage.InputTokens, usage.OutputTokens, usage.CacheCreationInputTokens, usage.CacheReadInputTokens, usage.TotalTokens)
 
 		// Confirm with user
 		if !confirmCommit(commitMsg) {

@@ -95,15 +95,10 @@ func (t *AnthropicThread) SendMessage(
 		t.usage.InputTokens += int(response.Usage.InputTokens)
 		t.usage.OutputTokens += int(response.Usage.OutputTokens)
 
-		// In some versions of the API, these fields might be pointers
-		if response.Usage.CacheCreationInputTokens > 0 {
-			t.usage.CacheCreationInputTokens += int(response.Usage.CacheCreationInputTokens)
-		}
-		if response.Usage.CacheReadInputTokens > 0 {
-			t.usage.CacheReadInputTokens += int(response.Usage.CacheReadInputTokens)
-		}
+		t.usage.CacheCreationInputTokens += int(response.Usage.CacheCreationInputTokens)
+		t.usage.CacheReadInputTokens += int(response.Usage.CacheReadInputTokens)
 
-		t.usage.TotalTokens = t.usage.InputTokens + t.usage.OutputTokens
+		t.usage.TotalTokens += t.usage.InputTokens + t.usage.OutputTokens + t.usage.CacheCreationInputTokens + t.usage.CacheReadInputTokens
 
 		// Process the response content blocks
 		toolUseCount := 0
