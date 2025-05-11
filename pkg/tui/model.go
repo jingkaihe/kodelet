@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"os/exec"
 	"strings"
 	"time"
@@ -555,11 +556,26 @@ func (m Model) statusView() string {
 		statusText += " " + spinChars[m.spinnerIndex%8]
 	}
 
+	// Get usage statistics
+	usage := m.assistant.GetUsage()
+	usageText := ""
+	costText := ""
+
+	if usage.TotalTokens > 0 {
+		usageText = fmt.Sprintf(" │ Tokens: %d in / %d out / %d cw / %d cr / %d total",
+			usage.InputTokens, usage.OutputTokens, usage.CacheCreationInputTokens, usage.CacheReadInputTokens, usage.TotalTokens)
+
+		// Add cost information if available
+		if usage.TotalCost > 0 {
+			costText = fmt.Sprintf(" │ Cost: $%.4f", usage.TotalCost)
+		}
+	}
+
 	return lipgloss.NewStyle().
 		Foreground(lipgloss.Color("205")).
 		Background(lipgloss.Color("236")).
 		Padding(0, 1).
 		MarginTop(0).
 		Bold(true).
-		Render(statusText + " │ Ctrl+C (twice): Quit │ Ctrl+H (/help): Help │ ↑/↓: Scroll")
+		Render(statusText + usageText + costText + " │ Ctrl+C (twice): Quit │ Ctrl+H (/help): Help │ ↑/↓: Scroll")
 }
