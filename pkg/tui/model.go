@@ -559,9 +559,16 @@ func (m Model) statusView() string {
 	// Get usage statistics
 	usage := m.assistant.GetUsage()
 	usageText := ""
+	costText := ""
+
 	if usage.TotalTokens > 0 {
 		usageText = fmt.Sprintf(" │ Tokens: %d in / %d out / %d cw / %d cr / %d total",
 			usage.InputTokens, usage.OutputTokens, usage.CacheCreationInputTokens, usage.CacheReadInputTokens, usage.TotalTokens)
+
+		// Add cost information if available
+		if usage.TotalCost > 0 {
+			costText = fmt.Sprintf(" │ Cost: $%.4f", usage.TotalCost)
+		}
 	}
 
 	return lipgloss.NewStyle().
@@ -570,5 +577,5 @@ func (m Model) statusView() string {
 		Padding(0, 1).
 		MarginTop(0).
 		Bold(true).
-		Render(statusText + usageText + " │ Ctrl+C (twice): Quit │ Ctrl+H (/help): Help │ ↑/↓: Scroll")
+		Render(statusText + usageText + costText + " │ Ctrl+C (twice): Quit │ Ctrl+H (/help): Help │ ↑/↓: Scroll")
 }
