@@ -38,7 +38,7 @@ func TestNewThread(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			thread := NewThread(tc.config)
+			thread := NewThread(tc.config).(*AnthropicThread)
 			assert.NotNil(t, thread)
 			assert.Equal(t, tc.expectedModel, thread.config.Model)
 			assert.Equal(t, tc.expectedMax, thread.config.MaxTokens)
