@@ -53,14 +53,6 @@ func (t *Thread) GetState() state.State {
 	return t.state
 }
 
-func (t *Thread) SetMessages(messages []anthropic.MessageParam) {
-	t.messages = messages
-}
-
-func (t *Thread) GetMessages() []anthropic.MessageParam {
-	return t.messages
-}
-
 func (t *Thread) AddUserMessage(message string) {
 	t.messages = append(t.messages, anthropic.NewUserMessage(anthropic.NewTextBlock(message)))
 }
