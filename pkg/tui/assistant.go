@@ -10,7 +10,7 @@ import (
 
 // AssistantClient handles the interaction with the LLM thread
 type AssistantClient struct {
-	thread *llm.Thread
+	thread llm.Thread
 }
 
 // NewAssistantClient creates a new assistant client
