@@ -39,7 +39,7 @@ var runCmd = &cobra.Command{
 
 		// Display usage statistics
 		usage := thread.GetUsage()
-		fmt.Printf("\n\033[1;36m[Usage Stats] Input tokens: %d | Output tokens: %d | Total: %d\033[0m\n",
-			usage.InputTokens, usage.OutputTokens, usage.TotalTokens)
+		fmt.Printf("\n\033[1;36m[Usage Stats] Input tokens: %d | Output tokens: %d | Cache write: %d | Cache read: %d | Total: %d\033[0m\n",
+			usage.InputTokens, usage.OutputTokens, usage.CacheCreationInputTokens, usage.CacheReadInputTokens, usage.TotalTokens)
 	},
 }

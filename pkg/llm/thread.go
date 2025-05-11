@@ -10,11 +10,11 @@ import (
 
 // Usage represents token usage information from LLM API calls
 type Usage struct {
-	InputTokens              int
-	OutputTokens             int
-	CacheCreationInputTokens int
-	CacheReadInputTokens     int
-	TotalTokens              int
+	InputTokens              int // Regular input tokens count
+	OutputTokens             int // Output tokens generated
+	CacheCreationInputTokens int // Tokens used for creating cache entries
+	CacheReadInputTokens     int // Tokens used for reading from cache
+	TotalTokens              int // Total token count
 }
 
 // MessageHandler defines how message events should be processed

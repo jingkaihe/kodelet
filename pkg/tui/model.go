@@ -560,8 +560,8 @@ func (m Model) statusView() string {
 	usage := m.assistant.GetUsage()
 	usageText := ""
 	if usage.TotalTokens > 0 {
-		usageText = fmt.Sprintf(" │ Tokens: %d in / %d out / %d total",
-			usage.InputTokens, usage.OutputTokens, usage.TotalTokens)
+		usageText = fmt.Sprintf(" │ Tokens: %d in / %d out / %d cw / %d cr / %d total",
+			usage.InputTokens, usage.OutputTokens, usage.CacheCreationInputTokens, usage.CacheReadInputTokens, usage.TotalTokens)
 	}
 
 	return lipgloss.NewStyle().
