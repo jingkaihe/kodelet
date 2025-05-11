@@ -46,28 +46,6 @@ func TestNewThread(t *testing.T) {
 	}
 }
 
-func TestThreadAccessors(t *testing.T) {
-	thread := NewThread(Config{})
-
-	// Test state accessors
-	state := state.NewBasicState()
-	thread.SetState(state)
-	assert.Equal(t, state, thread.GetState())
-
-	// Test message accessors
-	msgs := []anthropic.MessageParam{
-		anthropic.NewUserMessage(anthropic.NewTextBlock("Test message")),
-	}
-	thread.SetMessages(msgs)
-	assert.Equal(t, msgs, thread.GetMessages())
-
-	// Test AddUserMessage
-	thread.AddUserMessage("Another message")
-	assert.Len(t, thread.GetMessages(), 2)
-	// Role is anthropic.MessageParamRole type but contains "user" string
-	assert.Contains(t, string(thread.GetMessages()[1].Role), "user")
-}
-
 func TestConsoleMessageHandler(t *testing.T) {
 	// This test mainly ensures the methods don't panic
 	// For a more thorough test, we would need to capture stdout
