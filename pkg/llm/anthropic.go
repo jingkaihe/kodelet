@@ -17,6 +17,7 @@ type AnthropicThread struct {
 	config   Config
 	state    state.State
 	messages []anthropic.MessageParam
+	usage    Usage
 }
 
 // NewAnthropicThread creates a new thread with Anthropic's Claude API
@@ -90,6 +91,20 @@ func (t *AnthropicThread) SendMessage(
 		// Add the assistant response to history
 		t.messages = append(t.messages, response.ToParam())
 
+		// Track usage statistics
+		t.usage.InputTokens += int(response.Usage.InputTokens)
+		t.usage.OutputTokens += int(response.Usage.OutputTokens)
+
+		// In some versions of the API, these fields might be pointers
+		if response.Usage.CacheCreationInputTokens > 0 {
+			t.usage.CacheCreationInputTokens += int(response.Usage.CacheCreationInputTokens)
+		}
+		if response.Usage.CacheReadInputTokens > 0 {
+			t.usage.CacheReadInputTokens += int(response.Usage.CacheReadInputTokens)
+		}
+
+		t.usage.TotalTokens = t.usage.InputTokens + t.usage.OutputTokens
+
 		// Process the response content blocks
 		toolUseCount := 0
 		for _, block := range response.Content {
@@ -120,4 +135,9 @@ func (t *AnthropicThread) SendMessage(
 
 	handler.HandleDone()
 	return nil
+}
+
+// GetUsage returns the current token usage for the thread
+func (t *AnthropicThread) GetUsage() Usage {
+	return t.usage
 }

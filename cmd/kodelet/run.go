@@ -31,6 +31,15 @@ var runCmd = &cobra.Command{
 		thread.SetState(appState)
 
 		// Send the message and process the response
-		thread.SendMessage(context.Background(), query, handler)
+		err := thread.SendMessage(context.Background(), query, handler)
+		if err != nil {
+			fmt.Printf("\n\033[1;31mError: %v\033[0m\n", err)
+			return
+		}
+
+		// Display usage statistics
+		usage := thread.GetUsage()
+		fmt.Printf("\n\033[1;36m[Usage Stats] Input tokens: %d | Output tokens: %d | Total: %d\033[0m\n",
+			usage.InputTokens, usage.OutputTokens, usage.TotalTokens)
 	},
 }
