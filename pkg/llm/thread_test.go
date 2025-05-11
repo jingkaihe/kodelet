@@ -38,34 +38,12 @@ func TestNewThread(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			thread := NewThread(tc.config)
+			thread := NewThread(tc.config).(*AnthropicThread)
 			assert.NotNil(t, thread)
 			assert.Equal(t, tc.expectedModel, thread.config.Model)
 			assert.Equal(t, tc.expectedMax, thread.config.MaxTokens)
 		})
 	}
-}
-
-func TestThreadAccessors(t *testing.T) {
-	thread := NewThread(Config{})
-
-	// Test state accessors
-	state := state.NewBasicState()
-	thread.SetState(state)
-	assert.Equal(t, state, thread.GetState())
-
-	// Test message accessors
-	msgs := []anthropic.MessageParam{
-		anthropic.NewUserMessage(anthropic.NewTextBlock("Test message")),
-	}
-	thread.SetMessages(msgs)
-	assert.Equal(t, msgs, thread.GetMessages())
-
-	// Test AddUserMessage
-	thread.AddUserMessage("Another message")
-	assert.Len(t, thread.GetMessages(), 2)
-	// Role is anthropic.MessageParamRole type but contains "user" string
-	assert.Contains(t, string(thread.GetMessages()[1].Role), "user")
 }
 
 func TestConsoleMessageHandler(t *testing.T) {

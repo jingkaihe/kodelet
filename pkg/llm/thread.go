@@ -2,15 +2,25 @@ package llm
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
-	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/jingkaihe/kodelet/pkg/state"
-	"github.com/jingkaihe/kodelet/pkg/sysprompt"
-	"github.com/jingkaihe/kodelet/pkg/tools"
 )
+
+// Usage represents token usage information from LLM API calls
+type Usage struct {
+	InputTokens              int     // Regular input tokens count
+	OutputTokens             int     // Output tokens generated
+	CacheCreationInputTokens int     // Tokens used for creating cache entries
+	CacheReadInputTokens     int     // Tokens used for reading from cache
+	TotalTokens              int     // Total token count
+	InputCost                float64 // Cost for input tokens in USD
+	OutputCost               float64 // Cost for output tokens in USD
+	CacheCreationCost        float64 // Cost for cache creation in USD
+	CacheReadCost            float64 // Cost for cache read in USD
+	TotalCost                float64 // Total cost in USD
+}
 
 // MessageHandler defines how message events should be processed
 type MessageHandler interface {
@@ -21,48 +31,17 @@ type MessageHandler interface {
 }
 
 // Thread represents a conversation thread with an LLM
-type Thread struct {
-	client   anthropic.Client
-	config   Config
-	state    state.State
-	messages []anthropic.MessageParam
-}
-
-// NewThread creates a new conversation thread
-func NewThread(config Config) *Thread {
-	// Apply defaults if not provided
-	if config.Model == "" {
-		config.Model = anthropic.ModelClaude3_7SonnetLatest
-	}
-	if config.MaxTokens == 0 {
-		config.MaxTokens = 8192
-	}
-
-	return &Thread{
-		client: anthropic.NewClient(),
-		config: config,
-	}
-}
-
-// Accessors and setters for Thread
-func (t *Thread) SetState(s state.State) {
-	t.state = s
-}
-
-func (t *Thread) GetState() state.State {
-	return t.state
-}
-
-func (t *Thread) SetMessages(messages []anthropic.MessageParam) {
-	t.messages = messages
-}
-
-func (t *Thread) GetMessages() []anthropic.MessageParam {
-	return t.messages
-}
-
-func (t *Thread) AddUserMessage(message string) {
-	t.messages = append(t.messages, anthropic.NewUserMessage(anthropic.NewTextBlock(message)))
+type Thread interface {
+	// SetState sets the state for the thread
+	SetState(s state.State)
+	// GetState returns the current state of the thread
+	GetState() state.State
+	// AddUserMessage adds a user message to the thread
+	AddUserMessage(message string)
+	// SendMessage sends a message to the LLM and processes the response
+	SendMessage(ctx context.Context, message string, handler MessageHandler, modelOverride ...string) error
+	// GetUsage returns the current token usage for the thread
+	GetUsage() Usage
 }
 
 // ConsoleMessageHandler prints messages to the console
@@ -180,87 +159,48 @@ func (h *StringCollectorHandler) CollectedText() string {
 	return h.text.String()
 }
 
-// SendMessage sends a user message to the thread and processes the response
-func (t *Thread) SendMessage(
-	ctx context.Context,
-	message string,
-	handler MessageHandler,
-	modelOverride ...string,
-) error {
-	// Add the user message to history
-	t.AddUserMessage(message)
+// NewThread creates a new thread based on the model specified in the config
+func NewThread(config Config) Thread {
+	// Determine which provider to use based on the model name
+	modelName := config.Model
 
-	// Main interaction loop for handling tool calls
-	for {
-		// Determine which model to use
-		model := t.config.Model
-		if len(modelOverride) > 0 && modelOverride[0] != "" {
-			model = modelOverride[0]
-		}
-
-		// Send request to Anthropic API
-		response, err := t.client.Messages.New(ctx, anthropic.MessageNewParams{
-			MaxTokens: int64(t.config.MaxTokens),
-			System: []anthropic.TextBlockParam{
-				{
-					Text: sysprompt.SystemPrompt(model),
-					CacheControl: anthropic.CacheControlEphemeralParam{
-						Type: "ephemeral",
-					},
-				},
-			},
-			Messages: t.messages,
-			Model:    model,
-			Tools:    tools.ToAnthropicTools(tools.Tools),
-		})
-		if err != nil {
-			return fmt.Errorf("error sending message to Anthropic: %w", err)
-		}
-
-		// Add the assistant response to history
-		t.messages = append(t.messages, response.ToParam())
-
-		// Process the response content blocks
-		toolUseCount := 0
-		for _, block := range response.Content {
-			switch variant := block.AsAny().(type) {
-			case anthropic.TextBlock:
-				handler.HandleText(variant.Text)
-			case anthropic.ToolUseBlock:
-				toolUseCount++
-				inputJSON, _ := json.Marshal(variant.JSON.Input.Raw())
-				handler.HandleToolUse(block.Name, string(inputJSON))
-
-				// Run the tool
-				output := tools.RunTool(ctx, t.state, block.Name, string(variant.JSON.Input.Raw()))
-				handler.HandleToolResult(block.Name, output.String())
-
-				// Add tool result to messages for next API call
-				t.messages = append(t.messages, anthropic.NewUserMessage(
-					anthropic.NewToolResultBlock(block.ID, output.String(), false),
-				))
-			}
-		}
-
-		// If no tools were used, we're done
-		if toolUseCount == 0 {
-			break
-		}
+	// Default to Anthropic Claude if no model specified
+	if modelName == "" {
+		return NewAnthropicThread(config)
 	}
 
-	handler.HandleDone()
-	return nil
+	// Check model name patterns to determine provider
+	switch {
+	// If the model starts with "claude" or matches Anthropic's constants, use Anthropic
+	case strings.HasPrefix(strings.ToLower(modelName), "claude"):
+		return NewAnthropicThread(config)
+
+	// Add cases for other providers here in the future
+	// Example:
+	// case strings.HasPrefix(strings.ToLower(modelName), "gpt"):
+	//     return NewOpenAIThread(config)
+
+	// Default to Anthropic for now
+	default:
+		return NewAnthropicThread(config)
+	}
 }
 
-// SendMessageAndGetText is a convenience method for one-shot queries that returns the response as a string
-func SendMessageAndGetText(ctx context.Context, state state.State, query string, config Config, silent bool, modelOverride ...string) string {
+// SendMessageAndGetTextWithUsage is a convenience method for one-shot queries that returns the response as a string and usage information
+func SendMessageAndGetTextWithUsage(ctx context.Context, state state.State, query string, config Config, silent bool, modelOverride ...string) (string, Usage) {
 	thread := NewThread(config)
 	thread.SetState(state)
 
 	handler := &StringCollectorHandler{Silent: silent}
 	err := thread.SendMessage(ctx, query, handler, modelOverride...)
 	if err != nil {
-		return fmt.Sprintf("Error: %v", err)
+		return fmt.Sprintf("Error: %v", err), Usage{}
 	}
-	return handler.CollectedText()
+	return handler.CollectedText(), thread.GetUsage()
+}
+
+// SendMessageAndGetText is a convenience method for one-shot queries that returns the response as a string
+func SendMessageAndGetText(ctx context.Context, state state.State, query string, config Config, silent bool, modelOverride ...string) string {
+	text, _ := SendMessageAndGetTextWithUsage(ctx, state, query, config, silent, modelOverride...)
+	return text
 }

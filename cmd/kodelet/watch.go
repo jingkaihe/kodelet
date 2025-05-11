@@ -249,18 +249,22 @@ def multiply(a, b):
 	config := llm.GetConfigFromViper()
 
 	var response string
+	var usage llm.Usage
+
 	// Use the auto-completion model if appropriate
 	if autoCompletionModel != "" {
 		if verbosity == "verbose" {
 			fmt.Printf("Using auto-completion model: %s\n", autoCompletionModel)
 		}
-		response = llm.SendMessageAndGetText(ctx, s, query, config, true, autoCompletionModel)
+		response, usage = llm.SendMessageAndGetTextWithUsage(ctx, s, query, config, true, autoCompletionModel)
 	} else {
-		response = llm.SendMessageAndGetText(ctx, s, query, config, true)
+		response, usage = llm.SendMessageAndGetTextWithUsage(ctx, s, query, config, true)
 	}
 
 	// Display the AI response
 	fmt.Printf("\n===== AI Analysis for %s =====\n", path)
 	fmt.Println(response)
+	fmt.Printf("\033[1;36m[Usage Stats] Input tokens: %d | Output tokens: %d | Total: %d\033[0m\n",
+		usage.InputTokens, usage.OutputTokens, usage.TotalTokens)
 	fmt.Println("===============================")
 }

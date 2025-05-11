@@ -203,6 +203,16 @@ type MessageHandler interface {
 
 This architecture provides a unified approach for both interactive and one-shot uses.
 
+### Token Usage Tracking
+Kodelet tracks token usage from all LLM API calls, including:
+- Regular input tokens
+- Output tokens
+- Cache write input tokens
+- Cache read input tokens
+- Total tokens
+
+All commands (chat, run, commit) display detailed token usage statistics upon completion, helping users monitor API usage and cost.
+
 ## Important Notes
 - Requires an Anthropic API key for Claude integration
 - Uses Claude 3.7 Sonnet model by default

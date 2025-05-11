@@ -1,5 +1,9 @@
 # Kodelet
 
+## 0.0.6.alpha (2025-05-11)
+
+- Added token usage and cost tracking for the LLM usage
+
 ## 0.0.5.alpha (2025-05-10)
 
 - Added new LLM architecture with Thread abstraction that unifies all interactions with Claude API
