@@ -293,6 +293,11 @@ func (t *AnthropicThread) IsPersisted() bool {
 	return t.isPersisted
 }
 
+// GetMessages returns the current messages in the thread
+func (t *AnthropicThread) GetMessages() []anthropic.MessageParam {
+	return t.messages
+}
+
 // EnablePersistence enables conversation persistence for this thread
 func (t *AnthropicThread) EnablePersistence(enabled bool) {
 	t.isPersisted = enabled
