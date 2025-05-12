@@ -58,9 +58,19 @@ Start an interactive chat session with a modern TUI interface:
 kodelet chat
 ```
 
-Start with legacy command-line interface instead of TUI:
+Start with plain command-line interface instead of TUI:
 ```bash
-kodelet chat --legacy
+kodelet chat --plain
+```
+
+List all saved conversations:
+```bash
+kodelet chat list
+```
+
+Delete a specific conversation:
+```bash
+kodelet chat delete <conversation-id>
 ```
 
 #### Version Information

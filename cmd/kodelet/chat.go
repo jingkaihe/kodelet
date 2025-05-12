@@ -11,49 +11,58 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
-	useLegacyUI       bool
-	resumeConvID      string
-	listConversations bool
-	deleteConvID      string
-	storageType       string
-	noSave            bool
-)
+// ChatOptions contains all options for the chat command
+type ChatOptions struct {
+	usePlainUI   bool
+	resumeConvID string
+	storageType  string
+	noSave       bool
+}
+
+var chatOptions = &ChatOptions{}
 
 var chatCmd = &cobra.Command{
 	Use:   "chat",
 	Short: "Start an interactive chat session with Kodelet",
 	Long:  `Start an interactive chat session with Kodelet through stdin.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		// Handle conversation management commands
-		if listConversations {
-			listConversationsCmd()
-			return
-		}
-
-		if deleteConvID != "" {
-			deleteConversationCmd(deleteConvID)
-			return
-		}
-
 		// Start the Bubble Tea UI
-		if !useLegacyUI {
-			tui.StartChatCmd(resumeConvID, !noSave)
+		if !chatOptions.usePlainUI {
+			tui.StartChatCmd(chatOptions.resumeConvID, !chatOptions.noSave)
 			return
 		}
 
-		// Use the legacy CLI interface
-		legacyChatUI()
+		// Use the plain CLI interface
+		plainChatUI(chatOptions)
+	},
+}
+
+var listCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List all saved conversations",
+	Run: func(cmd *cobra.Command, args []string) {
+		listConversationsCmd()
+	},
+}
+
+var deleteCmd = &cobra.Command{
+	Use:   "delete [conversationID]",
+	Short: "Delete a specific conversation",
+	Args:  cobra.ExactArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		deleteConversationCmd(args[0])
 	},
 }
 
 func init() {
-	chatCmd.Flags().BoolVar(&useLegacyUI, "legacy", false, "Use the legacy command-line interface instead of the TUI")
-	chatCmd.Flags().StringVar(&resumeConvID, "resume", "", "Resume a specific conversation")
-	chatCmd.Flags().BoolVar(&listConversations, "list", false, "List all saved conversations")
-	chatCmd.Flags().StringVar(&deleteConvID, "delete", "", "Delete a specific conversation")
-	chatCmd.Flags().StringVar(&storageType, "storage", "json", "Specify storage backend (json or sqlite)")
-	chatCmd.Flags().BoolVar(&noSave, "no-save", false, "Disable conversation persistence")
+	chatCmd.Flags().BoolVar(&chatOptions.usePlainUI, "plain", false, "Use the plain command-line interface instead of the TUI")
+	chatCmd.Flags().StringVar(&chatOptions.resumeConvID, "resume", "", "Resume a specific conversation")
+	chatCmd.Flags().StringVar(&chatOptions.storageType, "storage", "json", "Specify storage backend (json or sqlite)")
+	chatCmd.Flags().BoolVar(&chatOptions.noSave, "no-save", false, "Disable conversation persistence")
+
+	// Add subcommands
+	chatCmd.AddCommand(listCmd)
+	chatCmd.AddCommand(deleteCmd)
 }
 
 // listConversationsCmd displays a list of all saved conversations
@@ -105,7 +114,7 @@ func listConversationsCmd() {
 	w.Flush()
 
 	fmt.Println("\nTo resume a conversation: kodelet chat --resume <ID>")
-	fmt.Println("To delete a conversation: kodelet chat --delete <ID>")
+	fmt.Println("To delete a conversation: kodelet chat delete <ID>")
 }
 
 // deleteConversationCmd deletes a specific conversation
