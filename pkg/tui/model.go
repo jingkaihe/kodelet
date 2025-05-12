@@ -43,6 +43,8 @@ type Model struct {
 	ctx                context.Context
 	ctrlCPressCount    int
 	lastCtrlCPressTime time.Time
+	usageText          string
+	costText           string
 
 	// Command auto-completion
 	showCommandDropdown bool
@@ -550,32 +552,53 @@ func (m Model) View() string {
 
 // statusView renders the status bar
 func (m Model) statusView() string {
-	statusText := m.statusMessage
+	var statusText string
 	if m.isProcessing {
-		spinChars := []string{"⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"}
-		statusText += " " + spinChars[m.spinnerIndex%8]
+		spinChars := []string{".", "∘", "○", "◌", "◍", "◉", "◎", "●"}
+		statusText = fmt.Sprintf("%s %s", spinChars[m.spinnerIndex%8], m.statusMessage)
+	} else {
+		statusText = m.statusMessage
 	}
 
-	// Get usage statistics
-	usage := m.assistant.GetUsage()
-	usageText := ""
-	costText := ""
+	m.usageText, m.costText = m.updateUsage()
 
-	if usage.TotalTokens > 0 {
-		usageText = fmt.Sprintf(" │ Tokens: %d in / %d out / %d cw / %d cr / %d total",
-			usage.InputTokens, usage.OutputTokens, usage.CacheCreationInputTokens, usage.CacheReadInputTokens, usage.TotalTokens)
-
-		// Add cost information if available
-		if usage.TotalCost > 0 {
-			costText = fmt.Sprintf(" │ Cost: $%.4f", usage.TotalCost)
-		}
-	}
-
-	return lipgloss.NewStyle().
+	// Create main status line with controls
+	mainStatus := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("205")).
 		Background(lipgloss.Color("236")).
 		Padding(0, 1).
 		MarginTop(0).
 		Bold(true).
-		Render(statusText + usageText + costText + " │ Ctrl+C (twice): Quit │ Ctrl+H (/help): Help │ ↑/↓: Scroll")
+		Render(statusText + " │ Ctrl+C (twice): Quit │ Ctrl+H (/help): Help │ ↑/↓: Scroll")
+
+	// Create separate usage and cost line if available
+	if m.usageText != "" {
+		usageLine := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("205")).
+			Background(lipgloss.Color("236")).
+			Padding(0, 1).
+			Bold(true).
+			Render(m.usageText + m.costText)
+
+		return lipgloss.JoinVertical(lipgloss.Left, mainStatus, usageLine)
+	}
+
+	return mainStatus
+}
+
+func (m *Model) updateUsage() (usageText string, costText string) {
+	usage := m.assistant.GetUsage()
+
+	if usage.TotalTokens() > 0 {
+		usageText = fmt.Sprintf("Tokens: %d in / %d out / %d cw / %d cr / %d total | Ctx: %d / %d",
+			usage.InputTokens, usage.OutputTokens, usage.CacheCreationInputTokens, usage.CacheReadInputTokens, usage.TotalTokens(),
+			usage.CurrentContextWindow, usage.MaxContextWindow)
+
+		// Add cost information if available
+		if usage.TotalCost() > 0 {
+			costText = fmt.Sprintf(" | Cost: $%.4f", usage.TotalCost())
+		}
+	}
+
+	return usageText, costText
 }

@@ -18,6 +18,7 @@ type ModelPricing struct {
 	Output             float64
 	PromptCachingWrite float64
 	PromptCachingRead  float64
+	ContextWindow      int
 }
 
 // ModelPricingMap maps model names to their pricing information
@@ -28,18 +29,21 @@ var ModelPricingMap = map[string]ModelPricing{
 		Output:             0.000015,   // $15.00 per million tokens
 		PromptCachingWrite: 0.00000375, // $3.75 per million tokens
 		PromptCachingRead:  0.0000003,  // $0.30 per million tokens
+		ContextWindow:      200_000,
 	},
 	anthropic.ModelClaude3_5HaikuLatest: {
 		Input:              0.0000008,  // $0.80 per million tokens
 		Output:             0.000004,   // $4.00 per million tokens
 		PromptCachingWrite: 0.000001,   // $1.00 per million tokens
 		PromptCachingRead:  0.00000008, // $0.08 per million tokens
+		ContextWindow:      200_000,
 	},
 	anthropic.ModelClaude3OpusLatest: {
 		Input:              0.000015,   // $15.00 per million tokens
 		Output:             0.000075,   // $75.00 per million tokens
 		PromptCachingWrite: 0.00001875, // $18.75 per million tokens
 		PromptCachingRead:  0.0000015,  // $1.50 per million tokens
+		ContextWindow:      200_000,
 	},
 	// Legacy models
 	anthropic.ModelClaude3_5SonnetLatest: {
@@ -47,12 +51,14 @@ var ModelPricingMap = map[string]ModelPricing{
 		Output:             0.000015,   // $15.00 per million tokens
 		PromptCachingWrite: 0.00000375, // $3.75 per million tokens
 		PromptCachingRead:  0.0000003,  // $0.30 per million tokens
+		ContextWindow:      200_000,
 	},
 	anthropic.ModelClaude_3_Haiku_20240307: {
 		Input:              0.00000025, // $0.25 per million tokens
 		Output:             0.00000125, // $1.25 per million tokens
 		PromptCachingWrite: 0.0000003,  // $0.30 per million tokens
 		PromptCachingRead:  0.00000003, // $0.03 per million tokens
+		ContextWindow:      200_000,
 	},
 }
 
@@ -165,7 +171,6 @@ func (t *AnthropicThread) SendMessage(
 		t.usage.OutputTokens += int(response.Usage.OutputTokens)
 		t.usage.CacheCreationInputTokens += int(response.Usage.CacheCreationInputTokens)
 		t.usage.CacheReadInputTokens += int(response.Usage.CacheReadInputTokens)
-		t.usage.TotalTokens = t.usage.InputTokens + t.usage.OutputTokens + t.usage.CacheCreationInputTokens + t.usage.CacheReadInputTokens
 
 		// Calculate costs based on model pricing
 		pricing := getModelPricing(model)
@@ -181,7 +186,8 @@ func (t *AnthropicThread) SendMessage(
 		t.usage.OutputCost = outputCost
 		t.usage.CacheCreationCost = cacheWriteCost
 		t.usage.CacheReadCost = cacheReadCost
-		t.usage.TotalCost = inputCost + outputCost + cacheWriteCost + cacheReadCost
+		t.usage.CurrentContextWindow = int(response.Usage.InputTokens) + int(response.Usage.OutputTokens) + int(response.Usage.CacheCreationInputTokens) + int(response.Usage.CacheReadInputTokens)
+		t.usage.MaxContextWindow = pricing.ContextWindow
 
 		// Process the response content blocks
 		toolUseCount := 0
