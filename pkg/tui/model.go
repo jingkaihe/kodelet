@@ -86,7 +86,11 @@ func NewModel(conversationID string, enablePersistence bool) Model {
 	// Create status message
 	statusMessage := "Ready"
 
-	return Model{
+	// Create assistant client
+	assistant := NewAssistantClient(conversationID, enablePersistence)
+
+	// Create the initial model
+	model := Model{
 		messageCh:          make(chan types.MessageEvent),
 		messages:           []Message{},
 		textarea:           ta,
@@ -96,11 +100,23 @@ func NewModel(conversationID string, enablePersistence bool) Model {
 		userStyle:          lipgloss.NewStyle().Foreground(lipgloss.Color("86")).Bold(true),
 		assistantStyle:     lipgloss.NewStyle().Foreground(lipgloss.Color("212")).Bold(true),
 		systemStyle:        lipgloss.NewStyle().Foreground(lipgloss.Color("yellow")).Bold(true),
-		assistant:          NewAssistantClient(conversationID, enablePersistence),
+		assistant:          assistant,
 		ctx:                context.Background(),
 		availableCommands:  availableCommands,
 		selectedCommandIdx: 0,
 	}
+
+	// Populate messages from loaded conversation if it exists
+	if conversationID != "" && enablePersistence {
+		if loadedMessages, err := assistant.GetThreadMessages(); err == nil && len(loadedMessages) > 0 {
+			model.messages = loadedMessages
+			model.updateViewportContent()
+			model.viewport.GotoBottom()
+			model.AddSystemMessage(fmt.Sprintf("Loaded conversation: %s", conversationID))
+		}
+	}
+
+	return model
 }
 
 // AddMessage adds a new message to the chat history
