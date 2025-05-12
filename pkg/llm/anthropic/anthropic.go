@@ -124,7 +124,25 @@ func (t *AnthropicThread) GetState() state.State {
 
 // AddUserMessage adds a user message to the thread
 func (t *AnthropicThread) AddUserMessage(message string) {
-	t.messages = append(t.messages, anthropic.NewUserMessage(anthropic.NewTextBlock(message)))
+	// remove cache control from the messages
+	for msgIdx, msg := range t.messages {
+		for blkIdx, block := range msg.Content {
+			if block.OfRequestTextBlock != nil {
+				block.OfRequestTextBlock.CacheControl = anthropic.CacheControlEphemeralParam{}
+				t.messages[msgIdx].Content[blkIdx] = block
+			}
+		}
+	}
+
+	msgParam := anthropic.NewUserMessage(anthropic.ContentBlockParamUnion{
+		OfRequestTextBlock: &anthropic.TextBlockParam{
+			Text: message,
+			CacheControl: anthropic.CacheControlEphemeralParam{
+				Type: "ephemeral",
+			},
+		},
+	})
+	t.messages = append(t.messages, msgParam)
 }
 
 // SendMessage sends a message to the LLM and processes the response
