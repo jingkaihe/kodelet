@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/jingkaihe/kodelet/pkg/llm"
+	"github.com/jingkaihe/kodelet/pkg/llm/types"
 	"github.com/jingkaihe/kodelet/pkg/state"
 )
 
@@ -35,7 +36,7 @@ func plainChatUI(options *ChatOptions) {
 	}
 
 	// Create a console handler
-	handler := &llm.ConsoleMessageHandler{Silent: false}
+	handler := &types.ConsoleMessageHandler{Silent: false}
 
 	reader := bufio.NewReader(os.Stdin)
 

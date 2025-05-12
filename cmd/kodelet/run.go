@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/jingkaihe/kodelet/pkg/llm"
+	"github.com/jingkaihe/kodelet/pkg/llm/types"
 	"github.com/jingkaihe/kodelet/pkg/state"
 	"github.com/spf13/cobra"
 )
@@ -26,7 +27,7 @@ var runCmd = &cobra.Command{
 		fmt.Printf("\033[1;33m[user]: \033[0m%s\n", query)
 
 		// Process the query using the Thread abstraction
-		handler := &llm.ConsoleMessageHandler{Silent: false}
+		handler := &types.ConsoleMessageHandler{Silent: false}
 		thread := llm.NewThread(llm.GetConfigFromViper())
 		thread.SetState(appState)
 

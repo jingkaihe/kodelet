@@ -41,7 +41,7 @@ func (a *AssistantClient) AddUserMessage(message string) {
 // SendMessage sends a message to the assistant and processes the response
 func (a *AssistantClient) SendMessage(ctx context.Context, message string, messageCh chan types.MessageEvent) error {
 	// Create a handler for channel-based events
-	handler := &llm.ChannelMessageHandler{MessageCh: messageCh}
+	handler := &types.ChannelMessageHandler{MessageCh: messageCh}
 
 	// Send the message using the persistent thread
 	err := a.thread.SendMessage(ctx, message, handler)

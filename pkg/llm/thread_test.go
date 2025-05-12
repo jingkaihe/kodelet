@@ -49,7 +49,7 @@ func TestNewThread(t *testing.T) {
 func TestConsoleMessageHandler(t *testing.T) {
 	// This test mainly ensures the methods don't panic
 	// For a more thorough test, we would need to capture stdout
-	handler := &ConsoleMessageHandler{Silent: true}
+	handler := &types.ConsoleMessageHandler{Silent: true}
 
 	handler.HandleText("Test text")
 	handler.HandleToolUse("test-tool", "test-input")
@@ -58,7 +58,7 @@ func TestConsoleMessageHandler(t *testing.T) {
 
 	// With Silent = false, the methods should print to stdout
 	// but we're not capturing that output in this test
-	handler = &ConsoleMessageHandler{Silent: false}
+	handler = &types.ConsoleMessageHandler{Silent: false}
 	handler.HandleText("Test text")
 	handler.HandleToolUse("test-tool", "test-input")
 	handler.HandleToolResult("test-tool", "test-result")
@@ -67,7 +67,7 @@ func TestConsoleMessageHandler(t *testing.T) {
 
 func TestChannelMessageHandler(t *testing.T) {
 	ch := make(chan types.MessageEvent, 4)
-	handler := &ChannelMessageHandler{MessageCh: ch}
+	handler := &types.ChannelMessageHandler{MessageCh: ch}
 
 	handler.HandleText("Test text")
 	handler.HandleToolUse("test-tool", "test-input")
@@ -97,7 +97,7 @@ func TestChannelMessageHandler(t *testing.T) {
 }
 
 func TestStringCollectorHandler(t *testing.T) {
-	handler := &StringCollectorHandler{Silent: true}
+	handler := &types.StringCollectorHandler{Silent: true}
 
 	handler.HandleText("Line 1")
 	handler.HandleText("Line 2")
@@ -109,7 +109,7 @@ func TestStringCollectorHandler(t *testing.T) {
 	assert.Equal(t, expected, handler.CollectedText())
 
 	// Test with Silent = false (just for coverage)
-	handler = &StringCollectorHandler{Silent: false}
+	handler = &types.StringCollectorHandler{Silent: false}
 	handler.HandleToolUse("test-tool", "test-input")
 	handler.HandleToolResult("test-tool", "test-result")
 }
@@ -199,7 +199,7 @@ func TestStringCollectorHandlerCapture(t *testing.T) {
 	os.Stdout = w
 
 	// Create handler
-	handler := &StringCollectorHandler{Silent: false}
+	handler := &types.StringCollectorHandler{Silent: false}
 
 	// Run methods
 	handler.HandleText("Test text")
@@ -237,7 +237,7 @@ func TestSendMessageWithToolUse(t *testing.T) {
 	defer cancel()
 
 	// Set up handler that will collect the response
-	handler := &StringCollectorHandler{Silent: true}
+	handler := &types.StringCollectorHandler{Silent: true}
 
 	// Create thread
 	thread := NewThread(types.Config{

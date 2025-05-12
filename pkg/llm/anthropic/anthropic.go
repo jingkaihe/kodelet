@@ -134,6 +134,10 @@ func (t *AnthropicThread) GetState() state.State {
 
 // AddUserMessage adds a user message to the thread
 func (t *AnthropicThread) AddUserMessage(message string) {
+	t.messages = append(t.messages, anthropic.NewUserMessage(anthropic.NewTextBlock(message)))
+}
+
+func (t *AnthropicThread) cacheMessages() {
 	// remove cache control from the messages
 	for msgIdx, msg := range t.messages {
 		for blkIdx, block := range msg.Content {
@@ -143,20 +147,11 @@ func (t *AnthropicThread) AddUserMessage(message string) {
 			}
 		}
 	}
-
-	msgParam := anthropic.NewUserMessage(anthropic.ContentBlockParamUnion{
-		OfRequestTextBlock: &anthropic.TextBlockParam{
-			Text: message,
-			CacheControl: anthropic.CacheControlEphemeralParam{
-				Type: "ephemeral",
-			},
-		},
-	})
-	t.messages = append(t.messages, msgParam)
-
-	// Save conversation state if persistence is enabled
-	if t.isPersisted && t.store != nil {
-		t.saveConversation()
+	if len(t.messages) > 0 {
+		lastMsg := t.messages[len(t.messages)-1]
+		if len(lastMsg.Content) > 0 {
+			lastMsg.Content[len(lastMsg.Content)-1].OfRequestTextBlock.CacheControl = anthropic.CacheControlEphemeralParam{}
+		}
 	}
 }
 
@@ -167,7 +162,7 @@ func (t *AnthropicThread) SendMessage(
 	handler types.MessageHandler,
 	modelOverride ...string,
 ) error {
-	// Add the user message to history
+	t.cacheMessages()
 	t.AddUserMessage(message)
 
 	// Main interaction loop for handling tool calls
@@ -177,9 +172,6 @@ func (t *AnthropicThread) SendMessage(
 		if len(modelOverride) > 0 && modelOverride[0] != "" {
 			model = modelOverride[0]
 		}
-		// fmt.Println("messages", t.messages)
-		// fmt.Println("sending message to Anthropic API with model", model)
-		// Send request to Anthropic API
 		response, err := t.client.Messages.New(ctx, anthropic.MessageNewParams{
 			MaxTokens: int64(t.config.MaxTokens),
 			System: []anthropic.TextBlockParam{
@@ -259,6 +251,26 @@ func (t *AnthropicThread) SendMessage(
 
 	handler.HandleDone()
 	return nil
+}
+
+func (t *AnthropicThread) Summary(ctx context.Context) string {
+	prompt := `Summarise the conversation in one sentence. Keep it short and concise.
+Treat the USER role as the first person, and the ASSISTANT role as the person you are talking to.
+`
+	handler := &types.StringCollectorHandler{}
+	t.isPersisted = false
+	defer func() {
+		t.isPersisted = true
+	}()
+	err := t.SendMessage(ctx, prompt, handler)
+	if err != nil {
+		return ""
+	}
+	if len(t.messages) >= 2 {
+		t.messages = t.messages[:len(t.messages)-2]
+	}
+
+	return handler.CollectedText()
 }
 
 // GetUsage returns the current token usage for the thread
