@@ -53,7 +53,7 @@ type Model struct {
 }
 
 // NewModel creates a new TUI model
-func NewModel() Model {
+func NewModel(conversationID string, enablePersistence bool) Model {
 	ta := textarea.New()
 	ta.Placeholder = "Type your message..."
 	ta.Focus()
@@ -83,17 +83,20 @@ func NewModel() Model {
 		"/clear",
 	}
 
+	// Create status message
+	statusMessage := "Ready"
+
 	return Model{
 		messageCh:          make(chan types.MessageEvent),
 		messages:           []Message{},
 		textarea:           ta,
 		viewport:           vp,
-		statusMessage:      "Ready",
+		statusMessage:      statusMessage,
 		senderStyle:        lipgloss.NewStyle().Foreground(lipgloss.Color("205")).Bold(true),
 		userStyle:          lipgloss.NewStyle().Foreground(lipgloss.Color("86")).Bold(true),
 		assistantStyle:     lipgloss.NewStyle().Foreground(lipgloss.Color("212")).Bold(true),
 		systemStyle:        lipgloss.NewStyle().Foreground(lipgloss.Color("yellow")).Bold(true),
-		assistant:          NewAssistantClient(),
+		assistant:          NewAssistantClient(conversationID, enablePersistence),
 		ctx:                context.Background(),
 		availableCommands:  availableCommands,
 		selectedCommandIdx: 0,
@@ -116,7 +119,7 @@ func (m *Model) AddSystemMessage(content string) {
 		Content:  content,
 		IsSystem: true,
 	})
-	m.assistant.AddUserMessage(content)
+	// m.assistant.AddUserMessage(content)
 	m.updateViewportContent()
 	m.viewport.GotoBottom()
 }
@@ -562,6 +565,12 @@ func (m Model) statusView() string {
 
 	m.usageText, m.costText = m.updateUsage()
 
+	// Add conversation ID to status if persistence is enabled
+	var persistenceStatus string
+	if m.assistant.IsPersisted() {
+		persistenceStatus = fmt.Sprintf(" │ Conv: %s", m.assistant.GetConversationID())
+	}
+
 	// Create main status line with controls
 	mainStatus := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("205")).
@@ -569,7 +578,7 @@ func (m Model) statusView() string {
 		Padding(0, 1).
 		MarginTop(0).
 		Bold(true).
-		Render(statusText + " │ Ctrl+C (twice): Quit │ Ctrl+H (/help): Help │ ↑/↓: Scroll")
+		Render(statusText + persistenceStatus + " │ Ctrl+C (twice): Quit │ Ctrl+H (/help): Help │ ↑/↓: Scroll")
 
 	// Create separate usage and cost line if available
 	if m.usageText != "" {

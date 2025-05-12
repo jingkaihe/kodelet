@@ -7,11 +7,16 @@ import (
 	"strings"
 
 	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/llm/types"
 	"github.com/jingkaihe/kodelet/pkg/state"
 	"github.com/jingkaihe/kodelet/pkg/sysprompt"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 )
+
+// ConversationStore is an alias for the conversations.ConversationStore interface
+// to avoid direct dependency on the conversations package
+type ConversationStore = conversations.ConversationStore
 
 // ModelPricing holds the per-token pricing for different operations
 type ModelPricing struct {
@@ -89,11 +94,14 @@ func getModelPricing(model string) ModelPricing {
 
 // AnthropicThread implements the Thread interface using Anthropic's Claude API
 type AnthropicThread struct {
-	client   anthropic.Client
-	config   types.Config
-	state    state.State
-	messages []anthropic.MessageParam
-	usage    types.Usage
+	client         anthropic.Client
+	config         types.Config
+	state          state.State
+	messages       []anthropic.MessageParam
+	usage          types.Usage
+	conversationID string
+	isPersisted    bool
+	store          ConversationStore
 }
 
 // NewAnthropicThread creates a new thread with Anthropic's Claude API
@@ -107,8 +115,10 @@ func NewAnthropicThread(config types.Config) *AnthropicThread {
 	}
 
 	return &AnthropicThread{
-		client: anthropic.NewClient(),
-		config: config,
+		client:         anthropic.NewClient(),
+		config:         config,
+		conversationID: conversations.GenerateID(),
+		isPersisted:    false,
 	}
 }
 
@@ -143,6 +153,11 @@ func (t *AnthropicThread) AddUserMessage(message string) {
 		},
 	})
 	t.messages = append(t.messages, msgParam)
+
+	// Save conversation state if persistence is enabled
+	if t.isPersisted && t.store != nil {
+		t.saveConversation()
+	}
 }
 
 // SendMessage sends a message to the LLM and processes the response
@@ -162,7 +177,8 @@ func (t *AnthropicThread) SendMessage(
 		if len(modelOverride) > 0 && modelOverride[0] != "" {
 			model = modelOverride[0]
 		}
-
+		// fmt.Println("messages", t.messages)
+		// fmt.Println("sending message to Anthropic API with model", model)
 		// Send request to Anthropic API
 		response, err := t.client.Messages.New(ctx, anthropic.MessageNewParams{
 			MaxTokens: int64(t.config.MaxTokens),
@@ -236,6 +252,11 @@ func (t *AnthropicThread) SendMessage(
 		}
 	}
 
+	// Save conversation state after completing the interaction
+	if t.isPersisted && t.store != nil {
+		t.saveConversation()
+	}
+
 	handler.HandleDone()
 	return nil
 }
@@ -243,4 +264,42 @@ func (t *AnthropicThread) SendMessage(
 // GetUsage returns the current token usage for the thread
 func (t *AnthropicThread) GetUsage() types.Usage {
 	return t.usage
+}
+
+// GetConversationID returns the current conversation ID
+func (t *AnthropicThread) GetConversationID() string {
+	return t.conversationID
+}
+
+// SetConversationID sets the conversation ID
+func (t *AnthropicThread) SetConversationID(id string) {
+	t.conversationID = id
+}
+
+// IsPersisted returns whether this thread is being persisted
+func (t *AnthropicThread) IsPersisted() bool {
+	return t.isPersisted
+}
+
+// EnablePersistence enables conversation persistence for this thread
+func (t *AnthropicThread) EnablePersistence(enabled bool) {
+	t.isPersisted = enabled
+
+	// Initialize the store if enabling persistence and it's not already initialized
+	if enabled && t.store == nil {
+		store, err := conversations.GetConversationStore()
+		if err != nil {
+			// Log the error but continue without persistence
+			fmt.Printf("Error initializing conversation store: %v\n", err)
+			t.isPersisted = false
+			return
+		}
+		t.store = store
+	}
+
+	// If enabling persistence and there's an existing conversation ID,
+	// try to load it from the store
+	if enabled && t.conversationID != "" && t.store != nil {
+		t.loadConversation()
+	}
 }
