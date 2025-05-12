@@ -11,9 +11,9 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/state"
 )
 
-// legacyChatUI implements the original CLI interface
-func legacyChatUI() {
-	fmt.Println("Kodelet Chat Mode (Legacy UI) - Type 'exit' or 'quit' to end the session")
+// plainChatUI implements the plain CLI interface
+func plainChatUI(options *ChatOptions) {
+	fmt.Println("Kodelet Chat Mode (Plain UI) - Type 'exit' or 'quit' to end the session")
 	fmt.Println("----------------------------------------------------------")
 
 	// Create a persistent thread with state
@@ -21,14 +21,14 @@ func legacyChatUI() {
 	thread.SetState(state.NewBasicState())
 
 	// Configure conversation persistence
-	if resumeConvID != "" {
-		thread.SetConversationID(resumeConvID)
-		fmt.Printf("Resuming conversation: %s\n", resumeConvID)
+	if options.resumeConvID != "" {
+		thread.SetConversationID(options.resumeConvID)
+		fmt.Printf("Resuming conversation: %s\n", options.resumeConvID)
 	}
 
-	thread.EnablePersistence(!noSave)
+	thread.EnablePersistence(!options.noSave)
 
-	if !noSave {
+	if !options.noSave {
 		fmt.Println("Conversation persistence is enabled.")
 	} else {
 		fmt.Println("Conversation persistence is disabled (--no-save).")
@@ -65,6 +65,7 @@ func legacyChatUI() {
 			if thread.IsPersisted() {
 				fmt.Printf("\033[1;36m[Conversation] ID: %s\033[0m\n", thread.GetConversationID())
 				fmt.Printf("To resume this conversation: kodelet chat --resume %s\n", thread.GetConversationID())
+				fmt.Printf("To delete this conversation: kodelet chat delete %s\n", thread.GetConversationID())
 			}
 
 			fmt.Println("Exiting chat mode. Goodbye!")
