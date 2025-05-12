@@ -14,12 +14,20 @@ type Usage struct {
 	OutputTokens             int     // Output tokens generated
 	CacheCreationInputTokens int     // Tokens used for creating cache entries
 	CacheReadInputTokens     int     // Tokens used for reading from cache
-	TotalTokens              int     // Total token count
 	InputCost                float64 // Cost for input tokens in USD
 	OutputCost               float64 // Cost for output tokens in USD
 	CacheCreationCost        float64 // Cost for cache creation in USD
 	CacheReadCost            float64 // Cost for cache read in USD
-	TotalCost                float64 // Total cost in USD
+	CurrentContextWindow     int     // Current context window size
+	MaxContextWindow         int     // Max context window size
+}
+
+func (u *Usage) TotalCost() float64 {
+	return u.InputCost + u.OutputCost + u.CacheCreationCost + u.CacheReadCost
+}
+
+func (u *Usage) TotalTokens() int {
+	return u.InputTokens + u.OutputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens
 }
 
 // MessageHandler defines how message events should be processed

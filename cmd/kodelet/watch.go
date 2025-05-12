@@ -115,7 +115,7 @@ func runWatchMode(ctx context.Context, s state.State) {
 						}
 						continue
 					}
-					
+
 					// Check if file matches include pattern
 					if includePattern != "" {
 						matched, err := filepath.Match(includePattern, filepath.Base(event.Name))
@@ -202,7 +202,7 @@ func processFileChange(ctx context.Context, s state.State, path string, op fsnot
 		}
 		return
 	}
-	
+
 	// Read the file content
 	content, err := os.ReadFile(path)
 	if err != nil {
@@ -282,6 +282,6 @@ def multiply(a, b):
 	fmt.Printf("\n===== AI Analysis for %s =====\n", path)
 	fmt.Println(response)
 	fmt.Printf("\033[1;36m[Usage Stats] Input tokens: %d | Output tokens: %d | Total: %d\033[0m\n",
-		usage.InputTokens, usage.OutputTokens, usage.TotalTokens)
+		usage.InputTokens, usage.OutputTokens, usage.TotalTokens())
 	fmt.Println("===============================")
 }
