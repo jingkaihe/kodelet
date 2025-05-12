@@ -562,20 +562,35 @@ func (m Model) statusView() string {
 	costText := ""
 
 	if usage.TotalTokens > 0 {
-		usageText = fmt.Sprintf(" │ Tokens: %d in / %d out / %d cw / %d cr / %d total",
+		usageText = fmt.Sprintf("Tokens: %d in / %d out / %d cw / %d cr / %d total",
 			usage.InputTokens, usage.OutputTokens, usage.CacheCreationInputTokens, usage.CacheReadInputTokens, usage.TotalTokens)
 
 		// Add cost information if available
 		if usage.TotalCost > 0 {
-			costText = fmt.Sprintf(" │ Cost: $%.4f", usage.TotalCost)
+			costText = fmt.Sprintf("Cost: $%.4f", usage.TotalCost)
 		}
 	}
 
-	return lipgloss.NewStyle().
+	// Create main status line with controls
+	mainStatus := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("205")).
 		Background(lipgloss.Color("236")).
 		Padding(0, 1).
 		MarginTop(0).
 		Bold(true).
-		Render(statusText + usageText + costText + " │ Ctrl+C (twice): Quit │ Ctrl+H (/help): Help │ ↑/↓: Scroll")
+		Render(statusText + " │ Ctrl+C (twice): Quit │ Ctrl+H (/help): Help │ ↑/↓: Scroll")
+
+	// Create separate usage and cost line if available
+	if usage.TotalTokens > 0 {
+		usageLine := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("205")).
+			Background(lipgloss.Color("236")).
+			Padding(0, 1).
+			Bold(true).
+			Render(usageText + costText)
+
+		return lipgloss.JoinVertical(lipgloss.Left, mainStatus, usageLine)
+	}
+
+	return mainStatus
 }
