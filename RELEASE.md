@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.0.6.alpha1 (2025-05-12)
+
+- Added context window size tracking and cost calculation
+- Separated the usage and cost stats into two lines in the TUI
+- Bug fix: make sure that the watch command does not process binary files
+- Nicer spinner for the TUI
 ## 0.0.6.alpha (2025-05-11)
 
 - Added token usage and cost tracking for the LLM usage
