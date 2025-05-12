@@ -9,7 +9,7 @@ import (
 )
 
 // StartChat starts the TUI chat interface
-func StartChat() error {
+func StartChat(conversationID string, enablePersistence bool) error {
 	// Check terminal capabilities
 	var teaOptions []tea.ProgramOption
 
@@ -25,7 +25,7 @@ func StartChat() error {
 	var p *tea.Program
 
 	// Create model separately to add welcome messages
-	model := NewModel()
+	model := NewModel(conversationID, enablePersistence)
 
 	// Add welcome message with ASCII art
 	kodaletArt := `
@@ -49,6 +49,14 @@ func StartChat() error {
 	if !isTTY() {
 		welcomeMsg += "\nLimited terminal capabilities detected. Some features may not work properly."
 	}
+
+	// Add persistence status
+	if enablePersistence {
+		welcomeMsg += "\nConversation persistence is enabled."
+	} else {
+		welcomeMsg += "\nConversation persistence is disabled (--no-save)."
+	}
+
 	model.AddSystemMessage(welcomeMsg)
 	model.AddSystemMessage("Press Ctrl+H for help with keyboard shortcuts.")
 
@@ -71,6 +79,12 @@ func StartChat() error {
 			fmt.Printf("\033[1;36m[Cost Stats] Input: $%.4f | Output: $%.4f | Cache write: $%.4f | Cache read: $%.4f | Total: $%.4f\033[0m\n",
 				usage.InputCost, usage.OutputCost, usage.CacheCreationCost, usage.CacheReadCost, usage.TotalCost())
 		}
+
+		// Display conversation ID if persistence was enabled
+		if model.assistant.IsPersisted() {
+			fmt.Printf("\033[1;36m[Conversation] ID: %s\033[0m\n", model.assistant.GetConversationID())
+			fmt.Printf("To resume this conversation: kodelet chat --resume %s\n", model.assistant.GetConversationID())
+		}
 	}
 
 	return nil
@@ -84,8 +98,8 @@ func isTTY() bool {
 }
 
 // StartChatCmd is a wrapper that can be called from a command line
-func StartChatCmd() {
-	if err := StartChat(); err != nil {
+func StartChatCmd(conversationID string, enablePersistence bool) {
+	if err := StartChat(conversationID, enablePersistence); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}

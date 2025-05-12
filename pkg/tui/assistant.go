@@ -15,12 +15,19 @@ type AssistantClient struct {
 }
 
 // NewAssistantClient creates a new assistant client
-func NewAssistantClient() *AssistantClient {
+func NewAssistantClient(conversationID string, enablePersistence bool) *AssistantClient {
 	// Create a persistent thread with config from viper
 	thread := llm.NewThread(llm.GetConfigFromViper())
 
 	// Set default state
 	thread.SetState(state.NewBasicState())
+
+	// Configure conversation persistence
+	if conversationID != "" {
+		thread.SetConversationID(conversationID)
+	}
+
+	thread.EnablePersistence(enablePersistence)
 
 	return &AssistantClient{
 		thread: thread,
@@ -45,6 +52,16 @@ func (a *AssistantClient) SendMessage(ctx context.Context, message string, messa
 // GetUsage returns the current token usage
 func (a *AssistantClient) GetUsage() types.Usage {
 	return a.thread.GetUsage()
+}
+
+// GetConversationID returns the current conversation ID
+func (a *AssistantClient) GetConversationID() string {
+	return a.thread.GetConversationID()
+}
+
+// IsPersisted returns whether this thread is being persisted
+func (a *AssistantClient) IsPersisted() bool {
+	return a.thread.IsPersisted()
 }
 
 // ProcessAssistantEvent processes the events from the assistant

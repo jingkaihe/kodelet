@@ -20,6 +20,20 @@ func legacyChatUI() {
 	thread := llm.NewThread(llm.GetConfigFromViper())
 	thread.SetState(state.NewBasicState())
 
+	// Configure conversation persistence
+	if resumeConvID != "" {
+		thread.SetConversationID(resumeConvID)
+		fmt.Printf("Resuming conversation: %s\n", resumeConvID)
+	}
+
+	thread.EnablePersistence(!noSave)
+
+	if !noSave {
+		fmt.Println("Conversation persistence is enabled.")
+	} else {
+		fmt.Println("Conversation persistence is disabled (--no-save).")
+	}
+
 	// Create a console handler
 	handler := &llm.ConsoleMessageHandler{Silent: false}
 
@@ -46,6 +60,12 @@ func legacyChatUI() {
 			// Display cost information
 			fmt.Printf("\033[1;36m[Cost Stats] Input: $%.4f | Output: $%.4f | Cache write: $%.4f | Cache read: $%.4f | Total: $%.4f\033[0m\n",
 				usage.InputCost, usage.OutputCost, usage.CacheCreationCost, usage.CacheReadCost, usage.TotalCost())
+
+			// Display conversation ID if persistence was enabled
+			if thread.IsPersisted() {
+				fmt.Printf("\033[1;36m[Conversation] ID: %s\033[0m\n", thread.GetConversationID())
+				fmt.Printf("To resume this conversation: kodelet chat --resume %s\n", thread.GetConversationID())
+			}
 
 			fmt.Println("Exiting chat mode. Goodbye!")
 			return
