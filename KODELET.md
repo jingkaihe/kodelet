@@ -13,6 +13,8 @@ Kodelet is a lightweight CLI tool that helps with software engineering tasks. It
 │   └── kodelet/         # Application entry point
 └── pkg/
     ├── llm/             # LLM client for AI interactions
+    │   ├── anthropic/   # Anthropic-specific client implementation
+    │   └── types/       # Common types and interfaces for LLM clients
     ├── state/           # State management for the application
     ├── sysprompt/       # System prompt configuration and templates
     ├── tools/           # Tool implementations (bash, file operations, etc.)
@@ -26,6 +28,8 @@ The codebase follows a modular structure with clear separation of concerns:
 - State management interfaces and implementations in the `pkg/state` package
 - System prompt configuration in the `pkg/sysprompt` package
 - LLM communication is handled in the `pkg/llm` package with a conversational Thread abstraction
+  - The `pkg/llm/anthropic` package contains the Anthropic-specific client implementation
+  - The `pkg/llm/types` package defines common interfaces and types used across LLM implementations
 - Tools for executing various operations in the `pkg/tools` package (bash, file operations, code search, todo management, etc.)
 - Terminal user interface components in the `pkg/tui` package for interactive chat mode
 - Common utilities and helper functions in the `pkg/utils` package

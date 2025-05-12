@@ -11,7 +11,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/jingkaihe/kodelet/pkg/llm"
+	"github.com/jingkaihe/kodelet/pkg/llm/types"
 )
 
 // Message represents a chat message
@@ -23,7 +23,7 @@ type Message struct {
 
 // Model represents the main TUI model
 type Model struct {
-	messageCh          chan llm.MessageEvent
+	messageCh          chan types.MessageEvent
 	messages           []Message
 	viewport           viewport.Model
 	textarea           textarea.Model
@@ -84,7 +84,7 @@ func NewModel() Model {
 	}
 
 	return Model{
-		messageCh:          make(chan llm.MessageEvent),
+		messageCh:          make(chan types.MessageEvent),
 		messages:           []Message{},
 		textarea:           ta,
 		viewport:           vp,
@@ -347,7 +347,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 `
 		m.AddMessage(cmd_out, true)
 		m.SetProcessing(false)
-	case llm.MessageEvent:
+	case types.MessageEvent:
 		if !msg.Done {
 			m.AddMessage(ProcessAssistantEvent(msg), false)
 			return m, func() tea.Msg {
