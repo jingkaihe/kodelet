@@ -561,13 +561,14 @@ func (m Model) statusView() string {
 	usageText := ""
 	costText := ""
 
-	if usage.TotalTokens > 0 {
-		usageText = fmt.Sprintf("Tokens: %d in / %d out / %d cw / %d cr / %d total",
-			usage.InputTokens, usage.OutputTokens, usage.CacheCreationInputTokens, usage.CacheReadInputTokens, usage.TotalTokens)
+	if usage.TotalTokens() > 0 {
+		usageText = fmt.Sprintf("Tokens: %d in / %d out / %d cw / %d cr / %d total | Ctx: %d / %d",
+			usage.InputTokens, usage.OutputTokens, usage.CacheCreationInputTokens, usage.CacheReadInputTokens, usage.TotalTokens,
+			usage.CurrentContextWindow, usage.MaxContextWindow)
 
 		// Add cost information if available
-		if usage.TotalCost > 0 {
-			costText = fmt.Sprintf("Cost: $%.4f", usage.TotalCost)
+		if usage.TotalCost() > 0 {
+			costText = fmt.Sprintf(" | Cost: $%.4f", usage.TotalCost())
 		}
 	}
 
@@ -581,7 +582,7 @@ func (m Model) statusView() string {
 		Render(statusText + " │ Ctrl+C (twice): Quit │ Ctrl+H (/help): Help │ ↑/↓: Scroll")
 
 	// Create separate usage and cost line if available
-	if usage.TotalTokens > 0 {
+	if usage.TotalTokens() > 0 {
 		usageLine := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("205")).
 			Background(lipgloss.Color("236")).
