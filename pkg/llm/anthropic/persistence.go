@@ -82,16 +82,6 @@ func (t *AnthropicThread) loadConversation() error {
 	return nil
 }
 
-// type contentUnion struct {
-// 	anthropic.TextBlockParam             `json:",omitzero,inline"`
-// 	anthropic.ImageBlockParam            `json:",omitzero,inline"`
-// 	anthropic.ToolUseBlockParam          `json:",omitzero,inline"`
-// 	anthropic.ToolResultBlockParam       `json:",omitzero,inline"`
-// 	anthropic.DocumentBlockParam         `json:",omitzero,inline"`
-// 	anthropic.ThinkingBlockParam         `json:",omitzero,inline"`
-// 	anthropic.RedactedThinkingBlockParam `json:",omitzero,inline"`
-// }
-
 type contentBlock map[string]interface{}
 type messageParam struct {
 	Role    string         `json:"role"`
