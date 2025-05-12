@@ -5,12 +5,13 @@ import (
 	"fmt"
 
 	"github.com/jingkaihe/kodelet/pkg/llm"
+	"github.com/jingkaihe/kodelet/pkg/llm/types"
 	"github.com/jingkaihe/kodelet/pkg/state"
 )
 
 // AssistantClient handles the interaction with the LLM thread
 type AssistantClient struct {
-	thread llm.Thread
+	thread types.Thread
 }
 
 // NewAssistantClient creates a new assistant client
@@ -31,7 +32,7 @@ func (a *AssistantClient) AddUserMessage(message string) {
 }
 
 // SendMessage sends a message to the assistant and processes the response
-func (a *AssistantClient) SendMessage(ctx context.Context, message string, messageCh chan llm.MessageEvent) error {
+func (a *AssistantClient) SendMessage(ctx context.Context, message string, messageCh chan types.MessageEvent) error {
 	// Create a handler for channel-based events
 	handler := &llm.ChannelMessageHandler{MessageCh: messageCh}
 
@@ -42,19 +43,19 @@ func (a *AssistantClient) SendMessage(ctx context.Context, message string, messa
 }
 
 // GetUsage returns the current token usage
-func (a *AssistantClient) GetUsage() llm.Usage {
+func (a *AssistantClient) GetUsage() types.Usage {
 	return a.thread.GetUsage()
 }
 
 // ProcessAssistantEvent processes the events from the assistant
 // and returns a formatted message
-func ProcessAssistantEvent(event llm.MessageEvent) string {
+func ProcessAssistantEvent(event types.MessageEvent) string {
 	switch event.Type {
-	case llm.EventTypeText:
+	case types.EventTypeText:
 		return event.Content
-	case llm.EventTypeToolUse:
+	case types.EventTypeToolUse:
 		return fmt.Sprintf("🔧 Using tool: %s", event.Content)
-	case llm.EventTypeToolResult:
+	case types.EventTypeToolResult:
 		return fmt.Sprintf("🔄 Tool result: %s", event.Content)
 	}
 

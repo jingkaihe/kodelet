@@ -1,4 +1,4 @@
-package llm
+package anthropic
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/jingkaihe/kodelet/pkg/llm/types"
 	"github.com/jingkaihe/kodelet/pkg/state"
 	"github.com/jingkaihe/kodelet/pkg/sysprompt"
 	"github.com/jingkaihe/kodelet/pkg/tools"
@@ -89,14 +90,14 @@ func getModelPricing(model string) ModelPricing {
 // AnthropicThread implements the Thread interface using Anthropic's Claude API
 type AnthropicThread struct {
 	client   anthropic.Client
-	config   Config
+	config   types.Config
 	state    state.State
 	messages []anthropic.MessageParam
-	usage    Usage
+	usage    types.Usage
 }
 
 // NewAnthropicThread creates a new thread with Anthropic's Claude API
-func NewAnthropicThread(config Config) *AnthropicThread {
+func NewAnthropicThread(config types.Config) *AnthropicThread {
 	// Apply defaults if not provided
 	if config.Model == "" {
 		config.Model = anthropic.ModelClaude3_7SonnetLatest
@@ -130,7 +131,7 @@ func (t *AnthropicThread) AddUserMessage(message string) {
 func (t *AnthropicThread) SendMessage(
 	ctx context.Context,
 	message string,
-	handler MessageHandler,
+	handler types.MessageHandler,
 	modelOverride ...string,
 ) error {
 	// Add the user message to history
@@ -222,6 +223,6 @@ func (t *AnthropicThread) SendMessage(
 }
 
 // GetUsage returns the current token usage for the thread
-func (t *AnthropicThread) GetUsage() Usage {
+func (t *AnthropicThread) GetUsage() types.Usage {
 	return t.usage
 }

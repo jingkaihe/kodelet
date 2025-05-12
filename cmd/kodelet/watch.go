@@ -13,6 +13,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/fsnotify/fsnotify"
 	"github.com/jingkaihe/kodelet/pkg/llm"
+	"github.com/jingkaihe/kodelet/pkg/llm/types"
 	"github.com/jingkaihe/kodelet/pkg/state"
 	"github.com/jingkaihe/kodelet/pkg/utils"
 	"github.com/sirupsen/logrus"
@@ -266,7 +267,7 @@ def multiply(a, b):
 	config := llm.GetConfigFromViper()
 
 	var response string
-	var usage llm.Usage
+	var usage types.Usage
 
 	// Use the auto-completion model if appropriate
 	if autoCompletionModel != "" {
