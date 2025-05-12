@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/anthropics/anthropic-sdk-go/packages/param"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 )
 
@@ -71,20 +72,121 @@ func (t *AnthropicThread) loadConversation() error {
 	}
 
 	// Reset current messages
-	t.messages = []anthropic.MessageParam{}
-	listRawMessages := []json.RawMessage{}
-	if err := json.Unmarshal(record.RawMessages, &listRawMessages); err != nil {
-		return fmt.Errorf("failed to unmarshal conversation messages: %w", err)
-	}
-
-	for _, rawMessage := range listRawMessages {
-		var msg anthropic.Message
-		json.Unmarshal(rawMessage, &msg)
-		t.messages = append(t.messages, msg.ToParam())
+	if _, err := t.DeserializeMessages(record.RawMessages); err != nil {
+		return fmt.Errorf("failed to deserialize conversation messages: %w", err)
 	}
 
 	// Restore usage statistics
 	t.usage = record.Usage
 
 	return nil
+}
+
+// type contentUnion struct {
+// 	anthropic.TextBlockParam             `json:",omitzero,inline"`
+// 	anthropic.ImageBlockParam            `json:",omitzero,inline"`
+// 	anthropic.ToolUseBlockParam          `json:",omitzero,inline"`
+// 	anthropic.ToolResultBlockParam       `json:",omitzero,inline"`
+// 	anthropic.DocumentBlockParam         `json:",omitzero,inline"`
+// 	anthropic.ThinkingBlockParam         `json:",omitzero,inline"`
+// 	anthropic.RedactedThinkingBlockParam `json:",omitzero,inline"`
+// }
+
+type contentBlock map[string]interface{}
+type messageParam struct {
+	Role    string         `json:"role"`
+	Content []contentBlock `json:"content"`
+}
+
+func (t *AnthropicThread) DeserializeMessages(b []byte) ([]anthropic.MessageParam, error) {
+	t.messages = []anthropic.MessageParam{}
+	var listRawMessages []json.RawMessage
+	if err := json.Unmarshal(b, &listRawMessages); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal conversation messages: %w", err)
+	}
+
+	for _, rawMessage := range listRawMessages {
+		var msg anthropic.MessageParam
+		var shallowMessage messageParam
+		if err := json.Unmarshal(rawMessage, &shallowMessage); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal conversation messages: %w", err)
+		}
+
+		msg.Role = anthropic.MessageParamRole(shallowMessage.Role)
+		msg.Content = []anthropic.ContentBlockParamUnion{}
+		for _, content := range shallowMessage.Content {
+			switch content["type"].(string) {
+			case "text":
+				for _, field := range []string{"text"} {
+					if _, ok := content[field]; !ok {
+						return nil, fmt.Errorf("missing field: %s", field)
+					}
+				}
+				msg.Content = append(msg.Content, anthropic.ContentBlockParamUnion{
+					OfRequestTextBlock: &anthropic.TextBlockParam{
+						Type: "text",
+						Text: content["text"].(string),
+					},
+				})
+			case "tool_use":
+				for _, field := range []string{"id", "name", "input"} {
+					if _, ok := content[field]; !ok {
+						return nil, fmt.Errorf("missing field: %s", field)
+					}
+				}
+				msg.Content = append(msg.Content, anthropic.ContentBlockParamUnion{
+					OfRequestToolUseBlock: &anthropic.ToolUseBlockParam{
+						Type:  "tool_use",
+						ID:    content["id"].(string),
+						Name:  content["name"].(string),
+						Input: content["input"],
+					},
+				})
+			case "tool_result":
+				for _, field := range []string{"tool_use_id", "content"} {
+					if _, ok := content[field]; !ok {
+						return nil, fmt.Errorf("missing field: %s", field)
+					}
+				}
+				toolCallContentList, ok := content["content"].([]interface{})
+				if !ok {
+					return nil, fmt.Errorf("content is not a list")
+				}
+				if len(toolCallContentList) == 0 {
+					return nil, fmt.Errorf("content is empty")
+				}
+				toolCallContent := toolCallContentList[0].(map[string]interface{})
+				for _, field := range []string{"text"} {
+					if _, ok := toolCallContent[field]; !ok {
+						return nil, fmt.Errorf("missing field: %s", field)
+					}
+				}
+				isError, ok := toolCallContent["is_error"].(bool)
+				if !ok {
+					isError = false
+				}
+				msg.Content = append(msg.Content, anthropic.ContentBlockParamUnion{
+					OfRequestToolResultBlock: &anthropic.ToolResultBlockParam{
+						Type:      "tool_result",
+						ToolUseID: content["tool_use_id"].(string),
+						IsError:   param.Opt[bool]{Value: isError},
+						Content: []anthropic.ToolResultBlockParamContentUnion{
+							{
+								OfRequestTextBlock: &anthropic.TextBlockParam{
+									Type: "text",
+									Text: toolCallContent["text"].(string),
+								},
+							},
+						},
+					},
+				})
+			}
+		}
+
+		if len(msg.Content) != 0 {
+			t.messages = append(t.messages, msg)
+		}
+	}
+
+	return t.messages, nil
 }
