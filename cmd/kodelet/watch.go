@@ -14,6 +14,7 @@ import (
 	"github.com/fsnotify/fsnotify"
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/state"
+	"github.com/jingkaihe/kodelet/pkg/utils"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
@@ -107,6 +108,14 @@ func runWatchMode(ctx context.Context, s state.State) {
 				}
 				// Only process write and create events
 				if event.Op&(fsnotify.Write|fsnotify.Create) != 0 {
+					// Skip binary files
+					if utils.IsBinaryFile(event.Name) {
+						if verbosity == "verbose" {
+							fmt.Printf("Skipping binary file: %s\n", event.Name)
+						}
+						continue
+					}
+					
 					// Check if file matches include pattern
 					if includePattern != "" {
 						matched, err := filepath.Match(includePattern, filepath.Base(event.Name))
@@ -186,6 +195,14 @@ var (
 
 // Process a file change event
 func processFileChange(ctx context.Context, s state.State, path string, op fsnotify.Op) {
+	// Double-check that the file is not binary before processing
+	if utils.IsBinaryFile(path) {
+		if verbosity == "verbose" {
+			fmt.Printf("Skipping binary file processing: %s\n", path)
+		}
+		return
+	}
+	
 	// Read the file content
 	content, err := os.ReadFile(path)
 	if err != nil {
