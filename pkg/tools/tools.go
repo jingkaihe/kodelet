@@ -58,6 +58,7 @@ var Tools = []Tool{
 	&ThinkingTool{},
 	&TodoReadTool{},
 	&TodoWriteTool{},
+	&SubAgentTool{},
 }
 
 func ToAnthropicTools(tools []Tool) []anthropic.ToolUnionParam {

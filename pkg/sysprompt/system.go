@@ -18,6 +18,7 @@ const (
 	bashTool      = "bash"
 	kodeletMd     = "KODELET.md"
 	readmeMd      = "README.md"
+	subagentTool  = "subagent"
 )
 
 var systemPrompt = `
@@ -88,6 +89,7 @@ IMPORTANT: DO NOT write code comments unless the code block is complicated.
 # Tool Usage
 * If there are not dependencies among the tool calls, you can return them in a single tool use block.
 * If the tool call returns <error>... Use ${anotherTool} instead</error>, use the ${anotherTool} to solve the problem.
+* Use ${subagentTool} for semantic code search.
 
 # Task Management
 You have access to the ${todoWriteTool} and ${todoReadTool} tools to help you manage and plan tasks. For any non-trivial tasks that require multiple steps to complete, you MUST:
@@ -137,6 +139,9 @@ If the current working directory contains a ${kodeletMd} file, it will be automa
 If you find a new command that you have to use repeatedly, you can add it to the ${kodeletMd} file.
 If you have make any significant changes to the project structure, or modified the tech stack, you should update the ${kodeletMd} file.
 
+`
+
+const systemInfo = `
 # System Information
 Here is the system information:
 <system-information>
@@ -192,6 +197,36 @@ func getOSVersion() string {
 	return runtime.GOOS
 }
 
+func SystemInfo() string {
+	pwd, _ := os.Getwd()
+	isGitRepo := checkIsGitRepo(pwd)
+	platform := runtime.GOOS
+	osVersion := getOSVersion()
+	date := time.Now().Format("2006-01-02")
+
+	prompt := systemInfo
+	prompt = strings.Replace(prompt, "${pwd}", pwd, -1)
+	prompt = strings.Replace(prompt, "${isGitRepo}", fmt.Sprintf("%v", isGitRepo), -1)
+	prompt = strings.Replace(prompt, "${platform}", platform, -1)
+	prompt = strings.Replace(prompt, "${osVersion}", osVersion, -1)
+	prompt = strings.Replace(prompt, "${date}", date, -1)
+	prompt = strings.Replace(prompt, "${subagentTool}", subagentTool, -1)
+	return prompt
+}
+
+func Context() string {
+	prompt := "\nHere are some useful context to help you solve the user's problem:\n"
+	contexts := loadContexts()
+	for filename, content := range contexts {
+		prompt += fmt.Sprintf(`
+<context filename="%s">
+%s
+</context>
+`, filename, content)
+	}
+	return prompt
+}
+
 func SystemPrompt(model string) string {
 	// Replace variables in the template
 	prompt := systemPrompt
@@ -201,29 +236,7 @@ func SystemPrompt(model string) string {
 	prompt = strings.Replace(prompt, "${bashTool}", bashTool, -1)
 	prompt = strings.Replace(prompt, "${kodeletMd}", kodeletMd, -1)
 
-	// Get environment information
-	pwd, _ := os.Getwd()
-	isGitRepo := checkIsGitRepo(pwd)
-	platform := runtime.GOOS
-	osVersion := getOSVersion()
-	date := time.Now().Format("2006-01-02")
-
-	// Replace environment variables
-	prompt = strings.Replace(prompt, "${pwd}", pwd, -1)
-	prompt = strings.Replace(prompt, "${isGitRepo}", fmt.Sprintf("%v", isGitRepo), -1)
-	prompt = strings.Replace(prompt, "${platform}", platform, -1)
-	prompt = strings.Replace(prompt, "${osVersion}", osVersion, -1)
-	prompt = strings.Replace(prompt, "${date}", date, -1)
-	prompt = strings.Replace(prompt, "${model}", model, -1)
-
-	prompt += "\nHere are some useful context to help you solve the user's problem:\n"
-	contexts := loadContexts()
-	for filename, content := range contexts {
-		prompt += fmt.Sprintf(`
-<context filename="%s">
-%s
-</context>
-`, filename, content)
-	}
+	prompt += SystemInfo()
+	prompt += Context()
 	return prompt
 }

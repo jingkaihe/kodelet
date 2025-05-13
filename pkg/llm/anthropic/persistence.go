@@ -33,7 +33,7 @@ func (t *AnthropicThread) SaveConversation(ctx context.Context, summarise bool) 
 		ID:          t.conversationID,
 		RawMessages: rawMessages,
 		ModelType:   "anthropic",
-		Usage:       t.usage,
+		Usage:       *t.usage,
 		Metadata:    map[string]interface{}{"model": t.config.Model},
 		Summary:     t.summary,
 		CreatedAt:   time.Now(),
@@ -67,7 +67,7 @@ func (t *AnthropicThread) loadConversation() error {
 	}
 
 	// Restore usage statistics
-	t.usage = record.Usage
+	t.usage = &record.Usage
 	t.summary = record.Summary
 	return nil
 }

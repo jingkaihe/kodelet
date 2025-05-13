@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
@@ -98,11 +99,12 @@ type AnthropicThread struct {
 	config         types.Config
 	state          state.State
 	messages       []anthropic.MessageParam
-	usage          types.Usage
+	usage          *types.Usage
 	conversationID string
 	summary        string
 	isPersisted    bool
 	store          ConversationStore
+	mu             sync.Mutex
 }
 
 // NewAnthropicThread creates a new thread with Anthropic's Claude API
@@ -120,6 +122,7 @@ func NewAnthropicThread(config types.Config) *AnthropicThread {
 		config:         config,
 		conversationID: conversations.GenerateID(),
 		isPersisted:    false,
+		usage:          &types.Usage{}, // must be initialised to avoid nil pointer dereference
 	}
 }
 
@@ -162,27 +165,33 @@ func (t *AnthropicThread) SendMessage(
 	message string,
 	handler types.MessageHandler,
 	opt types.MessageOpt,
-) error {
+) (finalOutput string, err error) {
 	if opt.PromptCache {
 		t.cacheMessages()
 	}
 	t.AddUserMessage(message)
 
+	// Determine which model to use
+	model := t.config.Model
+
+	if opt.UseWeakModel && t.config.WeakModel != "" {
+		model = t.config.WeakModel
+	}
+	var systemPrompt string
+	if t.config.IsSubAgent {
+		systemPrompt = sysprompt.SubAgentPrompt(model)
+	} else {
+		systemPrompt = sysprompt.SystemPrompt(model)
+	}
+
 	// Main interaction loop for handling tool calls
 	for {
-		// Determine which model to use
-		model := t.config.Model
-
-		if opt.UseWeakModel && t.config.WeakModel != "" {
-			model = t.config.WeakModel
-		}
-
 		// Prepare message parameters
 		messageParams := anthropic.MessageNewParams{
 			MaxTokens: int64(t.config.MaxTokens),
 			System: []anthropic.TextBlockParam{
 				{
-					Text: sysprompt.SystemPrompt(model),
+					Text: systemPrompt,
 					CacheControl: anthropic.CacheControlEphemeralParam{
 						Type: "ephemeral",
 					},
@@ -190,34 +199,18 @@ func (t *AnthropicThread) SendMessage(
 			},
 			Messages: t.messages,
 			Model:    model,
-			Tools:    tools.ToAnthropicTools(tools.Tools),
+			Tools:    t.tools(),
 		}
 
 		response, err := t.client.Messages.New(ctx, messageParams)
 		if err != nil {
-			return fmt.Errorf("error sending message to Anthropic: %w", err)
+			return "", fmt.Errorf("error sending message to Anthropic: %w", err)
 		}
 
 		// Add the assistant response to history
 		t.messages = append(t.messages, response.ToParam())
 
-		// Track usage statistics
-		t.usage.InputTokens += int(response.Usage.InputTokens)
-		t.usage.OutputTokens += int(response.Usage.OutputTokens)
-		t.usage.CacheCreationInputTokens += int(response.Usage.CacheCreationInputTokens)
-		t.usage.CacheReadInputTokens += int(response.Usage.CacheReadInputTokens)
-
-		// Calculate costs based on model pricing
-		pricing := getModelPricing(model)
-
-		// Calculate individual costs
-		t.usage.InputCost += float64(response.Usage.InputTokens) * pricing.Input
-		t.usage.OutputCost += float64(response.Usage.OutputTokens) * pricing.Output
-		t.usage.CacheCreationCost += float64(response.Usage.CacheCreationInputTokens) * pricing.PromptCachingWrite
-		t.usage.CacheReadCost += float64(response.Usage.CacheReadInputTokens) * pricing.PromptCachingRead
-
-		t.usage.CurrentContextWindow = int(response.Usage.InputTokens) + int(response.Usage.OutputTokens) + int(response.Usage.CacheCreationInputTokens) + int(response.Usage.CacheReadInputTokens)
-		t.usage.MaxContextWindow = pricing.ContextWindow
+		t.updateUsage(response, model)
 
 		// Process the response content blocks
 		toolUseCount := 0
@@ -225,13 +218,14 @@ func (t *AnthropicThread) SendMessage(
 			switch variant := block.AsAny().(type) {
 			case anthropic.TextBlock:
 				handler.HandleText(variant.Text)
+				finalOutput = variant.Text
 			case anthropic.ToolUseBlock:
 				toolUseCount++
 				inputJSON, _ := json.Marshal(variant.JSON.Input.Raw())
 				handler.HandleToolUse(block.Name, string(inputJSON))
 
-				// Run the tool
-				output := tools.RunTool(ctx, t.state, block.Name, string(variant.JSON.Input.Raw()))
+				runToolCtx := t.WithSubAgent(ctx)
+				output := tools.RunTool(runToolCtx, t.state, block.Name, string(variant.JSON.Input.Raw()))
 				handler.HandleToolResult(block.Name, output.String())
 
 				// Add tool result to messages for next API call
@@ -253,7 +247,59 @@ func (t *AnthropicThread) SendMessage(
 	}
 
 	handler.HandleDone()
-	return nil
+	return finalOutput, nil
+}
+
+func (t *AnthropicThread) tools() []anthropic.ToolUnionParam {
+	if !t.config.IsSubAgent {
+		return tools.ToAnthropicTools(tools.Tools)
+	}
+	// remove the agent tool from the list
+	selectedTools := []tools.Tool{}
+	for _, tool := range tools.Tools {
+		if tool.Name() != "subagent" {
+			selectedTools = append(selectedTools, tool)
+		}
+	}
+	return tools.ToAnthropicTools(selectedTools)
+}
+
+func (t *AnthropicThread) updateUsage(response *anthropic.Message, model string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	// Track usage statistics
+	t.usage.InputTokens += int(response.Usage.InputTokens)
+	t.usage.OutputTokens += int(response.Usage.OutputTokens)
+	t.usage.CacheCreationInputTokens += int(response.Usage.CacheCreationInputTokens)
+	t.usage.CacheReadInputTokens += int(response.Usage.CacheReadInputTokens)
+
+	// Calculate costs based on model pricing
+	pricing := getModelPricing(model)
+
+	// Calculate individual costs
+	t.usage.InputCost += float64(response.Usage.InputTokens) * pricing.Input
+	t.usage.OutputCost += float64(response.Usage.OutputTokens) * pricing.Output
+	t.usage.CacheCreationCost += float64(response.Usage.CacheCreationInputTokens) * pricing.PromptCachingWrite
+	t.usage.CacheReadCost += float64(response.Usage.CacheReadInputTokens) * pricing.PromptCachingRead
+
+	t.usage.CurrentContextWindow = int(response.Usage.InputTokens) + int(response.Usage.OutputTokens) + int(response.Usage.CacheCreationInputTokens) + int(response.Usage.CacheReadInputTokens)
+	t.usage.MaxContextWindow = pricing.ContextWindow
+}
+func (t *AnthropicThread) NewSubAgent(ctx context.Context) types.Thread {
+	config := t.config
+	config.IsSubAgent = true
+	thread := NewAnthropicThread(config)
+	thread.isPersisted = false // subagent is not persisted
+	thread.SetState(state.NewBasicState())
+	thread.usage = t.usage
+
+	return thread
+}
+
+func (t *AnthropicThread) WithSubAgent(ctx context.Context) context.Context {
+	subAgent := t.NewSubAgent(ctx)
+	ctx = context.WithValue(ctx, types.ThreadKey{}, subAgent)
+	return ctx
 }
 
 func (t *AnthropicThread) ShortSummary(ctx context.Context) string {
@@ -268,7 +314,7 @@ Treat the USER role as the first person (I), and the ASSISTANT role as the perso
 		t.isPersisted = true
 	}()
 	// Use a faster model for summarization as it's a simpler task
-	err := t.SendMessage(ctx, prompt, handler, types.MessageOpt{
+	_, err := t.SendMessage(ctx, prompt, handler, types.MessageOpt{
 		UseWeakModel: true,
 		PromptCache:  false, // maybe we should make it configurable, but there is likely no cache for weak model
 	})
@@ -285,7 +331,9 @@ Treat the USER role as the first person (I), and the ASSISTANT role as the perso
 
 // GetUsage returns the current token usage for the thread
 func (t *AnthropicThread) GetUsage() types.Usage {
-	return t.usage
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return *t.usage
 }
 
 // GetConversationID returns the current conversation ID

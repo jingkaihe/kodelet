@@ -32,7 +32,7 @@ var runCmd = &cobra.Command{
 		thread.SetState(appState)
 
 		// Send the message and process the response
-		err := thread.SendMessage(context.Background(), query, handler, types.MessageOpt{
+		_, err := thread.SendMessage(context.Background(), query, handler, types.MessageOpt{
 			PromptCache: true,
 		})
 		if err != nil {

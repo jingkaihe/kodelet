@@ -90,7 +90,7 @@ func (a *AssistantClient) SendMessage(ctx context.Context, message string, messa
 	handler := &types.ChannelMessageHandler{MessageCh: messageCh}
 
 	// Send the message using the persistent thread
-	err := a.thread.SendMessage(ctx, message, handler, types.MessageOpt{
+	_, err := a.thread.SendMessage(ctx, message, handler, types.MessageOpt{
 		PromptCache: true,
 	})
 
