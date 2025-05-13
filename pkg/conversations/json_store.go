@@ -177,8 +177,11 @@ func (s *JSONConversationStore) Query(options QueryOptions) ([]ConversationSumma
 
 	// Sort results
 	sort.Slice(summaries, func(i, j int) bool {
-		// Default sort is by updated time, most recent first
+		// Default sort is by updated time
 		if options.SortBy == "" || options.SortBy == "updated" {
+			if options.SortOrder == "asc" {
+				return summaries[i].UpdatedAt.Before(summaries[j].UpdatedAt)
+			}
 			return summaries[i].UpdatedAt.After(summaries[j].UpdatedAt)
 		}
 
@@ -198,7 +201,10 @@ func (s *JSONConversationStore) Query(options QueryOptions) ([]ConversationSumma
 			return summaries[i].MessageCount > summaries[j].MessageCount
 		}
 
-		// Default to most recent
+		// Fallback to updated time
+		if options.SortOrder == "asc" {
+			return summaries[i].UpdatedAt.Before(summaries[j].UpdatedAt)
+		}
 		return summaries[i].UpdatedAt.After(summaries[j].UpdatedAt)
 	})
 
