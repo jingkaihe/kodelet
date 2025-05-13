@@ -240,6 +240,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Check if this is a second ctrl+c press within 2 seconds
 			now := time.Now()
 			if m.ctrlCPressCount > 0 && now.Sub(m.lastCtrlCPressTime) < 2*time.Second {
+				// Save the conversation
+				m.assistant.SaveConversation(m.ctx)
 				return m, tea.Quit
 			}
 

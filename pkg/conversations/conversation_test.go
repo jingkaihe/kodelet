@@ -25,8 +25,7 @@ func TestNewConversationRecord(t *testing.T) {
 
 func TestToSummary(t *testing.T) {
 	record := NewConversationRecord("test-id")
-	record.FirstUserPrompt = "This is a test message"
-	record.RawMessages = json.RawMessage(`[{"role":"user"},{"role":"assistant"}]`)
+	record.RawMessages = json.RawMessage(`[{"role":"user","content":[{"type":"text","text":"This is a test message"}]},{"role":"assistant"}]`)
 	record.Summary = "Test conversation summary"
 
 	summary := record.ToSummary()
@@ -41,7 +40,7 @@ func TestToSummary(t *testing.T) {
 	// Test truncation of long first message
 	longMessage := "This is a very long message that should be truncated when converted to a summary. It contains more than 100 characters to test the truncation logic."
 	record = NewConversationRecord("test-id-2")
-	record.FirstUserPrompt = longMessage
+	record.RawMessages = json.RawMessage(`[{"role":"user","content":[{"type":"text","text":"` + longMessage + `"}]}]`)
 
 	summary = record.ToSummary()
 	assert.Equal(t, 100, len(summary.FirstMessage), "Long first message should be truncated to 100 chars")

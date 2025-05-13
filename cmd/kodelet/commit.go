@@ -82,6 +82,7 @@ IMPORTANT: The output of the commit message should not be wrapped with any markd
 		// Get the commit message using the Thread abstraction with usage stats
 		commitMsg, usage := llm.SendMessageAndGetTextWithUsage(ctx, s, prompt, llm.GetConfigFromViper(), true, types.MessageOpt{
 			UseWeakModel: true,
+			PromptCache:  false,
 		})
 		commitMsg = sanitizeCommitMessage(commitMsg)
 

@@ -100,6 +100,7 @@ type AnthropicThread struct {
 	messages       []anthropic.MessageParam
 	usage          types.Usage
 	conversationID string
+	summary        string
 	isPersisted    bool
 	store          ConversationStore
 }
@@ -210,16 +211,11 @@ func (t *AnthropicThread) SendMessage(
 		pricing := getModelPricing(model)
 
 		// Calculate individual costs
-		inputCost := float64(t.usage.InputTokens) * pricing.Input
-		outputCost := float64(t.usage.OutputTokens) * pricing.Output
-		cacheWriteCost := float64(t.usage.CacheCreationInputTokens) * pricing.PromptCachingWrite
-		cacheReadCost := float64(t.usage.CacheReadInputTokens) * pricing.PromptCachingRead
+		t.usage.InputCost += float64(t.usage.InputTokens) * pricing.Input
+		t.usage.OutputCost += float64(t.usage.OutputTokens) * pricing.Output
+		t.usage.CacheCreationCost += float64(t.usage.CacheCreationInputTokens) * pricing.PromptCachingWrite
+		t.usage.CacheReadCost += float64(t.usage.CacheReadInputTokens) * pricing.PromptCachingRead
 
-		// Update cost fields
-		t.usage.InputCost = inputCost
-		t.usage.OutputCost = outputCost
-		t.usage.CacheCreationCost = cacheWriteCost
-		t.usage.CacheReadCost = cacheReadCost
 		t.usage.CurrentContextWindow = int(response.Usage.InputTokens) + int(response.Usage.OutputTokens) + int(response.Usage.CacheCreationInputTokens) + int(response.Usage.CacheReadInputTokens)
 		t.usage.MaxContextWindow = pricing.ContextWindow
 
@@ -253,18 +249,20 @@ func (t *AnthropicThread) SendMessage(
 
 	// Save conversation state after completing the interaction
 	if t.isPersisted && t.store != nil {
-		t.saveConversation()
+		t.SaveConversation(ctx, false)
 	}
 
 	handler.HandleDone()
 	return nil
 }
 
-func (t *AnthropicThread) Summary(ctx context.Context) string {
-	prompt := `Summarise the conversation in one sentence. Keep it short and concise.
-Treat the USER role as the first person, and the ASSISTANT role as the person you are talking to.
+func (t *AnthropicThread) ShortSummary(ctx context.Context) string {
+	prompt := `Summarise the conversation in one sentence, less or equal than 12 words. Keep it short and concise.
+Treat the USER role as the first person (I), and the ASSISTANT role as the person you are talking to.
 `
-	handler := &types.StringCollectorHandler{}
+	handler := &types.StringCollectorHandler{
+		Silent: true,
+	}
 	t.isPersisted = false
 	defer func() {
 		t.isPersisted = true
