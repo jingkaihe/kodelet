@@ -38,12 +38,12 @@ func NewThread(config types.Config) types.Thread {
 }
 
 // SendMessageAndGetTextWithUsage is a convenience method for one-shot queries that returns the response as a string and usage information
-func SendMessageAndGetTextWithUsage(ctx context.Context, state state.State, query string, config types.Config, silent bool, modelOverride ...string) (string, types.Usage) {
+func SendMessageAndGetTextWithUsage(ctx context.Context, state state.State, query string, config types.Config, silent bool, opt types.MessageOpt) (string, types.Usage) {
 	thread := NewThread(config)
 	thread.SetState(state)
 
 	handler := &types.StringCollectorHandler{Silent: silent}
-	err := thread.SendMessage(ctx, query, handler, modelOverride...)
+	err := thread.SendMessage(ctx, query, handler, opt)
 	if err != nil {
 		return fmt.Sprintf("Error: %v", err), types.Usage{}
 	}
@@ -51,7 +51,7 @@ func SendMessageAndGetTextWithUsage(ctx context.Context, state state.State, quer
 }
 
 // SendMessageAndGetText is a convenience method for one-shot queries that returns the response as a string
-func SendMessageAndGetText(ctx context.Context, state state.State, query string, config types.Config, silent bool, modelOverride ...string) string {
-	text, _ := SendMessageAndGetTextWithUsage(ctx, state, query, config, silent, modelOverride...)
+func SendMessageAndGetText(ctx context.Context, state state.State, query string, config types.Config, silent bool, opt types.MessageOpt) string {
+	text, _ := SendMessageAndGetTextWithUsage(ctx, state, query, config, silent, opt)
 	return text
 }

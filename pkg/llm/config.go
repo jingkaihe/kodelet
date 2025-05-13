@@ -10,5 +10,6 @@ func GetConfigFromViper() types.Config {
 	return types.Config{
 		Model:     viper.GetString("model"),
 		MaxTokens: viper.GetInt("max_tokens"),
+		WeakModel: viper.GetString("weak_model"),
 	}
 }

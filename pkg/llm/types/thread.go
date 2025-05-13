@@ -6,6 +6,14 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/state"
 )
 
+// MessageOpt represents options for sending messages
+type MessageOpt struct {
+	// PromptCache indicates if prompt caching should be used
+	PromptCache bool
+	// UseWeakModel allows temporarily overriding the model for this message
+	UseWeakModel bool
+}
+
 // Thread represents a conversation thread with an LLM
 type Thread interface {
 	// SetState sets the state for the thread
@@ -15,7 +23,7 @@ type Thread interface {
 	// AddUserMessage adds a user message to the thread
 	AddUserMessage(message string)
 	// SendMessage sends a message to the LLM and processes the response
-	SendMessage(ctx context.Context, message string, handler MessageHandler, modelOverride ...string) error
+	SendMessage(ctx context.Context, message string, handler MessageHandler, opt MessageOpt) error
 	// GetUsage returns the current token usage for the thread
 	GetUsage() Usage
 	// GetConversationID returns the current conversation ID
