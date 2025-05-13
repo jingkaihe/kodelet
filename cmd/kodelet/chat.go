@@ -37,9 +37,23 @@ var chatCmd = &cobra.Command{
 	},
 }
 
+// ListOptions contains all options for the list command
+type ListOptions struct {
+	startDate string
+	endDate   string
+	search    string
+	limit     int
+	offset    int
+	sortBy    string
+	sortOrder string
+}
+
+var listOptions = &ListOptions{}
+
 var listCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all saved conversations",
+	Long:  `List saved conversations with filtering and sorting options.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		listConversationsCmd()
 	},
@@ -60,12 +74,21 @@ func init() {
 	chatCmd.Flags().StringVar(&chatOptions.storageType, "storage", "json", "Specify storage backend (json or sqlite)")
 	chatCmd.Flags().BoolVar(&chatOptions.noSave, "no-save", false, "Disable conversation persistence")
 
+	// Add list command flags
+	listCmd.Flags().StringVar(&listOptions.startDate, "start", "", "Filter conversations after this date (format: YYYY-MM-DD)")
+	listCmd.Flags().StringVar(&listOptions.endDate, "end", "", "Filter conversations before this date (format: YYYY-MM-DD)")
+	listCmd.Flags().StringVar(&listOptions.search, "search", "", "Search term to filter conversations")
+	listCmd.Flags().IntVar(&listOptions.limit, "limit", 0, "Maximum number of conversations to display")
+	listCmd.Flags().IntVar(&listOptions.offset, "offset", 0, "Offset for pagination")
+	listCmd.Flags().StringVar(&listOptions.sortBy, "sort-by", "updated", "Field to sort by: updated, created, or messages")
+	listCmd.Flags().StringVar(&listOptions.sortOrder, "sort-order", "desc", "Sort order: asc (ascending) or desc (descending)")
+
 	// Add subcommands
 	chatCmd.AddCommand(listCmd)
 	chatCmd.AddCommand(deleteCmd)
 }
 
-// listConversationsCmd displays a list of all saved conversations
+// listConversationsCmd displays a list of saved conversations with query options
 func listConversationsCmd() {
 	// Create a store
 	store, err := conversations.GetConversationStore()
@@ -74,15 +97,46 @@ func listConversationsCmd() {
 		os.Exit(1)
 	}
 
-	// List conversations
-	summaries, err := store.List()
+	// Prepare query options
+	options := conversations.QueryOptions{
+		SearchTerm: listOptions.search,
+		Limit:      listOptions.limit,
+		Offset:     listOptions.offset,
+		SortBy:     listOptions.sortBy,
+		SortOrder:  listOptions.sortOrder,
+	}
+
+	// Parse start date if provided
+	if listOptions.startDate != "" {
+		startDate, err := time.Parse("2006-01-02", listOptions.startDate)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error parsing start date: %v\n", err)
+			os.Exit(1)
+		}
+		options.StartDate = &startDate
+	}
+
+	// Parse end date if provided
+	if listOptions.endDate != "" {
+		endDate, err := time.Parse("2006-01-02", listOptions.endDate)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error parsing end date: %v\n", err)
+			os.Exit(1)
+		}
+		// Set to end of day
+		endDate = endDate.Add(24*time.Hour - time.Second)
+		options.EndDate = &endDate
+	}
+
+	// Query conversations with options
+	summaries, err := store.Query(options)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error listing conversations: %v\n", err)
 		os.Exit(1)
 	}
 
 	if len(summaries) == 0 {
-		fmt.Println("No saved conversations found.")
+		fmt.Println("No conversations found matching your criteria.")
 		return
 	}
 
