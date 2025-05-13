@@ -10,9 +10,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/fsnotify/fsnotify"
 	"github.com/jingkaihe/kodelet/pkg/llm"
+	"github.com/jingkaihe/kodelet/pkg/llm/types"
 	"github.com/jingkaihe/kodelet/pkg/state"
 	"github.com/jingkaihe/kodelet/pkg/utils"
 	"github.com/sirupsen/logrus"
@@ -20,11 +20,11 @@ import (
 )
 
 var (
-	ignoreDirs          []string
-	includePattern      string
-	verbosity           string
-	debounceTime        int
-	autoCompletionModel string
+	ignoreDirs     []string
+	includePattern string
+	verbosity      string
+	debounceTime   int
+	useWeakModel   bool
 )
 
 // FileEvent represents a file system event with additional metadata
@@ -54,7 +54,7 @@ func init() {
 	watchCmd.Flags().StringVarP(&includePattern, "include", "p", "", "File pattern to include (e.g., '*.go', '*.{js,ts}')")
 	watchCmd.Flags().StringVarP(&verbosity, "verbosity", "v", "normal", "Verbosity level (quiet, normal, verbose)")
 	watchCmd.Flags().IntVarP(&debounceTime, "debounce", "d", 500, "Debounce time in milliseconds for file change events")
-	watchCmd.Flags().StringVar(&autoCompletionModel, "auto-completion-model", anthropic.ModelClaude3_7SonnetLatest, "Model to use for auto-completion")
+	watchCmd.Flags().BoolVar(&useWeakModel, "use-weak-model", false, "Use auto-completion model")
 }
 
 func runWatchMode(ctx context.Context, s state.State) {
@@ -266,17 +266,18 @@ def multiply(a, b):
 	config := llm.GetConfigFromViper()
 
 	var response string
-	var usage llm.Usage
+	var usage types.Usage
 
 	// Use the auto-completion model if appropriate
-	if autoCompletionModel != "" {
+	if useWeakModel {
 		if verbosity == "verbose" {
-			fmt.Printf("Using auto-completion model: %s\n", autoCompletionModel)
+			fmt.Printf("Using auto-completion model: %v\n", config.WeakModel)
 		}
-		response, usage = llm.SendMessageAndGetTextWithUsage(ctx, s, query, config, true, autoCompletionModel)
-	} else {
-		response, usage = llm.SendMessageAndGetTextWithUsage(ctx, s, query, config, true)
 	}
+	response, usage = llm.SendMessageAndGetTextWithUsage(ctx, s, query, config, true, types.MessageOpt{
+		UseWeakModel: useWeakModel,
+		PromptCache:  false,
+	})
 
 	// Display the AI response
 	fmt.Printf("\n===== AI Analysis for %s =====\n", path)

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/jingkaihe/kodelet/pkg/llm"
+	"github.com/jingkaihe/kodelet/pkg/llm/types"
 	"github.com/jingkaihe/kodelet/pkg/state"
 	"github.com/spf13/cobra"
 )
@@ -79,7 +80,10 @@ IMPORTANT: The output of the commit message should not be wrapped with any markd
 		fmt.Println("-----------------------------------------------------------")
 
 		// Get the commit message using the Thread abstraction with usage stats
-		commitMsg, usage := llm.SendMessageAndGetTextWithUsage(ctx, s, prompt, llm.GetConfigFromViper(), true)
+		commitMsg, usage := llm.SendMessageAndGetTextWithUsage(ctx, s, prompt, llm.GetConfigFromViper(), true, types.MessageOpt{
+			UseWeakModel: true,
+			PromptCache:  false,
+		})
 		commitMsg = sanitizeCommitMessage(commitMsg)
 
 		fmt.Println("-----------------------------------------------------------")

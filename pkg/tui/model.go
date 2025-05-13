@@ -11,7 +11,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/jingkaihe/kodelet/pkg/llm"
+	"github.com/jingkaihe/kodelet/pkg/llm/types"
 )
 
 // Message represents a chat message
@@ -23,7 +23,7 @@ type Message struct {
 
 // Model represents the main TUI model
 type Model struct {
-	messageCh          chan llm.MessageEvent
+	messageCh          chan types.MessageEvent
 	messages           []Message
 	viewport           viewport.Model
 	textarea           textarea.Model
@@ -53,7 +53,7 @@ type Model struct {
 }
 
 // NewModel creates a new TUI model
-func NewModel() Model {
+func NewModel(conversationID string, enablePersistence bool) Model {
 	ta := textarea.New()
 	ta.Placeholder = "Type your message..."
 	ta.Focus()
@@ -83,21 +83,40 @@ func NewModel() Model {
 		"/clear",
 	}
 
-	return Model{
-		messageCh:          make(chan llm.MessageEvent),
+	// Create status message
+	statusMessage := "Ready"
+
+	// Create assistant client
+	assistant := NewAssistantClient(conversationID, enablePersistence)
+
+	// Create the initial model
+	model := Model{
+		messageCh:          make(chan types.MessageEvent),
 		messages:           []Message{},
 		textarea:           ta,
 		viewport:           vp,
-		statusMessage:      "Ready",
+		statusMessage:      statusMessage,
 		senderStyle:        lipgloss.NewStyle().Foreground(lipgloss.Color("205")).Bold(true),
 		userStyle:          lipgloss.NewStyle().Foreground(lipgloss.Color("86")).Bold(true),
 		assistantStyle:     lipgloss.NewStyle().Foreground(lipgloss.Color("212")).Bold(true),
 		systemStyle:        lipgloss.NewStyle().Foreground(lipgloss.Color("yellow")).Bold(true),
-		assistant:          NewAssistantClient(),
+		assistant:          assistant,
 		ctx:                context.Background(),
 		availableCommands:  availableCommands,
 		selectedCommandIdx: 0,
 	}
+
+	// Populate messages from loaded conversation if it exists
+	if conversationID != "" && enablePersistence {
+		if loadedMessages, err := assistant.GetThreadMessages(); err == nil && len(loadedMessages) > 0 {
+			model.messages = loadedMessages
+			model.updateViewportContent()
+			model.viewport.GotoBottom()
+			model.AddSystemMessage(fmt.Sprintf("Loaded conversation: %s", conversationID))
+		}
+	}
+
+	return model
 }
 
 // AddMessage adds a new message to the chat history
@@ -116,7 +135,7 @@ func (m *Model) AddSystemMessage(content string) {
 		Content:  content,
 		IsSystem: true,
 	})
-	m.assistant.AddUserMessage(content)
+	// m.assistant.AddUserMessage(content)
 	m.updateViewportContent()
 	m.viewport.GotoBottom()
 }
@@ -221,6 +240,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Check if this is a second ctrl+c press within 2 seconds
 			now := time.Now()
 			if m.ctrlCPressCount > 0 && now.Sub(m.lastCtrlCPressTime) < 2*time.Second {
+				// Save the conversation
+				m.assistant.SaveConversation(m.ctx)
 				return m, tea.Quit
 			}
 
@@ -347,7 +368,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 `
 		m.AddMessage(cmd_out, true)
 		m.SetProcessing(false)
-	case llm.MessageEvent:
+	case types.MessageEvent:
 		if !msg.Done {
 			m.AddMessage(ProcessAssistantEvent(msg), false)
 			return m, func() tea.Msg {
@@ -562,6 +583,12 @@ func (m Model) statusView() string {
 
 	m.usageText, m.costText = m.updateUsage()
 
+	// Add conversation ID to status if persistence is enabled
+	var persistenceStatus string
+	if m.assistant.IsPersisted() {
+		persistenceStatus = fmt.Sprintf(" │ Conv: %s", m.assistant.GetConversationID())
+	}
+
 	// Create main status line with controls
 	mainStatus := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("205")).
@@ -569,7 +596,7 @@ func (m Model) statusView() string {
 		Padding(0, 1).
 		MarginTop(0).
 		Bold(true).
-		Render(statusText + " │ Ctrl+C (twice): Quit │ Ctrl+H (/help): Help │ ↑/↓: Scroll")
+		Render(statusText + persistenceStatus + " │ Ctrl+C (twice): Quit │ Ctrl+H (/help): Help │ ↑/↓: Scroll")
 
 	// Create separate usage and cost line if available
 	if m.usageText != "" {

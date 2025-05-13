@@ -1,4 +1,4 @@
-package llm
+package anthropic
 
 import (
 	"context"
@@ -7,10 +7,16 @@ import (
 	"strings"
 
 	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/llm/types"
 	"github.com/jingkaihe/kodelet/pkg/state"
 	"github.com/jingkaihe/kodelet/pkg/sysprompt"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 )
+
+// ConversationStore is an alias for the conversations.ConversationStore interface
+// to avoid direct dependency on the conversations package
+type ConversationStore = conversations.ConversationStore
 
 // ModelPricing holds the per-token pricing for different operations
 type ModelPricing struct {
@@ -88,15 +94,19 @@ func getModelPricing(model string) ModelPricing {
 
 // AnthropicThread implements the Thread interface using Anthropic's Claude API
 type AnthropicThread struct {
-	client   anthropic.Client
-	config   Config
-	state    state.State
-	messages []anthropic.MessageParam
-	usage    Usage
+	client         anthropic.Client
+	config         types.Config
+	state          state.State
+	messages       []anthropic.MessageParam
+	usage          types.Usage
+	conversationID string
+	summary        string
+	isPersisted    bool
+	store          ConversationStore
 }
 
 // NewAnthropicThread creates a new thread with Anthropic's Claude API
-func NewAnthropicThread(config Config) *AnthropicThread {
+func NewAnthropicThread(config types.Config) *AnthropicThread {
 	// Apply defaults if not provided
 	if config.Model == "" {
 		config.Model = anthropic.ModelClaude3_7SonnetLatest
@@ -106,8 +116,10 @@ func NewAnthropicThread(config Config) *AnthropicThread {
 	}
 
 	return &AnthropicThread{
-		client: anthropic.NewClient(),
-		config: config,
+		client:         anthropic.NewClient(),
+		config:         config,
+		conversationID: conversations.GenerateID(),
+		isPersisted:    false,
 	}
 }
 
@@ -126,26 +138,47 @@ func (t *AnthropicThread) AddUserMessage(message string) {
 	t.messages = append(t.messages, anthropic.NewUserMessage(anthropic.NewTextBlock(message)))
 }
 
+func (t *AnthropicThread) cacheMessages() {
+	// remove cache control from the messages
+	for msgIdx, msg := range t.messages {
+		for blkIdx, block := range msg.Content {
+			if block.OfRequestTextBlock != nil {
+				block.OfRequestTextBlock.CacheControl = anthropic.CacheControlEphemeralParam{}
+				t.messages[msgIdx].Content[blkIdx] = block
+			}
+		}
+	}
+	if len(t.messages) > 0 {
+		lastMsg := t.messages[len(t.messages)-1]
+		if len(lastMsg.Content) > 0 {
+			lastMsg.Content[len(lastMsg.Content)-1].OfRequestTextBlock.CacheControl = anthropic.CacheControlEphemeralParam{}
+		}
+	}
+}
+
 // SendMessage sends a message to the LLM and processes the response
 func (t *AnthropicThread) SendMessage(
 	ctx context.Context,
 	message string,
-	handler MessageHandler,
-	modelOverride ...string,
+	handler types.MessageHandler,
+	opt types.MessageOpt,
 ) error {
-	// Add the user message to history
+	if opt.PromptCache {
+		t.cacheMessages()
+	}
 	t.AddUserMessage(message)
 
 	// Main interaction loop for handling tool calls
 	for {
 		// Determine which model to use
 		model := t.config.Model
-		if len(modelOverride) > 0 && modelOverride[0] != "" {
-			model = modelOverride[0]
+
+		if opt.UseWeakModel && t.config.WeakModel != "" {
+			model = t.config.WeakModel
 		}
 
-		// Send request to Anthropic API
-		response, err := t.client.Messages.New(ctx, anthropic.MessageNewParams{
+		// Prepare message parameters
+		messageParams := anthropic.MessageNewParams{
 			MaxTokens: int64(t.config.MaxTokens),
 			System: []anthropic.TextBlockParam{
 				{
@@ -158,7 +191,9 @@ func (t *AnthropicThread) SendMessage(
 			Messages: t.messages,
 			Model:    model,
 			Tools:    tools.ToAnthropicTools(tools.Tools),
-		})
+		}
+
+		response, err := t.client.Messages.New(ctx, messageParams)
 		if err != nil {
 			return fmt.Errorf("error sending message to Anthropic: %w", err)
 		}
@@ -176,16 +211,11 @@ func (t *AnthropicThread) SendMessage(
 		pricing := getModelPricing(model)
 
 		// Calculate individual costs
-		inputCost := float64(t.usage.InputTokens) * pricing.Input
-		outputCost := float64(t.usage.OutputTokens) * pricing.Output
-		cacheWriteCost := float64(t.usage.CacheCreationInputTokens) * pricing.PromptCachingWrite
-		cacheReadCost := float64(t.usage.CacheReadInputTokens) * pricing.PromptCachingRead
+		t.usage.InputCost += float64(response.Usage.InputTokens) * pricing.Input
+		t.usage.OutputCost += float64(response.Usage.OutputTokens) * pricing.Output
+		t.usage.CacheCreationCost += float64(response.Usage.CacheCreationInputTokens) * pricing.PromptCachingWrite
+		t.usage.CacheReadCost += float64(response.Usage.CacheReadInputTokens) * pricing.PromptCachingRead
 
-		// Update cost fields
-		t.usage.InputCost = inputCost
-		t.usage.OutputCost = outputCost
-		t.usage.CacheCreationCost = cacheWriteCost
-		t.usage.CacheReadCost = cacheReadCost
 		t.usage.CurrentContextWindow = int(response.Usage.InputTokens) + int(response.Usage.OutputTokens) + int(response.Usage.CacheCreationInputTokens) + int(response.Usage.CacheReadInputTokens)
 		t.usage.MaxContextWindow = pricing.ContextWindow
 
@@ -217,11 +247,86 @@ func (t *AnthropicThread) SendMessage(
 		}
 	}
 
+	// Save conversation state after completing the interaction
+	if t.isPersisted && t.store != nil {
+		t.SaveConversation(ctx, false)
+	}
+
 	handler.HandleDone()
 	return nil
 }
 
+func (t *AnthropicThread) ShortSummary(ctx context.Context) string {
+	prompt := `Summarise the conversation in one sentence, less or equal than 12 words. Keep it short and concise.
+Treat the USER role as the first person (I), and the ASSISTANT role as the person you are talking to.
+`
+	handler := &types.StringCollectorHandler{
+		Silent: true,
+	}
+	t.isPersisted = false
+	defer func() {
+		t.isPersisted = true
+	}()
+	// Use a faster model for summarization as it's a simpler task
+	err := t.SendMessage(ctx, prompt, handler, types.MessageOpt{
+		UseWeakModel: true,
+		PromptCache:  false, // maybe we should make it configurable, but there is likely no cache for weak model
+	})
+	if err != nil {
+		return ""
+	}
+
+	if len(t.messages) >= 2 {
+		t.messages = t.messages[:len(t.messages)-2]
+	}
+
+	return handler.CollectedText()
+}
+
 // GetUsage returns the current token usage for the thread
-func (t *AnthropicThread) GetUsage() Usage {
+func (t *AnthropicThread) GetUsage() types.Usage {
 	return t.usage
+}
+
+// GetConversationID returns the current conversation ID
+func (t *AnthropicThread) GetConversationID() string {
+	return t.conversationID
+}
+
+// SetConversationID sets the conversation ID
+func (t *AnthropicThread) SetConversationID(id string) {
+	t.conversationID = id
+}
+
+// IsPersisted returns whether this thread is being persisted
+func (t *AnthropicThread) IsPersisted() bool {
+	return t.isPersisted
+}
+
+// GetMessages returns the current messages in the thread
+func (t *AnthropicThread) GetMessages() []anthropic.MessageParam {
+	return t.messages
+}
+
+// EnablePersistence enables conversation persistence for this thread
+func (t *AnthropicThread) EnablePersistence(enabled bool) {
+	t.isPersisted = enabled
+
+	// Initialize the store if enabling persistence and it's not already initialized
+	if enabled && t.store == nil {
+		store, err := conversations.GetConversationStore()
+		if err != nil {
+			// Log the error but continue without persistence
+			fmt.Printf("Error initializing conversation store: %v\n", err)
+			t.isPersisted = false
+			return
+		}
+		t.store = store
+	}
+
+	// If enabling persistence and there's an existing conversation ID,
+	// try to load it from the store
+	if enabled && t.conversationID != "" && t.store != nil {
+		t.loadConversation()
+	}
 }

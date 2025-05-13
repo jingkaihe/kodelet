@@ -8,20 +8,35 @@ import (
 	"strings"
 
 	"github.com/jingkaihe/kodelet/pkg/llm"
+	"github.com/jingkaihe/kodelet/pkg/llm/types"
 	"github.com/jingkaihe/kodelet/pkg/state"
 )
 
-// legacyChatUI implements the original CLI interface
-func legacyChatUI() {
-	fmt.Println("Kodelet Chat Mode (Legacy UI) - Type 'exit' or 'quit' to end the session")
+// plainChatUI implements the plain CLI interface
+func plainChatUI(options *ChatOptions) {
+	fmt.Println("Kodelet Chat Mode (Plain UI) - Type 'exit' or 'quit' to end the session")
 	fmt.Println("----------------------------------------------------------")
 
 	// Create a persistent thread with state
 	thread := llm.NewThread(llm.GetConfigFromViper())
 	thread.SetState(state.NewBasicState())
 
+	// Configure conversation persistence
+	if options.resumeConvID != "" {
+		thread.SetConversationID(options.resumeConvID)
+		fmt.Printf("Resuming conversation: %s\n", options.resumeConvID)
+	}
+
+	thread.EnablePersistence(!options.noSave)
+
+	if !options.noSave {
+		fmt.Println("Conversation persistence is enabled.")
+	} else {
+		fmt.Println("Conversation persistence is disabled (--no-save).")
+	}
+
 	// Create a console handler
-	handler := &llm.ConsoleMessageHandler{Silent: false}
+	handler := &types.ConsoleMessageHandler{Silent: false}
 
 	reader := bufio.NewReader(os.Stdin)
 
@@ -47,6 +62,13 @@ func legacyChatUI() {
 			fmt.Printf("\033[1;36m[Cost Stats] Input: $%.4f | Output: $%.4f | Cache write: $%.4f | Cache read: $%.4f | Total: $%.4f\033[0m\n",
 				usage.InputCost, usage.OutputCost, usage.CacheCreationCost, usage.CacheReadCost, usage.TotalCost())
 
+			// Display conversation ID if persistence was enabled
+			if thread.IsPersisted() {
+				fmt.Printf("\033[1;36m[Conversation] ID: %s\033[0m\n", thread.GetConversationID())
+				fmt.Printf("To resume this conversation: kodelet chat --resume %s\n", thread.GetConversationID())
+				fmt.Printf("To delete this conversation: kodelet chat delete %s\n", thread.GetConversationID())
+			}
+
 			fmt.Println("Exiting chat mode. Goodbye!")
 			return
 		}
@@ -57,7 +79,9 @@ func legacyChatUI() {
 		}
 
 		// Process the query using the persistent thread
-		err = thread.SendMessage(context.Background(), input, handler)
+		err = thread.SendMessage(context.Background(), input, handler, types.MessageOpt{
+			PromptCache: true,
+		})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		}

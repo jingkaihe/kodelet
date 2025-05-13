@@ -1,5 +1,27 @@
 # Kodelet
 
+## 0.0.7.alpha (2025-05-13)
+
+### Conversation Persistence
+
+The main feature in this release is the addition of conversation persistence, allowing users to save, load, and manage chat conversations across sessions.
+
+- **Conversation Management**: Save and load conversation history with persistent storage
+- **Chat List Command**: Browse, filter, and sort saved conversations
+- **Improved TUI**: Enhanced terminal UI with support for loading existing conversations
+- **Weak Model Support**: Additional configuration options for message handling with less capable models
+
+### Architectural Improvements
+
+- Refactored LLM interfaces with better separation of concerns
+- Enhanced token usage calculation and reporting
+- Renamed legacy chat UI to "plain UI" with updated command structure
+
+### Documentation
+
+- Added detailed development guide at `docs/DEVELOPMENT.md`
+- Created ADR for conversation persistence design decisions
+
 ## 0.0.6.alpha1 (2025-05-12)
 
 - Added context window size tracking and cost calculation
