@@ -211,10 +211,10 @@ func (t *AnthropicThread) SendMessage(
 		pricing := getModelPricing(model)
 
 		// Calculate individual costs
-		t.usage.InputCost += float64(t.usage.InputTokens) * pricing.Input
-		t.usage.OutputCost += float64(t.usage.OutputTokens) * pricing.Output
-		t.usage.CacheCreationCost += float64(t.usage.CacheCreationInputTokens) * pricing.PromptCachingWrite
-		t.usage.CacheReadCost += float64(t.usage.CacheReadInputTokens) * pricing.PromptCachingRead
+		t.usage.InputCost += float64(response.Usage.InputTokens) * pricing.Input
+		t.usage.OutputCost += float64(response.Usage.OutputTokens) * pricing.Output
+		t.usage.CacheCreationCost += float64(response.Usage.CacheCreationInputTokens) * pricing.PromptCachingWrite
+		t.usage.CacheReadCost += float64(response.Usage.CacheReadInputTokens) * pricing.PromptCachingRead
 
 		t.usage.CurrentContextWindow = int(response.Usage.InputTokens) + int(response.Usage.OutputTokens) + int(response.Usage.CacheCreationInputTokens) + int(response.Usage.CacheReadInputTokens)
 		t.usage.MaxContextWindow = pricing.ContextWindow
