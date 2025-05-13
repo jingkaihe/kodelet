@@ -1,8 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -39,13 +42,14 @@ var chatCmd = &cobra.Command{
 
 // ListOptions contains all options for the list command
 type ListOptions struct {
-	startDate string
-	endDate   string
-	search    string
-	limit     int
-	offset    int
-	sortBy    string
-	sortOrder string
+	startDate  string
+	endDate    string
+	search     string
+	limit      int
+	offset     int
+	sortBy     string
+	sortOrder  string
+	jsonOutput bool
 }
 
 var listOptions = &ListOptions{}
@@ -82,10 +86,119 @@ func init() {
 	listCmd.Flags().IntVar(&listOptions.offset, "offset", 0, "Offset for pagination")
 	listCmd.Flags().StringVar(&listOptions.sortBy, "sort-by", "updated", "Field to sort by: updated, created, or messages")
 	listCmd.Flags().StringVar(&listOptions.sortOrder, "sort-order", "desc", "Sort order: asc (ascending) or desc (descending)")
+	listCmd.Flags().BoolVar(&listOptions.jsonOutput, "json", false, "Output in JSON format")
 
 	// Add subcommands
 	chatCmd.AddCommand(listCmd)
 	chatCmd.AddCommand(deleteCmd)
+}
+
+// OutputFormat defines the format of the output
+type OutputFormat int
+
+const (
+	TableFormat OutputFormat = iota
+	JSONFormat
+)
+
+// ConversationListOutput represents the output for conversation list
+type ConversationListOutput struct {
+	Conversations []ConversationSummaryOutput
+	Format        OutputFormat
+}
+
+// NewConversationListOutput creates a new ConversationListOutput
+func NewConversationListOutput(summaries []conversations.ConversationSummary, format OutputFormat) *ConversationListOutput {
+	output := &ConversationListOutput{
+		Conversations: make([]ConversationSummaryOutput, 0, len(summaries)),
+		Format:        format,
+	}
+
+	for _, summary := range summaries {
+		// Extract first message or summary
+		preview := summary.FirstMessage
+		if summary.Summary != "" {
+			preview = summary.Summary
+		}
+
+		output.Conversations = append(output.Conversations, ConversationSummaryOutput{
+			ID:           summary.ID,
+			CreatedAt:    summary.CreatedAt,
+			UpdatedAt:    summary.UpdatedAt,
+			MessageCount: summary.MessageCount,
+			Preview:      preview,
+		})
+	}
+
+	return output
+}
+
+// Render formats and renders the conversation list to the specified writer
+func (o *ConversationListOutput) Render(w io.Writer) error {
+	if o.Format == JSONFormat {
+		return o.renderJSON(w)
+	}
+	return o.renderTable(w)
+}
+
+// renderJSON renders the output in JSON format
+func (o *ConversationListOutput) renderJSON(w io.Writer) error {
+	type jsonOutput struct {
+		Conversations []ConversationSummaryOutput `json:"conversations"`
+	}
+
+	output := jsonOutput{
+		Conversations: o.Conversations,
+	}
+
+	jsonData, err := json.MarshalIndent(output, "", "  ")
+	if err != nil {
+		return fmt.Errorf("error generating JSON output: %v", err)
+	}
+
+	_, err = fmt.Fprintln(w, string(jsonData))
+	return err
+}
+
+// renderTable renders the output in table format
+func (o *ConversationListOutput) renderTable(w io.Writer) error {
+	// Create a tabwriter with padding for better readability
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	
+	// Print table header
+	fmt.Fprintln(tw, "ID\tCreated\tUpdated\tMessages\tSummary")
+	fmt.Fprintln(tw, "----\t-------\t-------\t--------\t-------")
+
+	for _, summary := range o.Conversations {
+		// Format creation and update dates
+		created := summary.CreatedAt.Format(time.RFC3339)
+		updated := summary.UpdatedAt.Format(time.RFC3339)
+
+		// Truncate long previews
+		preview := summary.Preview
+		if len(preview) > 60 {
+			preview = strings.TrimSpace(preview[:57]) + "..."
+		}
+
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%s\n",
+			summary.ID,
+			created,
+			updated,
+			summary.MessageCount,
+			preview,
+		)
+	}
+
+	return tw.Flush()
+}
+
+// ConversationSummaryOutput represents a single conversation summary for output
+type ConversationSummaryOutput struct {
+	ID           string    `json:"id"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+	MessageCount int       `json:"message_count"`
+	Preview      string    `json:"preview"`
 }
 
 // listConversationsCmd displays a list of saved conversations with query options
@@ -140,35 +253,18 @@ func listConversationsCmd() {
 		return
 	}
 
-	// Create a tabwriter to format the output
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintf(w, "ID\tCreated\tUpdated\tMessages\tSummary\n")
-	fmt.Fprintf(w, "----\t-------\t-------\t--------\t-------\n")
-
-	for _, summary := range summaries {
-		// Format creation and update dates
-		created := summary.CreatedAt.Format(time.RFC3339)
-		updated := summary.UpdatedAt.Format(time.RFC3339)
-
-		// Extract first message or summary
-		preview := summary.FirstMessage
-		if summary.Summary != "" {
-			preview = summary.Summary
-		}
-
-		fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%s\n",
-			summary.ID,
-			created,
-			updated,
-			summary.MessageCount,
-			preview,
-		)
+	// Determine output format
+	format := TableFormat
+	if listOptions.jsonOutput {
+		format = JSONFormat
 	}
 
-	w.Flush()
-
-	fmt.Println("\nTo resume a conversation: kodelet chat --resume <ID>")
-	fmt.Println("To delete a conversation: kodelet chat delete <ID>")
+	// Create and render the output
+	output := NewConversationListOutput(summaries, format)
+	if err := output.Render(os.Stdout); err != nil {
+		fmt.Fprintf(os.Stderr, "Error rendering output: %v\n", err)
+		os.Exit(1)
+	}
 }
 
 // deleteConversationCmd deletes a specific conversation
