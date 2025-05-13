@@ -228,10 +228,3 @@ Kodelet tracks token usage from all LLM API calls, including:
 - Total tokens
 
 All commands (chat, run, commit) display detailed token usage statistics upon completion, helping users monitor API usage and cost.
-
-## Important Notes
-- Requires an Anthropic API key for Claude integration
-- Uses Claude 3.7 Sonnet model by default
-- The bash tool has security restrictions to prevent dangerous commands
-- The file_read tool has a maximum output limit of 100KB
-- The kodelet.md file (this file) is used for project context

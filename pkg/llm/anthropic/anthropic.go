@@ -154,7 +154,11 @@ func (t *AnthropicThread) cacheMessages() {
 	if len(t.messages) > 0 {
 		lastMsg := t.messages[len(t.messages)-1]
 		if len(lastMsg.Content) > 0 {
-			lastMsg.Content[len(lastMsg.Content)-1].OfRequestTextBlock.CacheControl = anthropic.CacheControlEphemeralParam{}
+			lastBlock := lastMsg.Content[len(lastMsg.Content)-1]
+			if lastBlock.OfRequestTextBlock != nil {
+				lastBlock.OfRequestTextBlock.CacheControl = anthropic.CacheControlEphemeralParam{}
+				t.messages[len(t.messages)-1].Content[len(lastMsg.Content)-1] = lastBlock
+			}
 		}
 	}
 }
@@ -199,7 +203,7 @@ func (t *AnthropicThread) SendMessage(
 			},
 			Messages: t.messages,
 			Model:    model,
-			Tools:    t.tools(),
+			Tools:    tools.ToAnthropicTools(t.tools()),
 		}
 
 		response, err := t.client.Messages.New(ctx, messageParams)
@@ -224,8 +228,8 @@ func (t *AnthropicThread) SendMessage(
 				inputJSON, _ := json.Marshal(variant.JSON.Input.Raw())
 				handler.HandleToolUse(block.Name, string(inputJSON))
 
-				runToolCtx := t.WithSubAgent(ctx)
-				output := tools.RunTool(runToolCtx, t.state, block.Name, string(variant.JSON.Input.Raw()))
+				runToolCtx := t.WithSubAgent(ctx, handler)
+				output := tools.RunTool(runToolCtx, t.state, block.Name, string(variant.JSON.Input.Raw()), t.tools())
 				handler.HandleToolResult(block.Name, output.String())
 
 				// Add tool result to messages for next API call
@@ -250,18 +254,11 @@ func (t *AnthropicThread) SendMessage(
 	return finalOutput, nil
 }
 
-func (t *AnthropicThread) tools() []anthropic.ToolUnionParam {
-	if !t.config.IsSubAgent {
-		return tools.ToAnthropicTools(tools.Tools)
+func (t *AnthropicThread) tools() []tools.Tool {
+	if t.config.IsSubAgent {
+		return tools.SubAgentTools
 	}
-	// remove the agent tool from the list
-	selectedTools := []tools.Tool{}
-	for _, tool := range tools.Tools {
-		if tool.Name() != "subagent" {
-			selectedTools = append(selectedTools, tool)
-		}
-	}
-	return tools.ToAnthropicTools(selectedTools)
+	return tools.MainTools
 }
 
 func (t *AnthropicThread) updateUsage(response *anthropic.Message, model string) {
@@ -296,9 +293,12 @@ func (t *AnthropicThread) NewSubAgent(ctx context.Context) types.Thread {
 	return thread
 }
 
-func (t *AnthropicThread) WithSubAgent(ctx context.Context) context.Context {
+func (t *AnthropicThread) WithSubAgent(ctx context.Context, handler types.MessageHandler) context.Context {
 	subAgent := t.NewSubAgent(ctx)
-	ctx = context.WithValue(ctx, types.ThreadKey{}, subAgent)
+	ctx = context.WithValue(ctx, types.SubAgentConfig{}, types.SubAgentConfig{
+		Thread:         subAgent,
+		MessageHandler: handler,
+	})
 	return ctx
 }
 

@@ -49,7 +49,19 @@ func GenerateSchema[T any]() *jsonschema.Schema {
 	return reflector.Reflect(v)
 }
 
-var Tools = []Tool{
+var MainTools = []Tool{
+	&BashTool{},
+	&FileReadTool{},
+	&FileWriteTool{},
+	&FileEditTool{},
+	&ThinkingTool{},
+	&SubAgentTool{},
+	&CodeSearchTool{},
+	&TodoReadTool{},
+	&TodoWriteTool{},
+}
+
+var SubAgentTools = []Tool{
 	&BashTool{},
 	&FileReadTool{},
 	&FileWriteTool{},
@@ -58,7 +70,6 @@ var Tools = []Tool{
 	&ThinkingTool{},
 	&TodoReadTool{},
 	&TodoWriteTool{},
-	&SubAgentTool{},
 }
 
 func ToAnthropicTools(tools []Tool) []anthropic.ToolUnionParam {
@@ -78,8 +89,8 @@ func ToAnthropicTools(tools []Tool) []anthropic.ToolUnionParam {
 	return anthropicTools
 }
 
-func RunTool(ctx context.Context, state state.State, toolName string, parameters string) ToolResult {
-	for _, tool := range Tools {
+func RunTool(ctx context.Context, state state.State, toolName string, parameters string, tools []Tool) ToolResult {
+	for _, tool := range tools {
 		if tool.Name() == toolName {
 			err := tool.ValidateInput(state, parameters)
 			if err != nil {

@@ -8,6 +8,7 @@ import (
 	"github.com/invopop/jsonschema"
 	"github.com/jingkaihe/kodelet/pkg/llm/types"
 	"github.com/jingkaihe/kodelet/pkg/state"
+	"github.com/sirupsen/logrus"
 )
 
 type SubAgentTool struct{}
@@ -34,6 +35,7 @@ This tool is ideal for semantic search, where you are not sure about the exact k
 ## DO NOT use this tool when:
 * You know exactly the keywords to use. e.g. "[Ll]og" - Use ${code_search} instead.
 * You just want to find where certain files or directories are located - Use find command via ${bash} tool instead.
+* You just want to look for the content of a file - Use ${file_read} tool instead.
 
 ## Important Notes
 1. The subagent does not have any memory of previous invocations, and you cannot talk to it back and forth. As a result, your task description must be:
@@ -67,14 +69,22 @@ func (t *SubAgentTool) Execute(ctx context.Context, state state.State, parameter
 	}
 
 	// get type.Thread from context
-	thread, ok := ctx.Value(types.ThreadKey{}).(types.Thread)
+	subAgentConfig, ok := ctx.Value(types.SubAgentConfig{}).(types.SubAgentConfig)
 	if !ok {
 		return ToolResult{
-			Error: "thread not found in context",
+			Error: "sub-agent config not found in context",
 		}
 	}
 
-	text, err := thread.SendMessage(ctx, input.TaskDescription, &types.ConsoleMessageHandler{}, types.MessageOpt{})
+	handler := subAgentConfig.MessageHandler
+	if handler == nil {
+		logrus.Warn("no message handler found in context, using console handler")
+		handler = &types.ConsoleMessageHandler{}
+	}
+	text, err := subAgentConfig.Thread.SendMessage(ctx, input.TaskDescription, handler, types.MessageOpt{
+		PromptCache:  true,
+		UseWeakModel: false,
+	})
 	if err != nil {
 		return ToolResult{
 			Error: err.Error(),

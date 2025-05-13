@@ -14,8 +14,11 @@ type MessageOpt struct {
 	UseWeakModel bool
 }
 
-// ThreadKey is the key for the thread in the context
-type ThreadKey struct{}
+// SubAgentConfig is the key for the thread in the context
+type SubAgentConfig struct {
+	Thread         Thread         // Thread used by the sub-agent
+	MessageHandler MessageHandler // Message handler for the sub-agent
+}
 
 // Thread represents a conversation thread with an LLM
 type Thread interface {

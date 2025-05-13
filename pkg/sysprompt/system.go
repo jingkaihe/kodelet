@@ -12,13 +12,14 @@ import (
 )
 
 const (
-	productName   = "kodelet"
-	todoWriteTool = "todo_write"
-	todoReadTool  = "todo_read"
-	bashTool      = "bash"
-	kodeletMd     = "KODELET.md"
-	readmeMd      = "README.md"
-	subagentTool  = "subagent"
+	productName    = "kodelet"
+	todoWriteTool  = "todo_write"
+	todoReadTool   = "todo_read"
+	bashTool       = "bash"
+	kodeletMd      = "KODELET.md"
+	readmeMd       = "README.md"
+	subagentTool   = "subagent"
+	codeSearchTool = "code_search"
 )
 
 var systemPrompt = `
@@ -89,7 +90,24 @@ IMPORTANT: DO NOT write code comments unless the code block is complicated.
 # Tool Usage
 * If there are not dependencies among the tool calls, you can return them in a single tool use block.
 * If the tool call returns <error>... Use ${anotherTool} instead</error>, use the ${anotherTool} to solve the problem.
-* Use ${subagentTool} for semantic code search.
+* Use ${codeSearchTool} for simple code search when the keywords for search can be described in regex.
+* Use ${subagentTool} for semantic code search when the subject you are searching is nuanced and cannot be described in regex.
+
+<example>
+User: What's the code that checks if the user is authenticated?
+Assistant: [use ${subagentTool} and search "what's the code that checks if the user is authenticated"]
+<reasoning>
+The user's request is nuanced and cannot be described in regex.
+</reasoning>
+</example>
+
+<example>
+User: Where is the foo function defined?
+Assistant: [use ${codeSearchTool} and search "func foo"]
+<reasoning>
+The user's request is simple and can be described in regex.
+</reasoning>
+</example>
 
 # Task Management
 You have access to the ${todoWriteTool} and ${todoReadTool} tools to help you manage and plan tasks. For any non-trivial tasks that require multiple steps to complete, you MUST:
