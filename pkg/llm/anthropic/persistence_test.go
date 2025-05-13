@@ -77,7 +77,7 @@ func TestDeserializeMessages(t *testing.T) {
 	assert.Equal(t, anthropic.MessageParamRoleUser, thread.messages[0].Role)
 	assert.Equal(t, "ls -la", thread.messages[0].Content[0].OfRequestTextBlock.Text)
 	assert.Equal(t, "text", *thread.messages[0].Content[0].GetType())
-	// assert.Equal(t, anthropic.CacheControlEphemeralParam{Type: "ephemeral"}, thread.messages[0].Content[0].OfRequestTextBlock.CacheControl)
+	assert.Equal(t, anthropic.CacheControlEphemeralParam{}, thread.messages[0].Content[0].OfRequestTextBlock.CacheControl, "prompt cache config is ignored")
 
 	assert.Equal(t, anthropic.MessageParamRoleAssistant, thread.messages[1].Role)
 	assert.Equal(t, "I'll list all files in the current directory with detailed information.", thread.messages[1].Content[0].OfRequestTextBlock.Text)

@@ -131,7 +131,16 @@ func TestSendMessageAndGetText(t *testing.T) {
 	query := "Respond with exactly these words: 'Hello from test'"
 
 	// Test with real client
-	result := SendMessageAndGetText(ctx, state.NewBasicState(), query, types.Config{}, true)
+	result := SendMessageAndGetText(ctx,
+		state.NewBasicState(),
+		query,
+		types.Config{
+			Model:     anthropic.ModelClaude3_5HaikuLatest,
+			MaxTokens: 100,
+		},
+		true,
+		types.MessageOpt{},
+	)
 
 	// Verify we got a non-error response
 	assert.False(t, strings.HasPrefix(result, "Error:"), "Response should not contain an error")
@@ -184,7 +193,7 @@ func TestSendMessageRealClient(t *testing.T) {
 	thread.SetState(state.NewBasicState())
 
 	// Send a simple message that should not trigger tool use
-	err := thread.SendMessage(ctx, "Say hello world", mockHandler)
+	err := thread.SendMessage(ctx, "Say hello world", mockHandler, types.MessageOpt{})
 
 	// Verify
 	assert.NoError(t, err)
@@ -241,13 +250,13 @@ func TestSendMessageWithToolUse(t *testing.T) {
 
 	// Create thread
 	thread := NewThread(types.Config{
-		Model:     anthropic.ModelClaude3_7SonnetLatest,
+		Model:     anthropic.ModelClaude3_5HaikuLatest,
 		MaxTokens: 1000,
 	})
 	thread.SetState(state.NewBasicState())
 
 	// Send message that should trigger thinking tool use
-	err := thread.SendMessage(ctx, "Use the thinking tool to calculate 25 * 32", handler)
+	err := thread.SendMessage(ctx, "Use the thinking tool to calculate 25 * 32", handler, types.MessageOpt{})
 
 	// Verify response
 	assert.NoError(t, err)

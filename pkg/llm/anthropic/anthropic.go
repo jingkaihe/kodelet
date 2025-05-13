@@ -160,19 +160,24 @@ func (t *AnthropicThread) SendMessage(
 	ctx context.Context,
 	message string,
 	handler types.MessageHandler,
-	modelOverride ...string,
+	opt types.MessageOpt,
 ) error {
-	t.cacheMessages()
+	if opt.PromptCache {
+		t.cacheMessages()
+	}
 	t.AddUserMessage(message)
 
 	// Main interaction loop for handling tool calls
 	for {
 		// Determine which model to use
 		model := t.config.Model
-		if len(modelOverride) > 0 && modelOverride[0] != "" {
-			model = modelOverride[0]
+
+		if opt.UseWeakModel && t.config.WeakModel != "" {
+			model = t.config.WeakModel
 		}
-		response, err := t.client.Messages.New(ctx, anthropic.MessageNewParams{
+
+		// Prepare message parameters
+		messageParams := anthropic.MessageNewParams{
 			MaxTokens: int64(t.config.MaxTokens),
 			System: []anthropic.TextBlockParam{
 				{
@@ -185,7 +190,9 @@ func (t *AnthropicThread) SendMessage(
 			Messages: t.messages,
 			Model:    model,
 			Tools:    tools.ToAnthropicTools(tools.Tools),
-		})
+		}
+
+		response, err := t.client.Messages.New(ctx, messageParams)
 		if err != nil {
 			return fmt.Errorf("error sending message to Anthropic: %w", err)
 		}
@@ -262,10 +269,15 @@ Treat the USER role as the first person, and the ASSISTANT role as the person yo
 	defer func() {
 		t.isPersisted = true
 	}()
-	err := t.SendMessage(ctx, prompt, handler)
+	// Use a faster model for summarization as it's a simpler task
+	err := t.SendMessage(ctx, prompt, handler, types.MessageOpt{
+		UseWeakModel: true,
+		PromptCache:  false, // maybe we should make it configurable, but there is likely no cache for weak model
+	})
 	if err != nil {
 		return ""
 	}
+
 	if len(t.messages) >= 2 {
 		t.messages = t.messages[:len(t.messages)-2]
 	}
