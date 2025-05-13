@@ -11,6 +11,8 @@ Kodelet is a lightweight CLI tool that helps with software engineering tasks. It
 ├── bin/                 # Compiled binaries
 ├── cmd/
 │   └── kodelet/         # Application entry point
+├── docs/                # Documentation files
+│   └── DEVELOPMENT.md   # Development guidelines and information
 └── pkg/
     ├── llm/             # LLM client for AI interactions
     │   ├── anthropic/   # Anthropic-specific client implementation
