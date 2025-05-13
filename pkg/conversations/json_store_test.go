@@ -34,8 +34,8 @@ func TestJSONConversationStore(t *testing.T) {
 	// Test Save and Load
 	t.Run("SaveAndLoad", func(t *testing.T) {
 		record := NewConversationRecord("test-save-load")
-		record.FirstUserPrompt = "Hello"
-		record.RawMessages = json.RawMessage(`[{"role":"user"},{"role":"assistant"}]`)
+		record.Summary = "Hello conversation"
+		record.RawMessages = json.RawMessage(`[{"role":"user","content":[{"type":"text","text":"Hello"}]},{"role":"assistant"}]`)
 		record.ModelType = "anthropic"
 
 		// Save the record
@@ -53,7 +53,7 @@ func TestJSONConversationStore(t *testing.T) {
 
 		// Verify contents
 		assert.Equal(t, record.ID, loaded.ID, "ID should match")
-		assert.Equal(t, "Hello", loaded.FirstUserPrompt, "First user message should match")
+		assert.Equal(t, "Hello conversation", loaded.Summary, "Summary should match")
 		assert.Equal(t, "anthropic", loaded.ModelType, "Model type should match")
 		assert.JSONEq(t, string(record.RawMessages), string(loaded.RawMessages), "Raw messages should match")
 	})
@@ -68,8 +68,8 @@ func TestJSONConversationStore(t *testing.T) {
 	// Test Delete
 	t.Run("Delete", func(t *testing.T) {
 		record := NewConversationRecord("test-delete")
-		record.FirstUserPrompt = "Delete me"
-		record.RawMessages = json.RawMessage(`[{"role":"user"}]`)
+		record.Summary = "Delete me"
+		record.RawMessages = json.RawMessage(`[{"role":"user","content":[{"type":"text","text":"Delete me"}]}]`)
 
 		// Save and confirm it exists
 		err := store.Save(record)
@@ -96,8 +96,8 @@ func TestJSONConversationStore(t *testing.T) {
 		// Create multiple conversations
 		for i := 1; i <= 3; i++ {
 			record := NewConversationRecord(fmt.Sprintf("test-list-%d", i))
-			record.FirstUserPrompt = fmt.Sprintf("Message %d", i)
-			record.RawMessages = json.RawMessage(fmt.Sprintf(`[{"role":"user"}]`))
+			record.Summary = fmt.Sprintf("Conversation %d", i)
+			record.RawMessages = json.RawMessage(fmt.Sprintf(`[{"role":"user","content":[{"type":"text","text":"Message %d"}]}]`, i))
 			err := store.Save(record)
 			assert.NoError(t, err)
 
@@ -125,12 +125,12 @@ func TestJSONConversationStore(t *testing.T) {
 	t.Run("Query", func(t *testing.T) {
 		// Create records with specific content for testing search
 		recordA := NewConversationRecord("test-query-apple")
-		recordA.FirstUserPrompt = "I like apples"
-		recordA.RawMessages = json.RawMessage(`[{"role":"user"}]`)
+		recordA.Summary = "Discussion about apples"
+		recordA.RawMessages = json.RawMessage(`[{"role":"user","content":[{"type":"text","text":"I like apples"}]}]`)
 
 		recordB := NewConversationRecord("test-query-banana")
-		recordB.FirstUserPrompt = "Bananas are great"
-		recordB.RawMessages = json.RawMessage(`[{"role":"user"}]`)
+		recordB.Summary = "Conversation about bananas"
+		recordB.RawMessages = json.RawMessage(`[{"role":"user","content":[{"type":"text","text":"Bananas are great"}]}]`)
 
 		err := store.Save(recordA)
 		assert.NoError(t, err)

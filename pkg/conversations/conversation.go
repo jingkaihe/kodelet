@@ -10,15 +10,14 @@ import (
 
 // ConversationRecord represents a persisted conversation with its messages and metadata
 type ConversationRecord struct {
-	ID              string                 `json:"id"`
-	RawMessages     json.RawMessage        `json:"rawMessages"` // Raw LLM provider messages
-	ModelType       string                 `json:"modelType"`   // e.g., "anthropic"
-	Usage           types.Usage            `json:"usage"`
-	Summary         string                 `json:"summary,omitempty"`
-	CreatedAt       time.Time              `json:"createdAt"`
-	UpdatedAt       time.Time              `json:"updatedAt"`
-	Metadata        map[string]interface{} `json:"metadata,omitempty"`
-	FirstUserPrompt string                 `json:"firstUserPrompt"` // For display in listings
+	ID          string                 `json:"id"`
+	RawMessages json.RawMessage        `json:"rawMessages"` // Raw LLM provider messages
+	ModelType   string                 `json:"modelType"`   // e.g., "anthropic"
+	Usage       types.Usage            `json:"usage"`
+	Summary     string                 `json:"summary,omitempty"`
+	CreatedAt   time.Time              `json:"createdAt"`
+	UpdatedAt   time.Time              `json:"updatedAt"`
+	Metadata    map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // ConversationSummary provides a brief overview of a conversation
@@ -51,12 +50,28 @@ func NewConversationRecord(id string) ConversationRecord {
 
 // ToSummary converts a ConversationRecord to a ConversationSummary
 func (cr *ConversationRecord) ToSummary() ConversationSummary {
-	// Use FirstUserPrompt for display in the summary
-	firstMessage := cr.FirstUserPrompt
-	if firstMessage != "" {
-		// Truncate if too long
-		if len(firstMessage) > 100 {
-			firstMessage = firstMessage[:97] + "..."
+	// Extract first message by parsing the raw messages
+	firstMessage := ""
+	if len(cr.RawMessages) > 0 {
+		var messages []map[string]interface{}
+		if err := json.Unmarshal(cr.RawMessages, &messages); err == nil && len(messages) > 0 {
+			// Find first user message
+			for _, msg := range messages {
+				if role, ok := msg["role"].(string); ok && role == "user" {
+					if content, ok := msg["content"].([]interface{}); ok && len(content) > 0 {
+						if block, ok := content[0].(map[string]interface{}); ok {
+							if text, ok := block["text"].(string); ok {
+								firstMessage = text
+								// Truncate if too long
+								if len(firstMessage) > 100 {
+									firstMessage = firstMessage[:97] + "..."
+								}
+								break
+							}
+						}
+					}
+				}
+			}
 		}
 	}
 

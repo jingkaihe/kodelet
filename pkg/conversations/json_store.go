@@ -148,10 +148,7 @@ func (s *JSONConversationStore) Query(options QueryOptions) ([]ConversationSumma
 				found = true
 			}
 
-			// Search in FirstUserPrompt
-			if !found && strings.Contains(strings.ToLower(record.FirstUserPrompt), strings.ToLower(options.SearchTerm)) {
-				found = true
-			}
+			// FirstUserPrompt has been removed, so skip this check
 
 			// Search in raw messages
 			if !found && len(record.RawMessages) > 0 {

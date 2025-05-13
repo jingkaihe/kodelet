@@ -1,6 +1,7 @@
 package anthropic
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -10,8 +11,8 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 )
 
-// saveConversation saves the current thread to the conversation store
-func (t *AnthropicThread) saveConversation() error {
+// SaveConversation saves the current thread to the conversation store
+func (t *AnthropicThread) SaveConversation(ctx context.Context, summarise bool) error {
 	if !t.isPersisted || t.store == nil {
 		return nil
 	}
@@ -22,32 +23,21 @@ func (t *AnthropicThread) saveConversation() error {
 		return fmt.Errorf("failed to marshal conversation messages: %w", err)
 	}
 
-	// Extract first user message for display purposes
-	firstUserPrompt := ""
-	for _, msg := range t.messages {
-		if msg.Role == "user" {
-			for _, block := range msg.Content {
-				if text := block.GetText(); text != nil {
-					firstUserPrompt = *text
-					break
-				}
-			}
-			if firstUserPrompt != "" {
-				break
-			}
-		}
+	if summarise {
+		// Generate summary for the conversation
+		t.summary = t.ShortSummary(ctx)
 	}
 
 	// Create a new conversation record
 	record := conversations.ConversationRecord{
-		ID:              t.conversationID,
-		RawMessages:     rawMessages,
-		ModelType:       "anthropic",
-		Usage:           t.usage,
-		Metadata:        map[string]interface{}{"model": t.config.Model},
-		FirstUserPrompt: firstUserPrompt,
-		CreatedAt:       time.Now(),
-		UpdatedAt:       time.Now(),
+		ID:          t.conversationID,
+		RawMessages: rawMessages,
+		ModelType:   "anthropic",
+		Usage:       t.usage,
+		Metadata:    map[string]interface{}{"model": t.config.Model},
+		Summary:     t.summary,
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
 	}
 
 	// Save the record
@@ -78,7 +68,7 @@ func (t *AnthropicThread) loadConversation() error {
 
 	// Restore usage statistics
 	t.usage = record.Usage
-
+	t.summary = record.Summary
 	return nil
 }
 
