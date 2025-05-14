@@ -13,6 +13,7 @@ import (
 
 	"github.com/invopop/jsonschema"
 	"github.com/jingkaihe/kodelet/pkg/state"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 var (
@@ -39,6 +40,20 @@ func (b *BashTool) GenerateSchema() *jsonschema.Schema {
 
 func (b *BashTool) Name() string {
 	return "bash"
+}
+
+func (b *BashTool) TracingKVs(parameters string) ([]attribute.KeyValue, error) {
+	input := &BashInput{}
+	err := json.Unmarshal([]byte(parameters), input)
+	if err != nil {
+		return nil, err
+	}
+
+	return []attribute.KeyValue{
+		attribute.String("command", input.Command),
+		attribute.String("description", input.Description),
+		attribute.Int("timeout", input.Timeout),
+	}, nil
 }
 
 func (b *BashTool) ValidateInput(state state.State, parameters string) error {

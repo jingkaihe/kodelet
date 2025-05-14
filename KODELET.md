@@ -191,6 +191,12 @@ max_tokens: 8192
    kodelet run --model "claude-3-opus-20240229" --max-tokens 4096 "your query"
    ```
 
+## Observability
+
+Kodelet includes OpenTelemetry tracing to help with monitoring, debugging, and performance optimization. 
+
+For detailed information about observability features, configuration options, and usage, see [Observability Documentation](docs/observability.md).
+
 ## LLM Architecture
 
 Kodelet uses a `Thread` abstraction for all interactions with the Anthropic Claude API:
@@ -228,10 +234,3 @@ Kodelet tracks token usage from all LLM API calls, including:
 - Total tokens
 
 All commands (chat, run, commit) display detailed token usage statistics upon completion, helping users monitor API usage and cost.
-
-## Important Notes
-- Requires an Anthropic API key for Claude integration
-- Uses Claude 3.7 Sonnet model by default
-- The bash tool has security restrictions to prevent dangerous commands
-- The file_read tool has a maximum output limit of 100KB
-- The kodelet.md file (this file) is used for project context

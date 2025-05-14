@@ -12,6 +12,7 @@ import (
 	"github.com/invopop/jsonschema"
 	"github.com/jingkaihe/kodelet/pkg/state"
 	"github.com/jingkaihe/kodelet/pkg/utils"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 const (
@@ -72,6 +73,19 @@ func (r *FileReadTool) ValidateInput(state state.State, parameters string) error
 	}
 
 	return nil
+}
+
+func (r *FileReadTool) TracingKVs(parameters string) ([]attribute.KeyValue, error) {
+	input := &FileReadInput{}
+	err := json.Unmarshal([]byte(parameters), input)
+	if err != nil {
+		return nil, err
+	}
+
+	return []attribute.KeyValue{
+		attribute.String("file_path", input.FilePath),
+		attribute.Int("offset", input.Offset),
+	}, nil
 }
 
 func (r *FileReadTool) Execute(ctx context.Context, state state.State, parameters string) ToolResult {

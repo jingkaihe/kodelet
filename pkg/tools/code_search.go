@@ -15,6 +15,7 @@ import (
 	"github.com/invopop/jsonschema"
 	"github.com/jingkaihe/kodelet/pkg/state"
 	"github.com/jingkaihe/kodelet/pkg/utils"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 type CodeSearchTool struct{}
@@ -33,6 +34,19 @@ func (t *CodeSearchTool) GenerateSchema() *jsonschema.Schema {
 	return GenerateSchema[CodeSearchInput]()
 }
 
+func (t *CodeSearchTool) TracingKVs(parameters string) ([]attribute.KeyValue, error) {
+	input := &CodeSearchInput{}
+	err := json.Unmarshal([]byte(parameters), input)
+	if err != nil {
+		return nil, err
+	}
+
+	return []attribute.KeyValue{
+		attribute.String("pattern", input.Pattern),
+		attribute.String("path", input.Path),
+		attribute.String("include", input.Include),
+	}, nil
+}
 func (t *CodeSearchTool) Description() string {
 	return `Search for a pattern in the codebase using regex.
 

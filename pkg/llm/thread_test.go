@@ -193,7 +193,7 @@ func TestSendMessageRealClient(t *testing.T) {
 	thread.SetState(state.NewBasicState())
 
 	// Send a simple message that should not trigger tool use
-	err := thread.SendMessage(ctx, "Say hello world", mockHandler, types.MessageOpt{})
+	_, err := thread.SendMessage(ctx, "Say hello world", mockHandler, types.MessageOpt{})
 
 	// Verify
 	assert.NoError(t, err)
@@ -256,7 +256,7 @@ func TestSendMessageWithToolUse(t *testing.T) {
 	thread.SetState(state.NewBasicState())
 
 	// Send message that should trigger thinking tool use
-	err := thread.SendMessage(ctx, "Use the thinking tool to calculate 25 * 32", handler, types.MessageOpt{})
+	_, err := thread.SendMessage(ctx, "Use the thinking tool to calculate 25 * 32", handler, types.MessageOpt{})
 
 	// Verify response
 	assert.NoError(t, err)

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -9,7 +10,7 @@ import (
 )
 
 // StartChat starts the TUI chat interface
-func StartChat(conversationID string, enablePersistence bool) error {
+func StartChat(ctx context.Context, conversationID string, enablePersistence bool) error {
 	// Check terminal capabilities
 	var teaOptions []tea.ProgramOption
 
@@ -25,7 +26,7 @@ func StartChat(conversationID string, enablePersistence bool) error {
 	var p *tea.Program
 
 	// Create model separately to add welcome messages
-	model := NewModel(conversationID, enablePersistence)
+	model := NewModel(ctx, conversationID, enablePersistence)
 
 	// Add welcome message with ASCII art
 	kodaletArt := `
@@ -98,8 +99,8 @@ func isTTY() bool {
 }
 
 // StartChatCmd is a wrapper that can be called from a command line
-func StartChatCmd(conversationID string, enablePersistence bool) {
-	if err := StartChat(conversationID, enablePersistence); err != nil {
+func StartChatCmd(ctx context.Context, conversationID string, enablePersistence bool) {
+	if err := StartChat(ctx, conversationID, enablePersistence); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}

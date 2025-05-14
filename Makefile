@@ -41,6 +41,9 @@ docker-build:
 docker-run:
 	docker run -e ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY} kodelet "$(query)"
 
+release-note: build
+	./bin/kodelet run "diff against the main branch and write the release note in RELEASE.md"
+
 # Display help information
 help:
 	@echo "Available targets:"

@@ -1,0 +1,36 @@
+# Kodelet Sample Configuration File
+# This file shows all available configuration options with example values
+
+# LLM Configuration
+# Model to use for LLM interactions
+model: "claude-3-7-sonnet-latest"
+
+# Maximum tokens for responses
+max_tokens: 8192
+
+# Weak model to use for less complex tasks
+weak_model: "claude-3-5-haiku-latest"
+
+# Tracing Configuration
+tracing:
+  # Enable OpenTelemetry tracing (default: false)
+  enabled: true
+
+  # Sampling strategy (options: always, never, ratio)
+  sampler: always
+
+  # Sampling ratio when using ratio sampler (0.0-1.0)
+  ratio: 1
+
+# Environment variables can also be used to configure Kodelet:
+# - KODELET_MODEL: Overrides the model setting
+# - KODELET_MAX_TOKENS: Overrides the max_tokens setting
+# - KODELET_WEAK_MODEL: Overrides the weak_model setting
+# - KODELET_TRACING_ENABLED: Enables/disables tracing
+# - KODELET_TRACING_SAMPLER: Sets the sampling strategy
+# - KODELET_TRACING_RATIO: Sets the sampling ratio
+#
+# Standard OpenTelemetry environment variables are also supported:
+# - OTEL_EXPORTER_OTLP_ENDPOINT: The endpoint to send telemetry data to
+# - OTEL_EXPORTER_OTLP_HEADERS: Headers to use when sending telemetry data (for auth)
+# - OTEL_RESOURCE_ATTRIBUTES: Additional resource attributes to include

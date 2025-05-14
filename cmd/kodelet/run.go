@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
@@ -17,6 +16,7 @@ var runCmd = &cobra.Command{
 	Long:  `Execute a one-shot query with Kodelet and return the result.`,
 	Args:  cobra.MinimumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
+		ctx := cmd.Context()
 		// Join all arguments as a single query
 		query := strings.Join(args, " ")
 
@@ -32,7 +32,7 @@ var runCmd = &cobra.Command{
 		thread.SetState(appState)
 
 		// Send the message and process the response
-		err := thread.SendMessage(context.Background(), query, handler, types.MessageOpt{
+		_, err := thread.SendMessage(ctx, query, handler, types.MessageOpt{
 			PromptCache: true,
 		})
 		if err != nil {

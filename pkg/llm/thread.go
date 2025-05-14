@@ -43,7 +43,7 @@ func SendMessageAndGetTextWithUsage(ctx context.Context, state state.State, quer
 	thread.SetState(state)
 
 	handler := &types.StringCollectorHandler{Silent: silent}
-	err := thread.SendMessage(ctx, query, handler, opt)
+	_, err := thread.SendMessage(ctx, query, handler, opt)
 	if err != nil {
 		return fmt.Sprintf("Error: %v", err), types.Usage{}
 	}

@@ -14,6 +14,12 @@ type MessageOpt struct {
 	UseWeakModel bool
 }
 
+// SubAgentConfig is the key for the thread in the context
+type SubAgentConfig struct {
+	Thread         Thread         // Thread used by the sub-agent
+	MessageHandler MessageHandler // Message handler for the sub-agent
+}
+
 // Thread represents a conversation thread with an LLM
 type Thread interface {
 	// SetState sets the state for the thread
@@ -23,7 +29,7 @@ type Thread interface {
 	// AddUserMessage adds a user message to the thread
 	AddUserMessage(message string)
 	// SendMessage sends a message to the LLM and processes the response
-	SendMessage(ctx context.Context, message string, handler MessageHandler, opt MessageOpt) error
+	SendMessage(ctx context.Context, message string, handler MessageHandler, opt MessageOpt) (finalOutput string, err error)
 	// GetUsage returns the current token usage for the thread
 	GetUsage() Usage
 	// GetConversationID returns the current conversation ID

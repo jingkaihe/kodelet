@@ -1,5 +1,30 @@
 # Kodelet
 
+## 0.0.8.alpha (2025-05-14)
+
+### SubAgent Tool Implementation
+
+- Added new subagent tool functionality for delegating complex tasks
+- Enhanced capabilities for semantic search and handling nuanced queries
+
+### OpenTelemetry Tracing Implementation
+
+- Added comprehensive OpenTelemetry tracing support for enhanced observability to support the subagent tool
+- New `/pkg/telemetry` package with tracing initialization and helper functions
+- Instrumented CLI commands, LLM interactions, and tool executions with tracing
+- Added configuration options for enabling/disabling tracing and sampling strategies
+- Created documentation in `docs/observability.md` explaining usage and configuration
+
+### Thread Management Improvements
+
+- Refactored thread architecture for better management of LLM interactions
+- Improved token usage tracking and management
+- Enhanced error handling and persistence functionality
+
+### Chat UI Improvements
+
+- Support multiline input with `Ctrl+S` to send the message
+
 ## 0.0.7.alpha (2025-05-13)
 
 ### Conversation Persistence
