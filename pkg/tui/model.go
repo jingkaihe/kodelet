@@ -60,7 +60,7 @@ func NewModel(ctx context.Context, conversationID string, enablePersistence bool
 	ta.SetWidth(80)
 	ta.SetHeight(3)
 	ta.ShowLineNumbers = false
-	ta.KeyMap.InsertNewline.SetEnabled(false) // Use Enter to send
+	ta.KeyMap.InsertNewline.SetEnabled(true) // Support multiline input
 
 	// Style the textarea
 	ta.Prompt = "❯ "
@@ -125,6 +125,7 @@ func (m *Model) AddMessage(content string, isUser bool) {
 		Content: content,
 		IsUser:  isUser,
 	})
+	m.assistant.AddUserMessage(content)
 	m.updateViewportContent()
 	m.viewport.GotoBottom()
 }
@@ -225,7 +226,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Handle Enter key specially when dropdown is visible
 	case tea.KeyMsg:
-		if msg.String() == "enter" && m.showCommandDropdown && !m.isProcessing {
+		if msg.Type == tea.KeyEnter && m.showCommandDropdown && !m.isProcessing {
 			// Select the command from dropdown when Enter is pressed
 			selectedCommand := m.availableCommands[m.selectedCommandIdx]
 			m.textarea.SetValue(selectedCommand + " ")
@@ -235,8 +236,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Continue with normal message handling
-		switch msg.String() {
-		case "ctrl+c":
+		switch msg.Type {
+		case tea.KeyCtrlC:
 			// Check if this is a second ctrl+c press within 2 seconds
 			now := time.Now()
 			if m.ctrlCPressCount > 0 && now.Sub(m.lastCtrlCPressTime) < 2*time.Second {
@@ -252,11 +253,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			// Schedule a reset using the proper command system
 			return m, resetCtrlCCmd()
-		case "ctrl+h":
+		case tea.KeyCtrlH:
 			// Show help/shortcuts
 			m.AddSystemMessage("Keyboard Shortcuts:\n" +
 				"Ctrl+C (twice): Quit\n" +
-				"Enter: Send message\n" +
+				"Ctrl+S: Send message\n" +
 				"Ctrl+H: Show this help\n" +
 				"Ctrl+L: Clear screen\n" +
 				"PageUp/PageDown: Scroll history\n" +
@@ -265,18 +266,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				"/bash [command]: Execute a bash command and include result in chat context\n" +
 				"/help: Show this help message\n" +
 				"/clear: Clear the screen")
-		case "ctrl+l":
+		case tea.KeyCtrlL:
 			// Clear the screen
 			m.messages = []Message{}
 			m.updateViewportContent()
 			m.AddSystemMessage("Screen cleared")
-		case "pgup":
+		case tea.KeyPgUp:
 			// Scroll up a page
 			m.viewport.PageUp()
-		case "pgdown":
+		case tea.KeyPgDown:
 			// Scroll down a page
 			m.viewport.PageDown()
-		case "enter":
+		case tea.KeyCtrlS:
 			// Always hide dropdown on Enter regardless of what happens next
 			m.showCommandDropdown = false
 
@@ -296,7 +297,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							// Show help message
 							m.AddSystemMessage("Keyboard Shortcuts:\n" +
 								"Ctrl+C (twice): Quit\n" +
-								"Enter: Send message\n" +
+								"Ctrl+S: Send message\n" +
 								"Ctrl+H: Show this help\n" +
 								"Ctrl+L: Clear screen\n" +
 								"PageUp/PageDown: Scroll history\n" +
@@ -414,18 +415,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Handle slash command navigation with Tab, Up, Down
-		if _, ok := msg.(tea.KeyMsg); ok {
-			switch msg.(tea.KeyMsg).String() {
-			case "tab", "down":
+		if keyMsg, ok := msg.(tea.KeyMsg); ok {
+			switch keyMsg.Type {
+			case tea.KeyTab, tea.KeyDown:
 				// Move to the next suggestion
 				m.selectedCommandIdx = (m.selectedCommandIdx + 1) % len(m.availableCommands)
-			case "shift+tab", "up":
+			case tea.KeyShiftTab, tea.KeyUp:
 				// Move to the previous suggestion
 				m.selectedCommandIdx = (m.selectedCommandIdx - 1)
 				if m.selectedCommandIdx < 0 {
 					m.selectedCommandIdx = len(m.availableCommands) - 1
 				}
-			case "enter":
+			case tea.KeyEnter:
 				// If showing dropdown and Enter is pressed, select the command
 				if m.showCommandDropdown {
 					selectedCommand := m.availableCommands[m.selectedCommandIdx]
@@ -596,7 +597,7 @@ func (m Model) statusView() string {
 		Padding(0, 1).
 		MarginTop(0).
 		Bold(true).
-		Render(statusText + persistenceStatus + " │ Ctrl+C (twice): Quit │ Ctrl+H (/help): Help │ ↑/↓: Scroll")
+		Render(statusText + persistenceStatus + " │ Ctrl+C (twice): Quit │ Ctrl+H (/help): Help │ Ctrl+S: Submit │ ↑/↓: Scroll")
 
 	// Create separate usage and cost line if available
 	if m.usageText != "" {

@@ -21,6 +21,9 @@
 - Improved token usage tracking and management
 - Enhanced error handling and persistence functionality
 
+### Chat UI Improvements
+
+- Support multiline input with `Ctrl+S` to send the message
 
 ## 0.0.7.alpha (2025-05-13)
 
