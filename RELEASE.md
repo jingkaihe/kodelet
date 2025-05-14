@@ -1,5 +1,9 @@
 # Kodelet
 
+## 0.0.8.alpha1 (2025-05-14)
+
+- Minior TUI message input fix
+
 ## 0.0.8.alpha (2025-05-14)
 
 ### SubAgent Tool Implementation

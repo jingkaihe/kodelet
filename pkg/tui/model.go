@@ -125,7 +125,6 @@ func (m *Model) AddMessage(content string, isUser bool) {
 		Content: content,
 		IsUser:  isUser,
 	})
-	m.assistant.AddUserMessage(content)
 	m.updateViewportContent()
 	m.viewport.GotoBottom()
 }
