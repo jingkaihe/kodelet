@@ -191,6 +191,12 @@ max_tokens: 8192
    kodelet run --model "claude-3-opus-20240229" --max-tokens 4096 "your query"
    ```
 
+## Observability
+
+Kodelet includes OpenTelemetry tracing to help with monitoring, debugging, and performance optimization. 
+
+For detailed information about observability features, configuration options, and usage, see [Observability Documentation](docs/observability.md).
+
 ## LLM Architecture
 
 Kodelet uses a `Thread` abstraction for all interactions with the Anthropic Claude API:

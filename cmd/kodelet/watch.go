@@ -43,7 +43,7 @@ AI-powered insights or assistance whenever changes are detected.
 By default, it watches the current directory and all subdirectories,
 ignoring common directories like .git and node_modules.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		ctx := context.Background()
+		ctx := cmd.Context()
 		s := state.NewBasicState()
 		runWatchMode(ctx, s)
 	},

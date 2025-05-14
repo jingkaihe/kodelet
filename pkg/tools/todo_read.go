@@ -9,6 +9,7 @@ import (
 
 	"github.com/invopop/jsonschema"
 	"github.com/jingkaihe/kodelet/pkg/state"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 type TodoReadTool struct{}
@@ -38,6 +39,22 @@ func (t *TodoReadTool) GenerateSchema() *jsonschema.Schema {
 
 func (t *TodoReadTool) ValidateInput(state state.State, parameters string) error {
 	return nil
+}
+
+func (t *TodoReadTool) TracingKVs(parameters string) ([]attribute.KeyValue, error) {
+	var todos TodoWriteInput
+	if err := json.Unmarshal([]byte(parameters), &todos); err != nil {
+		return nil, err
+	}
+
+	kvs := []attribute.KeyValue{}
+	for i, todo := range todos.Todos {
+		kvs = append(kvs, attribute.String(fmt.Sprintf("todo.%d.Status", i), string(todo.Status)))
+		kvs = append(kvs, attribute.String(fmt.Sprintf("todo.%d.Priority", i), string(todo.Priority)))
+		kvs = append(kvs, attribute.String(fmt.Sprintf("todo.%d.Content", i), todo.Content))
+	}
+
+	return kvs, nil
 }
 
 func (t *TodoReadTool) Execute(ctx context.Context, state state.State, parameters string) ToolResult {

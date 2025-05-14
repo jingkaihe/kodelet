@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -29,7 +28,7 @@ You must stage your changes (using 'git add') before running this command.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		// Create a new state for the commit operation
 		s := state.NewBasicState()
-		ctx := context.Background()
+		ctx := cmd.Context()
 
 		// Check if we're in a git repository
 		if !isGitRepository() {

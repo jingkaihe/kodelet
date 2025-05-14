@@ -53,7 +53,7 @@ type Model struct {
 }
 
 // NewModel creates a new TUI model
-func NewModel(conversationID string, enablePersistence bool) Model {
+func NewModel(ctx context.Context, conversationID string, enablePersistence bool) Model {
 	ta := textarea.New()
 	ta.Placeholder = "Type your message..."
 	ta.Focus()
@@ -101,7 +101,7 @@ func NewModel(conversationID string, enablePersistence bool) Model {
 		assistantStyle:     lipgloss.NewStyle().Foreground(lipgloss.Color("212")).Bold(true),
 		systemStyle:        lipgloss.NewStyle().Foreground(lipgloss.Color("yellow")).Bold(true),
 		assistant:          assistant,
-		ctx:                context.Background(),
+		ctx:                ctx,
 		availableCommands:  availableCommands,
 		selectedCommandIdx: 0,
 	}

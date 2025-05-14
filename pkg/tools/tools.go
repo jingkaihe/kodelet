@@ -7,6 +7,11 @@ import (
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/invopop/jsonschema"
 	"github.com/jingkaihe/kodelet/pkg/state"
+	"github.com/jingkaihe/kodelet/pkg/telemetry"
+	"github.com/sirupsen/logrus"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type Tool interface {
@@ -15,6 +20,7 @@ type Tool interface {
 	Description() string
 	ValidateInput(state state.State, parameters string) error
 	Execute(ctx context.Context, state state.State, parameters string) ToolResult
+	TracingKVs(parameters string) ([]attribute.KeyValue, error)
 }
 
 type ToolResult struct {
@@ -89,23 +95,59 @@ func ToAnthropicTools(tools []Tool) []anthropic.ToolUnionParam {
 	return anthropicTools
 }
 
+var (
+	tracer = telemetry.Tracer("kodelet.tools")
+)
+
 func RunTool(ctx context.Context, state state.State, toolName string, parameters string, tools []Tool) ToolResult {
-	for _, tool := range tools {
-		if tool.Name() == toolName {
-			err := tool.ValidateInput(state, parameters)
-			if err != nil {
-				return ToolResult{
-					Error: err.Error(),
-				}
-			}
-			result := tool.Execute(ctx, state, parameters)
-			if result.Error != "" {
-				return result
-			}
-			return result
+	attrs := []attribute.KeyValue{
+		attribute.String("tool.name", toolName),
+		attribute.Int("parameters.length", len(parameters)),
+	}
+
+	ctx, span := tracer.Start(
+		ctx,
+		"tools.run_tool",
+		trace.WithAttributes(attrs...),
+	)
+	defer span.End()
+
+	tool := findTool(tools, toolName)
+	if tool == nil {
+		return ToolResult{
+			Error: fmt.Sprintf("tool not found: %s", toolName),
 		}
 	}
-	return ToolResult{
-		Error: fmt.Sprintf("tool not found: %s", toolName),
+
+	kvs, err := tool.TracingKVs(parameters)
+	if err != nil {
+		logrus.WithError(err).Error("failed to get tracing kvs")
 	}
+	telemetry.SetAttributes(ctx, kvs...)
+
+	err = tool.ValidateInput(state, parameters)
+	if err != nil {
+		return ToolResult{
+			Error: err.Error(),
+		}
+	}
+	result := tool.Execute(ctx, state, parameters)
+
+	if result.Error != "" {
+		span.SetStatus(codes.Error, result.Error)
+		span.RecordError(fmt.Errorf("%s", result.Error))
+	} else {
+		span.SetStatus(codes.Ok, "")
+	}
+
+	return result
+}
+
+func findTool(tools []Tool, toolName string) Tool {
+	for _, tool := range tools {
+		if tool.Name() == toolName {
+			return tool
+		}
+	}
+	return nil
 }

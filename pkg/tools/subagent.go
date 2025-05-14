@@ -8,7 +8,7 @@ import (
 	"github.com/invopop/jsonschema"
 	"github.com/jingkaihe/kodelet/pkg/llm/types"
 	"github.com/jingkaihe/kodelet/pkg/state"
-	"github.com/sirupsen/logrus"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 type SubAgentTool struct{}
@@ -59,6 +59,18 @@ func (t *SubAgentTool) ValidateInput(state state.State, parameters string) error
 	return nil
 }
 
+func (t *SubAgentTool) TracingKVs(parameters string) ([]attribute.KeyValue, error) {
+	input := &SubAgentInput{}
+	err := json.Unmarshal([]byte(parameters), input)
+	if err != nil {
+		return nil, err
+	}
+
+	return []attribute.KeyValue{
+		attribute.String("task_description", input.TaskDescription),
+	}, nil
+}
+
 func (t *SubAgentTool) Execute(ctx context.Context, state state.State, parameters string) ToolResult {
 	input := &SubAgentInput{}
 	err := json.Unmarshal([]byte(parameters), input)
@@ -76,10 +88,13 @@ func (t *SubAgentTool) Execute(ctx context.Context, state state.State, parameter
 		}
 	}
 
-	handler := subAgentConfig.MessageHandler
-	if handler == nil {
-		logrus.Warn("no message handler found in context, using console handler")
-		handler = &types.ConsoleMessageHandler{}
+	// handler := subAgentConfig.MessageHandler
+	// if handler == nil {
+	// 	logrus.Warn("no message handler found in context, using console handler")
+	// 	handler = &types.ConsoleMessageHandler{}
+	// }
+	handler := &types.ConsoleMessageHandler{
+		Silent: true,
 	}
 	text, err := subAgentConfig.Thread.SendMessage(ctx, input.TaskDescription, handler, types.MessageOpt{
 		PromptCache:  true,

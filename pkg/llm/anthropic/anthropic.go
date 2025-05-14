@@ -12,7 +12,11 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/llm/types"
 	"github.com/jingkaihe/kodelet/pkg/state"
 	"github.com/jingkaihe/kodelet/pkg/sysprompt"
+	"github.com/jingkaihe/kodelet/pkg/telemetry"
 	"github.com/jingkaihe/kodelet/pkg/tools"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // ConversationStore is an alias for the conversations.ConversationStore interface
@@ -170,6 +174,47 @@ func (t *AnthropicThread) SendMessage(
 	handler types.MessageHandler,
 	opt types.MessageOpt,
 ) (finalOutput string, err error) {
+	// Check if tracing is enabled and wrap the handler
+	tracingEnabled := false
+	tracer := telemetry.Tracer("kodelet.llm")
+
+	attributes := []attribute.KeyValue{
+		attribute.String("model", t.config.Model),
+		attribute.Int("max_tokens", t.config.MaxTokens),
+		attribute.Bool("prompt_cache", opt.PromptCache),
+		attribute.Bool("use_weak_model", opt.UseWeakModel),
+		attribute.Bool("is_sub_agent", t.config.IsSubAgent),
+		attribute.String("conversation_id", t.conversationID),
+		attribute.Bool("is_persisted", t.isPersisted),
+		attribute.Int("message_length", len(message)),
+	}
+
+	ctx, span := tracer.Start(ctx, "llm.send_message", trace.WithAttributes(attributes...))
+	defer func() {
+		// Record usage metrics after completion
+		usage := t.GetUsage()
+		span.SetAttributes(
+			attribute.Int("tokens.input", usage.InputTokens),
+			attribute.Int("tokens.output", usage.OutputTokens),
+			attribute.Int("tokens.cache_creation", usage.CacheCreationInputTokens),
+			attribute.Int("tokens.cache_read", usage.CacheReadInputTokens),
+			attribute.Float64("cost.input", usage.InputCost),
+			attribute.Float64("cost.output", usage.OutputCost),
+			attribute.Float64("cost.total", usage.TotalCost()),
+			attribute.Int("context_window.current", usage.CurrentContextWindow),
+			attribute.Int("context_window.max", usage.MaxContextWindow),
+		)
+
+		if err != nil {
+			span.SetStatus(codes.Error, err.Error())
+			span.RecordError(err)
+		} else {
+			span.SetStatus(codes.Ok, "")
+			span.AddEvent("message_processing_completed")
+		}
+		span.End()
+	}()
+
 	if opt.PromptCache {
 		t.cacheMessages()
 	}
@@ -206,9 +251,28 @@ func (t *AnthropicThread) SendMessage(
 			Tools:    tools.ToAnthropicTools(t.tools()),
 		}
 
+		// Add a tracing event for API call start
+		if tracingEnabled {
+			telemetry.AddEvent(ctx, "api_call_start",
+				attribute.String("model", model),
+				attribute.Int("max_tokens", t.config.MaxTokens),
+			)
+		}
+
 		response, err := t.client.Messages.New(ctx, messageParams)
 		if err != nil {
+			if tracingEnabled {
+				telemetry.RecordError(ctx, err)
+			}
 			return "", fmt.Errorf("error sending message to Anthropic: %w", err)
+		}
+
+		// Record API call completion
+		if tracingEnabled {
+			telemetry.AddEvent(ctx, "api_call_complete",
+				attribute.Int("input_tokens", int(response.Usage.InputTokens)),
+				attribute.Int("output_tokens", int(response.Usage.OutputTokens)),
+			)
 		}
 
 		// Add the assistant response to history
@@ -228,9 +292,24 @@ func (t *AnthropicThread) SendMessage(
 				inputJSON, _ := json.Marshal(variant.JSON.Input.Raw())
 				handler.HandleToolUse(block.Name, string(inputJSON))
 
+				// For tracing, add tool execution event
+				if tracingEnabled {
+					telemetry.AddEvent(ctx, "tool_execution_start",
+						attribute.String("tool_name", block.Name),
+					)
+				}
+
 				runToolCtx := t.WithSubAgent(ctx, handler)
 				output := tools.RunTool(runToolCtx, t.state, block.Name, string(variant.JSON.Input.Raw()), t.tools())
 				handler.HandleToolResult(block.Name, output.String())
+
+				// For tracing, add tool execution completion event
+				if tracingEnabled {
+					telemetry.AddEvent(ctx, "tool_execution_complete",
+						attribute.String("tool_name", block.Name),
+						attribute.Int("result_length", len(output.String())),
+					)
+				}
 
 				// Add tool result to messages for next API call
 				t.messages = append(t.messages, anthropic.NewUserMessage(

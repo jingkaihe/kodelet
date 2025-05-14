@@ -1,10 +1,13 @@
 package main
 
 import (
-	"fmt"
+	"context"
 	"os"
+	"strings"
+	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -14,9 +17,19 @@ func init() {
 	viper.SetDefault("max_tokens", 8192)
 	viper.SetDefault("model", anthropic.ModelClaude3_7SonnetLatest)
 	viper.SetDefault("weak_model", anthropic.ModelClaude3_5HaikuLatest)
+
+	// Set default tracing configuration
+	viper.SetDefault("tracing.enabled", false)
+	viper.SetDefault("tracing.sampler", "ratio")
+	viper.SetDefault("tracing.ratio", 1)
+
 	// Environment variables
 	viper.SetEnvPrefix("KODELET")
 	viper.AutomaticEnv()
+
+	// Support for nested keys in environment variables
+	// e.g. KODELET_TRACING_ENABLED -> tracing.enabled
+	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 
 	// Config file support
 	viper.SetConfigName("config")
@@ -25,7 +38,9 @@ func init() {
 	viper.AddConfigPath(".")
 
 	// Load config file if it exists (ignore errors if it doesn't)
-	_ = viper.ReadInConfig()
+	if err := viper.ReadInConfig(); err == nil {
+		logrus.WithField("config_file", viper.ConfigFileUsed()).Debug("Using config file")
+	}
 }
 
 var rootCmd = &cobra.Command{
@@ -45,6 +60,9 @@ var rootCmd = &cobra.Command{
 }
 
 func main() {
+	// Create a context
+	ctx := context.Background()
+
 	// Add global flags
 	rootCmd.PersistentFlags().String("model", anthropic.ModelClaude3_7SonnetLatest, "Anthropic model to use (overrides config)")
 	rootCmd.PersistentFlags().Int("max-tokens", 8192, "Maximum tokens for response (overrides config)")
@@ -54,6 +72,7 @@ func main() {
 	viper.BindPFlag("model", rootCmd.PersistentFlags().Lookup("model"))
 	viper.BindPFlag("max_tokens", rootCmd.PersistentFlags().Lookup("max-tokens"))
 	viper.BindPFlag("weak_model", rootCmd.PersistentFlags().Lookup("weak-model"))
+
 	// Add subcommands
 	rootCmd.AddCommand(chatCmd)
 	rootCmd.AddCommand(runCmd)
@@ -61,9 +80,37 @@ func main() {
 	rootCmd.AddCommand(commitCmd)
 	rootCmd.AddCommand(watchCmd)
 
+	// Initialize telemetry with tracing
+	tracingShutdown, err := initTracing(ctx)
+	if err != nil {
+		logrus.WithField("error", err).Warn("Failed to initialize tracing")
+	} else if tracingShutdown != nil {
+		// Ensure tracing is properly shutdown
+		defer func() {
+			if viper.GetBool("tracing.enabled") {
+				// best effort to ensure graceful shutdown
+				time.Sleep(1 * time.Second)
+				if err := tracingShutdown(ctx); err != nil {
+					logrus.WithField("error", err).Warn("Failed to shutdown tracing")
+				}
+			}
+		}()
+	}
+
+	// Apply tracing to all commands
+	rootCmd = withTracing(rootCmd)
+	runCmd = withTracing(runCmd)
+	chatCmd = withTracing(chatCmd)
+	versionCmd = withTracing(versionCmd)
+	commitCmd = withTracing(commitCmd)
+	watchCmd = withTracing(watchCmd)
+
+	// Set the root command context to include the tracing context
+	rootCmd.SetContext(ctx)
+
 	// Execute
-	if err := rootCmd.Execute(); err != nil {
-		fmt.Println(err)
+	if err := rootCmd.ExecuteContext(ctx); err != nil {
+		logrus.WithField("error", err).Error("Failed to execute command")
 		os.Exit(1)
 	}
 }

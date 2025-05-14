@@ -7,6 +7,7 @@ import (
 
 	"github.com/invopop/jsonschema"
 	"github.com/jingkaihe/kodelet/pkg/state"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 type ThinkingTool struct{}
@@ -17,6 +18,18 @@ type ThinkingInput struct {
 
 func (t *ThinkingTool) Name() string {
 	return "thinking"
+}
+
+func (t *ThinkingTool) TracingKVs(parameters string) ([]attribute.KeyValue, error) {
+	input := &ThinkingInput{}
+	err := json.Unmarshal([]byte(parameters), input)
+	if err != nil {
+		return nil, err
+	}
+
+	return []attribute.KeyValue{
+		attribute.String("thought", input.Thought),
+	}, nil
 }
 
 func (t *ThinkingTool) ValidateInput(state state.State, parameters string) error {

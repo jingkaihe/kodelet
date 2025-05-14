@@ -29,14 +29,15 @@ var chatCmd = &cobra.Command{
 	Short: "Start an interactive chat session with Kodelet",
 	Long:  `Start an interactive chat session with Kodelet through stdin.`,
 	Run: func(cmd *cobra.Command, args []string) {
+		ctx := cmd.Context()
 		// Start the Bubble Tea UI
 		if !chatOptions.usePlainUI {
-			tui.StartChatCmd(chatOptions.resumeConvID, !chatOptions.noSave)
+			tui.StartChatCmd(ctx, chatOptions.resumeConvID, !chatOptions.noSave)
 			return
 		}
 
 		// Use the plain CLI interface
-		plainChatUI(chatOptions)
+		plainChatUI(ctx, chatOptions)
 	},
 }
 
@@ -164,7 +165,7 @@ func (o *ConversationListOutput) renderJSON(w io.Writer) error {
 func (o *ConversationListOutput) renderTable(w io.Writer) error {
 	// Create a tabwriter with padding for better readability
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	
+
 	// Print table header
 	fmt.Fprintln(tw, "ID\tCreated\tUpdated\tMessages\tSummary")
 	fmt.Fprintln(tw, "----\t-------\t-------\t--------\t-------")

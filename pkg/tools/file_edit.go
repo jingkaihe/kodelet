@@ -11,6 +11,7 @@ import (
 	"github.com/invopop/jsonschema"
 	"github.com/jingkaihe/kodelet/pkg/state"
 	"github.com/jingkaihe/kodelet/pkg/utils"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 type FileEditTool struct{}
@@ -57,6 +58,20 @@ The old text must be unique in the file. To ensure the uniqueness of the old tex
 
 If you have multiple text blocks to be replaced, you can call this tool multiple times in a single message.
 `
+}
+
+func (t *FileEditTool) TracingKVs(parameters string) ([]attribute.KeyValue, error) {
+	input := &FileEditInput{}
+	err := json.Unmarshal([]byte(parameters), input)
+	if err != nil {
+		return nil, err
+	}
+
+	return []attribute.KeyValue{
+		attribute.String("file_path", input.FilePath),
+		attribute.String("old_text", input.OldText),
+		attribute.String("new_text", input.NewText),
+	}, nil
 }
 
 func (t *FileEditTool) ValidateInput(state state.State, parameters string) error {

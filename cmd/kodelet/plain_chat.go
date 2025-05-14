@@ -13,7 +13,7 @@ import (
 )
 
 // plainChatUI implements the plain CLI interface
-func plainChatUI(options *ChatOptions) {
+func plainChatUI(ctx context.Context, options *ChatOptions) {
 	fmt.Println("Kodelet Chat Mode (Plain UI) - Type 'exit' or 'quit' to end the session")
 	fmt.Println("----------------------------------------------------------")
 
@@ -79,7 +79,7 @@ func plainChatUI(options *ChatOptions) {
 		}
 
 		// Process the query using the persistent thread
-		_, err = thread.SendMessage(context.Background(), input, handler, types.MessageOpt{
+		_, err = thread.SendMessage(ctx, input, handler, types.MessageOpt{
 			PromptCache: true,
 		})
 		if err != nil {
