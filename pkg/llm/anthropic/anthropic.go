@@ -175,7 +175,6 @@ func (t *AnthropicThread) SendMessage(
 	opt types.MessageOpt,
 ) (finalOutput string, err error) {
 	// Check if tracing is enabled and wrap the handler
-	tracingEnabled := false
 	tracer := telemetry.Tracer("kodelet.llm")
 
 	attributes := []attribute.KeyValue{
@@ -198,8 +197,6 @@ func (t *AnthropicThread) SendMessage(
 			attribute.Int("tokens.output", usage.OutputTokens),
 			attribute.Int("tokens.cache_creation", usage.CacheCreationInputTokens),
 			attribute.Int("tokens.cache_read", usage.CacheReadInputTokens),
-			attribute.Float64("cost.input", usage.InputCost),
-			attribute.Float64("cost.output", usage.OutputCost),
 			attribute.Float64("cost.total", usage.TotalCost()),
 			attribute.Int("context_window.current", usage.CurrentContextWindow),
 			attribute.Int("context_window.max", usage.MaxContextWindow),
@@ -252,28 +249,21 @@ func (t *AnthropicThread) SendMessage(
 		}
 
 		// Add a tracing event for API call start
-		if tracingEnabled {
-			telemetry.AddEvent(ctx, "api_call_start",
-				attribute.String("model", model),
-				attribute.Int("max_tokens", t.config.MaxTokens),
-			)
-		}
+		telemetry.AddEvent(ctx, "api_call_start",
+			attribute.String("model", model),
+			attribute.Int("max_tokens", t.config.MaxTokens),
+		)
 
-		response, err := t.client.Messages.New(ctx, messageParams)
+		response, err := t.NewMessage(ctx, messageParams)
 		if err != nil {
-			if tracingEnabled {
-				telemetry.RecordError(ctx, err)
-			}
 			return "", fmt.Errorf("error sending message to Anthropic: %w", err)
 		}
 
 		// Record API call completion
-		if tracingEnabled {
-			telemetry.AddEvent(ctx, "api_call_complete",
-				attribute.Int("input_tokens", int(response.Usage.InputTokens)),
-				attribute.Int("output_tokens", int(response.Usage.OutputTokens)),
-			)
-		}
+		telemetry.AddEvent(ctx, "api_call_complete",
+			attribute.Int("input_tokens", int(response.Usage.InputTokens)),
+			attribute.Int("output_tokens", int(response.Usage.OutputTokens)),
+		)
 
 		// Add the assistant response to history
 		t.messages = append(t.messages, response.ToParam())
@@ -293,23 +283,19 @@ func (t *AnthropicThread) SendMessage(
 				handler.HandleToolUse(block.Name, string(inputJSON))
 
 				// For tracing, add tool execution event
-				if tracingEnabled {
-					telemetry.AddEvent(ctx, "tool_execution_start",
-						attribute.String("tool_name", block.Name),
-					)
-				}
+				telemetry.AddEvent(ctx, "tool_execution_start",
+					attribute.String("tool_name", block.Name),
+				)
 
 				runToolCtx := t.WithSubAgent(ctx, handler)
 				output := tools.RunTool(runToolCtx, t.state, block.Name, string(variant.JSON.Input.Raw()), t.tools())
 				handler.HandleToolResult(block.Name, output.String())
 
 				// For tracing, add tool execution completion event
-				if tracingEnabled {
-					telemetry.AddEvent(ctx, "tool_execution_complete",
-						attribute.String("tool_name", block.Name),
-						attribute.Int("result_length", len(output.String())),
-					)
-				}
+				telemetry.AddEvent(ctx, "tool_execution_complete",
+					attribute.String("tool_name", block.Name),
+					attribute.Int("result_length", len(output.String())),
+				)
 
 				// Add tool result to messages for next API call
 				t.messages = append(t.messages, anthropic.NewUserMessage(
@@ -331,6 +317,83 @@ func (t *AnthropicThread) SendMessage(
 
 	handler.HandleDone()
 	return finalOutput, nil
+}
+
+// NewMessage sends a message to Anthropic with OTEL tracing
+func (t *AnthropicThread) NewMessage(ctx context.Context, params anthropic.MessageNewParams) (*anthropic.Message, error) {
+	tracer := telemetry.Tracer("kodelet.llm.anthropic")
+
+	// Create attributes for the span
+	spanAttrs := []attribute.KeyValue{
+		attribute.String("model", params.Model),
+		attribute.Int64("max_tokens", params.MaxTokens),
+	}
+	for i, sys := range params.System {
+		spanAttrs = append(spanAttrs, attribute.String(fmt.Sprintf("system.%d", i), sys.Text))
+	}
+
+	// Add the last 10 messages (or fewer if there aren't 10) to the span attributes
+	spanAttrs = append(spanAttrs, t.getLastMessagesAttributes(params.Messages, 10)...)
+
+	// Create a new span for the API call
+	ctx, span := tracer.Start(ctx, "llm.anthropic.new_message", trace.WithAttributes(spanAttrs...))
+	defer span.End()
+
+	// Call the Anthropic API
+	response, err := t.client.Messages.New(ctx, params)
+
+	// Handle errors and update span
+	if err != nil {
+		telemetry.RecordError(ctx, err)
+		span.SetStatus(codes.Error, err.Error())
+		return nil, fmt.Errorf("error sending message to Anthropic: %w", err)
+	}
+
+	// Add response data to the span
+	span.SetAttributes(
+		attribute.Int("input_tokens", int(response.Usage.InputTokens)),
+		attribute.Int("output_tokens", int(response.Usage.OutputTokens)),
+		attribute.Int("cache_creation_tokens", int(response.Usage.CacheCreationInputTokens)),
+		attribute.Int("cache_read_tokens", int(response.Usage.CacheReadInputTokens)),
+	)
+	span.SetStatus(codes.Ok, "")
+
+	return response, nil
+}
+
+// getLastMessagesAttributes extracts information from the last n messages for telemetry purposes
+func (t *AnthropicThread) getLastMessagesAttributes(messages []anthropic.MessageParam, lastN int) []attribute.KeyValue {
+	attrs := []attribute.KeyValue{}
+
+	// Determine how many messages to process (last n or all if fewer than n)
+	startIdx := 0
+	if len(messages) > lastN {
+		startIdx = len(messages) - lastN
+	}
+
+	// Process the last n messages
+	for i := startIdx; i < len(messages); i++ {
+		msg := messages[i]
+		idx := i - startIdx // relative index for attribute naming
+
+		// Add message role
+		attrs = append(attrs, attribute.String(fmt.Sprintf("message.%d.role", idx), string(msg.Role)))
+
+		contentJson, err := json.Marshal(msg.Content)
+		if err != nil {
+			attrs = append(attrs, attribute.String(
+				fmt.Sprintf("message.%d.content", idx),
+				fmt.Sprintf("error marshalling content: %s", err),
+			))
+		} else {
+			attrs = append(attrs, attribute.String(
+				fmt.Sprintf("message.%d.content", idx),
+				string(contentJson),
+			))
+		}
+	}
+
+	return attrs
 }
 
 func (t *AnthropicThread) tools() []tools.Tool {

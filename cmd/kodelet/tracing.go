@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/jingkaihe/kodelet/pkg/telemetry"
 	"github.com/jingkaihe/kodelet/pkg/version"
@@ -50,7 +49,7 @@ func withTracing(cmd *cobra.Command) *cobra.Command {
 
 	// Replace with a traced version
 	cmd.Run = func(cmd *cobra.Command, args []string) {
-		ctx := cmd.Context(
+		ctx := cmd.Context()
 
 		// Add command attributes
 		attrs := []attribute.KeyValue{

@@ -100,18 +100,6 @@ var (
 )
 
 func RunTool(ctx context.Context, state state.State, toolName string, parameters string, tools []Tool) ToolResult {
-	attrs := []attribute.KeyValue{
-		attribute.String("tool.name", toolName),
-		attribute.Int("parameters.length", len(parameters)),
-	}
-
-	ctx, span := tracer.Start(
-		ctx,
-		"tools.run_tool",
-		trace.WithAttributes(attrs...),
-	)
-	defer span.End()
-
 	tool := findTool(tools, toolName)
 	if tool == nil {
 		return ToolResult{
@@ -123,7 +111,13 @@ func RunTool(ctx context.Context, state state.State, toolName string, parameters
 	if err != nil {
 		logrus.WithError(err).Error("failed to get tracing kvs")
 	}
-	telemetry.SetAttributes(ctx, kvs...)
+
+	ctx, span := tracer.Start(
+		ctx,
+		fmt.Sprintf("tools.run_tool.%s", toolName),
+		trace.WithAttributes(kvs...),
+	)
+	defer span.End()
 
 	err = tool.ValidateInput(state, parameters)
 	if err != nil {
