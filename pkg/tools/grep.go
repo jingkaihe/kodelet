@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/invopop/jsonschema"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -50,9 +51,12 @@ func (t *GrepTool) TracingKVs(parameters string) ([]attribute.KeyValue, error) {
 func (t *GrepTool) Description() string {
 	return `Search for a pattern in the codebase using regex.
 
-IMPORTANT: You should prioritise using this tool over search via grep or egrep.
+## Important Notes
+* You should prioritise using this tool over search via grep, egrep, or other grep-like UNIX commands.
+* Binary files and hidden files/directories (starting with .) are skipped by default.
+* The result returns at maximum 100 files sorted by modification time (newest first). Pay attention to the truncation notice and refine your search pattern to narrow down the results.
 
-This tool takes three parameters:
+## Input
 - pattern: The regex pattern to search for. For example: "func TestFoo_(.*) {", "type Foo struct {"
 - path: The path to search for the pattern default using the current directory
 - include: The optional include path to search for the pattern for example: '*.go' '*.{go,py}'. Leave it empty if you are not sure about the file name pattern or extension.
@@ -266,6 +270,15 @@ func searchDirectory(ctx context.Context, root, pattern, includePattern string, 
 			return err
 		}
 
+		// Skip hidden files and directories (starting with .)
+		baseName := filepath.Base(path)
+		if strings.HasPrefix(baseName, ".") {
+			if d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
+		}
+
 		if d.IsDir() {
 			return nil
 		}
@@ -297,6 +310,36 @@ func searchDirectory(ctx context.Context, root, pattern, includePattern string, 
 	return results, err
 }
 
+// sortSearchResultsByModTime sorts search results by file modification time (newest first)
+func sortSearchResultsByModTime(results []SearchResult) {
+	if len(results) <= 1 {
+		return
+	}
+	
+	// Get file modification times
+	fileTimes := make(map[string]time.Time)
+	for _, result := range results {
+		info, err := os.Stat(result.Filename)
+		if err == nil {
+			fileTimes[result.Filename] = info.ModTime()
+		}
+	}
+	
+	// Sort results by modification time (newest first)
+	for i := 0; i < len(results); i++ {
+		for j := i + 1; j < len(results); j++ {
+			timeI := fileTimes[results[i].Filename]
+			timeJ := fileTimes[results[j].Filename]
+			if timeI.Before(timeJ) {
+				results[i], results[j] = results[j], results[i]
+			}
+		}
+	}
+}
+
+// Limit for maximum search results
+const MaxSearchResults = 100
+
 func (t *GrepTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
 	var input CodeSearchInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
@@ -318,8 +361,26 @@ func (t *GrepTool) Execute(ctx context.Context, state tooltypes.State, parameter
 		}
 	}
 
-	// Format and return the results
+	// Sort results by file modification time (newest first)
+	sortSearchResultsByModTime(results)
+	
+	// Check if results need to be truncated
+	isResultsTruncated := false
+	if len(results) > MaxSearchResults {
+		isResultsTruncated = true
+		results = results[:MaxSearchResults]
+	}
+
+	// Format the results
+	formattedResults := FormatSearchResults(input.Pattern, results)
+	
+	// Add truncation notice if needed
+	if isResultsTruncated {
+		formattedResults += "\n\n[TRUNCATED DUE TO MAXIMUM 100 RESULT LIMIT]"
+	}
+
+	// Return the results
 	return tooltypes.ToolResult{
-		Result: FormatSearchResults(input.Pattern, results),
+		Result: formattedResults,
 	}
 }
