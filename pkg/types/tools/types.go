@@ -46,4 +46,6 @@ type State interface {
 	ClearFileLastAccessed(path string) error
 	TodoFilePath() string
 	SetTodoFilePath(path string)
+
+	Tools() []Tool
 }

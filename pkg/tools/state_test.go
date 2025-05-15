@@ -37,6 +37,27 @@ func TestBasicState(t *testing.T) {
 	if !lastAccessed.IsZero() {
 		t.Errorf("Expected zero time for non-existent file, got %v", lastAccessed)
 	}
+
+	// Test tools
+	tools := s.Tools()
+	if len(tools) != len(MainTools) {
+		t.Errorf("Expected %d tools, got %d", len(MainTools), len(tools))
+	}
+	for i, tool := range tools {
+		if tool.Name() != MainTools[i].Name() {
+			t.Errorf("Expected tool %d to be %s, got %s", i, MainTools[i].Name(), tool.Name())
+		}
+	}
+
+	subAgentTools := NewBasicState(WithSubAgentTools())
+	if len(subAgentTools.Tools()) != len(SubAgentTools) {
+		t.Errorf("Expected %d tools, got %d", len(SubAgentTools), len(subAgentTools.Tools()))
+	}
+	for i, tool := range subAgentTools.Tools() {
+		if tool.Name() != SubAgentTools[i].Name() {
+			t.Errorf("Expected tool %d to be %s, got %s", i, SubAgentTools[i].Name(), tool.Name())
+		}
+	}
 }
 
 func TestClearFileLastAccessed(t *testing.T) {

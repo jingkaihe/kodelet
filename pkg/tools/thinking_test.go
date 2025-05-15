@@ -27,9 +27,9 @@ func TestThinkingTool_Description(t *testing.T) {
 
 func TestThinkingTool_Execute(t *testing.T) {
 	tool := &ThinkingTool{}
-	mockState := NewBasicState()
+	state := NewBasicState()
 
-	result := tool.Execute(context.Background(), mockState, `{"thought": "Test thought"}`)
+	result := tool.Execute(context.Background(), state, `{"thought": "Test thought"}`)
 
 	assert.Equal(t, "Your thought have been recorded.", result.Result)
 	assert.Empty(t, result.Error)
@@ -37,7 +37,7 @@ func TestThinkingTool_Execute(t *testing.T) {
 
 func TestThinkingTool_ValidateInput(t *testing.T) {
 	tool := &ThinkingTool{}
-	mockState := NewBasicState()
+	state := NewBasicState()
 
 	tests := []struct {
 		name       string
@@ -63,7 +63,7 @@ func TestThinkingTool_ValidateInput(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := tool.ValidateInput(mockState, tt.input)
+			err := tool.ValidateInput(state, tt.input)
 			if tt.wantErrMsg == "" {
 				assert.NoError(t, err)
 			} else {

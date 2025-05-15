@@ -67,8 +67,8 @@ var (
 	tracer = telemetry.Tracer("kodelet.tools")
 )
 
-func RunTool(ctx context.Context, state tooltypes.State, toolName string, parameters string, tools []tooltypes.Tool) tooltypes.ToolResult {
-	tool := findTool(tools, toolName)
+func RunTool(ctx context.Context, state tooltypes.State, toolName string, parameters string) tooltypes.ToolResult {
+	tool := findTool(state.Tools(), toolName)
 	if tool == nil {
 		return tooltypes.ToolResult{
 			Error: fmt.Sprintf("tool not found: %s", toolName),

@@ -289,7 +289,7 @@ func (t *AnthropicThread) SendMessage(
 				)
 
 				runToolCtx := t.WithSubAgent(ctx, handler)
-				output := tools.RunTool(runToolCtx, t.state, block.Name, string(variant.JSON.Input.Raw()), t.tools())
+				output := tools.RunTool(runToolCtx, t.state, block.Name, string(variant.JSON.Input.Raw()))
 				handler.HandleToolResult(block.Name, output.String())
 
 				// For tracing, add tool execution completion event
@@ -430,7 +430,7 @@ func (t *AnthropicThread) NewSubAgent(ctx context.Context) llmtypes.Thread {
 	config.IsSubAgent = true
 	thread := NewAnthropicThread(config)
 	thread.isPersisted = false // subagent is not persisted
-	thread.SetState(tools.NewBasicState())
+	thread.SetState(tools.NewBasicState(tools.WithSubAgentTools()))
 	thread.usage = t.usage
 
 	return thread
