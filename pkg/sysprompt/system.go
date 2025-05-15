@@ -20,6 +20,7 @@ const (
 	readmeMd       = "README.md"
 	subagentTool   = "subagent"
 	codeSearchTool = "code_search"
+	batchTool      = "batch"
 )
 
 var systemPrompt = `
@@ -88,10 +89,10 @@ Assistant: [view the test_payment.py and applied the fixes. Noticed a unecessary
 IMPORTANT: DO NOT write code comments unless the code block is complicated.
 
 # Tool Usage
-* If there are not dependencies among the tool calls, you can return them in a single tool use block.
+* Use ${batchTool} for calling multiple INDEPENDENT tools. This allows you to parallelise the tool calls and reduce the latency and context usage by avoiding back and forth communication. e.g. if you should batch "nproc" and "free -m" together.
 * If the tool call returns <error>... Use ${anotherTool} instead</error>, use the ${anotherTool} to solve the problem.
 * Use ${codeSearchTool} for simple code search when the keywords for search can be described in regex.
-* Use ${subagentTool} for semantic code search when the subject you are searching is nuanced and cannot be described in regex.
+* Use ${subagentTool} for semantic code search when the subject you are searching is nuanced and cannot be described in regex. This is going to greatly reduce the latency and context uage.
 
 <example>
 User: What's the code that checks if the user is authenticated?
@@ -229,6 +230,7 @@ func SystemInfo() string {
 	prompt = strings.Replace(prompt, "${osVersion}", osVersion, -1)
 	prompt = strings.Replace(prompt, "${date}", date, -1)
 	prompt = strings.Replace(prompt, "${subagentTool}", subagentTool, -1)
+	prompt = strings.Replace(prompt, "${batchTool}", batchTool, -1)
 	return prompt
 }
 

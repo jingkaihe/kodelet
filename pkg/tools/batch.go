@@ -177,18 +177,14 @@ func (t *BatchTool) Execute(ctx context.Context, state tooltypes.State, paramete
 
 	for idx, toolResult := range toolResults {
 		if toolResult.Error != "" {
-			errors = append(errors, fmt.Sprintf(`<invocation.%d>
-<e>
+			errors = append(errors, fmt.Sprintf(`<invocation.%d.error>
 %s
-</e>
-</invocation.%d>
+</invocation.%d.error>
 `, idx, toolResult.Error, idx))
 		} else {
-			results = append(results, fmt.Sprintf(`<invocation.%d>
-<r>
+			results = append(results, fmt.Sprintf(`<invocation.%d.result>
 %s
-</r>
-</invocation.%d>
+</invocation.%d.result>
 `, idx, toolResult.Result, idx))
 		}
 	}

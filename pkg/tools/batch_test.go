@@ -154,7 +154,7 @@ func TestBatchTool_ValidateInput(t *testing.T) {
 // Fix for the undefined 't' variable in noNestedBatch function
 func TestNoNestedBatch(t *testing.T) {
 	batchTool := &BatchTool{}
-	
+
 	tests := []struct {
 		name        string
 		input       BatchToolInput
@@ -182,7 +182,7 @@ func TestNoNestedBatch(t *testing.T) {
 				Description: "Invalid batch",
 				Invocations: []Invocation{
 					{
-						ToolName: "batch", // This should match batchTool.Name()
+						ToolName:   "batch", // This should match batchTool.Name()
 						Parameters: map[string]interface{}{},
 					},
 				},
@@ -202,7 +202,7 @@ func TestNoNestedBatch(t *testing.T) {
 				}
 				return nil
 			}(tt.input)
-			
+
 			if tt.expectError {
 				assert.Error(t, err)
 			} else {
@@ -247,8 +247,8 @@ func TestBatchTool_Execute(t *testing.T) {
 		assert.Empty(t, result.Error)
 		assert.Contains(t, result.Result, "hello")
 		assert.Contains(t, result.Result, "world")
-		assert.Contains(t, result.Result, "<invocation.0>")
-		assert.Contains(t, result.Result, "<invocation.1>")
+		assert.Contains(t, result.Result, "<invocation.0.result>")
+		assert.Contains(t, result.Result, "<invocation.1.result>")
 	})
 
 	t.Run("one tool succeeds, one fails", func(t *testing.T) {
@@ -280,8 +280,8 @@ func TestBatchTool_Execute(t *testing.T) {
 		result := tool.Execute(ctx, state, string(inputBytes))
 		assert.Contains(t, result.Result, "hello")
 		assert.Contains(t, result.Error, "Command exited with status 127")
-		assert.Contains(t, result.Result, "<invocation.0>")
-		assert.Contains(t, result.Error, "<invocation.1>")
+		assert.Contains(t, result.Result, "<invocation.0.result>")
+		assert.Contains(t, result.Error, "<invocation.1.error>")
 	})
 
 	t.Run("invalid JSON input", func(t *testing.T) {
