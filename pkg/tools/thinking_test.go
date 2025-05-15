@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/jingkaihe/kodelet/pkg/state"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -28,7 +27,7 @@ func TestThinkingTool_Description(t *testing.T) {
 
 func TestThinkingTool_Execute(t *testing.T) {
 	tool := &ThinkingTool{}
-	mockState := state.NewBasicState()
+	mockState := NewBasicState()
 
 	result := tool.Execute(context.Background(), mockState, `{"thought": "Test thought"}`)
 
@@ -38,7 +37,7 @@ func TestThinkingTool_Execute(t *testing.T) {
 
 func TestThinkingTool_ValidateInput(t *testing.T) {
 	tool := &ThinkingTool{}
-	mockState := state.NewBasicState()
+	mockState := NewBasicState()
 
 	tests := []struct {
 		name       string

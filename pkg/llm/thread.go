@@ -6,12 +6,12 @@ import (
 	"strings"
 
 	"github.com/jingkaihe/kodelet/pkg/llm/anthropic"
-	"github.com/jingkaihe/kodelet/pkg/llm/types"
-	"github.com/jingkaihe/kodelet/pkg/state"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
 // NewThread creates a new thread based on the model specified in the config
-func NewThread(config types.Config) types.Thread {
+func NewThread(config llmtypes.Config) llmtypes.Thread {
 	// Determine which provider to use based on the model name
 	modelName := config.Model
 
@@ -38,20 +38,20 @@ func NewThread(config types.Config) types.Thread {
 }
 
 // SendMessageAndGetTextWithUsage is a convenience method for one-shot queries that returns the response as a string and usage information
-func SendMessageAndGetTextWithUsage(ctx context.Context, state state.State, query string, config types.Config, silent bool, opt types.MessageOpt) (string, types.Usage) {
+func SendMessageAndGetTextWithUsage(ctx context.Context, state tooltypes.State, query string, config llmtypes.Config, silent bool, opt llmtypes.MessageOpt) (string, llmtypes.Usage) {
 	thread := NewThread(config)
 	thread.SetState(state)
 
-	handler := &types.StringCollectorHandler{Silent: silent}
+	handler := &llmtypes.StringCollectorHandler{Silent: silent}
 	_, err := thread.SendMessage(ctx, query, handler, opt)
 	if err != nil {
-		return fmt.Sprintf("Error: %v", err), types.Usage{}
+		return fmt.Sprintf("Error: %v", err), llmtypes.Usage{}
 	}
 	return handler.CollectedText(), thread.GetUsage()
 }
 
 // SendMessageAndGetText is a convenience method for one-shot queries that returns the response as a string
-func SendMessageAndGetText(ctx context.Context, state state.State, query string, config types.Config, silent bool, opt types.MessageOpt) string {
+func SendMessageAndGetText(ctx context.Context, state tooltypes.State, query string, config llmtypes.Config, silent bool, opt llmtypes.MessageOpt) string {
 	text, _ := SendMessageAndGetTextWithUsage(ctx, state, query, config, silent, opt)
 	return text
 }

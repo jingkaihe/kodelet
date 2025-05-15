@@ -6,9 +6,10 @@ import (
 	"errors"
 
 	"github.com/invopop/jsonschema"
-	"github.com/jingkaihe/kodelet/pkg/llm/types"
-	"github.com/jingkaihe/kodelet/pkg/state"
 	"go.opentelemetry.io/otel/attribute"
+
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
 type SubAgentTool struct{}
@@ -45,7 +46,7 @@ This tool is ideal for semantic search, where you are not sure about the exact k
 `
 }
 
-func (t *SubAgentTool) ValidateInput(state state.State, parameters string) error {
+func (t *SubAgentTool) ValidateInput(state tooltypes.State, parameters string) error {
 	input := &SubAgentInput{}
 	err := json.Unmarshal([]byte(parameters), input)
 	if err != nil {
@@ -71,19 +72,19 @@ func (t *SubAgentTool) TracingKVs(parameters string) ([]attribute.KeyValue, erro
 	}, nil
 }
 
-func (t *SubAgentTool) Execute(ctx context.Context, state state.State, parameters string) ToolResult {
+func (t *SubAgentTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
 	input := &SubAgentInput{}
 	err := json.Unmarshal([]byte(parameters), input)
 	if err != nil {
-		return ToolResult{
+		return tooltypes.ToolResult{
 			Error: err.Error(),
 		}
 	}
 
 	// get type.Thread from context
-	subAgentConfig, ok := ctx.Value(types.SubAgentConfig{}).(types.SubAgentConfig)
+	subAgentConfig, ok := ctx.Value(llmtypes.SubAgentConfig{}).(llmtypes.SubAgentConfig)
 	if !ok {
-		return ToolResult{
+		return tooltypes.ToolResult{
 			Error: "sub-agent config not found in context",
 		}
 	}
@@ -91,22 +92,22 @@ func (t *SubAgentTool) Execute(ctx context.Context, state state.State, parameter
 	// handler := subAgentConfig.MessageHandler
 	// if handler == nil {
 	// 	logrus.Warn("no message handler found in context, using console handler")
-	// 	handler = &types.ConsoleMessageHandler{}
+	// 	handler = &llmtypes.ConsoleMessageHandler{}
 	// }
-	handler := &types.ConsoleMessageHandler{
+	handler := &llmtypes.ConsoleMessageHandler{
 		Silent: true,
 	}
-	text, err := subAgentConfig.Thread.SendMessage(ctx, input.TaskDescription, handler, types.MessageOpt{
+	text, err := subAgentConfig.Thread.SendMessage(ctx, input.TaskDescription, handler, llmtypes.MessageOpt{
 		PromptCache:  true,
 		UseWeakModel: false,
 	})
 	if err != nil {
-		return ToolResult{
+		return tooltypes.ToolResult{
 			Error: err.Error(),
 		}
 	}
 
-	return ToolResult{
+	return tooltypes.ToolResult{
 		Result: text,
 	}
 }

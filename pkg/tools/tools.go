@@ -6,44 +6,12 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/invopop/jsonschema"
-	"github.com/jingkaihe/kodelet/pkg/state"
 	"github.com/jingkaihe/kodelet/pkg/telemetry"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/sirupsen/logrus"
-	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 )
-
-type Tool interface {
-	GenerateSchema() *jsonschema.Schema
-	Name() string
-	Description() string
-	ValidateInput(state state.State, parameters string) error
-	Execute(ctx context.Context, state state.State, parameters string) ToolResult
-	TracingKVs(parameters string) ([]attribute.KeyValue, error)
-}
-
-type ToolResult struct {
-	Result string `json:"result"`
-	Error  string `json:"error"`
-}
-
-func (t *ToolResult) String() string {
-	out := ""
-	if t.Error != "" {
-		out = fmt.Sprintf(`<error>
-%s
-</error>
-`, t.Error)
-	}
-	if t.Result != "" {
-		out += fmt.Sprintf(`<result>
-%s
-</result>
-`, t.Result)
-	}
-	return out
-}
 
 func GenerateSchema[T any]() *jsonschema.Schema {
 	reflector := jsonschema.Reflector{
@@ -55,7 +23,7 @@ func GenerateSchema[T any]() *jsonschema.Schema {
 	return reflector.Reflect(v)
 }
 
-var MainTools = []Tool{
+var MainTools = []tooltypes.Tool{
 	&BashTool{},
 	&FileReadTool{},
 	&FileWriteTool{},
@@ -67,7 +35,7 @@ var MainTools = []Tool{
 	&TodoWriteTool{},
 }
 
-var SubAgentTools = []Tool{
+var SubAgentTools = []tooltypes.Tool{
 	&BashTool{},
 	&FileReadTool{},
 	&FileWriteTool{},
@@ -78,7 +46,7 @@ var SubAgentTools = []Tool{
 	&TodoWriteTool{},
 }
 
-func ToAnthropicTools(tools []Tool) []anthropic.ToolUnionParam {
+func ToAnthropicTools(tools []tooltypes.Tool) []anthropic.ToolUnionParam {
 	anthropicTools := make([]anthropic.ToolUnionParam, len(tools))
 	for i, tool := range tools {
 		anthropicTools[i] = anthropic.ToolUnionParam{
@@ -99,10 +67,10 @@ var (
 	tracer = telemetry.Tracer("kodelet.tools")
 )
 
-func RunTool(ctx context.Context, state state.State, toolName string, parameters string, tools []Tool) ToolResult {
+func RunTool(ctx context.Context, state tooltypes.State, toolName string, parameters string, tools []tooltypes.Tool) tooltypes.ToolResult {
 	tool := findTool(tools, toolName)
 	if tool == nil {
-		return ToolResult{
+		return tooltypes.ToolResult{
 			Error: fmt.Sprintf("tool not found: %s", toolName),
 		}
 	}
@@ -121,7 +89,7 @@ func RunTool(ctx context.Context, state state.State, toolName string, parameters
 
 	err = tool.ValidateInput(state, parameters)
 	if err != nil {
-		return ToolResult{
+		return tooltypes.ToolResult{
 			Error: err.Error(),
 		}
 	}
@@ -137,7 +105,7 @@ func RunTool(ctx context.Context, state state.State, toolName string, parameters
 	return result
 }
 
-func findTool(tools []Tool, toolName string) Tool {
+func findTool(tools []tooltypes.Tool, toolName string) tooltypes.Tool {
 	for _, tool := range tools {
 		if tool.Name() == toolName {
 			return tool

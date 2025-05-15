@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/invopop/jsonschema"
-	"github.com/jingkaihe/kodelet/pkg/state"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"go.opentelemetry.io/otel/attribute"
 )
 
@@ -56,7 +56,7 @@ func (b *BashTool) TracingKVs(parameters string) ([]attribute.KeyValue, error) {
 	}, nil
 }
 
-func (b *BashTool) ValidateInput(state state.State, parameters string) error {
+func (b *BashTool) ValidateInput(state tooltypes.State, parameters string) error {
 	input := &BashInput{}
 	err := json.Unmarshal([]byte(parameters), input)
 	if err != nil {
@@ -200,11 +200,11 @@ The command is using heredoc.
 `
 }
 
-func (b *BashTool) Execute(ctx context.Context, state state.State, parameters string) ToolResult {
+func (b *BashTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
 	input := &BashInput{}
 	err := json.Unmarshal([]byte(parameters), input)
 	if err != nil {
-		return ToolResult{
+		return tooltypes.ToolResult{
 			Error: err.Error(),
 		}
 	}
@@ -216,22 +216,22 @@ func (b *BashTool) Execute(ctx context.Context, state state.State, parameters st
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
-			return ToolResult{
+			return tooltypes.ToolResult{
 				Error: "Command timed out after " + strconv.Itoa(input.Timeout) + " seconds",
 			}
 		}
 		if status, ok := err.(*exec.ExitError); ok {
-			return ToolResult{
+			return tooltypes.ToolResult{
 				Result: string(output),
 				Error:  fmt.Sprintf("Command exited with status %d", status.ExitCode()),
 			}
 		}
-		return ToolResult{
+		return tooltypes.ToolResult{
 			Error: err.Error(),
 		}
 	}
 
-	return ToolResult{
+	return tooltypes.ToolResult{
 		Result: string(output),
 	}
 }

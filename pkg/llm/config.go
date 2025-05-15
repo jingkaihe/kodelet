@@ -1,13 +1,14 @@
 package llm
 
 import (
-	"github.com/jingkaihe/kodelet/pkg/llm/types"
 	"github.com/spf13/viper"
+
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
 
 // GetConfigFromViper returns a Config object based on the current Viper settings
-func GetConfigFromViper() types.Config {
-	return types.Config{
+func GetConfigFromViper() llmtypes.Config {
+	return llmtypes.Config{
 		Model:     viper.GetString("model"),
 		MaxTokens: viper.GetInt("max_tokens"),
 		WeakModel: viper.GetString("weak_model"),

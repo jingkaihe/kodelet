@@ -39,7 +39,7 @@ type MessageHandler interface {
 type Thread struct {
     client          anthropic.Client
     config          Config
-    state           state.State
+    state           State
     messages        []anthropic.MessageParam
 }
 
@@ -52,7 +52,7 @@ func NewThread(config Config) *Thread {
     if config.MaxTokens == 0 {
         config.MaxTokens = 8192
     }
-    
+
     return &Thread{
         client: anthropic.NewClient(),
         config: config,
@@ -60,11 +60,11 @@ func NewThread(config Config) *Thread {
 }
 
 // Accessors and setters for Thread
-func (t *Thread) SetState(s state.State) {
+func (t *Thread) SetState(s State) {
     t.state = s
 }
 
-func (t *Thread) GetState() state.State {
+func (t *Thread) GetState() State {
     return t.state
 }
 
@@ -158,7 +158,7 @@ type StringCollectorHandler struct {
 func (h *StringCollectorHandler) HandleText(text string) {
     h.text.WriteString(text)
     h.text.WriteString("\n")
-    
+
     if !h.silent {
         fmt.Println(text)
         fmt.Println()
@@ -191,14 +191,14 @@ func (h *StringCollectorHandler) CollectedText() string {
 ```go
 // SendMessage sends a user message to the thread and processes the response
 func (t *Thread) SendMessage(
-    ctx context.Context, 
-    message string, 
+    ctx context.Context,
+    message string,
     handler MessageHandler,
     modelOverride ...string,
 ) error {
     // Add the user message to history
     t.messages = append(t.messages, anthropic.NewUserMessage(anthropic.NewTextBlock(message)))
-    
+
     // Main interaction loop for handling tool calls
     for {
         // Determine which model to use
@@ -206,7 +206,7 @@ func (t *Thread) SendMessage(
         if len(modelOverride) > 0 && modelOverride[0] != "" {
             model = modelOverride[0]
         }
-        
+
         // Send request to Anthropic API
         response, err := t.client.Messages.New(ctx, anthropic.MessageNewParams{
             MaxTokens: int64(t.config.MaxTokens),
@@ -225,10 +225,10 @@ func (t *Thread) SendMessage(
         if err != nil {
             return fmt.Errorf("error sending message to Anthropic: %w", err)
         }
-        
+
         // Add the assistant response to history
         t.messages = append(t.messages, response.ToParam())
-        
+
         // Process the response content blocks
         toolUseCount := 0
         for _, block := range response.Content {
@@ -239,24 +239,24 @@ func (t *Thread) SendMessage(
                 toolUseCount++
                 inputJSON, _ := json.Marshal(variant.JSON.Input.Raw())
                 handler.HandleToolUse(block.Name, string(inputJSON))
-                
+
                 // Run the tool
                 output := tools.RunTool(ctx, t.state, block.Name, string(variant.JSON.Input.Raw()))
                 handler.HandleToolResult(block.Name, output.String())
-                
+
                 // Add tool result to messages for next API call
                 t.messages = append(t.messages, anthropic.NewUserMessage(
                     anthropic.NewToolResultBlock(block.ID, output.String(), false),
                 ))
             }
         }
-        
+
         // If no tools were used, we're done
         if toolUseCount == 0 {
             break
         }
     }
-    
+
     handler.HandleDone()
     return nil
 }
@@ -266,10 +266,10 @@ func (t *Thread) SendMessage(
 
 ```go
 // SendMessageAndGetText is a convenience method for one-shot queries that returns the response as a string
-func SendMessageAndGetText(ctx context.Context, state state.State, query string, config Config, silent bool, modelOverride ...string) string {
+func SendMessageAndGetText(ctx context.Context, state tooltypes.State, query string, config Config, silent bool, modelOverride ...string) string {
     thread := NewThread(config)
     thread.SetState(state)
-    
+
     handler := &StringCollectorHandler{silent: silent}
     thread.SendMessage(ctx, query, handler, modelOverride...)
     return handler.CollectedText()
@@ -282,14 +282,14 @@ func SendMessageAndGetText(ctx context.Context, state state.State, query string,
 // SendMessage sends a message to the assistant and processes the response
 func (a *AssistantClient) SendMessage(ctx context.Context, message string, messageCh chan MessageEvent) error {
     handler := &ChannelMessageHandler{messageCh: messageCh}
-    
+
     thread := llm.NewThread(llm.Config{
         Model:     viper.GetString("model"),
         MaxTokens: viper.GetInt("max_tokens"),
     })
     thread.SetState(a.state)
     thread.SetMessages(a.messages)
-    
+
     err := thread.SendMessage(ctx, message, handler)
     a.messages = thread.GetMessages() // Update messages after the call
     return err

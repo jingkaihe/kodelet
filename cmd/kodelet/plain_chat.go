@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	"github.com/jingkaihe/kodelet/pkg/llm"
-	"github.com/jingkaihe/kodelet/pkg/llm/types"
-	"github.com/jingkaihe/kodelet/pkg/state"
+	"github.com/jingkaihe/kodelet/pkg/tools"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
 
 // plainChatUI implements the plain CLI interface
@@ -19,7 +19,7 @@ func plainChatUI(ctx context.Context, options *ChatOptions) {
 
 	// Create a persistent thread with state
 	thread := llm.NewThread(llm.GetConfigFromViper())
-	thread.SetState(state.NewBasicState())
+	thread.SetState(tools.NewBasicState())
 
 	// Configure conversation persistence
 	if options.resumeConvID != "" {
@@ -36,7 +36,7 @@ func plainChatUI(ctx context.Context, options *ChatOptions) {
 	}
 
 	// Create a console handler
-	handler := &types.ConsoleMessageHandler{Silent: false}
+	handler := &llmtypes.ConsoleMessageHandler{Silent: false}
 
 	reader := bufio.NewReader(os.Stdin)
 
@@ -79,7 +79,7 @@ func plainChatUI(ctx context.Context, options *ChatOptions) {
 		}
 
 		// Process the query using the persistent thread
-		_, err = thread.SendMessage(ctx, input, handler, types.MessageOpt{
+		_, err = thread.SendMessage(ctx, input, handler, llmtypes.MessageOpt{
 			PromptCache: true,
 		})
 		if err != nil {

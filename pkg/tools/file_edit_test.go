@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jingkaihe/kodelet/pkg/state"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -50,7 +49,7 @@ func TestFileEditTool_ValidateInput(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	mockState := state.NewBasicState()
+	mockState := NewBasicState()
 	mockState.SetFileLastAccessed(tmpfile.Name(), time.Now())
 
 	tool := &FileEditTool{}
@@ -137,7 +136,7 @@ func TestFileEditTool_Execute(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		mockState := state.NewBasicState()
+		mockState := NewBasicState()
 
 		input := FileEditInput{
 			FilePath: tmpfile.Name(),
@@ -165,7 +164,7 @@ func TestFileEditTool_Execute(t *testing.T) {
 			NewText:  "new text",
 		}
 		params, _ := json.Marshal(input)
-		result := tool.Execute(context.Background(), state.NewBasicState(), string(params))
+		result := tool.Execute(context.Background(), NewBasicState(), string(params))
 
 		assert.Contains(t, result.Error, "failed to read the file")
 		assert.Empty(t, result.Result)
@@ -173,7 +172,7 @@ func TestFileEditTool_Execute(t *testing.T) {
 
 	// Test invalid JSON
 	t.Run("invalid JSON", func(t *testing.T) {
-		result := tool.Execute(context.Background(), state.NewBasicState(), "invalid json")
+		result := tool.Execute(context.Background(), NewBasicState(), "invalid json")
 		assert.NotEmpty(t, result.Error)
 		assert.Empty(t, result.Result)
 	})
@@ -196,7 +195,7 @@ func TestFileEditTool_MultipleEdits(t *testing.T) {
 	}
 
 	tool := &FileEditTool{}
-	mockState := state.NewBasicState()
+	mockState := NewBasicState()
 
 	// First edit
 	firstInput := FileEditInput{
@@ -317,7 +316,7 @@ func TestFileEditTool_ExecuteOutputsFormattedEdit(t *testing.T) {
 	}
 
 	tool := &FileEditTool{}
-	mockState := state.NewBasicState()
+	mockState := NewBasicState()
 
 	// Edit the file
 	input := FileEditInput{
@@ -365,7 +364,7 @@ func main() {
 	}
 
 	tool := &FileEditTool{}
-	mockState := state.NewBasicState()
+	mockState := NewBasicState()
 
 	// Edit the file - replace the data processing loop
 	oldText := `	// Process data

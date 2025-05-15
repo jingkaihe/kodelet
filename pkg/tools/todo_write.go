@@ -7,7 +7,7 @@ import (
 	"os"
 
 	"github.com/invopop/jsonschema"
-	"github.com/jingkaihe/kodelet/pkg/state"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"go.opentelemetry.io/otel/attribute"
 )
 
@@ -139,7 +139,7 @@ func (t *TodoWriteTool) GenerateSchema() *jsonschema.Schema {
 	return GenerateSchema[TodoWriteInput]()
 }
 
-func (t *TodoWriteTool) ValidateInput(state state.State, parameters string) error {
+func (t *TodoWriteTool) ValidateInput(state tooltypes.State, parameters string) error {
 	var input TodoWriteInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
 		return fmt.Errorf("invalid input: %w", err)
@@ -180,10 +180,10 @@ func (t *TodoWriteTool) TracingKVs(parameters string) ([]attribute.KeyValue, err
 	return kvs, nil
 }
 
-func (t *TodoWriteTool) Execute(ctx context.Context, state state.State, parameters string) ToolResult {
+func (t *TodoWriteTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
 	var input TodoWriteInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
-		return ToolResult{
+		return tooltypes.ToolResult{
 			Error: fmt.Sprintf("invalid input: %s", err.Error()),
 		}
 	}
@@ -193,12 +193,12 @@ func (t *TodoWriteTool) Execute(ctx context.Context, state state.State, paramete
 	// write the todos to the file
 	err := os.WriteFile(todosFilePath, []byte(parameters), 0644)
 	if err != nil {
-		return ToolResult{
+		return tooltypes.ToolResult{
 			Error: fmt.Sprintf("failed to write todos to file: %s", err.Error()),
 		}
 	}
 
-	return ToolResult{
+	return tooltypes.ToolResult{
 		Result: fmt.Sprintf("Todos have been written to %s", todosFilePath),
 	}
 }

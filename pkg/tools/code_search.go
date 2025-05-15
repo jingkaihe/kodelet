@@ -13,7 +13,7 @@ import (
 	"strings"
 
 	"github.com/invopop/jsonschema"
-	"github.com/jingkaihe/kodelet/pkg/state"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/jingkaihe/kodelet/pkg/utils"
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -59,7 +59,7 @@ This tool takes three parameters:
 `
 }
 
-func (t *CodeSearchTool) ValidateInput(state state.State, parameters string) error {
+func (t *CodeSearchTool) ValidateInput(state tooltypes.State, parameters string) error {
 	var input CodeSearchInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
 		return err
@@ -294,10 +294,10 @@ func searchDirectory(ctx context.Context, root, pattern, includePattern string, 
 	return results, err
 }
 
-func (t *CodeSearchTool) Execute(ctx context.Context, state state.State, parameters string) ToolResult {
+func (t *CodeSearchTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
 	var input CodeSearchInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
-		return ToolResult{
+		return tooltypes.ToolResult{
 			Error: fmt.Sprintf("invalid input: %s", err),
 		}
 	}
@@ -310,13 +310,13 @@ func (t *CodeSearchTool) Execute(ctx context.Context, state state.State, paramet
 	// Search for the pattern in the specified directory
 	results, err := searchDirectory(ctx, path, input.Pattern, input.Include, CodeSearchSurroundingLines)
 	if err != nil {
-		return ToolResult{
+		return tooltypes.ToolResult{
 			Error: fmt.Sprintf("search failed: %s", err),
 		}
 	}
 
 	// Format and return the results
-	return ToolResult{
+	return tooltypes.ToolResult{
 		Result: FormatSearchResults(input.Pattern, results),
 	}
 }

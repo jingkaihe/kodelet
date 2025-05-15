@@ -4,12 +4,13 @@ import (
 	"testing"
 
 	"github.com/anthropics/anthropic-sdk-go"
-	"github.com/jingkaihe/kodelet/pkg/llm/types"
 	"github.com/stretchr/testify/assert"
+
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
 
 func TestDeserializeMessages(t *testing.T) {
-	thread := NewAnthropicThread(types.Config{
+	thread := NewAnthropicThread(llmtypes.Config{
 		Model: anthropic.ModelClaude3_7SonnetLatest,
 	})
 	thread.DeserializeMessages([]byte(``))

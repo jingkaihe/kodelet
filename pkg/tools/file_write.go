@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/invopop/jsonschema"
-	"github.com/jingkaihe/kodelet/pkg/state"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/jingkaihe/kodelet/pkg/utils"
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -43,7 +43,7 @@ By default the file is created with 0644 permissions. You can change the permiss
 `
 }
 
-func (t *FileWriteTool) ValidateInput(state state.State, parameters string) error {
+func (t *FileWriteTool) ValidateInput(state tooltypes.State, parameters string) error {
 	var input FileWriteInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
 		return fmt.Errorf("invalid input: %w", err)
@@ -90,17 +90,17 @@ func (t *FileWriteTool) TracingKVs(parameters string) ([]attribute.KeyValue, err
 	}, nil
 }
 
-func (t *FileWriteTool) Execute(ctx context.Context, state state.State, parameters string) ToolResult {
+func (t *FileWriteTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
 	var input FileWriteInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
-		return ToolResult{Error: fmt.Sprintf("invalid input: %s", err.Error())}
+		return tooltypes.ToolResult{Error: fmt.Sprintf("invalid input: %s", err.Error())}
 	}
 
 	state.SetFileLastAccessed(input.FilePath, time.Now())
 
 	err := os.WriteFile(input.FilePath, []byte(input.Text), 0644)
 	if err != nil {
-		return ToolResult{Error: fmt.Sprintf("failed to write the file: %s", err.Error())}
+		return tooltypes.ToolResult{Error: fmt.Sprintf("failed to write the file: %s", err.Error())}
 	}
 
 	lines := strings.Split(input.Text, "\n")
@@ -110,5 +110,5 @@ func (t *FileWriteTool) Execute(ctx context.Context, state state.State, paramete
 
 %s`, input.FilePath, textWithLineNumber)
 
-	return ToolResult{Result: result}
+	return tooltypes.ToolResult{Result: result}
 }

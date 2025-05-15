@@ -1,4 +1,4 @@
-package types
+package llm
 
 // Usage represents token usage information from LLM API calls
 type Usage struct {

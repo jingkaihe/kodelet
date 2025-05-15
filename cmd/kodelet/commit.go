@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	"github.com/jingkaihe/kodelet/pkg/llm"
-	"github.com/jingkaihe/kodelet/pkg/llm/types"
-	"github.com/jingkaihe/kodelet/pkg/state"
+	"github.com/jingkaihe/kodelet/pkg/tools"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/spf13/cobra"
 )
 
@@ -27,7 +27,7 @@ This command analyzes your 'git diff --cached' and uses AI to generate an approp
 You must stage your changes (using 'git add') before running this command.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		// Create a new state for the commit operation
-		s := state.NewBasicState()
+		s := tools.NewBasicState()
 		ctx := cmd.Context()
 
 		// Check if we're in a git repository
@@ -79,7 +79,7 @@ IMPORTANT: The output of the commit message should not be wrapped with any markd
 		fmt.Println("-----------------------------------------------------------")
 
 		// Get the commit message using the Thread abstraction with usage stats
-		commitMsg, usage := llm.SendMessageAndGetTextWithUsage(ctx, s, prompt, llm.GetConfigFromViper(), true, types.MessageOpt{
+		commitMsg, usage := llm.SendMessageAndGetTextWithUsage(ctx, s, prompt, llm.GetConfigFromViper(), true, llmtypes.MessageOpt{
 			UseWeakModel: true,
 			PromptCache:  false,
 		})

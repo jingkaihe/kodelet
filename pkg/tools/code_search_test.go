@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jingkaihe/kodelet/pkg/state"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -40,7 +39,7 @@ func TestCodeSearchTool_Description(t *testing.T) {
 
 func TestCodeSearchTool_ValidateInput(t *testing.T) {
 	tool := &CodeSearchTool{}
-	state := state.NewBasicState()
+	state := NewBasicState()
 
 	tests := []struct {
 		name        string
@@ -94,7 +93,7 @@ func TestCodeSearchTool_ValidateInput(t *testing.T) {
 func TestCodeSearchTool_Execute(t *testing.T) {
 	tool := &CodeSearchTool{}
 	ctx := context.Background()
-	state := state.NewBasicState()
+	state := NewBasicState()
 
 	// Create a temporary directory for test files
 	tempDir, err := os.MkdirTemp("", "code_search_test")
@@ -280,7 +279,7 @@ func TestCodeSearchTool_Execute(t *testing.T) {
 func TestCodeSearchTool_InvalidJSON(t *testing.T) {
 	tool := &CodeSearchTool{}
 	ctx := context.Background()
-	state := state.NewBasicState()
+	state := NewBasicState()
 
 	result := tool.Execute(ctx, state, "invalid json")
 	assert.NotEmpty(t, result.Error)

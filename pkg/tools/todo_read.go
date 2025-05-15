@@ -8,7 +8,7 @@ import (
 	"sort"
 
 	"github.com/invopop/jsonschema"
-	"github.com/jingkaihe/kodelet/pkg/state"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"go.opentelemetry.io/otel/attribute"
 )
 
@@ -37,7 +37,7 @@ func (t *TodoReadTool) GenerateSchema() *jsonschema.Schema {
 	return GenerateSchema[TodoReadInput]()
 }
 
-func (t *TodoReadTool) ValidateInput(state state.State, parameters string) error {
+func (t *TodoReadTool) ValidateInput(state tooltypes.State, parameters string) error {
 	return nil
 }
 
@@ -57,19 +57,19 @@ func (t *TodoReadTool) TracingKVs(parameters string) ([]attribute.KeyValue, erro
 	return kvs, nil
 }
 
-func (t *TodoReadTool) Execute(ctx context.Context, state state.State, parameters string) ToolResult {
+func (t *TodoReadTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
 	filePath := state.TodoFilePath()
 
 	content, err := os.ReadFile(filePath)
 	if err != nil {
-		return ToolResult{
+		return tooltypes.ToolResult{
 			Error: fmt.Sprintf("failed to read todos from file: %s", err.Error()),
 		}
 	}
 
 	var todos TodoWriteInput
 	if err := json.Unmarshal(content, &todos); err != nil {
-		return ToolResult{
+		return tooltypes.ToolResult{
 			Error: fmt.Sprintf("failed to unmarshal todos from file: %s", err.Error()),
 		}
 	}
@@ -77,7 +77,7 @@ func (t *TodoReadTool) Execute(ctx context.Context, state state.State, parameter
 	sortedTodos := sortTodos(todos.Todos)
 	formattedTodos := formatTodos(sortedTodos)
 
-	return ToolResult{
+	return tooltypes.ToolResult{
 		Result: formattedTodos,
 	}
 }

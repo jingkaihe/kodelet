@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jingkaihe/kodelet/pkg/llm/types"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
 
 // ConversationRecord represents a persisted conversation with its messages and metadata
@@ -13,7 +13,7 @@ type ConversationRecord struct {
 	ID          string                 `json:"id"`
 	RawMessages json.RawMessage        `json:"rawMessages"` // Raw LLM provider messages
 	ModelType   string                 `json:"modelType"`   // e.g., "anthropic"
-	Usage       types.Usage            `json:"usage"`
+	Usage       llmtypes.Usage         `json:"usage"`
 	Summary     string                 `json:"summary,omitempty"`
 	CreatedAt   time.Time              `json:"createdAt"`
 	UpdatedAt   time.Time              `json:"updatedAt"`

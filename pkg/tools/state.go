@@ -1,4 +1,4 @@
-package state
+package tools
 
 import (
 	"fmt"
@@ -7,14 +7,6 @@ import (
 
 	"github.com/google/uuid"
 )
-
-type State interface {
-	SetFileLastAccessed(path string, lastAccessed time.Time) error
-	GetFileLastAccessed(path string) (time.Time, error)
-	ClearFileLastAccessed(path string) error
-	TodoFilePath() string
-	SetTodoFilePath(path string)
-}
 
 type BasicState struct {
 	lastAccessed map[string]time.Time

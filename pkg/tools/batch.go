@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"github.com/invopop/jsonschema"
-	"github.com/jingkaihe/kodelet/pkg/state"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"go.opentelemetry.io/otel/attribute"
 )
 
@@ -102,7 +102,7 @@ func (t *BatchTool) GenerateSchema() *jsonschema.Schema {
 	return GenerateSchema[BatchToolInput]()
 }
 
-func (t *BatchTool) ValidateInput(state state.State, parameters string) error {
+func (t *BatchTool) ValidateInput(state tooltypes.State, parameters string) error {
 	var input BatchToolInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
 		return fmt.Errorf("failed to unmarshal input: %w", err)
@@ -111,13 +111,13 @@ func (t *BatchTool) ValidateInput(state state.State, parameters string) error {
 	return nil
 }
 
-func (t *BatchTool) Execute(ctx context.Context, state state.State, parameters string) ToolResult {
+func (t *BatchTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
 	var input BatchToolInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
-		return ToolResult{Error: fmt.Sprintf("failed to unmarshal input: %w", err)}
+		return tooltypes.ToolResult{Error: fmt.Sprintf("failed to unmarshal input: %v", err)}
 	}
 
-	return ToolResult{}
+	return tooltypes.ToolResult{}
 }
 
 func (t *BatchTool) TracingKVs(parameters string) ([]attribute.KeyValue, error) {

@@ -10,9 +10,10 @@ import (
 	"time"
 
 	"github.com/invopop/jsonschema"
-	"github.com/jingkaihe/kodelet/pkg/state"
 	"github.com/jingkaihe/kodelet/pkg/utils"
 	"go.opentelemetry.io/otel/attribute"
+
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
 const (
@@ -57,7 +58,7 @@ Example:
 `
 }
 
-func (r *FileReadTool) ValidateInput(state state.State, parameters string) error {
+func (r *FileReadTool) ValidateInput(state tooltypes.State, parameters string) error {
 	input := &FileReadInput{}
 	err := json.Unmarshal([]byte(parameters), input)
 	if err != nil {
@@ -88,11 +89,11 @@ func (r *FileReadTool) TracingKVs(parameters string) ([]attribute.KeyValue, erro
 	}, nil
 }
 
-func (r *FileReadTool) Execute(ctx context.Context, state state.State, parameters string) ToolResult {
+func (r *FileReadTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
 	input := &FileReadInput{}
 	err := json.Unmarshal([]byte(parameters), input)
 	if err != nil {
-		return ToolResult{
+		return tooltypes.ToolResult{
 			Error: err.Error(),
 		}
 	}
@@ -101,7 +102,7 @@ func (r *FileReadTool) Execute(ctx context.Context, state state.State, parameter
 
 	file, err := os.Open(input.FilePath)
 	if err != nil {
-		return ToolResult{
+		return tooltypes.ToolResult{
 			Error: fmt.Sprintf("Failed to open file: %s", err.Error()),
 		}
 	}
@@ -118,7 +119,7 @@ func (r *FileReadTool) Execute(ctx context.Context, state state.State, parameter
 	}
 
 	if lineCount < input.Offset {
-		return ToolResult{
+		return tooltypes.ToolResult{
 			Error: fmt.Sprintf("File has only %d lines, which is less than the requested offset %d", lineCount, input.Offset),
 		}
 	}
@@ -136,12 +137,12 @@ func (r *FileReadTool) Execute(ctx context.Context, state state.State, parameter
 	}
 
 	if err := scanner.Err(); err != nil {
-		return ToolResult{
+		return tooltypes.ToolResult{
 			Error: fmt.Sprintf("Error reading file: %s", err.Error()),
 		}
 	}
 
-	return ToolResult{
+	return tooltypes.ToolResult{
 		Result: result,
 	}
 }
