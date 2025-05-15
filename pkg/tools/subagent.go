@@ -6,6 +6,7 @@ import (
 	"errors"
 
 	"github.com/invopop/jsonschema"
+	"github.com/sirupsen/logrus"
 	"go.opentelemetry.io/otel/attribute"
 
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -43,6 +44,7 @@ This tool is ideal for semantic search, where you are not sure about the exact k
    - highly detailed and context-rich.
    - state what information you expect to get back.
 2. The agent returns a text response back to you, and you have no access to the subagent's internal messages.
+3. The agent's response is not visible to the user.
 `
 }
 
@@ -89,17 +91,14 @@ func (t *SubAgentTool) Execute(ctx context.Context, state tooltypes.State, param
 		}
 	}
 
-	// handler := subAgentConfig.MessageHandler
-	// if handler == nil {
-	// 	logrus.Warn("no message handler found in context, using console handler")
-	// 	handler = &llmtypes.ConsoleMessageHandler{}
-	// }
-	handler := &llmtypes.ConsoleMessageHandler{
-		Silent: false,
+	handler := subAgentConfig.MessageHandler
+	if handler == nil {
+		logrus.Warn("no message handler found in context, using console handler")
+		handler = &llmtypes.ConsoleMessageHandler{}
 	}
 	text, err := subAgentConfig.Thread.SendMessage(ctx, input.TaskDescription, handler, llmtypes.MessageOpt{
-		PromptCache:  true,
-		UseWeakModel: false,
+		PromptCache:  false,
+		UseWeakModel: true,
 	})
 	if err != nil {
 		return tooltypes.ToolResult{

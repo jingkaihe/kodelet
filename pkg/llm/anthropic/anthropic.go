@@ -316,7 +316,10 @@ func (t *AnthropicThread) SendMessage(
 		t.SaveConversation(ctx, false)
 	}
 
-	handler.HandleDone()
+	if !t.config.IsSubAgent {
+		// only main agaent can signal done
+		handler.HandleDone()
+	}
 	return finalOutput, nil
 }
 
