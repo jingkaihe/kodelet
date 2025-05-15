@@ -8,6 +8,7 @@ import (
 	"github.com/invopop/jsonschema"
 	"github.com/jingkaihe/kodelet/pkg/telemetry"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
@@ -33,6 +34,7 @@ var MainTools = []tooltypes.Tool{
 	&CodeSearchTool{},
 	&TodoReadTool{},
 	&TodoWriteTool{},
+	&BatchTool{},
 }
 
 var SubAgentTools = []tooltypes.Tool{
@@ -44,6 +46,7 @@ var SubAgentTools = []tooltypes.Tool{
 	&ThinkingTool{},
 	&TodoReadTool{},
 	&TodoWriteTool{},
+	&BatchTool{},
 }
 
 func ToAnthropicTools(tools []tooltypes.Tool) []anthropic.ToolUnionParam {
@@ -68,10 +71,10 @@ var (
 )
 
 func RunTool(ctx context.Context, state tooltypes.State, toolName string, parameters string) tooltypes.ToolResult {
-	tool := findTool(state.Tools(), toolName)
-	if tool == nil {
+	tool, err := findTool(toolName, state)
+	if err != nil {
 		return tooltypes.ToolResult{
-			Error: fmt.Sprintf("tool not found: %s", toolName),
+			Error: errors.Wrap(err, "failed to find tool").Error(),
 		}
 	}
 
@@ -103,13 +106,4 @@ func RunTool(ctx context.Context, state tooltypes.State, toolName string, parame
 	}
 
 	return result
-}
-
-func findTool(tools []tooltypes.Tool, toolName string) tooltypes.Tool {
-	for _, tool := range tools {
-		if tool.Name() == toolName {
-			return tool
-		}
-	}
-	return nil
 }

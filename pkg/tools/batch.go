@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
+	"sync"
 
 	"github.com/invopop/jsonschema"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/pkg/errors"
 	"go.opentelemetry.io/otel/attribute"
 )
 
@@ -20,6 +23,20 @@ type BatchToolInput struct {
 type Invocation struct {
 	ToolName   string `json:"tool_name" jsonschema:"description=The name of the tool to invoke"`
 	Parameters any    `json:"parameters" jsonschema:"description=The parameters to pass to the tool"`
+}
+
+func (inv *Invocation) invoke(ctx context.Context, state tooltypes.State) tooltypes.ToolResult {
+	_, err := findTool(inv.ToolName, state)
+	if err != nil {
+		return tooltypes.ToolResult{Error: errors.Wrap(err, "failed to find tool").Error()}
+	}
+
+	p, err := json.Marshal(inv.Parameters)
+	if err != nil {
+		return tooltypes.ToolResult{Error: errors.Wrap(err, "failed to encode parameters").Error()}
+	}
+
+	return RunTool(ctx, state, inv.ToolName, string(p))
 }
 
 func (t *BatchTool) Name() string {
@@ -102,10 +119,33 @@ func (t *BatchTool) GenerateSchema() *jsonschema.Schema {
 	return GenerateSchema[BatchToolInput]()
 }
 
+var (
+	ErrNestedBatch       = errors.New("nested batch is not allowed")
+	ErrToolNotFound      = errors.New("tool not found")
+	ErrInvalidParameters = errors.New("invalid parameters")
+)
+
 func (t *BatchTool) ValidateInput(state tooltypes.State, parameters string) error {
 	var input BatchToolInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
 		return fmt.Errorf("failed to unmarshal input: %w", err)
+	}
+
+	if err := noNestedBatch(input); err != nil {
+		return err
+	}
+	for _, invocation := range input.Invocations {
+		tool, err := findTool(invocation.ToolName, state)
+		if err != nil {
+			return err
+		}
+		p, err := json.Marshal(invocation.Parameters)
+		if err != nil {
+			return errors.Wrapf(err, "failed to encode parameters")
+		}
+		if err := tool.ValidateInput(state, string(p)); err != nil {
+			return errors.Wrapf(err, "failed to validate parameters")
+		}
 	}
 
 	return nil
@@ -114,10 +154,49 @@ func (t *BatchTool) ValidateInput(state tooltypes.State, parameters string) erro
 func (t *BatchTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
 	var input BatchToolInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
-		return tooltypes.ToolResult{Error: fmt.Sprintf("failed to unmarshal input: %v", err)}
+		return tooltypes.ToolResult{Error: errors.Wrap(err, "failed to unmarshal input").Error()}
 	}
 
-	return tooltypes.ToolResult{}
+	toolResults := make([]tooltypes.ToolResult, len(input.Invocations))
+	wg := sync.WaitGroup{}
+	wg.Add(len(input.Invocations))
+
+	for i, invocation := range input.Invocations {
+		go func(inv Invocation, i int) {
+			defer wg.Done()
+			toolResults[i] = inv.invoke(ctx, state)
+		}(invocation, i)
+	}
+
+	wg.Wait()
+
+	var (
+		results []string
+		errors  []string
+	)
+
+	for idx, toolResult := range toolResults {
+		if toolResult.Error != "" {
+			errors = append(errors, fmt.Sprintf(`<invocation.%d>
+<e>
+%s
+</e>
+</invocation.%d>
+`, idx, toolResult.Error, idx))
+		} else {
+			results = append(results, fmt.Sprintf(`<invocation.%d>
+<r>
+%s
+</r>
+</invocation.%d>
+`, idx, toolResult.Result, idx))
+		}
+	}
+
+	return tooltypes.ToolResult{
+		Result: strings.Join(results, "\n"),
+		Error:  strings.Join(errors, "\n"),
+	}
 }
 
 func (t *BatchTool) TracingKVs(parameters string) ([]attribute.KeyValue, error) {
