@@ -55,13 +55,14 @@ func (t *GrepTool) Description() string {
 * You should prioritise using this tool over search via grep, egrep, or other grep-like UNIX commands.
 * Binary files and hidden files/directories (starting with .) are skipped by default.
 * The result returns at maximum 100 files sorted by modification time (newest first). Pay attention to the truncation notice and refine your search pattern to narrow down the results.
+* To get the best result, you should use the ${glob_tool} to narrow down the files to search in, and then use this tool for a more targeted search.
 
 ## Input
 - pattern: The regex pattern to search for. For example: "func TestFoo_(.*) {", "type Foo struct {"
 - path: The path to search for the pattern default using the current directory
 - include: The optional include path to search for the pattern for example: '*.go' '*.{go,py}'. Leave it empty if you are not sure about the file name pattern or extension.
 
-If you need to do multi-turn search, use ${subagentTool} instead.
+If you need to do multi-turn search using grep_tool and glob_tool, use subagentTool instead.
 `
 }
 
@@ -315,7 +316,7 @@ func sortSearchResultsByModTime(results []SearchResult) {
 	if len(results) <= 1 {
 		return
 	}
-	
+
 	// Get file modification times
 	fileTimes := make(map[string]time.Time)
 	for _, result := range results {
@@ -324,7 +325,7 @@ func sortSearchResultsByModTime(results []SearchResult) {
 			fileTimes[result.Filename] = info.ModTime()
 		}
 	}
-	
+
 	// Sort results by modification time (newest first)
 	for i := 0; i < len(results); i++ {
 		for j := i + 1; j < len(results); j++ {
@@ -363,7 +364,7 @@ func (t *GrepTool) Execute(ctx context.Context, state tooltypes.State, parameter
 
 	// Sort results by file modification time (newest first)
 	sortSearchResultsByModTime(results)
-	
+
 	// Check if results need to be truncated
 	isResultsTruncated := false
 	if len(results) > MaxSearchResults {
@@ -373,7 +374,7 @@ func (t *GrepTool) Execute(ctx context.Context, state tooltypes.State, parameter
 
 	// Format the results
 	formattedResults := FormatSearchResults(input.Pattern, results)
-	
+
 	// Add truncation notice if needed
 	if isResultsTruncated {
 		formattedResults += "\n\n[TRUNCATED DUE TO MAXIMUM 100 RESULT LIMIT]"

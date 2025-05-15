@@ -276,7 +276,9 @@ def multiply(a, b):
 			fmt.Printf("Using auto-completion model: %v\n", config.WeakModel)
 		}
 	}
-	response, usage = llm.SendMessageAndGetTextWithUsage(ctx, state, query, config, true, llmtypes.MessageOpt{
+
+	state.SetFileLastAccessed(path, time.Now())
+	response, usage = llm.SendMessageAndGetTextWithUsage(ctx, state, query, config, false, llmtypes.MessageOpt{
 		UseWeakModel: useWeakModel,
 		PromptCache:  false,
 	})

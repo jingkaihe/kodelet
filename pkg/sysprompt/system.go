@@ -20,6 +20,7 @@ const (
 	readmeMd      = "README.md"
 	subagentTool  = "subagent"
 	grepTool      = "grep_tool"
+	globTool      = "glob_tool"
 	batchTool     = "batch"
 )
 
@@ -91,6 +92,7 @@ Assistant: [view the test_payment.py and applied the fixes. Noticed a unecessary
 IMPORTANT: DO NOT write code comments unless the code block is complicated.
 
 # Tool Usage
+* grep_tool and glob_tool are prefered over running grep, egrep and find using the bash tool.
 * !!!IMPORTANT!!! You MUST use ${batchTool} tool for calling multiple INDEPENDENT tools AS MUCH AS POSSIBLE. This parallelises the tool calls and massively reduces the latency and context usage by avoiding back and forth communication.
 * If the tool call returns <error>... Use ${anotherTool} instead</error>, use the ${anotherTool} to solve the problem.
 * Use ${grepTool} tool for simple code search when the keywords for search can be described in regex.
@@ -235,6 +237,8 @@ func SystemInfo() string {
 	prompt = strings.Replace(prompt, "${date}", date, -1)
 	prompt = strings.Replace(prompt, "${subagentTool}", subagentTool, -1)
 	prompt = strings.Replace(prompt, "${batchTool}", batchTool, -1)
+	prompt = strings.Replace(prompt, "${grepTool}", grepTool, -1)
+	prompt = strings.Replace(prompt, "${globTool}", globTool, -1)
 	return prompt
 }
 
