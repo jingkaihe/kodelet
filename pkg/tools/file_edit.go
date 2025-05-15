@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/invopop/jsonschema"
-	"github.com/jingkaihe/kodelet/pkg/state"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/jingkaihe/kodelet/pkg/utils"
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -74,7 +74,7 @@ func (t *FileEditTool) TracingKVs(parameters string) ([]attribute.KeyValue, erro
 	}, nil
 }
 
-func (t *FileEditTool) ValidateInput(state state.State, parameters string) error {
+func (t *FileEditTool) ValidateInput(state tooltypes.State, parameters string) error {
 	var input FileEditInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
 		return fmt.Errorf("invalid input: %w", err)
@@ -160,17 +160,17 @@ func FormatEditedBlock(originalContent, oldText, newText string) string {
 	return utils.ContentWithLineNumber(editedLines, oldBlockStartIdx+1)
 }
 
-func (t *FileEditTool) Execute(ctx context.Context, state state.State, parameters string) ToolResult {
+func (t *FileEditTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
 	var input FileEditInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
-		return ToolResult{
+		return tooltypes.ToolResult{
 			Error: fmt.Sprintf("invalid input: %s", err),
 		}
 	}
 
 	b, err := os.ReadFile(input.FilePath)
 	if err != nil {
-		return ToolResult{
+		return tooltypes.ToolResult{
 			Error: fmt.Sprintf("failed to read the file: %s", err),
 		}
 	}
@@ -184,7 +184,7 @@ func (t *FileEditTool) Execute(ctx context.Context, state state.State, parameter
 
 	err = os.WriteFile(input.FilePath, []byte(content), 0644)
 	if err != nil {
-		return ToolResult{
+		return tooltypes.ToolResult{
 			Error: fmt.Sprintf("failed to write the file: %s", err),
 		}
 	}
@@ -193,7 +193,7 @@ func (t *FileEditTool) Execute(ctx context.Context, state state.State, parameter
 	// Format the edited block with line numbers
 	formattedEdit := FormatEditedBlock(originalContent, oldText, newText)
 
-	return ToolResult{
+	return tooltypes.ToolResult{
 		Result: fmt.Sprintf("File %s has been edited successfully\n\nEdited code block:\n%s", input.FilePath, formattedEdit),
 	}
 }

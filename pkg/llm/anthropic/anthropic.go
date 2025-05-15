@@ -9,14 +9,15 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
-	"github.com/jingkaihe/kodelet/pkg/llm/types"
-	"github.com/jingkaihe/kodelet/pkg/state"
 	"github.com/jingkaihe/kodelet/pkg/sysprompt"
 	"github.com/jingkaihe/kodelet/pkg/telemetry"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
+
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
 // ConversationStore is an alias for the conversations.ConversationStore interface
@@ -100,10 +101,10 @@ func getModelPricing(model string) ModelPricing {
 // AnthropicThread implements the Thread interface using Anthropic's Claude API
 type AnthropicThread struct {
 	client         anthropic.Client
-	config         types.Config
-	state          state.State
+	config         llmtypes.Config
+	state          tooltypes.State
 	messages       []anthropic.MessageParam
-	usage          *types.Usage
+	usage          *llmtypes.Usage
 	conversationID string
 	summary        string
 	isPersisted    bool
@@ -112,7 +113,7 @@ type AnthropicThread struct {
 }
 
 // NewAnthropicThread creates a new thread with Anthropic's Claude API
-func NewAnthropicThread(config types.Config) *AnthropicThread {
+func NewAnthropicThread(config llmtypes.Config) *AnthropicThread {
 	// Apply defaults if not provided
 	if config.Model == "" {
 		config.Model = anthropic.ModelClaude3_7SonnetLatest
@@ -126,17 +127,17 @@ func NewAnthropicThread(config types.Config) *AnthropicThread {
 		config:         config,
 		conversationID: conversations.GenerateID(),
 		isPersisted:    false,
-		usage:          &types.Usage{}, // must be initialised to avoid nil pointer dereference
+		usage:          &llmtypes.Usage{}, // must be initialised to avoid nil pointer dereference
 	}
 }
 
 // SetState sets the state for the thread
-func (t *AnthropicThread) SetState(s state.State) {
+func (t *AnthropicThread) SetState(s tooltypes.State) {
 	t.state = s
 }
 
 // GetState returns the current state of the thread
-func (t *AnthropicThread) GetState() state.State {
+func (t *AnthropicThread) GetState() tooltypes.State {
 	return t.state
 }
 
@@ -171,8 +172,8 @@ func (t *AnthropicThread) cacheMessages() {
 func (t *AnthropicThread) SendMessage(
 	ctx context.Context,
 	message string,
-	handler types.MessageHandler,
-	opt types.MessageOpt,
+	handler llmtypes.MessageHandler,
+	opt llmtypes.MessageOpt,
 ) (finalOutput string, err error) {
 	// Check if tracing is enabled and wrap the handler
 	tracer := telemetry.Tracer("kodelet.llm")
@@ -288,7 +289,7 @@ func (t *AnthropicThread) SendMessage(
 				)
 
 				runToolCtx := t.WithSubAgent(ctx, handler)
-				output := tools.RunTool(runToolCtx, t.state, block.Name, string(variant.JSON.Input.Raw()), t.tools())
+				output := tools.RunTool(runToolCtx, t.state, block.Name, string(variant.JSON.Input.Raw()))
 				handler.HandleToolResult(block.Name, output.String())
 
 				// For tracing, add tool execution completion event
@@ -315,7 +316,10 @@ func (t *AnthropicThread) SendMessage(
 		t.SaveConversation(ctx, false)
 	}
 
-	handler.HandleDone()
+	if !t.config.IsSubAgent {
+		// only main agaent can signal done
+		handler.HandleDone()
+	}
 	return finalOutput, nil
 }
 
@@ -396,7 +400,7 @@ func (t *AnthropicThread) getLastMessagesAttributes(messages []anthropic.Message
 	return attrs
 }
 
-func (t *AnthropicThread) tools() []tools.Tool {
+func (t *AnthropicThread) tools() []tooltypes.Tool {
 	if t.config.IsSubAgent {
 		return tools.SubAgentTools
 	}
@@ -424,20 +428,20 @@ func (t *AnthropicThread) updateUsage(response *anthropic.Message, model string)
 	t.usage.CurrentContextWindow = int(response.Usage.InputTokens) + int(response.Usage.OutputTokens) + int(response.Usage.CacheCreationInputTokens) + int(response.Usage.CacheReadInputTokens)
 	t.usage.MaxContextWindow = pricing.ContextWindow
 }
-func (t *AnthropicThread) NewSubAgent(ctx context.Context) types.Thread {
+func (t *AnthropicThread) NewSubAgent(ctx context.Context) llmtypes.Thread {
 	config := t.config
 	config.IsSubAgent = true
 	thread := NewAnthropicThread(config)
 	thread.isPersisted = false // subagent is not persisted
-	thread.SetState(state.NewBasicState())
+	thread.SetState(tools.NewBasicState(tools.WithSubAgentTools()))
 	thread.usage = t.usage
 
 	return thread
 }
 
-func (t *AnthropicThread) WithSubAgent(ctx context.Context, handler types.MessageHandler) context.Context {
+func (t *AnthropicThread) WithSubAgent(ctx context.Context, handler llmtypes.MessageHandler) context.Context {
 	subAgent := t.NewSubAgent(ctx)
-	ctx = context.WithValue(ctx, types.SubAgentConfig{}, types.SubAgentConfig{
+	ctx = context.WithValue(ctx, llmtypes.SubAgentConfig{}, llmtypes.SubAgentConfig{
 		Thread:         subAgent,
 		MessageHandler: handler,
 	})
@@ -448,7 +452,7 @@ func (t *AnthropicThread) ShortSummary(ctx context.Context) string {
 	prompt := `Summarise the conversation in one sentence, less or equal than 12 words. Keep it short and concise.
 Treat the USER role as the first person (I), and the ASSISTANT role as the person you are talking to.
 `
-	handler := &types.StringCollectorHandler{
+	handler := &llmtypes.StringCollectorHandler{
 		Silent: true,
 	}
 	t.isPersisted = false
@@ -456,7 +460,7 @@ Treat the USER role as the first person (I), and the ASSISTANT role as the perso
 		t.isPersisted = true
 	}()
 	// Use a faster model for summarization as it's a simpler task
-	_, err := t.SendMessage(ctx, prompt, handler, types.MessageOpt{
+	_, err := t.SendMessage(ctx, prompt, handler, llmtypes.MessageOpt{
 		UseWeakModel: true,
 		PromptCache:  false, // maybe we should make it configurable, but there is likely no cache for weak model
 	})
@@ -472,7 +476,7 @@ Treat the USER role as the first person (I), and the ASSISTANT role as the perso
 }
 
 // GetUsage returns the current token usage for the thread
-func (t *AnthropicThread) GetUsage() types.Usage {
+func (t *AnthropicThread) GetUsage() llmtypes.Usage {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return *t.usage

@@ -1,9 +1,9 @@
-package types
+package llm
 
 import (
 	"context"
 
-	"github.com/jingkaihe/kodelet/pkg/state"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
 // MessageOpt represents options for sending messages
@@ -23,9 +23,9 @@ type SubAgentConfig struct {
 // Thread represents a conversation thread with an LLM
 type Thread interface {
 	// SetState sets the state for the thread
-	SetState(s state.State)
+	SetState(s tooltypes.State)
 	// GetState returns the current state of the thread
-	GetState() state.State
+	GetState() tooltypes.State
 	// AddUserMessage adds a user message to the thread
 	AddUserMessage(message string)
 	// SendMessage sends a message to the LLM and processes the response

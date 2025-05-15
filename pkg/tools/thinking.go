@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"github.com/invopop/jsonschema"
-	"github.com/jingkaihe/kodelet/pkg/state"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"go.opentelemetry.io/otel/attribute"
 )
 
@@ -32,7 +32,7 @@ func (t *ThinkingTool) TracingKVs(parameters string) ([]attribute.KeyValue, erro
 	}, nil
 }
 
-func (t *ThinkingTool) ValidateInput(state state.State, parameters string) error {
+func (t *ThinkingTool) ValidateInput(state tooltypes.State, parameters string) error {
 	var input ThinkingInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
 		return fmt.Errorf("invalid input: %w", err)
@@ -63,8 +63,8 @@ It will not obtain new information or change the database, but just append the t
 `
 }
 
-func (t *ThinkingTool) Execute(ctx context.Context, state state.State, parameters string) ToolResult {
-	return ToolResult{
+func (t *ThinkingTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
+	return tooltypes.ToolResult{
 		Result: "Your thought have been recorded.",
 	}
 }

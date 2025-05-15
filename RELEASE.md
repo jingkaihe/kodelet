@@ -1,5 +1,28 @@
 # Kodelet
 
+## 0.0.9.alpha (2025-05-15)
+
+### Package Structure Refactoring
+
+- **Type Reorganization**: Moved types to more appropriate packages
+  - Relocated LLM types from `pkg/llm/types` to `pkg/types/llm`
+  - Moved tool interfaces from `pkg/tools` to `pkg/types/tools`
+  - Integrated state management from `pkg/state` into `pkg/tools`
+- **Improved Dependency Management**: Reduced circular dependencies and enhanced code modularity
+
+### Batch Tool Implementation
+
+- Added new `batch` tool for executing multiple independent tool calls in parallel
+- Enhanced performance by reducing latency and context switching with parallel tool execution
+- Implemented validation to prevent nested batch operations
+
+### Other Improvements
+
+- Enhanced error handling with `github.com/pkg/errors` for better error context and tracing
+- Implemented more robust tool discovery and validation mechanisms
+- Improved state management to support tool-specific configurations
+- Code formatting and documentation updates
+
 ## 0.0.8.alpha1 (2025-05-14)
 
 - Minior TUI message input fix

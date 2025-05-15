@@ -13,12 +13,12 @@ import (
 	"strings"
 
 	"github.com/invopop/jsonschema"
-	"github.com/jingkaihe/kodelet/pkg/state"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/jingkaihe/kodelet/pkg/utils"
 	"go.opentelemetry.io/otel/attribute"
 )
 
-type CodeSearchTool struct{}
+type GrepTool struct{}
 
 type CodeSearchInput struct {
 	Pattern string `json:"pattern" jsonschema:"description=The regex pattern to search for"`
@@ -26,15 +26,15 @@ type CodeSearchInput struct {
 	Include string `json:"include" jsonschema:"description=The optional include path to search for the pattern for example: '*.go' '*.{go,py}'"`
 }
 
-func (t *CodeSearchTool) Name() string {
-	return "code_search"
+func (t *GrepTool) Name() string {
+	return "grep_tool"
 }
 
-func (t *CodeSearchTool) GenerateSchema() *jsonschema.Schema {
+func (t *GrepTool) GenerateSchema() *jsonschema.Schema {
 	return GenerateSchema[CodeSearchInput]()
 }
 
-func (t *CodeSearchTool) TracingKVs(parameters string) ([]attribute.KeyValue, error) {
+func (t *GrepTool) TracingKVs(parameters string) ([]attribute.KeyValue, error) {
 	input := &CodeSearchInput{}
 	err := json.Unmarshal([]byte(parameters), input)
 	if err != nil {
@@ -47,7 +47,7 @@ func (t *CodeSearchTool) TracingKVs(parameters string) ([]attribute.KeyValue, er
 		attribute.String("include", input.Include),
 	}, nil
 }
-func (t *CodeSearchTool) Description() string {
+func (t *GrepTool) Description() string {
 	return `Search for a pattern in the codebase using regex.
 
 IMPORTANT: You should prioritise using this tool over search via grep or egrep.
@@ -56,10 +56,12 @@ This tool takes three parameters:
 - pattern: The regex pattern to search for. For example: "func TestFoo_(.*) {", "type Foo struct {"
 - path: The path to search for the pattern default using the current directory
 - include: The optional include path to search for the pattern for example: '*.go' '*.{go,py}'. Leave it empty if you are not sure about the file name pattern or extension.
+
+If you need to do multi-turn search, use ${subagentTool} instead.
 `
 }
 
-func (t *CodeSearchTool) ValidateInput(state state.State, parameters string) error {
+func (t *GrepTool) ValidateInput(state tooltypes.State, parameters string) error {
 	var input CodeSearchInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
 		return err
@@ -72,7 +74,8 @@ func (t *CodeSearchTool) ValidateInput(state state.State, parameters string) err
 }
 
 const (
-	CodeSearchSurroundingLines = 3
+	// CodeSearchSurroundingLines = 3
+	CodeSearchSurroundingLines = 0
 )
 
 // SearchResult represents a search result from a file
@@ -294,10 +297,10 @@ func searchDirectory(ctx context.Context, root, pattern, includePattern string, 
 	return results, err
 }
 
-func (t *CodeSearchTool) Execute(ctx context.Context, state state.State, parameters string) ToolResult {
+func (t *GrepTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
 	var input CodeSearchInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
-		return ToolResult{
+		return tooltypes.ToolResult{
 			Error: fmt.Sprintf("invalid input: %s", err),
 		}
 	}
@@ -310,13 +313,13 @@ func (t *CodeSearchTool) Execute(ctx context.Context, state state.State, paramet
 	// Search for the pattern in the specified directory
 	results, err := searchDirectory(ctx, path, input.Pattern, input.Include, CodeSearchSurroundingLines)
 	if err != nil {
-		return ToolResult{
+		return tooltypes.ToolResult{
 			Error: fmt.Sprintf("search failed: %s", err),
 		}
 	}
 
 	// Format and return the results
-	return ToolResult{
+	return tooltypes.ToolResult{
 		Result: FormatSearchResults(input.Pattern, results),
 	}
 }

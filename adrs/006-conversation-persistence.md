@@ -26,8 +26,8 @@ We will implement conversation persistence with a storage-agnostic approach that
    // pkg/conversations/conversation.go
    type ConversationRecord struct {
      ID        string                 `json:"id"`
-     Messages  []types.Message        `json:"messages"`
-     Usage     types.Usage            `json:"usage"`
+     Messages  []llmtypes.Message        `json:"messages"`
+     Usage     llmtypes.Usage            `json:"usage"`
      Summary   string                 `json:"summary,omitempty"`
      CreatedAt time.Time              `json:"createdAt"`
      UpdatedAt time.Time              `json:"updatedAt"`
@@ -89,14 +89,14 @@ We will implement conversation persistence with a storage-agnostic approach that
      Load(id string) (ConversationRecord, error)
      List() ([]ConversationSummary, error)
      Delete(id string) error
-     
+
      // Advanced query operations (for future expansion)
      Query(options QueryOptions) ([]ConversationSummary, error)
-     
+
      // Lifecycle methods
      Close() error
    }
-   
+
    // Query options to support future advanced filtering
    type QueryOptions struct {
      StartDate   *time.Time
@@ -115,12 +115,12 @@ We will implement conversation persistence with a storage-agnostic approach that
    type JSONConversationStore struct {
      basePath string
    }
-   
+
    func NewJSONConversationStore(basePath string) (*JSONConversationStore, error) {
      // Create directory if it doesn't exist
      // Return store instance
    }
-   
+
    // Implement ConversationStore interface methods
    ```
 

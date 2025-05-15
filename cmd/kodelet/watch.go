@@ -12,11 +12,13 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/jingkaihe/kodelet/pkg/llm"
-	"github.com/jingkaihe/kodelet/pkg/llm/types"
-	"github.com/jingkaihe/kodelet/pkg/state"
+	"github.com/jingkaihe/kodelet/pkg/tools"
 	"github.com/jingkaihe/kodelet/pkg/utils"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
 var (
@@ -44,7 +46,7 @@ By default, it watches the current directory and all subdirectories,
 ignoring common directories like .git and node_modules.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx := cmd.Context()
-		s := state.NewBasicState()
+		s := tools.NewBasicState()
 		runWatchMode(ctx, s)
 	},
 }
@@ -57,7 +59,7 @@ func init() {
 	watchCmd.Flags().BoolVar(&useWeakModel, "use-weak-model", false, "Use auto-completion model")
 }
 
-func runWatchMode(ctx context.Context, s state.State) {
+func runWatchMode(ctx context.Context, state tooltypes.State) {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		logrus.WithError(err).Fatal("Failed to create file watcher")
@@ -85,7 +87,7 @@ func runWatchMode(ctx context.Context, s state.State) {
 				if verbosity != "quiet" {
 					fmt.Printf("Change detected: %s (%s)\n", event.Path, event.Op)
 				}
-				processFileChange(ctx, s, event.Path, event.Op)
+				processFileChange(ctx, state, event.Path, event.Op)
 			case <-done:
 				return
 			}
@@ -194,7 +196,7 @@ var (
 )
 
 // Process a file change event
-func processFileChange(ctx context.Context, s state.State, path string, op fsnotify.Op) {
+func processFileChange(ctx context.Context, state tooltypes.State, path string, op fsnotify.Op) {
 	// Double-check that the file is not binary before processing
 	if utils.IsBinaryFile(path) {
 		if verbosity == "verbose" {
@@ -266,7 +268,7 @@ def multiply(a, b):
 	config := llm.GetConfigFromViper()
 
 	var response string
-	var usage types.Usage
+	var usage llmtypes.Usage
 
 	// Use the auto-completion model if appropriate
 	if useWeakModel {
@@ -274,7 +276,7 @@ def multiply(a, b):
 			fmt.Printf("Using auto-completion model: %v\n", config.WeakModel)
 		}
 	}
-	response, usage = llm.SendMessageAndGetTextWithUsage(ctx, s, query, config, true, types.MessageOpt{
+	response, usage = llm.SendMessageAndGetTextWithUsage(ctx, state, query, config, true, llmtypes.MessageOpt{
 		UseWeakModel: useWeakModel,
 		PromptCache:  false,
 	})

@@ -1,4 +1,4 @@
-package types
+package llm
 
 // Config holds the configuration for the LLM client
 type Config struct {

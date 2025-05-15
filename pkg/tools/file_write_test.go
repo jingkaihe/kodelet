@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jingkaihe/kodelet/pkg/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -36,7 +35,7 @@ func TestFileWriteTool_Description(t *testing.T) {
 
 func TestFileWriteTool_ValidateInput(t *testing.T) {
 	tool := &FileWriteTool{}
-	state := state.NewBasicState()
+	state := NewBasicState()
 
 	tempDir := t.TempDir()
 	testFilePath := filepath.Join(tempDir, "test_file.txt")
@@ -104,7 +103,7 @@ func TestFileWriteTool_ValidateInput(t *testing.T) {
 
 func TestFileWriteTool_Execute(t *testing.T) {
 	tool := &FileWriteTool{}
-	state := state.NewBasicState()
+	state := NewBasicState()
 	ctx := context.Background()
 
 	tempDir := t.TempDir()

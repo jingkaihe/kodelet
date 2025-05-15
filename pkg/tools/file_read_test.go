@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jingkaihe/kodelet/pkg/state"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -82,7 +81,7 @@ func TestFileReadTool_ValidateInput(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			input, _ := json.Marshal(tt.input)
-			err := tool.ValidateInput(state.NewBasicState(), string(input))
+			err := tool.ValidateInput(NewBasicState(), string(input))
 			if tt.expectError {
 				assert.Error(t, err)
 				if tt.errorMsg != "" {
@@ -120,7 +119,7 @@ func TestFileReadTool_Execute(t *testing.T) {
 			Offset:   0,
 		}
 		params, _ := json.Marshal(input)
-		result := tool.Execute(context.Background(), state.NewBasicState(), string(params))
+		result := tool.Execute(context.Background(), NewBasicState(), string(params))
 
 		assert.Empty(t, result.Error)
 		assert.Contains(t, result.Result, "0: Line 1")
@@ -134,7 +133,7 @@ func TestFileReadTool_Execute(t *testing.T) {
 			Offset:   2,
 		}
 		params, _ := json.Marshal(input)
-		result := tool.Execute(context.Background(), state.NewBasicState(), string(params))
+		result := tool.Execute(context.Background(), NewBasicState(), string(params))
 
 		assert.Empty(t, result.Error)
 		assert.Contains(t, result.Result, "2: Line 3")
@@ -149,7 +148,7 @@ func TestFileReadTool_Execute(t *testing.T) {
 			Offset:   10,
 		}
 		params, _ := json.Marshal(input)
-		result := tool.Execute(context.Background(), state.NewBasicState(), string(params))
+		result := tool.Execute(context.Background(), NewBasicState(), string(params))
 
 		assert.Contains(t, result.Error, "File has only 5 lines")
 		assert.Empty(t, result.Result)
@@ -162,7 +161,7 @@ func TestFileReadTool_Execute(t *testing.T) {
 			Offset:   0,
 		}
 		params, _ := json.Marshal(input)
-		result := tool.Execute(context.Background(), state.NewBasicState(), string(params))
+		result := tool.Execute(context.Background(), NewBasicState(), string(params))
 
 		assert.Contains(t, result.Error, "Failed to open file")
 		assert.Empty(t, result.Result)
@@ -170,7 +169,7 @@ func TestFileReadTool_Execute(t *testing.T) {
 
 	// Test with invalid JSON
 	t.Run("invalid JSON", func(t *testing.T) {
-		result := tool.Execute(context.Background(), state.NewBasicState(), "invalid json")
+		result := tool.Execute(context.Background(), NewBasicState(), "invalid json")
 		assert.NotEmpty(t, result.Error)
 		assert.Empty(t, result.Result)
 	})
@@ -205,7 +204,7 @@ func TestFileReadTool_Line_Padding(t *testing.T) {
 			Offset:   0,
 		}
 		params, _ := json.Marshal(input)
-		result := tool.Execute(context.Background(), state.NewBasicState(), string(params))
+		result := tool.Execute(context.Background(), NewBasicState(), string(params))
 
 		assert.Empty(t, result.Error)
 
@@ -223,7 +222,7 @@ func TestFileReadTool_Line_Padding(t *testing.T) {
 			Offset:   50,
 		}
 		params, _ := json.Marshal(input)
-		result := tool.Execute(context.Background(), state.NewBasicState(), string(params))
+		result := tool.Execute(context.Background(), NewBasicState(), string(params))
 
 		assert.Empty(t, result.Error)
 
@@ -266,7 +265,7 @@ func TestFileReadTool_MaxOutputBytes(t *testing.T) {
 			Offset:   5, // Skip first few lines but still read content
 		}
 		params, _ := json.Marshal(input)
-		result := tool.Execute(context.Background(), state.NewBasicState(), string(params))
+		result := tool.Execute(context.Background(), NewBasicState(), string(params))
 
 		assert.Empty(t, result.Error)
 		// Verify the content starts at the correct offset
@@ -297,7 +296,7 @@ func TestFileReadTool_MaxOutputBytes(t *testing.T) {
 			Offset:   validOffset,
 		}
 		params, _ := json.Marshal(input)
-		result := tool.Execute(context.Background(), state.NewBasicState(), string(params))
+		result := tool.Execute(context.Background(), NewBasicState(), string(params))
 
 		// Since our file is large, we should see the truncated message
 		assert.Empty(t, result.Error)

@@ -1,4 +1,4 @@
-package state
+package tools
 
 import (
 	"fmt"
@@ -6,29 +6,41 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
-
-type State interface {
-	SetFileLastAccessed(path string, lastAccessed time.Time) error
-	GetFileLastAccessed(path string) (time.Time, error)
-	ClearFileLastAccessed(path string) error
-	TodoFilePath() string
-	SetTodoFilePath(path string)
-}
 
 type BasicState struct {
 	lastAccessed map[string]time.Time
 	mu           sync.RWMutex
 	sessionID    string
 	todoFilePath string
+	tools        []tooltypes.Tool
 }
 
+type BasicStateOption func(*BasicState)
+
 // NewBasicState creates a new instance of BasicState with initialized map
-func NewBasicState() *BasicState {
-	return &BasicState{
+func NewBasicState(opts ...BasicStateOption) *BasicState {
+	state := &BasicState{
 		lastAccessed: make(map[string]time.Time),
 		sessionID:    uuid.New().String(),
 		todoFilePath: "",
+	}
+
+	for _, opt := range opts {
+		opt(state)
+	}
+
+	if len(state.tools) == 0 {
+		state.tools = MainTools
+	}
+
+	return state
+}
+
+func WithSubAgentTools() BasicStateOption {
+	return func(s *BasicState) {
+		s.tools = SubAgentTools
 	}
 }
 
@@ -65,4 +77,8 @@ func (s *BasicState) ClearFileLastAccessed(path string) error {
 	defer s.mu.Unlock()
 	delete(s.lastAccessed, path)
 	return nil
+}
+
+func (s *BasicState) Tools() []tooltypes.Tool {
+	return s.tools
 }

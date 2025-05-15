@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
-	"github.com/jingkaihe/kodelet/pkg/llm/types"
-	"github.com/jingkaihe/kodelet/pkg/state"
+	"github.com/jingkaihe/kodelet/pkg/tools"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
@@ -19,19 +19,19 @@ import (
 func TestNewThread(t *testing.T) {
 	tests := []struct {
 		name          string
-		config        types.Config
+		config        llmtypes.Config
 		expectedModel string
 		expectedMax   int
 	}{
 		{
 			name:          "WithConfigValues",
-			config:        types.Config{Model: "test-model", MaxTokens: 5000},
+			config:        llmtypes.Config{Model: "test-model", MaxTokens: 5000},
 			expectedModel: "test-model",
 			expectedMax:   5000,
 		},
 		{
 			name:          "WithDefaultValues",
-			config:        types.Config{},
+			config:        llmtypes.Config{},
 			expectedModel: anthropic.ModelClaude3_7SonnetLatest,
 			expectedMax:   8192,
 		},
@@ -49,7 +49,7 @@ func TestNewThread(t *testing.T) {
 func TestConsoleMessageHandler(t *testing.T) {
 	// This test mainly ensures the methods don't panic
 	// For a more thorough test, we would need to capture stdout
-	handler := &types.ConsoleMessageHandler{Silent: true}
+	handler := &llmtypes.ConsoleMessageHandler{Silent: true}
 
 	handler.HandleText("Test text")
 	handler.HandleToolUse("test-tool", "test-input")
@@ -58,7 +58,7 @@ func TestConsoleMessageHandler(t *testing.T) {
 
 	// With Silent = false, the methods should print to stdout
 	// but we're not capturing that output in this test
-	handler = &types.ConsoleMessageHandler{Silent: false}
+	handler = &llmtypes.ConsoleMessageHandler{Silent: false}
 	handler.HandleText("Test text")
 	handler.HandleToolUse("test-tool", "test-input")
 	handler.HandleToolResult("test-tool", "test-result")
@@ -66,8 +66,8 @@ func TestConsoleMessageHandler(t *testing.T) {
 }
 
 func TestChannelMessageHandler(t *testing.T) {
-	ch := make(chan types.MessageEvent, 4)
-	handler := &types.ChannelMessageHandler{MessageCh: ch}
+	ch := make(chan llmtypes.MessageEvent, 4)
+	handler := &llmtypes.ChannelMessageHandler{MessageCh: ch}
 
 	handler.HandleText("Test text")
 	handler.HandleToolUse("test-tool", "test-input")
@@ -76,28 +76,28 @@ func TestChannelMessageHandler(t *testing.T) {
 
 	// Verify the events sent to the channel
 	event := <-ch
-	assert.Equal(t, types.EventTypeText, event.Type)
+	assert.Equal(t, llmtypes.EventTypeText, event.Type)
 	assert.Equal(t, "Test text", event.Content)
 	assert.False(t, event.Done)
 
 	event = <-ch
-	assert.Equal(t, types.EventTypeToolUse, event.Type)
+	assert.Equal(t, llmtypes.EventTypeToolUse, event.Type)
 	assert.Equal(t, "test-tool: test-input", event.Content)
 	assert.False(t, event.Done)
 
 	event = <-ch
-	assert.Equal(t, types.EventTypeToolResult, event.Type)
+	assert.Equal(t, llmtypes.EventTypeToolResult, event.Type)
 	assert.Equal(t, "test-result", event.Content)
 	assert.False(t, event.Done)
 
 	event = <-ch
-	assert.Equal(t, types.EventTypeText, event.Type)
+	assert.Equal(t, llmtypes.EventTypeText, event.Type)
 	assert.Equal(t, "Done", event.Content)
 	assert.True(t, event.Done)
 }
 
 func TestStringCollectorHandler(t *testing.T) {
-	handler := &types.StringCollectorHandler{Silent: true}
+	handler := &llmtypes.StringCollectorHandler{Silent: true}
 
 	handler.HandleText("Line 1")
 	handler.HandleText("Line 2")
@@ -109,7 +109,7 @@ func TestStringCollectorHandler(t *testing.T) {
 	assert.Equal(t, expected, handler.CollectedText())
 
 	// Test with Silent = false (just for coverage)
-	handler = &types.StringCollectorHandler{Silent: false}
+	handler = &llmtypes.StringCollectorHandler{Silent: false}
 	handler.HandleToolUse("test-tool", "test-input")
 	handler.HandleToolResult("test-tool", "test-result")
 }
@@ -132,14 +132,14 @@ func TestSendMessageAndGetText(t *testing.T) {
 
 	// Test with real client
 	result := SendMessageAndGetText(ctx,
-		state.NewBasicState(),
+		tools.NewBasicState(),
 		query,
-		types.Config{
+		llmtypes.Config{
 			Model:     anthropic.ModelClaude3_5HaikuLatest,
 			MaxTokens: 100,
 		},
 		true,
-		types.MessageOpt{},
+		llmtypes.MessageOpt{},
 	)
 
 	// Verify we got a non-error response
@@ -186,14 +186,14 @@ func TestSendMessageRealClient(t *testing.T) {
 	mockHandler.On("HandleDone").Return()
 
 	// Create a real thread
-	thread := NewThread(types.Config{
+	thread := NewThread(llmtypes.Config{
 		Model:     anthropic.ModelClaude3_7SonnetLatest, // Using a real model
 		MaxTokens: 100,                                  // Small token count for faster tests
 	})
-	thread.SetState(state.NewBasicState())
+	thread.SetState(tools.NewBasicState())
 
 	// Send a simple message that should not trigger tool use
-	_, err := thread.SendMessage(ctx, "Say hello world", mockHandler, types.MessageOpt{})
+	_, err := thread.SendMessage(ctx, "Say hello world", mockHandler, llmtypes.MessageOpt{})
 
 	// Verify
 	assert.NoError(t, err)
@@ -208,7 +208,7 @@ func TestStringCollectorHandlerCapture(t *testing.T) {
 	os.Stdout = w
 
 	// Create handler
-	handler := &types.StringCollectorHandler{Silent: false}
+	handler := &llmtypes.StringCollectorHandler{Silent: false}
 
 	// Run methods
 	handler.HandleText("Test text")
@@ -246,17 +246,17 @@ func TestSendMessageWithToolUse(t *testing.T) {
 	defer cancel()
 
 	// Set up handler that will collect the response
-	handler := &types.StringCollectorHandler{Silent: true}
+	handler := &llmtypes.StringCollectorHandler{Silent: true}
 
 	// Create thread
-	thread := NewThread(types.Config{
+	thread := NewThread(llmtypes.Config{
 		Model:     anthropic.ModelClaude3_5HaikuLatest,
 		MaxTokens: 1000,
 	})
-	thread.SetState(state.NewBasicState())
+	thread.SetState(tools.NewBasicState())
 
 	// Send message that should trigger thinking tool use
-	_, err := thread.SendMessage(ctx, "Use the thinking tool to calculate 25 * 32", handler, types.MessageOpt{})
+	_, err := thread.SendMessage(ctx, "Use the thinking tool to calculate 25 * 32", handler, llmtypes.MessageOpt{})
 
 	// Verify response
 	assert.NoError(t, err)
