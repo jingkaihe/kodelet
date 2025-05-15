@@ -12,15 +12,15 @@ import (
 )
 
 const (
-	productName    = "kodelet"
-	todoWriteTool  = "todo_write"
-	todoReadTool   = "todo_read"
-	bashTool       = "bash"
-	kodeletMd      = "KODELET.md"
-	readmeMd       = "README.md"
-	subagentTool   = "subagent"
-	codeSearchTool = "code_search"
-	batchTool      = "batch"
+	productName   = "kodelet"
+	todoWriteTool = "todo_write"
+	todoReadTool  = "todo_read"
+	bashTool      = "bash"
+	kodeletMd     = "KODELET.md"
+	readmeMd      = "README.md"
+	subagentTool  = "subagent"
+	grepTool      = "grep_tool"
+	batchTool     = "batch"
 )
 
 var systemPrompt = `
@@ -89,10 +89,15 @@ Assistant: [view the test_payment.py and applied the fixes. Noticed a unecessary
 IMPORTANT: DO NOT write code comments unless the code block is complicated.
 
 # Tool Usage
-* Use ${batchTool} for calling multiple INDEPENDENT tools. This allows you to parallelise the tool calls and reduce the latency and context usage by avoiding back and forth communication. e.g. if you should batch "nproc" and "free -m" together.
+* You MUST use ${batchTool} tool for calling multiple INDEPENDENT tools AS MUCH AS POSSIBLE. This allows you to parallelise the tool calls and reduce the latency and context usage by avoiding back and forth communication. for examples:
+  - you MUST batch "nproc" and "free -m" together.
+  - you MUST batch "git status" and "git diff --cached" together.
+  - you MUST batch "read_file(foo.py)" and "read_file(bar.py)" together.
 * If the tool call returns <error>... Use ${anotherTool} instead</error>, use the ${anotherTool} to solve the problem.
-* Use ${codeSearchTool} for simple code search when the keywords for search can be described in regex.
-* Use ${subagentTool} for semantic code search when the subject you are searching is nuanced and cannot be described in regex. This is going to greatly reduce the latency and context uage.
+* Use ${grepTool} tool for simple code search when the keywords for search can be described in regex.
+* Use ${subagentTool} tool for semantic code search when the subject you are searching is nuanced and cannot be described in regex. This is going to greatly reduce the latency and context uage. Common use cases:
+  - User asks you a question about the codebase (.e.g "How XYZ is implemented?", "How XYZ is integrated with ABC?")
+  - You need to explore the codebase to find a certain code snippet, which you cannot describe in regex.
 
 <example>
 User: What's the code that checks if the user is authenticated?
@@ -104,11 +109,34 @@ The user's request is nuanced and cannot be described in regex.
 
 <example>
 User: Where is the foo function defined?
-Assistant: [use ${codeSearchTool} and search "func foo"]
+Assistant: [use ${grepTool} and search "func foo"]
 <reasoning>
 The user's request is simple and can be described in regex.
 </reasoning>
 </example>
+
+<good-example>
+User: Explain code in the ./src/api
+Assistant: [Tool Call: ${bashTool} and run "ls -la ./src/api"]
+User: ./src/api/config.py ./src/api/main.py
+Assistant: [run ${batchTool} and run "read_file(./src/api/config.py)" and "read_file(./src/api/main.py)"]
+<reasoning>
+The operation can be done in parallel.
+</reasoning>
+</good-example>
+
+<bad-example>
+User: Explain code in the ./src/api
+Assistant: [Tool Call: ${bashTool} and run "ls -la ./src/api"]
+User: ./src/api/config.py ./src/api/main.py
+Assistant: [run ${bashTool} read_file(./src/api/config.py)
+User: [content of ./src/api/config.py]
+Assistant: Now let me view the ./src/api/main.py
+User: [content of ./src/api/main.py]
+<reasoning>
+The operations are parallelisable but the tool call is not batched.
+</reasoning>
+</bad-example>
 
 # Task Management
 You have access to the ${todoWriteTool} and ${todoReadTool} tools to help you manage and plan tasks. For any non-trivial tasks that require multiple steps to complete, you MUST:

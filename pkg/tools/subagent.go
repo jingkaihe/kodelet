@@ -34,7 +34,7 @@ This tool is ideal for semantic search, where you are not sure about the exact k
 * If you want to search for a concept, but are not sure about the exact keyword.
 
 ## DO NOT use this tool when:
-* You know exactly the keywords to use. e.g. "[Ll]og" - Use ${code_search} instead.
+* You know exactly the keywords to use. e.g. "[Ll]og" - Use ${grep_tool} instead.
 * You just want to find where certain files or directories are located - Use find command via ${bash} tool instead.
 * You just want to look for the content of a file - Use ${file_read} tool instead.
 
@@ -95,7 +95,7 @@ func (t *SubAgentTool) Execute(ctx context.Context, state tooltypes.State, param
 	// 	handler = &llmtypes.ConsoleMessageHandler{}
 	// }
 	handler := &llmtypes.ConsoleMessageHandler{
-		Silent: true,
+		Silent: false,
 	}
 	text, err := subAgentConfig.Thread.SendMessage(ctx, input.TaskDescription, handler, llmtypes.MessageOpt{
 		PromptCache:  true,

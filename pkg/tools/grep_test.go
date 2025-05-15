@@ -12,24 +12,24 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// Ensure we're using the same constant defined in code_search.go
+// Ensure we're using the same constant defined in grep.go
 var surroundingLinesCount = CodeSearchSurroundingLines
 
-func TestCodeSearchTool_GenerateSchema(t *testing.T) {
-	tool := &CodeSearchTool{}
+func TestGrepTool_GenerateSchema(t *testing.T) {
+	tool := &GrepTool{}
 	schema := tool.GenerateSchema()
 	assert.NotNil(t, schema)
 
 	assert.Equal(t, "https://github.com/jingkaihe/kodelet/pkg/tools/code-search-input", string(schema.ID))
 }
 
-func TestCodeSearchTool_Name(t *testing.T) {
-	tool := &CodeSearchTool{}
-	assert.Equal(t, "code_search", tool.Name())
+func TestGrepTool_Name(t *testing.T) {
+	tool := &GrepTool{}
+	assert.Equal(t, "grep", tool.Name())
 }
 
-func TestCodeSearchTool_Description(t *testing.T) {
-	tool := &CodeSearchTool{}
+func TestGrepTool_Description(t *testing.T) {
+	tool := &GrepTool{}
 	desc := tool.Description()
 	assert.Contains(t, desc, "Search for a pattern in the codebase using regex")
 	assert.Contains(t, desc, "pattern")
@@ -37,8 +37,8 @@ func TestCodeSearchTool_Description(t *testing.T) {
 	assert.Contains(t, desc, "include")
 }
 
-func TestCodeSearchTool_ValidateInput(t *testing.T) {
-	tool := &CodeSearchTool{}
+func TestGrepTool_ValidateInput(t *testing.T) {
+	tool := &GrepTool{}
 	state := NewBasicState()
 
 	tests := []struct {
@@ -90,13 +90,13 @@ func TestCodeSearchTool_ValidateInput(t *testing.T) {
 	}
 }
 
-func TestCodeSearchTool_Execute(t *testing.T) {
-	tool := &CodeSearchTool{}
+func TestGrepTool_Execute(t *testing.T) {
+	tool := &GrepTool{}
 	ctx := context.Background()
 	state := NewBasicState()
 
 	// Create a temporary directory for test files
-	tempDir, err := os.MkdirTemp("", "code_search_test")
+	tempDir, err := os.MkdirTemp("", "grep_test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,8 +276,8 @@ func TestCodeSearchTool_Execute(t *testing.T) {
 	}
 }
 
-func TestCodeSearchTool_InvalidJSON(t *testing.T) {
-	tool := &CodeSearchTool{}
+func TestGrepTool_InvalidJSON(t *testing.T) {
+	tool := &GrepTool{}
 	ctx := context.Background()
 	state := NewBasicState()
 

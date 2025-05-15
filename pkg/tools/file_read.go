@@ -55,6 +55,8 @@ Example:
 100:  print(hello)
 
 ---
+
+If you need to read multiple files, use ${batchTool} to wrap this tool.
 `
 }
 
