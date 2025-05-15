@@ -14,26 +14,32 @@ Kodelet is a lightweight CLI tool that helps with software engineering tasks. It
 ├── docs/                # Documentation files
 │   └── DEVELOPMENT.md   # Development guidelines and information
 └── pkg/
+    ├── conversations/   # Conversation storage and management
     ├── llm/             # LLM client for AI interactions
-    │   ├── anthropic/   # Anthropic-specific client implementation
-    │   └── types/       # Common types and interfaces for LLM clients
-    ├── state/           # State management for the application
+    │   └── anthropic/   # Anthropic-specific client implementation
     ├── sysprompt/       # System prompt configuration and templates
+    ├── telemetry/       # Telemetry and observability components
     ├── tools/           # Tool implementations (bash, file operations, etc.)
     ├── tui/             # Terminal User Interface components
+    ├── types/           # Common types used across the codebase
+    │   ├── llm/         # LLM-specific types and interfaces
+    │   └── tools/       # Tool-specific types and interfaces
     ├── utils/           # Utility functions and helpers
     └── version/         # Version information
 ```
 
 The codebase follows a modular structure with clear separation of concerns:
 - Core application logic in the `cmd/kodelet` directory with separate files for different execution modes
-- State management interfaces and implementations in the `pkg/state` package
 - System prompt configuration in the `pkg/sysprompt` package
 - LLM communication is handled in the `pkg/llm` package with a conversational Thread abstraction
   - The `pkg/llm/anthropic` package contains the Anthropic-specific client implementation
-  - The `pkg/llm/types` package defines common interfaces and types used across LLM implementations
+- Common types are organized in the `pkg/types` directory
+  - The `pkg/types/llm` package defines interfaces and types for LLM implementations
+  - The `pkg/types/tools` package defines interfaces and types for tools
+- Conversation storage and management in the `pkg/conversations` package
 - Tools for executing various operations in the `pkg/tools` package (bash, file operations, code search, todo management, etc.)
 - Terminal user interface components in the `pkg/tui` package for interactive chat mode
+- Telemetry and observability components in the `pkg/telemetry` package
 - Common utilities and helper functions in the `pkg/utils` package
 - Version information in the `pkg/version` package
 
@@ -157,8 +163,7 @@ make help
 ## Coding Conventions
 - Use Go's standard formatting rules (enforced by `go fmt`)
 - Follow standard Go error handling patterns
-- Tools implement the `Tool` interface defined in pkg/tools/tools.go
-- State is managed through the `State` interface in pkg/state/state.go
+- Tools implement the `Tool` interface defined in pkg/types/tools/tools.go
 - Function and variable names use camelCase
 - Type names use PascalCase
 - Always run `make format && make lint` after finishing code changes to ensure code style compliance
