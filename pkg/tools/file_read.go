@@ -56,7 +56,7 @@ Example:
 
 ---
 
-If you need to read multiple files, use ${batchTool} to wrap this tool.
+If you need to read multiple files, use batch tool to wrap multiple read_file calls together.
 `
 }
 
