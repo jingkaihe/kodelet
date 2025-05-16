@@ -135,7 +135,10 @@ Here is the content from %s:
 %s
 </content>
 
+Here is the instruction:
+<instruction>
 %s
+</instruction>
 `,
 		input.URL, processedContent, input.Prompt)
 
@@ -148,6 +151,7 @@ Here is the content from %s:
 		llm.MessageOpt{
 			UseWeakModel: true,
 			PromptCache:  false,
+			NoToolUse:    true,
 		},
 	)
 

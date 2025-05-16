@@ -60,7 +60,7 @@ Use "strong" model when you want it to perform strong architecture thinking and 
    - state what information you expect to get back.
    - state the format of the output in detail.
 2. The agent returns a text response back to you, and you have no access to the subagent's internal messages.
-3. The agent's response is not visible to the user.
+3. The agent's response is not visible to the user. To show user the result you must send the result from the subagent back to the user.
 `
 }
 

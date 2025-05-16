@@ -246,7 +246,7 @@ func (t *AnthropicThread) SendMessage(
 			},
 			Messages: t.messages,
 			Model:    model,
-			Tools:    tools.ToAnthropicTools(t.tools()),
+			Tools:    tools.ToAnthropicTools(t.tools(opt)),
 		}
 
 		// Add a tracing event for API call start
@@ -400,7 +400,10 @@ func (t *AnthropicThread) getLastMessagesAttributes(messages []anthropic.Message
 	return attrs
 }
 
-func (t *AnthropicThread) tools() []tooltypes.Tool {
+func (t *AnthropicThread) tools(opt llmtypes.MessageOpt) []tooltypes.Tool {
+	if opt.NoToolUse {
+		return []tooltypes.Tool{}
+	}
 	if t.config.IsSubAgent {
 		return tools.SubAgentTools
 	}
