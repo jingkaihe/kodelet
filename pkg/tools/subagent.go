@@ -23,8 +23,8 @@ const (
 )
 
 type SubAgentInput struct {
-	TaskDescription string        `json:"task_description" jsonschema:"description=A description of the task to complete"`
-	ModelStrength   ModelStrength `json:"model_strength" jsonschema:"description=The strength of the model to use, it can be 'weak' or 'strong'"`
+	Question      string        `json:"question" jsonschema:"description=The question to ask in 15 words or less"`
+	ModelStrength ModelStrength `json:"model_strength" jsonschema:"description=The strength of the model to use, it can be 'weak' or 'strong'"`
 }
 
 func (t *SubAgentTool) Name() string {
@@ -37,10 +37,10 @@ func (t *SubAgentTool) GenerateSchema() *jsonschema.Schema {
 
 func (t *SubAgentTool) Description() string {
 	return `Use this tool to delegate tasks to a sub-agent.
-This tool is ideal for tasks that involves code base searching and understanding.
+This tool is ideal for tasks that involves code searching, architecture analysis, codebase understanding and troubleshooting.
 
 ## Input
-- task_description: A description of the task to complete. It must be highly detailed and context-rich, and clearly state what information and its format you expect to get back.
+- question: A description of the question to ask the subagent.
 - model_strength: The strength of the model to use, it can be "weak" or "strong".
 
 Use "weak" model when you want it to perform simple multi-turn search and information summary.
@@ -55,10 +55,10 @@ Use "strong" model when you want it to perform strong architecture thinking and 
 * You just want to look for the content of a file - Use ${file_read} tool instead.
 
 ## Important Notes
-1. The subagent does not have any memory of previous invocations, and you cannot talk to it back and forth. As a result, your task description must be:
-   - highly detailed and context-rich.
+1. The subagent does not have any memory of previous invocations, and you cannot talk to it back and forth. As a result, your question must be concise and to the point.
+   - contain a short and concise problem statement.
    - state what information you expect to get back.
-   - state the format of the output.
+   - state the format of the output in detail.
 2. The agent returns a text response back to you, and you have no access to the subagent's internal messages.
 3. The agent's response is not visible to the user.
 `
@@ -71,8 +71,8 @@ func (t *SubAgentTool) ValidateInput(state tooltypes.State, parameters string) e
 		return err
 	}
 
-	if input.TaskDescription == "" {
-		return errors.New("task_description is required")
+	if input.Question == "" {
+		return errors.New("question is required")
 	}
 
 	if input.ModelStrength != ModelStrengthWeak && input.ModelStrength != ModelStrengthStrong {
@@ -90,7 +90,7 @@ func (t *SubAgentTool) TracingKVs(parameters string) ([]attribute.KeyValue, erro
 	}
 
 	return []attribute.KeyValue{
-		attribute.String("task_description", input.TaskDescription),
+		attribute.String("question", input.Question),
 	}, nil
 }
 
@@ -117,7 +117,7 @@ func (t *SubAgentTool) Execute(ctx context.Context, state tooltypes.State, param
 		handler = &llmtypes.ConsoleMessageHandler{}
 	}
 
-	text, err := subAgentConfig.Thread.SendMessage(ctx, input.TaskDescription, handler, llmtypes.MessageOpt{
+	text, err := subAgentConfig.Thread.SendMessage(ctx, input.Question, handler, llmtypes.MessageOpt{
 		PromptCache:  input.ModelStrength == ModelStrengthStrong,
 		UseWeakModel: input.ModelStrength == ModelStrengthWeak,
 	})
