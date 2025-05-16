@@ -129,6 +129,7 @@ Before executing the command, please follow these steps:
 * You **MUST NOT** run commands that require user interaction.
 * When issuing multiple commands, use the ';' or '&&' operator to separate them. Command MUST NOT be multiline.
 * Try to maintain your current working directory throughout the session by using absolute paths and avoid using cd directly. If you need to use cd please wrap it in parentheses.
+* grep_tool and glob_tool are prefered over running grep, egrep and find using the bash tool.
 * DO NOT use heredoc. For any command that requires heredoc, use the "file_write" tool instead.
 
 # Examples

@@ -1,5 +1,25 @@
 # Kodelet
 
+## 0.0.10.alpha (2025-05-16)
+
+### Enhanced Subagent and Tool System
+
+- **Improved Subagent Tool**: Completely redesigned subagent system prompt with better task delegation and consistent formatting
+- **System Prompt Updates**: Modernized system prompts with consistent backtick formatting for tool references
+- **New Glob Tool**: Added `glob_tool` for efficient file pattern matching with support for complex patterns
+- **Enhanced Grep Tool**: 
+  - Added filtering to skip hidden files/directories
+  - Implemented result sorting by modification time (newest first)
+  - Added result truncation (100 files max) with clear notifications
+
+### Bug Fixes
+
+- Fixed file tracking in watch mode by properly setting file last accessed time
+
+### Dependencies
+
+- Added `github.com/bmatcuk/doublestar/v4 v4.8.1` for glob pattern matching support
+
 ## 0.0.9.alpha (2025-05-15)
 
 ### Package Structure Refactoring
