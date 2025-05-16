@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -35,6 +36,11 @@ func TestGrepTool_Description(t *testing.T) {
 	assert.Contains(t, desc, "pattern")
 	assert.Contains(t, desc, "path")
 	assert.Contains(t, desc, "include")
+	
+	// New features description tests
+	assert.Contains(t, desc, "Binary files and hidden files/directories (starting with .) are skipped by default")
+	assert.Contains(t, desc, "maximum 100 files sorted by modification time")
+	assert.Contains(t, desc, "truncation notice")
 }
 
 func TestGrepTool_ValidateInput(t *testing.T) {
@@ -284,4 +290,219 @@ func TestGrepTool_InvalidJSON(t *testing.T) {
 	result := tool.Execute(ctx, state, "invalid json")
 	assert.NotEmpty(t, result.Error)
 	assert.Contains(t, result.Error, "invalid input")
+}
+
+// TestGrepHiddenFilesIgnored tests that files and directories starting with a dot are ignored
+func TestGrepHiddenFilesIgnored(t *testing.T) {
+	tool := &GrepTool{}
+	ctx := context.Background()
+	state := NewBasicState()
+
+	// Create a temporary directory for test files
+	tempDir, err := os.MkdirTemp("", "grep_hidden_test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Create visible and hidden files
+	testFiles := map[string]string{
+		"visible.go":     "func TestVisibleFunc() {}\n",
+		".hidden.go":     "func TestHiddenFunc() {}\n",
+		"normal/test.go": "func TestNormalDirFunc() {}\n",
+		".git/test.go":   "func TestHiddenDirFunc() {}\n",
+	}
+
+	// Create the files
+	for filename, content := range testFiles {
+		filePath := filepath.Join(tempDir, filename)
+		
+		// Ensure directory exists
+		dir := filepath.Dir(filePath)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		
+		if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Search for "func Test" pattern
+	input := CodeSearchInput{
+		Pattern: "func Test",
+		Path:    tempDir,
+	}
+	
+	inputJSON, _ := json.Marshal(input)
+	result := tool.Execute(ctx, state, string(inputJSON))
+
+	// Should not find hidden files
+	assert.Empty(t, result.Error)
+	assert.Contains(t, result.Result, "TestVisibleFunc")
+	assert.Contains(t, result.Result, "TestNormalDirFunc")
+	assert.NotContains(t, result.Result, "TestHiddenFunc")
+	assert.NotContains(t, result.Result, "TestHiddenDirFunc")
+}
+
+// TestGrepResultLimitAndTruncation tests the limit of 100 results with truncation message
+func TestGrepResultLimitAndTruncation(t *testing.T) {
+	tool := &GrepTool{}
+	ctx := context.Background()
+	state := NewBasicState()
+
+	// Create a temporary directory for test files
+	tempDir, err := os.MkdirTemp("", "grep_limit_test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Create 120 files with the same pattern for testing truncation
+	const filesToCreate = 120
+	for i := 0; i < filesToCreate; i++ {
+		filename := filepath.Join(tempDir, filepath.Clean(filepath.Join("dir"+fmt.Sprintf("%d", i%10), "file"+fmt.Sprintf("%d", i)+".txt")))
+		
+		// Ensure directory exists
+		dir := filepath.Dir(filename)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		
+		content := "This is a test file with a FIND_ME pattern inside"
+		if err := os.WriteFile(filename, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Search for the pattern
+	input := CodeSearchInput{
+		Pattern: "FIND_ME",
+		Path:    tempDir,
+	}
+	
+	inputJSON, _ := json.Marshal(input)
+	result := tool.Execute(ctx, state, string(inputJSON))
+
+	// Count the number of "Pattern found in file" occurrences
+	count := strings.Count(result.Result, "Pattern found in file")
+	
+	// We should have exactly 100 results
+	assert.Equal(t, 100, count, "Should return exactly 100 results")
+	
+	// Should contain truncation notice
+	assert.Contains(t, result.Result, "[TRUNCATED DUE TO MAXIMUM 100 RESULT LIMIT]")
+}
+
+// TestSortSearchResultsByModTime tests the dedicated sorting function
+func TestSortSearchResultsByModTime(t *testing.T) {
+	// Create temporary files with different timestamps
+	tempDir, err := os.MkdirTemp("", "grep_sort_func_test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+	
+	// Create test files with specific content and timestamps
+	fileNames := []string{"file1.txt", "file2.txt", "file3.txt"}
+	fileTimes := []time.Time{
+		time.Now().Add(-2 * time.Hour),
+		time.Now().Add(-1 * time.Hour),
+		time.Now(),
+	}
+	
+	// Create files and set mod times
+	for i, name := range fileNames {
+		path := filepath.Join(tempDir, name)
+		if err := os.WriteFile(path, []byte("test content"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(path, fileTimes[i], fileTimes[i]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	
+	// Create search results in reverse order (oldest first)
+	results := []SearchResult{
+		{Filename: filepath.Join(tempDir, fileNames[0])},
+		{Filename: filepath.Join(tempDir, fileNames[1])},
+		{Filename: filepath.Join(tempDir, fileNames[2])},
+	}
+	
+	// Sort the results
+	sortSearchResultsByModTime(results)
+	
+	// Check the order is newest first
+	assert.Equal(t, filepath.Join(tempDir, fileNames[2]), results[0].Filename, "Newest file should be first")
+	assert.Equal(t, filepath.Join(tempDir, fileNames[1]), results[1].Filename, "Second newest file should be second")
+	assert.Equal(t, filepath.Join(tempDir, fileNames[0]), results[2].Filename, "Oldest file should be last")
+}
+
+// TestGrepSortByModTime tests that results are sorted by modification time
+func TestGrepSortByModTime(t *testing.T) {
+	tool := &GrepTool{}
+	ctx := context.Background()
+	state := NewBasicState()
+
+	// Create a temporary directory for test files
+	tempDir, err := os.MkdirTemp("", "grep_sort_test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Create files with different timestamps
+	testFiles := []struct {
+		name    string
+		content string
+		modTime time.Time
+	}{
+		{
+			name:    "file_old.txt",
+			content: "This is an old file with TIMESTAMP_TEST pattern",
+			modTime: time.Now().Add(-2 * time.Hour),
+		},
+		{
+			name:    "file_newer.txt", 
+			content: "This is a newer file with TIMESTAMP_TEST pattern",
+			modTime: time.Now().Add(-1 * time.Hour),
+		},
+		{
+			name:    "file_newest.txt",
+			content: "This is the newest file with TIMESTAMP_TEST pattern",
+			modTime: time.Now(),
+		},
+	}
+
+	// Create the files with specific timestamps
+	for _, fileInfo := range testFiles {
+		filePath := filepath.Join(tempDir, fileInfo.name)
+		
+		if err := os.WriteFile(filePath, []byte(fileInfo.content), 0644); err != nil {
+			t.Fatal(err)
+		}
+		
+		// Set modification time
+		if err := os.Chtimes(filePath, fileInfo.modTime, fileInfo.modTime); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Search for the pattern
+	input := CodeSearchInput{
+		Pattern: "TIMESTAMP_TEST",
+		Path:    tempDir,
+	}
+	
+	inputJSON, _ := json.Marshal(input)
+	result := tool.Execute(ctx, state, string(inputJSON))
+
+	// Verify order in output (newest first)
+	firstOccurrence := strings.Index(result.Result, "file_newest.txt")
+	secondOccurrence := strings.Index(result.Result, "file_newer.txt")
+	thirdOccurrence := strings.Index(result.Result, "file_old.txt")
+	
+	// Assert the files appear in order of newest to oldest
+	assert.Greater(t, secondOccurrence, firstOccurrence, "Newest file should appear first")
+	assert.Greater(t, thirdOccurrence, secondOccurrence, "Files should be in order of decreasing modification time")
 }
