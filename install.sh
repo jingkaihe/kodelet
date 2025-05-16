@@ -79,24 +79,55 @@ if [ -d "/usr/local/bin" ] && [ -w "/usr/local/bin" ]; then
     echo "You can now run: kodelet"
 else
     echo -e "${YELLOW}Unable to create symlink in /usr/local/bin${NC}"
-    echo "Add Kodelet to your PATH by adding this line to your shell profile:"
-    echo "export PATH=\$PATH:$INSTALL_DIR/bin"
+
+    # Detect shell type and appropriate profile file
+    SHELL_TYPE=$(basename "$SHELL")
+    case "$SHELL_TYPE" in
+        bash)
+            PROFILE_FILE="$HOME/.bashrc"
+            # On macOS, bash might use .bash_profile instead
+            if [ "$OS" = "darwin" ] && [ -f "$HOME/.bash_profile" ]; then
+                PROFILE_FILE="$HOME/.bash_profile"
+            fi
+            ;;
+        zsh)
+            PROFILE_FILE="$HOME/.zshrc"
+            ;;
+        fish)
+            PROFILE_FILE="$HOME/.config/fish/config.fish"
+            EXPORT_CMD="set -gx PATH \$PATH $INSTALL_DIR/bin"
+            ;;
+        *)
+            PROFILE_FILE="$HOME/.profile"
+            ;;
+    esac
+
+    # Default export command for bash/zsh/others
+    if [ -z "$EXPORT_CMD" ]; then
+        EXPORT_CMD="export PATH=\$PATH:$INSTALL_DIR/bin"
+    fi
+
+    # Check if the path is already in the profile
+    if [ -f "$PROFILE_FILE" ] && grep -q "$INSTALL_DIR/bin" "$PROFILE_FILE"; then
+        echo -e "${GREEN}Path already in $PROFILE_FILE${NC}"
+    else
+        # Add the PATH export to shell profile
+        echo "" >> "$PROFILE_FILE"
+        echo "# Added by Kodelet installer" >> "$PROFILE_FILE"
+        echo "$EXPORT_CMD" >> "$PROFILE_FILE"
+        echo -e "${GREEN}Added Kodelet to your PATH in $PROFILE_FILE${NC}"
+        echo "Run 'source $PROFILE_FILE' to update your current session or restart your terminal."
+    fi
+
     echo -e "${GREEN}Kodelet installed successfully at: $INSTALL_DIR/bin/kodelet${NC}"
 fi
 
-# Create config directory and sample config
-CONFIG_DIR="$HOME/.kodelet"
-mkdir -p "$CONFIG_DIR"
-
-if [ ! -f "$CONFIG_DIR/config.yaml" ]; then
-    cat > "$CONFIG_DIR/config.yaml" << EOF
-# Kodelet configuration
-model: "claude-3-7-sonnet-latest"
-max_tokens: 8192
-EOF
-    echo "Created sample config at: $CONFIG_DIR/config.yaml"
-fi
-
 echo -e "${BLUE}Installation complete!${NC}"
-echo "Remember to set your Anthropic API key:"
-echo "export ANTHROPIC_API_KEY=\"your-key-here\""
+
+echo -e "${BLUE}Setting up Kodelet...${NC}"
+if [ -z "${ANTHROPIC_API_KEY}" ]; then
+  "./bin/kodelet" init
+else
+  echo -e "${GREEN}✅ ANTHROPIC_API_KEY already set. Skipping initialization.${NC}"
+  echo -e "${BLUE}You can run 'kodelet init' manually if you want to change configuration.${NC}"
+fi

@@ -1,5 +1,31 @@
 # Kodelet
 
+## 0.0.14.alpha (2025-05-16)
+
+### New Features
+
+- **Interactive Setup Wizard**: Added a new `kodelet init` command that provides an interactive setup experience for first-time users
+  - Guides users through configuring their Anthropic API key
+  - Automatically detects shell type (bash, zsh, fish) and offers to add the API key to the appropriate profile
+  - Configures model preferences with sensible defaults
+  - Creates the required configuration files and directories
+
+### Improvements
+
+- **Enhanced Installation Script**: Updated the `install.sh` script to:
+  - Automatically detect shell type and add Kodelet to PATH
+  - Launch the new init wizard after installation when no API key is detected
+  - Provide better guidance for different shell environments
+
+### Bug Fixes
+
+- Fixed debug output in subagent prompt generation (removed unintended print statement)
+
+### Dependencies
+
+- Added `golang.org/x/term` package for secure password input
+- Updated `golang.org/x/sys` from v0.32.0 to v0.33.0
+
 ## 0.0.12.alpha (2025-05-16)
 
 ### System Prompt Refactoring
