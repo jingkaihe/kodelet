@@ -9,15 +9,22 @@ Kodelet is a lightweight CLI tool that helps with software engineering tasks. It
 ├── adrs/                # Architecture Decision Records
 ├── bin/                 # Compiled binaries
 ├── cmd/                 # Application entry point
+│   └── kodelet/         # Main application command
 ├── docs/                # Documentation files
 └── pkg/                 # Core packages
     ├── conversations/   # Conversation storage and management
     ├── llm/             # LLM client for AI interactions
+    │   └── anthropic/   # Anthropic Claude API client
     ├── sysprompt/       # System prompt configuration
+    │   └── templates/   # Prompt templates
+    │       └── components/ # Template components
+    │           └── examples/ # Template for the prompt examples
     ├── telemetry/       # Telemetry components
     ├── tools/           # Tool implementations
     ├── tui/             # Terminal UI components
     ├── types/           # Common types
+    │   ├── llm/         # LLM related types
+    │   └── tools/       # Tool related types
     ├── utils/           # Utility functions
     └── version/         # Version information
 ```

@@ -1,0 +1,8 @@
+# !!!VERY IMPORTANT!!! Tool Usage
+{{if .Features.subagentEnabled}}
+- When you are doing open ended code search, architecture analysis, codebase understanding or troubleshooting you should prefer using `{{.ToolNames.subagent}}` to reduce the context usage.
+{{end}}
+{{if .Features.batchToolEnabled}}
+- You MUST use `{{.ToolNames.batch}}` tool to invoke multiple INDEPENDENT tools AS MUCH AS POSSIBLE to reduce the latency and context usage.
+- You can also use `{{.ToolNames.batch}}` to parallelise `{{.ToolNames.bash}}` to conduct multiple independent analysis.
+{{end}}
