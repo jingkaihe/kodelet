@@ -79,6 +79,7 @@ func main() {
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(commitCmd)
 	rootCmd.AddCommand(watchCmd)
+	rootCmd.AddCommand(updateCmd)
 
 	// Initialize telemetry with tracing
 	tracingShutdown, err := initTracing(ctx)
@@ -104,6 +105,7 @@ func main() {
 	versionCmd = withTracing(versionCmd)
 	commitCmd = withTracing(commitCmd)
 	watchCmd = withTracing(watchCmd)
+	updateCmd = withTracing(updateCmd)
 
 	// Set the root command context to include the tracing context
 	rootCmd.SetContext(ctx)

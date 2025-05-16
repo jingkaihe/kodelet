@@ -14,6 +14,20 @@ Kodelet is a powerful, lightweight CLI tool that transforms your ideas into robu
 curl -sSL https://raw.githubusercontent.com/jingkaihe/kodelet/main/install.sh | bash
 ```
 
+## Updating
+
+To update Kodelet to the latest version:
+
+```bash
+kodelet update
+```
+
+To install a specific version:
+
+```bash
+kodelet update --version 1.0.0
+```
+
 ## Development
 
 For detailed development instructions, including prerequisites, running locally, configuration options, and available make commands, please see the [Development Guide](docs/DEVELOPMENT.md).
