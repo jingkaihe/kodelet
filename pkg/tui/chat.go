@@ -17,10 +17,11 @@ func StartChat(ctx context.Context, conversationID string, enablePersistence boo
 	// Always use the full terminal screen
 	teaOptions = append(teaOptions, tea.WithAltScreen())
 
+	// disable mouse cell motion to allow text selection/copying
 	// Try to enable mouse support, but don't fail if not available
-	if isTTY() {
-		teaOptions = append(teaOptions, tea.WithMouseCellMotion())
-	}
+	// if isTTY() {
+	// 	teaOptions = append(teaOptions, tea.WithMouseCellMotion())
+	// }
 
 	// Initialize the program variable first
 	var p *tea.Program
