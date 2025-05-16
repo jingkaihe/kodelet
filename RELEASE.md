@@ -1,5 +1,17 @@
 # Kodelet
 
+## 0.0.11.alpha (2025-05-16)
+
+### Self-Update Command
+
+- **New Command**: Added `kodelet update` for easy version management
+  - Download and install the latest Kodelet version with a single command
+  - Support for installing specific versions with `--version` flag
+  - Auto-detection of platform (OS and architecture)
+  - Automatic handling of permission requirements
+- **Improved User Experience**: No need to manually download and install new versions
+- **Version Management**: Updated README with instructions for updating
+
 ## 0.0.10.alpha (2025-05-16)
 
 ### Enhanced Subagent and Tool System
@@ -7,7 +19,7 @@
 - **Improved Subagent Tool**: Completely redesigned subagent system prompt with better task delegation and consistent formatting
 - **System Prompt Updates**: Modernized system prompts with consistent backtick formatting for tool references
 - **New Glob Tool**: Added `glob_tool` for efficient file pattern matching with support for complex patterns
-- **Enhanced Grep Tool**: 
+- **Enhanced Grep Tool**:
   - Added filtering to skip hidden files/directories
   - Implemented result sorting by modification time (newest first)
   - Added result truncation (100 files max) with clear notifications
