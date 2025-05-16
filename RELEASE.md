@@ -1,5 +1,17 @@
 # Kodelet
 
+## 0.0.12.alpha (2025-05-16)
+
+### System Prompt Refactoring
+
+- **Complete Template Overhaul**: Refactored system prompt generation with a modular, template-driven design
+  - Implemented new renderer with embedded filesystem for template storage
+  - Created component-based template system with reusable sections
+  - Added support for conditional template rendering based on feature configuration
+- **Improved Configuration**: Added PromptConfig system for fine-grained control of enabled features
+- **Enhanced Testing**: Added comprehensive test suite for template rendering and system prompt generation
+- **Code Organization**: Moved constant definitions to dedicated constants.go file
+
 ## 0.0.11.alpha (2025-05-16)
 
 ### Self-Update Command
