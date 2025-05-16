@@ -183,13 +183,8 @@ var initCmd = &cobra.Command{
 			fmt.Println("To activate your API key, you must restart your terminal")
 			fmt.Println("or run the following command:")
 
-			// Show the appropriate source command based on shell
-			switch shellName {
-			case "fish":
-				fmt.Printf("   $ source %s\n", profilePath)
-			default:
-				fmt.Printf("   $ source %s\n", profilePath)
-			}
+			fmt.Printf("   $ source %s\n", profilePath)
+
 			fmt.Println(strings.Repeat("═", 50))
 		}
 
