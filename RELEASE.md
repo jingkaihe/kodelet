@@ -1,5 +1,17 @@
 # Kodelet
 
+## 0.0.10.alpha (2025-05-16)
+
+### Self-Update Command
+
+- **New Command**: Added `kodelet update` for easy version management
+  - Download and install the latest Kodelet version with a single command
+  - Support for installing specific versions with `--version` flag
+  - Auto-detection of platform (OS and architecture)
+  - Automatic handling of permission requirements
+- **Improved User Experience**: No need to manually download and install new versions
+- **Version Management**: Updated README with instructions for updating
+
 ## 0.0.9.alpha (2025-05-15)
 
 ### Package Structure Refactoring

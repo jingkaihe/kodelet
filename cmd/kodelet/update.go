@@ -15,6 +15,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const (
+	GitHubRepoURL = "github.com/jingkaihe/kodelet"
+)
+
 var (
 	versionFlag string
 )
@@ -65,14 +69,14 @@ func updateKodelet(cmd *cobra.Command) error {
 	// Construct download URL based on version
 	var downloadURL string
 	if versionFlag == "latest" {
-		downloadURL = fmt.Sprintf("https://github.com/jingkaihe/kodelet/releases/latest/download/kodelet-%s-%s", osType, arch)
+		downloadURL = fmt.Sprintf("https://%s/releases/latest/download/kodelet-%s-%s", GitHubRepoURL, osType, arch)
 	} else {
 		// If version doesn't start with 'v', add it
 		version := versionFlag
 		if !strings.HasPrefix(version, "v") {
 			version = "v" + version
 		}
-		downloadURL = fmt.Sprintf("https://github.com/jingkaihe/kodelet/releases/download/%s/kodelet-%s-%s", version, osType, arch)
+		downloadURL = fmt.Sprintf("https://%s/releases/download/%s/kodelet-%s-%s", GitHubRepoURL, version, osType, arch)
 	}
 	fmt.Printf("Downloading latest version from: %s\n", downloadURL)
 
