@@ -1,0 +1,15 @@
+<example>
+User: What's the code that checks if the user is authenticated?
+Assistant: [use `{{.ToolNames.subagent}}` and search "what's the code that checks if the user is authenticated"]
+<reasoning>
+The user's request is nuanced and cannot be described in regex.
+</reasoning>
+</example>
+
+<example>
+User: Where is the foo function defined?
+Assistant: [use `{{.ToolNames.grep}}` and search "func foo"]
+<reasoning>
+The user's request is simple and can be described in regex.
+</reasoning>
+</example>

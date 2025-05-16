@@ -45,17 +45,17 @@ pkg/
   sysprompt/
     templates/                 # Template files directory
       components/              # Individual template components
-        tone.tmpl              # Tone and style guidance 
+        tone.tmpl              # Tone and style guidance
         tools.tmpl             # Tool usage instructions
         task_management.tmpl   # Task management guidance
         examples/              # Example templates
           simple.tmpl          # Simple examples
-          tool_usage.tmpl      # Tool usage examples
+          subagent_tool_usage.tmpl      # Tool usage examples
       system.tmpl              # Main system prompt template
       subagent.tmpl            # Subagent prompt template
     context.go                 # Context generation code
     renderer.go                # Template rendering logic
-    system.go                  # System prompt generation 
+    system.go                  # System prompt generation
     subagent.go                # Subagent prompt generation
     config.go                  # Configuration types for templates
     constants.go               # Common constants
@@ -71,13 +71,13 @@ type PromptContext struct {
     Platform         string
     OSVersion        string
     Date             string
-    
+
     // Tool names
     ToolNames        map[string]string
-    
+
     // Content contexts (README, KODELET.md)
     ContextFiles     map[string]string
-    
+
     // Feature flags
     Features         map[string]bool
 }
