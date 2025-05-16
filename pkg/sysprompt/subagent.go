@@ -1,8 +1,6 @@
 package sysprompt
 
 import (
-	"fmt"
-
 	"github.com/sirupsen/logrus"
 )
 
@@ -25,8 +23,6 @@ func SubAgentPrompt(model string) string {
 	if err != nil {
 		logrus.WithError(err).Fatal("Error rendering subagent prompt")
 	}
-
-	fmt.Println(prompt)
 
 	return prompt
 }
