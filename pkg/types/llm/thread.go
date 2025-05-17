@@ -12,6 +12,8 @@ type MessageOpt struct {
 	PromptCache bool
 	// UseWeakModel allows temporarily overriding the model for this message
 	UseWeakModel bool
+	// NoToolUse indicates that no tool use should be performed
+	NoToolUse bool
 }
 
 // SubAgentConfig is the key for the thread in the context

@@ -1,5 +1,19 @@
 # Kodelet
 
+## 0.0.15.alpha (2025-05-17)
+
+### New Features
+
+- **Web Fetch Tool**: Added new `web_fetch` tool for retrieving and processing content from websites
+  - Securely fetch content from HTTPS URLs with same-domain redirect protection
+  - Convert HTML to Markdown for better readability in CLI context
+  - Extract specific information using AI processing
+  - Perfect for retrieving documentation, API specifications, and other web content
+
+### Dependencies
+
+- Added `github.com/JohannesKaufmann/html-to-markdown` for HTML to Markdown conversion
+
 ## 0.0.14.alpha (2025-05-16)
 
 ### New Features
