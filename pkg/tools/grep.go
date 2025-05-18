@@ -63,6 +63,12 @@ func (t *GrepTool) Description() string {
 - path: The absolute path to search for the pattern default using the current directory
 - include: The optional include path to search for the pattern for example: '*.go' '*.{go,py}'. Leave it empty if you are not sure about the file name pattern or extension.
 
+- pattern: The glob pattern to match files. For example:
+  * "*.go" - Find all Go files in the current directory
+  * "**/*.go" - Find all Go files recursively
+  * "*.{json,yaml}" - Find all JSON and YAML files
+  * "cmd/*.go" - Find all Go files in the cmd directory
+
 If you need to do multi-turn search using grep_tool and glob_tool, use subagentTool instead.
 `
 }
