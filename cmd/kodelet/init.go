@@ -144,6 +144,23 @@ var initCmd = &cobra.Command{
 			}
 		}
 
+		// Thinking tokens
+		defaultThinkingTokens := viper.GetInt("thinking_tokens")
+		if defaultThinkingTokens == 0 {
+			defaultThinkingTokens = 4048
+		}
+
+		fmt.Printf("   Maximum thinking tokens [%d]: ", defaultThinkingTokens)
+		thinkingTokensInput, _ := reader.ReadString('\n')
+		thinkingTokensInput = strings.TrimSpace(thinkingTokensInput)
+
+		if thinkingTokensInput != "" {
+			thinkingTokens, err := strconv.Atoi(thinkingTokensInput)
+			if err == nil {
+				defaultThinkingTokens = thinkingTokens
+			}
+		}
+
 		// Create config directory if it doesn't exist
 		configDir := filepath.Join(os.Getenv("HOME"), ".kodelet")
 		err := os.MkdirAll(configDir, 0755)
@@ -164,7 +181,10 @@ var initCmd = &cobra.Command{
 		configContent += fmt.Sprintf("weak_model: \"%s\"\n\n", defaultWeakModel)
 
 		configContent += "# Maximum output tokens\n"
-		configContent += fmt.Sprintf("max_tokens: %d\n", defaultMaxTokens)
+		configContent += fmt.Sprintf("max_tokens: %d\n\n", defaultMaxTokens)
+
+		configContent += "# Maximum thinking tokens\n"
+		configContent += fmt.Sprintf("thinking_tokens: %d\n", defaultThinkingTokens)
 
 		// Write the config file
 		err = os.WriteFile(configFile, []byte(configContent), 0644)
