@@ -66,6 +66,11 @@ func (a *AssistantClient) GetThreadMessages() ([]Message, error) {
 							IsUser:  false,
 						})
 					}
+				case "thinking":
+					messages = append(messages, Message{
+						Content: fmt.Sprintf("💭 Thinking: %s", block.OfRequestThinkingBlock.Thinking),
+						IsUser:  false,
+					})
 				}
 			}
 		}
@@ -122,6 +127,8 @@ func ProcessAssistantEvent(event llmtypes.MessageEvent) string {
 		return fmt.Sprintf("🔧 Using tool: %s", event.Content)
 	case llmtypes.EventTypeToolResult:
 		return fmt.Sprintf("🔄 Tool result: %s", event.Content)
+	case llmtypes.EventTypeThinking:
+		return fmt.Sprintf("💭 Thinking: %s", event.Content)
 	}
 
 	return ""

@@ -235,6 +235,12 @@ func (t *AnthropicThread) SendMessage(
 	for {
 		// Prepare message parameters
 		messageParams := anthropic.MessageNewParams{
+			Thinking: anthropic.ThinkingConfigParamUnion{
+				OfThinkingConfigEnabled: &anthropic.ThinkingConfigEnabledParam{
+					Type:         "enabled",
+					BudgetTokens: 2048,
+				},
+			},
 			MaxTokens: int64(t.config.MaxTokens),
 			System: []anthropic.TextBlockParam{
 				{
@@ -278,6 +284,8 @@ func (t *AnthropicThread) SendMessage(
 			case anthropic.TextBlock:
 				handler.HandleText(variant.Text)
 				finalOutput = variant.Text
+			case anthropic.ThinkingBlock:
+				handler.HandleThinking(variant.Thinking)
 			case anthropic.ToolUseBlock:
 				toolUseCount++
 				inputJSON, _ := json.Marshal(variant.JSON.Input.Raw())

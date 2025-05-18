@@ -165,6 +165,10 @@ func (m *MockMessageHandler) HandleToolResult(toolName string, result string) {
 	m.Called(toolName, result)
 }
 
+func (m *MockMessageHandler) HandleThinking(thinking string) {
+	m.Called(thinking)
+}
+
 func (m *MockMessageHandler) HandleDone() {
 	m.Called()
 }
