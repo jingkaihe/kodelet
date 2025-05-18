@@ -14,24 +14,24 @@ func TestSystemPrompt(t *testing.T) {
 	expectedFragments := []string{
 		// Main introduction
 		"You are an interactive CLI tool",
-		
+
 		// Tone and style sections
 		"Tone and Style",
 		"Be concise, direct and to the point",
-		
+
 		// Tool usage section
 		"Tool Usage",
 		"invoke multiple INDEPENDENT tools",
-		
+
 		// Task management section
 		"Task Management",
 		"todo_write",
 		"todo_read",
-		
+
 		// Context section
 		"Context",
 		"KODELET.md",
-		
+
 		// System information section
 		"System Information",
 		"Current working directory",
