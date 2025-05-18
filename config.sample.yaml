@@ -8,6 +8,9 @@ model: "claude-3-7-sonnet-latest"
 # Maximum tokens for responses
 max_tokens: 8192
 
+# Maximum tokens budget for thinking capability
+thinking_budget_tokens: 4048
+
 # Weak model to use for less complex tasks
 weak_model: "claude-3-5-haiku-latest"
 
@@ -25,6 +28,7 @@ tracing:
 # Environment variables can also be used to configure Kodelet:
 # - KODELET_MODEL: Overrides the model setting
 # - KODELET_MAX_TOKENS: Overrides the max_tokens setting
+# - KODELET_THINKING_BUDGET_TOKENS: Overrides the thinking_budget_tokens setting
 # - KODELET_WEAK_MODEL: Overrides the weak_model setting
 # - KODELET_TRACING_ENABLED: Enables/disables tracing
 # - KODELET_TRACING_SAMPLER: Sets the sampling strategy

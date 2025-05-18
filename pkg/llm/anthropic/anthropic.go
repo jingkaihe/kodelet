@@ -121,6 +121,9 @@ func NewAnthropicThread(config llmtypes.Config) *AnthropicThread {
 	if config.MaxTokens == 0 {
 		config.MaxTokens = 8192
 	}
+	if config.ThinkingBudgetTokens == 0 {
+		config.ThinkingBudgetTokens = 4048
+	}
 
 	return &AnthropicThread{
 		client:         anthropic.NewClient(),
@@ -181,6 +184,7 @@ func (t *AnthropicThread) SendMessage(
 	attributes := []attribute.KeyValue{
 		attribute.String("model", t.config.Model),
 		attribute.Int("max_tokens", t.config.MaxTokens),
+		attribute.Int("thinking_budget_tokens", t.config.ThinkingBudgetTokens),
 		attribute.Bool("prompt_cache", opt.PromptCache),
 		attribute.Bool("use_weak_model", opt.UseWeakModel),
 		attribute.Bool("is_sub_agent", t.config.IsSubAgent),
@@ -248,6 +252,14 @@ func (t *AnthropicThread) SendMessage(
 			Model:    model,
 			Tools:    tools.ToAnthropicTools(t.tools(opt)),
 		}
+		if t.shouldUtiliseThinking() {
+			messageParams.Thinking = anthropic.ThinkingConfigParamUnion{
+				OfThinkingConfigEnabled: &anthropic.ThinkingConfigEnabledParam{
+					Type:         "enabled",
+					BudgetTokens: int64(t.config.ThinkingBudgetTokens),
+				},
+			}
+		}
 
 		// Add a tracing event for API call start
 		telemetry.AddEvent(ctx, "api_call_start",
@@ -278,6 +290,8 @@ func (t *AnthropicThread) SendMessage(
 			case anthropic.TextBlock:
 				handler.HandleText(variant.Text)
 				finalOutput = variant.Text
+			case anthropic.ThinkingBlock:
+				handler.HandleThinking(variant.Thinking)
 			case anthropic.ToolUseBlock:
 				toolUseCount++
 				inputJSON, _ := json.Marshal(variant.JSON.Input.Raw())
@@ -323,6 +337,16 @@ func (t *AnthropicThread) SendMessage(
 	return finalOutput, nil
 }
 
+func (t *AnthropicThread) shouldUtiliseThinking() bool {
+	if t.config.ThinkingBudgetTokens == 0 {
+		return false
+	}
+	if t.config.Model != anthropic.ModelClaude3_7SonnetLatest {
+		return false
+	}
+	return true
+}
+
 // NewMessage sends a message to Anthropic with OTEL tracing
 func (t *AnthropicThread) NewMessage(ctx context.Context, params anthropic.MessageNewParams) (*anthropic.Message, error) {
 	tracer := telemetry.Tracer("kodelet.llm.anthropic")
@@ -331,6 +355,8 @@ func (t *AnthropicThread) NewMessage(ctx context.Context, params anthropic.Messa
 	spanAttrs := []attribute.KeyValue{
 		attribute.String("model", params.Model),
 		attribute.Int64("max_tokens", params.MaxTokens),
+		attribute.Bool("thinking", params.Thinking.OfThinkingConfigEnabled.BudgetTokens > 0),
+		attribute.Int64("budget_tokens", params.Thinking.OfThinkingConfigEnabled.BudgetTokens),
 	}
 	for i, sys := range params.System {
 		spanAttrs = append(spanAttrs, attribute.String(fmt.Sprintf("system.%d", i), sys.Text))

@@ -10,6 +10,7 @@ type MessageHandler interface {
 	HandleText(text string)
 	HandleToolUse(toolName string, input string)
 	HandleToolResult(toolName string, result string)
+	HandleThinking(thinking string)
 	HandleDone()
 }
 
@@ -22,6 +23,7 @@ type MessageEvent struct {
 
 // Event types
 const (
+	EventTypeThinking   = "thinking"
 	EventTypeText       = "text"
 	EventTypeToolUse    = "tool_use"
 	EventTypeToolResult = "tool_result"
@@ -49,6 +51,12 @@ func (h *ConsoleMessageHandler) HandleToolUse(toolName string, input string) {
 func (h *ConsoleMessageHandler) HandleToolResult(toolName string, result string) {
 	if !h.Silent {
 		fmt.Printf("🔄 Tool result: %s\n\n", result)
+	}
+}
+
+func (h *ConsoleMessageHandler) HandleThinking(thinking string) {
+	if !h.Silent {
+		fmt.Printf("💭 Thinking: %s\n\n", thinking)
 	}
 }
 
@@ -91,6 +99,13 @@ func (h *ChannelMessageHandler) HandleDone() {
 	}
 }
 
+func (h *ChannelMessageHandler) HandleThinking(thinking string) {
+	h.MessageCh <- MessageEvent{
+		Type:    EventTypeThinking,
+		Content: thinking,
+	}
+}
+
 // StringCollectorHandler collects text responses into a string
 type StringCollectorHandler struct {
 	Silent bool
@@ -117,6 +132,12 @@ func (h *StringCollectorHandler) HandleToolUse(toolName string, input string) {
 func (h *StringCollectorHandler) HandleToolResult(toolName string, result string) {
 	if !h.Silent {
 		fmt.Printf("🔄 Tool result: %s\n\n", result)
+	}
+}
+
+func (h *StringCollectorHandler) HandleThinking(thinking string) {
+	if !h.Silent {
+		fmt.Printf("💭 Thinking: %s\n\n", thinking)
 	}
 }
 

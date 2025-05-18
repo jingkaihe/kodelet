@@ -60,8 +60,10 @@ Kodelet uses Viper for configuration management. You can configure Kodelet in se
 
 1. **Environment Variables** - All environment variables should be prefixed with `KODELET_`:
    ```bash
+   export ANTHROPIC_API_KEY="sk-ant-api..."
    export KODELET_MODEL="claude-3-7-sonnet-latest"
-   export KODELET_MAX_TOKENS="2048"
+   export KODELET_MAX_TOKENS="8192"
+   export KODELET_THINKING_BUDGET_TOKENS="4048"
    ```
 
 2. **Configuration File** - Kodelet looks for a configuration file named `config.yaml` in:
@@ -76,6 +78,11 @@ model: "claude-3-7-sonnet-latest"
 # Maximum tokens for responses
 max_tokens: 8192
 ```
+
+3. **Command Line Flags**:
+   ```bash
+   kodelet run --model "claude-3-opus-20240229" --max-tokens 4096 "query"
+   ```
 
 ## Available Make Commands
 

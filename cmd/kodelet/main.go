@@ -15,6 +15,7 @@ import (
 func init() {
 	// Set default configuration values
 	viper.SetDefault("max_tokens", 8192)
+	viper.SetDefault("thinking_budget_tokens", 4048)
 	viper.SetDefault("model", anthropic.ModelClaude3_7SonnetLatest)
 	viper.SetDefault("weak_model", anthropic.ModelClaude3_5HaikuLatest)
 
@@ -66,11 +67,13 @@ func main() {
 	// Add global flags
 	rootCmd.PersistentFlags().String("model", anthropic.ModelClaude3_7SonnetLatest, "Anthropic model to use (overrides config)")
 	rootCmd.PersistentFlags().Int("max-tokens", 8192, "Maximum tokens for response (overrides config)")
+	rootCmd.PersistentFlags().Int("thinking-budget-tokens", 4048, "Maximum tokens for thinking capability (overrides config)")
 	rootCmd.PersistentFlags().String("weak-model", anthropic.ModelClaude3_5HaikuLatest, "Weak model to use (overrides config)")
 
 	// Bind flags to viper
 	viper.BindPFlag("model", rootCmd.PersistentFlags().Lookup("model"))
 	viper.BindPFlag("max_tokens", rootCmd.PersistentFlags().Lookup("max-tokens"))
+	viper.BindPFlag("thinking_budget_tokens", rootCmd.PersistentFlags().Lookup("thinking-budget-tokens"))
 	viper.BindPFlag("weak_model", rootCmd.PersistentFlags().Lookup("weak-model"))
 
 	// Add subcommands

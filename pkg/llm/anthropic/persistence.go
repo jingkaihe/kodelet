@@ -122,6 +122,19 @@ func (t *AnthropicThread) DeserializeMessages(b []byte) ([]anthropic.MessagePara
 						Input: content["input"],
 					},
 				})
+			case "thinking":
+				for _, field := range []string{"thinking", "signature", "type"} {
+					if _, ok := content[field]; !ok {
+						return nil, fmt.Errorf("missing field: %s", field)
+					}
+				}
+				msg.Content = append(msg.Content, anthropic.ContentBlockParamUnion{
+					OfRequestThinkingBlock: &anthropic.ThinkingBlockParam{
+						Type:      "thinking",
+						Thinking:  content["thinking"].(string),
+						Signature: content["signature"].(string),
+					},
+				})
 			case "tool_result":
 				for _, field := range []string{"tool_use_id", "content"} {
 					if _, ok := content[field]; !ok {

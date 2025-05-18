@@ -1,5 +1,13 @@
 # Kodelet
 
+## 0.0.17.alpha (2025-05-18)
+
+### New Features
+
+- **Thinking Tokens Support**: Added support for handling Anthropic thinking events
+  - Integrated with Anthropic API to capture model thinking process
+  - Added thinking tokens configuration to Kodelet LLM configuration
+
 ## 0.0.16.alpha (2025-05-18)
 
 ### New Features
