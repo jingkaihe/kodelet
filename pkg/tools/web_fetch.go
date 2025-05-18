@@ -98,7 +98,7 @@ func (t *WebFetchTool) Execute(ctx context.Context, state tools.State, parameter
 	input := &WebFetchInput{}
 	err := json.Unmarshal([]byte(parameters), input)
 	if err != nil {
-		return tools.ToolResult{
+		return &tools.DefaultToolResult{
 			Error: err.Error(),
 		}
 	}
@@ -106,7 +106,7 @@ func (t *WebFetchTool) Execute(ctx context.Context, state tools.State, parameter
 	// 1. Fetch the content with a custom HTTP client that handles same-domain redirects
 	content, contentType, err := fetchWithSameDomainRedirects(input.URL)
 	if err != nil {
-		return tools.ToolResult{
+		return &tools.DefaultToolResult{
 			Error: fmt.Sprintf("Failed to fetch URL: %s", err),
 		}
 	}
@@ -122,7 +122,7 @@ func (t *WebFetchTool) Execute(ctx context.Context, state tools.State, parameter
 	// 3. Use weak LLM to extract the requested information
 	subAgentConfig, ok := ctx.Value(llm.SubAgentConfig{}).(llm.SubAgentConfig)
 	if !ok {
-		return tools.ToolResult{
+		return &tools.DefaultToolResult{
 			Error: "sub-agent config not found in context",
 		}
 	}
@@ -156,12 +156,12 @@ Here is the instruction:
 	)
 
 	if err != nil {
-		return tools.ToolResult{
+		return &tools.DefaultToolResult{
 			Error: fmt.Sprintf("Failed to extract information: %s", err),
 		}
 	}
 
-	return tools.ToolResult{
+	return &tools.DefaultToolResult{
 		Result: extractedInfo,
 	}
 }

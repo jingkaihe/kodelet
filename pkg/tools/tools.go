@@ -77,7 +77,8 @@ var (
 func RunTool(ctx context.Context, state tooltypes.State, toolName string, parameters string) tooltypes.ToolResult {
 	tool, err := findTool(toolName, state)
 	if err != nil {
-		return tooltypes.ToolResult{
+		// Create a DefaultToolResult with an error
+		return &tooltypes.DefaultToolResult{
 			Error: errors.Wrap(err, "failed to find tool").Error(),
 		}
 	}
@@ -96,15 +97,16 @@ func RunTool(ctx context.Context, state tooltypes.State, toolName string, parame
 
 	err = tool.ValidateInput(state, parameters)
 	if err != nil {
-		return tooltypes.ToolResult{
+		// Create a DefaultToolResult with an error
+		return &tooltypes.DefaultToolResult{
 			Error: err.Error(),
 		}
 	}
 	result := tool.Execute(ctx, state, parameters)
 
-	if result.Error != "" {
-		span.SetStatus(codes.Error, result.Error)
-		span.RecordError(fmt.Errorf("%s", result.Error))
+	if result.IsError() {
+		span.SetStatus(codes.Error, result.UserMessage())
+		span.RecordError(fmt.Errorf("%s", result.UserMessage()))
 	} else {
 		span.SetStatus(codes.Ok, "")
 	}

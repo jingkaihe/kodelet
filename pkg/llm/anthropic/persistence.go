@@ -141,10 +141,17 @@ func (t *AnthropicThread) DeserializeMessages(b []byte) ([]anthropic.MessagePara
 						return nil, fmt.Errorf("missing field: %s", field)
 					}
 				}
-				isError, ok := toolCallContent["is_error"].(bool)
-				if !ok {
-					isError = false
+				
+				// Handle both old and new isError formats
+				isError := false
+				if isErrorVal, ok := content["is_error"].(bool); ok {
+					// New format where is_error is at the root level
+					isError = isErrorVal
+				} else if isErrorVal, ok := toolCallContent["is_error"].(bool); ok {
+					// Old format where is_error is in the content
+					isError = isErrorVal
 				}
+				
 				msg.Content = append(msg.Content, anthropic.ContentBlockParamUnion{
 					OfRequestToolResultBlock: &anthropic.ToolResultBlockParam{
 						Type:      "tool_result",

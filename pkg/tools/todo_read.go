@@ -62,14 +62,14 @@ func (t *TodoReadTool) Execute(ctx context.Context, state tooltypes.State, param
 
 	content, err := os.ReadFile(filePath)
 	if err != nil {
-		return tooltypes.ToolResult{
+		return &tooltypes.DefaultToolResult{
 			Error: fmt.Sprintf("failed to read todos from file: %s", err.Error()),
 		}
 	}
 
 	var todos TodoWriteInput
 	if err := json.Unmarshal(content, &todos); err != nil {
-		return tooltypes.ToolResult{
+		return &tooltypes.DefaultToolResult{
 			Error: fmt.Sprintf("failed to unmarshal todos from file: %s", err.Error()),
 		}
 	}
@@ -77,7 +77,7 @@ func (t *TodoReadTool) Execute(ctx context.Context, state tooltypes.State, param
 	sortedTodos := sortTodos(todos.Todos)
 	formattedTodos := formatTodos(sortedTodos)
 
-	return tooltypes.ToolResult{
+	return &tooltypes.DefaultToolResult{
 		Result: formattedTodos,
 	}
 }

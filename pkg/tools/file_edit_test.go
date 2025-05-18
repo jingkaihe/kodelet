@@ -144,7 +144,7 @@ func TestFileEditTool_Execute(t *testing.T) {
 			NewText:  "New Line 3",
 		}
 		params, _ := json.Marshal(input)
-		result := tool.Execute(context.Background(), mockState, string(params))
+		result := execute(tool, context.Background(), mockState, string(params))
 
 		assert.Empty(t, result.Error)
 		assert.Contains(t, result.Result, "has been edited successfully")
@@ -164,7 +164,7 @@ func TestFileEditTool_Execute(t *testing.T) {
 			NewText:  "new text",
 		}
 		params, _ := json.Marshal(input)
-		result := tool.Execute(context.Background(), NewBasicState(), string(params))
+		result := execute(tool, context.Background(), NewBasicState(), string(params))
 
 		assert.Contains(t, result.Error, "failed to read the file")
 		assert.Empty(t, result.Result)
@@ -172,7 +172,7 @@ func TestFileEditTool_Execute(t *testing.T) {
 
 	// Test invalid JSON
 	t.Run("invalid JSON", func(t *testing.T) {
-		result := tool.Execute(context.Background(), NewBasicState(), "invalid json")
+		result := execute(tool, context.Background(), NewBasicState(), "invalid json")
 		assert.NotEmpty(t, result.Error)
 		assert.Empty(t, result.Result)
 	})
@@ -204,7 +204,7 @@ func TestFileEditTool_MultipleEdits(t *testing.T) {
 		NewText:  "MODIFIED Second line",
 	}
 	firstParams, _ := json.Marshal(firstInput)
-	firstResult := tool.Execute(context.Background(), mockState, string(firstParams))
+	firstResult := execute(tool, context.Background(), mockState, string(firstParams))
 	assert.Empty(t, firstResult.Error)
 
 	// Second edit
@@ -214,7 +214,7 @@ func TestFileEditTool_MultipleEdits(t *testing.T) {
 		NewText:  "MODIFIED Fourth line",
 	}
 	secondParams, _ := json.Marshal(secondInput)
-	secondResult := tool.Execute(context.Background(), mockState, string(secondParams))
+	secondResult := execute(tool, context.Background(), mockState, string(secondParams))
 	assert.Empty(t, secondResult.Error)
 
 	// Verify both edits were applied
@@ -325,7 +325,7 @@ func TestFileEditTool_ExecuteOutputsFormattedEdit(t *testing.T) {
 		NewText:  "Modified Line 3",
 	}
 	params, _ := json.Marshal(input)
-	result := tool.Execute(context.Background(), mockState, string(params))
+	result := execute(tool, context.Background(), mockState, string(params))
 
 	// Check that the result contains formatted output
 	assert.Empty(t, result.Error)
@@ -387,7 +387,7 @@ func main() {
 		NewText:  newText,
 	}
 	params, _ := json.Marshal(input)
-	result := tool.Execute(context.Background(), mockState, string(params))
+	result := execute(tool, context.Background(), mockState, string(params))
 
 	// Check that the result contains formatted output with correct line numbers
 	assert.Empty(t, result.Error)

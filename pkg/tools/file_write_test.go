@@ -118,7 +118,7 @@ func TestFileWriteTool_Execute(t *testing.T) {
 		inputJSON, err := json.Marshal(input)
 		require.NoError(t, err)
 
-		result := tool.Execute(ctx, state, string(inputJSON))
+		result := execute(tool, ctx, state, string(inputJSON))
 		assert.Empty(t, result.Error)
 		assert.Contains(t, result.Result, "has been written successfully")
 
@@ -145,7 +145,7 @@ func TestFileWriteTool_Execute(t *testing.T) {
 		inputJSON, err := json.Marshal(input)
 		require.NoError(t, err)
 
-		result := tool.Execute(ctx, state, string(inputJSON))
+		result := execute(tool, ctx, state, string(inputJSON))
 		assert.Empty(t, result.Error)
 
 		// Verify file content
@@ -155,7 +155,7 @@ func TestFileWriteTool_Execute(t *testing.T) {
 	})
 
 	t.Run("invalid JSON input", func(t *testing.T) {
-		result := tool.Execute(ctx, state, "invalid json")
+		result := execute(tool, ctx, state, "invalid json")
 		assert.NotEmpty(t, result.Error)
 		assert.Contains(t, result.Error, "invalid input")
 	})
@@ -171,7 +171,7 @@ func TestFileWriteTool_Execute(t *testing.T) {
 		inputJSON, err := json.Marshal(input)
 		require.NoError(t, err)
 
-		result := tool.Execute(ctx, state, string(inputJSON))
+		result := execute(tool, ctx, state, string(inputJSON))
 		assert.NotEmpty(t, result.Error)
 		assert.Contains(t, result.Error, "failed to write the file")
 	})

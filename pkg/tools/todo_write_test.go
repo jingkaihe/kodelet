@@ -165,7 +165,7 @@ func TestTodoWriteTool_Execute(t *testing.T) {
 			},
 		}
 		params, _ := json.Marshal(input)
-		result := tool.Execute(context.Background(), s, string(params))
+		result := execute(tool, context.Background(), s, string(params))
 
 		assert.Empty(t, result.Error)
 		assert.Contains(t, result.Result, "Todos have been written to")
@@ -215,7 +215,7 @@ func TestTodoWriteTool_Execute(t *testing.T) {
 			},
 		}
 		params, _ := json.Marshal(input)
-		result := tool.Execute(context.Background(), s, string(params))
+		result := execute(tool, context.Background(), s, string(params))
 
 		assert.Empty(t, result.Error)
 
@@ -231,7 +231,7 @@ func TestTodoWriteTool_Execute(t *testing.T) {
 
 	t.Run("invalid JSON", func(t *testing.T) {
 		s := NewBasicState()
-		result := tool.Execute(context.Background(), s, "invalid json")
+		result := execute(tool, context.Background(), s, "invalid json")
 		assert.Contains(t, result.Error, "invalid input")
 		assert.Empty(t, result.Result)
 	})
@@ -251,7 +251,7 @@ func TestTodoWriteTool_Execute(t *testing.T) {
 			},
 		}
 		params, _ := json.Marshal(input)
-		result := tool.Execute(context.Background(), s, string(params))
+		result := execute(tool, context.Background(), s, string(params))
 
 		assert.Contains(t, result.Error, "failed to write todos to file")
 		assert.Empty(t, result.Result)

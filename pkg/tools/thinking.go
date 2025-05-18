@@ -64,7 +64,7 @@ It will not obtain new information or change the database, but just append the t
 }
 
 func (t *ThinkingTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
-	return tooltypes.ToolResult{
+	return &tooltypes.DefaultToolResult{
 		Result: "Your thought have been recorded.",
 	}
 }

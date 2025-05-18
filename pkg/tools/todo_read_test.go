@@ -69,7 +69,7 @@ func TestTodoReadTool_Execute(t *testing.T) {
 		require.NoError(t, err)
 
 		// Execute the tool
-		result := tool.Execute(ctx, s, "")
+		result := execute(tool, ctx, s, "")
 
 		// Verify results
 		assert.Empty(t, result.Error)
@@ -108,7 +108,7 @@ func TestTodoReadTool_Execute(t *testing.T) {
 		require.NoError(t, err)
 
 		// Execute the tool
-		result := tool.Execute(ctx, s, "")
+		result := execute(tool, ctx, s, "")
 
 		// Verify results
 		assert.Empty(t, result.Error)
@@ -123,7 +123,7 @@ func TestTodoReadTool_Execute(t *testing.T) {
 		s.SetTodoFilePath(todoFilePath)
 
 		// Execute the tool
-		result := tool.Execute(ctx, s, "")
+		result := execute(tool, ctx, s, "")
 
 		// Verify error
 		assert.NotEmpty(t, result.Error)
@@ -141,7 +141,7 @@ func TestTodoReadTool_Execute(t *testing.T) {
 		require.NoError(t, err)
 
 		// Execute the tool
-		result := tool.Execute(ctx, s, "")
+		result := execute(tool, ctx, s, "")
 
 		// Verify error
 		assert.NotEmpty(t, result.Error)

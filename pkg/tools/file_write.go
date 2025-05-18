@@ -93,14 +93,14 @@ func (t *FileWriteTool) TracingKVs(parameters string) ([]attribute.KeyValue, err
 func (t *FileWriteTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
 	var input FileWriteInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
-		return tooltypes.ToolResult{Error: fmt.Sprintf("invalid input: %s", err.Error())}
+		return &tooltypes.DefaultToolResult{Error: fmt.Sprintf("invalid input: %s", err.Error())}
 	}
 
 	state.SetFileLastAccessed(input.FilePath, time.Now())
 
 	err := os.WriteFile(input.FilePath, []byte(input.Text), 0644)
 	if err != nil {
-		return tooltypes.ToolResult{Error: fmt.Sprintf("failed to write the file: %s", err.Error())}
+		return &tooltypes.DefaultToolResult{Error: fmt.Sprintf("failed to write the file: %s", err.Error())}
 	}
 
 	lines := strings.Split(input.Text, "\n")
@@ -110,5 +110,5 @@ func (t *FileWriteTool) Execute(ctx context.Context, state tooltypes.State, para
 
 %s`, input.FilePath, textWithLineNumber)
 
-	return tooltypes.ToolResult{Result: result}
+	return &tooltypes.DefaultToolResult{Result: result}
 }
