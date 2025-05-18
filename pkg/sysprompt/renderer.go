@@ -49,12 +49,12 @@ func (r *Renderer) getTemplate(name string) (*template.Template, error) {
 		baseName = name[idx+1:]
 	}
 
-	// Create a new template with include function 
+	// Create a new template with include function
 	tmpl := template.New(baseName)
-	
+
 	// We'll need to create a self-reference for the include function
 	var selfRef *template.Template
-	
+
 	// Add custom functions
 	tmpl = tmpl.Funcs(template.FuncMap{
 		"include": func(tplName string, data interface{}) (string, error) {
@@ -63,7 +63,7 @@ func (r *Renderer) getTemplate(name string) (*template.Template, error) {
 			return buf.String(), err
 		},
 	})
-	
+
 	// Set the self reference after template creation
 	selfRef = tmpl
 
@@ -87,16 +87,16 @@ func (r *Renderer) getTemplate(name string) (*template.Template, error) {
 		if d.IsDir() {
 			return nil
 		}
-		
+
 		component, err := fs.ReadFile(r.templateFS, path)
 		if err != nil {
 			return err
 		}
-		
+
 		_, err = tmpl.New(path).Parse(string(component))
 		return err
 	})
-	
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to load component templates: %w", err)
 	}

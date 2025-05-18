@@ -15,20 +15,20 @@ func TestSubAgentPrompt(t *testing.T) {
 		// Main introduction
 		"You are an AI SWE Agent",
 		"open ended code search, architecture analysis",
-		
+
 		// Tone and style sections
 		"Tone and Style",
 		"Be concise, direct and to the point",
-		
+
 		// Tool usage section
 		"Tool Usage",
 		"invoke multiple INDEPENDENT tools",
-		
+
 		// Task management section
 		"Task Management",
 		"todo_write",
 		"todo_read",
-		
+
 		// System information section
 		"System Information",
 		"Current working directory",
