@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"io"
+	"os"
 	"strings"
 
 	"github.com/jingkaihe/kodelet/pkg/llm"
@@ -14,11 +16,41 @@ var runCmd = &cobra.Command{
 	Use:   "run [query]",
 	Short: "Execute a one-shot query with Kodelet",
 	Long:  `Execute a one-shot query with Kodelet and return the result.`,
-	Args:  cobra.MinimumNArgs(1),
+	Args:  cobra.MinimumNArgs(0),
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx := cmd.Context()
-		// Join all arguments as a single query
-		query := strings.Join(args, " ")
+
+		// Check if there's input from stdin (pipe)
+		stat, _ := os.Stdin.Stat()
+		isPipe := (stat.Mode() & os.ModeCharDevice) == 0
+
+		var query string
+		if isPipe {
+			// Read from stdin
+			stdinBytes, err := io.ReadAll(os.Stdin)
+			if err != nil {
+				fmt.Printf("\n\033[1;31mError reading from stdin: %v\033[0m\n", err)
+				return
+			}
+
+			stdinContent := string(stdinBytes)
+
+			// If there are command line args, prepend them to the stdin content
+			if len(args) > 0 {
+				argsContent := strings.Join(args, " ")
+				query = argsContent + "\n" + stdinContent
+			} else {
+				// If no args, just use stdin content
+				query = stdinContent
+			}
+		} else {
+			// No pipe, just use args
+			if len(args) == 0 {
+				fmt.Printf("\n\033[1;31mError: No query provided\033[0m\n")
+				return
+			}
+			query = strings.Join(args, " ")
+		}
 
 		// Create a new state for this session
 		appState := tools.NewBasicState()
