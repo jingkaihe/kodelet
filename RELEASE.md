@@ -1,5 +1,23 @@
 # Kodelet
 
+## 0.0.16.alpha (2025-05-18)
+
+### New Features
+
+- **File Multi-Edit Tool**: Added new `file_multi_edit` tool to support editing multiple occurrences of text in a file
+  - Allows efficient modification of repeated patterns in large files
+  - Provides clear reporting on number of replacements made
+  - Includes validation to prevent unintended mass replacements
+
+### Improvements
+
+- **Enhanced Grep Tool**:
+  - Upgraded pattern matching with doublestar library for more powerful glob support
+  - Improved file path handling to use absolute paths by default
+  - Better documentation with detailed examples for pattern parameter
+- Fixed trailing newlines in multiple system prompt files
+- Code formatting and style improvements
+
 ## 0.0.15.alpha (2025-05-17)
 
 ### New Features
