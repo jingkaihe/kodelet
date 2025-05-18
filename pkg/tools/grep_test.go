@@ -41,6 +41,9 @@ func TestGrepTool_Description(t *testing.T) {
 	assert.Contains(t, desc, "Binary files and hidden files/directories (starting with .) are skipped by default")
 	assert.Contains(t, desc, "maximum 100 files sorted by modification time")
 	assert.Contains(t, desc, "truncation notice")
+
+	// Verify description mentions absolute path
+	assert.Contains(t, desc, "absolute path")
 }
 
 func TestGrepTool_ValidateInput(t *testing.T) {
@@ -61,18 +64,38 @@ func TestGrepTool_ValidateInput(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name: "valid input with all fields",
+			name: "valid input with all fields and absolute path",
 			input: CodeSearchInput{
 				Pattern: "func Test",
-				Path:    "./",
+				Path:    "/tmp",
 				Include: "*.go",
 			},
 			expectError: false,
 		},
 		{
+			name: "invalid relative path",
+			input: CodeSearchInput{
+				Pattern: "func Test",
+				Path:    "./",
+				Include: "*.go",
+			},
+			expectError: true,
+			errorMsg:    "path must be an absolute path",
+		},
+		{
+			name: "invalid path with dot prefix",
+			input: CodeSearchInput{
+				Pattern: "func Test",
+				Path:    ".hidden/path",
+				Include: "*.go",
+			},
+			expectError: true,
+			errorMsg:    "path must be an absolute path",
+		},
+		{
 			name: "missing pattern",
 			input: CodeSearchInput{
-				Path:    "./",
+				Path:    "/tmp",
 				Include: "*.go",
 			},
 			expectError: true,
@@ -305,6 +328,12 @@ func TestGrepHiddenFilesIgnored(t *testing.T) {
 	}
 	defer os.RemoveAll(tempDir)
 
+	// Get the absolute path
+	tempDirAbs, err := filepath.Abs(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	// Create visible and hidden files
 	testFiles := map[string]string{
 		"visible.go":     "func TestVisibleFunc() {}\n",
@@ -331,7 +360,7 @@ func TestGrepHiddenFilesIgnored(t *testing.T) {
 	// Search for "func Test" pattern
 	input := CodeSearchInput{
 		Pattern: "func Test",
-		Path:    tempDir,
+		Path:    tempDirAbs,
 	}
 
 	inputJSON, _ := json.Marshal(input)
@@ -358,6 +387,12 @@ func TestGrepResultLimitAndTruncation(t *testing.T) {
 	}
 	defer os.RemoveAll(tempDir)
 
+	// Get the absolute path
+	tempDirAbs, err := filepath.Abs(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	// Create 120 files with the same pattern for testing truncation
 	const filesToCreate = 120
 	for i := 0; i < filesToCreate; i++ {
@@ -378,7 +413,7 @@ func TestGrepResultLimitAndTruncation(t *testing.T) {
 	// Search for the pattern
 	input := CodeSearchInput{
 		Pattern: "FIND_ME",
-		Path:    tempDir,
+		Path:    tempDirAbs,
 	}
 
 	inputJSON, _ := json.Marshal(input)
@@ -438,6 +473,97 @@ func TestSortSearchResultsByModTime(t *testing.T) {
 	assert.Equal(t, filepath.Join(tempDir, fileNames[0]), results[2].Filename, "Oldest file should be last")
 }
 
+// TestFileIncludedWithDoublestar tests the isFileIncluded function with the doublestar library
+func TestFileIncludedWithDoublestar(t *testing.T) {
+	tests := []struct {
+		name           string
+		filename       string
+		includePattern string
+		expected       bool
+	}{
+		{
+			name:           "simple pattern match",
+			filename:       "test.go",
+			includePattern: "*.go",
+			expected:       true,
+		},
+		{
+			name:           "simple pattern no match",
+			filename:       "test.go",
+			includePattern: "*.py",
+			expected:       false,
+		},
+		{
+			name:           "extended pattern match with braces",
+			filename:       "test.go",
+			includePattern: "*.{go,py}",
+			expected:       true,
+		},
+		{
+			name:           "extended pattern match with braces another extension",
+			filename:       "test.py",
+			includePattern: "*.{go,py}",
+			expected:       true,
+		},
+		{
+			name:           "extended pattern with braces no match",
+			filename:       "test.js",
+			includePattern: "*.{go,py}",
+			expected:       false,
+		},
+		{
+			name:           "recursive match",
+			filename:       "path/to/test.go",
+			includePattern: "**/*.go",
+			expected:       true,
+		},
+		{
+			name:           "recursive match with brace pattern",
+			filename:       "path/to/deep/test.py",
+			includePattern: "**/*.{go,py}",
+			expected:       true,
+		},
+		{
+			name:           "empty pattern always matches",
+			filename:       "anything.txt",
+			includePattern: "",
+			expected:       true,
+		},
+		{
+			name:           "invalid pattern",
+			filename:       "test.go",
+			includePattern: "**/*.[", // Invalid pattern
+			expected:       false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isFileIncluded(tt.filename, tt.includePattern)
+			assert.Equal(t, tt.expected, result, "isFileIncluded() result mismatch")
+		})
+	}
+}
+
+// TestDefaultPathIsAbsolute tests that the default path is an absolute path
+func TestDefaultPathIsAbsolute(t *testing.T) {
+	tool := &GrepTool{}
+	ctx := context.Background()
+	state := NewBasicState()
+
+	// Input with no path specified
+	input := CodeSearchInput{
+		Pattern: "test pattern",
+	}
+
+	inputJSON, _ := json.Marshal(input)
+	result := tool.Execute(ctx, state, string(inputJSON))
+
+	// The test should not error due to path issues
+	assert.NotContains(t, result.Error, "path must be an absolute path")
+	assert.NotContains(t, result.Error, "failed to get current working directory")
+}
+
 // TestGrepSortByModTime tests that results are sorted by modification time
 func TestGrepSortByModTime(t *testing.T) {
 	tool := &GrepTool{}
@@ -450,6 +576,12 @@ func TestGrepSortByModTime(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(tempDir)
+
+	// Get the absolute path
+	tempDirAbs, err := filepath.Abs(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// Create files with different timestamps
 	testFiles := []struct {
@@ -491,7 +623,7 @@ func TestGrepSortByModTime(t *testing.T) {
 	// Search for the pattern
 	input := CodeSearchInput{
 		Pattern: "TIMESTAMP_TEST",
-		Path:    tempDir,
+		Path:    tempDirAbs,
 	}
 
 	inputJSON, _ := json.Marshal(input)

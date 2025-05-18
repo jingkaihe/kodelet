@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bmatcuk/doublestar/v4"
 	"github.com/invopop/jsonschema"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/jingkaihe/kodelet/pkg/utils"
@@ -23,7 +24,7 @@ type GrepTool struct{}
 
 type CodeSearchInput struct {
 	Pattern string `json:"pattern" jsonschema:"description=The regex pattern to search for"`
-	Path    string `json:"path" jsonschema:"description=The path to search for the pattern default using the current directory"`
+	Path    string `json:"path" jsonschema:"description=The absolute path to search for the pattern default using the current directory"`
 	Include string `json:"include" jsonschema:"description=The optional include path to search for the pattern for example: '*.go' '*.{go,py}'"`
 }
 
@@ -59,7 +60,7 @@ func (t *GrepTool) Description() string {
 
 ## Input
 - pattern: The regex pattern to search for. For example: "func TestFoo_(.*) {", "type Foo struct {"
-- path: The path to search for the pattern default using the current directory
+- path: The absolute path to search for the pattern default using the current directory
 - include: The optional include path to search for the pattern for example: '*.go' '*.{go,py}'. Leave it empty if you are not sure about the file name pattern or extension.
 
 If you need to do multi-turn search using grep_tool and glob_tool, use subagentTool instead.
@@ -71,6 +72,11 @@ func (t *GrepTool) ValidateInput(state tooltypes.State, parameters string) error
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
 		return err
 	}
+
+	if strings.HasPrefix(input.Path, ".") {
+		return errors.New("path must be an absolute path")
+	}
+
 	if input.Pattern == "" {
 		return errors.New("pattern is required")
 	}
@@ -143,35 +149,12 @@ func isFileIncluded(filename, includePattern string) bool {
 		return true
 	}
 
-	// Simple glob matching
-	patterns := strings.Split(includePattern, ",")
-	for _, pattern := range patterns {
-		pattern = strings.TrimSpace(pattern)
-
-		// Handle patterns like *.{go,py}
-		if strings.Contains(pattern, "{") && strings.Contains(pattern, "}") {
-			start := strings.Index(pattern, "{")
-			end := strings.Index(pattern, "}")
-			if start >= 0 && end > start {
-				prefix := pattern[:start]
-				exts := strings.Split(pattern[start+1:end], ",")
-				for _, ext := range exts {
-					if matched, _ := filepath.Match(prefix+ext, filename); matched {
-						return true
-					}
-				}
-			}
-			continue
-		}
-
-		// Regular glob pattern
-		matched, err := filepath.Match(pattern, filepath.Base(filename))
-		if err == nil && matched {
-			return true
-		}
+	matched, err := doublestar.PathMatch(includePattern, filename)
+	if err != nil {
+		return false
 	}
 
-	return false
+	return matched
 }
 
 // searchFile searches for the pattern in a single file
@@ -284,7 +267,12 @@ func searchDirectory(ctx context.Context, root, pattern, includePattern string, 
 			return nil
 		}
 
-		if !isFileIncluded(path, includePattern) {
+		pathForMatch, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+
+		if !isFileIncluded(pathForMatch, includePattern) {
 			return nil
 		}
 
@@ -349,7 +337,12 @@ func (t *GrepTool) Execute(ctx context.Context, state tooltypes.State, parameter
 		}
 	}
 
-	path := "."
+	path, err := os.Getwd()
+	if err != nil {
+		return tooltypes.ToolResult{
+			Error: fmt.Sprintf("failed to get current working directory: %s", err),
+		}
+	}
 	if input.Path != "" {
 		path = input.Path
 	}
