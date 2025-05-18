@@ -121,8 +121,8 @@ func NewAnthropicThread(config llmtypes.Config) *AnthropicThread {
 	if config.MaxTokens == 0 {
 		config.MaxTokens = 8192
 	}
-	if config.ThinkingTokens == 0 {
-		config.ThinkingTokens = 4048
+	if config.ThinkingBudgetTokens == 0 {
+		config.ThinkingBudgetTokens = 4048
 	}
 
 	return &AnthropicThread{
@@ -184,7 +184,7 @@ func (t *AnthropicThread) SendMessage(
 	attributes := []attribute.KeyValue{
 		attribute.String("model", t.config.Model),
 		attribute.Int("max_tokens", t.config.MaxTokens),
-		attribute.Int("thinking_tokens", t.config.ThinkingTokens),
+		attribute.Int("thinking_budget_tokens", t.config.ThinkingBudgetTokens),
 		attribute.Bool("prompt_cache", opt.PromptCache),
 		attribute.Bool("use_weak_model", opt.UseWeakModel),
 		attribute.Bool("is_sub_agent", t.config.IsSubAgent),
@@ -256,7 +256,7 @@ func (t *AnthropicThread) SendMessage(
 			messageParams.Thinking = anthropic.ThinkingConfigParamUnion{
 				OfThinkingConfigEnabled: &anthropic.ThinkingConfigEnabledParam{
 					Type:         "enabled",
-					BudgetTokens: int64(t.config.ThinkingTokens),
+					BudgetTokens: int64(t.config.ThinkingBudgetTokens),
 				},
 			}
 		}
@@ -338,7 +338,7 @@ func (t *AnthropicThread) SendMessage(
 }
 
 func (t *AnthropicThread) shouldUtiliseThinking() bool {
-	if t.config.ThinkingTokens == 0 {
+	if t.config.ThinkingBudgetTokens == 0 {
 		return false
 	}
 	if t.config.Model != anthropic.ModelClaude3_7SonnetLatest {

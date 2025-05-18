@@ -6,5 +6,5 @@ type Config struct {
 	Model          string // Model is the main driver
 	WeakModel      string // WeakModel is the less capable but faster model to use
 	MaxTokens      int
-	ThinkingTokens int // ThinkingTokens is the budget for the thinking capability
+	ThinkingBudgetTokens int // ThinkingBudgetTokens is the budget for the thinking capability
 }

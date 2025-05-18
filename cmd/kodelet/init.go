@@ -145,19 +145,19 @@ var initCmd = &cobra.Command{
 		}
 
 		// Thinking tokens
-		defaultThinkingTokens := viper.GetInt("thinking_tokens")
-		if defaultThinkingTokens == 0 {
-			defaultThinkingTokens = 4048
+		defaultThinkingBudgetTokens := viper.GetInt("thinking_budget_tokens")
+		if defaultThinkingBudgetTokens == 0 {
+			defaultThinkingBudgetTokens = 4048
 		}
 
-		fmt.Printf("   Maximum thinking tokens [%d]: ", defaultThinkingTokens)
-		thinkingTokensInput, _ := reader.ReadString('\n')
-		thinkingTokensInput = strings.TrimSpace(thinkingTokensInput)
+		fmt.Printf("   Maximum thinking tokens [%d]: ", defaultThinkingBudgetTokens)
+		thinkingBudgetTokensInput, _ := reader.ReadString('\n')
+		thinkingBudgetTokensInput = strings.TrimSpace(thinkingBudgetTokensInput)
 
-		if thinkingTokensInput != "" {
-			thinkingTokens, err := strconv.Atoi(thinkingTokensInput)
+		if thinkingBudgetTokensInput != "" {
+			thinkingBudgetTokens, err := strconv.Atoi(thinkingBudgetTokensInput)
 			if err == nil {
-				defaultThinkingTokens = thinkingTokens
+				defaultThinkingBudgetTokens = thinkingBudgetTokens
 			}
 		}
 
@@ -184,7 +184,7 @@ var initCmd = &cobra.Command{
 		configContent += fmt.Sprintf("max_tokens: %d\n\n", defaultMaxTokens)
 
 		configContent += "# Maximum thinking tokens\n"
-		configContent += fmt.Sprintf("thinking_tokens: %d\n", defaultThinkingTokens)
+		configContent += fmt.Sprintf("thinking_budget_tokens: %d\n", defaultThinkingBudgetTokens)
 
 		// Write the config file
 		err = os.WriteFile(configFile, []byte(configContent), 0644)
