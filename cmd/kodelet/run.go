@@ -12,6 +12,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// RunOptions contains all options for the run command
+type RunOptions struct {
+	resumeConvID string
+	noSave       bool
+}
+
+var runOptions = &RunOptions{}
+
 var runCmd = &cobra.Command{
 	Use:   "run [query]",
 	Short: "Execute a one-shot query with Kodelet",
@@ -63,6 +71,14 @@ var runCmd = &cobra.Command{
 		thread := llm.NewThread(llm.GetConfigFromViper())
 		thread.SetState(appState)
 
+		// Configure conversation persistence
+		if runOptions.resumeConvID != "" {
+			thread.SetConversationID(runOptions.resumeConvID)
+			fmt.Printf("Resuming conversation: %s\n", runOptions.resumeConvID)
+		}
+
+		thread.EnablePersistence(!runOptions.noSave)
+
 		// Send the message and process the response
 		_, err := thread.SendMessage(ctx, query, handler, llmtypes.MessageOpt{
 			PromptCache: true,
@@ -80,5 +96,17 @@ var runCmd = &cobra.Command{
 		// Display cost information
 		fmt.Printf("\033[1;36m[Cost Stats] Input: $%.4f | Output: $%.4f | Cache write: $%.4f | Cache read: $%.4f | Total: $%.4f\033[0m\n",
 			usage.InputCost, usage.OutputCost, usage.CacheCreationCost, usage.CacheReadCost, usage.TotalCost())
+
+		// Display conversation ID if persistence was enabled
+		if thread.IsPersisted() {
+			fmt.Printf("\033[1;36m[Conversation] ID: %s\033[0m\n", thread.GetConversationID())
+			fmt.Printf("To resume this conversation: kodelet run --resume %s\n", thread.GetConversationID())
+			fmt.Printf("To delete this conversation: kodelet chat delete %s\n", thread.GetConversationID())
+		}
 	},
+}
+
+func init() {
+	runCmd.Flags().StringVar(&runOptions.resumeConvID, "resume", "", "Resume a specific conversation")
+	runCmd.Flags().BoolVar(&runOptions.noSave, "no-save", false, "Disable conversation persistence")
 }
