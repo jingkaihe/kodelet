@@ -14,6 +14,9 @@ thinking_budget_tokens: 4048
 # Weak model to use for less complex tasks
 weak_model: "claude-3-5-haiku-latest"
 
+# Maximum tokens for weak model responses
+weak_model_max_tokens: 8192
+
 # Tracing Configuration
 tracing:
   # Enable OpenTelemetry tracing (default: false)
@@ -30,6 +33,7 @@ tracing:
 # - KODELET_MAX_TOKENS: Overrides the max_tokens setting
 # - KODELET_THINKING_BUDGET_TOKENS: Overrides the thinking_budget_tokens setting
 # - KODELET_WEAK_MODEL: Overrides the weak_model setting
+# - KODELET_WEAK_MODEL_MAX_TOKENS: Overrides the weak_model_max_tokens setting
 # - KODELET_TRACING_ENABLED: Enables/disables tracing
 # - KODELET_TRACING_SAMPLER: Sets the sampling strategy
 # - KODELET_TRACING_RATIO: Sets the sampling ratio

@@ -69,6 +69,7 @@ Kodelet uses Viper for configuration management. You can configure Kodelet in se
    export ANTHROPIC_API_KEY="sk-ant-api..."
    export KODELET_MODEL="claude-3-7-sonnet-latest"
    export KODELET_MAX_TOKENS="8192"
+   export KODELET_WEAK_MODEL_MAX_TOKENS="8192"
    export KODELET_THINKING_BUDGET_TOKENS="4048"
    ```
 
@@ -83,11 +84,17 @@ model: "claude-3-7-sonnet-latest"
 
 # Maximum tokens for responses
 max_tokens: 8192
+
+# Weak model to use for less complex tasks
+weak_model: "claude-3-5-haiku-latest"
+
+# Maximum tokens for weak model responses
+weak_model_max_tokens: 8192
 ```
 
 3. **Command Line Flags**:
    ```bash
-   kodelet run --model "claude-3-opus-20240229" --max-tokens 4096 "query"
+   kodelet run --model "claude-3-opus-20240229" --max-tokens 4096 --weak-model-max-tokens 2048 "query"
    ```
 
 ## Available Make Commands
