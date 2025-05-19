@@ -192,7 +192,7 @@ func TestSendMessageRealClient(t *testing.T) {
 	// Create a real thread
 	thread := NewThread(llmtypes.Config{
 		Model:     anthropic.ModelClaude3_7SonnetLatest, // Using a real model
-		MaxTokens: 100,                                  // Small token count for faster tests
+		MaxTokens: 100,
 	})
 	thread.SetState(tools.NewBasicState())
 

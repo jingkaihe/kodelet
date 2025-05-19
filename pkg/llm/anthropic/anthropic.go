@@ -121,9 +121,6 @@ func NewAnthropicThread(config llmtypes.Config) *AnthropicThread {
 	if config.MaxTokens == 0 {
 		config.MaxTokens = 8192
 	}
-	if config.ThinkingBudgetTokens == 0 {
-		config.ThinkingBudgetTokens = 4048
-	}
 
 	return &AnthropicThread{
 		client:         anthropic.NewClient(),
