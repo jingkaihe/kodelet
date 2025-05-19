@@ -278,7 +278,9 @@ func searchDirectory(ctx context.Context, root, pattern, includePattern string, 
 			return err
 		}
 
-		if !isFileIncluded(pathForMatch, includePattern) {
+		// match if the relative path or the base name is included
+		// e.g. *.go matches pkg/foo/bar.go and foo.go
+		if !isFileIncluded(pathForMatch, includePattern) && !isFileIncluded(baseName, includePattern) {
 			return nil
 		}
 
