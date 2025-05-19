@@ -44,15 +44,29 @@ The codebase follows a modular structure with separation of concerns between LLM
 
 #### One-shot Mode
 ```bash
+# Basic one-shot query
 kodelet run "your query"
+
+# One-shot query with conversation persistence
+kodelet run "your query"                     # saved automatically
+kodelet run --resume CONVERSATION_ID "more"  # continue a conversation
+kodelet run --no-save "temporary query"      # don't save the conversation
 ```
 
 #### Interactive Chat Mode
 ```bash
 kodelet chat
 kodelet chat --plain
-kodelet chat list
-kodelet chat delete <conversation-id>
+```
+
+#### Conversation Management
+```bash
+kodelet conversation list
+kodelet conversation list --search "term" --sort-by "updated" --sort-order "desc"
+kodelet conversation show <conversation-id>
+kodelet conversation show <conversation-id> --format [text|json|raw]
+kodelet conversation delete <conversation-id>
+kodelet conversation delete --no-confirm <conversation-id>
 ```
 
 #### Watch Mode

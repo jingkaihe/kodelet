@@ -11,7 +11,13 @@ You can use Kodelet in a few ways:
 ### Run Command (One-shot)
 
 ```bash
+# Basic one-shot query
 kodelet run "your idea"
+
+# With conversation features
+kodelet run "your idea"                      # saved as a conversation
+kodelet run --resume CONVERSATION_ID "more"  # continue a conversation
+kodelet run --no-save "temporary query"      # don't save as a conversation
 ```
 
 ### Generate Git Commit

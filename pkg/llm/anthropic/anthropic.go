@@ -121,9 +121,6 @@ func NewAnthropicThread(config llmtypes.Config) *AnthropicThread {
 	if config.MaxTokens == 0 {
 		config.MaxTokens = 8192
 	}
-	if config.ThinkingBudgetTokens == 0 {
-		config.ThinkingBudgetTokens = 4048
-	}
 
 	return &AnthropicThread{
 		client:         anthropic.NewClient(),
@@ -252,7 +249,7 @@ func (t *AnthropicThread) SendMessage(
 			Model:    model,
 			Tools:    tools.ToAnthropicTools(t.tools(opt)),
 		}
-		if t.shouldUtiliseThinking() {
+		if t.shouldUtiliseThinking(model) {
 			messageParams.Thinking = anthropic.ThinkingConfigParamUnion{
 				OfThinkingConfigEnabled: &anthropic.ThinkingConfigEnabledParam{
 					Type:         "enabled",
@@ -337,11 +334,11 @@ func (t *AnthropicThread) SendMessage(
 	return finalOutput, nil
 }
 
-func (t *AnthropicThread) shouldUtiliseThinking() bool {
+func (t *AnthropicThread) shouldUtiliseThinking(model string) bool {
 	if t.config.ThinkingBudgetTokens == 0 {
 		return false
 	}
-	if t.config.Model != anthropic.ModelClaude3_7SonnetLatest {
+	if model != anthropic.ModelClaude3_7SonnetLatest {
 		return false
 	}
 	return true
@@ -355,8 +352,13 @@ func (t *AnthropicThread) NewMessage(ctx context.Context, params anthropic.Messa
 	spanAttrs := []attribute.KeyValue{
 		attribute.String("model", params.Model),
 		attribute.Int64("max_tokens", params.MaxTokens),
-		attribute.Bool("thinking", params.Thinking.OfThinkingConfigEnabled.BudgetTokens > 0),
-		attribute.Int64("budget_tokens", params.Thinking.OfThinkingConfigEnabled.BudgetTokens),
+	}
+
+	if t.shouldUtiliseThinking(params.Model) {
+		spanAttrs = append(spanAttrs,
+			attribute.Bool("thinking", params.Thinking.OfThinkingConfigEnabled.BudgetTokens > 0),
+			attribute.Int64("budget_tokens", params.Thinking.OfThinkingConfigEnabled.BudgetTokens),
+		)
 	}
 	for i, sys := range params.System {
 		spanAttrs = append(spanAttrs, attribute.String(fmt.Sprintf("system.%d", i), sys.Text))
