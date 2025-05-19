@@ -638,3 +638,133 @@ func TestGrepSortByModTime(t *testing.T) {
 	assert.Greater(t, secondOccurrence, firstOccurrence, "Newest file should appear first")
 	assert.Greater(t, thirdOccurrence, secondOccurrence, "Files should be in order of decreasing modification time")
 }
+
+// TestGrepFileMatchingByRelativePathOrBaseName tests that files are matched by either their relative path or base name
+func TestGrepFileMatchingByRelativePathOrBaseName(t *testing.T) {
+	tool := &GrepTool{}
+	ctx := context.Background()
+	state := NewBasicState()
+
+	// Create a temporary directory for test files
+	tempDir, err := os.MkdirTemp("", "grep_path_match_test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Get the absolute path
+	tempDirAbs, err := filepath.Abs(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a directory structure with test files
+	testFiles := map[string]string{
+		"top_level.go":              "package main\n\nfunc TopLevel() {}\n",
+		"pkg/nested/nested_file.go": "package nested\n\nfunc NestedFunc() {}\n",
+		"another/path/another.go":   "package another\n\nfunc AnotherFunc() {}\n",
+		"docs/readme.md":            "# Test Documentation\n",
+	}
+
+	// Create the files
+	for filename, content := range testFiles {
+		filePath := filepath.Join(tempDir, filename)
+
+		// Ensure directory exists
+		dir := filepath.Dir(filePath)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Test cases
+	tests := []struct {
+		name            string
+		includePattern  string
+		expectedMatches []string
+		unexpectedFiles []string
+	}{
+		{
+			name:           "match by base name only",
+			includePattern: "*.go",
+			expectedMatches: []string{
+				"top_level.go",
+				"nested_file.go",
+				"another.go",
+			},
+			unexpectedFiles: []string{
+				"readme.md",
+			},
+		},
+		{
+			name:           "match by full relative path",
+			includePattern: "pkg/**/*.go",
+			expectedMatches: []string{
+				"nested_file.go",
+			},
+			unexpectedFiles: []string{
+				"top_level.go",
+				"another.go",
+				"readme.md",
+			},
+		},
+		{
+			name:           "match by partial relative path",
+			includePattern: "**/nested/*.go",
+			expectedMatches: []string{
+				"nested_file.go",
+			},
+			unexpectedFiles: []string{
+				"top_level.go",
+				"another.go",
+				"readme.md",
+			},
+		},
+		{
+			name:           "multiple extensions with braces",
+			includePattern: "*.{go,md}",
+			expectedMatches: []string{
+				"top_level.go",
+				"nested_file.go",
+				"another.go",
+				"readme.md",
+			},
+			unexpectedFiles: []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Use a simple pattern that will match in all files
+			input := CodeSearchInput{
+				Pattern: "package|func|Test",
+				Path:    tempDirAbs,
+				Include: tt.includePattern,
+			}
+
+			inputJSON, _ := json.Marshal(input)
+			result := tool.Execute(ctx, state, string(inputJSON))
+
+			// Check that there's no error
+			assert.Empty(t, result.Error)
+
+			// Check that expected matches are found
+			for _, expectedMatch := range tt.expectedMatches {
+				assert.Contains(t, result.Result, expectedMatch,
+					fmt.Sprintf("Should find matches in file %s with pattern %s",
+						expectedMatch, tt.includePattern))
+			}
+
+			// Check that unexpected files are not matched
+			for _, unexpectedFile := range tt.unexpectedFiles {
+				assert.NotContains(t, result.Result, unexpectedFile,
+					fmt.Sprintf("Should NOT find matches in file %s with pattern %s",
+						unexpectedFile, tt.includePattern))
+			}
+		})
+	}
+}
