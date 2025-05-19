@@ -99,11 +99,13 @@ make help           # Display help
    ```yaml
    model: "claude-3-7-sonnet-latest"
    max_tokens: 8192
+   weak_model: "claude-3-5-haiku-latest"
+   weak_model_max_tokens: 8192
    ```
 
 3. **Command Line Flags**:
    ```bash
-   kodelet run --model "claude-3-opus-20240229" --max-tokens 4096 "query"
+   kodelet run --model "claude-3-opus-20240229" --max-tokens 4096 --weak-model-max-tokens 2048 "query"
    ```
 
 ## LLM Architecture

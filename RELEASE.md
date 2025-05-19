@@ -1,5 +1,20 @@
 # Kodelet
 
+## 0.0.18.alpha (2025-05-19)
+
+### New Features
+
+- **Configurable Weak Model Tokens**: Added support for configuring maximum token output for weak models
+  - Added `weak_model_max_tokens` configuration option (default: 8192)
+  - Added `--weak-model-max-tokens` command line flag
+  - Added corresponding environment variable `KODELET_WEAK_MODEL_MAX_TOKENS`
+- **Enhanced Model Selection**: Improved model selection logic to use appropriate token limits based on model type
+
+### Improvements
+
+- **Configuration Wizard**: Updated initialization wizard to configure weak model token limits
+- **Documentation Updates**: Enhanced configuration examples in KODELET.md and DEVELOPMENT.md
+
 ## 0.0.17.alpha (2025-05-19)
 
 ### New Features

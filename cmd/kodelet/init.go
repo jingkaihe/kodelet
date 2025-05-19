@@ -144,6 +144,23 @@ var initCmd = &cobra.Command{
 			}
 		}
 
+		// Weak model max tokens
+		defaultWeakModelMaxTokens := viper.GetInt("weak_model_max_tokens")
+		if defaultWeakModelMaxTokens == 0 {
+			defaultWeakModelMaxTokens = 8192
+		}
+
+		fmt.Printf("   Maximum weak model output tokens [%d]: ", defaultWeakModelMaxTokens)
+		weakModelMaxTokensInput, _ := reader.ReadString('\n')
+		weakModelMaxTokensInput = strings.TrimSpace(weakModelMaxTokensInput)
+
+		if weakModelMaxTokensInput != "" {
+			weakModelMaxTokens, err := strconv.Atoi(weakModelMaxTokensInput)
+			if err == nil {
+				defaultWeakModelMaxTokens = weakModelMaxTokens
+			}
+		}
+
 		// Thinking tokens
 		defaultThinkingBudgetTokens := viper.GetInt("thinking_budget_tokens")
 		if defaultThinkingBudgetTokens == 0 {
@@ -182,6 +199,9 @@ var initCmd = &cobra.Command{
 
 		configContent += "# Maximum output tokens\n"
 		configContent += fmt.Sprintf("max_tokens: %d\n\n", defaultMaxTokens)
+
+		configContent += "# Maximum output tokens for weak model\n"
+		configContent += fmt.Sprintf("weak_model_max_tokens: %d\n\n", defaultWeakModelMaxTokens)
 
 		configContent += "# Maximum thinking tokens\n"
 		configContent += fmt.Sprintf("thinking_budget_tokens: %d\n", defaultThinkingBudgetTokens)

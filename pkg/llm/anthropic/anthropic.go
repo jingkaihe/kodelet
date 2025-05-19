@@ -181,6 +181,7 @@ func (t *AnthropicThread) SendMessage(
 	attributes := []attribute.KeyValue{
 		attribute.String("model", t.config.Model),
 		attribute.Int("max_tokens", t.config.MaxTokens),
+		attribute.Int("weak_model_max_tokens", t.config.WeakModelMaxTokens),
 		attribute.Int("thinking_budget_tokens", t.config.ThinkingBudgetTokens),
 		attribute.Bool("prompt_cache", opt.PromptCache),
 		attribute.Bool("use_weak_model", opt.UseWeakModel),
@@ -220,11 +221,7 @@ func (t *AnthropicThread) SendMessage(
 	t.AddUserMessage(message)
 
 	// Determine which model to use
-	model := t.config.Model
-
-	if opt.UseWeakModel && t.config.WeakModel != "" {
-		model = t.config.WeakModel
-	}
+	model, maxTokens := t.getModelAndTokens(opt)
 	var systemPrompt string
 	if t.config.IsSubAgent {
 		systemPrompt = sysprompt.SubAgentPrompt(model)
@@ -236,7 +233,7 @@ func (t *AnthropicThread) SendMessage(
 	for {
 		// Prepare message parameters
 		messageParams := anthropic.MessageNewParams{
-			MaxTokens: int64(t.config.MaxTokens),
+			MaxTokens: int64(maxTokens),
 			System: []anthropic.TextBlockParam{
 				{
 					Text: systemPrompt,
@@ -261,7 +258,7 @@ func (t *AnthropicThread) SendMessage(
 		// Add a tracing event for API call start
 		telemetry.AddEvent(ctx, "api_call_start",
 			attribute.String("model", model),
-			attribute.Int("max_tokens", t.config.MaxTokens),
+			attribute.Int("max_tokens", maxTokens),
 		)
 
 		response, err := t.NewMessage(ctx, messageParams)
@@ -332,6 +329,21 @@ func (t *AnthropicThread) SendMessage(
 		handler.HandleDone()
 	}
 	return finalOutput, nil
+}
+
+// getModelAndTokens determines which model and max tokens to use based on configuration and options
+func (t *AnthropicThread) getModelAndTokens(opt llmtypes.MessageOpt) (string, int) {
+	model := t.config.Model
+	maxTokens := t.config.MaxTokens
+
+	if opt.UseWeakModel && t.config.WeakModel != "" {
+		model = t.config.WeakModel
+		if t.config.WeakModelMaxTokens > 0 {
+			maxTokens = t.config.WeakModelMaxTokens
+		}
+	}
+
+	return model, maxTokens
 }
 
 func (t *AnthropicThread) shouldUtiliseThinking(model string) bool {
