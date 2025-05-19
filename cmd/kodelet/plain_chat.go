@@ -66,7 +66,7 @@ func plainChatUI(ctx context.Context, options *ChatOptions) {
 			if thread.IsPersisted() {
 				fmt.Printf("\033[1;36m[Conversation] ID: %s\033[0m\n", thread.GetConversationID())
 				fmt.Printf("To resume this conversation: kodelet chat --resume %s\n", thread.GetConversationID())
-				fmt.Printf("To delete this conversation: kodelet chat delete %s\n", thread.GetConversationID())
+				fmt.Printf("To delete this conversation: kodelet conversation delete %s\n", thread.GetConversationID())
 			}
 
 			fmt.Println("Exiting chat mode. Goodbye!")
