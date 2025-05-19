@@ -1,12 +1,21 @@
 # Kodelet
 
-## 0.0.17.alpha (2025-05-18)
+## 0.0.17.alpha (2025-05-19)
 
 ### New Features
 
 - **Thinking Tokens Support**: Added support for handling Anthropic thinking events
   - Integrated with Anthropic API to capture model thinking process
   - Added thinking tokens configuration to Kodelet LLM configuration
+- **Improved Conversation Management**: Completely redesigned conversation commands
+  - Added dedicated `kodelet conversation` namespace for managing saved chats
+  - Implemented advanced filtering and sorting options
+  - Added multiple output formats (text, JSON, raw) for viewing conversations
+  - Simplified resuming conversations in both chat and one-shot modes
+- **Enhanced One-shot Experience**: Improved `run` command capabilities
+  - Added support for piped input from other commands
+  - Implemented conversation persistence for one-shot queries
+  - Added ability to resume conversations with `--resume` flag
 
 ## 0.0.16.alpha (2025-05-18)
 
