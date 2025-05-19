@@ -1,5 +1,14 @@
 # Kodelet
 
+## 0.0.19.alpha (2025-05-19)
+
+### Improvements
+
+- **Enhanced Grep Tool**:
+  - Improved file pattern matching to support both base name and relative path matches
+  - Files now match if either their relative path or base name matches the include pattern
+  - Example: `*.go` will now match both `foo.go` and `pkg/foo/bar.go`
+
 ## 0.0.18.alpha (2025-05-19)
 
 ### New Features
