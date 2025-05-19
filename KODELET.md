@@ -63,6 +63,8 @@ kodelet chat --plain
 ```bash
 kodelet conversation list
 kodelet conversation list --search "term" --sort-by "updated" --sort-order "desc"
+kodelet conversation show <conversation-id>
+kodelet conversation show <conversation-id> --format [text|json|raw]
 kodelet conversation delete <conversation-id>
 kodelet conversation delete --no-confirm <conversation-id>
 ```

@@ -28,6 +28,18 @@ kodelet conversation list --sort-by "messages" --sort-order "desc"
 kodelet conversation list --json
 ```
 
+### Showing Conversations
+
+```bash
+# Show a conversation in text format (default)
+kodelet conversation show <conversation-id>
+
+# Show in different formats
+kodelet conversation show <conversation-id> --format text  # Default format with user/assistant labels
+kodelet conversation show <conversation-id> --format json  # Structured JSON output
+kodelet conversation show <conversation-id> --format raw   # Raw message format as stored
+```
+
 ### Deleting Conversations
 
 ```bash

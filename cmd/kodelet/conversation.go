@@ -68,6 +68,22 @@ var conversationDeleteCmd = &cobra.Command{
 	},
 }
 
+// ShowOptions contains options for the show command
+type ShowOptions struct {
+	format string
+}
+
+var showOptions = &ShowOptions{}
+
+var conversationShowCmd = &cobra.Command{
+	Use:   "show [conversationID]",
+	Short: "Show a specific conversation",
+	Args:  cobra.ExactArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		showConversationCmd(args[0])
+	},
+}
+
 func init() {
 	// Add list command flags
 	conversationListCmd.Flags().StringVar(&listOptions.startDate, "start", "", "Filter conversations after this date (format: YYYY-MM-DD)")
@@ -82,9 +98,13 @@ func init() {
 	// Add delete command flags
 	conversationDeleteCmd.Flags().BoolVar(&deleteOptions.noConfirm, "no-confirm", false, "Skip confirmation prompt")
 
+	// Add show command flags
+	conversationShowCmd.Flags().StringVar(&showOptions.format, "format", "text", "Output format: raw, json, or text")
+
 	// Add subcommands
 	conversationCmd.AddCommand(conversationListCmd)
 	conversationCmd.AddCommand(conversationDeleteCmd)
+	conversationCmd.AddCommand(conversationShowCmd)
 }
 
 // OutputFormat defines the format of the output
@@ -290,4 +310,190 @@ func deleteConversationCmd(id string) {
 	}
 
 	fmt.Printf("Conversation %s deleted successfully.\n", id)
+}
+
+// Message represents a chat message
+type Message struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+// showConversationCmd displays a specific conversation
+func showConversationCmd(id string) {
+	// Create a store
+	store, err := conversations.GetConversationStore()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Load the conversation record
+	record, err := store.Load(id)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error loading conversation: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Extract messages from raw message data
+	messages, err := extractMessages(record.RawMessages)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error parsing messages: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Render messages according to the format
+	switch showOptions.format {
+	case "raw":
+		// Output the raw messages as stored
+		fmt.Println(string(record.RawMessages))
+	case "json":
+		// Convert to simpler JSON format and output
+		outputJSON, err := json.MarshalIndent(messages, "", "  ")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error generating JSON output: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println(string(outputJSON))
+	case "text":
+		// Format as readable text with user/assistant prefixes
+		displayConversation(messages)
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown format: %s. Supported formats are raw, json, and text.\n", showOptions.format)
+		os.Exit(1)
+	}
+}
+
+// extractMessages parses the raw messages from a conversation record
+func extractMessages(rawMessages json.RawMessage) ([]Message, error) {
+	// Parse the raw JSON messages directly
+	var rawMsgs []map[string]interface{}
+	if err := json.Unmarshal(rawMessages, &rawMsgs); err != nil {
+		return nil, fmt.Errorf("error parsing raw messages: %v", err)
+	}
+
+	var messages []Message
+	for _, msg := range rawMsgs {
+		role, ok := msg["role"].(string)
+		if !ok {
+			continue // Skip if role is not a string or doesn't exist
+		}
+
+		content, ok := msg["content"].([]interface{})
+		if !ok || len(content) == 0 {
+			continue // Skip if content is not an array or is empty
+		}
+
+		// Process each content block in the message
+		for _, block := range content {
+			blockMap, ok := block.(map[string]interface{})
+			if !ok {
+				continue // Skip if block is not a map
+			}
+
+			// Extract block type
+			blockType, ok := blockMap["type"].(string)
+			if !ok {
+				continue // Skip if type is not a string or doesn't exist
+			}
+
+			// Extract message content based on block type
+			switch blockType {
+			case "text":
+				// Add text content
+				text, ok := blockMap["text"].(string)
+				if !ok {
+					continue // Skip if text is not a string or doesn't exist
+				}
+
+				messages = append(messages, Message{
+					Role:    role,
+					Content: text,
+				})
+
+			case "tool_use":
+				// Add tool usage as content
+				input, ok := blockMap["input"]
+				if !ok {
+					continue // Skip if input is not found
+				}
+
+				inputJSON, err := json.Marshal(input)
+				if err != nil {
+					continue // Skip if marshaling fails
+				}
+
+				messages = append(messages, Message{
+					Role:    role,
+					Content: fmt.Sprintf("🔧 Using tool: %s", string(inputJSON)),
+				})
+
+			case "tool_result":
+				// Add tool result as content
+				resultContent, ok := blockMap["content"].([]interface{})
+				if !ok || len(resultContent) == 0 {
+					continue // Skip if content is not an array or is empty
+				}
+
+				resultBlock, ok := resultContent[0].(map[string]interface{})
+				if !ok {
+					continue // Skip if first element is not a map
+				}
+
+				if resultBlock["type"] == "text" {
+					result, ok := resultBlock["text"].(string)
+					if !ok {
+						continue // Skip if text is not a string
+					}
+
+					messages = append(messages, Message{
+						Role:    "assistant",
+						Content: fmt.Sprintf("🔄 Tool result: %s", result),
+					})
+				}
+
+			case "thinking":
+				// Add thinking content
+				thinking, ok := blockMap["thinking"].(string)
+				if !ok {
+					continue // Skip if thinking is not a string
+				}
+
+				messages = append(messages, Message{
+					Role:    "assistant",
+					Content: fmt.Sprintf("💭 Thinking: %s", thinking),
+				})
+			}
+		}
+	}
+
+	return messages, nil
+}
+
+// displayConversation renders the messages in a readable text format
+func displayConversation(messages []Message) {
+	for i, msg := range messages {
+		// Add a separator between messages
+		if i > 0 {
+			fmt.Println(strings.Repeat("-", 80))
+		}
+
+		// Format based on role
+		roleLabel := ""
+		switch msg.Role {
+		case "user":
+			roleLabel = "You"
+		case "assistant":
+			roleLabel = "Assistant"
+		default:
+			// Capitalize first letter of role
+			if len(msg.Role) > 0 {
+				roleLabel = strings.ToUpper(msg.Role[:1]) + msg.Role[1:]
+			} else {
+				roleLabel = msg.Role
+			}
+		}
+
+		// Output the formatted message
+		fmt.Printf("%s:\n%s\n", roleLabel, msg.Content)
+	}
 }
