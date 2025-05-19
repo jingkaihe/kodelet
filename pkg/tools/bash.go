@@ -206,7 +206,7 @@ func (b *BashTool) Execute(ctx context.Context, state tooltypes.State, parameter
 	input := &BashInput{}
 	err := json.Unmarshal([]byte(parameters), input)
 	if err != nil {
-		return tooltypes.ToolResult{
+		return &tooltypes.DefaultToolResult{
 			Error: err.Error(),
 		}
 	}
@@ -218,22 +218,22 @@ func (b *BashTool) Execute(ctx context.Context, state tooltypes.State, parameter
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
-			return tooltypes.ToolResult{
+			return &tooltypes.DefaultToolResult{
 				Error: "Command timed out after " + strconv.Itoa(input.Timeout) + " seconds",
 			}
 		}
 		if status, ok := err.(*exec.ExitError); ok {
-			return tooltypes.ToolResult{
+			return &tooltypes.DefaultToolResult{
 				Result: string(output),
 				Error:  fmt.Sprintf("Command exited with status %d", status.ExitCode()),
 			}
 		}
-		return tooltypes.ToolResult{
+		return &tooltypes.DefaultToolResult{
 			Error: err.Error(),
 		}
 	}
 
-	return tooltypes.ToolResult{
+	return &tooltypes.DefaultToolResult{
 		Result: string(output),
 	}
 }

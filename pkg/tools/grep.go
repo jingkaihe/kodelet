@@ -338,7 +338,7 @@ const MaxSearchResults = 100
 func (t *GrepTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
 	var input CodeSearchInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
-		return tooltypes.ToolResult{
+		return &tooltypes.DefaultToolResult{
 			Error: fmt.Sprintf("invalid input: %s", err),
 		}
 	}
@@ -356,7 +356,7 @@ func (t *GrepTool) Execute(ctx context.Context, state tooltypes.State, parameter
 	// Search for the pattern in the specified directory
 	results, err := searchDirectory(ctx, path, input.Pattern, input.Include, CodeSearchSurroundingLines)
 	if err != nil {
-		return tooltypes.ToolResult{
+		return &tooltypes.DefaultToolResult{
 			Error: fmt.Sprintf("search failed: %s", err),
 		}
 	}
@@ -380,7 +380,7 @@ func (t *GrepTool) Execute(ctx context.Context, state tooltypes.State, parameter
 	}
 
 	// Return the results
-	return tooltypes.ToolResult{
+	return &tooltypes.DefaultToolResult{
 		Result: formattedResults,
 	}
 }

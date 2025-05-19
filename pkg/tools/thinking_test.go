@@ -29,7 +29,7 @@ func TestThinkingTool_Execute(t *testing.T) {
 	tool := &ThinkingTool{}
 	state := NewBasicState()
 
-	result := tool.Execute(context.Background(), state, `{"thought": "Test thought"}`)
+	result := execute(tool, context.Background(), state, `{"thought": "Test thought"}`)
 
 	assert.Equal(t, "Your thought have been recorded.", result.Result)
 	assert.Empty(t, result.Error)

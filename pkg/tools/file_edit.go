@@ -163,14 +163,14 @@ func FormatEditedBlock(originalContent, oldText, newText string) string {
 func (t *FileEditTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
 	var input FileEditInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
-		return tooltypes.ToolResult{
+		return &tooltypes.DefaultToolResult{
 			Error: fmt.Sprintf("invalid input: %s", err),
 		}
 	}
 
 	b, err := os.ReadFile(input.FilePath)
 	if err != nil {
-		return tooltypes.ToolResult{
+		return &tooltypes.DefaultToolResult{
 			Error: fmt.Sprintf("failed to read the file: %s", err),
 		}
 	}
@@ -184,7 +184,7 @@ func (t *FileEditTool) Execute(ctx context.Context, state tooltypes.State, param
 
 	err = os.WriteFile(input.FilePath, []byte(content), 0644)
 	if err != nil {
-		return tooltypes.ToolResult{
+		return &tooltypes.DefaultToolResult{
 			Error: fmt.Sprintf("failed to write the file: %s", err),
 		}
 	}
@@ -193,7 +193,7 @@ func (t *FileEditTool) Execute(ctx context.Context, state tooltypes.State, param
 	// Format the edited block with line numbers
 	formattedEdit := FormatEditedBlock(originalContent, oldText, newText)
 
-	return tooltypes.ToolResult{
+	return &tooltypes.DefaultToolResult{
 		Result: fmt.Sprintf("File %s has been edited successfully\n\nEdited code block:\n%s", input.FilePath, formattedEdit),
 	}
 }

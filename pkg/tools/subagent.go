@@ -98,7 +98,7 @@ func (t *SubAgentTool) Execute(ctx context.Context, state tooltypes.State, param
 	input := &SubAgentInput{}
 	err := json.Unmarshal([]byte(parameters), input)
 	if err != nil {
-		return tooltypes.ToolResult{
+		return &tooltypes.DefaultToolResult{
 			Error: err.Error(),
 		}
 	}
@@ -106,7 +106,7 @@ func (t *SubAgentTool) Execute(ctx context.Context, state tooltypes.State, param
 	// get type.Thread from context
 	subAgentConfig, ok := ctx.Value(llmtypes.SubAgentConfig{}).(llmtypes.SubAgentConfig)
 	if !ok {
-		return tooltypes.ToolResult{
+		return &tooltypes.DefaultToolResult{
 			Error: "sub-agent config not found in context",
 		}
 	}
@@ -122,12 +122,12 @@ func (t *SubAgentTool) Execute(ctx context.Context, state tooltypes.State, param
 		UseWeakModel: input.ModelStrength == ModelStrengthWeak,
 	})
 	if err != nil {
-		return tooltypes.ToolResult{
+		return &tooltypes.DefaultToolResult{
 			Error: err.Error(),
 		}
 	}
 
-	return tooltypes.ToolResult{
+	return &tooltypes.DefaultToolResult{
 		Result: text,
 	}
 }

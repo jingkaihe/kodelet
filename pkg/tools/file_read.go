@@ -95,7 +95,7 @@ func (r *FileReadTool) Execute(ctx context.Context, state tooltypes.State, param
 	input := &FileReadInput{}
 	err := json.Unmarshal([]byte(parameters), input)
 	if err != nil {
-		return tooltypes.ToolResult{
+		return &tooltypes.DefaultToolResult{
 			Error: err.Error(),
 		}
 	}
@@ -104,7 +104,7 @@ func (r *FileReadTool) Execute(ctx context.Context, state tooltypes.State, param
 
 	file, err := os.Open(input.FilePath)
 	if err != nil {
-		return tooltypes.ToolResult{
+		return &tooltypes.DefaultToolResult{
 			Error: fmt.Sprintf("Failed to open file: %s", err.Error()),
 		}
 	}
@@ -121,7 +121,7 @@ func (r *FileReadTool) Execute(ctx context.Context, state tooltypes.State, param
 	}
 
 	if lineCount < input.Offset {
-		return tooltypes.ToolResult{
+		return &tooltypes.DefaultToolResult{
 			Error: fmt.Sprintf("File has only %d lines, which is less than the requested offset %d", lineCount, input.Offset),
 		}
 	}
@@ -139,12 +139,12 @@ func (r *FileReadTool) Execute(ctx context.Context, state tooltypes.State, param
 	}
 
 	if err := scanner.Err(); err != nil {
-		return tooltypes.ToolResult{
+		return &tooltypes.DefaultToolResult{
 			Error: fmt.Sprintf("Error reading file: %s", err.Error()),
 		}
 	}
 
-	return tooltypes.ToolResult{
+	return &tooltypes.DefaultToolResult{
 		Result: result,
 	}
 }

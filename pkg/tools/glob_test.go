@@ -198,7 +198,7 @@ func TestGlobTool_Execute(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			inputBytes, _ := json.Marshal(tc.input)
-			result := tool.Execute(ctx, state, string(inputBytes))
+			result := execute(tool, ctx, state, string(inputBytes))
 
 			if tc.expectError {
 				assert.NotEmpty(t, result.Error)

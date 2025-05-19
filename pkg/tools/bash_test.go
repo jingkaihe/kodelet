@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -29,6 +30,12 @@ func TestBashTool_Description(t *testing.T) {
 	assert.Contains(t, desc, "Important")
 }
 
+func execute(tool tooltypes.Tool, ctx context.Context, state tooltypes.State, parameters string) tooltypes.DefaultToolResult {
+	_result := tool.Execute(ctx, state, parameters)
+	result, _ := _result.(*tooltypes.DefaultToolResult)
+	return *result
+}
+
 func TestBashTool_Execute_Success(t *testing.T) {
 	tool := &BashTool{}
 	input := BashInput{
@@ -38,7 +45,7 @@ func TestBashTool_Execute_Success(t *testing.T) {
 	}
 	params, _ := json.Marshal(input)
 
-	result := tool.Execute(context.Background(), NewBasicState(), string(params))
+	result := execute(tool, context.Background(), NewBasicState(), string(params))
 	assert.Empty(t, result.Error)
 	assert.Equal(t, "hello world\n", result.Result)
 }
@@ -52,7 +59,7 @@ func TestBashTool_Execute_Timeout(t *testing.T) {
 	}
 	params, _ := json.Marshal(input)
 
-	result := tool.Execute(context.Background(), NewBasicState(), string(params))
+	result := execute(tool, context.Background(), NewBasicState(), string(params))
 	assert.Contains(t, result.Error, "Command timed out after 1 seconds")
 	assert.Empty(t, result.Result)
 }
@@ -66,14 +73,14 @@ func TestBashTool_Execute_Error(t *testing.T) {
 	}
 	params, _ := json.Marshal(input)
 
-	result := tool.Execute(context.Background(), NewBasicState(), string(params))
+	result := execute(tool, context.Background(), NewBasicState(), string(params))
 	assert.Contains(t, result.Error, "Command exited with status 127")
 	assert.Contains(t, result.Result, "nonexistentcommand: command not found")
 }
 
 func TestBashTool_Execute_InvalidJSON(t *testing.T) {
 	tool := &BashTool{}
-	result := tool.Execute(context.Background(), NewBasicState(), "invalid json")
+	result := execute(tool, context.Background(), NewBasicState(), "invalid json")
 	assert.NotEmpty(t, result.Error)
 	assert.Empty(t, result.Result)
 }
@@ -90,7 +97,7 @@ func TestBashTool_Execute_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
-	result := tool.Execute(ctx, NewBasicState(), string(params))
+	result := execute(tool, ctx, NewBasicState(), string(params))
 	assert.Contains(t, result.Error, "Command timed out")
 	assert.Empty(t, result.Result)
 }

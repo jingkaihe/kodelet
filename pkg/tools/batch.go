@@ -28,12 +28,12 @@ type Invocation struct {
 func (inv *Invocation) invoke(ctx context.Context, state tooltypes.State) tooltypes.ToolResult {
 	_, err := findTool(inv.ToolName, state)
 	if err != nil {
-		return tooltypes.ToolResult{Error: errors.Wrap(err, "failed to find tool").Error()}
+		return &tooltypes.DefaultToolResult{Error: errors.Wrap(err, "failed to find tool").Error()}
 	}
 
 	p, err := json.Marshal(inv.Parameters)
 	if err != nil {
-		return tooltypes.ToolResult{Error: errors.Wrap(err, "failed to encode parameters").Error()}
+		return &tooltypes.DefaultToolResult{Error: errors.Wrap(err, "failed to encode parameters").Error()}
 	}
 
 	return RunTool(ctx, state, inv.ToolName, string(p))
@@ -154,7 +154,7 @@ func (t *BatchTool) ValidateInput(state tooltypes.State, parameters string) erro
 func (t *BatchTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
 	var input BatchToolInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
-		return tooltypes.ToolResult{Error: errors.Wrap(err, "failed to unmarshal input").Error()}
+		return &tooltypes.DefaultToolResult{Error: errors.Wrap(err, "failed to unmarshal input").Error()}
 	}
 
 	toolResults := make([]tooltypes.ToolResult, len(input.Invocations))
@@ -176,20 +176,20 @@ func (t *BatchTool) Execute(ctx context.Context, state tooltypes.State, paramete
 	)
 
 	for idx, toolResult := range toolResults {
-		if toolResult.Error != "" {
+		if toolResult.IsError() {
 			errors = append(errors, fmt.Sprintf(`<invocation.%d.error>
 %s
 </invocation.%d.error>
-`, idx, toolResult.Error, idx))
+`, idx, toolResult.UserMessage(), idx))
 		} else {
 			results = append(results, fmt.Sprintf(`<invocation.%d.result>
 %s
 </invocation.%d.result>
-`, idx, toolResult.Result, idx))
+`, idx, toolResult.UserMessage(), idx))
 		}
 	}
 
-	return tooltypes.ToolResult{
+	return &tooltypes.DefaultToolResult{
 		Result: strings.Join(results, "\n"),
 		Error:  strings.Join(errors, "\n"),
 	}

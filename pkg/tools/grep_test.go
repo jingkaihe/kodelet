@@ -232,7 +232,7 @@ func TestGrepTool_Execute(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			input, _ := json.Marshal(tt.input)
-			result := tool.Execute(ctx, state, string(input))
+			result := execute(tool, ctx, state, string(input))
 
 			if tt.expectError {
 				assert.NotEmpty(t, result.Error)
@@ -310,7 +310,7 @@ func TestGrepTool_InvalidJSON(t *testing.T) {
 	ctx := context.Background()
 	state := NewBasicState()
 
-	result := tool.Execute(ctx, state, "invalid json")
+	result := execute(tool, ctx, state, "invalid json")
 	assert.NotEmpty(t, result.Error)
 	assert.Contains(t, result.Error, "invalid input")
 }
@@ -364,7 +364,7 @@ func TestGrepHiddenFilesIgnored(t *testing.T) {
 	}
 
 	inputJSON, _ := json.Marshal(input)
-	result := tool.Execute(ctx, state, string(inputJSON))
+	result := execute(tool, ctx, state, string(inputJSON))
 
 	// Should not find hidden files
 	assert.Empty(t, result.Error)
@@ -417,7 +417,7 @@ func TestGrepResultLimitAndTruncation(t *testing.T) {
 	}
 
 	inputJSON, _ := json.Marshal(input)
-	result := tool.Execute(ctx, state, string(inputJSON))
+	result := execute(tool, ctx, state, string(inputJSON))
 
 	// Count the number of "Pattern found in file" occurrences
 	count := strings.Count(result.Result, "Pattern found in file")
@@ -627,7 +627,7 @@ func TestGrepSortByModTime(t *testing.T) {
 	}
 
 	inputJSON, _ := json.Marshal(input)
-	result := tool.Execute(ctx, state, string(inputJSON))
+	result := execute(tool, ctx, state, string(inputJSON))
 
 	// Verify order in output (newest first)
 	firstOccurrence := strings.Index(result.Result, "file_newest.txt")

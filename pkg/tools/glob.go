@@ -87,7 +87,7 @@ func (t *GlobTool) ValidateInput(state tooltypes.State, parameters string) error
 func (t *GlobTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
 	var input GlobInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
-		return tooltypes.ToolResult{
+		return &tooltypes.DefaultToolResult{
 			Error: err.Error(),
 		}
 	}
@@ -98,7 +98,7 @@ func (t *GlobTool) Execute(ctx context.Context, state tooltypes.State, parameter
 	if searchPath == "" {
 		searchPath, err = os.Getwd()
 		if err != nil {
-			return tooltypes.ToolResult{
+			return &tooltypes.DefaultToolResult{
 				Error: err.Error(),
 			}
 		}
@@ -139,7 +139,7 @@ func (t *GlobTool) Execute(ctx context.Context, state tooltypes.State, parameter
 	})
 
 	if err != nil {
-		return tooltypes.ToolResult{
+		return &tooltypes.DefaultToolResult{
 			Error: fmt.Sprintf("Error walking the path: %v", err),
 		}
 	}
@@ -166,7 +166,7 @@ func (t *GlobTool) Execute(ctx context.Context, state tooltypes.State, parameter
 		result.WriteString("\n[Results truncated to 100 files. Please refine your pattern to narrow down the results.]\n")
 	}
 
-	return tooltypes.ToolResult{
+	return &tooltypes.DefaultToolResult{
 		Result: result.String(),
 	}
 }
