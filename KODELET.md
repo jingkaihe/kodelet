@@ -94,12 +94,7 @@ make help           # Display help
    export ANTHROPIC_API_KEY="sk-ant-api..."
    export KODELET_MODEL="claude-3-7-sonnet-latest"
    export KODELET_MAX_TOKENS="8192"
-   
-   # MCP configuration
-   export KODELET_MCP_SERVERS_SERVER_NAME_SERVER_TYPE="stdio"
-   export KODELET_MCP_SERVERS_SERVER_NAME_COMMAND="python"
-   export KODELET_MCP_SERVERS_SERVER_NAME_ARGS="-m,my_server"
-   export KODELET_MCP_SERVERS_SERVER_NAME_ENVS_SOME_ENV="value"
+
    ```
 
 2. **Configuration File** (`config.yaml`):
@@ -108,18 +103,15 @@ make help           # Display help
    max_tokens: 8192
    weak_model: "claude-3-5-haiku-latest"
    weak_model_max_tokens: 8192
-   
+
    # MCP configuration
    mcp:
      servers:
-       server_name:
-         server_type: "stdio" # or "sse"
-         # stdio config
-         command: "python" # Command to execute for stdio server
-         args: ["-m", "my_server"] # Arguments for the command
-         envs: # Environment variables 
-           SOME_ENV: "value"
-         # sse config
+       fs:
+         command: "npx" # Command to execute for stdio server
+         args: ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed/files"]
+         tool_white_list: ["list_directory"] # Optional tool white list
+        some_sse_server:   # sse config
          base_url: "http://localhost:8000" # Base URL for SSE server
          headers: # Headers for HTTP requests
            Authorization: "Bearer token"

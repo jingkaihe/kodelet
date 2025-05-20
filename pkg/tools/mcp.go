@@ -246,12 +246,13 @@ func (t *MCPTool) GenerateSchema() *jsonschema.Schema {
 	if err != nil {
 		return nil
 	}
-	var v any
-	err = json.Unmarshal(b, &v)
+
+	var schema *jsonschema.Schema
+	err = json.Unmarshal(b, &schema)
 	if err != nil {
 		return nil
 	}
-	return GenerateSchema[any]()
+	return schema
 }
 
 func (t *MCPTool) TracingKVs(parameters string) ([]attribute.KeyValue, error) {

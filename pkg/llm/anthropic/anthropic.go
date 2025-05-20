@@ -444,10 +444,7 @@ func (t *AnthropicThread) tools(opt llmtypes.MessageOpt) []tooltypes.Tool {
 	if opt.NoToolUse {
 		return []tooltypes.Tool{}
 	}
-	if t.config.IsSubAgent {
-		return tools.SubAgentTools
-	}
-	return tools.MainTools
+	return t.state.Tools()
 }
 
 func (t *AnthropicThread) updateUsage(response *anthropic.Message, model string) {
