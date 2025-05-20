@@ -7,10 +7,15 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/jingkaihe/kodelet/pkg/tools"
 )
 
 // StartChat starts the TUI chat interface
-func StartChat(ctx context.Context, conversationID string, enablePersistence bool) error {
+func StartChat(ctx context.Context,
+	conversationID string,
+	enablePersistence bool,
+	mcpManager *tools.MCPManager,
+) error {
 	// Check terminal capabilities
 	var teaOptions []tea.ProgramOption
 
@@ -27,7 +32,7 @@ func StartChat(ctx context.Context, conversationID string, enablePersistence boo
 	var p *tea.Program
 
 	// Create model separately to add welcome messages
-	model := NewModel(ctx, conversationID, enablePersistence)
+	model := NewModel(ctx, conversationID, enablePersistence, mcpManager)
 
 	// Add welcome message with ASCII art
 	kodaletArt := `
@@ -100,8 +105,8 @@ func isTTY() bool {
 }
 
 // StartChatCmd is a wrapper that can be called from a command line
-func StartChatCmd(ctx context.Context, conversationID string, enablePersistence bool) {
-	if err := StartChat(ctx, conversationID, enablePersistence); err != nil {
+func StartChatCmd(ctx context.Context, conversationID string, enablePersistence bool, mcpManager *tools.MCPManager) {
+	if err := StartChat(ctx, conversationID, enablePersistence, mcpManager); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}

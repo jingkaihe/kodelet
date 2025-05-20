@@ -13,16 +13,17 @@ import (
 
 // AssistantClient handles the interaction with the LLM thread
 type AssistantClient struct {
-	thread llmtypes.Thread
+	thread     llmtypes.Thread
+	mcpManager *tools.MCPManager
 }
 
 // NewAssistantClient creates a new assistant client
-func NewAssistantClient(conversationID string, enablePersistence bool) *AssistantClient {
+func NewAssistantClient(ctx context.Context, conversationID string, enablePersistence bool, mcpManager *tools.MCPManager) *AssistantClient {
 	// Create a persistent thread with config from viper
 	thread := llm.NewThread(llm.GetConfigFromViper())
 
-	// Set default state
-	thread.SetState(tools.NewBasicState())
+	state := tools.NewBasicState(ctx, tools.WithMCPTools(mcpManager))
+	thread.SetState(state)
 
 	// Configure conversation persistence
 	if conversationID != "" {
@@ -32,7 +33,8 @@ func NewAssistantClient(conversationID string, enablePersistence bool) *Assistan
 	thread.EnablePersistence(enablePersistence)
 
 	return &AssistantClient{
-		thread: thread,
+		thread:     thread,
+		mcpManager: mcpManager,
 	}
 }
 
@@ -115,6 +117,14 @@ func (a *AssistantClient) GetConversationID() string {
 // IsPersisted returns whether this thread is being persisted
 func (a *AssistantClient) IsPersisted() bool {
 	return a.thread.IsPersisted()
+}
+
+// Close performs cleanup operations for the assistant client
+func (a *AssistantClient) Close(ctx context.Context) error {
+	if a.mcpManager != nil {
+		return a.mcpManager.Close(ctx)
+	}
+	return nil
 }
 
 // ProcessAssistantEvent processes the events from the assistant

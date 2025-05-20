@@ -38,7 +38,7 @@ func TestBashTool_Execute_Success(t *testing.T) {
 	}
 	params, _ := json.Marshal(input)
 
-	result := tool.Execute(context.Background(), NewBasicState(), string(params))
+	result := tool.Execute(context.Background(), NewBasicState(context.TODO()), string(params))
 	assert.Empty(t, result.Error)
 	assert.Equal(t, "hello world\n", result.Result)
 }
@@ -52,7 +52,7 @@ func TestBashTool_Execute_Timeout(t *testing.T) {
 	}
 	params, _ := json.Marshal(input)
 
-	result := tool.Execute(context.Background(), NewBasicState(), string(params))
+	result := tool.Execute(context.Background(), NewBasicState(context.TODO()), string(params))
 	assert.Contains(t, result.Error, "Command timed out after 1 seconds")
 	assert.Empty(t, result.Result)
 }
@@ -66,14 +66,14 @@ func TestBashTool_Execute_Error(t *testing.T) {
 	}
 	params, _ := json.Marshal(input)
 
-	result := tool.Execute(context.Background(), NewBasicState(), string(params))
+	result := tool.Execute(context.Background(), NewBasicState(context.TODO()), string(params))
 	assert.Contains(t, result.Error, "Command exited with status 127")
 	assert.Contains(t, result.Result, "nonexistentcommand: command not found")
 }
 
 func TestBashTool_Execute_InvalidJSON(t *testing.T) {
 	tool := &BashTool{}
-	result := tool.Execute(context.Background(), NewBasicState(), "invalid json")
+	result := tool.Execute(context.Background(), NewBasicState(context.TODO()), "invalid json")
 	assert.NotEmpty(t, result.Error)
 	assert.Empty(t, result.Result)
 }
@@ -90,7 +90,7 @@ func TestBashTool_Execute_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
-	result := tool.Execute(ctx, NewBasicState(), string(params))
+	result := tool.Execute(ctx, NewBasicState(context.TODO()), string(params))
 	assert.Contains(t, result.Error, "Command timed out")
 	assert.Empty(t, result.Result)
 }
@@ -193,7 +193,7 @@ func TestBashTool_ValidateInput(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			input, _ := json.Marshal(tt.input)
-			err := tool.ValidateInput(NewBasicState(), string(input))
+			err := tool.ValidateInput(NewBasicState(context.TODO()), string(input))
 			if tt.expectError {
 				assert.Error(t, err)
 				if tt.errorMsg != "" {

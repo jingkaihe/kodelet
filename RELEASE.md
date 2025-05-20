@@ -1,5 +1,32 @@
 # Kodelet
 
+## 0.0.21.alpha (2025-05-20)
+
+### New Features
+
+- **MCP Integration**: Added support for the Model Context Protocol (MCP) which allows Kodelet to connect to external tools and services
+  - New MCP server configuration options in `config.yaml`
+  - Support for both stdio and SSE transport modes
+  - Tool whitelisting for granular control over what tools are allowed to avoid prompt bloat.
+
+### Configuration
+
+Added new configuration section for MCP in `config.yaml`:
+
+```yaml
+mcp:
+  servers:
+    fs:
+      command: "npx"  # Command to execute for stdio server
+      args: ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed/files"]
+      tool_white_list: ["list_directory"]  # Optional tool white list
+```
+
+### Dependencies
+
+- Added MCP Go client (`github.com/mark3labs/mcp-go v0.29.0`)
+- Added `github.com/hashicorp/go-multierror v1.1.1` for error handling
+
 ## 0.0.20.alpha (2025-05-20)
 
 ### Features

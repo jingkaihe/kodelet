@@ -46,7 +46,16 @@ By default, it watches the current directory and all subdirectories,
 ignoring common directories like .git and node_modules.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx := cmd.Context()
-		s := tools.NewBasicState()
+
+		// Create the MCP manager from Viper configuration
+		mcpManager, err := tools.CreateMCPManagerFromViper(ctx)
+		if err != nil {
+			fmt.Printf("Error creating MCP manager: %v\n", err)
+			return
+		}
+
+		s := tools.NewBasicState(ctx, tools.WithMCPTools(mcpManager))
+
 		runWatchMode(ctx, s)
 	},
 }

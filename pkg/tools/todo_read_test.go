@@ -34,7 +34,7 @@ func TestTodoReadTool_Description(t *testing.T) {
 
 func TestTodoReadTool_ValidateInput(t *testing.T) {
 	tool := &TodoReadTool{}
-	s := NewBasicState()
+	s := NewBasicState(context.TODO())
 
 	// TodoReadTool.ValidateInput always returns nil
 	err := tool.ValidateInput(s, "")
@@ -48,7 +48,7 @@ func TestTodoReadTool_Execute(t *testing.T) {
 
 	t.Run("successful read with todos", func(t *testing.T) {
 		// Create a test state and set todo file path
-		s := NewBasicState()
+		s := NewBasicState(context.TODO())
 		todoFilePath := filepath.Join(tempDir, "todo_test.json")
 		s.SetTodoFilePath(todoFilePath)
 
@@ -92,7 +92,7 @@ func TestTodoReadTool_Execute(t *testing.T) {
 
 	t.Run("empty todo file", func(t *testing.T) {
 		// Create a test state and set todo file path
-		s := NewBasicState()
+		s := NewBasicState(context.TODO())
 		todoFilePath := filepath.Join(tempDir, "todo_empty.json")
 		s.SetTodoFilePath(todoFilePath)
 
@@ -118,7 +118,7 @@ func TestTodoReadTool_Execute(t *testing.T) {
 
 	t.Run("non-existent todo file", func(t *testing.T) {
 		// Create a test state and set todo file path to non-existent file
-		s := NewBasicState()
+		s := NewBasicState(context.TODO())
 		todoFilePath := filepath.Join(tempDir, "non_existent.json")
 		s.SetTodoFilePath(todoFilePath)
 
@@ -132,7 +132,7 @@ func TestTodoReadTool_Execute(t *testing.T) {
 
 	t.Run("invalid json in todo file", func(t *testing.T) {
 		// Create a test state and set todo file path
-		s := NewBasicState()
+		s := NewBasicState(context.TODO())
 		todoFilePath := filepath.Join(tempDir, "invalid_todo.json")
 		s.SetTodoFilePath(todoFilePath)
 

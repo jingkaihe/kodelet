@@ -444,10 +444,7 @@ func (t *AnthropicThread) tools(opt llmtypes.MessageOpt) []tooltypes.Tool {
 	if opt.NoToolUse {
 		return []tooltypes.Tool{}
 	}
-	if t.config.IsSubAgent {
-		return tools.SubAgentTools
-	}
-	return tools.MainTools
+	return t.state.Tools()
 }
 
 func (t *AnthropicThread) updateUsage(response *anthropic.Message, model string) {
@@ -476,7 +473,7 @@ func (t *AnthropicThread) NewSubAgent(ctx context.Context) llmtypes.Thread {
 	config.IsSubAgent = true
 	thread := NewAnthropicThread(config)
 	thread.isPersisted = false // subagent is not persisted
-	thread.SetState(tools.NewBasicState(tools.WithSubAgentTools()))
+	thread.SetState(tools.NewBasicState(ctx, tools.WithSubAgentTools(), tools.WithExtraMCPTools(t.state.MCPTools())))
 	thread.usage = t.usage
 
 	return thread

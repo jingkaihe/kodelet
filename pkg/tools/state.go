@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
@@ -18,13 +19,14 @@ type BasicState struct {
 	mu           sync.RWMutex
 	sessionID    string
 	todoFilePath string
-	tools        []tooltypes.Tool
+	basicTools   []tooltypes.Tool
+	mcpTools     []tooltypes.Tool
 }
 
-type BasicStateOption func(*BasicState)
+type BasicStateOption func(ctx context.Context, s *BasicState) error
 
 // NewBasicState creates a new instance of BasicState with initialized map
-func NewBasicState(opts ...BasicStateOption) *BasicState {
+func NewBasicState(ctx context.Context, opts ...BasicStateOption) *BasicState {
 	state := &BasicState{
 		lastAccessed: make(map[string]time.Time),
 		sessionID:    uuid.New().String(),
@@ -32,19 +34,40 @@ func NewBasicState(opts ...BasicStateOption) *BasicState {
 	}
 
 	for _, opt := range opts {
-		opt(state)
+		opt(ctx, state)
 	}
 
-	if len(state.tools) == 0 {
-		state.tools = MainTools
+	if len(state.basicTools) == 0 {
+		state.basicTools = MainTools
 	}
 
 	return state
 }
 
 func WithSubAgentTools() BasicStateOption {
-	return func(s *BasicState) {
-		s.tools = SubAgentTools
+	return func(ctx context.Context, s *BasicState) error {
+		s.basicTools = SubAgentTools
+		return nil
+	}
+}
+
+func WithMCPTools(mcpManager *MCPManager) BasicStateOption {
+	return func(ctx context.Context, s *BasicState) error {
+		tools, err := mcpManager.ListMCPTools(ctx)
+		if err != nil {
+			return err
+		}
+		for _, tool := range tools {
+			s.mcpTools = append(s.mcpTools, &tool)
+		}
+		return nil
+	}
+}
+
+func WithExtraMCPTools(tools []tooltypes.Tool) BasicStateOption {
+	return func(ctx context.Context, s *BasicState) error {
+		s.mcpTools = append(s.mcpTools, tools...)
+		return nil
 	}
 }
 
@@ -95,6 +118,17 @@ func (s *BasicState) ClearFileLastAccessed(path string) error {
 	return nil
 }
 
+func (s *BasicState) BasicTools() []tooltypes.Tool {
+	return s.basicTools
+}
+
+func (s *BasicState) MCPTools() []tooltypes.Tool {
+	return s.mcpTools
+}
+
 func (s *BasicState) Tools() []tooltypes.Tool {
-	return s.tools
+	tools := make([]tooltypes.Tool, 0, len(s.basicTools)+len(s.mcpTools))
+	tools = append(tools, s.basicTools...)
+	tools = append(tools, s.mcpTools...)
+	return tools
 }

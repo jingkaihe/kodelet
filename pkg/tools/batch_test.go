@@ -33,7 +33,7 @@ func TestBatchTool_Description(t *testing.T) {
 
 func TestBatchTool_ValidateInput(t *testing.T) {
 	tool := &BatchTool{}
-	state := NewBasicState()
+	state := NewBasicState(context.TODO())
 
 	tests := []struct {
 		name        string
@@ -215,7 +215,7 @@ func TestNoNestedBatch(t *testing.T) {
 func TestBatchTool_Execute(t *testing.T) {
 	tool := &BatchTool{}
 	ctx := context.Background()
-	state := NewBasicState()
+	state := NewBasicState(context.TODO())
 
 	t.Run("successful batch execution", func(t *testing.T) {
 		input := BatchToolInput{

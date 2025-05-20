@@ -48,7 +48,7 @@ func TestGrepTool_Description(t *testing.T) {
 
 func TestGrepTool_ValidateInput(t *testing.T) {
 	tool := &GrepTool{}
-	state := NewBasicState()
+	state := NewBasicState(context.TODO())
 
 	tests := []struct {
 		name        string
@@ -122,7 +122,7 @@ func TestGrepTool_ValidateInput(t *testing.T) {
 func TestGrepTool_Execute(t *testing.T) {
 	tool := &GrepTool{}
 	ctx := context.Background()
-	state := NewBasicState()
+	state := NewBasicState(context.TODO())
 
 	// Create a temporary directory for test files
 	tempDir, err := os.MkdirTemp("", "grep_test")
@@ -308,7 +308,7 @@ func TestGrepTool_Execute(t *testing.T) {
 func TestGrepTool_InvalidJSON(t *testing.T) {
 	tool := &GrepTool{}
 	ctx := context.Background()
-	state := NewBasicState()
+	state := NewBasicState(context.TODO())
 
 	result := tool.Execute(ctx, state, "invalid json")
 	assert.NotEmpty(t, result.Error)
@@ -319,7 +319,7 @@ func TestGrepTool_InvalidJSON(t *testing.T) {
 func TestGrepHiddenFilesIgnored(t *testing.T) {
 	tool := &GrepTool{}
 	ctx := context.Background()
-	state := NewBasicState()
+	state := NewBasicState(context.TODO())
 
 	// Create a temporary directory for test files
 	tempDir, err := os.MkdirTemp("", "grep_hidden_test")
@@ -378,7 +378,7 @@ func TestGrepHiddenFilesIgnored(t *testing.T) {
 func TestGrepResultLimitAndTruncation(t *testing.T) {
 	tool := &GrepTool{}
 	ctx := context.Background()
-	state := NewBasicState()
+	state := NewBasicState(context.TODO())
 
 	// Create a temporary directory for test files
 	tempDir, err := os.MkdirTemp("", "grep_limit_test")
@@ -549,7 +549,7 @@ func TestFileIncludedWithDoublestar(t *testing.T) {
 func TestDefaultPathIsAbsolute(t *testing.T) {
 	tool := &GrepTool{}
 	ctx := context.Background()
-	state := NewBasicState()
+	state := NewBasicState(context.TODO())
 
 	// Input with no path specified
 	input := CodeSearchInput{
@@ -568,7 +568,7 @@ func TestDefaultPathIsAbsolute(t *testing.T) {
 func TestGrepSortByModTime(t *testing.T) {
 	tool := &GrepTool{}
 	ctx := context.Background()
-	state := NewBasicState()
+	state := NewBasicState(context.TODO())
 
 	// Create a temporary directory for test files
 	tempDir, err := os.MkdirTemp("", "grep_sort_test")
@@ -643,7 +643,7 @@ func TestGrepSortByModTime(t *testing.T) {
 func TestGrepFileMatchingByRelativePathOrBaseName(t *testing.T) {
 	tool := &GrepTool{}
 	ctx := context.Background()
-	state := NewBasicState()
+	state := NewBasicState(context.TODO())
 
 	// Create a temporary directory for test files
 	tempDir, err := os.MkdirTemp("", "grep_path_match_test")

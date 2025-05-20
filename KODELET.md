@@ -90,9 +90,11 @@ make help           # Display help
 
 1. **Environment Variables**:
    ```bash
+   # LLM configuration
    export ANTHROPIC_API_KEY="sk-ant-api..."
    export KODELET_MODEL="claude-3-7-sonnet-latest"
    export KODELET_MAX_TOKENS="8192"
+
    ```
 
 2. **Configuration File** (`config.yaml`):
@@ -101,6 +103,19 @@ make help           # Display help
    max_tokens: 8192
    weak_model: "claude-3-5-haiku-latest"
    weak_model_max_tokens: 8192
+
+   # MCP configuration
+   mcp:
+     servers:
+       fs:
+         command: "npx" # Command to execute for stdio server
+         args: ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed/files"]
+         tool_white_list: ["list_directory"] # Optional tool white list
+        some_sse_server:   # sse config
+         base_url: "http://localhost:8000" # Base URL for SSE server
+         headers: # Headers for HTTP requests
+           Authorization: "Bearer token"
+         tool_white_list: ["tool1", "tool2"] # Optional tool white list
    ```
 
 3. **Command Line Flags**:

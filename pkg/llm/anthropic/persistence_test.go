@@ -110,7 +110,7 @@ func TestSaveAndLoadConversationWithFileLastAccess(t *testing.T) {
 	thread.SetConversationID(conversationID)
 
 	// Setup state with file access data
-	state := tools.NewBasicState()
+	state := tools.NewBasicState(context.TODO())
 	thread.SetState(state)
 
 	// Enable persistence
@@ -135,7 +135,7 @@ func TestSaveAndLoadConversationWithFileLastAccess(t *testing.T) {
 		Model: anthropic.ModelClaude3_7SonnetLatest,
 	})
 	newThread.SetConversationID(conversationID)
-	newState := tools.NewBasicState()
+	newState := tools.NewBasicState(context.TODO())
 	newThread.SetState(newState)
 
 	// Enable persistence to load the conversation

@@ -25,7 +25,7 @@ func TestFileMultiEditTool_ValidateInput(t *testing.T) {
 	modTime := fileInfo.ModTime()
 
 	// Create state with the current file modification time
-	state := NewBasicState()
+	state := NewBasicState(context.TODO())
 	state.SetFileLastAccessed(testFilePath, modTime)
 
 	tool := &FileMultiEditTool{}
@@ -183,7 +183,7 @@ func TestFileMultiEditTool_Execute(t *testing.T) {
 			modTime := fileInfo.ModTime()
 
 			// Create state with the current file modification time
-			state := NewBasicState()
+			state := NewBasicState(context.TODO())
 			state.SetFileLastAccessed(testFile, modTime)
 
 			tool := &FileMultiEditTool{}

@@ -19,7 +19,15 @@ func plainChatUI(ctx context.Context, options *ChatOptions) {
 
 	// Create a persistent thread with state
 	thread := llm.NewThread(llm.GetConfigFromViper())
-	thread.SetState(tools.NewBasicState())
+
+	// Create the MCP manager from Viper configuration
+	mcpManager, err := tools.CreateMCPManagerFromViper(ctx)
+	if err != nil {
+		fmt.Printf("Error creating MCP manager: %v\n", err)
+		return
+	}
+
+	thread.SetState(tools.NewBasicState(ctx, tools.WithMCPTools(mcpManager)))
 
 	// Configure conversation persistence
 	if options.resumeConvID != "" {
