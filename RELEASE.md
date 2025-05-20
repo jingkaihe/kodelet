@@ -1,5 +1,17 @@
 # Kodelet
 
+## 0.0.20.alpha (2025-05-20)
+
+### Features
+
+- **File Access Tracking**: Added file last access tracking to conversation persistence
+  - Improves context management for files accessed during conversations
+  - Enables better persistence of file interactions
+
+### Improvements
+
+- **Code Cleanup**: Removed unused code
+
 ## 0.0.19.alpha (2025-05-19)
 
 ### Improvements

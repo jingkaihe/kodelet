@@ -10,6 +10,10 @@ import (
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
+var (
+	_ tooltypes.State = &BasicState{}
+)
+
 type BasicState struct {
 	lastAccessed map[string]time.Time
 	mu           sync.RWMutex
@@ -75,6 +79,18 @@ func (s *BasicState) SetFileLastAccessed(path string, lastAccessed time.Time) er
 	defer s.mu.Unlock()
 	s.lastAccessed[path] = lastAccessed
 	return nil
+}
+
+func (s *BasicState) FileLastAccess() map[string]time.Time {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.lastAccessed
+}
+
+func (s *BasicState) SetFileLastAccess(fileLastAccess map[string]time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lastAccessed = fileLastAccess
 }
 
 func (s *BasicState) GetFileLastAccessed(path string) (time.Time, error) {

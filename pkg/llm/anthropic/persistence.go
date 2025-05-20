@@ -30,14 +30,15 @@ func (t *AnthropicThread) SaveConversation(ctx context.Context, summarise bool) 
 
 	// Create a new conversation record
 	record := conversations.ConversationRecord{
-		ID:          t.conversationID,
-		RawMessages: rawMessages,
-		ModelType:   "anthropic",
-		Usage:       *t.usage,
-		Metadata:    map[string]interface{}{"model": t.config.Model},
-		Summary:     t.summary,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
+		ID:             t.conversationID,
+		RawMessages:    rawMessages,
+		ModelType:      "anthropic",
+		Usage:          *t.usage,
+		Metadata:       map[string]interface{}{"model": t.config.Model},
+		Summary:        t.summary,
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+		FileLastAccess: t.state.FileLastAccess(),
 	}
 
 	// Save the record
@@ -69,6 +70,7 @@ func (t *AnthropicThread) loadConversation() error {
 	// Restore usage statistics
 	t.usage = &record.Usage
 	t.summary = record.Summary
+	t.state.SetFileLastAccess(record.FileLastAccess)
 	return nil
 }
 

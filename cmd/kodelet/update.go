@@ -28,7 +28,7 @@ var updateCmd = &cobra.Command{
 	Short: "Update Kodelet to the latest version",
 	Long:  `Download and install the latest version of Kodelet or a specified version.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		if err := updateKodelet(cmd); err != nil {
+		if err := updateKodelet(); err != nil {
 			logrus.WithError(err).Error("Failed to update Kodelet")
 			os.Exit(1)
 		}
@@ -39,7 +39,7 @@ func init() {
 	updateCmd.Flags().StringVar(&versionFlag, "version", "latest", "Specific version to install (e.g., v0.1.0)")
 }
 
-func updateKodelet(cmd *cobra.Command) error {
+func updateKodelet() error {
 	// Get current version info
 	currentVersion := version.Get()
 	fmt.Printf("Current version: %s\n", currentVersion.Version)

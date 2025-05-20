@@ -87,7 +87,7 @@ func runWatchMode(ctx context.Context, state tooltypes.State) {
 				if verbosity != "quiet" {
 					fmt.Printf("Change detected: %s (%s)\n", event.Path, event.Op)
 				}
-				processFileChange(ctx, state, event.Path, event.Op)
+				processFileChange(ctx, state, event.Path)
 			case <-done:
 				return
 			}
@@ -196,7 +196,7 @@ var (
 )
 
 // Process a file change event
-func processFileChange(ctx context.Context, state tooltypes.State, path string, op fsnotify.Op) {
+func processFileChange(ctx context.Context, state tooltypes.State, path string) {
 	// Double-check that the file is not binary before processing
 	if utils.IsBinaryFile(path) {
 		if verbosity == "verbose" {
