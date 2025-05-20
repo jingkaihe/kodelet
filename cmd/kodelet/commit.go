@@ -82,6 +82,7 @@ IMPORTANT: The output of the commit message should not be wrapped with any markd
 		commitMsg, usage := llm.SendMessageAndGetTextWithUsage(ctx, s, prompt, llm.GetConfigFromViper(), true, llmtypes.MessageOpt{
 			UseWeakModel: true,
 			PromptCache:  false,
+			NoToolUse:    true,
 		})
 		commitMsg = sanitizeCommitMessage(commitMsg)
 
