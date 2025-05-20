@@ -112,6 +112,7 @@ type AnthropicThread struct {
 	isPersisted    bool
 	store          ConversationStore
 	mu             sync.Mutex
+	conversationMu sync.Mutex
 }
 
 // NewAnthropicThread creates a new thread with Anthropic's Claude API
@@ -233,7 +234,7 @@ OUTER:
 	}
 
 	// Save conversation state after completing the interaction
-	if t.isPersisted && t.store != nil {
+	if t.isPersisted && t.store != nil && !opt.NoSaveConversation && !t.config.IsSubAgent {
 		saveCtx := context.Background() // use new context to avoid cancellation
 		t.SaveConversation(saveCtx, false)
 	}
@@ -523,18 +524,21 @@ Treat the USER role as the first person (I), and the ASSISTANT role as the perso
 	defer func() {
 		t.isPersisted = true
 	}()
+
+	oldMessages := make([]anthropic.MessageParam, len(t.messages))
+	copy(oldMessages, t.messages)
 	// Use a faster model for summarization as it's a simpler task
 	_, err := t.SendMessage(ctx, prompt, handler, llmtypes.MessageOpt{
-		UseWeakModel: true,
-		PromptCache:  false, // maybe we should make it configurable, but there is likely no cache for weak model
+		UseWeakModel:       true,
+		PromptCache:        false, // maybe we should make it configurable, but there is likely no cache for weak model
+		NoToolUse:          true,
+		NoSaveConversation: true,
 	})
 	if err != nil {
-		return ""
+		return err.Error()
 	}
 
-	if len(t.messages) >= 2 {
-		t.messages = t.messages[:len(t.messages)-2]
-	}
+	t.messages = oldMessages
 
 	return handler.CollectedText()
 }

@@ -75,6 +75,9 @@ func StartChat(ctx context.Context,
 		return fmt.Errorf("error running program: %w", err)
 	}
 
+	// use a new context to avoid cancellation
+	defer model.assistant.SaveConversation(context.Background())
+
 	// Display final usage statistics on exit
 	if model, ok := result.(Model); ok {
 		usage := model.assistant.GetUsage()
