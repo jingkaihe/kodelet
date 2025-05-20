@@ -48,6 +48,7 @@ type State interface {
 	SetTodoFilePath(path string)
 	SetFileLastAccess(fileLastAccess map[string]time.Time)
 	FileLastAccess() map[string]time.Time
-
+	BasicTools() []Tool
+	MCPTools() []Tool
 	Tools() []Tool
 }

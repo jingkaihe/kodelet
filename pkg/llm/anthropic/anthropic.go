@@ -476,7 +476,7 @@ func (t *AnthropicThread) NewSubAgent(ctx context.Context) llmtypes.Thread {
 	config.IsSubAgent = true
 	thread := NewAnthropicThread(config)
 	thread.isPersisted = false // subagent is not persisted
-	thread.SetState(tools.NewBasicState(ctx, tools.WithSubAgentTools()))
+	thread.SetState(tools.NewBasicState(ctx, tools.WithSubAgentTools(), tools.WithExtraMCPTools(t.state.MCPTools())))
 	thread.usage = t.usage
 
 	return thread

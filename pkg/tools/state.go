@@ -19,7 +19,8 @@ type BasicState struct {
 	mu           sync.RWMutex
 	sessionID    string
 	todoFilePath string
-	tools        []tooltypes.Tool
+	basicTools   []tooltypes.Tool
+	mcpTools     []tooltypes.Tool
 }
 
 type BasicStateOption func(ctx context.Context, s *BasicState) error
@@ -36,8 +37,8 @@ func NewBasicState(ctx context.Context, opts ...BasicStateOption) *BasicState {
 		opt(ctx, state)
 	}
 
-	if len(state.tools) == 0 {
-		state.tools = MainTools
+	if len(state.basicTools) == 0 {
+		state.basicTools = MainTools
 	}
 
 	return state
@@ -45,7 +46,7 @@ func NewBasicState(ctx context.Context, opts ...BasicStateOption) *BasicState {
 
 func WithSubAgentTools() BasicStateOption {
 	return func(ctx context.Context, s *BasicState) error {
-		s.tools = SubAgentTools
+		s.basicTools = SubAgentTools
 		return nil
 	}
 }
@@ -57,13 +58,18 @@ func WithMCPTools(mcpManager *MCPManager) BasicStateOption {
 			return err
 		}
 		for _, tool := range tools {
-			s.tools = append(s.tools, &tool)
+			s.mcpTools = append(s.mcpTools, &tool)
 		}
 		return nil
 	}
 }
 
-
+func WithExtraMCPTools(tools []tooltypes.Tool) BasicStateOption {
+	return func(ctx context.Context, s *BasicState) error {
+		s.mcpTools = append(s.mcpTools, tools...)
+		return nil
+	}
+}
 
 func (s *BasicState) TodoFilePath() string {
 	if s.todoFilePath != "" {
@@ -112,6 +118,17 @@ func (s *BasicState) ClearFileLastAccessed(path string) error {
 	return nil
 }
 
+func (s *BasicState) BasicTools() []tooltypes.Tool {
+	return s.basicTools
+}
+
+func (s *BasicState) MCPTools() []tooltypes.Tool {
+	return s.mcpTools
+}
+
 func (s *BasicState) Tools() []tooltypes.Tool {
-	return s.tools
+	tools := make([]tooltypes.Tool, 0, len(s.basicTools)+len(s.mcpTools))
+	tools = append(tools, s.basicTools...)
+	tools = append(tools, s.mcpTools...)
+	return tools
 }
