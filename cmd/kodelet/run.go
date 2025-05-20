@@ -60,8 +60,14 @@ var runCmd = &cobra.Command{
 			query = strings.Join(args, " ")
 		}
 
-		// Create a new state for this session with MCP tools from Viper
-		appState := tools.NewBasicState(ctx, tools.WithViperMCPTools())
+		// Create the MCP manager from Viper configuration
+		mcpManager, err := tools.CreateMCPManagerFromViper(ctx)
+		if err != nil {
+			fmt.Printf("\n\033[1;31mError creating MCP manager: %v\033[0m\n", err)
+			return
+		}
+
+		appState := tools.NewBasicState(ctx, tools.WithMCPTools(mcpManager))
 
 		// Print the user query
 		fmt.Printf("\033[1;33m[user]: \033[0m%s\n", query)
@@ -80,7 +86,7 @@ var runCmd = &cobra.Command{
 		thread.EnablePersistence(!runOptions.noSave)
 
 		// Send the message and process the response
-		_, err := thread.SendMessage(ctx, query, handler, llmtypes.MessageOpt{
+		_, err = thread.SendMessage(ctx, query, handler, llmtypes.MessageOpt{
 			PromptCache: true,
 		})
 		if err != nil {

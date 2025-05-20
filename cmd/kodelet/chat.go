@@ -1,6 +1,10 @@
 package main
 
 import (
+	"fmt"
+	"os"
+
+	"github.com/jingkaihe/kodelet/pkg/tools"
 	"github.com/jingkaihe/kodelet/pkg/tui"
 	"github.com/spf13/cobra"
 )
@@ -28,9 +32,14 @@ var chatCmd = &cobra.Command{
 	Long:  `Start an interactive chat session with Kodelet through stdin.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx := cmd.Context()
+		mcpManager, err := tools.CreateMCPManagerFromViper(ctx)
+		if err != nil {
+			fmt.Printf("Error creating MCP manager: %v\n", err)
+			os.Exit(1)
+		}
 		// Start the Bubble Tea UI
 		if !chatOptions.usePlainUI {
-			tui.StartChatCmd(ctx, chatOptions.resumeConvID, !chatOptions.noSave)
+			tui.StartChatCmd(ctx, chatOptions.resumeConvID, !chatOptions.noSave, mcpManager)
 			return
 		}
 

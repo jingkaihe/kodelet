@@ -12,6 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
 
@@ -54,7 +55,7 @@ type Model struct {
 }
 
 // NewModel creates a new TUI model
-func NewModel(ctx context.Context, conversationID string, enablePersistence bool) Model {
+func NewModel(ctx context.Context, conversationID string, enablePersistence bool, mcpManager *tools.MCPManager) Model {
 	ta := textarea.New()
 	ta.Placeholder = "Type your message..."
 	ta.Focus()
@@ -88,7 +89,7 @@ func NewModel(ctx context.Context, conversationID string, enablePersistence bool
 	statusMessage := "Ready"
 
 	// Create assistant client
-	assistant := NewAssistantClient(ctx, conversationID, enablePersistence)
+	assistant := NewAssistantClient(ctx, conversationID, enablePersistence, mcpManager)
 
 	// Create the initial model
 	model := Model{

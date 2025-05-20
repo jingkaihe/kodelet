@@ -63,24 +63,7 @@ func WithMCPTools(mcpManager *MCPManager) BasicStateOption {
 	}
 }
 
-// WithViperMCPTools loads MCP configuration from Viper and adds MCP tools to the state
-func WithViperMCPTools() BasicStateOption {
-	return func(ctx context.Context, s *BasicState) error {
-		// Create MCP manager from Viper configuration
-		mcpManager, err := CreateMCPManagerFromViper(ctx)
-		if err != nil {
-			return fmt.Errorf("failed to create MCP manager from Viper: %w", err)
-		}
 
-		// If no MCP manager could be created (no configuration), just return without error
-		if mcpManager == nil {
-			return nil
-		}
-
-		// Use the WithMCPTools option with the created manager
-		return WithMCPTools(mcpManager)(ctx, s)
-	}
-}
 
 func (s *BasicState) TodoFilePath() string {
 	if s.todoFilePath != "" {
