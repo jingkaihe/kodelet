@@ -43,6 +43,7 @@ type Model struct {
 	systemStyle        lipgloss.Style
 	assistant          *AssistantClient
 	ctx                context.Context
+	cancel             context.CancelFunc
 	ctrlCPressCount    int
 	lastCtrlCPressTime time.Time
 	usageText          string
@@ -91,6 +92,8 @@ func NewModel(ctx context.Context, conversationID string, enablePersistence bool
 	// Create assistant client
 	assistant := NewAssistantClient(ctx, conversationID, enablePersistence, mcpManager)
 
+	ctx, cancel := context.WithCancel(ctx)
+
 	// Create the initial model
 	model := Model{
 		messageCh:          make(chan llmtypes.MessageEvent),
@@ -104,6 +107,7 @@ func NewModel(ctx context.Context, conversationID string, enablePersistence bool
 		systemStyle:        lipgloss.NewStyle().Foreground(lipgloss.Color("yellow")).Bold(true),
 		assistant:          assistant,
 		ctx:                ctx,
+		cancel:             cancel,
 		availableCommands:  availableCommands,
 		selectedCommandIdx: 0,
 	}
@@ -244,6 +248,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.ctrlCPressCount > 0 && now.Sub(m.lastCtrlCPressTime) < 2*time.Second {
 				// Save the conversation
 				m.assistant.SaveConversation(m.ctx)
+				m.cancel()
 				return m, tea.Quit
 			}
 

@@ -3,6 +3,7 @@ package anthropic
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -12,6 +13,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/sysprompt"
 	"github.com/jingkaihe/kodelet/pkg/telemetry"
 	"github.com/jingkaihe/kodelet/pkg/tools"
+	"github.com/sirupsen/logrus"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
@@ -196,25 +198,44 @@ func (t *AnthropicThread) SendMessage(
 	}
 
 	// Main interaction loop for handling tool calls
+OUTER:
 	for {
-		var exchangeOutput string
-		exchangeOutput, toolsUsed, err := t.processMessageExchange(ctx, handler, model, maxTokens, systemPrompt, opt)
-		if err != nil {
-			return "", err
-		}
+		select {
+		case <-ctx.Done():
+			logrus.Info("stopping kodelet.llm.anthropic")
+			break OUTER
+		default:
+			var exchangeOutput string
+			exchangeOutput, toolsUsed, err := t.processMessageExchange(ctx, handler, model, maxTokens, systemPrompt, opt)
+			if err != nil {
+				if errors.Is(err, context.Canceled) {
+					logrus.Info("Request to anthropic cancelled, stopping kodelet.llm.anthropic")
+					// remove the last tool use from the messages
+					if len(t.messages) > 0 {
+						lastMsg := t.messages[len(t.messages)-1]
+						if isMessageToolUse(lastMsg) {
+							t.messages = t.messages[:len(t.messages)-1]
+						}
+					}
+					break OUTER
+				}
+				return "", err
+			}
 
-		// Update finalOutput with the most recent output
-		finalOutput = exchangeOutput
+			// Update finalOutput with the most recent output
+			finalOutput = exchangeOutput
 
-		// If no tools were used, we're done
-		if !toolsUsed {
-			break
+			// If no tools were used, we're done
+			if !toolsUsed {
+				break OUTER
+			}
 		}
 	}
 
 	// Save conversation state after completing the interaction
 	if t.isPersisted && t.store != nil {
-		t.SaveConversation(ctx, false)
+		saveCtx := context.Background() // use new context to avoid cancellation
+		t.SaveConversation(saveCtx, false)
 	}
 
 	if !t.config.IsSubAgent {
@@ -222,6 +243,18 @@ func (t *AnthropicThread) SendMessage(
 		handler.HandleDone()
 	}
 	return finalOutput, nil
+}
+
+func isMessageToolUse(msg anthropic.MessageParam) bool {
+	if len(msg.Content) == 0 {
+		return false
+	}
+	for _, block := range msg.Content {
+		if block.OfRequestToolUseBlock != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // processMessageExchange handles a single message exchange with the LLM, including
