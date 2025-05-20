@@ -118,8 +118,9 @@ func (t *SubAgentTool) Execute(ctx context.Context, state tooltypes.State, param
 	}
 
 	text, err := subAgentConfig.Thread.SendMessage(ctx, input.Question, handler, llmtypes.MessageOpt{
-		PromptCache:  input.ModelStrength == ModelStrengthStrong,
-		UseWeakModel: input.ModelStrength == ModelStrengthWeak,
+		PromptCache:        input.ModelStrength == ModelStrengthStrong,
+		UseWeakModel:       input.ModelStrength == ModelStrengthWeak,
+		NoSaveConversation: true,
 	})
 	if err != nil {
 		return tooltypes.ToolResult{

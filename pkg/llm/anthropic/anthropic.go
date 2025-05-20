@@ -187,6 +187,13 @@ func (t *AnthropicThread) SendMessage(
 	if opt.PromptCache {
 		t.cacheMessages()
 	}
+
+	var originalMessages []anthropic.MessageParam
+	if opt.PromptCache {
+		originalMessages = make([]anthropic.MessageParam, len(t.messages))
+		copy(originalMessages, t.messages)
+	}
+
 	t.AddUserMessage(message)
 
 	// Determine which model to use
@@ -233,8 +240,12 @@ OUTER:
 		}
 	}
 
+	if opt.NoSaveConversation {
+		t.messages = originalMessages
+	}
+
 	// Save conversation state after completing the interaction
-	if t.isPersisted && t.store != nil && !opt.NoSaveConversation && !t.config.IsSubAgent {
+	if t.isPersisted && t.store != nil && !opt.NoSaveConversation {
 		saveCtx := context.Background() // use new context to avoid cancellation
 		t.SaveConversation(saveCtx, false)
 	}
@@ -525,8 +536,6 @@ Treat the USER role as the first person (I), and the ASSISTANT role as the perso
 		t.isPersisted = true
 	}()
 
-	oldMessages := make([]anthropic.MessageParam, len(t.messages))
-	copy(oldMessages, t.messages)
 	// Use a faster model for summarization as it's a simpler task
 	_, err := t.SendMessage(ctx, prompt, handler, llmtypes.MessageOpt{
 		UseWeakModel:       true,
@@ -537,8 +546,6 @@ Treat the USER role as the first person (I), and the ASSISTANT role as the perso
 	if err != nil {
 		return err.Error()
 	}
-
-	t.messages = oldMessages
 
 	return handler.CollectedText()
 }
