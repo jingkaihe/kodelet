@@ -43,7 +43,7 @@ type MCPServersConfig struct {
 	Servers map[string]MCPServerConfig `json:"servers"`
 }
 
-func NewMCPClient(config MCPServerConfig) (*client.Client, error) {
+func newMCPClient(config MCPServerConfig) (*client.Client, error) {
 	if config.ServerType == "" {
 		if config.BaseURL != "" {
 			config.ServerType = MCPServerTypeSSE
@@ -91,7 +91,7 @@ func NewMCPManager(config MCPServersConfig) (*MCPManager, error) {
 		whiteList: make(map[string][]string),
 	}
 	for name, config := range config.Servers {
-		client, err := NewMCPClient(config)
+		client, err := newMCPClient(config)
 		if err != nil {
 			return nil, err
 		}
