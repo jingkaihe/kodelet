@@ -1,11 +1,14 @@
 package anthropic
 
 import (
+	"context"
 	"testing"
+	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
 
@@ -96,7 +99,53 @@ func TestDeserializeMessages(t *testing.T) {
 	assert.Equal(t, false, thread.messages[2].Content[0].OfRequestToolResultBlock.IsError.Value)
 	assert.Equal(t, "/root/foo/bar", thread.messages[2].Content[0].OfRequestToolResultBlock.Content[0].OfRequestTextBlock.Text)
 	assert.Equal(t, "text", *thread.messages[2].Content[0].OfRequestToolResultBlock.Content[0].GetType())
-	// assert.Equal(t, "ls -la", thread.messages[1].Content[1].OfRequestToolUseBlock.Input.Command)
-	// assert.Equal(t, "List all files with detailed information", thread.messages[1].Content[1].OfRequestToolUseBlock.Input.Description)
-	// assert.Equal(t, 10, thread.messages[1].Content[1].OfRequestToolUseBlock.Input.Timeout)
+}
+
+func TestSaveAndLoadConversationWithFileLastAccess(t *testing.T) {
+	// Create a thread with a unique conversation ID
+	conversationID := "test-file-last-access"
+	thread := NewAnthropicThread(llmtypes.Config{
+		Model: anthropic.ModelClaude3_7SonnetLatest,
+	})
+	thread.SetConversationID(conversationID)
+
+	// Setup state with file access data
+	state := tools.NewBasicState()
+	thread.SetState(state)
+
+	// Enable persistence
+	thread.EnablePersistence(true)
+
+	// Set file access times
+	now := time.Now()
+	yesterday := now.Add(-24 * time.Hour)
+
+	fileAccessMap := map[string]time.Time{
+		"/path/to/file1.txt": now,
+		"/path/to/file2.txt": yesterday,
+	}
+	state.SetFileLastAccess(fileAccessMap)
+
+	// Save the conversation
+	err := thread.SaveConversation(context.Background(), false)
+	assert.NoError(t, err)
+
+	// Create a new thread with the same conversation ID
+	newThread := NewAnthropicThread(llmtypes.Config{
+		Model: anthropic.ModelClaude3_7SonnetLatest,
+	})
+	newThread.SetConversationID(conversationID)
+	newState := tools.NewBasicState()
+	newThread.SetState(newState)
+
+	// Enable persistence to load the conversation
+	newThread.EnablePersistence(true)
+
+	// Verify the file last access data was preserved
+	loadedState := newThread.GetState()
+	loadedFileAccess := loadedState.FileLastAccess()
+
+	assert.Equal(t, 2, len(loadedFileAccess))
+	assert.Equal(t, now.Unix(), loadedFileAccess["/path/to/file1.txt"].Unix())
+	assert.Equal(t, yesterday.Unix(), loadedFileAccess["/path/to/file2.txt"].Unix())
 }
