@@ -9,6 +9,10 @@
   - Support for both stdio and SSE transport modes
   - Tool whitelisting for granular control over what tools are allowed to avoid prompt bloat.
 
+- **File Access Tracking**: Added file last access tracking to conversation persistence
+  - Improves context management for files accessed during conversations
+  - Enables better persistence of file interactions
+
 ### Configuration
 
 Added new configuration section for MCP in `config.yaml`:
@@ -26,14 +30,6 @@ mcp:
 
 - Added MCP Go client (`github.com/mark3labs/mcp-go v0.29.0`)
 - Added `github.com/hashicorp/go-multierror v1.1.1` for error handling
-
-## 0.0.20.alpha (2025-05-20)
-
-### Features
-
-- **File Access Tracking**: Added file last access tracking to conversation persistence
-  - Improves context management for files accessed during conversations
-  - Enables better persistence of file interactions
 
 ### Improvements
 
