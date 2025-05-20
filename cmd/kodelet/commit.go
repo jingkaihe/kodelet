@@ -148,30 +148,6 @@ func getGitDiff() (string, error) {
 	return string(output), nil
 }
 
-// captureOutput captures the output of the provided function
-func captureOutput(f func()) string {
-	// Redirect stdout to a pipe
-	oldStdout := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-
-	// Call the function
-	f()
-
-	// Reset stdout and close the pipe
-	w.Close()
-	os.Stdout = oldStdout
-
-	// Read the output
-	var buf strings.Builder
-	scanner := bufio.NewScanner(r)
-	for scanner.Scan() {
-		buf.WriteString(scanner.Text() + "\n")
-	}
-
-	return buf.String()
-}
-
 // confirmCommit asks the user to confirm the commit
 func confirmCommit(message string) bool {
 	reader := bufio.NewReader(os.Stdin)

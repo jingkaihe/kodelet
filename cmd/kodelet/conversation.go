@@ -18,8 +18,6 @@ type ConversationOptions struct {
 	// Common options can be added here
 }
 
-var conversationOptions = &ConversationOptions{}
-
 var conversationCmd = &cobra.Command{
 	Use:   "conversation",
 	Short: "Manage saved conversations",
