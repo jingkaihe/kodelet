@@ -1,6 +1,6 @@
 # Kodelet
 
-Kodelet is a powerful, lightweight CLI tool that transforms your ideas into robust engineering solutions using AI.
+Kodelet is a lightweight agentic SWE Agent. It runs as an interactive CLI tool in your terminal. It is capable of peforming software engineering and production operating tasks.
 
 ## Key Features
 

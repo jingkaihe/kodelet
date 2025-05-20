@@ -6,27 +6,40 @@ Kodelet is a lightweight CLI tool that helps with software engineering tasks. It
 ## Project Structure
 ```
 ├── .github/             # GitHub configuration
+├── .dockerignore        # Docker ignore file
+├── .gitignore           # Git ignore file
 ├── adrs/                # Architecture Decision Records
 ├── bin/                 # Compiled binaries
 ├── cmd/                 # Application entry point
 │   └── kodelet/         # Main application command
+├── config.sample.yaml   # Sample configuration file
+├── Dockerfile           # Docker configuration
 ├── docs/                # Documentation files
-└── pkg/                 # Core packages
-    ├── conversations/   # Conversation storage and management
-    ├── llm/             # LLM client for AI interactions
-    │   └── anthropic/   # Anthropic Claude API client
-    ├── sysprompt/       # System prompt configuration
-    │   └── templates/   # Prompt templates
-    │       └── components/ # Template components
-    │           └── examples/ # Template for the prompt examples
-    ├── telemetry/       # Telemetry components
-    ├── tools/           # Tool implementations
-    ├── tui/             # Terminal UI components
-    ├── types/           # Common types
-    │   ├── llm/         # LLM related types
-    │   └── tools/       # Tool related types
-    ├── utils/           # Utility functions
-    └── version/         # Version information
+├── go.mod               # Go module file
+├── go.sum               # Go dependencies checksum
+├── install.sh           # Installation script
+├── KODELET.md           # Project documentation
+├── LICENSE              # License file
+├── Makefile             # Build automation
+├── pkg/                 # Core packages
+│   ├── conversations/   # Conversation storage and management
+│   ├── llm/             # LLM client for AI interactions
+│   │   └── anthropic/   # Anthropic Claude API client
+│   ├── sysprompt/       # System prompt configuration
+│   │   └── templates/   # Prompt templates
+│   │       └── components/ # Template components
+│   │           └── examples/ # Template for the prompt examples
+│   ├── telemetry/       # Telemetry components
+│   ├── tools/           # Tool implementations
+│   ├── tui/             # Terminal UI components
+│   ├── types/           # Common types
+│   │   ├── llm/         # LLM related types
+│   │   └── tools/       # Tool related types
+│   ├── utils/           # Utility functions
+│   └── version/         # Version information
+├── README.md            # Project overview
+├── RELEASE.md           # Release notes
+└── VERSION.txt          # Version information file
 ```
 
 The codebase follows a modular structure with separation of concerns between LLM communication, tools, UI, and core functionality.
