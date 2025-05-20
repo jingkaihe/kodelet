@@ -102,8 +102,7 @@ func NewMCPManager(config MCPServersConfig) (*MCPManager, error) {
 }
 
 func (m *MCPManager) Initialize(ctx context.Context) error {
-	for name, client := range m.clients {
-		logrus.WithField("name", name).Info("initializing mcp client")
+	for _, client := range m.clients {
 		initReq := mcp.InitializeRequest{}
 		initReq.Params.ClientInfo = mcp.Implementation{
 			Name:    "kodelet",
@@ -118,7 +117,6 @@ func (m *MCPManager) Initialize(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		logrus.WithField("name", name).Info("initialized mcp client")
 	}
 	return nil
 }
@@ -136,7 +134,6 @@ func (m *MCPManager) Close(ctx context.Context) error {
 func (m *MCPManager) ListMCPTools(ctx context.Context) ([]MCPTool, error) {
 	tools := []MCPTool{}
 	for name, client := range m.clients {
-		logrus.WithField("name", name).Info("listing mcp tools")
 		listToolResult, err := client.ListTools(ctx, mcp.ListToolsRequest{})
 		if err != nil {
 			return nil, err

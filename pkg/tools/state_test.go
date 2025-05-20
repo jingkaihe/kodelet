@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestBasicState(t *testing.T) {
@@ -129,4 +131,19 @@ func TestConcurrentAccess(t *testing.T) {
 	}
 
 	// If we got here without deadlock or panic, the test passes
+}
+
+func TestBasicState_MCPTools(t *testing.T) {
+	config := goldenMCPServersConfig
+	manager, err := NewMCPManager(config)
+	assert.NoError(t, err)
+
+	err = manager.Initialize(context.Background())
+	assert.NoError(t, err)
+
+	s := NewBasicState(context.TODO(), WithMCPTools(manager))
+
+	tools := s.MCPTools()
+	assert.NotNil(t, tools)
+	assert.Equal(t, len(tools), 3)
 }
