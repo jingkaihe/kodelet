@@ -3,6 +3,7 @@ package anthropic
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -12,6 +13,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/sysprompt"
 	"github.com/jingkaihe/kodelet/pkg/telemetry"
 	"github.com/jingkaihe/kodelet/pkg/tools"
+	"github.com/sirupsen/logrus"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
@@ -110,6 +112,7 @@ type AnthropicThread struct {
 	isPersisted    bool
 	store          ConversationStore
 	mu             sync.Mutex
+	conversationMu sync.Mutex
 }
 
 // NewAnthropicThread creates a new thread with Anthropic's Claude API
@@ -178,46 +181,19 @@ func (t *AnthropicThread) SendMessage(
 	// Check if tracing is enabled and wrap the handler
 	tracer := telemetry.Tracer("kodelet.llm")
 
-	attributes := []attribute.KeyValue{
-		attribute.String("model", t.config.Model),
-		attribute.Int("max_tokens", t.config.MaxTokens),
-		attribute.Int("weak_model_max_tokens", t.config.WeakModelMaxTokens),
-		attribute.Int("thinking_budget_tokens", t.config.ThinkingBudgetTokens),
-		attribute.Bool("prompt_cache", opt.PromptCache),
-		attribute.Bool("use_weak_model", opt.UseWeakModel),
-		attribute.Bool("is_sub_agent", t.config.IsSubAgent),
-		attribute.String("conversation_id", t.conversationID),
-		attribute.Bool("is_persisted", t.isPersisted),
-		attribute.Int("message_length", len(message)),
-	}
-
-	ctx, span := tracer.Start(ctx, "llm.send_message", trace.WithAttributes(attributes...))
-	defer func() {
-		// Record usage metrics after completion
-		usage := t.GetUsage()
-		span.SetAttributes(
-			attribute.Int("tokens.input", usage.InputTokens),
-			attribute.Int("tokens.output", usage.OutputTokens),
-			attribute.Int("tokens.cache_creation", usage.CacheCreationInputTokens),
-			attribute.Int("tokens.cache_read", usage.CacheReadInputTokens),
-			attribute.Float64("cost.total", usage.TotalCost()),
-			attribute.Int("context_window.current", usage.CurrentContextWindow),
-			attribute.Int("context_window.max", usage.MaxContextWindow),
-		)
-
-		if err != nil {
-			span.SetStatus(codes.Error, err.Error())
-			span.RecordError(err)
-		} else {
-			span.SetStatus(codes.Ok, "")
-			span.AddEvent("message_processing_completed")
-		}
-		span.End()
-	}()
+	ctx, span := t.createMessageSpan(ctx, tracer, message, opt)
+	defer t.finalizeMessageSpan(span, err)
 
 	if opt.PromptCache {
 		t.cacheMessages()
 	}
+
+	var originalMessages []anthropic.MessageParam
+	if opt.PromptCache {
+		originalMessages = make([]anthropic.MessageParam, len(t.messages))
+		copy(originalMessages, t.messages)
+	}
+
 	t.AddUserMessage(message)
 
 	// Determine which model to use
@@ -230,98 +206,48 @@ func (t *AnthropicThread) SendMessage(
 	}
 
 	// Main interaction loop for handling tool calls
+OUTER:
 	for {
-		// Prepare message parameters
-		messageParams := anthropic.MessageNewParams{
-			MaxTokens: int64(maxTokens),
-			System: []anthropic.TextBlockParam{
-				{
-					Text: systemPrompt,
-					CacheControl: anthropic.CacheControlEphemeralParam{
-						Type: "ephemeral",
-					},
-				},
-			},
-			Messages: t.messages,
-			Model:    model,
-			Tools:    tools.ToAnthropicTools(t.tools(opt)),
-		}
-		if t.shouldUtiliseThinking(model) {
-			messageParams.Thinking = anthropic.ThinkingConfigParamUnion{
-				OfThinkingConfigEnabled: &anthropic.ThinkingConfigEnabledParam{
-					Type:         "enabled",
-					BudgetTokens: int64(t.config.ThinkingBudgetTokens),
-				},
+		select {
+		case <-ctx.Done():
+			logrus.Info("stopping kodelet.llm.anthropic")
+			break OUTER
+		default:
+			var exchangeOutput string
+			exchangeOutput, toolsUsed, err := t.processMessageExchange(ctx, handler, model, maxTokens, systemPrompt, opt)
+			if err != nil {
+				if errors.Is(err, context.Canceled) {
+					logrus.Info("Request to anthropic cancelled, stopping kodelet.llm.anthropic")
+					// remove the last tool use from the messages
+					if len(t.messages) > 0 {
+						lastMsg := t.messages[len(t.messages)-1]
+						if isMessageToolUse(lastMsg) {
+							t.messages = t.messages[:len(t.messages)-1]
+						}
+					}
+					break OUTER
+				}
+				return "", err
 			}
-		}
 
-		// Add a tracing event for API call start
-		telemetry.AddEvent(ctx, "api_call_start",
-			attribute.String("model", model),
-			attribute.Int("max_tokens", maxTokens),
-		)
+			// Update finalOutput with the most recent output
+			finalOutput = exchangeOutput
 
-		response, err := t.NewMessage(ctx, messageParams)
-		if err != nil {
-			return "", fmt.Errorf("error sending message to Anthropic: %w", err)
-		}
-
-		// Record API call completion
-		telemetry.AddEvent(ctx, "api_call_complete",
-			attribute.Int("input_tokens", int(response.Usage.InputTokens)),
-			attribute.Int("output_tokens", int(response.Usage.OutputTokens)),
-		)
-
-		// Add the assistant response to history
-		t.messages = append(t.messages, response.ToParam())
-
-		t.updateUsage(response, model)
-
-		// Process the response content blocks
-		toolUseCount := 0
-		for _, block := range response.Content {
-			switch variant := block.AsAny().(type) {
-			case anthropic.TextBlock:
-				handler.HandleText(variant.Text)
-				finalOutput = variant.Text
-			case anthropic.ThinkingBlock:
-				handler.HandleThinking(variant.Thinking)
-			case anthropic.ToolUseBlock:
-				toolUseCount++
-				inputJSON, _ := json.Marshal(variant.JSON.Input.Raw())
-				handler.HandleToolUse(block.Name, string(inputJSON))
-
-				// For tracing, add tool execution event
-				telemetry.AddEvent(ctx, "tool_execution_start",
-					attribute.String("tool_name", block.Name),
-				)
-
-				runToolCtx := t.WithSubAgent(ctx, handler)
-				output := tools.RunTool(runToolCtx, t.state, block.Name, string(variant.JSON.Input.Raw()))
-				handler.HandleToolResult(block.Name, output.String())
-
-				// For tracing, add tool execution completion event
-				telemetry.AddEvent(ctx, "tool_execution_complete",
-					attribute.String("tool_name", block.Name),
-					attribute.Int("result_length", len(output.String())),
-				)
-
-				// Add tool result to messages for next API call
-				t.messages = append(t.messages, anthropic.NewUserMessage(
-					anthropic.NewToolResultBlock(block.ID, output.String(), false),
-				))
+			// If no tools were used, we're done
+			if !toolsUsed {
+				break OUTER
 			}
-		}
-
-		// If no tools were used, we're done
-		if toolUseCount == 0 {
-			break
 		}
 	}
 
+	if opt.NoSaveConversation {
+		t.messages = originalMessages
+	}
+
 	// Save conversation state after completing the interaction
-	if t.isPersisted && t.store != nil {
-		t.SaveConversation(ctx, false)
+	if t.isPersisted && t.store != nil && !opt.NoSaveConversation {
+		saveCtx := context.Background() // use new context to avoid cancellation
+		t.SaveConversation(saveCtx, false)
 	}
 
 	if !t.config.IsSubAgent {
@@ -329,6 +255,116 @@ func (t *AnthropicThread) SendMessage(
 		handler.HandleDone()
 	}
 	return finalOutput, nil
+}
+
+func isMessageToolUse(msg anthropic.MessageParam) bool {
+	if len(msg.Content) == 0 {
+		return false
+	}
+	for _, block := range msg.Content {
+		if block.OfRequestToolUseBlock != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// processMessageExchange handles a single message exchange with the LLM, including
+// preparing message parameters, making the API call, and processing the response
+func (t *AnthropicThread) processMessageExchange(
+	ctx context.Context,
+	handler llmtypes.MessageHandler,
+	model string,
+	maxTokens int,
+	systemPrompt string,
+	opt llmtypes.MessageOpt,
+) (string, bool, error) {
+	var finalOutput string
+
+	// Prepare message parameters
+	messageParams := anthropic.MessageNewParams{
+		MaxTokens: int64(maxTokens),
+		System: []anthropic.TextBlockParam{
+			{
+				Text: systemPrompt,
+				CacheControl: anthropic.CacheControlEphemeralParam{
+					Type: "ephemeral",
+				},
+			},
+		},
+		Messages: t.messages,
+		Model:    model,
+		Tools:    tools.ToAnthropicTools(t.tools(opt)),
+	}
+	if t.shouldUtiliseThinking(model) {
+		messageParams.Thinking = anthropic.ThinkingConfigParamUnion{
+			OfThinkingConfigEnabled: &anthropic.ThinkingConfigEnabledParam{
+				Type:         "enabled",
+				BudgetTokens: int64(t.config.ThinkingBudgetTokens),
+			},
+		}
+	}
+
+	// Add a tracing event for API call start
+	telemetry.AddEvent(ctx, "api_call_start",
+		attribute.String("model", model),
+		attribute.Int("max_tokens", maxTokens),
+	)
+
+	response, err := t.NewMessage(ctx, messageParams)
+	if err != nil {
+		return "", false, fmt.Errorf("error sending message to Anthropic: %w", err)
+	}
+
+	// Record API call completion
+	telemetry.AddEvent(ctx, "api_call_complete",
+		attribute.Int("input_tokens", int(response.Usage.InputTokens)),
+		attribute.Int("output_tokens", int(response.Usage.OutputTokens)),
+	)
+
+	// Add the assistant response to history
+	t.messages = append(t.messages, response.ToParam())
+
+	t.updateUsage(response, model)
+
+	// Process the response content blocks
+	toolUseCount := 0
+	for _, block := range response.Content {
+		switch variant := block.AsAny().(type) {
+		case anthropic.TextBlock:
+			handler.HandleText(variant.Text)
+			finalOutput = variant.Text
+		case anthropic.ThinkingBlock:
+			handler.HandleThinking(variant.Thinking)
+		case anthropic.ToolUseBlock:
+			toolUseCount++
+			inputJSON, _ := json.Marshal(variant.JSON.Input.Raw())
+			handler.HandleToolUse(block.Name, string(inputJSON))
+
+			// For tracing, add tool execution event
+			telemetry.AddEvent(ctx, "tool_execution_start",
+				attribute.String("tool_name", block.Name),
+			)
+
+			runToolCtx := t.WithSubAgent(ctx, handler)
+			output := tools.RunTool(runToolCtx, t.state, block.Name, string(variant.JSON.Input.Raw()))
+			handler.HandleToolResult(block.Name, output.String())
+
+			// For tracing, add tool execution completion event
+			telemetry.AddEvent(ctx, "tool_execution_complete",
+				attribute.String("tool_name", block.Name),
+				attribute.Int("result_length", len(output.String())),
+			)
+
+			// Add tool result to messages for next API call
+			t.messages = append(t.messages, anthropic.NewUserMessage(
+				anthropic.NewToolResultBlock(block.ID, output.String(), false),
+			))
+		}
+	}
+
+	// Return whether tools were used in this exchange
+	return finalOutput, toolUseCount > 0, nil
 }
 
 // getModelAndTokens determines which model and max tokens to use based on configuration and options
@@ -499,17 +535,16 @@ Treat the USER role as the first person (I), and the ASSISTANT role as the perso
 	defer func() {
 		t.isPersisted = true
 	}()
+
 	// Use a faster model for summarization as it's a simpler task
 	_, err := t.SendMessage(ctx, prompt, handler, llmtypes.MessageOpt{
-		UseWeakModel: true,
-		PromptCache:  false, // maybe we should make it configurable, but there is likely no cache for weak model
+		UseWeakModel:       true,
+		PromptCache:        false, // maybe we should make it configurable, but there is likely no cache for weak model
+		NoToolUse:          true,
+		NoSaveConversation: true,
 	})
 	if err != nil {
-		return ""
-	}
-
-	if len(t.messages) >= 2 {
-		t.messages = t.messages[:len(t.messages)-2]
+		return err.Error()
 	}
 
 	return handler.CollectedText()
@@ -563,4 +598,51 @@ func (t *AnthropicThread) EnablePersistence(enabled bool) {
 	if enabled && t.conversationID != "" && t.store != nil {
 		t.loadConversation()
 	}
+}
+
+// createMessageSpan creates and configures a tracing span for message handling
+func (t *AnthropicThread) createMessageSpan(
+	ctx context.Context,
+	tracer trace.Tracer,
+	message string,
+	opt llmtypes.MessageOpt,
+) (context.Context, trace.Span) {
+	attributes := []attribute.KeyValue{
+		attribute.String("model", t.config.Model),
+		attribute.Int("max_tokens", t.config.MaxTokens),
+		attribute.Int("weak_model_max_tokens", t.config.WeakModelMaxTokens),
+		attribute.Int("thinking_budget_tokens", t.config.ThinkingBudgetTokens),
+		attribute.Bool("prompt_cache", opt.PromptCache),
+		attribute.Bool("use_weak_model", opt.UseWeakModel),
+		attribute.Bool("is_sub_agent", t.config.IsSubAgent),
+		attribute.String("conversation_id", t.conversationID),
+		attribute.Bool("is_persisted", t.isPersisted),
+		attribute.Int("message_length", len(message)),
+	}
+
+	return tracer.Start(ctx, "llm.send_message", trace.WithAttributes(attributes...))
+}
+
+// finalizeMessageSpan records final metrics and status to the span before ending it
+func (t *AnthropicThread) finalizeMessageSpan(span trace.Span, err error) {
+	// Record usage metrics after completion
+	usage := t.GetUsage()
+	span.SetAttributes(
+		attribute.Int("tokens.input", usage.InputTokens),
+		attribute.Int("tokens.output", usage.OutputTokens),
+		attribute.Int("tokens.cache_creation", usage.CacheCreationInputTokens),
+		attribute.Int("tokens.cache_read", usage.CacheReadInputTokens),
+		attribute.Float64("cost.total", usage.TotalCost()),
+		attribute.Int("context_window.current", usage.CurrentContextWindow),
+		attribute.Int("context_window.max", usage.MaxContextWindow),
+	)
+
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		span.RecordError(err)
+	} else {
+		span.SetStatus(codes.Ok, "")
+		span.AddEvent("message_processing_completed")
+	}
+	span.End()
 }

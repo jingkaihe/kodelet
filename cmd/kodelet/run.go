@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/tools"
@@ -26,7 +29,18 @@ var runCmd = &cobra.Command{
 	Long:  `Execute a one-shot query with Kodelet and return the result.`,
 	Args:  cobra.MinimumNArgs(0),
 	Run: func(cmd *cobra.Command, args []string) {
-		ctx := cmd.Context()
+		// Create a cancellable context that listens for signals
+		ctx, cancel := context.WithCancel(cmd.Context())
+		defer cancel()
+
+		// Set up signal handling
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+		go func() {
+			<-sigCh
+			fmt.Println("\n\033[1;33m[kodelet]: Cancellation requested, shutting down...\033[0m")
+			cancel()
+		}()
 
 		// Check if there's input from stdin (pipe)
 		stat, _ := os.Stdin.Stat()

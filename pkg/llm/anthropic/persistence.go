@@ -13,6 +13,9 @@ import (
 
 // SaveConversation saves the current thread to the conversation store
 func (t *AnthropicThread) SaveConversation(ctx context.Context, summarise bool) error {
+	t.conversationMu.Lock()
+	defer t.conversationMu.Unlock()
+
 	if !t.isPersisted || t.store == nil {
 		return nil
 	}
@@ -47,6 +50,9 @@ func (t *AnthropicThread) SaveConversation(ctx context.Context, summarise bool) 
 
 // loadConversation loads a conversation from the store into the thread
 func (t *AnthropicThread) loadConversation() error {
+	t.conversationMu.Lock()
+	defer t.conversationMu.Unlock()
+
 	if !t.isPersisted || t.store == nil || t.conversationID == "" {
 		return nil
 	}

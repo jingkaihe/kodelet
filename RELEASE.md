@@ -1,5 +1,14 @@
 # Kodelet
 
+## 0.0.22.alpha (2025-05-20)
+
+### Features
+- **Conversation Management**: Improved conversation persistence and concurrency safety
+- **Thread Context**: Added context cancellation and signal handling for graceful shutdown
+
+### Refactoring
+- Extracted tracing and message exchange logic into separate methods in Anthropic client
+
 ## 0.0.21.alpha (2025-05-20)
 
 ### New Features

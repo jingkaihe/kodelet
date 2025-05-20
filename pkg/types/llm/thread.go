@@ -14,6 +14,8 @@ type MessageOpt struct {
 	UseWeakModel bool
 	// NoToolUse indicates that no tool use should be performed
 	NoToolUse bool
+	// NoSaveConversation indicates that the following conversation should not be saved
+	NoSaveConversation bool
 }
 
 // SubAgentConfig is the key for the thread in the context

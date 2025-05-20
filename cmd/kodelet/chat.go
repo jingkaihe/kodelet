@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -31,7 +32,9 @@ var chatCmd = &cobra.Command{
 	Short: "Start an interactive chat session with Kodelet",
 	Long:  `Start an interactive chat session with Kodelet through stdin.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		ctx := cmd.Context()
+		ctx, cancel := context.WithCancel(cmd.Context())
+		defer cancel()
+
 		mcpManager, err := tools.CreateMCPManagerFromViper(ctx)
 		if err != nil {
 			fmt.Printf("Error creating MCP manager: %v\n", err)
