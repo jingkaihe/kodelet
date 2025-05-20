@@ -49,7 +49,7 @@ func TestFileEditTool_ValidateInput(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	mockState := NewBasicState()
+	mockState := NewBasicState(context.TODO())
 	mockState.SetFileLastAccessed(tmpfile.Name(), time.Now())
 
 	tool := &FileEditTool{}
@@ -136,7 +136,7 @@ func TestFileEditTool_Execute(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		mockState := NewBasicState()
+		mockState := NewBasicState(context.TODO())
 
 		input := FileEditInput{
 			FilePath: tmpfile.Name(),
@@ -164,7 +164,7 @@ func TestFileEditTool_Execute(t *testing.T) {
 			NewText:  "new text",
 		}
 		params, _ := json.Marshal(input)
-		result := tool.Execute(context.Background(), NewBasicState(), string(params))
+		result := tool.Execute(context.Background(), NewBasicState(context.TODO()), string(params))
 
 		assert.Contains(t, result.Error, "failed to read the file")
 		assert.Empty(t, result.Result)
@@ -172,7 +172,7 @@ func TestFileEditTool_Execute(t *testing.T) {
 
 	// Test invalid JSON
 	t.Run("invalid JSON", func(t *testing.T) {
-		result := tool.Execute(context.Background(), NewBasicState(), "invalid json")
+		result := tool.Execute(context.Background(), NewBasicState(context.TODO()), "invalid json")
 		assert.NotEmpty(t, result.Error)
 		assert.Empty(t, result.Result)
 	})
@@ -195,7 +195,7 @@ func TestFileEditTool_MultipleEdits(t *testing.T) {
 	}
 
 	tool := &FileEditTool{}
-	mockState := NewBasicState()
+	mockState := NewBasicState(context.TODO())
 
 	// First edit
 	firstInput := FileEditInput{
@@ -316,7 +316,7 @@ func TestFileEditTool_ExecuteOutputsFormattedEdit(t *testing.T) {
 	}
 
 	tool := &FileEditTool{}
-	mockState := NewBasicState()
+	mockState := NewBasicState(context.TODO())
 
 	// Edit the file
 	input := FileEditInput{
@@ -364,7 +364,7 @@ func main() {
 	}
 
 	tool := &FileEditTool{}
-	mockState := NewBasicState()
+	mockState := NewBasicState(context.TODO())
 
 	// Edit the file - replace the data processing loop
 	oldText := `	// Process data

@@ -17,12 +17,12 @@ type AssistantClient struct {
 }
 
 // NewAssistantClient creates a new assistant client
-func NewAssistantClient(conversationID string, enablePersistence bool) *AssistantClient {
+func NewAssistantClient(ctx context.Context, conversationID string, enablePersistence bool) *AssistantClient {
 	// Create a persistent thread with config from viper
 	thread := llm.NewThread(llm.GetConfigFromViper())
 
 	// Set default state
-	thread.SetState(tools.NewBasicState())
+	thread.SetState(tools.NewBasicState(ctx))
 
 	// Configure conversation persistence
 	if conversationID != "" {

@@ -61,7 +61,7 @@ var runCmd = &cobra.Command{
 		}
 
 		// Create a new state for this session
-		appState := tools.NewBasicState()
+		appState := tools.NewBasicState(ctx)
 
 		// Print the user query
 		fmt.Printf("\033[1;33m[user]: \033[0m%s\n", query)

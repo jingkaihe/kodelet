@@ -132,7 +132,7 @@ func TestSendMessageAndGetText(t *testing.T) {
 
 	// Test with real client
 	result := SendMessageAndGetText(ctx,
-		tools.NewBasicState(),
+		tools.NewBasicState(ctx),
 		query,
 		llmtypes.Config{
 			Model:     anthropic.ModelClaude3_5HaikuLatest,
@@ -194,7 +194,7 @@ func TestSendMessageRealClient(t *testing.T) {
 		Model:     anthropic.ModelClaude3_7SonnetLatest, // Using a real model
 		MaxTokens: 100,
 	})
-	thread.SetState(tools.NewBasicState())
+	thread.SetState(tools.NewBasicState(context.TODO()))
 
 	// Send a simple message that should not trigger tool use
 	_, err := thread.SendMessage(ctx, "Say hello world", mockHandler, llmtypes.MessageOpt{})
@@ -257,7 +257,7 @@ func TestSendMessageWithToolUse(t *testing.T) {
 		Model:     anthropic.ModelClaude3_5HaikuLatest,
 		MaxTokens: 1000,
 	})
-	thread.SetState(tools.NewBasicState())
+	thread.SetState(tools.NewBasicState(context.TODO()))
 
 	// Send message that should trigger thinking tool use
 	_, err := thread.SendMessage(ctx, "Use the thinking tool to calculate 25 * 32", handler, llmtypes.MessageOpt{})

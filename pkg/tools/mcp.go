@@ -17,6 +17,10 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 )
 
+var (
+	_ tooltypes.Tool = &MCPTool{}
+)
+
 type MCPServerType string
 
 const (

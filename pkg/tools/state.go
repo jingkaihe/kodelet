@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
@@ -17,10 +18,10 @@ type BasicState struct {
 	tools        []tooltypes.Tool
 }
 
-type BasicStateOption func(*BasicState)
+type BasicStateOption func(ctx context.Context, s *BasicState) error
 
 // NewBasicState creates a new instance of BasicState with initialized map
-func NewBasicState(opts ...BasicStateOption) *BasicState {
+func NewBasicState(ctx context.Context, opts ...BasicStateOption) *BasicState {
 	state := &BasicState{
 		lastAccessed: make(map[string]time.Time),
 		sessionID:    uuid.New().String(),
@@ -28,7 +29,7 @@ func NewBasicState(opts ...BasicStateOption) *BasicState {
 	}
 
 	for _, opt := range opts {
-		opt(state)
+		opt(ctx, state)
 	}
 
 	if len(state.tools) == 0 {
@@ -39,8 +40,22 @@ func NewBasicState(opts ...BasicStateOption) *BasicState {
 }
 
 func WithSubAgentTools() BasicStateOption {
-	return func(s *BasicState) {
+	return func(ctx context.Context, s *BasicState) error {
 		s.tools = SubAgentTools
+		return nil
+	}
+}
+
+func WithMCPTools(mcpManager *MCPManager) BasicStateOption {
+	return func(ctx context.Context, s *BasicState) error {
+		tools, err := mcpManager.ListMCPTools(ctx)
+		if err != nil {
+			return err
+		}
+		for _, tool := range tools {
+			s.tools = append(s.tools, &tool)
+		}
+		return nil
 	}
 }
 

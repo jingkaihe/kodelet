@@ -88,7 +88,7 @@ func NewModel(ctx context.Context, conversationID string, enablePersistence bool
 	statusMessage := "Ready"
 
 	// Create assistant client
-	assistant := NewAssistantClient(conversationID, enablePersistence)
+	assistant := NewAssistantClient(ctx, conversationID, enablePersistence)
 
 	// Create the initial model
 	model := Model{

@@ -27,7 +27,7 @@ func TestThinkingTool_Description(t *testing.T) {
 
 func TestThinkingTool_Execute(t *testing.T) {
 	tool := &ThinkingTool{}
-	state := NewBasicState()
+	state := NewBasicState(context.TODO())
 
 	result := tool.Execute(context.Background(), state, `{"thought": "Test thought"}`)
 
@@ -37,7 +37,7 @@ func TestThinkingTool_Execute(t *testing.T) {
 
 func TestThinkingTool_ValidateInput(t *testing.T) {
 	tool := &ThinkingTool{}
-	state := NewBasicState()
+	state := NewBasicState(context.TODO())
 
 	tests := []struct {
 		name       string

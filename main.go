@@ -49,6 +49,6 @@ func main() {
 	if err != nil {
 		logrus.WithError(err).Fatal("failed to marshal input")
 	}
-	result := tool.Execute(ctx, tools.NewBasicState(), string(params))
+	result := tool.Execute(ctx, tools.NewBasicState(ctx), string(params))
 	fmt.Println(result.String())
 }

@@ -27,8 +27,8 @@ This command analyzes your 'git diff --cached' and uses AI to generate an approp
 You must stage your changes (using 'git add') before running this command.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		// Create a new state for the commit operation
-		s := tools.NewBasicState()
 		ctx := cmd.Context()
+		s := tools.NewBasicState(ctx)
 
 		// Check if we're in a git repository
 		if !isGitRepository() {

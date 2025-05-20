@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -8,7 +9,7 @@ import (
 
 func TestBasicState(t *testing.T) {
 	// Create a new BasicState using the constructor
-	s := NewBasicState()
+	s := NewBasicState(context.TODO())
 
 	// Test setting and getting a file's last modified time
 	path := "test/file.txt"
@@ -49,7 +50,7 @@ func TestBasicState(t *testing.T) {
 		}
 	}
 
-	subAgentTools := NewBasicState(WithSubAgentTools())
+	subAgentTools := NewBasicState(context.TODO(), WithSubAgentTools())
 	if len(subAgentTools.Tools()) != len(SubAgentTools) {
 		t.Errorf("Expected %d tools, got %d", len(SubAgentTools), len(subAgentTools.Tools()))
 	}
@@ -61,7 +62,7 @@ func TestBasicState(t *testing.T) {
 }
 
 func TestClearFileLastAccessed(t *testing.T) {
-	s := NewBasicState()
+	s := NewBasicState(context.TODO())
 
 	// Set a file's last modified time
 	path := "test/file.txt"
@@ -100,7 +101,7 @@ func TestClearFileLastAccessed(t *testing.T) {
 }
 
 func TestConcurrentAccess(t *testing.T) {
-	s := NewBasicState()
+	s := NewBasicState(context.TODO())
 
 	const numGoroutines = 100
 	const operationsPerGoroutine = 10

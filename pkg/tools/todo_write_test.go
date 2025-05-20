@@ -130,7 +130,7 @@ func TestTodoWriteTool_ValidateInput(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			input, _ := json.Marshal(tt.input)
-			err := tool.ValidateInput(NewBasicState(), string(input))
+			err := tool.ValidateInput(NewBasicState(context.TODO()), string(input))
 			if tt.expectError {
 				assert.Error(t, err)
 				if tt.errorMsg != "" {
@@ -152,7 +152,7 @@ func TestTodoWriteTool_Execute(t *testing.T) {
 		todoPath := filepath.Join(tempDir, "test-todos.json")
 
 		// Set up state with custom todo path
-		s := NewBasicState()
+		s := NewBasicState(context.TODO())
 		s.SetTodoFilePath(todoPath)
 
 		input := TodoWriteInput{
@@ -192,7 +192,7 @@ func TestTodoWriteTool_Execute(t *testing.T) {
 		todoPath := filepath.Join(tempDir, "test-todos-multiple.json")
 
 		// Set up state with custom todo path
-		s := NewBasicState()
+		s := NewBasicState(context.TODO())
 		s.SetTodoFilePath(todoPath)
 
 		input := TodoWriteInput{
@@ -230,7 +230,7 @@ func TestTodoWriteTool_Execute(t *testing.T) {
 	})
 
 	t.Run("invalid JSON", func(t *testing.T) {
-		s := NewBasicState()
+		s := NewBasicState(context.TODO())
 		result := tool.Execute(context.Background(), s, "invalid json")
 		assert.Contains(t, result.Error, "invalid input")
 		assert.Empty(t, result.Result)
@@ -238,7 +238,7 @@ func TestTodoWriteTool_Execute(t *testing.T) {
 
 	t.Run("handle non-writable file", func(t *testing.T) {
 		// Set up state with a non-writable path
-		s := NewBasicState()
+		s := NewBasicState(context.TODO())
 		s.SetTodoFilePath("/non-existent-dir/non-writable-file.json")
 
 		input := TodoWriteInput{

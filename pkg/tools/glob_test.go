@@ -50,7 +50,7 @@ func TestGlobTool_TracingKVs(t *testing.T) {
 
 func TestGlobTool_ValidateInput(t *testing.T) {
 	tool := &GlobTool{}
-	state := NewBasicState()
+	state := NewBasicState(context.TODO())
 
 	// Valid input
 	validInput := GlobInput{
@@ -130,7 +130,7 @@ func TestGlobTool_Execute(t *testing.T) {
 
 	tool := &GlobTool{}
 	ctx := context.Background()
-	state := NewBasicState()
+	state := NewBasicState(context.TODO())
 
 	// Test cases
 	testCases := []struct {

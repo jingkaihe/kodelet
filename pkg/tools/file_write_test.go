@@ -35,7 +35,7 @@ func TestFileWriteTool_Description(t *testing.T) {
 
 func TestFileWriteTool_ValidateInput(t *testing.T) {
 	tool := &FileWriteTool{}
-	state := NewBasicState()
+	state := NewBasicState(context.TODO())
 
 	tempDir := t.TempDir()
 	testFilePath := filepath.Join(tempDir, "test_file.txt")
@@ -103,7 +103,7 @@ func TestFileWriteTool_ValidateInput(t *testing.T) {
 
 func TestFileWriteTool_Execute(t *testing.T) {
 	tool := &FileWriteTool{}
-	state := NewBasicState()
+	state := NewBasicState(context.TODO())
 	ctx := context.Background()
 
 	tempDir := t.TempDir()
