@@ -6,7 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"sync"
+	"time"
 
+	"github.com/hashicorp/go-multierror"
 	"github.com/invopop/jsonschema"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/jingkaihe/kodelet/pkg/version"
@@ -102,22 +105,41 @@ func NewMCPManager(config MCPServersConfig) (*MCPManager, error) {
 }
 
 func (m *MCPManager) Initialize(ctx context.Context) error {
-	for _, client := range m.clients {
+	now := time.Now()
+	logrus.WithField("time", now).Debug("initializing mcp manager")
+	var initClient = func(c *client.Client) error {
 		initReq := mcp.InitializeRequest{}
 		initReq.Params.ClientInfo = mcp.Implementation{
 			Name:    "kodelet",
 			Version: version.Version,
 		}
 		initReq.Params.ProtocolVersion = mcp.LATEST_PROTOCOL_VERSION
-		err := client.Start(ctx)
+		err := c.Start(ctx)
 		if err != nil {
 			return err
 		}
-		_, err = client.Initialize(ctx, initReq)
-		if err != nil {
-			return err
-		}
+		_, err = c.Initialize(ctx, initReq)
+		return err
 	}
+	var (
+		wg       sync.WaitGroup
+		mu       sync.Mutex
+		multiErr error
+	)
+	wg.Add(len(m.clients))
+	for _, c := range m.clients {
+		go func(c *client.Client) {
+			defer wg.Done()
+			err := initClient(c)
+			if err != nil {
+				mu.Lock()
+				multiErr = multierror.Append(multiErr, err)
+				mu.Unlock()
+			}
+		}(c)
+	}
+	wg.Wait()
+	logrus.WithField("time", time.Since(now)).Debug("mcp manager initialized")
 	return nil
 }
 
@@ -132,18 +154,50 @@ func (m *MCPManager) Close(ctx context.Context) error {
 }
 
 func (m *MCPManager) ListMCPTools(ctx context.Context) ([]MCPTool, error) {
-	tools := []MCPTool{}
-	for name, client := range m.clients {
-		listToolResult, err := client.ListTools(ctx, mcp.ListToolsRequest{})
+	now := time.Now()
+	logrus.WithField("time", now).Debug("listing mcp tools")
+	var listTools = func(c *client.Client, serverName string) ([]mcp.Tool, error) {
+		listToolResult, err := c.ListTools(ctx, mcp.ListToolsRequest{})
 		if err != nil {
 			return nil, err
 		}
+		tools := []mcp.Tool{}
 		for _, tool := range listToolResult.Tools {
-			if toolWhiteListed(tool, m.whiteList[name]) {
-				tools = append(tools, *NewMCPTool(client, tool))
+			if toolWhiteListed(tool, m.whiteList[serverName]) {
+				tools = append(tools, tool)
 			}
 		}
+		return tools, nil
 	}
+	var (
+		wg       sync.WaitGroup
+		mu       sync.Mutex
+		multiErr error
+		tools    []MCPTool
+	)
+	wg.Add(len(m.clients))
+	for name, c := range m.clients {
+		go func(c *client.Client, serverName string) {
+			defer wg.Done()
+			toolsResult, err := listTools(c, serverName)
+			if err != nil {
+				mu.Lock()
+				multiErr = multierror.Append(multiErr, err)
+				mu.Unlock()
+			} else {
+				mu.Lock()
+				for _, tool := range toolsResult {
+					tools = append(tools, *NewMCPTool(c, tool))
+				}
+				mu.Unlock()
+			}
+		}(c, name)
+	}
+	wg.Wait()
+	if multiErr != nil {
+		return nil, multiErr
+	}
+	logrus.WithField("time", time.Since(now)).Debug("mcp tools listed")
 	return tools, nil
 }
 
