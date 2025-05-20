@@ -60,8 +60,8 @@ var runCmd = &cobra.Command{
 			query = strings.Join(args, " ")
 		}
 
-		// Create a new state for this session
-		appState := tools.NewBasicState(ctx)
+		// Create a new state for this session with MCP tools from Viper
+		appState := tools.NewBasicState(ctx, tools.WithViperMCPTools())
 
 		// Print the user query
 		fmt.Printf("\033[1;33m[user]: \033[0m%s\n", query)

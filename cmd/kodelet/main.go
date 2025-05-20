@@ -20,6 +20,9 @@ func init() {
 	viper.SetDefault("model", anthropic.ModelClaude3_7SonnetLatest)
 	viper.SetDefault("weak_model", anthropic.ModelClaude3_5HaikuLatest)
 
+	// Set default MCP configuration
+	viper.SetDefault("mcp.servers", map[string]interface{}{})
+
 	// Set default tracing configuration
 	viper.SetDefault("tracing.enabled", false)
 	viper.SetDefault("tracing.sampler", "ratio")

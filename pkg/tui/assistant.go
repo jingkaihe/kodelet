@@ -21,8 +21,8 @@ func NewAssistantClient(ctx context.Context, conversationID string, enablePersis
 	// Create a persistent thread with config from viper
 	thread := llm.NewThread(llm.GetConfigFromViper())
 
-	// Set default state
-	thread.SetState(tools.NewBasicState(ctx))
+	// Set default state with MCP tools from Viper
+	thread.SetState(tools.NewBasicState(ctx, tools.WithViperMCPTools()))
 
 	// Configure conversation persistence
 	if conversationID != "" {

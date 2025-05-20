@@ -19,7 +19,7 @@ func plainChatUI(ctx context.Context, options *ChatOptions) {
 
 	// Create a persistent thread with state
 	thread := llm.NewThread(llm.GetConfigFromViper())
-	thread.SetState(tools.NewBasicState(ctx))
+	thread.SetState(tools.NewBasicState(ctx, tools.WithViperMCPTools()))
 
 	// Configure conversation persistence
 	if options.resumeConvID != "" {

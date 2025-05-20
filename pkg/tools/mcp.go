@@ -14,6 +14,7 @@ import (
 	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/sirupsen/logrus"
+	"github.com/spf13/viper"
 	"go.opentelemetry.io/otel/attribute"
 )
 
@@ -159,6 +160,68 @@ func (m *MCPManager) GetMCPClient(clientName string) (*client.Client, error) {
 
 func toolWhiteListed(tool mcp.Tool, whiteList []string) bool {
 	return len(whiteList) == 0 || slices.Contains(whiteList, tool.GetName())
+}
+
+// LoadMCPServersConfigFromViper loads MCP servers configuration from Viper
+func LoadMCPServersConfigFromViper() (MCPServersConfig, error) {
+	var config MCPServersConfig
+	
+	// Get servers configuration from Viper
+	serversConfig := viper.GetStringMap("mcp.servers")
+	if serversConfig == nil {
+		// Return empty config if not configured
+		return MCPServersConfig{
+			Servers: make(map[string]MCPServerConfig),
+		}, nil
+	}
+	
+	// Initialize the servers map
+	config.Servers = make(map[string]MCPServerConfig)
+	
+	// For each server in the configuration
+	for serverName, serverConfigRaw := range serversConfig {
+		// Convert to JSON and back to properly handle nested structures
+		jsonData, err := json.Marshal(serverConfigRaw)
+		if err != nil {
+			return config, fmt.Errorf("failed to marshal server config: %w", err)
+		}
+		
+		var serverConfig MCPServerConfig
+		if err := json.Unmarshal(jsonData, &serverConfig); err != nil {
+			return config, fmt.Errorf("failed to unmarshal server config: %w", err)
+		}
+		
+		config.Servers[serverName] = serverConfig
+	}
+	
+	return config, nil
+}
+
+// CreateMCPManagerFromViper creates a new MCPManager from Viper configuration
+func CreateMCPManagerFromViper(ctx context.Context) (*MCPManager, error) {
+	// Load configuration from Viper
+	config, err := LoadMCPServersConfigFromViper()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load MCP servers config: %w", err)
+	}
+	
+	// If no servers are configured, return nil
+	if len(config.Servers) == 0 {
+		return nil, nil
+	}
+	
+	// Create the manager
+	manager, err := NewMCPManager(config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create MCP manager: %w", err)
+	}
+	
+	// Initialize the manager
+	if err := manager.Initialize(ctx); err != nil {
+		return nil, fmt.Errorf("failed to initialize MCP manager: %w", err)
+	}
+	
+	return manager, nil
 }
 
 type MCPTool struct {

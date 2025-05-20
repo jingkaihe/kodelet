@@ -46,7 +46,7 @@ By default, it watches the current directory and all subdirectories,
 ignoring common directories like .git and node_modules.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx := cmd.Context()
-		s := tools.NewBasicState(ctx)
+		s := tools.NewBasicState(ctx, tools.WithViperMCPTools())
 		runWatchMode(ctx, s)
 	},
 }

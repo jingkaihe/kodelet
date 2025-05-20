@@ -28,7 +28,7 @@ You must stage your changes (using 'git add') before running this command.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		// Create a new state for the commit operation
 		ctx := cmd.Context()
-		s := tools.NewBasicState(ctx)
+		s := tools.NewBasicState(ctx, tools.WithViperMCPTools())
 
 		// Check if we're in a git repository
 		if !isGitRepository() {
