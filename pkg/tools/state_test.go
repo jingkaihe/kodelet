@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
@@ -18,48 +17,29 @@ func TestBasicState(t *testing.T) {
 	now := time.Now()
 
 	err := s.SetFileLastAccessed(path, now)
-	if err != nil {
-		t.Errorf("SetFileLastAccessed returned an error: %v", err)
-	}
+	assert.NoError(t, err, "SetFileLastAccessed should not return an error")
 
 	lastAccessed, err := s.GetFileLastAccessed(path)
-	if err != nil {
-		t.Errorf("GetFileLastAccessed returned an error: %v", err)
-	}
-
-	if !lastAccessed.Equal(now) {
-		t.Errorf("Expected lastAccessed to be %v, got %v", now, lastAccessed)
-	}
+	assert.NoError(t, err, "GetFileLastAccessed should not return an error")
+	assert.True(t, lastAccessed.Equal(now), "lastAccessed should equal the time that was set")
 
 	// Test getting a non-existent file
 	nonExistentPath := "non/existent/file.txt"
 	lastAccessed, err = s.GetFileLastAccessed(nonExistentPath)
-	if err == nil {
-		t.Errorf("Expected error for non-existent file, got nil")
-	}
-	if !lastAccessed.IsZero() {
-		t.Errorf("Expected zero time for non-existent file, got %v", lastAccessed)
-	}
+	assert.Error(t, err, "Expected error for non-existent file")
+	assert.True(t, lastAccessed.IsZero(), "Time for non-existent file should be zero")
 
 	// Test tools
 	tools := s.Tools()
-	if len(tools) != len(MainTools) {
-		t.Errorf("Expected %d tools, got %d", len(MainTools), len(tools))
-	}
+	assert.Equal(t, len(MainTools), len(tools), "Should have the correct number of tools")
 	for i, tool := range tools {
-		if tool.Name() != MainTools[i].Name() {
-			t.Errorf("Expected tool %d to be %s, got %s", i, MainTools[i].Name(), tool.Name())
-		}
+		assert.Equal(t, MainTools[i].Name(), tool.Name(), "Tool names should match")
 	}
 
 	subAgentTools := NewBasicState(context.TODO(), WithSubAgentTools())
-	if len(subAgentTools.Tools()) != len(SubAgentTools) {
-		t.Errorf("Expected %d tools, got %d", len(SubAgentTools), len(subAgentTools.Tools()))
-	}
+	assert.Equal(t, len(SubAgentTools), len(subAgentTools.Tools()), "Should have the correct number of subagent tools")
 	for i, tool := range subAgentTools.Tools() {
-		if tool.Name() != SubAgentTools[i].Name() {
-			t.Errorf("Expected tool %d to be %s, got %s", i, SubAgentTools[i].Name(), tool.Name())
-		}
+		assert.Equal(t, SubAgentTools[i].Name(), tool.Name(), "Subagent tool names should match")
 	}
 }
 
@@ -71,35 +51,22 @@ func TestClearFileLastAccessed(t *testing.T) {
 	now := time.Now()
 
 	err := s.SetFileLastAccessed(path, now)
-	if err != nil {
-		t.Errorf("SetFileLastAccessed returned an error: %v", err)
-	}
+	assert.NoError(t, err, "SetFileLastAccessed should not return an error")
 
 	// Verify it was set
 	lastAccessed, err := s.GetFileLastAccessed(path)
-	if err != nil {
-		t.Errorf("GetFileLastAccessed returned an error: %v", err)
-	}
-	if !lastAccessed.Equal(now) {
-		t.Errorf("Expected lastAccessed to be %v, got %v", now, lastAccessed)
-	}
+	assert.NoError(t, err, "GetFileLastAccessed should not return an error")
+	assert.True(t, lastAccessed.Equal(now), "lastAccessed should equal the time that was set")
 
 	// Clear the file's last modified time
 	err = s.ClearFileLastAccessed(path)
-	if err != nil {
-		t.Errorf("ClearFileLastAccessed returned an error: %v", err)
-	}
+	assert.NoError(t, err, "ClearFileLastAccessed should not return an error")
 
 	// Verify it was cleared - we now expect an error
 	lastAccessed, err = s.GetFileLastAccessed(path)
-	if err == nil {
-		t.Errorf("Expected an error after clearing, got nil")
-	} else if !strings.Contains(err.Error(), "has not been read yet") {
-		t.Errorf("Unexpected error message: %v", err)
-	}
-	if !lastAccessed.IsZero() {
-		t.Errorf("Expected lastAccessed to be zero after clearing, got %v", lastAccessed)
-	}
+	assert.Error(t, err, "Should get an error after clearing access time")
+	assert.Contains(t, err.Error(), "has not been read yet", "Error message should indicate the file hasn't been read")
+	assert.True(t, lastAccessed.IsZero(), "Time should be zero after clearing")
 }
 
 func TestConcurrentAccess(t *testing.T) {
@@ -131,6 +98,7 @@ func TestConcurrentAccess(t *testing.T) {
 	}
 
 	// If we got here without deadlock or panic, the test passes
+	assert.True(t, true, "Concurrent access test completed without deadlock or panic")
 }
 
 func TestBasicState_MCPTools(t *testing.T) {
