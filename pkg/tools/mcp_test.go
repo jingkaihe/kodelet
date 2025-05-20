@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"testing"
 
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -107,6 +108,9 @@ var (
 )
 
 func TestMCPManager_Initialize(t *testing.T) {
+	if os.Getenv("SKIP_DOCKER_TEST") == "true" {
+		t.Skip("Skipping docker test")
+	}
 	// Test with empty config
 	t.Run("empty config", func(t *testing.T) {
 		config := MCPServersConfig{
@@ -132,6 +136,10 @@ func TestMCPManager_Initialize(t *testing.T) {
 }
 
 func TestMCPManager_ListMCPTools(t *testing.T) {
+	if os.Getenv("SKIP_DOCKER_TEST") == "true" {
+		t.Skip("Skipping docker test")
+	}
+
 	t.Run("empty config", func(t *testing.T) {
 		config := MCPServersConfig{
 			Servers: make(map[string]MCPServerConfig),
@@ -173,6 +181,9 @@ func TestMCPManager_ListMCPTools(t *testing.T) {
 }
 
 func TestMCPTool_GenerateSchema(t *testing.T) {
+	if os.Getenv("SKIP_DOCKER_TEST") == "true" {
+		t.Skip("Skipping docker test")
+	}
 	t.Run("valid config", func(t *testing.T) {
 		config := goldenMCPServersConfig
 		manager, err := NewMCPManager(config)
@@ -201,6 +212,10 @@ func TestMCPTool_GenerateSchema(t *testing.T) {
 }
 
 func TestMCPTool_Execute(t *testing.T) {
+	if os.Getenv("SKIP_DOCKER_TEST") == "true" {
+		t.Skip("Skipping docker test")
+	}
+
 	config := goldenMCPServersConfig
 	manager, err := NewMCPManager(config)
 	assert.NoError(t, err)
