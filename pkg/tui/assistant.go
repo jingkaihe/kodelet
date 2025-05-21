@@ -39,39 +39,39 @@ func NewAssistantClient(ctx context.Context, conversationID string, enablePersis
 }
 
 // GetThreadMessages returns the messages from the thread
-func (a *AssistantClient) GetThreadMessages() ([]Message, error) {
+func (a *AssistantClient) GetThreadMessages() ([]llmtypes.Message, error) {
 	// Get access to the underlying anthropic thread to extract messages
 	if anthropicThread, ok := a.thread.(*anthropic.AnthropicThread); ok {
 		msgParams := anthropicThread.GetMessages()
-		var messages []Message
+		var messages []llmtypes.Message
 
 		for _, msgParam := range msgParams {
 			for _, block := range msgParam.Content {
 				blockType := *block.GetType()
 				switch blockType {
 				case "text":
-					messages = append(messages, Message{
+					messages = append(messages, llmtypes.Message{
 						Content: *block.GetText(),
-						IsUser:  msgParam.Role == "user",
+						Role:    "user",
 					})
 				case "tool_use":
 					inputJSON, _ := json.Marshal(block.OfRequestToolUseBlock.Input)
-					messages = append(messages, Message{
+					messages = append(messages, llmtypes.Message{
 						Content: fmt.Sprintf("🔧 Using tool: %s", string(inputJSON)),
-						IsUser:  msgParam.Role == "user",
+						Role:    "user",
 					})
 				case "tool_result":
 					if len(block.OfRequestToolResultBlock.Content) > 0 {
 						result := block.OfRequestToolResultBlock.Content[0].OfRequestTextBlock.Text
-						messages = append(messages, Message{
+						messages = append(messages, llmtypes.Message{
 							Content: fmt.Sprintf("🔄 Tool result: %s", result),
-							IsUser:  false,
+							Role:    "assistant",
 						})
 					}
 				case "thinking":
-					messages = append(messages, Message{
+					messages = append(messages, llmtypes.Message{
 						Content: fmt.Sprintf("💭 Thinking: %s", block.OfRequestThinkingBlock.Thinking),
-						IsUser:  false,
+						Role:    "assistant",
 					})
 				}
 			}

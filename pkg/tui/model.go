@@ -16,17 +16,10 @@ import (
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
 
-// Message represents a chat message
-type Message struct {
-	Content  string
-	IsUser   bool
-	IsSystem bool
-}
-
 // Model represents the main TUI model
 type Model struct {
 	messageCh          chan llmtypes.MessageEvent
-	messages           []Message
+	messages           []llmtypes.Message
 	viewport           viewport.Model
 	textarea           textarea.Model
 	ready              bool
@@ -97,7 +90,7 @@ func NewModel(ctx context.Context, conversationID string, enablePersistence bool
 	// Create the initial model
 	model := Model{
 		messageCh:          make(chan llmtypes.MessageEvent),
-		messages:           []Message{},
+		messages:           []llmtypes.Message{},
 		textarea:           ta,
 		viewport:           vp,
 		statusMessage:      statusMessage,
@@ -127,9 +120,15 @@ func NewModel(ctx context.Context, conversationID string, enablePersistence bool
 
 // AddMessage adds a new message to the chat history
 func (m *Model) AddMessage(content string, isUser bool) {
-	m.messages = append(m.messages, Message{
+	var role string
+	if isUser {
+		role = "user"
+	} else {
+		role = "assistant"
+	}
+	m.messages = append(m.messages, llmtypes.Message{
 		Content: content,
-		IsUser:  isUser,
+		Role:    role,
 	})
 	m.updateViewportContent()
 	m.viewport.GotoBottom()
@@ -137,9 +136,9 @@ func (m *Model) AddMessage(content string, isUser bool) {
 
 // AddSystemMessage adds a system message to the chat history
 func (m *Model) AddSystemMessage(content string) {
-	m.messages = append(m.messages, Message{
-		Content:  content,
-		IsSystem: true,
+	m.messages = append(m.messages, llmtypes.Message{
+		Content: content,
+		Role:    "", // no role for system messages
 	})
 	// m.assistant.AddUserMessage(content)
 	m.updateViewportContent()
@@ -164,10 +163,10 @@ func (m *Model) updateViewportContent() {
 	for i, msg := range m.messages {
 		var renderedMsg string
 
-		if msg.IsSystem {
+		if msg.Role == "" {
 			// No prefix for system messages
 			renderedMsg = msg.Content
-		} else if msg.IsUser {
+		} else if msg.Role == "user" {
 			// Create a styled user message
 			userPrefix := m.userStyle.Render("You")
 			messageText := lipgloss.NewStyle().
@@ -272,7 +271,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				"/clear: Clear the screen")
 		case tea.KeyCtrlL:
 			// Clear the screen
-			m.messages = []Message{}
+			m.messages = []llmtypes.Message{}
 			m.updateViewportContent()
 			m.AddSystemMessage("Screen cleared")
 		case tea.KeyPgUp:
@@ -316,7 +315,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							m.AddMessage(content, true)
 							m.textarea.Reset()
 							// Clear the screen
-							m.messages = []Message{}
+							m.messages = []llmtypes.Message{}
 							m.updateViewportContent()
 							m.AddSystemMessage("Screen cleared")
 							return m, nil
