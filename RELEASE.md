@@ -1,5 +1,14 @@
 # Kodelet
 
+## 0.0.23.alpha (2025-05-21)
+
+### New Features
+- **Pull Request Command**: Added new `kodelet pr` command to generate AI-powered pull requests
+  - Automatically analyzes git diffs to create meaningful PR titles and descriptions
+  - Integrates with GitHub CLI for seamless PR creation
+  - Supports custom PR templates via `--template-file` flag
+  - Provides detailed analysis of changes for better PR quality
+
 ## 0.0.22.alpha (2025-05-20)
 
 ### Features
