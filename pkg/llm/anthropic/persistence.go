@@ -70,9 +70,11 @@ func (t *AnthropicThread) loadConversation() error {
 	}
 
 	// Reset current messages
-	if _, err := t.DeserializeMessages(record.RawMessages); err != nil {
+	messages, err := DeserializeMessages(record.RawMessages)
+	if err != nil {
 		return fmt.Errorf("failed to deserialize conversation messages: %w", err)
 	}
+	t.messages = messages
 
 	// Restore usage statistics
 	t.usage = &record.Usage
@@ -87,8 +89,8 @@ type messageParam struct {
 	Content []contentBlock `json:"content"`
 }
 
-func (t *AnthropicThread) DeserializeMessages(b []byte) ([]anthropic.MessageParam, error) {
-	t.messages = []anthropic.MessageParam{}
+func DeserializeMessages(b []byte) ([]anthropic.MessageParam, error) {
+	messages := []anthropic.MessageParam{}
 	var listRawMessages []json.RawMessage
 	if err := json.Unmarshal(b, &listRawMessages); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal conversation messages: %w", err)
@@ -186,11 +188,11 @@ func (t *AnthropicThread) DeserializeMessages(b []byte) ([]anthropic.MessagePara
 		}
 
 		if len(msg.Content) != 0 {
-			t.messages = append(t.messages, msg)
+			messages = append(messages, msg)
 		}
 	}
 
-	return t.messages, nil
+	return messages, nil
 }
 
 // ExtractMessages parses the raw messages from a conversation record
