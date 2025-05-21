@@ -107,12 +107,14 @@ IMPORTANT:
 		fmt.Println("Analyzing branch changes and generating PR description...")
 		fmt.Println("-----------------------------------------------------------")
 
-		_, usage := llm.SendMessageAndGetTextWithUsage(ctx, s, prompt, llm.GetConfigFromViper(), false, llmtypes.MessageOpt{
+		out, usage := llm.SendMessageAndGetTextWithUsage(ctx, s, prompt, llm.GetConfigFromViper(), false, llmtypes.MessageOpt{
 			// UseWeakModel:       false,
 			PromptCache: true,
 			// NoToolUse:          false,
 			// NoSaveConversation: true,
 		})
+
+		fmt.Println(out)
 
 		fmt.Println("-----------------------------------------------------------")
 
