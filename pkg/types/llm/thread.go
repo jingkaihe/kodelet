@@ -6,6 +6,12 @@ import (
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
+// Message represents a chat message
+type Message struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
 // MessageOpt represents options for sending messages
 type MessageOpt struct {
 	// PromptCache indicates if prompt caching should be used

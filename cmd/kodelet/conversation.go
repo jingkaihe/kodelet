@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/spf13/cobra"
 )
 
@@ -310,12 +311,6 @@ func deleteConversationCmd(id string) {
 	fmt.Printf("Conversation %s deleted successfully.\n", id)
 }
 
-// Message represents a chat message
-type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
 // showConversationCmd displays a specific conversation
 func showConversationCmd(id string) {
 	// Create a store
@@ -362,14 +357,14 @@ func showConversationCmd(id string) {
 }
 
 // extractMessages parses the raw messages from a conversation record
-func extractMessages(rawMessages json.RawMessage) ([]Message, error) {
+func extractMessages(rawMessages json.RawMessage) ([]llm.Message, error) {
 	// Parse the raw JSON messages directly
 	var rawMsgs []map[string]interface{}
 	if err := json.Unmarshal(rawMessages, &rawMsgs); err != nil {
 		return nil, fmt.Errorf("error parsing raw messages: %v", err)
 	}
 
-	var messages []Message
+	var messages []llm.Message
 	for _, msg := range rawMsgs {
 		role, ok := msg["role"].(string)
 		if !ok {
@@ -403,7 +398,7 @@ func extractMessages(rawMessages json.RawMessage) ([]Message, error) {
 					continue // Skip if text is not a string or doesn't exist
 				}
 
-				messages = append(messages, Message{
+				messages = append(messages, llm.Message{
 					Role:    role,
 					Content: text,
 				})
@@ -420,7 +415,7 @@ func extractMessages(rawMessages json.RawMessage) ([]Message, error) {
 					continue // Skip if marshaling fails
 				}
 
-				messages = append(messages, Message{
+				messages = append(messages, llm.Message{
 					Role:    role,
 					Content: fmt.Sprintf("🔧 Using tool: %s", string(inputJSON)),
 				})
@@ -443,7 +438,7 @@ func extractMessages(rawMessages json.RawMessage) ([]Message, error) {
 						continue // Skip if text is not a string
 					}
 
-					messages = append(messages, Message{
+					messages = append(messages, llm.Message{
 						Role:    "assistant",
 						Content: fmt.Sprintf("🔄 Tool result: %s", result),
 					})
@@ -456,7 +451,7 @@ func extractMessages(rawMessages json.RawMessage) ([]Message, error) {
 					continue // Skip if thinking is not a string
 				}
 
-				messages = append(messages, Message{
+				messages = append(messages, llm.Message{
 					Role:    "assistant",
 					Content: fmt.Sprintf("💭 Thinking: %s", thinking),
 				})
@@ -468,7 +463,7 @@ func extractMessages(rawMessages json.RawMessage) ([]Message, error) {
 }
 
 // displayConversation renders the messages in a readable text format
-func displayConversation(messages []Message) {
+func displayConversation(messages []llm.Message) {
 	for i, msg := range messages {
 		// Add a separator between messages
 		if i > 0 {
