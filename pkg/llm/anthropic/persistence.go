@@ -197,102 +197,50 @@ func DeserializeMessages(b []byte) ([]anthropic.MessageParam, error) {
 
 // ExtractMessages parses the raw messages from a conversation record
 func ExtractMessages(rawMessages json.RawMessage) ([]llm.Message, error) {
-	// Parse the raw JSON messages directly
-	var rawMsgs []map[string]interface{}
-	if err := json.Unmarshal(rawMessages, &rawMsgs); err != nil {
-		return nil, fmt.Errorf("error parsing raw messages: %v", err)
+	// Deserialize the raw messages using the existing DeserializeMessages function
+	anthropicMessages, err := DeserializeMessages(rawMessages)
+	if err != nil {
+		return nil, fmt.Errorf("error deserializing messages: %w", err)
 	}
 
 	var messages []llm.Message
-	for _, msg := range rawMsgs {
-		role, ok := msg["role"].(string)
-		if !ok {
-			continue // Skip if role is not a string or doesn't exist
-		}
-
-		content, ok := msg["content"].([]interface{})
-		if !ok || len(content) == 0 {
-			continue // Skip if content is not an array or is empty
-		}
-
-		// Process each content block in the message
-		for _, block := range content {
-			blockMap, ok := block.(map[string]interface{})
-			if !ok {
-				continue // Skip if block is not a map
-			}
-
-			// Extract block type
-			blockType, ok := blockMap["type"].(string)
-			if !ok {
-				continue // Skip if type is not a string or doesn't exist
-			}
-
-			// Extract message content based on block type
-			switch blockType {
-			case "text":
-				// Add text content
-				text, ok := blockMap["text"].(string)
-				if !ok {
-					continue // Skip if text is not a string or doesn't exist
-				}
-
+	// Convert Anthropic message format to LLM message format
+	for _, msg := range anthropicMessages {
+		for _, contentBlock := range msg.Content {
+			// Handle text blocks
+			if textBlock := contentBlock.OfRequestTextBlock; textBlock != nil {
 				messages = append(messages, llm.Message{
-					Role:    role,
-					Content: text,
+					Role:    string(msg.Role),
+					Content: textBlock.Text,
 				})
-
-			case "tool_use":
-				// Add tool usage as content
-				input, ok := blockMap["input"]
-				if !ok {
-					continue // Skip if input is not found
-				}
-
-				inputJSON, err := json.Marshal(input)
+			}
+			// Handle tool use blocks
+			if toolUseBlock := contentBlock.OfRequestToolUseBlock; toolUseBlock != nil {
+				inputJSON, err := json.Marshal(toolUseBlock.Input)
 				if err != nil {
 					continue // Skip if marshaling fails
 				}
-
 				messages = append(messages, llm.Message{
-					Role:    role,
+					Role:    string(msg.Role),
 					Content: fmt.Sprintf("🔧 Using tool: %s", string(inputJSON)),
 				})
-
-			case "tool_result":
-				// Add tool result as content
-				resultContent, ok := blockMap["content"].([]interface{})
-				if !ok || len(resultContent) == 0 {
-					continue // Skip if content is not an array or is empty
-				}
-
-				resultBlock, ok := resultContent[0].(map[string]interface{})
-				if !ok {
-					continue // Skip if first element is not a map
-				}
-
-				if resultBlock["type"] == "text" {
-					result, ok := resultBlock["text"].(string)
-					if !ok {
-						continue // Skip if text is not a string
+			}
+			// Handle tool result blocks
+			if toolResultBlock := contentBlock.OfRequestToolResultBlock; toolResultBlock != nil {
+				for _, resultContent := range toolResultBlock.Content {
+					if textBlock := resultContent.OfRequestTextBlock; textBlock != nil {
+						messages = append(messages, llm.Message{
+							Role:    "assistant",
+							Content: fmt.Sprintf("🔄 Tool result: %s", textBlock.Text),
+						})
 					}
-
-					messages = append(messages, llm.Message{
-						Role:    "assistant",
-						Content: fmt.Sprintf("🔄 Tool result: %s", result),
-					})
 				}
-
-			case "thinking":
-				// Add thinking content
-				thinking, ok := blockMap["thinking"].(string)
-				if !ok {
-					continue // Skip if thinking is not a string
-				}
-
+			}
+			// Handle thinking blocks
+			if thinkingBlock := contentBlock.OfRequestThinkingBlock; thinkingBlock != nil {
 				messages = append(messages, llm.Message{
 					Role:    "assistant",
-					Content: fmt.Sprintf("💭 Thinking: %s", thinking),
+					Content: fmt.Sprintf("💭 Thinking: %s", thinkingBlock.Thinking),
 				})
 			}
 		}

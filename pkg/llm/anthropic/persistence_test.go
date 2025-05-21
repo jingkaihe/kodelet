@@ -16,9 +16,9 @@ func TestDeserializeMessages(t *testing.T) {
 	thread := NewAnthropicThread(llmtypes.Config{
 		Model: anthropic.ModelClaude3_7SonnetLatest,
 	})
-	thread.DeserializeMessages([]byte(``))
-
-	assert.Equal(t, 0, len(thread.messages))
+	messages, err := DeserializeMessages([]byte(`[]`))
+	assert.NoError(t, err)
+	assert.Equal(t, 0, len(messages))
 
 	rawMessages := `[
     {
@@ -75,12 +75,14 @@ func TestDeserializeMessages(t *testing.T) {
     }
   ]`
 
-	thread.DeserializeMessages([]byte(rawMessages))
+	messages, err = DeserializeMessages([]byte(rawMessages))
+	assert.NoError(t, err)
+	thread.messages = messages
 
-	assert.Equal(t, 3, len(thread.messages)) // remove the empty assistant message
-	assert.Equal(t, anthropic.MessageParamRoleUser, thread.messages[0].Role)
-	assert.Equal(t, "ls -la", thread.messages[0].Content[0].OfRequestTextBlock.Text)
-	assert.Equal(t, "text", *thread.messages[0].Content[0].GetType())
+	assert.Equal(t, 3, len(messages)) // remove the empty assistant message
+	assert.Equal(t, anthropic.MessageParamRoleUser, messages[0].Role)
+	assert.Equal(t, "ls -la", messages[0].Content[0].OfRequestTextBlock.Text)
+	assert.Equal(t, "text", *messages[0].Content[0].GetType())
 	assert.Equal(t, anthropic.CacheControlEphemeralParam{}, thread.messages[0].Content[0].OfRequestTextBlock.CacheControl, "prompt cache config is ignored")
 
 	assert.Equal(t, anthropic.MessageParamRoleAssistant, thread.messages[1].Role)
