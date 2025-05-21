@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/llm/anthropic"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -54,4 +55,13 @@ func SendMessageAndGetTextWithUsage(ctx context.Context, state tooltypes.State, 
 func SendMessageAndGetText(ctx context.Context, state tooltypes.State, query string, config llmtypes.Config, silent bool, opt llmtypes.MessageOpt) string {
 	text, _ := SendMessageAndGetTextWithUsage(ctx, state, query, config, silent, opt)
 	return text
+}
+
+// ExtractMessages parses the raw messages from a conversation record
+func ExtractMessages(record conversations.ConversationRecord) ([]llmtypes.Message, error) {
+	if record.ModelType == "anthropic" {
+		return anthropic.ExtractMessages(record.RawMessages)
+	}
+
+	return nil, fmt.Errorf("unsupported model type: %s", record.ModelType)
 }

@@ -10,7 +10,8 @@ import (
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
-	"github.com/jingkaihe/kodelet/pkg/types/llm"
+	"github.com/jingkaihe/kodelet/pkg/llm"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/spf13/cobra"
 )
 
@@ -328,7 +329,7 @@ func showConversationCmd(id string) {
 	}
 
 	// Extract messages from raw message data
-	messages, err := extractMessages(record.RawMessages)
+	messages, err := llm.ExtractMessages(record)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error parsing messages: %v\n", err)
 		os.Exit(1)
@@ -356,114 +357,8 @@ func showConversationCmd(id string) {
 	}
 }
 
-// extractMessages parses the raw messages from a conversation record
-func extractMessages(rawMessages json.RawMessage) ([]llm.Message, error) {
-	// Parse the raw JSON messages directly
-	var rawMsgs []map[string]interface{}
-	if err := json.Unmarshal(rawMessages, &rawMsgs); err != nil {
-		return nil, fmt.Errorf("error parsing raw messages: %v", err)
-	}
-
-	var messages []llm.Message
-	for _, msg := range rawMsgs {
-		role, ok := msg["role"].(string)
-		if !ok {
-			continue // Skip if role is not a string or doesn't exist
-		}
-
-		content, ok := msg["content"].([]interface{})
-		if !ok || len(content) == 0 {
-			continue // Skip if content is not an array or is empty
-		}
-
-		// Process each content block in the message
-		for _, block := range content {
-			blockMap, ok := block.(map[string]interface{})
-			if !ok {
-				continue // Skip if block is not a map
-			}
-
-			// Extract block type
-			blockType, ok := blockMap["type"].(string)
-			if !ok {
-				continue // Skip if type is not a string or doesn't exist
-			}
-
-			// Extract message content based on block type
-			switch blockType {
-			case "text":
-				// Add text content
-				text, ok := blockMap["text"].(string)
-				if !ok {
-					continue // Skip if text is not a string or doesn't exist
-				}
-
-				messages = append(messages, llm.Message{
-					Role:    role,
-					Content: text,
-				})
-
-			case "tool_use":
-				// Add tool usage as content
-				input, ok := blockMap["input"]
-				if !ok {
-					continue // Skip if input is not found
-				}
-
-				inputJSON, err := json.Marshal(input)
-				if err != nil {
-					continue // Skip if marshaling fails
-				}
-
-				messages = append(messages, llm.Message{
-					Role:    role,
-					Content: fmt.Sprintf("🔧 Using tool: %s", string(inputJSON)),
-				})
-
-			case "tool_result":
-				// Add tool result as content
-				resultContent, ok := blockMap["content"].([]interface{})
-				if !ok || len(resultContent) == 0 {
-					continue // Skip if content is not an array or is empty
-				}
-
-				resultBlock, ok := resultContent[0].(map[string]interface{})
-				if !ok {
-					continue // Skip if first element is not a map
-				}
-
-				if resultBlock["type"] == "text" {
-					result, ok := resultBlock["text"].(string)
-					if !ok {
-						continue // Skip if text is not a string
-					}
-
-					messages = append(messages, llm.Message{
-						Role:    "assistant",
-						Content: fmt.Sprintf("🔄 Tool result: %s", result),
-					})
-				}
-
-			case "thinking":
-				// Add thinking content
-				thinking, ok := blockMap["thinking"].(string)
-				if !ok {
-					continue // Skip if thinking is not a string
-				}
-
-				messages = append(messages, llm.Message{
-					Role:    "assistant",
-					Content: fmt.Sprintf("💭 Thinking: %s", thinking),
-				})
-			}
-		}
-	}
-
-	return messages, nil
-}
-
 // displayConversation renders the messages in a readable text format
-func displayConversation(messages []llm.Message) {
+func displayConversation(messages []llmtypes.Message) {
 	for i, msg := range messages {
 		// Add a separator between messages
 		if i > 0 {
