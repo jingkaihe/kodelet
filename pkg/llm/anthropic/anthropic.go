@@ -577,8 +577,12 @@ func (t *AnthropicThread) IsPersisted() bool {
 }
 
 // GetMessages returns the current messages in the thread
-func (t *AnthropicThread) GetMessages() []anthropic.MessageParam {
-	return t.messages
+func (t *AnthropicThread) GetMessages() ([]llmtypes.Message, error) {
+	b, err := json.Marshal(t.messages)
+	if err != nil {
+		return nil, err
+	}
+	return ExtractMessages(b)
 }
 
 // EnablePersistence enables conversation persistence for this thread

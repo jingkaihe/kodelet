@@ -54,4 +54,6 @@ type Thread interface {
 	EnablePersistence(enabled bool)
 	// Provider returns the provider of the thread
 	Provider() string
+	// GetMessages returns the messages from the thread
+	GetMessages() ([]Message, error)
 }
