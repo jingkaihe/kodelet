@@ -329,7 +329,7 @@ func showConversationCmd(id string) {
 	}
 
 	// Extract messages from raw message data
-	messages, err := llm.ExtractMessages(record)
+	messages, err := llm.ExtractMessages(record.ModelType, record.RawMessages)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error parsing messages: %v\n", err)
 		os.Exit(1)

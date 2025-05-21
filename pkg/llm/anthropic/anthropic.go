@@ -115,6 +115,10 @@ type AnthropicThread struct {
 	conversationMu sync.Mutex
 }
 
+func (t *AnthropicThread) Provider() string {
+	return "anthropic"
+}
+
 // NewAnthropicThread creates a new thread with Anthropic's Claude API
 func NewAnthropicThread(config llmtypes.Config) *AnthropicThread {
 	// Apply defaults if not provided

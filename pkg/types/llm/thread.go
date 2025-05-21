@@ -52,4 +52,6 @@ type Thread interface {
 	IsPersisted() bool
 	// EnablePersistence enables conversation persistence for this thread
 	EnablePersistence(enabled bool)
+	// Provider returns the provider of the thread
+	Provider() string
 }
