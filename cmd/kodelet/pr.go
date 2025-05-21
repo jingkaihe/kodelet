@@ -61,10 +61,10 @@ This command analyzes the current branch changes compared to the target branch a
 		}
 
 		// 4. Check if there are uncommitted changes
-		if hasUncommittedChanges() {
-			fmt.Println("Error: You have uncommitted changes. Please commit or stash them before creating a PR.")
-			os.Exit(1)
-		}
+		// if hasUncommittedChanges() {
+		// 	fmt.Println("Error: You have uncommitted changes. Please commit or stash them before creating a PR.")
+		// 	os.Exit(1)
+		// }
 
 		// Load the template
 		template := loadTemplate(templateFile)
@@ -108,10 +108,10 @@ IMPORTANT:
 		fmt.Println("-----------------------------------------------------------")
 
 		_, usage := llm.SendMessageAndGetTextWithUsage(ctx, s, prompt, llm.GetConfigFromViper(), false, llmtypes.MessageOpt{
-			UseWeakModel:       false,
-			PromptCache:        false,
-			NoToolUse:          false,
-			NoSaveConversation: true,
+			// UseWeakModel:       false,
+			PromptCache: true,
+			// NoToolUse:          false,
+			// NoSaveConversation: true,
 		})
 
 		fmt.Println("-----------------------------------------------------------")
