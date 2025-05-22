@@ -13,12 +13,12 @@ func ToOpenAITools(tools []tooltypes.Tool) []openai.Tool {
 	openaiTools := make([]openai.Tool, len(tools))
 	for i, tool := range tools {
 		schema := tool.GenerateSchema()
-		
+
 		// Convert to JSON
 		schemaBytes, _ := json.Marshal(schema)
 		var jsonSchema map[string]interface{}
 		json.Unmarshal(schemaBytes, &jsonSchema)
-		
+
 		openaiTools[i] = openai.Tool{
 			Type: "function",
 			Function: &openai.FunctionDefinition{

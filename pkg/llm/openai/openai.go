@@ -394,6 +394,7 @@ func (t *OpenAIThread) processMessageExchange(
 
 	if IsReasoningModel(model) {
 		requestParams.ReasoningEffort = t.reasoningEffort
+		requestParams.MaxTokens = 0
 	}
 
 	// Add tool definitions if tool use is enabled

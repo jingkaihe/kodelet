@@ -79,7 +79,7 @@ func (t *OpenAIThread) loadConversation() error {
 	t.usage = &record.Usage
 	t.summary = record.Summary
 	t.state.SetFileLastAccess(record.FileLastAccess)
-	
+
 	return nil
 }
 
