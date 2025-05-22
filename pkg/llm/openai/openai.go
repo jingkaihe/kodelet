@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"slices"
 	"strings"
 	"sync"
 
@@ -22,6 +24,30 @@ import (
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
+var (
+	ReasoningModels = []string{
+		"o3",
+		"o4-mini",
+		"o3-mini",
+		"o1-mini",
+	}
+	NonReasoningModels = []string{
+		"gpt-4.1",
+		"gpt-4.1-mini",
+		"gpt-4.1-nano",
+		"gpt-4o",
+		"gpt-4o-mini",
+	}
+)
+
+func IsReasoningModel(model string) bool {
+	return slices.Contains(ReasoningModels, model)
+}
+
+func IsOpenAIModel(model string) bool {
+	return slices.Contains(ReasoningModels, model) || slices.Contains(NonReasoningModels, model)
+}
+
 // ConversationStore is an alias for the conversations.ConversationStore interface
 // to avoid direct dependency on the conversations package
 type ConversationStore = conversations.ConversationStore
@@ -29,6 +55,7 @@ type ConversationStore = conversations.ConversationStore
 // ModelPricing holds the per-token pricing for different operations
 type ModelPricing struct {
 	Input         float64
+	CachedInput   float64
 	Output        float64
 	ContextWindow int
 }
@@ -36,25 +63,131 @@ type ModelPricing struct {
 // ModelPricingMap maps model names to their pricing information
 var ModelPricingMap = map[string]ModelPricing{
 	"gpt-4.1": {
-		Input:         0.00001,  // $0.01 per 1K tokens
-		Output:        0.00003,  // $0.03 per 1K tokens
-		ContextWindow: 128_000,
+		Input:         0.000002,
+		CachedInput:   0.0000005,
+		Output:        0.000008,
+		ContextWindow: 1047576,
 	},
 	"gpt-4.1-mini": {
-		Input:         0.000003, // $0.003 per 1K tokens
-		Output:        0.000009, // $0.009 per 1K tokens
-		ContextWindow: 128_000,
+		Input:         0.0000004,
+		CachedInput:   0.0000001,
+		Output:        0.0000016,
+		ContextWindow: 1047576,
 	},
+	"gpt-4.1-nano": {
+		Input:         0.0000001,
+		CachedInput:   0.000000025,
+		Output:        0.0000004,
+		ContextWindow: 1047576,
+	},
+	// "gpt-4.5-preview": {
+	// 	Input:         0.000075,
+	// 	CachedInput:   0.0000375,
+	// 	Output:        0.00015,
+	// 	ContextWindow: 128_000,
+	// },
 	"gpt-4o": {
-		Input:         0.000005, // $0.005 per 1K tokens
-		Output:        0.000015, // $0.015 per 1K tokens
+		Input:         0.0000025,
+		CachedInput:   0.00000125,
+		Output:        0.00001,
 		ContextWindow: 128_000,
 	},
-	"gpt-3.5-turbo": {
-		Input:         0.0000005, // $0.0005 per 1K tokens
-		Output:        0.0000015, // $0.0015 per 1K tokens
-		ContextWindow: 16_000,
+	// "gpt-4o-audio-preview": {
+	// 	Input:         0.0000025,
+	// 	CachedInput:   nil,
+	// 	Output:        0.00001,
+	// 	ContextWindow: 128_000,
+	// },
+	// "gpt-4o-realtime-preview": {
+	// 	Input:         0.000005,
+	// 	CachedInput:   0.0000025,
+	// 	Output:        0.00002,
+	// 	ContextWindow: 128_000,
+	// },
+	"gpt-4o-mini": {
+		Input:         0.00000015,
+		CachedInput:   0.000000075,
+		Output:        0.0000006,
+		ContextWindow: 128_000,
 	},
+	// "gpt-4o-mini-audio-preview": {
+	// 	Input:         0.00000015,
+	// 	CachedInput:   nil,
+	// 	Output:        0.0000006,
+	// 	ContextWindow: 128_000,
+	// },
+	// "gpt-4o-mini-realtime-preview": {
+	// 	Input:         0.0000006,
+	// 	CachedInput:   0.0000003,
+	// 	Output:        0.0000024,
+	// 	ContextWindow: 128_000,
+	// },
+	// "o1": {
+	// 	Input:         0.000015,
+	// 	CachedInput:   0.0000075,
+	// 	Output:        0.00006,
+	// 	ContextWindow: 128_000,
+	// },
+	// "o1-pro": {
+	// 	Input:         0.00015,
+	// 	CachedInput:   nil,
+	// 	Output:        0.0006,
+	// 	ContextWindow: 128_000,
+	// },
+	"o3": {
+		Input:         0.00001,
+		CachedInput:   0.0000025,
+		Output:        0.00004,
+		ContextWindow: 200_000,
+	},
+	"o4-mini": {
+		Input:         0.0000011,
+		CachedInput:   0.000000275,
+		Output:        0.0000044,
+		ContextWindow: 200_000,
+	},
+	"o3-mini": {
+		Input:         0.0000011,
+		CachedInput:   0.00000055,
+		Output:        0.0000044,
+		ContextWindow: 200_000,
+	},
+	"o1-mini": {
+		Input:         0.0000011,
+		CachedInput:   0.00000055,
+		Output:        0.0000044,
+		ContextWindow: 128_000,
+	},
+	"codex-mini-latest": {
+		Input:         0.0000015,
+		CachedInput:   0.000000375,
+		Output:        0.000006,
+		ContextWindow: 200_000,
+	},
+	// "gpt-4o-mini-search-preview": {
+	// 	Input:         0.00000015,
+	// 	CachedInput:   nil,
+	// 	Output:        0.0000006,
+	// 	ContextWindow: 128_000,
+	// },
+	// "gpt-4o-search-preview": {
+	// 	Input:         0.0000025,
+	// 	CachedInput:   nil,
+	// 	Output:        0.00001,
+	// 	ContextWindow: 128_000,
+	// },
+	// "computer-use-preview": {
+	// 	Input:         0.000003,
+	// 	CachedInput:   nil,
+	// 	Output:        0.000012,
+	// 	ContextWindow: 128_000,
+	// },
+	// "gpt-image-1": {
+	// 	Input:         0.000005,
+	// 	CachedInput:   0.00000125,
+	// 	Output:        nil,
+	// 	ContextWindow: 128_000,
+	// },
 }
 
 // getModelPricing returns the pricing information for a given model
@@ -81,18 +214,18 @@ func getModelPricing(model string) ModelPricing {
 
 // OpenAIThread implements the Thread interface using OpenAI's API
 type OpenAIThread struct {
-	client         *openai.Client
-	config         llmtypes.Config
-	reasoningEffort string     // low, medium, high to determine token allocation
-	state          tooltypes.State
-	messages       []openai.ChatCompletionMessage
-	usage          *llmtypes.Usage
-	conversationID string
-	summary        string
-	isPersisted    bool
-	store          ConversationStore
-	mu             sync.Mutex
-	conversationMu sync.Mutex
+	client          *openai.Client
+	config          llmtypes.Config
+	reasoningEffort string // low, medium, high to determine token allocation
+	state           tooltypes.State
+	messages        []openai.ChatCompletionMessage
+	usage           *llmtypes.Usage
+	conversationID  string
+	summary         string
+	isPersisted     bool
+	store           ConversationStore
+	mu              sync.Mutex
+	conversationMu  sync.Mutex
 }
 
 func (t *OpenAIThread) Provider() string {
@@ -108,14 +241,14 @@ func NewOpenAIThread(config llmtypes.Config) *OpenAIThread {
 	if config.MaxTokens == 0 {
 		config.MaxTokens = 8192
 	}
-	
+
 	reasoningEffort := config.ReasoningEffort
 	if reasoningEffort == "" {
 		reasoningEffort = "medium" // Default reasoning effort
 	}
 
 	return &OpenAIThread{
-		client:          openai.NewClient(""),  // API key will be set via env var
+		client:          openai.NewClient(os.Getenv("OPENAI_API_KEY")), // API key will be set via env var
 		config:          config,
 		reasoningEffort: reasoningEffort,
 		conversationID:  conversations.GenerateID(),
@@ -164,8 +297,11 @@ func (t *OpenAIThread) SendMessage(
 	t.AddUserMessage(message)
 
 	// Determine which model to use
-	model, maxTokens := t.getModelAndTokens(opt)
-	
+	model := t.config.Model
+	if opt.UseWeakModel && t.config.WeakModel != "" {
+		model = t.config.WeakModel
+	}
+
 	// Add system message if it doesn't exist
 	if len(t.messages) == 0 || t.messages[0].Role != openai.ChatMessageRoleSystem {
 		var systemPrompt string
@@ -174,12 +310,12 @@ func (t *OpenAIThread) SendMessage(
 		} else {
 			systemPrompt = sysprompt.SystemPrompt(model)
 		}
-		
+
 		systemMessage := openai.ChatCompletionMessage{
 			Role:    openai.ChatMessageRoleSystem,
 			Content: systemPrompt,
 		}
-		
+
 		// Insert system message at the beginning
 		t.messages = append([]openai.ChatCompletionMessage{systemMessage}, t.messages...)
 	}
@@ -193,7 +329,7 @@ OUTER:
 			break OUTER
 		default:
 			var exchangeOutput string
-			exchangeOutput, toolsUsed, err := t.processMessageExchange(ctx, handler, model, maxTokens, opt)
+			exchangeOutput, toolsUsed, err := t.processMessageExchange(ctx, handler, model, t.config.MaxTokens, opt)
 			if err != nil {
 				if errors.Is(err, context.Canceled) {
 					logrus.Info("Request to OpenAI cancelled, stopping kodelet.llm.openai")
@@ -254,6 +390,10 @@ func (t *OpenAIThread) processMessageExchange(
 		Model:     model,
 		Messages:  t.messages,
 		MaxTokens: maxTokens,
+	}
+
+	if IsReasoningModel(model) {
+		requestParams.ReasoningEffort = t.reasoningEffort
 	}
 
 	// Add tool definitions if tool use is enabled
@@ -339,49 +479,6 @@ func (t *OpenAIThread) processMessageExchange(
 	return finalOutput, true, nil
 }
 
-// getModelAndTokens determines which model and max tokens to use based on configuration and options
-func (t *OpenAIThread) getModelAndTokens(opt llmtypes.MessageOpt) (string, int) {
-	model := t.config.Model
-	maxTokens := t.config.MaxTokens
-	
-	// Update model and tokens based on current selection
-	if opt.UseWeakModel && t.config.WeakModel != "" {
-		model = t.config.WeakModel
-		if t.config.WeakModelMaxTokens > 0 {
-			maxTokens = t.config.WeakModelMaxTokens
-		}
-		
-		// Always use low reasoning effort for weak models
-		t.reasoningEffort = "low"
-	} else {
-		// Restore the original reasoning effort
-		if t.config.ReasoningEffort != "" {
-			t.reasoningEffort = t.config.ReasoningEffort
-		} else {
-			t.reasoningEffort = "medium"
-		}
-	}
-	
-	// Adjust maxTokens based on reasoning effort
-	switch t.reasoningEffort {
-	case "low":
-		maxTokens = int(float64(maxTokens) * 0.5) // Use fewer tokens for low effort
-	case "high":
-		maxTokens = int(float64(maxTokens) * 1.5) // Use more tokens for high effort
-	}
-	
-	// Ensure we don't exceed reasonable limits
-	if maxTokens < 256 {
-		maxTokens = 256
-	} else if maxTokens > 16384 {
-		maxTokens = 16384
-	}
-
-	return model, maxTokens
-}
-
-
-
 func (t *OpenAIThread) tools(opt llmtypes.MessageOpt) []tooltypes.Tool {
 	if opt.NoToolUse {
 		return []tooltypes.Tool{}
@@ -392,18 +489,18 @@ func (t *OpenAIThread) tools(opt llmtypes.MessageOpt) []tooltypes.Tool {
 func (t *OpenAIThread) updateUsage(usage openai.Usage, model string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	
+
 	// Track usage statistics
 	t.usage.InputTokens += usage.PromptTokens
 	t.usage.OutputTokens += usage.CompletionTokens
-	
+
 	// Calculate costs based on model pricing
 	pricing := getModelPricing(model)
-	
+
 	// Calculate individual costs
 	t.usage.InputCost += float64(usage.PromptTokens) * pricing.Input
 	t.usage.OutputCost += float64(usage.CompletionTokens) * pricing.Output
-	
+
 	t.usage.CurrentContextWindow = usage.PromptTokens + usage.CompletionTokens
 	t.usage.MaxContextWindow = pricing.ContextWindow
 }
@@ -478,28 +575,28 @@ func (t *OpenAIThread) IsPersisted() bool {
 // GetMessages returns the current messages in the thread
 func (t *OpenAIThread) GetMessages() ([]llmtypes.Message, error) {
 	result := make([]llmtypes.Message, 0, len(t.messages))
-	
+
 	for _, msg := range t.messages {
 		// Skip system messages
 		if msg.Role == openai.ChatMessageRoleSystem {
 			continue
 		}
-		
+
 		role := string(msg.Role)
 		content := msg.Content
-		
+
 		// Handle tool calls
 		if msg.ToolCalls != nil && len(msg.ToolCalls) > 0 {
 			toolCallContent, _ := json.Marshal(msg.ToolCalls)
 			content = string(toolCallContent)
 		}
-		
+
 		result = append(result, llmtypes.Message{
 			Role:    role,
 			Content: content,
 		})
 	}
-	
+
 	return result, nil
 }
 

@@ -38,9 +38,9 @@ func NewThread(config llmtypes.Config) llmtypes.Thread {
 	// If the model starts with "claude" or matches Anthropic's constants, use Anthropic
 	case strings.HasPrefix(strings.ToLower(modelName), "claude"):
 		return anthropic.NewAnthropicThread(config)
-		
+
 	// If the model starts with "gpt" or matches OpenAI's naming conventions, use OpenAI
-	case strings.HasPrefix(strings.ToLower(modelName), "gpt"):
+	case openai.IsOpenAIModel(modelName):
 		return openai.NewOpenAIThread(config)
 
 	// Default to Anthropic for now
