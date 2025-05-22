@@ -155,7 +155,7 @@ We will maintain the same interface and features across providers where possible
 
 ## Alternatives Considered
 
-1. **Using a third-party LLM gateway**: 
+1. **Using a third-party LLM gateway**:
    - Rejected because it would add unnecessary complexity and dependencies
    - Direct integration gives us more control over implementation details
 
@@ -180,11 +180,10 @@ We will maintain the same interface and features across providers where possible
 1. Create the basic `pkg/llm/openai` package structure
 2. Update the configuration types to support the `reasoning_effort` parameter
 3. Implement the core `OpenAIThread` type with the required interfaces
-4. Add support for token tracking and model pricing based on OpenAI's actual pricing
+4. Add support for token tracking - use placeholder values for now
 5. Implement tool conversion and execution for OpenAI's tool calling format
 6. Add conversation persistence compatible with the existing store
-7. Create provider-specific system prompts optimized for OpenAI models
-8. Update configuration handling to support provider selection and reasoning effort
-9. Add tests for the OpenAI implementation
-10. Update documentation with OpenAI-specific guidance
-11. Create examples showing how to configure and use the OpenAI provider
+7. Update configuration handling to support provider selection and reasoning effort
+8. Add tests for the OpenAI implementation
+9. Update documentation with OpenAI-specific guidance
+10. Create examples showing how to configure and use the OpenAI provider

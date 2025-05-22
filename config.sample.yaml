@@ -2,6 +2,9 @@
 # This file shows all available configuration options with example values
 
 # LLM Configuration
+# Provider to use (anthropic or openai)
+provider: "anthropic"
+
 # Model to use for LLM interactions
 model: "claude-3-7-sonnet-latest"
 
@@ -17,6 +20,22 @@ weak_model: "claude-3-5-haiku-latest"
 # Maximum tokens for weak model responses
 weak_model_max_tokens: 8192
 
+# OpenAI specific settings
+# Reasoning effort for OpenAI models (low, medium, high)
+reasoning_effort: "medium"
+
+# Reasoning effort for OpenAI weak models (low, medium, high)
+weak_reasoning_effort: "low"
+
+# Example OpenAI configuration (uncomment to use)
+# provider: "openai"
+# model: "gpt-4.1"
+# max_tokens: 8192
+# weak_model: "gpt-4.1-mini"
+# weak_model_max_tokens: 4096
+# reasoning_effort: "medium"
+# weak_reasoning_effort: "low"
+
 # Tracing Configuration
 tracing:
   # Enable OpenTelemetry tracing (default: false)
@@ -29,14 +48,21 @@ tracing:
   ratio: 1
 
 # Environment variables can also be used to configure Kodelet:
+# - KODELET_PROVIDER: Overrides the provider setting (anthropic, openai)
 # - KODELET_MODEL: Overrides the model setting
 # - KODELET_MAX_TOKENS: Overrides the max_tokens setting
 # - KODELET_THINKING_BUDGET_TOKENS: Overrides the thinking_budget_tokens setting
 # - KODELET_WEAK_MODEL: Overrides the weak_model setting
 # - KODELET_WEAK_MODEL_MAX_TOKENS: Overrides the weak_model_max_tokens setting
+# - KODELET_REASONING_EFFORT: Overrides the reasoning_effort setting (OpenAI)
+# - KODELET_WEAK_REASONING_EFFORT: Overrides the weak_reasoning_effort setting (OpenAI)
 # - KODELET_TRACING_ENABLED: Enables/disables tracing
 # - KODELET_TRACING_SAMPLER: Sets the sampling strategy
 # - KODELET_TRACING_RATIO: Sets the sampling ratio
+#
+# API Keys:
+# - ANTHROPIC_API_KEY: Required when using the Anthropic provider
+# - OPENAI_API_KEY: Required when using the OpenAI provider
 #
 # Standard OpenTelemetry environment variables are also supported:
 # - OTEL_EXPORTER_OTLP_ENDPOINT: The endpoint to send telemetry data to
