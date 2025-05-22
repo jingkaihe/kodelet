@@ -298,8 +298,12 @@ func (t *OpenAIThread) SendMessage(
 
 	// Determine which model to use
 	model := t.config.Model
+	maxTokens := t.config.MaxTokens
 	if opt.UseWeakModel && t.config.WeakModel != "" {
 		model = t.config.WeakModel
+		if t.config.WeakModelMaxTokens > 0 {
+			maxTokens = t.config.WeakModelMaxTokens
+		}
 	}
 
 	// Add system message if it doesn't exist
@@ -329,7 +333,7 @@ OUTER:
 			break OUTER
 		default:
 			var exchangeOutput string
-			exchangeOutput, toolsUsed, err := t.processMessageExchange(ctx, handler, model, t.config.MaxTokens, opt)
+			exchangeOutput, toolsUsed, err := t.processMessageExchange(ctx, handler, model, maxTokens, opt)
 			if err != nil {
 				if errors.Is(err, context.Canceled) {
 					logrus.Info("Request to OpenAI cancelled, stopping kodelet.llm.openai")
