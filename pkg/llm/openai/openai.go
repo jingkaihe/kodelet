@@ -344,19 +344,15 @@ func (t *OpenAIThread) getModelAndTokens(opt llmtypes.MessageOpt) (string, int) 
 	model := t.config.Model
 	maxTokens := t.config.MaxTokens
 	
-	// Update reasoning effort based on current model
+	// Update model and tokens based on current selection
 	if opt.UseWeakModel && t.config.WeakModel != "" {
 		model = t.config.WeakModel
 		if t.config.WeakModelMaxTokens > 0 {
 			maxTokens = t.config.WeakModelMaxTokens
 		}
 		
-		// Use weak reasoning effort if specified
-		if t.config.WeakReasoningEffort != "" {
-			t.reasoningEffort = t.config.WeakReasoningEffort
-		} else {
-			t.reasoningEffort = "low" // Default to low for weak models
-		}
+		// Always use low reasoning effort for weak models
+		t.reasoningEffort = "low"
 	} else {
 		// Restore the original reasoning effort
 		if t.config.ReasoningEffort != "" {

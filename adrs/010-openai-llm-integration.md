@@ -143,7 +143,6 @@ provider: openai
 model: gpt-4.1
 reasoning_effort: medium  # low, medium, high
 weak_model: gpt-4.1-mini
-weak_model_reasoning_effort: low
 ```
 
 ## Compatibility

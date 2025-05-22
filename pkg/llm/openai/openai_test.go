@@ -32,12 +32,11 @@ func TestNewOpenAIThread(t *testing.T) {
 func TestGetModelAndTokens(t *testing.T) {
 	// Test with regular model
 	config := llm.Config{
-		Model:               "gpt-4.1",
-		MaxTokens:           8192,
-		WeakModel:           "gpt-3.5-turbo",
-		WeakModelMaxTokens:  2048,
-		ReasoningEffort:     "medium",
-		WeakReasoningEffort: "low",
+		Model:              "gpt-4.1",
+		MaxTokens:          8192,
+		WeakModel:          "gpt-3.5-turbo",
+		WeakModelMaxTokens: 2048,
+		ReasoningEffort:    "medium",
 	}
 	thread := NewOpenAIThread(config)
 	

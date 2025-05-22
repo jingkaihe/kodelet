@@ -16,6 +16,5 @@ func GetConfigFromViper() llmtypes.Config {
 		WeakModelMaxTokens:   viper.GetInt("weak_model_max_tokens"),
 		ThinkingBudgetTokens: viper.GetInt("thinking_budget_tokens"),
 		ReasoningEffort:      viper.GetString("reasoning_effort"),
-		WeakReasoningEffort:  viper.GetString("weak_reasoning_effort"),
 	}
 }

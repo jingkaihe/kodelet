@@ -10,5 +10,4 @@ type Config struct {
 	WeakModelMaxTokens   int    // WeakModelMaxTokens is the maximum tokens for the weak model
 	ThinkingBudgetTokens int    // ThinkingBudgetTokens is the budget for the thinking capability
 	ReasoningEffort      string // ReasoningEffort is used for OpenAI models (low, medium, high)
-	WeakReasoningEffort  string // WeakReasoningEffort is used for OpenAI weak models
 }
