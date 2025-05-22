@@ -26,8 +26,12 @@ kodelet update
 To install a specific version:
 
 ```bash
-kodelet update --version 1.0.0
+kodelet update --version 0.0.24.alpha
 ```
+
+## Choice of LLM
+
+Kodelet supports both Anthropic Claude and OpenAI models. Currently, we recommend using Claude 3.7 Sonnet for standard requests and Claude 3.5 Haiku for lightweight tasks.
 
 ## Development
 
