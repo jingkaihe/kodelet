@@ -21,7 +21,6 @@ func init() {
 	viper.SetDefault("weak_model", anthropic.ModelClaude3_5HaikuLatest)
 	viper.SetDefault("provider", "anthropic")
 	viper.SetDefault("reasoning_effort", "medium")
-	viper.SetDefault("weak_reasoning_effort", "low")
 
 	// Set default MCP configuration
 	viper.SetDefault("mcp.servers", map[string]interface{}{})
@@ -79,7 +78,6 @@ func main() {
 	rootCmd.PersistentFlags().String("weak-model", anthropic.ModelClaude3_5HaikuLatest, "Weak model to use (overrides config)")
 	rootCmd.PersistentFlags().Int("weak-model-max-tokens", 8192, "Maximum tokens for weak model response (overrides config)")
 	rootCmd.PersistentFlags().String("reasoning-effort", "medium", "Reasoning effort for OpenAI models (low, medium, high)")
-	rootCmd.PersistentFlags().String("weak-reasoning-effort", "low", "Reasoning effort for OpenAI weak models (low, medium, high)")
 
 	// Bind flags to viper
 	viper.BindPFlag("provider", rootCmd.PersistentFlags().Lookup("provider"))

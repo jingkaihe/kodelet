@@ -24,8 +24,6 @@ weak_model_max_tokens: 8192
 # Reasoning effort for OpenAI models (low, medium, high)
 reasoning_effort: "medium"
 
-# Reasoning effort for OpenAI weak models (low, medium, high)
-weak_reasoning_effort: "low"
 
 # Example OpenAI configuration (uncomment to use)
 # provider: "openai"
@@ -34,7 +32,6 @@ weak_reasoning_effort: "low"
 # weak_model: "gpt-4.1-mini"
 # weak_model_max_tokens: 4096
 # reasoning_effort: "medium"
-# weak_reasoning_effort: "low"
 
 # Tracing Configuration
 tracing:
