@@ -102,7 +102,7 @@ var initCmd = &cobra.Command{
 		// Model selection
 		defaultModel := viper.GetString("model")
 		if defaultModel == "" {
-			defaultModel = string(anthropic.ModelClaude3_7SonnetLatest)
+			defaultModel = string(anthropic.ModelClaudeSonnet4_0)
 		}
 
 		fmt.Printf("   Primary model [%s]: ", defaultModel)

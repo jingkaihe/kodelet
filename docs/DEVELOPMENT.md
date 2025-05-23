@@ -67,7 +67,7 @@ Kodelet uses Viper for configuration management. You can configure Kodelet in se
 1. **Environment Variables** - All environment variables should be prefixed with `KODELET_`:
    ```bash
    export ANTHROPIC_API_KEY="sk-ant-api..."
-   export KODELET_MODEL="claude-3-7-sonnet-latest"
+   export KODELET_MODEL="claude-sonnet-4-0"
    export KODELET_MAX_TOKENS="8192"
    export KODELET_WEAK_MODEL_MAX_TOKENS="8192"
    export KODELET_THINKING_BUDGET_TOKENS="4048"
@@ -80,7 +80,7 @@ Kodelet uses Viper for configuration management. You can configure Kodelet in se
 Example `config.yaml`:
 ```yaml
 # Anthropic model to use
-model: "claude-3-7-sonnet-latest"
+model: "claude-sonnet-4-0"
 
 # Maximum tokens for responses
 max_tokens: 8192

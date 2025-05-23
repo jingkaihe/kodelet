@@ -108,9 +108,9 @@ make help           # Display help
    # LLM configuration - Anthropic
    export ANTHROPIC_API_KEY="sk-ant-api..."
    export KODELET_PROVIDER="anthropic"  # Optional, detected from model name
-   export KODELET_MODEL="claude-3-7-sonnet-latest"
+   export KODELET_MODEL="claude-sonnet-4-0"
    export KODELET_MAX_TOKENS="8192"
-   
+
    # LLM configuration - OpenAI
    export OPENAI_API_KEY="sk-..."
    export KODELET_PROVIDER="openai"
@@ -123,11 +123,11 @@ make help           # Display help
    ```yaml
    # Anthropic configuration
    provider: "anthropic"
-   model: "claude-3-7-sonnet-latest"
+   model: "claude-sonnet-4-0"
    max_tokens: 8192
    weak_model: "claude-3-5-haiku-latest"
    weak_model_max_tokens: 8192
-   
+
    # Alternative OpenAI configuration
    # provider: "openai"
    # model: "gpt-4.1"
@@ -155,7 +155,7 @@ make help           # Display help
    ```bash
    # Anthropic example
    kodelet run --provider "anthropic" --model "claude-3-opus-20240229" --max-tokens 4096 --weak-model-max-tokens 2048 "query"
-   
+
    # OpenAI example
    kodelet run --provider "openai" --model "gpt-4.1" --max-tokens 4096 --reasoning-effort "high" "query"
    ```

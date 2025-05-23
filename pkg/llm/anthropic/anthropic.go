@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"sync"
 
 	"github.com/anthropics/anthropic-sdk-go"
@@ -25,80 +24,6 @@ import (
 // ConversationStore is an alias for the conversations.ConversationStore interface
 // to avoid direct dependency on the conversations package
 type ConversationStore = conversations.ConversationStore
-
-// ModelPricing holds the per-token pricing for different operations
-type ModelPricing struct {
-	Input              float64
-	Output             float64
-	PromptCachingWrite float64
-	PromptCachingRead  float64
-	ContextWindow      int
-}
-
-// ModelPricingMap maps model names to their pricing information
-var ModelPricingMap = map[anthropic.Model]ModelPricing{
-	// Latest models
-	anthropic.ModelClaude3_7SonnetLatest: {
-		Input:              0.000003,   // $3.00 per million tokens
-		Output:             0.000015,   // $15.00 per million tokens
-		PromptCachingWrite: 0.00000375, // $3.75 per million tokens
-		PromptCachingRead:  0.0000003,  // $0.30 per million tokens
-		ContextWindow:      200_000,
-	},
-	anthropic.ModelClaude3_5HaikuLatest: {
-		Input:              0.0000008,  // $0.80 per million tokens
-		Output:             0.000004,   // $4.00 per million tokens
-		PromptCachingWrite: 0.000001,   // $1.00 per million tokens
-		PromptCachingRead:  0.00000008, // $0.08 per million tokens
-		ContextWindow:      200_000,
-	},
-	anthropic.ModelClaude3OpusLatest: {
-		Input:              0.000015,   // $15.00 per million tokens
-		Output:             0.000075,   // $75.00 per million tokens
-		PromptCachingWrite: 0.00001875, // $18.75 per million tokens
-		PromptCachingRead:  0.0000015,  // $1.50 per million tokens
-		ContextWindow:      200_000,
-	},
-	// Legacy models
-	anthropic.ModelClaude3_5SonnetLatest: {
-		Input:              0.000003,   // $3.00 per million tokens
-		Output:             0.000015,   // $15.00 per million tokens
-		PromptCachingWrite: 0.00000375, // $3.75 per million tokens
-		PromptCachingRead:  0.0000003,  // $0.30 per million tokens
-		ContextWindow:      200_000,
-	},
-	anthropic.ModelClaude_3_Haiku_20240307: {
-		Input:              0.00000025, // $0.25 per million tokens
-		Output:             0.00000125, // $1.25 per million tokens
-		PromptCachingWrite: 0.0000003,  // $0.30 per million tokens
-		PromptCachingRead:  0.00000003, // $0.03 per million tokens
-		ContextWindow:      200_000,
-	},
-}
-
-// getModelPricing returns the pricing information for a given model
-func getModelPricing(model anthropic.Model) ModelPricing {
-	// First try exact match
-	if pricing, ok := ModelPricingMap[model]; ok {
-		return pricing
-	}
-	// Try to find a match based on model family
-	lowerModel := strings.ToLower(string(model))
-	if strings.Contains(lowerModel, "claude-3-7-sonnet") {
-		return ModelPricingMap[anthropic.ModelClaude3_7SonnetLatest]
-	} else if strings.Contains(lowerModel, "claude-3-5-haiku") {
-		return ModelPricingMap[anthropic.ModelClaude3_5HaikuLatest]
-	} else if strings.Contains(lowerModel, "claude-3-opus") {
-		return ModelPricingMap[anthropic.ModelClaude3OpusLatest]
-	} else if strings.Contains(lowerModel, "claude-3-5-sonnet") {
-		return ModelPricingMap["claude-3-5-sonnet-20240620"]
-	} else if strings.Contains(lowerModel, "claude-3-haiku") {
-		return ModelPricingMap["claude-3-haiku-20240307"]
-	}
-
-	// Default to Claude 3.7 Sonnet pricing if no match
-	return ModelPricingMap[anthropic.ModelClaude3_7SonnetLatest]
-}
 
 // AnthropicThread implements the Thread interface using Anthropic's Claude API
 type AnthropicThread struct {
@@ -123,7 +48,7 @@ func (t *AnthropicThread) Provider() string {
 func NewAnthropicThread(config llmtypes.Config) *AnthropicThread {
 	// Apply defaults if not provided
 	if config.Model == "" {
-		config.Model = string(anthropic.ModelClaude3_7SonnetLatest)
+		config.Model = string(anthropic.ModelClaudeSonnet4_0)
 	}
 	if config.MaxTokens == 0 {
 		config.MaxTokens = 8192
@@ -390,7 +315,7 @@ func (t *AnthropicThread) shouldUtiliseThinking(model anthropic.Model) bool {
 	if t.config.ThinkingBudgetTokens == 0 {
 		return false
 	}
-	if model != anthropic.ModelClaude3_7SonnetLatest {
+	if model != anthropic.ModelClaudeSonnet4_0 {
 		return false
 	}
 	return true

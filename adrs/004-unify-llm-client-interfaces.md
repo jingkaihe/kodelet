@@ -47,7 +47,7 @@ type Thread struct {
 func NewThread(config Config) *Thread {
     // Apply defaults if not provided
     if config.Model == "" {
-        config.Model = anthropic.ModelClaude3_7SonnetLatest
+        config.Model = anthropic.ModelClaudeSonnet4_0
     }
     if config.MaxTokens == 0 {
         config.MaxTokens = 8192

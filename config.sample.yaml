@@ -6,7 +6,7 @@
 provider: "anthropic"
 
 # Model to use for LLM interactions
-model: "claude-3-7-sonnet-latest"
+model: "claude-sonnet-4-0"
 
 # Maximum tokens for responses
 max_tokens: 8192

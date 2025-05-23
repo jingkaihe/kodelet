@@ -14,7 +14,7 @@ import (
 
 func TestDeserializeMessages(t *testing.T) {
 	thread := NewAnthropicThread(llmtypes.Config{
-		Model: string(anthropic.ModelClaude3_7SonnetLatest),
+		Model: string(anthropic.ModelClaudeSonnet4_0),
 	})
 	messages, err := DeserializeMessages([]byte(`[]`))
 	assert.NoError(t, err)
@@ -107,7 +107,7 @@ func TestSaveAndLoadConversationWithFileLastAccess(t *testing.T) {
 	// Create a thread with a unique conversation ID
 	conversationID := "test-file-last-access"
 	thread := NewAnthropicThread(llmtypes.Config{
-		Model: string(anthropic.ModelClaude3_7SonnetLatest),
+		Model: string(anthropic.ModelClaudeSonnet4_0),
 	})
 	thread.SetConversationID(conversationID)
 
@@ -134,7 +134,7 @@ func TestSaveAndLoadConversationWithFileLastAccess(t *testing.T) {
 
 	// Create a new thread with the same conversation ID
 	newThread := NewAnthropicThread(llmtypes.Config{
-		Model: string(anthropic.ModelClaude3_7SonnetLatest),
+		Model: string(anthropic.ModelClaudeSonnet4_0),
 	})
 	newThread.SetConversationID(conversationID)
 	newState := tools.NewBasicState(context.TODO())

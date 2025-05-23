@@ -32,7 +32,7 @@ func TestNewThread(t *testing.T) {
 		{
 			name:          "WithDefaultValues",
 			config:        llmtypes.Config{},
-			expectedModel: string(anthropic.ModelClaude3_7SonnetLatest),
+			expectedModel: string(anthropic.ModelClaudeSonnet4_0),
 			expectedMax:   8192,
 		},
 	}
@@ -191,7 +191,7 @@ func TestSendMessageRealClient(t *testing.T) {
 
 	// Create a real thread
 	thread := NewThread(llmtypes.Config{
-		Model:     string(anthropic.ModelClaude3_7SonnetLatest), // Using a real model
+		Model:     string(anthropic.ModelClaudeSonnet4_0), // Using a real model
 		MaxTokens: 100,
 	})
 	thread.SetState(tools.NewBasicState(context.TODO()))

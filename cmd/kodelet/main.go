@@ -17,7 +17,7 @@ func init() {
 	viper.SetDefault("max_tokens", 8192)
 	viper.SetDefault("weak_model_max_tokens", 8192)
 	viper.SetDefault("thinking_budget_tokens", 4048)
-	viper.SetDefault("model", anthropic.ModelClaude3_7SonnetLatest)
+	viper.SetDefault("model", anthropic.ModelClaudeSonnet4_0)
 	viper.SetDefault("weak_model", anthropic.ModelClaude3_5HaikuLatest)
 	viper.SetDefault("provider", "anthropic")
 	viper.SetDefault("reasoning_effort", "medium")
@@ -72,7 +72,7 @@ func main() {
 
 	// Add global flags
 	rootCmd.PersistentFlags().String("provider", "anthropic", "LLM provider to use (anthropic, openai)")
-	rootCmd.PersistentFlags().String("model", string(anthropic.ModelClaude3_7SonnetLatest), "LLM model to use (overrides config)")
+	rootCmd.PersistentFlags().String("model", string(anthropic.ModelClaudeSonnet4_0), "LLM model to use (overrides config)")
 	rootCmd.PersistentFlags().Int("max-tokens", 8192, "Maximum tokens for response (overrides config)")
 	rootCmd.PersistentFlags().Int("thinking-budget-tokens", 4048, "Maximum tokens for thinking capability (overrides config)")
 	rootCmd.PersistentFlags().String("weak-model", string(anthropic.ModelClaude3_5HaikuLatest), "Weak model to use (overrides config)")

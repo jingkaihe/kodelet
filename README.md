@@ -31,7 +31,7 @@ kodelet update --version 0.0.24.alpha
 
 ## Choice of LLM
 
-Kodelet supports both Anthropic Claude and OpenAI models. Currently, we recommend using Claude 3.7 Sonnet for standard requests and Claude 3.5 Haiku for lightweight tasks.
+Kodelet supports both Anthropic Claude and OpenAI models. Currently, we recommend using Claude Sonnet 4 Sonnet for standard requests and Claude 3.5 Haiku for lightweight tasks.
 
 ## Development
 
