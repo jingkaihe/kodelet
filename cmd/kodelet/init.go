@@ -102,7 +102,7 @@ var initCmd = &cobra.Command{
 		// Model selection
 		defaultModel := viper.GetString("model")
 		if defaultModel == "" {
-			defaultModel = anthropic.ModelClaude3_7SonnetLatest
+			defaultModel = string(anthropic.ModelClaude3_7SonnetLatest)
 		}
 
 		fmt.Printf("   Primary model [%s]: ", defaultModel)
@@ -116,7 +116,7 @@ var initCmd = &cobra.Command{
 		// Weak model selection
 		defaultWeakModel := viper.GetString("weak_model")
 		if defaultWeakModel == "" {
-			defaultWeakModel = anthropic.ModelClaude3_5HaikuLatest
+			defaultWeakModel = string(anthropic.ModelClaude3_5HaikuLatest)
 		}
 
 		fmt.Printf("   Secondary (weak) model [%s]: ", defaultWeakModel)

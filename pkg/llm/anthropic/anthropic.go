@@ -36,7 +36,7 @@ type ModelPricing struct {
 }
 
 // ModelPricingMap maps model names to their pricing information
-var ModelPricingMap = map[string]ModelPricing{
+var ModelPricingMap = map[anthropic.Model]ModelPricing{
 	// Latest models
 	anthropic.ModelClaude3_7SonnetLatest: {
 		Input:              0.000003,   // $3.00 per million tokens
@@ -77,13 +77,13 @@ var ModelPricingMap = map[string]ModelPricing{
 }
 
 // getModelPricing returns the pricing information for a given model
-func getModelPricing(model string) ModelPricing {
+func getModelPricing(model anthropic.Model) ModelPricing {
 	// First try exact match
 	if pricing, ok := ModelPricingMap[model]; ok {
 		return pricing
 	}
 	// Try to find a match based on model family
-	lowerModel := strings.ToLower(model)
+	lowerModel := strings.ToLower(string(model))
 	if strings.Contains(lowerModel, "claude-3-7-sonnet") {
 		return ModelPricingMap[anthropic.ModelClaude3_7SonnetLatest]
 	} else if strings.Contains(lowerModel, "claude-3-5-haiku") {
@@ -123,7 +123,7 @@ func (t *AnthropicThread) Provider() string {
 func NewAnthropicThread(config llmtypes.Config) *AnthropicThread {
 	// Apply defaults if not provided
 	if config.Model == "" {
-		config.Model = anthropic.ModelClaude3_7SonnetLatest
+		config.Model = string(anthropic.ModelClaude3_7SonnetLatest)
 	}
 	if config.MaxTokens == 0 {
 		config.MaxTokens = 8192
@@ -157,8 +157,8 @@ func (t *AnthropicThread) cacheMessages() {
 	// remove cache control from the messages
 	for msgIdx, msg := range t.messages {
 		for blkIdx, block := range msg.Content {
-			if block.OfRequestTextBlock != nil {
-				block.OfRequestTextBlock.CacheControl = anthropic.CacheControlEphemeralParam{}
+			if block.OfText != nil {
+				block.OfText.CacheControl = anthropic.CacheControlEphemeralParam{}
 				t.messages[msgIdx].Content[blkIdx] = block
 			}
 		}
@@ -167,8 +167,8 @@ func (t *AnthropicThread) cacheMessages() {
 		lastMsg := t.messages[len(t.messages)-1]
 		if len(lastMsg.Content) > 0 {
 			lastBlock := lastMsg.Content[len(lastMsg.Content)-1]
-			if lastBlock.OfRequestTextBlock != nil {
-				lastBlock.OfRequestTextBlock.CacheControl = anthropic.CacheControlEphemeralParam{}
+			if lastBlock.OfText != nil {
+				lastBlock.OfText.CacheControl = anthropic.CacheControlEphemeralParam{}
 				t.messages[len(t.messages)-1].Content[len(lastMsg.Content)-1] = lastBlock
 			}
 		}
@@ -204,9 +204,9 @@ func (t *AnthropicThread) SendMessage(
 	model, maxTokens := t.getModelAndTokens(opt)
 	var systemPrompt string
 	if t.config.IsSubAgent {
-		systemPrompt = sysprompt.SubAgentPrompt(model)
+		systemPrompt = sysprompt.SubAgentPrompt(string(model))
 	} else {
-		systemPrompt = sysprompt.SystemPrompt(model)
+		systemPrompt = sysprompt.SystemPrompt(string(model))
 	}
 
 	// Main interaction loop for handling tool calls
@@ -266,7 +266,7 @@ func isMessageToolUse(msg anthropic.MessageParam) bool {
 		return false
 	}
 	for _, block := range msg.Content {
-		if block.OfRequestToolUseBlock != nil {
+		if block.OfToolUse != nil {
 			return true
 		}
 	}
@@ -278,7 +278,7 @@ func isMessageToolUse(msg anthropic.MessageParam) bool {
 func (t *AnthropicThread) processMessageExchange(
 	ctx context.Context,
 	handler llmtypes.MessageHandler,
-	model string,
+	model anthropic.Model,
 	maxTokens int,
 	systemPrompt string,
 	opt llmtypes.MessageOpt,
@@ -302,7 +302,7 @@ func (t *AnthropicThread) processMessageExchange(
 	}
 	if t.shouldUtiliseThinking(model) {
 		messageParams.Thinking = anthropic.ThinkingConfigParamUnion{
-			OfThinkingConfigEnabled: &anthropic.ThinkingConfigEnabledParam{
+			OfEnabled: &anthropic.ThinkingConfigEnabledParam{
 				Type:         "enabled",
 				BudgetTokens: int64(t.config.ThinkingBudgetTokens),
 			},
@@ -311,13 +311,13 @@ func (t *AnthropicThread) processMessageExchange(
 
 	// Add a tracing event for API call start
 	telemetry.AddEvent(ctx, "api_call_start",
-		attribute.String("model", model),
+		attribute.String("model", string(model)),
 		attribute.Int("max_tokens", maxTokens),
 	)
 
 	response, err := t.NewMessage(ctx, messageParams)
 	if err != nil {
-		return "", false, fmt.Errorf("error sending message to Anthropic: %w", err)
+		return "", false, err
 	}
 
 	// Record API call completion
@@ -372,7 +372,7 @@ func (t *AnthropicThread) processMessageExchange(
 }
 
 // getModelAndTokens determines which model and max tokens to use based on configuration and options
-func (t *AnthropicThread) getModelAndTokens(opt llmtypes.MessageOpt) (string, int) {
+func (t *AnthropicThread) getModelAndTokens(opt llmtypes.MessageOpt) (anthropic.Model, int) {
 	model := t.config.Model
 	maxTokens := t.config.MaxTokens
 
@@ -383,10 +383,10 @@ func (t *AnthropicThread) getModelAndTokens(opt llmtypes.MessageOpt) (string, in
 		}
 	}
 
-	return model, maxTokens
+	return anthropic.Model(model), maxTokens
 }
 
-func (t *AnthropicThread) shouldUtiliseThinking(model string) bool {
+func (t *AnthropicThread) shouldUtiliseThinking(model anthropic.Model) bool {
 	if t.config.ThinkingBudgetTokens == 0 {
 		return false
 	}
@@ -402,14 +402,14 @@ func (t *AnthropicThread) NewMessage(ctx context.Context, params anthropic.Messa
 
 	// Create attributes for the span
 	spanAttrs := []attribute.KeyValue{
-		attribute.String("model", params.Model),
+		attribute.String("model", string(params.Model)),
 		attribute.Int64("max_tokens", params.MaxTokens),
 	}
 
 	if t.shouldUtiliseThinking(params.Model) {
 		spanAttrs = append(spanAttrs,
-			attribute.Bool("thinking", params.Thinking.OfThinkingConfigEnabled.BudgetTokens > 0),
-			attribute.Int64("budget_tokens", params.Thinking.OfThinkingConfigEnabled.BudgetTokens),
+			attribute.Bool("thinking", params.Thinking.OfEnabled.BudgetTokens > 0),
+			attribute.Int64("budget_tokens", params.Thinking.OfEnabled.BudgetTokens),
 		)
 	}
 	for i, sys := range params.System {
@@ -424,25 +424,34 @@ func (t *AnthropicThread) NewMessage(ctx context.Context, params anthropic.Messa
 	defer span.End()
 
 	// Call the Anthropic API
-	response, err := t.client.Messages.New(ctx, params)
+	stream := t.client.Messages.NewStreaming(ctx, params)
+	message := anthropic.Message{}
+	for stream.Next() {
+		event := stream.Current()
+		err := message.Accumulate(event)
+		if err != nil {
+			telemetry.RecordError(ctx, err)
+			span.SetStatus(codes.Error, err.Error())
+			return nil, err
+		}
 
-	// Handle errors and update span
-	if err != nil {
-		telemetry.RecordError(ctx, err)
-		span.SetStatus(codes.Error, err.Error())
-		return nil, fmt.Errorf("error sending message to Anthropic: %w", err)
+		if stream.Err() != nil {
+			telemetry.RecordError(ctx, stream.Err())
+			span.SetStatus(codes.Error, stream.Err().Error())
+			return nil, stream.Err()
+		}
 	}
 
 	// Add response data to the span
 	span.SetAttributes(
-		attribute.Int("input_tokens", int(response.Usage.InputTokens)),
-		attribute.Int("output_tokens", int(response.Usage.OutputTokens)),
-		attribute.Int("cache_creation_tokens", int(response.Usage.CacheCreationInputTokens)),
-		attribute.Int("cache_read_tokens", int(response.Usage.CacheReadInputTokens)),
+		attribute.Int64("input_tokens", message.Usage.InputTokens),
+		attribute.Int64("output_tokens", message.Usage.OutputTokens),
+		attribute.Int64("cache_creation_tokens", message.Usage.CacheCreationInputTokens),
+		attribute.Int64("cache_read_tokens", message.Usage.CacheReadInputTokens),
 	)
 	span.SetStatus(codes.Ok, "")
 
-	return response, nil
+	return &message, nil
 }
 
 // getLastMessagesAttributes extracts information from the last n messages for telemetry purposes
@@ -487,7 +496,7 @@ func (t *AnthropicThread) tools(opt llmtypes.MessageOpt) []tooltypes.Tool {
 	return t.state.Tools()
 }
 
-func (t *AnthropicThread) updateUsage(response *anthropic.Message, model string) {
+func (t *AnthropicThread) updateUsage(response *anthropic.Message, model anthropic.Model) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	// Track usage statistics

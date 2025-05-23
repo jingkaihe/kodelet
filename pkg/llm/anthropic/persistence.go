@@ -114,7 +114,7 @@ func DeserializeMessages(b []byte) ([]anthropic.MessageParam, error) {
 					}
 				}
 				msg.Content = append(msg.Content, anthropic.ContentBlockParamUnion{
-					OfRequestTextBlock: &anthropic.TextBlockParam{
+					OfText: &anthropic.TextBlockParam{
 						Type: "text",
 						Text: content["text"].(string),
 					},
@@ -126,7 +126,7 @@ func DeserializeMessages(b []byte) ([]anthropic.MessageParam, error) {
 					}
 				}
 				msg.Content = append(msg.Content, anthropic.ContentBlockParamUnion{
-					OfRequestToolUseBlock: &anthropic.ToolUseBlockParam{
+					OfToolUse: &anthropic.ToolUseBlockParam{
 						Type:  "tool_use",
 						ID:    content["id"].(string),
 						Name:  content["name"].(string),
@@ -140,7 +140,7 @@ func DeserializeMessages(b []byte) ([]anthropic.MessageParam, error) {
 					}
 				}
 				msg.Content = append(msg.Content, anthropic.ContentBlockParamUnion{
-					OfRequestThinkingBlock: &anthropic.ThinkingBlockParam{
+					OfThinking: &anthropic.ThinkingBlockParam{
 						Type:      "thinking",
 						Thinking:  content["thinking"].(string),
 						Signature: content["signature"].(string),
@@ -170,13 +170,13 @@ func DeserializeMessages(b []byte) ([]anthropic.MessageParam, error) {
 					isError = false
 				}
 				msg.Content = append(msg.Content, anthropic.ContentBlockParamUnion{
-					OfRequestToolResultBlock: &anthropic.ToolResultBlockParam{
+					OfToolResult: &anthropic.ToolResultBlockParam{
 						Type:      "tool_result",
 						ToolUseID: content["tool_use_id"].(string),
 						IsError:   param.Opt[bool]{Value: isError},
 						Content: []anthropic.ToolResultBlockParamContentUnion{
 							{
-								OfRequestTextBlock: &anthropic.TextBlockParam{
+								OfText: &anthropic.TextBlockParam{
 									Type: "text",
 									Text: toolCallContent["text"].(string),
 								},
@@ -208,14 +208,14 @@ func ExtractMessages(rawMessages json.RawMessage) ([]llm.Message, error) {
 	for _, msg := range anthropicMessages {
 		for _, contentBlock := range msg.Content {
 			// Handle text blocks
-			if textBlock := contentBlock.OfRequestTextBlock; textBlock != nil {
+			if textBlock := contentBlock.OfText; textBlock != nil {
 				messages = append(messages, llm.Message{
 					Role:    string(msg.Role),
 					Content: textBlock.Text,
 				})
 			}
 			// Handle tool use blocks
-			if toolUseBlock := contentBlock.OfRequestToolUseBlock; toolUseBlock != nil {
+			if toolUseBlock := contentBlock.OfToolUse; toolUseBlock != nil {
 				inputJSON, err := json.Marshal(toolUseBlock.Input)
 				if err != nil {
 					continue // Skip if marshaling fails
@@ -226,9 +226,9 @@ func ExtractMessages(rawMessages json.RawMessage) ([]llm.Message, error) {
 				})
 			}
 			// Handle tool result blocks
-			if toolResultBlock := contentBlock.OfRequestToolResultBlock; toolResultBlock != nil {
+			if toolResultBlock := contentBlock.OfToolResult; toolResultBlock != nil {
 				for _, resultContent := range toolResultBlock.Content {
-					if textBlock := resultContent.OfRequestTextBlock; textBlock != nil {
+					if textBlock := resultContent.OfText; textBlock != nil {
 						messages = append(messages, llm.Message{
 							Role:    "assistant",
 							Content: fmt.Sprintf("🔄 Tool result: %s", textBlock.Text),
@@ -237,7 +237,7 @@ func ExtractMessages(rawMessages json.RawMessage) ([]llm.Message, error) {
 				}
 			}
 			// Handle thinking blocks
-			if thinkingBlock := contentBlock.OfRequestThinkingBlock; thinkingBlock != nil {
+			if thinkingBlock := contentBlock.OfThinking; thinkingBlock != nil {
 				messages = append(messages, llm.Message{
 					Role:    "assistant",
 					Content: fmt.Sprintf("💭 Thinking: %s", thinkingBlock.Thinking),

@@ -72,10 +72,10 @@ func main() {
 
 	// Add global flags
 	rootCmd.PersistentFlags().String("provider", "anthropic", "LLM provider to use (anthropic, openai)")
-	rootCmd.PersistentFlags().String("model", anthropic.ModelClaude3_7SonnetLatest, "LLM model to use (overrides config)")
+	rootCmd.PersistentFlags().String("model", string(anthropic.ModelClaude3_7SonnetLatest), "LLM model to use (overrides config)")
 	rootCmd.PersistentFlags().Int("max-tokens", 8192, "Maximum tokens for response (overrides config)")
 	rootCmd.PersistentFlags().Int("thinking-budget-tokens", 4048, "Maximum tokens for thinking capability (overrides config)")
-	rootCmd.PersistentFlags().String("weak-model", anthropic.ModelClaude3_5HaikuLatest, "Weak model to use (overrides config)")
+	rootCmd.PersistentFlags().String("weak-model", string(anthropic.ModelClaude3_5HaikuLatest), "Weak model to use (overrides config)")
 	rootCmd.PersistentFlags().Int("weak-model-max-tokens", 8192, "Maximum tokens for weak model response (overrides config)")
 	rootCmd.PersistentFlags().String("reasoning-effort", "medium", "Reasoning effort for OpenAI models (low, medium, high)")
 
