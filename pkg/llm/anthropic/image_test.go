@@ -134,7 +134,7 @@ func TestProcessImageFile(t *testing.T) {
 	}
 }
 
-func TestAddUserMessageWithImages(t *testing.T) {
+func TestAddUserMessage(t *testing.T) {
 	thread := NewAnthropicThread(llmtypes.Config{})
 
 	// Create a temporary directory for test files
@@ -181,7 +181,7 @@ func TestAddUserMessageWithImages(t *testing.T) {
 				}
 			}
 
-			thread.AddUserMessageWithImages(test.message, test.images...)
+			thread.AddUserMessage(test.message, test.images...)
 
 			// Should have added exactly one message
 			assert.Equal(t, initialCount+1, len(thread.messages))

@@ -38,10 +38,8 @@ type Thread interface {
 	SetState(s tooltypes.State)
 	// GetState returns the current state of the thread
 	GetState() tooltypes.State
-	// AddUserMessage adds a user message to the thread
-	AddUserMessage(message string)
-	// AddUserMessageWithImages adds a user message with optional images to the thread
-	AddUserMessageWithImages(message string, imagePaths ...string)
+	// AddUserMessage adds a user message with optional images to the thread
+	AddUserMessage(message string, imagePaths ...string)
 	// SendMessage sends a message to the LLM and processes the response
 	SendMessage(ctx context.Context, message string, handler MessageHandler, opt MessageOpt) (finalOutput string, err error)
 	// GetUsage returns the current token usage for the thread

@@ -83,13 +83,8 @@ func (t *AnthropicThread) GetState() tooltypes.State {
 	return t.state
 }
 
-// AddUserMessage adds a user message to the thread
-func (t *AnthropicThread) AddUserMessage(message string) {
-	t.AddUserMessageWithImages(message)
-}
-
-// AddUserMessageWithImages adds a user message with optional images to the thread
-func (t *AnthropicThread) AddUserMessageWithImages(message string, imagePaths ...string) {
+// AddUserMessage adds a user message with optional images to the thread
+func (t *AnthropicThread) AddUserMessage(message string, imagePaths ...string) {
 	contentBlocks := []anthropic.ContentBlockParamUnion{
 		anthropic.NewTextBlock(message),
 	}
@@ -159,11 +154,7 @@ func (t *AnthropicThread) SendMessage(
 	}
 
 	// Add user message with images if provided
-	if len(opt.Images) > 0 {
-		t.AddUserMessageWithImages(message, opt.Images...)
-	} else {
-		t.AddUserMessage(message)
-	}
+	t.AddUserMessage(message, opt.Images...)
 
 	// Determine which model to use
 	model, maxTokens := t.getModelAndTokens(opt)
@@ -635,10 +626,13 @@ func (t *AnthropicThread) processImage(imagePath string) (*anthropic.ContentBloc
 	if strings.HasPrefix(imagePath, "https://") {
 		return t.processImageURL(imagePath)
 	} else if strings.HasPrefix(imagePath, "file://") {
+		// Remove file:// prefix and process as file
+		filePath := strings.TrimPrefix(imagePath, "file://")
+		return t.processImageFile(filePath)
+	} else {
+		// Treat as a local file path
 		return t.processImageFile(imagePath)
 	}
-
-	return nil, fmt.Errorf("unsupported image path: %s", imagePath)
 }
 
 // processImageURL creates an image block from an HTTPS URL
