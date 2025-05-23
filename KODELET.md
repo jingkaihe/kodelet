@@ -1,7 +1,7 @@
 # Kodelet Documentation
 
 ## Project Overview
-Kodelet is a lightweight CLI tool that helps with software engineering tasks. It uses the Anthropic Claude API to process user queries and execute various tools.
+Kodelet is a lightweight CLI tool that helps with software engineering tasks. It supports both Anthropic Claude and OpenAI APIs to process user queries and execute various tools.
 
 ## Project Structure
 ```
@@ -24,7 +24,8 @@ Kodelet is a lightweight CLI tool that helps with software engineering tasks. It
 ├── pkg/                 # Core packages
 │   ├── conversations/   # Conversation storage and management
 │   ├── llm/             # LLM client for AI interactions
-│   │   └── anthropic/   # Anthropic Claude API client
+│   │   ├── anthropic/   # Anthropic Claude API client
+│   │   └── openai/      # OpenAI API client
 │   ├── sysprompt/       # System prompt configuration
 │   │   └── templates/   # Prompt templates
 │   │       └── components/ # Template components
@@ -47,6 +48,7 @@ The codebase follows a modular structure with separation of concerns between LLM
 ## Tech Stack
 - **Go 1.24.2** - Programming language
 - **Anthropic SDK** - For Claude AI integration (v0.2.0-beta.3)
+- **OpenAI SDK** - For GPT models integration
 - **Charm libraries** - TUI components
 - **Cobra & Viper** - CLI commands and configuration
 - **Docker** - For containerization
@@ -103,19 +105,37 @@ make help           # Display help
 
 1. **Environment Variables**:
    ```bash
-   # LLM configuration
+   # LLM configuration - Anthropic
    export ANTHROPIC_API_KEY="sk-ant-api..."
+   export KODELET_PROVIDER="anthropic"  # Optional, detected from model name
    export KODELET_MODEL="claude-3-7-sonnet-latest"
    export KODELET_MAX_TOKENS="8192"
-
+   
+   # LLM configuration - OpenAI
+   export OPENAI_API_KEY="sk-..."
+   export KODELET_PROVIDER="openai"
+   export KODELET_MODEL="gpt-4.1"
+   export KODELET_MAX_TOKENS="8192"
+   export KODELET_REASONING_EFFORT="medium"  # low, medium, high
    ```
 
 2. **Configuration File** (`config.yaml`):
    ```yaml
+   # Anthropic configuration
+   provider: "anthropic"
    model: "claude-3-7-sonnet-latest"
    max_tokens: 8192
    weak_model: "claude-3-5-haiku-latest"
    weak_model_max_tokens: 8192
+   
+   # Alternative OpenAI configuration
+   # provider: "openai"
+   # model: "gpt-4.1"
+   # max_tokens: 8192
+   # weak_model: "gpt-4.1-mini"
+   # weak_model_max_tokens: 4096
+   # reasoning_effort: "medium"
+   # weak_reasoning_effort: "low"
 
    # MCP configuration
    mcp:
@@ -133,14 +153,19 @@ make help           # Display help
 
 3. **Command Line Flags**:
    ```bash
-   kodelet run --model "claude-3-opus-20240229" --max-tokens 4096 --weak-model-max-tokens 2048 "query"
+   # Anthropic example
+   kodelet run --provider "anthropic" --model "claude-3-opus-20240229" --max-tokens 4096 --weak-model-max-tokens 2048 "query"
+   
+   # OpenAI example
+   kodelet run --provider "openai" --model "gpt-4.1" --max-tokens 4096 --reasoning-effort "high" "query"
    ```
 
 ## LLM Architecture
 
-Kodelet uses a `Thread` abstraction for all interactions with the Anthropic Claude API:
+Kodelet uses a `Thread` abstraction for all interactions with LLM providers (Anthropic Claude and OpenAI):
 - Maintains message history and state
 - Handles tool execution and responses
 - Uses a handler-based pattern for processing responses
+- Supports provider-specific features (thinking for Claude, reasoning effort for OpenAI)
 
-The architecture provides a unified approach for both interactive and one-shot uses with token usage tracking for all API calls.
+The architecture provides a unified approach for both interactive and one-shot uses with token usage tracking for all API calls across different providers.

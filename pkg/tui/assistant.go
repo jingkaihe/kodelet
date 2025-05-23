@@ -2,11 +2,9 @@ package tui
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"github.com/jingkaihe/kodelet/pkg/llm"
-	"github.com/jingkaihe/kodelet/pkg/llm/anthropic"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
@@ -39,48 +37,8 @@ func NewAssistantClient(ctx context.Context, conversationID string, enablePersis
 }
 
 // GetThreadMessages returns the messages from the thread
-func (a *AssistantClient) GetThreadMessages() ([]Message, error) {
-	// Get access to the underlying anthropic thread to extract messages
-	if anthropicThread, ok := a.thread.(*anthropic.AnthropicThread); ok {
-		msgParams := anthropicThread.GetMessages()
-		var messages []Message
-
-		for _, msgParam := range msgParams {
-			for _, block := range msgParam.Content {
-				blockType := *block.GetType()
-				switch blockType {
-				case "text":
-					messages = append(messages, Message{
-						Content: *block.GetText(),
-						IsUser:  msgParam.Role == "user",
-					})
-				case "tool_use":
-					inputJSON, _ := json.Marshal(block.OfRequestToolUseBlock.Input)
-					messages = append(messages, Message{
-						Content: fmt.Sprintf("🔧 Using tool: %s", string(inputJSON)),
-						IsUser:  msgParam.Role == "user",
-					})
-				case "tool_result":
-					if len(block.OfRequestToolResultBlock.Content) > 0 {
-						result := block.OfRequestToolResultBlock.Content[0].OfRequestTextBlock.Text
-						messages = append(messages, Message{
-							Content: fmt.Sprintf("🔄 Tool result: %s", result),
-							IsUser:  false,
-						})
-					}
-				case "thinking":
-					messages = append(messages, Message{
-						Content: fmt.Sprintf("💭 Thinking: %s", block.OfRequestThinkingBlock.Thinking),
-						IsUser:  false,
-					})
-				}
-			}
-		}
-
-		return messages, nil
-	}
-
-	return nil, fmt.Errorf("unsupported thread type")
+func (a *AssistantClient) GetThreadMessages() ([]llmtypes.Message, error) {
+	return a.thread.GetMessages()
 }
 
 func (a *AssistantClient) AddUserMessage(message string) {

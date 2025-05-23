@@ -7,6 +7,7 @@ Kodelet is a lightweight agentic SWE Agent. It runs as an interactive CLI tool i
 - **Intelligent Engineering Assistant**: Automates software engineering tasks and production operations with agentic capabilities.
 - **Interactive Architecture Design**: Collaboratively design and refine system architectures through natural dialogue.
 - **Continuous Code Intelligence**: Analyzes, understands, and improves your codebase while answering technical questions in context.
+- **Multiple LLM Providers**: Supports both Anthropic Claude and OpenAI models, giving you flexibility in choosing the best model for your needs.
 
 ## Installation
 
@@ -25,8 +26,12 @@ kodelet update
 To install a specific version:
 
 ```bash
-kodelet update --version 1.0.0
+kodelet update --version 0.0.24.alpha
 ```
+
+## Choice of LLM
+
+Kodelet supports both Anthropic Claude and OpenAI models. Currently, we recommend using Claude 3.7 Sonnet for standard requests and Claude 3.5 Haiku for lightweight tasks.
 
 ## Development
 

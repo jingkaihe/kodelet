@@ -9,10 +9,12 @@ import (
 // GetConfigFromViper returns a Config object based on the current Viper settings
 func GetConfigFromViper() llmtypes.Config {
 	return llmtypes.Config{
+		Provider:             viper.GetString("provider"),
 		Model:                viper.GetString("model"),
 		MaxTokens:            viper.GetInt("max_tokens"),
 		WeakModel:            viper.GetString("weak_model"),
 		WeakModelMaxTokens:   viper.GetInt("weak_model_max_tokens"),
 		ThinkingBudgetTokens: viper.GetInt("thinking_budget_tokens"),
+		ReasoningEffort:      viper.GetString("reasoning_effort"),
 	}
 }

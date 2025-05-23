@@ -1,5 +1,15 @@
 # Kodelet
 
+## 0.0.24.alpha (2025-05-22)
+
+### New Features
+- **OpenAI LLM Integration**: Added provider support, model classification, pricing API integration, and pricing updates.
+- **Dynamic Message Extraction**: Upgraded thread retrieval to extract structured messages and choose providers dynamically.
+
+### Refactoring
+- **Anthropic Deserialization**: Simplified ExtractMessages with a new DeserializeMessages function.
+- **Message Modeling**: Modularized and centralized message model handling across TUI and core packages.
+
 ## 0.0.23.alpha (2025-05-21)
 
 ### New Features

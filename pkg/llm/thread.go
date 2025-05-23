@@ -6,12 +6,25 @@ import (
 	"strings"
 
 	"github.com/jingkaihe/kodelet/pkg/llm/anthropic"
+	"github.com/jingkaihe/kodelet/pkg/llm/openai"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
 // NewThread creates a new thread based on the model specified in the config
 func NewThread(config llmtypes.Config) llmtypes.Thread {
+	// If a provider is explicitly specified, use that
+	if config.Provider != "" {
+		switch strings.ToLower(config.Provider) {
+		case "openai":
+			return openai.NewOpenAIThread(config)
+		case "anthropic":
+			return anthropic.NewAnthropicThread(config)
+		default:
+			// If unknown provider, fall back to model name detection
+		}
+	}
+
 	// Determine which provider to use based on the model name
 	modelName := config.Model
 
@@ -26,10 +39,9 @@ func NewThread(config llmtypes.Config) llmtypes.Thread {
 	case strings.HasPrefix(strings.ToLower(modelName), "claude"):
 		return anthropic.NewAnthropicThread(config)
 
-	// Add cases for other providers here in the future
-	// Example:
-	// case strings.HasPrefix(strings.ToLower(modelName), "gpt"):
-	//     return NewOpenAIThread(config)
+	// If the model starts with "gpt" or matches OpenAI's naming conventions, use OpenAI
+	case openai.IsOpenAIModel(modelName):
+		return openai.NewOpenAIThread(config)
 
 	// Default to Anthropic for now
 	default:
@@ -54,4 +66,16 @@ func SendMessageAndGetTextWithUsage(ctx context.Context, state tooltypes.State, 
 func SendMessageAndGetText(ctx context.Context, state tooltypes.State, query string, config llmtypes.Config, silent bool, opt llmtypes.MessageOpt) string {
 	text, _ := SendMessageAndGetTextWithUsage(ctx, state, query, config, silent, opt)
 	return text
+}
+
+// ExtractMessages parses the raw messages from a conversation record
+func ExtractMessages(provider string, rawMessages []byte) ([]llmtypes.Message, error) {
+	switch provider {
+	case "anthropic":
+		return anthropic.ExtractMessages(rawMessages)
+	case "openai":
+		return openai.ExtractMessages(rawMessages)
+	default:
+		return nil, fmt.Errorf("unsupported provider: %s", provider)
+	}
 }

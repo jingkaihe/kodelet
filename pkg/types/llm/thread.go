@@ -6,6 +6,12 @@ import (
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
+// Message represents a chat message
+type Message struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
 // MessageOpt represents options for sending messages
 type MessageOpt struct {
 	// PromptCache indicates if prompt caching should be used
@@ -46,4 +52,8 @@ type Thread interface {
 	IsPersisted() bool
 	// EnablePersistence enables conversation persistence for this thread
 	EnablePersistence(enabled bool)
+	// Provider returns the provider of the thread
+	Provider() string
+	// GetMessages returns the messages from the thread
+	GetMessages() ([]Message, error)
 }

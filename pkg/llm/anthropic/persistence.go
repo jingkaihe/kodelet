@@ -9,6 +9,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/packages/param"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/types/llm"
 )
 
 // SaveConversation saves the current thread to the conversation store
@@ -69,9 +70,11 @@ func (t *AnthropicThread) loadConversation() error {
 	}
 
 	// Reset current messages
-	if _, err := t.DeserializeMessages(record.RawMessages); err != nil {
+	messages, err := DeserializeMessages(record.RawMessages)
+	if err != nil {
 		return fmt.Errorf("failed to deserialize conversation messages: %w", err)
 	}
+	t.messages = messages
 
 	// Restore usage statistics
 	t.usage = &record.Usage
@@ -86,8 +89,8 @@ type messageParam struct {
 	Content []contentBlock `json:"content"`
 }
 
-func (t *AnthropicThread) DeserializeMessages(b []byte) ([]anthropic.MessageParam, error) {
-	t.messages = []anthropic.MessageParam{}
+func DeserializeMessages(b []byte) ([]anthropic.MessageParam, error) {
+	messages := []anthropic.MessageParam{}
 	var listRawMessages []json.RawMessage
 	if err := json.Unmarshal(b, &listRawMessages); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal conversation messages: %w", err)
@@ -185,9 +188,63 @@ func (t *AnthropicThread) DeserializeMessages(b []byte) ([]anthropic.MessagePara
 		}
 
 		if len(msg.Content) != 0 {
-			t.messages = append(t.messages, msg)
+			messages = append(messages, msg)
 		}
 	}
 
-	return t.messages, nil
+	return messages, nil
+}
+
+// ExtractMessages parses the raw messages from a conversation record
+func ExtractMessages(rawMessages json.RawMessage) ([]llm.Message, error) {
+	// Deserialize the raw messages using the existing DeserializeMessages function
+	anthropicMessages, err := DeserializeMessages(rawMessages)
+	if err != nil {
+		return nil, fmt.Errorf("error deserializing messages: %w", err)
+	}
+
+	var messages []llm.Message
+	// Convert Anthropic message format to LLM message format
+	for _, msg := range anthropicMessages {
+		for _, contentBlock := range msg.Content {
+			// Handle text blocks
+			if textBlock := contentBlock.OfRequestTextBlock; textBlock != nil {
+				messages = append(messages, llm.Message{
+					Role:    string(msg.Role),
+					Content: textBlock.Text,
+				})
+			}
+			// Handle tool use blocks
+			if toolUseBlock := contentBlock.OfRequestToolUseBlock; toolUseBlock != nil {
+				inputJSON, err := json.Marshal(toolUseBlock.Input)
+				if err != nil {
+					continue // Skip if marshaling fails
+				}
+				messages = append(messages, llm.Message{
+					Role:    string(msg.Role),
+					Content: fmt.Sprintf("🔧 Using tool: %s", string(inputJSON)),
+				})
+			}
+			// Handle tool result blocks
+			if toolResultBlock := contentBlock.OfRequestToolResultBlock; toolResultBlock != nil {
+				for _, resultContent := range toolResultBlock.Content {
+					if textBlock := resultContent.OfRequestTextBlock; textBlock != nil {
+						messages = append(messages, llm.Message{
+							Role:    "assistant",
+							Content: fmt.Sprintf("🔄 Tool result: %s", textBlock.Text),
+						})
+					}
+				}
+			}
+			// Handle thinking blocks
+			if thinkingBlock := contentBlock.OfRequestThinkingBlock; thinkingBlock != nil {
+				messages = append(messages, llm.Message{
+					Role:    "assistant",
+					Content: fmt.Sprintf("💭 Thinking: %s", thinkingBlock.Thinking),
+				})
+			}
+		}
+	}
+
+	return messages, nil
 }

@@ -19,6 +19,8 @@ func init() {
 	viper.SetDefault("thinking_budget_tokens", 4048)
 	viper.SetDefault("model", anthropic.ModelClaude3_7SonnetLatest)
 	viper.SetDefault("weak_model", anthropic.ModelClaude3_5HaikuLatest)
+	viper.SetDefault("provider", "anthropic")
+	viper.SetDefault("reasoning_effort", "medium")
 
 	// Set default MCP configuration
 	viper.SetDefault("mcp.servers", map[string]interface{}{})
@@ -69,18 +71,23 @@ func main() {
 	ctx := context.Background()
 
 	// Add global flags
-	rootCmd.PersistentFlags().String("model", anthropic.ModelClaude3_7SonnetLatest, "Anthropic model to use (overrides config)")
+	rootCmd.PersistentFlags().String("provider", "anthropic", "LLM provider to use (anthropic, openai)")
+	rootCmd.PersistentFlags().String("model", anthropic.ModelClaude3_7SonnetLatest, "LLM model to use (overrides config)")
 	rootCmd.PersistentFlags().Int("max-tokens", 8192, "Maximum tokens for response (overrides config)")
 	rootCmd.PersistentFlags().Int("thinking-budget-tokens", 4048, "Maximum tokens for thinking capability (overrides config)")
 	rootCmd.PersistentFlags().String("weak-model", anthropic.ModelClaude3_5HaikuLatest, "Weak model to use (overrides config)")
 	rootCmd.PersistentFlags().Int("weak-model-max-tokens", 8192, "Maximum tokens for weak model response (overrides config)")
+	rootCmd.PersistentFlags().String("reasoning-effort", "medium", "Reasoning effort for OpenAI models (low, medium, high)")
 
 	// Bind flags to viper
+	viper.BindPFlag("provider", rootCmd.PersistentFlags().Lookup("provider"))
 	viper.BindPFlag("model", rootCmd.PersistentFlags().Lookup("model"))
 	viper.BindPFlag("max_tokens", rootCmd.PersistentFlags().Lookup("max-tokens"))
 	viper.BindPFlag("thinking_budget_tokens", rootCmd.PersistentFlags().Lookup("thinking-budget-tokens"))
 	viper.BindPFlag("weak_model", rootCmd.PersistentFlags().Lookup("weak-model"))
 	viper.BindPFlag("weak_model_max_tokens", rootCmd.PersistentFlags().Lookup("weak-model-max-tokens"))
+	viper.BindPFlag("reasoning_effort", rootCmd.PersistentFlags().Lookup("reasoning-effort"))
+	viper.BindPFlag("weak_reasoning_effort", rootCmd.PersistentFlags().Lookup("weak-reasoning-effort"))
 
 	// Add subcommands
 	rootCmd.AddCommand(chatCmd)
