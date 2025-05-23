@@ -269,13 +269,13 @@ func (t *OpenAIThread) GetState() tooltypes.State {
 
 // AddUserMessage adds a user message to the thread
 func (t *OpenAIThread) AddUserMessage(message string) {
-	t.AddUserMessageWithImages(message, nil)
+	t.AddUserMessageWithImages(message)
 }
 
 // AddUserMessageWithImages adds a user message with optional images to the thread
 // Note: OpenAI vision support is not yet implemented, images will be ignored
-func (t *OpenAIThread) AddUserMessageWithImages(message string, images []string) {
-	if len(images) > 0 {
+func (t *OpenAIThread) AddUserMessageWithImages(message string, imagePaths ...string) {
+	if len(imagePaths) > 0 {
 		logrus.Warnf("Image input not yet supported for OpenAI provider, processing text only")
 		// TODO: Implement OpenAI vision support in future versions
 	}
@@ -308,7 +308,7 @@ func (t *OpenAIThread) SendMessage(
 
 	// Add user message with images if provided
 	if len(opt.Images) > 0 {
-		t.AddUserMessageWithImages(message, opt.Images)
+		t.AddUserMessageWithImages(message, opt.Images...)
 	} else {
 		t.AddUserMessage(message)
 	}

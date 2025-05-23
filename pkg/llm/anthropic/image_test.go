@@ -181,7 +181,7 @@ func TestAddUserMessageWithImages(t *testing.T) {
 				}
 			}
 
-			thread.AddUserMessageWithImages(test.message, test.images)
+			thread.AddUserMessageWithImages(test.message, test.images...)
 
 			// Should have added exactly one message
 			assert.Equal(t, initialCount+1, len(thread.messages))

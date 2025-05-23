@@ -85,23 +85,23 @@ func (t *AnthropicThread) GetState() tooltypes.State {
 
 // AddUserMessage adds a user message to the thread
 func (t *AnthropicThread) AddUserMessage(message string) {
-	t.AddUserMessageWithImages(message, nil)
+	t.AddUserMessageWithImages(message)
 }
 
 // AddUserMessageWithImages adds a user message with optional images to the thread
-func (t *AnthropicThread) AddUserMessageWithImages(message string, images []string) {
+func (t *AnthropicThread) AddUserMessageWithImages(message string, imagePaths ...string) {
 	contentBlocks := []anthropic.ContentBlockParamUnion{
 		anthropic.NewTextBlock(message),
 	}
 
 	// Validate image count
-	if len(images) > MaxImageCount {
-		logrus.Warnf("Too many images provided (%d), maximum is %d. Only processing first %d images", len(images), MaxImageCount, MaxImageCount)
-		images = images[:MaxImageCount]
+	if len(imagePaths) > MaxImageCount {
+		logrus.Warnf("Too many images provided (%d), maximum is %d. Only processing first %d images", len(imagePaths), MaxImageCount, MaxImageCount)
+		imagePaths = imagePaths[:MaxImageCount]
 	}
 
 	// Process images and add them as content blocks
-	for _, imagePath := range images {
+	for _, imagePath := range imagePaths {
 		imageBlock, err := t.processImage(imagePath)
 		if err != nil {
 			logrus.Warnf("Failed to process image %s: %v", imagePath, err)
@@ -160,7 +160,7 @@ func (t *AnthropicThread) SendMessage(
 
 	// Add user message with images if provided
 	if len(opt.Images) > 0 {
-		t.AddUserMessageWithImages(message, opt.Images)
+		t.AddUserMessageWithImages(message, opt.Images...)
 	} else {
 		t.AddUserMessage(message)
 	}
@@ -634,10 +634,11 @@ func (t *AnthropicThread) processImage(imagePath string) (*anthropic.ContentBloc
 	// Only allow HTTPS URLs for security
 	if strings.HasPrefix(imagePath, "https://") {
 		return t.processImageURL(imagePath)
+	} else if strings.HasPrefix(imagePath, "file://") {
+		return t.processImageFile(imagePath)
 	}
 
-	// Treat everything else as a local file path
-	return t.processImageFile(imagePath)
+	return nil, fmt.Errorf("unsupported image path: %s", imagePath)
 }
 
 // processImageURL creates an image block from an HTTPS URL

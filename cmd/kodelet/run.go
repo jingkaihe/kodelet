@@ -131,5 +131,5 @@ var runCmd = &cobra.Command{
 func init() {
 	runCmd.Flags().StringVar(&runOptions.resumeConvID, "resume", "", "Resume a specific conversation")
 	runCmd.Flags().BoolVar(&runOptions.noSave, "no-save", false, "Disable conversation persistence")
-	runCmd.Flags().StringSliceVar(&runOptions.images, "image", []string{}, "Add image input (can be used multiple times)")
+	runCmd.Flags().StringSliceVarP(&runOptions.images, "image", "I", []string{}, "Add image input (can be used multiple times)")
 }
