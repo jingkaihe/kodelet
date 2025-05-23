@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"slices"
 	"strings"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 type Model struct {
 	messageCh          chan llmtypes.MessageEvent
 	messages           []llmtypes.Message
+	imagePaths         []string
 	viewport           viewport.Model
 	textarea           textarea.Model
 	ready              bool
@@ -75,6 +77,8 @@ func NewModel(ctx context.Context, conversationID string, enablePersistence bool
 	// Define available slash commands
 	availableCommands := []string{
 		"/bash",
+		"/add-image",
+		"/remove-image",
 		"/help",
 		"/clear",
 	}
@@ -91,6 +95,7 @@ func NewModel(ctx context.Context, conversationID string, enablePersistence bool
 	model := Model{
 		messageCh:          make(chan llmtypes.MessageEvent),
 		messages:           []llmtypes.Message{},
+		imagePaths:         []string{},
 		textarea:           ta,
 		viewport:           vp,
 		statusMessage:      statusMessage,
@@ -267,6 +272,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				"Up/Down: Navigate history\n\n" +
 				"Commands:\n" +
 				"/bash [command]: Execute a bash command and include result in chat context\n" +
+				"/add-image [image-path]: Add an image to the chat\n" +
+				"/remove-image [image-path]: Remove an image from the chat\n" +
 				"/help: Show this help message\n" +
 				"/clear: Clear the screen")
 		case tea.KeyCtrlL:
@@ -307,6 +314,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 								"Up/Down: Navigate history\n\n" +
 								"Commands:\n" +
 								"/bash [command]: Execute a bash command and include result in chat context\n" +
+								"/add-image [image-path]: Add an image to the chat\n" +
+								"/remove-image [image-path]: Remove an image from the chat\n" +
 								"/help: Show this help message\n" +
 								"/clear: Clear the screen")
 							return m, nil
@@ -334,6 +343,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							return m, func() tea.Msg {
 								return bashInputMsg(bashCommand)
 							}
+						case "/add-image":
+							m.textarea.Reset()
+							if len(commandParts) > 1 {
+								m.imagePaths = append(m.imagePaths, commandParts[1])
+								m.AddSystemMessage(fmt.Sprintf("Added image: %s", commandParts[1]))
+							}
+							return m, nil
+						case "/remove-image":
+							m.AddMessage(content, true)
+							m.textarea.Reset()
+							if len(commandParts) > 1 {
+								m.imagePaths = slices.DeleteFunc(m.imagePaths, func(path string) bool {
+									return path == commandParts[1]
+								})
+								m.AddSystemMessage(fmt.Sprintf("Removed image: %s", commandParts[1]))
+							}
+							return m, nil
 						}
 					}
 
@@ -349,7 +375,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case userInputMsg:
 		go func() {
-			err := m.assistant.SendMessage(m.ctx, string(msg), m.messageCh)
+			defer func() {
+				m.imagePaths = []string{}
+			}()
+			err := m.assistant.SendMessage(m.ctx, string(msg), m.messageCh, m.imagePaths...)
 			if err != nil {
 				m.AddSystemMessage("Error: " + err.Error())
 			}
