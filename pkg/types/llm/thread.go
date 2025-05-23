@@ -22,6 +22,8 @@ type MessageOpt struct {
 	NoToolUse bool
 	// NoSaveConversation indicates that the following conversation should not be saved
 	NoSaveConversation bool
+	// Images contains image paths or URLs to include with the message
+	Images []string
 }
 
 // SubAgentConfig is the key for the thread in the context
@@ -38,6 +40,8 @@ type Thread interface {
 	GetState() tooltypes.State
 	// AddUserMessage adds a user message to the thread
 	AddUserMessage(message string)
+	// AddUserMessageWithImages adds a user message with optional images to the thread
+	AddUserMessageWithImages(message string, images []string)
 	// SendMessage sends a message to the LLM and processes the response
 	SendMessage(ctx context.Context, message string, handler MessageHandler, opt MessageOpt) (finalOutput string, err error)
 	// GetUsage returns the current token usage for the thread

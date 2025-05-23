@@ -269,6 +269,18 @@ func (t *OpenAIThread) GetState() tooltypes.State {
 
 // AddUserMessage adds a user message to the thread
 func (t *OpenAIThread) AddUserMessage(message string) {
+	t.AddUserMessageWithImages(message, nil)
+}
+
+// AddUserMessageWithImages adds a user message with optional images to the thread
+// Note: OpenAI vision support is not yet implemented, images will be ignored
+func (t *OpenAIThread) AddUserMessageWithImages(message string, images []string) {
+	if len(images) > 0 {
+		logrus.Warnf("Image input not yet supported for OpenAI provider, processing text only")
+		// TODO: Implement OpenAI vision support in future versions
+	}
+
+	// Fall back to text-only processing
 	t.messages = append(t.messages, openai.ChatCompletionMessage{
 		Role:    openai.ChatMessageRoleUser,
 		Content: message,
@@ -294,7 +306,12 @@ func (t *OpenAIThread) SendMessage(
 		copy(originalMessages, t.messages)
 	}
 
-	t.AddUserMessage(message)
+	// Add user message with images if provided
+	if len(opt.Images) > 0 {
+		t.AddUserMessageWithImages(message, opt.Images)
+	} else {
+		t.AddUserMessage(message)
+	}
 
 	// Determine which model to use
 	model := t.config.Model

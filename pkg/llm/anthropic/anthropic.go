@@ -2,9 +2,13 @@ package anthropic
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/anthropics/anthropic-sdk-go"
@@ -24,6 +28,12 @@ import (
 // ConversationStore is an alias for the conversations.ConversationStore interface
 // to avoid direct dependency on the conversations package
 type ConversationStore = conversations.ConversationStore
+
+// Constants for image processing
+const (
+	MaxImageFileSize = 5 * 1024 * 1024 // 5MB limit
+	MaxImageCount    = 10              // Maximum 10 images per message
+)
 
 // AnthropicThread implements the Thread interface using Anthropic's Claude API
 type AnthropicThread struct {
@@ -75,7 +85,32 @@ func (t *AnthropicThread) GetState() tooltypes.State {
 
 // AddUserMessage adds a user message to the thread
 func (t *AnthropicThread) AddUserMessage(message string) {
-	t.messages = append(t.messages, anthropic.NewUserMessage(anthropic.NewTextBlock(message)))
+	t.AddUserMessageWithImages(message, nil)
+}
+
+// AddUserMessageWithImages adds a user message with optional images to the thread
+func (t *AnthropicThread) AddUserMessageWithImages(message string, images []string) {
+	contentBlocks := []anthropic.ContentBlockParamUnion{
+		anthropic.NewTextBlock(message),
+	}
+
+	// Validate image count
+	if len(images) > MaxImageCount {
+		logrus.Warnf("Too many images provided (%d), maximum is %d. Only processing first %d images", len(images), MaxImageCount, MaxImageCount)
+		images = images[:MaxImageCount]
+	}
+
+	// Process images and add them as content blocks
+	for _, imagePath := range images {
+		imageBlock, err := t.processImage(imagePath)
+		if err != nil {
+			logrus.Warnf("Failed to process image %s: %v", imagePath, err)
+			continue
+		}
+		contentBlocks = append(contentBlocks, *imageBlock)
+	}
+
+	t.messages = append(t.messages, anthropic.NewUserMessage(contentBlocks...))
 }
 
 func (t *AnthropicThread) cacheMessages() {
@@ -123,7 +158,12 @@ func (t *AnthropicThread) SendMessage(
 		copy(originalMessages, t.messages)
 	}
 
-	t.AddUserMessage(message)
+	// Add user message with images if provided
+	if len(opt.Images) > 0 {
+		t.AddUserMessageWithImages(message, opt.Images)
+	} else {
+		t.AddUserMessage(message)
+	}
 
 	// Determine which model to use
 	model, maxTokens := t.getModelAndTokens(opt)
@@ -587,4 +627,84 @@ func (t *AnthropicThread) finalizeMessageSpan(span trace.Span, err error) {
 		span.AddEvent("message_processing_completed")
 	}
 	span.End()
+}
+
+// processImage converts an image path/URL to an Anthropic image content block
+func (t *AnthropicThread) processImage(imagePath string) (*anthropic.ContentBlockParamUnion, error) {
+	// Only allow HTTPS URLs for security
+	if strings.HasPrefix(imagePath, "https://") {
+		return t.processImageURL(imagePath)
+	}
+
+	// Treat everything else as a local file path
+	return t.processImageFile(imagePath)
+}
+
+// processImageURL creates an image block from an HTTPS URL
+func (t *AnthropicThread) processImageURL(url string) (*anthropic.ContentBlockParamUnion, error) {
+	// Validate URL format (HTTPS only)
+	if !strings.HasPrefix(url, "https://") {
+		return nil, fmt.Errorf("only HTTPS URLs are supported for security: %s", url)
+	}
+
+	block := anthropic.NewImageBlock(anthropic.URLImageSourceParam{
+		Type: "url",
+		URL:  url,
+	})
+	return &block, nil
+}
+
+// processImageFile creates an image block from a local file
+func (t *AnthropicThread) processImageFile(filePath string) (*anthropic.ContentBlockParamUnion, error) {
+	// Check if file exists
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		return nil, fmt.Errorf("image file not found: %s", filePath)
+	}
+
+	// Determine media type from file extension first
+	mediaType, err := getMediaTypeFromExtension(filepath.Ext(filePath))
+	if err != nil {
+		return nil, fmt.Errorf("unsupported image format: %s (supported: .jpg, .jpeg, .png, .gif, .webp)", filepath.Ext(filePath))
+	}
+
+	// Check file size
+	fileInfo, err := os.Stat(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get file info: %w", err)
+	}
+	if fileInfo.Size() > MaxImageFileSize {
+		return nil, fmt.Errorf("image file too large: %d bytes (max: %d bytes)", fileInfo.Size(), MaxImageFileSize)
+	}
+
+	// Read and encode the file
+	imageData, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read image file: %w", err)
+	}
+
+	// Encode to base64
+	base64Data := base64.StdEncoding.EncodeToString(imageData)
+
+	block := anthropic.NewImageBlock(anthropic.Base64ImageSourceParam{
+		Type:      "base64",
+		MediaType: mediaType,
+		Data:      base64Data,
+	})
+	return &block, nil
+}
+
+// getMediaTypeFromExtension returns the Anthropic media type for supported image formats only
+func getMediaTypeFromExtension(ext string) (anthropic.Base64ImageSourceMediaType, error) {
+	switch strings.ToLower(ext) {
+	case ".jpg", ".jpeg":
+		return anthropic.Base64ImageSourceMediaTypeImageJPEG, nil
+	case ".png":
+		return anthropic.Base64ImageSourceMediaTypeImagePNG, nil
+	case ".gif":
+		return anthropic.Base64ImageSourceMediaTypeImageGIF, nil
+	case ".webp":
+		return anthropic.Base64ImageSourceMediaTypeImageWebP, nil
+	default:
+		return "", fmt.Errorf("unsupported format")
+	}
 }

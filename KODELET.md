@@ -66,6 +66,11 @@ kodelet run "your query"
 kodelet run "your query"                     # saved automatically
 kodelet run --resume CONVERSATION_ID "more"  # continue a conversation
 kodelet run --no-save "temporary query"      # don't save the conversation
+
+# One-shot query with image inputs
+kodelet run --image /path/to/screenshot.png "What's wrong with this UI?"
+kodelet run --image /path/to/diagram.png --image https://example.com/mockup.jpg "Compare these designs"
+kodelet run --image https://remote.com/image.jpg "Analyze this image"
 ```
 
 #### Interactive Chat Mode
@@ -169,3 +174,34 @@ Kodelet uses a `Thread` abstraction for all interactions with LLM providers (Ant
 - Supports provider-specific features (thinking for Claude, reasoning effort for OpenAI)
 
 The architecture provides a unified approach for both interactive and one-shot uses with token usage tracking for all API calls across different providers.
+
+## Image Input Support
+
+Kodelet supports image inputs for vision-enabled models (currently Anthropic Claude models only). You can provide images through local file paths or HTTPS URLs.
+
+### Supported Features
+- **Local Images**: JPEG, PNG, GIF, and WebP formats
+- **Remote Images**: HTTPS URLs only (for security)
+- **Multiple Images**: Up to 10 images per message
+- **Size Limits**: Maximum 5MB per image file
+- **Provider Support**: Anthropic Claude models (OpenAI support planned)
+
+### Usage Examples
+```bash
+
+# Multiple images (local and remote)
+kodelet run --image ./diagram.png --image https://example.com/mockup.jpg "Compare these designs"
+
+# Multiple local images
+kodelet run --image ./before.png --image ./after.png "What changed between these versions?"
+
+# Architecture diagram analysis
+kodelet run --image ./architecture.png "Review this system architecture and suggest improvements"
+```
+
+### Security & Limitations
+- Only HTTPS URLs are accepted for remote images (no HTTP)
+- File size limited to 5MB per image
+- Maximum 10 images per message
+- Supported formats: JPEG, PNG, GIF, WebP only
+- OpenAI provider will log a warning and process text only (vision support planned)
