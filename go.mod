@@ -4,7 +4,7 @@ go 1.24.2
 
 require (
 	github.com/JohannesKaufmann/html-to-markdown v1.6.0
-	github.com/anthropics/anthropic-sdk-go v0.2.0-beta.3
+	github.com/anthropics/anthropic-sdk-go v1.2.0
 	github.com/bmatcuk/doublestar/v4 v4.8.1
 	github.com/charmbracelet/bubbles v0.21.0
 	github.com/charmbracelet/bubbletea v1.3.5

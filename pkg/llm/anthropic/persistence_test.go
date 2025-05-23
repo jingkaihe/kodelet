@@ -14,7 +14,7 @@ import (
 
 func TestDeserializeMessages(t *testing.T) {
 	thread := NewAnthropicThread(llmtypes.Config{
-		Model: anthropic.ModelClaude3_7SonnetLatest,
+		Model: string(anthropic.ModelClaudeSonnet4_0),
 	})
 	messages, err := DeserializeMessages([]byte(`[]`))
 	assert.NoError(t, err)
@@ -81,33 +81,33 @@ func TestDeserializeMessages(t *testing.T) {
 
 	assert.Equal(t, 3, len(messages)) // remove the empty assistant message
 	assert.Equal(t, anthropic.MessageParamRoleUser, messages[0].Role)
-	assert.Equal(t, "ls -la", messages[0].Content[0].OfRequestTextBlock.Text)
+	assert.Equal(t, "ls -la", messages[0].Content[0].OfText.Text)
 	assert.Equal(t, "text", *messages[0].Content[0].GetType())
-	assert.Equal(t, anthropic.CacheControlEphemeralParam{}, thread.messages[0].Content[0].OfRequestTextBlock.CacheControl, "prompt cache config is ignored")
+	assert.Equal(t, anthropic.CacheControlEphemeralParam{}, thread.messages[0].Content[0].OfText.CacheControl, "prompt cache config is ignored")
 
 	assert.Equal(t, anthropic.MessageParamRoleAssistant, thread.messages[1].Role)
-	assert.Equal(t, "I'll list all files in the current directory with detailed information.", thread.messages[1].Content[0].OfRequestTextBlock.Text)
+	assert.Equal(t, "I'll list all files in the current directory with detailed information.", thread.messages[1].Content[0].OfText.Text)
 	assert.Equal(t, "text", *thread.messages[1].Content[0].GetType())
-	assert.Equal(t, "toolu_01Nc9gURS9CrZjCcruQNCcna", thread.messages[1].Content[1].OfRequestToolUseBlock.ID)
-	assert.Equal(t, "bash", thread.messages[1].Content[1].OfRequestToolUseBlock.Name)
+	assert.Equal(t, "toolu_01Nc9gURS9CrZjCcruQNCcna", thread.messages[1].Content[1].OfToolUse.ID)
+	assert.Equal(t, "bash", thread.messages[1].Content[1].OfToolUse.Name)
 
-	input := thread.messages[1].Content[1].OfRequestToolUseBlock.Input.(map[string]interface{})
+	input := thread.messages[1].Content[1].OfToolUse.Input.(map[string]interface{})
 	assert.Equal(t, "ls -la", input["command"])
 	assert.Equal(t, "List all files with detailed information", input["description"])
 	assert.Equal(t, float64(10), input["timeout"])
 
 	assert.Equal(t, anthropic.MessageParamRoleUser, thread.messages[2].Role)
-	assert.Equal(t, "toolu_01Nc9gURS9CrZjCcruQNCcna", thread.messages[2].Content[0].OfRequestToolResultBlock.ToolUseID)
-	assert.Equal(t, false, thread.messages[2].Content[0].OfRequestToolResultBlock.IsError.Value)
-	assert.Equal(t, "/root/foo/bar", thread.messages[2].Content[0].OfRequestToolResultBlock.Content[0].OfRequestTextBlock.Text)
-	assert.Equal(t, "text", *thread.messages[2].Content[0].OfRequestToolResultBlock.Content[0].GetType())
+	assert.Equal(t, "toolu_01Nc9gURS9CrZjCcruQNCcna", thread.messages[2].Content[0].OfToolResult.ToolUseID)
+	assert.Equal(t, false, thread.messages[2].Content[0].OfToolResult.IsError.Value)
+	assert.Equal(t, "/root/foo/bar", thread.messages[2].Content[0].OfToolResult.Content[0].OfText.Text)
+	assert.Equal(t, "text", *thread.messages[2].Content[0].OfToolResult.Content[0].GetType())
 }
 
 func TestSaveAndLoadConversationWithFileLastAccess(t *testing.T) {
 	// Create a thread with a unique conversation ID
 	conversationID := "test-file-last-access"
 	thread := NewAnthropicThread(llmtypes.Config{
-		Model: anthropic.ModelClaude3_7SonnetLatest,
+		Model: string(anthropic.ModelClaudeSonnet4_0),
 	})
 	thread.SetConversationID(conversationID)
 
@@ -134,7 +134,7 @@ func TestSaveAndLoadConversationWithFileLastAccess(t *testing.T) {
 
 	// Create a new thread with the same conversation ID
 	newThread := NewAnthropicThread(llmtypes.Config{
-		Model: anthropic.ModelClaude3_7SonnetLatest,
+		Model: string(anthropic.ModelClaudeSonnet4_0),
 	})
 	newThread.SetConversationID(conversationID)
 	newState := tools.NewBasicState(context.TODO())
