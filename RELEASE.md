@@ -1,5 +1,51 @@
 # Kodelet
 
+## 0.0.25.alpha (2025-05-23)
+
+### Major Updates
+
+- **Claude Sonnet 4.0 Integration**: Upgraded default model from Claude 3.7 Sonnet to the new Claude Sonnet 4.0
+  - Updated all configuration files, documentation, and code references
+  - Changed default model constant from `ModelClaude3_7SonnetLatest` to `ModelClaudeSonnet4_0`
+  - Enhanced performance and capabilities with the latest Claude model
+
+- **Anthropic SDK Upgrade**: Major update to Anthropic SDK from v0.2.0-beta.3 to v1.2.0
+  - **Breaking Changes**: Updated API interface to use stable SDK release
+  - **Streaming Support**: Implemented streaming message responses for better user experience
+  - **Improved Type Safety**: Updated all content block handling to use new API structure
+  - **Enhanced Error Handling**: Better error reporting with streaming API
+  - **Pricing Integration**: Added support for new Claude 4 Opus and Sonnet 4.0 pricing tiers
+
+### Technical Improvements
+
+- **Message Processing**: Refactored message handling to work with new SDK structure
+  - Updated `OfRequestTextBlock` → `OfText`
+  - Updated `OfRequestToolUseBlock` → `OfToolUse`
+  - Updated `OfRequestToolResultBlock` → `OfToolResult`
+  - Updated `OfRequestThinkingBlock` → `OfThinking`
+
+- **Pricing Updates**: Added comprehensive pricing support for new Claude models
+  - Claude Sonnet 4.0: $3/$15 per million tokens (input/output)
+  - Claude 4 Opus: $15/$75 per million tokens (input/output)
+  - Maintained backward compatibility with legacy model pricing
+
+- **Configuration Updates**: Updated all default configurations across the codebase
+  - Environment variable examples now use `claude-sonnet-4-0`
+  - Sample configuration files updated with new model names
+  - Command-line help text reflects new default models
+
+### Documentation
+
+- **Updated Examples**: All documentation examples now use Claude Sonnet 4.0 as the default
+- **Migration Guide**: Configuration files and environment variables automatically use new model names
+- **Pricing Documentation**: Updated cost calculations to reflect new model pricing
+
+### Backward Compatibility
+
+- Existing configurations will continue to work
+- Legacy model names are still supported
+- Automatic model detection and pricing fallback for unsupported models
+
 ## 0.0.24.alpha (2025-05-22)
 
 ### New Features
