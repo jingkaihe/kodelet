@@ -56,7 +56,7 @@ The output summarizes the information extracted from the image.
 * Extracting text or data from images.
 
 ## DO NOT use this tool when
-Do not use this tool when image content has already been shared with you.
+!!!VERY IMPORTANT!!! Do not use this tool when image content has already been shared with you directly through the messages
 
 ## Important Notes
 1. Only .jpg, .jpeg, .png, .gif, .webp formats are supported.
