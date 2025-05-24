@@ -1,5 +1,62 @@
 # Kodelet
 
+## 0.0.26.alpha (2025-05-24)
+
+### Major Features
+
+- **Image Input Support**: Added comprehensive multimodal capabilities to Kodelet
+  - **CLI Integration**: New `--image` flag supports multiple images per message via local files or HTTPS URLs
+  - **Vision-Enabled Models**: Full support for Anthropic Claude models with vision capabilities
+  - **Multiple Input Types**: Supports JPEG, PNG, GIF, and WebP formats with automatic validation
+  - **Security First**: Only HTTPS URLs accepted for remote images, with 5MB file size limits
+  - **Interactive Mode**: Added `/add-image` and `/remove-image` commands in chat mode
+  - **Dual Provider Support**: Anthropic (full vision support) and OpenAI (graceful text-only fallback)
+
+### New Tools
+
+- **Image Recognition Tool**: Added dedicated `image_recognition` tool for vision-enabled AI analysis
+  - Process images from local files or remote HTTPS URLs
+  - Extract specific information from screenshots, diagrams, and mockups
+  - Integrated with existing LLM workflow for seamless multimodal interactions
+  - Support for architecture analysis, UI/UX feedback, and code review from screenshots
+
+### Technical Improvements
+
+- **Thread Interface Extension**: Updated `AddUserMessage` to support optional image inputs
+  - Maintains backward compatibility with existing text-only workflows
+  - Enhanced message options with `Images` field for multimodal content
+- **Provider-Specific Implementation**:
+  - **Anthropic**: Full vision support with base64 encoding and URL references
+  - **OpenAI**: Graceful fallback with warning messages for unsupported vision features
+- **Comprehensive Testing**: Added extensive test coverage for image processing and validation
+- **Error Handling**: Robust validation for file formats, sizes, and accessibility
+
+### Architecture Decision Record
+
+- **ADR 011**: Documented complete design decisions for image input support
+  - Security considerations and validation strategies
+  - Multi-provider architecture approach
+  - Implementation phases and future expansion plans
+
+### Usage Examples
+
+```bash
+# Single image analysis
+kodelet run --image /path/to/screenshot.png "What's wrong with this UI?"
+
+# Multiple images comparison
+kodelet run --image diagram.png --image https://example.com/mockup.jpg "Compare these designs"
+
+# Architecture review
+kodelet run --image ./architecture.png "Review this system architecture"
+```
+
+### Documentation Updates
+
+- **Enhanced README**: Added vision capabilities to key features section
+- **Updated KODELET.md**: Comprehensive documentation for image input usage
+- **Security Guidelines**: Clear documentation of HTTPS-only policy and file size limits
+
 ## 0.0.25.alpha (2025-05-23)
 
 ### Major Updates
