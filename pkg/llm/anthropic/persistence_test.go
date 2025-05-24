@@ -79,11 +79,11 @@ func TestDeserializeMessages(t *testing.T) {
 	assert.NoError(t, err)
 	thread.messages = messages
 
-	assert.Equal(t, 3, len(messages)) // remove the empty assistant message
+	assert.Equal(t, 4, len(messages)) // remove the empty assistant message
 	assert.Equal(t, anthropic.MessageParamRoleUser, messages[0].Role)
 	assert.Equal(t, "ls -la", messages[0].Content[0].OfText.Text)
 	assert.Equal(t, "text", *messages[0].Content[0].GetType())
-	assert.Equal(t, anthropic.CacheControlEphemeralParam{}, thread.messages[0].Content[0].OfText.CacheControl, "prompt cache config is ignored")
+	assert.Equal(t, anthropic.CacheControlEphemeralParam{Type: "ephemeral"}, messages[0].Content[0].OfText.CacheControl)
 
 	assert.Equal(t, anthropic.MessageParamRoleAssistant, thread.messages[1].Role)
 	assert.Equal(t, "I'll list all files in the current directory with detailed information.", thread.messages[1].Content[0].OfText.Text)
@@ -101,6 +101,9 @@ func TestDeserializeMessages(t *testing.T) {
 	assert.Equal(t, false, thread.messages[2].Content[0].OfToolResult.IsError.Value)
 	assert.Equal(t, "/root/foo/bar", thread.messages[2].Content[0].OfToolResult.Content[0].OfText.Text)
 	assert.Equal(t, "text", *thread.messages[2].Content[0].OfToolResult.Content[0].GetType())
+
+	assert.Equal(t, anthropic.MessageParamRoleAssistant, thread.messages[3].Role)
+	assert.Equal(t, 0, len(thread.messages[3].Content))
 }
 
 func TestSaveAndLoadConversationWithFileLastAccess(t *testing.T) {

@@ -41,22 +41,23 @@ func (a *AssistantClient) GetThreadMessages() ([]llmtypes.Message, error) {
 	return a.thread.GetMessages()
 }
 
-func (a *AssistantClient) AddUserMessage(message string) {
-	a.thread.AddUserMessage(message)
-}
+// func (a *AssistantClient) AddUserMessage(message string, imagePaths ...string) {
+// 	a.thread.AddUserMessage(message, imagePaths...)
+// }
 
 func (a *AssistantClient) SaveConversation(ctx context.Context) error {
 	return a.thread.SaveConversation(ctx, true)
 }
 
 // SendMessage sends a message to the assistant and processes the response
-func (a *AssistantClient) SendMessage(ctx context.Context, message string, messageCh chan llmtypes.MessageEvent) error {
+func (a *AssistantClient) SendMessage(ctx context.Context, message string, messageCh chan llmtypes.MessageEvent, imagePaths ...string) error {
 	// Create a handler for channel-based events
 	handler := &llmtypes.ChannelMessageHandler{MessageCh: messageCh}
 
 	// Send the message using the persistent thread
 	_, err := a.thread.SendMessage(ctx, message, handler, llmtypes.MessageOpt{
 		PromptCache: true,
+		Images:      imagePaths,
 	})
 
 	return err

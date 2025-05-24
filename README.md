@@ -7,6 +7,7 @@ Kodelet is a lightweight agentic SWE Agent. It runs as an interactive CLI tool i
 - **Intelligent Engineering Assistant**: Automates software engineering tasks and production operations with agentic capabilities.
 - **Interactive Architecture Design**: Collaboratively design and refine system architectures through natural dialogue.
 - **Continuous Code Intelligence**: Analyzes, understands, and improves your codebase while answering technical questions in context.
+- **Vision Capabilities**: Support for image inputs including screenshots, diagrams, and mockups (Anthropic Claude models).
 - **Multiple LLM Providers**: Supports both Anthropic Claude and OpenAI models, giving you flexibility in choosing the best model for your needs.
 
 ## Installation

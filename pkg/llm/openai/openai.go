@@ -2,10 +2,12 @@ package openai
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -38,6 +40,12 @@ var (
 		"gpt-4o",
 		"gpt-4o-mini",
 	}
+)
+
+// Constants for image processing
+const (
+	MaxImageFileSize = 5 * 1024 * 1024 // 5MB limit
+	MaxImageCount    = 10              // Maximum 10 images per message
 )
 
 func IsReasoningModel(model string) bool {
@@ -267,11 +275,33 @@ func (t *OpenAIThread) GetState() tooltypes.State {
 	return t.state
 }
 
-// AddUserMessage adds a user message to the thread
-func (t *OpenAIThread) AddUserMessage(message string) {
+// AddUserMessage adds a user message with optional images to the thread
+func (t *OpenAIThread) AddUserMessage(message string, imagePaths ...string) {
+	contentParts := []openai.ChatMessagePart{}
+
+	// Validate image count
+	if len(imagePaths) > MaxImageCount {
+		logrus.Warnf("Too many images provided (%d), maximum is %d. Only processing first %d images", len(imagePaths), MaxImageCount, MaxImageCount)
+		imagePaths = imagePaths[:MaxImageCount]
+	}
+
+	// Process images and add them as content parts
+	for _, imagePath := range imagePaths {
+		imagePart, err := t.processImage(imagePath)
+		if err != nil {
+			logrus.Warnf("Failed to process image %s: %v", imagePath, err)
+			continue
+		}
+		contentParts = append(contentParts, *imagePart)
+	}
+	contentParts = append(contentParts, openai.ChatMessagePart{
+		Type: openai.ChatMessagePartTypeText,
+		Text: message,
+	})
+
 	t.messages = append(t.messages, openai.ChatCompletionMessage{
-		Role:    openai.ChatMessageRoleUser,
-		Content: message,
+		Role:         openai.ChatMessageRoleUser,
+		MultiContent: contentParts,
 	})
 }
 
@@ -294,7 +324,12 @@ func (t *OpenAIThread) SendMessage(
 		copy(originalMessages, t.messages)
 	}
 
-	t.AddUserMessage(message)
+	// Add user message with images if provided
+	if len(opt.Images) > 0 {
+		t.AddUserMessage(message, opt.Images...)
+	} else {
+		t.AddUserMessage(message)
+	}
 
 	// Determine which model to use
 	model := t.config.Model
@@ -670,4 +705,99 @@ func (t *OpenAIThread) finalizeMessageSpan(span trace.Span, err error) {
 		span.AddEvent("message_processing_completed")
 	}
 	span.End()
+}
+
+// processImage converts an image path/URL to an OpenAI ChatMessagePart
+func (t *OpenAIThread) processImage(imagePath string) (*openai.ChatMessagePart, error) {
+	// Only allow HTTPS URLs for security
+	if strings.HasPrefix(imagePath, "https://") {
+		return t.processImageURL(imagePath)
+	} else if strings.HasPrefix(imagePath, "http://") {
+		// Explicitly reject HTTP URLs for security
+		return nil, fmt.Errorf("only HTTPS URLs are supported for security: %s", imagePath)
+	} else if strings.HasPrefix(imagePath, "file://") {
+		// Remove file:// prefix and process as file
+		filePath := strings.TrimPrefix(imagePath, "file://")
+		return t.processImageFile(filePath)
+	} else {
+		// Treat as a local file path
+		return t.processImageFile(imagePath)
+	}
+}
+
+// processImageURL creates an image part from an HTTPS URL
+func (t *OpenAIThread) processImageURL(url string) (*openai.ChatMessagePart, error) {
+	// Validate URL format (HTTPS only)
+	if !strings.HasPrefix(url, "https://") {
+		return nil, fmt.Errorf("only HTTPS URLs are supported for security: %s", url)
+	}
+
+	part := &openai.ChatMessagePart{
+		Type: openai.ChatMessagePartTypeImageURL,
+		ImageURL: &openai.ChatMessageImageURL{
+			URL:    url,
+			Detail: openai.ImageURLDetailAuto, // Use auto detail as default
+		},
+	}
+	return part, nil
+}
+
+// processImageFile creates an image part from a local file
+func (t *OpenAIThread) processImageFile(filePath string) (*openai.ChatMessagePart, error) {
+	// Check if file exists
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		return nil, fmt.Errorf("image file not found: %s", filePath)
+	}
+
+	// Determine media type from file extension first
+	mediaType, err := getImageMediaType(filepath.Ext(filePath))
+	if err != nil {
+		return nil, fmt.Errorf("unsupported image format: %s (supported: .jpg, .jpeg, .png, .gif, .webp)", filepath.Ext(filePath))
+	}
+
+	// Check file size
+	fileInfo, err := os.Stat(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get file info: %w", err)
+	}
+	if fileInfo.Size() > MaxImageFileSize {
+		return nil, fmt.Errorf("image file too large: %d bytes (max: %d bytes)", fileInfo.Size(), MaxImageFileSize)
+	}
+
+	// Read and encode the file
+	imageData, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read image file: %w", err)
+	}
+
+	// Encode to base64
+	base64Data := base64.StdEncoding.EncodeToString(imageData)
+
+	// Create data URL with proper MIME type
+	dataURL := fmt.Sprintf("data:%s;base64,%s", mediaType, base64Data)
+
+	part := &openai.ChatMessagePart{
+		Type: openai.ChatMessagePartTypeImageURL,
+		ImageURL: &openai.ChatMessageImageURL{
+			URL:    dataURL,
+			Detail: openai.ImageURLDetailAuto, // Use auto detail as default
+		},
+	}
+	return part, nil
+}
+
+// getImageMediaType returns the MIME type for supported image formats
+func getImageMediaType(ext string) (string, error) {
+	switch strings.ToLower(ext) {
+	case ".jpg", ".jpeg":
+		return "image/jpeg", nil
+	case ".png":
+		return "image/png", nil
+	case ".gif":
+		return "image/gif", nil
+	case ".webp":
+		return "image/webp", nil
+	default:
+		return "", fmt.Errorf("unsupported format")
+	}
 }

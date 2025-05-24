@@ -19,6 +19,7 @@ import (
 type RunOptions struct {
 	resumeConvID string
 	noSave       bool
+	images       []string // Image paths or URLs to include with the message
 }
 
 var runOptions = &RunOptions{}
@@ -102,6 +103,7 @@ var runCmd = &cobra.Command{
 		// Send the message and process the response
 		_, err = thread.SendMessage(ctx, query, handler, llmtypes.MessageOpt{
 			PromptCache: true,
+			Images:      runOptions.images,
 		})
 		if err != nil {
 			fmt.Printf("\n\033[1;31mError: %v\033[0m\n", err)
@@ -129,4 +131,5 @@ var runCmd = &cobra.Command{
 func init() {
 	runCmd.Flags().StringVar(&runOptions.resumeConvID, "resume", "", "Resume a specific conversation")
 	runCmd.Flags().BoolVar(&runOptions.noSave, "no-save", false, "Disable conversation persistence")
+	runCmd.Flags().StringSliceVarP(&runOptions.images, "image", "I", []string{}, "Add image input (can be used multiple times)")
 }
