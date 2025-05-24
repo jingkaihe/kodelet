@@ -1,10 +1,14 @@
 package openai
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/jingkaihe/kodelet/pkg/types/llm"
+	"github.com/sashabaranov/go-openai"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNewOpenAIThread(t *testing.T) {
@@ -90,4 +94,394 @@ func TestExtractMessages(t *testing.T) {
 	toolCallMessage := messages[1]
 	assert.Equal(t, "assistant", toolCallMessage.Role)
 	assert.Contains(t, toolCallMessage.Content, "get_time") // The content should contain the serialized tool call
+}
+
+// Image Processing Tests
+
+func TestGetImageMediaType(t *testing.T) {
+	tests := []struct {
+		ext      string
+		expected string
+		hasError bool
+	}{
+		{".jpg", "image/jpeg", false},
+		{".jpeg", "image/jpeg", false},
+		{".JPG", "image/jpeg", false},
+		{".JPEG", "image/jpeg", false},
+		{".png", "image/png", false},
+		{".PNG", "image/png", false},
+		{".gif", "image/gif", false},
+		{".GIF", "image/gif", false},
+		{".webp", "image/webp", false},
+		{".WEBP", "image/webp", false},
+		{".txt", "", true},
+		{".doc", "", true},
+		{".pdf", "", true},
+		{"", "", true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.ext, func(t *testing.T) {
+			mediaType, err := getImageMediaType(test.ext)
+			if test.hasError {
+				assert.Error(t, err)
+				assert.Empty(t, mediaType)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, test.expected, mediaType)
+			}
+		})
+	}
+}
+
+func TestProcessImageURL(t *testing.T) {
+	thread := NewOpenAIThread(llm.Config{})
+
+	tests := []struct {
+		name        string
+		url         string
+		expectError bool
+		errorMsg    string
+	}{
+		{
+			name:        "Valid HTTPS URL",
+			url:         "https://example.com/image.jpg",
+			expectError: false,
+		},
+		{
+			name:        "Valid HTTPS URL with query params",
+			url:         "https://cdn.example.com/images/photo.png?size=large",
+			expectError: false,
+		},
+		{
+			name:        "Invalid HTTP URL",
+			url:         "http://example.com/image.jpg",
+			expectError: true,
+			errorMsg:    "only HTTPS URLs are supported for security",
+		},
+		{
+			name:        "Invalid FTP URL",
+			url:         "ftp://example.com/image.jpg",
+			expectError: true,
+			errorMsg:    "only HTTPS URLs are supported for security",
+		},
+		{
+			name:        "Malformed URL",
+			url:         "not-a-url",
+			expectError: true,
+			errorMsg:    "only HTTPS URLs are supported for security",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			part, err := thread.processImageURL(test.url)
+
+			if test.expectError {
+				assert.Error(t, err)
+				assert.Nil(t, part)
+				if test.errorMsg != "" {
+					assert.Contains(t, err.Error(), test.errorMsg)
+				}
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, part)
+				assert.Equal(t, openai.ChatMessagePartTypeImageURL, part.Type)
+				assert.NotNil(t, part.ImageURL)
+				assert.Equal(t, test.url, part.ImageURL.URL)
+				assert.Equal(t, openai.ImageURLDetailAuto, part.ImageURL.Detail)
+			}
+		})
+	}
+}
+
+func TestProcessImageFile(t *testing.T) {
+	thread := NewOpenAIThread(llm.Config{})
+
+	// Create temporary test directory
+	tempDir := t.TempDir()
+
+	// Create test files
+	smallImagePath := filepath.Join(tempDir, "small.jpg")
+	largeImagePath := filepath.Join(tempDir, "large.jpg")
+	unsupportedPath := filepath.Join(tempDir, "document.txt")
+
+	// Create a small valid JPEG-like file (just some bytes for testing)
+	smallImageData := []byte("fake-jpeg-data-for-testing")
+	err := os.WriteFile(smallImagePath, smallImageData, 0644)
+	require.NoError(t, err)
+
+	// Create a large file (exceeding MaxImageFileSize)
+	largeImageData := make([]byte, MaxImageFileSize+1)
+	err = os.WriteFile(largeImagePath, largeImageData, 0644)
+	require.NoError(t, err)
+
+	// Create an unsupported file
+	textData := []byte("This is not an image")
+	err = os.WriteFile(unsupportedPath, textData, 0644)
+	require.NoError(t, err)
+
+	tests := []struct {
+		name        string
+		filePath    string
+		expectError bool
+		errorMsg    string
+	}{
+		{
+			name:        "Valid small image file",
+			filePath:    smallImagePath,
+			expectError: false,
+		},
+		{
+			name:        "File too large",
+			filePath:    largeImagePath,
+			expectError: true,
+			errorMsg:    "image file too large",
+		},
+		{
+			name:        "Unsupported file format",
+			filePath:    unsupportedPath,
+			expectError: true,
+			errorMsg:    "unsupported image format",
+		},
+		{
+			name:        "Non-existent file",
+			filePath:    filepath.Join(tempDir, "nonexistent.jpg"),
+			expectError: true,
+			errorMsg:    "image file not found",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			part, err := thread.processImageFile(test.filePath)
+
+			if test.expectError {
+				assert.Error(t, err)
+				assert.Nil(t, part)
+				if test.errorMsg != "" {
+					assert.Contains(t, err.Error(), test.errorMsg)
+				}
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, part)
+				assert.Equal(t, openai.ChatMessagePartTypeImageURL, part.Type)
+				assert.NotNil(t, part.ImageURL)
+				assert.Contains(t, part.ImageURL.URL, "data:image/jpeg;base64,")
+				assert.Equal(t, openai.ImageURLDetailAuto, part.ImageURL.Detail)
+			}
+		})
+	}
+}
+
+func TestProcessImage(t *testing.T) {
+	thread := NewOpenAIThread(llm.Config{})
+
+	// Create temporary test file
+	tempDir := t.TempDir()
+	testImagePath := filepath.Join(tempDir, "test.png")
+	imageData := []byte("fake-png-data-for-testing")
+	err := os.WriteFile(testImagePath, imageData, 0644)
+	require.NoError(t, err)
+
+	tests := []struct {
+		name        string
+		imagePath   string
+		expectError bool
+		errorMsg    string
+	}{
+		{
+			name:        "HTTPS URL",
+			imagePath:   "https://example.com/image.jpg",
+			expectError: false,
+		},
+		{
+			name:        "File URL",
+			imagePath:   "file://" + testImagePath,
+			expectError: false,
+		},
+		{
+			name:        "Local file path",
+			imagePath:   testImagePath,
+			expectError: false,
+		},
+		{
+			name:        "HTTP URL (should fail)",
+			imagePath:   "http://example.com/image.jpg",
+			expectError: true,
+			errorMsg:    "only HTTPS URLs are supported for security",
+		},
+		{
+			name:        "Non-existent local file",
+			imagePath:   filepath.Join(tempDir, "nonexistent.jpg"),
+			expectError: true,
+			errorMsg:    "image file not found",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			part, err := thread.processImage(test.imagePath)
+
+			if test.expectError {
+				assert.Error(t, err)
+				assert.Nil(t, part)
+				if test.errorMsg != "" {
+					assert.Contains(t, err.Error(), test.errorMsg)
+				}
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, part)
+				assert.Equal(t, openai.ChatMessagePartTypeImageURL, part.Type)
+				assert.NotNil(t, part.ImageURL)
+			}
+		})
+	}
+}
+
+func TestAddUserMessageWithImages(t *testing.T) {
+	thread := NewOpenAIThread(llm.Config{})
+
+	// Create temporary test files
+	tempDir := t.TempDir()
+	validImagePath := filepath.Join(tempDir, "valid.jpg")
+	invalidImagePath := filepath.Join(tempDir, "invalid.txt")
+
+	// Create a valid image file
+	imageData := []byte("fake-jpeg-data-for-testing")
+	err := os.WriteFile(validImagePath, imageData, 0644)
+	require.NoError(t, err)
+
+	// Create an invalid file
+	textData := []byte("This is not an image")
+	err = os.WriteFile(invalidImagePath, textData, 0644)
+	require.NoError(t, err)
+
+	tests := []struct {
+		name              string
+		message           string
+		imagePaths        []string
+		expectedPartCount int
+		expectedFirstType openai.ChatMessagePartType
+		expectedFirstText string
+	}{
+		{
+			name:              "Text only message",
+			message:           "Hello, world!",
+			imagePaths:        []string{},
+			expectedPartCount: 1,
+			expectedFirstType: openai.ChatMessagePartTypeText,
+			expectedFirstText: "Hello, world!",
+		},
+		{
+			name:              "Text with valid image",
+			message:           "Analyze this image",
+			imagePaths:        []string{validImagePath},
+			expectedPartCount: 2,
+			expectedFirstType: openai.ChatMessagePartTypeText,
+			expectedFirstText: "Analyze this image",
+		},
+		{
+			name:              "Text with HTTPS URL",
+			message:           "Look at this",
+			imagePaths:        []string{"https://example.com/image.jpg"},
+			expectedPartCount: 2,
+			expectedFirstType: openai.ChatMessagePartTypeText,
+			expectedFirstText: "Look at this",
+		},
+		{
+			name:              "Text with multiple valid images",
+			message:           "Compare these",
+			imagePaths:        []string{validImagePath, "https://example.com/image.jpg"},
+			expectedPartCount: 3,
+			expectedFirstType: openai.ChatMessagePartTypeText,
+			expectedFirstText: "Compare these",
+		},
+		{
+			name:              "Text with invalid image (should only have text)",
+			message:           "This should work",
+			imagePaths:        []string{invalidImagePath},
+			expectedPartCount: 1, // Invalid image should be skipped
+			expectedFirstType: openai.ChatMessagePartTypeText,
+			expectedFirstText: "This should work",
+		},
+		{
+			name:              "Text with mix of valid and invalid images",
+			message:           "Mixed content",
+			imagePaths:        []string{invalidImagePath, validImagePath, "https://example.com/image.jpg"},
+			expectedPartCount: 3, // Text + 2 valid images (invalid one skipped)
+			expectedFirstType: openai.ChatMessagePartTypeText,
+			expectedFirstText: "Mixed content",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			initialMessageCount := len(thread.messages)
+
+			thread.AddUserMessage(test.message, test.imagePaths...)
+
+			// Check that a message was added
+			assert.Equal(t, initialMessageCount+1, len(thread.messages))
+
+			// Get the last message (the one we just added)
+			lastMessage := thread.messages[len(thread.messages)-1]
+
+			// Check message properties
+			assert.Equal(t, openai.ChatMessageRoleUser, lastMessage.Role)
+			assert.Len(t, lastMessage.MultiContent, test.expectedPartCount)
+
+			// Check first part (should always be text)
+			if len(lastMessage.MultiContent) > 0 {
+				firstPart := lastMessage.MultiContent[0]
+				assert.Equal(t, test.expectedFirstType, firstPart.Type)
+				assert.Equal(t, test.expectedFirstText, firstPart.Text)
+			}
+
+			// Check that subsequent parts are images if expected
+			for i := 1; i < len(lastMessage.MultiContent); i++ {
+				part := lastMessage.MultiContent[i]
+				assert.Equal(t, openai.ChatMessagePartTypeImageURL, part.Type)
+				assert.NotNil(t, part.ImageURL)
+			}
+		})
+	}
+}
+
+func TestAddUserMessageWithTooManyImages(t *testing.T) {
+	thread := NewOpenAIThread(llm.Config{})
+
+	// Create more image paths than the maximum allowed
+	imagePaths := make([]string, MaxImageCount+5)
+	for i := 0; i < len(imagePaths); i++ {
+		imagePaths[i] = "https://example.com/image" + string(rune('0'+i)) + ".jpg"
+	}
+
+	initialMessageCount := len(thread.messages)
+	thread.AddUserMessage("Too many images", imagePaths...)
+
+	// Check that a message was added
+	assert.Equal(t, initialMessageCount+1, len(thread.messages))
+
+	// Get the last message
+	lastMessage := thread.messages[len(thread.messages)-1]
+
+	// Should have text + MaxImageCount images
+	expectedPartCount := 1 + MaxImageCount
+	assert.Equal(t, expectedPartCount, len(lastMessage.MultiContent))
+
+	// First part should be text
+	assert.Equal(t, openai.ChatMessagePartTypeText, lastMessage.MultiContent[0].Type)
+	assert.Equal(t, "Too many images", lastMessage.MultiContent[0].Text)
+
+	// Remaining parts should be images
+	for i := 1; i < len(lastMessage.MultiContent); i++ {
+		assert.Equal(t, openai.ChatMessagePartTypeImageURL, lastMessage.MultiContent[i].Type)
+	}
+}
+
+func TestConstants(t *testing.T) {
+	// Test that constants are set to expected values
+	assert.Equal(t, 5*1024*1024, MaxImageFileSize)
+	assert.Equal(t, 10, MaxImageCount)
 }
