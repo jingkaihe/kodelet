@@ -38,6 +38,7 @@ var MainTools = []tooltypes.Tool{
 	&TodoWriteTool{},
 	&BatchTool{},
 	&WebFetchTool{},
+	&ImageRecognitionTool{},
 }
 
 var SubAgentTools = []tooltypes.Tool{
@@ -53,6 +54,7 @@ var SubAgentTools = []tooltypes.Tool{
 	&TodoWriteTool{},
 	&BatchTool{},
 	&WebFetchTool{},
+	&ImageRecognitionTool{},
 }
 
 func ToAnthropicTools(tools []tooltypes.Tool) []anthropic.ToolUnionParam {

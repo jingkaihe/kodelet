@@ -139,6 +139,9 @@ Here is the instruction:
 <instruction>
 %s
 </instruction>
+
+Please extract the information from the content based on the instruction.
+IMPORTANT: Make sure that you preserve all the links in the content including hyperlinks and images.
 `,
 		input.URL, processedContent, input.Prompt)
 
