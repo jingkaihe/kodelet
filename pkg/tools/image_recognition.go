@@ -194,9 +194,9 @@ Please provide a clear and detailed response based on what you can see in the im
 			Silent: true,
 		},
 		llm.MessageOpt{
-			UseWeakModel: true,
-			PromptCache:  false,
-			Images:       imagePaths,
+			PromptCache:        true,
+			Images:             imagePaths,
+			NoSaveConversation: true,
 		},
 	)
 

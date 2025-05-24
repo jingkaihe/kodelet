@@ -54,7 +54,7 @@ var SubAgentTools = []tooltypes.Tool{
 	&TodoWriteTool{},
 	&BatchTool{},
 	&WebFetchTool{},
-	&ImageRecognitionTool{},
+	// &ImageRecognitionTool{}, // subagent will directly recognise the image using api
 }
 
 func ToAnthropicTools(tools []tooltypes.Tool) []anthropic.ToolUnionParam {
