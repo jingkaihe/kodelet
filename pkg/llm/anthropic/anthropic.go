@@ -85,9 +85,7 @@ func (t *AnthropicThread) GetState() tooltypes.State {
 
 // AddUserMessage adds a user message with optional images to the thread
 func (t *AnthropicThread) AddUserMessage(message string, imagePaths ...string) {
-	contentBlocks := []anthropic.ContentBlockParamUnion{
-		anthropic.NewTextBlock(message),
-	}
+	contentBlocks := []anthropic.ContentBlockParamUnion{}
 
 	// Validate image count
 	if len(imagePaths) > MaxImageCount {
@@ -104,6 +102,7 @@ func (t *AnthropicThread) AddUserMessage(message string, imagePaths ...string) {
 		}
 		contentBlocks = append(contentBlocks, *imageBlock)
 	}
+	contentBlocks = append(contentBlocks, anthropic.NewTextBlock(message))
 
 	t.messages = append(t.messages, anthropic.NewUserMessage(contentBlocks...))
 }

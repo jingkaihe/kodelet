@@ -277,12 +277,7 @@ func (t *OpenAIThread) GetState() tooltypes.State {
 
 // AddUserMessage adds a user message with optional images to the thread
 func (t *OpenAIThread) AddUserMessage(message string, imagePaths ...string) {
-	contentParts := []openai.ChatMessagePart{
-		{
-			Type: openai.ChatMessagePartTypeText,
-			Text: message,
-		},
-	}
+	contentParts := []openai.ChatMessagePart{}
 
 	// Validate image count
 	if len(imagePaths) > MaxImageCount {
@@ -299,6 +294,10 @@ func (t *OpenAIThread) AddUserMessage(message string, imagePaths ...string) {
 		}
 		contentParts = append(contentParts, *imagePart)
 	}
+	contentParts = append(contentParts, openai.ChatMessagePart{
+		Type: openai.ChatMessagePartTypeText,
+		Text: message,
+	})
 
 	t.messages = append(t.messages, openai.ChatCompletionMessage{
 		Role:         openai.ChatMessageRoleUser,

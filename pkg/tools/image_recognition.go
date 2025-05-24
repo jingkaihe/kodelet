@@ -55,11 +55,15 @@ The output summarizes the information extracted from the image.
 * Analyzing screenshots, mockups, or other visual content.
 * Extracting text or data from images.
 
+## DO NOT use this tool when
+Do not use this tool when image content has already been shared with you.
+
 ## Important Notes
 1. Only .jpg, .jpeg, .png, .gif, .webp formats are supported.
 2. The image must be less than 5MB in size.
 3. For security reasons, only HTTPS URLs are supported for remote images.
 4. No URL redirects are followed for security.
+5. File path must be an absolute path to avoid ambiguity. e.g. "file:///home/user/pictures/image.jpg" instead of "./pictures/image.jpg"
 `
 }
 
@@ -190,9 +194,8 @@ Please provide a clear and detailed response based on what you can see in the im
 			Silent: true,
 		},
 		llm.MessageOpt{
-			UseWeakModel: false, // Use the strong model for better image analysis
+			UseWeakModel: true,
 			PromptCache:  false,
-			NoToolUse:    true,
 			Images:       imagePaths,
 		},
 	)

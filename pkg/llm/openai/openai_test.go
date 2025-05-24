@@ -362,56 +362,56 @@ func TestAddUserMessageWithImages(t *testing.T) {
 		message           string
 		imagePaths        []string
 		expectedPartCount int
-		expectedFirstType openai.ChatMessagePartType
-		expectedFirstText string
+		expectedLastType  openai.ChatMessagePartType
+		expectedLastText  string
 	}{
 		{
 			name:              "Text only message",
 			message:           "Hello, world!",
 			imagePaths:        []string{},
 			expectedPartCount: 1,
-			expectedFirstType: openai.ChatMessagePartTypeText,
-			expectedFirstText: "Hello, world!",
+			expectedLastType:  openai.ChatMessagePartTypeText,
+			expectedLastText:  "Hello, world!",
 		},
 		{
 			name:              "Text with valid image",
 			message:           "Analyze this image",
 			imagePaths:        []string{validImagePath},
 			expectedPartCount: 2,
-			expectedFirstType: openai.ChatMessagePartTypeText,
-			expectedFirstText: "Analyze this image",
+			expectedLastType:  openai.ChatMessagePartTypeText,
+			expectedLastText:  "Analyze this image",
 		},
 		{
 			name:              "Text with HTTPS URL",
 			message:           "Look at this",
 			imagePaths:        []string{"https://example.com/image.jpg"},
 			expectedPartCount: 2,
-			expectedFirstType: openai.ChatMessagePartTypeText,
-			expectedFirstText: "Look at this",
+			expectedLastType:  openai.ChatMessagePartTypeText,
+			expectedLastText:  "Look at this",
 		},
 		{
 			name:              "Text with multiple valid images",
 			message:           "Compare these",
 			imagePaths:        []string{validImagePath, "https://example.com/image.jpg"},
 			expectedPartCount: 3,
-			expectedFirstType: openai.ChatMessagePartTypeText,
-			expectedFirstText: "Compare these",
+			expectedLastType:  openai.ChatMessagePartTypeText,
+			expectedLastText:  "Compare these",
 		},
 		{
 			name:              "Text with invalid image (should only have text)",
 			message:           "This should work",
 			imagePaths:        []string{invalidImagePath},
 			expectedPartCount: 1, // Invalid image should be skipped
-			expectedFirstType: openai.ChatMessagePartTypeText,
-			expectedFirstText: "This should work",
+			expectedLastType:  openai.ChatMessagePartTypeText,
+			expectedLastText:  "This should work",
 		},
 		{
 			name:              "Text with mix of valid and invalid images",
 			message:           "Mixed content",
 			imagePaths:        []string{invalidImagePath, validImagePath, "https://example.com/image.jpg"},
 			expectedPartCount: 3, // Text + 2 valid images (invalid one skipped)
-			expectedFirstType: openai.ChatMessagePartTypeText,
-			expectedFirstText: "Mixed content",
+			expectedLastType:  openai.ChatMessagePartTypeText,
+			expectedLastText:  "Mixed content",
 		},
 	}
 
@@ -431,15 +431,15 @@ func TestAddUserMessageWithImages(t *testing.T) {
 			assert.Equal(t, openai.ChatMessageRoleUser, lastMessage.Role)
 			assert.Len(t, lastMessage.MultiContent, test.expectedPartCount)
 
-			// Check first part (should always be text)
+			// Check last part (should always be text)
 			if len(lastMessage.MultiContent) > 0 {
-				firstPart := lastMessage.MultiContent[0]
-				assert.Equal(t, test.expectedFirstType, firstPart.Type)
-				assert.Equal(t, test.expectedFirstText, firstPart.Text)
+				lastPart := lastMessage.MultiContent[len(lastMessage.MultiContent)-1]
+				assert.Equal(t, test.expectedLastType, lastPart.Type)
+				assert.Equal(t, test.expectedLastText, lastPart.Text)
 			}
 
-			// Check that subsequent parts are images if expected
-			for i := 1; i < len(lastMessage.MultiContent); i++ {
+			// Check that preceding parts are images if expected
+			for i := 0; i < len(lastMessage.MultiContent)-1; i++ {
 				part := lastMessage.MultiContent[i]
 				assert.Equal(t, openai.ChatMessagePartTypeImageURL, part.Type)
 				assert.NotNil(t, part.ImageURL)
@@ -470,12 +470,13 @@ func TestAddUserMessageWithTooManyImages(t *testing.T) {
 	expectedPartCount := 1 + MaxImageCount
 	assert.Equal(t, expectedPartCount, len(lastMessage.MultiContent))
 
-	// First part should be text
-	assert.Equal(t, openai.ChatMessagePartTypeText, lastMessage.MultiContent[0].Type)
-	assert.Equal(t, "Too many images", lastMessage.MultiContent[0].Text)
+	// Last part should be text
+	lastPartIndex := len(lastMessage.MultiContent) - 1
+	assert.Equal(t, openai.ChatMessagePartTypeText, lastMessage.MultiContent[lastPartIndex].Type)
+	assert.Equal(t, "Too many images", lastMessage.MultiContent[lastPartIndex].Text)
 
-	// Remaining parts should be images
-	for i := 1; i < len(lastMessage.MultiContent); i++ {
+	// Preceding parts should be images
+	for i := 0; i < len(lastMessage.MultiContent)-1; i++ {
 		assert.Equal(t, openai.ChatMessagePartTypeImageURL, lastMessage.MultiContent[i].Type)
 	}
 }
