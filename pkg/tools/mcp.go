@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"slices"
 	"sync"
 	"time"
@@ -19,6 +20,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"go.opentelemetry.io/otel/attribute"
+	"gopkg.in/yaml.v2"
 )
 
 var (
@@ -33,16 +35,16 @@ const (
 )
 
 type MCPServerConfig struct {
-	ServerType    MCPServerType     `json:"server_type"`     // stdio or sse
-	Command       string            `json:"command"`         // stdio: command to start the server
-	Args          []string          `json:"args"`            // stdio: arguments to pass to the server
-	Envs          map[string]string `json:"envs"`            // stdio: environment variables to set
-	BaseURL       string            `json:"base_url"`        // sse: base URL of the server
-	Headers       map[string]string `json:"headers"`         // sse: headers to send to the server
-	ToolWhiteList []string          `json:"tool_white_list"` // sse: tool white list
+	ServerType    MCPServerType     `json:"server_type" yaml:"server_type"`         // stdio or sse
+	Command       string            `json:"command" yaml:"command"`                 // stdio: command to start the server
+	Args          []string          `json:"args" yaml:"args"`                       // stdio: arguments to pass to the server
+	Envs          map[string]string `json:"envs" yaml:"envs"`                       // stdio: environment variables to set
+	BaseURL       string            `json:"base_url" yaml:"base_url"`               // sse: base URL of the server
+	Headers       map[string]string `json:"headers" yaml:"headers"`                 // sse: headers to send to the server
+	ToolWhiteList []string          `json:"tool_white_list" yaml:"tool_white_list"` // sse: tool white list
 }
 
-type MCPServersConfig struct {
+type MCPConfig struct {
 	Servers map[string]MCPServerConfig `json:"servers"`
 }
 
@@ -88,7 +90,7 @@ type MCPManager struct {
 	whiteList map[string][]string
 }
 
-func NewMCPManager(config MCPServersConfig) (*MCPManager, error) {
+func NewMCPManager(config MCPConfig) (*MCPManager, error) {
 	clients := &MCPManager{
 		clients:   make(map[string]*client.Client),
 		whiteList: make(map[string][]string),
@@ -213,45 +215,32 @@ func toolWhiteListed(tool mcp.Tool, whiteList []string) bool {
 	return len(whiteList) == 0 || slices.Contains(whiteList, tool.GetName())
 }
 
-// LoadMCPServersConfigFromViper loads MCP servers configuration from Viper
-func LoadMCPServersConfigFromViper() (MCPServersConfig, error) {
-	var config MCPServersConfig
-
-	// Get servers configuration from Viper
-	serversConfig := viper.GetStringMap("mcp.servers")
-	if serversConfig == nil {
-		// Return empty config if not configured
-		return MCPServersConfig{
-			Servers: make(map[string]MCPServerConfig),
-		}, nil
+// LoadMCPConfigFromViper loads MCP servers configuration from Viper
+func LoadMCPConfigFromViper() (MCPConfig, error) {
+	type config struct {
+		MCP MCPConfig `yaml:"mcp"`
 	}
-
-	// Initialize the servers map
-	config.Servers = make(map[string]MCPServerConfig)
-
-	// For each server in the configuration
-	for serverName, serverConfigRaw := range serversConfig {
-		// Convert to JSON and back to properly handle nested structures
-		jsonData, err := json.Marshal(serverConfigRaw)
-		if err != nil {
-			return config, fmt.Errorf("failed to marshal server config: %w", err)
-		}
-
-		var serverConfig MCPServerConfig
-		if err := json.Unmarshal(jsonData, &serverConfig); err != nil {
-			return config, fmt.Errorf("failed to unmarshal server config: %w", err)
-		}
-
-		config.Servers[serverName] = serverConfig
+	filename := viper.ConfigFileUsed()
+	if filename == "" {
+		return MCPConfig{}, nil
 	}
+	f, err := os.Open(filename)
+	if err != nil {
+		return MCPConfig{}, fmt.Errorf("failed to open config file: %w", err)
+	}
+	defer f.Close()
 
-	return config, nil
+	var c config
+	if err := yaml.NewDecoder(f).Decode(&c); err != nil {
+		return MCPConfig{}, fmt.Errorf("failed to decode config file: %w", err)
+	}
+	return c.MCP, nil
 }
 
 // CreateMCPManagerFromViper creates a new MCPManager from Viper configuration
 func CreateMCPManagerFromViper(ctx context.Context) (*MCPManager, error) {
 	// Load configuration from Viper
-	config, err := LoadMCPServersConfigFromViper()
+	config, err := LoadMCPConfigFromViper()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load MCP servers config: %w", err)
 	}

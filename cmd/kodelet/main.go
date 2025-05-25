@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/jingkaihe/kodelet/pkg/tools"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -23,7 +24,7 @@ func init() {
 	viper.SetDefault("reasoning_effort", "medium")
 
 	// Set default MCP configuration
-	viper.SetDefault("mcp.servers", map[string]interface{}{})
+	viper.SetDefault("mcp", map[string]tools.MCPConfig{})
 
 	// Set default tracing configuration
 	viper.SetDefault("tracing.enabled", false)
