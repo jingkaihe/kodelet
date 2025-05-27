@@ -15,14 +15,21 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// RunOptions contains all options for the run command
-type RunOptions struct {
-	resumeConvID string
-	noSave       bool
-	images       []string // Image paths or URLs to include with the message
+// RunConfig holds configuration for the run command
+type RunConfig struct {
+	ResumeConvID string
+	NoSave       bool
+	Images       []string // Image paths or URLs to include with the message
 }
 
-var runOptions = &RunOptions{}
+// NewRunConfig creates a new RunConfig with default values
+func NewRunConfig() *RunConfig {
+	return &RunConfig{
+		ResumeConvID: "",
+		NoSave:       false,
+		Images:       []string{},
+	}
+}
 
 var runCmd = &cobra.Command{
 	Use:   "run [query]",
@@ -33,6 +40,9 @@ var runCmd = &cobra.Command{
 		// Create a cancellable context that listens for signals
 		ctx, cancel := context.WithCancel(cmd.Context())
 		defer cancel()
+
+		// Get run config from flags
+		config := getRunConfigFromFlags(cmd)
 
 		// Set up signal handling
 		sigCh := make(chan os.Signal, 1)
@@ -93,17 +103,17 @@ var runCmd = &cobra.Command{
 		thread.SetState(appState)
 
 		// Configure conversation persistence
-		if runOptions.resumeConvID != "" {
-			thread.SetConversationID(runOptions.resumeConvID)
-			fmt.Printf("Resuming conversation: %s\n", runOptions.resumeConvID)
+		if config.ResumeConvID != "" {
+			thread.SetConversationID(config.ResumeConvID)
+			fmt.Printf("Resuming conversation: %s\n", config.ResumeConvID)
 		}
 
-		thread.EnablePersistence(!runOptions.noSave)
+		thread.EnablePersistence(!config.NoSave)
 
 		// Send the message and process the response
 		_, err = thread.SendMessage(ctx, query, handler, llmtypes.MessageOpt{
 			PromptCache: true,
-			Images:      runOptions.images,
+			Images:      config.Images,
 		})
 		if err != nil {
 			fmt.Printf("\n\033[1;31mError: %v\033[0m\n", err)
@@ -129,7 +139,25 @@ var runCmd = &cobra.Command{
 }
 
 func init() {
-	runCmd.Flags().StringVar(&runOptions.resumeConvID, "resume", "", "Resume a specific conversation")
-	runCmd.Flags().BoolVar(&runOptions.noSave, "no-save", false, "Disable conversation persistence")
-	runCmd.Flags().StringSliceVarP(&runOptions.images, "image", "I", []string{}, "Add image input (can be used multiple times)")
+	defaults := NewRunConfig()
+	runCmd.Flags().String("resume", defaults.ResumeConvID, "Resume a specific conversation")
+	runCmd.Flags().Bool("no-save", defaults.NoSave, "Disable conversation persistence")
+	runCmd.Flags().StringSliceP("image", "I", defaults.Images, "Add image input (can be used multiple times)")
+}
+
+// getRunConfigFromFlags extracts run configuration from command flags
+func getRunConfigFromFlags(cmd *cobra.Command) *RunConfig {
+	config := NewRunConfig()
+
+	if resumeConvID, err := cmd.Flags().GetString("resume"); err == nil {
+		config.ResumeConvID = resumeConvID
+	}
+	if noSave, err := cmd.Flags().GetBool("no-save"); err == nil {
+		config.NoSave = noSave
+	}
+	if images, err := cmd.Flags().GetStringSlice("image"); err == nil {
+		config.Images = images
+	}
+
+	return config
 }

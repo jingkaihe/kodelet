@@ -13,11 +13,21 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
-	noSign   bool
-	template string
-	short    bool
-)
+// CommitConfig holds configuration for the commit command
+type CommitConfig struct {
+	NoSign   bool
+	Template string
+	Short    bool
+}
+
+// NewCommitConfig creates a new CommitConfig with default values
+func NewCommitConfig() *CommitConfig {
+	return &CommitConfig{
+		NoSign:   false,
+		Template: "",
+		Short:    false,
+	}
+}
 
 var commitCmd = &cobra.Command{
 	Use:   "commit",
@@ -30,6 +40,9 @@ You must stage your changes (using 'git add') before running this command.`,
 		ctx := cmd.Context()
 
 		s := tools.NewBasicState(ctx)
+
+		// Get commit config from flags
+		config := getCommitConfigFromFlags(cmd)
 
 		// Check if we're in a git repository
 		if !isGitRepository() {
@@ -58,9 +71,9 @@ You must stage your changes (using 'git add') before running this command.`,
 
 		// Generate commit message based on diff
 		var prompt string
-		if template != "" {
-			prompt = fmt.Sprintf("Generate a commit message following this template: '%s' for the following git diff:\n\n%s", template, diff)
-		} else if short {
+		if config.Template != "" {
+			prompt = fmt.Sprintf("Generate a commit message following this template: '%s' for the following git diff:\n\n%s", config.Template, diff)
+		} else if config.Short {
 			prompt = fmt.Sprintf(`Generate a concise commit message following conventional commits format for the following git diff.
 The commit message should have only a short, descriptive title that summarizes the changes.
 
@@ -104,7 +117,7 @@ IMPORTANT: The output of the commit message should not be wrapped with any markd
 		}
 
 		// Create the commit
-		if err := createCommit(commitMsg, !noSign); err != nil {
+		if err := createCommit(commitMsg, !config.NoSign); err != nil {
 			fmt.Printf("Error creating commit: %s\n", err)
 			os.Exit(1)
 		}
@@ -114,9 +127,27 @@ IMPORTANT: The output of the commit message should not be wrapped with any markd
 }
 
 func init() {
-	commitCmd.Flags().BoolVar(&noSign, "no-sign", false, "Disable commit signing")
-	commitCmd.Flags().StringVarP(&template, "template", "t", "", "Template for commit message")
-	commitCmd.Flags().BoolVar(&short, "short", false, "Generate a short commit message with just a description, no bullet points")
+	defaults := NewCommitConfig()
+	commitCmd.Flags().Bool("no-sign", defaults.NoSign, "Disable commit signing")
+	commitCmd.Flags().StringP("template", "t", defaults.Template, "Template for commit message")
+	commitCmd.Flags().Bool("short", defaults.Short, "Generate a short commit message with just a description, no bullet points")
+}
+
+// getCommitConfigFromFlags extracts commit configuration from command flags
+func getCommitConfigFromFlags(cmd *cobra.Command) *CommitConfig {
+	config := NewCommitConfig()
+
+	if noSign, err := cmd.Flags().GetBool("no-sign"); err == nil {
+		config.NoSign = noSign
+	}
+	if template, err := cmd.Flags().GetString("template"); err == nil {
+		config.Template = template
+	}
+	if short, err := cmd.Flags().GetBool("short"); err == nil {
+		config.Short = short
+	}
+
+	return config
 }
 
 func sanitizeCommitMessage(message string) string {
