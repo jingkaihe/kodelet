@@ -13,7 +13,7 @@ import (
 func TestNewMCPManager(t *testing.T) {
 	// Test with empty config
 	t.Run("empty config", func(t *testing.T) {
-		config := MCPServersConfig{
+		config := MCPConfig{
 			Servers: make(map[string]MCPServerConfig),
 		}
 		manager, err := NewMCPManager(config)
@@ -25,7 +25,7 @@ func TestNewMCPManager(t *testing.T) {
 
 	// Test with valid SSE config
 	t.Run("valid sse config", func(t *testing.T) {
-		config := MCPServersConfig{
+		config := MCPConfig{
 			Servers: map[string]MCPServerConfig{
 				"test-sse": {
 					ServerType: MCPServerTypeSSE,
@@ -46,7 +46,7 @@ func TestNewMCPManager(t *testing.T) {
 
 	// Test with invalid configuration
 	t.Run("invalid config", func(t *testing.T) {
-		config := MCPServersConfig{
+		config := MCPConfig{
 			Servers: map[string]MCPServerConfig{
 				"invalid": {
 					ServerType: "invalid-type",
@@ -60,7 +60,7 @@ func TestNewMCPManager(t *testing.T) {
 
 	// Test with missing required fields
 	t.Run("missing required fields", func(t *testing.T) {
-		config := MCPServersConfig{
+		config := MCPConfig{
 			Servers: map[string]MCPServerConfig{
 				"missing-url": {
 					ServerType: MCPServerTypeSSE,
@@ -80,7 +80,7 @@ func TestNewMCPManager(t *testing.T) {
 }
 
 var (
-	goldenMCPServersConfig = MCPServersConfig{
+	goldenMCPConfig = MCPConfig{
 		Servers: map[string]MCPServerConfig{
 			"filesystem": {
 				Command: "docker",
@@ -113,7 +113,7 @@ func TestMCPManager_Initialize(t *testing.T) {
 	}
 	// Test with empty config
 	t.Run("empty config", func(t *testing.T) {
-		config := MCPServersConfig{
+		config := MCPConfig{
 			Servers: make(map[string]MCPServerConfig),
 		}
 		manager, err := NewMCPManager(config)
@@ -124,7 +124,7 @@ func TestMCPManager_Initialize(t *testing.T) {
 	})
 
 	t.Run("valid config", func(t *testing.T) {
-		config := goldenMCPServersConfig
+		config := goldenMCPConfig
 		manager, err := NewMCPManager(config)
 		assert.NoError(t, err)
 
@@ -141,7 +141,7 @@ func TestMCPManager_ListMCPTools(t *testing.T) {
 	}
 
 	t.Run("empty config", func(t *testing.T) {
-		config := MCPServersConfig{
+		config := MCPConfig{
 			Servers: make(map[string]MCPServerConfig),
 		}
 		manager, err := NewMCPManager(config)
@@ -158,7 +158,7 @@ func TestMCPManager_ListMCPTools(t *testing.T) {
 	})
 
 	t.Run("valid config", func(t *testing.T) {
-		config := goldenMCPServersConfig
+		config := goldenMCPConfig
 		manager, err := NewMCPManager(config)
 		assert.NoError(t, err)
 
@@ -185,7 +185,7 @@ func TestMCPTool_GenerateSchema(t *testing.T) {
 		t.Skip("Skipping docker test")
 	}
 	t.Run("valid config", func(t *testing.T) {
-		config := goldenMCPServersConfig
+		config := goldenMCPConfig
 		manager, err := NewMCPManager(config)
 		assert.NoError(t, err)
 
@@ -216,7 +216,7 @@ func TestMCPTool_Execute(t *testing.T) {
 		t.Skip("Skipping docker test")
 	}
 
-	config := goldenMCPServersConfig
+	config := goldenMCPConfig
 	manager, err := NewMCPManager(config)
 	assert.NoError(t, err)
 

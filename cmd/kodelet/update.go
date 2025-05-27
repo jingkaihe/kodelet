@@ -19,16 +19,36 @@ const (
 	GitHubRepoURL = "github.com/jingkaihe/kodelet"
 )
 
-var (
-	versionFlag string
-)
+// UpdateConfig holds configuration for the update command
+type UpdateConfig struct {
+	Version string
+}
+
+// NewUpdateConfig creates a new UpdateConfig with default values
+func NewUpdateConfig() *UpdateConfig {
+	return &UpdateConfig{
+		Version: "latest",
+	}
+}
+
+// Validate validates the UpdateConfig and returns an error if invalid
+func (c *UpdateConfig) Validate() error {
+	if c.Version == "" {
+		return fmt.Errorf("version cannot be empty")
+	}
+
+	return nil
+}
 
 var updateCmd = &cobra.Command{
 	Use:   "update",
 	Short: "Update Kodelet to the latest version",
 	Long:  `Download and install the latest version of Kodelet or a specified version.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		if err := updateKodelet(); err != nil {
+		// Get update config from flags
+		config := getUpdateConfigFromFlags(cmd)
+
+		if err := updateKodelet(config); err != nil {
 			logrus.WithError(err).Error("Failed to update Kodelet")
 			os.Exit(1)
 		}
@@ -36,10 +56,22 @@ var updateCmd = &cobra.Command{
 }
 
 func init() {
-	updateCmd.Flags().StringVar(&versionFlag, "version", "latest", "Specific version to install (e.g., v0.1.0)")
+	defaults := NewUpdateConfig()
+	updateCmd.Flags().String("version", defaults.Version, "Specific version to install (e.g., v0.1.0)")
 }
 
-func updateKodelet() error {
+// getUpdateConfigFromFlags extracts update configuration from command flags
+func getUpdateConfigFromFlags(cmd *cobra.Command) *UpdateConfig {
+	config := NewUpdateConfig()
+
+	if version, err := cmd.Flags().GetString("version"); err == nil {
+		config.Version = version
+	}
+
+	return config
+}
+
+func updateKodelet(config *UpdateConfig) error {
 	// Get current version info
 	currentVersion := version.Get()
 	fmt.Printf("Current version: %s\n", currentVersion.Version)
@@ -68,11 +100,11 @@ func updateKodelet() error {
 
 	// Construct download URL based on version
 	var downloadURL string
-	if versionFlag == "latest" {
+	if config.Version == "latest" {
 		downloadURL = fmt.Sprintf("https://%s/releases/latest/download/kodelet-%s-%s", GitHubRepoURL, osType, arch)
 	} else {
 		// If version doesn't start with 'v', add it
-		version := versionFlag
+		version := config.Version
 		if !strings.HasPrefix(version, "v") {
 			version = "v" + version
 		}

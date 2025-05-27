@@ -21,13 +21,43 @@ import (
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
-var (
-	ignoreDirs     []string
-	includePattern string
-	verbosity      string
-	debounceTime   int
-	useWeakModel   bool
-)
+// WatchConfig holds configuration for the watch command
+type WatchConfig struct {
+	IgnoreDirs     []string
+	IncludePattern string
+	Verbosity      string
+	DebounceTime   int
+	UseWeakModel   bool
+}
+
+// NewWatchConfig creates a new WatchConfig with default values
+func NewWatchConfig() *WatchConfig {
+	return &WatchConfig{
+		IgnoreDirs:     []string{".git", "node_modules"},
+		IncludePattern: "",
+		Verbosity:      "normal",
+		DebounceTime:   500,
+		UseWeakModel:   false,
+	}
+}
+
+// Validate validates the WatchConfig and returns an error if invalid
+func (c *WatchConfig) Validate() error {
+	validVerbosityLevels := []string{"quiet", "normal", "verbose"}
+	for _, level := range validVerbosityLevels {
+		if c.Verbosity == level {
+			goto verbosityValid
+		}
+	}
+	return fmt.Errorf("invalid verbosity level: %s, must be one of: %s", c.Verbosity, strings.Join(validVerbosityLevels, ", "))
+
+verbosityValid:
+	if c.DebounceTime < 0 {
+		return fmt.Errorf("debounce time cannot be negative: %d", c.DebounceTime)
+	}
+
+	return nil
+}
 
 // FileEvent represents a file system event with additional metadata
 type FileEvent struct {
@@ -56,19 +86,52 @@ ignoring common directories like .git and node_modules.`,
 
 		s := tools.NewBasicState(ctx, tools.WithMCPTools(mcpManager))
 
-		runWatchMode(ctx, s)
+		// Get watch config from flags
+		config := getWatchConfigFromFlags(cmd)
+
+		// Validate configuration
+		if err := config.Validate(); err != nil {
+			fmt.Printf("Error: Invalid configuration: %s\n", err)
+			os.Exit(1)
+		}
+
+		runWatchMode(ctx, s, config)
 	},
 }
 
 func init() {
-	watchCmd.Flags().StringSliceVarP(&ignoreDirs, "ignore", "i", []string{".git", "node_modules"}, "Directories to ignore")
-	watchCmd.Flags().StringVarP(&includePattern, "include", "p", "", "File pattern to include (e.g., '*.go', '*.{js,ts}')")
-	watchCmd.Flags().StringVarP(&verbosity, "verbosity", "v", "normal", "Verbosity level (quiet, normal, verbose)")
-	watchCmd.Flags().IntVarP(&debounceTime, "debounce", "d", 500, "Debounce time in milliseconds for file change events")
-	watchCmd.Flags().BoolVar(&useWeakModel, "use-weak-model", false, "Use auto-completion model")
+	defaults := NewWatchConfig()
+	watchCmd.Flags().StringSliceP("ignore", "i", defaults.IgnoreDirs, "Directories to ignore")
+	watchCmd.Flags().StringP("include", "p", defaults.IncludePattern, "File pattern to include (e.g., '*.go', '*.{js,ts}')")
+	watchCmd.Flags().StringP("verbosity", "v", defaults.Verbosity, "Verbosity level (quiet, normal, verbose)")
+	watchCmd.Flags().IntP("debounce", "d", defaults.DebounceTime, "Debounce time in milliseconds for file change events")
+	watchCmd.Flags().Bool("use-weak-model", defaults.UseWeakModel, "Use auto-completion model")
 }
 
-func runWatchMode(ctx context.Context, state tooltypes.State) {
+// getWatchConfigFromFlags extracts watch configuration from command flags
+func getWatchConfigFromFlags(cmd *cobra.Command) *WatchConfig {
+	config := NewWatchConfig()
+
+	if ignoreDirs, err := cmd.Flags().GetStringSlice("ignore"); err == nil {
+		config.IgnoreDirs = ignoreDirs
+	}
+	if includePattern, err := cmd.Flags().GetString("include"); err == nil {
+		config.IncludePattern = includePattern
+	}
+	if verbosity, err := cmd.Flags().GetString("verbosity"); err == nil {
+		config.Verbosity = verbosity
+	}
+	if debounceTime, err := cmd.Flags().GetInt("debounce"); err == nil {
+		config.DebounceTime = debounceTime
+	}
+	if useWeakModel, err := cmd.Flags().GetBool("use-weak-model"); err == nil {
+		config.UseWeakModel = useWeakModel
+	}
+
+	return config
+}
+
+func runWatchMode(ctx context.Context, state tooltypes.State, config *WatchConfig) {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		logrus.WithError(err).Fatal("Failed to create file watcher")
@@ -83,7 +146,7 @@ func runWatchMode(ctx context.Context, state tooltypes.State) {
 	debouncedEvents := make(chan FileEvent)
 
 	// Start debouncer goroutine
-	go debounceFileEvents(events, debouncedEvents, time.Duration(debounceTime)*time.Millisecond)
+	go debounceFileEvents(events, debouncedEvents, time.Duration(config.DebounceTime)*time.Millisecond)
 
 	// Process events
 	go func() {
@@ -93,10 +156,10 @@ func runWatchMode(ctx context.Context, state tooltypes.State) {
 				if !ok {
 					return
 				}
-				if verbosity != "quiet" {
+				if config.Verbosity != "quiet" {
 					fmt.Printf("Change detected: %s (%s)\n", event.Path, event.Op)
 				}
-				processFileChange(ctx, state, event.Path)
+				processFileChange(ctx, state, event.Path, config)
 			case <-done:
 				return
 			}
@@ -112,7 +175,7 @@ func runWatchMode(ctx context.Context, state tooltypes.State) {
 					return
 				}
 				// Skip ignored directories
-				for _, ignoreDir := range ignoreDirs {
+				for _, ignoreDir := range config.IgnoreDirs {
 					if strings.Contains(event.Name, ignoreDir+string(os.PathSeparator)) {
 						continue
 					}
@@ -121,15 +184,15 @@ func runWatchMode(ctx context.Context, state tooltypes.State) {
 				if event.Op&(fsnotify.Write|fsnotify.Create) != 0 {
 					// Skip binary files
 					if utils.IsBinaryFile(event.Name) {
-						if verbosity == "verbose" {
+						if config.Verbosity == "verbose" {
 							fmt.Printf("Skipping binary file: %s\n", event.Name)
 						}
 						continue
 					}
 
 					// Check if file matches include pattern
-					if includePattern != "" {
-						matched, err := filepath.Match(includePattern, filepath.Base(event.Name))
+					if config.IncludePattern != "" {
+						matched, err := filepath.Match(config.IncludePattern, filepath.Base(event.Name))
 						if err != nil || !matched {
 							continue
 						}
@@ -158,7 +221,7 @@ func runWatchMode(ctx context.Context, state tooltypes.State) {
 		}
 		if info.IsDir() {
 			// Skip ignored directories
-			for _, ignoreDir := range ignoreDirs {
+			for _, ignoreDir := range config.IgnoreDirs {
 				if strings.Contains(path, ignoreDir+string(os.PathSeparator)) || path == ignoreDir {
 					return filepath.SkipDir
 				}
@@ -205,10 +268,10 @@ var (
 )
 
 // Process a file change event
-func processFileChange(ctx context.Context, state tooltypes.State, path string) {
+func processFileChange(ctx context.Context, state tooltypes.State, path string, config *WatchConfig) {
 	// Double-check that the file is not binary before processing
 	if utils.IsBinaryFile(path) {
-		if verbosity == "verbose" {
+		if config.Verbosity == "verbose" {
 			fmt.Printf("Skipping binary file processing: %s\n", path)
 		}
 		return
@@ -269,26 +332,26 @@ def multiply(a, b):
 		path, string(content))
 
 	// Process with AI
-	if verbosity == "verbose" {
+	if config.Verbosity == "verbose" {
 		fmt.Println("Sending to AI for analysis...")
 	}
 
 	// Get configuration for the LLM
-	config := llm.GetConfigFromViper()
+	llmConfig := llm.GetConfigFromViper()
 
 	var response string
 	var usage llmtypes.Usage
 
 	// Use the auto-completion model if appropriate
-	if useWeakModel {
-		if verbosity == "verbose" {
-			fmt.Printf("Using auto-completion model: %v\n", config.WeakModel)
+	if config.UseWeakModel {
+		if config.Verbosity == "verbose" {
+			fmt.Printf("Using auto-completion model: %v\n", llmConfig.WeakModel)
 		}
 	}
 
 	state.SetFileLastAccessed(path, time.Now())
-	response, usage = llm.SendMessageAndGetTextWithUsage(ctx, state, query, config, false, llmtypes.MessageOpt{
-		UseWeakModel: useWeakModel,
+	response, usage = llm.SendMessageAndGetTextWithUsage(ctx, state, query, llmConfig, false, llmtypes.MessageOpt{
+		UseWeakModel: config.UseWeakModel,
 		PromptCache:  false,
 	})
 

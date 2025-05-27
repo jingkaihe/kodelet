@@ -15,9 +15,54 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// ConversationOptions contains common options for conversation commands
-type ConversationOptions struct {
-	// Common options can be added here
+// ConversationListConfig holds configuration for the conversation list command
+type ConversationListConfig struct {
+	StartDate  string
+	EndDate    string
+	Search     string
+	Limit      int
+	Offset     int
+	SortBy     string
+	SortOrder  string
+	JSONOutput bool
+}
+
+// NewConversationListConfig creates a new ConversationListConfig with default values
+func NewConversationListConfig() *ConversationListConfig {
+	return &ConversationListConfig{
+		StartDate:  "",
+		EndDate:    "",
+		Search:     "",
+		Limit:      0,
+		Offset:     0,
+		SortBy:     "updated",
+		SortOrder:  "desc",
+		JSONOutput: false,
+	}
+}
+
+// ConversationDeleteConfig holds configuration for the conversation delete command
+type ConversationDeleteConfig struct {
+	NoConfirm bool
+}
+
+// NewConversationDeleteConfig creates a new ConversationDeleteConfig with default values
+func NewConversationDeleteConfig() *ConversationDeleteConfig {
+	return &ConversationDeleteConfig{
+		NoConfirm: false,
+	}
+}
+
+// ConversationShowConfig holds configuration for the conversation show command
+type ConversationShowConfig struct {
+	Format string
+}
+
+// NewConversationShowConfig creates a new ConversationShowConfig with default values
+func NewConversationShowConfig() *ConversationShowConfig {
+	return &ConversationShowConfig{
+		Format: "text",
+	}
 }
 
 var conversationCmd = &cobra.Command{
@@ -29,82 +74,114 @@ var conversationCmd = &cobra.Command{
 	},
 }
 
-// ListOptions contains all options for the list command
-type ListOptions struct {
-	startDate  string
-	endDate    string
-	search     string
-	limit      int
-	offset     int
-	sortBy     string
-	sortOrder  string
-	jsonOutput bool
-}
-
-var listOptions = &ListOptions{}
-
 var conversationListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all saved conversations",
 	Long:  `List saved conversations with filtering and sorting options.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		listConversationsCmd()
+		config := getConversationListConfigFromFlags(cmd)
+		listConversationsCmd(config)
 	},
 }
-
-// DeleteOptions contains options for the delete command
-type DeleteOptions struct {
-	noConfirm bool
-}
-
-var deleteOptions = &DeleteOptions{}
 
 var conversationDeleteCmd = &cobra.Command{
 	Use:   "delete [conversationID]",
 	Short: "Delete a specific conversation",
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
-		deleteConversationCmd(args[0])
+		config := getConversationDeleteConfigFromFlags(cmd)
+		deleteConversationCmd(args[0], config)
 	},
 }
-
-// ShowOptions contains options for the show command
-type ShowOptions struct {
-	format string
-}
-
-var showOptions = &ShowOptions{}
 
 var conversationShowCmd = &cobra.Command{
 	Use:   "show [conversationID]",
 	Short: "Show a specific conversation",
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
-		showConversationCmd(args[0])
+		config := getConversationShowConfigFromFlags(cmd)
+		showConversationCmd(args[0], config)
 	},
 }
 
 func init() {
 	// Add list command flags
-	conversationListCmd.Flags().StringVar(&listOptions.startDate, "start", "", "Filter conversations after this date (format: YYYY-MM-DD)")
-	conversationListCmd.Flags().StringVar(&listOptions.endDate, "end", "", "Filter conversations before this date (format: YYYY-MM-DD)")
-	conversationListCmd.Flags().StringVar(&listOptions.search, "search", "", "Search term to filter conversations")
-	conversationListCmd.Flags().IntVar(&listOptions.limit, "limit", 0, "Maximum number of conversations to display")
-	conversationListCmd.Flags().IntVar(&listOptions.offset, "offset", 0, "Offset for pagination")
-	conversationListCmd.Flags().StringVar(&listOptions.sortBy, "sort-by", "updated", "Field to sort by: updated, created, or messages")
-	conversationListCmd.Flags().StringVar(&listOptions.sortOrder, "sort-order", "desc", "Sort order: asc (ascending) or desc (descending)")
-	conversationListCmd.Flags().BoolVar(&listOptions.jsonOutput, "json", false, "Output in JSON format")
+	listDefaults := NewConversationListConfig()
+	conversationListCmd.Flags().String("start", listDefaults.StartDate, "Filter conversations after this date (format: YYYY-MM-DD)")
+	conversationListCmd.Flags().String("end", listDefaults.EndDate, "Filter conversations before this date (format: YYYY-MM-DD)")
+	conversationListCmd.Flags().String("search", listDefaults.Search, "Search term to filter conversations")
+	conversationListCmd.Flags().Int("limit", listDefaults.Limit, "Maximum number of conversations to display")
+	conversationListCmd.Flags().Int("offset", listDefaults.Offset, "Offset for pagination")
+	conversationListCmd.Flags().String("sort-by", listDefaults.SortBy, "Field to sort by: updated, created, or messages")
+	conversationListCmd.Flags().String("sort-order", listDefaults.SortOrder, "Sort order: asc (ascending) or desc (descending)")
+	conversationListCmd.Flags().Bool("json", listDefaults.JSONOutput, "Output in JSON format")
 
 	// Add delete command flags
-	conversationDeleteCmd.Flags().BoolVar(&deleteOptions.noConfirm, "no-confirm", false, "Skip confirmation prompt")
+	deleteDefaults := NewConversationDeleteConfig()
+	conversationDeleteCmd.Flags().Bool("no-confirm", deleteDefaults.NoConfirm, "Skip confirmation prompt")
 
 	// Add show command flags
-	conversationShowCmd.Flags().StringVar(&showOptions.format, "format", "text", "Output format: raw, json, or text")
+	showDefaults := NewConversationShowConfig()
+	conversationShowCmd.Flags().String("format", showDefaults.Format, "Output format: raw, json, or text")
 
 	// Add subcommands
 	conversationCmd.AddCommand(conversationListCmd)
 	conversationCmd.AddCommand(conversationDeleteCmd)
 	conversationCmd.AddCommand(conversationShowCmd)
+}
+
+// getConversationListConfigFromFlags extracts list configuration from command flags
+func getConversationListConfigFromFlags(cmd *cobra.Command) *ConversationListConfig {
+	config := NewConversationListConfig()
+
+	if startDate, err := cmd.Flags().GetString("start"); err == nil {
+		config.StartDate = startDate
+	}
+	if endDate, err := cmd.Flags().GetString("end"); err == nil {
+		config.EndDate = endDate
+	}
+	if search, err := cmd.Flags().GetString("search"); err == nil {
+		config.Search = search
+	}
+	if limit, err := cmd.Flags().GetInt("limit"); err == nil {
+		config.Limit = limit
+	}
+	if offset, err := cmd.Flags().GetInt("offset"); err == nil {
+		config.Offset = offset
+	}
+	if sortBy, err := cmd.Flags().GetString("sort-by"); err == nil {
+		config.SortBy = sortBy
+	}
+	if sortOrder, err := cmd.Flags().GetString("sort-order"); err == nil {
+		config.SortOrder = sortOrder
+	}
+	if jsonOutput, err := cmd.Flags().GetBool("json"); err == nil {
+		config.JSONOutput = jsonOutput
+	}
+
+	return config
+}
+
+// getConversationDeleteConfigFromFlags extracts delete configuration from command flags
+func getConversationDeleteConfigFromFlags(cmd *cobra.Command) *ConversationDeleteConfig {
+	config := NewConversationDeleteConfig()
+
+	if noConfirm, err := cmd.Flags().GetBool("no-confirm"); err == nil {
+		config.NoConfirm = noConfirm
+	}
+
+	return config
+}
+
+// getConversationShowConfigFromFlags extracts show configuration from command flags
+func getConversationShowConfigFromFlags(cmd *cobra.Command) *ConversationShowConfig {
+	config := NewConversationShowConfig()
+
+	if format, err := cmd.Flags().GetString("format"); err == nil {
+		config.Format = format
+	}
+
+	return config
 }
 
 // OutputFormat defines the format of the output
@@ -216,7 +293,7 @@ type ConversationSummaryOutput struct {
 }
 
 // listConversationsCmd displays a list of saved conversations with query options
-func listConversationsCmd() {
+func listConversationsCmd(config *ConversationListConfig) {
 	// Create a store
 	store, err := conversations.GetConversationStore()
 	if err != nil {
@@ -226,16 +303,16 @@ func listConversationsCmd() {
 
 	// Prepare query options
 	options := conversations.QueryOptions{
-		SearchTerm: listOptions.search,
-		Limit:      listOptions.limit,
-		Offset:     listOptions.offset,
-		SortBy:     listOptions.sortBy,
-		SortOrder:  listOptions.sortOrder,
+		SearchTerm: config.Search,
+		Limit:      config.Limit,
+		Offset:     config.Offset,
+		SortBy:     config.SortBy,
+		SortOrder:  config.SortOrder,
 	}
 
 	// Parse start date if provided
-	if listOptions.startDate != "" {
-		startDate, err := time.Parse("2006-01-02", listOptions.startDate)
+	if config.StartDate != "" {
+		startDate, err := time.Parse("2006-01-02", config.StartDate)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error parsing start date: %v\n", err)
 			os.Exit(1)
@@ -244,8 +321,8 @@ func listConversationsCmd() {
 	}
 
 	// Parse end date if provided
-	if listOptions.endDate != "" {
-		endDate, err := time.Parse("2006-01-02", listOptions.endDate)
+	if config.EndDate != "" {
+		endDate, err := time.Parse("2006-01-02", config.EndDate)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error parsing end date: %v\n", err)
 			os.Exit(1)
@@ -269,7 +346,7 @@ func listConversationsCmd() {
 
 	// Determine output format
 	format := TableFormat
-	if listOptions.jsonOutput {
+	if config.JSONOutput {
 		format = JSONFormat
 	}
 
@@ -282,7 +359,7 @@ func listConversationsCmd() {
 }
 
 // deleteConversationCmd deletes a specific conversation
-func deleteConversationCmd(id string) {
+func deleteConversationCmd(id string, config *ConversationDeleteConfig) {
 	// Create a store
 	store, err := conversations.GetConversationStore()
 	if err != nil {
@@ -291,7 +368,7 @@ func deleteConversationCmd(id string) {
 	}
 
 	// If no-confirm flag is not set, prompt for confirmation
-	if !deleteOptions.noConfirm {
+	if !config.NoConfirm {
 		fmt.Printf("Are you sure you want to delete conversation %s? (y/N): ", id)
 		var response string
 		fmt.Scanln(&response)
@@ -313,7 +390,7 @@ func deleteConversationCmd(id string) {
 }
 
 // showConversationCmd displays a specific conversation
-func showConversationCmd(id string) {
+func showConversationCmd(id string, config *ConversationShowConfig) {
 	// Create a store
 	store, err := conversations.GetConversationStore()
 	if err != nil {
@@ -336,7 +413,7 @@ func showConversationCmd(id string) {
 	}
 
 	// Render messages according to the format
-	switch showOptions.format {
+	switch config.Format {
 	case "raw":
 		// Output the raw messages as stored
 		fmt.Println(string(record.RawMessages))
@@ -352,7 +429,7 @@ func showConversationCmd(id string) {
 		// Format as readable text with user/assistant prefixes
 		displayConversation(messages)
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown format: %s. Supported formats are raw, json, and text.\n", showOptions.format)
+		fmt.Fprintf(os.Stderr, "Unknown format: %s. Supported formats are raw, json, and text.\n", config.Format)
 		os.Exit(1)
 	}
 }

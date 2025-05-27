@@ -106,7 +106,7 @@ func TestBasicState_MCPTools(t *testing.T) {
 	if os.Getenv("SKIP_DOCKER_TEST") == "true" {
 		t.Skip("Skipping docker test")
 	}
-	config := goldenMCPServersConfig
+	config := goldenMCPConfig
 	manager, err := NewMCPManager(config)
 	assert.NoError(t, err)
 

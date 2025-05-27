@@ -12,11 +12,34 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
-	provider     string
-	target       string
-	templateFile string
-)
+// PRConfig holds configuration for the pr command
+type PRConfig struct {
+	Provider     string
+	Target       string
+	TemplateFile string
+}
+
+// NewPRConfig creates a new PRConfig with default values
+func NewPRConfig() *PRConfig {
+	return &PRConfig{
+		Provider:     "github",
+		Target:       "main",
+		TemplateFile: "",
+	}
+}
+
+// Validate validates the PRConfig and returns an error if invalid
+func (c *PRConfig) Validate() error {
+	if c.Provider != "github" {
+		return fmt.Errorf("unsupported provider: %s, only 'github' is supported", c.Provider)
+	}
+
+	if c.Target == "" {
+		return fmt.Errorf("target branch cannot be empty")
+	}
+
+	return nil
+}
 
 // Default PR template
 const defaultTemplate = `## Description
@@ -39,6 +62,9 @@ This command analyzes the current branch changes compared to the target branch a
 		// Create a new state for the PR operation
 		ctx := cmd.Context()
 		s := tools.NewBasicState(ctx)
+
+		// Get PR config from flags
+		config := getPRConfigFromFlags(cmd)
 
 		// Check prerequisites
 		// 1. Check if we're in a git repository
@@ -67,12 +93,7 @@ This command analyzes the current branch changes compared to the target branch a
 		// }
 
 		// Load the template
-		template := loadTemplate(templateFile)
-
-		// Set default target branch if not specified
-		if target == "" {
-			target = "main" // Default target branch
-		}
+		template := loadTemplate(config.TemplateFile)
 
 		// Generate the prompt for the LLM
 		prompt := fmt.Sprintf(`Create a pull request for the changes you have made on the current branch.
@@ -101,7 +122,7 @@ Please create a pull request following the steps below:
 IMPORTANT:
 - After the batch command run, when you performing the PR analysis, do not carry out extra tool calls to gather extra information, but instead use the information provided by the batch tool.
 - Once you have created the PR, provide a link to the PR in your final response.
-- !!!CRITICAL!!!: You should never update user's git config under any circumstances.`, target, target, target, template)
+- !!!CRITICAL!!!: You should never update user's git config under any circumstances.`, config.Target, config.Target, config.Target, template)
 
 		// Send the prompt to the LLM
 		fmt.Println("Analyzing branch changes and generating PR description...")
@@ -129,9 +150,27 @@ IMPORTANT:
 }
 
 func init() {
-	prCmd.Flags().StringVarP(&provider, "provider", "p", "github", "The CVS provider to use")
-	prCmd.Flags().StringVarP(&target, "target", "t", "main", "The target branch to create the pull request on")
-	prCmd.Flags().StringVar(&templateFile, "template-file", "", "The path to the template file for the pull request")
+	defaults := NewPRConfig()
+	prCmd.Flags().StringP("provider", "p", defaults.Provider, "The CVS provider to use")
+	prCmd.Flags().StringP("target", "t", defaults.Target, "The target branch to create the pull request on")
+	prCmd.Flags().String("template-file", defaults.TemplateFile, "The path to the template file for the pull request")
+}
+
+// getPRConfigFromFlags extracts PR configuration from command flags
+func getPRConfigFromFlags(cmd *cobra.Command) *PRConfig {
+	config := NewPRConfig()
+
+	if provider, err := cmd.Flags().GetString("provider"); err == nil {
+		config.Provider = provider
+	}
+	if target, err := cmd.Flags().GetString("target"); err == nil {
+		config.Target = target
+	}
+	if templateFile, err := cmd.Flags().GetString("template-file"); err == nil {
+		config.TemplateFile = templateFile
+	}
+
+	return config
 }
 
 // loadTemplate loads the template from a file or returns the default template
