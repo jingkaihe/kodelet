@@ -1,5 +1,46 @@
 # Kodelet
 
+## 0.0.28.alpha (2025-05-27)
+
+### Major Refactoring
+
+- **Command Configuration Redesign**: Comprehensive refactoring of CLI command flag handling and configuration management
+  - **Type-Safe Configuration**: Introduced dedicated configuration structs for all commands (`CommitConfig`, `ConversationListConfig`, `ConversationDeleteConfig`, `ConversationShowConfig`, `PRConfig`, `RunConfig`, `UpdateConfig`, `WatchConfig`)
+  - **Centralized Defaults**: Each command now has a `NewXConfig()` function that provides sensible default values
+  - **Improved Flag Handling**: Replaced global variables with proper flag extraction functions that read values safely using Cobra's flag methods
+  - **Enhanced Validation**: Added configuration validation with descriptive error messages for invalid inputs
+
+### MCP Configuration Improvements
+
+- **Robust Configuration Loading**: Improved MCP (Model Context Protocol) server configuration handling
+  - **YAML-Based Loading**: Migrated from Viper's complex nested map handling to direct YAML parsing for better type safety
+  - **Structured Configuration**: Enhanced `MCPConfig` and `MCPServerConfig` types with proper YAML tags
+  - **Better Error Handling**: More descriptive error messages when MCP configuration fails to load
+  - **Configuration File Safety**: Added proper file existence checks and graceful handling of missing config files
+
+### Technical Improvements
+
+- **Code Quality**: Eliminated global variables in CLI commands in favor of structured configuration patterns
+- **Maintainability**: Each command now follows a consistent pattern: `NewXConfig()` → `getXConfigFromFlags()` → validation → execution
+- **Type Safety**: Enhanced type safety across all command configurations with proper struct definitions
+- **Testing Support**: Improved testability by removing global state dependencies
+
+### Breaking Changes
+
+- **Internal API Changes**: Command flag handling has been completely restructured (affects only internal APIs, not user-facing CLI)
+- **Configuration Structure**: MCP configuration loading mechanism has changed (existing config files remain compatible)
+
+### Dependencies
+
+- **Added**: `gopkg.in/yaml.v2` for improved YAML configuration parsing
+- **Updated**: Various dependency updates for better stability
+
+### Bug Fixes
+
+- **MCP Configuration**: Fixed issues with complex nested MCP server configurations not loading properly
+- **Flag Validation**: Improved error handling for invalid command-line flag combinations
+- **Configuration Loading**: Better handling of missing or malformed configuration files
+
 ## 0.0.26.alpha (2025-05-24)
 
 ### Major Features
