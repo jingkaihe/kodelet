@@ -231,14 +231,14 @@ func (r *BashToolResult) UserFacing() string {
 	}
 
 	buf := bytes.NewBufferString(fmt.Sprintf("Command: %s\n", r.command))
-	
+
 	output := r.combinedOutput
 	if output == "" {
 		buf.WriteString("(no output)")
 	} else {
 		buf.WriteString(output)
 	}
-	
+
 	return buf.String()
 }
 

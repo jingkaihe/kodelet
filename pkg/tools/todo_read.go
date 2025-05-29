@@ -152,10 +152,9 @@ func sortTodos(todos []Todo) []Todo {
 func formatTodos(todos []Todo) string {
 	formatted := ""
 	formatted += "Current todos:\n"
-	formatted += fmt.Sprintf("%-3s %-12s %-8s %s\n", "ID", "Status", "Priority", "Content")
-	// formatted += fmt.Sprintf("%-3s %-12s %-8s %s\n", "---", "------------", "--------", "-------")
+	formatted += fmt.Sprintf("%s\t%s\t%s\t%s\n", "ID", "Status", "Priority", "Content")
 	for idx, todo := range todos {
-		formatted += fmt.Sprintf("%-3d %-12s %-8s %s\n", idx+1, todo.Status, todo.Priority, todo.Content)
+		formatted += fmt.Sprintf("%d\t%s\t%s\t%s\n", idx+1, todo.Status, todo.Priority, todo.Content)
 	}
 	return formatted
 }
