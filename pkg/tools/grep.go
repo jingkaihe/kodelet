@@ -20,6 +20,66 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 )
 
+type GrepToolResult struct {
+	pattern   string
+	path      string
+	include   string
+	results   []SearchResult
+	truncated bool
+	err       string
+}
+
+func (r *GrepToolResult) GetResult() string {
+	result := FormatSearchResults(r.pattern, r.results)
+	
+	if r.truncated {
+		result += "\n\n[TRUNCATED DUE TO MAXIMUM 100 RESULT LIMIT]"
+	}
+	
+	return result
+}
+
+func (r *GrepToolResult) GetError() string {
+	return r.err
+}
+
+func (r *GrepToolResult) IsError() bool {
+	return r.err != ""
+}
+
+func (r *GrepToolResult) AssistantFacing() string {
+	var content string
+	if !r.IsError() {
+		content = r.GetResult()
+	}
+	return tooltypes.StringifyToolResult(content, r.GetError())
+}
+
+func (r *GrepToolResult) UserFacing() string {
+	if r.IsError() {
+		return r.GetError()
+	}
+
+	var result strings.Builder
+	result.WriteString(fmt.Sprintf("Search Pattern: %s\n", r.pattern))
+	if r.path != "" {
+		result.WriteString(fmt.Sprintf("Search Path: %s\n", r.path))
+	}
+	if r.include != "" {
+		result.WriteString(fmt.Sprintf("Include Pattern: %s\n", r.include))
+	}
+	result.WriteString(fmt.Sprintf("Found matches in %d files:\n\n", len(r.results)))
+	
+	content := r.GetResult()
+	result.WriteString(content)
+
+	if r.truncated {
+		result.WriteString("\n\n[TRUNCATED DUE TO MAXIMUM 100 RESULT LIMIT]")
+	}
+
+	return result.String()
+}
+
 type GrepTool struct{}
 
 type CodeSearchInput struct {
@@ -340,15 +400,21 @@ const MaxSearchResults = 100
 func (t *GrepTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResultInterface {
 	var input CodeSearchInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
-		return tooltypes.ToolResult{
-			Error: fmt.Sprintf("invalid input: %s", err),
+		return &GrepToolResult{
+			pattern: input.Pattern,
+			path:    input.Path,
+			include: input.Include,
+			err:     fmt.Sprintf("invalid input: %s", err),
 		}
 	}
 
 	path, err := os.Getwd()
 	if err != nil {
-		return tooltypes.ToolResult{
-			Error: fmt.Sprintf("failed to get current working directory: %s", err),
+		return &GrepToolResult{
+			pattern: input.Pattern,
+			path:    input.Path,
+			include: input.Include,
+			err:     fmt.Sprintf("failed to get current working directory: %s", err),
 		}
 	}
 	if input.Path != "" {
@@ -358,8 +424,11 @@ func (t *GrepTool) Execute(ctx context.Context, state tooltypes.State, parameter
 	// Search for the pattern in the specified directory
 	results, err := searchDirectory(ctx, path, input.Pattern, input.Include, CodeSearchSurroundingLines)
 	if err != nil {
-		return tooltypes.ToolResult{
-			Error: fmt.Sprintf("search failed: %s", err),
+		return &GrepToolResult{
+			pattern: input.Pattern,
+			path:    path,
+			include: input.Include,
+			err:     fmt.Sprintf("search failed: %s", err),
 		}
 	}
 
@@ -373,16 +442,12 @@ func (t *GrepTool) Execute(ctx context.Context, state tooltypes.State, parameter
 		results = results[:MaxSearchResults]
 	}
 
-	// Format the results
-	formattedResults := FormatSearchResults(input.Pattern, results)
-
-	// Add truncation notice if needed
-	if isResultsTruncated {
-		formattedResults += "\n\n[TRUNCATED DUE TO MAXIMUM 100 RESULT LIMIT]"
-	}
-
 	// Return the results
-	return tooltypes.ToolResult{
-		Result: formattedResults,
+	return &GrepToolResult{
+		pattern:   input.Pattern,
+		path:      path,
+		include:   input.Include,
+		results:   results,
+		truncated: isResultsTruncated,
 	}
 }
