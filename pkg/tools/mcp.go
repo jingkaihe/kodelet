@@ -12,12 +12,12 @@ import (
 
 	"github.com/hashicorp/go-multierror"
 	"github.com/invopop/jsonschema"
+	"github.com/jingkaihe/kodelet/pkg/logger"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/jingkaihe/kodelet/pkg/version"
 	"github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"go.opentelemetry.io/otel/attribute"
 	"gopkg.in/yaml.v2"
@@ -108,7 +108,7 @@ func NewMCPManager(config MCPConfig) (*MCPManager, error) {
 
 func (m *MCPManager) Initialize(ctx context.Context) error {
 	now := time.Now()
-	logrus.WithField("time", now).Debug("initializing mcp manager")
+	logger.G(ctx).WithField("time", now).Debug("initializing mcp manager")
 	var initClient = func(c *client.Client) error {
 		initReq := mcp.InitializeRequest{}
 		initReq.Params.ClientInfo = mcp.Implementation{
@@ -141,7 +141,7 @@ func (m *MCPManager) Initialize(ctx context.Context) error {
 		}(c)
 	}
 	wg.Wait()
-	logrus.WithField("time", time.Since(now)).Debug("mcp manager initialized")
+	logger.G(ctx).WithField("time", time.Since(now)).Debug("mcp manager initialized")
 	return nil
 }
 
@@ -149,7 +149,7 @@ func (m *MCPManager) Close(ctx context.Context) error {
 	for name, client := range m.clients {
 		err := client.Close()
 		if err != nil {
-			logrus.WithField("name", name).WithError(err).Error("failed to close mcp client")
+			logger.G(ctx).WithField("name", name).WithError(err).Error("failed to close mcp client")
 		}
 	}
 	return nil
@@ -157,7 +157,7 @@ func (m *MCPManager) Close(ctx context.Context) error {
 
 func (m *MCPManager) ListMCPTools(ctx context.Context) ([]MCPTool, error) {
 	now := time.Now()
-	logrus.WithField("time", now).Debug("listing mcp tools")
+	logger.G(ctx).WithField("time", now).Debug("listing mcp tools")
 	var listTools = func(c *client.Client, serverName string) ([]mcp.Tool, error) {
 		listToolResult, err := c.ListTools(ctx, mcp.ListToolsRequest{})
 		if err != nil {
@@ -199,7 +199,7 @@ func (m *MCPManager) ListMCPTools(ctx context.Context) ([]MCPTool, error) {
 	if multiErr != nil {
 		return nil, multiErr
 	}
-	logrus.WithField("time", time.Since(now)).Debug("mcp tools listed")
+	logger.G(ctx).WithField("time", time.Since(now)).Debug("mcp tools listed")
 	return tools, nil
 }
 
@@ -306,7 +306,7 @@ func (t *MCPTool) ValidateInput(state tooltypes.State, parameters string) error 
 func (t *MCPTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
 	var input map[string]any
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
-		return tooltypes.ToolResult{
+		return tooltypes.BaseToolResult{
 			Error: err.Error(),
 		}
 	}
@@ -316,7 +316,7 @@ func (t *MCPTool) Execute(ctx context.Context, state tooltypes.State, parameters
 	req.Params.Name = t.mcpToolName
 	result, err := t.client.CallTool(ctx, req)
 	if err != nil {
-		return tooltypes.ToolResult{
+		return tooltypes.BaseToolResult{
 			Error: err.Error(),
 		}
 	}
@@ -328,7 +328,7 @@ func (t *MCPTool) Execute(ctx context.Context, state tooltypes.State, parameters
 			content += fmt.Sprintf("%v", c)
 		}
 	}
-	return tooltypes.ToolResult{
+	return tooltypes.BaseToolResult{
 		Result: content,
 	}
 }

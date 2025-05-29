@@ -12,12 +12,42 @@ import (
 	"strings"
 
 	"github.com/invopop/jsonschema"
-	"github.com/sirupsen/logrus"
 	"go.opentelemetry.io/otel/attribute"
 
+	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/types/llm"
-	"github.com/jingkaihe/kodelet/pkg/types/tools"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
+
+type ImageRecognitionToolResult struct {
+	imagePath string
+	prompt    string
+	result    string
+	err       string
+}
+
+func (r *ImageRecognitionToolResult) GetResult() string {
+	return r.result
+}
+
+func (r *ImageRecognitionToolResult) GetError() string {
+	return r.err
+}
+
+func (r *ImageRecognitionToolResult) IsError() bool {
+	return r.err != ""
+}
+
+func (r *ImageRecognitionToolResult) AssistantFacing() string {
+	return tooltypes.StringifyToolResult(r.result, r.err)
+}
+
+func (r *ImageRecognitionToolResult) UserFacing() string {
+	if r.IsError() {
+		return r.GetError()
+	}
+	return fmt.Sprintf("Image Recognition: %s\nPrompt: %s\n%s", r.imagePath, r.prompt, r.result)
+}
 
 // ImageRecognitionTool implements the image_recognition tool for processing and understanding images.
 type ImageRecognitionTool struct{}
@@ -68,7 +98,7 @@ The output summarizes the information extracted from the image.
 }
 
 // ValidateInput validates the input parameters for the tool.
-func (t *ImageRecognitionTool) ValidateInput(state tools.State, parameters string) error {
+func (t *ImageRecognitionTool) ValidateInput(state tooltypes.State, parameters string) error {
 	input := &ImageRecognitionInput{}
 	err := json.Unmarshal([]byte(parameters), input)
 	if err != nil {
@@ -149,20 +179,24 @@ func (t *ImageRecognitionTool) validateLocalImageFile(filePath string) error {
 }
 
 // Execute executes the image_recognition tool.
-func (t *ImageRecognitionTool) Execute(ctx context.Context, state tools.State, parameters string) tools.ToolResult {
+func (t *ImageRecognitionTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
 	input := &ImageRecognitionInput{}
 	err := json.Unmarshal([]byte(parameters), input)
 	if err != nil {
-		return tools.ToolResult{
-			Error: err.Error(),
+		return &ImageRecognitionToolResult{
+			imagePath: input.ImagePath,
+			prompt:    input.Prompt,
+			err:       err.Error(),
 		}
 	}
 
 	// Validate remote URL if it's an HTTPS URL
 	if strings.HasPrefix(input.ImagePath, "https://") {
-		if err := t.validateRemoteImage(input.ImagePath); err != nil {
-			return tools.ToolResult{
-				Error: fmt.Sprintf("Failed to validate remote image: %s", err),
+		if err := t.validateRemoteImage(ctx, input.ImagePath); err != nil {
+			return &ImageRecognitionToolResult{
+				imagePath: input.ImagePath,
+				prompt:    input.Prompt,
+				err:       fmt.Sprintf("Failed to validate remote image: %s", err),
 			}
 		}
 	}
@@ -170,8 +204,10 @@ func (t *ImageRecognitionTool) Execute(ctx context.Context, state tools.State, p
 	// Get sub-agent config from context for LLM interaction
 	subAgentConfig, ok := ctx.Value(llm.SubAgentConfig{}).(llm.SubAgentConfig)
 	if !ok {
-		return tools.ToolResult{
-			Error: "sub-agent config not found in context",
+		return &ImageRecognitionToolResult{
+			imagePath: input.ImagePath,
+			prompt:    input.Prompt,
+			err:       "sub-agent config not found in context",
 		}
 	}
 
@@ -201,18 +237,22 @@ Please provide a clear and detailed response based on what you can see in the im
 	)
 
 	if err != nil {
-		return tools.ToolResult{
-			Error: fmt.Sprintf("Failed to analyze image: %s", err),
+		return &ImageRecognitionToolResult{
+			imagePath: input.ImagePath,
+			prompt:    input.Prompt,
+			err:       fmt.Sprintf("Failed to analyze image: %s", err),
 		}
 	}
 
-	return tools.ToolResult{
-		Result: analysisResult,
+	return &ImageRecognitionToolResult{
+		imagePath: input.ImagePath,
+		prompt:    input.Prompt,
+		result:    analysisResult,
 	}
 }
 
 // validateRemoteImage validates that a remote HTTPS image is accessible
-func (t *ImageRecognitionTool) validateRemoteImage(imageURL string) error {
+func (t *ImageRecognitionTool) validateRemoteImage(ctx context.Context, imageURL string) error {
 	// Create a simple HTTP HEAD request to check if the image is accessible
 	// without downloading the full content
 	client := &http.Client{
@@ -236,7 +276,7 @@ func (t *ImageRecognitionTool) validateRemoteImage(imageURL string) error {
 	// Check content type to ensure it's an image
 	contentType := resp.Header.Get("Content-Type")
 	if contentType == "" {
-		logrus.Warnf("No Content-Type header found for image URL: %s", imageURL)
+		logger.G(ctx).Warnf("No Content-Type header found for image URL: %s", imageURL)
 	} else if !strings.HasPrefix(contentType, "image/") {
 		return fmt.Errorf("URL does not point to an image (Content-Type: %s)", contentType)
 	}

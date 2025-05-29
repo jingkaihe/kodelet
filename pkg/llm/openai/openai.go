@@ -13,11 +13,11 @@ import (
 	"sync"
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/sysprompt"
 	"github.com/jingkaihe/kodelet/pkg/telemetry"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	"github.com/sashabaranov/go-openai"
-	"github.com/sirupsen/logrus"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
@@ -276,12 +276,12 @@ func (t *OpenAIThread) GetState() tooltypes.State {
 }
 
 // AddUserMessage adds a user message with optional images to the thread
-func (t *OpenAIThread) AddUserMessage(message string, imagePaths ...string) {
+func (t *OpenAIThread) AddUserMessage(ctx context.Context, message string, imagePaths ...string) {
 	contentParts := []openai.ChatMessagePart{}
 
 	// Validate image count
 	if len(imagePaths) > MaxImageCount {
-		logrus.Warnf("Too many images provided (%d), maximum is %d. Only processing first %d images", len(imagePaths), MaxImageCount, MaxImageCount)
+		logger.G(ctx).Warnf("Too many images provided (%d), maximum is %d. Only processing first %d images", len(imagePaths), MaxImageCount, MaxImageCount)
 		imagePaths = imagePaths[:MaxImageCount]
 	}
 
@@ -289,7 +289,7 @@ func (t *OpenAIThread) AddUserMessage(message string, imagePaths ...string) {
 	for _, imagePath := range imagePaths {
 		imagePart, err := t.processImage(imagePath)
 		if err != nil {
-			logrus.Warnf("Failed to process image %s: %v", imagePath, err)
+			logger.G(ctx).Warnf("Failed to process image %s: %v", imagePath, err)
 			continue
 		}
 		contentParts = append(contentParts, *imagePart)
@@ -326,9 +326,9 @@ func (t *OpenAIThread) SendMessage(
 
 	// Add user message with images if provided
 	if len(opt.Images) > 0 {
-		t.AddUserMessage(message, opt.Images...)
+		t.AddUserMessage(ctx, message, opt.Images...)
 	} else {
-		t.AddUserMessage(message)
+		t.AddUserMessage(ctx, message)
 	}
 
 	// Determine which model to use
@@ -364,14 +364,14 @@ OUTER:
 	for {
 		select {
 		case <-ctx.Done():
-			logrus.Info("stopping kodelet.llm.openai")
+			logger.G(ctx).Info("stopping kodelet.llm.openai")
 			break OUTER
 		default:
 			var exchangeOutput string
 			exchangeOutput, toolsUsed, err := t.processMessageExchange(ctx, handler, model, maxTokens, opt)
 			if err != nil {
 				if errors.Is(err, context.Canceled) {
-					logrus.Info("Request to OpenAI cancelled, stopping kodelet.llm.openai")
+					logger.G(ctx).Info("Request to OpenAI cancelled, stopping kodelet.llm.openai")
 					// Remove the last tool message from the messages if it exists
 					if len(t.messages) > 0 && isToolResultMessage(t.messages[len(t.messages)-1]) {
 						t.messages = t.messages[:len(t.messages)-1]
@@ -500,18 +500,23 @@ func (t *OpenAIThread) processMessageExchange(
 		// Execute the tool
 		runToolCtx := t.WithSubAgent(ctx, handler)
 		output := tools.RunTool(runToolCtx, t.state, toolCall.Function.Name, toolCall.Function.Arguments)
-		handler.HandleToolResult(toolCall.Function.Name, output.String())
+		handler.HandleToolResult(toolCall.Function.Name, output.UserFacing())
 
 		// For tracing, add tool execution completion event
 		telemetry.AddEvent(ctx, "tool_execution_complete",
 			attribute.String("tool_name", toolCall.Function.Name),
-			attribute.Int("result_length", len(output.String())),
+			attribute.String("result", output.AssistantFacing()),
 		)
 
 		// Add tool result to messages for next API call
+		logger.G(ctx).
+			WithField("tool_name", toolCall.Function.Name).
+			WithField("result", output.AssistantFacing()).
+			Debug("Adding tool result to messages")
+
 		t.messages = append(t.messages, openai.ChatCompletionMessage{
 			Role:       openai.ChatMessageRoleTool,
-			Content:    output.String(),
+			Content:    output.AssistantFacing(),
 			ToolCallID: toolCall.ID,
 		})
 	}

@@ -244,11 +244,11 @@ func TestBatchTool_Execute(t *testing.T) {
 		require.NoError(t, err)
 
 		result := tool.Execute(ctx, state, string(inputBytes))
-		assert.Empty(t, result.Error)
-		assert.Contains(t, result.Result, "hello")
-		assert.Contains(t, result.Result, "world")
-		assert.Contains(t, result.Result, "<invocation.0.result>")
-		assert.Contains(t, result.Result, "<invocation.1.result>")
+		assert.False(t, result.IsError())
+		assert.Contains(t, result.GetResult(), "hello")
+		assert.Contains(t, result.GetResult(), "world")
+		assert.Contains(t, result.GetResult(), "<invocation.0.result>")
+		assert.Contains(t, result.GetResult(), "<invocation.1.result>")
 	})
 
 	t.Run("one tool succeeds, one fails", func(t *testing.T) {
@@ -278,16 +278,16 @@ func TestBatchTool_Execute(t *testing.T) {
 		require.NoError(t, err)
 
 		result := tool.Execute(ctx, state, string(inputBytes))
-		assert.Contains(t, result.Result, "hello")
-		assert.Contains(t, result.Error, "Command exited with status 127")
-		assert.Contains(t, result.Result, "<invocation.0.result>")
-		assert.Contains(t, result.Error, "<invocation.1.error>")
+		assert.Contains(t, result.GetResult(), "hello")
+		assert.Contains(t, result.GetError(), "Command exited with status 127")
+		assert.Contains(t, result.GetResult(), "<invocation.0.result>")
+		assert.Contains(t, result.GetError(), "<invocation.1.error>")
 	})
 
 	t.Run("invalid JSON input", func(t *testing.T) {
 		result := tool.Execute(ctx, state, "invalid json")
-		assert.NotEmpty(t, result.Error)
-		assert.Contains(t, result.Error, "failed to unmarshal input")
+		assert.True(t, result.IsError())
+		assert.Contains(t, result.GetError(), "failed to unmarshal input")
 	})
 }
 

@@ -242,7 +242,8 @@ func TestMCPTool_Execute(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, executeResult)
 
-	assert.Equal(t, executeResult.Error, "")
-	assert.Contains(t, executeResult.String(), "<result>")
-	assert.NotContains(t, executeResult.String(), "<error>")
+	// assert.Equal(t, executeResult.Error, "")
+	assert.False(t, executeResult.IsError())
+	assert.Contains(t, executeResult.AssistantFacing(), "<result>")
+	assert.NotContains(t, executeResult.AssistantFacing(), "<error>")
 }

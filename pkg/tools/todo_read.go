@@ -12,6 +12,45 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 )
 
+type TodoToolResult struct {
+	filePath string
+	todos    []Todo
+	err      string
+	isWrite  bool
+}
+
+func (r *TodoToolResult) GetResult() string {
+	if r.IsError() {
+		return ""
+	}
+	if r.isWrite {
+		return fmt.Sprintf("Todos have been written to %s", r.filePath)
+	}
+	sortedTodos := sortTodos(r.todos)
+	return formatTodos(sortedTodos)
+}
+
+func (r *TodoToolResult) GetError() string {
+	return r.err
+}
+
+func (r *TodoToolResult) IsError() bool {
+	return r.err != ""
+}
+
+func (r *TodoToolResult) AssistantFacing() string {
+	return tooltypes.StringifyToolResult(r.GetResult(), r.GetError())
+}
+
+func (r *TodoToolResult) UserFacing() string {
+	if r.IsError() {
+		return r.GetError()
+	}
+	// Always show formatted todos for user-facing output
+	sortedTodos := sortTodos(r.todos)
+	return formatTodos(sortedTodos)
+}
+
 type TodoReadTool struct{}
 
 type TodoReadInput struct{}
@@ -62,23 +101,24 @@ func (t *TodoReadTool) Execute(ctx context.Context, state tooltypes.State, param
 
 	content, err := os.ReadFile(filePath)
 	if err != nil {
-		return tooltypes.ToolResult{
-			Error: fmt.Sprintf("failed to read todos from file: %s", err.Error()),
+		return &TodoToolResult{
+			filePath: filePath,
+			err:      fmt.Sprintf("failed to read todos from file: %s", err.Error()),
 		}
 	}
 
-	var todos TodoWriteInput
-	if err := json.Unmarshal(content, &todos); err != nil {
-		return tooltypes.ToolResult{
-			Error: fmt.Sprintf("failed to unmarshal todos from file: %s", err.Error()),
+	var todoInput TodoWriteInput
+	if err := json.Unmarshal(content, &todoInput); err != nil {
+		return &TodoToolResult{
+			filePath: filePath,
+			err:      fmt.Sprintf("failed to unmarshal todos from file: %s", err.Error()),
 		}
 	}
 
-	sortedTodos := sortTodos(todos.Todos)
-	formattedTodos := formatTodos(sortedTodos)
-
-	return tooltypes.ToolResult{
-		Result: formattedTodos,
+	return &TodoToolResult{
+		filePath: filePath,
+		todos:    todoInput.Todos,
+		isWrite:  false,
 	}
 }
 
@@ -112,7 +152,7 @@ func sortTodos(todos []Todo) []Todo {
 func formatTodos(todos []Todo) string {
 	formatted := ""
 	formatted += "Current todos:\n"
-	formatted += "ID\tStatus\tPriority\tContent\n"
+	formatted += fmt.Sprintf("%s\t%s\t%s\t%s\n", "ID", "Status", "Priority", "Content")
 	for idx, todo := range todos {
 		formatted += fmt.Sprintf("%d\t%s\t%s\t%s\n", idx+1, todo.Status, todo.Priority, todo.Content)
 	}

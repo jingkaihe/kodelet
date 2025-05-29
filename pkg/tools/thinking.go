@@ -10,6 +10,34 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 )
 
+type ThinkingToolResult struct {
+	thought string
+	err     string
+}
+
+func (r *ThinkingToolResult) GetResult() string {
+	return "Your thought have been recorded."
+}
+
+func (r *ThinkingToolResult) GetError() string {
+	return r.err
+}
+
+func (r *ThinkingToolResult) IsError() bool {
+	return r.err != ""
+}
+
+func (r *ThinkingToolResult) AssistantFacing() string {
+	return tooltypes.StringifyToolResult("Your thought have been recorded.", r.err)
+}
+
+func (r *ThinkingToolResult) UserFacing() string {
+	if r.IsError() {
+		return r.GetError()
+	}
+	return fmt.Sprintf("Thought: %s\nYour thought have been recorded.", r.thought)
+}
+
 type ThinkingTool struct{}
 
 type ThinkingInput struct {
@@ -64,7 +92,15 @@ It will not obtain new information or change the database, but just append the t
 }
 
 func (t *ThinkingTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
-	return tooltypes.ToolResult{
-		Result: "Your thought have been recorded.",
+	input := &ThinkingInput{}
+	err := json.Unmarshal([]byte(parameters), input)
+	if err != nil {
+		return &ThinkingToolResult{
+			err: err.Error(),
+		}
+	}
+
+	return &ThinkingToolResult{
+		thought: input.Thought,
 	}
 }

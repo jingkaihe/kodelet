@@ -12,12 +12,42 @@ import (
 
 	md "github.com/JohannesKaufmann/html-to-markdown"
 	"github.com/invopop/jsonschema"
-	"github.com/sirupsen/logrus"
 	"go.opentelemetry.io/otel/attribute"
 
+	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/types/llm"
-	"github.com/jingkaihe/kodelet/pkg/types/tools"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
+
+type WebFetchToolResult struct {
+	url    string
+	prompt string
+	result string
+	err    string
+}
+
+func (r *WebFetchToolResult) GetResult() string {
+	return r.result
+}
+
+func (r *WebFetchToolResult) GetError() string {
+	return r.err
+}
+
+func (r *WebFetchToolResult) IsError() bool {
+	return r.err != ""
+}
+
+func (r *WebFetchToolResult) AssistantFacing() string {
+	return tooltypes.StringifyToolResult(r.result, r.err)
+}
+
+func (r *WebFetchToolResult) UserFacing() string {
+	if r.IsError() {
+		return r.GetError()
+	}
+	return fmt.Sprintf("Web Fetch: %s\nPrompt: %s\n%s", r.url, r.prompt, r.result)
+}
 
 // WebFetchTool implements the web_fetch tool for retrieving and processing web content.
 type WebFetchTool struct{}
@@ -65,7 +95,7 @@ func (t *WebFetchTool) Description() string {
 }
 
 // ValidateInput validates the input parameters for the tool.
-func (t *WebFetchTool) ValidateInput(state tools.State, parameters string) error {
+func (t *WebFetchTool) ValidateInput(state tooltypes.State, parameters string) error {
 	input := &WebFetchInput{}
 	err := json.Unmarshal([]byte(parameters), input)
 	if err != nil {
@@ -94,27 +124,31 @@ func (t *WebFetchTool) ValidateInput(state tools.State, parameters string) error
 }
 
 // Execute executes the web_fetch tool.
-func (t *WebFetchTool) Execute(ctx context.Context, state tools.State, parameters string) tools.ToolResult {
+func (t *WebFetchTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
 	input := &WebFetchInput{}
 	err := json.Unmarshal([]byte(parameters), input)
 	if err != nil {
-		return tools.ToolResult{
-			Error: err.Error(),
+		return &WebFetchToolResult{
+			url:    input.URL,
+			prompt: input.Prompt,
+			err:    err.Error(),
 		}
 	}
 
 	// 1. Fetch the content with a custom HTTP client that handles same-domain redirects
 	content, contentType, err := fetchWithSameDomainRedirects(input.URL)
 	if err != nil {
-		return tools.ToolResult{
-			Error: fmt.Sprintf("Failed to fetch URL: %s", err),
+		return &WebFetchToolResult{
+			url:    input.URL,
+			prompt: input.Prompt,
+			err:    fmt.Sprintf("Failed to fetch URL: %s", err),
 		}
 	}
 
 	// 2. Convert HTML to Markdown if appropriate
 	var processedContent string
 	if strings.Contains(contentType, "text/html") {
-		processedContent = convertHTMLToMarkdown(content)
+		processedContent = convertHTMLToMarkdown(ctx, content)
 	} else {
 		processedContent = content
 	}
@@ -122,8 +156,10 @@ func (t *WebFetchTool) Execute(ctx context.Context, state tools.State, parameter
 	// 3. Use weak LLM to extract the requested information
 	subAgentConfig, ok := ctx.Value(llm.SubAgentConfig{}).(llm.SubAgentConfig)
 	if !ok {
-		return tools.ToolResult{
-			Error: "sub-agent config not found in context",
+		return &WebFetchToolResult{
+			url:    input.URL,
+			prompt: input.Prompt,
+			err:    "sub-agent config not found in context",
 		}
 	}
 
@@ -159,13 +195,17 @@ IMPORTANT: Make sure that you preserve all the links in the content including hy
 	)
 
 	if err != nil {
-		return tools.ToolResult{
-			Error: fmt.Sprintf("Failed to extract information: %s", err),
+		return &WebFetchToolResult{
+			url:    input.URL,
+			prompt: input.Prompt,
+			err:    fmt.Sprintf("Failed to extract information: %s", err),
 		}
 	}
 
-	return tools.ToolResult{
-		Result: extractedInfo,
+	return &WebFetchToolResult{
+		url:    input.URL,
+		prompt: input.Prompt,
+		result: extractedInfo,
 	}
 }
 
@@ -244,11 +284,11 @@ func fetchWithSameDomainRedirects(urlStr string) (string, string, error) {
 }
 
 // convertHTMLToMarkdown converts HTML content to Markdown.
-func convertHTMLToMarkdown(htmlContent string) string {
+func convertHTMLToMarkdown(ctx context.Context, htmlContent string) string {
 	converter := md.NewConverter("", true, nil)
 	markdown, err := converter.ConvertString(htmlContent)
 	if err != nil {
-		logrus.WithError(err).Warn("Failed to convert HTML to Markdown, returning raw HTML")
+		logger.G(ctx).WithError(err).Warn("Failed to convert HTML to Markdown, returning raw HTML")
 		return htmlContent
 	}
 	return markdown

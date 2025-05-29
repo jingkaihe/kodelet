@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -8,10 +9,69 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aymanbagabas/go-udiff"
 	"github.com/invopop/jsonschema"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"go.opentelemetry.io/otel/attribute"
 )
+
+type FileMultiEditToolResult struct {
+	filename       string
+	oldText        string
+	newText        string
+	oldContent     string
+	newContent     string
+	occurrence     int
+	actualReplaced int
+	err            string
+}
+
+func (r *FileMultiEditToolResult) GetResult() string {
+	if r.IsError() {
+		return ""
+	}
+	return fmt.Sprintf("File %s has been edited successfully. Replaced %d occurrence(s) of the text.", r.filename, r.actualReplaced)
+}
+
+func (r *FileMultiEditToolResult) GetError() string {
+	return r.err
+}
+
+func (r *FileMultiEditToolResult) IsError() bool {
+	return r.err != ""
+}
+
+func (r *FileMultiEditToolResult) AssistantFacing() string {
+	if r.IsError() {
+		return tooltypes.StringifyToolResult("", r.GetError())
+	}
+
+	formattedEdit := ""
+	if r.actualReplaced > 0 && r.newText != "" {
+		// Use the same FormatEditedBlock function as FileEditTool
+		formattedEdit = FormatEditedBlock(r.oldContent, r.oldText, r.newText)
+	}
+
+	result := fmt.Sprintf("File %s has been edited successfully. Replaced %d occurrence(s) of the text.\n\nExample of edited code block:\n%s",
+		r.filename, r.actualReplaced, formattedEdit)
+	return tooltypes.StringifyToolResult(result, "")
+}
+
+func (r *FileMultiEditToolResult) UserFacing() string {
+	if r.IsError() {
+		return r.GetError()
+	}
+
+	buf := bytes.NewBufferString(fmt.Sprintf("File Multi Edit: %s\n", r.filename))
+	buf.WriteString(fmt.Sprintf("Replaced %d occurrence(s) of the text\n\n", r.actualReplaced))
+
+	buf.WriteString("Diff:\n")
+
+	out := udiff.Unified(r.filename, r.filename, r.oldContent, r.newContent)
+	buf.WriteString(out)
+
+	return buf.String()
+}
 
 type FileMultiEditTool struct{}
 
@@ -123,15 +183,17 @@ func (t *FileMultiEditTool) ValidateInput(state tooltypes.State, parameters stri
 func (t *FileMultiEditTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
 	var input FileMultiEditInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
-		return tooltypes.ToolResult{
-			Error: fmt.Sprintf("invalid input: %s", err),
+		return &FileMultiEditToolResult{
+			filename: input.FilePath,
+			err:      fmt.Sprintf("invalid input: %s", err),
 		}
 	}
 
 	b, err := os.ReadFile(input.FilePath)
 	if err != nil {
-		return tooltypes.ToolResult{
-			Error: fmt.Sprintf("failed to read the file: %s", err),
+		return &FileMultiEditToolResult{
+			filename: input.FilePath,
+			err:      fmt.Sprintf("failed to read the file: %s", err),
 		}
 	}
 
@@ -145,8 +207,9 @@ func (t *FileMultiEditTool) Execute(ctx context.Context, state tooltypes.State, 
 
 	err = os.WriteFile(input.FilePath, []byte(content), 0644)
 	if err != nil {
-		return tooltypes.ToolResult{
-			Error: fmt.Sprintf("failed to write the file: %s", err),
+		return &FileMultiEditToolResult{
+			filename: input.FilePath,
+			err:      fmt.Sprintf("failed to write the file: %s", err),
 		}
 	}
 	state.SetFileLastAccessed(input.FilePath, time.Now())
@@ -154,15 +217,13 @@ func (t *FileMultiEditTool) Execute(ctx context.Context, state tooltypes.State, 
 	// Count how many occurrences were actually replaced
 	actualReplaced := strings.Count(originalContent, oldText) - strings.Count(content, oldText)
 
-	// Format one instance of the edited block with line numbers
-	formattedEdit := ""
-	if actualReplaced > 0 {
-		// Use the same FormatEditedBlock function as FileEditTool
-		formattedEdit = FormatEditedBlock(originalContent, oldText, newText)
-	}
-
-	return tooltypes.ToolResult{
-		Result: fmt.Sprintf("File %s has been edited successfully. Replaced %d occurrence(s) of the text.\n\nExample of edited code block:\n%s",
-			input.FilePath, actualReplaced, formattedEdit),
+	return &FileMultiEditToolResult{
+		filename:       input.FilePath,
+		oldText:        oldText,
+		newText:        newText,
+		oldContent:     originalContent,
+		newContent:     content,
+		occurrence:     occurrence,
+		actualReplaced: actualReplaced,
 	}
 }

@@ -146,8 +146,8 @@ func TestFileEditTool_Execute(t *testing.T) {
 		params, _ := json.Marshal(input)
 		result := tool.Execute(context.Background(), mockState, string(params))
 
-		assert.Empty(t, result.Error)
-		assert.Contains(t, result.Result, "has been edited successfully")
+		assert.False(t, result.IsError())
+		assert.Contains(t, result.GetResult(), "has been edited successfully")
 
 		// Verify the file was actually edited
 		updatedContent, err := os.ReadFile(tmpfile.Name())
@@ -166,15 +166,15 @@ func TestFileEditTool_Execute(t *testing.T) {
 		params, _ := json.Marshal(input)
 		result := tool.Execute(context.Background(), NewBasicState(context.TODO()), string(params))
 
-		assert.Contains(t, result.Error, "failed to read the file")
-		assert.Empty(t, result.Result)
+		assert.Contains(t, result.GetError(), "failed to read the file")
+		assert.Empty(t, result.GetResult())
 	})
 
 	// Test invalid JSON
 	t.Run("invalid JSON", func(t *testing.T) {
 		result := tool.Execute(context.Background(), NewBasicState(context.TODO()), "invalid json")
-		assert.NotEmpty(t, result.Error)
-		assert.Empty(t, result.Result)
+		assert.True(t, result.IsError())
+		assert.Empty(t, result.GetResult())
 	})
 }
 
@@ -205,7 +205,7 @@ func TestFileEditTool_MultipleEdits(t *testing.T) {
 	}
 	firstParams, _ := json.Marshal(firstInput)
 	firstResult := tool.Execute(context.Background(), mockState, string(firstParams))
-	assert.Empty(t, firstResult.Error)
+	assert.False(t, firstResult.IsError())
 
 	// Second edit
 	secondInput := FileEditInput{
@@ -215,7 +215,7 @@ func TestFileEditTool_MultipleEdits(t *testing.T) {
 	}
 	secondParams, _ := json.Marshal(secondInput)
 	secondResult := tool.Execute(context.Background(), mockState, string(secondParams))
-	assert.Empty(t, secondResult.Error)
+	assert.False(t, secondResult.IsError())
 
 	// Verify both edits were applied
 	updatedContent, err := os.ReadFile(tmpfile.Name())
@@ -328,9 +328,9 @@ func TestFileEditTool_ExecuteOutputsFormattedEdit(t *testing.T) {
 	result := tool.Execute(context.Background(), mockState, string(params))
 
 	// Check that the result contains formatted output
-	assert.Empty(t, result.Error)
-	assert.Contains(t, result.Result, "has been edited successfully")
-	assert.Contains(t, result.Result, "3: Modified Line 3")
+	assert.False(t, result.IsError())
+	assert.Contains(t, result.GetResult(), "has been edited successfully")
+	assert.Contains(t, result.AssistantFacing(), "3: Modified Line 3")
 }
 
 func TestFileEditTool_ExecuteWithMultilineEdits(t *testing.T) {
@@ -390,14 +390,15 @@ func main() {
 	result := tool.Execute(context.Background(), mockState, string(params))
 
 	// Check that the result contains formatted output with correct line numbers
-	assert.Empty(t, result.Error)
-	assert.Contains(t, result.Result, "has been edited successfully")
+	assert.False(t, result.IsError())
+	assert.Contains(t, result.GetResult(), "has been edited successfully")
 
-	// Check for formatted lines with correct line numbers
-	assert.Contains(t, result.Result, "9: 	// Process data with sum")
-	assert.Contains(t, result.Result, "10: 	data := []int{1, 2, 3, 4, 5}")
-	assert.Contains(t, result.Result, "11: 	sum := 0")
-	assert.Contains(t, result.Result, "15: 	fmt.Println(\"Sum:\", sum)")
+	// Check for formatted lines with correct line numbers in AssistantFacing
+	assistantResult := result.AssistantFacing()
+	assert.Contains(t, assistantResult, "9: 	// Process data with sum")
+	assert.Contains(t, assistantResult, "10: 	data := []int{1, 2, 3, 4, 5}")
+	assert.Contains(t, assistantResult, "11: 	sum := 0")
+	assert.Contains(t, assistantResult, "15: 	fmt.Println(\"Sum:\", sum)")
 
 	// Verify the file was actually edited
 	updatedContent, err := os.ReadFile(tmpfile.Name())

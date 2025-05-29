@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -12,6 +13,87 @@ import (
 	"github.com/pkg/errors"
 	"go.opentelemetry.io/otel/attribute"
 )
+
+type BatchToolResult struct {
+	description string
+	toolResults []tooltypes.ToolResult
+}
+
+func (r *BatchToolResult) GetResult() string {
+	var results []string
+	for idx, toolResult := range r.toolResults {
+		if !toolResult.IsError() {
+			results = append(results, fmt.Sprintf(`<invocation.%d.result>
+%s
+</invocation.%d.result>
+`, idx, toolResult.GetResult(), idx))
+		}
+	}
+	return strings.Join(results, "\n")
+}
+
+func (r *BatchToolResult) GetError() string {
+	var errors []string
+	for idx, toolResult := range r.toolResults {
+		if toolResult.IsError() {
+			errors = append(errors, fmt.Sprintf(`<invocation.%d.error>
+%s
+</invocation.%d.error>
+`, idx, toolResult.GetError(), idx))
+		}
+	}
+	return strings.Join(errors, "\n")
+}
+
+func (r *BatchToolResult) IsError() bool {
+	for _, toolResult := range r.toolResults {
+		if toolResult.IsError() {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *BatchToolResult) AssistantFacing() string {
+	// return tooltypes.StringifyToolResult(r.GetResult(), r.GetError())
+	results := bytes.NewBufferString("")
+	for idx, toolResult := range r.toolResults {
+		if toolResult.GetResult() != "" {
+			results.WriteString(fmt.Sprintf(`<invocation.%d.result>
+%s
+</invocation.%d.result>
+`, idx, toolResult.GetResult(), idx))
+		}
+
+		if toolResult.IsError() {
+			results.WriteString(fmt.Sprintf(`<invocation.%d.error>
+%s
+</invocation.%d.error>
+`, idx, toolResult.GetError(), idx))
+		}
+	}
+
+	return results.String()
+}
+
+func (r *BatchToolResult) UserFacing() string {
+	if r.IsError() {
+		return r.GetError()
+	}
+
+	var results []string
+	for _, toolResult := range r.toolResults {
+		if !toolResult.IsError() {
+			results = append(results, toolResult.UserFacing())
+		}
+	}
+
+	content := strings.Join(results, "\n\n")
+	if content == "" {
+		return "Batch operation completed successfully"
+	}
+	return fmt.Sprintf("Batch: %s\n%s", r.description, content)
+}
 
 type BatchTool struct{}
 
@@ -28,12 +110,12 @@ type Invocation struct {
 func (inv *Invocation) invoke(ctx context.Context, state tooltypes.State) tooltypes.ToolResult {
 	_, err := findTool(inv.ToolName, state)
 	if err != nil {
-		return tooltypes.ToolResult{Error: errors.Wrap(err, "failed to find tool").Error()}
+		return tooltypes.BaseToolResult{Error: errors.Wrap(err, "failed to find tool").Error()}
 	}
 
 	p, err := json.Marshal(inv.Parameters)
 	if err != nil {
-		return tooltypes.ToolResult{Error: errors.Wrap(err, "failed to encode parameters").Error()}
+		return tooltypes.BaseToolResult{Error: errors.Wrap(err, "failed to encode parameters").Error()}
 	}
 
 	return RunTool(ctx, state, inv.ToolName, string(p))
@@ -154,7 +236,12 @@ func (t *BatchTool) ValidateInput(state tooltypes.State, parameters string) erro
 func (t *BatchTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
 	var input BatchToolInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
-		return tooltypes.ToolResult{Error: errors.Wrap(err, "failed to unmarshal input").Error()}
+		return &BatchToolResult{
+			description: input.Description,
+			toolResults: []tooltypes.ToolResult{
+				tooltypes.BaseToolResult{Error: errors.Wrap(err, "failed to unmarshal input").Error()},
+			},
+		}
 	}
 
 	toolResults := make([]tooltypes.ToolResult, len(input.Invocations))
@@ -170,28 +257,9 @@ func (t *BatchTool) Execute(ctx context.Context, state tooltypes.State, paramete
 
 	wg.Wait()
 
-	var (
-		results []string
-		errors  []string
-	)
-
-	for idx, toolResult := range toolResults {
-		if toolResult.Error != "" {
-			errors = append(errors, fmt.Sprintf(`<invocation.%d.error>
-%s
-</invocation.%d.error>
-`, idx, toolResult.Error, idx))
-		} else {
-			results = append(results, fmt.Sprintf(`<invocation.%d.result>
-%s
-</invocation.%d.result>
-`, idx, toolResult.Result, idx))
-		}
-	}
-
-	return tooltypes.ToolResult{
-		Result: strings.Join(results, "\n"),
-		Error:  strings.Join(errors, "\n"),
+	return &BatchToolResult{
+		description: input.Description,
+		toolResults: toolResults,
 	}
 }
 

@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -419,7 +420,7 @@ func TestAddUserMessageWithImages(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			initialMessageCount := len(thread.messages)
 
-			thread.AddUserMessage(test.message, test.imagePaths...)
+			thread.AddUserMessage(context.Background(), test.message, test.imagePaths...)
 
 			// Check that a message was added
 			assert.Equal(t, initialMessageCount+1, len(thread.messages))
@@ -458,7 +459,7 @@ func TestAddUserMessageWithTooManyImages(t *testing.T) {
 	}
 
 	initialMessageCount := len(thread.messages)
-	thread.AddUserMessage("Too many images", imagePaths...)
+	thread.AddUserMessage(context.Background(), "Too many images", imagePaths...)
 
 	// Check that a message was added
 	assert.Equal(t, initialMessageCount+1, len(thread.messages))

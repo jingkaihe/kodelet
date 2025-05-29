@@ -18,12 +18,20 @@ type Tool interface {
 	TracingKVs(parameters string) ([]attribute.KeyValue, error)
 }
 
-type ToolResult struct {
+type ToolResult interface {
+	AssistantFacing() string
+	UserFacing() string
+	IsError() bool
+	GetError() string  // xxx: to be removed
+	GetResult() string // xxx: to be removed
+}
+
+type BaseToolResult struct {
 	Result string `json:"result"`
 	Error  string `json:"error"`
 }
 
-func (t *ToolResult) String() string {
+func (t BaseToolResult) AssistantFacing() string {
 	out := ""
 	if t.Error != "" {
 		out = fmt.Sprintf(`<error>
@@ -36,6 +44,39 @@ func (t *ToolResult) String() string {
 %s
 </result>
 `, t.Result)
+	}
+	return out
+}
+
+func (t BaseToolResult) UserFacing() string {
+	return t.AssistantFacing()
+}
+
+func (t BaseToolResult) IsError() bool {
+	return t.Error != ""
+}
+
+func (t BaseToolResult) GetError() string {
+	return t.Error
+}
+
+func (t BaseToolResult) GetResult() string {
+	return t.Result
+}
+
+func StringifyToolResult(result, err string) string {
+	out := ""
+	if err != "" {
+		out = fmt.Sprintf(`<error>
+%s
+</error>
+`, err)
+	}
+	if result != "" {
+		out += fmt.Sprintf(`<result>
+%s
+</result>
+`, result)
 	}
 	return out
 }

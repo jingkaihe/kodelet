@@ -18,6 +18,68 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 )
 
+type GlobToolResult struct {
+	pattern   string
+	path      string
+	files     []string
+	truncated bool
+	err       string
+}
+
+func (r *GlobToolResult) GetResult() string {
+	var result strings.Builder
+	for _, file := range r.files {
+		result.WriteString(file)
+		result.WriteString("\n")
+	}
+
+	if r.truncated {
+		result.WriteString("\n[Results truncated to 100 files. Please refine your pattern to narrow down the results.]\n")
+	}
+
+	return result.String()
+}
+
+func (r *GlobToolResult) GetError() string {
+	return r.err
+}
+
+func (r *GlobToolResult) IsError() bool {
+	return r.err != ""
+}
+
+func (r *GlobToolResult) AssistantFacing() string {
+	var content string
+	if !r.IsError() {
+		content = r.GetResult()
+	}
+	return tooltypes.StringifyToolResult(content, r.GetError())
+}
+
+func (r *GlobToolResult) UserFacing() string {
+	if r.IsError() {
+		return r.GetError()
+	}
+
+	var result strings.Builder
+	result.WriteString(fmt.Sprintf("Glob Pattern: %s\n", r.pattern))
+	if r.path != "" {
+		result.WriteString(fmt.Sprintf("Search Path: %s\n", r.path))
+	}
+	result.WriteString(fmt.Sprintf("Found %d files:\n", len(r.files)))
+
+	for _, file := range r.files {
+		result.WriteString(file)
+		result.WriteString("\n")
+	}
+
+	if r.truncated {
+		result.WriteString("\n[Results truncated to 100 files. Please refine your pattern to narrow down the results.]\n")
+	}
+
+	return result.String()
+}
+
 type GlobTool struct{}
 
 type GlobInput struct {
@@ -87,8 +149,10 @@ func (t *GlobTool) ValidateInput(state tooltypes.State, parameters string) error
 func (t *GlobTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
 	var input GlobInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
-		return tooltypes.ToolResult{
-			Error: err.Error(),
+		return &GlobToolResult{
+			pattern: input.Pattern,
+			path:    input.Path,
+			err:     err.Error(),
 		}
 	}
 
@@ -98,8 +162,10 @@ func (t *GlobTool) Execute(ctx context.Context, state tooltypes.State, parameter
 	if searchPath == "" {
 		searchPath, err = os.Getwd()
 		if err != nil {
-			return tooltypes.ToolResult{
-				Error: err.Error(),
+			return &GlobToolResult{
+				pattern: input.Pattern,
+				path:    input.Path,
+				err:     err.Error(),
 			}
 		}
 	}
@@ -110,7 +176,7 @@ func (t *GlobTool) Execute(ctx context.Context, state tooltypes.State, parameter
 		modTime time.Time
 	}
 
-	var files []fileInfo
+	var fileInfos []fileInfo
 	truncated := false
 
 	// Walk the file tree
@@ -130,7 +196,7 @@ func (t *GlobTool) Execute(ctx context.Context, state tooltypes.State, parameter
 			return nil // simply skip the file
 		}
 
-		files = append(files, fileInfo{
+		fileInfos = append(fileInfos, fileInfo{
 			path:    absPath,
 			modTime: info.ModTime(),
 		})
@@ -139,34 +205,34 @@ func (t *GlobTool) Execute(ctx context.Context, state tooltypes.State, parameter
 	})
 
 	if err != nil {
-		return tooltypes.ToolResult{
-			Error: fmt.Sprintf("Error walking the path: %v", err),
+		return &GlobToolResult{
+			pattern: input.Pattern,
+			path:    searchPath,
+			err:     fmt.Sprintf("Error walking the path: %v", err),
 		}
 	}
 
 	// Sort files by modification time (newest first)
-	sort.Slice(files, func(i, j int) bool {
-		return files[i].modTime.After(files[j].modTime)
+	sort.Slice(fileInfos, func(i, j int) bool {
+		return fileInfos[i].modTime.After(fileInfos[j].modTime)
 	})
 
 	// Limit results to 100 files
-	if len(files) > 100 {
-		files = files[:100]
+	if len(fileInfos) > 100 {
+		fileInfos = fileInfos[:100]
 		truncated = true
 	}
 
-	// Prepare the result
-	var result strings.Builder
-	for _, file := range files {
-		result.WriteString(file.path)
-		result.WriteString("\n")
+	// Extract file paths
+	var files []string
+	for _, fileInfo := range fileInfos {
+		files = append(files, fileInfo.path)
 	}
 
-	if truncated {
-		result.WriteString("\n[Results truncated to 100 files. Please refine your pattern to narrow down the results.]\n")
-	}
-
-	return tooltypes.ToolResult{
-		Result: result.String(),
+	return &GlobToolResult{
+		pattern:   input.Pattern,
+		path:      searchPath,
+		files:     files,
+		truncated: truncated,
 	}
 }

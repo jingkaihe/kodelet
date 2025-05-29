@@ -26,6 +26,7 @@ Kodelet is a lightweight CLI tool that helps with software engineering tasks. It
 │   ├── llm/             # LLM client for AI interactions
 │   │   ├── anthropic/   # Anthropic Claude API client
 │   │   └── openai/      # OpenAI API client
+│   ├── logger/          # Context-aware structured logging
 │   ├── sysprompt/       # System prompt configuration
 │   │   └── templates/   # Prompt templates
 │   │       └── components/ # Template components
@@ -49,6 +50,7 @@ The codebase follows a modular structure with separation of concerns between LLM
 - **Go 1.24.2** - Programming language
 - **Anthropic SDK** - For Claude AI integration (v0.2.0-beta.3)
 - **OpenAI SDK** - For GPT models integration
+- **Logrus** - Structured logging library
 - **Charm libraries** - TUI components
 - **Cobra & Viper** - CLI commands and configuration
 - **Docker** - For containerization
@@ -110,6 +112,9 @@ make help           # Display help
 
 1. **Environment Variables**:
    ```bash
+   # Logging configuration
+   export KODELET_LOG_LEVEL="info"  # panic, fatal, error, warn, info, debug, trace
+
    # LLM configuration - Anthropic
    export ANTHROPIC_API_KEY="sk-ant-api..."
    export KODELET_PROVIDER="anthropic"  # Optional, detected from model name
@@ -126,6 +131,9 @@ make help           # Display help
 
 2. **Configuration File** (`config.yaml`):
    ```yaml
+   # Logging configuration
+   log_level: "info"  # panic, fatal, error, warn, info, debug, trace
+
    # Anthropic configuration
    provider: "anthropic"
    model: "claude-sonnet-4-0"
@@ -158,6 +166,9 @@ make help           # Display help
 
 3. **Command Line Flags**:
    ```bash
+   # Log level example
+   kodelet run --log-level debug "query"
+
    # Anthropic example
    kodelet run --provider "anthropic" --model "claude-3-opus-20240229" --max-tokens 4096 --weak-model-max-tokens 2048 "query"
 
@@ -174,6 +185,26 @@ Kodelet uses a `Thread` abstraction for all interactions with LLM providers (Ant
 - Supports provider-specific features (thinking for Claude, reasoning effort for OpenAI)
 
 The architecture provides a unified approach for both interactive and one-shot uses with token usage tracking for all API calls across different providers.
+
+## Logger Package
+
+Context-aware structured logging using [logrus](https://github.com/sirupsen/logrus) with automatic context propagation.
+
+### Key APIs
+- **`logger.G(ctx)`**: Get logger from context (ALWAYS use this)
+- **`logger.WithLogger(ctx, logger)`**: Store logger in context
+- **`log.WithFields()`**: Add contextual fields to logger
+
+### Usage
+```go
+// Basic usage
+log := logger.G(ctx)
+log.Info("Processing request")
+
+// Add context fields
+enrichedLog := log.WithFields(logrus.Fields{"request_id": id})
+ctx = logger.WithLogger(ctx, enrichedLog)
+```
 
 ## Image Input Support
 

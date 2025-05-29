@@ -1,3 +1,6 @@
+// Package llm provides a unified interface for Large Language Model providers.
+// It abstracts different LLM providers (Anthropic Claude, OpenAI GPT) behind
+// a common Thread interface for consistent interaction patterns.
 package llm
 
 import (

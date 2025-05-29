@@ -119,8 +119,8 @@ func TestFileWriteTool_Execute(t *testing.T) {
 		require.NoError(t, err)
 
 		result := tool.Execute(ctx, state, string(inputJSON))
-		assert.Empty(t, result.Error)
-		assert.Contains(t, result.Result, "has been written successfully")
+		assert.False(t, result.IsError())
+		assert.Contains(t, result.GetResult(), "has been written successfully")
 
 		// Verify file content
 		content, err := os.ReadFile(testFilePath)
@@ -146,7 +146,7 @@ func TestFileWriteTool_Execute(t *testing.T) {
 		require.NoError(t, err)
 
 		result := tool.Execute(ctx, state, string(inputJSON))
-		assert.Empty(t, result.Error)
+		assert.False(t, result.IsError())
 
 		// Verify file content
 		content, err := os.ReadFile(testFilePath)
@@ -156,8 +156,8 @@ func TestFileWriteTool_Execute(t *testing.T) {
 
 	t.Run("invalid JSON input", func(t *testing.T) {
 		result := tool.Execute(ctx, state, "invalid json")
-		assert.NotEmpty(t, result.Error)
-		assert.Contains(t, result.Error, "invalid input")
+		assert.True(t, result.IsError())
+		assert.Contains(t, result.GetError(), "invalid input")
 	})
 
 	t.Run("non-existent directory", func(t *testing.T) {
@@ -172,7 +172,7 @@ func TestFileWriteTool_Execute(t *testing.T) {
 		require.NoError(t, err)
 
 		result := tool.Execute(ctx, state, string(inputJSON))
-		assert.NotEmpty(t, result.Error)
-		assert.Contains(t, result.Error, "failed to write the file")
+		assert.True(t, result.IsError())
+		assert.Contains(t, result.GetError(), "failed to write the file")
 	})
 }

@@ -1,3 +1,6 @@
+// Package main provides the entry point for the Kodelet CLI application.
+// It initializes configuration, sets up command structure with Cobra,
+// and manages application lifecycle including tracing and error handling.
 package main
 
 import (
@@ -7,8 +10,8 @@ import (
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/tools"
-	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -31,6 +34,9 @@ func init() {
 	viper.SetDefault("tracing.sampler", "ratio")
 	viper.SetDefault("tracing.ratio", 1)
 
+	// Set default logging configuration
+	viper.SetDefault("log_level", "info")
+
 	// Environment variables
 	viper.SetEnvPrefix("KODELET")
 	viper.AutomaticEnv()
@@ -47,7 +53,7 @@ func init() {
 
 	// Load config file if it exists (ignore errors if it doesn't)
 	if err := viper.ReadInConfig(); err == nil {
-		logrus.WithField("config_file", viper.ConfigFileUsed()).Debug("Using config file")
+		logger.G(context.TODO()).WithField("config_file", viper.ConfigFileUsed()).Debug("Using config file")
 	}
 }
 
@@ -71,6 +77,15 @@ func main() {
 	// Create a context
 	ctx := context.Background()
 
+	// Initialize log level from configuration after CLI parsing
+	cobra.OnInitialize(func() {
+		if logLevel := viper.GetString("log_level"); logLevel != "" {
+			if err := logger.SetLogLevel(logLevel); err != nil {
+				logger.G(context.TODO()).WithField("error", err).WithField("log_level", logLevel).Warn("Invalid log level, using default")
+			}
+		}
+	})
+
 	// Add global flags
 	rootCmd.PersistentFlags().String("provider", "anthropic", "LLM provider to use (anthropic, openai)")
 	rootCmd.PersistentFlags().String("model", string(anthropic.ModelClaudeSonnet4_0), "LLM model to use (overrides config)")
@@ -79,6 +94,7 @@ func main() {
 	rootCmd.PersistentFlags().String("weak-model", string(anthropic.ModelClaude3_5HaikuLatest), "Weak model to use (overrides config)")
 	rootCmd.PersistentFlags().Int("weak-model-max-tokens", 8192, "Maximum tokens for weak model response (overrides config)")
 	rootCmd.PersistentFlags().String("reasoning-effort", "medium", "Reasoning effort for OpenAI models (low, medium, high)")
+	rootCmd.PersistentFlags().String("log-level", "info", "Log level (panic, fatal, error, warn, info, debug, trace)")
 
 	// Bind flags to viper
 	viper.BindPFlag("provider", rootCmd.PersistentFlags().Lookup("provider"))
@@ -89,6 +105,7 @@ func main() {
 	viper.BindPFlag("weak_model_max_tokens", rootCmd.PersistentFlags().Lookup("weak-model-max-tokens"))
 	viper.BindPFlag("reasoning_effort", rootCmd.PersistentFlags().Lookup("reasoning-effort"))
 	viper.BindPFlag("weak_reasoning_effort", rootCmd.PersistentFlags().Lookup("weak-reasoning-effort"))
+	viper.BindPFlag("log_level", rootCmd.PersistentFlags().Lookup("log-level"))
 
 	// Add subcommands
 	rootCmd.AddCommand(chatCmd)
@@ -104,7 +121,7 @@ func main() {
 	// Initialize telemetry with tracing
 	tracingShutdown, err := initTracing(ctx)
 	if err != nil {
-		logrus.WithField("error", err).Warn("Failed to initialize tracing")
+		logger.G(context.TODO()).WithField("error", err).Warn("Failed to initialize tracing")
 	} else if tracingShutdown != nil {
 		// Ensure tracing is properly shutdown
 		defer func() {
@@ -112,7 +129,7 @@ func main() {
 				// best effort to ensure graceful shutdown
 				time.Sleep(1 * time.Second)
 				if err := tracingShutdown(ctx); err != nil {
-					logrus.WithField("error", err).Warn("Failed to shutdown tracing")
+					logger.G(context.TODO()).WithField("error", err).Warn("Failed to shutdown tracing")
 				}
 			}
 		}()
@@ -135,7 +152,7 @@ func main() {
 
 	// Execute
 	if err := rootCmd.ExecuteContext(ctx); err != nil {
-		logrus.WithField("error", err).Error("Failed to execute command")
+		logger.G(context.TODO()).WithField("error", err).Error("Failed to execute command")
 		os.Exit(1)
 	}
 }

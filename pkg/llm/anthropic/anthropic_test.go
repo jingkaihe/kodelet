@@ -1,6 +1,7 @@
 package anthropic
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -181,7 +182,7 @@ func TestAddUserMessage(t *testing.T) {
 				}
 			}
 
-			thread.AddUserMessage(test.message, test.images...)
+			thread.AddUserMessage(context.Background(), test.message, test.images...)
 
 			// Should have added exactly one message
 			assert.Equal(t, initialCount+1, len(thread.messages))

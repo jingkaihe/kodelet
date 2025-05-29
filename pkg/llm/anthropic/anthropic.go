@@ -13,10 +13,10 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/sysprompt"
 	"github.com/jingkaihe/kodelet/pkg/telemetry"
 	"github.com/jingkaihe/kodelet/pkg/tools"
-	"github.com/sirupsen/logrus"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
@@ -84,12 +84,12 @@ func (t *AnthropicThread) GetState() tooltypes.State {
 }
 
 // AddUserMessage adds a user message with optional images to the thread
-func (t *AnthropicThread) AddUserMessage(message string, imagePaths ...string) {
+func (t *AnthropicThread) AddUserMessage(ctx context.Context, message string, imagePaths ...string) {
 	contentBlocks := []anthropic.ContentBlockParamUnion{}
 
 	// Validate image count
 	if len(imagePaths) > MaxImageCount {
-		logrus.Warnf("Too many images provided (%d), maximum is %d. Only processing first %d images", len(imagePaths), MaxImageCount, MaxImageCount)
+		logger.G(ctx).Warnf("Too many images provided (%d), maximum is %d. Only processing first %d images", len(imagePaths), MaxImageCount, MaxImageCount)
 		imagePaths = imagePaths[:MaxImageCount]
 	}
 
@@ -97,7 +97,7 @@ func (t *AnthropicThread) AddUserMessage(message string, imagePaths ...string) {
 	for _, imagePath := range imagePaths {
 		imageBlock, err := t.processImage(imagePath)
 		if err != nil {
-			logrus.Warnf("Failed to process image %s: %v", imagePath, err)
+			logger.G(ctx).Warnf("Failed to process image %s: %v", imagePath, err)
 			continue
 		}
 		contentBlocks = append(contentBlocks, *imageBlock)
@@ -153,7 +153,7 @@ func (t *AnthropicThread) SendMessage(
 	}
 
 	// Add user message with images if provided
-	t.AddUserMessage(message, opt.Images...)
+	t.AddUserMessage(ctx, message, opt.Images...)
 
 	// Determine which model to use
 	model, maxTokens := t.getModelAndTokens(opt)
@@ -169,14 +169,14 @@ OUTER:
 	for {
 		select {
 		case <-ctx.Done():
-			logrus.Info("stopping kodelet.llm.anthropic")
+			logger.G(ctx).Info("stopping kodelet.llm.anthropic")
 			break OUTER
 		default:
 			var exchangeOutput string
 			exchangeOutput, toolsUsed, err := t.processMessageExchange(ctx, handler, model, maxTokens, systemPrompt, opt)
 			if err != nil {
 				if errors.Is(err, context.Canceled) {
-					logrus.Info("Request to anthropic cancelled, stopping kodelet.llm.anthropic")
+					logger.G(ctx).Info("Request to anthropic cancelled, stopping kodelet.llm.anthropic")
 					// remove the last tool use from the messages
 					if len(t.messages) > 0 {
 						lastMsg := t.messages[len(t.messages)-1]
@@ -307,17 +307,22 @@ func (t *AnthropicThread) processMessageExchange(
 
 			runToolCtx := t.WithSubAgent(ctx, handler)
 			output := tools.RunTool(runToolCtx, t.state, block.Name, string(variant.JSON.Input.Raw()))
-			handler.HandleToolResult(block.Name, output.String())
+			handler.HandleToolResult(block.Name, output.UserFacing())
 
 			// For tracing, add tool execution completion event
 			telemetry.AddEvent(ctx, "tool_execution_complete",
 				attribute.String("tool_name", block.Name),
-				attribute.Int("result_length", len(output.String())),
+				attribute.String("result", output.AssistantFacing()),
 			)
 
 			// Add tool result to messages for next API call
+			logger.G(ctx).
+				WithField("tool_name", block.Name).
+				WithField("result", output.AssistantFacing()).
+				Debug("Adding tool result to messages")
+
 			t.messages = append(t.messages, anthropic.NewUserMessage(
-				anthropic.NewToolResultBlock(block.ID, output.String(), false),
+				anthropic.NewToolResultBlock(block.ID, output.AssistantFacing(), false),
 			))
 		}
 	}

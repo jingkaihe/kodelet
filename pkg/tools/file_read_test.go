@@ -121,9 +121,9 @@ func TestFileReadTool_Execute(t *testing.T) {
 		params, _ := json.Marshal(input)
 		result := tool.Execute(context.Background(), NewBasicState(context.TODO()), string(params))
 
-		assert.Empty(t, result.Error)
-		assert.Contains(t, result.Result, "0: Line 1")
-		assert.Contains(t, result.Result, "4: Line 5")
+		assert.False(t, result.IsError())
+		assert.Contains(t, result.GetResult(), "0: Line 1")
+		assert.Contains(t, result.GetResult(), "4: Line 5")
 	})
 
 	// Test reading with offset
@@ -135,10 +135,10 @@ func TestFileReadTool_Execute(t *testing.T) {
 		params, _ := json.Marshal(input)
 		result := tool.Execute(context.Background(), NewBasicState(context.TODO()), string(params))
 
-		assert.Empty(t, result.Error)
-		assert.Contains(t, result.Result, "2: Line 3")
-		assert.Contains(t, result.Result, "4: Line 5")
-		assert.NotContains(t, result.Result, "0: Line 1")
+		assert.False(t, result.IsError())
+		assert.Contains(t, result.GetResult(), "2: Line 3")
+		assert.Contains(t, result.GetResult(), "4: Line 5")
+		assert.NotContains(t, result.GetResult(), "0: Line 1")
 	})
 
 	// Test reading with offset beyond file length
@@ -150,8 +150,8 @@ func TestFileReadTool_Execute(t *testing.T) {
 		params, _ := json.Marshal(input)
 		result := tool.Execute(context.Background(), NewBasicState(context.TODO()), string(params))
 
-		assert.Contains(t, result.Error, "File has only 5 lines")
-		assert.Empty(t, result.Result)
+		assert.Contains(t, result.GetError(), "File has only 5 lines")
+		assert.Empty(t, result.GetResult())
 	})
 
 	// Test reading non-existent file
@@ -163,15 +163,15 @@ func TestFileReadTool_Execute(t *testing.T) {
 		params, _ := json.Marshal(input)
 		result := tool.Execute(context.Background(), NewBasicState(context.TODO()), string(params))
 
-		assert.Contains(t, result.Error, "Failed to open file")
-		assert.Empty(t, result.Result)
+		assert.Contains(t, result.GetError(), "Failed to open file")
+		assert.Empty(t, result.GetResult())
 	})
 
 	// Test with invalid JSON
 	t.Run("invalid JSON", func(t *testing.T) {
 		result := tool.Execute(context.Background(), NewBasicState(context.TODO()), "invalid json")
-		assert.NotEmpty(t, result.Error)
-		assert.Empty(t, result.Result)
+		assert.True(t, result.IsError())
+		assert.Empty(t, result.GetResult())
 	})
 }
 
@@ -206,13 +206,13 @@ func TestFileReadTool_Line_Padding(t *testing.T) {
 		params, _ := json.Marshal(input)
 		result := tool.Execute(context.Background(), NewBasicState(context.TODO()), string(params))
 
-		assert.Empty(t, result.Error)
+		assert.False(t, result.IsError())
 
 		// The padding is dynamic, so the exact space count may vary
 		// Let's just check that the format is correct instead of exact spacing
-		assert.Contains(t, result.Result, "0: Line 1")
-		assert.Contains(t, result.Result, "10: Line 11")
-		assert.Contains(t, result.Result, "99: Line 100")
+		assert.Contains(t, result.GetResult(), "0: Line 1")
+		assert.Contains(t, result.GetResult(), "10: Line 11")
+		assert.Contains(t, result.GetResult(), "99: Line 100")
 	})
 
 	// Test with offset to see if padding is calculated properly
@@ -224,11 +224,11 @@ func TestFileReadTool_Line_Padding(t *testing.T) {
 		params, _ := json.Marshal(input)
 		result := tool.Execute(context.Background(), NewBasicState(context.TODO()), string(params))
 
-		assert.Empty(t, result.Error)
+		assert.False(t, result.IsError())
 
 		// With offset 50, line numbers should start at 50
-		assert.Contains(t, result.Result, "50: Line 51")
-		assert.Contains(t, result.Result, "99: Line 100")
+		assert.Contains(t, result.GetResult(), "50: Line 51")
+		assert.Contains(t, result.GetResult(), "99: Line 100")
 	})
 }
 
@@ -267,9 +267,9 @@ func TestFileReadTool_MaxOutputBytes(t *testing.T) {
 		params, _ := json.Marshal(input)
 		result := tool.Execute(context.Background(), NewBasicState(context.TODO()), string(params))
 
-		assert.Empty(t, result.Error)
+		assert.False(t, result.IsError())
 		// Verify the content starts at the correct offset
-		assert.Contains(t, result.Result, "5: Line 5")
+		assert.Contains(t, result.GetResult(), "5: Line 5")
 	})
 
 	// Test skipping through byte count tracking during offset scanning
@@ -299,8 +299,8 @@ func TestFileReadTool_MaxOutputBytes(t *testing.T) {
 		result := tool.Execute(context.Background(), NewBasicState(context.TODO()), string(params))
 
 		// Since our file is large, we should see the truncated message
-		assert.Empty(t, result.Error)
-		assert.Contains(t, result.Result, fmt.Sprintf("%d: Line %d", validOffset, validOffset))
-		assert.Contains(t, result.Result, "truncated due to max output bytes limit")
+		assert.False(t, result.IsError())
+		assert.Contains(t, result.GetResult(), fmt.Sprintf("%d: Line %d", validOffset, validOffset))
+		assert.Contains(t, result.GetResult(), "truncated due to max output bytes limit")
 	})
 }

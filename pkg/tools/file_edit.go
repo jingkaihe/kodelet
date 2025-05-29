@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -8,11 +9,69 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aymanbagabas/go-udiff"
 	"github.com/invopop/jsonschema"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/jingkaihe/kodelet/pkg/utils"
 	"go.opentelemetry.io/otel/attribute"
 )
+
+type FileEditToolResult struct {
+	filename   string
+	oldText    string
+	newText    string
+	oldContent string
+	newContent string
+	startLine  int
+	endLine    int
+	err        string
+}
+
+func (r *FileEditToolResult) GetResult() string {
+	if r.IsError() {
+		return ""
+	}
+	return fmt.Sprintf("File %s has been edited successfully", r.filename)
+}
+
+func (r *FileEditToolResult) GetError() string {
+	return r.err
+}
+
+func (r *FileEditToolResult) IsError() bool {
+	return r.err != ""
+}
+
+func (r *FileEditToolResult) AssistantFacing() string {
+	if r.IsError() {
+		return tooltypes.StringifyToolResult("", r.GetError())
+	}
+
+	formattedEdit := ""
+	if r.newText != "" {
+		newLines := strings.Split(r.newText, "\n")
+		formattedEdit = utils.ContentWithLineNumber(newLines, r.startLine)
+	}
+
+	result := fmt.Sprintf("File %s has been edited successfully\n\nEdited code block:\n%s", r.filename, formattedEdit)
+	return tooltypes.StringifyToolResult(result, "")
+}
+
+func (r *FileEditToolResult) UserFacing() string {
+	if r.IsError() {
+		return r.GetError()
+	}
+
+	buf := bytes.NewBufferString(fmt.Sprintf("File Edit: %s\n", r.filename))
+	buf.WriteString(fmt.Sprintf("Lines %d-%d\n\n", r.startLine, r.endLine))
+
+	buf.WriteString("Diff:\n")
+
+	out := udiff.Unified(r.filename, r.filename, r.oldContent, r.newContent)
+	buf.WriteString(out)
+
+	return buf.String()
+}
 
 type FileEditTool struct{}
 
@@ -120,6 +179,49 @@ func (t *FileEditTool) ValidateInput(state tooltypes.State, parameters string) e
 	return nil
 }
 
+// findLineNumbers finds the start and end line numbers for the given old text in the content
+func findLineNumbers(content, oldText string) (int, int) {
+	lines := strings.Split(content, "\n")
+	oldTextLines := strings.Split(oldText, "\n")
+
+	// Find the starting line index
+	startLineIdx := -1
+	for i := 0; i <= len(lines)-len(oldTextLines); i++ {
+		match := true
+		for j, oldLine := range oldTextLines {
+			if i+j >= len(lines) || lines[i+j] != oldLine {
+				match = false
+				break
+			}
+		}
+		if match {
+			startLineIdx = i
+			break
+		}
+	}
+
+	if startLineIdx == -1 {
+		// Fallback: try to find at least the first line
+		for i, line := range lines {
+			if strings.Contains(line, strings.Split(oldText, "\n")[0]) {
+				startLineIdx = i
+				break
+			}
+		}
+	}
+
+	// If still not found, default to line 0
+	if startLineIdx == -1 {
+		startLineIdx = 0
+	}
+
+	// Calculate end line (1-indexed)
+	startLine := startLineIdx + 1
+	endLine := startLineIdx + len(oldTextLines)
+
+	return startLine, endLine
+}
+
 // FormatEditedBlock formats the edited text block with line numbers,
 // using the original content and old text to find the starting line number.
 func FormatEditedBlock(originalContent, oldText, newText string) string {
@@ -163,15 +265,17 @@ func FormatEditedBlock(originalContent, oldText, newText string) string {
 func (t *FileEditTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
 	var input FileEditInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
-		return tooltypes.ToolResult{
-			Error: fmt.Sprintf("invalid input: %s", err),
+		return &FileEditToolResult{
+			filename: input.FilePath,
+			err:      fmt.Sprintf("invalid input: %s", err),
 		}
 	}
 
 	b, err := os.ReadFile(input.FilePath)
 	if err != nil {
-		return tooltypes.ToolResult{
-			Error: fmt.Sprintf("failed to read the file: %s", err),
+		return &FileEditToolResult{
+			filename: input.FilePath,
+			err:      fmt.Sprintf("failed to read the file: %s", err),
 		}
 	}
 
@@ -179,21 +283,28 @@ func (t *FileEditTool) Execute(ctx context.Context, state tooltypes.State, param
 	oldText := input.OldText
 	newText := input.NewText
 
+	// Find the line numbers for the old text
+	startLine, endLine := findLineNumbers(originalContent, oldText)
+
 	// Since we already validated the text exists and is unique, we can safely replace it
 	content := strings.Replace(originalContent, oldText, newText, 1)
 
 	err = os.WriteFile(input.FilePath, []byte(content), 0644)
 	if err != nil {
-		return tooltypes.ToolResult{
-			Error: fmt.Sprintf("failed to write the file: %s", err),
+		return &FileEditToolResult{
+			filename: input.FilePath,
+			err:      fmt.Sprintf("failed to write the file: %s", err),
 		}
 	}
 	state.SetFileLastAccessed(input.FilePath, time.Now())
 
-	// Format the edited block with line numbers
-	formattedEdit := FormatEditedBlock(originalContent, oldText, newText)
-
-	return tooltypes.ToolResult{
-		Result: fmt.Sprintf("File %s has been edited successfully\n\nEdited code block:\n%s", input.FilePath, formattedEdit),
+	return &FileEditToolResult{
+		filename:   input.FilePath,
+		oldText:    oldText,
+		newText:    newText,
+		oldContent: originalContent,
+		newContent: content,
+		startLine:  startLine,
+		endLine:    endLine,
 	}
 }

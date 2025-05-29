@@ -1,5 +1,52 @@
 # Kodelet
 
+## 0.0.29.alpha (2025-05-29)
+
+### Major Architectural Improvements
+
+- **Tool Result Interface Redesign**: Complete overhaul of tool execution and result handling
+  - **Dual-Facing Results**: Implemented `ToolResult` interface with separate `UserFacing()` and `AssistantFacing()` methods for optimal output formatting
+  - **Structured Tool Results**: Added dedicated result types for all tools (`GrepToolResult`, `FileMultiEditToolResult`, `GlobToolResult`, `SubAgentToolResult`, etc.)
+  - **Enhanced Error Handling**: Improved error reporting and debugging capabilities across all tool operations
+  - **Better User Experience**: User-facing results are optimized for readability while assistant-facing results provide structured data for LLM processing
+
+### Context-Aware Logging Infrastructure
+
+- **New Logger Package**: Implemented comprehensive context-aware structured logging using Logrus
+  - **Context Propagation**: Automatic logger context propagation through `logger.G(ctx)` for consistent logging across the application
+  - **Structured Fields**: Enhanced logging with contextual fields using `log.WithFields()` for better observability
+  - **Configurable Log Levels**: Added support for configurable log levels across all application components
+
+### Enhanced Tool Capabilities
+
+- **File Multi-Edit Tool**: Enhanced with diff generation and detailed result reporting
+  - Advanced result handling with before/after comparisons
+  - Clear reporting of the number of replacements made
+  - Improved validation to prevent unintended mass replacements
+
+- **Grep Tool Improvements**: Enhanced search result handling and formatting
+  - Structured result presentation with file paths, line numbers, and matched content
+  - Better handling of large result sets with truncation notifications
+  - Improved error reporting for invalid patterns or file access issues
+
+- **Batch Tool Refinements**: Improved parallel tool execution with better result aggregation
+  - Enhanced error handling for failed batch operations
+  - Clearer result presentation for multiple tool executions
+  - Better validation to prevent nested batch operations
+
+### Technical Improvements
+
+**Configuration Updates**: Enhanced logging configuration options
+- Added log level configuration to sample config files
+- Improved CLI flag handling for logging options
+- Better integration with existing configuration management
+
+### Developer Experience
+
+- **Enhanced Documentation**: Updated KODELET.md with comprehensive logging usage examples
+- **Improved Testing**: All tool result interfaces now have comprehensive test coverage
+- **Better Error Messages**: More descriptive error messages throughout the application for easier debugging
+
 ## 0.0.28.alpha (2025-05-27)
 
 ### Major Refactoring
