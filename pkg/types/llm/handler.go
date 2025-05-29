@@ -50,7 +50,7 @@ func (h *ConsoleMessageHandler) HandleToolUse(toolName string, input string) {
 
 func (h *ConsoleMessageHandler) HandleToolResult(toolName string, result string) {
 	if !h.Silent {
-		fmt.Printf("🔄 Tool result:\n%s", result)
+		fmt.Printf("🔄 Tool result:\n%s\n\n", result)
 	}
 }
 

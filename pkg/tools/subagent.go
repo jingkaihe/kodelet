@@ -13,6 +13,35 @@ import (
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
+type SubAgentToolResult struct {
+	result string
+	err    string
+}
+
+func (r *SubAgentToolResult) GetResult() string {
+	return r.result
+}
+
+func (r *SubAgentToolResult) GetError() string {
+	return r.err
+}
+
+func (r *SubAgentToolResult) IsError() bool {
+	return r.err != ""
+}
+
+func (r *SubAgentToolResult) AssistantFacing() string {
+	return tooltypes.StringifyToolResult(r.result, r.GetError())
+}
+
+func (r *SubAgentToolResult) UserFacing() string {
+	if r.IsError() {
+		return r.GetError()
+	}
+
+	return r.result
+}
+
 type SubAgentTool struct{}
 
 type ModelStrength string
@@ -98,16 +127,16 @@ func (t *SubAgentTool) Execute(ctx context.Context, state tooltypes.State, param
 	input := &SubAgentInput{}
 	err := json.Unmarshal([]byte(parameters), input)
 	if err != nil {
-		return tooltypes.ToolResult{
-			Error: err.Error(),
+		return &SubAgentToolResult{
+			err: err.Error(),
 		}
 	}
 
 	// get type.Thread from context
 	subAgentConfig, ok := ctx.Value(llmtypes.SubAgentConfig{}).(llmtypes.SubAgentConfig)
 	if !ok {
-		return tooltypes.ToolResult{
-			Error: "sub-agent config not found in context",
+		return &SubAgentToolResult{
+			err: "sub-agent config not found in context",
 		}
 	}
 
@@ -123,12 +152,12 @@ func (t *SubAgentTool) Execute(ctx context.Context, state tooltypes.State, param
 		NoSaveConversation: true,
 	})
 	if err != nil {
-		return tooltypes.ToolResult{
-			Error: err.Error(),
+		return &SubAgentToolResult{
+			err: err.Error(),
 		}
 	}
 
-	return tooltypes.ToolResult{
-		Result: text,
+	return &SubAgentToolResult{
+		result: text,
 	}
 }
