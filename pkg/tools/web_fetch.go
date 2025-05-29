@@ -124,7 +124,7 @@ func (t *WebFetchTool) ValidateInput(state tooltypes.State, parameters string) e
 }
 
 // Execute executes the web_fetch tool.
-func (t *WebFetchTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResultInterface {
+func (t *WebFetchTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
 	input := &WebFetchInput{}
 	err := json.Unmarshal([]byte(parameters), input)
 	if err != nil {

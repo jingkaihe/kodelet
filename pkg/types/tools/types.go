@@ -14,11 +14,11 @@ type Tool interface {
 	Name() string
 	Description() string
 	ValidateInput(state State, parameters string) error
-	Execute(ctx context.Context, state State, parameters string) ToolResultInterface
+	Execute(ctx context.Context, state State, parameters string) ToolResult
 	TracingKVs(parameters string) ([]attribute.KeyValue, error)
 }
 
-type ToolResultInterface interface {
+type ToolResult interface {
 	AssistantFacing() string
 	UserFacing() string
 	IsError() bool
@@ -26,12 +26,12 @@ type ToolResultInterface interface {
 	GetResult() string // xxx: to be removed
 }
 
-type ToolResult struct {
+type BaseToolResult struct {
 	Result string `json:"result"`
 	Error  string `json:"error"`
 }
 
-func (t *ToolResult) String() string {
+func (t BaseToolResult) AssistantFacing() string {
 	out := ""
 	if t.Error != "" {
 		out = fmt.Sprintf(`<error>
@@ -46,6 +46,22 @@ func (t *ToolResult) String() string {
 `, t.Result)
 	}
 	return out
+}
+
+func (t BaseToolResult) UserFacing() string {
+	return t.AssistantFacing()
+}
+
+func (t BaseToolResult) IsError() bool {
+	return t.Error != ""
+}
+
+func (t BaseToolResult) GetError() string {
+	return t.Error
+}
+
+func (t BaseToolResult) GetResult() string {
+	return t.Result
 }
 
 func StringifyToolResult(result, err string) string {
@@ -63,26 +79,6 @@ func StringifyToolResult(result, err string) string {
 `, result)
 	}
 	return out
-}
-
-func (t ToolResult) AssistantFacing() string {
-	return t.String()
-}
-
-func (t ToolResult) UserFacing() string {
-	return t.String()
-}
-
-func (t ToolResult) IsError() bool {
-	return t.Error != ""
-}
-
-func (t ToolResult) GetError() string {
-	return t.Error
-}
-
-func (t ToolResult) GetResult() string {
-	return t.Result
 }
 
 type State interface {

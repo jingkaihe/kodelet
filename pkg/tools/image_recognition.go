@@ -179,7 +179,7 @@ func (t *ImageRecognitionTool) validateLocalImageFile(filePath string) error {
 }
 
 // Execute executes the image_recognition tool.
-func (t *ImageRecognitionTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResultInterface {
+func (t *ImageRecognitionTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
 	input := &ImageRecognitionInput{}
 	err := json.Unmarshal([]byte(parameters), input)
 	if err != nil {

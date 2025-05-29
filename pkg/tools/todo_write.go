@@ -180,7 +180,7 @@ func (t *TodoWriteTool) TracingKVs(parameters string) ([]attribute.KeyValue, err
 	return kvs, nil
 }
 
-func (t *TodoWriteTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResultInterface {
+func (t *TodoWriteTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
 	var input TodoWriteInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
 		return &TodoToolResult{

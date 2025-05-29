@@ -16,7 +16,7 @@ import (
 
 type BatchToolResult struct {
 	description string
-	toolResults []tooltypes.ToolResultInterface
+	toolResults []tooltypes.ToolResult
 }
 
 func (r *BatchToolResult) GetResult() string {
@@ -105,15 +105,15 @@ type Invocation struct {
 	Parameters any    `json:"parameters" jsonschema:"description=The parameters to pass to the tool"`
 }
 
-func (inv *Invocation) invoke(ctx context.Context, state tooltypes.State) tooltypes.ToolResultInterface {
+func (inv *Invocation) invoke(ctx context.Context, state tooltypes.State) tooltypes.ToolResult {
 	_, err := findTool(inv.ToolName, state)
 	if err != nil {
-		return tooltypes.ToolResult{Error: errors.Wrap(err, "failed to find tool").Error()}
+		return tooltypes.BaseToolResult{Error: errors.Wrap(err, "failed to find tool").Error()}
 	}
 
 	p, err := json.Marshal(inv.Parameters)
 	if err != nil {
-		return tooltypes.ToolResult{Error: errors.Wrap(err, "failed to encode parameters").Error()}
+		return tooltypes.BaseToolResult{Error: errors.Wrap(err, "failed to encode parameters").Error()}
 	}
 
 	return RunTool(ctx, state, inv.ToolName, string(p))
@@ -231,18 +231,18 @@ func (t *BatchTool) ValidateInput(state tooltypes.State, parameters string) erro
 	return nil
 }
 
-func (t *BatchTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResultInterface {
+func (t *BatchTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
 	var input BatchToolInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
 		return &BatchToolResult{
 			description: input.Description,
-			toolResults: []tooltypes.ToolResultInterface{
-				tooltypes.ToolResult{Error: errors.Wrap(err, "failed to unmarshal input").Error()},
+			toolResults: []tooltypes.ToolResult{
+				tooltypes.BaseToolResult{Error: errors.Wrap(err, "failed to unmarshal input").Error()},
 			},
 		}
 	}
 
-	toolResults := make([]tooltypes.ToolResultInterface, len(input.Invocations))
+	toolResults := make([]tooltypes.ToolResult, len(input.Invocations))
 	wg := sync.WaitGroup{}
 	wg.Add(len(input.Invocations))
 

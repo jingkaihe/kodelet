@@ -135,7 +135,7 @@ func (t *FileWriteTool) TracingKVs(parameters string) ([]attribute.KeyValue, err
 	}, nil
 }
 
-func (t *FileWriteTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResultInterface {
+func (t *FileWriteTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
 	var input FileWriteInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
 		return &FileWriteToolResult{

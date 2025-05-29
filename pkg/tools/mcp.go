@@ -303,10 +303,10 @@ func (t *MCPTool) ValidateInput(state tooltypes.State, parameters string) error 
 	return nil
 }
 
-func (t *MCPTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResultInterface {
+func (t *MCPTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
 	var input map[string]any
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
-		return tooltypes.ToolResult{
+		return tooltypes.BaseToolResult{
 			Error: err.Error(),
 		}
 	}
@@ -316,7 +316,7 @@ func (t *MCPTool) Execute(ctx context.Context, state tooltypes.State, parameters
 	req.Params.Name = t.mcpToolName
 	result, err := t.client.CallTool(ctx, req)
 	if err != nil {
-		return tooltypes.ToolResult{
+		return tooltypes.BaseToolResult{
 			Error: err.Error(),
 		}
 	}
@@ -328,7 +328,7 @@ func (t *MCPTool) Execute(ctx context.Context, state tooltypes.State, parameters
 			content += fmt.Sprintf("%v", c)
 		}
 	}
-	return tooltypes.ToolResult{
+	return tooltypes.BaseToolResult{
 		Result: content,
 	}
 }

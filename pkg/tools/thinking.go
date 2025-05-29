@@ -91,7 +91,7 @@ It will not obtain new information or change the database, but just append the t
 `
 }
 
-func (t *ThinkingTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResultInterface {
+func (t *ThinkingTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
 	input := &ThinkingInput{}
 	err := json.Unmarshal([]byte(parameters), input)
 	if err != nil {

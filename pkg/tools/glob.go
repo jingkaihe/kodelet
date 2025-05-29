@@ -146,7 +146,7 @@ func (t *GlobTool) ValidateInput(state tooltypes.State, parameters string) error
 	return nil
 }
 
-func (t *GlobTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResultInterface {
+func (t *GlobTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
 	var input GlobInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
 		return &GlobToolResult{

@@ -78,10 +78,10 @@ var (
 	tracer = telemetry.Tracer("kodelet.tools")
 )
 
-func RunTool(ctx context.Context, state tooltypes.State, toolName string, parameters string) tooltypes.ToolResultInterface {
+func RunTool(ctx context.Context, state tooltypes.State, toolName string, parameters string) tooltypes.ToolResult {
 	tool, err := findTool(toolName, state)
 	if err != nil {
-		return tooltypes.ToolResult{
+		return tooltypes.BaseToolResult{
 			Error: errors.Wrap(err, "failed to find tool").Error(),
 		}
 	}
@@ -100,7 +100,7 @@ func RunTool(ctx context.Context, state tooltypes.State, toolName string, parame
 
 	err = tool.ValidateInput(state, parameters)
 	if err != nil {
-		return tooltypes.ToolResult{
+		return tooltypes.BaseToolResult{
 			Error: err.Error(),
 		}
 	}
