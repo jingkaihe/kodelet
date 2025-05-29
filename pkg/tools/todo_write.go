@@ -183,8 +183,8 @@ func (t *TodoWriteTool) TracingKVs(parameters string) ([]attribute.KeyValue, err
 func (t *TodoWriteTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResultInterface {
 	var input TodoWriteInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
-		return tooltypes.ToolResult{
-			Error: fmt.Sprintf("invalid input: %s", err.Error()),
+		return &TodoToolResult{
+			err: fmt.Sprintf("invalid input: %s", err.Error()),
 		}
 	}
 
@@ -193,12 +193,15 @@ func (t *TodoWriteTool) Execute(ctx context.Context, state tooltypes.State, para
 	// write the todos to the file
 	err := os.WriteFile(todosFilePath, []byte(parameters), 0644)
 	if err != nil {
-		return tooltypes.ToolResult{
-			Error: fmt.Sprintf("failed to write todos to file: %s", err.Error()),
+		return &TodoToolResult{
+			filePath: todosFilePath,
+			err:      fmt.Sprintf("failed to write todos to file: %s", err.Error()),
 		}
 	}
 
-	return tooltypes.ToolResult{
-		Result: fmt.Sprintf("Todos have been written to %s", todosFilePath),
+	return &TodoToolResult{
+		filePath: todosFilePath,
+		todos:    input.Todos,
+		isWrite:  true,
 	}
 }
