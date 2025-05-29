@@ -6,9 +6,9 @@ import (
 	"errors"
 
 	"github.com/invopop/jsonschema"
-	"github.com/sirupsen/logrus"
 	"go.opentelemetry.io/otel/attribute"
 
+	"github.com/jingkaihe/kodelet/pkg/logger"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
@@ -142,7 +142,7 @@ func (t *SubAgentTool) Execute(ctx context.Context, state tooltypes.State, param
 
 	handler := subAgentConfig.MessageHandler
 	if handler == nil {
-		logrus.Warn("no message handler found in context, using console handler")
+		logger.G(ctx).Warn("no message handler found in context, using console handler")
 		handler = &llmtypes.ConsoleMessageHandler{}
 	}
 

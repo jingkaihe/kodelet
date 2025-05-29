@@ -217,17 +217,17 @@ func (m *mockThread) SendMessage(ctx context.Context, message string, handler ll
 	return m.sendMessageResult, m.sendMessageError
 }
 
-func (m *mockThread) SetState(s tools.State)                                     {}
-func (m *mockThread) GetState() tools.State                                      { return nil }
-func (m *mockThread) AddUserMessage(message string, imagePaths ...string)        {}
-func (m *mockThread) GetUsage() llm.Usage                                        { return llm.Usage{} }
-func (m *mockThread) GetConversationID() string                                  { return "" }
-func (m *mockThread) SetConversationID(id string)                                {}
-func (m *mockThread) SaveConversation(ctx context.Context, summarise bool) error { return nil }
-func (m *mockThread) IsPersisted() bool                                          { return false }
-func (m *mockThread) EnablePersistence(enabled bool)                             {}
-func (m *mockThread) Provider() string                                           { return "mock" }
-func (m *mockThread) GetMessages() ([]llm.Message, error)                        { return nil, nil }
+func (m *mockThread) SetState(s tools.State)                                                   {}
+func (m *mockThread) GetState() tools.State                                                    { return nil }
+func (m *mockThread) AddUserMessage(ctx context.Context, message string, imagePaths ...string) {}
+func (m *mockThread) GetUsage() llm.Usage                                                      { return llm.Usage{} }
+func (m *mockThread) GetConversationID() string                                                { return "" }
+func (m *mockThread) SetConversationID(id string)                                              {}
+func (m *mockThread) SaveConversation(ctx context.Context, summarise bool) error               { return nil }
+func (m *mockThread) IsPersisted() bool                                                        { return false }
+func (m *mockThread) EnablePersistence(enabled bool)                                           {}
+func (m *mockThread) Provider() string                                                         { return "mock" }
+func (m *mockThread) GetMessages() ([]llm.Message, error)                                      { return nil, nil }
 
 func TestImageRecognitionTool_Execute(t *testing.T) {
 	tool := &ImageRecognitionTool{}

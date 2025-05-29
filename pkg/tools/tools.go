@@ -1,3 +1,6 @@
+// Package tools provides the core tool execution framework for Kodelet.
+// It defines the available tools, manages tool registration, and handles
+// tool execution with proper validation, tracing, and error handling.
 package tools
 
 import (
@@ -6,10 +9,10 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/invopop/jsonschema"
+	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/telemetry"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
-	"github.com/sirupsen/logrus"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -88,7 +91,7 @@ func RunTool(ctx context.Context, state tooltypes.State, toolName string, parame
 
 	kvs, err := tool.TracingKVs(parameters)
 	if err != nil {
-		logrus.WithError(err).Error("failed to get tracing kvs")
+		logger.G(ctx).WithError(err).Error("failed to get tracing kvs")
 	}
 
 	ctx, span := tracer.Start(

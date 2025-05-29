@@ -12,9 +12,9 @@ import (
 
 	md "github.com/JohannesKaufmann/html-to-markdown"
 	"github.com/invopop/jsonschema"
-	"github.com/sirupsen/logrus"
 	"go.opentelemetry.io/otel/attribute"
 
+	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
@@ -148,7 +148,7 @@ func (t *WebFetchTool) Execute(ctx context.Context, state tooltypes.State, param
 	// 2. Convert HTML to Markdown if appropriate
 	var processedContent string
 	if strings.Contains(contentType, "text/html") {
-		processedContent = convertHTMLToMarkdown(content)
+		processedContent = convertHTMLToMarkdown(ctx, content)
 	} else {
 		processedContent = content
 	}
@@ -284,11 +284,11 @@ func fetchWithSameDomainRedirects(urlStr string) (string, string, error) {
 }
 
 // convertHTMLToMarkdown converts HTML content to Markdown.
-func convertHTMLToMarkdown(htmlContent string) string {
+func convertHTMLToMarkdown(ctx context.Context, htmlContent string) string {
 	converter := md.NewConverter("", true, nil)
 	markdown, err := converter.ConvertString(htmlContent)
 	if err != nil {
-		logrus.WithError(err).Warn("Failed to convert HTML to Markdown, returning raw HTML")
+		logger.G(ctx).WithError(err).Warn("Failed to convert HTML to Markdown, returning raw HTML")
 		return htmlContent
 	}
 	return markdown

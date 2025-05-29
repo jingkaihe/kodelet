@@ -1,3 +1,6 @@
+// Package main provides the entry point for the Kodelet CLI application.
+// It initializes configuration, sets up command structure with Cobra,
+// and manages application lifecycle including tracing and error handling.
 package main
 
 import (
@@ -7,8 +10,8 @@ import (
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/tools"
-	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -47,7 +50,7 @@ func init() {
 
 	// Load config file if it exists (ignore errors if it doesn't)
 	if err := viper.ReadInConfig(); err == nil {
-		logrus.WithField("config_file", viper.ConfigFileUsed()).Debug("Using config file")
+		logger.G(context.TODO()).WithField("config_file", viper.ConfigFileUsed()).Debug("Using config file")
 	}
 }
 
@@ -104,7 +107,7 @@ func main() {
 	// Initialize telemetry with tracing
 	tracingShutdown, err := initTracing(ctx)
 	if err != nil {
-		logrus.WithField("error", err).Warn("Failed to initialize tracing")
+		logger.G(context.TODO()).WithField("error", err).Warn("Failed to initialize tracing")
 	} else if tracingShutdown != nil {
 		// Ensure tracing is properly shutdown
 		defer func() {
@@ -112,7 +115,7 @@ func main() {
 				// best effort to ensure graceful shutdown
 				time.Sleep(1 * time.Second)
 				if err := tracingShutdown(ctx); err != nil {
-					logrus.WithField("error", err).Warn("Failed to shutdown tracing")
+					logger.G(context.TODO()).WithField("error", err).Warn("Failed to shutdown tracing")
 				}
 			}
 		}()
@@ -135,7 +138,7 @@ func main() {
 
 	// Execute
 	if err := rootCmd.ExecuteContext(ctx); err != nil {
-		logrus.WithField("error", err).Error("Failed to execute command")
+		logger.G(context.TODO()).WithField("error", err).Error("Failed to execute command")
 		os.Exit(1)
 	}
 }

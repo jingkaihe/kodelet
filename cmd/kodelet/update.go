@@ -10,8 +10,8 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/version"
-	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
 
@@ -45,11 +45,12 @@ var updateCmd = &cobra.Command{
 	Short: "Update Kodelet to the latest version",
 	Long:  `Download and install the latest version of Kodelet or a specified version.`,
 	Run: func(cmd *cobra.Command, args []string) {
+		ctx := cmd.Context()
 		// Get update config from flags
 		config := getUpdateConfigFromFlags(cmd)
 
 		if err := updateKodelet(config); err != nil {
-			logrus.WithError(err).Error("Failed to update Kodelet")
+			logger.G(ctx).WithError(err).Error("Failed to update Kodelet")
 			os.Exit(1)
 		}
 	},

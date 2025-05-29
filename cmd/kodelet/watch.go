@@ -12,9 +12,9 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/jingkaihe/kodelet/pkg/llm"
+	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	"github.com/jingkaihe/kodelet/pkg/utils"
-	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -134,7 +134,8 @@ func getWatchConfigFromFlags(cmd *cobra.Command) *WatchConfig {
 func runWatchMode(ctx context.Context, state tooltypes.State, config *WatchConfig) {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
-		logrus.WithError(err).Fatal("Failed to create file watcher")
+		// Use context.TODO() to avoid using cancelled context
+		logger.G(context.TODO()).WithError(err).Fatal("Failed to create file watcher")
 	}
 	defer watcher.Close()
 
@@ -207,7 +208,7 @@ func runWatchMode(ctx context.Context, state tooltypes.State, config *WatchConfi
 				if !ok {
 					return
 				}
-				logrus.WithError(err).Error("Error watching files")
+				logger.G(context.TODO()).WithError(err).Error("Error watching files")
 			case <-done:
 				return
 			}
@@ -231,7 +232,7 @@ func runWatchMode(ctx context.Context, state tooltypes.State, config *WatchConfi
 		return nil
 	})
 	if err != nil {
-		logrus.WithError(err).Fatal("Failed to watch directories")
+		logger.G(context.TODO()).WithError(err).Fatal("Failed to watch directories")
 	}
 
 	fmt.Println("Watching for file changes... Press Ctrl+C to stop")
@@ -280,7 +281,7 @@ func processFileChange(ctx context.Context, state tooltypes.State, path string, 
 	// Read the file content
 	content, err := os.ReadFile(path)
 	if err != nil {
-		logrus.WithError(err).Errorf("Failed to read file: %s", path)
+		logger.G(ctx).WithError(err).Errorf("Failed to read file: %s", path)
 		return
 	}
 

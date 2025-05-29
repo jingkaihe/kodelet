@@ -1,6 +1,7 @@
 package sysprompt
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -8,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sirupsen/logrus"
+	"github.com/jingkaihe/kodelet/pkg/logger"
 )
 
 // PromptContext holds all variables for template rendering
@@ -73,10 +74,13 @@ func NewPromptContext() *PromptContext {
 func loadContexts() map[string]string {
 	filenames := []string{KodeletMd, ReadmeMd}
 	results := make(map[string]string)
+	ctx := context.Background()
+	log := logger.G(ctx)
+
 	for _, filename := range filenames {
 		content, err := os.ReadFile(filename)
 		if err != nil {
-			logrus.WithError(err).WithField("filename", filename).Debug("failed to read file")
+			log.WithError(err).WithField("filename", filename).Debug("failed to read file")
 			continue
 		}
 		results[filename] = string(content)

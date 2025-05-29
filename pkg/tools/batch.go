@@ -58,12 +58,14 @@ func (r *BatchToolResult) AssistantFacing() string {
 	// return tooltypes.StringifyToolResult(r.GetResult(), r.GetError())
 	results := bytes.NewBufferString("")
 	for idx, toolResult := range r.toolResults {
-		if !toolResult.IsError() {
+		if toolResult.GetResult() != "" {
 			results.WriteString(fmt.Sprintf(`<invocation.%d.result>
 %s
 </invocation.%d.result>
 `, idx, toolResult.GetResult(), idx))
-		} else {
+		}
+
+		if toolResult.IsError() {
 			results.WriteString(fmt.Sprintf(`<invocation.%d.error>
 %s
 </invocation.%d.error>

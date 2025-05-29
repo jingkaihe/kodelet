@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -89,7 +90,7 @@ func TestFetchWithSameDomainRedirects(t *testing.T) {
 
 func TestConvertHTMLToMarkdown(t *testing.T) {
 	html := "<html><body><h1>Hello World</h1><p>This is a <strong>test</strong>.</p></body></html>"
-	markdown := convertHTMLToMarkdown(html)
+	markdown := convertHTMLToMarkdown(context.Background(), html)
 	assert.Contains(t, markdown, "# Hello World")
 	assert.Contains(t, markdown, "This is a **test**.")
 }

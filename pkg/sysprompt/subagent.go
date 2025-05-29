@@ -1,13 +1,15 @@
 package sysprompt
 
 import (
-	"github.com/sirupsen/logrus"
+	"context"
+
+	"github.com/jingkaihe/kodelet/pkg/logger"
 )
 
 // SubAgentPrompt generates a subagent prompt for the given model
 func SubAgentPrompt(model string) string {
 	// Create a new prompt context with default values
-	ctx := NewPromptContext()
+	promptCtx := NewPromptContext()
 
 	// Create a new template renderer
 	renderer := NewRenderer(TemplateFS)
@@ -16,12 +18,14 @@ func SubAgentPrompt(model string) string {
 	config := NewDefaultConfig().WithModel(model)
 
 	// Update the context with the configuration
-	UpdateContextWithConfig(ctx, config)
+	UpdateContextWithConfig(promptCtx, config)
 
 	// Render the subagent prompt
-	prompt, err := renderer.RenderSubagentPrompt(ctx)
+	prompt, err := renderer.RenderSubagentPrompt(promptCtx)
 	if err != nil {
-		logrus.WithError(err).Fatal("Error rendering subagent prompt")
+		ctx := context.Background()
+		log := logger.G(ctx)
+		log.WithError(err).Fatal("Error rendering subagent prompt")
 	}
 
 	return prompt

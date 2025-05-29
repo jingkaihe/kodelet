@@ -1,13 +1,15 @@
 package sysprompt
 
 import (
-	"github.com/sirupsen/logrus"
+	"context"
+
+	"github.com/jingkaihe/kodelet/pkg/logger"
 )
 
 // SystemPrompt generates a system prompt for the given model
 func SystemPrompt(model string) string {
 	// Create a new prompt context with default values
-	ctx := NewPromptContext()
+	promptCtx := NewPromptContext()
 
 	// Create a new template renderer
 	renderer := NewRenderer(TemplateFS)
@@ -16,12 +18,14 @@ func SystemPrompt(model string) string {
 	config := NewDefaultConfig().WithModel(model)
 
 	// Update the context with the configuration
-	UpdateContextWithConfig(ctx, config)
+	UpdateContextWithConfig(promptCtx, config)
 
 	// Render the system prompt
-	prompt, err := renderer.RenderSystemPrompt(ctx)
+	prompt, err := renderer.RenderSystemPrompt(promptCtx)
 	if err != nil {
-		logrus.WithError(err).Fatal("Error rendering system prompt")
+		ctx := context.Background()
+		log := logger.G(ctx)
+		log.WithError(err).Fatal("Error rendering system prompt")
 	}
 
 	return prompt
