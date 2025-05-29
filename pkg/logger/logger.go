@@ -45,3 +45,23 @@ func newLogger() *logrus.Logger {
 
 	return l
 }
+
+// SetLogLevel sets the log level for the global logger
+func SetLogLevel(level string) error {
+	logLevel, err := logrus.ParseLevel(level)
+	if err != nil {
+		return err
+	}
+	L.Logger.SetLevel(logLevel)
+	return nil
+}
+
+// SetLogLevelForLogger sets the log level for a specific logger
+func SetLogLevelForLogger(logger *logrus.Logger, level string) error {
+	logLevel, err := logrus.ParseLevel(level)
+	if err != nil {
+		return err
+	}
+	logger.SetLevel(logLevel)
+	return nil
+}

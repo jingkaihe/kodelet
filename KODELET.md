@@ -112,6 +112,9 @@ make help           # Display help
 
 1. **Environment Variables**:
    ```bash
+   # Logging configuration
+   export KODELET_LOG_LEVEL="info"  # panic, fatal, error, warn, info, debug, trace
+
    # LLM configuration - Anthropic
    export ANTHROPIC_API_KEY="sk-ant-api..."
    export KODELET_PROVIDER="anthropic"  # Optional, detected from model name
@@ -128,6 +131,9 @@ make help           # Display help
 
 2. **Configuration File** (`config.yaml`):
    ```yaml
+   # Logging configuration
+   log_level: "info"  # panic, fatal, error, warn, info, debug, trace
+
    # Anthropic configuration
    provider: "anthropic"
    model: "claude-sonnet-4-0"
@@ -160,6 +166,9 @@ make help           # Display help
 
 3. **Command Line Flags**:
    ```bash
+   # Log level example
+   kodelet run --log-level debug "query"
+
    # Anthropic example
    kodelet run --provider "anthropic" --model "claude-3-opus-20240229" --max-tokens 4096 --weak-model-max-tokens 2048 "query"
 

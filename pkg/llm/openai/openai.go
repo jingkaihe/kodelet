@@ -505,10 +505,15 @@ func (t *OpenAIThread) processMessageExchange(
 		// For tracing, add tool execution completion event
 		telemetry.AddEvent(ctx, "tool_execution_complete",
 			attribute.String("tool_name", toolCall.Function.Name),
-			attribute.Int("result_length", len(output.UserFacing())),
+			attribute.String("result", output.AssistantFacing()),
 		)
 
 		// Add tool result to messages for next API call
+		logger.G(ctx).
+			WithField("tool_name", toolCall.Function.Name).
+			WithField("result", output.AssistantFacing()).
+			Debug("Adding tool result to messages")
+
 		t.messages = append(t.messages, openai.ChatCompletionMessage{
 			Role:       openai.ChatMessageRoleTool,
 			Content:    output.AssistantFacing(),

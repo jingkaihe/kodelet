@@ -1,6 +1,10 @@
 # Kodelet Sample Configuration File
 # This file shows all available configuration options with example values
 
+# Logging Configuration
+# Log level for the application (panic, fatal, error, warn, info, debug, trace)
+log_level: "info"
+
 # LLM Configuration
 # Provider to use (anthropic or openai)
 provider: "anthropic"
@@ -45,6 +49,7 @@ tracing:
   ratio: 1
 
 # Environment variables can also be used to configure Kodelet:
+# - KODELET_LOG_LEVEL: Overrides the log_level setting
 # - KODELET_PROVIDER: Overrides the provider setting (anthropic, openai)
 # - KODELET_MODEL: Overrides the model setting
 # - KODELET_MAX_TOKENS: Overrides the max_tokens setting
