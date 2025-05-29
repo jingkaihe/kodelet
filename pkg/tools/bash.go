@@ -14,7 +14,6 @@ import (
 
 	"github.com/invopop/jsonschema"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
-	"github.com/olekukonko/tablewriter"
 	"go.opentelemetry.io/otel/attribute"
 )
 
@@ -205,44 +204,41 @@ The command is using heredoc.
 }
 
 type BashToolResult struct {
-	CombinedOutput string `json:"combined_output"`
-	Error          string `json:"error"`
+	command        string
+	combinedOutput string
+	error          string
 }
 
 func (r *BashToolResult) GetResult() string {
-	return r.CombinedOutput
+	return r.combinedOutput
 }
 
 func (r *BashToolResult) GetError() string {
-	return r.Error
+	return r.error
 }
 
 func (r *BashToolResult) IsError() bool {
-	return r.Error != ""
+	return r.error != ""
 }
 
 func (r *BashToolResult) AssistantFacing() string {
-	return tooltypes.StringifyToolResult(r.CombinedOutput, r.GetError())
+	return tooltypes.StringifyToolResult(r.combinedOutput, r.GetError())
 }
 
 func (r *BashToolResult) UserFacing() string {
-	var buf bytes.Buffer
-
-	table := tablewriter.NewWriter(&buf)
-
 	if r.IsError() {
-		table.Append([]string{"Error", r.GetError()})
+		return r.GetError()
 	}
 
-	output := r.CombinedOutput
+	buf := bytes.NewBufferString(fmt.Sprintf("Command: %s\n", r.command))
+	
+	output := r.combinedOutput
 	if output == "" {
-		output = "(no output)"
+		buf.WriteString("(no output)")
+	} else {
+		buf.WriteString(output)
 	}
-	table.Append([]string{"Output", output})
-
-	// Render the table
-	table.Render()
-
+	
 	return buf.String()
 }
 
@@ -251,7 +247,8 @@ func (b *BashTool) Execute(ctx context.Context, state tooltypes.State, parameter
 	err := json.Unmarshal([]byte(parameters), input)
 	if err != nil {
 		return &BashToolResult{
-			Error: err.Error(),
+			command: input.Command,
+			error:   err.Error(),
 		}
 	}
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(input.Timeout)*time.Second)
@@ -263,21 +260,25 @@ func (b *BashTool) Execute(ctx context.Context, state tooltypes.State, parameter
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return &BashToolResult{
-				Error: "Command timed out after " + strconv.Itoa(input.Timeout) + " seconds",
+				command: input.Command,
+				error:   "Command timed out after " + strconv.Itoa(input.Timeout) + " seconds",
 			}
 		}
 		if status, ok := err.(*exec.ExitError); ok {
 			return &BashToolResult{
-				CombinedOutput: string(output),
-				Error:          fmt.Sprintf("Command exited with status %d", status.ExitCode()),
+				command:        input.Command,
+				combinedOutput: string(output),
+				error:          fmt.Sprintf("Command exited with status %d", status.ExitCode()),
 			}
 		}
 		return &BashToolResult{
-			Error: err.Error(),
+			command: input.Command,
+			error:   err.Error(),
 		}
 	}
 
 	return &BashToolResult{
-		CombinedOutput: string(output),
+		command:        input.Command,
+		combinedOutput: string(output),
 	}
 }
