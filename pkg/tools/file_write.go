@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -9,10 +10,54 @@ import (
 	"time"
 
 	"github.com/invopop/jsonschema"
+	"go.opentelemetry.io/otel/attribute"
+
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/jingkaihe/kodelet/pkg/utils"
-	"go.opentelemetry.io/otel/attribute"
 )
+
+type FileWriteToolResult struct {
+	filename string
+	text     string
+	err      string
+}
+
+func (r *FileWriteToolResult) GetResult() string {
+	lines := strings.Split(r.text, "\n")
+	textWithLineNumber := utils.ContentWithLineNumber(lines, 0)
+	return fmt.Sprintf(`file %s has been written successfully
+
+%s`, r.filename, textWithLineNumber)
+}
+
+func (r *FileWriteToolResult) GetError() string {
+	return r.err
+}
+
+func (r *FileWriteToolResult) IsError() bool {
+	return r.err != ""
+}
+
+func (r *FileWriteToolResult) AssistantFacing() string {
+	var content string
+	if !r.IsError() {
+		content = r.GetResult()
+	}
+	return tooltypes.StringifyToolResult(content, r.GetError())
+}
+
+func (r *FileWriteToolResult) UserFacing() string {
+	if r.IsError() {
+		return r.GetError()
+	}
+
+	lines := strings.Split(r.text, "\n")
+	textWithLineNumber := utils.ContentWithLineNumber(lines, 0)
+
+	buf := bytes.NewBufferString(fmt.Sprintf("File Written: %s\n", r.filename))
+	buf.WriteString(textWithLineNumber)
+	return buf.String()
+}
 
 type FileWriteTool struct{}
 
@@ -93,22 +138,24 @@ func (t *FileWriteTool) TracingKVs(parameters string) ([]attribute.KeyValue, err
 func (t *FileWriteTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResultInterface {
 	var input FileWriteInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
-		return tooltypes.ToolResult{Error: fmt.Sprintf("invalid input: %s", err.Error())}
+		return &FileWriteToolResult{
+			filename: input.FilePath,
+			err:      fmt.Sprintf("invalid input: %s", err.Error()),
+		}
 	}
 
 	state.SetFileLastAccessed(input.FilePath, time.Now())
 
 	err := os.WriteFile(input.FilePath, []byte(input.Text), 0644)
 	if err != nil {
-		return tooltypes.ToolResult{Error: fmt.Sprintf("failed to write the file: %s", err.Error())}
+		return &FileWriteToolResult{
+			filename: input.FilePath,
+			err:      fmt.Sprintf("failed to write the file: %s", err.Error()),
+		}
 	}
 
-	lines := strings.Split(input.Text, "\n")
-	textWithLineNumber := utils.ContentWithLineNumber(lines, 0)
-
-	result := fmt.Sprintf(`file %s has been written successfully
-
-%s`, input.FilePath, textWithLineNumber)
-
-	return tooltypes.ToolResult{Result: result}
+	return &FileWriteToolResult{
+		filename: input.FilePath,
+		text:     input.Text,
+	}
 }

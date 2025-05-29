@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/invopop/jsonschema"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/olekukonko/tablewriter"
 	"go.opentelemetry.io/otel/attribute"
 )
 
@@ -202,11 +204,53 @@ The command is using heredoc.
 `
 }
 
+type BashToolResult struct {
+	CombinedOutput string `json:"combined_output"`
+	Error          string `json:"error"`
+}
+
+func (r *BashToolResult) GetResult() string {
+	return r.CombinedOutput
+}
+
+func (r *BashToolResult) GetError() string {
+	return r.Error
+}
+
+func (r *BashToolResult) IsError() bool {
+	return r.Error != ""
+}
+
+func (r *BashToolResult) AssistantFacing() string {
+	return tooltypes.StringifyToolResult(r.CombinedOutput, r.GetError())
+}
+
+func (r *BashToolResult) UserFacing() string {
+	var buf bytes.Buffer
+
+	table := tablewriter.NewWriter(&buf)
+
+	if r.IsError() {
+		table.Append([]string{"Error", r.GetError()})
+	}
+
+	output := r.CombinedOutput
+	if output == "" {
+		output = "(no output)"
+	}
+	table.Append([]string{"Output", output})
+
+	// Render the table
+	table.Render()
+
+	return buf.String()
+}
+
 func (b *BashTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResultInterface {
 	input := &BashInput{}
 	err := json.Unmarshal([]byte(parameters), input)
 	if err != nil {
-		return tooltypes.ToolResult{
+		return &BashToolResult{
 			Error: err.Error(),
 		}
 	}
@@ -218,22 +262,22 @@ func (b *BashTool) Execute(ctx context.Context, state tooltypes.State, parameter
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
-			return tooltypes.ToolResult{
+			return &BashToolResult{
 				Error: "Command timed out after " + strconv.Itoa(input.Timeout) + " seconds",
 			}
 		}
 		if status, ok := err.(*exec.ExitError); ok {
-			return tooltypes.ToolResult{
-				Result: string(output),
-				Error:  fmt.Sprintf("Command exited with status %d", status.ExitCode()),
+			return &BashToolResult{
+				CombinedOutput: string(output),
+				Error:          fmt.Sprintf("Command exited with status %d", status.ExitCode()),
 			}
 		}
-		return tooltypes.ToolResult{
+		return &BashToolResult{
 			Error: err.Error(),
 		}
 	}
 
-	return tooltypes.ToolResult{
-		Result: string(output),
+	return &BashToolResult{
+		CombinedOutput: string(output),
 	}
 }

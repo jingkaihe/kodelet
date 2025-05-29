@@ -2,6 +2,7 @@ package tools
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,15 +11,55 @@ import (
 	"time"
 
 	"github.com/invopop/jsonschema"
-	"github.com/jingkaihe/kodelet/pkg/utils"
 	"go.opentelemetry.io/otel/attribute"
 
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/jingkaihe/kodelet/pkg/utils"
 )
 
 const (
 	MaxOutputBytes = 100_000 // 100KB
 )
+
+type FileReadToolResult struct {
+	filename string
+	lines    []string
+	offset   int
+	err      string
+}
+
+func (r *FileReadToolResult) GetResult() string {
+	return utils.ContentWithLineNumber(r.lines, r.offset)
+}
+
+func (r *FileReadToolResult) GetError() string {
+	return r.err
+}
+
+func (r *FileReadToolResult) IsError() bool {
+	return r.err != ""
+}
+
+func (r *FileReadToolResult) AssistantFacing() string {
+	var content string
+	if !r.IsError() {
+		content = utils.ContentWithLineNumber(r.lines, r.offset)
+	}
+	return tooltypes.StringifyToolResult(content, r.GetError())
+}
+
+func (r *FileReadToolResult) UserFacing() string {
+	if r.IsError() {
+		return r.GetError()
+	}
+
+	content := utils.ContentWithLineNumber(r.lines, r.offset)
+
+	buf := bytes.NewBufferString(fmt.Sprintf("File Read: %s\n", r.filename))
+	buf.WriteString(fmt.Sprintf("Offset: %d\n", r.offset))
+	buf.WriteString(content)
+	return buf.String()
+}
 
 type FileReadTool struct{}
 
@@ -95,8 +136,9 @@ func (r *FileReadTool) Execute(ctx context.Context, state tooltypes.State, param
 	input := &FileReadInput{}
 	err := json.Unmarshal([]byte(parameters), input)
 	if err != nil {
-		return tooltypes.ToolResult{
-			Error: err.Error(),
+		return &FileReadToolResult{
+			filename: input.FilePath,
+			err:      err.Error(),
 		}
 	}
 
@@ -104,8 +146,9 @@ func (r *FileReadTool) Execute(ctx context.Context, state tooltypes.State, param
 
 	file, err := os.Open(input.FilePath)
 	if err != nil {
-		return tooltypes.ToolResult{
-			Error: fmt.Sprintf("Failed to open file: %s", err.Error()),
+		return &FileReadToolResult{
+			filename: input.FilePath,
+			err:      fmt.Sprintf("Failed to open file: %s", err.Error()),
 		}
 	}
 	defer file.Close()
@@ -114,37 +157,42 @@ func (r *FileReadTool) Execute(ctx context.Context, state tooltypes.State, param
 
 	// Skip lines before offset
 	lineCount := 0
-	bytesRead := 0
-	for lineCount < input.Offset && bytesRead < MaxOutputBytes && scanner.Scan() {
+	for lineCount < input.Offset && scanner.Scan() {
 		lineCount++
-		bytesRead += len(scanner.Bytes())
 	}
 
 	if lineCount < input.Offset {
-		return tooltypes.ToolResult{
-			Error: fmt.Sprintf("File has only %d lines, which is less than the requested offset %d", lineCount, input.Offset),
+		return &FileReadToolResult{
+			filename: input.FilePath,
+			err:      fmt.Sprintf("File has only %d lines, which is less than the requested offset %d", lineCount, input.Offset),
 		}
 	}
 
 	// Read and buffer content
+	bytesRead := 0
 	var lines []string
-	for scanner.Scan() {
+	for bytesRead < MaxOutputBytes && scanner.Scan() {
 		lines = append(lines, scanner.Text())
+		bytesRead += len(scanner.Bytes())
 	}
 
-	result := utils.ContentWithLineNumber(lines, input.Offset)
+	// result := utils.ContentWithLineNumber(lines, input.Offset)
 
 	if bytesRead > MaxOutputBytes {
-		result += fmt.Sprintf("\n\n... [truncated due to max output bytes limit of %d]", MaxOutputBytes)
+		// result += fmt.Sprintf("\n\n... [truncated due to max output bytes limit of %d]", MaxOutputBytes)
+		lines = append(lines, fmt.Sprintf("... [truncated due to max output bytes limit of %d]", MaxOutputBytes))
 	}
 
 	if err := scanner.Err(); err != nil {
-		return tooltypes.ToolResult{
-			Error: fmt.Sprintf("Error reading file: %s", err.Error()),
+		return &FileReadToolResult{
+			filename: input.FilePath,
+			err:      fmt.Sprintf("Error reading file: %s", err.Error()),
 		}
 	}
 
-	return tooltypes.ToolResult{
-		Result: result,
+	return &FileReadToolResult{
+		filename: input.FilePath,
+		lines:    lines,
+		offset:   input.Offset,
 	}
 }

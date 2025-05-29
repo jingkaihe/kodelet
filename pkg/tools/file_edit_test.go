@@ -330,7 +330,7 @@ func TestFileEditTool_ExecuteOutputsFormattedEdit(t *testing.T) {
 	// Check that the result contains formatted output
 	assert.False(t, result.IsError())
 	assert.Contains(t, result.GetResult(), "has been edited successfully")
-	assert.Contains(t, result.GetResult(), "3: Modified Line 3")
+	assert.Contains(t, result.AssistantFacing(), "3: Modified Line 3")
 }
 
 func TestFileEditTool_ExecuteWithMultilineEdits(t *testing.T) {
@@ -393,11 +393,12 @@ func main() {
 	assert.False(t, result.IsError())
 	assert.Contains(t, result.GetResult(), "has been edited successfully")
 
-	// Check for formatted lines with correct line numbers
-	assert.Contains(t, result.GetResult(), "9: 	// Process data with sum")
-	assert.Contains(t, result.GetResult(), "10: 	data := []int{1, 2, 3, 4, 5}")
-	assert.Contains(t, result.GetResult(), "11: 	sum := 0")
-	assert.Contains(t, result.GetResult(), "15: 	fmt.Println(\"Sum:\", sum)")
+	// Check for formatted lines with correct line numbers in AssistantFacing
+	assistantResult := result.AssistantFacing()
+	assert.Contains(t, assistantResult, "9: 	// Process data with sum")
+	assert.Contains(t, assistantResult, "10: 	data := []int{1, 2, 3, 4, 5}")
+	assert.Contains(t, assistantResult, "11: 	sum := 0")
+	assert.Contains(t, assistantResult, "15: 	fmt.Println(\"Sum:\", sum)")
 
 	// Verify the file was actually edited
 	updatedContent, err := os.ReadFile(tmpfile.Name())

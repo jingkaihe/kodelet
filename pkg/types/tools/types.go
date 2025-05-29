@@ -48,6 +48,23 @@ func (t *ToolResult) String() string {
 	return out
 }
 
+func StringifyToolResult(result, err string) string {
+	out := ""
+	if err != "" {
+		out = fmt.Sprintf(`<error>
+%s
+</error>
+`, err)
+	}
+	if result != "" {
+		out += fmt.Sprintf(`<result>
+%s
+</result>
+`, result)
+	}
+	return out
+}
+
 func (t ToolResult) AssistantFacing() string {
 	return t.String()
 }
