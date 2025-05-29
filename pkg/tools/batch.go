@@ -77,15 +77,9 @@ func (r *BatchToolResult) AssistantFacing() string {
 }
 
 func (r *BatchToolResult) UserFacing() string {
-	if r.IsError() {
-		return r.GetError()
-	}
-
 	var results []string
 	for _, toolResult := range r.toolResults {
-		if !toolResult.IsError() {
-			results = append(results, toolResult.UserFacing())
-		}
+		results = append(results, toolResult.UserFacing())
 	}
 
 	content := strings.Join(results, "\n\n")

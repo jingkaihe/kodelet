@@ -1,5 +1,14 @@
 # Kodelet
 
+## 0.0.30.alpha (2025-05-29)
+
+### User Experience Improvements
+
+- **Enhanced Tool Output Visibility**: Improved user-facing output for better transparency and debugging
+  - **Bash Tool**: Command output and errors are now both shown to users, with errors appended after command output for better context
+  - **Batch Tool**: All tool results are now displayed to users, including those that encounter errors, providing complete visibility into batch operations
+  - **SubAgent Tool**: Simplified output handling to ensure consistent display of subagent results to users
+
 ## 0.0.29.alpha (2025-05-29)
 
 ### Major Architectural Improvements

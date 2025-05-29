@@ -35,11 +35,7 @@ func (r *SubAgentToolResult) AssistantFacing() string {
 }
 
 func (r *SubAgentToolResult) UserFacing() string {
-	if r.IsError() {
-		return r.GetError()
-	}
-
-	return r.result
+	return r.AssistantFacing()
 }
 
 type SubAgentTool struct{}
