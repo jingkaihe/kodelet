@@ -226,10 +226,6 @@ func (r *BashToolResult) AssistantFacing() string {
 }
 
 func (r *BashToolResult) UserFacing() string {
-	if r.IsError() {
-		return r.GetError()
-	}
-
 	buf := bytes.NewBufferString(fmt.Sprintf("Command: %s\n", r.command))
 
 	output := r.combinedOutput
@@ -237,6 +233,10 @@ func (r *BashToolResult) UserFacing() string {
 		buf.WriteString("(no output)")
 	} else {
 		buf.WriteString(output)
+	}
+
+	if r.IsError() {
+		buf.WriteString("\nError: " + r.GetError())
 	}
 
 	return buf.String()
