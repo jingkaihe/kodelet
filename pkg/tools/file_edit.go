@@ -160,7 +160,7 @@ func FormatEditedBlock(originalContent, oldText, newText string) string {
 	return utils.ContentWithLineNumber(editedLines, oldBlockStartIdx+1)
 }
 
-func (t *FileEditTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
+func (t *FileEditTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResultInterface {
 	var input FileEditInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
 		return tooltypes.ToolResult{

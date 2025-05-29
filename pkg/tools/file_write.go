@@ -90,7 +90,7 @@ func (t *FileWriteTool) TracingKVs(parameters string) ([]attribute.KeyValue, err
 	}, nil
 }
 
-func (t *FileWriteTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
+func (t *FileWriteTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResultInterface {
 	var input FileWriteInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
 		return tooltypes.ToolResult{Error: fmt.Sprintf("invalid input: %s", err.Error())}

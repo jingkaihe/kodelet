@@ -106,9 +106,9 @@ func RunTool(ctx context.Context, state tooltypes.State, toolName string, parame
 	}
 	result := tool.Execute(ctx, state, parameters)
 
-	if result.Error != "" {
-		span.SetStatus(codes.Error, result.Error)
-		span.RecordError(fmt.Errorf("%s", result.Error))
+	if result.IsError() {
+		span.SetStatus(codes.Error, result.GetError())
+		span.RecordError(fmt.Errorf("%s", result.GetError()))
 	} else {
 		span.SetStatus(codes.Ok, "")
 	}

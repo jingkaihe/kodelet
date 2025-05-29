@@ -16,7 +16,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/jingkaihe/kodelet/pkg/types/llm"
-	"github.com/jingkaihe/kodelet/pkg/types/tools"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
 // ImageRecognitionTool implements the image_recognition tool for processing and understanding images.
@@ -68,7 +68,7 @@ The output summarizes the information extracted from the image.
 }
 
 // ValidateInput validates the input parameters for the tool.
-func (t *ImageRecognitionTool) ValidateInput(state tools.State, parameters string) error {
+func (t *ImageRecognitionTool) ValidateInput(state tooltypes.State, parameters string) error {
 	input := &ImageRecognitionInput{}
 	err := json.Unmarshal([]byte(parameters), input)
 	if err != nil {
@@ -149,11 +149,11 @@ func (t *ImageRecognitionTool) validateLocalImageFile(filePath string) error {
 }
 
 // Execute executes the image_recognition tool.
-func (t *ImageRecognitionTool) Execute(ctx context.Context, state tools.State, parameters string) tools.ToolResult {
+func (t *ImageRecognitionTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResultInterface {
 	input := &ImageRecognitionInput{}
 	err := json.Unmarshal([]byte(parameters), input)
 	if err != nil {
-		return tools.ToolResult{
+		return tooltypes.ToolResult{
 			Error: err.Error(),
 		}
 	}
@@ -161,7 +161,7 @@ func (t *ImageRecognitionTool) Execute(ctx context.Context, state tools.State, p
 	// Validate remote URL if it's an HTTPS URL
 	if strings.HasPrefix(input.ImagePath, "https://") {
 		if err := t.validateRemoteImage(input.ImagePath); err != nil {
-			return tools.ToolResult{
+			return tooltypes.ToolResult{
 				Error: fmt.Sprintf("Failed to validate remote image: %s", err),
 			}
 		}
@@ -170,7 +170,7 @@ func (t *ImageRecognitionTool) Execute(ctx context.Context, state tools.State, p
 	// Get sub-agent config from context for LLM interaction
 	subAgentConfig, ok := ctx.Value(llm.SubAgentConfig{}).(llm.SubAgentConfig)
 	if !ok {
-		return tools.ToolResult{
+		return tooltypes.ToolResult{
 			Error: "sub-agent config not found in context",
 		}
 	}
@@ -201,12 +201,12 @@ Please provide a clear and detailed response based on what you can see in the im
 	)
 
 	if err != nil {
-		return tools.ToolResult{
+		return tooltypes.ToolResult{
 			Error: fmt.Sprintf("Failed to analyze image: %s", err),
 		}
 	}
 
-	return tools.ToolResult{
+	return tooltypes.ToolResult{
 		Result: analysisResult,
 	}
 }

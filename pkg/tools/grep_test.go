@@ -235,21 +235,21 @@ func TestGrepTool_Execute(t *testing.T) {
 			result := tool.Execute(ctx, state, string(input))
 
 			if tt.expectError {
-				assert.NotEmpty(t, result.Error)
+				assert.False(t, result.IsError())
 			} else {
-				assert.Empty(t, result.Error)
+				assert.False(t, result.IsError())
 
 				// Skip the "Search results" check for the no matches case
 				if tt.name != "search with no matches" {
-					assert.Contains(t, result.Result, "Search results for pattern")
+					assert.Contains(t, result.GetResult(), "Search results for pattern")
 				}
 
 				for _, expected := range tt.expectedResults {
-					assert.Contains(t, result.Result, expected)
+					assert.Contains(t, result.GetResult(), expected)
 				}
 
 				if tt.notExpected != "" {
-					assert.NotContains(t, result.Result, tt.notExpected)
+					assert.NotContains(t, result.GetResult(), tt.notExpected)
 				}
 
 				// Additional verification for surrounding lines test
@@ -262,7 +262,7 @@ func TestGrepTool_Execute(t *testing.T) {
 				// 		}
 
 				// 		contextLine := fmt.Sprintf("Line %d - Context line", i)
-				// 		assert.Contains(t, result.Result, contextLine,
+				// 		assert.Contains(t, result.GetResult(), contextLine,
 				// 			fmt.Sprintf("Should contain context line %d", i))
 				// 	}
 				// }
@@ -270,34 +270,34 @@ func TestGrepTool_Execute(t *testing.T) {
 				// Verify line numbers are present for all test cases except "no matches"
 				if tt.name != "search with no matches" && !tt.expectError {
 					// Look for pattern headers
-					assert.Contains(t, result.Result, "Pattern found in file",
+					assert.Contains(t, result.GetResult(), "Pattern found in file",
 						"Output should contain file headers")
 
 					// Check for line number format in matches
 					if tt.name != "search with surrounding lines" {
-						assert.Regexp(t, `\d+:`, result.Result, "Output should contain line numbers with colon for matches")
+						assert.Regexp(t, `\d+:`, result.GetResult(), "Output should contain line numbers with colon for matches")
 					}
 
 					// Check for context line format
 					// if tt.name == "search with surrounding lines" || tt.name == "search with line numbers" {
-					// 	assert.Regexp(t, `\d+-`, result.Result, "Output should contain line numbers with dash for context lines")
+					// 	assert.Regexp(t, `\d+-`, result.GetResult(), "Output should contain line numbers with dash for context lines")
 					// }
 				}
 
 				// Additional verification for the line numbers test case
 				if tt.name == "search with line numbers" {
 					// Get the temp file path from the result (it's dynamic)
-					assert.Contains(t, result.Result, "Pattern found in file",
+					assert.Contains(t, result.GetResult(), "Pattern found in file",
 						"Output should contain the file header")
 
 					// Check for the exact match on line 5
-					assert.Contains(t, result.Result, "5:func LineNumberTest",
+					assert.Contains(t, result.GetResult(), "5:func LineNumberTest",
 						"Output should contain the exact match with correct line number")
 
 					// Check for context lines with their line numbers
-					// assert.Contains(t, result.Result, "3-// Comment line 3",
+					// assert.Contains(t, result.GetResult(), "3-// Comment line 3",
 					// 	"Output should show line number for context lines before match")
-					// assert.Contains(t, result.Result, "7-    fmt.Println",
+					// assert.Contains(t, result.GetResult(), "7-    fmt.Println",
 					// 	"Output should show line number for context lines after match")
 				}
 			}
@@ -311,8 +311,8 @@ func TestGrepTool_InvalidJSON(t *testing.T) {
 	state := NewBasicState(context.TODO())
 
 	result := tool.Execute(ctx, state, "invalid json")
-	assert.NotEmpty(t, result.Error)
-	assert.Contains(t, result.Error, "invalid input")
+	assert.True(t, result.IsError())
+	assert.Contains(t, result.GetError(), "invalid input")
 }
 
 // TestGrepHiddenFilesIgnored tests that files and directories starting with a dot are ignored
@@ -367,11 +367,11 @@ func TestGrepHiddenFilesIgnored(t *testing.T) {
 	result := tool.Execute(ctx, state, string(inputJSON))
 
 	// Should not find hidden files
-	assert.Empty(t, result.Error)
-	assert.Contains(t, result.Result, "TestVisibleFunc")
-	assert.Contains(t, result.Result, "TestNormalDirFunc")
-	assert.NotContains(t, result.Result, "TestHiddenFunc")
-	assert.NotContains(t, result.Result, "TestHiddenDirFunc")
+	assert.False(t, result.IsError())
+	assert.Contains(t, result.GetResult(), "TestVisibleFunc")
+	assert.Contains(t, result.GetResult(), "TestNormalDirFunc")
+	assert.NotContains(t, result.GetResult(), "TestHiddenFunc")
+	assert.NotContains(t, result.GetResult(), "TestHiddenDirFunc")
 }
 
 // TestGrepResultLimitAndTruncation tests the limit of 100 results with truncation message
@@ -420,13 +420,13 @@ func TestGrepResultLimitAndTruncation(t *testing.T) {
 	result := tool.Execute(ctx, state, string(inputJSON))
 
 	// Count the number of "Pattern found in file" occurrences
-	count := strings.Count(result.Result, "Pattern found in file")
+	count := strings.Count(result.GetResult(), "Pattern found in file")
 
 	// We should have exactly 100 results
 	assert.Equal(t, 100, count, "Should return exactly 100 results")
 
 	// Should contain truncation notice
-	assert.Contains(t, result.Result, "[TRUNCATED DUE TO MAXIMUM 100 RESULT LIMIT]")
+	assert.Contains(t, result.GetResult(), "[TRUNCATED DUE TO MAXIMUM 100 RESULT LIMIT]")
 }
 
 // TestSortSearchResultsByModTime tests the dedicated sorting function
@@ -560,8 +560,8 @@ func TestDefaultPathIsAbsolute(t *testing.T) {
 	result := tool.Execute(ctx, state, string(inputJSON))
 
 	// The test should not error due to path issues
-	assert.NotContains(t, result.Error, "path must be an absolute path")
-	assert.NotContains(t, result.Error, "failed to get current working directory")
+	assert.NotContains(t, result.GetError(), "path must be an absolute path")
+	assert.NotContains(t, result.GetError(), "failed to get current working directory")
 }
 
 // TestGrepSortByModTime tests that results are sorted by modification time
@@ -630,9 +630,9 @@ func TestGrepSortByModTime(t *testing.T) {
 	result := tool.Execute(ctx, state, string(inputJSON))
 
 	// Verify order in output (newest first)
-	firstOccurrence := strings.Index(result.Result, "file_newest.txt")
-	secondOccurrence := strings.Index(result.Result, "file_newer.txt")
-	thirdOccurrence := strings.Index(result.Result, "file_old.txt")
+	firstOccurrence := strings.Index(result.GetResult(), "file_newest.txt")
+	secondOccurrence := strings.Index(result.GetResult(), "file_newer.txt")
+	thirdOccurrence := strings.Index(result.GetResult(), "file_old.txt")
 
 	// Assert the files appear in order of newest to oldest
 	assert.Greater(t, secondOccurrence, firstOccurrence, "Newest file should appear first")
@@ -750,18 +750,18 @@ func TestGrepFileMatchingByRelativePathOrBaseName(t *testing.T) {
 			result := tool.Execute(ctx, state, string(inputJSON))
 
 			// Check that there's no error
-			assert.Empty(t, result.Error)
+			assert.False(t, result.IsError())
 
 			// Check that expected matches are found
 			for _, expectedMatch := range tt.expectedMatches {
-				assert.Contains(t, result.Result, expectedMatch,
+				assert.Contains(t, result.GetResult(), expectedMatch,
 					fmt.Sprintf("Should find matches in file %s with pattern %s",
 						expectedMatch, tt.includePattern))
 			}
 
 			// Check that unexpected files are not matched
 			for _, unexpectedFile := range tt.unexpectedFiles {
-				assert.NotContains(t, result.Result, unexpectedFile,
+				assert.NotContains(t, result.GetResult(), unexpectedFile,
 					fmt.Sprintf("Should NOT find matches in file %s with pattern %s",
 						unexpectedFile, tt.includePattern))
 			}

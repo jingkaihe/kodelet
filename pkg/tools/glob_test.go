@@ -201,27 +201,27 @@ func TestGlobTool_Execute(t *testing.T) {
 			result := tool.Execute(ctx, state, string(inputBytes))
 
 			if tc.expectError {
-				assert.NotEmpty(t, result.Error)
+				assert.False(t, result.IsError())
 				return
 			}
 
-			assert.Empty(t, result.Error)
+			assert.False(t, result.IsError())
 
 			// Check for expected files
 			for _, expectedFile := range tc.expectedFiles {
 				expectedPath := filepath.ToSlash(filepath.Join(tmpDir, expectedFile))
-				assert.Contains(t, result.Result, expectedPath)
+				assert.Contains(t, result.GetResult(), expectedPath)
 			}
 
 			// Check that unexpected files are not included
 			for _, unexpectedFile := range tc.notExpected {
 				unexpectedPath := filepath.ToSlash(filepath.Join(tmpDir, unexpectedFile))
-				assert.NotContains(t, result.Result, unexpectedPath)
+				assert.NotContains(t, result.GetResult(), unexpectedPath)
 			}
 
 			// Check that files are sorted by modification time (newest first)
 			if len(tc.expectedFiles) >= 2 && tc.expectedFiles[0] == "file2.go" && tc.expectedFiles[1] == "file1.go" {
-				resultLines := strings.Split(strings.TrimSpace(result.Result), "\n")
+				resultLines := strings.Split(strings.TrimSpace(result.GetResult()), "\n")
 				file2Index := -1
 				file1Index := -1
 
@@ -241,7 +241,7 @@ func TestGlobTool_Execute(t *testing.T) {
 
 			// Check truncation message if needed
 			if tc.checkTruncated {
-				assert.Contains(t, result.Result, "Results truncated to 100 files")
+				assert.Contains(t, result.GetResult(), "Results truncated to 100 files")
 			}
 		})
 	}

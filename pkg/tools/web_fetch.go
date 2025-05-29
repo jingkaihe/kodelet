@@ -16,7 +16,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/jingkaihe/kodelet/pkg/types/llm"
-	"github.com/jingkaihe/kodelet/pkg/types/tools"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
 // WebFetchTool implements the web_fetch tool for retrieving and processing web content.
@@ -65,7 +65,7 @@ func (t *WebFetchTool) Description() string {
 }
 
 // ValidateInput validates the input parameters for the tool.
-func (t *WebFetchTool) ValidateInput(state tools.State, parameters string) error {
+func (t *WebFetchTool) ValidateInput(state tooltypes.State, parameters string) error {
 	input := &WebFetchInput{}
 	err := json.Unmarshal([]byte(parameters), input)
 	if err != nil {
@@ -94,11 +94,11 @@ func (t *WebFetchTool) ValidateInput(state tools.State, parameters string) error
 }
 
 // Execute executes the web_fetch tool.
-func (t *WebFetchTool) Execute(ctx context.Context, state tools.State, parameters string) tools.ToolResult {
+func (t *WebFetchTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResultInterface {
 	input := &WebFetchInput{}
 	err := json.Unmarshal([]byte(parameters), input)
 	if err != nil {
-		return tools.ToolResult{
+		return tooltypes.ToolResult{
 			Error: err.Error(),
 		}
 	}
@@ -106,7 +106,7 @@ func (t *WebFetchTool) Execute(ctx context.Context, state tools.State, parameter
 	// 1. Fetch the content with a custom HTTP client that handles same-domain redirects
 	content, contentType, err := fetchWithSameDomainRedirects(input.URL)
 	if err != nil {
-		return tools.ToolResult{
+		return tooltypes.ToolResult{
 			Error: fmt.Sprintf("Failed to fetch URL: %s", err),
 		}
 	}
@@ -122,7 +122,7 @@ func (t *WebFetchTool) Execute(ctx context.Context, state tools.State, parameter
 	// 3. Use weak LLM to extract the requested information
 	subAgentConfig, ok := ctx.Value(llm.SubAgentConfig{}).(llm.SubAgentConfig)
 	if !ok {
-		return tools.ToolResult{
+		return tooltypes.ToolResult{
 			Error: "sub-agent config not found in context",
 		}
 	}
@@ -159,12 +159,12 @@ IMPORTANT: Make sure that you preserve all the links in the content including hy
 	)
 
 	if err != nil {
-		return tools.ToolResult{
+		return tooltypes.ToolResult{
 			Error: fmt.Sprintf("Failed to extract information: %s", err),
 		}
 	}
 
-	return tools.ToolResult{
+	return tooltypes.ToolResult{
 		Result: extractedInfo,
 	}
 }

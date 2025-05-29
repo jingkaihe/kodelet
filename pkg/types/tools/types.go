@@ -14,7 +14,7 @@ type Tool interface {
 	Name() string
 	Description() string
 	ValidateInput(state State, parameters string) error
-	Execute(ctx context.Context, state State, parameters string) ToolResult
+	Execute(ctx context.Context, state State, parameters string) ToolResultInterface
 	TracingKVs(parameters string) ([]attribute.KeyValue, error)
 }
 

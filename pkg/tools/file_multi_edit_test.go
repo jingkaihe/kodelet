@@ -199,10 +199,10 @@ func TestFileMultiEditTool_Execute(t *testing.T) {
 			result := tool.Execute(context.Background(), state, string(inputBytes))
 
 			// Check that there was no error
-			assert.Empty(t, result.Error)
+			assert.False(t, result.IsError())
 
 			// Check that the result contains the expected count
-			assert.Contains(t, result.Result,
+			assert.Contains(t, result.GetResult(),
 				"Replaced "+string("0123456789"[tt.expectedCount])+" occurrence(s)")
 
 			// Check that the file was modified correctly

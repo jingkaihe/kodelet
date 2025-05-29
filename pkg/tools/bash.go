@@ -202,7 +202,7 @@ The command is using heredoc.
 `
 }
 
-func (b *BashTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
+func (b *BashTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResultInterface {
 	input := &BashInput{}
 	err := json.Unmarshal([]byte(parameters), input)
 	if err != nil {

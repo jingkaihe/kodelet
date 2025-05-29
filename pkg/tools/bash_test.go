@@ -39,8 +39,8 @@ func TestBashTool_Execute_Success(t *testing.T) {
 	params, _ := json.Marshal(input)
 
 	result := tool.Execute(context.Background(), NewBasicState(context.TODO()), string(params))
-	assert.Empty(t, result.Error)
-	assert.Equal(t, "hello world\n", result.Result)
+	assert.False(t, result.IsError())
+	assert.Equal(t, "hello world\n", result.GetResult())
 }
 
 func TestBashTool_Execute_Timeout(t *testing.T) {
@@ -53,8 +53,8 @@ func TestBashTool_Execute_Timeout(t *testing.T) {
 	params, _ := json.Marshal(input)
 
 	result := tool.Execute(context.Background(), NewBasicState(context.TODO()), string(params))
-	assert.Contains(t, result.Error, "Command timed out after 1 seconds")
-	assert.Empty(t, result.Result)
+	assert.Contains(t, result.GetError(), "Command timed out after 1 seconds")
+	assert.Empty(t, result.GetResult())
 }
 
 func TestBashTool_Execute_Error(t *testing.T) {
@@ -67,15 +67,15 @@ func TestBashTool_Execute_Error(t *testing.T) {
 	params, _ := json.Marshal(input)
 
 	result := tool.Execute(context.Background(), NewBasicState(context.TODO()), string(params))
-	assert.Contains(t, result.Error, "Command exited with status 127")
-	assert.Contains(t, result.Result, "nonexistentcommand: command not found")
+	assert.Contains(t, result.GetError(), "Command exited with status 127")
+	assert.Contains(t, result.GetResult(), "nonexistentcommand: command not found")
 }
 
 func TestBashTool_Execute_InvalidJSON(t *testing.T) {
 	tool := &BashTool{}
 	result := tool.Execute(context.Background(), NewBasicState(context.TODO()), "invalid json")
-	assert.NotEmpty(t, result.Error)
-	assert.Empty(t, result.Result)
+	assert.True(t, result.IsError())
+	assert.Empty(t, result.GetResult())
 }
 
 func TestBashTool_Execute_ContextCancellation(t *testing.T) {
@@ -91,8 +91,8 @@ func TestBashTool_Execute_ContextCancellation(t *testing.T) {
 	defer cancel()
 
 	result := tool.Execute(ctx, NewBasicState(context.TODO()), string(params))
-	assert.Contains(t, result.Error, "Command timed out")
-	assert.Empty(t, result.Result)
+	assert.Contains(t, result.GetError(), "Command timed out")
+	assert.Empty(t, result.GetResult())
 }
 
 func TestBashTool_ValidateInput(t *testing.T) {

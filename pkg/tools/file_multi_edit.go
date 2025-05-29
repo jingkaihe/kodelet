@@ -120,7 +120,7 @@ func (t *FileMultiEditTool) ValidateInput(state tooltypes.State, parameters stri
 	return nil
 }
 
-func (t *FileMultiEditTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
+func (t *FileMultiEditTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResultInterface {
 	var input FileMultiEditInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
 		return tooltypes.ToolResult{

@@ -303,7 +303,7 @@ func (t *MCPTool) ValidateInput(state tooltypes.State, parameters string) error 
 	return nil
 }
 
-func (t *MCPTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
+func (t *MCPTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResultInterface {
 	var input map[string]any
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
 		return tooltypes.ToolResult{

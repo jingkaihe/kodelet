@@ -72,22 +72,22 @@ func TestTodoReadTool_Execute(t *testing.T) {
 		result := tool.Execute(ctx, s, "")
 
 		// Verify results
-		assert.Empty(t, result.Error)
-		assert.NotEmpty(t, result.Result)
+		assert.False(t, result.IsError())
+		assert.NotEmpty(t, result.GetResult())
 
 		// Check expected formatting
-		assert.Contains(t, result.Result, "Current todos:")
-		assert.Contains(t, result.Result, "ID\tStatus\tPriority\tContent")
+		assert.Contains(t, result.GetResult(), "Current todos:")
+		assert.Contains(t, result.GetResult(), "ID\tStatus\tPriority\tContent")
 
 		// Check expected order (sorted by status and priority)
 		// Canceled should be first
-		assert.Contains(t, result.Result, "canceled\thigh\tCanceled task")
+		assert.Contains(t, result.GetResult(), "canceled\thigh\tCanceled task")
 		// Completed should be next
-		assert.Contains(t, result.Result, "completed\tmedium\tCompleted task")
+		assert.Contains(t, result.GetResult(), "completed\tmedium\tCompleted task")
 		// In Progress should follow
-		assert.Contains(t, result.Result, "in_progress\tlow\tIn progress task")
+		assert.Contains(t, result.GetResult(), "in_progress\tlow\tIn progress task")
 		// Pending should be last
-		assert.Contains(t, result.Result, "pending\thigh\tHigh priority task")
+		assert.Contains(t, result.GetResult(), "pending\thigh\tHigh priority task")
 	})
 
 	t.Run("empty todo file", func(t *testing.T) {
@@ -111,9 +111,9 @@ func TestTodoReadTool_Execute(t *testing.T) {
 		result := tool.Execute(ctx, s, "")
 
 		// Verify results
-		assert.Empty(t, result.Error)
-		assert.NotEmpty(t, result.Result)
-		assert.Contains(t, result.Result, "Current todos:")
+		assert.False(t, result.IsError())
+		assert.NotEmpty(t, result.GetResult())
+		assert.Contains(t, result.GetResult(), "Current todos:")
 	})
 
 	t.Run("non-existent todo file", func(t *testing.T) {
@@ -126,8 +126,8 @@ func TestTodoReadTool_Execute(t *testing.T) {
 		result := tool.Execute(ctx, s, "")
 
 		// Verify error
-		assert.NotEmpty(t, result.Error)
-		assert.Contains(t, result.Error, "failed to read todos from file")
+		assert.True(t, result.IsError())
+		assert.Contains(t, result.GetError(), "failed to read todos from file")
 	})
 
 	t.Run("invalid json in todo file", func(t *testing.T) {
@@ -144,8 +144,8 @@ func TestTodoReadTool_Execute(t *testing.T) {
 		result := tool.Execute(ctx, s, "")
 
 		// Verify error
-		assert.NotEmpty(t, result.Error)
-		assert.Contains(t, result.Error, "failed to unmarshal todos from file")
+		assert.True(t, result.IsError())
+		assert.Contains(t, result.GetError(), "failed to unmarshal todos from file")
 	})
 }
 

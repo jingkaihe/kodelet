@@ -31,8 +31,8 @@ func TestThinkingTool_Execute(t *testing.T) {
 
 	result := tool.Execute(context.Background(), state, `{"thought": "Test thought"}`)
 
-	assert.Equal(t, "Your thought have been recorded.", result.Result)
-	assert.Empty(t, result.Error)
+	assert.Equal(t, "Your thought have been recorded.", result.GetResult())
+	assert.False(t, result.IsError())
 }
 
 func TestThinkingTool_ValidateInput(t *testing.T) {

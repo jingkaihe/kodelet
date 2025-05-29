@@ -337,7 +337,7 @@ func sortSearchResultsByModTime(results []SearchResult) {
 // Limit for maximum search results
 const MaxSearchResults = 100
 
-func (t *GrepTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
+func (t *GrepTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResultInterface {
 	var input CodeSearchInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
 		return tooltypes.ToolResult{

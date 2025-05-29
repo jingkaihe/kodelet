@@ -57,7 +57,7 @@ func (t *TodoReadTool) TracingKVs(parameters string) ([]attribute.KeyValue, erro
 	return kvs, nil
 }
 
-func (t *TodoReadTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
+func (t *TodoReadTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResultInterface {
 	filePath := state.TodoFilePath()
 
 	content, err := os.ReadFile(filePath)

@@ -244,8 +244,8 @@ func TestImageRecognitionTool_Execute(t *testing.T) {
 		parameters := `{"image_path": "` + imagePath + `", "prompt": "What is this?"}`
 
 		result := tool.Execute(ctx, state, parameters)
-		assert.NotEmpty(t, result.Error)
-		assert.Contains(t, result.Error, "sub-agent config not found")
+		assert.True(t, result.IsError())
+		assert.Contains(t, result.GetError(), "sub-agent config not found")
 	})
 
 	t.Run("successful execution", func(t *testing.T) {
@@ -266,8 +266,8 @@ func TestImageRecognitionTool_Execute(t *testing.T) {
 		parameters := `{"image_path": "` + imagePath + `", "prompt": "What is this?"}`
 
 		result := tool.Execute(ctx, state, parameters)
-		assert.Empty(t, result.Error)
-		assert.Equal(t, "This is a test image analysis result", result.Result)
+		assert.False(t, result.IsError())
+		assert.Equal(t, "This is a test image analysis result", result.GetResult())
 	})
 
 	t.Run("invalid parameters", func(t *testing.T) {
@@ -276,6 +276,6 @@ func TestImageRecognitionTool_Execute(t *testing.T) {
 		parameters := `invalid json`
 
 		result := tool.Execute(ctx, state, parameters)
-		assert.NotEmpty(t, result.Error)
+		assert.True(t, result.IsError())
 	})
 }

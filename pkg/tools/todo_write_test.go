@@ -167,8 +167,8 @@ func TestTodoWriteTool_Execute(t *testing.T) {
 		params, _ := json.Marshal(input)
 		result := tool.Execute(context.Background(), s, string(params))
 
-		assert.Empty(t, result.Error)
-		assert.Contains(t, result.Result, "Todos have been written to")
+		assert.False(t, result.IsError())
+		assert.Contains(t, result.GetResult(), "Todos have been written to")
 
 		// Verify the file was created
 		assert.FileExists(t, todoPath)
@@ -217,7 +217,7 @@ func TestTodoWriteTool_Execute(t *testing.T) {
 		params, _ := json.Marshal(input)
 		result := tool.Execute(context.Background(), s, string(params))
 
-		assert.Empty(t, result.Error)
+		assert.False(t, result.IsError())
 
 		// Verify file contents
 		fileData, err := os.ReadFile(todoPath)
@@ -232,8 +232,8 @@ func TestTodoWriteTool_Execute(t *testing.T) {
 	t.Run("invalid JSON", func(t *testing.T) {
 		s := NewBasicState(context.TODO())
 		result := tool.Execute(context.Background(), s, "invalid json")
-		assert.Contains(t, result.Error, "invalid input")
-		assert.Empty(t, result.Result)
+		assert.Contains(t, result.GetError(), "invalid input")
+		assert.Empty(t, result.GetResult())
 	})
 
 	t.Run("handle non-writable file", func(t *testing.T) {
@@ -253,7 +253,7 @@ func TestTodoWriteTool_Execute(t *testing.T) {
 		params, _ := json.Marshal(input)
 		result := tool.Execute(context.Background(), s, string(params))
 
-		assert.Contains(t, result.Error, "failed to write todos to file")
-		assert.Empty(t, result.Result)
+		assert.Contains(t, result.GetError(), "failed to write todos to file")
+		assert.Empty(t, result.GetResult())
 	})
 }

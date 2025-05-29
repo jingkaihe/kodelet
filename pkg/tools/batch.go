@@ -151,7 +151,7 @@ func (t *BatchTool) ValidateInput(state tooltypes.State, parameters string) erro
 	return nil
 }
 
-func (t *BatchTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
+func (t *BatchTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResultInterface {
 	var input BatchToolInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
 		return tooltypes.ToolResult{Error: errors.Wrap(err, "failed to unmarshal input").Error()}

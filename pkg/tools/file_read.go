@@ -91,7 +91,7 @@ func (r *FileReadTool) TracingKVs(parameters string) ([]attribute.KeyValue, erro
 	}, nil
 }
 
-func (r *FileReadTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
+func (r *FileReadTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResultInterface {
 	input := &FileReadInput{}
 	err := json.Unmarshal([]byte(parameters), input)
 	if err != nil {
