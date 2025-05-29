@@ -31,11 +31,11 @@ type GrepToolResult struct {
 
 func (r *GrepToolResult) GetResult() string {
 	result := FormatSearchResults(r.pattern, r.results)
-	
+
 	if r.truncated {
 		result += "\n\n[TRUNCATED DUE TO MAXIMUM 100 RESULT LIMIT]"
 	}
-	
+
 	return result
 }
 
@@ -69,7 +69,7 @@ func (r *GrepToolResult) UserFacing() string {
 		result.WriteString(fmt.Sprintf("Include Pattern: %s\n", r.include))
 	}
 	result.WriteString(fmt.Sprintf("Found matches in %d files:\n\n", len(r.results)))
-	
+
 	content := r.GetResult()
 	result.WriteString(content)
 

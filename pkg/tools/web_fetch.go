@@ -19,6 +19,36 @@ import (
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
+type WebFetchToolResult struct {
+	url    string
+	prompt string
+	result string
+	err    string
+}
+
+func (r *WebFetchToolResult) GetResult() string {
+	return r.result
+}
+
+func (r *WebFetchToolResult) GetError() string {
+	return r.err
+}
+
+func (r *WebFetchToolResult) IsError() bool {
+	return r.err != ""
+}
+
+func (r *WebFetchToolResult) AssistantFacing() string {
+	return tooltypes.StringifyToolResult(r.result, r.err)
+}
+
+func (r *WebFetchToolResult) UserFacing() string {
+	if r.IsError() {
+		return r.GetError()
+	}
+	return fmt.Sprintf("Web Fetch: %s\nPrompt: %s\n%s", r.url, r.prompt, r.result)
+}
+
 // WebFetchTool implements the web_fetch tool for retrieving and processing web content.
 type WebFetchTool struct{}
 
@@ -98,16 +128,20 @@ func (t *WebFetchTool) Execute(ctx context.Context, state tooltypes.State, param
 	input := &WebFetchInput{}
 	err := json.Unmarshal([]byte(parameters), input)
 	if err != nil {
-		return tooltypes.ToolResult{
-			Error: err.Error(),
+		return &WebFetchToolResult{
+			url:    input.URL,
+			prompt: input.Prompt,
+			err:    err.Error(),
 		}
 	}
 
 	// 1. Fetch the content with a custom HTTP client that handles same-domain redirects
 	content, contentType, err := fetchWithSameDomainRedirects(input.URL)
 	if err != nil {
-		return tooltypes.ToolResult{
-			Error: fmt.Sprintf("Failed to fetch URL: %s", err),
+		return &WebFetchToolResult{
+			url:    input.URL,
+			prompt: input.Prompt,
+			err:    fmt.Sprintf("Failed to fetch URL: %s", err),
 		}
 	}
 
@@ -122,8 +156,10 @@ func (t *WebFetchTool) Execute(ctx context.Context, state tooltypes.State, param
 	// 3. Use weak LLM to extract the requested information
 	subAgentConfig, ok := ctx.Value(llm.SubAgentConfig{}).(llm.SubAgentConfig)
 	if !ok {
-		return tooltypes.ToolResult{
-			Error: "sub-agent config not found in context",
+		return &WebFetchToolResult{
+			url:    input.URL,
+			prompt: input.Prompt,
+			err:    "sub-agent config not found in context",
 		}
 	}
 
@@ -159,13 +195,17 @@ IMPORTANT: Make sure that you preserve all the links in the content including hy
 	)
 
 	if err != nil {
-		return tooltypes.ToolResult{
-			Error: fmt.Sprintf("Failed to extract information: %s", err),
+		return &WebFetchToolResult{
+			url:    input.URL,
+			prompt: input.Prompt,
+			err:    fmt.Sprintf("Failed to extract information: %s", err),
 		}
 	}
 
-	return tooltypes.ToolResult{
-		Result: extractedInfo,
+	return &WebFetchToolResult{
+		url:    input.URL,
+		prompt: input.Prompt,
+		result: extractedInfo,
 	}
 }
 

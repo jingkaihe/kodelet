@@ -19,6 +19,36 @@ import (
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
+type ImageRecognitionToolResult struct {
+	imagePath string
+	prompt    string
+	result    string
+	err       string
+}
+
+func (r *ImageRecognitionToolResult) GetResult() string {
+	return r.result
+}
+
+func (r *ImageRecognitionToolResult) GetError() string {
+	return r.err
+}
+
+func (r *ImageRecognitionToolResult) IsError() bool {
+	return r.err != ""
+}
+
+func (r *ImageRecognitionToolResult) AssistantFacing() string {
+	return tooltypes.StringifyToolResult(r.result, r.err)
+}
+
+func (r *ImageRecognitionToolResult) UserFacing() string {
+	if r.IsError() {
+		return r.GetError()
+	}
+	return fmt.Sprintf("Image Recognition: %s\nPrompt: %s\n%s", r.imagePath, r.prompt, r.result)
+}
+
 // ImageRecognitionTool implements the image_recognition tool for processing and understanding images.
 type ImageRecognitionTool struct{}
 
@@ -153,16 +183,20 @@ func (t *ImageRecognitionTool) Execute(ctx context.Context, state tooltypes.Stat
 	input := &ImageRecognitionInput{}
 	err := json.Unmarshal([]byte(parameters), input)
 	if err != nil {
-		return tooltypes.ToolResult{
-			Error: err.Error(),
+		return &ImageRecognitionToolResult{
+			imagePath: input.ImagePath,
+			prompt:    input.Prompt,
+			err:       err.Error(),
 		}
 	}
 
 	// Validate remote URL if it's an HTTPS URL
 	if strings.HasPrefix(input.ImagePath, "https://") {
 		if err := t.validateRemoteImage(input.ImagePath); err != nil {
-			return tooltypes.ToolResult{
-				Error: fmt.Sprintf("Failed to validate remote image: %s", err),
+			return &ImageRecognitionToolResult{
+				imagePath: input.ImagePath,
+				prompt:    input.Prompt,
+				err:       fmt.Sprintf("Failed to validate remote image: %s", err),
 			}
 		}
 	}
@@ -170,8 +204,10 @@ func (t *ImageRecognitionTool) Execute(ctx context.Context, state tooltypes.Stat
 	// Get sub-agent config from context for LLM interaction
 	subAgentConfig, ok := ctx.Value(llm.SubAgentConfig{}).(llm.SubAgentConfig)
 	if !ok {
-		return tooltypes.ToolResult{
-			Error: "sub-agent config not found in context",
+		return &ImageRecognitionToolResult{
+			imagePath: input.ImagePath,
+			prompt:    input.Prompt,
+			err:       "sub-agent config not found in context",
 		}
 	}
 
@@ -201,13 +237,17 @@ Please provide a clear and detailed response based on what you can see in the im
 	)
 
 	if err != nil {
-		return tooltypes.ToolResult{
-			Error: fmt.Sprintf("Failed to analyze image: %s", err),
+		return &ImageRecognitionToolResult{
+			imagePath: input.ImagePath,
+			prompt:    input.Prompt,
+			err:       fmt.Sprintf("Failed to analyze image: %s", err),
 		}
 	}
 
-	return tooltypes.ToolResult{
-		Result: analysisResult,
+	return &ImageRecognitionToolResult{
+		imagePath: input.ImagePath,
+		prompt:    input.Prompt,
+		result:    analysisResult,
 	}
 }
 

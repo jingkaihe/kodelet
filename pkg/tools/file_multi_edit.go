@@ -16,14 +16,14 @@ import (
 )
 
 type FileMultiEditToolResult struct {
-	filename        string
-	oldText         string
-	newText         string
-	oldContent      string
-	newContent      string
-	occurrence      int
-	actualReplaced  int
-	err             string
+	filename       string
+	oldText        string
+	newText        string
+	oldContent     string
+	newContent     string
+	occurrence     int
+	actualReplaced int
+	err            string
 }
 
 func (r *FileMultiEditToolResult) GetResult() string {
@@ -52,7 +52,7 @@ func (r *FileMultiEditToolResult) AssistantFacing() string {
 		formattedEdit = FormatEditedBlock(r.oldContent, r.oldText, r.newText)
 	}
 
-	result := fmt.Sprintf("File %s has been edited successfully. Replaced %d occurrence(s) of the text.\n\nExample of edited code block:\n%s", 
+	result := fmt.Sprintf("File %s has been edited successfully. Replaced %d occurrence(s) of the text.\n\nExample of edited code block:\n%s",
 		r.filename, r.actualReplaced, formattedEdit)
 	return tooltypes.StringifyToolResult(result, "")
 }

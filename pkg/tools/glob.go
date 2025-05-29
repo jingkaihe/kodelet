@@ -67,7 +67,7 @@ func (r *GlobToolResult) UserFacing() string {
 		result.WriteString(fmt.Sprintf("Search Path: %s\n", r.path))
 	}
 	result.WriteString(fmt.Sprintf("Found %d files:\n", len(r.files)))
-	
+
 	for _, file := range r.files {
 		result.WriteString(file)
 		result.WriteString("\n")
