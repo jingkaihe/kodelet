@@ -25,7 +25,7 @@ type Invocation struct {
 	Parameters any    `json:"parameters" jsonschema:"description=The parameters to pass to the tool"`
 }
 
-func (inv *Invocation) invoke(ctx context.Context, state tooltypes.State) tooltypes.ToolResult {
+func (inv *Invocation) invoke(ctx context.Context, state tooltypes.State) tooltypes.ToolResultInterface {
 	_, err := findTool(inv.ToolName, state)
 	if err != nil {
 		return tooltypes.ToolResult{Error: errors.Wrap(err, "failed to find tool").Error()}
@@ -157,7 +157,7 @@ func (t *BatchTool) Execute(ctx context.Context, state tooltypes.State, paramete
 		return tooltypes.ToolResult{Error: errors.Wrap(err, "failed to unmarshal input").Error()}
 	}
 
-	toolResults := make([]tooltypes.ToolResult, len(input.Invocations))
+	toolResults := make([]tooltypes.ToolResultInterface, len(input.Invocations))
 	wg := sync.WaitGroup{}
 	wg.Add(len(input.Invocations))
 
@@ -176,16 +176,16 @@ func (t *BatchTool) Execute(ctx context.Context, state tooltypes.State, paramete
 	)
 
 	for idx, toolResult := range toolResults {
-		if toolResult.Error != "" {
+		if toolResult.IsError() {
 			errors = append(errors, fmt.Sprintf(`<invocation.%d.error>
 %s
 </invocation.%d.error>
-`, idx, toolResult.Error, idx))
+`, idx, toolResult.GetError(), idx))
 		} else {
 			results = append(results, fmt.Sprintf(`<invocation.%d.result>
 %s
 </invocation.%d.result>
-`, idx, toolResult.Result, idx))
+`, idx, toolResult.GetResult(), idx))
 		}
 	}
 

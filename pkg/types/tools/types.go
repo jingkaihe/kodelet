@@ -18,6 +18,14 @@ type Tool interface {
 	TracingKVs(parameters string) ([]attribute.KeyValue, error)
 }
 
+type ToolResultInterface interface {
+	AssistantFacing() string
+	UserFacing() string
+	IsError() bool
+	GetError() string  // xxx: to be removed
+	GetResult() string // xxx: to be removed
+}
+
 type ToolResult struct {
 	Result string `json:"result"`
 	Error  string `json:"error"`
@@ -38,6 +46,26 @@ func (t *ToolResult) String() string {
 `, t.Result)
 	}
 	return out
+}
+
+func (t ToolResult) AssistantFacing() string {
+	return t.String()
+}
+
+func (t ToolResult) UserFacing() string {
+	return t.String()
+}
+
+func (t ToolResult) IsError() bool {
+	return t.Error != ""
+}
+
+func (t ToolResult) GetError() string {
+	return t.Error
+}
+
+func (t ToolResult) GetResult() string {
+	return t.Result
 }
 
 type State interface {

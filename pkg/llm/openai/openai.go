@@ -500,18 +500,18 @@ func (t *OpenAIThread) processMessageExchange(
 		// Execute the tool
 		runToolCtx := t.WithSubAgent(ctx, handler)
 		output := tools.RunTool(runToolCtx, t.state, toolCall.Function.Name, toolCall.Function.Arguments)
-		handler.HandleToolResult(toolCall.Function.Name, output.String())
+		handler.HandleToolResult(toolCall.Function.Name, output.UserFacing())
 
 		// For tracing, add tool execution completion event
 		telemetry.AddEvent(ctx, "tool_execution_complete",
 			attribute.String("tool_name", toolCall.Function.Name),
-			attribute.Int("result_length", len(output.String())),
+			attribute.Int("result_length", len(output.UserFacing())),
 		)
 
 		// Add tool result to messages for next API call
 		t.messages = append(t.messages, openai.ChatCompletionMessage{
 			Role:       openai.ChatMessageRoleTool,
-			Content:    output.String(),
+			Content:    output.AssistantFacing(),
 			ToolCallID: toolCall.ID,
 		})
 	}

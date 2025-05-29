@@ -307,17 +307,17 @@ func (t *AnthropicThread) processMessageExchange(
 
 			runToolCtx := t.WithSubAgent(ctx, handler)
 			output := tools.RunTool(runToolCtx, t.state, block.Name, string(variant.JSON.Input.Raw()))
-			handler.HandleToolResult(block.Name, output.String())
+			handler.HandleToolResult(block.Name, output.UserFacing())
 
 			// For tracing, add tool execution completion event
 			telemetry.AddEvent(ctx, "tool_execution_complete",
 				attribute.String("tool_name", block.Name),
-				attribute.Int("result_length", len(output.String())),
+				attribute.Int("result_length", len(output.UserFacing())),
 			)
 
 			// Add tool result to messages for next API call
 			t.messages = append(t.messages, anthropic.NewUserMessage(
-				anthropic.NewToolResultBlock(block.ID, output.String(), false),
+				anthropic.NewToolResultBlock(block.ID, output.AssistantFacing(), false),
 			))
 		}
 	}

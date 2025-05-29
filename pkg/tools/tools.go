@@ -78,7 +78,7 @@ var (
 	tracer = telemetry.Tracer("kodelet.tools")
 )
 
-func RunTool(ctx context.Context, state tooltypes.State, toolName string, parameters string) tooltypes.ToolResult {
+func RunTool(ctx context.Context, state tooltypes.State, toolName string, parameters string) tooltypes.ToolResultInterface {
 	tool, err := findTool(toolName, state)
 	if err != nil {
 		return tooltypes.ToolResult{
