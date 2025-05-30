@@ -89,6 +89,7 @@ func plainChatUI(ctx context.Context, options *ChatOptions) {
 		// Process the query using the persistent thread
 		_, err = thread.SendMessage(ctx, input, handler, llmtypes.MessageOpt{
 			PromptCache: true,
+			MaxTurns:    options.maxTurns,
 		})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)

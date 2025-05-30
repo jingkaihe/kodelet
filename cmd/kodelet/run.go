@@ -20,6 +20,7 @@ type RunConfig struct {
 	ResumeConvID string
 	NoSave       bool
 	Images       []string // Image paths or URLs to include with the message
+	MaxTurns     int      // Maximum number of turns within a single SendMessage call
 }
 
 // NewRunConfig creates a new RunConfig with default values
@@ -28,6 +29,7 @@ func NewRunConfig() *RunConfig {
 		ResumeConvID: "",
 		NoSave:       false,
 		Images:       []string{},
+		MaxTurns:     50, // Default to 50 turns
 	}
 }
 
@@ -114,6 +116,7 @@ var runCmd = &cobra.Command{
 		_, err = thread.SendMessage(ctx, query, handler, llmtypes.MessageOpt{
 			PromptCache: true,
 			Images:      config.Images,
+			MaxTurns:    config.MaxTurns,
 		})
 		if err != nil {
 			fmt.Printf("\n\033[1;31mError: %v\033[0m\n", err)
@@ -143,6 +146,7 @@ func init() {
 	runCmd.Flags().String("resume", defaults.ResumeConvID, "Resume a specific conversation")
 	runCmd.Flags().Bool("no-save", defaults.NoSave, "Disable conversation persistence")
 	runCmd.Flags().StringSliceP("image", "I", defaults.Images, "Add image input (can be used multiple times)")
+	runCmd.Flags().Int("max-turns", defaults.MaxTurns, "Maximum number of turns within a single message exchange (0 for no limit)")
 }
 
 // getRunConfigFromFlags extracts run configuration from command flags
@@ -157,6 +161,13 @@ func getRunConfigFromFlags(cmd *cobra.Command) *RunConfig {
 	}
 	if images, err := cmd.Flags().GetStringSlice("image"); err == nil {
 		config.Images = images
+	}
+	if maxTurns, err := cmd.Flags().GetInt("max-turns"); err == nil {
+		// Ensure non-negative values (treat negative as 0/no limit)
+		if maxTurns < 0 {
+			maxTurns = 0
+		}
+		config.MaxTurns = maxTurns
 	}
 
 	return config

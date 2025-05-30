@@ -13,10 +13,11 @@ import (
 type AssistantClient struct {
 	thread     llmtypes.Thread
 	mcpManager *tools.MCPManager
+	maxTurns   int
 }
 
 // NewAssistantClient creates a new assistant client
-func NewAssistantClient(ctx context.Context, conversationID string, enablePersistence bool, mcpManager *tools.MCPManager) *AssistantClient {
+func NewAssistantClient(ctx context.Context, conversationID string, enablePersistence bool, mcpManager *tools.MCPManager, maxTurns int) *AssistantClient {
 	// Create a persistent thread with config from viper
 	thread := llm.NewThread(llm.GetConfigFromViper())
 
@@ -33,6 +34,7 @@ func NewAssistantClient(ctx context.Context, conversationID string, enablePersis
 	return &AssistantClient{
 		thread:     thread,
 		mcpManager: mcpManager,
+		maxTurns:   maxTurns,
 	}
 }
 
@@ -58,6 +60,7 @@ func (a *AssistantClient) SendMessage(ctx context.Context, message string, messa
 	_, err := a.thread.SendMessage(ctx, message, handler, llmtypes.MessageOpt{
 		PromptCache: true,
 		Images:      imagePaths,
+		MaxTurns:    a.maxTurns,
 	})
 
 	return err
