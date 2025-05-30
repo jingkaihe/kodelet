@@ -360,6 +360,12 @@ func (t *OpenAIThread) SendMessage(
 	}
 
 	// Main interaction loop for handling tool calls
+	turnCount := 0
+	maxTurns := opt.MaxTurns
+	if maxTurns < 0 {
+		maxTurns = 0 // treat negative as no limit
+	}
+
 OUTER:
 	for {
 		select {
@@ -367,6 +373,17 @@ OUTER:
 			logger.G(ctx).Info("stopping kodelet.llm.openai")
 			break OUTER
 		default:
+			// Check turn limit (0 means no limit)
+			logger.G(ctx).WithField("turn_count", turnCount).WithField("max_turns", maxTurns).Debug("checking turn limit")
+
+			if maxTurns > 0 && turnCount >= maxTurns {
+				logger.G(ctx).
+					WithField("turn_count", turnCount).
+					WithField("max_turns", maxTurns).
+					Warn("reached maximum turn limit, stopping interaction")
+				break OUTER
+			}
+
 			var exchangeOutput string
 			exchangeOutput, toolsUsed, err := t.processMessageExchange(ctx, handler, model, maxTokens, opt)
 			if err != nil {
@@ -380,6 +397,9 @@ OUTER:
 				}
 				return "", err
 			}
+
+			// Increment turn count after each exchange
+			turnCount++
 
 			// Update finalOutput with the most recent output
 			finalOutput = exchangeOutput

@@ -36,5 +36,4 @@ anthropic.json
 Thumbs.db
 
 ./bin
-kodelet-todos-*.json
-# kodelet
+.kodelet/

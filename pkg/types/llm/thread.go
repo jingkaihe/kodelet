@@ -24,6 +24,9 @@ type MessageOpt struct {
 	NoSaveConversation bool
 	// Images contains image paths or URLs to include with the message
 	Images []string
+	// MaxTurns limits the number of turns within a single SendMessage call
+	// A value of 0 means no limit, and negative values are treated as 0
+	MaxTurns int
 }
 
 // SubAgentConfig is the key for the thread in the context

@@ -120,6 +120,7 @@ make help           # Display help
    export KODELET_PROVIDER="anthropic"  # Optional, detected from model name
    export KODELET_MODEL="claude-sonnet-4-0"
    export KODELET_MAX_TOKENS="8192"
+   export KODELET_CACHE_EVERY="5"  # Cache messages every N interactions (0 to disable)
 
    # LLM configuration - OpenAI
    export OPENAI_API_KEY="sk-..."
@@ -140,6 +141,7 @@ make help           # Display help
    max_tokens: 8192
    weak_model: "claude-3-5-haiku-latest"
    weak_model_max_tokens: 8192
+   cache_every: 10  # Cache messages every N interactions (0 to disable)
 
    # Alternative OpenAI configuration
    # provider: "openai"
@@ -170,7 +172,7 @@ make help           # Display help
    kodelet run --log-level debug "query"
 
    # Anthropic example
-   kodelet run --provider "anthropic" --model "claude-3-opus-20240229" --max-tokens 4096 --weak-model-max-tokens 2048 "query"
+   kodelet run --provider "anthropic" --model "claude-3-opus-20240229" --max-tokens 4096 --weak-model-max-tokens 2048 --cache-every 3 "query"
 
    # OpenAI example
    kodelet run --provider "openai" --model "gpt-4.1" --max-tokens 4096 --reasoning-effort "high" "query"

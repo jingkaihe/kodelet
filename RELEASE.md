@@ -1,5 +1,42 @@
 # Kodelet
 
+## 0.0.31.alpha (2025-05-30)
+
+### Conversation Context Management
+
+- **Max-Turns Configuration**: Added configurable conversation turn limits to prevent excessive context growth
+  - **CLI Flags**: New `--max-turns` flag for `chat` and `run` commands (default: 50 turns)
+  - **Context Control**: Helps manage token usage and prevents runaway conversation loops
+  - **Flexible Limits**: Set to 0 for unlimited turns, or negative values are treated as no limit
+
+### LLM Caching Enhancements
+
+- **Anthropic Message Caching**: Implemented configurable message caching for Anthropic threads
+  - **Cache Configuration**: New `--cache-every` flag and `cache_every` config option (default: 10 interactions)
+  - **Performance Optimization**: Reduces API costs by caching frequently accessed message history
+  - **Anthropic-Specific**: Optimized for Anthropic's caching capabilities to improve response times
+
+### Todo Management Improvements
+
+- **Enhanced File Path Management**: Improved todo file organization and error handling
+  - **Dedicated Directory**: Todo files now stored in `.kodelet/` directory for better organization
+  - **Robust Error Handling**: Better error reporting when todo file paths cannot be determined
+  - **Session-Based Storage**: Todo files remain session-specific with improved path resolution
+
+### Technical Improvements
+
+- **Debug Logging**: Added comprehensive debug logging for LLM turn limit checks and caching behavior
+  - **Turn Tracking**: Better visibility into conversation turn counting for both Anthropic and OpenAI interactions
+  - **Cache Debugging**: Detailed logging for message caching operations and decisions
+- **Configuration Management**: Enhanced configuration handling for new caching and turn limit features
+  - **Backward Compatibility**: All new features have sensible defaults and don't break existing configurations
+  - **Provider-Specific**: Turn limits and caching options are intelligently applied based on LLM provider capabilities
+
+### Bug Fixes
+
+- **Todo Tool Reliability**: Fixed potential crashes when todo file paths cannot be determined
+- **Configuration Loading**: Improved handling of missing or invalid configuration values for new features
+
 ## 0.0.30.alpha (2025-05-29)
 
 ### User Experience Improvements

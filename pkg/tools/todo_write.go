@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/invopop/jsonschema"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -188,10 +189,24 @@ func (t *TodoWriteTool) Execute(ctx context.Context, state tooltypes.State, para
 		}
 	}
 
-	todosFilePath := state.TodoFilePath()
+	todosFilePath, err := state.TodoFilePath()
+	if err != nil {
+		return &TodoToolResult{
+			filePath: todosFilePath,
+			err:      fmt.Sprintf("failed to get todo file path: %s", err.Error()),
+		}
+	}
+
+	// make the directory if it doesn't exist
+	if err := os.MkdirAll(filepath.Dir(todosFilePath), 0755); err != nil {
+		return &TodoToolResult{
+			filePath: todosFilePath,
+			err:      fmt.Sprintf("failed to write todos to file: %s", err.Error()),
+		}
+	}
 
 	// write the todos to the file
-	err := os.WriteFile(todosFilePath, []byte(parameters), 0644)
+	err = os.WriteFile(todosFilePath, []byte(parameters), 0644)
 	if err != nil {
 		return &TodoToolResult{
 			filePath: todosFilePath,

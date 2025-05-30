@@ -16,6 +16,7 @@ type ChatOptions struct {
 	resumeConvID string
 	storageType  string
 	noSave       bool
+	maxTurns     int
 }
 
 var chatOptions = &ChatOptions{}
@@ -25,6 +26,7 @@ func init() {
 	chatCmd.Flags().StringVar(&chatOptions.resumeConvID, "resume", "", "Resume a specific conversation")
 	chatCmd.Flags().StringVar(&chatOptions.storageType, "storage", "json", "Specify storage backend (json or sqlite)")
 	chatCmd.Flags().BoolVar(&chatOptions.noSave, "no-save", false, "Disable conversation persistence")
+	chatCmd.Flags().IntVar(&chatOptions.maxTurns, "max-turns", 50, "Maximum number of turns within a single message exchange (0 for no limit)")
 }
 
 var chatCmd = &cobra.Command{
@@ -42,11 +44,20 @@ var chatCmd = &cobra.Command{
 		}
 		// Start the Bubble Tea UI
 		if !chatOptions.usePlainUI {
-			tui.StartChatCmd(ctx, chatOptions.resumeConvID, !chatOptions.noSave, mcpManager)
+			// Ensure non-negative values (treat negative as 0/no limit)
+			maxTurns := chatOptions.maxTurns
+			if maxTurns < 0 {
+				maxTurns = 0
+			}
+			tui.StartChatCmd(ctx, chatOptions.resumeConvID, !chatOptions.noSave, mcpManager, maxTurns)
 			return
 		}
 
 		// Use the plain CLI interface
+		// Ensure non-negative values (treat negative as 0/no limit)
+		if chatOptions.maxTurns < 0 {
+			chatOptions.maxTurns = 0
+		}
 		plainChatUI(ctx, chatOptions)
 	},
 }
