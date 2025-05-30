@@ -112,8 +112,6 @@ graph TB
 
     subgraph "GitHub Actions Runner"
         Runner[🏃 Actions Runner]
-        Validator[🔐 Permission Validator]
-        Parser[📖 Comment Parser]
         Env[🛠️ Environment Setup]
         Kodelet[🤖 Kodelet CLI]
         Tools[🔧 Development Tools]
@@ -127,16 +125,10 @@ graph TB
     %% Interaction Flow
     Dev -->|"@kodelet work on this"| Issue
     Issue -->|issue_comment event| Events
-    Events -->|Trigger workflow| Runner
+    Events -->|Trigger workflow with if condition| Runner
 
-    %% Validation & Parsing
-    Runner --> Parser
-    Parser -->|Extract trigger| Validator
-    Validator -->|Check permissions| API
-    Validator -->|Check workflow config| Workflow
-
-    %% Workflow Execution (if valid)
-    Validator -->|Valid trigger| Env
+    %% Workflow Execution (validation done in if condition)
+    Runner -->|Validation passed| Env
     Env -->|Clone & setup| Repo
     Env --> Kodelet
     Kodelet -->|Access secrets| Secrets
@@ -147,8 +139,8 @@ graph TB
     Runner -->|Create PR| PR
     Runner -->|Update status| Issue
 
-    %% Error Handling (if invalid)
-    Validator -->|Invalid trigger| API
+    %% Error Handling (if validation fails)
+    Events -->|Validation failed| API
 
     %% Styling
     classDef user fill:#e1f5fe
@@ -158,7 +150,7 @@ graph TB
 
     class Dev user
     class GH,API,Repo,PR,Events,Issue github
-    class Runner,Validator,Parser,Env,Kodelet,Tools runner
+    class Runner,Env,Kodelet,Tools runner
     class Workflow,Secrets config
 ```
 
@@ -178,56 +170,46 @@ sequenceDiagram
 
     Dev->>GH: Comment "@kodelet work on this" on issue
     GH->>Events: Trigger issue_comment event
-    Events->>Actions: Start workflow (issue_comment.created)
+    Events->>Actions: Evaluate workflow if condition
 
-    Note over Actions: Built-in Authentication & Validation
-    Actions->>Actions: Parse comment for "@kodelet" trigger
-    Actions->>Actions: Extract issue context & labels
-    Actions->>Actions: Check if trigger matches pattern
+    Note over Actions: GitHub Actions Built-in Validation
+    Events->>Events: Check if issue (not PR)
+    Events->>Events: Check for "@kodelet" in comment
+    Events->>Events: Check author permissions (OWNER/MEMBER/COLLABORATOR)
+    Events->>Events: Validate against label whitelist (if configured)
 
-    alt Valid trigger pattern
-        Note over Actions,API: Permission & Configuration Validation
-        Actions->>API: Check comment author permissions (using GITHUB_TOKEN)
-        API-->>Actions: User role & repository access
-        Actions->>Actions: Read workflow environment variables
-        Actions->>Actions: Validate against label whitelist (if configured)
+    alt All conditions pass in if statement
+        Note over Actions,Kodelet: Secure Execution Environment
+        Actions->>Actions: Start workflow execution
+        Actions->>Actions: Provision isolated runner environment
+        Actions->>Secrets: Fetch ANTHROPIC_API_KEY
+        Actions->>GH: Clone repository (using GITHUB_TOKEN)
 
-        alt Valid permissions & configuration
-            Note over Actions,Kodelet: Secure Execution Environment
-            Actions->>Actions: Provision isolated runner environment
-            Actions->>Secrets: Fetch ANTHROPIC_API_KEY
-            Actions->>GH: Clone repository (using GITHUB_TOKEN)
+        Note over Actions: Environment Setup
+        Actions->>Actions: Install Go & dependencies
+        Actions->>Actions: Setup kodelet CLI
+        Actions->>Actions: Create feature branch
 
-            Note over Actions: Environment Setup
-            Actions->>Actions: Install Go & dependencies
-            Actions->>Actions: Setup kodelet CLI
-            Actions->>Actions: Create feature branch
+        Note over Kodelet: Autonomous Work
+        Actions->>Kodelet: Execute with issue context
+        Kodelet->>Kodelet: Analyze issue requirements
+        Kodelet->>Kodelet: Make hypothesis about solution
 
-            Note over Kodelet: Autonomous Work
-            Actions->>Kodelet: Execute with issue context
-            Kodelet->>Kodelet: Analyze issue requirements
-            Kodelet->>Kodelet: Make hypothesis about solution
-
-            loop Development Cycle
-                Kodelet->>Kodelet: Write/modify code
-                Kodelet->>Kodelet: Run tests & validation
-                Kodelet->>API: Post progress comment (using GITHUB_TOKEN)
-                Note right of API: Status updates with assumptions made
-            end
-
-            Note over Kodelet,GH: Deliverable Creation
-            Kodelet->>GH: Commit changes to feature branch
-            Actions->>API: Create Pull Request (using GITHUB_TOKEN)
-            Actions->>API: Comment on original issue with results
-
-        else Invalid permissions or configuration
-            Actions->>API: Post error comment (using GITHUB_TOKEN)
-            Note right of API: Explains permission requirements or configuration issues
+        loop Development Cycle
+            Kodelet->>Kodelet: Write/modify code
+            Kodelet->>Kodelet: Run tests & validation
+            Kodelet->>API: Post progress comment (using GITHUB_TOKEN)
+            Note right of API: Status updates with assumptions made
         end
 
-    else Invalid trigger pattern
-        Actions->>Actions: Exit workflow silently
-        Note right of Actions: No action taken for non-kodelet comments
+        Note over Kodelet,GH: Deliverable Creation
+        Kodelet->>GH: Commit changes to feature branch
+        Actions->>API: Create Pull Request (using GITHUB_TOKEN)
+        Actions->>API: Comment on original issue with results
+
+    else Any condition fails in if statement
+        Events->>Events: Skip workflow execution
+        Note right of Events: No action taken for invalid triggers
     end
 
     Note over Dev,Secrets: Security Boundaries
@@ -241,7 +223,6 @@ sequenceDiagram
 graph LR
     subgraph "GitHub Actions Built-in Authentication"
         GHTOKEN[🔑 GITHUB_TOKEN] --> CLONE[Repository Clone]
-        GHTOKEN --> PERM[Permission Checking]
         GHTOKEN --> PRAPI[PR Creation]
         GHTOKEN --> COMMENT[Issue Comments]
         APIKEY[🔑 ANTHROPIC_API_KEY] --> LLM[LLM API Calls]
@@ -251,13 +232,13 @@ graph LR
         READPERM[👁️ Repository Read] --> CLONE
         WRITEPERM[✏️ Repository Write] --> PRAPI
         ISSUEPERM[💬 Issues Write] --> COMMENT
-        APIPERM[🔌 API Access] --> PERM
         SECPERM[🔒 Secrets Read] --> APIKEY
     end
 
-    subgraph "Event-Driven Triggers"
-        ISSUEVENT[📢 issue_comment.created] --> TRIGGER[Workflow Trigger]
-        FILTER[🔍 @kodelet Pattern] --> VALIDATE[Validation Logic]
+    subgraph "Event-Driven Triggers with Validation"
+        ISSUEVENT[📢 issue_comment.created] --> IFCOND[If Condition Check]
+        IFCOND --> PATTERNS[Pattern & Permission Check]
+        PATTERNS --> TRIGGER[Workflow Execution]
     end
 
     classDef auth fill:#ffebee
@@ -266,9 +247,9 @@ graph LR
     classDef event fill:#f3e5f5
 
     class GHTOKEN,APIKEY auth
-    class READPERM,WRITEPERM,ISSUEPERM,APIPERM,SECPERM scope
-    class CLONE,PERM,PRAPI,COMMENT,LLM,TRIGGER,VALIDATE action
-    class ISSUEVENT,FILTER event
+    class READPERM,WRITEPERM,ISSUEPERM,SECPERM scope
+    class CLONE,PRAPI,COMMENT,LLM,TRIGGER action
+    class ISSUEVENT,IFCOND,PATTERNS event
 ```
 
 ## Implementation Breakdown
