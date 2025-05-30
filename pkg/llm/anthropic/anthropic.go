@@ -179,8 +179,13 @@ OUTER:
 			break OUTER
 		default:
 			// Check turn limit (0 means no limit)
+			logger.G(ctx).WithField("turn_count", turnCount).WithField("max_turns", maxTurns).Debug("checking turn limit")
+
 			if maxTurns > 0 && turnCount >= maxTurns {
-				logger.G(ctx).Warnf("Reached maximum turn limit of %d, stopping interaction", maxTurns)
+				logger.G(ctx).
+					WithField("turn_count", turnCount).
+					WithField("max_turns", maxTurns).
+					Warn("reached maximum turn limit, stopping interaction")
 				break OUTER
 			}
 
