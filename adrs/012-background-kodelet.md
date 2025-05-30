@@ -8,7 +8,7 @@ Kodelet has proven to be a significant productivity boost for autonomous softwar
 
 The proposed feature would allow developers to trigger kodelet by commenting `@kodelet work on this` on GitHub issues, which would then autonomously:
 - Clone the repository
-- Set up the development environment  
+- Set up the development environment
 - Create a feature branch
 - Work on the GitHub issue
 - Submit a pull request
@@ -101,74 +101,65 @@ graph TB
         Dev[👤 Developer]
         Issue[📋 GitHub Issue]
     end
-    
+
     subgraph "GitHub Platform"
         GH[🐙 GitHub]
         API[📡 GitHub API]
         Repo[📁 Repository]
         PR[🔀 Pull Request]
-        Webhooks[🔗 Webhooks]
+        Events[⚡ GitHub Events]
     end
-    
-    subgraph "Webhook Handler (Serverless)"
-        WH[⚡ Webhook Handler]
-        Auth[🔐 Auth Validator]
-        Parser[📖 Comment Parser]
-    end
-    
+
     subgraph "GitHub Actions Runner"
         Runner[🏃 Actions Runner]
+        Validator[🔐 Permission Validator]
+        Parser[📖 Comment Parser]
         Env[🛠️ Environment Setup]
         Kodelet[🤖 Kodelet CLI]
         Tools[🔧 Development Tools]
     end
-    
+
     subgraph "Configuration"
-        RepoConfig[📝 .kodelet/background.yml]
+        Workflow[📄 GitHub Actions Workflow]
         Secrets[🔑 GitHub Secrets]
-        Labels[🏷️ Issue Labels Filter]
     end
 
     %% Interaction Flow
     Dev -->|"@kodelet work on this"| Issue
-    Issue --> Webhooks
-    Webhooks --> WH
-    
-    %% Authentication & Validation
-    WH --> Auth
-    Auth -->|Check permissions| API
-    Auth -->|Validate labels| Labels
-    WH --> Parser
-    
-    %% Trigger Workflow
-    Parser -->|Valid trigger| API
-    API -->|repository_dispatch| Runner
-    
-    %% Workflow Execution
-    Runner --> Env
+    Issue -->|issue_comment event| Events
+    Events -->|Trigger workflow| Runner
+
+    %% Validation & Parsing
+    Runner --> Parser
+    Parser -->|Extract trigger| Validator
+    Validator -->|Check permissions| API
+    Validator -->|Check workflow config| Workflow
+
+    %% Workflow Execution (if valid)
+    Validator -->|Valid trigger| Env
     Env -->|Clone & setup| Repo
     Env --> Kodelet
-    Kodelet -->|Read config| RepoConfig
     Kodelet -->|Access secrets| Secrets
     Kodelet --> Tools
-    
+
     %% Output Generation
     Kodelet -->|Commit changes| Repo
     Runner -->|Create PR| PR
     Runner -->|Update status| Issue
-    
+
+    %% Error Handling (if invalid)
+    Validator -->|Invalid trigger| API
+
     %% Styling
     classDef user fill:#e1f5fe
     classDef github fill:#f3e5f5
-    classDef serverless fill:#e8f5e8
     classDef runner fill:#fff3e0
     classDef config fill:#fce4ec
-    
+
     class Dev user
-    class GH,API,Repo,PR,Webhooks,Issue github
-    class WH,Auth,Parser serverless
-    class Runner,Env,Kodelet,Tools runner
-    class RepoConfig,Secrets,Labels config
+    class GH,API,Repo,PR,Events,Issue github
+    class Runner,Validator,Parser,Env,Kodelet,Tools runner
+    class Workflow,Secrets config
 ```
 
 ### Detailed Authentication and Execution Flow
@@ -177,190 +168,195 @@ graph TB
 sequenceDiagram
     participant Dev as 👤 Developer
     participant GH as 🐙 GitHub
-    participant WH as ⚡ Webhook Handler
-    participant API as 📡 GitHub API
+    participant Events as ⚡ GitHub Events
     participant Actions as 🏃 GitHub Actions
+    participant API as 📡 GitHub API
     participant Kodelet as 🤖 Kodelet Runner
     participant Secrets as 🔑 GitHub Secrets
 
-    Note over Dev,Secrets: Authentication & Authorization Flow
-    
+    Note over Dev,Secrets: Direct GitHub Actions Integration
+
     Dev->>GH: Comment "@kodelet work on this" on issue
-    GH->>WH: POST /webhook (signed with webhook secret)
-    
-    Note over WH: Webhook Authentication
-    WH->>WH: Verify GitHub webhook signature
-    WH->>WH: Parse comment for "@kodelet" trigger
-    WH->>WH: Extract issue context & labels
-    
-    Note over WH,API: Permission Validation
-    WH->>API: Check user permissions (using PAT)
-    API-->>WH: User role & repository access
-    WH->>WH: Validate against configured label whitelist
-    
-    alt Valid trigger & permissions
-        Note over WH,Actions: Workflow Dispatch
-        WH->>API: POST /repos/{owner}/{repo}/dispatches
-        Note right of API: Uses PAT with 'repo' scope
-        API->>Actions: Trigger repository_dispatch event
-        
-        Note over Actions,Kodelet: Secure Execution Environment
-        Actions->>Actions: Provision isolated runner
-        Actions->>Secrets: Fetch ANTHROPIC_API_KEY
-        Actions->>Secrets: Fetch GITHUB_TOKEN
-        Actions->>GH: Clone repository (using GITHUB_TOKEN)
-        
-        Note over Actions: Environment Setup
-        Actions->>Actions: Install Go & dependencies
-        Actions->>Actions: Setup kodelet CLI
-        Actions->>Actions: Create feature branch
-        
-        Note over Kodelet: Autonomous Work
-        Actions->>Kodelet: Execute with issue context
-        Kodelet->>Kodelet: Analyze issue requirements
-        Kodelet->>Kodelet: Make hypothesis about solution
-        
-        loop Development Cycle
-            Kodelet->>Kodelet: Write/modify code
-            Kodelet->>Kodelet: Run tests & validation
-            Kodelet->>API: Post progress comment (using GITHUB_TOKEN)
-            Note right of API: Status updates with assumptions made
+    GH->>Events: Trigger issue_comment event
+    Events->>Actions: Start workflow (issue_comment.created)
+
+    Note over Actions: Built-in Authentication & Validation
+    Actions->>Actions: Parse comment for "@kodelet" trigger
+    Actions->>Actions: Extract issue context & labels
+    Actions->>Actions: Check if trigger matches pattern
+
+    alt Valid trigger pattern
+        Note over Actions,API: Permission & Configuration Validation
+        Actions->>API: Check comment author permissions (using GITHUB_TOKEN)
+        API-->>Actions: User role & repository access
+        Actions->>Actions: Read workflow environment variables
+        Actions->>Actions: Validate against label whitelist (if configured)
+
+        alt Valid permissions & configuration
+            Note over Actions,Kodelet: Secure Execution Environment
+            Actions->>Actions: Provision isolated runner environment
+            Actions->>Secrets: Fetch ANTHROPIC_API_KEY
+            Actions->>GH: Clone repository (using GITHUB_TOKEN)
+
+            Note over Actions: Environment Setup
+            Actions->>Actions: Install Go & dependencies
+            Actions->>Actions: Setup kodelet CLI
+            Actions->>Actions: Create feature branch
+
+            Note over Kodelet: Autonomous Work
+            Actions->>Kodelet: Execute with issue context
+            Kodelet->>Kodelet: Analyze issue requirements
+            Kodelet->>Kodelet: Make hypothesis about solution
+
+            loop Development Cycle
+                Kodelet->>Kodelet: Write/modify code
+                Kodelet->>Kodelet: Run tests & validation
+                Kodelet->>API: Post progress comment (using GITHUB_TOKEN)
+                Note right of API: Status updates with assumptions made
+            end
+
+            Note over Kodelet,GH: Deliverable Creation
+            Kodelet->>GH: Commit changes to feature branch
+            Actions->>API: Create Pull Request (using GITHUB_TOKEN)
+            Actions->>API: Comment on original issue with results
+
+        else Invalid permissions or configuration
+            Actions->>API: Post error comment (using GITHUB_TOKEN)
+            Note right of API: Explains permission requirements or configuration issues
         end
-        
-        Note over Kodelet,GH: Deliverable Creation
-        Kodelet->>GH: Commit changes to feature branch
-        Actions->>API: Create Pull Request (using GITHUB_TOKEN)
-        Actions->>API: Comment on original issue with results
-        
-    else Invalid trigger or insufficient permissions
-        WH->>API: Post error comment (using PAT)
-        Note right of API: Explains permission requirements or invalid trigger
+
+    else Invalid trigger pattern
+        Actions->>Actions: Exit workflow silently
+        Note right of Actions: No action taken for non-kodelet comments
     end
-    
+
     Note over Dev,Secrets: Security Boundaries
-    Note over WH: Serverless: Stateless, time-limited execution
     Note over Actions: Isolated: Fresh environment per execution
     Note over Secrets: Encrypted: GitHub-managed secret storage
 ```
 
-### Authentication Matrix
+### Simplified Authentication Matrix
 
 ```mermaid
 graph LR
-    subgraph "Webhook Handler Authentication"
-        WHS[🔐 Webhook Secret] --> WHV[Webhook Signature Validation]
-        PAT[🔑 Personal Access Token] --> PERM[Permission Checking]
-        PAT --> DISP[Workflow Dispatch]
-    end
-    
-    subgraph "GitHub Actions Authentication" 
+    subgraph "GitHub Actions Built-in Authentication"
         GHTOKEN[🔑 GITHUB_TOKEN] --> CLONE[Repository Clone]
+        GHTOKEN --> PERM[Permission Checking]
         GHTOKEN --> PRAPI[PR Creation]
         GHTOKEN --> COMMENT[Issue Comments]
         APIKEY[🔑 ANTHROPIC_API_KEY] --> LLM[LLM API Calls]
     end
-    
-    subgraph "Permissions Scope"
+
+    subgraph "Automatic Permissions Scope"
         READPERM[👁️ Repository Read] --> CLONE
         WRITEPERM[✏️ Repository Write] --> PRAPI
         ISSUEPERM[💬 Issues Write] --> COMMENT
+        APIPERM[🔌 API Access] --> PERM
         SECPERM[🔒 Secrets Read] --> APIKEY
     end
-    
+
+    subgraph "Event-Driven Triggers"
+        ISSUEVENT[📢 issue_comment.created] --> TRIGGER[Workflow Trigger]
+        FILTER[🔍 @kodelet Pattern] --> VALIDATE[Validation Logic]
+    end
+
     classDef auth fill:#ffebee
     classDef scope fill:#e8f5e8
     classDef action fill:#e3f2fd
-    
-    class WHS,PAT,GHTOKEN,APIKEY auth
-    class READPERM,WRITEPERM,ISSUEPERM,SECPERM scope
-    class WHV,PERM,DISP,CLONE,PRAPI,COMMENT,LLM action
+    classDef event fill:#f3e5f5
+
+    class GHTOKEN,APIKEY auth
+    class READPERM,WRITEPERM,ISSUEPERM,APIPERM,SECPERM scope
+    class CLONE,PERM,PRAPI,COMMENT,LLM,TRIGGER,VALIDATE action
+    class ISSUEVENT,FILTER event
 ```
 
 ## Implementation Breakdown
 
-### Phase 1: Core Infrastructure (Weeks 1-2)
-1. **Webhook Handler Service**
-   - Deploy simple webhook receiver (GitHub Pages + Netlify Functions or Vercel)
-   - Parse GitHub webhook payloads
-   - Validate "@kodelet" trigger patterns
-   - Permission checking (repo collaborator status)
-
-2. **GitHub Actions Workflow**
-   - Workflow triggered by repository dispatch
-   - Environment setup (Go, dependencies)
-   - Repository checkout and branch creation
+### Phase 1: Core Infrastructure (Days 1-3)
+1. **GitHub Actions Workflow**
+   - Single workflow file with complete validation logic
+   - Native GitHub permissions and context usage  
+   - Repository checkout with shallow clone
    - Basic kodelet execution framework
+   - PR creation and issue commenting
 
-3. **GitHub API Integration**
-   - PR creation and management
-   - Issue commenting for status updates
-   - Authentication via GitHub tokens
+2. **Kodelet CLI Enhancement**
+   - Add background execution mode
+   - Issue context processing and prompt generation
+   - Progress reporting via GitHub API comments
 
-### Phase 2: Enhanced Kodelet Integration (Weeks 3-4)
+### Phase 2: Enhanced Integration (Days 4-7)  
 1. **Issue Context Processing**
-   - Extract issue title, description, and labels
-   - Parse requirements and acceptance criteria
-   - Generate kodelet prompts from issue content
+   - Parse issue title, description, and labels
+   - Generate appropriate kodelet prompts from issue content
+   - Handle different issue types and complexity levels
 
-2. **Progress Tracking**
-   - Real-time status updates via issue comments
-   - Error handling and recovery
-   - Timeout management (within 6-hour limit)
-
-3. **Quality Assurance**
+2. **Quality Assurance**
    - Automated testing before PR creation
-   - Code formatting and linting
-   - Basic security scanning
+   - Code formatting and linting integration
+   - Error handling and recovery with assumption disclosure
 
-### Phase 3: Advanced Features (Weeks 5-6)
+3. **Progress Tracking**
+   - Real-time status updates via issue comments
+   - Timeout management and graceful handling
+   - Detailed logging and progress reports
+
+### Phase 3: Advanced Features (Week 2)
 1. **Multi-Repository Support**
-   - Cross-repo dependency handling
-   - Workspace isolation strategies
-   - Resource optimization
+   - Template workflow for easy repository onboarding
+   - Organization-level deployment strategies
+   - Cross-repo dependency handling patterns
 
-2. **Enhanced Permissions**
-   - Organization-level access controls
-   - Repository-specific configurations
-   - Rate limiting and quotas
+2. **Enhanced Configuration**
+   - Advanced label filtering patterns
+   - Custom timeout configurations
+   - Repository-specific kodelet behavior settings
 
-3. **Monitoring and Observability**
-   - Execution metrics and logging
-   - Cost tracking and optimization
-   - Performance analytics
+3. **Monitoring and Optimization**
+   - Workflow execution metrics
+   - Performance optimization (caching, etc.)
+   - Cost tracking and resource usage analysis
 
 ## Technical Components
 
-### 1. Webhook Handler
-```yaml
-# Deployment: Serverless function (Vercel/Netlify)
-Responsibilities:
-  - Webhook payload validation
-  - Trigger pattern recognition  
-  - Permission verification
-  - GitHub Actions workflow dispatch
-```
-
-### 2. GitHub Actions Workflow
+### 1. GitHub Actions Workflow
 ```yaml
 # .github/workflows/kodelet-background.yml
 name: Background Kodelet
 on:
-  repository_dispatch:
-    types: [kodelet-trigger]
+  issue_comment:
+    types: [created]
+
+permissions:
+  issues: write          # Comment on issues
+  pull-requests: write   # Create PRs
+  contents: write        # Push commits
+  metadata: read         # Read repository metadata
 
 jobs:
   kodelet-work:
     runs-on: ubuntu-latest
     timeout-minutes: 360  # 6 hours
+    # Complete validation in single if: condition
+    if: |
+      github.event.issue.pull_request == null &&
+      contains(github.event.comment.body, '@kodelet') &&
+      contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)
     steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1  # Shallow clone
+
       - name: Setup Environment
-      - name: Process Issue
+        # Install Go, dependencies, kodelet CLI
+
       - name: Run Kodelet
-      - name: Create PR
-      - name: Report Results
+        # Create branch, execute kodelet, create PR
 ```
 
-### 3. Enhanced Kodelet CLI
+### 2. Enhanced Kodelet CLI
 ```go
 // New subcommand: kodelet background
 type BackgroundConfig struct {
@@ -371,34 +367,99 @@ type BackgroundConfig struct {
 }
 ```
 
-## Configuration and Security
+## Repository Onboarding
 
-### Repository Configuration
+### Required Setup for Repository Onboarding
+
+**Step 1: Add GitHub Actions Workflow with Inline Configuration**
 ```yaml
-# .kodelet/background.yml
-enabled: true
+# .github/workflows/kodelet-background.yml
+name: Background Kodelet
+on:
+  issue_comment:
+    types: [created]
+
 permissions:
-  allowed_users: ["maintainer", "owner"]
-  allowed_teams: ["core-team"]
-timeout_minutes: 300
-auto_merge: false
-review_required: true
-trigger:
-  issue_label_whitelist: ["enhancement", "bug", "feature"] # Optional: restrict which labeled issues trigger kodelet
-  # If empty/not specified, all issues are eligible
+  issues: write          # Comment on issues
+  pull-requests: write   # Create PRs
+  contents: write        # Push commits
+  metadata: read         # Read repository metadata
+
+env:
+  # Configuration as environment variables
+  LABEL_WHITELIST: "enhancement,bug,feature"  # Optional: empty means all labels allowed
+  TIMEOUT_MINUTES: "300"
+
+jobs:
+  kodelet-work:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    if: |
+      github.event.issue.pull_request == null &&
+      contains(github.event.comment.body, '@kodelet') &&
+      contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association) &&
+      (env.LABEL_WHITELIST == '' || contains(env.LABEL_WHITELIST, github.event.issue.labels.*.name))
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1  # Shallow clone for faster checkout
+
+      - name: Setup Environment
+        run: |
+          # Install Go, dependencies, kodelet CLI
+
+      - name: Run Kodelet
+        run: |
+          # Create feature branch, execute kodelet, create PR
 ```
 
+**Step 2: Configure Repository Secret**
+- `ANTHROPIC_API_KEY` - LLM API access
+- `GITHUB_TOKEN` - Automatically provided
+
+**That's it!** One file, one secret, zero external dependencies, zero API calls for validation.
+
+### Benefits of Single-File Approach
+✅ **One file**: Everything in the workflow
+✅ **One secret**: Only ANTHROPIC_API_KEY needed
+✅ **Native GitHub features**: Built-in conditionals and permissions
+✅ **Zero API calls**: All validation via GitHub context
+✅ **Version controlled**: Configuration changes tracked with workflow
+✅ **Self-documenting**: All logic visible in one place
+✅ **Maximum performance**: No permission API overhead
+
+## Configuration and Security
+
+### Workflow-Level Configuration
+All configuration is defined directly in the GitHub Actions workflow using:
+- **Environment variables** for settings (label whitelist, timeouts)
+- **Conditional execution** with comprehensive `if:` statement covering:
+  - Issue vs PR detection: `github.event.issue.pull_request == null`
+  - Trigger detection: `contains(github.event.comment.body, '@kodelet')`
+  - Permission validation: `contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)`
+  - Optional label filtering: `contains(env.LABEL_WHITELIST, github.event.issue.labels.*.name)`
+- **GitHub context** for accessing issue data and user permissions
+- **No additional API calls** needed for validation
+
 ### Security Considerations
-- **Secrets Management**: Use GitHub Secrets for API tokens
-- **Permission Model**: Leverage GitHub's collaboration permissions
-- **Resource Limits**: Implement quotas and rate limiting
+- **Explicit Permissions**: GitHub Actions workflow declares exact permissions needed
+  - `issues: write` - Comment on issues with status updates
+  - `pull-requests: write` - Create PRs with kodelet changes
+  - `contents: write` - Push commits to feature branches
+  - `metadata: read` - Read repository and issue metadata
+- **Permission Model**: Check comment author's repository collaboration permissions
+- **Resource Limits**: 6-hour timeout per workflow, GitHub Actions quotas
 - **Code Review**: Require human review before merge
-- **Audit Logging**: Track all background kodelet activities
+- **Audit Logging**: All activities logged in GitHub Actions logs
+- **Secrets Management**: Only ANTHROPIC_API_KEY required as repository secret
+- **Shallow Clone**: `fetch-depth: 1` for faster checkout and reduced resource usage
 
 ## Migration Path
 
-### Immediate (GitHub Actions)
-- Deploy webhook handler and basic workflow
+### Immediate (Direct GitHub Actions)
+- Deploy GitHub Actions workflow with event-driven triggers
 - Support single-repo, simple issues
 - Manual PR review required
 
@@ -441,7 +502,7 @@ trigger:
 ### Design Decisions Based on Requirements
 
 1. **Issue Scope**: No restrictions on issue types - kodelet can work on any issue, but GitHub Action will support configurable issue label whitelist to control which issues trigger background runs
-2. **Review Process**: Policy reviews are repository-specific and out of scope for this implementation  
+2. **Review Process**: Policy reviews are repository-specific and out of scope for this implementation
 3. **Error Handling**: Kodelet will NOT ask for clarification but work based on hypothesis and disclose assumptions/decisions in issue comments
 4. **Integration Strategy**: GitHub-centric approach - focus on GitHub ecosystem integration initially
 
