@@ -25,6 +25,7 @@ func init() {
 	viper.SetDefault("weak_model", anthropic.ModelClaude3_5HaikuLatest)
 	viper.SetDefault("provider", "anthropic")
 	viper.SetDefault("reasoning_effort", "medium")
+	viper.SetDefault("cache_every", 10)
 
 	// Set default MCP configuration
 	viper.SetDefault("mcp", map[string]tools.MCPConfig{})
@@ -94,6 +95,7 @@ func main() {
 	rootCmd.PersistentFlags().String("weak-model", string(anthropic.ModelClaude3_5HaikuLatest), "Weak model to use (overrides config)")
 	rootCmd.PersistentFlags().Int("weak-model-max-tokens", 8192, "Maximum tokens for weak model response (overrides config)")
 	rootCmd.PersistentFlags().String("reasoning-effort", "medium", "Reasoning effort for OpenAI models (low, medium, high)")
+	rootCmd.PersistentFlags().Int("cache-every", 10, "Cache messages every N interactions (0 to disable, Anthropic only)")
 	rootCmd.PersistentFlags().String("log-level", "info", "Log level (panic, fatal, error, warn, info, debug, trace)")
 
 	// Bind flags to viper
@@ -105,6 +107,7 @@ func main() {
 	viper.BindPFlag("weak_model_max_tokens", rootCmd.PersistentFlags().Lookup("weak-model-max-tokens"))
 	viper.BindPFlag("reasoning_effort", rootCmd.PersistentFlags().Lookup("reasoning-effort"))
 	viper.BindPFlag("weak_reasoning_effort", rootCmd.PersistentFlags().Lookup("weak-reasoning-effort"))
+	viper.BindPFlag("cache_every", rootCmd.PersistentFlags().Lookup("cache-every"))
 	viper.BindPFlag("log_level", rootCmd.PersistentFlags().Lookup("log-level"))
 
 	// Add subcommands

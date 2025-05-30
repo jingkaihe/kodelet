@@ -171,6 +171,9 @@ func (t *AnthropicThread) SendMessage(
 		maxTurns = 0 // treat negative as no limit
 	}
 
+	// Check cache-every setting and cache if needed
+	cacheEvery := t.config.CacheEvery
+
 OUTER:
 	for {
 		select {
@@ -187,6 +190,11 @@ OUTER:
 					WithField("max_turns", maxTurns).
 					Warn("reached maximum turn limit, stopping interaction")
 				break OUTER
+			}
+
+			if opt.PromptCache && turnCount > 0 && cacheEvery > 0 && turnCount%cacheEvery == 0 {
+				logger.G(ctx).WithField("turn_count", turnCount).WithField("cache_every", cacheEvery).Debug("caching messages")
+				t.cacheMessages()
 			}
 
 			var exchangeOutput string
