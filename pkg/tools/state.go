@@ -3,6 +3,8 @@ package tools
 import (
 	"context"
 	"fmt"
+	"os"
+	"path"
 	"sync"
 	"time"
 
@@ -71,11 +73,17 @@ func WithExtraMCPTools(tools []tooltypes.Tool) BasicStateOption {
 	}
 }
 
-func (s *BasicState) TodoFilePath() string {
+func (s *BasicState) TodoFilePath() (string, error) {
 	if s.todoFilePath != "" {
-		return s.todoFilePath
+		return s.todoFilePath, nil
 	}
-	return fmt.Sprintf("kodelet-todos-%s.json", s.sessionID)
+	pwd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+
+	todoFilePath := path.Join(pwd, ".kodelet", fmt.Sprintf("kodelet-todos-%s.json", s.sessionID))
+	return todoFilePath, nil
 }
 
 func (s *BasicState) SetTodoFilePath(path string) {

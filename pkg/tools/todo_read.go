@@ -97,7 +97,13 @@ func (t *TodoReadTool) TracingKVs(parameters string) ([]attribute.KeyValue, erro
 }
 
 func (t *TodoReadTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
-	filePath := state.TodoFilePath()
+	filePath, err := state.TodoFilePath()
+	if err != nil {
+		return &TodoToolResult{
+			filePath: filePath,
+			err:      fmt.Sprintf("failed to get todo file path: %s", err.Error()),
+		}
+	}
 
 	content, err := os.ReadFile(filePath)
 	if err != nil {

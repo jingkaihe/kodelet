@@ -85,7 +85,7 @@ type State interface {
 	SetFileLastAccessed(path string, lastAccessed time.Time) error
 	GetFileLastAccessed(path string) (time.Time, error)
 	ClearFileLastAccessed(path string) error
-	TodoFilePath() string
+	TodoFilePath() (string, error)
 	SetTodoFilePath(path string)
 	SetFileLastAccess(fileLastAccess map[string]time.Time)
 	FileLastAccess() map[string]time.Time
