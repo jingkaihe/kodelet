@@ -11,27 +11,39 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/go-github/v57/github"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 )
 
+// CommentData represents a GitHub issue comment
+type CommentData struct {
+	ID        int64     `json:"id"`
+	Author    string    `json:"author"`
+	Body      string    `json:"body"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	HTMLURL   string    `json:"html_url"`
+}
+
 // IssueData represents the structured data of a GitHub issue
 type IssueData struct {
-	Owner       string    `json:"owner"`
-	Repo        string    `json:"repo"`
-	Number      int       `json:"number"`
-	Title       string    `json:"title"`
-	Body        string    `json:"body"`
-	Author      string    `json:"author"`
-	State       string    `json:"state"`
-	Labels      []string  `json:"labels"`
-	Assignees   []string  `json:"assignees"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
-	URL         string    `json:"url"`
-	HTMLURL     string    `json:"html_url"`
-	Comments    int       `json:"comments"`
-	Locked      bool      `json:"locked"`
-	Milestone   string    `json:"milestone,omitempty"`
+	Owner         string        `json:"owner"`
+	Repo          string        `json:"repo"`
+	Number        int           `json:"number"`
+	Title         string        `json:"title"`
+	Body          string        `json:"body"`
+	Author        string        `json:"author"`
+	State         string        `json:"state"`
+	Labels        []string      `json:"labels"`
+	Assignees     []string      `json:"assignees"`
+	CreatedAt     time.Time     `json:"created_at"`
+	UpdatedAt     time.Time     `json:"updated_at"`
+	URL           string        `json:"url"`
+	HTMLURL       string        `json:"html_url"`
+	Comments      int           `json:"comments"`
+	Locked        bool          `json:"locked"`
+	Milestone     string        `json:"milestone,omitempty"`
+	IssueComments []CommentData `json:"issue_comments"`
 }
 
 // IssueProcessor handles fetching and processing GitHub issues
@@ -120,8 +132,60 @@ func (p *IssueProcessor) FetchAndProcess(ctx context.Context, issueURL string) (
 		issueData.Milestone = milestone.GetTitle()
 	}
 	
+	// Fetch comments if any exist
+	if issue.GetComments() > 0 {
+		log.WithField("comment_count", issue.GetComments()).Info("Fetching issue comments")
+		comments, err := p.fetchComments(ctx, owner, repo, number)
+		if err != nil {
+			log.WithError(err).Warn("Failed to fetch comments, continuing without them")
+		} else {
+			issueData.IssueComments = comments
+			log.WithField("comments_fetched", len(comments)).Info("Successfully fetched issue comments")
+		}
+	}
+	
 	log.WithField("title", issueData.Title).Info("Successfully fetched GitHub issue")
 	return issueData, nil
+}
+
+// fetchComments fetches all comments for a GitHub issue
+func (p *IssueProcessor) fetchComments(ctx context.Context, owner, repo string, number int) ([]CommentData, error) {
+	var allComments []CommentData
+	
+	// GitHub API pagination options
+	opts := &github.IssueListCommentsOptions{
+		ListOptions: github.ListOptions{
+			PerPage: 100, // Maximum per page
+		},
+	}
+	
+	for {
+		comments, resp, err := p.client.client.Issues.ListComments(ctx, owner, repo, number, opts)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch comments: %w", err)
+		}
+		
+		// Convert GitHub comments to our CommentData format
+		for _, comment := range comments {
+			commentData := CommentData{
+				ID:        comment.GetID(),
+				Author:    comment.GetUser().GetLogin(),
+				Body:      comment.GetBody(),
+				CreatedAt: comment.GetCreatedAt().Time,
+				UpdatedAt: comment.GetUpdatedAt().Time,
+				HTMLURL:   comment.GetHTMLURL(),
+			}
+			allComments = append(allComments, commentData)
+		}
+		
+		// Check if there are more pages
+		if resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+	
+	return allComments, nil
 }
 
 // WriteIssueFile creates an ISSUE.md file with the formatted issue content
@@ -199,9 +263,36 @@ func (p *IssueProcessor) formatIssueAsMarkdown(issue *IssueData) string {
 	sb.WriteString("## Description\n\n")
 	if issue.Body != "" {
 		sb.WriteString(issue.Body)
-		sb.WriteString("\n")
+		sb.WriteString("\n\n")
 	} else {
-		sb.WriteString("*No description provided.*\n")
+		sb.WriteString("*No description provided.*\n\n")
+	}
+	
+	// Comments section
+	if len(issue.IssueComments) > 0 {
+		sb.WriteString("## Comments\n\n")
+		for i, comment := range issue.IssueComments {
+			// Comment header
+			sb.WriteString(fmt.Sprintf("### Comment #%d by @%s\n\n", i+1, comment.Author))
+			sb.WriteString(fmt.Sprintf("**Posted:** %s  \n", comment.CreatedAt.Format("2006-01-02 15:04:05")))
+			if !comment.UpdatedAt.Equal(comment.CreatedAt) {
+				sb.WriteString(fmt.Sprintf("**Updated:** %s  \n", comment.UpdatedAt.Format("2006-01-02 15:04:05")))
+			}
+			sb.WriteString(fmt.Sprintf("**URL:** %s\n\n", comment.HTMLURL))
+			
+			// Comment body
+			if comment.Body != "" {
+				sb.WriteString(comment.Body)
+				sb.WriteString("\n\n")
+			} else {
+				sb.WriteString("*No comment text.*\n\n")
+			}
+			
+			// Add separator between comments (except for the last one)
+			if i < len(issue.IssueComments)-1 {
+				sb.WriteString("---\n\n")
+			}
+		}
 	}
 	
 	return sb.String()
