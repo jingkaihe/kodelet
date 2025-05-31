@@ -423,7 +423,6 @@ import "github.com/google/go-github/v57/github"
 
 type Client struct {
     client *github.Client
-    logger *logrus.Entry
 }
 
 func NewClient(ctx context.Context, token string) *Client {
@@ -432,7 +431,6 @@ func NewClient(ctx context.Context, token string) *Client {
     
     return &Client{
         client: github.NewClient(tc),
-        logger: logger.G(ctx),
     }
 }
 
@@ -442,7 +440,7 @@ type CommentManager struct {
     owner       string
     repo        string
     issueNumber int
-    commentID   *int64  // nil means no comment created yet
+    commentID   int64  // 0 means no comment created yet
 }
 
 func (c *Client) NewCommentManager(owner, repo string, issueNumber int) *CommentManager {
@@ -456,7 +454,9 @@ func (c *Client) NewCommentManager(owner, repo string, issueNumber int) *Comment
 
 // CreateOrUpdateComment creates a new comment or updates existing one
 func (cm *CommentManager) CreateOrUpdateComment(ctx context.Context, body string) error {
-    if cm.commentID == nil {
+    log := logger.G(ctx)
+    
+    if cm.commentID == 0 {
         // Create new comment
         comment := &github.IssueComment{Body: &body}
         created, _, err := cm.client.client.Issues.CreateComment(
@@ -464,18 +464,18 @@ func (cm *CommentManager) CreateOrUpdateComment(ctx context.Context, body string
         if err != nil {
             return err
         }
-        cm.commentID = created.ID
-        cm.client.logger.WithField("comment_id", *cm.commentID).Info("Created progress comment")
+        cm.commentID = *created.ID
+        log.WithField("comment_id", cm.commentID).Info("Created progress comment")
         return nil
     } else {
         // Update existing comment
         comment := &github.IssueComment{Body: &body}
         _, _, err := cm.client.client.Issues.EditComment(
-            ctx, cm.owner, cm.repo, *cm.commentID, comment)
+            ctx, cm.owner, cm.repo, cm.commentID, comment)
         if err != nil {
             return err
         }
-        cm.client.logger.WithField("comment_id", *cm.commentID).Info("Updated progress comment")
+        log.WithField("comment_id", cm.commentID).Info("Updated progress comment")
         return nil
     }
 }
