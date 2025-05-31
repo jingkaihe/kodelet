@@ -96,6 +96,16 @@ kodelet conversation delete --no-confirm <conversation-id>
 kodelet watch [--include "*.go"] [--ignore ".git,node_modules"] [--verbosity level] [--debounce ms]
 ```
 
+#### Commit Command
+```bash
+# Generate AI-powered commit messages
+kodelet commit                    # Interactive mode with confirmation
+kodelet commit --no-confirm      # Skip confirmation prompt
+kodelet commit --short           # Generate concise commit message
+kodelet commit --template "feat:" # Use custom template
+kodelet commit --no-sign         # Disable commit signing
+```
+
 ### Development Commands
 ```bash
 make build          # Build the application

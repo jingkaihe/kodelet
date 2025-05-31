@@ -31,6 +31,8 @@ This command analyzes your staged changes (git diff --cached) and uses AI to gen
 Options:
 - `--no-sign`: Disable commit signing (commits are signed by default)
 - `--template` or `-t`: Use a template for the commit message
+- `--short`: Generate a short commit message with just a description, no bullet points
+- `--no-confirm`: Skip confirmation prompt and create commit automatically
 
 ### Interactive Chat Mode
 
