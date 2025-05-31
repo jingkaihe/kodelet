@@ -107,41 +107,26 @@ pkg/
 ```text
 Please resolve the github issue ${ISSUE_URL} following the steps below:
 
-**Prerequisites Check:**
-1. Verify that 'gh' CLI is installed and authenticated using 'gh auth status'
-2. Ensure we're in a git repository using 'git status'
-3. Check that GITHUB_TOKEN environment variable is available
+1. use `gh issue view ${ISSUE_URL}` to get the issue details.
+- review the issue details and understand the issue.
+- especially pay attention to the latest comment with @kodelet - this is the instruction from the user.
+- extract the issue number from the issue URL for branch naming
 
-**Issue Processing:**
-4. Use 'gh issue view ${ISSUE_URL} --json number,title,body,comments' to get issue details
-5. Review issue details and understand requirements
-6. Pay special attention to latest comment with @kodelet - contains user instructions
-7. Extract issue number from URL for branch naming
+2. based on the issue details, come up with a branch name and checkout the branch via `git checkout -b kodelet/issue-${ISSUE_NUMBER}-${BRANCH_NAME}`
 
-**Branch Management:**
-8. Generate descriptive branch name: kodelet/issue-${ISSUE_NUMBER}-${descriptive-slug}
-9. Run 'git checkout -b ${BRANCH_NAME}' to create and switch to new branch
-10. Run 'git push -u origin ${BRANCH_NAME}' to push branch to remote
+3. start to work on the issue.
+- think step by step before you start to work on the issue.
+- if the issue is complex, you should add extra steps to the todo list to help you keep track of the progress.
+- do not commit during this step.
 
-**Issue Resolution:**
-11. Work on resolving the issue based on identified requirements
-12. Use batch tool to efficiently gather information when needed
-13. Make focused, incremental commits as you progress
+4. once you have resolved the issue, ask the subagent to run `kodelet commit --short` to commit the changes.
 
-**Pull Request Creation:**
-14. Once resolved, run 'kodelet commit --short' to commit final changes
-15. Run 'kodelet pr --target main' to create pull request
-16. Extract PR URL from command output
+5. after committing the changes, ask the subagent to run `kodelet pr` to create a pull request. Please instruct the subagent to always returning the PR link in the final response.
 
-**Issue Update:**
-17. Comment on original issue: "🤖 Kodelet has created a pull request: [PR Link]"
-18. Use 'gh issue comment ${ISSUE_URL} --body "[comment text]"' to add comment
+6. once the pull request is created, comment on the issue with the link to the pull request. If the pull request is not created, ask the subagent to create a pull request.
 
-**CRITICAL CONSTRAINTS:**
-- !!!NEVER update user's git config under any circumstances!!!
-- Always verify commands succeed before proceeding
-- Keep commits focused and atomic
-- Ensure PR description references original issue
+IMPORTANT:
+!!!CRITICAL!!!: You should never update user's git config under any circumstances.
 ```
 
 #### LLM Integration (Following `kodelet pr` Pattern)
@@ -150,22 +135,22 @@ Please resolve the github issue ${ISSUE_URL} following the steps below:
 func runIssue(cmd *cobra.Command, args []string) error {
     ctx := cmd.Context()
     s := tools.NewBasicState(ctx)
-    
+
     // Prerequisites checking (like pr.go)
     if !isGitRepository() { /* error handling */ }
     if !isGhCliInstalled() { /* error handling */ }
     if !isGhAuthenticated() { /* error handling */ }
-    
+
     // Generate prompt with issue URL
     issueURL, _ := cmd.Flags().GetString("issue-url")
     prompt := generateIssuePrompt(issueURL)
-    
+
     // Send to LLM using existing patterns
-    out, usage := llm.SendMessageAndGetTextWithUsage(ctx, s, prompt, 
+    out, usage := llm.SendMessageAndGetTextWithUsage(ctx, s, prompt,
         llm.GetConfigFromViper(), false, llmtypes.MessageOpt{
             PromptCache: true,
         })
-    
+
     fmt.Println(out)
     // Display usage stats...
 }
@@ -185,50 +170,50 @@ This command analyzes the GitHub issue, creates an appropriate branch, works on 
     Run: func(cmd *cobra.Command, args []string) {
         ctx := cmd.Context()
         s := tools.NewBasicState(ctx)
-        
-        // Prerequisites checking (same as pr.go)
+
+        // Prerequisites checking - Done in code, not in prompt (same as pr.go)
         if !isGitRepository() {
             fmt.Println("Error: Not a git repository. Please run this command from a git repository.")
             os.Exit(1)
         }
-        
+
         if !isGhCliInstalled() {
             fmt.Println("Error: GitHub CLI (gh) is not installed. Please install it first.")
             fmt.Println("Visit https://cli.github.com/ for installation instructions.")
             os.Exit(1)
         }
-        
+
         if !isGhAuthenticated() {
             fmt.Println("Error: You are not authenticated with GitHub. Please run 'gh auth login' first.")
             os.Exit(1)
         }
-        
+
         // Get issue URL from flags
         issueURL, _ := cmd.Flags().GetString("issue-url")
         if issueURL == "" {
             fmt.Println("Error: --issue-url is required")
             os.Exit(1)
         }
-        
+
         // Generate comprehensive prompt
         prompt := generateIssueResolutionPrompt(issueURL)
-        
+
         // Send to LLM using existing architecture
         fmt.Println("Analyzing GitHub issue and starting resolution process...")
         fmt.Println("-----------------------------------------------------------")
-        
-        out, usage := llm.SendMessageAndGetTextWithUsage(ctx, s, prompt, 
+
+        out, usage := llm.SendMessageAndGetTextWithUsage(ctx, s, prompt,
             llm.GetConfigFromViper(), false, llmtypes.MessageOpt{
                 PromptCache: true,
             })
-        
+
         fmt.Println(out)
         fmt.Println("-----------------------------------------------------------")
-        
+
         // Display usage statistics (same as pr.go)
         fmt.Printf("\033[1;36m[Usage Stats] Input tokens: %d | Output tokens: %d | Cache write: %d | Cache read: %d | Total: %d\033[0m\n",
             usage.InputTokens, usage.OutputTokens, usage.CacheCreationInputTokens, usage.CacheReadInputTokens, usage.TotalTokens())
-        
+
         fmt.Printf("\033[1;36m[Cost Stats] Input: $%.4f | Output: $%.4f | Cache write: $%.4f | Cache read: $%.4f | Total: $%.4f\033[0m\n",
             usage.InputCost, usage.OutputCost, usage.CacheCreationCost, usage.CacheReadCost, usage.TotalCost())
     },
@@ -242,49 +227,27 @@ func init() {
 func generateIssueResolutionPrompt(issueURL string) string {
     return fmt.Sprintf(`Please resolve the github issue %s following the steps below:
 
-**Prerequisites Check:**
-1. Verify that 'gh' CLI is installed and authenticated using 'gh auth status'
-2. Ensure we're in a git repository using 'git status'
-3. Check that GITHUB_TOKEN environment variable is available
+1. use "gh issue view %s" to get the issue details.
+- review the issue details and understand the issue.
+- especially pay attention to the latest comment with @kodelet - this is the instruction from the user.
+- extract the issue number from the issue URL for branch naming
 
-**Issue Processing:**
-4. Use 'gh issue view %s --json number,title,body,comments' to get issue details
-5. Review issue details and understand requirements
-6. Pay special attention to latest comment with @kodelet - contains user instructions
-7. Extract issue number from URL for branch naming
+2. based on the issue details, come up with a branch name and checkout the branch via "git checkout -b kodelet/issue-${ISSUE_NUMBER}-${BRANCH_NAME}"
 
-**Branch Management:**
-8. Generate descriptive branch name: kodelet/issue-${ISSUE_NUMBER}-${descriptive-slug}
-9. Run 'git checkout -b ${BRANCH_NAME}' to create and switch to new branch
-10. Run 'git push -u origin ${BRANCH_NAME}' to push branch to remote
+3. start to work on the issue.
+- think step by step before you start to work on the issue.
+- if the issue is complex, you should add extra steps to the todo list to help you keep track of the progress.
+- do not commit during this step.
 
-**Issue Resolution:**
-11. Work on resolving the issue based on identified requirements
-12. Use batch tool to efficiently gather information when needed
-13. Make focused, incremental commits as you progress
+4. once you have resolved the issue, ask the subagent to run "kodelet commit --short" to commit the changes.
 
-**Pull Request Creation:**
-14. Once resolved, run 'kodelet commit --short' to commit final changes
-15. Run 'kodelet pr --target main' to create pull request
-16. Extract PR URL from command output
+5. after committing the changes, ask the subagent to run "kodelet pr" to create a pull request. Please instruct the subagent to always returning the PR link in the final response.
 
-**Issue Update:**
-17. Comment on original issue: "🤖 Kodelet has created a pull request: [PR Link]"
-18. Use 'gh issue comment %s --body "[comment text]"' to add comment
+6. once the pull request is created, comment on the issue with the link to the pull request. If the pull request is not created, ask the subagent to create a pull request.
 
-**Final Response:**
-19. Provide summary including:
-    - Branch created: ${BRANCH_NAME}
-    - Pull request: ${PR_URL}
-    - Files modified: [list key files]
-    - Issue status: Resolved with PR
-
-**CRITICAL CONSTRAINTS:**
-- !!!NEVER update user's git config under any circumstances!!!
-- Always verify commands succeed before proceeding
-- Keep commits focused and atomic
-- Ensure PR description references original issue
-- If any step fails, explain the error and ask for guidance`, issueURL, issueURL, issueURL)
+IMPORTANT:
+!!!CRITICAL!!!: You should never update user's git config under any circumstances.`,
+issueURL, issueURL)
 }
 ```
 
@@ -407,7 +370,7 @@ The prompt-based approach leverages:
 The prompt-based orchestration approach (Option 4) provides the simplest and most maintainable solution for Background Kodelet functionality. By following the established `kodelet pr` pattern, this approach:
 
 1. **Minimizes implementation complexity** - Single command file vs complex orchestration architecture
-2. **Maximizes consistency** - Uses identical patterns to existing successful commands  
+2. **Maximizes consistency** - Uses identical patterns to existing successful commands
 3. **Leverages existing infrastructure** - No new packages or architectural changes required
 4. **Enables rapid iteration** - Prompt modifications for behavior changes vs code refactoring
 
