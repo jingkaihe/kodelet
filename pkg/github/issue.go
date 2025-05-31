@@ -63,43 +63,43 @@ func parseIssueURL(issueURL string) (owner, repo string, number int, err error) 
 	// Regex to match GitHub issue URLs
 	re := regexp.MustCompile(`^https://github\.com/([^/]+)/([^/]+)/issues/(\d+)/?$`)
 	matches := re.FindStringSubmatch(strings.TrimSpace(issueURL))
-	
+
 	if len(matches) != 4 {
 		return "", "", 0, fmt.Errorf("invalid GitHub issue URL format: %s", issueURL)
 	}
-	
+
 	owner = matches[1]
 	repo = matches[2]
 	number, err = strconv.Atoi(matches[3])
 	if err != nil {
 		return "", "", 0, fmt.Errorf("invalid issue number: %s", matches[3])
 	}
-	
+
 	return owner, repo, number, nil
 }
 
 // FetchAndProcess fetches a GitHub issue and converts it to IssueData
 func (p *IssueProcessor) FetchAndProcess(ctx context.Context, issueURL string) (*IssueData, error) {
 	log := logger.G(ctx)
-	
+
 	// Parse the issue URL
 	owner, repo, number, err := parseIssueURL(issueURL)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	log.WithFields(map[string]interface{}{
 		"owner":  owner,
 		"repo":   repo,
 		"number": number,
 	}).Info("Fetching GitHub issue")
-	
+
 	// Fetch the issue
 	issue, _, err := p.client.client.Issues.Get(ctx, owner, repo, number)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch issue: %w", err)
 	}
-	
+
 	// Convert to IssueData
 	issueData := &IssueData{
 		Owner:     owner,
@@ -116,22 +116,22 @@ func (p *IssueProcessor) FetchAndProcess(ctx context.Context, issueURL string) (
 		CreatedAt: issue.GetCreatedAt().Time,
 		UpdatedAt: issue.GetUpdatedAt().Time,
 	}
-	
+
 	// Extract labels
 	for _, label := range issue.Labels {
 		issueData.Labels = append(issueData.Labels, label.GetName())
 	}
-	
+
 	// Extract assignees
 	for _, assignee := range issue.Assignees {
 		issueData.Assignees = append(issueData.Assignees, assignee.GetLogin())
 	}
-	
+
 	// Extract milestone if present
 	if milestone := issue.GetMilestone(); milestone != nil {
 		issueData.Milestone = milestone.GetTitle()
 	}
-	
+
 	// Fetch comments if any exist
 	if issue.GetComments() > 0 {
 		log.WithField("comment_count", issue.GetComments()).Info("Fetching issue comments")
@@ -143,7 +143,7 @@ func (p *IssueProcessor) FetchAndProcess(ctx context.Context, issueURL string) (
 			log.WithField("comments_fetched", len(comments)).Info("Successfully fetched issue comments")
 		}
 	}
-	
+
 	log.WithField("title", issueData.Title).Info("Successfully fetched GitHub issue")
 	return issueData, nil
 }
@@ -151,20 +151,20 @@ func (p *IssueProcessor) FetchAndProcess(ctx context.Context, issueURL string) (
 // fetchComments fetches all comments for a GitHub issue
 func (p *IssueProcessor) fetchComments(ctx context.Context, owner, repo string, number int) ([]CommentData, error) {
 	var allComments []CommentData
-	
+
 	// GitHub API pagination options
 	opts := &github.IssueListCommentsOptions{
 		ListOptions: github.ListOptions{
 			PerPage: 100, // Maximum per page
 		},
 	}
-	
+
 	for {
 		comments, resp, err := p.client.client.Issues.ListComments(ctx, owner, repo, number, opts)
 		if err != nil {
 			return nil, fmt.Errorf("failed to fetch comments: %w", err)
 		}
-		
+
 		// Convert GitHub comments to our CommentData format
 		for _, comment := range comments {
 			commentData := CommentData{
@@ -177,25 +177,25 @@ func (p *IssueProcessor) fetchComments(ctx context.Context, owner, repo string, 
 			}
 			allComments = append(allComments, commentData)
 		}
-		
+
 		// Check if there are more pages
 		if resp.NextPage == 0 {
 			break
 		}
 		opts.Page = resp.NextPage
 	}
-	
+
 	return allComments, nil
 }
 
 // WriteIssueFile creates an ISSUE.md file with the formatted issue content
 func (p *IssueProcessor) WriteIssueFile(issueData *IssueData) error {
 	content := p.formatIssueAsMarkdown(issueData)
-	
+
 	if err := os.WriteFile("ISSUE.md", []byte(content), 0644); err != nil {
 		return fmt.Errorf("failed to write ISSUE.md: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -205,28 +205,28 @@ func (p *IssueProcessor) WriteIssueJSON(issueData *IssueData) error {
 	if err := os.MkdirAll(".kodelet", 0755); err != nil {
 		return fmt.Errorf("failed to create .kodelet directory: %w", err)
 	}
-	
+
 	// Write JSON metadata
 	jsonData, err := json.MarshalIndent(issueData, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal issue data: %w", err)
 	}
-	
+
 	jsonPath := filepath.Join(".kodelet", "issue.json")
 	if err := os.WriteFile(jsonPath, jsonData, 0644); err != nil {
 		return fmt.Errorf("failed to write issue.json: %w", err)
 	}
-	
+
 	return nil
 }
 
 // formatIssueAsMarkdown formats the issue data as a readable markdown file
 func (p *IssueProcessor) formatIssueAsMarkdown(issue *IssueData) string {
 	var sb strings.Builder
-	
+
 	// Header
 	sb.WriteString(fmt.Sprintf("# %s\n\n", issue.Title))
-	
+
 	// Metadata
 	sb.WriteString("## Issue Information\n\n")
 	sb.WriteString(fmt.Sprintf("- **Repository:** %s/%s\n", issue.Owner, issue.Repo))
@@ -236,29 +236,29 @@ func (p *IssueProcessor) formatIssueAsMarkdown(issue *IssueData) string {
 	sb.WriteString(fmt.Sprintf("- **Created:** %s\n", issue.CreatedAt.Format("2006-01-02 15:04:05")))
 	sb.WriteString(fmt.Sprintf("- **Updated:** %s\n", issue.UpdatedAt.Format("2006-01-02 15:04:05")))
 	sb.WriteString(fmt.Sprintf("- **URL:** %s\n", issue.HTMLURL))
-	
+
 	// Labels
 	if len(issue.Labels) > 0 {
 		sb.WriteString(fmt.Sprintf("- **Labels:** %s\n", strings.Join(issue.Labels, ", ")))
 	}
-	
+
 	// Assignees
 	if len(issue.Assignees) > 0 {
 		sb.WriteString(fmt.Sprintf("- **Assignees:** %s\n", strings.Join(issue.Assignees, ", ")))
 	}
-	
+
 	// Milestone
 	if issue.Milestone != "" {
 		sb.WriteString(fmt.Sprintf("- **Milestone:** %s\n", issue.Milestone))
 	}
-	
+
 	// Comments count
 	if issue.Comments > 0 {
 		sb.WriteString(fmt.Sprintf("- **Comments:** %d\n", issue.Comments))
 	}
-	
+
 	sb.WriteString("\n")
-	
+
 	// Issue Body
 	sb.WriteString("## Description\n\n")
 	if issue.Body != "" {
@@ -267,7 +267,7 @@ func (p *IssueProcessor) formatIssueAsMarkdown(issue *IssueData) string {
 	} else {
 		sb.WriteString("*No description provided.*\n\n")
 	}
-	
+
 	// Comments section
 	if len(issue.IssueComments) > 0 {
 		sb.WriteString("## Comments\n\n")
@@ -279,7 +279,7 @@ func (p *IssueProcessor) formatIssueAsMarkdown(issue *IssueData) string {
 				sb.WriteString(fmt.Sprintf("**Updated:** %s  \n", comment.UpdatedAt.Format("2006-01-02 15:04:05")))
 			}
 			sb.WriteString(fmt.Sprintf("**URL:** %s\n\n", comment.HTMLURL))
-			
+
 			// Comment body
 			if comment.Body != "" {
 				sb.WriteString(comment.Body)
@@ -287,13 +287,13 @@ func (p *IssueProcessor) formatIssueAsMarkdown(issue *IssueData) string {
 			} else {
 				sb.WriteString("*No comment text.*\n\n")
 			}
-			
+
 			// Add separator between comments (except for the last one)
 			if i < len(issue.IssueComments)-1 {
 				sb.WriteString("---\n\n")
 			}
 		}
 	}
-	
+
 	return sb.String()
 }

@@ -16,17 +16,17 @@ type Client struct {
 // NewClient creates a new GitHub client with authentication
 func NewClient(ctx context.Context, token string) *Client {
 	log := logger.G(ctx)
-	
+
 	if token == "" {
 		log.Warn("No GitHub token provided - API rate limits will be restricted")
 		return &Client{
 			client: github.NewClient(nil),
 		}
 	}
-	
+
 	ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
 	tc := oauth2.NewClient(ctx, ts)
-	
+
 	log.Debug("GitHub client initialized with authentication")
 	return &Client{
 		client: github.NewClient(tc),

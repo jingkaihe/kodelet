@@ -43,49 +43,49 @@ func init() {
 func runIssueFetch(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	log := logger.G(ctx)
-	
+
 	issueURL := args[0]
 	log.WithField("issue_url", issueURL).Info("Starting issue fetch")
-	
+
 	// Get GitHub token from environment
 	token := os.Getenv("GITHUB_TOKEN")
 	if token == "" {
 		log.Warn("GITHUB_TOKEN not set - using unauthenticated requests (lower rate limits)")
 	}
-	
+
 	// Create GitHub client
 	client := github.NewClient(ctx, token)
-	
+
 	// Create issue processor
 	processor := github.NewIssueProcessor(client)
-	
+
 	// Fetch and process the issue
 	issueData, err := processor.FetchAndProcess(ctx, issueURL)
 	if err != nil {
 		log.WithError(err).Error("Failed to fetch GitHub issue")
 		return err
 	}
-	
+
 	// Write ISSUE.md file
 	if err := processor.WriteIssueFile(issueData); err != nil {
 		log.WithError(err).Error("Failed to write ISSUE.md")
 		return err
 	}
 	log.Info("Created ISSUE.md")
-	
+
 	// Write issue metadata JSON
 	if err := processor.WriteIssueJSON(issueData); err != nil {
 		log.WithError(err).Error("Failed to write issue metadata")
 		return err
 	}
 	log.Info("Created .kodelet/issue.json")
-	
+
 	log.WithFields(map[string]interface{}{
 		"title":  issueData.Title,
 		"owner":  issueData.Owner,
 		"repo":   issueData.Repo,
 		"number": issueData.Number,
 	}).Info("Successfully processed GitHub issue")
-	
+
 	return nil
 }
