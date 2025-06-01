@@ -106,6 +106,21 @@ kodelet commit --template "feat:" # Use custom template
 kodelet commit --no-sign         # Disable commit signing
 ```
 
+#### PR Command
+```bash
+# Generate AI-powered pull requests
+kodelet pr                       # Create PR for current branch changes
+kodelet pr --target main        # Target specific branch (default: main)
+kodelet pr --provider github    # Use specific provider (default: github)
+```
+
+#### Issue Resolution Command
+```bash
+# Resolve GitHub issues autonomously
+kodelet issue --issue-url https://github.com/owner/repo/issues/123
+# Fetches issue details, creates branch, implements fixes, creates PR, and comments back
+```
+
 ### Development Commands
 ```bash
 make build          # Build the application
