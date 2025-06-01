@@ -44,8 +44,14 @@ This command analyzes the GitHub issue, creates an appropriate branch, works on 
 			os.Exit(1)
 		}
 
+		bin, err := os.Executable()
+		if err != nil {
+			fmt.Println("Error: Failed to get executable path")
+			os.Exit(1)
+		}
+
 		// Generate comprehensive prompt
-		prompt := generateIssueResolutionPrompt(issueURL)
+		prompt := generateIssueResolutionPrompt(bin, issueURL)
 
 		// Send to LLM using existing architecture
 		fmt.Println("Analyzing GitHub issue and starting resolution process...")
@@ -73,7 +79,7 @@ func init() {
 	issueCmd.MarkFlagRequired("issue-url")
 }
 
-func generateIssueResolutionPrompt(issueURL string) string {
+func generateIssueResolutionPrompt(bin, issueURL string) string {
 	return fmt.Sprintf(`Please resolve the github issue %s following the steps below:
 
 1. use "gh issue view %s" to get the issue details.
@@ -82,19 +88,18 @@ func generateIssueResolutionPrompt(issueURL string) string {
 - extract the issue number from the issue URL for branch naming
 
 2. based on the issue details, come up with a branch name and checkout the branch via "git checkout -b kodelet/issue-${ISSUE_NUMBER}-${BRANCH_NAME}"
-
 3. start to work on the issue.
 - think step by step before you start to work on the issue.
 - if the issue is complex, you should add extra steps to the todo list to help you keep track of the progress.
 - do not commit during this step.
 
-4. once you have resolved the issue, ask the subagent to run "kodelet commit --short" to commit the changes.
-
-5. after committing the changes, ask the subagent to run "kodelet pr" to create a pull request. Please instruct the subagent to always returning the PR link in the final response.
-
+4. once you have resolved the issue, ask the subagent to run "%s commit --short --no-confirm" to commit the changes.
+5. after committing the changes, ask the subagent to run "%s pr" to create a pull request. Please instruct the subagent to always returning the PR link in the final response.
 6. once the pull request is created, comment on the issue with the link to the pull request. If the pull request is not created, ask the subagent to create a pull request.
 
 IMPORTANT:
-!!!CRITICAL!!!: You should never update user's git config under any circumstances.`,
-		issueURL, issueURL)
+*!!!CRITICAL!!!: You should never update user's git config under any circumstances.
+* Use a checklist to keep track of the progress.
+`,
+		issueURL, issueURL, bin, bin)
 }

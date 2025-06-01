@@ -7,7 +7,8 @@ import (
 
 func TestGenerateIssueResolutionPrompt(t *testing.T) {
 	issueURL := "https://github.com/owner/repo/issues/123"
-	prompt := generateIssueResolutionPrompt(issueURL)
+	bin := "kodelet"
+	prompt := generateIssueResolutionPrompt(bin, issueURL)
 
 	// Test that the prompt contains the issue URL in the right places
 	if !strings.Contains(prompt, issueURL) {
