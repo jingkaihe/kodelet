@@ -1,122 +1,159 @@
 # Development Guide
 
+This guide is for developers who want to contribute to Kodelet or build it from source.
+
+For user documentation, see the [User Manual](MANUAL.md).
+
 ## Prerequisites
 
 - Go 1.24 or higher
+- Make (for using Makefile commands)
+- Git
 
-## Running locally
+## Setting Up Development Environment
 
-You can use Kodelet in a few ways:
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/jingkaihe/kodelet.git
+   cd kodelet
+   ```
 
-### Run Command (One-shot)
+2. Install dependencies:
+   ```bash
+   go mod download
+   ```
 
-```bash
-# Basic one-shot query
-kodelet run "your idea"
-
-# With conversation features
-kodelet run "your idea"                      # saved as a conversation
-kodelet run --resume CONVERSATION_ID "more"  # continue a conversation
-kodelet run --no-save "temporary query"      # don't save as a conversation
-```
-
-### Generate Git Commit
-
-```bash
-kodelet commit
-```
-
-This command analyzes your staged changes (git diff --cached) and uses AI to generate a meaningful commit message following conventional commits format. You must stage your changes using `git add` before running this command.
-
-Options:
-- `--no-sign`: Disable commit signing (commits are signed by default)
-- `--template` or `-t`: Use a template for the commit message
-
-### Interactive Chat Mode
-
-The chat mode allows you to interact with Kodelet in a TUI.
-
-```bash
-kodelet chat
-```
-
-### Watch Mode
-
-The watch mode allows you to monitor file changes and automatically process files with special "@kodelet" comments.
-
-```bash
-kodelet watch
-```
-Options:
-- `--ignore` or `-i`: Directories to ignore (default: `.git,node_modules`)
-- `--include` or `-p`: File pattern to include (e.g., `*.go`, `*.{js,ts}`)
-- `--verbosity` or `-v`: Verbosity level (`quiet`, `normal`, `verbose`)
-- `--debounce` or `-d`: Debounce time in milliseconds (default: 500)
-- `--auto-completion-model`: Model to use for auto-completion requests
-
-Make sure your Anthropic API key is set in your environment:
-
-```bash
-export ANTHROPIC_API_KEY="sk-ant-api..."
-```
-
-### Configuration
-
-Kodelet uses Viper for configuration management. You can configure Kodelet in several ways:
-
-1. **Environment Variables** - All environment variables should be prefixed with `KODELET_`:
+3. Set up your API keys for testing:
    ```bash
    export ANTHROPIC_API_KEY="sk-ant-api..."
-   export KODELET_MODEL="claude-sonnet-4-0"
-   export KODELET_MAX_TOKENS="8192"
-   export KODELET_WEAK_MODEL_MAX_TOKENS="8192"
-   export KODELET_THINKING_BUDGET_TOKENS="4048"
+   # or
+   export OPENAI_API_KEY="sk-..."
    ```
 
-2. **Configuration File** - Kodelet looks for a configuration file named `config.yaml` in:
-   - Current directory
-   - `$HOME/.kodelet/` directory
+## Building from Source
 
-Example `config.yaml`:
-```yaml
-# Anthropic model to use
-model: "claude-sonnet-4-0"
-
-# Maximum tokens for responses
-max_tokens: 8192
-
-# Weak model to use for less complex tasks
-weak_model: "claude-3-5-haiku-latest"
-
-# Maximum tokens for weak model responses
-weak_model_max_tokens: 8192
-```
-
-3. **Command Line Flags**:
-   ```bash
-   kodelet run --model "claude-3-opus-20240229" --max-tokens 4096 --weak-model-max-tokens 2048 "query"
-   ```
-
-## Available Make Commands
-
-Kodelet provides several make commands to simplify development and usage:
+### Local Build
 
 ```bash
-# Build the application
 make build
+```
 
-# Run tests
+This creates the binary in `./bin/kodelet`.
+
+### Cross-Platform Build
+
+```bash
+make cross-build
+```
+
+This builds binaries for multiple platforms in the `./bin/` directory.
+
+### Docker Build
+
+```bash
+make docker-build
+```
+
+## Development Commands
+
+### Testing
+
+```bash
+# Run all tests
 make test
 
+# Run tests with coverage
+go test -v -cover ./...
+
+# Run tests for a specific package
+go test -v ./pkg/llm/...
+```
+
+### Code Quality
+
+```bash
 # Run linter
 make lint
 
 # Format code
 make format
 
-# Build Docker image
-make docker-build
+# Check for formatting issues
+gofmt -d .
+```
 
-# Display help information
+### Local Development
+
+1. Build the development version:
+   ```bash
+   make build
+   ```
+
+2. Test your changes:
+   ```bash
+   ./bin/kodelet run "test query"
+   ```
+
+3. Run specific functionality:
+   ```bash
+   ./bin/kodelet chat
+   ./bin/kodelet watch
+   ```
+
+## Project Structure
+
+```
+├── cmd/kodelet/         # Application entry point
+├── pkg/                 # Core packages
+│   ├── conversations/   # Conversation storage and management
+│   ├── llm/             # LLM client for AI interactions
+│   │   ├── anthropic/   # Anthropic Claude API client
+│   │   └── openai/      # OpenAI API client
+│   ├── logger/          # Context-aware structured logging
+│   ├── sysprompt/       # System prompt configuration
+│   ├── telemetry/       # Telemetry components
+│   ├── tools/           # Tool implementations
+│   ├── tui/             # Terminal UI components
+│   ├── types/           # Common types
+│   └── utils/           # Utility functions
+├── docs/                # Documentation
+├── .github/             # GitHub configuration
+└── Makefile             # Build automation
+```
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feature/my-feature`
+3. Make your changes
+4. Run tests: `make test`
+5. Run linter: `make lint`
+6. Commit your changes: `git commit -am 'Add some feature'`
+7. Push to the branch: `git push origin feature/my-feature`
+8. Submit a pull request
+
+## Release Process
+
+1. Update version in `VERSION.txt`
+2. Update `RELEASE.md` with changelog
+3. Create release using make:
+   ```bash
+   make release
+   ```
+
+## Available Make Commands
+
+For a complete list of available commands:
+
+```bash
 make help
 ```
+
+Common commands:
+- `make build` - Build the application
+- `make test` - Run tests  
+- `make lint` - Run linter
+- `make format` - Format code
+- `make docker-build` - Build Docker image
+- `make cross-build` - Build for multiple platforms
+- `make release` - Create a release
