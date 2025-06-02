@@ -215,7 +215,8 @@ func runWatchMode(ctx context.Context, state tooltypes.State, config *WatchConfi
 				if !ok {
 					return
 				}
-				logger.G(ctx).WithError(err).Error("Error watching files")
+				// Use context.TODO() to avoid using cancelled context
+				logger.G(context.TODO()).WithError(err).Error("Error watching files")
 			case <-ctx.Done():
 				return
 			}
@@ -239,7 +240,8 @@ func runWatchMode(ctx context.Context, state tooltypes.State, config *WatchConfi
 		return nil
 	})
 	if err != nil {
-		logger.G(ctx).WithError(err).Fatal("Failed to watch directories")
+		// Use context.TODO() to avoid using cancelled context
+		logger.G(context.TODO()).WithError(err).Fatal("Failed to watch directories")
 	}
 
 	fmt.Println("Watching for file changes... Press Ctrl+C to stop")
