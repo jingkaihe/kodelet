@@ -17,15 +17,13 @@ func TestNewLogger(t *testing.T) {
 	logger := newLogger()
 
 	assert.NotNil(t, logger)
-	assert.IsType(t, &logrus.JSONFormatter{}, logger.Formatter)
+	assert.IsType(t, &logrus.TextFormatter{}, logger.Formatter)
 
-	formatter, ok := logger.Formatter.(*logrus.JSONFormatter)
+	formatter, ok := logger.Formatter.(*logrus.TextFormatter)
 	require.True(t, ok)
 
-	assert.Equal(t, "timestamp", formatter.FieldMap[logrus.FieldKeyTime])
-	assert.Equal(t, "logLevel", formatter.FieldMap[logrus.FieldKeyLevel])
-	assert.Equal(t, "message", formatter.FieldMap[logrus.FieldKeyMsg])
 	assert.Equal(t, time.RFC3339Nano, formatter.TimestampFormat)
+	assert.True(t, formatter.FullTimestamp)
 }
 
 func TestGlobalVariables(t *testing.T) {
