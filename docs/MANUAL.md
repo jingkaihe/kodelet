@@ -92,6 +92,23 @@ Create pull requests:
 kodelet pr
 ```
 
+Resolve GitHub issues automatically:
+
+```bash
+kodelet resolve --issue-url https://github.com/owner/repo/issues/123
+```
+
+This command analyzes the issue, creates an appropriate branch, works on the issue resolution, and automatically creates a pull request with updates back to the original issue. Currently supports GitHub issues only.
+
+Respond to specific pull request comments:
+
+```bash
+kodelet pr-respond --pr-url https://github.com/owner/repo/pull/456
+kodelet pr-respond --pr-url https://github.com/owner/repo/pull/456 --comment-id 123456
+```
+
+This command focuses on addressing a specific comment or review feedback within a PR. If no comment ID is provided, it will address the most recent @kodelet mention. Currently supports GitHub PRs only.
+
 ### Image Input Support
 
 Kodelet supports image inputs for vision-enabled models (currently Anthropic Claude models only). You can provide images through local file paths or HTTPS URLs.
