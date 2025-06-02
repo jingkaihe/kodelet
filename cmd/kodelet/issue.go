@@ -10,15 +10,51 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// IssueConfig holds configuration for the issue command
+type IssueConfig struct {
+	Provider string
+	IssueURL string
+}
+
+// NewIssueConfig creates a new IssueConfig with default values
+func NewIssueConfig() *IssueConfig {
+	return &IssueConfig{
+		Provider: "github",
+		IssueURL: "",
+	}
+}
+
+// Validate validates the IssueConfig and returns an error if invalid
+func (c *IssueConfig) Validate() error {
+	if c.Provider != "github" {
+		return fmt.Errorf("unsupported provider: %s, only 'github' is supported", c.Provider)
+	}
+
+	if c.IssueURL == "" {
+		return fmt.Errorf("issue URL cannot be empty")
+	}
+
+	return nil
+}
+
 var issueCmd = &cobra.Command{
 	Use:   "issue",
-	Short: "Resolve a GitHub issue autonomously",
-	Long: `Resolve a GitHub issue by fetching details, creating a branch, implementing fixes, and creating a PR.
+	Short: "Resolve an issue autonomously",
+	Long: `Resolve an issue by fetching details, creating a branch, implementing fixes, and creating a PR.
 
-This command analyzes the GitHub issue, creates an appropriate branch, works on the issue resolution, and automatically creates a pull request with updates back to the original issue.`,
+This command analyzes the issue, creates an appropriate branch, works on the issue resolution, and automatically creates a pull request with updates back to the original issue. Currently supports GitHub issues only.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx := cmd.Context()
 		s := tools.NewBasicState(ctx)
+
+		// Get issue config from flags
+		config := getIssueConfigFromFlags(cmd)
+
+		// Validate configuration
+		if err := config.Validate(); err != nil {
+			fmt.Printf("Error: %s\n", err)
+			os.Exit(1)
+		}
 
 		// Prerequisites checking
 		if !isGitRepository() {
@@ -37,13 +73,6 @@ This command analyzes the GitHub issue, creates an appropriate branch, works on 
 			os.Exit(1)
 		}
 
-		// Get issue URL from flags
-		issueURL, _ := cmd.Flags().GetString("issue-url")
-		if issueURL == "" {
-			fmt.Println("Error: --issue-url is required")
-			os.Exit(1)
-		}
-
 		bin, err := os.Executable()
 		if err != nil {
 			fmt.Println("Error: Failed to get executable path")
@@ -51,7 +80,7 @@ This command analyzes the GitHub issue, creates an appropriate branch, works on 
 		}
 
 		// Generate comprehensive prompt
-		prompt := generateIssueResolutionPrompt(bin, issueURL)
+		prompt := generateIssueResolutionPrompt(bin, config.IssueURL)
 
 		// Send to LLM using existing architecture
 		fmt.Println("Analyzing GitHub issue and starting resolution process...")
@@ -75,8 +104,24 @@ This command analyzes the GitHub issue, creates an appropriate branch, works on 
 }
 
 func init() {
-	issueCmd.Flags().String("issue-url", "", "GitHub issue URL (required)")
+	defaults := NewIssueConfig()
+	issueCmd.Flags().StringP("provider", "p", defaults.Provider, "The issue provider to use")
+	issueCmd.Flags().String("issue-url", defaults.IssueURL, "Issue URL (required)")
 	issueCmd.MarkFlagRequired("issue-url")
+}
+
+// getIssueConfigFromFlags extracts issue configuration from command flags
+func getIssueConfigFromFlags(cmd *cobra.Command) *IssueConfig {
+	config := NewIssueConfig()
+
+	if provider, err := cmd.Flags().GetString("provider"); err == nil {
+		config.Provider = provider
+	}
+	if issueURL, err := cmd.Flags().GetString("issue-url"); err == nil {
+		config.IssueURL = issueURL
+	}
+
+	return config
 }
 
 func generateIssueResolutionPrompt(bin, issueURL string) string {
