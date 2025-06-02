@@ -34,16 +34,32 @@ func GetLogger(ctx context.Context) *logrus.Entry {
 func newLogger() *logrus.Logger {
 	l := logrus.New()
 
-	l.Formatter = &logrus.JSONFormatter{
-		FieldMap: logrus.FieldMap{
-			logrus.FieldKeyTime:  "timestamp",
-			logrus.FieldKeyLevel: "logLevel",
-			logrus.FieldKeyMsg:   "message",
-		},
-		TimestampFormat: time.RFC3339Nano,
-	}
+	// Default to formatted text format
+	setLoggerFormat(l, "fmt")
 
 	return l
+}
+
+// setLoggerFormat sets the formatter for the given logger
+func setLoggerFormat(logger *logrus.Logger, format string) {
+	switch format {
+	case "json":
+		logger.Formatter = &logrus.JSONFormatter{
+			FieldMap: logrus.FieldMap{
+				logrus.FieldKeyTime:  "timestamp",
+				logrus.FieldKeyLevel: "logLevel",
+				logrus.FieldKeyMsg:   "message",
+			},
+			TimestampFormat: time.RFC3339Nano,
+		}
+	case "text", "fmt":
+		fallthrough
+	default:
+		logger.Formatter = &logrus.TextFormatter{
+			TimestampFormat: time.RFC3339Nano,
+			FullTimestamp:   true,
+		}
+	}
 }
 
 // SetLogLevel sets the log level for the global logger
@@ -64,4 +80,14 @@ func SetLogLevelForLogger(logger *logrus.Logger, level string) error {
 	}
 	logger.SetLevel(logLevel)
 	return nil
+}
+
+// SetLogFormat sets the log format for the global logger
+func SetLogFormat(format string) {
+	setLoggerFormat(L.Logger, format)
+}
+
+// SetLogFormatForLogger sets the log format for a specific logger
+func SetLogFormatForLogger(logger *logrus.Logger, format string) {
+	setLoggerFormat(logger, format)
 }
