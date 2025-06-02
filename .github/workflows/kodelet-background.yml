@@ -45,9 +45,26 @@ jobs:
           # Install from the installation script
           curl -sSL https://raw.githubusercontent.com/jingkaihe/kodelet/main/install.sh | bash
       - name: Configure Git
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMMENTER: ${{ github.event.comment.user.login }}
         run: |
-          git config --global user.name "kodelet[bot]"
-          git config --global user.email "kodelet[bot]@users.noreply.github.com"
+          # Try to get the user's public email first
+          USER_DATA=$(gh api users/$COMMENTER 2>/dev/null || echo "{}")
+          EMAIL=$(echo "$USER_DATA" | jq -r '.email // empty')
+          USER_ID=$(echo "$USER_DATA" | jq -r '.id // empty')
+
+          if [ -z "$EMAIL" ] || [ "$EMAIL" = "null" ]; then
+            # Use GitHub's private noreply format with user ID
+            if [ -n "$USER_ID" ] && [ "$USER_ID" != "null" ]; then
+              EMAIL="${USER_ID}+${COMMENTER}@users.noreply.github.com"
+            else
+              EMAIL="${COMMENTER}@users.noreply.github.com"
+            fi
+          fi
+
+          git config --global user.name "$COMMENTER"
+          git config --global user.email "$EMAIL"
       - name: Set up Go # as the dev env
         uses: actions/setup-go@v5
         with:
