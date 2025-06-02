@@ -65,6 +65,8 @@ All development work must follow these core principles:
 
 ## Key Commands
 
+For comprehensive usage documentation and examples, see [./docs/MANUAL.md](./docs/MANUAL.md).
+
 ```bash
 # Core commands
 kodelet run "query"                    # One-shot execution
