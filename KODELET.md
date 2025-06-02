@@ -80,6 +80,10 @@ kodelet commit [--no-confirm|--short]  # AI commit messages
 kodelet pr [--target main]             # Generate PRs
 kodelet resolve --issue-url URL        # Resolve GitHub issues
 
+# PR management
+kodelet pr-respond --pr-url URL        # Respond to specific PR comment
+kodelet pr-respond --pr-url URL --comment-id ID  # Respond to specific comment
+
 # Image support (Claude only)
 kodelet run --image path.png "query"   # Single/multiple images
 

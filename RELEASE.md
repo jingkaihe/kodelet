@@ -1,5 +1,64 @@
 # Kodelet
 
+## 0.0.33.alpha (2025-06-02)
+
+### PR Comment Response System
+
+- **New `kodelet pr-respond` Command**: Added intelligent PR comment response capability
+  - **Focused Comment Handling**: Responds to specific PR comments with targeted code changes
+  - **@kodelet Mention Detection**: Automatically finds latest @kodelet mentions when no comment ID specified
+  - **Smart Comment Analysis**: Analyzes comment requests and implements precise changes without scope creep
+  - **GitHub CLI Integration**: Uses `gh pr view` and comment APIs for seamless GitHub workflow integration
+  - **Automatic Code Updates**: Makes targeted changes and commits them with `--no-confirm` flag
+  - **Comment Reply System**: Responds to the original comment with summary of actions taken
+
+### Enhanced GitHub Actions Integration
+
+- **Comprehensive PR Review Support**: Updated `kodelet-background.yml` workflow for complete PR interaction
+  - **Multi-Event Support**: Handles `pull_request_review_comment`, `pull_request_review`, and `issue_comment` events
+  - **Context-Aware Processing**: Automatically detects whether comment is on PR or issue and routes appropriately
+  - **Comment ID Tracking**: Passes specific comment IDs to `pr-respond` command for precise targeting
+  - **Enhanced Error Handling**: Improved error reporting with detailed workflow logs and user-friendly messages
+  - **Smart Event Routing**: Distinguishes between PR comments and issue comments for appropriate tool selection
+
+### Logging Infrastructure Improvements
+
+- **Configurable Log Format**: Added support for both JSON and text log formats
+  - **New Configuration Options**: Added `log_format` config setting and corresponding environment variable
+  - **Text Format Default**: Changed default from JSON to human-readable text format with full timestamps
+  - **Backward Compatibility**: JSON format still available via configuration for structured logging needs
+  - **Enhanced Readability**: Improved development experience with formatted text output
+
+### Watch Mode Reliability
+
+- **Improved Signal Handling**: Enhanced graceful shutdown in watch mode
+  - **Context Management**: Better context propagation and cancellation handling
+  - **Error Logging**: Fixed error logging in watch mode using `context.TODO()` when context is cancelled
+  - **Signal Processing**: Improved handling of SIGINT and SIGTERM for clean shutdown
+
+### Technical Improvements
+
+- **Enhanced Prerequisites Validation**: All PR-related commands now validate git repository, GitHub CLI installation, and authentication
+- **Robust Error Handling**: Comprehensive error checking with clear user guidance for missing dependencies
+- **Configuration Management**: Added new configuration options with proper defaults and environment variable support
+- **Code Quality**: Improved code organization and consistency across PR-related commands
+
+### Usage Examples
+
+```bash
+# Respond to specific PR comment
+kodelet pr-respond --pr-url https://github.com/owner/repo/pull/123 --comment-id 456789
+
+# Respond to latest @kodelet mention in PR
+kodelet pr-respond --pr-url https://github.com/owner/repo/pull/123
+
+# Configure text log format (default)
+export KODELET_LOG_FORMAT="text"
+
+# Configure JSON log format for structured logging
+export KODELET_LOG_FORMAT="json"
+```
+
 ## 0.0.32.alpha (2025-06-02)
 
 ### GitHub Issue Resolution

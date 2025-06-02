@@ -147,7 +147,7 @@ func getResolveConfigFromFlags(cmd *cobra.Command) *ResolveConfig {
 func generateIssueResolutionPrompt(bin, issueURL string) string {
 	return fmt.Sprintf(`Please resolve the github issue %s following the steps below:
 
-1. use "gh issue view %s" to get the issue details.
+1. use "gh issue view %s --comments" to get the issue details.
 - review the issue details and understand the issue.
 - especially pay attention to the latest comment with @kodelet - this is the instruction from the user.
 - extract the issue number from the issue URL for branch naming
