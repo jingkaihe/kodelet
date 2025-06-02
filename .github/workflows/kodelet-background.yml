@@ -1,0 +1,80 @@
+name: Background Kodelet
+
+on:
+  issue_comment:
+    types: [created]
+  issues:
+    types: [opened, assigned]
+
+permissions:
+  issues: write          # Comment on issues
+  pull-requests: write   # Create PRs
+  contents: write        # Push commits
+env:
+  TIMEOUT_MINUTES: "300"
+
+jobs:
+  kodelet-work:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360  # 6 hours
+    # Complete validation in single if: condition
+    if: |
+      github.event_name == 'issue_comment' && github.event.issue.pull_request == null && contains(github.event.comment.body, '@kodelet')
+
+    steps:
+      - name: Post status comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '🤖 Kodelet is starting to work on this issue...'
+            });
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full clone for proper git operations
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install Kodelet
+        run: |
+          # Install from the installation script
+          curl -sSL https://raw.githubusercontent.com/jingkaihe/kodelet/main/install.sh | bash
+      - name: Configure Git
+        run: |
+          git config --global user.name "kodelet[bot]"
+          git config --global user.email "kodelet[bot]@users.noreply.github.com"
+      - name: Set up Go # as the dev env
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+      - name: Run Kodelet on Issue
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          KODELET_LOG_LEVEL: "info"
+        run: |
+          # Use the existing kodelet resolve command
+          ISSUE_URL="https://github.com/${{ github.repository }}/issues/${{ github.event.issue.number }}"
+          kodelet resolve --issue-url "$ISSUE_URL"
+      - name: Handle errors
+        uses: actions/github-script@v7
+        if: failure()
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `❌ **Kodelet encountered an error while working on this issue**
+
+              The automated workflow failed during execution. This could be due to:
+              - Complex issue requirements that need human intervention
+              - Environmental or dependency issues
+              - API rate limits or service unavailability
+
+              Please check the [workflow logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for more details.
+
+              You may want to try again later or handle this issue manually.`
+            });
