@@ -1,5 +1,9 @@
 # Kodelet
 
+## 0.0.32.alpha1 (2025-06-02)
+
+Improved the kodelet prompt to make it capable of working on pre-existing branch.
+
 ## 0.0.32.alpha (2025-06-02)
 
 ### GitHub Issue Resolution
