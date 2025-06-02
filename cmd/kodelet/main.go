@@ -37,6 +37,7 @@ func init() {
 
 	// Set default logging configuration
 	viper.SetDefault("log_level", "info")
+	viper.SetDefault("log_format", "json")
 
 	// Environment variables
 	viper.SetEnvPrefix("KODELET")
@@ -78,12 +79,15 @@ func main() {
 	// Create a context
 	ctx := context.Background()
 
-	// Initialize log level from configuration after CLI parsing
+	// Initialize log level and format from configuration after CLI parsing
 	cobra.OnInitialize(func() {
 		if logLevel := viper.GetString("log_level"); logLevel != "" {
 			if err := logger.SetLogLevel(logLevel); err != nil {
 				logger.G(context.TODO()).WithField("error", err).WithField("log_level", logLevel).Warn("Invalid log level, using default")
 			}
+		}
+		if logFormat := viper.GetString("log_format"); logFormat != "" {
+			logger.SetLogFormat(logFormat)
 		}
 	})
 
@@ -97,6 +101,7 @@ func main() {
 	rootCmd.PersistentFlags().String("reasoning-effort", "medium", "Reasoning effort for OpenAI models (low, medium, high)")
 	rootCmd.PersistentFlags().Int("cache-every", 10, "Cache messages every N interactions (0 to disable, Anthropic only)")
 	rootCmd.PersistentFlags().String("log-level", "info", "Log level (panic, fatal, error, warn, info, debug, trace)")
+	rootCmd.PersistentFlags().String("log-format", "json", "Log format (json, text, fmt)")
 
 	// Bind flags to viper
 	viper.BindPFlag("provider", rootCmd.PersistentFlags().Lookup("provider"))
@@ -109,6 +114,7 @@ func main() {
 	viper.BindPFlag("weak_reasoning_effort", rootCmd.PersistentFlags().Lookup("weak-reasoning-effort"))
 	viper.BindPFlag("cache_every", rootCmd.PersistentFlags().Lookup("cache-every"))
 	viper.BindPFlag("log_level", rootCmd.PersistentFlags().Lookup("log-level"))
+	viper.BindPFlag("log_format", rootCmd.PersistentFlags().Lookup("log-format"))
 
 	// Add subcommands
 	rootCmd.AddCommand(chatCmd)
