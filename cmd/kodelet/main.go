@@ -37,7 +37,7 @@ func init() {
 
 	// Set default logging configuration
 	viper.SetDefault("log_level", "info")
-	viper.SetDefault("log_format", "json")
+	viper.SetDefault("log_format", "fmt")
 
 	// Environment variables
 	viper.SetEnvPrefix("KODELET")
@@ -101,7 +101,7 @@ func main() {
 	rootCmd.PersistentFlags().String("reasoning-effort", "medium", "Reasoning effort for OpenAI models (low, medium, high)")
 	rootCmd.PersistentFlags().Int("cache-every", 10, "Cache messages every N interactions (0 to disable, Anthropic only)")
 	rootCmd.PersistentFlags().String("log-level", "info", "Log level (panic, fatal, error, warn, info, debug, trace)")
-	rootCmd.PersistentFlags().String("log-format", "json", "Log format (json, text, fmt)")
+	rootCmd.PersistentFlags().String("log-format", "fmt", "Log format (json, text, fmt)")
 
 	// Bind flags to viper
 	viper.BindPFlag("provider", rootCmd.PersistentFlags().Lookup("provider"))

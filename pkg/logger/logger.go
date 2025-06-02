@@ -34,8 +34,8 @@ func GetLogger(ctx context.Context) *logrus.Entry {
 func newLogger() *logrus.Logger {
 	l := logrus.New()
 
-	// Default to JSON format
-	setLoggerFormat(l, "json")
+	// Default to formatted text format
+	setLoggerFormat(l, "fmt")
 
 	return l
 }
@@ -43,14 +43,7 @@ func newLogger() *logrus.Logger {
 // setLoggerFormat sets the formatter for the given logger
 func setLoggerFormat(logger *logrus.Logger, format string) {
 	switch format {
-	case "text", "fmt":
-		logger.Formatter = &logrus.TextFormatter{
-			TimestampFormat: time.RFC3339Nano,
-			FullTimestamp:   true,
-		}
 	case "json":
-		fallthrough
-	default:
 		logger.Formatter = &logrus.JSONFormatter{
 			FieldMap: logrus.FieldMap{
 				logrus.FieldKeyTime:  "timestamp",
@@ -58,6 +51,13 @@ func setLoggerFormat(logger *logrus.Logger, format string) {
 				logrus.FieldKeyMsg:   "message",
 			},
 			TimestampFormat: time.RFC3339Nano,
+		}
+	case "text", "fmt":
+		fallthrough
+	default:
+		logger.Formatter = &logrus.TextFormatter{
+			TimestampFormat: time.RFC3339Nano,
+			FullTimestamp:   true,
 		}
 	}
 }
