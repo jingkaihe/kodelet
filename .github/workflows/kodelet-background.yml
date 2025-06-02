@@ -23,12 +23,13 @@ jobs:
     timeout-minutes: 360  # 6 hours
     if: |
       (
-        (github.event_name == 'issue_comment' && github.event.issue.pull_request == null && contains(github.event.comment.body, '@kodelet')) ||
-        (github.event_name == 'issue_comment' && github.event.issue.pull_request != null && contains(github.event.comment.body, '@kodelet')) ||
+        (github.event_name == 'issues' && contains(github.event.issue.body, '@kodelet')) ||
+        (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@kodelet')) ||
         (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@kodelet')) ||
         (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@kodelet'))
       ) &&
       (
+        (github.event.issue.author_association == 'OWNER' || github.event.issue.author_association == 'MEMBER' || github.event.issue.author_association == 'COLLABORATOR') ||
         (github.event.comment.author_association == 'OWNER' || github.event.comment.author_association == 'MEMBER' || github.event.comment.author_association == 'COLLABORATOR') ||
         (github.event.review.author_association == 'OWNER' || github.event.review.author_association == 'MEMBER' || github.event.review.author_association == 'COLLABORATOR')
       )
