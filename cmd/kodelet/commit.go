@@ -15,17 +15,19 @@ import (
 
 // CommitConfig holds configuration for the commit command
 type CommitConfig struct {
-	NoSign   bool
-	Template string
-	Short    bool
+	NoSign    bool
+	Template  string
+	Short     bool
+	NoConfirm bool
 }
 
 // NewCommitConfig creates a new CommitConfig with default values
 func NewCommitConfig() *CommitConfig {
 	return &CommitConfig{
-		NoSign:   false,
-		Template: "",
-		Short:    false,
+		NoSign:    false,
+		Template:  "",
+		Short:     false,
+		NoConfirm: false,
 	}
 }
 
@@ -111,8 +113,8 @@ IMPORTANT: The output of the commit message should not be wrapped with any markd
 		fmt.Printf("\033[1;36m[Cost Stats] Input: $%.4f | Output: $%.4f | Cache write: $%.4f | Cache read: $%.4f | Total: $%.4f\033[0m\n",
 			usage.InputCost, usage.OutputCost, usage.CacheCreationCost, usage.CacheReadCost, usage.TotalCost())
 
-		// Confirm with user
-		if !confirmCommit(commitMsg) {
+		// Confirm with user (unless --no-confirm is set)
+		if !config.NoConfirm && !confirmCommit(commitMsg) {
 			os.Exit(0)
 		}
 
@@ -131,6 +133,7 @@ func init() {
 	commitCmd.Flags().Bool("no-sign", defaults.NoSign, "Disable commit signing")
 	commitCmd.Flags().StringP("template", "t", defaults.Template, "Template for commit message")
 	commitCmd.Flags().Bool("short", defaults.Short, "Generate a short commit message with just a description, no bullet points")
+	commitCmd.Flags().Bool("no-confirm", defaults.NoConfirm, "Skip confirmation prompt and create commit automatically")
 }
 
 // getCommitConfigFromFlags extracts commit configuration from command flags
@@ -145,6 +148,9 @@ func getCommitConfigFromFlags(cmd *cobra.Command) *CommitConfig {
 	}
 	if short, err := cmd.Flags().GetBool("short"); err == nil {
 		config.Short = short
+	}
+	if noConfirm, err := cmd.Flags().GetBool("no-confirm"); err == nil {
+		config.NoConfirm = noConfirm
 	}
 
 	return config

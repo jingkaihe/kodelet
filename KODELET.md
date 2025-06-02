@@ -55,128 +55,68 @@ The codebase follows a modular structure with separation of concerns between LLM
 - **Cobra & Viper** - CLI commands and configuration
 - **Docker** - For containerization
 
+## Engineering Principles
+
+All development work must follow these core principles:
+
+1. **Always run linting**: Make sure you run `make lint` after you finish any work to ensure code quality and consistency.
+2. **Write comprehensive tests**: Always write tests for new features you add, and regression tests for changes you make to existing functionality.
+3. **Document CLI changes**: Always document when you have changed the CLI interface to maintain clear usage documentation.
+
 ## Key Commands
 
-### CLI Commands
-
-#### One-shot Mode
 ```bash
-# Basic one-shot query
-kodelet run "your query"
+# Core commands
+kodelet run "query"                    # One-shot execution
+kodelet chat                           # Interactive mode
+kodelet watch                          # File watcher
 
-# One-shot query with conversation persistence
-kodelet run "your query"                     # saved automatically
-kodelet run --resume CONVERSATION_ID "more"  # continue a conversation
-kodelet run --no-save "temporary query"      # don't save the conversation
+# Conversation management
+kodelet conversation list|show|delete  # Manage conversations
+kodelet run --resume ID "more"         # Continue conversation
 
-# One-shot query with image inputs
-kodelet run --image /path/to/screenshot.png "What's wrong with this UI?"
-kodelet run --image /path/to/diagram.png --image https://example.com/mockup.jpg "Compare these designs"
-kodelet run --image https://remote.com/image.jpg "Analyze this image"
-```
+# Git integration
+kodelet commit [--no-confirm|--short]  # AI commit messages
+kodelet pr [--target main]             # Generate PRs
+kodelet resolve --issue-url URL        # Resolve GitHub issues
 
-#### Interactive Chat Mode
-```bash
-kodelet chat
-kodelet chat --plain
-```
+# Image support (Claude only)
+kodelet run --image path.png "query"   # Single/multiple images
 
-#### Conversation Management
-```bash
-kodelet conversation list
-kodelet conversation list --search "term" --sort-by "updated" --sort-order "desc"
-kodelet conversation show <conversation-id>
-kodelet conversation show <conversation-id> --format [text|json|raw]
-kodelet conversation delete <conversation-id>
-kodelet conversation delete --no-confirm <conversation-id>
-```
-
-#### Watch Mode
-```bash
-kodelet watch [--include "*.go"] [--ignore ".git,node_modules"] [--verbosity level] [--debounce ms]
-```
-
-### Development Commands
-```bash
-make build          # Build the application
-make cross-build    # Build for multiple platforms
-make docker-build   # Build Docker image
-make test           # Run tests
-make format         # Format code
-make lint           # Lint code
-make release        # Create a release
-make help           # Display help
+# Development
+make build|test|lint|format|release    # Standard dev commands
 ```
 
 ## Configuration
 
-1. **Environment Variables**:
-   ```bash
-   # Logging configuration
-   export KODELET_LOG_LEVEL="info"  # panic, fatal, error, warn, info, debug, trace
+**Environment Variables**:
+```bash
+# API Keys
+export ANTHROPIC_API_KEY="sk-ant-api..."  # Claude models
+export OPENAI_API_KEY="sk-..."            # OpenAI models
 
-   # LLM configuration - Anthropic
-   export ANTHROPIC_API_KEY="sk-ant-api..."
-   export KODELET_PROVIDER="anthropic"  # Optional, detected from model name
-   export KODELET_MODEL="claude-sonnet-4-0"
-   export KODELET_MAX_TOKENS="8192"
-   export KODELET_CACHE_EVERY="5"  # Cache messages every N interactions (0 to disable)
+# Core settings
+export KODELET_PROVIDER="anthropic|openai"
+export KODELET_MODEL="claude-sonnet-4-0|gpt-4.1"
+export KODELET_MAX_TOKENS="8192"
+export KODELET_LOG_LEVEL="info"
+```
 
-   # LLM configuration - OpenAI
-   export OPENAI_API_KEY="sk-..."
-   export KODELET_PROVIDER="openai"
-   export KODELET_MODEL="gpt-4.1"
-   export KODELET_MAX_TOKENS="8192"
-   export KODELET_REASONING_EFFORT="medium"  # low, medium, high
-   ```
+**Config File** (`config.yaml`):
+```yaml
+provider: "anthropic"
+model: "claude-sonnet-4-0"
+max_tokens: 8192
+weak_model: "claude-3-5-haiku-latest"
+log_level: "info"
 
-2. **Configuration File** (`config.yaml`):
-   ```yaml
-   # Logging configuration
-   log_level: "info"  # panic, fatal, error, warn, info, debug, trace
-
-   # Anthropic configuration
-   provider: "anthropic"
-   model: "claude-sonnet-4-0"
-   max_tokens: 8192
-   weak_model: "claude-3-5-haiku-latest"
-   weak_model_max_tokens: 8192
-   cache_every: 10  # Cache messages every N interactions (0 to disable)
-
-   # Alternative OpenAI configuration
-   # provider: "openai"
-   # model: "gpt-4.1"
-   # max_tokens: 8192
-   # weak_model: "gpt-4.1-mini"
-   # weak_model_max_tokens: 4096
-   # reasoning_effort: "medium"
-   # weak_reasoning_effort: "low"
-
-   # MCP configuration
-   mcp:
-     servers:
-       fs:
-         command: "npx" # Command to execute for stdio server
-         args: ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed/files"]
-         tool_white_list: ["list_directory"] # Optional tool white list
-        some_sse_server:   # sse config
-         base_url: "http://localhost:8000" # Base URL for SSE server
-         headers: # Headers for HTTP requests
-           Authorization: "Bearer token"
-         tool_white_list: ["tool1", "tool2"] # Optional tool white list
-   ```
-
-3. **Command Line Flags**:
-   ```bash
-   # Log level example
-   kodelet run --log-level debug "query"
-
-   # Anthropic example
-   kodelet run --provider "anthropic" --model "claude-3-opus-20240229" --max-tokens 4096 --weak-model-max-tokens 2048 --cache-every 3 "query"
-
-   # OpenAI example
-   kodelet run --provider "openai" --model "gpt-4.1" --max-tokens 4096 --reasoning-effort "high" "query"
-   ```
+# MCP servers (optional)
+mcp:
+  servers:
+    fs:
+      command: "npx"
+      args: ["-y", "@modelcontextprotocol/server-filesystem", "/path"]
+```
 
 ## LLM Architecture
 
@@ -195,7 +135,7 @@ Context-aware structured logging using [logrus](https://github.com/sirupsen/logr
 ### Key APIs
 - **`logger.G(ctx)`**: Get logger from context (ALWAYS use this)
 - **`logger.WithLogger(ctx, logger)`**: Store logger in context
-- **`log.WithFields()`**: Add contextual fields to logger
+- **`log.WithField(key, value)`**: Add contextual field to logger
 
 ### Usage
 ```go
@@ -204,37 +144,21 @@ log := logger.G(ctx)
 log.Info("Processing request")
 
 // Add context fields
-enrichedLog := log.WithFields(logrus.Fields{"request_id": id})
-ctx = logger.WithLogger(ctx, enrichedLog)
+log = log.WithField("request_id", id)
+ctx = logger.WithLogger(ctx, log)
+
+// always use structured logging
+// GOOD:
+log.WithField("request_id", id).Info("Processing request")
+// BAD
+log.Info("Processing request %s", id)
 ```
 
 ## Image Input Support
 
-Kodelet supports image inputs for vision-enabled models (currently Anthropic Claude models only). You can provide images through local file paths or HTTPS URLs.
+Vision support for Claude models only. Supports local files (JPEG, PNG, GIF, WebP) and HTTPS URLs. Max 10 images, 5MB each.
 
-### Supported Features
-- **Local Images**: JPEG, PNG, GIF, and WebP formats
-- **Remote Images**: HTTPS URLs only (for security)
-- **Multiple Images**: Up to 10 images per message
-- **Size Limits**: Maximum 5MB per image file
-- **Provider Support**: Anthropic Claude models (OpenAI support planned)
-
-### Usage Examples
 ```bash
-
-# Multiple images (local and remote)
-kodelet run --image ./diagram.png --image https://example.com/mockup.jpg "Compare these designs"
-
-# Multiple local images
-kodelet run --image ./before.png --image ./after.png "What changed between these versions?"
-
-# Architecture diagram analysis
-kodelet run --image ./architecture.png "Review this system architecture and suggest improvements"
+kodelet run --image diagram.png "analyze this"
+kodelet run --image file1.png --image file2.png "compare these"
 ```
-
-### Security & Limitations
-- Only HTTPS URLs are accepted for remote images (no HTTP)
-- File size limited to 5MB per image
-- Maximum 10 images per message
-- Supported formats: JPEG, PNG, GIF, WebP only
-- OpenAI provider will log a warning and process text only (vision support planned)

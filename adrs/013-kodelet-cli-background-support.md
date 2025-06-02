@@ -57,444 +57,229 @@ The CLI enhancements must integrate cleanly with the existing architecture while
 - More complex CLI implementation
 - Potential code duplication between orchestrator and individual commands
 
+### Option 4: Prompt-Based Orchestration (Like `kodelet pr`)
+**Pros:**
+- **Maximum Simplicity**: Reuses existing `llm.SendMessageAndGetTextWithUsage()` infrastructure
+- **Consistency**: Follows established `kodelet pr` command pattern
+- **Easy Testing**: Prompt modifications don't require code changes
+- **Minimal Code**: Single command file following existing patterns
+- **Tool Integration**: Automatic access to all existing tools via LLM
+- **Error Handling**: Built-in via LLM reasoning and tool error handling
+
+**Cons:**
+- Less granular progress reporting (relies on LLM to provide updates)
+- All logic embedded in prompt rather than structured code
+- Potential token usage higher due to comprehensive prompt
+
 ## Decision
 
-**Selected Approach: Option 3 - Master Orchestration Command + Individual Commands**
+**Selected Approach: Option 4 - Prompt-Based Orchestration (Like `kodelet pr`)**
 
 We will implement:
-1. **New individual commands** for GitHub/Git operations
-2. **Master `kodelet background` command** for full orchestration
-3. **Shared packages** for GitHub API, Git operations, and orchestration logic
+1. **Single `kodelet resolve` command** that orchestrates the entire workflow via LLM prompt
+2. **Reuse existing architecture** including tools, LLM clients, and conversation storage
+3. **Follow `kodelet pr` patterns** for prerequisites checking and command structure
 
 ## Implementation Architecture
 
-### New CLI Commands
+### New CLI Command
 
-#### 1. Issue Processing
+#### Issue Resolution Command
 ```bash
-kodelet issue fetch <github-issue-url>
-# Creates: ISSUE.md, .kodelet/issue.json
-```
-
-#### 2. Branch Management  
-```bash
-kodelet branch create --from-issue [--issue-url <url>]
-# Creates branch: issue-{number}-{slug}
-```
-
-#### 3. Issue Commenting
-```bash
-kodelet comment <github-issue-url> [--message <text>] [--file <path>] [--template <type>] [--update-comment-id <id>]
-# Templates: success, error, progress
-# --update-comment-id: Update existing comment instead of creating new one
-```
-
-#### 4. Master Orchestration
-```bash
-kodelet background --issue-url <github-issue-url> [--max-time <duration>] [--progress-freq <duration>]
-# Executes: fetch → branch → run → pr → comment
+kodelet resolve --issue-url <github-issue-url> [--max-tokens 8192] [--model claude-sonnet-4-0]
+# Executes: fetch → branch → resolve → pr → comment via single LLM prompt
 ```
 
 ### Package Structure
 
+**No new packages required** - reuses existing architecture:
 ```
 pkg/
-├── background/          # New: Orchestration logic
-│   ├── orchestrator.go  # Main pipeline execution
-│   ├── progress.go      # Progress reporting
-│   └── config.go        # Configuration management
-├── github/              # New: GitHub API integration
-│   ├── issue.go         # Issue fetching and processing
-│   ├── comment.go       # Issue commenting with update support
-│   ├── client.go        # GitHub API client setup
-│   └── manager.go       # Comment management (create/update single comment)
-├── git/                 # New: Git operations
-│   ├── branch.go        # Branch creation and management
-│   └── utils.go         # Git utility functions
-└── [existing packages] # No changes to existing architecture
+├── llm/                 # Existing: LLM client integration
+├── tools/               # Existing: Tool registry and implementations
+├── conversations/       # Existing: Conversation storage
+└── [existing packages] # No changes needed
 ```
 
 ### Integration with Existing Architecture
 
-#### LLM Thread Integration
-```go
-// Reuse existing pkg/llm.Thread for kodelet execution
-func (o *Orchestrator) runKodelet(ctx context.Context) error {
-    content, err := os.ReadFile("ISSUE.md")
-    if err != nil {
-        return err
-    }
-    
-    // Create thread using existing patterns
-    thread, err := o.createLLMThread(ctx)
-    if err != nil {
-        return err
-    }
-    
-    prompt := fmt.Sprintf("Work on this GitHub issue:\n\n%s", string(content))
-    return thread.SendMessage(ctx, prompt)
-}
+#### Prompt-Based Orchestration Template
+```text
+Please resolve the github issue ${ISSUE_URL} following the steps below:
+
+1. use `gh issue view ${ISSUE_URL}` to get the issue details.
+- review the issue details and understand the issue.
+- especially pay attention to the latest comment with @kodelet - this is the instruction from the user.
+- extract the issue number from the issue URL for branch naming
+
+2. based on the issue details, come up with a branch name and checkout the branch via `git checkout -b kodelet/issue-${ISSUE_NUMBER}-${BRANCH_NAME}`
+
+3. start to work on the issue.
+- think step by step before you start to work on the issue.
+- if the issue is complex, you should add extra steps to the todo list to help you keep track of the progress.
+- do not commit during this step.
+
+4. once you have resolved the issue, ask the subagent to run `kodelet commit --short` to commit the changes.
+
+5. after committing the changes, ask the subagent to run `kodelet pr` to create a pull request. Please instruct the subagent to always returning the PR link in the final response.
+
+6. once the pull request is created, comment on the issue with the link to the pull request. If the pull request is not created, ask the subagent to create a pull request.
+
+IMPORTANT:
+!!!CRITICAL!!!: You should never update user's git config under any circumstances.
 ```
 
-#### Conversation Storage
+#### LLM Integration (Following `kodelet pr` Pattern)
 ```go
-// Store background executions as conversations
-func (o *Orchestrator) Execute(ctx context.Context) error {
-    conversationID := uuid.New().String()
-    
-    // Use existing conversation storage
-    conversation := &conversations.Conversation{
-        ID:      conversationID,
-        Type:    "background",
-        Metadata: map[string]string{
-            "issue_url": o.config.IssueURL,
-            "branch":    getCurrentBranch(),
-        },
-    }
-    
-    return o.executeWithConversation(ctx, conversation)
-}
-```
+// cmd/kodelet/resolve.go - Similar to pr.go
+func runIssue(cmd *cobra.Command, args []string) error {
+    ctx := cmd.Context()
+    s := tools.NewBasicState(ctx)
 
-#### Tool Integration
-```go
-// All existing tools available during background execution
-func (o *Orchestrator) createLLMThread(ctx context.Context) (*llm.Thread, error) {
-    // Reuse existing tool registry and LLM client creation
-    return llm.NewThread(ctx, o.llmClient, o.toolRegistry)
+    // Prerequisites checking (like pr.go)
+    if !isGitRepository() { /* error handling */ }
+    if !isGhCliInstalled() { /* error handling */ }
+    if !isGhAuthenticated() { /* error handling */ }
+
+    // Generate prompt with issue URL
+    issueURL, _ := cmd.Flags().GetString("issue-url")
+    prompt := generateIssuePrompt(issueURL)
+
+    // Send to LLM using existing patterns
+    out, usage := llm.SendMessageAndGetTextWithUsage(ctx, s, prompt,
+        llm.GetConfigFromViper(), false, llmtypes.MessageOpt{
+            PromptCache: true,
+        })
+
+    fmt.Println(out)
+    // Display usage stats...
 }
 ```
 
 ### Command Implementation
 
-#### Background Command
+#### Issue Resolution Command (Following `pr.go` Pattern)
 ```go
-// cmd/kodelet/background.go
-func NewBackgroundCommand() *cobra.Command {
-    cmd := &cobra.Command{
-        Use:   "background",
-        Short: "Execute kodelet for a GitHub issue autonomously",
-        Long: `Fetch a GitHub issue, create a branch, run kodelet, create PR, and report back.
-Designed for GitHub Actions automation but can be used manually.`,
-        RunE: runBackground,
-    }
-    
-    cmd.Flags().String("issue-url", "", "GitHub issue URL (required)")
-    cmd.Flags().Duration("max-time", time.Hour*5, "Maximum execution time")
-    cmd.Flags().Duration("progress-freq", time.Minute*10, "Progress update frequency")
-    cmd.MarkFlagRequired("issue-url")
-    
-    return cmd
-}
+// cmd/kodelet/resolve.go
+var resolveCmd = &cobra.Command{
+    Use:   "issue",
+    Short: "Resolve a GitHub issue autonomously",
+    Long: `Resolve a GitHub issue by fetching details, creating a branch, implementing fixes, and creating a PR.
 
-func runBackground(cmd *cobra.Command, args []string) error {
-    ctx := cmd.Context()
-    log := logger.G(ctx)
-    
-    // Parse flags
-    issueURL, _ := cmd.Flags().GetString("issue-url")
-    maxTime, _ := cmd.Flags().GetDuration("max-time")
-    progressFreq, _ := cmd.Flags().GetDuration("progress-freq")
-    
-    // Create orchestrator with existing patterns
-    orchestrator, err := background.NewOrchestrator(&background.Config{
-        IssueURL:     issueURL,
-        MaxTime:      maxTime,
-        ProgressFreq: progressFreq,
-        Logger:       log,
-    })
-    if err != nil {
-        return err
-    }
-    
-    // Execute with timeout
-    ctx, cancel := context.WithTimeout(ctx, maxTime)
-    defer cancel()
-    
-    return orchestrator.Execute(ctx)
-}
-```
+This command analyzes the GitHub issue, creates an appropriate branch, works on the issue resolution, and automatically creates a pull request with updates back to the original issue.`,
+    Run: func(cmd *cobra.Command, args []string) {
+        ctx := cmd.Context()
+        s := tools.NewBasicState(ctx)
 
-#### Individual Commands
-```go
-// cmd/kodelet/issue.go
-func NewIssueCommand() *cobra.Command {
-    cmd := &cobra.Command{
-        Use:   "issue",
-        Short: "GitHub issue operations",
-    }
-    
-    cmd.AddCommand(NewIssueFetchCommand())
-    return cmd
-}
-
-func NewIssueFetchCommand() *cobra.Command {
-    return &cobra.Command{
-        Use:   "fetch <github-issue-url>",
-        Short: "Fetch GitHub issue and create ISSUE.md",
-        Args:  cobra.ExactArgs(1),
-        RunE: func(cmd *cobra.Command, args []string) error {
-            processor := github.NewIssueProcessor()
-            issueData, err := processor.FetchAndProcess(cmd.Context(), args[0])
-            if err != nil {
-                return err
-            }
-            return processor.WriteIssueFile(issueData)
-        },
-    }
-}
-
-// cmd/kodelet/comment.go
-func NewCommentCommand() *cobra.Command {
-    cmd := &cobra.Command{
-        Use:   "comment <github-issue-url>",
-        Short: "Create or update GitHub issue comment",
-        Args:  cobra.ExactArgs(1),
-        RunE:  runComment,
-    }
-    
-    cmd.Flags().String("message", "", "Comment message")
-    cmd.Flags().String("file", "", "File containing comment message")
-    cmd.Flags().String("template", "", "Comment template (progress, success, error)")
-    cmd.Flags().Int64("update-comment-id", 0, "Comment ID to update (0 creates new)")
-    
-    return cmd
-}
-
-func runComment(cmd *cobra.Command, args []string) error {
-    // Parse issue URL and flags
-    issueURL := args[0]
-    updateCommentID, _ := cmd.Flags().GetInt64("update-comment-id")
-    message, _ := cmd.Flags().GetString("message")
-    
-    // Create GitHub client
-    client := github.NewClient(cmd.Context(), os.Getenv("GITHUB_TOKEN"))
-    
-    if updateCommentID > 0 {
-        // Update existing comment
-        return client.UpdateComment(cmd.Context(), updateCommentID, message)
-    } else {
-        // Create new comment
-        return client.CreateComment(cmd.Context(), issueURL, message)
-    }
-}
-```
-
-### Orchestration Pipeline
-
-```go
-// pkg/background/orchestrator.go
-type Orchestrator struct {
-    githubClient   *github.Client
-    commentManager *github.CommentManager
-    issueData      *github.IssueData
-    config         *Config
-    logger         *logrus.Entry
-}
-
-func (o *Orchestrator) Execute(ctx context.Context) error {
-    // Initialize comment manager for single progress comment
-    o.commentManager = o.githubClient.NewCommentManager(
-        o.issueData.Owner, o.issueData.Repo, o.issueData.Number)
-    
-    // Create initial progress comment
-    initialComment := `🤖 **Kodelet Background Execution Started**
-
-**Status:** Initializing...
-**Branch:** Creating branch...
-**Started:** ` + time.Now().Format(time.RFC3339) + `
-
-_Kodelet is working on your issue. This comment will be updated with progress._`
-    
-    if err := o.commentManager.CreateOrUpdateComment(ctx, initialComment); err != nil {
-        o.logger.WithError(err).Warn("Failed to create initial comment")
-    }
-
-    steps := []struct {
-        name string
-        fn   func(context.Context) error
-    }{
-        {"fetch-issue", o.fetchIssue},
-        {"create-branch", o.createBranch},
-        {"run-kodelet", o.runKodelet},
-        {"create-pr", o.createPR},
-    }
-    
-    // Start progress reporting
-    progressCtx, cancel := context.WithCancel(ctx)
-    defer cancel()
-    go o.reportProgress(progressCtx)
-    
-    for _, step := range steps {
-        o.logger.Infof("Executing step: %s", step.name)
-        if err := step.fn(ctx); err != nil {
-            o.commentError(ctx, step.name, err)
-            return fmt.Errorf("step %s failed: %w", step.name, err)
+        // Prerequisites checking - Done in code, not in prompt (same as pr.go)
+        if !isGitRepository() {
+            fmt.Println("Error: Not a git repository. Please run this command from a git repository.")
+            os.Exit(1)
         }
-    }
-    
-    // Create final success comment (separate from progress)
-    o.commentSuccess(ctx)
-    return nil
+
+        if !isGhCliInstalled() {
+            fmt.Println("Error: GitHub CLI (gh) is not installed. Please install it first.")
+            fmt.Println("Visit https://cli.github.com/ for installation instructions.")
+            os.Exit(1)
+        }
+
+        if !isGhAuthenticated() {
+            fmt.Println("Error: You are not authenticated with GitHub. Please run 'gh auth login' first.")
+            os.Exit(1)
+        }
+
+        // Get issue URL from flags
+        issueURL, _ := cmd.Flags().GetString("issue-url")
+        if issueURL == "" {
+            fmt.Println("Error: --issue-url is required")
+            os.Exit(1)
+        }
+
+        // Generate comprehensive prompt
+        prompt := generateIssueResolutionPrompt(issueURL)
+
+        // Send to LLM using existing architecture
+        fmt.Println("Analyzing GitHub issue and starting resolution process...")
+        fmt.Println("-----------------------------------------------------------")
+
+        out, usage := llm.SendMessageAndGetTextWithUsage(ctx, s, prompt,
+            llm.GetConfigFromViper(), false, llmtypes.MessageOpt{
+                PromptCache: true,
+            })
+
+        fmt.Println(out)
+        fmt.Println("-----------------------------------------------------------")
+
+        // Display usage statistics (same as pr.go)
+        fmt.Printf("\033[1;36m[Usage Stats] Input tokens: %d | Output tokens: %d | Cache write: %d | Cache read: %d | Total: %d\033[0m\n",
+            usage.InputTokens, usage.OutputTokens, usage.CacheCreationInputTokens, usage.CacheReadInputTokens, usage.TotalTokens())
+
+        fmt.Printf("\033[1;36m[Cost Stats] Input: $%.4f | Output: $%.4f | Cache write: $%.4f | Cache read: $%.4f | Total: $%.4f\033[0m\n",
+            usage.InputCost, usage.OutputCost, usage.CacheCreationCost, usage.CacheReadCost, usage.TotalCost())
+    },
+}
+
+func init() {
+    resolveCmd.Flags().String("issue-url", "", "GitHub issue URL (required)")
+    resolveCmd.MarkFlagRequired("issue-url")
+}
+
+func generateIssueResolutionPrompt(issueURL string) string {
+    return fmt.Sprintf(`Please resolve the github issue %s following the steps below:
+
+1. use "gh issue view %s" to get the issue details.
+- review the issue details and understand the issue.
+- especially pay attention to the latest comment with @kodelet - this is the instruction from the user.
+- extract the issue number from the issue URL for branch naming
+
+2. based on the issue details, come up with a branch name and checkout the branch via "git checkout -b kodelet/issue-${ISSUE_NUMBER}-${BRANCH_NAME}"
+
+3. start to work on the issue.
+- think step by step before you start to work on the issue.
+- if the issue is complex, you should add extra steps to the todo list to help you keep track of the progress.
+- do not commit during this step.
+
+4. once you have resolved the issue, ask the subagent to run "kodelet commit --short" to commit the changes.
+
+5. after committing the changes, ask the subagent to run "kodelet pr" to create a pull request. Please instruct the subagent to always returning the PR link in the final response.
+
+6. once the pull request is created, comment on the issue with the link to the pull request. If the pull request is not created, ask the subagent to create a pull request.
+
+IMPORTANT:
+!!!CRITICAL!!!: You should never update user's git config under any circumstances.`,
+issueURL, issueURL)
 }
 ```
 
-### Error Handling and Recovery
+### Prerequisites Functions (Reused from `pr.go`)
 
 ```go
-func (o *Orchestrator) commentError(ctx context.Context, step string, err error) {
-    // Create a separate error comment, don't update progress comment
-    comment := fmt.Sprintf(`🚨 **Kodelet Background Execution Failed**
-
-**Step:** %s
-**Error:** %s
-**Branch:** %s
-**Timestamp:** %s
-
-The kodelet background execution encountered an error. Please review the logs and retry if needed.
-
-_This is an automated error report_
-`, step, err.Error(), getCurrentBranch(), time.Now().Format(time.RFC3339))
-    
-    _ = o.commentManager.CreateFinalComment(ctx, comment)
+// Helper functions reused from existing pr.go
+func isGitRepository() bool {
+    cmd := exec.Command("git", "rev-parse", "--git-dir")
+    err := cmd.Run()
+    return err == nil
 }
 
-func (o *Orchestrator) commentSuccess(ctx context.Context) {
-    // Create a separate success comment
-    comment := fmt.Sprintf(`✅ **Kodelet Background Execution Completed**
-
-**Branch:** %s
-**Pull Request:** %s
-**Files Modified:** %d
-**Completed:** %s
-
-Kodelet has successfully processed your issue and created a pull request. Please review the changes.
-
-_This is an automated completion report_
-`, getCurrentBranch(), o.getPRURL(), o.getFilesModified(), time.Now().Format(time.RFC3339))
-    
-    _ = o.commentManager.CreateFinalComment(ctx, comment)
-}
-```
-
-### Progress Reporting
-
-```go
-func (o *Orchestrator) reportProgress(ctx context.Context) {
-    ticker := time.NewTicker(o.config.ProgressFreq)
-    defer ticker.Stop()
-    
-    for {
-        select {
-        case <-ctx.Done():
-            return
-        case <-ticker.C:
-            status := o.getCurrentStatus()
-            comment := fmt.Sprintf(`🤖 **Kodelet Background Execution In Progress**
-
-**Status:** %s
-**Branch:** %s
-**Last Activity:** %s
-**Files Modified:** %d
-**Started:** %s
-
-_Kodelet is working on your issue. This comment updates automatically._
-`, 
-                status.Message, 
-                status.Branch, 
-                status.LastActivity.Format("15:04:05"), 
-                status.FilesModified,
-                o.config.StartTime.Format(time.RFC3339))
-            
-            // Update the same comment instead of creating new ones
-            if err := o.commentManager.CreateOrUpdateComment(ctx, comment); err != nil {
-                o.logger.WithError(err).Warn("Failed to update progress comment")
-            }
-        }
-    }
-}
-```
-
-### GitHub Client Implementation
-
-```go
-// pkg/github/client.go
-import "github.com/google/go-github/v57/github"
-
-type Client struct {
-    client *github.Client
-    logger *logrus.Entry
+func isGhCliInstalled() bool {
+    cmd := exec.Command("gh", "--version")
+    err := cmd.Run()
+    return err == nil
 }
 
-func NewClient(ctx context.Context, token string) *Client {
-    ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
-    tc := oauth2.NewClient(ctx, ts)
-    
-    return &Client{
-        client: github.NewClient(tc),
-        logger: logger.G(ctx),
-    }
-}
-
-// CommentManager handles creating and updating a single comment
-type CommentManager struct {
-    client      *Client
-    owner       string
-    repo        string
-    issueNumber int
-    commentID   *int64  // nil means no comment created yet
-}
-
-func (c *Client) NewCommentManager(owner, repo string, issueNumber int) *CommentManager {
-    return &CommentManager{
-        client:      c,
-        owner:       owner,
-        repo:        repo,
-        issueNumber: issueNumber,
-    }
-}
-
-// CreateOrUpdateComment creates a new comment or updates existing one
-func (cm *CommentManager) CreateOrUpdateComment(ctx context.Context, body string) error {
-    if cm.commentID == nil {
-        // Create new comment
-        comment := &github.IssueComment{Body: &body}
-        created, _, err := cm.client.client.Issues.CreateComment(
-            ctx, cm.owner, cm.repo, cm.issueNumber, comment)
-        if err != nil {
-            return err
-        }
-        cm.commentID = created.ID
-        cm.client.logger.WithField("comment_id", *cm.commentID).Info("Created progress comment")
-        return nil
-    } else {
-        // Update existing comment
-        comment := &github.IssueComment{Body: &body}
-        _, _, err := cm.client.client.Issues.EditComment(
-            ctx, cm.owner, cm.repo, *cm.commentID, comment)
-        if err != nil {
-            return err
-        }
-        cm.client.logger.WithField("comment_id", *cm.commentID).Info("Updated progress comment")
-        return nil
-    }
-}
-
-// CreateFinalComment creates a separate final comment (success/error)
-func (cm *CommentManager) CreateFinalComment(ctx context.Context, body string) error {
-    comment := &github.IssueComment{Body: &body}
-    _, _, err := cm.client.client.Issues.CreateComment(
-        ctx, cm.owner, cm.repo, cm.issueNumber, comment)
-    return err
+func isGhAuthenticated() bool {
+    cmd := exec.Command("gh", "auth", "status")
+    err := cmd.Run()
+    return err == nil
 }
 ```
 
 ## GitHub Actions Integration
 
 ```yaml
-# .github/workflows/kodelet-background.yml
-- name: Run Kodelet Background
-  run: kodelet background --issue-url ${{ github.event.issue.html_url }}
+# .github/workflows/kodelet-resolve.yml
+- name: Run Kodelet Issue Resolution
+  run: kodelet resolve --issue-url ${{ github.event.issue.html_url }}
   env:
     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -502,86 +287,91 @@ func (cm *CommentManager) CreateFinalComment(ctx context.Context, body string) e
 
 ## Configuration Management
 
-### State Files
-```
-.kodelet/
-├── issue.json          # Issue metadata for command coordination
-├── background.json     # Background execution state
-└── progress.log        # Progress tracking for status updates
-```
-
 ### Environment Variables
 ```bash
 GITHUB_TOKEN=<token>           # GitHub API access
 ANTHROPIC_API_KEY=<key>        # LLM API access
-KODELET_PROGRESS_FREQ=10m      # Progress update frequency
-KODELET_MAX_TIME=5h            # Maximum execution time
+KODELET_MODEL=<model>          # Optional: Override default model
+KODELET_MAX_TOKENS=<tokens>    # Optional: Override token limit
 ```
+
+### No Additional State Files Required
+The prompt-based approach leverages:
+- Existing conversation storage for LLM interactions
+- Git repository state for tracking changes
+- GitHub API for issue and PR management
 
 ## Testing Strategy
 
 ### Unit Tests
-- Individual command functionality
-- GitHub API integration
-- Git operations
-- Orchestration logic
+- Command flag parsing and validation
+- Prerequisites checking functions
+- Prompt generation logic
+- Integration with existing LLM infrastructure
 
 ### Integration Tests
-- Full pipeline execution
-- Error handling and recovery
-- Progress reporting
-- GitHub API mocking
+- Full issue resolution workflow
+- Error handling scenarios
+- GitHub CLI authentication checks
+- Tool execution coordination
 
 ### End-to-End Tests
 - Real GitHub issue processing
 - Branch creation and PR workflow
-- Comment verification
+- Issue commenting verification
+- Conversation storage validation
 
 ## Migration Path
 
-### Phase 1: Individual Commands (Days 1-2)
-- Implement `kodelet issue fetch`
-- Implement `kodelet branch create`
-- Implement `kodelet comment`
+### Phase 1: Command Implementation (Day 1)
+- Implement `kodelet resolve` command following `pr.go` pattern
+- Add prerequisites checking
+- Create comprehensive prompt template
 
-### Phase 2: Orchestration (Days 3-4)
-- Implement `kodelet background`
-- Add progress reporting
-- Add error handling
+### Phase 2: Testing and Refinement (Day 2)
+- Unit tests for command functionality
+- Integration testing with GitHub API
+- Prompt optimization based on testing results
 
-### Phase 3: Integration (Days 5-6)
-- GitHub Actions workflow integration
-- End-to-end testing
-- Documentation and examples
+### Phase 3: Documentation and Integration (Day 3)
+- GitHub Actions workflow setup
+- Documentation updates
+- End-to-end testing validation
 
 ## Consequences
 
 ### Positive
-- **Clean Architecture**: Maintains existing patterns while adding new capabilities
-- **Flexible Usage**: Both manual and automated execution modes
-- **Robust Error Handling**: Comprehensive error reporting back to GitHub
-- **Progress Transparency**: Real-time status updates during execution
-- **Anti-Spam Design**: Single progress comment updated in-place instead of multiple comments
-- **Backward Compatibility**: No changes to existing commands
+- **Maximum Simplicity**: Single command file, minimal code changes required
+- **Consistency**: Follows established `kodelet pr` command pattern exactly
+- **Maintainability**: Easy to modify prompts without code changes
+- **Tool Integration**: Automatic access to all existing tools via LLM
+- **Error Handling**: Built-in error handling via LLM reasoning
+- **Conversation Storage**: Automatic conversation tracking via existing infrastructure
+- **Backward Compatibility**: No changes to existing commands or architecture
 
 ### Negative
-- **Increased Complexity**: More CLI commands and packages to maintain
-- **GitHub Dependency**: New functionality tightly coupled to GitHub API
-- **State Management**: Additional complexity in coordinating between commands
+- **Token Usage**: Higher token consumption due to comprehensive prompt
+- **Prompt Engineering**: Logic embedded in prompt rather than structured code
+- **Progress Granularity**: Less fine-grained progress reporting than structured approach
 
 ### Risks
-- **GitHub API Rate Limits**: Progress updates and comments may hit limits
-- **Authentication Complexity**: Multiple tokens and permissions required
-- **Error Recovery**: Partial execution state may be difficult to recover
+- **Prompt Complexity**: Large prompts may lead to inconsistent execution
+- **LLM Dependency**: Entire workflow depends on LLM understanding and execution
+- **Error Recovery**: Recovery logic must be embedded in prompt instructions
 
 ## Success Metrics
-- **Command Coverage**: All background workflow steps available as individual commands
-- **Error Rate**: <5% failure rate in background executions
-- **Performance**: Background execution completes within configured timeouts
-- **Developer Experience**: Manual commands provide clear feedback and error messages
+- **Implementation Time**: Command implemented within 1 day following `pr.go` pattern
+- **Error Rate**: <5% failure rate in issue resolution executions
+- **Code Simplicity**: <200 lines of new code (vs >1000 lines for Option 3)
+- **Developer Experience**: Clear error messages and consistent behavior with existing commands
 
 ## Conclusion
 
-The proposed CLI enhancements provide a solid foundation for Background Kodelet functionality while maintaining the existing architecture's integrity. The dual approach of individual commands + orchestration command offers maximum flexibility for both automated and manual use cases.
+The prompt-based orchestration approach (Option 4) provides the simplest and most maintainable solution for Background Kodelet functionality. By following the established `kodelet pr` pattern, this approach:
 
-The implementation leverages existing kodelet patterns and packages, ensuring consistency and maintainability while adding the specific capabilities needed for autonomous GitHub issue processing.
+1. **Minimizes implementation complexity** - Single command file vs complex orchestration architecture
+2. **Maximizes consistency** - Uses identical patterns to existing successful commands
+3. **Leverages existing infrastructure** - No new packages or architectural changes required
+4. **Enables rapid iteration** - Prompt modifications for behavior changes vs code refactoring
+
+This approach represents the optimal balance between functionality and maintainability, delivering autonomous GitHub issue processing capability with minimal technical debt.

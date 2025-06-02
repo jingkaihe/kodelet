@@ -75,7 +75,18 @@ AI-powered insights or assistance whenever changes are detected.
 By default, it watches the current directory and all subdirectories,
 ignoring common directories like .git and node_modules.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		ctx := cmd.Context()
+		// Create a cancellable context that listens for signals
+		ctx, cancel := context.WithCancel(cmd.Context())
+		defer cancel()
+
+		// Set up signal handling
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+		go func() {
+			<-sigCh
+			fmt.Println("\n\033[1;33m[kodelet]: Cancellation requested, shutting down...\033[0m")
+			cancel()
+		}()
 
 		// Create the MCP manager from Viper configuration
 		mcpManager, err := tools.CreateMCPManagerFromViper(ctx)
@@ -134,20 +145,16 @@ func getWatchConfigFromFlags(cmd *cobra.Command) *WatchConfig {
 func runWatchMode(ctx context.Context, state tooltypes.State, config *WatchConfig) {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
-		// Use context.TODO() to avoid using cancelled context
-		logger.G(context.TODO()).WithError(err).Fatal("Failed to create file watcher")
+		logger.G(ctx).WithError(err).Fatal("Failed to create file watcher")
 	}
 	defer watcher.Close()
-
-	// Setup done channel for cleanup
-	done := make(chan bool)
 
 	// Setup debouncing mechanism
 	events := make(chan FileEvent)
 	debouncedEvents := make(chan FileEvent)
 
 	// Start debouncer goroutine
-	go debounceFileEvents(events, debouncedEvents, time.Duration(config.DebounceTime)*time.Millisecond)
+	go debounceFileEvents(ctx, events, debouncedEvents, time.Duration(config.DebounceTime)*time.Millisecond)
 
 	// Process events
 	go func() {
@@ -161,7 +168,7 @@ func runWatchMode(ctx context.Context, state tooltypes.State, config *WatchConfi
 					fmt.Printf("Change detected: %s (%s)\n", event.Path, event.Op)
 				}
 				processFileChange(ctx, state, event.Path, config)
-			case <-done:
+			case <-ctx.Done():
 				return
 			}
 		}
@@ -208,8 +215,9 @@ func runWatchMode(ctx context.Context, state tooltypes.State, config *WatchConfi
 				if !ok {
 					return
 				}
+				// Use context.TODO() to avoid using cancelled context
 				logger.G(context.TODO()).WithError(err).Error("Error watching files")
-			case <-done:
+			case <-ctx.Done():
 				return
 			}
 		}
@@ -232,35 +240,54 @@ func runWatchMode(ctx context.Context, state tooltypes.State, config *WatchConfi
 		return nil
 	})
 	if err != nil {
+		// Use context.TODO() to avoid using cancelled context
 		logger.G(context.TODO()).WithError(err).Fatal("Failed to watch directories")
 	}
 
 	fmt.Println("Watching for file changes... Press Ctrl+C to stop")
 
-	// Wait for interrupt signal
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
-	<-c
-	close(done)
+	// Wait for context cancellation
+	<-ctx.Done()
 }
 
 // Debounce file events to prevent processing multiple rapid changes to the same file
-func debounceFileEvents(input <-chan FileEvent, output chan<- FileEvent, delay time.Duration) {
+func debounceFileEvents(ctx context.Context, input <-chan FileEvent, output chan<- FileEvent, delay time.Duration) {
 	var pending = make(map[string]*time.Timer)
 
-	for event := range input {
-		// Cancel any pending timers for this file
-		if timer, exists := pending[event.Path]; exists {
-			timer.Stop()
-			delete(pending, event.Path)
-		}
+	for {
+		select {
+		case event, ok := <-input:
+			if !ok {
+				// Clean up pending timers before returning
+				for _, timer := range pending {
+					timer.Stop()
+				}
+				return
+			}
+			// Cancel any pending timers for this file
+			if timer, exists := pending[event.Path]; exists {
+				timer.Stop()
+				delete(pending, event.Path)
+			}
 
-		// Create a new timer
-		eventCopy := event // Create a copy of the event to avoid race conditions
-		pending[event.Path] = time.AfterFunc(delay, func() {
-			output <- eventCopy
-			delete(pending, eventCopy.Path)
-		})
+			// Create a new timer
+			eventCopy := event // Create a copy of the event to avoid race conditions
+			pending[event.Path] = time.AfterFunc(delay, func() {
+				select {
+				case output <- eventCopy:
+					delete(pending, eventCopy.Path)
+				case <-ctx.Done():
+					// Context cancelled, don't send the event
+					delete(pending, eventCopy.Path)
+				}
+			})
+		case <-ctx.Done():
+			// Clean up pending timers before returning
+			for _, timer := range pending {
+				timer.Stop()
+			}
+			return
+		}
 	}
 }
 

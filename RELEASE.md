@@ -1,5 +1,66 @@
 # Kodelet
 
+## 0.0.32.alpha (2025-06-02)
+
+### GitHub Issue Resolution
+
+- **New `kodelet resolve` Command**: Added autonomous GitHub issue resolution capability
+  - **Issue Analysis**: Automatically fetches and analyzes GitHub issues using `gh issue view`
+  - **Smart Branch Creation**: Creates branches with naming pattern `kodelet/issue-{number}-{descriptive-name}`
+  - **Autonomous Resolution**: Works through issue requirements step-by-step with todo tracking
+  - **Automatic PR Creation**: Integrates with existing `kodelet pr` command to create pull requests
+  - **Issue Commenting**: Automatically updates original issue with PR link and completion status
+  - **Prerequisites Validation**: Ensures git repository, GitHub CLI installation, and authentication
+
+### Enhanced Commit Command
+
+- **Automatic Commit Generation**: Added `--no-confirm` flag for autonomous commit workflows
+  - **Streamlined Automation**: Skip confirmation prompts when called from automated scripts
+  - **Integration Ready**: Designed for use with `kodelet resolve` and CI/CD workflows
+  - **Backward Compatibility**: Maintains existing confirmation behavior by default
+
+### Documentation Improvements
+
+- **Simplified KODELET.md**: Consolidated and streamlined key documentation sections
+  - **Engineering Principles**: Added core development principles with linting, testing, and documentation requirements
+  - **Streamlined Configuration**: Simplified configuration examples and removed redundant sections
+  - **Focused Command Reference**: Concentrated on most commonly used commands and patterns
+  - **Updated Architecture**: Refined LLM architecture documentation and logger usage examples
+
+### Architecture Decision Record
+
+- **ADR 013 Update**: Comprehensive revision of CLI background support approach
+  - **Prompt-Based Orchestration**: Selected simpler prompt-based approach following `kodelet pr` pattern
+  - **Implementation Strategy**: Detailed comparison of orchestration approaches with selected solution
+  - **GitHub Actions Integration**: Defined workflow integration patterns for automated issue resolution
+
+### Technical Improvements
+
+- **MCP Tool Support**: Enhanced `kodelet resolve` with Model Context Protocol tool integration
+- **Graceful Cancellation**: Added proper signal handling and context cancellation for long-running operations
+- **Error Handling**: Comprehensive prerequisite validation with clear error messages and installation guidance
+- **Test Coverage**: Added unit tests for issue resolution prompt generation and validation logic
+
+### Usage Examples
+
+```bash
+# Resolve a GitHub issue autonomously
+kodelet resolve --issue-url https://github.com/owner/repo/issues/123
+
+# Create commits without confirmation (for automation)
+kodelet commit --short --no-confirm
+
+# Integration with existing PR workflow
+kodelet pr  # Works seamlessly after kodelet resolve
+```
+
+### Integration Capabilities
+
+- **GitHub Actions Ready**: Designed for automated issue resolution in CI/CD pipelines
+- **Existing Tool Reuse**: Leverages all existing tools (grep, file operations, bash, etc.) through LLM orchestration
+- **Conversation Persistence**: Maintains conversation history for debugging and analysis
+- **Cost Tracking**: Provides detailed token usage and cost statistics for monitoring
+
 ## 0.0.31.alpha (2025-05-30)
 
 ### Conversation Context Management
