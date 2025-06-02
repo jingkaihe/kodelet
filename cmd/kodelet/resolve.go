@@ -1,8 +1,11 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/tools"
@@ -44,8 +47,25 @@ var resolveCmd = &cobra.Command{
 
 This command analyzes the issue, creates an appropriate branch, works on the issue resolution, and automatically creates a pull request with updates back to the original issue. Currently supports GitHub issues only.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		ctx := cmd.Context()
-		s := tools.NewBasicState(ctx)
+		ctx, cancel := context.WithCancel(cmd.Context())
+		defer cancel()
+
+		// Set up signal handling
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+		go func() {
+			<-sigCh
+			fmt.Println("\n\033[1;33m[kodelet]: Cancellation requested, shutting down...\033[0m")
+			cancel()
+		}()
+
+		mcpManager, err := tools.CreateMCPManagerFromViper(ctx)
+		if err != nil {
+			fmt.Printf("\n\033[1;31mError creating MCP manager: %v\033[0m\n", err)
+			return
+		}
+
+		s := tools.NewBasicState(ctx, tools.WithMCPTools(mcpManager))
 
 		// Get resolve config from flags
 		config := getResolveConfigFromFlags(cmd)
