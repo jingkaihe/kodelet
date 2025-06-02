@@ -10,22 +10,22 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// IssueConfig holds configuration for the issue command
-type IssueConfig struct {
+// ResolveConfig holds configuration for the resolve command
+type ResolveConfig struct {
 	Provider string
 	IssueURL string
 }
 
-// NewIssueConfig creates a new IssueConfig with default values
-func NewIssueConfig() *IssueConfig {
-	return &IssueConfig{
+// NewResolveConfig creates a new ResolveConfig with default values
+func NewResolveConfig() *ResolveConfig {
+	return &ResolveConfig{
 		Provider: "github",
 		IssueURL: "",
 	}
 }
 
-// Validate validates the IssueConfig and returns an error if invalid
-func (c *IssueConfig) Validate() error {
+// Validate validates the ResolveConfig and returns an error if invalid
+func (c *ResolveConfig) Validate() error {
 	if c.Provider != "github" {
 		return fmt.Errorf("unsupported provider: %s, only 'github' is supported", c.Provider)
 	}
@@ -37,8 +37,8 @@ func (c *IssueConfig) Validate() error {
 	return nil
 }
 
-var issueCmd = &cobra.Command{
-	Use:   "issue",
+var resolveCmd = &cobra.Command{
+	Use:   "resolve",
 	Short: "Resolve an issue autonomously",
 	Long: `Resolve an issue by fetching details, creating a branch, implementing fixes, and creating a PR.
 
@@ -47,8 +47,8 @@ This command analyzes the issue, creates an appropriate branch, works on the iss
 		ctx := cmd.Context()
 		s := tools.NewBasicState(ctx)
 
-		// Get issue config from flags
-		config := getIssueConfigFromFlags(cmd)
+		// Get resolve config from flags
+		config := getResolveConfigFromFlags(cmd)
 
 		// Validate configuration
 		if err := config.Validate(); err != nil {
@@ -104,15 +104,15 @@ This command analyzes the issue, creates an appropriate branch, works on the iss
 }
 
 func init() {
-	defaults := NewIssueConfig()
-	issueCmd.Flags().StringP("provider", "p", defaults.Provider, "The issue provider to use")
-	issueCmd.Flags().String("issue-url", defaults.IssueURL, "Issue URL (required)")
-	issueCmd.MarkFlagRequired("issue-url")
+	defaults := NewResolveConfig()
+	resolveCmd.Flags().StringP("provider", "p", defaults.Provider, "The issue provider to use")
+	resolveCmd.Flags().String("issue-url", defaults.IssueURL, "Issue URL (required)")
+	resolveCmd.MarkFlagRequired("issue-url")
 }
 
-// getIssueConfigFromFlags extracts issue configuration from command flags
-func getIssueConfigFromFlags(cmd *cobra.Command) *IssueConfig {
-	config := NewIssueConfig()
+// getResolveConfigFromFlags extracts resolve configuration from command flags
+func getResolveConfigFromFlags(cmd *cobra.Command) *ResolveConfig {
+	config := NewResolveConfig()
 
 	if provider, err := cmd.Flags().GetString("provider"); err == nil {
 		config.Provider = provider

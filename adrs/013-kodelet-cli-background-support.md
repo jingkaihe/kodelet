@@ -76,7 +76,7 @@ The CLI enhancements must integrate cleanly with the existing architecture while
 **Selected Approach: Option 4 - Prompt-Based Orchestration (Like `kodelet pr`)**
 
 We will implement:
-1. **Single `kodelet issue` command** that orchestrates the entire workflow via LLM prompt
+1. **Single `kodelet resolve` command** that orchestrates the entire workflow via LLM prompt
 2. **Reuse existing architecture** including tools, LLM clients, and conversation storage
 3. **Follow `kodelet pr` patterns** for prerequisites checking and command structure
 
@@ -86,7 +86,7 @@ We will implement:
 
 #### Issue Resolution Command
 ```bash
-kodelet issue --issue-url <github-issue-url> [--max-tokens 8192] [--model claude-sonnet-4-0]
+kodelet resolve --issue-url <github-issue-url> [--max-tokens 8192] [--model claude-sonnet-4-0]
 # Executes: fetch → branch → resolve → pr → comment via single LLM prompt
 ```
 
@@ -131,7 +131,7 @@ IMPORTANT:
 
 #### LLM Integration (Following `kodelet pr` Pattern)
 ```go
-// cmd/kodelet/issue.go - Similar to pr.go
+// cmd/kodelet/resolve.go - Similar to pr.go
 func runIssue(cmd *cobra.Command, args []string) error {
     ctx := cmd.Context()
     s := tools.NewBasicState(ctx)
@@ -160,8 +160,8 @@ func runIssue(cmd *cobra.Command, args []string) error {
 
 #### Issue Resolution Command (Following `pr.go` Pattern)
 ```go
-// cmd/kodelet/issue.go
-var issueCmd = &cobra.Command{
+// cmd/kodelet/resolve.go
+var resolveCmd = &cobra.Command{
     Use:   "issue",
     Short: "Resolve a GitHub issue autonomously",
     Long: `Resolve a GitHub issue by fetching details, creating a branch, implementing fixes, and creating a PR.
@@ -220,8 +220,8 @@ This command analyzes the GitHub issue, creates an appropriate branch, works on 
 }
 
 func init() {
-    issueCmd.Flags().String("issue-url", "", "GitHub issue URL (required)")
-    issueCmd.MarkFlagRequired("issue-url")
+    resolveCmd.Flags().String("issue-url", "", "GitHub issue URL (required)")
+    resolveCmd.MarkFlagRequired("issue-url")
 }
 
 func generateIssueResolutionPrompt(issueURL string) string {
@@ -277,9 +277,9 @@ func isGhAuthenticated() bool {
 ## GitHub Actions Integration
 
 ```yaml
-# .github/workflows/kodelet-issue.yml
+# .github/workflows/kodelet-resolve.yml
 - name: Run Kodelet Issue Resolution
-  run: kodelet issue --issue-url ${{ github.event.issue.html_url }}
+  run: kodelet resolve --issue-url ${{ github.event.issue.html_url }}
   env:
     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -324,7 +324,7 @@ The prompt-based approach leverages:
 ## Migration Path
 
 ### Phase 1: Command Implementation (Day 1)
-- Implement `kodelet issue` command following `pr.go` pattern
+- Implement `kodelet resolve` command following `pr.go` pattern
 - Add prerequisites checking
 - Create comprehensive prompt template
 

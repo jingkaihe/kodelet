@@ -120,7 +120,7 @@ func main() {
 	rootCmd.AddCommand(initCmd)
 	rootCmd.AddCommand(conversationCmd)
 	rootCmd.AddCommand(prCmd)
-	rootCmd.AddCommand(issueCmd)
+	rootCmd.AddCommand(resolveCmd)
 
 	// Initialize telemetry with tracing
 	tracingShutdown, err := initTracing(ctx)
@@ -150,7 +150,7 @@ func main() {
 	initCmd = withTracing(initCmd)
 	conversationCmd = withTracing(conversationCmd)
 	prCmd = withTracing(prCmd)
-	issueCmd = withTracing(issueCmd)
+	resolveCmd = withTracing(resolveCmd)
 
 	// Set the root command context to include the tracing context
 	rootCmd.SetContext(ctx)

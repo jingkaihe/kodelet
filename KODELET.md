@@ -78,7 +78,7 @@ kodelet run --resume ID "more"         # Continue conversation
 # Git integration
 kodelet commit [--no-confirm|--short]  # AI commit messages
 kodelet pr [--target main]             # Generate PRs
-kodelet issue --issue-url URL          # Resolve GitHub issues
+kodelet resolve --issue-url URL        # Resolve GitHub issues
 
 # Image support (Claude only)
 kodelet run --image path.png "query"   # Single/multiple images
