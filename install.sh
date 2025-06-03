@@ -63,7 +63,7 @@ mkdir -p "$INSTALL_DIR/bin"
 if [ "$VERSION" = "latest" ]; then
     DOWNLOAD_URL="https://github.com/jingkaihe/kodelet/releases/latest/download/kodelet-$OS-$ARCH"
 else
-    DOWNLOAD_URL="https://github.com/jingkaihe/kodelet/releases/download/$VERSION/kodelet-$OS-$ARCH"
+    DOWNLOAD_URL="https://github.com/jingkaihe/kodelet/releases/download/v$VERSION/kodelet-$OS-$ARCH"
 fi
 
 echo "Downloading from: $DOWNLOAD_URL"
