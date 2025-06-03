@@ -183,9 +183,28 @@ export KODELET_REASONING_EFFORT="medium"  # low, medium, high
 
 ### Configuration File
 
-Kodelet looks for a configuration file named `config.yaml` in:
-- Current directory
-- `$HOME/.kodelet/` directory
+Kodelet looks for configuration files in the following order of precedence:
+1. **Repository-level**: `kodelet-config.yaml` in the current directory (highest priority)
+2. **Global**: `config.yaml` in `$HOME/.kodelet/` directory
+
+**Repository-level Configuration**
+
+Use `kodelet-config.yaml` in your project root for project-specific settings that should be committed to version control:
+
+```bash
+# Create project-specific configuration
+echo "provider: anthropic
+model: claude-3-5-haiku-latest
+max_tokens: 4096" > kodelet-config.yaml
+
+# This configuration takes precedence over global settings
+kodelet run "analyze this codebase"
+```
+
+This is particularly useful for:
+- Setting consistent model preferences across team members
+- Configuring project-specific tool settings
+- Ensuring reproducible AI assistance behavior
 
 Example `config.yaml`:
 

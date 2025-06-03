@@ -57,16 +57,15 @@ func init() {
 		}
 	}
 
-	// Fall back to standard config paths if repo-level config not found
+	// Fall back to global config path if repo-level config not found
 	if !repoConfigLoaded {
 		viper.SetConfigName("config")
 		viper.SetConfigType("yaml")
 		viper.AddConfigPath("$HOME/.kodelet")
-		viper.AddConfigPath(".")
 
 		// Load config file if it exists (ignore errors if it doesn't)
 		if err := viper.ReadInConfig(); err == nil {
-			logger.G(context.TODO()).WithField("config_file", viper.ConfigFileUsed()).Debug("Using config file")
+			logger.G(context.TODO()).WithField("config_file", viper.ConfigFileUsed()).Debug("Using global config file")
 		}
 	}
 }

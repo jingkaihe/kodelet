@@ -12,9 +12,10 @@
 ### Configuration Enhancements
 
 - **Repository-level Configuration**: Added support for `kodelet-config.yaml` in project root
-  - Takes precedence over standard config files (`~/.kodelet/config.yaml` and `./config.yaml`)
+  - Takes precedence over global config file (`~/.kodelet/config.yaml`)
   - Enables project-specific configuration without affecting global settings
-  - Falls back to standard config paths if repo-level config not found
+  - Removes support for generic `config.yaml` in current directory to avoid confusion
+  - Clear naming convention: `kodelet-config.yaml` for repo-level, `config.yaml` for global only
 
 ```bash
 # New recommended command
