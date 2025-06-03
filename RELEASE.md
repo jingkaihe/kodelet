@@ -9,6 +9,15 @@
   - Original `resolve` command acts as deprecated wrapper with migration notice
   - No breaking changes - existing scripts continue to work
 
+### Configuration Enhancements
+
+- **Layered Configuration System**: Implemented intelligent configuration merging with fallback behavior
+  - **Global base**: Loads `~/.kodelet/config.yaml` as the foundation
+  - **Repository override**: Merges `kodelet-config.yaml` on top, overriding only specified settings
+  - **Minimal repo configs**: Only need to specify settings that differ from global defaults
+  - **Automatic inheritance**: API keys, logging, and other global preferences are preserved
+  - **Clear naming**: `kodelet-config.yaml` for repo-level, `config.yaml` for global only
+
 ```bash
 # New recommended command
 kodelet issue-resolve --issue-url https://github.com/owner/repo/issues/123

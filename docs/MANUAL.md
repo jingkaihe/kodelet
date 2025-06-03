@@ -95,7 +95,7 @@ kodelet pr
 Resolve GitHub issues automatically:
 
 ```bash
-kodelet resolve --issue-url https://github.com/owner/repo/issues/123
+kodelet issue-resolve --issue-url https://github.com/owner/repo/issues/123
 ```
 
 This command analyzes the issue, creates an appropriate branch, works on the issue resolution, and automatically creates a pull request with updates back to the original issue. Currently supports GitHub issues only.
@@ -183,9 +183,39 @@ export KODELET_REASONING_EFFORT="medium"  # low, medium, high
 
 ### Configuration File
 
-Kodelet looks for a configuration file named `config.yaml` in:
-- Current directory
-- `$HOME/.kodelet/` directory
+Kodelet uses a **layered configuration approach** where settings are applied in the following order:
+
+1. **Defaults**: Built-in default values
+2. **Global Config**: `config.yaml` in `$HOME/.kodelet/` directory
+3. **Repository Config**: `kodelet-config.yaml` in the current directory (overrides global)
+
+**Repository-level Configuration**
+
+Use `kodelet-config.yaml` in your project root for project-specific settings. This file will **merge with and override** your global configuration, so you only need to specify the settings that differ from your global defaults.
+
+```yaml
+# Global config (~/.kodelet/config.yaml)
+provider: "anthropic"
+model: "claude-sonnet-4-0"
+max_tokens: 8192
+log_level: "info"
+```
+
+```yaml
+# Repository config (kodelet-config.yaml) - only override what's different
+provider: "openai"
+model: gpt-4.1
+```
+
+```bash
+# Result: using provider=openai, model=gpt-4.1, max_tokens=8192, log_level=info
+kodelet run "analyze this codebase"
+```
+
+**Benefits of layered configuration:**
+- **Minimal repo configs**: Only specify what's different from your global settings
+- **Team consistency**: Share project-specific settings while preserving individual global preferences
+- **Inheritance**: Automatically inherit global settings like API keys, logging preferences, etc.
 
 Example `config.yaml`:
 

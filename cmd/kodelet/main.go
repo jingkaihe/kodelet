@@ -47,15 +47,22 @@ func init() {
 	// e.g. KODELET_TRACING_ENABLED -> tracing.enabled
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 
-	// Config file support
+	// Config file support - layered approach (global first, then repo-level override)
+	// First, try to load global config
 	viper.SetConfigName("config")
 	viper.SetConfigType("yaml")
 	viper.AddConfigPath("$HOME/.kodelet")
-	viper.AddConfigPath(".")
-
-	// Load config file if it exists (ignore errors if it doesn't)
+	
 	if err := viper.ReadInConfig(); err == nil {
-		logger.G(context.TODO()).WithField("config_file", viper.ConfigFileUsed()).Debug("Using config file")
+		logger.G(context.TODO()).WithField("config_file", viper.ConfigFileUsed()).Debug("Using global config file")
+	}
+
+	// Then, try to merge repo-level config which will override global settings
+	if _, err := os.Stat("kodelet-config.yaml"); err == nil {
+		viper.SetConfigFile("kodelet-config.yaml")
+		if err := viper.MergeInConfig(); err == nil {
+			logger.G(context.TODO()).WithField("config_file", "kodelet-config.yaml").Debug("Merged repo-level config file")
+		}
 	}
 }
 
