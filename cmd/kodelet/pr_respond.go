@@ -244,12 +244,22 @@ func prefetchPRData(prURL, commentID string, isReviewComment bool) (*PRData, err
 	return data, nil
 }
 
-// parseGitHubURL extracts owner and repo from GitHub PR URL
+// parseGitHubURL extracts owner, repo, and PR number from GitHub PR URL
+// Expected URL format: https://github.com/owner/repo/pull/123
+// When split by "/", the parts array becomes:
+//   parts[0]: "https:"
+//   parts[1]: "" (empty string)
+//   parts[2]: "github.com"
+//   parts[3]: "owner" (GitHub username/organization)
+//   parts[4]: "repo" (repository name)
+//   parts[5]: "pull" (literal "pull")
+//   parts[6]: "123" (PR number)
 func parseGitHubURL(prURL string) (owner, repo, prNumber string, err error) {
 	parts := strings.Split(prURL, "/")
 	if len(parts) < 7 {
 		return "", "", "", fmt.Errorf("invalid PR URL format")
 	}
+	// Extract: owner (parts[3]), repo (parts[4]), prNumber (parts[6])
 	return parts[3], parts[4], parts[6], nil
 }
 
