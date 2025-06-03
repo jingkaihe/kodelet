@@ -4,12 +4,11 @@ Kodelet provides seamless GitHub Actions integration through the [kodelet-action
 
 ## Overview
 
-The Kodelet Action automates software engineering tasks using advanced AI models, including:
+The Kodelet Action allows you to delegate software engineering tasks via GitHub issues and PRs. It comes with the following features:
 
 * **AI-Powered Engineering**: Automates software engineering tasks using advanced AI models
 * **Issue Resolution**: Automatically resolves GitHub issues with code changes and explanations
-* **PR Reviews**: Provides intelligent code review comments and suggestions  
-* **Background Processing**: Runs asynchronously without blocking your development workflow
+* **Low Cost-of-Ownership**: Autonomous software engineering tasks running asynchronously on your CI (GitHub Actions), without the need of maintaining separate cloud-based dev environment
 * **Multi-Event Support**: Works with issue comments, PR comments, and review comments
 * **Secure**: Uses GitHub tokens and API keys securely through GitHub Secrets
 
@@ -100,19 +99,19 @@ Comment `@kodelet` on any issue or pull request to trigger automated assistance:
 
 | Input | Description | Required | Default |
 |-------|-------------|----------|---------|
-| `anthropic-api-key` | Anthropic API key for Kodelet | ✅ | |
-| `github-token` | GitHub token for repository operations | ❌ | `${{ github.token }}` |
-| `commenter` | Username who triggered the action | ❌ | Auto-detected from event |
-| `event-name` | GitHub event name | ❌ | `${{ github.event_name }}` |
-| `issue-number` | Issue or PR number | ❌ | Auto-detected from event |
-| `comment-id` | Comment ID (for issue comments on PRs) | ❌ | Auto-detected from event |
-| `review-id` | Review ID (for PR review comments) | ❌ | Auto-detected from event |
-| `repository` | Repository in format owner/repo | ❌ | `${{ github.repository }}` |
-| `is-pr` | Whether this is a pull request | ❌ | Auto-detected from event |
-| `pr-number` | Pull request number | ❌ | Auto-detected from event |
-| `timeout-minutes` | Timeout for execution in minutes | ❌ | `300` |
-| `log-level` | Log level (debug, info, warn, error) | ❌ | `info` |
-| `kodelet-version` | Kodelet version to install (e.g., v0.0.35.alpha, latest) | ❌ | `latest` |
+| `anthropic-api-key` | Anthropic API key for Kodelet | Yes | |
+| `github-token` | GitHub token for repository operations | No | `${{ github.token }}` |
+| `commenter` | Username who triggered the action | No | Auto-detected from event |
+| `event-name` | GitHub event name | No | `${{ github.event_name }}` |
+| `issue-number` | Issue or PR number | No | Auto-detected from event |
+| `comment-id` | Comment ID (for issue comments on PRs) | No | Auto-detected from event |
+| `review-id` | Review ID (for PR review comments) | No | Auto-detected from event |
+| `repository` | Repository in format owner/repo | No | `${{ github.repository }}` |
+| `is-pr` | Whether this is a pull request | No | Auto-detected from event |
+| `pr-number` | Pull request number | No | Auto-detected from event |
+| `timeout-minutes` | Timeout for execution in minutes | No | `300` |
+| `log-level` | Log level (debug, info, warn, error) | No | `info` |
+| `kodelet-version` | Kodelet version to install (e.g., v0.0.35.alpha, latest) | No | `latest` |
 
 ## Usage Examples
 
@@ -138,12 +137,12 @@ Comment `@kodelet` on any issue or pull request to trigger automated assistance:
 
 ## Supported Events
 
-| Event | Description | Kodelet Command |
-|-------|-------------|-----------------|
-| `issue_comment` | Comments on issues | `kodelet resolve --issue-url` |
-| `issue_comment` (on PR) | Comments on pull requests | `kodelet pr-respond --pr-url --issue-comment-id` |
-| `pull_request_review_comment` | Inline PR review comments | `kodelet pr-respond --pr-url --review-id` |
-| `pull_request_review` | PR review submissions | `kodelet pr-respond --pr-url --review-id` |
+| Event | Description |
+|-------|-------------|
+| `issue_comment` | Comments on issues |
+| `issue_comment` (on PR) | Comments on pull requests |
+| `pull_request_review_comment` | Inline PR review comments |
+| `pull_request_review` | PR review submissions |
 
 ## Workflow Trigger Conditions
 
