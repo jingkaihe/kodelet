@@ -24,11 +24,13 @@ type PRRespondConfig struct {
 
 // PRData holds prefetched PR information
 type PRData struct {
-	BasicInfo         string
-	Comments          string
-	Reviews           string
-	FocusedComment    string // Focused comment when comment-id is specified
-	RelatedDiscussion string // Related discussions for the focused comment
+	BasicInfo              string
+	Comments               string
+	Reviews                string
+	FocusedComment         string // Focused comment when comment-id is specified
+	RelatedDiscussion      string // Related discussions for the focused comment
+	LatestKodeletComment   string // Latest @kodelet comment when no comment-id is specified
+	LatestKodeletDiscussion string // Related discussions for the latest @kodelet comment
 }
 
 // NewPRRespondConfig creates a new PRRespondConfig with default values
@@ -211,6 +213,18 @@ func prefetchPRData(prURL, commentID string) (*PRData, error) {
 			data.FocusedComment = focusedComment
 			data.RelatedDiscussion = relatedDiscussion
 		}
+	} else {
+		// When no comment ID is provided, find the latest @kodelet comment
+		latestKodeletComment, latestKodeletDiscussion, err := fetchLatestKodeletComment(prURL)
+		if err != nil {
+			// Don't fail completely, just log the error and continue
+			fmt.Printf("Warning: Failed to fetch latest @kodelet comment: %v\n", err)
+			data.LatestKodeletComment = "No @kodelet mention found or failed to fetch"
+			data.LatestKodeletDiscussion = "No related discussions available"
+		} else {
+			data.LatestKodeletComment = latestKodeletComment
+			data.LatestKodeletDiscussion = latestKodeletDiscussion
+		}
 	}
 	
 	return data, nil
@@ -254,6 +268,49 @@ func fetchFocusedCommentData(prURL, commentID string) (string, string, error) {
 	return focusedComment, relatedDiscussion, nil
 }
 
+// fetchLatestKodeletComment finds the most recent @kodelet mention in PR comments and related discussions
+func fetchLatestKodeletComment(prURL string) (string, string, error) {
+	// Extract repository information from PR URL
+	parts := strings.Split(prURL, "/")
+	if len(parts) < 5 {
+		return "", "", fmt.Errorf("invalid PR URL format")
+	}
+	
+	owner := parts[3]
+	repo := parts[4]
+	prNumber := parts[6]
+	
+	// Search for @kodelet mentions in issue comments (regular PR comments)
+	cmd := exec.Command("gh", "api", fmt.Sprintf("repos/%s/%s/issues/%s/comments", owner, repo, prNumber),
+		"--jq", ".[] | select(.body | contains(\"@kodelet\")) | {id: .id, author: .user.login, body: .body, created_at: .created_at} | tostring")
+	issueCommentsOutput, err := cmd.Output()
+	
+	// Search for @kodelet mentions in pull request review comments
+	cmd2 := exec.Command("gh", "api", fmt.Sprintf("repos/%s/%s/pulls/%s/comments", owner, repo, prNumber),
+		"--jq", ".[] | select(.body | contains(\"@kodelet\")) | {id: .id, author: .user.login, body: .body, path: .path, line: .line, created_at: .created_at} | tostring")
+	reviewCommentsOutput, err2 := cmd2.Output()
+	
+	var allKodeletComments []string
+	if err == nil && len(issueCommentsOutput) > 0 {
+		allKodeletComments = append(allKodeletComments, strings.Split(strings.TrimSpace(string(issueCommentsOutput)), "\n")...)
+	}
+	if err2 == nil && len(reviewCommentsOutput) > 0 {
+		allKodeletComments = append(allKodeletComments, strings.Split(strings.TrimSpace(string(reviewCommentsOutput)), "\n")...)
+	}
+	
+	if len(allKodeletComments) == 0 {
+		return "No @kodelet mention found in PR comments", "No related discussions available", nil
+	}
+	
+	// Get the latest comment (they're sorted by creation time, so take the last one)
+	latestComment := allKodeletComments[len(allKodeletComments)-1]
+	
+	latestKodeletComment := fmt.Sprintf("Latest @kodelet mention:\n%s", latestComment)
+	latestKodeletDiscussion := fmt.Sprintf("All @kodelet mentions in this PR:\n%s", strings.Join(allKodeletComments, "\n---\n"))
+	
+	return latestKodeletComment, latestKodeletDiscussion, nil
+}
+
 func generatePRRespondPrompt(bin, prURL, commentID string, prData *PRData) string {
 	commentInstruction := ""
 	focusedSections := ""
@@ -277,6 +334,17 @@ Focus on the specific comment ID: %s by reviewing the focused comment and relate
 		commentInstruction = `
 
 Find the most recent @kodelet mention by reviewing the comments data above. If no @kodelet mention is found, address the most recent review comment.`
+		
+		// Use the same format as focusedSections above for the latest @kodelet comment
+		focusedSections = fmt.Sprintf(`
+
+<pr_comment>
+%s
+</pr_comment>
+
+<pr_discussions>
+%s
+</pr_discussions>`, prData.LatestKodeletComment, prData.LatestKodeletDiscussion)
 	}
 
 	return fmt.Sprintf(`Please respond to a specific comment in pull request %s following the steps below:
