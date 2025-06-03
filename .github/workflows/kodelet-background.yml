@@ -45,7 +45,7 @@ jobs:
         with:
           go-version: '1.24'
       - name: Run Kodelet
-        uses: jingkaihe/kodelet-action@v0.1.1-alpha
+        uses: jingkaihe/kodelet-action@v0.1.2-alpha
         with:
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           kodelet-version: 0.0.35.alpha
