@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/jingkaihe/kodelet/pkg/llm"
@@ -18,6 +20,13 @@ type PRRespondConfig struct {
 	Provider  string
 	PRURL     string
 	CommentID string
+}
+
+// PRData holds prefetched PR information
+type PRData struct {
+	BasicInfo    string
+	Comments     string
+	Reviews      string
 }
 
 // NewPRRespondConfig creates a new PRRespondConfig with default values
@@ -101,8 +110,16 @@ This command focuses on addressing a specific comment or review feedback within 
 			os.Exit(1)
 		}
 
-		// Generate comprehensive prompt
-		prompt := generatePRRespondPrompt(bin, config.PRURL, config.CommentID)
+		// Prefetch PR data
+		fmt.Println("Prefetching PR data...")
+		prData, err := prefetchPRData(config.PRURL)
+		if err != nil {
+			fmt.Printf("Error prefetching PR data: %v\n", err)
+			os.Exit(1)
+		}
+
+		// Generate comprehensive prompt with prefetched data
+		prompt := generatePRRespondPrompt(bin, config.PRURL, config.CommentID, prData)
 
 		// Send to LLM using existing architecture
 		fmt.Println("Analyzing specific PR comment and implementing response...")
@@ -150,48 +167,83 @@ func getPRRespondConfigFromFlags(cmd *cobra.Command) *PRRespondConfig {
 	return config
 }
 
-func generatePRRespondPrompt(bin, prURL, commentID string) string {
+// prefetchPRData fetches PR information, comments, and reviews using gh CLI
+func prefetchPRData(prURL string) (*PRData, error) {
+	data := &PRData{}
+	
+	// Get basic PR information
+	cmd := exec.Command("gh", "pr", "view", prURL)
+	basicInfoOutput, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get PR basic info: %w", err)
+	}
+	data.BasicInfo = strings.TrimSpace(string(basicInfoOutput))
+	
+	// Get PR comments
+	cmd = exec.Command("gh", "pr", "view", prURL, "--comments")
+	commentsOutput, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get PR comments: %w", err)
+	}
+	data.Comments = strings.TrimSpace(string(commentsOutput))
+	
+	// Get PR reviews (try to get them, but don't fail if not available)
+	cmd = exec.Command("gh", "pr", "view", prURL, "--json", "reviews")
+	reviewsOutput, err := cmd.Output()
+	if err == nil {
+		data.Reviews = strings.TrimSpace(string(reviewsOutput))
+	} else {
+		data.Reviews = "No reviews data available"
+	}
+	
+	return data, nil
+}
+
+func generatePRRespondPrompt(bin, prURL, commentID string, prData *PRData) string {
 	commentInstruction := ""
 	if commentID != "" {
 		commentInstruction = fmt.Sprintf(`
-3. Focus on the specific comment ID: %s
-   - Use appropriate gh commands to retrieve the specific comment details
-   - Parse the comment content and understand the specific request`, commentID)
+
+Focus on the specific comment ID: %s by reviewing the comments data above.`, commentID)
 	} else {
 		commentInstruction = `
-3. Find the most recent @kodelet mention:
-   - Look through all comments to find the latest mention of @kodelet
-   - Focus on that specific comment and its context
-   - If no @kodelet mention is found, address the most recent review comment`
+
+Find the most recent @kodelet mention by reviewing the comments data above. If no @kodelet mention is found, address the most recent review comment.`
 	}
 
 	return fmt.Sprintf(`Please respond to a specific comment in pull request %s following the steps below:
 
-1. Use "gh pr view %s" to get basic PR information:
-   - PR description, branches, and current status
-   - Extract the PR number for reference
+<pr_basic_info>
+%s
+</pr_basic_info>
 
-2. Use "gh pr view %s --comments" to get all comments and reviews:
-   - Identify all comments and review feedback
-   - Parse comment timestamps and authors%s
+<pr_comments>
+%s
+</pr_comments>
 
-4. Check the current state of the PR branch:
+<pr_reviews>
+%s
+</pr_reviews>
+
+Based on the PR information provided above:%s
+
+1. Check the current state of the PR branch:
    - Use "git checkout <pr-branch>" to switch to the PR branch
    - Run "git pull origin <pr-branch>" to ensure latest changes
    - Check current working directory state
 
-5. Analyze the specific comment request:
-   - Understand exactly what is being asked for
+2. Analyze the specific comment request:
+   - Review the PR comments section above to understand exactly what is being asked for
    - Determine if it requires code changes, documentation, tests, or clarification
    - Create a focused todo list for this specific request
-	 - If the request is unclear, ask for clarification in your comment response, do not implement any changes
+   - If the request is unclear, ask for clarification in your comment response, do not implement any changes
 
-6. Implement the specific change:
+3. Implement the specific change:
    - Focus only on what was requested in the comment
    - Make precise, targeted changes
    - Avoid scope creep or unrelated improvements
 
-7. Respond appropriately:
+4. Respond appropriately:
    - Make necessary code changes if requested
    - Ask subagent to run "%s commit --short --no-confirm" for changes
    - Push updates with "git push origin <pr-branch>"
@@ -204,5 +256,5 @@ IMPORTANT:
 - If the request is unclear, ask for clarification in your comment response
 - Always acknowledge the specific comment you're responding to
 `,
-		prURL, prURL, prURL, commentInstruction, bin)
+		prURL, prData.BasicInfo, prData.Comments, prData.Reviews, commentInstruction, bin)
 }
