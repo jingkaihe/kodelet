@@ -5,7 +5,7 @@
 ### Enhanced PR Response System
 
 - **Focused Comment Data Fetching**: Improved `kodelet pr-respond` with targeted comment analysis
-  - **Smart Data Fetching**: When `--comment-id` is specified, fetches specific comment details and related discussions for focused responses
+  - **Smart Data Fetching**: When `--review-comment-id` or `--issue-comment-id` is specified, fetches specific comment details and related discussions for focused responses
   - **Automatic @kodelet Detection**: When no comment-id provided, automatically finds latest @kodelet mention with contextual discussions
   - **Reduced Noise**: Removed redundant all-comments fetching, keeping only relevant focused sections
   - **Clean Repository Management**: Fixed accidental binary inclusion in commit history with proper cleanup
@@ -82,8 +82,11 @@ kodelet resolve --issue-url https://github.com/owner/repo/issues/123
 ### Usage Examples
 
 ```bash
-# Respond to specific PR comment
-kodelet pr-respond --pr-url https://github.com/owner/repo/pull/123 --comment-id 456789
+# Respond to specific PR review comment
+kodelet pr-respond --pr-url https://github.com/owner/repo/pull/123 --review-comment-id 456789
+
+# Respond to specific PR issue comment  
+kodelet pr-respond --pr-url https://github.com/owner/repo/pull/123 --issue-comment-id 789012
 
 # Respond to latest @kodelet mention in PR
 kodelet pr-respond --pr-url https://github.com/owner/repo/pull/123

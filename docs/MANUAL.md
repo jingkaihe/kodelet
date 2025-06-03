@@ -104,10 +104,11 @@ Respond to specific pull request comments:
 
 ```bash
 kodelet pr-respond --pr-url https://github.com/owner/repo/pull/456
-kodelet pr-respond --pr-url https://github.com/owner/repo/pull/456 --comment-id 123456
+kodelet pr-respond --pr-url https://github.com/owner/repo/pull/456 --review-comment-id 123456
+kodelet pr-respond --pr-url https://github.com/owner/repo/pull/456 --issue-comment-id 789012
 ```
 
-This command focuses on addressing a specific comment or review feedback within a PR. If no comment ID is provided, it will address the most recent @kodelet mention. Currently supports GitHub PRs only.
+This command focuses on addressing a specific comment or review feedback within a PR. You must provide either `--review-comment-id` for review comments or `--issue-comment-id` for issue comments. Currently supports GitHub PRs only.
 
 ### Image Input Support
 
