@@ -81,7 +81,7 @@ jobs:
           go-version: '1.24'
 
       - name: Run Kodelet
-        uses: jingkaihe/kodelet-action@v0.1.2-alpha
+        uses: jingkaihe/kodelet-action@v0.1.4-alpha
         with:
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           kodelet-version: 0.0.35.alpha
@@ -118,7 +118,7 @@ Comment `@kodelet` on any issue or pull request to trigger automated assistance:
 ### Basic Usage (Minimal Configuration)
 
 ```yaml
-- uses: jingkaihe/kodelet-action@v0.1.2-alpha
+- uses: jingkaihe/kodelet-action@v0.1.4-alpha
   with:
     anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
     # All other inputs are automatically populated from GitHub context
@@ -127,7 +127,7 @@ Comment `@kodelet` on any issue or pull request to trigger automated assistance:
 ### Custom Configuration
 
 ```yaml
-- uses: jingkaihe/kodelet-action@v0.1.2-alpha
+- uses: jingkaihe/kodelet-action@v0.1.4-alpha
   with:
     anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
     timeout-minutes: 180  # 3 hours
@@ -222,7 +222,7 @@ Failed runs include links to workflow logs for debugging.
 Enable debug logging for more detailed output:
 
 ```yaml
-- uses: jingkaihe/kodelet-action@v0.1.2-alpha
+- uses: jingkaihe/kodelet-action@v0.1.4-alpha
   with:
     anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
     log-level: debug
@@ -233,7 +233,7 @@ Enable debug logging for more detailed output:
 This action follows semantic versioning:
 
 - **Latest stable**: `@v0`
-- **Specific version**: `@v0.1.2-alpha`
+- **Specific version**: `@v0.1.4-alpha`
 - **Development**: `@main` (not recommended for production)
 
 ## Best Practices
