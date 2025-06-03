@@ -28,7 +28,6 @@ type PRRespondConfig struct {
 // PRData holds prefetched PR information
 type PRData struct {
 	BasicInfo               string
-	Reviews                 string
 	FocusedComment          string // Focused comment when comment-id is specified
 	RelatedDiscussion       string // Related discussions for the focused comment
 	LatestKodeletComment    string // Latest @kodelet comment when no comment-id is specified
@@ -189,21 +188,12 @@ func prefetchPRData(prURL, commentID string) (*PRData, error) {
 	data := &PRData{}
 
 	// Get basic PR information
-	cmd := exec.Command("gh", "pr", "view", prURL)
+	cmd := exec.Command("gh", "pr", "view", prURL, "--comments")
 	basicInfoOutput, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get PR basic info: %w", err)
 	}
 	data.BasicInfo = strings.TrimSpace(string(basicInfoOutput))
-
-	// Get PR reviews (try to get them, but don't fail if not available)
-	cmd = exec.Command("gh", "pr", "view", prURL, "--json", "reviews")
-	reviewsOutput, err := cmd.Output()
-	if err == nil {
-		data.Reviews = strings.TrimSpace(string(reviewsOutput))
-	} else {
-		data.Reviews = "No reviews data available"
-	}
 
 	// If comment ID is specified, fetch focused comment and related discussions
 	if commentID != "" {
@@ -265,13 +255,23 @@ func fetchFocusedCommentData(prURL, commentID string) (string, string, error) {
 	if err != nil {
 		return "", "", err
 	}
+	// Treat it as an issue comment first
+	cmd := exec.Command("gh", "api", fmt.Sprintf("repos/%s/%s/issues/comments/%s", owner, repo, commentID),
+		"--jq", ".body")
+	logger.G(context.TODO()).WithField("cmd", cmd.String()).Debug("Fetching focused comment data")
+	commentOutput, err := cmd.CombinedOutput()
+	if err == nil {
+		return strings.TrimSpace(string(commentOutput)), "", nil
+	}
+	logger.G(context.TODO()).WithField("cmd", cmd.String()).WithError(err).Error("Failed to fetch focused comment data, fallback to pull request comment")
 
 	// Fetch the specific comment using GitHub API
-	cmd := exec.Command("gh", "api", fmt.Sprintf("repos/%s/%s/pulls/comments/%s", owner, repo, commentID),
+	cmd = exec.Command("gh", "api", fmt.Sprintf("repos/%s/%s/pulls/comments/%s", owner, repo, commentID),
 		"--jq", "{author: .user.login, body: .body, path: .path, line: .line, created_at: .created_at}")
-	commentOutput, err := cmd.Output()
+	logger.G(context.TODO()).WithField("cmd", cmd.String()).Debug("Fetching focused comment data")
+	commentOutput, err = cmd.CombinedOutput()
 	if err != nil {
-		return "", "", fmt.Errorf("failed to fetch comment details: %w", err)
+		return "", "", fmt.Errorf("failed to fetch comment details: %w, %s", err, string(commentOutput))
 	}
 
 	focusedComment := fmt.Sprintf("Comment ID %s:\n%s", commentID, strings.TrimSpace(string(commentOutput)))
@@ -339,10 +339,6 @@ const prRespondPromptTemplate = `Here is the information for pull request {{.PRU
 <pr_basic_info>
 {{.PRData.BasicInfo}}
 </pr_basic_info>
-
-<pr_reviews>
-{{.PRData.Reviews}}
-</pr_reviews>
 
 {{.FocusedSections}}
 
