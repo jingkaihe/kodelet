@@ -247,13 +247,14 @@ func prefetchPRData(prURL, commentID string, isReviewComment bool) (*PRData, err
 // parseGitHubURL extracts owner, repo, and PR number from GitHub PR URL
 // Expected URL format: https://github.com/owner/repo/pull/123
 // When split by "/", the parts array becomes:
-//   parts[0]: "https:"
-//   parts[1]: "" (empty string)
-//   parts[2]: "github.com"
-//   parts[3]: "owner" (GitHub username/organization)
-//   parts[4]: "repo" (repository name)
-//   parts[5]: "pull" (literal "pull")
-//   parts[6]: "123" (PR number)
+//
+//	parts[0]: "https:"
+//	parts[1]: "" (empty string)
+//	parts[2]: "github.com"
+//	parts[3]: "owner" (GitHub username/organization)
+//	parts[4]: "repo" (repository name)
+//	parts[5]: "pull" (literal "pull")
+//	parts[6]: "123" (PR number)
 func parseGitHubURL(prURL string) (owner, repo, prNumber string, err error) {
 	parts := strings.Split(prURL, "/")
 	if len(parts) < 7 {
@@ -300,7 +301,7 @@ func fetchFocusedReviewComment(prURL, commentID string) (string, string, error) 
 	// For related discussions
 	cmd = exec.Command("gh", "api",
 		fmt.Sprintf("repos/%s/%s/pulls/%s/reviews/%s/comments", owner, repo, prNumber, commentID),
-		"--jq", ".[] | {id: .id, author: .user.login, body: .body, line: .line, created_at: .created_at, diff_hunk: .diff_hunk}")
+		"--jq", "[.[] | {id: .id, author: .user.login, body: .body, line: .line, created_at: .created_at, diff_hunk: .diff_hunk}]")
 	logger.G(context.TODO()).WithField("cmd", cmd.String()).Debug("Fetching related review discussions")
 	discussionOutput, err := cmd.CombinedOutput()
 	if err != nil {
