@@ -18,7 +18,7 @@ env:
   TIMEOUT_MINUTES: "300"
 
 jobs:
-  kodelet-work:
+  background-kodelet:
     runs-on: ubuntu-latest
     timeout-minutes: 360  # 6 hours
     if: |
@@ -48,3 +48,4 @@ jobs:
         uses: jingkaihe/kodelet-action@v0.1.1-alpha
         with:
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          kodelet-version: 0.0.35.alpha

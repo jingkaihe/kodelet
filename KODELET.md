@@ -83,8 +83,9 @@ kodelet pr [--target main]             # Generate PRs
 kodelet resolve --issue-url URL        # Resolve GitHub issues
 
 # PR management
-kodelet pr-respond --pr-url URL        # Respond to specific PR comment
-kodelet pr-respond --pr-url URL --comment-id ID  # Respond to specific comment
+kodelet pr-respond --pr-url URL                           # Respond to latest @kodelet mention
+kodelet pr-respond --pr-url URL --review-id ID    # Respond to review comment
+kodelet pr-respond --pr-url URL --issue-comment-id ID     # Respond to issue comment
 
 # Image support (Claude only)
 kodelet run --image path.png "query"   # Single/multiple images
