@@ -1,5 +1,22 @@
 # Kodelet
 
+## 0.0.34.alpha (2025-06-02)
+
+### Command Restructure
+
+- **Renamed resolve command to issue-resolve**: Enhanced CLI clarity while maintaining full backward compatibility
+  - Created dedicated `issue_resolve.go` file with complete implementation
+  - Original `resolve` command acts as deprecated wrapper with migration notice
+  - No breaking changes - existing scripts continue to work
+
+```bash
+# New recommended command
+kodelet issue-resolve --issue-url https://github.com/owner/repo/issues/123
+
+# Legacy command (still works, shows deprecation notice)  
+kodelet resolve --issue-url https://github.com/owner/repo/issues/123
+```
+
 ## 0.0.33.alpha (2025-06-02)
 
 ### PR Comment Response System
