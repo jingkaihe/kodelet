@@ -183,28 +183,35 @@ export KODELET_REASONING_EFFORT="medium"  # low, medium, high
 
 ### Configuration File
 
-Kodelet looks for configuration files in the following order of precedence:
-1. **Repository-level**: `kodelet-config.yaml` in the current directory (highest priority)
-2. **Global**: `config.yaml` in `$HOME/.kodelet/` directory
+Kodelet uses a **layered configuration approach** where settings are applied in the following order:
+
+1. **Defaults**: Built-in default values
+2. **Global Config**: `config.yaml` in `$HOME/.kodelet/` directory
+3. **Repository Config**: `kodelet-config.yaml` in the current directory (overrides global)
 
 **Repository-level Configuration**
 
-Use `kodelet-config.yaml` in your project root for project-specific settings that should be committed to version control:
+Use `kodelet-config.yaml` in your project root for project-specific settings. This file will **merge with and override** your global configuration, so you only need to specify the settings that differ from your global defaults.
 
 ```bash
-# Create project-specific configuration
-echo "provider: anthropic
-model: claude-3-5-haiku-latest
+# Global config (~/.kodelet/config.yaml)
+provider: "anthropic"
+model: "claude-sonnet-4-0"
+max_tokens: 8192
+log_level: "info"
+
+# Repository config (kodelet-config.yaml) - only override what's different
+echo "model: claude-3-5-haiku-latest
 max_tokens: 4096" > kodelet-config.yaml
 
-# This configuration takes precedence over global settings
+# Result: provider=anthropic, model=claude-3-5-haiku-latest, max_tokens=4096, log_level=info
 kodelet run "analyze this codebase"
 ```
 
-This is particularly useful for:
-- Setting consistent model preferences across team members
-- Configuring project-specific tool settings
-- Ensuring reproducible AI assistance behavior
+**Benefits of layered configuration:**
+- **Minimal repo configs**: Only specify what's different from your global settings
+- **Team consistency**: Share project-specific settings while preserving individual global preferences
+- **Inheritance**: Automatically inherit global settings like API keys, logging preferences, etc.
 
 Example `config.yaml`:
 

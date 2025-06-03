@@ -108,7 +108,9 @@ export KODELET_MAX_TOKENS="8192"
 export KODELET_LOG_LEVEL="info"
 ```
 
-**Config File** (`config.yaml`):
+**Configuration**: Layered approach with global defaults and repository overrides
+
+**Global Config** (`~/.kodelet/config.yaml`):
 ```yaml
 provider: "anthropic"
 model: "claude-sonnet-4-0"
@@ -122,6 +124,13 @@ mcp:
     fs:
       command: "npx"
       args: ["-y", "@modelcontextprotocol/server-filesystem", "/path"]
+```
+
+**Repository Config** (`kodelet-config.yaml`):
+```yaml
+# Only specify what differs from global config
+model: "claude-3-5-haiku-latest"
+max_tokens: 4096
 ```
 
 ## LLM Architecture
