@@ -9,6 +9,13 @@
   - Original `resolve` command acts as deprecated wrapper with migration notice
   - No breaking changes - existing scripts continue to work
 
+### Configuration Enhancements
+
+- **Repository-level Configuration**: Added support for `kodelet-config.yaml` in project root
+  - Takes precedence over standard config files (`~/.kodelet/config.yaml` and `./config.yaml`)
+  - Enables project-specific configuration without affecting global settings
+  - Falls back to standard config paths if repo-level config not found
+
 ```bash
 # New recommended command
 kodelet issue-resolve --issue-url https://github.com/owner/repo/issues/123
