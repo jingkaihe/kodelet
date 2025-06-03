@@ -189,9 +189,10 @@ func prefetchPRData(prURL, commentID string) (*PRData, error) {
 
 	// Get basic PR information
 	cmd := exec.Command("gh", "pr", "view", prURL, "--comments")
-	basicInfoOutput, err := cmd.Output()
+	logger.G(context.TODO()).WithField("cmd", cmd.String()).Debug("Fetching PR basic info")
+	basicInfoOutput, err := cmd.CombinedOutput()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get PR basic info: %w", err)
+		return nil, fmt.Errorf("failed to get PR basic info: %w, %s", err, string(basicInfoOutput))
 	}
 	data.BasicInfo = strings.TrimSpace(string(basicInfoOutput))
 
@@ -280,7 +281,8 @@ func fetchFocusedCommentData(prURL, commentID string) (string, string, error) {
 	// This is a simplified approach - in practice, you might want more sophisticated logic
 	cmd = exec.Command("gh", "api", fmt.Sprintf("repos/%s/%s/pulls/comments", owner, repo),
 		"--jq", fmt.Sprintf(".[] | select(.path == (.[] | select(.id == %s) | .path)) | {id: .id, author: .user.login, body: .body, line: .line, created_at: .created_at}", commentID))
-	discussionOutput, err := cmd.Output()
+	logger.G(context.TODO()).WithField("cmd", cmd.String()).Debug("Fetching related discussions")
+	discussionOutput, err := cmd.CombinedOutput()
 	if err != nil {
 		// If we can't get related discussions, just return empty
 		relatedDiscussion := "No related discussions found or failed to fetch"
@@ -298,11 +300,13 @@ func fetchKodeletMentions(owner, repo, prNumber string) []string {
 
 	// Search issue comments
 	cmd1 := exec.Command("gh", "api", fmt.Sprintf("repos/%s/%s/issues/%s/comments", owner, repo, prNumber), "--jq", jqFilter)
-	issueOutput, err1 := cmd1.Output()
+	logger.G(context.TODO()).WithField("cmd", cmd1.String()).Debug("Fetching issue comments")
+	issueOutput, err1 := cmd1.CombinedOutput()
 
 	// Search review comments
 	cmd2 := exec.Command("gh", "api", fmt.Sprintf("repos/%s/%s/pulls/%s/comments", owner, repo, prNumber), "--jq", jqFilter)
-	reviewOutput, err2 := cmd2.Output()
+	logger.G(context.TODO()).WithField("cmd", cmd2.String()).Debug("Fetching review comments")
+	reviewOutput, err2 := cmd2.CombinedOutput()
 
 	var allComments []string
 	if err1 == nil && len(issueOutput) > 0 {
@@ -364,7 +368,7 @@ Please respond to the comment and discussions in <pr_focused_comment> section fo
    - Make necessary code changes if requested
    - Ask subagent to run "{{.BinPath}} commit --short --no-confirm" for changes
    - Push updates with "git push origin <pr-branch>"
-   - Reply to the specific comment with a summary of actions taken
+   - Reply to the specific comment with a summary of actions taken using "gh pr comment <pr-number> --body <summary>". Keep the summary short, concise and to the point.
 
 IMPORTANT:
 - !!!CRITICAL!!!: You should never update user's git config under any circumstances.
