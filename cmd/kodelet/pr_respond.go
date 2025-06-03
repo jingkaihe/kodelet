@@ -221,17 +221,34 @@ func prefetchPRData(prURL, commentID string) (*PRData, error) {
 	return data, nil
 }
 
+// parseGitHubURL extracts owner and repo from GitHub PR URL
+func parseGitHubURL(prURL string) (owner, repo, prNumber string, err error) {
+	parts := strings.Split(prURL, "/")
+	if len(parts) < 7 {
+		return "", "", "", fmt.Errorf("invalid PR URL format")
+	}
+	return parts[3], parts[4], parts[6], nil
+}
+
+// formatFocusedSections creates the focused sections format used in prompts
+func formatFocusedSections(comment, discussion string) string {
+	return fmt.Sprintf(`
+
+<pr_comment>
+%s
+</pr_comment>
+
+<pr_discussions>
+%s
+</pr_discussions>`, comment, discussion)
+}
+
 // fetchFocusedCommentData fetches specific comment details and related discussions using GitHub API
 func fetchFocusedCommentData(prURL, commentID string) (string, string, error) {
-	// Extract repository information from PR URL
-	// Expected format: https://github.com/owner/repo/pull/number
-	parts := strings.Split(prURL, "/")
-	if len(parts) < 5 {
-		return "", "", fmt.Errorf("invalid PR URL format")
+	owner, repo, _, err := parseGitHubURL(prURL)
+	if err != nil {
+		return "", "", err
 	}
-	
-	owner := parts[3]
-	repo := parts[4]
 	
 	// Fetch the specific comment using GitHub API
 	cmd := exec.Command("gh", "api", fmt.Sprintf("repos/%s/%s/pulls/comments/%s", owner, repo, commentID),
@@ -259,43 +276,42 @@ func fetchFocusedCommentData(prURL, commentID string) (string, string, error) {
 	return focusedComment, relatedDiscussion, nil
 }
 
+// fetchKodeletMentions fetches all @kodelet mentions from both issue and review comments
+func fetchKodeletMentions(owner, repo, prNumber string) []string {
+	jqFilter := ".[] | select(.body | contains(\"@kodelet\")) | {id: .id, author: .user.login, body: .body, created_at: .created_at} | tostring"
+	
+	// Search issue comments
+	cmd1 := exec.Command("gh", "api", fmt.Sprintf("repos/%s/%s/issues/%s/comments", owner, repo, prNumber), "--jq", jqFilter)
+	issueOutput, err1 := cmd1.Output()
+	
+	// Search review comments  
+	cmd2 := exec.Command("gh", "api", fmt.Sprintf("repos/%s/%s/pulls/%s/comments", owner, repo, prNumber), "--jq", jqFilter)
+	reviewOutput, err2 := cmd2.Output()
+	
+	var allComments []string
+	if err1 == nil && len(issueOutput) > 0 {
+		allComments = append(allComments, strings.Split(strings.TrimSpace(string(issueOutput)), "\n")...)
+	}
+	if err2 == nil && len(reviewOutput) > 0 {
+		allComments = append(allComments, strings.Split(strings.TrimSpace(string(reviewOutput)), "\n")...)
+	}
+	return allComments
+}
+
 // fetchLatestKodeletComment finds the most recent @kodelet mention in PR comments and related discussions
 func fetchLatestKodeletComment(prURL string) (string, string, error) {
-	// Extract repository information from PR URL
-	parts := strings.Split(prURL, "/")
-	if len(parts) < 5 {
-		return "", "", fmt.Errorf("invalid PR URL format")
+	owner, repo, prNumber, err := parseGitHubURL(prURL)
+	if err != nil {
+		return "", "", err
 	}
 	
-	owner := parts[3]
-	repo := parts[4]
-	prNumber := parts[6]
-	
-	// Search for @kodelet mentions in issue comments (regular PR comments)
-	cmd := exec.Command("gh", "api", fmt.Sprintf("repos/%s/%s/issues/%s/comments", owner, repo, prNumber),
-		"--jq", ".[] | select(.body | contains(\"@kodelet\")) | {id: .id, author: .user.login, body: .body, created_at: .created_at} | tostring")
-	issueCommentsOutput, err := cmd.Output()
-	
-	// Search for @kodelet mentions in pull request review comments
-	cmd2 := exec.Command("gh", "api", fmt.Sprintf("repos/%s/%s/pulls/%s/comments", owner, repo, prNumber),
-		"--jq", ".[] | select(.body | contains(\"@kodelet\")) | {id: .id, author: .user.login, body: .body, path: .path, line: .line, created_at: .created_at} | tostring")
-	reviewCommentsOutput, err2 := cmd2.Output()
-	
-	var allKodeletComments []string
-	if err == nil && len(issueCommentsOutput) > 0 {
-		allKodeletComments = append(allKodeletComments, strings.Split(strings.TrimSpace(string(issueCommentsOutput)), "\n")...)
-	}
-	if err2 == nil && len(reviewCommentsOutput) > 0 {
-		allKodeletComments = append(allKodeletComments, strings.Split(strings.TrimSpace(string(reviewCommentsOutput)), "\n")...)
-	}
+	allKodeletComments := fetchKodeletMentions(owner, repo, prNumber)
 	
 	if len(allKodeletComments) == 0 {
 		return "No @kodelet mention found in PR comments", "No related discussions available", nil
 	}
 	
-	// Get the latest comment (they're sorted by creation time, so take the last one)
 	latestComment := allKodeletComments[len(allKodeletComments)-1]
-	
 	latestKodeletComment := fmt.Sprintf("Latest @kodelet mention:\n%s", latestComment)
 	latestKodeletDiscussion := fmt.Sprintf("All @kodelet mentions in this PR:\n%s", strings.Join(allKodeletComments, "\n---\n"))
 	
@@ -303,39 +319,18 @@ func fetchLatestKodeletComment(prURL string) (string, string, error) {
 }
 
 func generatePRRespondPrompt(bin, prURL, commentID string, prData *PRData) string {
-	commentInstruction := ""
-	focusedSections := ""
+	var commentInstruction, focusedSections string
 	
 	if commentID != "" {
 		commentInstruction = fmt.Sprintf(`
 
 Focus on the specific comment ID: %s by reviewing the focused comment and related discussions below.`, commentID)
-		
-		// Add focused comment and related discussions sections when comment ID is specified
-		focusedSections = fmt.Sprintf(`
-
-<pr_comment>
-%s
-</pr_comment>
-
-<pr_discussions>
-%s
-</pr_discussions>`, prData.FocusedComment, prData.RelatedDiscussion)
+		focusedSections = formatFocusedSections(prData.FocusedComment, prData.RelatedDiscussion)
 	} else {
 		commentInstruction = `
 
 Find the most recent @kodelet mention by reviewing the comments data above. If no @kodelet mention is found, address the most recent review comment.`
-		
-		// Use the same format as focusedSections above for the latest @kodelet comment
-		focusedSections = fmt.Sprintf(`
-
-<pr_comment>
-%s
-</pr_comment>
-
-<pr_discussions>
-%s
-</pr_discussions>`, prData.LatestKodeletComment, prData.LatestKodeletDiscussion)
+		focusedSections = formatFocusedSections(prData.LatestKodeletComment, prData.LatestKodeletDiscussion)
 	}
 
 	return fmt.Sprintf(`Please respond to a specific comment in pull request %s following the steps below:
