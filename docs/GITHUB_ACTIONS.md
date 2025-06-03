@@ -6,12 +6,12 @@ Kodelet provides seamless GitHub Actions integration through the [kodelet-action
 
 The Kodelet Action automates software engineering tasks using advanced AI models, including:
 
-* 🤖 **AI-Powered Engineering**: Automates software engineering tasks using advanced AI models
-* 📝 **Issue Resolution**: Automatically resolves GitHub issues with code changes and explanations
-* 🔍 **PR Reviews**: Provides intelligent code review comments and suggestions  
-* ⚡ **Background Processing**: Runs asynchronously without blocking your development workflow
-* 🔄 **Multi-Event Support**: Works with issue comments, PR comments, and review comments
-* 🛡️ **Secure**: Uses GitHub tokens and API keys securely through GitHub Secrets
+* **AI-Powered Engineering**: Automates software engineering tasks using advanced AI models
+* **Issue Resolution**: Automatically resolves GitHub issues with code changes and explanations
+* **PR Reviews**: Provides intelligent code review comments and suggestions  
+* **Background Processing**: Runs asynchronously without blocking your development workflow
+* **Multi-Event Support**: Works with issue comments, PR comments, and review comments
+* **Secure**: Uses GitHub tokens and API keys securely through GitHub Secrets
 
 ## Quick Start
 
@@ -53,14 +53,17 @@ jobs:
   background-kodelet:
     runs-on: ubuntu-latest
     timeout-minutes: 360  # 6 hours
+    # Only run if @kodelet is mentioned AND the author has proper permissions
     if: |
       (
+        # Check if @kodelet is mentioned in the event (issue, comment, or review)
         (github.event_name == 'issues' && contains(github.event.issue.body, '@kodelet')) ||
         (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@kodelet')) ||
         (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@kodelet')) ||
         (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@kodelet'))
       ) &&
       (
+        # Verify the author has proper repository permissions (recommended for public repos)
         (github.event.issue.author_association == 'OWNER' || github.event.issue.author_association == 'MEMBER' || github.event.issue.author_association == 'COLLABORATOR') ||
         (github.event.comment.author_association == 'OWNER' || github.event.comment.author_association == 'MEMBER' || github.event.comment.author_association == 'COLLABORATOR') ||
         (github.event.review.author_association == 'OWNER' || github.event.review.author_association == 'MEMBER' || github.event.review.author_association == 'COLLABORATOR')
@@ -73,7 +76,7 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set up Go # as the dev env
+      - name: Set up the dev environment # Setup depends on the nature of your repo
         uses: actions/setup-go@v5
         with:
           go-version: '1.24'
@@ -133,27 +136,6 @@ Comment `@kodelet` on any issue or pull request to trigger automated assistance:
     kodelet-version: v0.0.35.alpha  # Pin to specific version
 ```
 
-### Version Pinning
-
-You can control which version of Kodelet is installed:
-
-```yaml
-# Use latest release (default)
-- uses: jingkaihe/kodelet-action@v0.1.2-alpha
-  with:
-    kodelet-version: latest
-
-# Pin to specific version
-- uses: jingkaihe/kodelet-action@v0.1.2-alpha
-  with:
-    kodelet-version: 0.0.35.alpha
-```
-
-**Recommended approaches:**
-- **Production**: Pin to a specific stable version for consistency
-- **Development**: Use `latest` to get the newest features
-- **Testing**: Pin to specific versions to ensure reproducible results
-
 ## Supported Events
 
 | Event | Description | Kodelet Command |
@@ -168,7 +150,7 @@ You can control which version of Kodelet is installed:
 The action only runs when:
 
 1. **Event contains `@kodelet`**: The trigger event (comment, issue, review) must contain `@kodelet`
-2. **Author has proper permissions**: Only users with `OWNER`, `MEMBER`, or `COLLABORATOR` association can trigger the action
+2. **Author has proper permissions**: Only users with `OWNER`, `MEMBER`, or `COLLABORATOR` association can trigger the action (highly recommended for public repos, but not mandatory)
 3. **Supported event types**: Only specific GitHub events are supported (see table above)
 
 ### Trigger Examples
@@ -234,9 +216,7 @@ Failed runs include links to workflow logs for debugging.
    - Ensure workflow has proper `permissions` section
    - Verify `GITHUB_TOKEN` has required scopes
 
-4. **Timeouts**
-   - Consider increasing `timeout-minutes` for complex tasks
-   - Review workflow logs for specific timeout causes
+
 
 ### Debugging
 
@@ -271,7 +251,7 @@ The Kodelet repository itself uses this action. See [`.github/workflows/kodelet-
 
 ## Support
 
-- 📖 [Kodelet Documentation](https://github.com/jingkaihe/kodelet)
-- 🐛 [Report Issues](https://github.com/jingkaihe/kodelet-action/issues)
-- 💬 [Discussions](https://github.com/jingkaihe/kodelet-action/discussions)
-- 🛍️ [GitHub Marketplace](https://github.com/marketplace/actions/kodelet-action)
+- [Kodelet Documentation](https://github.com/jingkaihe/kodelet)
+- [Report Issues](https://github.com/jingkaihe/kodelet-action/issues)
+- [Discussions](https://github.com/jingkaihe/kodelet-action/discussions)
+- [GitHub Marketplace](https://github.com/marketplace/actions/kodelet-action)
