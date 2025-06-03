@@ -84,7 +84,7 @@ kodelet resolve --issue-url URL        # Resolve GitHub issues
 
 # PR management
 kodelet pr-respond --pr-url URL                           # Respond to latest @kodelet mention
-kodelet pr-respond --pr-url URL --review-comment-id ID    # Respond to review comment
+kodelet pr-respond --pr-url URL --review-id ID    # Respond to review comment
 kodelet pr-respond --pr-url URL --issue-comment-id ID     # Respond to issue comment
 
 # Image support (Claude only)

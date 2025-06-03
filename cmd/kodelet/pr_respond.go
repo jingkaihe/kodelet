@@ -69,11 +69,11 @@ func (c *PRRespondConfig) Validate() error {
 	issueCommentProvided := c.IssueCommentID != ""
 
 	if !reviewCommentProvided && !issueCommentProvided {
-		return fmt.Errorf("either --review-comment-id or --issue-comment-id must be provided")
+		return fmt.Errorf("either --review-id or --issue-comment-id must be provided")
 	}
 
 	if reviewCommentProvided && issueCommentProvided {
-		return fmt.Errorf("only one of --review-comment-id or --issue-comment-id can be provided, not both")
+		return fmt.Errorf("only one of --review-id or --issue-comment-id can be provided, not both")
 	}
 
 	return nil
@@ -84,7 +84,7 @@ var prRespondCmd = &cobra.Command{
 	Short: "Respond to a specific PR comment with code changes",
 	Long: `Respond to a specific pull request comment by analyzing the feedback and implementing the requested changes.
 
-This command focuses on addressing a specific comment or review feedback within a PR. You must provide either --review-comment-id for review comments or --issue-comment-id for issue comments. Currently supports GitHub PRs only.`,
+This command focuses on addressing a specific comment or review feedback within a PR. You must provide either --review-id for review comments or --issue-comment-id for issue comments. Currently supports GitHub PRs only.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx, cancel := context.WithCancel(cmd.Context())
 		defer cancel()
@@ -183,7 +183,7 @@ func init() {
 	defaults := NewPRRespondConfig()
 	prRespondCmd.Flags().StringP("provider", "p", defaults.Provider, "The PR provider to use")
 	prRespondCmd.Flags().String("pr-url", defaults.PRURL, "PR URL (required)")
-	prRespondCmd.Flags().String("review-comment-id", defaults.ReviewCommentID, "Specific review comment ID to respond to")
+	prRespondCmd.Flags().String("review-id", defaults.ReviewCommentID, "Specific review comment ID to respond to")
 	prRespondCmd.Flags().String("issue-comment-id", defaults.IssueCommentID, "Specific issue comment ID to respond to")
 	prRespondCmd.MarkFlagRequired("pr-url")
 }
@@ -198,7 +198,7 @@ func getPRRespondConfigFromFlags(cmd *cobra.Command) *PRRespondConfig {
 	if prURL, err := cmd.Flags().GetString("pr-url"); err == nil {
 		config.PRURL = prURL
 	}
-	if reviewCommentID, err := cmd.Flags().GetString("review-comment-id"); err == nil {
+	if reviewCommentID, err := cmd.Flags().GetString("review-id"); err == nil {
 		config.ReviewCommentID = reviewCommentID
 	}
 	if issueCommentID, err := cmd.Flags().GetString("issue-comment-id"); err == nil {
