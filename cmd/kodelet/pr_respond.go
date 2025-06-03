@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/jingkaihe/kodelet/pkg/llm"
@@ -18,6 +20,17 @@ type PRRespondConfig struct {
 	Provider  string
 	PRURL     string
 	CommentID string
+}
+
+// PRData holds prefetched PR information
+type PRData struct {
+	BasicInfo              string
+	Comments               string
+	Reviews                string
+	FocusedComment         string // Focused comment when comment-id is specified
+	RelatedDiscussion      string // Related discussions for the focused comment
+	LatestKodeletComment   string // Latest @kodelet comment when no comment-id is specified
+	LatestKodeletDiscussion string // Related discussions for the latest @kodelet comment
 }
 
 // NewPRRespondConfig creates a new PRRespondConfig with default values
@@ -101,8 +114,16 @@ This command focuses on addressing a specific comment or review feedback within 
 			os.Exit(1)
 		}
 
-		// Generate comprehensive prompt
-		prompt := generatePRRespondPrompt(bin, config.PRURL, config.CommentID)
+		// Prefetch PR data
+		fmt.Println("Prefetching PR data...")
+		prData, err := prefetchPRData(config.PRURL, config.CommentID)
+		if err != nil {
+			fmt.Printf("Error prefetching PR data: %v\n", err)
+			os.Exit(1)
+		}
+
+		// Generate comprehensive prompt with prefetched data
+		prompt := generatePRRespondPrompt(bin, config.PRURL, config.CommentID, prData)
 
 		// Send to LLM using existing architecture
 		fmt.Println("Analyzing specific PR comment and implementing response...")
@@ -150,48 +171,215 @@ func getPRRespondConfigFromFlags(cmd *cobra.Command) *PRRespondConfig {
 	return config
 }
 
-func generatePRRespondPrompt(bin, prURL, commentID string) string {
+// prefetchPRData fetches PR information, comments, and reviews using gh CLI
+// If commentID is provided, it also fetches focused comment and related discussions
+func prefetchPRData(prURL, commentID string) (*PRData, error) {
+	data := &PRData{}
+	
+	// Get basic PR information
+	cmd := exec.Command("gh", "pr", "view", prURL)
+	basicInfoOutput, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get PR basic info: %w", err)
+	}
+	data.BasicInfo = strings.TrimSpace(string(basicInfoOutput))
+	
+	// Get PR comments
+	cmd = exec.Command("gh", "pr", "view", prURL, "--comments")
+	commentsOutput, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get PR comments: %w", err)
+	}
+	data.Comments = strings.TrimSpace(string(commentsOutput))
+	
+	// Get PR reviews (try to get them, but don't fail if not available)
+	cmd = exec.Command("gh", "pr", "view", prURL, "--json", "reviews")
+	reviewsOutput, err := cmd.Output()
+	if err == nil {
+		data.Reviews = strings.TrimSpace(string(reviewsOutput))
+	} else {
+		data.Reviews = "No reviews data available"
+	}
+	
+	// If comment ID is specified, fetch focused comment and related discussions
+	if commentID != "" {
+		focusedComment, relatedDiscussion, err := fetchFocusedCommentData(prURL, commentID)
+		if err != nil {
+			// Don't fail completely, just log the error and continue
+			fmt.Printf("Warning: Failed to fetch focused comment data: %v\n", err)
+			data.FocusedComment = "Failed to fetch focused comment"
+			data.RelatedDiscussion = "Failed to fetch related discussions"
+		} else {
+			data.FocusedComment = focusedComment
+			data.RelatedDiscussion = relatedDiscussion
+		}
+	} else {
+		// When no comment ID is provided, find the latest @kodelet comment
+		latestKodeletComment, latestKodeletDiscussion, err := fetchLatestKodeletComment(prURL)
+		if err != nil {
+			// Don't fail completely, just log the error and continue
+			fmt.Printf("Warning: Failed to fetch latest @kodelet comment: %v\n", err)
+			data.LatestKodeletComment = "No @kodelet mention found or failed to fetch"
+			data.LatestKodeletDiscussion = "No related discussions available"
+		} else {
+			data.LatestKodeletComment = latestKodeletComment
+			data.LatestKodeletDiscussion = latestKodeletDiscussion
+		}
+	}
+	
+	return data, nil
+}
+
+// fetchFocusedCommentData fetches specific comment details and related discussions using GitHub API
+func fetchFocusedCommentData(prURL, commentID string) (string, string, error) {
+	// Extract repository information from PR URL
+	// Expected format: https://github.com/owner/repo/pull/number
+	parts := strings.Split(prURL, "/")
+	if len(parts) < 5 {
+		return "", "", fmt.Errorf("invalid PR URL format")
+	}
+	
+	owner := parts[3]
+	repo := parts[4]
+	
+	// Fetch the specific comment using GitHub API
+	cmd := exec.Command("gh", "api", fmt.Sprintf("repos/%s/%s/pulls/comments/%s", owner, repo, commentID),
+		"--jq", "{author: .user.login, body: .body, path: .path, line: .line, created_at: .created_at}")
+	commentOutput, err := cmd.Output()
+	if err != nil {
+		return "", "", fmt.Errorf("failed to fetch comment details: %w", err)
+	}
+	
+	focusedComment := fmt.Sprintf("Comment ID %s:\n%s", commentID, strings.TrimSpace(string(commentOutput)))
+	
+	// For related discussions, we can fetch all comments on the same file/line
+	// This is a simplified approach - in practice, you might want more sophisticated logic
+	cmd = exec.Command("gh", "api", fmt.Sprintf("repos/%s/%s/pulls/comments", owner, repo),
+		"--jq", fmt.Sprintf(".[] | select(.path == (.[] | select(.id == %s) | .path)) | {id: .id, author: .user.login, body: .body, line: .line, created_at: .created_at}", commentID))
+	discussionOutput, err := cmd.Output()
+	if err != nil {
+		// If we can't get related discussions, just return empty
+		relatedDiscussion := "No related discussions found or failed to fetch"
+		return focusedComment, relatedDiscussion, nil
+	}
+	
+	relatedDiscussion := fmt.Sprintf("Related discussions for comment %s:\n%s", commentID, strings.TrimSpace(string(discussionOutput)))
+	
+	return focusedComment, relatedDiscussion, nil
+}
+
+// fetchLatestKodeletComment finds the most recent @kodelet mention in PR comments and related discussions
+func fetchLatestKodeletComment(prURL string) (string, string, error) {
+	// Extract repository information from PR URL
+	parts := strings.Split(prURL, "/")
+	if len(parts) < 5 {
+		return "", "", fmt.Errorf("invalid PR URL format")
+	}
+	
+	owner := parts[3]
+	repo := parts[4]
+	prNumber := parts[6]
+	
+	// Search for @kodelet mentions in issue comments (regular PR comments)
+	cmd := exec.Command("gh", "api", fmt.Sprintf("repos/%s/%s/issues/%s/comments", owner, repo, prNumber),
+		"--jq", ".[] | select(.body | contains(\"@kodelet\")) | {id: .id, author: .user.login, body: .body, created_at: .created_at} | tostring")
+	issueCommentsOutput, err := cmd.Output()
+	
+	// Search for @kodelet mentions in pull request review comments
+	cmd2 := exec.Command("gh", "api", fmt.Sprintf("repos/%s/%s/pulls/%s/comments", owner, repo, prNumber),
+		"--jq", ".[] | select(.body | contains(\"@kodelet\")) | {id: .id, author: .user.login, body: .body, path: .path, line: .line, created_at: .created_at} | tostring")
+	reviewCommentsOutput, err2 := cmd2.Output()
+	
+	var allKodeletComments []string
+	if err == nil && len(issueCommentsOutput) > 0 {
+		allKodeletComments = append(allKodeletComments, strings.Split(strings.TrimSpace(string(issueCommentsOutput)), "\n")...)
+	}
+	if err2 == nil && len(reviewCommentsOutput) > 0 {
+		allKodeletComments = append(allKodeletComments, strings.Split(strings.TrimSpace(string(reviewCommentsOutput)), "\n")...)
+	}
+	
+	if len(allKodeletComments) == 0 {
+		return "No @kodelet mention found in PR comments", "No related discussions available", nil
+	}
+	
+	// Get the latest comment (they're sorted by creation time, so take the last one)
+	latestComment := allKodeletComments[len(allKodeletComments)-1]
+	
+	latestKodeletComment := fmt.Sprintf("Latest @kodelet mention:\n%s", latestComment)
+	latestKodeletDiscussion := fmt.Sprintf("All @kodelet mentions in this PR:\n%s", strings.Join(allKodeletComments, "\n---\n"))
+	
+	return latestKodeletComment, latestKodeletDiscussion, nil
+}
+
+func generatePRRespondPrompt(bin, prURL, commentID string, prData *PRData) string {
 	commentInstruction := ""
+	focusedSections := ""
+	
 	if commentID != "" {
 		commentInstruction = fmt.Sprintf(`
-3. Focus on the specific comment ID: %s
-   - Use appropriate gh commands to retrieve the specific comment details
-   - Parse the comment content and understand the specific request`, commentID)
+
+Focus on the specific comment ID: %s by reviewing the focused comment and related discussions below.`, commentID)
+		
+		// Add focused comment and related discussions sections when comment ID is specified
+		focusedSections = fmt.Sprintf(`
+
+<pr_comment>
+%s
+</pr_comment>
+
+<pr_discussions>
+%s
+</pr_discussions>`, prData.FocusedComment, prData.RelatedDiscussion)
 	} else {
 		commentInstruction = `
-3. Find the most recent @kodelet mention:
-   - Look through all comments to find the latest mention of @kodelet
-   - Focus on that specific comment and its context
-   - If no @kodelet mention is found, address the most recent review comment`
+
+Find the most recent @kodelet mention by reviewing the comments data above. If no @kodelet mention is found, address the most recent review comment.`
+		
+		// Use the same format as focusedSections above for the latest @kodelet comment
+		focusedSections = fmt.Sprintf(`
+
+<pr_comment>
+%s
+</pr_comment>
+
+<pr_discussions>
+%s
+</pr_discussions>`, prData.LatestKodeletComment, prData.LatestKodeletDiscussion)
 	}
 
 	return fmt.Sprintf(`Please respond to a specific comment in pull request %s following the steps below:
 
-1. Use "gh pr view %s" to get basic PR information:
-   - PR description, branches, and current status
-   - Extract the PR number for reference
+<pr_basic_info>
+%s
+</pr_basic_info>
 
-2. Use "gh pr view %s --comments" to get all comments and reviews:
-   - Identify all comments and review feedback
-   - Parse comment timestamps and authors%s
+<pr_comments>
+%s
+</pr_comments>
 
-4. Check the current state of the PR branch:
+<pr_reviews>
+%s
+</pr_reviews>%s
+
+Based on the PR information provided above:%s
+
+1. Check the current state of the PR branch:
    - Use "git checkout <pr-branch>" to switch to the PR branch
    - Run "git pull origin <pr-branch>" to ensure latest changes
    - Check current working directory state
 
-5. Analyze the specific comment request:
-   - Understand exactly what is being asked for
+2. Analyze the specific comment request:
+   - Review the PR comments section above to understand exactly what is being asked for
    - Determine if it requires code changes, documentation, tests, or clarification
    - Create a focused todo list for this specific request
-	 - If the request is unclear, ask for clarification in your comment response, do not implement any changes
+   - If the request is unclear, ask for clarification in your comment response, do not implement any changes
 
-6. Implement the specific change:
+3. Implement the specific change:
    - Focus only on what was requested in the comment
    - Make precise, targeted changes
    - Avoid scope creep or unrelated improvements
 
-7. Respond appropriately:
+4. Respond appropriately:
    - Make necessary code changes if requested
    - Ask subagent to run "%s commit --short --no-confirm" for changes
    - Push updates with "git push origin <pr-branch>"
@@ -204,5 +392,5 @@ IMPORTANT:
 - If the request is unclear, ask for clarification in your comment response
 - Always acknowledge the specific comment you're responding to
 `,
-		prURL, prURL, prURL, commentInstruction, bin)
+		prURL, prData.BasicInfo, prData.Comments, prData.Reviews, focusedSections, commentInstruction, bin)
 }
