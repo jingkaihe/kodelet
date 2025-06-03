@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -16,6 +17,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v2"
 )
 
 // PRRespondConfig holds configuration for the pr-respond command
@@ -269,33 +271,48 @@ func formatFocusedSections(comment, discussion string) string {
 
 // fetchFocusedReviewComment fetches specific review comment details and related discussions using GitHub API
 func fetchFocusedReviewComment(prURL, commentID string) (string, string, error) {
-	owner, repo, _, err := parseGitHubURL(prURL)
+	owner, repo, prNumber, err := parseGitHubURL(prURL)
 	if err != nil {
 		return "", "", err
 	}
 
 	// Fetch review comment
-	cmd := exec.Command("gh", "api", fmt.Sprintf("repos/%s/%s/pulls/comments/%s", owner, repo, commentID),
-		"--jq", "{author: .user.login, body: .body, path: .path, line: .line, created_at: .created_at}")
+	cmd := exec.Command("gh", "api", fmt.Sprintf("repos/%s/%s/pulls/%s/reviews/%s", owner, repo, prNumber, commentID), "--jq", "{body: .body, author: .user.login, submitted_at: .submitted_at}")
 	logger.G(context.TODO()).WithField("cmd", cmd.String()).Debug("Fetching review comment data")
 	commentOutput, err := cmd.CombinedOutput()
 	if err != nil {
+		logger.G(context.TODO()).WithField("cmd", cmd.String()).WithError(err).Error("Failed to fetch review comment details")
 		return "", "", fmt.Errorf("failed to fetch review comment details: %w, %s", err, string(commentOutput))
 	}
 
 	focusedComment := fmt.Sprintf("Review Comment ID %s:\n%s", commentID, strings.TrimSpace(string(commentOutput)))
 
-	// For related discussions, fetch all comments on the same file/line
-	cmd = exec.Command("gh", "api", fmt.Sprintf("repos/%s/%s/pulls/comments", owner, repo),
-		"--jq", fmt.Sprintf(".[] | select(.path == (.[] | select(.id == %s) | .path)) | {id: .id, author: .user.login, body: .body, line: .line, created_at: .created_at}", commentID))
+	// For related discussions
+	cmd = exec.Command("gh", "api",
+		fmt.Sprintf("repos/%s/%s/pulls/%s/reviews/%s/comments", owner, repo, prNumber, commentID),
+		"--jq", ".[] | {id: .id, author: .user.login, body: .body, line: .line, created_at: .created_at, diff_hunk: .diff_hunk}")
 	logger.G(context.TODO()).WithField("cmd", cmd.String()).Debug("Fetching related review discussions")
 	discussionOutput, err := cmd.CombinedOutput()
 	if err != nil {
+		logger.G(context.TODO()).WithField("cmd", cmd.String()).WithError(err).Error("Failed to fetch related review discussions")
 		relatedDiscussion := "No related discussions found or failed to fetch"
 		return focusedComment, relatedDiscussion, nil
 	}
 
-	relatedDiscussion := fmt.Sprintf("Related review discussions for comment %s:\n%s", commentID, strings.TrimSpace(string(discussionOutput)))
+	// turn discussionOutput into from json to yaml
+	var discussion any
+	err = json.Unmarshal(discussionOutput, &discussion)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to unmarshal discussion output: %w, %s", err, string(discussionOutput))
+	}
+
+	// turn discussion into yaml
+	discussionYaml, err := yaml.Marshal(discussion)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to marshal discussion output: %w, %s", err, string(discussionOutput))
+	}
+
+	relatedDiscussion := fmt.Sprintf("Related review discussions for comment %s:\n%s", commentID, strings.TrimSpace(string(discussionYaml)))
 
 	return focusedComment, relatedDiscussion, nil
 }
