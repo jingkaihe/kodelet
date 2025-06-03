@@ -25,7 +25,6 @@ type PRRespondConfig struct {
 // PRData holds prefetched PR information
 type PRData struct {
 	BasicInfo              string
-	Comments               string
 	Reviews                string
 	FocusedComment         string // Focused comment when comment-id is specified
 	RelatedDiscussion      string // Related discussions for the focused comment
@@ -183,14 +182,6 @@ func prefetchPRData(prURL, commentID string) (*PRData, error) {
 		return nil, fmt.Errorf("failed to get PR basic info: %w", err)
 	}
 	data.BasicInfo = strings.TrimSpace(string(basicInfoOutput))
-	
-	// Get PR comments
-	cmd = exec.Command("gh", "pr", "view", prURL, "--comments")
-	commentsOutput, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get PR comments: %w", err)
-	}
-	data.Comments = strings.TrimSpace(string(commentsOutput))
 	
 	// Get PR reviews (try to get them, but don't fail if not available)
 	cmd = exec.Command("gh", "pr", "view", prURL, "--json", "reviews")
@@ -353,10 +344,6 @@ Find the most recent @kodelet mention by reviewing the comments data above. If n
 %s
 </pr_basic_info>
 
-<pr_comments>
-%s
-</pr_comments>
-
 <pr_reviews>
 %s
 </pr_reviews>%s
@@ -392,5 +379,5 @@ IMPORTANT:
 - If the request is unclear, ask for clarification in your comment response
 - Always acknowledge the specific comment you're responding to
 `,
-		prURL, prData.BasicInfo, prData.Comments, prData.Reviews, focusedSections, commentInstruction, bin)
+		prURL, prData.BasicInfo, prData.Reviews, focusedSections, commentInstruction, bin)
 }
