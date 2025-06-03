@@ -24,9 +24,11 @@ type PRRespondConfig struct {
 
 // PRData holds prefetched PR information
 type PRData struct {
-	BasicInfo    string
-	Comments     string
-	Reviews      string
+	BasicInfo         string
+	Comments          string
+	Reviews           string
+	FocusedComment    string // Focused comment when comment-id is specified
+	RelatedDiscussion string // Related discussions for the focused comment
 }
 
 // NewPRRespondConfig creates a new PRRespondConfig with default values
@@ -112,7 +114,7 @@ This command focuses on addressing a specific comment or review feedback within 
 
 		// Prefetch PR data
 		fmt.Println("Prefetching PR data...")
-		prData, err := prefetchPRData(config.PRURL)
+		prData, err := prefetchPRData(config.PRURL, config.CommentID)
 		if err != nil {
 			fmt.Printf("Error prefetching PR data: %v\n", err)
 			os.Exit(1)
@@ -168,7 +170,8 @@ func getPRRespondConfigFromFlags(cmd *cobra.Command) *PRRespondConfig {
 }
 
 // prefetchPRData fetches PR information, comments, and reviews using gh CLI
-func prefetchPRData(prURL string) (*PRData, error) {
+// If commentID is provided, it also fetches focused comment and related discussions
+func prefetchPRData(prURL, commentID string) (*PRData, error) {
 	data := &PRData{}
 	
 	// Get basic PR information
@@ -196,15 +199,80 @@ func prefetchPRData(prURL string) (*PRData, error) {
 		data.Reviews = "No reviews data available"
 	}
 	
+	// If comment ID is specified, fetch focused comment and related discussions
+	if commentID != "" {
+		focusedComment, relatedDiscussion, err := fetchFocusedCommentData(prURL, commentID)
+		if err != nil {
+			// Don't fail completely, just log the error and continue
+			fmt.Printf("Warning: Failed to fetch focused comment data: %v\n", err)
+			data.FocusedComment = "Failed to fetch focused comment"
+			data.RelatedDiscussion = "Failed to fetch related discussions"
+		} else {
+			data.FocusedComment = focusedComment
+			data.RelatedDiscussion = relatedDiscussion
+		}
+	}
+	
 	return data, nil
+}
+
+// fetchFocusedCommentData fetches specific comment details and related discussions using GitHub API
+func fetchFocusedCommentData(prURL, commentID string) (string, string, error) {
+	// Extract repository information from PR URL
+	// Expected format: https://github.com/owner/repo/pull/number
+	parts := strings.Split(prURL, "/")
+	if len(parts) < 5 {
+		return "", "", fmt.Errorf("invalid PR URL format")
+	}
+	
+	owner := parts[3]
+	repo := parts[4]
+	
+	// Fetch the specific comment using GitHub API
+	cmd := exec.Command("gh", "api", fmt.Sprintf("repos/%s/%s/pulls/comments/%s", owner, repo, commentID),
+		"--jq", "{author: .user.login, body: .body, path: .path, line: .line, created_at: .created_at}")
+	commentOutput, err := cmd.Output()
+	if err != nil {
+		return "", "", fmt.Errorf("failed to fetch comment details: %w", err)
+	}
+	
+	focusedComment := fmt.Sprintf("Comment ID %s:\n%s", commentID, strings.TrimSpace(string(commentOutput)))
+	
+	// For related discussions, we can fetch all comments on the same file/line
+	// This is a simplified approach - in practice, you might want more sophisticated logic
+	cmd = exec.Command("gh", "api", fmt.Sprintf("repos/%s/%s/pulls/comments", owner, repo),
+		"--jq", fmt.Sprintf(".[] | select(.path == (.[] | select(.id == %s) | .path)) | {id: .id, author: .user.login, body: .body, line: .line, created_at: .created_at}", commentID))
+	discussionOutput, err := cmd.Output()
+	if err != nil {
+		// If we can't get related discussions, just return empty
+		relatedDiscussion := "No related discussions found or failed to fetch"
+		return focusedComment, relatedDiscussion, nil
+	}
+	
+	relatedDiscussion := fmt.Sprintf("Related discussions for comment %s:\n%s", commentID, strings.TrimSpace(string(discussionOutput)))
+	
+	return focusedComment, relatedDiscussion, nil
 }
 
 func generatePRRespondPrompt(bin, prURL, commentID string, prData *PRData) string {
 	commentInstruction := ""
+	focusedSections := ""
+	
 	if commentID != "" {
 		commentInstruction = fmt.Sprintf(`
 
-Focus on the specific comment ID: %s by reviewing the comments data above.`, commentID)
+Focus on the specific comment ID: %s by reviewing the focused comment and related discussions below.`, commentID)
+		
+		// Add focused comment and related discussions sections when comment ID is specified
+		focusedSections = fmt.Sprintf(`
+
+<pr_comment>
+%s
+</pr_comment>
+
+<pr_discussions>
+%s
+</pr_discussions>`, prData.FocusedComment, prData.RelatedDiscussion)
 	} else {
 		commentInstruction = `
 
@@ -223,7 +291,7 @@ Find the most recent @kodelet mention by reviewing the comments data above. If n
 
 <pr_reviews>
 %s
-</pr_reviews>
+</pr_reviews>%s
 
 Based on the PR information provided above:%s
 
@@ -256,5 +324,5 @@ IMPORTANT:
 - If the request is unclear, ask for clarification in your comment response
 - Always acknowledge the specific comment you're responding to
 `,
-		prURL, prData.BasicInfo, prData.Comments, prData.Reviews, commentInstruction, bin)
+		prURL, prData.BasicInfo, prData.Comments, prData.Reviews, focusedSections, commentInstruction, bin)
 }
