@@ -152,7 +152,7 @@ kodelet conversation delete --no-confirm <conversation-id>
 
 ## Shell Completion
 
-Kodelet provides shell completion support for bash, zsh, fish, and PowerShell. This enables tab completion for commands and flags, making the CLI experience more efficient.
+Kodelet provides shell completion support for bash, zsh, and fish. This enables tab completion for commands and flags, making the CLI experience more efficient.
 
 ### Setup Instructions
 
@@ -163,16 +163,9 @@ To load completions in your current shell session:
 source <(kodelet completion bash)
 ```
 
-To load completions for every new session:
-
-On Linux:
+To load completions for every new session, add the following to your `~/.bashrc`:
 ```bash
-kodelet completion bash > /etc/bash_completion.d/kodelet
-```
-
-On macOS:
-```bash
-kodelet completion bash > $(brew --prefix)/etc/bash_completion.d/kodelet
+echo 'source <(kodelet completion bash)' >> ~/.bashrc
 ```
 
 **Zsh:**
@@ -187,16 +180,9 @@ To load completions in your current shell session:
 source <(kodelet completion zsh)
 ```
 
-To load completions for every new session:
-
-On Linux:
+To load completions for every new session, add the following to your `~/.zshrc`:
 ```bash
-kodelet completion zsh > "${fpath[1]}/_kodelet"
-```
-
-On macOS:
-```bash
-kodelet completion zsh > $(brew --prefix)/share/zsh/site-functions/_kodelet
+echo 'source <(kodelet completion zsh)' >> ~/.zshrc
 ```
 
 **Fish:**
@@ -211,15 +197,6 @@ To load completions for every new session:
 kodelet completion fish > ~/.config/fish/completions/kodelet.fish
 ```
 
-**PowerShell:**
-
-To load completions in your current shell session:
-```powershell
-kodelet completion powershell | Out-String | Invoke-Expression
-```
-
-To load completions for every new session, add the output of the above command to your PowerShell profile.
-
 ### Additional Options
 
 All completion commands support these additional flags:
@@ -227,7 +204,7 @@ All completion commands support these additional flags:
 
 Example:
 ```bash
-kodelet completion bash --no-descriptions > /etc/bash_completion.d/kodelet
+source <(kodelet completion bash --no-descriptions)
 ```
 
 After setting up completion, you will need to start a new shell session for the changes to take effect.
