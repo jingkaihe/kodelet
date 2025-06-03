@@ -20,18 +20,17 @@ import (
 
 // PRRespondConfig holds configuration for the pr-respond command
 type PRRespondConfig struct {
-	Provider  string
-	PRURL     string
-	CommentID string
+	Provider        string
+	PRURL           string
+	ReviewCommentID string
+	IssueCommentID  string
 }
 
 // PRData holds prefetched PR information
 type PRData struct {
-	BasicInfo               string
-	FocusedComment          string // Focused comment when comment-id is specified
-	RelatedDiscussion       string // Related discussions for the focused comment
-	LatestKodeletComment    string // Latest @kodelet comment when no comment-id is specified
-	LatestKodeletDiscussion string // Related discussions for the latest @kodelet comment
+	BasicInfo         string
+	FocusedComment    string // Focused comment when comment-id is specified
+	RelatedDiscussion string // Related discussions for the focused comment
 }
 
 // PRRespondTemplateData holds data for the PR respond prompt template
@@ -46,9 +45,10 @@ type PRRespondTemplateData struct {
 // NewPRRespondConfig creates a new PRRespondConfig with default values
 func NewPRRespondConfig() *PRRespondConfig {
 	return &PRRespondConfig{
-		Provider:  "github",
-		PRURL:     "",
-		CommentID: "",
+		Provider:        "github",
+		PRURL:           "",
+		ReviewCommentID: "",
+		IssueCommentID:  "",
 	}
 }
 
@@ -62,6 +62,18 @@ func (c *PRRespondConfig) Validate() error {
 		return fmt.Errorf("PR URL cannot be empty")
 	}
 
+	// Check that exactly one comment ID is provided
+	reviewCommentProvided := c.ReviewCommentID != ""
+	issueCommentProvided := c.IssueCommentID != ""
+
+	if !reviewCommentProvided && !issueCommentProvided {
+		return fmt.Errorf("either --review-comment-id or --issue-comment-id must be provided")
+	}
+
+	if reviewCommentProvided && issueCommentProvided {
+		return fmt.Errorf("only one of --review-comment-id or --issue-comment-id can be provided, not both")
+	}
+
 	return nil
 }
 
@@ -70,7 +82,7 @@ var prRespondCmd = &cobra.Command{
 	Short: "Respond to a specific PR comment with code changes",
 	Long: `Respond to a specific pull request comment by analyzing the feedback and implementing the requested changes.
 
-This command focuses on addressing a specific comment or review feedback within a PR. If no comment ID is provided, it will address the most recent @kodelet mention. Currently supports GitHub PRs only.`,
+This command focuses on addressing a specific comment or review feedback within a PR. You must provide either --review-comment-id for review comments or --issue-comment-id for issue comments. Currently supports GitHub PRs only.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx, cancel := context.WithCancel(cmd.Context())
 		defer cancel()
@@ -124,16 +136,24 @@ This command focuses on addressing a specific comment or review feedback within 
 			os.Exit(1)
 		}
 
+		// Determine which comment ID to use
+		var commentID string
+		if config.ReviewCommentID != "" {
+			commentID = config.ReviewCommentID
+		} else {
+			commentID = config.IssueCommentID
+		}
+
 		// Prefetch PR data
 		fmt.Println("Prefetching PR data...")
-		prData, err := prefetchPRData(config.PRURL, config.CommentID)
+		prData, err := prefetchPRData(config.PRURL, commentID, config.ReviewCommentID != "")
 		if err != nil {
 			fmt.Printf("Error prefetching PR data: %v\n", err)
 			os.Exit(1)
 		}
 
 		// Generate comprehensive prompt with prefetched data
-		prompt := generatePRRespondPrompt(bin, config.PRURL, config.CommentID, prData)
+		prompt := generatePRRespondPrompt(bin, config.PRURL, commentID, prData)
 		logger.G(context.TODO()).WithField("prompt", prompt).Debug("Generated PR respond prompt")
 
 		// Send to LLM using existing architecture
@@ -161,7 +181,8 @@ func init() {
 	defaults := NewPRRespondConfig()
 	prRespondCmd.Flags().StringP("provider", "p", defaults.Provider, "The PR provider to use")
 	prRespondCmd.Flags().String("pr-url", defaults.PRURL, "PR URL (required)")
-	prRespondCmd.Flags().String("comment-id", defaults.CommentID, "Specific comment ID to respond to (optional, will find latest @kodelet mention if not provided)")
+	prRespondCmd.Flags().String("review-comment-id", defaults.ReviewCommentID, "Specific review comment ID to respond to")
+	prRespondCmd.Flags().String("issue-comment-id", defaults.IssueCommentID, "Specific issue comment ID to respond to")
 	prRespondCmd.MarkFlagRequired("pr-url")
 }
 
@@ -175,8 +196,11 @@ func getPRRespondConfigFromFlags(cmd *cobra.Command) *PRRespondConfig {
 	if prURL, err := cmd.Flags().GetString("pr-url"); err == nil {
 		config.PRURL = prURL
 	}
-	if commentID, err := cmd.Flags().GetString("comment-id"); err == nil {
-		config.CommentID = commentID
+	if reviewCommentID, err := cmd.Flags().GetString("review-comment-id"); err == nil {
+		config.ReviewCommentID = reviewCommentID
+	}
+	if issueCommentID, err := cmd.Flags().GetString("issue-comment-id"); err == nil {
+		config.IssueCommentID = issueCommentID
 	}
 
 	return config
@@ -184,7 +208,7 @@ func getPRRespondConfigFromFlags(cmd *cobra.Command) *PRRespondConfig {
 
 // prefetchPRData fetches PR information, comments, and reviews using gh CLI
 // If commentID is provided, it also fetches focused comment and related discussions
-func prefetchPRData(prURL, commentID string) (*PRData, error) {
+func prefetchPRData(prURL, commentID string, isReviewComment bool) (*PRData, error) {
 	data := &PRData{}
 
 	// Get basic PR information
@@ -196,30 +220,23 @@ func prefetchPRData(prURL, commentID string) (*PRData, error) {
 	}
 	data.BasicInfo = strings.TrimSpace(string(basicInfoOutput))
 
-	// If comment ID is specified, fetch focused comment and related discussions
-	if commentID != "" {
-		focusedComment, relatedDiscussion, err := fetchFocusedCommentData(prURL, commentID)
-		if err != nil {
-			// Don't fail completely, just log the error and continue
-			fmt.Printf("Warning: Failed to fetch focused comment data: %v\n", err)
-			data.FocusedComment = "Failed to fetch focused comment"
-			data.RelatedDiscussion = "Failed to fetch related discussions"
-		} else {
-			data.FocusedComment = focusedComment
-			data.RelatedDiscussion = relatedDiscussion
-		}
+	// Fetch focused comment and related discussions
+	var focusedComment, relatedDiscussion string
+
+	if isReviewComment {
+		focusedComment, relatedDiscussion, err = fetchFocusedReviewComment(prURL, commentID)
 	} else {
-		// When no comment ID is provided, find the latest @kodelet comment
-		latestKodeletComment, latestKodeletDiscussion, err := fetchLatestKodeletComment(prURL)
-		if err != nil {
-			// Don't fail completely, just log the error and continue
-			fmt.Printf("Warning: Failed to fetch latest @kodelet comment: %v\n", err)
-			data.LatestKodeletComment = "No @kodelet mention found or failed to fetch"
-			data.LatestKodeletDiscussion = "No related discussions available"
-		} else {
-			data.LatestKodeletComment = latestKodeletComment
-			data.LatestKodeletDiscussion = latestKodeletDiscussion
-		}
+		focusedComment, relatedDiscussion, err = fetchFocusedIssueComment(prURL, commentID)
+	}
+
+	if err != nil {
+		// Don't fail completely, just log the error and continue
+		fmt.Printf("Warning: Failed to fetch focused comment data: %v\n", err)
+		data.FocusedComment = "Failed to fetch focused comment"
+		data.RelatedDiscussion = "Failed to fetch related discussions"
+	} else {
+		data.FocusedComment = focusedComment
+		data.RelatedDiscussion = relatedDiscussion
 	}
 
 	return data, nil
@@ -250,92 +267,59 @@ func formatFocusedSections(comment, discussion string) string {
 		comment, discussion)
 }
 
-// fetchFocusedCommentData fetches specific comment details and related discussions using GitHub API
-func fetchFocusedCommentData(prURL, commentID string) (string, string, error) {
+// fetchFocusedReviewComment fetches specific review comment details and related discussions using GitHub API
+func fetchFocusedReviewComment(prURL, commentID string) (string, string, error) {
 	owner, repo, _, err := parseGitHubURL(prURL)
 	if err != nil {
 		return "", "", err
 	}
-	// Treat it as an issue comment first
-	cmd := exec.Command("gh", "api", fmt.Sprintf("repos/%s/%s/issues/comments/%s", owner, repo, commentID),
-		"--jq", ".body")
-	logger.G(context.TODO()).WithField("cmd", cmd.String()).Debug("Fetching focused comment data")
-	commentOutput, err := cmd.CombinedOutput()
-	if err == nil {
-		return strings.TrimSpace(string(commentOutput)), "", nil
-	}
-	logger.G(context.TODO()).WithField("cmd", cmd.String()).WithError(err).Error("Failed to fetch focused comment data, fallback to pull request comment")
 
-	// Fetch the specific comment using GitHub API
-	cmd = exec.Command("gh", "api", fmt.Sprintf("repos/%s/%s/pulls/comments/%s", owner, repo, commentID),
+	// Fetch review comment
+	cmd := exec.Command("gh", "api", fmt.Sprintf("repos/%s/%s/pulls/comments/%s", owner, repo, commentID),
 		"--jq", "{author: .user.login, body: .body, path: .path, line: .line, created_at: .created_at}")
-	logger.G(context.TODO()).WithField("cmd", cmd.String()).Debug("Fetching focused comment data")
-	commentOutput, err = cmd.CombinedOutput()
+	logger.G(context.TODO()).WithField("cmd", cmd.String()).Debug("Fetching review comment data")
+	commentOutput, err := cmd.CombinedOutput()
 	if err != nil {
-		return "", "", fmt.Errorf("failed to fetch comment details: %w, %s", err, string(commentOutput))
+		return "", "", fmt.Errorf("failed to fetch review comment details: %w, %s", err, string(commentOutput))
 	}
 
-	focusedComment := fmt.Sprintf("Comment ID %s:\n%s", commentID, strings.TrimSpace(string(commentOutput)))
+	focusedComment := fmt.Sprintf("Review Comment ID %s:\n%s", commentID, strings.TrimSpace(string(commentOutput)))
 
-	// For related discussions, we can fetch all comments on the same file/line
-	// This is a simplified approach - in practice, you might want more sophisticated logic
+	// For related discussions, fetch all comments on the same file/line
 	cmd = exec.Command("gh", "api", fmt.Sprintf("repos/%s/%s/pulls/comments", owner, repo),
 		"--jq", fmt.Sprintf(".[] | select(.path == (.[] | select(.id == %s) | .path)) | {id: .id, author: .user.login, body: .body, line: .line, created_at: .created_at}", commentID))
-	logger.G(context.TODO()).WithField("cmd", cmd.String()).Debug("Fetching related discussions")
+	logger.G(context.TODO()).WithField("cmd", cmd.String()).Debug("Fetching related review discussions")
 	discussionOutput, err := cmd.CombinedOutput()
 	if err != nil {
-		// If we can't get related discussions, just return empty
 		relatedDiscussion := "No related discussions found or failed to fetch"
 		return focusedComment, relatedDiscussion, nil
 	}
 
-	relatedDiscussion := fmt.Sprintf("Related discussions for comment %s:\n%s", commentID, strings.TrimSpace(string(discussionOutput)))
+	relatedDiscussion := fmt.Sprintf("Related review discussions for comment %s:\n%s", commentID, strings.TrimSpace(string(discussionOutput)))
 
 	return focusedComment, relatedDiscussion, nil
 }
 
-// fetchKodeletMentions fetches all @kodelet mentions from both issue and review comments
-func fetchKodeletMentions(owner, repo, prNumber string) []string {
-	jqFilter := ".[] | select(.body | contains(\"@kodelet\")) | {id: .id, author: .user.login, body: .body, created_at: .created_at} | tostring"
-
-	// Search issue comments
-	cmd1 := exec.Command("gh", "api", fmt.Sprintf("repos/%s/%s/issues/%s/comments", owner, repo, prNumber), "--jq", jqFilter)
-	logger.G(context.TODO()).WithField("cmd", cmd1.String()).Debug("Fetching issue comments")
-	issueOutput, err1 := cmd1.CombinedOutput()
-
-	// Search review comments
-	cmd2 := exec.Command("gh", "api", fmt.Sprintf("repos/%s/%s/pulls/%s/comments", owner, repo, prNumber), "--jq", jqFilter)
-	logger.G(context.TODO()).WithField("cmd", cmd2.String()).Debug("Fetching review comments")
-	reviewOutput, err2 := cmd2.CombinedOutput()
-
-	var allComments []string
-	if err1 == nil && len(issueOutput) > 0 {
-		allComments = append(allComments, strings.Split(strings.TrimSpace(string(issueOutput)), "\n")...)
-	}
-	if err2 == nil && len(reviewOutput) > 0 {
-		allComments = append(allComments, strings.Split(strings.TrimSpace(string(reviewOutput)), "\n")...)
-	}
-	return allComments
-}
-
-// fetchLatestKodeletComment finds the most recent @kodelet mention in PR comments and related discussions
-func fetchLatestKodeletComment(prURL string) (string, string, error) {
-	owner, repo, prNumber, err := parseGitHubURL(prURL)
+// fetchFocusedIssueComment fetches specific issue comment details using GitHub API
+func fetchFocusedIssueComment(prURL, commentID string) (string, string, error) {
+	owner, repo, _, err := parseGitHubURL(prURL)
 	if err != nil {
 		return "", "", err
 	}
 
-	allKodeletComments := fetchKodeletMentions(owner, repo, prNumber)
-
-	if len(allKodeletComments) == 0 {
-		return "No @kodelet mention found in PR comments", "No related discussions available", nil
+	// Fetch issue comment
+	cmd := exec.Command("gh", "api", fmt.Sprintf("repos/%s/%s/issues/comments/%s", owner, repo, commentID),
+		"--jq", "{author: .user.login, body: .body, created_at: .created_at}")
+	logger.G(context.TODO()).WithField("cmd", cmd.String()).Debug("Fetching issue comment data")
+	commentOutput, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", "", fmt.Errorf("failed to fetch issue comment details: %w, %s", err, string(commentOutput))
 	}
 
-	latestComment := allKodeletComments[len(allKodeletComments)-1]
-	latestKodeletComment := fmt.Sprintf("Latest @kodelet mention:\n%s", latestComment)
-	latestKodeletDiscussion := fmt.Sprintf("All @kodelet mentions in this PR:\n%s", strings.Join(allKodeletComments, "\n---\n"))
+	focusedComment := fmt.Sprintf("Issue Comment ID %s:\n%s", commentID, strings.TrimSpace(string(commentOutput)))
+	relatedDiscussion := "Issue comments don't have related discussions like review comments"
 
-	return latestKodeletComment, latestKodeletDiscussion, nil
+	return focusedComment, relatedDiscussion, nil
 }
 
 const prRespondPromptTemplate = `Here is the information for pull request {{.PRURL}}:
@@ -379,13 +363,7 @@ IMPORTANT:
 `
 
 func generatePRRespondPrompt(bin, prURL, commentID string, prData *PRData) string {
-	var focusedSections string
-
-	if commentID != "" {
-		focusedSections = formatFocusedSections(prData.FocusedComment, prData.RelatedDiscussion)
-	} else {
-		focusedSections = formatFocusedSections(prData.LatestKodeletComment, prData.LatestKodeletDiscussion)
-	}
+	focusedSections := formatFocusedSections(prData.FocusedComment, prData.RelatedDiscussion)
 
 	data := PRRespondTemplateData{
 		BinPath:         bin,
