@@ -95,7 +95,7 @@ kodelet pr
 Resolve GitHub issues automatically:
 
 ```bash
-kodelet resolve --issue-url https://github.com/owner/repo/issues/123
+kodelet issue-resolve --issue-url https://github.com/owner/repo/issues/123
 ```
 
 This command analyzes the issue, creates an appropriate branch, works on the issue resolution, and automatically creates a pull request with updates back to the original issue. Currently supports GitHub issues only.
@@ -193,18 +193,22 @@ Kodelet uses a **layered configuration approach** where settings are applied in 
 
 Use `kodelet-config.yaml` in your project root for project-specific settings. This file will **merge with and override** your global configuration, so you only need to specify the settings that differ from your global defaults.
 
-```bash
+```yaml
 # Global config (~/.kodelet/config.yaml)
 provider: "anthropic"
 model: "claude-sonnet-4-0"
 max_tokens: 8192
 log_level: "info"
+```
 
+```yaml
 # Repository config (kodelet-config.yaml) - only override what's different
-echo "model: claude-3-5-haiku-latest
-max_tokens: 4096" > kodelet-config.yaml
+provider: "openai"
+model: gpt-4.1
+```
 
-# Result: provider=anthropic, model=claude-3-5-haiku-latest, max_tokens=4096, log_level=info
+```bash
+# Result: using provider=openai, model=gpt-4.1, max_tokens=8192, log_level=info
 kodelet run "analyze this codebase"
 ```
 
