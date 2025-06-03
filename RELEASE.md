@@ -1,5 +1,15 @@
 # Kodelet
 
+## 0.0.35.alpha (2025-06-03)
+
+### Enhanced PR Response System
+
+- **Focused Comment Data Fetching**: Improved `kodelet pr-respond` with targeted comment analysis
+  - **Smart Data Fetching**: When `--comment-id` is specified, fetches specific comment details and related discussions for focused responses
+  - **Automatic @kodelet Detection**: When no comment-id provided, automatically finds latest @kodelet mention with contextual discussions
+  - **Reduced Noise**: Removed redundant all-comments fetching, keeping only relevant focused sections
+  - **Clean Repository Management**: Fixed accidental binary inclusion in commit history with proper cleanup
+
 ## 0.0.34.alpha (2025-06-02)
 
 ### Command Restructure
