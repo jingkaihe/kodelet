@@ -150,6 +150,50 @@ kodelet conversation delete <conversation-id>
 kodelet conversation delete --no-confirm <conversation-id>
 ```
 
+## Shell Completion
+
+Kodelet provides shell completion support for bash, zsh, and fish. This enables tab completion for commands and flags, making the CLI experience more efficient.
+
+### Setup Instructions
+
+**Bash:**
+
+To load completions for every new session, add the following to your `~/.bashrc`:
+```bash
+echo 'source <(kodelet completion bash)' >> ~/.bashrc
+```
+
+**Zsh:**
+
+If shell completion is not already enabled in your environment, you will need to enable it first:
+```bash
+echo "autoload -U compinit; compinit" >> ~/.zshrc
+```
+
+To load completions for every new session, add the following to your `~/.zshrc`:
+```bash
+echo 'source <(kodelet completion zsh)' >> ~/.zshrc
+```
+
+**Fish:**
+
+To load completions for every new session:
+```bash
+kodelet completion fish > ~/.config/fish/completions/kodelet.fish
+```
+
+### Additional Options
+
+All completion commands support these additional flags:
+- `--no-descriptions`: Disable completion descriptions for a cleaner experience
+
+Example:
+```bash
+echo 'source <(kodelet completion bash --no-descriptions)' >> ~/.bashrc
+```
+
+After setting up completion, you will need to start a new shell session for the changes to take effect.
+
 ## Configuration
 
 Kodelet supports multiple configuration methods with the following precedence (highest to lowest):
