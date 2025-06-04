@@ -48,4 +48,3 @@ jobs:
         uses: jingkaihe/kodelet-action@v0.1.4-alpha
         with:
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
-          kodelet-version: 0.0.35.alpha

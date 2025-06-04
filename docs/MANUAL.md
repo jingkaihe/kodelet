@@ -44,6 +44,8 @@ kodelet run "your query"
 # One-shot query with conversation persistence
 kodelet run "your query"                     # saved automatically
 kodelet run --resume CONVERSATION_ID "more"  # continue a conversation
+kodelet run --follow "continue most recent"  # continue the most recent conversation
+kodelet run -f "quick follow-up"             # short form
 kodelet run --no-save "temporary query"      # don't save the conversation
 ```
 
@@ -54,6 +56,9 @@ For extended conversations and complex tasks:
 ```bash
 kodelet chat
 kodelet chat --plain
+kodelet chat --follow              # resume most recent conversation
+kodelet chat -f                    # short form
+kodelet chat --resume CONV_ID      # resume specific conversation
 ```
 
 ### Watch Mode
@@ -131,6 +136,24 @@ kodelet run --image ./architecture.png "Review this system architecture and sugg
 - **Multiple Images**: Up to 10 images per message
 - **Size Limits**: Maximum 5MB per image file
 - **Provider Support**: Anthropic Claude models (OpenAI support planned)
+
+### Conversation Continuation
+
+Continue previous conversations seamlessly:
+
+```bash
+# Continue the most recent conversation (both run and chat)
+kodelet run --follow "continue working on the feature"
+kodelet run -f "what's the status?"
+kodelet chat --follow
+kodelet chat -f
+
+# Continue a specific conversation by ID
+kodelet run --resume CONVERSATION_ID "more questions"
+kodelet chat --resume CONVERSATION_ID
+```
+
+**Note**: The `--follow` and `--resume` flags cannot be used together. If no conversations exist when using `--follow`, a new conversation will be started with a warning message.
 
 ### Conversation Management
 

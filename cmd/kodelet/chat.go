@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	"github.com/jingkaihe/kodelet/pkg/tui"
 	"github.com/spf13/cobra"
@@ -14,6 +15,7 @@ import (
 type ChatOptions struct {
 	usePlainUI   bool
 	resumeConvID string
+	follow       bool
 	storageType  string
 	noSave       bool
 	maxTurns     int
@@ -24,6 +26,7 @@ var chatOptions = &ChatOptions{}
 func init() {
 	chatCmd.Flags().BoolVar(&chatOptions.usePlainUI, "plain", false, "Use the plain command-line interface instead of the TUI")
 	chatCmd.Flags().StringVar(&chatOptions.resumeConvID, "resume", "", "Resume a specific conversation")
+	chatCmd.Flags().BoolVarP(&chatOptions.follow, "follow", "f", false, "Follow the most recent conversation")
 	chatCmd.Flags().StringVar(&chatOptions.storageType, "storage", "json", "Specify storage backend (json or sqlite)")
 	chatCmd.Flags().BoolVar(&chatOptions.noSave, "no-save", false, "Disable conversation persistence")
 	chatCmd.Flags().IntVar(&chatOptions.maxTurns, "max-turns", 50, "Maximum number of turns within a single message exchange (0 for no limit)")
@@ -37,6 +40,18 @@ var chatCmd = &cobra.Command{
 		ctx, cancel := context.WithCancel(cmd.Context())
 		defer cancel()
 
+		if chatOptions.follow {
+			if chatOptions.resumeConvID != "" {
+
+				fmt.Printf("Error: --follow and --resume cannot be used together\n")
+				os.Exit(1)
+			}
+			var err error
+			chatOptions.resumeConvID, err = conversations.GetMostRecentConversationID()
+			if err != nil {
+				fmt.Println("Warning: no conversations found, starting a new conversation")
+			}
+		}
 		mcpManager, err := tools.CreateMCPManagerFromViper(ctx)
 		if err != nil {
 			fmt.Printf("Error creating MCP manager: %v\n", err)
