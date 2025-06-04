@@ -9,6 +9,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -154,7 +155,18 @@ func getRunConfigFromFlags(cmd *cobra.Command) *RunConfig {
 	config := NewRunConfig()
 
 	if resumeConvID, err := cmd.Flags().GetString("resume"); err == nil {
-		config.ResumeConvID = resumeConvID
+		// Check if --resume was specified without a value, or with an empty value
+		if cmd.Flags().Changed("resume") && resumeConvID == "" {
+			// Auto-select the most recent conversation
+			if latestID, err := conversations.GetMostRecentConversationID(); err == nil {
+				config.ResumeConvID = latestID
+				fmt.Printf("Auto-resuming most recent conversation: %s\n", latestID)
+			} else {
+				fmt.Printf("Warning: --resume specified but no conversations found: %v\n", err)
+			}
+		} else {
+			config.ResumeConvID = resumeConvID
+		}
 	}
 	if noSave, err := cmd.Flags().GetBool("no-save"); err == nil {
 		config.NoSave = noSave

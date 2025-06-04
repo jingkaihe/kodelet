@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	"github.com/jingkaihe/kodelet/pkg/tui"
 	"github.com/spf13/cobra"
@@ -36,6 +37,16 @@ var chatCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx, cancel := context.WithCancel(cmd.Context())
 		defer cancel()
+
+		// Handle auto-resume if --resume was specified without a value
+		if cmd.Flags().Changed("resume") && chatOptions.resumeConvID == "" {
+			if latestID, err := conversations.GetMostRecentConversationID(); err == nil {
+				chatOptions.resumeConvID = latestID
+				fmt.Printf("Auto-resuming most recent conversation: %s\n", latestID)
+			} else {
+				fmt.Printf("Warning: --resume specified but no conversations found: %v\n", err)
+			}
+		}
 
 		mcpManager, err := tools.CreateMCPManagerFromViper(ctx)
 		if err != nil {
