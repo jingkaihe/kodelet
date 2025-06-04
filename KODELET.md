@@ -75,7 +75,9 @@ kodelet watch                          # File watcher
 
 # Conversation management
 kodelet conversation list|show|delete  # Manage conversations
-kodelet run --resume ID "more"         # Continue conversation
+kodelet run --resume ID "more"         # Continue specific conversation
+kodelet run --follow "continue"        # Continue most recent conversation
+kodelet chat --follow                  # Resume most recent in chat mode
 
 # Git integration
 kodelet commit [--no-confirm|--short]  # AI commit messages
