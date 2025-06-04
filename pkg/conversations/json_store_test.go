@@ -174,3 +174,152 @@ func (c *fixedClock) Now() time.Time {
 func (c *fixedClock) Add(d time.Duration) {
 	c.now = c.now.Add(d)
 }
+
+func TestGetMostRecentConversationID(t *testing.T) {
+	// Test the core logic that GetMostRecentConversationID uses.
+	// We test the Query functionality with the same parameters that
+	// GetMostRecentConversationID uses to ensure it works correctly.
+
+	t.Run("NoConversationsExists", func(t *testing.T) {
+		tempDir, cleanup := setupTestDir(t)
+		defer cleanup()
+		store, err := NewJSONConversationStore(tempDir)
+		require.NoError(t, err)
+		defer store.Close()
+
+		// Test the same query logic that GetMostRecentConversationID uses
+		options := QueryOptions{
+			Limit:     1,
+			Offset:    0,
+			SortBy:    "updated_at", // This is what GetMostRecentConversationID uses
+			SortOrder: "desc",
+		}
+
+		conversations, err := store.Query(options)
+		require.NoError(t, err)
+
+		// When no conversations exist, should return empty result
+		assert.Equal(t, 0, len(conversations), "Should return no conversations when none exist")
+	})
+
+	t.Run("SingleConversation", func(t *testing.T) {
+		tempDir, cleanup := setupTestDir(t)
+		defer cleanup()
+		store, err := NewJSONConversationStore(tempDir)
+		require.NoError(t, err)
+		defer store.Close()
+
+		// Create a single conversation
+		record := NewConversationRecord("single-conversation")
+		record.Summary = "Only conversation"
+		record.RawMessages = json.RawMessage(`[{"role":"user","content":[{"type":"text","text":"Hello"}]}]`)
+		
+		err = store.Save(record)
+		require.NoError(t, err)
+
+		// Test the same query logic that GetMostRecentConversationID uses
+		options := QueryOptions{
+			Limit:     1,
+			Offset:    0,
+			SortBy:    "updated_at", // This is what GetMostRecentConversationID uses
+			SortOrder: "desc",
+		}
+
+		conversations, err := store.Query(options)
+		require.NoError(t, err)
+		require.Equal(t, 1, len(conversations), "Should return exactly one conversation")
+		assert.Equal(t, "single-conversation", conversations[0].ID)
+	})
+
+	t.Run("MultipleConversationsByTime", func(t *testing.T) {
+		tempDir, cleanup := setupTestDir(t)
+		defer cleanup()
+		store, err := NewJSONConversationStore(tempDir)
+		require.NoError(t, err)
+		defer store.Close()
+
+		// Create multiple conversations with different timestamps
+		baseTime := time.Now().Add(-1 * time.Hour)
+		
+		// Oldest conversation
+		record1 := NewConversationRecord("oldest-conversation")
+		record1.Summary = "Oldest"
+		record1.RawMessages = json.RawMessage(`[{"role":"user","content":[{"type":"text","text":"First"}]}]`)
+		record1.CreatedAt = baseTime
+		record1.UpdatedAt = baseTime
+		err = store.Save(record1)
+		require.NoError(t, err)
+
+		// Middle conversation
+		record2 := NewConversationRecord("middle-conversation")
+		record2.Summary = "Middle"
+		record2.RawMessages = json.RawMessage(`[{"role":"user","content":[{"type":"text","text":"Second"}]}]`)
+		record2.CreatedAt = baseTime.Add(30 * time.Minute)
+		record2.UpdatedAt = baseTime.Add(30 * time.Minute)
+		err = store.Save(record2)
+		require.NoError(t, err)
+
+		// Most recent conversation
+		record3 := NewConversationRecord("newest-conversation")
+		record3.Summary = "Newest"
+		record3.RawMessages = json.RawMessage(`[{"role":"user","content":[{"type":"text","text":"Third"}]}]`)
+		record3.CreatedAt = baseTime.Add(60 * time.Minute)
+		record3.UpdatedAt = baseTime.Add(60 * time.Minute)
+		err = store.Save(record3)
+		require.NoError(t, err)
+
+		// Test the same query logic that GetMostRecentConversationID uses
+		options := QueryOptions{
+			Limit:     1,
+			Offset:    0,
+			SortBy:    "updated_at", // This is what GetMostRecentConversationID uses
+			SortOrder: "desc",
+		}
+
+		conversations, err := store.Query(options)
+		require.NoError(t, err)
+		require.Equal(t, 1, len(conversations), "Should return exactly one conversation")
+		assert.Equal(t, "newest-conversation", conversations[0].ID, "Should return the most recent conversation")
+	})
+
+	t.Run("ConversationsSortedByUpdatedAt", func(t *testing.T) {
+		tempDir, cleanup := setupTestDir(t)
+		defer cleanup()
+		store, err := NewJSONConversationStore(tempDir)
+		require.NoError(t, err)
+		defer store.Close()
+
+		// Create first conversation
+		record1 := NewConversationRecord("created-first")
+		record1.Summary = "Created first"
+		record1.RawMessages = json.RawMessage(`[{"role":"user","content":[{"type":"text","text":"Created first"}]}]`)
+		err = store.Save(record1)
+		require.NoError(t, err)
+
+		// Add a small delay to ensure different timestamps
+		time.Sleep(50 * time.Millisecond)
+
+		// Create second conversation (will have later UpdatedAt due to the delay)
+		record2 := NewConversationRecord("created-second")
+		record2.Summary = "Created second"
+		record2.RawMessages = json.RawMessage(`[{"role":"user","content":[{"type":"text","text":"Created second"}]}]`)
+		err = store.Save(record2)
+		require.NoError(t, err)
+
+		// Test the same query logic that GetMostRecentConversationID uses
+		options := QueryOptions{
+			Limit:     1,
+			Offset:    0,
+			SortBy:    "updated_at", // This is what GetMostRecentConversationID uses
+			SortOrder: "desc",
+		}
+
+		conversations, err := store.Query(options)
+		require.NoError(t, err)
+		require.Equal(t, 1, len(conversations), "Should return exactly one conversation")
+		
+		// Since record2 was saved after record1, it should have a more recent UpdatedAt timestamp
+		// and should be returned as the most recent conversation
+		assert.Equal(t, "created-second", conversations[0].ID, "Should return conversation with most recent updated_at timestamp")
+	})
+}
