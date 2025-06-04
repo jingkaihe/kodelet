@@ -19,6 +19,7 @@ import (
 // RunConfig holds configuration for the run command
 type RunConfig struct {
 	ResumeConvID string
+	Follow       bool
 	NoSave       bool
 	Images       []string // Image paths or URLs to include with the message
 	MaxTurns     int      // Maximum number of turns within a single SendMessage call
@@ -28,6 +29,7 @@ type RunConfig struct {
 func NewRunConfig() *RunConfig {
 	return &RunConfig{
 		ResumeConvID: "",
+		Follow:       false,
 		NoSave:       false,
 		Images:       []string{},
 		MaxTurns:     50, // Default to 50 turns
@@ -145,6 +147,7 @@ var runCmd = &cobra.Command{
 func init() {
 	defaults := NewRunConfig()
 	runCmd.Flags().String("resume", defaults.ResumeConvID, "Resume a specific conversation")
+	runCmd.Flags().BoolP("follow", "f", defaults.Follow, "Follow the most recent conversation")
 	runCmd.Flags().Bool("no-save", defaults.NoSave, "Disable conversation persistence")
 	runCmd.Flags().StringSliceP("image", "I", defaults.Images, "Add image input (can be used multiple times)")
 	runCmd.Flags().Int("max-turns", defaults.MaxTurns, "Maximum number of turns within a single message exchange (0 for no limit)")
@@ -155,19 +158,23 @@ func getRunConfigFromFlags(cmd *cobra.Command) *RunConfig {
 	config := NewRunConfig()
 
 	if resumeConvID, err := cmd.Flags().GetString("resume"); err == nil {
-		// Check if --resume was specified without a value, or with an empty value
-		if cmd.Flags().Changed("resume") && resumeConvID == "" {
-			// Auto-select the most recent conversation
-			if latestID, err := conversations.GetMostRecentConversationID(); err == nil {
-				config.ResumeConvID = latestID
-				fmt.Printf("Auto-resuming most recent conversation: %s\n", latestID)
-			} else {
-				fmt.Printf("Warning: --resume specified but no conversations found: %v\n", err)
-			}
-		} else {
-			config.ResumeConvID = resumeConvID
+		config.ResumeConvID = resumeConvID
+	}
+	if follow, err := cmd.Flags().GetBool("follow"); err == nil {
+		config.Follow = follow
+	}
+	if config.Follow {
+		if config.ResumeConvID != "" {
+			fmt.Printf("Error: --auto-resume and --resume cannot be used together\n")
+			os.Exit(1)
+		}
+		var err error
+		config.ResumeConvID, err = conversations.GetMostRecentConversationID()
+		if err != nil {
+			fmt.Println("Warning: no conversations found, starting a new conversation")
 		}
 	}
+
 	if noSave, err := cmd.Flags().GetBool("no-save"); err == nil {
 		config.NoSave = noSave
 	}
