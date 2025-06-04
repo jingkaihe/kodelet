@@ -1,5 +1,15 @@
 # Kodelet
 
+## 0.0.36.alpha (2025-06-04)
+
+### Conversation Continuity Enhancements
+
+- **Follow Flag Implementation**: Added `--follow` / `-f` flag for seamless conversation continuation
+  - **Run Command**: `kodelet run --follow "continue working"` resumes most recent conversation automatically
+  - **Chat Command**: `kodelet chat --follow` enters interactive mode with most recent conversation loaded
+  - **Smart Conflict Detection**: Prevents using `--follow` and `--resume` flags together with clear error messages
+  - **Graceful Fallbacks**: When no conversations exist, starts new conversation with informative warning
+
 ## 0.0.35.alpha (2025-06-03)
 
 ### Enhanced PR Response System
@@ -32,7 +42,7 @@
 # New recommended command
 kodelet issue-resolve --issue-url https://github.com/owner/repo/issues/123
 
-# Legacy command (still works, shows deprecation notice)  
+# Legacy command (still works, shows deprecation notice)
 kodelet resolve --issue-url https://github.com/owner/repo/issues/123
 ```
 
@@ -85,7 +95,7 @@ kodelet resolve --issue-url https://github.com/owner/repo/issues/123
 # Respond to specific PR review comment
 kodelet pr-respond --pr-url https://github.com/owner/repo/pull/123 --review-id 456789
 
-# Respond to specific PR issue comment  
+# Respond to specific PR issue comment
 kodelet pr-respond --pr-url https://github.com/owner/repo/pull/123 --issue-comment-id 789012
 
 # Respond to latest @kodelet mention in PR
