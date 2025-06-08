@@ -2,7 +2,7 @@ VERSION=$(shell cat VERSION.txt)
 GIT_COMMIT=$(shell git rev-parse --short HEAD)
 
 VERSION_FLAG=-X 'github.com/jingkaihe/kodelet/pkg/version.Version=$(VERSION)' -X 'github.com/jingkaihe/kodelet/pkg/version.GitCommit=$(GIT_COMMIT)'
-.PHONY: build cross-build run test lint format docker-build docker-run
+.PHONY: build cross-build run test lint format docker-build docker-run e2e-test e2e-test-docker
 
 # Build the application
 build:
@@ -14,7 +14,7 @@ chat: build
 
 # Run tests
 test:
-	go test ./...
+	go test ./pkg/... ./cmd/...
 
 # Run linter
 lint:
@@ -23,6 +23,11 @@ lint:
 # Format code
 format:
 	go fmt ./...
+
+# Run e2e tests in Docker
+e2e-test-docker:
+	docker build -f tests/acceptance/Dockerfile.e2e -t kodelet-e2e-tests .
+	docker run --rm -e ANTHROPIC_API_KEY -e OPENAI_API_KEY kodelet-e2e-tests
 
 # Cross-compile for multiple platforms
 cross-build:
@@ -52,6 +57,8 @@ help:
 	@echo "  run          - Run in one-shot mode (use: make run query='your query')"
 	@echo "  chat         - Run in interactive chat mode"
 	@echo "  test         - Run tests"
+	@echo "  e2e-test     - Run end-to-end acceptance tests"
+	@echo "  e2e-test-docker - Run e2e tests in Docker"
 	@echo "  lint         - Run linter"
 	@echo "  format       - Format code"
 	@echo "  docker-build - Build Docker image"

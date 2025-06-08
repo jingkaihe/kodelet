@@ -41,6 +41,8 @@ Kodelet is a lightweight CLI tool that helps with software engineering tasks. It
 │   └── version/         # Version information
 ├── README.md            # Project overview
 ├── RELEASE.md           # Release notes
+├── tests/               # Test files
+│   └── acceptance/      # Acceptance tests
 └── VERSION.txt          # Version information file
 ```
 
@@ -63,6 +65,15 @@ All development work must follow these core principles:
 2. **Write comprehensive tests**: Always write tests for new features you add, and regression tests for changes you make to existing functionality.
 3. **Document CLI changes**: Always document when you have changed the CLI interface to maintain clear usage documentation.
 
+## Testing
+
+```bash
+make test # Run all tests
+make e2e-test-docker # Run acceptance tests in Docker
+go test ./pkg/... # Run tests for a specific package
+go test -v -cover ./pkg/... ./cmd/... # Run tests with coverage
+```
+
 ## Key Commands
 
 For comprehensive usage documentation and examples, see [./docs/MANUAL.md](./docs/MANUAL.md).
@@ -82,15 +93,16 @@ kodelet chat --follow                  # Resume most recent in chat mode
 # Git integration
 kodelet commit [--no-confirm|--short]  # AI commit messages
 kodelet pr [--target main]             # Generate PRs
-kodelet resolve --issue-url URL        # Resolve GitHub issues
+kodelet issue-resolve --issue-url URL        # Resolve GitHub issues
 
 # PR management
 kodelet pr-respond --pr-url URL                           # Respond to latest @kodelet mention
 kodelet pr-respond --pr-url URL --review-id ID    # Respond to review comment
 kodelet pr-respond --pr-url URL --issue-comment-id ID     # Respond to issue comment
 
-# Image support (Claude only)
+# Image support
 kodelet run --image path.png "query"   # Single/multiple images
+kodelet run --image file1.png --image file2.png "compare these"
 
 # Development
 make build|test|lint|format|release    # Standard dev commands
@@ -98,43 +110,23 @@ make build|test|lint|format|release    # Standard dev commands
 
 ## Configuration
 
-**Environment Variables**:
-```bash
-# API Keys
-export ANTHROPIC_API_KEY="sk-ant-api..."  # Claude models
-export OPENAI_API_KEY="sk-..."            # OpenAI models
+Kodelet uses a layered configuration approach with environment variables, global config (`~/.kodelet/config.yaml`), and repository-specific config (`kodelet-config.yaml`).
 
-# Core settings
+**Required API Keys**:
+```bash
+export ANTHROPIC_API_KEY="sk-ant-api..."  # For Claude models
+export OPENAI_API_KEY="sk-..."            # For OpenAI models
+```
+
+**Common Environment Variables**:
+```bash
 export KODELET_PROVIDER="anthropic|openai"
 export KODELET_MODEL="claude-sonnet-4-0|gpt-4.1"
 export KODELET_MAX_TOKENS="8192"
 export KODELET_LOG_LEVEL="info"
 ```
 
-**Configuration**: Layered approach with global defaults and repository overrides
-
-**Global Config** (`~/.kodelet/config.yaml`):
-```yaml
-provider: "anthropic"
-model: "claude-sonnet-4-0"
-max_tokens: 8192
-weak_model: "claude-3-5-haiku-latest"
-log_level: "info"
-
-# MCP servers (optional)
-mcp:
-  servers:
-    fs:
-      command: "npx"
-      args: ["-y", "@modelcontextprotocol/server-filesystem", "/path"]
-```
-
-**Repository Config** (`kodelet-config.yaml`):
-```yaml
-# Only specify what differs from global config
-model: "claude-3-5-haiku-latest"
-max_tokens: 4096
-```
+For complete configuration options including tracing, model settings, and environment variable overrides, see [`config.sample.yaml`](./config.sample.yaml).
 
 ## LLM Architecture
 
@@ -170,13 +162,4 @@ ctx = logger.WithLogger(ctx, log)
 log.WithField("request_id", id).Info("Processing request")
 // BAD
 log.Info("Processing request %s", id)
-```
-
-## Image Input Support
-
-Vision support for Claude models only. Supports local files (JPEG, PNG, GIF, WebP) and HTTPS URLs. Max 10 images, 5MB each.
-
-```bash
-kodelet run --image diagram.png "analyze this"
-kodelet run --image file1.png --image file2.png "compare these"
 ```

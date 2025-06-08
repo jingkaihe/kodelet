@@ -1,0 +1,42 @@
+FROM golang:1.24-alpine AS builder
+
+WORKDIR /app
+
+# Install make
+RUN apk add --no-cache make
+
+# Copy go modules
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source code
+COPY cmd/ ./cmd/
+COPY pkg/ ./pkg/
+COPY VERSION.txt ./
+COPY Makefile ./
+
+# Build the application
+RUN make build
+
+# Build acceptance tests as binary
+COPY tests/ ./tests/
+RUN go test -c -o acceptance-tests ./tests/acceptance/
+
+# Use ubuntu:24.04 for runtime
+FROM ubuntu:24.04
+
+# Install basic tools
+RUN apt-get update && apt-get install -y \
+    curl \
+    wget \
+    netcat-openbsd \
+    sysstat \
+    python3 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy kodelet binary and acceptance tests from builder
+COPY --from=builder /app/bin/kodelet /usr/local/bin/kodelet
+COPY --from=builder /app/acceptance-tests /usr/local/bin/acceptance-tests
+
+# Run acceptance tests
+CMD ["/usr/local/bin/acceptance-tests", "-test.v"]
