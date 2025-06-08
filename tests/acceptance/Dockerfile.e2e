@@ -18,8 +18,24 @@ COPY Makefile ./
 # Build the application
 RUN make build
 
-# Copy tests
+# Build acceptance tests as binary
 COPY tests/ ./tests/
+RUN go test -c -o acceptance-tests ./tests/acceptance/
+
+# Use ubuntu:24.04 for runtime
+FROM ubuntu:24.04
+
+# Install basic tools
+RUN apt-get update && apt-get install -y \
+    curl \
+    wget \
+    netcat-openbsd \
+    sysstat \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy kodelet binary and acceptance tests from builder
+COPY --from=builder /app/bin/kodelet /usr/local/bin/kodelet
+COPY --from=builder /app/acceptance-tests /usr/local/bin/acceptance-tests
 
 # Run acceptance tests
-CMD ["go", "test", "-v", "./tests/acceptance/..."]
+CMD ["/usr/local/bin/acceptance-tests", "-test.v"]

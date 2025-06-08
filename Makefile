@@ -31,7 +31,7 @@ e2e-test: build
 # Run e2e tests in Docker
 e2e-test-docker:
 	docker build -f tests/acceptance/Dockerfile.e2e -t kodelet-e2e-tests .
-	docker run --rm kodelet-e2e-tests
+	docker run --rm -e ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY}" -e OPENAI_API_KEY="${OPENAI_API_KEY}" kodelet-e2e-tests
 
 # Cross-compile for multiple platforms
 cross-build:

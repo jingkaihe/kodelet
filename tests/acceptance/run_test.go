@@ -13,12 +13,8 @@ func TestRunCommandNoAPIKey(t *testing.T) {
 	originalOpenAI := os.Getenv("OPENAI_API_KEY")
 	
 	defer func() {
-		if originalAnthropic != "" {
-			os.Setenv("ANTHROPIC_API_KEY", originalAnthropic)
-		}
-		if originalOpenAI != "" {
-			os.Setenv("OPENAI_API_KEY", originalOpenAI)
-		}
+		os.Setenv("ANTHROPIC_API_KEY", originalAnthropic)
+		os.Setenv("OPENAI_API_KEY", originalOpenAI)
 	}()
 	
 	os.Unsetenv("ANTHROPIC_API_KEY")
@@ -71,12 +67,8 @@ func TestRunCommandWithNoSaveFlag(t *testing.T) {
 	originalOpenAI := os.Getenv("OPENAI_API_KEY")
 	
 	defer func() {
-		if originalAnthropic != "" {
-			os.Setenv("ANTHROPIC_API_KEY", originalAnthropic)
-		}
-		if originalOpenAI != "" {
-			os.Setenv("OPENAI_API_KEY", originalOpenAI)
-		}
+		os.Setenv("ANTHROPIC_API_KEY", originalAnthropic)
+		os.Setenv("OPENAI_API_KEY", originalOpenAI)
 	}()
 	
 	os.Unsetenv("ANTHROPIC_API_KEY")
