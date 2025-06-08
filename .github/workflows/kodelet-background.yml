@@ -45,6 +45,12 @@ jobs:
         with:
           go-version: '1.24'
       - name: Run Kodelet
-        uses: jingkaihe/kodelet-action@v0.1.4-alpha
+        uses: jingkaihe/kodelet-action@v0.1.6-alpha
         with:
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          kodelet-config: |
+            model: "claude-sonnet-4-0"
+            weak_model: "claude-3-5-haiku-latest"
+            max_tokens: 64000
+            weak_model_max_tokens: 8192
+            thinking_budget_tokens: 32000

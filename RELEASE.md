@@ -1,5 +1,16 @@
 # Kodelet
 
+## 0.0.37.alpha (2025-06-08)
+
+### Issue Resolution Configuration Enhancement
+
+- **Configurable Bot Mention**: Added `--bot-mention` flag to `resolve` and `issue-resolve` commands to customize bot mentions (defaults to `@kodelet`)
+
+### PR Response Enhancement
+
+- **Git Diff Context**: Enhanced `kodelet pr-respond` to include git diff in PR response data
+  - **Better Code Context**: PR responses prompt now have access to actual code changes via `gh pr diff`, so that kodelet can make more informed responses by understanding what code was changed
+
 ## 0.0.36.alpha (2025-06-04)
 
 ### Conversation Continuity Enhancements
