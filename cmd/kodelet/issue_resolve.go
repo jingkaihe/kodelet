@@ -129,7 +129,7 @@ func init() {
 	defaults := NewIssueResolveConfig()
 	issueResolveCmd.Flags().StringP("provider", "p", defaults.Provider, "The issue provider to use")
 	issueResolveCmd.Flags().String("issue-url", defaults.IssueURL, "Issue URL (required)")
-	issueResolveCmd.Flags().String("bot-mention", defaults.BotMention, "Bot mention to look for in comments (e.g., @kodelet)")
+	issueResolveCmd.Flags().String("bot-mention", defaults.BotMention, "Bot mention to look for in comments")
 	issueResolveCmd.MarkFlagRequired("issue-url")
 }
 

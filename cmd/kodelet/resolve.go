@@ -50,7 +50,7 @@ func init() {
 	defaults := NewResolveConfig()
 	resolveCmd.Flags().StringP("provider", "p", defaults.Provider, "The issue provider to use")
 	resolveCmd.Flags().String("issue-url", defaults.IssueURL, "Issue URL (required)")
-	resolveCmd.Flags().String("bot-mention", defaults.BotMention, "Bot mention to look for in comments (e.g., @kodelet)")
+	resolveCmd.Flags().String("bot-mention", defaults.BotMention, "Bot mention to look for in comments")
 	resolveCmd.MarkFlagRequired("issue-url")
 }
 
@@ -86,7 +86,7 @@ func generateIssueResolutionPrompt(bin, issueURL, botMention string) string {
 - do not commit during this step.
 
 4. once you have resolved the issue, ask the subagent to run "%s commit --short --no-confirm" to commit the changes.
-5. after committing the changes, ask the subagent to run "%s pr" to create a pull request. Please instruct the subagent to always returning the PR link in the final response.
+5. after committing the changes, ask the subagent to run "%s pr" with 60 seconds timeout to create a pull request. Please instruct the subagent to always returning the PR link in the final response.
 6. once the pull request is created, comment on the issue with the link to the pull request. If the pull request is not created, ask the subagent to create a pull request.
 
 IMPORTANT:
