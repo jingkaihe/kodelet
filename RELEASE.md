@@ -9,9 +9,7 @@
 ### PR Response Enhancement
 
 - **Git Diff Context**: Enhanced `kodelet pr-respond` to include git diff in PR response data
-  - **Better Code Context**: PR responses now have access to actual code changes via `gh pr diff`
-  - **Improved Response Quality**: AI can make more informed responses by understanding what code was changed
-  - **Robust Error Handling**: Gracefully handles cases where git diff cannot be fetched
+  - **Better Code Context**: PR responses prompt now have access to actual code changes via `gh pr diff`, so that kodelet can make more informed responses by understanding what code was changed
 
 ## 0.0.36.alpha (2025-06-04)
 
