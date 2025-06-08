@@ -1,0 +1,25 @@
+FROM golang:1.24-alpine AS builder
+
+WORKDIR /app
+
+# Install make
+RUN apk add --no-cache make
+
+# Copy go modules
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source code
+COPY cmd/ ./cmd/
+COPY pkg/ ./pkg/
+COPY VERSION.txt ./
+COPY Makefile ./
+
+# Build the application
+RUN make build
+
+# Copy tests
+COPY tests/ ./tests/
+
+# Run acceptance tests
+CMD ["go", "test", "-v", "./tests/acceptance/..."]
