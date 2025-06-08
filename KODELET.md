@@ -63,6 +63,15 @@ All development work must follow these core principles:
 2. **Write comprehensive tests**: Always write tests for new features you add, and regression tests for changes you make to existing functionality.
 3. **Document CLI changes**: Always document when you have changed the CLI interface to maintain clear usage documentation.
 
+## Testing
+
+```bash
+make test # Run all tests
+make e2e-test-docker # Run acceptance tests in Docker
+go test ./pkg/... # Run tests for a specific package
+go test -v -cover ./pkg/... ./cmd/... # Run tests with coverage
+```
+
 ## Key Commands
 
 For comprehensive usage documentation and examples, see [./docs/MANUAL.md](./docs/MANUAL.md).

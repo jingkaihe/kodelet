@@ -63,10 +63,13 @@ make docker-build
 make test
 
 # Run tests with coverage
-go test -v -cover ./...
+go test -v -cover ./pkg/... ./cmd/...
 
 # Run tests for a specific package
 go test -v ./pkg/llm/...
+
+# Acceptance tests
+make e2e-test-docker
 ```
 
 ### Code Quality
@@ -151,7 +154,7 @@ make help
 
 Common commands:
 - `make build` - Build the application
-- `make test` - Run tests  
+- `make test` - Run tests
 - `make lint` - Run linter
 - `make format` - Format code
 - `make docker-build` - Build Docker image
