@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.0.37.alpha (2025-06-08)
+
+### Issue Resolution Configuration Enhancement
+
+- **Configurable Bot Mention**: Added `--bot-mention` flag to `resolve` and `issue-resolve` commands to customize bot mentions (defaults to `@kodelet`)
+
 ## 0.0.36.alpha (2025-06-04)
 
 ### Conversation Continuity Enhancements
