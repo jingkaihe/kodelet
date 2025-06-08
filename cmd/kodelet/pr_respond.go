@@ -33,6 +33,7 @@ type PRData struct {
 	BasicInfo         string
 	FocusedComment    string // Focused comment when comment-id is specified
 	RelatedDiscussion string // Related discussions for the focused comment
+	GitDiff           string // Git diff of the PR
 }
 
 // PRRespondTemplateData holds data for the PR respond prompt template
@@ -222,6 +223,18 @@ func prefetchPRData(prURL, commentID string, isReviewComment bool) (*PRData, err
 	}
 	data.BasicInfo = strings.TrimSpace(string(basicInfoOutput))
 
+	// Get git diff of the PR
+	diffCmd := exec.Command("gh", "pr", "diff", prURL)
+	logger.G(context.TODO()).WithField("cmd", diffCmd.String()).Debug("Fetching PR git diff")
+	diffOutput, err := diffCmd.CombinedOutput()
+	if err != nil {
+		// Don't fail completely, just log the error and continue
+		fmt.Printf("Warning: Failed to fetch PR git diff: %v\n", err)
+		data.GitDiff = "Failed to fetch git diff"
+	} else {
+		data.GitDiff = strings.TrimSpace(string(diffOutput))
+	}
+
 	// Fetch focused comment and related discussions
 	var focusedComment, relatedDiscussion string
 
@@ -355,6 +368,10 @@ const prRespondPromptTemplate = `Here is the information for pull request {{.PRU
 <pr_basic_info>
 {{.PRData.BasicInfo}}
 </pr_basic_info>
+
+<git_diff>
+{{.PRData.GitDiff}}
+</git_diff>
 
 {{.FocusedSections}}
 
