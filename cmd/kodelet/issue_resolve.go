@@ -15,15 +15,17 @@ import (
 
 // IssueResolveConfig holds configuration for the issue-resolve command
 type IssueResolveConfig struct {
-	Provider string
-	IssueURL string
+	Provider   string
+	IssueURL   string
+	BotMention string
 }
 
 // NewIssueResolveConfig creates a new IssueResolveConfig with default values
 func NewIssueResolveConfig() *IssueResolveConfig {
 	return &IssueResolveConfig{
-		Provider: "github",
-		IssueURL: "",
+		Provider:   "github",
+		IssueURL:   "",
+		BotMention: "@kodelet",
 	}
 }
 
@@ -100,7 +102,7 @@ This command analyzes the issue, creates an appropriate branch, works on the iss
 		}
 
 		// Generate comprehensive prompt
-		prompt := generateIssueResolutionPrompt(bin, config.IssueURL)
+		prompt := generateIssueResolutionPrompt(bin, config.IssueURL, config.BotMention)
 
 		// Send to LLM using existing architecture
 		fmt.Println("Analyzing GitHub issue and starting resolution process...")
@@ -127,6 +129,7 @@ func init() {
 	defaults := NewIssueResolveConfig()
 	issueResolveCmd.Flags().StringP("provider", "p", defaults.Provider, "The issue provider to use")
 	issueResolveCmd.Flags().String("issue-url", defaults.IssueURL, "Issue URL (required)")
+	issueResolveCmd.Flags().String("bot-mention", defaults.BotMention, "Bot mention to look for in comments")
 	issueResolveCmd.MarkFlagRequired("issue-url")
 }
 
@@ -139,6 +142,9 @@ func getIssueResolveConfigFromFlags(cmd *cobra.Command) *IssueResolveConfig {
 	}
 	if issueURL, err := cmd.Flags().GetString("issue-url"); err == nil {
 		config.IssueURL = issueURL
+	}
+	if botMention, err := cmd.Flags().GetString("bot-mention"); err == nil {
+		config.BotMention = botMention
 	}
 
 	return config
