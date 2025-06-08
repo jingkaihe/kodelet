@@ -1,5 +1,28 @@
 # Kodelet
 
+## 0.0.37.alpha (2025-06-08)
+
+### Issue Resolution Configuration Enhancement
+
+- **Configurable Bot Mention**: Made @kodelet mention configurable in issue resolution commands
+  - **New `--bot-mention` Flag**: Added configurable bot mention parameter for both `resolve` and `issue-resolve` commands
+  - **Default Behavior**: Maintains default `@kodelet` behavior for backward compatibility
+  - **Custom Bot Integration**: Enables integration with other bot accounts for automated issue resolution
+  - **Enhanced Flexibility**: Allows teams to customize the bot mention pattern to match their automation setup
+
+### Usage Examples
+
+```bash
+# Use default @kodelet mention
+kodelet issue-resolve --issue-url https://github.com/owner/repo/issues/123
+
+# Use custom bot mention
+kodelet issue-resolve --issue-url https://github.com/owner/repo/issues/123 --bot-mention @mybot
+
+# Legacy resolve command also supports custom mentions
+kodelet resolve --issue-url https://github.com/owner/repo/issues/123 --bot-mention @custombot
+```
+
 ## 0.0.36.alpha (2025-06-04)
 
 ### Conversation Continuity Enhancements
