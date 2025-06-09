@@ -274,7 +274,7 @@ func getEditor() string {
 // createCommit creates a git commit with the provided message
 func createCommit(message string, sign bool) error {
 	// Add co-authorship attribution
-	message = message + "\n\nCo-authored-by: Kodelet <kodelet@tryopsmate.ai>"
+	message = message + "\n\nCo-authored-by: Kodelet <noreply@kodelet.com>"
 
 	// Create a temporary file for the commit message
 	tempFile, err := os.CreateTemp("", "kodelet-commit-*.txt")

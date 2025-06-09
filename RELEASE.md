@@ -1,5 +1,20 @@
 # Kodelet
 
+## 0.0.38.alpha (2025-06-09)
+
+### End-to-End Testing Infrastructure
+
+- **Comprehensive Acceptance Testing**: Added complete end-to-end testing suite to ensure reliability across different environments
+  - **Docker-Based E2E Tests**: New `make e2e-test-docker` command runs tests in isolated container environment
+  - **Core Functionality Tests**: Tests covering basic commands, conversation management, and file operations
+  - **Conversation Tests**: Validation of chat persistence, resume functionality, and conversation lifecycle
+  - **Version Compatibility**: Automated testing of version commands and update mechanisms
+  - **GitHub Actions Integration**: Added `/e2e-test` comment trigger for PR testing with proper permissions
+
+### Minor Improvements
+
+**Updated Co-authorship Attribution**: Changed commit co-author email from `kodelet@tryopsmate.ai` to `noreply@kodelet.com`
+
 ## 0.0.37.alpha (2025-06-08)
 
 ### Issue Resolution Configuration Enhancement
