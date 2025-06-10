@@ -1,8 +1,5 @@
 # GitHub Actions Integration
 
-[![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/jingkaihe/kodelet-action)](https://github.com/jingkaihe/kodelet-action/releases)
-[![GitHub Marketplace](https://img.shields.io/badge/Marketplace-Kodelet%20Action-blue.svg?colorA=24292e&colorB=0366d6&style=flat&longCache=true&logo=data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAA4AAAAOCAYAAAAfSC3RAAAABHNCSVQICAgIfAhkiAAAAAlwSFlzAAAM6wAADOsB5dZE0gAAABl0RVh0U29mdHdhcmUAd3d3Lmlua3NjYXBlLm9yZ5vuPBoAAAERSURBVCiRhZG/SsMxFEZPfsVJ61jbxaF0cRQRcRJ9hlYn30IHN/+9iquDCOIsblIrOjqKgy5aKoJQj4n3EllCLx9AuAkfOScdtNwJZdH+fKGiMEhiFCeAJ+JPWBa8AADBSOA8gNFSKYR8H6AAD5KM8HFw/YJJpJaUKJhANSRBQ1EY0rQr4dMZPKwZLLqA2k8y5nHEPW2hL9P4pYgHuNzQASi7/OcJwrHQlJ3I1hQh0Y6J2V0K04UHMcOKoIJSojM/JUKKyBwb8kRcnGPKJOSfDGpL1XYAAAAASUVORK5CYII=)](https://github.com/marketplace/actions/kodelet-action)
-
 Kodelet provides seamless GitHub Actions integration through the [kodelet-action](https://github.com/jingkaihe/kodelet-action), enabling automated software engineering tasks directly in your repository workflows.
 
 ## Features
@@ -365,10 +362,16 @@ steps:
 
 Use a fine-grained or classic PAT for full repository access.
 
-**Requirements:**
+**Pros:**
+- Full repository access and control
+- Can create pull requests and push commits
+- Works consistently across all repository types
+
+**Limitations:**
 - Create PAT with necessary permissions
 - Store in repository secrets
 - More token management overhead
+- Security responsibility for token rotation
 
 **Setup:**
 ```yaml
@@ -381,7 +384,7 @@ steps:
 
 ### 4. Custom Auth Gateway
 
-Advanced users can configure their own auth gateway endpoint:
+For the purpose of enterprise deployment or additional security compliance requirements, advanced users can configure their own auth gateway endpoint:
 
 ```yaml
 - uses: jingkaihe/kodelet-action@v0.1.7-alpha
@@ -390,6 +393,8 @@ Advanced users can configure their own auth gateway endpoint:
   env:
     KODELET_AUTH_GATEWAY_ENDPOINT: "https://your-auth-gateway.com"
 ```
+
+**Note**: The source code of the GitHub Actions auth gateway will be open sourced soon to enable self-hosted deployments for enterprise environments.
 
 ### Recommendation
 
