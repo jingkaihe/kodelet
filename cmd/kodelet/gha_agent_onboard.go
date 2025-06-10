@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"strings"
@@ -25,8 +26,9 @@ func NewGhaAgentOnboardConfig() *GhaAgentOnboardConfig {
 	}
 }
 
-// GitHub workflow template
-const workflowTemplate = `name: Background Kodelet
+// generateWorkflowTemplate generates the GitHub workflow template with the provided configuration
+func generateWorkflowTemplate(config *GhaAgentOnboardConfig) string {
+	return fmt.Sprintf(`name: Background Kodelet
 
 on:
   issue_comment:
@@ -75,13 +77,15 @@ jobs:
         uses: jingkaihe/kodelet-action@v0.1.7-alpha
         with:
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          auth-gateway-endpoint: %s
           kodelet-config: |
             model: "claude-sonnet-4-0"
             weak_model: "claude-3-5-haiku-latest"
             max_tokens: 64000
             weak_model_max_tokens: 8192
             thinking_budget_tokens: 32000
-`
+`, config.AuthGatewayEndpoint)
+}
 
 var ghaAgentOnboardCmd = &cobra.Command{
 	Use:   "gha-agent-onboard",
@@ -119,6 +123,12 @@ This command will:
 		fmt.Printf("Opening GitHub app installation page for '%s'...\n", config.GithubApp)
 		appURL := fmt.Sprintf("https://github.com/apps/%s", config.GithubApp)
 		
+		// Validate the URL before opening
+		if err := validateURL(appURL); err != nil {
+			fmt.Printf("Error: Invalid GitHub app URL: %s\n", err)
+			os.Exit(1)
+		}
+		
 		if err := openInBrowser(appURL); err != nil {
 			fmt.Printf("Failed to open browser automatically. Please manually open: %s\n", appURL)
 		} else {
@@ -137,11 +147,19 @@ This command will:
 			os.Exit(1)
 		}
 
-		// Step 3: Create branch and workflow file
+		// Step 3: Store current branch and create new branch and workflow file
 		fmt.Println("Creating git branch and workflow file...")
+		
+		// Get current branch before creating new one
+		currentBranch, err := getCurrentBranch()
+		if err != nil {
+			fmt.Printf("Error getting current branch: %s\n", err)
+			os.Exit(1)
+		}
+		
 		branchName := fmt.Sprintf("kodelet-background-agent-onboard-%d", time.Now().Unix())
 		
-		if err := createBranchAndWorkflow(branchName); err != nil {
+		if err := createBranchAndWorkflow(branchName, config); err != nil {
 			fmt.Printf("Error creating branch and workflow: %s\n", err)
 			os.Exit(1)
 		}
@@ -152,6 +170,12 @@ This command will:
 		if err != nil {
 			fmt.Printf("Error creating commit and PR: %s\n", err)
 			os.Exit(1)
+		}
+
+		// Step 5: Checkout back to original branch
+		fmt.Printf("Checking out back to original branch: %s\n", currentBranch)
+		if err := checkoutBranch(currentBranch); err != nil {
+			fmt.Printf("Warning: Failed to checkout back to original branch %s: %s\n", currentBranch, err)
 		}
 
 		// Success message
@@ -203,6 +227,52 @@ func openInBrowser(url string) error {
 func commandExists(cmd string) bool {
 	_, err := exec.LookPath(cmd)
 	return err == nil
+}
+
+// getCurrentBranch gets the current git branch name
+func getCurrentBranch() (string, error) {
+	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("error getting current branch: %w", err)
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
+// checkoutBranch checks out to the specified branch
+func checkoutBranch(branchName string) error {
+	cmd := exec.Command("git", "checkout", branchName)
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("error checking out to branch %s: %w", branchName, err)
+	}
+	return nil
+}
+
+// validateURL validates that the provided URL is well-formed
+func validateURL(urlStr string) error {
+	parsedURL, err := url.Parse(urlStr)
+	if err != nil {
+		return fmt.Errorf("malformed URL: %w", err)
+	}
+	
+	if parsedURL.Scheme == "" {
+		return fmt.Errorf("URL scheme is required")
+	}
+	
+	if parsedURL.Host == "" {
+		return fmt.Errorf("URL host is required")
+	}
+	
+	// Additional validation for GitHub app URLs
+	if parsedURL.Scheme != "https" {
+		return fmt.Errorf("GitHub app URLs must use HTTPS")
+	}
+	
+	if parsedURL.Host != "github.com" {
+		return fmt.Errorf("GitHub app URLs must be on github.com domain")
+	}
+	
+	return nil
 }
 
 // setupAnthropicAPIKey checks and sets up the ANTHROPIC_API_KEY secret
@@ -268,7 +338,7 @@ func checkGitHubSecret(secretName string) (bool, error) {
 }
 
 // createBranchAndWorkflow creates a new git branch and adds the workflow file
-func createBranchAndWorkflow(branchName string) error {
+func createBranchAndWorkflow(branchName string, config *GhaAgentOnboardConfig) error {
 	// Create and checkout new branch
 	cmd := exec.Command("git", "checkout", "-b", branchName)
 	if err := cmd.Run(); err != nil {
@@ -281,9 +351,12 @@ func createBranchAndWorkflow(branchName string) error {
 		return fmt.Errorf("error creating workflow directory: %w", err)
 	}
 
+	// Generate the workflow template with config
+	workflowContent := generateWorkflowTemplate(config)
+
 	// Write the workflow file
 	workflowPath := fmt.Sprintf("%s/kodelet.yaml", workflowDir)
-	if err := os.WriteFile(workflowPath, []byte(workflowTemplate), 0644); err != nil {
+	if err := os.WriteFile(workflowPath, []byte(workflowContent), 0644); err != nil {
 		return fmt.Errorf("error writing workflow file: %w", err)
 	}
 
