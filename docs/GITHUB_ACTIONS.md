@@ -2,15 +2,12 @@
 
 Kodelet provides seamless GitHub Actions integration through the [kodelet-action](https://github.com/jingkaihe/kodelet-action), enabling automated software engineering tasks directly in your repository workflows.
 
-## Overview
+## Features
 
-The Kodelet Action allows you to delegate software engineering tasks via GitHub issues and PRs. It comes with the following features:
-
-* **AI-Powered Engineering**: Automates software engineering tasks using advanced AI models
-* **Issue Resolution**: Automatically resolves GitHub issues with code changes and explanations
-* **Low Cost-of-Ownership**: Autonomous software engineering tasks running asynchronously on your CI (GitHub Actions), without the need of maintaining separate cloud-based dev environment
-* **Multi-Event Support**: Works with issue comments, PR comments, and review comments
-* **Secure**: Uses GitHub tokens and API keys securely through GitHub Secrets
+* **Automated Issue Resolution** Kodelet analyses your GitHub issues and automatically generates comprehensive solutions, creating pull requests with clean, production-ready code based on your specifications. It handles complex coding tasks without manual intervention, letting you focus on higher-level architectural decisions while it manages the implementation details.
+* **Intelligent Continuous Improvement** Kodelet doesn't just write code once and disappear. It iteratively improves pull requests based on your feedback and code review comments, adapting to your coding standards and project requirements.
+* **Parallel Task Management** Scale your development capacity by delegating multiple coding tasks simultaneously. You can assign as many issues as needed to Kodelet, and it will work on them in parallel, maximising your development velocity without requiring you to manage the workload distribution.
+* **Integrate into your workflow** Simply mention `@kodelet` in any GitHub issue or pull request to engage your AI coding assistant. Kodelet will spring into github action, analysing your requirements and delivering high-quality solutions tailored to your project.
 
 ## Quick Start
 
@@ -29,7 +26,6 @@ Create `.github/workflows/kodelet.yml` in your repository:
 
 ```yaml
 name: Background Kodelet
-
 on:
   issue_comment:
     types: [created]
@@ -40,29 +36,24 @@ on:
   pull_request_review:
     types: [submitted]
 
-permissions:
-  issues: write          # Comment on issues
-  pull-requests: write   # Create PRs
-  contents: write        # Push commits
-
-env:
-  TIMEOUT_MINUTES: "300"
 
 jobs:
-  background-kodelet:
+  background-agent:
     runs-on: ubuntu-latest
-    timeout-minutes: 360  # 6 hours
-    # Only run if @kodelet is mentioned AND the author has proper permissions
+    permissions:
+      id-token: write
+      issues: read
+      pull-requests: read
+      contents: read
+    timeout-minutes: 15  # 15 minutes
     if: |
       (
-        # Check if @kodelet is mentioned in the event (issue, comment, or review)
         (github.event_name == 'issues' && contains(github.event.issue.body, '@kodelet')) ||
         (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@kodelet')) ||
         (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@kodelet')) ||
         (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@kodelet'))
       ) &&
       (
-        # Verify the author has proper repository permissions (recommended for public repos)
         (github.event.issue.author_association == 'OWNER' || github.event.issue.author_association == 'MEMBER' || github.event.issue.author_association == 'COLLABORATOR') ||
         (github.event.comment.author_association == 'OWNER' || github.event.comment.author_association == 'MEMBER' || github.event.comment.author_association == 'COLLABORATOR') ||
         (github.event.review.author_association == 'OWNER' || github.event.review.author_association == 'MEMBER' || github.event.review.author_association == 'COLLABORATOR')
@@ -72,19 +63,15 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set up the dev environment # Setup depends on the nature of your repo
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.24'
-
+      - name: Setup your dev environment
+        run: |
+          echo "YMMV"
       - name: Run Kodelet
-        uses: jingkaihe/kodelet-action@v0.1.4-alpha
+        uses: jingkaihe/kodelet-action@v0.1.7-alpha
         with:
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
-          kodelet-version: 0.0.35.alpha
+          # All other inputs are automatically populated from GitHub context
 ```
 
 ### 3. Trigger Kodelet
@@ -95,44 +82,176 @@ Comment `@kodelet` on any issue or pull request to trigger automated assistance:
 - **PRs**: `@kodelet review this code`
 - **PR Reviews**: Include `@kodelet` in review comments
 
-## Action Inputs
+## How It Works
+
+```mermaid
+flowchart LR
+    A[User mentions @kodelet] --> B{Event Type}
+
+    B -->|issues.opened| C1[Issue Created]
+    B -->|issue_comment| C2[Issue Comment]
+    B -->|issue_comment on PR| C3[PR Comment]
+    B -->|pull_request_review_comment| C4[PR Review Comment]
+
+    C1 --> D[Check Permissions]
+    C2 --> D
+    C3 --> D
+    C4 --> D
+
+    D --> E{User has OWNER/MEMBER/COLLABORATOR access?}
+    E -->|No| F[Action Skipped]
+    E -->|Yes| G[Start Kodelet Action]
+
+    G --> H{GitHub Token Provided?}
+    H -->|Yes| I[Use Provided Token]
+    H -->|No| J[Auth Gateway OIDC]
+
+    I --> K[Post Status Comment]
+    J --> K
+
+    K --> L[Install Kodelet CLI]
+    L --> M[Configure Git]
+    M --> N[Parse Event Context]
+
+    N --> O{Route Command}
+    O -->|Issue| P[kodelet issue-resolve]
+    O -->|PR Comment| Q[kodelet pr-respond --issue-comment-id]
+    O -->|PR Review| R[kodelet pr-respond --review-id]
+
+    P --> S[Execute Kodelet]
+    Q --> S
+    R --> S
+
+    S --> T{Success?}
+    T -->|Yes| U[✅ Task Complete]
+    T -->|No| V[❌ Post Error Comment]
+
+    style A fill:#e3f2fd
+    style G fill:#f3e5f5
+    style S fill:#e8f5e8
+    style U fill:#c8e6c8
+    style V fill:#ffcdd2
+    style F fill:#f5f5f5
+```
+
+## Inputs
 
 | Input | Description | Required | Default |
 |-------|-------------|----------|---------|
-| `anthropic-api-key` | Anthropic API key for Kodelet | Yes | |
-| `github-token` | GitHub token for repository operations | No | `${{ github.token }}` |
-| `commenter` | Username who triggered the action | No | Auto-detected from event |
-| `event-name` | GitHub event name | No | `${{ github.event_name }}` |
-| `issue-number` | Issue or PR number | No | Auto-detected from event |
-| `comment-id` | Comment ID (for issue comments on PRs) | No | Auto-detected from event |
-| `review-id` | Review ID (for PR review comments) | No | Auto-detected from event |
-| `repository` | Repository in format owner/repo | No | `${{ github.repository }}` |
-| `is-pr` | Whether this is a pull request | No | Auto-detected from event |
-| `pr-number` | Pull request number | No | Auto-detected from event |
-| `timeout-minutes` | Timeout for execution in minutes | No | `300` |
-| `log-level` | Log level (debug, info, warn, error) | No | `info` |
-| `kodelet-version` | Kodelet version to install (e.g., v0.0.35.alpha, latest) | No | `latest` |
+| `anthropic-api-key` | Anthropic API key for AI operations | Yes | N/A |
+| `github-token` | GitHub token for repository operations | No | Auth Gateway OIDC |
+| `commenter` | Username who triggered the action | No | Auto-detected |
+| `event-name` | GitHub event name | No | Auto-detected |
+| `issue-number` | Issue number | No | Auto-detected |
+| `comment-id` | Comment ID | No | Auto-detected |
+| `review-id` | Review ID | No | Auto-detected |
+| `repository` | Repository (owner/repo) | No | Auto-detected |
+| `is-pr` | Is this a pull request? | No | Auto-detected |
+| `pr-number` | Pull request number | No | Auto-detected |
+| `timeout-minutes` | Execution timeout | No | `300` |
+| `log-level` | Logging level | No | `info` |
+| `kodelet-version` | Kodelet CLI version | No | `latest` |
 
 ## Usage Examples
 
 ### Basic Usage (Minimal Configuration)
 
 ```yaml
-- uses: jingkaihe/kodelet-action@v0.1.4-alpha
+- uses: jingkaihe/kodelet-action@v0.1.7-alpha
   with:
     anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
     # All other inputs are automatically populated from GitHub context
 ```
 
+### Auth Gateway Authentication
+
+**Default & Recommended** - Uses OIDC with GitHub's auth gateway:
+
+```yaml
+- uses: jingkaihe/kodelet-action@v0.1.7-alpha
+  with:
+    anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+    # github-token is automatically handled via OIDC
+```
+
+Required permissions:
+```yaml
+permissions:
+  id-token: write
+  issues: read
+  pull-requests: read
+  contents: read
+```
+
 ### Custom Configuration
 
 ```yaml
-- uses: jingkaihe/kodelet-action@v0.1.4-alpha
+- uses: jingkaihe/kodelet-action@v0.1.7-alpha
   with:
     anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
     timeout-minutes: 180  # 3 hours
     log-level: debug
     kodelet-version: v0.0.35.alpha  # Pin to specific version
+```
+
+### Manual Override (if needed)
+
+If you need to override the automatic token detection:
+
+```yaml
+- uses: jingkaihe/kodelet-action@v0.1.7-alpha
+  with:
+    anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+    github-token: ${{ secrets.GITHUB_TOKEN }}
+```
+
+Required permissions for manual override:
+```yaml
+permissions:
+  issues: write
+  pull-requests: write
+  contents: write
+```
+
+### Environment Variables
+
+Configure Kodelet through environment variables:
+
+```yaml
+- uses: jingkaihe/kodelet-action@v0.1.7-alpha
+  with:
+    anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+  env:
+    KODELET_PROVIDER: "anthropic"
+    KODELET_MODEL: "claude-sonnet-4-0"
+    KODELET_MAX_TOKENS: "8192"
+```
+
+### Version Pinning
+
+**Production environments** should pin to specific versions:
+
+```yaml
+# Latest stable
+- uses: jingkaihe/kodelet-action@v0.1.7-alpha
+
+# Specific version
+- uses: jingkaihe/kodelet-action@v0.1.7-alpha
+
+# Development (not recommended)
+- uses: jingkaihe/kodelet-action@main
+```
+
+### Kodelet Configuration
+
+Place `kodelet-config.yaml` in your repository root:
+
+```yaml
+provider: anthropic
+model: claude-sonnet-4-0
+max_tokens: 8192
+tracing:
+  enabled: false
 ```
 
 ## Supported Events
@@ -169,10 +288,20 @@ The action only runs when:
 This function looks complex. @kodelet can you refactor this?
 ```
 
-## Permissions Required
+## Permissions
 
 The action requires the following GitHub permissions:
 
+**For Auth Gateway (Default & Recommended):**
+```yaml
+permissions:
+  id-token: write
+  issues: read
+  pull-requests: read
+  contents: read
+```
+
+**For Manual Override:**
 ```yaml
 permissions:
   issues: write          # Comment on issues
@@ -180,12 +309,103 @@ permissions:
   contents: write        # Push commits and create branches
 ```
 
-## Security Considerations
+## GitHub Authentication Token Considerations
+
+### 1. Auth Gateway (Default & Recommended)
+
+The action uses GitHub's OIDC to authenticate with an auth gateway service that provides elevated permissions automatically. This is the **most secure and convenient** option.
+
+**Benefits:**
+- No token management required
+- Automatic permission elevation
+- Secure credential handling
+- Simplified workflow setup
+
+**Setup:**
+```yaml
+permissions:
+  id-token: write
+  issues: read
+  pull-requests: read
+  contents: read
+
+steps:
+  - uses: jingkaihe/kodelet-action@v0.1.7-alpha
+    with:
+      anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+      # github-token is automatically handled
+```
+
+### 2. Standard GitHub Token
+
+Uses the default `GITHUB_TOKEN` provided by GitHub Actions. **Limited permissions** - can only comment, cannot create PRs or push commits.
+
+**Limitations:**
+- Cannot create pull requests
+- Cannot push commits to new branches
+- Can only post comments
+
+**Setup:**
+```yaml
+permissions:
+  issues: write
+  pull-requests: write
+
+steps:
+  - uses: jingkaihe/kodelet-action@v0.1.7-alpha
+    with:
+      anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+```
+
+### 3. Personal Access Token (PAT)
+
+Use a fine-grained or classic PAT for full repository access.
+
+**Pros:**
+- Full repository access and control
+- Can create pull requests and push commits
+- Works consistently across all repository types
+
+**Limitations:**
+- Create PAT with necessary permissions
+- Store in repository secrets
+- More token management overhead
+- Security responsibility for token rotation
+
+**Setup:**
+```yaml
+steps:
+  - uses: jingkaihe/kodelet-action@v0.1.7-alpha
+    with:
+      anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+      github-token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+```
+
+### 4. Custom Auth Gateway
+
+For the purpose of enterprise deployment or additional security compliance requirements, advanced users can configure their own auth gateway endpoint:
+
+```yaml
+- uses: jingkaihe/kodelet-action@v0.1.7-alpha
+  with:
+    anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+  env:
+    KODELET_AUTH_GATEWAY_ENDPOINT: "https://your-auth-gateway.com"
+```
+
+**Note**: The source code of the GitHub Actions auth gateway will be open sourced soon to enable self-hosted deployments for enterprise environments.
+
+### Recommendation
+
+Use **Auth Gateway** (option 1) for the best balance of security, functionality, and ease of setup. It provides all necessary permissions automatically while maintaining security best practices.
+
+## Security
 
 - **API Keys**: Store your Anthropic API key in GitHub Secrets, never in code
-- **GitHub Token**: Uses the automatically provided `GITHUB_TOKEN` with limited scope
+- **GitHub Token**: Uses auth gateway or provided token with appropriate scope
 - **Repository Access**: Only maintainers/collaborators can trigger the action
-- **Timeout Protection**: Execution is limited by configurable timeout (default: 5 hours)
+- **Timeout Protection**: Execution is limited by configurable timeout
 
 ## Error Handling
 
@@ -222,7 +442,7 @@ Failed runs include links to workflow logs for debugging.
 Enable debug logging for more detailed output:
 
 ```yaml
-- uses: jingkaihe/kodelet-action@v0.1.4-alpha
+- uses: jingkaihe/kodelet-action@v0.1.7-alpha
   with:
     anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
     log-level: debug
@@ -232,8 +452,8 @@ Enable debug logging for more detailed output:
 
 This action follows semantic versioning:
 
-- **Latest stable**: `@v0`
-- **Specific version**: `@v0.1.4-alpha`
+- **Latest stable**: `@v0.1.7-alpha`
+- **Specific version**: `@v0.1.7-alpha`
 - **Development**: `@main` (not recommended for production)
 
 ## Best Practices
