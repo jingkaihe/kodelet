@@ -390,8 +390,7 @@ For the purpose of enterprise deployment or additional security compliance requi
 - uses: jingkaihe/kodelet-action@v0.1.7-alpha
   with:
     anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
-  env:
-    KODELET_AUTH_GATEWAY_ENDPOINT: "https://your-auth-gateway.com"
+    auth-gateway-endpoint: "https://your-auth-gateway.com/api/github"
 ```
 
 **Note**: The source code of the GitHub Actions auth gateway will be open sourced soon to enable self-hosted deployments for enterprise environments.
