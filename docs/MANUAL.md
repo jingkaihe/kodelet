@@ -2,6 +2,38 @@
 
 Kodelet is a lightweight agentic SWE Agent that runs as an interactive CLI tool in your terminal. It is capable of performing software engineering and production operating tasks.
 
+## Table of Contents
+
+- [Installation](#installation)
+  - [Using Install Script](#using-install-script)
+  - [Prerequisites](#prerequisites)
+- [Updating](#updating)
+- [Usage Modes](#usage-modes)
+  - [One-shot Mode](#one-shot-mode)
+  - [Interactive Chat Mode](#interactive-chat-mode)
+  - [Watch Mode](#watch-mode)
+  - [Git Integration](#git-integration)
+  - [GitHub Actions Background Agent](#github-actions-background-agent)
+  - [Image Input Support](#image-input-support)
+  - [Conversation Continuation](#conversation-continuation)
+  - [Conversation Management](#conversation-management)
+- [Shell Completion](#shell-completion)
+  - [Setup Instructions](#setup-instructions)
+  - [Additional Options](#additional-options)
+- [Configuration](#configuration)
+  - [Environment Variables](#environment-variables)
+  - [Configuration File](#configuration-file)
+  - [Command Line Flags](#command-line-flags)
+- [LLM Providers](#llm-providers)
+  - [Anthropic Claude](#anthropic-claude)
+  - [OpenAI](#openai)
+- [Key Features](#key-features)
+- [Security & Limitations](#security--limitations)
+  - [Image Input Security](#image-input-security)
+  - [General Security](#general-security)
+- [Troubleshooting](#troubleshooting)
+  - [Common Issues](#common-issues)
+
 ## Installation
 
 ### Using Install Script
@@ -114,6 +146,44 @@ kodelet pr-respond --pr-url https://github.com/owner/repo/pull/456 --issue-comme
 ```
 
 This command focuses on addressing a specific comment or review feedback within a PR. You must provide either `--review-id` for review comments or `--issue-comment-id` for issue comments. Currently supports GitHub PRs only.
+
+### GitHub Actions Background Agent
+
+Set up an automated background agent that responds to `@kodelet` mentions in your GitHub repository:
+
+```bash
+kodelet gha-agent-onboard
+```
+
+This command automates the complete setup process for a GitHub Actions-based background agent:
+
+1. **GitHub App Installation**: Opens the GitHub app installation page in your browser
+2. **Secret Configuration**: Checks and sets up the `ANTHROPIC_API_KEY` repository secret
+3. **Workflow Creation**: Creates a new git branch with the Kodelet workflow file (`.github/workflows/kodelet.yaml`)
+4. **Pull Request**: Automatically commits changes and creates a pull request for review
+
+**Prerequisites:**
+- Must be run from within a git repository
+- GitHub CLI (`gh`) must be installed and authenticated
+- Repository owner/admin permissions to install GitHub apps and manage secrets
+
+**Supported Triggers:**
+- Issue comments containing `@kodelet`
+- New issues with `@kodelet` in the body
+- Pull request review comments with `@kodelet`
+- Pull request reviews containing `@kodelet`
+
+**Security Features:**
+- Only responds to repository owners, members, and collaborators
+- Uses repository secrets for secure API key management
+- Runs with minimal required permissions (read-only access)
+
+**Configuration Options:**
+```bash
+kodelet gha-agent-onboard --github-app "kodelet" --auth-gateway-endpoint "https://gha-auth-gateway.kodelet.com/api/github"
+```
+
+After the pull request is merged, team members can mention `@kodelet` in issues and pull requests to get automated assistance with development tasks.
 
 ### Image Input Support
 
