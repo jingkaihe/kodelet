@@ -1,5 +1,16 @@
 # Kodelet
 
+## 0.0.39.alpha (2025-06-11)
+
+### GitHub Actions Background Agent
+
+- **New `kodelet gha-agent-onboard` Command**: Added automated onboarding for GitHub Actions-based background agent
+  - **One-Command Setup**: Automates GitHub app installation, secret configuration, and workflow creation
+  - **Secure Integration**: Handles `ANTHROPIC_API_KEY` secret setup with validation
+  - **Auto PR Creation**: Creates git branch, workflow file, and pull request automatically
+  - **Branch Management**: Stores and restores original branch after onboarding
+  - **URL Validation**: Comprehensive validation for GitHub app URLs
+
 ## 0.0.38.alpha (2025-06-09)
 
 ### End-to-End Testing Infrastructure
