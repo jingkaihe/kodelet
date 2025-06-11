@@ -471,6 +471,7 @@ Please respond to the comment and discussions in <pr_focused_comment> section fo
 
 4. Respond appropriately:
    - Make necessary code changes if requested
+	 - Make sure that you run 'git add ...' to add the changes to the staging area before you commit.
    - Ask subagent to run "{{.BinPath}} commit --short --no-confirm" for changes
    - Push updates with "git push origin <pr-branch>"
    - Reply to the specific comment with a summary of actions taken using "gh pr comment <pr-number> --body <summary>". Keep the summary short, concise and to the point.

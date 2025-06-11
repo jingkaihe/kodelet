@@ -1,3 +1,5 @@
+# Kodelet
+
 ## 0.0.39.alpha2 (2025-06-11)
 
 **PR Respond Command**: Improved `kodelet pr-respond` to fetch PR basic info using `gh pr view --json title,author,body,comments`

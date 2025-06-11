@@ -70,28 +70,3 @@ func getResolveConfigFromFlags(cmd *cobra.Command) *ResolveConfig {
 
 	return config
 }
-
-func generateIssueResolutionPrompt(bin, issueURL, botMention string) string {
-	return fmt.Sprintf(`Please resolve the github issue %s following the steps below:
-
-1. use "gh issue view %s --comments" to get the issue details.
-- review the issue details and understand the issue.
-- especially pay attention to the latest comment with %s - this is the instruction from the user.
-- extract the issue number from the issue URL for branch naming
-
-2. based on the issue details, come up with a branch name and checkout the branch via "git checkout -b kodelet/issue-${ISSUE_NUMBER}-${BRANCH_NAME}"
-3. start to work on the issue.
-- think step by step before you start to work on the issue.
-- if the issue is complex, you should add extra steps to the todo list to help you keep track of the progress.
-- do not commit during this step.
-
-4. once you have resolved the issue, ask the subagent to run "%s commit --short --no-confirm" to commit the changes.
-5. after committing the changes, ask the subagent to run "%s pr" with 60 seconds timeout to create a pull request. Please instruct the subagent to always returning the PR link in the final response.
-6. once the pull request is created, comment on the issue with the link to the pull request. If the pull request is not created, ask the subagent to create a pull request.
-
-IMPORTANT:
-*!!!CRITICAL!!!: You should never update user's git config under any circumstances.
-* Use a checklist to keep track of the progress.
-`,
-		issueURL, issueURL, botMention, bin, bin)
-}

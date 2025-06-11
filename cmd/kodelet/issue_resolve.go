@@ -13,6 +13,16 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// Supported issue providers
+const (
+	GitHubProvider = "github"
+)
+
+// Default configuration values
+const (
+	DefaultBotMention = "@kodelet"
+)
+
 // IssueResolveConfig holds configuration for the issue-resolve command
 type IssueResolveConfig struct {
 	Provider   string
@@ -23,16 +33,16 @@ type IssueResolveConfig struct {
 // NewIssueResolveConfig creates a new IssueResolveConfig with default values
 func NewIssueResolveConfig() *IssueResolveConfig {
 	return &IssueResolveConfig{
-		Provider:   "github",
+		Provider:   GitHubProvider,
 		IssueURL:   "",
-		BotMention: "@kodelet",
+		BotMention: DefaultBotMention,
 	}
 }
 
 // Validate validates the IssueResolveConfig and returns an error if invalid
 func (c *IssueResolveConfig) Validate() error {
-	if c.Provider != "github" {
-		return fmt.Errorf("unsupported provider: %s, only 'github' is supported", c.Provider)
+	if c.Provider != GitHubProvider {
+		return fmt.Errorf("unsupported provider: %s, only '%s' is supported", c.Provider, GitHubProvider)
 	}
 
 	if c.IssueURL == "" {
@@ -44,10 +54,27 @@ func (c *IssueResolveConfig) Validate() error {
 
 var issueResolveCmd = &cobra.Command{
 	Use:   "issue-resolve",
-	Short: "Resolve an issue autonomously",
-	Long: `Resolve an issue by fetching details, creating a branch, implementing fixes, and creating a PR.
+	Short: "Intelligently resolve GitHub issues based on their type",
+	Long: `Resolve GitHub issues using appropriate workflows based on issue type:
 
-This command analyzes the issue, creates an appropriate branch, works on the issue resolution, and automatically creates a pull request with updates back to the original issue. Currently supports GitHub issues only.`,
+IMPLEMENTATION ISSUES (features, bugs, code changes):
+- Analyzes the issue and creates a feature branch
+- Implements the required changes
+- Commits changes and creates a pull request
+- Links the PR back to the original issue
+
+QUESTION ISSUES (information requests, clarifications):
+- Analyzes the codebase to understand the question
+- Researches relevant code and documentation
+- Provides comprehensive answers directly in issue comments
+- No code changes or pull requests created
+
+The command automatically detects issue type and applies the appropriate workflow.
+Currently supports GitHub issues only.
+
+Examples:
+  kodelet issue-resolve --issue-url https://github.com/user/repo/issues/123
+  kodelet issue-resolve --issue-url https://github.com/user/repo/issues/456 --bot-mention @mybot`,
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx, cancel := context.WithCancel(cmd.Context())
 		defer cancel()
@@ -78,20 +105,9 @@ This command analyzes the issue, creates an appropriate branch, works on the iss
 			os.Exit(1)
 		}
 
-		// Prerequisites checking
-		if !isGitRepository() {
-			fmt.Println("Error: Not a git repository. Please run this command from a git repository.")
-			os.Exit(1)
-		}
-
-		if !isGhCliInstalled() {
-			fmt.Println("Error: GitHub CLI (gh) is not installed. Please install it first.")
-			fmt.Println("Visit https://cli.github.com/ for installation instructions.")
-			os.Exit(1)
-		}
-
-		if !isGhAuthenticated() {
-			fmt.Println("Error: You are not authenticated with GitHub. Please run 'gh auth login' first.")
+		// Validate prerequisites (git repository, gh CLI, authentication)
+		if err := validatePrerequisites(); err != nil {
+			fmt.Printf("Error: %s\n", err)
 			os.Exit(1)
 		}
 
@@ -101,11 +117,11 @@ This command analyzes the issue, creates an appropriate branch, works on the iss
 			os.Exit(1)
 		}
 
-		// Generate comprehensive prompt
+		// Generate intelligent issue resolution prompt
 		prompt := generateIssueResolutionPrompt(bin, config.IssueURL, config.BotMention)
 
 		// Send to LLM using existing architecture
-		fmt.Println("Analyzing GitHub issue and starting resolution process...")
+		fmt.Println("Analyzing GitHub issue and determining appropriate resolution workflow...")
 		fmt.Println("-----------------------------------------------------------")
 
 		out, usage := llm.SendMessageAndGetTextWithUsage(ctx, s, prompt,
@@ -127,9 +143,9 @@ This command analyzes the issue, creates an appropriate branch, works on the iss
 
 func init() {
 	defaults := NewIssueResolveConfig()
-	issueResolveCmd.Flags().StringP("provider", "p", defaults.Provider, "The issue provider to use")
-	issueResolveCmd.Flags().String("issue-url", defaults.IssueURL, "Issue URL (required)")
-	issueResolveCmd.Flags().String("bot-mention", defaults.BotMention, "Bot mention to look for in comments")
+	issueResolveCmd.Flags().StringP("provider", "p", defaults.Provider, "The issue provider to use (currently only 'github')")
+	issueResolveCmd.Flags().String("issue-url", defaults.IssueURL, "GitHub issue URL (required)")
+	issueResolveCmd.Flags().String("bot-mention", defaults.BotMention, "Bot mention to look for in issue comments")
 	issueResolveCmd.MarkFlagRequired("issue-url")
 }
 
@@ -148,4 +164,103 @@ func getIssueResolveConfigFromFlags(cmd *cobra.Command) *IssueResolveConfig {
 	}
 
 	return config
+}
+
+// validatePrerequisites checks that all necessary tools and authentication are in place
+func validatePrerequisites() error {
+	if !isGitRepository() {
+		return fmt.Errorf("not a git repository. Please run this command from a git repository")
+	}
+
+	if !isGhCliInstalled() {
+		return fmt.Errorf("GitHub CLI (gh) is not installed. Please install it first.\nVisit https://cli.github.com/ for installation instructions")
+	}
+
+	if !isGhAuthenticated() {
+		return fmt.Errorf("you are not authenticated with GitHub. Please run 'gh auth login' first")
+	}
+
+	return nil
+}
+
+// generateIssueResolutionPrompt creates a comprehensive prompt for resolving GitHub issues
+// with intelligent workflow selection based on issue type (implementation vs question).
+//
+// Parameters:
+//   - bin: path to the kodelet executable for subagent commands
+//   - issueURL: the GitHub issue URL to resolve
+//   - botMention: the bot mention string to look for in comments (e.g., "@kodelet")
+//
+// Returns a detailed prompt that instructs the AI to:
+//  1. Analyze the issue type (implementation vs question)
+//  2. Apply the appropriate workflow
+//  3. Follow best practices for each type
+func generateIssueResolutionPrompt(bin, issueURL, botMention string) string {
+	return fmt.Sprintf(`Please resolve the github issue %s following the appropriate workflow based on the issue type:
+
+## Step 1: Analyze the Issue
+1. Use "gh issue view %s" and "gh issue view %s --comments" to get the issue details and its comments.
+2. Review the issue details and understand the issue.
+3. Pay special attention to the latest comment with %s - this is the instruction from the user.
+4. Determine the issue type:
+   - **IMPLEMENTATION ISSUE**: Requires code changes, bug fixes, feature implementation, or file modifications
+   - **QUESTION ISSUE**: Asks for information, clarification, or understanding about the codebase
+
+## Step 2: Choose the Appropriate Workflow
+
+### For IMPLEMENTATION ISSUES (Feature/Fix/Code Changes):
+1. Extract the issue number from the issue URL for branch naming
+2. Create and checkout a new branch: "git checkout -b kodelet/issue-${ISSUE_NUMBER}-${BRANCH_NAME}"
+3. Work on the issue:
+   - Think step by step before starting
+   - Add extra steps to the todo list for complex issues
+   - Do not commit during this step
+	 - Make sure that you run 'git add ...' to add the changes to the staging area before you commit.
+4. Once resolved, use subagent to run "%s commit --short --no-confirm" to commit changes
+5. Use subagent to run "%s pr" (60s timeout) to create a pull request
+6. Comment on the issue with the PR link
+
+### For QUESTION ISSUES (Information/Clarification):
+1. Understand the question by reading issue comments and analyzing the codebase
+2. Research the codebase to gather relevant information to answer the question
+3. Once you have a comprehensive understanding, comment directly on the issue with your answer
+4. Do NOT create branches, make code changes, or create pull requests
+
+## Examples:
+
+**IMPLEMENTATION ISSUE Example:**
+<example>
+Title: "Add user authentication middleware"
+Body: "We need to implement JWT authentication middleware for our API endpoints..."
+This requires code implementation -> Use IMPLEMENTATION workflow
+</example>
+
+**QUESTION ISSUE Example:**
+<example>
+Title: "How does the logging system work?"
+Body: "Can someone explain how our current logging implementation handles different log levels..."
+This asks for information -> Use QUESTION workflow
+</example>
+
+**QUESTION ISSUE Example:**
+<example>
+Title: "What's the difference between our Redis and PostgreSQL usage?"
+Body: "@kodelet can you explain how we use Redis vs PostgreSQL in our architecture..."
+This asks for clarification -> Use QUESTION workflow
+</example>
+
+**IMPLEMENTATION ISSUE Example:**
+<example>
+Title: "Fix memory leak in worker pool"
+Body: "The worker pool is not properly cleaning up goroutines, causing memory leaks..."
+This requires bug fix -> Use IMPLEMENTATION workflow
+</example>
+
+IMPORTANT:
+* !!!CRITICAL!!!: Never update user's git config under any circumstances
+* Use a checklist to keep track of progress
+* For questions, focus on providing accurate, helpful information rather than code changes
+* For implementation, follow the full development workflow with proper branching and PR creation
+`,
+		issueURL, issueURL, issueURL, botMention, bin, bin)
 }
