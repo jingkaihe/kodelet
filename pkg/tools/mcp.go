@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -66,6 +67,9 @@ func newMCPClient(config MCPServerConfig) (*client.Client, error) {
 		}
 		envArgs := []string{}
 		for k, v := range config.Envs {
+			if strings.HasPrefix(v, "$") {
+				v = os.Getenv(strings.TrimPrefix(v, "$"))
+			}
 			envArgs = append(envArgs, fmt.Sprintf("%s=%s", k, v))
 		}
 		tp := transport.NewStdio(config.Command, envArgs, config.Args...)
