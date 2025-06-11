@@ -215,7 +215,7 @@ func prefetchPRData(prURL, commentID string, isReviewComment bool) (*PRData, err
 	data := &PRData{}
 
 	// Get basic PR information
-	cmd := exec.Command("gh", "pr", "view", prURL, "--comments")
+	cmd := exec.Command("gh", "pr", "view", prURL, "--json", "title,author,body,comments")
 	logger.G(context.TODO()).WithField("cmd", cmd.String()).Debug("Fetching PR basic info")
 	basicInfoOutput, err := cmd.CombinedOutput()
 	if err != nil {
