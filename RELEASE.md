@@ -1,5 +1,14 @@
 # Kodelet
 
+## 0.0.40.alpha (2025-06-11)
+
+### Issue Resolution Enhancements
+
+- **Intelligent Type Detection**: Enhanced `kodelet issue-resolve` with automatic type detection and workflow selection
+  - **Smart Analysis**: Automatically categorizes issues as bug fixes, feature requests, or documentation updates
+  - **Workflow Optimization**: Tailors resolution approach based on detected issue type
+  - **Improved Testing**: Expanded test coverage for issue type detection logic
+
 ## 0.0.39.alpha2 (2025-06-11)
 
 **PR Respond Command**: Improved `kodelet pr-respond` to fetch PR basic info using `gh pr view --json title,author,body,comments`
