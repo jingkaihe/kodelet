@@ -1,5 +1,14 @@
 # Kodelet
 
+## 0.0.40.alpha1 (2025-06-11)
+
+### MCP Configuration Enhancement
+
+- **Environment Variable Interpolation**: Added support for environment variable interpolation in MCP server configuration
+  - **Dollar Sign Syntax**: Use `$VAR_NAME` in MCP env configuration to reference environment variables
+  - **Dynamic Configuration**: Enables secure handling of API keys and secrets in MCP server environments
+  - **Backward Compatibility**: Existing configurations continue to work unchanged
+
 ## 0.0.40.alpha (2025-06-11)
 
 ### Issue Resolution Enhancements

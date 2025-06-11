@@ -247,3 +247,134 @@ func TestMCPTool_Execute(t *testing.T) {
 	assert.Contains(t, executeResult.AssistantFacing(), "<result>")
 	assert.NotContains(t, executeResult.AssistantFacing(), "<error>")
 }
+
+func TestNewMCPClient_EnvironmentVariableResolution(t *testing.T) {
+	// Test the strings.HasPrefix(v, "$") logic for environment variable resolution
+
+	t.Run("environment variable with $ prefix is resolved", func(t *testing.T) {
+		// Set a test environment variable
+		testEnvValue := "test-secret-value"
+		os.Setenv("TEST_MCP_VAR", testEnvValue)
+		defer os.Unsetenv("TEST_MCP_VAR")
+
+		config := MCPServerConfig{
+			ServerType: MCPServerTypeStdio,
+			Command:    "/bin/echo",
+			Args:       []string{"hello"},
+			Envs: map[string]string{
+				"TEST_VAR": "$TEST_MCP_VAR", // Should be resolved to testEnvValue
+			},
+		}
+
+		client, err := newMCPClient(config)
+		assert.NoError(t, err)
+		assert.NotNil(t, client)
+	})
+
+	t.Run("environment variable without $ prefix is used as literal", func(t *testing.T) {
+		config := MCPServerConfig{
+			ServerType: MCPServerTypeStdio,
+			Command:    "/bin/echo",
+			Args:       []string{"hello"},
+			Envs: map[string]string{
+				"TEST_VAR": "literal-value", // Should be used as-is
+			},
+		}
+
+		client, err := newMCPClient(config)
+		assert.NoError(t, err)
+		assert.NotNil(t, client)
+	})
+
+	t.Run("environment variable with $ prefix but undefined variable resolves to empty", func(t *testing.T) {
+		// Ensure the env var doesn't exist
+		os.Unsetenv("UNDEFINED_MCP_VAR")
+
+		config := MCPServerConfig{
+			ServerType: MCPServerTypeStdio,
+			Command:    "/bin/echo",
+			Args:       []string{"hello"},
+			Envs: map[string]string{
+				"TEST_VAR": "$UNDEFINED_MCP_VAR", // Should resolve to empty string
+			},
+		}
+
+		client, err := newMCPClient(config)
+		assert.NoError(t, err)
+		assert.NotNil(t, client)
+	})
+
+	t.Run("multiple environment variables with mixed $ prefix", func(t *testing.T) {
+		// Set test environment variables
+		os.Setenv("TEST_MCP_VAR1", "value1")
+		os.Setenv("TEST_MCP_VAR2", "value2")
+		defer func() {
+			os.Unsetenv("TEST_MCP_VAR1")
+			os.Unsetenv("TEST_MCP_VAR2")
+		}()
+
+		config := MCPServerConfig{
+			ServerType: MCPServerTypeStdio,
+			Command:    "/bin/echo",
+			Args:       []string{"hello"},
+			Envs: map[string]string{
+				"VAR1": "$TEST_MCP_VAR1", // Should be resolved
+				"VAR2": "literal-value",  // Should be literal
+				"VAR3": "$TEST_MCP_VAR2", // Should be resolved
+				"VAR4": "$UNDEFINED_VAR", // Should be empty
+			},
+		}
+
+		client, err := newMCPClient(config)
+		assert.NoError(t, err)
+		assert.NotNil(t, client)
+	})
+
+	t.Run("environment variable with $ at beginning of longer string", func(t *testing.T) {
+		os.Setenv("TEST_MCP_PREFIX", "secret")
+		defer os.Unsetenv("TEST_MCP_PREFIX")
+
+		config := MCPServerConfig{
+			ServerType: MCPServerTypeStdio,
+			Command:    "/bin/echo",
+			Args:       []string{"hello"},
+			Envs: map[string]string{
+				"TEST_VAR": "$TEST_MCP_PREFIX", // Should be resolved
+			},
+		}
+
+		client, err := newMCPClient(config)
+		assert.NoError(t, err)
+		assert.NotNil(t, client)
+	})
+
+	t.Run("empty environment variable value", func(t *testing.T) {
+		config := MCPServerConfig{
+			ServerType: MCPServerTypeStdio,
+			Command:    "/bin/echo",
+			Args:       []string{"hello"},
+			Envs: map[string]string{
+				"TEST_VAR": "", // Empty value should not trigger $ logic
+			},
+		}
+
+		client, err := newMCPClient(config)
+		assert.NoError(t, err)
+		assert.NotNil(t, client)
+	})
+
+	t.Run("environment variable value with only $", func(t *testing.T) {
+		config := MCPServerConfig{
+			ServerType: MCPServerTypeStdio,
+			Command:    "/bin/echo",
+			Args:       []string{"hello"},
+			Envs: map[string]string{
+				"TEST_VAR": "$", // Just $ should resolve to empty string from os.Getenv("")
+			},
+		}
+
+		client, err := newMCPClient(config)
+		assert.NoError(t, err)
+		assert.NotNil(t, client)
+	})
+}
