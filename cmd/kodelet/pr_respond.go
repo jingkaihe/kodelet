@@ -11,6 +11,7 @@ import (
 	"strings"
 	"syscall"
 	"text/template"
+	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/logger"
@@ -43,6 +44,26 @@ type PRRespondTemplateData struct {
 	CommentID       string
 	PRData          *PRData
 	FocusedSections string
+}
+
+// PRBasicInfo represents the JSON structure returned by 'gh pr view --json'
+type PRBasicInfo struct {
+	Title    string      `json:"title"`
+	Author   PRAuthor    `json:"author"`
+	Body     string      `json:"body"`
+	Comments []PRComment `json:"comments"`
+}
+
+// PRAuthor represents the author of the PR
+type PRAuthor struct {
+	Login string `json:"login"`
+}
+
+// PRComment represents a comment on the PR
+type PRComment struct {
+	Author    PRAuthor  `json:"author"`
+	Body      string    `json:"body"`
+	CreatedAt time.Time `json:"createdAt"`
 }
 
 // NewPRRespondConfig creates a new PRRespondConfig with default values
@@ -221,7 +242,16 @@ func prefetchPRData(prURL, commentID string, isReviewComment bool) (*PRData, err
 	if err != nil {
 		return nil, fmt.Errorf("failed to get PR basic info: %w, %s", err, string(basicInfoOutput))
 	}
-	data.BasicInfo = strings.TrimSpace(string(basicInfoOutput))
+
+	// Format JSON output to human-readable markdown
+	formattedInfo, err := formatPRBasicInfoToMarkdown(strings.TrimSpace(string(basicInfoOutput)))
+	if err != nil {
+		// Fallback to raw JSON if formatting fails
+		logger.G(context.TODO()).WithError(err).Warn("Failed to format PR basic info to markdown, using raw JSON")
+		data.BasicInfo = strings.TrimSpace(string(basicInfoOutput))
+	} else {
+		data.BasicInfo = formattedInfo
+	}
 
 	// Get git diff of the PR
 	diffCmd := exec.Command("gh", "pr", "diff", prURL)
@@ -292,6 +322,52 @@ func formatFocusedSections(comment, discussion string) string {
 `,
 		comment, discussion)
 }
+
+// formatPRBasicInfoToMarkdown converts JSON PR data to human-readable markdown
+func formatPRBasicInfoToMarkdown(jsonData string) (string, error) {
+	var prInfo PRBasicInfo
+	err := json.Unmarshal([]byte(jsonData), &prInfo)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse PR JSON data: %w", err)
+	}
+
+	// Create function map for template
+	funcMap := template.FuncMap{
+		"add": func(a, b int) int { return a + b },
+	}
+
+	tmpl, err := template.New("prBasicInfo").Funcs(funcMap).Parse(prBasicInfoTemplate)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse PR basic info template: %w", err)
+	}
+
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, prInfo); err != nil {
+		return "", fmt.Errorf("failed to execute PR basic info template: %w", err)
+	}
+
+	return buf.String(), nil
+}
+
+const prBasicInfoTemplate = `# {{.Title}}
+
+**Author:** @{{.Author.Login}}
+
+{{if .Body}}## Description
+
+{{.Body}}
+
+{{end}}{{if .Comments}}## Comments
+
+{{range $i, $comment := .Comments}}### Comment {{add $i 1}}
+**Author:** @{{$comment.Author.Login}}
+**Created:** {{$comment.CreatedAt.Format "2006-01-02 15:04:05"}}
+
+{{$comment.Body}}
+
+---
+
+{{end}}{{end}}`
 
 // fetchFocusedReviewComment fetches specific review comment details and related discussions using GitHub API
 func fetchFocusedReviewComment(prURL, commentID string) (string, string, error) {
