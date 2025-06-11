@@ -12,6 +12,7 @@ import (
 	"sync"
 
 	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/sysprompt"
@@ -412,15 +413,27 @@ func (t *AnthropicThread) NewMessage(ctx context.Context, params anthropic.Messa
 	defer span.End()
 
 	// Call the Anthropic API
-	stream := t.client.Messages.NewStreaming(ctx, params)
+	stream := t.client.Messages.NewStreaming(ctx, params, option.WithMaxRetries(3))
+	defer stream.Close()
 	message := anthropic.Message{}
 	for stream.Next() {
 		event := stream.Current()
 		err := message.Accumulate(event)
 		if err != nil {
+			// issue: https://github.com/anthropics/anthropic-sdk-go/issues/187
+			// from the observation this typically happens when the tool call string payload is complicated which confuses the llm
+			// this is the best effort to handle the error as right now there is no obvious way to handle it
+			// the behaviour is:
+			// - message is not accumulated properly
+			// - tool call becomes empty thus the tool call executiong returns error
+			// - the agentic loop will retry until it succeeds
+			// we can also wrap this into a more fancy retry func, but the effect is more or less the same
+			//
+			// the alternative approach is to return the error, however it will cause all the progress to be lost
+			logger.G(ctx).WithError(err).Error("error accumulating message")
 			telemetry.RecordError(ctx, err)
 			span.SetStatus(codes.Error, err.Error())
-			return nil, err
+			continue
 		}
 
 		if stream.Err() != nil {

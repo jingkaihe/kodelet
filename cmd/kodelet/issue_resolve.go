@@ -199,7 +199,9 @@ func generateIssueResolutionPrompt(bin, issueURL, botMention string) string {
 	return fmt.Sprintf(`Please resolve the github issue %s following the appropriate workflow based on the issue type:
 
 ## Step 1: Analyze the Issue
-1. Use "gh issue view %s" and "gh issue view %s --comments" to get the issue details and its comments.
+1. Get the issue details and its comments
+   - Preferrably use 'mcp_get_issue_comments' if it is available
+	 - If not, use 'gh issue view %s' and 'gh issue view %s --comments' to get the issue details and its comments.
 2. Review the issue details and understand the issue.
 3. Pay special attention to the latest comment with %s - this is the instruction from the user.
 4. Determine the issue type:
@@ -219,6 +221,8 @@ func generateIssueResolutionPrompt(bin, issueURL, botMention string) string {
 4. Once resolved, use subagent to run "%s commit --short --no-confirm" to commit changes
 5. Use subagent to run "%s pr" (60s timeout) to create a pull request
 6. Comment on the issue with the PR link
+   - Preferrably use 'mcp_add_issue_comment' if it is available
+	 - If not, use 'gh issue comment ...' to comment on the issue.
 
 ### For QUESTION ISSUES (Information/Clarification):
 1. Understand the question by reading issue comments and analyzing the codebase
