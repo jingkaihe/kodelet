@@ -1,5 +1,9 @@
 # Kodelet
 
+## 0.0.39.alpha1 (2025-06-11)
+
+Make sure the `kodelet gha-agent-onboard` update the dev env setup step before `git add` and `git commit`.
+
 ## 0.0.39.alpha (2025-06-11)
 
 ### GitHub Actions Background Agent

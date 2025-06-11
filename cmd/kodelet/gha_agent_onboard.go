@@ -166,7 +166,30 @@ This command will:
 			os.Exit(1)
 		}
 
-		// Step 4: Commit and create PR
+		// Step 4: Update the workflow file
+		// the the binary itself
+		binaryPath, err := os.Executable()
+		if err != nil {
+			fmt.Printf("Error getting executable path: %s\n", err)
+			os.Exit(1)
+		}
+
+		prompt := `
+	Update the 'Set up Agent Environment' step in .github/workflows/kodelet.yaml based on your understanding of the codebase.
+
+	Here are some of the references you can use to update the step:
+	* Your context of the codebase
+	* README.md
+	* Pre-existing github actions workflow files
+	`
+
+		kodeletRunCmd := exec.Command(binaryPath, "run", "--no-save", prompt)
+		if err := executeCommandWithStreaming(kodeletRunCmd); err != nil {
+			fmt.Printf("Error running command: %s\n", err)
+			os.Exit(1)
+		}
+
+		// Step 5: Commit and create PR
 		fmt.Println("Creating commit and pull request...")
 		prURL, err := commitAndCreatePR(branchName)
 		if err != nil {
@@ -421,26 +444,6 @@ func commitAndCreatePR(branchName string) (string, error) {
 	cmd := exec.Command("git", "add", ".github/workflows/kodelet.yaml")
 	if err := cmd.Run(); err != nil {
 		return "", errors.Wrap(err, "error adding workflow file")
-	}
-
-	// the the binary itself
-	binaryPath, err := os.Executable()
-	if err != nil {
-		return "", errors.Wrap(err, "error getting executable path")
-	}
-
-	prompt := `
-	Update the 'Set up Agent Environment' step in .github/workflows/kodelet.yaml based on your understanding of the codebase.
-
-	Here are some of the references you can use to update the step:
-	* Your context of the codebase
-	* README.md
-	* Pre-existing github actions workflow files
-	`
-
-	cmd = exec.Command(binaryPath, "run", "--no-save", prompt)
-	if err := executeCommandWithStreaming(cmd); err != nil {
-		return "", errors.Wrap(err, "error running command")
 	}
 
 	// Commit the changes
