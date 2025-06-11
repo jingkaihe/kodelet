@@ -115,7 +115,7 @@ Please create a pull request following the steps below:
 - A detailed description of the changes based on the changes impact on the project.
 - Break down the changes into a few bullet points
 
-4. Create a pull request using 'gh pr create --title <title> --body <body> --base %s' command. The body should follow the following format:
+4. Create a pull request using 'mcp_create_pull_request' if it is available, otherwise use 'gh pr create --title <title> --body <body> --base %s' command. The body should follow the following format:
 
 %s
 
