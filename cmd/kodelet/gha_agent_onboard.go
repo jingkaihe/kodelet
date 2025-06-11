@@ -438,7 +438,7 @@ func commitAndCreatePR(branchName string) (string, error) {
 	* Pre-existing github actions workflow files
 	`
 
-	cmd = exec.Command(binaryPath, "run", prompt)
+	cmd = exec.Command(binaryPath, "run", "--no-save", prompt)
 	if err := executeCommandWithStreaming(cmd); err != nil {
 		return "", errors.Wrap(err, "error running command")
 	}
