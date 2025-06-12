@@ -1,0 +1,77 @@
+name: Background Kodelet
+
+on:
+  issue_comment:
+    types: [created]
+  issues:
+    types: [opened, assigned]
+  pull_request_review_comment:
+    types: [created]
+  pull_request_review:
+    types: [submitted]
+
+env:
+  TIMEOUT_MINUTES: "300"
+
+jobs:
+  background-kodelet:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      issues: read
+      pull-requests: read
+      contents: read
+    timeout-minutes: 15  # 15 Minutes
+    if: |
+      (
+        (github.event_name == 'issues' && contains(github.event.issue.body, '@kodelet')) ||
+        (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@kodelet')) ||
+        (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@kodelet')) ||
+        (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@kodelet'))
+      ) &&
+      (
+        (github.event.issue.author_association == 'OWNER' || github.event.issue.author_association == 'MEMBER' || github.event.issue.author_association == 'COLLABORATOR') ||
+        (github.event.comment.author_association == 'OWNER' || github.event.comment.author_association == 'MEMBER' || github.event.comment.author_association == 'COLLABORATOR') ||
+        (github.event.review.author_association == 'OWNER' || github.event.review.author_association == 'MEMBER' || github.event.review.author_association == 'COLLABORATOR')
+      )
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ "{{" }} secrets.GITHUB_TOKEN {{ "}}" }}
+      - name: Set up Agent Environment
+        run: |
+          echo "YMMV"
+      - name: Run Kodelet
+        uses: jingkaihe/kodelet-action@v0.1.7-alpha
+        with:
+          anthropic-api-key: ${{ "{{" }} secrets.ANTHROPIC_API_KEY {{ "}}" }}
+          auth-gateway-endpoint: {{ .AuthGatewayEndpoint }}
+          kodelet-config: |
+            model: "claude-sonnet-4-0"
+            weak_model: "claude-3-5-haiku-latest"
+            max_tokens: 64000
+            weak_model_max_tokens: 8192
+            thinking_budget_tokens: 32000
+            mcp:
+              servers:
+                github:
+                  command: "docker"
+                  args:
+                    - run
+                    - -i
+                    - --rm
+                    - -e
+                    - GITHUB_PERSONAL_ACCESS_TOKEN
+                    - -e
+                    - GITHUB_TOOLSETS
+                    - ghcr.io/github/github-mcp-server
+                  envs:
+                    GITHUB_TOOLSETS: "issues,pull_requests"
+                    GITHUB_PERSONAL_ACCESS_TOKEN: $GITHUB_TOKEN
+                  tool_white_list:
+                    - get_issue
+                    - get_issue_comments
+                    - add_issue_comment
+                    - create_pull_request
