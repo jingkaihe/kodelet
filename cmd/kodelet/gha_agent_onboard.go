@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/github"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
@@ -29,64 +30,12 @@ func NewGhaAgentOnboardConfig() *GhaAgentOnboardConfig {
 }
 
 // generateWorkflowTemplate generates the GitHub workflow template with the provided configuration
-func generateWorkflowTemplate(config *GhaAgentOnboardConfig) string {
-	return fmt.Sprintf(`name: Background Kodelet
+func generateWorkflowTemplate(config *GhaAgentOnboardConfig) (string, error) {
+	templateData := github.WorkflowTemplateData{
+		AuthGatewayEndpoint: config.AuthGatewayEndpoint,
+	}
 
-on:
-  issue_comment:
-    types: [created]
-  issues:
-    types: [opened, assigned]
-  pull_request_review_comment:
-    types: [created]
-  pull_request_review:
-    types: [submitted]
-
-env:
-  TIMEOUT_MINUTES: "300"
-
-jobs:
-  background-kodelet:
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      issues: read
-      pull-requests: read
-      contents: read
-    timeout-minutes: 15  # 15 Minutes
-    if: |
-      (
-        (github.event_name == 'issues' && contains(github.event.issue.body, '@kodelet')) ||
-        (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@kodelet')) ||
-        (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@kodelet')) ||
-        (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@kodelet'))
-      ) &&
-      (
-        (github.event.issue.author_association == 'OWNER' || github.event.issue.author_association == 'MEMBER' || github.event.issue.author_association == 'COLLABORATOR') ||
-        (github.event.comment.author_association == 'OWNER' || github.event.comment.author_association == 'MEMBER' || github.event.comment.author_association == 'COLLABORATOR') ||
-        (github.event.review.author_association == 'OWNER' || github.event.review.author_association == 'MEMBER' || github.event.review.author_association == 'COLLABORATOR')
-      )
-
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Set up Agent Environment
-        run: |
-          echo "YMMV"
-      - name: Run Kodelet
-        uses: jingkaihe/kodelet-action@v0.1.7-alpha
-        with:
-          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
-          auth-gateway-endpoint: %s
-          kodelet-config: |
-            model: "claude-sonnet-4-0"
-            weak_model: "claude-3-5-haiku-latest"
-            max_tokens: 64000
-            weak_model_max_tokens: 8192
-            thinking_budget_tokens: 32000
-`, config.AuthGatewayEndpoint)
+	return github.RenderBackgroundAgentWorkflow(templateData)
 }
 
 var ghaAgentOnboardCmd = &cobra.Command{
@@ -377,7 +326,10 @@ func createBranchAndWorkflow(branchName string, config *GhaAgentOnboardConfig) e
 	}
 
 	// Generate the workflow template with config
-	workflowContent := generateWorkflowTemplate(config)
+	workflowContent, err := generateWorkflowTemplate(config)
+	if err != nil {
+		return errors.Wrap(err, "error generating workflow template")
+	}
 
 	// Write the workflow file
 	workflowPath := fmt.Sprintf("%s/kodelet.yaml", workflowDir)
