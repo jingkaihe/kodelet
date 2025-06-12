@@ -1,5 +1,12 @@
 # Kodelet
 
+## 0.0.40.alpha2 (2025-06-12)
+
+### GitHub Actions Template System
+
+- **New Template Rendering**: Added GitHub Actions workflow template system with Go templating support
+  - **Template File Support**: New `pkg/github/templates.go` with embedded workflow templates
+
 ## 0.0.40.alpha1 (2025-06-11)
 
 ### MCP Configuration Enhancement
