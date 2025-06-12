@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jingkaihe/kodelet/pkg/gha"
+	"github.com/jingkaihe/kodelet/pkg/github"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
@@ -31,11 +31,11 @@ func NewGhaAgentOnboardConfig() *GhaAgentOnboardConfig {
 
 // generateWorkflowTemplate generates the GitHub workflow template with the provided configuration
 func generateWorkflowTemplate(config *GhaAgentOnboardConfig) (string, error) {
-	templateData := gha.WorkflowTemplateData{
+	templateData := github.WorkflowTemplateData{
 		AuthGatewayEndpoint: config.AuthGatewayEndpoint,
 	}
 
-	return gha.RenderBackgroundAgentWorkflow(templateData)
+	return github.RenderBackgroundAgentWorkflow(templateData)
 }
 
 var ghaAgentOnboardCmd = &cobra.Command{

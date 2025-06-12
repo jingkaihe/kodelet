@@ -23,7 +23,7 @@ Kodelet is a lightweight CLI tool that helps with software engineering tasks. It
 ├── Makefile             # Build automation
 ├── pkg/                 # Core packages
 │   ├── conversations/   # Conversation storage and management
-│   ├── gha/             # GitHub Actions templates and utilities
+│   ├── github/          # GitHub Actions templates and utilities
 │   │   └── templates/   # Embedded GitHub Actions workflow templates
 │   ├── llm/             # LLM client for AI interactions
 │   │   ├── anthropic/   # Anthropic Claude API client

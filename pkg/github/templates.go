@@ -1,4 +1,4 @@
-package gha
+package github
 
 import (
 	"bytes"
