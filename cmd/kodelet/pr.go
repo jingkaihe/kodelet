@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"strings"
+	"syscall"
 
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/tools"
@@ -60,8 +63,25 @@ var prCmd = &cobra.Command{
 This command analyzes the current branch changes compared to the target branch and generates an appropriate PR title and description.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		// Create a new state for the PR operation
-		ctx := cmd.Context()
-		s := tools.NewBasicState(ctx)
+		ctx, cancel := context.WithCancel(cmd.Context())
+		defer cancel()
+
+		// Set up signal handling
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+		go func() {
+			<-sigCh
+			fmt.Println("\n\033[1;33m[kodelet]: Cancellation requested, shutting down...\033[0m")
+			cancel()
+		}()
+
+		mcpManager, err := tools.CreateMCPManagerFromViper(ctx)
+		if err != nil {
+			fmt.Printf("\n\033[1;31mError creating MCP manager: %v\033[0m\n", err)
+			return
+		}
+
+		s := tools.NewBasicState(ctx, tools.WithMCPTools(mcpManager))
 
 		// Get PR config from flags
 		config := getPRConfigFromFlags(cmd)
@@ -115,9 +135,16 @@ Please create a pull request following the steps below:
 - A detailed description of the changes based on the changes impact on the project.
 - Break down the changes into a few bullet points
 
-4. Create a pull request using 'mcp_create_pull_request' if it is available, otherwise use 'gh pr create --title <title> --body <body> --base %s' command. The body should follow the following format:
+4. Create a pull request against the target branch %s:
+- **MUST USE** the 'mcp_create_pull_request' MCP tool if it is available in your tool list
+- The 'mcp_create_pull_request' tool requires: owner, repo, title, body, head (current branch), base (target branch)
+- Only use 'gh pr create ...' bash command as a last resort fallback if the MCP tool is not available
 
+The body of the pull request should follow the following format:
+
+<pr_body_format>
 %s
+</pr_body_format>
 
 IMPORTANT:
 - After the batch command run, when you performing the PR analysis, do not carry out extra tool calls to gather extra information, but instead use the information provided by the batch tool.
