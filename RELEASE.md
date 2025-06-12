@@ -1,5 +1,14 @@
 # Kodelet
 
+## 0.0.41.alpha (2025-06-12)
+
+### Message Cleanup
+
+- **Orphaned Message Cleanup**: Added automatic cleanup for orphaned messages in both Anthropic and OpenAI threads
+  - **Thread Integrity**: Ensures conversation threads maintain proper message structure and relationships
+  - **Memory Optimization**: Removes orphaned messages that could accumulate during failed operations
+  - **Cross-Provider Support**: Consistent cleanup behavior across both Anthropic and OpenAI implementations
+
 ## 0.0.40.alpha2 (2025-06-12)
 
 ### GitHub Actions Template System
