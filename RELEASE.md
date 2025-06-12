@@ -7,6 +7,10 @@
 - **New Template Rendering**: Added GitHub Actions workflow template system with Go templating support
   - **Template File Support**: New `pkg/github/templates.go` with embedded workflow templates
 
+### PR Command Enhancements
+
+- **MCP Tool Support**: Added support for MCP tools in the PR command
+
 ## 0.0.40.alpha1 (2025-06-11)
 
 ### MCP Configuration Enhancement
