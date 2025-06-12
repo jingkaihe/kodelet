@@ -12,6 +12,34 @@ import (
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
 
+// cleanupOrphanedMessages removes orphaned messages from the end of the message list.
+// This includes:
+// - Empty messages (messages with no content and no tool calls)
+// - Assistant messages containing tool calls that are not followed by tool result messages
+func (t *OpenAIThread) cleanupOrphanedMessages() {
+	for {
+		if len(t.messages) == 0 {
+			break
+		}
+		lastMessage := t.messages[len(t.messages)-1]
+
+		// Remove the last message if it is empty (no content and no tool calls)
+		if lastMessage.Content == "" && len(lastMessage.ToolCalls) == 0 && lastMessage.Role != openai.ChatMessageRoleTool {
+			t.messages = t.messages[:len(t.messages)-1]
+			continue
+		}
+
+		// Remove the last message if it's an assistant message with tool calls,
+		// as it must be followed by tool result messages
+		if lastMessage.Role == openai.ChatMessageRoleAssistant && len(lastMessage.ToolCalls) > 0 {
+			t.messages = t.messages[:len(t.messages)-1]
+			continue
+		}
+
+		break
+	}
+}
+
 // SaveConversation saves the current thread to the conversation store
 func (t *OpenAIThread) SaveConversation(ctx context.Context, summarize bool) error {
 	t.conversationMu.Lock()
@@ -20,6 +48,9 @@ func (t *OpenAIThread) SaveConversation(ctx context.Context, summarize bool) err
 	if !t.isPersisted || t.store == nil {
 		return nil
 	}
+
+	// Clean up orphaned messages before saving
+	t.cleanupOrphanedMessages()
 
 	// Generate a new summary if requested
 	if summarize {
