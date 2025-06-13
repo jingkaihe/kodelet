@@ -136,7 +136,7 @@ func (t *WebFetchTool) Execute(ctx context.Context, state tooltypes.State, param
 	}
 
 	// 1. Fetch the content with a custom HTTP client that handles same-domain redirects
-	content, contentType, err := fetchWithSameDomainRedirects(input.URL)
+	content, contentType, err := fetchWithSameDomainRedirects(ctx, input.URL)
 	if err != nil {
 		return &WebFetchToolResult{
 			url:    input.URL,
@@ -224,7 +224,7 @@ func (t *WebFetchTool) TracingKVs(parameters string) ([]attribute.KeyValue, erro
 
 // fetchWithSameDomainRedirects fetches content from a URL and follows redirects
 // only if they stay within the same domain.
-func fetchWithSameDomainRedirects(urlStr string) (string, string, error) {
+func fetchWithSameDomainRedirects(ctx context.Context, urlStr string) (string, string, error) {
 	// Parse the original URL to get the domain
 	parsedURL, err := url.Parse(urlStr)
 	if err != nil {
@@ -251,8 +251,14 @@ func fetchWithSameDomainRedirects(urlStr string) (string, string, error) {
 		},
 	}
 
+	// Create the request with context
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, urlStr, nil)
+	if err != nil {
+		return "", "", err
+	}
+
 	// Make the request
-	resp, err := client.Get(urlStr)
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", "", err
 	}

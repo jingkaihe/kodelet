@@ -11,6 +11,38 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/types/llm"
 )
 
+// cleanupOrphanedMessages removes orphaned messages from the end of the message list.
+// This includes:
+// - Empty messages (messages with no content)
+// - Messages containing tool use blocks that are not followed by tool result messages
+func (t *AnthropicThread) cleanupOrphanedMessages() {
+	for {
+		if len(t.messages) == 0 {
+			break
+		}
+		lastMessage := t.messages[len(t.messages)-1]
+		// remove the last message if it is empty
+		if len(lastMessage.Content) == 0 {
+			t.messages = t.messages[:len(t.messages)-1]
+			continue
+		}
+		// remove the last message if it has any tool use message, as it must be followed by a tool result message
+		hasToolUse := false
+		for _, contentBlock := range lastMessage.Content {
+			if contentBlock.OfToolUse != nil {
+				hasToolUse = true
+				break
+			}
+		}
+
+		if hasToolUse {
+			t.messages = t.messages[:len(t.messages)-1]
+			continue
+		}
+		break
+	}
+}
+
 // SaveConversation saves the current thread to the conversation store
 func (t *AnthropicThread) SaveConversation(ctx context.Context, summarise bool) error {
 	t.conversationMu.Lock()
@@ -19,6 +51,9 @@ func (t *AnthropicThread) SaveConversation(ctx context.Context, summarise bool) 
 	if !t.isPersisted || t.store == nil {
 		return nil
 	}
+
+	// Clean up orphaned messages before saving
+	t.cleanupOrphanedMessages()
 
 	// Marshall the messages to JSON
 	rawMessages, err := json.Marshal(t.messages)

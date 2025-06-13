@@ -154,3 +154,343 @@ func TestSaveAndLoadConversationWithFileLastAccess(t *testing.T) {
 	assert.Equal(t, now.Unix(), loadedFileAccess["/path/to/file1.txt"].Unix())
 	assert.Equal(t, yesterday.Unix(), loadedFileAccess["/path/to/file2.txt"].Unix())
 }
+
+func TestSaveConversationMessageCleanup(t *testing.T) {
+	tests := []struct {
+		name             string
+		initialMessages  []anthropic.MessageParam
+		expectedMessages []anthropic.MessageParam
+		description      string
+	}{
+		{
+			name:             "empty messages list",
+			initialMessages:  []anthropic.MessageParam{},
+			expectedMessages: []anthropic.MessageParam{},
+			description:      "should handle empty message list without error",
+		},
+		{
+			name: "remove single empty message at end",
+			initialMessages: []anthropic.MessageParam{
+				anthropic.NewUserMessage(anthropic.NewTextBlock("Hello")),
+				{
+					Role:    anthropic.MessageParamRoleAssistant,
+					Content: []anthropic.ContentBlockParamUnion{}, // empty content
+				},
+			},
+			expectedMessages: []anthropic.MessageParam{
+				anthropic.NewUserMessage(anthropic.NewTextBlock("Hello")),
+			},
+			description: "should remove empty message at the end",
+		},
+		{
+			name: "remove multiple empty messages at end",
+			initialMessages: []anthropic.MessageParam{
+				anthropic.NewUserMessage(anthropic.NewTextBlock("Hello")),
+				{
+					Role:    anthropic.MessageParamRoleAssistant,
+					Content: []anthropic.ContentBlockParamUnion{}, // empty content
+				},
+				{
+					Role:    anthropic.MessageParamRoleUser,
+					Content: []anthropic.ContentBlockParamUnion{}, // empty content
+				},
+			},
+			expectedMessages: []anthropic.MessageParam{
+				anthropic.NewUserMessage(anthropic.NewTextBlock("Hello")),
+			},
+			description: "should remove multiple empty messages at the end",
+		},
+		{
+			name: "remove orphaned tool use message at end",
+			initialMessages: func() []anthropic.MessageParam {
+				// Create messages similar to the existing test pattern
+				rawMessages := `[
+					{
+						"content": [
+							{
+								"text": "Hello",
+								"type": "text"
+							}
+						],
+						"role": "user"
+					},
+					{
+						"content": [
+							{
+								"id": "tool_123",
+								"input": {
+									"command": "test"
+								},
+								"name": "test_tool",
+								"type": "tool_use"
+							}
+						],
+						"role": "assistant"
+					}
+				]`
+				messages, _ := DeserializeMessages([]byte(rawMessages))
+				return messages
+			}(),
+			expectedMessages: []anthropic.MessageParam{
+				anthropic.NewUserMessage(anthropic.NewTextBlock("Hello")),
+			},
+			description: "should remove orphaned tool use message at the end",
+		},
+		{
+			name: "remove orphaned tool use message with text message at end",
+			initialMessages: []anthropic.MessageParam{
+				anthropic.NewUserMessage(anthropic.NewTextBlock("Hello")),
+				{
+					Role: anthropic.MessageParamRoleAssistant,
+					Content: []anthropic.ContentBlockParamUnion{
+						anthropic.NewTextBlock("Hi there"),
+						anthropic.NewToolUseBlock("tool_123", "test_tool", "test"),
+					},
+				},
+			},
+			expectedMessages: []anthropic.MessageParam{
+				anthropic.NewUserMessage(anthropic.NewTextBlock("Hello")),
+			},
+			description: "should remove orphaned tool use message with text message at the end",
+		},
+		{
+			name: "preserve valid tool use followed by tool result",
+			initialMessages: func() []anthropic.MessageParam {
+				rawMessages := `[
+					{
+						"content": [
+							{
+								"text": "Hello",
+								"type": "text"
+							}
+						],
+						"role": "user"
+					},
+					{
+						"content": [
+							{
+								"id": "tool_123",
+								"input": {
+									"command": "test"
+								},
+								"name": "test_tool",
+								"type": "tool_use"
+							}
+						],
+						"role": "assistant"
+					},
+					{
+						"content": [
+							{
+								"tool_use_id": "tool_123",
+								"is_error": false,
+								"content": [
+									{
+										"text": "result",
+										"type": "text"
+									}
+								],
+								"type": "tool_result"
+							}
+						],
+						"role": "user"
+					}
+				]`
+				messages, _ := DeserializeMessages([]byte(rawMessages))
+				return messages
+			}(),
+			expectedMessages: func() []anthropic.MessageParam {
+				rawMessages := `[
+					{
+						"content": [
+							{
+								"text": "Hello",
+								"type": "text"
+							}
+						],
+						"role": "user"
+					},
+					{
+						"content": [
+							{
+								"id": "tool_123",
+								"input": {
+									"command": "test"
+								},
+								"name": "test_tool",
+								"type": "tool_use"
+							}
+						],
+						"role": "assistant"
+					},
+					{
+						"content": [
+							{
+								"tool_use_id": "tool_123",
+								"is_error": false,
+								"content": [
+									{
+										"text": "result",
+										"type": "text"
+									}
+								],
+								"type": "tool_result"
+							}
+						],
+						"role": "user"
+					}
+				]`
+				messages, _ := DeserializeMessages([]byte(rawMessages))
+				return messages
+			}(),
+			description: "should preserve valid tool use when followed by tool result",
+		},
+		{
+			name: "complex cleanup scenario",
+			initialMessages: func() []anthropic.MessageParam {
+				rawMessages := `[
+					{
+						"content": [
+							{
+								"text": "Hello",
+								"type": "text"
+							}
+						],
+						"role": "user"
+					},
+					{
+						"content": [
+							{
+								"text": "Valid response",
+								"type": "text"
+							}
+						],
+						"role": "assistant"
+					},
+					{
+						"content": [
+							{
+								"id": "tool_orphaned",
+								"input": {
+									"command": "orphaned"
+								},
+								"name": "test_tool",
+								"type": "tool_use"
+							}
+						],
+						"role": "assistant"
+					},
+					{
+						"content": [],
+						"role": "user"
+					},
+					{
+						"content": [],
+						"role": "assistant"
+					}
+				]`
+				messages, _ := DeserializeMessages([]byte(rawMessages))
+				return messages
+			}(),
+			expectedMessages: []anthropic.MessageParam{
+				anthropic.NewUserMessage(anthropic.NewTextBlock("Hello")),
+				{
+					Role: anthropic.MessageParamRoleAssistant,
+					Content: []anthropic.ContentBlockParamUnion{
+						anthropic.NewTextBlock("Valid response"),
+					},
+				},
+			},
+			description: "should remove multiple types of invalid messages from the end",
+		},
+		{
+			name: "preserve valid messages only",
+			initialMessages: []anthropic.MessageParam{
+				anthropic.NewUserMessage(anthropic.NewTextBlock("Hello")),
+				{
+					Role: anthropic.MessageParamRoleAssistant,
+					Content: []anthropic.ContentBlockParamUnion{
+						anthropic.NewTextBlock("Hi there!"),
+					},
+				},
+			},
+			expectedMessages: []anthropic.MessageParam{
+				anthropic.NewUserMessage(anthropic.NewTextBlock("Hello")),
+				{
+					Role: anthropic.MessageParamRoleAssistant,
+					Content: []anthropic.ContentBlockParamUnion{
+						anthropic.NewTextBlock("Hi there!"),
+					},
+				},
+			},
+			description: "should preserve all valid messages without modification",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create a thread without persistence to avoid store issues
+			thread := NewAnthropicThread(llmtypes.Config{
+				Model: string(anthropic.ModelClaudeSonnet4_0),
+			})
+
+			// Set up state
+			state := tools.NewBasicState(context.TODO())
+			thread.SetState(state)
+
+			// Set the initial messages
+			thread.messages = tt.initialMessages
+
+			// Test the cleanup logic directly by calling the extracted function
+			thread.cleanupOrphanedMessages()
+
+			// Verify the messages were cleaned up correctly
+			assert.Equal(t, len(tt.expectedMessages), len(thread.messages),
+				"Message count mismatch for test: %s", tt.description)
+
+			for i, expectedMsg := range tt.expectedMessages {
+				if i >= len(thread.messages) {
+					t.Errorf("Expected message %d missing in test: %s", i, tt.description)
+					continue
+				}
+
+				actualMsg := thread.messages[i]
+				assert.Equal(t, expectedMsg.Role, actualMsg.Role,
+					"Role mismatch at message %d for test: %s", i, tt.description)
+				assert.Equal(t, len(expectedMsg.Content), len(actualMsg.Content),
+					"Content length mismatch at message %d for test: %s", i, tt.description)
+
+				// Compare content blocks - focus on key properties
+				for j, expectedContent := range expectedMsg.Content {
+					if j >= len(actualMsg.Content) {
+						t.Errorf("Expected content block %d missing at message %d for test: %s",
+							j, i, tt.description)
+						continue
+					}
+
+					actualContent := actualMsg.Content[j]
+
+					// Compare text content if it's a text block
+					if expectedContent.OfText != nil && actualContent.OfText != nil {
+						assert.Equal(t, expectedContent.OfText.Text, actualContent.OfText.Text,
+							"Text content mismatch at message %d, content %d for test: %s", i, j, tt.description)
+					}
+
+					// Compare tool use if it's a tool use block
+					if expectedContent.OfToolUse != nil && actualContent.OfToolUse != nil {
+						assert.Equal(t, expectedContent.OfToolUse.ID, actualContent.OfToolUse.ID,
+							"Tool use ID mismatch at message %d, content %d for test: %s", i, j, tt.description)
+						assert.Equal(t, expectedContent.OfToolUse.Name, actualContent.OfToolUse.Name,
+							"Tool use name mismatch at message %d, content %d for test: %s", i, j, tt.description)
+					}
+
+					// Compare tool result if it's a tool result block
+					if expectedContent.OfToolResult != nil && actualContent.OfToolResult != nil {
+						assert.Equal(t, expectedContent.OfToolResult.ToolUseID, actualContent.OfToolResult.ToolUseID,
+							"Tool result ID mismatch at message %d, content %d for test: %s", i, j, tt.description)
+					}
+				}
+			}
+		})
+	}
+}
