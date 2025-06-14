@@ -65,7 +65,7 @@ type FileReadTool struct{}
 
 type FileReadInput struct {
 	FilePath string `json:"file_path" jsonschema:"description=The absolute path of the file to read"`
-	Offset   int    `json:"offset" jsonschema:"description=The 0-indexed line number to start reading from,default=0"`
+	Offset   int    `json:"offset" jsonschema:"description=The 1-indexed line number to start reading from,default=1,minimum=1"`
 }
 
 func (r *FileReadTool) GenerateSchema() *jsonschema.Schema {
@@ -81,7 +81,7 @@ func (r *FileReadTool) Description() string {
 
 This tool takes two parameters:
 - file_path: The absolute path of the file to read
-- offset: The 0-indexed line number to start reading from (default: 0)
+- offset: The 1-indexed line number to start reading from (default: 1, minimum: 1)
 
 Non-zero offset is recommended for the purpose of reading large files.
 
@@ -90,10 +90,10 @@ Example:
 
 ---
 
-  0: def hello():
-  1:    print("Hello world")
+  1: def hello():
+  2:    print("Hello world")
 ...
-100:  print(hello)
+101:  print(hello)
 
 ---
 
@@ -113,7 +113,8 @@ func (r *FileReadTool) ValidateInput(state tooltypes.State, parameters string) e
 	}
 
 	if input.Offset < 0 {
-		return errors.New("offset must be a non-negative integer")
+		// sometimes offset is 0, which means the llm wants to read the whole file
+		return errors.New("offset must be a positive integer")
 	}
 
 	return nil
@@ -155,8 +156,12 @@ func (r *FileReadTool) Execute(ctx context.Context, state tooltypes.State, param
 
 	scanner := bufio.NewScanner(file)
 
+	if input.Offset == 0 {
+		input.Offset = 1
+	}
+
 	// Skip lines before offset
-	lineCount := 0
+	lineCount := 1
 	for lineCount < input.Offset && scanner.Scan() {
 		lineCount++
 	}
@@ -164,7 +169,7 @@ func (r *FileReadTool) Execute(ctx context.Context, state tooltypes.State, param
 	if lineCount < input.Offset {
 		return &FileReadToolResult{
 			filename: input.FilePath,
-			err:      fmt.Sprintf("File has only %d lines, which is less than the requested offset %d", lineCount, input.Offset),
+			err:      fmt.Sprintf("File has only %d lines, which is less than the requested offset %d", lineCount-1, input.Offset),
 		}
 	}
 
