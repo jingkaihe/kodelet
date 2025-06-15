@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/invopop/jsonschema"
@@ -81,6 +82,14 @@ func StringifyToolResult(result, err string) string {
 	return out
 }
 
+type BackgroundProcess struct {
+	PID       int         `json:"pid"`
+	Command   string      `json:"command"`
+	LogPath   string      `json:"log_path"`
+	StartTime time.Time   `json:"start_time"`
+	Process   *os.Process `json:"-"` // Not serialized
+}
+
 type State interface {
 	SetFileLastAccessed(path string, lastAccessed time.Time) error
 	GetFileLastAccessed(path string) (time.Time, error)
@@ -92,4 +101,8 @@ type State interface {
 	BasicTools() []Tool
 	MCPTools() []Tool
 	Tools() []Tool
+	// Background process management
+	AddBackgroundProcess(process BackgroundProcess) error
+	GetBackgroundProcesses() []BackgroundProcess
+	RemoveBackgroundProcess(pid int) error
 }

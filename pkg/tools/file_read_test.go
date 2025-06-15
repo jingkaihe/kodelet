@@ -74,7 +74,7 @@ func TestFileReadTool_ValidateInput(t *testing.T) {
 				Offset:   -1,
 			},
 			expectError: true,
-			errorMsg:    "offset must be a non-negative integer",
+			errorMsg:    "offset must be a positive integer",
 		},
 	}
 
@@ -122,8 +122,8 @@ func TestFileReadTool_Execute(t *testing.T) {
 		result := tool.Execute(context.Background(), NewBasicState(context.TODO()), string(params))
 
 		assert.False(t, result.IsError())
-		assert.Contains(t, result.GetResult(), "0: Line 1")
-		assert.Contains(t, result.GetResult(), "4: Line 5")
+		assert.Contains(t, result.GetResult(), "1: Line 1")
+		assert.Contains(t, result.GetResult(), "5: Line 5")
 	})
 
 	// Test reading with offset
@@ -136,9 +136,10 @@ func TestFileReadTool_Execute(t *testing.T) {
 		result := tool.Execute(context.Background(), NewBasicState(context.TODO()), string(params))
 
 		assert.False(t, result.IsError())
-		assert.Contains(t, result.GetResult(), "2: Line 3")
-		assert.Contains(t, result.GetResult(), "4: Line 5")
-		assert.NotContains(t, result.GetResult(), "0: Line 1")
+		assert.Contains(t, result.GetResult(), "2: Line 2")
+		assert.Contains(t, result.GetResult(), "3: Line 3")
+		assert.Contains(t, result.GetResult(), "5: Line 5")
+		assert.NotContains(t, result.GetResult(), "1: Line 1")
 	})
 
 	// Test reading with offset beyond file length
@@ -210,9 +211,9 @@ func TestFileReadTool_Line_Padding(t *testing.T) {
 
 		// The padding is dynamic, so the exact space count may vary
 		// Let's just check that the format is correct instead of exact spacing
-		assert.Contains(t, result.GetResult(), "0: Line 1")
-		assert.Contains(t, result.GetResult(), "10: Line 11")
-		assert.Contains(t, result.GetResult(), "99: Line 100")
+		assert.Contains(t, result.GetResult(), "1: Line 1")
+		assert.Contains(t, result.GetResult(), "10: Line 10")
+		assert.Contains(t, result.GetResult(), "100: Line 100")
 	})
 
 	// Test with offset to see if padding is calculated properly
@@ -227,8 +228,9 @@ func TestFileReadTool_Line_Padding(t *testing.T) {
 		assert.False(t, result.IsError())
 
 		// With offset 50, line numbers should start at 50
-		assert.Contains(t, result.GetResult(), "50: Line 51")
-		assert.Contains(t, result.GetResult(), "99: Line 100")
+		assert.Contains(t, result.GetResult(), "50: Line 50")
+		assert.Contains(t, result.GetResult(), "51: Line 51")
+		assert.Contains(t, result.GetResult(), "100: Line 100")
 	})
 }
 
@@ -239,7 +241,7 @@ func TestFileReadTool_MaxOutputBytes(t *testing.T) {
 	largeLine := strings.Repeat("X", 1000) + "\n"
 
 	// Write 200 of these lines (approx 200KB, which exceeds MaxOutputBytes of 100KB)
-	for i := 0; i < 200; i++ {
+	for i := 1; i < 200; i++ {
 		content.WriteString(fmt.Sprintf("Line %d: %s", i, largeLine))
 	}
 

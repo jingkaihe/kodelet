@@ -3,10 +3,12 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestBashTool_GenerateSchema(t *testing.T) {
@@ -47,7 +49,7 @@ func TestBashTool_Execute_Timeout(t *testing.T) {
 	tool := &BashTool{}
 	input := BashInput{
 		Description: "Sleep test",
-		Command:     "sleep 2",
+		Command:     "sleep 1",
 		Timeout:     1,
 	}
 	params, _ := json.Marshal(input)
@@ -82,7 +84,7 @@ func TestBashTool_Execute_ContextCancellation(t *testing.T) {
 	tool := &BashTool{}
 	input := BashInput{
 		Description: "Long running command",
-		Command:     "sleep 10",
+		Command:     "sleep 5",
 		Timeout:     20,
 	}
 	params, _ := json.Marshal(input)
@@ -188,6 +190,38 @@ func TestBashTool_ValidateInput(t *testing.T) {
 			expectError: true,
 			errorMsg:    "timeout must be between 10 and 120 seconds",
 		},
+		{
+			name: "valid background command with timeout 0",
+			input: BashInput{
+				Description: "test",
+				Command:     "sleep 1",
+				Timeout:     0,
+				Background:  true,
+			},
+			expectError: false,
+		},
+		{
+			name: "invalid background command with non-zero timeout",
+			input: BashInput{
+				Description: "test",
+				Command:     "echo hello",
+				Timeout:     30,
+				Background:  true,
+			},
+			expectError: true,
+			errorMsg:    "background processes must have timeout=0",
+		},
+		{
+			name: "invalid background command with negative timeout",
+			input: BashInput{
+				Description: "test",
+				Command:     "echo hello",
+				Timeout:     -1,
+				Background:  true,
+			},
+			expectError: true,
+			errorMsg:    "background processes must have timeout=0",
+		},
 	}
 
 	for _, tt := range tests {
@@ -204,4 +238,62 @@ func TestBashTool_ValidateInput(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestBashTool_BackgroundExecution(t *testing.T) {
+	tool := &BashTool{}
+
+	// Create a temporary directory for testing
+	tempDir, err := os.MkdirTemp("", "bash_bg_test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	// Change to temp directory
+	oldPwd, _ := os.Getwd()
+	defer os.Chdir(oldPwd)
+	os.Chdir(tempDir)
+
+	input := BashInput{
+		Description: "Background echo test",
+		Command:     "echo 'background process' && sleep 0.5 && echo 'done'",
+		Timeout:     0, // Background processes must have timeout=0
+		Background:  true,
+	}
+	params, _ := json.Marshal(input)
+
+	state := NewBasicState(context.TODO())
+	result := tool.Execute(context.Background(), state, string(params))
+
+	assert.False(t, result.IsError(), "Background execution should not error: %s", result.GetError())
+
+	// Check if it's a background result
+	bgResult, ok := result.(*BackgroundBashToolResult)
+	require.True(t, ok, "Result should be BackgroundBashToolResult")
+
+	// Verify PID is set
+	assert.Greater(t, bgResult.pid, 0, "PID should be set")
+
+	// Verify log path is correct
+	assert.Contains(t, bgResult.logPath, ".kodelet")
+	assert.Contains(t, bgResult.logPath, "out.log")
+
+	// Check that the process was added to state
+	processes := state.GetBackgroundProcesses()
+	assert.Len(t, processes, 1, "Should have one background process")
+	assert.Equal(t, bgResult.pid, processes[0].PID)
+	assert.Equal(t, input.Command, processes[0].Command)
+
+	// Wait a bit for the process to write to log file
+	time.Sleep(400 * time.Millisecond)
+
+	content, err := os.ReadFile(bgResult.logPath)
+	require.NoError(t, err)
+	assert.Contains(t, string(content), "background process")
+	assert.NotContains(t, string(content), "done")
+
+	time.Sleep(200 * time.Millisecond)
+
+	content, err = os.ReadFile(bgResult.logPath)
+	require.NoError(t, err)
+	assert.Contains(t, string(content), "done")
 }

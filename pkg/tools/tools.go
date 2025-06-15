@@ -42,6 +42,7 @@ var MainTools = []tooltypes.Tool{
 	&BatchTool{},
 	&WebFetchTool{},
 	&ImageRecognitionTool{},
+	&ViewBackgroundProcessesTool{},
 }
 
 var SubAgentTools = []tooltypes.Tool{
