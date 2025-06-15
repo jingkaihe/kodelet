@@ -286,18 +286,6 @@ func TestBashTool_BackgroundExecution(t *testing.T) {
 	// Wait a bit for the process to write to log file
 	time.Sleep(400 * time.Millisecond)
 
-	// Check that log file exists and contains expected content
-	// if _, err := os.Stat(bgResult.logPath); err == nil {
-	// 	content, err := os.ReadFile(bgResult.logPath)
-	// 	if err == nil {
-	// 		t.Logf("Log file content: %q", string(content))
-	// 		assert.Contains(t, string(content), "background process")
-	// 	} else {
-	// 		t.Logf("Failed to read log file: %v", err)
-	// 	}
-	// } else {
-	// 	t.Logf("Log file does not exist: %v", err)
-	// }
 	content, err := os.ReadFile(bgResult.logPath)
 	require.NoError(t, err)
 	assert.Contains(t, string(content), "background process")

@@ -1,5 +1,23 @@
 # Kodelet
 
+## 0.0.42.alpha (2025-06-15)
+
+### Background Process Management
+
+- **Background Process Execution**: Enhanced bash tool with background process support for long-running tasks
+  - **Background Flag**: New `background=true` parameter runs commands in background with process tracking
+  - **Process Monitoring**: Background processes write output to `.kodelet/{PID}/out.log` files
+  - **Non-blocking Execution**: Bash tool returns immediately with PID and log file location for background tasks
+- **View Background Processes Tool**: Added comprehensive background process management capabilities
+  - **Process Tracking**: View all background processes with PID, status, start time, and command details
+  - **Status Monitoring**: Track running/stopped status of background processes across sessions
+  - **Log File Access**: Easy access to log file paths for debugging and monitoring background tasks
+
+### Developer Experience Improvements
+
+- **Enhanced File Reading**: Changed file_read tool line numbering from 0-indexed to 1-indexed for better readability and consistency with editors
+- **Comprehensive Documentation**: Added detailed MCP language server tools documentation with code intelligence capabilities and best practices
+
 ## 0.0.41.alpha (2025-06-12)
 
 ### Message Cleanup
