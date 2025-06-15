@@ -213,7 +213,7 @@ func TestGetMostRecentConversationID(t *testing.T) {
 		record := NewConversationRecord("single-conversation")
 		record.Summary = "Only conversation"
 		record.RawMessages = json.RawMessage(`[{"role":"user","content":[{"type":"text","text":"Hello"}]}]`)
-		
+
 		err = store.Save(record)
 		require.NoError(t, err)
 
@@ -240,7 +240,7 @@ func TestGetMostRecentConversationID(t *testing.T) {
 
 		// Create multiple conversations with different timestamps
 		baseTime := time.Now().Add(-1 * time.Hour)
-		
+
 		// Oldest conversation
 		record1 := NewConversationRecord("oldest-conversation")
 		record1.Summary = "Oldest"
@@ -317,7 +317,7 @@ func TestGetMostRecentConversationID(t *testing.T) {
 		conversations, err := store.Query(options)
 		require.NoError(t, err)
 		require.Equal(t, 1, len(conversations), "Should return exactly one conversation")
-		
+
 		// Since record2 was saved after record1, it should have a more recent UpdatedAt timestamp
 		// and should be returned as the most recent conversation
 		assert.Equal(t, "created-second", conversations[0].ID, "Should return conversation with most recent updated_at timestamp")

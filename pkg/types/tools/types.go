@@ -83,11 +83,11 @@ func StringifyToolResult(result, err string) string {
 }
 
 type BackgroundProcess struct {
-	PID         int           `json:"pid"`
-	Command     string        `json:"command"`
-	LogPath     string        `json:"log_path"`
-	StartTime   time.Time     `json:"start_time"`
-	Process     *os.Process   `json:"-"` // Not serialized
+	PID       int         `json:"pid"`
+	Command   string      `json:"command"`
+	LogPath   string      `json:"log_path"`
+	StartTime time.Time   `json:"start_time"`
+	Process   *os.Process `json:"-"` // Not serialized
 }
 
 type State interface {

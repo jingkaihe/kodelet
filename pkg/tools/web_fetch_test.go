@@ -82,7 +82,7 @@ func TestFetchWithSameDomainRedirects(t *testing.T) {
 	assert.Contains(t, content, "Hello World")
 
 	// Test successful redirect (same domain)
-	content, contentType, err = fetchWithSameDomainRedirects(context.Background(), server.URL + "/redirect-same-domain")
+	content, contentType, err = fetchWithSameDomainRedirects(context.Background(), server.URL+"/redirect-same-domain")
 	assert.NoError(t, err)
 	assert.Contains(t, contentType, "text/html")
 	assert.Contains(t, content, "Hello World")
