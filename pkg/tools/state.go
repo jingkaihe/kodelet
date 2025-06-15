@@ -17,12 +17,13 @@ var (
 )
 
 type BasicState struct {
-	lastAccessed map[string]time.Time
-	mu           sync.RWMutex
-	sessionID    string
-	todoFilePath string
-	basicTools   []tooltypes.Tool
-	mcpTools     []tooltypes.Tool
+	lastAccessed        map[string]time.Time
+	backgroundProcesses []tooltypes.BackgroundProcess
+	mu                  sync.RWMutex
+	sessionID           string
+	todoFilePath        string
+	basicTools          []tooltypes.Tool
+	mcpTools            []tooltypes.Tool
 }
 
 type BasicStateOption func(ctx context.Context, s *BasicState) error
@@ -139,4 +140,32 @@ func (s *BasicState) Tools() []tooltypes.Tool {
 	tools = append(tools, s.basicTools...)
 	tools = append(tools, s.mcpTools...)
 	return tools
+}
+
+func (s *BasicState) AddBackgroundProcess(process tooltypes.BackgroundProcess) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.backgroundProcesses = append(s.backgroundProcesses, process)
+	return nil
+}
+
+func (s *BasicState) GetBackgroundProcesses() []tooltypes.BackgroundProcess {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	// Return a copy to avoid race conditions
+	processes := make([]tooltypes.BackgroundProcess, len(s.backgroundProcesses))
+	copy(processes, s.backgroundProcesses)
+	return processes
+}
+
+func (s *BasicState) RemoveBackgroundProcess(pid int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, process := range s.backgroundProcesses {
+		if process.PID == pid {
+			s.backgroundProcesses = append(s.backgroundProcesses[:i], s.backgroundProcesses[i+1:]...)
+			return nil
+		}
+	}
+	return fmt.Errorf("background process with PID %d not found", pid)
 }
