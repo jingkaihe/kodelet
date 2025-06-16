@@ -13,12 +13,13 @@ import (
 
 // ChatOptions contains all options for the chat command
 type ChatOptions struct {
-	usePlainUI   bool
-	resumeConvID string
-	follow       bool
-	storageType  string
-	noSave       bool
-	maxTurns     int
+	usePlainUI         bool
+	resumeConvID       string
+	follow             bool
+	storageType        string
+	noSave             bool
+	maxTurns           int
+	enableBrowserTools bool
 }
 
 var chatOptions = &ChatOptions{}
@@ -30,6 +31,7 @@ func init() {
 	chatCmd.Flags().StringVar(&chatOptions.storageType, "storage", "json", "Specify storage backend (json or sqlite)")
 	chatCmd.Flags().BoolVar(&chatOptions.noSave, "no-save", false, "Disable conversation persistence")
 	chatCmd.Flags().IntVar(&chatOptions.maxTurns, "max-turns", 50, "Maximum number of turns within a single message exchange (0 for no limit)")
+	chatCmd.Flags().BoolVar(&chatOptions.enableBrowserTools, "enable-browser-tools", false, "Enable browser automation tools (navigate, click, type, screenshot, etc.)")
 }
 
 var chatCmd = &cobra.Command{
@@ -64,7 +66,7 @@ var chatCmd = &cobra.Command{
 			if maxTurns < 0 {
 				maxTurns = 0
 			}
-			tui.StartChatCmd(ctx, chatOptions.resumeConvID, !chatOptions.noSave, mcpManager, maxTurns)
+			tui.StartChatCmd(ctx, chatOptions.resumeConvID, !chatOptions.noSave, mcpManager, maxTurns, chatOptions.enableBrowserTools)
 			return
 		}
 

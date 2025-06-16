@@ -19,10 +19,11 @@ var (
 type BasicState struct {
 	lastAccessed        map[string]time.Time
 	backgroundProcesses []tooltypes.BackgroundProcess
+	browserManager      tooltypes.BrowserManager
 	mu                  sync.RWMutex
 	sessionID           string
 	todoFilePath        string
-	basicTools          []tooltypes.Tool
+	tools               []tooltypes.Tool
 	mcpTools            []tooltypes.Tool
 }
 
@@ -40,8 +41,8 @@ func NewBasicState(ctx context.Context, opts ...BasicStateOption) *BasicState {
 		opt(ctx, state)
 	}
 
-	if len(state.basicTools) == 0 {
-		state.basicTools = MainTools
+	if len(state.tools) == 0 {
+		state.tools = GetMainTools(false) // Default without browser tools
 	}
 
 	return state
@@ -49,7 +50,21 @@ func NewBasicState(ctx context.Context, opts ...BasicStateOption) *BasicState {
 
 func WithSubAgentTools() BasicStateOption {
 	return func(ctx context.Context, s *BasicState) error {
-		s.basicTools = SubAgentTools
+		s.tools = GetSubAgentTools(false) // Default without browser tools
+		return nil
+	}
+}
+
+func WithMainToolsAndBrowser() BasicStateOption {
+	return func(ctx context.Context, s *BasicState) error {
+		s.tools = GetMainTools(true) // Main tools with browser support
+		return nil
+	}
+}
+
+func WithSubAgentToolsAndBrowser() BasicStateOption {
+	return func(ctx context.Context, s *BasicState) error {
+		s.tools = GetSubAgentTools(true) // Sub-agent tools with browser support
 		return nil
 	}
 }
@@ -128,7 +143,7 @@ func (s *BasicState) ClearFileLastAccessed(path string) error {
 }
 
 func (s *BasicState) BasicTools() []tooltypes.Tool {
-	return s.basicTools
+	return s.tools
 }
 
 func (s *BasicState) MCPTools() []tooltypes.Tool {
@@ -136,8 +151,8 @@ func (s *BasicState) MCPTools() []tooltypes.Tool {
 }
 
 func (s *BasicState) Tools() []tooltypes.Tool {
-	tools := make([]tooltypes.Tool, 0, len(s.basicTools)+len(s.mcpTools))
-	tools = append(tools, s.basicTools...)
+	tools := make([]tooltypes.Tool, 0, len(s.tools)+len(s.mcpTools))
+	tools = append(tools, s.tools...)
 	tools = append(tools, s.mcpTools...)
 	return tools
 }
@@ -168,4 +183,16 @@ func (s *BasicState) RemoveBackgroundProcess(pid int) error {
 		}
 	}
 	return fmt.Errorf("background process with PID %d not found", pid)
+}
+
+func (s *BasicState) GetBrowserManager() tooltypes.BrowserManager {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.browserManager
+}
+
+func (s *BasicState) SetBrowserManager(manager tooltypes.BrowserManager) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.browserManager = manager
 }

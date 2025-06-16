@@ -18,21 +18,23 @@ import (
 
 // RunConfig holds configuration for the run command
 type RunConfig struct {
-	ResumeConvID string
-	Follow       bool
-	NoSave       bool
-	Images       []string // Image paths or URLs to include with the message
-	MaxTurns     int      // Maximum number of turns within a single SendMessage call
+	ResumeConvID       string
+	Follow             bool
+	NoSave             bool
+	Images             []string // Image paths or URLs to include with the message
+	MaxTurns           int      // Maximum number of turns within a single SendMessage call
+	EnableBrowserTools bool     // Enable browser automation tools
 }
 
 // NewRunConfig creates a new RunConfig with default values
 func NewRunConfig() *RunConfig {
 	return &RunConfig{
-		ResumeConvID: "",
-		Follow:       false,
-		NoSave:       false,
-		Images:       []string{},
-		MaxTurns:     50, // Default to 50 turns
+		ResumeConvID:       "",
+		Follow:             false,
+		NoSave:             false,
+		Images:             []string{},
+		MaxTurns:           50, // Default to 50 turns
+		EnableBrowserTools: false,
 	}
 }
 
@@ -97,7 +99,13 @@ var runCmd = &cobra.Command{
 			return
 		}
 
-		appState := tools.NewBasicState(ctx, tools.WithMCPTools(mcpManager))
+		// Create state with appropriate tools based on browser support
+		var stateOpts []tools.BasicStateOption
+		stateOpts = append(stateOpts, tools.WithMCPTools(mcpManager))
+		if config.EnableBrowserTools {
+			stateOpts = append(stateOpts, tools.WithMainToolsAndBrowser())
+		}
+		appState := tools.NewBasicState(ctx, stateOpts...)
 
 		// Print the user query
 		fmt.Printf("\033[1;33m[user]: \033[0m%s\n", query)
@@ -151,6 +159,7 @@ func init() {
 	runCmd.Flags().Bool("no-save", defaults.NoSave, "Disable conversation persistence")
 	runCmd.Flags().StringSliceP("image", "I", defaults.Images, "Add image input (can be used multiple times)")
 	runCmd.Flags().Int("max-turns", defaults.MaxTurns, "Maximum number of turns within a single message exchange (0 for no limit)")
+	runCmd.Flags().Bool("enable-browser-tools", defaults.EnableBrowserTools, "Enable browser automation tools (navigate, click, type, screenshot, etc.)")
 }
 
 // getRunConfigFromFlags extracts run configuration from command flags
@@ -187,6 +196,9 @@ func getRunConfigFromFlags(cmd *cobra.Command) *RunConfig {
 			maxTurns = 0
 		}
 		config.MaxTurns = maxTurns
+	}
+	if enableBrowserTools, err := cmd.Flags().GetBool("enable-browser-tools"); err == nil {
+		config.EnableBrowserTools = enableBrowserTools
 	}
 
 	return config
