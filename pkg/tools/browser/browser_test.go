@@ -69,22 +69,27 @@ func TestClickToolValidation(t *testing.T) {
 	}{
 		{
 			name:        "valid input",
-			input:       `{"selector": "button.submit", "timeout": 5000}`,
+			input:       `{"element_id": 5, "timeout": 5000}`,
 			expectError: false,
 		},
 		{
-			name:        "missing selector",
+			name:        "missing element_id",
 			input:       `{"timeout": 5000}`,
 			expectError: true,
 		},
 		{
-			name:        "empty selector",
-			input:       `{"selector": "", "timeout": 5000}`,
+			name:        "zero element_id",
+			input:       `{"element_id": 0, "timeout": 5000}`,
+			expectError: true,
+		},
+		{
+			name:        "negative element_id",
+			input:       `{"element_id": -1, "timeout": 5000}`,
 			expectError: true,
 		},
 		{
 			name:        "negative timeout",
-			input:       `{"selector": "button", "timeout": -1}`,
+			input:       `{"element_id": 1, "timeout": -1}`,
 			expectError: true,
 		},
 	}
@@ -112,22 +117,27 @@ func TestTypeToolValidation(t *testing.T) {
 	}{
 		{
 			name:        "valid input",
-			input:       `{"selector": "input[name='email']", "text": "test@example.com", "clear": true, "timeout": 5000}`,
+			input:       `{"element_id": 3, "text": "test@example.com", "clear": true, "timeout": 5000}`,
 			expectError: false,
 		},
 		{
-			name:        "missing selector",
+			name:        "missing element_id",
 			input:       `{"text": "test@example.com", "timeout": 5000}`,
 			expectError: true,
 		},
 		{
+			name:        "zero element_id",
+			input:       `{"element_id": 0, "text": "test", "timeout": 5000}`,
+			expectError: true,
+		},
+		{
 			name:        "missing text",
-			input:       `{"selector": "input", "timeout": 5000}`,
+			input:       `{"element_id": 1, "timeout": 5000}`,
 			expectError: true,
 		},
 		{
 			name:        "empty text",
-			input:       `{"selector": "input", "text": "", "timeout": 5000}`,
+			input:       `{"element_id": 1, "text": "", "timeout": 5000}`,
 			expectError: true,
 		},
 	}
@@ -355,44 +365,6 @@ func TestToolResultInterfaces(t *testing.T) {
 			assert.NotEmpty(t, tt.result.GetResult())
 		})
 	}
-}
-
-func TestSimplifyHTML(t *testing.T) {
-	html := `<html>
-		<head>
-			<script>console.log('test');</script>
-			<style>body { color: red; }</style>
-		</head>
-		<body class="main-body" style="color: blue;">
-			<div data-id="123" aria-label="content">
-				<p>This is content</p>
-			</div>
-		</body>
-	</html>`
-
-	simplified, truncated := SimplifyHTML(html, 1000)
-
-	// Should remove script and style tags
-	assert.NotContains(t, simplified, "console.log")
-	assert.NotContains(t, simplified, "color: red")
-
-	// Should contain actual content
-	assert.Contains(t, simplified, "This is content")
-
-	// Should not be truncated for small content
-	assert.False(t, truncated)
-
-	// Test truncation
-	simplified, truncated = SimplifyHTML(html, 50)
-	t.Logf("Simplified content (len=%d): %q", len(simplified), simplified)
-	t.Logf("Truncated: %v", truncated)
-
-	// With the new simplification, content might be shorter than 50 chars
-	// So we only check truncation if the content was actually longer
-	if len(simplified) == 50 {
-		assert.True(t, truncated)
-	}
-	assert.LessOrEqual(t, len(simplified), 50)
 }
 
 func TestTracingKVs(t *testing.T) {

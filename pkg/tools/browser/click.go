@@ -17,8 +17,8 @@ import (
 type ClickTool struct{}
 
 type ClickInput struct {
-	Selector string `json:"selector" jsonschema:"required,description=CSS selector for element to click"`
-	Timeout  int    `json:"timeout" jsonschema:"default=10000,description=Timeout to wait for element"`
+	ElementID int `json:"element_id" jsonschema:"required,description=Element ID from get_page output"`
+	Timeout   int `json:"timeout" jsonschema:"default=10000,description=Timeout to wait for element"`
 }
 
 type ClickResult struct {
@@ -37,7 +37,7 @@ func (r ClickResult) AssistantFacing() string {
 func (r ClickResult) UserFacing() string {
 	if !r.Success {
 		if !r.ElementFound {
-			return fmt.Sprintf("❌ Element not found or not clickable")
+			return "❌ Element not found or not clickable"
 		}
 		return fmt.Sprintf("❌ Click failed: %s", r.Error)
 	}
@@ -68,24 +68,27 @@ func (t ClickTool) Name() string {
 }
 
 func (t ClickTool) Description() string {
-	return `Click on a web page element identified by a CSS selector.
+	return `Click on a web page element using element ID-based targeting with automatic coordinate resolution.
 
 ## Parameters
-- selector: CSS selector for the element to click (required)
-- timeout: Maximum wait time for element to be visible and clickable in milliseconds (default: 10000)
+- **element_id**: Element ID from browser_get_page output (e.g., element with id=5 would use element_id: 5)
+- **timeout**: Maximum wait time for element in milliseconds (default: 10000)
 
 ## Behavior
-- Waits for the element to be visible and accessible
-- Verifies the element exists before attempting to click
-- Performs a single left-click on the center of the element
-- Returns success status and element found information
+- Uses element ID from browser_get_page output for targeting
+- Automatically resolves element coordinates from internal element buffer
+- Performs precise clicking at element center coordinates
+- Removes target="_blank" attributes to prevent new tabs/windows
+- Handles viewport scrolling and element positioning
 
-## CSS Selector Examples
-- By ID: "#submit-button", "#login-form"
-- By class: ".btn-primary", ".nav-link"
-- By tag: "button", "a", "input"
-- By attribute: "[data-testid='submit']", "[type='submit']"
-- Complex selectors: "form.login button[type='submit']", ".modal .close-btn"
+## Workflow with browser_get_page
+1. First use browser_get_page to see numbered elements: <button id=0>Submit</button>
+2. Then use element_id: 0 to click that specific button
+3. The tool will resolve the element's coordinates and perform precise clicking
+
+## Examples
+- Basic click: {"element_id": 5}
+- With timeout: {"element_id": 3, "timeout": 15000}
 
 ## Common Use Cases
 * Clicking buttons (submit, cancel, navigation)
@@ -94,21 +97,17 @@ func (t ClickTool) Description() string {
 * Triggering interactive elements
 * Closing modals or popups
 
-## Element Requirements
-- Element must be visible on the page
-- Element must not be obscured by other elements
-- Element should be clickable (not disabled)
-
-## Examples
-- Click submit button: {"selector": "#submit-btn"}
-- Click with custom timeout: {"selector": ".slow-loading-btn", "timeout": 20000}
-- Click by attribute: {"selector": "[data-action='delete']"}
+## Advanced Features
+- Element ID-based targeting (more reliable than CSS selector clicking)
+- Automatic link target removal to prevent new tabs
+- Element center coordinate calculation for precise clicking
+- Integration with the element indexing system from browser_get_page
 
 ## Important Notes
-- The tool will fail if the element is not found or not visible
-- Use browser_wait_for tool first if you need to wait for dynamic content
-- For elements that appear after page interactions, increase the timeout value
-- Complex selectors may be slower - use specific selectors when possible`
+- Requires recent browser_get_page call to populate element index
+- Element must be visible and within viewport for reliable clicking
+- Uses element ID resolution with coordinate-based clicking for better automation reliability
+- Automatically handles link target removal to prevent new tabs`
 }
 
 func (t ClickTool) ValidateInput(state tools.State, parameters string) error {
@@ -117,8 +116,8 @@ func (t ClickTool) ValidateInput(state tools.State, parameters string) error {
 		return fmt.Errorf("failed to parse input: %w", err)
 	}
 
-	if input.Selector == "" {
-		return fmt.Errorf("selector is required")
+	if input.ElementID <= 0 {
+		return fmt.Errorf("element_id is required and must be positive")
 	}
 
 	if input.Timeout < 0 {
@@ -164,29 +163,48 @@ func (t ClickTool) Execute(ctx context.Context, state tools.State, parameters st
 	timeoutCtx, cancel := context.WithTimeout(browserCtx, timeout)
 	defer cancel()
 
-	// Check if element exists first
-	var exists bool
-	err := chromedp.Run(timeoutCtx,
-		chromedp.WaitVisible(input.Selector),
-		chromedp.Evaluate(fmt.Sprintf(`document.querySelector("%s") !== null`, input.Selector), &exists),
-	)
-
-	if err != nil || !exists {
-		logger.G(ctx).WithField("selector", input.Selector).WithError(err).Info("Element not found or not visible")
+	element, exists := manager.(*Manager).GetElement(input.ElementID)
+	if !exists {
+		logger.G(ctx).WithField("element_id", input.ElementID).Info("Element ID not found in buffer")
 		return ClickResult{
 			Success:      false,
 			ElementFound: false,
-			Error:        fmt.Sprintf("element not found or not visible: %s", input.Selector),
+			Error:        fmt.Sprintf("element ID %d not found - ensure browser_get_page was called recently", input.ElementID),
 		}
 	}
 
-	// Perform the click
+	clickX := float64(element.CenterX)
+	clickY := float64(element.CenterY)
+
+	err := chromedp.Run(timeoutCtx,
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			return chromedp.Evaluate(`
+				const links = document.getElementsByTagName("a");
+				for (var i = 0; i < links.length; i++) {
+					links[i].removeAttribute("target");
+				}
+			`, nil).Do(ctx)
+		}),
+	)
+	if err != nil {
+		logger.G(ctx).WithError(err).Debug("Failed to remove target attributes (non-critical)")
+	}
+
+	// Perform coordinate-based click
 	err = chromedp.Run(timeoutCtx,
-		chromedp.Click(input.Selector),
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			// Use mouse click at exact coordinates
+			return chromedp.MouseClickXY(clickX, clickY).Do(ctx)
+		}),
 	)
 
 	if err != nil {
-		logger.G(ctx).WithField("selector", input.Selector).WithError(err).Info("Click failed")
+		logger.G(ctx).WithFields(map[string]any{
+			"x":          clickX,
+			"y":          clickY,
+			"element_id": input.ElementID,
+			"method":     t.getClickMethod(input),
+		}).WithError(err).Info("Element ID-based click failed")
 		return ClickResult{
 			Success:      false,
 			ElementFound: true,
@@ -194,12 +212,22 @@ func (t ClickTool) Execute(ctx context.Context, state tools.State, parameters st
 		}
 	}
 
-	logger.G(ctx).WithField("selector", input.Selector).Info("Click successful")
+	logger.G(ctx).WithFields(map[string]any{
+		"x":          clickX,
+		"y":          clickY,
+		"element_id": input.ElementID,
+		"method":     t.getClickMethod(input),
+	}).Info("Element ID-based click successful")
 
 	return ClickResult{
 		Success:      true,
 		ElementFound: true,
 	}
+}
+
+// getClickMethod returns a string describing which click method was used
+func (t ClickTool) getClickMethod(_ ClickInput) string {
+	return "element_id"
 }
 
 func (t ClickTool) TracingKVs(parameters string) ([]attribute.KeyValue, error) {
@@ -209,7 +237,8 @@ func (t ClickTool) TracingKVs(parameters string) ([]attribute.KeyValue, error) {
 	}
 
 	return []attribute.KeyValue{
-		attribute.String("browser.click.selector", input.Selector),
+		attribute.String("browser.click.method", t.getClickMethod(input)),
+		attribute.Int("browser.click.element_id", input.ElementID),
 		attribute.Int("browser.click.timeout", input.Timeout),
 	}, nil
 }

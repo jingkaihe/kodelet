@@ -42,7 +42,7 @@ func (r GetPageResult) UserFacing() string {
 	}
 
 	status := "✅ Page content retrieved"
-	// status += r.HTML + "\n\n"
+	status += r.HTML + "\n\n"
 	if r.Truncated {
 		status += " (truncated)"
 	}
@@ -168,24 +168,31 @@ func (t GetPageTool) Execute(ctx context.Context, state tools.State, parameters 
 		}
 	}
 
-	// Get page content
-	var html, currentURL, title string
+	// Get page metadata
+	var currentURL, title string
 	err := chromedp.Run(browserCtx,
-		chromedp.OuterHTML("html", &html),
 		chromedp.Location(&currentURL),
 		chromedp.Title(&title),
 	)
 
 	if err != nil {
-		logger.G(ctx).WithError(err).Info("Failed to get page content")
+		logger.G(ctx).WithError(err).Info("Failed to get page metadata")
 		return GetPageResult{
 			Success: false,
-			Error:   fmt.Sprintf("failed to get page content: %v", err),
+			Error:   fmt.Sprintf("failed to get page metadata: %v", err),
 		}
 	}
 
-	// Always simplify HTML for better LLM processing
-	html, truncated := SimplifyHTML(html, input.MaxLength)
+	input.MaxLength = 500000
+
+	html, truncated, err := manager.(*Manager).Crawl(ctx, input.MaxLength)
+	if err != nil {
+		logger.G(ctx).WithError(err).Info("Failed to crawl page content")
+		return GetPageResult{
+			Success: false,
+			Error:   fmt.Sprintf("failed to crawl page content: %v", err),
+		}
+	}
 
 	logger.G(ctx).WithFields(map[string]interface{}{
 		"url":         currentURL,

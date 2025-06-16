@@ -17,10 +17,11 @@ import (
 type TypeTool struct{}
 
 type TypeInput struct {
-	Selector string `json:"selector" jsonschema:"required,description=CSS selector for input element"`
-	Text     string `json:"text" jsonschema:"required,description=Text to type"`
-	Clear    bool   `json:"clear" jsonschema:"default=true,description=Clear field before typing"`
-	Timeout  int    `json:"timeout" jsonschema:"default=10000,description=Timeout to wait for element"`
+	ElementID int    `json:"element_id" jsonschema:"required,description=Element ID from get_page output"`
+	Text      string `json:"text" jsonschema:"required,description=Text to type"`
+	Clear     bool   `json:"clear" jsonschema:"default=true,description=Clear field before typing"`
+	Submit    bool   `json:"submit" jsonschema:"default=false,description=Press Enter after typing"`
+	Timeout   int    `json:"timeout" jsonschema:"default=10000,description=Timeout to wait for element"`
 }
 
 type TypeResult struct {
@@ -39,7 +40,7 @@ func (r TypeResult) AssistantFacing() string {
 func (r TypeResult) UserFacing() string {
 	if !r.Success {
 		if !r.ElementFound {
-			return fmt.Sprintf("❌ Input element not found")
+			return "❌ Input element not found"
 		}
 		return fmt.Sprintf("❌ Type failed: %s", r.Error)
 	}
@@ -70,19 +71,22 @@ func (t TypeTool) Name() string {
 }
 
 func (t TypeTool) Description() string {
-	return `Type text into input fields, text areas, or other editable elements.
+	return `Type text into input fields using element ID-based targeting with automatic coordinate resolution.
 
 ## Parameters
-- selector: CSS selector for the input element (required)
+- element_id: Element ID from browser_get_page output (required)
 - text: Text content to type into the element (required)
 - clear: Whether to clear the field before typing (default: true)
+- submit: Whether to press Enter after typing (default: false)
 - timeout: Maximum wait time for element to be visible in milliseconds (default: 10000)
 
 ## Behavior
-- Waits for the input element to be visible and editable
+- Uses element ID from browser_get_page output for targeting
+- Resolves element coordinates from internal element buffer
+- Clicks on the element first to focus it
 - Optionally clears existing content (if clear=true)
-- Types the specified text character by character
-- Works with input fields, textareas, and contentEditable elements
+- Types the specified text using keyboard simulation
+- Optionally submits by pressing Enter (if submit=true)
 
 ## Supported Element Types
 - Text inputs: <input type="text">, <input type="email">, <input type="password">
@@ -95,29 +99,34 @@ func (t TypeTool) Description() string {
 - clear=true (default): Selects all existing text and replaces it
 - clear=false: Appends text to existing content at cursor position
 
-## Common Use Cases
-* Filling out forms (login, registration, contact)
-* Entering search terms
-* Updating text content
-* Providing input for web applications
-* Testing form validation
+## Submit Behavior
+- submit=false (default): Just types the text
+- submit=true: Types text then presses Enter for submission
 
-## CSS Selector Examples
-- By ID: "#username", "#email-input"
-- By name: "[name='password']", "[name='search']"
-- By class: ".form-control", ".search-input"
-- By type: "input[type='text']", "input[type='email']"
+## Workflow with browser_get_page
+1. First use browser_get_page to see numbered elements: <input id=2 type=text name='username'>
+2. Then use element_id: 2 to type into that specific input
+3. The tool will resolve coordinates, click the element first, then type the text
 
 ## Examples
-- Fill username: {"selector": "#username", "text": "john.doe"}
-- Append to existing text: {"selector": "#comment", "text": " Additional text", "clear": false}
-- With timeout: {"selector": ".dynamic-input", "text": "test", "timeout": 15000}
+- Basic typing: {"element_id": 5, "text": "john.doe"}
+- Type and submit: {"element_id": 3, "text": "search query", "submit": true}
+- Append text: {"element_id": 2, "text": " additional text", "clear": false}
+- With timeout: {"element_id": 1, "text": "test", "timeout": 15000}
+
+## Common Use Cases
+* Filling out forms (login, registration, contact)
+* Entering search terms with automatic submission
+* Updating text content in existing fields
+* Providing input for web applications
+* Testing form validation and submission
 
 ## Important Notes
+- Element ID method requires recent browser_get_page call to populate element index
 - Element must be editable (input, textarea, or contentEditable)
-- Use clear=false to append text rather than replace
-- For password fields, the text will still be visible in logs
-- Some fields may have input validation or formatting that affects the final value`
+- Uses click-first approach for reliable focus using coordinate resolution
+- Submit option provides convenient text entry with submission
+- For password fields, the text will still be visible in logs`
 }
 
 func (t TypeTool) ValidateInput(state tools.State, parameters string) error {
@@ -126,8 +135,8 @@ func (t TypeTool) ValidateInput(state tools.State, parameters string) error {
 		return fmt.Errorf("failed to parse input: %w", err)
 	}
 
-	if input.Selector == "" {
-		return fmt.Errorf("selector is required")
+	if input.ElementID <= 0 {
+		return fmt.Errorf("element_id is required and must be positive")
 	}
 
 	if input.Text == "" {
@@ -177,22 +186,32 @@ func (t TypeTool) Execute(ctx context.Context, state tools.State, parameters str
 	timeoutCtx, cancel := context.WithTimeout(browserCtx, timeout)
 	defer cancel()
 
-	// Check if element exists and is an input element
-	var exists bool
-	err := chromedp.Run(timeoutCtx,
-		chromedp.WaitVisible(input.Selector),
-		chromedp.Evaluate(fmt.Sprintf(`
-			const el = document.querySelector("%s");
-			el !== null && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.contentEditable === 'true')
-		`, input.Selector), &exists),
-	)
-
-	if err != nil || !exists {
-		logger.G(ctx).WithField("selector", input.Selector).WithError(err).Info("Input element not found or not editable")
+	element, exists := manager.(*Manager).GetElement(input.ElementID)
+	if !exists {
+		logger.G(ctx).WithField("element_id", input.ElementID).Info("Element ID not found in buffer")
 		return TypeResult{
 			Success:      false,
 			ElementFound: false,
-			Error:        fmt.Sprintf("input element not found or not editable: %s", input.Selector),
+			Error:        fmt.Sprintf("element ID %d not found - ensure browser_get_page was called recently", input.ElementID),
+		}
+	}
+
+	clickX := float64(element.CenterX)
+	clickY := float64(element.CenterY)
+
+	// First click on the element to focus it
+	err := chromedp.Run(timeoutCtx,
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			return chromedp.MouseClickXY(clickX, clickY).Do(ctx)
+		}),
+	)
+
+	if err != nil {
+		logger.G(ctx).WithField("element_id", input.ElementID).WithError(err).Info("Failed to click element for focus")
+		return TypeResult{
+			Success:      false,
+			ElementFound: true,
+			Error:        fmt.Sprintf("failed to focus element: %v", err),
 		}
 	}
 
@@ -202,21 +221,25 @@ func (t TypeTool) Execute(ctx context.Context, state tools.State, parameters str
 	// Clear field if requested
 	if input.Clear {
 		actions = append(actions,
-			chromedp.Click(input.Selector),
 			chromedp.KeyEvent("ctrl+a"),
 		)
-	} else {
-		actions = append(actions, chromedp.Click(input.Selector))
 	}
 
-	// Type the text
-	actions = append(actions, chromedp.SendKeys(input.Selector, input.Text))
+	// Type the text using keyboard simulation
+	actions = append(actions, chromedp.ActionFunc(func(ctx context.Context) error {
+		return chromedp.KeyEvent(input.Text).Do(ctx)
+	}))
+
+	// Submit if requested
+	if input.Submit {
+		actions = append(actions, chromedp.KeyEvent("\n"))
+	}
 
 	// Execute the typing actions
 	err = chromedp.Run(timeoutCtx, actions...)
 
 	if err != nil {
-		logger.G(ctx).WithField("selector", input.Selector).WithError(err).Info("Type failed")
+		logger.G(ctx).WithField("element_id", input.ElementID).WithError(err).Info("Element ID-based type failed")
 		return TypeResult{
 			Success:      false,
 			ElementFound: true,
@@ -224,7 +247,12 @@ func (t TypeTool) Execute(ctx context.Context, state tools.State, parameters str
 		}
 	}
 
-	logger.G(ctx).WithField("selector", input.Selector).WithField("text_length", len(input.Text)).Info("Type successful")
+	logger.G(ctx).WithFields(map[string]any{
+		"element_id":  input.ElementID,
+		"text_length": len(input.Text),
+		"submit":      input.Submit,
+		"clear":       input.Clear,
+	}).Info("Element ID-based type successful")
 
 	return TypeResult{
 		Success:      true,
@@ -239,9 +267,10 @@ func (t TypeTool) TracingKVs(parameters string) ([]attribute.KeyValue, error) {
 	}
 
 	return []attribute.KeyValue{
-		attribute.String("browser.type.selector", input.Selector),
+		attribute.Int("browser.type.element_id", input.ElementID),
 		attribute.Int("browser.type.text_length", len(input.Text)),
 		attribute.Bool("browser.type.clear", input.Clear),
+		attribute.Bool("browser.type.submit", input.Submit),
 		attribute.Int("browser.type.timeout", input.Timeout),
 	}, nil
 }

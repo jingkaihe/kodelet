@@ -76,7 +76,7 @@ var browserTools = []tooltypes.Tool{
 	&browser.ClickTool{},
 	&browser.TypeTool{},
 	&browser.WaitForTool{},
-	&browser.ExtractTextTool{},
+	// &browser.ExtractTextTool{},
 	&browser.ScreenshotTool{},
 	&browser.GoBackTool{},
 }

@@ -10,21 +10,35 @@ import (
 	"sync"
 	"time"
 
-	"github.com/PuerkitoBio/goquery"
 	"github.com/chromedp/chromedp"
 	"github.com/google/uuid"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
-	"golang.org/x/net/html"
 )
+
+// Element represents a crawled element with its position and metadata
+type Element struct {
+	NodeIndex     int      `json:"node_index"`
+	BackendNodeID int      `json:"backend_node_id"`
+	NodeName      string   `json:"node_name"`
+	NodeValue     string   `json:"node_value"`
+	NodeMeta      []string `json:"node_meta"`
+	IsClickable   bool     `json:"is_clickable"`
+	OriginX       int      `json:"origin_x"`
+	OriginY       int      `json:"origin_y"`
+	CenterX       int      `json:"center_x"`
+	CenterY       int      `json:"center_y"`
+}
 
 // Manager handles browser context and lifecycle
 type Manager struct {
-	ctx       context.Context
-	cancelCtx context.CancelFunc
-	allocCtx  context.Context
-	mutex     sync.Mutex
-	isActive  bool
+	ctx           context.Context
+	cancelCtx     context.CancelFunc
+	allocCtx      context.Context
+	mutex         sync.Mutex
+	isActive      bool
+	elementBuffer map[int]*Element
+	elementMutex  sync.RWMutex
 }
 
 // Ensure Manager implements the BrowserManager interface
@@ -32,7 +46,9 @@ var _ tooltypes.BrowserManager = (*Manager)(nil)
 
 // NewManager creates a new browser manager instance
 func NewManager() *Manager {
-	return &Manager{}
+	return &Manager{
+		elementBuffer: make(map[int]*Element),
+	}
 }
 
 // GetManagerFromState retrieves or creates a browser manager from the tool state
@@ -290,200 +306,244 @@ func SetRealisticHeaders(ctx context.Context) chromedp.Action {
 	})
 }
 
-// SimplifyHTML removes unnecessary attributes and elements for LLM analysis
-func SimplifyHTML(htmlContent string, maxLength int) (string, bool) {
-	// Parse HTML to extract meaningful content similar to natbot.py
-	doc, err := goquery.NewDocumentFromReader(strings.NewReader(htmlContent))
+// Crawl extracts and simplifies page content using DOM snapshot approach
+func (m *Manager) Crawl(ctx context.Context, maxLength int) (string, bool, error) {
+	if m.ctx == nil {
+		return "", false, fmt.Errorf("browser context not available")
+	}
+
+	// Get viewport information
+	var viewport struct {
+		Width  float64 `json:"width"`
+		Height float64 `json:"height"`
+		X      float64 `json:"x"`
+		Y      float64 `json:"y"`
+	}
+
+	err := chromedp.Run(m.ctx,
+		chromedp.Evaluate(`({
+			width: window.innerWidth,
+			height: window.innerHeight,
+			x: window.scrollX,
+			y: window.scrollY
+		})`, &viewport),
+	)
 	if err != nil {
-		// Fallback to basic simplification if parsing fails
-		return basicSimplifyHTML(htmlContent, maxLength)
+		return "", false, fmt.Errorf("failed to get viewport info: %w", err)
 	}
 
-	// Elements to completely skip (similar to natbot's black_listed_elements)
-	blacklistedElements := map[string]bool{
-		"script": true, "style": true, "meta": true, "link": true,
-		"noscript": true, "svg": true, "path": true, "head": true,
-		"iframe": true, "object": true, "embed": true, "param": true,
-		"source": true, "track": true, "br": true,
+	// Extract page elements for interaction
+	var result interface{}
+	err = chromedp.Run(m.ctx,
+		chromedp.Evaluate(`(() => {
+				const elements = [];
+				const elementBuffer = {};
+				let idCounter = 0;
+
+				function isInViewport(rect) {
+					return rect.left < window.innerWidth + window.scrollX &&
+						   rect.right >= window.scrollX &&
+						   rect.top < window.innerHeight + window.scrollY &&
+						   rect.bottom >= window.scrollY;
+				}
+
+				function convertNodeName(nodeName, hasClickHandler) {
+					if (nodeName === 'A') return 'link';
+					if (nodeName === 'INPUT') return 'input';
+					if (nodeName === 'IMG') return 'img';
+					if (nodeName === 'BUTTON' || hasClickHandler) return 'button';
+					if (nodeName === 'SELECT') return 'select';
+					if (nodeName === 'TEXTAREA') return 'textarea';
+					return 'text';
+				}
+
+				function getTextWithoutBlacklisted(element) {
+					// Get only direct text and text from non-blacklisted children
+					const blacklisted = ['SCRIPT', 'STYLE', 'NOSCRIPT'];
+					let text = '';
+
+					for (const node of element.childNodes) {
+						if (node.nodeType === Node.TEXT_NODE) {
+							text += node.textContent;
+						} else if (node.nodeType === Node.ELEMENT_NODE && !blacklisted.includes(node.nodeName)) {
+							text += getTextWithoutBlacklisted(node);
+						}
+					}
+
+					return text.trim();
+				}
+
+				function processElement(element) {
+					const nodeName = element.nodeName;
+					const rect = element.getBoundingClientRect();
+
+					// Skip if not in viewport
+					if (!isInViewport(rect)) return;
+
+					// Skip blacklisted elements
+					const blacklisted = ['HTML', 'HEAD', 'TITLE', 'META', 'IFRAME',
+										'BODY', 'SCRIPT', 'STYLE', 'PATH', 'SVG', 'BR', 'NOSCRIPT'];
+					if (blacklisted.includes(nodeName)) return;
+
+					const isClickable = element.onclick !== null ||
+									   element.hasAttribute('onclick') ||
+									   ['A', 'BUTTON', 'INPUT', 'SELECT', 'TEXTAREA'].includes(nodeName);
+
+					let innerText = '';
+					let meta = [];
+
+					// Extract text content
+					if (nodeName === 'INPUT') {
+						const type = element.type || 'text';
+						const placeholder = element.placeholder || '';
+						const value = element.value || '';
+						const name = element.name || '';
+
+						meta.push('type=' + type);
+						if (placeholder) meta.push('placeholder="' + placeholder + '"');
+						if (value && type !== 'password') meta.push('value="' + value + '"');
+						if (name) meta.push('name="' + name + '"');
+						innerText = meta.join(' ');
+					} else if (nodeName === 'TEXTAREA') {
+						const value = element.value || '';
+						const placeholder = element.placeholder || '';
+						const name = element.name || '';
+						const rows = element.rows || '';
+						const cols = element.cols || '';
+
+						if (value) meta.push('value="' + value + '"');
+						if (placeholder) meta.push('placeholder="' + placeholder + '"');
+						if (name) meta.push('name="' + name + '"');
+						if (rows) meta.push('rows="' + rows + '"');
+						if (cols) meta.push('cols="' + cols + '"');
+						innerText = meta.join(' ');
+					} else if (nodeName === 'IMG') {
+						const alt = element.alt || '';
+						const src = element.src || '';
+						if (alt) meta.push('alt="' + alt + '"');
+						if (src) meta.push('src="' + src + '"');
+						innerText = meta.join(' ');
+					} else if (nodeName === 'A') {
+						innerText = getTextWithoutBlacklisted(element);
+						const href = element.href || '';
+						if (href) innerText += ' [' + href + ']';
+					} else if (nodeName === 'SELECT') {
+						const options = Array.from(element.options).map(opt => opt.text).join(', ');
+						innerText = 'options: ' + options;
+					} else {
+						innerText = getTextWithoutBlacklisted(element);
+					}
+
+					// Skip empty elements unless they're interactive
+					if (!innerText && !isClickable) return;
+
+					const convertedNodeName = convertNodeName(nodeName, isClickable);
+
+					// Store element info for coordinate mapping
+					elementBuffer[idCounter] = {
+						center_x: rect.left + rect.width / 2,
+						center_y: rect.top + rect.height / 2,
+						origin_x: rect.left,
+						origin_y: rect.top,
+						width: rect.width,
+						height: rect.height
+					};
+
+					if (innerText) {
+						elements.push('<' + convertedNodeName + ' id=' + idCounter + '>' + innerText + '</' + convertedNodeName + '>');
+					} else {
+						elements.push('<' + convertedNodeName + ' id=' + idCounter + '/>');
+					}
+
+					idCounter++;
+				}
+
+				// Process all elements in document
+				const allElements = document.querySelectorAll('*');
+				for (let i = 0; i < allElements.length; i++) {
+					processElement(allElements[i]);
+				}
+
+				return {
+					elements: elements,
+					elementBuffer: elementBuffer
+				};
+			})()`, &result),
+	)
+
+	if err != nil {
+		return "", false, fmt.Errorf("failed to capture DOM snapshot: %w", err)
 	}
 
-	var elements []string
-	elementIndex := 0
-	processedNodes := make(map[*goquery.Selection]bool)
-
-	// Process only leaf nodes and interactive elements to avoid duplication
-	var processNode func(*goquery.Selection)
-	processNode = func(s *goquery.Selection) {
-		// Skip if already processed
-		if processedNodes[s] {
-			return
-		}
-		processedNodes[s] = true
-
-		tagName := goquery.NodeName(s)
-
-		// Skip blacklisted elements
-		if blacklistedElements[tagName] {
-			return
-		}
-
-		// Check if this is an interactive element or has direct text
-		isInteractive := tagName == "a" || tagName == "button" || tagName == "input" ||
-			tagName == "select" || tagName == "textarea" || tagName == "img"
-
-		// Check if element has direct text content (not in child elements)
-		hasDirectText := false
-		ownText := s.Contents().FilterFunction(func(i int, s *goquery.Selection) bool {
-			if s.Nodes != nil && len(s.Nodes) > 0 {
-				node := s.Nodes[0]
-				// Check if it's a text node
-				return node.Type == html.TextNode
-			}
-			return false
-		}).Text()
-
-		if strings.TrimSpace(ownText) != "" {
-			hasDirectText = true
-		}
-
-		// Process interactive elements or elements with direct text
-		if isInteractive || hasDirectText {
-			elementStr := extractElement(s, tagName, elementIndex)
-			if elementStr != "" {
-				elements = append(elements, elementStr)
-				elementIndex++
-			}
-
-			// Don't process children of interactive elements
-			if isInteractive {
-				return
-			}
-		}
-
-		// Process children
-		s.Children().Each(func(i int, child *goquery.Selection) {
-			processNode(child)
-		})
+	// Parse the result directly since it's already structured data from JavaScript
+	crawlResult, ok := result.(map[string]interface{})
+	if !ok {
+		return "", false, fmt.Errorf("unexpected result format from JavaScript")
 	}
 
-	// Start processing from body or document root
-	body := doc.Find("body")
-	if body.Length() > 0 {
-		processNode(body)
-	} else {
-		processNode(doc.Selection)
+	elements, ok := crawlResult["elements"].([]interface{})
+	if !ok {
+		return "", false, fmt.Errorf("unexpected elements format")
 	}
 
-	// Join all elements
-	result := strings.Join(elements, "\n")
+	elementBuffer, ok := crawlResult["elementBuffer"].(map[string]interface{})
+	if !ok {
+		return "", false, fmt.Errorf("unexpected elementBuffer format")
+	}
+	// Update element buffer for coordinate mapping
+	m.elementMutex.Lock()
+	m.elementBuffer = make(map[int]*Element)
+	for idStr, elementDataInterface := range elementBuffer {
+		var id int
+		fmt.Sscanf(idStr, "%d", &id)
+
+		elementData, ok := elementDataInterface.(map[string]interface{})
+		if !ok {
+			continue // skip invalid entries
+		}
+
+		centerX, _ := elementData["center_x"].(float64)
+		centerY, _ := elementData["center_y"].(float64)
+		originX, _ := elementData["origin_x"].(float64)
+		originY, _ := elementData["origin_y"].(float64)
+
+		m.elementBuffer[id] = &Element{
+			CenterX: int(centerX),
+			CenterY: int(centerY),
+			OriginX: int(originX),
+			OriginY: int(originY),
+		}
+	}
+	m.elementMutex.Unlock()
+
+	// Join all elements (convert interface{} slice to string slice)
+	var elementStrings []string
+	for _, elem := range elements {
+		if str, ok := elem.(string); ok {
+			elementStrings = append(elementStrings, str)
+		}
+	}
+	result_str := strings.Join(elementStrings, "\n")
 
 	// Clean up extra whitespace
-	result = cleanupWhitespace(result)
+	result_str = cleanupWhitespace(result_str)
 
 	truncated := false
-	if len(result) > maxLength {
-		result = result[:maxLength]
+	if len(result_str) > maxLength {
+		result_str = result_str[:maxLength]
 		truncated = true
 	}
 
-	return result, truncated
+	return result_str, truncated, nil
 }
 
-// extractElement extracts meaningful content from an element, similar to natbot's approach
-func extractElement(s *goquery.Selection, tagName string, index int) string {
-	// Get element's own text content (not including children)
-	text := ""
-	if tagName != "input" && tagName != "img" {
-		// For most elements, get the direct text content
-		ownText := s.Contents().FilterFunction(func(i int, sel *goquery.Selection) bool {
-			if sel.Nodes != nil && len(sel.Nodes) > 0 {
-				return sel.Nodes[0].Type == html.TextNode
-			}
-			return false
-		}).Text()
-		text = strings.TrimSpace(ownText)
+// GetElement returns element data by ID for coordinate mapping
+func (m *Manager) GetElement(id int) (*Element, bool) {
+	m.elementMutex.RLock()
+	defer m.elementMutex.RUnlock()
 
-		// For some elements like buttons and links, we want all text content
-		if tagName == "a" || tagName == "button" || text == "" {
-			text = strings.TrimSpace(s.Text())
-		}
-	}
-
-	// Check if element has click handlers or is interactive
-	_, hasOnClick := s.Attr("onclick")
-
-	// Convert tag names similar to natbot's convert_name function
-	elementType := ""
-	switch tagName {
-	case "a":
-		elementType = "link"
-		if href, exists := s.Attr("href"); exists {
-			text = fmt.Sprintf("%s [%s]", text, href)
-		}
-	case "button":
-		elementType = "button"
-	case "input":
-		elementType = "input"
-		inputType, _ := s.Attr("type")
-		placeholder, _ := s.Attr("placeholder")
-		value, _ := s.Attr("value")
-		name, _ := s.Attr("name")
-
-		parts := []string{fmt.Sprintf("type=%s", inputType)}
-		if placeholder != "" {
-			parts = append(parts, fmt.Sprintf("placeholder='%s'", placeholder))
-		}
-		if value != "" && inputType != "password" {
-			parts = append(parts, fmt.Sprintf("value='%s'", value))
-		}
-		if name != "" {
-			parts = append(parts, fmt.Sprintf("name='%s'", name))
-		}
-		text = strings.Join(parts, " ")
-	case "img":
-		elementType = "img"
-		alt, _ := s.Attr("alt")
-		src, _ := s.Attr("src")
-		if alt != "" {
-			text = fmt.Sprintf("alt='%s'", alt)
-		}
-		if src != "" {
-			text += fmt.Sprintf(" src='%s'", src)
-		}
-	case "select":
-		elementType = "select"
-		options := []string{}
-		s.Find("option").Each(func(i int, opt *goquery.Selection) {
-			optText := strings.TrimSpace(opt.Text())
-			if optText != "" {
-				options = append(options, optText)
-			}
-		})
-		if len(options) > 0 {
-			text = fmt.Sprintf("options: %s", strings.Join(options, ", "))
-		}
-	case "textarea":
-		elementType = "textarea"
-		placeholder, _ := s.Attr("placeholder")
-		if placeholder != "" {
-			text = fmt.Sprintf("placeholder='%s'", placeholder)
-		}
-	default:
-		// For other elements, check if they're clickable
-		if hasOnClick || s.Is("[role='button']") {
-			elementType = "button"
-		} else if text != "" {
-			elementType = "text"
-		}
-	}
-
-	// Skip empty elements
-	if elementType == "" || (text == "" && elementType == "text") {
-		return ""
-	}
-
-	// Format output similar to natbot
-	return fmt.Sprintf("[%d] <%s> %s", index, elementType, text)
+	element, exists := m.elementBuffer[id]
+	return element, exists
 }
 
 // cleanupWhitespace removes excessive whitespace and formats the output
@@ -500,79 +560,6 @@ func cleanupWhitespace(s string) string {
 	s = strings.TrimSpace(s)
 
 	return s
-}
-
-// basicSimplifyHTML is a fallback for when goquery parsing fails
-func basicSimplifyHTML(htmlContent string, maxLength int) (string, bool) {
-	// Remove script and style tags with their content
-	result := removeTagsWithContent(htmlContent, "script", "style")
-
-	// Remove common attributes that aren't useful for analysis
-	attributesToRemove := []string{
-		`class="[^"]*"`,
-		`style="[^"]*"`,
-		`data-[^=]*="[^"]*"`,
-		`aria-[^=]*="[^"]*"`,
-		`role="[^"]*"`,
-		`tabindex="[^"]*"`,
-		`autocomplete="[^"]*"`,
-		`spellcheck="[^"]*"`,
-	}
-
-	for _, attr := range attributesToRemove {
-		re := regexp.MustCompile(attr)
-		result = re.ReplaceAllString(result, "")
-	}
-
-	// Clean up extra whitespace
-	result = cleanupWhitespace(result)
-
-	truncated := false
-	if len(result) > maxLength {
-		result = result[:maxLength]
-		truncated = true
-	}
-
-	return result, truncated
-}
-
-// removeTagsWithContent removes HTML tags and their content
-func removeTagsWithContent(html, tagName string, additionalTags ...string) string {
-	tags := append([]string{tagName}, additionalTags...)
-
-	for _, tag := range tags {
-		// Remove opening tag, content, and closing tag
-		startTag := fmt.Sprintf("<%s", tag)
-		endTag := fmt.Sprintf("</%s>", tag)
-
-		for {
-			start := strings.Index(strings.ToLower(html), strings.ToLower(startTag))
-			if start == -1 {
-				break
-			}
-
-			// Find the end of the opening tag
-			tagEnd := strings.Index(html[start:], ">")
-			if tagEnd == -1 {
-				break
-			}
-			tagEnd += start + 1
-
-			// Find the closing tag
-			end := strings.Index(strings.ToLower(html[tagEnd:]), strings.ToLower(endTag))
-			if end == -1 {
-				// No closing tag found, just remove the opening tag
-				html = html[:start] + html[tagEnd:]
-				continue
-			}
-			end += tagEnd + len(endTag)
-
-			// Remove the entire tag and its content
-			html = html[:start] + html[end:]
-		}
-	}
-
-	return html
 }
 
 // CreateScreenshotDir ensures the screenshots directory exists
