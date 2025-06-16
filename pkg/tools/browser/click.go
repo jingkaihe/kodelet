@@ -68,7 +68,47 @@ func (t ClickTool) Name() string {
 }
 
 func (t ClickTool) Description() string {
-	return "Click an element by CSS selector"
+	return `Click on a web page element identified by a CSS selector.
+
+## Parameters
+- selector: CSS selector for the element to click (required)
+- timeout: Maximum wait time for element to be visible and clickable in milliseconds (default: 10000)
+
+## Behavior
+- Waits for the element to be visible and accessible
+- Verifies the element exists before attempting to click
+- Performs a single left-click on the center of the element
+- Returns success status and element found information
+
+## CSS Selector Examples
+- By ID: "#submit-button", "#login-form"
+- By class: ".btn-primary", ".nav-link"
+- By tag: "button", "a", "input"
+- By attribute: "[data-testid='submit']", "[type='submit']"
+- Complex selectors: "form.login button[type='submit']", ".modal .close-btn"
+
+## Common Use Cases
+* Clicking buttons (submit, cancel, navigation)
+* Following links
+* Activating form controls
+* Triggering interactive elements
+* Closing modals or popups
+
+## Element Requirements
+- Element must be visible on the page
+- Element must not be obscured by other elements
+- Element should be clickable (not disabled)
+
+## Examples
+- Click submit button: {"selector": "#submit-btn"}
+- Click with custom timeout: {"selector": ".slow-loading-btn", "timeout": 20000}
+- Click by attribute: {"selector": "[data-action='delete']"}
+
+## Important Notes
+- The tool will fail if the element is not found or not visible
+- Use browser_wait_for tool first if you need to wait for dynamic content
+- For elements that appear after page interactions, increase the timeout value
+- Complex selectors may be slower - use specific selectors when possible`
 }
 
 func (t ClickTool) ValidateInput(state tools.State, parameters string) error {

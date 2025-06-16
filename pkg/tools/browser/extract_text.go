@@ -50,11 +50,11 @@ func (r ExtractTextResult) UserFacing() string {
 	if !r.Success {
 		return fmt.Sprintf("❌ Text extraction failed: %s", r.Error)
 	}
-	
+
 	if r.Count == 0 {
 		return "📝 No text found"
 	}
-	
+
 	return fmt.Sprintf("✅ Text extracted from %d element(s)", r.Count)
 }
 
@@ -85,7 +85,55 @@ func (t ExtractTextTool) Name() string {
 }
 
 func (t ExtractTextTool) Description() string {
-	return "Extract text from element(s)"
+	return `Extract text content from one or more web page elements using CSS selectors.
+
+## Parameters
+- selector: CSS selector for target element(s) (required)
+- multiple: Extract from all matching elements vs. just the first (default: false)
+- timeout: Maximum wait time for element(s) to be visible in milliseconds (default: 10000)
+
+## Extraction Modes
+- multiple=false: Extracts text from the first matching element only
+- multiple=true: Extracts text from all matching elements and returns an array
+
+## Behavior
+- Waits for element(s) to be visible on the page
+- Extracts the textContent property (visible text only)
+- Automatically trims whitespace from extracted text
+- Filters out empty text values when using multiple=true
+
+## CSS Selector Examples
+- By ID: "#content", "#article-title"
+- By class: ".product-name", ".price"
+- By tag: "h1", "p", "span"
+- By attribute: "[data-content]", "[aria-label]"
+- Complex: ".card .title", "table td:nth-child(2)"
+
+## Common Use Cases
+* Extracting page titles and headings
+* Reading product information (names, prices, descriptions)
+* Gathering form labels and validation messages
+* Collecting navigation menu items
+* Scraping data from tables or lists
+* Verifying displayed content matches expectations
+
+## Single vs Multiple Extraction
+- Single: Returns a string with the first element's text
+- Multiple: Returns an array of strings from all matching elements
+- Use multiple=true for lists, tables, or repeated content patterns
+
+## Examples
+- Extract page title: {"selector": "h1"}
+- Get all product names: {"selector": ".product-title", "multiple": true}
+- Read with timeout: {"selector": ".dynamic-content", "timeout": 15000}
+- Table data: {"selector": "table tbody td:first-child", "multiple": true}
+
+## Important Notes
+- Only extracts visible text content (no HTML tags)
+- Empty elements or whitespace-only text are filtered out in multiple mode
+- Use specific selectors to avoid extracting unwanted text
+- The tool waits for elements to be visible, not just present in the DOM
+- Hidden elements (display:none, visibility:hidden) will not be extracted`
 }
 
 func (t ExtractTextTool) ValidateInput(state tools.State, parameters string) error {

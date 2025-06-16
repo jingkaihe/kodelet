@@ -65,7 +65,38 @@ func (t NavigateTool) Name() string {
 }
 
 func (t NavigateTool) Description() string {
-	return "Navigate to a URL"
+	return `Navigate the browser to a specified URL and wait for the page to load.
+
+## Parameters
+- url: The absolute URL to navigate to (must include scheme: http:// or https://)
+- timeout: Maximum wait time for navigation in milliseconds (default: 30000)
+
+## Behavior
+- Automatically starts a browser session if not already active
+- Navigates to the specified URL
+- Waits for the page body to be ready before returning
+- Returns the final URL (after redirects) and page title
+
+## URL Requirements
+- Must be an absolute URL with protocol (http:// or https://)
+- Local file URLs (file://) are supported
+- Relative URLs are not allowed - use full URLs
+
+## Common Use Cases
+* Opening web pages for testing or automation
+* Navigating to application login pages
+* Loading web applications for interaction
+* Accessing documentation or content pages
+
+## Examples
+- Navigate to Google: {"url": "https://www.google.com"}
+- Load local HTML file: {"url": "file:///path/to/file.html"}
+- With custom timeout: {"url": "https://slow-site.com", "timeout": 60000}
+
+## Notes
+- The tool will wait for the page to be ready before returning
+- If navigation fails due to network issues or invalid URLs, an error is returned
+- The final URL may differ from the input URL due to redirects`
 }
 
 func (t NavigateTool) ValidateInput(state tools.State, parameters string) error {
@@ -148,7 +179,7 @@ func (t NavigateTool) Execute(ctx context.Context, state tools.State, parameters
 	}
 
 	logger.G(ctx).WithField("url", currentURL).WithField("title", title).Info("Navigation successful")
-	
+
 	return NavigateResult{
 		Success: true,
 		URL:     currentURL,

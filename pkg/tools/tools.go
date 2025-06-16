@@ -32,11 +32,11 @@ func GenerateSchema[T any]() *jsonschema.Schema {
 func GetMainTools(enableBrowserTools bool) []tooltypes.Tool {
 	tools := make([]tooltypes.Tool, len(baseMainTools))
 	copy(tools, baseMainTools)
-	
+
 	if enableBrowserTools {
 		tools = append(tools, browserTools...)
 	}
-	
+
 	return tools
 }
 
@@ -44,11 +44,11 @@ func GetMainTools(enableBrowserTools bool) []tooltypes.Tool {
 func GetSubAgentTools(enableBrowserTools bool) []tooltypes.Tool {
 	tools := make([]tooltypes.Tool, len(baseSubAgentTools))
 	copy(tools, baseSubAgentTools)
-	
+
 	if enableBrowserTools {
 		tools = append(tools, browserTools...)
 	}
-	
+
 	return tools
 }
 

@@ -302,7 +302,7 @@ func TestToolMetadata(t *testing.T) {
 }
 
 func TestToolSchemaGeneration(t *testing.T) {
-	tests := []struct{
+	tests := []struct {
 		name string
 		tool tools.Tool
 	}{
@@ -390,8 +390,10 @@ func TestSimplifyHTML(t *testing.T) {
 
 func TestTracingKVs(t *testing.T) {
 	tests := []struct {
-		name       string
-		tool       interface{ TracingKVs(string) ([]attribute.KeyValue, error) }
+		name string
+		tool interface {
+			TracingKVs(string) ([]attribute.KeyValue, error)
+		}
 		parameters string
 	}{
 		{
@@ -424,16 +426,16 @@ func (m *mockState) SetFileLastAccessed(path string, lastAccessed time.Time) err
 func (m *mockState) GetFileLastAccessed(path string) (time.Time, error) {
 	return time.Time{}, nil
 }
-func (m *mockState) ClearFileLastAccessed(path string) error { return nil }
-func (m *mockState) TodoFilePath() (string, error)          { return "", nil }
-func (m *mockState) SetTodoFilePath(path string)             {}
-func (m *mockState) SetFileLastAccess(fileLastAccess map[string]time.Time) {}
-func (m *mockState) FileLastAccess() map[string]time.Time { return nil }
-func (m *mockState) BasicTools() []tools.Tool { return nil }
-func (m *mockState) MCPTools() []tools.Tool { return nil }
-func (m *mockState) Tools() []tools.Tool { return nil }
+func (m *mockState) ClearFileLastAccessed(path string) error                    { return nil }
+func (m *mockState) TodoFilePath() (string, error)                              { return "", nil }
+func (m *mockState) SetTodoFilePath(path string)                                {}
+func (m *mockState) SetFileLastAccess(fileLastAccess map[string]time.Time)      {}
+func (m *mockState) FileLastAccess() map[string]time.Time                       { return nil }
+func (m *mockState) BasicTools() []tools.Tool                                   { return nil }
+func (m *mockState) MCPTools() []tools.Tool                                     { return nil }
+func (m *mockState) Tools() []tools.Tool                                        { return nil }
 func (m *mockState) AddBackgroundProcess(process tools.BackgroundProcess) error { return nil }
-func (m *mockState) GetBackgroundProcesses() []tools.BackgroundProcess { return nil }
-func (m *mockState) RemoveBackgroundProcess(pid int) error { return nil }
-func (m *mockState) GetBrowserManager() tools.BrowserManager { return nil }
-func (m *mockState) SetBrowserManager(manager tools.BrowserManager) {}
+func (m *mockState) GetBackgroundProcesses() []tools.BackgroundProcess          { return nil }
+func (m *mockState) RemoveBackgroundProcess(pid int) error                      { return nil }
+func (m *mockState) GetBrowserManager() tools.BrowserManager                    { return nil }
+func (m *mockState) SetBrowserManager(manager tools.BrowserManager)             {}

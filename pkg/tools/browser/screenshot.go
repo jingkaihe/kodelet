@@ -65,7 +65,50 @@ func (t ScreenshotTool) Name() string {
 }
 
 func (t ScreenshotTool) Description() string {
-	return "Take screenshot of current page"
+	return `Capture a screenshot of the current web page with flexible formatting and sizing options.
+
+## Parameters
+- full_page: Whether to capture the entire page or just the viewport (default: true)
+- format: Image format for the screenshot - "png" or "jpeg" (default: "png")
+
+## Capture Modes
+- full_page=true: Captures the entire page including content below the fold
+- full_page=false: Captures only the visible viewport area
+
+## Format Options
+- PNG: Lossless format, larger file size, supports transparency
+- JPEG: Lossy format, smaller file size, no transparency support
+
+## Behavior
+- Automatically generates a unique filename with timestamp
+- Saves screenshot to a temporary directory
+- Returns the file path, dimensions, and success status
+- Works with the current page loaded in the browser
+
+## Common Use Cases
+* Documenting page states for testing or debugging
+* Capturing visual evidence of UI issues
+* Creating snapshots for comparison testing
+* Recording page layouts at different viewport sizes
+* Generating visual documentation
+
+## File Management
+- Screenshots are saved with timestamps for uniqueness
+- Files are saved to the system temporary directory
+- File paths are returned for further processing or reference
+
+## Examples
+- Full page PNG: {"full_page": true, "format": "png"}
+- Viewport only: {"full_page": false}
+- JPEG format: {"format": "jpeg"}
+- Quick viewport screenshot: {}
+
+## Important Notes
+- Full page screenshots may be very large for long pages
+- JPEG format is recommended for large screenshots to reduce file size
+- The tool requires an active browser session with a loaded page
+- Screenshot quality is affected by the browser's zoom level and display settings
+- Ensure the page is fully loaded before taking screenshots for best results`
 }
 
 func (t ScreenshotTool) ValidateInput(state tools.State, parameters string) error {
@@ -177,11 +220,11 @@ func (t ScreenshotTool) Execute(ctx context.Context, state tools.State, paramete
 	}
 
 	logger.G(ctx).WithFields(map[string]interface{}{
-		"path": screenshotPath,
+		"path":      screenshotPath,
 		"full_page": input.FullPage,
-		"format": input.Format,
-		"width": width,
-		"height": height,
+		"format":    input.Format,
+		"width":     width,
+		"height":    height,
 	}).Info("Screenshot successful")
 
 	return ScreenshotResult{
@@ -203,4 +246,3 @@ func (t ScreenshotTool) TracingKVs(parameters string) ([]attribute.KeyValue, err
 		attribute.String("browser.screenshot.format", input.Format),
 	}, nil
 }
-

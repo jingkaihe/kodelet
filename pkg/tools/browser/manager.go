@@ -37,7 +37,7 @@ func GetManagerFromState(state tooltypes.State) tooltypes.BrowserManager {
 	if manager := state.GetBrowserManager(); manager != nil {
 		return manager
 	}
-	
+
 	// Create a new manager and store it in the state
 	manager := NewManager()
 	state.SetBrowserManager(manager)
@@ -48,11 +48,11 @@ func GetManagerFromState(state tooltypes.State) tooltypes.BrowserManager {
 func (m *Manager) Start(ctx context.Context) error {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
-	
+
 	if m.isActive {
 		return nil
 	}
-	
+
 	opts := []chromedp.ExecAllocatorOption{
 		chromedp.NoFirstRun,
 		chromedp.NoDefaultBrowserCheck,
@@ -61,15 +61,15 @@ func (m *Manager) Start(ctx context.Context) error {
 		chromedp.Headless,
 		chromedp.UserAgent("Kodelet Browser Agent/1.0"),
 	}
-	
+
 	allocCtx, _ := chromedp.NewExecAllocator(ctx, opts...)
 	m.allocCtx = allocCtx
-	
+
 	browserCtx, cancelCtx := chromedp.NewContext(allocCtx)
 	m.ctx = browserCtx
 	m.cancelCtx = cancelCtx
 	m.isActive = true
-	
+
 	// Test browser startup
 	var title string
 	err := chromedp.Run(m.ctx, chromedp.Navigate("about:blank"), chromedp.Title(&title))
@@ -77,7 +77,7 @@ func (m *Manager) Start(ctx context.Context) error {
 		m.Stop()
 		return fmt.Errorf("failed to start browser: %w", err)
 	}
-	
+
 	logger.G(ctx).Info("Browser manager started successfully")
 	return nil
 }
@@ -86,15 +86,15 @@ func (m *Manager) Start(ctx context.Context) error {
 func (m *Manager) Stop() {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
-	
+
 	if !m.isActive {
 		return
 	}
-	
+
 	if m.cancelCtx != nil {
 		m.cancelCtx()
 	}
-	
+
 	m.isActive = false
 	m.ctx = nil
 	m.cancelCtx = nil
@@ -105,7 +105,7 @@ func (m *Manager) Stop() {
 func (m *Manager) GetContext() context.Context {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
-	
+
 	return m.ctx
 }
 
@@ -113,7 +113,7 @@ func (m *Manager) GetContext() context.Context {
 func (m *Manager) IsActive() bool {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
-	
+
 	return m.isActive
 }
 
@@ -129,7 +129,7 @@ func (m *Manager) EnsureActive(ctx context.Context) error {
 func SimplifyHTML(html string, maxLength int) (string, bool) {
 	// Remove script and style tags with their content
 	html = removeTagsWithContent(html, "script", "style")
-	
+
 	// Remove common attributes that aren't useful for analysis
 	attributesToRemove := []string{
 		`class="[^"]*"`,
@@ -141,47 +141,47 @@ func SimplifyHTML(html string, maxLength int) (string, bool) {
 		`autocomplete="[^"]*"`,
 		`spellcheck="[^"]*"`,
 	}
-	
+
 	for _, attr := range attributesToRemove {
 		html = strings.ReplaceAll(html, attr, "")
 	}
-	
+
 	// Clean up extra whitespace
 	html = strings.ReplaceAll(html, "\n\n", "\n")
 	html = strings.ReplaceAll(html, "  ", " ")
 	html = strings.TrimSpace(html)
-	
+
 	truncated := false
 	if len(html) > maxLength {
 		html = html[:maxLength]
 		truncated = true
 	}
-	
+
 	return html, truncated
 }
 
 // removeTagsWithContent removes HTML tags and their content
 func removeTagsWithContent(html, tagName string, additionalTags ...string) string {
 	tags := append([]string{tagName}, additionalTags...)
-	
+
 	for _, tag := range tags {
 		// Remove opening tag, content, and closing tag
 		startTag := fmt.Sprintf("<%s", tag)
 		endTag := fmt.Sprintf("</%s>", tag)
-		
+
 		for {
 			start := strings.Index(strings.ToLower(html), strings.ToLower(startTag))
 			if start == -1 {
 				break
 			}
-			
+
 			// Find the end of the opening tag
 			tagEnd := strings.Index(html[start:], ">")
 			if tagEnd == -1 {
 				break
 			}
 			tagEnd += start + 1
-			
+
 			// Find the closing tag
 			end := strings.Index(strings.ToLower(html[tagEnd:]), strings.ToLower(endTag))
 			if end == -1 {
@@ -190,12 +190,12 @@ func removeTagsWithContent(html, tagName string, additionalTags ...string) strin
 				continue
 			}
 			end += tagEnd + len(endTag)
-			
+
 			// Remove the entire tag and its content
 			html = html[:start] + html[end:]
 		}
 	}
-	
+
 	return html
 }
 
@@ -205,13 +205,13 @@ func CreateScreenshotDir() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to get home directory: %w", err)
 	}
-	
+
 	screenshotDir := filepath.Join(homeDir, ".kodelet", "screenshots")
-	
+
 	if err := os.MkdirAll(screenshotDir, 0755); err != nil {
 		return "", fmt.Errorf("failed to create screenshots directory: %w", err)
 	}
-	
+
 	return screenshotDir, nil
 }
 
@@ -221,7 +221,7 @@ func GenerateScreenshotPath(format string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	
+
 	filename := fmt.Sprintf("%s.%s", uuid.New().String(), format)
 	return filepath.Join(screenshotDir, filename), nil
 }
@@ -230,7 +230,7 @@ func GenerateScreenshotPath(format string) (string, error) {
 func WaitForCondition(ctx context.Context, condition string, selector string, timeout time.Duration) error {
 	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	
+
 	switch condition {
 	case "page_load":
 		return chromedp.Run(timeoutCtx, chromedp.WaitReady("body"))

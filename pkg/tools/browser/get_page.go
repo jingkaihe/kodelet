@@ -41,13 +41,13 @@ func (r GetPageResult) UserFacing() string {
 	if !r.Success {
 		return fmt.Sprintf("❌ Failed to get page content: %s", r.Error)
 	}
-	
+
 	status := "✅ Page content retrieved"
 	if r.Truncated {
 		status += " (truncated)"
 	}
-	
-	return fmt.Sprintf("%s\nURL: %s\nTitle: %s\nHTML Length: %d characters", 
+
+	return fmt.Sprintf("%s\nURL: %s\nTitle: %s\nHTML Length: %d characters",
 		status, r.URL, r.Title, len(r.HTML))
 }
 
@@ -72,7 +72,58 @@ func (t GetPageTool) Name() string {
 }
 
 func (t GetPageTool) Description() string {
-	return "Get cleaned HTML DOM of current page for LLM analysis"
+	return `Extract and return the complete HTML content of the current web page with optional cleaning for LLM analysis.
+
+## Parameters
+- simplify: Remove scripts, styles, and non-essential attributes for cleaner content (default: true)
+- max_length: Maximum HTML content length to return in characters (default: 50000)
+
+## Content Processing
+- simplify=true: Removes scripts, stylesheets, comments, and formatting attributes
+- simplify=false: Returns raw HTML with all original content and formatting
+- Content is automatically truncated if it exceeds max_length
+
+## Simplification Benefits
+- Removes clutter like JavaScript and CSS that's irrelevant for content analysis
+- Strips non-essential attributes (style, class, id) while preserving structure
+- Reduces content size for more efficient LLM processing
+- Maintains semantic HTML structure and text content
+
+## Return Information
+- Full HTML content (simplified or raw based on settings)
+- Current page URL and title
+- Content length and truncation status
+- Success/error status
+
+## Common Use Cases
+* Analyzing page structure and content for testing
+* Extracting page data for LLM analysis or processing
+* Debugging page layout and content issues
+* Capturing page state for comparison or documentation
+* Preparing page content for content analysis or summarization
+
+## Content Limitations
+- Very large pages may be truncated to stay within max_length
+- Dynamic content loaded after page load may not be captured
+- Some content may be hidden or rendered differently than displayed
+
+## Examples
+- Default simplified: {}
+- Raw HTML: {"simplify": false}
+- Custom length limit: {"max_length": 100000}
+- Minimal processing: {"simplify": false, "max_length": 25000}
+
+## Processing Notes
+- Simplification focuses on content preservation over visual formatting
+- Script and style tags are completely removed when simplified
+- The tool captures the current DOM state, including any dynamic changes
+- Truncation happens after simplification to ensure the most relevant content
+
+## Best Practices
+- Use simplify=true for content analysis and LLM processing
+- Use simplify=false when you need to inspect the complete page structure
+- Adjust max_length based on your content analysis needs
+- Consider the page loading state - ensure dynamic content has loaded before extraction`
 }
 
 func (t GetPageTool) ValidateInput(state tools.State, parameters string) error {
@@ -145,11 +196,11 @@ func (t GetPageTool) Execute(ctx context.Context, state tools.State, parameters 
 	}
 
 	logger.G(ctx).WithFields(map[string]interface{}{
-		"url": currentURL,
-		"title": title,
+		"url":         currentURL,
+		"title":       title,
 		"html_length": len(html),
-		"truncated": truncated,
-		"simplified": input.Simplify,
+		"truncated":   truncated,
+		"simplified":  input.Simplify,
 	}).Info("Page content retrieved")
 
 	return GetPageResult{

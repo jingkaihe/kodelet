@@ -70,7 +70,54 @@ func (t TypeTool) Name() string {
 }
 
 func (t TypeTool) Description() string {
-	return "Type text into an input element"
+	return `Type text into input fields, text areas, or other editable elements.
+
+## Parameters
+- selector: CSS selector for the input element (required)
+- text: Text content to type into the element (required)
+- clear: Whether to clear the field before typing (default: true)
+- timeout: Maximum wait time for element to be visible in milliseconds (default: 10000)
+
+## Behavior
+- Waits for the input element to be visible and editable
+- Optionally clears existing content (if clear=true)
+- Types the specified text character by character
+- Works with input fields, textareas, and contentEditable elements
+
+## Supported Element Types
+- Text inputs: <input type="text">, <input type="email">, <input type="password">
+- Number inputs: <input type="number">
+- Text areas: <textarea>
+- Content editable: Elements with contentEditable="true"
+- Search inputs: <input type="search">
+
+## Clear Behavior
+- clear=true (default): Selects all existing text and replaces it
+- clear=false: Appends text to existing content at cursor position
+
+## Common Use Cases
+* Filling out forms (login, registration, contact)
+* Entering search terms
+* Updating text content
+* Providing input for web applications
+* Testing form validation
+
+## CSS Selector Examples
+- By ID: "#username", "#email-input"
+- By name: "[name='password']", "[name='search']"
+- By class: ".form-control", ".search-input"
+- By type: "input[type='text']", "input[type='email']"
+
+## Examples
+- Fill username: {"selector": "#username", "text": "john.doe"}
+- Append to existing text: {"selector": "#comment", "text": " Additional text", "clear": false}
+- With timeout: {"selector": ".dynamic-input", "text": "test", "timeout": 15000}
+
+## Important Notes
+- Element must be editable (input, textarea, or contentEditable)
+- Use clear=false to append text rather than replace
+- For password fields, the text will still be visible in logs
+- Some fields may have input validation or formatting that affects the final value`
 }
 
 func (t TypeTool) ValidateInput(state tools.State, parameters string) error {
@@ -151,7 +198,7 @@ func (t TypeTool) Execute(ctx context.Context, state tools.State, parameters str
 
 	// Build typing actions
 	var actions []chromedp.Action
-	
+
 	// Clear field if requested
 	if input.Clear {
 		actions = append(actions,
@@ -161,7 +208,7 @@ func (t TypeTool) Execute(ctx context.Context, state tools.State, parameters str
 	} else {
 		actions = append(actions, chromedp.Click(input.Selector))
 	}
-	
+
 	// Type the text
 	actions = append(actions, chromedp.SendKeys(input.Selector, input.Text))
 

@@ -71,7 +71,57 @@ func (t WaitForTool) Name() string {
 }
 
 func (t WaitForTool) Description() string {
-	return "Wait for page load or element condition"
+	return `Wait for specific conditions to be met on the web page before proceeding.
+
+## Parameters
+- condition: The condition type to wait for (required)
+- selector: CSS selector for element conditions (required for element_visible and element_hidden)
+- timeout: Maximum time to wait for condition in milliseconds (default: 30000)
+
+## Available Conditions
+- page_load: Wait for the page to finish loading completely
+- element_visible: Wait for an element to become visible on the page
+- element_hidden: Wait for an element to become hidden or removed
+
+## Condition Details
+- **page_load**: Waits for document ready state and all resources to load
+- **element_visible**: Element must be present in DOM and visible (not hidden)
+- **element_hidden**: Element either removed from DOM or hidden via CSS
+
+## Behavior
+- Returns immediately when the condition is met
+- Times out after the specified duration if condition is not met
+- Timeout is treated as a valid result, not an error
+- Useful for synchronizing with dynamic page content
+
+## Common Use Cases
+* Waiting for AJAX content to load after navigation
+* Synchronizing with single-page application state changes
+* Waiting for modals or popups to appear or disappear
+* Ensuring elements are ready before interaction
+* Handling slow-loading dynamic content
+
+## CSS Selector Guidelines
+- Use specific selectors to target the exact element you're waiting for
+- Consider using data attributes for more reliable targeting
+- Avoid overly complex selectors that might be slow to evaluate
+
+## Examples
+- Wait for page load: {"condition": "page_load"}
+- Wait for modal: {"condition": "element_visible", "selector": "#loading-modal"}
+- Wait for spinner to hide: {"condition": "element_hidden", "selector": ".loading-spinner"}
+- Custom timeout: {"condition": "element_visible", "selector": ".dynamic-content", "timeout": 60000}
+
+## Timing Strategies
+- Use shorter timeouts (5-10 seconds) for expected fast operations
+- Use longer timeouts (30-60 seconds) for complex page loads or network operations
+- Consider the user experience - avoid unnecessarily long waits
+
+## Important Notes
+- Timeout is not considered a failure - check the returned condition_met status
+- Use this tool before clicking or typing on dynamically loaded elements
+- element_visible requires the element to be both present and not hidden
+- page_load waits for all resources including images and scripts`
 }
 
 func (t WaitForTool) ValidateInput(state tools.State, parameters string) error {
@@ -85,9 +135,9 @@ func (t WaitForTool) ValidateInput(state tools.State, parameters string) error {
 	}
 
 	validConditions := map[string]bool{
-		"page_load":        true,
-		"element_visible":  true,
-		"element_hidden":   true,
+		"page_load":       true,
+		"element_visible": true,
+		"element_hidden":  true,
 	}
 
 	if !validConditions[input.Condition] {
@@ -150,8 +200,8 @@ func (t WaitForTool) Execute(ctx context.Context, state tools.State, parameters 
 		if timeoutCtx.Err() == context.DeadlineExceeded {
 			logger.G(ctx).WithFields(map[string]interface{}{
 				"condition": input.Condition,
-				"selector": input.Selector,
-				"timeout": input.Timeout,
+				"selector":  input.Selector,
+				"timeout":   input.Timeout,
 			}).Info("Wait condition timeout")
 			return WaitForResult{
 				Success:      true,
@@ -161,7 +211,7 @@ func (t WaitForTool) Execute(ctx context.Context, state tools.State, parameters 
 
 		logger.G(ctx).WithFields(map[string]interface{}{
 			"condition": input.Condition,
-			"selector": input.Selector,
+			"selector":  input.Selector,
 		}).WithError(err).Info("Wait condition failed")
 		return WaitForResult{
 			Success: false,
@@ -171,7 +221,7 @@ func (t WaitForTool) Execute(ctx context.Context, state tools.State, parameters 
 
 	logger.G(ctx).WithFields(map[string]interface{}{
 		"condition": input.Condition,
-		"selector": input.Selector,
+		"selector":  input.Selector,
 	}).Info("Wait condition met")
 
 	return WaitForResult{
