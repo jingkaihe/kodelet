@@ -5,14 +5,17 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/PuerkitoBio/goquery"
 	"github.com/chromedp/chromedp"
 	"github.com/google/uuid"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
+	"golang.org/x/net/html"
 )
 
 // Manager handles browser context and lifecycle
@@ -288,9 +291,221 @@ func SetRealisticHeaders(ctx context.Context) chromedp.Action {
 }
 
 // SimplifyHTML removes unnecessary attributes and elements for LLM analysis
-func SimplifyHTML(html string, maxLength int) (string, bool) {
+func SimplifyHTML(htmlContent string, maxLength int) (string, bool) {
+	// Parse HTML to extract meaningful content similar to natbot.py
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(htmlContent))
+	if err != nil {
+		// Fallback to basic simplification if parsing fails
+		return basicSimplifyHTML(htmlContent, maxLength)
+	}
+
+	// Elements to completely skip (similar to natbot's black_listed_elements)
+	blacklistedElements := map[string]bool{
+		"script": true, "style": true, "meta": true, "link": true,
+		"noscript": true, "svg": true, "path": true, "head": true,
+		"iframe": true, "object": true, "embed": true, "param": true,
+		"source": true, "track": true, "br": true,
+	}
+
+	var elements []string
+	elementIndex := 0
+	processedNodes := make(map[*goquery.Selection]bool)
+
+	// Process only leaf nodes and interactive elements to avoid duplication
+	var processNode func(*goquery.Selection)
+	processNode = func(s *goquery.Selection) {
+		// Skip if already processed
+		if processedNodes[s] {
+			return
+		}
+		processedNodes[s] = true
+
+		tagName := goquery.NodeName(s)
+
+		// Skip blacklisted elements
+		if blacklistedElements[tagName] {
+			return
+		}
+
+		// Check if this is an interactive element or has direct text
+		isInteractive := tagName == "a" || tagName == "button" || tagName == "input" ||
+			tagName == "select" || tagName == "textarea" || tagName == "img"
+
+		// Check if element has direct text content (not in child elements)
+		hasDirectText := false
+		ownText := s.Contents().FilterFunction(func(i int, s *goquery.Selection) bool {
+			if s.Nodes != nil && len(s.Nodes) > 0 {
+				node := s.Nodes[0]
+				// Check if it's a text node
+				return node.Type == html.TextNode
+			}
+			return false
+		}).Text()
+
+		if strings.TrimSpace(ownText) != "" {
+			hasDirectText = true
+		}
+
+		// Process interactive elements or elements with direct text
+		if isInteractive || hasDirectText {
+			elementStr := extractElement(s, tagName, elementIndex)
+			if elementStr != "" {
+				elements = append(elements, elementStr)
+				elementIndex++
+			}
+
+			// Don't process children of interactive elements
+			if isInteractive {
+				return
+			}
+		}
+
+		// Process children
+		s.Children().Each(func(i int, child *goquery.Selection) {
+			processNode(child)
+		})
+	}
+
+	// Start processing from body or document root
+	body := doc.Find("body")
+	if body.Length() > 0 {
+		processNode(body)
+	} else {
+		processNode(doc.Selection)
+	}
+
+	// Join all elements
+	result := strings.Join(elements, "\n")
+
+	// Clean up extra whitespace
+	result = cleanupWhitespace(result)
+
+	truncated := false
+	if len(result) > maxLength {
+		result = result[:maxLength]
+		truncated = true
+	}
+
+	return result, truncated
+}
+
+// extractElement extracts meaningful content from an element, similar to natbot's approach
+func extractElement(s *goquery.Selection, tagName string, index int) string {
+	// Get element's own text content (not including children)
+	text := ""
+	if tagName != "input" && tagName != "img" {
+		// For most elements, get the direct text content
+		ownText := s.Contents().FilterFunction(func(i int, sel *goquery.Selection) bool {
+			if sel.Nodes != nil && len(sel.Nodes) > 0 {
+				return sel.Nodes[0].Type == html.TextNode
+			}
+			return false
+		}).Text()
+		text = strings.TrimSpace(ownText)
+
+		// For some elements like buttons and links, we want all text content
+		if tagName == "a" || tagName == "button" || text == "" {
+			text = strings.TrimSpace(s.Text())
+		}
+	}
+
+	// Check if element has click handlers or is interactive
+	_, hasOnClick := s.Attr("onclick")
+
+	// Convert tag names similar to natbot's convert_name function
+	elementType := ""
+	switch tagName {
+	case "a":
+		elementType = "link"
+		if href, exists := s.Attr("href"); exists {
+			text = fmt.Sprintf("%s [%s]", text, href)
+		}
+	case "button":
+		elementType = "button"
+	case "input":
+		elementType = "input"
+		inputType, _ := s.Attr("type")
+		placeholder, _ := s.Attr("placeholder")
+		value, _ := s.Attr("value")
+		name, _ := s.Attr("name")
+
+		parts := []string{fmt.Sprintf("type=%s", inputType)}
+		if placeholder != "" {
+			parts = append(parts, fmt.Sprintf("placeholder='%s'", placeholder))
+		}
+		if value != "" && inputType != "password" {
+			parts = append(parts, fmt.Sprintf("value='%s'", value))
+		}
+		if name != "" {
+			parts = append(parts, fmt.Sprintf("name='%s'", name))
+		}
+		text = strings.Join(parts, " ")
+	case "img":
+		elementType = "img"
+		alt, _ := s.Attr("alt")
+		src, _ := s.Attr("src")
+		if alt != "" {
+			text = fmt.Sprintf("alt='%s'", alt)
+		}
+		if src != "" {
+			text += fmt.Sprintf(" src='%s'", src)
+		}
+	case "select":
+		elementType = "select"
+		options := []string{}
+		s.Find("option").Each(func(i int, opt *goquery.Selection) {
+			optText := strings.TrimSpace(opt.Text())
+			if optText != "" {
+				options = append(options, optText)
+			}
+		})
+		if len(options) > 0 {
+			text = fmt.Sprintf("options: %s", strings.Join(options, ", "))
+		}
+	case "textarea":
+		elementType = "textarea"
+		placeholder, _ := s.Attr("placeholder")
+		if placeholder != "" {
+			text = fmt.Sprintf("placeholder='%s'", placeholder)
+		}
+	default:
+		// For other elements, check if they're clickable
+		if hasOnClick || s.Is("[role='button']") {
+			elementType = "button"
+		} else if text != "" {
+			elementType = "text"
+		}
+	}
+
+	// Skip empty elements
+	if elementType == "" || (text == "" && elementType == "text") {
+		return ""
+	}
+
+	// Format output similar to natbot
+	return fmt.Sprintf("[%d] <%s> %s", index, elementType, text)
+}
+
+// cleanupWhitespace removes excessive whitespace and formats the output
+func cleanupWhitespace(s string) string {
+	// Remove multiple consecutive newlines
+	re := regexp.MustCompile(`\n{3,}`)
+	s = re.ReplaceAllString(s, "\n\n")
+
+	// Remove multiple consecutive spaces
+	re = regexp.MustCompile(` {2,}`)
+	s = re.ReplaceAllString(s, " ")
+
+	// Trim leading and trailing whitespace
+	s = strings.TrimSpace(s)
+
+	return s
+}
+
+// basicSimplifyHTML is a fallback for when goquery parsing fails
+func basicSimplifyHTML(htmlContent string, maxLength int) (string, bool) {
 	// Remove script and style tags with their content
-	html = removeTagsWithContent(html, "script", "style")
+	result := removeTagsWithContent(htmlContent, "script", "style")
 
 	// Remove common attributes that aren't useful for analysis
 	attributesToRemove := []string{
@@ -305,21 +520,20 @@ func SimplifyHTML(html string, maxLength int) (string, bool) {
 	}
 
 	for _, attr := range attributesToRemove {
-		html = strings.ReplaceAll(html, attr, "")
+		re := regexp.MustCompile(attr)
+		result = re.ReplaceAllString(result, "")
 	}
 
 	// Clean up extra whitespace
-	html = strings.ReplaceAll(html, "\n\n", "\n")
-	html = strings.ReplaceAll(html, "  ", " ")
-	html = strings.TrimSpace(html)
+	result = cleanupWhitespace(result)
 
 	truncated := false
-	if len(html) > maxLength {
-		html = html[:maxLength]
+	if len(result) > maxLength {
+		result = result[:maxLength]
 		truncated = true
 	}
 
-	return html, truncated
+	return result, truncated
 }
 
 // removeTagsWithContent removes HTML tags and their content
