@@ -59,7 +59,44 @@ func (m *Manager) Start(ctx context.Context) error {
 		chromedp.DisableGPU,
 		chromedp.NoSandbox,
 		chromedp.Headless,
-		chromedp.UserAgent("Kodelet Browser Agent/1.0"),
+
+		// Realistic User Agent - Chrome on Windows 11
+		chromedp.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
+
+		// Realistic viewport dimensions - Full HD (most common desktop resolution)
+		chromedp.WindowSize(1920, 1080),
+
+		// Additional flags for more realistic behavior
+		chromedp.Flag("disable-blink-features", "AutomationControlled"),
+		chromedp.Flag("disable-dev-shm-usage", true),
+		chromedp.Flag("disable-extensions", false),   // Allow extensions for realism
+		chromedp.Flag("disable-plugins", false),      // Allow plugins for realism
+		chromedp.Flag("disable-images", false),       // Allow images for realistic behavior
+		chromedp.Flag("disable-javascript", false),   // Allow JS for realistic behavior
+		chromedp.Flag("disable-web-security", false), // Keep security enabled
+
+		// Hide automation indicators
+		chromedp.Flag("excludeSwitches", "enable-automation"),
+		chromedp.Flag("useAutomationExtension", false),
+		chromedp.Flag("disable-background-timer-throttling", true),
+		chromedp.Flag("disable-backgrounding-occluded-windows", true),
+		chromedp.Flag("disable-renderer-backgrounding", true),
+
+		// Language and locale settings
+		chromedp.Flag("lang", "en-US,en"),
+		chromedp.Flag("accept-lang", "en-US,en;q=0.9"),
+
+		// Timezone and location
+		chromedp.Flag("timezone", "America/New_York"),
+
+		// Memory and performance optimizations
+		chromedp.Flag("memory-pressure-off", true),
+		chromedp.Flag("max_old_space_size", "4096"),
+
+		// Additional realism flags
+		chromedp.Flag("enable-features", "NetworkService,NetworkServiceLogging"),
+		chromedp.Flag("force-color-profile", "srgb"),
+		chromedp.Flag("metrics-recording-only", true),
 	}
 
 	allocCtx, _ := chromedp.NewExecAllocator(ctx, opts...)
@@ -70,9 +107,16 @@ func (m *Manager) Start(ctx context.Context) error {
 	m.cancelCtx = cancelCtx
 	m.isActive = true
 
+	// Configure browser for realistic behavior
+	err := m.setupRealisticBrowserBehavior(m.ctx)
+	if err != nil {
+		m.Stop()
+		return fmt.Errorf("failed to configure browser: %w", err)
+	}
+
 	// Test browser startup
 	var title string
-	err := chromedp.Run(m.ctx, chromedp.Navigate("about:blank"), chromedp.Title(&title))
+	err = chromedp.Run(m.ctx, chromedp.Navigate("about:blank"), chromedp.Title(&title))
 	if err != nil {
 		m.Stop()
 		return fmt.Errorf("failed to start browser: %w", err)
@@ -123,6 +167,124 @@ func (m *Manager) EnsureActive(ctx context.Context) error {
 		return m.Start(ctx)
 	}
 	return nil
+}
+
+// setupRealisticBrowserBehavior configures the browser to appear more human-like
+func (m *Manager) setupRealisticBrowserBehavior(ctx context.Context) error {
+	// Hide automation indicators and set realistic properties
+	err := chromedp.Run(ctx,
+		// Remove webdriver property that can detect automation
+		chromedp.Evaluate(`
+			Object.defineProperty(navigator, 'webdriver', {
+				get: () => undefined,
+			});
+		`, nil),
+
+		// Set realistic screen properties
+		chromedp.Evaluate(`
+			Object.defineProperty(screen, 'availWidth', {
+				get: () => 1920,
+			});
+			Object.defineProperty(screen, 'availHeight', {
+				get: () => 1040,
+			});
+			Object.defineProperty(screen, 'width', {
+				get: () => 1920,
+			});
+			Object.defineProperty(screen, 'height', {
+				get: () => 1080,
+			});
+		`, nil),
+
+		// Set realistic language and platform properties
+		chromedp.Evaluate(`
+			Object.defineProperty(navigator, 'language', {
+				get: () => 'en-US',
+			});
+			Object.defineProperty(navigator, 'languages', {
+				get: () => ['en-US', 'en'],
+			});
+			Object.defineProperty(navigator, 'platform', {
+				get: () => 'Win32',
+			});
+		`, nil),
+
+		// Set realistic plugin and mime type arrays (empty but present)
+		chromedp.Evaluate(`
+			Object.defineProperty(navigator, 'plugins', {
+				get: () => [1, 2, 3, 4, 5],
+			});
+			Object.defineProperty(navigator, 'mimeTypes', {
+				get: () => [1, 2, 3, 4],
+			});
+		`, nil),
+
+		// Set realistic timezone
+		chromedp.Evaluate(`
+			try {
+				Intl.DateTimeFormat().resolvedOptions().timeZone = 'America/New_York';
+			} catch (e) {}
+		`, nil),
+
+		// Set realistic connection information
+		chromedp.Evaluate(`
+			Object.defineProperty(navigator, 'connection', {
+				get: () => ({
+					effectiveType: '4g',
+					rtt: 50,
+					downlink: 10,
+					onchange: null
+				}),
+			});
+		`, nil),
+
+		// Set realistic hardware concurrency
+		chromedp.Evaluate(`
+			Object.defineProperty(navigator, 'hardwareConcurrency', {
+				get: () => 8,
+			});
+		`, nil),
+
+		// Set realistic device memory
+		chromedp.Evaluate(`
+			Object.defineProperty(navigator, 'deviceMemory', {
+				get: () => 8,
+			});
+		`, nil),
+	)
+
+	return err
+}
+
+// SetRealisticHeaders sets realistic HTTP headers for browser requests
+func SetRealisticHeaders(ctx context.Context) chromedp.Action {
+	return chromedp.ActionFunc(func(ctx context.Context) error {
+		return chromedp.Run(ctx,
+			// Set realistic Accept headers
+			chromedp.Evaluate(`
+				// Override fetch to add realistic headers
+				const originalFetch = window.fetch;
+				window.fetch = function(...args) {
+					if (args.length > 1 && args[1] && args[1].headers) {
+						args[1].headers = {
+							...args[1].headers,
+							'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+							'Accept-Language': 'en-US,en;q=0.9',
+							'Accept-Encoding': 'gzip, deflate, br',
+							'Cache-Control': 'no-cache',
+							'Pragma': 'no-cache',
+							'Sec-Fetch-Dest': 'document',
+							'Sec-Fetch-Mode': 'navigate',
+							'Sec-Fetch-Site': 'none',
+							'Sec-Fetch-User': '?1',
+							'Upgrade-Insecure-Requests': '1'
+						};
+					}
+					return originalFetch.apply(this, args);
+				};
+			`, nil),
+		)
+	})
 }
 
 // SimplifyHTML removes unnecessary attributes and elements for LLM analysis

@@ -73,7 +73,7 @@ func (t ScreenshotTool) Description() string {
 
 ## Capture Modes
 - full_page=true: Captures the entire page including content below the fold
-- full_page=false: Captures only the visible viewport area
+- full_page=false: Captures only the visible viewport area (current browser window view)
 
 ## Format Options
 - PNG: Lossless format, larger file size, supports transparency
@@ -99,9 +99,9 @@ func (t ScreenshotTool) Description() string {
 
 ## Examples
 - Full page PNG: {"full_page": true, "format": "png"}
-- Viewport only: {"full_page": false}
-- JPEG format: {"format": "jpeg"}
-- Quick viewport screenshot: {}
+- Viewport only (visible area): {"full_page": false}
+- Viewport JPEG: {"full_page": false, "format": "jpeg"}
+- Quick viewport screenshot: {} (uses default: full_page=true)
 
 ## Important Notes
 - Full page screenshots may be very large for long pages
@@ -185,7 +185,8 @@ func (t ScreenshotTool) Execute(ctx context.Context, state tools.State, paramete
 	if input.FullPage {
 		screenshotAction = chromedp.FullScreenshot(&screenshotBytes, 90)
 	} else {
-		screenshotAction = chromedp.Screenshot(`body`, &screenshotBytes)
+		// Use viewport screenshot instead of element screenshot to avoid hanging
+		screenshotAction = chromedp.CaptureScreenshot(&screenshotBytes)
 	}
 
 	err = chromedp.Run(browserCtx, screenshotAction)
@@ -207,8 +208,9 @@ func (t ScreenshotTool) Execute(ctx context.Context, state tools.State, paramete
 		}
 	}
 
-	// Update dimensions for full page screenshots
+	// Update dimensions based on screenshot type
 	if input.FullPage {
+		// For full page screenshots, get the scroll dimensions
 		err = chromedp.Run(browserCtx,
 			chromedp.Evaluate(`document.documentElement.scrollWidth`, &width),
 			chromedp.Evaluate(`document.documentElement.scrollHeight`, &height),
@@ -216,6 +218,19 @@ func (t ScreenshotTool) Execute(ctx context.Context, state tools.State, paramete
 		if err != nil {
 			// Use fallback dimensions if we can't get scroll dimensions
 			width, height = 1920, 1080
+		}
+	} else {
+		// For viewport screenshots, use the window inner dimensions
+		if width == 0 || height == 0 {
+			// Fallback to viewport dimensions if not already set
+			err = chromedp.Run(browserCtx,
+				chromedp.Evaluate(`window.innerWidth`, &width),
+				chromedp.Evaluate(`window.innerHeight`, &height),
+			)
+			if err != nil {
+				// Use browser window size as final fallback
+				width, height = 1920, 1080
+			}
 		}
 	}
 
