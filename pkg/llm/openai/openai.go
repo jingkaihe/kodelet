@@ -345,9 +345,9 @@ func (t *OpenAIThread) SendMessage(
 	if len(t.messages) == 0 || t.messages[0].Role != openai.ChatMessageRoleSystem {
 		var systemPrompt string
 		if t.config.IsSubAgent {
-			systemPrompt = sysprompt.SubAgentPrompt(model)
+			systemPrompt = sysprompt.SubAgentPrompt(model, t.config)
 		} else {
-			systemPrompt = sysprompt.SystemPrompt(model)
+			systemPrompt = sysprompt.SystemPrompt(model, t.config)
 		}
 
 		systemMessage := openai.ChatCompletionMessage{

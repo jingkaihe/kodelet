@@ -4,10 +4,11 @@ import (
 	"context"
 
 	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/types/llm"
 )
 
 // SystemPrompt generates a system prompt for the given model
-func SystemPrompt(model string) string {
+func SystemPrompt(model string, llmConfig llm.Config) string {
 	// Create a new prompt context with default values
 	promptCtx := NewPromptContext()
 
@@ -19,6 +20,9 @@ func SystemPrompt(model string) string {
 
 	// Update the context with the configuration
 	updateContextWithConfig(promptCtx, config)
+
+	// Update the context with LLM configuration
+	promptCtx.BashAllowedCommands = llmConfig.AllowedCommands
 
 	// Render the system prompt
 	prompt, err := renderer.RenderSystemPrompt(promptCtx)

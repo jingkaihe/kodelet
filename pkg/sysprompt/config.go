@@ -1,9 +1,5 @@
 package sysprompt
 
-import (
-	"github.com/jingkaihe/kodelet/pkg/types/llm"
-)
-
 // PromptConfig defines configuration options for prompt generation
 type PromptConfig struct {
 	// Model identifies the LLM model being used
@@ -57,9 +53,3 @@ func updateContextWithConfig(ctx *PromptContext, config *PromptConfig) {
 	ctx.Features["batchToolEnabled"] = config.IsFeatureEnabled("batchTool")
 }
 
-// updateContextWithLLMConfig updates a PromptContext with LLM configuration settings
-func updateContextWithLLMConfig(ctx *PromptContext, llmConfig *llm.Config) {
-	if llmConfig != nil {
-		ctx.BashAllowedCommands = llmConfig.AllowedCommands
-	}
-}

@@ -11,7 +11,7 @@ import (
 // TestSystemPrompt verifies that key elements from templates appear in the generated system prompt
 func TestSystemPrompt(t *testing.T) {
 	// Generate a system prompt
-	prompt := SystemPrompt("claude-3-sonnet-20240229")
+	prompt := SystemPrompt("claude-3-sonnet-20240229", llm.Config{})
 
 	// Define expected fragments that should appear in the prompt
 	expectedFragments := []string{
@@ -51,7 +51,7 @@ func TestSystemPrompt(t *testing.T) {
 
 // TestSystemPromptBashBannedCommands verifies that banned commands appear in the default system prompt
 func TestSystemPromptBashBannedCommands(t *testing.T) {
-	prompt := SystemPrompt("claude-3-sonnet-20240229")
+	prompt := SystemPrompt("claude-3-sonnet-20240229", llm.Config{})
 
 	// Should contain bash command restrictions section
 	if !strings.Contains(prompt, "Bash Command Restrictions") {
@@ -87,7 +87,7 @@ func TestSystemPromptBashAllowedCommands(t *testing.T) {
 	}
 
 	updateContextWithConfig(promptCtx, config)
-	updateContextWithLLMConfig(promptCtx, llmConfig)
+	promptCtx.BashAllowedCommands = llmConfig.AllowedCommands
 
 	renderer := NewRenderer(TemplateFS)
 	prompt, err := renderer.RenderSystemPrompt(promptCtx)
@@ -133,7 +133,7 @@ func TestSystemPromptBashEmptyAllowedCommands(t *testing.T) {
 	}
 
 	updateContextWithConfig(promptCtx, config)
-	updateContextWithLLMConfig(promptCtx, llmConfig)
+	promptCtx.BashAllowedCommands = llmConfig.AllowedCommands
 
 	renderer := NewRenderer(TemplateFS)
 	prompt, err := renderer.RenderSystemPrompt(promptCtx)
@@ -151,3 +151,4 @@ func TestSystemPromptBashEmptyAllowedCommands(t *testing.T) {
 		t.Error("Did not expect system prompt to contain 'Allowed Commands' section when allowed commands is empty")
 	}
 }
+

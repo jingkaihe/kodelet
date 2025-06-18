@@ -11,7 +11,7 @@ import (
 // TestSubAgentPrompt verifies that key elements from templates appear in the generated subagent prompt
 func TestSubAgentPrompt(t *testing.T) {
 	// Generate a subagent prompt
-	prompt := SubAgentPrompt("claude-3-sonnet-20240229")
+	prompt := SubAgentPrompt("claude-3-sonnet-20240229", llm.Config{})
 
 	// Define expected fragments that should appear in the prompt
 	expectedFragments := []string{
@@ -48,7 +48,7 @@ func TestSubAgentPrompt(t *testing.T) {
 
 // TestSubAgentPromptBashBannedCommands verifies that banned commands appear in the default subagent prompt
 func TestSubAgentPromptBashBannedCommands(t *testing.T) {
-	prompt := SubAgentPrompt("claude-3-sonnet-20240229")
+	prompt := SubAgentPrompt("claude-3-sonnet-20240229", llm.Config{})
 
 	// Should contain bash command restrictions section
 	if !strings.Contains(prompt, "Bash Command Restrictions") {
@@ -84,7 +84,7 @@ func TestSubAgentPromptBashAllowedCommands(t *testing.T) {
 	}
 
 	updateContextWithConfig(promptCtx, config)
-	updateContextWithLLMConfig(promptCtx, llmConfig)
+	promptCtx.BashAllowedCommands = llmConfig.AllowedCommands
 
 	renderer := NewRenderer(TemplateFS)
 	prompt, err := renderer.RenderSubagentPrompt(promptCtx)
@@ -131,7 +131,7 @@ func TestSubAgentPromptContextConsistency(t *testing.T) {
 	}
 
 	updateContextWithConfig(promptCtx, config)
-	updateContextWithLLMConfig(promptCtx, llmConfig)
+	promptCtx.BashAllowedCommands = llmConfig.AllowedCommands
 
 	renderer := NewRenderer(TemplateFS)
 
@@ -170,3 +170,4 @@ func TestSubAgentPromptContextConsistency(t *testing.T) {
 		t.Error("Did not expect subagent prompt to contain 'Banned Commands' section when allowed commands are configured")
 	}
 }
+

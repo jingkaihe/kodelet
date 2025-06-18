@@ -160,9 +160,9 @@ func (t *AnthropicThread) SendMessage(
 	model, maxTokens := t.getModelAndTokens(opt)
 	var systemPrompt string
 	if t.config.IsSubAgent {
-		systemPrompt = sysprompt.SubAgentPrompt(string(model))
+		systemPrompt = sysprompt.SubAgentPrompt(string(model), t.config)
 	} else {
-		systemPrompt = sysprompt.SystemPrompt(string(model))
+		systemPrompt = sysprompt.SystemPrompt(string(model), t.config)
 	}
 
 	// Main interaction loop for handling tool calls
