@@ -16,9 +16,7 @@ import (
 type WaitForTool struct{}
 
 type WaitForInput struct {
-	Condition string `json:"condition" jsonschema:"required,enum=page_load,enum=element_visible,enum=element_hidden,description=Condition to wait for"`
-	Selector  string `json:"selector" jsonschema:"description=CSS selector (required for element conditions)"`
-	Timeout   int    `json:"timeout" jsonschema:"default=30000,description=Maximum time to wait"`
+	Timeout int `json:"timeout" jsonschema:"default=30000,description=Maximum time to wait in milliseconds"`
 }
 
 type WaitForResult struct {
@@ -71,82 +69,46 @@ func (t WaitForTool) Name() string {
 }
 
 func (t WaitForTool) Description() string {
-	return `Wait for specific conditions to be met on the web page before proceeding.
+	return `Wait for the web page to finish loading completely before proceeding.
 
 ## Parameters
-- condition: The condition type to wait for (required)
-- selector: CSS selector for element conditions (required for element_visible and element_hidden)
-- timeout: Maximum time to wait for condition in milliseconds (default: 30000)
-
-## Available Conditions
-- page_load: Wait for the page to finish loading completely
-- element_visible: Wait for an element to become visible on the page
-- element_hidden: Wait for an element to become hidden or removed
-
-## Condition Details
-- **page_load**: Waits for document ready state and all resources to load
-- **element_visible**: Element must be present in DOM and visible (not hidden)
-- **element_hidden**: Element either removed from DOM or hidden via CSS
+- timeout: Maximum time to wait for page load in milliseconds (default: 30000)
 
 ## Behavior
-- Returns immediately when the condition is met
-- Times out after the specified duration if condition is not met
+- Waits for document ready state and all resources to load
+- Returns immediately when the page is fully loaded
+- Times out after the specified duration if page load is not complete
 - Timeout is treated as a valid result, not an error
-- Useful for synchronizing with dynamic page content
+- Essential for ensuring page content is ready before screenshots or interactions
 
 ## Common Use Cases
-* Waiting for AJAX content to load after navigation
-* Synchronizing with single-page application state changes
-* Waiting for modals or popups to appear or disappear
-* Ensuring elements are ready before interaction
-* Handling slow-loading dynamic content
-
-## CSS Selector Guidelines
-- Use specific selectors to target the exact element you're waiting for
-- Consider using data attributes for more reliable targeting
-- Avoid overly complex selectors that might be slow to evaluate
+* Waiting for page content to load after navigation
+* Ensuring page is ready before taking screenshots
+* Synchronizing with slow-loading resources (images, scripts, stylesheets)
+* Handling pages with dynamic content that loads after initial render
+* Preparing for reliable browser automation actions
 
 ## Examples
-- Wait for page load: {"condition": "page_load"}
-- Wait for modal: {"condition": "element_visible", "selector": "#loading-modal"}
-- Wait for spinner to hide: {"condition": "element_hidden", "selector": ".loading-spinner"}
-- Custom timeout: {"condition": "element_visible", "selector": ".dynamic-content", "timeout": 60000}
+- Default timeout (30 seconds): {} or {"timeout": 30000}
+- Quick timeout (10 seconds): {"timeout": 10000}
+- Extended timeout (60 seconds): {"timeout": 60000}
 
 ## Timing Strategies
-- Use shorter timeouts (5-10 seconds) for expected fast operations
-- Use longer timeouts (30-60 seconds) for complex page loads or network operations
-- Consider the user experience - avoid unnecessarily long waits
+- Use shorter timeouts (10-15 seconds) for simple pages
+- Use longer timeouts (30-60 seconds) for complex pages with many resources
+- Consider network conditions when setting timeout values
 
 ## Important Notes
 - Timeout is not considered a failure - check the returned condition_met status
-- Use this tool before clicking or typing on dynamically loaded elements
-- element_visible requires the element to be both present and not hidden
-- page_load waits for all resources including images and scripts`
+- This tool waits for all resources including images, scripts, and stylesheets
+- Use this tool before browser_screenshot for best results
+- Essential for reliable browser automation workflows`
 }
 
 func (t WaitForTool) ValidateInput(state tools.State, parameters string) error {
 	var input WaitForInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
 		return fmt.Errorf("failed to parse input: %w", err)
-	}
-
-	if input.Condition == "" {
-		return fmt.Errorf("condition is required")
-	}
-
-	validConditions := map[string]bool{
-		"page_load":       true,
-		"element_visible": true,
-		"element_hidden":  true,
-	}
-
-	if !validConditions[input.Condition] {
-		return fmt.Errorf("invalid condition: %s. Valid conditions: page_load, element_visible, element_hidden", input.Condition)
-	}
-
-	// Selector is required for element conditions
-	if (input.Condition == "element_visible" || input.Condition == "element_hidden") && input.Selector == "" {
-		return fmt.Errorf("selector is required for condition: %s", input.Condition)
 	}
 
 	if input.Timeout < 0 {
@@ -192,37 +154,27 @@ func (t WaitForTool) Execute(ctx context.Context, state tools.State, parameters 
 	timeoutCtx, cancel := context.WithTimeout(browserCtx, timeout)
 	defer cancel()
 
-	// Wait for the specified condition
-	err := WaitForCondition(timeoutCtx, input.Condition, input.Selector, timeout)
+	// Wait for page load condition
+	err := WaitForCondition(timeoutCtx, timeout)
 
 	if err != nil {
 		// Check if it's a timeout error
 		if timeoutCtx.Err() == context.DeadlineExceeded {
-			logger.G(ctx).WithFields(map[string]interface{}{
-				"condition": input.Condition,
-				"selector":  input.Selector,
-				"timeout":   input.Timeout,
-			}).Info("Wait condition timeout")
+			logger.G(ctx).WithField("timeout", input.Timeout).Info("Page load timeout")
 			return WaitForResult{
 				Success:      true,
 				ConditionMet: false,
 			}
 		}
 
-		logger.G(ctx).WithFields(map[string]interface{}{
-			"condition": input.Condition,
-			"selector":  input.Selector,
-		}).WithError(err).Info("Wait condition failed")
+		logger.G(ctx).WithError(err).Info("Page load wait failed")
 		return WaitForResult{
 			Success: false,
-			Error:   fmt.Sprintf("wait failed: %v", err),
+			Error:   fmt.Sprintf("page load wait failed: %v", err),
 		}
 	}
 
-	logger.G(ctx).WithFields(map[string]interface{}{
-		"condition": input.Condition,
-		"selector":  input.Selector,
-	}).Info("Wait condition met")
+	logger.G(ctx).Info("Page load complete")
 
 	return WaitForResult{
 		Success:      true,
@@ -236,14 +188,8 @@ func (t WaitForTool) TracingKVs(parameters string) ([]attribute.KeyValue, error)
 		return nil, err
 	}
 
-	kvs := []attribute.KeyValue{
-		attribute.String("browser.wait_for.condition", input.Condition),
+	return []attribute.KeyValue{
+		attribute.String("browser.wait_for.condition", "page_load"),
 		attribute.Int("browser.wait_for.timeout", input.Timeout),
-	}
-
-	if input.Selector != "" {
-		kvs = append(kvs, attribute.String("browser.wait_for.selector", input.Selector))
-	}
-
-	return kvs, nil
+	}, nil
 }

@@ -589,25 +589,10 @@ func GenerateScreenshotPath(format string) (string, error) {
 	return filepath.Join(screenshotDir, filename), nil
 }
 
-// WaitForCondition waits for various page conditions
-func WaitForCondition(ctx context.Context, condition string, selector string, timeout time.Duration) error {
+// WaitForCondition waits for page load condition
+func WaitForCondition(ctx context.Context, timeout time.Duration) error {
 	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	switch condition {
-	case "page_load":
-		return chromedp.Run(timeoutCtx, chromedp.WaitReady("body"))
-	case "element_visible":
-		if selector == "" {
-			return fmt.Errorf("selector required for element_visible condition")
-		}
-		return chromedp.Run(timeoutCtx, chromedp.WaitVisible(selector))
-	case "element_hidden":
-		if selector == "" {
-			return fmt.Errorf("selector required for element_hidden condition")
-		}
-		return chromedp.Run(timeoutCtx, chromedp.WaitNotPresent(selector))
-	default:
-		return fmt.Errorf("unknown condition: %s", condition)
-	}
+	return chromedp.Run(timeoutCtx, chromedp.WaitReady("body"))
 }

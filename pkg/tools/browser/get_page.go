@@ -15,9 +15,7 @@ import (
 
 type GetPageTool struct{}
 
-type GetPageInput struct {
-	MaxLength int `json:"max_length" jsonschema:"default=100000,description=Maximum content length to return"`
-}
+type GetPageInput struct {}
 
 type GetPageResult struct {
 	Success   bool   `json:"success"`
@@ -42,7 +40,6 @@ func (r GetPageResult) UserFacing() string {
 	}
 
 	status := "✅ Page content retrieved"
-	status += r.HTML + "\n\n"
 	if r.Truncated {
 		status += " (truncated)"
 	}
@@ -73,9 +70,6 @@ func (t GetPageTool) Name() string {
 
 func (t GetPageTool) Description() string {
 	return `Extract and return the simplified content of the current web page optimized for LLM analysis.
-
-## Parameters
-- max_length: Maximum content length to return in characters (default: 100000)
 
 ## Content Processing
 This tool automatically:
@@ -115,12 +109,9 @@ Elements are formatted as: [index] <type> content
 
 ## Examples
 - Default usage: {}
-- Extended content: {"max_length": 100000}
-- Compact output: {"max_length": 10000}
 
 ## Best Practices
 - The numbered elements make it easy to reference specific items in other browser tools
-- Adjust max_length based on your needs - smaller for quick overview, larger for complete content
 - Use in combination with browser_click, browser_type, etc. for automation`
 }
 
@@ -128,10 +119,6 @@ func (t GetPageTool) ValidateInput(state tools.State, parameters string) error {
 	var input GetPageInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
 		return fmt.Errorf("failed to parse input: %w", err)
-	}
-
-	if input.MaxLength < 0 {
-		return fmt.Errorf("max_length must be non-negative")
 	}
 
 	return nil
@@ -144,11 +131,6 @@ func (t GetPageTool) Execute(ctx context.Context, state tools.State, parameters 
 			Success: false,
 			Error:   fmt.Sprintf("failed to parse input: %v", err),
 		}
-	}
-
-	// Set defaults
-	if input.MaxLength == 0 {
-		input.MaxLength = 100000
 	}
 
 	// Get browser manager and ensure it's active
@@ -183,9 +165,7 @@ func (t GetPageTool) Execute(ctx context.Context, state tools.State, parameters 
 		}
 	}
 
-	input.MaxLength = 500000
-
-	html, truncated, err := manager.(*Manager).Crawl(ctx, input.MaxLength)
+	html, truncated, err := manager.(*Manager).Crawl(ctx, 500000)
 	if err != nil {
 		logger.G(ctx).WithError(err).Info("Failed to crawl page content")
 		return GetPageResult{
@@ -197,6 +177,7 @@ func (t GetPageTool) Execute(ctx context.Context, state tools.State, parameters 
 	logger.G(ctx).WithFields(map[string]interface{}{
 		"url":         currentURL,
 		"title":       title,
+		"html":        html,
 		"html_length": len(html),
 		"truncated":   truncated,
 	}).Info("Page content retrieved")
@@ -211,12 +192,5 @@ func (t GetPageTool) Execute(ctx context.Context, state tools.State, parameters 
 }
 
 func (t GetPageTool) TracingKVs(parameters string) ([]attribute.KeyValue, error) {
-	var input GetPageInput
-	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
-		return nil, err
-	}
-
-	return []attribute.KeyValue{
-		attribute.Int("browser.get_page.max_length", input.MaxLength),
-	}, nil
+	return []attribute.KeyValue{}, nil
 }

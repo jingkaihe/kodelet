@@ -17,7 +17,7 @@ import (
 type ScreenshotTool struct{}
 
 type ScreenshotInput struct {
-	FullPage bool   `json:"full_page" jsonschema:"default=true,description=Capture full page or just viewport"`
+	FullPage bool   `json:"full_page" jsonschema:"default=false,description=Capture full page or just viewport"`
 	Format   string `json:"format" jsonschema:"default=png,enum=png,enum=jpeg"`
 }
 
@@ -65,25 +65,31 @@ func (t ScreenshotTool) Name() string {
 }
 
 func (t ScreenshotTool) Description() string {
-	return `Capture a screenshot of the current web page with flexible formatting and sizing options.
+	return `Capture a screenshot of the current web page with flexible formatting and sizing options. For best results, use browser_wait_for tool with "page_load" condition before taking screenshots to ensure the page is fully loaded.
 
 ## Parameters
-- full_page: Whether to capture the entire page or just the viewport (default: true)
+- full_page: Whether to capture the entire page or just the viewport (default: false)
 - format: Image format for the screenshot - "png" or "jpeg" (default: "png")
 
 ## Capture Modes
-- full_page=true: Captures the entire page including content below the fold
 - full_page=false: Captures only the visible viewport area (current browser window view)
+- full_page=true: Captures the entire page including content below the fold
 
 ## Format Options
 - PNG: Lossless format, larger file size, supports transparency
 - JPEG: Lossy format, smaller file size, no transparency support
 
 ## Behavior
+- Captures screenshot of current page state immediately
 - Automatically generates a unique filename with timestamp
 - Saves screenshot to a temporary directory
 - Returns the file path, dimensions, and success status
 - Works with the current page loaded in the browser
+
+## Recommended Workflow
+1. Navigate to page using browser_navigate
+2. Wait for page load using browser_wait_for with "page_load" condition
+3. Take screenshot using this tool
 
 ## Common Use Cases
 * Documenting page states for testing or debugging
@@ -98,17 +104,17 @@ func (t ScreenshotTool) Description() string {
 - File paths are returned for further processing or reference
 
 ## Examples
-- Full page PNG: {"full_page": true, "format": "png"}
-- Viewport only (visible area): {"full_page": false}
+- Viewport only (visible area): {"full_page": false} or just {}
 - Viewport JPEG: {"full_page": false, "format": "jpeg"}
-- Quick viewport screenshot: {} (uses default: full_page=true)
+- Full page PNG: {"full_page": true, "format": "png"}
+- Quick viewport screenshot: {} (uses default: full_page=false)
 
 ## Important Notes
 - Full page screenshots may be very large for long pages
 - JPEG format is recommended for large screenshots to reduce file size
 - The tool requires an active browser session with a loaded page
 - Screenshot quality is affected by the browser's zoom level and display settings
-- Ensure the page is fully loaded before taking screenshots for best results`
+- Always use browser_wait_for tool before screenshots to ensure page content is fully loaded`
 }
 
 func (t ScreenshotTool) ValidateInput(state tools.State, parameters string) error {
