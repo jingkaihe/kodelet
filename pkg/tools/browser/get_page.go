@@ -15,7 +15,7 @@ import (
 
 type GetPageTool struct{}
 
-type GetPageInput struct {}
+type GetPageInput struct{}
 
 type GetPageResult struct {
 	Success   bool   `json:"success"`

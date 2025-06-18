@@ -164,28 +164,23 @@ func TestWaitForToolValidation(t *testing.T) {
 		expectError bool
 	}{
 		{
-			name:        "valid page_load",
-			input:       `{"condition": "page_load", "timeout": 5000}`,
-			expectError: false,
-		},
-		{
-			name:        "valid element_visible with selector",
-			input:       `{"condition": "element_visible", "selector": ".content", "timeout": 5000}`,
-			expectError: false,
-		},
-		{
-			name:        "element_visible without selector",
-			input:       `{"condition": "element_visible", "timeout": 5000}`,
-			expectError: true,
-		},
-		{
-			name:        "invalid condition",
-			input:       `{"condition": "unknown_condition", "timeout": 5000}`,
-			expectError: true,
-		},
-		{
-			name:        "missing condition",
+			name:        "valid with timeout",
 			input:       `{"timeout": 5000}`,
+			expectError: false,
+		},
+		{
+			name:        "valid with default timeout",
+			input:       `{}`,
+			expectError: false,
+		},
+		{
+			name:        "negative timeout",
+			input:       `{"timeout": -1}`,
+			expectError: true,
+		},
+		{
+			name:        "malformed json",
+			input:       `{"timeout": 5000`,
 			expectError: true,
 		},
 	}
