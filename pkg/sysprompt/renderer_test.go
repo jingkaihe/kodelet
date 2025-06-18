@@ -40,7 +40,7 @@ func TestConditionalRendering(t *testing.T) {
 
 		// Generate prompt with modified features
 		config := NewDefaultConfig()
-		UpdateContextWithConfig(ctx, config)
+		updateContextWithConfig(ctx, config)
 
 		prompt, err := renderer.RenderSystemPrompt(ctx)
 		if err != nil {

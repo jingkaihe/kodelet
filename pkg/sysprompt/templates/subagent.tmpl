@@ -16,11 +16,7 @@ Here are some examples that demonstrate the tone and style you should follow:
 
 {{include "templates/components/conventions.tmpl" .}}
 
-# !!!VERY IMPORTANT!!! Tool Usage
-{{if .Features.batchToolEnabled}}
-- You MUST use `{{.ToolNames.batch}}` tool to invoke multiple INDEPENDENT tools AS MUCH AS POSSIBLE to reduce the latency and context usage.
-- You can also use `{{.ToolNames.batch}}` to parallelise `{{.ToolNames.bash}}` to conduct multiple independent analysis.
-{{end}}
+{{include "templates/components/tools.tmpl" .}}
 
 {{include "templates/components/task_management.tmpl" .}}
 

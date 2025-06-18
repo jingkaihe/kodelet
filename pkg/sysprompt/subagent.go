@@ -18,7 +18,7 @@ func SubAgentPrompt(model string) string {
 	config := NewDefaultConfig().WithModel(model)
 
 	// Update the context with the configuration
-	UpdateContextWithConfig(promptCtx, config)
+	updateContextWithConfig(promptCtx, config)
 
 	// Render the subagent prompt
 	prompt, err := renderer.RenderSubagentPrompt(promptCtx)
