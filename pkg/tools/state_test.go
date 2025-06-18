@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestBasicState(t *testing.T) {
@@ -127,16 +127,16 @@ func TestBasicState_LLMConfig(t *testing.T) {
 	// Test setting and getting LLM config
 	config := llmtypes.Config{
 		Provider:        "anthropic",
-		Model:          "claude-3-5-sonnet",
+		Model:           "claude-3-5-sonnet",
 		AllowedCommands: []string{"ls *", "pwd", "echo *"},
 	}
-	
+
 	s := NewBasicState(context.TODO(), WithLLMConfig(config))
-	
+
 	// Test that config is stored correctly
 	retrievedConfig := s.GetLLMConfig()
 	assert.NotNil(t, retrievedConfig)
-	
+
 	// Cast back to the expected type
 	llmConfig, ok := retrievedConfig.(llmtypes.Config)
 	assert.True(t, ok, "Config should be of type llmtypes.Config")
@@ -151,9 +151,9 @@ func TestBasicState_ConfigureBashTool(t *testing.T) {
 	config := llmtypes.Config{
 		AllowedCommands: allowedCommands,
 	}
-	
+
 	s := NewBasicState(context.TODO(), WithLLMConfig(config))
-	
+
 	// Find the bash tool in the tools list
 	tools := s.BasicTools()
 	var bashTool *BashTool
@@ -165,7 +165,7 @@ func TestBasicState_ConfigureBashTool(t *testing.T) {
 			}
 		}
 	}
-	
+
 	assert.NotNil(t, bashTool, "BashTool should be found in tools list")
 	assert.Equal(t, allowedCommands, bashTool.allowedCommands, "BashTool should have correct allowed commands")
 }
@@ -176,9 +176,9 @@ func TestBasicState_ConfigureBashTool_WithSubAgentTools(t *testing.T) {
 	config := llmtypes.Config{
 		AllowedCommands: allowedCommands,
 	}
-	
+
 	s := NewBasicState(context.TODO(), WithLLMConfig(config), WithSubAgentTools())
-	
+
 	// Find the bash tool in the tools list
 	tools := s.BasicTools()
 	var bashTool *BashTool
@@ -190,7 +190,7 @@ func TestBasicState_ConfigureBashTool_WithSubAgentTools(t *testing.T) {
 			}
 		}
 	}
-	
+
 	assert.NotNil(t, bashTool, "BashTool should be found in sub-agent tools list")
 	assert.Equal(t, allowedCommands, bashTool.allowedCommands, "BashTool should have correct allowed commands")
 }
@@ -200,9 +200,9 @@ func TestBasicState_ConfigureBashTool_EmptyAllowedCommands(t *testing.T) {
 	config := llmtypes.Config{
 		AllowedCommands: []string{}, // Empty list
 	}
-	
+
 	s := NewBasicState(context.TODO(), WithLLMConfig(config))
-	
+
 	// Find the bash tool in the tools list
 	tools := s.BasicTools()
 	var bashTool *BashTool
@@ -214,7 +214,7 @@ func TestBasicState_ConfigureBashTool_EmptyAllowedCommands(t *testing.T) {
 			}
 		}
 	}
-	
+
 	assert.NotNil(t, bashTool, "BashTool should be found in tools list")
 	assert.Equal(t, []string{}, bashTool.allowedCommands, "BashTool should have empty allowed commands")
 }

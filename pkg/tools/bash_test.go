@@ -31,6 +31,96 @@ func TestBashTool_Description(t *testing.T) {
 	assert.Contains(t, desc, "Important")
 }
 
+func TestBashTool_Description_BannedCommands(t *testing.T) {
+	// Test with no allowed commands configured (uses banned commands)
+	tool := NewBashTool([]string{})
+	desc := tool.Description()
+
+	// Should contain banned commands section
+	assert.Contains(t, desc, "## Banned Commands")
+	assert.Contains(t, desc, "The following commands are banned and cannot be used:")
+	assert.Contains(t, desc, "* vim")
+	assert.Contains(t, desc, "* view")
+	assert.Contains(t, desc, "* less")
+	assert.Contains(t, desc, "* more")
+	assert.Contains(t, desc, "* cd")
+
+	// Should NOT contain allowed commands section
+	assert.NotContains(t, desc, "## Allowed Commands")
+	assert.NotContains(t, desc, "Only the following commands/patterns are allowed:")
+}
+
+func TestBashTool_Description_AllowedCommands(t *testing.T) {
+	// Test with allowed commands configured
+	allowedCommands := []string{"ls *", "pwd", "echo *", "git status"}
+	tool := NewBashTool(allowedCommands)
+	desc := tool.Description()
+
+	// Should contain allowed commands section
+	assert.Contains(t, desc, "## Allowed Commands")
+	assert.Contains(t, desc, "Only the following commands/patterns are allowed:")
+	assert.Contains(t, desc, "* ls *")
+	assert.Contains(t, desc, "* pwd")
+	assert.Contains(t, desc, "* echo *")
+	assert.Contains(t, desc, "* git status")
+	assert.Contains(t, desc, "Commands not matching these patterns will be rejected.")
+
+	// Should NOT contain banned commands section
+	assert.NotContains(t, desc, "## Banned Commands")
+	assert.NotContains(t, desc, "The following commands are banned and cannot be used:")
+}
+
+func TestBashTool_Description_EmptyAllowedCommands(t *testing.T) {
+	// Test with empty allowed commands (should fall back to banned commands)
+	tool := NewBashTool(nil)
+	desc := tool.Description()
+
+	// Should contain banned commands section since no allowed commands configured
+	assert.Contains(t, desc, "## Banned Commands")
+	assert.Contains(t, desc, "* vim")
+	assert.NotContains(t, desc, "## Allowed Commands")
+}
+
+func TestBashTool_Description_ConsistentOutput(t *testing.T) {
+	// Test that the description is consistent and contains all expected sections
+	tool := NewBashTool([]string{"test *", "example"})
+	desc := tool.Description()
+
+	// Basic structure should always be present
+	assert.Contains(t, desc, "Executes a given bash command in a persistent shell session with timeout.")
+	assert.Contains(t, desc, "# Command Restrictions")
+	assert.Contains(t, desc, "# Important")
+	assert.Contains(t, desc, "# Background Parameter")
+	assert.Contains(t, desc, "# Examples")
+
+	// Should be well-formed
+	assert.NotEmpty(t, desc)
+	assert.Greater(t, len(desc), 1000) // Should be a substantial description
+
+	// Test that multiple calls return the same result
+	desc2 := tool.Description()
+	assert.Equal(t, desc, desc2)
+}
+
+func TestBashTool_Description_SpecialCharacters(t *testing.T) {
+	// Test with allowed commands that contain special characters
+	allowedCommands := []string{
+		"find . -name '*.go'",
+		"grep -r \"pattern\" .",
+		"awk '{print $1}'",
+		"sed 's/old/new/g'",
+	}
+	tool := NewBashTool(allowedCommands)
+	desc := tool.Description()
+
+	// Should handle special characters in command patterns
+	assert.Contains(t, desc, "## Allowed Commands")
+	assert.Contains(t, desc, "* find . -name '*.go'")
+	assert.Contains(t, desc, "* grep -r \"pattern\" .")
+	assert.Contains(t, desc, "* awk '{print $1}'")
+	assert.Contains(t, desc, "* sed 's/old/new/g'")
+}
+
 func TestBashTool_Execute_Success(t *testing.T) {
 	tool := &BashTool{}
 	input := BashInput{
@@ -309,37 +399,37 @@ func TestBashTool_GlobPatternMatching(t *testing.T) {
 		{"exact match", "ls", "ls", true},
 		{"exact match with args", "git status", "git status", true},
 		{"no match exact", "ls", "cat", false},
-		
+
 		// Realistic wildcard patterns
 		{"wildcard with args", "ls -la", "ls *", true},
 		{"wildcard with multiple args", "ls -la /home", "ls *", true},
 		{"wildcard no match", "cat file.txt", "ls *", false},
-		
+
 		// Multiple wildcards
 		{"multiple wildcards", "git log --oneline", "git * --oneline", true},
 		{"multiple wildcards no match", "git status", "git * --oneline", false},
-		
+
 		// Wildcard at start
 		{"wildcard at start", "npm start", "* start", true},
 		{"wildcard at start no match", "npm build", "* start", false},
-		
+
 		// Wildcard at end
 		{"wildcard at end", "npm start", "npm *", true},
 		{"wildcard at end no match", "yarn start", "npm *", false},
-		
+
 		// Full wildcard
 		{"full wildcard", "any command here", "*", true},
 		{"full wildcard empty", "", "*", true},
-		
+
 		// Edge cases
 		{"empty command exact", "", "", true},
 		{"empty command pattern", "", "ls", false},
 		{"command with pattern empty", "ls", "", false},
-		
+
 		// Complex patterns
 		{"complex pattern match", "docker run -it ubuntu bash", "docker * ubuntu *", true},
 		{"complex pattern no match", "docker run -it alpine bash", "docker * ubuntu *", false},
-		
+
 		// Real world examples
 		{"npm commands", "npm install", "npm *", true},
 		{"yarn commands", "yarn build", "yarn *", true},
@@ -349,14 +439,17 @@ func TestBashTool_GlobPatternMatching(t *testing.T) {
 		{"ls variations", "ls -la", "ls *", true},
 		{"pwd exact", "pwd", "pwd", true},
 		{"find commands", "find . -name '*.go'", "find *", true},
+
+		// Prefix matches
+		{"prefix match", "git status", "git", true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tool := NewBashTool([]string{tt.pattern})
 			result := tool.MatchesCommand(tt.command)
-			assert.Equal(t, tt.expected, result, 
-				"BashTool.MatchesCommand(%q) with pattern %q = %v, want %v", 
+			assert.Equal(t, tt.expected, result,
+				"BashTool.MatchesCommand(%q) with pattern %q = %v, want %v",
 				tt.command, tt.pattern, result, tt.expected)
 		})
 	}
@@ -413,7 +506,7 @@ func TestBashTool_ValidateInput_AllowedCommands(t *testing.T) {
 			expectError: true,
 			errorMsg:    "command is banned: vim",
 		},
-		
+
 		// Single exact command allowed
 		{
 			name:            "exact command allowed",
@@ -436,7 +529,7 @@ func TestBashTool_ValidateInput_AllowedCommands(t *testing.T) {
 			expectError: true,
 			errorMsg:    "command not in allowed list: ls",
 		},
-		
+
 		// Wildcard patterns
 		{
 			name:            "wildcard pattern allows command",
@@ -469,7 +562,7 @@ func TestBashTool_ValidateInput_AllowedCommands(t *testing.T) {
 			expectError: true,
 			errorMsg:    "command not in allowed list: cat file.txt",
 		},
-		
+
 		// Multiple allowed commands
 		{
 			name:            "multiple commands - first matches",
@@ -512,7 +605,7 @@ func TestBashTool_ValidateInput_AllowedCommands(t *testing.T) {
 			expectError: true,
 			errorMsg:    "command not in allowed list: cat file.txt",
 		},
-		
+
 		// Complex commands with operators
 		{
 			name:            "compound command - both parts allowed",
@@ -566,7 +659,7 @@ func TestBashTool_ValidateInput_AllowedCommands(t *testing.T) {
 			},
 			expectError: false,
 		},
-		
+
 		// Real world scenarios
 		{
 			name:            "npm commands",
@@ -616,7 +709,7 @@ func TestBashTool_ValidateInput_AllowedCommands(t *testing.T) {
 			tool := NewBashTool(tt.allowedCommands)
 			input, _ := json.Marshal(tt.input)
 			err := tool.ValidateInput(NewBasicState(context.TODO()), string(input))
-			
+
 			if tt.expectError {
 				assert.Error(t, err)
 				if tt.errorMsg != "" {
