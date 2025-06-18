@@ -6,25 +6,22 @@ Kodelet is a lightweight CLI tool that helps with software engineering tasks. It
 ## Project Structure
 ```
 ├── .github/             # GitHub configuration
-├── .dockerignore        # Docker ignore file
-├── .gitignore           # Git ignore file
-├── adrs/                # Architecture Decision Records
+│   └── workflows/       # GitHub Actions workflows (4 workflow files)
+├── adrs/                # Architecture Decision Records (13 ADRs)
 ├── bin/                 # Compiled binaries
 ├── cmd/                 # Application entry point
-│   └── kodelet/         # Main application command
+│   └── kodelet/         # Main application command (15+ command files)
 ├── config.sample.yaml   # Sample configuration file
-├── Dockerfile           # Docker configuration
 ├── docs/                # Documentation files
-├── go.mod               # Go module file
-├── go.sum               # Go dependencies checksum
+├── Dockerfile           # Docker configuration
 ├── install.sh           # Installation script
-├── KODELET.md           # Project documentation
+├── KODELET.md           # Project documentation (this file)
+├── kodelet-config.yaml  # Repository-specific configuration
 ├── LICENSE              # License file
 ├── Makefile             # Build automation
 ├── pkg/                 # Core packages
 │   ├── conversations/   # Conversation storage and management
 │   ├── github/          # GitHub Actions templates and utilities
-│   │   └── templates/   # Embedded GitHub Actions workflow templates
 │   ├── llm/             # LLM client for AI interactions
 │   │   ├── anthropic/   # Anthropic Claude API client
 │   │   └── openai/      # OpenAI API client
@@ -32,9 +29,9 @@ Kodelet is a lightweight CLI tool that helps with software engineering tasks. It
 │   ├── sysprompt/       # System prompt configuration
 │   │   └── templates/   # Prompt templates
 │   │       └── components/ # Template components
-│   │           └── examples/ # Template for the prompt examples
-│   ├── telemetry/       # Telemetry components
-│   ├── tools/           # Tool implementations
+│   ├── telemetry/       # Telemetry and tracing components
+│   ├── tools/           # Tool implementations (20+ tools)
+│   │   └── browser/     # Browser automation tools package
 │   ├── tui/             # Terminal UI components
 │   ├── types/           # Common types
 │   │   ├── llm/         # LLM related types
@@ -140,30 +137,24 @@ Kodelet uses a `Thread` abstraction for all interactions with LLM providers (Ant
 
 The architecture provides a unified approach for both interactive and one-shot uses with token usage tracking for all API calls across different providers.
 
-## Logger Package
-
-Context-aware structured logging using [logrus](https://github.com/sirupsen/logrus) with automatic context propagation.
-
-### Key APIs
-- **`logger.G(ctx)`**: Get logger from context (ALWAYS use this)
-- **`logger.WithLogger(ctx, logger)`**: Store logger in context
-- **`log.WithField(key, value)`**: Add contextual field to logger
-
-### Usage
+## Logging
+Always use the logger package with context:
 ```go
-// Basic usage
-log := logger.G(ctx)
-log.Info("Processing request")
+import "github.com/jingkaihe/kodelet/pkg/logger"
 
-// Add context fields
-log = log.WithField("request_id", id)
-ctx = logger.WithLogger(ctx, log)
+// Good
+logger.G(ctx).WithField("user_id", userID).Info("Processing request")
 
-// always use structured logging
-// GOOD:
-log.WithField("request_id", id).Info("Processing request")
-// BAD
-log.Info("Processing request %s", id)
+// Bad - never use fmt.Printf or log.Printf
+fmt.Printf("Processing request for %s", userID)
+```
+
+### Error Handling
+```go
+// Return errors with context
+if err != nil {
+    return fmt.Errorf("failed to process: %w", err)
+}
 ```
 
 ## Code Intelligence & MCP Language Server Tools
