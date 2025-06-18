@@ -77,7 +77,6 @@ var browserTools = []tooltypes.Tool{
 	&browser.TypeTool{},
 	&browser.WaitForTool{},
 	&browser.ScreenshotTool{},
-	&browser.GoBackTool{},
 }
 
 var baseSubAgentTools = []tooltypes.Tool{

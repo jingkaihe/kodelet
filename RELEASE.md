@@ -4,7 +4,7 @@
 
 ### Browser Automation Tools
 
-- **New Browser Tools**: Added `navigate`, `go_back`, `get_page`, `click`, `type`, `screenshot`, and `wait_for` tools
+- **New Browser Tools**: Added `navigate`, `get_page`, `click`, `type`, `screenshot`, and `wait_for` tools
 
 ### Chat Experience
 

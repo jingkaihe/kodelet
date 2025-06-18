@@ -252,7 +252,6 @@ func TestToolMetadata(t *testing.T) {
 		{"type tool", &TypeTool{}, "browser_type"},
 		{"wait_for tool", &WaitForTool{}, "browser_wait_for"},
 		{"screenshot tool", &ScreenshotTool{}, "browser_screenshot"},
-		{"go_back tool", &GoBackTool{}, "browser_go_back"},
 	}
 
 	for _, tt := range tests {
@@ -273,7 +272,6 @@ func TestToolSchemaGeneration(t *testing.T) {
 		{"browser_type", &TypeTool{}},
 		{"browser_wait_for", &WaitForTool{}},
 		{"browser_screenshot", &ScreenshotTool{}},
-		{"browser_go_back", &GoBackTool{}},
 	}
 
 	for _, tt := range tests {
@@ -301,7 +299,6 @@ func TestToolResultInterfaces(t *testing.T) {
 		{"type result", TypeResult{Success: true, ElementFound: true}},
 		{"wait_for result", WaitForResult{Success: true, ConditionMet: true}},
 		{"screenshot result", ScreenshotResult{Success: true, OutputPath: "/path/to/screenshot.png"}},
-		{"go_back result", GoBackResult{Success: true, URL: "https://example.com"}},
 	}
 
 	for _, tt := range tests {
