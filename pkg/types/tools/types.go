@@ -90,6 +90,14 @@ type BackgroundProcess struct {
 	Process   *os.Process `json:"-"` // Not serialized
 }
 
+type BrowserManager interface {
+	Start(ctx context.Context) error
+	Stop()
+	GetContext() context.Context
+	IsActive() bool
+	EnsureActive(ctx context.Context) error
+}
+
 type State interface {
 	SetFileLastAccessed(path string, lastAccessed time.Time) error
 	GetFileLastAccessed(path string) (time.Time, error)
@@ -105,4 +113,7 @@ type State interface {
 	AddBackgroundProcess(process BackgroundProcess) error
 	GetBackgroundProcesses() []BackgroundProcess
 	RemoveBackgroundProcess(pid int) error
+	// Browser management
+	GetBrowserManager() BrowserManager
+	SetBrowserManager(manager BrowserManager)
 }

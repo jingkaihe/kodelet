@@ -27,7 +27,13 @@ func plainChatUI(ctx context.Context, options *ChatOptions) {
 		return
 	}
 
-	thread.SetState(tools.NewBasicState(ctx, tools.WithMCPTools(mcpManager)))
+	// Create state with appropriate tools based on browser support
+	var stateOpts []tools.BasicStateOption
+	stateOpts = append(stateOpts, tools.WithMCPTools(mcpManager))
+	if options.enableBrowserTools {
+		stateOpts = append(stateOpts, tools.WithMainToolsAndBrowser())
+	}
+	thread.SetState(tools.NewBasicState(ctx, stateOpts...))
 
 	// Configure conversation persistence
 	if options.resumeConvID != "" {
