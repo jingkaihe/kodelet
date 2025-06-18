@@ -1,5 +1,15 @@
 # Kodelet
 
+## 0.0.43.alpha (2025-06-18)
+
+### Browser Automation Tools
+
+- **New Browser Tools**: Added `navigate`, `go_back`, `get_page`, `click`, `type`, `screenshot`, and `wait_for` tools
+
+### Chat Experience
+
+- **TUI Log Redirection**: Chat logs redirected to separate files for cleaner TUI interface
+
 ## 0.0.42.alpha (2025-06-15)
 
 ### Background Process Management
