@@ -41,7 +41,8 @@ You must stage your changes (using 'git add') before running this command.`,
 		// Create a new state for the commit operation
 		ctx := cmd.Context()
 
-		s := tools.NewBasicState(ctx)
+		llmConfig := llm.GetConfigFromViper()
+		s := tools.NewBasicState(ctx, tools.WithLLMConfig(llmConfig))
 
 		// Get commit config from flags
 		config := getCommitConfigFromFlags(cmd)
@@ -95,7 +96,7 @@ IMPORTANT: The output of the commit message should not be wrapped with any markd
 		fmt.Println("-----------------------------------------------------------")
 
 		// Get the commit message using the Thread abstraction with usage stats
-		commitMsg, usage := llm.SendMessageAndGetTextWithUsage(ctx, s, prompt, llm.GetConfigFromViper(), true, llmtypes.MessageOpt{
+		commitMsg, usage := llm.SendMessageAndGetTextWithUsage(ctx, s, prompt, llmConfig, true, llmtypes.MessageOpt{
 			UseWeakModel: true,
 			PromptCache:  false,
 			NoToolUse:    true,

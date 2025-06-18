@@ -95,7 +95,8 @@ ignoring common directories like .git and node_modules.`,
 			return
 		}
 
-		s := tools.NewBasicState(ctx, tools.WithMCPTools(mcpManager))
+		llmConfig := llm.GetConfigFromViper()
+		s := tools.NewBasicState(ctx, tools.WithLLMConfig(llmConfig), tools.WithMCPTools(mcpManager))
 
 		// Get watch config from flags
 		config := getWatchConfigFromFlags(cmd)

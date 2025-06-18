@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gobwas/glob"
 	"github.com/invopop/jsonschema"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"go.opentelemetry.io/otel/attribute"
@@ -32,7 +33,32 @@ var (
 	}
 )
 
-type BashTool struct{}
+type BashTool struct {
+	allowedCommands []string
+	compiledGlobs   []glob.Glob
+}
+
+func NewBashTool(allowedCommands []string) *BashTool {
+	globs := make([]glob.Glob, len(allowedCommands))
+	for i, pattern := range allowedCommands {
+		// Compile glob patterns without custom separators (default behavior)
+		globs[i] = glob.MustCompile(pattern)
+	}
+	return &BashTool{
+		allowedCommands: allowedCommands,
+		compiledGlobs:   globs,
+	}
+}
+
+// MatchesCommand checks if a command matches any of the compiled glob patterns
+func (b *BashTool) MatchesCommand(command string) bool {
+	for _, g := range b.compiledGlobs {
+		if g.Match(command) {
+			return true
+		}
+	}
+	return false
+}
 
 type BashInput struct {
 	Description string `json:"description" jsonschema:"description=A description of the command to run"`
@@ -102,8 +128,18 @@ func (b *BashTool) ValidateInput(state tooltypes.State, parameters string) error
 		}
 
 		firstWord := splitted[0]
-		if slices.Contains(BannedCommands, firstWord) {
-			return errors.New("command is banned: " + firstWord)
+		
+		// Check if allowed commands are configured
+		if len(b.allowedCommands) > 0 {
+			// If allowed commands are configured, only allow commands that match patterns
+			if !b.MatchesCommand(command) {
+				return fmt.Errorf("command not in allowed list: %s", command)
+			}
+		} else {
+			// If no allowed commands configured, fall back to banned commands check
+			if slices.Contains(BannedCommands, firstWord) {
+				return errors.New("command is banned: " + firstWord)
+			}
 		}
 
 		return nil

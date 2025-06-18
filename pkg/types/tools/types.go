@@ -116,4 +116,6 @@ type State interface {
 	// Browser management
 	GetBrowserManager() BrowserManager
 	SetBrowserManager(manager BrowserManager)
+	// LLM configuration access
+	GetLLMConfig() interface{} // Returns llmtypes.Config but using interface{} to avoid circular import
 }

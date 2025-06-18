@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
@@ -25,6 +26,7 @@ type BasicState struct {
 	todoFilePath        string
 	tools               []tooltypes.Tool
 	mcpTools            []tooltypes.Tool
+	llmConfig           llmtypes.Config
 }
 
 type BasicStateOption func(ctx context.Context, s *BasicState) error
@@ -43,6 +45,8 @@ func NewBasicState(ctx context.Context, opts ...BasicStateOption) *BasicState {
 
 	if len(state.tools) == 0 {
 		state.tools = GetMainTools(false) // Default without browser tools
+		// Replace BashTool with configured version if LLM config has allowed commands
+		state.configureBashTool()
 	}
 
 	return state
@@ -51,6 +55,7 @@ func NewBasicState(ctx context.Context, opts ...BasicStateOption) *BasicState {
 func WithSubAgentTools() BasicStateOption {
 	return func(ctx context.Context, s *BasicState) error {
 		s.tools = GetSubAgentTools(false) // Default without browser tools
+		s.configureBashTool()
 		return nil
 	}
 }
@@ -58,6 +63,7 @@ func WithSubAgentTools() BasicStateOption {
 func WithMainToolsAndBrowser() BasicStateOption {
 	return func(ctx context.Context, s *BasicState) error {
 		s.tools = GetMainTools(true) // Main tools with browser support
+		s.configureBashTool()
 		return nil
 	}
 }
@@ -65,6 +71,7 @@ func WithMainToolsAndBrowser() BasicStateOption {
 func WithSubAgentToolsAndBrowser() BasicStateOption {
 	return func(ctx context.Context, s *BasicState) error {
 		s.tools = GetSubAgentTools(true) // Sub-agent tools with browser support
+		s.configureBashTool()
 		return nil
 	}
 }
@@ -85,6 +92,13 @@ func WithMCPTools(mcpManager *MCPManager) BasicStateOption {
 func WithExtraMCPTools(tools []tooltypes.Tool) BasicStateOption {
 	return func(ctx context.Context, s *BasicState) error {
 		s.mcpTools = append(s.mcpTools, tools...)
+		return nil
+	}
+}
+
+func WithLLMConfig(config llmtypes.Config) BasicStateOption {
+	return func(ctx context.Context, s *BasicState) error {
+		s.llmConfig = config
 		return nil
 	}
 }
@@ -195,4 +209,20 @@ func (s *BasicState) SetBrowserManager(manager tooltypes.BrowserManager) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.browserManager = manager
+}
+
+func (s *BasicState) GetLLMConfig() interface{} {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.llmConfig
+}
+
+// configureBashTool replaces the default BashTool with one configured with allowed commands
+func (s *BasicState) configureBashTool() {
+	for i, tool := range s.tools {
+		if tool.Name() == "bash" {
+			s.tools[i] = NewBashTool(s.llmConfig.AllowedCommands)
+			break
+		}
+	}
 }

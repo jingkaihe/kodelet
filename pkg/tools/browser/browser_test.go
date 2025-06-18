@@ -364,3 +364,4 @@ func (m *mockState) GetBackgroundProcesses() []tools.BackgroundProcess          
 func (m *mockState) RemoveBackgroundProcess(pid int) error                      { return nil }
 func (m *mockState) GetBrowserManager() tools.BrowserManager                    { return nil }
 func (m *mockState) SetBrowserManager(manager tools.BrowserManager)             {}
+func (m *mockState) GetLLMConfig() interface{}                                  { return nil }

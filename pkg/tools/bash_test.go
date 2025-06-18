@@ -297,3 +297,334 @@ func TestBashTool_BackgroundExecution(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(content), "done")
 }
+
+func TestBashTool_GlobPatternMatching(t *testing.T) {
+	tests := []struct {
+		name     string
+		command  string
+		pattern  string
+		expected bool
+	}{
+		// Exact matches
+		{"exact match", "ls", "ls", true},
+		{"exact match with args", "git status", "git status", true},
+		{"no match exact", "ls", "cat", false},
+		
+		// Realistic wildcard patterns
+		{"wildcard with args", "ls -la", "ls *", true},
+		{"wildcard with multiple args", "ls -la /home", "ls *", true},
+		{"wildcard no match", "cat file.txt", "ls *", false},
+		
+		// Multiple wildcards
+		{"multiple wildcards", "git log --oneline", "git * --oneline", true},
+		{"multiple wildcards no match", "git status", "git * --oneline", false},
+		
+		// Wildcard at start
+		{"wildcard at start", "npm start", "* start", true},
+		{"wildcard at start no match", "npm build", "* start", false},
+		
+		// Wildcard at end
+		{"wildcard at end", "npm start", "npm *", true},
+		{"wildcard at end no match", "yarn start", "npm *", false},
+		
+		// Full wildcard
+		{"full wildcard", "any command here", "*", true},
+		{"full wildcard empty", "", "*", true},
+		
+		// Edge cases
+		{"empty command exact", "", "", true},
+		{"empty command pattern", "", "ls", false},
+		{"command with pattern empty", "ls", "", false},
+		
+		// Complex patterns
+		{"complex pattern match", "docker run -it ubuntu bash", "docker * ubuntu *", true},
+		{"complex pattern no match", "docker run -it alpine bash", "docker * ubuntu *", false},
+		
+		// Real world examples
+		{"npm commands", "npm install", "npm *", true},
+		{"yarn commands", "yarn build", "yarn *", true},
+		{"git status exact", "git status", "git status", true},
+		{"git log with args", "git log --oneline --graph", "git log *", true},
+		{"echo variations", "echo hello world", "echo *", true},
+		{"ls variations", "ls -la", "ls *", true},
+		{"pwd exact", "pwd", "pwd", true},
+		{"find commands", "find . -name '*.go'", "find *", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tool := NewBashTool([]string{tt.pattern})
+			result := tool.MatchesCommand(tt.command)
+			assert.Equal(t, tt.expected, result, 
+				"BashTool.MatchesCommand(%q) with pattern %q = %v, want %v", 
+				tt.command, tt.pattern, result, tt.expected)
+		})
+	}
+}
+
+func TestNewBashTool(t *testing.T) {
+	tests := []struct {
+		name            string
+		allowedCommands []string
+	}{
+		{"empty allowed commands", []string{}},
+		{"single command", []string{"ls"}},
+		{"multiple commands", []string{"ls *", "pwd", "echo *"}},
+		{"complex patterns", []string{"git status", "npm *", "docker * ubuntu *"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tool := NewBashTool(tt.allowedCommands)
+			assert.NotNil(t, tool)
+			assert.Equal(t, "bash", tool.Name())
+			assert.Equal(t, tt.allowedCommands, tool.allowedCommands)
+		})
+	}
+}
+
+func TestBashTool_ValidateInput_AllowedCommands(t *testing.T) {
+	tests := []struct {
+		name            string
+		allowedCommands []string
+		input           BashInput
+		expectError     bool
+		errorMsg        string
+	}{
+		// Empty allowed commands (should use banned commands)
+		{
+			name:            "empty allowed commands - valid command",
+			allowedCommands: []string{},
+			input: BashInput{
+				Description: "test",
+				Command:     "echo hello",
+				Timeout:     10,
+			},
+			expectError: false,
+		},
+		{
+			name:            "empty allowed commands - banned command",
+			allowedCommands: []string{},
+			input: BashInput{
+				Description: "test",
+				Command:     "vim file.txt",
+				Timeout:     10,
+			},
+			expectError: true,
+			errorMsg:    "command is banned: vim",
+		},
+		
+		// Single exact command allowed
+		{
+			name:            "exact command allowed",
+			allowedCommands: []string{"pwd"},
+			input: BashInput{
+				Description: "test",
+				Command:     "pwd",
+				Timeout:     10,
+			},
+			expectError: false,
+		},
+		{
+			name:            "exact command not allowed",
+			allowedCommands: []string{"pwd"},
+			input: BashInput{
+				Description: "test",
+				Command:     "ls",
+				Timeout:     10,
+			},
+			expectError: true,
+			errorMsg:    "command not in allowed list: ls",
+		},
+		
+		// Wildcard patterns
+		{
+			name:            "wildcard pattern allows command",
+			allowedCommands: []string{"ls *"},
+			input: BashInput{
+				Description: "test",
+				Command:     "ls -la",
+				Timeout:     10,
+			},
+			expectError: false,
+		},
+		{
+			name:            "wildcard pattern allows command with args",
+			allowedCommands: []string{"ls *"},
+			input: BashInput{
+				Description: "test",
+				Command:     "ls -la",
+				Timeout:     10,
+			},
+			expectError: false,
+		},
+		{
+			name:            "wildcard pattern rejects non-matching command",
+			allowedCommands: []string{"ls *"},
+			input: BashInput{
+				Description: "test",
+				Command:     "cat file.txt",
+				Timeout:     10,
+			},
+			expectError: true,
+			errorMsg:    "command not in allowed list: cat file.txt",
+		},
+		
+		// Multiple allowed commands
+		{
+			name:            "multiple commands - first matches",
+			allowedCommands: []string{"ls *", "pwd", "echo *"},
+			input: BashInput{
+				Description: "test",
+				Command:     "ls -la",
+				Timeout:     10,
+			},
+			expectError: false,
+		},
+		{
+			name:            "multiple commands - second matches",
+			allowedCommands: []string{"ls *", "pwd", "echo *"},
+			input: BashInput{
+				Description: "test",
+				Command:     "pwd",
+				Timeout:     10,
+			},
+			expectError: false,
+		},
+		{
+			name:            "multiple commands - third matches",
+			allowedCommands: []string{"ls *", "pwd", "echo *"},
+			input: BashInput{
+				Description: "test",
+				Command:     "echo hello world",
+				Timeout:     10,
+			},
+			expectError: false,
+		},
+		{
+			name:            "multiple commands - none match",
+			allowedCommands: []string{"ls *", "pwd", "echo *"},
+			input: BashInput{
+				Description: "test",
+				Command:     "cat file.txt",
+				Timeout:     10,
+			},
+			expectError: true,
+			errorMsg:    "command not in allowed list: cat file.txt",
+		},
+		
+		// Complex commands with operators
+		{
+			name:            "compound command - both parts allowed",
+			allowedCommands: []string{"echo *", "ls *"},
+			input: BashInput{
+				Description: "test",
+				Command:     "echo hello && ls -la",
+				Timeout:     10,
+			},
+			expectError: false,
+		},
+		{
+			name:            "compound command - first part not allowed",
+			allowedCommands: []string{"echo *", "ls *"},
+			input: BashInput{
+				Description: "test",
+				Command:     "cat file.txt && ls -la",
+				Timeout:     10,
+			},
+			expectError: true,
+			errorMsg:    "command not in allowed list: cat file.txt",
+		},
+		{
+			name:            "compound command - second part not allowed",
+			allowedCommands: []string{"echo *", "ls *"},
+			input: BashInput{
+				Description: "test",
+				Command:     "echo hello && cat file.txt",
+				Timeout:     10,
+			},
+			expectError: true,
+			errorMsg:    "command not in allowed list: cat file.txt",
+		},
+		{
+			name:            "complex compound command with semicolon",
+			allowedCommands: []string{"echo *", "pwd"},
+			input: BashInput{
+				Description: "test",
+				Command:     "echo start; pwd; echo done",
+				Timeout:     10,
+			},
+			expectError: false,
+		},
+		{
+			name:            "complex compound command with or operator",
+			allowedCommands: []string{"echo *", "pwd"},
+			input: BashInput{
+				Description: "test",
+				Command:     "echo start || pwd",
+				Timeout:     10,
+			},
+			expectError: false,
+		},
+		
+		// Real world scenarios
+		{
+			name:            "npm commands",
+			allowedCommands: []string{"npm *", "yarn *"},
+			input: BashInput{
+				Description: "build project",
+				Command:     "npm run build",
+				Timeout:     60,
+			},
+			expectError: false,
+		},
+		{
+			name:            "git commands",
+			allowedCommands: []string{"git status", "git log *", "git diff *"},
+			input: BashInput{
+				Description: "check git status",
+				Command:     "git status",
+				Timeout:     10,
+			},
+			expectError: false,
+		},
+		{
+			name:            "git commands with args",
+			allowedCommands: []string{"git status", "git log *", "git diff *"},
+			input: BashInput{
+				Description: "check git log",
+				Command:     "git log --oneline -10",
+				Timeout:     10,
+			},
+			expectError: false,
+		},
+		{
+			name:            "git command not allowed",
+			allowedCommands: []string{"git status", "git log *", "git diff *"},
+			input: BashInput{
+				Description: "git push",
+				Command:     "git push origin main",
+				Timeout:     10,
+			},
+			expectError: true,
+			errorMsg:    "command not in allowed list: git push origin main",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tool := NewBashTool(tt.allowedCommands)
+			input, _ := json.Marshal(tt.input)
+			err := tool.ValidateInput(NewBasicState(context.TODO()), string(input))
+			
+			if tt.expectError {
+				assert.Error(t, err)
+				if tt.errorMsg != "" {
+					assert.Contains(t, err.Error(), tt.errorMsg)
+				}
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
