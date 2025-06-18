@@ -202,49 +202,6 @@ func TestWaitForToolValidation(t *testing.T) {
 	}
 }
 
-func TestExtractTextToolValidation(t *testing.T) {
-	tool := ExtractTextTool{}
-	state := &mockState{}
-
-	tests := []struct {
-		name        string
-		input       string
-		expectError bool
-	}{
-		{
-			name:        "valid single element",
-			input:       `{"selector": "h1", "multiple": false, "timeout": 5000}`,
-			expectError: false,
-		},
-		{
-			name:        "valid multiple elements",
-			input:       `{"selector": ".item", "multiple": true, "timeout": 5000}`,
-			expectError: false,
-		},
-		{
-			name:        "missing selector",
-			input:       `{"multiple": false, "timeout": 5000}`,
-			expectError: true,
-		},
-		{
-			name:        "empty selector",
-			input:       `{"selector": "", "multiple": false, "timeout": 5000}`,
-			expectError: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := tool.ValidateInput(state, tt.input)
-			if tt.expectError {
-				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
-			}
-		})
-	}
-}
-
 func TestScreenshotToolValidation(t *testing.T) {
 	tool := ScreenshotTool{}
 	state := &mockState{}
@@ -299,7 +256,6 @@ func TestToolMetadata(t *testing.T) {
 		{"click tool", &ClickTool{}, "browser_click"},
 		{"type tool", &TypeTool{}, "browser_type"},
 		{"wait_for tool", &WaitForTool{}, "browser_wait_for"},
-		{"extract_text tool", &ExtractTextTool{}, "browser_extract_text"},
 		{"screenshot tool", &ScreenshotTool{}, "browser_screenshot"},
 		{"go_back tool", &GoBackTool{}, "browser_go_back"},
 	}
@@ -321,7 +277,6 @@ func TestToolSchemaGeneration(t *testing.T) {
 		{"browser_click", &ClickTool{}},
 		{"browser_type", &TypeTool{}},
 		{"browser_wait_for", &WaitForTool{}},
-		{"browser_extract_text", &ExtractTextTool{}},
 		{"browser_screenshot", &ScreenshotTool{}},
 		{"browser_go_back", &GoBackTool{}},
 	}
@@ -350,7 +305,6 @@ func TestToolResultInterfaces(t *testing.T) {
 		{"click result", ClickResult{Success: true, ElementFound: true}},
 		{"type result", TypeResult{Success: true, ElementFound: true}},
 		{"wait_for result", WaitForResult{Success: true, ConditionMet: true}},
-		{"extract_text result", ExtractTextResult{Success: true, Text: "extracted text", Count: 1}},
 		{"screenshot result", ScreenshotResult{Success: true, OutputPath: "/path/to/screenshot.png"}},
 		{"go_back result", GoBackResult{Success: true, URL: "https://example.com"}},
 	}
