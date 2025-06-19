@@ -38,3 +38,6 @@ Thumbs.db
 ./bin
 .kodelet/
 kodelet-config.yaml
+
+# we do `cat REQ.md | kodelet run` a lot and we don't want to check in the REQ.md file
+REQ.md

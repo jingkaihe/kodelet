@@ -15,8 +15,10 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"text/template"
 	"time"
 
+	"github.com/gobwas/glob"
 	"github.com/invopop/jsonschema"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"go.opentelemetry.io/otel/attribute"
@@ -30,110 +32,24 @@ var (
 		"more",
 		"cd",
 	}
-)
 
-type BashTool struct{}
-
-type BashInput struct {
-	Description string `json:"description" jsonschema:"description=A description of the command to run"`
-	Command     string `json:"command" jsonschema:"description=The bash command to run"`
-	Timeout     int    `json:"timeout" jsonschema:"description=The timeout for the command in seconds,default=10"`
-	Background  bool   `json:"background" jsonschema:"description=Whether to run the command in the background,default=false"`
-}
-
-func (b *BashTool) GenerateSchema() *jsonschema.Schema {
-	return GenerateSchema[BashInput]()
-}
-
-func (b *BashTool) Name() string {
-	return "bash"
-}
-
-func (b *BashTool) TracingKVs(parameters string) ([]attribute.KeyValue, error) {
-	input := &BashInput{}
-	err := json.Unmarshal([]byte(parameters), input)
-	if err != nil {
-		return nil, err
-	}
-
-	return []attribute.KeyValue{
-		attribute.String("command", input.Command),
-		attribute.String("description", input.Description),
-		attribute.Int("timeout", input.Timeout),
-		attribute.Bool("background", input.Background),
-	}, nil
-}
-
-func (b *BashTool) ValidateInput(state tooltypes.State, parameters string) error {
-	input := &BashInput{}
-	err := json.Unmarshal([]byte(parameters), input)
-	if err != nil {
-		return err
-	}
-
-	if input.Command == "" {
-		return errors.New("command is required")
-	}
-
-	if input.Description == "" {
-		return errors.New("description is required")
-	}
-
-	// For background processes, timeout must be 0 (no timeout)
-	if input.Background {
-		if input.Timeout != 0 {
-			return errors.New("background processes must have timeout=0 (no timeout)")
-		}
-	} else {
-		if input.Timeout < 10 || input.Timeout > 120 {
-			return errors.New("timeout must be between 10 and 120 seconds")
-		}
-	}
-
-	validateCommand := func(command string) error {
-		command = strings.TrimSpace(command)
-		if command == "" {
-			return nil
-		}
-
-		splitted := strings.Split(command, " ")
-		if len(splitted) == 0 {
-			return errors.New("command must contain at least one word")
-		}
-
-		firstWord := splitted[0]
-		if slices.Contains(BannedCommands, firstWord) {
-			return errors.New("command is banned: " + firstWord)
-		}
-
-		return nil
-	}
-
-	// Split by all operators and validate each command
-	operators := []string{"&&", "||", ";"}
-	commands := []string{input.Command}
-
-	for _, op := range operators {
-		var newCommands []string
-		for _, cmd := range commands {
-			newCommands = append(newCommands, strings.Split(cmd, op)...)
-		}
-		commands = newCommands
-	}
-
-	for _, command := range commands {
-		if err := validateCommand(command); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func (b *BashTool) Description() string {
-	return `Executes a given bash command in a persistent shell session with timeout.
+	descriptionTemplate = `Executes a given bash command in a persistent shell session with timeout.
 
 Before executing the command, please follow these steps:
+
+# Command Restrictions
+{{if .AllowedCommands}}
+## Allowed Commands
+Only the following commands/patterns are allowed:
+{{range .AllowedCommands}}* {{.}}
+{{end}}
+Commands not matching these patterns will be rejected.
+{{else}}
+## Banned Commands
+The following commands are banned and cannot be used:
+{{range .BannedCommands}}* {{.}}
+{{end}}
+{{end}}
 
 # Important
 * The command argument is required.
@@ -245,6 +161,169 @@ Running a gunicorn server in the background.
 </reasoning>
 </good-example>
 `
+)
+
+type BashTool struct {
+	allowedCommands []string
+	compiledGlobs   []glob.Glob
+}
+
+func NewBashTool(allowedCommands []string) *BashTool {
+	globs := make([]glob.Glob, len(allowedCommands))
+	for i, pattern := range allowedCommands {
+		// Compile glob patterns without custom separators (default behavior)
+		globs[i] = glob.MustCompile(pattern)
+	}
+	return &BashTool{
+		allowedCommands: allowedCommands,
+		compiledGlobs:   globs,
+	}
+}
+
+// MatchesCommand checks if a command matches any of the compiled glob patterns
+func (b *BashTool) MatchesCommand(command string) bool {
+	for _, c := range b.allowedCommands {
+		if c != "" && strings.Contains(command, c) {
+			return true
+		}
+	}
+
+	for _, g := range b.compiledGlobs {
+		if g.Match(command) {
+			return true
+		}
+	}
+	return false
+}
+
+type BashInput struct {
+	Description string `json:"description" jsonschema:"description=A description of the command to run"`
+	Command     string `json:"command" jsonschema:"description=The bash command to run"`
+	Timeout     int    `json:"timeout" jsonschema:"description=The timeout for the command in seconds,default=10"`
+	Background  bool   `json:"background" jsonschema:"description=Whether to run the command in the background,default=false"`
+}
+
+func (b *BashTool) GenerateSchema() *jsonschema.Schema {
+	return GenerateSchema[BashInput]()
+}
+
+func (b *BashTool) Name() string {
+	return "bash"
+}
+
+func (b *BashTool) TracingKVs(parameters string) ([]attribute.KeyValue, error) {
+	input := &BashInput{}
+	err := json.Unmarshal([]byte(parameters), input)
+	if err != nil {
+		return nil, err
+	}
+
+	return []attribute.KeyValue{
+		attribute.String("command", input.Command),
+		attribute.String("description", input.Description),
+		attribute.Int("timeout", input.Timeout),
+		attribute.Bool("background", input.Background),
+	}, nil
+}
+
+func (b *BashTool) ValidateInput(state tooltypes.State, parameters string) error {
+	input := &BashInput{}
+	err := json.Unmarshal([]byte(parameters), input)
+	if err != nil {
+		return err
+	}
+
+	if input.Command == "" {
+		return errors.New("command is required")
+	}
+
+	if input.Description == "" {
+		return errors.New("description is required")
+	}
+
+	// For background processes, timeout must be 0 (no timeout)
+	if input.Background {
+		if input.Timeout != 0 {
+			return errors.New("background processes must have timeout=0 (no timeout)")
+		}
+	} else {
+		if input.Timeout < 10 || input.Timeout > 120 {
+			return errors.New("timeout must be between 10 and 120 seconds")
+		}
+	}
+
+	validateCommand := func(command string) error {
+		command = strings.TrimSpace(command)
+		if command == "" {
+			return nil
+		}
+
+		splitted := strings.Split(command, " ")
+		if len(splitted) == 0 {
+			return errors.New("command must contain at least one word")
+		}
+
+		firstWord := splitted[0]
+
+		// DENY FIRST: Check if command is banned - if yes, deny it regardless of allowed commands
+		if slices.Contains(BannedCommands, firstWord) {
+			return errors.New("command is banned: " + firstWord)
+		}
+
+		// Check if allowed commands are configured
+		if len(b.allowedCommands) > 0 {
+			// If allowed commands are configured, only allow commands that match patterns
+			if !b.MatchesCommand(command) {
+				return fmt.Errorf("command not in allowed list: %s", command)
+			}
+		}
+
+		return nil
+	}
+
+	// Split by all operators and validate each command
+	operators := []string{"&&", "||", ";"}
+	commands := []string{input.Command}
+
+	for _, op := range operators {
+		var newCommands []string
+		for _, cmd := range commands {
+			newCommands = append(newCommands, strings.Split(cmd, op)...)
+		}
+		commands = newCommands
+	}
+
+	for _, command := range commands {
+		if err := validateCommand(command); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (b *BashTool) Description() string {
+	tmpl, err := template.New("bash_description").Parse(descriptionTemplate)
+	if err != nil {
+		// Fallback to a simple description if template parsing fails
+		return "Executes bash commands with configurable restrictions."
+	}
+
+	data := struct {
+		AllowedCommands []string
+		BannedCommands  []string
+	}{
+		AllowedCommands: b.allowedCommands,
+		BannedCommands:  BannedCommands,
+	}
+
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		// Fallback to a simple description if template execution fails
+		return "Executes bash commands with configurable restrictions."
+	}
+
+	return buf.String()
 }
 
 type BashToolResult struct {

@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.0.44.alpha (2025-06-18)
+
+### Security & Configuration
+
+**Configurable Bash Commands**: Added `allowed_commands` configuration to restrict bash tool execution
+
 ## 0.0.43.alpha (2025-06-18)
 
 ### Browser Automation Tools

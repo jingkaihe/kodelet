@@ -17,5 +17,6 @@ func GetConfigFromViper() llmtypes.Config {
 		ThinkingBudgetTokens: viper.GetInt("thinking_budget_tokens"),
 		ReasoningEffort:      viper.GetString("reasoning_effort"),
 		CacheEvery:           viper.GetInt("cache_every"),
+		AllowedCommands:      viper.GetStringSlice("allowed_commands"),
 	}
 }

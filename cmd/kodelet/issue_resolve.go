@@ -94,7 +94,8 @@ Examples:
 			return
 		}
 
-		s := tools.NewBasicState(ctx, tools.WithMCPTools(mcpManager))
+		llmConfig := llm.GetConfigFromViper()
+		s := tools.NewBasicState(ctx, tools.WithLLMConfig(llmConfig), tools.WithMCPTools(mcpManager))
 
 		// Get issue-resolve config from flags
 		config := getIssueResolveConfigFromFlags(cmd)

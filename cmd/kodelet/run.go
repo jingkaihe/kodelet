@@ -99,8 +99,12 @@ var runCmd = &cobra.Command{
 			return
 		}
 
+		// Get LLM config
+		llmConfig := llm.GetConfigFromViper()
+
 		// Create state with appropriate tools based on browser support
 		var stateOpts []tools.BasicStateOption
+		stateOpts = append(stateOpts, tools.WithLLMConfig(llmConfig))
 		stateOpts = append(stateOpts, tools.WithMCPTools(mcpManager))
 		if config.EnableBrowserTools {
 			stateOpts = append(stateOpts, tools.WithMainToolsAndBrowser())
@@ -112,7 +116,7 @@ var runCmd = &cobra.Command{
 
 		// Process the query using the Thread abstraction
 		handler := &llmtypes.ConsoleMessageHandler{Silent: false}
-		thread := llm.NewThread(llm.GetConfigFromViper())
+		thread := llm.NewThread(llmConfig)
 		thread.SetState(appState)
 
 		// Configure conversation persistence

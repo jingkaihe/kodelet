@@ -18,7 +18,8 @@ func plainChatUI(ctx context.Context, options *ChatOptions) {
 	fmt.Println("----------------------------------------------------------")
 
 	// Create a persistent thread with state
-	thread := llm.NewThread(llm.GetConfigFromViper())
+	config := llm.GetConfigFromViper()
+	thread := llm.NewThread(config)
 
 	// Create the MCP manager from Viper configuration
 	mcpManager, err := tools.CreateMCPManagerFromViper(ctx)
@@ -29,6 +30,7 @@ func plainChatUI(ctx context.Context, options *ChatOptions) {
 
 	// Create state with appropriate tools based on browser support
 	var stateOpts []tools.BasicStateOption
+	stateOpts = append(stateOpts, tools.WithLLMConfig(config))
 	stateOpts = append(stateOpts, tools.WithMCPTools(mcpManager))
 	if options.enableBrowserTools {
 		stateOpts = append(stateOpts, tools.WithMainToolsAndBrowser())

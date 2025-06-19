@@ -19,10 +19,12 @@ type AssistantClient struct {
 // NewAssistantClient creates a new assistant client
 func NewAssistantClient(ctx context.Context, conversationID string, enablePersistence bool, mcpManager *tools.MCPManager, maxTurns int, enableBrowserTools bool) *AssistantClient {
 	// Create a persistent thread with config from viper
-	thread := llm.NewThread(llm.GetConfigFromViper())
+	config := llm.GetConfigFromViper()
+	thread := llm.NewThread(config)
 
 	// Create state with appropriate tools based on browser support
 	var stateOpts []tools.BasicStateOption
+	stateOpts = append(stateOpts, tools.WithLLMConfig(config))
 	stateOpts = append(stateOpts, tools.WithMCPTools(mcpManager))
 	if enableBrowserTools {
 		stateOpts = append(stateOpts, tools.WithMainToolsAndBrowser())
