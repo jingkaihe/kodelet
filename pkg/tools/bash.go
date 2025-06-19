@@ -265,16 +265,16 @@ func (b *BashTool) ValidateInput(state tooltypes.State, parameters string) error
 
 		firstWord := splitted[0]
 
+		// DENY FIRST: Check if command is banned - if yes, deny it regardless of allowed commands
+		if slices.Contains(BannedCommands, firstWord) {
+			return errors.New("command is banned: " + firstWord)
+		}
+
 		// Check if allowed commands are configured
 		if len(b.allowedCommands) > 0 {
 			// If allowed commands are configured, only allow commands that match patterns
 			if !b.MatchesCommand(command) {
 				return fmt.Errorf("command not in allowed list: %s", command)
-			}
-		} else {
-			// If no allowed commands configured, fall back to banned commands check
-			if slices.Contains(BannedCommands, firstWord) {
-				return errors.New("command is banned: " + firstWord)
 			}
 		}
 

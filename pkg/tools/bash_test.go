@@ -702,6 +702,106 @@ func TestBashTool_ValidateInput_AllowedCommands(t *testing.T) {
 			expectError: true,
 			errorMsg:    "command not in allowed list: git push origin main",
 		},
+
+		// DENY FIRST: Test that banned commands are rejected even if in allowed list
+		{
+			name:            "banned command denied even when in allowed list - vim",
+			allowedCommands: []string{"vim *", "echo *", "ls *"},
+			input: BashInput{
+				Description: "edit file",
+				Command:     "vim file.txt",
+				Timeout:     10,
+			},
+			expectError: true,
+			errorMsg:    "command is banned: vim",
+		},
+		{
+			name:            "banned command denied even when in allowed list - cd",
+			allowedCommands: []string{"cd *", "echo *", "pwd"},
+			input: BashInput{
+				Description: "change directory",
+				Command:     "cd /home",
+				Timeout:     10,
+			},
+			expectError: true,
+			errorMsg:    "command is banned: cd",
+		},
+		{
+			name:            "banned command denied even when in allowed list - less",
+			allowedCommands: []string{"less *", "cat *", "echo *"},
+			input: BashInput{
+				Description: "view file",
+				Command:     "less file.txt",
+				Timeout:     10,
+			},
+			expectError: true,
+			errorMsg:    "command is banned: less",
+		},
+		{
+			name:            "banned command denied even when in allowed list - more",
+			allowedCommands: []string{"more *", "cat *", "echo *"},
+			input: BashInput{
+				Description: "view file",
+				Command:     "more file.txt",
+				Timeout:     10,
+			},
+			expectError: true,
+			errorMsg:    "command is banned: more",
+		},
+		{
+			name:            "banned command denied even when in allowed list - view",
+			allowedCommands: []string{"view *", "cat *", "echo *"},
+			input: BashInput{
+				Description: "view file",
+				Command:     "view file.txt",
+				Timeout:     10,
+			},
+			expectError: true,
+			errorMsg:    "command is banned: view",
+		},
+		{
+			name:            "banned command in compound statement denied - with allowed",
+			allowedCommands: []string{"echo *", "vim *"},
+			input: BashInput{
+				Description: "echo then edit",
+				Command:     "echo hello && vim file.txt",
+				Timeout:     10,
+			},
+			expectError: true,
+			errorMsg:    "command is banned: vim",
+		},
+		{
+			name:            "banned command mixed with allowed commands - first command banned",
+			allowedCommands: []string{"ls *", "cd *", "pwd"},
+			input: BashInput{
+				Description: "change dir then list",
+				Command:     "cd /tmp && ls -la",
+				Timeout:     10,
+			},
+			expectError: true,
+			errorMsg:    "command is banned: cd",
+		},
+		{
+			name:            "banned command mixed with allowed commands - second command banned",
+			allowedCommands: []string{"ls *", "vim *", "pwd"},
+			input: BashInput{
+				Description: "list then edit",
+				Command:     "ls -la && vim file.txt",
+				Timeout:     10,
+			},
+			expectError: true,
+			errorMsg:    "command is banned: vim",
+		},
+		{
+			name:            "work around to banned command - with paranthesis", // this is OK by design
+			allowedCommands: []string{"(cd *", "ls *", "pwd"},
+			input: BashInput{
+				Description: "cd then ls",
+				Command:     "(cd /foo && ls -la) && pwd",
+				Timeout:     10,
+			},
+			expectError: false,
+		},
 	}
 
 	for _, tt := range tests {
