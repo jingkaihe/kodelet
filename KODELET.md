@@ -153,67 +153,40 @@ fmt.Printf("Processing request for %s", userID)
 ```go
 // Return errors with context
 if err != nil {
-    return fmt.Errorf("failed to process: %w", err)
+    return errors.Wrap(err, "failed to process")
 }
 ```
 
 ## Code Intelligence & MCP Language Server Tools
 
-Kodelet integrates with MCP (Model Context Protocol) Language Server to provide advanced code intelligence capabilities. **ALWAYS prioritize these MCP tools over basic text search (grep/find) for code navigation and understanding.**
+Kodelet integrates with MCP (Model Context Protocol) Language Server for advanced code intelligence. **ALWAYS prioritize MCP tools over basic text search for code navigation.**
 
 ### Core MCP Tools
-
-#### Symbol Navigation
-- **`mcp_definition`**: Get complete source code definition of any symbol (functions, types, constants, methods)
-- **`mcp_references`**: Find all usages and references of a symbol throughout the entire codebase
-- **`mcp_hover`**: Get type information, documentation, and context for symbols at specific positions
-
-#### Code Modification
-- **`mcp_rename_symbol`**: Safely rename symbols and update all references across the codebase
+- **`mcp_definition`**: Get complete source code definition of symbols (functions, types, constants)
+- **`mcp_references`**: Find all usages and references of a symbol throughout the codebase
+- **`mcp_hover`**: Get type information, documentation, and context for symbols at positions
+- **`mcp_rename_symbol`**: Safely rename symbols and update all references across codebase
 - **`mcp_edit_file`**: Apply multiple precise text edits to files with line-based targeting
 - **`mcp_diagnostics`**: Get compiler/linter diagnostics and errors for specific files
 
-### When to Use MCP Tools vs Basic Search
-
+### Usage Guidelines
 **Use MCP tools for:**
-- Finding function/type definitions: `mcp_definition` instead of `grep_tool`
-- Understanding symbol usage: `mcp_references` instead of `grep_tool`
-- Refactoring code: `mcp_rename_symbol` instead of manual find/replace
-- Getting type information: `mcp_hover` instead of guessing from context
-- Checking code health: `mcp_diagnostics` instead of running linters manually
-- Precise code edits: `mcp_edit_file` instead of `file_edit` for multiple changes
+- Code definitions, symbol usage, refactoring, type information, diagnostics, precise edits
 
-**Use basic search tools only for:**
-- Searching for string literals, comments, or documentation
-- Finding configuration patterns or non-code content
-- Exploratory searches where you don't know exact symbol names
+**Use basic search only for:**
+- String literals, comments, documentation, configuration patterns, exploratory searches
 
 ### Best Practices
-
 1. **Start with MCP**: Always try MCP tools first for code-related queries
-2. **Symbol-aware navigation**: Use `mcp_definition` and `mcp_references` to understand code relationships
-3. **Safe refactoring**: Use `mcp_rename_symbol` for renaming to ensure all references are updated
-4. **Diagnostic-driven fixes**: Use `mcp_diagnostics` to identify and prioritize code issues
-5. **Precise editing**: Use `mcp_edit_file` for making multiple related changes in a single operation
+2. **Symbol-aware navigation**: Use `mcp_definition` and `mcp_references` for code relationships
+3. **Safe refactoring**: Use `mcp_rename_symbol` to ensure all references are updated
+4. **Diagnostic-driven fixes**: Use `mcp_diagnostics` to identify and prioritize issues
 
-### Example Workflows
-
+### Common Workflows
 ```bash
-# Understanding a function
-1. mcp_definition "FunctionName"           # Get implementation
-2. mcp_references "FunctionName"           # Find all usages
-3. mcp_hover at usage locations            # Understand context
-
-# Refactoring workflow
-1. mcp_diagnostics for target files        # Check current issues
-2. mcp_rename_symbol for safe renames      # Update symbols
-3. mcp_edit_file for implementation changes # Apply changes
-4. mcp_diagnostics again                   # Verify fixes
-
-# Code review workflow
-1. mcp_diagnostics on changed files        # Check for issues
-2. mcp_references for modified symbols     # Understand impact
-3. mcp_hover for type verification         # Ensure correctness
+# Understanding: mcp_definition -> mcp_references -> mcp_hover
+# Refactoring: mcp_diagnostics -> mcp_rename_symbol -> mcp_edit_file -> mcp_diagnostics
+# Code review: mcp_diagnostics -> mcp_references -> mcp_hover
 ```
 
-This approach provides language-aware code intelligence that understands Go syntax, semantics, and project structure, making code navigation and modification significantly more reliable than text-based search.
+MCP provides language-aware code intelligence that understands Go syntax, semantics, and project structure, making code navigation significantly more reliable than text-based search.
