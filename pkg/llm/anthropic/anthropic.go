@@ -78,7 +78,7 @@ func NewAnthropicThread(config llmtypes.Config) *AnthropicThread {
 			client = anthropic.NewClient()
 		} else {
 			logger.Debug("using anthropic access token")
-			client = anthropic.NewClient(option.WithAuthToken(accessToken), auth.AnthropicHeader())
+			client = anthropic.NewClient(auth.AnthropicHeader(accessToken)...)
 			useSubscription = true
 		}
 	} else {
@@ -292,20 +292,24 @@ func (t *AnthropicThread) processMessageExchange(
 ) (string, bool, error) {
 	var finalOutput string
 
+	systemPromptBlocks := []anthropic.TextBlockParam{}
+	if t.useSubscription {
+		systemPromptBlocks = append(systemPromptBlocks, auth.AnthropicSystemPrompt())
+	}
+	systemPromptBlocks = append(systemPromptBlocks, anthropic.TextBlockParam{
+		Text: systemPrompt,
+		CacheControl: anthropic.CacheControlEphemeralParam{
+			Type: "ephemeral",
+		},
+	})
+
 	// Prepare message parameters
 	messageParams := anthropic.MessageNewParams{
 		MaxTokens: int64(maxTokens),
-		System: []anthropic.TextBlockParam{
-			{
-				Text: systemPrompt,
-				CacheControl: anthropic.CacheControlEphemeralParam{
-					Type: "ephemeral",
-				},
-			},
-		},
-		Messages: t.messages,
-		Model:    model,
-		Tools:    tools.ToAnthropicTools(t.tools(opt)),
+		System:    systemPromptBlocks,
+		Messages:  t.messages,
+		Model:     model,
+		Tools:     tools.ToAnthropicTools(t.tools(opt)),
 	}
 	if t.shouldUtiliseThinking(model) {
 		messageParams.Thinking = anthropic.ThinkingConfigParamUnion{
@@ -460,6 +464,7 @@ func (t *AnthropicThread) NewMessage(ctx context.Context, params anthropic.Messa
 		}
 
 		if stream.Err() != nil {
+			logger.G(ctx).WithError(stream.Err()).Error("error streaming message from anthropic")
 			telemetry.RecordError(ctx, stream.Err())
 			span.SetStatus(codes.Error, stream.Err().Error())
 			return nil, stream.Err()

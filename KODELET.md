@@ -20,6 +20,7 @@ Kodelet is a lightweight CLI tool that helps with software engineering tasks. It
 ├── LICENSE              # License file
 ├── Makefile             # Build automation
 ├── pkg/                 # Core packages
+│   ├── auth/            # Authentication and login management
 │   ├── conversations/   # Conversation storage and management
 │   ├── github/          # GitHub Actions templates and utilities
 │   ├── llm/             # LLM client for AI interactions
@@ -120,7 +121,7 @@ export OPENAI_API_KEY="sk-..."            # For OpenAI models
 **Common Environment Variables**:
 ```bash
 export KODELET_PROVIDER="anthropic|openai"
-export KODELET_MODEL="claude-sonnet-4-0|gpt-4.1"
+export KODELET_MODEL="claude-sonnet-4-20250514|gpt-4.1"
 export KODELET_MAX_TOKENS="8192"
 export KODELET_LOG_LEVEL="info"
 ```

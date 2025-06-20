@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/pkg/errors"
 	"golang.org/x/oauth2/authhandler"
@@ -275,6 +276,17 @@ func AnthropicAccessToken(ctx context.Context) (string, error) {
 	return creds.AccessToken, nil
 }
 
-func AnthropicHeader() option.RequestOption {
-	return option.WithHeader("User-Agent", "claude-cli/1.0.30 (external, cli)")
+func AnthropicHeader(accessToken string) []option.RequestOption {
+	return []option.RequestOption{
+		option.WithHeader("User-Agent", "claude-cli/1.0.30 (external, cli)"),
+		option.WithAuthToken(accessToken),
+		option.WithHeader("anthropic-beta", "oauth-2025-04-20"),
+		option.WithHeaderDel("X-Api-Key"),
+	}
+}
+
+func AnthropicSystemPrompt() anthropic.TextBlockParam {
+	return anthropic.TextBlockParam{
+		Text: "You are Claude Code, Anthropic's official CLI for Claude.",
+	}
 }
