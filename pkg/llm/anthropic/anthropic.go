@@ -13,6 +13,7 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
+	"github.com/jingkaihe/kodelet/pkg/auth"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/sysprompt"
@@ -38,17 +39,18 @@ const (
 
 // AnthropicThread implements the Thread interface using Anthropic's Claude API
 type AnthropicThread struct {
-	client         anthropic.Client
-	config         llmtypes.Config
-	state          tooltypes.State
-	messages       []anthropic.MessageParam
-	usage          *llmtypes.Usage
-	conversationID string
-	summary        string
-	isPersisted    bool
-	store          ConversationStore
-	mu             sync.Mutex
-	conversationMu sync.Mutex
+	client          anthropic.Client
+	config          llmtypes.Config
+	state           tooltypes.State
+	messages        []anthropic.MessageParam
+	usage           *llmtypes.Usage
+	conversationID  string
+	summary         string
+	isPersisted     bool
+	store           ConversationStore
+	mu              sync.Mutex
+	conversationMu  sync.Mutex
+	useSubscription bool
 }
 
 func (t *AnthropicThread) Provider() string {
@@ -65,12 +67,32 @@ func NewAnthropicThread(config llmtypes.Config) *AnthropicThread {
 		config.MaxTokens = 8192
 	}
 
+	logger := logger.G(context.Background())
+	var client anthropic.Client
+	var useSubscription bool
+	antCredsExists, _ := auth.GetAnthropicCredentialsExists()
+	if antCredsExists {
+		accessToken, err := auth.AnthropicAccessToken(context.Background())
+		if err != nil {
+			logger.WithError(err).Error("failed to get anthropic access token, falling back to use API key")
+			client = anthropic.NewClient()
+		} else {
+			logger.Debug("using anthropic access token")
+			client = anthropic.NewClient(option.WithAuthToken(accessToken), auth.AnthropicHeader())
+			useSubscription = true
+		}
+	} else {
+		logger.Debug("no anthropic credentials found, falling back to use API key")
+		client = anthropic.NewClient()
+	}
+
 	return &AnthropicThread{
-		client:         anthropic.NewClient(),
-		config:         config,
-		conversationID: conversations.GenerateID(),
-		isPersisted:    false,
-		usage:          &llmtypes.Usage{}, // must be initialised to avoid nil pointer dereference
+		client:          client,
+		config:          config,
+		useSubscription: useSubscription,
+		conversationID:  conversations.GenerateID(),
+		isPersisted:     false,
+		usage:           &llmtypes.Usage{}, // must be initialised to avoid nil pointer dereference
 	}
 }
 
@@ -509,12 +531,19 @@ func (t *AnthropicThread) updateUsage(response *anthropic.Message, model anthrop
 
 	// Calculate costs based on model pricing
 	pricing := getModelPricing(model)
+	var inputPricing, outputPricing, cacheCreationPricing, cacheReadPricing float64
+	if !t.useSubscription {
+		inputPricing = pricing.Input
+		outputPricing = pricing.Output
+		cacheCreationPricing = pricing.PromptCachingWrite
+		cacheReadPricing = pricing.PromptCachingRead
+	}
 
 	// Calculate individual costs
-	t.usage.InputCost += float64(response.Usage.InputTokens) * pricing.Input
-	t.usage.OutputCost += float64(response.Usage.OutputTokens) * pricing.Output
-	t.usage.CacheCreationCost += float64(response.Usage.CacheCreationInputTokens) * pricing.PromptCachingWrite
-	t.usage.CacheReadCost += float64(response.Usage.CacheReadInputTokens) * pricing.PromptCachingRead
+	t.usage.InputCost += float64(response.Usage.InputTokens) * inputPricing
+	t.usage.OutputCost += float64(response.Usage.OutputTokens) * outputPricing
+	t.usage.CacheCreationCost += float64(response.Usage.CacheCreationInputTokens) * cacheCreationPricing
+	t.usage.CacheReadCost += float64(response.Usage.CacheReadInputTokens) * cacheReadPricing
 
 	t.usage.CurrentContextWindow = int(response.Usage.InputTokens) + int(response.Usage.OutputTokens) + int(response.Usage.CacheCreationInputTokens) + int(response.Usage.CacheReadInputTokens)
 	t.usage.MaxContextWindow = pricing.ContextWindow
