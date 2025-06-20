@@ -141,6 +141,7 @@ func main() {
 	rootCmd.AddCommand(resolveCmd)
 	rootCmd.AddCommand(ghaAgentOnboardCmd)
 	rootCmd.AddCommand(anthropicLoginCmd)
+	rootCmd.AddCommand(anthropicLogoutCmd)
 
 	// Initialize telemetry with tracing
 	tracingShutdown, err := initTracing(ctx)
@@ -175,6 +176,7 @@ func main() {
 	resolveCmd = withTracing(resolveCmd)
 	ghaAgentOnboardCmd = withTracing(ghaAgentOnboardCmd)
 	anthropicLoginCmd = withTracing(anthropicLoginCmd)
+	anthropicLogoutCmd = withTracing(anthropicLogoutCmd)
 
 	// Set the root command context to include the tracing context
 	rootCmd.SetContext(ctx)
