@@ -309,7 +309,7 @@ export KODELET_LOG_LEVEL="info"  # panic, fatal, error, warn, info, debug, trace
 # LLM configuration - Anthropic
 export ANTHROPIC_API_KEY="sk-ant-api..."
 export KODELET_PROVIDER="anthropic"  # Optional, detected from model name
-export KODELET_MODEL="claude-sonnet-4-0"
+export KODELET_MODEL="claude-sonnet-4-20250514"
 export KODELET_MAX_TOKENS="8192"
 export KODELET_CACHE_EVERY="5"  # Cache messages every N interactions (0 to disable)
 
@@ -339,7 +339,7 @@ Use `kodelet-config.yaml` in your project root for project-specific settings. Th
 ```yaml
 # Global config (~/.kodelet/config.yaml)
 provider: "anthropic"
-model: "claude-sonnet-4-0"
+model: "claude-sonnet-4-20250514"
 max_tokens: 8192
 log_level: "info"
 ```
@@ -368,7 +368,7 @@ log_level: "info"  # panic, fatal, error, warn, info, debug, trace
 
 # Anthropic configuration
 provider: "anthropic"
-model: "claude-sonnet-4-0"
+model: "claude-sonnet-4-20250514"
 max_tokens: 8192
 weak_model: "claude-3-5-haiku-latest"
 weak_model_max_tokens: 8192
@@ -486,7 +486,7 @@ kodelet run --allowed-commands "ls *,pwd,echo *" "analyze this directory"
 ### Anthropic Claude
 
 Kodelet supports various Anthropic Claude models:
-- `claude-sonnet-4-0` (recommended for standard tasks)
+- `claude-sonnet-4-20250514` (recommended for standard tasks)
 - `claude-3-5-haiku-latest` (recommended for lightweight tasks)
 - `claude-3-opus-20240229`
 

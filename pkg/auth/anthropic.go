@@ -276,8 +276,12 @@ func AnthropicAccessToken(ctx context.Context) (string, error) {
 	return creds.AccessToken, nil
 }
 
-func AnthropicHeader() option.RequestOption {
-	return option.WithHeader("User-Agent", "claude-cli/1.0.30 (external, cli)")
+func AnthropicHeader() []option.RequestOption {
+	return []option.RequestOption{
+		option.WithHeader("User-Agent", "claude-cli/1.0.30 (external, cli)"),
+		option.WithHeader("anthropic-beta", "oauth-2025-04-20"),
+		option.WithHeaderDel("X-Api-Key"),
+	}
 }
 
 func AnthropicSystemPrompt() anthropic.TextBlockParam {

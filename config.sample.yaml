@@ -13,7 +13,7 @@ log_format: "json"
 provider: "anthropic"
 
 # Model to use for LLM interactions
-model: "claude-sonnet-4-0"
+model: "claude-sonnet-4-20250514"
 
 # Maximum tokens for responses
 max_tokens: 8192

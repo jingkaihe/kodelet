@@ -23,7 +23,7 @@ func TestRenderBackgroundAgentWorkflow(t *testing.T) {
 				"name: Background Kodelet",
 				"auth-gateway-endpoint: https://gha-auth-gateway.kodelet.com/api/github",
 				"jingkaihe/kodelet-action@v0.1.7-alpha",
-				"claude-sonnet-4-0",
+				"claude-sonnet-4-20250514",
 				"github.event_name == 'issues'",
 				"@kodelet",
 			},

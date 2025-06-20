@@ -78,7 +78,11 @@ func NewAnthropicThread(config llmtypes.Config) *AnthropicThread {
 			client = anthropic.NewClient()
 		} else {
 			logger.Debug("using anthropic access token")
-			client = anthropic.NewClient(option.WithAuthToken(accessToken), auth.AnthropicHeader())
+			opts := []option.RequestOption{
+				option.WithAuthToken(accessToken),
+			}
+			opts = append(opts, auth.AnthropicHeader()...)
+			client = anthropic.NewClient(opts...)
 			useSubscription = true
 		}
 	} else {
@@ -464,6 +468,7 @@ func (t *AnthropicThread) NewMessage(ctx context.Context, params anthropic.Messa
 		}
 
 		if stream.Err() != nil {
+			logger.G(ctx).WithError(stream.Err()).Error("error streaming message from anthropic")
 			telemetry.RecordError(ctx, stream.Err())
 			span.SetStatus(codes.Error, stream.Err().Error())
 			return nil, stream.Err()
