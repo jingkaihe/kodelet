@@ -370,7 +370,7 @@ log_level: "info"  # panic, fatal, error, warn, info, debug, trace
 provider: "anthropic"
 model: "claude-sonnet-4-20250514"
 max_tokens: 8192
-weak_model: "claude-3-5-haiku-latest"
+weak_model: "claude-3-5-haiku-20241022"
 weak_model_max_tokens: 8192
 cache_every: 10  # Cache messages every N interactions (0 to disable)
 
@@ -487,7 +487,7 @@ kodelet run --allowed-commands "ls *,pwd,echo *" "analyze this directory"
 
 Kodelet supports various Anthropic Claude models:
 - `claude-sonnet-4-20250514` (recommended for standard tasks)
-- `claude-3-5-haiku-latest` (recommended for lightweight tasks)
+- `claude-3-5-haiku-20241022` (recommended for lightweight tasks)
 - `claude-3-opus-20240229`
 
 Features:

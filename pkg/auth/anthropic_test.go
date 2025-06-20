@@ -233,7 +233,7 @@ func TestAnthropicAccessToken(t *testing.T) {
 }
 
 func TestAnthropicHeader(t *testing.T) {
-	header := AnthropicHeader()
+	header := AnthropicHeader("access_token_123")
 	assert.NotNil(t, header)
 }
 

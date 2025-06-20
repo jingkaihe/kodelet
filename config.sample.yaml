@@ -22,7 +22,7 @@ max_tokens: 8192
 thinking_budget_tokens: 4048
 
 # Weak model to use for less complex tasks
-weak_model: "claude-3-5-haiku-latest"
+weak_model: "claude-3-5-haiku-2024102"
 
 # Maximum tokens for weak model responses
 weak_model_max_tokens: 8192

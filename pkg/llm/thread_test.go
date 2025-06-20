@@ -135,7 +135,7 @@ func TestSendMessageAndGetText(t *testing.T) {
 		tools.NewBasicState(ctx),
 		query,
 		llmtypes.Config{
-			Model:     string(anthropic.ModelClaude3_5HaikuLatest),
+			Model:     string(anthropic.ModelClaude3_5Haiku20241022),
 			MaxTokens: 100,
 		},
 		true,
@@ -191,7 +191,7 @@ func TestSendMessageRealClient(t *testing.T) {
 
 	// Create a real thread
 	thread := NewThread(llmtypes.Config{
-		Model:     string(anthropic.ModelClaudeSonnet4_0), // Using a real model
+		Model:     string(anthropic.ModelClaude3_5Haiku20241022), // Using a real model
 		MaxTokens: 100,
 	})
 	thread.SetState(tools.NewBasicState(context.TODO()))
@@ -254,7 +254,7 @@ func TestSendMessageWithToolUse(t *testing.T) {
 
 	// Create thread
 	thread := NewThread(llmtypes.Config{
-		Model:     string(anthropic.ModelClaude3_5HaikuLatest),
+		Model:     string(anthropic.ModelClaude3_5Haiku20241022),
 		MaxTokens: 1000,
 	})
 	thread.SetState(tools.NewBasicState(context.TODO()))

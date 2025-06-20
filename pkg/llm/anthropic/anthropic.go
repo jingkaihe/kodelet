@@ -78,11 +78,7 @@ func NewAnthropicThread(config llmtypes.Config) *AnthropicThread {
 			client = anthropic.NewClient()
 		} else {
 			logger.Debug("using anthropic access token")
-			opts := []option.RequestOption{
-				option.WithAuthToken(accessToken),
-			}
-			opts = append(opts, auth.AnthropicHeader()...)
-			client = anthropic.NewClient(opts...)
+			client = anthropic.NewClient(auth.AnthropicHeader(accessToken)...)
 			useSubscription = true
 		}
 	} else {
