@@ -1,5 +1,15 @@
 # Kodelet
 
+## 0.0.45.alpha (2025-06-20)
+
+### Authentication & Model Access
+
+**Anthropic OAuth Login**: Added `kodelet anthropic-login` command for accessing subscription-based models
+- OAuth-based authentication flow with automatic browser opening
+- Supports subscription models not available via standard API key
+- Credentials saved to `~/.kodelet/anthropic-subscription.json`
+- Cross-platform browser support (macOS, Linux, Windows)
+
 ## 0.0.44.alpha (2025-06-18)
 
 ### Security & Configuration
