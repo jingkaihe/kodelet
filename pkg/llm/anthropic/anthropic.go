@@ -292,20 +292,24 @@ func (t *AnthropicThread) processMessageExchange(
 ) (string, bool, error) {
 	var finalOutput string
 
+	systemPromptBlocks := []anthropic.TextBlockParam{}
+	if t.useSubscription {
+		systemPromptBlocks = append(systemPromptBlocks, auth.AnthropicSystemPrompt())
+	}
+	systemPromptBlocks = append(systemPromptBlocks, anthropic.TextBlockParam{
+		Text: systemPrompt,
+		CacheControl: anthropic.CacheControlEphemeralParam{
+			Type: "ephemeral",
+		},
+	})
+
 	// Prepare message parameters
 	messageParams := anthropic.MessageNewParams{
 		MaxTokens: int64(maxTokens),
-		System: []anthropic.TextBlockParam{
-			{
-				Text: systemPrompt,
-				CacheControl: anthropic.CacheControlEphemeralParam{
-					Type: "ephemeral",
-				},
-			},
-		},
-		Messages: t.messages,
-		Model:    model,
-		Tools:    tools.ToAnthropicTools(t.tools(opt)),
+		System:    systemPromptBlocks,
+		Messages:  t.messages,
+		Model:     model,
+		Tools:     tools.ToAnthropicTools(t.tools(opt)),
 	}
 	if t.shouldUtiliseThinking(model) {
 		messageParams.Thinking = anthropic.ThinkingConfigParamUnion{

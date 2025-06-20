@@ -1,5 +1,10 @@
 # Kodelet
 
+## 0.0.46.alpha (2025-06-20)
+
+### Anthropic Usage Enhancements
+- System prompt includes official Anthropic branding when using subscription models
+
 ## 0.0.45.alpha (2025-06-20)
 
 ### Authentication & Model Access
