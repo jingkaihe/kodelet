@@ -1,5 +1,10 @@
 # Kodelet
 
+## 0.0.47.alpha (2025-06-21)
+
+### Token Refresh Improvements
+- Improved Anthropic token refresh logic to refresh 10 minutes before expiration instead of after expiration
+
 ## 0.0.46.alpha (2025-06-20)
 
 ### Anthropic Usage Enhancements
