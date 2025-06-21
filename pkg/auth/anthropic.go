@@ -239,7 +239,7 @@ func refreshAnthropicToken(ctx context.Context, creds *AnthropicCredentials) (*A
 		return nil, errors.Wrap(err, "failed to parse token response")
 	}
 
-	refreshedCreds := &AnthropicCredentials{
+	refreshed := &AnthropicCredentials{
 		AccessToken:  tokenResponse.AccessToken,
 		RefreshToken: tokenResponse.RefreshToken,
 		ExpiresAt:    time.Now().Add(time.Duration(tokenResponse.ExpiresIn) * time.Second).Unix(),
@@ -247,11 +247,11 @@ func refreshAnthropicToken(ctx context.Context, creds *AnthropicCredentials) (*A
 		Scope:        creds.Scope,
 	}
 
-	if _, err := SaveAnthropicCredentials(refreshedCreds); err != nil {
+	if _, err := SaveAnthropicCredentials(refreshed); err != nil {
 		return nil, errors.Wrap(err, "failed to save anthropic credentials")
 	}
 
-	return refreshedCreds, nil
+	return refreshed, nil
 }
 
 func AnthropicAccessToken(ctx context.Context) (string, error) {
@@ -278,12 +278,12 @@ func AnthropicAccessToken(ctx context.Context) (string, error) {
 		return creds.AccessToken, nil
 	}
 
-	refreshedCreds, err := refreshAnthropicToken(ctx, &creds)
+	refreshed, err := refreshAnthropicToken(ctx, &creds)
 	if err != nil {
 		return "", err
 	}
 
-	return refreshedCreds.AccessToken, nil
+	return refreshed.AccessToken, nil
 }
 
 func AnthropicHeader(accessToken string) []option.RequestOption {
