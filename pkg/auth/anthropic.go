@@ -200,6 +200,60 @@ func SaveAnthropicCredentials(creds *AnthropicCredentials) (string, error) {
 	return filePath, nil
 }
 
+func refreshAnthropicToken(ctx context.Context, creds *AnthropicCredentials) (*AnthropicCredentials, error) {
+	payload := map[string]string{
+		"grant_type":    "refresh_token",
+		"client_id":     anthropicClientID,
+		"refresh_token": creds.RefreshToken,
+	}
+
+	jsonPayload, err := json.Marshal(payload)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to marshal refresh token request payload")
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", anthropicTokenEndpoint, bytes.NewBuffer(jsonPayload))
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create refresh token request")
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := http.DefaultClient
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to send refresh token request")
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to read refresh token response")
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, errors.Errorf("refresh token failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var tokenResponse AnthropicTokenResponse
+	if err := json.Unmarshal(body, &tokenResponse); err != nil {
+		return nil, errors.Wrap(err, "failed to parse token response")
+	}
+
+	refreshed := &AnthropicCredentials{
+		AccessToken:  tokenResponse.AccessToken,
+		RefreshToken: tokenResponse.RefreshToken,
+		ExpiresAt:    time.Now().Add(time.Duration(tokenResponse.ExpiresIn) * time.Second).Unix(),
+		Email:        creds.Email,
+		Scope:        creds.Scope,
+	}
+
+	if _, err := SaveAnthropicCredentials(refreshed); err != nil {
+		return nil, errors.Wrap(err, "failed to save anthropic credentials")
+	}
+
+	return refreshed, nil
+}
+
 func AnthropicAccessToken(ctx context.Context) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -218,62 +272,18 @@ func AnthropicAccessToken(ctx context.Context) (string, error) {
 		return "", errors.Wrap(err, "failed to decode anthropic subscription file")
 	}
 
-	if creds.ExpiresAt > time.Now().Unix() {
+	// Refresh token 10 minutes before expiration
+	refreshThreshold := time.Now().Add(10 * time.Minute).Unix()
+	if creds.ExpiresAt > refreshThreshold {
 		return creds.AccessToken, nil
 	}
 
-	// refresh token
-	payload := map[string]string{
-		"grant_type":    "refresh_token",
-		"client_id":     anthropicClientID,
-		"refresh_token": creds.RefreshToken,
-	}
-
-	jsonPayload, err := json.Marshal(payload)
+	refreshed, err := refreshAnthropicToken(ctx, &creds)
 	if err != nil {
-		return "", errors.Wrap(err, "failed to marshal refresh token request payload")
+		return "", err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", anthropicTokenEndpoint, bytes.NewBuffer(jsonPayload))
-	if err != nil {
-		return "", errors.Wrap(err, "failed to create refresh token request")
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	client := http.DefaultClient
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", errors.Wrap(err, "failed to send refresh token request")
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", errors.Wrap(err, "failed to read refresh token response")
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return "", errors.Errorf("refresh token failed with status %d: %s", resp.StatusCode, string(body))
-	}
-
-	var tokenResponse AnthropicTokenResponse
-	if err := json.Unmarshal(body, &tokenResponse); err != nil {
-		return "", errors.Wrap(err, "failed to parse token response")
-	}
-
-	creds = AnthropicCredentials{
-		AccessToken:  tokenResponse.AccessToken,
-		RefreshToken: tokenResponse.RefreshToken,
-		ExpiresAt:    time.Now().Add(time.Duration(tokenResponse.ExpiresIn) * time.Second).Unix(),
-		Email:        creds.Email,
-		Scope:        creds.Scope,
-	}
-
-	if _, err := SaveAnthropicCredentials(&creds); err != nil {
-		return "", errors.Wrap(err, "failed to save anthropic credentials")
-	}
-
-	return creds.AccessToken, nil
+	return refreshed.AccessToken, nil
 }
 
 func AnthropicHeader(accessToken string) []option.RequestOption {
