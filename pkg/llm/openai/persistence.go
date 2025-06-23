@@ -106,6 +106,8 @@ func (t *OpenAIThread) loadConversation() error {
 		return fmt.Errorf("error unmarshaling messages: %w", err)
 	}
 
+	t.cleanupOrphanedMessages()
+
 	t.messages = messages
 	t.usage = &record.Usage
 	t.summary = record.Summary
@@ -131,7 +133,7 @@ func ExtractMessages(data []byte) ([]llmtypes.Message, error) {
 		content := msg.Content
 
 		// Handle tool calls by serializing them to JSON
-		if msg.ToolCalls != nil && len(msg.ToolCalls) > 0 {
+		if len(msg.ToolCalls) > 0 {
 			toolCallsJSON, _ := json.Marshal(msg.ToolCalls)
 			content = string(toolCallsJSON)
 		}

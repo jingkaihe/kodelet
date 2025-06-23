@@ -5,6 +5,9 @@
 ### Token Refresh Improvements
 - Improved Anthropic token refresh logic to refresh 10 minutes before expiration instead of after expiration
 
+### Web Fetch Tool Enhancements
+- Allow web fetch tool to fetch files directly without prompt summarise. This is particularly useful for fetching source code where you just want to have the raw content.
+
 ## 0.0.46.alpha (2025-06-20)
 
 ### Anthropic Usage Enhancements

@@ -26,6 +26,11 @@ func (t *AnthropicThread) cleanupOrphanedMessages() {
 			t.messages = t.messages[:len(t.messages)-1]
 			continue
 		}
+		// remove the last message if it is an empty message
+		if len(lastMessage.Content) == 1 && lastMessage.Content[0].OfText != nil && lastMessage.Content[0].OfText.Text == "" {
+			t.messages = t.messages[:len(t.messages)-1]
+			continue
+		}
 		// remove the last message if it has any tool use message, as it must be followed by a tool result message
 		hasToolUse := false
 		for _, contentBlock := range lastMessage.Content {
@@ -110,6 +115,7 @@ func (t *AnthropicThread) loadConversation() error {
 	}
 	t.messages = messages
 
+	t.cleanupOrphanedMessages()
 	// Restore usage statistics
 	t.usage = &record.Usage
 	t.summary = record.Summary

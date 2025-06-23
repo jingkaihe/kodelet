@@ -8,6 +8,9 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path"
+	"path/filepath"
 	"strings"
 
 	md "github.com/JohannesKaufmann/html-to-markdown"
@@ -17,13 +20,15 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/jingkaihe/kodelet/pkg/utils"
 )
 
 type WebFetchToolResult struct {
-	url    string
-	prompt string
-	result string
-	err    string
+	url      string
+	prompt   string
+	result   string
+	err      string
+	filePath string // For saved files
 }
 
 func (r *WebFetchToolResult) GetResult() string {
@@ -46,7 +51,13 @@ func (r *WebFetchToolResult) UserFacing() string {
 	if r.IsError() {
 		return r.GetError()
 	}
-	return fmt.Sprintf("Web Fetch: %s\nPrompt: %s\n%s", r.url, r.prompt, r.result)
+	if r.filePath != "" {
+		return fmt.Sprintf("Web Fetch: %s\nSaved to: %s\n%s", r.url, r.filePath, r.result)
+	}
+	if r.prompt != "" {
+		return fmt.Sprintf("Web Fetch: %s\nPrompt: %s\n%s", r.url, r.prompt, r.result)
+	}
+	return fmt.Sprintf("Web Fetch: %s\n%s", r.url, r.result)
 }
 
 // WebFetchTool implements the web_fetch tool for retrieving and processing web content.
@@ -55,7 +66,7 @@ type WebFetchTool struct{}
 // WebFetchInput defines the input parameters for the web_fetch tool.
 type WebFetchInput struct {
 	URL    string `json:"url" jsonschema:"description=The URL to fetch content from"`
-	Prompt string `json:"prompt" jsonschema:"description=Information to extract from the content"`
+	Prompt string `json:"prompt,omitempty" jsonschema:"description=Information to extract from HTML/Markdown content (optional)"`
 }
 
 // Name returns the name of the tool.
@@ -70,27 +81,84 @@ func (t *WebFetchTool) GenerateSchema() *jsonschema.Schema {
 
 // Description returns the description of the tool.
 func (t *WebFetchTool) Description() string {
-	return `Fetches content from a web URL and extracts specific information.
+	return `Fetches content from a web URL with intelligent content handling.
 
 ## Input
 - url: The URL to fetch content from. The URL must be a valid HTTPS URL.
-- prompt: Information that should be extracted from the content
+- prompt: (Optional) Only provided if you want to extract specific information from HTML/Markdown content using AI instead of getting the whole content
 
 ## Behavior
-- Makes an HTTP GET request to the specified URL
-- Follows redirects as long as the domain does not change
-- Converts HTML content to Markdown for better readability
-- Uses AI to extract the requested information from the content
+**Scenario 1: Code/Text Content**
+- If the URL contains code, plain text, JSON, XML, or other structured text:
+  - Saves the content to ./.kodelet/web-archives/{domain_name}/{filename}.{ext}
+  - Returns the full content with line numbers if under 100KB
+  - Returns first 100KB with line numbers and truncation notice if over 100KB
+  - No AI processing is applied
+
+**Scenario 2: HTML/Markdown Content**
+- If the URL contains HTML or Markdown:
+  - **Without prompt**: Converts HTML to Markdown and returns the converted content directly
+  - **With prompt**: Uses AI to extract specific information based on the prompt
+  - Does not save the content to file in either case
 
 ## Common Use Cases
-* Retrieving specific information from documentation websites
-* Extracting data from public web pages
-* Analyzing content from online resources
-* Providing context from web-based reference material
+* Fetching code files from GitHub or other repositories (saved with line numbers)
+* Downloading configuration files or documentation (saved with line numbers)
+* Converting HTML pages to readable Markdown format (returned directly)
+* Extracting specific information from HTML documentation using AI prompts
+* Analyzing structured data files like JSON or XML (saved with line numbers)
 
 ## Important Notes
 1. Only public URLs that don't require authentication can be accessed
 2. For security reasons, redirects are only followed within the same domain
+3. Code/text files are saved to ./.kodelet/web-archives/{domain_name}/ directory for future reference
+4. HTML/Markdown content is returned directly (with optional AI processing)
+5. Prompt parameter only affects HTML/Markdown content behavior
+
+## Examples
+
+<good-example>
+url: https://raw.githubusercontent.com/user/repo/main/config.yaml
+<reasoning>
+Fetches a code/text file from GitHub and saves it with line numbers for future reference.
+</reasoning>
+</good-example>
+
+<good-example>
+url: https://docs.example.com/api-reference
+<reasoning>
+Converts HTML documentation page to readable Markdown format and returns it directly.
+</reasoning>
+</good-example>
+
+<good-example>
+url: https://docs.example.com/api-reference
+prompt: Extract all API endpoints and their HTTP methods
+<reasoning>
+Uses AI to extract specific information from HTML documentation based on the provided prompt.
+</reasoning>
+</good-example>
+
+<bad-example>
+url: http://insecure-site.com/file.txt
+<reasoning>
+Only HTTPS URLs are supported for security reasons.
+</reasoning>
+</bad-example>
+
+<bad-example>
+url: https://example.com/download.zip
+<reasoning>
+Binary files like ZIP archives are not supported. Only text-based content can be fetched.
+</reasoning>
+</bad-example>
+
+<bad-example>
+url: https://private-api.com/data
+<reasoning>
+URLs requiring authentication cannot be accessed as only public URLs are supported.
+</reasoning>
+</bad-example>
 `
 }
 
@@ -116,10 +184,7 @@ func (t *WebFetchTool) ValidateInput(state tooltypes.State, parameters string) e
 		return errors.New("only HTTPS scheme is supported")
 	}
 
-	if input.Prompt == "" {
-		return errors.New("prompt is required")
-	}
-
+	// Prompt is now optional, no validation needed
 	return nil
 }
 
@@ -145,7 +210,192 @@ func (t *WebFetchTool) Execute(ctx context.Context, state tooltypes.State, param
 		}
 	}
 
-	// 2. Convert HTML to Markdown if appropriate
+	// 2. Determine content handling strategy
+	isHtmlOrMarkdown := strings.Contains(contentType, "text/html") ||
+		strings.Contains(contentType, "text/markdown") ||
+		isMarkdownFromURL(input.URL)
+
+	// Scenario 1: Code/Text content - save to file with line numbers
+	if !isHtmlOrMarkdown {
+		return t.handleCodeTextContent(ctx, input, content, contentType)
+	}
+
+	// Scenario 2: HTML/Markdown content
+	if input.Prompt == "" {
+		// No prompt: return converted markdown content directly
+		return t.handleHtmlMarkdownContent(ctx, input, content, contentType)
+	} else {
+		// With prompt: use AI extraction
+		return t.handleHtmlMarkdownWithPrompt(ctx, input, content, contentType)
+	}
+}
+
+// TracingKVs returns tracing key-value pairs for observability.
+func (t *WebFetchTool) TracingKVs(parameters string) ([]attribute.KeyValue, error) {
+	input := &WebFetchInput{}
+	err := json.Unmarshal([]byte(parameters), input)
+	if err != nil {
+		return nil, err
+	}
+
+	return []attribute.KeyValue{
+		attribute.String("url", input.URL),
+	}, nil
+}
+
+// isMarkdownFromURL checks if the URL ends with markdown file extensions
+func isMarkdownFromURL(urlStr string) bool {
+	parsedURL, err := url.Parse(urlStr)
+	if err != nil {
+		return false
+	}
+	ext := strings.ToLower(path.Ext(parsedURL.Path))
+	return ext == ".md" || ext == ".markdown"
+}
+
+// getFileNameFromURL extracts a filename from the URL
+func getFileNameFromURL(urlStr string) string {
+	parsedURL, err := url.Parse(urlStr)
+	if err != nil {
+		return "unnamed"
+	}
+
+	filename := path.Base(parsedURL.Path)
+	if filename == "" || filename == "/" || filename == "." {
+		// Use domain name if no filename
+		filename = strings.ReplaceAll(parsedURL.Hostname(), ".", "_")
+	}
+
+	// Remove any file extension to add appropriate one later
+	ext := path.Ext(filename)
+	if ext != "" {
+		filename = strings.TrimSuffix(filename, ext)
+	}
+
+	return filename
+}
+
+// getFileExtensionFromContentType determines file extension from content type
+func getFileExtensionFromContentType(contentType, urlStr string) string {
+	// Check URL first for explicit extension
+	parsedURL, err := url.Parse(urlStr)
+	if err == nil {
+		ext := strings.ToLower(path.Ext(parsedURL.Path))
+		if ext != "" {
+			return ext
+		}
+	}
+
+	// Fall back to content type mapping
+	contentType = strings.ToLower(contentType)
+	switch {
+	case strings.Contains(contentType, "javascript"):
+		return ".js"
+	case strings.Contains(contentType, "json"):
+		return ".json"
+	case strings.Contains(contentType, "xml"):
+		return ".xml"
+	case strings.Contains(contentType, "yaml"):
+		return ".yaml"
+	case strings.Contains(contentType, "text/html"):
+		return ".html"
+	case strings.Contains(contentType, "text/markdown"):
+		return ".md"
+	case strings.Contains(contentType, "text/plain"):
+		return ".txt"
+	case strings.Contains(contentType, "text/css"):
+		return ".css"
+	default:
+		return ".txt"
+	}
+}
+
+// handleCodeTextContent saves content to file and returns with line numbers
+func (t *WebFetchTool) handleCodeTextContent(ctx context.Context, input *WebFetchInput, content, contentType string) tooltypes.ToolResult {
+	// Parse URL to get domain name
+	parsedURL, err := url.Parse(input.URL)
+	if err != nil {
+		return &WebFetchToolResult{
+			url:    input.URL,
+			prompt: input.Prompt,
+			err:    fmt.Sprintf("Failed to parse URL: %s", err),
+		}
+	}
+
+	// Create domain-specific web-archives directory
+	domainName := parsedURL.Hostname()
+	archiveDir := filepath.Join("./.kodelet/web-archives", domainName)
+	if err := os.MkdirAll(archiveDir, 0755); err != nil {
+		return &WebFetchToolResult{
+			url:    input.URL,
+			prompt: input.Prompt,
+			err:    fmt.Sprintf("Failed to create archive directory: %s", err),
+		}
+	}
+
+	// Generate filename
+	baseFileName := getFileNameFromURL(input.URL)
+	ext := getFileExtensionFromContentType(contentType, input.URL)
+	fileName := baseFileName + ext
+	filePath := filepath.Join(archiveDir, fileName)
+
+	// Handle potential filename conflicts
+	counter := 1
+	for {
+		if _, err := os.Stat(filePath); os.IsNotExist(err) {
+			break
+		}
+		filePath = fmt.Sprintf("%s_%d%s",
+			filepath.Join(archiveDir, baseFileName), counter, ext)
+		counter++
+	}
+
+	// Write content to file
+	if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
+		return &WebFetchToolResult{
+			url:    input.URL,
+			prompt: input.Prompt,
+			err:    fmt.Sprintf("Failed to save content to file: %s", err),
+		}
+	}
+
+	// Prepare content with line numbers
+	lines := strings.Split(content, "\n")
+	contentBytes := len(content)
+
+	var resultContent string
+	if contentBytes <= MaxOutputBytes {
+		// Return full content with line numbers
+		resultContent = utils.ContentWithLineNumber(lines, 1)
+	} else {
+		// Return truncated content with line numbers
+		bytesRead := 0
+		var truncatedLines []string
+		for _, line := range lines {
+			if bytesRead+len(line)+1 > MaxOutputBytes { // +1 for newline
+				break
+			}
+			truncatedLines = append(truncatedLines, line)
+			bytesRead += len(line) + 1
+		}
+
+		resultContent = utils.ContentWithLineNumber(truncatedLines, 1)
+		resultContent += fmt.Sprintf("\n\n[truncated due to max output bytes limit of %d, please read the full file at %s]",
+			MaxOutputBytes, filePath)
+	}
+
+	return &WebFetchToolResult{
+		url:      input.URL,
+		prompt:   input.Prompt,
+		result:   resultContent,
+		filePath: filePath,
+	}
+}
+
+// handleHtmlMarkdownContent processes HTML/Markdown content without AI extraction
+// Returns the converted markdown content directly
+func (t *WebFetchTool) handleHtmlMarkdownContent(ctx context.Context, input *WebFetchInput, content, contentType string) tooltypes.ToolResult {
+	// Convert HTML to Markdown if needed
 	var processedContent string
 	if strings.Contains(contentType, "text/html") {
 		processedContent = convertHTMLToMarkdown(ctx, content)
@@ -153,7 +403,24 @@ func (t *WebFetchTool) Execute(ctx context.Context, state tooltypes.State, param
 		processedContent = content
 	}
 
-	// 3. Use weak LLM to extract the requested information
+	return &WebFetchToolResult{
+		url:    input.URL,
+		prompt: input.Prompt,
+		result: processedContent,
+	}
+}
+
+// handleHtmlMarkdownWithPrompt processes HTML/Markdown content with AI extraction
+func (t *WebFetchTool) handleHtmlMarkdownWithPrompt(ctx context.Context, input *WebFetchInput, content, contentType string) tooltypes.ToolResult {
+	// Convert HTML to Markdown if needed
+	var processedContent string
+	if strings.Contains(contentType, "text/html") {
+		processedContent = convertHTMLToMarkdown(ctx, content)
+	} else {
+		processedContent = content
+	}
+
+	// Use AI to extract the requested information
 	subAgentConfig, ok := ctx.Value(llm.SubAgentConfig{}).(llm.SubAgentConfig)
 	if !ok {
 		return &WebFetchToolResult{
@@ -209,19 +476,6 @@ IMPORTANT: Make sure that you preserve all the links in the content including hy
 	}
 }
 
-// TracingKVs returns tracing key-value pairs for observability.
-func (t *WebFetchTool) TracingKVs(parameters string) ([]attribute.KeyValue, error) {
-	input := &WebFetchInput{}
-	err := json.Unmarshal([]byte(parameters), input)
-	if err != nil {
-		return nil, err
-	}
-
-	return []attribute.KeyValue{
-		attribute.String("url", input.URL),
-	}, nil
-}
-
 // fetchWithSameDomainRedirects fetches content from a URL and follows redirects
 // only if they stay within the same domain.
 func fetchWithSameDomainRedirects(ctx context.Context, urlStr string) (string, string, error) {
@@ -229,6 +483,11 @@ func fetchWithSameDomainRedirects(ctx context.Context, urlStr string) (string, s
 	parsedURL, err := url.Parse(urlStr)
 	if err != nil {
 		return "", "", fmt.Errorf("invalid URL: %w", err)
+	}
+
+	// Only HTTPS URLs are supported for security reasons
+	if parsedURL.Scheme != "https" {
+		return "", "", errors.New("only HTTPS scheme is supported")
 	}
 
 	originalDomain := parsedURL.Hostname()
