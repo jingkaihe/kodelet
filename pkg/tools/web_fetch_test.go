@@ -290,7 +290,7 @@ func TestWebFetchToolFilenameConflictResolution(t *testing.T) {
 		os.Chdir(tempDir)
 
 		// Create archive directory manually
-		archiveDir := "./kodelet/web-archives"
+		archiveDir := "./.kodelet/web-archives"
 		err := os.MkdirAll(archiveDir, 0755)
 		require.NoError(t, err)
 
@@ -413,7 +413,7 @@ func TestWebFetchToolDescription(t *testing.T) {
 	// Check that description contains key information about new functionality
 	assert.Contains(t, description, "Scenario 1: Code/Text Content")
 	assert.Contains(t, description, "Scenario 2: HTML/Markdown Content")
-	assert.Contains(t, description, "./kodelet/web-archives/")
+	assert.Contains(t, description, "./.kodelet/web-archives/")
 	assert.Contains(t, description, "100KB")
 	assert.Contains(t, description, "prompt: (Optional)")
 	assert.Contains(t, description, "Without prompt")

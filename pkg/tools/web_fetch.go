@@ -90,7 +90,7 @@ func (t *WebFetchTool) Description() string {
 ## Behavior
 **Scenario 1: Code/Text Content**
 - If the URL contains code, plain text, JSON, XML, or other structured text:
-  - Saves the content to ./kodelet/web-archives/{filename}.{ext}
+  - Saves the content to ./.kodelet/web-archives/{filename}.{ext}
   - Returns the full content with line numbers if under 100KB
   - Returns first 100KB with line numbers and truncation notice if over 100KB
   - No AI processing is applied
@@ -111,7 +111,7 @@ func (t *WebFetchTool) Description() string {
 ## Important Notes
 1. Only public URLs that don't require authentication can be accessed
 2. For security reasons, redirects are only followed within the same domain
-3. Code/text files are saved to ./kodelet/web-archives/ directory for future reference
+3. Code/text files are saved to ./.kodelet/web-archives/ directory for future reference
 4. HTML/Markdown content is returned directly (with optional AI processing)
 5. Prompt parameter only affects HTML/Markdown content behavior
 `
@@ -268,7 +268,7 @@ func getFileExtensionFromContentType(contentType, urlStr string) string {
 // handleCodeTextContent saves content to file and returns with line numbers
 func (t *WebFetchTool) handleCodeTextContent(ctx context.Context, input *WebFetchInput, content, contentType string) tooltypes.ToolResult {
 	// Create web-archives directory
-	archiveDir := "./kodelet/web-archives"
+	archiveDir := "./.kodelet/web-archives"
 	if err := os.MkdirAll(archiveDir, 0755); err != nil {
 		return &WebFetchToolResult{
 			url:    input.URL,
