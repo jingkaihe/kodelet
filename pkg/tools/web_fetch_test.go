@@ -112,7 +112,7 @@ func TestWebFetchToolHelperFunctions(t *testing.T) {
 			{"https://example.com/", "example_com"},
 			{"https://api.github.com/", "api_github_com"},
 			{"https://sub.domain.com/path/", "path"}, // path.Base("/path/") returns "path"
-			{"invalid-url", "invalid-url"}, // Treated as relative URL, path.Base("invalid-url") returns "invalid-url"
+			{"invalid-url", "invalid-url"},           // Treated as relative URL, path.Base("invalid-url") returns "invalid-url"
 		}
 
 		for _, test := range tests {
@@ -131,7 +131,7 @@ func TestWebFetchToolHelperFunctions(t *testing.T) {
 			{"text/plain", "https://example.com/script.py", ".py"},
 			{"text/plain", "https://example.com/config.yaml", ".yaml"},
 			{"text/plain", "https://example.com/data.json", ".json"},
-			
+
 			// Content type mapping when no URL extension
 			{"application/json", "https://api.example.com/data", ".json"},
 			{"text/html", "https://example.com/page", ".html"},
@@ -144,7 +144,7 @@ func TestWebFetchToolHelperFunctions(t *testing.T) {
 			{"text/plain", "https://example.com/file", ".txt"},
 			{"text/css", "https://example.com/style", ".css"},
 			{"text/markdown", "https://example.com/doc", ".md"},
-			
+
 			// Fallback to .txt for unknown types
 			{"unknown/type", "https://example.com/file", ".txt"},
 			{"", "https://example.com/file", ".txt"},
@@ -169,11 +169,11 @@ func TestWebFetchToolCodeTextContent(t *testing.T) {
 		// Test content type detection
 		ext := getFileExtensionFromContentType("application/json", "https://example.com/data")
 		assert.Equal(t, ".json", ext)
-		
+
 		// Test filename extraction
 		filename := getFileNameFromURL("https://example.com/test.py")
 		assert.Equal(t, "test", filename)
-		
+
 		// Test markdown detection
 		isMd := isMarkdownFromURL("https://example.com/README.md")
 		assert.True(t, isMd)
@@ -197,7 +197,7 @@ func TestWebFetchToolHTMLContentWithPrompt(t *testing.T) {
 		mockThread := &MockThread{
 			response: "The main heading is: Welcome to Example.com",
 		}
-		
+
 		ctx := context.WithValue(context.Background(), llm.SubAgentConfig{}, llm.SubAgentConfig{
 			Thread: mockThread,
 		})
@@ -207,10 +207,10 @@ func TestWebFetchToolHTMLContentWithPrompt(t *testing.T) {
 			URL:    "https://example.com/page.html",
 			Prompt: "What is the main heading?",
 		}
-		
+
 		htmlContent := `<html><body><h1>Welcome to Example.com</h1></body></html>`
 		result := tool.handleHtmlMarkdownWithPrompt(ctx, input, htmlContent, "text/html")
-		
+
 		assert.False(t, result.IsError())
 		assert.Equal(t, "The main heading is: Welcome to Example.com", result.GetResult())
 		assert.True(t, mockThread.called)
@@ -222,17 +222,17 @@ func TestWebFetchToolHTMLContentWithPrompt(t *testing.T) {
 			URL: "https://example.com/page.html",
 			// No prompt provided
 		}
-		
+
 		htmlContent := `<html><body><h1>Welcome to Example.com</h1><p>This is a test page.</p></body></html>`
 		result := tool.handleHtmlMarkdownContent(context.Background(), input, htmlContent, "text/html")
-		
+
 		assert.False(t, result.IsError())
 		content := result.GetResult()
-		
+
 		// Should contain markdown conversion
 		assert.Contains(t, content, "# Welcome to Example.com")
 		assert.Contains(t, content, "This is a test page.")
-		
+
 		// Should not have line numbers (that's only for code/text files)
 		assert.NotContains(t, content, "1:")
 		assert.NotContains(t, content, "2:")
@@ -244,7 +244,7 @@ func TestWebFetchToolHTMLContentWithPrompt(t *testing.T) {
 			URL: "https://example.com/doc.md",
 			// No prompt provided
 		}
-		
+
 		markdownContent := `# API Documentation
 
 ## Getting Started
@@ -252,12 +252,12 @@ This is the main documentation for our API.
 
 ### Authentication
 Use your API key in the header.`
-		
+
 		result := tool.handleHtmlMarkdownContent(context.Background(), input, markdownContent, "text/markdown")
-		
+
 		assert.False(t, result.IsError())
 		content := result.GetResult()
-		
+
 		// Should return the markdown content as-is
 		assert.Equal(t, markdownContent, content)
 	})
@@ -345,18 +345,18 @@ func TestConvertHTMLToMarkdown(t *testing.T) {
 		expected []string // Strings that should be present in the markdown
 	}{
 		{
-			name: "Basic HTML conversion",
-			html: "<html><body><h1>Hello World</h1><p>This is a <strong>test</strong>.</p></body></html>",
+			name:     "Basic HTML conversion",
+			html:     "<html><body><h1>Hello World</h1><p>This is a <strong>test</strong>.</p></body></html>",
 			expected: []string{"# Hello World", "This is a **test**."},
 		},
 		{
-			name: "Links and images",
-			html: `<html><body><a href="/about">About</a><img src="image.jpg" alt="Test Image"></body></html>`,
+			name:     "Links and images",
+			html:     `<html><body><a href="/about">About</a><img src="image.jpg" alt="Test Image"></body></html>`,
 			expected: []string{"[About](/about)", "![Test Image](image.jpg)"},
 		},
 		{
-			name: "Lists",
-			html: "<html><body><ul><li>Item 1</li><li>Item 2</li></ul></body></html>",
+			name:     "Lists",
+			html:     "<html><body><ul><li>Item 1</li><li>Item 2</li></ul></body></html>",
 			expected: []string{"- Item 1", "- Item 2"},
 		},
 	}
@@ -409,7 +409,7 @@ func TestWebFetchToolName(t *testing.T) {
 func TestWebFetchToolDescription(t *testing.T) {
 	tool := &WebFetchTool{}
 	description := tool.Description()
-	
+
 	// Check that description contains key information about new functionality
 	assert.Contains(t, description, "Scenario 1: Code/Text Content")
 	assert.Contains(t, description, "Scenario 2: HTML/Markdown Content")
@@ -423,15 +423,15 @@ func TestWebFetchToolDescription(t *testing.T) {
 func TestWebFetchToolGenerateSchema(t *testing.T) {
 	tool := &WebFetchTool{}
 	schema := tool.GenerateSchema()
-	
+
 	assert.NotNil(t, schema)
 	assert.NotNil(t, schema.Properties)
-	
+
 	// Check that URL property exists
 	urlProp, exists := schema.Properties.Get("url")
 	assert.True(t, exists)
 	assert.NotNil(t, urlProp)
-	
+
 	// Check that prompt property exists
 	promptProp, exists := schema.Properties.Get("prompt")
 	assert.True(t, exists)
@@ -440,7 +440,7 @@ func TestWebFetchToolGenerateSchema(t *testing.T) {
 
 func TestWebFetchToolTracingKVs(t *testing.T) {
 	tool := &WebFetchTool{}
-	
+
 	t.Run("Valid parameters", func(t *testing.T) {
 		kvs, err := tool.TracingKVs(`{"url": "https://example.com", "prompt": "Extract the main heading"}`)
 		assert.NoError(t, err)
@@ -522,7 +522,7 @@ func (m *MockThread) Reset() {
 
 func TestWebFetchToolCodeContentTruncation(t *testing.T) {
 	tool := &WebFetchTool{}
-	
+
 	// Create a temporary directory for testing
 	tempDir := t.TempDir()
 	oldWd, _ := os.Getwd()
@@ -533,33 +533,33 @@ func TestWebFetchToolCodeContentTruncation(t *testing.T) {
 		input := &WebFetchInput{
 			URL: "https://example.com/small.txt",
 		}
-		
+
 		// Create small content (well under 100KB)
 		smallContent := "line 1\nline 2\nline 3\nline 4\nline 5"
-		
+
 		result := tool.handleCodeTextContent(context.Background(), input, smallContent, "text/plain")
-		
+
 		assert.False(t, result.IsError())
 		content := result.GetResult()
-		
+
 		// Should contain line numbers starting from 1
 		assert.Contains(t, content, "1: line 1")
 		assert.Contains(t, content, "2: line 2")
 		assert.Contains(t, content, "3: line 3")
 		assert.Contains(t, content, "4: line 4")
 		assert.Contains(t, content, "5: line 5")
-		
+
 		// Should NOT contain truncation message
 		assert.NotContains(t, content, "truncated due to max output bytes limit")
-		
+
 		// Should have created a file
 		webFetchResult := result.(*WebFetchToolResult)
 		assert.NotEmpty(t, webFetchResult.filePath)
-		
+
 		// Verify file exists and contains the content
 		_, err := os.Stat(webFetchResult.filePath)
 		assert.NoError(t, err)
-		
+
 		fileContent, err := os.ReadFile(webFetchResult.filePath)
 		assert.NoError(t, err)
 		assert.Equal(t, smallContent, string(fileContent))
@@ -569,7 +569,7 @@ func TestWebFetchToolCodeContentTruncation(t *testing.T) {
 		input := &WebFetchInput{
 			URL: "https://example.com/large.txt",
 		}
-		
+
 		// Create content that exceeds MaxOutputBytes (100KB)
 		// Each line is about 50 bytes, so we need about 2500+ lines to exceed 100KB
 		var lines []string
@@ -577,38 +577,38 @@ func TestWebFetchToolCodeContentTruncation(t *testing.T) {
 			lines = append(lines, fmt.Sprintf("This is line %04d with some padding text to make it longer", i))
 		}
 		largeContent := strings.Join(lines, "\n")
-		
+
 		// Verify our test content actually exceeds MaxOutputBytes
 		assert.Greater(t, len(largeContent), MaxOutputBytes, "Test content should exceed MaxOutputBytes")
-		
+
 		result := tool.handleCodeTextContent(context.Background(), input, largeContent, "text/plain")
-		
+
 		assert.False(t, result.IsError())
 		content := result.GetResult()
-		
+
 		// Should contain line numbers starting from 1
 		assert.Contains(t, content, "1: This is line 0001")
 		assert.Contains(t, content, "2: This is line 0002")
-		
+
 		// Should contain truncation message
 		assert.Contains(t, content, "truncated due to max output bytes limit")
 		assert.Contains(t, content, fmt.Sprintf("%d", MaxOutputBytes))
-		
+
 		// Should contain file path in truncation message
 		webFetchResult := result.(*WebFetchToolResult)
 		assert.Contains(t, content, webFetchResult.filePath)
-		
+
 		// Should NOT contain content from the end of the original file
 		assert.NotContains(t, content, "line 3000")
 		assert.NotContains(t, content, "line 2999")
-		
+
 		// Should have created a file with full content
 		assert.NotEmpty(t, webFetchResult.filePath)
-		
+
 		// Verify file exists and contains the FULL content (not truncated)
 		_, err := os.Stat(webFetchResult.filePath)
 		assert.NoError(t, err)
-		
+
 		fileContent, err := os.ReadFile(webFetchResult.filePath)
 		assert.NoError(t, err)
 		assert.Equal(t, largeContent, string(fileContent))
@@ -618,32 +618,32 @@ func TestWebFetchToolCodeContentTruncation(t *testing.T) {
 		input := &WebFetchInput{
 			URL: "https://example.com/exact.txt",
 		}
-		
+
 		// Create content that is exactly MaxOutputBytes
 		// We need to be careful about line breaks counting toward the limit
-		lineContent := "This is a test line that is exactly 50 chars long!"  // 50 chars
-		linesNeeded := MaxOutputBytes / (len(lineContent) + 1)  // +1 for newline
-		
+		lineContent := "This is a test line that is exactly 50 chars long!" // 50 chars
+		linesNeeded := MaxOutputBytes / (len(lineContent) + 1)              // +1 for newline
+
 		var lines []string
 		for i := 0; i < linesNeeded; i++ {
 			lines = append(lines, lineContent)
 		}
 		exactContent := strings.Join(lines, "\n")
-		
+
 		// Adjust to be exactly MaxOutputBytes or just under
 		for len(exactContent) > MaxOutputBytes {
 			lines = lines[:len(lines)-1]
 			exactContent = strings.Join(lines, "\n")
 		}
-		
+
 		result := tool.handleCodeTextContent(context.Background(), input, exactContent, "text/plain")
-		
+
 		assert.False(t, result.IsError())
 		content := result.GetResult()
-		
+
 		// Should contain line numbers
 		assert.Contains(t, content, "1: This is a test line")
-		
+
 		// Should NOT contain truncation message since it's at or under the limit
 		assert.NotContains(t, content, "truncated due to max output bytes limit")
 	})
@@ -651,7 +651,7 @@ func TestWebFetchToolCodeContentTruncation(t *testing.T) {
 
 func TestWebFetchToolOneIndexedCodeView(t *testing.T) {
 	tool := &WebFetchTool{}
-	
+
 	// Create a temporary directory for testing
 	tempDir := t.TempDir()
 	oldWd, _ := os.Getwd()
@@ -662,14 +662,14 @@ func TestWebFetchToolOneIndexedCodeView(t *testing.T) {
 		input := &WebFetchInput{
 			URL: "https://example.com/single.py",
 		}
-		
+
 		singleLineContent := "print('Hello, World!')"
-		
+
 		result := tool.handleCodeTextContent(context.Background(), input, singleLineContent, "text/plain")
-		
+
 		assert.False(t, result.IsError())
 		content := result.GetResult()
-		
+
 		// Should start with line number 1
 		assert.Contains(t, content, "1: print('Hello, World!')")
 		// Should not contain line number 0
@@ -680,7 +680,7 @@ func TestWebFetchToolOneIndexedCodeView(t *testing.T) {
 		input := &WebFetchInput{
 			URL: "https://example.com/multi.py",
 		}
-		
+
 		multiLineContent := `def hello():
     print("Hello")
     return "world"
@@ -688,21 +688,21 @@ func TestWebFetchToolOneIndexedCodeView(t *testing.T) {
 if __name__ == "__main__":
     result = hello()
     print(result)`
-		
+
 		result := tool.handleCodeTextContent(context.Background(), input, multiLineContent, "text/plain")
-		
+
 		assert.False(t, result.IsError())
 		content := result.GetResult()
-		
+
 		// Should have proper 1-indexed line numbers
 		assert.Contains(t, content, "1: def hello():")
 		assert.Contains(t, content, "2:     print(\"Hello\")")
 		assert.Contains(t, content, "3:     return \"world\"")
-		assert.Contains(t, content, "4: ")  // Empty line
+		assert.Contains(t, content, "4: ") // Empty line
 		assert.Contains(t, content, "5: if __name__ == \"__main__\":")
 		assert.Contains(t, content, "6:     result = hello()")
 		assert.Contains(t, content, "7:     print(result)")
-		
+
 		// Should not contain line number 0
 		assert.NotContains(t, content, "0:")
 	})
@@ -711,25 +711,25 @@ if __name__ == "__main__":
 		input := &WebFetchInput{
 			URL: "https://example.com/padded.txt",
 		}
-		
+
 		// Create content with exactly 10 lines to test padding
 		var lines []string
 		for i := 1; i <= 10; i++ {
 			lines = append(lines, fmt.Sprintf("Line %d content", i))
 		}
 		paddedContent := strings.Join(lines, "\n")
-		
+
 		result := tool.handleCodeTextContent(context.Background(), input, paddedContent, "text/plain")
-		
+
 		assert.False(t, result.IsError())
 		content := result.GetResult()
-		
+
 		// Lines 1-9 should be padded with a space, line 10 should not
 		assert.Contains(t, content, " 1: Line 1 content")
 		assert.Contains(t, content, " 2: Line 2 content")
 		assert.Contains(t, content, " 9: Line 9 content")
 		assert.Contains(t, content, "10: Line 10 content")
-		
+
 		// Verify alignment by checking that single-digit line numbers are right-aligned
 		contentLines := strings.Split(content, "\n")
 		var lineNumberPrefixes []string
@@ -741,10 +741,10 @@ if __name__ == "__main__":
 				}
 			}
 		}
-		
+
 		// Should have collected 10 line number prefixes
 		assert.Equal(t, 10, len(lineNumberPrefixes))
-		
+
 		// All prefixes should have the same width (2 characters for 1-10)
 		expectedWidth := 2
 		for i, prefix := range lineNumberPrefixes {
@@ -756,26 +756,26 @@ if __name__ == "__main__":
 		input := &WebFetchInput{
 			URL: "https://example.com/large_line_numbers.txt",
 		}
-		
+
 		// Create content with 1000+ lines to test 4-digit line numbers
 		var lines []string
 		for i := 1; i <= 1200; i++ {
 			lines = append(lines, fmt.Sprintf("Content of line %d", i))
 		}
 		largeLineContent := strings.Join(lines, "\n")
-		
+
 		// This will likely be truncated, but we can still test the line number formatting
 		result := tool.handleCodeTextContent(context.Background(), input, largeLineContent, "text/plain")
-		
+
 		assert.False(t, result.IsError())
 		content := result.GetResult()
-		
+
 		// Should have proper alignment for 4-digit line numbers
 		// All line numbers should be right-aligned to 4 characters
 		assert.Contains(t, content, "   1: Content of line 1")
 		assert.Contains(t, content, "  10: Content of line 10")
 		assert.Contains(t, content, " 100: Content of line 100")
-		
+
 		// Due to truncation, we might not see line 1000+, but the alignment should be consistent
 		// for whatever lines are included
 	})
@@ -784,30 +784,30 @@ if __name__ == "__main__":
 		input := &WebFetchInput{
 			URL: "https://example.com/empty_lines.txt",
 		}
-		
+
 		contentWithEmptyLines := `First line
 
 Third line (second was empty)
 
 Fifth line (fourth was empty)`
-		
+
 		result := tool.handleCodeTextContent(context.Background(), input, contentWithEmptyLines, "text/plain")
-		
+
 		assert.False(t, result.IsError())
 		content := result.GetResult()
-		
+
 		// Should maintain proper line numbering even with empty lines
 		assert.Contains(t, content, "1: First line")
-		assert.Contains(t, content, "2: ")  // Empty line 2
+		assert.Contains(t, content, "2: ") // Empty line 2
 		assert.Contains(t, content, "3: Third line (second was empty)")
-		assert.Contains(t, content, "4: ")  // Empty line 4
+		assert.Contains(t, content, "4: ") // Empty line 4
 		assert.Contains(t, content, "5: Fifth line (fourth was empty)")
 	})
 }
 
 func TestWebFetchToolFileTypes(t *testing.T) {
 	tool := &WebFetchTool{}
-	
+
 	// Create a temporary directory for testing
 	tempDir := t.TempDir()
 	oldWd, _ := os.Getwd()
@@ -832,7 +832,7 @@ func TestWebFetchToolFileTypes(t *testing.T) {
 		},
 		{
 			name:        "JSON file",
-			url:         "https://example.com/config.json", 
+			url:         "https://example.com/config.json",
 			contentType: "application/json",
 			content:     "{\n  \"name\": \"test\",\n  \"version\": \"1.0.0\"\n}",
 			expectFile:  true,
@@ -859,16 +859,16 @@ func TestWebFetchToolFileTypes(t *testing.T) {
 			url:         "https://example.com/page.html",
 			contentType: "text/html",
 			content:     "<html><body><h1>Title</h1></body></html>",
-			expectFile:  false,  // HTML content is not saved to file
-			expectLines: false,  // HTML content doesn't get line numbers
+			expectFile:  false, // HTML content is not saved to file
+			expectLines: false, // HTML content doesn't get line numbers
 		},
 		{
 			name:        "Markdown file from URL should be processed as HTML/Markdown",
 			url:         "https://example.com/README.md",
 			contentType: "text/plain",
 			content:     "# Title\n\nThis is markdown content.",
-			expectFile:  false,  // Markdown from URL is processed as HTML/Markdown
-			expectLines: false,  // Markdown content doesn't get line numbers
+			expectFile:  false, // Markdown from URL is processed as HTML/Markdown
+			expectLines: false, // Markdown content doesn't get line numbers
 		},
 	}
 
@@ -877,37 +877,102 @@ func TestWebFetchToolFileTypes(t *testing.T) {
 			input := &WebFetchInput{
 				URL: tc.url,
 			}
-			
+
 			result := tool.handleCodeTextContent(context.Background(), input, tc.content, tc.contentType)
-			
+
 			// Only test code/text content handling, not HTML/Markdown
 			if tc.expectFile {
 				assert.False(t, result.IsError())
 				content := result.GetResult()
-				
+
 				if tc.expectLines {
 					// Should contain line numbers
 					assert.Contains(t, content, "1:")
-					
+
 					// Verify line number format matches expected pattern
 					lines := strings.Split(tc.content, "\n")
 					if len(lines) > 0 && lines[0] != "" {
 						assert.Contains(t, content, fmt.Sprintf("1: %s", lines[0]))
 					}
 				}
-				
+
 				// Should have created a file
 				webFetchResult := result.(*WebFetchToolResult)
 				assert.NotEmpty(t, webFetchResult.filePath)
-				
+
 				// Verify file was created and contains original content
 				_, err := os.Stat(webFetchResult.filePath)
 				assert.NoError(t, err)
-				
+
 				fileContent, err := os.ReadFile(webFetchResult.filePath)
 				assert.NoError(t, err)
 				assert.Equal(t, tc.content, string(fileContent))
 			}
 		})
 	}
+}
+
+func TestWebFetchToolDomainSpecificDirectories(t *testing.T) {
+	tool := &WebFetchTool{}
+
+	// Create a temporary directory for testing
+	tempDir := t.TempDir()
+	oldWd, _ := os.Getwd()
+	defer os.Chdir(oldWd)
+	os.Chdir(tempDir)
+
+	t.Run("Files are saved to domain-specific directories", func(t *testing.T) {
+		testCases := []struct {
+			url            string
+			expectedDomain string
+		}{
+			{
+				url:            "https://github.com/user/repo/main.py",
+				expectedDomain: "github.com",
+			},
+			{
+				url:            "https://raw.githubusercontent.com/user/repo/main/config.json",
+				expectedDomain: "raw.githubusercontent.com",
+			},
+			{
+				url:            "https://api.example.com/data.xml",
+				expectedDomain: "api.example.com",
+			},
+		}
+
+		for _, tc := range testCases {
+			t.Run(tc.url, func(t *testing.T) {
+				input := &WebFetchInput{
+					URL: tc.url,
+				}
+
+				testContent := "test content for domain directory"
+				result := tool.handleCodeTextContent(context.Background(), input, testContent, "text/plain")
+
+				assert.False(t, result.IsError())
+
+				// Should have created a file in the domain-specific directory
+				webFetchResult := result.(*WebFetchToolResult)
+				assert.NotEmpty(t, webFetchResult.filePath)
+
+				// Verify the file path contains the expected domain directory
+				expectedDir := fmt.Sprintf(".kodelet/web-archives/%s", tc.expectedDomain)
+				assert.Contains(t, webFetchResult.filePath, expectedDir)
+
+				// Verify the directory structure exists
+				_, err := os.Stat(webFetchResult.filePath)
+				assert.NoError(t, err)
+
+				// Verify file contains the original content
+				fileContent, err := os.ReadFile(webFetchResult.filePath)
+				assert.NoError(t, err)
+				assert.Equal(t, testContent, string(fileContent))
+
+				// Verify the domain directory was created
+				domainDir := filepath.Join(".kodelet/web-archives", tc.expectedDomain)
+				_, err = os.Stat(domainDir)
+				assert.NoError(t, err)
+			})
+		}
+	})
 }
