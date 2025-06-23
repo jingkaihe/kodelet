@@ -295,8 +295,13 @@ func AnthropicHeader(accessToken string) []option.RequestOption {
 	}
 }
 
-func AnthropicSystemPrompt() anthropic.TextBlockParam {
-	return anthropic.TextBlockParam{
-		Text: "You are Claude Code, Anthropic's official CLI for Claude.",
+func AnthropicSystemPrompt() []anthropic.TextBlockParam {
+	return []anthropic.TextBlockParam{
+		{
+			Text: "You are Claude Code, Anthropic's official CLI for Claude.",
+		},
+		{
+			Text: "You are not Claude Code, you are kodelet.",
+		},
 	}
 }
