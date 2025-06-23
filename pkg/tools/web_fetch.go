@@ -85,7 +85,7 @@ func (t *WebFetchTool) Description() string {
 
 ## Input
 - url: The URL to fetch content from. The URL must be a valid HTTPS URL.
-- prompt: (Optional) Information to extract from HTML/Markdown content using AI
+- prompt: (Optional) Only provided if you want to extract specific information from HTML/Markdown content using AI instead of getting the whole content
 
 ## Behavior
 **Scenario 1: Code/Text Content**
@@ -114,6 +114,51 @@ func (t *WebFetchTool) Description() string {
 3. Code/text files are saved to ./.kodelet/web-archives/{domain_name}/ directory for future reference
 4. HTML/Markdown content is returned directly (with optional AI processing)
 5. Prompt parameter only affects HTML/Markdown content behavior
+
+## Examples
+
+<good-example>
+url: https://raw.githubusercontent.com/user/repo/main/config.yaml
+<reasoning>
+Fetches a code/text file from GitHub and saves it with line numbers for future reference.
+</reasoning>
+</good-example>
+
+<good-example>
+url: https://docs.example.com/api-reference
+<reasoning>
+Converts HTML documentation page to readable Markdown format and returns it directly.
+</reasoning>
+</good-example>
+
+<good-example>
+url: https://docs.example.com/api-reference
+prompt: Extract all API endpoints and their HTTP methods
+<reasoning>
+Uses AI to extract specific information from HTML documentation based on the provided prompt.
+</reasoning>
+</good-example>
+
+<bad-example>
+url: http://insecure-site.com/file.txt
+<reasoning>
+Only HTTPS URLs are supported for security reasons.
+</reasoning>
+</bad-example>
+
+<bad-example>
+url: https://example.com/download.zip
+<reasoning>
+Binary files like ZIP archives are not supported. Only text-based content can be fetched.
+</reasoning>
+</bad-example>
+
+<bad-example>
+url: https://private-api.com/data
+<reasoning>
+URLs requiring authentication cannot be accessed as only public URLs are supported.
+</reasoning>
+</bad-example>
 `
 }
 
