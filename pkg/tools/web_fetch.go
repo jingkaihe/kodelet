@@ -485,6 +485,11 @@ func fetchWithSameDomainRedirects(ctx context.Context, urlStr string) (string, s
 		return "", "", fmt.Errorf("invalid URL: %w", err)
 	}
 
+	// Only HTTPS URLs are supported for security reasons
+	if parsedURL.Scheme != "https" {
+		return "", "", errors.New("only HTTPS scheme is supported")
+	}
+
 	originalDomain := parsedURL.Hostname()
 
 	// Create a custom HTTP client with a redirect policy
