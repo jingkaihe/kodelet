@@ -11,6 +11,8 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/llm"
+	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/spf13/cobra"
@@ -56,7 +58,7 @@ var runCmd = &cobra.Command{
 		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 		go func() {
 			<-sigCh
-			fmt.Println("\n\033[1;33m[kodelet]: Cancellation requested, shutting down...\033[0m")
+			presenter.Warning("Cancellation requested, shutting down...")
 			cancel()
 		}()
 
@@ -69,7 +71,8 @@ var runCmd = &cobra.Command{
 			// Read from stdin
 			stdinBytes, err := io.ReadAll(os.Stdin)
 			if err != nil {
-				fmt.Printf("\n\033[1;31mError reading from stdin: %v\033[0m\n", err)
+				presenter.Error(err, "Failed to read from stdin")
+				logger.G(ctx).WithError(err).Error("stdin read failed")
 				return
 			}
 
@@ -86,7 +89,7 @@ var runCmd = &cobra.Command{
 		} else {
 			// No pipe, just use args
 			if len(args) == 0 {
-				fmt.Printf("\n\033[1;31mError: No query provided\033[0m\n")
+				presenter.Error(fmt.Errorf("no query provided"), "Please provide a query to execute")
 				return
 			}
 			query = strings.Join(args, " ")
@@ -95,7 +98,8 @@ var runCmd = &cobra.Command{
 		// Create the MCP manager from Viper configuration
 		mcpManager, err := tools.CreateMCPManagerFromViper(ctx)
 		if err != nil {
-			fmt.Printf("\n\033[1;31mError creating MCP manager: %v\033[0m\n", err)
+			presenter.Error(err, "Failed to create MCP manager")
+			logger.G(ctx).WithError(err).Error("MCP manager creation failed")
 			return
 		}
 
@@ -122,7 +126,7 @@ var runCmd = &cobra.Command{
 		// Configure conversation persistence
 		if config.ResumeConvID != "" {
 			thread.SetConversationID(config.ResumeConvID)
-			fmt.Printf("Resuming conversation: %s\n", config.ResumeConvID)
+			presenter.Info(fmt.Sprintf("Resuming conversation: %s", config.ResumeConvID))
 		}
 
 		thread.EnablePersistence(!config.NoSave)
@@ -134,24 +138,27 @@ var runCmd = &cobra.Command{
 			MaxTurns:    config.MaxTurns,
 		})
 		if err != nil {
-			fmt.Printf("\n\033[1;31mError: %v\033[0m\n", err)
+			presenter.Error(err, "Failed to process query")
+			logger.G(ctx).WithError(err).Error("Message processing failed")
 			return
 		}
 
 		// Display usage statistics
 		usage := thread.GetUsage()
-		fmt.Printf("\n\033[1;36m[Usage Stats] Input tokens: %d | Output tokens: %d | Cache write: %d | Cache read: %d | Total: %d\033[0m\n",
-			usage.InputTokens, usage.OutputTokens, usage.CacheCreationInputTokens, usage.CacheReadInputTokens, usage.TotalTokens())
-
-		// Display cost information
-		fmt.Printf("\033[1;36m[Cost Stats] Input: $%.4f | Output: $%.4f | Cache write: $%.4f | Cache read: $%.4f | Total: $%.4f\033[0m\n",
-			usage.InputCost, usage.OutputCost, usage.CacheCreationCost, usage.CacheReadCost, usage.TotalCost())
+		usageStats := presenter.ConvertUsageStats(&usage)
+		presenter.Stats(usageStats)
+		logger.G(ctx).WithFields(map[string]interface{}{
+			"input_tokens":  usage.InputTokens,
+			"output_tokens": usage.OutputTokens,
+			"total_cost":    usage.TotalCost(),
+		}).Info("Query processing completed")
 
 		// Display conversation ID if persistence was enabled
 		if thread.IsPersisted() {
-			fmt.Printf("\033[1;36m[Conversation] ID: %s\033[0m\n", thread.GetConversationID())
-			fmt.Printf("To resume this conversation: kodelet run --resume %s\n", thread.GetConversationID())
-			fmt.Printf("To delete this conversation: kodelet conversation delete %s\n", thread.GetConversationID())
+			presenter.Section("Conversation Information")
+			presenter.Info(fmt.Sprintf("ID: %s", thread.GetConversationID()))
+			presenter.Info(fmt.Sprintf("To resume this conversation: kodelet run --resume %s", thread.GetConversationID()))
+			presenter.Info(fmt.Sprintf("To delete this conversation: kodelet conversation delete %s", thread.GetConversationID()))
 		}
 	},
 }
@@ -178,13 +185,13 @@ func getRunConfigFromFlags(cmd *cobra.Command) *RunConfig {
 	}
 	if config.Follow {
 		if config.ResumeConvID != "" {
-			fmt.Printf("Error: --auto-resume and --resume cannot be used together\n")
+			presenter.Error(fmt.Errorf("conflicting flags"), "--follow and --resume cannot be used together")
 			os.Exit(1)
 		}
 		var err error
 		config.ResumeConvID, err = conversations.GetMostRecentConversationID()
 		if err != nil {
-			fmt.Println("Warning: no conversations found, starting a new conversation")
+			presenter.Warning("No conversations found, starting a new conversation")
 		}
 	}
 

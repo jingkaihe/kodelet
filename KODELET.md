@@ -138,22 +138,46 @@ Kodelet uses a `Thread` abstraction for all interactions with LLM providers (Ant
 
 The architecture provides a unified approach for both interactive and one-shot uses with token usage tracking for all API calls across different providers.
 
-## Logging
-Always use the logger package with context:
+## Logging & CLI Output
+
+### Structured Logging
+Always use the logger package with context for diagnostics:
 ```go
 import "github.com/jingkaihe/kodelet/pkg/logger"
 
-// Good
-logger.G(ctx).WithField("user_id", userID).Info("Processing request")
+// Good - structured logging for diagnostics
+logger.G(ctx).WithField("command", "commit").Info("Starting operation")
 
-// Bad - never use fmt.Printf or log.Printf
+// Bad - never use fmt.Printf or log.Printf for diagnostics
 fmt.Printf("Processing request for %s", userID)
 ```
 
-### Error Handling
+### CLI Output
+Use the presenter package for all user-facing output:
 ```go
-// Return errors with context
+import "github.com/jingkaihe/kodelet/pkg/presenter"
+
+// User feedback
+presenter.Success("Operation completed")    // Green ✓
+presenter.Error(err, "Failed to commit")   // Red [ERROR]
+presenter.Warning("No changes detected")   // Yellow ⚠
+presenter.Info("Processing files...")      // Plain text
+presenter.Section("Results")              // Bold header
+presenter.Stats(usageStats)               // Formatted stats
+```
+
+**Key principles:**
+- Logger = diagnostics (debug, structured data)
+- Presenter = user interaction (progress, results, errors)
+- Colors auto-detect terminal/CI with `KODELET_COLOR` override
+- Quiet mode support via `presenter.SetQuiet(true)`
+
+### Error Handling
+Handle errors with both user feedback and logging:
+```go
 if err != nil {
+    presenter.Error(err, "Operation failed")           // For user
+    logger.G(ctx).WithError(err).Error("Details here")  // For diagnostics
     return errors.Wrap(err, "failed to process")
 }
 ```

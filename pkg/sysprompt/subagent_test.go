@@ -170,4 +170,3 @@ func TestSubAgentPromptContextConsistency(t *testing.T) {
 		t.Error("Did not expect subagent prompt to contain 'Banned Commands' section when allowed commands are configured")
 	}
 }
-

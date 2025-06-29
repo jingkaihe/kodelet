@@ -8,14 +8,17 @@ import (
 	"strings"
 
 	"github.com/jingkaihe/kodelet/pkg/llm"
+	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
 
 // plainChatUI implements the plain CLI interface
 func plainChatUI(ctx context.Context, options *ChatOptions) {
-	fmt.Println("Kodelet Chat Mode (Plain UI) - Type 'exit' or 'quit' to end the session")
-	fmt.Println("----------------------------------------------------------")
+	presenter.Section("Kodelet Chat Mode (Plain UI)")
+	presenter.Info("Type 'exit' or 'quit' to end the session")
+	presenter.Separator()
 
 	// Create a persistent thread with state
 	config := llm.GetConfigFromViper()
@@ -24,7 +27,8 @@ func plainChatUI(ctx context.Context, options *ChatOptions) {
 	// Create the MCP manager from Viper configuration
 	mcpManager, err := tools.CreateMCPManagerFromViper(ctx)
 	if err != nil {
-		fmt.Printf("Error creating MCP manager: %v\n", err)
+		presenter.Error(err, "Failed to create MCP manager")
+		logger.G(ctx).WithError(err).Error("MCP manager initialization failed in plain chat UI")
 		return
 	}
 
@@ -40,15 +44,16 @@ func plainChatUI(ctx context.Context, options *ChatOptions) {
 	// Configure conversation persistence
 	if options.resumeConvID != "" {
 		thread.SetConversationID(options.resumeConvID)
-		fmt.Printf("Resuming conversation: %s\n", options.resumeConvID)
+		presenter.Info(fmt.Sprintf("Resuming conversation: %s", options.resumeConvID))
+		logger.G(ctx).WithField("conversation_id", options.resumeConvID).Info("Resuming existing conversation")
 	}
 
 	thread.EnablePersistence(!options.noSave)
 
 	if !options.noSave {
-		fmt.Println("Conversation persistence is enabled.")
+		presenter.Info("Conversation persistence is enabled")
 	} else {
-		fmt.Println("Conversation persistence is disabled (--no-save).")
+		presenter.Info("Conversation persistence is disabled (--no-save)")
 	}
 
 	// Create a console handler
@@ -60,7 +65,8 @@ func plainChatUI(ctx context.Context, options *ChatOptions) {
 		fmt.Print("\033[1;33m[user]: \033[0m")
 		input, err := reader.ReadString('\n')
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error reading input: %s\n", err)
+			presenter.Error(err, "Error reading input")
+			logger.G(ctx).WithError(err).Error("Failed to read user input from stdin")
 			continue
 		}
 
@@ -71,21 +77,22 @@ func plainChatUI(ctx context.Context, options *ChatOptions) {
 		if input == "exit" || input == "quit" {
 			// Display final usage statistics before exiting
 			usage := thread.GetUsage()
-			fmt.Printf("\n\033[1;36m[Usage Stats] Input tokens: %d | Output tokens: %d | Cache write: %d | Cache read: %d | Total: %d\033[0m\n",
-				usage.InputTokens, usage.OutputTokens, usage.CacheCreationInputTokens, usage.CacheReadInputTokens, usage.TotalTokens())
+			presenter.Separator()
 
-			// Display cost information
-			fmt.Printf("\033[1;36m[Cost Stats] Input: $%.4f | Output: $%.4f | Cache write: $%.4f | Cache read: $%.4f | Total: $%.4f\033[0m\n",
-				usage.InputCost, usage.OutputCost, usage.CacheCreationCost, usage.CacheReadCost, usage.TotalCost())
+			// Convert and display usage statistics using presenter
+			usageStats := presenter.ConvertUsageStats(&usage)
+			presenter.Stats(usageStats)
 
 			// Display conversation ID if persistence was enabled
 			if thread.IsPersisted() {
-				fmt.Printf("\033[1;36m[Conversation] ID: %s\033[0m\n", thread.GetConversationID())
-				fmt.Printf("To resume this conversation: kodelet chat --resume %s\n", thread.GetConversationID())
-				fmt.Printf("To delete this conversation: kodelet conversation delete %s\n", thread.GetConversationID())
+				presenter.Section("Conversation Information")
+				presenter.Info(fmt.Sprintf("Conversation ID: %s", thread.GetConversationID()))
+				presenter.Info(fmt.Sprintf("To resume this conversation: kodelet chat --resume %s", thread.GetConversationID()))
+				presenter.Info(fmt.Sprintf("To delete this conversation: kodelet conversation delete %s", thread.GetConversationID()))
 			}
 
-			fmt.Println("Exiting chat mode. Goodbye!")
+			presenter.Success("Exiting chat mode. Goodbye!")
+			logger.G(ctx).WithField("conversation_id", thread.GetConversationID()).Info("Chat session ended by user")
 			return
 		}
 
@@ -100,7 +107,8 @@ func plainChatUI(ctx context.Context, options *ChatOptions) {
 			MaxTurns:    options.maxTurns,
 		})
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			presenter.Error(err, "Failed to process message")
+			logger.G(ctx).WithError(err).Error("Message processing failed in plain chat UI")
 		}
 	}
 }

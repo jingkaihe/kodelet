@@ -15,6 +15,7 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/spf13/cobra"
@@ -111,18 +112,22 @@ This command focuses on addressing a specific comment or review feedback within 
 		ctx, cancel := context.WithCancel(cmd.Context())
 		defer cancel()
 
+		logger.G(ctx).WithField("command", "pr-respond").Info("Starting PR respond operation")
+
 		// Set up signal handling
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 		go func() {
 			<-sigCh
-			fmt.Println("\n\033[1;33m[kodelet]: Cancellation requested, shutting down...\033[0m")
+			presenter.Warning("Cancellation requested, shutting down...")
+			logger.G(ctx).Warn("PR respond operation cancelled by user")
 			cancel()
 		}()
 
 		mcpManager, err := tools.CreateMCPManagerFromViper(ctx)
 		if err != nil {
-			fmt.Printf("\n\033[1;31mError creating MCP manager: %v\033[0m\n", err)
+			presenter.Error(err, "Failed to create MCP manager")
+			logger.G(ctx).WithError(err).Error("MCP manager creation failed")
 			return
 		}
 
@@ -133,30 +138,41 @@ This command focuses on addressing a specific comment or review feedback within 
 
 		// Validate configuration
 		if err := config.Validate(); err != nil {
-			fmt.Printf("Error: %s\n", err)
+			presenter.Error(err, "Configuration validation failed")
+			logger.G(ctx).WithError(err).WithField("config", config).Error("Invalid PR respond configuration")
 			os.Exit(1)
 		}
 
+		logger.G(ctx).WithFields(map[string]interface{}{
+			"pr_url":            config.PRURL,
+			"review_comment_id": config.ReviewCommentID,
+			"issue_comment_id":  config.IssueCommentID,
+		}).Info("Configuration validated successfully")
+
 		// Prerequisites checking
 		if !isGitRepository() {
-			fmt.Println("Error: Not a git repository. Please run this command from a git repository.")
+			presenter.Error(fmt.Errorf("not a git repository"), "Please run this command from a git repository")
+			logger.G(ctx).Error("Command executed outside git repository")
 			os.Exit(1)
 		}
 
 		if !isGhCliInstalled() {
-			fmt.Println("Error: GitHub CLI (gh) is not installed. Please install it first.")
-			fmt.Println("Visit https://cli.github.com/ for installation instructions.")
+			presenter.Error(fmt.Errorf("GitHub CLI not installed"), "Please install GitHub CLI first")
+			presenter.Info("Visit https://cli.github.com/ for installation instructions")
+			logger.G(ctx).Error("GitHub CLI not found in PATH")
 			os.Exit(1)
 		}
 
 		if !isGhAuthenticated() {
-			fmt.Println("Error: You are not authenticated with GitHub. Please run 'gh auth login' first.")
+			presenter.Error(fmt.Errorf("not authenticated with GitHub"), "Please run 'gh auth login' first")
+			logger.G(ctx).Error("GitHub authentication required")
 			os.Exit(1)
 		}
 
 		bin, err := os.Executable()
 		if err != nil {
-			fmt.Println("Error: Failed to get executable path")
+			presenter.Error(err, "Failed to get executable path")
+			logger.G(ctx).WithError(err).Error("Could not determine executable path")
 			os.Exit(1)
 		}
 
@@ -169,20 +185,27 @@ This command focuses on addressing a specific comment or review feedback within 
 		}
 
 		// Prefetch PR data
-		fmt.Println("Prefetching PR data...")
-		prData, err := prefetchPRData(config.PRURL, commentID, config.ReviewCommentID != "")
+		presenter.Info("Prefetching PR data...")
+		logger.G(ctx).WithFields(map[string]interface{}{
+			"pr_url":            config.PRURL,
+			"comment_id":        commentID,
+			"is_review_comment": config.ReviewCommentID != "",
+		}).Info("Starting PR data prefetch")
+
+		prData, err := prefetchPRData(ctx, config.PRURL, commentID, config.ReviewCommentID != "")
 		if err != nil {
-			fmt.Printf("Error prefetching PR data: %v\n", err)
+			presenter.Error(err, "Failed to prefetch PR data")
+			logger.G(ctx).WithError(err).Error("PR data prefetch failed")
 			os.Exit(1)
 		}
 
 		// Generate comprehensive prompt with prefetched data
 		prompt := generatePRRespondPrompt(bin, config.PRURL, commentID, prData)
-		logger.G(context.TODO()).WithField("prompt", prompt).Debug("Generated PR respond prompt")
+		logger.G(ctx).WithField("prompt_length", len(prompt)).Debug("Generated PR respond prompt")
 
 		// Send to LLM using existing architecture
-		fmt.Println("Analyzing specific PR comment and implementing response...")
-		fmt.Println("-----------------------------------------------------------")
+		presenter.Info("Analyzing specific PR comment and implementing response...")
+		presenter.Separator()
 
 		out, usage := llm.SendMessageAndGetTextWithUsage(ctx, s, prompt,
 			llm.GetConfigFromViper(), false, llmtypes.MessageOpt{
@@ -190,14 +213,16 @@ This command focuses on addressing a specific comment or review feedback within 
 			})
 
 		fmt.Println(out)
-		fmt.Println("-----------------------------------------------------------")
+		presenter.Separator()
 
 		// Display usage statistics
-		fmt.Printf("\033[1;36m[Usage Stats] Input tokens: %d | Output tokens: %d | Cache write: %d | Cache read: %d | Total: %d\033[0m\n",
-			usage.InputTokens, usage.OutputTokens, usage.CacheCreationInputTokens, usage.CacheReadInputTokens, usage.TotalTokens())
-
-		fmt.Printf("\033[1;36m[Cost Stats] Input: $%.4f | Output: $%.4f | Cache write: $%.4f | Cache read: $%.4f | Total: $%.4f\033[0m\n",
-			usage.InputCost, usage.OutputCost, usage.CacheCreationCost, usage.CacheReadCost, usage.TotalCost())
+		usageStats := presenter.ConvertUsageStats(&usage)
+		presenter.Stats(usageStats)
+		logger.G(ctx).WithFields(map[string]interface{}{
+			"input_tokens":  usage.InputTokens,
+			"output_tokens": usage.OutputTokens,
+			"total_cost":    usage.TotalCost(),
+		}).Info("PR respond operation completed")
 	},
 }
 
@@ -232,14 +257,15 @@ func getPRRespondConfigFromFlags(cmd *cobra.Command) *PRRespondConfig {
 
 // prefetchPRData fetches PR information, comments, and reviews using gh CLI
 // If commentID is provided, it also fetches focused comment and related discussions
-func prefetchPRData(prURL, commentID string, isReviewComment bool) (*PRData, error) {
+func prefetchPRData(ctx context.Context, prURL, commentID string, isReviewComment bool) (*PRData, error) {
 	data := &PRData{}
 
 	// Get basic PR information
 	cmd := exec.Command("gh", "pr", "view", prURL, "--json", "title,author,body,comments")
-	logger.G(context.TODO()).WithField("cmd", cmd.String()).Debug("Fetching PR basic info")
+	logger.G(ctx).WithField("cmd", cmd.String()).Debug("Fetching PR basic info")
 	basicInfoOutput, err := cmd.CombinedOutput()
 	if err != nil {
+		logger.G(ctx).WithError(err).WithField("output", string(basicInfoOutput)).Error("Failed to fetch PR basic info")
 		return nil, fmt.Errorf("failed to get PR basic info: %w, %s", err, string(basicInfoOutput))
 	}
 
@@ -247,7 +273,7 @@ func prefetchPRData(prURL, commentID string, isReviewComment bool) (*PRData, err
 	formattedInfo, err := formatPRBasicInfoToMarkdown(strings.TrimSpace(string(basicInfoOutput)))
 	if err != nil {
 		// Fallback to raw JSON if formatting fails
-		logger.G(context.TODO()).WithError(err).Warn("Failed to format PR basic info to markdown, using raw JSON")
+		logger.G(ctx).WithError(err).Warn("Failed to format PR basic info to markdown, using raw JSON")
 		data.BasicInfo = strings.TrimSpace(string(basicInfoOutput))
 	} else {
 		data.BasicInfo = formattedInfo
@@ -255,33 +281,38 @@ func prefetchPRData(prURL, commentID string, isReviewComment bool) (*PRData, err
 
 	// Get git diff of the PR
 	diffCmd := exec.Command("gh", "pr", "diff", prURL)
-	logger.G(context.TODO()).WithField("cmd", diffCmd.String()).Debug("Fetching PR git diff")
+	logger.G(ctx).WithField("cmd", diffCmd.String()).Debug("Fetching PR git diff")
 	diffOutput, err := diffCmd.CombinedOutput()
 	if err != nil {
 		// Don't fail completely, just log the error and continue
-		fmt.Printf("Warning: Failed to fetch PR git diff: %v\n", err)
+		logger.G(ctx).WithError(err).WithField("output", string(diffOutput)).Warn("Failed to fetch PR git diff")
 		data.GitDiff = "Failed to fetch git diff"
 	} else {
 		data.GitDiff = strings.TrimSpace(string(diffOutput))
+		logger.G(ctx).WithField("diff_length", len(data.GitDiff)).Debug("PR git diff fetched successfully")
 	}
 
 	// Fetch focused comment and related discussions
 	var focusedComment, relatedDiscussion string
 
 	if isReviewComment {
-		focusedComment, relatedDiscussion, err = fetchFocusedReviewComment(prURL, commentID)
+		focusedComment, relatedDiscussion, err = fetchFocusedReviewComment(ctx, prURL, commentID)
 	} else {
-		focusedComment, relatedDiscussion, err = fetchFocusedIssueComment(prURL, commentID)
+		focusedComment, relatedDiscussion, err = fetchFocusedIssueComment(ctx, prURL, commentID)
 	}
 
 	if err != nil {
 		// Don't fail completely, just log the error and continue
-		fmt.Printf("Warning: Failed to fetch focused comment data: %v\n", err)
+		logger.G(ctx).WithError(err).WithFields(map[string]interface{}{
+			"is_review_comment": isReviewComment,
+			"comment_id":        commentID,
+		}).Warn("Failed to fetch focused comment data")
 		data.FocusedComment = "Failed to fetch focused comment"
 		data.RelatedDiscussion = "Failed to fetch related discussions"
 	} else {
 		data.FocusedComment = focusedComment
 		data.RelatedDiscussion = relatedDiscussion
+		logger.G(ctx).WithField("is_review_comment", isReviewComment).Debug("Focused comment data fetched successfully")
 	}
 
 	return data, nil
@@ -370,7 +401,7 @@ const prBasicInfoTemplate = `# {{.Title}}
 {{end}}{{end}}`
 
 // fetchFocusedReviewComment fetches specific review comment details and related discussions using GitHub API
-func fetchFocusedReviewComment(prURL, commentID string) (string, string, error) {
+func fetchFocusedReviewComment(ctx context.Context, prURL, commentID string) (string, string, error) {
 	owner, repo, prNumber, err := parseGitHubURL(prURL)
 	if err != nil {
 		return "", "", err
@@ -378,10 +409,10 @@ func fetchFocusedReviewComment(prURL, commentID string) (string, string, error) 
 
 	// Fetch review comment
 	cmd := exec.Command("gh", "api", fmt.Sprintf("repos/%s/%s/pulls/%s/reviews/%s", owner, repo, prNumber, commentID), "--jq", "{body: .body, author: .user.login, submitted_at: .submitted_at}")
-	logger.G(context.TODO()).WithField("cmd", cmd.String()).Debug("Fetching review comment data")
+	logger.G(ctx).WithField("cmd", cmd.String()).Debug("Fetching review comment data")
 	commentOutput, err := cmd.CombinedOutput()
 	if err != nil {
-		logger.G(context.TODO()).WithField("cmd", cmd.String()).WithError(err).Error("Failed to fetch review comment details")
+		logger.G(ctx).WithField("cmd", cmd.String()).WithError(err).WithField("output", string(commentOutput)).Error("Failed to fetch review comment details")
 		return "", "", fmt.Errorf("failed to fetch review comment details: %w, %s", err, string(commentOutput))
 	}
 
@@ -391,10 +422,10 @@ func fetchFocusedReviewComment(prURL, commentID string) (string, string, error) 
 	cmd = exec.Command("gh", "api",
 		fmt.Sprintf("repos/%s/%s/pulls/%s/reviews/%s/comments", owner, repo, prNumber, commentID),
 		"--jq", "[.[] | {id: .id, author: .user.login, body: .body, line: .line, created_at: .created_at, diff_hunk: .diff_hunk}]")
-	logger.G(context.TODO()).WithField("cmd", cmd.String()).Debug("Fetching related review discussions")
+	logger.G(ctx).WithField("cmd", cmd.String()).Debug("Fetching related review discussions")
 	discussionOutput, err := cmd.CombinedOutput()
 	if err != nil {
-		logger.G(context.TODO()).WithField("cmd", cmd.String()).WithError(err).Error("Failed to fetch related review discussions")
+		logger.G(ctx).WithField("cmd", cmd.String()).WithError(err).WithField("output", string(discussionOutput)).Error("Failed to fetch related review discussions")
 		relatedDiscussion := "No related discussions found or failed to fetch"
 		return focusedComment, relatedDiscussion, nil
 	}
@@ -418,7 +449,7 @@ func fetchFocusedReviewComment(prURL, commentID string) (string, string, error) 
 }
 
 // fetchFocusedIssueComment fetches specific issue comment details using GitHub API
-func fetchFocusedIssueComment(prURL, commentID string) (string, string, error) {
+func fetchFocusedIssueComment(ctx context.Context, prURL, commentID string) (string, string, error) {
 	owner, repo, _, err := parseGitHubURL(prURL)
 	if err != nil {
 		return "", "", err
@@ -427,9 +458,10 @@ func fetchFocusedIssueComment(prURL, commentID string) (string, string, error) {
 	// Fetch issue comment
 	cmd := exec.Command("gh", "api", fmt.Sprintf("repos/%s/%s/issues/comments/%s", owner, repo, commentID),
 		"--jq", "{author: .user.login, body: .body, created_at: .created_at}")
-	logger.G(context.TODO()).WithField("cmd", cmd.String()).Debug("Fetching issue comment data")
+	logger.G(ctx).WithField("cmd", cmd.String()).Debug("Fetching issue comment data")
 	commentOutput, err := cmd.CombinedOutput()
 	if err != nil {
+		logger.G(ctx).WithField("cmd", cmd.String()).WithError(err).WithField("output", string(commentOutput)).Error("Failed to fetch issue comment details")
 		return "", "", fmt.Errorf("failed to fetch issue comment details: %w, %s", err, string(commentOutput))
 	}
 

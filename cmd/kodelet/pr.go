@@ -10,6 +10,8 @@ import (
 	"syscall"
 
 	"github.com/jingkaihe/kodelet/pkg/llm"
+	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/spf13/cobra"
@@ -71,14 +73,15 @@ This command analyzes the current branch changes compared to the target branch a
 		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 		go func() {
 			<-sigCh
-			fmt.Println("\n\033[1;33m[kodelet]: Cancellation requested, shutting down...\033[0m")
+			presenter.Warning("Cancellation requested, shutting down...")
 			cancel()
 		}()
 
 		mcpManager, err := tools.CreateMCPManagerFromViper(ctx)
 		if err != nil {
-			fmt.Printf("\n\033[1;31mError creating MCP manager: %v\033[0m\n", err)
-			return
+			presenter.Error(err, "Failed to create MCP manager")
+			logger.G(ctx).WithError(err).Error("MCP manager creation failed")
+			os.Exit(1)
 		}
 
 		llmConfig := llm.GetConfigFromViper()
@@ -90,20 +93,23 @@ This command analyzes the current branch changes compared to the target branch a
 		// Check prerequisites
 		// 1. Check if we're in a git repository
 		if !isGitRepository() {
-			fmt.Println("Error: Not a git repository. Please run this command from a git repository.")
+			presenter.Error(fmt.Errorf("not a git repository"), "Please run this command from a git repository")
+			logger.G(ctx).WithField("operation", "pr").Error("Command executed outside git repository")
 			os.Exit(1)
 		}
 
 		// 2. Check if the user has GitHub CLI installed
 		if !isGhCliInstalled() {
-			fmt.Println("Error: GitHub CLI (gh) is not installed. Please install it first.")
-			fmt.Println("Visit https://cli.github.com/ for installation instructions.")
+			presenter.Error(fmt.Errorf("GitHub CLI not installed"), "GitHub CLI (gh) is not installed. Please install it first")
+			presenter.Info("Visit https://cli.github.com/ for installation instructions")
+			logger.G(ctx).WithField("operation", "pr").Error("GitHub CLI not available")
 			os.Exit(1)
 		}
 
 		// 3. Check if the user is authenticated with GitHub
 		if !isGhAuthenticated() {
-			fmt.Println("Error: You are not authenticated with GitHub. Please run 'gh auth login' first.")
+			presenter.Error(fmt.Errorf("not authenticated with GitHub"), "You are not authenticated with GitHub. Please run 'gh auth login' first")
+			logger.G(ctx).WithField("operation", "pr").Error("GitHub authentication required")
 			os.Exit(1)
 		}
 
@@ -153,8 +159,8 @@ IMPORTANT:
 - !!!CRITICAL!!!: You should never update user's git config under any circumstances.`, config.Target, config.Target, config.Target, template)
 
 		// Send the prompt to the LLM
-		fmt.Println("Analyzing branch changes and generating PR description...")
-		fmt.Println("-----------------------------------------------------------")
+		presenter.Info("Analyzing branch changes and generating PR description...")
+		presenter.Separator()
 
 		out, usage := llm.SendMessageAndGetTextWithUsage(ctx, s, prompt, llm.GetConfigFromViper(), false, llmtypes.MessageOpt{
 			// UseWeakModel:       false,
@@ -165,15 +171,16 @@ IMPORTANT:
 
 		fmt.Println(out)
 
-		fmt.Println("-----------------------------------------------------------")
+		presenter.Separator()
 
 		// Display usage statistics
-		fmt.Printf("\033[1;36m[Usage Stats] Input tokens: %d | Output tokens: %d | Cache write: %d | Cache read: %d | Total: %d\033[0m\n",
-			usage.InputTokens, usage.OutputTokens, usage.CacheCreationInputTokens, usage.CacheReadInputTokens, usage.TotalTokens())
-
-		// Display cost information
-		fmt.Printf("\033[1;36m[Cost Stats] Input: $%.4f | Output: $%.4f | Cache write: $%.4f | Cache read: $%.4f | Total: $%.4f\033[0m\n",
-			usage.InputCost, usage.OutputCost, usage.CacheCreationCost, usage.CacheReadCost, usage.TotalCost())
+		usageStats := presenter.ConvertUsageStats(&usage)
+		presenter.Stats(usageStats)
+		logger.G(ctx).WithFields(map[string]interface{}{
+			"input_tokens":  usage.InputTokens,
+			"output_tokens": usage.OutputTokens,
+			"total_cost":    usage.TotalCost(),
+		}).Info("PR generation completed")
 	},
 }
 
@@ -209,8 +216,8 @@ func loadTemplate(templateFile string) string {
 
 	content, err := os.ReadFile(templateFile)
 	if err != nil {
-		fmt.Printf("Warning: Could not read template file %s: %s\n", templateFile, err)
-		fmt.Println("Using default template instead.")
+		presenter.Warning(fmt.Sprintf("Could not read template file %s: %s", templateFile, err))
+		presenter.Info("Using default template instead")
 		return defaultTemplate
 	}
 
@@ -236,7 +243,7 @@ func hasUncommittedChanges() bool {
 	cmd := exec.Command("git", "status", "--porcelain")
 	output, err := cmd.Output()
 	if err != nil {
-		fmt.Printf("Error checking git status: %s\n", err)
+		presenter.Error(err, "Failed to check git status")
 		os.Exit(1)
 	}
 	return len(strings.TrimSpace(string(output))) > 0

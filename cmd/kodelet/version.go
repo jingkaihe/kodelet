@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/jingkaihe/kodelet/pkg/version"
 	"github.com/spf13/cobra"
 )
@@ -16,7 +17,7 @@ var versionCmd = &cobra.Command{
 		info := version.Get()
 		json, err := info.JSON()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error formatting version info: %s\n", err)
+			presenter.Error(err, "Failed to format version information")
 			os.Exit(1)
 		}
 		fmt.Println(json)
