@@ -40,7 +40,8 @@ func TestNewThread(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Cannot type assert with the new structure - need a different approach
-			thread := NewThread(tc.config)
+			thread, err := NewThread(tc.config)
+			assert.NoError(t, err)
 			assert.NotNil(t, thread)
 		})
 	}
@@ -184,20 +185,23 @@ func TestSendMessageRealClient(t *testing.T) {
 	ctx := context.Background()
 	mockHandler := new(MockMessageHandler)
 
-	// Set up expectations for just the handler since state methods might not be called
-	// with a simple text response that doesn't use tools
+	// Set up expectations for the handler - allow optional tool use
 	mockHandler.On("HandleText", mock.Anything).Return()
+	mockHandler.On("HandleToolUse", mock.Anything, mock.Anything).Return().Maybe()
+	mockHandler.On("HandleToolResult", mock.Anything, mock.Anything).Return().Maybe()
+	mockHandler.On("HandleThinking", mock.Anything).Return().Maybe()
 	mockHandler.On("HandleDone").Return()
 
 	// Create a real thread
-	thread := NewThread(llmtypes.Config{
+	thread, err := NewThread(llmtypes.Config{
 		Model:     string(anthropic.ModelClaude3_5Haiku20241022), // Using a real model
 		MaxTokens: 100,
 	})
+	assert.NoError(t, err)
 	thread.SetState(tools.NewBasicState(context.TODO()))
 
 	// Send a simple message that should not trigger tool use
-	_, err := thread.SendMessage(ctx, "Say hello world", mockHandler, llmtypes.MessageOpt{})
+	_, err = thread.SendMessage(ctx, "Say hello world", mockHandler, llmtypes.MessageOpt{})
 
 	// Verify
 	assert.NoError(t, err)
@@ -253,14 +257,15 @@ func TestSendMessageWithToolUse(t *testing.T) {
 	handler := &llmtypes.StringCollectorHandler{Silent: true}
 
 	// Create thread
-	thread := NewThread(llmtypes.Config{
+	thread, err := NewThread(llmtypes.Config{
 		Model:     string(anthropic.ModelClaude3_5Haiku20241022),
 		MaxTokens: 1000,
 	})
+	assert.NoError(t, err)
 	thread.SetState(tools.NewBasicState(context.TODO()))
 
 	// Send message that should trigger thinking tool use
-	_, err := thread.SendMessage(ctx, "Use the thinking tool to calculate 25 * 32", handler, llmtypes.MessageOpt{})
+	_, err = thread.SendMessage(ctx, "Use the thinking tool to calculate 25 * 32", handler, llmtypes.MessageOpt{})
 
 	// Verify response
 	assert.NoError(t, err)

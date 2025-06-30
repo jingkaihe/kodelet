@@ -27,6 +27,7 @@ func init() {
 	viper.SetDefault("reasoning_effort", "medium")
 	viper.SetDefault("cache_every", 10)
 	viper.SetDefault("allowed_commands", []string{})
+	viper.SetDefault("anthropic_api_access", "auto")
 
 	// Set default MCP configuration
 	viper.SetDefault("mcp", map[string]tools.MCPConfig{})
@@ -111,6 +112,7 @@ func main() {
 	rootCmd.PersistentFlags().String("log-level", "info", "Log level (panic, fatal, error, warn, info, debug, trace)")
 	rootCmd.PersistentFlags().String("log-format", "fmt", "Log format (json, text, fmt)")
 	rootCmd.PersistentFlags().StringSlice("allowed-commands", []string{}, "Allowed command patterns for bash tool (e.g. 'yarn start,ls *')")
+	rootCmd.PersistentFlags().String("anthropic-api-access", "auto", "Anthropic API access mode (auto, subscription, api-key)")
 
 	// Bind flags to viper
 	viper.BindPFlag("provider", rootCmd.PersistentFlags().Lookup("provider"))
@@ -125,6 +127,7 @@ func main() {
 	viper.BindPFlag("log_level", rootCmd.PersistentFlags().Lookup("log-level"))
 	viper.BindPFlag("log_format", rootCmd.PersistentFlags().Lookup("log-format"))
 	viper.BindPFlag("allowed_commands", rootCmd.PersistentFlags().Lookup("allowed-commands"))
+	viper.BindPFlag("anthropic_api_access", rootCmd.PersistentFlags().Lookup("anthropic-api-access"))
 
 	// Add subcommands
 	rootCmd.AddCommand(chatCmd)

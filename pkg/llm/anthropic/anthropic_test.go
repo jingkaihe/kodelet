@@ -49,7 +49,8 @@ func TestGetMediaTypeFromExtension(t *testing.T) {
 }
 
 func TestProcessImageURL(t *testing.T) {
-	thread := NewAnthropicThread(llmtypes.Config{})
+	thread, err := NewAnthropicThread(llmtypes.Config{})
+	require.NoError(t, err)
 
 	tests := []struct {
 		name     string
@@ -77,7 +78,8 @@ func TestProcessImageURL(t *testing.T) {
 }
 
 func TestProcessImageFile(t *testing.T) {
-	thread := NewAnthropicThread(llmtypes.Config{})
+	thread, err := NewAnthropicThread(llmtypes.Config{})
+	require.NoError(t, err)
 
 	// Create a temporary directory for test files
 	tempDir := t.TempDir()
@@ -96,7 +98,7 @@ func TestProcessImageFile(t *testing.T) {
 	}
 
 	testImagePath := filepath.Join(tempDir, "test.png")
-	err := os.WriteFile(testImagePath, pngData, 0644)
+	err = os.WriteFile(testImagePath, pngData, 0644)
 	require.NoError(t, err)
 
 	// Create a large test file (exceeds MaxImageFileSize)
@@ -136,7 +138,8 @@ func TestProcessImageFile(t *testing.T) {
 }
 
 func TestAddUserMessage(t *testing.T) {
-	thread := NewAnthropicThread(llmtypes.Config{})
+	thread, err := NewAnthropicThread(llmtypes.Config{})
+	require.NoError(t, err)
 
 	// Create a temporary directory for test files
 	tempDir := t.TempDir()
@@ -155,7 +158,7 @@ func TestAddUserMessage(t *testing.T) {
 	}
 
 	testImagePath := filepath.Join(tempDir, "test.png")
-	err := os.WriteFile(testImagePath, pngData, 0644)
+	err = os.WriteFile(testImagePath, pngData, 0644)
 	require.NoError(t, err)
 
 	tests := []struct {

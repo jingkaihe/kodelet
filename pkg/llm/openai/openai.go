@@ -573,10 +573,18 @@ func (t *OpenAIThread) updateUsage(usage openai.Usage, model string) {
 func (t *OpenAIThread) NewSubAgent(ctx context.Context) llmtypes.Thread {
 	config := t.config
 	config.IsSubAgent = true
-	thread := NewOpenAIThread(config)
-	thread.isPersisted = false // subagent is not persisted
+
+	// Create subagent thread reusing the parent's client instead of creating a new one
+	thread := &OpenAIThread{
+		client:          t.client, // Reuse parent's client
+		config:          config,
+		reasoningEffort: t.reasoningEffort, // Reuse parent's reasoning effort
+		conversationID:  conversations.GenerateID(),
+		isPersisted:     false,   // subagent is not persisted
+		usage:           t.usage, // Share usage tracking with parent
+	}
+
 	thread.SetState(tools.NewBasicState(ctx, tools.WithSubAgentTools(), tools.WithExtraMCPTools(t.state.MCPTools())))
-	thread.usage = t.usage
 
 	return thread
 }

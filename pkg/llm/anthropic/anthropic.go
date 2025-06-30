@@ -60,7 +60,7 @@ func (t *AnthropicThread) Provider() string {
 }
 
 // NewAnthropicThread creates a new thread with Anthropic's Claude API
-func NewAnthropicThread(config llmtypes.Config) *AnthropicThread {
+func NewAnthropicThread(config llmtypes.Config) (*AnthropicThread, error) {
 	// Apply defaults if not provided
 	if config.Model == "" {
 		config.Model = string(anthropic.ModelClaudeSonnet4_20250514)
@@ -72,20 +72,50 @@ func NewAnthropicThread(config llmtypes.Config) *AnthropicThread {
 	logger := logger.G(context.Background())
 	var client anthropic.Client
 	var useSubscription bool
-	antCredsExists, _ := auth.GetAnthropicCredentialsExists()
-	if antCredsExists {
+
+	// Determine authentication method based on access mode configuration
+	switch config.AnthropicAPIAccess {
+	case llmtypes.AnthropicAPIAccessAPIKey:
+		// Force API key usage
+		logger.Debug("using API key authentication (forced by configuration)")
+		client = anthropic.NewClient()
+		useSubscription = false
+
+	case llmtypes.AnthropicAPIAccessSubscription:
+		// Force subscription usage - no fallbacks allowed
+		antCredsExists, _ := auth.GetAnthropicCredentialsExists()
+		if !antCredsExists {
+			return nil, fmt.Errorf("subscription authentication forced but no credentials found")
+		}
 		accessToken, err := auth.AnthropicAccessToken(context.Background())
 		if err != nil {
-			logger.WithError(err).Error("failed to get anthropic access token, falling back to use API key")
-			client = anthropic.NewClient()
-		} else {
-			logger.Debug("using anthropic access token")
-			client = anthropic.NewClient(auth.AnthropicHeader(accessToken)...)
-			useSubscription = true
+			return nil, fmt.Errorf("subscription authentication forced but failed to get access token: %w", err)
 		}
-	} else {
-		logger.Debug("no anthropic credentials found, falling back to use API key")
-		client = anthropic.NewClient()
+		logger.Debug("using anthropic access token (forced by configuration)")
+		client = anthropic.NewClient(auth.AnthropicHeader(accessToken)...)
+		useSubscription = true
+
+	case llmtypes.AnthropicAPIAccessAuto:
+		fallthrough
+	default:
+		// Auto mode: try subscription first, then fall back to API key
+		antCredsExists, _ := auth.GetAnthropicCredentialsExists()
+		if antCredsExists {
+			accessToken, err := auth.AnthropicAccessToken(context.Background())
+			if err != nil {
+				logger.WithError(err).Error("failed to get anthropic access token, falling back to use API key")
+				client = anthropic.NewClient()
+				useSubscription = false
+			} else {
+				logger.Debug("using anthropic access token")
+				client = anthropic.NewClient(auth.AnthropicHeader(accessToken)...)
+				useSubscription = true
+			}
+		} else {
+			logger.Debug("no anthropic credentials found, falling back to use API key")
+			client = anthropic.NewClient()
+			useSubscription = false
+		}
 	}
 
 	return &AnthropicThread{
@@ -95,7 +125,7 @@ func NewAnthropicThread(config llmtypes.Config) *AnthropicThread {
 		conversationID:  conversations.GenerateID(),
 		isPersisted:     false,
 		usage:           &llmtypes.Usage{}, // must be initialised to avoid nil pointer dereference
-	}
+	}, nil
 }
 
 // SetState sets the state for the thread
@@ -591,10 +621,18 @@ func (t *AnthropicThread) updateUsage(response *anthropic.Message, model anthrop
 func (t *AnthropicThread) NewSubAgent(ctx context.Context) llmtypes.Thread {
 	config := t.config
 	config.IsSubAgent = true
-	thread := NewAnthropicThread(config)
-	thread.isPersisted = false // subagent is not persisted
+
+	// Create subagent thread reusing the parent's client instead of creating a new one
+	thread := &AnthropicThread{
+		client:          t.client, // Reuse parent's client
+		config:          config,
+		useSubscription: t.useSubscription, // Reuse parent's subscription status
+		conversationID:  conversations.GenerateID(),
+		isPersisted:     false,   // subagent is not persisted
+		usage:           t.usage, // Share usage tracking with parent
+	}
+
 	thread.SetState(tools.NewBasicState(ctx, tools.WithSubAgentTools(), tools.WithExtraMCPTools(t.state.MCPTools())))
-	thread.usage = t.usage
 
 	return thread
 }

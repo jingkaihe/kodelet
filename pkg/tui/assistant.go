@@ -20,7 +20,11 @@ type AssistantClient struct {
 func NewAssistantClient(ctx context.Context, conversationID string, enablePersistence bool, mcpManager *tools.MCPManager, maxTurns int, enableBrowserTools bool) *AssistantClient {
 	// Create a persistent thread with config from viper
 	config := llm.GetConfigFromViper()
-	thread := llm.NewThread(config)
+	thread, err := llm.NewThread(config)
+	if err != nil {
+		// This is a critical error during initialization
+		panic(fmt.Sprintf("failed to create LLM thread: %v", err))
+	}
 
 	// Create state with appropriate tools based on browser support
 	var stateOpts []tools.BasicStateOption
