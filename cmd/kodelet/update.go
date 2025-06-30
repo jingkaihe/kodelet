@@ -53,7 +53,6 @@ var updateCmd = &cobra.Command{
 
 		if err := updateKodelet(ctx, config); err != nil {
 			presenter.Error(err, "Failed to update Kodelet")
-			logger.G(ctx).WithError(err).Error("Failed to update Kodelet")
 			os.Exit(1)
 		}
 	},

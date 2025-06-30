@@ -12,7 +12,6 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/llm"
-	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/spf13/cobra"
@@ -300,21 +299,11 @@ type ConversationSummaryOutput struct {
 
 // listConversationsCmd displays a list of saved conversations with query options
 func listConversationsCmd(ctx context.Context, config *ConversationListConfig) {
-	logger.G(ctx).WithFields(map[string]interface{}{
-		"command":     "list",
-		"search_term": config.Search,
-		"limit":       config.Limit,
-		"offset":      config.Offset,
-		"sort_by":     config.SortBy,
-		"sort_order":  config.SortOrder,
-		"json_output": config.JSONOutput,
-	}).Info("Starting conversation list operation")
 
 	// Create a store
 	store, err := conversations.GetConversationStore()
 	if err != nil {
 		presenter.Error(err, "Failed to initialize conversation store")
-		logger.G(ctx).WithError(err).Error("Failed to get conversation store")
 		os.Exit(1)
 	}
 
@@ -332,11 +321,9 @@ func listConversationsCmd(ctx context.Context, config *ConversationListConfig) {
 		startDate, err := time.Parse("2006-01-02", config.StartDate)
 		if err != nil {
 			presenter.Error(err, "Invalid start date format. Please use YYYY-MM-DD")
-			logger.G(ctx).WithError(err).WithField("start_date", config.StartDate).Error("Failed to parse start date")
 			os.Exit(1)
 		}
 		options.StartDate = &startDate
-		logger.G(ctx).WithField("start_date", startDate).Debug("Parsed start date filter")
 	}
 
 	// Parse end date if provided
@@ -344,24 +331,19 @@ func listConversationsCmd(ctx context.Context, config *ConversationListConfig) {
 		endDate, err := time.Parse("2006-01-02", config.EndDate)
 		if err != nil {
 			presenter.Error(err, "Invalid end date format. Please use YYYY-MM-DD")
-			logger.G(ctx).WithError(err).WithField("end_date", config.EndDate).Error("Failed to parse end date")
 			os.Exit(1)
 		}
 		// Set to end of day
 		endDate = endDate.Add(24*time.Hour - time.Second)
 		options.EndDate = &endDate
-		logger.G(ctx).WithField("end_date", endDate).Debug("Parsed end date filter")
 	}
 
 	// Query conversations with options
 	summaries, err := store.Query(options)
 	if err != nil {
 		presenter.Error(err, "Failed to list conversations")
-		logger.G(ctx).WithError(err).Error("Failed to query conversations from store")
 		os.Exit(1)
 	}
-
-	logger.G(ctx).WithField("conversation_count", len(summaries)).Info("Retrieved conversations from store")
 
 	if len(summaries) == 0 {
 		presenter.Info("No conversations found matching your criteria.")
@@ -378,37 +360,26 @@ func listConversationsCmd(ctx context.Context, config *ConversationListConfig) {
 	output := NewConversationListOutput(summaries, format)
 	if err := output.Render(os.Stdout); err != nil {
 		presenter.Error(err, "Failed to render conversation list")
-		logger.G(ctx).WithError(err).Error("Failed to render output")
 		os.Exit(1)
 	}
-
-	logger.G(ctx).WithField("format", format).Info("Successfully rendered conversation list")
 }
 
 // deleteConversationCmd deletes a specific conversation
 func deleteConversationCmd(ctx context.Context, id string, config *ConversationDeleteConfig) {
-	logger.G(ctx).WithFields(map[string]interface{}{
-		"command":         "delete",
-		"conversation_id": id,
-		"no_confirm":      config.NoConfirm,
-	}).Info("Starting conversation delete operation")
 
 	// Create a store
 	store, err := conversations.GetConversationStore()
 	if err != nil {
 		presenter.Error(err, "Failed to initialize conversation store")
-		logger.G(ctx).WithError(err).Error("Failed to get conversation store")
 		os.Exit(1)
 	}
 
 	// If no-confirm flag is not set, prompt for confirmation
 	if !config.NoConfirm {
 		response := presenter.Prompt(fmt.Sprintf("Are you sure you want to delete conversation %s?", id), "y", "N")
-		logger.G(ctx).WithField("user_response", response).Debug("User confirmation prompt response")
 
 		if response != "y" && response != "Y" {
 			presenter.Info("Deletion cancelled.")
-			logger.G(ctx).Info("User cancelled conversation deletion")
 			return
 		}
 	}
@@ -417,27 +388,19 @@ func deleteConversationCmd(ctx context.Context, id string, config *ConversationD
 	err = store.Delete(id)
 	if err != nil {
 		presenter.Error(err, "Failed to delete conversation")
-		logger.G(ctx).WithError(err).WithField("conversation_id", id).Error("Failed to delete conversation from store")
 		os.Exit(1)
 	}
 
 	presenter.Success(fmt.Sprintf("Conversation %s deleted successfully", id))
-	logger.G(ctx).WithField("conversation_id", id).Info("Successfully deleted conversation")
 }
 
 // showConversationCmd displays a specific conversation
 func showConversationCmd(ctx context.Context, id string, config *ConversationShowConfig) {
-	logger.G(ctx).WithFields(map[string]interface{}{
-		"command":         "show",
-		"conversation_id": id,
-		"format":          config.Format,
-	}).Info("Starting conversation show operation")
 
 	// Create a store
 	store, err := conversations.GetConversationStore()
 	if err != nil {
 		presenter.Error(err, "Failed to initialize conversation store")
-		logger.G(ctx).WithError(err).Error("Failed to get conversation store")
 		os.Exit(1)
 	}
 
@@ -445,59 +408,36 @@ func showConversationCmd(ctx context.Context, id string, config *ConversationSho
 	record, err := store.Load(id)
 	if err != nil {
 		presenter.Error(err, "Failed to load conversation")
-		logger.G(ctx).WithError(err).WithField("conversation_id", id).Error("Failed to load conversation from store")
 		os.Exit(1)
 	}
-
-	logger.G(ctx).WithFields(map[string]interface{}{
-		"conversation_id": id,
-		"model_type":      record.ModelType,
-		"message_length":  len(record.RawMessages),
-	}).Info("Successfully loaded conversation record")
 
 	// Extract messages from raw message data
 	messages, err := llm.ExtractMessages(record.ModelType, record.RawMessages)
 	if err != nil {
 		presenter.Error(err, "Failed to parse conversation messages")
-		logger.G(ctx).WithError(err).WithField("conversation_id", id).Error("Failed to extract messages from raw data")
 		os.Exit(1)
 	}
-
-	logger.G(ctx).WithFields(map[string]interface{}{
-		"conversation_id": id,
-		"message_count":   len(messages),
-	}).Debug("Successfully extracted messages")
 
 	// Render messages according to the format
 	switch config.Format {
 	case "raw":
 		// Output the raw messages as stored
 		fmt.Println(string(record.RawMessages))
-		logger.G(ctx).WithField("format", "raw").Debug("Rendered conversation in raw format")
 	case "json":
 		// Convert to simpler JSON format and output
 		outputJSON, err := json.MarshalIndent(messages, "", "  ")
 		if err != nil {
 			presenter.Error(err, "Failed to generate JSON output")
-			logger.G(ctx).WithError(err).Error("Failed to marshal messages to JSON")
 			os.Exit(1)
 		}
 		fmt.Println(string(outputJSON))
-		logger.G(ctx).WithField("format", "json").Debug("Rendered conversation in JSON format")
 	case "text":
 		// Format as readable text with user/assistant prefixes
 		displayConversation(messages)
-		logger.G(ctx).WithField("format", "text").Debug("Rendered conversation in text format")
 	default:
 		presenter.Error(fmt.Errorf("unsupported format: %s", config.Format), "Unknown format. Supported formats are raw, json, and text")
-		logger.G(ctx).WithField("format", config.Format).Error("Unsupported output format specified")
 		os.Exit(1)
 	}
-
-	logger.G(ctx).WithFields(map[string]interface{}{
-		"conversation_id": id,
-		"format":          config.Format,
-	}).Info("Successfully displayed conversation")
 }
 
 // displayConversation renders the messages in a readable text format

@@ -24,7 +24,6 @@ var initCmd = &cobra.Command{
 	Long:  `Interactive setup for Kodelet configuration including API key and model preferences.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx := cmd.Context()
-		logger.G(ctx).WithField("operation", "init").Info("Starting Kodelet configuration setup")
 
 		// Create a reader for user input
 		reader := bufio.NewReader(os.Stdin)
@@ -48,7 +47,6 @@ var initCmd = &cobra.Command{
 			if err != nil {
 				fmt.Println() // Add newline after password prompt
 				presenter.Error(err, "Failed to read API key")
-				logger.G(ctx).WithError(err).Error("Password input failed during API key entry")
 				return
 			}
 			apiKey = strings.TrimSpace(string(apiKeyBytes))
@@ -56,25 +54,18 @@ var initCmd = &cobra.Command{
 
 			if apiKey != "" {
 				presenter.Success("API key received")
-				logger.G(ctx).Info("API key entered successfully")
 				needsApiKeySetup = true
 			} else {
 				presenter.Warning("No API key provided. You will need to set ANTHROPIC_API_KEY environment variable to use Kodelet")
-				logger.G(ctx).Warn("User did not provide API key")
 			}
 		} else {
 			presenter.Success("Found Anthropic API key in environment variables")
-			logger.G(ctx).Info("API key found in environment")
 		}
 
 		// Save API key to shell profile if needed
 		if needsApiKeySetup && apiKey != "" {
 			// Detect shell and profile path
 			shellName, profilePath = detectShell(ctx)
-			logger.G(ctx).WithFields(map[string]interface{}{
-				"shell":        shellName,
-				"profile_path": profilePath,
-			}).Debug("Detected shell configuration")
 
 			// Check if the API key is already in the profile
 			if checkApiKeyInProfile(ctx, profilePath) {
@@ -85,7 +76,6 @@ var initCmd = &cobra.Command{
 					err := writeApiKeyToProfile(ctx, profilePath, shellName, apiKey)
 					if err != nil {
 						presenter.Error(err, "Failed to update shell profile")
-						logger.G(ctx).WithError(err).WithField("profile_path", profilePath).Error("Shell profile update failed")
 						presenter.Info("📝 To manually set your API key, add the following to your shell profile:")
 
 						// Show the appropriate export command based on shell
@@ -96,7 +86,6 @@ var initCmd = &cobra.Command{
 						}
 					} else {
 						presenter.Success(fmt.Sprintf("API key added to %s", profilePath))
-						logger.G(ctx).WithField("profile_path", profilePath).Info("API key successfully added to shell profile")
 						apiKeyAddedToProfile = true
 					}
 				} else {
@@ -118,7 +107,7 @@ var initCmd = &cobra.Command{
 		// Model selection
 		defaultModel := viper.GetString("model")
 		if defaultModel == "" {
-			defaultModel = string(anthropic.ModelClaudeSonnet4_0)
+			defaultModel = string(anthropic.ModelClaudeSonnet4_20250514)
 		}
 
 		fmt.Printf("   Primary model [%s]: ", defaultModel)
@@ -128,12 +117,11 @@ var initCmd = &cobra.Command{
 		if modelInput != "" {
 			defaultModel = modelInput
 		}
-		logger.G(ctx).WithField("primary_model", defaultModel).Debug("Primary model configured")
 
 		// Weak model selection
 		defaultWeakModel := viper.GetString("weak_model")
 		if defaultWeakModel == "" {
-			defaultWeakModel = string(anthropic.ModelClaude3_5HaikuLatest)
+			defaultWeakModel = string(anthropic.ModelClaude3_5Haiku20241022)
 		}
 
 		fmt.Printf("   Secondary (weak) model [%s]: ", defaultWeakModel)
@@ -143,7 +131,6 @@ var initCmd = &cobra.Command{
 		if weakModelInput != "" {
 			defaultWeakModel = weakModelInput
 		}
-		logger.G(ctx).WithField("weak_model", defaultWeakModel).Debug("Secondary model configured")
 
 		// Max tokens
 		defaultMaxTokens := viper.GetInt("max_tokens")
@@ -302,12 +289,7 @@ func detectShell(ctx context.Context) (string, string) {
 		return "fish", fishConfig
 	default:
 		// Default to .profile for unknown shells
-		profile := filepath.Join(os.Getenv("HOME"), ".profile")
-		logger.G(ctx).WithFields(map[string]interface{}{
-			"unknown_shell": shellName,
-			"profile_file":  profile,
-		}).Warn("Unknown shell detected, using .profile")
-		return shellName, profile
+		return shellName, filepath.Join(os.Getenv("HOME"), ".profile")
 	}
 }
 
@@ -317,33 +299,19 @@ func checkApiKeyInProfile(ctx context.Context, profilePath string) bool {
 	content, err := os.ReadFile(profilePath)
 	if err != nil {
 		// If the file doesn't exist or can't be read, assume the key is not there
-		logger.G(ctx).WithError(err).WithField("profile_path", profilePath).Debug("Could not read profile file, assuming API key not present")
 		return false
 	}
 
 	// Check if the API key export is already in the file
-	hasAPIKey := strings.Contains(string(content), "export ANTHROPIC_API_KEY=") ||
+	return strings.Contains(string(content), "export ANTHROPIC_API_KEY=") ||
 		strings.Contains(string(content), "set -x ANTHROPIC_API_KEY")
-
-	logger.G(ctx).WithFields(map[string]interface{}{
-		"profile_path": profilePath,
-		"has_api_key":  hasAPIKey,
-	}).Debug("Checked for existing API key in profile")
-
-	return hasAPIKey
 }
 
 // writeApiKeyToProfile adds the API key to the shell profile
 func writeApiKeyToProfile(ctx context.Context, profilePath, shellName, apiKey string) error {
-	logger.G(ctx).WithFields(map[string]interface{}{
-		"profile_path": profilePath,
-		"shell":        shellName,
-	}).Debug("Writing API key to profile")
-
 	// Open the file in append mode
 	file, err := os.OpenFile(profilePath, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
 	if err != nil {
-		logger.G(ctx).WithError(err).WithField("profile_path", profilePath).Error("Failed to open profile file for writing")
 		return err
 	}
 	defer file.Close()
@@ -351,7 +319,6 @@ func writeApiKeyToProfile(ctx context.Context, profilePath, shellName, apiKey st
 	// Add a newline for cleanliness
 	_, err = file.WriteString("\n# Added by Kodelet\n")
 	if err != nil {
-		logger.G(ctx).WithError(err).Error("Failed to write header comment to profile")
 		return err
 	}
 
@@ -361,12 +328,6 @@ func writeApiKeyToProfile(ctx context.Context, profilePath, shellName, apiKey st
 		_, err = file.WriteString(fmt.Sprintf("set -x ANTHROPIC_API_KEY \"%s\"\n", apiKey))
 	default:
 		_, err = file.WriteString(fmt.Sprintf("export ANTHROPIC_API_KEY=\"%s\"\n", apiKey))
-	}
-
-	if err != nil {
-		logger.G(ctx).WithError(err).WithField("shell", shellName).Error("Failed to write API key export to profile")
-	} else {
-		logger.G(ctx).WithField("shell", shellName).Info("Successfully wrote API key to profile")
 	}
 
 	return err

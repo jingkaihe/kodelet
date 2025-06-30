@@ -32,7 +32,7 @@ func TestNewThread(t *testing.T) {
 		{
 			name:          "WithDefaultValues",
 			config:        llmtypes.Config{},
-			expectedModel: string(anthropic.ModelClaudeSonnet4_0),
+			expectedModel: string(anthropic.ModelClaudeSonnet4_20250514),
 			expectedMax:   8192,
 		},
 	}

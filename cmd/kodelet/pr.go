@@ -10,7 +10,6 @@ import (
 	"syscall"
 
 	"github.com/jingkaihe/kodelet/pkg/llm"
-	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -80,7 +79,6 @@ This command analyzes the current branch changes compared to the target branch a
 		mcpManager, err := tools.CreateMCPManagerFromViper(ctx)
 		if err != nil {
 			presenter.Error(err, "Failed to create MCP manager")
-			logger.G(ctx).WithError(err).Error("MCP manager creation failed")
 			os.Exit(1)
 		}
 
@@ -94,7 +92,6 @@ This command analyzes the current branch changes compared to the target branch a
 		// 1. Check if we're in a git repository
 		if !isGitRepository() {
 			presenter.Error(fmt.Errorf("not a git repository"), "Please run this command from a git repository")
-			logger.G(ctx).WithField("operation", "pr").Error("Command executed outside git repository")
 			os.Exit(1)
 		}
 
@@ -102,14 +99,12 @@ This command analyzes the current branch changes compared to the target branch a
 		if !isGhCliInstalled() {
 			presenter.Error(fmt.Errorf("GitHub CLI not installed"), "GitHub CLI (gh) is not installed. Please install it first")
 			presenter.Info("Visit https://cli.github.com/ for installation instructions")
-			logger.G(ctx).WithField("operation", "pr").Error("GitHub CLI not available")
 			os.Exit(1)
 		}
 
 		// 3. Check if the user is authenticated with GitHub
 		if !isGhAuthenticated() {
 			presenter.Error(fmt.Errorf("not authenticated with GitHub"), "You are not authenticated with GitHub. Please run 'gh auth login' first")
-			logger.G(ctx).WithField("operation", "pr").Error("GitHub authentication required")
 			os.Exit(1)
 		}
 
@@ -176,11 +171,6 @@ IMPORTANT:
 		// Display usage statistics
 		usageStats := presenter.ConvertUsageStats(&usage)
 		presenter.Stats(usageStats)
-		logger.G(ctx).WithFields(map[string]interface{}{
-			"input_tokens":  usage.InputTokens,
-			"output_tokens": usage.OutputTokens,
-			"total_cost":    usage.TotalCost(),
-		}).Info("PR generation completed")
 	},
 }
 

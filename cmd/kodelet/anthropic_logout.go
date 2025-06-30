@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
@@ -32,7 +31,6 @@ Anthropic models until you authenticate again.`,
 
 		if err := runAnthropicLogout(ctx, noConfirm); err != nil {
 			presenter.Error(err, "Failed to complete Anthropic logout")
-			logger.G(ctx).WithError(err).Error("Failed to complete Anthropic logout")
 			os.Exit(1)
 		}
 	},
@@ -43,42 +41,32 @@ func init() {
 }
 
 func runAnthropicLogout(ctx context.Context, noConfirm bool) error {
-	logger.G(ctx).WithField("operation", "anthropic-logout").Info("Starting Anthropic logout process")
-
 	// Get the credentials file path
 	home, err := os.UserHomeDir()
 	if err != nil {
-		logger.G(ctx).WithError(err).Error("Failed to get user home directory")
 		return errors.Wrap(err, "failed to get user home directory")
 	}
 
 	credentialsPath := filepath.Join(home, ".kodelet", "anthropic-subscription.json")
-	logger.G(ctx).WithField("credentials_path", credentialsPath).Debug("Checking credentials file")
 
 	// Check if credentials file exists
 	if _, err := os.Stat(credentialsPath); os.IsNotExist(err) {
 		presenter.Info("No Anthropic credentials found. You are already logged out.")
-		logger.G(ctx).WithField("credentials_path", credentialsPath).Info("No credentials file found")
 		return nil
 	} else if err != nil {
-		logger.G(ctx).WithError(err).WithField("credentials_path", credentialsPath).Error("Failed to check credentials file")
 		return errors.Wrap(err, "failed to check credentials file")
 	}
 
 	// Confirm with user (unless --no-confirm is set)
 	if !noConfirm && !confirmLogout() {
 		presenter.Info("Logout cancelled.")
-		logger.G(ctx).Info("User cancelled logout operation")
 		return nil
 	}
 
 	// Remove the credentials file
 	if err := os.Remove(credentialsPath); err != nil {
-		logger.G(ctx).WithError(err).WithField("credentials_path", credentialsPath).Error("Failed to remove credentials file")
 		return errors.Wrap(err, "failed to remove credentials file")
 	}
-
-	logger.G(ctx).WithField("credentials_path", credentialsPath).Info("Successfully removed credentials file")
 
 	// Success message
 	presenter.Section("Anthropic Logout")

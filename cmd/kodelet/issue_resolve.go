@@ -8,7 +8,6 @@ import (
 	"syscall"
 
 	"github.com/jingkaihe/kodelet/pkg/llm"
-	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -93,7 +92,6 @@ Examples:
 		mcpManager, err := tools.CreateMCPManagerFromViper(ctx)
 		if err != nil {
 			presenter.Error(err, "Failed to create MCP manager")
-			logger.G(ctx).WithError(err).Error("MCP manager creation failed")
 			return
 		}
 
@@ -106,21 +104,18 @@ Examples:
 		// Validate configuration
 		if err := config.Validate(); err != nil {
 			presenter.Error(err, "Configuration validation failed")
-			logger.G(ctx).WithError(err).Error("Invalid configuration")
 			os.Exit(1)
 		}
 
 		// Validate prerequisites (git repository, gh CLI, authentication)
 		if err := validatePrerequisites(); err != nil {
 			presenter.Error(err, "Prerequisites validation failed")
-			logger.G(ctx).WithError(err).Error("Prerequisites not met")
 			os.Exit(1)
 		}
 
 		bin, err := os.Executable()
 		if err != nil {
 			presenter.Error(err, "Failed to get executable path")
-			logger.G(ctx).WithError(err).Error("Could not determine kodelet executable path")
 			os.Exit(1)
 		}
 
@@ -142,12 +137,6 @@ Examples:
 		// Display usage statistics
 		usageStats := presenter.ConvertUsageStats(&usage)
 		presenter.Stats(usageStats)
-		logger.G(ctx).WithFields(map[string]interface{}{
-			"input_tokens":  usage.InputTokens,
-			"output_tokens": usage.OutputTokens,
-			"total_cost":    usage.TotalCost(),
-			"issue_url":     config.IssueURL,
-		}).Info("Issue resolution completed")
 	},
 }
 

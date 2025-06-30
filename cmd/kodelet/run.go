@@ -11,7 +11,6 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/llm"
-	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -72,7 +71,6 @@ var runCmd = &cobra.Command{
 			stdinBytes, err := io.ReadAll(os.Stdin)
 			if err != nil {
 				presenter.Error(err, "Failed to read from stdin")
-				logger.G(ctx).WithError(err).Error("stdin read failed")
 				return
 			}
 
@@ -99,7 +97,6 @@ var runCmd = &cobra.Command{
 		mcpManager, err := tools.CreateMCPManagerFromViper(ctx)
 		if err != nil {
 			presenter.Error(err, "Failed to create MCP manager")
-			logger.G(ctx).WithError(err).Error("MCP manager creation failed")
 			return
 		}
 
@@ -139,7 +136,6 @@ var runCmd = &cobra.Command{
 		})
 		if err != nil {
 			presenter.Error(err, "Failed to process query")
-			logger.G(ctx).WithError(err).Error("Message processing failed")
 			return
 		}
 
@@ -147,11 +143,6 @@ var runCmd = &cobra.Command{
 		usage := thread.GetUsage()
 		usageStats := presenter.ConvertUsageStats(&usage)
 		presenter.Stats(usageStats)
-		logger.G(ctx).WithFields(map[string]interface{}{
-			"input_tokens":  usage.InputTokens,
-			"output_tokens": usage.OutputTokens,
-			"total_cost":    usage.TotalCost(),
-		}).Info("Query processing completed")
 
 		// Display conversation ID if persistence was enabled
 		if thread.IsPersisted() {

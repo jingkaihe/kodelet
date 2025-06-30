@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/jingkaihe/kodelet/pkg/llm"
-	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -53,14 +52,12 @@ You must stage your changes (using 'git add') before running this command.`,
 		// Check if we're in a git repository
 		if !isGitRepository() {
 			presenter.Error(fmt.Errorf("not a git repository"), "Please run this command from a git repository")
-			logger.G(ctx).WithField("operation", "commit").Error("Command executed outside git repository")
 			os.Exit(1)
 		}
 
 		// Check if there are staged changes
 		if !hasStagedChanges() {
 			presenter.Error(fmt.Errorf("no staged changes found"), "Please stage your changes using 'git add' first")
-			logger.G(ctx).WithField("operation", "commit").Warn("No staged changes detected")
 			os.Exit(1)
 		}
 
@@ -68,14 +65,12 @@ You must stage your changes (using 'git add') before running this command.`,
 		diff, err := getGitDiff()
 		if err != nil {
 			presenter.Error(err, "Failed to get git diff")
-			logger.G(ctx).WithError(err).Error("Failed to execute git diff command")
 			os.Exit(1)
 		}
 
 		// If diff is empty, notify the user and exit
 		if len(strings.TrimSpace(diff)) == 0 {
 			presenter.Warning("No changes detected. Please stage changes using 'git add' before committing")
-			logger.G(ctx).WithField("diff_length", len(diff)).Warn("Empty git diff detected")
 			os.Exit(1)
 		}
 
@@ -117,11 +112,6 @@ IMPORTANT: The output of the commit message should not be wrapped with any markd
 		// Display usage statistics
 		usageStats := presenter.ConvertUsageStats(&usage)
 		presenter.Stats(usageStats)
-		logger.G(ctx).WithFields(map[string]interface{}{
-			"input_tokens":  usage.InputTokens,
-			"output_tokens": usage.OutputTokens,
-			"total_cost":    usage.TotalCost(),
-		}).Info("Commit message generation completed")
 
 		// Confirm with user (unless --no-confirm is set)
 		if !config.NoConfirm && !confirmCommit(commitMsg) {
@@ -131,12 +121,10 @@ IMPORTANT: The output of the commit message should not be wrapped with any markd
 		// Create the commit
 		if err := createCommit(ctx, commitMsg, !config.NoSign); err != nil {
 			presenter.Error(err, "Failed to create commit")
-			logger.G(ctx).WithError(err).Error("Git commit command failed")
 			os.Exit(1)
 		}
 
 		presenter.Success("Commit created successfully!")
-		logger.G(ctx).Info("Git commit created successfully")
 	},
 }
 
@@ -287,15 +275,10 @@ func getEditor() string {
 func createCommit(ctx context.Context, message string, sign bool) error {
 	// Add co-authorship attribution
 	message = message + "\n\nCo-authored-by: Kodelet <noreply@kodelet.com>"
-	logger.G(ctx).WithFields(map[string]interface{}{
-		"sign":           sign,
-		"message_length": len(message),
-	}).Debug("Creating git commit")
 
 	// Create a temporary file for the commit message
 	tempFile, err := os.CreateTemp("", "kodelet-commit-*.txt")
 	if err != nil {
-		logger.G(ctx).WithError(err).Error("Failed to create temporary file for commit message")
 		return fmt.Errorf("error creating temporary file: %w", err)
 	}
 	defer os.Remove(tempFile.Name())

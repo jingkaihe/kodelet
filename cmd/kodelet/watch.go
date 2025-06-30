@@ -92,7 +92,6 @@ ignoring common directories like .git and node_modules.`,
 		go func() {
 			<-sigCh
 			presenter.Warning("\n[kodelet]: Cancellation requested, shutting down...")
-			logger.G(ctx).WithField("operation", "watch").Info("Shutdown signal received")
 			cancel()
 		}()
 
@@ -100,7 +99,6 @@ ignoring common directories like .git and node_modules.`,
 		mcpManager, err := tools.CreateMCPManagerFromViper(ctx)
 		if err != nil {
 			presenter.Error(err, "Failed to create MCP manager")
-			logger.G(ctx).WithError(err).Error("MCP manager creation failed")
 			return
 		}
 
@@ -110,17 +108,8 @@ ignoring common directories like .git and node_modules.`,
 		// Validate configuration
 		if err := config.Validate(); err != nil {
 			presenter.Error(err, "Invalid configuration")
-			logger.G(ctx).WithError(err).WithField("config", config).Error("Configuration validation failed")
 			os.Exit(1)
 		}
-
-		logger.G(ctx).WithFields(map[string]interface{}{
-			"ignore_dirs":     config.IgnoreDirs,
-			"include_pattern": config.IncludePattern,
-			"verbosity":       config.Verbosity,
-			"debounce_time":   config.DebounceTime,
-			"use_weak_model":  config.UseWeakModel,
-		}).Info("Starting watch mode")
 
 		runWatchMode(ctx, s, config)
 	},

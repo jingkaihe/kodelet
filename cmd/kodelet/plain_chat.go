@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/jingkaihe/kodelet/pkg/llm"
-	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -28,7 +27,6 @@ func plainChatUI(ctx context.Context, options *ChatOptions) {
 	mcpManager, err := tools.CreateMCPManagerFromViper(ctx)
 	if err != nil {
 		presenter.Error(err, "Failed to create MCP manager")
-		logger.G(ctx).WithError(err).Error("MCP manager initialization failed in plain chat UI")
 		return
 	}
 
@@ -45,7 +43,6 @@ func plainChatUI(ctx context.Context, options *ChatOptions) {
 	if options.resumeConvID != "" {
 		thread.SetConversationID(options.resumeConvID)
 		presenter.Info(fmt.Sprintf("Resuming conversation: %s", options.resumeConvID))
-		logger.G(ctx).WithField("conversation_id", options.resumeConvID).Info("Resuming existing conversation")
 	}
 
 	thread.EnablePersistence(!options.noSave)
@@ -66,7 +63,6 @@ func plainChatUI(ctx context.Context, options *ChatOptions) {
 		input, err := reader.ReadString('\n')
 		if err != nil {
 			presenter.Error(err, "Error reading input")
-			logger.G(ctx).WithError(err).Error("Failed to read user input from stdin")
 			continue
 		}
 
@@ -92,7 +88,6 @@ func plainChatUI(ctx context.Context, options *ChatOptions) {
 			}
 
 			presenter.Success("Exiting chat mode. Goodbye!")
-			logger.G(ctx).WithField("conversation_id", thread.GetConversationID()).Info("Chat session ended by user")
 			return
 		}
 
@@ -108,7 +103,6 @@ func plainChatUI(ctx context.Context, options *ChatOptions) {
 		})
 		if err != nil {
 			presenter.Error(err, "Failed to process message")
-			logger.G(ctx).WithError(err).Error("Message processing failed in plain chat UI")
 		}
 	}
 }

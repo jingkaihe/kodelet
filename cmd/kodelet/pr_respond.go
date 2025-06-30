@@ -112,22 +112,18 @@ This command focuses on addressing a specific comment or review feedback within 
 		ctx, cancel := context.WithCancel(cmd.Context())
 		defer cancel()
 
-		logger.G(ctx).WithField("command", "pr-respond").Info("Starting PR respond operation")
-
 		// Set up signal handling
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 		go func() {
 			<-sigCh
 			presenter.Warning("Cancellation requested, shutting down...")
-			logger.G(ctx).Warn("PR respond operation cancelled by user")
 			cancel()
 		}()
 
 		mcpManager, err := tools.CreateMCPManagerFromViper(ctx)
 		if err != nil {
 			presenter.Error(err, "Failed to create MCP manager")
-			logger.G(ctx).WithError(err).Error("MCP manager creation failed")
 			return
 		}
 
@@ -139,40 +135,29 @@ This command focuses on addressing a specific comment or review feedback within 
 		// Validate configuration
 		if err := config.Validate(); err != nil {
 			presenter.Error(err, "Configuration validation failed")
-			logger.G(ctx).WithError(err).WithField("config", config).Error("Invalid PR respond configuration")
 			os.Exit(1)
 		}
-
-		logger.G(ctx).WithFields(map[string]interface{}{
-			"pr_url":            config.PRURL,
-			"review_comment_id": config.ReviewCommentID,
-			"issue_comment_id":  config.IssueCommentID,
-		}).Info("Configuration validated successfully")
 
 		// Prerequisites checking
 		if !isGitRepository() {
 			presenter.Error(fmt.Errorf("not a git repository"), "Please run this command from a git repository")
-			logger.G(ctx).Error("Command executed outside git repository")
 			os.Exit(1)
 		}
 
 		if !isGhCliInstalled() {
 			presenter.Error(fmt.Errorf("GitHub CLI not installed"), "Please install GitHub CLI first")
 			presenter.Info("Visit https://cli.github.com/ for installation instructions")
-			logger.G(ctx).Error("GitHub CLI not found in PATH")
 			os.Exit(1)
 		}
 
 		if !isGhAuthenticated() {
 			presenter.Error(fmt.Errorf("not authenticated with GitHub"), "Please run 'gh auth login' first")
-			logger.G(ctx).Error("GitHub authentication required")
 			os.Exit(1)
 		}
 
 		bin, err := os.Executable()
 		if err != nil {
 			presenter.Error(err, "Failed to get executable path")
-			logger.G(ctx).WithError(err).Error("Could not determine executable path")
 			os.Exit(1)
 		}
 
@@ -186,16 +171,10 @@ This command focuses on addressing a specific comment or review feedback within 
 
 		// Prefetch PR data
 		presenter.Info("Prefetching PR data...")
-		logger.G(ctx).WithFields(map[string]interface{}{
-			"pr_url":            config.PRURL,
-			"comment_id":        commentID,
-			"is_review_comment": config.ReviewCommentID != "",
-		}).Info("Starting PR data prefetch")
 
 		prData, err := prefetchPRData(ctx, config.PRURL, commentID, config.ReviewCommentID != "")
 		if err != nil {
 			presenter.Error(err, "Failed to prefetch PR data")
-			logger.G(ctx).WithError(err).Error("PR data prefetch failed")
 			os.Exit(1)
 		}
 
@@ -218,11 +197,6 @@ This command focuses on addressing a specific comment or review feedback within 
 		// Display usage statistics
 		usageStats := presenter.ConvertUsageStats(&usage)
 		presenter.Stats(usageStats)
-		logger.G(ctx).WithFields(map[string]interface{}{
-			"input_tokens":  usage.InputTokens,
-			"output_tokens": usage.OutputTokens,
-			"total_cost":    usage.TotalCost(),
-		}).Info("PR respond operation completed")
 	},
 }
 
@@ -262,10 +236,8 @@ func prefetchPRData(ctx context.Context, prURL, commentID string, isReviewCommen
 
 	// Get basic PR information
 	cmd := exec.Command("gh", "pr", "view", prURL, "--json", "title,author,body,comments")
-	logger.G(ctx).WithField("cmd", cmd.String()).Debug("Fetching PR basic info")
 	basicInfoOutput, err := cmd.CombinedOutput()
 	if err != nil {
-		logger.G(ctx).WithError(err).WithField("output", string(basicInfoOutput)).Error("Failed to fetch PR basic info")
 		return nil, fmt.Errorf("failed to get PR basic info: %w, %s", err, string(basicInfoOutput))
 	}
 

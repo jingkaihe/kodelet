@@ -76,20 +76,17 @@ var chatCmd = &cobra.Command{
 		if chatOptions.follow {
 			if chatOptions.resumeConvID != "" {
 				presenter.Error(fmt.Errorf("conflicting options"), "--follow and --resume cannot be used together")
-				logger.G(ctx).WithField("operation", "chat").Error("Conflicting command line options provided")
 				os.Exit(1)
 			}
 			var err error
 			chatOptions.resumeConvID, err = conversations.GetMostRecentConversationID()
 			if err != nil {
 				presenter.Warning("No conversations found, starting a new conversation")
-				logger.G(ctx).WithError(err).Info("No previous conversations found for --follow option")
 			}
 		}
 		mcpManager, err := tools.CreateMCPManagerFromViper(ctx)
 		if err != nil {
 			presenter.Error(err, "Failed to create MCP manager")
-			logger.G(ctx).WithError(err).Error("MCP manager initialization failed")
 			os.Exit(1)
 		}
 		// Start the Bubble Tea UI
@@ -115,11 +112,8 @@ var chatCmd = &cobra.Command{
 				if err != nil {
 					// Print warning but don't fail - continue without log redirection
 					presenter.Warning(fmt.Sprintf("Failed to set up log redirection for TUI: %v", err))
-					logger.G(ctx).WithError(err).Warn("TUI log redirection setup failed")
 				} else {
 					defer logFile.Close()
-					// Log to the file that we just set up
-					logger.G(ctx).WithField("log_file", logFilePath).Info("Redirecting logs to file for TUI mode")
 				}
 			}
 

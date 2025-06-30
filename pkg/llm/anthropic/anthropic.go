@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 
@@ -19,6 +20,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/sysprompt"
 	"github.com/jingkaihe/kodelet/pkg/telemetry"
 	"github.com/jingkaihe/kodelet/pkg/tools"
+	"github.com/sirupsen/logrus"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
@@ -61,7 +63,7 @@ func (t *AnthropicThread) Provider() string {
 func NewAnthropicThread(config llmtypes.Config) *AnthropicThread {
 	// Apply defaults if not provided
 	if config.Model == "" {
-		config.Model = string(anthropic.ModelClaudeSonnet4_0)
+		config.Model = string(anthropic.ModelClaudeSonnet4_20250514)
 	}
 	if config.MaxTokens == 0 {
 		config.MaxTokens = 8192
@@ -403,10 +405,24 @@ func (t *AnthropicThread) getModelAndTokens(opt llmtypes.MessageOpt) (anthropic.
 }
 
 func (t *AnthropicThread) shouldUtiliseThinking(model anthropic.Model) bool {
+	thinkingModels := []anthropic.Model{
+		// sonnet 4 models
+		anthropic.ModelClaudeSonnet4_0,
+		anthropic.ModelClaudeSonnet4_20250514,
+		// opus 4 models
+		anthropic.ModelClaudeOpus4_0,
+		anthropic.ModelClaude4Opus20250514,
+		// sonnet 3.7 models
+		anthropic.ModelClaude3_7Sonnet20250219,
+		anthropic.ModelClaude3_7SonnetLatest,
+		// opus 3 models
+		anthropic.ModelClaude_3_Opus_20240229,
+		anthropic.ModelClaude3OpusLatest,
+	}
 	if t.config.ThinkingBudgetTokens == 0 {
 		return false
 	}
-	if model != anthropic.ModelClaudeSonnet4_0 {
+	if !slices.Contains(thinkingModels, model) {
 		return false
 	}
 	return true
@@ -431,6 +447,14 @@ func (t *AnthropicThread) NewMessage(ctx context.Context, params anthropic.Messa
 	for i, sys := range params.System {
 		spanAttrs = append(spanAttrs, attribute.String(fmt.Sprintf("system.%d", i), sys.Text))
 	}
+
+	log := logger.G(ctx).WithFields(logrus.Fields{
+		"model":         string(params.Model),
+		"max_tokens":    params.MaxTokens,
+		"thinking":      params.Thinking.OfEnabled.BudgetTokens > 0,
+		"budget_tokens": params.Thinking.OfEnabled.BudgetTokens,
+	})
+	log.Debug("new message")
 
 	// Add the last 10 messages (or fewer if there aren't 10) to the span attributes
 	spanAttrs = append(spanAttrs, t.getLastMessagesAttributes(params.Messages, 10)...)
