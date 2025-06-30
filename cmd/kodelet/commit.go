@@ -95,7 +95,6 @@ IMPORTANT: The output of the commit message should not be wrapped with any markd
 		}
 
 		presenter.Info("Analyzing staged changes and generating commit message...")
-		presenter.Separator()
 
 		// Get the commit message using the Thread abstraction with usage stats
 		commitMsg, usage := llm.SendMessageAndGetTextWithUsage(ctx, s, prompt, llmConfig, true, llmtypes.MessageOpt{
@@ -105,7 +104,6 @@ IMPORTANT: The output of the commit message should not be wrapped with any markd
 		})
 		commitMsg = sanitizeCommitMessage(commitMsg)
 
-		presenter.Separator()
 		presenter.Section("Generated Commit Message")
 		fmt.Printf("%s\n\n", commitMsg)
 

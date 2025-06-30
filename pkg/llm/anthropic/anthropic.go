@@ -621,17 +621,17 @@ func (t *AnthropicThread) updateUsage(response *anthropic.Message, model anthrop
 func (t *AnthropicThread) NewSubAgent(ctx context.Context) llmtypes.Thread {
 	config := t.config
 	config.IsSubAgent = true
-	
+
 	// Create subagent thread reusing the parent's client instead of creating a new one
 	thread := &AnthropicThread{
-		client:          t.client,          // Reuse parent's client
+		client:          t.client, // Reuse parent's client
 		config:          config,
 		useSubscription: t.useSubscription, // Reuse parent's subscription status
 		conversationID:  conversations.GenerateID(),
-		isPersisted:     false, // subagent is not persisted
+		isPersisted:     false,   // subagent is not persisted
 		usage:           t.usage, // Share usage tracking with parent
 	}
-	
+
 	thread.SetState(tools.NewBasicState(ctx, tools.WithSubAgentTools(), tools.WithExtraMCPTools(t.state.MCPTools())))
 
 	return thread
