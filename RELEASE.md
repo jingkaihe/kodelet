@@ -1,5 +1,12 @@
 # Kodelet
 
+## 0.0.48.alpha (2025-06-30)
+
+### Enhanced CLI Output System
+- **New Presenter Package**: Introduced dedicated presenter package for consistent CLI output with color support and context-aware formatting
+- **Improved User Experience**: Better structured output with success/error/warning indicators and statistics reporting
+- **Context-Aware Colors**: Automatic terminal detection with color override support
+
 ## 0.0.47.alpha (2025-06-21)
 
 ### Token Refresh Improvements

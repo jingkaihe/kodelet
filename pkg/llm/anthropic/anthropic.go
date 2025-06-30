@@ -448,12 +448,15 @@ func (t *AnthropicThread) NewMessage(ctx context.Context, params anthropic.Messa
 		spanAttrs = append(spanAttrs, attribute.String(fmt.Sprintf("system.%d", i), sys.Text))
 	}
 
-	log := logger.G(ctx).WithFields(logrus.Fields{
-		"model":         string(params.Model),
-		"max_tokens":    params.MaxTokens,
-		"thinking":      params.Thinking.OfEnabled.BudgetTokens > 0,
-		"budget_tokens": params.Thinking.OfEnabled.BudgetTokens,
-	})
+	logFields := logrus.Fields{
+		"model":      string(params.Model),
+		"max_tokens": params.MaxTokens,
+	}
+	if t.shouldUtiliseThinking(params.Model) {
+		logFields["thinking"] = params.Thinking.OfEnabled.BudgetTokens > 0
+		logFields["budget_tokens"] = params.Thinking.OfEnabled.BudgetTokens
+	}
+	log := logger.G(ctx).WithFields(logFields)
 	log.Debug("new message")
 
 	// Add the last 10 messages (or fewer if there aren't 10) to the span attributes
