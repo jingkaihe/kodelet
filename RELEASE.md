@@ -1,5 +1,10 @@
 # Kodelet
 
+## 0.0.49.alpha (2025-06-30)
+
+### Usage Analytics Command
+- **New `kodelet usage` Command**: Added comprehensive token usage and cost tracking functionality
+
 ## 0.0.48.alpha (2025-06-30)
 
 ### Enhanced CLI Output System
