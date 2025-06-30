@@ -8,6 +8,7 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	"github.com/jingkaihe/kodelet/pkg/tui"
 	"github.com/spf13/cobra"
@@ -74,19 +75,18 @@ var chatCmd = &cobra.Command{
 
 		if chatOptions.follow {
 			if chatOptions.resumeConvID != "" {
-
-				fmt.Printf("Error: --follow and --resume cannot be used together\n")
+				presenter.Error(fmt.Errorf("conflicting options"), "--follow and --resume cannot be used together")
 				os.Exit(1)
 			}
 			var err error
 			chatOptions.resumeConvID, err = conversations.GetMostRecentConversationID()
 			if err != nil {
-				fmt.Println("Warning: no conversations found, starting a new conversation")
+				presenter.Warning("No conversations found, starting a new conversation")
 			}
 		}
 		mcpManager, err := tools.CreateMCPManagerFromViper(ctx)
 		if err != nil {
-			fmt.Printf("Error creating MCP manager: %v\n", err)
+			presenter.Error(err, "Failed to create MCP manager")
 			os.Exit(1)
 		}
 		// Start the Bubble Tea UI
@@ -110,12 +110,10 @@ var chatCmd = &cobra.Command{
 				var err error
 				logFile, logFilePath, err = setupTUILogRedirection(conversationID)
 				if err != nil {
-					// Print to stderr but don't fail - continue without log redirection
-					fmt.Fprintf(os.Stderr, "Warning: Failed to set up log redirection for TUI: %v\n", err)
+					// Print warning but don't fail - continue without log redirection
+					presenter.Warning(fmt.Sprintf("Failed to set up log redirection for TUI: %v", err))
 				} else {
 					defer logFile.Close()
-					// Log to the file that we just set up
-					logger.G(ctx).WithField("log_file", logFilePath).Info("Redirecting logs to file for TUI mode")
 				}
 			}
 
@@ -125,7 +123,7 @@ var chatCmd = &cobra.Command{
 			if logFile != nil {
 				logger.L.Logger.SetOutput(os.Stderr)
 				if logFilePath != "" {
-					fmt.Printf("Chat logs saved to: %s\n", logFilePath)
+					presenter.Info(fmt.Sprintf("Chat logs saved to: %s", logFilePath))
 				}
 			}
 

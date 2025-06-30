@@ -92,9 +92,9 @@ func getModelPricing(model anthropic.Model) ModelPricing {
 	}
 	// Try to find a match based on model family
 	lowerModel := strings.ToLower(string(model))
-	if strings.Contains(lowerModel, "claude-sonnet-4") {
+	if strings.Contains(lowerModel, "claude-sonnet-4") || strings.Contains(lowerModel, "claude-sonnet-4") {
 		return ModelPricingMap[anthropic.ModelClaudeSonnet4_0]
-	} else if strings.Contains(lowerModel, "claude-4-opus") {
+	} else if strings.Contains(lowerModel, "claude-4-opus") || strings.Contains(lowerModel, "claude-opus-4") {
 		return ModelPricingMap[anthropic.ModelClaude4Opus20250514]
 	} else if strings.Contains(lowerModel, "claude-3-7-sonnet") {
 		return ModelPricingMap[anthropic.ModelClaude3_7SonnetLatest]

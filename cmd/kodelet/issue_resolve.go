@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"github.com/jingkaihe/kodelet/pkg/llm"
+	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/spf13/cobra"
@@ -84,13 +85,13 @@ Examples:
 		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 		go func() {
 			<-sigCh
-			fmt.Println("\n\033[1;33m[kodelet]: Cancellation requested, shutting down...\033[0m")
+			presenter.Warning("Cancellation requested, shutting down...")
 			cancel()
 		}()
 
 		mcpManager, err := tools.CreateMCPManagerFromViper(ctx)
 		if err != nil {
-			fmt.Printf("\n\033[1;31mError creating MCP manager: %v\033[0m\n", err)
+			presenter.Error(err, "Failed to create MCP manager")
 			return
 		}
 
@@ -102,19 +103,19 @@ Examples:
 
 		// Validate configuration
 		if err := config.Validate(); err != nil {
-			fmt.Printf("Error: %s\n", err)
+			presenter.Error(err, "Configuration validation failed")
 			os.Exit(1)
 		}
 
 		// Validate prerequisites (git repository, gh CLI, authentication)
 		if err := validatePrerequisites(); err != nil {
-			fmt.Printf("Error: %s\n", err)
+			presenter.Error(err, "Prerequisites validation failed")
 			os.Exit(1)
 		}
 
 		bin, err := os.Executable()
 		if err != nil {
-			fmt.Println("Error: Failed to get executable path")
+			presenter.Error(err, "Failed to get executable path")
 			os.Exit(1)
 		}
 
@@ -122,23 +123,20 @@ Examples:
 		prompt := generateIssueResolutionPrompt(bin, config.IssueURL, config.BotMention)
 
 		// Send to LLM using existing architecture
-		fmt.Println("Analyzing GitHub issue and determining appropriate resolution workflow...")
-		fmt.Println("-----------------------------------------------------------")
+		presenter.Info("Analyzing GitHub issue and determining appropriate resolution workflow...")
+		presenter.Separator()
 
 		out, usage := llm.SendMessageAndGetTextWithUsage(ctx, s, prompt,
 			llm.GetConfigFromViper(), false, llmtypes.MessageOpt{
 				PromptCache: true,
 			})
 
-		fmt.Println(out)
-		fmt.Println("-----------------------------------------------------------")
+		presenter.Info(out)
+		presenter.Separator()
 
-		// Display usage statistics (same as pr.go)
-		fmt.Printf("\033[1;36m[Usage Stats] Input tokens: %d | Output tokens: %d | Cache write: %d | Cache read: %d | Total: %d\033[0m\n",
-			usage.InputTokens, usage.OutputTokens, usage.CacheCreationInputTokens, usage.CacheReadInputTokens, usage.TotalTokens())
-
-		fmt.Printf("\033[1;36m[Cost Stats] Input: $%.4f | Output: $%.4f | Cache write: $%.4f | Cache read: $%.4f | Total: $%.4f\033[0m\n",
-			usage.InputCost, usage.OutputCost, usage.CacheCreationCost, usage.CacheReadCost, usage.TotalCost())
+		// Display usage statistics
+		usageStats := presenter.ConvertUsageStats(&usage)
+		presenter.Stats(usageStats)
 	},
 }
 

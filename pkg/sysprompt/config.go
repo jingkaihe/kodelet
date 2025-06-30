@@ -52,4 +52,3 @@ func updateContextWithConfig(ctx *PromptContext, config *PromptConfig) {
 	ctx.Features["todoToolsEnabled"] = config.IsFeatureEnabled("todoTools")
 	ctx.Features["batchToolEnabled"] = config.IsFeatureEnabled("batchTool")
 }
-

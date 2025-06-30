@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/llm"
+	"github.com/jingkaihe/kodelet/pkg/presenter"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/spf13/cobra"
 )
@@ -79,8 +81,9 @@ var conversationListCmd = &cobra.Command{
 	Short: "List all saved conversations",
 	Long:  `List saved conversations with filtering and sorting options.`,
 	Run: func(cmd *cobra.Command, args []string) {
+		ctx := cmd.Context()
 		config := getConversationListConfigFromFlags(cmd)
-		listConversationsCmd(config)
+		listConversationsCmd(ctx, config)
 	},
 }
 
@@ -89,8 +92,9 @@ var conversationDeleteCmd = &cobra.Command{
 	Short: "Delete a specific conversation",
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
+		ctx := cmd.Context()
 		config := getConversationDeleteConfigFromFlags(cmd)
-		deleteConversationCmd(args[0], config)
+		deleteConversationCmd(ctx, args[0], config)
 	},
 }
 
@@ -99,8 +103,9 @@ var conversationShowCmd = &cobra.Command{
 	Short: "Show a specific conversation",
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
+		ctx := cmd.Context()
 		config := getConversationShowConfigFromFlags(cmd)
-		showConversationCmd(args[0], config)
+		showConversationCmd(ctx, args[0], config)
 	},
 }
 
@@ -293,11 +298,12 @@ type ConversationSummaryOutput struct {
 }
 
 // listConversationsCmd displays a list of saved conversations with query options
-func listConversationsCmd(config *ConversationListConfig) {
+func listConversationsCmd(ctx context.Context, config *ConversationListConfig) {
+
 	// Create a store
 	store, err := conversations.GetConversationStore()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		presenter.Error(err, "Failed to initialize conversation store")
 		os.Exit(1)
 	}
 
@@ -314,7 +320,7 @@ func listConversationsCmd(config *ConversationListConfig) {
 	if config.StartDate != "" {
 		startDate, err := time.Parse("2006-01-02", config.StartDate)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error parsing start date: %v\n", err)
+			presenter.Error(err, "Invalid start date format. Please use YYYY-MM-DD")
 			os.Exit(1)
 		}
 		options.StartDate = &startDate
@@ -324,7 +330,7 @@ func listConversationsCmd(config *ConversationListConfig) {
 	if config.EndDate != "" {
 		endDate, err := time.Parse("2006-01-02", config.EndDate)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error parsing end date: %v\n", err)
+			presenter.Error(err, "Invalid end date format. Please use YYYY-MM-DD")
 			os.Exit(1)
 		}
 		// Set to end of day
@@ -335,12 +341,12 @@ func listConversationsCmd(config *ConversationListConfig) {
 	// Query conversations with options
 	summaries, err := store.Query(options)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error listing conversations: %v\n", err)
+		presenter.Error(err, "Failed to list conversations")
 		os.Exit(1)
 	}
 
 	if len(summaries) == 0 {
-		fmt.Println("No conversations found matching your criteria.")
+		presenter.Info("No conversations found matching your criteria.")
 		return
 	}
 
@@ -353,28 +359,27 @@ func listConversationsCmd(config *ConversationListConfig) {
 	// Create and render the output
 	output := NewConversationListOutput(summaries, format)
 	if err := output.Render(os.Stdout); err != nil {
-		fmt.Fprintf(os.Stderr, "Error rendering output: %v\n", err)
+		presenter.Error(err, "Failed to render conversation list")
 		os.Exit(1)
 	}
 }
 
 // deleteConversationCmd deletes a specific conversation
-func deleteConversationCmd(id string, config *ConversationDeleteConfig) {
+func deleteConversationCmd(ctx context.Context, id string, config *ConversationDeleteConfig) {
+
 	// Create a store
 	store, err := conversations.GetConversationStore()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		presenter.Error(err, "Failed to initialize conversation store")
 		os.Exit(1)
 	}
 
 	// If no-confirm flag is not set, prompt for confirmation
 	if !config.NoConfirm {
-		fmt.Printf("Are you sure you want to delete conversation %s? (y/N): ", id)
-		var response string
-		fmt.Scanln(&response)
+		response := presenter.Prompt(fmt.Sprintf("Are you sure you want to delete conversation %s?", id), "y", "N")
 
 		if response != "y" && response != "Y" {
-			fmt.Println("Deletion cancelled.")
+			presenter.Info("Deletion cancelled.")
 			return
 		}
 	}
@@ -382,33 +387,34 @@ func deleteConversationCmd(id string, config *ConversationDeleteConfig) {
 	// Delete the conversation
 	err = store.Delete(id)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error deleting conversation: %v\n", err)
+		presenter.Error(err, "Failed to delete conversation")
 		os.Exit(1)
 	}
 
-	fmt.Printf("Conversation %s deleted successfully.\n", id)
+	presenter.Success(fmt.Sprintf("Conversation %s deleted successfully", id))
 }
 
 // showConversationCmd displays a specific conversation
-func showConversationCmd(id string, config *ConversationShowConfig) {
+func showConversationCmd(ctx context.Context, id string, config *ConversationShowConfig) {
+
 	// Create a store
 	store, err := conversations.GetConversationStore()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		presenter.Error(err, "Failed to initialize conversation store")
 		os.Exit(1)
 	}
 
 	// Load the conversation record
 	record, err := store.Load(id)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading conversation: %v\n", err)
+		presenter.Error(err, "Failed to load conversation")
 		os.Exit(1)
 	}
 
 	// Extract messages from raw message data
 	messages, err := llm.ExtractMessages(record.ModelType, record.RawMessages)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error parsing messages: %v\n", err)
+		presenter.Error(err, "Failed to parse conversation messages")
 		os.Exit(1)
 	}
 
@@ -421,7 +427,7 @@ func showConversationCmd(id string, config *ConversationShowConfig) {
 		// Convert to simpler JSON format and output
 		outputJSON, err := json.MarshalIndent(messages, "", "  ")
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error generating JSON output: %v\n", err)
+			presenter.Error(err, "Failed to generate JSON output")
 			os.Exit(1)
 		}
 		fmt.Println(string(outputJSON))
@@ -429,7 +435,7 @@ func showConversationCmd(id string, config *ConversationShowConfig) {
 		// Format as readable text with user/assistant prefixes
 		displayConversation(messages)
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown format: %s. Supported formats are raw, json, and text.\n", config.Format)
+		presenter.Error(fmt.Errorf("unsupported format: %s", config.Format), "Unknown format. Supported formats are raw, json, and text")
 		os.Exit(1)
 	}
 }
@@ -439,7 +445,7 @@ func displayConversation(messages []llmtypes.Message) {
 	for i, msg := range messages {
 		// Add a separator between messages
 		if i > 0 {
-			fmt.Println(strings.Repeat("-", 80))
+			presenter.Separator()
 		}
 
 		// Format based on role
@@ -458,7 +464,8 @@ func displayConversation(messages []llmtypes.Message) {
 			}
 		}
 
-		// Output the formatted message
-		fmt.Printf("%s:\n%s\n", roleLabel, msg.Content)
+		// Output the formatted message with section header
+		presenter.Section(roleLabel)
+		fmt.Printf("%s\n", msg.Content)
 	}
 }

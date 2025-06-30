@@ -151,4 +151,3 @@ func TestSystemPromptBashEmptyAllowedCommands(t *testing.T) {
 		t.Error("Did not expect system prompt to contain 'Allowed Commands' section when allowed commands is empty")
 	}
 }
-

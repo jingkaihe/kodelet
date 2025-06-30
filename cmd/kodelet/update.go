@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/jingkaihe/kodelet/pkg/version"
 	"github.com/spf13/cobra"
 )
@@ -49,8 +51,8 @@ var updateCmd = &cobra.Command{
 		// Get update config from flags
 		config := getUpdateConfigFromFlags(cmd)
 
-		if err := updateKodelet(config); err != nil {
-			logger.G(ctx).WithError(err).Error("Failed to update Kodelet")
+		if err := updateKodelet(ctx, config); err != nil {
+			presenter.Error(err, "Failed to update Kodelet")
 			os.Exit(1)
 		}
 	},
@@ -72,10 +74,10 @@ func getUpdateConfigFromFlags(cmd *cobra.Command) *UpdateConfig {
 	return config
 }
 
-func updateKodelet(config *UpdateConfig) error {
+func updateKodelet(ctx context.Context, config *UpdateConfig) error {
 	// Get current version info
 	currentVersion := version.Get()
-	fmt.Printf("Current version: %s\n", currentVersion.Version)
+	presenter.Info(fmt.Sprintf("Current version: %s", currentVersion.Version))
 
 	// Detect OS and architecture
 	osType := runtime.GOOS
@@ -111,7 +113,8 @@ func updateKodelet(config *UpdateConfig) error {
 		}
 		downloadURL = fmt.Sprintf("https://%s/releases/download/%s/kodelet-%s-%s", GitHubRepoURL, version, osType, arch)
 	}
-	fmt.Printf("Downloading latest version from: %s\n", downloadURL)
+
+	presenter.Info(fmt.Sprintf("Downloading from: %s", downloadURL))
 
 	// Find the current executable path
 	execPath, err := os.Executable()
@@ -123,7 +126,7 @@ func updateKodelet(config *UpdateConfig) error {
 		return fmt.Errorf("failed to resolve symlinks for executable path: %w", err)
 	}
 
-	fmt.Printf("Current executable: %s\n", execPath)
+	logger.G(ctx).WithField("executable_path", execPath).Debug("Resolved current executable path")
 
 	// Create a temporary file for downloading
 	tempFile, err := os.CreateTemp("", "kodelet-update-*")
@@ -168,7 +171,7 @@ func updateKodelet(config *UpdateConfig) error {
 
 	// If we need sudo, try to use it
 	if needsSudo {
-		fmt.Println("Elevated permissions required to update. You may be prompted for your password.")
+		presenter.Warning("Elevated permissions required to update. You may be prompted for your password.")
 		cmd := exec.Command("sudo", "mv", tempFilePath, execPath)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -179,8 +182,8 @@ func updateKodelet(config *UpdateConfig) error {
 		}
 	}
 
-	fmt.Println("Update completed successfully!")
-	fmt.Println("Please run 'kodelet version' to verify the new version.")
+	presenter.Success("Update completed successfully!")
+	presenter.Info("Please run 'kodelet version' to verify the new version.")
 
 	return nil
 }

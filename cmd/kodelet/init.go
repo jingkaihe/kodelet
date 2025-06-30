@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +11,8 @@ import (
 	"syscall"
 
 	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"golang.org/x/term"
@@ -20,13 +23,14 @@ var initCmd = &cobra.Command{
 	Short: "Set up Kodelet configuration",
 	Long:  `Interactive setup for Kodelet configuration including API key and model preferences.`,
 	Run: func(cmd *cobra.Command, args []string) {
+		ctx := cmd.Context()
+
 		// Create a reader for user input
 		reader := bufio.NewReader(os.Stdin)
 
-		fmt.Println("🚀 Kodelet Configuration Setup")
-		fmt.Println("=============================")
-		fmt.Println("This wizard will help you set up Kodelet with the recommended configuration.")
-		fmt.Println("")
+		presenter.Section("🚀 Kodelet Configuration Setup")
+		presenter.Info("This wizard will help you set up Kodelet with the recommended configuration.")
+		presenter.Separator()
 
 		// Check for existing API key
 		apiKey := os.Getenv("ANTHROPIC_API_KEY")
@@ -41,68 +45,69 @@ var initCmd = &cobra.Command{
 			fmt.Print("🔑 Enter your Anthropic API key: ")
 			apiKeyBytes, err := term.ReadPassword(int(syscall.Stdin))
 			if err != nil {
-				fmt.Println("\n⚠️ Error reading API key:", err)
+				fmt.Println() // Add newline after password prompt
+				presenter.Error(err, "Failed to read API key")
 				return
 			}
 			apiKey = strings.TrimSpace(string(apiKeyBytes))
 			fmt.Println() // Add a newline after the hidden input
 
 			if apiKey != "" {
-				fmt.Println("✅ API key received.")
+				presenter.Success("API key received")
 				needsApiKeySetup = true
 			} else {
-				fmt.Println("\n⚠️ No API key provided. You will need to set ANTHROPIC_API_KEY environment variable to use Kodelet.")
+				presenter.Warning("No API key provided. You will need to set ANTHROPIC_API_KEY environment variable to use Kodelet")
 			}
 		} else {
-			fmt.Println("🔑 Found Anthropic API key in environment variables. ✅")
+			presenter.Success("Found Anthropic API key in environment variables")
 		}
 
 		// Save API key to shell profile if needed
 		if needsApiKeySetup && apiKey != "" {
 			// Detect shell and profile path
-			shellName, profilePath = detectShell()
+			shellName, profilePath = detectShell(ctx)
 
 			// Check if the API key is already in the profile
-			if checkApiKeyInProfile(profilePath) {
-				fmt.Println("🔑 API key is already configured in your shell profile.")
+			if checkApiKeyInProfile(ctx, profilePath) {
+				presenter.Info("🔑 API key is already configured in your shell profile")
 			} else {
 				// Ask permission to update the shell profile
 				if askForPermission(reader, profilePath) {
-					err := writeApiKeyToProfile(profilePath, shellName, apiKey)
+					err := writeApiKeyToProfile(ctx, profilePath, shellName, apiKey)
 					if err != nil {
-						fmt.Printf("\n⚠️ Failed to update shell profile: %v\n", err)
-						fmt.Println("📝 To manually set your API key, add the following to your shell profile:")
+						presenter.Error(err, "Failed to update shell profile")
+						presenter.Info("📝 To manually set your API key, add the following to your shell profile:")
 
 						// Show the appropriate export command based on shell
 						if shellName == "fish" {
-							fmt.Printf("   set -x ANTHROPIC_API_KEY \"%s\"\n\n", apiKey)
+							presenter.Info(fmt.Sprintf("   set -x ANTHROPIC_API_KEY \"%s\"", apiKey))
 						} else {
-							fmt.Printf("   export ANTHROPIC_API_KEY=\"%s\"\n\n", apiKey)
+							presenter.Info(fmt.Sprintf("   export ANTHROPIC_API_KEY=\"%s\"", apiKey))
 						}
 					} else {
-						fmt.Printf("\n✅ API key added to %s\n", profilePath)
+						presenter.Success(fmt.Sprintf("API key added to %s", profilePath))
 						apiKeyAddedToProfile = true
 					}
 				} else {
-					fmt.Println("\n📝 To manually set your API key, add the following to your shell profile:")
+					presenter.Info("📝 To manually set your API key, add the following to your shell profile:")
 
 					// Show the appropriate export command based on shell
 					if shellName == "fish" {
-						fmt.Printf("   set -x ANTHROPIC_API_KEY \"%s\"\n\n", apiKey)
+						presenter.Info(fmt.Sprintf("   set -x ANTHROPIC_API_KEY \"%s\"", apiKey))
 					} else {
-						fmt.Printf("   export ANTHROPIC_API_KEY=\"%s\"\n\n", apiKey)
+						presenter.Info(fmt.Sprintf("   export ANTHROPIC_API_KEY=\"%s\"", apiKey))
 					}
 				}
 			}
 		}
 
 		// Configure models and tokens
-		fmt.Println("📋 Let's configure your model preferences:")
+		presenter.Section("📋 Model Configuration")
 
 		// Model selection
 		defaultModel := viper.GetString("model")
 		if defaultModel == "" {
-			defaultModel = string(anthropic.ModelClaudeSonnet4_0)
+			defaultModel = string(anthropic.ModelClaudeSonnet4_20250514)
 		}
 
 		fmt.Printf("   Primary model [%s]: ", defaultModel)
@@ -116,7 +121,7 @@ var initCmd = &cobra.Command{
 		// Weak model selection
 		defaultWeakModel := viper.GetString("weak_model")
 		if defaultWeakModel == "" {
-			defaultWeakModel = string(anthropic.ModelClaude3_5HaikuLatest)
+			defaultWeakModel = string(anthropic.ModelClaude3_5Haiku20241022)
 		}
 
 		fmt.Printf("   Secondary (weak) model [%s]: ", defaultWeakModel)
@@ -178,13 +183,21 @@ var initCmd = &cobra.Command{
 			}
 		}
 
+		logger.G(ctx).WithFields(map[string]interface{}{
+			"max_tokens":             defaultMaxTokens,
+			"weak_model_max_tokens":  defaultWeakModelMaxTokens,
+			"thinking_budget_tokens": defaultThinkingBudgetTokens,
+		}).Debug("Token limits configured")
+
 		// Create config directory if it doesn't exist
 		configDir := filepath.Join(os.Getenv("HOME"), ".kodelet")
 		err := os.MkdirAll(configDir, 0755)
 		if err != nil {
-			fmt.Printf("\n❌ Failed to create config directory: %v\n", err)
+			presenter.Error(err, "Failed to create config directory")
+			logger.G(ctx).WithError(err).WithField("config_dir", configDir).Error("Config directory creation failed")
 			return
 		}
+		logger.G(ctx).WithField("config_dir", configDir).Debug("Config directory created")
 
 		// Create a config file
 		configFile := filepath.Join(configDir, "config.yaml")
@@ -209,45 +222,49 @@ var initCmd = &cobra.Command{
 		// Write the config file
 		err = os.WriteFile(configFile, []byte(configContent), 0644)
 		if err != nil {
-			fmt.Printf("\n❌ Failed to write config file: %v\n", err)
+			presenter.Error(err, "Failed to write config file")
+			logger.G(ctx).WithError(err).WithField("config_file", configFile).Error("Config file write failed")
 			return
 		}
 
-		fmt.Printf("\n✅ Configuration saved to %s\n", configFile)
-		fmt.Println("\n🎉 Kodelet setup complete! You can now use Kodelet.")
+		presenter.Success(fmt.Sprintf("Configuration saved to %s", configFile))
+		logger.G(ctx).WithField("config_file", configFile).Info("Configuration file created successfully")
+		presenter.Separator()
+		presenter.Success("🎉 Kodelet setup complete! You can now use Kodelet")
+		logger.G(ctx).Info("Kodelet initialization completed successfully")
 
 		// If we added an API key to the profile, remind the user to refresh their shell
 		if needsApiKeySetup && apiKey != "" && apiKeyAddedToProfile {
-			fmt.Println("\n" + strings.Repeat("═", 50))
-			fmt.Println("⚠️  IMPORTANT ACTION REQUIRED ⚠️")
-			fmt.Println("To activate your API key, you must restart your terminal")
-			fmt.Println("or run the following command:")
-
-			fmt.Printf("   $ source %s\n", profilePath)
-
-			fmt.Println(strings.Repeat("═", 50))
+			presenter.Separator()
+			presenter.Warning("⚠️  IMPORTANT ACTION REQUIRED ⚠️")
+			presenter.Info("To activate your API key, you must restart your terminal")
+			presenter.Info("or run the following command:")
+			presenter.Info(fmt.Sprintf("   $ source %s", profilePath))
+			presenter.Separator()
 		}
 
 		// Show some example commands
-		fmt.Println("\nExample commands to get started:")
-		fmt.Println("  kodelet chat                  # Start an interactive chat session")
-		fmt.Println("  kodelet run \"your query\"      # Run a one-shot query")
-		fmt.Println("  kodelet watch                 # Start watch mode to monitor file changes")
-		fmt.Println("  kodelet --help                # Show available commands")
+		presenter.Section("Example Commands")
+		presenter.Info("  kodelet chat                  # Start an interactive chat session")
+		presenter.Info("  kodelet run \"your query\"      # Run a one-shot query")
+		presenter.Info("  kodelet watch                 # Start watch mode to monitor file changes")
+		presenter.Info("  kodelet --help                # Show available commands")
 	},
 }
 
 // detectShell determines the user's shell and returns the appropriate profile file path
-func detectShell() (string, string) {
+func detectShell(ctx context.Context) (string, string) {
 	// Get the user's shell from the SHELL environment variable
 	shell := os.Getenv("SHELL")
 	if shell == "" {
 		// Default to bash if we can't determine the shell
+		logger.G(ctx).Warn("SHELL environment variable not set, defaulting to bash")
 		return "bash", filepath.Join(os.Getenv("HOME"), ".bashrc")
 	}
 
 	// Extract the shell name from the path
 	shellName := filepath.Base(shell)
+	logger.G(ctx).WithField("detected_shell", shellName).Debug("Shell detected from SHELL environment variable")
 
 	// Determine the appropriate profile file based on the shell
 	switch shellName {
@@ -255,14 +272,20 @@ func detectShell() (string, string) {
 		// Check if .bash_profile exists, use it for login shells on macOS
 		bashProfile := filepath.Join(os.Getenv("HOME"), ".bash_profile")
 		if _, err := os.Stat(bashProfile); err == nil {
+			logger.G(ctx).WithField("profile_file", bashProfile).Debug("Using .bash_profile for bash shell")
 			return "bash", bashProfile
 		}
-		return "bash", filepath.Join(os.Getenv("HOME"), ".bashrc")
+		bashrc := filepath.Join(os.Getenv("HOME"), ".bashrc")
+		logger.G(ctx).WithField("profile_file", bashrc).Debug("Using .bashrc for bash shell")
+		return "bash", bashrc
 	case "zsh":
-		return "zsh", filepath.Join(os.Getenv("HOME"), ".zshrc")
+		zshrc := filepath.Join(os.Getenv("HOME"), ".zshrc")
+		logger.G(ctx).WithField("profile_file", zshrc).Debug("Using .zshrc for zsh shell")
+		return "zsh", zshrc
 	case "fish":
 		// Fish uses a different directory structure
 		fishConfig := filepath.Join(os.Getenv("HOME"), ".config/fish/config.fish")
+		logger.G(ctx).WithField("profile_file", fishConfig).Debug("Using config.fish for fish shell")
 		return "fish", fishConfig
 	default:
 		// Default to .profile for unknown shells
@@ -271,7 +294,7 @@ func detectShell() (string, string) {
 }
 
 // checkApiKeyInProfile checks if the API key is already set in the profile
-func checkApiKeyInProfile(profilePath string) bool {
+func checkApiKeyInProfile(ctx context.Context, profilePath string) bool {
 	// Read the profile file
 	content, err := os.ReadFile(profilePath)
 	if err != nil {
@@ -285,7 +308,7 @@ func checkApiKeyInProfile(profilePath string) bool {
 }
 
 // writeApiKeyToProfile adds the API key to the shell profile
-func writeApiKeyToProfile(profilePath, shellName, apiKey string) error {
+func writeApiKeyToProfile(ctx context.Context, profilePath, shellName, apiKey string) error {
 	// Open the file in append mode
 	file, err := os.OpenFile(profilePath, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
 	if err != nil {

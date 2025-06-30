@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
@@ -30,8 +30,7 @@ Anthropic models until you authenticate again.`,
 		noConfirm, _ := cmd.Flags().GetBool("no-confirm")
 
 		if err := runAnthropicLogout(ctx, noConfirm); err != nil {
-			logger.G(ctx).WithField("error", err).Error("Failed to complete Anthropic logout")
-			fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+			presenter.Error(err, "Failed to complete Anthropic logout")
 			os.Exit(1)
 		}
 	},
@@ -52,7 +51,7 @@ func runAnthropicLogout(ctx context.Context, noConfirm bool) error {
 
 	// Check if credentials file exists
 	if _, err := os.Stat(credentialsPath); os.IsNotExist(err) {
-		fmt.Println("No Anthropic credentials found. You are already logged out.")
+		presenter.Info("No Anthropic credentials found. You are already logged out.")
 		return nil
 	} else if err != nil {
 		return errors.Wrap(err, "failed to check credentials file")
@@ -60,7 +59,7 @@ func runAnthropicLogout(ctx context.Context, noConfirm bool) error {
 
 	// Confirm with user (unless --no-confirm is set)
 	if !noConfirm && !confirmLogout() {
-		fmt.Println("Logout cancelled.")
+		presenter.Info("Logout cancelled.")
 		return nil
 	}
 
@@ -70,14 +69,11 @@ func runAnthropicLogout(ctx context.Context, noConfirm bool) error {
 	}
 
 	// Success message
-	fmt.Println("Anthropic Logout")
-	fmt.Println("================")
-	fmt.Println()
-	fmt.Println("Successfully logged out from Anthropic.")
-	fmt.Printf("Removed credentials file: %s\n", credentialsPath)
-	fmt.Println()
-	fmt.Println("You no longer have access to subscription-based Anthropic models.")
-	fmt.Println("Run 'kodelet anthropic-login' to authenticate again.")
+	presenter.Section("Anthropic Logout")
+	presenter.Success("Successfully logged out from Anthropic.")
+	presenter.Info("Removed credentials file: " + credentialsPath)
+	presenter.Info("You no longer have access to subscription-based Anthropic models.")
+	presenter.Info("Run 'kodelet anthropic-login' to authenticate again.")
 
 	return nil
 }

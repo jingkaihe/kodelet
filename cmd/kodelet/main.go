@@ -21,8 +21,8 @@ func init() {
 	viper.SetDefault("max_tokens", 8192)
 	viper.SetDefault("weak_model_max_tokens", 8192)
 	viper.SetDefault("thinking_budget_tokens", 4048)
-	viper.SetDefault("model", anthropic.ModelClaudeSonnet4_0)
-	viper.SetDefault("weak_model", anthropic.ModelClaude3_5HaikuLatest)
+	viper.SetDefault("model", anthropic.ModelClaudeSonnet4_20250514)
+	viper.SetDefault("weak_model", anthropic.ModelClaude3_5Haiku20241022)
 	viper.SetDefault("provider", "anthropic")
 	viper.SetDefault("reasoning_effort", "medium")
 	viper.SetDefault("cache_every", 10)
@@ -101,10 +101,10 @@ func main() {
 
 	// Add global flags
 	rootCmd.PersistentFlags().String("provider", "anthropic", "LLM provider to use (anthropic, openai)")
-	rootCmd.PersistentFlags().String("model", string(anthropic.ModelClaudeSonnet4_0), "LLM model to use (overrides config)")
+	rootCmd.PersistentFlags().String("model", string(anthropic.ModelClaudeSonnet4_20250514), "LLM model to use (overrides config)")
 	rootCmd.PersistentFlags().Int("max-tokens", 8192, "Maximum tokens for response (overrides config)")
 	rootCmd.PersistentFlags().Int("thinking-budget-tokens", 4048, "Maximum tokens for thinking capability (overrides config)")
-	rootCmd.PersistentFlags().String("weak-model", string(anthropic.ModelClaude3_5HaikuLatest), "Weak model to use (overrides config)")
+	rootCmd.PersistentFlags().String("weak-model", string(anthropic.ModelClaude3_5Haiku20241022), "Weak model to use (overrides config)")
 	rootCmd.PersistentFlags().Int("weak-model-max-tokens", 8192, "Maximum tokens for weak model response (overrides config)")
 	rootCmd.PersistentFlags().String("reasoning-effort", "medium", "Reasoning effort for OpenAI models (low, medium, high)")
 	rootCmd.PersistentFlags().Int("cache-every", 10, "Cache messages every N interactions (0 to disable, Anthropic only)")

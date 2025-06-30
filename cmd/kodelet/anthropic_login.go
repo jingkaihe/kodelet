@@ -3,16 +3,14 @@ package main
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"strings"
 
 	"github.com/jingkaihe/kodelet/pkg/auth"
-	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
@@ -40,8 +38,7 @@ that are not available via the standard API key authentication.`,
 		ctx := cmd.Context()
 
 		if err := runAnthropicLogin(ctx); err != nil {
-			logger.G(ctx).WithField("error", err).Error("Failed to complete Anthropic login")
-			fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+			presenter.Error(err, "Failed to complete Anthropic login")
 			os.Exit(1)
 		}
 	},
@@ -55,24 +52,21 @@ func runAnthropicLogin(ctx context.Context) error {
 	}
 
 	// Display instructions to user
-	fmt.Println("Anthropic OAuth Login")
-	fmt.Println("===================")
-	fmt.Println()
-	fmt.Println("To authenticate with Anthropic and access subscription-based models:")
+	presenter.Section("Anthropic OAuth Login")
+	presenter.Info("To authenticate with Anthropic and access subscription-based models:")
 	fmt.Println()
 
 	// Try to open the browser automatically
-	fmt.Println("Opening your browser for authentication...")
+	presenter.Info("Opening your browser for authentication...")
 	if err := openBrowser(authURL); err != nil {
-		logger.G(ctx).WithField("error", err).Debug("Failed to open browser automatically")
-		fmt.Println("Could not open browser automatically. Please visit the following URL manually:")
+		presenter.Warning("Could not open browser automatically. Please visit the following URL manually:")
 		fmt.Printf("\n   %s\n\n", authURL)
 	} else {
-		fmt.Println("If your browser didn't open automatically, visit this URL:")
+		presenter.Info("If your browser didn't open automatically, visit this URL:")
 		fmt.Printf("   %s\n\n", authURL)
 	}
 
-	fmt.Println("Instructions:")
+	presenter.Info("Instructions:")
 	fmt.Println("1. Complete the authentication process in your browser")
 	fmt.Println("2. After authorization, you'll be redirected to a page")
 	fmt.Println("3. Copy the authorization code displayed on that page")
@@ -93,7 +87,7 @@ func runAnthropicLogin(ctx context.Context) error {
 
 	// Exchange code for credentials
 	fmt.Println()
-	fmt.Println("Exchanging authorization code for access token...")
+	presenter.Info("Exchanging authorization code for access token...")
 
 	creds, err := auth.ExchangeAnthropicCode(ctx, code, verifier)
 	if err != nil {
@@ -108,42 +102,14 @@ func runAnthropicLogin(ctx context.Context) error {
 
 	// Success message
 	fmt.Println()
-	fmt.Println("Authentication successful!")
+	presenter.Success("Authentication successful!")
 	fmt.Printf("Logged in as: %s\n", creds.Email)
 	fmt.Printf("Scopes: %s\n", creds.Scope)
 	fmt.Printf("Credentials saved to: %s\n", credentialsPath)
 	fmt.Println()
-	fmt.Println("You can now use subscription-based Anthropic models with Kodelet.")
+	presenter.Info("You can now use subscription-based Anthropic models with Kodelet.")
 
 	return nil
-}
-
-func saveAnthropicCredentials(creds *auth.AnthropicCredentials) (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", errors.Wrap(err, "failed to get user home directory")
-	}
-
-	filePath := filepath.Join(home, ".kodelet", "anthropic-subscription.json")
-
-	// Ensure the directory exists
-	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
-		return "", errors.Wrap(err, "failed to create credentials directory")
-	}
-
-	f, err := os.Create(filePath)
-	if err != nil {
-		return "", errors.Wrap(err, "failed to create credentials file")
-	}
-	defer f.Close()
-
-	encoder := json.NewEncoder(f)
-	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(creds); err != nil {
-		return "", errors.Wrap(err, "failed to write credentials")
-	}
-
-	return filePath, nil
 }
 
 // openBrowser attempts to open the default browser with the given URL

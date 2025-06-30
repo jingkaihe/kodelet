@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"net/url"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/github"
+	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
@@ -50,76 +52,83 @@ This command will:
 3. Create a git branch and install the Kodelet workflow file
 4. Create a pull request for the changes`,
 	Run: func(cmd *cobra.Command, args []string) {
+		ctx := cmd.Context()
+
 		// Get config from flags
 		config := getGhaAgentOnboardConfigFromFlags(cmd)
 
 		// Check prerequisites
 		if !isGitRepository() {
-			fmt.Println("Error: Not a git repository. Please run this command from a git repository.")
+			presenter.Error(fmt.Errorf("not a git repository"), "Please run this command from a git repository")
 			os.Exit(1)
 		}
 
 		if !isGhCliInstalled() {
-			fmt.Println("Error: GitHub CLI (gh) is not installed. Please install it first.")
-			fmt.Println("Visit https://cli.github.com/ for installation instructions.")
+			presenter.Error(fmt.Errorf("GitHub CLI not installed"), "GitHub CLI (gh) is not installed. Please install it first")
+			presenter.Info("Visit https://cli.github.com/ for installation instructions")
 			os.Exit(1)
 		}
 
 		if !isGhAuthenticated() {
-			fmt.Println("Error: You are not authenticated with GitHub. Please run 'gh auth login' first.")
+			presenter.Error(fmt.Errorf("not authenticated with GitHub"), "You are not authenticated with GitHub. Please run 'gh auth login' first")
 			os.Exit(1)
 		}
 
 		// Step 1: Open GitHub app installation page
-		fmt.Printf("Opening GitHub app installation page for '%s'...\n", config.GithubApp)
+		presenter.Section("Step 1: GitHub App Installation")
+		presenter.Info(fmt.Sprintf("Opening GitHub app installation page for '%s'...", config.GithubApp))
 		appURL := fmt.Sprintf("https://github.com/apps/%s", config.GithubApp)
 
 		// Validate the URL before opening
 		if err := validateURL(appURL); err != nil {
-			fmt.Printf("Error: Invalid GitHub app URL: %s\n", err)
+			presenter.Error(err, "Invalid GitHub app URL")
 			os.Exit(1)
 		}
 
 		if err := openInBrowser(appURL); err != nil {
-			fmt.Printf("Failed to open browser automatically. Please manually open: %s\n", appURL)
+			presenter.Warning(fmt.Sprintf("Failed to open browser automatically. Please manually open: %s", appURL))
 		} else {
-			fmt.Printf("Opened: %s\n", appURL)
+			presenter.Success(fmt.Sprintf("Opened: %s", appURL))
 		}
 
 		// Wait for user confirmation
-		fmt.Print("Press Enter to continue once the app is installed...")
+		presenter.Info("Press Enter to continue once the app is installed...")
 		reader := bufio.NewReader(os.Stdin)
 		reader.ReadString('\n')
 
 		// Step 2: Check ANTHROPIC_API_KEY secret
-		fmt.Println("Checking ANTHROPIC_API_KEY secret...")
-		if err := setupAnthropicAPIKey(); err != nil {
-			fmt.Printf("Error setting up ANTHROPIC_API_KEY: %s\n", err)
+		presenter.Section("Step 2: API Key Setup")
+		presenter.Info("Checking ANTHROPIC_API_KEY secret...")
+		if err := setupAnthropicAPIKey(ctx); err != nil {
+			presenter.Error(err, "Failed to set up ANTHROPIC_API_KEY")
 			os.Exit(1)
 		}
 
 		// Step 3: Store current branch and create new branch and workflow file
-		fmt.Println("Creating git branch and workflow file...")
+		presenter.Section("Step 3: Branch and Workflow Setup")
+		presenter.Info("Creating git branch and workflow file...")
 
 		// Get current branch before creating new one
 		currentBranch, err := getCurrentBranch()
 		if err != nil {
-			fmt.Printf("Error getting current branch: %s\n", err)
+			presenter.Error(err, "Failed to get current branch")
 			os.Exit(1)
 		}
 
 		branchName := fmt.Sprintf("kodelet-background-agent-onboard-%d", time.Now().Unix())
 
-		if err := createBranchAndWorkflow(branchName, config); err != nil {
-			fmt.Printf("Error creating branch and workflow: %s\n", err)
+		if err := createBranchAndWorkflow(ctx, branchName, config); err != nil {
+			presenter.Error(err, "Failed to create branch and workflow")
 			os.Exit(1)
 		}
 
 		// Step 4: Update the workflow file
-		// the the binary itself
+		presenter.Section("Step 4: Workflow Customization")
+		presenter.Info("Updating workflow configuration...")
+
 		binaryPath, err := os.Executable()
 		if err != nil {
-			fmt.Printf("Error getting executable path: %s\n", err)
+			presenter.Error(err, "Failed to get executable path")
 			os.Exit(1)
 		}
 
@@ -133,29 +142,32 @@ This command will:
 	`
 
 		kodeletRunCmd := exec.Command(binaryPath, "run", "--no-save", prompt)
-		if err := executeCommandWithStreaming(kodeletRunCmd); err != nil {
-			fmt.Printf("Error running command: %s\n", err)
+		if err := executeCommandWithStreaming(ctx, kodeletRunCmd); err != nil {
+			presenter.Error(err, "Failed to customize workflow")
 			os.Exit(1)
 		}
 
 		// Step 5: Commit and create PR
-		fmt.Println("Creating commit and pull request...")
-		prURL, err := commitAndCreatePR(branchName)
+		presenter.Section("Step 5: Commit and Pull Request")
+		presenter.Info("Creating commit and pull request...")
+
+		prURL, err := commitAndCreatePR(ctx, branchName)
 		if err != nil {
-			fmt.Printf("Error creating commit and PR: %s\n", err)
+			presenter.Error(err, "Failed to create commit and PR")
 			os.Exit(1)
 		}
 
-		// Step 5: Checkout back to original branch
-		fmt.Printf("Checking out back to original branch: %s\n", currentBranch)
+		// Step 6: Checkout back to original branch
+		presenter.Info(fmt.Sprintf("Checking out back to original branch: %s", currentBranch))
 		if err := checkoutBranch(currentBranch); err != nil {
-			fmt.Printf("Warning: Failed to checkout back to original branch %s: %s\n", currentBranch, err)
+			presenter.Warning(fmt.Sprintf("Failed to checkout back to original branch %s: %s", currentBranch, err))
 		}
 
 		// Success message
-		fmt.Println("✅ GitHub Actions background agent onboarding completed successfully!")
-		fmt.Printf("📝 Pull Request: %s\n", prURL)
-		fmt.Println("🚀 Once the PR is merged, the GitHub Actions-based background agent will be up and running.")
+		presenter.Separator()
+		presenter.Success("GitHub Actions background agent onboarding completed successfully!")
+		presenter.Info(fmt.Sprintf("📝 Pull Request: %s", prURL))
+		presenter.Info("🚀 Once the PR is merged, the GitHub Actions-based background agent will be up and running.")
 	},
 }
 
@@ -250,7 +262,7 @@ func validateURL(urlStr string) error {
 }
 
 // setupAnthropicAPIKey checks and sets up the ANTHROPIC_API_KEY secret
-func setupAnthropicAPIKey() error {
+func setupAnthropicAPIKey(ctx context.Context) error {
 	// Check if secret already exists
 	secretExists, err := checkGitHubSecret("ANTHROPIC_API_KEY")
 	if err != nil {
@@ -258,15 +270,16 @@ func setupAnthropicAPIKey() error {
 	}
 
 	if secretExists {
-		fmt.Println("✅ ANTHROPIC_API_KEY secret already exists")
+		presenter.Success("ANTHROPIC_API_KEY secret already exists")
 		return nil
 	}
 
 	// Check if env var exists
 	apiKey := os.Getenv("ANTHROPIC_API_KEY")
+
 	if apiKey == "" {
 		// Ask user for the key
-		fmt.Print("ANTHROPIC_API_KEY not found. Please enter your Anthropic API key: ")
+		presenter.Info("ANTHROPIC_API_KEY not found. Please enter your Anthropic API key: ")
 		reader := bufio.NewReader(os.Stdin)
 		input, err := reader.ReadString('\n')
 		if err != nil {
@@ -275,13 +288,13 @@ func setupAnthropicAPIKey() error {
 		apiKey = strings.TrimSpace(input)
 	} else {
 		// Ask if user wants to use the env var
-		fmt.Printf("Found ANTHROPIC_API_KEY environment variable. Use it for the GitHub secret? [Y/n]: ")
+		presenter.Info("Found ANTHROPIC_API_KEY environment variable. Use it for the GitHub secret? [Y/n]: ")
 		reader := bufio.NewReader(os.Stdin)
 		response, _ := reader.ReadString('\n')
 		response = strings.ToLower(strings.TrimSpace(response))
 
 		if response == "n" || response == "no" {
-			fmt.Print("Please enter your Anthropic API key: ")
+			presenter.Info("Please enter your Anthropic API key: ")
 			input, err := reader.ReadString('\n')
 			if err != nil {
 				return errors.Wrap(err, "error reading input")
@@ -296,7 +309,7 @@ func setupAnthropicAPIKey() error {
 		return errors.Wrap(err, "error setting GitHub secret")
 	}
 
-	fmt.Println("✅ ANTHROPIC_API_KEY secret set successfully")
+	presenter.Success("ANTHROPIC_API_KEY secret set successfully")
 	return nil
 }
 
@@ -312,7 +325,7 @@ func checkGitHubSecret(secretName string) (bool, error) {
 }
 
 // createBranchAndWorkflow creates a new git branch and adds the workflow file
-func createBranchAndWorkflow(branchName string, config *GhaAgentOnboardConfig) error {
+func createBranchAndWorkflow(ctx context.Context, branchName string, config *GhaAgentOnboardConfig) error {
 	// Create and checkout new branch
 	cmd := exec.Command("git", "checkout", "-b", branchName)
 	if err := cmd.Run(); err != nil {
@@ -337,13 +350,13 @@ func createBranchAndWorkflow(branchName string, config *GhaAgentOnboardConfig) e
 		return errors.Wrap(err, "error writing workflow file")
 	}
 
-	fmt.Printf("✅ Created workflow file: %s\n", workflowPath)
-	fmt.Printf("✅ Created branch: %s\n", branchName)
+	presenter.Success(fmt.Sprintf("Created workflow file: %s", workflowPath))
+	presenter.Success(fmt.Sprintf("Created branch: %s", branchName))
 	return nil
 }
 
 // executeCommandWithStreaming executes a command and streams its output in real-time
-func executeCommandWithStreaming(cmd *exec.Cmd) error {
+func executeCommandWithStreaming(ctx context.Context, cmd *exec.Cmd) error {
 	// Set up pipes for real-time output streaming
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -386,14 +399,14 @@ func executeCommandWithStreaming(cmd *exec.Cmd) error {
 	if err := cmd.Wait(); err != nil {
 		return errors.Wrap(err, "error executing command")
 	}
-
 	return nil
 }
 
 // commitAndCreatePR commits the changes and creates a pull request
-func commitAndCreatePR(branchName string) (string, error) {
+func commitAndCreatePR(ctx context.Context, branchName string) (string, error) {
 	// Add the workflow file
-	cmd := exec.Command("git", "add", ".github/workflows/kodelet.yaml")
+	workflowFile := ".github/workflows/kodelet.yaml"
+	cmd := exec.Command("git", "add", workflowFile)
 	if err := cmd.Run(); err != nil {
 		return "", errors.Wrap(err, "error adding workflow file")
 	}
@@ -427,6 +440,7 @@ This PR onboards the Kodelet background agent for GitHub Actions.
 - Improves development workflow with AI assistance`
 
 	cmd = exec.Command("gh", "pr", "create", "--title", prTitle, "--body", prBody, "--base", "main")
+
 	output, err := cmd.Output()
 	if err != nil {
 		return "", errors.Wrap(err, "error creating PR")

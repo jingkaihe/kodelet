@@ -13,6 +13,7 @@ import (
 	"github.com/fsnotify/fsnotify"
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	"github.com/jingkaihe/kodelet/pkg/utils"
 	"github.com/spf13/cobra"
@@ -79,31 +80,34 @@ ignoring common directories like .git and node_modules.`,
 		ctx, cancel := context.WithCancel(cmd.Context())
 		defer cancel()
 
+		// Get watch config from flags first to configure quiet mode
+		config := getWatchConfigFromFlags(cmd)
+
+		// Configure presenter based on verbosity
+		presenter.SetQuiet(config.Verbosity == "quiet")
+
 		// Set up signal handling
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 		go func() {
 			<-sigCh
-			fmt.Println("\n\033[1;33m[kodelet]: Cancellation requested, shutting down...\033[0m")
+			presenter.Warning("\n[kodelet]: Cancellation requested, shutting down...")
 			cancel()
 		}()
 
 		// Create the MCP manager from Viper configuration
 		mcpManager, err := tools.CreateMCPManagerFromViper(ctx)
 		if err != nil {
-			fmt.Printf("Error creating MCP manager: %v\n", err)
+			presenter.Error(err, "Failed to create MCP manager")
 			return
 		}
 
 		llmConfig := llm.GetConfigFromViper()
 		s := tools.NewBasicState(ctx, tools.WithLLMConfig(llmConfig), tools.WithMCPTools(mcpManager))
 
-		// Get watch config from flags
-		config := getWatchConfigFromFlags(cmd)
-
 		// Validate configuration
 		if err := config.Validate(); err != nil {
-			fmt.Printf("Error: Invalid configuration: %s\n", err)
+			presenter.Error(err, "Invalid configuration")
 			os.Exit(1)
 		}
 
@@ -146,6 +150,7 @@ func getWatchConfigFromFlags(cmd *cobra.Command) *WatchConfig {
 func runWatchMode(ctx context.Context, state tooltypes.State, config *WatchConfig) {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
+		presenter.Error(err, "Failed to create file watcher")
 		logger.G(ctx).WithError(err).Fatal("Failed to create file watcher")
 	}
 	defer watcher.Close()
@@ -166,7 +171,12 @@ func runWatchMode(ctx context.Context, state tooltypes.State, config *WatchConfi
 					return
 				}
 				if config.Verbosity != "quiet" {
-					fmt.Printf("Change detected: %s (%s)\n", event.Path, event.Op)
+					presenter.Info(fmt.Sprintf("Change detected: %s (%s)", event.Path, event.Op))
+					logger.G(ctx).WithFields(map[string]interface{}{
+						"file":      event.Path,
+						"operation": event.Op.String(),
+						"timestamp": event.Time,
+					}).Debug("File change detected")
 				}
 				processFileChange(ctx, state, event.Path, config)
 			case <-ctx.Done():
@@ -184,17 +194,24 @@ func runWatchMode(ctx context.Context, state tooltypes.State, config *WatchConfi
 					return
 				}
 				// Skip ignored directories
+				skipEvent := false
 				for _, ignoreDir := range config.IgnoreDirs {
 					if strings.Contains(event.Name, ignoreDir+string(os.PathSeparator)) {
-						continue
+						skipEvent = true
+						break
 					}
 				}
+				if skipEvent {
+					continue
+				}
+
 				// Only process write and create events
 				if event.Op&(fsnotify.Write|fsnotify.Create) != 0 {
 					// Skip binary files
 					if utils.IsBinaryFile(event.Name) {
 						if config.Verbosity == "verbose" {
-							fmt.Printf("Skipping binary file: %s\n", event.Name)
+							presenter.Info(fmt.Sprintf("Skipping binary file: %s", event.Name))
+							logger.G(ctx).WithField("file", event.Name).Debug("Skipped binary file")
 						}
 						continue
 					}
@@ -203,6 +220,9 @@ func runWatchMode(ctx context.Context, state tooltypes.State, config *WatchConfi
 					if config.IncludePattern != "" {
 						matched, err := filepath.Match(config.IncludePattern, filepath.Base(event.Name))
 						if err != nil || !matched {
+							if config.Verbosity == "verbose" && err != nil {
+								logger.G(ctx).WithError(err).WithField("pattern", config.IncludePattern).Debug("Pattern matching error")
+							}
 							continue
 						}
 					}
@@ -216,8 +236,8 @@ func runWatchMode(ctx context.Context, state tooltypes.State, config *WatchConfi
 				if !ok {
 					return
 				}
-				// Use context.TODO() to avoid using cancelled context
-				logger.G(context.TODO()).WithError(err).Error("Error watching files")
+				presenter.Error(err, "File watcher error")
+				logger.G(ctx).WithError(err).Error("Error watching files")
 			case <-ctx.Done():
 				return
 			}
@@ -233,19 +253,24 @@ func runWatchMode(ctx context.Context, state tooltypes.State, config *WatchConfi
 			// Skip ignored directories
 			for _, ignoreDir := range config.IgnoreDirs {
 				if strings.Contains(path, ignoreDir+string(os.PathSeparator)) || path == ignoreDir {
+					if config.Verbosity == "verbose" {
+						logger.G(ctx).WithField("directory", path).Debug("Skipping ignored directory")
+					}
 					return filepath.SkipDir
 				}
 			}
+			logger.G(ctx).WithField("directory", path).Debug("Adding directory to watcher")
 			return watcher.Add(path)
 		}
 		return nil
 	})
 	if err != nil {
-		// Use context.TODO() to avoid using cancelled context
-		logger.G(context.TODO()).WithError(err).Fatal("Failed to watch directories")
+		presenter.Error(err, "Failed to watch directories")
+		logger.G(ctx).WithError(err).Fatal("Failed to watch directories")
 	}
 
-	fmt.Println("Watching for file changes... Press Ctrl+C to stop")
+	presenter.Info("Watching for file changes... Press Ctrl+C to stop")
+	logger.G(ctx).WithField("directories_count", len(config.IgnoreDirs)).Info("File watcher initialized")
 
 	// Wait for context cancellation
 	<-ctx.Done()
@@ -301,7 +326,8 @@ func processFileChange(ctx context.Context, state tooltypes.State, path string, 
 	// Double-check that the file is not binary before processing
 	if utils.IsBinaryFile(path) {
 		if config.Verbosity == "verbose" {
-			fmt.Printf("Skipping binary file processing: %s\n", path)
+			presenter.Info(fmt.Sprintf("Skipping binary file processing: %s", path))
+			logger.G(ctx).WithField("file", path).Debug("Skipped binary file processing")
 		}
 		return
 	}
@@ -309,24 +335,31 @@ func processFileChange(ctx context.Context, state tooltypes.State, path string, 
 	// Read the file content
 	content, err := os.ReadFile(path)
 	if err != nil {
-		logger.G(ctx).WithError(err).Errorf("Failed to read file: %s", path)
+		presenter.Error(err, fmt.Sprintf("Failed to read file: %s", path))
+		logger.G(ctx).WithError(err).WithField("file", path).Error("Failed to read file")
 		return
 	}
 
-	// Get file extension
-	// ext := filepath.Ext(path)
-
 	// continue if the pattern is not found
 	found := false
+	foundPattern := ""
 	for _, pattern := range MagicCommentPatterns {
 		if strings.Contains(string(content), pattern) {
 			found = true
+			foundPattern = pattern
 			break
 		}
 	}
 	if !found {
+		logger.G(ctx).WithField("file", path).Debug("No magic comment pattern found, skipping")
 		return
 	}
+
+	logger.G(ctx).WithFields(map[string]interface{}{
+		"file":           path,
+		"pattern":        foundPattern,
+		"content_length": len(content),
+	}).Info("Processing file with magic comment")
 
 	// Create query with file content and context
 	query := fmt.Sprintf(`Here is the file "%s" that has just been changed.
@@ -362,7 +395,7 @@ def multiply(a, b):
 
 	// Process with AI
 	if config.Verbosity == "verbose" {
-		fmt.Println("Sending to AI for analysis...")
+		presenter.Info("Sending to AI for analysis...")
 	}
 
 	// Get configuration for the LLM
@@ -374,8 +407,9 @@ def multiply(a, b):
 	// Use the auto-completion model if appropriate
 	if config.UseWeakModel {
 		if config.Verbosity == "verbose" {
-			fmt.Printf("Using auto-completion model: %v\n", llmConfig.WeakModel)
+			presenter.Info(fmt.Sprintf("Using auto-completion model: %v", llmConfig.WeakModel))
 		}
+		logger.G(ctx).WithField("model", llmConfig.WeakModel).Debug("Using weak model for processing")
 	}
 
 	state.SetFileLastAccessed(path, time.Now())
@@ -385,9 +419,19 @@ def multiply(a, b):
 	})
 
 	// Display the AI response
-	fmt.Printf("\n===== AI Analysis for %s =====\n", path)
+	presenter.Separator()
+	presenter.Section(fmt.Sprintf("AI Analysis for %s", path))
 	fmt.Println(response)
-	fmt.Printf("\033[1;36m[Usage Stats] Input tokens: %d | Output tokens: %d | Total: %d\033[0m\n",
-		usage.InputTokens, usage.OutputTokens, usage.TotalTokens())
-	fmt.Println("===============================")
+
+	// Display usage statistics using presenter package
+	usageStats := presenter.ConvertUsageStats(&usage)
+	presenter.Stats(usageStats)
+	logger.G(ctx).WithFields(map[string]interface{}{
+		"file":          path,
+		"input_tokens":  usage.InputTokens,
+		"output_tokens": usage.OutputTokens,
+		"total_cost":    usage.TotalCost(),
+	}).Info("AI analysis completed")
+
+	presenter.Separator()
 }
