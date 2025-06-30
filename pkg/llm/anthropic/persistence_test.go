@@ -7,15 +7,17 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
 
 func TestDeserializeMessages(t *testing.T) {
-	thread := NewAnthropicThread(llmtypes.Config{
+	thread, err := NewAnthropicThread(llmtypes.Config{
 		Model: string(anthropic.ModelClaudeSonnet4_20250514),
 	})
+	require.NoError(t, err)
 	messages, err := DeserializeMessages([]byte(`[]`))
 	assert.NoError(t, err)
 	assert.Equal(t, 0, len(messages))
@@ -109,9 +111,10 @@ func TestDeserializeMessages(t *testing.T) {
 func TestSaveAndLoadConversationWithFileLastAccess(t *testing.T) {
 	// Create a thread with a unique conversation ID
 	conversationID := "test-file-last-access"
-	thread := NewAnthropicThread(llmtypes.Config{
+	thread, err := NewAnthropicThread(llmtypes.Config{
 		Model: string(anthropic.ModelClaudeSonnet4_20250514),
 	})
+	require.NoError(t, err)
 	thread.SetConversationID(conversationID)
 
 	// Setup state with file access data
@@ -132,13 +135,14 @@ func TestSaveAndLoadConversationWithFileLastAccess(t *testing.T) {
 	state.SetFileLastAccess(fileAccessMap)
 
 	// Save the conversation
-	err := thread.SaveConversation(context.Background(), false)
+	err = thread.SaveConversation(context.Background(), false)
 	assert.NoError(t, err)
 
 	// Create a new thread with the same conversation ID
-	newThread := NewAnthropicThread(llmtypes.Config{
+	newThread, err := NewAnthropicThread(llmtypes.Config{
 		Model: string(anthropic.ModelClaudeSonnet4_20250514),
 	})
+	require.NoError(t, err)
 	newThread.SetConversationID(conversationID)
 	newState := tools.NewBasicState(context.TODO())
 	newThread.SetState(newState)
@@ -430,9 +434,10 @@ func TestSaveConversationMessageCleanup(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create a thread without persistence to avoid store issues
-			thread := NewAnthropicThread(llmtypes.Config{
+			thread, err := NewAnthropicThread(llmtypes.Config{
 				Model: string(anthropic.ModelClaudeSonnet4_20250514),
 			})
+			require.NoError(t, err)
 
 			// Set up state
 			state := tools.NewBasicState(context.TODO())

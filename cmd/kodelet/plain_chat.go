@@ -21,7 +21,11 @@ func plainChatUI(ctx context.Context, options *ChatOptions) {
 
 	// Create a persistent thread with state
 	config := llm.GetConfigFromViper()
-	thread := llm.NewThread(config)
+	thread, err := llm.NewThread(config)
+	if err != nil {
+		presenter.Error(err, "Failed to create LLM thread")
+		return
+	}
 
 	// Create the MCP manager from Viper configuration
 	mcpManager, err := tools.CreateMCPManagerFromViper(ctx)

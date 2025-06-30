@@ -117,7 +117,11 @@ var runCmd = &cobra.Command{
 
 		// Process the query using the Thread abstraction
 		handler := &llmtypes.ConsoleMessageHandler{Silent: false}
-		thread := llm.NewThread(llmConfig)
+		thread, err := llm.NewThread(llmConfig)
+		if err != nil {
+			presenter.Error(err, "Failed to create LLM thread")
+			return
+		}
 		thread.SetState(appState)
 
 		// Configure conversation persistence
