@@ -185,9 +185,11 @@ func TestSendMessageRealClient(t *testing.T) {
 	ctx := context.Background()
 	mockHandler := new(MockMessageHandler)
 
-	// Set up expectations for just the handler since state methods might not be called
-	// with a simple text response that doesn't use tools
+	// Set up expectations for the handler - allow optional tool use
 	mockHandler.On("HandleText", mock.Anything).Return()
+	mockHandler.On("HandleToolUse", mock.Anything, mock.Anything).Return().Maybe()
+	mockHandler.On("HandleToolResult", mock.Anything, mock.Anything).Return().Maybe()
+	mockHandler.On("HandleThinking", mock.Anything).Return().Maybe()
 	mockHandler.On("HandleDone").Return()
 
 	// Create a real thread
