@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.0.50.alpha (2025-06-30)
+
+### Configuration Enhancements
+- **Optimized Thread Management**: Subagent thread creation now reuses parent client and usage tracking for better resource efficiency
+- **Configurable Anthropic Access**: Added support for configurable Anthropic API access mode to improve API interaction flexibility
+
 ## 0.0.49.alpha (2025-06-30)
 
 ### Usage Analytics Command
