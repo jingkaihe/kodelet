@@ -225,7 +225,7 @@ func (s *BasicState) configureTools() {
 	if s.llmConfig.AllowedDomainsFile != "" {
 		domainFilter = utils.NewDomainFilter(s.llmConfig.AllowedDomainsFile)
 	}
-	
+
 	for i, tool := range s.tools {
 		switch tool.Name() {
 		case "bash":

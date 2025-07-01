@@ -62,7 +62,7 @@ func (r *WebFetchToolResult) UserFacing() string {
 }
 
 // WebFetchTool implements the web_fetch tool for retrieving and processing web content.
-type WebFetchTool struct{
+type WebFetchTool struct {
 	domainFilter *utils.DomainFilter
 }
 

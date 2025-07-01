@@ -2,6 +2,7 @@ package utils
 
 import (
 	"bufio"
+	"context"
 	"net"
 	"net/url"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gobwas/glob"
+	"github.com/jingkaihe/kodelet/pkg/logger"
 )
 
 const (
@@ -22,9 +24,9 @@ const (
 type DomainFilter struct {
 	mu           sync.RWMutex
 	filePath     string
-	domains      map[string]bool  // exact match domains
-	globPatterns []glob.Glob      // compiled glob patterns
-	rawPatterns  []string         // original pattern strings for debugging
+	domains      map[string]bool // exact match domains
+	globPatterns []glob.Glob     // compiled glob patterns
+	rawPatterns  []string        // original pattern strings for debugging
 	lastLoadTime time.Time
 }
 
@@ -33,7 +35,11 @@ func NewDomainFilter(filePath string) *DomainFilter {
 	// Expand tilde if present
 	if strings.HasPrefix(filePath, "~/") {
 		home, err := os.UserHomeDir()
-		if err == nil {
+		if err != nil {
+			// If we can't get the home directory, keep the original path
+			// This will likely fail later, but allows for better error reporting
+			// when the file is actually accessed
+		} else {
 			filePath = filepath.Join(home, filePath[2:])
 		}
 	}
@@ -65,6 +71,9 @@ func (df *DomainFilter) loadDomains() {
 
 	file, err := os.Open(df.filePath)
 	if err != nil {
+		if !os.IsNotExist(err) {
+			logger.G(context.TODO()).WithError(err).Error("Failed to open allowed domains file")
+		}
 		// Unable to open file, clear domains and return
 		df.domains = make(map[string]bool)
 		df.globPatterns = make([]glob.Glob, 0)
@@ -84,12 +93,12 @@ func (df *DomainFilter) loadDomains() {
 		if line != "" && !strings.HasPrefix(line, "#") {
 			// Normalize domain - handle URLs, protocols, and paths
 			domain := strings.ToLower(line)
-			
+
 			// Add protocol if missing to help with parsing
 			if !strings.HasPrefix(domain, "http://") && !strings.HasPrefix(domain, "https://") {
 				domain = "https://" + domain
 			}
-			
+
 			// Parse as URL to extract just the hostname
 			var hostname string
 			if parsed, err := url.Parse(domain); err == nil && parsed.Hostname() != "" {
@@ -103,7 +112,7 @@ func (df *DomainFilter) loadDomains() {
 				}
 				hostname = strings.TrimSuffix(hostname, "/")
 			}
-			
+
 			if hostname != "" {
 				// Check if this is a glob pattern (contains * or ?)
 				if strings.ContainsAny(hostname, "*?") {
@@ -204,16 +213,16 @@ func (df *DomainFilter) GetAllowedDomains() []string {
 	defer df.mu.RUnlock()
 
 	result := make([]string, 0, len(df.domains)+len(df.rawPatterns))
-	
+
 	// Add exact match domains
 	for domain := range df.domains {
 		result = append(result, domain)
 	}
-	
+
 	// Add glob patterns
 	for _, pattern := range df.rawPatterns {
 		result = append(result, pattern)
 	}
-	
+
 	return result
 }

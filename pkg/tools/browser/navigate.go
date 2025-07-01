@@ -20,7 +20,7 @@ type DomainFilter interface {
 	IsAllowed(urlStr string) (bool, error)
 }
 
-type NavigateTool struct{
+type NavigateTool struct {
 	domainFilter DomainFilter
 }
 
