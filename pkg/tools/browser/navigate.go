@@ -15,7 +15,21 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
-type NavigateTool struct{}
+// DomainFilter interface to avoid circular imports
+type DomainFilter interface {
+	IsAllowed(urlStr string) (bool, error)
+}
+
+type NavigateTool struct{
+	domainFilter DomainFilter
+}
+
+// NewNavigateTool creates a new NavigateTool with optional domain filtering
+func NewNavigateTool(domainFilter DomainFilter) *NavigateTool {
+	return &NavigateTool{
+		domainFilter: domainFilter,
+	}
+}
 
 type NavigateInput struct {
 	URL     string `json:"url" jsonschema:"required,format=uri,description=URL to navigate to"`
@@ -120,6 +134,17 @@ func (t NavigateTool) ValidateInput(state tools.State, parameters string) error 
 
 	if input.Timeout < 0 {
 		return fmt.Errorf("timeout must be non-negative")
+	}
+
+	// Check domain filtering if configured
+	if t.domainFilter != nil {
+		allowed, err := t.domainFilter.IsAllowed(input.URL)
+		if err != nil {
+			return fmt.Errorf("failed to validate domain: %w", err)
+		}
+		if !allowed {
+			return fmt.Errorf("domain %s is not in the allowed domains list", parsedURL.Hostname())
+		}
 	}
 
 	return nil

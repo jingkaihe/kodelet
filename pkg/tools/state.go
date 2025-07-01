@@ -9,8 +9,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jingkaihe/kodelet/pkg/tools/browser"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/jingkaihe/kodelet/pkg/utils"
 )
 
 var (
@@ -45,8 +47,8 @@ func NewBasicState(ctx context.Context, opts ...BasicStateOption) *BasicState {
 
 	if len(state.tools) == 0 {
 		state.tools = GetMainTools(false) // Default without browser tools
-		// Replace BashTool with configured version if LLM config has allowed commands
-		state.configureBashTool()
+		// Configure tools with LLM config parameters
+		state.configureTools()
 	}
 
 	return state
@@ -55,7 +57,7 @@ func NewBasicState(ctx context.Context, opts ...BasicStateOption) *BasicState {
 func WithSubAgentTools() BasicStateOption {
 	return func(ctx context.Context, s *BasicState) error {
 		s.tools = GetSubAgentTools(false) // Default without browser tools
-		s.configureBashTool()
+		s.configureTools()
 		return nil
 	}
 }
@@ -63,7 +65,7 @@ func WithSubAgentTools() BasicStateOption {
 func WithMainToolsAndBrowser() BasicStateOption {
 	return func(ctx context.Context, s *BasicState) error {
 		s.tools = GetMainTools(true) // Main tools with browser support
-		s.configureBashTool()
+		s.configureTools()
 		return nil
 	}
 }
@@ -71,7 +73,7 @@ func WithMainToolsAndBrowser() BasicStateOption {
 func WithSubAgentToolsAndBrowser() BasicStateOption {
 	return func(ctx context.Context, s *BasicState) error {
 		s.tools = GetSubAgentTools(true) // Sub-agent tools with browser support
-		s.configureBashTool()
+		s.configureTools()
 		return nil
 	}
 }
@@ -217,12 +219,21 @@ func (s *BasicState) GetLLMConfig() interface{} {
 	return s.llmConfig
 }
 
-// configureBashTool replaces the default BashTool with one configured with allowed commands
-func (s *BasicState) configureBashTool() {
+// configureTools configures tools with LLM config parameters
+func (s *BasicState) configureTools() {
+	var domainFilter *utils.DomainFilter
+	if s.llmConfig.AllowedDomainsFile != "" {
+		domainFilter = utils.NewDomainFilter(s.llmConfig.AllowedDomainsFile)
+	}
+	
 	for i, tool := range s.tools {
-		if tool.Name() == "bash" {
+		switch tool.Name() {
+		case "bash":
 			s.tools[i] = NewBashTool(s.llmConfig.AllowedCommands)
-			break
+		case "web_fetch":
+			s.tools[i] = NewWebFetchTool(s.llmConfig.AllowedDomainsFile)
+		case "browser_navigate":
+			s.tools[i] = browser.NewNavigateTool(domainFilter)
 		}
 	}
 }

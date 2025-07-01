@@ -24,6 +24,7 @@ func GetConfigFromViper() llmtypes.Config {
 		ReasoningEffort:      viper.GetString("reasoning_effort"),
 		CacheEvery:           viper.GetInt("cache_every"),
 		AllowedCommands:      viper.GetStringSlice("allowed_commands"),
+		AllowedDomainsFile:   viper.GetString("allowed_domains_file"),
 		AnthropicAPIAccess:   llmtypes.AnthropicAPIAccess(anthropicAPIAccess),
 	}
 }
