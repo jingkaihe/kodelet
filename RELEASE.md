@@ -1,5 +1,10 @@
 # Kodelet
 
+## 0.0.51.alpha (2025-07-01)
+
+### Web Fetch Tool Enhancement
+- **Localhost HTTP Support**: Enhanced web_fetch tool to allow HTTP URLs for localhost and internal addresses (127.0.0.1, ::1, localhost, etc.) while maintaining HTTPS requirement for external domains
+
 ## 0.0.50.alpha (2025-06-30)
 
 ### Configuration Enhancements
