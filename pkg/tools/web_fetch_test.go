@@ -52,9 +52,24 @@ func TestWebFetchToolValidation(t *testing.T) {
 			expectError: true,
 		},
 		{
-			name:        "Invalid URL scheme - HTTP",
+			name:        "Invalid URL scheme - HTTP for external domain",
 			input:       `{"url": "http://example.com", "prompt": "Extract the main heading"}`,
 			expectError: true,
+		},
+		{
+			name:        "Valid URL scheme - HTTP for localhost",
+			input:       `{"url": "http://localhost:8080", "prompt": "Extract the main heading"}`,
+			expectError: false,
+		},
+		{
+			name:        "Valid URL scheme - HTTP for 127.0.0.1",
+			input:       `{"url": "http://127.0.0.1:3000", "prompt": "Extract the main heading"}`,
+			expectError: false,
+		},
+		{
+			name:        "Valid URL scheme - HTTP for ::1 (IPv6 localhost)",
+			input:       `{"url": "http://[::1]:8080", "prompt": "Extract the main heading"}`,
+			expectError: false,
 		},
 		{
 			name:        "Invalid JSON",
@@ -81,6 +96,41 @@ func TestWebFetchToolValidation(t *testing.T) {
 }
 
 func TestWebFetchToolHelperFunctions(t *testing.T) {
+	t.Run("isLocalHost", func(t *testing.T) {
+		tests := []struct {
+			hostname string
+			expected bool
+		}{
+			// Standard localhost names
+			{"localhost", true},
+			{"127.0.0.1", true},
+			{"::1", true},
+			{"0.0.0.0", true},
+
+			// Other loopback addresses
+			{"127.0.0.2", true},
+			{"127.1.1.1", true},
+			{"127.255.255.255", true},
+
+			// External domains
+			{"example.com", false},
+			{"github.com", false},
+			{"192.168.1.1", false},
+			{"10.0.0.1", false},
+			{"8.8.8.8", false},
+			{"2001:db8::1", false},
+
+			// Invalid/edge cases
+			{"", false},
+			{"not-an-ip", false},
+		}
+
+		for _, test := range tests {
+			result := isLocalHost(test.hostname)
+			assert.Equal(t, test.expected, result, "Hostname: %s", test.hostname)
+		}
+	})
+
 	t.Run("isMarkdownFromURL", func(t *testing.T) {
 		tests := []struct {
 			url      string
@@ -329,12 +379,21 @@ func TestFetchWithSameDomainRedirects(t *testing.T) {
 	}))
 	defer server.Close()
 
-	// Note: We're testing with HTTP server, but the function requires HTTPS
-	// So these tests will fail due to scheme validation
-	t.Run("HTTP URLs are rejected", func(t *testing.T) {
-		_, _, err := fetchWithSameDomainRedirects(context.Background(), server.URL)
+	// Note: We're testing with HTTP server, but the function requires HTTPS for external domains
+	// HTTP should be rejected for external domains but allowed for localhost
+	t.Run("HTTP URLs are rejected for external domains", func(t *testing.T) {
+		_, _, err := fetchWithSameDomainRedirects(context.Background(), "http://external-domain.com/test")
 		assert.Error(t, err)
-		// The function should reject HTTP URLs in favor of HTTPS
+		assert.Contains(t, err.Error(), "only HTTPS scheme is supported for external domains")
+	})
+
+	t.Run("HTTP URLs are allowed for localhost", func(t *testing.T) {
+		// Use the test server URL which should be localhost (127.0.0.1)
+		content, contentType, err := fetchWithSameDomainRedirects(context.Background(), server.URL)
+		// Should succeed since 127.0.0.1 is localhost
+		assert.NoError(t, err)
+		assert.Contains(t, content, "Hello World")
+		assert.Contains(t, contentType, "text/html")
 	})
 }
 

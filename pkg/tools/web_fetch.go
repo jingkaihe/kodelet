@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -63,6 +64,21 @@ func (r *WebFetchToolResult) UserFacing() string {
 // WebFetchTool implements the web_fetch tool for retrieving and processing web content.
 type WebFetchTool struct{}
 
+// isLocalHost checks if the given hostname/IP is a localhost or internal address
+func isLocalHost(hostname string) bool {
+	// Check for common localhost names
+	if hostname == "localhost" || hostname == "127.0.0.1" || hostname == "::1" || hostname == "0.0.0.0" {
+		return true
+	}
+
+	// Check for other loopback addresses (127.0.0.0/8)
+	if ip := net.ParseIP(hostname); ip != nil {
+		return ip.IsLoopback()
+	}
+
+	return false
+}
+
 // WebFetchInput defines the input parameters for the web_fetch tool.
 type WebFetchInput struct {
 	URL    string `json:"url" jsonschema:"description=The URL to fetch content from"`
@@ -84,7 +100,7 @@ func (t *WebFetchTool) Description() string {
 	return `Fetches content from a web URL with intelligent content handling.
 
 ## Input
-- url: The URL to fetch content from. The URL must be a valid HTTPS URL.
+- url: The URL to fetch content from. HTTPS URLs are required for external domains. HTTP URLs are allowed for localhost/internal addresses (127.0.0.1, ::1, localhost, etc.).
 - prompt: (Optional) Only provided if you want to extract specific information from HTML/Markdown content using AI instead of getting the whole content
 
 ## Behavior
@@ -140,11 +156,18 @@ Uses AI to extract specific information from HTML documentation based on the pro
 </good-example>
 
 <bad-example>
-url: http://insecure-site.com/file.txt
+url: http://external-site.com/file.txt
 <reasoning>
-Only HTTPS URLs are supported for security reasons.
+Only HTTPS URLs are supported for external domains for security reasons.
 </reasoning>
 </bad-example>
+
+<good-example>
+url: http://localhost:8080/api/data
+<reasoning>
+HTTP URLs are allowed for localhost/internal addresses for development convenience.
+</reasoning>
+</good-example>
 
 <bad-example>
 url: https://example.com/download.zip
@@ -180,8 +203,13 @@ func (t *WebFetchTool) ValidateInput(state tooltypes.State, parameters string) e
 		return fmt.Errorf("invalid URL: %w", err)
 	}
 
-	if parsedURL.Scheme != "https" {
-		return errors.New("only HTTPS scheme is supported")
+	// Allow HTTP for localhost/internal addresses, require HTTPS for external domains
+	if parsedURL.Scheme == "https" {
+		// HTTPS is always allowed
+	} else if parsedURL.Scheme == "http" && isLocalHost(parsedURL.Hostname()) {
+		// HTTP is allowed for localhost/internal addresses
+	} else {
+		return errors.New("only HTTPS scheme is supported for external domains, HTTP is allowed for localhost/internal addresses")
 	}
 
 	// Prompt is now optional, no validation needed
@@ -485,9 +513,13 @@ func fetchWithSameDomainRedirects(ctx context.Context, urlStr string) (string, s
 		return "", "", fmt.Errorf("invalid URL: %w", err)
 	}
 
-	// Only HTTPS URLs are supported for security reasons
-	if parsedURL.Scheme != "https" {
-		return "", "", errors.New("only HTTPS scheme is supported")
+	// Allow HTTP for localhost/internal addresses, require HTTPS for external domains
+	if parsedURL.Scheme == "https" {
+		// HTTPS is always allowed
+	} else if parsedURL.Scheme == "http" && isLocalHost(parsedURL.Hostname()) {
+		// HTTP is allowed for localhost/internal addresses
+	} else {
+		return "", "", errors.New("only HTTPS scheme is supported for external domains, HTTP is allowed for localhost/internal addresses")
 	}
 
 	originalDomain := parsedURL.Hostname()
