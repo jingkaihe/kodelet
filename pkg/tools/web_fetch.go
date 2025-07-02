@@ -62,7 +62,20 @@ func (r *WebFetchToolResult) UserFacing() string {
 }
 
 // WebFetchTool implements the web_fetch tool for retrieving and processing web content.
-type WebFetchTool struct{}
+type WebFetchTool struct {
+	domainFilter *utils.DomainFilter
+}
+
+// NewWebFetchTool creates a new WebFetchTool with optional domain filtering
+func NewWebFetchTool(allowedDomainsFile string) *WebFetchTool {
+	var domainFilter *utils.DomainFilter
+	if allowedDomainsFile != "" {
+		domainFilter = utils.NewDomainFilter(allowedDomainsFile)
+	}
+	return &WebFetchTool{
+		domainFilter: domainFilter,
+	}
+}
 
 // isLocalHost checks if the given hostname/IP is a localhost or internal address
 func isLocalHost(hostname string) bool {
@@ -210,6 +223,17 @@ func (t *WebFetchTool) ValidateInput(state tooltypes.State, parameters string) e
 		// HTTP is allowed for localhost/internal addresses
 	} else {
 		return errors.New("only HTTPS scheme is supported for external domains, HTTP is allowed for localhost/internal addresses")
+	}
+
+	// Check domain filtering if configured
+	if t.domainFilter != nil {
+		allowed, err := t.domainFilter.IsAllowed(input.URL)
+		if err != nil {
+			return fmt.Errorf("failed to validate domain: %w", err)
+		}
+		if !allowed {
+			return fmt.Errorf("domain %s is not in the allowed domains list", parsedURL.Hostname())
+		}
 	}
 
 	// Prompt is now optional, no validation needed

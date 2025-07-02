@@ -290,7 +290,7 @@ func AnthropicHeader(accessToken string) []option.RequestOption {
 	return []option.RequestOption{
 		option.WithHeader("User-Agent", "claude-cli/1.0.30 (external, cli)"),
 		option.WithAuthToken(accessToken),
-		option.WithHeader("anthropic-beta", "oauth-2025-04-20"),
+		option.WithHeaderAdd("anthropic-beta", "oauth-2025-04-20"),
 		option.WithHeaderDel("X-Api-Key"),
 	}
 }

@@ -1,5 +1,20 @@
 # Kodelet
 
+## 0.0.52.alpha (2025-07-02)
+
+### Security & Web Tools Enhancement
+- **Domain Filtering for Web Tools**: Added configurable domain filtering system for web_fetch and browser tools
+  - **Security Control**: New `allowed_domains_file` configuration option to restrict web tool access to specific domains
+  - **Flexible Patterns**: Support for exact domain matches and glob patterns (e.g., `*.github.com`, `api.*.com`)
+  - **Auto-Refresh**: Domain list refreshes every 30 seconds for dynamic control
+  - **Localhost Bypass**: Localhost and internal addresses are always allowed regardless of domain filter
+  - **Graceful Defaults**: When no domain file is configured, all domains are allowed for backward compatibility
+
+### Anthropic Thinking Enhancements
+**Interleaved Thinking**: Added support for interleaved thinking for Anthropic models that support it
+
+Extended thinking with tool use in Claude 4 models supports [interleaved thinking](https://docs.anthropic.com/en/docs/build-with-claude/extended-thinking#interleaved-thinking), which enables Claude to think between tool calls and make more sophisticated reasoning after receiving tool results.
+
 ## 0.0.51.alpha (2025-07-01)
 
 ### Web Fetch Tool Enhancement

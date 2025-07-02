@@ -24,5 +24,6 @@ type Config struct {
 	ReasoningEffort      string             // ReasoningEffort is used for OpenAI models (low, medium, high)
 	CacheEvery           int                // CacheEvery represents how often Thread messages should be cached (Anthropic only)
 	AllowedCommands      []string           // AllowedCommands is a list of allowed command patterns for the bash tool
+	AllowedDomainsFile   string             // AllowedDomainsFile is the path to the file containing allowed domains for web_fetch and browser tools
 	AnthropicAPIAccess   AnthropicAPIAccess // AnthropicAPIAccess controls how to authenticate with Anthropic API
 }
