@@ -1035,3 +1035,367 @@ func TestWebFetchToolDomainSpecificDirectories(t *testing.T) {
 		}
 	})
 }
+
+func TestWebFetchToolDomainFilter(t *testing.T) {
+	// Create a temporary directory for testing
+	tempDir := t.TempDir()
+	oldWd, _ := os.Getwd()
+	defer os.Chdir(oldWd)
+	os.Chdir(tempDir)
+
+	state := &BasicState{}
+
+	t.Run("Domain filter with no file allows all domains", func(t *testing.T) {
+		// Create tool without domain filter
+		tool := NewWebFetchTool("")
+
+		testURLs := []string{
+			"https://github.com/user/repo",
+			"https://example.com/page",
+			"https://api.test.com/data",
+		}
+
+		for _, url := range testURLs {
+			input := fmt.Sprintf(`{"url": "%s"}`, url)
+			err := tool.ValidateInput(state, input)
+			assert.NoError(t, err, "Should allow all domains when no filter is configured")
+		}
+	})
+
+	t.Run("Domain filter with empty file allows all domains", func(t *testing.T) {
+		// Create empty domains file
+		domainsFile := filepath.Join(tempDir, "empty_domains.txt")
+		err := os.WriteFile(domainsFile, []byte(""), 0644)
+		require.NoError(t, err)
+
+		tool := NewWebFetchTool(domainsFile)
+
+		testURLs := []string{
+			"https://github.com/user/repo",
+			"https://example.com/page",
+			"https://api.test.com/data",
+		}
+
+		for _, url := range testURLs {
+			input := fmt.Sprintf(`{"url": "%s"}`, url)
+			err := tool.ValidateInput(state, input)
+			assert.NoError(t, err, "Should allow all domains when domains file is empty")
+		}
+	})
+
+	t.Run("Domain filter with nonexistent file allows all domains", func(t *testing.T) {
+		// Use a nonexistent file path
+		nonexistentFile := filepath.Join(tempDir, "nonexistent_domains.txt")
+		tool := NewWebFetchTool(nonexistentFile)
+
+		testURLs := []string{
+			"https://github.com/user/repo",
+			"https://example.com/page",
+			"https://api.test.com/data",
+		}
+
+		for _, url := range testURLs {
+			input := fmt.Sprintf(`{"url": "%s"}`, url)
+			err := tool.ValidateInput(state, input)
+			assert.NoError(t, err, "Should allow all domains when domains file doesn't exist")
+		}
+	})
+
+	t.Run("Domain filter with exact domain matches", func(t *testing.T) {
+		// Create domains file with exact matches
+		domainsFile := filepath.Join(tempDir, "exact_domains.txt")
+		domainsContent := `# Allowed domains
+github.com
+example.com
+api.test.com
+# Comments should be ignored
+`
+		err := os.WriteFile(domainsFile, []byte(domainsContent), 0644)
+		require.NoError(t, err)
+
+		tool := NewWebFetchTool(domainsFile)
+
+		// Test allowed domains
+		allowedURLs := []string{
+			"https://github.com/user/repo",
+			"https://example.com/page",
+			"https://api.test.com/data",
+		}
+
+		for _, url := range allowedURLs {
+			input := fmt.Sprintf(`{"url": "%s"}`, url)
+			err := tool.ValidateInput(state, input)
+			assert.NoError(t, err, "Should allow domain: %s", url)
+		}
+
+		// Test blocked domains
+		blockedURLs := []string{
+			"https://blocked.com/page",
+			"https://evil.com/malware",
+			"https://unknown.domain.com/file",
+		}
+
+		for _, url := range blockedURLs {
+			input := fmt.Sprintf(`{"url": "%s"}`, url)
+			err := tool.ValidateInput(state, input)
+			assert.Error(t, err, "Should block domain: %s", url)
+			assert.Contains(t, err.Error(), "not in the allowed domains list")
+		}
+	})
+
+	t.Run("Domain filter with glob patterns", func(t *testing.T) {
+		// Create domains file with glob patterns
+		domainsFile := filepath.Join(tempDir, "glob_domains.txt")
+		domainsContent := `# Glob patterns for domains
+*.github.com
+*.example.com
+api.*.com
+test-*.org
+`
+		err := os.WriteFile(domainsFile, []byte(domainsContent), 0644)
+		require.NoError(t, err)
+
+		tool := NewWebFetchTool(domainsFile)
+
+		// Test URLs that should match glob patterns
+		allowedURLs := []string{
+			"https://raw.github.com/user/repo/file.txt",
+			"https://api.github.com/repos",
+			"https://docs.example.com/guide",
+			"https://www.example.com/page",
+			"https://api.service.com/data",
+			"https://api.production.com/v1/users",
+			"https://test-staging.org/app",
+			"https://test-prod.org/dashboard",
+		}
+
+		for _, url := range allowedURLs {
+			input := fmt.Sprintf(`{"url": "%s"}`, url)
+			err := tool.ValidateInput(state, input)
+			assert.NoError(t, err, "Should allow URL matching glob pattern: %s", url)
+		}
+
+		// Test URLs that should NOT match glob patterns
+		blockedURLs := []string{
+			"https://github.com/user/repo", // doesn't match *.github.com
+			"https://example.com/page",     // doesn't match *.example.com
+			"https://api.example.net/data", // doesn't match api.*.com
+			"https://prod-test.org/app",    // doesn't match test-*.org
+			"https://blocked.com/page",     // no matching pattern
+		}
+
+		for _, url := range blockedURLs {
+			input := fmt.Sprintf(`{"url": "%s"}`, url)
+			err := tool.ValidateInput(state, input)
+			assert.Error(t, err, "Should block URL not matching glob patterns: %s", url)
+			assert.Contains(t, err.Error(), "not in the allowed domains list")
+		}
+	})
+
+	t.Run("Domain filter with mixed exact and glob patterns", func(t *testing.T) {
+		// Create domains file with both exact matches and glob patterns
+		domainsFile := filepath.Join(tempDir, "mixed_domains.txt")
+		domainsContent := `# Mixed domain configuration
+github.com
+example.com
+*.googleapis.com
+api.*.dev
+# End of config
+`
+		err := os.WriteFile(domainsFile, []byte(domainsContent), 0644)
+		require.NoError(t, err)
+
+		tool := NewWebFetchTool(domainsFile)
+
+		// Test exact matches
+		exactMatches := []string{
+			"https://github.com/user/repo",
+			"https://example.com/page",
+		}
+
+		for _, url := range exactMatches {
+			input := fmt.Sprintf(`{"url": "%s"}`, url)
+			err := tool.ValidateInput(state, input)
+			assert.NoError(t, err, "Should allow exact match: %s", url)
+		}
+
+		// Test glob matches
+		globMatches := []string{
+			"https://storage.googleapis.com/bucket/file",
+			"https://compute.googleapis.com/instances",
+			"https://api.staging.dev/v1/data",
+			"https://api.production.dev/users",
+		}
+
+		for _, url := range globMatches {
+			input := fmt.Sprintf(`{"url": "%s"}`, url)
+			err := tool.ValidateInput(state, input)
+			assert.NoError(t, err, "Should allow glob match: %s", url)
+		}
+
+		// Test blocked domains
+		blockedURLs := []string{
+			"https://raw.githubusercontent.com/file", // not in allowed list
+			"https://googleapis.com/service",         // doesn't match *.googleapis.com
+			"https://api.prod.com/data",              // doesn't match api.*.dev
+			"https://malicious.com/payload",          // not in allowed list
+		}
+
+		for _, url := range blockedURLs {
+			input := fmt.Sprintf(`{"url": "%s"}`, url)
+			err := tool.ValidateInput(state, input)
+			assert.Error(t, err, "Should block URL: %s", url)
+			assert.Contains(t, err.Error(), "not in the allowed domains list")
+		}
+	})
+
+	t.Run("Domain filter always allows localhost", func(t *testing.T) {
+		// Create restrictive domains file that doesn't include localhost
+		domainsFile := filepath.Join(tempDir, "restrictive_domains.txt")
+		domainsContent := `# Very restrictive - only example.com allowed
+example.com
+`
+		err := os.WriteFile(domainsFile, []byte(domainsContent), 0644)
+		require.NoError(t, err)
+
+		tool := NewWebFetchTool(domainsFile)
+
+		// Test that localhost URLs are always allowed regardless of domain filter
+		localhostURLs := []string{
+			"http://localhost:8080/api",
+			"http://127.0.0.1:3000/page",
+			"http://[::1]:9000/service",
+			"http://0.0.0.0:5000/health",
+		}
+
+		for _, url := range localhostURLs {
+			input := fmt.Sprintf(`{"url": "%s"}`, url)
+			err := tool.ValidateInput(state, input)
+			assert.NoError(t, err, "Should always allow localhost URL: %s", url)
+		}
+
+		// Test that external domains are still filtered
+		externalURL := "https://github.com/user/repo"
+		input := fmt.Sprintf(`{"url": "%s"}`, externalURL)
+		err = tool.ValidateInput(state, input)
+		assert.Error(t, err, "Should block external domain when not in allowed list")
+		assert.Contains(t, err.Error(), "not in the allowed domains list")
+	})
+
+	t.Run("Domain filter handles URL normalization", func(t *testing.T) {
+		// Create domains file
+		domainsFile := filepath.Join(tempDir, "normalized_domains.txt")
+		domainsContent := `# Test normalization
+example.com
+https://github.com/
+http://api.test.com/path
+`
+		err := os.WriteFile(domainsFile, []byte(domainsContent), 0644)
+		require.NoError(t, err)
+
+		tool := NewWebFetchTool(domainsFile)
+
+		// Test that domains are properly normalized (protocol and path stripped)
+		normalizedURLs := []string{
+			"https://example.com/any/path",
+			"https://github.com/different/path",
+			"https://api.test.com/other/endpoint",
+		}
+
+		for _, url := range normalizedURLs {
+			input := fmt.Sprintf(`{"url": "%s"}`, url)
+			err := tool.ValidateInput(state, input)
+			assert.NoError(t, err, "Should allow URL with different path/protocol: %s", url)
+		}
+	})
+
+	t.Run("Domain filter validation errors", func(t *testing.T) {
+		// Create domains file
+		domainsFile := filepath.Join(tempDir, "test_domains.txt")
+		domainsContent := `example.com`
+		err := os.WriteFile(domainsFile, []byte(domainsContent), 0644)
+		require.NoError(t, err)
+
+		tool := NewWebFetchTool(domainsFile)
+
+		// Test that domain filter validation integrates with other validation
+		testCases := []struct {
+			name        string
+			input       string
+			expectError bool
+			errorMsg    string
+		}{
+			{
+				name:        "Valid domain passes all validation",
+				input:       `{"url": "https://example.com/file.txt"}`,
+				expectError: false,
+			},
+			{
+				name:        "Blocked domain fails domain filter validation",
+				input:       `{"url": "https://blocked.com/file.txt"}`,
+				expectError: true,
+				errorMsg:    "not in the allowed domains list",
+			},
+			{
+				name:        "Invalid URL fails before domain filter",
+				input:       `{"url": "not-a-url"}`,
+				expectError: true,
+				errorMsg:    "only HTTPS scheme is supported",
+			},
+			{
+				name:        "HTTP external domain fails scheme validation before domain filter",
+				input:       `{"url": "http://example.com/file.txt"}`,
+				expectError: true,
+				errorMsg:    "only HTTPS scheme is supported",
+			},
+		}
+
+		for _, tc := range testCases {
+			t.Run(tc.name, func(t *testing.T) {
+				err := tool.ValidateInput(state, tc.input)
+				if tc.expectError {
+					assert.Error(t, err)
+					if tc.errorMsg != "" {
+						assert.Contains(t, err.Error(), tc.errorMsg)
+					}
+				} else {
+					assert.NoError(t, err)
+				}
+			})
+		}
+	})
+
+	t.Run("Domain filter file with comments and whitespace", func(t *testing.T) {
+		// Create domains file with various formatting
+		domainsFile := filepath.Join(tempDir, "formatted_domains.txt")
+		domainsContent := `
+# This is a comment
+  
+github.com   
+   example.com
+# Another comment
+ 
+   # Comment with spaces
+*.googleapis.com  
+   
+# Final comment
+`
+		err := os.WriteFile(domainsFile, []byte(domainsContent), 0644)
+		require.NoError(t, err)
+
+		tool := NewWebFetchTool(domainsFile)
+
+		// Test that domains are properly parsed despite formatting
+		allowedURLs := []string{
+			"https://github.com/user/repo",
+			"https://example.com/page",
+			"https://storage.googleapis.com/bucket/file",
+		}
+
+		for _, url := range allowedURLs {
+			input := fmt.Sprintf(`{"url": "%s"}`, url)
+			err := tool.ValidateInput(state, input)
+			assert.NoError(t, err, "Should allow URL despite file formatting: %s", url)
+		}
+	})
+}
