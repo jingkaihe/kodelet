@@ -160,7 +160,14 @@ type ConversationStoringHandler struct {
 	conversationStore ToolExecutionStore
 	conversationID    string
 	messageIndex      int
-	pendingToolUse    map[string]string // toolName -> input mapping for pending tool uses
+	pendingToolUse    []PendingToolExecution // Queue of pending tool uses
+}
+
+// PendingToolExecution represents a tool execution waiting for results
+type PendingToolExecution struct {
+	ToolName string
+	Input    string
+	CallID   string // Unique identifier for this specific call
 }
 
 // NewConversationStoringHandler creates a new handler that stores tool executions
@@ -170,7 +177,7 @@ func NewConversationStoringHandler(wrapped MessageHandler, store ToolExecutionSt
 		conversationStore: store,
 		conversationID:    conversationID,
 		messageIndex:      messageIndex,
-		pendingToolUse:    make(map[string]string),
+		pendingToolUse:    make([]PendingToolExecution, 0),
 	}
 }
 
@@ -180,21 +187,29 @@ func (h *ConversationStoringHandler) HandleText(text string) {
 }
 
 func (h *ConversationStoringHandler) HandleToolUse(toolName string, input string) {
-	// Store the tool input for later use when result comes
-	h.pendingToolUse[toolName] = input
+	// Add tool use to the queue (FIFO order)
+	h.pendingToolUse = append(h.pendingToolUse, PendingToolExecution{
+		ToolName: toolName,
+		Input:    input,
+	})
 	
 	h.wrapped.HandleToolUse(toolName, input)
 }
 
 func (h *ConversationStoringHandler) HandleToolResult(toolName string, result string) {
 	// Store the tool execution in the conversation
-	if h.conversationStore != nil {
-		// Get the stored input for this tool
-		input := h.pendingToolUse[toolName]
-		h.conversationStore.AddToolExecution(h.conversationID, toolName, input, result, h.messageIndex)
-		
-		// Clean up the pending tool use
-		delete(h.pendingToolUse, toolName)
+	if h.conversationStore != nil && len(h.pendingToolUse) > 0 {
+		// Find the first pending tool use with matching name (FIFO)
+		for i, pending := range h.pendingToolUse {
+			if pending.ToolName == toolName {
+				// Store the execution
+				h.conversationStore.AddToolExecution(h.conversationID, toolName, pending.Input, result, h.messageIndex)
+				
+				// Remove this item from the queue
+				h.pendingToolUse = append(h.pendingToolUse[:i], h.pendingToolUse[i+1:]...)
+				break
+			}
+		}
 	}
 	
 	// Forward to the wrapped handler
