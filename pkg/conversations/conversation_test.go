@@ -13,11 +13,12 @@ func TestConversationRecord_AddToolExecution(t *testing.T) {
 	record.AddToolExecution("test-tool", "test input", "test user facing result", 0)
 
 	// Verify the tool execution was added
-	if len(record.ToolExecutions) != 1 {
-		t.Errorf("Expected 1 tool execution, got %d", len(record.ToolExecutions))
+	executions := record.GetToolExecutionsForMessage(0)
+	if len(executions) != 1 {
+		t.Errorf("Expected 1 tool execution, got %d", len(executions))
 	}
 
-	execution := record.ToolExecutions[0]
+	execution := executions[0]
 	if execution.ToolName != "test-tool" {
 		t.Errorf("Expected ToolName 'test-tool', got '%s'", execution.ToolName)
 	}
@@ -26,9 +27,6 @@ func TestConversationRecord_AddToolExecution(t *testing.T) {
 	}
 	if execution.UserFacing != "test user facing result" {
 		t.Errorf("Expected UserFacing 'test user facing result', got '%s'", execution.UserFacing)
-	}
-	if execution.MessageIndex != 0 {
-		t.Errorf("Expected MessageIndex 0, got %d", execution.MessageIndex)
 	}
 }
 
@@ -41,7 +39,7 @@ func TestConversationRecord_GetToolExecutionsForMessage(t *testing.T) {
 	record.AddToolExecution("tool-2", "input-2", "result-2", 1)
 	record.AddToolExecution("tool-3", "input-3", "result-3", 0)
 
-	// Get tool executions for message 0
+	// Get tool executions for message 0 - should be O(1) now!
 	executions := record.GetToolExecutionsForMessage(0)
 	if len(executions) != 2 {
 		t.Errorf("Expected 2 tool executions for message 0, got %d", len(executions))
@@ -79,6 +77,12 @@ func TestConversationRecord_GetToolExecutionsForMessage(t *testing.T) {
 	if len(executions) != 0 {
 		t.Errorf("Expected 0 tool executions for message 2, got %d", len(executions))
 	}
+
+	// Test total count
+	totalCount := record.GetToolExecutionCount()
+	if totalCount != 3 {
+		t.Errorf("Expected total count of 3 tool executions, got %d", totalCount)
+	}
 }
 
 func TestJSONConversationStore_AddToolExecution(t *testing.T) {
@@ -114,11 +118,13 @@ func TestJSONConversationStore_AddToolExecution(t *testing.T) {
 		t.Fatalf("Failed to load record: %v", err)
 	}
 
-	if len(loadedRecord.ToolExecutions) != 1 {
-		t.Errorf("Expected 1 tool execution, got %d", len(loadedRecord.ToolExecutions))
+	// Verify the tool execution was added
+	executions := loadedRecord.GetToolExecutionsForMessage(0)
+	if len(executions) != 1 {
+		t.Errorf("Expected 1 tool execution, got %d", len(executions))
 	}
 
-	execution := loadedRecord.ToolExecutions[0]
+	execution := executions[0]
 	if execution.ToolName != "test-tool" {
 		t.Errorf("Expected ToolName 'test-tool', got '%s'", execution.ToolName)
 	}
@@ -127,9 +133,6 @@ func TestJSONConversationStore_AddToolExecution(t *testing.T) {
 	}
 	if execution.UserFacing != "test result" {
 		t.Errorf("Expected UserFacing 'test result', got '%s'", execution.UserFacing)
-	}
-	if execution.MessageIndex != 0 {
-		t.Errorf("Expected MessageIndex 0, got %d", execution.MessageIndex)
 	}
 }
 
@@ -197,11 +200,13 @@ func TestJSONConversationStore_AddMultipleToolExecutions(t *testing.T) {
 		t.Fatalf("Failed to load record: %v", err)
 	}
 
-	if len(loadedRecord.ToolExecutions) != 3 {
-		t.Errorf("Expected 3 tool executions, got %d", len(loadedRecord.ToolExecutions))
+	// Verify all tool executions were added
+	totalCount := loadedRecord.GetToolExecutionCount()
+	if totalCount != 3 {
+		t.Errorf("Expected 3 tool executions, got %d", totalCount)
 	}
 
-	// Verify we can get executions by message index
+	// Verify we can get executions by message index efficiently
 	executions0 := loadedRecord.GetToolExecutionsForMessage(0)
 	if len(executions0) != 2 {
 		t.Errorf("Expected 2 tool executions for message 0, got %d", len(executions0))

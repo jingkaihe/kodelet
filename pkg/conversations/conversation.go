@@ -14,7 +14,6 @@ type ToolExecution struct {
 	Input        string    `json:"input"`
 	UserFacing   string    `json:"userFacing"`
 	Timestamp    time.Time `json:"timestamp"`
-	MessageIndex int       `json:"messageIndex"` // Index of the message this tool execution belongs to
 }
 
 // ConversationRecord represents a persisted conversation with its messages and metadata
@@ -28,7 +27,7 @@ type ConversationRecord struct {
 	CreatedAt      time.Time              `json:"createdAt"`
 	UpdatedAt      time.Time              `json:"updatedAt"`
 	Metadata       map[string]interface{} `json:"metadata,omitempty"`
-	ToolExecutions []ToolExecution        `json:"toolExecutions,omitempty"` // User-facing tool results
+	ToolExecutionsByMessage map[int][]ToolExecution `json:"toolExecutionsByMessage,omitempty"` // messageIndex → []executions
 }
 
 // ConversationSummary provides a brief overview of a conversation
@@ -51,13 +50,13 @@ func NewConversationRecord(id string) ConversationRecord {
 	}
 
 	return ConversationRecord{
-		ID:             id,
-		RawMessages:    json.RawMessage("[]"),
-		CreatedAt:      now,
-		UpdatedAt:      now,
-		Metadata:       make(map[string]interface{}),
-		FileLastAccess: make(map[string]time.Time),
-		ToolExecutions: make([]ToolExecution, 0),
+		ID:                      id,
+		RawMessages:             json.RawMessage("[]"),
+		CreatedAt:               now,
+		UpdatedAt:               now,
+		Metadata:                make(map[string]interface{}),
+		FileLastAccess:          make(map[string]time.Time),
+		ToolExecutionsByMessage: make(map[int][]ToolExecution),
 	}
 }
 
@@ -107,29 +106,43 @@ func (cr *ConversationRecord) ToSummary() ConversationSummary {
 
 // AddToolExecution adds a tool execution result to the conversation
 func (cr *ConversationRecord) AddToolExecution(toolName, input, userFacing string, messageIndex int) {
-	if cr.ToolExecutions == nil {
-		cr.ToolExecutions = make([]ToolExecution, 0)
+	if cr.ToolExecutionsByMessage == nil {
+		cr.ToolExecutionsByMessage = make(map[int][]ToolExecution)
 	}
 	
 	execution := ToolExecution{
-		ToolName:     toolName,
-		Input:        input,
-		UserFacing:   userFacing,
-		Timestamp:    time.Now(),
-		MessageIndex: messageIndex,
+		ToolName:   toolName,
+		Input:      input,
+		UserFacing: userFacing,
+		Timestamp:  time.Now(),
 	}
 	
-	cr.ToolExecutions = append(cr.ToolExecutions, execution)
+	cr.ToolExecutionsByMessage[messageIndex] = append(cr.ToolExecutionsByMessage[messageIndex], execution)
 	cr.UpdatedAt = time.Now()
 }
 
-// GetToolExecutionsForMessage returns all tool executions for a specific message index
+// GetToolExecutionsForMessage returns all tool executions for a specific message index - now O(1)!
 func (cr *ConversationRecord) GetToolExecutionsForMessage(messageIndex int) []ToolExecution {
+	if cr.ToolExecutionsByMessage == nil {
+		return nil
+	}
+	return cr.ToolExecutionsByMessage[messageIndex]
+}
+
+// GetAllToolExecutions returns all tool executions as a slice (for backwards compatibility)
+func (cr *ConversationRecord) GetAllToolExecutions() []ToolExecution {
 	var executions []ToolExecution
-	for _, exec := range cr.ToolExecutions {
-		if exec.MessageIndex == messageIndex {
-			executions = append(executions, exec)
-		}
+	for _, messageExecutions := range cr.ToolExecutionsByMessage {
+		executions = append(executions, messageExecutions...)
 	}
 	return executions
+}
+
+// GetToolExecutionCount returns the total number of tool executions
+func (cr *ConversationRecord) GetToolExecutionCount() int {
+	count := 0
+	for _, executions := range cr.ToolExecutionsByMessage {
+		count += len(executions)
+	}
+	return count
 }
