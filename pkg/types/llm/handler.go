@@ -148,3 +148,68 @@ func (h *StringCollectorHandler) HandleDone() {
 func (h *StringCollectorHandler) CollectedText() string {
 	return h.text.String()
 }
+
+// ToolExecutionStore interface for storing tool executions
+type ToolExecutionStore interface {
+	AddToolExecution(conversationID, toolName, input, userFacing string, messageIndex int) error
+}
+
+// ConversationStoringHandler wraps another handler and stores tool executions to a conversation
+type ConversationStoringHandler struct {
+	wrapped           MessageHandler
+	conversationStore ToolExecutionStore
+	conversationID    string
+	messageIndex      int
+	pendingToolUse    map[string]string // toolName -> input mapping for pending tool uses
+}
+
+// NewConversationStoringHandler creates a new handler that stores tool executions
+func NewConversationStoringHandler(wrapped MessageHandler, store ToolExecutionStore, conversationID string, messageIndex int) *ConversationStoringHandler {
+	return &ConversationStoringHandler{
+		wrapped:           wrapped,
+		conversationStore: store,
+		conversationID:    conversationID,
+		messageIndex:      messageIndex,
+		pendingToolUse:    make(map[string]string),
+	}
+}
+
+// Implementation of MessageHandler for ConversationStoringHandler
+func (h *ConversationStoringHandler) HandleText(text string) {
+	h.wrapped.HandleText(text)
+}
+
+func (h *ConversationStoringHandler) HandleToolUse(toolName string, input string) {
+	// Store the tool input for later use when result comes
+	h.pendingToolUse[toolName] = input
+	
+	h.wrapped.HandleToolUse(toolName, input)
+}
+
+func (h *ConversationStoringHandler) HandleToolResult(toolName string, result string) {
+	// Store the tool execution in the conversation
+	if h.conversationStore != nil {
+		// Get the stored input for this tool
+		input := h.pendingToolUse[toolName]
+		h.conversationStore.AddToolExecution(h.conversationID, toolName, input, result, h.messageIndex)
+		
+		// Clean up the pending tool use
+		delete(h.pendingToolUse, toolName)
+	}
+	
+	// Forward to the wrapped handler
+	h.wrapped.HandleToolResult(toolName, result)
+}
+
+func (h *ConversationStoringHandler) HandleThinking(thinking string) {
+	h.wrapped.HandleThinking(thinking)
+}
+
+func (h *ConversationStoringHandler) HandleDone() {
+	h.wrapped.HandleDone()
+}
+
+// UpdateMessageIndex allows updating the current message index
+func (h *ConversationStoringHandler) UpdateMessageIndex(index int) {
+	h.messageIndex = index
+}

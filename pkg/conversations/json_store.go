@@ -225,6 +225,21 @@ func (s *JSONConversationStore) Query(options QueryOptions) ([]ConversationSumma
 	return summaries, nil
 }
 
+// AddToolExecution adds a tool execution to a conversation
+func (s *JSONConversationStore) AddToolExecution(conversationID, toolName, input, userFacing string, messageIndex int) error {
+	// Load the existing conversation
+	record, err := s.Load(conversationID)
+	if err != nil {
+		return fmt.Errorf("failed to load conversation for tool execution: %w", err)
+	}
+
+	// Add the tool execution
+	record.AddToolExecution(toolName, input, userFacing, messageIndex)
+
+	// Save the updated record
+	return s.Save(record)
+}
+
 // Close cleans up any resources
 func (s *JSONConversationStore) Close() error {
 	// No resources to clean up for the JSON file store

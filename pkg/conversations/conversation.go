@@ -8,6 +8,15 @@ import (
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
 
+// ToolExecution represents a single tool execution with its user-facing result
+type ToolExecution struct {
+	ToolName     string    `json:"toolName"`
+	Input        string    `json:"input"`
+	UserFacing   string    `json:"userFacing"`
+	Timestamp    time.Time `json:"timestamp"`
+	MessageIndex int       `json:"messageIndex"` // Index of the message this tool execution belongs to
+}
+
 // ConversationRecord represents a persisted conversation with its messages and metadata
 type ConversationRecord struct {
 	ID             string                 `json:"id"`
@@ -19,6 +28,7 @@ type ConversationRecord struct {
 	CreatedAt      time.Time              `json:"createdAt"`
 	UpdatedAt      time.Time              `json:"updatedAt"`
 	Metadata       map[string]interface{} `json:"metadata,omitempty"`
+	ToolExecutions []ToolExecution        `json:"toolExecutions,omitempty"` // User-facing tool results
 }
 
 // ConversationSummary provides a brief overview of a conversation
@@ -47,6 +57,7 @@ func NewConversationRecord(id string) ConversationRecord {
 		UpdatedAt:      now,
 		Metadata:       make(map[string]interface{}),
 		FileLastAccess: make(map[string]time.Time),
+		ToolExecutions: make([]ToolExecution, 0),
 	}
 }
 
@@ -92,4 +103,33 @@ func (cr *ConversationRecord) ToSummary() ConversationSummary {
 		CreatedAt:    cr.CreatedAt,
 		UpdatedAt:    cr.UpdatedAt,
 	}
+}
+
+// AddToolExecution adds a tool execution result to the conversation
+func (cr *ConversationRecord) AddToolExecution(toolName, input, userFacing string, messageIndex int) {
+	if cr.ToolExecutions == nil {
+		cr.ToolExecutions = make([]ToolExecution, 0)
+	}
+	
+	execution := ToolExecution{
+		ToolName:     toolName,
+		Input:        input,
+		UserFacing:   userFacing,
+		Timestamp:    time.Now(),
+		MessageIndex: messageIndex,
+	}
+	
+	cr.ToolExecutions = append(cr.ToolExecutions, execution)
+	cr.UpdatedAt = time.Now()
+}
+
+// GetToolExecutionsForMessage returns all tool executions for a specific message index
+func (cr *ConversationRecord) GetToolExecutionsForMessage(messageIndex int) []ToolExecution {
+	var executions []ToolExecution
+	for _, exec := range cr.ToolExecutions {
+		if exec.MessageIndex == messageIndex {
+			executions = append(executions, exec)
+		}
+	}
+	return executions
 }

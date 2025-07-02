@@ -132,8 +132,20 @@ var runCmd = &cobra.Command{
 
 		thread.EnablePersistence(!config.NoSave)
 
+		// Wrap handler with conversation storing handler if persistence is enabled
+		var finalHandler llmtypes.MessageHandler = handler
+		if thread.IsPersisted() {
+			store, err := conversations.GetConversationStore()
+			if err != nil {
+				presenter.Error(err, "Failed to initialize conversation store")
+				return
+			}
+			// Start with message index 0 for the first message
+			finalHandler = llmtypes.NewConversationStoringHandler(handler, store, thread.GetConversationID(), 0)
+		}
+
 		// Send the message and process the response
-		_, err = thread.SendMessage(ctx, query, handler, llmtypes.MessageOpt{
+		_, err = thread.SendMessage(ctx, query, finalHandler, llmtypes.MessageOpt{
 			PromptCache: true,
 			Images:      config.Images,
 			MaxTurns:    config.MaxTurns,

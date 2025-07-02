@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/jingkaihe/kodelet/pkg/tools"
@@ -60,7 +61,22 @@ func plainChatUI(ctx context.Context, options *ChatOptions) {
 	// Create a console handler
 	handler := &llmtypes.ConsoleMessageHandler{Silent: false}
 
+	// Wrap handler with conversation storing handler if persistence is enabled
+	var finalHandler llmtypes.MessageHandler = handler
+	var storingHandler *llmtypes.ConversationStoringHandler
+	if thread.IsPersisted() {
+		store, err := conversations.GetConversationStore()
+		if err != nil {
+			presenter.Error(err, "Failed to initialize conversation store")
+			return
+		}
+		// Start with message index 0 for the first message
+		storingHandler = llmtypes.NewConversationStoringHandler(handler, store, thread.GetConversationID(), 0)
+		finalHandler = storingHandler
+	}
+
 	reader := bufio.NewReader(os.Stdin)
+	messageIndex := 0 // Track message index for the storing handler
 
 	for {
 		fmt.Print("\033[1;33m[user]: \033[0m")
@@ -100,13 +116,21 @@ func plainChatUI(ctx context.Context, options *ChatOptions) {
 			continue
 		}
 
+		// Update message index for storing handler if needed
+		if storingHandler != nil {
+			storingHandler.UpdateMessageIndex(messageIndex)
+		}
+
 		// Process the query using the persistent thread
-		_, err = thread.SendMessage(ctx, input, handler, llmtypes.MessageOpt{
+		_, err = thread.SendMessage(ctx, input, finalHandler, llmtypes.MessageOpt{
 			PromptCache: true,
 			MaxTurns:    options.maxTurns,
 		})
 		if err != nil {
 			presenter.Error(err, "Failed to process message")
 		}
+
+		// Increment message index for next iteration
+		messageIndex++
 	}
 }

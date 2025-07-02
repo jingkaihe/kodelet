@@ -26,6 +26,9 @@ type ConversationStore interface {
 	// Advanced query operations
 	Query(options QueryOptions) ([]ConversationSummary, error)
 
+	// Tool execution storage
+	AddToolExecution(conversationID, toolName, input, userFacing string, messageIndex int) error
+
 	// Lifecycle methods
 	Close() error
 }

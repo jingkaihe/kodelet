@@ -424,8 +424,16 @@ func showConversationCmd(ctx context.Context, id string, config *ConversationSho
 		// Output the raw messages as stored
 		fmt.Println(string(record.RawMessages))
 	case "json":
-		// Convert to simpler JSON format and output
-		outputJSON, err := json.MarshalIndent(messages, "", "  ")
+		// Convert to simpler JSON format including tool executions
+		output := map[string]interface{}{
+			"messages":        messages,
+			"toolExecutions":  record.ToolExecutions,
+			"summary":         record.Summary,
+			"createdAt":       record.CreatedAt,
+			"updatedAt":       record.UpdatedAt,
+			"usage":           record.Usage,
+		}
+		outputJSON, err := json.MarshalIndent(output, "", "  ")
 		if err != nil {
 			presenter.Error(err, "Failed to generate JSON output")
 			os.Exit(1)
@@ -433,7 +441,7 @@ func showConversationCmd(ctx context.Context, id string, config *ConversationSho
 		fmt.Println(string(outputJSON))
 	case "text":
 		// Format as readable text with user/assistant prefixes
-		displayConversation(messages)
+		displayConversation(messages, record)
 	default:
 		presenter.Error(fmt.Errorf("unsupported format: %s", config.Format), "Unknown format. Supported formats are raw, json, and text")
 		os.Exit(1)
@@ -441,7 +449,7 @@ func showConversationCmd(ctx context.Context, id string, config *ConversationSho
 }
 
 // displayConversation renders the messages in a readable text format
-func displayConversation(messages []llmtypes.Message) {
+func displayConversation(messages []llmtypes.Message, record conversations.ConversationRecord) {
 	for i, msg := range messages {
 		// Add a separator between messages
 		if i > 0 {
@@ -467,5 +475,22 @@ func displayConversation(messages []llmtypes.Message) {
 		// Output the formatted message with section header
 		presenter.Section(roleLabel)
 		fmt.Printf("%s\n", msg.Content)
+
+		// Display tool executions for this message if any
+		toolExecutions := record.GetToolExecutionsForMessage(i)
+		if len(toolExecutions) > 0 {
+			fmt.Println()
+			presenter.Section("Tool Executions")
+			for _, exec := range toolExecutions {
+				fmt.Printf("🔧 **%s**", exec.ToolName)
+				if exec.Input != "" {
+					fmt.Printf(" (%s)", exec.Input)
+				}
+				fmt.Printf("\n\n%s\n", exec.UserFacing)
+				if len(toolExecutions) > 1 {
+					fmt.Println("---")
+				}
+			}
+		}
 	}
 }
