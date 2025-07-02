@@ -10,6 +10,11 @@
   - **Localhost Bypass**: Localhost and internal addresses are always allowed regardless of domain filter
   - **Graceful Defaults**: When no domain file is configured, all domains are allowed for backward compatibility
 
+### Anthropic Thinking Enhancements
+**Interleaved Thinking**: Added support for interleaved thinking for Anthropic models that support it
+
+Extended thinking with tool use in Claude 4 models supports [interleaved thinking](https://docs.anthropic.com/en/docs/build-with-claude/extended-thinking#interleaved-thinking), which enables Claude to think between tool calls and make more sophisticated reasoning after receiving tool results.
+
 ## 0.0.51.alpha (2025-07-01)
 
 ### Web Fetch Tool Enhancement

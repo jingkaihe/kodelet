@@ -69,6 +69,11 @@ func NewAnthropicThread(config llmtypes.Config) (*AnthropicThread, error) {
 		config.MaxTokens = 8192
 	}
 
+	opts := []option.RequestOption{}
+	if isThinkingModel(anthropic.Model(config.Model)) {
+		opts = append(opts, option.WithHeaderAdd("anthropic-beta", "interleaved-thinking-2025-05-14"))
+	}
+
 	logger := logger.G(context.Background())
 	var client anthropic.Client
 	var useSubscription bool
@@ -78,7 +83,7 @@ func NewAnthropicThread(config llmtypes.Config) (*AnthropicThread, error) {
 	case llmtypes.AnthropicAPIAccessAPIKey:
 		// Force API key usage
 		logger.Debug("using API key authentication (forced by configuration)")
-		client = anthropic.NewClient()
+		client = anthropic.NewClient(opts...)
 		useSubscription = false
 
 	case llmtypes.AnthropicAPIAccessSubscription:
@@ -92,7 +97,8 @@ func NewAnthropicThread(config llmtypes.Config) (*AnthropicThread, error) {
 			return nil, fmt.Errorf("subscription authentication forced but failed to get access token: %w", err)
 		}
 		logger.Debug("using anthropic access token (forced by configuration)")
-		client = anthropic.NewClient(auth.AnthropicHeader(accessToken)...)
+		opts = append(opts, auth.AnthropicHeader(accessToken)...)
+		client = anthropic.NewClient(opts...)
 		useSubscription = true
 
 	case llmtypes.AnthropicAPIAccessAuto:
@@ -108,12 +114,13 @@ func NewAnthropicThread(config llmtypes.Config) (*AnthropicThread, error) {
 				useSubscription = false
 			} else {
 				logger.Debug("using anthropic access token")
-				client = anthropic.NewClient(auth.AnthropicHeader(accessToken)...)
+				opts = append(opts, auth.AnthropicHeader(accessToken)...)
+				client = anthropic.NewClient(opts...)
 				useSubscription = true
 			}
 		} else {
 			logger.Debug("no anthropic credentials found, falling back to use API key")
-			client = anthropic.NewClient()
+			client = anthropic.NewClient(opts...)
 			useSubscription = false
 		}
 	}
@@ -435,6 +442,16 @@ func (t *AnthropicThread) getModelAndTokens(opt llmtypes.MessageOpt) (anthropic.
 }
 
 func (t *AnthropicThread) shouldUtiliseThinking(model anthropic.Model) bool {
+	if !isThinkingModel(model) {
+		return false
+	}
+	if t.config.ThinkingBudgetTokens == 0 {
+		return false
+	}
+	return true
+}
+
+func isThinkingModel(model anthropic.Model) bool {
 	thinkingModels := []anthropic.Model{
 		// sonnet 4 models
 		anthropic.ModelClaudeSonnet4_0,
@@ -449,13 +466,7 @@ func (t *AnthropicThread) shouldUtiliseThinking(model anthropic.Model) bool {
 		anthropic.ModelClaude_3_Opus_20240229,
 		anthropic.ModelClaude3OpusLatest,
 	}
-	if t.config.ThinkingBudgetTokens == 0 {
-		return false
-	}
-	if !slices.Contains(thinkingModels, model) {
-		return false
-	}
-	return true
+	return slices.Contains(thinkingModels, model)
 }
 
 // NewMessage sends a message to Anthropic with OTEL tracing
