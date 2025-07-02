@@ -65,15 +65,16 @@ func (t *OpenAIThread) SaveConversation(ctx context.Context, summarize bool) err
 
 	// Build the conversation record
 	record := conversations.ConversationRecord{
-		ID:             t.conversationID,
-		RawMessages:    messagesJSON,
-		ModelType:      "openai",
-		Usage:          *t.usage,
-		Metadata:       map[string]interface{}{"model": t.config.Model},
-		Summary:        t.summary,
-		CreatedAt:      time.Now(),
-		UpdatedAt:      time.Now(),
-		FileLastAccess: t.state.FileLastAccess(),
+		ID:                    t.conversationID,
+		RawMessages:           messagesJSON,
+		ModelType:             "openai",
+		Usage:                 *t.usage,
+		Metadata:              map[string]interface{}{"model": t.config.Model},
+		Summary:               t.summary,
+		CreatedAt:             time.Now(),
+		UpdatedAt:             time.Now(),
+		FileLastAccess:        t.state.FileLastAccess(),
+		UserFacingToolResults: t.GetUserFacingToolResults(),
 	}
 
 	// Save to the store
@@ -112,6 +113,8 @@ func (t *OpenAIThread) loadConversation() error {
 	t.usage = &record.Usage
 	t.summary = record.Summary
 	t.state.SetFileLastAccess(record.FileLastAccess)
+	// Restore user-facing tool results
+	t.SetUserFacingToolResults(record.UserFacingToolResults)
 
 	return nil
 }

@@ -572,6 +572,18 @@ func (m *MockThread) GetMessages() ([]llm.Message, error) {
 	return []llm.Message{}, nil
 }
 
+func (m *MockThread) SetUserFacingToolResult(toolCallID, result string) {
+	// Mock implementation - do nothing
+}
+
+func (m *MockThread) GetUserFacingToolResults() map[string]string {
+	return make(map[string]string)
+}
+
+func (m *MockThread) SetUserFacingToolResults(results map[string]string) {
+	// Mock implementation - do nothing
+}
+
 func (m *MockThread) Reset() {
 	m.called = false
 	m.lastPrompt = ""

@@ -433,7 +433,7 @@ func showConversationCmd(ctx context.Context, id string, config *ConversationSho
 		fmt.Println(string(outputJSON))
 	case "text":
 		// Format as readable text with user/assistant prefixes
-		displayConversation(messages)
+		displayConversation(messages, record.UserFacingToolResults)
 	default:
 		presenter.Error(fmt.Errorf("unsupported format: %s", config.Format), "Unknown format. Supported formats are raw, json, and text")
 		os.Exit(1)
@@ -441,7 +441,7 @@ func showConversationCmd(ctx context.Context, id string, config *ConversationSho
 }
 
 // displayConversation renders the messages in a readable text format
-func displayConversation(messages []llmtypes.Message) {
+func displayConversation(messages []llmtypes.Message, userFacingToolResults map[string]string) {
 	for i, msg := range messages {
 		// Add a separator between messages
 		if i > 0 {
@@ -467,5 +467,15 @@ func displayConversation(messages []llmtypes.Message) {
 		// Output the formatted message with section header
 		presenter.Section(roleLabel)
 		fmt.Printf("%s\n", msg.Content)
+	}
+
+	// Display user-facing tool results if any exist
+	if len(userFacingToolResults) > 0 {
+		presenter.Separator()
+		presenter.Section("Tool Results (User-Facing)")
+		for toolCallID, result := range userFacingToolResults {
+			fmt.Printf("Tool Call ID: %s\n", toolCallID)
+			fmt.Printf("%s\n\n", result)
+		}
 	}
 }

@@ -61,4 +61,10 @@ type Thread interface {
 	Provider() string
 	// GetMessages returns the messages from the thread
 	GetMessages() ([]Message, error)
+	// SetUserFacingToolResult stores the user-facing result for a tool call
+	SetUserFacingToolResult(toolCallID, result string)
+	// GetUserFacingToolResults returns all user-facing tool results
+	GetUserFacingToolResults() map[string]string
+	// SetUserFacingToolResults sets all user-facing tool results (for loading from conversation)
+	SetUserFacingToolResults(results map[string]string)
 }
