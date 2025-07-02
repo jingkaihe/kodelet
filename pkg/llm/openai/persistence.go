@@ -63,6 +63,12 @@ func (t *OpenAIThread) SaveConversation(ctx context.Context, summarize bool) err
 		return fmt.Errorf("error marshaling messages: %w", err)
 	}
 
+	// Load existing record to preserve ToolExecutionsByMessage if it exists
+	var existingRecord *conversations.ConversationRecord
+	if existingRec, err := t.store.Load(t.conversationID); err == nil {
+		existingRecord = &existingRec
+	}
+
 	// Build the conversation record
 	record := conversations.ConversationRecord{
 		ID:             t.conversationID,
@@ -71,9 +77,16 @@ func (t *OpenAIThread) SaveConversation(ctx context.Context, summarize bool) err
 		Usage:          *t.usage,
 		Metadata:       map[string]interface{}{"model": t.config.Model},
 		Summary:        t.summary,
-		CreatedAt:      time.Now(),
 		UpdatedAt:      time.Now(),
 		FileLastAccess: t.state.FileLastAccess(),
+	}
+
+	// Preserve existing data if available
+	if existingRecord != nil {
+		record.ToolExecutionsByMessage = existingRecord.ToolExecutionsByMessage
+		record.CreatedAt = existingRecord.CreatedAt
+	} else {
+		record.CreatedAt = time.Now()
 	}
 
 	// Save to the store

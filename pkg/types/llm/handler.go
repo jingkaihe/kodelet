@@ -192,7 +192,7 @@ func (h *ConversationStoringHandler) HandleToolUse(toolName string, input string
 		ToolName: toolName,
 		Input:    input,
 	})
-	
+
 	h.wrapped.HandleToolUse(toolName, input)
 }
 
@@ -204,14 +204,14 @@ func (h *ConversationStoringHandler) HandleToolResult(toolName string, result st
 			if pending.ToolName == toolName {
 				// Store the execution
 				h.conversationStore.AddToolExecution(h.conversationID, toolName, pending.Input, result, h.messageIndex)
-				
+
 				// Remove this item from the queue
 				h.pendingToolUse = append(h.pendingToolUse[:i], h.pendingToolUse[i+1:]...)
 				break
 			}
 		}
 	}
-	
+
 	// Forward to the wrapped handler
 	h.wrapped.HandleToolResult(toolName, result)
 }

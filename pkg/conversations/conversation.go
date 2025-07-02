@@ -10,23 +10,23 @@ import (
 
 // ToolExecution represents a single tool execution with its user-facing result
 type ToolExecution struct {
-	ToolName     string    `json:"toolName"`
-	Input        string    `json:"input"`
-	UserFacing   string    `json:"userFacing"`
-	Timestamp    time.Time `json:"timestamp"`
+	ToolName   string    `json:"toolName"`
+	Input      string    `json:"input"`
+	UserFacing string    `json:"userFacing"`
+	Timestamp  time.Time `json:"timestamp"`
 }
 
 // ConversationRecord represents a persisted conversation with its messages and metadata
 type ConversationRecord struct {
-	ID             string                 `json:"id"`
-	RawMessages    json.RawMessage        `json:"rawMessages"` // Raw LLM provider messages
-	ModelType      string                 `json:"modelType"`   // e.g., "anthropic"
-	FileLastAccess map[string]time.Time   `json:"fileLastAccess"`
-	Usage          llmtypes.Usage         `json:"usage"`
-	Summary        string                 `json:"summary,omitempty"`
-	CreatedAt      time.Time              `json:"createdAt"`
-	UpdatedAt      time.Time              `json:"updatedAt"`
-	Metadata       map[string]interface{} `json:"metadata,omitempty"`
+	ID                      string                  `json:"id"`
+	RawMessages             json.RawMessage         `json:"rawMessages"` // Raw LLM provider messages
+	ModelType               string                  `json:"modelType"`   // e.g., "anthropic"
+	FileLastAccess          map[string]time.Time    `json:"fileLastAccess"`
+	Usage                   llmtypes.Usage          `json:"usage"`
+	Summary                 string                  `json:"summary,omitempty"`
+	CreatedAt               time.Time               `json:"createdAt"`
+	UpdatedAt               time.Time               `json:"updatedAt"`
+	Metadata                map[string]interface{}  `json:"metadata,omitempty"`
 	ToolExecutionsByMessage map[int][]ToolExecution `json:"toolExecutionsByMessage,omitempty"` // messageIndex → []executions
 }
 
@@ -109,14 +109,14 @@ func (cr *ConversationRecord) AddToolExecution(toolName, input, userFacing strin
 	if cr.ToolExecutionsByMessage == nil {
 		cr.ToolExecutionsByMessage = make(map[int][]ToolExecution)
 	}
-	
+
 	execution := ToolExecution{
 		ToolName:   toolName,
 		Input:      input,
 		UserFacing: userFacing,
 		Timestamp:  time.Now(),
 	}
-	
+
 	cr.ToolExecutionsByMessage[messageIndex] = append(cr.ToolExecutionsByMessage[messageIndex], execution)
 	cr.UpdatedAt = time.Now()
 }

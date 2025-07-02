@@ -71,7 +71,13 @@ func (t *AnthropicThread) SaveConversation(ctx context.Context, summarise bool) 
 		t.summary = t.ShortSummary(ctx)
 	}
 
-	// Create a new conversation record
+	// Load existing record to preserve ToolExecutionsByMessage if it exists
+	var existingRecord *conversations.ConversationRecord
+	if existingRec, err := t.store.Load(t.conversationID); err == nil {
+		existingRecord = &existingRec
+	}
+
+	// Create or update conversation record
 	record := conversations.ConversationRecord{
 		ID:             t.conversationID,
 		RawMessages:    rawMessages,
@@ -79,9 +85,16 @@ func (t *AnthropicThread) SaveConversation(ctx context.Context, summarise bool) 
 		Usage:          *t.usage,
 		Metadata:       map[string]interface{}{"model": t.config.Model},
 		Summary:        t.summary,
-		CreatedAt:      time.Now(),
 		UpdatedAt:      time.Now(),
 		FileLastAccess: t.state.FileLastAccess(),
+	}
+
+	// Preserve existing data if available
+	if existingRecord != nil {
+		record.ToolExecutionsByMessage = existingRecord.ToolExecutionsByMessage
+		record.CreatedAt = existingRecord.CreatedAt
+	} else {
+		record.CreatedAt = time.Now()
 	}
 
 	// Save the record

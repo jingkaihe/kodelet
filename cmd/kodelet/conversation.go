@@ -426,12 +426,12 @@ func showConversationCmd(ctx context.Context, id string, config *ConversationSho
 	case "json":
 		// Convert to simpler JSON format including tool executions
 		output := map[string]interface{}{
-			"messages":                  messages,
-			"toolExecutionsByMessage":   record.ToolExecutionsByMessage,
-			"summary":                   record.Summary,
-			"createdAt":                 record.CreatedAt,
-			"updatedAt":                 record.UpdatedAt,
-			"usage":                     record.Usage,
+			"messages":                messages,
+			"toolExecutionsByMessage": record.ToolExecutionsByMessage,
+			"summary":                 record.Summary,
+			"createdAt":               record.CreatedAt,
+			"updatedAt":               record.UpdatedAt,
+			"usage":                   record.Usage,
 		}
 		outputJSON, err := json.MarshalIndent(output, "", "  ")
 		if err != nil {
