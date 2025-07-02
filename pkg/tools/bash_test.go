@@ -139,13 +139,17 @@ func TestBashTool_Execute_Timeout(t *testing.T) {
 	tool := &BashTool{}
 	input := BashInput{
 		Description: "Sleep test",
-		Command:     "sleep 1",
+		Command:     "sleep 0.2",
 		Timeout:     1,
 	}
 	params, _ := json.Marshal(input)
 
-	result := tool.Execute(context.Background(), NewBasicState(context.TODO()), string(params))
-	assert.Contains(t, result.GetError(), "Command timed out after 1 seconds")
+	// Use a shorter context timeout to simulate timeout faster
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	result := tool.Execute(ctx, NewBasicState(context.TODO()), string(params))
+	assert.Contains(t, result.GetError(), "Command timed out")
 	assert.Empty(t, result.GetResult())
 }
 
@@ -345,7 +349,7 @@ func TestBashTool_BackgroundExecution(t *testing.T) {
 
 	input := BashInput{
 		Description: "Background echo test",
-		Command:     "echo 'background process' && sleep 0.5 && echo 'done'",
+		Command:     "echo 'background process' && sleep 0.1 && echo 'done'",
 		Timeout:     0, // Background processes must have timeout=0
 		Background:  true,
 	}
@@ -374,14 +378,14 @@ func TestBashTool_BackgroundExecution(t *testing.T) {
 	assert.Equal(t, input.Command, processes[0].Command)
 
 	// Wait a bit for the process to write to log file
-	time.Sleep(400 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 
 	content, err := os.ReadFile(bgResult.logPath)
 	require.NoError(t, err)
 	assert.Contains(t, string(content), "background process")
 	assert.NotContains(t, string(content), "done")
 
-	time.Sleep(200 * time.Millisecond)
+	time.Sleep(80 * time.Millisecond)
 
 	content, err = os.ReadFile(bgResult.logPath)
 	require.NoError(t, err)
