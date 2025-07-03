@@ -325,9 +325,9 @@ func writeApiKeyToProfile(ctx context.Context, profilePath, shellName, apiKey st
 	// Add the export statement based on the shell
 	switch shellName {
 	case "fish":
-		_, err = file.WriteString(fmt.Sprintf("set -x ANTHROPIC_API_KEY \"%s\"\n", apiKey))
+		_, err = fmt.Fprintf(file, "set -x ANTHROPIC_API_KEY \"%s\"\n", apiKey)
 	default:
-		_, err = file.WriteString(fmt.Sprintf("export ANTHROPIC_API_KEY=\"%s\"\n", apiKey))
+		_, err = fmt.Fprintf(file, "export ANTHROPIC_API_KEY=\"%s\"\n", apiKey)
 	}
 
 	return err

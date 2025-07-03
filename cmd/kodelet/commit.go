@@ -192,9 +192,10 @@ func confirmCommit(message string) bool {
 	response, _ := reader.ReadString('\n')
 	response = strings.ToLower(strings.TrimSpace(response))
 
-	if response == "" || response == "y" || response == "yes" {
+	switch response {
+	case "", "y", "yes":
 		return true
-	} else if response == "e" || response == "edit" {
+	case "e", "edit":
 		// Allow user to edit the message
 		editedMsg := editMessage(message)
 		if editedMsg == "" {

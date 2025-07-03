@@ -53,20 +53,3 @@ func init() {
 	resolveCmd.Flags().String("bot-mention", defaults.BotMention, "Bot mention to look for in comments")
 	resolveCmd.MarkFlagRequired("issue-url")
 }
-
-// getResolveConfigFromFlags extracts resolve configuration from command flags
-func getResolveConfigFromFlags(cmd *cobra.Command) *ResolveConfig {
-	config := NewResolveConfig()
-
-	if provider, err := cmd.Flags().GetString("provider"); err == nil {
-		config.Provider = provider
-	}
-	if issueURL, err := cmd.Flags().GetString("issue-url"); err == nil {
-		config.IssueURL = issueURL
-	}
-	if botMention, err := cmd.Flags().GetString("bot-mention"); err == nil {
-		config.BotMention = botMention
-	}
-
-	return config
-}

@@ -15,13 +15,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const (
-	anthropicClientID      = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
-	anthropicAuthEndpoint  = "https://claude.ai/oauth/authorize"
-	anthropicRedirectURI   = "https://console.anthropic.com/oauth/code/callback"
-	anthropicTokenEndpoint = "https://console.anthropic.com/v1/oauth/token"
-)
-
 var anthropicLoginCmd = &cobra.Command{
 	Use:   "anthropic-login",
 	Short: "Login to Anthropic via OAuth to access subscription-based models",

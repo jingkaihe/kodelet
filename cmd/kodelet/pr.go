@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"strings"
 	"syscall"
 
 	"github.com/jingkaihe/kodelet/pkg/llm"
@@ -226,15 +225,4 @@ func isGhAuthenticated() bool {
 	cmd := exec.Command("gh", "auth", "status")
 	err := cmd.Run()
 	return err == nil
-}
-
-// hasUncommittedChanges checks if there are uncommitted changes
-func hasUncommittedChanges() bool {
-	cmd := exec.Command("git", "status", "--porcelain")
-	output, err := cmd.Output()
-	if err != nil {
-		presenter.Error(err, "Failed to check git status")
-		os.Exit(1)
-	}
-	return len(strings.TrimSpace(string(output))) > 0
 }

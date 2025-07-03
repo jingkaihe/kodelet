@@ -59,17 +59,17 @@ func (r *BatchToolResult) AssistantFacing() string {
 	results := bytes.NewBufferString("")
 	for idx, toolResult := range r.toolResults {
 		if toolResult.GetResult() != "" {
-			results.WriteString(fmt.Sprintf(`<invocation.%d.result>
+			fmt.Fprintf(results, `<invocation.%d.result>
 %s
 </invocation.%d.result>
-`, idx, toolResult.GetResult(), idx))
+`, idx, toolResult.GetResult(), idx)
 		}
 
 		if toolResult.IsError() {
-			results.WriteString(fmt.Sprintf(`<invocation.%d.error>
+			fmt.Fprintf(results, `<invocation.%d.error>
 %s
 </invocation.%d.error>
-`, idx, toolResult.GetError(), idx))
+`, idx, toolResult.GetError(), idx)
 		}
 	}
 

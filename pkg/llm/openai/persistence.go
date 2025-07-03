@@ -17,10 +17,7 @@ import (
 // - Empty messages (messages with no content and no tool calls)
 // - Assistant messages containing tool calls that are not followed by tool result messages
 func (t *OpenAIThread) cleanupOrphanedMessages() {
-	for {
-		if len(t.messages) == 0 {
-			break
-		}
+	for len(t.messages) > 0 {
 		lastMessage := t.messages[len(t.messages)-1]
 
 		// Remove the last message if it is empty (no content and no tool calls)

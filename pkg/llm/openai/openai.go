@@ -665,7 +665,7 @@ func (t *OpenAIThread) GetMessages() ([]llmtypes.Message, error) {
 		content := msg.Content
 
 		// Handle tool calls
-		if msg.ToolCalls != nil && len(msg.ToolCalls) > 0 {
+		if len(msg.ToolCalls) > 0 {
 			toolCallContent, _ := json.Marshal(msg.ToolCalls)
 			content = string(toolCallContent)
 		}

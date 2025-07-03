@@ -220,9 +220,7 @@ func (df *DomainFilter) GetAllowedDomains() []string {
 	}
 
 	// Add glob patterns
-	for _, pattern := range df.rawPatterns {
-		result = append(result, pattern)
-	}
+	result = append(result, df.rawPatterns...)
 
 	return result
 }

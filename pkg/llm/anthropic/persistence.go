@@ -16,10 +16,7 @@ import (
 // - Empty messages (messages with no content)
 // - Messages containing tool use blocks that are not followed by tool result messages
 func (t *AnthropicThread) cleanupOrphanedMessages() {
-	for {
-		if len(t.messages) == 0 {
-			break
-		}
+	for len(t.messages) > 0 {
 		lastMessage := t.messages[len(t.messages)-1]
 		// remove the last message if it is empty
 		if len(lastMessage.Content) == 0 {
@@ -124,12 +121,6 @@ func (t *AnthropicThread) loadConversation() error {
 	// Restore user-facing tool results
 	t.SetUserFacingToolResults(record.UserFacingToolResults)
 	return nil
-}
-
-type contentBlock map[string]interface{}
-type messageParam struct {
-	Role    string         `json:"role"`
-	Content []contentBlock `json:"content"`
 }
 
 func DeserializeMessages(b []byte) ([]anthropic.MessageParam, error) {

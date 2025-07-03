@@ -63,7 +63,7 @@ func (r *FileEditToolResult) UserFacing() string {
 	}
 
 	buf := bytes.NewBufferString(fmt.Sprintf("File Edit: %s\n", r.filename))
-	buf.WriteString(fmt.Sprintf("Lines %d-%d\n\n", r.startLine, r.endLine))
+	fmt.Fprintf(buf, "Lines %d-%d\n\n", r.startLine, r.endLine)
 
 	buf.WriteString("Diff:\n")
 

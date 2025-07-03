@@ -389,9 +389,10 @@ func (r *BackgroundBashToolResult) AssistantFacing() string {
 }
 
 func (r *BackgroundBashToolResult) UserFacing() string {
-	buf := bytes.NewBufferString(fmt.Sprintf("Command: %s\n", r.command))
-	buf.WriteString(fmt.Sprintf("PID: %d\n", r.pid))
-	buf.WriteString(fmt.Sprintf("Log file: %s\n", r.logPath))
+	buf := bytes.NewBufferString("")
+	fmt.Fprintf(buf, "Command: %s\n", r.command)
+	fmt.Fprintf(buf, "PID: %d\n", r.pid)
+	fmt.Fprintf(buf, "Log file: %s\n", r.logPath)
 
 	if r.IsError() {
 		buf.WriteString("Error: " + r.GetError())

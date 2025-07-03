@@ -29,7 +29,6 @@ type Model struct {
 	height             int
 	isProcessing       bool
 	spinnerIndex       int
-	showCommands       bool
 	windowSizeMsg      tea.WindowSizeMsg
 	statusMessage      string
 	senderStyle        lipgloss.Style
@@ -168,10 +167,11 @@ func (m *Model) updateViewportContent() {
 	for i, msg := range m.messages {
 		var renderedMsg string
 
-		if msg.Role == "" {
+		switch msg.Role {
+		case "":
 			// No prefix for system messages
 			renderedMsg = msg.Content
-		} else if msg.Role == "user" {
+		case "user":
 			// Create a styled user message
 			userPrefix := m.userStyle.Render("You")
 			messageText := lipgloss.NewStyle().
@@ -179,7 +179,7 @@ func (m *Model) updateViewportContent() {
 				Width(m.width - 15). // Ensure text wraps within viewport width
 				Render(msg.Content)
 			renderedMsg = userPrefix + " → " + messageText
-		} else {
+		default:
 			// Create a styled assistant message
 			assistantPrefix := m.assistantStyle.Render("Assistant")
 			messageText := lipgloss.NewStyle().
@@ -541,13 +541,6 @@ func (m Model) View() string {
 			// Add the styled command to the dropdown
 			dropdownContent += style.Render(cmd) + "\n"
 		}
-
-		// Create dropdown box with border
-		commandDropdown = lipgloss.NewStyle().
-			BorderStyle(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("205")).
-			Width(20).
-			Render(dropdownContent)
 
 		// Create dropdown box with border and navigation hint
 		hintText := "↑↓:Navigate Tab:Next Enter:Select"
