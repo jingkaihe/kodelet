@@ -9,6 +9,9 @@
 - **Linting Integration**: Added golangci-lint with comprehensive rules, Makefile targets, and CI integration
 - **Code Cleanup**: Removed unused code and enhanced test coverage
 
+### Usage Analytics Enhancement
+- **Time Range Filtering**: Fixed `kodelet usage` command to properly filter conversations by `--since` and `--until` flags
+
 ## 0.0.52.alpha (2025-07-02)
 
 ### Security & Web Tools Enhancement

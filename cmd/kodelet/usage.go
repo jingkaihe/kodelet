@@ -82,6 +82,11 @@ func getUsageConfigFromFlags(cmd *cobra.Command) *UsageConfig {
 
 // parseTimeSpec parses time specifications like "1d", "1w", "2025-06-01"
 func parseTimeSpec(spec string) (time.Time, error) {
+	return parseTimeSpecWithClock(spec, time.Now)
+}
+
+// parseTimeSpecWithClock parses time specifications with a custom clock function for testing
+func parseTimeSpecWithClock(spec string, now func() time.Time) (time.Time, error) {
 	if spec == "" {
 		return time.Time{}, nil
 	}
@@ -104,15 +109,15 @@ func parseTimeSpec(spec string) (time.Time, error) {
 	}
 
 	unit := matches[2]
-	now := time.Now()
+	currentTime := now()
 
 	switch unit {
 	case "d":
-		return now.AddDate(0, 0, -amount), nil
+		return currentTime.AddDate(0, 0, -amount), nil
 	case "h":
-		return now.Add(-time.Duration(amount) * time.Hour), nil
+		return currentTime.Add(-time.Duration(amount) * time.Hour), nil
 	case "w":
-		return now.AddDate(0, 0, -amount*7), nil
+		return currentTime.AddDate(0, 0, -amount*7), nil
 	default:
 		return time.Time{}, fmt.Errorf("invalid time unit: %s (supported: d, h, w)", unit)
 	}
@@ -213,7 +218,7 @@ func runUsageCmd(_ context.Context, config *UsageConfig) {
 }
 
 // aggregateUsageStats aggregates usage statistics from conversation records
-func aggregateUsageStats(records []conversations.ConversationRecord, _, _ time.Time) *UsageStats {
+func aggregateUsageStats(records []conversations.ConversationRecord, startTime, endTime time.Time) *UsageStats {
 	// Create map to aggregate daily usage
 	dailyMap := make(map[string]*DailyUsage)
 	totalUsage := llmtypes.Usage{}
@@ -221,6 +226,15 @@ func aggregateUsageStats(records []conversations.ConversationRecord, _, _ time.T
 	for _, record := range records {
 		// Use UpdatedAt as the date for this conversation's usage
 		date := record.UpdatedAt.Truncate(24 * time.Hour)
+
+		// Filter by time range if specified
+		if !startTime.IsZero() && date.Before(startTime) {
+			continue
+		}
+		if !endTime.IsZero() && date.After(endTime) {
+			continue
+		}
+
 		dateKey := date.Format("2006-01-02")
 
 		// Initialize daily usage if not exists
