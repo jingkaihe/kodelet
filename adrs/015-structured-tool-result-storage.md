@@ -260,6 +260,28 @@ type BrowserScreenshotMetadata struct {
 }
 ```
 
+#### MCP (Model Context Protocol) Tools
+
+```go
+type MCPToolMetadata struct {
+    MCPToolName    string               `json:"mcpToolName"`    // Original tool name from MCP server
+    ServerName     string               `json:"serverName"`     // Name of the MCP server
+    Parameters     map[string]any       `json:"parameters"`     // Input parameters sent to MCP tool
+    Content        []MCPContent         `json:"content"`        // Structured content from MCP server
+    ContentText    string               `json:"contentText"`    // Concatenated text content for fallback
+    ExecutionTime  time.Duration        `json:"executionTime"`  // Time taken to execute the tool
+}
+
+type MCPContent struct {
+    Type           string               `json:"type"`           // "text", "image", "resource", etc.
+    Text           string               `json:"text,omitempty"` // Text content
+    Data           string               `json:"data,omitempty"` // Base64 encoded data for images/resources
+    MimeType       string               `json:"mimeType,omitempty"` // MIME type for non-text content
+    URI            string               `json:"uri,omitempty"`      // URI for resource content
+    Metadata       map[string]any       `json:"metadata,omitempty"` // Additional metadata from MCP server
+}
+```
+
 ### Simplified Tool Interface
 
 Replace the existing tool interface with a cleaner structure:
@@ -280,12 +302,12 @@ func (r *FileReadToolResult) StructuredData() StructuredToolResult {
         Success:   !r.IsError(),
         Timestamp: time.Now(),
     }
-    
+
     if r.IsError() {
         result.Error = r.GetError()
         return result
     }
-    
+
     result.Metadata = &FileReadMetadata{
         FilePath:  r.filename,
         Offset:    r.offset,
@@ -293,7 +315,7 @@ func (r *FileReadToolResult) StructuredData() StructuredToolResult {
         Language:  detectLanguage(r.filename),
         Truncated: len(r.lines) > MaxOutputLines,
     }
-    
+
     return result
 }
 ```
@@ -310,21 +332,27 @@ type CLIRenderer interface {
 // Renderer registry for dispatching based on tool name
 type RendererRegistry struct {
     renderers map[string]CLIRenderer
+    patterns  map[string]CLIRenderer // For pattern-based matching like "mcp_*"
 }
 
 func NewRendererRegistry() *RendererRegistry {
     registry := &RendererRegistry{
         renderers: make(map[string]CLIRenderer),
+        patterns:  make(map[string]CLIRenderer),
     }
-    
+
     // Register all tool renderers
     registry.Register("file_read", &FileReadRenderer{})
     registry.Register("file_write", &FileWriteRenderer{})
     registry.Register("file_edit", &FileEditRenderer{})
     registry.Register("bash", &BashRenderer{})
     registry.Register("grep_tool", &GrepRenderer{})
+
+    // Register MCP tools - pattern matches any tool prefixed with "mcp_"
+    registry.RegisterPattern("mcp_*", &MCPToolRenderer{})
+
     // ... register all other tools
-    
+
     return registry
 }
 
@@ -332,13 +360,35 @@ func (r *RendererRegistry) Register(toolName string, renderer CLIRenderer) {
     r.renderers[toolName] = renderer
 }
 
+func (r *RendererRegistry) RegisterPattern(pattern string, renderer CLIRenderer) {
+    r.patterns[pattern] = renderer
+}
+
 func (r *RendererRegistry) Render(result StructuredToolResult) string {
+    // First try exact match
     renderer, exists := r.renderers[result.ToolName]
-    if !exists {
-        // Fallback renderer for unknown tools
-        return r.renderFallback(result)
+    if exists {
+        return renderer.RenderCLI(result)
     }
-    return renderer.RenderCLI(result)
+
+    // Then try pattern matching
+    for pattern, patternRenderer := range r.patterns {
+        if r.matchesPattern(result.ToolName, pattern) {
+            return patternRenderer.RenderCLI(result)
+        }
+    }
+
+    // Fallback renderer for unknown tools
+    return r.renderFallback(result)
+}
+
+func (r *RendererRegistry) matchesPattern(toolName, pattern string) bool {
+    // Simple pattern matching for "mcp_*" style patterns
+    if strings.HasSuffix(pattern, "*") {
+        prefix := strings.TrimSuffix(pattern, "*")
+        return strings.HasPrefix(toolName, prefix)
+    }
+    return toolName == pattern
 }
 
 func (r *RendererRegistry) renderFallback(result StructuredToolResult) string {
@@ -355,11 +405,65 @@ func (r *FileReadRenderer) RenderCLI(result StructuredToolResult) string {
     if !result.Success {
         return fmt.Sprintf("Error: %s", result.Error)
     }
-    
+
     meta := result.Metadata.(*FileReadMetadata)
     buf := bytes.NewBufferString(fmt.Sprintf("File Read: %s\n", meta.FilePath))
     fmt.Fprintf(buf, "Offset: %d\n", meta.Offset)
     buf.WriteString(utils.ContentWithLineNumber(meta.Lines, meta.Offset))
+    return buf.String()
+}
+
+// Example MCP tool renderer
+type MCPToolRenderer struct{}
+
+func (r *MCPToolRenderer) RenderCLI(result StructuredToolResult) string {
+    if !result.Success {
+        return fmt.Sprintf("Error: %s", result.Error)
+    }
+
+    meta := result.Metadata.(*MCPToolMetadata)
+    buf := bytes.NewBufferString(fmt.Sprintf("MCP Tool: %s", meta.MCPToolName))
+    if meta.ServerName != "" {
+        fmt.Fprintf(buf, " (server: %s)", meta.ServerName)
+    }
+    buf.WriteString("\n")
+
+    // Show parameters if present
+    if len(meta.Parameters) > 0 {
+        buf.WriteString("Parameters:\n")
+        for k, v := range meta.Parameters {
+            fmt.Fprintf(buf, "  %s: %v\n", k, v)
+        }
+        buf.WriteString("\n")
+    }
+
+    // Render structured content
+    if len(meta.Content) > 0 {
+        buf.WriteString("Content:\n")
+        for i, content := range meta.Content {
+            if i > 0 {
+                buf.WriteString("\n")
+            }
+            switch content.Type {
+            case "text":
+                buf.WriteString(content.Text)
+            case "image":
+                fmt.Fprintf(buf, "[Image: %s, size: %d bytes]", content.MimeType, len(content.Data))
+            case "resource":
+                fmt.Fprintf(buf, "[Resource: %s (%s)]", content.URI, content.MimeType)
+            default:
+                fmt.Fprintf(buf, "[%s content]", content.Type)
+                if content.Text != "" {
+                    buf.WriteString(": ")
+                    buf.WriteString(content.Text)
+                }
+            }
+        }
+    } else {
+        // Fallback to concatenated text content
+        buf.WriteString(meta.ContentText)
+    }
+
     return buf.String()
 }
 ```
@@ -432,7 +536,8 @@ ToolResults: map[string]StructuredToolResult // Single source of truth
 1. Convert content processing tools (`web_fetch`, `image_recognition`)
 2. Update organization tools (`thinking`, `todo_read/write`, `subagent`)
 3. Handle browser automation tools with rich metadata
-4. Implement batch tool with nested structured results
+4. Convert MCP tools (generic `mcp_*` pattern) to preserve structured content from MCP servers
+5. Implement batch tool with nested structured results
 
 ### Phase 4: Integration & Polish (Week 7-8)
 1. Update conversation storage/loading to use new format
