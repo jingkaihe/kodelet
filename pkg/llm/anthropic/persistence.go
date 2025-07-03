@@ -142,7 +142,7 @@ func DeserializeMessages(b []byte) ([]anthropic.MessageParam, error) {
 }
 
 // ExtractMessages parses the raw messages from a conversation record
-func ExtractMessages(rawMessages json.RawMessage) ([]llm.Message, error) {
+func ExtractMessages(rawMessages json.RawMessage, userFacingToolResults map[string]string) ([]llm.Message, error) {
 	// Deserialize the raw messages using the existing DeserializeMessages function
 	anthropicMessages, err := DeserializeMessages(rawMessages)
 	if err != nil {
@@ -168,16 +168,20 @@ func ExtractMessages(rawMessages json.RawMessage) ([]llm.Message, error) {
 				}
 				messages = append(messages, llm.Message{
 					Role:    string(msg.Role),
-					Content: fmt.Sprintf("🔧 Using tool: %s", string(inputJSON)),
+					Content: fmt.Sprintf("🔧 Using tool: %s with input: %s", toolUseBlock.Name, string(inputJSON)),
 				})
 			}
 			// Handle tool result blocks
 			if toolResultBlock := contentBlock.OfToolResult; toolResultBlock != nil {
 				for _, resultContent := range toolResultBlock.Content {
 					if textBlock := resultContent.OfText; textBlock != nil {
+						text := textBlock.Text
+						if userFacingToolResults, ok := userFacingToolResults[toolResultBlock.ToolUseID]; ok {
+							text = userFacingToolResults
+						}
 						messages = append(messages, llm.Message{
 							Role:    "assistant",
-							Content: fmt.Sprintf("🔄 Tool result: %s", textBlock.Text),
+							Content: fmt.Sprintf("🔄 Tool result:\n%s", text),
 						})
 					}
 				}

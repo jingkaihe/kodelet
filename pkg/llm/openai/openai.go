@@ -523,7 +523,7 @@ func (t *OpenAIThread) processMessageExchange(
 		runToolCtx := t.WithSubAgent(ctx, handler)
 		output := tools.RunTool(runToolCtx, t.state, toolCall.Function.Name, toolCall.Function.Arguments)
 		handler.HandleToolResult(toolCall.Function.Name, output.UserFacing())
-		
+
 		// Store the user-facing result for this tool call
 		t.SetUserFacingToolResult(toolCall.ID, output.UserFacing())
 

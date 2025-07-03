@@ -66,7 +66,7 @@ func TestExtractMessages(t *testing.T) {
 		{"role": "assistant", "content": "Of course! What kind of project are you working on?"}
 	]`
 
-	messages, err := ExtractMessages([]byte(messagesJSON))
+	messages, err := ExtractMessages([]byte(messagesJSON), nil)
 	assert.NoError(t, err)
 	assert.Len(t, messages, 4) // System message should be filtered out
 
@@ -87,14 +87,103 @@ func TestExtractMessages(t *testing.T) {
 		{"role": "assistant", "content": "The current time is 10:30 AM."}
 	]`
 
-	messages, err = ExtractMessages([]byte(messagesWithToolsJSON))
+	messages, err = ExtractMessages([]byte(messagesWithToolsJSON), nil)
+	assert.NoError(t, err)
+	assert.Len(t, messages, 4) // System message should be filtered out, tool message processed
+
+	// Check that tool calls are properly serialized
+	toolCallMessage := messages[1]
+	assert.Equal(t, "assistant", toolCallMessage.Role)
+	assert.Contains(t, toolCallMessage.Content, "get_time") // The content should contain the serialized tool call
+}
+
+func TestExtractMessagesWithUserFacingToolResults(t *testing.T) {
+	// Test with user-facing tool results
+	messagesWithToolsJSON := `[
+		{"role": "system", "content": "You are a helpful AI assistant."},
+		{"role": "user", "content": "What time is it?"},
+		{"role": "assistant", "content": "", "tool_calls": [{"id": "call_123", "function": {"name": "get_time", "arguments": "{}"}}]},
+		{"role": "tool", "content": "Raw output: 10:30 AM", "tool_call_id": "call_123"},
+		{"role": "assistant", "content": "The current time is 10:30 AM."}
+	]`
+
+	// Test with user-facing tool results
+	userFacingToolResults := map[string]string{
+		"call_123": "User-friendly: It's 10:30 in the morning",
+	}
+
+	messages, err := ExtractMessages([]byte(messagesWithToolsJSON), userFacingToolResults)
 	assert.NoError(t, err)
 	assert.Len(t, messages, 4) // System message should be filtered out
 
 	// Check that tool calls are properly serialized
 	toolCallMessage := messages[1]
 	assert.Equal(t, "assistant", toolCallMessage.Role)
-	assert.Contains(t, toolCallMessage.Content, "get_time") // The content should contain the serialized tool call
+	assert.Contains(t, toolCallMessage.Content, "get_time")
+
+	// Check that tool result uses user-facing result instead of raw content
+	// The tool result message should be at index 2 and should be converted to assistant role
+	toolResultMessage := messages[2]
+	assert.Equal(t, "assistant", toolResultMessage.Role)
+	assert.Contains(t, toolResultMessage.Content, "🔄 Tool result:")
+	assert.Contains(t, toolResultMessage.Content, "User-friendly: It's 10:30 in the morning")
+	assert.NotContains(t, toolResultMessage.Content, "Raw output: 10:30 AM")
+
+	// Test with nil userFacingToolResults (should use raw content)
+	messages, err = ExtractMessages([]byte(messagesWithToolsJSON), nil)
+	assert.NoError(t, err)
+	assert.Len(t, messages, 4)
+
+	toolResultMessage = messages[2]
+	assert.Equal(t, "assistant", toolResultMessage.Role)
+	assert.Contains(t, toolResultMessage.Content, "🔄 Tool result:")
+	assert.Contains(t, toolResultMessage.Content, "Raw output: 10:30 AM")
+}
+
+func TestExtractMessagesWithMultipleToolResults(t *testing.T) {
+	// Test with multiple tool calls and results
+	messagesWithMultipleToolsJSON := `[
+		{"role": "system", "content": "You are a helpful AI assistant."},
+		{"role": "user", "content": "Get weather and time"},
+		{"role": "assistant", "content": "", "tool_calls": [
+			{"id": "call_time", "function": {"name": "get_time", "arguments": "{}"}},
+			{"id": "call_weather", "function": {"name": "get_weather", "arguments": "{\"location\": \"NYC\"}"}}
+		]},
+		{"role": "tool", "content": "Current time: 10:30 AM", "tool_call_id": "call_time"},
+		{"role": "tool", "content": "Weather: 72°F, sunny", "tool_call_id": "call_weather"},
+		{"role": "assistant", "content": "Here's the info you requested."}
+	]`
+
+	userFacingToolResults := map[string]string{
+		"call_time":    "The time is 10:30 AM",
+		"call_weather": "It's sunny and 72°F in New York City",
+	}
+
+	messages, err := ExtractMessages([]byte(messagesWithMultipleToolsJSON), userFacingToolResults)
+	assert.NoError(t, err)
+	assert.Len(t, messages, 6) // user + 2 tool calls + 2 tool results + assistant final
+
+	// Check first tool call
+	firstToolCall := messages[1]
+	assert.Equal(t, "assistant", firstToolCall.Role)
+	assert.Contains(t, firstToolCall.Content, "get_time")
+
+	// Check second tool call
+	secondToolCall := messages[2]
+	assert.Equal(t, "assistant", secondToolCall.Role)
+	assert.Contains(t, secondToolCall.Content, "get_weather")
+
+	// Check first tool result uses user-facing result
+	firstToolResult := messages[3]
+	assert.Equal(t, "assistant", firstToolResult.Role)
+	assert.Contains(t, firstToolResult.Content, "The time is 10:30 AM")
+	assert.NotContains(t, firstToolResult.Content, "Current time: 10:30 AM")
+
+	// Check second tool result uses user-facing result
+	secondToolResult := messages[4]
+	assert.Equal(t, "assistant", secondToolResult.Role)
+	assert.Contains(t, secondToolResult.Content, "It's sunny and 72°F in New York City")
+	assert.NotContains(t, secondToolResult.Content, "Weather: 72°F, sunny")
 }
 
 // Image Processing Tests

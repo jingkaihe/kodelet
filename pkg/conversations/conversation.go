@@ -10,16 +10,16 @@ import (
 
 // ConversationRecord represents a persisted conversation with its messages and metadata
 type ConversationRecord struct {
-	ID                     string                 `json:"id"`
-	RawMessages            json.RawMessage        `json:"rawMessages"` // Raw LLM provider messages
-	ModelType              string                 `json:"modelType"`   // e.g., "anthropic"
-	FileLastAccess         map[string]time.Time   `json:"fileLastAccess"`
-	Usage                  llmtypes.Usage         `json:"usage"`
-	Summary                string                 `json:"summary,omitempty"`
-	CreatedAt              time.Time              `json:"createdAt"`
-	UpdatedAt              time.Time              `json:"updatedAt"`
-	Metadata               map[string]interface{} `json:"metadata,omitempty"`
-	UserFacingToolResults  map[string]string      `json:"userFacingToolResults,omitempty"` // Maps tool_call_id to user-facing result
+	ID                    string                 `json:"id"`
+	RawMessages           json.RawMessage        `json:"rawMessages"` // Raw LLM provider messages
+	ModelType             string                 `json:"modelType"`   // e.g., "anthropic"
+	FileLastAccess        map[string]time.Time   `json:"fileLastAccess"`
+	Usage                 llmtypes.Usage         `json:"usage"`
+	Summary               string                 `json:"summary,omitempty"`
+	CreatedAt             time.Time              `json:"createdAt"`
+	UpdatedAt             time.Time              `json:"updatedAt"`
+	Metadata              map[string]interface{} `json:"metadata,omitempty"`
+	UserFacingToolResults map[string]string      `json:"userFacingToolResults,omitempty"` // Maps tool_call_id to user-facing result
 }
 
 // ConversationSummary provides a brief overview of a conversation

@@ -412,7 +412,7 @@ func showConversationCmd(ctx context.Context, id string, config *ConversationSho
 	}
 
 	// Extract messages from raw message data
-	messages, err := llm.ExtractMessages(record.ModelType, record.RawMessages)
+	messages, err := llm.ExtractMessages(record.ModelType, record.RawMessages, record.UserFacingToolResults)
 	if err != nil {
 		presenter.Error(err, "Failed to parse conversation messages")
 		os.Exit(1)
@@ -467,15 +467,5 @@ func displayConversation(messages []llmtypes.Message, userFacingToolResults map[
 		// Output the formatted message with section header
 		presenter.Section(roleLabel)
 		fmt.Printf("%s\n", msg.Content)
-	}
-
-	// Display user-facing tool results if any exist
-	if len(userFacingToolResults) > 0 {
-		presenter.Separator()
-		presenter.Section("Tool Results (User-Facing)")
-		for toolCallID, result := range userFacingToolResults {
-			fmt.Printf("Tool Call ID: %s\n", toolCallID)
-			fmt.Printf("%s\n\n", result)
-		}
 	}
 }

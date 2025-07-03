@@ -120,7 +120,7 @@ func (t *OpenAIThread) loadConversation() error {
 }
 
 // ExtractMessages converts the internal message format to the common format
-func ExtractMessages(data []byte) ([]llmtypes.Message, error) {
+func ExtractMessages(data []byte, userFacingToolResults map[string]string) ([]llmtypes.Message, error) {
 	var messages []openai.ChatCompletionMessage
 	if err := json.Unmarshal(data, &messages); err != nil {
 		return nil, fmt.Errorf("error unmarshaling messages: %w", err)
@@ -133,18 +133,50 @@ func ExtractMessages(data []byte) ([]llmtypes.Message, error) {
 			continue
 		}
 
-		content := msg.Content
-
-		// Handle tool calls by serializing them to JSON
-		if len(msg.ToolCalls) > 0 {
-			toolCallsJSON, _ := json.Marshal(msg.ToolCalls)
-			content = string(toolCallsJSON)
+		// Handle tool results first (before plain content)
+		if msg.Role == openai.ChatMessageRoleTool {
+			text := msg.Content
+			if userFacingToolResults, ok := userFacingToolResults[msg.ToolCallID]; ok {
+				text = userFacingToolResults
+			}
+			result = append(result, llmtypes.Message{
+				Role:    "assistant",
+				Content: fmt.Sprintf("🔄 Tool result:\n%s", text),
+			})
+			continue
 		}
 
-		result = append(result, llmtypes.Message{
-			Role:    string(msg.Role),
-			Content: content,
-		})
+		// Handle plain content (legacy format)
+		if msg.Content != "" && len(msg.MultiContent) == 0 && len(msg.ToolCalls) == 0 {
+			result = append(result, llmtypes.Message{
+				Role:    string(msg.Role),
+				Content: msg.Content,
+			})
+		}
+
+		// Handle text blocks in MultiContent
+		for _, contentBlock := range msg.MultiContent {
+			if contentBlock.Text != "" {
+				result = append(result, llmtypes.Message{
+					Role:    string(msg.Role),
+					Content: contentBlock.Text,
+				})
+			}
+		}
+
+		// Handle tool calls
+		if len(msg.ToolCalls) > 0 {
+			for _, toolCall := range msg.ToolCalls {
+				inputJSON, err := json.Marshal(toolCall)
+				if err != nil {
+					continue
+				}
+				result = append(result, llmtypes.Message{
+					Role:    string(msg.Role),
+					Content: fmt.Sprintf("🔧 Using tool: %s", string(inputJSON)),
+				})
+			}
+		}
 	}
 
 	return result, nil

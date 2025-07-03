@@ -405,7 +405,7 @@ func (t *AnthropicThread) processMessageExchange(
 			runToolCtx := t.WithSubAgent(ctx, handler)
 			output := tools.RunTool(runToolCtx, t.state, block.Name, string(variant.JSON.Input.Raw()))
 			handler.HandleToolResult(block.Name, output.UserFacing())
-			
+
 			// Store the user-facing result for this tool call
 			t.SetUserFacingToolResult(block.ID, output.UserFacing())
 
@@ -717,7 +717,7 @@ func (t *AnthropicThread) GetMessages() ([]llmtypes.Message, error) {
 	if err != nil {
 		return nil, err
 	}
-	return ExtractMessages(b)
+	return ExtractMessages(b, t.GetUserFacingToolResults())
 }
 
 // EnablePersistence enables conversation persistence for this thread
