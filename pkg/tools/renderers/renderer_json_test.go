@@ -41,7 +41,7 @@ func TestRendererWithJSONUnmarshal(t *testing.T) {
 
 		// Try to render - this will panic or fail with current implementation
 		output := registry.Render(unmarshaled)
-		
+
 		// Should produce the expected output
 		expected := "Web Fetch: https://example.com\nSaved to: /tmp/file.txt\nThis is the content"
 		if output != expected {
@@ -75,7 +75,7 @@ func TestRendererWithJSONUnmarshal(t *testing.T) {
 		}
 
 		output := registry.Render(unmarshaled)
-		
+
 		// Should contain file path
 		if !strings.Contains(output, "/etc/hosts") {
 			t.Errorf("Expected file path in output, got: %s", output)
@@ -107,7 +107,7 @@ func TestRendererWithJSONUnmarshal(t *testing.T) {
 		}
 
 		output := registry.Render(unmarshaled)
-		
+
 		// Should contain command
 		if !strings.Contains(output, "ls -la") {
 			t.Errorf("Expected command in output, got: %s", output)
@@ -146,7 +146,7 @@ func TestRendererWithJSONUnmarshal(t *testing.T) {
 		}
 
 		output := registry.Render(unmarshaled)
-		
+
 		// Should contain todo content
 		if !strings.Contains(output, "Task 1") {
 			t.Errorf("Expected todo content in output, got: %s", output)

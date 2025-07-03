@@ -330,7 +330,7 @@ func TestWebFetchRenderer(t *testing.T) {
 		}
 
 		output := renderer.RenderCLI(result)
-		expected := fmt.Sprintf("Web Fetch: %s\nSaved to: %s\n%s", 
+		expected := fmt.Sprintf("Web Fetch: %s\nSaved to: %s\n%s",
 			"https://example.com", "/tmp/content.html", content)
 
 		if output != expected {
@@ -354,7 +354,7 @@ func TestWebFetchRenderer(t *testing.T) {
 		}
 
 		output := renderer.RenderCLI(result)
-		expected := fmt.Sprintf("Web Fetch: %s\nPrompt: %s\n%s", 
+		expected := fmt.Sprintf("Web Fetch: %s\nPrompt: %s\n%s",
 			"https://example.com", "Extract main content", content)
 
 		if output != expected {

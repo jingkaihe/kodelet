@@ -3,6 +3,7 @@ package tools
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"time"
 )
 
@@ -49,6 +50,31 @@ func (s StructuredToolResult) MarshalJSON() ([]byte, error) {
 	return json.Marshal(raw)
 }
 
+// metadataTypeRegistry maps metadata type strings to their corresponding Go types
+var metadataTypeRegistry = map[string]reflect.Type{
+	"file_read":                 reflect.TypeOf(FileReadMetadata{}),
+	"file_write":                reflect.TypeOf(FileWriteMetadata{}),
+	"file_edit":                 reflect.TypeOf(FileEditMetadata{}),
+	"file_multi_edit":           reflect.TypeOf(FileMultiEditMetadata{}),
+	"grep_tool":                 reflect.TypeOf(GrepMetadata{}),
+	"glob_tool":                 reflect.TypeOf(GlobMetadata{}),
+	"bash":                      reflect.TypeOf(BashMetadata{}),
+	"mcp_tool":                  reflect.TypeOf(MCPToolMetadata{}),
+	"todo":                      reflect.TypeOf(TodoMetadata{}),
+	"thinking":                  reflect.TypeOf(ThinkingMetadata{}),
+	"batch":                     reflect.TypeOf(BatchMetadata{}),
+	"browser_navigate":          reflect.TypeOf(BrowserNavigateMetadata{}),
+	"browser_click":             reflect.TypeOf(BrowserClickMetadata{}),
+	"browser_get_page":          reflect.TypeOf(BrowserGetPageMetadata{}),
+	"browser_screenshot":        reflect.TypeOf(BrowserScreenshotMetadata{}),
+	"browser_type":              reflect.TypeOf(BrowserTypeMetadata{}),
+	"browser_wait_for":          reflect.TypeOf(BrowserWaitForMetadata{}),
+	"image_recognition":         reflect.TypeOf(ImageRecognitionMetadata{}),
+	"subagent":                  reflect.TypeOf(SubAgentMetadata{}),
+	"web_fetch":                 reflect.TypeOf(WebFetchMetadata{}),
+	"view_background_processes": reflect.TypeOf(ViewBackgroundProcessesMetadata{}),
+}
+
 // UnmarshalJSON implements custom JSON unmarshaling for StructuredToolResult
 func (s *StructuredToolResult) UnmarshalJSON(data []byte) error {
 	var raw rawStructuredToolResult
@@ -63,103 +89,22 @@ func (s *StructuredToolResult) UnmarshalJSON(data []byte) error {
 
 	// Handle metadata based on type
 	if raw.MetadataType != "" && len(raw.Metadata) > 0 {
-		var metadata ToolMetadata
-		var err error
-
-		switch raw.MetadataType {
-		case "file_read":
-			var m FileReadMetadata
-			err = json.Unmarshal(raw.Metadata, &m)
-			metadata = m
-		case "file_write":
-			var m FileWriteMetadata
-			err = json.Unmarshal(raw.Metadata, &m)
-			metadata = m
-		case "file_edit":
-			var m FileEditMetadata
-			err = json.Unmarshal(raw.Metadata, &m)
-			metadata = m
-		case "file_multi_edit":
-			var m FileMultiEditMetadata
-			err = json.Unmarshal(raw.Metadata, &m)
-			metadata = m
-		case "grep_tool":
-			var m GrepMetadata
-			err = json.Unmarshal(raw.Metadata, &m)
-			metadata = m
-		case "glob_tool":
-			var m GlobMetadata
-			err = json.Unmarshal(raw.Metadata, &m)
-			metadata = m
-		case "bash":
-			var m BashMetadata
-			err = json.Unmarshal(raw.Metadata, &m)
-			metadata = m
-		case "mcp_tool":
-			var m MCPToolMetadata
-			err = json.Unmarshal(raw.Metadata, &m)
-			metadata = m
-		case "todo":
-			var m TodoMetadata
-			err = json.Unmarshal(raw.Metadata, &m)
-			metadata = m
-		case "thinking":
-			var m ThinkingMetadata
-			err = json.Unmarshal(raw.Metadata, &m)
-			metadata = m
-		case "batch":
-			var m BatchMetadata
-			err = json.Unmarshal(raw.Metadata, &m)
-			metadata = m
-		case "browser_navigate":
-			var m BrowserNavigateMetadata
-			err = json.Unmarshal(raw.Metadata, &m)
-			metadata = m
-		case "browser_click":
-			var m BrowserClickMetadata
-			err = json.Unmarshal(raw.Metadata, &m)
-			metadata = m
-		case "browser_get_page":
-			var m BrowserGetPageMetadata
-			err = json.Unmarshal(raw.Metadata, &m)
-			metadata = m
-		case "browser_screenshot":
-			var m BrowserScreenshotMetadata
-			err = json.Unmarshal(raw.Metadata, &m)
-			metadata = m
-		case "browser_type":
-			var m BrowserTypeMetadata
-			err = json.Unmarshal(raw.Metadata, &m)
-			metadata = m
-		case "browser_wait_for":
-			var m BrowserWaitForMetadata
-			err = json.Unmarshal(raw.Metadata, &m)
-			metadata = m
-		case "image_recognition":
-			var m ImageRecognitionMetadata
-			err = json.Unmarshal(raw.Metadata, &m)
-			metadata = m
-		case "subagent":
-			var m SubAgentMetadata
-			err = json.Unmarshal(raw.Metadata, &m)
-			metadata = m
-		case "web_fetch":
-			var m WebFetchMetadata
-			err = json.Unmarshal(raw.Metadata, &m)
-			metadata = m
-		case "view_background_processes":
-			var m ViewBackgroundProcessesMetadata
-			err = json.Unmarshal(raw.Metadata, &m)
-			metadata = m
-		default:
+		metadataType, exists := metadataTypeRegistry[raw.MetadataType]
+		if !exists {
 			// Unknown metadata type, leave as nil
 			return nil
 		}
 
-		if err != nil {
+		// Create a new instance of the metadata type
+		metadataPtr := reflect.New(metadataType)
+
+		// Unmarshal the JSON into the new instance
+		if err := json.Unmarshal(raw.Metadata, metadataPtr.Interface()); err != nil {
 			return fmt.Errorf("failed to unmarshal metadata of type %s: %w", raw.MetadataType, err)
 		}
-		s.Metadata = metadata
+
+		// Set the metadata (as a value type, not pointer)
+		s.Metadata = metadataPtr.Elem().Interface().(ToolMetadata)
 	}
 
 	return nil
@@ -414,7 +359,7 @@ type WebFetchMetadata struct {
 	SavedPath     string `json:"savedPath,omitempty"`
 	Prompt        string `json:"prompt,omitempty"`
 	ProcessedType string `json:"processedType"` // "saved", "markdown", "ai_extracted"
-	Content       string `json:"content"`      // The actual fetched content
+	Content       string `json:"content"`       // The actual fetched content
 }
 
 func (m WebFetchMetadata) ToolType() string { return "web_fetch" }

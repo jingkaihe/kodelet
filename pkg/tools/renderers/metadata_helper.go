@@ -1,6 +1,8 @@
 package renderers
 
 import (
+	"reflect"
+
 	"github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
@@ -12,197 +14,25 @@ func extractMetadata(metadata tools.ToolMetadata, target interface{}) bool {
 		return false
 	}
 
-	switch target := target.(type) {
-	case *tools.FileReadMetadata:
-		switch m := metadata.(type) {
-		case *tools.FileReadMetadata:
-			*target = *m
-			return true
-		case tools.FileReadMetadata:
-			*target = m
-			return true
-		}
-	case *tools.FileWriteMetadata:
-		switch m := metadata.(type) {
-		case *tools.FileWriteMetadata:
-			*target = *m
-			return true
-		case tools.FileWriteMetadata:
-			*target = m
-			return true
-		}
-	case *tools.FileEditMetadata:
-		switch m := metadata.(type) {
-		case *tools.FileEditMetadata:
-			*target = *m
-			return true
-		case tools.FileEditMetadata:
-			*target = m
-			return true
-		}
-	case *tools.FileMultiEditMetadata:
-		switch m := metadata.(type) {
-		case *tools.FileMultiEditMetadata:
-			*target = *m
-			return true
-		case tools.FileMultiEditMetadata:
-			*target = m
-			return true
-		}
-	case *tools.BashMetadata:
-		switch m := metadata.(type) {
-		case *tools.BashMetadata:
-			*target = *m
-			return true
-		case tools.BashMetadata:
-			*target = m
-			return true
-		}
-	case *tools.GrepMetadata:
-		switch m := metadata.(type) {
-		case *tools.GrepMetadata:
-			*target = *m
-			return true
-		case tools.GrepMetadata:
-			*target = m
-			return true
-		}
-	case *tools.GlobMetadata:
-		switch m := metadata.(type) {
-		case *tools.GlobMetadata:
-			*target = *m
-			return true
-		case tools.GlobMetadata:
-			*target = m
-			return true
-		}
-	case *tools.TodoMetadata:
-		switch m := metadata.(type) {
-		case *tools.TodoMetadata:
-			*target = *m
-			return true
-		case tools.TodoMetadata:
-			*target = m
-			return true
-		}
-	case *tools.ThinkingMetadata:
-		switch m := metadata.(type) {
-		case *tools.ThinkingMetadata:
-			*target = *m
-			return true
-		case tools.ThinkingMetadata:
-			*target = m
-			return true
-		}
-	case *tools.BatchMetadata:
-		switch m := metadata.(type) {
-		case *tools.BatchMetadata:
-			*target = *m
-			return true
-		case tools.BatchMetadata:
-			*target = m
-			return true
-		}
-	case *tools.SubAgentMetadata:
-		switch m := metadata.(type) {
-		case *tools.SubAgentMetadata:
-			*target = *m
-			return true
-		case tools.SubAgentMetadata:
-			*target = m
-			return true
-		}
-	case *tools.ImageRecognitionMetadata:
-		switch m := metadata.(type) {
-		case *tools.ImageRecognitionMetadata:
-			*target = *m
-			return true
-		case tools.ImageRecognitionMetadata:
-			*target = m
-			return true
-		}
-	case *tools.WebFetchMetadata:
-		switch m := metadata.(type) {
-		case *tools.WebFetchMetadata:
-			*target = *m
-			return true
-		case tools.WebFetchMetadata:
-			*target = m
-			return true
-		}
-	case *tools.ViewBackgroundProcessesMetadata:
-		switch m := metadata.(type) {
-		case *tools.ViewBackgroundProcessesMetadata:
-			*target = *m
-			return true
-		case tools.ViewBackgroundProcessesMetadata:
-			*target = m
-			return true
-		}
-	case *tools.MCPToolMetadata:
-		switch m := metadata.(type) {
-		case *tools.MCPToolMetadata:
-			*target = *m
-			return true
-		case tools.MCPToolMetadata:
-			*target = m
-			return true
-		}
-	case *tools.BrowserNavigateMetadata:
-		switch m := metadata.(type) {
-		case *tools.BrowserNavigateMetadata:
-			*target = *m
-			return true
-		case tools.BrowserNavigateMetadata:
-			*target = m
-			return true
-		}
-	case *tools.BrowserClickMetadata:
-		switch m := metadata.(type) {
-		case *tools.BrowserClickMetadata:
-			*target = *m
-			return true
-		case tools.BrowserClickMetadata:
-			*target = m
-			return true
-		}
-	case *tools.BrowserTypeMetadata:
-		switch m := metadata.(type) {
-		case *tools.BrowserTypeMetadata:
-			*target = *m
-			return true
-		case tools.BrowserTypeMetadata:
-			*target = m
-			return true
-		}
-	case *tools.BrowserScreenshotMetadata:
-		switch m := metadata.(type) {
-		case *tools.BrowserScreenshotMetadata:
-			*target = *m
-			return true
-		case tools.BrowserScreenshotMetadata:
-			*target = m
-			return true
-		}
-	case *tools.BrowserGetPageMetadata:
-		switch m := metadata.(type) {
-		case *tools.BrowserGetPageMetadata:
-			*target = *m
-			return true
-		case tools.BrowserGetPageMetadata:
-			*target = m
-			return true
-		}
-	case *tools.BrowserWaitForMetadata:
-		switch m := metadata.(type) {
-		case *tools.BrowserWaitForMetadata:
-			*target = *m
-			return true
-		case tools.BrowserWaitForMetadata:
-			*target = m
-			return true
-		}
+	targetValue := reflect.ValueOf(target)
+	if targetValue.Kind() != reflect.Ptr || targetValue.IsNil() {
+		return false
 	}
-	
-	return false
+
+	targetElem := targetValue.Elem()
+	metadataValue := reflect.ValueOf(metadata)
+
+	// If metadata is a pointer, dereference it
+	if metadataValue.Kind() == reflect.Ptr && !metadataValue.IsNil() {
+		metadataValue = metadataValue.Elem()
+	}
+
+	// Check if the types match (comparing the base types, not pointer vs value)
+	if targetElem.Type() != metadataValue.Type() {
+		return false
+	}
+
+	// Set the target to the metadata value
+	targetElem.Set(metadataValue)
+	return true
 }

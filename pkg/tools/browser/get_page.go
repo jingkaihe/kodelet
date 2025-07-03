@@ -62,13 +62,23 @@ func (r GetPageResult) GetResult() string {
 }
 
 func (r GetPageResult) StructuredData() tools.StructuredToolResult {
-	return tools.StructuredToolResult{
+	result := tools.StructuredToolResult{
 		ToolName:  "browser_get_page",
 		Success:   r.Success,
 		Error:     r.Error,
 		Timestamp: time.Now(),
-		// TODO: Add proper browser metadata once BrowserGetPageMetadata is defined
 	}
+
+	if r.Success {
+		result.Metadata = &tools.BrowserGetPageMetadata{
+			URL:       r.URL,
+			Title:     r.Title,
+			HTMLSize:  len(r.HTML),
+			Truncated: r.Truncated,
+		}
+	}
+
+	return result
 }
 
 func (t GetPageTool) GenerateSchema() *jsonschema.Schema {

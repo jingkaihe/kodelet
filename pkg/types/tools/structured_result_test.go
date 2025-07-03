@@ -186,13 +186,13 @@ func TestStructuredToolResult_JSONMarshaling(t *testing.T) {
 						t.Errorf("Metadata type mismatch: got %s, want %s",
 							unmarshaled.Metadata.ToolType(), tt.result.Metadata.ToolType())
 					}
-					
+
 					// IMPORTANT: After unmarshaling, metadata is always a value type, not a pointer
 					metaType := reflect.TypeOf(unmarshaled.Metadata)
 					if metaType.Kind() == reflect.Ptr {
 						t.Errorf("Expected value type after unmarshal, got pointer type: %T", unmarshaled.Metadata)
 					}
-					
+
 					// Log the actual type for debugging
 					t.Logf("Unmarshaled metadata type: %T", unmarshaled.Metadata)
 				}
@@ -204,38 +204,38 @@ func TestStructuredToolResult_JSONMarshaling(t *testing.T) {
 func TestStructuredToolResult_TypeAssertions(t *testing.T) {
 	// Test that type assertions work correctly for both pointer and value types
 	tests := []struct {
-		name           string
-		metadata       ToolMetadata
-		expectedType   string
-		shouldBeValue  bool
+		name            string
+		metadata        ToolMetadata
+		expectedType    string
+		shouldBeValue   bool
 		shouldBePointer bool
 	}{
 		{
-			name:           "FileReadMetadata value",
-			metadata:       FileReadMetadata{FilePath: "/test.go"},
-			expectedType:   "file_read",
-			shouldBeValue:  true,
+			name:            "FileReadMetadata value",
+			metadata:        FileReadMetadata{FilePath: "/test.go"},
+			expectedType:    "file_read",
+			shouldBeValue:   true,
 			shouldBePointer: false,
 		},
 		{
-			name:           "FileReadMetadata pointer",
-			metadata:       &FileReadMetadata{FilePath: "/test.go"},
-			expectedType:   "file_read",
-			shouldBeValue:  false,
+			name:            "FileReadMetadata pointer",
+			metadata:        &FileReadMetadata{FilePath: "/test.go"},
+			expectedType:    "file_read",
+			shouldBeValue:   false,
 			shouldBePointer: true,
 		},
 		{
-			name:           "WebFetchMetadata value",
-			metadata:       WebFetchMetadata{URL: "https://example.com", Content: "test"},
-			expectedType:   "web_fetch",
-			shouldBeValue:  true,
+			name:            "WebFetchMetadata value",
+			metadata:        WebFetchMetadata{URL: "https://example.com", Content: "test"},
+			expectedType:    "web_fetch",
+			shouldBeValue:   true,
 			shouldBePointer: false,
 		},
 		{
-			name:           "WebFetchMetadata pointer",
-			metadata:       &WebFetchMetadata{URL: "https://example.com", Content: "test"},
-			expectedType:   "web_fetch",
-			shouldBeValue:  false,
+			name:            "WebFetchMetadata pointer",
+			metadata:        &WebFetchMetadata{URL: "https://example.com", Content: "test"},
+			expectedType:    "web_fetch",
+			shouldBeValue:   false,
 			shouldBePointer: true,
 		},
 	}
@@ -564,19 +564,19 @@ func TestStructuredToolResult_RawJSONStrings(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var result StructuredToolResult
 			err := json.Unmarshal([]byte(tt.jsonStr), &result)
-			
+
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Unmarshal error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			
+
 			if err == nil && result.Metadata != nil {
 				// Verify the metadata matches expected
 				if result.Metadata.ToolType() != tt.expected.ToolType() {
 					t.Errorf("ToolType mismatch: got %s, want %s",
 						result.Metadata.ToolType(), tt.expected.ToolType())
 				}
-				
+
 				// Check it's a value type (not pointer) after unmarshal
 				if reflect.TypeOf(result.Metadata).Kind() == reflect.Ptr {
 					t.Errorf("Expected value type after unmarshal, got pointer: %T", result.Metadata)
