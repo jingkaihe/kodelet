@@ -14,8 +14,8 @@ func (r *BrowserNavigateRenderer) RenderCLI(result tools.StructuredToolResult) s
 		return fmt.Sprintf("❌ Navigation failed: %s", result.Error)
 	}
 
-	meta, ok := result.Metadata.(*tools.BrowserNavigateMetadata)
-	if !ok {
+	var meta tools.BrowserNavigateMetadata
+	if !extractMetadata(result.Metadata, &meta) {
 		return "Error: Invalid metadata type for browser_navigate"
 	}
 
@@ -38,8 +38,8 @@ type BrowserClickRenderer struct{}
 
 func (r *BrowserClickRenderer) RenderCLI(result tools.StructuredToolResult) string {
 	if !result.Success {
-		meta, ok := result.Metadata.(*tools.BrowserClickMetadata)
-		if ok && !meta.ElementFound {
+		var meta tools.BrowserClickMetadata
+		if extractMetadata(result.Metadata, &meta) && !meta.ElementFound {
 			return "❌ Element not found or not clickable"
 		}
 		return fmt.Sprintf("❌ Click failed: %s", result.Error)
@@ -56,8 +56,8 @@ func (r *BrowserGetPageRenderer) RenderCLI(result tools.StructuredToolResult) st
 		return fmt.Sprintf("❌ Failed to get page content: %s", result.Error)
 	}
 
-	meta, ok := result.Metadata.(*tools.BrowserGetPageMetadata)
-	if !ok {
+	var meta tools.BrowserGetPageMetadata
+	if !extractMetadata(result.Metadata, &meta) {
 		return "Error: Invalid metadata type for browser_get_page"
 	}
 
@@ -78,8 +78,8 @@ func (r *BrowserScreenshotRenderer) RenderCLI(result tools.StructuredToolResult)
 		return fmt.Sprintf("❌ Screenshot failed: %s", result.Error)
 	}
 
-	meta, ok := result.Metadata.(*tools.BrowserScreenshotMetadata)
-	if !ok {
+	var meta tools.BrowserScreenshotMetadata
+	if !extractMetadata(result.Metadata, &meta) {
 		return "Error: Invalid metadata type for browser_screenshot"
 	}
 
@@ -104,8 +104,8 @@ func (r *BrowserTypeRenderer) RenderCLI(result tools.StructuredToolResult) strin
 		return fmt.Sprintf("❌ Type failed: %s", result.Error)
 	}
 
-	meta, ok := result.Metadata.(*tools.BrowserTypeMetadata)
-	if !ok {
+	var meta tools.BrowserTypeMetadata
+	if !extractMetadata(result.Metadata, &meta) {
 		return "Error: Invalid metadata type for browser_type"
 	}
 
@@ -125,8 +125,8 @@ func (r *BrowserWaitForRenderer) RenderCLI(result tools.StructuredToolResult) st
 		return fmt.Sprintf("❌ Wait failed: %s", result.Error)
 	}
 
-	meta, ok := result.Metadata.(*tools.BrowserWaitForMetadata)
-	if !ok {
+	var meta tools.BrowserWaitForMetadata
+	if !extractMetadata(result.Metadata, &meta) {
 		return "Error: Invalid metadata type for browser_wait_for"
 	}
 

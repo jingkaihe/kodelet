@@ -15,8 +15,8 @@ func (r *BashRenderer) RenderCLI(result tools.StructuredToolResult) string {
 		return fmt.Sprintf("Error: %s", result.Error)
 	}
 
-	meta, ok := result.Metadata.(*tools.BashMetadata)
-	if !ok {
+	var meta tools.BashMetadata
+	if !extractMetadata(result.Metadata, &meta) {
 		return "Error: Invalid metadata type for bash"
 	}
 

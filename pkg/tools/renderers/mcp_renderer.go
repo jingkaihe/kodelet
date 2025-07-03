@@ -15,8 +15,8 @@ func (r *MCPToolRenderer) RenderCLI(result tools.StructuredToolResult) string {
 		return fmt.Sprintf("Error: %s", result.Error)
 	}
 
-	meta, ok := result.Metadata.(*tools.MCPToolMetadata)
-	if !ok {
+	var meta tools.MCPToolMetadata
+	if !extractMetadata(result.Metadata, &meta) {
 		return "Error: Invalid metadata type for MCP tool"
 	}
 

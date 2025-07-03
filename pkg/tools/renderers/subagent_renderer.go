@@ -14,8 +14,8 @@ func (r *SubAgentRenderer) RenderCLI(result tools.StructuredToolResult) string {
 		return fmt.Sprintf("Error: %s", result.Error)
 	}
 
-	meta, ok := result.Metadata.(*tools.SubAgentMetadata)
-	if !ok {
+	var meta tools.SubAgentMetadata
+	if !extractMetadata(result.Metadata, &meta) {
 		return "Error: Invalid metadata type for subagent"
 	}
 

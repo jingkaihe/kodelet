@@ -15,8 +15,8 @@ func (r *TodoRenderer) RenderCLI(result tools.StructuredToolResult) string {
 		return fmt.Sprintf("Error: %s", result.Error)
 	}
 
-	meta, ok := result.Metadata.(*tools.TodoMetadata)
-	if !ok {
+	var meta tools.TodoMetadata
+	if !extractMetadata(result.Metadata, &meta) {
 		return "Error: Invalid metadata type for todo"
 	}
 

@@ -14,8 +14,8 @@ func (r *WebFetchRenderer) RenderCLI(result tools.StructuredToolResult) string {
 		return result.Error
 	}
 
-	meta, ok := result.Metadata.(*tools.WebFetchMetadata)
-	if !ok {
+	var meta tools.WebFetchMetadata
+	if !extractMetadata(result.Metadata, &meta) {
 		return "Error: Invalid metadata type for web_fetch"
 	}
 
