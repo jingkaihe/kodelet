@@ -414,6 +414,7 @@ type WebFetchMetadata struct {
 	SavedPath     string `json:"savedPath,omitempty"`
 	Prompt        string `json:"prompt,omitempty"`
 	ProcessedType string `json:"processedType"` // "saved", "markdown", "ai_extracted"
+	Content       string `json:"content"`      // The actual fetched content
 }
 
 func (m WebFetchMetadata) ToolType() string { return "web_fetch" }

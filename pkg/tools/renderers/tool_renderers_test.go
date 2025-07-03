@@ -1,6 +1,7 @@
 package renderers
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -313,61 +314,88 @@ func TestThinkingRenderer(t *testing.T) {
 func TestWebFetchRenderer(t *testing.T) {
 	renderer := &WebFetchRenderer{}
 
-	t.Run("Web fetch with all metadata", func(t *testing.T) {
+	t.Run("Web fetch with saved file", func(t *testing.T) {
+		content := "This is the fetched content\nLine 2\nLine 3"
 		result := tools.StructuredToolResult{
 			ToolName:  "web_fetch",
 			Success:   true,
 			Timestamp: time.Now(),
 			Metadata: &tools.WebFetchMetadata{
 				URL:           "https://example.com",
-				ProcessedType: "html",
+				ProcessedType: "saved",
 				SavedPath:     "/tmp/content.html",
-				Prompt:        "Extract main content",
-				Size:          1024,
+				Size:          int64(len(content)),
+				Content:       content,
 			},
 		}
 
 		output := renderer.RenderCLI(result)
+		expected := fmt.Sprintf("Web Fetch: %s\nSaved to: %s\n%s", 
+			"https://example.com", "/tmp/content.html", content)
 
-		if !strings.Contains(output, "Web Fetch: https://example.com") {
-			t.Errorf("Expected URL in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Type: html") {
-			t.Errorf("Expected type in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Saved to: /tmp/content.html") {
-			t.Errorf("Expected saved path in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Prompt: Extract main content") {
-			t.Errorf("Expected prompt in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Size: 1024 bytes") {
-			t.Errorf("Expected size in output, got: %s", output)
+		if output != expected {
+			t.Errorf("Expected output to match UserFacing() format:\nExpected:\n%s\nGot:\n%s", expected, output)
 		}
 	})
 
-	t.Run("Web fetch minimal metadata", func(t *testing.T) {
+	t.Run("Web fetch with prompt", func(t *testing.T) {
+		content := "Extracted information: The main points are..."
 		result := tools.StructuredToolResult{
 			ToolName:  "web_fetch",
 			Success:   true,
 			Timestamp: time.Now(),
 			Metadata: &tools.WebFetchMetadata{
 				URL:           "https://example.com",
-				ProcessedType: "text",
+				ProcessedType: "ai_extracted",
+				Prompt:        "Extract main content",
+				Size:          int64(len(content)),
+				Content:       content,
 			},
 		}
 
 		output := renderer.RenderCLI(result)
+		expected := fmt.Sprintf("Web Fetch: %s\nPrompt: %s\n%s", 
+			"https://example.com", "Extract main content", content)
 
-		if !strings.Contains(output, "Web Fetch: https://example.com") {
-			t.Errorf("Expected URL in output, got: %s", output)
+		if output != expected {
+			t.Errorf("Expected output to match UserFacing() format:\nExpected:\n%s\nGot:\n%s", expected, output)
 		}
-		if !strings.Contains(output, "Type: text") {
-			t.Errorf("Expected type in output, got: %s", output)
+	})
+
+	t.Run("Web fetch minimal (no save or prompt)", func(t *testing.T) {
+		content := "<!DOCTYPE html><html>...</html>"
+		result := tools.StructuredToolResult{
+			ToolName:  "web_fetch",
+			Success:   true,
+			Timestamp: time.Now(),
+			Metadata: &tools.WebFetchMetadata{
+				URL:           "https://example.com",
+				ProcessedType: "markdown",
+				Size:          int64(len(content)),
+				Content:       content,
+			},
 		}
-		// Should not contain optional fields
-		if strings.Contains(output, "Saved to:") {
-			t.Errorf("Should not show empty saved path, got: %s", output)
+
+		output := renderer.RenderCLI(result)
+		expected := fmt.Sprintf("Web Fetch: %s\n%s", "https://example.com", content)
+
+		if output != expected {
+			t.Errorf("Expected output to match UserFacing() format:\nExpected:\n%s\nGot:\n%s", expected, output)
+		}
+	})
+
+	t.Run("Web fetch error", func(t *testing.T) {
+		result := tools.StructuredToolResult{
+			ToolName:  "web_fetch",
+			Success:   false,
+			Error:     "Failed to fetch URL: connection timeout",
+			Timestamp: time.Now(),
+		}
+
+		output := renderer.RenderCLI(result)
+
+		if output != "Failed to fetch URL: connection timeout" {
+			t.Errorf("Expected error message, got: %s", output)
 		}
 	})
 }

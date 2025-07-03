@@ -643,6 +643,7 @@ func (r *WebFetchToolResult) StructuredData() tooltypes.StructuredToolResult {
 		SavedPath:     r.filePath,
 		Prompt:        r.prompt,
 		ProcessedType: processedType,
+		Content:       r.result,
 	}
 
 	return result

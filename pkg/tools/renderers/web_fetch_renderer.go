@@ -11,7 +11,7 @@ type WebFetchRenderer struct{}
 
 func (r *WebFetchRenderer) RenderCLI(result tools.StructuredToolResult) string {
 	if !result.Success {
-		return fmt.Sprintf("Error: %s", result.Error)
+		return result.Error
 	}
 
 	meta, ok := result.Metadata.(*tools.WebFetchMetadata)
@@ -19,18 +19,12 @@ func (r *WebFetchRenderer) RenderCLI(result tools.StructuredToolResult) string {
 		return "Error: Invalid metadata type for web_fetch"
 	}
 
-	output := fmt.Sprintf("Web Fetch: %s\n", meta.URL)
-	output += fmt.Sprintf("Type: %s\n", meta.ProcessedType)
-
+	// Match the UserFacing() output exactly
 	if meta.SavedPath != "" {
-		output += fmt.Sprintf("Saved to: %s\n", meta.SavedPath)
+		return fmt.Sprintf("Web Fetch: %s\nSaved to: %s\n%s", meta.URL, meta.SavedPath, meta.Content)
 	}
 	if meta.Prompt != "" {
-		output += fmt.Sprintf("Prompt: %s\n", meta.Prompt)
+		return fmt.Sprintf("Web Fetch: %s\nPrompt: %s\n%s", meta.URL, meta.Prompt, meta.Content)
 	}
-	if meta.Size > 0 {
-		output += fmt.Sprintf("Size: %d bytes\n", meta.Size)
-	}
-
-	return output
+	return fmt.Sprintf("Web Fetch: %s\n%s", meta.URL, meta.Content)
 }
