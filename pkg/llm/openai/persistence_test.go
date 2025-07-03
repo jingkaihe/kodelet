@@ -4,12 +4,55 @@ import (
 	"context"
 	"testing"
 
+	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	"github.com/sashabaranov/go-openai"
 	"github.com/stretchr/testify/assert"
 
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
+
+// MockConversationStore is a test implementation of the ConversationStore interface
+type MockConversationStore struct {
+	SavedRecords []conversations.ConversationRecord
+	LoadedRecord *conversations.ConversationRecord
+}
+
+func (m *MockConversationStore) Save(record conversations.ConversationRecord) error {
+	m.SavedRecords = append(m.SavedRecords, record)
+	return nil
+}
+
+func (m *MockConversationStore) Load(id string) (conversations.ConversationRecord, error) {
+	if m.LoadedRecord != nil {
+		return *m.LoadedRecord, nil
+	}
+
+	// Find the record with the matching ID
+	for _, record := range m.SavedRecords {
+		if record.ID == id {
+			return record, nil
+		}
+	}
+
+	return conversations.ConversationRecord{}, nil
+}
+
+func (m *MockConversationStore) List() ([]conversations.ConversationSummary, error) {
+	return nil, nil
+}
+
+func (m *MockConversationStore) Delete(id string) error {
+	return nil
+}
+
+func (m *MockConversationStore) Query(options conversations.QueryOptions) ([]conversations.ConversationSummary, error) {
+	return nil, nil
+}
+
+func (m *MockConversationStore) Close() error {
+	return nil
+}
 
 func TestSaveConversationMessageCleanup(t *testing.T) {
 	tests := []struct {
@@ -317,4 +360,58 @@ func TestSaveConversationMessageCleanup(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSaveAndLoadConversationWithUserFacingToolResults(t *testing.T) {
+	// Create a mock store
+	store := &MockConversationStore{}
+
+	// Create a thread with user-facing tool results
+	thread := NewOpenAIThread(llmtypes.Config{
+		Model: "gpt-4.1",
+	})
+
+	// Set up state
+	state := tools.NewBasicState(context.TODO())
+	thread.SetState(state)
+	thread.store = store
+	thread.EnablePersistence(true) // Enable persistence
+
+	thread.SetUserFacingToolResult("call_1", "User-friendly result 1")
+	thread.SetUserFacingToolResult("call_2", "User-friendly result 2")
+
+	// Add some sample messages
+	thread.AddUserMessage(context.Background(), "Hello")
+
+	// Save the conversation
+	err := thread.SaveConversation(context.Background(), false)
+	assert.NoError(t, err)
+
+	// Verify the saved record contains user-facing tool results
+	assert.Len(t, store.SavedRecords, 1)
+	savedRecord := store.SavedRecords[0]
+
+	assert.NotNil(t, savedRecord.UserFacingToolResults)
+	assert.Len(t, savedRecord.UserFacingToolResults, 2)
+	assert.Equal(t, "User-friendly result 1", savedRecord.UserFacingToolResults["call_1"])
+	assert.Equal(t, "User-friendly result 2", savedRecord.UserFacingToolResults["call_2"])
+
+	// Create a new thread and load the conversation
+	newThread := NewOpenAIThread(llmtypes.Config{
+		Model: "gpt-4.1",
+	})
+	newThread.SetState(tools.NewBasicState(context.TODO()))
+	newThread.store = store
+	newThread.EnablePersistence(true) // Enable persistence
+	newThread.SetConversationID(savedRecord.ID)
+
+	// Load the conversation
+	err = newThread.loadConversation()
+	assert.NoError(t, err)
+
+	// Verify the loaded thread has the user-facing tool results
+	loadedResults := newThread.GetUserFacingToolResults()
+	assert.Len(t, loadedResults, 2)
+	assert.Equal(t, "User-friendly result 1", loadedResults["call_1"])
+	assert.Equal(t, "User-friendly result 2", loadedResults["call_2"])
 }

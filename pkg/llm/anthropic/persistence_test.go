@@ -9,9 +9,52 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
+
+// MockConversationStore is a test implementation of the ConversationStore interface
+type MockConversationStore struct {
+	SavedRecords []conversations.ConversationRecord
+	LoadedRecord *conversations.ConversationRecord
+}
+
+func (m *MockConversationStore) Save(record conversations.ConversationRecord) error {
+	m.SavedRecords = append(m.SavedRecords, record)
+	return nil
+}
+
+func (m *MockConversationStore) Load(id string) (conversations.ConversationRecord, error) {
+	if m.LoadedRecord != nil {
+		return *m.LoadedRecord, nil
+	}
+
+	// Find the record with the matching ID
+	for _, record := range m.SavedRecords {
+		if record.ID == id {
+			return record, nil
+		}
+	}
+
+	return conversations.ConversationRecord{}, nil
+}
+
+func (m *MockConversationStore) List() ([]conversations.ConversationSummary, error) {
+	return nil, nil
+}
+
+func (m *MockConversationStore) Delete(id string) error {
+	return nil
+}
+
+func (m *MockConversationStore) Query(options conversations.QueryOptions) ([]conversations.ConversationSummary, error) {
+	return nil, nil
+}
+
+func (m *MockConversationStore) Close() error {
+	return nil
+}
 
 func TestDeserializeMessages(t *testing.T) {
 	thread, err := NewAnthropicThread(llmtypes.Config{
@@ -846,4 +889,60 @@ func TestExtractMessagesWithThinking(t *testing.T) {
 	// Check final assistant message
 	assert.Equal(t, "assistant", messages[2].Role)
 	assert.Equal(t, "2+2 equals 4.", messages[2].Content)
+}
+
+func TestSaveAndLoadConversationWithUserFacingToolResults(t *testing.T) {
+	store := &MockConversationStore{}
+
+	// Create a thread with user-facing tool results
+	thread, err := NewAnthropicThread(llmtypes.Config{
+		Model: string(anthropic.ModelClaudeSonnet4_20250514),
+	})
+	require.NoError(t, err)
+
+	// Set up state and store
+	state := tools.NewBasicState(context.TODO())
+	thread.SetState(state)
+	thread.store = store
+	thread.EnablePersistence(true) // Enable persistence
+	thread.SetUserFacingToolResult("tool_1", "User-friendly result 1")
+	thread.SetUserFacingToolResult("tool_2", "User-friendly result 2")
+
+	// Add some sample messages
+	thread.AddUserMessage(context.Background(), "Hello")
+
+	// Save the conversation
+	err = thread.SaveConversation(context.Background(), false)
+	require.NoError(t, err)
+
+	// Verify the saved record contains user-facing tool results
+	require.Len(t, store.SavedRecords, 1)
+	savedRecord := store.SavedRecords[0]
+
+	assert.NotNil(t, savedRecord.UserFacingToolResults)
+	assert.Len(t, savedRecord.UserFacingToolResults, 2)
+	assert.Equal(t, "User-friendly result 1", savedRecord.UserFacingToolResults["tool_1"])
+	assert.Equal(t, "User-friendly result 2", savedRecord.UserFacingToolResults["tool_2"])
+
+	// Create a new thread and load the conversation
+	newThread, err := NewAnthropicThread(llmtypes.Config{
+		Model: string(anthropic.ModelClaudeSonnet4_20250514),
+	})
+	require.NoError(t, err)
+
+	newState := tools.NewBasicState(context.TODO())
+	newThread.SetState(newState)
+	newThread.store = store
+	newThread.EnablePersistence(true) // Enable persistence
+	newThread.SetConversationID(savedRecord.ID)
+
+	// Load the conversation
+	err = newThread.loadConversation()
+	require.NoError(t, err)
+
+	// Verify the loaded thread has the user-facing tool results
+	loadedResults := newThread.GetUserFacingToolResults()
+	assert.Len(t, loadedResults, 2)
+	assert.Equal(t, "User-friendly result 1", loadedResults["tool_1"])
+	assert.Equal(t, "User-friendly result 2", loadedResults["tool_2"])
 }
