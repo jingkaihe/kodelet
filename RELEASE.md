@@ -1,5 +1,14 @@
 # Kodelet
 
+## 0.0.53.alpha (2025-07-03)
+
+### Conversation Enhancement
+- **Tool Results Display**: Tool execution results now properly display in conversation history and persist across sessions for both Anthropic and OpenAI
+
+### SDLC Improvements
+- **Linting Integration**: Added golangci-lint with comprehensive rules, Makefile targets, and CI integration
+- **Code Cleanup**: Removed unused code and enhanced test coverage
+
 ## 0.0.52.alpha (2025-07-02)
 
 ### Security & Web Tools Enhancement
