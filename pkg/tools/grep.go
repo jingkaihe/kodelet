@@ -80,6 +80,52 @@ func (r *GrepToolResult) UserFacing() string {
 	return result.String()
 }
 
+func (r *GrepToolResult) StructuredData() tooltypes.StructuredToolResult {
+	result := tooltypes.StructuredToolResult{
+		ToolName:  "grep_tool",
+		Success:   !r.IsError(),
+		Timestamp: time.Now(),
+	}
+
+	if r.IsError() {
+		result.Error = r.GetError()
+		return result
+	}
+
+	// Convert internal SearchResult to metadata format
+	metadataResults := make([]tooltypes.SearchResult, 0, len(r.results))
+	for _, res := range r.results {
+		matches := make([]tooltypes.SearchMatch, 0, len(res.MatchedLines))
+		for _, match := range res.MatchedLines {
+			matches = append(matches, tooltypes.SearchMatch{
+				LineNumber: match.LineNumber,
+				Content:    match.LineContent,
+				MatchStart: 0, // TODO: Calculate actual match positions
+				MatchEnd:   0,
+			})
+		}
+
+		// Detect language from file extension
+		language := utils.DetectLanguageFromPath(res.Filename)
+
+		metadataResults = append(metadataResults, tooltypes.SearchResult{
+			FilePath: res.Filename,
+			Language: language,
+			Matches:  matches,
+		})
+	}
+
+	result.Metadata = &tooltypes.GrepMetadata{
+		Pattern:   r.pattern,
+		Path:      r.path,
+		Include:   r.include,
+		Results:   metadataResults,
+		Truncated: r.truncated,
+	}
+
+	return result
+}
+
 type GrepTool struct{}
 
 type CodeSearchInput struct {

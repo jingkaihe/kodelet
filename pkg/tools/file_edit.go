@@ -73,6 +73,37 @@ func (r *FileEditToolResult) UserFacing() string {
 	return buf.String()
 }
 
+func (r *FileEditToolResult) StructuredData() tooltypes.StructuredToolResult {
+	result := tooltypes.StructuredToolResult{
+		ToolName:  "file_edit",
+		Success:   !r.IsError(),
+		Timestamp: time.Now(),
+	}
+
+	if r.IsError() {
+		result.Error = r.GetError()
+		return result
+	}
+
+	// Detect language from file extension
+	language := utils.DetectLanguageFromPath(r.filename)
+
+	result.Metadata = &tooltypes.FileEditMetadata{
+		FilePath: r.filename,
+		Language: language,
+		Edits: []tooltypes.Edit{
+			{
+				StartLine:  r.startLine,
+				EndLine:    r.endLine,
+				OldContent: r.oldText,
+				NewContent: r.newText,
+			},
+		},
+	}
+
+	return result
+}
+
 type FileEditTool struct{}
 
 func (t *FileEditTool) Name() string {

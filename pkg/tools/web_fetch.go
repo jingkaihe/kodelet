@@ -13,6 +13,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
 
 	md "github.com/JohannesKaufmann/html-to-markdown"
 	"github.com/invopop/jsonschema"
@@ -613,4 +614,36 @@ func convertHTMLToMarkdown(ctx context.Context, htmlContent string) string {
 		return htmlContent
 	}
 	return markdown
+}
+
+func (r *WebFetchToolResult) StructuredData() tooltypes.StructuredToolResult {
+	result := tooltypes.StructuredToolResult{
+		ToolName:  "web_fetch",
+		Success:   !r.IsError(),
+		Timestamp: time.Now(),
+	}
+
+	if r.IsError() {
+		result.Error = r.GetError()
+		return result
+	}
+
+	// Determine processed type based on what happened
+	processedType := "markdown" // Default for most web pages
+	if r.filePath != "" {
+		processedType = "saved"
+	} else if r.prompt != "" {
+		processedType = "ai_extracted"
+	}
+
+	result.Metadata = &tooltypes.WebFetchMetadata{
+		URL:           r.url,
+		ContentType:   "", // Not available in current structure
+		Size:          int64(len(r.result)),
+		SavedPath:     r.filePath,
+		Prompt:        r.prompt,
+		ProcessedType: processedType,
+	}
+
+	return result
 }

@@ -59,6 +59,31 @@ func (r *FileWriteToolResult) UserFacing() string {
 	return buf.String()
 }
 
+func (r *FileWriteToolResult) StructuredData() tooltypes.StructuredToolResult {
+	result := tooltypes.StructuredToolResult{
+		ToolName:  "file_write",
+		Success:   !r.IsError(),
+		Timestamp: time.Now(),
+	}
+
+	if r.IsError() {
+		result.Error = r.GetError()
+		return result
+	}
+
+	// Detect language from file extension
+	language := utils.DetectLanguageFromPath(r.filename)
+
+	result.Metadata = &tooltypes.FileWriteMetadata{
+		FilePath: r.filename,
+		Content:  r.text,
+		Size:     int64(len(r.text)),
+		Language: language,
+	}
+
+	return result
+}
+
 type FileWriteTool struct{}
 
 func (t *FileWriteTool) Name() string {

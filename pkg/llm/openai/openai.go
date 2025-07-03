@@ -17,6 +17,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/sysprompt"
 	"github.com/jingkaihe/kodelet/pkg/telemetry"
 	"github.com/jingkaihe/kodelet/pkg/tools"
+	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
 	"github.com/sashabaranov/go-openai"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -234,7 +235,8 @@ type OpenAIThread struct {
 	store                 ConversationStore
 	mu                    sync.Mutex
 	conversationMu        sync.Mutex
-	userFacingToolResults map[string]string // Maps tool_call_id to user-facing result
+	userFacingToolResults map[string]string                         // Maps tool_call_id to user-facing result
+	toolResults           map[string]tooltypes.StructuredToolResult // Maps tool_call_id to structured result
 }
 
 func (t *OpenAIThread) Provider() string {
@@ -264,6 +266,7 @@ func NewOpenAIThread(config llmtypes.Config) *OpenAIThread {
 		isPersisted:           false,
 		usage:                 &llmtypes.Usage{}, // must be initialized to avoid nil pointer dereference
 		userFacingToolResults: make(map[string]string),
+		toolResults:           make(map[string]tooltypes.StructuredToolResult),
 	}
 }
 
@@ -522,10 +525,17 @@ func (t *OpenAIThread) processMessageExchange(
 		// Execute the tool
 		runToolCtx := t.WithSubAgent(ctx, handler)
 		output := tools.RunTool(runToolCtx, t.state, toolCall.Function.Name, toolCall.Function.Arguments)
-		handler.HandleToolResult(toolCall.Function.Name, output.UserFacing())
 
-		// Store the user-facing result for this tool call
-		t.SetUserFacingToolResult(toolCall.ID, output.UserFacing())
+		// Use CLI rendering instead of UserFacing()
+		structuredResult := output.StructuredData()
+		registry := renderers.NewRendererRegistry()
+		renderedOutput := registry.Render(structuredResult)
+		handler.HandleToolResult(toolCall.Function.Name, renderedOutput)
+
+		// Store the user-facing result for this tool call (keeping for backward compatibility)
+		t.SetUserFacingToolResult(toolCall.ID, renderedOutput)
+		// Store the structured result for this tool call
+		t.SetStructuredToolResult(toolCall.ID, structuredResult)
 
 		// For tracing, add tool execution completion event
 		telemetry.AddEvent(ctx, "tool_execution_complete",
@@ -876,6 +886,45 @@ func (t *OpenAIThread) SetUserFacingToolResults(results map[string]string) {
 		t.userFacingToolResults = make(map[string]string)
 		for k, v := range results {
 			t.userFacingToolResults[k] = v
+		}
+	}
+}
+
+// SetStructuredToolResult stores the structured result for a tool call
+func (t *OpenAIThread) SetStructuredToolResult(toolCallID string, result tooltypes.StructuredToolResult) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.toolResults == nil {
+		t.toolResults = make(map[string]tooltypes.StructuredToolResult)
+	}
+	t.toolResults[toolCallID] = result
+}
+
+// GetStructuredToolResults returns all structured tool results
+func (t *OpenAIThread) GetStructuredToolResults() map[string]tooltypes.StructuredToolResult {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.toolResults == nil {
+		return make(map[string]tooltypes.StructuredToolResult)
+	}
+	// Return a copy to avoid race conditions
+	result := make(map[string]tooltypes.StructuredToolResult)
+	for k, v := range t.toolResults {
+		result[k] = v
+	}
+	return result
+}
+
+// SetStructuredToolResults sets all structured tool results (for loading from conversation)
+func (t *OpenAIThread) SetStructuredToolResults(results map[string]tooltypes.StructuredToolResult) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if results == nil {
+		t.toolResults = make(map[string]tooltypes.StructuredToolResult)
+	} else {
+		t.toolResults = make(map[string]tooltypes.StructuredToolResult)
+		for k, v := range results {
+			t.toolResults[k] = v
 		}
 	}
 }

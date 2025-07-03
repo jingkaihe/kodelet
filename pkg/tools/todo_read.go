@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"time"
 
 	"github.com/invopop/jsonschema"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -163,4 +164,56 @@ func formatTodos(todos []Todo) string {
 		formatted += fmt.Sprintf("%d\t%s\t%s\t%s\n", idx+1, todo.Status, todo.Priority, todo.Content)
 	}
 	return formatted
+}
+
+func (r *TodoToolResult) StructuredData() tooltypes.StructuredToolResult {
+	toolName := "todo_read"
+	action := "read"
+	if r.isWrite {
+		toolName = "todo_write"
+		action = "write"
+	}
+
+	result := tooltypes.StructuredToolResult{
+		ToolName:  toolName,
+		Success:   !r.IsError(),
+		Timestamp: time.Now(),
+	}
+
+	if r.IsError() {
+		result.Error = r.GetError()
+		return result
+	}
+
+	// Convert Todo items to structured format
+	todoItems := make([]tooltypes.TodoItem, 0, len(r.todos))
+	stats := tooltypes.TodoStats{}
+
+	for i, todo := range r.todos {
+		todoItems = append(todoItems, tooltypes.TodoItem{
+			ID:       fmt.Sprintf("%d", i+1), // Simple numeric IDs
+			Content:  todo.Content,
+			Status:   string(todo.Status),
+			Priority: string(todo.Priority),
+		})
+
+		// Update statistics
+		stats.Total++
+		switch todo.Status {
+		case "completed":
+			stats.Completed++
+		case "in_progress":
+			stats.InProgress++
+		case "pending":
+			stats.Pending++
+		}
+	}
+
+	result.Metadata = &tooltypes.TodoMetadata{
+		Action:     action,
+		TodoList:   todoItems,
+		Statistics: stats,
+	}
+
+	return result
 }

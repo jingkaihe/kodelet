@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"syscall"
+	"time"
 
 	"github.com/invopop/jsonschema"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -129,4 +130,41 @@ func getProcessStatus(process tooltypes.BackgroundProcess) string {
 	}
 
 	return "running"
+}
+
+func (r *ViewBackgroundProcessesToolResult) StructuredData() tooltypes.StructuredToolResult {
+	result := tooltypes.StructuredToolResult{
+		ToolName:  "view_background_processes",
+		Success:   !r.IsError(),
+		Timestamp: time.Now(),
+	}
+
+	if r.IsError() {
+		result.Error = r.GetError()
+		return result
+	}
+
+	// Convert background processes to structured format
+	processes := make([]tooltypes.BackgroundProcessInfo, 0, len(r.processes))
+	for i, process := range r.processes {
+		status := "unknown"
+		if i < len(r.statuses) {
+			status = r.statuses[i]
+		}
+
+		processes = append(processes, tooltypes.BackgroundProcessInfo{
+			PID:       process.PID,
+			Command:   process.Command,
+			LogPath:   process.LogPath,
+			StartTime: process.StartTime,
+			Status:    status,
+		})
+	}
+
+	result.Metadata = &tooltypes.ViewBackgroundProcessesMetadata{
+		Processes: processes,
+		Count:     len(processes),
+	}
+
+	return result
 }

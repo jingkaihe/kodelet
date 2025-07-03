@@ -15,6 +15,7 @@ import (
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/invopop/jsonschema"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/jingkaihe/kodelet/pkg/utils"
 	"go.opentelemetry.io/otel/attribute"
 )
 
@@ -78,6 +79,59 @@ func (r *GlobToolResult) UserFacing() string {
 	}
 
 	return result.String()
+}
+
+func (r *GlobToolResult) StructuredData() tooltypes.StructuredToolResult {
+	result := tooltypes.StructuredToolResult{
+		ToolName:  "glob_tool",
+		Success:   !r.IsError(),
+		Timestamp: time.Now(),
+	}
+
+	if r.IsError() {
+		result.Error = r.GetError()
+		return result
+	}
+
+	// Convert file paths to FileInfo structures
+	fileInfos := make([]tooltypes.FileInfo, 0, len(r.files))
+	for _, file := range r.files {
+		info, err := os.Stat(file)
+		fileType := "file"
+		var size int64
+		var modTime time.Time
+
+		if err == nil {
+			if info.IsDir() {
+				fileType = "directory"
+			}
+			size = info.Size()
+			modTime = info.ModTime()
+		}
+
+		// Detect language from file extension
+		language := ""
+		if fileType == "file" {
+			language = utils.DetectLanguageFromPath(file)
+		}
+
+		fileInfos = append(fileInfos, tooltypes.FileInfo{
+			Path:     file,
+			Size:     size,
+			ModTime:  modTime,
+			Type:     fileType,
+			Language: language,
+		})
+	}
+
+	result.Metadata = &tooltypes.GlobMetadata{
+		Pattern:   r.pattern,
+		Path:      r.path,
+		Files:     fileInfos,
+		Truncated: r.truncated,
+	}
+
+	return result
 }
 
 type GlobTool struct{}

@@ -25,6 +25,7 @@ type ToolResult interface {
 	IsError() bool
 	GetError() string  // xxx: to be removed
 	GetResult() string // xxx: to be removed
+	StructuredData() StructuredToolResult
 }
 
 type BaseToolResult struct {
@@ -63,6 +64,16 @@ func (t BaseToolResult) GetError() string {
 
 func (t BaseToolResult) GetResult() string {
 	return t.Result
+}
+
+func (t BaseToolResult) StructuredData() StructuredToolResult {
+	return StructuredToolResult{
+		ToolName:  "unknown", // This will be overridden by specific tool implementations
+		Success:   !t.IsError(),
+		Error:     t.Error,
+		Timestamp: time.Now(),
+		// Metadata will be nil for BaseToolResult
+	}
 }
 
 func StringifyToolResult(result, err string) string {

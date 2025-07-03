@@ -5,8 +5,10 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/types/llm"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/sashabaranov/go-openai"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -107,12 +109,17 @@ func TestExtractMessagesWithUserFacingToolResults(t *testing.T) {
 		{"role": "assistant", "content": "The current time is 10:30 AM."}
 	]`
 
-	// Test with user-facing tool results
-	userFacingToolResults := map[string]string{
-		"call_123": "User-friendly: It's 10:30 in the morning",
+	// Test with structured tool results
+	toolResults := map[string]tooltypes.StructuredToolResult{
+		"call_123": {
+			ToolName:  "get_time",
+			Success:   true,
+			Timestamp: time.Now(),
+			Metadata:  nil,
+		},
 	}
 
-	messages, err := ExtractMessages([]byte(messagesWithToolsJSON), userFacingToolResults)
+	messages, err := ExtractMessages([]byte(messagesWithToolsJSON), toolResults)
 	assert.NoError(t, err)
 	assert.Len(t, messages, 4) // System message should be filtered out
 
@@ -126,10 +133,10 @@ func TestExtractMessagesWithUserFacingToolResults(t *testing.T) {
 	toolResultMessage := messages[2]
 	assert.Equal(t, "assistant", toolResultMessage.Role)
 	assert.Contains(t, toolResultMessage.Content, "🔄 Tool result:")
-	assert.Contains(t, toolResultMessage.Content, "User-friendly: It's 10:30 in the morning")
-	assert.NotContains(t, toolResultMessage.Content, "Raw output: 10:30 AM")
+	// Tool result now uses CLI rendering which will use fallback rendering for unknown tools
+	assert.Contains(t, toolResultMessage.Content, "get_time")
 
-	// Test with nil userFacingToolResults (should use raw content)
+	// Test with nil toolResults (should use raw content)
 	messages, err = ExtractMessages([]byte(messagesWithToolsJSON), nil)
 	assert.NoError(t, err)
 	assert.Len(t, messages, 4)
@@ -154,12 +161,22 @@ func TestExtractMessagesWithMultipleToolResults(t *testing.T) {
 		{"role": "assistant", "content": "Here's the info you requested."}
 	]`
 
-	userFacingToolResults := map[string]string{
-		"call_time":    "The time is 10:30 AM",
-		"call_weather": "It's sunny and 72°F in New York City",
+	toolResults := map[string]tooltypes.StructuredToolResult{
+		"call_time": {
+			ToolName:  "get_time",
+			Success:   true,
+			Timestamp: time.Now(),
+			Metadata:  nil,
+		},
+		"call_weather": {
+			ToolName:  "get_weather",
+			Success:   true,
+			Timestamp: time.Now(),
+			Metadata:  nil,
+		},
 	}
 
-	messages, err := ExtractMessages([]byte(messagesWithMultipleToolsJSON), userFacingToolResults)
+	messages, err := ExtractMessages([]byte(messagesWithMultipleToolsJSON), toolResults)
 	assert.NoError(t, err)
 	assert.Len(t, messages, 6) // user + 2 tool calls + 2 tool results + assistant final
 
@@ -173,17 +190,15 @@ func TestExtractMessagesWithMultipleToolResults(t *testing.T) {
 	assert.Equal(t, "assistant", secondToolCall.Role)
 	assert.Contains(t, secondToolCall.Content, "get_weather")
 
-	// Check first tool result uses user-facing result
+	// Check first tool result uses CLI rendering
 	firstToolResult := messages[3]
 	assert.Equal(t, "assistant", firstToolResult.Role)
-	assert.Contains(t, firstToolResult.Content, "The time is 10:30 AM")
-	assert.NotContains(t, firstToolResult.Content, "Current time: 10:30 AM")
+	assert.Contains(t, firstToolResult.Content, "get_time")
 
-	// Check second tool result uses user-facing result
+	// Check second tool result uses CLI rendering
 	secondToolResult := messages[4]
 	assert.Equal(t, "assistant", secondToolResult.Role)
-	assert.Contains(t, secondToolResult.Content, "It's sunny and 72°F in New York City")
-	assert.NotContains(t, secondToolResult.Content, "Weather: 72°F, sunny")
+	assert.Contains(t, secondToolResult.Content, "get_weather")
 }
 
 // Image Processing Tests

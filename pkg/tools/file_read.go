@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/invopop/jsonschema"
@@ -59,6 +60,35 @@ func (r *FileReadToolResult) UserFacing() string {
 	fmt.Fprintf(buf, "Offset: %d\n", r.offset)
 	buf.WriteString(content)
 	return buf.String()
+}
+
+func (r *FileReadToolResult) StructuredData() tooltypes.StructuredToolResult {
+	result := tooltypes.StructuredToolResult{
+		ToolName:  "file_read",
+		Success:   !r.IsError(),
+		Timestamp: time.Now(),
+	}
+
+	if r.IsError() {
+		result.Error = r.GetError()
+		return result
+	}
+
+	// Check if content was truncated
+	truncated := len(r.lines) > 0 && strings.Contains(r.lines[len(r.lines)-1], "truncated due to max output bytes")
+
+	// Detect language from file extension
+	language := utils.DetectLanguageFromPath(r.filename)
+
+	result.Metadata = &tooltypes.FileReadMetadata{
+		FilePath:  r.filename,
+		Offset:    r.offset,
+		Lines:     r.lines,
+		Language:  language,
+		Truncated: truncated,
+	}
+
+	return result
 }
 
 type FileReadTool struct{}

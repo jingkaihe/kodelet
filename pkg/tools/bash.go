@@ -365,6 +365,27 @@ func (r *BashToolResult) UserFacing() string {
 	return buf.String()
 }
 
+func (r *BashToolResult) StructuredData() tooltypes.StructuredToolResult {
+	result := tooltypes.StructuredToolResult{
+		ToolName:  "bash",
+		Success:   !r.IsError(),
+		Timestamp: time.Now(),
+	}
+
+	if r.IsError() {
+		result.Error = r.GetError()
+		return result
+	}
+
+	result.Metadata = &tooltypes.BashMetadata{
+		Command:  r.command,
+		Output:   r.combinedOutput,
+		ExitCode: 0, // TODO: Extract actual exit code from execution
+	}
+
+	return result
+}
+
 type BackgroundBashToolResult struct {
 	command string
 	pid     int
@@ -401,6 +422,27 @@ func (r *BackgroundBashToolResult) UserFacing() string {
 	}
 
 	return buf.String()
+}
+
+func (r *BackgroundBashToolResult) StructuredData() tooltypes.StructuredToolResult {
+	result := tooltypes.StructuredToolResult{
+		ToolName:  "bash_background",
+		Success:   !r.IsError(),
+		Timestamp: time.Now(),
+	}
+
+	if r.IsError() {
+		result.Error = r.GetError()
+		return result
+	}
+
+	// TODO: Create BackgroundBashMetadata type for structured background process info
+	result.Metadata = &tooltypes.BashMetadata{
+		Command: r.command,
+		Output:  fmt.Sprintf("PID: %d, Log: %s", r.pid, r.logPath),
+	}
+
+	return result
 }
 
 func (b *BashTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {

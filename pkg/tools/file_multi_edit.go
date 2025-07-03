@@ -12,6 +12,7 @@ import (
 	"github.com/aymanbagabas/go-udiff"
 	"github.com/invopop/jsonschema"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/jingkaihe/kodelet/pkg/utils"
 	"go.opentelemetry.io/otel/attribute"
 )
 
@@ -226,4 +227,39 @@ func (t *FileMultiEditTool) Execute(ctx context.Context, state tooltypes.State, 
 		occurrence:     occurrence,
 		actualReplaced: actualReplaced,
 	}
+}
+
+func (r *FileMultiEditToolResult) StructuredData() tooltypes.StructuredToolResult {
+	result := tooltypes.StructuredToolResult{
+		ToolName:  "file_multi_edit",
+		Success:   !r.IsError(),
+		Timestamp: time.Now(),
+	}
+
+	if r.IsError() {
+		result.Error = r.GetError()
+		return result
+	}
+
+	// Detect language from file extension
+	language := utils.DetectLanguageFromPath(r.filename)
+
+	// For multi-edit, we only have info about the last edit
+	// This tool would need restructuring to track all edits properly
+	edits := []tooltypes.Edit{
+		{
+			StartLine:  0, // Not tracked in current structure
+			EndLine:    0, // Not tracked in current structure
+			OldContent: r.oldText,
+			NewContent: r.newText,
+		},
+	}
+
+	result.Metadata = &tooltypes.FileMultiEditMetadata{
+		FilePath: r.filename,
+		Edits:    edits,
+		Language: language,
+	}
+
+	return result
 }

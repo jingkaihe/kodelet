@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/invopop/jsonschema"
 	"go.opentelemetry.io/otel/attribute"
@@ -319,4 +320,33 @@ func (t *ImageRecognitionTool) TracingKVs(parameters string) ([]attribute.KeyVal
 	}
 
 	return attrs, nil
+}
+
+func (r *ImageRecognitionToolResult) StructuredData() tooltypes.StructuredToolResult {
+	result := tooltypes.StructuredToolResult{
+		ToolName:  "image_recognition",
+		Success:   !r.IsError(),
+		Timestamp: time.Now(),
+	}
+
+	if r.IsError() {
+		result.Error = r.GetError()
+		return result
+	}
+
+	// Determine if image is local or remote
+	imageType := "local"
+	if strings.HasPrefix(r.imagePath, "http://") || strings.HasPrefix(r.imagePath, "https://") {
+		imageType = "remote"
+	}
+
+	result.Metadata = &tooltypes.ImageRecognitionMetadata{
+		ImagePath: r.imagePath,
+		ImageType: imageType,
+		Prompt:    r.prompt,
+		Analysis:  r.result,
+		// ImageSize would require additional processing to extract
+	}
+
+	return result
 }

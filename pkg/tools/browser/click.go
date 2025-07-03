@@ -59,6 +59,16 @@ func (r ClickResult) GetResult() string {
 	return r.Error
 }
 
+func (r ClickResult) StructuredData() tools.StructuredToolResult {
+	return tools.StructuredToolResult{
+		ToolName:  "browser_click",
+		Success:   r.Success,
+		Error:     r.Error,
+		Timestamp: time.Now(),
+		// TODO: Add proper browser metadata once BrowserClickMetadata is defined
+	}
+}
+
 func (t ClickTool) GenerateSchema() *jsonschema.Schema {
 	return generateSchema[ClickInput]()
 }

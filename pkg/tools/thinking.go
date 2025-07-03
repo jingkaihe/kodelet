@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/invopop/jsonschema"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -103,4 +104,23 @@ func (t *ThinkingTool) Execute(ctx context.Context, state tooltypes.State, param
 	return &ThinkingToolResult{
 		thought: input.Thought,
 	}
+}
+
+func (r *ThinkingToolResult) StructuredData() tooltypes.StructuredToolResult {
+	result := tooltypes.StructuredToolResult{
+		ToolName:  "thinking",
+		Success:   !r.IsError(),
+		Timestamp: time.Now(),
+	}
+
+	if r.IsError() {
+		result.Error = r.GetError()
+		return result
+	}
+
+	result.Metadata = &tooltypes.ThinkingMetadata{
+		Thought: r.thought,
+	}
+
+	return result
 }

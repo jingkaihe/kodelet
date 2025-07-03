@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/chromedp/chromedp"
 	"github.com/invopop/jsonschema"
@@ -58,6 +59,16 @@ func (r GetPageResult) GetError() string {
 
 func (r GetPageResult) GetResult() string {
 	return r.HTML
+}
+
+func (r GetPageResult) StructuredData() tools.StructuredToolResult {
+	return tools.StructuredToolResult{
+		ToolName:  "browser_get_page",
+		Success:   r.Success,
+		Error:     r.Error,
+		Timestamp: time.Now(),
+		// TODO: Add proper browser metadata once BrowserGetPageMetadata is defined
+	}
 }
 
 func (t GetPageTool) GenerateSchema() *jsonschema.Schema {

@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/invopop/jsonschema"
+	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
 	"go.opentelemetry.io/otel/attribute"
@@ -77,9 +79,13 @@ func (r *BatchToolResult) AssistantFacing() string {
 }
 
 func (r *BatchToolResult) UserFacing() string {
+	// Use CLI rendering for sub-results to maintain consistency
 	var results []string
+	registry := renderers.NewRendererRegistry()
 	for _, toolResult := range r.toolResults {
-		results = append(results, toolResult.UserFacing())
+		structuredResult := toolResult.StructuredData()
+		renderedOutput := registry.Render(structuredResult)
+		results = append(results, renderedOutput)
 	}
 
 	content := strings.Join(results, "\n\n")
@@ -272,4 +278,42 @@ func (t *BatchTool) TracingKVs(parameters string) ([]attribute.KeyValue, error) 
 	}
 
 	return kvs, nil
+}
+
+func (r *BatchToolResult) StructuredData() tooltypes.StructuredToolResult {
+	result := tooltypes.StructuredToolResult{
+		ToolName:  "batch",
+		Success:   !r.IsError(),
+		Timestamp: time.Now(),
+	}
+
+	// Convert sub-results to structured format
+	subResults := make([]tooltypes.StructuredToolResult, 0, len(r.toolResults))
+	successCount := 0
+	failureCount := 0
+
+	for _, toolResult := range r.toolResults {
+		subResult := toolResult.StructuredData()
+		subResults = append(subResults, subResult)
+		if subResult.Success {
+			successCount++
+		} else {
+			failureCount++
+		}
+	}
+
+	result.Metadata = &tooltypes.BatchMetadata{
+		Description:   r.description,
+		SubResults:    subResults,
+		ExecutionTime: time.Duration(0), // Batch tool doesn't track execution time currently
+		SuccessCount:  successCount,
+		FailureCount:  failureCount,
+	}
+
+	// If any sub-tool failed, include aggregated errors
+	if failureCount > 0 {
+		result.Error = r.GetError()
+	}
+
+	return result
 }

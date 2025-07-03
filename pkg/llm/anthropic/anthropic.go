@@ -20,6 +20,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/sysprompt"
 	"github.com/jingkaihe/kodelet/pkg/telemetry"
 	"github.com/jingkaihe/kodelet/pkg/tools"
+	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
 	"github.com/sirupsen/logrus"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -53,7 +54,8 @@ type AnthropicThread struct {
 	mu                    sync.Mutex
 	conversationMu        sync.Mutex
 	useSubscription       bool
-	userFacingToolResults map[string]string // Maps tool_call_id to user-facing result
+	userFacingToolResults map[string]string                         // Maps tool_call_id to user-facing result (DEPRECATED)
+	toolResults           map[string]tooltypes.StructuredToolResult // Maps tool_call_id to structured result
 }
 
 func (t *AnthropicThread) Provider() string {
@@ -134,6 +136,7 @@ func NewAnthropicThread(config llmtypes.Config) (*AnthropicThread, error) {
 		isPersisted:           false,
 		usage:                 &llmtypes.Usage{}, // must be initialised to avoid nil pointer dereference
 		userFacingToolResults: make(map[string]string),
+		toolResults:           make(map[string]tooltypes.StructuredToolResult),
 	}, nil
 }
 
@@ -404,10 +407,16 @@ func (t *AnthropicThread) processMessageExchange(
 
 			runToolCtx := t.WithSubAgent(ctx, handler)
 			output := tools.RunTool(runToolCtx, t.state, block.Name, string(variant.JSON.Input.Raw()))
-			handler.HandleToolResult(block.Name, output.UserFacing())
 
-			// Store the user-facing result for this tool call
-			t.SetUserFacingToolResult(block.ID, output.UserFacing())
+			// Use CLI rendering instead of UserFacing()
+			structuredResult := output.StructuredData()
+			registry := renderers.NewRendererRegistry()
+			renderedOutput := registry.Render(structuredResult)
+			handler.HandleToolResult(block.Name, renderedOutput)
+
+			// Store both structured and user-facing results (keeping user-facing for backward compatibility)
+			t.SetUserFacingToolResult(block.ID, renderedOutput)
+			t.SetStructuredToolResult(block.ID, structuredResult)
 
 			// For tracing, add tool execution completion event
 			telemetry.AddEvent(ctx, "tool_execution_complete",
@@ -717,7 +726,7 @@ func (t *AnthropicThread) GetMessages() ([]llmtypes.Message, error) {
 	if err != nil {
 		return nil, err
 	}
-	return ExtractMessages(b, t.GetUserFacingToolResults())
+	return ExtractMessages(b, t.GetStructuredToolResults())
 }
 
 // EnablePersistence enables conversation persistence for this thread
@@ -909,6 +918,45 @@ func (t *AnthropicThread) SetUserFacingToolResults(results map[string]string) {
 		t.userFacingToolResults = make(map[string]string)
 		for k, v := range results {
 			t.userFacingToolResults[k] = v
+		}
+	}
+}
+
+// SetStructuredToolResult stores the structured result for a tool call
+func (t *AnthropicThread) SetStructuredToolResult(toolCallID string, result tooltypes.StructuredToolResult) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.toolResults == nil {
+		t.toolResults = make(map[string]tooltypes.StructuredToolResult)
+	}
+	t.toolResults[toolCallID] = result
+}
+
+// GetStructuredToolResults returns all structured tool results
+func (t *AnthropicThread) GetStructuredToolResults() map[string]tooltypes.StructuredToolResult {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.toolResults == nil {
+		return make(map[string]tooltypes.StructuredToolResult)
+	}
+	// Return a copy to avoid race conditions
+	result := make(map[string]tooltypes.StructuredToolResult)
+	for k, v := range t.toolResults {
+		result[k] = v
+	}
+	return result
+}
+
+// SetStructuredToolResults sets all structured tool results (for loading from conversation)
+func (t *AnthropicThread) SetStructuredToolResults(results map[string]tooltypes.StructuredToolResult) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if results == nil {
+		t.toolResults = make(map[string]tooltypes.StructuredToolResult)
+	} else {
+		t.toolResults = make(map[string]tooltypes.StructuredToolResult)
+		for k, v := range results {
+			t.toolResults[k] = v
 		}
 	}
 }

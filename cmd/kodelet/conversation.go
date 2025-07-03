@@ -412,7 +412,7 @@ func showConversationCmd(_ context.Context, id string, config *ConversationShowC
 	}
 
 	// Extract messages from raw message data
-	messages, err := llm.ExtractMessages(record.ModelType, record.RawMessages, record.UserFacingToolResults)
+	messages, err := llm.ExtractMessages(record.ModelType, record.RawMessages, record.ToolResults)
 	if err != nil {
 		presenter.Error(err, "Failed to parse conversation messages")
 		os.Exit(1)
