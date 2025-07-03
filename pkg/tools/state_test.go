@@ -82,7 +82,7 @@ func TestConcurrentAccess(t *testing.T) {
 	done := make(chan bool, numGoroutines)
 
 	for i := 0; i < numGoroutines; i++ {
-		go func(id int) {
+		go func(_ int) {
 			path := "test/file.txt"
 			for j := 0; j < operationsPerGoroutine; j++ {
 				now := time.Now()

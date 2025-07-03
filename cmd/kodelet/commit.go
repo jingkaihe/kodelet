@@ -271,7 +271,7 @@ func getEditor() string {
 }
 
 // createCommit creates a git commit with the provided message
-func createCommit(ctx context.Context, message string, sign bool) error {
+func createCommit(_ context.Context, message string, sign bool) error {
 	// Add co-authorship attribution
 	message = message + "\n\nCo-authored-by: Kodelet <noreply@kodelet.com>"
 

@@ -294,7 +294,7 @@ func detectShell(ctx context.Context) (string, string) {
 }
 
 // checkApiKeyInProfile checks if the API key is already set in the profile
-func checkApiKeyInProfile(ctx context.Context, profilePath string) bool {
+func checkApiKeyInProfile(_ context.Context, profilePath string) bool {
 	// Read the profile file
 	content, err := os.ReadFile(profilePath)
 	if err != nil {
@@ -308,7 +308,7 @@ func checkApiKeyInProfile(ctx context.Context, profilePath string) bool {
 }
 
 // writeApiKeyToProfile adds the API key to the shell profile
-func writeApiKeyToProfile(ctx context.Context, profilePath, shellName, apiKey string) error {
+func writeApiKeyToProfile(_ context.Context, profilePath, shellName, apiKey string) error {
 	// Open the file in append mode
 	file, err := os.OpenFile(profilePath, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
 	if err != nil {

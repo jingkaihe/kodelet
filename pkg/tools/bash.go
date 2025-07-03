@@ -572,7 +572,7 @@ func (b *BashTool) executeBackground(ctx context.Context, state tooltypes.State,
 
 		// Wait for the process to complete and capture exit status
 		if err := cmd.Wait(); err != nil {
-			flushingWriter.Write([]byte(fmt.Sprintf("Process exited with error: %v\n", err)))
+			fmt.Fprintf(flushingWriter, "Process exited with error: %v\n", err)
 		}
 	}()
 

@@ -298,7 +298,7 @@ type ConversationSummaryOutput struct {
 }
 
 // listConversationsCmd displays a list of saved conversations with query options
-func listConversationsCmd(ctx context.Context, config *ConversationListConfig) {
+func listConversationsCmd(_ context.Context, config *ConversationListConfig) {
 
 	// Create a store
 	store, err := conversations.GetConversationStore()
@@ -365,7 +365,7 @@ func listConversationsCmd(ctx context.Context, config *ConversationListConfig) {
 }
 
 // deleteConversationCmd deletes a specific conversation
-func deleteConversationCmd(ctx context.Context, id string, config *ConversationDeleteConfig) {
+func deleteConversationCmd(_ context.Context, id string, config *ConversationDeleteConfig) {
 
 	// Create a store
 	store, err := conversations.GetConversationStore()
@@ -395,7 +395,7 @@ func deleteConversationCmd(ctx context.Context, id string, config *ConversationD
 }
 
 // showConversationCmd displays a specific conversation
-func showConversationCmd(ctx context.Context, id string, config *ConversationShowConfig) {
+func showConversationCmd(_ context.Context, id string, config *ConversationShowConfig) {
 
 	// Create a store
 	store, err := conversations.GetConversationStore()
@@ -433,7 +433,7 @@ func showConversationCmd(ctx context.Context, id string, config *ConversationSho
 		fmt.Println(string(outputJSON))
 	case "text":
 		// Format as readable text with user/assistant prefixes
-		displayConversation(messages, record.UserFacingToolResults)
+		displayConversation(messages)
 	default:
 		presenter.Error(fmt.Errorf("unsupported format: %s", config.Format), "Unknown format. Supported formats are raw, json, and text")
 		os.Exit(1)
@@ -441,7 +441,7 @@ func showConversationCmd(ctx context.Context, id string, config *ConversationSho
 }
 
 // displayConversation renders the messages in a readable text format
-func displayConversation(messages []llmtypes.Message, userFacingToolResults map[string]string) {
+func displayConversation(messages []llmtypes.Message) {
 	for i, msg := range messages {
 		// Add a separator between messages
 		if i > 0 {

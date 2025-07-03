@@ -132,7 +132,7 @@ type UsageStats struct {
 }
 
 // runUsageCmd executes the usage command
-func runUsageCmd(ctx context.Context, config *UsageConfig) {
+func runUsageCmd(_ context.Context, config *UsageConfig) {
 	// Parse time specifications
 	var startTime, endTime time.Time
 	var err error
@@ -213,7 +213,7 @@ func runUsageCmd(ctx context.Context, config *UsageConfig) {
 }
 
 // aggregateUsageStats aggregates usage statistics from conversation records
-func aggregateUsageStats(records []conversations.ConversationRecord, startTime, endTime time.Time) *UsageStats {
+func aggregateUsageStats(records []conversations.ConversationRecord, _, _ time.Time) *UsageStats {
 	// Create map to aggregate daily usage
 	dailyMap := make(map[string]*DailyUsage)
 	totalUsage := llmtypes.Usage{}

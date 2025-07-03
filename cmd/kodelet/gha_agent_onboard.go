@@ -262,7 +262,7 @@ func validateURL(urlStr string) error {
 }
 
 // setupAnthropicAPIKey checks and sets up the ANTHROPIC_API_KEY secret
-func setupAnthropicAPIKey(ctx context.Context) error {
+func setupAnthropicAPIKey(_ context.Context) error {
 	// Check if secret already exists
 	secretExists, err := checkGitHubSecret("ANTHROPIC_API_KEY")
 	if err != nil {
@@ -325,7 +325,7 @@ func checkGitHubSecret(secretName string) (bool, error) {
 }
 
 // createBranchAndWorkflow creates a new git branch and adds the workflow file
-func createBranchAndWorkflow(ctx context.Context, branchName string, config *GhaAgentOnboardConfig) error {
+func createBranchAndWorkflow(_ context.Context, branchName string, config *GhaAgentOnboardConfig) error {
 	// Create and checkout new branch
 	cmd := exec.Command("git", "checkout", "-b", branchName)
 	if err := cmd.Run(); err != nil {
@@ -356,7 +356,7 @@ func createBranchAndWorkflow(ctx context.Context, branchName string, config *Gha
 }
 
 // executeCommandWithStreaming executes a command and streams its output in real-time
-func executeCommandWithStreaming(ctx context.Context, cmd *exec.Cmd) error {
+func executeCommandWithStreaming(_ context.Context, cmd *exec.Cmd) error {
 	// Set up pipes for real-time output streaming
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -403,7 +403,7 @@ func executeCommandWithStreaming(ctx context.Context, cmd *exec.Cmd) error {
 }
 
 // commitAndCreatePR commits the changes and creates a pull request
-func commitAndCreatePR(ctx context.Context, branchName string) (string, error) {
+func commitAndCreatePR(_ context.Context, branchName string) (string, error) {
 	// Add the workflow file
 	workflowFile := ".github/workflows/kodelet.yaml"
 	cmd := exec.Command("git", "add", workflowFile)
