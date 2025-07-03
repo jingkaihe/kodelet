@@ -40,7 +40,7 @@ func init() {
 	anthropicLogoutCmd.Flags().Bool("no-confirm", false, "Skip confirmation prompt and logout automatically")
 }
 
-func runAnthropicLogout(ctx context.Context, noConfirm bool) error {
+func runAnthropicLogout(_ context.Context, noConfirm bool) error {
 	// Get the credentials file path
 	home, err := os.UserHomeDir()
 	if err != nil {

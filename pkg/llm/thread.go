@@ -75,12 +75,12 @@ func SendMessageAndGetText(ctx context.Context, state tooltypes.State, query str
 }
 
 // ExtractMessages parses the raw messages from a conversation record
-func ExtractMessages(provider string, rawMessages []byte) ([]llmtypes.Message, error) {
+func ExtractMessages(provider string, rawMessages []byte, userFacingToolResults map[string]string) ([]llmtypes.Message, error) {
 	switch provider {
 	case "anthropic":
-		return anthropic.ExtractMessages(rawMessages)
+		return anthropic.ExtractMessages(rawMessages, userFacingToolResults)
 	case "openai":
-		return openai.ExtractMessages(rawMessages)
+		return openai.ExtractMessages(rawMessages, userFacingToolResults)
 	default:
 		return nil, fmt.Errorf("unsupported provider: %s", provider)
 	}

@@ -162,19 +162,6 @@ func TestJSONConversationStore(t *testing.T) {
 	})
 }
 
-// Mock time for testing
-type fixedClock struct {
-	now time.Time
-}
-
-func (c *fixedClock) Now() time.Time {
-	return c.now
-}
-
-func (c *fixedClock) Add(d time.Duration) {
-	c.now = c.now.Add(d)
-}
-
 func TestGetMostRecentConversationID(t *testing.T) {
 	// Test the core logic that GetMostRecentConversationID uses.
 	// We test the Query functionality with the same parameters that

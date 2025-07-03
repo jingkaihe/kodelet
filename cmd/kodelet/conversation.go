@@ -298,7 +298,7 @@ type ConversationSummaryOutput struct {
 }
 
 // listConversationsCmd displays a list of saved conversations with query options
-func listConversationsCmd(ctx context.Context, config *ConversationListConfig) {
+func listConversationsCmd(_ context.Context, config *ConversationListConfig) {
 
 	// Create a store
 	store, err := conversations.GetConversationStore()
@@ -365,7 +365,7 @@ func listConversationsCmd(ctx context.Context, config *ConversationListConfig) {
 }
 
 // deleteConversationCmd deletes a specific conversation
-func deleteConversationCmd(ctx context.Context, id string, config *ConversationDeleteConfig) {
+func deleteConversationCmd(_ context.Context, id string, config *ConversationDeleteConfig) {
 
 	// Create a store
 	store, err := conversations.GetConversationStore()
@@ -395,7 +395,7 @@ func deleteConversationCmd(ctx context.Context, id string, config *ConversationD
 }
 
 // showConversationCmd displays a specific conversation
-func showConversationCmd(ctx context.Context, id string, config *ConversationShowConfig) {
+func showConversationCmd(_ context.Context, id string, config *ConversationShowConfig) {
 
 	// Create a store
 	store, err := conversations.GetConversationStore()
@@ -412,7 +412,7 @@ func showConversationCmd(ctx context.Context, id string, config *ConversationSho
 	}
 
 	// Extract messages from raw message data
-	messages, err := llm.ExtractMessages(record.ModelType, record.RawMessages)
+	messages, err := llm.ExtractMessages(record.ModelType, record.RawMessages, record.UserFacingToolResults)
 	if err != nil {
 		presenter.Error(err, "Failed to parse conversation messages")
 		os.Exit(1)

@@ -16,10 +16,7 @@ import (
 // - Empty messages (messages with no content)
 // - Messages containing tool use blocks that are not followed by tool result messages
 func (t *AnthropicThread) cleanupOrphanedMessages() {
-	for {
-		if len(t.messages) == 0 {
-			break
-		}
+	for len(t.messages) > 0 {
 		lastMessage := t.messages[len(t.messages)-1]
 		// remove the last message if it is empty
 		if len(lastMessage.Content) == 0 {
@@ -73,15 +70,16 @@ func (t *AnthropicThread) SaveConversation(ctx context.Context, summarise bool) 
 
 	// Create a new conversation record
 	record := conversations.ConversationRecord{
-		ID:             t.conversationID,
-		RawMessages:    rawMessages,
-		ModelType:      "anthropic",
-		Usage:          *t.usage,
-		Metadata:       map[string]interface{}{"model": t.config.Model},
-		Summary:        t.summary,
-		CreatedAt:      time.Now(),
-		UpdatedAt:      time.Now(),
-		FileLastAccess: t.state.FileLastAccess(),
+		ID:                    t.conversationID,
+		RawMessages:           rawMessages,
+		ModelType:             "anthropic",
+		Usage:                 *t.usage,
+		Metadata:              map[string]interface{}{"model": t.config.Model},
+		Summary:               t.summary,
+		CreatedAt:             time.Now(),
+		UpdatedAt:             time.Now(),
+		FileLastAccess:        t.state.FileLastAccess(),
+		UserFacingToolResults: t.GetUserFacingToolResults(),
 	}
 
 	// Save the record
@@ -120,13 +118,9 @@ func (t *AnthropicThread) loadConversation() error {
 	t.usage = &record.Usage
 	t.summary = record.Summary
 	t.state.SetFileLastAccess(record.FileLastAccess)
+	// Restore user-facing tool results
+	t.SetUserFacingToolResults(record.UserFacingToolResults)
 	return nil
-}
-
-type contentBlock map[string]interface{}
-type messageParam struct {
-	Role    string         `json:"role"`
-	Content []contentBlock `json:"content"`
 }
 
 func DeserializeMessages(b []byte) ([]anthropic.MessageParam, error) {
@@ -139,7 +133,7 @@ func DeserializeMessages(b []byte) ([]anthropic.MessageParam, error) {
 }
 
 // ExtractMessages parses the raw messages from a conversation record
-func ExtractMessages(rawMessages json.RawMessage) ([]llm.Message, error) {
+func ExtractMessages(rawMessages json.RawMessage, userFacingToolResults map[string]string) ([]llm.Message, error) {
 	// Deserialize the raw messages using the existing DeserializeMessages function
 	anthropicMessages, err := DeserializeMessages(rawMessages)
 	if err != nil {
@@ -165,16 +159,20 @@ func ExtractMessages(rawMessages json.RawMessage) ([]llm.Message, error) {
 				}
 				messages = append(messages, llm.Message{
 					Role:    string(msg.Role),
-					Content: fmt.Sprintf("🔧 Using tool: %s", string(inputJSON)),
+					Content: fmt.Sprintf("🔧 Using tool: %s with input: %s", toolUseBlock.Name, string(inputJSON)),
 				})
 			}
 			// Handle tool result blocks
 			if toolResultBlock := contentBlock.OfToolResult; toolResultBlock != nil {
 				for _, resultContent := range toolResultBlock.Content {
 					if textBlock := resultContent.OfText; textBlock != nil {
+						text := textBlock.Text
+						if userFacingToolResults, ok := userFacingToolResults[toolResultBlock.ToolUseID]; ok {
+							text = userFacingToolResults
+						}
 						messages = append(messages, llm.Message{
 							Role:    "assistant",
-							Content: fmt.Sprintf("🔄 Tool result: %s", textBlock.Text),
+							Content: fmt.Sprintf("🔄 Tool result:\n%s", text),
 						})
 					}
 				}

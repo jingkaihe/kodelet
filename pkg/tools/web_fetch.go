@@ -363,7 +363,7 @@ func getFileExtensionFromContentType(contentType, urlStr string) string {
 }
 
 // handleCodeTextContent saves content to file and returns with line numbers
-func (t *WebFetchTool) handleCodeTextContent(ctx context.Context, input *WebFetchInput, content, contentType string) tooltypes.ToolResult {
+func (t *WebFetchTool) handleCodeTextContent(_ context.Context, input *WebFetchInput, content, contentType string) tooltypes.ToolResult {
 	// Parse URL to get domain name
 	parsedURL, err := url.Parse(input.URL)
 	if err != nil {

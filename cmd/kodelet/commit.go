@@ -192,9 +192,10 @@ func confirmCommit(message string) bool {
 	response, _ := reader.ReadString('\n')
 	response = strings.ToLower(strings.TrimSpace(response))
 
-	if response == "" || response == "y" || response == "yes" {
+	switch response {
+	case "", "y", "yes":
 		return true
-	} else if response == "e" || response == "edit" {
+	case "e", "edit":
 		// Allow user to edit the message
 		editedMsg := editMessage(message)
 		if editedMsg == "" {
@@ -270,7 +271,7 @@ func getEditor() string {
 }
 
 // createCommit creates a git commit with the provided message
-func createCommit(ctx context.Context, message string, sign bool) error {
+func createCommit(_ context.Context, message string, sign bool) error {
 	// Add co-authorship attribution
 	message = message + "\n\nCo-authored-by: Kodelet <noreply@kodelet.com>"
 

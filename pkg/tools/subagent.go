@@ -48,7 +48,7 @@ const (
 )
 
 type SubAgentInput struct {
-	Question      string        `json:"question" jsonschema:"description=The question to ask in 15 words or less"`
+	Question      string        `json:"question" jsonschema:"description=The question to ask"`
 	ModelStrength ModelStrength `json:"model_strength" jsonschema:"description=The strength of the model to use, it can be 'weak' or 'strong'"`
 }
 

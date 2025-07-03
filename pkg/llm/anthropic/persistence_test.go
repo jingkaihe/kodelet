@@ -9,9 +9,52 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
+
+// MockConversationStore is a test implementation of the ConversationStore interface
+type MockConversationStore struct {
+	SavedRecords []conversations.ConversationRecord
+	LoadedRecord *conversations.ConversationRecord
+}
+
+func (m *MockConversationStore) Save(record conversations.ConversationRecord) error {
+	m.SavedRecords = append(m.SavedRecords, record)
+	return nil
+}
+
+func (m *MockConversationStore) Load(id string) (conversations.ConversationRecord, error) {
+	if m.LoadedRecord != nil {
+		return *m.LoadedRecord, nil
+	}
+
+	// Find the record with the matching ID
+	for _, record := range m.SavedRecords {
+		if record.ID == id {
+			return record, nil
+		}
+	}
+
+	return conversations.ConversationRecord{}, nil
+}
+
+func (m *MockConversationStore) List() ([]conversations.ConversationSummary, error) {
+	return nil, nil
+}
+
+func (m *MockConversationStore) Delete(id string) error {
+	return nil
+}
+
+func (m *MockConversationStore) Query(options conversations.QueryOptions) ([]conversations.ConversationSummary, error) {
+	return nil, nil
+}
+
+func (m *MockConversationStore) Close() error {
+	return nil
+}
 
 func TestDeserializeMessages(t *testing.T) {
 	thread, err := NewAnthropicThread(llmtypes.Config{
@@ -498,4 +541,408 @@ func TestSaveConversationMessageCleanup(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestExtractMessages(t *testing.T) {
+	// Test basic message extraction
+	rawMessages := `[
+		{
+			"content": [
+				{
+					"text": "Hello there!",
+					"type": "text"
+				}
+			],
+			"role": "user"
+		},
+		{
+			"content": [
+				{
+					"text": "Hi! How can I help you today?",
+					"type": "text"
+				}
+			],
+			"role": "assistant"
+		}
+	]`
+
+	messages, err := ExtractMessages([]byte(rawMessages), nil)
+	assert.NoError(t, err)
+	assert.Len(t, messages, 2)
+
+	// Check first message
+	assert.Equal(t, "user", messages[0].Role)
+	assert.Equal(t, "Hello there!", messages[0].Content)
+
+	// Check second message
+	assert.Equal(t, "assistant", messages[1].Role)
+	assert.Equal(t, "Hi! How can I help you today?", messages[1].Content)
+}
+
+func TestExtractMessagesWithToolUse(t *testing.T) {
+	// Test with tool use and tool result
+	rawMessages := `[
+		{
+			"content": [
+				{
+					"text": "List the files in the current directory",
+					"type": "text"
+				}
+			],
+			"role": "user"
+		},
+		{
+			"content": [
+				{
+					"text": "I'll list the files for you.",
+					"type": "text"
+				},
+				{
+					"id": "toolu_123",
+					"input": {
+						"command": "ls -la",
+						"description": "List files"
+					},
+					"name": "bash",
+					"type": "tool_use"
+				}
+			],
+			"role": "assistant"
+		},
+		{
+			"content": [
+				{
+					"tool_use_id": "toolu_123",
+					"is_error": false,
+					"content": [
+						{
+							"text": "file1.txt\nfile2.txt\nREADME.md",
+							"type": "text"
+						}
+					],
+					"type": "tool_result"
+				}
+			],
+			"role": "user"
+		},
+		{
+			"content": [
+				{
+					"text": "Here are the files in your directory: file1.txt, file2.txt, README.md",
+					"type": "text"
+				}
+			],
+			"role": "assistant"
+		}
+	]`
+
+	messages, err := ExtractMessages([]byte(rawMessages), nil)
+	assert.NoError(t, err)
+	assert.Len(t, messages, 5) // user + assistant text + tool use + tool result + assistant final
+
+	// Check user message
+	assert.Equal(t, "user", messages[0].Role)
+	assert.Equal(t, "List the files in the current directory", messages[0].Content)
+
+	// Check assistant text message
+	assert.Equal(t, "assistant", messages[1].Role)
+	assert.Equal(t, "I'll list the files for you.", messages[1].Content)
+
+	// Check tool use message
+	assert.Equal(t, "assistant", messages[2].Role)
+	assert.Contains(t, messages[2].Content, "🔧 Using tool: bash")
+	assert.Contains(t, messages[2].Content, "ls -la")
+
+	// Check tool result message
+	assert.Equal(t, "assistant", messages[3].Role)
+	assert.Contains(t, messages[3].Content, "🔄 Tool result:")
+	assert.Contains(t, messages[3].Content, "file1.txt\nfile2.txt\nREADME.md")
+
+	// Check final assistant message
+	assert.Equal(t, "assistant", messages[4].Role)
+	assert.Equal(t, "Here are the files in your directory: file1.txt, file2.txt, README.md", messages[4].Content)
+}
+
+func TestExtractMessagesWithUserFacingToolResults(t *testing.T) {
+	// Test with user-facing tool results
+	rawMessages := `[
+		{
+			"content": [
+				{
+					"text": "What's the weather like?",
+					"type": "text"
+				}
+			],
+			"role": "user"
+		},
+		{
+			"content": [
+				{
+					"text": "Let me check the weather for you.",
+					"type": "text"
+				},
+				{
+					"id": "toolu_weather",
+					"input": {
+						"location": "New York"
+					},
+					"name": "get_weather",
+					"type": "tool_use"
+				}
+			],
+			"role": "assistant"
+		},
+		{
+			"content": [
+				{
+					"tool_use_id": "toolu_weather",
+					"is_error": false,
+					"content": [
+						{
+							"text": "Raw weather data: 72F, sunny, humidity 60%",
+							"type": "text"
+						}
+					],
+					"type": "tool_result"
+				}
+			],
+			"role": "user"
+		},
+		{
+			"content": [
+				{
+					"text": "It's sunny and 72°F in New York today.",
+					"type": "text"
+				}
+			],
+			"role": "assistant"
+		}
+	]`
+
+	// Test with user-facing tool results
+	userFacingToolResults := map[string]string{
+		"toolu_weather": "It's a beautiful sunny day in New York with 72°F temperature and low humidity.",
+	}
+
+	messages, err := ExtractMessages([]byte(rawMessages), userFacingToolResults)
+	assert.NoError(t, err)
+	assert.Len(t, messages, 5)
+
+	// Check tool result uses user-facing result instead of raw content
+	toolResultMessage := messages[3]
+	assert.Equal(t, "assistant", toolResultMessage.Role)
+	assert.Contains(t, toolResultMessage.Content, "🔄 Tool result:")
+	assert.Contains(t, toolResultMessage.Content, "It's a beautiful sunny day in New York with 72°F temperature and low humidity.")
+	assert.NotContains(t, toolResultMessage.Content, "Raw weather data: 72F, sunny, humidity 60%")
+
+	// Test with nil userFacingToolResults (should use raw content)
+	messages, err = ExtractMessages([]byte(rawMessages), nil)
+	assert.NoError(t, err)
+	assert.Len(t, messages, 5)
+
+	toolResultMessage = messages[3]
+	assert.Equal(t, "assistant", toolResultMessage.Role)
+	assert.Contains(t, toolResultMessage.Content, "🔄 Tool result:")
+	assert.Contains(t, toolResultMessage.Content, "Raw weather data: 72F, sunny, humidity 60%")
+}
+
+func TestExtractMessagesWithMultipleToolResults(t *testing.T) {
+	// Test with multiple tool calls and results
+	rawMessages := `[
+		{
+			"content": [
+				{
+					"text": "Get me the weather and time",
+					"type": "text"
+				}
+			],
+			"role": "user"
+		},
+		{
+			"content": [
+				{
+					"text": "I'll get both the weather and time for you.",
+					"type": "text"
+				},
+				{
+					"id": "toolu_weather",
+					"input": {
+						"location": "NYC"
+					},
+					"name": "get_weather",
+					"type": "tool_use"
+				},
+				{
+					"id": "toolu_time",
+					"input": {},
+					"name": "get_time",
+					"type": "tool_use"
+				}
+			],
+			"role": "assistant"
+		},
+		{
+			"content": [
+				{
+					"tool_use_id": "toolu_weather",
+					"is_error": false,
+					"content": [
+						{
+							"text": "Weather: 75°F, cloudy",
+							"type": "text"
+						}
+					],
+					"type": "tool_result"
+				}
+			],
+			"role": "user"
+		},
+		{
+			"content": [
+				{
+					"tool_use_id": "toolu_time",
+					"is_error": false,
+					"content": [
+						{
+							"text": "Current time: 2:30 PM",
+							"type": "text"
+						}
+					],
+					"type": "tool_result"
+				}
+			],
+			"role": "user"
+		},
+		{
+			"content": [
+				{
+					"text": "Here's the information: It's 75°F and cloudy, and the time is 2:30 PM.",
+					"type": "text"
+				}
+			],
+			"role": "assistant"
+		}
+	]`
+
+	userFacingToolResults := map[string]string{
+		"toolu_weather": "It's 75°F and cloudy in New York City",
+		"toolu_time":    "The current time is 2:30 PM",
+	}
+
+	messages, err := ExtractMessages([]byte(rawMessages), userFacingToolResults)
+	assert.NoError(t, err)
+	assert.Len(t, messages, 7) // user + assistant text + weather tool use + time tool use + weather result + time result + assistant final
+
+	// Check weather tool result uses user-facing result
+	weatherToolResult := messages[4]
+	assert.Equal(t, "assistant", weatherToolResult.Role)
+	assert.Contains(t, weatherToolResult.Content, "It's 75°F and cloudy in New York City")
+	assert.NotContains(t, weatherToolResult.Content, "Weather: 75°F, cloudy")
+
+	// Check time tool result uses user-facing result
+	timeToolResult := messages[5]
+	assert.Equal(t, "assistant", timeToolResult.Role)
+	assert.Contains(t, timeToolResult.Content, "The current time is 2:30 PM")
+	assert.NotContains(t, timeToolResult.Content, "Current time: 2:30 PM")
+}
+
+func TestExtractMessagesWithThinking(t *testing.T) {
+	// Test with thinking content
+	rawMessages := `[
+		{
+			"content": [
+				{
+					"text": "What is 2+2?",
+					"type": "text"
+				}
+			],
+			"role": "user"
+		},
+		{
+			"content": [
+				{
+					"thinking": "The user is asking for a simple arithmetic calculation. 2+2 equals 4.",
+					"type": "thinking"
+				},
+				{
+					"text": "2+2 equals 4.",
+					"type": "text"
+				}
+			],
+			"role": "assistant"
+		}
+	]`
+
+	messages, err := ExtractMessages([]byte(rawMessages), nil)
+	assert.NoError(t, err)
+	assert.Len(t, messages, 3) // user + thinking + assistant text
+
+	// Check user message
+	assert.Equal(t, "user", messages[0].Role)
+	assert.Equal(t, "What is 2+2?", messages[0].Content)
+
+	// Check thinking message
+	assert.Equal(t, "assistant", messages[1].Role)
+	assert.Contains(t, messages[1].Content, "💭 Thinking:")
+	assert.Contains(t, messages[1].Content, "The user is asking for a simple arithmetic calculation. 2+2 equals 4.")
+
+	// Check final assistant message
+	assert.Equal(t, "assistant", messages[2].Role)
+	assert.Equal(t, "2+2 equals 4.", messages[2].Content)
+}
+
+func TestSaveAndLoadConversationWithUserFacingToolResults(t *testing.T) {
+	store := &MockConversationStore{}
+
+	// Create a thread with user-facing tool results
+	thread, err := NewAnthropicThread(llmtypes.Config{
+		Model: string(anthropic.ModelClaudeSonnet4_20250514),
+	})
+	require.NoError(t, err)
+
+	// Set up state and store
+	state := tools.NewBasicState(context.TODO())
+	thread.SetState(state)
+	thread.store = store
+	thread.EnablePersistence(true) // Enable persistence
+	thread.SetUserFacingToolResult("tool_1", "User-friendly result 1")
+	thread.SetUserFacingToolResult("tool_2", "User-friendly result 2")
+
+	// Add some sample messages
+	thread.AddUserMessage(context.Background(), "Hello")
+
+	// Save the conversation
+	err = thread.SaveConversation(context.Background(), false)
+	require.NoError(t, err)
+
+	// Verify the saved record contains user-facing tool results
+	require.Len(t, store.SavedRecords, 1)
+	savedRecord := store.SavedRecords[0]
+
+	assert.NotNil(t, savedRecord.UserFacingToolResults)
+	assert.Len(t, savedRecord.UserFacingToolResults, 2)
+	assert.Equal(t, "User-friendly result 1", savedRecord.UserFacingToolResults["tool_1"])
+	assert.Equal(t, "User-friendly result 2", savedRecord.UserFacingToolResults["tool_2"])
+
+	// Create a new thread and load the conversation
+	newThread, err := NewAnthropicThread(llmtypes.Config{
+		Model: string(anthropic.ModelClaudeSonnet4_20250514),
+	})
+	require.NoError(t, err)
+
+	newState := tools.NewBasicState(context.TODO())
+	newThread.SetState(newState)
+	newThread.store = store
+	newThread.EnablePersistence(true) // Enable persistence
+	newThread.SetConversationID(savedRecord.ID)
+
+	// Load the conversation
+	err = newThread.loadConversation()
+	require.NoError(t, err)
+
+	// Verify the loaded thread has the user-facing tool results
+	loadedResults := newThread.GetUserFacingToolResults()
+	assert.Len(t, loadedResults, 2)
+	assert.Equal(t, "User-friendly result 1", loadedResults["tool_1"])
+	assert.Equal(t, "User-friendly result 2", loadedResults["tool_2"])
 }

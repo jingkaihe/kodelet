@@ -63,7 +63,7 @@ func (r *FileMultiEditToolResult) UserFacing() string {
 	}
 
 	buf := bytes.NewBufferString(fmt.Sprintf("File Multi Edit: %s\n", r.filename))
-	buf.WriteString(fmt.Sprintf("Replaced %d occurrence(s) of the text\n\n", r.actualReplaced))
+	fmt.Fprintf(buf, "Replaced %d occurrence(s) of the text\n\n", r.actualReplaced)
 
 	buf.WriteString("Diff:\n")
 

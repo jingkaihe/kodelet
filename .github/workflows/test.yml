@@ -17,6 +17,9 @@ jobs:
         with:
           go-version: '1.24'
 
+      - name: Install linters
+        run: make install-linters
+
       - name: Lint
         run: make lint
 

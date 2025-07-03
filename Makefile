@@ -2,7 +2,7 @@ VERSION=$(shell cat VERSION.txt)
 GIT_COMMIT=$(shell git rev-parse --short HEAD)
 
 VERSION_FLAG=-X 'github.com/jingkaihe/kodelet/pkg/version.Version=$(VERSION)' -X 'github.com/jingkaihe/kodelet/pkg/version.GitCommit=$(GIT_COMMIT)'
-.PHONY: build cross-build run test lint format docker-build docker-run e2e-test e2e-test-docker
+.PHONY: build cross-build run test lint golangci-lint install-linters format docker-build docker-run e2e-test e2e-test-docker
 
 # Build the application
 build:
@@ -16,9 +16,30 @@ chat: build
 test:
 	go test ./pkg/... ./cmd/...
 
-# Run linter
+# Install linting tools
+install-linters:
+	@echo "Installing golangci-lint to ./bin..."
+	@mkdir -p bin
+	@curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./bin
+
+# Run all linters
 lint:
 	go vet ./...
+	@if [ -f ./bin/golangci-lint ]; then \
+		echo "Running golangci-lint..."; \
+		./bin/golangci-lint run; \
+	else \
+		echo "golangci-lint not found. Run 'make install-linters' to install it."; \
+	fi
+
+# Run golangci-lint
+golangci-lint:
+	@if [ -f ./bin/golangci-lint ]; then \
+		./bin/golangci-lint run; \
+	else \
+		echo "golangci-lint not found. Run 'make install-linters' to install it."; \
+		exit 1; \
+	fi
 
 # Format code
 format:
@@ -59,7 +80,9 @@ help:
 	@echo "  test         - Run tests"
 	@echo "  e2e-test     - Run end-to-end acceptance tests"
 	@echo "  e2e-test-docker - Run e2e tests in Docker"
-	@echo "  lint         - Run linter"
+	@echo "  lint         - Run all linters (go vet, golangci-lint)"
+	@echo "  golangci-lint - Run golangci-lint"
+	@echo "  install-linters - Install golangci-lint"
 	@echo "  format       - Format code"
 	@echo "  docker-build - Build Docker image"
 	@echo "  docker-run   - Run with Docker (use: make docker-run query='your query')"

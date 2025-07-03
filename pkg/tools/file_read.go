@@ -56,7 +56,7 @@ func (r *FileReadToolResult) UserFacing() string {
 	content := utils.ContentWithLineNumber(r.lines, r.offset)
 
 	buf := bytes.NewBufferString(fmt.Sprintf("File Read: %s\n", r.filename))
-	buf.WriteString(fmt.Sprintf("Offset: %d\n", r.offset))
+	fmt.Fprintf(buf, "Offset: %d\n", r.offset)
 	buf.WriteString(content)
 	return buf.String()
 }
