@@ -16,7 +16,7 @@ func (r *GrepRenderer) RenderCLI(result tools.StructuredToolResult) string {
 	}
 
 	var meta tools.GrepMetadata
-	if !extractMetadata(result.Metadata, &meta) {
+	if !tools.ExtractMetadata(result.Metadata, &meta) {
 		return "Error: Invalid metadata type for grep_tool"
 	}
 
@@ -55,7 +55,7 @@ func (r *GlobRenderer) RenderCLI(result tools.StructuredToolResult) string {
 	}
 
 	var meta tools.GlobMetadata
-	if !extractMetadata(result.Metadata, &meta) {
+	if !tools.ExtractMetadata(result.Metadata, &meta) {
 		return "Error: Invalid metadata type for glob_tool"
 	}
 

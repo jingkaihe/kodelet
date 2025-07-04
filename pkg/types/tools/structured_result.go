@@ -59,6 +59,7 @@ var metadataTypeRegistry = map[string]reflect.Type{
 	"grep_tool":                 reflect.TypeOf(GrepMetadata{}),
 	"glob_tool":                 reflect.TypeOf(GlobMetadata{}),
 	"bash":                      reflect.TypeOf(BashMetadata{}),
+	"bash_background":           reflect.TypeOf(BackgroundBashMetadata{}),
 	"mcp_tool":                  reflect.TypeOf(MCPToolMetadata{}),
 	"todo":                      reflect.TypeOf(TodoMetadata{}),
 	"thinking":                  reflect.TypeOf(ThinkingMetadata{}),
@@ -204,6 +205,15 @@ type BashMetadata struct {
 }
 
 func (m BashMetadata) ToolType() string { return "bash" }
+
+type BackgroundBashMetadata struct {
+	Command   string    `json:"command"`
+	PID       int       `json:"pid"`
+	LogPath   string    `json:"logPath"`
+	StartTime time.Time `json:"startTime"`
+}
+
+func (m BackgroundBashMetadata) ToolType() string { return "bash_background" }
 
 // MCP tool metadata
 
@@ -386,3 +396,34 @@ type FileMultiEditMetadata struct {
 }
 
 func (m FileMultiEditMetadata) ToolType() string { return "file_multi_edit" }
+
+// ExtractMetadata is a helper that handles both pointer and value type assertions
+// This is necessary because JSON unmarshaling creates value types, while
+// direct creation uses pointer types
+func ExtractMetadata(metadata ToolMetadata, target interface{}) bool {
+	if metadata == nil {
+		return false
+	}
+
+	targetValue := reflect.ValueOf(target)
+	if targetValue.Kind() != reflect.Ptr || targetValue.IsNil() {
+		return false
+	}
+
+	targetElem := targetValue.Elem()
+	metadataValue := reflect.ValueOf(metadata)
+
+	// If metadata is a pointer, dereference it
+	if metadataValue.Kind() == reflect.Ptr && !metadataValue.IsNil() {
+		metadataValue = metadataValue.Elem()
+	}
+
+	// Check if the types match (comparing the base types, not pointer vs value)
+	if targetElem.Type() != metadataValue.Type() {
+		return false
+	}
+
+	// Set the target to the metadata value
+	targetElem.Set(metadataValue)
+	return true
+}

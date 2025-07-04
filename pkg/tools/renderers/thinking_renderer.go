@@ -16,7 +16,7 @@ func (r *ThinkingRenderer) RenderCLI(result tools.StructuredToolResult) string {
 	}
 
 	var meta tools.ThinkingMetadata
-	if !extractMetadata(result.Metadata, &meta) {
+	if !tools.ExtractMetadata(result.Metadata, &meta) {
 		return "Error: Invalid metadata type for thinking"
 	}
 

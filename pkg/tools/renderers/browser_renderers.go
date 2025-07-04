@@ -15,7 +15,7 @@ func (r *BrowserNavigateRenderer) RenderCLI(result tools.StructuredToolResult) s
 	}
 
 	var meta tools.BrowserNavigateMetadata
-	if !extractMetadata(result.Metadata, &meta) {
+	if !tools.ExtractMetadata(result.Metadata, &meta) {
 		return "Error: Invalid metadata type for browser_navigate"
 	}
 
@@ -39,7 +39,7 @@ type BrowserClickRenderer struct{}
 func (r *BrowserClickRenderer) RenderCLI(result tools.StructuredToolResult) string {
 	if !result.Success {
 		var meta tools.BrowserClickMetadata
-		if extractMetadata(result.Metadata, &meta) && !meta.ElementFound {
+		if tools.ExtractMetadata(result.Metadata, &meta) && !meta.ElementFound {
 			return "❌ Element not found or not clickable"
 		}
 		return fmt.Sprintf("❌ Click failed: %s", result.Error)
@@ -57,7 +57,7 @@ func (r *BrowserGetPageRenderer) RenderCLI(result tools.StructuredToolResult) st
 	}
 
 	var meta tools.BrowserGetPageMetadata
-	if !extractMetadata(result.Metadata, &meta) {
+	if !tools.ExtractMetadata(result.Metadata, &meta) {
 		return "Error: Invalid metadata type for browser_get_page"
 	}
 
@@ -79,7 +79,7 @@ func (r *BrowserScreenshotRenderer) RenderCLI(result tools.StructuredToolResult)
 	}
 
 	var meta tools.BrowserScreenshotMetadata
-	if !extractMetadata(result.Metadata, &meta) {
+	if !tools.ExtractMetadata(result.Metadata, &meta) {
 		return "Error: Invalid metadata type for browser_screenshot"
 	}
 
@@ -105,7 +105,7 @@ func (r *BrowserTypeRenderer) RenderCLI(result tools.StructuredToolResult) strin
 	}
 
 	var meta tools.BrowserTypeMetadata
-	if !extractMetadata(result.Metadata, &meta) {
+	if !tools.ExtractMetadata(result.Metadata, &meta) {
 		return "Error: Invalid metadata type for browser_type"
 	}
 
@@ -126,7 +126,7 @@ func (r *BrowserWaitForRenderer) RenderCLI(result tools.StructuredToolResult) st
 	}
 
 	var meta tools.BrowserWaitForMetadata
-	if !extractMetadata(result.Metadata, &meta) {
+	if !tools.ExtractMetadata(result.Metadata, &meta) {
 		return "Error: Invalid metadata type for browser_wait_for"
 	}
 

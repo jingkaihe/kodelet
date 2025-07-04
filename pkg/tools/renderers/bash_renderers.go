@@ -16,24 +16,45 @@ func (r *BashRenderer) RenderCLI(result tools.StructuredToolResult) string {
 		output.WriteString(fmt.Sprintf("Error: %s", result.Error))
 	}
 
-	var meta tools.BashMetadata
-	if !extractMetadata(result.Metadata, &meta) {
-		return "Error: Invalid metadata type for bash"
+	// Try to extract regular BashMetadata first
+	var bashMeta tools.BashMetadata
+	if tools.ExtractMetadata(result.Metadata, &bashMeta) {
+		return r.renderBashMetadata(bashMeta, &output)
 	}
 
-	output.WriteString(fmt.Sprintf("Command: %s\n", meta.Command))
-	output.WriteString(fmt.Sprintf("Exit Code: %d\n", meta.ExitCode))
+	// Try to extract BackgroundBashMetadata
+	var bgBashMeta tools.BackgroundBashMetadata
+	if tools.ExtractMetadata(result.Metadata, &bgBashMeta) {
+		return r.renderBackgroundBashMetadata(bgBashMeta, &output)
+	}
+
+	return "Error: Invalid metadata type for bash"
+}
+
+func (r *BashRenderer) renderBashMetadata(meta tools.BashMetadata, output *strings.Builder) string {
+	fmt.Fprintf(output, "Command: %s\n", meta.Command)
+	fmt.Fprintf(output, "Exit Code: %d\n", meta.ExitCode)
 
 	if meta.WorkingDir != "" {
-		output.WriteString(fmt.Sprintf("Working Directory: %s\n", meta.WorkingDir))
+		fmt.Fprintf(output, "Working Directory: %s\n", meta.WorkingDir)
 	}
 
-	output.WriteString(fmt.Sprintf("Execution Time: %v\n", meta.ExecutionTime))
+	fmt.Fprintf(output, "Execution Time: %v\n", meta.ExecutionTime)
 
 	if meta.Output != "" {
 		output.WriteString("\nOutput:\n")
 		output.WriteString(meta.Output)
 	}
+
+	return output.String()
+}
+
+func (r *BashRenderer) renderBackgroundBashMetadata(meta tools.BackgroundBashMetadata, output *strings.Builder) string {
+	fmt.Fprintf(output, "Background Command: %s\n", meta.Command)
+	fmt.Fprintf(output, "Process ID: %d\n", meta.PID)
+	fmt.Fprintf(output, "Log File: %s\n", meta.LogPath)
+	fmt.Fprintf(output, "Started: %s\n", meta.StartTime.Format("2006-01-02 15:04:05"))
+	output.WriteString("\nThe process is running in the background. Check the log file for output.")
 
 	return output.String()
 }

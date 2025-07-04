@@ -16,7 +16,7 @@ func (r *ViewBackgroundProcessesRenderer) RenderCLI(result tools.StructuredToolR
 	}
 
 	var meta tools.ViewBackgroundProcessesMetadata
-	if !extractMetadata(result.Metadata, &meta) {
+	if !tools.ExtractMetadata(result.Metadata, &meta) {
 		return "Error: Invalid metadata type for view_background_processes"
 	}
 

@@ -58,6 +58,20 @@ func TestStructuredToolResult_JSONMarshaling(t *testing.T) {
 			},
 		},
 		{
+			name: "BackgroundBashMetadata",
+			result: StructuredToolResult{
+				ToolName:  "bash_background",
+				Success:   true,
+				Timestamp: time.Now(),
+				Metadata: &BackgroundBashMetadata{
+					Command:   "python -m http.server 8000",
+					PID:       12345,
+					LogPath:   "/tmp/.kodelet/12345/out.log",
+					StartTime: time.Date(2023, 1, 1, 10, 0, 0, 0, time.UTC),
+				},
+			},
+		},
+		{
 			name: "GrepMetadata",
 			result: StructuredToolResult{
 				ToolName:  "grep_tool",
@@ -581,6 +595,236 @@ func TestStructuredToolResult_RawJSONStrings(t *testing.T) {
 				if reflect.TypeOf(result.Metadata).Kind() == reflect.Ptr {
 					t.Errorf("Expected value type after unmarshal, got pointer: %T", result.Metadata)
 				}
+			}
+		})
+	}
+}
+
+// ExtractMetadata tests (moved from renderers package)
+
+func TestExtractMetadata(t *testing.T) {
+	tests := []struct {
+		name     string
+		metadata ToolMetadata
+		target   interface{}
+		want     bool
+		validate func(t *testing.T, target interface{})
+	}{
+		{
+			name:     "nil metadata returns false",
+			metadata: nil,
+			target:   &FileReadMetadata{},
+			want:     false,
+		},
+		{
+			name:     "nil target returns false",
+			metadata: FileReadMetadata{FilePath: "/test.go"},
+			target:   nil,
+			want:     false,
+		},
+		{
+			name:     "non-pointer target returns false",
+			metadata: FileReadMetadata{FilePath: "/test.go"},
+			target:   FileReadMetadata{},
+			want:     false,
+		},
+		{
+			name: "value type to matching pointer target",
+			metadata: FileReadMetadata{
+				FilePath: "/test.go",
+				Lines:    []string{"line1", "line2"},
+				Language: "go",
+			},
+			target: &FileReadMetadata{},
+			want:   true,
+			validate: func(t *testing.T, target interface{}) {
+				result := target.(*FileReadMetadata)
+				if result.FilePath != "/test.go" {
+					t.Errorf("FilePath = %v, want /test.go", result.FilePath)
+				}
+				if len(result.Lines) != 2 {
+					t.Errorf("Lines length = %v, want 2", len(result.Lines))
+				}
+				if result.Language != "go" {
+					t.Errorf("Language = %v, want go", result.Language)
+				}
+			},
+		},
+		{
+			name: "pointer type to matching pointer target",
+			metadata: &WebFetchMetadata{
+				URL:     "https://example.com",
+				Content: "test content",
+				Size:    100,
+			},
+			target: &WebFetchMetadata{},
+			want:   true,
+			validate: func(t *testing.T, target interface{}) {
+				result := target.(*WebFetchMetadata)
+				if result.URL != "https://example.com" {
+					t.Errorf("URL = %v, want https://example.com", result.URL)
+				}
+				if result.Content != "test content" {
+					t.Errorf("Content = %v, want test content", result.Content)
+				}
+				if result.Size != 100 {
+					t.Errorf("Size = %v, want 100", result.Size)
+				}
+			},
+		},
+		{
+			name:     "mismatched types returns false",
+			metadata: FileReadMetadata{FilePath: "/test.go"},
+			target:   &BashMetadata{},
+			want:     false,
+		},
+		{
+			name: "complex nested metadata",
+			metadata: BatchMetadata{
+				Description:  "batch test",
+				SuccessCount: 2,
+				FailureCount: 0,
+				SubResults: []StructuredToolResult{
+					{
+						ToolName: "bash",
+						Success:  true,
+						Metadata: BashMetadata{Command: "echo test"},
+					},
+				},
+			},
+			target: &BatchMetadata{},
+			want:   true,
+			validate: func(t *testing.T, target interface{}) {
+				result := target.(*BatchMetadata)
+				if result.Description != "batch test" {
+					t.Errorf("Description = %v, want batch test", result.Description)
+				}
+				if result.SuccessCount != 2 {
+					t.Errorf("SuccessCount = %v, want 2", result.SuccessCount)
+				}
+				if len(result.SubResults) != 1 {
+					t.Errorf("SubResults length = %v, want 1", len(result.SubResults))
+				}
+			},
+		},
+		{
+			name: "metadata with slices and maps",
+			metadata: &MCPToolMetadata{
+				MCPToolName: "test_tool",
+				ServerName:  "test_server",
+				Parameters: map[string]any{
+					"key1": "value1",
+					"key2": 42,
+				},
+				Content: []MCPContent{
+					{Type: "text", Text: "content1"},
+					{Type: "code", Text: "content2"},
+				},
+			},
+			target: &MCPToolMetadata{},
+			want:   true,
+			validate: func(t *testing.T, target interface{}) {
+				result := target.(*MCPToolMetadata)
+				if result.MCPToolName != "test_tool" {
+					t.Errorf("MCPToolName = %v, want test_tool", result.MCPToolName)
+				}
+				if len(result.Parameters) != 2 {
+					t.Errorf("Parameters length = %v, want 2", len(result.Parameters))
+				}
+				if result.Parameters["key1"] != "value1" {
+					t.Errorf("Parameters[key1] = %v, want value1", result.Parameters["key1"])
+				}
+				if len(result.Content) != 2 {
+					t.Errorf("Content length = %v, want 2", len(result.Content))
+				}
+			},
+		},
+		{
+			name: "all browser metadata types",
+			metadata: BrowserNavigateMetadata{
+				URL:      "https://example.com",
+				FinalURL: "https://example.com/home",
+				Title:    "Example",
+				LoadTime: 100 * time.Millisecond,
+			},
+			target: &BrowserNavigateMetadata{},
+			want:   true,
+			validate: func(t *testing.T, target interface{}) {
+				result := target.(*BrowserNavigateMetadata)
+				if result.URL != "https://example.com" {
+					t.Errorf("URL = %v, want https://example.com", result.URL)
+				}
+				if result.Title != "Example" {
+					t.Errorf("Title = %v, want Example", result.Title)
+				}
+				if result.LoadTime != 100*time.Millisecond {
+					t.Errorf("LoadTime = %v, want 100ms", result.LoadTime)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ExtractMetadata(tt.metadata, tt.target)
+			if got != tt.want {
+				t.Errorf("ExtractMetadata() = %v, want %v", got, tt.want)
+			}
+			if got && tt.validate != nil {
+				tt.validate(t, tt.target)
+			}
+		})
+	}
+}
+
+func TestExtractMetadata_AllTypes(t *testing.T) {
+	// Test that all metadata types work with the generic function
+	metadataTypes := []struct {
+		name     string
+		metadata ToolMetadata
+		target   interface{}
+	}{
+		{"FileReadMetadata", FileReadMetadata{FilePath: "/test"}, &FileReadMetadata{}},
+		{"FileWriteMetadata", FileWriteMetadata{FilePath: "/test"}, &FileWriteMetadata{}},
+		{"FileEditMetadata", FileEditMetadata{FilePath: "/test"}, &FileEditMetadata{}},
+		{"FileMultiEditMetadata", FileMultiEditMetadata{FilePath: "/test"}, &FileMultiEditMetadata{}},
+		{"BashMetadata", BashMetadata{Command: "test"}, &BashMetadata{}},
+		{"BackgroundBashMetadata", BackgroundBashMetadata{Command: "test", PID: 1234, LogPath: "/tmp/log.txt"}, &BackgroundBashMetadata{}},
+		{"GrepMetadata", GrepMetadata{Pattern: "test"}, &GrepMetadata{}},
+		{"GlobMetadata", GlobMetadata{Pattern: "*.go"}, &GlobMetadata{}},
+		{"TodoMetadata", TodoMetadata{Action: "read"}, &TodoMetadata{}},
+		{"ThinkingMetadata", ThinkingMetadata{Thought: "test"}, &ThinkingMetadata{}},
+		{"BatchMetadata", BatchMetadata{Description: "test"}, &BatchMetadata{}},
+		{"SubAgentMetadata", SubAgentMetadata{Question: "test"}, &SubAgentMetadata{}},
+		{"ImageRecognitionMetadata", ImageRecognitionMetadata{ImagePath: "/test.png"}, &ImageRecognitionMetadata{}},
+		{"WebFetchMetadata", WebFetchMetadata{URL: "https://test"}, &WebFetchMetadata{}},
+		{"ViewBackgroundProcessesMetadata", ViewBackgroundProcessesMetadata{Count: 1}, &ViewBackgroundProcessesMetadata{}},
+		{"MCPToolMetadata", MCPToolMetadata{MCPToolName: "test"}, &MCPToolMetadata{}},
+		{"BrowserNavigateMetadata", BrowserNavigateMetadata{URL: "https://test"}, &BrowserNavigateMetadata{}},
+		{"BrowserClickMetadata", BrowserClickMetadata{ElementID: 123, ElementFound: true}, &BrowserClickMetadata{}},
+		{"BrowserTypeMetadata", BrowserTypeMetadata{ElementID: 456, Text: "hello"}, &BrowserTypeMetadata{}},
+		{"BrowserScreenshotMetadata", BrowserScreenshotMetadata{OutputPath: "/test.png", Width: 800, Height: 600}, &BrowserScreenshotMetadata{}},
+		{"BrowserGetPageMetadata", BrowserGetPageMetadata{URL: "https://test"}, &BrowserGetPageMetadata{}},
+		{"BrowserWaitForMetadata", BrowserWaitForMetadata{Condition: "visible", Selector: "#test"}, &BrowserWaitForMetadata{}},
+	}
+
+	for _, tt := range metadataTypes {
+		t.Run(tt.name, func(t *testing.T) {
+			// Test with value type
+			if !ExtractMetadata(tt.metadata, tt.target) {
+				t.Errorf("ExtractMetadata() failed for value type %s", tt.name)
+			}
+
+			// Reset target for pointer test
+			tt.target = reflect.New(reflect.TypeOf(tt.metadata)).Interface()
+
+			// Test with pointer type - create a pointer to the metadata
+			metadataValue := reflect.ValueOf(tt.metadata)
+			metadataPtr := reflect.New(metadataValue.Type())
+			metadataPtr.Elem().Set(metadataValue)
+
+			if !ExtractMetadata(metadataPtr.Interface().(ToolMetadata), tt.target) {
+				t.Errorf("ExtractMetadata() failed for pointer type %s", tt.name)
 			}
 		})
 	}

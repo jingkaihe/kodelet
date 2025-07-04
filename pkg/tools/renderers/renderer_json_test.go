@@ -152,4 +152,45 @@ func TestRendererWithJSONUnmarshal(t *testing.T) {
 			t.Errorf("Expected todo content in output, got: %s", output)
 		}
 	})
+
+	t.Run("BackgroundBashRenderer after JSON unmarshal", func(t *testing.T) {
+		original := tools.StructuredToolResult{
+			ToolName:  "bash_background",
+			Success:   true,
+			Timestamp: time.Now(),
+			Metadata: &tools.BackgroundBashMetadata{
+				Command:   "python -m http.server 8000",
+				PID:       12345,
+				LogPath:   "/tmp/.kodelet/12345/out.log",
+				StartTime: time.Date(2023, 1, 1, 10, 30, 45, 0, time.UTC),
+			},
+		}
+
+		data, err := json.Marshal(original)
+		if err != nil {
+			t.Fatalf("Failed to marshal: %v", err)
+		}
+
+		var unmarshaled tools.StructuredToolResult
+		err = json.Unmarshal(data, &unmarshaled)
+		if err != nil {
+			t.Fatalf("Failed to unmarshal: %v", err)
+		}
+
+		output := registry.Render(unmarshaled)
+
+		// Should contain background command details
+		if !strings.Contains(output, "Background Command: python -m http.server 8000") {
+			t.Errorf("Expected background command in output, got: %s", output)
+		}
+		if !strings.Contains(output, "Process ID: 12345") {
+			t.Errorf("Expected process ID in output, got: %s", output)
+		}
+		if !strings.Contains(output, "Log File: /tmp/.kodelet/12345/out.log") {
+			t.Errorf("Expected log file path in output, got: %s", output)
+		}
+		if !strings.Contains(output, "Started: 2023-01-01 10:30:45") {
+			t.Errorf("Expected start time in output, got: %s", output)
+		}
+	})
 }

@@ -308,28 +308,158 @@ echo "Script completed"`
 
 	t.Run("Background command output", func(t *testing.T) {
 		result := tools.StructuredToolResult{
-			ToolName:  "bash",
+			ToolName:  "bash_background",
 			Success:   true,
 			Timestamp: time.Now(),
-			Metadata: &tools.BashMetadata{
-				Command:       "python -m http.server 8000 &",
-				ExitCode:      0,
-				WorkingDir:    "/var/www",
-				ExecutionTime: 100 * time.Millisecond,
-				Output:        "Serving HTTP on 0.0.0.0 port 8000 (http://0.0.0.0:8000/) ...\n[1] 12345",
+			Metadata: &tools.BackgroundBashMetadata{
+				Command:   "python -m http.server 8000",
+				PID:       12345,
+				LogPath:   "/tmp/.kodelet/12345/out.log",
+				StartTime: time.Date(2023, 1, 1, 10, 30, 45, 0, time.UTC),
 			},
 		}
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "python -m http.server 8000 &") {
+		if !strings.Contains(output, "Background Command: python -m http.server 8000") {
 			t.Errorf("Expected background command in output, got: %s", output)
 		}
-		if !strings.Contains(output, "Serving HTTP on 0.0.0.0") {
-			t.Errorf("Expected server output in output, got: %s", output)
+		if !strings.Contains(output, "Process ID: 12345") {
+			t.Errorf("Expected process ID in output, got: %s", output)
 		}
-		if !strings.Contains(output, "[1] 12345") {
-			t.Errorf("Expected background process ID in output, got: %s", output)
+		if !strings.Contains(output, "Log File: /tmp/.kodelet/12345/out.log") {
+			t.Errorf("Expected log file path in output, got: %s", output)
+		}
+		if !strings.Contains(output, "Started: 2023-01-01 10:30:45") {
+			t.Errorf("Expected start time in output, got: %s", output)
+		}
+		if !strings.Contains(output, "running in the background") {
+			t.Errorf("Expected background process message in output, got: %s", output)
+		}
+		if !strings.Contains(output, "Check the log file for output") {
+			t.Errorf("Expected log file instruction in output, got: %s", output)
+		}
+	})
+
+	t.Run("Background command with error", func(t *testing.T) {
+		result := tools.StructuredToolResult{
+			ToolName:  "bash_background",
+			Success:   false,
+			Error:     "Failed to start background process",
+			Timestamp: time.Now(),
+			Metadata: &tools.BackgroundBashMetadata{
+				Command:   "invalid-command",
+				PID:       0,
+				LogPath:   "",
+				StartTime: time.Now(),
+			},
+		}
+
+		output := renderer.RenderCLI(result)
+
+		if !strings.Contains(output, "Error: Failed to start background process") {
+			t.Errorf("Expected error message in output, got: %s", output)
+		}
+		if !strings.Contains(output, "Background Command: invalid-command") {
+			t.Errorf("Expected background command in output, got: %s", output)
+		}
+		if !strings.Contains(output, "Process ID: 0") {
+			t.Errorf("Expected process ID 0 in output, got: %s", output)
+		}
+	})
+
+	t.Run("Background command with different timestamp format", func(t *testing.T) {
+		result := tools.StructuredToolResult{
+			ToolName:  "bash_background",
+			Success:   true,
+			Timestamp: time.Now(),
+			Metadata: &tools.BackgroundBashMetadata{
+				Command:   "tail -f /var/log/syslog",
+				PID:       99999,
+				LogPath:   "/home/user/.kodelet/99999/out.log",
+				StartTime: time.Date(2023, 12, 25, 23, 59, 59, 0, time.UTC),
+			},
+		}
+
+		output := renderer.RenderCLI(result)
+
+		if !strings.Contains(output, "Started: 2023-12-25 23:59:59") {
+			t.Errorf("Expected formatted start time in output, got: %s", output)
+		}
+		if !strings.Contains(output, "Process ID: 99999") {
+			t.Errorf("Expected large process ID in output, got: %s", output)
+		}
+		if !strings.Contains(output, "/home/user/.kodelet/99999/out.log") {
+			t.Errorf("Expected user-specific log path in output, got: %s", output)
+		}
+	})
+
+	t.Run("Background command with complex command", func(t *testing.T) {
+		result := tools.StructuredToolResult{
+			ToolName:  "bash_background",
+			Success:   true,
+			Timestamp: time.Now(),
+			Metadata: &tools.BackgroundBashMetadata{
+				Command:   `docker run -d -p 8080:80 --name web-server nginx:latest`,
+				PID:       54321,
+				LogPath:   "/tmp/.kodelet/54321/out.log",
+				StartTime: time.Now(),
+			},
+		}
+
+		output := renderer.RenderCLI(result)
+
+		if !strings.Contains(output, "Background Command: docker run -d -p 8080:80 --name web-server nginx:latest") {
+			t.Errorf("Expected complex docker command in output, got: %s", output)
+		}
+		if !strings.Contains(output, "Process ID: 54321") {
+			t.Errorf("Expected process ID in output, got: %s", output)
+		}
+	})
+
+	t.Run("Invalid metadata type for background bash", func(t *testing.T) {
+		result := tools.StructuredToolResult{
+			ToolName:  "bash_background",
+			Success:   true,
+			Timestamp: time.Now(),
+			Metadata:  &tools.FileReadMetadata{}, // Wrong type
+		}
+
+		output := renderer.RenderCLI(result)
+
+		if !strings.Contains(output, "Error: Invalid metadata type for bash") {
+			t.Errorf("Expected invalid metadata error, got: %s", output)
+		}
+	})
+
+	t.Run("Regular bash command still works", func(t *testing.T) {
+		result := tools.StructuredToolResult{
+			ToolName:  "bash",
+			Success:   true,
+			Timestamp: time.Now(),
+			Metadata: &tools.BashMetadata{
+				Command:       "echo 'Hello World'",
+				ExitCode:      0,
+				WorkingDir:    "/tmp",
+				ExecutionTime: 50 * time.Millisecond,
+				Output:        "Hello World",
+			},
+		}
+
+		output := renderer.RenderCLI(result)
+
+		// Should still render as regular bash command, not background
+		if !strings.Contains(output, "Command: echo 'Hello World'") {
+			t.Errorf("Expected regular command format, got: %s", output)
+		}
+		if !strings.Contains(output, "Exit Code: 0") {
+			t.Errorf("Expected exit code in output, got: %s", output)
+		}
+		if strings.Contains(output, "Background Command:") {
+			t.Errorf("Should not show background format for regular bash, got: %s", output)
+		}
+		if strings.Contains(output, "Process ID:") {
+			t.Errorf("Should not show process ID for regular bash, got: %s", output)
 		}
 	})
 }

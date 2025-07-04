@@ -18,7 +18,7 @@ func (r *BatchRenderer) RenderCLI(result tools.StructuredToolResult) string {
 	}
 
 	var meta tools.BatchMetadata
-	if !extractMetadata(result.Metadata, &meta) {
+	if !tools.ExtractMetadata(result.Metadata, &meta) {
 		return "Error: Invalid metadata type for batch"
 	}
 

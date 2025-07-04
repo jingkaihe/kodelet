@@ -15,7 +15,7 @@ func (r *ImageRecognitionRenderer) RenderCLI(result tools.StructuredToolResult) 
 	}
 
 	var meta tools.ImageRecognitionMetadata
-	if !extractMetadata(result.Metadata, &meta) {
+	if !tools.ExtractMetadata(result.Metadata, &meta) {
 		return "Error: Invalid metadata type for image_recognition"
 	}
 

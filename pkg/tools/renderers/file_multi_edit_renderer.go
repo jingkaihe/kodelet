@@ -16,7 +16,7 @@ func (r *FileMultiEditRenderer) RenderCLI(result tools.StructuredToolResult) str
 	}
 
 	var meta tools.FileMultiEditMetadata
-	if !extractMetadata(result.Metadata, &meta) {
+	if !tools.ExtractMetadata(result.Metadata, &meta) {
 		return "Error: Invalid metadata type for file_multi_edit"
 	}
 

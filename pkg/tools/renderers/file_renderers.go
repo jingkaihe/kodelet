@@ -18,7 +18,7 @@ func (r *FileReadRenderer) RenderCLI(result tools.StructuredToolResult) string {
 	}
 
 	var meta tools.FileReadMetadata
-	if !extractMetadata(result.Metadata, &meta) {
+	if !tools.ExtractMetadata(result.Metadata, &meta) {
 		return "Error: Invalid metadata type for file_read"
 	}
 
@@ -42,7 +42,7 @@ func (r *FileWriteRenderer) RenderCLI(result tools.StructuredToolResult) string 
 	}
 
 	var meta tools.FileWriteMetadata
-	if !extractMetadata(result.Metadata, &meta) {
+	if !tools.ExtractMetadata(result.Metadata, &meta) {
 		return "Error: Invalid metadata type for file_write"
 	}
 
@@ -59,7 +59,7 @@ func (r *FileEditRenderer) RenderCLI(result tools.StructuredToolResult) string {
 	}
 
 	var meta tools.FileEditMetadata
-	if !extractMetadata(result.Metadata, &meta) {
+	if !tools.ExtractMetadata(result.Metadata, &meta) {
 		return "Error: Invalid metadata type for file_edit"
 	}
 
