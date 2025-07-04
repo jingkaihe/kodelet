@@ -412,15 +412,36 @@ class FileReadRenderer extends BaseRenderer {
         if (!meta) return super.renderSuccess(toolResult);
 
         const language = meta.language || this.detectLanguageFromPath(meta.filePath);
-        const fileContent = (meta.lines || []).join('\n');
+        // Get lines from metadata
+        let lines = meta.lines || [];
         const startLine = meta.offset || 1;
-
-        // Create line-numbered code
-        const lines = meta.lines || [];
-        const codeWithLineNumbers = lines.map((line, index) => {
-            const lineNumber = (startLine + index).toString().padStart(4, ' ');
-            return `<span class="line-number text-base-content/50">${lineNumber}</span><span class="line-content">${this.escapeHtml(line)}</span>`;
-        }).join('\n');
+        const totalLines = meta.totalLines || meta.lines?.length || 0;
+        
+        // Debug: log what we're receiving
+        console.log('FileReadRenderer - lines received:', lines.length, 'startLine:', startLine, 'totalLines:', totalLines);
+        
+        // Remove trailing empty lines
+        let lastNonEmptyIndex = lines.length - 1;
+        while (lastNonEmptyIndex >= 0 && lines[lastNonEmptyIndex] === '') {
+            lastNonEmptyIndex--;
+        }
+        lines = lines.slice(0, lastNonEmptyIndex + 1);
+        
+        const fileContent = lines.join('\n');
+        const maxLineNumber = startLine + lines.length - 1;
+        const lineNumberWidth = Math.max(4, maxLineNumber.toString().length);
+        
+        // Build line numbers and content separately for better alignment
+        const lineNumbersHtml = lines.map((_, index) => {
+            const lineNumber = (startLine + index).toString().padStart(lineNumberWidth, ' ');
+            return `<div style="text-align: right; padding-right: 1ch; min-height: 1.2em;">${lineNumber}</div>`;
+        }).join('');
+        
+        const codeContentHtml = lines.map(line => {
+            // Preserve empty lines with a non-breaking space
+            const content = line === '' ? '&nbsp;' : this.escapeHtml(line);
+            return `<div style="min-height: 1.2em;">${content}</div>`;
+        }).join('');
 
         const badges = [];
         if (meta.truncated) badges.push({ text: 'Truncated', class: 'badge-warning' });
@@ -428,7 +449,7 @@ class FileReadRenderer extends BaseRenderer {
         const metadata = [
             { label: 'Path', value: meta.filePath },
             startLine > 1 ? { label: 'Starting at line', value: startLine } : null,
-            lines.length > 0 ? { label: 'Lines', value: lines.length } : null,
+            { label: 'Lines shown', value: `${lines.length}${totalLines > 0 && totalLines > lines.length ? ` of ${totalLines}` : ''}` },
             language ? { label: 'Language', value: language } : null
         ].filter(Boolean);
 
@@ -445,8 +466,11 @@ class FileReadRenderer extends BaseRenderer {
                     </div>
                 </div>
 
-                <div class="mockup-code bg-base-300 text-sm max-h-96 overflow-y-auto">
-                    <pre><code class="language-${language}">${codeWithLineNumbers}</code></pre>
+                <div class="bg-base-300 text-sm font-mono rounded-lg" style="max-height: 600px; overflow-y: auto;">
+                    <div style="display: flex; padding: 1rem;">
+                        <div class="text-base-content/50" style="flex-shrink: 0; white-space: pre;">${lineNumbersHtml}</div>
+                        <div style="flex-grow: 1; overflow-x: auto; white-space: pre;">${codeContentHtml}</div>
+                    </div>
                 </div>
             `
         });
