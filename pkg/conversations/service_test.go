@@ -2,10 +2,12 @@ package conversations
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/types/llm"
+	"github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -28,20 +30,27 @@ func newMockConversationStore() *mockConversationStore {
 	}
 }
 
-func (m *mockConversationStore) Save(record *ConversationRecord) error {
-	m.conversations[record.ID] = record
+func (m *mockConversationStore) Save(record ConversationRecord) error {
+	m.conversations[record.ID] = &record
 	return nil
 }
 
-func (m *mockConversationStore) Load(id string) (*ConversationRecord, error) {
+func (m *mockConversationStore) Load(id string) (ConversationRecord, error) {
 	if m.loadFunc != nil {
-		return m.loadFunc(id)
+		rec, err := m.loadFunc(id)
+		if err != nil {
+			return ConversationRecord{}, err
+		}
+		if rec == nil {
+			return ConversationRecord{}, errors.New("conversation not found")
+		}
+		return *rec, nil
 	}
 	record, exists := m.conversations[id]
 	if !exists {
-		return nil, &ValidationError{Field: "id", Message: "conversation not found"}
+		return ConversationRecord{}, errors.New("conversation not found")
 	}
-	return record, nil
+	return *record, nil
 }
 
 func (m *mockConversationStore) List() ([]ConversationSummary, error) {
@@ -152,7 +161,7 @@ func TestConversationService_GetConversation(t *testing.T) {
 		UpdatedAt:   now,
 		ModelType:   "anthropic",
 		Summary:     "Test conversation",
-		Usage:       llm.Usage{TotalTokens: 100},
+		Usage:       llm.Usage{InputTokens: 50, OutputTokens: 50},
 		RawMessages: []byte(`[{"role":"user","content":"hello"}]`),
 		ToolResults: map[string]tools.StructuredToolResult{
 			"tool1": {ToolName: "test-tool"},
@@ -174,7 +183,7 @@ func TestConversationService_GetConversation(t *testing.T) {
 		{
 			name:          "conversation not found",
 			id:            "missing-id",
-			storeError:    &ValidationError{Field: "id", Message: "conversation not found"},
+			storeError:    errors.New("conversation not found"),
 			expectedError: true,
 		},
 		{

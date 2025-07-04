@@ -25,7 +25,7 @@ var embedFS embed.FS
 // Server represents the web UI server
 type Server struct {
 	router              *mux.Router
-	conversationService *conversations.ConversationService
+	conversationService conversations.ConversationServiceInterface
 	config              *ServerConfig
 	server              *http.Server
 	staticFS            fs.FS
@@ -313,9 +313,10 @@ func (s *Server) convertToWebMessages(rawMessages json.RawMessage, modelType str
 		}
 
 		// Extract tool calls based on provider
-		if modelType == "anthropic" {
+		switch modelType {
+		case "anthropic":
 			webMsg.ToolCalls = s.extractAnthropicToolCalls(baseMsg["content"])
-		} else if modelType == "openai" {
+		case "openai":
 			webMsg.ToolCalls = s.extractOpenAIToolCalls(baseMsg)
 		}
 

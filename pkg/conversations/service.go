@@ -12,6 +12,18 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
+// ConversationServiceInterface defines the interface for conversation operations
+type ConversationServiceInterface interface {
+	ListConversations(ctx context.Context, req *ListConversationsRequest) (*ListConversationsResponse, error)
+	GetConversation(ctx context.Context, id string) (*GetConversationResponse, error)
+	GetToolResult(ctx context.Context, conversationID, toolCallID string) (*GetToolResultResponse, error)
+	DeleteConversation(ctx context.Context, id string) error
+	ResolveConversationID(ctx context.Context, id string) (string, error)
+	SearchConversations(ctx context.Context, query string, limit int) (*ListConversationsResponse, error)
+	GetConversationStatistics(ctx context.Context) (*ConversationStatistics, error)
+	Close() error
+}
+
 // ConversationService provides high-level conversation operations
 type ConversationService struct {
 	store ConversationStore
