@@ -15,6 +15,7 @@ require (
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/gobwas/glob v0.2.3
 	github.com/google/uuid v1.6.0
+	github.com/gorilla/mux v1.8.1
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/invopop/jsonschema v0.13.0
 	github.com/mark3labs/mcp-go v0.29.0

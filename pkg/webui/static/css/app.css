@@ -1,0 +1,205 @@
+/* Custom styles for Kodelet Web UI */
+
+/* Line number styling for code blocks */
+.line-number {
+    color: rgb(156 163 175); /* text-gray-400 */
+    user-select: none;
+    margin-right: 0.5rem;
+}
+
+/* Syntax highlighting adjustments */
+pre code {
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-size: 0.875rem;
+    line-height: 1.5;
+}
+
+/* Custom scrollbar for webkit browsers */
+.overflow-x-auto::-webkit-scrollbar {
+    height: 8px;
+}
+
+.overflow-x-auto::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.overflow-x-auto::-webkit-scrollbar-thumb {
+    background: rgb(75 85 99); /* gray-600 */
+    border-radius: 4px;
+}
+
+.overflow-x-auto::-webkit-scrollbar-thumb:hover {
+    background: rgb(55 65 81); /* gray-700 */
+}
+
+/* Prose adjustments for markdown content */
+.prose {
+    max-width: none;
+}
+
+.prose p {
+    margin-bottom: 1rem;
+}
+
+.prose pre {
+    background-color: rgb(31 41 55); /* gray-800 */
+    color: rgb(243 244 246); /* gray-100 */
+    border-radius: 0.5rem;
+    padding: 1rem;
+    overflow-x: auto;
+    margin: 1rem 0;
+}
+
+.prose code {
+    background-color: rgb(31 41 55); /* gray-800 */
+    color: rgb(243 244 246); /* gray-100 */
+    padding: 0.25rem 0.5rem;
+    border-radius: 0.25rem;
+    font-size: 0.875rem;
+}
+
+.prose pre code {
+    background-color: transparent;
+    padding: 0;
+}
+
+/* Toast notifications positioning */
+.toast {
+    position: fixed;
+    top: 1rem;
+    right: 1rem;
+    z-index: 9999;
+}
+
+/* Hover effects for interactive elements */
+.card:hover {
+    transform: translateY(-2px);
+    transition: all 0.2s ease-in-out;
+}
+
+/* Custom badge styles */
+.badge-sm {
+    font-size: 0.75rem;
+    padding: 0.25rem 0.5rem;
+}
+
+/* Loading animation adjustments */
+.loading {
+    display: inline-block;
+}
+
+/* Tool result specific styling */
+.tool-result-header {
+    border-bottom: 1px solid rgb(229 231 235); /* gray-200 */
+    padding-bottom: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+
+/* Diff styling */
+.diff-line-added {
+    background-color: rgb(220 252 231); /* green-100 */
+    color: rgb(22 101 52); /* green-800 */
+}
+
+.diff-line-removed {
+    background-color: rgb(254 226 226); /* red-100 */
+    color: rgb(153 27 27); /* red-800 */
+}
+
+.diff-line-context {
+    background-color: rgb(249 250 251); /* gray-50 */
+    color: rgb(75 85 99); /* gray-600 */
+}
+
+/* Dark mode adjustments */
+@media (prefers-color-scheme: dark) {
+    .prose pre {
+        background-color: rgb(17 24 39); /* gray-900 */
+    }
+    
+    .prose code {
+        background-color: rgb(17 24 39); /* gray-900 */
+    }
+    
+    .diff-line-added {
+        background-color: rgb(5 46 22); /* green-900 */
+        color: rgb(187 247 208); /* green-200 */
+    }
+    
+    .diff-line-removed {
+        background-color: rgb(127 29 29); /* red-900 */
+        color: rgb(254 202 202); /* red-200 */
+    }
+    
+    .diff-line-context {
+        background-color: rgb(31 41 55); /* gray-800 */
+        color: rgb(156 163 175); /* gray-400 */
+    }
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .container {
+        padding-left: 1rem;
+        padding-right: 1rem;
+    }
+    
+    .card-body {
+        padding: 1rem;
+    }
+    
+    .prose {
+        font-size: 0.875rem;
+    }
+}
+
+/* Animation for loading states */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.fade-in {
+    animation: fadeIn 0.3s ease-in-out;
+}
+
+/* Copy button styling */
+.copy-button {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    opacity: 0;
+    transition: opacity 0.2s ease-in-out;
+}
+
+.card:hover .copy-button {
+    opacity: 1;
+}
+
+/* Collapsible content styling */
+.collapse-content {
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+/* Message styling */
+.message-user {
+    background: linear-gradient(135deg, rgb(239 246 255), rgb(219 234 254)); /* blue gradient */
+}
+
+.message-assistant {
+    background: linear-gradient(135deg, rgb(249 250 251), rgb(243 244 246)); /* gray gradient */
+}
+
+/* Tool call styling */
+.tool-call {
+    border-left: 4px solid rgb(59 130 246); /* blue-500 */
+    padding-left: 1rem;
+    margin: 0.5rem 0;
+}

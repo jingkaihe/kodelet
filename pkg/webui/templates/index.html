@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Title}}</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/daisyui@4.4.24/dist/full.min.css" rel="stylesheet">
+    <link href="/static/css/app.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+</head>
+<body class="bg-base-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8" x-data="conversationListApp()">
+        <!-- Header -->
+        <div class="mb-8">
+            <h1 class="text-4xl font-bold text-base-content mb-2">{{.Title}}</h1>
+            <p class="text-base-content/70">Browse and search your conversation history</p>
+        </div>
+
+        <!-- Search and Filters -->
+        <div class="card bg-base-200 shadow-xl mb-6">
+            <div class="card-body">
+                <h2 class="card-title mb-4">Search & Filter</h2>
+                
+                <!-- Search Input -->
+                <div class="form-control mb-4">
+                    <div class="input-group">
+                        <input 
+                            type="text" 
+                            placeholder="Search conversations..." 
+                            class="input input-bordered flex-1"
+                            x-model="searchTerm"
+                            @keyup.enter="search()"
+                        >
+                        <button class="btn btn-primary" @click="search()">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Filter Options -->
+                <div class="flex flex-wrap gap-4">
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text">Sort by</span>
+                        </label>
+                        <select class="select select-bordered" x-model="sortBy" @change="loadConversations()">
+                            <option value="updated">Last Updated</option>
+                            <option value="created">Created</option>
+                            <option value="messages">Message Count</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text">Order</span>
+                        </label>
+                        <select class="select select-bordered" x-model="sortOrder" @change="loadConversations()">
+                            <option value="desc">Newest First</option>
+                            <option value="asc">Oldest First</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text">Limit</span>
+                        </label>
+                        <select class="select select-bordered" x-model="limit" @change="loadConversations()">
+                            <option value="10">10</option>
+                            <option value="25">25</option>
+                            <option value="50">50</option>
+                            <option value="100">100</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Clear Filters Button -->
+                <div class="mt-4">
+                    <button class="btn btn-outline btn-sm" @click="clearFilters()">Clear Filters</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Statistics Card -->
+        <div class="card bg-base-200 shadow-xl mb-6" x-show="stats">
+            <div class="card-body">
+                <h2 class="card-title mb-4">Statistics</h2>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div class="stat">
+                        <div class="stat-title">Total Conversations</div>
+                        <div class="stat-value text-primary" x-text="stats?.totalConversations || 0"></div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-title">Total Messages</div>
+                        <div class="stat-value text-secondary" x-text="stats?.totalMessages || 0"></div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-title">Date Range</div>
+                        <div class="stat-desc" x-text="formatDateRange()"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Loading State -->
+        <div class="text-center py-8" x-show="loading">
+            <div class="loading loading-spinner loading-lg"></div>
+            <p class="mt-4 text-base-content/70">Loading conversations...</p>
+        </div>
+
+        <!-- Error State -->
+        <div class="alert alert-error mb-6" x-show="error">
+            <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span x-text="error"></span>
+        </div>
+
+        <!-- Conversation List -->
+        <div class="space-y-4" x-show="!loading && conversations.length > 0">
+            <template x-for="conversation in conversations" :key="conversation.id">
+                <div class="card bg-base-100 shadow-lg hover:shadow-xl transition-shadow duration-200">
+                    <div class="card-body">
+                        <div class="flex justify-between items-start">
+                            <div class="flex-1">
+                                <h3 class="card-title text-lg mb-2">
+                                    <a :href="'/c/' + conversation.id" 
+                                       class="link link-hover text-primary"
+                                       x-text="conversation.id.substring(0, 8) + '...'"></a>
+                                </h3>
+                                <p class="text-base-content/70 mb-3" x-text="conversation.preview"></p>
+                                
+                                <div class="flex flex-wrap gap-2 text-sm text-base-content/60">
+                                    <div class="badge badge-outline">
+                                        <span x-text="conversation.messageCount"></span> messages
+                                    </div>
+                                    <div class="badge badge-outline">
+                                        Created: <span x-text="formatDate(conversation.created_at)"></span>
+                                    </div>
+                                    <div class="badge badge-outline">
+                                        Updated: <span x-text="formatDate(conversation.updated_at)"></span>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="dropdown dropdown-end">
+                                <div tabindex="0" role="button" class="btn btn-ghost btn-sm">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
+                                    </svg>
+                                </div>
+                                <ul tabindex="0" class="dropdown-content menu bg-base-100 rounded-box z-[1] w-52 p-2 shadow">
+                                    <li><a :href="'/c/' + conversation.id">View</a></li>
+                                    <li><a @click="deleteConversation(conversation.id)" class="text-error">Delete</a></li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </template>
+        </div>
+
+        <!-- Empty State -->
+        <div class="text-center py-12" x-show="!loading && conversations.length === 0">
+            <svg xmlns="http://www.w3.org/2000/svg" class="mx-auto h-24 w-24 text-base-content/30" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+            </svg>
+            <h2 class="mt-4 text-xl font-semibold text-base-content/70">No conversations found</h2>
+            <p class="mt-2 text-base-content/50">Try adjusting your search criteria or filters</p>
+        </div>
+
+        <!-- Pagination -->
+        <div class="flex justify-center mt-8" x-show="!loading && conversations.length > 0">
+            <div class="join">
+                <button class="join-item btn" @click="previousPage()" :disabled="offset === 0">
+                    « Previous
+                </button>
+                <button class="join-item btn btn-disabled">
+                    Page <span x-text="Math.floor(offset / limit) + 1"></span>
+                </button>
+                <button class="join-item btn" @click="nextPage()" :disabled="!hasMore">
+                    Next »
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+    <script src="/static/js/tool-renderers.js"></script>
+    <script src="/static/js/tool-renderers-extended.js"></script>
+    <script src="/static/js/tool-renderers-complete.js"></script>
+</body>
+</html>
