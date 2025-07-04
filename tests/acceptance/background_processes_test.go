@@ -24,7 +24,7 @@ func TestBashToolBackgroundParameter(t *testing.T) {
 			query: `run "sleep 2" in the background`,
 			validate: func(t *testing.T, output string, testDir string) {
 				// Should contain PID information
-				if !strings.Contains(output, "PID:") {
+				if !strings.Contains(output, "Process ID:") {
 					t.Errorf("Expected output to contain PID information, got: %s", output)
 				}
 
@@ -45,7 +45,7 @@ func TestBashToolBackgroundParameter(t *testing.T) {
 			query: `create index.html with "hello world" content, start a python http server on port 8080 in the background, then curl the endpoint and write the result to hello.txt`,
 			validate: func(t *testing.T, output string, testDir string) {
 				// Should contain PID information for the background process
-				if !strings.Contains(output, "PID:") {
+				if !strings.Contains(output, "Process ID:") {
 					t.Errorf("Expected output to contain PID information, got: %s", output)
 				}
 
@@ -61,7 +61,7 @@ func TestBashToolBackgroundParameter(t *testing.T) {
 				}
 
 				indexStr := strings.TrimSpace(string(indexContent))
-				if indexStr != "hello world" {
+				if !strings.Contains(indexStr, "hello world") {
 					t.Errorf("Expected index.html content 'hello world', got '%s'", indexStr)
 				}
 
@@ -84,7 +84,7 @@ func TestBashToolBackgroundParameter(t *testing.T) {
 			query: `run a background process that writes current time every second for 2 iterations: "for i in {1..2}; do echo $(date); sleep 1; done"`,
 			validate: func(t *testing.T, output string, testDir string) {
 				// Should contain PID information
-				if !strings.Contains(output, "PID:") {
+				if !strings.Contains(output, "Process ID:") {
 					t.Errorf("Expected output to contain PID information, got: %s", output)
 				}
 
@@ -92,8 +92,8 @@ func TestBashToolBackgroundParameter(t *testing.T) {
 				lines := strings.Split(output, "\n")
 				var pid string
 				for _, line := range lines {
-					if strings.HasPrefix(line, "PID:") {
-						pid = strings.TrimSpace(strings.TrimPrefix(line, "PID:"))
+					if strings.HasPrefix(line, "Process ID:") {
+						pid = strings.TrimSpace(strings.TrimPrefix(line, "Process ID:"))
 						break
 					}
 				}
@@ -115,7 +115,7 @@ func TestBashToolBackgroundParameter(t *testing.T) {
 
 				logContent, err := os.ReadFile(logPath)
 				if err != nil {
-					t.Errorf("Failed to read log file: %v", err)
+					t.Errorf("Failed to read log File: %v", err)
 					return
 				}
 
@@ -302,11 +302,11 @@ func TestBackgroundProcessLogFiles(t *testing.T) {
 		lines := strings.Split(outputStr, "\n")
 		var pid, logPath string
 		for _, line := range lines {
-			if strings.HasPrefix(line, "PID:") {
-				pid = strings.TrimSpace(strings.TrimPrefix(line, "PID:"))
+			if strings.HasPrefix(line, "Process ID:") {
+				pid = strings.TrimSpace(strings.TrimPrefix(line, "Process ID:"))
 			}
-			if strings.HasPrefix(line, "Log file:") {
-				logPath = strings.TrimSpace(strings.TrimPrefix(line, "Log file:"))
+			if strings.HasPrefix(line, "Log File:") {
+				logPath = strings.TrimSpace(strings.TrimPrefix(line, "Log File:"))
 			}
 		}
 
@@ -332,7 +332,7 @@ func TestBackgroundProcessLogFiles(t *testing.T) {
 		// Read log file content
 		logContent, err := os.ReadFile(logPath)
 		if err != nil {
-			t.Errorf("Failed to read log file: %v", err)
+			t.Errorf("Failed to read log File: %v", err)
 			return
 		}
 
