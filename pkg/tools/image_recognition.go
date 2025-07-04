@@ -322,23 +322,23 @@ func (r *ImageRecognitionToolResult) StructuredData() tooltypes.StructuredToolRe
 		Timestamp: time.Now(),
 	}
 
-	if r.IsError() {
-		result.Error = r.GetError()
-		return result
-	}
-
 	// Determine if image is local or remote
 	imageType := "local"
 	if strings.HasPrefix(r.imagePath, "http://") || strings.HasPrefix(r.imagePath, "https://") {
 		imageType = "remote"
 	}
 
+	// Always populate metadata, even for errors
 	result.Metadata = &tooltypes.ImageRecognitionMetadata{
 		ImagePath: r.imagePath,
 		ImageType: imageType,
 		Prompt:    r.prompt,
 		Analysis:  r.result,
 		// ImageSize would require additional processing to extract
+	}
+
+	if r.IsError() {
+		result.Error = r.GetError()
 	}
 
 	return result

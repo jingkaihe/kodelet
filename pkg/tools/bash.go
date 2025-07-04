@@ -358,17 +358,17 @@ func (r *BashToolResult) StructuredData() tooltypes.StructuredToolResult {
 		Timestamp: time.Now(),
 	}
 
-	if r.IsError() {
-		result.Error = r.GetError()
-		return result
-	}
-
+	// Always populate metadata, even for errors
 	result.Metadata = &tooltypes.BashMetadata{
 		Command:       r.command,
 		Output:        r.combinedOutput,
 		ExitCode:      r.exitCode,
 		ExecutionTime: r.executionTime,
 		WorkingDir:    r.workingDir,
+	}
+
+	if r.IsError() {
+		result.Error = r.GetError()
 	}
 
 	return result
@@ -405,16 +405,16 @@ func (r *BackgroundBashToolResult) StructuredData() tooltypes.StructuredToolResu
 		Timestamp: time.Now(),
 	}
 
-	if r.IsError() {
-		result.Error = r.GetError()
-		return result
-	}
-
+	// Always populate metadata, even for errors
 	result.Metadata = &tooltypes.BackgroundBashMetadata{
 		Command:   r.command,
 		PID:       r.pid,
 		LogPath:   r.logPath,
 		StartTime: r.startTime,
+	}
+
+	if r.IsError() {
+		result.Error = r.GetError()
 	}
 
 	return result

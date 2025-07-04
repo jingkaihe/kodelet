@@ -162,17 +162,17 @@ func (r *SubAgentToolResult) StructuredData() tooltypes.StructuredToolResult {
 		Timestamp: time.Now(),
 	}
 
-	if r.IsError() {
-		result.Error = r.GetError()
-		return result
-	}
-
+	// Always populate metadata, even for errors
 	// Note: SubAgentToolResult doesn't store the original question or model strength
 	// This would require modifying the SubAgentToolResult struct
 	result.Metadata = &tooltypes.SubAgentMetadata{
 		Question:      "", // Not available in current structure
 		ModelStrength: "", // Not available in current structure
 		Response:      r.result,
+	}
+
+	if r.IsError() {
+		result.Error = r.GetError()
 	}
 
 	return result

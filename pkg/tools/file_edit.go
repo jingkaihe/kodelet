@@ -62,14 +62,10 @@ func (r *FileEditToolResult) StructuredData() tooltypes.StructuredToolResult {
 		Timestamp: time.Now(),
 	}
 
-	if r.IsError() {
-		result.Error = r.GetError()
-		return result
-	}
-
 	// Detect language from file extension
 	language := utils.DetectLanguageFromPath(r.filename)
 
+	// Always populate metadata, even for errors
 	result.Metadata = &tooltypes.FileEditMetadata{
 		FilePath: r.filename,
 		Language: language,
@@ -81,6 +77,10 @@ func (r *FileEditToolResult) StructuredData() tooltypes.StructuredToolResult {
 				NewContent: r.newText,
 			},
 		},
+	}
+
+	if r.IsError() {
+		result.Error = r.GetError()
 	}
 
 	return result

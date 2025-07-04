@@ -610,11 +610,6 @@ func (r *WebFetchToolResult) StructuredData() tooltypes.StructuredToolResult {
 		Timestamp: time.Now(),
 	}
 
-	if r.IsError() {
-		result.Error = r.GetError()
-		return result
-	}
-
 	// Determine processed type based on what happened
 	processedType := "markdown" // Default for most web pages
 	if r.filePath != "" {
@@ -623,6 +618,7 @@ func (r *WebFetchToolResult) StructuredData() tooltypes.StructuredToolResult {
 		processedType = "ai_extracted"
 	}
 
+	// Always populate metadata, even for errors
 	result.Metadata = &tooltypes.WebFetchMetadata{
 		URL:           r.url,
 		ContentType:   "", // Not available in current structure
@@ -631,6 +627,10 @@ func (r *WebFetchToolResult) StructuredData() tooltypes.StructuredToolResult {
 		Prompt:        r.prompt,
 		ProcessedType: processedType,
 		Content:       r.result,
+	}
+
+	if r.IsError() {
+		result.Error = r.GetError()
 	}
 
 	return result

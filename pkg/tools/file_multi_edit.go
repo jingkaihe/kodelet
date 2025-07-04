@@ -218,11 +218,6 @@ func (r *FileMultiEditToolResult) StructuredData() tooltypes.StructuredToolResul
 		Timestamp: time.Now(),
 	}
 
-	if r.IsError() {
-		result.Error = r.GetError()
-		return result
-	}
-
 	// Detect language from file extension
 	language := utils.DetectLanguageFromPath(r.filename)
 
@@ -237,10 +232,15 @@ func (r *FileMultiEditToolResult) StructuredData() tooltypes.StructuredToolResul
 		},
 	}
 
+	// Always populate metadata, even for errors
 	result.Metadata = &tooltypes.FileMultiEditMetadata{
 		FilePath: r.filename,
 		Edits:    edits,
 		Language: language,
+	}
+
+	if r.IsError() {
+		result.Error = r.GetError()
 	}
 
 	return result

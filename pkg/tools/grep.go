@@ -62,11 +62,6 @@ func (r *GrepToolResult) StructuredData() tooltypes.StructuredToolResult {
 		Timestamp: time.Now(),
 	}
 
-	if r.IsError() {
-		result.Error = r.GetError()
-		return result
-	}
-
 	// Convert internal SearchResult to metadata format
 	metadataResults := make([]tooltypes.SearchResult, 0, len(r.results))
 	for _, res := range r.results {
@@ -90,12 +85,17 @@ func (r *GrepToolResult) StructuredData() tooltypes.StructuredToolResult {
 		})
 	}
 
+	// Always populate metadata, even for errors
 	result.Metadata = &tooltypes.GrepMetadata{
 		Pattern:   r.pattern,
 		Path:      r.path,
 		Include:   r.include,
 		Results:   metadataResults,
 		Truncated: r.truncated,
+	}
+
+	if r.IsError() {
+		result.Error = r.GetError()
 	}
 
 	return result

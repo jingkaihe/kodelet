@@ -132,11 +132,6 @@ func (r *ViewBackgroundProcessesToolResult) StructuredData() tooltypes.Structure
 		Timestamp: time.Now(),
 	}
 
-	if r.IsError() {
-		result.Error = r.GetError()
-		return result
-	}
-
 	// Convert background processes to structured format
 	processes := make([]tooltypes.BackgroundProcessInfo, 0, len(r.processes))
 	for i, process := range r.processes {
@@ -154,9 +149,14 @@ func (r *ViewBackgroundProcessesToolResult) StructuredData() tooltypes.Structure
 		})
 	}
 
+	// Always populate metadata, even for errors
 	result.Metadata = &tooltypes.ViewBackgroundProcessesMetadata{
 		Processes: processes,
 		Count:     len(processes),
+	}
+
+	if r.IsError() {
+		result.Error = r.GetError()
 	}
 
 	return result

@@ -171,11 +171,6 @@ func (r *TodoToolResult) StructuredData() tooltypes.StructuredToolResult {
 		Timestamp: time.Now(),
 	}
 
-	if r.IsError() {
-		result.Error = r.GetError()
-		return result
-	}
-
 	// Convert Todo items to structured format
 	todoItems := make([]tooltypes.TodoItem, 0, len(r.todos))
 	stats := tooltypes.TodoStats{}
@@ -200,10 +195,15 @@ func (r *TodoToolResult) StructuredData() tooltypes.StructuredToolResult {
 		}
 	}
 
+	// Always populate metadata, even for errors
 	result.Metadata = &tooltypes.TodoMetadata{
 		Action:     action,
 		TodoList:   todoItems,
 		Statistics: stats,
+	}
+
+	if r.IsError() {
+		result.Error = r.GetError()
 	}
 
 	return result

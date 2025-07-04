@@ -52,19 +52,19 @@ func (r *FileWriteToolResult) StructuredData() tooltypes.StructuredToolResult {
 		Timestamp: time.Now(),
 	}
 
-	if r.IsError() {
-		result.Error = r.GetError()
-		return result
-	}
-
 	// Detect language from file extension
 	language := utils.DetectLanguageFromPath(r.filename)
 
+	// Always populate metadata, even for errors
 	result.Metadata = &tooltypes.FileWriteMetadata{
 		FilePath: r.filename,
 		Content:  r.text,
 		Size:     int64(len(r.text)),
 		Language: language,
+	}
+
+	if r.IsError() {
+		result.Error = r.GetError()
 	}
 
 	return result
