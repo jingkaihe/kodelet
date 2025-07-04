@@ -35,20 +35,6 @@ func (r GetPageResult) AssistantFacing() string {
 	return tools.StringifyToolResult(result+"\n\n"+r.HTML, "")
 }
 
-func (r GetPageResult) UserFacing() string {
-	if !r.Success {
-		return fmt.Sprintf("❌ Failed to get page content: %s", r.Error)
-	}
-
-	status := "✅ Page content retrieved"
-	if r.Truncated {
-		status += " (truncated)"
-	}
-
-	return fmt.Sprintf("%s\nURL: %s\nTitle: %s\nHTML Length: %d characters",
-		status, r.URL, r.Title, len(r.HTML))
-}
-
 func (r GetPageResult) IsError() bool {
 	return !r.Success
 }

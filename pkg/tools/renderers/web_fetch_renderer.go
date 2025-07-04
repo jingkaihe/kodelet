@@ -19,7 +19,6 @@ func (r *WebFetchRenderer) RenderCLI(result tools.StructuredToolResult) string {
 		return "Error: Invalid metadata type for web_fetch"
 	}
 
-	// Match the UserFacing() output exactly
 	if meta.SavedPath != "" {
 		return fmt.Sprintf("Web Fetch: %s\nSaved to: %s\n%s", meta.URL, meta.SavedPath, meta.Content)
 	}

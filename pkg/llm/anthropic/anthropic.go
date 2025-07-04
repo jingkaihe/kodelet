@@ -42,20 +42,19 @@ const (
 
 // AnthropicThread implements the Thread interface using Anthropic's Claude API
 type AnthropicThread struct {
-	client                anthropic.Client
-	config                llmtypes.Config
-	state                 tooltypes.State
-	messages              []anthropic.MessageParam
-	usage                 *llmtypes.Usage
-	conversationID        string
-	summary               string
-	isPersisted           bool
-	store                 ConversationStore
-	mu                    sync.Mutex
-	conversationMu        sync.Mutex
-	useSubscription       bool
-	userFacingToolResults map[string]string                         // Maps tool_call_id to user-facing result (DEPRECATED)
-	toolResults           map[string]tooltypes.StructuredToolResult // Maps tool_call_id to structured result
+	client          anthropic.Client
+	config          llmtypes.Config
+	state           tooltypes.State
+	messages        []anthropic.MessageParam
+	usage           *llmtypes.Usage
+	conversationID  string
+	summary         string
+	isPersisted     bool
+	store           ConversationStore
+	mu              sync.Mutex
+	conversationMu  sync.Mutex
+	useSubscription bool
+	toolResults     map[string]tooltypes.StructuredToolResult // Maps tool_call_id to structured result
 }
 
 func (t *AnthropicThread) Provider() string {
@@ -129,14 +128,13 @@ func NewAnthropicThread(config llmtypes.Config) (*AnthropicThread, error) {
 	}
 
 	return &AnthropicThread{
-		client:                client,
-		config:                config,
-		useSubscription:       useSubscription,
-		conversationID:        conversations.GenerateID(),
-		isPersisted:           false,
-		usage:                 &llmtypes.Usage{}, // must be initialised to avoid nil pointer dereference
-		userFacingToolResults: make(map[string]string),
-		toolResults:           make(map[string]tooltypes.StructuredToolResult),
+		client:          client,
+		config:          config,
+		useSubscription: useSubscription,
+		conversationID:  conversations.GenerateID(),
+		isPersisted:     false,
+		usage:           &llmtypes.Usage{}, // must be initialised to avoid nil pointer dereference
+		toolResults:     make(map[string]tooltypes.StructuredToolResult),
 	}, nil
 }
 
@@ -408,14 +406,13 @@ func (t *AnthropicThread) processMessageExchange(
 			runToolCtx := t.WithSubAgent(ctx, handler)
 			output := tools.RunTool(runToolCtx, t.state, block.Name, string(variant.JSON.Input.Raw()))
 
-			// Use CLI rendering instead of UserFacing()
+			// Use CLI rendering for consistent output formatting
 			structuredResult := output.StructuredData()
 			registry := renderers.NewRendererRegistry()
 			renderedOutput := registry.Render(structuredResult)
 			handler.HandleToolResult(block.Name, renderedOutput)
 
-			// Store both structured and user-facing results (keeping user-facing for backward compatibility)
-			t.SetUserFacingToolResult(block.ID, renderedOutput)
+			// Store structured results
 			t.SetStructuredToolResult(block.ID, structuredResult)
 
 			// For tracing, add tool execution completion event
@@ -649,13 +646,12 @@ func (t *AnthropicThread) NewSubAgent(ctx context.Context) llmtypes.Thread {
 
 	// Create subagent thread reusing the parent's client instead of creating a new one
 	thread := &AnthropicThread{
-		client:                t.client, // Reuse parent's client
-		config:                config,
-		useSubscription:       t.useSubscription, // Reuse parent's subscription status
-		conversationID:        conversations.GenerateID(),
-		isPersisted:           false,   // subagent is not persisted
-		usage:                 t.usage, // Share usage tracking with parent
-		userFacingToolResults: make(map[string]string),
+		client:          t.client, // Reuse parent's client
+		config:          config,
+		useSubscription: t.useSubscription, // Reuse parent's subscription status
+		conversationID:  conversations.GenerateID(),
+		isPersisted:     false,   // subagent is not persisted
+		usage:           t.usage, // Share usage tracking with parent
 	}
 
 	thread.SetState(tools.NewBasicState(ctx, tools.WithSubAgentTools(), tools.WithExtraMCPTools(t.state.MCPTools())))
@@ -880,45 +876,6 @@ func getMediaTypeFromExtension(ext string) (anthropic.Base64ImageSourceMediaType
 		return anthropic.Base64ImageSourceMediaTypeImageWebP, nil
 	default:
 		return "", fmt.Errorf("unsupported format")
-	}
-}
-
-// SetUserFacingToolResult stores the user-facing result for a tool call
-func (t *AnthropicThread) SetUserFacingToolResult(toolCallID, result string) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if t.userFacingToolResults == nil {
-		t.userFacingToolResults = make(map[string]string)
-	}
-	t.userFacingToolResults[toolCallID] = result
-}
-
-// GetUserFacingToolResults returns all user-facing tool results
-func (t *AnthropicThread) GetUserFacingToolResults() map[string]string {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if t.userFacingToolResults == nil {
-		return make(map[string]string)
-	}
-	// Return a copy to avoid race conditions
-	result := make(map[string]string)
-	for k, v := range t.userFacingToolResults {
-		result[k] = v
-	}
-	return result
-}
-
-// SetUserFacingToolResults sets all user-facing tool results (for loading from conversation)
-func (t *AnthropicThread) SetUserFacingToolResults(results map[string]string) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if results == nil {
-		t.userFacingToolResults = make(map[string]string)
-	} else {
-		t.userFacingToolResults = make(map[string]string)
-		for k, v := range results {
-			t.userFacingToolResults[k] = v
-		}
 	}
 }
 

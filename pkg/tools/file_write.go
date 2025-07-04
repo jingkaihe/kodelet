@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -44,19 +43,6 @@ func (r *FileWriteToolResult) AssistantFacing() string {
 		content = r.GetResult()
 	}
 	return tooltypes.StringifyToolResult(content, r.GetError())
-}
-
-func (r *FileWriteToolResult) UserFacing() string {
-	if r.IsError() {
-		return r.GetError()
-	}
-
-	lines := strings.Split(r.text, "\n")
-	textWithLineNumber := utils.ContentWithLineNumber(lines, 0)
-
-	buf := bytes.NewBufferString(fmt.Sprintf("File Written: %s\n", r.filename))
-	buf.WriteString(textWithLineNumber)
-	return buf.String()
 }
 
 func (r *FileWriteToolResult) StructuredData() tooltypes.StructuredToolResult {

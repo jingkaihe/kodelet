@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -9,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/aymanbagabas/go-udiff"
 	"github.com/invopop/jsonschema"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/jingkaihe/kodelet/pkg/utils"
@@ -55,22 +53,6 @@ func (r *FileEditToolResult) AssistantFacing() string {
 
 	result := fmt.Sprintf("File %s has been edited successfully\n\nEdited code block:\n%s", r.filename, formattedEdit)
 	return tooltypes.StringifyToolResult(result, "")
-}
-
-func (r *FileEditToolResult) UserFacing() string {
-	if r.IsError() {
-		return r.GetError()
-	}
-
-	buf := bytes.NewBufferString(fmt.Sprintf("File Edit: %s\n", r.filename))
-	fmt.Fprintf(buf, "Lines %d-%d\n\n", r.startLine, r.endLine)
-
-	buf.WriteString("Diff:\n")
-
-	out := udiff.Unified(r.filename, r.filename, r.oldContent, r.newContent)
-	buf.WriteString(out)
-
-	return buf.String()
 }
 
 func (r *FileEditToolResult) StructuredData() tooltypes.StructuredToolResult {

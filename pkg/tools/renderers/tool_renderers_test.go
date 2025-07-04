@@ -334,7 +334,7 @@ func TestWebFetchRenderer(t *testing.T) {
 			"https://example.com", "/tmp/content.html", content)
 
 		if output != expected {
-			t.Errorf("Expected output to match UserFacing() format:\nExpected:\n%s\nGot:\n%s", expected, output)
+			t.Errorf("Expected output to match RenderCLI() format:\nExpected:\n%s\nGot:\n%s", expected, output)
 		}
 	})
 
@@ -358,7 +358,7 @@ func TestWebFetchRenderer(t *testing.T) {
 			"https://example.com", "Extract main content", content)
 
 		if output != expected {
-			t.Errorf("Expected output to match UserFacing() format:\nExpected:\n%s\nGot:\n%s", expected, output)
+			t.Errorf("Expected output to match RenderCLI() format:\nExpected:\n%s\nGot:\n%s", expected, output)
 		}
 	})
 
@@ -380,7 +380,7 @@ func TestWebFetchRenderer(t *testing.T) {
 		expected := fmt.Sprintf("Web Fetch: %s\n%s", "https://example.com", content)
 
 		if output != expected {
-			t.Errorf("Expected output to match UserFacing() format:\nExpected:\n%s\nGot:\n%s", expected, output)
+			t.Errorf("Expected output to match RenderCLI() format:\nExpected:\n%s\nGot:\n%s", expected, output)
 		}
 	})
 

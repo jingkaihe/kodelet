@@ -21,7 +21,6 @@ type Tool interface {
 
 type ToolResult interface {
 	AssistantFacing() string
-	UserFacing() string
 	IsError() bool
 	GetError() string  // xxx: to be removed
 	GetResult() string // xxx: to be removed
@@ -48,10 +47,6 @@ func (t BaseToolResult) AssistantFacing() string {
 `, t.Result)
 	}
 	return out
-}
-
-func (t BaseToolResult) UserFacing() string {
-	return t.AssistantFacing()
 }
 
 func (t BaseToolResult) IsError() bool {

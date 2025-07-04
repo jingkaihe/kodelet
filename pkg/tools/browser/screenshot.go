@@ -37,13 +37,6 @@ func (r ScreenshotResult) AssistantFacing() string {
 	return tools.StringifyToolResult(result, "")
 }
 
-func (r ScreenshotResult) UserFacing() string {
-	if !r.Success {
-		return fmt.Sprintf("❌ Screenshot failed: %s", r.Error)
-	}
-	return fmt.Sprintf("📸 Screenshot saved to %s (%dx%d)", r.OutputPath, r.Width, r.Height)
-}
-
 func (r ScreenshotResult) IsError() bool {
 	return !r.Success
 }

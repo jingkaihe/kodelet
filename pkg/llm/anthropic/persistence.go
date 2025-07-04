@@ -72,17 +72,16 @@ func (t *AnthropicThread) SaveConversation(ctx context.Context, summarise bool) 
 
 	// Create a new conversation record
 	record := conversations.ConversationRecord{
-		ID:                    t.conversationID,
-		RawMessages:           rawMessages,
-		ModelType:             "anthropic",
-		Usage:                 *t.usage,
-		Metadata:              map[string]interface{}{"model": t.config.Model},
-		Summary:               t.summary,
-		CreatedAt:             time.Now(),
-		UpdatedAt:             time.Now(),
-		FileLastAccess:        t.state.FileLastAccess(),
-		UserFacingToolResults: t.GetUserFacingToolResults(),
-		ToolResults:           t.GetStructuredToolResults(),
+		ID:             t.conversationID,
+		RawMessages:    rawMessages,
+		ModelType:      "anthropic",
+		Usage:          *t.usage,
+		Metadata:       map[string]interface{}{"model": t.config.Model},
+		Summary:        t.summary,
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+		FileLastAccess: t.state.FileLastAccess(),
+		ToolResults:    t.GetStructuredToolResults(),
 	}
 
 	// Save the record
@@ -121,8 +120,6 @@ func (t *AnthropicThread) loadConversation() error {
 	t.usage = &record.Usage
 	t.summary = record.Summary
 	t.state.SetFileLastAccess(record.FileLastAccess)
-	// Restore user-facing tool results
-	t.SetUserFacingToolResults(record.UserFacingToolResults)
 	// Restore structured tool results
 	t.SetStructuredToolResults(record.ToolResults)
 	return nil

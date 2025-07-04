@@ -11,8 +11,9 @@ import (
 type BashRenderer struct{}
 
 func (r *BashRenderer) RenderCLI(result tools.StructuredToolResult) string {
+	var output strings.Builder
 	if !result.Success {
-		return fmt.Sprintf("Error: %s", result.Error)
+		output.WriteString(fmt.Sprintf("Error: %s", result.Error))
 	}
 
 	var meta tools.BashMetadata
@@ -20,7 +21,6 @@ func (r *BashRenderer) RenderCLI(result tools.StructuredToolResult) string {
 		return "Error: Invalid metadata type for bash"
 	}
 
-	var output strings.Builder
 	output.WriteString(fmt.Sprintf("Command: %s\n", meta.Command))
 	output.WriteString(fmt.Sprintf("Exit Code: %d\n", meta.ExitCode))
 

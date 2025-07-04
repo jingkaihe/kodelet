@@ -35,10 +35,6 @@ func (r *SubAgentToolResult) AssistantFacing() string {
 	return tooltypes.StringifyToolResult(r.result, r.GetError())
 }
 
-func (r *SubAgentToolResult) UserFacing() string {
-	return r.AssistantFacing()
-}
-
 type SubAgentTool struct{}
 
 type ModelStrength string

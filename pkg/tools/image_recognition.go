@@ -43,13 +43,6 @@ func (r *ImageRecognitionToolResult) AssistantFacing() string {
 	return tooltypes.StringifyToolResult(r.result, r.err)
 }
 
-func (r *ImageRecognitionToolResult) UserFacing() string {
-	if r.IsError() {
-		return r.GetError()
-	}
-	return fmt.Sprintf("Image Recognition: %s\nPrompt: %s\n%s", r.imagePath, r.prompt, r.result)
-}
-
 // ImageRecognitionTool implements the image_recognition tool for processing and understanding images.
 type ImageRecognitionTool struct{}
 

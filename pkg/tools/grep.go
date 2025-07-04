@@ -55,31 +55,6 @@ func (r *GrepToolResult) AssistantFacing() string {
 	return tooltypes.StringifyToolResult(content, r.GetError())
 }
 
-func (r *GrepToolResult) UserFacing() string {
-	if r.IsError() {
-		return r.GetError()
-	}
-
-	var result strings.Builder
-	result.WriteString(fmt.Sprintf("Search Pattern: %s\n", r.pattern))
-	if r.path != "" {
-		result.WriteString(fmt.Sprintf("Search Path: %s\n", r.path))
-	}
-	if r.include != "" {
-		result.WriteString(fmt.Sprintf("Include Pattern: %s\n", r.include))
-	}
-	result.WriteString(fmt.Sprintf("Found matches in %d files:\n\n", len(r.results)))
-
-	content := r.GetResult()
-	result.WriteString(content)
-
-	if r.truncated {
-		result.WriteString("\n\n[TRUNCATED DUE TO MAXIMUM 100 RESULT LIMIT]")
-	}
-
-	return result.String()
-}
-
 func (r *GrepToolResult) StructuredData() tooltypes.StructuredToolResult {
 	result := tooltypes.StructuredToolResult{
 		ToolName:  "grep_tool",

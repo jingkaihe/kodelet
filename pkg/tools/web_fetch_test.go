@@ -443,8 +443,6 @@ func TestWebFetchToolResultInterfaces(t *testing.T) {
 		assert.Equal(t, "File content here", successResult.GetResult())
 		assert.Empty(t, successResult.GetError())
 		assert.False(t, successResult.IsError())
-		assert.Contains(t, successResult.UserFacing(), "Saved to: /path/to/saved/file.txt")
-		assert.Contains(t, successResult.AssistantFacing(), "File content here")
 
 		// Test error result
 		errorResult := &WebFetchToolResult{
@@ -455,8 +453,6 @@ func TestWebFetchToolResultInterfaces(t *testing.T) {
 		assert.Empty(t, errorResult.GetResult())
 		assert.Equal(t, "Connection failed", errorResult.GetError())
 		assert.True(t, errorResult.IsError())
-		assert.Equal(t, "Connection failed", errorResult.UserFacing())
-		assert.Contains(t, errorResult.AssistantFacing(), "Connection failed")
 	})
 }
 
@@ -570,18 +566,6 @@ func (m *MockThread) Provider() string {
 
 func (m *MockThread) GetMessages() ([]llm.Message, error) {
 	return []llm.Message{}, nil
-}
-
-func (m *MockThread) SetUserFacingToolResult(toolCallID, result string) {
-	// Mock implementation - do nothing
-}
-
-func (m *MockThread) GetUserFacingToolResults() map[string]string {
-	return make(map[string]string)
-}
-
-func (m *MockThread) SetUserFacingToolResults(results map[string]string) {
-	// Mock implementation - do nothing
 }
 
 func (m *MockThread) Reset() {

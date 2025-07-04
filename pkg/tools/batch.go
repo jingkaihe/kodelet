@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/invopop/jsonschema"
-	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
 	"go.opentelemetry.io/otel/attribute"
@@ -76,23 +75,6 @@ func (r *BatchToolResult) AssistantFacing() string {
 	}
 
 	return results.String()
-}
-
-func (r *BatchToolResult) UserFacing() string {
-	// Use CLI rendering for sub-results to maintain consistency
-	var results []string
-	registry := renderers.NewRendererRegistry()
-	for _, toolResult := range r.toolResults {
-		structuredResult := toolResult.StructuredData()
-		renderedOutput := registry.Render(structuredResult)
-		results = append(results, renderedOutput)
-	}
-
-	content := strings.Join(results, "\n\n")
-	if content == "" {
-		return "Batch operation completed successfully"
-	}
-	return fmt.Sprintf("Batch: %s\n%s", r.description, content)
 }
 
 type BatchTool struct{}

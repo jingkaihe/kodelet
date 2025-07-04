@@ -308,13 +308,6 @@ func (r *MCPToolResult) AssistantFacing() string {
 	return tooltypes.StringifyToolResult(r.result, r.err)
 }
 
-func (r *MCPToolResult) UserFacing() string {
-	if r.IsError() {
-		return r.GetError()
-	}
-	return r.result
-}
-
 func (r *MCPToolResult) StructuredData() tooltypes.StructuredToolResult {
 	result := tooltypes.StructuredToolResult{
 		ToolName:  r.toolName,

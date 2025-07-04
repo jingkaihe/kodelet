@@ -57,30 +57,6 @@ func (r *GlobToolResult) AssistantFacing() string {
 	return tooltypes.StringifyToolResult(content, r.GetError())
 }
 
-func (r *GlobToolResult) UserFacing() string {
-	if r.IsError() {
-		return r.GetError()
-	}
-
-	var result strings.Builder
-	result.WriteString(fmt.Sprintf("Glob Pattern: %s\n", r.pattern))
-	if r.path != "" {
-		result.WriteString(fmt.Sprintf("Search Path: %s\n", r.path))
-	}
-	result.WriteString(fmt.Sprintf("Found %d files:\n", len(r.files)))
-
-	for _, file := range r.files {
-		result.WriteString(file)
-		result.WriteString("\n")
-	}
-
-	if r.truncated {
-		result.WriteString("\n[Results truncated to 100 files. Please refine your pattern to narrow down the results.]\n")
-	}
-
-	return result.String()
-}
-
 func (r *GlobToolResult) StructuredData() tooltypes.StructuredToolResult {
 	result := tooltypes.StructuredToolResult{
 		ToolName:  "glob_tool",

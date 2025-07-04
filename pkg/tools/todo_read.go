@@ -43,15 +43,6 @@ func (r *TodoToolResult) AssistantFacing() string {
 	return tooltypes.StringifyToolResult(r.GetResult(), r.GetError())
 }
 
-func (r *TodoToolResult) UserFacing() string {
-	if r.IsError() {
-		return r.GetError()
-	}
-	// Always show formatted todos for user-facing output
-	sortedTodos := sortTodos(r.todos)
-	return formatTodos(sortedTodos)
-}
-
 type TodoReadTool struct{}
 
 type TodoReadInput struct{}

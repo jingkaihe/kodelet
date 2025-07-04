@@ -348,23 +348,6 @@ func (r *BashToolResult) AssistantFacing() string {
 	return tooltypes.StringifyToolResult(r.combinedOutput, r.GetError())
 }
 
-func (r *BashToolResult) UserFacing() string {
-	buf := bytes.NewBufferString(fmt.Sprintf("Command: %s\n", r.command))
-
-	output := r.combinedOutput
-	if output == "" {
-		buf.WriteString("(no output)")
-	} else {
-		buf.WriteString(output)
-	}
-
-	if r.IsError() {
-		buf.WriteString("\nError: " + r.GetError())
-	}
-
-	return buf.String()
-}
-
 func (r *BashToolResult) StructuredData() tooltypes.StructuredToolResult {
 	result := tooltypes.StructuredToolResult{
 		ToolName:  "bash",
@@ -407,21 +390,6 @@ func (r *BackgroundBashToolResult) IsError() bool {
 
 func (r *BackgroundBashToolResult) AssistantFacing() string {
 	return tooltypes.StringifyToolResult(r.GetResult(), r.GetError())
-}
-
-func (r *BackgroundBashToolResult) UserFacing() string {
-	buf := bytes.NewBufferString("")
-	fmt.Fprintf(buf, "Command: %s\n", r.command)
-	fmt.Fprintf(buf, "PID: %d\n", r.pid)
-	fmt.Fprintf(buf, "Log file: %s\n", r.logPath)
-
-	if r.IsError() {
-		buf.WriteString("Error: " + r.GetError())
-	} else {
-		buf.WriteString("Process started in background successfully")
-	}
-
-	return buf.String()
 }
 
 func (r *BackgroundBashToolResult) StructuredData() tooltypes.StructuredToolResult {

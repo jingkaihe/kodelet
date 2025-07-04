@@ -2,7 +2,6 @@ package tools
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -47,19 +46,6 @@ func (r *FileReadToolResult) AssistantFacing() string {
 		content = utils.ContentWithLineNumber(r.lines, r.offset)
 	}
 	return tooltypes.StringifyToolResult(content, r.GetError())
-}
-
-func (r *FileReadToolResult) UserFacing() string {
-	if r.IsError() {
-		return r.GetError()
-	}
-
-	content := utils.ContentWithLineNumber(r.lines, r.offset)
-
-	buf := bytes.NewBufferString(fmt.Sprintf("File Read: %s\n", r.filename))
-	fmt.Fprintf(buf, "Offset: %d\n", r.offset)
-	buf.WriteString(content)
-	return buf.String()
 }
 
 func (r *FileReadToolResult) StructuredData() tooltypes.StructuredToolResult {

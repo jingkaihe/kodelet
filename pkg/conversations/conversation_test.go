@@ -17,13 +17,10 @@ func TestNewConversationRecord(t *testing.T) {
 	assert.NotZero(t, record.CreatedAt, "CreatedAt should be set")
 	assert.NotZero(t, record.UpdatedAt, "UpdatedAt should be set")
 	assert.NotNil(t, record.Metadata, "Metadata should be initialized")
-	assert.NotNil(t, record.UserFacingToolResults, "UserFacingToolResults should be initialized")
-	assert.Empty(t, record.UserFacingToolResults, "UserFacingToolResults should be empty initially")
 
 	// Test creation with generated ID
 	record = NewConversationRecord("")
 	assert.NotEmpty(t, record.ID, "ID should be generated")
-	assert.NotNil(t, record.UserFacingToolResults, "UserFacingToolResults should be initialized")
 }
 
 func TestToSummary(t *testing.T) {

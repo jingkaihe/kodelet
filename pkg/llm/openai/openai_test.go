@@ -99,54 +99,6 @@ func TestExtractMessages(t *testing.T) {
 	assert.Contains(t, toolCallMessage.Content, "get_time") // The content should contain the serialized tool call
 }
 
-func TestExtractMessagesWithUserFacingToolResults(t *testing.T) {
-	// Test with user-facing tool results
-	messagesWithToolsJSON := `[
-		{"role": "system", "content": "You are a helpful AI assistant."},
-		{"role": "user", "content": "What time is it?"},
-		{"role": "assistant", "content": "", "tool_calls": [{"id": "call_123", "function": {"name": "get_time", "arguments": "{}"}}]},
-		{"role": "tool", "content": "Raw output: 10:30 AM", "tool_call_id": "call_123"},
-		{"role": "assistant", "content": "The current time is 10:30 AM."}
-	]`
-
-	// Test with structured tool results
-	toolResults := map[string]tooltypes.StructuredToolResult{
-		"call_123": {
-			ToolName:  "get_time",
-			Success:   true,
-			Timestamp: time.Now(),
-			Metadata:  nil,
-		},
-	}
-
-	messages, err := ExtractMessages([]byte(messagesWithToolsJSON), toolResults)
-	assert.NoError(t, err)
-	assert.Len(t, messages, 4) // System message should be filtered out
-
-	// Check that tool calls are properly serialized
-	toolCallMessage := messages[1]
-	assert.Equal(t, "assistant", toolCallMessage.Role)
-	assert.Contains(t, toolCallMessage.Content, "get_time")
-
-	// Check that tool result uses user-facing result instead of raw content
-	// The tool result message should be at index 2 and should be converted to assistant role
-	toolResultMessage := messages[2]
-	assert.Equal(t, "assistant", toolResultMessage.Role)
-	assert.Contains(t, toolResultMessage.Content, "🔄 Tool result:")
-	// Tool result now uses CLI rendering which will use fallback rendering for unknown tools
-	assert.Contains(t, toolResultMessage.Content, "get_time")
-
-	// Test with nil toolResults (should use raw content)
-	messages, err = ExtractMessages([]byte(messagesWithToolsJSON), nil)
-	assert.NoError(t, err)
-	assert.Len(t, messages, 4)
-
-	toolResultMessage = messages[2]
-	assert.Equal(t, "assistant", toolResultMessage.Role)
-	assert.Contains(t, toolResultMessage.Content, "🔄 Tool result:")
-	assert.Contains(t, toolResultMessage.Content, "Raw output: 10:30 AM")
-}
-
 func TestExtractMessagesWithMultipleToolResults(t *testing.T) {
 	// Test with multiple tool calls and results
 	messagesWithMultipleToolsJSON := `[

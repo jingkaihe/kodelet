@@ -34,16 +34,6 @@ func (r ClickResult) AssistantFacing() string {
 	return tools.StringifyToolResult("Element clicked successfully", "")
 }
 
-func (r ClickResult) UserFacing() string {
-	if !r.Success {
-		if !r.ElementFound {
-			return "❌ Element not found or not clickable"
-		}
-		return fmt.Sprintf("❌ Click failed: %s", r.Error)
-	}
-	return "✅ Element clicked successfully"
-}
-
 func (r ClickResult) IsError() bool {
 	return !r.Success
 }

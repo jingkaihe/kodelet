@@ -287,7 +287,6 @@ func TestToolResultInterfaces(t *testing.T) {
 		name   string
 		result interface {
 			AssistantFacing() string
-			UserFacing() string
 			IsError() bool
 			GetError() string
 			GetResult() string
@@ -305,7 +304,6 @@ func TestToolResultInterfaces(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Test that all methods return non-empty strings for successful results
 			assert.NotEmpty(t, tt.result.AssistantFacing())
-			assert.NotEmpty(t, tt.result.UserFacing())
 			assert.False(t, tt.result.IsError())
 			assert.Empty(t, tt.result.GetError())
 			assert.NotEmpty(t, tt.result.GetResult())

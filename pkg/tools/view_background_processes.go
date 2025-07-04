@@ -37,13 +37,6 @@ func (r *ViewBackgroundProcessesToolResult) AssistantFacing() string {
 	return tooltypes.StringifyToolResult(r.GetResult(), r.GetError())
 }
 
-func (r *ViewBackgroundProcessesToolResult) UserFacing() string {
-	if r.IsError() {
-		return r.GetError()
-	}
-	return r.formatProcesses()
-}
-
 func (r *ViewBackgroundProcessesToolResult) formatProcesses() string {
 	if len(r.processes) == 0 {
 		return "No background processes running."

@@ -32,13 +32,6 @@ func (r *ThinkingToolResult) AssistantFacing() string {
 	return tooltypes.StringifyToolResult("Your thought have been recorded.", r.err)
 }
 
-func (r *ThinkingToolResult) UserFacing() string {
-	if r.IsError() {
-		return r.GetError()
-	}
-	return fmt.Sprintf("Thought: %s\nYour thought have been recorded.", r.thought)
-}
-
 type ThinkingTool struct{}
 
 type ThinkingInput struct {

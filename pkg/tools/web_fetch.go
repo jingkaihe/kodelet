@@ -49,19 +49,6 @@ func (r *WebFetchToolResult) AssistantFacing() string {
 	return tooltypes.StringifyToolResult(r.result, r.err)
 }
 
-func (r *WebFetchToolResult) UserFacing() string {
-	if r.IsError() {
-		return r.GetError()
-	}
-	if r.filePath != "" {
-		return fmt.Sprintf("Web Fetch: %s\nSaved to: %s\n%s", r.url, r.filePath, r.result)
-	}
-	if r.prompt != "" {
-		return fmt.Sprintf("Web Fetch: %s\nPrompt: %s\n%s", r.url, r.prompt, r.result)
-	}
-	return fmt.Sprintf("Web Fetch: %s\n%s", r.url, r.result)
-}
-
 // WebFetchTool implements the web_fetch tool for retrieving and processing web content.
 type WebFetchTool struct {
 	domainFilter *utils.DomainFilter
