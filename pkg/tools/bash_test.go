@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
 func TestBashTool_GenerateSchema(t *testing.T) {
