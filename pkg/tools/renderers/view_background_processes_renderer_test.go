@@ -13,7 +13,7 @@ func TestViewBackgroundProcessesRenderer(t *testing.T) {
 
 	t.Run("Background processes with multiple entries", func(t *testing.T) {
 		testTime := time.Date(2023, 12, 1, 14, 30, 0, 0, time.UTC)
-		
+
 		result := tools.StructuredToolResult{
 			ToolName:  "view_background_processes",
 			Success:   true,
@@ -88,7 +88,7 @@ func TestViewBackgroundProcessesRenderer(t *testing.T) {
 
 	t.Run("Single background process", func(t *testing.T) {
 		testTime := time.Date(2023, 12, 1, 10, 0, 0, 0, time.UTC)
-		
+
 		result := tools.StructuredToolResult{
 			ToolName:  "view_background_processes",
 			Success:   true,
@@ -149,7 +149,7 @@ func TestViewBackgroundProcessesRenderer(t *testing.T) {
 
 	t.Run("Processes with different statuses", func(t *testing.T) {
 		testTime := time.Date(2023, 12, 1, 12, 0, 0, 0, time.UTC)
-		
+
 		result := tools.StructuredToolResult{
 			ToolName:  "view_background_processes",
 			Success:   true,

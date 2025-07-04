@@ -85,7 +85,7 @@ func TestMCPToolRenderer(t *testing.T) {
 						Data:     "fake image data",
 					},
 					{
-						Type: "resource",
+						Type:     "resource",
 						URI:      "file:///home/user/docs/counter.md",
 						MimeType: "text/markdown",
 					},
