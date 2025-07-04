@@ -1,14 +1,23 @@
 // Conversation View Alpine.js Component and Tool Result Renderers
 
 // Initialize the updated registry - now using the advanced renderers
-let toolRendererRegistry;
+let toolRendererRegistry = null;
 
-// Wait for all renderer files to load
-document.addEventListener('DOMContentLoaded', function() {
-    if (typeof ToolRendererRegistry !== 'undefined') {
-        toolRendererRegistry = new ToolRendererRegistry();
-    }
-});
+// Initialize immediately if available, otherwise wait for DOMContentLoaded
+if (typeof window.toolRendererRegistry !== 'undefined') {
+    toolRendererRegistry = window.toolRendererRegistry;
+} else {
+    // Wait for all renderer files to load
+    document.addEventListener('DOMContentLoaded', function() {
+        // Check if the registry is available from tool-renderers.js
+        if (typeof window.toolRendererRegistry !== 'undefined') {
+            toolRendererRegistry = window.toolRendererRegistry;
+        } else if (typeof window.ToolRendererRegistry !== 'undefined') {
+            // Fallback: create a new instance if class is available
+            toolRendererRegistry = new window.ToolRendererRegistry();
+        }
+    });
+}
 
 // Conversation View Alpine.js Component
 function conversationViewApp(conversationId) {

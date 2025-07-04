@@ -21,13 +21,13 @@
         <div class="card bg-base-200 shadow-xl mb-6">
             <div class="card-body">
                 <h2 class="card-title mb-4">Search & Filter</h2>
-                
+
                 <!-- Search Input -->
                 <div class="form-control mb-4">
                     <div class="input-group">
-                        <input 
-                            type="text" 
-                            placeholder="Search conversations..." 
+                        <input
+                            type="text"
+                            placeholder="Search conversations..."
                             class="input input-bordered flex-1"
                             x-model="searchTerm"
                             @keyup.enter="search()"
@@ -52,7 +52,7 @@
                             <option value="messages">Message Count</option>
                         </select>
                     </div>
-                    
+
                     <div class="form-control">
                         <label class="label">
                             <span class="label-text">Order</span>
@@ -62,7 +62,7 @@
                             <option value="asc">Oldest First</option>
                         </select>
                     </div>
-                    
+
                     <div class="form-control">
                         <label class="label">
                             <span class="label-text">Limit</span>
@@ -126,12 +126,12 @@
                         <div class="flex justify-between items-start">
                             <div class="flex-1">
                                 <h3 class="card-title text-lg mb-2">
-                                    <a :href="'/c/' + conversation.id" 
+                                    <a :href="'/c/' + conversation.id"
                                        class="link link-hover text-primary"
                                        x-text="conversation.id.substring(0, 8) + '...'"></a>
                                 </h3>
                                 <p class="text-base-content/70 mb-3" x-text="conversation.preview"></p>
-                                
+
                                 <div class="flex flex-wrap gap-2 text-sm text-base-content/60">
                                     <div class="badge badge-outline">
                                         <span x-text="conversation.messageCount"></span> messages
@@ -144,7 +144,7 @@
                                     </div>
                                 </div>
                             </div>
-                            
+
                             <div class="dropdown dropdown-end">
                                 <div tabindex="0" role="button" class="btn btn-ghost btn-sm">
                                     <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -188,6 +188,6 @@
     </div>
 
     <script src="/static/js/app.js"></script>
-    <script src="/static/js/tool-renderers-improved.js"></script>
+    <script src="/static/js/tool-renderers.js"></script>
 </body>
 </html>

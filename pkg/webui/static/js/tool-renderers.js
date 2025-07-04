@@ -1,54 +1,7 @@
 // Improved Tool Result Renderers for Web UI
 // Consolidated with better patterns and security
 
-// Global utility functions
-function copyToClipboard(text) {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(text).then(() => {
-            // Show success toast or feedback
-            showToast('Copied to clipboard!', 'success');
-        }).catch(err => {
-            console.error('Failed to copy:', err);
-            // Fallback to older method
-            fallbackCopyToClipboard(text);
-        });
-    } else {
-        // Fallback for older browsers
-        fallbackCopyToClipboard(text);
-    }
-}
-
-function fallbackCopyToClipboard(text) {
-    const textArea = document.createElement('textarea');
-    textArea.value = text;
-    textArea.style.position = 'fixed';
-    textArea.style.opacity = '0';
-    document.body.appendChild(textArea);
-    textArea.select();
-    try {
-        document.execCommand('copy');
-        showToast('Copied to clipboard!', 'success');
-    } catch (err) {
-        console.error('Failed to copy:', err);
-        showToast('Failed to copy to clipboard', 'error');
-    }
-    document.body.removeChild(textArea);
-}
-
-function showToast(message, type = 'info') {
-    // Simple toast notification - can be enhanced with a toast library
-    const toast = document.createElement('div');
-    toast.className = `toast toast-top toast-end`;
-    toast.innerHTML = `
-        <div class="alert alert-${type}">
-            <span>${message}</span>
-        </div>
-    `;
-    document.body.appendChild(toast);
-    setTimeout(() => {
-        toast.remove();
-    }, 3000);
-}
+// Note: copyToClipboard and showToast are already defined in app.js
 
 // Tool Result Renderer Registry
 class ToolRendererRegistry {
@@ -79,10 +32,6 @@ class ToolRendererRegistry {
             'browser_navigate': BrowserNavigateRenderer,
             'browser_screenshot': BrowserScreenshotRenderer,
             'view_background_processes': BackgroundProcessesRenderer,
-            'mcp_definition': MCPDefinitionRenderer,
-            'mcp_references': MCPReferencesRenderer,
-            'mcp_hover': MCPHoverRenderer,
-            'mcp_diagnostics': MCPDiagnosticsRenderer
         };
 
         // Register class references for lazy instantiation
@@ -98,14 +47,14 @@ class ToolRendererRegistry {
     getRenderer(toolName) {
         const RendererClass = this.renderers.get(toolName);
         if (!RendererClass) return null;
-        
+
         // Lazy instantiation
         if (typeof RendererClass === 'function') {
             const instance = new RendererClass();
             this.renderers.set(toolName, instance);
             return instance;
         }
-        
+
         return RendererClass;
     }
 
@@ -120,7 +69,7 @@ class ToolRendererRegistry {
         // Render
         const renderer = this.getRenderer(toolResult.toolName);
         const html = renderer ? renderer.render(toolResult) : this.renderFallback(toolResult);
-        
+
         // Cache the result
         this.renderCache.set(cacheKey, {
             html: html,
@@ -153,7 +102,7 @@ class ToolRendererRegistry {
                 toolResult.error
             );
         }
-        
+
         return RendererFactory.createCard({
             title: `🔧 ${toolResult.toolName}`,
             badge: { text: 'Unknown Tool', class: 'badge-info' },
@@ -199,10 +148,10 @@ class RendererFactory {
             className = 'bg-base-200'
         } = options;
 
-        const badgeHtml = badge ? 
+        const badgeHtml = badge ?
             `<div class="badge ${badge.class || 'badge-info'} badge-sm">${badge.text}</div>` : '';
-        
-        const actionsHtml = actions ? 
+
+        const actionsHtml = actions ?
             `<div class="card-actions">${actions}</div>` : '';
 
         return `
@@ -237,12 +186,12 @@ class RendererFactory {
 
     static createCollapsible(title, content, collapsed = false, badge = null) {
         const collapseId = `collapse-${Math.random().toString(36).substr(2, 9)}`;
-        const badgeHtml = badge ? 
+        const badgeHtml = badge ?
             `<div class="badge badge-sm ${badge.class || 'badge-info'}" aria-label="${badge.text}">${badge.text}</div>` : '';
-        
+
         return `
             <div class="collapse collapse-arrow bg-base-100 mt-2" role="region">
-                <input type="checkbox" id="${collapseId}" ${collapsed ? '' : 'checked'} 
+                <input type="checkbox" id="${collapseId}" ${collapsed ? '' : 'checked'}
                        aria-expanded="${!collapsed}" aria-controls="${collapseId}-content">
                 <label for="${collapseId}" class="collapse-title text-sm font-medium flex items-center justify-between cursor-pointer">
                     <span>${title}</span>
@@ -258,8 +207,8 @@ class RendererFactory {
     static createCopyButton(content, className = 'btn-xs') {
         const escapedContent = this.escapeHtml(JSON.stringify(content));
         return `
-            <button class="btn btn-ghost ${className}" 
-                    onclick="copyToClipboard(${escapedContent})" 
+            <button class="btn btn-ghost ${className}"
+                    onclick="window.copyToClipboard(${escapedContent})"
                     title="Copy to clipboard"
                     aria-label="Copy to clipboard">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
@@ -272,7 +221,7 @@ class RendererFactory {
     static createCodeBlock(code, language = '', showLineNumbers = true, maxHeight = null) {
         const lines = code.split('\n');
         const heightStyle = maxHeight ? `max-height: ${maxHeight}px; overflow-y: auto;` : '';
-        
+
         let codeHtml;
         if (showLineNumbers) {
             codeHtml = lines.map((line, index) => {
@@ -465,7 +414,7 @@ class FileReadRenderer extends BaseRenderer {
         const language = meta.language || this.detectLanguageFromPath(meta.filePath);
         const fileContent = (meta.lines || []).join('\n');
         const startLine = meta.offset || 1;
-        
+
         // Create line-numbered code
         const lines = meta.lines || [];
         const codeWithLineNumbers = lines.map((line, index) => {
@@ -490,12 +439,12 @@ class FileReadRenderer extends BaseRenderer {
             content: `
                 <div class="text-xs text-base-content/60 mb-3 font-mono">
                     <div class="flex items-center gap-4 flex-wrap">
-                        ${metadata.map(item => 
-                            `<span><strong>${item.label}:</strong> ${this.escapeHtml(item.value)}</span>`
-                        ).join('')}
+                        ${metadata.map(item =>
+                `<span><strong>${item.label}:</strong> ${this.escapeHtml(item.value)}</span>`
+            ).join('')}
                     </div>
                 </div>
-                
+
                 <div class="mockup-code bg-base-300 text-sm max-h-96 overflow-y-auto">
                     <pre><code class="language-${language}">${codeWithLineNumbers}</code></pre>
                 </div>
@@ -526,17 +475,17 @@ class FileWriteRenderer extends BaseRenderer {
             content: `
                 <div class="text-xs text-base-content/60 mb-3 font-mono">
                     <div class="flex items-center gap-4">
-                        ${metadata.map(item => 
-                            `<span><strong>${item.label}:</strong> ${this.escapeHtml(item.value)}</span>`
-                        ).join('')}
+                        ${metadata.map(item =>
+                `<span><strong>${item.label}:</strong> ${this.escapeHtml(item.value)}</span>`
+            ).join('')}
                     </div>
                 </div>
-                
+
                 ${meta.content ? this.createCollapsible(
-                    'View Content', 
-                    this.createCodeBlock(meta.content, language, true, 300),
-                    true
-                ) : ''}
+                'View Content',
+                this.createCodeBlock(meta.content, language, true, 300),
+                true
+            ) : ''}
             `
         });
     }
@@ -550,7 +499,7 @@ class FileEditRenderer extends BaseRenderer {
 
         const language = meta.language || this.detectLanguageFromPath(meta.filePath);
         const edits = meta.edits || [];
-        
+
         return RendererFactory.createCard({
             title: '✏️ File Edit',
             badge: { text: `${edits.length} edit${edits.length !== 1 ? 's' : ''}`, class: 'badge-info' },
@@ -558,13 +507,13 @@ class FileEditRenderer extends BaseRenderer {
                 <div class="text-xs text-base-content/60 mb-3 font-mono">
                     <span><strong>Path:</strong> ${this.escapeHtml(meta.filePath)}</span>
                 </div>
-                
+
                 ${edits.length > 0 ? this.createCollapsible(
-                    'View Changes',
-                    this.renderEdits(edits, language),
-                    false,
-                    { text: `${edits.length} changes`, class: 'badge-info' }
-                ) : ''}
+                'View Changes',
+                this.renderEdits(edits, language),
+                false,
+                { text: `${edits.length} changes`, class: 'badge-info' }
+            ) : ''}
             `
         });
     }
@@ -573,7 +522,7 @@ class FileEditRenderer extends BaseRenderer {
         return edits.map((edit, index) => {
             const oldText = edit.oldText || '';
             const newText = edit.newText || '';
-            
+
             return `
                 <div class="mb-4">
                     <h5 class="text-sm font-medium mb-2">Edit ${index + 1}: Lines ${edit.startLine}-${edit.endLine}</h5>
@@ -604,7 +553,7 @@ class FileMultiEditRenderer extends BaseRenderer {
         if (!meta) return super.renderSuccess(toolResult);
 
         const replacements = meta.occurrence || meta.replacements || 0;
-        
+
         return RendererFactory.createCard({
             title: '🔄 File Multi Edit',
             badge: { text: `${replacements} replacements`, class: 'badge-info' },
@@ -630,7 +579,7 @@ class BashRenderer extends BaseRenderer {
         const hasOutput = meta.output && meta.output.trim();
         const exitCode = meta.exitCode || 0;
         const isSuccess = exitCode === 0;
-        
+
         if (isBackground) {
             return this.renderBackgroundProcess(meta);
         }
@@ -640,29 +589,29 @@ class BashRenderer extends BaseRenderer {
             meta.workingDir ? { label: 'Directory', value: meta.workingDir } : null,
             meta.executionTime ? { label: 'Duration', value: this.formatDuration(meta.executionTime) } : null
         ].filter(Boolean);
-        
+
         return RendererFactory.createCard({
             title: '🖥️ Command Execution',
-            badge: { 
-                text: `Exit Code: ${exitCode}`, 
-                class: isSuccess ? 'badge-success' : 'badge-error' 
+            badge: {
+                text: `Exit Code: ${exitCode}`,
+                class: isSuccess ? 'badge-success' : 'badge-error'
             },
             actions: hasOutput ? this.createCopyButton(meta.output) : '',
             content: `
                 <div class="text-xs text-base-content/60 mb-3 font-mono">
                     <div class="flex items-center gap-4 flex-wrap">
-                        ${metadata.map(item => 
-                            `<span><strong>${item.label}:</strong> ${this.escapeHtml(item.value)}</span>`
-                        ).join('')}
+                        ${metadata.map(item =>
+                `<span><strong>${item.label}:</strong> ${this.escapeHtml(item.value)}</span>`
+            ).join('')}
                     </div>
                 </div>
-                
+
                 ${hasOutput ? this.createCollapsible(
-                    'Command Output',
-                    this.createTerminalOutput(meta.output),
-                    false,
-                    { text: 'View Output', class: 'badge-info' }
-                ) : '<div class="text-sm text-base-content/60">No output</div>'}
+                'Command Output',
+                this.createTerminalOutput(meta.output),
+                false,
+                { text: 'View Output', class: 'badge-info' }
+            ) : '<div class="text-sm text-base-content/60">No output</div>'}
             `
         });
     }
@@ -680,9 +629,9 @@ class BashRenderer extends BaseRenderer {
             content: `
                 <div class="text-xs text-base-content/60 font-mono">
                     <div class="space-y-1">
-                        ${metadata.map(item => 
-                            `<div><strong>${item.label}:</strong> ${this.escapeHtml(item.value)}</div>`
-                        ).join('')}
+                        ${metadata.map(item =>
+                `<div><strong>${item.label}:</strong> ${this.escapeHtml(item.value)}</div>`
+            ).join('')}
                     </div>
                 </div>
             `
@@ -730,20 +679,20 @@ class GrepRenderer extends BaseRenderer {
             meta.path ? { label: 'Path', value: meta.path } : null,
             meta.include ? { label: 'Include', value: meta.include } : null
         ].filter(Boolean);
-        
+
         return RendererFactory.createCard({
             title: '🔍 Search Results',
             badge: badges[0],
             content: `
                 <div class="text-xs text-base-content/60 mb-3 font-mono">
                     <div class="flex items-center gap-4 flex-wrap">
-                        ${metadata.map(item => 
-                            `<span><strong>${item.label}:</strong> ${this.escapeHtml(item.value)}</span>`
-                        ).join('')}
+                        ${metadata.map(item =>
+                `<span><strong>${item.label}:</strong> ${this.escapeHtml(item.value)}</span>`
+            ).join('')}
                     </div>
                 </div>
-                
-                ${results.length > 0 ? this.renderSearchResults(results, meta.pattern) : 
+
+                ${results.length > 0 ? this.renderSearchResults(results, meta.pattern) :
                     '<div class="text-sm text-base-content/60">No matches found</div>'}
             `
         });
@@ -751,7 +700,7 @@ class GrepRenderer extends BaseRenderer {
 
     renderSearchResults(results, pattern) {
         const fileGroups = this.groupResultsByFile(results);
-        
+
         return Object.entries(fileGroups).map(([file, matches]) => {
             const matchCount = matches.length;
             const fileContent = matches.map(match => {
@@ -780,7 +729,7 @@ class GrepRenderer extends BaseRenderer {
             if (!grouped[file]) {
                 grouped[file] = [];
             }
-            
+
             if (result.matches) {
                 // Multiple matches per file
                 grouped[file].push(...result.matches);
@@ -794,7 +743,7 @@ class GrepRenderer extends BaseRenderer {
 
     highlightPattern(text, pattern) {
         if (!pattern || !text) return this.escapeHtml(text);
-        
+
         try {
             const escaped = this.escapeHtml(text);
             const regex = new RegExp(`(${pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
@@ -823,20 +772,20 @@ class GlobRenderer extends BaseRenderer {
             meta.path ? { label: 'Path', value: meta.path } : null,
             totalSize > 0 ? { label: 'Total Size', value: this.formatFileSize(totalSize) } : null
         ].filter(Boolean);
-        
+
         return RendererFactory.createCard({
             title: '📁 File Listing',
             badge: badges[0],
             content: `
                 <div class="text-xs text-base-content/60 mb-3 font-mono">
                     <div class="flex items-center gap-4 flex-wrap">
-                        ${metadata.map(item => 
-                            `<span><strong>${item.label}:</strong> ${this.escapeHtml(item.value)}</span>`
-                        ).join('')}
+                        ${metadata.map(item =>
+                `<span><strong>${item.label}:</strong> ${this.escapeHtml(item.value)}</span>`
+            ).join('')}
                     </div>
                 </div>
-                
-                ${files.length > 0 ? this.renderFileList(files) : 
+
+                ${files.length > 0 ? this.renderFileList(files) :
                     '<div class="text-sm text-base-content/60">No files found</div>'}
             `
         });
@@ -846,7 +795,7 @@ class GlobRenderer extends BaseRenderer {
         const fileContent = files.map(file => {
             const icon = this.getFileIcon(file.path || file.name);
             const sizeText = file.size ? this.formatFileSize(file.size) : '';
-            const modTime = file.modTime || file.modified ? 
+            const modTime = file.modTime || file.modified ?
                 new Date(file.modTime || file.modified).toLocaleDateString() : '';
 
             return `
@@ -885,7 +834,7 @@ class ThinkingRenderer extends BaseRenderer {
                         <h4 class="font-semibold text-blue-700">🧠 Thinking</h4>
                         <div class="badge badge-info badge-sm">Internal Process</div>
                     </div>
-                    
+
                     <div class="bg-white p-4 rounded-lg border border-blue-100">
                         <div class="text-sm text-gray-700 italic leading-relaxed">
                             ${this.formatThoughtContent(meta.thought)}
@@ -898,7 +847,7 @@ class ThinkingRenderer extends BaseRenderer {
 
     formatThoughtContent(thought) {
         if (!thought) return '';
-        
+
         // Use markdown parser if available
         return this.formatMarkdown(thought);
     }
@@ -920,7 +869,7 @@ class WebFetchRenderer extends BaseRenderer {
             savedPath ? { label: 'Saved to', value: savedPath } : null,
             hasPrompt ? { label: 'Extraction Prompt', value: meta.prompt } : null
         ].filter(Boolean);
-        
+
         return RendererFactory.createCard({
             title: '🌐 Web Fetch',
             badge: { text: 'Success', class: 'badge-success' },
@@ -934,18 +883,18 @@ class WebFetchRenderer extends BaseRenderer {
             content: `
                 <div class="text-xs text-base-content/60 mb-3 font-mono">
                     <div class="space-y-1">
-                        ${metadata.map(item => 
-                            `<div><strong>${item.label}:</strong> ${this.escapeHtml(item.value)}</div>`
-                        ).join('')}
+                        ${metadata.map(item =>
+                `<div><strong>${item.label}:</strong> ${this.escapeHtml(item.value)}</div>`
+            ).join('')}
                     </div>
                 </div>
-                
+
                 ${meta.content ? this.createCollapsible(
-                    'Fetched Content',
-                    this.renderWebContent(meta),
-                    true,
-                    { text: 'View Content', class: 'badge-info' }
-                ) : ''}
+                'Fetched Content',
+                this.renderWebContent(meta),
+                true,
+                { text: 'View Content', class: 'badge-info' }
+            ) : ''}
             `
         });
     }
@@ -953,16 +902,16 @@ class WebFetchRenderer extends BaseRenderer {
     renderWebContent(meta) {
         if (meta.contentType && meta.contentType.includes('image')) {
             const safeUrl = this.escapeUrl(meta.url);
-            return safeUrl !== '#' ? 
+            return safeUrl !== '#' ?
                 `<img src="${safeUrl}" alt="Fetched image" class="max-w-full h-auto rounded">` :
                 '<div class="text-sm text-base-content/60">Invalid image URL</div>';
         }
-        
+
         if (meta.content) {
             const language = this.detectContentLanguage(meta.contentType);
             return this.createCodeBlock(meta.content, language, true, 400);
         }
-        
+
         return '<div class="text-sm text-base-content/60">Content preview not available</div>';
     }
 
@@ -985,11 +934,11 @@ class TodoRenderer extends BaseRenderer {
 
         const action = meta.action || 'updated';
         const todos = meta.todos || meta.todoList || [];
-        
+
         return RendererFactory.createCard({
             title: '📋 Todo List',
             badge: { text: action, class: 'badge-info' },
-            content: todos.length > 0 ? this.renderTodoList(todos) : 
+            content: todos.length > 0 ? this.renderTodoList(todos) :
                 '<div class="text-sm text-base-content/60">No todos available</div>'
         });
     }
@@ -999,7 +948,7 @@ class TodoRenderer extends BaseRenderer {
             const statusIcon = this.getTodoStatusIcon(todo.status);
             const priorityClass = this.getPriorityClass(todo.priority);
             const isCompleted = todo.status === 'completed';
-            
+
             return `
                 <div class="flex items-start gap-3 p-2 hover:bg-base-100 rounded" role="listitem">
                     <span class="text-lg" aria-label="${todo.status}">${statusIcon}</span>
@@ -1014,9 +963,9 @@ class TodoRenderer extends BaseRenderer {
             `;
         }).join('');
 
-        return this.createCollapsible('Todo Items', 
-            `<div role="list">${todoContent}</div>`, 
-            false, 
+        return this.createCollapsible('Todo Items',
+            `<div role="list">${todoContent}</div>`,
+            false,
             { text: `${todos.length} items`, class: 'badge-info' }
         );
     }
@@ -1048,7 +997,7 @@ class SubagentRenderer extends BaseRenderer {
         if (!meta) return super.renderSuccess(toolResult);
 
         const modelStrength = meta.modelStrength || meta.model_strength || 'unknown';
-        
+
         return RendererFactory.createCard({
             title: '🤖 Sub-agent',
             badge: { text: `${modelStrength} model`, class: 'badge-info' },
@@ -1058,7 +1007,7 @@ class SubagentRenderer extends BaseRenderer {
                         <div class="text-xs text-base-content/60 mb-1"><strong>Question:</strong></div>
                         <div class="bg-blue-50 p-3 rounded text-sm">${this.escapeHtml(meta.question)}</div>
                     </div>
-                    
+
                     ${meta.response ? `
                         <div>
                             <div class="text-xs text-base-content/60 mb-1"><strong>Response:</strong></div>
@@ -1081,7 +1030,7 @@ class BatchRenderer extends BaseRenderer {
         const subResults = meta.subResults || meta.results || [];
         const successCount = meta.successCount || subResults.filter(r => r.success).length;
         const failureCount = meta.failureCount || subResults.filter(r => !r.success).length;
-        
+
         return RendererFactory.createCard({
             title: '📦 Batch Operation',
             badge: { text: description, class: 'badge-info' },
@@ -1093,13 +1042,13 @@ class BatchRenderer extends BaseRenderer {
                         ${failureCount > 0 ? `<span class="text-red-600"><strong>Failed:</strong> ${failureCount}</span>` : ''}
                     </div>
                 </div>
-                
+
                 ${subResults.length > 0 ? this.createCollapsible(
-                    'Sub-operations',
-                    this.renderSubResults(subResults),
-                    true,
-                    { text: `${subResults.length} operations`, class: 'badge-info' }
-                ) : ''}
+                'Sub-operations',
+                this.renderSubResults(subResults),
+                true,
+                { text: `${subResults.length} operations`, class: 'badge-info' }
+            ) : ''}
             `
         });
     }
@@ -1108,7 +1057,7 @@ class BatchRenderer extends BaseRenderer {
         return subResults.map((result, index) => {
             const statusIcon = result.success ? '✅' : '❌';
             const statusClass = result.success ? 'text-green-600' : 'text-red-600';
-            
+
             return `
                 <div class="border rounded p-3 mb-2">
                     <div class="flex items-center gap-2 mb-2">
@@ -1136,17 +1085,17 @@ class ImageRecognitionRenderer extends BaseRenderer {
             imagePath ? { label: 'Image', value: imagePath } : null,
             meta.prompt ? { label: 'Prompt', value: meta.prompt } : null
         ].filter(Boolean);
-        
+
         return RendererFactory.createCard({
             title: '👁️ Image Recognition',
             badge: { text: 'Analyzed', class: 'badge-success' },
             content: `
                 <div class="text-xs text-base-content/60 mb-3 font-mono">
-                    ${metadata.map(item => 
-                        `<div><strong>${item.label}:</strong> ${this.escapeHtml(item.value)}</div>`
-                    ).join('')}
+                    ${metadata.map(item =>
+                `<div><strong>${item.label}:</strong> ${this.escapeHtml(item.value)}</div>`
+            ).join('')}
                 </div>
-                
+
                 ${analysis ? `
                     <div class="bg-base-100 p-3 rounded">
                         <div class="text-sm">${this.escapeHtml(analysis)}</div>
@@ -1171,7 +1120,7 @@ class BrowserNavigateRenderer extends BaseRenderer {
             { label: 'URL', value: url },
             title ? { label: 'Title', value: title } : null
         ].filter(Boolean);
-        
+
         return RendererFactory.createCard({
             title: '🌐 Browser Navigation',
             badge: { text: 'Success', class: 'badge-success' },
@@ -1185,9 +1134,9 @@ class BrowserNavigateRenderer extends BaseRenderer {
             content: `
                 <div class="text-xs text-base-content/60 font-mono">
                     <div class="space-y-1">
-                        ${metadata.map(item => 
-                            `<div><strong>${item.label}:</strong> ${this.escapeHtml(item.value)}</div>`
-                        ).join('')}
+                        ${metadata.map(item =>
+                `<div><strong>${item.label}:</strong> ${this.escapeHtml(item.value)}</div>`
+            ).join('')}
                     </div>
                 </div>
             `
@@ -1208,23 +1157,23 @@ class BrowserScreenshotRenderer extends BaseRenderer {
             filePath ? { label: 'File', value: filePath } : null,
             dimensions ? { label: 'Dimensions', value: dimensions } : null
         ].filter(Boolean);
-        
+
         return RendererFactory.createCard({
             title: '📸 Browser Screenshot',
             badge: { text: 'Captured', class: 'badge-success' },
             content: `
                 <div class="text-xs text-base-content/60 mb-3 font-mono">
                     <div class="space-y-1">
-                        ${metadata.map(item => 
-                            `<div><strong>${item.label}:</strong> ${this.escapeHtml(item.value)}</div>`
-                        ).join('')}
+                        ${metadata.map(item =>
+                `<div><strong>${item.label}:</strong> ${this.escapeHtml(item.value)}</div>`
+            ).join('')}
                     </div>
                 </div>
-                
+
                 ${filePath && this.isImageFile(filePath) ? `
                     <div class="mt-3">
-                        <img src="${this.escapeUrl('file://' + filePath)}" alt="Screenshot" 
-                             class="max-w-full h-auto rounded border" 
+                        <img src="${this.escapeUrl('file://' + filePath)}" alt="Screenshot"
+                             class="max-w-full h-auto rounded border"
                              onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
                         <div style="display:none" class="text-sm text-base-content/60">Unable to load screenshot</div>
                     </div>
@@ -1247,11 +1196,11 @@ class BackgroundProcessesRenderer extends BaseRenderer {
 
         const processes = meta.processes || [];
         const processCount = meta.processCount || processes.length;
-        
+
         return RendererFactory.createCard({
             title: '⚙️ Background Processes',
             badge: { text: `${processCount} processes`, class: 'badge-info' },
-            content: processes.length > 0 ? this.renderProcessList(processes) : 
+            content: processes.length > 0 ? this.renderProcessList(processes) :
                 '<div class="text-sm text-base-content/60">No background processes</div>'
         });
     }
@@ -1260,7 +1209,7 @@ class BackgroundProcessesRenderer extends BaseRenderer {
         const processContent = processes.map(process => {
             const statusIcon = process.status === 'running' ? '🟢' : '🔴';
             const statusClass = process.status === 'running' ? 'text-green-600' : 'text-red-600';
-            
+
             return `
                 <div class="flex items-center justify-between p-2 hover:bg-base-100 rounded">
                     <div class="flex items-center gap-3">
@@ -1280,58 +1229,12 @@ class BackgroundProcessesRenderer extends BaseRenderer {
     }
 }
 
-// MCP Tool Renderers (kept simple as requested)
-class MCPDefinitionRenderer extends BaseRenderer {
-    renderSuccess(toolResult) {
-        const meta = toolResult.metadata;
-        if (!meta) return super.renderSuccess(toolResult);
+// Initialize the registry and make it globally available
+// Expose the class first
+window.ToolRendererRegistry = ToolRendererRegistry;
 
-        return RendererFactory.createCard({
-            title: '🔍 Code Definition',
-            badge: { text: 'MCP', class: 'badge-info' },
-            content: '<div class="text-sm text-base-content/60">Code definition retrieved</div>'
-        });
-    }
-}
+// Create and expose the instance
+window.toolRendererRegistry = new ToolRendererRegistry();
 
-class MCPReferencesRenderer extends BaseRenderer {
-    renderSuccess(toolResult) {
-        const meta = toolResult.metadata;
-        if (!meta) return super.renderSuccess(toolResult);
-
-        return RendererFactory.createCard({
-            title: '📚 Code References',
-            badge: { text: 'MCP', class: 'badge-info' },
-            content: '<div class="text-sm text-base-content/60">Code references found</div>'
-        });
-    }
-}
-
-class MCPHoverRenderer extends BaseRenderer {
-    renderSuccess(toolResult) {
-        const meta = toolResult.metadata;
-        if (!meta) return super.renderSuccess(toolResult);
-
-        return RendererFactory.createCard({
-            title: '💡 Code Hover Info',
-            badge: { text: 'MCP', class: 'badge-info' },
-            content: '<div class="text-sm text-base-content/60">Hover information retrieved</div>'
-        });
-    }
-}
-
-class MCPDiagnosticsRenderer extends BaseRenderer {
-    renderSuccess(toolResult) {
-        const meta = toolResult.metadata;
-        if (!meta) return super.renderSuccess(toolResult);
-
-        return RendererFactory.createCard({
-            title: '🔍 Code Diagnostics',
-            badge: { text: 'MCP', class: 'badge-info' },
-            content: '<div class="text-sm text-base-content/60">Diagnostics retrieved</div>'
-        });
-    }
-}
-
-// Initialize the registry
-const advancedToolRendererRegistry = new ToolRendererRegistry();
+// Also expose other utilities that might be needed
+window.RendererFactory = RendererFactory;

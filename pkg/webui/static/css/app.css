@@ -2,7 +2,8 @@
 
 /* Line number styling for code blocks */
 .line-number {
-    color: rgb(156 163 175); /* text-gray-400 */
+    color: rgb(156 163 175);
+    /* text-gray-400 */
     user-select: none;
     margin-right: 0.5rem;
 }
@@ -12,6 +13,10 @@ pre code {
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
     font-size: 0.875rem;
     line-height: 1.5;
+}
+
+code[class*=language-] {
+    text-shadow: none !important;
 }
 
 /* Custom scrollbar for webkit browsers */
@@ -24,12 +29,14 @@ pre code {
 }
 
 .overflow-x-auto::-webkit-scrollbar-thumb {
-    background: rgb(75 85 99); /* gray-600 */
+    background: rgb(75 85 99);
+    /* gray-600 */
     border-radius: 4px;
 }
 
 .overflow-x-auto::-webkit-scrollbar-thumb:hover {
-    background: rgb(55 65 81); /* gray-700 */
+    background: rgb(55 65 81);
+    /* gray-700 */
 }
 
 /* Prose adjustments for markdown content */
@@ -42,8 +49,10 @@ pre code {
 }
 
 .prose pre {
-    background-color: rgb(31 41 55); /* gray-800 */
-    color: rgb(243 244 246); /* gray-100 */
+    background-color: rgb(31 41 55);
+    /* gray-800 */
+    color: rgb(243 244 246);
+    /* gray-100 */
     border-radius: 0.5rem;
     padding: 1rem;
     overflow-x: auto;
@@ -51,8 +60,10 @@ pre code {
 }
 
 .prose code {
-    background-color: rgb(31 41 55); /* gray-800 */
-    color: rgb(243 244 246); /* gray-100 */
+    background-color: rgb(31 41 55);
+    /* gray-800 */
+    color: rgb(243 244 246);
+    /* gray-100 */
     padding: 0.25rem 0.5rem;
     border-radius: 0.25rem;
     font-size: 0.875rem;
@@ -77,6 +88,7 @@ pre code {
         transform: translateX(100%);
         opacity: 0;
     }
+
     to {
         transform: translateX(0);
         opacity: 1;
@@ -102,50 +114,65 @@ pre code {
 
 /* Tool result specific styling */
 .tool-result-header {
-    border-bottom: 1px solid rgb(229 231 235); /* gray-200 */
+    border-bottom: 1px solid rgb(229 231 235);
+    /* gray-200 */
     padding-bottom: 0.5rem;
     margin-bottom: 0.5rem;
 }
 
 /* Diff styling */
 .diff-line-added {
-    background-color: rgb(220 252 231); /* green-100 */
-    color: rgb(22 101 52); /* green-800 */
+    background-color: rgb(220 252 231);
+    /* green-100 */
+    color: rgb(22 101 52);
+    /* green-800 */
 }
 
 .diff-line-removed {
-    background-color: rgb(254 226 226); /* red-100 */
-    color: rgb(153 27 27); /* red-800 */
+    background-color: rgb(254 226 226);
+    /* red-100 */
+    color: rgb(153 27 27);
+    /* red-800 */
 }
 
 .diff-line-context {
-    background-color: rgb(249 250 251); /* gray-50 */
-    color: rgb(75 85 99); /* gray-600 */
+    background-color: rgb(249 250 251);
+    /* gray-50 */
+    color: rgb(75 85 99);
+    /* gray-600 */
 }
 
 /* Dark mode adjustments */
 @media (prefers-color-scheme: dark) {
     .prose pre {
-        background-color: rgb(17 24 39); /* gray-900 */
+        background-color: rgb(17 24 39);
+        /* gray-900 */
     }
-    
+
     .prose code {
-        background-color: rgb(17 24 39); /* gray-900 */
+        background-color: rgb(17 24 39);
+        /* gray-900 */
     }
-    
+
     .diff-line-added {
-        background-color: rgb(5 46 22); /* green-900 */
-        color: rgb(187 247 208); /* green-200 */
+        background-color: rgb(5 46 22);
+        /* green-900 */
+        color: rgb(187 247 208);
+        /* green-200 */
     }
-    
+
     .diff-line-removed {
-        background-color: rgb(127 29 29); /* red-900 */
-        color: rgb(254 202 202); /* red-200 */
+        background-color: rgb(127 29 29);
+        /* red-900 */
+        color: rgb(254 202 202);
+        /* red-200 */
     }
-    
+
     .diff-line-context {
-        background-color: rgb(31 41 55); /* gray-800 */
-        color: rgb(156 163 175); /* gray-400 */
+        background-color: rgb(31 41 55);
+        /* gray-800 */
+        color: rgb(156 163 175);
+        /* gray-400 */
     }
 }
 
@@ -155,11 +182,11 @@ pre code {
         padding-left: 1rem;
         padding-right: 1rem;
     }
-    
+
     .card-body {
         padding: 1rem;
     }
-    
+
     .prose {
         font-size: 0.875rem;
     }
@@ -171,6 +198,7 @@ pre code {
         opacity: 0;
         transform: translateY(10px);
     }
+
     to {
         opacity: 1;
         transform: translateY(0);
@@ -202,16 +230,19 @@ pre code {
 
 /* Message styling */
 .message-user {
-    background: linear-gradient(135deg, rgb(239 246 255), rgb(219 234 254)); /* blue gradient */
+    background: linear-gradient(135deg, rgb(239 246 255), rgb(219 234 254));
+    /* blue gradient */
 }
 
 .message-assistant {
-    background: linear-gradient(135deg, rgb(249 250 251), rgb(243 244 246)); /* gray gradient */
+    background: linear-gradient(135deg, rgb(249 250 251), rgb(243 244 246));
+    /* gray gradient */
 }
 
 /* Tool call styling */
 .tool-call {
-    border-left: 4px solid rgb(59 130 246); /* blue-500 */
+    border-left: 4px solid rgb(59 130 246);
+    /* blue-500 */
     padding-left: 1rem;
     margin: 0.5rem 0;
 }
@@ -234,7 +265,8 @@ button:focus-visible,
 a:focus-visible,
 input:focus-visible,
 [role="button"]:focus-visible {
-    outline: 2px solid rgb(59 130 246); /* blue-500 */
+    outline: 2px solid rgb(59 130 246);
+    /* blue-500 */
     outline-offset: 2px;
 }
 
@@ -243,7 +275,7 @@ input:focus-visible,
     .badge {
         border: 1px solid currentColor;
     }
-    
+
     .card {
         border: 2px solid currentColor;
     }
