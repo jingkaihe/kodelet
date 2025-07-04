@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/invopop/jsonschema"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -29,13 +30,6 @@ func (r *ThinkingToolResult) IsError() bool {
 
 func (r *ThinkingToolResult) AssistantFacing() string {
 	return tooltypes.StringifyToolResult("Your thought have been recorded.", r.err)
-}
-
-func (r *ThinkingToolResult) UserFacing() string {
-	if r.IsError() {
-		return r.GetError()
-	}
-	return fmt.Sprintf("Thought: %s\nYour thought have been recorded.", r.thought)
 }
 
 type ThinkingTool struct{}
@@ -103,4 +97,23 @@ func (t *ThinkingTool) Execute(ctx context.Context, state tooltypes.State, param
 	return &ThinkingToolResult{
 		thought: input.Thought,
 	}
+}
+
+func (r *ThinkingToolResult) StructuredData() tooltypes.StructuredToolResult {
+	result := tooltypes.StructuredToolResult{
+		ToolName:  "thinking",
+		Success:   !r.IsError(),
+		Timestamp: time.Now(),
+	}
+
+	if r.IsError() {
+		result.Error = r.GetError()
+		return result
+	}
+
+	result.Metadata = &tooltypes.ThinkingMetadata{
+		Thought: r.thought,
+	}
+
+	return result
 }

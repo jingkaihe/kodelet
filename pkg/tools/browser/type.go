@@ -37,16 +37,6 @@ func (r TypeResult) AssistantFacing() string {
 	return tools.StringifyToolResult("Text typed successfully", "")
 }
 
-func (r TypeResult) UserFacing() string {
-	if !r.Success {
-		if !r.ElementFound {
-			return "❌ Input element not found"
-		}
-		return fmt.Sprintf("❌ Type failed: %s", r.Error)
-	}
-	return "✅ Text typed successfully"
-}
-
 func (r TypeResult) IsError() bool {
 	return !r.Success
 }

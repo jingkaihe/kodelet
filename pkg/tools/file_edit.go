@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -9,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/aymanbagabas/go-udiff"
 	"github.com/invopop/jsonschema"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/jingkaihe/kodelet/pkg/utils"
@@ -57,20 +55,35 @@ func (r *FileEditToolResult) AssistantFacing() string {
 	return tooltypes.StringifyToolResult(result, "")
 }
 
-func (r *FileEditToolResult) UserFacing() string {
-	if r.IsError() {
-		return r.GetError()
+func (r *FileEditToolResult) StructuredData() tooltypes.StructuredToolResult {
+	result := tooltypes.StructuredToolResult{
+		ToolName:  "file_edit",
+		Success:   !r.IsError(),
+		Timestamp: time.Now(),
 	}
 
-	buf := bytes.NewBufferString(fmt.Sprintf("File Edit: %s\n", r.filename))
-	fmt.Fprintf(buf, "Lines %d-%d\n\n", r.startLine, r.endLine)
+	// Detect language from file extension
+	language := utils.DetectLanguageFromPath(r.filename)
 
-	buf.WriteString("Diff:\n")
+	// Always populate metadata, even for errors
+	result.Metadata = &tooltypes.FileEditMetadata{
+		FilePath: r.filename,
+		Language: language,
+		Edits: []tooltypes.Edit{
+			{
+				StartLine:  r.startLine,
+				EndLine:    r.endLine,
+				OldContent: r.oldText,
+				NewContent: r.newText,
+			},
+		},
+	}
 
-	out := udiff.Unified(r.filename, r.filename, r.oldContent, r.newContent)
-	buf.WriteString(out)
+	if r.IsError() {
+		result.Error = r.GetError()
+	}
 
-	return buf.String()
+	return result
 }
 
 type FileEditTool struct{}

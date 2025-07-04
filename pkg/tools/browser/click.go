@@ -34,16 +34,6 @@ func (r ClickResult) AssistantFacing() string {
 	return tools.StringifyToolResult("Element clicked successfully", "")
 }
 
-func (r ClickResult) UserFacing() string {
-	if !r.Success {
-		if !r.ElementFound {
-			return "❌ Element not found or not clickable"
-		}
-		return fmt.Sprintf("❌ Click failed: %s", r.Error)
-	}
-	return "✅ Element clicked successfully"
-}
-
 func (r ClickResult) IsError() bool {
 	return !r.Success
 }
@@ -57,6 +47,24 @@ func (r ClickResult) GetResult() string {
 		return "clicked"
 	}
 	return r.Error
+}
+
+func (r ClickResult) StructuredData() tools.StructuredToolResult {
+	result := tools.StructuredToolResult{
+		ToolName:  "browser_click",
+		Success:   r.Success,
+		Error:     r.Error,
+		Timestamp: time.Now(),
+	}
+
+	// Add metadata if successful or if element was found
+	if r.Success || r.ElementFound {
+		result.Metadata = &tools.BrowserClickMetadata{
+			ElementFound: r.ElementFound,
+		}
+	}
+
+	return result
 }
 
 func (t ClickTool) GenerateSchema() *jsonschema.Schema {

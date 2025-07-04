@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -9,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/aymanbagabas/go-udiff"
 	"github.com/invopop/jsonschema"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/jingkaihe/kodelet/pkg/utils"
 	"go.opentelemetry.io/otel/attribute"
 )
 
@@ -55,22 +54,6 @@ func (r *FileMultiEditToolResult) AssistantFacing() string {
 	result := fmt.Sprintf("File %s has been edited successfully. Replaced %d occurrence(s) of the text.\n\nExample of edited code block:\n%s",
 		r.filename, r.actualReplaced, formattedEdit)
 	return tooltypes.StringifyToolResult(result, "")
-}
-
-func (r *FileMultiEditToolResult) UserFacing() string {
-	if r.IsError() {
-		return r.GetError()
-	}
-
-	buf := bytes.NewBufferString(fmt.Sprintf("File Multi Edit: %s\n", r.filename))
-	fmt.Fprintf(buf, "Replaced %d occurrence(s) of the text\n\n", r.actualReplaced)
-
-	buf.WriteString("Diff:\n")
-
-	out := udiff.Unified(r.filename, r.filename, r.oldContent, r.newContent)
-	buf.WriteString(out)
-
-	return buf.String()
 }
 
 type FileMultiEditTool struct{}
@@ -226,4 +209,39 @@ func (t *FileMultiEditTool) Execute(ctx context.Context, state tooltypes.State, 
 		occurrence:     occurrence,
 		actualReplaced: actualReplaced,
 	}
+}
+
+func (r *FileMultiEditToolResult) StructuredData() tooltypes.StructuredToolResult {
+	result := tooltypes.StructuredToolResult{
+		ToolName:  "file_multi_edit",
+		Success:   !r.IsError(),
+		Timestamp: time.Now(),
+	}
+
+	// Detect language from file extension
+	language := utils.DetectLanguageFromPath(r.filename)
+
+	// For multi-edit, we only have info about the last edit
+	// This tool would need restructuring to track all edits properly
+	edits := []tooltypes.Edit{
+		{
+			StartLine:  0, // Not tracked in current structure
+			EndLine:    0, // Not tracked in current structure
+			OldContent: r.oldText,
+			NewContent: r.newText,
+		},
+	}
+
+	// Always populate metadata, even for errors
+	result.Metadata = &tooltypes.FileMultiEditMetadata{
+		FilePath: r.filename,
+		Edits:    edits,
+		Language: language,
+	}
+
+	if r.IsError() {
+		result.Error = r.GetError()
+	}
+
+	return result
 }

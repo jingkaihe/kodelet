@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"time"
 
 	"github.com/invopop/jsonschema"
 	"go.opentelemetry.io/otel/attribute"
@@ -32,10 +33,6 @@ func (r *SubAgentToolResult) IsError() bool {
 
 func (r *SubAgentToolResult) AssistantFacing() string {
 	return tooltypes.StringifyToolResult(r.result, r.GetError())
-}
-
-func (r *SubAgentToolResult) UserFacing() string {
-	return r.AssistantFacing()
 }
 
 type SubAgentTool struct{}
@@ -156,4 +153,27 @@ func (t *SubAgentTool) Execute(ctx context.Context, state tooltypes.State, param
 	return &SubAgentToolResult{
 		result: text,
 	}
+}
+
+func (r *SubAgentToolResult) StructuredData() tooltypes.StructuredToolResult {
+	result := tooltypes.StructuredToolResult{
+		ToolName:  "subagent",
+		Success:   !r.IsError(),
+		Timestamp: time.Now(),
+	}
+
+	// Always populate metadata, even for errors
+	// Note: SubAgentToolResult doesn't store the original question or model strength
+	// This would require modifying the SubAgentToolResult struct
+	result.Metadata = &tooltypes.SubAgentMetadata{
+		Question:      "", // Not available in current structure
+		ModelStrength: "", // Not available in current structure
+		Response:      r.result,
+	}
+
+	if r.IsError() {
+		result.Error = r.GetError()
+	}
+
+	return result
 }

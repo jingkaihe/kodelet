@@ -17,6 +17,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/sysprompt"
 	"github.com/jingkaihe/kodelet/pkg/telemetry"
 	"github.com/jingkaihe/kodelet/pkg/tools"
+	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
 	"github.com/sashabaranov/go-openai"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -222,19 +223,19 @@ func getModelPricing(model string) ModelPricing {
 
 // OpenAIThread implements the Thread interface using OpenAI's API
 type OpenAIThread struct {
-	client                *openai.Client
-	config                llmtypes.Config
-	reasoningEffort       string // low, medium, high to determine token allocation
-	state                 tooltypes.State
-	messages              []openai.ChatCompletionMessage
-	usage                 *llmtypes.Usage
-	conversationID        string
-	summary               string
-	isPersisted           bool
-	store                 ConversationStore
-	mu                    sync.Mutex
-	conversationMu        sync.Mutex
-	userFacingToolResults map[string]string // Maps tool_call_id to user-facing result
+	client          *openai.Client
+	config          llmtypes.Config
+	reasoningEffort string // low, medium, high to determine token allocation
+	state           tooltypes.State
+	messages        []openai.ChatCompletionMessage
+	usage           *llmtypes.Usage
+	conversationID  string
+	summary         string
+	isPersisted     bool
+	store           ConversationStore
+	mu              sync.Mutex
+	conversationMu  sync.Mutex
+	toolResults     map[string]tooltypes.StructuredToolResult // Maps tool_call_id to structured result
 }
 
 func (t *OpenAIThread) Provider() string {
@@ -257,13 +258,13 @@ func NewOpenAIThread(config llmtypes.Config) *OpenAIThread {
 	}
 
 	return &OpenAIThread{
-		client:                openai.NewClient(os.Getenv("OPENAI_API_KEY")), // API key will be set via env var
-		config:                config,
-		reasoningEffort:       reasoningEffort,
-		conversationID:        conversations.GenerateID(),
-		isPersisted:           false,
-		usage:                 &llmtypes.Usage{}, // must be initialized to avoid nil pointer dereference
-		userFacingToolResults: make(map[string]string),
+		client:          openai.NewClient(os.Getenv("OPENAI_API_KEY")), // API key will be set via env var
+		config:          config,
+		reasoningEffort: reasoningEffort,
+		conversationID:  conversations.GenerateID(),
+		isPersisted:     false,
+		usage:           &llmtypes.Usage{}, // must be initialized to avoid nil pointer dereference
+		toolResults:     make(map[string]tooltypes.StructuredToolResult),
 	}
 }
 
@@ -522,10 +523,15 @@ func (t *OpenAIThread) processMessageExchange(
 		// Execute the tool
 		runToolCtx := t.WithSubAgent(ctx, handler)
 		output := tools.RunTool(runToolCtx, t.state, toolCall.Function.Name, toolCall.Function.Arguments)
-		handler.HandleToolResult(toolCall.Function.Name, output.UserFacing())
 
-		// Store the user-facing result for this tool call
-		t.SetUserFacingToolResult(toolCall.ID, output.UserFacing())
+		// Use CLI rendering for consistent output formatting
+		structuredResult := output.StructuredData()
+		registry := renderers.NewRendererRegistry()
+		renderedOutput := registry.Render(structuredResult)
+		handler.HandleToolResult(toolCall.Function.Name, renderedOutput)
+
+		// Store the structured result for this tool call
+		t.SetStructuredToolResult(toolCall.ID, structuredResult)
 
 		// For tracing, add tool execution completion event
 		telemetry.AddEvent(ctx, "tool_execution_complete",
@@ -581,13 +587,12 @@ func (t *OpenAIThread) NewSubAgent(ctx context.Context) llmtypes.Thread {
 
 	// Create subagent thread reusing the parent's client instead of creating a new one
 	thread := &OpenAIThread{
-		client:                t.client, // Reuse parent's client
-		config:                config,
-		reasoningEffort:       t.reasoningEffort, // Reuse parent's reasoning effort
-		conversationID:        conversations.GenerateID(),
-		isPersisted:           false,   // subagent is not persisted
-		usage:                 t.usage, // Share usage tracking with parent
-		userFacingToolResults: make(map[string]string),
+		client:          t.client, // Reuse parent's client
+		config:          config,
+		reasoningEffort: t.reasoningEffort, // Reuse parent's reasoning effort
+		conversationID:  conversations.GenerateID(),
+		isPersisted:     false,   // subagent is not persisted
+		usage:           t.usage, // Share usage tracking with parent
 	}
 
 	thread.SetState(tools.NewBasicState(ctx, tools.WithSubAgentTools(), tools.WithExtraMCPTools(t.state.MCPTools())))
@@ -841,41 +846,41 @@ func getImageMediaType(ext string) (string, error) {
 	}
 }
 
-// SetUserFacingToolResult stores the user-facing result for a tool call
-func (t *OpenAIThread) SetUserFacingToolResult(toolCallID, result string) {
+// SetStructuredToolResult stores the structured result for a tool call
+func (t *OpenAIThread) SetStructuredToolResult(toolCallID string, result tooltypes.StructuredToolResult) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if t.userFacingToolResults == nil {
-		t.userFacingToolResults = make(map[string]string)
+	if t.toolResults == nil {
+		t.toolResults = make(map[string]tooltypes.StructuredToolResult)
 	}
-	t.userFacingToolResults[toolCallID] = result
+	t.toolResults[toolCallID] = result
 }
 
-// GetUserFacingToolResults returns all user-facing tool results
-func (t *OpenAIThread) GetUserFacingToolResults() map[string]string {
+// GetStructuredToolResults returns all structured tool results
+func (t *OpenAIThread) GetStructuredToolResults() map[string]tooltypes.StructuredToolResult {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if t.userFacingToolResults == nil {
-		return make(map[string]string)
+	if t.toolResults == nil {
+		return make(map[string]tooltypes.StructuredToolResult)
 	}
 	// Return a copy to avoid race conditions
-	result := make(map[string]string)
-	for k, v := range t.userFacingToolResults {
+	result := make(map[string]tooltypes.StructuredToolResult)
+	for k, v := range t.toolResults {
 		result[k] = v
 	}
 	return result
 }
 
-// SetUserFacingToolResults sets all user-facing tool results (for loading from conversation)
-func (t *OpenAIThread) SetUserFacingToolResults(results map[string]string) {
+// SetStructuredToolResults sets all structured tool results (for loading from conversation)
+func (t *OpenAIThread) SetStructuredToolResults(results map[string]tooltypes.StructuredToolResult) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if results == nil {
-		t.userFacingToolResults = make(map[string]string)
+		t.toolResults = make(map[string]tooltypes.StructuredToolResult)
 	} else {
-		t.userFacingToolResults = make(map[string]string)
+		t.toolResults = make(map[string]tooltypes.StructuredToolResult)
 		for k, v := range results {
-			t.userFacingToolResults[k] = v
+			t.toolResults[k] = v
 		}
 	}
 }

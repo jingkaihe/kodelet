@@ -35,16 +35,6 @@ func (r WaitForResult) AssistantFacing() string {
 	return tools.StringifyToolResult("Wait condition met successfully", "")
 }
 
-func (r WaitForResult) UserFacing() string {
-	if !r.Success {
-		return fmt.Sprintf("❌ Wait failed: %s", r.Error)
-	}
-	if !r.ConditionMet {
-		return "⏰ Wait timeout - condition not met"
-	}
-	return "✅ Wait condition met successfully"
-}
-
 func (r WaitForResult) IsError() bool {
 	return !r.Success
 }

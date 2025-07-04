@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/invopop/jsonschema"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -74,19 +75,6 @@ func (r *BatchToolResult) AssistantFacing() string {
 	}
 
 	return results.String()
-}
-
-func (r *BatchToolResult) UserFacing() string {
-	var results []string
-	for _, toolResult := range r.toolResults {
-		results = append(results, toolResult.UserFacing())
-	}
-
-	content := strings.Join(results, "\n\n")
-	if content == "" {
-		return "Batch operation completed successfully"
-	}
-	return fmt.Sprintf("Batch: %s\n%s", r.description, content)
 }
 
 type BatchTool struct{}
@@ -272,4 +260,42 @@ func (t *BatchTool) TracingKVs(parameters string) ([]attribute.KeyValue, error) 
 	}
 
 	return kvs, nil
+}
+
+func (r *BatchToolResult) StructuredData() tooltypes.StructuredToolResult {
+	result := tooltypes.StructuredToolResult{
+		ToolName:  "batch",
+		Success:   !r.IsError(),
+		Timestamp: time.Now(),
+	}
+
+	// Convert sub-results to structured format
+	subResults := make([]tooltypes.StructuredToolResult, 0, len(r.toolResults))
+	successCount := 0
+	failureCount := 0
+
+	for _, toolResult := range r.toolResults {
+		subResult := toolResult.StructuredData()
+		subResults = append(subResults, subResult)
+		if subResult.Success {
+			successCount++
+		} else {
+			failureCount++
+		}
+	}
+
+	result.Metadata = &tooltypes.BatchMetadata{
+		Description:   r.description,
+		SubResults:    subResults,
+		ExecutionTime: time.Duration(0), // Batch tool doesn't track execution time currently
+		SuccessCount:  successCount,
+		FailureCount:  failureCount,
+	}
+
+	// If any sub-tool failed, include aggregated errors
+	if failureCount > 0 {
+		result.Error = r.GetError()
+	}
+
+	return result
 }

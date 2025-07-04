@@ -51,13 +51,6 @@ func (r NavigateResult) AssistantFacing() string {
 	return tools.StringifyToolResult(result, "")
 }
 
-func (r NavigateResult) UserFacing() string {
-	if !r.Success {
-		return fmt.Sprintf("❌ Navigation failed: %s", r.Error)
-	}
-	return fmt.Sprintf("✅ Navigated to %s\nTitle: %s", r.URL, r.Title)
-}
-
 func (r NavigateResult) IsError() bool {
 	return !r.Success
 }

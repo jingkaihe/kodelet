@@ -13,6 +13,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
 
 	md "github.com/JohannesKaufmann/html-to-markdown"
 	"github.com/invopop/jsonschema"
@@ -46,19 +47,6 @@ func (r *WebFetchToolResult) IsError() bool {
 
 func (r *WebFetchToolResult) AssistantFacing() string {
 	return tooltypes.StringifyToolResult(r.result, r.err)
-}
-
-func (r *WebFetchToolResult) UserFacing() string {
-	if r.IsError() {
-		return r.GetError()
-	}
-	if r.filePath != "" {
-		return fmt.Sprintf("Web Fetch: %s\nSaved to: %s\n%s", r.url, r.filePath, r.result)
-	}
-	if r.prompt != "" {
-		return fmt.Sprintf("Web Fetch: %s\nPrompt: %s\n%s", r.url, r.prompt, r.result)
-	}
-	return fmt.Sprintf("Web Fetch: %s\n%s", r.url, r.result)
 }
 
 // WebFetchTool implements the web_fetch tool for retrieving and processing web content.
@@ -613,4 +601,37 @@ func convertHTMLToMarkdown(ctx context.Context, htmlContent string) string {
 		return htmlContent
 	}
 	return markdown
+}
+
+func (r *WebFetchToolResult) StructuredData() tooltypes.StructuredToolResult {
+	result := tooltypes.StructuredToolResult{
+		ToolName:  "web_fetch",
+		Success:   !r.IsError(),
+		Timestamp: time.Now(),
+	}
+
+	// Determine processed type based on what happened
+	processedType := "markdown" // Default for most web pages
+	if r.filePath != "" {
+		processedType = "saved"
+	} else if r.prompt != "" {
+		processedType = "ai_extracted"
+	}
+
+	// Always populate metadata, even for errors
+	result.Metadata = &tooltypes.WebFetchMetadata{
+		URL:           r.url,
+		ContentType:   "", // Not available in current structure
+		Size:          int64(len(r.result)),
+		SavedPath:     r.filePath,
+		Prompt:        r.prompt,
+		ProcessedType: processedType,
+		Content:       r.result,
+	}
+
+	if r.IsError() {
+		result.Error = r.GetError()
+	}
+
+	return result
 }

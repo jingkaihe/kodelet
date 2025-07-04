@@ -2,12 +2,12 @@ package tools
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/invopop/jsonschema"
@@ -48,17 +48,33 @@ func (r *FileReadToolResult) AssistantFacing() string {
 	return tooltypes.StringifyToolResult(content, r.GetError())
 }
 
-func (r *FileReadToolResult) UserFacing() string {
-	if r.IsError() {
-		return r.GetError()
+func (r *FileReadToolResult) StructuredData() tooltypes.StructuredToolResult {
+	result := tooltypes.StructuredToolResult{
+		ToolName:  "file_read",
+		Success:   !r.IsError(),
+		Timestamp: time.Now(),
 	}
 
-	content := utils.ContentWithLineNumber(r.lines, r.offset)
+	// Check if content was truncated
+	truncated := len(r.lines) > 0 && strings.Contains(r.lines[len(r.lines)-1], "truncated due to max output bytes")
 
-	buf := bytes.NewBufferString(fmt.Sprintf("File Read: %s\n", r.filename))
-	fmt.Fprintf(buf, "Offset: %d\n", r.offset)
-	buf.WriteString(content)
-	return buf.String()
+	// Detect language from file extension
+	language := utils.DetectLanguageFromPath(r.filename)
+
+	// Always populate metadata, even for errors
+	result.Metadata = &tooltypes.FileReadMetadata{
+		FilePath:  r.filename,
+		Offset:    r.offset,
+		Lines:     r.lines,
+		Language:  language,
+		Truncated: truncated,
+	}
+
+	if r.IsError() {
+		result.Error = r.GetError()
+	}
+
+	return result
 }
 
 type FileReadTool struct{}

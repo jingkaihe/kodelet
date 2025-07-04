@@ -12,6 +12,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
 // MockConversationStore is a test implementation of the ConversationStore interface
@@ -663,89 +664,6 @@ func TestExtractMessagesWithToolUse(t *testing.T) {
 	assert.Equal(t, "Here are the files in your directory: file1.txt, file2.txt, README.md", messages[4].Content)
 }
 
-func TestExtractMessagesWithUserFacingToolResults(t *testing.T) {
-	// Test with user-facing tool results
-	rawMessages := `[
-		{
-			"content": [
-				{
-					"text": "What's the weather like?",
-					"type": "text"
-				}
-			],
-			"role": "user"
-		},
-		{
-			"content": [
-				{
-					"text": "Let me check the weather for you.",
-					"type": "text"
-				},
-				{
-					"id": "toolu_weather",
-					"input": {
-						"location": "New York"
-					},
-					"name": "get_weather",
-					"type": "tool_use"
-				}
-			],
-			"role": "assistant"
-		},
-		{
-			"content": [
-				{
-					"tool_use_id": "toolu_weather",
-					"is_error": false,
-					"content": [
-						{
-							"text": "Raw weather data: 72F, sunny, humidity 60%",
-							"type": "text"
-						}
-					],
-					"type": "tool_result"
-				}
-			],
-			"role": "user"
-		},
-		{
-			"content": [
-				{
-					"text": "It's sunny and 72°F in New York today.",
-					"type": "text"
-				}
-			],
-			"role": "assistant"
-		}
-	]`
-
-	// Test with user-facing tool results
-	userFacingToolResults := map[string]string{
-		"toolu_weather": "It's a beautiful sunny day in New York with 72°F temperature and low humidity.",
-	}
-
-	messages, err := ExtractMessages([]byte(rawMessages), userFacingToolResults)
-	assert.NoError(t, err)
-	assert.Len(t, messages, 5)
-
-	// Check tool result uses user-facing result instead of raw content
-	toolResultMessage := messages[3]
-	assert.Equal(t, "assistant", toolResultMessage.Role)
-	assert.Contains(t, toolResultMessage.Content, "🔄 Tool result:")
-	assert.Contains(t, toolResultMessage.Content, "It's a beautiful sunny day in New York with 72°F temperature and low humidity.")
-	assert.NotContains(t, toolResultMessage.Content, "Raw weather data: 72F, sunny, humidity 60%")
-
-	// Test with nil userFacingToolResults (should use raw content)
-	messages, err = ExtractMessages([]byte(rawMessages), nil)
-	assert.NoError(t, err)
-	assert.Len(t, messages, 5)
-
-	toolResultMessage = messages[3]
-	assert.Equal(t, "assistant", toolResultMessage.Role)
-	assert.Contains(t, toolResultMessage.Content, "🔄 Tool result:")
-	assert.Contains(t, toolResultMessage.Content, "Raw weather data: 72F, sunny, humidity 60%")
-}
-
 func TestExtractMessagesWithMultipleToolResults(t *testing.T) {
 	// Test with multiple tool calls and results
 	rawMessages := `[
@@ -824,26 +742,34 @@ func TestExtractMessagesWithMultipleToolResults(t *testing.T) {
 		}
 	]`
 
-	userFacingToolResults := map[string]string{
-		"toolu_weather": "It's 75°F and cloudy in New York City",
-		"toolu_time":    "The current time is 2:30 PM",
+	toolResults := map[string]tooltypes.StructuredToolResult{
+		"toolu_weather": {
+			ToolName:  "get_weather",
+			Success:   true,
+			Timestamp: time.Now(),
+			Metadata:  nil,
+		},
+		"toolu_time": {
+			ToolName:  "get_time",
+			Success:   true,
+			Timestamp: time.Now(),
+			Metadata:  nil,
+		},
 	}
 
-	messages, err := ExtractMessages([]byte(rawMessages), userFacingToolResults)
+	messages, err := ExtractMessages([]byte(rawMessages), toolResults)
 	assert.NoError(t, err)
 	assert.Len(t, messages, 7) // user + assistant text + weather tool use + time tool use + weather result + time result + assistant final
 
-	// Check weather tool result uses user-facing result
+	// Check weather tool result uses CLI rendering
 	weatherToolResult := messages[4]
 	assert.Equal(t, "assistant", weatherToolResult.Role)
-	assert.Contains(t, weatherToolResult.Content, "It's 75°F and cloudy in New York City")
-	assert.NotContains(t, weatherToolResult.Content, "Weather: 75°F, cloudy")
+	assert.Contains(t, weatherToolResult.Content, "get_weather")
 
-	// Check time tool result uses user-facing result
+	// Check time tool result uses CLI rendering
 	timeToolResult := messages[5]
 	assert.Equal(t, "assistant", timeToolResult.Role)
-	assert.Contains(t, timeToolResult.Content, "The current time is 2:30 PM")
-	assert.NotContains(t, timeToolResult.Content, "Current time: 2:30 PM")
+	assert.Contains(t, timeToolResult.Content, "get_time")
 }
 
 func TestExtractMessagesWithThinking(t *testing.T) {
@@ -889,60 +815,4 @@ func TestExtractMessagesWithThinking(t *testing.T) {
 	// Check final assistant message
 	assert.Equal(t, "assistant", messages[2].Role)
 	assert.Equal(t, "2+2 equals 4.", messages[2].Content)
-}
-
-func TestSaveAndLoadConversationWithUserFacingToolResults(t *testing.T) {
-	store := &MockConversationStore{}
-
-	// Create a thread with user-facing tool results
-	thread, err := NewAnthropicThread(llmtypes.Config{
-		Model: string(anthropic.ModelClaudeSonnet4_20250514),
-	})
-	require.NoError(t, err)
-
-	// Set up state and store
-	state := tools.NewBasicState(context.TODO())
-	thread.SetState(state)
-	thread.store = store
-	thread.EnablePersistence(true) // Enable persistence
-	thread.SetUserFacingToolResult("tool_1", "User-friendly result 1")
-	thread.SetUserFacingToolResult("tool_2", "User-friendly result 2")
-
-	// Add some sample messages
-	thread.AddUserMessage(context.Background(), "Hello")
-
-	// Save the conversation
-	err = thread.SaveConversation(context.Background(), false)
-	require.NoError(t, err)
-
-	// Verify the saved record contains user-facing tool results
-	require.Len(t, store.SavedRecords, 1)
-	savedRecord := store.SavedRecords[0]
-
-	assert.NotNil(t, savedRecord.UserFacingToolResults)
-	assert.Len(t, savedRecord.UserFacingToolResults, 2)
-	assert.Equal(t, "User-friendly result 1", savedRecord.UserFacingToolResults["tool_1"])
-	assert.Equal(t, "User-friendly result 2", savedRecord.UserFacingToolResults["tool_2"])
-
-	// Create a new thread and load the conversation
-	newThread, err := NewAnthropicThread(llmtypes.Config{
-		Model: string(anthropic.ModelClaudeSonnet4_20250514),
-	})
-	require.NoError(t, err)
-
-	newState := tools.NewBasicState(context.TODO())
-	newThread.SetState(newState)
-	newThread.store = store
-	newThread.EnablePersistence(true) // Enable persistence
-	newThread.SetConversationID(savedRecord.ID)
-
-	// Load the conversation
-	err = newThread.loadConversation()
-	require.NoError(t, err)
-
-	// Verify the loaded thread has the user-facing tool results
-	loadedResults := newThread.GetUserFacingToolResults()
-	assert.Len(t, loadedResults, 2)
-	assert.Equal(t, "User-friendly result 1", loadedResults["tool_1"])
-	assert.Equal(t, "User-friendly result 2", loadedResults["tool_2"])
 }

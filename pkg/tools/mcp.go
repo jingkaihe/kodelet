@@ -278,6 +278,60 @@ func NewMCPTool(client *client.Client, tool mcp.Tool) *MCPTool {
 		mcpToolDescription: tool.Description,
 	}
 }
+
+// MCPToolResult represents the result of an MCP tool execution
+type MCPToolResult struct {
+	toolName      string
+	mcpToolName   string
+	serverName    string
+	parameters    map[string]any
+	content       []tooltypes.MCPContent
+	contentText   string
+	executionTime time.Duration
+	result        string
+	err           string
+}
+
+func (r *MCPToolResult) GetResult() string {
+	return r.result
+}
+
+func (r *MCPToolResult) GetError() string {
+	return r.err
+}
+
+func (r *MCPToolResult) IsError() bool {
+	return r.err != ""
+}
+
+func (r *MCPToolResult) AssistantFacing() string {
+	return tooltypes.StringifyToolResult(r.result, r.err)
+}
+
+func (r *MCPToolResult) StructuredData() tooltypes.StructuredToolResult {
+	result := tooltypes.StructuredToolResult{
+		ToolName:  r.toolName,
+		Success:   !r.IsError(),
+		Timestamp: time.Now(),
+	}
+
+	if r.IsError() {
+		result.Error = r.GetError()
+		return result
+	}
+
+	result.Metadata = &tooltypes.MCPToolMetadata{
+		MCPToolName:   r.mcpToolName,
+		ServerName:    r.serverName,
+		Parameters:    r.parameters,
+		Content:       r.content,
+		ContentText:   r.contentText,
+		ExecutionTime: r.executionTime,
+	}
+
+	return result
+}
+
 func (t *MCPTool) Name() string {
 	return fmt.Sprintf("mcp_%s", t.mcpToolName)
 }
@@ -310,29 +364,56 @@ func (t *MCPTool) ValidateInput(state tooltypes.State, parameters string) error 
 func (t *MCPTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
 	var input map[string]any
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
-		return tooltypes.BaseToolResult{
-			Error: err.Error(),
+		return &MCPToolResult{
+			toolName:    t.Name(),
+			mcpToolName: t.mcpToolName,
+			err:         err.Error(),
 		}
 	}
 
+	startTime := time.Now()
 	req := mcp.CallToolRequest{}
 	req.Params.Arguments = input
 	req.Params.Name = t.mcpToolName
 	result, err := t.client.CallTool(ctx, req)
+	executionTime := time.Since(startTime)
+
 	if err != nil {
-		return tooltypes.BaseToolResult{
-			Error: err.Error(),
+		return &MCPToolResult{
+			toolName:    t.Name(),
+			mcpToolName: t.mcpToolName,
+			err:         err.Error(),
 		}
 	}
+
+	// Extract content for both formats
 	content := ""
+	var mcpContents []tooltypes.MCPContent
+
 	for _, c := range result.Content {
 		if v, ok := c.(mcp.TextContent); ok {
 			content += v.Text
+			mcpContents = append(mcpContents, tooltypes.MCPContent{
+				Type: "text",
+				Text: v.Text,
+			})
 		} else {
+			// Handle other content types
 			content += fmt.Sprintf("%v", c)
+			mcpContents = append(mcpContents, tooltypes.MCPContent{
+				Type: "unknown",
+				Text: fmt.Sprintf("%v", c),
+			})
 		}
 	}
-	return tooltypes.BaseToolResult{
-		Result: content,
+
+	return &MCPToolResult{
+		toolName:      t.Name(),
+		mcpToolName:   t.mcpToolName,
+		parameters:    input,
+		content:       mcpContents,
+		contentText:   content,
+		executionTime: executionTime,
+		result:        content,
 	}
 }

@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -46,17 +45,29 @@ func (r *FileWriteToolResult) AssistantFacing() string {
 	return tooltypes.StringifyToolResult(content, r.GetError())
 }
 
-func (r *FileWriteToolResult) UserFacing() string {
-	if r.IsError() {
-		return r.GetError()
+func (r *FileWriteToolResult) StructuredData() tooltypes.StructuredToolResult {
+	result := tooltypes.StructuredToolResult{
+		ToolName:  "file_write",
+		Success:   !r.IsError(),
+		Timestamp: time.Now(),
 	}
 
-	lines := strings.Split(r.text, "\n")
-	textWithLineNumber := utils.ContentWithLineNumber(lines, 0)
+	// Detect language from file extension
+	language := utils.DetectLanguageFromPath(r.filename)
 
-	buf := bytes.NewBufferString(fmt.Sprintf("File Written: %s\n", r.filename))
-	buf.WriteString(textWithLineNumber)
-	return buf.String()
+	// Always populate metadata, even for errors
+	result.Metadata = &tooltypes.FileWriteMetadata{
+		FilePath: r.filename,
+		Content:  r.text,
+		Size:     int64(len(r.text)),
+		Language: language,
+	}
+
+	if r.IsError() {
+		result.Error = r.GetError()
+	}
+
+	return result
 }
 
 type FileWriteTool struct{}

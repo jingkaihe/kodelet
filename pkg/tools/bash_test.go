@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -824,4 +825,106 @@ func TestBashTool_ValidateInput_AllowedCommands(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestBashToolResult_StructuredDataFields(t *testing.T) {
+	tool := NewBashTool(nil)
+	state := NewBasicState(context.TODO())
+
+	t.Run("successful command has all metadata fields", func(t *testing.T) {
+		input := BashInput{
+			Description: "Test command",
+			Command:     "echo 'hello world'",
+			Timeout:     10,
+		}
+
+		inputJSON, _ := json.Marshal(input)
+		result := tool.Execute(context.Background(), state, string(inputJSON))
+
+		assert.False(t, result.IsError())
+
+		structuredResult := result.StructuredData()
+		assert.True(t, structuredResult.Success)
+		assert.Equal(t, "bash", structuredResult.ToolName)
+
+		// Extract metadata and verify all fields are populated
+		bashResult, ok := result.(*BashToolResult)
+		assert.True(t, ok)
+
+		// Verify execution time is tracked
+		assert.Greater(t, bashResult.executionTime, time.Duration(0))
+
+		// Verify exit code is set correctly
+		assert.Equal(t, 0, bashResult.exitCode)
+
+		// Verify working directory is captured
+		assert.NotEmpty(t, bashResult.workingDir)
+
+		// Verify command and output
+		assert.Equal(t, "echo 'hello world'", bashResult.command)
+		assert.Contains(t, bashResult.combinedOutput, "hello world")
+
+		// Check structured metadata
+		metadata := structuredResult.Metadata.(*tooltypes.BashMetadata)
+		assert.Equal(t, "echo 'hello world'", metadata.Command)
+		assert.Equal(t, 0, metadata.ExitCode)
+		assert.Greater(t, metadata.ExecutionTime, time.Duration(0))
+		assert.NotEmpty(t, metadata.WorkingDir)
+		assert.Contains(t, metadata.Output, "hello world")
+	})
+
+	t.Run("failed command has correct exit code", func(t *testing.T) {
+		input := BashInput{
+			Description: "Test failing command",
+			Command:     "exit 42",
+			Timeout:     10,
+		}
+
+		inputJSON, _ := json.Marshal(input)
+		result := tool.Execute(context.Background(), state, string(inputJSON))
+
+		assert.True(t, result.IsError())
+
+		bashResult, ok := result.(*BashToolResult)
+		assert.True(t, ok)
+
+		// Verify execution time is tracked even for failures
+		assert.Greater(t, bashResult.executionTime, time.Duration(0))
+
+		// Verify correct exit code is captured
+		assert.Equal(t, 42, bashResult.exitCode)
+
+		// Verify working directory is captured
+		assert.NotEmpty(t, bashResult.workingDir)
+
+		// Check structured metadata for error case
+		structuredResult := result.StructuredData()
+		assert.False(t, structuredResult.Success)
+		assert.Contains(t, structuredResult.Error, "Command exited with status 42")
+	})
+
+	t.Run("timeout has execution time and working dir", func(t *testing.T) {
+		input := BashInput{
+			Description: "Test timeout command",
+			Command:     "sleep 20", // Will timeout with 10s limit
+			Timeout:     10,
+		}
+
+		inputJSON, _ := json.Marshal(input)
+		result := tool.Execute(context.Background(), state, string(inputJSON))
+
+		assert.True(t, result.IsError())
+
+		bashResult, ok := result.(*BashToolResult)
+		assert.True(t, ok)
+
+		// Verify execution time is tracked even for timeouts
+		assert.Greater(t, bashResult.executionTime, time.Duration(0))
+
+		// Verify working directory is captured
+		assert.NotEmpty(t, bashResult.workingDir)
+
+		// Verify timeout error message
+		assert.Contains(t, bashResult.error, "Command timed out after 10 seconds")
+	})
 }

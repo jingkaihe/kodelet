@@ -8,7 +8,9 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
 	"github.com/jingkaihe/kodelet/pkg/types/llm"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
 // cleanupOrphanedMessages removes orphaned messages from the end of the message list.
@@ -70,16 +72,16 @@ func (t *AnthropicThread) SaveConversation(ctx context.Context, summarise bool) 
 
 	// Create a new conversation record
 	record := conversations.ConversationRecord{
-		ID:                    t.conversationID,
-		RawMessages:           rawMessages,
-		ModelType:             "anthropic",
-		Usage:                 *t.usage,
-		Metadata:              map[string]interface{}{"model": t.config.Model},
-		Summary:               t.summary,
-		CreatedAt:             time.Now(),
-		UpdatedAt:             time.Now(),
-		FileLastAccess:        t.state.FileLastAccess(),
-		UserFacingToolResults: t.GetUserFacingToolResults(),
+		ID:             t.conversationID,
+		RawMessages:    rawMessages,
+		ModelType:      "anthropic",
+		Usage:          *t.usage,
+		Metadata:       map[string]interface{}{"model": t.config.Model},
+		Summary:        t.summary,
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+		FileLastAccess: t.state.FileLastAccess(),
+		ToolResults:    t.GetStructuredToolResults(),
 	}
 
 	// Save the record
@@ -118,8 +120,8 @@ func (t *AnthropicThread) loadConversation() error {
 	t.usage = &record.Usage
 	t.summary = record.Summary
 	t.state.SetFileLastAccess(record.FileLastAccess)
-	// Restore user-facing tool results
-	t.SetUserFacingToolResults(record.UserFacingToolResults)
+	// Restore structured tool results
+	t.SetStructuredToolResults(record.ToolResults)
 	return nil
 }
 
@@ -133,7 +135,7 @@ func DeserializeMessages(b []byte) ([]anthropic.MessageParam, error) {
 }
 
 // ExtractMessages parses the raw messages from a conversation record
-func ExtractMessages(rawMessages json.RawMessage, userFacingToolResults map[string]string) ([]llm.Message, error) {
+func ExtractMessages(rawMessages json.RawMessage, toolResults map[string]tooltypes.StructuredToolResult) ([]llm.Message, error) {
 	// Deserialize the raw messages using the existing DeserializeMessages function
 	anthropicMessages, err := DeserializeMessages(rawMessages)
 	if err != nil {
@@ -167,8 +169,10 @@ func ExtractMessages(rawMessages json.RawMessage, userFacingToolResults map[stri
 				for _, resultContent := range toolResultBlock.Content {
 					if textBlock := resultContent.OfText; textBlock != nil {
 						text := textBlock.Text
-						if userFacingToolResults, ok := userFacingToolResults[toolResultBlock.ToolUseID]; ok {
-							text = userFacingToolResults
+						// Use CLI rendering if structured result is available
+						if structuredResult, ok := toolResults[toolResultBlock.ToolUseID]; ok {
+							registry := renderers.NewRendererRegistry()
+							text = registry.Render(structuredResult)
 						}
 						messages = append(messages, llm.Message{
 							Role:    "assistant",

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/chromedp/chromedp"
 	"github.com/invopop/jsonschema"
@@ -34,20 +35,6 @@ func (r GetPageResult) AssistantFacing() string {
 	return tools.StringifyToolResult(result+"\n\n"+r.HTML, "")
 }
 
-func (r GetPageResult) UserFacing() string {
-	if !r.Success {
-		return fmt.Sprintf("❌ Failed to get page content: %s", r.Error)
-	}
-
-	status := "✅ Page content retrieved"
-	if r.Truncated {
-		status += " (truncated)"
-	}
-
-	return fmt.Sprintf("%s\nURL: %s\nTitle: %s\nHTML Length: %d characters",
-		status, r.URL, r.Title, len(r.HTML))
-}
-
 func (r GetPageResult) IsError() bool {
 	return !r.Success
 }
@@ -58,6 +45,26 @@ func (r GetPageResult) GetError() string {
 
 func (r GetPageResult) GetResult() string {
 	return r.HTML
+}
+
+func (r GetPageResult) StructuredData() tools.StructuredToolResult {
+	result := tools.StructuredToolResult{
+		ToolName:  "browser_get_page",
+		Success:   r.Success,
+		Error:     r.Error,
+		Timestamp: time.Now(),
+	}
+
+	if r.Success {
+		result.Metadata = &tools.BrowserGetPageMetadata{
+			URL:       r.URL,
+			Title:     r.Title,
+			HTMLSize:  len(r.HTML),
+			Truncated: r.Truncated,
+		}
+	}
+
+	return result
 }
 
 func (t GetPageTool) GenerateSchema() *jsonschema.Schema {

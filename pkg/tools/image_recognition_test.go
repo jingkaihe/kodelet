@@ -228,9 +228,6 @@ func (m *mockThread) IsPersisted() bool                                         
 func (m *mockThread) EnablePersistence(enabled bool)                                           {}
 func (m *mockThread) Provider() string                                                         { return "mock" }
 func (m *mockThread) GetMessages() ([]llm.Message, error)                                      { return nil, nil }
-func (m *mockThread) SetUserFacingToolResult(toolCallID, result string)                        {}
-func (m *mockThread) GetUserFacingToolResults() map[string]string                              { return make(map[string]string) }
-func (m *mockThread) SetUserFacingToolResults(results map[string]string)                       {}
 
 func TestImageRecognitionTool_Execute(t *testing.T) {
 	tool := &ImageRecognitionTool{}

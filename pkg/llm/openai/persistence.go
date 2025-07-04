@@ -7,9 +7,11 @@ import (
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
 	"github.com/sashabaranov/go-openai"
 
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
 // cleanupOrphanedMessages removes orphaned messages from the end of the message list.
@@ -62,16 +64,16 @@ func (t *OpenAIThread) SaveConversation(ctx context.Context, summarize bool) err
 
 	// Build the conversation record
 	record := conversations.ConversationRecord{
-		ID:                    t.conversationID,
-		RawMessages:           messagesJSON,
-		ModelType:             "openai",
-		Usage:                 *t.usage,
-		Metadata:              map[string]interface{}{"model": t.config.Model},
-		Summary:               t.summary,
-		CreatedAt:             time.Now(),
-		UpdatedAt:             time.Now(),
-		FileLastAccess:        t.state.FileLastAccess(),
-		UserFacingToolResults: t.GetUserFacingToolResults(),
+		ID:             t.conversationID,
+		RawMessages:    messagesJSON,
+		ModelType:      "openai",
+		Usage:          *t.usage,
+		Metadata:       map[string]interface{}{"model": t.config.Model},
+		Summary:        t.summary,
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+		FileLastAccess: t.state.FileLastAccess(),
+		ToolResults:    t.GetStructuredToolResults(),
 	}
 
 	// Save to the store
@@ -110,14 +112,14 @@ func (t *OpenAIThread) loadConversation() error {
 	t.usage = &record.Usage
 	t.summary = record.Summary
 	t.state.SetFileLastAccess(record.FileLastAccess)
-	// Restore user-facing tool results
-	t.SetUserFacingToolResults(record.UserFacingToolResults)
+	// Restore structured tool results
+	t.SetStructuredToolResults(record.ToolResults)
 
 	return nil
 }
 
 // ExtractMessages converts the internal message format to the common format
-func ExtractMessages(data []byte, userFacingToolResults map[string]string) ([]llmtypes.Message, error) {
+func ExtractMessages(data []byte, toolResults map[string]tooltypes.StructuredToolResult) ([]llmtypes.Message, error) {
 	var messages []openai.ChatCompletionMessage
 	if err := json.Unmarshal(data, &messages); err != nil {
 		return nil, fmt.Errorf("error unmarshaling messages: %w", err)
@@ -133,8 +135,10 @@ func ExtractMessages(data []byte, userFacingToolResults map[string]string) ([]ll
 		// Handle tool results first (before plain content)
 		if msg.Role == openai.ChatMessageRoleTool {
 			text := msg.Content
-			if userFacingToolResults, ok := userFacingToolResults[msg.ToolCallID]; ok {
-				text = userFacingToolResults
+			// Use CLI rendering if structured result is available
+			if structuredResult, ok := toolResults[msg.ToolCallID]; ok {
+				registry := renderers.NewRendererRegistry()
+				text = registry.Render(structuredResult)
 			}
 			result = append(result, llmtypes.Message{
 				Role:    "assistant",

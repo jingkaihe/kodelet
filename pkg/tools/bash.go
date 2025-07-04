@@ -330,6 +330,9 @@ type BashToolResult struct {
 	command        string
 	combinedOutput string
 	error          string
+	exitCode       int
+	executionTime  time.Duration
+	workingDir     string
 }
 
 func (r *BashToolResult) GetResult() string {
@@ -348,28 +351,35 @@ func (r *BashToolResult) AssistantFacing() string {
 	return tooltypes.StringifyToolResult(r.combinedOutput, r.GetError())
 }
 
-func (r *BashToolResult) UserFacing() string {
-	buf := bytes.NewBufferString(fmt.Sprintf("Command: %s\n", r.command))
+func (r *BashToolResult) StructuredData() tooltypes.StructuredToolResult {
+	result := tooltypes.StructuredToolResult{
+		ToolName:  "bash",
+		Success:   !r.IsError(),
+		Timestamp: time.Now(),
+	}
 
-	output := r.combinedOutput
-	if output == "" {
-		buf.WriteString("(no output)")
-	} else {
-		buf.WriteString(output)
+	// Always populate metadata, even for errors
+	result.Metadata = &tooltypes.BashMetadata{
+		Command:       r.command,
+		Output:        r.combinedOutput,
+		ExitCode:      r.exitCode,
+		ExecutionTime: r.executionTime,
+		WorkingDir:    r.workingDir,
 	}
 
 	if r.IsError() {
-		buf.WriteString("\nError: " + r.GetError())
+		result.Error = r.GetError()
 	}
 
-	return buf.String()
+	return result
 }
 
 type BackgroundBashToolResult struct {
-	command string
-	pid     int
-	logPath string
-	error   string
+	command   string
+	pid       int
+	logPath   string
+	startTime time.Time
+	error     string
 }
 
 func (r *BackgroundBashToolResult) GetResult() string {
@@ -388,28 +398,37 @@ func (r *BackgroundBashToolResult) AssistantFacing() string {
 	return tooltypes.StringifyToolResult(r.GetResult(), r.GetError())
 }
 
-func (r *BackgroundBashToolResult) UserFacing() string {
-	buf := bytes.NewBufferString("")
-	fmt.Fprintf(buf, "Command: %s\n", r.command)
-	fmt.Fprintf(buf, "PID: %d\n", r.pid)
-	fmt.Fprintf(buf, "Log file: %s\n", r.logPath)
-
-	if r.IsError() {
-		buf.WriteString("Error: " + r.GetError())
-	} else {
-		buf.WriteString("Process started in background successfully")
+func (r *BackgroundBashToolResult) StructuredData() tooltypes.StructuredToolResult {
+	result := tooltypes.StructuredToolResult{
+		ToolName:  "bash_background",
+		Success:   !r.IsError(),
+		Timestamp: time.Now(),
 	}
 
-	return buf.String()
+	// Always populate metadata, even for errors
+	result.Metadata = &tooltypes.BackgroundBashMetadata{
+		Command:   r.command,
+		PID:       r.pid,
+		LogPath:   r.logPath,
+		StartTime: r.startTime,
+	}
+
+	if r.IsError() {
+		result.Error = r.GetError()
+	}
+
+	return result
 }
 
 func (b *BashTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
 	input := &BashInput{}
 	err := json.Unmarshal([]byte(parameters), input)
 	if err != nil {
+		workingDir, _ := os.Getwd()
 		return &BashToolResult{
-			command: input.Command,
-			error:   err.Error(),
+			command:    input.Command,
+			workingDir: workingDir,
+			error:      err.Error(),
 		}
 	}
 
@@ -421,35 +440,51 @@ func (b *BashTool) Execute(ctx context.Context, state tooltypes.State, parameter
 }
 
 func (b *BashTool) executeForeground(ctx context.Context, input *BashInput) tooltypes.ToolResult {
+	startTime := time.Now()
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(input.Timeout)*time.Second)
 	defer cancel()
+
+	// Get current working directory
+	workingDir, _ := os.Getwd()
 
 	cmd := exec.CommandContext(ctx, "bash", "-c", input.Command)
 
 	output, err := cmd.CombinedOutput()
+	executionTime := time.Since(startTime)
+
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return &BashToolResult{
-				command: input.Command,
-				error:   "Command timed out after " + strconv.Itoa(input.Timeout) + " seconds",
+				command:       input.Command,
+				executionTime: executionTime,
+				workingDir:    workingDir,
+				error:         "Command timed out after " + strconv.Itoa(input.Timeout) + " seconds",
 			}
 		}
 		if status, ok := err.(*exec.ExitError); ok {
 			return &BashToolResult{
 				command:        input.Command,
 				combinedOutput: string(output),
+				exitCode:       status.ExitCode(),
+				executionTime:  executionTime,
+				workingDir:     workingDir,
 				error:          fmt.Sprintf("Command exited with status %d", status.ExitCode()),
 			}
 		}
 		return &BashToolResult{
-			command: input.Command,
-			error:   err.Error(),
+			command:       input.Command,
+			executionTime: executionTime,
+			workingDir:    workingDir,
+			error:         err.Error(),
 		}
 	}
 
 	return &BashToolResult{
 		command:        input.Command,
 		combinedOutput: string(output),
+		exitCode:       0, // Success
+		executionTime:  executionTime,
+		workingDir:     workingDir,
 	}
 }
 
@@ -458,16 +493,18 @@ func (b *BashTool) executeBackground(ctx context.Context, state tooltypes.State,
 	pwd, err := os.Getwd()
 	if err != nil {
 		return &BackgroundBashToolResult{
-			command: input.Command,
-			error:   fmt.Sprintf("Failed to get current directory: %v", err),
+			command:   input.Command,
+			startTime: time.Now(),
+			error:     fmt.Sprintf("Failed to get current directory: %v", err),
 		}
 	}
 
 	kodeletDir := filepath.Join(pwd, ".kodelet")
 	if err := os.MkdirAll(kodeletDir, 0755); err != nil {
 		return &BackgroundBashToolResult{
-			command: input.Command,
-			error:   fmt.Sprintf("Failed to create kodelet directory: %v", err),
+			command:   input.Command,
+			startTime: time.Now(),
+			error:     fmt.Sprintf("Failed to create kodelet directory: %v", err),
 		}
 	}
 
@@ -478,24 +515,27 @@ func (b *BashTool) executeBackground(ctx context.Context, state tooltypes.State,
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return &BackgroundBashToolResult{
-			command: input.Command,
-			error:   fmt.Sprintf("Failed to create stdout pipe: %v", err),
+			command:   input.Command,
+			startTime: time.Now(),
+			error:     fmt.Sprintf("Failed to create stdout pipe: %v", err),
 		}
 	}
 
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		return &BackgroundBashToolResult{
-			command: input.Command,
-			error:   fmt.Sprintf("Failed to create stderr pipe: %v", err),
+			command:   input.Command,
+			startTime: time.Now(),
+			error:     fmt.Sprintf("Failed to create stderr pipe: %v", err),
 		}
 	}
 
 	// Start the command
 	if err := cmd.Start(); err != nil {
 		return &BackgroundBashToolResult{
-			command: input.Command,
-			error:   fmt.Sprintf("Failed to start command: %v", err),
+			command:   input.Command,
+			startTime: time.Now(),
+			error:     fmt.Sprintf("Failed to start command: %v", err),
 		}
 	}
 
@@ -506,8 +546,9 @@ func (b *BashTool) executeBackground(ctx context.Context, state tooltypes.State,
 	if err := os.MkdirAll(pidDir, 0755); err != nil {
 		cmd.Process.Kill()
 		return &BackgroundBashToolResult{
-			command: input.Command,
-			error:   fmt.Sprintf("Failed to create PID directory: %v", err),
+			command:   input.Command,
+			startTime: time.Now(),
+			error:     fmt.Sprintf("Failed to create PID directory: %v", err),
 		}
 	}
 
@@ -517,17 +558,19 @@ func (b *BashTool) executeBackground(ctx context.Context, state tooltypes.State,
 	if err != nil {
 		cmd.Process.Kill()
 		return &BackgroundBashToolResult{
-			command: input.Command,
-			error:   fmt.Sprintf("Failed to create log file: %v", err),
+			command:   input.Command,
+			startTime: time.Now(),
+			error:     fmt.Sprintf("Failed to create log file: %v", err),
 		}
 	}
 
 	// Add to state tracking
+	startTime := time.Now()
 	backgroundProcess := tooltypes.BackgroundProcess{
 		PID:       pid,
 		Command:   input.Command,
 		LogPath:   logPath,
-		StartTime: time.Now(),
+		StartTime: startTime,
 		Process:   cmd.Process,
 	}
 
@@ -535,8 +578,9 @@ func (b *BashTool) executeBackground(ctx context.Context, state tooltypes.State,
 		logFile.Close()
 		cmd.Process.Kill()
 		return &BackgroundBashToolResult{
-			command: input.Command,
-			error:   fmt.Sprintf("Failed to track background process: %v", err),
+			command:   input.Command,
+			startTime: startTime,
+			error:     fmt.Sprintf("Failed to track background process: %v", err),
 		}
 	}
 
@@ -577,9 +621,10 @@ func (b *BashTool) executeBackground(ctx context.Context, state tooltypes.State,
 	}()
 
 	return &BackgroundBashToolResult{
-		command: input.Command,
-		pid:     pid,
-		logPath: logPath,
+		command:   input.Command,
+		pid:       pid,
+		logPath:   logPath,
+		startTime: startTime,
 	}
 }
 
