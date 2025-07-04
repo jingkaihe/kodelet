@@ -1,5 +1,16 @@
 # Kodelet
 
+## 0.0.54.alpha (2025-07-04)
+
+### Store Structured Tool Result in Conversation
+
+- **Structured Tool Results**: Complete architectural overhaul replacing string-based tool results with structured metadata storage
+  - **Rich Metadata**: Tool results now capture structured data (file paths, line numbers, execution context, etc.) instead of plain strings
+  - **Type-Safe Storage**: All tool outputs stored with type-safe metadata structures for better data integrity
+  - **Improved Conversation Persistence**: Enhanced conversation storage with structured tool result metadata
+  - **CLI Renderer System**: New renderer architecture generates CLI output from structured data at display time
+  - **Web UI Foundation**: Structured data provides foundation for upcoming web UI conversation viewer
+
 ## 0.0.53.alpha (2025-07-03)
 
 ### Conversation Enhancement
