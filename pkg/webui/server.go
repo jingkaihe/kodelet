@@ -28,6 +28,7 @@ type Server struct {
 	conversationService *conversations.ConversationService
 	config              *ServerConfig
 	server              *http.Server
+	staticFS            fs.FS
 }
 
 // ServerConfig holds the configuration for the web server
@@ -36,18 +37,45 @@ type ServerConfig struct {
 	Port int
 }
 
+// Validate validates the server configuration
+func (c *ServerConfig) Validate() error {
+	// Validate host
+	if c.Host == "" {
+		return fmt.Errorf("host cannot be empty")
+	}
+
+	// Validate port
+	if c.Port < 1 || c.Port > 65535 {
+		return fmt.Errorf("port must be between 1 and 65535, got %d", c.Port)
+	}
+
+	return nil
+}
+
 // NewServer creates a new web UI server
 func NewServer(config *ServerConfig) (*Server, error) {
+	// Validate configuration
+	if err := config.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid server configuration: %w", err)
+	}
+
 	// Get the conversation service
 	conversationService, err := conversations.GetDefaultConversationService()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create conversation service: %w", err)
 	}
 
+	// Create a sub-filesystem for static files
+	staticFS, err := fs.Sub(embedFS, "static")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create static filesystem: %w", err)
+	}
+
 	s := &Server{
 		router:              mux.NewRouter(),
 		conversationService: conversationService,
 		config:              config,
+		staticFS:            staticFS,
 	}
 
 	// Setup routes
@@ -81,13 +109,7 @@ func (s *Server) setupRoutes() {
 
 // staticFileHandler serves static files from the embedded filesystem
 func (s *Server) staticFileHandler() http.Handler {
-	// Create a sub-filesystem for static files
-	staticFS, err := fs.Sub(embedFS, "static")
-	if err != nil {
-		panic(fmt.Sprintf("failed to create static filesystem: %v", err))
-	}
-
-	return http.StripPrefix("/static/", http.FileServer(http.FS(staticFS)))
+	return http.StripPrefix("/static/", http.FileServer(http.FS(s.staticFS)))
 }
 
 // loggingMiddleware logs HTTP requests
@@ -183,7 +205,7 @@ func (s *Server) handleListConversations(w http.ResponseWriter, r *http.Request)
 	// Get conversations
 	response, err := s.conversationService.ListConversations(ctx, req)
 	if err != nil {
-		s.writeErrorResponse(w, http.StatusInternalServerError, "Failed to list conversations", err)
+		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to list conversations", err)
 		return
 	}
 
@@ -231,21 +253,21 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 	// Resolve conversation ID (supports short IDs)
 	resolvedID, err := s.conversationService.ResolveConversationID(ctx, id)
 	if err != nil {
-		s.writeErrorResponse(w, http.StatusNotFound, "Conversation not found", err)
+		s.writeErrorResponse(w, http.StatusNotFound, "conversation not found", err)
 		return
 	}
 
 	// Get conversation
 	response, err := s.conversationService.GetConversation(ctx, resolvedID)
 	if err != nil {
-		s.writeErrorResponse(w, http.StatusInternalServerError, "Failed to get conversation", err)
+		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to get conversation", err)
 		return
 	}
 
 	// Convert to web messages with tool call structure preserved
 	webMessages, err := s.convertToWebMessages(response.RawMessages, response.ModelType)
 	if err != nil {
-		s.writeErrorResponse(w, http.StatusInternalServerError, "Failed to parse conversation messages", err)
+		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to parse conversation messages", err)
 		return
 	}
 
@@ -401,14 +423,14 @@ func (s *Server) handleGetToolResult(w http.ResponseWriter, r *http.Request) {
 	// Resolve conversation ID
 	resolvedID, err := s.conversationService.ResolveConversationID(ctx, id)
 	if err != nil {
-		s.writeErrorResponse(w, http.StatusNotFound, "Conversation not found", err)
+		s.writeErrorResponse(w, http.StatusNotFound, "conversation not found", err)
 		return
 	}
 
 	// Get tool result
 	response, err := s.conversationService.GetToolResult(ctx, resolvedID, toolCallID)
 	if err != nil {
-		s.writeErrorResponse(w, http.StatusNotFound, "Tool result not found", err)
+		s.writeErrorResponse(w, http.StatusNotFound, "tool result not found", err)
 		return
 	}
 
@@ -424,14 +446,14 @@ func (s *Server) handleDeleteConversation(w http.ResponseWriter, r *http.Request
 	// Resolve conversation ID
 	resolvedID, err := s.conversationService.ResolveConversationID(ctx, id)
 	if err != nil {
-		s.writeErrorResponse(w, http.StatusNotFound, "Conversation not found", err)
+		s.writeErrorResponse(w, http.StatusNotFound, "conversation not found", err)
 		return
 	}
 
 	// Delete conversation
 	err = s.conversationService.DeleteConversation(ctx, resolvedID)
 	if err != nil {
-		s.writeErrorResponse(w, http.StatusInternalServerError, "Failed to delete conversation", err)
+		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to delete conversation", err)
 		return
 	}
 
@@ -445,7 +467,7 @@ func (s *Server) handleSearchConversations(w http.ResponseWriter, r *http.Reques
 
 	searchTerm := query.Get("q")
 	if searchTerm == "" {
-		s.writeErrorResponse(w, http.StatusBadRequest, "Search term is required", nil)
+		s.writeErrorResponse(w, http.StatusBadRequest, "search term is required", nil)
 		return
 	}
 
@@ -459,7 +481,7 @@ func (s *Server) handleSearchConversations(w http.ResponseWriter, r *http.Reques
 	// Search conversations
 	response, err := s.conversationService.SearchConversations(ctx, searchTerm, limit)
 	if err != nil {
-		s.writeErrorResponse(w, http.StatusInternalServerError, "Failed to search conversations", err)
+		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to search conversations", err)
 		return
 	}
 
@@ -473,7 +495,7 @@ func (s *Server) handleGetStatistics(w http.ResponseWriter, r *http.Request) {
 	// Get statistics
 	response, err := s.conversationService.GetConversationStatistics(ctx)
 	if err != nil {
-		s.writeErrorResponse(w, http.StatusInternalServerError, "Failed to get statistics", err)
+		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to get statistics", err)
 		return
 	}
 
@@ -486,7 +508,7 @@ func (s *Server) handleGetStatistics(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleConversationList(w http.ResponseWriter, r *http.Request) {
 	tmpl, err := s.loadTemplate("index.html")
 	if err != nil {
-		http.Error(w, "Failed to load template", http.StatusInternalServerError)
+		http.Error(w, "failed to load template", http.StatusInternalServerError)
 		return
 	}
 
@@ -498,8 +520,8 @@ func (s *Server) handleConversationList(w http.ResponseWriter, r *http.Request) 
 
 	w.Header().Set("Content-Type", "text/html")
 	if err := tmpl.Execute(w, data); err != nil {
-		logger.G(r.Context()).WithError(err).Error("Failed to execute template")
-		http.Error(w, "Failed to render page", http.StatusInternalServerError)
+		logger.G(r.Context()).WithError(err).Error("failed to execute template")
+		http.Error(w, "failed to render page", http.StatusInternalServerError)
 	}
 }
 
@@ -510,7 +532,7 @@ func (s *Server) handleConversationView(w http.ResponseWriter, r *http.Request) 
 
 	tmpl, err := s.loadTemplate("conversation.html")
 	if err != nil {
-		http.Error(w, "Failed to load template", http.StatusInternalServerError)
+		http.Error(w, "failed to load template", http.StatusInternalServerError)
 		return
 	}
 
@@ -524,8 +546,8 @@ func (s *Server) handleConversationView(w http.ResponseWriter, r *http.Request) 
 
 	w.Header().Set("Content-Type", "text/html")
 	if err := tmpl.Execute(w, data); err != nil {
-		logger.G(r.Context()).WithError(err).Error("Failed to execute template")
-		http.Error(w, "Failed to render page", http.StatusInternalServerError)
+		logger.G(r.Context()).WithError(err).Error("failed to execute template")
+		http.Error(w, "failed to render page", http.StatusInternalServerError)
 	}
 }
 
@@ -551,15 +573,15 @@ func (s *Server) loadTemplate(name string) (*template.Template, error) {
 func (s *Server) writeJSONResponse(w http.ResponseWriter, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(data); err != nil {
-		logger.G(context.Background()).WithError(err).Error("Failed to encode JSON response")
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		logger.G(context.TODO()).WithError(err).Error("failed to encode JSON response")
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 	}
 }
 
 // writeErrorResponse writes an error response
 func (s *Server) writeErrorResponse(w http.ResponseWriter, statusCode int, message string, err error) {
 	if err != nil {
-		logger.G(context.Background()).WithError(err).Error(message)
+		logger.G(context.TODO()).WithError(err).Error(message)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -572,7 +594,7 @@ func (s *Server) writeErrorResponse(w http.ResponseWriter, statusCode int, messa
 	}
 
 	if err := json.NewEncoder(w).Encode(response); err != nil {
-		logger.G(context.Background()).WithError(err).Error("Failed to encode error response")
+		logger.G(context.TODO()).WithError(err).Error("failed to encode error response")
 	}
 }
 
@@ -616,7 +638,7 @@ func (s *Server) Stop() error {
 func (s *Server) Close() error {
 	if s.conversationService != nil {
 		if err := s.conversationService.Close(); err != nil {
-			return err
+			return fmt.Errorf("failed to close conversation service: %w", err)
 		}
 	}
 	return s.Stop()

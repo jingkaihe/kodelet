@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/jingkaihe/kodelet/pkg/logger"
@@ -63,8 +65,44 @@ func getServeConfigFromFlags(cmd *cobra.Command) *ServeConfig {
 	return config
 }
 
+// validateServeConfig validates the serve configuration
+func validateServeConfig(config *ServeConfig) error {
+	// Validate host
+	if config.Host == "" {
+		return fmt.Errorf("host cannot be empty")
+	}
+
+	// Check if host is a valid hostname or IP address
+	if config.Host != "localhost" && config.Host != "0.0.0.0" {
+		if ip := net.ParseIP(config.Host); ip == nil {
+			// Not an IP, check if it's a valid hostname
+			if strings.Contains(config.Host, " ") || strings.Contains(config.Host, ":") {
+				return fmt.Errorf("invalid host: %s", config.Host)
+			}
+		}
+	}
+
+	// Validate port
+	if config.Port < 1 || config.Port > 65535 {
+		return fmt.Errorf("port must be between 1 and 65535, got %d", config.Port)
+	}
+
+	// Check for privileged ports
+	if config.Port < 1024 {
+		logger.G(context.Background()).WithField("port", config.Port).Warn("using privileged port (< 1024) may require elevated permissions")
+	}
+
+	return nil
+}
+
 // runServeCommand starts the web UI server
 func runServeCommand(ctx context.Context, config *ServeConfig) {
+	// Validate configuration
+	if err := validateServeConfig(config); err != nil {
+		presenter.Error(err, "invalid server configuration")
+		os.Exit(1)
+	}
+
 	logger.G(ctx).WithFields(map[string]interface{}{
 		"host": config.Host,
 		"port": config.Port,
@@ -79,12 +117,12 @@ func runServeCommand(ctx context.Context, config *ServeConfig) {
 	// Create the web server
 	server, err := webui.NewServer(serverConfig)
 	if err != nil {
-		presenter.Error(err, "Failed to create web server")
+		presenter.Error(err, "failed to create web server")
 		os.Exit(1)
 	}
 	defer func() {
 		if closeErr := server.Close(); closeErr != nil {
-			logger.G(ctx).WithError(closeErr).Error("Failed to close web server")
+			logger.G(ctx).WithError(closeErr).Error("failed to close web server")
 		}
 	}()
 
@@ -98,8 +136,8 @@ func runServeCommand(ctx context.Context, config *ServeConfig) {
 
 	// Start server and wait for shutdown
 	if err := server.Start(ctx); err != nil {
-		logger.G(ctx).WithError(err).Error("Web server error")
-		presenter.Error(err, "Web server failed")
+		logger.G(ctx).WithError(err).Error("web server error")
+		presenter.Error(err, "web server failed")
 		os.Exit(1)
 	}
 

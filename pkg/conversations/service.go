@@ -28,7 +28,7 @@ func NewConversationService(store ConversationStore) *ConversationService {
 func GetDefaultConversationService() (*ConversationService, error) {
 	store, err := GetConversationStore()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get conversation store: %w", err)
 	}
 	return NewConversationService(store), nil
 }
