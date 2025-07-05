@@ -92,7 +92,7 @@ func TestConversationService_ListConversations(t *testing.T) {
 		expectedCount  int
 	}{
 		{
-			name: "successful list with defaults",
+			name:    "successful list with defaults",
 			request: &ListConversationsRequest{},
 			storeSummaries: []ConversationSummary{
 				{ID: "1", CreatedAt: time.Now(), UpdatedAt: time.Now()},
@@ -112,15 +112,15 @@ func TestConversationService_ListConversations(t *testing.T) {
 			expectedCount: 1,
 		},
 		{
-			name: "empty list",
-			request: &ListConversationsRequest{},
+			name:           "empty list",
+			request:        &ListConversationsRequest{},
 			storeSummaries: []ConversationSummary{},
-			expectedCount: 0,
+			expectedCount:  0,
 		},
 		{
-			name: "store error",
-			request: &ListConversationsRequest{},
-			storeError: assert.AnError,
+			name:          "store error",
+			request:       &ListConversationsRequest{},
+			storeError:    assert.AnError,
 			expectedError: true,
 		},
 	}
@@ -270,16 +270,16 @@ func TestConversationService_DeleteConversation(t *testing.T) {
 
 func TestConversationService_ResolveConversationID(t *testing.T) {
 	tests := []struct {
-		name          string
-		id            string
+		name           string
+		id             string
 		storeSummaries []ConversationSummary
-		expectedID    string
-		expectedError bool
-		errorContains string
+		expectedID     string
+		expectedError  bool
+		errorContains  string
 	}{
 		{
-			name: "full UUID already",
-			id:   "12345678-1234-1234-1234-123456789012",
+			name:       "full UUID already",
+			id:         "12345678-1234-1234-1234-123456789012",
 			expectedID: "12345678-1234-1234-1234-123456789012",
 		},
 		{
@@ -400,12 +400,12 @@ func TestConversationService_GetConversationStatistics(t *testing.T) {
 			assert.NotNil(t, stats)
 			assert.Equal(t, tt.expectedStats.TotalConversations, stats.TotalConversations)
 			assert.Equal(t, tt.expectedStats.TotalMessages, stats.TotalMessages)
-			
+
 			if tt.expectedStats.OldestConversation != nil {
 				assert.NotNil(t, stats.OldestConversation)
 				assert.True(t, stats.OldestConversation.Equal(*tt.expectedStats.OldestConversation))
 			}
-			
+
 			if tt.expectedStats.NewestConversation != nil {
 				assert.NotNil(t, stats.NewestConversation)
 				assert.True(t, stats.NewestConversation.Equal(*tt.expectedStats.NewestConversation))

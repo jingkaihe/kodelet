@@ -390,9 +390,10 @@ type BackgroundProcessInfo struct {
 func (m ViewBackgroundProcessesMetadata) ToolType() string { return "view_background_processes" }
 
 type FileMultiEditMetadata struct {
-	FilePath string `json:"filePath"`
-	Edits    []Edit `json:"edits"`
-	Language string `json:"language,omitempty"`
+	FilePath       string `json:"filePath"`
+	Edits          []Edit `json:"edits"`
+	Language       string `json:"language,omitempty"`
+	ActualReplaced int    `json:"actualReplaced"`
 }
 
 func (m FileMultiEditMetadata) ToolType() string { return "file_multi_edit" }

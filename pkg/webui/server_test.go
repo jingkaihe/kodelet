@@ -18,14 +18,14 @@ import (
 
 // mockConversationService implements the methods we need for testing
 type mockConversationService struct {
-	listFunc       func(ctx context.Context, req *conversations.ListConversationsRequest) (*conversations.ListConversationsResponse, error)
-	getFunc        func(ctx context.Context, id string) (*conversations.GetConversationResponse, error)
-	deleteFunc     func(ctx context.Context, id string) error
-	resolveFunc    func(ctx context.Context, id string) (string, error)
-	getToolFunc    func(ctx context.Context, conversationID, toolCallID string) (*conversations.GetToolResultResponse, error)
-	searchFunc     func(ctx context.Context, query string, limit int) (*conversations.ListConversationsResponse, error)
-	statsFunc      func(ctx context.Context) (*conversations.ConversationStatistics, error)
-	closeFunc      func() error
+	listFunc    func(ctx context.Context, req *conversations.ListConversationsRequest) (*conversations.ListConversationsResponse, error)
+	getFunc     func(ctx context.Context, id string) (*conversations.GetConversationResponse, error)
+	deleteFunc  func(ctx context.Context, id string) error
+	resolveFunc func(ctx context.Context, id string) (string, error)
+	getToolFunc func(ctx context.Context, conversationID, toolCallID string) (*conversations.GetToolResultResponse, error)
+	searchFunc  func(ctx context.Context, query string, limit int) (*conversations.ListConversationsResponse, error)
+	statsFunc   func(ctx context.Context) (*conversations.ConversationStatistics, error)
+	closeFunc   func() error
 }
 
 func (m *mockConversationService) ListConversations(ctx context.Context, req *conversations.ListConversationsRequest) (*conversations.ListConversationsResponse, error) {
@@ -212,7 +212,7 @@ func TestServer_handleGetConversation(t *testing.T) {
 func TestServer_handleDeleteConversation(t *testing.T) {
 	conversationID := "test-id-123"
 	deleteCalled := false
-	
+
 	mockService := &mockConversationService{
 		resolveFunc: func(ctx context.Context, id string) (string, error) {
 			return conversationID, nil
@@ -332,7 +332,7 @@ func TestServer_handleGetStatistics(t *testing.T) {
 func TestServer_handleGetToolResult(t *testing.T) {
 	conversationID := "conv-123"
 	toolCallID := "tool-456"
-	
+
 	mockService := &mockConversationService{
 		resolveFunc: func(ctx context.Context, id string) (string, error) {
 			return conversationID, nil
@@ -376,24 +376,24 @@ func TestServer_convertToWebMessages(t *testing.T) {
 	server := &Server{}
 
 	tests := []struct {
-		name         string
-		rawMessages  json.RawMessage
-		modelType    string
-		expectedMsgs int
+		name          string
+		rawMessages   json.RawMessage
+		modelType     string
+		expectedMsgs  int
 		checkToolCall bool
 	}{
 		{
-			name:         "anthropic messages with tool calls",
-			rawMessages:  json.RawMessage(`[{"role":"assistant","content":[{"type":"text","text":"Let me help"},{"type":"tool_use","id":"tool-123","name":"TestTool","input":{"arg":"value"}}]}]`),
-			modelType:    "anthropic",
-			expectedMsgs: 1,
+			name:          "anthropic messages with tool calls",
+			rawMessages:   json.RawMessage(`[{"role":"assistant","content":[{"type":"text","text":"Let me help"},{"type":"tool_use","id":"tool-123","name":"TestTool","input":{"arg":"value"}}]}]`),
+			modelType:     "anthropic",
+			expectedMsgs:  1,
 			checkToolCall: true,
 		},
 		{
-			name:         "openai messages with tool calls",
-			rawMessages:  json.RawMessage(`[{"role":"assistant","content":"Let me help","tool_calls":[{"id":"tool-123","function":{"name":"TestTool","arguments":"{\"arg\":\"value\"}"}}]}]`),
-			modelType:    "openai",
-			expectedMsgs: 1,
+			name:          "openai messages with tool calls",
+			rawMessages:   json.RawMessage(`[{"role":"assistant","content":"Let me help","tool_calls":[{"id":"tool-123","function":{"name":"TestTool","arguments":"{\"arg\":\"value\"}"}}]}]`),
+			modelType:     "openai",
+			expectedMsgs:  1,
 			checkToolCall: true,
 		},
 		{

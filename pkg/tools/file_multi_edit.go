@@ -234,9 +234,10 @@ func (r *FileMultiEditToolResult) StructuredData() tooltypes.StructuredToolResul
 
 	// Always populate metadata, even for errors
 	result.Metadata = &tooltypes.FileMultiEditMetadata{
-		FilePath: r.filename,
-		Edits:    edits,
-		Language: language,
+		FilePath:       r.filename,
+		Edits:          edits,
+		Language:       language,
+		ActualReplaced: r.actualReplaced,
 	}
 
 	if r.IsError() {

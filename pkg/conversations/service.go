@@ -80,7 +80,7 @@ type GetConversationResponse struct {
 
 // GetToolResultResponse represents the response from getting a tool result
 type GetToolResultResponse struct {
-	ToolCallID string                    `json:"toolCallId"`
+	ToolCallID string                     `json:"toolCallId"`
 	Result     tools.StructuredToolResult `json:"result"`
 }
 
@@ -270,7 +270,7 @@ func (s *ConversationService) GetConversationStatistics(ctx context.Context) (*C
 	// Calculate statistics
 	for _, summary := range summaries {
 		stats.TotalMessages += summary.MessageCount
-		
+
 		// For detailed usage stats, we'd need to load each conversation
 		// For now, we'll just count conversations
 	}
@@ -279,7 +279,7 @@ func (s *ConversationService) GetConversationStatistics(ctx context.Context) (*C
 	if len(summaries) > 0 {
 		oldest := summaries[0].CreatedAt
 		newest := summaries[0].UpdatedAt
-		
+
 		for _, summary := range summaries {
 			if summary.CreatedAt.Before(oldest) {
 				oldest = summary.CreatedAt
@@ -288,7 +288,7 @@ func (s *ConversationService) GetConversationStatistics(ctx context.Context) (*C
 				newest = summary.UpdatedAt
 			}
 		}
-		
+
 		stats.OldestConversation = &oldest
 		stats.NewestConversation = &newest
 	}
@@ -299,11 +299,11 @@ func (s *ConversationService) GetConversationStatistics(ctx context.Context) (*C
 
 // ConversationStatistics represents conversation statistics
 type ConversationStatistics struct {
-	TotalConversations  int                `json:"totalConversations"`
-	TotalMessages       int                `json:"totalMessages"`
-	TotalUsage          llmtypes.Usage     `json:"totalUsage"`
-	OldestConversation  *time.Time         `json:"oldestConversation,omitempty"`
-	NewestConversation  *time.Time         `json:"newestConversation,omitempty"`
+	TotalConversations int            `json:"totalConversations"`
+	TotalMessages      int            `json:"totalMessages"`
+	TotalUsage         llmtypes.Usage `json:"totalUsage"`
+	OldestConversation *time.Time     `json:"oldestConversation,omitempty"`
+	NewestConversation *time.Time     `json:"newestConversation,omitempty"`
 }
 
 // Close closes the underlying store

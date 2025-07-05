@@ -96,7 +96,7 @@ func (s *Server) setupRoutes() {
 
 	// Static assets from the React build
 	s.router.PathPrefix("/assets/").Handler(s.staticFileHandler())
-	
+
 	// All other routes serve the React SPA
 	s.router.PathPrefix("/").HandlerFunc(s.handleReactSPA)
 
