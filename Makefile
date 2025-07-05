@@ -2,7 +2,7 @@ VERSION=$(shell cat VERSION.txt)
 GIT_COMMIT=$(shell git rev-parse --short HEAD)
 
 VERSION_FLAG=-X 'github.com/jingkaihe/kodelet/pkg/version.Version=$(VERSION)' -X 'github.com/jingkaihe/kodelet/pkg/version.GitCommit=$(GIT_COMMIT)'
-.PHONY: build build-dev cross-build run test lint golangci-lint install-linters format docker-build docker-run e2e-test e2e-test-docker eslint eslint-fix
+.PHONY: build build-dev cross-build run test lint golangci-lint install-linters format docker-build docker-run e2e-test e2e-test-docker eslint eslint-fix frontend-test frontend-test-watch frontend-test-ui frontend-test-coverage
 
 # Build the application
 build:
@@ -64,6 +64,26 @@ eslint-fix:
 	@echo "Running eslint with auto-fix on frontend code..."
 	@cd pkg/webui/frontend && npm run lint:fix
 
+# Run frontend tests
+frontend-test:
+	@echo "Running frontend tests..."
+	@cd pkg/webui/frontend && npm run test:run
+
+# Run frontend tests in watch mode
+frontend-test-watch:
+	@echo "Running frontend tests in watch mode..."
+	@cd pkg/webui/frontend && npm run test:watch
+
+# Run frontend tests with UI
+frontend-test-ui:
+	@echo "Running frontend tests with UI..."
+	@cd pkg/webui/frontend && npm run test:ui
+
+# Run frontend tests with coverage
+frontend-test-coverage:
+	@echo "Running frontend tests with coverage..."
+	@cd pkg/webui/frontend && npm run test:coverage
+
 # Run e2e tests in Docker
 e2e-test-docker:
 	docker build -f tests/acceptance/Dockerfile.e2e -t kodelet-e2e-tests .
@@ -109,6 +129,10 @@ help:
 	@echo "  format       - Format code"
 	@echo "  eslint       - Run eslint on frontend code"
 	@echo "  eslint-fix   - Run eslint with auto-fix on frontend code"
+	@echo "  frontend-test - Run frontend tests"
+	@echo "  frontend-test-watch - Run frontend tests in watch mode"
+	@echo "  frontend-test-ui - Run frontend tests with UI"
+	@echo "  frontend-test-coverage - Run frontend tests with coverage"
 	@echo "  docker-build - Build Docker image"
 	@echo "  docker-run   - Run with Docker (use: make docker-run query='your query')"
 

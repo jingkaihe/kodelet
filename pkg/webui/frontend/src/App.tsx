@@ -5,7 +5,10 @@ import ConversationViewPage from './pages/ConversationViewPage';
 
 function App() {
   return (
-    <Router>
+    <Router future={{
+      v7_startTransition: true,
+      v7_relativeSplatPath: true
+    }}>
       <div className="min-h-screen bg-base-100">
         <Routes>
           <Route path="/" element={<ConversationListPage />} />
