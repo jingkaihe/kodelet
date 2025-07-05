@@ -1,5 +1,5 @@
 import React from 'react';
-import { copyToClipboard, escapeHtml, detectLanguageFromPath, formatFileSize, formatTimestamp, formatDuration, escapeUrl } from '../../utils';
+import { copyToClipboard, escapeUrl } from '../../utils';
 
 // Shared components for tool renderers
 
@@ -230,51 +230,3 @@ export const ExternalLink: React.FC<ExternalLinkProps> = ({ href, children, clas
   );
 };
 
-// Helper functions for tool renderers
-export const getMetadata = (toolResult: any, ...paths: string[]): any => {
-  let value = toolResult.metadata;
-  for (const path of paths) {
-    if (!value) return null;
-    value = value[path];
-  }
-  return value;
-};
-
-export const getMetadataAny = (toolResult: any, paths: string[]): any => {
-  for (const path of paths) {
-    const value = getMetadata(toolResult, ...path.split('.'));
-    if (value !== null && value !== undefined) return value;
-  }
-  return null;
-};
-
-// File icon utility
-export const getFileIcon = (path: string): string => {
-  if (!path) return '📄';
-  const ext = path.split('.').pop()?.toLowerCase();
-  const iconMap: Record<string, string> = {
-    'js': '📜', 'ts': '📜', 'py': '🐍', 'go': '🐹', 'java': '☕',
-    'html': '🌐', 'css': '🎨', 'json': '📋', 'xml': '📄',
-    'md': '📝', 'txt': '📄', 'log': '📊',
-    'jpg': '🖼️', 'jpeg': '🖼️', 'png': '🖼️', 'gif': '🖼️',
-    'pdf': '📕', 'doc': '📘', 'docx': '📘',
-    'zip': '📦', 'tar': '📦', 'gz': '📦'
-  };
-  return iconMap[ext || ''] || '📄';
-};
-
-// Check if image file
-export const isImageFile = (path: string): boolean => {
-  const imageExts = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp'];
-  return imageExts.some(ext => path.toLowerCase().endsWith(ext));
-};
-
-// Export utility functions for use in individual renderers
-export {
-  escapeHtml,
-  detectLanguageFromPath,
-  formatFileSize,
-  formatTimestamp,
-  formatDuration,
-  escapeUrl
-};

@@ -1,6 +1,7 @@
 import React from 'react';
 import { ToolResult, FileMetadata } from '../../types';
-import { ToolCard, CopyButton, MetadataRow, detectLanguageFromPath } from './shared';
+import { ToolCard, CopyButton, MetadataRow } from './shared';
+import { detectLanguageFromPath } from './utils';
 
 interface FileReadRendererProps {
   toolResult: ToolResult;

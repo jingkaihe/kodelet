@@ -140,24 +140,24 @@ export const getFileIcon = (path: string): string => {
 };
 
 // Debounce utility
-export const debounce = <T extends (...args: any[]) => any>(
-  func: T,
+export const debounce = <T extends unknown[]>(
+  func: (...args: T) => void,
   delay: number
-): ((...args: Parameters<T>) => void) => {
+): ((...args: T) => void) => {
   let timeoutId: number;
-  return (...args: Parameters<T>) => {
+  return (...args: T) => {
     clearTimeout(timeoutId);
     timeoutId = window.setTimeout(() => func(...args), delay);
   };
 };
 
 // Throttle utility
-export const throttle = <T extends (...args: any[]) => any>(
-  func: T,
+export const throttle = <T extends unknown[]>(
+  func: (...args: T) => void,
   delay: number
-): ((...args: Parameters<T>) => void) => {
+): ((...args: T) => void) => {
   let lastCall = 0;
-  return (...args: Parameters<T>) => {
+  return (...args: T) => {
     const now = Date.now();
     if (now - lastCall >= delay) {
       lastCall = now;
@@ -169,16 +169,16 @@ export const throttle = <T extends (...args: any[]) => any>(
 // Deep clone utility
 export const deepClone = <T>(obj: T): T => {
   if (obj === null || typeof obj !== 'object') return obj;
-  if (obj instanceof Date) return new Date(obj.getTime()) as any;
-  if (obj instanceof Array) return obj.map(item => deepClone(item)) as any;
+  if (obj instanceof Date) return new Date(obj.getTime()) as T;
+  if (obj instanceof Array) return obj.map(item => deepClone(item)) as T;
   if (obj instanceof Object) {
-    const cloned: any = {};
+    const cloned: Record<string, unknown> = {};
     for (const key in obj) {
-      if (obj.hasOwnProperty(key)) {
-        cloned[key] = deepClone(obj[key]);
+      if (Object.prototype.hasOwnProperty.call(obj, key)) {
+        cloned[key] = deepClone((obj as Record<string, unknown>)[key]);
       }
     }
-    return cloned;
+    return cloned as T;
   }
   return obj;
 };

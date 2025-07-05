@@ -2,20 +2,34 @@ import React from 'react';
 import { ToolResult } from '../../types';
 import { ToolCard, MetadataRow, Collapsible } from './shared';
 
+interface FileEditMetadata {
+  filePath: string;
+  edits: FileEdit[];
+  actualReplaced?: number;
+  occurrence?: number;
+}
+
+interface FileEdit {
+  startLine: number;
+  endLine: number;
+  oldContent: string;
+  newContent: string;
+}
+
 interface FileEditRendererProps {
   toolResult: ToolResult;
 }
 
 const FileEditRenderer: React.FC<FileEditRendererProps> = ({ toolResult }) => {
-  const meta = toolResult.metadata;
+  const meta = toolResult.metadata as FileEditMetadata;
   if (!meta) return null;
 
   const edits = meta.edits || [];
   const isMultiEdit = toolResult.toolName === 'file_multi_edit';
   const replacements = meta.actualReplaced || 0;
 
-  const renderEdits = (edits: any[]) => {
-    return edits.map((edit: any, index: number) => {
+  const renderEdits = (edits: FileEdit[]) => {
+    return edits.map((edit: FileEdit, index: number) => {
       const oldContent = edit.oldContent || '';
       const newContent = edit.newContent || '';
       const filePath = meta.filePath || '';

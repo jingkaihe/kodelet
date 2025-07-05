@@ -2,7 +2,7 @@ VERSION=$(shell cat VERSION.txt)
 GIT_COMMIT=$(shell git rev-parse --short HEAD)
 
 VERSION_FLAG=-X 'github.com/jingkaihe/kodelet/pkg/version.Version=$(VERSION)' -X 'github.com/jingkaihe/kodelet/pkg/version.GitCommit=$(GIT_COMMIT)'
-.PHONY: build build-dev cross-build run test lint golangci-lint install-linters format docker-build docker-run e2e-test e2e-test-docker
+.PHONY: build build-dev cross-build run test lint golangci-lint install-linters format docker-build docker-run e2e-test e2e-test-docker eslint eslint-fix
 
 # Build the application
 build:
@@ -54,6 +54,16 @@ golangci-lint:
 format:
 	go fmt ./...
 
+# Run eslint on frontend code
+eslint:
+	@echo "Running eslint on frontend code..."
+	@cd pkg/webui/frontend && npm run lint
+
+# Run eslint with auto-fix on frontend code
+eslint-fix:
+	@echo "Running eslint with auto-fix on frontend code..."
+	@cd pkg/webui/frontend && npm run lint:fix
+
 # Run e2e tests in Docker
 e2e-test-docker:
 	docker build -f tests/acceptance/Dockerfile.e2e -t kodelet-e2e-tests .
@@ -97,6 +107,8 @@ help:
 	@echo "  golangci-lint - Run golangci-lint"
 	@echo "  install-linters - Install golangci-lint"
 	@echo "  format       - Format code"
+	@echo "  eslint       - Run eslint on frontend code"
+	@echo "  eslint-fix   - Run eslint with auto-fix on frontend code"
 	@echo "  docker-build - Build Docker image"
 	@echo "  docker-run   - Run with Docker (use: make docker-run query='your query')"
 

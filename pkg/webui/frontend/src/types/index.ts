@@ -32,7 +32,7 @@ export interface ToolResult {
   toolName: string;
   success: boolean;
   error?: string;
-  metadata?: any;
+  metadata?: FileMetadata | BashMetadata | GrepMetadata | GlobMetadata | WebFetchMetadata | ThinkingMetadata | TodoMetadata | SubagentMetadata | BatchMetadata | ImageRecognitionMetadata | BrowserMetadata | BackgroundProcessMetadata | Record<string, unknown>;
   timestamp?: string;
 }
 

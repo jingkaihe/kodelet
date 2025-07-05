@@ -1,6 +1,7 @@
 import React from 'react';
 import { ToolResult, BatchMetadata } from '../../types';
-import { ToolCard, Collapsible, escapeHtml } from './shared';
+import { ToolCard, Collapsible } from './shared';
+import { escapeHtml } from './utils';
 
 interface BatchRendererProps {
   toolResult: ToolResult;
@@ -15,7 +16,7 @@ const BatchRenderer: React.FC<BatchRendererProps> = ({ toolResult }) => {
   const successCount = meta.successCount || subResults.filter(r => r.success).length;
   const failureCount = meta.failureCount || subResults.filter(r => !r.success).length;
 
-  const renderSubResults = (subResults: any[]) => {
+  const renderSubResults = (subResults: ToolResult[]) => {
     return subResults.map((result, index) => {
       const statusIcon = result.success ? '✅' : '❌';
       const statusClass = result.success ? 'text-green-600' : 'text-red-600';

@@ -1,6 +1,7 @@
 import React from 'react';
 import { ToolResult, WebFetchMetadata } from '../../types';
-import { ToolCard, MetadataRow, Collapsible, CodeBlock, ExternalLink, escapeUrl } from './shared';
+import { ToolCard, MetadataRow, Collapsible, CodeBlock, ExternalLink } from './shared';
+import { escapeUrl } from './utils';
 
 interface WebFetchRendererProps {
   toolResult: ToolResult;

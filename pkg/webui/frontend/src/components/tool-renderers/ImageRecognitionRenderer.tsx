@@ -1,6 +1,7 @@
 import React from 'react';
 import { ToolResult, ImageRecognitionMetadata } from '../../types';
-import { ToolCard, MetadataRow, getMetadataAny, escapeHtml } from './shared';
+import { ToolCard, MetadataRow } from './shared';
+import { getMetadataAny, escapeHtml } from './utils';
 
 interface ImageRecognitionRendererProps {
   toolResult: ToolResult;
@@ -10,7 +11,7 @@ const ImageRecognitionRenderer: React.FC<ImageRecognitionRendererProps> = ({ too
   const meta = toolResult.metadata as ImageRecognitionMetadata;
   if (!meta) return null;
 
-  const imagePath = getMetadataAny(toolResult, ['imagePath', 'image_path', 'path']);
+  const imagePath = getMetadataAny(toolResult, ['imagePath', 'image_path', 'path']) as string;
   const analysis = meta.analysis || meta.result;
 
   return (

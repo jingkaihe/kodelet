@@ -1,6 +1,7 @@
 import React from 'react';
 import { ToolResult, GlobMetadata, FileInfo } from '../../types';
-import { ToolCard, MetadataRow, Collapsible, formatFileSize, getFileIcon } from './shared';
+import { ToolCard, MetadataRow, Collapsible } from './shared';
+import { formatFileSize, getFileIcon } from './utils';
 
 interface GlobRendererProps {
   toolResult: ToolResult;

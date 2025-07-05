@@ -1,13 +1,18 @@
 import React from 'react';
 import { ToolResult, FileMetadata } from '../../types';
-import { ToolCard, CopyButton, MetadataRow, Collapsible, CodeBlock, detectLanguageFromPath, formatFileSize } from './shared';
+import { ToolCard, CopyButton, MetadataRow, Collapsible, CodeBlock } from './shared';
+import { detectLanguageFromPath, formatFileSize } from './utils';
+
+interface FileWriteMetadata extends FileMetadata {
+  content?: string;
+}
 
 interface FileWriteRendererProps {
   toolResult: ToolResult;
 }
 
 const FileWriteRenderer: React.FC<FileWriteRendererProps> = ({ toolResult }) => {
-  const meta = toolResult.metadata as FileMetadata;
+  const meta = toolResult.metadata as FileWriteMetadata;
   if (!meta) return null;
 
   const language = meta.language || detectLanguageFromPath(meta.filePath);
@@ -17,7 +22,7 @@ const FileWriteRenderer: React.FC<FileWriteRendererProps> = ({ toolResult }) => 
     <ToolCard
       title="📝 File Written"
       badge={{ text: 'Success', className: 'badge-success' }}
-      actions={(meta as any).content ? <CopyButton content={(meta as any).content} /> : undefined}
+      actions={meta.content ? <CopyButton content={meta.content} /> : undefined}
     >
       <div className="text-xs text-base-content/60 mb-3 font-mono">
         <div className="flex items-center gap-4">
@@ -27,14 +32,14 @@ const FileWriteRenderer: React.FC<FileWriteRendererProps> = ({ toolResult }) => 
         </div>
       </div>
 
-      {(meta as any).content && (
+      {meta.content && (
         <Collapsible
           title="View Content"
           collapsed={true}
           badge={{ text: 'View Content', className: 'badge-info' }}
         >
           <CodeBlock 
-            code={(meta as any).content} 
+            code={meta.content} 
             language={language} 
             showLineNumbers={true} 
             maxHeight={300} 

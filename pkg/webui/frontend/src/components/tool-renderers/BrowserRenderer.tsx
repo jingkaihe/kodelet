@@ -1,6 +1,7 @@
 import React from 'react';
 import { ToolResult, BrowserMetadata } from '../../types';
-import { ToolCard, MetadataRow, ExternalLink, getMetadataAny, escapeUrl, isImageFile } from './shared';
+import { ToolCard, MetadataRow, ExternalLink } from './shared';
+import { getMetadataAny, escapeUrl, isImageFile } from './utils';
 
 interface BrowserRendererProps {
   toolResult: ToolResult;
@@ -11,7 +12,7 @@ const BrowserRenderer: React.FC<BrowserRendererProps> = ({ toolResult }) => {
   if (!meta) return null;
 
   const isScreenshot = toolResult.toolName === 'browser_screenshot';
-  const filePath = getMetadataAny(toolResult, ['filePath', 'file_path', 'path']);
+  const filePath = getMetadataAny(toolResult, ['filePath', 'file_path', 'path']) as string;
   const safeUrl = escapeUrl(meta.url);
 
   if (isScreenshot) {

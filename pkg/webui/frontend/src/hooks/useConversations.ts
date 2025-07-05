@@ -101,12 +101,12 @@ export const useConversations = (): UseConversationsResult => {
   // Load conversations when filters change
   useEffect(() => {
     loadConversations();
-  }, [filters.searchTerm, filters.sortBy, filters.sortOrder, filters.limit]);
+  }, [filters.searchTerm, filters.sortBy, filters.sortOrder, filters.limit, loadConversations]);
 
   // Load initial data
   useEffect(() => {
     refresh();
-  }, []);
+  }, [refresh]);
 
   return {
     conversations,

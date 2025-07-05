@@ -5,7 +5,8 @@ import {
   ConversationListResponse, 
   ConversationStats, 
   SearchFilters, 
-  ApiError 
+  ApiError,
+  ToolResult
 } from '../types';
 
 class ApiService {
@@ -69,7 +70,7 @@ class ApiService {
     return this.request<ConversationListResponse>(`/api/search?q=${encodeURIComponent(query)}`);
   }
 
-  async getToolResult(conversationId: string, toolCallId: string): Promise<any> {
+  async getToolResult(conversationId: string, toolCallId: string): Promise<ToolResult> {
     return this.request(`/api/conversations/${conversationId}/tools/${toolCallId}`);
   }
 }

@@ -1,6 +1,7 @@
 import React from 'react';
 import { ToolResult, BackgroundProcessMetadata, BackgroundProcess } from '../../types';
-import { ToolCard, Collapsible, escapeHtml } from './shared';
+import { ToolCard, Collapsible } from './shared';
+import { escapeHtml } from './utils';
 
 interface BackgroundProcessesRendererProps {
   toolResult: ToolResult;

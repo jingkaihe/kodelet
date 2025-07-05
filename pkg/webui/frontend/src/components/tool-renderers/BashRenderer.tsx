@@ -1,6 +1,7 @@
 import React from 'react';
 import { ToolResult, BashMetadata } from '../../types';
-import { ToolCard, CopyButton, MetadataRow, Collapsible, formatDuration } from './shared';
+import { ToolCard, CopyButton, MetadataRow, Collapsible } from './shared';
+import { formatDuration } from './utils';
 
 interface BashRendererProps {
   toolResult: ToolResult;
@@ -35,16 +36,18 @@ const BashRenderer: React.FC<BashRendererProps> = ({ toolResult }) => {
   const createTerminalOutput = (output: string) => {
     // Convert ANSI codes to HTML (basic implementation)
     const ansiToHtml = (text: string) => {
+      // Use proper escape sequences to avoid ESLint no-control-regex warnings
+      const ESC = '\u001b';
       return text
-        .replace(/\x1b\[31m/g, '<span class="text-red-500">')    // Red
-        .replace(/\x1b\[32m/g, '<span class="text-green-500">')  // Green
-        .replace(/\x1b\[33m/g, '<span class="text-yellow-500">') // Yellow
-        .replace(/\x1b\[34m/g, '<span class="text-blue-500">')   // Blue
-        .replace(/\x1b\[35m/g, '<span class="text-purple-500">') // Magenta
-        .replace(/\x1b\[36m/g, '<span class="text-cyan-500">')   // Cyan
-        .replace(/\x1b\[37m/g, '<span class="text-gray-500">')   // White
-        .replace(/\x1b\[0m/g, '</span>')                        // Reset
-        .replace(/\x1b\[\d+m/g, '');                            // Remove other codes
+        .replace(new RegExp(`${ESC}\\[31m`, 'g'), '<span class="text-red-500">')    // Red
+        .replace(new RegExp(`${ESC}\\[32m`, 'g'), '<span class="text-green-500">')  // Green
+        .replace(new RegExp(`${ESC}\\[33m`, 'g'), '<span class="text-yellow-500">') // Yellow
+        .replace(new RegExp(`${ESC}\\[34m`, 'g'), '<span class="text-blue-500">')   // Blue
+        .replace(new RegExp(`${ESC}\\[35m`, 'g'), '<span class="text-purple-500">') // Magenta
+        .replace(new RegExp(`${ESC}\\[36m`, 'g'), '<span class="text-cyan-500">')   // Cyan
+        .replace(new RegExp(`${ESC}\\[37m`, 'g'), '<span class="text-gray-500">')   // White
+        .replace(new RegExp(`${ESC}\\[0m`, 'g'), '</span>')                        // Reset
+        .replace(new RegExp(`${ESC}\\[\\d+m`, 'g'), '');                            // Remove other codes
     };
 
     const escapeHtml = (text: string) => {
