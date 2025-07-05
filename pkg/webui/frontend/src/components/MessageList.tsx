@@ -10,8 +10,44 @@ interface MessageListProps {
 }
 
 const MessageList: React.FC<MessageListProps> = ({ messages, toolResults }) => {
-  const [expandedToolCalls, setExpandedToolCalls] = useState<string[]>([]);
-  const [expandedThinking, setExpandedThinking] = useState<string[]>([]);
+  // Initialize thinking blocks and tool calls to be expanded by default
+  const [expandedToolCalls, setExpandedToolCalls] = useState<string[]>(() => {
+    const allToolCallIds: string[] = [];
+    messages.forEach(message => {
+      const toolCalls = message.toolCalls || message.tool_calls || [];
+      toolCalls.forEach(toolCall => {
+        if (toolCall.id) {
+          allToolCallIds.push(toolCall.id);
+        }
+      });
+    });
+    return allToolCallIds;
+  });
+  
+  const [expandedThinking, setExpandedThinking] = useState<string[]>(() => {
+    const allMessageIndices: string[] = [];
+    messages.forEach((message, index) => {
+      if (message.thinkingText) {
+        allMessageIndices.push(index.toString());
+      }
+    });
+    return allMessageIndices;
+  });
+
+  // New state for arguments and results within tool calls
+  const [expandedArguments, setExpandedArguments] = useState<string[]>([]);
+  const [expandedResults, setExpandedResults] = useState<string[]>(() => {
+    const allToolCallIds: string[] = [];
+    messages.forEach(message => {
+      const toolCalls = message.toolCalls || message.tool_calls || [];
+      toolCalls.forEach(toolCall => {
+        if (toolCall.id && toolResults[toolCall.id]) {
+          allToolCallIds.push(toolCall.id);
+        }
+      });
+    });
+    return allToolCallIds;
+  });
 
   const toggleToolCall = (toolCallId: string) => {
     setExpandedToolCalls(prev => {
@@ -31,6 +67,28 @@ const MessageList: React.FC<MessageListProps> = ({ messages, toolResults }) => {
         return prev.filter(id => id !== messageIndex);
       } else {
         return [...prev, messageIndex];
+      }
+    });
+  };
+
+  const toggleArguments = (toolCallId: string) => {
+    setExpandedArguments(prev => {
+      const index = prev.indexOf(toolCallId);
+      if (index > -1) {
+        return prev.filter(id => id !== toolCallId);
+      } else {
+        return [...prev, toolCallId];
+      }
+    });
+  };
+
+  const toggleResults = (toolCallId: string) => {
+    setExpandedResults(prev => {
+      const index = prev.indexOf(toolCallId);
+      if (index > -1) {
+        return prev.filter(id => id !== toolCallId);
+      } else {
+        return [...prev, toolCallId];
       }
     });
   };
@@ -145,7 +203,9 @@ const MessageList: React.FC<MessageListProps> = ({ messages, toolResults }) => {
                     >
                       <svg
                         xmlns="http://www.w3.org/2000/svg"
-                        className="h-4 w-4"
+                        className={`h-4 w-4 transition-transform ${
+                          expandedThinking.includes(index.toString()) ? '' : 'rotate-180'
+                        }`}
                         fill="none"
                         viewBox="0 0 24 24"
                         stroke="currentColor"
@@ -195,7 +255,9 @@ const MessageList: React.FC<MessageListProps> = ({ messages, toolResults }) => {
                           >
                             <svg
                               xmlns="http://www.w3.org/2000/svg"
-                              className="h-4 w-4"
+                              className={`h-4 w-4 transition-transform ${
+                                expandedToolCalls.includes(toolCall.id) ? '' : 'rotate-180'
+                              }`}
                               fill="none"
                               viewBox="0 0 24 24"
                               stroke="currentColor"
@@ -213,24 +275,91 @@ const MessageList: React.FC<MessageListProps> = ({ messages, toolResults }) => {
 
                         {expandedToolCalls.includes(toolCall.id) && (
                           <div className="mt-2">
-                            <div className="text-sm">
-                              <strong>Arguments:</strong>
-                              <pre className="bg-base-100 p-2 rounded text-xs mt-1 overflow-x-auto">
-                                <code>
-                                  {JSON.stringify(
-                                    JSON.parse(toolCall.function?.arguments || '{}'),
-                                    null,
-                                    2
-                                  )}
-                                </code>
-                              </pre>
+                            {/* Arguments Section */}
+                            <div className="mb-3">
+                              <div className="flex items-center justify-between mb-2">
+                                <div className="flex items-center gap-2">
+                                  <div className="badge badge-outline badge-sm">
+                                    Arguments
+                                  </div>
+                                </div>
+                                <button
+                                  className={`btn btn-ghost btn-xs ${
+                                    expandedArguments.includes(toolCall.id) ? 'btn-active' : ''
+                                  }`}
+                                  onClick={() => toggleArguments(toolCall.id)}
+                                  aria-label="Toggle arguments"
+                                >
+                                  <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    className={`h-4 w-4 transition-transform ${
+                                      expandedArguments.includes(toolCall.id) ? '' : 'rotate-180'
+                                    }`}
+                                    fill="none"
+                                    viewBox="0 0 24 24"
+                                    stroke="currentColor"
+                                    aria-hidden="true"
+                                  >
+                                    <path
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                      strokeWidth="2"
+                                      d="M19 9l-7 7-7-7"
+                                    />
+                                  </svg>
+                                </button>
+                              </div>
+                              {expandedArguments.includes(toolCall.id) && (
+                                <pre className="bg-base-100 p-2 rounded text-xs overflow-x-auto">
+                                  <code>
+                                    {JSON.stringify(
+                                      JSON.parse(toolCall.function?.arguments || '{}'),
+                                      null,
+                                      2
+                                    )}
+                                  </code>
+                                </pre>
+                              )}
                             </div>
 
-                            {/* Tool Result */}
+                            {/* Tool Result Section */}
                             {toolResults[toolCall.id] && (
                               <div className="mt-3">
-                                <div className="divider divider-start">Result</div>
-                                <ToolRenderer toolResult={toolResults[toolCall.id]} />
+                                <div className="flex items-center justify-between mb-2">
+                                  <div className="flex items-center gap-2">
+                                    <div className="badge badge-outline badge-sm">
+                                      Result
+                                    </div>
+                                  </div>
+                                  <button
+                                    className={`btn btn-ghost btn-xs ${
+                                      expandedResults.includes(toolCall.id) ? 'btn-active' : ''
+                                    }`}
+                                    onClick={() => toggleResults(toolCall.id)}
+                                    aria-label="Toggle results"
+                                  >
+                                    <svg
+                                      xmlns="http://www.w3.org/2000/svg"
+                                      className={`h-4 w-4 transition-transform ${
+                                        expandedResults.includes(toolCall.id) ? '' : 'rotate-180'
+                                      }`}
+                                      fill="none"
+                                      viewBox="0 0 24 24"
+                                      stroke="currentColor"
+                                      aria-hidden="true"
+                                    >
+                                      <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        strokeWidth="2"
+                                        d="M19 9l-7 7-7-7"
+                                      />
+                                    </svg>
+                                  </button>
+                                </div>
+                                {expandedResults.includes(toolCall.id) && (
+                                  <ToolRenderer toolResult={toolResults[toolCall.id]} />
+                                )}
                               </div>
                             )}
                           </div>
