@@ -78,13 +78,21 @@ The web UI is a React/TypeScript SPA built with Vite and embedded directly into 
 
 **Production**: `make build` or `make cross-build` always rebuilds frontend assets for distribution.
 
+**Frontend Development Workflow**:
+- `make eslint` - Run ESLint to check TypeScript/React code quality
+- `make eslint-fix` - Run ESLint with auto-fix to automatically resolve fixable issues
+- `make frontend-test` - Run frontend unit tests
+- `make frontend-test-watch` - Run frontend tests in watch mode for development
+- `make frontend-test-ui` - Run frontend tests with interactive UI
+- `make frontend-test-coverage` - Run frontend tests with coverage reporting
+
 The embedded approach eliminates external dependencies and ensures the web UI is always available with the binary.
 
 ## Engineering Principles
 
 All development work must follow these core principles:
 
-1. **Always run linting**: Make sure you run `make lint` after you finish any work to ensure code quality and consistency.
+1. **Always run linting**: Make sure you run `make lint` after you finish any work to ensure code quality and consistency. For frontend changes, also run `make eslint` to check TypeScript/React code quality.
 2. **Write comprehensive tests**: Always write tests for new features you add, and regression tests for changes you make to existing functionality.
 3. **Document CLI changes**: Always document when you have changed the CLI interface to maintain clear usage documentation.
 
@@ -95,6 +103,12 @@ make test # Run all tests
 make e2e-test-docker # Run acceptance tests in Docker
 go test ./pkg/... # Run tests for a specific package
 go test -v -cover ./pkg/... ./cmd/... # Run tests with coverage
+
+# Frontend testing
+make frontend-test # Run frontend tests
+make frontend-test-watch # Run frontend tests in watch mode
+make frontend-test-ui # Run frontend tests with UI
+make frontend-test-coverage # Run frontend tests with coverage
 ```
 
 ## Key Commands
@@ -130,6 +144,9 @@ kodelet run --image file1.png --image file2.png "compare these"
 
 # Development
 make build|test|lint|format|release    # Standard dev commands
+make build-dev                          # Fast build without frontend assets
+make eslint                            # Run frontend linting
+make eslint-fix                        # Run frontend linting with auto-fix
 ```
 
 ## Configuration

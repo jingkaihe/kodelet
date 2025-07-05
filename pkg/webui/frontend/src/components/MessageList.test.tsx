@@ -112,6 +112,73 @@ describe('MessageList', () => {
     expect(screen.getByText('Let me think about this...')).toBeInTheDocument();
   });
 
+  it('trims leading and trailing whitespace from thinking text', () => {
+    const messageWithWhitespace: Message = {
+      role: 'assistant',
+      content: 'Test response',
+      toolCalls: [],
+      thinkingText: '\n\n  This has leading and trailing whitespace  \n\n',
+    };
+
+    render(<MessageList messages={[messageWithWhitespace]} toolResults={{}} />);
+    
+    // Should display trimmed text
+    expect(screen.getByText('This has leading and trailing whitespace')).toBeInTheDocument();
+    // Should not display the original text with whitespace
+    expect(screen.queryByText('\n\n  This has leading and trailing whitespace  \n\n')).not.toBeInTheDocument();
+  });
+
+  it('trims newlines from thinking text', () => {
+    const messageWithNewlines: Message = {
+      role: 'assistant',
+      content: 'Test response',
+      toolCalls: [],
+      thinkingText: '\n\nI need to analyze this carefully.\n\nLet me break it down:\n1. First step\n2. Second step\n\n',
+    };
+
+    render(<MessageList messages={[messageWithNewlines]} toolResults={{}} />);
+    
+    // Should display trimmed text (leading/trailing newlines removed, internal preserved)
+    // Check that the text starts with the expected content without leading newlines
+    expect(screen.getByText(/^I need to analyze this carefully\./)).toBeInTheDocument();
+    
+    // Check that it contains the list items
+    expect(screen.getByText(/1\. First step/)).toBeInTheDocument();
+    expect(screen.getByText(/2\. Second step/)).toBeInTheDocument();
+  });
+
+  it('handles thinking text that is only whitespace', () => {
+    const messageWithOnlyWhitespace: Message = {
+      role: 'assistant',
+      content: 'Test response',
+      toolCalls: [],
+      thinkingText: '\n\n   \t   \n\n',
+    };
+
+    render(<MessageList messages={[messageWithOnlyWhitespace]} toolResults={{}} />);
+    
+    // Should display empty string after trimming in the pre element
+    const preElement = screen.getByText((content, element) => {
+      return element?.tagName.toLowerCase() === 'pre' && content === '';
+    });
+    
+    expect(preElement).toBeInTheDocument();
+  });
+
+  it('does not affect thinking text without leading/trailing whitespace', () => {
+    const messageWithoutWhitespace: Message = {
+      role: 'assistant',
+      content: 'Test response',
+      toolCalls: [],
+      thinkingText: 'Clean thinking text with no whitespace',
+    };
+
+    render(<MessageList messages={[messageWithoutWhitespace]} toolResults={{}} />);
+    
+    // Should display the original text unchanged
+    expect(screen.getByText('Clean thinking text with no whitespace')).toBeInTheDocument();
+  });
+
   it('renders tool calls with toggle', () => {
     render(<MessageList messages={mockMessages} toolResults={mockToolResults} />);
     
