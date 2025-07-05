@@ -1,3 +1,6 @@
+/* Import subagent-specific styles */
+@import './subagent.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;

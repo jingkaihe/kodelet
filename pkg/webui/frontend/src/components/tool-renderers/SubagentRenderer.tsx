@@ -35,7 +35,7 @@ const SubagentRenderer: React.FC<SubagentRendererProps> = ({ toolResult }) => {
           </div>
           <div className="bg-primary/10 p-3 rounded-lg border border-primary/20">
             <div 
-              className="prose-enhanced text-sm"
+              className="prose-enhanced subagent-response text-sm"
               dangerouslySetInnerHTML={{
                 __html: formatMarkdown(meta.question)
               }}
@@ -50,7 +50,7 @@ const SubagentRenderer: React.FC<SubagentRendererProps> = ({ toolResult }) => {
             </div>
             <div className="bg-base-200 p-4 rounded-lg border">
               <div 
-                className="prose-enhanced"
+                className="prose-enhanced subagent-response"
                 dangerouslySetInnerHTML={{
                   __html: formatMarkdown(meta.response)
                 }}
