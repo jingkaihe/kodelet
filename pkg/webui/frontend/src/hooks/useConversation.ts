@@ -30,7 +30,8 @@ export const useConversation = (conversationId: string): UseConversationResult =
         data.messages = data.messages.map(message => ({
           role: message.role || 'user',
           content: message.content || '',
-          toolCalls: message.toolCalls || message.tool_calls || []
+          toolCalls: message.toolCalls || message.tool_calls || [],
+          thinkingText: message.thinkingText
         }));
       }
 

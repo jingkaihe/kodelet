@@ -11,6 +11,7 @@ interface MessageListProps {
 
 const MessageList: React.FC<MessageListProps> = ({ messages, toolResults }) => {
   const [expandedToolCalls, setExpandedToolCalls] = useState<string[]>([]);
+  const [expandedThinking, setExpandedThinking] = useState<string[]>([]);
 
   const toggleToolCall = (toolCallId: string) => {
     setExpandedToolCalls(prev => {
@@ -19,6 +20,17 @@ const MessageList: React.FC<MessageListProps> = ({ messages, toolResults }) => {
         return prev.filter(id => id !== toolCallId);
       } else {
         return [...prev, toolCallId];
+      }
+    });
+  };
+
+  const toggleThinking = (messageIndex: string) => {
+    setExpandedThinking(prev => {
+      const index = prev.indexOf(messageIndex);
+      if (index > -1) {
+        return prev.filter(id => id !== messageIndex);
+      } else {
+        return [...prev, messageIndex];
       }
     });
   };
@@ -114,6 +126,49 @@ const MessageList: React.FC<MessageListProps> = ({ messages, toolResults }) => {
                   __html: renderMessageContent(message.content)
                 }}
               />
+
+              {/* Thinking Block */}
+              {message.thinkingText && (
+                <div className="mt-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <div className="badge badge-outline badge-secondary">
+                        💭 Thinking
+                      </div>
+                    </div>
+                    <button
+                      className={`btn btn-ghost btn-xs ${
+                        expandedThinking.includes(index.toString()) ? 'btn-active' : ''
+                      }`}
+                      onClick={() => toggleThinking(index.toString())}
+                      aria-label="Toggle thinking block"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        className="h-4 w-4"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                        aria-hidden="true"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth="2"
+                          d="M19 9l-7 7-7-7"
+                        />
+                      </svg>
+                    </button>
+                  </div>
+                  {expandedThinking.includes(index.toString()) && (
+                    <div className="bg-base-200 p-3 rounded-lg">
+                      <div className="prose prose-sm max-w-none">
+                        <pre className="whitespace-pre-wrap text-sm">{message.thinkingText}</pre>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Tool Calls */}
               {toolCalls.length > 0 && (

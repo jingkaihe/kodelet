@@ -402,6 +402,18 @@ func TestServer_convertToWebMessages(t *testing.T) {
 			modelType:    "anthropic",
 			expectedMsgs: 2,
 		},
+		{
+			name:         "empty messages should be filtered out",
+			rawMessages:  json.RawMessage(`[{"role":"user","content":""},{"role":"assistant","content":"Hi there!"},{"role":"user","content":""}]`),
+			modelType:    "anthropic",
+			expectedMsgs: 1,
+		},
+		{
+			name:         "empty messages with tool calls should be preserved",
+			rawMessages:  json.RawMessage(`[{"role":"user","content":""},{"role":"assistant","content":"","tool_calls":[{"id":"tool-123","function":{"name":"TestTool","arguments":"{\"arg\":\"value\"}"}}]}]`),
+			modelType:    "openai",
+			expectedMsgs: 1,
+		},
 	}
 
 	for _, tt := range tests {

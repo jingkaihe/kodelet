@@ -11,10 +11,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/gorilla/mux"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
+	"github.com/sashabaranov/go-openai"
 )
 
 //go:generate bash -c "cd frontend && npm install && npm run build"
@@ -240,9 +242,10 @@ type WebConversationResponse struct {
 
 // WebMessage represents a message with structured tool calls for the web UI
 type WebMessage struct {
-	Role      string        `json:"role"`
-	Content   string        `json:"content"`
-	ToolCalls []WebToolCall `json:"toolCalls,omitempty"`
+	Role         string        `json:"role"`
+	Content      string        `json:"content"`
+	ToolCalls    []WebToolCall `json:"toolCalls,omitempty"`
+	ThinkingText string        `json:"thinkingText,omitempty"`
 }
 
 // WebToolCall represents a tool call for the web UI
@@ -325,12 +328,34 @@ func (s *Server) convertToWebMessages(rawMessages json.RawMessage, modelType str
 			ToolCalls: []WebToolCall{},
 		}
 
-		// Extract tool calls based on provider
+		// Extract tool calls and thinking content based on provider
 		switch modelType {
 		case "anthropic":
-			webMsg.ToolCalls = s.extractAnthropicToolCalls(baseMsg["content"])
+			// For Anthropic, we need to use the full raw message to properly deserialize
+			if toolCalls, err := s.extractAnthropicToolCalls(rawMsg); err == nil {
+				webMsg.ToolCalls = toolCalls
+			}
+			// Extract thinking content using SDK
+			if textContent, thinkingText, err := s.extractAnthropicContent(rawMsg); err == nil {
+				if textContent != "" {
+					webMsg.Content = textContent
+				}
+				webMsg.ThinkingText = thinkingText
+			}
 		case "openai":
-			webMsg.ToolCalls = s.extractOpenAIToolCalls(baseMsg)
+			if toolCalls, err := s.extractOpenAIToolCalls(rawMsg); err == nil {
+				webMsg.ToolCalls = toolCalls
+			}
+			// Extract content using SDK for consistency
+			if textContent, err := s.extractOpenAIContent(rawMsg); err == nil && textContent != "" {
+				webMsg.Content = textContent
+			}
+		}
+
+		// Skip empty messages (no content, no tool calls, and no thinking text)
+		// pretty much neglecting the user tool call feedback as it is covered by the toolresult block at
+		if webMsg.Content == "" && len(webMsg.ToolCalls) == 0 && webMsg.ThinkingText == "" {
+			continue
 		}
 
 		messages = append(messages, webMsg)
@@ -362,69 +387,112 @@ func (s *Server) extractContentString(content interface{}) string {
 	}
 }
 
-// extractAnthropicToolCalls extracts tool calls from Anthropic content
-func (s *Server) extractAnthropicToolCalls(content interface{}) []WebToolCall {
-	var toolCalls []WebToolCall
+// extractAnthropicContent extracts both text content and thinking blocks using Anthropic SDK
+func (s *Server) extractAnthropicContent(rawMessage json.RawMessage) (string, string, error) {
+	// Deserialize single message using the Anthropic SDK
+	var anthropicMessage anthropic.MessageParam
+	if err := json.Unmarshal(rawMessage, &anthropicMessage); err != nil {
+		return "", "", fmt.Errorf("failed to deserialize Anthropic message: %w", err)
+	}
 
-	if contentArray, ok := content.([]interface{}); ok {
-		for _, block := range contentArray {
-			if blockMap, ok := block.(map[string]interface{}); ok {
-				if blockType, _ := blockMap["type"].(string); blockType == "tool_use" {
-					if id, ok := blockMap["id"].(string); ok {
-						if name, ok := blockMap["name"].(string); ok {
-							// Convert input to JSON string
-							inputJSON := "{}"
-							if input := blockMap["input"]; input != nil {
-								if inputBytes, err := json.Marshal(input); err == nil {
-									inputJSON = string(inputBytes)
-								}
-							}
+	var textParts []string
+	var thinkingText string
 
-							toolCalls = append(toolCalls, WebToolCall{
-								ID: id,
-								Function: WebToolCallFunction{
-									Name:      name,
-									Arguments: inputJSON,
-								},
-							})
-						}
-					}
-				}
-			}
+	for _, contentBlock := range anthropicMessage.Content {
+		// Handle text blocks
+		if textBlock := contentBlock.OfText; textBlock != nil {
+			textParts = append(textParts, textBlock.Text)
+		}
+		// Handle thinking blocks
+		if thinkingBlock := contentBlock.OfThinking; thinkingBlock != nil {
+			thinkingText = thinkingBlock.Thinking
 		}
 	}
 
-	return toolCalls
+	return strings.Join(textParts, "\n"), thinkingText, nil
 }
 
-// extractOpenAIToolCalls extracts tool calls from OpenAI messages
-func (s *Server) extractOpenAIToolCalls(message map[string]interface{}) []WebToolCall {
+// extractAnthropicToolCalls extracts tool calls from Anthropic content using SDK
+func (s *Server) extractAnthropicToolCalls(rawMessage json.RawMessage) ([]WebToolCall, error) {
+	// Deserialize single message using the Anthropic SDK
+	var anthropicMessage anthropic.MessageParam
+	if err := json.Unmarshal(rawMessage, &anthropicMessage); err != nil {
+		return nil, fmt.Errorf("failed to deserialize Anthropic message: %w", err)
+	}
+
 	var toolCalls []WebToolCall
 
-	if toolCallsData, ok := message["tool_calls"]; ok {
-		if toolCallsArray, ok := toolCallsData.([]interface{}); ok {
-			for _, tc := range toolCallsArray {
-				if tcMap, ok := tc.(map[string]interface{}); ok {
-					if id, ok := tcMap["id"].(string); ok {
-						if function, ok := tcMap["function"].(map[string]interface{}); ok {
-							name, _ := function["name"].(string)
-							arguments, _ := function["arguments"].(string)
-
-							toolCalls = append(toolCalls, WebToolCall{
-								ID: id,
-								Function: WebToolCallFunction{
-									Name:      name,
-									Arguments: arguments,
-								},
-							})
-						}
-					}
+	for _, contentBlock := range anthropicMessage.Content {
+		// Handle tool use blocks using SDK accessors
+		if toolUseBlock := contentBlock.OfToolUse; toolUseBlock != nil {
+			// Convert input to JSON string using SDK field
+			inputJSON := "{}"
+			if toolUseBlock.Input != nil {
+				if inputBytes, err := json.Marshal(toolUseBlock.Input); err == nil {
+					inputJSON = string(inputBytes)
 				}
 			}
+
+			toolCalls = append(toolCalls, WebToolCall{
+				ID: toolUseBlock.ID,
+				Function: WebToolCallFunction{
+					Name:      toolUseBlock.Name,
+					Arguments: inputJSON,
+				},
+			})
 		}
 	}
 
-	return toolCalls
+	return toolCalls, nil
+}
+
+// extractOpenAIToolCalls extracts tool calls from OpenAI messages using SDK
+func (s *Server) extractOpenAIToolCalls(rawMessage json.RawMessage) ([]WebToolCall, error) {
+	// Deserialize single message using the OpenAI SDK
+	var openaiMessage openai.ChatCompletionMessage
+	if err := json.Unmarshal(rawMessage, &openaiMessage); err != nil {
+		return nil, fmt.Errorf("failed to deserialize OpenAI message: %w", err)
+	}
+
+	var toolCalls []WebToolCall
+
+	// Use SDK ToolCalls field directly
+	for _, toolCall := range openaiMessage.ToolCalls {
+		toolCalls = append(toolCalls, WebToolCall{
+			ID: toolCall.ID,
+			Function: WebToolCallFunction{
+				Name:      toolCall.Function.Name,
+				Arguments: toolCall.Function.Arguments,
+			},
+		})
+	}
+
+	return toolCalls, nil
+}
+
+// extractOpenAIContent extracts content from OpenAI messages using SDK
+func (s *Server) extractOpenAIContent(rawMessage json.RawMessage) (string, error) {
+	// Deserialize single message using the OpenAI SDK
+	var openaiMessage openai.ChatCompletionMessage
+	if err := json.Unmarshal(rawMessage, &openaiMessage); err != nil {
+		return "", fmt.Errorf("failed to deserialize OpenAI message: %w", err)
+	}
+
+	// OpenAI messages have simple string content or multimodal content
+	if openaiMessage.Content != "" {
+		return openaiMessage.Content, nil
+	}
+
+	// Handle multimodal content if present
+	var textParts []string
+	for _, part := range openaiMessage.MultiContent {
+		if part.Type == openai.ChatMessagePartTypeText {
+			textParts = append(textParts, part.Text)
+		}
+		// Note: Image parts would need special handling for display
+	}
+
+	return strings.Join(textParts, "\n"), nil
 }
 
 // handleGetToolResult handles GET /api/conversations/{id}/tools/{toolCallId}

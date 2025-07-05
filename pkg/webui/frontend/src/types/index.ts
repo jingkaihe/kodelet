@@ -5,6 +5,7 @@ export interface Message {
   content: string | ContentBlock[];
   toolCalls?: ToolCall[];
   tool_calls?: ToolCall[]; // Alternative format
+  thinkingText?: string; // For Claude thinking blocks
 }
 
 export interface ContentBlock {
