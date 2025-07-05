@@ -1,6 +1,6 @@
 import React from 'react';
 import { ToolResult, SubagentMetadata } from '../../types';
-import { ToolCard, escapeHtml } from './shared';
+import { ToolCard } from './shared';
 import { marked } from 'marked';
 
 interface SubagentRendererProps {
@@ -15,6 +15,11 @@ const SubagentRenderer: React.FC<SubagentRendererProps> = ({ toolResult }) => {
 
   const formatMarkdown = (text: string): string => {
     if (!text) return '';
+    // Configure marked for better code rendering
+    marked.setOptions({
+      breaks: true,
+      gfm: true,
+    });
     return marked.parse(text);
   };
 
@@ -23,27 +28,34 @@ const SubagentRenderer: React.FC<SubagentRendererProps> = ({ toolResult }) => {
       title="🤖 Sub-agent"
       badge={{ text: `${modelStrength} model`, className: 'badge-info' }}
     >
-      <div className="space-y-3">
+      <div className="space-y-4">
         <div>
-          <div className="text-xs text-base-content/60 mb-1">
+          <div className="text-xs text-base-content/60 mb-2">
             <strong>Question:</strong>
           </div>
-          <div className="bg-blue-50 p-3 rounded text-sm">
-            {escapeHtml(meta.question)}
+          <div className="bg-primary/10 p-3 rounded-lg border border-primary/20">
+            <div 
+              className="prose-enhanced text-sm"
+              dangerouslySetInnerHTML={{
+                __html: formatMarkdown(meta.question)
+              }}
+            />
           </div>
         </div>
 
         {meta.response && (
           <div>
-            <div className="text-xs text-base-content/60 mb-1">
+            <div className="text-xs text-base-content/60 mb-2">
               <strong>Response:</strong>
             </div>
-            <div 
-              className="bg-green-50 p-3 rounded text-sm prose prose-sm max-w-none"
-              dangerouslySetInnerHTML={{
-                __html: formatMarkdown(meta.response)
-              }}
-            />
+            <div className="bg-base-200 p-4 rounded-lg border">
+              <div 
+                className="prose-enhanced"
+                dangerouslySetInnerHTML={{
+                  __html: formatMarkdown(meta.response)
+                }}
+              />
+            </div>
           </div>
         )}
       </div>
