@@ -41,7 +41,10 @@ Kodelet is a lightweight CLI tool that helps with software engineering tasks. It
 │   │   ├── llm/         # LLM related types
 │   │   └── tools/       # Tool related types
 │   ├── utils/           # Utility functions
-│   └── version/         # Version information
+│   ├── version/         # Version information
+│   └── webui/           # Web UI server and React frontend
+│       ├── frontend/    # React/TypeScript SPA with Vite build
+│       └── dist/        # Built frontend assets (embedded in binary)
 ├── README.md            # Project overview
 ├── RELEASE.md           # Release notes
 ├── tests/               # Test files
@@ -59,6 +62,23 @@ The codebase follows a modular structure with separation of concerns between LLM
 - **Charm libraries** - TUI components
 - **Cobra & Viper** - CLI commands and configuration
 - **Docker** - For containerization
+
+## Frontend Bundling
+
+The web UI is a React/TypeScript SPA built with Vite and embedded directly into the Go binary:
+
+**Frontend Stack**: React 18, TypeScript, Tailwind CSS, DaisyUI, React Router, Vite
+**Build Process**:
+- `go generate ./pkg/webui` triggers `npm install && npm run build` in frontend directory
+- Vite builds optimized assets to `pkg/webui/dist/` directory
+- Go's `//go:embed dist/*` directive embeds all built assets into the binary at compile time
+- Web server serves embedded React SPA with `/api/*` endpoints for conversation management
+
+**Development**: Use `make build-dev` to skip frontend build for faster Go-only builds.
+
+**Production**: `make build` or `make cross-build` always rebuilds frontend assets for distribution.
+
+The embedded approach eliminates external dependencies and ensures the web UI is always available with the binary.
 
 ## Engineering Principles
 
@@ -86,6 +106,7 @@ For comprehensive usage documentation and examples, see [./docs/MANUAL.md](./doc
 kodelet run "query"                    # One-shot execution
 kodelet chat                           # Interactive mode
 kodelet watch                          # File watcher
+kodelet serve [--host HOST] [--port PORT] # Web UI server (default: localhost:8080)
 
 # Conversation management
 kodelet conversation list|show|delete  # Manage conversations
