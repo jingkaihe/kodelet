@@ -203,9 +203,7 @@ const MessageList: React.FC<MessageListProps> = ({ messages, toolResults }) => {
                     >
                       <svg
                         xmlns="http://www.w3.org/2000/svg"
-                        className={`h-4 w-4 transition-transform ${
-                          expandedThinking.includes(index.toString()) ? '' : 'rotate-180'
-                        }`}
+                        className="h-4 w-4"
                         fill="none"
                         viewBox="0 0 24 24"
                         stroke="currentColor"
@@ -215,7 +213,7 @@ const MessageList: React.FC<MessageListProps> = ({ messages, toolResults }) => {
                           strokeLinecap="round"
                           strokeLinejoin="round"
                           strokeWidth="2"
-                          d="M19 9l-7 7-7-7"
+                          d={expandedThinking.includes(index.toString()) ? "M19 9l-7 7-7-7" : "M9 5l7 7-7 7"}
                         />
                       </svg>
                     </button>
@@ -255,9 +253,7 @@ const MessageList: React.FC<MessageListProps> = ({ messages, toolResults }) => {
                           >
                             <svg
                               xmlns="http://www.w3.org/2000/svg"
-                              className={`h-4 w-4 transition-transform ${
-                                expandedToolCalls.includes(toolCall.id) ? '' : 'rotate-180'
-                              }`}
+                              className="h-4 w-4"
                               fill="none"
                               viewBox="0 0 24 24"
                               stroke="currentColor"
@@ -267,7 +263,7 @@ const MessageList: React.FC<MessageListProps> = ({ messages, toolResults }) => {
                                 strokeLinecap="round"
                                 strokeLinejoin="round"
                                 strokeWidth="2"
-                                d="M19 9l-7 7-7-7"
+                                d={expandedToolCalls.includes(toolCall.id) ? "M19 9l-7 7-7-7" : "M9 5l7 7-7 7"}
                               />
                             </svg>
                           </button>
@@ -292,9 +288,7 @@ const MessageList: React.FC<MessageListProps> = ({ messages, toolResults }) => {
                                 >
                                   <svg
                                     xmlns="http://www.w3.org/2000/svg"
-                                    className={`h-4 w-4 transition-transform ${
-                                      expandedArguments.includes(toolCall.id) ? '' : 'rotate-180'
-                                    }`}
+                                    className="h-4 w-4"
                                     fill="none"
                                     viewBox="0 0 24 24"
                                     stroke="currentColor"
@@ -304,7 +298,7 @@ const MessageList: React.FC<MessageListProps> = ({ messages, toolResults }) => {
                                       strokeLinecap="round"
                                       strokeLinejoin="round"
                                       strokeWidth="2"
-                                      d="M19 9l-7 7-7-7"
+                                      d={expandedArguments.includes(toolCall.id) ? "M19 9l-7 7-7-7" : "M9 5l7 7-7 7"}
                                     />
                                   </svg>
                                 </button>
@@ -340,9 +334,7 @@ const MessageList: React.FC<MessageListProps> = ({ messages, toolResults }) => {
                                   >
                                     <svg
                                       xmlns="http://www.w3.org/2000/svg"
-                                      className={`h-4 w-4 transition-transform ${
-                                        expandedResults.includes(toolCall.id) ? '' : 'rotate-180'
-                                      }`}
+                                      className="h-4 w-4"
                                       fill="none"
                                       viewBox="0 0 24 24"
                                       stroke="currentColor"
@@ -352,7 +344,7 @@ const MessageList: React.FC<MessageListProps> = ({ messages, toolResults }) => {
                                         strokeLinecap="round"
                                         strokeLinejoin="round"
                                         strokeWidth="2"
-                                        d="M19 9l-7 7-7-7"
+                                        d={expandedResults.includes(toolCall.id) ? "M19 9l-7 7-7-7" : "M9 5l7 7-7 7"}
                                       />
                                     </svg>
                                   </button>
