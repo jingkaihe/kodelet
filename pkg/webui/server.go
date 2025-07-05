@@ -5,10 +5,8 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
-	"html/template"
 	"io/fs"
 	"net/http"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -19,7 +17,8 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 )
 
-//go:embed templates/* static/*
+//go:generate bash -c "cd frontend && npm install && npm run build"
+//go:embed dist/*
 var embedFS embed.FS
 
 // Server represents the web UI server
@@ -65,8 +64,8 @@ func NewServer(config *ServerConfig) (*Server, error) {
 		return nil, fmt.Errorf("failed to create conversation service: %w", err)
 	}
 
-	// Create a sub-filesystem for static files
-	staticFS, err := fs.Sub(embedFS, "static")
+	// Create a sub-filesystem for static files from dist/assets
+	staticFS, err := fs.Sub(embedFS, "dist/assets")
 	if err != nil {
 		return nil, fmt.Errorf("failed to create static filesystem: %w", err)
 	}
@@ -86,9 +85,6 @@ func NewServer(config *ServerConfig) (*Server, error) {
 
 // setupRoutes configures all the HTTP routes
 func (s *Server) setupRoutes() {
-	// Static files
-	s.router.PathPrefix("/static/").Handler(s.staticFileHandler())
-
 	// API routes
 	api := s.router.PathPrefix("/api").Subrouter()
 	api.HandleFunc("/conversations", s.handleListConversations).Methods("GET")
@@ -98,9 +94,11 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/search", s.handleSearchConversations).Methods("GET")
 	api.HandleFunc("/stats", s.handleGetStatistics).Methods("GET")
 
-	// HTML routes
-	s.router.HandleFunc("/", s.handleConversationList).Methods("GET")
-	s.router.HandleFunc("/c/{id}", s.handleConversationView).Methods("GET")
+	// Static assets from the React build
+	s.router.PathPrefix("/assets/").Handler(s.staticFileHandler())
+	
+	// All other routes serve the React SPA
+	s.router.PathPrefix("/").HandlerFunc(s.handleReactSPA)
 
 	// Add middleware
 	s.router.Use(s.loggingMiddleware)
@@ -109,7 +107,22 @@ func (s *Server) setupRoutes() {
 
 // staticFileHandler serves static files from the embedded filesystem
 func (s *Server) staticFileHandler() http.Handler {
-	return http.StripPrefix("/static/", http.FileServer(http.FS(s.staticFS)))
+	return http.StripPrefix("/assets/", http.FileServer(http.FS(s.staticFS)))
+}
+
+// handleReactSPA serves the React single-page application
+func (s *Server) handleReactSPA(w http.ResponseWriter, r *http.Request) {
+	// Serve index.html for all non-API routes
+	indexContent, err := embedFS.ReadFile("dist/index.html")
+	if err != nil {
+		logger.G(r.Context()).WithError(err).Error("failed to read index.html")
+		http.Error(w, "failed to load application", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.Write(indexContent)
 }
 
 // loggingMiddleware logs HTTP requests
@@ -503,72 +516,9 @@ func (s *Server) handleGetStatistics(w http.ResponseWriter, r *http.Request) {
 	s.writeJSONResponse(w, response)
 }
 
-// HTML Handlers
-
-// handleConversationList handles GET /
-func (s *Server) handleConversationList(w http.ResponseWriter, r *http.Request) {
-	tmpl, err := s.loadTemplate("index.html")
-	if err != nil {
-		http.Error(w, "failed to load template", http.StatusInternalServerError)
-		return
-	}
-
-	data := struct {
-		Title string
-	}{
-		Title: "Kodelet Conversations",
-	}
-
-	w.Header().Set("Content-Type", "text/html")
-	if err := tmpl.Execute(w, data); err != nil {
-		logger.G(r.Context()).WithError(err).Error("failed to execute template")
-		http.Error(w, "failed to render page", http.StatusInternalServerError)
-	}
-}
-
-// handleConversationView handles GET /c/{id}
-func (s *Server) handleConversationView(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	id := vars["id"]
-
-	tmpl, err := s.loadTemplate("conversation.html")
-	if err != nil {
-		http.Error(w, "failed to load template", http.StatusInternalServerError)
-		return
-	}
-
-	data := struct {
-		Title          string
-		ConversationID string
-	}{
-		Title:          fmt.Sprintf("Conversation %s", id),
-		ConversationID: id,
-	}
-
-	w.Header().Set("Content-Type", "text/html")
-	if err := tmpl.Execute(w, data); err != nil {
-		logger.G(r.Context()).WithError(err).Error("failed to execute template")
-		http.Error(w, "failed to render page", http.StatusInternalServerError)
-	}
-}
+// HTML Handlers - removed since we're using React SPA
 
 // Utility methods
-
-// loadTemplate loads a template from the embedded filesystem
-func (s *Server) loadTemplate(name string) (*template.Template, error) {
-	templatePath := filepath.Join("templates", name)
-	content, err := embedFS.ReadFile(templatePath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read template %s: %w", name, err)
-	}
-
-	tmpl, err := template.New(name).Parse(string(content))
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse template %s: %w", name, err)
-	}
-
-	return tmpl, nil
-}
 
 // writeJSONResponse writes a JSON response
 func (s *Server) writeJSONResponse(w http.ResponseWriter, data interface{}) {

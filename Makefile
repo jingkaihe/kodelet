@@ -2,11 +2,20 @@ VERSION=$(shell cat VERSION.txt)
 GIT_COMMIT=$(shell git rev-parse --short HEAD)
 
 VERSION_FLAG=-X 'github.com/jingkaihe/kodelet/pkg/version.Version=$(VERSION)' -X 'github.com/jingkaihe/kodelet/pkg/version.GitCommit=$(GIT_COMMIT)'
-.PHONY: build cross-build run test lint golangci-lint install-linters format docker-build docker-run e2e-test e2e-test-docker
+.PHONY: build build-dev cross-build run test lint golangci-lint install-linters format docker-build docker-run e2e-test e2e-test-docker
 
 # Build the application
 build:
 	mkdir -p bin
+	@echo "Building frontend assets..."
+	go generate ./pkg/webui
+	@echo "Building kodelet binary..."
+	CGO_ENABLED=0 go build -ldflags="$(VERSION_FLAG)" -o ./bin/kodelet ./cmd/kodelet/
+
+# Build the application without frontend assets (for development)
+build-dev:
+	mkdir -p bin
+	@echo "Building kodelet binary (without frontend)..."
 	CGO_ENABLED=0 go build -ldflags="$(VERSION_FLAG)" -o ./bin/kodelet ./cmd/kodelet/
 
 chat: build
@@ -53,6 +62,9 @@ e2e-test-docker:
 # Cross-compile for multiple platforms
 cross-build:
 	mkdir -p bin
+	@echo "Building frontend assets..."
+	go generate ./pkg/webui
+	@echo "Cross-compiling for multiple platforms..."
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="$(VERSION_FLAG)" -o ./bin/kodelet-linux-amd64 ./cmd/kodelet/
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="$(VERSION_FLAG)" -o ./bin/kodelet-linux-arm64 ./cmd/kodelet/
 	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags="$(VERSION_FLAG)" -o ./bin/kodelet-darwin-amd64 ./cmd/kodelet/
@@ -73,7 +85,8 @@ release-note: build
 # Display help information
 help:
 	@echo "Available targets:"
-	@echo "  build        - Build the application"
+	@echo "  build        - Build the application with embedded web UI"
+	@echo "  build-dev    - Build the application without web UI (faster for development)"
 	@echo "  cross-build  - Cross-compile for multiple platforms (linux, macOS, Windows)"
 	@echo "  run          - Run in one-shot mode (use: make run query='your query')"
 	@echo "  chat         - Run in interactive chat mode"
