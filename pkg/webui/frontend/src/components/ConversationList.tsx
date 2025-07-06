@@ -39,9 +39,10 @@ const ConversationList: React.FC<ConversationListProps> = ({
                 <h3 className="card-title text-lg mb-2">
                   <Link
                     to={`/c/${conversation.id}`}
-                    className="link link-hover text-primary"
+                    className="link link-hover text-primary font-mono text-sm"
+                    title={conversation.id}
                   >
-                    {conversation.id.substring(0, 8)}...
+                    {conversation.id}
                   </Link>
                 </h3>
                 <p className="text-base-content/70 mb-3">
@@ -62,6 +63,16 @@ const ConversationList: React.FC<ConversationListProps> = ({
                     <div className="badge badge-outline">
                       Model: <span>{conversation.modelType}</span>
                     </div>
+                  )}
+                  {conversation.usage && (
+                    <>
+                      <div className="badge badge-info badge-outline">
+                        Tokens: <span>{((conversation.usage.inputTokens || 0) + (conversation.usage.outputTokens || 0)).toLocaleString()}</span>
+                      </div>
+                      <div className="badge badge-success badge-outline">
+                        Cost: <span>${((conversation.usage.inputCost || 0) + (conversation.usage.outputCost || 0) + (conversation.usage.cacheCreationCost || 0) + (conversation.usage.cacheReadCost || 0)).toFixed(4)}</span>
+                      </div>
+                    </>
                   )}
                 </div>
               </div>

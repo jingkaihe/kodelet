@@ -3,7 +3,6 @@
 import { 
   Conversation, 
   ConversationListResponse, 
-  ConversationStats, 
   SearchFilters, 
   ApiError,
   ToolResult
@@ -60,10 +59,6 @@ class ApiService {
     await this.request(`/api/conversations/${id}`, {
       method: 'DELETE',
     });
-  }
-
-  async getConversationStats(): Promise<ConversationStats> {
-    return this.request<ConversationStats>('/api/stats');
   }
 
   async searchConversations(query: string): Promise<ConversationListResponse> {

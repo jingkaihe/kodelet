@@ -57,6 +57,11 @@ export const useConversations = (): UseConversationsResult => {
         setConversations(response.conversations);
       }
       
+      // Update stats from the response
+      if (response.stats) {
+        setStats(response.stats);
+      }
+      
       setHasMore(response.hasMore);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load conversations');
@@ -71,32 +76,20 @@ export const useConversations = (): UseConversationsResult => {
     }
   }, [hasMore, loading, loadConversations]);
 
-  const loadStats = useCallback(async () => {
-    try {
-      const statsData = await apiService.getConversationStats();
-      setStats(statsData);
-    } catch (err) {
-      console.error('Failed to load stats:', err);
-    }
-  }, []);
-
   const deleteConversation = useCallback(async (id: string) => {
     try {
       await apiService.deleteConversation(id);
       setConversations(prev => prev.filter(c => c.id !== id));
-      // Refresh stats after deletion
-      await loadStats();
+      // Reload conversations to get updated stats
+      await loadConversations();
     } catch (err) {
       throw new Error(err instanceof Error ? err.message : 'Failed to delete conversation');
     }
-  }, [loadStats]);
+  }, [loadConversations]);
 
   const refresh = useCallback(async () => {
-    await Promise.all([
-      loadConversations(),
-      loadStats(),
-    ]);
-  }, [loadConversations, loadStats]);
+    await loadConversations();
+  }, [loadConversations]);
 
   // Load conversations when filters change
   useEffect(() => {
@@ -105,8 +98,8 @@ export const useConversations = (): UseConversationsResult => {
 
   // Load initial data
   useEffect(() => {
-    refresh();
-  }, [refresh]);
+    loadConversations();
+  }, [loadConversations]);
 
   return {
     conversations,

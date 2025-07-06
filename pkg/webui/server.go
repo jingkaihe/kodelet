@@ -94,7 +94,6 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/conversations/{id}/tools/{toolCallId}", s.handleGetToolResult).Methods("GET")
 	api.HandleFunc("/conversations/{id}", s.handleDeleteConversation).Methods("DELETE")
 	api.HandleFunc("/search", s.handleSearchConversations).Methods("GET")
-	api.HandleFunc("/stats", s.handleGetStatistics).Methods("GET")
 
 	// Static assets from the React build
 	s.router.PathPrefix("/assets/").Handler(s.staticFileHandler())
@@ -569,22 +568,6 @@ func (s *Server) handleSearchConversations(w http.ResponseWriter, r *http.Reques
 
 	s.writeJSONResponse(w, response)
 }
-
-// handleGetStatistics handles GET /api/stats
-func (s *Server) handleGetStatistics(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-
-	// Get statistics
-	response, err := s.conversationService.GetConversationStatistics(ctx)
-	if err != nil {
-		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to get statistics", err)
-		return
-	}
-
-	s.writeJSONResponse(w, response)
-}
-
-// HTML Handlers - removed since we're using React SPA
 
 // Utility methods
 

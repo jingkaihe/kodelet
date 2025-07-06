@@ -2,13 +2,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, waitFor, act } from '@testing-library/react';
 import { useConversations } from './useConversations';
 import { apiService } from '../services/api';
-import { ConversationListResponse, ConversationStats } from '../types';
+import { ConversationListResponse } from '../types';
 
 // Mock the API service
 vi.mock('../services/api', () => ({
   apiService: {
     getConversations: vi.fn(),
-    getConversationStats: vi.fn(),
     deleteConversation: vi.fn(),
   },
 }));
@@ -30,17 +29,25 @@ describe('useConversations (simplified)', () => {
       },
     ],
     hasMore: false,
-  };
-
-  const mockStats: ConversationStats = {
-    totalConversations: 10,
-    totalMessages: 100,
+    stats: {
+      totalConversations: 10,
+      totalMessages: 100,
+      totalTokens: 1000,
+      totalCost: 0.05,
+      inputTokens: 600,
+      outputTokens: 400,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      inputCost: 0.03,
+      outputCost: 0.02,
+      cacheReadCost: 0,
+      cacheWriteCost: 0,
+    },
   };
 
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(apiService.getConversations).mockResolvedValue(mockConversations);
-    vi.mocked(apiService.getConversationStats).mockResolvedValue(mockStats);
   });
 
   it('provides initial state', async () => {

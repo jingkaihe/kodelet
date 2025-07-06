@@ -52,6 +52,16 @@ describe('ConversationListPage', () => {
   const mockStats = {
     totalConversations: 10,
     totalMessages: 100,
+    totalTokens: 1000,
+    totalCost: 0.05,
+    inputTokens: 600,
+    outputTokens: 400,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    inputCost: 0.03,
+    outputCost: 0.02,
+    cacheReadCost: 0,
+    cacheWriteCost: 0,
   };
 
   const defaultMockHook = {

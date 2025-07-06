@@ -65,13 +65,22 @@ export interface ConversationListResponse {
   conversations: Conversation[];
   hasMore: boolean;
   totalCount?: number;
+  stats?: ConversationStats;
 }
 
 export interface ConversationStats {
   totalConversations: number;
   totalMessages: number;
-  oldestConversation?: string;
-  newestConversation?: string;
+  totalTokens: number;
+  totalCost: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  inputCost: number;
+  outputCost: number;
+  cacheReadCost: number;
+  cacheWriteCost: number;
 }
 
 export interface SearchFilters {

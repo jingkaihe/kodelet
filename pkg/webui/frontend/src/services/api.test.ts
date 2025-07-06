@@ -3,7 +3,6 @@ import apiService from './api';
 import { 
   ConversationListResponse, 
   Conversation, 
-  ConversationStats,
   ToolResult 
 } from '../types';
 
@@ -163,25 +162,6 @@ describe('ApiService', () => {
           method: 'DELETE',
         })
       );
-    });
-  });
-
-  describe('getConversationStats', () => {
-    it('fetches conversation statistics', async () => {
-      const mockStats: ConversationStats = {
-        totalConversations: 10,
-        totalMessages: 100,
-      };
-
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockStats,
-      });
-
-      const result = await apiService.getConversationStats();
-
-      expect(mockFetch).toHaveBeenCalledWith('/api/stats', expect.any(Object));
-      expect(result).toEqual(mockStats);
     });
   });
 

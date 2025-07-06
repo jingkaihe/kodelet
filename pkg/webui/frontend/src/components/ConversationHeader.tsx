@@ -16,8 +16,8 @@ const ConversationHeader: React.FC<ConversationHeaderProps> = ({
     <div className="mb-8">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-4xl font-bold text-base-content mb-2">
-            {conversation.id ? `${conversation.id.substring(0, 8)}...` : 'Loading...'}
+          <h1 className="text-2xl font-bold text-base-content mb-2 font-mono">
+            {conversation.id || 'Loading...'}
           </h1>
           <p className="text-base-content/70">
             {conversation.summary || 'No summary available'}

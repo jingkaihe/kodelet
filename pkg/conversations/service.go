@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/jingkaihe/kodelet/pkg/usage"
 )
 
 // ConversationServiceInterface defines the interface for conversation operations
@@ -26,13 +28,50 @@ type ConversationServiceInterface interface {
 
 // ConversationService provides high-level conversation operations
 type ConversationService struct {
-	store ConversationStore
+	store      ConversationStore
+	statsCache *statisticsCache
+}
+
+// statisticsCache provides simple caching for expensive statistics calculation
+type statisticsCache struct {
+	mu         sync.RWMutex
+	stats      *ConversationStatistics
+	expiry     time.Time
+	cacheDuration time.Duration
+}
+
+// newStatisticsCache creates a new statistics cache with 5 minute expiry
+func newStatisticsCache() *statisticsCache {
+	return &statisticsCache{
+		cacheDuration: 5 * time.Minute,
+	}
+}
+
+// get returns cached statistics if valid, nil otherwise
+func (c *statisticsCache) get() *ConversationStatistics {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	
+	if c.stats != nil && time.Now().Before(c.expiry) {
+		return c.stats
+	}
+	return nil
+}
+
+// set stores statistics in cache with current timestamp + duration
+func (c *statisticsCache) set(stats *ConversationStatistics) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	
+	c.stats = stats
+	c.expiry = time.Now().Add(c.cacheDuration)
 }
 
 // NewConversationService creates a new conversation service
 func NewConversationService(store ConversationStore) *ConversationService {
 	return &ConversationService{
-		store: store,
+		store:      store,
+		statsCache: newStatisticsCache(),
 	}
 }
 
@@ -63,6 +102,7 @@ type ListConversationsResponse struct {
 	Limit         int                   `json:"limit"`
 	Offset        int                   `json:"offset"`
 	HasMore       bool                  `json:"hasMore"`
+	Stats         *ConversationStatistics `json:"stats,omitempty"`
 }
 
 // GetConversationResponse represents the response from getting a conversation
@@ -117,12 +157,67 @@ func (s *ConversationService) ListConversations(ctx context.Context, req *ListCo
 	total := len(summaries)
 	hasMore := req.Limit > 0 && total == req.Limit
 
+	// Calculate statistics for the returned conversations
+	var stats *ConversationStatistics
+	if len(summaries) > 0 {
+		// Load conversation records to get usage data
+		var records []ConversationRecord
+		for _, summary := range summaries {
+			record, err := s.store.Load(summary.ID)
+			if err != nil {
+				logger.G(ctx).WithField("id", summary.ID).WithError(err).Warn("Failed to load conversation for statistics")
+				continue
+			}
+			records = append(records, record)
+		}
+
+		// Calculate usage statistics using the usage package
+		var usageRecords []usage.ConversationRecord
+		for _, record := range records {
+			// Calculate message count from raw messages
+			messageCount := 0
+			if len(record.RawMessages) > 0 {
+				var messages []interface{}
+				if err := json.Unmarshal(record.RawMessages, &messages); err == nil {
+					messageCount = len(messages)
+				}
+			}
+			
+			usageRecords = append(usageRecords, usage.ConversationRecord{
+				ID:           record.ID,
+				CreatedAt:    record.CreatedAt,
+				UpdatedAt:    record.UpdatedAt,
+				MessageCount: messageCount,
+				Usage:        record.Usage,
+			})
+		}
+		
+		usageStats := usage.CalculateConversationUsageStats(usageRecords)
+
+		// Convert to ConversationStatistics
+		stats = &ConversationStatistics{
+			TotalConversations: usageStats.TotalConversations,
+			TotalMessages:      usageStats.TotalMessages,
+			TotalTokens:        usageStats.TotalTokens,
+			TotalCost:          usageStats.TotalCost,
+			InputTokens:        usageStats.InputTokens,
+			OutputTokens:       usageStats.OutputTokens,
+			CacheReadTokens:    usageStats.CacheReadTokens,
+			CacheWriteTokens:   usageStats.CacheWriteTokens,
+			InputCost:          usageStats.InputCost,
+			OutputCost:         usageStats.OutputCost,
+			CacheReadCost:      usageStats.CacheReadCost,
+			CacheWriteCost:     usageStats.CacheWriteCost,
+		}
+	}
+
 	response := &ListConversationsResponse{
 		Conversations: summaries,
 		Total:         total,
 		Limit:         req.Limit,
 		Offset:        req.Offset,
 		HasMore:       hasMore,
+		Stats:         stats,
 	}
 
 	logger.G(ctx).WithField("count", len(summaries)).Debug("Listed conversations")
@@ -256,42 +351,98 @@ func (s *ConversationService) SearchConversations(ctx context.Context, query str
 func (s *ConversationService) GetConversationStatistics(ctx context.Context) (*ConversationStatistics, error) {
 	logger.G(ctx).Debug("Getting conversation statistics")
 
+	// Check cache first
+	if cached := s.statsCache.get(); cached != nil {
+		logger.G(ctx).Debug("Returning cached conversation statistics")
+		return cached, nil
+	}
+
 	summaries, err := s.store.List()
 	if err != nil {
 		return nil, fmt.Errorf("failed to list conversations: %w", err)
 	}
 
-	stats := &ConversationStatistics{
-		TotalConversations: len(summaries),
-		TotalMessages:      0,
-		TotalUsage:         llmtypes.Usage{},
+	if len(summaries) == 0 {
+		stats := &ConversationStatistics{
+			TotalConversations: 0,
+			TotalMessages:      0,
+		}
+		s.statsCache.set(stats)
+		return stats, nil
 	}
 
-	// Calculate statistics
+	// Load conversation records concurrently for better performance
+	const maxConcurrent = 20 // Limit concurrent loads to avoid overwhelming the system
+	semaphore := make(chan struct{}, maxConcurrent)
+	var mu sync.Mutex
+	var records []ConversationRecord
+	var wg sync.WaitGroup
+
 	for _, summary := range summaries {
-		stats.TotalMessages += summary.MessageCount
-
-		// For detailed usage stats, we'd need to load each conversation
-		// For now, we'll just count conversations
+		wg.Add(1)
+		go func(summaryID string) {
+			defer wg.Done()
+			
+			// Acquire semaphore
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
+			
+			record, err := s.store.Load(summaryID)
+			if err != nil {
+				logger.G(ctx).WithField("id", summaryID).WithError(err).Warn("Failed to load conversation for statistics")
+				return
+			}
+			
+			mu.Lock()
+			records = append(records, record)
+			mu.Unlock()
+		}(summary.ID)
 	}
 
-	// Find oldest and newest conversations
-	if len(summaries) > 0 {
-		oldest := summaries[0].CreatedAt
-		newest := summaries[0].UpdatedAt
+	// Wait for all goroutines to complete
+	wg.Wait()
 
-		for _, summary := range summaries {
-			if summary.CreatedAt.Before(oldest) {
-				oldest = summary.CreatedAt
-			}
-			if summary.UpdatedAt.After(newest) {
-				newest = summary.UpdatedAt
+	// Calculate usage statistics using the usage package
+	var usageRecords []usage.ConversationRecord
+	for _, record := range records {
+		// Calculate message count from raw messages
+		messageCount := 0
+		if len(record.RawMessages) > 0 {
+			var messages []interface{}
+			if err := json.Unmarshal(record.RawMessages, &messages); err == nil {
+				messageCount = len(messages)
 			}
 		}
-
-		stats.OldestConversation = &oldest
-		stats.NewestConversation = &newest
+		
+		usageRecords = append(usageRecords, usage.ConversationRecord{
+			ID:           record.ID,
+			CreatedAt:    record.CreatedAt,
+			UpdatedAt:    record.UpdatedAt,
+			MessageCount: messageCount,
+			Usage:        record.Usage,
+		})
 	}
+	
+	usageStats := usage.CalculateConversationUsageStats(usageRecords)
+
+	// Convert to ConversationStatistics
+	stats := &ConversationStatistics{
+		TotalConversations: usageStats.TotalConversations,
+		TotalMessages:      usageStats.TotalMessages,
+		TotalTokens:        usageStats.TotalTokens,
+		TotalCost:          usageStats.TotalCost,
+		InputTokens:        usageStats.InputTokens,
+		OutputTokens:       usageStats.OutputTokens,
+		CacheReadTokens:    usageStats.CacheReadTokens,
+		CacheWriteTokens:   usageStats.CacheWriteTokens,
+		InputCost:          usageStats.InputCost,
+		OutputCost:         usageStats.OutputCost,
+		CacheReadCost:      usageStats.CacheReadCost,
+		CacheWriteCost:     usageStats.CacheWriteCost,
+	}
+
+	// Cache the results
+	s.statsCache.set(stats)
 
 	logger.G(ctx).WithField("stats", stats).Debug("Retrieved conversation statistics")
 	return stats, nil
@@ -299,11 +450,18 @@ func (s *ConversationService) GetConversationStatistics(ctx context.Context) (*C
 
 // ConversationStatistics represents conversation statistics
 type ConversationStatistics struct {
-	TotalConversations int            `json:"totalConversations"`
-	TotalMessages      int            `json:"totalMessages"`
-	TotalUsage         llmtypes.Usage `json:"totalUsage"`
-	OldestConversation *time.Time     `json:"oldestConversation,omitempty"`
-	NewestConversation *time.Time     `json:"newestConversation,omitempty"`
+	TotalConversations int     `json:"totalConversations"`
+	TotalMessages      int     `json:"totalMessages"`
+	TotalTokens        int     `json:"totalTokens"`
+	TotalCost          float64 `json:"totalCost"`
+	InputTokens        int     `json:"inputTokens"`
+	OutputTokens       int     `json:"outputTokens"`
+	CacheReadTokens    int     `json:"cacheReadTokens"`
+	CacheWriteTokens   int     `json:"cacheWriteTokens"`
+	InputCost          float64 `json:"inputCost"`
+	OutputCost         float64 `json:"outputCost"`
+	CacheReadCost      float64 `json:"cacheReadCost"`
+	CacheWriteCost     float64 `json:"cacheWriteCost"`
 }
 
 // Close closes the underlying store
