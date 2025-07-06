@@ -18,7 +18,7 @@ func TestBatchTool_GenerateSchema(t *testing.T) {
 	assert.Equal(t, "https://github.com/jingkaihe/kodelet/pkg/tools/batch-tool-input", string(schema.ID))
 }
 
-// Removed trivial test TestBatchTool_Name - testing a constant return value provides no value
+
 
 func TestBatchTool_Description(t *testing.T) {
 	tool := &BatchTool{}

@@ -296,8 +296,7 @@ func TestServer_handleSearchConversations(t *testing.T) {
 	}
 }
 
-// Removed trivial test TestServer_handleGetStatistics - it was only testing that the mock works
-// without testing any actual handler logic (no handleGetStatistics handler exists)
+
 
 func TestServer_handleGetToolResult(t *testing.T) {
 	conversationID := "conv-123"

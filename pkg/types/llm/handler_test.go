@@ -57,4 +57,4 @@ func TestStringCollectorHandler_HandleThinkingTrimsLeadingNewlines(t *testing.T)
 	// If we get here without panicking, the test passes
 }
 
-// Removed trivial test TestHandlerEventTypes - testing constant string values provides no value
+

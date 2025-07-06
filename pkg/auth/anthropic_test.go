@@ -98,10 +98,7 @@ func TestExchangeAnthropicCode(t *testing.T) {
 		assert.Contains(t, err.Error(), "invalid state parameter")
 	})
 
-	// Remove skipped tests as they provide no value
-	// These tests require dependency injection to mock the endpoint,
-	// which would require refactoring the implementation.
-	// The current tests for error cases provide sufficient coverage.
+
 }
 
 func TestGetAnthropicCredentialsExists(t *testing.T) {

@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Removed trivial test TestTodoReadTool_Name - testing a constant return value provides no value
+
 
 func TestTodoReadTool_GenerateSchema(t *testing.T) {
 	tool := &TodoReadTool{}
@@ -29,7 +29,7 @@ func TestTodoReadTool_Description(t *testing.T) {
 	assert.Contains(t, desc, "Use TodoRead tool to read the current todo list")
 }
 
-// Removed trivial test TestTodoReadTool_ValidateInput - testing a method that always returns nil provides no value
+
 
 func TestTodoReadTool_Execute(t *testing.T) {
 	tool := &TodoReadTool{}
