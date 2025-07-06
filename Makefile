@@ -1,5 +1,7 @@
 VERSION=$(shell cat VERSION.txt)
 GIT_COMMIT=$(shell git rev-parse --short HEAD)
+NODE_VERSION=22.17.0
+NPM_VERSION=10.9.2
 
 VERSION_FLAG=-X 'github.com/jingkaihe/kodelet/pkg/version.Version=$(VERSION)' -X 'github.com/jingkaihe/kodelet/pkg/version.GitCommit=$(GIT_COMMIT)'
 .PHONY: build build-dev cross-build run test lint golangci-lint install-linters format docker-build docker-run e2e-test e2e-test-docker eslint eslint-fix frontend-test frontend-test-watch frontend-test-ui frontend-test-coverage
@@ -86,7 +88,7 @@ frontend-test-coverage:
 
 # Run e2e tests in Docker
 e2e-test-docker:
-	docker build -f tests/acceptance/Dockerfile.e2e -t kodelet-e2e-tests .
+	docker build --build-arg NODE_VERSION="$(NODE_VERSION)" --build-arg NPM_VERSION="$(NPM_VERSION)" -f tests/acceptance/Dockerfile.e2e -t kodelet-e2e-tests .
 	docker run --rm -e ANTHROPIC_API_KEY -e OPENAI_API_KEY kodelet-e2e-tests
 
 # Cross-compile for multiple platforms
@@ -103,7 +105,7 @@ cross-build:
 
 # Build Docker image
 docker-build:
-	docker build --build-arg VERSION="$$(cat VERSION.txt)" --build-arg GIT_COMMIT="$$(git rev-parse --short HEAD)" -t kodelet .
+	docker build --build-arg VERSION="$$(cat VERSION.txt)" --build-arg GIT_COMMIT="$$(git rev-parse --short HEAD)" --build-arg NODE_VERSION="$(NODE_VERSION)" --build-arg NPM_VERSION="$(NPM_VERSION)" -t kodelet .
 
 # Run with Docker
 docker-run:
@@ -133,8 +135,10 @@ help:
 	@echo "  frontend-test-watch - Run frontend tests in watch mode"
 	@echo "  frontend-test-ui - Run frontend tests with UI"
 	@echo "  frontend-test-coverage - Run frontend tests with coverage"
-	@echo "  docker-build - Build Docker image"
+	@echo "  docker-build - Build Docker image (use NODE_VERSION/NPM_VERSION vars to override)"
 	@echo "  docker-run   - Run with Docker (use: make docker-run query='your query')"
+	@echo ""
+	@echo "Node.js/npm versions can be overridden: make docker-build NODE_VERSION=20.0.0 NPM_VERSION=9.0.0"
 
 release: cross-build
 	gh release create v$(VERSION)
