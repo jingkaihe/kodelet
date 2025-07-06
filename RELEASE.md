@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.0.56.alpha (2025-07-06)
+
+### Test Improvements
+
+Generally improve ROI of the tests by either removing the low value tests or improving the test coverage.
+
 ## 0.0.55.alpha (2025-07-06)
 
 ### Conversation Web UI

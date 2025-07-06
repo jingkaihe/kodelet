@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -158,13 +159,31 @@ func TestLoggerChaining(t *testing.T) {
 	assert.Equal(t, "testing", finalLogger.Data["operation"])
 }
 
-func TestLoggerKey(t *testing.T) {
-	// Test that loggerKey is a distinct type
-	key1 := loggerKey{}
-	key2 := loggerKey{}
+func TestLoggerKey_UniqueContextKey(t *testing.T) {
+	// Test that loggerKey doesn't conflict with other context values
+	ctx := context.Background()
 
-	assert.Equal(t, key1, key2)
-	assert.IsType(t, loggerKey{}, key1)
+	// Define a custom key type to avoid collision warnings
+	type customKey string
+
+	// Add a string key with a value
+	ctx = context.WithValue(ctx, customKey("logger"), "string-logger-value")
+
+	// Add a logger with our key type
+	customLogger := logrus.NewEntry(logrus.New()).WithField("test", "value")
+	ctx = WithLogger(ctx, customLogger)
+
+	// Verify both values can coexist without conflict
+	stringValue := ctx.Value(customKey("logger"))
+	assert.Equal(t, "string-logger-value", stringValue)
+
+	loggerValue := ctx.Value(loggerKey{})
+	assert.NotNil(t, loggerValue)
+	assert.IsType(t, &logrus.Entry{}, loggerValue)
+
+	// Verify the logger has the expected field
+	retrievedLogger := G(ctx)
+	assert.Equal(t, "value", retrievedLogger.Data["test"])
 }
 
 func TestContextPropagation(t *testing.T) {
@@ -196,19 +215,27 @@ func TestContextPropagation(t *testing.T) {
 	assert.Contains(t, output, "123")
 }
 
-func TestNilContext(t *testing.T) {
-	// This should not panic and should return the global logger
+func TestGetLogger_TypeAssertion(t *testing.T) {
+	// Test that GetLogger properly handles non-logger values in context
+	ctx := context.Background()
+
+	// Add a non-logger value with the same key (shouldn't happen in practice)
+	// This tests the type assertion in GetLogger
+	ctx = context.WithValue(ctx, loggerKey{}, "not-a-logger")
+
+	// This should panic due to failed type assertion
 	defer func() {
 		if r := recover(); r != nil {
-			t.Errorf("GetLogger panicked with nil context: %v", r)
+			// Expected behavior - type assertion should fail
+			panicStr := fmt.Sprintf("%v", r)
+			assert.Contains(t, panicStr, "interface conversion")
+		} else {
+			t.Error("Expected panic from invalid type assertion")
 		}
 	}()
 
-	// Note: passing nil context would cause a panic in ctx.Value(),
-	// but this tests our expectation that users pass valid contexts
-	ctx := context.Background()
-	logger := G(ctx)
-	assert.NotNil(t, logger)
+	// This should panic
+	G(ctx)
 }
 
 func TestLogLevels(t *testing.T) {

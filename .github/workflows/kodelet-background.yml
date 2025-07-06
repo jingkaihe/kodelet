@@ -63,6 +63,6 @@ jobs:
           kodelet-config: |
             model: "claude-sonnet-4-20250514"
             weak_model: "claude-3-5-haiku-20241022"
-            max_tokens: 64000
+            max_tokens: 16000
             weak_model_max_tokens: 8192
-            thinking_budget_tokens: 32000
+            thinking_budget_tokens: 8000

@@ -57,10 +57,4 @@ func TestStringCollectorHandler_HandleThinkingTrimsLeadingNewlines(t *testing.T)
 	// If we get here without panicking, the test passes
 }
 
-func TestHandlerEventTypes(t *testing.T) {
-	// Ensure our event types are correctly defined
-	assert.Equal(t, "thinking", EventTypeThinking)
-	assert.Equal(t, "text", EventTypeText)
-	assert.Equal(t, "tool_use", EventTypeToolUse)
-	assert.Equal(t, "tool_result", EventTypeToolResult)
-}
+

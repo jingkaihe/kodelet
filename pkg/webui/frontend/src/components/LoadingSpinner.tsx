@@ -17,7 +17,7 @@ const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({
 
   return (
     <div className="text-center py-8">
-      <div className={`loading loading-spinner ${sizeClass}`}></div>
+      <div className={`loading loading-spinner ${sizeClass}`} role="status"></div>
       <p className="mt-4 text-base-content/70">{message}</p>
     </div>
   );

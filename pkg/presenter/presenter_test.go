@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/fatih/color"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -268,21 +269,30 @@ func TestConvertUsageStats(t *testing.T) {
 	result := ConvertUsageStats(nil)
 	assert.Nil(t, result)
 
-	// Mock llm.UsageStats (we'll need to import the actual type)
-	// For now, we'll just test the structure
-	stats := &UsageStats{
-		InputTokens:      100,
-		OutputTokens:     50,
-		CacheWriteTokens: 25,
-		CacheReadTokens:  10,
-		InputCost:        0.1,
-		OutputCost:       0.05,
-		CacheWriteCost:   0.025,
-		CacheReadCost:    0.01,
+	// Test actual conversion
+	llmStats := &llmtypes.Usage{
+		InputTokens:              100,
+		OutputTokens:             50,
+		CacheCreationInputTokens: 25,
+		CacheReadInputTokens:     10,
+		InputCost:                0.1,
+		OutputCost:               0.05,
+		CacheCreationCost:        0.025,
+		CacheReadCost:            0.01,
 	}
 
-	// This would test the actual conversion when we have the real llm.UsageStats type
-	assert.NotNil(t, stats)
+	result = ConvertUsageStats(llmStats)
+	require.NotNil(t, result)
+
+	// Verify all fields are properly converted
+	assert.Equal(t, int64(100), result.InputTokens)
+	assert.Equal(t, int64(50), result.OutputTokens)
+	assert.Equal(t, int64(25), result.CacheWriteTokens)
+	assert.Equal(t, int64(10), result.CacheReadTokens)
+	assert.Equal(t, 0.1, result.InputCost)
+	assert.Equal(t, 0.05, result.OutputCost)
+	assert.Equal(t, 0.025, result.CacheWriteCost)
+	assert.Equal(t, 0.01, result.CacheReadCost)
 }
 
 func TestColorModeConfiguration(t *testing.T) {
@@ -300,20 +310,70 @@ func TestColorModeConfiguration(t *testing.T) {
 }
 
 func TestGlobalFunctions(t *testing.T) {
-	// Test that global functions don't panic
-	// We can't easily test output without affecting global state
-	// These tests ensure the functions exist and can be called
+	// Save original global presenter
+	originalPresenter := defaultPresenter
 
-	assert.NotPanics(t, func() {
-		Error(errors.New("test"), "context")
-		Success("test")
-		Warning("test")
-		Info("test")
-		Section("test")
-		Stats(&UsageStats{})
-		Separator()
-		SetQuiet(true)
-		IsQuiet()
-		SetQuiet(false)
-	})
+	// Create a presenter with captured output
+	var output, errorOutput bytes.Buffer
+	testPresenter := NewWithOptions(&output, &errorOutput, ColorNever)
+	defaultPresenter = testPresenter
+
+	// Restore original presenter after test
+	defer func() {
+		defaultPresenter = originalPresenter
+	}()
+
+	// Test Error function
+	output.Reset()
+	errorOutput.Reset()
+	Error(errors.New("test error"), "error context")
+	assert.Contains(t, errorOutput.String(), "[ERROR]")
+	assert.Contains(t, errorOutput.String(), "error context")
+	assert.Contains(t, errorOutput.String(), "test error")
+
+	// Test Success function
+	output.Reset()
+	Success("success message")
+	assert.Contains(t, output.String(), "✓")
+	assert.Contains(t, output.String(), "success message")
+
+	// Test Warning function
+	output.Reset()
+	Warning("warning message")
+	assert.Contains(t, output.String(), "⚠")
+	assert.Contains(t, output.String(), "warning message")
+
+	// Test Info function
+	output.Reset()
+	Info("info message")
+	assert.Contains(t, output.String(), "info message")
+
+	// Test Section function
+	output.Reset()
+	Section("Test Section")
+	assert.Contains(t, output.String(), "Test Section")
+	assert.Contains(t, output.String(), "----------")
+
+	// Test Stats function
+	output.Reset()
+	Stats(&UsageStats{InputTokens: 100, OutputTokens: 50})
+	assert.Contains(t, output.String(), "[Usage Stats]")
+	assert.Contains(t, output.String(), "Input tokens: 100")
+
+	// Test Separator function
+	output.Reset()
+	Separator()
+	assert.Contains(t, output.String(), "----")
+
+	// Test quiet mode functions
+	SetQuiet(true)
+	assert.True(t, IsQuiet())
+
+	// Verify quiet mode works
+	output.Reset()
+	Info("should not appear")
+	assert.Empty(t, output.String())
+
+	SetQuiet(false)
+	assert.False(t, IsQuiet())
 }
