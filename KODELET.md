@@ -76,17 +76,9 @@ The web UI is a React/TypeScript SPA built with Vite and embedded directly into 
 
 **Development**: Use `make build-dev` to skip frontend build for faster Go-only builds.
 
-**Production**: `make build` or `make cross-build` always rebuilds frontend assets for distribution.
-
-**Frontend Development Workflow**:
-- `make eslint` - Run ESLint to check TypeScript/React code quality
-- `make eslint-fix` - Run ESLint with auto-fix to automatically resolve fixable issues
-- `make frontend-test` - Run frontend unit tests
-- `make frontend-test-watch` - Run frontend tests in watch mode for development
-- `make frontend-test-ui` - Run frontend tests with interactive UI
-- `make frontend-test-coverage` - Run frontend tests with coverage reporting
-
 The embedded approach eliminates external dependencies and ensures the web UI is always available with the binary.
+
+For detailed frontend development workflow and commands, see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
 ## Engineering Principles
 
@@ -145,8 +137,12 @@ kodelet run --image file1.png --image file2.png "compare these"
 # Development
 make build|test|lint|format|release    # Standard dev commands
 make build-dev                          # Fast build without frontend assets
+make cross-build                        # Cross-compile for multiple platforms
+make cross-build-docker                 # Cross-compile using Docker (recommended)
 make eslint                            # Run frontend linting
 make eslint-fix                        # Run frontend linting with auto-fix
+
+# For detailed build instructions and release process, see docs/DEVELOPMENT.md
 ```
 
 ## Configuration
