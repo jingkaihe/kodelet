@@ -296,27 +296,8 @@ func TestServer_handleSearchConversations(t *testing.T) {
 	}
 }
 
-func TestServer_handleGetStatistics(t *testing.T) {
-	mockService := &mockConversationService{
-		statsFunc: func(ctx context.Context) (*conversations.ConversationStatistics, error) {
-			return &conversations.ConversationStatistics{
-				TotalConversations: 42,
-				TotalMessages:      256,
-			}, nil
-		},
-	}
-
-	server := &Server{
-		conversationService: mockService,
-		router:              mux.NewRouter(),
-	}
-
-	// Just test that the mock service works without the handler
-	stats, err := server.conversationService.GetConversationStatistics(context.Background())
-	require.NoError(t, err)
-	assert.Equal(t, 42, stats.TotalConversations)
-	assert.Equal(t, 256, stats.TotalMessages)
-}
+// Removed trivial test TestServer_handleGetStatistics - it was only testing that the mock works
+// without testing any actual handler logic (no handleGetStatistics handler exists)
 
 func TestServer_handleGetToolResult(t *testing.T) {
 	conversationID := "conv-123"

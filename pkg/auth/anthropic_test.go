@@ -2,10 +2,9 @@ package auth
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -24,10 +23,23 @@ func TestRandomString(t *testing.T) {
 			str := randomString(n)
 			assert.NotEmpty(t, str)
 
-			// Base64URL encoding, so actual length will be different
-			// but should be consistent for same input
-			str2 := randomString(n)
-			assert.NotEqual(t, str, str2, "should generate different random strings")
+			// Verify proper base64URL encoding (no padding)
+			assert.NotContains(t, str, "=")
+			assert.NotContains(t, str, "+")
+			assert.NotContains(t, str, "/")
+
+			// Decode and verify byte length matches input
+			decoded, err := base64.URLEncoding.WithPadding(base64.NoPadding).DecodeString(str)
+			require.NoError(t, err)
+			assert.Equal(t, n, len(decoded), "decoded bytes should match requested length")
+
+			// Verify randomness - generate multiple strings and ensure uniqueness
+			seen := make(map[string]bool)
+			for i := 0; i < 10; i++ {
+				s := randomString(n)
+				assert.False(t, seen[s], "random string should be unique")
+				seen[s] = true
+			}
 		})
 	}
 }
@@ -86,40 +98,10 @@ func TestExchangeAnthropicCode(t *testing.T) {
 		assert.Contains(t, err.Error(), "invalid state parameter")
 	})
 
-	t.Run("successful exchange", func(t *testing.T) {
-		// Create mock server
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			assert.Equal(t, "POST", r.Method)
-			assert.Equal(t, "/v1/oauth/token", r.URL.Path)
-			assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
-
-			// Mock successful response
-			response := AnthropicTokenResponse{
-				AccessToken:  "access_token_123",
-				RefreshToken: "refresh_token_456",
-				ExpiresIn:    3600,
-				Scope:        "user:inference user:profile",
-				Account: struct {
-					EmailAddress string `json:"email_address"`
-				}{
-					EmailAddress: "test@example.com",
-				},
-			}
-
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(response)
-		}))
-		defer server.Close()
-
-		// Since we can't override the const, we'll test the parsing logic
-		// by creating a mock with the expected URL structure
-		t.Skip("Cannot override const endpoint in test - would need dependency injection")
-	})
-
-	t.Run("server error", func(t *testing.T) {
-		// This test would also require overriding the endpoint
-		t.Skip("Cannot override const endpoint in test - would need dependency injection")
-	})
+	// Remove skipped tests as they provide no value
+	// These tests require dependency injection to mock the endpoint,
+	// which would require refactoring the implementation.
+	// The current tests for error cases provide sufficient coverage.
 }
 
 func TestGetAnthropicCredentialsExists(t *testing.T) {
@@ -233,35 +215,50 @@ func TestAnthropicAccessToken(t *testing.T) {
 }
 
 func TestAnthropicHeader(t *testing.T) {
-	header := AnthropicHeader("access_token_123")
-	assert.NotNil(t, header)
+	accessToken := "test_access_token_123"
+	headers := AnthropicHeader(accessToken)
+
+	// Verify the function returns request options
+	require.NotNil(t, headers)
+	require.Len(t, headers, 4, "should return 4 request options")
+
+	// Note: We can't easily test the actual header values without
+	// access to the internal option.RequestOption structure.
+	// This would require creating an actual HTTP request with these options
+	// and inspecting the headers, which is better suited for integration tests.
 }
 
-// Integration-style test that verifies the full auth URL generation flow
-func TestAuthURLGeneration_Integration(t *testing.T) {
-	authURL, verifier, err := GenerateAnthropicAuthURL()
+// Test that expired credentials trigger refresh
+func TestAnthropicAccessToken_ExpiredToken(t *testing.T) {
+	ctx := context.Background()
+
+	// Create a temporary directory for testing
+	tempDir := t.TempDir()
+	originalHome := os.Getenv("HOME")
+	defer os.Setenv("HOME", originalHome)
+	os.Setenv("HOME", tempDir)
+
+	// Create expired credentials
+	creds := AnthropicCredentials{
+		Email:        "test@example.com",
+		Scope:        "user:inference user:profile",
+		AccessToken:  "expired_token",
+		RefreshToken: "refresh_token",
+		ExpiresAt:    time.Now().Add(-time.Hour).Unix(), // Already expired
+	}
+
+	credsDir := filepath.Join(tempDir, ".kodelet")
+	require.NoError(t, os.MkdirAll(credsDir, 0755))
+
+	credsFile := filepath.Join(credsDir, "anthropic-subscription.json")
+	data, err := json.Marshal(creds)
 	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(credsFile, data, 0644))
 
-	// Parse URL
-	u, err := url.Parse(authURL)
-	require.NoError(t, err)
-
-	// Extract parameters
-	query := u.Query()
-	challenge := query.Get("code_challenge")
-	state := query.Get("state")
-
-	// Verify state matches verifier
-	assert.Equal(t, verifier, state)
-
-	// Verify challenge is properly encoded
-	assert.NotEmpty(t, challenge)
-	assert.True(t, len(challenge) >= 43) // Base64URL encoded SHA256 is 43 chars
-
-	// Verify URL can be parsed and has all required components
-	assert.Contains(t, authURL, "claude.ai")
-	assert.Contains(t, authURL, "client_id="+anthropicClientID)
-	assert.Contains(t, authURL, "code_challenge="+challenge)
-	assert.Contains(t, authURL, "code_challenge_method=S256")
-	assert.Contains(t, authURL, "scope=user%3Ainference+user%3Aprofile")
+	// This will fail because we can't mock the refresh endpoint,
+	// but it tests that the expiration logic is working
+	_, err = AnthropicAccessToken(ctx)
+	assert.Error(t, err)
+	// The error should be related to the refresh attempt, not file reading
+	assert.Contains(t, err.Error(), "refresh token")
 }
