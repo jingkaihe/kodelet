@@ -4,13 +4,11 @@ NODE_VERSION=22.17.0
 NPM_VERSION=10.9.2
 
 VERSION_FLAG=-X 'github.com/jingkaihe/kodelet/pkg/version.Version=$(VERSION)' -X 'github.com/jingkaihe/kodelet/pkg/version.GitCommit=$(GIT_COMMIT)'
-.PHONY: build build-dev cross-build run test lint golangci-lint install-linters format docker-build docker-run e2e-test e2e-test-docker eslint eslint-fix frontend-test frontend-test-watch frontend-test-ui frontend-test-coverage
+.PHONY: build build-dev cross-build run test lint golangci-lint code-generation install-linters format docker-build docker-run e2e-test e2e-test-docker eslint eslint-fix frontend-test frontend-test-watch frontend-test-ui frontend-test-coverage
 
 # Build the application
-build:
+build: code-generation
 	mkdir -p bin
-	@echo "Building frontend assets..."
-	go generate ./pkg/webui
 	@echo "Building kodelet binary..."
 	CGO_ENABLED=0 go build -ldflags="$(VERSION_FLAG)" -o ./bin/kodelet ./cmd/kodelet/
 
@@ -22,6 +20,9 @@ build-dev:
 
 chat: build
 	./bin/kodelet chat
+
+code-generation:
+	go generate ./pkg/webui
 
 # Run tests
 test:
@@ -92,10 +93,8 @@ e2e-test-docker:
 	docker run --rm -e ANTHROPIC_API_KEY -e OPENAI_API_KEY kodelet-e2e-tests
 
 # Cross-compile for multiple platforms
-cross-build:
+cross-build: code-generation
 	mkdir -p bin
-	@echo "Building frontend assets..."
-	go generate ./pkg/webui
 	@echo "Cross-compiling for multiple platforms..."
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="$(VERSION_FLAG)" -o ./bin/kodelet-linux-amd64 ./cmd/kodelet/
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="$(VERSION_FLAG)" -o ./bin/kodelet-linux-arm64 ./cmd/kodelet/
@@ -120,6 +119,7 @@ help:
 	@echo "  build        - Build the application with embedded web UI"
 	@echo "  build-dev    - Build the application without web UI (faster for development)"
 	@echo "  cross-build  - Cross-compile for multiple platforms (linux, macOS, Windows)"
+	@echo "  code-generation - Generate frontend assets"
 	@echo "  run          - Run in one-shot mode (use: make run query='your query')"
 	@echo "  chat         - Run in interactive chat mode"
 	@echo "  test         - Run tests"
