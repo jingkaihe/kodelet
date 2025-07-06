@@ -816,3 +816,49 @@ func TestExtractMessagesWithThinking(t *testing.T) {
 	assert.Equal(t, "assistant", messages[2].Role)
 	assert.Equal(t, "2+2 equals 4.", messages[2].Content)
 }
+
+func TestExtractMessagesWithThinkingLeadingNewlines(t *testing.T) {
+	// Test with thinking content that has leading newlines
+	rawMessages := `[
+		{
+			"content": [
+				{
+					"text": "What is 2+2?",
+					"type": "text"
+				}
+			],
+			"role": "user"
+		},
+		{
+			"content": [
+				{
+					"thinking": "\n\nThe user is asking for a simple arithmetic calculation. 2+2 equals 4.",
+					"type": "thinking"
+				},
+				{
+					"text": "2+2 equals 4.",
+					"type": "text"
+				}
+			],
+			"role": "assistant"
+		}
+	]`
+
+	messages, err := ExtractMessages([]byte(rawMessages), nil)
+	assert.NoError(t, err)
+	assert.Len(t, messages, 3) // user + thinking + assistant text
+
+	// Check user message
+	assert.Equal(t, "user", messages[0].Role)
+	assert.Equal(t, "What is 2+2?", messages[0].Content)
+
+	// Check thinking message - should NOT have leading newlines
+	assert.Equal(t, "assistant", messages[1].Role)
+	assert.Equal(t, "💭 Thinking: The user is asking for a simple arithmetic calculation. 2+2 equals 4.", messages[1].Content)
+	// Verify no leading newlines in the thinking content
+	assert.NotContains(t, messages[1].Content, "💭 Thinking: \n")
+
+	// Check final assistant message
+	assert.Equal(t, "assistant", messages[2].Role)
+	assert.Equal(t, "2+2 equals 4.", messages[2].Content)
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
@@ -185,7 +186,7 @@ func ExtractMessages(rawMessages json.RawMessage, toolResults map[string]tooltyp
 			if thinkingBlock := contentBlock.OfThinking; thinkingBlock != nil {
 				messages = append(messages, llm.Message{
 					Role:    "assistant",
-					Content: fmt.Sprintf("💭 Thinking: %s", thinkingBlock.Thinking),
+					Content: fmt.Sprintf("💭 Thinking: %s", strings.TrimLeft(thinkingBlock.Thinking, "\n")),
 				})
 			}
 		}
