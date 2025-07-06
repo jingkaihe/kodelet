@@ -122,7 +122,7 @@ describe('ConversationViewPage', () => {
     
     // Check breadcrumb
     expect(screen.getByText('Conversations')).toBeInTheDocument();
-    expect(screen.getByText('conv-123')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'conv-123' })).toBeInTheDocument();
     
     // Check messages are rendered
     expect(screen.getByText('Hello')).toBeInTheDocument();

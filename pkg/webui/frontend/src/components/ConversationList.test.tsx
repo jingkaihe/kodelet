@@ -41,8 +41,8 @@ describe('ConversationList', () => {
   it('renders conversations list', () => {
     render(<ConversationList {...defaultProps} />);
 
-    expect(screen.getByText('conv-123...')).toBeInTheDocument();
-    expect(screen.getByText('conv-456...')).toBeInTheDocument();
+    expect(screen.getByText('conv-123')).toBeInTheDocument();
+    expect(screen.getByText('conv-456')).toBeInTheDocument();
     expect(screen.getByText('This is a test conversation preview')).toBeInTheDocument();
     expect(screen.getByText('Another test conversation summary')).toBeInTheDocument();
   });
@@ -168,7 +168,7 @@ describe('ConversationList', () => {
   it('renders empty list when no conversations', () => {
     render(<ConversationList {...defaultProps} conversations={[]} />);
 
-    expect(screen.queryByText('conv-123...')).not.toBeInTheDocument();
+    expect(screen.queryByText('conv-123')).not.toBeInTheDocument();
     expect(screen.queryByText('Load More')).not.toBeInTheDocument();
   });
 

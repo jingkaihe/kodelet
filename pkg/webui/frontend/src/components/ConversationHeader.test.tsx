@@ -28,10 +28,10 @@ describe('ConversationHeader', () => {
     vi.clearAllMocks();
   });
 
-  it('renders conversation ID truncated', () => {
+  it('renders conversation ID without truncation', () => {
     render(<ConversationHeader {...defaultProps} />);
     
-    expect(screen.getByText('conv-123...')).toBeInTheDocument();
+    expect(screen.getByText('conv-1234567890')).toBeInTheDocument();
   });
 
   it('renders conversation summary', () => {
