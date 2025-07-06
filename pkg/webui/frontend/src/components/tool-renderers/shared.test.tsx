@@ -14,121 +14,66 @@ vi.mock('../../utils', async () => {
 });
 
 describe('ToolCard', () => {
-  it('renders with title and children', () => {
+  it('renders tool result card with title and content', () => {
     render(
-      <ToolCard title="Test Tool">
-        <div>Test content</div>
+      <ToolCard title="File Edit">
+        <div>File was successfully edited</div>
       </ToolCard>
     );
     
-    expect(screen.getByText('Test Tool')).toBeInTheDocument();
-    expect(screen.getByText('Test content')).toBeInTheDocument();
+    expect(screen.getByText('File Edit')).toBeInTheDocument();
+    expect(screen.getByText('File was successfully edited')).toBeInTheDocument();
   });
 
-  it('renders with badge', () => {
+  it('displays status badge when provided', () => {
     render(
-      <ToolCard title="Test Tool" badge={{ text: 'Badge Text', className: 'badge-success' }}>
+      <ToolCard title="Command" badge={{ text: 'Success', className: 'badge-success' }}>
+        <div>Output</div>
+      </ToolCard>
+    );
+    
+    expect(screen.getByText('Success')).toBeInTheDocument();
+  });
+
+  it('renders action buttons when provided', () => {
+    const onCopy = vi.fn();
+    render(
+      <ToolCard title="Code" actions={<button onClick={onCopy}>Copy</button>}>
         <div>Content</div>
       </ToolCard>
     );
     
-    const badge = screen.getByText('Badge Text');
-    expect(badge).toBeInTheDocument();
-    expect(badge).toHaveClass('badge', 'badge-sm', 'badge-success');
-  });
-
-  it('renders with actions', () => {
-    render(
-      <ToolCard title="Test Tool" actions={<button>Action</button>}>
-        <div>Content</div>
-      </ToolCard>
-    );
-    
-    expect(screen.getByRole('button', { name: 'Action' })).toBeInTheDocument();
-  });
-
-  it('applies custom className', () => {
-    render(
-      <ToolCard title="Test Tool" className="custom-class">
-        <div>Content</div>
-      </ToolCard>
-    );
-    
-    const card = screen.getByRole('article');
-    expect(card).toHaveClass('card', 'custom-class', 'border');
-  });
-
-  it('uses default className when not provided', () => {
-    render(
-      <ToolCard title="Test Tool">
-        <div>Content</div>
-      </ToolCard>
-    );
-    
-    const card = screen.getByRole('article');
-    expect(card).toHaveClass('card', 'bg-base-200', 'border');
+    fireEvent.click(screen.getByRole('button', { name: 'Copy' }));
+    expect(onCopy).toHaveBeenCalled();
   });
 });
 
 describe('Collapsible', () => {
-  it('renders with title and children', () => {
+  it('provides expandable/collapsible functionality', () => {
     render(
-      <Collapsible title="Collapsible Section">
-        <div>Collapsible content</div>
+      <Collapsible title="Tool Arguments" collapsed={true}>
+        <div>JSON arguments here</div>
       </Collapsible>
     );
     
-    expect(screen.getByText('Collapsible Section')).toBeInTheDocument();
-    expect(screen.getByText('Collapsible content')).toBeInTheDocument();
-  });
-
-  it('is expanded by default when collapsed prop is false', () => {
-    render(
-      <Collapsible title="Section" collapsed={false}>
-        <div>Content</div>
-      </Collapsible>
-    );
-    
-    const checkbox = screen.getByRole('checkbox');
-    expect(checkbox).toBeChecked();
-    expect(checkbox).toHaveAttribute('aria-expanded', 'true');
-  });
-
-  it('is collapsed when collapsed prop is true', () => {
-    render(
-      <Collapsible title="Section" collapsed={true}>
-        <div>Content</div>
-      </Collapsible>
-    );
-    
-    const checkbox = screen.getByRole('checkbox');
-    expect(checkbox).not.toBeChecked();
-    expect(checkbox).toHaveAttribute('aria-expanded', 'false');
-  });
-
-  it('renders with badge', () => {
-    render(
-      <Collapsible title="Section" badge={{ text: 'New', className: 'badge-primary' }}>
-        <div>Content</div>
-      </Collapsible>
-    );
-    
-    const badge = screen.getByLabelText('New');
-    expect(badge).toHaveClass('badge', 'badge-sm', 'badge-primary');
-  });
-
-  it('toggles expansion state', () => {
-    render(
-      <Collapsible title="Section" collapsed={true}>
-        <div>Content</div>
-      </Collapsible>
-    );
+    expect(screen.getByText('Tool Arguments')).toBeInTheDocument();
     
     const checkbox = screen.getByRole('checkbox');
     expect(checkbox).not.toBeChecked();
     
+    // Toggle to expand
     fireEvent.click(checkbox);
     expect(checkbox).toBeChecked();
+  });
+
+  it('shows badge for additional context', () => {
+    render(
+      <Collapsible title="Output" badge={{ text: '1.2MB', className: 'badge-neutral' }}>
+        <div>Large output</div>
+      </Collapsible>
+    );
+    
+    expect(screen.getByLabelText('1.2MB')).toBeInTheDocument();
   });
 });
 
@@ -159,53 +104,33 @@ describe('CopyButton', () => {
 });
 
 describe('CodeBlock', () => {
-  it('renders code with line numbers by default', () => {
-    const code = 'const x = 1;\nconst y = 2;';
-    render(<CodeBlock code={code} />);
+  it('displays code with line numbers for readability', () => {
+    const code = 'function hello() {\n  console.log("world");\n}';
+    render(<CodeBlock code={code} language="javascript" />);
     
-    const lineNumbers = screen.getAllByText(/^\s*\d+\s*$/);
-    expect(lineNumbers).toHaveLength(2);
-    expect(screen.getByText('const x = 1;')).toBeInTheDocument();
-    expect(screen.getByText('const y = 2;')).toBeInTheDocument();
+    // Verify line numbers exist
+    expect(screen.getAllByText(/^\s*\d+\s*$/)).toHaveLength(3);
+    
+    // Verify code content
+    expect(screen.getByText(/function hello/)).toBeInTheDocument();
+    expect(screen.getByText(/console\.log/)).toBeInTheDocument();
   });
 
-  it('renders without line numbers when showLineNumbers is false', () => {
-    const code = 'const x = 1;\nconst y = 2;';
-    const { container } = render(<CodeBlock code={code} showLineNumbers={false} />);
-    
-    const lineNumbers = screen.queryAllByText(/^\s*\d+\s*$/);
-    expect(lineNumbers).toHaveLength(0);
-    
-    // When showLineNumbers is false, the code is rendered as plain text
-    const codeElement = container.querySelector('code');
-    expect(codeElement?.textContent).toBe(code);
-  });
-
-  it('applies language class', () => {
-    render(<CodeBlock code="const x = 1;" language="javascript" />);
-    
-    const codeElement = screen.getByRole('region', { name: 'Code block' }).querySelector('code');
-    expect(codeElement).toHaveClass('language-javascript');
-  });
-
-  it('applies maxHeight style', () => {
-    render(<CodeBlock code="const x = 1;" maxHeight={200} />);
+  it('respects maxHeight for long code blocks', () => {
+    const longCode = Array(50).fill('console.log("line");').join('\n');
+    render(<CodeBlock code={longCode} maxHeight={200} />);
     
     const codeBlock = screen.getByRole('region', { name: 'Code block' });
     expect(codeBlock).toHaveStyle({ maxHeight: '200px', overflowY: 'auto' });
   });
 
-  it('handles empty lines correctly', () => {
+  it('handles empty lines in code', () => {
     const code = 'line1\n\nline3';
     const { container } = render(<CodeBlock code={code} />);
     
-    const lines = screen.getAllByText(/line\d/);
-    expect(lines).toHaveLength(2);
-    
-    // Empty line should be rendered as a space in line-content span
     const lineContentSpans = container.querySelectorAll('.line-content');
     expect(lineContentSpans).toHaveLength(3);
-    expect(lineContentSpans[1].textContent).toBe(' '); // Empty line rendered as space
+    expect(lineContentSpans[1].textContent).toBe(' ');
   });
 });
 

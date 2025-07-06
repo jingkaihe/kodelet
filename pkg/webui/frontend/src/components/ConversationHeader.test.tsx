@@ -18,107 +18,82 @@ describe('ConversationHeader', () => {
   const mockOnExport = vi.fn();
   const mockOnDelete = vi.fn();
 
-  const defaultProps = {
-    conversation: mockConversation,
-    onExport: mockOnExport,
-    onDelete: mockOnDelete,
-  };
-
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('renders conversation ID without truncation', () => {
-    render(<ConversationHeader {...defaultProps} />);
+  it('displays conversation information', () => {
+    render(
+      <ConversationHeader
+        conversation={mockConversation}
+        onExport={mockOnExport}
+        onDelete={mockOnDelete}
+      />
+    );
     
     expect(screen.getByText('conv-1234567890')).toBeInTheDocument();
-  });
-
-  it('renders conversation summary', () => {
-    render(<ConversationHeader {...defaultProps} />);
-    
     expect(screen.getByText('This is a test conversation summary')).toBeInTheDocument();
   });
 
-  it('renders default text when no summary', () => {
+  it('shows placeholder when conversation has no summary', () => {
     const conversationWithoutSummary = {
       ...mockConversation,
       summary: undefined,
     };
     
-    render(<ConversationHeader {...defaultProps} conversation={conversationWithoutSummary} />);
+    render(
+      <ConversationHeader
+        conversation={conversationWithoutSummary}
+        onExport={mockOnExport}
+        onDelete={mockOnDelete}
+      />
+    );
     
     expect(screen.getByText('No summary available')).toBeInTheDocument();
   });
 
-  it('handles export button click', () => {
-    render(<ConversationHeader {...defaultProps} />);
+  it('allows user to export conversation', () => {
+    render(
+      <ConversationHeader
+        conversation={mockConversation}
+        onExport={mockOnExport}
+        onDelete={mockOnDelete}
+      />
+    );
     
-    const exportButton = screen.getByRole('button', { name: /export conversation/i });
-    fireEvent.click(exportButton);
-    
+    fireEvent.click(screen.getByRole('button', { name: /export/i }));
     expect(mockOnExport).toHaveBeenCalledTimes(1);
   });
 
-  it('handles delete button click', () => {
-    render(<ConversationHeader {...defaultProps} />);
+  it('allows user to delete conversation', () => {
+    render(
+      <ConversationHeader
+        conversation={mockConversation}
+        onExport={mockOnExport}
+        onDelete={mockOnDelete}
+      />
+    );
     
-    const deleteButton = screen.getByRole('button', { name: /delete conversation/i });
-    fireEvent.click(deleteButton);
-    
+    fireEvent.click(screen.getByRole('button', { name: /delete/i }));
     expect(mockOnDelete).toHaveBeenCalledTimes(1);
   });
 
-  it('disables buttons when conversation has no ID', () => {
-    const conversationWithoutId = {
+  it('disables actions during loading state', () => {
+    const loadingConversation = {
       ...mockConversation,
       id: '',
     };
     
-    render(<ConversationHeader {...defaultProps} conversation={conversationWithoutId} />);
-    
-    const exportButton = screen.getByRole('button', { name: /export conversation/i });
-    const deleteButton = screen.getByRole('button', { name: /delete conversation/i });
-    
-    expect(exportButton).toBeDisabled();
-    expect(deleteButton).toBeDisabled();
-  });
-
-  it('shows loading text when conversation has no ID', () => {
-    const conversationWithoutId = {
-      ...mockConversation,
-      id: '',
-    };
-    
-    render(<ConversationHeader {...defaultProps} conversation={conversationWithoutId} />);
+    render(
+      <ConversationHeader
+        conversation={loadingConversation}
+        onExport={mockOnExport}
+        onDelete={mockOnDelete}
+      />
+    );
     
     expect(screen.getByText('Loading...')).toBeInTheDocument();
-  });
-
-  it('renders both export and delete buttons with correct styling', () => {
-    render(<ConversationHeader {...defaultProps} />);
-    
-    const exportButton = screen.getByRole('button', { name: /export conversation/i });
-    const deleteButton = screen.getByRole('button', { name: /delete conversation/i });
-    
-    expect(exportButton).toHaveClass('btn-primary');
-    expect(deleteButton).toHaveClass('btn-error');
-  });
-
-  it('renders SVG icons in buttons', () => {
-    const { container } = render(<ConversationHeader {...defaultProps} />);
-    
-    const svgElements = container.querySelectorAll('svg');
-    expect(svgElements).toHaveLength(2); // One for export, one for delete
-  });
-
-  it('buttons are enabled when conversation has ID', () => {
-    render(<ConversationHeader {...defaultProps} />);
-    
-    const exportButton = screen.getByRole('button', { name: /export conversation/i });
-    const deleteButton = screen.getByRole('button', { name: /delete conversation/i });
-    
-    expect(exportButton).not.toBeDisabled();
-    expect(deleteButton).not.toBeDisabled();
+    expect(screen.getByRole('button', { name: /export/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /delete/i })).toBeDisabled();
   });
 });

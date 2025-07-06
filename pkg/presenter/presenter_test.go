@@ -283,7 +283,7 @@ func TestConvertUsageStats(t *testing.T) {
 
 	result = ConvertUsageStats(llmStats)
 	require.NotNil(t, result)
-	
+
 	// Verify all fields are properly converted
 	assert.Equal(t, int64(100), result.InputTokens)
 	assert.Equal(t, int64(50), result.OutputTokens)
@@ -312,17 +312,17 @@ func TestColorModeConfiguration(t *testing.T) {
 func TestGlobalFunctions(t *testing.T) {
 	// Save original global presenter
 	originalPresenter := defaultPresenter
-	
+
 	// Create a presenter with captured output
 	var output, errorOutput bytes.Buffer
 	testPresenter := NewWithOptions(&output, &errorOutput, ColorNever)
 	defaultPresenter = testPresenter
-	
+
 	// Restore original presenter after test
 	defer func() {
 		defaultPresenter = originalPresenter
 	}()
-	
+
 	// Test Error function
 	output.Reset()
 	errorOutput.Reset()
@@ -330,50 +330,50 @@ func TestGlobalFunctions(t *testing.T) {
 	assert.Contains(t, errorOutput.String(), "[ERROR]")
 	assert.Contains(t, errorOutput.String(), "error context")
 	assert.Contains(t, errorOutput.String(), "test error")
-	
+
 	// Test Success function
 	output.Reset()
 	Success("success message")
 	assert.Contains(t, output.String(), "✓")
 	assert.Contains(t, output.String(), "success message")
-	
+
 	// Test Warning function
 	output.Reset()
 	Warning("warning message")
 	assert.Contains(t, output.String(), "⚠")
 	assert.Contains(t, output.String(), "warning message")
-	
+
 	// Test Info function
 	output.Reset()
 	Info("info message")
 	assert.Contains(t, output.String(), "info message")
-	
+
 	// Test Section function
 	output.Reset()
 	Section("Test Section")
 	assert.Contains(t, output.String(), "Test Section")
 	assert.Contains(t, output.String(), "----------")
-	
+
 	// Test Stats function
 	output.Reset()
 	Stats(&UsageStats{InputTokens: 100, OutputTokens: 50})
 	assert.Contains(t, output.String(), "[Usage Stats]")
 	assert.Contains(t, output.String(), "Input tokens: 100")
-	
+
 	// Test Separator function
 	output.Reset()
 	Separator()
 	assert.Contains(t, output.String(), "----")
-	
+
 	// Test quiet mode functions
 	SetQuiet(true)
 	assert.True(t, IsQuiet())
-	
+
 	// Verify quiet mode works
 	output.Reset()
 	Info("should not appear")
 	assert.Empty(t, output.String())
-	
+
 	SetQuiet(false)
 	assert.False(t, IsQuiet())
 }
