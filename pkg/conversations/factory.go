@@ -1,6 +1,7 @@
 package conversations
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -8,7 +9,7 @@ import (
 
 // NewConversationStore creates the appropriate ConversationStore implementation
 // based on the provided configuration
-func NewConversationStore(config *Config) (ConversationStore, error) {
+func NewConversationStore(ctx context.Context, config *Config) (ConversationStore, error) {
 	if config == nil {
 		// Use default config if none provided
 		var err error
@@ -20,18 +21,18 @@ func NewConversationStore(config *Config) (ConversationStore, error) {
 
 	switch config.StoreType {
 	case "json":
-		return NewJSONConversationStore(config.BasePath)
+		return NewJSONConversationStore(ctx, config.BasePath)
 	case "sqlite":
 		return nil, errors.New("SQLite store not yet implemented")
 	default:
 		// Default to JSON store with watcher for better performance
-		return NewJSONConversationStore(config.BasePath)
+		return NewJSONConversationStore(ctx, config.BasePath)
 	}
 }
 
 // GetConversationStore is a convenience function that creates a store
 // with default configuration
-func GetConversationStore() (ConversationStore, error) {
+func GetConversationStore(ctx context.Context) (ConversationStore, error) {
 	config, err := DefaultConfig()
 	if err != nil {
 		return nil, err
@@ -42,5 +43,5 @@ func GetConversationStore() (ConversationStore, error) {
 		config.StoreType = storeType
 	}
 
-	return NewConversationStore(config)
+	return NewConversationStore(ctx, config)
 }

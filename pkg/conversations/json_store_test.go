@@ -1,6 +1,7 @@
 package conversations
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -28,8 +29,9 @@ func TestJSONConversationStore(t *testing.T) {
 	defer cleanup()
 
 	// Create a new store
-	store, err := NewJSONConversationStore(tempDir)
+	store, err := NewJSONConversationStore(context.Background(), tempDir)
 	require.NoError(t, err)
+	defer store.Close()
 
 	// Test Save and Load
 	t.Run("SaveAndLoad", func(t *testing.T) {
@@ -170,7 +172,7 @@ func TestGetMostRecentConversationID(t *testing.T) {
 	t.Run("NoConversationsExists", func(t *testing.T) {
 		tempDir, cleanup := setupTestDir(t)
 		defer cleanup()
-		store, err := NewJSONConversationStore(tempDir)
+		store, err := NewJSONConversationStore(context.Background(), tempDir)
 		require.NoError(t, err)
 		defer store.Close()
 
@@ -192,7 +194,7 @@ func TestGetMostRecentConversationID(t *testing.T) {
 	t.Run("SingleConversation", func(t *testing.T) {
 		tempDir, cleanup := setupTestDir(t)
 		defer cleanup()
-		store, err := NewJSONConversationStore(tempDir)
+		store, err := NewJSONConversationStore(context.Background(), tempDir)
 		require.NoError(t, err)
 		defer store.Close()
 
@@ -221,7 +223,7 @@ func TestGetMostRecentConversationID(t *testing.T) {
 	t.Run("MultipleConversationsByTime", func(t *testing.T) {
 		tempDir, cleanup := setupTestDir(t)
 		defer cleanup()
-		store, err := NewJSONConversationStore(tempDir)
+		store, err := NewJSONConversationStore(context.Background(), tempDir)
 		require.NoError(t, err)
 		defer store.Close()
 
@@ -272,7 +274,7 @@ func TestGetMostRecentConversationID(t *testing.T) {
 	t.Run("ConversationsSortedByUpdatedAt", func(t *testing.T) {
 		tempDir, cleanup := setupTestDir(t)
 		defer cleanup()
-		store, err := NewJSONConversationStore(tempDir)
+		store, err := NewJSONConversationStore(context.Background(), tempDir)
 		require.NoError(t, err)
 		defer store.Close()
 

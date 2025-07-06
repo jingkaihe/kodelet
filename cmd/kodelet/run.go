@@ -50,7 +50,7 @@ var runCmd = &cobra.Command{
 		defer cancel()
 
 		// Get run config from flags
-		config := getRunConfigFromFlags(cmd)
+		config := getRunConfigFromFlags(ctx, cmd)
 
 		// Set up signal handling
 		sigCh := make(chan os.Signal, 1)
@@ -169,7 +169,7 @@ func init() {
 }
 
 // getRunConfigFromFlags extracts run configuration from command flags
-func getRunConfigFromFlags(cmd *cobra.Command) *RunConfig {
+func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
 	config := NewRunConfig()
 
 	if resumeConvID, err := cmd.Flags().GetString("resume"); err == nil {
@@ -184,7 +184,7 @@ func getRunConfigFromFlags(cmd *cobra.Command) *RunConfig {
 			os.Exit(1)
 		}
 		var err error
-		config.ResumeConvID, err = conversations.GetMostRecentConversationID()
+		config.ResumeConvID, err = conversations.GetMostRecentConversationID(ctx)
 		if err != nil {
 			presenter.Warning("No conversations found, starting a new conversation")
 		}

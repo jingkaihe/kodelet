@@ -6,6 +6,10 @@
 
 Generally improve ROI of the tests by either removing the low value tests or improving the test coverage.
 
+### Conversation Store Performance Optimization
+
+Drastically improve conversation loading performance in web UI by implementing in-memory caching and file watching.
+
 ## 0.0.55.alpha (2025-07-06)
 
 ### Conversation Web UI

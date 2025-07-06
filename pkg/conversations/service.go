@@ -39,8 +39,8 @@ func NewConversationService(store ConversationStore) *ConversationService {
 }
 
 // GetDefaultConversationService returns a service with the default store
-func GetDefaultConversationService() (*ConversationService, error) {
-	store, err := GetConversationStore()
+func GetDefaultConversationService(ctx context.Context) (*ConversationService, error) {
+	store, err := GetConversationStore(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get conversation store: %w", err)
 	}

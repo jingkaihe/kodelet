@@ -688,7 +688,7 @@ func (t *OpenAIThread) EnablePersistence(enabled bool) {
 
 	// Initialize the store if enabling persistence and it's not already initialized
 	if enabled && t.store == nil {
-		store, err := conversations.GetConversationStore()
+		store, err := conversations.GetConversationStore(context.Background())
 		if err != nil {
 			// Log the error but continue without persistence
 			fmt.Printf("Error initializing conversation store: %v\n", err)

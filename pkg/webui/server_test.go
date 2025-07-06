@@ -296,8 +296,6 @@ func TestServer_handleSearchConversations(t *testing.T) {
 	}
 }
 
-
-
 func TestServer_handleGetToolResult(t *testing.T) {
 	conversationID := "conv-123"
 	toolCallID := "tool-456"

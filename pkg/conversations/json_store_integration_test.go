@@ -1,6 +1,7 @@
 package conversations
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,10 +20,11 @@ func TestJSONStore_StructuredToolResults(t *testing.T) {
 	defer os.RemoveAll(tempDir)
 
 	// Create a store
-	store, err := NewJSONConversationStore(tempDir)
+	store, err := NewJSONConversationStore(context.Background(), tempDir)
 	if err != nil {
 		t.Fatalf("Failed to create store: %v", err)
 	}
+	defer store.Close()
 
 	// Create a conversation record with structured tool results
 	record := NewConversationRecord("test-conversation")

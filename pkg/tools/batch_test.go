@@ -18,8 +18,6 @@ func TestBatchTool_GenerateSchema(t *testing.T) {
 	assert.Equal(t, "https://github.com/jingkaihe/kodelet/pkg/tools/batch-tool-input", string(schema.ID))
 }
 
-
-
 func TestBatchTool_Description(t *testing.T) {
 	tool := &BatchTool{}
 	desc := tool.Description()

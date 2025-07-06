@@ -79,7 +79,7 @@ var chatCmd = &cobra.Command{
 				os.Exit(1)
 			}
 			var err error
-			chatOptions.resumeConvID, err = conversations.GetMostRecentConversationID()
+			chatOptions.resumeConvID, err = conversations.GetMostRecentConversationID(ctx)
 			if err != nil {
 				presenter.Warning("No conversations found, starting a new conversation")
 			}

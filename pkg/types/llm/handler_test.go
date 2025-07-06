@@ -56,5 +56,3 @@ func TestStringCollectorHandler_HandleThinkingTrimsLeadingNewlines(t *testing.T)
 	handler.HandleThinking(thinkingWithNewlines)
 	// If we get here without panicking, the test passes
 }
-
-

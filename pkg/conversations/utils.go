@@ -1,6 +1,7 @@
 package conversations
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -41,8 +42,8 @@ func GetDefaultBasePath() (string, error) {
 }
 
 // GetMostRecentConversationID returns the ID of the most recent conversation
-func GetMostRecentConversationID() (string, error) {
-	store, err := GetConversationStore()
+func GetMostRecentConversationID(ctx context.Context) (string, error) {
+	store, err := GetConversationStore(ctx)
 	if err != nil {
 		return "", err
 	}

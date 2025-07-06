@@ -11,8 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-
-
 func TestTodoReadTool_GenerateSchema(t *testing.T) {
 	tool := &TodoReadTool{}
 	schema := tool.GenerateSchema()
@@ -28,8 +26,6 @@ func TestTodoReadTool_Description(t *testing.T) {
 	assert.NotEmpty(t, desc)
 	assert.Contains(t, desc, "Use TodoRead tool to read the current todo list")
 }
-
-
 
 func TestTodoReadTool_Execute(t *testing.T) {
 	tool := &TodoReadTool{}
