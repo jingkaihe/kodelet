@@ -31,6 +31,7 @@ COPY VERSION.txt ./
 RUN bash -c 'export NVM_DIR="/root/.nvm" && \
     [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh" && \
     nvm use ${NODE_VERSION} && \
+    go generate ./pkg/webui && \
     CGO_ENABLED=0 go build -ldflags="-X '\''github.com/jingkaihe/kodelet/pkg/version.Version=${VERSION}'\'' -X '\''github.com/jingkaihe/kodelet/pkg/version.GitCommit=${GIT_COMMIT}'\''" -o /kodelet ./cmd/kodelet'
 
 FROM debian:bookworm-slim
