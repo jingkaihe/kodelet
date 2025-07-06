@@ -28,50 +28,13 @@ type ConversationServiceInterface interface {
 
 // ConversationService provides high-level conversation operations
 type ConversationService struct {
-	store      ConversationStore
-	statsCache *statisticsCache
-}
-
-// statisticsCache provides simple caching for expensive statistics calculation
-type statisticsCache struct {
-	mu         sync.RWMutex
-	stats      *ConversationStatistics
-	expiry     time.Time
-	cacheDuration time.Duration
-}
-
-// newStatisticsCache creates a new statistics cache with 5 minute expiry
-func newStatisticsCache() *statisticsCache {
-	return &statisticsCache{
-		cacheDuration: 5 * time.Minute,
-	}
-}
-
-// get returns cached statistics if valid, nil otherwise
-func (c *statisticsCache) get() *ConversationStatistics {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	
-	if c.stats != nil && time.Now().Before(c.expiry) {
-		return c.stats
-	}
-	return nil
-}
-
-// set stores statistics in cache with current timestamp + duration
-func (c *statisticsCache) set(stats *ConversationStatistics) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	
-	c.stats = stats
-	c.expiry = time.Now().Add(c.cacheDuration)
+	store ConversationStore
 }
 
 // NewConversationService creates a new conversation service
 func NewConversationService(store ConversationStore) *ConversationService {
 	return &ConversationService{
-		store:      store,
-		statsCache: newStatisticsCache(),
+		store: store,
 	}
 }
 
@@ -97,11 +60,11 @@ type ListConversationsRequest struct {
 
 // ListConversationsResponse represents the response from listing conversations
 type ListConversationsResponse struct {
-	Conversations []ConversationSummary `json:"conversations"`
-	Total         int                   `json:"total"`
-	Limit         int                   `json:"limit"`
-	Offset        int                   `json:"offset"`
-	HasMore       bool                  `json:"hasMore"`
+	Conversations []ConversationSummary   `json:"conversations"`
+	Total         int                     `json:"total"`
+	Limit         int                     `json:"limit"`
+	Offset        int                     `json:"offset"`
+	HasMore       bool                    `json:"hasMore"`
 	Stats         *ConversationStatistics `json:"stats,omitempty"`
 }
 
@@ -182,7 +145,7 @@ func (s *ConversationService) ListConversations(ctx context.Context, req *ListCo
 					messageCount = len(messages)
 				}
 			}
-			
+
 			usageRecords = append(usageRecords, usage.ConversationRecord{
 				ID:           record.ID,
 				CreatedAt:    record.CreatedAt,
@@ -191,7 +154,7 @@ func (s *ConversationService) ListConversations(ctx context.Context, req *ListCo
 				Usage:        record.Usage,
 			})
 		}
-		
+
 		usageStats := usage.CalculateConversationUsageStats(usageRecords)
 
 		// Convert to ConversationStatistics
@@ -351,12 +314,6 @@ func (s *ConversationService) SearchConversations(ctx context.Context, query str
 func (s *ConversationService) GetConversationStatistics(ctx context.Context) (*ConversationStatistics, error) {
 	logger.G(ctx).Debug("Getting conversation statistics")
 
-	// Check cache first
-	if cached := s.statsCache.get(); cached != nil {
-		logger.G(ctx).Debug("Returning cached conversation statistics")
-		return cached, nil
-	}
-
 	summaries, err := s.store.List()
 	if err != nil {
 		return nil, fmt.Errorf("failed to list conversations: %w", err)
@@ -367,7 +324,6 @@ func (s *ConversationService) GetConversationStatistics(ctx context.Context) (*C
 			TotalConversations: 0,
 			TotalMessages:      0,
 		}
-		s.statsCache.set(stats)
 		return stats, nil
 	}
 
@@ -382,17 +338,17 @@ func (s *ConversationService) GetConversationStatistics(ctx context.Context) (*C
 		wg.Add(1)
 		go func(summaryID string) {
 			defer wg.Done()
-			
+
 			// Acquire semaphore
 			semaphore <- struct{}{}
 			defer func() { <-semaphore }()
-			
+
 			record, err := s.store.Load(summaryID)
 			if err != nil {
 				logger.G(ctx).WithField("id", summaryID).WithError(err).Warn("Failed to load conversation for statistics")
 				return
 			}
-			
+
 			mu.Lock()
 			records = append(records, record)
 			mu.Unlock()
@@ -413,7 +369,7 @@ func (s *ConversationService) GetConversationStatistics(ctx context.Context) (*C
 				messageCount = len(messages)
 			}
 		}
-		
+
 		usageRecords = append(usageRecords, usage.ConversationRecord{
 			ID:           record.ID,
 			CreatedAt:    record.CreatedAt,
@@ -422,7 +378,7 @@ func (s *ConversationService) GetConversationStatistics(ctx context.Context) (*C
 			Usage:        record.Usage,
 		})
 	}
-	
+
 	usageStats := usage.CalculateConversationUsageStats(usageRecords)
 
 	// Convert to ConversationStatistics
@@ -440,9 +396,6 @@ func (s *ConversationService) GetConversationStatistics(ctx context.Context) (*C
 		CacheReadCost:      usageStats.CacheReadCost,
 		CacheWriteCost:     usageStats.CacheWriteCost,
 	}
-
-	// Cache the results
-	s.statsCache.set(stats)
 
 	logger.G(ctx).WithField("stats", stats).Debug("Retrieved conversation statistics")
 	return stats, nil

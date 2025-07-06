@@ -206,7 +206,7 @@ func runUsageCmd(_ context.Context, config *UsageConfig) {
 				messageCount = len(messages)
 			}
 		}
-		
+
 		usageRecords = append(usageRecords, usage.ConversationRecord{
 			ID:           record.ID,
 			CreatedAt:    record.CreatedAt,
@@ -226,8 +226,6 @@ func runUsageCmd(_ context.Context, config *UsageConfig) {
 		displayUsageTable(os.Stdout, stats)
 	}
 }
-
-
 
 // displayUsageTable displays usage statistics in table format
 func displayUsageTable(w io.Writer, stats *UsageStats) {
@@ -342,4 +340,24 @@ func displayUsageJSON(w io.Writer, stats *UsageStats) {
 	fmt.Fprintln(w, string(jsonData))
 }
 
+// formatNumber is a wrapper around usage.FormatNumber for testing
+func formatNumber(n int) string {
+	return usage.FormatNumber(n)
+}
 
+// aggregateUsageStats is a wrapper around usage.CalculateUsageStats for testing
+func aggregateUsageStats(records []conversations.ConversationRecord, startTime, endTime time.Time) *UsageStats {
+	// Convert to usage records
+	var usageRecords []usage.ConversationRecord
+	for _, record := range records {
+		usageRecords = append(usageRecords, usage.ConversationRecord{
+			ID:           record.ID,
+			CreatedAt:    record.CreatedAt,
+			UpdatedAt:    record.UpdatedAt,
+			MessageCount: 0, // Not used in aggregation
+			Usage:        record.Usage,
+		})
+	}
+
+	return usage.CalculateUsageStats(usageRecords, startTime, endTime)
+}

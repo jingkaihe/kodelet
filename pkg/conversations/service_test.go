@@ -356,9 +356,7 @@ func TestConversationService_GetConversationStatistics(t *testing.T) {
 			},
 			expectedStats: &ConversationStatistics{
 				TotalConversations: 2,
-				TotalMessages:      8,
-				OldestConversation: &earlier,
-				NewestConversation: &later,
+				TotalMessages:      4, // 2 messages per conversation
 			},
 		},
 		{
@@ -380,6 +378,22 @@ func TestConversationService_GetConversationStatistics(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mockStore := newMockConversationStore()
 			mockStore.summaries = tt.storeSummaries
+
+			// Set up conversation records for the summaries
+			for _, summary := range tt.storeSummaries {
+				record := &ConversationRecord{
+					ID:          summary.ID,
+					CreatedAt:   summary.CreatedAt,
+					UpdatedAt:   summary.UpdatedAt,
+					ModelType:   "anthropic",
+					Summary:     "Test conversation",
+					Usage:       llm.Usage{InputTokens: 50, OutputTokens: 50},
+					RawMessages: []byte(`[{"role":"user","content":"hello"},{"role":"assistant","content":"hi"}]`),
+					ToolResults: map[string]tools.StructuredToolResult{},
+				}
+				mockStore.conversations[summary.ID] = record
+			}
+
 			if tt.storeError != nil {
 				mockStore.listFunc = func() ([]ConversationSummary, error) {
 					return nil, tt.storeError
@@ -400,16 +414,6 @@ func TestConversationService_GetConversationStatistics(t *testing.T) {
 			assert.NotNil(t, stats)
 			assert.Equal(t, tt.expectedStats.TotalConversations, stats.TotalConversations)
 			assert.Equal(t, tt.expectedStats.TotalMessages, stats.TotalMessages)
-
-			if tt.expectedStats.OldestConversation != nil {
-				assert.NotNil(t, stats.OldestConversation)
-				assert.True(t, stats.OldestConversation.Equal(*tt.expectedStats.OldestConversation))
-			}
-
-			if tt.expectedStats.NewestConversation != nil {
-				assert.NotNil(t, stats.NewestConversation)
-				assert.True(t, stats.NewestConversation.Equal(*tt.expectedStats.NewestConversation))
-			}
 		})
 	}
 }

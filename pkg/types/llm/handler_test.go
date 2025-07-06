@@ -13,11 +13,11 @@ func TestConsoleMessageHandler_HandleThinkingTrimsLeadingNewlines(t *testing.T) 
 	// Since we can't easily capture stdout in tests, we'll test the logic directly
 	thinkingWithNewlines := "\n\nThis is thinking content with leading newlines"
 	expectedTrimmed := "This is thinking content with leading newlines"
-	
+
 	// Test the string trimming logic
 	trimmed := strings.TrimLeft(thinkingWithNewlines, "\n")
 	assert.Equal(t, expectedTrimmed, trimmed)
-	
+
 	// Test that handler doesn't panic with newlines
 	handler.HandleThinking(thinkingWithNewlines)
 	// If we get here without panicking, the test passes
