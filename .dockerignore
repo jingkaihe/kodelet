@@ -3,3 +3,83 @@
 Dockerfile
 *.json
 *.md
+
+# Frontend build artifacts and dependencies (will be built fresh in container)
+pkg/webui/dist/
+pkg/webui/frontend/node_modules/
+pkg/webui/frontend/dist/
+
+# Frontend logs and cache
+pkg/webui/frontend/npm-debug.log*
+pkg/webui/frontend/yarn-debug.log*
+pkg/webui/frontend/yarn-error.log*
+pkg/webui/frontend/pnpm-debug.log*
+pkg/webui/frontend/lerna-debug.log*
+
+# Frontend runtime data
+pkg/webui/frontend/pids
+pkg/webui/frontend/*.pid
+pkg/webui/frontend/*.seed
+pkg/webui/frontend/*.pid.lock
+
+# Frontend coverage directory
+pkg/webui/frontend/coverage/
+pkg/webui/frontend/*.lcov
+pkg/webui/frontend/.nyc_output
+
+# Frontend dependency directories
+pkg/webui/frontend/.pnp
+pkg/webui/frontend/.pnp.js
+
+# Frontend optional cache directories
+pkg/webui/frontend/.npm
+pkg/webui/frontend/.eslintcache
+
+# Frontend build cache
+pkg/webui/frontend/.rpt2_cache/
+pkg/webui/frontend/.rts2_cache_cjs/
+pkg/webui/frontend/.rts2_cache_es/
+pkg/webui/frontend/.rts2_cache_umd/
+
+# Frontend optional REPL history
+pkg/webui/frontend/.node_repl_history
+
+# Frontend output of npm pack
+pkg/webui/frontend/*.tgz
+
+# Frontend yarn integrity file
+pkg/webui/frontend/.yarn-integrity
+
+# Frontend environment variables
+pkg/webui/frontend/.env
+pkg/webui/frontend/.env.local
+pkg/webui/frontend/.env.development.local
+pkg/webui/frontend/.env.test.local
+pkg/webui/frontend/.env.production.local
+
+# Frontend parcel-bundler cache
+pkg/webui/frontend/.cache
+pkg/webui/frontend/.parcel-cache
+
+# Frontend framework build outputs
+pkg/webui/frontend/.next
+pkg/webui/frontend/out
+pkg/webui/frontend/.nuxt
+
+# Frontend temporary folders
+pkg/webui/frontend/tmp/
+pkg/webui/frontend/temp/
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# OS generated files
+Thumbs.db

@@ -7,15 +7,13 @@ import (
 	"io"
 	"os"
 	"regexp"
-	"sort"
 	"strconv"
-	"strings"
 	"text/tabwriter"
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
-	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	"github.com/jingkaihe/kodelet/pkg/usage"
 	"github.com/spf13/cobra"
 )
 
@@ -123,18 +121,9 @@ func parseTimeSpecWithClock(spec string, now func() time.Time) (time.Time, error
 	}
 }
 
-// DailyUsage represents usage statistics for a single day
-type DailyUsage struct {
-	Date          time.Time
-	Usage         llmtypes.Usage
-	Conversations int
-}
-
-// UsageStats represents aggregated usage statistics
-type UsageStats struct {
-	Daily []DailyUsage
-	Total llmtypes.Usage
-}
+// Use types from usage package
+type DailyUsage = usage.DailyUsage
+type UsageStats = usage.UsageStats
 
 // runUsageCmd executes the usage command
 func runUsageCmd(_ context.Context, config *UsageConfig) {
@@ -206,82 +195,35 @@ func runUsageCmd(_ context.Context, config *UsageConfig) {
 		records = append(records, record)
 	}
 
+	// Convert to usage records
+	var usageRecords []usage.ConversationRecord
+	for _, record := range records {
+		// Calculate message count from raw messages
+		messageCount := 0
+		if len(record.RawMessages) > 0 {
+			var messages []interface{}
+			if err := json.Unmarshal(record.RawMessages, &messages); err == nil {
+				messageCount = len(messages)
+			}
+		}
+
+		usageRecords = append(usageRecords, usage.ConversationRecord{
+			ID:           record.ID,
+			CreatedAt:    record.CreatedAt,
+			UpdatedAt:    record.UpdatedAt,
+			MessageCount: messageCount,
+			Usage:        record.Usage,
+		})
+	}
+
 	// Aggregate usage statistics
-	stats := aggregateUsageStats(records, startTime, endTime)
+	stats := usage.CalculateUsageStats(usageRecords, startTime, endTime)
 
 	// Display results
 	if config.Format == "json" {
 		displayUsageJSON(os.Stdout, stats)
 	} else {
 		displayUsageTable(os.Stdout, stats)
-	}
-}
-
-// aggregateUsageStats aggregates usage statistics from conversation records
-func aggregateUsageStats(records []conversations.ConversationRecord, startTime, endTime time.Time) *UsageStats {
-	// Create map to aggregate daily usage
-	dailyMap := make(map[string]*DailyUsage)
-	totalUsage := llmtypes.Usage{}
-
-	for _, record := range records {
-		// Use UpdatedAt as the date for this conversation's usage
-		date := record.UpdatedAt.Truncate(24 * time.Hour)
-
-		// Filter by time range if specified
-		if !startTime.IsZero() && date.Before(startTime) {
-			continue
-		}
-		if !endTime.IsZero() && date.After(endTime) {
-			continue
-		}
-
-		dateKey := date.Format("2006-01-02")
-
-		// Initialize daily usage if not exists
-		if _, exists := dailyMap[dateKey]; !exists {
-			dailyMap[dateKey] = &DailyUsage{
-				Date:  date,
-				Usage: llmtypes.Usage{},
-			}
-		}
-
-		// Add to daily and total usage
-		daily := dailyMap[dateKey]
-		daily.Usage.InputTokens += record.Usage.InputTokens
-		daily.Usage.OutputTokens += record.Usage.OutputTokens
-		daily.Usage.CacheCreationInputTokens += record.Usage.CacheCreationInputTokens
-		daily.Usage.CacheReadInputTokens += record.Usage.CacheReadInputTokens
-		daily.Usage.InputCost += record.Usage.InputCost
-		daily.Usage.OutputCost += record.Usage.OutputCost
-		daily.Usage.CacheCreationCost += record.Usage.CacheCreationCost
-		daily.Usage.CacheReadCost += record.Usage.CacheReadCost
-		daily.Conversations++
-
-		// Add to total
-		totalUsage.InputTokens += record.Usage.InputTokens
-		totalUsage.OutputTokens += record.Usage.OutputTokens
-		totalUsage.CacheCreationInputTokens += record.Usage.CacheCreationInputTokens
-		totalUsage.CacheReadInputTokens += record.Usage.CacheReadInputTokens
-		totalUsage.InputCost += record.Usage.InputCost
-		totalUsage.OutputCost += record.Usage.OutputCost
-		totalUsage.CacheCreationCost += record.Usage.CacheCreationCost
-		totalUsage.CacheReadCost += record.Usage.CacheReadCost
-	}
-
-	// Convert map to sorted slice
-	var dailyUsage []DailyUsage
-	for _, usage := range dailyMap {
-		dailyUsage = append(dailyUsage, *usage)
-	}
-
-	// Sort by date (newest first)
-	sort.Slice(dailyUsage, func(i, j int) bool {
-		return dailyUsage[i].Date.After(dailyUsage[j].Date)
-	})
-
-	return &UsageStats{
-		Daily: dailyUsage,
-		Total: totalUsage,
 	}
 }
 
@@ -298,10 +240,10 @@ func displayUsageTable(w io.Writer, stats *UsageStats) {
 		fmt.Fprintf(tw, "%s\t%d\t%s\t%s\t%s\t%s\t$%.4f\n",
 			daily.Date.Format("2006-01-02"),
 			daily.Conversations,
-			formatNumber(daily.Usage.InputTokens),
-			formatNumber(daily.Usage.OutputTokens),
-			formatNumber(daily.Usage.CacheCreationInputTokens),
-			formatNumber(daily.Usage.CacheReadInputTokens),
+			usage.FormatNumber(daily.Usage.InputTokens),
+			usage.FormatNumber(daily.Usage.OutputTokens),
+			usage.FormatNumber(daily.Usage.CacheCreationInputTokens),
+			usage.FormatNumber(daily.Usage.CacheReadInputTokens),
 			daily.Usage.TotalCost(),
 		)
 	}
@@ -315,10 +257,10 @@ func displayUsageTable(w io.Writer, stats *UsageStats) {
 
 	fmt.Fprintf(tw, "TOTAL\t%d\t%s\t%s\t%s\t%s\t$%.4f\n",
 		totalConversations,
-		formatNumber(stats.Total.InputTokens),
-		formatNumber(stats.Total.OutputTokens),
-		formatNumber(stats.Total.CacheCreationInputTokens),
-		formatNumber(stats.Total.CacheReadInputTokens),
+		usage.FormatNumber(stats.Total.InputTokens),
+		usage.FormatNumber(stats.Total.OutputTokens),
+		usage.FormatNumber(stats.Total.CacheCreationInputTokens),
+		usage.FormatNumber(stats.Total.CacheReadInputTokens),
 		stats.Total.TotalCost(),
 	)
 
@@ -398,20 +340,24 @@ func displayUsageJSON(w io.Writer, stats *UsageStats) {
 	fmt.Fprintln(w, string(jsonData))
 }
 
-// formatNumber formats large numbers with commas for readability
+// formatNumber is a wrapper around usage.FormatNumber for testing
 func formatNumber(n int) string {
-	str := strconv.Itoa(n)
-	if len(str) <= 3 {
-		return str
+	return usage.FormatNumber(n)
+}
+
+// aggregateUsageStats is a wrapper around usage.CalculateUsageStats for testing
+func aggregateUsageStats(records []conversations.ConversationRecord, startTime, endTime time.Time) *UsageStats {
+	// Convert to usage records
+	var usageRecords []usage.ConversationRecord
+	for _, record := range records {
+		usageRecords = append(usageRecords, usage.ConversationRecord{
+			ID:           record.ID,
+			CreatedAt:    record.CreatedAt,
+			UpdatedAt:    record.UpdatedAt,
+			MessageCount: 0, // Not used in aggregation
+			Usage:        record.Usage,
+		})
 	}
 
-	// Add commas
-	var result strings.Builder
-	for i, digit := range str {
-		if i > 0 && (len(str)-i)%3 == 0 {
-			result.WriteString(",")
-		}
-		result.WriteRune(digit)
-	}
-	return result.String()
+	return usage.CalculateUsageStats(usageRecords, startTime, endTime)
 }

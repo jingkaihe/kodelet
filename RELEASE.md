@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.0.55.alpha (2025-07-06)
+
+### Conversation Web UI
+
+Provide Web UI for conversations
+
 ## 0.0.54.alpha (2025-07-04)
 
 ### Store Structured Tool Result in Conversation

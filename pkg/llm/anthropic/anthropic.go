@@ -16,6 +16,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/jingkaihe/kodelet/pkg/auth"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/llm/prompts"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/sysprompt"
 	"github.com/jingkaihe/kodelet/pkg/telemetry"
@@ -300,7 +301,7 @@ OUTER:
 	// Save conversation state after completing the interaction
 	if t.isPersisted && t.store != nil && !opt.NoSaveConversation {
 		saveCtx := context.Background() // use new context to avoid cancellation
-		t.SaveConversation(saveCtx, false)
+		t.SaveConversation(saveCtx, true)
 	}
 
 	if !t.config.IsSubAgent {
@@ -669,9 +670,6 @@ func (t *AnthropicThread) WithSubAgent(ctx context.Context, handler llmtypes.Mes
 }
 
 func (t *AnthropicThread) ShortSummary(ctx context.Context) string {
-	prompt := `Summarise the conversation in one sentence, less or equal than 12 words. Keep it short and concise.
-Treat the USER role as the first person (I), and the ASSISTANT role as the person you are talking to.
-`
 	handler := &llmtypes.StringCollectorHandler{
 		Silent: true,
 	}
@@ -681,7 +679,7 @@ Treat the USER role as the first person (I), and the ASSISTANT role as the perso
 	}()
 
 	// Use a faster model for summarization as it's a simpler task
-	_, err := t.SendMessage(ctx, prompt, handler, llmtypes.MessageOpt{
+	_, err := t.SendMessage(ctx, prompts.ShortSummaryPrompt, handler, llmtypes.MessageOpt{
 		UseWeakModel:       true,
 		PromptCache:        false, // maybe we should make it configurable, but there is likely no cache for weak model
 		NoToolUse:          true,

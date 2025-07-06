@@ -1,0 +1,93 @@
+# Frontend build artifacts
+/dist/
+/frontend/node_modules/
+/frontend/dist/
+
+# Logs
+/frontend/npm-debug.log*
+/frontend/yarn-debug.log*
+/frontend/yarn-error.log*
+/frontend/pnpm-debug.log*
+/frontend/lerna-debug.log*
+
+# Runtime data
+/frontend/pids
+/frontend/*.pid
+/frontend/*.seed
+/frontend/*.pid.lock
+
+# Coverage directory used by tools like istanbul
+/frontend/coverage/
+/frontend/*.lcov
+
+# nyc test coverage
+/frontend/.nyc_output
+
+# Dependency directories
+/frontend/.pnp
+/frontend/.pnp.js
+
+# Optional npm cache directory
+/frontend/.npm
+
+# Optional eslint cache
+/frontend/.eslintcache
+
+# Microbundle cache
+/frontend/.rpt2_cache/
+/frontend/.rts2_cache_cjs/
+/frontend/.rts2_cache_es/
+/frontend/.rts2_cache_umd/
+
+# Optional REPL history
+/frontend/.node_repl_history
+
+# Output of 'npm pack'
+/frontend/*.tgz
+
+# Yarn Integrity file
+/frontend/.yarn-integrity
+
+# dotenv environment variables file
+/frontend/.env
+/frontend/.env.local
+/frontend/.env.development.local
+/frontend/.env.test.local
+/frontend/.env.production.local
+
+# parcel-bundler cache (https://parceljs.org/)
+/frontend/.cache
+/frontend/.parcel-cache
+
+# Next.js build output
+/frontend/.next
+/frontend/out
+
+# Nuxt.js build / generate output
+/frontend/.nuxt
+
+# Gatsby files
+/frontend/.cache/
+/frontend/public
+
+# Storybook build outputs
+/frontend/.out
+/frontend/.storybook-out
+
+# Temporary folders
+/frontend/tmp/
+/frontend/temp/
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# OS generated files
+Thumbs.db
