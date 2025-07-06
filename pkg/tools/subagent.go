@@ -15,8 +15,10 @@ import (
 )
 
 type SubAgentToolResult struct {
-	result string
-	err    string
+	result        string
+	err           string
+	question      string
+	modelStrength string
 }
 
 func (r *SubAgentToolResult) GetResult() string {
@@ -129,7 +131,9 @@ func (t *SubAgentTool) Execute(ctx context.Context, state tooltypes.State, param
 	subAgentConfig, ok := ctx.Value(llmtypes.SubAgentConfig{}).(llmtypes.SubAgentConfig)
 	if !ok {
 		return &SubAgentToolResult{
-			err: "sub-agent config not found in context",
+			err:           "sub-agent config not found in context",
+			question:      input.Question,
+			modelStrength: string(input.ModelStrength),
 		}
 	}
 
@@ -146,12 +150,16 @@ func (t *SubAgentTool) Execute(ctx context.Context, state tooltypes.State, param
 	})
 	if err != nil {
 		return &SubAgentToolResult{
-			err: err.Error(),
+			err:           err.Error(),
+			question:      input.Question,
+			modelStrength: string(input.ModelStrength),
 		}
 	}
 
 	return &SubAgentToolResult{
-		result: text,
+		result:        text,
+		question:      input.Question,
+		modelStrength: string(input.ModelStrength),
 	}
 }
 
@@ -163,11 +171,9 @@ func (r *SubAgentToolResult) StructuredData() tooltypes.StructuredToolResult {
 	}
 
 	// Always populate metadata, even for errors
-	// Note: SubAgentToolResult doesn't store the original question or model strength
-	// This would require modifying the SubAgentToolResult struct
 	result.Metadata = &tooltypes.SubAgentMetadata{
-		Question:      "", // Not available in current structure
-		ModelStrength: "", // Not available in current structure
+		Question:      r.question,
+		ModelStrength: r.modelStrength,
 		Response:      r.result,
 	}
 
