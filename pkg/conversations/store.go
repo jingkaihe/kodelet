@@ -44,7 +44,7 @@ func DefaultConfig() (*Config, error) {
 	}
 
 	return &Config{
-		StoreType: "json",
+		StoreType: "json", // JSON store with watcher is now the default
 		BasePath:  basePath,
 	}, nil
 }

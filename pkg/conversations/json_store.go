@@ -1,6 +1,7 @@
 package conversations
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -8,24 +9,207 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/fsnotify/fsnotify"
+	"github.com/sirupsen/logrus"
 )
 
 // JSONConversationStore implements the ConversationStore interface using JSON files
+// with in-memory caching and file watching for performance optimization
 type JSONConversationStore struct {
 	basePath string
+	
+	// In-memory cache for conversation summaries
+	summariesCache map[string]ConversationSummary
+	cacheRWMutex   sync.RWMutex
+	
+	// File watcher
+	watcher *fsnotify.Watcher
+	
+	// Shutdown context and cancel
+	ctx        context.Context
+	cancel     context.CancelFunc
+	shutdownWg sync.WaitGroup
+	
+	// Logger
+	logger *logrus.Logger
 }
 
-// NewJSONConversationStore creates a new JSON file-based conversation store
+// NewJSONConversationStore creates a new JSON file-based conversation store with file watching
 func NewJSONConversationStore(basePath string) (*JSONConversationStore, error) {
 	// Create the directory if it doesn't exist
 	if err := os.MkdirAll(basePath, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create conversations directory: %w", err)
 	}
 
-	return &JSONConversationStore{
-		basePath: basePath,
-	}, nil
+	// Create file watcher
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create file watcher: %w", err)
+	}
+
+	// Create context for graceful shutdown
+	ctx, cancel := context.WithCancel(context.Background())
+
+	store := &JSONConversationStore{
+		basePath:       basePath,
+		summariesCache: make(map[string]ConversationSummary),
+		watcher:        watcher,
+		ctx:            ctx,
+		cancel:         cancel,
+		logger:         logrus.New(),
+	}
+
+	// Initial load of all conversations into cache
+	if err := store.loadAllConversations(); err != nil {
+		store.Close()
+		return nil, fmt.Errorf("failed to load initial conversations: %w", err)
+	}
+
+	// Start watching the directory
+	if err := store.watcher.Add(basePath); err != nil {
+		store.Close()
+		return nil, fmt.Errorf("failed to watch conversations directory: %w", err)
+	}
+
+	// Start the file watcher goroutine
+	store.shutdownWg.Add(1)
+	go store.watchFileChanges()
+
+	return store, nil
+}
+
+// loadAllConversations loads all conversations from disk into the in-memory cache
+func (s *JSONConversationStore) loadAllConversations() error {
+	s.cacheRWMutex.Lock()
+	defer s.cacheRWMutex.Unlock()
+
+	// Clear existing cache
+	s.summariesCache = make(map[string]ConversationSummary)
+
+	// Find all JSON files in the directory
+	err := filepath.WalkDir(s.basePath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// Skip directories and non-JSON files
+		if d.IsDir() || !strings.HasSuffix(d.Name(), ".json") {
+			return nil
+		}
+
+		// Skip temporary files
+		if strings.HasSuffix(d.Name(), ".tmp") {
+			return nil
+		}
+
+		// Load the conversation record
+		if err := s.loadConversationIntoCache(path); err != nil {
+			s.logger.WithError(err).WithField("path", path).Warn("Failed to load conversation into cache")
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return fmt.Errorf("failed to walk conversations directory: %w", err)
+	}
+
+	s.logger.WithField("count", len(s.summariesCache)).Info("Loaded conversations into cache")
+	return nil
+}
+
+// loadConversationIntoCache loads a single conversation file into the cache
+func (s *JSONConversationStore) loadConversationIntoCache(filePath string) error {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to read conversation file: %w", err)
+	}
+
+	var record ConversationRecord
+	if err := json.Unmarshal(data, &record); err != nil {
+		return fmt.Errorf("failed to unmarshal conversation record: %w", err)
+	}
+
+	// Add to cache
+	s.summariesCache[record.ID] = record.ToSummary()
+	return nil
+}
+
+// watchFileChanges monitors the conversations directory for file changes
+func (s *JSONConversationStore) watchFileChanges() {
+	defer s.shutdownWg.Done()
+
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+
+		case event, ok := <-s.watcher.Events:
+			if !ok {
+				return
+			}
+
+			// Only process JSON files, ignore temporary files
+			if !strings.HasSuffix(event.Name, ".json") || strings.HasSuffix(event.Name, ".tmp") {
+				continue
+			}
+
+			// Extract conversation ID from filename
+			filename := filepath.Base(event.Name)
+			conversationID := strings.TrimSuffix(filename, ".json")
+
+			switch {
+			case event.Op&fsnotify.Create == fsnotify.Create:
+				s.handleFileCreated(event.Name, conversationID)
+			case event.Op&fsnotify.Write == fsnotify.Write:
+				s.handleFileModified(event.Name, conversationID)
+			case event.Op&fsnotify.Remove == fsnotify.Remove:
+				s.handleFileDeleted(conversationID)
+			}
+
+		case err, ok := <-s.watcher.Errors:
+			if !ok {
+				return
+			}
+			s.logger.WithError(err).Error("File watcher error")
+		}
+	}
+}
+
+// handleFileCreated handles file creation events
+func (s *JSONConversationStore) handleFileCreated(filePath, conversationID string) {
+	s.cacheRWMutex.Lock()
+	defer s.cacheRWMutex.Unlock()
+
+	if err := s.loadConversationIntoCache(filePath); err != nil {
+		s.logger.WithError(err).WithField("path", filePath).Warn("Failed to load created conversation into cache")
+	} else {
+		s.logger.WithField("id", conversationID).Debug("Added conversation to cache")
+	}
+}
+
+// handleFileModified handles file modification events
+func (s *JSONConversationStore) handleFileModified(filePath, conversationID string) {
+	s.cacheRWMutex.Lock()
+	defer s.cacheRWMutex.Unlock()
+
+	if err := s.loadConversationIntoCache(filePath); err != nil {
+		s.logger.WithError(err).WithField("path", filePath).Warn("Failed to reload modified conversation into cache")
+	} else {
+		s.logger.WithField("id", conversationID).Debug("Updated conversation in cache")
+	}
+}
+
+// handleFileDeleted handles file deletion events
+func (s *JSONConversationStore) handleFileDeleted(conversationID string) {
+	s.cacheRWMutex.Lock()
+	defer s.cacheRWMutex.Unlock()
+
+	delete(s.summariesCache, conversationID)
+	s.logger.WithField("id", conversationID).Debug("Removed conversation from cache")
 }
 
 // Save persists a conversation to a JSON file
@@ -59,6 +243,12 @@ func (s *JSONConversationStore) Save(record ConversationRecord) error {
 		return fmt.Errorf("failed to rename temporary conversation file: %w", err)
 	}
 
+	// Immediately update the cache to ensure consistency for tests and immediate queries
+	s.cacheRWMutex.Lock()
+	s.summariesCache[record.ID] = record.ToSummary()
+	s.cacheRWMutex.Unlock()
+
+	// Note: The file watcher will also update the cache when the file is created/modified
 	return nil
 }
 
@@ -82,7 +272,7 @@ func (s *JSONConversationStore) Load(id string) (ConversationRecord, error) {
 	return record, nil
 }
 
-// List returns summaries of all stored conversations
+// List returns summaries of all stored conversations using the in-memory cache
 func (s *JSONConversationStore) List() ([]ConversationSummary, error) {
 	return s.Query(QueryOptions{})
 }
@@ -99,83 +289,70 @@ func (s *JSONConversationStore) Delete(id string) error {
 		return fmt.Errorf("failed to delete conversation file: %w", err)
 	}
 
+	// Immediately update the cache to ensure consistency for tests and immediate queries
+	s.cacheRWMutex.Lock()
+	delete(s.summariesCache, id)
+	s.cacheRWMutex.Unlock()
+
+	// Note: The file watcher will also update the cache when the file is deleted
 	return nil
 }
 
-// Query searches for conversations matching the given criteria
+// Query searches for conversations using the in-memory cache for performance
 func (s *JSONConversationStore) Query(options QueryOptions) ([]ConversationSummary, error) {
+	s.cacheRWMutex.RLock()
+	defer s.cacheRWMutex.RUnlock()
+
 	var summaries []ConversationSummary
 
-	// Find all JSON files in the directory
-	err := filepath.WalkDir(s.basePath, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-
-		// Skip directories and non-JSON files
-		if d.IsDir() || !strings.HasSuffix(d.Name(), ".json") {
-			return nil
-		}
-
-		// Load the conversation record
-		data, err := os.ReadFile(path)
-		if err != nil {
-			// Log error but continue with other files
-			fmt.Fprintf(os.Stderr, "Error reading file %s: %v\n", path, err)
-			return nil
-		}
-
-		var record ConversationRecord
-		if err := json.Unmarshal(data, &record); err != nil {
-			// Log error but continue with other files
-			fmt.Fprintf(os.Stderr, "Error parsing file %s: %v\n", path, err)
-			return nil
-		}
-
+	// Filter conversations from cache
+	for _, summary := range s.summariesCache {
 		// Apply date filters if specified
-		if options.StartDate != nil && record.UpdatedAt.Before(*options.StartDate) {
-			return nil
+		if options.StartDate != nil && summary.UpdatedAt.Before(*options.StartDate) {
+			continue
 		}
-		if options.EndDate != nil && record.UpdatedAt.After(*options.EndDate) {
-			return nil
+		if options.EndDate != nil && summary.UpdatedAt.After(*options.EndDate) {
+			continue
 		}
 
 		// Apply text search if specified
 		if options.SearchTerm != "" {
+			searchTerm := strings.ToLower(options.SearchTerm)
 			found := false
+			
 			// Search in summary
-			if strings.Contains(strings.ToLower(record.Summary), strings.ToLower(options.SearchTerm)) {
+			if strings.Contains(strings.ToLower(summary.Summary), searchTerm) {
 				found = true
 			}
-
-			// FirstUserPrompt has been removed, so skip this check
-
-			// Search in raw messages
-			if !found && len(record.RawMessages) > 0 {
-				if strings.Contains(strings.ToLower(string(record.RawMessages)), strings.ToLower(options.SearchTerm)) {
-					found = true
+			
+			// Search in first message
+			if !found && strings.Contains(strings.ToLower(summary.FirstMessage), searchTerm) {
+				found = true
+			}
+			
+			// For deeper text search, we need to load the full conversation
+			if !found {
+				if record, err := s.Load(summary.ID); err == nil {
+					if strings.Contains(strings.ToLower(string(record.RawMessages)), searchTerm) {
+						found = true
+					}
 				}
 			}
-
+			
 			// Skip if not found
 			if !found {
-				return nil
+				continue
 			}
 		}
 
 		// Add to result list
-		summaries = append(summaries, record.ToSummary())
-		return nil
-	})
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to query conversations: %w", err)
+		summaries = append(summaries, summary)
 	}
 
 	// Sort results
 	sort.Slice(summaries, func(i, j int) bool {
 		// Default sort is by updated time
-		if options.SortBy == "" || options.SortBy == "updated" {
+		if options.SortBy == "" || options.SortBy == "updated" || options.SortBy == "updated_at" {
 			if options.SortOrder == "asc" {
 				return summaries[i].UpdatedAt.Before(summaries[j].UpdatedAt)
 			}
@@ -183,7 +360,7 @@ func (s *JSONConversationStore) Query(options QueryOptions) ([]ConversationSumma
 		}
 
 		// Sort by created time
-		if options.SortBy == "created" {
+		if options.SortBy == "created" || options.SortBy == "created_at" {
 			if options.SortOrder == "asc" {
 				return summaries[i].CreatedAt.Before(summaries[j].CreatedAt)
 			}
@@ -225,8 +402,31 @@ func (s *JSONConversationStore) Query(options QueryOptions) ([]ConversationSumma
 	return summaries, nil
 }
 
-// Close cleans up any resources
+// GetConversationSummary quickly retrieves a conversation summary from cache
+func (s *JSONConversationStore) GetConversationSummary(id string) (ConversationSummary, bool) {
+	s.cacheRWMutex.RLock()
+	defer s.cacheRWMutex.RUnlock()
+	
+	summary, found := s.summariesCache[id]
+	return summary, found
+}
+
+// Close cleans up resources and shuts down the file watcher
 func (s *JSONConversationStore) Close() error {
-	// No resources to clean up for the JSON file store
+	// Cancel the context to signal shutdown
+	if s.cancel != nil {
+		s.cancel()
+	}
+
+	// Close the file watcher
+	if s.watcher != nil {
+		if err := s.watcher.Close(); err != nil {
+			s.logger.WithError(err).Error("Failed to close file watcher")
+		}
+	}
+
+	// Wait for all goroutines to finish
+	s.shutdownWg.Wait()
+
 	return nil
 }

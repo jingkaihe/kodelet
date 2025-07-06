@@ -3,6 +3,7 @@ package conversations
 import (
 	"errors"
 	"fmt"
+	"os"
 )
 
 // NewConversationStore creates the appropriate ConversationStore implementation
@@ -23,7 +24,7 @@ func NewConversationStore(config *Config) (ConversationStore, error) {
 	case "sqlite":
 		return nil, errors.New("SQLite store not yet implemented")
 	default:
-		// Default to JSON store
+		// Default to JSON store with watcher for better performance
 		return NewJSONConversationStore(config.BasePath)
 	}
 }
@@ -34,6 +35,11 @@ func GetConversationStore() (ConversationStore, error) {
 	config, err := DefaultConfig()
 	if err != nil {
 		return nil, err
+	}
+
+	// Check for environment variable override
+	if storeType := os.Getenv("KODELET_CONVERSATION_STORE_TYPE"); storeType != "" {
+		config.StoreType = storeType
 	}
 
 	return NewConversationStore(config)
