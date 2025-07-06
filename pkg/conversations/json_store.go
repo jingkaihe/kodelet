@@ -116,7 +116,7 @@ func (s *JSONConversationStore) loadAllConversations() error {
 		return fmt.Errorf("failed to walk conversations directory: %w", err)
 	}
 
-	logger.G(s.ctx).WithField("count", len(s.summariesCache)).Info("Loaded conversations into cache")
+	logger.G(s.ctx).WithField("count", len(s.summariesCache)).Debug("Loaded conversations into cache")
 	return nil
 }
 

@@ -182,7 +182,7 @@ func TestServer_handleGetConversation(t *testing.T) {
 				ID:          conversationID,
 				Summary:     "Test conversation",
 				ModelType:   "anthropic",
-				RawMessages: json.RawMessage(`[{"role":"user","content":"hello"}]`),
+				RawMessages: json.RawMessage(`[{"role":"user","content":[{"type":"text","text":"hello"}]}]`),
 			}, nil
 		},
 	}
@@ -365,13 +365,13 @@ func TestServer_convertToWebMessages(t *testing.T) {
 		},
 		{
 			name:         "simple text messages",
-			rawMessages:  json.RawMessage(`[{"role":"user","content":"Hello"},{"role":"assistant","content":"Hi there!"}]`),
+			rawMessages:  json.RawMessage(`[{"role":"user","content":[{"type":"text","text":"Hello"}]},{"role":"assistant","content":[{"type":"text","text":"Hi there!"}]}]`),
 			modelType:    "anthropic",
 			expectedMsgs: 2,
 		},
 		{
 			name:         "empty messages should be filtered out",
-			rawMessages:  json.RawMessage(`[{"role":"user","content":""},{"role":"assistant","content":"Hi there!"},{"role":"user","content":""}]`),
+			rawMessages:  json.RawMessage(`[{"role":"user","content":[]},{"role":"assistant","content":[{"type":"text","text":"Hi there!"}]},{"role":"user","content":[]}]`),
 			modelType:    "anthropic",
 			expectedMsgs: 1,
 		},
