@@ -177,17 +177,9 @@ const MessageList: React.FC<MessageListProps> = ({ messages, toolResults }) => {
                 </div>
               </div>
 
-              {/* Message Content */}
-              <div
-                className="prose prose-sm max-w-none"
-                dangerouslySetInnerHTML={{
-                  __html: renderMessageContent(message.content)
-                }}
-              />
-
               {/* Thinking Block */}
               {message.thinkingText && (
-                <div className="mt-4">
+                <div className="mb-4">
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-2">
                       <div className="badge badge-outline badge-secondary">
@@ -227,6 +219,14 @@ const MessageList: React.FC<MessageListProps> = ({ messages, toolResults }) => {
                   )}
                 </div>
               )}
+
+              {/* Message Content */}
+              <div
+                className="prose prose-sm max-w-none"
+                dangerouslySetInnerHTML={{
+                  __html: renderMessageContent(message.content)
+                }}
+              />
 
               {/* Tool Calls */}
               {toolCalls.length > 0 && (
