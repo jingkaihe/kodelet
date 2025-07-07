@@ -222,8 +222,12 @@ func (m *mockConversationStore) List() ([]conversations.ConversationSummary, err
 	return []conversations.ConversationSummary{}, nil
 }
 
-func (m *mockConversationStore) Query(options conversations.QueryOptions) ([]conversations.ConversationSummary, error) {
-	return []conversations.ConversationSummary{}, nil
+func (m *mockConversationStore) Query(options conversations.QueryOptions) (conversations.QueryResult, error) {
+	return conversations.QueryResult{
+		ConversationSummaries: []conversations.ConversationSummary{},
+		Total:                 0,
+		QueryOptions:          options,
+	}, nil
 }
 
 // Mock state for testing
