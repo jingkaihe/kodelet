@@ -39,11 +39,14 @@ export interface ToolResult {
 export interface Usage {
   inputTokens?: number;
   outputTokens?: number;
+  cacheCreationInputTokens?: number;
   cacheReadInputTokens?: number;
   inputCost?: number;
   outputCost?: number;
   cacheCreationCost?: number;
   cacheReadCost?: number;
+  currentContextWindow?: number;
+  maxContextWindow?: number;
 }
 
 export interface Conversation {

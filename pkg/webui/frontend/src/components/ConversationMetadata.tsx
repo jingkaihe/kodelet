@@ -13,67 +13,80 @@ const ConversationMetadata: React.FC<ConversationMetadataProps> = ({ conversatio
     conversation.usage.cacheReadInputTokens
   );
 
+  const formatNumber = (num: number): string => {
+    return num.toLocaleString('en-US');
+  };
+
+  const calculateTotalTokens = (): number => {
+    if (!conversation.usage) return 0;
+    return (conversation.usage.inputTokens || 0) + 
+           (conversation.usage.outputTokens || 0) + 
+           (conversation.usage.cacheCreationInputTokens || 0) +
+           (conversation.usage.cacheReadInputTokens || 0);
+  };
+
   return (
     <div className="card bg-base-200 shadow-xl mb-6">
       <div className="card-body">
         <h2 className="card-title mb-4">Conversation Details</h2>
         
-        {/* Basic Stats */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          {/* Basic Stats */}
           <div className="stat">
             <div className="stat-title">Messages</div>
-            <div className="stat-value text-primary">{conversation.messageCount || 0}</div>
+            <div className="stat-value">{formatNumber(conversation.messageCount || 0)}</div>
           </div>
           <div className="stat">
             <div className="stat-title">Model</div>
-            <div className="stat-value text-secondary text-sm">
+            <div className="stat-value text-sm">
               {conversation.modelType || 'Unknown'}
             </div>
           </div>
           <div className="stat">
             <div className="stat-title">Created</div>
-            <div className="stat-desc">
+            <div className="stat-value text-sm">
               {formatDate(conversation.createdAt)}
             </div>
           </div>
           <div className="stat">
             <div className="stat-title">Updated</div>
-            <div className="stat-desc">
+            <div className="stat-value text-sm">
               {formatDate(conversation.updatedAt)}
             </div>
           </div>
+          
+          {/* Usage Statistics */}
+          {hasUsage && (
+            <>
+              <div className="stat">
+                <div className="stat-title">Total Tokens</div>
+                <div className="stat-value">{formatNumber(calculateTotalTokens())}</div>
+              </div>
+              <div className="stat">
+                <div className="stat-title">Total Cost</div>
+                <div className="stat-value">{conversation.usage ? formatCost(conversation.usage) : '$0.0000'}</div>
+              </div>
+              <div className="stat">
+                <div className="stat-title">Input Tokens</div>
+                <div className="stat-value">{formatNumber(conversation.usage?.inputTokens || 0)}</div>
+              </div>
+              <div className="stat">
+                <div className="stat-title">Output Tokens</div>
+                <div className="stat-value">{formatNumber(conversation.usage?.outputTokens || 0)}</div>
+              </div>
+              <div className="stat">
+                <div className="stat-title">Cache Read Tokens</div>
+                <div className="stat-value">{formatNumber(conversation.usage?.cacheReadInputTokens || 0)}</div>
+              </div>
+              {conversation.usage?.cacheCreationInputTokens && (
+                <div className="stat">
+                  <div className="stat-title">Cache Creation Tokens</div>
+                  <div className="stat-value">{formatNumber(conversation.usage.cacheCreationInputTokens)}</div>
+                </div>
+              )}
+            </>
+          )}
         </div>
-
-        {/* Usage Statistics */}
-        {hasUsage && (
-          <div className="mt-4">
-            <h3 className="font-semibold mb-2">Token Usage</h3>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
-              <div className="bg-base-100 p-2 rounded">
-                <div className="text-xs text-base-content/60">Input</div>
-                <div className="font-mono">
-                  {conversation.usage?.inputTokens?.toLocaleString() || 0}
-                </div>
-              </div>
-              <div className="bg-base-100 p-2 rounded">
-                <div className="text-xs text-base-content/60">Output</div>
-                <div className="font-mono">
-                  {conversation.usage?.outputTokens?.toLocaleString() || 0}
-                </div>
-              </div>
-              <div className="bg-base-100 p-2 rounded">
-                <div className="text-xs text-base-content/60">Cache Read</div>
-                <div className="font-mono">
-                  {conversation.usage?.cacheReadInputTokens?.toLocaleString() || 0}
-                </div>
-              </div>
-              <div className="bg-base-100 p-2 rounded">
-                <div className="text-xs text-base-content/60">Total Cost</div>
-                <div className="font-mono">{conversation.usage ? formatCost(conversation.usage) : '$0.0000'}</div>
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* Additional Metadata */}
         {conversation.summary && (
