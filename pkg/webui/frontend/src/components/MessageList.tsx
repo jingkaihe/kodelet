@@ -211,10 +211,8 @@ const MessageList: React.FC<MessageListProps> = ({ messages, toolResults }) => {
                     </button>
                   </div>
                   {expandedThinking.includes(index.toString()) && (
-                    <div className="bg-base-200 p-3 rounded-lg">
-                      <div className="prose prose-sm max-w-none">
-                        <pre className="whitespace-pre-wrap text-sm">{message.thinkingText.trim()}</pre>
-                      </div>
+                    <div className="bg-gray-50 border border-gray-200 p-3 rounded-lg">
+                      <pre className="whitespace-pre-wrap text-sm text-gray-700 bg-transparent font-mono">{message.thinkingText.trim()}</pre>
                     </div>
                   )}
                 </div>
