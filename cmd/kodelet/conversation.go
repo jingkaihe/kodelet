@@ -340,12 +340,13 @@ func listConversationsCmd(ctx context.Context, config *ConversationListConfig) {
 	}
 
 	// Query conversations with options
-	summaries, err := store.Query(options)
+	result, err := store.Query(options)
 	if err != nil {
 		presenter.Error(err, "Failed to list conversations")
 		os.Exit(1)
 	}
 
+	summaries := result.ConversationSummaries
 	if len(summaries) == 0 {
 		presenter.Info("No conversations found matching your criteria.")
 		return

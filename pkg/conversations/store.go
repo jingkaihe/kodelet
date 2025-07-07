@@ -24,7 +24,7 @@ type ConversationStore interface {
 	Delete(id string) error
 
 	// Advanced query operations
-	Query(options QueryOptions) ([]ConversationSummary, error)
+	Query(options QueryOptions) (QueryResult, error)
 
 	// Lifecycle methods
 	Close() error

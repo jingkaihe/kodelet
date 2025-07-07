@@ -172,11 +172,13 @@ func runUsageCmd(ctx context.Context, config *UsageConfig) {
 		options.EndDate = &endTime
 	}
 
-	summaries, err := store.Query(options)
+	result, err := store.Query(options)
 	if err != nil {
 		presenter.Error(err, "Failed to query conversations")
 		os.Exit(1)
 	}
+
+	summaries := result.ConversationSummaries
 
 	if len(summaries) == 0 {
 		presenter.Info("No conversations found in the specified time range.")

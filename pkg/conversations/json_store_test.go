@@ -148,7 +148,7 @@ func TestJSONConversationStore(t *testing.T) {
 
 		// Should find at least the apple record
 		found := false
-		for _, summary := range results {
+		for _, summary := range results.ConversationSummaries {
 			if summary.ID == "test-query-apple" {
 				found = true
 				break
@@ -161,7 +161,7 @@ func TestJSONConversationStore(t *testing.T) {
 			Limit: 2,
 		})
 		assert.NoError(t, err)
-		assert.LessOrEqual(t, len(limitResults), 2, "Should return at most 2 results")
+		assert.LessOrEqual(t, len(limitResults.ConversationSummaries), 2, "Should return at most 2 results")
 	})
 }
 
@@ -189,7 +189,7 @@ func TestGetMostRecentConversationID(t *testing.T) {
 		require.NoError(t, err)
 
 		// When no conversations exist, should return empty result
-		assert.Equal(t, 0, len(conversations), "Should return no conversations when none exist")
+		assert.Equal(t, 0, len(conversations.ConversationSummaries), "Should return no conversations when none exist")
 	})
 
 	t.Run("SingleConversation", func(t *testing.T) {
@@ -217,8 +217,8 @@ func TestGetMostRecentConversationID(t *testing.T) {
 
 		conversations, err := store.Query(options)
 		require.NoError(t, err)
-		require.Equal(t, 1, len(conversations), "Should return exactly one conversation")
-		assert.Equal(t, "single-conversation", conversations[0].ID)
+		require.Equal(t, 1, len(conversations.ConversationSummaries), "Should return exactly one conversation")
+		assert.Equal(t, "single-conversation", conversations.ConversationSummaries[0].ID)
 	})
 
 	t.Run("MultipleConversationsByTime", func(t *testing.T) {
@@ -268,8 +268,8 @@ func TestGetMostRecentConversationID(t *testing.T) {
 
 		conversations, err := store.Query(options)
 		require.NoError(t, err)
-		require.Equal(t, 1, len(conversations), "Should return exactly one conversation")
-		assert.Equal(t, "newest-conversation", conversations[0].ID, "Should return the most recent conversation")
+		require.Equal(t, 1, len(conversations.ConversationSummaries), "Should return exactly one conversation")
+		assert.Equal(t, "newest-conversation", conversations.ConversationSummaries[0].ID, "Should return the most recent conversation")
 	})
 
 	t.Run("ConversationsSortedByUpdatedAt", func(t *testing.T) {
@@ -306,11 +306,11 @@ func TestGetMostRecentConversationID(t *testing.T) {
 
 		conversations, err := store.Query(options)
 		require.NoError(t, err)
-		require.Equal(t, 1, len(conversations), "Should return exactly one conversation")
+		require.Equal(t, 1, len(conversations.ConversationSummaries), "Should return exactly one conversation")
 
 		// Since record2 was saved after record1, it should have a more recent UpdatedAt timestamp
 		// and should be returned as the most recent conversation
-		assert.Equal(t, "created-second", conversations[0].ID, "Should return conversation with most recent updated_at timestamp")
+		assert.Equal(t, "created-second", conversations.ConversationSummaries[0].ID, "Should return conversation with most recent updated_at timestamp")
 	})
 }
 

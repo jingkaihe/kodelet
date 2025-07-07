@@ -291,7 +291,11 @@ func (s *JSONConversationStore) Load(id string) (ConversationRecord, error) {
 
 // List returns summaries of all stored conversations using the in-memory cache
 func (s *JSONConversationStore) List() ([]ConversationSummary, error) {
-	return s.Query(QueryOptions{})
+	result, err := s.Query(QueryOptions{})
+	if err != nil {
+		return nil, err
+	}
+	return result.ConversationSummaries, nil
 }
 
 // Delete removes a conversation
@@ -317,7 +321,7 @@ func (s *JSONConversationStore) Delete(id string) error {
 }
 
 // Query searches for conversations using the in-memory cache for performance
-func (s *JSONConversationStore) Query(options QueryOptions) ([]ConversationSummary, error) {
+func (s *JSONConversationStore) Query(options QueryOptions) (QueryResult, error) {
 	s.cacheRWMutex.RLock()
 	defer s.cacheRWMutex.RUnlock()
 
@@ -400,6 +404,8 @@ func (s *JSONConversationStore) Query(options QueryOptions) ([]ConversationSumma
 		return summaries[i].UpdatedAt.After(summaries[j].UpdatedAt)
 	})
 
+	total := len(summaries)
+
 	// Apply limit and offset if specified
 	if options.Limit > 0 || options.Offset > 0 {
 		offset := options.Offset
@@ -417,7 +423,11 @@ func (s *JSONConversationStore) Query(options QueryOptions) ([]ConversationSumma
 		}
 	}
 
-	return summaries, nil
+	return QueryResult{
+		ConversationSummaries: summaries,
+		Total:                 total,
+		QueryOptions:          options,
+	}, nil
 }
 
 // GetConversationSummary quickly retrieves a conversation summary from cache

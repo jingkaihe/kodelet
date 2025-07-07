@@ -57,11 +57,12 @@ func GetMostRecentConversationID(ctx context.Context) (string, error) {
 		SortOrder: "desc",
 	}
 
-	conversations, err := store.Query(options)
+	result, err := store.Query(options)
 	if err != nil {
 		return "", err
 	}
 
+	conversations := result.ConversationSummaries
 	if len(conversations) == 0 {
 		return "", errors.New("no conversations found")
 	}
