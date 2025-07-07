@@ -1,0 +1,54 @@
+# Air configuration for auto-reload development server
+# Run with: make dev-server or ./bin/air
+#
+# This configuration is optimized for Go backend development.
+# It watches Go files and config files, but excludes frontend assets
+# to avoid unnecessary rebuilds when frontend files change.
+
+root = "."
+testdata_dir = "testdata"
+tmp_dir = "tmp"
+
+[build]
+  args_bin = ["serve", "--host", "0.0.0.0", "--port", "8080"]
+  bin = "./bin/kodelet"
+  cmd = "make build"
+  delay = 1000
+  # Exclude directories that shouldn't trigger Go rebuilds
+  exclude_dir = ["assets", "tmp", "vendor", "testdata", "bin", "dist", "node_modules", ".github", ".git", "pkg/webui/frontend/node_modules", "pkg/webui/dist", "pkg/webui/frontend/dist", "pkg/webui/frontend/.next", "pkg/webui/frontend/coverage", ".kodelet"]
+  exclude_file = []
+  # Exclude test files, log files, and temporary files
+  exclude_regex = ["_test.go", ".*\\.log$", ".*\\.tmp$"]
+  exclude_unchanged = false
+  follow_symlink = false
+  full_bin = ""
+  include_dir = []
+  # Only watch Go files and config files for backend changes
+  include_ext = ["go", "yaml", "yml", "json"]
+  include_file = []
+  kill_delay = "0s"
+  log = "build-errors.log"
+  poll = false
+  poll_interval = 0
+  rerun = false
+  rerun_delay = 500
+  send_interrupt = false
+  stop_on_root = false
+
+[color]
+  app = ""
+  build = "yellow"
+  main = "magenta"
+  runner = "green"
+  watcher = "cyan"
+
+[log]
+  main_only = false
+  time = false
+
+[misc]
+  clean_on_exit = false
+
+[screen]
+  clear_on_rebuild = false
+  keep_scroll = true

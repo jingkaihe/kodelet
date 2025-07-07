@@ -4,7 +4,7 @@ NODE_VERSION=22.17.0
 NPM_VERSION=10.9.2
 
 VERSION_FLAG=-X 'github.com/jingkaihe/kodelet/pkg/version.Version=$(VERSION)' -X 'github.com/jingkaihe/kodelet/pkg/version.GitCommit=$(GIT_COMMIT)'
-.PHONY: build build-dev cross-build cross-build-docker run test lint golangci-lint code-generation install-linters format docker-build docker-run e2e-test e2e-test-docker eslint eslint-fix frontend-test frontend-test-watch frontend-test-ui frontend-test-coverage release github-release push-tag
+.PHONY: build build-dev cross-build cross-build-docker run test lint golangci-lint code-generation install-linters format docker-build docker-run e2e-test e2e-test-docker eslint eslint-fix frontend-test frontend-test-watch frontend-test-ui frontend-test-coverage release github-release push-tag dev-server
 
 # Build the application
 build: code-generation
@@ -20,6 +20,15 @@ build-dev:
 
 chat: build
 	./bin/kodelet chat
+
+# Run development server with auto-reload
+dev-server:
+	@echo "Starting development server with auto-reload..."
+	@if [ ! -f ./bin/air ]; then \
+		echo "Installing air..."; \
+		GOBIN=$(shell pwd)/bin go install github.com/air-verse/air@latest; \
+	fi
+	./bin/air
 
 code-generation:
 	go generate ./pkg/webui
@@ -133,6 +142,7 @@ help:
 	@echo "  code-generation - Generate frontend assets"
 	@echo "  run          - Run in one-shot mode (use: make run query='your query')"
 	@echo "  chat         - Run in interactive chat mode"
+	@echo "  dev-server   - Run development server with auto-reload using air"
 	@echo "  test         - Run tests"
 	@echo "  e2e-test     - Run end-to-end acceptance tests"
 	@echo "  e2e-test-docker - Run e2e tests in Docker"
