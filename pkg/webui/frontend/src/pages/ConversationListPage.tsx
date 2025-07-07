@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback } from 'react';
 import { useConversations } from '../hooks/useConversations';
 import { useUrlFilters } from '../hooks/useUrlFilters';
 import ConversationList from '../components/ConversationList';
@@ -34,13 +34,13 @@ const ConversationListPage: React.FC = () => {
     }
   };
 
-  const handleSearch = (searchTerm: string) => {
+  const handleSearch = useCallback((searchTerm: string) => {
     updateFilters({ searchTerm });
-  };
+  }, [updateFilters]);
 
-  const handleClearFilters = () => {
+  const handleClearFilters = useCallback(() => {
     clearFilters();
-  };
+  }, [clearFilters]);
 
   return (
     <div className="container mx-auto px-4 py-8">

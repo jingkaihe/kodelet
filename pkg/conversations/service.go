@@ -21,7 +21,6 @@ type ConversationServiceInterface interface {
 	GetToolResult(ctx context.Context, conversationID, toolCallID string) (*GetToolResultResponse, error)
 	DeleteConversation(ctx context.Context, id string) error
 	ResolveConversationID(ctx context.Context, id string) (string, error)
-	SearchConversations(ctx context.Context, query string, limit int) (*ListConversationsResponse, error)
 	GetConversationStatistics(ctx context.Context) (*ConversationStatistics, error)
 	Close() error
 }
@@ -300,20 +299,6 @@ func (s *ConversationService) ResolveConversationID(ctx context.Context, id stri
 	resolvedID := matches[0]
 	logger.G(ctx).WithField("originalID", id).WithField("resolvedID", resolvedID).Debug("Resolved conversation ID")
 	return resolvedID, nil
-}
-
-// SearchConversations performs full-text search across conversations
-func (s *ConversationService) SearchConversations(ctx context.Context, query string, limit int) (*ListConversationsResponse, error) {
-	logger.G(ctx).WithField("query", query).WithField("limit", limit).Debug("Searching conversations")
-
-	req := &ListConversationsRequest{
-		SearchTerm: query,
-		Limit:      limit,
-		SortBy:     "updated",
-		SortOrder:  "desc",
-	}
-
-	return s.ListConversations(ctx, req)
 }
 
 // GetConversationStatistics returns statistics about conversations

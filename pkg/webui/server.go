@@ -93,7 +93,6 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/conversations/{id}", s.handleGetConversation).Methods("GET")
 	api.HandleFunc("/conversations/{id}/tools/{toolCallId}", s.handleGetToolResult).Methods("GET")
 	api.HandleFunc("/conversations/{id}", s.handleDeleteConversation).Methods("DELETE")
-	api.HandleFunc("/search", s.handleSearchConversations).Methods("GET")
 
 	// Static assets from the React build
 	s.router.PathPrefix("/assets/").Handler(s.staticFileHandler())
@@ -513,34 +512,6 @@ func (s *Server) handleDeleteConversation(w http.ResponseWriter, r *http.Request
 	}
 
 	w.WriteHeader(http.StatusNoContent)
-}
-
-// handleSearchConversations handles GET /api/search
-func (s *Server) handleSearchConversations(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	query := r.URL.Query()
-
-	searchTerm := query.Get("q")
-	if searchTerm == "" {
-		s.writeErrorResponse(w, http.StatusBadRequest, "search term is required", nil)
-		return
-	}
-
-	limit := 50 // Default limit
-	if limitStr := query.Get("limit"); limitStr != "" {
-		if parsedLimit, err := strconv.Atoi(limitStr); err == nil {
-			limit = parsedLimit
-		}
-	}
-
-	// Search conversations
-	response, err := s.conversationService.SearchConversations(ctx, searchTerm, limit)
-	if err != nil {
-		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to search conversations", err)
-		return
-	}
-
-	s.writeJSONResponse(w, response)
 }
 
 // Utility methods
