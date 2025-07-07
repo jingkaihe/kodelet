@@ -56,7 +56,7 @@ type Thread interface {
 	// IsPersisted returns whether this thread is being persisted
 	IsPersisted() bool
 	// EnablePersistence enables conversation persistence for this thread
-	EnablePersistence(enabled bool)
+	EnablePersistence(ctx context.Context, enabled bool)
 	// Provider returns the provider of the thread
 	Provider() string
 	// GetMessages returns the messages from the thread

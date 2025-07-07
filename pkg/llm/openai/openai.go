@@ -683,12 +683,12 @@ func (t *OpenAIThread) GetMessages() ([]llmtypes.Message, error) {
 }
 
 // EnablePersistence enables conversation persistence for this thread
-func (t *OpenAIThread) EnablePersistence(enabled bool) {
+func (t *OpenAIThread) EnablePersistence(ctx context.Context, enabled bool) {
 	t.isPersisted = enabled
 
 	// Initialize the store if enabling persistence and it's not already initialized
 	if enabled && t.store == nil {
-		store, err := conversations.GetConversationStore(context.Background())
+		store, err := conversations.GetConversationStore(ctx)
 		if err != nil {
 			// Log the error but continue without persistence
 			fmt.Printf("Error initializing conversation store: %v\n", err)

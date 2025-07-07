@@ -130,7 +130,7 @@ var runCmd = &cobra.Command{
 			presenter.Info(fmt.Sprintf("Resuming conversation: %s", config.ResumeConvID))
 		}
 
-		thread.EnablePersistence(!config.NoSave)
+		thread.EnablePersistence(ctx, !config.NoSave)
 
 		// Send the message and process the response
 		_, err = thread.SendMessage(ctx, query, handler, llmtypes.MessageOpt{

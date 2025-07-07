@@ -49,7 +49,7 @@ func plainChatUI(ctx context.Context, options *ChatOptions) {
 		presenter.Info(fmt.Sprintf("Resuming conversation: %s", options.resumeConvID))
 	}
 
-	thread.EnablePersistence(!options.noSave)
+	thread.EnablePersistence(ctx, !options.noSave)
 
 	if !options.noSave {
 		presenter.Info("Conversation persistence is enabled")

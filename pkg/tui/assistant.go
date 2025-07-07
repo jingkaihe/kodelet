@@ -41,7 +41,7 @@ func NewAssistantClient(ctx context.Context, conversationID string, enablePersis
 		thread.SetConversationID(conversationID)
 	}
 
-	thread.EnablePersistence(enablePersistence)
+	thread.EnablePersistence(ctx, enablePersistence)
 
 	return &AssistantClient{
 		thread:     thread,
