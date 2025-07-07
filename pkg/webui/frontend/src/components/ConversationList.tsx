@@ -3,20 +3,23 @@ import { Link } from 'react-router-dom';
 import { Conversation } from '../types';
 import { formatDate } from '../utils';
 import LoadingSpinner from './LoadingSpinner';
+import Pagination from './Pagination';
 
 interface ConversationListProps {
   conversations: Conversation[];
   loading: boolean;
-  hasMore: boolean;
-  onLoadMore: () => void;
+  currentPage: number;
+  totalPages: number;
+  onPageChange: (page: number) => void;
   onDelete: (conversationId: string) => void;
 }
 
 const ConversationList: React.FC<ConversationListProps> = ({
   conversations,
   loading,
-  hasMore,
-  onLoadMore,
+  currentPage,
+  totalPages,
+  onPageChange,
   onDelete,
 }) => {
   const handleDeleteClick = (e: React.MouseEvent, conversationId: string) => {
@@ -46,7 +49,7 @@ const ConversationList: React.FC<ConversationListProps> = ({
                   </Link>
                 </h3>
                 <p className="text-base-content/70 mb-3">
-                  {conversation.preview || conversation.summary || 'No preview available'}
+                  {conversation.firstMessage || conversation.preview || conversation.summary || 'No preview available'}
                 </p>
 
                 <div className="flex flex-wrap gap-2 text-sm text-base-content/60">
@@ -122,30 +125,18 @@ const ConversationList: React.FC<ConversationListProps> = ({
         </div>
       ))}
 
-      {/* Load More Button */}
-      {hasMore && (
-        <div className="flex justify-center mt-8">
-          <button
-            className="btn btn-primary"
-            onClick={onLoadMore}
-            disabled={loading}
-          >
-            {loading ? (
-              <>
-                <span className="loading loading-spinner loading-sm"></span>
-                Loading...
-              </>
-            ) : (
-              'Load More'
-            )}
-          </button>
-        </div>
-      )}
+      {/* Pagination */}
+      <Pagination
+        currentPage={currentPage}
+        totalPages={totalPages}
+        onPageChange={onPageChange}
+        loading={loading}
+      />
 
-      {/* Loading Indicator for Load More */}
-      {loading && conversations.length > 0 && (
-        <div className="text-center py-4">
-          <LoadingSpinner size="md" message="Loading more conversations..." />
+      {/* Loading Indicator */}
+      {loading && conversations.length === 0 && (
+        <div className="text-center py-8">
+          <LoadingSpinner size="lg" message="Loading conversations..." />
         </div>
       )}
     </div>

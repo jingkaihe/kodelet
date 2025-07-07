@@ -1,5 +1,6 @@
 import React from 'react';
 import { useConversations } from '../hooks/useConversations';
+import { useUrlFilters } from '../hooks/useUrlFilters';
 import ConversationList from '../components/ConversationList';
 import SearchAndFilters from '../components/SearchAndFilters';
 import StatsCard from '../components/StatsCard';
@@ -9,18 +10,16 @@ import EmptyState from '../components/EmptyState';
 import { showToast } from '../utils';
 
 const ConversationListPage: React.FC = () => {
+  const { filters, updateFilters, clearFilters, goToPage, currentPage } = useUrlFilters();
   const {
     conversations,
     stats,
     loading,
     error,
-    hasMore,
-    filters,
-    setFilters,
-    loadMore,
+    totalPages,
     deleteConversation,
     refresh,
-  } = useConversations();
+  } = useConversations({ filters });
 
   const handleDeleteConversation = async (conversationId: string) => {
     if (!confirm('Are you sure you want to delete this conversation?')) {
@@ -36,17 +35,11 @@ const ConversationListPage: React.FC = () => {
   };
 
   const handleSearch = (searchTerm: string) => {
-    setFilters({ searchTerm, offset: 0 });
+    updateFilters({ searchTerm });
   };
 
   const handleClearFilters = () => {
-    setFilters({
-      searchTerm: '',
-      sortBy: 'updated',
-      sortOrder: 'desc',
-      limit: 25,
-      offset: 0,
-    });
+    clearFilters();
   };
 
   return (
@@ -60,7 +53,7 @@ const ConversationListPage: React.FC = () => {
       {/* Search and Filters */}
       <SearchAndFilters
         filters={filters}
-        onFiltersChange={setFilters}
+        onFiltersChange={updateFilters}
         onSearch={handleSearch}
         onClearFilters={handleClearFilters}
       />
@@ -88,8 +81,9 @@ const ConversationListPage: React.FC = () => {
         <ConversationList
           conversations={conversations}
           loading={loading}
-          hasMore={hasMore}
-          onLoadMore={loadMore}
+          currentPage={currentPage}
+          totalPages={totalPages}
+          onPageChange={goToPage}
           onDelete={handleDeleteConversation}
         />
       )}

@@ -117,10 +117,10 @@ describe('useConversation', () => {
     });
 
     const conversation = result.current.conversation!;
-    expect(conversation.messages[0].role).toBe('user');
-    expect(conversation.messages[0].content).toBe('Test');
-    expect(conversation.messages[0].toolCalls).toEqual([]);
-    expect(conversation.messages[1].toolCalls).toEqual([{ id: '1', function: { name: 'test', arguments: '{}' } }]);
+    expect(conversation.messages?.[0]?.role).toBe('user');
+    expect(conversation.messages?.[0]?.content).toBe('Test');
+    expect(conversation.messages?.[0]?.toolCalls).toEqual([]);
+    expect(conversation.messages?.[1]?.toolCalls).toEqual([{ id: '1', function: { name: 'test', arguments: '{}' } }]);
     expect(conversation.toolResults).toEqual({});
   });
 

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { SearchFilters } from '../types';
 import { debounce } from '../utils';
 
@@ -16,6 +16,11 @@ const SearchAndFilters: React.FC<SearchAndFiltersProps> = ({
   onClearFilters,
 }) => {
   const [searchInput, setSearchInput] = useState(filters.searchTerm);
+
+  // Sync local state with filters prop
+  useEffect(() => {
+    setSearchInput(filters.searchTerm);
+  }, [filters.searchTerm]);
 
   // Debounced search function
   const debouncedSearch = debounce((term: string) => {

@@ -64,7 +64,9 @@ describe('ApiService', () => {
       const mockResponse: ConversationListResponse = {
         conversations: [],
         hasMore: false,
-        totalCount: 0,
+        total: 0,
+        limit: 25,
+        offset: 0,
       };
 
       mockFetch.mockResolvedValueOnce({
@@ -82,7 +84,9 @@ describe('ApiService', () => {
       const mockResponse: ConversationListResponse = {
         conversations: [],
         hasMore: false,
-        totalCount: 0,
+        total: 0,
+        limit: 25,
+        offset: 0,
       };
 
       mockFetch.mockResolvedValueOnce({
@@ -170,7 +174,9 @@ describe('ApiService', () => {
       const mockResponse: ConversationListResponse = {
         conversations: [],
         hasMore: false,
-        totalCount: 0,
+        total: 0,
+        limit: 25,
+        offset: 0,
       };
 
       mockFetch.mockResolvedValueOnce({

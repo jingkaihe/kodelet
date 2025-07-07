@@ -52,24 +52,24 @@ const ConversationMetadata: React.FC<ConversationMetadataProps> = ({ conversatio
               <div className="bg-base-100 p-2 rounded">
                 <div className="text-xs text-base-content/60">Input</div>
                 <div className="font-mono">
-                  {conversation.usage.inputTokens?.toLocaleString() || 0}
+                  {conversation.usage?.inputTokens?.toLocaleString() || 0}
                 </div>
               </div>
               <div className="bg-base-100 p-2 rounded">
                 <div className="text-xs text-base-content/60">Output</div>
                 <div className="font-mono">
-                  {conversation.usage.outputTokens?.toLocaleString() || 0}
+                  {conversation.usage?.outputTokens?.toLocaleString() || 0}
                 </div>
               </div>
               <div className="bg-base-100 p-2 rounded">
                 <div className="text-xs text-base-content/60">Cache Read</div>
                 <div className="font-mono">
-                  {conversation.usage.cacheReadInputTokens?.toLocaleString() || 0}
+                  {conversation.usage?.cacheReadInputTokens?.toLocaleString() || 0}
                 </div>
               </div>
               <div className="bg-base-100 p-2 rounded">
                 <div className="text-xs text-base-content/60">Total Cost</div>
-                <div className="font-mono">{formatCost(conversation.usage)}</div>
+                <div className="font-mono">{conversation.usage ? formatCost(conversation.usage) : '$0.0000'}</div>
               </div>
             </div>
           </div>
