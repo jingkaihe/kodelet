@@ -8,8 +8,8 @@ interface ConversationMetadataProps {
 
 const ConversationMetadata: React.FC<ConversationMetadataProps> = ({ conversation }) => {
   const hasUsage = conversation.usage && (
-    conversation.usage.inputTokens || 
-    conversation.usage.outputTokens || 
+    conversation.usage.inputTokens ||
+    conversation.usage.outputTokens ||
     conversation.usage.cacheReadInputTokens
   );
 
@@ -17,19 +17,21 @@ const ConversationMetadata: React.FC<ConversationMetadataProps> = ({ conversatio
     return num.toLocaleString('en-US');
   };
 
-  const calculateTotalTokens = (): number => {
-    if (!conversation.usage) return 0;
-    return (conversation.usage.inputTokens || 0) + 
-           (conversation.usage.outputTokens || 0) + 
-           (conversation.usage.cacheCreationInputTokens || 0) +
-           (conversation.usage.cacheReadInputTokens || 0);
+  const calculateContextUsage = (): string => {
+    if (!conversation.usage || !conversation.usage.maxContextWindow || conversation.usage.maxContextWindow === 0) {
+      return 'N/A';
+    }
+    const current = conversation.usage.currentContextWindow || 0;
+    const max = conversation.usage.maxContextWindow;
+    const percentage = Math.round((current / max) * 100);
+    return `${percentage}%`;
   };
 
   return (
     <div className="card bg-base-200 shadow-xl mb-6">
       <div className="card-body">
         <h2 className="card-title mb-4">Conversation Details</h2>
-        
+
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           {/* Basic Stats */}
           <div className="stat">
@@ -38,29 +40,35 @@ const ConversationMetadata: React.FC<ConversationMetadataProps> = ({ conversatio
           </div>
           <div className="stat">
             <div className="stat-title">Model</div>
-            <div className="stat-value text-sm">
+            <div className="stat-value">
               {conversation.modelType || 'Unknown'}
             </div>
           </div>
           <div className="stat">
             <div className="stat-title">Created</div>
-            <div className="stat-value text-sm">
+            <div className="stat-value">
               {formatDate(conversation.createdAt)}
             </div>
           </div>
           <div className="stat">
             <div className="stat-title">Updated</div>
-            <div className="stat-value text-sm">
+            <div className="stat-value">
               {formatDate(conversation.updatedAt)}
             </div>
           </div>
-          
+
           {/* Usage Statistics */}
           {hasUsage && (
             <>
               <div className="stat">
-                <div className="stat-title">Total Tokens</div>
-                <div className="stat-value">{formatNumber(calculateTotalTokens())}</div>
+                <div className="stat-title">Context Usage</div>
+                <div className="stat-value">{calculateContextUsage()}</div>
+                <div className="stat-desc">
+                  {conversation.usage?.currentContextWindow ?
+                    `${formatNumber(conversation.usage.currentContextWindow)} / ${formatNumber(conversation.usage?.maxContextWindow || 0)}` :
+                    'Context info unavailable'
+                  }
+                </div>
               </div>
               <div className="stat">
                 <div className="stat-title">Total Cost</div>
