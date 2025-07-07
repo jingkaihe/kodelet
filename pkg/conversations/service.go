@@ -110,15 +110,21 @@ func (s *ConversationService) ListConversations(ctx context.Context, req *ListCo
 		SortOrder:  req.SortOrder,
 	}
 
-	// Query conversations
+	// Get total count from all conversations
+	allSummaries, err := s.store.List()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list conversations for total count: %w", err)
+	}
+	total := len(allSummaries)
+
+	// Query conversations with pagination
 	summaries, err := s.store.Query(options)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query conversations: %w", err)
 	}
 
 	// Calculate pagination info
-	total := len(summaries)
-	hasMore := req.Limit > 0 && total == req.Limit
+	hasMore := req.Limit > 0 && len(summaries) == req.Limit
 
 	// Calculate statistics for the returned conversations
 	var stats *ConversationStatistics
