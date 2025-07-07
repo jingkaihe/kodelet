@@ -2,10 +2,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '../test/utils';
 import ConversationListPage from './ConversationListPage';
 import { useConversations } from '../hooks/useConversations';
+import { useUrlFilters } from '../hooks/useUrlFilters';
 import * as utils from '../utils';
 
 // Mock the useConversations hook
 vi.mock('../hooks/useConversations');
+
+// Mock the useUrlFilters hook
+vi.mock('../hooks/useUrlFilters');
 
 // Mock showToast
 vi.mock('../utils', async () => {
@@ -64,12 +68,7 @@ describe('ConversationListPage', () => {
     cacheWriteCost: 0,
   };
 
-  const defaultMockHook = {
-    conversations: mockConversations,
-    stats: mockStats,
-    loading: false,
-    error: null,
-    hasMore: false,
+  const defaultMockUrlFilters = {
     filters: {
       searchTerm: '',
       sortBy: 'updated' as const,
@@ -77,16 +76,28 @@ describe('ConversationListPage', () => {
       limit: 25,
       offset: 0,
     },
-    setFilters: vi.fn(),
-    loadMore: vi.fn(),
+    updateFilters: vi.fn(),
+    clearFilters: vi.fn(),
+    goToPage: vi.fn(),
+    currentPage: 1,
+  };
+
+  const defaultMockConversations = {
+    conversations: mockConversations,
+    stats: mockStats,
+    loading: false,
+    error: null,
+    currentPage: 1,
+    totalPages: 2,
+    loadConversations: vi.fn(),
     deleteConversation: vi.fn(),
     refresh: vi.fn(),
-    loadConversations: vi.fn(),
   };
 
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(useConversations).mockReturnValue(defaultMockHook);
+    vi.mocked(useUrlFilters).mockReturnValue(defaultMockUrlFilters);
+    vi.mocked(useConversations).mockReturnValue(defaultMockConversations);
     vi.mocked(global.confirm).mockReturnValue(true);
   });
 
@@ -117,7 +128,7 @@ describe('ConversationListPage', () => {
 
   it('renders loading state when loading with no conversations', () => {
     vi.mocked(useConversations).mockReturnValue({
-      ...defaultMockHook,
+      ...defaultMockConversations,
       conversations: [],
       loading: true,
     });
@@ -129,7 +140,7 @@ describe('ConversationListPage', () => {
 
   it('renders empty state when no conversations and not loading', () => {
     vi.mocked(useConversations).mockReturnValue({
-      ...defaultMockHook,
+      ...defaultMockConversations,
       conversations: [],
       loading: false,
     });
@@ -143,7 +154,7 @@ describe('ConversationListPage', () => {
   it('renders error state when error exists', () => {
     const mockRefresh = vi.fn();
     vi.mocked(useConversations).mockReturnValue({
-      ...defaultMockHook,
+      ...defaultMockConversations,
       error: 'Failed to load conversations',
       refresh: mockRefresh,
     });
@@ -160,10 +171,10 @@ describe('ConversationListPage', () => {
   });
 
   it('handles search', () => {
-    const mockSetFilters = vi.fn();
-    vi.mocked(useConversations).mockReturnValue({
-      ...defaultMockHook,
-      setFilters: mockSetFilters,
+    const mockUpdateFilters = vi.fn();
+    vi.mocked(useUrlFilters).mockReturnValue({
+      ...defaultMockUrlFilters,
+      updateFilters: mockUpdateFilters,
     });
 
     render(<ConversationListPage />);
@@ -173,21 +184,20 @@ describe('ConversationListPage', () => {
     fireEvent.change(searchInput, { target: { value: 'test search' } });
     fireEvent.submit(searchInput.closest('form')!);
     
-    expect(mockSetFilters).toHaveBeenCalledWith({
+    expect(mockUpdateFilters).toHaveBeenCalledWith({
       searchTerm: 'test search',
-      offset: 0,
     });
   });
 
   it('handles clear filters', () => {
-    const mockSetFilters = vi.fn();
-    vi.mocked(useConversations).mockReturnValue({
-      ...defaultMockHook,
+    const mockClearFilters = vi.fn();
+    vi.mocked(useUrlFilters).mockReturnValue({
+      ...defaultMockUrlFilters,
       filters: {
-        ...defaultMockHook.filters,
+        ...defaultMockUrlFilters.filters,
         searchTerm: 'test',
       },
-      setFilters: mockSetFilters,
+      clearFilters: mockClearFilters,
     });
 
     render(<ConversationListPage />);
@@ -196,19 +206,13 @@ describe('ConversationListPage', () => {
     const clearButton = screen.getByRole('button', { name: /clear/i });
     fireEvent.click(clearButton);
     
-    expect(mockSetFilters).toHaveBeenCalledWith({
-      searchTerm: '',
-      sortBy: 'updated' as const,
-      sortOrder: 'desc' as const,
-      limit: 25,
-      offset: 0,
-    });
+    expect(mockClearFilters).toHaveBeenCalled();
   });
 
   it('handles delete conversation with confirmation', async () => {
     const mockDeleteConversation = vi.fn().mockResolvedValue(undefined);
     vi.mocked(useConversations).mockReturnValue({
-      ...defaultMockHook,
+      ...defaultMockConversations,
       deleteConversation: mockDeleteConversation,
     });
 
@@ -234,7 +238,7 @@ describe('ConversationListPage', () => {
     vi.mocked(global.confirm).mockReturnValue(false);
     const mockDeleteConversation = vi.fn();
     vi.mocked(useConversations).mockReturnValue({
-      ...defaultMockHook,
+      ...defaultMockConversations,
       deleteConversation: mockDeleteConversation,
     });
 
@@ -253,7 +257,7 @@ describe('ConversationListPage', () => {
     const mockError = new Error('Delete failed');
     const mockDeleteConversation = vi.fn().mockRejectedValue(mockError);
     vi.mocked(useConversations).mockReturnValue({
-      ...defaultMockHook,
+      ...defaultMockConversations,
       deleteConversation: mockDeleteConversation,
     });
 
@@ -273,20 +277,24 @@ describe('ConversationListPage', () => {
     });
   });
 
-  it('handles load more', () => {
-    const mockLoadMore = vi.fn();
+  it('handles pagination', () => {
+    const mockGoToPage = vi.fn();
+    vi.mocked(useUrlFilters).mockReturnValue({
+      ...defaultMockUrlFilters,
+      currentPage: 1,
+      goToPage: mockGoToPage,
+    });
     vi.mocked(useConversations).mockReturnValue({
-      ...defaultMockHook,
-      hasMore: true,
-      loadMore: mockLoadMore,
+      ...defaultMockConversations,
+      totalPages: 3,
     });
 
     render(<ConversationListPage />);
     
-    const loadMoreButton = screen.getByText('Load More');
-    fireEvent.click(loadMoreButton);
+    const nextButton = screen.getByRole('button', { name: /next/i });
+    fireEvent.click(nextButton);
     
-    expect(mockLoadMore).toHaveBeenCalled();
+    expect(mockGoToPage).toHaveBeenCalledWith(2);
   });
 
   it('passes filters to SearchAndFilters component', () => {
@@ -298,8 +306,8 @@ describe('ConversationListPage', () => {
       offset: 0,
     };
     
-    vi.mocked(useConversations).mockReturnValue({
-      ...defaultMockHook,
+    vi.mocked(useUrlFilters).mockReturnValue({
+      ...defaultMockUrlFilters,
       filters: customFilters,
     });
 

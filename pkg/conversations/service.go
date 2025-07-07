@@ -21,7 +21,6 @@ type ConversationServiceInterface interface {
 	GetToolResult(ctx context.Context, conversationID, toolCallID string) (*GetToolResultResponse, error)
 	DeleteConversation(ctx context.Context, id string) error
 	ResolveConversationID(ctx context.Context, id string) (string, error)
-	SearchConversations(ctx context.Context, query string, limit int) (*ListConversationsResponse, error)
 	GetConversationStatistics(ctx context.Context) (*ConversationStatistics, error)
 	Close() error
 }
@@ -39,8 +38,8 @@ func NewConversationService(store ConversationStore) *ConversationService {
 }
 
 // GetDefaultConversationService returns a service with the default store
-func GetDefaultConversationService() (*ConversationService, error) {
-	store, err := GetConversationStore()
+func GetDefaultConversationService(ctx context.Context) (*ConversationService, error) {
+	store, err := GetConversationStore(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get conversation store: %w", err)
 	}
@@ -110,15 +109,17 @@ func (s *ConversationService) ListConversations(ctx context.Context, req *ListCo
 		SortOrder:  req.SortOrder,
 	}
 
-	// Query conversations
-	summaries, err := s.store.Query(options)
+	// Query conversations with pagination
+	result, err := s.store.Query(options)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query conversations: %w", err)
 	}
 
+	summaries := result.ConversationSummaries
+	total := result.Total
+
 	// Calculate pagination info
-	total := len(summaries)
-	hasMore := req.Limit > 0 && total == req.Limit
+	hasMore := req.Limit > 0 && len(summaries) == req.Limit
 
 	// Calculate statistics for the returned conversations
 	var stats *ConversationStatistics
@@ -172,6 +173,8 @@ func (s *ConversationService) ListConversations(ctx context.Context, req *ListCo
 			CacheReadCost:      usageStats.CacheReadCost,
 			CacheWriteCost:     usageStats.CacheWriteCost,
 		}
+	} else {
+		summaries = []ConversationSummary{}
 	}
 
 	response := &ListConversationsResponse{
@@ -294,20 +297,6 @@ func (s *ConversationService) ResolveConversationID(ctx context.Context, id stri
 	resolvedID := matches[0]
 	logger.G(ctx).WithField("originalID", id).WithField("resolvedID", resolvedID).Debug("Resolved conversation ID")
 	return resolvedID, nil
-}
-
-// SearchConversations performs full-text search across conversations
-func (s *ConversationService) SearchConversations(ctx context.Context, query string, limit int) (*ListConversationsResponse, error) {
-	logger.G(ctx).WithField("query", query).WithField("limit", limit).Debug("Searching conversations")
-
-	req := &ListConversationsRequest{
-		SearchTerm: query,
-		Limit:      limit,
-		SortBy:     "updated",
-		SortOrder:  "desc",
-	}
-
-	return s.ListConversations(ctx, req)
 }
 
 // GetConversationStatistics returns statistics about conversations

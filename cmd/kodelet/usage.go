@@ -126,7 +126,7 @@ type DailyUsage = usage.DailyUsage
 type UsageStats = usage.UsageStats
 
 // runUsageCmd executes the usage command
-func runUsageCmd(_ context.Context, config *UsageConfig) {
+func runUsageCmd(ctx context.Context, config *UsageConfig) {
 	// Parse time specifications
 	var startTime, endTime time.Time
 	var err error
@@ -152,7 +152,7 @@ func runUsageCmd(_ context.Context, config *UsageConfig) {
 	}
 
 	// Create conversation store
-	store, err := conversations.GetConversationStore()
+	store, err := conversations.GetConversationStore(ctx)
 	if err != nil {
 		presenter.Error(err, "Failed to initialize conversation store")
 		os.Exit(1)
@@ -172,11 +172,13 @@ func runUsageCmd(_ context.Context, config *UsageConfig) {
 		options.EndDate = &endTime
 	}
 
-	summaries, err := store.Query(options)
+	result, err := store.Query(options)
 	if err != nil {
 		presenter.Error(err, "Failed to query conversations")
 		os.Exit(1)
 	}
+
+	summaries := result.ConversationSummaries
 
 	if len(summaries) == 0 {
 		presenter.Info("No conversations found in the specified time range.")

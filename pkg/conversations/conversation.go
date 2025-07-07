@@ -33,6 +33,13 @@ type ConversationSummary struct {
 	UpdatedAt    time.Time `json:"updatedAt"`
 }
 
+// QueryResult represents the result of a query operation
+type QueryResult struct {
+	ConversationSummaries []ConversationSummary `json:"conversationSummaries"`
+	Total                 int                   `json:"total"` // Represents the total number of the entries that match the query without pagination
+	QueryOptions
+}
+
 // NewConversationRecord creates a new conversation record with a unique ID
 func NewConversationRecord(id string) ConversationRecord {
 	now := time.Now()

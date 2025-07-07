@@ -556,7 +556,7 @@ func (m *MockThread) IsPersisted() bool {
 	return false
 }
 
-func (m *MockThread) EnablePersistence(enabled bool) {
+func (m *MockThread) EnablePersistence(ctx context.Context, enabled bool) {
 	// Mock implementation - do nothing
 }
 

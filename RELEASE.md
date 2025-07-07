@@ -6,6 +6,15 @@
 
 Generally improve ROI of the tests by either removing the low value tests or improving the test coverage.
 
+### Conversation WebUI and API Improvements
+
+* Drastically improve conversation loading performance in web UI by implementing in-memory caching and file watching.
+* Fixed the pagination issue in web UI.
+
+### Others
+
+* Support auto-reload of the Web UI via `make dev-server` in the dev mode using [air](https://github.com/air-verse/air).
+
 ## 0.0.55.alpha (2025-07-06)
 
 ### Conversation Web UI

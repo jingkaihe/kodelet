@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { renderHook, waitFor, act } from '@testing-library/react';
+import { renderHook, waitFor } from '@testing-library/react';
 import { useConversations } from './useConversations';
 import { apiService } from '../services/api';
 import { ConversationListResponse } from '../types';
@@ -29,6 +29,9 @@ describe('useConversations (simplified)', () => {
       },
     ],
     hasMore: false,
+    total: 1,
+    limit: 25,
+    offset: 0,
     stats: {
       totalConversations: 10,
       totalMessages: 100,
@@ -45,20 +48,26 @@ describe('useConversations (simplified)', () => {
     },
   };
 
+  const mockFilters = {
+    searchTerm: '',
+    sortBy: 'updated' as const,
+    sortOrder: 'desc' as const,
+    limit: 25,
+    offset: 0,
+  };
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(apiService.getConversations).mockResolvedValue(mockConversations);
   });
 
   it('provides initial state', async () => {
-    const { result } = renderHook(() => useConversations());
+    const { result } = renderHook(() => useConversations({ filters: mockFilters }));
     
     // Check initial state
     expect(result.current.conversations).toEqual([]);
     expect(result.current.stats).toBe(null);
     expect(result.current.error).toBe(null);
-    expect(result.current.filters.searchTerm).toBe('');
-    expect(result.current.filters.sortBy).toBe('updated');
     
     // Wait for async effects to complete
     await waitFor(() => {
@@ -67,7 +76,7 @@ describe('useConversations (simplified)', () => {
   });
 
   it('loads data eventually', async () => {
-    const { result } = renderHook(() => useConversations());
+    const { result } = renderHook(() => useConversations({ filters: mockFilters }));
     
     // Wait for data to load
     await waitFor(() => {
@@ -81,14 +90,24 @@ describe('useConversations (simplified)', () => {
   });
 
 
-  it('allows setting filters', async () => {
-    const { result } = renderHook(() => useConversations());
+  it('allows updating filters through props', async () => {
+    const initialFilters = { ...mockFilters };
+    const { rerender } = renderHook(
+      (props) => useConversations({ filters: props.filters }),
+      { initialProps: { filters: initialFilters } }
+    );
     
-    act(() => {
-      result.current.setFilters({ searchTerm: 'test' });
+    // Wait for the initial load to complete
+    await waitFor(() => {
+      expect(apiService.getConversations).toHaveBeenCalled();
     });
     
-    expect(result.current.filters.searchTerm).toBe('test');
+    // Clear the mock to check the next call
+    vi.clearAllMocks();
+    vi.mocked(apiService.getConversations).mockResolvedValue(mockConversations);
+    
+    const updatedFilters = { ...mockFilters, searchTerm: 'test' };
+    rerender({ filters: updatedFilters });
     
     // Wait for the effect triggered by filter change
     await waitFor(() => {

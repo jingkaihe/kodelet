@@ -1,6 +1,7 @@
 package conversations
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -28,8 +30,9 @@ func TestJSONConversationStore(t *testing.T) {
 	defer cleanup()
 
 	// Create a new store
-	store, err := NewJSONConversationStore(tempDir)
+	store, err := NewJSONConversationStore(context.Background(), tempDir)
 	require.NoError(t, err)
+	defer store.Close()
 
 	// Test Save and Load
 	t.Run("SaveAndLoad", func(t *testing.T) {
@@ -145,7 +148,7 @@ func TestJSONConversationStore(t *testing.T) {
 
 		// Should find at least the apple record
 		found := false
-		for _, summary := range results {
+		for _, summary := range results.ConversationSummaries {
 			if summary.ID == "test-query-apple" {
 				found = true
 				break
@@ -158,7 +161,7 @@ func TestJSONConversationStore(t *testing.T) {
 			Limit: 2,
 		})
 		assert.NoError(t, err)
-		assert.LessOrEqual(t, len(limitResults), 2, "Should return at most 2 results")
+		assert.LessOrEqual(t, len(limitResults.ConversationSummaries), 2, "Should return at most 2 results")
 	})
 }
 
@@ -170,7 +173,7 @@ func TestGetMostRecentConversationID(t *testing.T) {
 	t.Run("NoConversationsExists", func(t *testing.T) {
 		tempDir, cleanup := setupTestDir(t)
 		defer cleanup()
-		store, err := NewJSONConversationStore(tempDir)
+		store, err := NewJSONConversationStore(context.Background(), tempDir)
 		require.NoError(t, err)
 		defer store.Close()
 
@@ -186,13 +189,13 @@ func TestGetMostRecentConversationID(t *testing.T) {
 		require.NoError(t, err)
 
 		// When no conversations exist, should return empty result
-		assert.Equal(t, 0, len(conversations), "Should return no conversations when none exist")
+		assert.Equal(t, 0, len(conversations.ConversationSummaries), "Should return no conversations when none exist")
 	})
 
 	t.Run("SingleConversation", func(t *testing.T) {
 		tempDir, cleanup := setupTestDir(t)
 		defer cleanup()
-		store, err := NewJSONConversationStore(tempDir)
+		store, err := NewJSONConversationStore(context.Background(), tempDir)
 		require.NoError(t, err)
 		defer store.Close()
 
@@ -214,14 +217,14 @@ func TestGetMostRecentConversationID(t *testing.T) {
 
 		conversations, err := store.Query(options)
 		require.NoError(t, err)
-		require.Equal(t, 1, len(conversations), "Should return exactly one conversation")
-		assert.Equal(t, "single-conversation", conversations[0].ID)
+		require.Equal(t, 1, len(conversations.ConversationSummaries), "Should return exactly one conversation")
+		assert.Equal(t, "single-conversation", conversations.ConversationSummaries[0].ID)
 	})
 
 	t.Run("MultipleConversationsByTime", func(t *testing.T) {
 		tempDir, cleanup := setupTestDir(t)
 		defer cleanup()
-		store, err := NewJSONConversationStore(tempDir)
+		store, err := NewJSONConversationStore(context.Background(), tempDir)
 		require.NoError(t, err)
 		defer store.Close()
 
@@ -265,14 +268,14 @@ func TestGetMostRecentConversationID(t *testing.T) {
 
 		conversations, err := store.Query(options)
 		require.NoError(t, err)
-		require.Equal(t, 1, len(conversations), "Should return exactly one conversation")
-		assert.Equal(t, "newest-conversation", conversations[0].ID, "Should return the most recent conversation")
+		require.Equal(t, 1, len(conversations.ConversationSummaries), "Should return exactly one conversation")
+		assert.Equal(t, "newest-conversation", conversations.ConversationSummaries[0].ID, "Should return the most recent conversation")
 	})
 
 	t.Run("ConversationsSortedByUpdatedAt", func(t *testing.T) {
 		tempDir, cleanup := setupTestDir(t)
 		defer cleanup()
-		store, err := NewJSONConversationStore(tempDir)
+		store, err := NewJSONConversationStore(context.Background(), tempDir)
 		require.NoError(t, err)
 		defer store.Close()
 
@@ -303,10 +306,78 @@ func TestGetMostRecentConversationID(t *testing.T) {
 
 		conversations, err := store.Query(options)
 		require.NoError(t, err)
-		require.Equal(t, 1, len(conversations), "Should return exactly one conversation")
+		require.Equal(t, 1, len(conversations.ConversationSummaries), "Should return exactly one conversation")
 
 		// Since record2 was saved after record1, it should have a more recent UpdatedAt timestamp
 		// and should be returned as the most recent conversation
-		assert.Equal(t, "created-second", conversations[0].ID, "Should return conversation with most recent updated_at timestamp")
+		assert.Equal(t, "created-second", conversations.ConversationSummaries[0].ID, "Should return conversation with most recent updated_at timestamp")
 	})
+}
+
+func TestJSONStore_StructuredToolResults(t *testing.T) {
+	tempDir, cleanup := setupTestDir(t)
+	defer cleanup()
+
+	// Create a store
+	store, err := NewJSONConversationStore(context.Background(), tempDir)
+	require.NoError(t, err)
+	defer store.Close()
+
+	// Create a conversation record with structured tool results
+	record := NewConversationRecord("test-conversation")
+	record.ToolResults = map[string]tools.StructuredToolResult{
+		"call_1": {
+			ToolName:  "file_read",
+			Success:   true,
+			Timestamp: time.Now(),
+			Metadata: tools.FileReadMetadata{
+				FilePath:  "/test/file.go",
+				Lines:     []string{"package main", "func main() {}"},
+				Language:  "go",
+				Truncated: false,
+			},
+		},
+		"call_2": {
+			ToolName:  "bash",
+			Success:   true,
+			Timestamp: time.Now(),
+			Metadata: tools.BashMetadata{
+				Command:       "go test ./...",
+				ExitCode:      0,
+				Output:        "ok\tgithub.com/test\t0.005s",
+				ExecutionTime: 5 * time.Second,
+				WorkingDir:    "/test",
+			},
+		},
+	}
+
+	// Save the record
+	err = store.Save(record)
+	require.NoError(t, err)
+
+	// Load it back
+	loaded, err := store.Load(record.ID)
+	require.NoError(t, err)
+
+	// Verify the tool results were preserved
+	assert.Equal(t, len(record.ToolResults), len(loaded.ToolResults), "Tool results count should match")
+
+	// Check specific results
+	for key, original := range record.ToolResults {
+		loaded, exists := loaded.ToolResults[key]
+		assert.True(t, exists, "Tool result should exist for key %s", key)
+
+		assert.Equal(t, original.ToolName, loaded.ToolName, "Tool name should match for %s", key)
+		assert.Equal(t, original.Success, loaded.Success, "Success should match for %s", key)
+		assert.NotNil(t, loaded.Metadata, "Metadata should not be nil for %s", key)
+		assert.Equal(t, original.Metadata.ToolType(), loaded.Metadata.ToolType(), "Metadata type should match for %s", key)
+	}
+
+	// Verify the actual JSON file exists and check its structure
+	jsonPath := filepath.Join(tempDir, record.ID+".json")
+	data, err := os.ReadFile(jsonPath)
+	require.NoError(t, err)
+
+	// The JSON should contain metadataType fields
+	assert.Contains(t, string(data), `"metadataType"`, "JSON should contain metadataType field")
 }

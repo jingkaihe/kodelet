@@ -31,8 +31,9 @@ describe('ConversationList', () => {
   const defaultProps = {
     conversations: mockConversations,
     loading: false,
-    hasMore: false,
-    onLoadMore: vi.fn(),
+    currentPage: 1,
+    totalPages: 1,
+    onPageChange: vi.fn(),
     onDelete: vi.fn(),
   };
 
@@ -70,21 +71,22 @@ describe('ConversationList', () => {
     expect(screen.getByText('No preview available')).toBeInTheDocument();
   });
 
-  it('provides pagination when more conversations available', () => {
-    const onLoadMore = vi.fn();
-    render(<ConversationList {...defaultProps} hasMore={true} onLoadMore={onLoadMore} />);
+  it('provides pagination when multiple pages available', () => {
+    const onPageChange = vi.fn();
+    render(<ConversationList {...defaultProps} totalPages={3} onPageChange={onPageChange} />);
 
-    const loadMoreButton = screen.getByText('Load More');
-    fireEvent.click(loadMoreButton);
+    const nextButton = screen.getByRole('button', { name: /next page/i });
+    fireEvent.click(nextButton);
     
-    expect(onLoadMore).toHaveBeenCalledTimes(1);
+    expect(onPageChange).toHaveBeenCalledWith(2);
   });
 
   it('shows loading state during pagination', () => {
-    render(<ConversationList {...defaultProps} hasMore={true} loading={true} />);
+    render(<ConversationList {...defaultProps} totalPages={3} loading={true} />);
 
-    expect(screen.getByRole('button', { name: /loading/i })).toBeDisabled();
-    expect(screen.getByText('Loading more conversations...')).toBeInTheDocument();
+    // Check if pagination buttons are disabled during loading
+    const nextButton = screen.getByRole('button', { name: /next page/i });
+    expect(nextButton).toBeDisabled();
   });
 
   it('allows user to delete conversation', () => {

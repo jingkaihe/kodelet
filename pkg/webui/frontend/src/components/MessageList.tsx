@@ -177,17 +177,9 @@ const MessageList: React.FC<MessageListProps> = ({ messages, toolResults }) => {
                 </div>
               </div>
 
-              {/* Message Content */}
-              <div
-                className="prose prose-sm max-w-none"
-                dangerouslySetInnerHTML={{
-                  __html: renderMessageContent(message.content)
-                }}
-              />
-
               {/* Thinking Block */}
               {message.thinkingText && (
-                <div className="mt-4">
+                <div className="mb-4">
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-2">
                       <div className="badge badge-outline badge-secondary">
@@ -219,14 +211,20 @@ const MessageList: React.FC<MessageListProps> = ({ messages, toolResults }) => {
                     </button>
                   </div>
                   {expandedThinking.includes(index.toString()) && (
-                    <div className="bg-base-200 p-3 rounded-lg">
-                      <div className="prose prose-sm max-w-none">
-                        <pre className="whitespace-pre-wrap text-sm">{message.thinkingText.trim()}</pre>
-                      </div>
+                    <div className="bg-gray-50 border border-gray-200 p-3 rounded-lg">
+                      <pre className="whitespace-pre-wrap text-sm text-gray-700 bg-transparent font-mono">{message.thinkingText.trim()}</pre>
                     </div>
                   )}
                 </div>
               )}
+
+              {/* Message Content */}
+              <div
+                className="prose prose-sm max-w-none"
+                dangerouslySetInnerHTML={{
+                  __html: renderMessageContent(message.content)
+                }}
+              />
 
               {/* Tool Calls */}
               {toolCalls.length > 0 && (

@@ -98,7 +98,6 @@ func TestExchangeAnthropicCode(t *testing.T) {
 		assert.Contains(t, err.Error(), "invalid state parameter")
 	})
 
-
 }
 
 func TestGetAnthropicCredentialsExists(t *testing.T) {

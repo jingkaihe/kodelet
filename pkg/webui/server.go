@@ -54,14 +54,14 @@ func (c *ServerConfig) Validate() error {
 }
 
 // NewServer creates a new web UI server
-func NewServer(config *ServerConfig) (*Server, error) {
+func NewServer(ctx context.Context, config *ServerConfig) (*Server, error) {
 	// Validate configuration
 	if err := config.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid server configuration: %w", err)
 	}
 
 	// Get the conversation service
-	conversationService, err := conversations.GetDefaultConversationService()
+	conversationService, err := conversations.GetDefaultConversationService(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create conversation service: %w", err)
 	}
@@ -93,7 +93,6 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/conversations/{id}", s.handleGetConversation).Methods("GET")
 	api.HandleFunc("/conversations/{id}/tools/{toolCallId}", s.handleGetToolResult).Methods("GET")
 	api.HandleFunc("/conversations/{id}", s.handleDeleteConversation).Methods("DELETE")
-	api.HandleFunc("/search", s.handleSearchConversations).Methods("GET")
 
 	// Static assets from the React build
 	s.router.PathPrefix("/assets/").Handler(s.staticFileHandler())
@@ -319,11 +318,10 @@ func (s *Server) convertToWebMessages(rawMessages json.RawMessage, modelType str
 		}
 
 		role, _ := baseMsg["role"].(string)
-		content := s.extractContentString(baseMsg["content"])
 
 		webMsg := WebMessage{
 			Role:      role,
-			Content:   content,
+			Content:   "",
 			ToolCalls: []WebToolCall{},
 		}
 
@@ -336,9 +334,7 @@ func (s *Server) convertToWebMessages(rawMessages json.RawMessage, modelType str
 			}
 			// Extract thinking content using SDK
 			if textContent, thinkingText, err := s.extractAnthropicContent(rawMsg); err == nil {
-				if textContent != "" {
-					webMsg.Content = textContent
-				}
+				webMsg.Content = textContent
 				webMsg.ThinkingText = thinkingText
 			}
 		case "openai":
@@ -346,7 +342,7 @@ func (s *Server) convertToWebMessages(rawMessages json.RawMessage, modelType str
 				webMsg.ToolCalls = toolCalls
 			}
 			// Extract content using SDK for consistency
-			if textContent, err := s.extractOpenAIContent(rawMsg); err == nil && textContent != "" {
+			if textContent, err := s.extractOpenAIContent(rawMsg); err == nil {
 				webMsg.Content = textContent
 			}
 		}
@@ -361,29 +357,6 @@ func (s *Server) convertToWebMessages(rawMessages json.RawMessage, modelType str
 	}
 
 	return messages, nil
-}
-
-// extractContentString extracts string content from various content formats
-func (s *Server) extractContentString(content interface{}) string {
-	switch c := content.(type) {
-	case string:
-		return c
-	case []interface{}:
-		// Handle array of content blocks
-		var textParts []string
-		for _, block := range c {
-			if blockMap, ok := block.(map[string]interface{}); ok {
-				if blockType, ok := blockMap["type"].(string); ok && blockType == "text" {
-					if text, ok := blockMap["text"].(string); ok {
-						textParts = append(textParts, text)
-					}
-				}
-			}
-		}
-		return strings.Join(textParts, "\n")
-	default:
-		return ""
-	}
 }
 
 // extractAnthropicContent extracts both text content and thinking blocks using Anthropic SDK
@@ -539,34 +512,6 @@ func (s *Server) handleDeleteConversation(w http.ResponseWriter, r *http.Request
 	}
 
 	w.WriteHeader(http.StatusNoContent)
-}
-
-// handleSearchConversations handles GET /api/search
-func (s *Server) handleSearchConversations(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	query := r.URL.Query()
-
-	searchTerm := query.Get("q")
-	if searchTerm == "" {
-		s.writeErrorResponse(w, http.StatusBadRequest, "search term is required", nil)
-		return
-	}
-
-	limit := 50 // Default limit
-	if limitStr := query.Get("limit"); limitStr != "" {
-		if parsedLimit, err := strconv.Atoi(limitStr); err == nil {
-			limit = parsedLimit
-		}
-	}
-
-	// Search conversations
-	response, err := s.conversationService.SearchConversations(ctx, searchTerm, limit)
-	if err != nil {
-		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to search conversations", err)
-		return
-	}
-
-	s.writeJSONResponse(w, response)
 }
 
 // Utility methods

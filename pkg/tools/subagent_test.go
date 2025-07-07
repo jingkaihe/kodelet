@@ -33,7 +33,7 @@ func (m *subagentMockThread) GetConversationID() string                         
 func (m *subagentMockThread) SetConversationID(id string)                                {}
 func (m *subagentMockThread) SaveConversation(ctx context.Context, summarise bool) error { return nil }
 func (m *subagentMockThread) IsPersisted() bool                                          { return false }
-func (m *subagentMockThread) EnablePersistence(enabled bool)                             {}
+func (m *subagentMockThread) EnablePersistence(ctx context.Context, enabled bool)        {}
 func (m *subagentMockThread) Provider() string                                           { return "" }
 func (m *subagentMockThread) GetMessages() ([]llmtypes.Message, error)                   { return nil, nil }
 

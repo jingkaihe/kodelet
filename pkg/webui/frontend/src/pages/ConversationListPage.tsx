@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useCallback } from 'react';
 import { useConversations } from '../hooks/useConversations';
+import { useUrlFilters } from '../hooks/useUrlFilters';
 import ConversationList from '../components/ConversationList';
 import SearchAndFilters from '../components/SearchAndFilters';
 import StatsCard from '../components/StatsCard';
@@ -9,18 +10,16 @@ import EmptyState from '../components/EmptyState';
 import { showToast } from '../utils';
 
 const ConversationListPage: React.FC = () => {
+  const { filters, updateFilters, clearFilters, goToPage, currentPage } = useUrlFilters();
   const {
     conversations,
     stats,
     loading,
     error,
-    hasMore,
-    filters,
-    setFilters,
-    loadMore,
+    totalPages,
     deleteConversation,
     refresh,
-  } = useConversations();
+  } = useConversations({ filters });
 
   const handleDeleteConversation = async (conversationId: string) => {
     if (!confirm('Are you sure you want to delete this conversation?')) {
@@ -35,19 +34,13 @@ const ConversationListPage: React.FC = () => {
     }
   };
 
-  const handleSearch = (searchTerm: string) => {
-    setFilters({ searchTerm, offset: 0 });
-  };
+  const handleSearch = useCallback((searchTerm: string) => {
+    updateFilters({ searchTerm });
+  }, [updateFilters]);
 
-  const handleClearFilters = () => {
-    setFilters({
-      searchTerm: '',
-      sortBy: 'updated',
-      sortOrder: 'desc',
-      limit: 25,
-      offset: 0,
-    });
-  };
+  const handleClearFilters = useCallback(() => {
+    clearFilters();
+  }, [clearFilters]);
 
   return (
     <div className="container mx-auto px-4 py-8">
@@ -60,7 +53,7 @@ const ConversationListPage: React.FC = () => {
       {/* Search and Filters */}
       <SearchAndFilters
         filters={filters}
-        onFiltersChange={setFilters}
+        onFiltersChange={updateFilters}
         onSearch={handleSearch}
         onClearFilters={handleClearFilters}
       />
@@ -72,10 +65,10 @@ const ConversationListPage: React.FC = () => {
       {error && <ErrorAlert message={error} onRetry={refresh} />}
 
       {/* Loading State */}
-      {loading && conversations.length === 0 && <LoadingSpinner message="Loading conversations..." />}
+      {loading && (!conversations || conversations.length === 0) && <LoadingSpinner message="Loading conversations..." />}
 
       {/* Empty State */}
-      {!loading && conversations.length === 0 && !error && (
+      {!loading && conversations && conversations.length === 0 && !error && (
         <EmptyState
           icon="💬"
           title="No conversations found"
@@ -84,12 +77,13 @@ const ConversationListPage: React.FC = () => {
       )}
 
       {/* Conversation List */}
-      {conversations.length > 0 && (
+      {conversations && conversations.length > 0 && (
         <ConversationList
           conversations={conversations}
           loading={loading}
-          hasMore={hasMore}
-          onLoadMore={loadMore}
+          currentPage={currentPage}
+          totalPages={totalPages}
+          onPageChange={goToPage}
           onDelete={handleDeleteConversation}
         />
       )}

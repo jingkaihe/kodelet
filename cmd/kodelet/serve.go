@@ -115,7 +115,7 @@ func runServeCommand(ctx context.Context, config *ServeConfig) {
 	}
 
 	// Create the web server
-	server, err := webui.NewServer(serverConfig)
+	server, err := webui.NewServer(ctx, serverConfig)
 	if err != nil {
 		presenter.Error(err, "failed to create web server")
 		os.Exit(1)

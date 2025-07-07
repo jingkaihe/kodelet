@@ -137,6 +137,7 @@ kodelet run --image file1.png --image file2.png "compare these"
 # Development
 make build|test|lint|format|release    # Standard dev commands
 make build-dev                          # Fast build without frontend assets
+make dev-server                         # Start development server with auto-reload
 make cross-build                        # Cross-compile for multiple platforms
 make cross-build-docker                 # Cross-compile using Docker (recommended)
 make eslint                            # Run frontend linting

@@ -1,9 +1,9 @@
 // API service layer for Kodelet Web UI
 
-import { 
-  Conversation, 
-  ConversationListResponse, 
-  SearchFilters, 
+import {
+  Conversation,
+  ConversationListResponse,
+  SearchFilters,
   ApiError,
   ToolResult
 } from '../types';
@@ -12,7 +12,7 @@ class ApiService {
   private baseUrl = '';
 
   private async request<T>(
-    endpoint: string, 
+    endpoint: string,
     options: RequestInit = {}
   ): Promise<T> {
     const response = await fetch(`${this.baseUrl}${endpoint}`, {
@@ -38,7 +38,7 @@ class ApiService {
 
   async getConversations(filters: Partial<SearchFilters> = {}): Promise<ConversationListResponse> {
     const params = new URLSearchParams();
-    
+
     if (filters.searchTerm) params.append('search', filters.searchTerm);
     if (filters.sortBy) params.append('sortBy', filters.sortBy);
     if (filters.sortOrder) params.append('sortOrder', filters.sortOrder);
@@ -47,8 +47,15 @@ class ApiService {
 
     const queryString = params.toString();
     const endpoint = queryString ? `/api/conversations?${queryString}` : '/api/conversations';
-    
-    return this.request<ConversationListResponse>(endpoint);
+
+    const response = await this.request<ConversationListResponse>(endpoint);
+
+    // Ensure conversations is always an array
+    if (!response.conversations || !Array.isArray(response.conversations)) {
+      response.conversations = [];
+    }
+
+    return response;
   }
 
   async getConversation(id: string): Promise<Conversation> {
@@ -59,10 +66,6 @@ class ApiService {
     await this.request(`/api/conversations/${id}`, {
       method: 'DELETE',
     });
-  }
-
-  async searchConversations(query: string): Promise<ConversationListResponse> {
-    return this.request<ConversationListResponse>(`/api/search?q=${encodeURIComponent(query)}`);
   }
 
   async getToolResult(conversationId: string, toolCallId: string): Promise<ToolResult> {

@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import apiService from './api';
-import { 
-  ConversationListResponse, 
-  Conversation, 
-  ToolResult 
+import {
+  ConversationListResponse,
+  Conversation,
+  ToolResult
 } from '../types';
 
 // Mock fetch globally
@@ -64,7 +64,9 @@ describe('ApiService', () => {
       const mockResponse: ConversationListResponse = {
         conversations: [],
         hasMore: false,
-        totalCount: 0,
+        total: 0,
+        limit: 25,
+        offset: 0,
       };
 
       mockFetch.mockResolvedValueOnce({
@@ -82,7 +84,9 @@ describe('ApiService', () => {
       const mockResponse: ConversationListResponse = {
         conversations: [],
         hasMore: false,
-        totalCount: 0,
+        total: 0,
+        limit: 25,
+        offset: 0,
       };
 
       mockFetch.mockResolvedValueOnce({
@@ -161,28 +165,6 @@ describe('ApiService', () => {
         expect.objectContaining({
           method: 'DELETE',
         })
-      );
-    });
-  });
-
-  describe('searchConversations', () => {
-    it('searches conversations with encoded query', async () => {
-      const mockResponse: ConversationListResponse = {
-        conversations: [],
-        hasMore: false,
-        totalCount: 0,
-      };
-
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockResponse,
-      });
-
-      await apiService.searchConversations('test query & special chars');
-
-      expect(mockFetch).toHaveBeenCalledWith(
-        '/api/search?q=test%20query%20%26%20special%20chars',
-        expect.any(Object)
       );
     });
   });

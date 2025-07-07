@@ -27,6 +27,10 @@ bin/
 build/
 dist/
 
+# Air development server
+tmp/
+build-errors.log
+
 # Anthropic API key
 .anthropic
 anthropic.json

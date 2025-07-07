@@ -22,40 +22,40 @@ const StatsCard: React.FC<StatsCardProps> = ({ stats }) => {
           {/* Basic Stats */}
           <div className="stat">
             <div className="stat-title">Total Conversations</div>
-            <div className="stat-value">{formatNumber(stats.totalConversations || 0)}</div>
+            <div className="text-lg font-semibold">{formatNumber(stats.totalConversations || 0)}</div>
           </div>
           <div className="stat">
             <div className="stat-title">Total Messages</div>
-            <div className="stat-value">{formatNumber(stats.totalMessages || 0)}</div>
+            <div className="text-lg font-semibold">{formatNumber(stats.totalMessages || 0)}</div>
           </div>
           <div className="stat">
             <div className="stat-title">Total Tokens</div>
-            <div className="stat-value">{formatNumber(stats.totalTokens || 0)}</div>
+            <div className="text-lg font-semibold">{formatNumber(stats.totalTokens || 0)}</div>
           </div>
           <div className="stat">
             <div className="stat-title">Total Cost</div>
-            <div className="stat-value">{formatCost(stats.totalCost || 0)}</div>
+            <div className="text-lg font-semibold">{formatCost(stats.totalCost || 0)}</div>
           </div>
           
           {/* Token Breakdown */}
           <div className="stat">
             <div className="stat-title">Input Tokens</div>
-            <div className="stat-value">{formatNumber(stats.inputTokens || 0)}</div>
+            <div className="text-lg font-semibold">{formatNumber(stats.inputTokens || 0)}</div>
             <div className="stat-desc">Cost: {formatCost(stats.inputCost || 0)}</div>
           </div>
           <div className="stat">
             <div className="stat-title">Output Tokens</div>
-            <div className="stat-value">{formatNumber(stats.outputTokens || 0)}</div>
+            <div className="text-lg font-semibold">{formatNumber(stats.outputTokens || 0)}</div>
             <div className="stat-desc">Cost: {formatCost(stats.outputCost || 0)}</div>
           </div>
           <div className="stat">
             <div className="stat-title">Cache Read Tokens</div>
-            <div className="stat-value">{formatNumber(stats.cacheReadTokens || 0)}</div>
+            <div className="text-lg font-semibold">{formatNumber(stats.cacheReadTokens || 0)}</div>
             <div className="stat-desc">Cost: {formatCost(stats.cacheReadCost || 0)}</div>
           </div>
           <div className="stat">
             <div className="stat-title">Cache Write Tokens</div>
-            <div className="stat-value">{formatNumber(stats.cacheWriteTokens || 0)}</div>
+            <div className="text-lg font-semibold">{formatNumber(stats.cacheWriteTokens || 0)}</div>
             <div className="stat-desc">Cost: {formatCost(stats.cacheWriteCost || 0)}</div>
           </div>
         </div>

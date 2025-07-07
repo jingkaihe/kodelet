@@ -39,24 +39,28 @@ export interface ToolResult {
 export interface Usage {
   inputTokens?: number;
   outputTokens?: number;
+  cacheCreationInputTokens?: number;
   cacheReadInputTokens?: number;
   inputCost?: number;
   outputCost?: number;
   cacheCreationCost?: number;
   cacheReadCost?: number;
+  currentContextWindow?: number;
+  maxContextWindow?: number;
 }
 
 export interface Conversation {
   id: string;
-  messages: Message[];
-  toolResults: Record<string, ToolResult>;
-  usage: Usage;
+  messages?: Message[]; // Optional for list view
+  toolResults?: Record<string, ToolResult>; // Optional for list view
+  usage?: Usage; // Optional for list view
   createdAt: string;
   updatedAt: string;
   messageCount: number;
   summary?: string;
   modelType?: string;
   preview?: string;
+  firstMessage?: string; // For list view - truncated first user message
   created_at?: string; // Alternative format
   updated_at?: string; // Alternative format
 }
@@ -64,7 +68,9 @@ export interface Conversation {
 export interface ConversationListResponse {
   conversations: Conversation[];
   hasMore: boolean;
-  totalCount?: number;
+  total: number;
+  limit: number;
+  offset: number;
   stats?: ConversationStats;
 }
 

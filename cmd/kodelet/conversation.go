@@ -298,14 +298,15 @@ type ConversationSummaryOutput struct {
 }
 
 // listConversationsCmd displays a list of saved conversations with query options
-func listConversationsCmd(_ context.Context, config *ConversationListConfig) {
+func listConversationsCmd(ctx context.Context, config *ConversationListConfig) {
 
 	// Create a store
-	store, err := conversations.GetConversationStore()
+	store, err := conversations.GetConversationStore(ctx)
 	if err != nil {
 		presenter.Error(err, "Failed to initialize conversation store")
 		os.Exit(1)
 	}
+	defer store.Close()
 
 	// Prepare query options
 	options := conversations.QueryOptions{
@@ -339,12 +340,13 @@ func listConversationsCmd(_ context.Context, config *ConversationListConfig) {
 	}
 
 	// Query conversations with options
-	summaries, err := store.Query(options)
+	result, err := store.Query(options)
 	if err != nil {
 		presenter.Error(err, "Failed to list conversations")
 		os.Exit(1)
 	}
 
+	summaries := result.ConversationSummaries
 	if len(summaries) == 0 {
 		presenter.Info("No conversations found matching your criteria.")
 		return
@@ -365,14 +367,15 @@ func listConversationsCmd(_ context.Context, config *ConversationListConfig) {
 }
 
 // deleteConversationCmd deletes a specific conversation
-func deleteConversationCmd(_ context.Context, id string, config *ConversationDeleteConfig) {
+func deleteConversationCmd(ctx context.Context, id string, config *ConversationDeleteConfig) {
 
 	// Create a store
-	store, err := conversations.GetConversationStore()
+	store, err := conversations.GetConversationStore(ctx)
 	if err != nil {
 		presenter.Error(err, "Failed to initialize conversation store")
 		os.Exit(1)
 	}
+	defer store.Close()
 
 	// If no-confirm flag is not set, prompt for confirmation
 	if !config.NoConfirm {
@@ -395,14 +398,15 @@ func deleteConversationCmd(_ context.Context, id string, config *ConversationDel
 }
 
 // showConversationCmd displays a specific conversation
-func showConversationCmd(_ context.Context, id string, config *ConversationShowConfig) {
+func showConversationCmd(ctx context.Context, id string, config *ConversationShowConfig) {
 
 	// Create a store
-	store, err := conversations.GetConversationStore()
+	store, err := conversations.GetConversationStore(ctx)
 	if err != nil {
 		presenter.Error(err, "Failed to initialize conversation store")
 		os.Exit(1)
 	}
+	defer store.Close()
 
 	// Load the conversation record
 	record, err := store.Load(id)

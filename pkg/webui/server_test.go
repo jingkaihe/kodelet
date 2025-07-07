@@ -22,7 +22,6 @@ type mockConversationService struct {
 	deleteFunc  func(ctx context.Context, id string) error
 	resolveFunc func(ctx context.Context, id string) (string, error)
 	getToolFunc func(ctx context.Context, conversationID, toolCallID string) (*conversations.GetToolResultResponse, error)
-	searchFunc  func(ctx context.Context, query string, limit int) (*conversations.ListConversationsResponse, error)
 	statsFunc   func(ctx context.Context) (*conversations.ConversationStatistics, error)
 	closeFunc   func() error
 }
@@ -60,13 +59,6 @@ func (m *mockConversationService) GetToolResult(ctx context.Context, conversatio
 		return m.getToolFunc(ctx, conversationID, toolCallID)
 	}
 	return &conversations.GetToolResultResponse{}, nil
-}
-
-func (m *mockConversationService) SearchConversations(ctx context.Context, query string, limit int) (*conversations.ListConversationsResponse, error) {
-	if m.searchFunc != nil {
-		return m.searchFunc(ctx, query, limit)
-	}
-	return &conversations.ListConversationsResponse{}, nil
 }
 
 func (m *mockConversationService) GetConversationStatistics(ctx context.Context) (*conversations.ConversationStatistics, error) {
@@ -182,7 +174,7 @@ func TestServer_handleGetConversation(t *testing.T) {
 				ID:          conversationID,
 				Summary:     "Test conversation",
 				ModelType:   "anthropic",
-				RawMessages: json.RawMessage(`[{"role":"user","content":"hello"}]`),
+				RawMessages: json.RawMessage(`[{"role":"user","content":[{"type":"text","text":"hello"}]}]`),
 			}, nil
 		},
 	}
@@ -237,66 +229,6 @@ func TestServer_handleDeleteConversation(t *testing.T) {
 	assert.Equal(t, http.StatusNoContent, w.Code)
 	assert.True(t, deleteCalled)
 }
-
-func TestServer_handleSearchConversations(t *testing.T) {
-	tests := []struct {
-		name           string
-		query          string
-		expectedStatus int
-		mockResponse   *conversations.ListConversationsResponse
-		mockError      error
-	}{
-		{
-			name:           "successful search",
-			query:          "?q=test&limit=10",
-			expectedStatus: http.StatusOK,
-			mockResponse: &conversations.ListConversationsResponse{
-				Conversations: []conversations.ConversationSummary{
-					{ID: "1", Summary: "Test result"},
-				},
-				Total: 1,
-			},
-		},
-		{
-			name:           "missing search term",
-			query:          "?limit=10",
-			expectedStatus: http.StatusBadRequest,
-		},
-		{
-			name:           "search error",
-			query:          "?q=test",
-			expectedStatus: http.StatusInternalServerError,
-			mockError:      fmt.Errorf("search failed"),
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			mockService := &mockConversationService{
-				searchFunc: func(ctx context.Context, query string, limit int) (*conversations.ListConversationsResponse, error) {
-					if tt.mockError != nil {
-						return nil, tt.mockError
-					}
-					return tt.mockResponse, nil
-				},
-			}
-
-			server := &Server{
-				conversationService: mockService,
-				router:              mux.NewRouter(),
-			}
-
-			req := httptest.NewRequest("GET", "/api/search"+tt.query, nil)
-			w := httptest.NewRecorder()
-
-			server.handleSearchConversations(w, req)
-
-			assert.Equal(t, tt.expectedStatus, w.Code)
-		})
-	}
-}
-
-
 
 func TestServer_handleGetToolResult(t *testing.T) {
 	conversationID := "conv-123"
@@ -367,13 +299,13 @@ func TestServer_convertToWebMessages(t *testing.T) {
 		},
 		{
 			name:         "simple text messages",
-			rawMessages:  json.RawMessage(`[{"role":"user","content":"Hello"},{"role":"assistant","content":"Hi there!"}]`),
+			rawMessages:  json.RawMessage(`[{"role":"user","content":[{"type":"text","text":"Hello"}]},{"role":"assistant","content":[{"type":"text","text":"Hi there!"}]}]`),
 			modelType:    "anthropic",
 			expectedMsgs: 2,
 		},
 		{
 			name:         "empty messages should be filtered out",
-			rawMessages:  json.RawMessage(`[{"role":"user","content":""},{"role":"assistant","content":"Hi there!"},{"role":"user","content":""}]`),
+			rawMessages:  json.RawMessage(`[{"role":"user","content":[]},{"role":"assistant","content":[{"type":"text","text":"Hi there!"}]},{"role":"user","content":[]}]`),
 			modelType:    "anthropic",
 			expectedMsgs: 1,
 		},
