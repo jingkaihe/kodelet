@@ -30,29 +30,29 @@ const ConversationMetadata: React.FC<ConversationMetadataProps> = ({ conversatio
   return (
     <div className="card bg-base-200 shadow-xl mb-6">
       <div className="card-body">
-        <h2 className="card-title mb-4">Conversation Details</h2>
+        <h2 className="card-title mb-4">Statistics</h2>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           {/* Basic Stats */}
           <div className="stat">
             <div className="stat-title">Messages</div>
-            <div className="stat-value">{formatNumber(conversation.messageCount || 0)}</div>
+            <div className="text-lg font-semibold">{formatNumber(conversation.messageCount || 0)}</div>
           </div>
           <div className="stat">
             <div className="stat-title">Model</div>
-            <div className="stat-value">
+            <div className="text-lg font-semibold">
               {conversation.modelType || 'Unknown'}
             </div>
           </div>
           <div className="stat">
             <div className="stat-title">Created</div>
-            <div className="stat-value">
+            <div className="text-lg font-semibold">
               {formatDate(conversation.createdAt)}
             </div>
           </div>
           <div className="stat">
             <div className="stat-title">Updated</div>
-            <div className="stat-value">
+            <div className="text-lg font-semibold">
               {formatDate(conversation.updatedAt)}
             </div>
           </div>
@@ -62,7 +62,7 @@ const ConversationMetadata: React.FC<ConversationMetadataProps> = ({ conversatio
             <>
               <div className="stat">
                 <div className="stat-title">Context Usage</div>
-                <div className="stat-value">{calculateContextUsage()}</div>
+                <div className="text-lg font-semibold">{calculateContextUsage()}</div>
                 <div className="stat-desc">
                   {conversation.usage?.currentContextWindow ?
                     `${formatNumber(conversation.usage.currentContextWindow)} / ${formatNumber(conversation.usage?.maxContextWindow || 0)}` :
@@ -72,24 +72,24 @@ const ConversationMetadata: React.FC<ConversationMetadataProps> = ({ conversatio
               </div>
               <div className="stat">
                 <div className="stat-title">Total Cost</div>
-                <div className="stat-value">{conversation.usage ? formatCost(conversation.usage) : '$0.0000'}</div>
+                <div className="text-lg font-semibold">{conversation.usage ? formatCost(conversation.usage) : '$0.0000'}</div>
               </div>
               <div className="stat">
                 <div className="stat-title">Input Tokens</div>
-                <div className="stat-value">{formatNumber(conversation.usage?.inputTokens || 0)}</div>
+                <div className="text-lg font-semibold">{formatNumber(conversation.usage?.inputTokens || 0)}</div>
               </div>
               <div className="stat">
                 <div className="stat-title">Output Tokens</div>
-                <div className="stat-value">{formatNumber(conversation.usage?.outputTokens || 0)}</div>
+                <div className="text-lg font-semibold">{formatNumber(conversation.usage?.outputTokens || 0)}</div>
               </div>
               <div className="stat">
                 <div className="stat-title">Cache Read Tokens</div>
-                <div className="stat-value">{formatNumber(conversation.usage?.cacheReadInputTokens || 0)}</div>
+                <div className="text-lg font-semibold">{formatNumber(conversation.usage?.cacheReadInputTokens || 0)}</div>
               </div>
               {conversation.usage?.cacheCreationInputTokens && (
                 <div className="stat">
                   <div className="stat-title">Cache Creation Tokens</div>
-                  <div className="stat-value">{formatNumber(conversation.usage.cacheCreationInputTokens)}</div>
+                  <div className="text-lg font-semibold">{formatNumber(conversation.usage.cacheCreationInputTokens)}</div>
                 </div>
               )}
             </>
