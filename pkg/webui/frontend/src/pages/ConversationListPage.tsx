@@ -65,10 +65,10 @@ const ConversationListPage: React.FC = () => {
       {error && <ErrorAlert message={error} onRetry={refresh} />}
 
       {/* Loading State */}
-      {loading && conversations.length === 0 && <LoadingSpinner message="Loading conversations..." />}
+      {loading && (!conversations || conversations.length === 0) && <LoadingSpinner message="Loading conversations..." />}
 
       {/* Empty State */}
-      {!loading && conversations.length === 0 && !error && (
+      {!loading && conversations && conversations.length === 0 && !error && (
         <EmptyState
           icon="💬"
           title="No conversations found"
@@ -77,7 +77,7 @@ const ConversationListPage: React.FC = () => {
       )}
 
       {/* Conversation List */}
-      {conversations.length > 0 && (
+      {conversations && conversations.length > 0 && (
         <ConversationList
           conversations={conversations}
           loading={loading}

@@ -48,7 +48,14 @@ class ApiService {
     const queryString = params.toString();
     const endpoint = queryString ? `/api/conversations?${queryString}` : '/api/conversations';
 
-    return this.request<ConversationListResponse>(endpoint);
+    const response = await this.request<ConversationListResponse>(endpoint);
+
+    // Ensure conversations is always an array
+    if (!response.conversations || !Array.isArray(response.conversations)) {
+      response.conversations = [];
+    }
+
+    return response;
   }
 
   async getConversation(id: string): Promise<Conversation> {

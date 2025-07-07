@@ -173,6 +173,8 @@ func (s *ConversationService) ListConversations(ctx context.Context, req *ListCo
 			CacheReadCost:      usageStats.CacheReadCost,
 			CacheWriteCost:     usageStats.CacheWriteCost,
 		}
+	} else {
+		summaries = []ConversationSummary{}
 	}
 
 	response := &ListConversationsResponse{

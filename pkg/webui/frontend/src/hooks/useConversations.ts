@@ -76,7 +76,8 @@ export const useConversations = (options: UseConversationsOptions): UseConversat
         return;
       }
       
-      setConversations(response.conversations);
+      // Ensure conversations is always an array
+      setConversations(Array.isArray(response.conversations) ? response.conversations : []);
       
       // Update stats from the response
       if (response.stats) {
