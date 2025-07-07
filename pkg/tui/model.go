@@ -643,9 +643,18 @@ func (m *Model) updateUsage() (usageText string, costText string) {
 	usage := m.assistant.GetUsage()
 
 	if usage.TotalTokens() > 0 {
-		usageText = fmt.Sprintf("Tokens: %d in / %d out / %d cw / %d cr / %d total | Ctx: %d / %d",
+		// Build context window display with percentage if available
+		var ctxDisplay string
+		if usage.MaxContextWindow > 0 {
+			percentage := float64(usage.CurrentContextWindow) / float64(usage.MaxContextWindow) * 100
+			ctxDisplay = fmt.Sprintf("Ctx: %d / %d (%.1f%%)", usage.CurrentContextWindow, usage.MaxContextWindow, percentage)
+		} else {
+			ctxDisplay = fmt.Sprintf("Ctx: %d / %d", usage.CurrentContextWindow, usage.MaxContextWindow)
+		}
+
+		usageText = fmt.Sprintf("Tokens: %d in / %d out / %d cw / %d cr / %d total | %s",
 			usage.InputTokens, usage.OutputTokens, usage.CacheCreationInputTokens, usage.CacheReadInputTokens, usage.TotalTokens(),
-			usage.CurrentContextWindow, usage.MaxContextWindow)
+			ctxDisplay)
 
 		// Add cost information if available
 		if usage.TotalCost() > 0 {

@@ -210,6 +210,106 @@ func TestStats(t *testing.T) {
 	assert.Contains(t, result, "Total: 185") // 100+50+25+10
 	assert.Contains(t, result, "[Cost Stats]")
 	assert.Contains(t, result, "Total: $0.1850") // 0.1+0.05+0.025+0.01
+	// Should not contain context window info since MaxContextWindow is 0
+	assert.NotContains(t, result, "[Context Window]")
+}
+
+func TestStatsWithContextWindow(t *testing.T) {
+	var output bytes.Buffer
+	presenter := NewWithOptions(&output, nil, ColorNever)
+
+	stats := &UsageStats{
+		InputTokens:          100,
+		OutputTokens:         50,
+		CacheWriteTokens:     25,
+		CacheReadTokens:      10,
+		InputCost:            0.1,
+		OutputCost:           0.05,
+		CacheWriteCost:       0.025,
+		CacheReadCost:        0.01,
+		CurrentContextWindow: 8000,
+		MaxContextWindow:     10000,
+	}
+
+	presenter.Stats(stats)
+
+	result := output.String()
+	lines := strings.Split(strings.TrimSpace(result), "\n")
+	require.Len(t, lines, 3) // Should have 3 lines: Usage Stats, Context Window, Cost Stats
+
+	// Check usage stats line
+	assert.Contains(t, result, "[Usage Stats]")
+	assert.Contains(t, result, "Total: 185")
+
+	// Check context window line
+	assert.Contains(t, result, "[Context Window]")
+	assert.Contains(t, result, "Current: 8000")
+	assert.Contains(t, result, "Max: 10000")
+	assert.Contains(t, result, "Usage: 80.0%")
+
+	// Check cost stats line
+	assert.Contains(t, result, "[Cost Stats]")
+	assert.Contains(t, result, "Total: $0.1850")
+}
+
+func TestStatsWithContextWindowZeroMax(t *testing.T) {
+	var output bytes.Buffer
+	presenter := NewWithOptions(&output, nil, ColorNever)
+
+	stats := &UsageStats{
+		InputTokens:          100,
+		OutputTokens:         50,
+		CurrentContextWindow: 8000,
+		MaxContextWindow:     0, // Zero max should not show context window stats
+	}
+
+	presenter.Stats(stats)
+
+	result := output.String()
+	// Should not contain context window info when MaxContextWindow is 0
+	assert.NotContains(t, result, "[Context Window]")
+	assert.Contains(t, result, "[Usage Stats]")
+	assert.Contains(t, result, "[Cost Stats]")
+}
+
+func TestStatsWithContextWindowFullUsage(t *testing.T) {
+	var output bytes.Buffer
+	presenter := NewWithOptions(&output, nil, ColorNever)
+
+	stats := &UsageStats{
+		InputTokens:          100,
+		OutputTokens:         50,
+		CurrentContextWindow: 10000,
+		MaxContextWindow:     10000, // 100% usage
+	}
+
+	presenter.Stats(stats)
+
+	result := output.String()
+	assert.Contains(t, result, "[Context Window]")
+	assert.Contains(t, result, "Current: 10000")
+	assert.Contains(t, result, "Max: 10000")
+	assert.Contains(t, result, "Usage: 100.0%")
+}
+
+func TestStatsWithContextWindowPartialUsage(t *testing.T) {
+	var output bytes.Buffer
+	presenter := NewWithOptions(&output, nil, ColorNever)
+
+	stats := &UsageStats{
+		InputTokens:          100,
+		OutputTokens:         50,
+		CurrentContextWindow: 3333,
+		MaxContextWindow:     10000, // 33.33% usage
+	}
+
+	presenter.Stats(stats)
+
+	result := output.String()
+	assert.Contains(t, result, "[Context Window]")
+	assert.Contains(t, result, "Current: 3333")
+	assert.Contains(t, result, "Max: 10000")
+	assert.Contains(t, result, "Usage: 33.3%")
 }
 
 func TestStatsNil(t *testing.T) {
@@ -227,6 +327,22 @@ func TestStatsQuietMode(t *testing.T) {
 	presenter.SetQuiet(true)
 
 	stats := &UsageStats{InputTokens: 100}
+	presenter.Stats(stats)
+
+	assert.Empty(t, output.String())
+}
+
+func TestStatsQuietModeWithContextWindow(t *testing.T) {
+	var output bytes.Buffer
+	presenter := NewWithOptions(&output, nil, ColorNever)
+	presenter.SetQuiet(true)
+
+	stats := &UsageStats{
+		InputTokens:          100,
+		OutputTokens:         50,
+		CurrentContextWindow: 8000,
+		MaxContextWindow:     10000,
+	}
 	presenter.Stats(stats)
 
 	assert.Empty(t, output.String())
@@ -279,6 +395,8 @@ func TestConvertUsageStats(t *testing.T) {
 		OutputCost:               0.05,
 		CacheCreationCost:        0.025,
 		CacheReadCost:            0.01,
+		CurrentContextWindow:     8000,
+		MaxContextWindow:         10000,
 	}
 
 	result = ConvertUsageStats(llmStats)
@@ -293,6 +411,31 @@ func TestConvertUsageStats(t *testing.T) {
 	assert.Equal(t, 0.05, result.OutputCost)
 	assert.Equal(t, 0.025, result.CacheWriteCost)
 	assert.Equal(t, 0.01, result.CacheReadCost)
+	assert.Equal(t, 8000, result.CurrentContextWindow)
+	assert.Equal(t, 10000, result.MaxContextWindow)
+}
+
+func TestConvertUsageStatsWithoutContextWindow(t *testing.T) {
+	// Test conversion with zero context window values
+	llmStats := &llmtypes.Usage{
+		InputTokens:              100,
+		OutputTokens:             50,
+		CacheCreationInputTokens: 25,
+		CacheReadInputTokens:     10,
+		InputCost:                0.1,
+		OutputCost:               0.05,
+		CacheCreationCost:        0.025,
+		CacheReadCost:            0.01,
+		CurrentContextWindow:     0,
+		MaxContextWindow:         0,
+	}
+
+	result := ConvertUsageStats(llmStats)
+	require.NotNil(t, result)
+
+	// Verify context window fields are properly set to zero
+	assert.Equal(t, 0, result.CurrentContextWindow)
+	assert.Equal(t, 0, result.MaxContextWindow)
 }
 
 func TestColorModeConfiguration(t *testing.T) {
@@ -356,9 +499,16 @@ func TestGlobalFunctions(t *testing.T) {
 
 	// Test Stats function
 	output.Reset()
-	Stats(&UsageStats{InputTokens: 100, OutputTokens: 50})
+	Stats(&UsageStats{
+		InputTokens:          100,
+		OutputTokens:         50,
+		CurrentContextWindow: 8000,
+		MaxContextWindow:     10000,
+	})
 	assert.Contains(t, output.String(), "[Usage Stats]")
 	assert.Contains(t, output.String(), "Input tokens: 100")
+	assert.Contains(t, output.String(), "[Context Window]")
+	assert.Contains(t, output.String(), "Usage: 80.0%")
 
 	// Test Separator function
 	output.Reset()

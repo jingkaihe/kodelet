@@ -13,14 +13,16 @@ import (
 
 // UsageStats represents token usage and cost information
 type UsageStats struct {
-	InputTokens      int64
-	OutputTokens     int64
-	CacheWriteTokens int64
-	CacheReadTokens  int64
-	InputCost        float64
-	OutputCost       float64
-	CacheWriteCost   float64
-	CacheReadCost    float64
+	InputTokens          int64
+	OutputTokens         int64
+	CacheWriteTokens     int64
+	CacheReadTokens      int64
+	InputCost            float64
+	OutputCost           float64
+	CacheWriteCost       float64
+	CacheReadCost        float64
+	CurrentContextWindow int
+	MaxContextWindow     int
 }
 
 // Presenter defines the interface for consistent CLI output
@@ -190,6 +192,13 @@ func (p *TerminalPresenter) Stats(usage *UsageStats) {
 	statsColor.Fprintf(p.output, "[Usage Stats] Input tokens: %d | Output tokens: %d | Cache write: %d | Cache read: %d | Total: %d\n",
 		usage.InputTokens, usage.OutputTokens, usage.CacheWriteTokens, usage.CacheReadTokens, totalTokens)
 
+	// Context window stats
+	if usage.MaxContextWindow > 0 {
+		percentage := float64(usage.CurrentContextWindow) / float64(usage.MaxContextWindow) * 100
+		statsColor.Fprintf(p.output, "[Context Window] Current: %d | Max: %d | Usage: %.1f%%\n",
+			usage.CurrentContextWindow, usage.MaxContextWindow, percentage)
+	}
+
 	// Cost stats
 	totalCost := usage.InputCost + usage.OutputCost + usage.CacheWriteCost + usage.CacheReadCost
 	statsColor.Fprintf(p.output, "[Cost Stats] Input: $%.4f | Output: $%.4f | Cache write: $%.4f | Cache read: $%.4f | Total: $%.4f\n",
@@ -223,14 +232,16 @@ func ConvertUsageStats(stats *llmtypes.Usage) *UsageStats {
 	}
 
 	return &UsageStats{
-		InputTokens:      int64(stats.InputTokens),
-		OutputTokens:     int64(stats.OutputTokens),
-		CacheWriteTokens: int64(stats.CacheCreationInputTokens),
-		CacheReadTokens:  int64(stats.CacheReadInputTokens),
-		InputCost:        stats.InputCost,
-		OutputCost:       stats.OutputCost,
-		CacheWriteCost:   stats.CacheCreationCost,
-		CacheReadCost:    stats.CacheReadCost,
+		InputTokens:          int64(stats.InputTokens),
+		OutputTokens:         int64(stats.OutputTokens),
+		CacheWriteTokens:     int64(stats.CacheCreationInputTokens),
+		CacheReadTokens:      int64(stats.CacheReadInputTokens),
+		InputCost:            stats.InputCost,
+		OutputCost:           stats.OutputCost,
+		CacheWriteCost:       stats.CacheCreationCost,
+		CacheReadCost:        stats.CacheReadCost,
+		CurrentContextWindow: stats.CurrentContextWindow,
+		MaxContextWindow:     stats.MaxContextWindow,
 	}
 }
 
