@@ -11,8 +11,6 @@ const SubagentRenderer: React.FC<SubagentRendererProps> = ({ toolResult }) => {
   const meta = toolResult.metadata as SubagentMetadata;
   if (!meta) return null;
 
-  const modelStrength = meta.modelStrength || meta.model_strength || 'unknown';
-
   const formatMarkdown = (text: string): string => {
     if (!text) return '';
     // Configure marked for better code rendering
@@ -26,7 +24,6 @@ const SubagentRenderer: React.FC<SubagentRendererProps> = ({ toolResult }) => {
   return (
     <ToolCard
       title="🤖 Sub-agent"
-      badge={{ text: `${modelStrength} model`, className: 'badge-info' }}
     >
       <div className="space-y-4">
         <div>

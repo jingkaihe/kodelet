@@ -50,26 +50,19 @@ func TestSubAgentTool_ValidateInput(t *testing.T) {
 	state := NewBasicState(context.TODO())
 
 	// Valid inputs
-	err := tool.ValidateInput(state, `{"question": "test", "model_strength": "weak"}`)
-	assert.NoError(t, err)
-
-	err = tool.ValidateInput(state, `{"question": "test", "model_strength": "strong"}`)
+	err := tool.ValidateInput(state, `{"question": "test"}`)
 	assert.NoError(t, err)
 
 	// Invalid inputs
-	err = tool.ValidateInput(state, `{"question": "", "model_strength": "weak"}`)
+	err = tool.ValidateInput(state, `{"question": ""}`)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "question is required")
-
-	err = tool.ValidateInput(state, `{"question": "test", "model_strength": "invalid"}`)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "model_strength must be either 'weak' or 'strong'")
 }
 
 func TestSubAgentTool_TracingKVs(t *testing.T) {
 	tool := &SubAgentTool{}
 
-	kvs, err := tool.TracingKVs(`{"question": "test question", "model_strength": "weak"}`)
+	kvs, err := tool.TracingKVs(`{"question": "test question"}`)
 	assert.NoError(t, err)
 	expected := []attribute.KeyValue{
 		attribute.String("question", "test question"),
@@ -81,10 +74,9 @@ func TestSubAgentTool_Execute_Success(t *testing.T) {
 	tool := &SubAgentTool{}
 	mockThread := new(subagentMockThread)
 
-	// Test weak model
 	mockThread.On("SendMessage", mock.Anything, "test question", mock.Anything, llmtypes.MessageOpt{
-		PromptCache:        false,
-		UseWeakModel:       true,
+		PromptCache:        true,
+		UseWeakModel:       false,
 		NoSaveConversation: true,
 	}).Return("test response", nil)
 
@@ -93,7 +85,7 @@ func TestSubAgentTool_Execute_Success(t *testing.T) {
 		MessageHandler: &llmtypes.StringCollectorHandler{Silent: true},
 	})
 
-	result := tool.Execute(ctx, NewBasicState(ctx), `{"question": "test question", "model_strength": "weak"}`)
+	result := tool.Execute(ctx, NewBasicState(ctx), `{"question": "test question"}`)
 
 	assert.False(t, result.IsError())
 	assert.Equal(t, "test response", result.GetResult())
@@ -106,37 +98,7 @@ func TestSubAgentTool_Execute_Success(t *testing.T) {
 	var metadata tooltypes.SubAgentMetadata
 	assert.True(t, tooltypes.ExtractMetadata(structuredData.Metadata, &metadata))
 	assert.Equal(t, "test question", metadata.Question)
-	assert.Equal(t, "weak", metadata.ModelStrength)
 	assert.Equal(t, "test response", metadata.Response)
-
-	mockThread.AssertExpectations(t)
-}
-
-func TestSubAgentTool_Execute_StrongModel(t *testing.T) {
-	tool := &SubAgentTool{}
-	mockThread := new(subagentMockThread)
-
-	// Test strong model
-	mockThread.On("SendMessage", mock.Anything, "complex question", mock.Anything, llmtypes.MessageOpt{
-		PromptCache:        true,
-		UseWeakModel:       false,
-		NoSaveConversation: true,
-	}).Return("complex response", nil)
-
-	ctx := context.WithValue(context.Background(), llmtypes.SubAgentConfig{}, llmtypes.SubAgentConfig{
-		Thread:         mockThread,
-		MessageHandler: &llmtypes.StringCollectorHandler{Silent: true},
-	})
-
-	result := tool.Execute(ctx, NewBasicState(ctx), `{"question": "complex question", "model_strength": "strong"}`)
-
-	assert.False(t, result.IsError())
-
-	// Verify metadata propagation
-	var metadata tooltypes.SubAgentMetadata
-	assert.True(t, tooltypes.ExtractMetadata(result.StructuredData().Metadata, &metadata))
-	assert.Equal(t, "complex question", metadata.Question)
-	assert.Equal(t, "strong", metadata.ModelStrength)
 
 	mockThread.AssertExpectations(t)
 }
@@ -145,7 +107,7 @@ func TestSubAgentTool_Execute_Errors(t *testing.T) {
 	tool := &SubAgentTool{}
 
 	// Test missing context
-	result := tool.Execute(context.Background(), NewBasicState(context.TODO()), `{"question": "test", "model_strength": "weak"}`)
+	result := tool.Execute(context.Background(), NewBasicState(context.TODO()), `{"question": "test"}`)
 	assert.True(t, result.IsError())
 	assert.Contains(t, result.GetError(), "sub-agent config not found")
 
@@ -158,7 +120,7 @@ func TestSubAgentTool_Execute_Errors(t *testing.T) {
 		MessageHandler: &llmtypes.StringCollectorHandler{Silent: true},
 	})
 
-	result = tool.Execute(ctx, NewBasicState(ctx), `{"question": "test", "model_strength": "weak"}`)
+	result = tool.Execute(ctx, NewBasicState(ctx), `{"question": "test"}`)
 	assert.True(t, result.IsError())
 	assert.Contains(t, result.GetError(), "thread error")
 
@@ -166,7 +128,6 @@ func TestSubAgentTool_Execute_Errors(t *testing.T) {
 	var metadata tooltypes.SubAgentMetadata
 	assert.True(t, tooltypes.ExtractMetadata(result.StructuredData().Metadata, &metadata))
 	assert.Equal(t, "test", metadata.Question)
-	assert.Equal(t, "weak", metadata.ModelStrength)
 	assert.Empty(t, metadata.Response)
 
 	mockThread.AssertExpectations(t)
@@ -175,9 +136,8 @@ func TestSubAgentTool_Execute_Errors(t *testing.T) {
 func TestSubAgentToolResult_Methods(t *testing.T) {
 	// Test successful result
 	result := &SubAgentToolResult{
-		result:        "success",
-		question:      "test q",
-		modelStrength: "weak",
+		result:   "success",
+		question: "test q",
 	}
 
 	assert.Equal(t, "success", result.GetResult())
@@ -187,9 +147,8 @@ func TestSubAgentToolResult_Methods(t *testing.T) {
 
 	// Test error result
 	errorResult := &SubAgentToolResult{
-		err:           "error",
-		question:      "test q",
-		modelStrength: "strong",
+		err:      "error",
+		question: "test q",
 	}
 
 	assert.Empty(t, errorResult.GetResult())

@@ -15,10 +15,9 @@ import (
 )
 
 type SubAgentToolResult struct {
-	result        string
-	err           string
-	question      string
-	modelStrength string
+	result   string
+	err      string
+	question string
 }
 
 func (r *SubAgentToolResult) GetResult() string {
@@ -39,16 +38,8 @@ func (r *SubAgentToolResult) AssistantFacing() string {
 
 type SubAgentTool struct{}
 
-type ModelStrength string
-
-const (
-	ModelStrengthWeak   ModelStrength = "weak"
-	ModelStrengthStrong ModelStrength = "strong"
-)
-
 type SubAgentInput struct {
-	Question      string        `json:"question" jsonschema:"description=The question to ask"`
-	ModelStrength ModelStrength `json:"model_strength" jsonschema:"description=The strength of the model to use, it can be 'weak' or 'strong'"`
+	Question string `json:"question" jsonschema:"description=The question to ask"`
 }
 
 func (t *SubAgentTool) Name() string {
@@ -65,10 +56,6 @@ This tool is ideal for tasks that involves code searching, architecture analysis
 
 ## Input
 - question: A description of the question to ask the subagent.
-- model_strength: The strength of the model to use, it can be "weak" or "strong".
-
-Use "weak" model when you want it to perform simple multi-turn search and information summary.
-Use "strong" model when you want it to perform strong architecture thinking and reasoning.
 
 ## Common Use Cases
 * If you want to do multi-turn search using grep_tool and file_read, and you don't know exactly what keywords to use. You should use this subagent tool.
@@ -99,10 +86,6 @@ func (t *SubAgentTool) ValidateInput(state tooltypes.State, parameters string) e
 		return errors.New("question is required")
 	}
 
-	if input.ModelStrength != ModelStrengthWeak && input.ModelStrength != ModelStrengthStrong {
-		return errors.New("model_strength must be either 'weak' or 'strong'")
-	}
-
 	return nil
 }
 
@@ -131,9 +114,8 @@ func (t *SubAgentTool) Execute(ctx context.Context, state tooltypes.State, param
 	subAgentConfig, ok := ctx.Value(llmtypes.SubAgentConfig{}).(llmtypes.SubAgentConfig)
 	if !ok {
 		return &SubAgentToolResult{
-			err:           "sub-agent config not found in context",
-			question:      input.Question,
-			modelStrength: string(input.ModelStrength),
+			err:      "sub-agent config not found in context",
+			question: input.Question,
 		}
 	}
 
@@ -144,22 +126,20 @@ func (t *SubAgentTool) Execute(ctx context.Context, state tooltypes.State, param
 	}
 
 	text, err := subAgentConfig.Thread.SendMessage(ctx, input.Question, handler, llmtypes.MessageOpt{
-		PromptCache:        input.ModelStrength == ModelStrengthStrong,
-		UseWeakModel:       input.ModelStrength == ModelStrengthWeak,
+		PromptCache:        true,
+		UseWeakModel:       false, // explicitly set to false for clarity
 		NoSaveConversation: true,
 	})
 	if err != nil {
 		return &SubAgentToolResult{
-			err:           err.Error(),
-			question:      input.Question,
-			modelStrength: string(input.ModelStrength),
+			err:      err.Error(),
+			question: input.Question,
 		}
 	}
 
 	return &SubAgentToolResult{
-		result:        text,
-		question:      input.Question,
-		modelStrength: string(input.ModelStrength),
+		result:   text,
+		question: input.Question,
 	}
 }
 
@@ -172,9 +152,8 @@ func (r *SubAgentToolResult) StructuredData() tooltypes.StructuredToolResult {
 
 	// Always populate metadata, even for errors
 	result.Metadata = &tooltypes.SubAgentMetadata{
-		Question:      r.question,
-		ModelStrength: r.modelStrength,
-		Response:      r.result,
+		Question: r.question,
+		Response: r.result,
 	}
 
 	if r.IsError() {

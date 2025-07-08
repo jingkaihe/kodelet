@@ -17,9 +17,8 @@ func TestSubAgentRenderer(t *testing.T) {
 			Success:   true,
 			Timestamp: time.Now(),
 			Metadata: &tools.SubAgentMetadata{
-				Question:      "What are the best practices for Go error handling?",
-				ModelStrength: "strong",
-				Response:      "Here are the key best practices for Go error handling:\n\n1. Always check errors explicitly\n2. Use meaningful error messages\n3. Wrap errors with context using fmt.Errorf\n4. Create custom error types when needed\n5. Don't ignore errors",
+				Question: "What are the best practices for Go error handling?",
+				Response: "Here are the key best practices for Go error handling:\n\n1. Always check errors explicitly\n2. Use meaningful error messages\n3. Wrap errors with context using fmt.Errorf\n4. Create custom error types when needed\n5. Don't ignore errors",
 			},
 		}
 
@@ -30,9 +29,6 @@ func TestSubAgentRenderer(t *testing.T) {
 		}
 		if !strings.Contains(output, "Question: What are the best practices for Go error handling?") {
 			t.Errorf("Expected question in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Model: strong") {
-			t.Errorf("Expected model strength in output, got: %s", output)
 		}
 		if !strings.Contains(output, "Here are the key best practices") {
 			t.Errorf("Expected response content in output, got: %s", output)
@@ -48,9 +44,8 @@ func TestSubAgentRenderer(t *testing.T) {
 			Success:   true,
 			Timestamp: time.Now(),
 			Metadata: &tools.SubAgentMetadata{
-				Question:      "How do I implement a binary search in Go?",
-				ModelStrength: "",
-				Response:      "Here's a simple implementation of binary search in Go:\n\nfunc binarySearch(arr []int, target int) int {\n    left, right := 0, len(arr)-1\n    for left <= right {\n        mid := (left + right) / 2\n        if arr[mid] == target {\n            return mid\n        } else if arr[mid] < target {\n            left = mid + 1\n        } else {\n            right = mid - 1\n        }\n    }\n    return -1\n}",
+				Question: "How do I implement a binary search in Go?",
+				Response: "Here's a simple implementation of binary search in Go:\n\nfunc binarySearch(arr []int, target int) int {\n    left, right := 0, len(arr)-1\n    for left <= right {\n        mid := (left + right) / 2\n        if arr[mid] == target {\n            return mid\n        } else if arr[mid] < target {\n            left = mid + 1\n        } else {\n            right = mid - 1\n        }\n    }\n    return -1\n}",
 			},
 		}
 
@@ -59,23 +54,19 @@ func TestSubAgentRenderer(t *testing.T) {
 		if !strings.Contains(output, "Question: How do I implement a binary search in Go?") {
 			t.Errorf("Expected question in output, got: %s", output)
 		}
-		if strings.Contains(output, "Model: ") {
-			t.Errorf("Should not show empty model strength, got: %s", output)
-		}
 		if !strings.Contains(output, "func binarySearch") {
 			t.Errorf("Expected code implementation in output, got: %s", output)
 		}
 	})
 
-	t.Run("Subagent response with model strength only", func(t *testing.T) {
+	t.Run("Subagent response with response only", func(t *testing.T) {
 		result := tools.StructuredToolResult{
 			ToolName:  "subagent",
 			Success:   true,
 			Timestamp: time.Now(),
 			Metadata: &tools.SubAgentMetadata{
-				Question:      "",
-				ModelStrength: "weak",
-				Response:      "Based on the available information, this seems to be a straightforward question about basic programming concepts.",
+				Question: "",
+				Response: "Based on the available information, this seems to be a straightforward question about basic programming concepts.",
 			},
 		}
 
@@ -83,9 +74,6 @@ func TestSubAgentRenderer(t *testing.T) {
 
 		if strings.Contains(output, "Question: ") {
 			t.Errorf("Should not show empty question, got: %s", output)
-		}
-		if !strings.Contains(output, "Model: weak") {
-			t.Errorf("Expected model strength in output, got: %s", output)
 		}
 		if !strings.Contains(output, "Based on the available information") {
 			t.Errorf("Expected response content in output, got: %s", output)
@@ -98,9 +86,8 @@ func TestSubAgentRenderer(t *testing.T) {
 			Success:   true,
 			Timestamp: time.Now(),
 			Metadata: &tools.SubAgentMetadata{
-				Question:      "",
-				ModelStrength: "",
-				Response:      "This is a direct response without additional metadata.",
+				Question: "",
+				Response: "This is a direct response without additional metadata.",
 			},
 		}
 
@@ -111,9 +98,6 @@ func TestSubAgentRenderer(t *testing.T) {
 		}
 		if strings.Contains(output, "Question: ") {
 			t.Errorf("Should not show empty question field, got: %s", output)
-		}
-		if strings.Contains(output, "Model: ") {
-			t.Errorf("Should not show empty model field, got: %s", output)
 		}
 		if !strings.Contains(output, "This is a direct response without additional metadata.") {
 			t.Errorf("Expected response content in output, got: %s", output)
@@ -151,9 +135,8 @@ This approach ensures scalability, maintainability, and resilience in your syste
 			Success:   true,
 			Timestamp: time.Now(),
 			Metadata: &tools.SubAgentMetadata{
-				Question:      "What should I consider when implementing microservices?",
-				ModelStrength: "strong",
-				Response:      longResponse,
+				Question: "What should I consider when implementing microservices?",
+				Response: longResponse,
 			},
 		}
 
@@ -179,9 +162,8 @@ This approach ensures scalability, maintainability, and resilience in your syste
 			Success:   true,
 			Timestamp: time.Now(),
 			Metadata: &tools.SubAgentMetadata{
-				Question:      "What is the answer?",
-				ModelStrength: "medium",
-				Response:      "",
+				Question: "What is the answer?",
+				Response: "",
 			},
 		}
 
@@ -189,9 +171,6 @@ This approach ensures scalability, maintainability, and resilience in your syste
 
 		if !strings.Contains(output, "Question: What is the answer?") {
 			t.Errorf("Expected question in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Model: medium") {
-			t.Errorf("Expected model strength in output, got: %s", output)
 		}
 		// The response should still be there, just empty
 		if !strings.Contains(output, "Subagent Response:") {

@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.0.57.alpha (2025-07-08)
+
+### Subagent Tool Simplification
+
+- **Removed Model Strength Parameter**: Simplified subagent tool interface by removing the `model_strength` parameter. Going forward subagent will use the default model for tasks.
+
 ## 0.0.56.alpha (2025-07-06)
 
 ### Test Improvements
