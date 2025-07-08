@@ -197,8 +197,6 @@ export interface TodoItem {
 export interface SubagentMetadata {
   question: string;
   response?: string;
-  modelStrength?: string;
-  model_strength?: string;
 }
 
 export interface BatchMetadata {

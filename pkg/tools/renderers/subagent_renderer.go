@@ -23,9 +23,6 @@ func (r *SubAgentRenderer) RenderCLI(result tools.StructuredToolResult) string {
 	if meta.Question != "" {
 		output += fmt.Sprintf("Question: %s\n", meta.Question)
 	}
-	if meta.ModelStrength != "" {
-		output += fmt.Sprintf("Model: %s\n", meta.ModelStrength)
-	}
 	output += fmt.Sprintf("\n%s", meta.Response)
 
 	return output

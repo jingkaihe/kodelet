@@ -355,9 +355,8 @@ type ImageDimensions struct {
 func (m ImageRecognitionMetadata) ToolType() string { return "image_recognition" }
 
 type SubAgentMetadata struct {
-	Question      string `json:"question"`
-	ModelStrength string `json:"modelStrength"`
-	Response      string `json:"response"`
+	Question string `json:"question"`
+	Response string `json:"response"`
 }
 
 func (m SubAgentMetadata) ToolType() string { return "subagent" }
