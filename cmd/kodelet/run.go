@@ -25,6 +25,8 @@ type RunConfig struct {
 	Images             []string // Image paths or URLs to include with the message
 	MaxTurns           int      // Maximum number of turns within a single SendMessage call
 	EnableBrowserTools bool     // Enable browser automation tools
+	CompactRatio       float64  // Ratio of context window at which to trigger auto-compact (0.0-1.0)
+	DisableAutoCompact bool     // Disable auto-compact functionality
 }
 
 // NewRunConfig creates a new RunConfig with default values
@@ -36,6 +38,8 @@ func NewRunConfig() *RunConfig {
 		Images:             []string{},
 		MaxTurns:           50, // Default to 50 turns
 		EnableBrowserTools: false,
+		CompactRatio:       0.9, // Default to 90% context window utilization
+		DisableAutoCompact: false,
 	}
 }
 
@@ -134,9 +138,11 @@ var runCmd = &cobra.Command{
 
 		// Send the message and process the response
 		_, err = thread.SendMessage(ctx, query, handler, llmtypes.MessageOpt{
-			PromptCache: true,
-			Images:      config.Images,
-			MaxTurns:    config.MaxTurns,
+			PromptCache:        true,
+			Images:             config.Images,
+			MaxTurns:           config.MaxTurns,
+			CompactRatio:       config.CompactRatio,
+			DisableAutoCompact: config.DisableAutoCompact,
 		})
 		if err != nil {
 			presenter.Error(err, "Failed to process query")
@@ -166,6 +172,8 @@ func init() {
 	runCmd.Flags().StringSliceP("image", "I", defaults.Images, "Add image input (can be used multiple times)")
 	runCmd.Flags().Int("max-turns", defaults.MaxTurns, "Maximum number of turns within a single message exchange (0 for no limit)")
 	runCmd.Flags().Bool("enable-browser-tools", defaults.EnableBrowserTools, "Enable browser automation tools (navigate, click, type, screenshot, etc.)")
+	runCmd.Flags().Float64("compact-ratio", defaults.CompactRatio, "Context window utilization ratio to trigger auto-compact (0.0-1.0)")
+	runCmd.Flags().Bool("disable-auto-compact", defaults.DisableAutoCompact, "Disable auto-compact functionality")
 }
 
 // getRunConfigFromFlags extracts run configuration from command flags
@@ -205,6 +213,17 @@ func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
 	}
 	if enableBrowserTools, err := cmd.Flags().GetBool("enable-browser-tools"); err == nil {
 		config.EnableBrowserTools = enableBrowserTools
+	}
+	if compactRatio, err := cmd.Flags().GetFloat64("compact-ratio"); err == nil {
+		// Validate compact ratio is between 0.0 and 1.0
+		if compactRatio < 0.0 || compactRatio > 1.0 {
+			presenter.Error(fmt.Errorf("invalid compact-ratio"), "compact-ratio must be between 0.0 and 1.0")
+			os.Exit(1)
+		}
+		config.CompactRatio = compactRatio
+	}
+	if disableAutoCompact, err := cmd.Flags().GetBool("disable-auto-compact"); err == nil {
+		config.DisableAutoCompact = disableAutoCompact
 	}
 
 	return config
