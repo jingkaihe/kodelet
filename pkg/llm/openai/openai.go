@@ -622,26 +622,57 @@ func (t *OpenAIThread) WithSubAgent(ctx context.Context, handler llmtypes.Messag
 	return ctx
 }
 
-func (t *OpenAIThread) ShortSummary(ctx context.Context) string {
-	handler := &llmtypes.StringCollectorHandler{
-		Silent: true,
+// getLastAssistantMessageText extracts text content from the most recent assistant message
+func (t *OpenAIThread) getLastAssistantMessageText() (string, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	
+	if len(t.messages) == 0 {
+		return "", fmt.Errorf("no messages found")
 	}
+	
+	// Find the last assistant message
+	var messageText string
+	for i := len(t.messages) - 1; i >= 0; i-- {
+		msg := t.messages[i]
+		if msg.Role == openai.ChatMessageRoleAssistant {
+			messageText = msg.Content
+			break
+		}
+	}
+	
+	if messageText == "" {
+		return "", fmt.Errorf("no text content found in assistant message")
+	}
+	
+	return messageText, nil
+}
+
+func (t *OpenAIThread) ShortSummary(ctx context.Context) string {
+	// Temporarily disable persistence during summarization
 	t.isPersisted = false
 	defer func() {
 		t.isPersisted = true
 	}()
 
 	// Use a faster model for summarization as it's a simpler task
-	_, err := t.SendMessage(ctx, prompts.ShortSummaryPrompt, handler, llmtypes.MessageOpt{
+	_, err := t.SendMessage(ctx, prompts.ShortSummaryPrompt, &llmtypes.StringCollectorHandler{Silent: true}, llmtypes.MessageOpt{
 		UseWeakModel:       true,
 		NoToolUse:          true,
-		NoSaveConversation: true,
+		DisableAutoCompact: true, // Prevent auto-compact during summarization
+		// Note: Not using NoSaveConversation so we can access the assistant response
 	})
 	if err != nil {
 		return err.Error()
 	}
 
-	return handler.CollectedText()
+	// Get the summary from the last assistant message
+	summary, err := t.getLastAssistantMessageText()
+	if err != nil {
+		return err.Error()
+	}
+
+	return summary
 }
 
 // shouldAutoCompact checks if auto-compact should be triggered based on context window utilization
@@ -661,10 +692,6 @@ func (t *OpenAIThread) shouldAutoCompact(compactRatio float64) bool {
 
 // CompactContext performs comprehensive context compacting by creating a detailed summary
 func (t *OpenAIThread) CompactContext(ctx context.Context) error {
-	handler := &llmtypes.StringCollectorHandler{
-		Silent: true,
-	}
-	
 	// Temporarily disable persistence during compacting
 	wasPersistedOriginal := t.isPersisted
 	t.isPersisted = false
@@ -673,20 +700,20 @@ func (t *OpenAIThread) CompactContext(ctx context.Context) error {
 	}()
 	
 	// Use the strong model for comprehensive compacting (opposite of ShortSummary)
-	_, err := t.SendMessage(ctx, prompts.CompactPrompt, handler, llmtypes.MessageOpt{
+	_, err := t.SendMessage(ctx, prompts.CompactPrompt, &llmtypes.StringCollectorHandler{Silent: true}, llmtypes.MessageOpt{
 		UseWeakModel:       false, // Use strong model for comprehensive compacting
 		NoToolUse:          true,
-		NoSaveConversation: true,
 		DisableAutoCompact: true, // Prevent recursion
+		// Note: Not using NoSaveConversation so we can access the assistant response
 	})
 	if err != nil {
 		return fmt.Errorf("failed to generate compact summary: %w", err)
 	}
 	
-	// Get the compact summary
-	compactSummary := handler.CollectedText()
-	if compactSummary == "" {
-		return fmt.Errorf("received empty compact summary")
+	// Get the compact summary from the last assistant message
+	compactSummary, err := t.getLastAssistantMessageText()
+	if err != nil {
+		return fmt.Errorf("failed to get compact summary from assistant message: %w", err)
 	}
 	
 	// Replace the conversation history with the compact summary
