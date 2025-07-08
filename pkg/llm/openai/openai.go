@@ -336,17 +336,6 @@ func (t *OpenAIThread) SendMessage(
 		t.AddUserMessage(ctx, message)
 	}
 
-	// Check if auto-compact should be triggered
-	if !opt.DisableAutoCompact && t.shouldAutoCompact(opt.CompactRatio) {
-		logger.G(ctx).WithField("context_utilization", float64(t.GetUsage().CurrentContextWindow)/float64(t.GetUsage().MaxContextWindow)).Info("triggering auto-compact")
-		err := t.CompactContext(ctx)
-		if err != nil {
-			logger.G(ctx).WithError(err).Error("failed to auto-compact context")
-		} else {
-			logger.G(ctx).Info("auto-compact completed successfully")
-		}
-	}
-
 	// Determine which model to use
 	model := t.config.Model
 	maxTokens := t.config.MaxTokens
@@ -398,6 +387,17 @@ OUTER:
 					WithField("max_turns", maxTurns).
 					Warn("reached maximum turn limit, stopping interaction")
 				break OUTER
+			}
+
+			// Check if auto-compact should be triggered before each exchange
+			if !opt.DisableAutoCompact && t.shouldAutoCompact(opt.CompactRatio) {
+				logger.G(ctx).WithField("context_utilization", float64(t.GetUsage().CurrentContextWindow)/float64(t.GetUsage().MaxContextWindow)).Info("triggering auto-compact")
+				err := t.CompactContext(ctx)
+				if err != nil {
+					logger.G(ctx).WithError(err).Error("failed to auto-compact context")
+				} else {
+					logger.G(ctx).Info("auto-compact completed successfully")
+				}
 			}
 
 			var exchangeOutput string
