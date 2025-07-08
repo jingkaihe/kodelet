@@ -811,15 +811,6 @@ func (t *AnthropicThread) CompactContext(ctx context.Context) error {
 		state.SetFileLastAccess(make(map[string]time.Time))
 	}
 
-	// Save the compacted conversation
-	if t.isPersisted {
-		saveCtx := context.WithValue(ctx, compactSaveKey, true)
-		err = t.SaveConversation(saveCtx, true)
-		if err != nil {
-			return fmt.Errorf("failed to save compacted conversation: %w", err)
-		}
-	}
-
 	return nil
 }
 
