@@ -766,12 +766,13 @@ func createGist(conversationID string, jsonData []byte, isPrivate bool) error {
 		return fmt.Errorf("failed to create gist: %w (output: %s)", err, string(output))
 	}
 
-	gistURL := strings.TrimSpace(string(output))
+	result := strings.TrimSpace(string(output))
 	visibility := "private"
 	if !isPrivate {
 		visibility = "public"
 	}
-	presenter.Success(fmt.Sprintf("Conversation %s exported to %s gist: %s", conversationID, visibility, gistURL))
 
+	presenter.Info(result)
+	presenter.Success(fmt.Sprintf("Conversation %s exported to %s gist", conversationID, visibility))
 	return nil
 }
