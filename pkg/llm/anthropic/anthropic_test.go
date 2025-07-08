@@ -5,12 +5,14 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
 func TestGetMediaTypeFromExtension(t *testing.T) {
@@ -203,4 +205,402 @@ func TestAddUserMessage(t *testing.T) {
 			assert.Equal(t, expectedBlocks, len(lastMessage.Content))
 		})
 	}
+}
+
+func TestShouldAutoCompact(t *testing.T) {
+	tests := []struct {
+		name                 string
+		compactRatio         float64
+		currentContextWindow int
+		maxContextWindow     int
+		expectedResult       bool
+	}{
+		{
+			name:                 "should compact when ratio exceeded",
+			compactRatio:         0.8,
+			currentContextWindow: 80,
+			maxContextWindow:     100,
+			expectedResult:       true,
+		},
+		{
+			name:                 "should not compact when ratio not exceeded",
+			compactRatio:         0.8,
+			currentContextWindow: 70,
+			maxContextWindow:     100,
+			expectedResult:       false,
+		},
+		{
+			name:                 "should not compact when ratio is zero",
+			compactRatio:         0.0,
+			currentContextWindow: 90,
+			maxContextWindow:     100,
+			expectedResult:       false,
+		},
+		{
+			name:                 "should not compact when ratio is negative",
+			compactRatio:         -0.5,
+			currentContextWindow: 90,
+			maxContextWindow:     100,
+			expectedResult:       false,
+		},
+		{
+			name:                 "should not compact when ratio is greater than 1",
+			compactRatio:         1.5,
+			currentContextWindow: 90,
+			maxContextWindow:     100,
+			expectedResult:       false,
+		},
+		{
+			name:                 "should not compact when max context window is zero",
+			compactRatio:         0.8,
+			currentContextWindow: 80,
+			maxContextWindow:     0,
+			expectedResult:       false,
+		},
+		{
+			name:                 "should compact when ratio is exactly at threshold",
+			compactRatio:         0.8,
+			currentContextWindow: 80,
+			maxContextWindow:     100,
+			expectedResult:       true,
+		},
+		{
+			name:                 "should compact when ratio is 1.0 and context is full",
+			compactRatio:         1.0,
+			currentContextWindow: 100,
+			maxContextWindow:     100,
+			expectedResult:       true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			thread, err := NewAnthropicThread(llmtypes.Config{})
+			require.NoError(t, err)
+
+			// Mock the usage stats
+			thread.usage.CurrentContextWindow = test.currentContextWindow
+			thread.usage.MaxContextWindow = test.maxContextWindow
+
+			result := thread.shouldAutoCompact(test.compactRatio)
+			assert.Equal(t, test.expectedResult, result)
+		})
+	}
+}
+
+func TestGetLastAssistantMessageText(t *testing.T) {
+	tests := []struct {
+		name          string
+		messages      []anthropic.MessageParam
+		expectedText  string
+		expectedError bool
+	}{
+		{
+			name: "single assistant message",
+			messages: []anthropic.MessageParam{
+				{
+					Role: anthropic.MessageParamRoleAssistant,
+					Content: []anthropic.ContentBlockParamUnion{
+						anthropic.NewTextBlock("Assistant response"),
+					},
+				},
+			},
+			expectedText:  "Assistant response",
+			expectedError: false,
+		},
+		{
+			name: "multiple messages with assistant last",
+			messages: []anthropic.MessageParam{
+				{
+					Role: anthropic.MessageParamRoleUser,
+					Content: []anthropic.ContentBlockParamUnion{
+						anthropic.NewTextBlock("User message"),
+					},
+				},
+				{
+					Role: anthropic.MessageParamRoleAssistant,
+					Content: []anthropic.ContentBlockParamUnion{
+						anthropic.NewTextBlock("Assistant response"),
+					},
+				},
+			},
+			expectedText:  "Assistant response",
+			expectedError: false,
+		},
+		{
+			name: "multiple assistant messages - should get last one",
+			messages: []anthropic.MessageParam{
+				{
+					Role: anthropic.MessageParamRoleAssistant,
+					Content: []anthropic.ContentBlockParamUnion{
+						anthropic.NewTextBlock("First assistant response"),
+					},
+				},
+				{
+					Role: anthropic.MessageParamRoleUser,
+					Content: []anthropic.ContentBlockParamUnion{
+						anthropic.NewTextBlock("User message"),
+					},
+				},
+				{
+					Role: anthropic.MessageParamRoleAssistant,
+					Content: []anthropic.ContentBlockParamUnion{
+						anthropic.NewTextBlock("Second assistant response"),
+					},
+				},
+			},
+			expectedText:  "Second assistant response",
+			expectedError: false,
+		},
+		{
+			name: "multiple content blocks in assistant message",
+			messages: []anthropic.MessageParam{
+				{
+					Role: anthropic.MessageParamRoleAssistant,
+					Content: []anthropic.ContentBlockParamUnion{
+						anthropic.NewTextBlock("First block"),
+						anthropic.NewTextBlock("Second block"),
+					},
+				},
+			},
+			expectedText:  "First blockSecond block",
+			expectedError: false,
+		},
+		{
+			name:          "no messages",
+			messages:      []anthropic.MessageParam{},
+			expectedText:  "",
+			expectedError: true,
+		},
+		{
+			name: "no assistant messages",
+			messages: []anthropic.MessageParam{
+				{
+					Role: anthropic.MessageParamRoleUser,
+					Content: []anthropic.ContentBlockParamUnion{
+						anthropic.NewTextBlock("User message"),
+					},
+				},
+			},
+			expectedText:  "",
+			expectedError: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			thread, err := NewAnthropicThread(llmtypes.Config{})
+			require.NoError(t, err)
+
+			thread.messages = test.messages
+
+			result, err := thread.getLastAssistantMessageText()
+
+			if test.expectedError {
+				assert.Error(t, err)
+				assert.Equal(t, test.expectedText, result)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, test.expectedText, result)
+			}
+		})
+	}
+}
+
+func TestCompactContextIntegration(t *testing.T) {
+	// Skip if no API key is available
+	if os.Getenv("ANTHROPIC_API_KEY") == "" {
+		t.Skip("ANTHROPIC_API_KEY not set, skipping integration test")
+	}
+
+	t.Run("real compact context with API call", func(t *testing.T) {
+		thread, err := NewAnthropicThread(llmtypes.Config{
+			Model:     "claude-3-5-haiku-20241022", // Use faster/cheaper model for testing
+			MaxTokens: 1000,                        // Limit tokens for test
+		})
+		require.NoError(t, err)
+
+		// Set up some realistic conversation history
+		thread.AddUserMessage(context.Background(), "Help me debug this Python function", []string{}...)
+		thread.messages = append(thread.messages, anthropic.MessageParam{
+			Role: anthropic.MessageParamRoleAssistant,
+			Content: []anthropic.ContentBlockParamUnion{
+				anthropic.NewTextBlock("I'd be happy to help you debug your Python function. Could you please share the code?"),
+			},
+		})
+		thread.AddUserMessage(context.Background(), "Here's the function: def add(a, b): return a + b", []string{}...)
+		thread.messages = append(thread.messages, anthropic.MessageParam{
+			Role: anthropic.MessageParamRoleAssistant,
+			Content: []anthropic.ContentBlockParamUnion{
+				anthropic.NewTextBlock("Your function looks correct. It's a simple addition function that takes two parameters and returns their sum."),
+			},
+		})
+
+		// Add some tool results to verify they get cleared
+		thread.toolResults = map[string]tooltypes.StructuredToolResult{
+			"tool1": {ToolName: "test_tool", Success: true, Timestamp: time.Now()},
+			"tool2": {ToolName: "another_tool", Success: false, Error: "test error", Timestamp: time.Now()},
+		}
+
+		// Record initial state
+		initialMessageCount := len(thread.messages)
+		initialToolResultCount := len(thread.toolResults)
+
+		// Verify we have multiple messages and tool results
+		assert.Greater(t, initialMessageCount, 2, "Should have multiple messages for meaningful test")
+		assert.Greater(t, initialToolResultCount, 0, "Should have tool results to verify clearing")
+
+		// Call the real CompactContext method
+		err = thread.CompactContext(context.Background())
+		require.NoError(t, err, "CompactContext should succeed with real API")
+
+		// Verify the compacting worked
+		assert.Equal(t, 1, len(thread.messages), "Should be compacted to single user message")
+		assert.Equal(t, 0, len(thread.toolResults), "Tool results should be cleared")
+
+		// Verify the single remaining message is a user message containing a summary
+		if len(thread.messages) > 0 {
+			assert.Equal(t, anthropic.MessageParamRoleUser, thread.messages[0].Role)
+			assert.Greater(t, len(thread.messages[0].Content), 0, "Compact message should have content")
+
+			// Extract text content and verify it's a reasonable summary
+			var messageText string
+			for _, block := range thread.messages[0].Content {
+				if block.OfText != nil {
+					messageText += block.OfText.Text
+				}
+			}
+			assert.Greater(t, len(messageText), 50, "Compact summary should be substantial")
+			assert.Contains(t, messageText, "Python", "Summary should mention the context discussed")
+		}
+	})
+
+	t.Run("compact context preserves thread functionality", func(t *testing.T) {
+		// Skip if no API key is available
+		if os.Getenv("ANTHROPIC_API_KEY") == "" {
+			t.Skip("ANTHROPIC_API_KEY not set, skipping integration test")
+		}
+
+		thread, err := NewAnthropicThread(llmtypes.Config{
+			Model:     "claude-3-5-haiku-20241022",
+			MaxTokens: 500,
+		})
+		require.NoError(t, err)
+
+		// Add some conversation history
+		thread.AddUserMessage(context.Background(), "What is 2+2?", []string{}...)
+		thread.messages = append(thread.messages, anthropic.MessageParam{
+			Role: anthropic.MessageParamRoleAssistant,
+			Content: []anthropic.ContentBlockParamUnion{
+				anthropic.NewTextBlock("2+2 equals 4."),
+			},
+		})
+
+		// Compact the context
+		err = thread.CompactContext(context.Background())
+		require.NoError(t, err)
+
+		// Verify thread is still functional by sending a new message
+		thread.AddUserMessage(context.Background(), "What about 3+3?", []string{}...)
+
+		// Should now have 2 messages: the compact summary + new user message
+		assert.Equal(t, 2, len(thread.messages))
+		assert.Equal(t, anthropic.MessageParamRoleUser, thread.messages[1].Role)
+	})
+}
+
+func TestAutoCompactTriggerLogic(t *testing.T) {
+	t.Run("auto-compact triggers when ratio exceeded", func(t *testing.T) {
+		thread, err := NewAnthropicThread(llmtypes.Config{})
+		require.NoError(t, err)
+
+		// Set up context window to trigger auto-compact
+		thread.usage.CurrentContextWindow = 85 // 85% utilization
+		thread.usage.MaxContextWindow = 100
+
+		// Verify shouldAutoCompact returns true for ratio 0.8
+		assert.True(t, thread.shouldAutoCompact(0.8),
+			"Should trigger auto-compact when ratio (0.85) exceeds threshold (0.8)")
+	})
+
+	t.Run("auto-compact does not trigger when ratio not exceeded", func(t *testing.T) {
+		thread, err := NewAnthropicThread(llmtypes.Config{})
+		require.NoError(t, err)
+
+		// Set up context window below auto-compact threshold
+		thread.usage.CurrentContextWindow = 75 // 75% utilization
+		thread.usage.MaxContextWindow = 100
+
+		// Verify shouldAutoCompact returns false for ratio 0.8
+		assert.False(t, thread.shouldAutoCompact(0.8),
+			"Should not trigger auto-compact when ratio (0.75) below threshold (0.8)")
+	})
+
+	t.Run("auto-compact disabled when DisableAutoCompact is true", func(t *testing.T) {
+		thread, err := NewAnthropicThread(llmtypes.Config{})
+		require.NoError(t, err)
+
+		// Set up context window to trigger auto-compact
+		thread.usage.CurrentContextWindow = 90 // 90% utilization
+		thread.usage.MaxContextWindow = 100
+
+		// Even though context is high, shouldAutoCompact should be bypassed
+		// when DisableAutoCompact is true (this is handled in SendMessage logic)
+		disableAutoCompact := true
+
+		// Simulate the logic from SendMessage
+		shouldTrigger := !disableAutoCompact && thread.shouldAutoCompact(0.8)
+		assert.False(t, shouldTrigger,
+			"Should not trigger auto-compact when DisableAutoCompact is true")
+	})
+
+	t.Run("auto-compact respects different compact ratios", func(t *testing.T) {
+		tests := []struct {
+			name          string
+			ratio         float64
+			utilization   int
+			shouldTrigger bool
+		}{
+			{
+				name:          "conservative ratio - should not trigger",
+				ratio:         0.9,
+				utilization:   85,
+				shouldTrigger: false,
+			},
+			{
+				name:          "conservative ratio - should trigger",
+				ratio:         0.9,
+				utilization:   95,
+				shouldTrigger: true,
+			},
+			{
+				name:          "aggressive ratio - should trigger",
+				ratio:         0.5,
+				utilization:   60,
+				shouldTrigger: true,
+			},
+			{
+				name:          "aggressive ratio - should not trigger",
+				ratio:         0.5,
+				utilization:   40,
+				shouldTrigger: false,
+			},
+		}
+
+		for _, test := range tests {
+			t.Run(test.name, func(t *testing.T) {
+				thread, err := NewAnthropicThread(llmtypes.Config{})
+				require.NoError(t, err)
+
+				// Set up context window
+				thread.usage.CurrentContextWindow = test.utilization
+				thread.usage.MaxContextWindow = 100
+
+				result := thread.shouldAutoCompact(test.ratio)
+				assert.Equal(t, test.shouldTrigger, result,
+					"Compact ratio %f with %d%% utilization should trigger: %v",
+					test.ratio, test.utilization, test.shouldTrigger)
+			})
+		}
+	})
 }

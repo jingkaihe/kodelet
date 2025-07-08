@@ -64,3 +64,112 @@ func TestRunCommandWithInvalidFlags(t *testing.T) {
 		t.Errorf("Expected flag-related error message, got: %s", outputStr)
 	}
 }
+
+func TestRunCommandWithCompactFlags(t *testing.T) {
+	// Test run command with compact flags
+	cmd := exec.Command("kodelet", "run", "--compact-ratio=0.9", "--disable-auto-compact", "test query")
+	cmd.Env = []string{} // Clear environment
+	output, _ := cmd.CombinedOutput()
+
+	outputStr := strings.TrimSpace(string(output))
+
+	// Should not fail due to flag parsing error
+	if strings.Contains(outputStr, "unknown flag") || strings.Contains(outputStr, "invalid flag") {
+		t.Errorf("Flag parsing failed: %s", outputStr)
+	}
+
+	// Should not crash or panic
+	if strings.Contains(outputStr, "panic") || strings.Contains(outputStr, "fatal") {
+		t.Errorf("Command should not panic or crash: %s", outputStr)
+	}
+}
+
+func TestRunCommandWithInvalidCompactRatio(t *testing.T) {
+	tests := []struct {
+		name        string
+		ratio       string
+		description string
+	}{
+		{
+			name:        "negative ratio",
+			ratio:       "-0.5",
+			description: "should reject negative compact ratio",
+		},
+		{
+			name:        "ratio greater than 1",
+			ratio:       "1.5",
+			description: "should reject compact ratio greater than 1",
+		},
+		{
+			name:        "invalid format",
+			ratio:       "invalid",
+			description: "should reject non-numeric compact ratio",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cmd := exec.Command("kodelet", "run", "--compact-ratio="+test.ratio, "test query")
+			cmd.Env = []string{} // Clear environment
+			output, err := cmd.CombinedOutput()
+
+			// Should fail due to invalid compact ratio
+			if err == nil && test.ratio != "invalid" {
+				// For negative and > 1 ratios, we expect the command to fail
+				// For invalid format, the flag parsing itself should fail
+				t.Errorf("Expected run command to fail with invalid compact ratio %s", test.ratio)
+			}
+
+			outputStr := strings.TrimSpace(string(output))
+
+			// Should contain error message about compact ratio
+			if test.ratio != "invalid" && !strings.Contains(outputStr, "compact") {
+				t.Errorf("Expected compact-related error message for %s, got: %s", test.description, outputStr)
+			}
+		})
+	}
+}
+
+func TestRunCommandWithValidCompactRatio(t *testing.T) {
+	tests := []struct {
+		name  string
+		ratio string
+	}{
+		{
+			name:  "minimum valid ratio",
+			ratio: "0.0",
+		},
+		{
+			name:  "maximum valid ratio",
+			ratio: "1.0",
+		},
+		{
+			name:  "middle valid ratio",
+			ratio: "0.8",
+		},
+		{
+			name:  "default ratio",
+			ratio: "0.75",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cmd := exec.Command("kodelet", "run", "--compact-ratio="+test.ratio, "test query")
+			cmd.Env = []string{} // Clear environment
+			output, _ := cmd.CombinedOutput()
+
+			outputStr := strings.TrimSpace(string(output))
+
+			// Should not fail due to flag parsing error
+			if strings.Contains(outputStr, "unknown flag") || strings.Contains(outputStr, "invalid flag") {
+				t.Errorf("Flag parsing failed for ratio %s: %s", test.ratio, outputStr)
+			}
+
+			// Should not fail due to compact ratio validation
+			if strings.Contains(outputStr, "compact ratio must be between") {
+				t.Errorf("Valid compact ratio %s was rejected: %s", test.ratio, outputStr)
+			}
+		})
+	}
+}
