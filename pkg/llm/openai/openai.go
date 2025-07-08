@@ -29,11 +29,6 @@ import (
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
-// contextKey is a custom type for context keys to avoid collisions
-type contextKey string
-
-const compactSaveKey contextKey = "compact_save"
-
 var (
 	ReasoningModels = []string{
 		"o3",
