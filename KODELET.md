@@ -225,37 +225,3 @@ if err != nil {
     return errors.Wrap(err, "failed to process")
 }
 ```
-
-## Code Intelligence & MCP Language Server Tools
-
-Kodelet integrates with MCP (Model Context Protocol) Language Server for advanced code intelligence. **ALWAYS prioritize MCP tools over basic text search for code navigation.**
-
-### Core MCP Tools
-- **`mcp_definition`**: Get complete source code definition of symbols (functions, types, constants)
-- **`mcp_references`**: Find all usages and references of a symbol throughout the codebase
-- **`mcp_hover`**: Get type information, documentation, and context for symbols at positions
-- **`mcp_rename_symbol`**: Safely rename symbols and update all references across codebase
-- **`mcp_edit_file`**: Apply multiple precise text edits to files with line-based targeting
-- **`mcp_diagnostics`**: Get compiler/linter diagnostics and errors for specific files
-
-### Usage Guidelines
-**Use MCP tools for:**
-- Code definitions, symbol usage, refactoring, type information, diagnostics, precise edits
-
-**Use basic search only for:**
-- String literals, comments, documentation, configuration patterns, exploratory searches
-
-### Best Practices
-1. **Start with MCP**: Always try MCP tools first for code-related queries
-2. **Symbol-aware navigation**: Use `mcp_definition` and `mcp_references` for code relationships
-3. **Safe refactoring**: Use `mcp_rename_symbol` to ensure all references are updated
-4. **Diagnostic-driven fixes**: Use `mcp_diagnostics` to identify and prioritize issues
-
-### Common Workflows
-```bash
-# Understanding: mcp_definition -> mcp_references -> mcp_hover
-# Refactoring: mcp_diagnostics -> mcp_rename_symbol -> mcp_edit_file -> mcp_diagnostics
-# Code review: mcp_diagnostics -> mcp_references -> mcp_hover
-```
-
-MCP provides language-aware code intelligence that understands Go syntax, semantics, and project structure, making code navigation significantly more reliable than text-based search.
