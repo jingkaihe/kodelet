@@ -38,7 +38,7 @@ func NewRunConfig() *RunConfig {
 		Images:             []string{},
 		MaxTurns:           50, // Default to 50 turns
 		EnableBrowserTools: false,
-		CompactRatio:       0.9, // Default to 90% context window utilization
+		CompactRatio:       0.8, // Default to 80% context window utilization
 		DisableAutoCompact: false,
 	}
 }

@@ -23,6 +23,8 @@ type ChatOptions struct {
 	noSave             bool
 	maxTurns           int
 	enableBrowserTools bool
+	compactRatio       float64
+	disableAutoCompact bool
 }
 
 var chatOptions = &ChatOptions{}
@@ -35,6 +37,8 @@ func init() {
 	chatCmd.Flags().BoolVar(&chatOptions.noSave, "no-save", false, "Disable conversation persistence")
 	chatCmd.Flags().IntVar(&chatOptions.maxTurns, "max-turns", 50, "Maximum number of turns within a single message exchange (0 for no limit)")
 	chatCmd.Flags().BoolVar(&chatOptions.enableBrowserTools, "enable-browser-tools", false, "Enable browser automation tools (navigate, click, type, screenshot, etc.)")
+	chatCmd.Flags().Float64Var(&chatOptions.compactRatio, "compact-ratio", 0.80, "Context window utilization ratio to trigger auto-compact (0.0-1.0)")
+	chatCmd.Flags().BoolVar(&chatOptions.disableAutoCompact, "disable-auto-compact", false, "Disable automatic context compacting")
 }
 
 // setupTUILogRedirection redirects logs to a file for TUI mode to prevent interference
@@ -72,6 +76,12 @@ var chatCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx, cancel := context.WithCancel(cmd.Context())
 		defer cancel()
+
+		// Validate compact ratio
+		if chatOptions.compactRatio < 0.0 || chatOptions.compactRatio > 1.0 {
+			presenter.Error(fmt.Errorf("invalid compact ratio"), "Compact ratio must be between 0.0 and 1.0")
+			os.Exit(1)
+		}
 
 		if chatOptions.follow {
 			if chatOptions.resumeConvID != "" {
@@ -117,7 +127,7 @@ var chatCmd = &cobra.Command{
 				}
 			}
 
-			tui.StartChatCmd(ctx, conversationID, !chatOptions.noSave, mcpManager, maxTurns, chatOptions.enableBrowserTools)
+			tui.StartChatCmd(ctx, conversationID, !chatOptions.noSave, mcpManager, maxTurns, chatOptions.enableBrowserTools, chatOptions.compactRatio, chatOptions.disableAutoCompact)
 
 			// Restore stderr logging after TUI exits and show log file location
 			if logFile != nil {

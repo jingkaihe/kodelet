@@ -17,6 +17,8 @@ func StartChat(ctx context.Context,
 	mcpManager *tools.MCPManager,
 	maxTurns int,
 	enableBrowserTools bool,
+	compactRatio float64,
+	disableAutoCompact bool,
 ) error {
 	// Check terminal capabilities
 	var teaOptions []tea.ProgramOption
@@ -34,7 +36,7 @@ func StartChat(ctx context.Context,
 	var p *tea.Program
 
 	// Create model separately to add welcome messages
-	model := NewModel(ctx, conversationID, enablePersistence, mcpManager, maxTurns, enableBrowserTools)
+	model := NewModel(ctx, conversationID, enablePersistence, mcpManager, maxTurns, enableBrowserTools, compactRatio, disableAutoCompact)
 
 	// Add welcome message with ASCII art
 	kodaletArt := `
@@ -117,8 +119,8 @@ func isTTY() bool {
 }
 
 // StartChatCmd is a wrapper that can be called from a command line
-func StartChatCmd(ctx context.Context, conversationID string, enablePersistence bool, mcpManager *tools.MCPManager, maxTurns int, enableBrowserTools bool) {
-	if err := StartChat(ctx, conversationID, enablePersistence, mcpManager, maxTurns, enableBrowserTools); err != nil {
+func StartChatCmd(ctx context.Context, conversationID string, enablePersistence bool, mcpManager *tools.MCPManager, maxTurns int, enableBrowserTools bool, compactRatio float64, disableAutoCompact bool) {
+	if err := StartChat(ctx, conversationID, enablePersistence, mcpManager, maxTurns, enableBrowserTools, compactRatio, disableAutoCompact); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}

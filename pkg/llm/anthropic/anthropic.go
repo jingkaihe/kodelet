@@ -32,6 +32,11 @@ import (
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
+// contextKey is a custom type for context keys to avoid collisions
+type contextKey string
+
+const compactSaveKey contextKey = "compact_save"
+
 // ConversationStore is an alias for the conversations.ConversationStore interface
 // to avoid direct dependency on the conversations package
 type ConversationStore = conversations.ConversationStore
@@ -808,7 +813,7 @@ func (t *AnthropicThread) CompactContext(ctx context.Context) error {
 
 	// Save the compacted conversation
 	if t.isPersisted {
-		saveCtx := context.WithValue(ctx, "compact_save", true)
+		saveCtx := context.WithValue(ctx, compactSaveKey, true)
 		err = t.SaveConversation(saveCtx, true)
 		if err != nil {
 			return fmt.Errorf("failed to save compacted conversation: %w", err)

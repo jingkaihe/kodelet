@@ -11,13 +11,15 @@ import (
 
 // AssistantClient handles the interaction with the LLM thread
 type AssistantClient struct {
-	thread     llmtypes.Thread
-	mcpManager *tools.MCPManager
-	maxTurns   int
+	thread             llmtypes.Thread
+	mcpManager         *tools.MCPManager
+	maxTurns           int
+	compactRatio       float64
+	disableAutoCompact bool
 }
 
 // NewAssistantClient creates a new assistant client
-func NewAssistantClient(ctx context.Context, conversationID string, enablePersistence bool, mcpManager *tools.MCPManager, maxTurns int, enableBrowserTools bool) *AssistantClient {
+func NewAssistantClient(ctx context.Context, conversationID string, enablePersistence bool, mcpManager *tools.MCPManager, maxTurns int, enableBrowserTools bool, compactRatio float64, disableAutoCompact bool) *AssistantClient {
 	// Create a persistent thread with config from viper
 	config := llm.GetConfigFromViper()
 	thread, err := llm.NewThread(config)
@@ -44,9 +46,11 @@ func NewAssistantClient(ctx context.Context, conversationID string, enablePersis
 	thread.EnablePersistence(ctx, enablePersistence)
 
 	return &AssistantClient{
-		thread:     thread,
-		mcpManager: mcpManager,
-		maxTurns:   maxTurns,
+		thread:             thread,
+		mcpManager:         mcpManager,
+		maxTurns:           maxTurns,
+		compactRatio:       compactRatio,
+		disableAutoCompact: disableAutoCompact,
 	}
 }
 
@@ -70,9 +74,11 @@ func (a *AssistantClient) SendMessage(ctx context.Context, message string, messa
 
 	// Send the message using the persistent thread
 	_, err := a.thread.SendMessage(ctx, message, handler, llmtypes.MessageOpt{
-		PromptCache: true,
-		Images:      imagePaths,
-		MaxTurns:    a.maxTurns,
+		PromptCache:        true,
+		Images:             imagePaths,
+		MaxTurns:           a.maxTurns,
+		CompactRatio:       a.compactRatio,
+		DisableAutoCompact: a.disableAutoCompact,
 	})
 
 	return err

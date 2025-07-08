@@ -29,6 +29,11 @@ import (
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
+// contextKey is a custom type for context keys to avoid collisions
+type contextKey string
+
+const compactSaveKey contextKey = "compact_save"
+
 var (
 	ReasoningModels = []string{
 		"o3",
@@ -740,7 +745,7 @@ func (t *OpenAIThread) CompactContext(ctx context.Context) error {
 	
 	// Save the compacted conversation
 	if t.isPersisted {
-		saveCtx := context.WithValue(ctx, "compact_save", true)
+		saveCtx := context.WithValue(ctx, compactSaveKey, true)
 		err = t.SaveConversation(saveCtx, true)
 		if err != nil {
 			return fmt.Errorf("failed to save compacted conversation: %w", err)
