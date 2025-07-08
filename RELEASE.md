@@ -1,5 +1,19 @@
 # Kodelet
 
+## 0.0.58.alpha (2025-07-08)
+
+### Support conversation import and export feature for sharing and backup
+
+Added `kodelet conversation import` and `kodelet conversation export` commands for importing and exporting conversations. Here are some examples of how to use it:
+
+```bash
+kodelet conversation export <conversation-id> $PATH # export conversation to a local file
+kodelet conversation export --gist <conversation-id> # export conversation to a private gist
+kodelet conversation export --public-gist <conversation-id> # export conversation to a public gist
+kodelet conversation import $PATH # import conversation from a local file
+kodelet conversation import https://example.com/conversation.json # import conversation from a URL
+```
+
 ## 0.0.57.alpha (2025-07-08)
 
 ### Subagent Tool Simplification
