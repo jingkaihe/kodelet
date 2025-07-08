@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
+	"net/url"
 	"os"
+	"os/exec"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -14,6 +17,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	"github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/spf13/cobra"
 )
 
@@ -67,6 +71,32 @@ func NewConversationShowConfig() *ConversationShowConfig {
 	}
 }
 
+// ConversationImportConfig holds configuration for the conversation import command
+type ConversationImportConfig struct {
+	Force bool
+}
+
+// NewConversationImportConfig creates a new ConversationImportConfig with default values
+func NewConversationImportConfig() *ConversationImportConfig {
+	return &ConversationImportConfig{
+		Force: false,
+	}
+}
+
+// ConversationExportConfig holds configuration for the conversation export command
+type ConversationExportConfig struct {
+	UseGist       bool
+	UsePublicGist bool
+}
+
+// NewConversationExportConfig creates a new ConversationExportConfig with default values
+func NewConversationExportConfig() *ConversationExportConfig {
+	return &ConversationExportConfig{
+		UseGist:       false,
+		UsePublicGist: false,
+	}
+}
+
 var conversationCmd = &cobra.Command{
 	Use:   "conversation",
 	Short: "Manage saved conversations",
@@ -109,6 +139,34 @@ var conversationShowCmd = &cobra.Command{
 	},
 }
 
+var conversationImportCmd = &cobra.Command{
+	Use:   "import [path_or_url]",
+	Short: "Import a conversation from a file or URL",
+	Args:  cobra.ExactArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		ctx := cmd.Context()
+		config := getConversationImportConfigFromFlags(cmd)
+		importConversationCmd(ctx, args[0], config)
+	},
+}
+
+var conversationExportCmd = &cobra.Command{
+	Use:   "export [conversationID] [path]",
+	Short: "Export a conversation to a file or create a gist",
+	Args:  cobra.RangeArgs(1, 2),
+	Run: func(cmd *cobra.Command, args []string) {
+		ctx := cmd.Context()
+		config := getConversationExportConfigFromFlags(cmd)
+
+		var path string
+		if len(args) > 1 {
+			path = args[1]
+		}
+
+		exportConversationCmd(ctx, args[0], path, config)
+	},
+}
+
 func init() {
 	// Add list command flags
 	listDefaults := NewConversationListConfig()
@@ -129,10 +187,21 @@ func init() {
 	showDefaults := NewConversationShowConfig()
 	conversationShowCmd.Flags().String("format", showDefaults.Format, "Output format: raw, json, or text")
 
+	// Add import command flags
+	importDefaults := NewConversationImportConfig()
+	conversationImportCmd.Flags().Bool("force", importDefaults.Force, "Force overwrite existing conversation")
+
+	// Add export command flags
+	exportDefaults := NewConversationExportConfig()
+	conversationExportCmd.Flags().Bool("gist", exportDefaults.UseGist, "Create a private gist using gh command")
+	conversationExportCmd.Flags().Bool("public-gist", exportDefaults.UsePublicGist, "Create a public gist using gh command")
+
 	// Add subcommands
 	conversationCmd.AddCommand(conversationListCmd)
 	conversationCmd.AddCommand(conversationDeleteCmd)
 	conversationCmd.AddCommand(conversationShowCmd)
+	conversationCmd.AddCommand(conversationImportCmd)
+	conversationCmd.AddCommand(conversationExportCmd)
 }
 
 // getConversationListConfigFromFlags extracts list configuration from command flags
@@ -184,6 +253,32 @@ func getConversationShowConfigFromFlags(cmd *cobra.Command) *ConversationShowCon
 
 	if format, err := cmd.Flags().GetString("format"); err == nil {
 		config.Format = format
+	}
+
+	return config
+}
+
+// getConversationImportConfigFromFlags extracts import configuration from command flags
+func getConversationImportConfigFromFlags(cmd *cobra.Command) *ConversationImportConfig {
+	config := NewConversationImportConfig()
+
+	if force, err := cmd.Flags().GetBool("force"); err == nil {
+		config.Force = force
+	}
+
+	return config
+}
+
+// getConversationExportConfigFromFlags extracts export configuration from command flags
+func getConversationExportConfigFromFlags(cmd *cobra.Command) *ConversationExportConfig {
+	config := NewConversationExportConfig()
+
+	if useGist, err := cmd.Flags().GetBool("gist"); err == nil {
+		config.UseGist = useGist
+	}
+
+	if usePublicGist, err := cmd.Flags().GetBool("public-gist"); err == nil {
+		config.UsePublicGist = usePublicGist
 	}
 
 	return config
@@ -472,4 +567,211 @@ func displayConversation(messages []llmtypes.Message) {
 		presenter.Section(roleLabel)
 		fmt.Printf("%s\n", msg.Content)
 	}
+}
+
+// importConversationCmd imports a conversation from a file or URL
+func importConversationCmd(ctx context.Context, source string, config *ConversationImportConfig) {
+	// Create a store
+	store, err := conversations.GetConversationStore(ctx)
+	if err != nil {
+		presenter.Error(err, "Failed to initialize conversation store")
+		os.Exit(1)
+	}
+	defer store.Close()
+
+	// Read the conversation data
+	data, err := readConversationData(source)
+	if err != nil {
+		presenter.Error(err, "Failed to read conversation data")
+		os.Exit(1)
+	}
+
+	// Validate and parse the conversation record
+	record, err := validateConversationRecord(data)
+	if err != nil {
+		presenter.Error(err, "Invalid conversation data")
+		os.Exit(1)
+	}
+
+	// Check if conversation already exists
+	if _, err := store.Load(record.ID); err == nil {
+		if !config.Force {
+			presenter.Error(fmt.Errorf("conversation with ID %s already exists", record.ID), "Use --force to overwrite")
+			os.Exit(1)
+		}
+	}
+
+	// Save the conversation
+	if err := store.Save(*record); err != nil {
+		presenter.Error(err, "Failed to save conversation")
+		os.Exit(1)
+	}
+
+	presenter.Success(fmt.Sprintf("Conversation %s imported successfully", record.ID))
+}
+
+// exportConversationCmd exports a conversation to a file or creates a gist
+func exportConversationCmd(ctx context.Context, conversationID string, path string, config *ConversationExportConfig) {
+	// Create a store
+	store, err := conversations.GetConversationStore(ctx)
+	if err != nil {
+		presenter.Error(err, "Failed to initialize conversation store")
+		os.Exit(1)
+	}
+	defer store.Close()
+
+	// Load the conversation
+	record, err := store.Load(conversationID)
+	if err != nil {
+		presenter.Error(err, "Failed to load conversation")
+		os.Exit(1)
+	}
+
+	// Convert to JSON
+	jsonData, err := json.MarshalIndent(record, "", "  ")
+	if err != nil {
+		presenter.Error(err, "Failed to serialize conversation")
+		os.Exit(1)
+	}
+
+	// Handle gist export
+	if config.UseGist || config.UsePublicGist {
+		// Check for conflicting flags
+		if config.UseGist && config.UsePublicGist {
+			presenter.Error(fmt.Errorf("cannot use both --gist and --public-gist flags"), "Conflicting flags")
+			os.Exit(1)
+		}
+
+		isPrivate := config.UseGist // private if --gist, public if --public-gist
+		if err := createGist(conversationID, jsonData, isPrivate); err != nil {
+			presenter.Error(err, "Failed to create gist")
+			os.Exit(1)
+		}
+		return
+	}
+
+	// Handle file export
+	if path == "" {
+		path = fmt.Sprintf("%s.json", conversationID)
+	}
+
+	if err := os.WriteFile(path, jsonData, 0644); err != nil {
+		presenter.Error(err, "Failed to write file")
+		os.Exit(1)
+	}
+
+	presenter.Success(fmt.Sprintf("Conversation %s exported to %s", conversationID, path))
+}
+
+// readConversationData reads conversation data from a file or URL
+func readConversationData(source string) ([]byte, error) {
+	// Check if it's a URL
+	if parsedURL, err := url.Parse(source); err == nil && parsedURL.Scheme != "" {
+		return readFromURL(source)
+	}
+
+	// It's a file path
+	return os.ReadFile(source)
+}
+
+// readFromURL reads data from a URL
+func readFromURL(urlStr string) ([]byte, error) {
+	resp, err := http.Get(urlStr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch from URL: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP error %d: %s", resp.StatusCode, resp.Status)
+	}
+
+	return io.ReadAll(resp.Body)
+}
+
+// validateConversationRecord validates and parses a conversation record
+func validateConversationRecord(data []byte) (*conversations.ConversationRecord, error) {
+	var record conversations.ConversationRecord
+	if err := json.Unmarshal(data, &record); err != nil {
+		return nil, fmt.Errorf("invalid JSON format: %w", err)
+	}
+
+	// Validate required fields
+	if record.ID == "" {
+		return nil, fmt.Errorf("conversation ID is required")
+	}
+
+	if record.ModelType == "" {
+		return nil, fmt.Errorf("model type is required")
+	}
+
+	// Validate supported providers
+	if record.ModelType != "anthropic" && record.ModelType != "openai" {
+		return nil, fmt.Errorf("unsupported model type: %s (supported: anthropic, openai)", record.ModelType)
+	}
+
+	if len(record.RawMessages) == 0 {
+		return nil, fmt.Errorf("raw messages are required")
+	}
+
+	// Validate that messages can be extracted
+	if record.ToolResults == nil {
+		record.ToolResults = make(map[string]tools.StructuredToolResult)
+	}
+
+	_, err := llm.ExtractMessages(record.ModelType, record.RawMessages, record.ToolResults)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract messages: %w", err)
+	}
+
+	// Set timestamps if not provided
+	if record.CreatedAt.IsZero() {
+		record.CreatedAt = time.Now()
+	}
+	if record.UpdatedAt.IsZero() {
+		record.UpdatedAt = time.Now()
+	}
+
+	return &record, nil
+}
+
+// createGist creates a gist using the gh command
+func createGist(conversationID string, jsonData []byte, isPrivate bool) error {
+	// Create a temporary file
+	tmpFile, err := os.CreateTemp("", fmt.Sprintf("conversation_%s_*.json", conversationID))
+	if err != nil {
+		return fmt.Errorf("failed to create temporary file: %w", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	// Write data to temporary file
+	if _, err := tmpFile.Write(jsonData); err != nil {
+		tmpFile.Close()
+		return fmt.Errorf("failed to write to temporary file: %w", err)
+	}
+	tmpFile.Close()
+
+	// Build gh command with appropriate visibility flag
+	args := []string{"gist", "create"}
+	if !isPrivate {
+		// Only add --public flag for public gists; private is the default
+		args = append(args, "--public")
+	}
+	args = append(args, "--filename", fmt.Sprintf("conversation_%s.json", conversationID), tmpFile.Name())
+
+	// Create gist using gh command
+	cmd := exec.Command("gh", args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to create gist: %w (output: %s)", err, string(output))
+	}
+
+	gistURL := strings.TrimSpace(string(output))
+	visibility := "private"
+	if !isPrivate {
+		visibility = "public"
+	}
+	presenter.Success(fmt.Sprintf("Conversation %s exported to %s gist: %s", conversationID, visibility, gistURL))
+
+	return nil
 }
