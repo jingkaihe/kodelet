@@ -4,7 +4,7 @@ NODE_VERSION=22.17.0
 NPM_VERSION=10.9.2
 
 VERSION_FLAG=-X 'github.com/jingkaihe/kodelet/pkg/version.Version=$(VERSION)' -X 'github.com/jingkaihe/kodelet/pkg/version.GitCommit=$(GIT_COMMIT)'
-.PHONY: build build-dev cross-build cross-build-docker run test lint golangci-lint code-generation install-linters format docker-build docker-run e2e-test e2e-test-docker eslint eslint-fix frontend-test frontend-test-watch frontend-test-ui frontend-test-coverage release github-release push-tag dev-server
+.PHONY: build build-dev cross-build cross-build-docker run test lint golangci-lint code-generation install-linters install-air install-npm install-deps format docker-build docker-run e2e-test e2e-test-docker eslint eslint-fix frontend-test frontend-test-watch frontend-test-ui frontend-test-coverage release github-release push-tag dev-server
 
 # Build the application
 build: code-generation
@@ -22,12 +22,8 @@ chat: build
 	./bin/kodelet chat
 
 # Run development server with auto-reload
-dev-server:
+dev-server: install-air
 	@echo "Starting development server with auto-reload..."
-	@if [ ! -f ./bin/air ]; then \
-		echo "Installing air..."; \
-		GOBIN=$(shell pwd)/bin go install github.com/air-verse/air@latest; \
-	fi
 	./bin/air
 
 code-generation:
@@ -42,6 +38,21 @@ install-linters:
 	@echo "Installing golangci-lint to ./bin..."
 	@mkdir -p bin
 	@curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./bin
+
+# Install air for development auto-reload
+install-air:
+	@echo "Installing air for development auto-reload..."
+	@mkdir -p bin
+	@GOBIN=$(shell pwd)/bin go install github.com/air-verse/air@latest
+
+# Install npm dependencies for frontend
+install-npm:
+	@echo "Installing npm dependencies for frontend..."
+	@cd pkg/webui/frontend && npm install
+
+# Install all tooling dependencies
+install-deps: install-linters install-air install-npm
+	@echo "All tooling dependencies installed successfully!"
 
 # Run all linters
 lint:
@@ -149,6 +160,9 @@ help:
 	@echo "  lint         - Run all linters (go vet, golangci-lint)"
 	@echo "  golangci-lint - Run golangci-lint"
 	@echo "  install-linters - Install golangci-lint"
+	@echo "  install-air  - Install air for development auto-reload"
+	@echo "  install-npm  - Install npm dependencies for frontend"
+	@echo "  install-deps - Install all tooling dependencies (golangci-lint, air, npm packages)"
 	@echo "  format       - Format code"
 	@echo "  eslint       - Run eslint on frontend code"
 	@echo "  eslint-fix   - Run eslint with auto-fix on frontend code"
