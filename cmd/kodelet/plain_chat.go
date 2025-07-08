@@ -102,8 +102,10 @@ func plainChatUI(ctx context.Context, options *ChatOptions) {
 
 		// Process the query using the persistent thread
 		_, err = thread.SendMessage(ctx, input, handler, llmtypes.MessageOpt{
-			PromptCache: true,
-			MaxTurns:    options.maxTurns,
+			PromptCache:        true,
+			MaxTurns:           options.maxTurns,
+			CompactRatio:       options.compactRatio,
+			DisableAutoCompact: options.disableAutoCompact,
 		})
 		if err != nil {
 			presenter.Error(err, "Failed to process message")

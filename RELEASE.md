@@ -6,6 +6,10 @@
 
 - **Removed Model Strength Parameter**: Simplified subagent tool interface by removing the `model_strength` parameter. Going forward subagent will use the default model for tasks.
 
+### Automatic Compacting
+
+Add context auto-compact support to allow kodelet to run for a long period of time without hitting the context window limit.
+
 ## 0.0.56.alpha (2025-07-06)
 
 ### Test Improvements

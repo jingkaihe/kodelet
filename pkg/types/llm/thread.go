@@ -27,6 +27,10 @@ type MessageOpt struct {
 	// MaxTurns limits the number of turns within a single SendMessage call
 	// A value of 0 means no limit, and negative values are treated as 0
 	MaxTurns int
+	// CompactRatio is the ratio of context window at which to trigger auto-compact (0.0-1.0)
+	CompactRatio float64
+	// DisableAutoCompact disables auto-compact functionality
+	DisableAutoCompact bool
 }
 
 // SubAgentConfig is the key for the thread in the context

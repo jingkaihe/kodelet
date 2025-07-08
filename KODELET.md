@@ -143,6 +143,12 @@ make cross-build-docker                 # Cross-compile using Docker (recommende
 make eslint                            # Run frontend linting
 make eslint-fix                        # Run frontend linting with auto-fix
 
+# Dependency installation
+make install-deps                       # Install all tooling dependencies
+make install-linters                    # Install golangci-lint only
+make install-air                        # Install air for development auto-reload
+make install-npm                        # Install npm dependencies for frontend
+
 # For detailed build instructions and release process, see docs/DEVELOPMENT.md
 ```
 

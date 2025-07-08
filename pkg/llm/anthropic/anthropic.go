@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
@@ -261,6 +262,17 @@ OUTER:
 			if opt.PromptCache && turnCount > 0 && cacheEvery > 0 && turnCount%cacheEvery == 0 {
 				logger.G(ctx).WithField("turn_count", turnCount).WithField("cache_every", cacheEvery).Debug("caching messages")
 				t.cacheMessages()
+			}
+
+			// Check if auto-compact should be triggered before each exchange
+			if !opt.DisableAutoCompact && t.shouldAutoCompact(opt.CompactRatio) {
+				logger.G(ctx).WithField("context_utilization", float64(t.GetUsage().CurrentContextWindow)/float64(t.GetUsage().MaxContextWindow)).Info("triggering auto-compact")
+				err := t.CompactContext(ctx)
+				if err != nil {
+					logger.G(ctx).WithError(err).Error("failed to auto-compact context")
+				} else {
+					logger.G(ctx).Info("auto-compact completed successfully")
+				}
 			}
 
 			var exchangeOutput string
@@ -669,27 +681,132 @@ func (t *AnthropicThread) WithSubAgent(ctx context.Context, handler llmtypes.Mes
 	return ctx
 }
 
-func (t *AnthropicThread) ShortSummary(ctx context.Context) string {
-	handler := &llmtypes.StringCollectorHandler{
-		Silent: true,
+// getLastAssistantMessageText extracts text content from the most recent assistant message
+func (t *AnthropicThread) getLastAssistantMessageText() (string, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if len(t.messages) == 0 {
+		return "", fmt.Errorf("no messages found")
 	}
+
+	// Find the last assistant message
+	var messageText string
+	for i := len(t.messages) - 1; i >= 0; i-- {
+		msg := t.messages[i]
+		if msg.Role == anthropic.MessageParamRoleAssistant {
+			// Extract text from the assistant message content blocks
+			for _, block := range msg.Content {
+				if block.OfText != nil {
+					messageText += block.OfText.Text
+				}
+			}
+			break
+		}
+	}
+
+	if messageText == "" {
+		return "", fmt.Errorf("no text content found in assistant message")
+	}
+
+	return messageText, nil
+}
+
+func (t *AnthropicThread) ShortSummary(ctx context.Context) string {
+	// Temporarily disable persistence during summarization
 	t.isPersisted = false
 	defer func() {
 		t.isPersisted = true
 	}()
 
 	// Use a faster model for summarization as it's a simpler task
-	_, err := t.SendMessage(ctx, prompts.ShortSummaryPrompt, handler, llmtypes.MessageOpt{
+	_, err := t.SendMessage(ctx, prompts.ShortSummaryPrompt, &llmtypes.StringCollectorHandler{Silent: true}, llmtypes.MessageOpt{
 		UseWeakModel:       true,
 		PromptCache:        false, // maybe we should make it configurable, but there is likely no cache for weak model
 		NoToolUse:          true,
-		NoSaveConversation: true,
+		DisableAutoCompact: true, // Prevent auto-compact during summarization
+		// Note: Not using NoSaveConversation so we can access the assistant response
 	})
 	if err != nil {
 		return err.Error()
 	}
 
-	return handler.CollectedText()
+	// Get the summary from the last assistant message
+	summary, err := t.getLastAssistantMessageText()
+	if err != nil {
+		return err.Error()
+	}
+
+	return summary
+}
+
+// shouldAutoCompact checks if auto-compact should be triggered based on context window utilization
+func (t *AnthropicThread) shouldAutoCompact(compactRatio float64) bool {
+	if compactRatio <= 0.0 || compactRatio > 1.0 {
+		return false
+	}
+
+	usage := t.GetUsage()
+	if usage.MaxContextWindow == 0 {
+		return false
+	}
+
+	utilizationRatio := float64(usage.CurrentContextWindow) / float64(usage.MaxContextWindow)
+	return utilizationRatio >= compactRatio
+}
+
+// CompactContext performs comprehensive context compacting by creating a detailed summary
+func (t *AnthropicThread) CompactContext(ctx context.Context) error {
+	// Temporarily disable persistence during compacting
+	wasPersistedOriginal := t.isPersisted
+	t.isPersisted = false
+	defer func() {
+		t.isPersisted = wasPersistedOriginal
+	}()
+
+	// Use the strong model for comprehensive compacting (opposite of ShortSummary)
+	_, err := t.SendMessage(ctx, prompts.CompactPrompt, &llmtypes.StringCollectorHandler{Silent: true}, llmtypes.MessageOpt{
+		UseWeakModel:       false, // Use strong model for comprehensive compacting
+		PromptCache:        false, // Don't cache the compacting prompt
+		NoToolUse:          true,
+		DisableAutoCompact: true, // Prevent recursion
+		// Note: Not using NoSaveConversation so we can access the assistant response
+	})
+	if err != nil {
+		return fmt.Errorf("failed to generate compact summary: %w", err)
+	}
+
+	// Get the compact summary from the last assistant message
+	compactSummary, err := t.getLastAssistantMessageText()
+	if err != nil {
+		return fmt.Errorf("failed to get compact summary from assistant message: %w", err)
+	}
+
+	// Replace the conversation history with the compact summary
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	t.messages = []anthropic.MessageParam{
+		{
+			Role: anthropic.MessageParamRoleUser,
+			Content: []anthropic.ContentBlockParamUnion{
+				anthropic.NewTextBlock(compactSummary),
+			},
+		},
+	}
+
+	// Clear stale tool results - they reference tool calls that no longer exist
+	t.toolResults = make(map[string]tooltypes.StructuredToolResult)
+
+	// Get state reference while under mutex protection
+	state := t.state
+
+	// Clear file access tracking to start fresh with context retrieval
+	if state != nil {
+		state.SetFileLastAccess(make(map[string]time.Time))
+	}
+
+	return nil
 }
 
 // GetUsage returns the current token usage for the thread
