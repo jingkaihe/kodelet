@@ -183,6 +183,21 @@ Kodelet uses a `Thread` abstraction for all interactions with LLM providers (Ant
 
 The architecture provides a unified approach for both interactive and one-shot uses with token usage tracking for all API calls across different providers.
 
+## Error Handling
+
+**Always prefer pkg/errors over fmt.Errorf** for error wrapping:
+
+```go
+// Good - pkg/errors provides stack traces and better error context
+return errors.Wrap(err, "failed to validate config")
+return errors.Wrapf(err, "failed to process file %s", filename)
+return errors.New("configuration is invalid")
+
+// Bad - fmt.Errorf loses stack trace information
+return fmt.Errorf("failed to validate config: %w", err)
+return fmt.Errorf("failed to process file %s: %w", filename, err)
+```
+
 ## Logging & CLI Output
 
 ### Structured Logging
@@ -217,12 +232,11 @@ presenter.Stats(usageStats)               // Formatted stats
 - Colors auto-detect terminal/CI with `KODELET_COLOR` override
 - Quiet mode support via `presenter.SetQuiet(true)`
 
-### Error Handling
+### CLI Error Handling
 Handle errors with both user feedback and logging:
 ```go
 if err != nil {
     presenter.Error(err, "Operation failed")           // For user
-    logger.G(ctx).WithError(err).Error("Details here")  // For diagnostics
     return errors.Wrap(err, "failed to process")
 }
 ```

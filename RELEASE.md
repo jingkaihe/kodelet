@@ -1,5 +1,10 @@
 # Kodelet
 
+## 0.0.59.alpha (2025-07-09)
+
+### refactor: replace fmt.Errorf with pkg/errors for consistent error wrapping
+
+
 ## 0.0.58.alpha (2025-07-08)
 
 ### Support boltdb as the conversation store
