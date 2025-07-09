@@ -2,6 +2,8 @@ package anthropic
 
 import (
 	"context"
+	"fmt"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -49,8 +51,8 @@ func (m *MockConversationStore) Delete(id string) error {
 	return nil
 }
 
-func (m *MockConversationStore) Query(options conversations.QueryOptions) ([]conversations.ConversationSummary, error) {
-	return nil, nil
+func (m *MockConversationStore) Query(options conversations.QueryOptions) (conversations.QueryResult, error) {
+	return conversations.QueryResult{}, nil
 }
 
 func (m *MockConversationStore) Close() error {
@@ -153,8 +155,17 @@ func TestDeserializeMessages(t *testing.T) {
 }
 
 func TestSaveAndLoadConversationWithFileLastAccess(t *testing.T) {
+	// Create a unique temporary directory for this test
+	tempDir := t.TempDir()
+	
+	// Create a BBolt store directly with a unique database path
+	dbPath := filepath.Join(tempDir, fmt.Sprintf("test-%d.db", time.Now().UnixNano()))
+	store, err := conversations.NewBBoltConversationStore(context.Background(), dbPath)
+	require.NoError(t, err)
+	defer store.Close()
+
 	// Create a thread with a unique conversation ID
-	conversationID := "test-file-last-access"
+	conversationID := fmt.Sprintf("test-file-last-access-%d", time.Now().UnixNano())
 	thread, err := NewAnthropicThread(llmtypes.Config{
 		Model: string(anthropic.ModelClaudeSonnet4_20250514),
 	})
@@ -165,8 +176,9 @@ func TestSaveAndLoadConversationWithFileLastAccess(t *testing.T) {
 	state := tools.NewBasicState(context.TODO())
 	thread.SetState(state)
 
-	// Enable persistence
-	thread.EnablePersistence(context.TODO(), true)
+	// Manually set the store instead of using EnablePersistence
+	thread.store = store
+	thread.isPersisted = true
 
 	// Set file access times
 	now := time.Now()
@@ -191,8 +203,12 @@ func TestSaveAndLoadConversationWithFileLastAccess(t *testing.T) {
 	newState := tools.NewBasicState(context.TODO())
 	newThread.SetState(newState)
 
-	// Enable persistence to load the conversation
-	newThread.EnablePersistence(context.TODO(), true)
+	// Manually set the store and enable persistence
+	newThread.store = store
+	newThread.isPersisted = true
+	
+	// Load the conversation
+	newThread.loadConversation()
 
 	// Verify the file last access data was preserved
 	loadedState := newThread.GetState()
