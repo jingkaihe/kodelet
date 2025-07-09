@@ -44,6 +44,18 @@ func TestSubAgentPrompt(t *testing.T) {
 			t.Errorf("Expected subagent prompt to contain: %q", fragment)
 		}
 	}
+
+	unexpectedFragments := []string{
+		"## Subagent tool usage examples",
+		"- **ALWAYS prioritize",
+		"for open-ended code search",
+	}
+
+	for _, fragment := range unexpectedFragments {
+		if strings.Contains(prompt, fragment) {
+			t.Errorf("Did not expect subagent prompt to contain: %q", fragment)
+		}
+	}
 }
 
 // TestSubAgentPromptBashBannedCommands verifies that banned commands appear in the default subagent prompt
