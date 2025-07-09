@@ -100,13 +100,15 @@ func NewConversationExportConfig() *ConversationExportConfig {
 
 // ConversationEditConfig holds configuration for the conversation edit command
 type ConversationEditConfig struct {
-	Editor string
+	Editor   string
+	EditArgs string
 }
 
 // NewConversationEditConfig creates a new ConversationEditConfig with default values
 func NewConversationEditConfig() *ConversationEditConfig {
 	return &ConversationEditConfig{
-		Editor: "",
+		Editor:   "",
+		EditArgs: "",
 	}
 }
 
@@ -252,11 +254,12 @@ func init() {
 	exportDefaults := NewConversationExportConfig()
 	conversationExportCmd.Flags().Bool("gist", exportDefaults.UseGist, "Create a private gist using gh command")
 	conversationExportCmd.Flags().Bool("public-gist", exportDefaults.UsePublicGist, "Create a public gist using gh command")
-	
+
 	// Add edit command flags
 	editDefaults := NewConversationEditConfig()
 	conversationEditCmd.Flags().String("editor", editDefaults.Editor, "Editor to use for editing the conversation (default: git config core.editor, then $EDITOR, then vim)")
-	
+	conversationEditCmd.Flags().String("edit-args", editDefaults.EditArgs, "Additional arguments to pass to the editor (e.g., '--wait' for VS Code)")
+
 	// Add migrate command flags
 	migrateDefaults := NewMigrationConfig()
 	conversationMigrateCmd.Flags().Bool("dry-run", migrateDefaults.DryRun, "Show what would be migrated without actually migrating")
@@ -362,6 +365,10 @@ func getConversationEditConfigFromFlags(cmd *cobra.Command) *ConversationEditCon
 
 	if editor, err := cmd.Flags().GetString("editor"); err == nil {
 		config.Editor = editor
+	}
+
+	if editArgs, err := cmd.Flags().GetString("edit-args"); err == nil {
+		config.EditArgs = editArgs
 	}
 
 	return config
@@ -931,8 +938,18 @@ func editConversationCmd(ctx context.Context, conversationID string, config *Con
 		editor = getEditor()
 	}
 
+	// Parse editor command and arguments
+	editorCmd := []string{editor}
+	if config.EditArgs != "" {
+		args := strings.Fields(config.EditArgs)
+		editorCmd = append(editorCmd, args...)
+	}
+	editorCmd = append(editorCmd, tempFile.Name())
+
+	fmt.Println(editorCmd)
+
 	// Open the file in the editor
-	cmd := exec.Command(editor, tempFile.Name())
+	cmd := exec.Command(editorCmd[0], editorCmd[1:]...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -964,8 +981,6 @@ func editConversationCmd(ctx context.Context, conversationID string, config *Con
 
 	presenter.Success(fmt.Sprintf("Conversation %s edited successfully", conversationID))
 }
-
-
 
 // migrateConversationsCmd performs the migration operation
 func migrateConversationsCmd(ctx context.Context, config *MigrationConfig) {

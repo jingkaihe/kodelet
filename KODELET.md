@@ -116,6 +116,7 @@ kodelet serve [--host HOST] [--port PORT] # Web UI server (default: localhost:80
 
 # Conversation management
 kodelet conversation list|show|delete  # Manage conversations
+kodelet conversation edit [--editor editor] [--edit-args "args"] ID  # Edit conversation JSON
 kodelet run --resume ID "more"         # Continue specific conversation
 kodelet run --follow "continue"        # Continue most recent conversation
 kodelet chat --follow                  # Resume most recent in chat mode
