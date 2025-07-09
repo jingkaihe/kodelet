@@ -98,6 +98,18 @@ func NewConversationExportConfig() *ConversationExportConfig {
 	}
 }
 
+// ConversationEditConfig holds configuration for the conversation edit command
+type ConversationEditConfig struct {
+	Editor string
+}
+
+// NewConversationEditConfig creates a new ConversationEditConfig with default values
+func NewConversationEditConfig() *ConversationEditConfig {
+	return &ConversationEditConfig{
+		Editor: "",
+	}
+}
+
 // MigrationConfig holds configuration for the migration command
 type MigrationConfig struct {
 	DryRun     bool
@@ -190,6 +202,17 @@ var conversationExportCmd = &cobra.Command{
 	},
 }
 
+var conversationEditCmd = &cobra.Command{
+	Use:   "edit [conversationID]",
+	Short: "Edit a conversation record in JSON format",
+	Args:  cobra.ExactArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		ctx := cmd.Context()
+		config := getConversationEditConfigFromFlags(cmd)
+		editConversationCmd(ctx, args[0], config)
+	},
+}
+
 var conversationMigrateCmd = &cobra.Command{
 	Use:   "migrate",
 	Short: "Migrate conversations from JSON to BBolt format",
@@ -229,6 +252,11 @@ func init() {
 	exportDefaults := NewConversationExportConfig()
 	conversationExportCmd.Flags().Bool("gist", exportDefaults.UseGist, "Create a private gist using gh command")
 	conversationExportCmd.Flags().Bool("public-gist", exportDefaults.UsePublicGist, "Create a public gist using gh command")
+	
+	// Add edit command flags
+	editDefaults := NewConversationEditConfig()
+	conversationEditCmd.Flags().String("editor", editDefaults.Editor, "Editor to use for editing the conversation (default: git config core.editor, then $EDITOR, then vim)")
+	
 	// Add migrate command flags
 	migrateDefaults := NewMigrationConfig()
 	conversationMigrateCmd.Flags().Bool("dry-run", migrateDefaults.DryRun, "Show what would be migrated without actually migrating")
@@ -244,6 +272,7 @@ func init() {
 	conversationCmd.AddCommand(conversationShowCmd)
 	conversationCmd.AddCommand(conversationImportCmd)
 	conversationCmd.AddCommand(conversationExportCmd)
+	conversationCmd.AddCommand(conversationEditCmd)
 	conversationCmd.AddCommand(conversationMigrateCmd)
 }
 
@@ -322,6 +351,17 @@ func getConversationExportConfigFromFlags(cmd *cobra.Command) *ConversationExpor
 
 	if usePublicGist, err := cmd.Flags().GetBool("public-gist"); err == nil {
 		config.UsePublicGist = usePublicGist
+	}
+
+	return config
+}
+
+// getConversationEditConfigFromFlags extracts edit configuration from command flags
+func getConversationEditConfigFromFlags(cmd *cobra.Command) *ConversationEditConfig {
+	config := NewConversationEditConfig()
+
+	if editor, err := cmd.Flags().GetString("editor"); err == nil {
+		config.Editor = editor
 	}
 
 	return config
@@ -845,6 +885,87 @@ func createGist(conversationID string, jsonData []byte, isPrivate bool) error {
 	presenter.Success(fmt.Sprintf("Conversation %s exported to %s gist", conversationID, visibility))
 	return nil
 }
+
+// editConversationCmd opens a conversation record in JSON format for editing
+func editConversationCmd(ctx context.Context, conversationID string, config *ConversationEditConfig) {
+	// Create a store
+	store, err := conversations.GetConversationStore(ctx)
+	if err != nil {
+		presenter.Error(err, "Failed to initialize conversation store")
+		os.Exit(1)
+	}
+	defer store.Close()
+
+	// Load the conversation
+	record, err := store.Load(conversationID)
+	if err != nil {
+		presenter.Error(err, "Failed to load conversation")
+		os.Exit(1)
+	}
+
+	// Convert to JSON
+	jsonData, err := json.MarshalIndent(record, "", "  ")
+	if err != nil {
+		presenter.Error(err, "Failed to serialize conversation")
+		os.Exit(1)
+	}
+
+	// Create a temporary file for editing
+	tempFile, err := os.CreateTemp("", fmt.Sprintf("conversation_%s_*.json", conversationID))
+	if err != nil {
+		presenter.Error(err, "Failed to create temporary file")
+		os.Exit(1)
+	}
+	defer os.Remove(tempFile.Name())
+
+	// Write the JSON to the temporary file
+	if _, err := tempFile.Write(jsonData); err != nil {
+		presenter.Error(err, "Failed to write to temporary file")
+		os.Exit(1)
+	}
+	tempFile.Close()
+
+	// Determine which editor to use
+	editor := config.Editor
+	if editor == "" {
+		editor = getEditor()
+	}
+
+	// Open the file in the editor
+	cmd := exec.Command(editor, tempFile.Name())
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		presenter.Error(err, "Failed to open editor")
+		os.Exit(1)
+	}
+
+	// Read the edited content
+	editedData, err := os.ReadFile(tempFile.Name())
+	if err != nil {
+		presenter.Error(err, "Failed to read edited file")
+		os.Exit(1)
+	}
+
+	// Parse the edited JSON to validate it
+	editedRecord, err := validateConversationRecord(editedData)
+	if err != nil {
+		presenter.Error(err, "Invalid edited conversation data")
+		os.Exit(1)
+	}
+
+	// Save the edited conversation
+	if err := store.Save(*editedRecord); err != nil {
+		presenter.Error(err, "Failed to save edited conversation")
+		os.Exit(1)
+	}
+
+	presenter.Success(fmt.Sprintf("Conversation %s edited successfully", conversationID))
+}
+
+
 
 // migrateConversationsCmd performs the migration operation
 func migrateConversationsCmd(ctx context.Context, config *MigrationConfig) {
