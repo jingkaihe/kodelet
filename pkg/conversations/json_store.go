@@ -138,6 +138,24 @@ func (s *JSONConversationStore) loadConversationIntoCache(filePath string) error
 	return nil
 }
 
+// loadRecordDirectly loads a conversation record directly from disk without updating cache
+// This is used to avoid deadlocks when already holding a read lock
+func (s *JSONConversationStore) loadRecordDirectly(id string) (ConversationRecord, error) {
+	filePath := filepath.Join(s.basePath, id+".json")
+
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return ConversationRecord{}, fmt.Errorf("failed to read conversation file: %w", err)
+	}
+
+	var record ConversationRecord
+	if err := json.Unmarshal(data, &record); err != nil {
+		return ConversationRecord{}, fmt.Errorf("failed to unmarshal conversation record: %w", err)
+	}
+
+	return record, nil
+}
+
 // watchFileChanges monitors the conversations directory for file changes
 func (s *JSONConversationStore) watchFileChanges() {
 	defer s.shutdownWg.Done()
@@ -353,10 +371,19 @@ func (s *JSONConversationStore) Query(options QueryOptions) (QueryResult, error)
 			}
 
 			// For deeper text search, we need to load the full conversation
+			// but avoid deadlock by using a cache-only read first, then direct file read if needed
 			if !found {
-				if record, err := s.Load(summary.ID); err == nil {
+				// First check if we have it in cache
+				if record, foundInCache := s.recordsCache[summary.ID]; foundInCache {
 					if strings.Contains(strings.ToLower(string(record.RawMessages)), searchTerm) {
 						found = true
+					}
+				} else {
+					// If not in cache, do a direct file read without cache updates to avoid deadlock
+					if record, err := s.loadRecordDirectly(summary.ID); err == nil {
+						if strings.Contains(strings.ToLower(string(record.RawMessages)), searchTerm) {
+							found = true
+						}
 					}
 				}
 			}
