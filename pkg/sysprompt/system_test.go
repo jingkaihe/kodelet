@@ -11,7 +11,7 @@ import (
 // TestSystemPrompt verifies that key elements from templates appear in the generated system prompt
 func TestSystemPrompt(t *testing.T) {
 	// Generate a system prompt
-	prompt := SystemPrompt("claude-3-sonnet-20240229", llm.Config{})
+	prompt := SystemPrompt("claude-sonnet-4-20250514", llm.Config{})
 
 	// Define expected fragments that should appear in the prompt
 	expectedFragments := []string{
@@ -51,7 +51,7 @@ func TestSystemPrompt(t *testing.T) {
 
 // TestSystemPromptBashBannedCommands verifies that banned commands appear in the default system prompt
 func TestSystemPromptBashBannedCommands(t *testing.T) {
-	prompt := SystemPrompt("claude-3-sonnet-20240229", llm.Config{})
+	prompt := SystemPrompt("claude-sonnet-4-20250514", llm.Config{})
 
 	// Should contain bash command restrictions section
 	if !strings.Contains(prompt, "Bash Command Restrictions") {
@@ -80,7 +80,7 @@ func TestSystemPromptBashBannedCommands(t *testing.T) {
 func TestSystemPromptBashAllowedCommands(t *testing.T) {
 	// Create a prompt context with allowed commands
 	promptCtx := NewPromptContext()
-	config := NewDefaultConfig().WithModel("claude-3-sonnet-20240229")
+	config := NewDefaultConfig().WithModel("claude-sonnet-4-20250514")
 	allowedCommands := []string{"ls *", "pwd", "git status", "echo *"}
 	llmConfig := &llm.Config{
 		AllowedCommands: allowedCommands,
@@ -127,7 +127,7 @@ func TestSystemPromptBashAllowedCommands(t *testing.T) {
 func TestSystemPromptBashEmptyAllowedCommands(t *testing.T) {
 	// Create a prompt context with empty allowed commands (should fall back to banned commands)
 	promptCtx := NewPromptContext()
-	config := NewDefaultConfig().WithModel("claude-3-sonnet-20240229")
+	config := NewDefaultConfig().WithModel("claude-sonnet-4-20250514")
 	llmConfig := &llm.Config{
 		AllowedCommands: []string{}, // Empty slice
 	}

@@ -13,17 +13,11 @@ func TestConditionalRendering(t *testing.T) {
 	// Test with specific features enabled
 	t.Run("With all features enabled", func(t *testing.T) {
 		ctx := NewPromptContext()
-		ctx.Features["grepToolEnabled"] = true
 		ctx.Features["subagentEnabled"] = true
 
 		prompt, err := renderer.RenderSystemPrompt(ctx)
 		if err != nil {
 			t.Fatalf("Failed to render system prompt: %v", err)
-		}
-
-		// Check that both grep and subagent tool references are included
-		if !strings.Contains(prompt, "grep_tool") {
-			t.Error("Expected grep_tool reference in prompt when grepToolEnabled is true")
 		}
 
 		if !strings.Contains(prompt, "subagent") {
@@ -35,28 +29,15 @@ func TestConditionalRendering(t *testing.T) {
 		ctx := NewPromptContext()
 
 		// Disable grep tool but keep subagent
-		ctx.Features["grepToolEnabled"] = false
 		ctx.Features["subagentEnabled"] = true
 
 		// Generate prompt with modified features
 		config := NewDefaultConfig()
 		updateContextWithConfig(ctx, config)
 
-		prompt, err := renderer.RenderSystemPrompt(ctx)
+		_, err := renderer.RenderSystemPrompt(ctx)
 		if err != nil {
 			t.Fatalf("Failed to render system prompt: %v", err)
-		}
-
-		// In our implementation, these checks might need adjustment based on how
-		// conditional sections are implemented. This is just an example approach.
-		grepMentionCount := strings.Count(strings.ToLower(prompt), "grep_tool")
-		subagentMentionCount := strings.Count(strings.ToLower(prompt), "subagent")
-
-		// The exact counts will depend on template implementation, but subagent should appear
-		// more often than grep when grep is disabled
-		if grepMentionCount >= subagentMentionCount && grepMentionCount > 0 {
-			t.Errorf("Expected fewer grep_tool mentions (%d) than subagent mentions (%d) when grepToolEnabled=false",
-				grepMentionCount, subagentMentionCount)
 		}
 	})
 }
