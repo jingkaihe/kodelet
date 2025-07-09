@@ -25,6 +25,15 @@ func GenerateID() string {
 
 // GetDefaultBasePath returns the default path for storing conversations
 func GetDefaultBasePath() (string, error) {
+	// Check for environment variable override
+	if basePath := os.Getenv("KODELET_BASE_PATH"); basePath != "" {
+		// Make sure the directory exists
+		if err := os.MkdirAll(basePath, 0755); err != nil {
+			return "", err
+		}
+		return basePath, nil
+	}
+
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return "", err

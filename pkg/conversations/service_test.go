@@ -360,7 +360,7 @@ func TestConversationService_GetConversationStatistics(t *testing.T) {
 			},
 			expectedStats: &ConversationStatistics{
 				TotalConversations: 2,
-				TotalMessages:      4, // 2 messages per conversation
+				TotalMessages:      8, // 5 + 3 messages from the MessageCount fields
 			},
 		},
 		{

@@ -9,13 +9,13 @@ import (
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
 
-// ConversationRecord represents the minimal data needed for usage calculation
-type ConversationRecord struct {
-	ID           string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-	MessageCount int
-	Usage        llmtypes.Usage
+// ConversationSummary represents the interface for conversation summary data needed for usage calculations
+type ConversationSummary interface {
+	GetID() string
+	GetCreatedAt() time.Time
+	GetUpdatedAt() time.Time
+	GetMessageCount() int
+	GetUsage() llmtypes.Usage
 }
 
 // DailyUsage represents usage statistics for a single day
@@ -47,15 +47,15 @@ type ConversationUsageStats struct {
 	CacheWriteCost     float64 `json:"cacheWriteCost"`
 }
 
-// CalculateUsageStats calculates usage statistics from a list of conversation records
-func CalculateUsageStats(records []ConversationRecord, startTime, endTime time.Time) *UsageStats {
+// CalculateUsageStats calculates usage statistics from a list of conversation summaries
+func CalculateUsageStats(summaries []ConversationSummary, startTime, endTime time.Time) *UsageStats {
 	// Create map to aggregate daily usage
 	dailyMap := make(map[string]*DailyUsage)
 	totalUsage := llmtypes.Usage{}
 
-	for _, record := range records {
+	for _, summary := range summaries {
 		// Use UpdatedAt as the date for this conversation's usage
-		date := record.UpdatedAt.Truncate(24 * time.Hour)
+		date := summary.GetUpdatedAt().Truncate(24 * time.Hour)
 
 		// Filter by time range if specified
 		if !startTime.IsZero() && date.Before(startTime) {
@@ -77,25 +77,26 @@ func CalculateUsageStats(records []ConversationRecord, startTime, endTime time.T
 
 		// Add to daily and total usage
 		daily := dailyMap[dateKey]
-		daily.Usage.InputTokens += record.Usage.InputTokens
-		daily.Usage.OutputTokens += record.Usage.OutputTokens
-		daily.Usage.CacheCreationInputTokens += record.Usage.CacheCreationInputTokens
-		daily.Usage.CacheReadInputTokens += record.Usage.CacheReadInputTokens
-		daily.Usage.InputCost += record.Usage.InputCost
-		daily.Usage.OutputCost += record.Usage.OutputCost
-		daily.Usage.CacheCreationCost += record.Usage.CacheCreationCost
-		daily.Usage.CacheReadCost += record.Usage.CacheReadCost
+		usage := summary.GetUsage()
+		daily.Usage.InputTokens += usage.InputTokens
+		daily.Usage.OutputTokens += usage.OutputTokens
+		daily.Usage.CacheCreationInputTokens += usage.CacheCreationInputTokens
+		daily.Usage.CacheReadInputTokens += usage.CacheReadInputTokens
+		daily.Usage.InputCost += usage.InputCost
+		daily.Usage.OutputCost += usage.OutputCost
+		daily.Usage.CacheCreationCost += usage.CacheCreationCost
+		daily.Usage.CacheReadCost += usage.CacheReadCost
 		daily.Conversations++
 
 		// Add to total
-		totalUsage.InputTokens += record.Usage.InputTokens
-		totalUsage.OutputTokens += record.Usage.OutputTokens
-		totalUsage.CacheCreationInputTokens += record.Usage.CacheCreationInputTokens
-		totalUsage.CacheReadInputTokens += record.Usage.CacheReadInputTokens
-		totalUsage.InputCost += record.Usage.InputCost
-		totalUsage.OutputCost += record.Usage.OutputCost
-		totalUsage.CacheCreationCost += record.Usage.CacheCreationCost
-		totalUsage.CacheReadCost += record.Usage.CacheReadCost
+		totalUsage.InputTokens += usage.InputTokens
+		totalUsage.OutputTokens += usage.OutputTokens
+		totalUsage.CacheCreationInputTokens += usage.CacheCreationInputTokens
+		totalUsage.CacheReadInputTokens += usage.CacheReadInputTokens
+		totalUsage.InputCost += usage.InputCost
+		totalUsage.OutputCost += usage.OutputCost
+		totalUsage.CacheCreationCost += usage.CacheCreationCost
+		totalUsage.CacheReadCost += usage.CacheReadCost
 	}
 
 	// Convert map to sorted slice
@@ -120,29 +121,30 @@ func CalculateUsageStats(records []ConversationRecord, startTime, endTime time.T
 }
 
 // CalculateConversationUsageStats calculates usage statistics for the conversation list UI
-func CalculateConversationUsageStats(records []ConversationRecord) *ConversationUsageStats {
+func CalculateConversationUsageStats(summaries []ConversationSummary) *ConversationUsageStats {
 	stats := &ConversationUsageStats{
-		TotalConversations: len(records),
+		TotalConversations: len(summaries),
 	}
 
-	if len(records) == 0 {
+	if len(summaries) == 0 {
 		return stats
 	}
 
 	// Calculate totals
-	for _, record := range records {
+	for _, summary := range summaries {
 		// Count messages
-		stats.TotalMessages += record.MessageCount
+		stats.TotalMessages += summary.GetMessageCount()
 
 		// Sum up usage
-		stats.InputTokens += record.Usage.InputTokens
-		stats.OutputTokens += record.Usage.OutputTokens
-		stats.CacheReadTokens += record.Usage.CacheReadInputTokens
-		stats.CacheWriteTokens += record.Usage.CacheCreationInputTokens
-		stats.InputCost += record.Usage.InputCost
-		stats.OutputCost += record.Usage.OutputCost
-		stats.CacheReadCost += record.Usage.CacheReadCost
-		stats.CacheWriteCost += record.Usage.CacheCreationCost
+		usage := summary.GetUsage()
+		stats.InputTokens += usage.InputTokens
+		stats.OutputTokens += usage.OutputTokens
+		stats.CacheReadTokens += usage.CacheReadInputTokens
+		stats.CacheWriteTokens += usage.CacheCreationInputTokens
+		stats.InputCost += usage.InputCost
+		stats.OutputCost += usage.OutputCost
+		stats.CacheReadCost += usage.CacheReadCost
+		stats.CacheWriteCost += usage.CacheCreationCost
 	}
 
 	// Calculate totals

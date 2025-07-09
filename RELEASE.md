@@ -2,6 +2,8 @@
 
 ## 0.0.58.alpha (2025-07-08)
 
+### Support boltdb as the conversation store
+
 ### Support conversation import and export feature for sharing and backup
 
 Added `kodelet conversation import` and `kodelet conversation export` commands for importing and exporting conversations. Here are some examples of how to use it:

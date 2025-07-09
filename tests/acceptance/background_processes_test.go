@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jingkaihe/kodelet/pkg/utils"
 )
 
 func TestBashToolBackgroundParameter(t *testing.T) {
@@ -50,10 +52,15 @@ func TestBashToolBackgroundParameter(t *testing.T) {
 				}
 
 				// Wait for the server to start and curl to complete
-				time.Sleep(2 * time.Second)
+				indexFile := filepath.Join(testDir, "index.html")
+				helloFile := filepath.Join(testDir, "hello.txt")
+				
+				if !utils.WaitForFiles(10*time.Second, 100*time.Millisecond, indexFile, helloFile) {
+					t.Errorf("Expected files to be created within timeout")
+					return
+				}
 
 				// Check if index.html was created
-				indexFile := filepath.Join(testDir, "index.html")
 				indexContent, err := os.ReadFile(indexFile)
 				if err != nil {
 					t.Errorf("index.html should have been created: %v", err)
@@ -66,7 +73,6 @@ func TestBashToolBackgroundParameter(t *testing.T) {
 				}
 
 				// Check if hello.txt was created with the curl result
-				helloFile := filepath.Join(testDir, "hello.txt")
 				helloContent, err := os.ReadFile(helloFile)
 				if err != nil {
 					t.Errorf("hello.txt should have been created by curl: %v", err)
@@ -103,11 +109,21 @@ func TestBashToolBackgroundParameter(t *testing.T) {
 					return
 				}
 
-				// Wait for the process to complete (should take about 2-3 seconds)
-				time.Sleep(3 * time.Second)
+				// Wait for the process to complete and log to contain expected content
+				logPath := filepath.Join(testDir, ".kodelet", pid, "out.log")
+				if !utils.WaitForCondition(10*time.Second, 200*time.Millisecond, func() bool {
+					if logContent, err := os.ReadFile(logPath); err == nil {
+						logStr := string(logContent)
+						// Should contain at least 2 date entries (one per iteration)
+						return strings.Count(logStr, "202") >= 2
+					}
+					return false
+				}) {
+					t.Errorf("Expected log file to contain at least 2 date entries within timeout")
+					return
+				}
 
 				// Check if log file exists and contains expected output
-				logPath := filepath.Join(testDir, ".kodelet", pid, "out.log")
 				if _, err := os.Stat(logPath); os.IsNotExist(err) {
 					t.Errorf("Log file should exist at %s", logPath)
 					return
@@ -320,8 +336,13 @@ func TestBackgroundProcessLogFiles(t *testing.T) {
 			return
 		}
 
-		// Wait for the background process to complete
-		time.Sleep(1 * time.Second)
+		// Wait for the background process to complete and log to contain all expected lines
+		expectedLines := []string{"Hello from background", "Line 2", "Line 3"}
+		
+		if !utils.WaitForFileContent(5*time.Second, 100*time.Millisecond, logPath, expectedLines) {
+			t.Errorf("Expected log file to contain all expected lines within timeout")
+			return
+		}
 
 		// Check if log file exists
 		if _, err := os.Stat(logPath); os.IsNotExist(err) {
@@ -337,7 +358,7 @@ func TestBackgroundProcessLogFiles(t *testing.T) {
 		}
 
 		logStr := string(logContent)
-		expectedLines := []string{"Hello from background", "Line 2", "Line 3"}
+		// expectedLines already defined above
 
 		for _, expectedLine := range expectedLines {
 			if !strings.Contains(logStr, expectedLine) {

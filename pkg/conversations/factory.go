@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 )
 
 // NewConversationStore creates the appropriate ConversationStore implementation
@@ -22,11 +23,15 @@ func NewConversationStore(ctx context.Context, config *Config) (ConversationStor
 	switch config.StoreType {
 	case "json":
 		return NewJSONConversationStore(ctx, config.BasePath)
+	case "bbolt":
+		dbPath := filepath.Join(config.BasePath, "storage.db")
+		return NewBBoltConversationStore(ctx, dbPath)
 	case "sqlite":
 		return nil, errors.New("SQLite store not yet implemented")
 	default:
-		// Default to JSON store with watcher for better performance
-		return NewJSONConversationStore(ctx, config.BasePath)
+		// Default to BBolt store for better performance
+		dbPath := filepath.Join(config.BasePath, "storage.db")
+		return NewBBoltConversationStore(ctx, dbPath)
 	}
 }
 
