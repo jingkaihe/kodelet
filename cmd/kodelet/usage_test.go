@@ -273,9 +273,12 @@ func TestAggregateUsageStats(t *testing.T) {
 	// Create test data
 	baseTime := time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC)
 
-	records := []conversations.ConversationRecord{
+	summaries := []conversations.ConversationSummary{
 		{
-			UpdatedAt: baseTime.Add(1 * 24 * time.Hour), // 2025-06-02
+			ID:           "test-1",
+			MessageCount: 2,
+			CreatedAt:    baseTime.Add(1 * 24 * time.Hour), // 2025-06-02
+			UpdatedAt:    baseTime.Add(1 * 24 * time.Hour), // 2025-06-02
 			Usage: llmtypes.Usage{
 				InputTokens:              100,
 				OutputTokens:             50,
@@ -288,7 +291,10 @@ func TestAggregateUsageStats(t *testing.T) {
 			},
 		},
 		{
-			UpdatedAt: baseTime.Add(1 * 24 * time.Hour), // 2025-06-02 (same day)
+			ID:           "test-2",
+			MessageCount: 3,
+			CreatedAt:    baseTime.Add(1 * 24 * time.Hour), // 2025-06-02
+			UpdatedAt:    baseTime.Add(1 * 24 * time.Hour), // 2025-06-02 (same day)
 			Usage: llmtypes.Usage{
 				InputTokens:              200,
 				OutputTokens:             100,
@@ -301,7 +307,10 @@ func TestAggregateUsageStats(t *testing.T) {
 			},
 		},
 		{
-			UpdatedAt: baseTime.Add(2 * 24 * time.Hour), // 2025-06-03
+			ID:           "test-3",
+			MessageCount: 4,
+			CreatedAt:    baseTime.Add(2 * 24 * time.Hour), // 2025-06-03
+			UpdatedAt:    baseTime.Add(2 * 24 * time.Hour), // 2025-06-03
 			Usage: llmtypes.Usage{
 				InputTokens:              150,
 				OutputTokens:             75,
@@ -316,7 +325,7 @@ func TestAggregateUsageStats(t *testing.T) {
 	}
 
 	t.Run("no time filters", func(t *testing.T) {
-		stats := aggregateUsageStats(records, time.Time{}, time.Time{})
+		stats := aggregateUsageStats(summaries, time.Time{}, time.Time{})
 
 		assert.Len(t, stats.Daily, 2) // 2 unique days
 
@@ -342,7 +351,7 @@ func TestAggregateUsageStats(t *testing.T) {
 
 	t.Run("with start time filter", func(t *testing.T) {
 		startTime := baseTime.Add(1*24*time.Hour + 12*time.Hour) // Middle of 2025-06-02
-		stats := aggregateUsageStats(records, startTime, time.Time{})
+		stats := aggregateUsageStats(summaries, startTime, time.Time{})
 
 		assert.Len(t, stats.Daily, 1) // Only 2025-06-03 should be included
 		assert.Equal(t, baseTime.Add(2*24*time.Hour).Truncate(24*time.Hour), stats.Daily[0].Date)
@@ -351,7 +360,7 @@ func TestAggregateUsageStats(t *testing.T) {
 
 	t.Run("with end time filter", func(t *testing.T) {
 		endTime := baseTime.Add(1*24*time.Hour + 12*time.Hour) // Middle of 2025-06-02
-		stats := aggregateUsageStats(records, time.Time{}, endTime)
+		stats := aggregateUsageStats(summaries, time.Time{}, endTime)
 
 		assert.Len(t, stats.Daily, 1) // Only 2025-06-02 should be included
 		assert.Equal(t, baseTime.Add(1*24*time.Hour).Truncate(24*time.Hour), stats.Daily[0].Date)
@@ -361,14 +370,14 @@ func TestAggregateUsageStats(t *testing.T) {
 	t.Run("with both time filters", func(t *testing.T) {
 		startTime := baseTime.Add(1 * 24 * time.Hour)          // Start of 2025-06-02
 		endTime := baseTime.Add(1*24*time.Hour + 23*time.Hour) // End of 2025-06-02
-		stats := aggregateUsageStats(records, startTime, endTime)
+		stats := aggregateUsageStats(summaries, startTime, endTime)
 
 		assert.Len(t, stats.Daily, 1)                 // Only 2025-06-02 should be included
 		assert.Equal(t, 300, stats.Total.InputTokens) // 100 + 200
 	})
 
-	t.Run("empty records", func(t *testing.T) {
-		stats := aggregateUsageStats([]conversations.ConversationRecord{}, time.Time{}, time.Time{})
+	t.Run("empty summaries", func(t *testing.T) {
+		stats := aggregateUsageStats([]conversations.ConversationSummary{}, time.Time{}, time.Time{})
 
 		assert.Len(t, stats.Daily, 0)
 		assert.Equal(t, llmtypes.Usage{}, stats.Total)
@@ -596,28 +605,40 @@ func TestDateRangeFiltering(t *testing.T) {
 	}
 }
 
-func TestDateRangeFilteringWithRecords(t *testing.T) {
+func TestDateRangeFilteringWithSummaries(t *testing.T) {
 	// Fixed time for deterministic testing
 	fixedTime := time.Date(2025, 6, 15, 15, 30, 0, 0, time.UTC) // Sunday 3:30 PM
 	mockNow := func() time.Time { return fixedTime }
 
-	// Create test records spanning multiple days
-	records := []conversations.ConversationRecord{
+	// Create test summaries spanning multiple days
+	summaries := []conversations.ConversationSummary{
 		{
-			UpdatedAt: time.Date(2025, 6, 3, 10, 0, 0, 0, time.UTC), // 12 days ago
-			Usage:     llmtypes.Usage{InputTokens: 100, OutputTokens: 50},
+			ID:           "test-1",
+			MessageCount: 2,
+			CreatedAt:    time.Date(2025, 6, 3, 10, 0, 0, 0, time.UTC), // 12 days ago
+			UpdatedAt:    time.Date(2025, 6, 3, 10, 0, 0, 0, time.UTC), // 12 days ago
+			Usage:        llmtypes.Usage{InputTokens: 100, OutputTokens: 50},
 		},
 		{
-			UpdatedAt: time.Date(2025, 6, 8, 14, 0, 0, 0, time.UTC), // 7 days ago
-			Usage:     llmtypes.Usage{InputTokens: 200, OutputTokens: 100},
+			ID:           "test-2",
+			MessageCount: 3,
+			CreatedAt:    time.Date(2025, 6, 8, 14, 0, 0, 0, time.UTC), // 7 days ago
+			UpdatedAt:    time.Date(2025, 6, 8, 14, 0, 0, 0, time.UTC), // 7 days ago
+			Usage:        llmtypes.Usage{InputTokens: 200, OutputTokens: 100},
 		},
 		{
-			UpdatedAt: time.Date(2025, 6, 12, 9, 0, 0, 0, time.UTC), // 3 days ago
-			Usage:     llmtypes.Usage{InputTokens: 300, OutputTokens: 150},
+			ID:           "test-3",
+			MessageCount: 4,
+			CreatedAt:    time.Date(2025, 6, 12, 9, 0, 0, 0, time.UTC), // 3 days ago
+			UpdatedAt:    time.Date(2025, 6, 12, 9, 0, 0, 0, time.UTC), // 3 days ago
+			Usage:        llmtypes.Usage{InputTokens: 300, OutputTokens: 150},
 		},
 		{
-			UpdatedAt: time.Date(2025, 6, 14, 16, 0, 0, 0, time.UTC), // 1 day ago
-			Usage:     llmtypes.Usage{InputTokens: 400, OutputTokens: 200},
+			ID:           "test-4",
+			MessageCount: 5,
+			CreatedAt:    time.Date(2025, 6, 14, 16, 0, 0, 0, time.UTC), // 1 day ago
+			UpdatedAt:    time.Date(2025, 6, 14, 16, 0, 0, 0, time.UTC), // 1 day ago
+			Usage:        llmtypes.Usage{InputTokens: 400, OutputTokens: 200},
 		},
 	}
 
@@ -633,49 +654,49 @@ func TestDateRangeFilteringWithRecords(t *testing.T) {
 			name:                "7d - should include last 7 days",
 			since:               "7d",
 			until:               "",
-			expectedRecordCount: 3,   // Records from June 8, 12, 14
+			expectedRecordCount: 3,   // Summaries from June 8, 12, 14
 			expectedInputTokens: 900, // 200 + 300 + 400
-			description:         "Records from June 8 onwards",
+			description:         "Summaries from June 8 onwards",
 		},
 		{
 			name:                "1w - should include last week (same as 7d)",
 			since:               "1w",
 			until:               "",
-			expectedRecordCount: 3,   // Records from June 8, 12, 14
+			expectedRecordCount: 3,   // Summaries from June 8, 12, 14
 			expectedInputTokens: 900, // 200 + 300 + 400
-			description:         "Records from June 8 onwards",
+			description:         "Summaries from June 8 onwards",
 		},
 		{
 			name:                "3d - should include last 3 days",
 			since:               "3d",
 			until:               "",
-			expectedRecordCount: 2,   // Records from June 12, 14
+			expectedRecordCount: 2,   // Summaries from June 12, 14
 			expectedInputTokens: 700, // 300 + 400
-			description:         "Records from June 12 onwards",
+			description:         "Summaries from June 12 onwards",
 		},
 		{
 			name:                "1d - should include last day",
 			since:               "1d",
 			until:               "",
-			expectedRecordCount: 1,   // Record from June 14
+			expectedRecordCount: 1,   // Summary from June 14
 			expectedInputTokens: 400, // 400
-			description:         "Records from June 14 onwards",
+			description:         "Summaries from June 14 onwards",
 		},
 		{
 			name:                "absolute range - June 8 to June 12",
 			since:               "2025-06-08",
 			until:               "2025-06-12",
-			expectedRecordCount: 2,   // Records from June 8 and 12
+			expectedRecordCount: 2,   // Summaries from June 8 and 12
 			expectedInputTokens: 500, // 200 + 300
-			description:         "Records from June 8 to June 12",
+			description:         "Summaries from June 8 to June 12",
 		},
 		{
-			name:                "no filters - all records",
+			name:                "no filters - all summaries",
 			since:               "",
 			until:               "",
-			expectedRecordCount: 4,    // All records
+			expectedRecordCount: 4,    // All summaries
 			expectedInputTokens: 1000, // 100 + 200 + 300 + 400
-			description:         "All records",
+			description:         "All summaries",
 		},
 	}
 
@@ -698,7 +719,7 @@ func TestDateRangeFilteringWithRecords(t *testing.T) {
 			}
 
 			// Test the aggregation with the parsed time range
-			stats := aggregateUsageStats(records, startTime, endTime)
+			stats := aggregateUsageStats(summaries, startTime, endTime)
 
 			// Count total conversations and tokens
 			totalConversations := 0
@@ -707,12 +728,12 @@ func TestDateRangeFilteringWithRecords(t *testing.T) {
 			}
 
 			assert.Equal(t, tt.expectedRecordCount, totalConversations,
-				"Record count mismatch for %s", tt.description)
+				"Summary count mismatch for %s", tt.description)
 			assert.Equal(t, tt.expectedInputTokens, stats.Total.InputTokens,
 				"Input tokens mismatch for %s", tt.description)
 
 			// Log the actual filtering results for visibility
-			t.Logf("Filtered %d records with %d input tokens for %s",
+			t.Logf("Filtered %d summaries with %d input tokens for %s",
 				totalConversations, stats.Total.InputTokens, tt.description)
 		})
 	}

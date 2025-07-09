@@ -1,5 +1,9 @@
 # Kodelet
 
+## 0.0.58.alpha (2025-07-09)
+
+### Support boltdb as the conversation store
+
 ## 0.0.57.alpha (2025-07-08)
 
 ### Subagent Tool Simplification

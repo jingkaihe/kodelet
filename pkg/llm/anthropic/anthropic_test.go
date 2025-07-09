@@ -450,8 +450,10 @@ func TestCompactContextIntegration(t *testing.T) {
 		assert.Greater(t, initialMessageCount, 2, "Should have multiple messages for meaningful test")
 		assert.Greater(t, initialToolResultCount, 0, "Should have tool results to verify clearing")
 
-		// Call the real CompactContext method
-		err = thread.CompactContext(context.Background())
+		// Call the real CompactContext method with timeout
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		err = thread.CompactContext(ctx)
 		require.NoError(t, err, "CompactContext should succeed with real API")
 
 		// Verify the compacting worked
@@ -496,8 +498,10 @@ func TestCompactContextIntegration(t *testing.T) {
 			},
 		})
 
-		// Compact the context
-		err = thread.CompactContext(context.Background())
+		// Compact the context with timeout
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		err = thread.CompactContext(ctx)
 		require.NoError(t, err)
 
 		// Verify thread is still functional by sending a new message

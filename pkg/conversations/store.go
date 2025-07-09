@@ -32,7 +32,7 @@ type ConversationStore interface {
 
 // Config holds configuration for the conversation store
 type Config struct {
-	StoreType string // "json" or "sqlite"
+	StoreType string // "json", "bbolt", or "sqlite"
 	BasePath  string // Base storage path
 }
 
@@ -44,7 +44,7 @@ func DefaultConfig() (*Config, error) {
 	}
 
 	return &Config{
-		StoreType: "json", // JSON store with watcher is now the default
+		StoreType: "bbolt", // BBolt store is now the default
 		BasePath:  basePath,
 	}, nil
 }
