@@ -534,7 +534,7 @@ func (t *OpenAIThread) processMessageExchange(
 		)
 
 		// Execute the tool
-		runToolCtx := t.WithSubAgent(ctx, handler)
+		runToolCtx := t.WithSubAgent(ctx, handler, opt.CompactRatio, opt.DisableAutoCompact)
 		output := tools.RunTool(runToolCtx, t.state, toolCall.Function.Name, toolCall.Function.Arguments)
 
 		// Use CLI rendering for consistent output formatting
@@ -613,11 +613,13 @@ func (t *OpenAIThread) NewSubAgent(ctx context.Context) llmtypes.Thread {
 	return thread
 }
 
-func (t *OpenAIThread) WithSubAgent(ctx context.Context, handler llmtypes.MessageHandler) context.Context {
+func (t *OpenAIThread) WithSubAgent(ctx context.Context, handler llmtypes.MessageHandler, compactRatio float64, disableAutoCompact bool) context.Context {
 	subAgent := t.NewSubAgent(ctx)
 	ctx = context.WithValue(ctx, llmtypes.SubAgentConfig{}, llmtypes.SubAgentConfig{
-		Thread:         subAgent,
-		MessageHandler: handler,
+		Thread:             subAgent,
+		MessageHandler:     handler,
+		CompactRatio:       compactRatio,
+		DisableAutoCompact: disableAutoCompact,
 	})
 	return ctx
 }

@@ -35,8 +35,10 @@ type MessageOpt struct {
 
 // SubAgentConfig is the key for the thread in the context
 type SubAgentConfig struct {
-	Thread         Thread         // Thread used by the sub-agent
-	MessageHandler MessageHandler // Message handler for the sub-agent
+	Thread             Thread         // Thread used by the sub-agent
+	MessageHandler     MessageHandler // Message handler for the sub-agent
+	CompactRatio       float64        // CompactRatio from parent agent
+	DisableAutoCompact bool           // DisableAutoCompact from parent agent
 }
 
 // Thread represents a conversation thread with an LLM
