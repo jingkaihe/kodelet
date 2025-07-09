@@ -389,33 +389,35 @@ func TestBBoltConversationStore_TripleStorage(t *testing.T) {
 	}
 
 	// Verify data exists in all three buckets
-	err = store.db.View(func(tx *bbolt.Tx) error {
-		// Check conversations bucket
-		convBucket := tx.Bucket([]byte("conversations"))
-		convData := convBucket.Get([]byte("triple-test"))
-		if convData == nil {
-			t.Error("Conversation data not found in conversations bucket")
-		}
+	err = store.withDB(func(db *bbolt.DB) error {
+		return db.View(func(tx *bbolt.Tx) error {
+			// Check conversations bucket
+			convBucket := tx.Bucket([]byte("conversations"))
+			convData := convBucket.Get([]byte("triple-test"))
+			if convData == nil {
+				t.Error("Conversation data not found in conversations bucket")
+			}
 
-		// Check summaries bucket
-		summBucket := tx.Bucket([]byte("summaries"))
-		summData := summBucket.Get([]byte("conv:triple-test"))
-		if summData == nil {
-			t.Error("Summary data not found in summaries bucket")
-		}
+			// Check summaries bucket
+			summBucket := tx.Bucket([]byte("summaries"))
+			summData := summBucket.Get([]byte("conv:triple-test"))
+			if summData == nil {
+				t.Error("Summary data not found in summaries bucket")
+			}
 
-		// Check search index bucket
-		searchBucket := tx.Bucket([]byte("search_index"))
-		msgData := searchBucket.Get([]byte("msg:triple-test"))
-		if msgData == nil {
-			t.Error("Message data not found in search index bucket")
-		}
-		sumData := searchBucket.Get([]byte("sum:triple-test"))
-		if sumData == nil {
-			t.Error("Summary data not found in search index bucket")
-		}
+			// Check search index bucket
+			searchBucket := tx.Bucket([]byte("search_index"))
+			msgData := searchBucket.Get([]byte("msg:triple-test"))
+			if msgData == nil {
+				t.Error("Message data not found in search index bucket")
+			}
+			sumData := searchBucket.Get([]byte("sum:triple-test"))
+			if sumData == nil {
+				t.Error("Summary data not found in search index bucket")
+			}
 
-		return nil
+			return nil
+		})
 	})
 
 	if err != nil {

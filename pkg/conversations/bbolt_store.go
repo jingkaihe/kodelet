@@ -15,29 +15,28 @@ import (
 )
 
 // BBoltConversationStore implements ConversationStore using BoltDB
+// Uses operation-scoped database access for multi-process safety
 type BBoltConversationStore struct {
-	db     *bbolt.DB
 	dbPath string
 }
 
-// NewBBoltConversationStore creates a new BBolt-based conversation store
-func NewBBoltConversationStore(ctx context.Context, dbPath string) (*BBoltConversationStore, error) {
-	// Create directory if needed
-	dir := filepath.Dir(dbPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create database directory: %w", err)
-	}
-
-	// Open database with appropriate options
-	db, err := bbolt.Open(dbPath, 0600, &bbolt.Options{
-		Timeout: 1 * time.Second,
+// withDB executes an operation with a temporary database connection
+// This ensures minimal lock duration and allows multiple processes to access concurrently
+func (s *BBoltConversationStore) withDB(operation func(*bbolt.DB) error) error {
+	db, err := bbolt.Open(s.dbPath, 0600, &bbolt.Options{
+		Timeout: 2 * time.Second, // Reasonable timeout for lock acquisition
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to open database: %w", err)
+		return fmt.Errorf("failed to open database: %w", err)
 	}
+	defer db.Close() // Always close after operation
 
-	// Create required buckets
-	err = db.Update(func(tx *bbolt.Tx) error {
+	return operation(db)
+}
+
+// ensureBuckets creates required buckets if they don't exist
+func (s *BBoltConversationStore) ensureBuckets(db *bbolt.DB) error {
+	return db.Update(func(tx *bbolt.Tx) error {
 		if _, err := tx.CreateBucketIfNotExists([]byte("conversations")); err != nil {
 			return err
 		}
@@ -49,66 +48,84 @@ func NewBBoltConversationStore(ctx context.Context, dbPath string) (*BBoltConver
 		}
 		return nil
 	})
-	if err != nil {
-		db.Close()
-		return nil, fmt.Errorf("failed to create buckets: %w", err)
+}
+
+// NewBBoltConversationStore creates a new BBolt-based conversation store
+func NewBBoltConversationStore(ctx context.Context, dbPath string) (*BBoltConversationStore, error) {
+	// Create directory if needed
+	dir := filepath.Dir(dbPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create database directory: %w", err)
 	}
 
-	return &BBoltConversationStore{
-		db:     db,
+	store := &BBoltConversationStore{
 		dbPath: dbPath,
-	}, nil
+	}
+
+	// Initialize database and create buckets on first access
+	err := store.withDB(func(db *bbolt.DB) error {
+		return store.ensureBuckets(db)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize database: %w", err)
+	}
+
+	return store, nil
 }
 
 // Save stores a conversation record using the triple storage pattern
 func (s *BBoltConversationStore) Save(record ConversationRecord) error {
-	return s.db.Update(func(tx *bbolt.Tx) error {
-		// 1. Save full record
-		conversationsBucket := tx.Bucket([]byte("conversations"))
-		recordData, err := json.Marshal(record)
-		if err != nil {
-			return fmt.Errorf("failed to marshal conversation record: %w", err)
-		}
+	return s.withDB(func(db *bbolt.DB) error {
+		return db.Update(func(tx *bbolt.Tx) error {
+			// 1. Save full record
+			conversationsBucket := tx.Bucket([]byte("conversations"))
+			recordData, err := json.Marshal(record)
+			if err != nil {
+				return fmt.Errorf("failed to marshal conversation record: %w", err)
+			}
 
-		// 2. Save summary for efficient listing
-		summariesBucket := tx.Bucket([]byte("summaries"))
-		summary := record.ToSummary()
-		summaryData, err := json.Marshal(summary)
-		if err != nil {
-			return fmt.Errorf("failed to marshal conversation summary: %w", err)
-		}
+			// 2. Save summary for efficient listing
+			summariesBucket := tx.Bucket([]byte("summaries"))
+			summary := record.ToSummary()
+			summaryData, err := json.Marshal(summary)
+			if err != nil {
+				return fmt.Errorf("failed to marshal conversation summary: %w", err)
+			}
 
-		// 3. Save search index fields (no JSON, raw strings)
-		searchBucket := tx.Bucket([]byte("search_index"))
+			// 3. Save search index fields (no JSON, raw strings)
+			searchBucket := tx.Bucket([]byte("search_index"))
 
-		// Atomic writes to all three buckets
-		if err := conversationsBucket.Put([]byte(record.ID), recordData); err != nil {
-			return fmt.Errorf("failed to save conversation record: %w", err)
-		}
-		if err := summariesBucket.Put([]byte("conv:"+record.ID), summaryData); err != nil {
-			return fmt.Errorf("failed to save conversation summary: %w", err)
-		}
-		if err := searchBucket.Put([]byte("msg:"+record.ID), []byte(summary.FirstMessage)); err != nil {
-			return fmt.Errorf("failed to save search index for message: %w", err)
-		}
-		if err := searchBucket.Put([]byte("sum:"+record.ID), []byte(summary.Summary)); err != nil {
-			return fmt.Errorf("failed to save search index for summary: %w", err)
-		}
+			// Atomic writes to all three buckets
+			if err := conversationsBucket.Put([]byte(record.ID), recordData); err != nil {
+				return fmt.Errorf("failed to save conversation record: %w", err)
+			}
+			if err := summariesBucket.Put([]byte("conv:"+record.ID), summaryData); err != nil {
+				return fmt.Errorf("failed to save conversation summary: %w", err)
+			}
+			if err := searchBucket.Put([]byte("msg:"+record.ID), []byte(summary.FirstMessage)); err != nil {
+				return fmt.Errorf("failed to save search index for message: %w", err)
+			}
+			if err := searchBucket.Put([]byte("sum:"+record.ID), []byte(summary.Summary)); err != nil {
+				return fmt.Errorf("failed to save search index for summary: %w", err)
+			}
 
-		return nil
+			return nil
+		})
 	})
 }
 
 // Load retrieves a conversation record by ID
 func (s *BBoltConversationStore) Load(id string) (ConversationRecord, error) {
 	var record ConversationRecord
-	err := s.db.View(func(tx *bbolt.Tx) error {
-		bucket := tx.Bucket([]byte("conversations"))
-		data := bucket.Get([]byte(id))
-		if data == nil {
-			return fmt.Errorf("conversation not found: %s", id)
-		}
-		return json.Unmarshal(data, &record)
+	err := s.withDB(func(db *bbolt.DB) error {
+		return db.View(func(tx *bbolt.Tx) error {
+			bucket := tx.Bucket([]byte("conversations"))
+			data := bucket.Get([]byte(id))
+			if data == nil {
+				return fmt.Errorf("conversation not found: %s", id)
+			}
+			return json.Unmarshal(data, &record)
+		})
 	})
 	return record, err
 }
@@ -117,20 +134,22 @@ func (s *BBoltConversationStore) Load(id string) (ConversationRecord, error) {
 func (s *BBoltConversationStore) List() ([]ConversationSummary, error) {
 	var summaries []ConversationSummary
 
-	err := s.db.View(func(tx *bbolt.Tx) error {
-		bucket := tx.Bucket([]byte("summaries"))
-		cursor := bucket.Cursor()
-		prefix := []byte("conv:")
+	err := s.withDB(func(db *bbolt.DB) error {
+		return db.View(func(tx *bbolt.Tx) error {
+			bucket := tx.Bucket([]byte("summaries"))
+			cursor := bucket.Cursor()
+			prefix := []byte("conv:")
 
-		for k, v := cursor.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, v = cursor.Next() {
-			var summary ConversationSummary
-			if err := json.Unmarshal(v, &summary); err != nil {
-				continue // Skip corrupted entries
+			for k, v := cursor.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, v = cursor.Next() {
+				var summary ConversationSummary
+				if err := json.Unmarshal(v, &summary); err != nil {
+					continue // Skip corrupted entries
+				}
+				summaries = append(summaries, summary)
 			}
-			summaries = append(summaries, summary)
-		}
 
-		return nil
+			return nil
+		})
 	})
 
 	if err != nil {
@@ -147,31 +166,33 @@ func (s *BBoltConversationStore) List() ([]ConversationSummary, error) {
 
 // Delete removes a conversation and its associated data
 func (s *BBoltConversationStore) Delete(id string) error {
-	return s.db.Update(func(tx *bbolt.Tx) error {
-		// Remove from all three buckets
-		conversationsBucket := tx.Bucket([]byte("conversations"))
-		summariesBucket := tx.Bucket([]byte("summaries"))
-		searchBucket := tx.Bucket([]byte("search_index"))
+	return s.withDB(func(db *bbolt.DB) error {
+		return db.Update(func(tx *bbolt.Tx) error {
+			// Remove from all three buckets
+			conversationsBucket := tx.Bucket([]byte("conversations"))
+			summariesBucket := tx.Bucket([]byte("summaries"))
+			searchBucket := tx.Bucket([]byte("search_index"))
 
-		// Delete from conversations bucket
-		if err := conversationsBucket.Delete([]byte(id)); err != nil {
-			return fmt.Errorf("failed to delete conversation record: %w", err)
-		}
+			// Delete from conversations bucket
+			if err := conversationsBucket.Delete([]byte(id)); err != nil {
+				return fmt.Errorf("failed to delete conversation record: %w", err)
+			}
 
-		// Delete from summaries bucket
-		if err := summariesBucket.Delete([]byte("conv:" + id)); err != nil {
-			return fmt.Errorf("failed to delete conversation summary: %w", err)
-		}
+			// Delete from summaries bucket
+			if err := summariesBucket.Delete([]byte("conv:" + id)); err != nil {
+				return fmt.Errorf("failed to delete conversation summary: %w", err)
+			}
 
-		// Delete from search index
-		if err := searchBucket.Delete([]byte("msg:" + id)); err != nil {
-			return fmt.Errorf("failed to delete search index for message: %w", err)
-		}
-		if err := searchBucket.Delete([]byte("sum:" + id)); err != nil {
-			return fmt.Errorf("failed to delete search index for summary: %w", err)
-		}
+			// Delete from search index
+			if err := searchBucket.Delete([]byte("msg:" + id)); err != nil {
+				return fmt.Errorf("failed to delete search index for message: %w", err)
+			}
+			if err := searchBucket.Delete([]byte("sum:" + id)); err != nil {
+				return fmt.Errorf("failed to delete search index for summary: %w", err)
+			}
 
-		return nil
+			return nil
+		})
 	})
 }
 
@@ -180,28 +201,30 @@ func (s *BBoltConversationStore) Query(options QueryOptions) (QueryResult, error
 	var allSummaries []ConversationSummary
 	var filteredSummaries []ConversationSummary
 
-	err := s.db.View(func(tx *bbolt.Tx) error {
-		// If we have a search term, use optimized search
-		if options.SearchTerm != "" {
-			matchingIDs := s.searchConversations(tx, options.SearchTerm)
-			filteredSummaries = s.getSummariesByIDs(tx, matchingIDs)
-		} else {
-			// Load all summaries for filtering
-			bucket := tx.Bucket([]byte("summaries"))
-			cursor := bucket.Cursor()
-			prefix := []byte("conv:")
+	err := s.withDB(func(db *bbolt.DB) error {
+		return db.View(func(tx *bbolt.Tx) error {
+			// If we have a search term, use optimized search
+			if options.SearchTerm != "" {
+				matchingIDs := s.searchConversations(tx, options.SearchTerm)
+				filteredSummaries = s.getSummariesByIDs(tx, matchingIDs)
+			} else {
+				// Load all summaries for filtering
+				bucket := tx.Bucket([]byte("summaries"))
+				cursor := bucket.Cursor()
+				prefix := []byte("conv:")
 
-			for k, v := cursor.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, v = cursor.Next() {
-				var summary ConversationSummary
-				if err := json.Unmarshal(v, &summary); err != nil {
-					continue // Skip corrupted entries
+				for k, v := cursor.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, v = cursor.Next() {
+					var summary ConversationSummary
+					if err := json.Unmarshal(v, &summary); err != nil {
+						continue // Skip corrupted entries
+					}
+					allSummaries = append(allSummaries, summary)
 				}
-				allSummaries = append(allSummaries, summary)
+				filteredSummaries = allSummaries
 			}
-			filteredSummaries = allSummaries
-		}
 
-		return nil
+			return nil
+		})
 	})
 
 	if err != nil {
@@ -334,10 +357,8 @@ func (s *BBoltConversationStore) applySorting(summaries []ConversationSummary, s
 	})
 }
 
-// Close closes the database connection
+// Close closes the database connection (no-op with operation-scoped access)
 func (s *BBoltConversationStore) Close() error {
-	if s.db != nil {
-		return s.db.Close()
-	}
+	// No persistent connection to close with operation-scoped access
 	return nil
 }
