@@ -78,11 +78,15 @@ func TestSubAgentTool_Execute_Success(t *testing.T) {
 		PromptCache:        true,
 		UseWeakModel:       false,
 		NoSaveConversation: true,
+		CompactRatio:       0.0,
+		DisableAutoCompact: false,
 	}).Return("test response", nil)
 
 	ctx := context.WithValue(context.Background(), llmtypes.SubAgentConfig{}, llmtypes.SubAgentConfig{
-		Thread:         mockThread,
-		MessageHandler: &llmtypes.StringCollectorHandler{Silent: true},
+		Thread:             mockThread,
+		MessageHandler:     &llmtypes.StringCollectorHandler{Silent: true},
+		CompactRatio:       0.0,
+		DisableAutoCompact: false,
 	})
 
 	result := tool.Execute(ctx, NewBasicState(ctx), `{"question": "test question"}`)
@@ -103,6 +107,100 @@ func TestSubAgentTool_Execute_Success(t *testing.T) {
 	mockThread.AssertExpectations(t)
 }
 
+func TestSubAgentTool_Execute_InheritsCompactConfig(t *testing.T) {
+	tool := &SubAgentTool{}
+	mockThread := new(subagentMockThread)
+
+	// Test that subagent inherits parent's compact configuration
+	mockThread.On("SendMessage", mock.Anything, "test question", mock.Anything, llmtypes.MessageOpt{
+		PromptCache:        true,
+		UseWeakModel:       false,
+		NoSaveConversation: true,
+		CompactRatio:       0.8,
+		DisableAutoCompact: true,
+	}).Return("test response", nil)
+
+	ctx := context.WithValue(context.Background(), llmtypes.SubAgentConfig{}, llmtypes.SubAgentConfig{
+		Thread:             mockThread,
+		MessageHandler:     &llmtypes.StringCollectorHandler{Silent: true},
+		CompactRatio:       0.8,
+		DisableAutoCompact: true,
+	})
+
+	result := tool.Execute(ctx, NewBasicState(ctx), `{"question": "test question"}`)
+
+	assert.False(t, result.IsError())
+	assert.Equal(t, "test response", result.GetResult())
+
+	mockThread.AssertExpectations(t)
+}
+
+func TestSubAgentTool_Execute_InheritsVariousCompactConfigs(t *testing.T) {
+	tool := &SubAgentTool{}
+
+	testCases := []struct {
+		name               string
+		compactRatio       float64
+		disableAutoCompact bool
+	}{
+		{
+			name:               "Default values",
+			compactRatio:       0.0,
+			disableAutoCompact: false,
+		},
+		{
+			name:               "High compact ratio enabled",
+			compactRatio:       0.9,
+			disableAutoCompact: false,
+		},
+		{
+			name:               "Low compact ratio enabled",
+			compactRatio:       0.3,
+			disableAutoCompact: false,
+		},
+		{
+			name:               "Compact disabled",
+			compactRatio:       0.8,
+			disableAutoCompact: true,
+		},
+		{
+			name:               "Edge case: ratio 1.0 with compaction disabled",
+			compactRatio:       1.0,
+			disableAutoCompact: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			mockThread := new(subagentMockThread)
+
+			expectedOpt := llmtypes.MessageOpt{
+				PromptCache:        true,
+				UseWeakModel:       false,
+				NoSaveConversation: true,
+				CompactRatio:       tc.compactRatio,
+				DisableAutoCompact: tc.disableAutoCompact,
+			}
+
+			mockThread.On("SendMessage", mock.Anything, "test question", mock.Anything, expectedOpt).Return("test response", nil)
+
+			ctx := context.WithValue(context.Background(), llmtypes.SubAgentConfig{}, llmtypes.SubAgentConfig{
+				Thread:             mockThread,
+				MessageHandler:     &llmtypes.StringCollectorHandler{Silent: true},
+				CompactRatio:       tc.compactRatio,
+				DisableAutoCompact: tc.disableAutoCompact,
+			})
+
+			result := tool.Execute(ctx, NewBasicState(ctx), `{"question": "test question"}`)
+
+			assert.False(t, result.IsError())
+			assert.Equal(t, "test response", result.GetResult())
+
+			mockThread.AssertExpectations(t)
+		})
+	}
+}
+
 func TestSubAgentTool_Execute_Errors(t *testing.T) {
 	tool := &SubAgentTool{}
 
@@ -116,8 +214,10 @@ func TestSubAgentTool_Execute_Errors(t *testing.T) {
 	mockThread.On("SendMessage", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return("", errors.New("thread error"))
 
 	ctx := context.WithValue(context.Background(), llmtypes.SubAgentConfig{}, llmtypes.SubAgentConfig{
-		Thread:         mockThread,
-		MessageHandler: &llmtypes.StringCollectorHandler{Silent: true},
+		Thread:             mockThread,
+		MessageHandler:     &llmtypes.StringCollectorHandler{Silent: true},
+		CompactRatio:       0.0,
+		DisableAutoCompact: false,
 	})
 
 	result = tool.Execute(ctx, NewBasicState(ctx), `{"question": "test"}`)

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/tools"
 	"github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/sashabaranov/go-openai"
@@ -796,5 +797,95 @@ func TestCompactContextIntegrationOpenAI(t *testing.T) {
 		// Should now have 2 messages: the compact summary + new user message
 		assert.Equal(t, 2, len(thread.messages))
 		assert.Equal(t, openai.ChatMessageRoleUser, thread.messages[1].Role)
+	})
+}
+
+func TestWithSubAgentOpenAI(t *testing.T) {
+	t.Run("WithSubAgent correctly passes compact configuration", func(t *testing.T) {
+		parentThread := NewOpenAIThread(llm.Config{})
+
+		// Set up a basic state for the parent thread using NewBasicState
+		parentThread.SetState(tools.NewBasicState(context.Background()))
+
+		// Test different compact configurations
+		testCases := []struct {
+			name               string
+			compactRatio       float64
+			disableAutoCompact bool
+		}{
+			{
+				name:               "Default configuration",
+				compactRatio:       0.0,
+				disableAutoCompact: false,
+			},
+			{
+				name:               "High compact ratio, enabled",
+				compactRatio:       0.9,
+				disableAutoCompact: false,
+			},
+			{
+				name:               "Auto-compact disabled",
+				compactRatio:       0.8,
+				disableAutoCompact: true,
+			},
+			{
+				name:               "Edge case: ratio 1.0",
+				compactRatio:       1.0,
+				disableAutoCompact: false,
+			},
+		}
+
+		for _, tc := range testCases {
+			t.Run(tc.name, func(t *testing.T) {
+				// Create a context with subagent configuration
+				ctx := parentThread.WithSubAgent(
+					context.Background(),
+					&llm.StringCollectorHandler{Silent: true},
+					tc.compactRatio,
+					tc.disableAutoCompact,
+				)
+
+				// Retrieve the configuration from the context
+				config, ok := ctx.Value(llm.SubAgentConfig{}).(llm.SubAgentConfig)
+				require.True(t, ok, "SubAgentConfig should be present in context")
+
+				// Verify the compact configuration is correctly passed
+				assert.Equal(t, tc.compactRatio, config.CompactRatio,
+					"CompactRatio should match the provided value")
+				assert.Equal(t, tc.disableAutoCompact, config.DisableAutoCompact,
+					"DisableAutoCompact should match the provided value")
+
+				// Verify the thread and handler are also correctly set
+				assert.NotNil(t, config.Thread, "Thread should be set")
+				assert.NotNil(t, config.MessageHandler, "MessageHandler should be set")
+			})
+		}
+	})
+
+	t.Run("WithSubAgent creates independent subagent", func(t *testing.T) {
+		parentThread := NewOpenAIThread(llm.Config{})
+
+		// Set up a basic state for the parent thread using NewBasicState
+		parentThread.SetState(tools.NewBasicState(context.Background()))
+
+		// Create subagent context
+		ctx := parentThread.WithSubAgent(
+			context.Background(),
+			&llm.StringCollectorHandler{Silent: true},
+			0.8,
+			false,
+		)
+
+		// Retrieve the configuration
+		config, ok := ctx.Value(llm.SubAgentConfig{}).(llm.SubAgentConfig)
+		require.True(t, ok, "SubAgentConfig should be present in context")
+
+		// Verify the subagent thread is independent
+		assert.NotSame(t, parentThread, config.Thread,
+			"Subagent thread should be different from parent thread")
+
+		// Verify the subagent has the correct configuration
+		assert.Equal(t, "openai", config.Thread.Provider(),
+			"Subagent should use the same provider as parent")
 	})
 }
