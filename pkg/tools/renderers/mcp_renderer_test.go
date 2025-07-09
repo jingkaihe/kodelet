@@ -1,10 +1,10 @@
 package renderers
 
 import (
-	"strings"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
@@ -36,30 +36,14 @@ func TestMCPToolRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "MCP Tool: mcp_definition") {
-			t.Errorf("Expected MCP tool name in output, got: %s", output)
-		}
-		if !strings.Contains(output, "(server: language-server)") {
-			t.Errorf("Expected server name in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Parameters:") {
-			t.Errorf("Expected parameters section in output, got: %s", output)
-		}
-		if !strings.Contains(output, "symbolName: main.go:TestFunction") {
-			t.Errorf("Expected symbolName parameter in output, got: %s", output)
-		}
-		if !strings.Contains(output, "project: kodelet") {
-			t.Errorf("Expected project parameter in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Content:") {
-			t.Errorf("Expected content section in output, got: %s", output)
-		}
-		if !strings.Contains(output, "func TestFunction(t *testing.T) {") {
-			t.Errorf("Expected function content in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Execution time: 100ms") {
-			t.Errorf("Expected execution time in output, got: %s", output)
-		}
+		assert.Contains(t, output, "MCP Tool: mcp_definition", "Expected MCP tool name in output")
+		assert.Contains(t, output, "(server: language-server)", "Expected server name in output")
+		assert.Contains(t, output, "Parameters:", "Expected parameters section in output")
+		assert.Contains(t, output, "symbolName: main.go:TestFunction", "Expected symbolName parameter in output")
+		assert.Contains(t, output, "project: kodelet", "Expected project parameter in output")
+		assert.Contains(t, output, "Content:", "Expected content section in output")
+		assert.Contains(t, output, "func TestFunction(t *testing.T) {", "Expected function content in output")
+		assert.Contains(t, output, "Execution time: 100ms", "Expected execution time in output")
 	})
 
 	t.Run("MCP tool with multiple content types", func(t *testing.T) {
@@ -99,27 +83,13 @@ func TestMCPToolRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "MCP Tool: mcp_hover") {
-			t.Errorf("Expected MCP tool name in output, got: %s", output)
-		}
-		if !strings.Contains(output, "line: 42") {
-			t.Errorf("Expected line parameter in output, got: %s", output)
-		}
-		if !strings.Contains(output, "column: 10") {
-			t.Errorf("Expected column parameter in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Variable: counter") {
-			t.Errorf("Expected text content in output, got: %s", output)
-		}
-		if !strings.Contains(output, "[Image: image/png, size: 15 bytes]") {
-			t.Errorf("Expected image content description in output, got: %s", output)
-		}
-		if !strings.Contains(output, "[Resource: file:///home/user/docs/counter.md (text/markdown)]") {
-			t.Errorf("Expected resource content description in output, got: %s", output)
-		}
-		if !strings.Contains(output, "[code content]: var counter int = 0") {
-			t.Errorf("Expected code content in output, got: %s", output)
-		}
+		assert.Contains(t, output, "MCP Tool: mcp_hover", "Expected MCP tool name in output")
+		assert.Contains(t, output, "line: 42", "Expected line parameter in output")
+		assert.Contains(t, output, "column: 10", "Expected column parameter in output")
+		assert.Contains(t, output, "Variable: counter", "Expected text content in output")
+		assert.Contains(t, output, "[Image: image/png, size: 15 bytes]", "Expected image content description in output")
+		assert.Contains(t, output, "[Resource: file:///home/user/docs/counter.md (text/markdown)]", "Expected resource content description in output")
+		assert.Contains(t, output, "[code content]: var counter int = 0", "Expected code content in output")
 	})
 
 	t.Run("MCP tool with fallback text content", func(t *testing.T) {
@@ -139,18 +109,10 @@ func TestMCPToolRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "MCP Tool: mcp_references") {
-			t.Errorf("Expected MCP tool name in output, got: %s", output)
-		}
-		if !strings.Contains(output, "symbolName: TestFunction") {
-			t.Errorf("Expected symbolName parameter in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Found 3 references:") {
-			t.Errorf("Expected fallback content text in output, got: %s", output)
-		}
-		if !strings.Contains(output, "1. main.go:10") {
-			t.Errorf("Expected reference line in output, got: %s", output)
-		}
+		assert.Contains(t, output, "MCP Tool: mcp_references", "Expected MCP tool name in output")
+		assert.Contains(t, output, "symbolName: TestFunction", "Expected symbolName parameter in output")
+		assert.Contains(t, output, "Found 3 references:", "Expected fallback content text in output")
+		assert.Contains(t, output, "1. main.go:10", "Expected reference line in output")
 	})
 
 	t.Run("MCP tool minimal metadata", func(t *testing.T) {
@@ -171,21 +133,11 @@ func TestMCPToolRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "MCP Tool: mcp_diagnostics") {
-			t.Errorf("Expected MCP tool name in output, got: %s", output)
-		}
-		if strings.Contains(output, "server:") {
-			t.Errorf("Should not show server when not set, got: %s", output)
-		}
-		if strings.Contains(output, "Parameters:") {
-			t.Errorf("Should not show parameters when empty, got: %s", output)
-		}
-		if !strings.Contains(output, "No issues found") {
-			t.Errorf("Expected content text in output, got: %s", output)
-		}
-		if strings.Contains(output, "Execution time:") {
-			t.Errorf("Should not show execution time when zero, got: %s", output)
-		}
+		assert.Contains(t, output, "MCP Tool: mcp_diagnostics", "Expected MCP tool name in output")
+		assert.NotContains(t, output, "server:", "Should not show server when not set")
+		assert.NotContains(t, output, "Parameters:", "Should not show parameters when empty")
+		assert.Contains(t, output, "No issues found", "Expected content text in output")
+		assert.NotContains(t, output, "Execution time:", "Should not show execution time when zero")
 	})
 
 	t.Run("MCP tool with no content", func(t *testing.T) {
@@ -206,21 +158,11 @@ func TestMCPToolRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "MCP Tool: mcp_rename_symbol") {
-			t.Errorf("Expected MCP tool name in output, got: %s", output)
-		}
-		if !strings.Contains(output, "oldName: oldFunction") {
-			t.Errorf("Expected oldName parameter in output, got: %s", output)
-		}
-		if !strings.Contains(output, "newName: newFunction") {
-			t.Errorf("Expected newName parameter in output, got: %s", output)
-		}
-		if strings.Contains(output, "Content:") {
-			t.Errorf("Should not show content section when no content, got: %s", output)
-		}
-		if !strings.Contains(output, "Execution time: 50ms") {
-			t.Errorf("Expected execution time in output, got: %s", output)
-		}
+		assert.Contains(t, output, "MCP Tool: mcp_rename_symbol", "Expected MCP tool name in output")
+		assert.Contains(t, output, "oldName: oldFunction", "Expected oldName parameter in output")
+		assert.Contains(t, output, "newName: newFunction", "Expected newName parameter in output")
+		assert.NotContains(t, output, "Content:", "Should not show content section when no content")
+		assert.Contains(t, output, "Execution time: 50ms", "Expected execution time in output")
 	})
 
 	t.Run("MCP tool error", func(t *testing.T) {
@@ -233,9 +175,7 @@ func TestMCPToolRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if output != "Error: Symbol not found" {
-			t.Errorf("Expected error message, got: %s", output)
-		}
+		assert.Equal(t, "Error: Symbol not found", output, "Expected error message")
 	})
 
 	t.Run("Invalid metadata type", func(t *testing.T) {
@@ -248,8 +188,6 @@ func TestMCPToolRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if output != "Error: Invalid metadata type for MCP tool" {
-			t.Errorf("Expected invalid metadata error, got: %s", output)
-		}
+		assert.Equal(t, "Error: Invalid metadata type for MCP tool", output, "Expected invalid metadata error")
 	})
 }

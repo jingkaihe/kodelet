@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"go.etcd.io/bbolt"
 )
@@ -18,9 +20,7 @@ func TestBBoltConversationStore_CRUD(t *testing.T) {
 	dbPath := filepath.Join(tempDir, "test.db")
 
 	store, err := NewBBoltConversationStore(ctx, dbPath)
-	if err != nil {
-		t.Fatalf("Failed to create BBolt store: %v", err)
-	}
+	require.NoError(t, err, "Failed to create BBolt store")
 	defer store.Close()
 
 	// Test Save
@@ -34,63 +34,36 @@ func TestBBoltConversationStore_CRUD(t *testing.T) {
 	record.RawMessages = json.RawMessage(`[{"role": "user", "content": [{"type": "text", "text": "Hello world"}]}]`)
 
 	err = store.Save(record)
-	if err != nil {
-		t.Fatalf("Failed to save conversation: %v", err)
-	}
+	require.NoError(t, err, "Failed to save conversation")
 
 	// Test Load
 	loadedRecord, err := store.Load("test-id-1")
-	if err != nil {
-		t.Fatalf("Failed to load conversation: %v", err)
-	}
+	require.NoError(t, err, "Failed to load conversation")
 
-	if loadedRecord.ID != record.ID {
-		t.Errorf("Expected ID %s, got %s", record.ID, loadedRecord.ID)
-	}
-	if loadedRecord.Summary != record.Summary {
-		t.Errorf("Expected summary %s, got %s", record.Summary, loadedRecord.Summary)
-	}
-	if loadedRecord.ModelType != record.ModelType {
-		t.Errorf("Expected model type %s, got %s", record.ModelType, loadedRecord.ModelType)
-	}
-	if loadedRecord.Usage.TotalTokens() != record.Usage.TotalTokens() {
-		t.Errorf("Expected total tokens %d, got %d", record.Usage.TotalTokens(), loadedRecord.Usage.TotalTokens())
-	}
+	assert.Equal(t, record.ID, loadedRecord.ID)
+	assert.Equal(t, record.Summary, loadedRecord.Summary)
+	assert.Equal(t, record.ModelType, loadedRecord.ModelType)
+	assert.Equal(t, record.Usage.TotalTokens(), loadedRecord.Usage.TotalTokens())
 
 	// Test List
 	summaries, err := store.List()
-	if err != nil {
-		t.Fatalf("Failed to list conversations: %v", err)
-	}
+	require.NoError(t, err, "Failed to list conversations")
 
-	if len(summaries) != 1 {
-		t.Errorf("Expected 1 conversation, got %d", len(summaries))
-	}
-
-	if summaries[0].ID != "test-id-1" {
-		t.Errorf("Expected ID test-id-1, got %s", summaries[0].ID)
-	}
+	assert.Equal(t, 1, len(summaries))
+	assert.Equal(t, "test-id-1", summaries[0].ID)
 
 	// Test Delete
 	err = store.Delete("test-id-1")
-	if err != nil {
-		t.Fatalf("Failed to delete conversation: %v", err)
-	}
+	require.NoError(t, err, "Failed to delete conversation")
 
 	// Verify deletion
 	_, err = store.Load("test-id-1")
-	if err == nil {
-		t.Error("Expected error when loading deleted conversation")
-	}
+	assert.Error(t, err, "Expected error when loading deleted conversation")
 
 	summaries, err = store.List()
-	if err != nil {
-		t.Fatalf("Failed to list conversations after delete: %v", err)
-	}
+	require.NoError(t, err, "Failed to list conversations after delete")
 
-	if len(summaries) != 0 {
-		t.Errorf("Expected 0 conversations after delete, got %d", len(summaries))
-	}
+	assert.Equal(t, 0, len(summaries))
 }
 
 func TestBBoltConversationStore_Query(t *testing.T) {
@@ -99,9 +72,7 @@ func TestBBoltConversationStore_Query(t *testing.T) {
 	dbPath := filepath.Join(tempDir, "test.db")
 
 	store, err := NewBBoltConversationStore(ctx, dbPath)
-	if err != nil {
-		t.Fatalf("Failed to create BBolt store: %v", err)
-	}
+	require.NoError(t, err, "Failed to create BBolt store")
 	defer store.Close()
 
 	now := time.Now()
@@ -136,103 +107,64 @@ func TestBBoltConversationStore_Query(t *testing.T) {
 	// Save all conversations
 	for _, conv := range conversations {
 		err = store.Save(conv)
-		if err != nil {
-			t.Fatalf("Failed to save conversation %s: %v", conv.ID, err)
-		}
+		require.NoError(t, err, "Failed to save conversation")
 	}
 
 	// Test basic query (no filters)
 	result, err := store.Query(QueryOptions{})
-	if err != nil {
-		t.Fatalf("Failed to query conversations: %v", err)
-	}
+	require.NoError(t, err, "Failed to query conversations")
 
-	if len(result.ConversationSummaries) != 3 {
-		t.Errorf("Expected 3 conversations, got %d", len(result.ConversationSummaries))
-	}
-
-	if result.Total != 3 {
-		t.Errorf("Expected total 3, got %d", result.Total)
-	}
+	assert.Equal(t, 3, len(result.ConversationSummaries))
+	assert.Equal(t, 3, result.Total)
 
 	// Test search query
 	result, err = store.Query(QueryOptions{
 		SearchTerm: "coding",
 	})
-	if err != nil {
-		t.Fatalf("Failed to query conversations with search: %v", err)
-	}
+	require.NoError(t, err, "Failed to query conversations with search")
 
-	if len(result.ConversationSummaries) != 1 {
-		t.Errorf("Expected 1 conversation with 'coding', got %d", len(result.ConversationSummaries))
-	}
-
-	if result.ConversationSummaries[0].ID != "conv-1" {
-		t.Errorf("Expected conv-1, got %s", result.ConversationSummaries[0].ID)
-	}
+	assert.Equal(t, 1, len(result.ConversationSummaries))
+	assert.Equal(t, "conv-1", result.ConversationSummaries[0].ID)
 
 	// Test search in first message
 	result, err = store.Query(QueryOptions{
 		SearchTerm: "BoltDB",
 	})
-	if err != nil {
-		t.Fatalf("Failed to query conversations with message search: %v", err)
-	}
+	require.NoError(t, err, "Failed to query conversations with message search")
 
-	if len(result.ConversationSummaries) != 1 {
-		t.Errorf("Expected 1 conversation with 'BoltDB', got %d", len(result.ConversationSummaries))
-	}
-
-	if result.ConversationSummaries[0].ID != "conv-3" {
-		t.Errorf("Expected conv-3, got %s", result.ConversationSummaries[0].ID)
-	}
+	assert.Equal(t, 1, len(result.ConversationSummaries))
+	assert.Equal(t, "conv-3", result.ConversationSummaries[0].ID)
 
 	// Test date filtering
 	result, err = store.Query(QueryOptions{
 		StartDate: &now,
 		EndDate:   &tomorrow,
 	})
-	if err != nil {
-		t.Fatalf("Failed to query conversations with date filter: %v", err)
-	}
+	require.NoError(t, err, "Failed to query conversations with date filter")
 
-	if len(result.ConversationSummaries) != 2 {
-		t.Errorf("Expected 2 conversations in date range, got %d", len(result.ConversationSummaries))
-	}
+	assert.Equal(t, 2, len(result.ConversationSummaries))
 
 	// Test pagination
 	result, err = store.Query(QueryOptions{
 		Limit:  2,
 		Offset: 1,
 	})
-	if err != nil {
-		t.Fatalf("Failed to query conversations with pagination: %v", err)
-	}
+	require.NoError(t, err, "Failed to query conversations with pagination")
 
-	if len(result.ConversationSummaries) != 2 {
-		t.Errorf("Expected 2 conversations with pagination, got %d", len(result.ConversationSummaries))
-	}
+	assert.Equal(t, 2, len(result.ConversationSummaries))
 
 	// Test sorting
 	result, err = store.Query(QueryOptions{
 		SortBy:    "createdAt",
 		SortOrder: "asc",
 	})
-	if err != nil {
-		t.Fatalf("Failed to query conversations with sorting: %v", err)
-	}
+	require.NoError(t, err, "Failed to query conversations with sorting")
 
-	if len(result.ConversationSummaries) != 3 {
-		t.Errorf("Expected 3 conversations with sorting, got %d", len(result.ConversationSummaries))
-	}
+	assert.Equal(t, 3, len(result.ConversationSummaries))
 
 	// Check ascending order
-	if result.ConversationSummaries[0].ID != "conv-1" {
-		t.Errorf("Expected conv-1 first in ascending order, got %s", result.ConversationSummaries[0].ID)
-	}
-	if result.ConversationSummaries[2].ID != "conv-3" {
-		t.Errorf("Expected conv-3 last in ascending order, got %s", result.ConversationSummaries[2].ID)
-	}
+	assert.Equal(t, "conv-1", result.ConversationSummaries[0].ID)
+	assert.Equal(t, "conv-3", result.ConversationSummaries[2].ID)
 }
 
 func TestBBoltConversationStore_ConcurrentAccess(t *testing.T) {
@@ -241,9 +173,7 @@ func TestBBoltConversationStore_ConcurrentAccess(t *testing.T) {
 	dbPath := filepath.Join(tempDir, "test.db")
 
 	store, err := NewBBoltConversationStore(ctx, dbPath)
-	if err != nil {
-		t.Fatalf("Failed to create BBolt store: %v", err)
-	}
+	require.NoError(t, err, "Failed to create BBolt store")
 	defer store.Close()
 
 	// Test concurrent saves
@@ -272,21 +202,17 @@ func TestBBoltConversationStore_ConcurrentAccess(t *testing.T) {
 		case <-done:
 			// Success
 		case err := <-errors:
-			t.Fatalf("Concurrent save failed: %v", err)
+			require.Fail(t, "Concurrent save failed", err.Error())
 		case <-time.After(5 * time.Second):
-			t.Fatal("Concurrent save timed out")
+			require.Fail(t, "Concurrent save timed out")
 		}
 	}
 
 	// Verify all conversations were saved
 	summaries, err := store.List()
-	if err != nil {
-		t.Fatalf("Failed to list conversations after concurrent saves: %v", err)
-	}
+	require.NoError(t, err, "Failed to list conversations after concurrent saves")
 
-	if len(summaries) != 10 {
-		t.Errorf("Expected 10 conversations after concurrent saves, got %d", len(summaries))
-	}
+	assert.Equal(t, 10, len(summaries))
 }
 
 func TestBBoltConversationStore_DatabasePersistence(t *testing.T) {
@@ -296,39 +222,27 @@ func TestBBoltConversationStore_DatabasePersistence(t *testing.T) {
 
 	// Create store and save a conversation
 	store1, err := NewBBoltConversationStore(ctx, dbPath)
-	if err != nil {
-		t.Fatalf("Failed to create BBolt store: %v", err)
-	}
+	require.NoError(t, err, "Failed to create BBolt store")
 
 	record := NewConversationRecord("persistence-test")
 	record.Summary = "Test persistence"
 	record.RawMessages = json.RawMessage(`[{"role": "user", "content": [{"type": "text", "text": "Hello persistence"}]}]`)
 
 	err = store1.Save(record)
-	if err != nil {
-		t.Fatalf("Failed to save conversation: %v", err)
-	}
+	require.NoError(t, err, "Failed to save conversation")
 
 	store1.Close()
 
 	// Reopen database and verify data persisted
 	store2, err := NewBBoltConversationStore(ctx, dbPath)
-	if err != nil {
-		t.Fatalf("Failed to reopen BBolt store: %v", err)
-	}
+	require.NoError(t, err, "Failed to reopen BBolt store")
 	defer store2.Close()
 
 	loadedRecord, err := store2.Load("persistence-test")
-	if err != nil {
-		t.Fatalf("Failed to load conversation from reopened store: %v", err)
-	}
+	require.NoError(t, err, "Failed to load conversation from reopened store")
 
-	if loadedRecord.ID != record.ID {
-		t.Errorf("Expected ID %s, got %s", record.ID, loadedRecord.ID)
-	}
-	if loadedRecord.Summary != record.Summary {
-		t.Errorf("Expected summary %s, got %s", record.Summary, loadedRecord.Summary)
-	}
+	assert.Equal(t, record.ID, loadedRecord.ID)
+	assert.Equal(t, record.Summary, loadedRecord.Summary)
 }
 
 func TestBBoltConversationStore_ErrorHandling(t *testing.T) {
@@ -337,22 +251,16 @@ func TestBBoltConversationStore_ErrorHandling(t *testing.T) {
 	dbPath := filepath.Join(tempDir, "test.db")
 
 	store, err := NewBBoltConversationStore(ctx, dbPath)
-	if err != nil {
-		t.Fatalf("Failed to create BBolt store: %v", err)
-	}
+	require.NoError(t, err, "Failed to create BBolt store")
 	defer store.Close()
 
 	// Test loading non-existent conversation
 	_, err = store.Load("non-existent")
-	if err == nil {
-		t.Error("Expected error when loading non-existent conversation")
-	}
+	assert.Error(t, err, "Expected error when loading non-existent conversation")
 
 	// Test deleting non-existent conversation (should not error)
 	err = store.Delete("non-existent")
-	if err != nil {
-		t.Errorf("Unexpected error when deleting non-existent conversation: %v", err)
-	}
+	assert.NoError(t, err, "Unexpected error when deleting non-existent conversation")
 }
 
 func TestBBoltConversationStore_TripleStorage(t *testing.T) {
@@ -361,9 +269,7 @@ func TestBBoltConversationStore_TripleStorage(t *testing.T) {
 	dbPath := filepath.Join(tempDir, "test.db")
 
 	store, err := NewBBoltConversationStore(ctx, dbPath)
-	if err != nil {
-		t.Fatalf("Failed to create BBolt store: %v", err)
-	}
+	require.NoError(t, err, "Failed to create BBolt store")
 	defer store.Close()
 
 	record := NewConversationRecord("triple-test")
@@ -371,9 +277,7 @@ func TestBBoltConversationStore_TripleStorage(t *testing.T) {
 	record.RawMessages = json.RawMessage(`[{"role": "user", "content": [{"type": "text", "text": "Test triple storage"}]}]`)
 
 	err = store.Save(record)
-	if err != nil {
-		t.Fatalf("Failed to save conversation: %v", err)
-	}
+	require.NoError(t, err, "Failed to save conversation")
 
 	// Verify data exists in all three buckets
 	err = store.withDB(func(db *bbolt.DB) error {
@@ -381,35 +285,25 @@ func TestBBoltConversationStore_TripleStorage(t *testing.T) {
 			// Check conversations bucket
 			convBucket := tx.Bucket([]byte("conversations"))
 			convData := convBucket.Get([]byte("triple-test"))
-			if convData == nil {
-				t.Error("Conversation data not found in conversations bucket")
-			}
+			assert.NotNil(t, convData, "Conversation data not found in conversations bucket")
 
 			// Check summaries bucket
 			summBucket := tx.Bucket([]byte("summaries"))
 			summData := summBucket.Get([]byte("conv:triple-test"))
-			if summData == nil {
-				t.Error("Summary data not found in summaries bucket")
-			}
+			assert.NotNil(t, summData, "Summary data not found in summaries bucket")
 
 			// Check search index bucket
 			searchBucket := tx.Bucket([]byte("search_index"))
 			msgData := searchBucket.Get([]byte("msg:triple-test"))
-			if msgData == nil {
-				t.Error("Message data not found in search index bucket")
-			}
+			assert.NotNil(t, msgData, "Message data not found in search index bucket")
 			sumData := searchBucket.Get([]byte("sum:triple-test"))
-			if sumData == nil {
-				t.Error("Summary data not found in search index bucket")
-			}
+			assert.NotNil(t, sumData, "Summary data not found in search index bucket")
 
 			return nil
 		})
 	})
 
-	if err != nil {
-		t.Fatalf("Failed to verify triple storage: %v", err)
-	}
+	require.NoError(t, err, "Failed to verify triple storage")
 }
 
 // Integration test through the service layer
@@ -424,9 +318,7 @@ func TestBBoltIntegration_ConversationService(t *testing.T) {
 	}
 
 	store, err := NewConversationStore(ctx, config)
-	if err != nil {
-		t.Fatalf("Failed to create BBolt store: %v", err)
-	}
+	require.NoError(t, err, "Failed to create BBolt store")
 	defer store.Close()
 
 	// Create conversation service
@@ -446,69 +338,45 @@ func TestBBoltIntegration_ConversationService(t *testing.T) {
 	record.RawMessages = json.RawMessage(`[{"role": "user", "content": [{"type": "text", "text": "Hello integration test"}]}]`)
 
 	err = store.Save(record)
-	if err != nil {
-		t.Fatalf("Failed to save conversation: %v", err)
-	}
+	require.NoError(t, err, "Failed to save conversation")
 
 	// Test listing conversations through the service
 	req := &ListConversationsRequest{}
 	result, err := service.ListConversations(ctx, req)
-	if err != nil {
-		t.Fatalf("Failed to list conversations: %v", err)
-	}
+	require.NoError(t, err, "Failed to list conversations")
 
-	if len(result.Conversations) != 1 {
-		t.Errorf("Expected 1 conversation, got %d", len(result.Conversations))
-	}
+	assert.Equal(t, 1, len(result.Conversations))
 
 	// Test getting a conversation through the service
 	retrievedRecord, err := service.GetConversation(ctx, record.ID)
-	if err != nil {
-		t.Fatalf("Failed to get conversation: %v", err)
-	}
+	require.NoError(t, err, "Failed to get conversation")
 
-	if retrievedRecord.ID != record.ID {
-		t.Errorf("Expected ID %s, got %s", record.ID, retrievedRecord.ID)
-	}
+	assert.Equal(t, record.ID, retrievedRecord.ID)
 
 	// Test searching conversations through the service
 	searchReq := &ListConversationsRequest{
 		SearchTerm: "integration",
 	}
 	searchResult, err := service.ListConversations(ctx, searchReq)
-	if err != nil {
-		t.Fatalf("Failed to search conversations: %v", err)
-	}
+	require.NoError(t, err, "Failed to search conversations")
 
-	if len(searchResult.Conversations) != 1 {
-		t.Errorf("Expected 1 conversation in search results, got %d", len(searchResult.Conversations))
-	}
+	assert.Equal(t, 1, len(searchResult.Conversations))
 
 	// Test conversation statistics
 	stats, err := service.GetConversationStatistics(ctx)
-	if err != nil {
-		t.Fatalf("Failed to get conversation statistics: %v", err)
-	}
+	require.NoError(t, err, "Failed to get conversation statistics")
 
-	if stats.TotalConversations != 1 {
-		t.Errorf("Expected 1 total conversation, got %d", stats.TotalConversations)
-	}
+	assert.Equal(t, 1, stats.TotalConversations)
 
 	// Test deleting a conversation through the service
 	err = service.DeleteConversation(ctx, record.ID)
-	if err != nil {
-		t.Fatalf("Failed to delete conversation: %v", err)
-	}
+	require.NoError(t, err, "Failed to delete conversation")
 
 	// Verify deletion
 	result, err = service.ListConversations(ctx, &ListConversationsRequest{})
-	if err != nil {
-		t.Fatalf("Failed to list conversations after delete: %v", err)
-	}
+	require.NoError(t, err, "Failed to list conversations after delete")
 
-	if len(result.Conversations) != 0 {
-		t.Errorf("Expected 0 conversations after delete, got %d", len(result.Conversations))
-	}
+	assert.Equal(t, 0, len(result.Conversations))
 }
 
 // Performance test with larger dataset
@@ -518,9 +386,7 @@ func TestBBoltIntegration_LargeDataset(t *testing.T) {
 	dbPath := filepath.Join(tempDir, "large-test.db")
 
 	store, err := NewBBoltConversationStore(ctx, dbPath)
-	if err != nil {
-		t.Fatalf("Failed to create BBolt store: %v", err)
-	}
+	require.NoError(t, err, "Failed to create BBolt store")
 	defer store.Close()
 
 	// Create a larger dataset to test performance
@@ -549,48 +415,31 @@ func TestBBoltIntegration_LargeDataset(t *testing.T) {
 		record.UpdatedAt = record.CreatedAt
 
 		err = store.Save(record)
-		if err != nil {
-			t.Fatalf("Failed to save conversation %d: %v", i, err)
-		}
+		require.NoError(t, err, "Failed to save conversation")
 	}
 
 	// Test listing all conversations
 	summaries, err := store.List()
-	if err != nil {
-		t.Fatalf("Failed to list conversations: %v", err)
-	}
+	require.NoError(t, err, "Failed to list conversations")
 
-	if len(summaries) != numConversations {
-		t.Errorf("Expected %d conversations, got %d", numConversations, len(summaries))
-	}
+	assert.Equal(t, numConversations, len(summaries))
 
 	// Test search functionality
 	searchResult, err := store.Query(QueryOptions{
 		SearchTerm: "searchable",
 	})
-	if err != nil {
-		t.Fatalf("Failed to search conversations: %v", err)
-	}
+	require.NoError(t, err, "Failed to search conversations")
 
 	expectedSearchResults := len(searchableConversations)
-	if len(searchResult.ConversationSummaries) != expectedSearchResults {
-		t.Errorf("Expected %d search results, got %d", expectedSearchResults, len(searchResult.ConversationSummaries))
-	}
+	assert.Equal(t, expectedSearchResults, len(searchResult.ConversationSummaries))
 
 	// Test pagination
 	paginatedResult, err := store.Query(QueryOptions{
 		Limit:  10,
 		Offset: 5,
 	})
-	if err != nil {
-		t.Fatalf("Failed to paginate conversations: %v", err)
-	}
+	require.NoError(t, err, "Failed to paginate conversations")
 
-	if len(paginatedResult.ConversationSummaries) != 10 {
-		t.Errorf("Expected 10 paginated results, got %d", len(paginatedResult.ConversationSummaries))
-	}
-
-	if paginatedResult.Total != numConversations {
-		t.Errorf("Expected total %d, got %d", numConversations, paginatedResult.Total)
-	}
+	assert.Equal(t, 10, len(paginatedResult.ConversationSummaries))
+	assert.Equal(t, numConversations, paginatedResult.Total)
 }

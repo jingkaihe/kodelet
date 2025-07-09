@@ -4,32 +4,27 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestChatCommandHelp(t *testing.T) {
 	// Test chat command help
 	cmd := exec.Command("kodelet", "chat", "--help")
 	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("Failed to execute chat --help: %v", err)
-	}
+	require.NoError(t, err, "Failed to execute chat --help")
 
 	outputStr := strings.TrimSpace(string(output))
 
 	// Should contain usage information
-	if !strings.Contains(outputStr, "Usage") && !strings.Contains(outputStr, "usage") {
-		t.Errorf("Help output should contain usage information: %s", outputStr)
-	}
+	assert.True(t, strings.Contains(outputStr, "Usage") || strings.Contains(outputStr, "usage"), "Help output should contain usage information: %s", outputStr)
 
 	// Should contain chat-specific flags
-	if !strings.Contains(outputStr, "--no-save") && !strings.Contains(outputStr, "--follow") {
-		t.Errorf("Help output should contain chat-specific flags: %s", outputStr)
-	}
+	assert.True(t, strings.Contains(outputStr, "--no-save") || strings.Contains(outputStr, "--follow"), "Help output should contain chat-specific flags: %s", outputStr)
 
 	// Should contain compact-related flags
-	if !strings.Contains(outputStr, "--compact-ratio") && !strings.Contains(outputStr, "--disable-auto-compact") {
-		t.Errorf("Help output should contain compact-related flags: %s", outputStr)
-	}
+	assert.True(t, strings.Contains(outputStr, "--compact-ratio") || strings.Contains(outputStr, "--disable-auto-compact"), "Help output should contain compact-related flags: %s", outputStr)
 }
 
 func TestChatCommandWithCompactFlags(t *testing.T) {
@@ -39,9 +34,7 @@ func TestChatCommandWithCompactFlags(t *testing.T) {
 
 	// Start the command but don't wait for completion since it's interactive
 	err := cmd.Start()
-	if err != nil {
-		t.Fatalf("Failed to start chat command: %v", err)
-	}
+	require.NoError(t, err, "Failed to start chat command")
 
 	// Kill the process immediately since we only want to test flag parsing
 	if cmd.Process != nil {
@@ -82,17 +75,17 @@ func TestChatCommandWithInvalidCompactRatio(t *testing.T) {
 			output, err := cmd.CombinedOutput()
 
 			// Should fail due to invalid compact ratio
-			if err == nil && test.ratio != "invalid" {
+			if test.ratio != "invalid" {
 				// For negative and > 1 ratios, we expect the command to fail
 				// For invalid format, the flag parsing itself should fail
-				t.Errorf("Expected chat command to fail with invalid compact ratio %s", test.ratio)
+				assert.NotNil(t, err, "Expected chat command to fail with invalid compact ratio %s", test.ratio)
 			}
 
 			outputStr := strings.TrimSpace(string(output))
 
 			// Should contain error message about compact ratio
-			if test.ratio != "invalid" && !strings.Contains(outputStr, "compact") {
-				t.Errorf("Expected compact-related error message for %s, got: %s", test.description, outputStr)
+			if test.ratio != "invalid" {
+				assert.True(t, strings.Contains(outputStr, "compact"), "Expected compact-related error message for %s, got: %s", test.description, outputStr)
 			}
 		})
 	}
@@ -135,9 +128,7 @@ func TestChatCommandWithValidCompactRatio(t *testing.T) {
 			}
 
 			// Should not fail due to flag parsing error
-			if err != nil {
-				t.Errorf("Flag parsing failed for ratio %s: %v", test.ratio, err)
-			}
+			assert.NoError(t, err, "Flag parsing failed for ratio %s", test.ratio)
 		})
 	}
 }

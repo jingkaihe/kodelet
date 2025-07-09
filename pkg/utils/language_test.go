@@ -2,6 +2,8 @@ package utils
 
 import (
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestDetectLanguageFromPath(t *testing.T) {
@@ -44,9 +46,8 @@ func TestDetectLanguageFromPath(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := DetectLanguageFromPath(tt.filePath); got != tt.want {
-				t.Errorf("DetectLanguageFromPath(%q) = %q, want %q", tt.filePath, got, tt.want)
-			}
+			got := DetectLanguageFromPath(tt.filePath)
+			assert.Equal(t, tt.want, got, "DetectLanguageFromPath(%q)", tt.filePath)
 		})
 	}
 }

@@ -3,6 +3,9 @@ package sysprompt
 import (
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestConditionalRendering tests that conditional template sections are included or excluded based on configuration
@@ -16,13 +19,9 @@ func TestConditionalRendering(t *testing.T) {
 		ctx.Features["subagentEnabled"] = true
 
 		prompt, err := renderer.RenderSystemPrompt(ctx)
-		if err != nil {
-			t.Fatalf("Failed to render system prompt: %v", err)
-		}
+		require.NoError(t, err, "Failed to render system prompt")
 
-		if !strings.Contains(prompt, "subagent") {
-			t.Error("Expected subagent reference in prompt when subagentEnabled is true")
-		}
+		assert.True(t, strings.Contains(prompt, "subagent"), "Expected subagent reference in prompt when subagentEnabled is true")
 	})
 
 	t.Run("With some features disabled", func(t *testing.T) {
@@ -36,9 +35,7 @@ func TestConditionalRendering(t *testing.T) {
 		updateContextWithConfig(ctx, config)
 
 		_, err := renderer.RenderSystemPrompt(ctx)
-		if err != nil {
-			t.Fatalf("Failed to render system prompt: %v", err)
-		}
+		require.NoError(t, err, "Failed to render system prompt")
 	})
 }
 
@@ -58,14 +55,9 @@ func TestRenderer(t *testing.T) {
 
 		for _, component := range components {
 			result, err := renderer.RenderPrompt(component, ctx)
-			if err != nil {
-				t.Errorf("Failed to render component %s: %v", component, err)
-				continue
-			}
-
-			if len(result) == 0 {
-				t.Errorf("Rendered component %s has zero length", component)
-			}
+			assert.NoError(t, err, "Failed to render component %s", component)
+			
+			assert.NotEqual(t, 0, len(result), "Rendered component %s has zero length", component)
 		}
 	})
 
@@ -73,19 +65,14 @@ func TestRenderer(t *testing.T) {
 	t.Run("Template caching", func(t *testing.T) {
 		// First render should parse and cache the template
 		_, err := renderer.RenderPrompt(SystemTemplate, ctx)
-		if err != nil {
-			t.Fatalf("Failed to render system template: %v", err)
-		}
+		require.NoError(t, err, "Failed to render system template")
 
 		// Check that we have a cache entry for this template
-		if len(renderer.cache) == 0 {
-			t.Error("Template was not cached after rendering")
-		}
+		assert.NotEqual(t, 0, len(renderer.cache), "Template was not cached after rendering")
 
 		// Make sure the system template is in the cache
-		if _, ok := renderer.cache[SystemTemplate]; !ok {
-			t.Errorf("Template %s not found in cache", SystemTemplate)
-		}
+		_, ok := renderer.cache[SystemTemplate]
+		assert.True(t, ok, "Template %s not found in cache", SystemTemplate)
 	})
 
 	// Test that include function works
@@ -94,8 +81,6 @@ func TestRenderer(t *testing.T) {
 		// We can't directly test this without modifying the renderer, but we can check
 		// that templates with includes render without errors
 		_, err := renderer.RenderSystemPrompt(ctx)
-		if err != nil {
-			t.Errorf("Failed to render template with includes: %v", err)
-		}
+		assert.NoError(t, err, "Failed to render template with includes")
 	})
 }

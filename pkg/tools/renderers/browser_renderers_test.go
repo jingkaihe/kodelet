@@ -1,11 +1,11 @@
 package renderers
 
 import (
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestBrowserNavigateRenderer(t *testing.T) {
@@ -26,18 +26,10 @@ func TestBrowserNavigateRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "✅ Navigated to: https://example.com") {
-			t.Errorf("Expected navigation success message, got: %s", output)
-		}
-		if !strings.Contains(output, "Final URL: https://example.com/home") {
-			t.Errorf("Expected final URL in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Page Title: Example Website") {
-			t.Errorf("Expected page title in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Load Time: 500ms") {
-			t.Errorf("Expected load time in output, got: %s", output)
-		}
+		assert.Contains(t, output, "✅ Navigated to: https://example.com", "Expected navigation success message")
+		assert.Contains(t, output, "Final URL: https://example.com/home", "Expected final URL in output")
+		assert.Contains(t, output, "Page Title: Example Website", "Expected page title in output")
+		assert.Contains(t, output, "Load Time: 500ms", "Expected load time in output")
 	})
 
 	t.Run("Navigation with minimal metadata", func(t *testing.T) {
@@ -52,12 +44,8 @@ func TestBrowserNavigateRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "✅ Navigated to: https://example.com") {
-			t.Errorf("Expected navigation success message, got: %s", output)
-		}
-		if strings.Contains(output, "Final URL:") {
-			t.Errorf("Should not show final URL when not different from URL, got: %s", output)
-		}
+		assert.Contains(t, output, "✅ Navigated to: https://example.com", "Expected navigation success message")
+		assert.NotContains(t, output, "Final URL:", "Should not show final URL when not different from URL")
 	})
 
 	t.Run("Navigation error", func(t *testing.T) {
@@ -70,9 +58,7 @@ func TestBrowserNavigateRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if output != "❌ Navigation failed: Connection timeout" {
-			t.Errorf("Expected error message, got: %s", output)
-		}
+		assert.Equal(t, "❌ Navigation failed: Connection timeout", output, "Expected error message")
 	})
 
 	t.Run("Invalid metadata type", func(t *testing.T) {
@@ -85,9 +71,7 @@ func TestBrowserNavigateRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "Error: Invalid metadata type for browser_navigate") {
-			t.Errorf("Expected invalid metadata error, got: %s", output)
-		}
+		assert.Contains(t, output, "Error: Invalid metadata type for browser_navigate", "Expected invalid metadata error")
 	})
 }
 
@@ -107,9 +91,7 @@ func TestBrowserClickRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if output != "✅ Element clicked successfully" {
-			t.Errorf("Expected success message, got: %s", output)
-		}
+		assert.Equal(t, "✅ Element clicked successfully", output, "Expected success message")
 	})
 
 	t.Run("Click error - element not found", func(t *testing.T) {
@@ -126,9 +108,7 @@ func TestBrowserClickRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if output != "❌ Element not found or not clickable" {
-			t.Errorf("Expected element not found message, got: %s", output)
-		}
+		assert.Equal(t, "❌ Element not found or not clickable", output, "Expected element not found message")
 	})
 
 	t.Run("Click error - general error", func(t *testing.T) {
@@ -141,9 +121,7 @@ func TestBrowserClickRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if output != "❌ Click failed: Page not loaded" {
-			t.Errorf("Expected general error message, got: %s", output)
-		}
+		assert.Equal(t, "❌ Click failed: Page not loaded", output, "Expected general error message")
 	})
 }
 
@@ -165,18 +143,10 @@ func TestBrowserGetPageRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "✅ Page content retrieved") {
-			t.Errorf("Expected success message, got: %s", output)
-		}
-		if !strings.Contains(output, "URL: https://example.com") {
-			t.Errorf("Expected URL in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Title: Example Page") {
-			t.Errorf("Expected title in output, got: %s", output)
-		}
-		if !strings.Contains(output, "HTML Length: 1024 characters") {
-			t.Errorf("Expected HTML length in output, got: %s", output)
-		}
+		assert.Contains(t, output, "✅ Page content retrieved", "Expected success message")
+		assert.Contains(t, output, "URL: https://example.com", "Expected URL in output")
+		assert.Contains(t, output, "Title: Example Page", "Expected title in output")
+		assert.Contains(t, output, "HTML Length: 1024 characters", "Expected HTML length in output")
 	})
 
 	t.Run("Page retrieval with truncation", func(t *testing.T) {
@@ -194,9 +164,7 @@ func TestBrowserGetPageRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "✅ Page content retrieved (truncated)") {
-			t.Errorf("Expected truncation indication, got: %s", output)
-		}
+		assert.Contains(t, output, "✅ Page content retrieved (truncated)", "Expected truncation indication")
 	})
 
 	t.Run("Page retrieval error", func(t *testing.T) {
@@ -209,9 +177,7 @@ func TestBrowserGetPageRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if output != "❌ Failed to get page content: Page not found" {
-			t.Errorf("Expected error message, got: %s", output)
-		}
+		assert.Equal(t, "❌ Failed to get page content: Page not found", output, "Expected error message")
 	})
 
 	t.Run("Invalid metadata type", func(t *testing.T) {
@@ -224,9 +190,7 @@ func TestBrowserGetPageRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "Error: Invalid metadata type for browser_get_page") {
-			t.Errorf("Expected invalid metadata error, got: %s", output)
-		}
+		assert.Contains(t, output, "Error: Invalid metadata type for browser_get_page", "Expected invalid metadata error")
 	})
 }
 
@@ -250,21 +214,11 @@ func TestBrowserScreenshotRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "✅ Screenshot saved to: /tmp/screenshot.png") {
-			t.Errorf("Expected screenshot path in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Dimensions: 1920x1080") {
-			t.Errorf("Expected dimensions in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Format: png") {
-			t.Errorf("Expected format in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Full page: Yes") {
-			t.Errorf("Expected full page indicator, got: %s", output)
-		}
-		if !strings.Contains(output, "File size: 2048 bytes") {
-			t.Errorf("Expected file size in output, got: %s", output)
-		}
+		assert.Contains(t, output, "✅ Screenshot saved to: /tmp/screenshot.png", "Expected screenshot path in output")
+		assert.Contains(t, output, "Dimensions: 1920x1080", "Expected dimensions in output")
+		assert.Contains(t, output, "Format: png", "Expected format in output")
+		assert.Contains(t, output, "Full page: Yes", "Expected full page indicator")
+		assert.Contains(t, output, "File size: 2048 bytes", "Expected file size in output")
 	})
 
 	t.Run("Screenshot without full page", func(t *testing.T) {
@@ -283,12 +237,8 @@ func TestBrowserScreenshotRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "✅ Screenshot saved to: /tmp/screenshot.png") {
-			t.Errorf("Expected screenshot path in output, got: %s", output)
-		}
-		if strings.Contains(output, "Full page: Yes") {
-			t.Errorf("Should not show full page indicator when false, got: %s", output)
-		}
+		assert.Contains(t, output, "✅ Screenshot saved to: /tmp/screenshot.png", "Expected screenshot path in output")
+		assert.NotContains(t, output, "Full page: Yes", "Should not show full page indicator when false")
 	})
 
 	t.Run("Screenshot error", func(t *testing.T) {
@@ -301,9 +251,7 @@ func TestBrowserScreenshotRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if output != "❌ Screenshot failed: Failed to capture screenshot" {
-			t.Errorf("Expected error message, got: %s", output)
-		}
+		assert.Equal(t, "❌ Screenshot failed: Failed to capture screenshot", output, "Expected error message")
 	})
 
 	t.Run("Invalid metadata type", func(t *testing.T) {
@@ -316,9 +264,7 @@ func TestBrowserScreenshotRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "Error: Invalid metadata type for browser_screenshot") {
-			t.Errorf("Expected invalid metadata error, got: %s", output)
-		}
+		assert.Contains(t, output, "Error: Invalid metadata type for browser_screenshot", "Expected invalid metadata error")
 	})
 }
 
@@ -339,9 +285,7 @@ func TestBrowserTypeRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if output != "✅ Text typed successfully" {
-			t.Errorf("Expected success message, got: %s", output)
-		}
+		assert.Equal(t, "✅ Text typed successfully", output, "Expected success message")
 	})
 
 	t.Run("Type with field cleared", func(t *testing.T) {
@@ -358,9 +302,7 @@ func TestBrowserTypeRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if output != "✅ Text typed successfully (field cleared first)" {
-			t.Errorf("Expected success message with cleared indicator, got: %s", output)
-		}
+		assert.Equal(t, "✅ Text typed successfully (field cleared first)", output, "Expected success message with cleared indicator")
 	})
 
 	t.Run("Type error", func(t *testing.T) {
@@ -373,9 +315,7 @@ func TestBrowserTypeRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if output != "❌ Type failed: Element not found" {
-			t.Errorf("Expected error message, got: %s", output)
-		}
+		assert.Equal(t, "❌ Type failed: Element not found", output, "Expected error message")
 	})
 
 	t.Run("Invalid metadata type", func(t *testing.T) {
@@ -388,9 +328,7 @@ func TestBrowserTypeRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "Error: Invalid metadata type for browser_type") {
-			t.Errorf("Expected invalid metadata error, got: %s", output)
-		}
+		assert.Contains(t, output, "Error: Invalid metadata type for browser_type", "Expected invalid metadata error")
 	})
 }
 
@@ -411,9 +349,7 @@ func TestBrowserWaitForRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if output != "✅ Condition met: visible" {
-			t.Errorf("Expected condition met message, got: %s", output)
-		}
+		assert.Equal(t, "✅ Condition met: visible", output, "Expected condition met message")
 	})
 
 	t.Run("Successful wait - timeout", func(t *testing.T) {
@@ -430,9 +366,7 @@ func TestBrowserWaitForRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if output != "⏱️ Timeout waiting for: clickable" {
-			t.Errorf("Expected timeout message, got: %s", output)
-		}
+		assert.Equal(t, "⏱️ Timeout waiting for: clickable", output, "Expected timeout message")
 	})
 
 	t.Run("Wait error", func(t *testing.T) {
@@ -445,9 +379,7 @@ func TestBrowserWaitForRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if output != "❌ Wait failed: Page not loaded" {
-			t.Errorf("Expected error message, got: %s", output)
-		}
+		assert.Equal(t, "❌ Wait failed: Page not loaded", output, "Expected error message")
 	})
 
 	t.Run("Invalid metadata type", func(t *testing.T) {
@@ -460,8 +392,6 @@ func TestBrowserWaitForRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "Error: Invalid metadata type for browser_wait_for") {
-			t.Errorf("Expected invalid metadata error, got: %s", output)
-		}
+		assert.Contains(t, output, "Error: Invalid metadata type for browser_wait_for", "Expected invalid metadata error")
 	})
 }

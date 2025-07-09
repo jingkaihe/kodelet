@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestWaitForCondition(t *testing.T) {
@@ -12,9 +14,7 @@ func TestWaitForCondition(t *testing.T) {
 		result := WaitForCondition(1*time.Second, 10*time.Millisecond, func() bool {
 			return true
 		})
-		if !result {
-			t.Error("Expected condition to be met immediately")
-		}
+		assert.True(t, result, "Expected condition to be met immediately")
 	})
 
 	t.Run("condition met after delay", func(t *testing.T) {
@@ -26,15 +26,9 @@ func TestWaitForCondition(t *testing.T) {
 		})
 		elapsed := time.Since(start)
 
-		if !result {
-			t.Error("Expected condition to be met after delay")
-		}
-		if elapsed < 20*time.Millisecond {
-			t.Errorf("Expected at least 20ms delay, got %v", elapsed)
-		}
-		if counter < 3 {
-			t.Errorf("Expected at least 3 calls, got %d", counter)
-		}
+		assert.True(t, result, "Expected condition to be met after delay")
+		assert.GreaterOrEqual(t, elapsed, 20*time.Millisecond, "Expected at least 20ms delay")
+		assert.GreaterOrEqual(t, counter, 3, "Expected at least 3 calls")
 	})
 
 	t.Run("condition times out", func(t *testing.T) {
@@ -44,12 +38,8 @@ func TestWaitForCondition(t *testing.T) {
 		})
 		elapsed := time.Since(start)
 
-		if result {
-			t.Error("Expected condition to timeout")
-		}
-		if elapsed < 50*time.Millisecond {
-			t.Errorf("Expected at least 50ms delay, got %v", elapsed)
-		}
+		assert.False(t, result, "Expected condition to timeout")
+		assert.GreaterOrEqual(t, elapsed, 50*time.Millisecond, "Expected at least 50ms delay")
 	})
 
 	t.Run("zero timeout runs once", func(t *testing.T) {
@@ -59,12 +49,8 @@ func TestWaitForCondition(t *testing.T) {
 			return false
 		})
 
-		if result {
-			t.Error("Expected condition to fail with zero timeout")
-		}
-		if callCount != 1 {
-			t.Errorf("Expected exactly 1 call with zero timeout, got %d", callCount)
-		}
+		assert.False(t, result, "Expected condition to fail with zero timeout")
+		assert.Equal(t, 1, callCount, "Expected exactly 1 call with zero timeout")
 	})
 }
 
@@ -80,17 +66,13 @@ func TestWaitForFiles(t *testing.T) {
 		os.WriteFile(file2, []byte("content2"), 0644)
 
 		result := WaitForFiles(1*time.Second, 10*time.Millisecond, file1, file2)
-		if !result {
-			t.Error("Expected files to be found")
-		}
+		assert.True(t, result, "Expected files to be found")
 	})
 
 	t.Run("wait for files that don't exist", func(t *testing.T) {
 		nonExistentFile := filepath.Join(tempDir, "nonexistent.txt")
 		result := WaitForFiles(50*time.Millisecond, 10*time.Millisecond, nonExistentFile)
-		if result {
-			t.Error("Expected files to not be found")
-		}
+		assert.False(t, result, "Expected files to not be found")
 	})
 
 	t.Run("wait for files created during wait", func(t *testing.T) {
@@ -103,9 +85,7 @@ func TestWaitForFiles(t *testing.T) {
 		}()
 
 		result := WaitForFiles(100*time.Millisecond, 10*time.Millisecond, delayedFile)
-		if !result {
-			t.Error("Expected delayed file to be found")
-		}
+		assert.True(t, result, "Expected delayed file to be found")
 	})
 }
 
@@ -118,9 +98,7 @@ func TestWaitForFileContent(t *testing.T) {
 		os.WriteFile(testFile, []byte(content), 0644)
 
 		result := WaitForFileContent(1*time.Second, 10*time.Millisecond, testFile, []string{"Hello", "test file"})
-		if !result {
-			t.Error("Expected content to be found")
-		}
+		assert.True(t, result, "Expected content to be found")
 	})
 
 	t.Run("wait for content not in file", func(t *testing.T) {
@@ -128,17 +106,13 @@ func TestWaitForFileContent(t *testing.T) {
 		os.WriteFile(testFile, []byte(content), 0644)
 
 		result := WaitForFileContent(50*time.Millisecond, 10*time.Millisecond, testFile, []string{"missing content"})
-		if result {
-			t.Error("Expected content to not be found")
-		}
+		assert.False(t, result, "Expected content to not be found")
 	})
 
 	t.Run("wait for content in file that doesn't exist", func(t *testing.T) {
 		nonExistentFile := filepath.Join(tempDir, "missing.txt")
 		result := WaitForFileContent(50*time.Millisecond, 10*time.Millisecond, nonExistentFile, []string{"any content"})
-		if result {
-			t.Error("Expected file to not exist")
-		}
+		assert.False(t, result, "Expected file to not exist")
 	})
 
 	t.Run("wait for content added during wait", func(t *testing.T) {
@@ -154,16 +128,12 @@ func TestWaitForFileContent(t *testing.T) {
 		}()
 
 		result := WaitForFileContent(100*time.Millisecond, 10*time.Millisecond, dynamicFile, []string{"initial", "added content"})
-		if !result {
-			t.Error("Expected dynamic content to be found")
-		}
+		assert.True(t, result, "Expected dynamic content to be found")
 	})
 
 	t.Run("empty expected content list", func(t *testing.T) {
 		os.WriteFile(testFile, []byte("any content"), 0644)
 		result := WaitForFileContent(50*time.Millisecond, 10*time.Millisecond, testFile, []string{})
-		if !result {
-			t.Error("Expected empty content list to always match")
-		}
+		assert.True(t, result, "Expected empty content list to always match")
 	})
 }

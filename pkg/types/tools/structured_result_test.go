@@ -5,6 +5,9 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestStructuredToolResult_JSONMarshaling(t *testing.T) {
@@ -153,9 +156,7 @@ func TestStructuredToolResult_JSONMarshaling(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Marshal to JSON
 			data, err := json.Marshal(tt.result)
-			if err != nil {
-				t.Fatalf("Failed to marshal: %v", err)
-			}
+			require.NoError(t, err, "Failed to marshal")
 
 			t.Logf("Marshaled JSON: %s", string(data))
 
@@ -163,53 +164,34 @@ func TestStructuredToolResult_JSONMarshaling(t *testing.T) {
 			var jsonMap map[string]interface{}
 			json.Unmarshal(data, &jsonMap)
 			if tt.result.Metadata != nil {
-				if _, hasType := jsonMap["metadataType"]; !hasType {
-					t.Error("Expected metadataType field in JSON")
-				}
+				_, hasType := jsonMap["metadataType"]
+				assert.True(t, hasType, "Expected metadataType field in JSON")
 			}
 
 			// Unmarshal back
 			var unmarshaled StructuredToolResult
 			err = json.Unmarshal(data, &unmarshaled)
-			if err != nil {
-				t.Fatalf("Failed to unmarshal: %v", err)
-			}
+			require.NoError(t, err, "Failed to unmarshal")
 
 			// Compare basic fields
-			if unmarshaled.ToolName != tt.result.ToolName {
-				t.Errorf("ToolName mismatch: got %s, want %s", unmarshaled.ToolName, tt.result.ToolName)
-			}
-			if unmarshaled.Success != tt.result.Success {
-				t.Errorf("Success mismatch: got %v, want %v", unmarshaled.Success, tt.result.Success)
-			}
-			if unmarshaled.Error != tt.result.Error {
-				t.Errorf("Error mismatch: got %s, want %s", unmarshaled.Error, tt.result.Error)
-			}
+			assert.Equal(t, tt.result.ToolName, unmarshaled.ToolName, "ToolName mismatch")
+			assert.Equal(t, tt.result.Success, unmarshaled.Success, "Success mismatch")
+			assert.Equal(t, tt.result.Error, unmarshaled.Error, "Error mismatch")
 
 			// Compare metadata
 			if tt.result.Metadata == nil {
-				if unmarshaled.Metadata != nil {
-					t.Errorf("Expected nil metadata, got %v", unmarshaled.Metadata)
-				}
+				assert.Nil(t, unmarshaled.Metadata, "Expected nil metadata")
 			} else {
-				if unmarshaled.Metadata == nil {
-					t.Errorf("Expected metadata, got nil")
-				} else {
-					// Check that ToolType matches
-					if unmarshaled.Metadata.ToolType() != tt.result.Metadata.ToolType() {
-						t.Errorf("Metadata type mismatch: got %s, want %s",
-							unmarshaled.Metadata.ToolType(), tt.result.Metadata.ToolType())
-					}
+				assert.NotNil(t, unmarshaled.Metadata, "Expected metadata")
+				// Check that ToolType matches
+				assert.Equal(t, tt.result.Metadata.ToolType(), unmarshaled.Metadata.ToolType(), "Metadata type mismatch")
 
-					// IMPORTANT: After unmarshaling, metadata is always a value type, not a pointer
-					metaType := reflect.TypeOf(unmarshaled.Metadata)
-					if metaType.Kind() == reflect.Ptr {
-						t.Errorf("Expected value type after unmarshal, got pointer type: %T", unmarshaled.Metadata)
-					}
+				// IMPORTANT: After unmarshaling, metadata is always a value type, not a pointer
+				metaType := reflect.TypeOf(unmarshaled.Metadata)
+				assert.NotEqual(t, reflect.Ptr, metaType.Kind(), "Expected value type after unmarshal, got pointer type: %T", unmarshaled.Metadata)
 
-					// Log the actual type for debugging
-					t.Logf("Unmarshaled metadata type: %T", unmarshaled.Metadata)
-				}
+				// Log the actual type for debugging
+				t.Logf("Unmarshaled metadata type: %T", unmarshaled.Metadata)
 			}
 		})
 	}
@@ -257,30 +239,20 @@ func TestStructuredToolResult_TypeAssertions(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Check ToolType
-			if tt.metadata.ToolType() != tt.expectedType {
-				t.Errorf("ToolType mismatch: got %s, want %s", tt.metadata.ToolType(), tt.expectedType)
-			}
+			assert.Equal(t, tt.expectedType, tt.metadata.ToolType(), "ToolType mismatch")
 
 			// Test value type assertion
 			switch tt.expectedType {
 			case "file_read":
 				_, ok := tt.metadata.(FileReadMetadata)
-				if ok != tt.shouldBeValue {
-					t.Errorf("Value type assertion mismatch: got %v, want %v", ok, tt.shouldBeValue)
-				}
+				assert.Equal(t, tt.shouldBeValue, ok, "Value type assertion mismatch")
 				_, ok = tt.metadata.(*FileReadMetadata)
-				if ok != tt.shouldBePointer {
-					t.Errorf("Pointer type assertion mismatch: got %v, want %v", ok, tt.shouldBePointer)
-				}
+				assert.Equal(t, tt.shouldBePointer, ok, "Pointer type assertion mismatch")
 			case "web_fetch":
 				_, ok := tt.metadata.(WebFetchMetadata)
-				if ok != tt.shouldBeValue {
-					t.Errorf("Value type assertion mismatch: got %v, want %v", ok, tt.shouldBeValue)
-				}
+				assert.Equal(t, tt.shouldBeValue, ok, "Value type assertion mismatch")
 				_, ok = tt.metadata.(*WebFetchMetadata)
-				if ok != tt.shouldBePointer {
-					t.Errorf("Pointer type assertion mismatch: got %v, want %v", ok, tt.shouldBePointer)
-				}
+				assert.Equal(t, tt.shouldBePointer, ok, "Pointer type assertion mismatch")
 			}
 		})
 	}
@@ -301,22 +273,14 @@ func TestStructuredToolResult_BackwardCompatibility(t *testing.T) {
 
 	var result StructuredToolResult
 	err := json.Unmarshal([]byte(oldFormat), &result)
-	if err != nil {
-		t.Fatalf("Failed to unmarshal old format: %v", err)
-	}
+	require.NoError(t, err, "Failed to unmarshal old format")
 
 	// Should successfully unmarshal basic fields
-	if result.ToolName != "file_read" {
-		t.Errorf("Expected tool name 'file_read', got %s", result.ToolName)
-	}
-	if !result.Success {
-		t.Errorf("Expected success to be true")
-	}
+	assert.Equal(t, "file_read", result.ToolName, "Expected tool name 'file_read'")
+	assert.True(t, result.Success, "Expected success to be true")
 
 	// Metadata will be nil since we can't determine the type
-	if result.Metadata != nil {
-		t.Errorf("Expected nil metadata for old format, got %v", result.Metadata)
-	}
+	assert.Nil(t, result.Metadata, "Expected nil metadata for old format")
 }
 
 func TestStructuredToolResult_ComplexMetadata(t *testing.T) {
@@ -385,44 +349,28 @@ func TestStructuredToolResult_ComplexMetadata(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Marshal to JSON
 			data, err := json.Marshal(tt.result)
-			if err != nil {
-				t.Fatalf("Failed to marshal: %v", err)
-			}
+			require.NoError(t, err, "Failed to marshal")
 
 			t.Logf("Marshaled JSON: %s", string(data))
 
 			// Unmarshal back
 			var unmarshaled StructuredToolResult
 			err = json.Unmarshal(data, &unmarshaled)
-			if err != nil {
-				t.Fatalf("Failed to unmarshal: %v", err)
-			}
+			require.NoError(t, err, "Failed to unmarshal")
 
 			// Verify the metadata type
-			if unmarshaled.Metadata == nil {
-				t.Fatal("Expected metadata, got nil")
-			}
-			if unmarshaled.Metadata.ToolType() != tt.result.Metadata.ToolType() {
-				t.Errorf("Metadata type mismatch: got %s, want %s",
-					unmarshaled.Metadata.ToolType(), tt.result.Metadata.ToolType())
-			}
+			require.NotNil(t, unmarshaled.Metadata, "Expected metadata")
+			assert.Equal(t, tt.result.Metadata.ToolType(), unmarshaled.Metadata.ToolType(), "Metadata type mismatch")
 
 			// For BatchMetadata, verify nested results
 			if tt.result.ToolName == "batch" {
 				batchMeta, ok := unmarshaled.Metadata.(BatchMetadata)
-				if !ok {
-					t.Fatalf("Failed to assert BatchMetadata type, got %T", unmarshaled.Metadata)
-				}
-				if len(batchMeta.SubResults) != 2 {
-					t.Errorf("Expected 2 sub-results, got %d", len(batchMeta.SubResults))
-				}
+				require.True(t, ok, "Failed to assert BatchMetadata type, got %T", unmarshaled.Metadata)
+				assert.Equal(t, 2, len(batchMeta.SubResults), "Expected 2 sub-results")
 				// Check that nested metadata also unmarshal correctly
 				for i, subResult := range batchMeta.SubResults {
-					if subResult.Metadata == nil {
-						t.Errorf("Sub-result %d has nil metadata", i)
-					} else {
-						t.Logf("Sub-result %d metadata type: %T", i, subResult.Metadata)
-					}
+					assert.NotNil(t, subResult.Metadata, "Sub-result %d has nil metadata", i)
+					t.Logf("Sub-result %d metadata type: %T", i, subResult.Metadata)
 				}
 			}
 		})
@@ -467,48 +415,28 @@ func TestConversationRecord_JSONRoundTrip(t *testing.T) {
 
 	// Marshal the map
 	data, err := json.Marshal(toolResults)
-	if err != nil {
-		t.Fatalf("Failed to marshal tool results map: %v", err)
-	}
+	require.NoError(t, err, "Failed to marshal tool results map")
 
 	t.Logf("Marshaled map JSON: %s", string(data))
 
 	// Unmarshal back
 	var unmarshaled map[string]StructuredToolResult
 	err = json.Unmarshal(data, &unmarshaled)
-	if err != nil {
-		t.Fatalf("Failed to unmarshal tool results map: %v", err)
-	}
+	require.NoError(t, err, "Failed to unmarshal tool results map")
 
 	// Verify the results
-	if len(unmarshaled) != len(toolResults) {
-		t.Errorf("Expected %d results, got %d", len(toolResults), len(unmarshaled))
-	}
+	assert.Equal(t, len(toolResults), len(unmarshaled), "Expected same number of results")
 
 	for key, original := range toolResults {
 		result, exists := unmarshaled[key]
-		if !exists {
-			t.Errorf("Missing result for key %s", key)
-			continue
-		}
+		require.True(t, exists, "Missing result for key %s", key)
 
-		if result.ToolName != original.ToolName {
-			t.Errorf("Tool name mismatch for %s: got %s, want %s",
-				key, result.ToolName, original.ToolName)
-		}
-		if result.Success != original.Success {
-			t.Errorf("Success mismatch for %s", key)
-		}
-		if result.Metadata == nil {
-			t.Errorf("Expected metadata for %s, got nil", key)
-		} else {
-			if result.Metadata.ToolType() != original.Metadata.ToolType() {
-				t.Errorf("Metadata type mismatch for %s: got %s, want %s",
-					key, result.Metadata.ToolType(), original.Metadata.ToolType())
-			}
-			// Log the actual type after unmarshal
-			t.Logf("Result %s metadata type after unmarshal: %T", key, result.Metadata)
-		}
+		assert.Equal(t, original.ToolName, result.ToolName, "Tool name mismatch for %s", key)
+		assert.Equal(t, original.Success, result.Success, "Success mismatch for %s", key)
+		assert.NotNil(t, result.Metadata, "Expected metadata for %s", key)
+		assert.Equal(t, original.Metadata.ToolType(), result.Metadata.ToolType(), "Metadata type mismatch for %s", key)
+		// Log the actual type after unmarshal
+		t.Logf("Result %s metadata type after unmarshal: %T", key, result.Metadata)
 	}
 }
 
@@ -579,22 +507,18 @@ func TestStructuredToolResult_RawJSONStrings(t *testing.T) {
 			var result StructuredToolResult
 			err := json.Unmarshal([]byte(tt.jsonStr), &result)
 
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Unmarshal error = %v, wantErr %v", err, tt.wantErr)
+			if tt.wantErr {
+				assert.Error(t, err, "Expected error but got none")
 				return
 			}
+			assert.NoError(t, err, "Unexpected error during unmarshal")
 
 			if err == nil && result.Metadata != nil {
 				// Verify the metadata matches expected
-				if result.Metadata.ToolType() != tt.expected.ToolType() {
-					t.Errorf("ToolType mismatch: got %s, want %s",
-						result.Metadata.ToolType(), tt.expected.ToolType())
-				}
+				assert.Equal(t, tt.expected.ToolType(), result.Metadata.ToolType(), "ToolType mismatch")
 
 				// Check it's a value type (not pointer) after unmarshal
-				if reflect.TypeOf(result.Metadata).Kind() == reflect.Ptr {
-					t.Errorf("Expected value type after unmarshal, got pointer: %T", result.Metadata)
-				}
+				assert.NotEqual(t, reflect.Ptr, reflect.TypeOf(result.Metadata).Kind(), "Expected value type after unmarshal, got pointer")
 			}
 		})
 	}
@@ -639,15 +563,9 @@ func TestExtractMetadata(t *testing.T) {
 			want:   true,
 			validate: func(t *testing.T, target interface{}) {
 				result := target.(*FileReadMetadata)
-				if result.FilePath != "/test.go" {
-					t.Errorf("FilePath = %v, want /test.go", result.FilePath)
-				}
-				if len(result.Lines) != 2 {
-					t.Errorf("Lines length = %v, want 2", len(result.Lines))
-				}
-				if result.Language != "go" {
-					t.Errorf("Language = %v, want go", result.Language)
-				}
+				assert.Equal(t, "/test.go", result.FilePath, "FilePath mismatch")
+				assert.Equal(t, 2, len(result.Lines), "Lines length mismatch")
+				assert.Equal(t, "go", result.Language, "Language mismatch")
 			},
 		},
 		{
@@ -661,15 +579,9 @@ func TestExtractMetadata(t *testing.T) {
 			want:   true,
 			validate: func(t *testing.T, target interface{}) {
 				result := target.(*WebFetchMetadata)
-				if result.URL != "https://example.com" {
-					t.Errorf("URL = %v, want https://example.com", result.URL)
-				}
-				if result.Content != "test content" {
-					t.Errorf("Content = %v, want test content", result.Content)
-				}
-				if result.Size != 100 {
-					t.Errorf("Size = %v, want 100", result.Size)
-				}
+				assert.Equal(t, "https://example.com", result.URL, "URL mismatch")
+				assert.Equal(t, "test content", result.Content, "Content mismatch")
+				assert.Equal(t, int64(100), result.Size, "Size mismatch")
 			},
 		},
 		{
@@ -696,15 +608,9 @@ func TestExtractMetadata(t *testing.T) {
 			want:   true,
 			validate: func(t *testing.T, target interface{}) {
 				result := target.(*BatchMetadata)
-				if result.Description != "batch test" {
-					t.Errorf("Description = %v, want batch test", result.Description)
-				}
-				if result.SuccessCount != 2 {
-					t.Errorf("SuccessCount = %v, want 2", result.SuccessCount)
-				}
-				if len(result.SubResults) != 1 {
-					t.Errorf("SubResults length = %v, want 1", len(result.SubResults))
-				}
+				assert.Equal(t, "batch test", result.Description, "Description mismatch")
+				assert.Equal(t, 2, result.SuccessCount, "SuccessCount mismatch")
+				assert.Equal(t, 1, len(result.SubResults), "SubResults length mismatch")
 			},
 		},
 		{
@@ -725,18 +631,10 @@ func TestExtractMetadata(t *testing.T) {
 			want:   true,
 			validate: func(t *testing.T, target interface{}) {
 				result := target.(*MCPToolMetadata)
-				if result.MCPToolName != "test_tool" {
-					t.Errorf("MCPToolName = %v, want test_tool", result.MCPToolName)
-				}
-				if len(result.Parameters) != 2 {
-					t.Errorf("Parameters length = %v, want 2", len(result.Parameters))
-				}
-				if result.Parameters["key1"] != "value1" {
-					t.Errorf("Parameters[key1] = %v, want value1", result.Parameters["key1"])
-				}
-				if len(result.Content) != 2 {
-					t.Errorf("Content length = %v, want 2", len(result.Content))
-				}
+				assert.Equal(t, "test_tool", result.MCPToolName, "MCPToolName mismatch")
+				assert.Equal(t, 2, len(result.Parameters), "Parameters length mismatch")
+				assert.Equal(t, "value1", result.Parameters["key1"], "Parameters[key1] mismatch")
+				assert.Equal(t, 2, len(result.Content), "Content length mismatch")
 			},
 		},
 		{
@@ -751,15 +649,9 @@ func TestExtractMetadata(t *testing.T) {
 			want:   true,
 			validate: func(t *testing.T, target interface{}) {
 				result := target.(*BrowserNavigateMetadata)
-				if result.URL != "https://example.com" {
-					t.Errorf("URL = %v, want https://example.com", result.URL)
-				}
-				if result.Title != "Example" {
-					t.Errorf("Title = %v, want Example", result.Title)
-				}
-				if result.LoadTime != 100*time.Millisecond {
-					t.Errorf("LoadTime = %v, want 100ms", result.LoadTime)
-				}
+				assert.Equal(t, "https://example.com", result.URL, "URL mismatch")
+				assert.Equal(t, "Example", result.Title, "Title mismatch")
+				assert.Equal(t, 100*time.Millisecond, result.LoadTime, "LoadTime mismatch")
 			},
 		},
 	}
@@ -767,9 +659,7 @@ func TestExtractMetadata(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := ExtractMetadata(tt.metadata, tt.target)
-			if got != tt.want {
-				t.Errorf("ExtractMetadata() = %v, want %v", got, tt.want)
-			}
+			assert.Equal(t, tt.want, got, "ExtractMetadata() return value mismatch")
 			if got && tt.validate != nil {
 				tt.validate(t, tt.target)
 			}
@@ -811,9 +701,7 @@ func TestExtractMetadata_AllTypes(t *testing.T) {
 	for _, tt := range metadataTypes {
 		t.Run(tt.name, func(t *testing.T) {
 			// Test with value type
-			if !ExtractMetadata(tt.metadata, tt.target) {
-				t.Errorf("ExtractMetadata() failed for value type %s", tt.name)
-			}
+			assert.True(t, ExtractMetadata(tt.metadata, tt.target), "ExtractMetadata() failed for value type %s", tt.name)
 
 			// Reset target for pointer test
 			tt.target = reflect.New(reflect.TypeOf(tt.metadata)).Interface()
@@ -823,9 +711,7 @@ func TestExtractMetadata_AllTypes(t *testing.T) {
 			metadataPtr := reflect.New(metadataValue.Type())
 			metadataPtr.Elem().Set(metadataValue)
 
-			if !ExtractMetadata(metadataPtr.Interface().(ToolMetadata), tt.target) {
-				t.Errorf("ExtractMetadata() failed for pointer type %s", tt.name)
-			}
+			assert.True(t, ExtractMetadata(metadataPtr.Interface().(ToolMetadata), tt.target), "ExtractMetadata() failed for pointer type %s", tt.name)
 		})
 	}
 }

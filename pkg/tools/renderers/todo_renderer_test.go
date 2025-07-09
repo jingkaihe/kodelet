@@ -1,11 +1,11 @@
 package renderers
 
 import (
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestTodoRenderer(t *testing.T) {
@@ -49,24 +49,12 @@ func TestTodoRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "Todo List:") {
-			t.Errorf("Expected todo list header, got: %s", output)
-		}
-		if !strings.Contains(output, "Total: 3") {
-			t.Errorf("Expected statistics, got: %s", output)
-		}
-		if !strings.Contains(output, "Fix the bug") {
-			t.Errorf("Expected todo content, got: %s", output)
-		}
-		if !strings.Contains(output, "✓") {
-			t.Errorf("Expected completed icon, got: %s", output)
-		}
-		if !strings.Contains(output, "→") {
-			t.Errorf("Expected in progress icon, got: %s", output)
-		}
-		if !strings.Contains(output, "○") {
-			t.Errorf("Expected pending icon, got: %s", output)
-		}
+		assert.Contains(t, output, "Todo List:", "Expected todo list header")
+		assert.Contains(t, output, "Total: 3", "Expected statistics")
+		assert.Contains(t, output, "Fix the bug", "Expected todo content")
+		assert.Contains(t, output, "✓", "Expected completed icon")
+		assert.Contains(t, output, "→", "Expected in progress icon")
+		assert.Contains(t, output, "○", "Expected pending icon")
 	})
 
 	t.Run("Todo update action", func(t *testing.T) {
@@ -82,8 +70,6 @@ func TestTodoRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "Todo List Updated:") {
-			t.Errorf("Expected todo list updated header, got: %s", output)
-		}
+		assert.Contains(t, output, "Todo List Updated:", "Expected todo list updated header")
 	})
 }

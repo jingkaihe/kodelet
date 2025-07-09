@@ -1,10 +1,10 @@
 package renderers
 
 import (
-	"strings"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
@@ -37,14 +37,8 @@ func TestBatchRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "Batch Execution: Test batch") {
-			t.Errorf("Expected batch description, got: %s", output)
-		}
-		if !strings.Contains(output, "Success: 1") {
-			t.Errorf("Expected success count, got: %s", output)
-		}
-		if !strings.Contains(output, "Task 1: file_read") {
-			t.Errorf("Expected sub-task info, got: %s", output)
-		}
+		assert.Contains(t, output, "Batch Execution: Test batch", "Expected batch description")
+		assert.Contains(t, output, "Success: 1", "Expected success count")
+		assert.Contains(t, output, "Task 1: file_read", "Expected sub-task info")
 	})
 }

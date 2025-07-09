@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // Ensure we're using the same constant defined in grep.go
@@ -126,9 +127,7 @@ func TestGrepTool_Execute(t *testing.T) {
 
 	// Create a temporary directory for test files
 	tempDir, err := os.MkdirTemp("", "grep_test")
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	defer os.RemoveAll(tempDir)
 
 	// Create test files with known content
@@ -166,9 +165,7 @@ func TestGrepTool_Execute(t *testing.T) {
 
 	for filename, content := range testFiles {
 		filePath := filepath.Join(tempDir, filename)
-		if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, os.WriteFile(filePath, []byte(content), 0644))
 	}
 
 	tests := []struct {
@@ -323,16 +320,12 @@ func TestGrepHiddenFilesIgnored(t *testing.T) {
 
 	// Create a temporary directory for test files
 	tempDir, err := os.MkdirTemp("", "grep_hidden_test")
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	defer os.RemoveAll(tempDir)
 
 	// Get the absolute path
 	tempDirAbs, err := filepath.Abs(tempDir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	// Create visible and hidden files
 	testFiles := map[string]string{
@@ -348,13 +341,9 @@ func TestGrepHiddenFilesIgnored(t *testing.T) {
 
 		// Ensure directory exists
 		dir := filepath.Dir(filePath)
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, os.MkdirAll(dir, 0755))
 
-		if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, os.WriteFile(filePath, []byte(content), 0644))
 	}
 
 	// Search for "func Test" pattern
@@ -382,16 +371,12 @@ func TestGrepResultLimitAndTruncation(t *testing.T) {
 
 	// Create a temporary directory for test files
 	tempDir, err := os.MkdirTemp("", "grep_limit_test")
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	defer os.RemoveAll(tempDir)
 
 	// Get the absolute path
 	tempDirAbs, err := filepath.Abs(tempDir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	// Create 120 files with the same pattern for testing truncation
 	const filesToCreate = 120
@@ -400,14 +385,10 @@ func TestGrepResultLimitAndTruncation(t *testing.T) {
 
 		// Ensure directory exists
 		dir := filepath.Dir(filename)
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, os.MkdirAll(dir, 0755))
 
 		content := "This is a test file with a FIND_ME pattern inside"
-		if err := os.WriteFile(filename, []byte(content), 0644); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, os.WriteFile(filename, []byte(content), 0644))
 	}
 
 	// Search for the pattern
@@ -433,9 +414,7 @@ func TestGrepResultLimitAndTruncation(t *testing.T) {
 func TestSortSearchResultsByModTime(t *testing.T) {
 	// Create temporary files with different timestamps
 	tempDir, err := os.MkdirTemp("", "grep_sort_func_test")
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	defer os.RemoveAll(tempDir)
 
 	// Create test files with specific content and timestamps
@@ -449,12 +428,8 @@ func TestSortSearchResultsByModTime(t *testing.T) {
 	// Create files and set mod times
 	for i, name := range fileNames {
 		path := filepath.Join(tempDir, name)
-		if err := os.WriteFile(path, []byte("test content"), 0644); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Chtimes(path, fileTimes[i], fileTimes[i]); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, os.WriteFile(path, []byte("test content"), 0644))
+		require.NoError(t, os.Chtimes(path, fileTimes[i], fileTimes[i]))
 	}
 
 	// Create search results in reverse order (oldest first)
@@ -572,16 +547,12 @@ func TestGrepSortByModTime(t *testing.T) {
 
 	// Create a temporary directory for test files
 	tempDir, err := os.MkdirTemp("", "grep_sort_test")
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	defer os.RemoveAll(tempDir)
 
 	// Get the absolute path
 	tempDirAbs, err := filepath.Abs(tempDir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	// Create files with different timestamps
 	testFiles := []struct {
@@ -610,14 +581,10 @@ func TestGrepSortByModTime(t *testing.T) {
 	for _, fileInfo := range testFiles {
 		filePath := filepath.Join(tempDir, fileInfo.name)
 
-		if err := os.WriteFile(filePath, []byte(fileInfo.content), 0644); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, os.WriteFile(filePath, []byte(fileInfo.content), 0644))
 
 		// Set modification time
-		if err := os.Chtimes(filePath, fileInfo.modTime, fileInfo.modTime); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, os.Chtimes(filePath, fileInfo.modTime, fileInfo.modTime))
 	}
 
 	// Search for the pattern
@@ -647,16 +614,12 @@ func TestGrepFileMatchingByRelativePathOrBaseName(t *testing.T) {
 
 	// Create a temporary directory for test files
 	tempDir, err := os.MkdirTemp("", "grep_path_match_test")
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	defer os.RemoveAll(tempDir)
 
 	// Get the absolute path
 	tempDirAbs, err := filepath.Abs(tempDir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	// Create a directory structure with test files
 	testFiles := map[string]string{
@@ -672,13 +635,9 @@ func TestGrepFileMatchingByRelativePathOrBaseName(t *testing.T) {
 
 		// Ensure directory exists
 		dir := filepath.Dir(filePath)
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, os.MkdirAll(dir, 0755))
 
-		if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, os.WriteFile(filePath, []byte(content), 0644))
 	}
 
 	// Test cases

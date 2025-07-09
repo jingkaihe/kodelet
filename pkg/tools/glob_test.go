@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestGlobTool_Name(t *testing.T) {
@@ -87,9 +88,7 @@ func TestGlobTool_ValidateInput(t *testing.T) {
 func TestGlobTool_Execute(t *testing.T) {
 	// Create a temporary directory structure for testing
 	tmpDir, err := os.MkdirTemp("", "glob-test-*")
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	defer os.RemoveAll(tmpDir)
 
 	// Create test directory structure
@@ -107,26 +106,18 @@ func TestGlobTool_Execute(t *testing.T) {
 	for path, content := range testFiles {
 		fullPath := filepath.Join(tmpDir, path)
 		err := os.MkdirAll(filepath.Dir(fullPath), 0755)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		err = os.WriteFile(fullPath, []byte(content), 0644)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 	}
 
 	// Modify file modification times to ensure consistent sorting
 	// Make file2.go newer than file1.go
 	now := time.Now()
 	err = os.Chtimes(filepath.Join(tmpDir, "file1.go"), now.Add(-2*time.Hour), now.Add(-2*time.Hour))
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	err = os.Chtimes(filepath.Join(tmpDir, "file2.go"), now, now)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	tool := &GlobTool{}
 	ctx := context.Background()

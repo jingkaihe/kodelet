@@ -230,7 +230,7 @@ func TestGetLogger_TypeAssertion(t *testing.T) {
 			panicStr := fmt.Sprintf("%v", r)
 			assert.Contains(t, panicStr, "interface conversion")
 		} else {
-			t.Error("Expected panic from invalid type assertion")
+			assert.Fail(t, "Expected panic from invalid type assertion")
 		}
 	}()
 

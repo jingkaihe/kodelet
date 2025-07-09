@@ -2,11 +2,12 @@ package renderers
 
 import (
 	"encoding/json"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestRendererWithJSONUnmarshal(t *testing.T) {
@@ -28,25 +29,19 @@ func TestRendererWithJSONUnmarshal(t *testing.T) {
 
 		// Marshal to JSON
 		data, err := json.Marshal(original)
-		if err != nil {
-			t.Fatalf("Failed to marshal: %v", err)
-		}
+		require.NoError(t, err, "Failed to marshal")
 
 		// Unmarshal back
 		var unmarshaled tools.StructuredToolResult
 		err = json.Unmarshal(data, &unmarshaled)
-		if err != nil {
-			t.Fatalf("Failed to unmarshal: %v", err)
-		}
+		require.NoError(t, err, "Failed to unmarshal")
 
 		// Try to render - this will panic or fail with current implementation
 		output := registry.Render(unmarshaled)
 
 		// Should produce the expected output
 		expected := "Web Fetch: https://example.com\nSaved to: /tmp/file.txt\nThis is the content"
-		if output != expected {
-			t.Errorf("Expected:\n%s\nGot:\n%s", expected, output)
-		}
+		assert.Equal(t, expected, output)
 	})
 
 	t.Run("FileReadRenderer after JSON unmarshal", func(t *testing.T) {
@@ -64,22 +59,16 @@ func TestRendererWithJSONUnmarshal(t *testing.T) {
 		}
 
 		data, err := json.Marshal(original)
-		if err != nil {
-			t.Fatalf("Failed to marshal: %v", err)
-		}
+		require.NoError(t, err, "Failed to marshal")
 
 		var unmarshaled tools.StructuredToolResult
 		err = json.Unmarshal(data, &unmarshaled)
-		if err != nil {
-			t.Fatalf("Failed to unmarshal: %v", err)
-		}
+		require.NoError(t, err, "Failed to unmarshal")
 
 		output := registry.Render(unmarshaled)
 
 		// Should contain file path
-		if !strings.Contains(output, "/etc/hosts") {
-			t.Errorf("Expected file path in output, got: %s", output)
-		}
+		assert.Contains(t, output, "/etc/hosts", "Expected file path in output")
 	})
 
 	t.Run("BashRenderer after JSON unmarshal", func(t *testing.T) {
@@ -96,22 +85,16 @@ func TestRendererWithJSONUnmarshal(t *testing.T) {
 		}
 
 		data, err := json.Marshal(original)
-		if err != nil {
-			t.Fatalf("Failed to marshal: %v", err)
-		}
+		require.NoError(t, err, "Failed to marshal")
 
 		var unmarshaled tools.StructuredToolResult
 		err = json.Unmarshal(data, &unmarshaled)
-		if err != nil {
-			t.Fatalf("Failed to unmarshal: %v", err)
-		}
+		require.NoError(t, err, "Failed to unmarshal")
 
 		output := registry.Render(unmarshaled)
 
 		// Should contain command
-		if !strings.Contains(output, "ls -la") {
-			t.Errorf("Expected command in output, got: %s", output)
-		}
+		assert.Contains(t, output, "ls -la", "Expected command in output")
 	})
 
 	t.Run("TodoRenderer after JSON unmarshal", func(t *testing.T) {
@@ -135,22 +118,16 @@ func TestRendererWithJSONUnmarshal(t *testing.T) {
 		}
 
 		data, err := json.Marshal(original)
-		if err != nil {
-			t.Fatalf("Failed to marshal: %v", err)
-		}
+		require.NoError(t, err, "Failed to marshal")
 
 		var unmarshaled tools.StructuredToolResult
 		err = json.Unmarshal(data, &unmarshaled)
-		if err != nil {
-			t.Fatalf("Failed to unmarshal: %v", err)
-		}
+		require.NoError(t, err, "Failed to unmarshal")
 
 		output := registry.Render(unmarshaled)
 
 		// Should contain todo content
-		if !strings.Contains(output, "Task 1") {
-			t.Errorf("Expected todo content in output, got: %s", output)
-		}
+		assert.Contains(t, output, "Task 1", "Expected todo content in output")
 	})
 
 	t.Run("BackgroundBashRenderer after JSON unmarshal", func(t *testing.T) {
@@ -167,30 +144,18 @@ func TestRendererWithJSONUnmarshal(t *testing.T) {
 		}
 
 		data, err := json.Marshal(original)
-		if err != nil {
-			t.Fatalf("Failed to marshal: %v", err)
-		}
+		require.NoError(t, err, "Failed to marshal")
 
 		var unmarshaled tools.StructuredToolResult
 		err = json.Unmarshal(data, &unmarshaled)
-		if err != nil {
-			t.Fatalf("Failed to unmarshal: %v", err)
-		}
+		require.NoError(t, err, "Failed to unmarshal")
 
 		output := registry.Render(unmarshaled)
 
 		// Should contain background command details
-		if !strings.Contains(output, "Background Command: python -m http.server 8000") {
-			t.Errorf("Expected background command in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Process ID: 12345") {
-			t.Errorf("Expected process ID in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Log File: /tmp/.kodelet/12345/out.log") {
-			t.Errorf("Expected log file path in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Started: 2023-01-01 10:30:45") {
-			t.Errorf("Expected start time in output, got: %s", output)
-		}
+		assert.Contains(t, output, "Background Command: python -m http.server 8000", "Expected background command in output")
+		assert.Contains(t, output, "Process ID: 12345", "Expected process ID in output")
+		assert.Contains(t, output, "Log File: /tmp/.kodelet/12345/out.log", "Expected log file path in output")
+		assert.Contains(t, output, "Started: 2023-01-01 10:30:45", "Expected start time in output")
 	})
 }

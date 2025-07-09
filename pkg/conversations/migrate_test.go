@@ -7,26 +7,23 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestDetectJSONConversations(t *testing.T) {
 	// Create temporary directory for test
 	tempDir, err := os.MkdirTemp("", "kodelet-migrate-test")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
+	require.NoError(t, err, "Failed to create temp dir")
 	defer os.RemoveAll(tempDir)
 
 	ctx := context.Background()
 
 	// Test with no conversations
 	conversations, err := DetectJSONConversations(ctx, tempDir)
-	if err != nil {
-		t.Fatalf("Failed to detect conversations in empty dir: %v", err)
-	}
-	if len(conversations) != 0 {
-		t.Errorf("Expected 0 conversations, got %d", len(conversations))
-	}
+	require.NoError(t, err, "Failed to detect conversations in empty dir")
+	assert.Equal(t, 0, len(conversations), "Expected 0 conversations")
 
 	// Create test conversations
 	testConversations := []ConversationRecord{
@@ -49,54 +46,40 @@ func TestDetectJSONConversations(t *testing.T) {
 	// Write test conversations to JSON files
 	for _, conv := range testConversations {
 		data, err := json.MarshalIndent(conv, "", "  ")
-		if err != nil {
-			t.Fatalf("Failed to marshal conversation: %v", err)
-		}
+		require.NoError(t, err, "Failed to marshal conversation")
 
 		filePath := filepath.Join(tempDir, conv.ID+".json")
-		if err := os.WriteFile(filePath, data, 0644); err != nil {
-			t.Fatalf("Failed to write conversation file: %v", err)
-		}
+		err = os.WriteFile(filePath, data, 0644)
+		require.NoError(t, err, "Failed to write conversation file")
 	}
 
 	// Test detection with conversations
 	conversations, err = DetectJSONConversations(ctx, tempDir)
-	if err != nil {
-		t.Fatalf("Failed to detect conversations: %v", err)
-	}
+	require.NoError(t, err, "Failed to detect conversations")
 
-	if len(conversations) != 2 {
-		t.Errorf("Expected 2 conversations, got %d", len(conversations))
-	}
+	assert.Equal(t, 2, len(conversations), "Expected 2 conversations")
 
 	// Verify conversation IDs
 	expectedIDs := map[string]bool{"test-conv-1": true, "test-conv-2": true}
 	for _, id := range conversations {
-		if !expectedIDs[id] {
-			t.Errorf("Unexpected conversation ID: %s", id)
-		}
+		assert.True(t, expectedIDs[id], "Unexpected conversation ID: %s", id)
 		delete(expectedIDs, id)
 	}
-	if len(expectedIDs) > 0 {
-		t.Errorf("Missing conversation IDs: %v", expectedIDs)
-	}
+	assert.Empty(t, expectedIDs, "Missing conversation IDs")
 }
 
 func TestMigrateJSONToBBolt(t *testing.T) {
 	// Create temporary directories for test
 	tempDir, err := os.MkdirTemp("", "kodelet-migrate-test")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
+	require.NoError(t, err, "Failed to create temp dir")
 	defer os.RemoveAll(tempDir)
 
 	jsonPath := filepath.Join(tempDir, "json")
 	dbPath := filepath.Join(tempDir, "test.db")
 	backupPath := filepath.Join(tempDir, "backup")
 
-	if err := os.MkdirAll(jsonPath, 0755); err != nil {
-		t.Fatalf("Failed to create JSON directory: %v", err)
-	}
+	err = os.MkdirAll(jsonPath, 0755)
+	require.NoError(t, err, "Failed to create JSON directory")
 
 	ctx := context.Background()
 
@@ -121,14 +104,11 @@ func TestMigrateJSONToBBolt(t *testing.T) {
 	// Write test conversations to JSON files
 	for _, conv := range testConversations {
 		data, err := json.MarshalIndent(conv, "", "  ")
-		if err != nil {
-			t.Fatalf("Failed to marshal conversation: %v", err)
-		}
+		require.NoError(t, err, "Failed to marshal conversation")
 
 		filePath := filepath.Join(jsonPath, conv.ID+".json")
-		if err := os.WriteFile(filePath, data, 0644); err != nil {
-			t.Fatalf("Failed to write conversation file: %v", err)
-		}
+		err = os.WriteFile(filePath, data, 0644)
+		require.NoError(t, err, "Failed to write conversation file")
 	}
 
 	// Test dry run migration
@@ -140,24 +120,15 @@ func TestMigrateJSONToBBolt(t *testing.T) {
 	}
 
 	result, err := MigrateJSONToBBolt(ctx, jsonPath, dbPath, dryRunOptions)
-	if err != nil {
-		t.Fatalf("Dry run migration failed: %v", err)
-	}
+	require.NoError(t, err, "Dry run migration failed")
 
-	if result.TotalConversations != 2 {
-		t.Errorf("Expected 2 total conversations, got %d", result.TotalConversations)
-	}
-	if result.MigratedCount != 2 {
-		t.Errorf("Expected 2 migrated conversations in dry run, got %d", result.MigratedCount)
-	}
-	if result.FailedCount != 0 {
-		t.Errorf("Expected 0 failed conversations in dry run, got %d", result.FailedCount)
-	}
+	assert.Equal(t, 2, result.TotalConversations, "Expected 2 total conversations")
+	assert.Equal(t, 2, result.MigratedCount, "Expected 2 migrated conversations in dry run")
+	assert.Equal(t, 0, result.FailedCount, "Expected 0 failed conversations in dry run")
 
 	// Verify BBolt database doesn't exist after dry run
-	if _, err := os.Stat(dbPath); err == nil {
-		t.Error("BBolt database should not exist after dry run")
-	}
+	_, err = os.Stat(dbPath)
+	assert.Error(t, err, "BBolt database should not exist after dry run")
 
 	// Test actual migration
 	actualOptions := MigrationOptions{
@@ -168,69 +139,46 @@ func TestMigrateJSONToBBolt(t *testing.T) {
 	}
 
 	result, err = MigrateJSONToBBolt(ctx, jsonPath, dbPath, actualOptions)
-	if err != nil {
-		t.Fatalf("Actual migration failed: %v", err)
-	}
+	require.NoError(t, err, "Actual migration failed")
 
-	if result.TotalConversations != 2 {
-		t.Errorf("Expected 2 total conversations, got %d", result.TotalConversations)
-	}
-	if result.MigratedCount != 2 {
-		t.Errorf("Expected 2 migrated conversations, got %d", result.MigratedCount)
-	}
-	if result.FailedCount != 0 {
-		t.Errorf("Expected 0 failed conversations, got %d", result.FailedCount)
-	}
+	assert.Equal(t, 2, result.TotalConversations, "Expected 2 total conversations")
+	assert.Equal(t, 2, result.MigratedCount, "Expected 2 migrated conversations")
+	assert.Equal(t, 0, result.FailedCount, "Expected 0 failed conversations")
 
 	// Verify BBolt database exists
-	if _, err := os.Stat(dbPath); err != nil {
-		t.Errorf("BBolt database should exist after migration: %v", err)
-	}
+	_, err = os.Stat(dbPath)
+	assert.NoError(t, err, "BBolt database should exist after migration")
 
 	// Verify conversations in BBolt database
 	bboltStore, err := NewBBoltConversationStore(ctx, dbPath)
-	if err != nil {
-		t.Fatalf("Failed to create BBolt store: %v", err)
-	}
+	require.NoError(t, err, "Failed to create BBolt store")
 	defer bboltStore.Close()
 
 	for _, originalConv := range testConversations {
 		migratedConv, err := bboltStore.Load(originalConv.ID)
-		if err != nil {
-			t.Errorf("Failed to load migrated conversation %s: %v", originalConv.ID, err)
+		if !assert.NoError(t, err, "Failed to load migrated conversation %s", originalConv.ID) {
 			continue
 		}
 
 		// Verify key fields
-		if migratedConv.ID != originalConv.ID {
-			t.Errorf("Conversation ID mismatch: expected %s, got %s", originalConv.ID, migratedConv.ID)
-		}
-		if migratedConv.Summary != originalConv.Summary {
-			t.Errorf("Summary mismatch for %s: expected %s, got %s", originalConv.ID, originalConv.Summary, migratedConv.Summary)
-		}
-		if !migratedConv.CreatedAt.Equal(originalConv.CreatedAt) {
-			t.Errorf("CreatedAt mismatch for %s: expected %v, got %v", originalConv.ID, originalConv.CreatedAt, migratedConv.CreatedAt)
-		}
-		if string(migratedConv.RawMessages) != string(originalConv.RawMessages) {
-			t.Errorf("RawMessages mismatch for %s", originalConv.ID)
-		}
+		assert.Equal(t, originalConv.ID, migratedConv.ID, "Conversation ID mismatch")
+		assert.Equal(t, originalConv.Summary, migratedConv.Summary, "Summary mismatch for %s", originalConv.ID)
+		assert.True(t, migratedConv.CreatedAt.Equal(originalConv.CreatedAt), "CreatedAt mismatch for %s: expected %v, got %v", originalConv.ID, originalConv.CreatedAt, migratedConv.CreatedAt)
+		assert.Equal(t, string(originalConv.RawMessages), string(migratedConv.RawMessages), "RawMessages mismatch for %s", originalConv.ID)
 	}
 }
 
 func TestBackupJSONConversations(t *testing.T) {
 	// Create temporary directories for test
 	tempDir, err := os.MkdirTemp("", "kodelet-backup-test")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
+	require.NoError(t, err, "Failed to create temp dir")
 	defer os.RemoveAll(tempDir)
 
 	jsonPath := filepath.Join(tempDir, "json")
 	backupPath := filepath.Join(tempDir, "backup")
 
-	if err := os.MkdirAll(jsonPath, 0755); err != nil {
-		t.Fatalf("Failed to create JSON directory: %v", err)
-	}
+	err = os.MkdirAll(jsonPath, 0755)
+	require.NoError(t, err, "Failed to create JSON directory")
 
 	ctx := context.Background()
 
@@ -245,39 +193,27 @@ func TestBackupJSONConversations(t *testing.T) {
 
 	// Write test conversation to JSON file
 	data, err := json.MarshalIndent(testConv, "", "  ")
-	if err != nil {
-		t.Fatalf("Failed to marshal conversation: %v", err)
-	}
+	require.NoError(t, err, "Failed to marshal conversation")
 
 	originalFile := filepath.Join(jsonPath, testConv.ID+".json")
-	if err := os.WriteFile(originalFile, data, 0644); err != nil {
-		t.Fatalf("Failed to write conversation file: %v", err)
-	}
+	err = os.WriteFile(originalFile, data, 0644)
+	require.NoError(t, err, "Failed to write conversation file")
 
 	// Test backup
 	err = BackupJSONConversations(ctx, jsonPath, backupPath)
-	if err != nil {
-		t.Fatalf("Backup failed: %v", err)
-	}
+	require.NoError(t, err, "Backup failed")
 
 	// Verify backup was created
 	backupFile := filepath.Join(backupPath, testConv.ID+".json")
-	if _, err := os.Stat(backupFile); err != nil {
-		t.Errorf("Backup file should exist: %v", err)
-	}
+	_, err = os.Stat(backupFile)
+	assert.NoError(t, err, "Backup file should exist")
 
 	// Verify backup content matches original
 	originalData, err := os.ReadFile(originalFile)
-	if err != nil {
-		t.Fatalf("Failed to read original file: %v", err)
-	}
+	require.NoError(t, err, "Failed to read original file")
 
 	backupData, err := os.ReadFile(backupFile)
-	if err != nil {
-		t.Fatalf("Failed to read backup file: %v", err)
-	}
+	require.NoError(t, err, "Failed to read backup file")
 
-	if string(originalData) != string(backupData) {
-		t.Error("Backup content doesn't match original")
-	}
+	assert.Equal(t, string(originalData), string(backupData), "Backup content doesn't match original")
 }

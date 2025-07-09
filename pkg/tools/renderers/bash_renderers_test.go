@@ -1,10 +1,10 @@
 package renderers
 
 import (
-	"strings"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
@@ -27,27 +27,13 @@ func TestBashRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "Command: ls -la") {
-			t.Errorf("Expected command in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Exit Code: 0") {
-			t.Errorf("Expected exit code in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Working Directory: /home/user") {
-			t.Errorf("Expected working directory in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Execution Time: 150ms") {
-			t.Errorf("Expected execution time in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Output:") {
-			t.Errorf("Expected output header in output, got: %s", output)
-		}
-		if !strings.Contains(output, "total 16") {
-			t.Errorf("Expected command output in output, got: %s", output)
-		}
-		if !strings.Contains(output, "drwxr-xr-x") {
-			t.Errorf("Expected detailed output in output, got: %s", output)
-		}
+		assert.Contains(t, output, "Command: ls -la", "Expected command in output")
+		assert.Contains(t, output, "Exit Code: 0", "Expected exit code in output")
+		assert.Contains(t, output, "Working Directory: /home/user", "Expected working directory in output")
+		assert.Contains(t, output, "Execution Time: 150ms", "Expected execution time in output")
+		assert.Contains(t, output, "Output:", "Expected output header in output")
+		assert.Contains(t, output, "total 16", "Expected command output in output")
+		assert.Contains(t, output, "drwxr-xr-x", "Expected detailed output in output")
 	})
 
 	t.Run("Bash command with non-zero exit code", func(t *testing.T) {
@@ -66,18 +52,10 @@ func TestBashRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "Command: grep nonexistent file.txt") {
-			t.Errorf("Expected command in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Exit Code: 1") {
-			t.Errorf("Expected non-zero exit code in output, got: %s", output)
-		}
-		if !strings.Contains(output, "No such file or directory") {
-			t.Errorf("Expected error output in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Error: ") {
-			t.Errorf("Expected error prefix in output, got: %s", output)
-		}
+		assert.Contains(t, output, "Command: grep nonexistent file.txt", "Expected command in output")
+		assert.Contains(t, output, "Exit Code: 1", "Expected non-zero exit code in output")
+		assert.Contains(t, output, "No such file or directory", "Expected error output in output")
+		assert.Contains(t, output, "Error: ", "Expected error prefix in output")
 	})
 
 	t.Run("Bash command without working directory", func(t *testing.T) {
@@ -96,18 +74,10 @@ func TestBashRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "Command: echo hello") {
-			t.Errorf("Expected command in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Exit Code: 0") {
-			t.Errorf("Expected exit code in output, got: %s", output)
-		}
-		if strings.Contains(output, "Working Directory:") {
-			t.Errorf("Should not show working directory when empty, got: %s", output)
-		}
-		if !strings.Contains(output, "hello") {
-			t.Errorf("Expected command output in output, got: %s", output)
-		}
+		assert.Contains(t, output, "Command: echo hello", "Expected command in output")
+		assert.Contains(t, output, "Exit Code: 0", "Expected exit code in output")
+		assert.NotContains(t, output, "Working Directory:", "Should not show working directory when empty")
+		assert.Contains(t, output, "hello", "Expected command output in output")
 	})
 
 	t.Run("Bash command without output", func(t *testing.T) {
@@ -126,15 +96,9 @@ func TestBashRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "Command: touch newfile.txt") {
-			t.Errorf("Expected command in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Exit Code: 0") {
-			t.Errorf("Expected exit code in output, got: %s", output)
-		}
-		if strings.Contains(output, "Output:") {
-			t.Errorf("Should not show output section when no output, got: %s", output)
-		}
+		assert.Contains(t, output, "Command: touch newfile.txt", "Expected command in output")
+		assert.Contains(t, output, "Exit Code: 0", "Expected exit code in output")
+		assert.NotContains(t, output, "Output:", "Should not show output section when no output")
 	})
 
 	t.Run("Bash command with multiline output", func(t *testing.T) {
@@ -160,18 +124,10 @@ echo "Script completed"`
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "Command: cat script.sh") {
-			t.Errorf("Expected command in output, got: %s", output)
-		}
-		if !strings.Contains(output, "#!/bin/bash") {
-			t.Errorf("Expected script shebang in output, got: %s", output)
-		}
-		if !strings.Contains(output, "for i in {1..3}") {
-			t.Errorf("Expected loop in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Script completed") {
-			t.Errorf("Expected end of script in output, got: %s", output)
-		}
+		assert.Contains(t, output, "Command: cat script.sh", "Expected command in output")
+		assert.Contains(t, output, "#!/bin/bash", "Expected script shebang in output")
+		assert.Contains(t, output, "for i in {1..3}", "Expected loop in output")
+		assert.Contains(t, output, "Script completed", "Expected end of script in output")
 	})
 
 	t.Run("Long running command", func(t *testing.T) {
@@ -190,15 +146,9 @@ echo "Script completed"`
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "find /usr -name") {
-			t.Errorf("Expected long command in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Execution Time: 5s") {
-			t.Errorf("Expected long execution time in output, got: %s", output)
-		}
-		if !strings.Contains(output, "libssl.so.1.1") {
-			t.Errorf("Expected library output in output, got: %s", output)
-		}
+		assert.Contains(t, output, "find /usr -name", "Expected long command in output")
+		assert.Contains(t, output, "Execution Time: 5s", "Expected long execution time in output")
+		assert.Contains(t, output, "libssl.so.1.1", "Expected library output in output")
 	})
 
 	t.Run("Command with special characters", func(t *testing.T) {
@@ -217,12 +167,8 @@ echo "Script completed"`
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, `grep -r "function.*("`) {
-			t.Errorf("Expected command with special characters in output, got: %s", output)
-		}
-		if !strings.Contains(output, "parseData(input)") {
-			t.Errorf("Expected function match in output, got: %s", output)
-		}
+		assert.Contains(t, output, `grep -r "function.*("`, "Expected command with special characters in output")
+		assert.Contains(t, output, "parseData(input)", "Expected function match in output")
 	})
 
 	t.Run("Error handling", func(t *testing.T) {
@@ -241,15 +187,9 @@ echo "Script completed"`
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "Error: Command execution failed") {
-			t.Errorf("Expected error message in output, got: %s", output)
-		}
-		if !strings.Contains(output, "nonexistent-command") {
-			t.Errorf("Expected command in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Exit Code: 1") {
-			t.Errorf("Expected exit code in output, got: %s", output)
-		}
+		assert.Contains(t, output, "Error: Command execution failed", "Expected error message in output")
+		assert.Contains(t, output, "nonexistent-command", "Expected command in output")
+		assert.Contains(t, output, "Exit Code: 1", "Expected exit code in output")
 	})
 
 	t.Run("Invalid metadata type", func(t *testing.T) {
@@ -262,9 +202,7 @@ echo "Script completed"`
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "Error: Invalid metadata type for bash") {
-			t.Errorf("Expected invalid metadata error, got: %s", output)
-		}
+		assert.Contains(t, output, "Error: Invalid metadata type for bash", "Expected invalid metadata error")
 	})
 
 	t.Run("Nil metadata", func(t *testing.T) {
@@ -277,9 +215,7 @@ echo "Script completed"`
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "Error: Invalid metadata type for bash") {
-			t.Errorf("Expected invalid metadata error for nil metadata, got: %s", output)
-		}
+		assert.Contains(t, output, "Error: Invalid metadata type for bash", "Expected invalid metadata error for nil metadata")
 	})
 
 	t.Run("Command with very short execution time", func(t *testing.T) {
@@ -298,12 +234,8 @@ echo "Script completed"`
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "Command: pwd") {
-			t.Errorf("Expected command in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Execution Time: 1µs") {
-			t.Errorf("Expected microsecond execution time in output, got: %s", output)
-		}
+		assert.Contains(t, output, "Command: pwd", "Expected command in output")
+		assert.Contains(t, output, "Execution Time: 1µs", "Expected microsecond execution time in output")
 	})
 
 	t.Run("Background command output", func(t *testing.T) {
@@ -321,24 +253,12 @@ echo "Script completed"`
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "Background Command: python -m http.server 8000") {
-			t.Errorf("Expected background command in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Process ID: 12345") {
-			t.Errorf("Expected process ID in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Log File: /tmp/.kodelet/12345/out.log") {
-			t.Errorf("Expected log file path in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Started: 2023-01-01 10:30:45") {
-			t.Errorf("Expected start time in output, got: %s", output)
-		}
-		if !strings.Contains(output, "running in the background") {
-			t.Errorf("Expected background process message in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Check the log file for output") {
-			t.Errorf("Expected log file instruction in output, got: %s", output)
-		}
+		assert.Contains(t, output, "Background Command: python -m http.server 8000", "Expected background command in output")
+		assert.Contains(t, output, "Process ID: 12345", "Expected process ID in output")
+		assert.Contains(t, output, "Log File: /tmp/.kodelet/12345/out.log", "Expected log file path in output")
+		assert.Contains(t, output, "Started: 2023-01-01 10:30:45", "Expected start time in output")
+		assert.Contains(t, output, "running in the background", "Expected background process message in output")
+		assert.Contains(t, output, "Check the log file for output", "Expected log file instruction in output")
 	})
 
 	t.Run("Background command with error", func(t *testing.T) {
@@ -357,15 +277,9 @@ echo "Script completed"`
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "Error: Failed to start background process") {
-			t.Errorf("Expected error message in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Background Command: invalid-command") {
-			t.Errorf("Expected background command in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Process ID: 0") {
-			t.Errorf("Expected process ID 0 in output, got: %s", output)
-		}
+		assert.Contains(t, output, "Error: Failed to start background process", "Expected error message in output")
+		assert.Contains(t, output, "Background Command: invalid-command", "Expected background command in output")
+		assert.Contains(t, output, "Process ID: 0", "Expected process ID 0 in output")
 	})
 
 	t.Run("Background command with different timestamp format", func(t *testing.T) {
@@ -383,15 +297,9 @@ echo "Script completed"`
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "Started: 2023-12-25 23:59:59") {
-			t.Errorf("Expected formatted start time in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Process ID: 99999") {
-			t.Errorf("Expected large process ID in output, got: %s", output)
-		}
-		if !strings.Contains(output, "/home/user/.kodelet/99999/out.log") {
-			t.Errorf("Expected user-specific log path in output, got: %s", output)
-		}
+		assert.Contains(t, output, "Started: 2023-12-25 23:59:59", "Expected formatted start time in output")
+		assert.Contains(t, output, "Process ID: 99999", "Expected large process ID in output")
+		assert.Contains(t, output, "/home/user/.kodelet/99999/out.log", "Expected user-specific log path in output")
 	})
 
 	t.Run("Background command with complex command", func(t *testing.T) {
@@ -409,12 +317,8 @@ echo "Script completed"`
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "Background Command: docker run -d -p 8080:80 --name web-server nginx:latest") {
-			t.Errorf("Expected complex docker command in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Process ID: 54321") {
-			t.Errorf("Expected process ID in output, got: %s", output)
-		}
+		assert.Contains(t, output, "Background Command: docker run -d -p 8080:80 --name web-server nginx:latest", "Expected complex docker command in output")
+		assert.Contains(t, output, "Process ID: 54321", "Expected process ID in output")
 	})
 
 	t.Run("Invalid metadata type for background bash", func(t *testing.T) {
@@ -427,9 +331,7 @@ echo "Script completed"`
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "Error: Invalid metadata type for bash") {
-			t.Errorf("Expected invalid metadata error, got: %s", output)
-		}
+		assert.Contains(t, output, "Error: Invalid metadata type for bash", "Expected invalid metadata error")
 	})
 
 	t.Run("Regular bash command still works", func(t *testing.T) {
@@ -449,17 +351,9 @@ echo "Script completed"`
 		output := renderer.RenderCLI(result)
 
 		// Should still render as regular bash command, not background
-		if !strings.Contains(output, "Command: echo 'Hello World'") {
-			t.Errorf("Expected regular command format, got: %s", output)
-		}
-		if !strings.Contains(output, "Exit Code: 0") {
-			t.Errorf("Expected exit code in output, got: %s", output)
-		}
-		if strings.Contains(output, "Background Command:") {
-			t.Errorf("Should not show background format for regular bash, got: %s", output)
-		}
-		if strings.Contains(output, "Process ID:") {
-			t.Errorf("Should not show process ID for regular bash, got: %s", output)
-		}
+		assert.Contains(t, output, "Command: echo 'Hello World'", "Expected regular command format")
+		assert.Contains(t, output, "Exit Code: 0", "Expected exit code in output")
+		assert.NotContains(t, output, "Background Command:", "Should not show background format for regular bash")
+		assert.NotContains(t, output, "Process ID:", "Should not show process ID for regular bash")
 	})
 }

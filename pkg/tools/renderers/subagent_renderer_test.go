@@ -1,11 +1,11 @@
 package renderers
 
 import (
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestSubAgentRenderer(t *testing.T) {
@@ -24,18 +24,10 @@ func TestSubAgentRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "Subagent Response:") {
-			t.Errorf("Expected subagent response header in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Question: What are the best practices for Go error handling?") {
-			t.Errorf("Expected question in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Here are the key best practices") {
-			t.Errorf("Expected response content in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Always check errors explicitly") {
-			t.Errorf("Expected detailed response content in output, got: %s", output)
-		}
+		assert.Contains(t, output, "Subagent Response:", "Expected subagent response header in output")
+		assert.Contains(t, output, "Question: What are the best practices for Go error handling?", "Expected question in output")
+		assert.Contains(t, output, "Here are the key best practices", "Expected response content in output")
+		assert.Contains(t, output, "Always check errors explicitly", "Expected detailed response content in output")
 	})
 
 	t.Run("Subagent response with question only", func(t *testing.T) {
@@ -51,12 +43,8 @@ func TestSubAgentRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "Question: How do I implement a binary search in Go?") {
-			t.Errorf("Expected question in output, got: %s", output)
-		}
-		if !strings.Contains(output, "func binarySearch") {
-			t.Errorf("Expected code implementation in output, got: %s", output)
-		}
+		assert.Contains(t, output, "Question: How do I implement a binary search in Go?", "Expected question in output")
+		assert.Contains(t, output, "func binarySearch", "Expected code implementation in output")
 	})
 
 	t.Run("Subagent response with response only", func(t *testing.T) {
@@ -72,12 +60,8 @@ func TestSubAgentRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if strings.Contains(output, "Question: ") {
-			t.Errorf("Should not show empty question, got: %s", output)
-		}
-		if !strings.Contains(output, "Based on the available information") {
-			t.Errorf("Expected response content in output, got: %s", output)
-		}
+		assert.NotContains(t, output, "Question: ", "Should not show empty question")
+		assert.Contains(t, output, "Based on the available information", "Expected response content in output")
 	})
 
 	t.Run("Subagent response with only response content", func(t *testing.T) {
@@ -93,15 +77,9 @@ func TestSubAgentRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "Subagent Response:") {
-			t.Errorf("Expected subagent response header in output, got: %s", output)
-		}
-		if strings.Contains(output, "Question: ") {
-			t.Errorf("Should not show empty question field, got: %s", output)
-		}
-		if !strings.Contains(output, "This is a direct response without additional metadata.") {
-			t.Errorf("Expected response content in output, got: %s", output)
-		}
+		assert.Contains(t, output, "Subagent Response:", "Expected subagent response header in output")
+		assert.NotContains(t, output, "Question: ", "Should not show empty question field")
+		assert.Contains(t, output, "This is a direct response without additional metadata.", "Expected response content in output")
 	})
 
 	t.Run("Subagent response with long multiline content", func(t *testing.T) {
@@ -142,18 +120,10 @@ This approach ensures scalability, maintainability, and resilience in your syste
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "microservices architecture") {
-			t.Errorf("Expected multiline response content in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Architecture Design:") {
-			t.Errorf("Expected section headers in response, got: %s", output)
-		}
-		if !strings.Contains(output, "Deployment and Operations:") {
-			t.Errorf("Expected full response content in output, got: %s", output)
-		}
-		if !strings.Contains(output, "scalability, maintainability, and resilience") {
-			t.Errorf("Expected complete response content in output, got: %s", output)
-		}
+		assert.Contains(t, output, "microservices architecture", "Expected multiline response content in output")
+		assert.Contains(t, output, "Architecture Design:", "Expected section headers in response")
+		assert.Contains(t, output, "Deployment and Operations:", "Expected full response content in output")
+		assert.Contains(t, output, "scalability, maintainability, and resilience", "Expected complete response content in output")
 	})
 
 	t.Run("Empty response content", func(t *testing.T) {
@@ -169,13 +139,9 @@ This approach ensures scalability, maintainability, and resilience in your syste
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "Question: What is the answer?") {
-			t.Errorf("Expected question in output, got: %s", output)
-		}
+		assert.Contains(t, output, "Question: What is the answer?", "Expected question in output")
 		// The response should still be there, just empty
-		if !strings.Contains(output, "Subagent Response:") {
-			t.Errorf("Expected subagent response header even with empty response, got: %s", output)
-		}
+		assert.Contains(t, output, "Subagent Response:", "Expected subagent response header even with empty response")
 	})
 
 	t.Run("Error handling", func(t *testing.T) {
@@ -188,9 +154,7 @@ This approach ensures scalability, maintainability, and resilience in your syste
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "Error: Subagent processing failed: timeout") {
-			t.Errorf("Expected error message in output, got: %s", output)
-		}
+		assert.Contains(t, output, "Error: Subagent processing failed: timeout", "Expected error message in output")
 	})
 
 	t.Run("Invalid metadata type", func(t *testing.T) {
@@ -203,9 +167,7 @@ This approach ensures scalability, maintainability, and resilience in your syste
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "Error: Invalid metadata type for subagent") {
-			t.Errorf("Expected invalid metadata error, got: %s", output)
-		}
+		assert.Contains(t, output, "Error: Invalid metadata type for subagent", "Expected invalid metadata error")
 	})
 
 	t.Run("Nil metadata", func(t *testing.T) {
@@ -218,8 +180,6 @@ This approach ensures scalability, maintainability, and resilience in your syste
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "Error: Invalid metadata type for subagent") {
-			t.Errorf("Expected invalid metadata error for nil metadata, got: %s", output)
-		}
+		assert.Contains(t, output, "Error: Invalid metadata type for subagent", "Expected invalid metadata error for nil metadata")
 	})
 }

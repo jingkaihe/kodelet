@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestThinkingRenderer(t *testing.T) {
@@ -24,12 +25,8 @@ func TestThinkingRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "Thinking [analysis]:") {
-			t.Errorf("Expected thinking header with category, got: %s", output)
-		}
-		if !strings.Contains(output, "I need to think about this problem carefully.") {
-			t.Errorf("Expected thought content, got: %s", output)
-		}
+		assert.Contains(t, output, "Thinking [analysis]:", "Expected thinking header with category")
+		assert.Contains(t, output, "I need to think about this problem carefully.", "Expected thought content")
 	})
 
 	t.Run("Thinking without category", func(t *testing.T) {
@@ -44,11 +41,7 @@ func TestThinkingRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "Thinking:") {
-			t.Errorf("Expected thinking header without category, got: %s", output)
-		}
-		if strings.Contains(output, "[]") {
-			t.Errorf("Should not show empty category brackets, got: %s", output)
-		}
+		assert.Contains(t, output, "Thinking:", "Expected thinking header without category")
+		assert.False(t, strings.Contains(output, "[]"), "Should not show empty category brackets")
 	})
 }

@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
@@ -30,9 +31,7 @@ func TestWebFetchRenderer(t *testing.T) {
 		expected := fmt.Sprintf("Web Fetch: %s\nSaved to: %s\n%s",
 			"https://example.com", "/tmp/content.html", content)
 
-		if output != expected {
-			t.Errorf("Expected output to match RenderCLI() format:\nExpected:\n%s\nGot:\n%s", expected, output)
-		}
+		assert.Equal(t, expected, output, "Expected output to match RenderCLI() format")
 	})
 
 	t.Run("Web fetch with prompt", func(t *testing.T) {
@@ -54,9 +53,7 @@ func TestWebFetchRenderer(t *testing.T) {
 		expected := fmt.Sprintf("Web Fetch: %s\nPrompt: %s\n%s",
 			"https://example.com", "Extract main content", content)
 
-		if output != expected {
-			t.Errorf("Expected output to match RenderCLI() format:\nExpected:\n%s\nGot:\n%s", expected, output)
-		}
+		assert.Equal(t, expected, output, "Expected output to match RenderCLI() format")
 	})
 
 	t.Run("Web fetch minimal (no save or prompt)", func(t *testing.T) {
@@ -76,9 +73,7 @@ func TestWebFetchRenderer(t *testing.T) {
 		output := renderer.RenderCLI(result)
 		expected := fmt.Sprintf("Web Fetch: %s\n%s", "https://example.com", content)
 
-		if output != expected {
-			t.Errorf("Expected output to match RenderCLI() format:\nExpected:\n%s\nGot:\n%s", expected, output)
-		}
+		assert.Equal(t, expected, output, "Expected output to match RenderCLI() format")
 	})
 
 	t.Run("Web fetch error", func(t *testing.T) {
@@ -91,8 +86,6 @@ func TestWebFetchRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if output != "Failed to fetch URL: connection timeout" {
-			t.Errorf("Expected error message, got: %s", output)
-		}
+		assert.Equal(t, "Failed to fetch URL: connection timeout", output, "Expected error message")
 	})
 }

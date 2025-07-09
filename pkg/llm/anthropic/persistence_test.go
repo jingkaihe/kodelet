@@ -515,7 +515,7 @@ func TestSaveConversationMessageCleanup(t *testing.T) {
 
 			for i, expectedMsg := range tt.expectedMessages {
 				if i >= len(thread.messages) {
-					t.Errorf("Expected message %d missing in test: %s", i, tt.description)
+					assert.Fail(t, fmt.Sprintf("Expected message %d missing in test: %s", i, tt.description))
 					continue
 				}
 
@@ -528,8 +528,8 @@ func TestSaveConversationMessageCleanup(t *testing.T) {
 				// Compare content blocks - focus on key properties
 				for j, expectedContent := range expectedMsg.Content {
 					if j >= len(actualMsg.Content) {
-						t.Errorf("Expected content block %d missing at message %d for test: %s",
-							j, i, tt.description)
+						assert.Fail(t, fmt.Sprintf("Expected content block %d missing at message %d for test: %s",
+							j, i, tt.description))
 						continue
 					}
 

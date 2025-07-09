@@ -7,6 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -21,9 +24,7 @@ func TestOpenAIThread_StructuredToolResults(t *testing.T) {
 
 	// Test initial state
 	results := thread.GetStructuredToolResults()
-	if len(results) != 0 {
-		t.Errorf("Expected empty initial results, got %d items", len(results))
-	}
+	assert.Len(t, results, 0)
 
 	// Test setting a structured tool result
 	result1 := tooltypes.StructuredToolResult{
@@ -41,18 +42,12 @@ func TestOpenAIThread_StructuredToolResults(t *testing.T) {
 
 	// Test getting results
 	results = thread.GetStructuredToolResults()
-	if len(results) != 1 {
-		t.Errorf("Expected 1 result, got %d", len(results))
-	}
+	assert.Len(t, results, 1)
 
 	retrieved, exists := results["call_1"]
-	if !exists {
-		t.Errorf("Expected result for call_1 to exist")
-	}
+	assert.True(t, exists)
 
-	if retrieved.ToolName != "file_read" {
-		t.Errorf("Expected tool name 'file_read', got %s", retrieved.ToolName)
-	}
+	assert.Equal(t, "file_read", retrieved.ToolName)
 
 	// Test setting multiple results
 	result2 := tooltypes.StructuredToolResult{
@@ -70,9 +65,7 @@ func TestOpenAIThread_StructuredToolResults(t *testing.T) {
 	thread.SetStructuredToolResult("call_2", result2)
 
 	results = thread.GetStructuredToolResults()
-	if len(results) != 2 {
-		t.Errorf("Expected 2 results, got %d", len(results))
-	}
+	assert.Len(t, results, 2)
 }
 
 func TestOpenAIThread_SetStructuredToolResults(t *testing.T) {
@@ -109,36 +102,22 @@ func TestOpenAIThread_SetStructuredToolResults(t *testing.T) {
 	thread.SetStructuredToolResults(bulkResults)
 
 	results := thread.GetStructuredToolResults()
-	if len(results) != 2 {
-		t.Errorf("Expected 2 results, got %d", len(results))
-	}
+	assert.Len(t, results, 2)
 
 	// Verify individual results
 	globResult, exists := results["call_1"]
-	if !exists {
-		t.Errorf("Expected glob result to exist")
-	}
-	if globResult.ToolName != "glob" {
-		t.Errorf("Expected tool name 'glob', got %s", globResult.ToolName)
-	}
+	assert.True(t, exists)
+	assert.Equal(t, "glob", globResult.ToolName)
 
 	cmdResult, exists := results["call_2"]
-	if !exists {
-		t.Errorf("Expected command result to exist")
-	}
-	if cmdResult.Success {
-		t.Errorf("Expected command result to be failed")
-	}
-	if cmdResult.Error != "Command failed" {
-		t.Errorf("Expected error 'Command failed', got %s", cmdResult.Error)
-	}
+	assert.True(t, exists)
+	assert.False(t, cmdResult.Success)
+	assert.Equal(t, "Command failed", cmdResult.Error)
 
 	// Test setting nil (should reset)
 	thread.SetStructuredToolResults(nil)
 	results = thread.GetStructuredToolResults()
-	if len(results) != 0 {
-		t.Errorf("Expected empty results after setting nil, got %d", len(results))
-	}
+	assert.Len(t, results, 0)
 }
 
 func TestOpenAIThread_StructuredResultsConcurrency(t *testing.T) {
@@ -185,9 +164,7 @@ func TestOpenAIThread_StructuredResultsConcurrency(t *testing.T) {
 	// Verify final state
 	results := thread.GetStructuredToolResults()
 	expectedCount := numGoroutines * resultsPerGoroutine
-	if len(results) != expectedCount {
-		t.Errorf("Expected %d results, got %d", expectedCount, len(results))
-	}
+	assert.Len(t, results, expectedCount)
 }
 
 // Mock conversation store for testing persistence
@@ -307,22 +284,14 @@ func TestOpenAIThread_PersistenceWithStructuredResults(t *testing.T) {
 	// Test saving
 	ctx := context.Background()
 	err := thread.SaveConversation(ctx, false)
-	if err != nil {
-		t.Fatalf("Failed to save conversation: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Verify the saved record contains structured results
-	if len(mockStore.saved.ToolResults) != 2 {
-		t.Errorf("Expected 2 structured results in saved record, got %d", len(mockStore.saved.ToolResults))
-	}
+	assert.Len(t, mockStore.saved.ToolResults, 2)
 
 	savedResult1, exists := mockStore.saved.ToolResults["call_1"]
-	if !exists {
-		t.Errorf("Expected call_1 result in saved record")
-	}
-	if savedResult1.ToolName != "file_read" {
-		t.Errorf("Expected saved result1 tool name 'file_read', got %s", savedResult1.ToolName)
-	}
+	assert.True(t, exists)
+	assert.Equal(t, "file_read", savedResult1.ToolName)
 
 	// Test loading
 	thread2 := NewOpenAIThread(config)
@@ -334,21 +303,13 @@ func TestOpenAIThread_PersistenceWithStructuredResults(t *testing.T) {
 	thread2.state = &mockState{}
 
 	err = thread2.loadConversation()
-	if err != nil {
-		t.Fatalf("Failed to load conversation: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Verify loaded structured results
 	loadedResults := thread2.GetStructuredToolResults()
-	if len(loadedResults) != 2 {
-		t.Errorf("Expected 2 loaded structured results, got %d", len(loadedResults))
-	}
+	assert.Len(t, loadedResults, 2)
 
 	loadedResult1, exists := loadedResults["call_1"]
-	if !exists {
-		t.Errorf("Expected call_1 result in loaded thread")
-	}
-	if loadedResult1.ToolName != "file_read" {
-		t.Errorf("Expected loaded result1 tool name 'file_read', got %s", loadedResult1.ToolName)
-	}
+	assert.True(t, exists)
+	assert.Equal(t, "file_read", loadedResult1.ToolName)
 }

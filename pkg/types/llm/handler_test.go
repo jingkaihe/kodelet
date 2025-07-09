@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestConsoleMessageHandler_HandleThinkingTrimsLeadingNewlines(t *testing.T) {
@@ -38,7 +39,7 @@ func TestChannelMessageHandler_HandleThinkingTrimsLeadingNewlines(t *testing.T) 
 		assert.Equal(t, EventTypeThinking, msg.Type)
 		assert.Equal(t, expectedTrimmed, msg.Content)
 	default:
-		t.Fatal("Expected message in channel")
+		require.Fail(t, "Expected message in channel")
 	}
 }
 

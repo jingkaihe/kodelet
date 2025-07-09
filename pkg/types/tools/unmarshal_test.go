@@ -3,6 +3,9 @@ package tools
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestUnmarshalJSON_SimplifiedRegistry(t *testing.T) {
@@ -26,16 +29,10 @@ func TestUnmarshalJSON_SimplifiedRegistry(t *testing.T) {
 				}
 			}`,
 			validate: func(t *testing.T, result StructuredToolResult) {
-				meta, ok := result.Metadata.(FileReadMetadata)
-				if !ok {
-					t.Fatalf("Expected FileReadMetadata, got %T", result.Metadata)
-				}
-				if meta.FilePath != "/test.go" {
-					t.Errorf("FilePath = %v, want /test.go", meta.FilePath)
-				}
-				if len(meta.Lines) != 2 {
-					t.Errorf("Lines length = %v, want 2", len(meta.Lines))
-				}
+				require.IsType(t, FileReadMetadata{}, result.Metadata)
+				meta := result.Metadata.(FileReadMetadata)
+				assert.Equal(t, "/test.go", meta.FilePath)
+				assert.Len(t, meta.Lines, 2)
 			},
 		},
 		"bash": {
@@ -53,16 +50,10 @@ func TestUnmarshalJSON_SimplifiedRegistry(t *testing.T) {
 				}
 			}`,
 			validate: func(t *testing.T, result StructuredToolResult) {
-				meta, ok := result.Metadata.(BashMetadata)
-				if !ok {
-					t.Fatalf("Expected BashMetadata, got %T", result.Metadata)
-				}
-				if meta.Command != "echo test" {
-					t.Errorf("Command = %v, want echo test", meta.Command)
-				}
-				if meta.ExitCode != 0 {
-					t.Errorf("ExitCode = %v, want 0", meta.ExitCode)
-				}
+				require.IsType(t, BashMetadata{}, result.Metadata)
+				meta := result.Metadata.(BashMetadata)
+				assert.Equal(t, "echo test", meta.Command)
+				assert.Equal(t, 0, meta.ExitCode)
 			},
 		},
 		"unknown_type": {
@@ -76,9 +67,7 @@ func TestUnmarshalJSON_SimplifiedRegistry(t *testing.T) {
 				}
 			}`,
 			validate: func(t *testing.T, result StructuredToolResult) {
-				if result.Metadata != nil {
-					t.Errorf("Expected nil metadata for unknown type, got %T", result.Metadata)
-				}
+				assert.Nil(t, result.Metadata)
 			},
 		},
 	}
@@ -87,9 +76,7 @@ func TestUnmarshalJSON_SimplifiedRegistry(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			var result StructuredToolResult
 			err := json.Unmarshal([]byte(tc.json), &result)
-			if err != nil {
-				t.Fatalf("Failed to unmarshal: %v", err)
-			}
+			require.NoError(t, err)
 			tc.validate(t, result)
 		})
 	}
@@ -107,16 +94,11 @@ func TestMetadataTypeRegistry_Completeness(t *testing.T) {
 	}
 
 	for _, typeName := range expectedTypes {
-		if _, exists := metadataTypeRegistry[typeName]; !exists {
-			t.Errorf("Missing metadata type in registry: %s", typeName)
-		}
+		assert.Contains(t, metadataTypeRegistry, typeName)
 	}
 
 	// Verify registry size matches expected
-	if len(metadataTypeRegistry) != len(expectedTypes) {
-		t.Errorf("Registry size mismatch: got %d, want %d",
-			len(metadataTypeRegistry), len(expectedTypes))
-	}
+	assert.Equal(t, len(expectedTypes), len(metadataTypeRegistry))
 }
 
 func BenchmarkUnmarshalJSON_Original(b *testing.B) {
