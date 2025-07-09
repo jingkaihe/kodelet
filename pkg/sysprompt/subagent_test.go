@@ -11,7 +11,7 @@ import (
 // TestSubAgentPrompt verifies that key elements from templates appear in the generated subagent prompt
 func TestSubAgentPrompt(t *testing.T) {
 	// Generate a subagent prompt
-	prompt := SubAgentPrompt("claude-3-sonnet-20240229", llm.Config{})
+	prompt := SubAgentPrompt("claude-sonnet-4-20250514", llm.Config{})
 
 	// Define expected fragments that should appear in the prompt
 	expectedFragments := []string{
@@ -44,11 +44,23 @@ func TestSubAgentPrompt(t *testing.T) {
 			t.Errorf("Expected subagent prompt to contain: %q", fragment)
 		}
 	}
+
+	unexpectedFragments := []string{
+		"## Subagent tool usage examples",
+		"- **ALWAYS prioritize",
+		"for open-ended code search",
+	}
+
+	for _, fragment := range unexpectedFragments {
+		if strings.Contains(prompt, fragment) {
+			t.Errorf("Did not expect subagent prompt to contain: %q", fragment)
+		}
+	}
 }
 
 // TestSubAgentPromptBashBannedCommands verifies that banned commands appear in the default subagent prompt
 func TestSubAgentPromptBashBannedCommands(t *testing.T) {
-	prompt := SubAgentPrompt("claude-3-sonnet-20240229", llm.Config{})
+	prompt := SubAgentPrompt("claude-sonnet-4-20250514", llm.Config{})
 
 	// Should contain bash command restrictions section
 	if !strings.Contains(prompt, "Bash Command Restrictions") {
@@ -77,7 +89,7 @@ func TestSubAgentPromptBashBannedCommands(t *testing.T) {
 func TestSubAgentPromptBashAllowedCommands(t *testing.T) {
 	// Create a prompt context with allowed commands
 	promptCtx := NewPromptContext()
-	config := NewDefaultConfig().WithModel("claude-3-sonnet-20240229")
+	config := NewDefaultConfig().WithModel("claude-sonnet-4-20250514")
 	allowedCommands := []string{"find *", "grep *", "cat *", "head *", "tail *"}
 	llmConfig := &llm.Config{
 		AllowedCommands: allowedCommands,
@@ -124,7 +136,7 @@ func TestSubAgentPromptBashAllowedCommands(t *testing.T) {
 func TestSubAgentPromptContextConsistency(t *testing.T) {
 	// Test that both system and subagent prompts render the same bash restrictions with the same context
 	promptCtx := NewPromptContext()
-	config := NewDefaultConfig().WithModel("claude-3-sonnet-20240229")
+	config := NewDefaultConfig().WithModel("claude-sonnet-4-20250514")
 	allowedCommands := []string{"test *", "verify *"}
 	llmConfig := &llm.Config{
 		AllowedCommands: allowedCommands,

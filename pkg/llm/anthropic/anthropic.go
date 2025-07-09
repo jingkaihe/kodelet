@@ -416,7 +416,7 @@ func (t *AnthropicThread) processMessageExchange(
 				attribute.String("tool_name", block.Name),
 			)
 
-			runToolCtx := t.WithSubAgent(ctx, handler)
+			runToolCtx := t.WithSubAgent(ctx, handler, opt.CompactRatio, opt.DisableAutoCompact)
 			output := tools.RunTool(runToolCtx, t.state, block.Name, string(variant.JSON.Input.Raw()))
 
 			// Use CLI rendering for consistent output formatting
@@ -672,11 +672,13 @@ func (t *AnthropicThread) NewSubAgent(ctx context.Context) llmtypes.Thread {
 	return thread
 }
 
-func (t *AnthropicThread) WithSubAgent(ctx context.Context, handler llmtypes.MessageHandler) context.Context {
+func (t *AnthropicThread) WithSubAgent(ctx context.Context, handler llmtypes.MessageHandler, compactRatio float64, disableAutoCompact bool) context.Context {
 	subAgent := t.NewSubAgent(ctx)
 	ctx = context.WithValue(ctx, llmtypes.SubAgentConfig{}, llmtypes.SubAgentConfig{
-		Thread:         subAgent,
-		MessageHandler: handler,
+		Thread:             subAgent,
+		MessageHandler:     handler,
+		CompactRatio:       compactRatio,
+		DisableAutoCompact: disableAutoCompact,
 	})
 	return ctx
 }

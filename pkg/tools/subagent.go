@@ -129,6 +129,8 @@ func (t *SubAgentTool) Execute(ctx context.Context, state tooltypes.State, param
 		PromptCache:        true,
 		UseWeakModel:       false, // explicitly set to false for clarity
 		NoSaveConversation: true,
+		CompactRatio:       subAgentConfig.CompactRatio,
+		DisableAutoCompact: subAgentConfig.DisableAutoCompact,
 	})
 	if err != nil {
 		return &SubAgentToolResult{
