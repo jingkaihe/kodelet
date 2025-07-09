@@ -157,7 +157,7 @@ func TestDeserializeMessages(t *testing.T) {
 func TestSaveAndLoadConversationWithFileLastAccess(t *testing.T) {
 	// Create a unique temporary directory for this test
 	tempDir := t.TempDir()
-	
+
 	// Create a BBolt store directly with a unique database path
 	dbPath := filepath.Join(tempDir, fmt.Sprintf("test-%d.db", time.Now().UnixNano()))
 	store, err := conversations.NewBBoltConversationStore(context.Background(), dbPath)
@@ -206,7 +206,7 @@ func TestSaveAndLoadConversationWithFileLastAccess(t *testing.T) {
 	// Manually set the store and enable persistence
 	newThread.store = store
 	newThread.isPersisted = true
-	
+
 	// Load the conversation
 	newThread.loadConversation()
 

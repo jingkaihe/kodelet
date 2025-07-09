@@ -1,7 +1,7 @@
 # ADR 016: BoltDB Conversation Storage
 
 ## Status
-Proposed
+Implemented
 
 ## Context
 The current conversation persistence implementation uses JSON files stored in `~/.kodelet/conversations/`. While this works well for basic use cases, it has some limitations:
@@ -537,7 +537,7 @@ func (s *BBoltConversationStore) withDB(operation func(*bbolt.DB) error) error {
         return err
     }
     defer db.Close()  // Always close after operation
-    
+
     return operation(db)
 }
 
@@ -563,3 +563,47 @@ Multi-process testing with 3 concurrent processes performing 5 operations each d
 - All 15 operations completed successfully
 - Proper data consistency across all processes
 - Natural interleaving of operations without coordination
+
+## Migration Implementation
+
+### Automatic Migration
+- **Detection**: Automatically detects existing JSON conversations on first BBolt store access
+- **User Prompt**: Prompts user for migration consent with clear information
+- **Backup Creation**: Automatically creates timestamped backup of JSON files
+- **Validation**: Performs comprehensive validation after migration
+- **Fallback**: Gracefully handles migration failures without data loss
+
+### Manual Migration Command
+Users can manually trigger migration using the CLI command:
+
+```bash
+# Dry run to see what would be migrated
+kodelet conversation migrate --dry-run --verbose
+
+# Perform actual migration with backup
+kodelet conversation migrate --verbose
+
+# Force migration (overwrite existing)
+kodelet conversation migrate --force --verbose
+
+# Custom paths
+kodelet conversation migrate \
+  --json-path ~/old-conversations \
+  --db-path ~/new-conversations.db \
+  --backup-path ~/backup-conversations
+```
+
+### Migration Features
+- **Batch Processing**: Loads all conversations at once and migrates them in a single BBolt transaction for maximum efficiency
+- **Comprehensive validation**: Ensures data integrity by comparing JSON semantics (ignoring formatting)
+- **Atomic operations**: Uses BBolt transactions for consistency
+- **Progress reporting**: Detailed feedback during migration process
+- **Error handling**: Continues migration on individual failures, reports all issues
+- **Backup management**: Automatic backup creation with timestamp organization
+- **Performance optimized**: Single database connection with bulk operations for improved speed
+
+### Migration Safety
+- **Non-destructive**: Original JSON files are preserved as backup
+- **Validation**: Full data comparison between source and target
+- **Rollback capability**: Users can revert to JSON store if needed
+- **Error isolation**: Individual conversation failures don't affect overall migration
