@@ -18,6 +18,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v2"
 )
@@ -80,11 +81,11 @@ func NewPRRespondConfig() *PRRespondConfig {
 // Validate validates the PRRespondConfig and returns an error if invalid
 func (c *PRRespondConfig) Validate() error {
 	if c.Provider != "github" {
-		return fmt.Errorf("unsupported provider: %s, only 'github' is supported", c.Provider)
+		return errors.New(fmt.Sprintf("unsupported provider: %s, only 'github' is supported", c.Provider))
 	}
 
 	if c.PRURL == "" {
-		return fmt.Errorf("PR URL cannot be empty")
+		return errors.New("PR URL cannot be empty")
 	}
 
 	// Check that exactly one comment ID is provided
@@ -92,11 +93,11 @@ func (c *PRRespondConfig) Validate() error {
 	issueCommentProvided := c.IssueCommentID != ""
 
 	if !reviewCommentProvided && !issueCommentProvided {
-		return fmt.Errorf("either --review-id or --issue-comment-id must be provided")
+		return errors.New("either --review-id or --issue-comment-id must be provided")
 	}
 
 	if reviewCommentProvided && issueCommentProvided {
-		return fmt.Errorf("only one of --review-id or --issue-comment-id can be provided, not both")
+		return errors.New("only one of --review-id or --issue-comment-id can be provided, not both")
 	}
 
 	return nil
@@ -140,18 +141,18 @@ This command focuses on addressing a specific comment or review feedback within 
 
 		// Prerequisites checking
 		if !isGitRepository() {
-			presenter.Error(fmt.Errorf("not a git repository"), "Please run this command from a git repository")
+			presenter.Error(errors.New("not a git repository"), "Please run this command from a git repository")
 			os.Exit(1)
 		}
 
 		if !isGhCliInstalled() {
-			presenter.Error(fmt.Errorf("GitHub CLI not installed"), "Please install GitHub CLI first")
+			presenter.Error(errors.New("GitHub CLI not installed"), "Please install GitHub CLI first")
 			presenter.Info("Visit https://cli.github.com/ for installation instructions")
 			os.Exit(1)
 		}
 
 		if !isGhAuthenticated() {
-			presenter.Error(fmt.Errorf("not authenticated with GitHub"), "Please run 'gh auth login' first")
+			presenter.Error(errors.New("not authenticated with GitHub"), "Please run 'gh auth login' first")
 			os.Exit(1)
 		}
 
@@ -238,7 +239,7 @@ func prefetchPRData(ctx context.Context, prURL, commentID string, isReviewCommen
 	cmd := exec.Command("gh", "pr", "view", prURL, "--json", "title,author,body,comments")
 	basicInfoOutput, err := cmd.CombinedOutput()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get PR basic info: %w, %s", err, string(basicInfoOutput))
+		return nil, errors.Wrapf(err, "failed to get PR basic info: %s", string(basicInfoOutput))
 	}
 
 	// Format JSON output to human-readable markdown
@@ -304,7 +305,7 @@ func prefetchPRData(ctx context.Context, prURL, commentID string, isReviewCommen
 func parseGitHubURL(prURL string) (owner, repo, prNumber string, err error) {
 	parts := strings.Split(prURL, "/")
 	if len(parts) < 7 {
-		return "", "", "", fmt.Errorf("invalid PR URL format")
+		return "", "", "", errors.New("invalid PR URL format")
 	}
 	// Extract: owner (parts[3]), repo (parts[4]), prNumber (parts[6])
 	return parts[3], parts[4], parts[6], nil
@@ -331,7 +332,7 @@ func formatPRBasicInfoToMarkdown(jsonData string) (string, error) {
 	var prInfo PRBasicInfo
 	err := json.Unmarshal([]byte(jsonData), &prInfo)
 	if err != nil {
-		return "", fmt.Errorf("failed to parse PR JSON data: %w", err)
+		return "", errors.Wrap(err, "failed to parse PR JSON data")
 	}
 
 	// Create function map for template
@@ -341,12 +342,12 @@ func formatPRBasicInfoToMarkdown(jsonData string) (string, error) {
 
 	tmpl, err := template.New("prBasicInfo").Funcs(funcMap).Parse(prBasicInfoTemplate)
 	if err != nil {
-		return "", fmt.Errorf("failed to parse PR basic info template: %w", err)
+		return "", errors.Wrap(err, "failed to parse PR basic info template")
 	}
 
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, prInfo); err != nil {
-		return "", fmt.Errorf("failed to execute PR basic info template: %w", err)
+		return "", errors.Wrap(err, "failed to execute PR basic info template")
 	}
 
 	return buf.String(), nil
@@ -385,7 +386,7 @@ func fetchFocusedReviewComment(ctx context.Context, prURL, commentID string) (st
 	commentOutput, err := cmd.CombinedOutput()
 	if err != nil {
 		logger.G(ctx).WithField("cmd", cmd.String()).WithError(err).WithField("output", string(commentOutput)).Error("Failed to fetch review comment details")
-		return "", "", fmt.Errorf("failed to fetch review comment details: %w, %s", err, string(commentOutput))
+		return "", "", errors.Wrapf(err, "failed to fetch review comment details: %s", string(commentOutput))
 	}
 
 	focusedComment := fmt.Sprintf("Review Comment ID %s:\n%s", commentID, strings.TrimSpace(string(commentOutput)))
@@ -406,13 +407,13 @@ func fetchFocusedReviewComment(ctx context.Context, prURL, commentID string) (st
 	var discussion any
 	err = json.Unmarshal(discussionOutput, &discussion)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to unmarshal discussion output: %w, %s", err, string(discussionOutput))
+		return "", "", errors.Wrapf(err, "failed to unmarshal discussion output: %s", string(discussionOutput))
 	}
 
 	// turn discussion into yaml
 	discussionYaml, err := yaml.Marshal(discussion)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to marshal discussion output: %w, %s", err, string(discussionOutput))
+		return "", "", errors.Wrapf(err, "failed to marshal discussion output: %s", string(discussionOutput))
 	}
 
 	relatedDiscussion := fmt.Sprintf("Related review discussions for comment %s:\n%s", commentID, strings.TrimSpace(string(discussionYaml)))
@@ -434,7 +435,7 @@ func fetchFocusedIssueComment(ctx context.Context, prURL, commentID string) (str
 	commentOutput, err := cmd.CombinedOutput()
 	if err != nil {
 		logger.G(ctx).WithField("cmd", cmd.String()).WithError(err).WithField("output", string(commentOutput)).Error("Failed to fetch issue comment details")
-		return "", "", fmt.Errorf("failed to fetch issue comment details: %w, %s", err, string(commentOutput))
+		return "", "", errors.Wrapf(err, "failed to fetch issue comment details: %s", string(commentOutput))
 	}
 
 	focusedComment := fmt.Sprintf("Issue Comment ID %s:\n%s", commentID, strings.TrimSpace(string(commentOutput)))

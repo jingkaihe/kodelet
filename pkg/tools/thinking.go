@@ -3,10 +3,10 @@ package tools
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"time"
 
 	"github.com/invopop/jsonschema"
+	"github.com/pkg/errors"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -57,11 +57,11 @@ func (t *ThinkingTool) TracingKVs(parameters string) ([]attribute.KeyValue, erro
 func (t *ThinkingTool) ValidateInput(state tooltypes.State, parameters string) error {
 	var input ThinkingInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
-		return fmt.Errorf("invalid input: %w", err)
+		return errors.Wrap(err, "invalid input")
 	}
 
 	if input.Thought == "" {
-		return fmt.Errorf("thought is required")
+		return errors.New("thought is required")
 	}
 
 	return nil

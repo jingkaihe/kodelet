@@ -2,9 +2,10 @@ package tools
 
 import (
 	"encoding/json"
-	"fmt"
 	"reflect"
 	"time"
+
+	"github.com/pkg/errors"
 )
 
 // StructuredToolResult represents a tool's execution result with structured metadata
@@ -42,7 +43,7 @@ func (s StructuredToolResult) MarshalJSON() ([]byte, error) {
 		// Marshal the metadata
 		metadataBytes, err := json.Marshal(s.Metadata)
 		if err != nil {
-			return nil, fmt.Errorf("failed to marshal metadata: %w", err)
+			return nil, errors.Wrap(err, "failed to marshal metadata")
 		}
 		raw.Metadata = metadataBytes
 	}
@@ -101,7 +102,7 @@ func (s *StructuredToolResult) UnmarshalJSON(data []byte) error {
 
 		// Unmarshal the JSON into the new instance
 		if err := json.Unmarshal(raw.Metadata, metadataPtr.Interface()); err != nil {
-			return fmt.Errorf("failed to unmarshal metadata of type %s: %w", raw.MetadataType, err)
+			return errors.Wrapf(err, "failed to unmarshal metadata of type %s", raw.MetadataType)
 		}
 
 		// Set the metadata (as a value type, not pointer)

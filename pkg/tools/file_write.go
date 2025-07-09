@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/invopop/jsonschema"
+	"github.com/pkg/errors"
 	"go.opentelemetry.io/otel/attribute"
 
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -102,11 +103,11 @@ By default the file is created with 0644 permissions. You can change the permiss
 func (t *FileWriteTool) ValidateInput(state tooltypes.State, parameters string) error {
 	var input FileWriteInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
-		return fmt.Errorf("invalid input: %w", err)
+		return errors.Wrap(err, "invalid input")
 	}
 
 	if input.Text == "" {
-		return fmt.Errorf("text is required. run 'touch' command to create an empty file")
+		return errors.New("text is required. run 'touch' command to create an empty file")
 	}
 
 	// check if the file exists
@@ -116,18 +117,18 @@ func (t *FileWriteTool) ValidateInput(state tooltypes.State, parameters string) 
 			// if the file does not exist, we can create it
 			return nil
 		}
-		return fmt.Errorf("failed to check the file status: %w", err)
+		return errors.Wrap(err, "failed to check the file status")
 	}
 
 	// get the last modified time of the file
 	lastAccessed := info.ModTime()
 	lastRead, err := state.GetFileLastAccessed(input.FilePath)
 	if err != nil {
-		return fmt.Errorf("failed to get the last access time of the file: %w", err)
+		return errors.Wrap(err, "failed to get the last access time of the file")
 	}
 
 	if lastAccessed.After(lastRead) {
-		return fmt.Errorf("file %s has been modified since the last read either by another tool or by the user, please read the file again", input.FilePath)
+		return errors.Errorf("file %s has been modified since the last read either by another tool or by the user, please read the file again", input.FilePath)
 	}
 
 	return nil

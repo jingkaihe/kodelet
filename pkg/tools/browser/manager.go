@@ -13,6 +13,7 @@ import (
 	"github.com/chromedp/chromedp"
 	"github.com/google/uuid"
 	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/pkg/errors"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
@@ -130,7 +131,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	err := m.setupRealisticBrowserBehavior(m.ctx)
 	if err != nil {
 		m.Stop()
-		return fmt.Errorf("failed to configure browser: %w", err)
+		return errors.Wrap(err, "failed to configure browser")
 	}
 
 	// Test browser startup
@@ -138,7 +139,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	err = chromedp.Run(m.ctx, chromedp.Navigate("about:blank"), chromedp.Title(&title))
 	if err != nil {
 		m.Stop()
-		return fmt.Errorf("failed to start browser: %w", err)
+		return errors.Wrap(err, "failed to start browser")
 	}
 
 	logger.G(ctx).Info("Browser manager started successfully")
@@ -309,7 +310,7 @@ func SetRealisticHeaders(ctx context.Context) chromedp.Action {
 // Crawl extracts and simplifies page content using DOM snapshot approach
 func (m *Manager) Crawl(ctx context.Context, maxLength int) (string, bool, error) {
 	if m.ctx == nil {
-		return "", false, fmt.Errorf("browser context not available")
+		return "", false, errors.New("browser context not available")
 	}
 
 	// Get viewport information
@@ -329,7 +330,7 @@ func (m *Manager) Crawl(ctx context.Context, maxLength int) (string, bool, error
 		})`, &viewport),
 	)
 	if err != nil {
-		return "", false, fmt.Errorf("failed to get viewport info: %w", err)
+		return "", false, errors.Wrap(err, "failed to get viewport info")
 	}
 
 	// Extract page elements for interaction
@@ -472,23 +473,23 @@ func (m *Manager) Crawl(ctx context.Context, maxLength int) (string, bool, error
 	)
 
 	if err != nil {
-		return "", false, fmt.Errorf("failed to capture DOM snapshot: %w", err)
+		return "", false, errors.Wrap(err, "failed to capture DOM snapshot")
 	}
 
 	// Parse the result directly since it's already structured data from JavaScript
 	crawlResult, ok := result.(map[string]interface{})
 	if !ok {
-		return "", false, fmt.Errorf("unexpected result format from JavaScript")
+		return "", false, errors.New("unexpected result format from JavaScript")
 	}
 
 	elements, ok := crawlResult["elements"].([]interface{})
 	if !ok {
-		return "", false, fmt.Errorf("unexpected elements format")
+		return "", false, errors.New("unexpected elements format")
 	}
 
 	elementBuffer, ok := crawlResult["elementBuffer"].(map[string]interface{})
 	if !ok {
-		return "", false, fmt.Errorf("unexpected elementBuffer format")
+		return "", false, errors.New("unexpected elementBuffer format")
 	}
 	// Update element buffer for coordinate mapping
 	m.elementMutex.Lock()
@@ -566,13 +567,13 @@ func cleanupWhitespace(s string) string {
 func CreateScreenshotDir() (string, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		return "", fmt.Errorf("failed to get home directory: %w", err)
+		return "", errors.Wrap(err, "failed to get home directory")
 	}
 
 	screenshotDir := filepath.Join(homeDir, ".kodelet", "screenshots")
 
 	if err := os.MkdirAll(screenshotDir, 0755); err != nil {
-		return "", fmt.Errorf("failed to create screenshots directory: %w", err)
+		return "", errors.Wrap(err, "failed to create screenshots directory")
 	}
 
 	return screenshotDir, nil

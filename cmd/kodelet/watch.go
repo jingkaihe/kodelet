@@ -16,6 +16,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	"github.com/jingkaihe/kodelet/pkg/utils"
+	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -50,11 +51,11 @@ func (c *WatchConfig) Validate() error {
 			goto verbosityValid
 		}
 	}
-	return fmt.Errorf("invalid verbosity level: %s, must be one of: %s", c.Verbosity, strings.Join(validVerbosityLevels, ", "))
+	return errors.New(fmt.Sprintf("invalid verbosity level: %s, must be one of: %s", c.Verbosity, strings.Join(validVerbosityLevels, ", ")))
 
 verbosityValid:
 	if c.DebounceTime < 0 {
-		return fmt.Errorf("debounce time cannot be negative: %d", c.DebounceTime)
+		return errors.New(fmt.Sprintf("debounce time cannot be negative: %d", c.DebounceTime))
 	}
 
 	return nil

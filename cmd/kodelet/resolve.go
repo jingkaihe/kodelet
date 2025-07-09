@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 
+	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
 
@@ -25,11 +26,11 @@ func NewResolveConfig() *ResolveConfig {
 // Validate validates the ResolveConfig and returns an error if invalid
 func (c *ResolveConfig) Validate() error {
 	if c.Provider != "github" {
-		return fmt.Errorf("unsupported provider: %s, only 'github' is supported", c.Provider)
+		return errors.New(fmt.Sprintf("unsupported provider: %s, only 'github' is supported", c.Provider))
 	}
 
 	if c.IssueURL == "" {
-		return fmt.Errorf("issue URL cannot be empty")
+		return errors.New("issue URL cannot be empty")
 	}
 
 	return nil

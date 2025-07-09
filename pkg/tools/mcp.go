@@ -3,7 +3,6 @@ package tools
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"slices"
@@ -19,6 +18,7 @@ import (
 	"github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/pkg/errors"
 	"github.com/spf13/viper"
 	"go.opentelemetry.io/otel/attribute"
 	"gopkg.in/yaml.v2"
@@ -230,13 +230,13 @@ func LoadMCPConfigFromViper() (MCPConfig, error) {
 	}
 	f, err := os.Open(filename)
 	if err != nil {
-		return MCPConfig{}, fmt.Errorf("failed to open config file: %w", err)
+		return MCPConfig{}, errors.Wrap(err, "failed to open config file")
 	}
 	defer f.Close()
 
 	var c config
 	if err := yaml.NewDecoder(f).Decode(&c); err != nil {
-		return MCPConfig{}, fmt.Errorf("failed to decode config file: %w", err)
+		return MCPConfig{}, errors.Wrap(err, "failed to decode config file")
 	}
 	return c.MCP, nil
 }
@@ -246,18 +246,18 @@ func CreateMCPManagerFromViper(ctx context.Context) (*MCPManager, error) {
 	// Load configuration from Viper
 	config, err := LoadMCPConfigFromViper()
 	if err != nil {
-		return nil, fmt.Errorf("failed to load MCP servers config: %w", err)
+		return nil, errors.Wrap(err, "failed to load MCP servers config")
 	}
 
 	// Create the manager
 	manager, err := NewMCPManager(config)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create MCP manager: %w", err)
+		return nil, errors.Wrap(err, "failed to create MCP manager")
 	}
 
 	// Initialize the manager
 	if err := manager.Initialize(ctx); err != nil {
-		return nil, fmt.Errorf("failed to initialize MCP manager: %w", err)
+		return nil, errors.Wrap(err, "failed to initialize MCP manager")
 	}
 
 	return manager, nil

@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -17,6 +16,8 @@ import (
 	"sync"
 	"text/template"
 	"time"
+
+	"github.com/pkg/errors"
 
 	"github.com/gobwas/glob"
 	"github.com/invopop/jsonschema"
@@ -274,7 +275,7 @@ func (b *BashTool) ValidateInput(state tooltypes.State, parameters string) error
 		if len(b.allowedCommands) > 0 {
 			// If allowed commands are configured, only allow commands that match patterns
 			if !b.MatchesCommand(command) {
-				return fmt.Errorf("command not in allowed list: %s", command)
+				return errors.Errorf("command not in allowed list: %s", command)
 			}
 		}
 

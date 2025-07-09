@@ -8,6 +8,7 @@ import (
 
 	"github.com/chromedp/chromedp"
 	"github.com/invopop/jsonschema"
+	"github.com/pkg/errors"
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/jingkaihe/kodelet/pkg/logger"
@@ -113,12 +114,12 @@ func (t ScreenshotTool) Description() string {
 func (t ScreenshotTool) ValidateInput(state tools.State, parameters string) error {
 	var input ScreenshotInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
-		return fmt.Errorf("failed to parse input: %w", err)
+		return errors.Wrap(err, "failed to parse input")
 	}
 
 	// Validate format
 	if input.Format != "" && input.Format != "png" && input.Format != "jpeg" {
-		return fmt.Errorf("invalid format: %s. Valid formats: png, jpeg", input.Format)
+		return errors.Errorf("invalid format: %s. Valid formats: png, jpeg", input.Format)
 	}
 
 	return nil

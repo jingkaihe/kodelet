@@ -192,7 +192,7 @@ var (
 func (t *BatchTool) ValidateInput(state tooltypes.State, parameters string) error {
 	var input BatchToolInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
-		return fmt.Errorf("failed to unmarshal input: %w", err)
+		return errors.Wrapf(err, "failed to unmarshal input")
 	}
 
 	if err := noNestedBatch(input); err != nil {
@@ -250,7 +250,7 @@ func (t *BatchTool) TracingKVs(parameters string) ([]attribute.KeyValue, error) 
 
 	var input BatchToolInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal input: %w", err)
+		return nil, errors.Wrapf(err, "failed to unmarshal input")
 	}
 
 	kvs = append(kvs, attribute.String("description", input.Description))

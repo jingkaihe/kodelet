@@ -3,9 +3,10 @@ package conversations
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strings"
 	"time"
+
+	"github.com/pkg/errors"
 
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -49,7 +50,7 @@ func NewConversationService(store ConversationStore) *ConversationService {
 func GetDefaultConversationService(ctx context.Context) (*ConversationService, error) {
 	store, err := GetConversationStore(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get conversation store: %w", err)
+		return nil, errors.Wrap(err, "failed to get conversation store")
 	}
 	return NewConversationService(store), nil
 }
@@ -120,7 +121,7 @@ func (s *ConversationService) ListConversations(ctx context.Context, req *ListCo
 	// Query conversations with pagination
 	result, err := s.store.Query(options)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query conversations: %w", err)
+		return nil, errors.Wrap(err, "failed to query conversations")
 	}
 
 	summaries := result.ConversationSummaries
@@ -174,7 +175,7 @@ func (s *ConversationService) GetConversation(ctx context.Context, id string) (*
 	// Load the conversation record
 	record, err := s.store.Load(id)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load conversation: %w", err)
+		return nil, errors.Wrap(err, "failed to load conversation")
 	}
 
 	// Calculate message count by parsing the raw messages
@@ -209,13 +210,13 @@ func (s *ConversationService) GetToolResult(ctx context.Context, conversationID,
 	// Load the conversation record
 	record, err := s.store.Load(conversationID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load conversation: %w", err)
+		return nil, errors.Wrap(err, "failed to load conversation")
 	}
 
 	// Find the tool result
 	result, exists := record.ToolResults[toolCallID]
 	if !exists {
-		return nil, fmt.Errorf("tool result not found: %s", toolCallID)
+		return nil, errors.Errorf("tool result not found: %s", toolCallID)
 	}
 
 	response := &GetToolResultResponse{
@@ -233,7 +234,7 @@ func (s *ConversationService) DeleteConversation(ctx context.Context, id string)
 
 	err := s.store.Delete(id)
 	if err != nil {
-		return fmt.Errorf("failed to delete conversation: %w", err)
+		return errors.Wrap(err, "failed to delete conversation")
 	}
 
 	logger.G(ctx).WithField("id", id).Info("Deleted conversation")
@@ -252,7 +253,7 @@ func (s *ConversationService) ResolveConversationID(ctx context.Context, id stri
 	// For short IDs, we need to search through conversations
 	summaries, err := s.store.List()
 	if err != nil {
-		return "", fmt.Errorf("failed to list conversations: %w", err)
+		return "", errors.Wrap(err, "failed to list conversations")
 	}
 
 	// Find conversations that start with the short ID
@@ -264,11 +265,11 @@ func (s *ConversationService) ResolveConversationID(ctx context.Context, id stri
 	}
 
 	if len(matches) == 0 {
-		return "", fmt.Errorf("no conversation found with ID starting with '%s'", id)
+		return "", errors.Errorf("no conversation found with ID starting with '%s'", id)
 	}
 
 	if len(matches) > 1 {
-		return "", fmt.Errorf("multiple conversations found with ID starting with '%s': %v", id, matches)
+		return "", errors.Errorf("multiple conversations found with ID starting with '%s': %v", id, matches)
 	}
 
 	resolvedID := matches[0]
@@ -282,7 +283,7 @@ func (s *ConversationService) GetConversationStatistics(ctx context.Context) (*C
 
 	summaries, err := s.store.List()
 	if err != nil {
-		return nil, fmt.Errorf("failed to list conversations: %w", err)
+		return nil, errors.Wrap(err, "failed to list conversations")
 	}
 
 	if len(summaries) == 0 {

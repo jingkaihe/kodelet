@@ -16,6 +16,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
+	"github.com/pkg/errors"
 	"github.com/sashabaranov/go-openai"
 )
 
@@ -42,12 +43,12 @@ type ServerConfig struct {
 func (c *ServerConfig) Validate() error {
 	// Validate host
 	if c.Host == "" {
-		return fmt.Errorf("host cannot be empty")
+		return errors.New("host cannot be empty")
 	}
 
 	// Validate port
 	if c.Port < 1 || c.Port > 65535 {
-		return fmt.Errorf("port must be between 1 and 65535, got %d", c.Port)
+		return errors.Errorf("port must be between 1 and 65535, got %d", c.Port)
 	}
 
 	return nil
@@ -57,19 +58,19 @@ func (c *ServerConfig) Validate() error {
 func NewServer(ctx context.Context, config *ServerConfig) (*Server, error) {
 	// Validate configuration
 	if err := config.Validate(); err != nil {
-		return nil, fmt.Errorf("invalid server configuration: %w", err)
+		return nil, errors.Wrap(err, "invalid server configuration")
 	}
 
 	// Get the conversation service
 	conversationService, err := conversations.GetDefaultConversationService(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create conversation service: %w", err)
+		return nil, errors.Wrap(err, "failed to create conversation service")
 	}
 
 	// Create a sub-filesystem for static files from dist/assets
 	staticFS, err := fs.Sub(embedFS, "dist/assets")
 	if err != nil {
-		return nil, fmt.Errorf("failed to create static filesystem: %w", err)
+		return nil, errors.Wrap(err, "failed to create static filesystem")
 	}
 
 	s := &Server{
@@ -308,7 +309,7 @@ func (s *Server) convertToWebMessages(rawMessages json.RawMessage, modelType str
 	// Parse the raw JSON messages
 	var rawMsgs []json.RawMessage
 	if err := json.Unmarshal(rawMessages, &rawMsgs); err != nil {
-		return nil, fmt.Errorf("failed to parse raw messages: %w", err)
+		return nil, errors.Wrap(err, "failed to parse raw messages")
 	}
 
 	for _, rawMsg := range rawMsgs {
@@ -364,7 +365,7 @@ func (s *Server) extractAnthropicContent(rawMessage json.RawMessage) (string, st
 	// Deserialize single message using the Anthropic SDK
 	var anthropicMessage anthropic.MessageParam
 	if err := json.Unmarshal(rawMessage, &anthropicMessage); err != nil {
-		return "", "", fmt.Errorf("failed to deserialize Anthropic message: %w", err)
+		return "", "", errors.Wrap(err, "failed to deserialize Anthropic message")
 	}
 
 	var textParts []string
@@ -389,7 +390,7 @@ func (s *Server) extractAnthropicToolCalls(rawMessage json.RawMessage) ([]WebToo
 	// Deserialize single message using the Anthropic SDK
 	var anthropicMessage anthropic.MessageParam
 	if err := json.Unmarshal(rawMessage, &anthropicMessage); err != nil {
-		return nil, fmt.Errorf("failed to deserialize Anthropic message: %w", err)
+		return nil, errors.Wrap(err, "failed to deserialize Anthropic message")
 	}
 
 	var toolCalls []WebToolCall
@@ -423,7 +424,7 @@ func (s *Server) extractOpenAIToolCalls(rawMessage json.RawMessage) ([]WebToolCa
 	// Deserialize single message using the OpenAI SDK
 	var openaiMessage openai.ChatCompletionMessage
 	if err := json.Unmarshal(rawMessage, &openaiMessage); err != nil {
-		return nil, fmt.Errorf("failed to deserialize OpenAI message: %w", err)
+		return nil, errors.Wrap(err, "failed to deserialize OpenAI message")
 	}
 
 	var toolCalls []WebToolCall
@@ -447,7 +448,7 @@ func (s *Server) extractOpenAIContent(rawMessage json.RawMessage) (string, error
 	// Deserialize single message using the OpenAI SDK
 	var openaiMessage openai.ChatCompletionMessage
 	if err := json.Unmarshal(rawMessage, &openaiMessage); err != nil {
-		return "", fmt.Errorf("failed to deserialize OpenAI message: %w", err)
+		return "", errors.Wrap(err, "failed to deserialize OpenAI message")
 	}
 
 	// OpenAI messages have simple string content or multimodal content
@@ -585,7 +586,7 @@ func (s *Server) Stop() error {
 func (s *Server) Close() error {
 	if s.conversationService != nil {
 		if err := s.conversationService.Close(); err != nil {
-			return fmt.Errorf("failed to close conversation service: %w", err)
+			return errors.Wrap(err, "failed to close conversation service")
 		}
 	}
 	return s.Stop()

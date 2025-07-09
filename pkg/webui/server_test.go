@@ -11,6 +11,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -167,7 +168,7 @@ func TestServer_handleGetConversation(t *testing.T) {
 			if id == conversationID {
 				return conversationID, nil
 			}
-			return "", fmt.Errorf("conversation not found")
+			return "", errors.New("conversation not found")
 		},
 		getFunc: func(ctx context.Context, id string) (*conversations.GetConversationResponse, error) {
 			return &conversations.GetConversationResponse{

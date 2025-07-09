@@ -3,7 +3,6 @@ package conversations
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -11,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/pkg/errors"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/jingkaihe/kodelet/pkg/logger"
@@ -39,13 +40,13 @@ type JSONConversationStore struct {
 func NewJSONConversationStore(ctx context.Context, basePath string) (*JSONConversationStore, error) {
 	// Create the directory if it doesn't exist
 	if err := os.MkdirAll(basePath, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create conversations directory: %w", err)
+		return nil, errors.Wrap(err, "failed to create conversations directory")
 	}
 
 	// Create file watcher
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
-		return nil, fmt.Errorf("failed to create file watcher: %w", err)
+		return nil, errors.Wrap(err, "failed to create file watcher")
 	}
 
 	// Create context for graceful shutdown that respects the parent context
@@ -63,13 +64,13 @@ func NewJSONConversationStore(ctx context.Context, basePath string) (*JSONConver
 	// Initial load of all conversations into cache
 	if err := store.loadAllConversations(); err != nil {
 		store.Close()
-		return nil, fmt.Errorf("failed to load initial conversations: %w", err)
+		return nil, errors.Wrap(err, "failed to load initial conversations")
 	}
 
 	// Start watching the directory
 	if err := store.watcher.Add(basePath); err != nil {
 		store.Close()
-		return nil, fmt.Errorf("failed to watch conversations directory: %w", err)
+		return nil, errors.Wrap(err, "failed to watch conversations directory")
 	}
 
 	// Start the file watcher goroutine
@@ -113,7 +114,7 @@ func (s *JSONConversationStore) loadAllConversations() error {
 	})
 
 	if err != nil {
-		return fmt.Errorf("failed to walk conversations directory: %w", err)
+		return errors.Wrap(err, "failed to walk conversations directory")
 	}
 
 	logger.G(s.ctx).WithField("count", len(s.summariesCache)).Debug("Loaded conversations into cache")
@@ -124,12 +125,12 @@ func (s *JSONConversationStore) loadAllConversations() error {
 func (s *JSONConversationStore) loadConversationIntoCache(filePath string) error {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
-		return fmt.Errorf("failed to read conversation file: %w", err)
+		return errors.Wrap(err, "failed to read conversation file")
 	}
 
 	var record ConversationRecord
 	if err := json.Unmarshal(data, &record); err != nil {
-		return fmt.Errorf("failed to unmarshal conversation record: %w", err)
+		return errors.Wrap(err, "failed to unmarshal conversation record")
 	}
 
 	// Add to both caches
@@ -145,12 +146,12 @@ func (s *JSONConversationStore) loadRecordDirectly(id string) (ConversationRecor
 
 	data, err := os.ReadFile(filePath)
 	if err != nil {
-		return ConversationRecord{}, fmt.Errorf("failed to read conversation file: %w", err)
+		return ConversationRecord{}, errors.Wrap(err, "failed to read conversation file")
 	}
 
 	var record ConversationRecord
 	if err := json.Unmarshal(data, &record); err != nil {
-		return ConversationRecord{}, fmt.Errorf("failed to unmarshal conversation record: %w", err)
+		return ConversationRecord{}, errors.Wrap(err, "failed to unmarshal conversation record")
 	}
 
 	return record, nil
@@ -244,7 +245,7 @@ func (s *JSONConversationStore) Save(record ConversationRecord) error {
 	// Convert to JSON
 	data, err := json.MarshalIndent(record, "", "  ")
 	if err != nil {
-		return fmt.Errorf("failed to marshal conversation record: %w", err)
+		return errors.Wrap(err, "failed to marshal conversation record")
 	}
 
 	// Write to a temporary file first (atomic write)
@@ -252,14 +253,14 @@ func (s *JSONConversationStore) Save(record ConversationRecord) error {
 	tempPath := filePath + ".tmp"
 
 	if err := os.WriteFile(tempPath, data, 0644); err != nil {
-		return fmt.Errorf("failed to write temporary conversation file: %w", err)
+		return errors.Wrap(err, "failed to write temporary conversation file")
 	}
 
 	// Rename to final file (this is atomic on most systems)
 	if err := os.Rename(tempPath, filePath); err != nil {
 		// Clean up the temp file if rename fails
 		os.Remove(tempPath)
-		return fmt.Errorf("failed to rename temporary conversation file: %w", err)
+		return errors.Wrap(err, "failed to rename temporary conversation file")
 	}
 
 	// Immediately update the cache to ensure consistency for tests and immediate queries
@@ -288,14 +289,14 @@ func (s *JSONConversationStore) Load(id string) (ConversationRecord, error) {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return ConversationRecord{}, fmt.Errorf("conversation not found: %s", id)
+			return ConversationRecord{}, errors.Errorf("conversation not found: %s", id)
 		}
-		return ConversationRecord{}, fmt.Errorf("failed to read conversation file: %w", err)
+		return ConversationRecord{}, errors.Wrap(err, "failed to read conversation file")
 	}
 
 	var record ConversationRecord
 	if err := json.Unmarshal(data, &record); err != nil {
-		return ConversationRecord{}, fmt.Errorf("failed to unmarshal conversation record: %w", err)
+		return ConversationRecord{}, errors.Wrap(err, "failed to unmarshal conversation record")
 	}
 
 	// Update cache with the loaded record
@@ -323,9 +324,9 @@ func (s *JSONConversationStore) Delete(id string) error {
 	err := os.Remove(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return fmt.Errorf("conversation not found: %s", id)
+			return errors.Errorf("conversation not found: %s", id)
 		}
-		return fmt.Errorf("failed to delete conversation file: %w", err)
+		return errors.Wrap(err, "failed to delete conversation file")
 	}
 
 	// Immediately update the cache to ensure consistency for tests and immediate queries

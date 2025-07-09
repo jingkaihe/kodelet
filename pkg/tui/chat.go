@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/jingkaihe/kodelet/pkg/tools"
+	"github.com/pkg/errors"
 )
 
 // StartChat starts the TUI chat interface
@@ -76,7 +77,7 @@ func StartChat(ctx context.Context,
 
 	result, err := p.Run()
 	if err != nil {
-		return fmt.Errorf("error running program: %w", err)
+		return errors.Wrap(err, "error running program")
 	}
 
 	// use a new context to avoid cancellation

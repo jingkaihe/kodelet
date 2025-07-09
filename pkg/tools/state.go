@@ -13,6 +13,7 @@ import (
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/jingkaihe/kodelet/pkg/utils"
+	"github.com/pkg/errors"
 )
 
 var (
@@ -146,7 +147,7 @@ func (s *BasicState) GetFileLastAccessed(path string) (time.Time, error) {
 	defer s.mu.RUnlock()
 	lastAccessed, ok := s.lastAccessed[path]
 	if !ok {
-		return time.Time{}, fmt.Errorf("file %s has not been read yet", path)
+		return time.Time{}, errors.Errorf("file %s has not been read yet", path)
 	}
 	return lastAccessed, nil
 }
@@ -198,7 +199,7 @@ func (s *BasicState) RemoveBackgroundProcess(pid int) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("background process with PID %d not found", pid)
+	return errors.Errorf("background process with PID %d not found", pid)
 }
 
 func (s *BasicState) GetBrowserManager() tooltypes.BrowserManager {

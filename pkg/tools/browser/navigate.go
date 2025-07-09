@@ -9,6 +9,7 @@ import (
 
 	"github.com/chromedp/chromedp"
 	"github.com/invopop/jsonschema"
+	"github.com/pkg/errors"
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/jingkaihe/kodelet/pkg/logger"
@@ -109,34 +110,34 @@ func (t NavigateTool) Description() string {
 func (t NavigateTool) ValidateInput(state tools.State, parameters string) error {
 	var input NavigateInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
-		return fmt.Errorf("failed to parse input: %w", err)
+		return errors.Wrap(err, "failed to parse input")
 	}
 
 	if input.URL == "" {
-		return fmt.Errorf("url is required")
+		return errors.New("url is required")
 	}
 
 	// Validate URL format - must be absolute URL with scheme
 	parsedURL, err := url.Parse(input.URL)
 	if err != nil {
-		return fmt.Errorf("invalid URL format: %w", err)
+		return errors.Wrap(err, "invalid URL format")
 	}
 	if !parsedURL.IsAbs() {
-		return fmt.Errorf("URL must be absolute (include scheme)")
+		return errors.New("URL must be absolute (include scheme)")
 	}
 
 	if input.Timeout < 0 {
-		return fmt.Errorf("timeout must be non-negative")
+		return errors.New("timeout must be non-negative")
 	}
 
 	// Check domain filtering if configured
 	if t.domainFilter != nil {
 		allowed, err := t.domainFilter.IsAllowed(input.URL)
 		if err != nil {
-			return fmt.Errorf("failed to validate domain: %w", err)
+			return errors.Wrap(err, "failed to validate domain")
 		}
 		if !allowed {
-			return fmt.Errorf("domain %s is not in the allowed domains list", parsedURL.Hostname())
+			return errors.Errorf("domain %s is not in the allowed domains list", parsedURL.Hostname())
 		}
 	}
 

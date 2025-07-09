@@ -11,6 +11,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	"github.com/jingkaihe/kodelet/pkg/tui"
+	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
 
@@ -46,12 +47,12 @@ func setupTUILogRedirection(conversationID string) (*os.File, string, error) {
 	// Create logs directory if it doesn't exist
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to get home directory: %w", err)
+		return nil, "", errors.Wrap(err, "failed to get home directory")
 	}
 
 	logsDir := filepath.Join(homeDir, ".kodelet", "logs")
 	if err := os.MkdirAll(logsDir, 0755); err != nil {
-		return nil, "", fmt.Errorf("failed to create logs directory: %w", err)
+		return nil, "", errors.Wrap(err, "failed to create logs directory")
 	}
 
 	// Create log file with conversation ID
@@ -60,7 +61,7 @@ func setupTUILogRedirection(conversationID string) (*os.File, string, error) {
 
 	logFile, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to open log file: %w", err)
+		return nil, "", errors.Wrap(err, "failed to open log file")
 	}
 
 	// Redirect logger output to file
@@ -79,13 +80,13 @@ var chatCmd = &cobra.Command{
 
 		// Validate compact ratio
 		if chatOptions.compactRatio < 0.0 || chatOptions.compactRatio > 1.0 {
-			presenter.Error(fmt.Errorf("invalid compact ratio"), "Compact ratio must be between 0.0 and 1.0")
+			presenter.Error(errors.New("invalid compact ratio"), "Compact ratio must be between 0.0 and 1.0")
 			os.Exit(1)
 		}
 
 		if chatOptions.follow {
 			if chatOptions.resumeConvID != "" {
-				presenter.Error(fmt.Errorf("conflicting options"), "--follow and --resume cannot be used together")
+				presenter.Error(errors.New("conflicting options"), "--follow and --resume cannot be used together")
 				os.Exit(1)
 			}
 			var err error

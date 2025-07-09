@@ -12,6 +12,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
 	"github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/pkg/errors"
 )
 
 // cleanupOrphanedMessages removes orphaned messages from the end of the message list.
@@ -63,7 +64,7 @@ func (t *AnthropicThread) SaveConversation(ctx context.Context, summarise bool) 
 	// Marshall the messages to JSON
 	rawMessages, err := json.Marshal(t.messages)
 	if err != nil {
-		return fmt.Errorf("failed to marshal conversation messages: %w", err)
+		return errors.Wrap(err, "failed to marshal conversation messages")
 	}
 
 	if summarise {
@@ -101,18 +102,18 @@ func (t *AnthropicThread) loadConversation() error {
 	// Try to load the conversation
 	record, err := t.store.Load(t.conversationID)
 	if err != nil {
-		return fmt.Errorf("failed to load conversation: %w", err)
+		return errors.Wrap(err, "failed to load conversation")
 	}
 
 	// Check if this is an Anthropic model conversation
 	if record.ModelType != "" && record.ModelType != "anthropic" {
-		return fmt.Errorf("incompatible model type: %s", record.ModelType)
+		return errors.Errorf("incompatible model type: %s", record.ModelType)
 	}
 
 	// Reset current messages
 	messages, err := DeserializeMessages(record.RawMessages)
 	if err != nil {
-		return fmt.Errorf("failed to deserialize conversation messages: %w", err)
+		return errors.Wrap(err, "failed to deserialize conversation messages")
 	}
 	t.messages = messages
 
@@ -129,7 +130,7 @@ func (t *AnthropicThread) loadConversation() error {
 func DeserializeMessages(b []byte) ([]anthropic.MessageParam, error) {
 	var messages []anthropic.MessageParam
 	if err := json.Unmarshal(b, &messages); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal conversation messages: %w", err)
+		return nil, errors.Wrap(err, "failed to unmarshal conversation messages")
 	}
 
 	return messages, nil
@@ -140,7 +141,7 @@ func ExtractMessages(rawMessages json.RawMessage, toolResults map[string]tooltyp
 	// Deserialize the raw messages using the existing DeserializeMessages function
 	anthropicMessages, err := DeserializeMessages(rawMessages)
 	if err != nil {
-		return nil, fmt.Errorf("error deserializing messages: %w", err)
+		return nil, errors.Wrap(err, "error deserializing messages")
 	}
 
 	var messages []llm.Message

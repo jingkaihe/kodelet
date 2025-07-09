@@ -12,6 +12,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
 
@@ -34,11 +35,11 @@ func NewPRConfig() *PRConfig {
 // Validate validates the PRConfig and returns an error if invalid
 func (c *PRConfig) Validate() error {
 	if c.Provider != "github" {
-		return fmt.Errorf("unsupported provider: %s, only 'github' is supported", c.Provider)
+		return errors.New(fmt.Sprintf("unsupported provider: %s, only 'github' is supported", c.Provider))
 	}
 
 	if c.Target == "" {
-		return fmt.Errorf("target branch cannot be empty")
+		return errors.New("target branch cannot be empty")
 	}
 
 	return nil
@@ -90,20 +91,20 @@ This command analyzes the current branch changes compared to the target branch a
 		// Check prerequisites
 		// 1. Check if we're in a git repository
 		if !isGitRepository() {
-			presenter.Error(fmt.Errorf("not a git repository"), "Please run this command from a git repository")
+			presenter.Error(errors.New("not a git repository"), "Please run this command from a git repository")
 			os.Exit(1)
 		}
 
 		// 2. Check if the user has GitHub CLI installed
 		if !isGhCliInstalled() {
-			presenter.Error(fmt.Errorf("GitHub CLI not installed"), "GitHub CLI (gh) is not installed. Please install it first")
+			presenter.Error(errors.New("GitHub CLI not installed"), "GitHub CLI (gh) is not installed. Please install it first")
 			presenter.Info("Visit https://cli.github.com/ for installation instructions")
 			os.Exit(1)
 		}
 
 		// 3. Check if the user is authenticated with GitHub
 		if !isGhAuthenticated() {
-			presenter.Error(fmt.Errorf("not authenticated with GitHub"), "You are not authenticated with GitHub. Please run 'gh auth login' first")
+			presenter.Error(errors.New("not authenticated with GitHub"), "You are not authenticated with GitHub. Please run 'gh auth login' first")
 			os.Exit(1)
 		}
 

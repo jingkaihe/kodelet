@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/pkg/errors"
+
 	"github.com/jingkaihe/kodelet/pkg/llm/anthropic"
 	"github.com/jingkaihe/kodelet/pkg/llm/openai"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -82,6 +84,6 @@ func ExtractMessages(provider string, rawMessages []byte, toolResults map[string
 	case "openai":
 		return openai.ExtractMessages(rawMessages, toolResults)
 	default:
-		return nil, fmt.Errorf("unsupported provider: %s", provider)
+		return nil, errors.Errorf("unsupported provider: %s", provider)
 	}
 }

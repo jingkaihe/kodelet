@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -23,6 +22,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/telemetry"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
+	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -94,11 +94,11 @@ func NewAnthropicThread(config llmtypes.Config) (*AnthropicThread, error) {
 		// Force subscription usage - no fallbacks allowed
 		antCredsExists, _ := auth.GetAnthropicCredentialsExists()
 		if !antCredsExists {
-			return nil, fmt.Errorf("subscription authentication forced but no credentials found")
+			return nil, errors.New("subscription authentication forced but no credentials found")
 		}
 		accessToken, err := auth.AnthropicAccessToken(context.Background())
 		if err != nil {
-			return nil, fmt.Errorf("subscription authentication forced but failed to get access token: %w", err)
+			return nil, errors.Wrap(err, "subscription authentication forced but failed to get access token")
 		}
 		logger.Debug("using anthropic access token (forced by configuration)")
 		opts = append(opts, auth.AnthropicHeader(accessToken)...)
@@ -687,7 +687,7 @@ func (t *AnthropicThread) getLastAssistantMessageText() (string, error) {
 	defer t.mu.Unlock()
 
 	if len(t.messages) == 0 {
-		return "", fmt.Errorf("no messages found")
+		return "", errors.New("no messages found")
 	}
 
 	// Find the last assistant message
@@ -706,7 +706,7 @@ func (t *AnthropicThread) getLastAssistantMessageText() (string, error) {
 	}
 
 	if messageText == "" {
-		return "", fmt.Errorf("no text content found in assistant message")
+		return "", errors.New("no text content found in assistant message")
 	}
 
 	return messageText, nil
@@ -773,13 +773,13 @@ func (t *AnthropicThread) CompactContext(ctx context.Context) error {
 		// Note: Not using NoSaveConversation so we can access the assistant response
 	})
 	if err != nil {
-		return fmt.Errorf("failed to generate compact summary: %w", err)
+		return errors.Wrap(err, "failed to generate compact summary")
 	}
 
 	// Get the compact summary from the last assistant message
 	compactSummary, err := t.getLastAssistantMessageText()
 	if err != nil {
-		return fmt.Errorf("failed to get compact summary from assistant message: %w", err)
+		return errors.Wrap(err, "failed to get compact summary from assistant message")
 	}
 
 	// Replace the conversation history with the compact summary
@@ -929,7 +929,7 @@ func (t *AnthropicThread) processImage(imagePath string) (*anthropic.ContentBloc
 func (t *AnthropicThread) processImageURL(url string) (*anthropic.ContentBlockParamUnion, error) {
 	// Validate URL format (HTTPS only)
 	if !strings.HasPrefix(url, "https://") {
-		return nil, fmt.Errorf("only HTTPS URLs are supported for security: %s", url)
+		return nil, errors.Errorf("only HTTPS URLs are supported for security: %s", url)
 	}
 
 	block := anthropic.NewImageBlock(anthropic.URLImageSourceParam{
@@ -943,28 +943,28 @@ func (t *AnthropicThread) processImageURL(url string) (*anthropic.ContentBlockPa
 func (t *AnthropicThread) processImageFile(filePath string) (*anthropic.ContentBlockParamUnion, error) {
 	// Check if file exists
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		return nil, fmt.Errorf("image file not found: %s", filePath)
+		return nil, errors.Errorf("image file not found: %s", filePath)
 	}
 
 	// Determine media type from file extension first
 	mediaType, err := getMediaTypeFromExtension(filepath.Ext(filePath))
 	if err != nil {
-		return nil, fmt.Errorf("unsupported image format: %s (supported: .jpg, .jpeg, .png, .gif, .webp)", filepath.Ext(filePath))
+		return nil, errors.Errorf("unsupported image format: %s (supported: .jpg, .jpeg, .png, .gif, .webp)", filepath.Ext(filePath))
 	}
 
 	// Check file size
 	fileInfo, err := os.Stat(filePath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get file info: %w", err)
+		return nil, errors.Wrap(err, "failed to get file info")
 	}
 	if fileInfo.Size() > MaxImageFileSize {
-		return nil, fmt.Errorf("image file too large: %d bytes (max: %d bytes)", fileInfo.Size(), MaxImageFileSize)
+		return nil, errors.Errorf("image file too large: %d bytes (max: %d bytes)", fileInfo.Size(), MaxImageFileSize)
 	}
 
 	// Read and encode the file
 	imageData, err := os.ReadFile(filePath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read image file: %w", err)
+		return nil, errors.Wrap(err, "failed to read image file")
 	}
 
 	// Encode to base64
@@ -990,7 +990,7 @@ func getMediaTypeFromExtension(ext string) (anthropic.Base64ImageSourceMediaType
 	case ".webp":
 		return anthropic.Base64ImageSourceMediaTypeImageWebP, nil
 	default:
-		return "", fmt.Errorf("unsupported format")
+		return "", errors.New("unsupported format")
 	}
 }
 

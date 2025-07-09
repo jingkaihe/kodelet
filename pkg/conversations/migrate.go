@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pkg/errors"
+
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"go.etcd.io/bbolt"
@@ -84,7 +86,7 @@ func DetectJSONConversations(ctx context.Context, jsonPath string) ([]string, er
 	})
 
 	if err != nil {
-		return nil, fmt.Errorf("failed to scan JSON conversations directory: %w", err)
+		return nil, errors.Wrap(err, "failed to scan JSON conversations directory")
 	}
 
 	return conversationIDs, nil
@@ -101,7 +103,7 @@ func MigrateJSONToBBolt(ctx context.Context, jsonPath, dbPath string, options Mi
 	// Detect existing conversations
 	conversationIDs, err := DetectJSONConversations(ctx, jsonPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to detect JSON conversations: %w", err)
+		return nil, errors.Wrap(err, "failed to detect JSON conversations")
 	}
 
 	result.TotalConversations = len(conversationIDs)
@@ -119,7 +121,7 @@ func MigrateJSONToBBolt(ctx context.Context, jsonPath, dbPath string, options Mi
 	// Create JSON store to read from
 	jsonStore, err := NewJSONConversationStore(ctx, jsonPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create JSON store: %w", err)
+		return nil, errors.Wrap(err, "failed to create JSON store")
 	}
 	defer jsonStore.Close()
 
@@ -134,7 +136,7 @@ func MigrateJSONToBBolt(ctx context.Context, jsonPath, dbPath string, options Mi
 
 	if len(allConversations) == 0 {
 		result.Duration = time.Since(startTime)
-		return result, fmt.Errorf("no conversations could be loaded from JSON store")
+		return result, errors.New("no conversations could be loaded from JSON store")
 	}
 
 	// If dry run, just validate the conversations can be processed
@@ -152,7 +154,7 @@ func MigrateJSONToBBolt(ctx context.Context, jsonPath, dbPath string, options Mi
 	// Create BBolt store to write to
 	bboltStore, err := NewBBoltConversationStore(ctx, dbPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create BBolt store: %w", err)
+		return nil, errors.Wrap(err, "failed to create BBolt store")
 	}
 	defer bboltStore.Close()
 
@@ -169,7 +171,7 @@ func MigrateJSONToBBolt(ctx context.Context, jsonPath, dbPath string, options Mi
 	// Validate migration
 	if result.MigratedCount > 0 {
 		if err := validateBatchMigration(ctx, bboltStore, allConversations, options); err != nil {
-			return nil, fmt.Errorf("migration validation failed: %w", err)
+			return nil, errors.Wrap(err, "migration validation failed")
 		}
 	}
 
@@ -265,28 +267,28 @@ func saveConversationToBuckets(conversationsBucket, summariesBucket, searchBucke
 	// 1. Save full record
 	recordData, err := json.Marshal(record)
 	if err != nil {
-		return fmt.Errorf("failed to marshal conversation record: %w", err)
+		return errors.Wrap(err, "failed to marshal conversation record")
 	}
 
 	// 2. Save summary for efficient listing
 	summary := record.ToSummary()
 	summaryData, err := json.Marshal(summary)
 	if err != nil {
-		return fmt.Errorf("failed to marshal conversation summary: %w", err)
+		return errors.Wrap(err, "failed to marshal conversation summary")
 	}
 
 	// 3. Atomic writes to all three buckets
 	if err := conversationsBucket.Put([]byte(record.ID), recordData); err != nil {
-		return fmt.Errorf("failed to save conversation record: %w", err)
+		return errors.Wrap(err, "failed to save conversation record")
 	}
 	if err := summariesBucket.Put([]byte("conv:"+record.ID), summaryData); err != nil {
-		return fmt.Errorf("failed to save conversation summary: %w", err)
+		return errors.Wrap(err, "failed to save conversation summary")
 	}
 	if err := searchBucket.Put([]byte("msg:"+record.ID), []byte(summary.FirstMessage)); err != nil {
-		return fmt.Errorf("failed to save search index for message: %w", err)
+		return errors.Wrap(err, "failed to save search index for message")
 	}
 	if err := searchBucket.Put([]byte("sum:"+record.ID), []byte(summary.Summary)); err != nil {
-		return fmt.Errorf("failed to save search index for summary: %w", err)
+		return errors.Wrap(err, "failed to save search index for summary")
 	}
 
 	return nil
@@ -355,11 +357,11 @@ func validateBatchMigration(ctx context.Context, bboltStore *BBoltConversationSt
 	})
 
 	if err != nil {
-		return fmt.Errorf("validation database operation failed: %w", err)
+		return errors.Wrap(err, "validation database operation failed")
 	}
 
 	if validationErrors > 0 {
-		return fmt.Errorf("validation failed: %d conversations have mismatched data", validationErrors)
+		return errors.Errorf("validation failed: %d conversations have mismatched data", validationErrors)
 	}
 
 	if options.Verbose {
@@ -377,7 +379,7 @@ func BackupJSONConversations(ctx context.Context, jsonPath, backupPath string) e
 
 	// Create backup directory
 	if err := os.MkdirAll(backupPath, 0755); err != nil {
-		return fmt.Errorf("failed to create backup directory: %w", err)
+		return errors.Wrap(err, "failed to create backup directory")
 	}
 
 	// Copy all JSON files to backup directory
@@ -406,23 +408,23 @@ func BackupJSONConversations(ctx context.Context, jsonPath, backupPath string) e
 		backupDir := filepath.Dir(backupFilePath)
 
 		if err := os.MkdirAll(backupDir, 0755); err != nil {
-			return fmt.Errorf("failed to create backup subdirectory: %w", err)
+			return errors.Wrap(err, "failed to create backup subdirectory")
 		}
 
 		data, err := os.ReadFile(path)
 		if err != nil {
-			return fmt.Errorf("failed to read source file: %w", err)
+			return errors.Wrap(err, "failed to read source file")
 		}
 
 		if err := os.WriteFile(backupFilePath, data, 0644); err != nil {
-			return fmt.Errorf("failed to write backup file: %w", err)
+			return errors.Wrap(err, "failed to write backup file")
 		}
 
 		return nil
 	})
 
 	if err != nil {
-		return fmt.Errorf("failed to backup JSON conversations: %w", err)
+		return errors.Wrap(err, "failed to backup JSON conversations")
 	}
 
 	logger.G(ctx).WithField("backup_path", backupPath).Info("Successfully backed up JSON conversations")

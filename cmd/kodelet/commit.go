@@ -12,6 +12,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
 
@@ -51,13 +52,13 @@ You must stage your changes (using 'git add') before running this command.`,
 
 		// Check if we're in a git repository
 		if !isGitRepository() {
-			presenter.Error(fmt.Errorf("not a git repository"), "Please run this command from a git repository")
+			presenter.Error(errors.New("not a git repository"), "Please run this command from a git repository")
 			os.Exit(1)
 		}
 
 		// Check if there are staged changes
 		if !hasStagedChanges() {
-			presenter.Error(fmt.Errorf("no staged changes found"), "Please stage your changes using 'git add' first")
+			presenter.Error(errors.New("no staged changes found"), "Please stage your changes using 'git add' first")
 			os.Exit(1)
 		}
 
@@ -278,13 +279,13 @@ func createCommit(_ context.Context, message string, sign bool) error {
 	// Create a temporary file for the commit message
 	tempFile, err := os.CreateTemp("", "kodelet-commit-*.txt")
 	if err != nil {
-		return fmt.Errorf("error creating temporary file: %w", err)
+		return errors.Wrapf(err, "error creating temporary file")
 	}
 	defer os.Remove(tempFile.Name())
 
 	// Write the message to the file
 	if _, err := tempFile.WriteString(message); err != nil {
-		return fmt.Errorf("error writing to temporary file: %w", err)
+		return errors.Wrapf(err, "error writing to temporary file")
 	}
 	tempFile.Close()
 

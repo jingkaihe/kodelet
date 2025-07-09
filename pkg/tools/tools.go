@@ -146,7 +146,7 @@ func RunTool(ctx context.Context, state tooltypes.State, toolName string, parame
 
 	if result.IsError() {
 		span.SetStatus(codes.Error, result.GetError())
-		span.RecordError(fmt.Errorf("%s", result.GetError()))
+		span.RecordError(errors.New(result.GetError()))
 	} else {
 		span.SetStatus(codes.Ok, "")
 	}

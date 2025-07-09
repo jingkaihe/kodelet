@@ -4,13 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/pkg/errors"
 	"go.etcd.io/bbolt"
 )
 
@@ -27,7 +27,7 @@ func (s *BBoltConversationStore) withDB(operation func(*bbolt.DB) error) error {
 		Timeout: 2 * time.Second, // Reasonable timeout for lock acquisition
 	})
 	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
+		return errors.Wrap(err, "failed to open database")
 	}
 	defer db.Close() // Always close after operation
 
@@ -55,7 +55,7 @@ func NewBBoltConversationStore(ctx context.Context, dbPath string) (*BBoltConver
 	// Create directory if needed
 	dir := filepath.Dir(dbPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create database directory: %w", err)
+		return nil, errors.Wrap(err, "failed to create database directory")
 	}
 
 	store := &BBoltConversationStore{
@@ -67,7 +67,7 @@ func NewBBoltConversationStore(ctx context.Context, dbPath string) (*BBoltConver
 		return store.ensureBuckets(db)
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to initialize database: %w", err)
+		return nil, errors.Wrap(err, "failed to initialize database")
 	}
 
 	return store, nil
@@ -81,7 +81,7 @@ func (s *BBoltConversationStore) Save(record ConversationRecord) error {
 			conversationsBucket := tx.Bucket([]byte("conversations"))
 			recordData, err := json.Marshal(record)
 			if err != nil {
-				return fmt.Errorf("failed to marshal conversation record: %w", err)
+				return errors.Wrap(err, "failed to marshal conversation record")
 			}
 
 			// 2. Save summary for efficient listing
@@ -89,7 +89,7 @@ func (s *BBoltConversationStore) Save(record ConversationRecord) error {
 			summary := record.ToSummary()
 			summaryData, err := json.Marshal(summary)
 			if err != nil {
-				return fmt.Errorf("failed to marshal conversation summary: %w", err)
+				return errors.Wrap(err, "failed to marshal conversation summary")
 			}
 
 			// 3. Save search index fields (no JSON, raw strings)
@@ -97,16 +97,16 @@ func (s *BBoltConversationStore) Save(record ConversationRecord) error {
 
 			// Atomic writes to all three buckets
 			if err := conversationsBucket.Put([]byte(record.ID), recordData); err != nil {
-				return fmt.Errorf("failed to save conversation record: %w", err)
+				return errors.Wrap(err, "failed to save conversation record")
 			}
 			if err := summariesBucket.Put([]byte("conv:"+record.ID), summaryData); err != nil {
-				return fmt.Errorf("failed to save conversation summary: %w", err)
+				return errors.Wrap(err, "failed to save conversation summary")
 			}
 			if err := searchBucket.Put([]byte("msg:"+record.ID), []byte(summary.FirstMessage)); err != nil {
-				return fmt.Errorf("failed to save search index for message: %w", err)
+				return errors.Wrap(err, "failed to save search index for message")
 			}
 			if err := searchBucket.Put([]byte("sum:"+record.ID), []byte(summary.Summary)); err != nil {
-				return fmt.Errorf("failed to save search index for summary: %w", err)
+				return errors.Wrap(err, "failed to save search index for summary")
 			}
 
 			return nil
@@ -122,7 +122,7 @@ func (s *BBoltConversationStore) Load(id string) (ConversationRecord, error) {
 			bucket := tx.Bucket([]byte("conversations"))
 			data := bucket.Get([]byte(id))
 			if data == nil {
-				return fmt.Errorf("conversation not found: %s", id)
+				return errors.Errorf("conversation not found: %s", id)
 			}
 			return json.Unmarshal(data, &record)
 		})
@@ -175,20 +175,20 @@ func (s *BBoltConversationStore) Delete(id string) error {
 
 			// Delete from conversations bucket
 			if err := conversationsBucket.Delete([]byte(id)); err != nil {
-				return fmt.Errorf("failed to delete conversation record: %w", err)
+				return errors.Wrap(err, "failed to delete conversation record")
 			}
 
 			// Delete from summaries bucket
 			if err := summariesBucket.Delete([]byte("conv:" + id)); err != nil {
-				return fmt.Errorf("failed to delete conversation summary: %w", err)
+				return errors.Wrap(err, "failed to delete conversation summary")
 			}
 
 			// Delete from search index
 			if err := searchBucket.Delete([]byte("msg:" + id)); err != nil {
-				return fmt.Errorf("failed to delete search index for message: %w", err)
+				return errors.Wrap(err, "failed to delete search index for message")
 			}
 			if err := searchBucket.Delete([]byte("sum:" + id)); err != nil {
-				return fmt.Errorf("failed to delete search index for summary: %w", err)
+				return errors.Wrap(err, "failed to delete search index for summary")
 			}
 
 			return nil
