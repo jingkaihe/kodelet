@@ -78,6 +78,15 @@ func getUsageConfigFromFlags(cmd *cobra.Command) *UsageConfig {
 	return config
 }
 
+// toUsageSummaries converts ConversationSummary slice to usage.ConversationSummary interface slice
+func toUsageSummaries(summaries []conversations.ConversationSummary) []usage.ConversationSummary {
+	result := make([]usage.ConversationSummary, len(summaries))
+	for i, s := range summaries {
+		result[i] = s
+	}
+	return result
+}
+
 // parseTimeSpec parses time specifications like "1d", "1w", "2025-06-01"
 func parseTimeSpec(spec string) (time.Time, error) {
 	return parseTimeSpecWithClock(spec, time.Now)
@@ -185,41 +194,8 @@ func runUsageCmd(ctx context.Context, config *UsageConfig) {
 		return
 	}
 
-	// Load full conversation records to get usage data
-	var records []conversations.ConversationRecord
-	for _, summary := range summaries {
-		record, err := store.Load(summary.ID)
-		if err != nil {
-			// Skip records that can't be loaded but log the error
-			fmt.Fprintf(os.Stderr, "Warning: failed to load conversation %s: %v\n", summary.ID, err)
-			continue
-		}
-		records = append(records, record)
-	}
-
-	// Convert to usage records
-	var usageRecords []usage.ConversationRecord
-	for _, record := range records {
-		// Calculate message count from raw messages
-		messageCount := 0
-		if len(record.RawMessages) > 0 {
-			var messages []interface{}
-			if err := json.Unmarshal(record.RawMessages, &messages); err == nil {
-				messageCount = len(messages)
-			}
-		}
-
-		usageRecords = append(usageRecords, usage.ConversationRecord{
-			ID:           record.ID,
-			CreatedAt:    record.CreatedAt,
-			UpdatedAt:    record.UpdatedAt,
-			MessageCount: messageCount,
-			Usage:        record.Usage,
-		})
-	}
-
-	// Aggregate usage statistics
-	stats := usage.CalculateUsageStats(usageRecords, startTime, endTime)
+	// Calculate usage statistics directly from summaries
+	stats := usage.CalculateUsageStats(toUsageSummaries(summaries), startTime, endTime)
 
 	// Display results
 	if config.Format == "json" {
@@ -348,18 +324,6 @@ func formatNumber(n int) string {
 }
 
 // aggregateUsageStats is a wrapper around usage.CalculateUsageStats for testing
-func aggregateUsageStats(records []conversations.ConversationRecord, startTime, endTime time.Time) *UsageStats {
-	// Convert to usage records
-	var usageRecords []usage.ConversationRecord
-	for _, record := range records {
-		usageRecords = append(usageRecords, usage.ConversationRecord{
-			ID:           record.ID,
-			CreatedAt:    record.CreatedAt,
-			UpdatedAt:    record.UpdatedAt,
-			MessageCount: 0, // Not used in aggregation
-			Usage:        record.Usage,
-		})
-	}
-
-	return usage.CalculateUsageStats(usageRecords, startTime, endTime)
+func aggregateUsageStats(summaries []conversations.ConversationSummary, startTime, endTime time.Time) *UsageStats {
+	return usage.CalculateUsageStats(toUsageSummaries(summaries), startTime, endTime)
 }

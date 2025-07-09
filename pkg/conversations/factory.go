@@ -50,5 +50,3 @@ func GetConversationStore(ctx context.Context) (ConversationStore, error) {
 
 	return NewConversationStore(ctx, config)
 }
-
-

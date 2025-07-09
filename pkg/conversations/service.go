@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/logger"
@@ -13,6 +12,15 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/jingkaihe/kodelet/pkg/usage"
 )
+
+// toUsageSummaries converts ConversationSummary slice to usage.ConversationSummary interface slice
+func toUsageSummaries(summaries []ConversationSummary) []usage.ConversationSummary {
+	result := make([]usage.ConversationSummary, len(summaries))
+	for i, s := range summaries {
+		result[i] = s
+	}
+	return result
+}
 
 // ConversationServiceInterface defines the interface for conversation operations
 type ConversationServiceInterface interface {
@@ -124,39 +132,8 @@ func (s *ConversationService) ListConversations(ctx context.Context, req *ListCo
 	// Calculate statistics for the returned conversations
 	var stats *ConversationStatistics
 	if len(summaries) > 0 {
-		// Load conversation records to get usage data
-		var records []ConversationRecord
-		for _, summary := range summaries {
-			record, err := s.store.Load(summary.ID)
-			if err != nil {
-				logger.G(ctx).WithField("id", summary.ID).WithError(err).Warn("Failed to load conversation for statistics")
-				continue
-			}
-			records = append(records, record)
-		}
-
-		// Calculate usage statistics using the usage package
-		var usageRecords []usage.ConversationRecord
-		for _, record := range records {
-			// Calculate message count from raw messages
-			messageCount := 0
-			if len(record.RawMessages) > 0 {
-				var messages []interface{}
-				if err := json.Unmarshal(record.RawMessages, &messages); err == nil {
-					messageCount = len(messages)
-				}
-			}
-
-			usageRecords = append(usageRecords, usage.ConversationRecord{
-				ID:           record.ID,
-				CreatedAt:    record.CreatedAt,
-				UpdatedAt:    record.UpdatedAt,
-				MessageCount: messageCount,
-				Usage:        record.Usage,
-			})
-		}
-
-		usageStats := usage.CalculateConversationUsageStats(usageRecords)
+		// Calculate usage statistics directly from summaries
+		usageStats := usage.CalculateConversationUsageStats(toUsageSummaries(summaries))
 
 		// Convert to ConversationStatistics
 		stats = &ConversationStatistics{
@@ -316,59 +293,8 @@ func (s *ConversationService) GetConversationStatistics(ctx context.Context) (*C
 		return stats, nil
 	}
 
-	// Load conversation records concurrently for better performance
-	const maxConcurrent = 20 // Limit concurrent loads to avoid overwhelming the system
-	semaphore := make(chan struct{}, maxConcurrent)
-	var mu sync.Mutex
-	var records []ConversationRecord
-	var wg sync.WaitGroup
-
-	for _, summary := range summaries {
-		wg.Add(1)
-		go func(summaryID string) {
-			defer wg.Done()
-
-			// Acquire semaphore
-			semaphore <- struct{}{}
-			defer func() { <-semaphore }()
-
-			record, err := s.store.Load(summaryID)
-			if err != nil {
-				logger.G(ctx).WithField("id", summaryID).WithError(err).Warn("Failed to load conversation for statistics")
-				return
-			}
-
-			mu.Lock()
-			records = append(records, record)
-			mu.Unlock()
-		}(summary.ID)
-	}
-
-	// Wait for all goroutines to complete
-	wg.Wait()
-
-	// Calculate usage statistics using the usage package
-	var usageRecords []usage.ConversationRecord
-	for _, record := range records {
-		// Calculate message count from raw messages
-		messageCount := 0
-		if len(record.RawMessages) > 0 {
-			var messages []interface{}
-			if err := json.Unmarshal(record.RawMessages, &messages); err == nil {
-				messageCount = len(messages)
-			}
-		}
-
-		usageRecords = append(usageRecords, usage.ConversationRecord{
-			ID:           record.ID,
-			CreatedAt:    record.CreatedAt,
-			UpdatedAt:    record.UpdatedAt,
-			MessageCount: messageCount,
-			Usage:        record.Usage,
-		})
-	}
-
-	usageStats := usage.CalculateConversationUsageStats(usageRecords)
+	// Calculate usage statistics directly from summaries
+	usageStats := usage.CalculateConversationUsageStats(toUsageSummaries(summaries))
 
 	// Convert to ConversationStatistics
 	stats := &ConversationStatistics{
