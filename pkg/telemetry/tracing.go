@@ -4,9 +4,9 @@ package telemetry
 import (
 	"context"
 	"errors"
-	"fmt"
 	"time"
 
+	pkgerrors "github.com/pkg/errors"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	"go.opentelemetry.io/otel/propagation"
@@ -47,7 +47,7 @@ func InitTracer(ctx context.Context, cfg Config) (shutdown func(context.Context)
 		),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create resource: %w", err)
+		return nil, pkgerrors.Wrap(err, "failed to create resource")
 	}
 
 	// Configure OTLP exporter for Grafana Cloud or other backends
@@ -56,7 +56,7 @@ func InitTracer(ctx context.Context, cfg Config) (shutdown func(context.Context)
 	// - OTEL_EXPORTER_OTLP_HEADERS for auth
 	traceExporter, err := otlptracehttp.New(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create trace exporter: %w", err)
+		return nil, pkgerrors.Wrap(err, "failed to create trace exporter")
 	}
 	shutdownFuncs = append(shutdownFuncs, traceExporter.Shutdown)
 

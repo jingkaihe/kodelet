@@ -8,6 +8,7 @@ import (
 
 	"github.com/chromedp/chromedp"
 	"github.com/invopop/jsonschema"
+	"github.com/pkg/errors"
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/jingkaihe/kodelet/pkg/logger"
@@ -121,15 +122,15 @@ func (t ClickTool) Description() string {
 func (t ClickTool) ValidateInput(state tools.State, parameters string) error {
 	var input ClickInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
-		return fmt.Errorf("failed to parse input: %w", err)
+		return errors.Wrap(err, "failed to parse input")
 	}
 
 	if input.ElementID <= 0 {
-		return fmt.Errorf("element_id is required and must be positive")
+		return errors.New("element_id is required and must be positive")
 	}
 
 	if input.Timeout < 0 {
-		return fmt.Errorf("timeout must be non-negative")
+		return errors.New("timeout must be non-negative")
 	}
 
 	return nil

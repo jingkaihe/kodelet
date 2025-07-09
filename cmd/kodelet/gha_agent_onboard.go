@@ -59,18 +59,18 @@ This command will:
 
 		// Check prerequisites
 		if !isGitRepository() {
-			presenter.Error(fmt.Errorf("not a git repository"), "Please run this command from a git repository")
+			presenter.Error(errors.New("not a git repository"), "Please run this command from a git repository")
 			os.Exit(1)
 		}
 
 		if !isGhCliInstalled() {
-			presenter.Error(fmt.Errorf("GitHub CLI not installed"), "GitHub CLI (gh) is not installed. Please install it first")
+			presenter.Error(errors.New("GitHub CLI not installed"), "GitHub CLI (gh) is not installed. Please install it first")
 			presenter.Info("Visit https://cli.github.com/ for installation instructions")
 			os.Exit(1)
 		}
 
 		if !isGhAuthenticated() {
-			presenter.Error(fmt.Errorf("not authenticated with GitHub"), "You are not authenticated with GitHub. Please run 'gh auth login' first")
+			presenter.Error(errors.New("not authenticated with GitHub"), "You are not authenticated with GitHub. Please run 'gh auth login' first")
 			os.Exit(1)
 		}
 

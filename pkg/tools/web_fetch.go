@@ -3,7 +3,6 @@ package tools
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -17,6 +16,7 @@ import (
 
 	md "github.com/JohannesKaufmann/html-to-markdown"
 	"github.com/invopop/jsonschema"
+	"github.com/pkg/errors"
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/jingkaihe/kodelet/pkg/logger"
@@ -201,7 +201,7 @@ func (t *WebFetchTool) ValidateInput(state tooltypes.State, parameters string) e
 	// Validate URL format and scheme
 	parsedURL, err := url.Parse(input.URL)
 	if err != nil {
-		return fmt.Errorf("invalid URL: %w", err)
+		return errors.Wrap(err, "invalid URL")
 	}
 
 	// Allow HTTP for localhost/internal addresses, require HTTPS for external domains
@@ -217,10 +217,10 @@ func (t *WebFetchTool) ValidateInput(state tooltypes.State, parameters string) e
 	if t.domainFilter != nil {
 		allowed, err := t.domainFilter.IsAllowed(input.URL)
 		if err != nil {
-			return fmt.Errorf("failed to validate domain: %w", err)
+			return errors.Wrap(err, "failed to validate domain")
 		}
 		if !allowed {
-			return fmt.Errorf("domain %s is not in the allowed domains list", parsedURL.Hostname())
+			return errors.Errorf("domain %s is not in the allowed domains list", parsedURL.Hostname())
 		}
 	}
 
@@ -522,7 +522,7 @@ func fetchWithSameDomainRedirects(ctx context.Context, urlStr string) (string, s
 	// Parse the original URL to get the domain
 	parsedURL, err := url.Parse(urlStr)
 	if err != nil {
-		return "", "", fmt.Errorf("invalid URL: %w", err)
+		return "", "", errors.Wrap(err, "invalid URL")
 	}
 
 	// Allow HTTP for localhost/internal addresses, require HTTPS for external domains
@@ -541,7 +541,7 @@ func fetchWithSameDomainRedirects(ctx context.Context, urlStr string) (string, s
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			// Check if the redirect is to the same domain
 			if req.URL.Hostname() != originalDomain {
-				return fmt.Errorf("redirect to different domain not allowed: %s -> %s",
+				return errors.Errorf("redirect to different domain not allowed: %s -> %s",
 					originalDomain, req.URL.Hostname())
 			}
 
@@ -569,7 +569,7 @@ func fetchWithSameDomainRedirects(ctx context.Context, urlStr string) (string, s
 
 	// Check status code
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", "", fmt.Errorf("HTTP error: %d %s", resp.StatusCode, resp.Status)
+		return "", "", errors.Errorf("HTTP error: %d %s", resp.StatusCode, resp.Status)
 	}
 
 	// Check content type
@@ -580,7 +580,7 @@ func fetchWithSameDomainRedirects(ctx context.Context, urlStr string) (string, s
 		strings.Contains(contentType, "image/") ||
 		strings.Contains(contentType, "audio/") ||
 		strings.Contains(contentType, "video/") {
-		return "", "", fmt.Errorf("unsupported content type: %s", contentType)
+		return "", "", errors.Errorf("unsupported content type: %s", contentType)
 	}
 
 	// Read the body

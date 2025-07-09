@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/invopop/jsonschema"
+	"github.com/pkg/errors"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/jingkaihe/kodelet/pkg/utils"
 	"go.opentelemetry.io/otel/attribute"
@@ -149,44 +150,44 @@ func (t *FileEditTool) TracingKVs(parameters string) ([]attribute.KeyValue, erro
 func (t *FileEditTool) ValidateInput(state tooltypes.State, parameters string) error {
 	var input FileEditInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
-		return fmt.Errorf("invalid input: %w", err)
+		return errors.Wrap(err, "invalid input")
 	}
 
 	// check if the file exists
 	info, err := os.Stat(input.FilePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return fmt.Errorf("file %s does not exist, use the 'FileWrite' tool to create instead", input.FilePath)
+			return errors.Errorf("file %s does not exist, use the 'FileWrite' tool to create instead", input.FilePath)
 		}
-		return fmt.Errorf("failed to check the file status: %w", err)
+		return errors.Wrap(err, "failed to check the file status")
 	}
 
 	lastAccessed := info.ModTime()
 	lastRead, err := state.GetFileLastAccessed(input.FilePath)
 	if err != nil {
-		return fmt.Errorf("failed to get the last access time of the file: %w", err)
+		return errors.Wrap(err, "failed to get the last access time of the file")
 	}
 
 	if lastAccessed.After(lastRead) {
-		return fmt.Errorf("file %s has been modified since the last read either by another tool or by the user, please read the file again", input.FilePath)
+		return errors.Errorf("file %s has been modified since the last read either by another tool or by the user, please read the file again", input.FilePath)
 	}
 
 	// check if the old text is unique
 	content, err := os.ReadFile(input.FilePath)
 	if err != nil {
-		return fmt.Errorf("failed to read the file: %w", err)
+		return errors.Wrap(err, "failed to read the file")
 	}
 
 	oldText := input.OldText
 
 	if !strings.Contains(string(content), oldText) {
-		return fmt.Errorf("old text not found in the file, please ensure the text exists")
+		return errors.New("old text not found in the file, please ensure the text exists")
 	}
 
 	// Count occurrences to ensure uniqueness
 	occurrences := strings.Count(string(content), oldText)
 	if occurrences > 1 {
-		return fmt.Errorf("old text appears %d times in the file, please ensure the old text is unique", occurrences)
+		return errors.Errorf("old text appears %d times in the file, please ensure the old text is unique", occurrences)
 	}
 
 	return nil

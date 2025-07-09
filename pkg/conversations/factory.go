@@ -2,10 +2,10 @@ package conversations
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/pkg/errors"
 )
 
 // NewConversationStore creates the appropriate ConversationStore implementation
@@ -16,7 +16,7 @@ func NewConversationStore(ctx context.Context, config *Config) (ConversationStor
 		var err error
 		config, err = DefaultConfig()
 		if err != nil {
-			return nil, fmt.Errorf("failed to create default config: %w", err)
+			return nil, errors.Wrap(err, "failed to create default config")
 		}
 	}
 

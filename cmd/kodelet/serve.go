@@ -12,6 +12,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/jingkaihe/kodelet/pkg/webui"
+	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
 
@@ -69,7 +70,7 @@ func getServeConfigFromFlags(cmd *cobra.Command) *ServeConfig {
 func validateServeConfig(config *ServeConfig) error {
 	// Validate host
 	if config.Host == "" {
-		return fmt.Errorf("host cannot be empty")
+		return errors.New("host cannot be empty")
 	}
 
 	// Check if host is a valid hostname or IP address
@@ -77,14 +78,14 @@ func validateServeConfig(config *ServeConfig) error {
 		if ip := net.ParseIP(config.Host); ip == nil {
 			// Not an IP, check if it's a valid hostname
 			if strings.Contains(config.Host, " ") || strings.Contains(config.Host, ":") {
-				return fmt.Errorf("invalid host: %s", config.Host)
+				return errors.New(fmt.Sprintf("invalid host: %s", config.Host))
 			}
 		}
 	}
 
 	// Validate port
 	if config.Port < 1 || config.Port > 65535 {
-		return fmt.Errorf("port must be between 1 and 65535, got %d", config.Port)
+		return errors.New(fmt.Sprintf("port must be between 1 and 65535, got %d", config.Port))
 	}
 
 	// Check for privileged ports

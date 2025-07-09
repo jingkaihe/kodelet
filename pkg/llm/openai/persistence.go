@@ -8,6 +8,7 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
+	"github.com/pkg/errors"
 	"github.com/sashabaranov/go-openai"
 
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -59,7 +60,7 @@ func (t *OpenAIThread) SaveConversation(ctx context.Context, summarize bool) err
 	// Serialize the thread state
 	messagesJSON, err := json.Marshal(t.messages)
 	if err != nil {
-		return fmt.Errorf("error marshaling messages: %w", err)
+		return errors.Wrap(err, "error marshaling messages")
 	}
 
 	// Build the conversation record
@@ -92,18 +93,18 @@ func (t *OpenAIThread) loadConversation() error {
 	// Try to load the conversation
 	record, err := t.store.Load(t.conversationID)
 	if err != nil {
-		return fmt.Errorf("failed to load conversation: %w", err)
+		return errors.Wrap(err, "failed to load conversation")
 	}
 
 	// Check if this is an OpenAI model conversation
 	if record.ModelType != "" && record.ModelType != "openai" {
-		return fmt.Errorf("incompatible model type: %s", record.ModelType)
+		return errors.Errorf("incompatible model type: %s", record.ModelType)
 	}
 
 	// Deserialize the messages
 	var messages []openai.ChatCompletionMessage
 	if err := json.Unmarshal(record.RawMessages, &messages); err != nil {
-		return fmt.Errorf("error unmarshaling messages: %w", err)
+		return errors.Wrap(err, "error unmarshaling messages")
 	}
 
 	t.cleanupOrphanedMessages()
@@ -122,7 +123,7 @@ func (t *OpenAIThread) loadConversation() error {
 func ExtractMessages(data []byte, toolResults map[string]tooltypes.StructuredToolResult) ([]llmtypes.Message, error) {
 	var messages []openai.ChatCompletionMessage
 	if err := json.Unmarshal(data, &messages); err != nil {
-		return nil, fmt.Errorf("error unmarshaling messages: %w", err)
+		return nil, errors.Wrap(err, "error unmarshaling messages")
 	}
 
 	result := make([]llmtypes.Message, 0, len(messages))

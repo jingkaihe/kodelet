@@ -8,6 +8,7 @@ import (
 
 	"github.com/chromedp/chromedp"
 	"github.com/invopop/jsonschema"
+	"github.com/pkg/errors"
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/jingkaihe/kodelet/pkg/logger"
@@ -125,7 +126,7 @@ Elements are formatted as: [index] <type> content
 func (t GetPageTool) ValidateInput(state tools.State, parameters string) error {
 	var input GetPageInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
-		return fmt.Errorf("failed to parse input: %w", err)
+		return errors.Wrap(err, "failed to parse input")
 	}
 
 	return nil

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/invopop/jsonschema"
+	"github.com/pkg/errors"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -143,22 +144,22 @@ func (t *TodoWriteTool) GenerateSchema() *jsonschema.Schema {
 func (t *TodoWriteTool) ValidateInput(state tooltypes.State, parameters string) error {
 	var input TodoWriteInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
-		return fmt.Errorf("invalid input: %w", err)
+		return errors.Wrap(err, "invalid input")
 	}
 
 	if len(input.Todos) == 0 {
-		return fmt.Errorf("todos should have at least one todo")
+		return errors.New("todos should have at least one todo")
 	}
 
 	for i, todo := range input.Todos {
 		if todo.Content == "" {
-			return fmt.Errorf("todo %d content is required", i)
+			return errors.Errorf("todo %d content is required", i)
 		}
 		if todo.Status == "" {
-			return fmt.Errorf("todo %d status must be one of %v", i, []Status{Pending, InProgress, Completed, Canceled})
+			return errors.Errorf("todo %d status must be one of %v", i, []Status{Pending, InProgress, Completed, Canceled})
 		}
 		if todo.Priority == "" {
-			return fmt.Errorf("todo %d priority must be one of %v", i, []Priority{Low, Medium, High})
+			return errors.Errorf("todo %d priority must be one of %v", i, []Priority{Low, Medium, High})
 		}
 	}
 

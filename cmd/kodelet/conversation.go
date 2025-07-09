@@ -19,6 +19,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
 
@@ -460,7 +461,7 @@ func (o *ConversationListOutput) renderJSON(w io.Writer) error {
 
 	jsonData, err := json.MarshalIndent(output, "", "  ")
 	if err != nil {
-		return fmt.Errorf("error generating JSON output: %v", err)
+		return errors.Wrap(err, "error generating JSON output")
 	}
 
 	_, err = fmt.Fprintln(w, string(jsonData))
@@ -650,7 +651,7 @@ func showConversationCmd(ctx context.Context, id string, config *ConversationSho
 		// Format as readable text with user/assistant prefixes
 		displayConversation(messages)
 	default:
-		presenter.Error(fmt.Errorf("unsupported format: %s", config.Format), "Unknown format. Supported formats are raw, json, and text")
+		presenter.Error(errors.Errorf("unsupported format: %s", config.Format), "Unknown format. Supported formats are raw, json, and text")
 		os.Exit(1)
 	}
 }
@@ -712,7 +713,7 @@ func importConversationCmd(ctx context.Context, source string, config *Conversat
 	// Check if conversation already exists
 	if _, err := store.Load(record.ID); err == nil {
 		if !config.Force {
-			presenter.Error(fmt.Errorf("conversation with ID %s already exists", record.ID), "Use --force to overwrite")
+			presenter.Error(errors.Errorf("conversation with ID %s already exists", record.ID), "Use --force to overwrite")
 			os.Exit(1)
 		}
 	}
@@ -754,7 +755,7 @@ func exportConversationCmd(ctx context.Context, conversationID string, path stri
 	if config.UseGist || config.UsePublicGist {
 		// Check for conflicting flags
 		if config.UseGist && config.UsePublicGist {
-			presenter.Error(fmt.Errorf("cannot use both --gist and --public-gist flags"), "Conflicting flags")
+			presenter.Error(errors.New("cannot use both --gist and --public-gist flags"), "Conflicting flags")
 			os.Exit(1)
 		}
 
@@ -794,12 +795,12 @@ func readConversationData(source string) ([]byte, error) {
 func readFromURL(urlStr string) ([]byte, error) {
 	resp, err := http.Get(urlStr)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch from URL: %w", err)
+		return nil, errors.Wrap(err, "failed to fetch from URL")
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP error %d: %s", resp.StatusCode, resp.Status)
+		return nil, errors.Errorf("HTTP error %d: %s", resp.StatusCode, resp.Status)
 	}
 
 	return io.ReadAll(resp.Body)
@@ -809,25 +810,25 @@ func readFromURL(urlStr string) ([]byte, error) {
 func validateConversationRecord(data []byte) (*conversations.ConversationRecord, error) {
 	var record conversations.ConversationRecord
 	if err := json.Unmarshal(data, &record); err != nil {
-		return nil, fmt.Errorf("invalid JSON format: %w", err)
+		return nil, errors.Wrap(err, "invalid JSON format")
 	}
 
 	// Validate required fields
 	if record.ID == "" {
-		return nil, fmt.Errorf("conversation ID is required")
+		return nil, errors.New("conversation ID is required")
 	}
 
 	if record.ModelType == "" {
-		return nil, fmt.Errorf("model type is required")
+		return nil, errors.New("model type is required")
 	}
 
 	// Validate supported providers
 	if record.ModelType != "anthropic" && record.ModelType != "openai" {
-		return nil, fmt.Errorf("unsupported model type: %s (supported: anthropic, openai)", record.ModelType)
+		return nil, errors.Errorf("unsupported model type: %s (supported: anthropic, openai)", record.ModelType)
 	}
 
 	if len(record.RawMessages) == 0 {
-		return nil, fmt.Errorf("raw messages are required")
+		return nil, errors.New("raw messages are required")
 	}
 
 	// Validate that messages can be extracted
@@ -837,7 +838,7 @@ func validateConversationRecord(data []byte) (*conversations.ConversationRecord,
 
 	_, err := llm.ExtractMessages(record.ModelType, record.RawMessages, record.ToolResults)
 	if err != nil {
-		return nil, fmt.Errorf("failed to extract messages: %w", err)
+		return nil, errors.Wrap(err, "failed to extract messages")
 	}
 
 	// Set timestamps if not provided
@@ -856,14 +857,14 @@ func createGist(conversationID string, jsonData []byte, isPrivate bool) error {
 	// Create a temporary file
 	tmpFile, err := os.CreateTemp("", fmt.Sprintf("conversation_%s_*.json", conversationID))
 	if err != nil {
-		return fmt.Errorf("failed to create temporary file: %w", err)
+		return errors.Wrap(err, "failed to create temporary file")
 	}
 	defer os.Remove(tmpFile.Name())
 
 	// Write data to temporary file
 	if _, err := tmpFile.Write(jsonData); err != nil {
 		tmpFile.Close()
-		return fmt.Errorf("failed to write to temporary file: %w", err)
+		return errors.Wrap(err, "failed to write to temporary file")
 	}
 	tmpFile.Close()
 
@@ -879,7 +880,7 @@ func createGist(conversationID string, jsonData []byte, isPrivate bool) error {
 	cmd := exec.Command("gh", args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("failed to create gist: %w (output: %s)", err, string(output))
+		return errors.Wrapf(err, "failed to create gist (output: %s)", string(output))
 	}
 
 	result := strings.TrimSpace(string(output))

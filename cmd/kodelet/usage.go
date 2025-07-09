@@ -14,6 +14,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/jingkaihe/kodelet/pkg/usage"
+	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
 
@@ -107,12 +108,12 @@ func parseTimeSpecWithClock(spec string, now func() time.Time) (time.Time, error
 	re := regexp.MustCompile(`^(\d+)([dhw])$`)
 	matches := re.FindStringSubmatch(spec)
 	if len(matches) != 3 {
-		return time.Time{}, fmt.Errorf("invalid time specification: %s (expected format: YYYY-MM-DD, 1d, 1w, etc.)", spec)
+		return time.Time{}, errors.New(fmt.Sprintf("invalid time specification: %s (expected format: YYYY-MM-DD, 1d, 1w, etc.)", spec))
 	}
 
 	amount, err := strconv.Atoi(matches[1])
 	if err != nil {
-		return time.Time{}, fmt.Errorf("invalid number in time specification: %s", matches[1])
+		return time.Time{}, errors.New(fmt.Sprintf("invalid number in time specification: %s", matches[1]))
 	}
 
 	unit := matches[2]
@@ -126,7 +127,7 @@ func parseTimeSpecWithClock(spec string, now func() time.Time) (time.Time, error
 	case "w":
 		return currentTime.AddDate(0, 0, -amount*7), nil
 	default:
-		return time.Time{}, fmt.Errorf("invalid time unit: %s (supported: d, h, w)", unit)
+		return time.Time{}, errors.New(fmt.Sprintf("invalid time unit: %s (supported: d, h, w)", unit))
 	}
 }
 

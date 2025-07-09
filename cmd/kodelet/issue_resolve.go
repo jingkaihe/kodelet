@@ -11,6 +11,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
 
@@ -43,11 +44,11 @@ func NewIssueResolveConfig() *IssueResolveConfig {
 // Validate validates the IssueResolveConfig and returns an error if invalid
 func (c *IssueResolveConfig) Validate() error {
 	if c.Provider != GitHubProvider {
-		return fmt.Errorf("unsupported provider: %s, only '%s' is supported", c.Provider, GitHubProvider)
+		return errors.New(fmt.Sprintf("unsupported provider: %s, only '%s' is supported", c.Provider, GitHubProvider))
 	}
 
 	if c.IssueURL == "" {
-		return fmt.Errorf("issue URL cannot be empty")
+		return errors.New("issue URL cannot be empty")
 	}
 
 	return nil
@@ -168,15 +169,15 @@ func getIssueResolveConfigFromFlags(cmd *cobra.Command) *IssueResolveConfig {
 // validatePrerequisites checks that all necessary tools and authentication are in place
 func validatePrerequisites() error {
 	if !isGitRepository() {
-		return fmt.Errorf("not a git repository. Please run this command from a git repository")
+		return errors.New("not a git repository. Please run this command from a git repository")
 	}
 
 	if !isGhCliInstalled() {
-		return fmt.Errorf("GitHub CLI (gh) is not installed. Please install it first.\nVisit https://cli.github.com/ for installation instructions")
+		return errors.New("GitHub CLI (gh) is not installed. Please install it first.\nVisit https://cli.github.com/ for installation instructions")
 	}
 
 	if !isGhAuthenticated() {
-		return fmt.Errorf("you are not authenticated with GitHub. Please run 'gh auth login' first")
+		return errors.New("you are not authenticated with GitHub. Please run 'gh auth login' first")
 	}
 
 	return nil

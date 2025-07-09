@@ -14,6 +14,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
 
@@ -91,7 +92,7 @@ var runCmd = &cobra.Command{
 		} else {
 			// No pipe, just use args
 			if len(args) == 0 {
-				presenter.Error(fmt.Errorf("no query provided"), "Please provide a query to execute")
+				presenter.Error(errors.New("no query provided"), "Please provide a query to execute")
 				return
 			}
 			query = strings.Join(args, " ")
@@ -188,7 +189,7 @@ func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
 	}
 	if config.Follow {
 		if config.ResumeConvID != "" {
-			presenter.Error(fmt.Errorf("conflicting flags"), "--follow and --resume cannot be used together")
+			presenter.Error(errors.New("conflicting flags"), "--follow and --resume cannot be used together")
 			os.Exit(1)
 		}
 		var err error
@@ -217,7 +218,7 @@ func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
 	if compactRatio, err := cmd.Flags().GetFloat64("compact-ratio"); err == nil {
 		// Validate compact ratio is between 0.0 and 1.0
 		if compactRatio < 0.0 || compactRatio > 1.0 {
-			presenter.Error(fmt.Errorf("invalid compact-ratio"), "compact-ratio must be between 0.0 and 1.0")
+			presenter.Error(errors.New("invalid compact-ratio"), "compact-ratio must be between 0.0 and 1.0")
 			os.Exit(1)
 		}
 		config.CompactRatio = compactRatio
