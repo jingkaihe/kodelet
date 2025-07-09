@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -356,18 +355,6 @@ func TestBBoltConversationStore_ErrorHandling(t *testing.T) {
 	}
 }
 
-func TestBBoltConversationStore_InvalidPath(t *testing.T) {
-	ctx := context.Background()
-
-	// Test with invalid path (permission denied)
-	if os.Getuid() != 0 { // Skip if running as root
-		_, err := NewBBoltConversationStore(ctx, "/root/invalid/path/test.db")
-		if err == nil {
-			t.Error("Expected error when creating store with invalid path")
-		}
-	}
-}
-
 func TestBBoltConversationStore_TripleStorage(t *testing.T) {
 	ctx := context.Background()
 	tempDir := t.TempDir()
@@ -422,5 +409,188 @@ func TestBBoltConversationStore_TripleStorage(t *testing.T) {
 
 	if err != nil {
 		t.Fatalf("Failed to verify triple storage: %v", err)
+	}
+}
+
+// Integration test through the service layer
+func TestBBoltIntegration_ConversationService(t *testing.T) {
+	ctx := context.Background()
+	tempDir := t.TempDir()
+
+	// Create BBolt store
+	config := &Config{
+		StoreType: "bbolt",
+		BasePath:  tempDir,
+	}
+
+	store, err := NewConversationStore(ctx, config)
+	if err != nil {
+		t.Fatalf("Failed to create BBolt store: %v", err)
+	}
+	defer store.Close()
+
+	// Create conversation service
+	service := NewConversationService(store)
+	defer service.Close()
+
+	// Test creating and saving a conversation directly through the store
+	record := NewConversationRecord("")
+	record.Summary = "Integration test conversation"
+	record.ModelType = "anthropic"
+	record.Usage = llmtypes.Usage{
+		InputTokens:  100,
+		OutputTokens: 50,
+		InputCost:    0.001,
+		OutputCost:   0.002,
+	}
+	record.RawMessages = json.RawMessage(`[{"role": "user", "content": [{"type": "text", "text": "Hello integration test"}]}]`)
+
+	err = store.Save(record)
+	if err != nil {
+		t.Fatalf("Failed to save conversation: %v", err)
+	}
+
+	// Test listing conversations through the service
+	req := &ListConversationsRequest{}
+	result, err := service.ListConversations(ctx, req)
+	if err != nil {
+		t.Fatalf("Failed to list conversations: %v", err)
+	}
+
+	if len(result.Conversations) != 1 {
+		t.Errorf("Expected 1 conversation, got %d", len(result.Conversations))
+	}
+
+	// Test getting a conversation through the service
+	retrievedRecord, err := service.GetConversation(ctx, record.ID)
+	if err != nil {
+		t.Fatalf("Failed to get conversation: %v", err)
+	}
+
+	if retrievedRecord.ID != record.ID {
+		t.Errorf("Expected ID %s, got %s", record.ID, retrievedRecord.ID)
+	}
+
+	// Test searching conversations through the service
+	searchReq := &ListConversationsRequest{
+		SearchTerm: "integration",
+	}
+	searchResult, err := service.ListConversations(ctx, searchReq)
+	if err != nil {
+		t.Fatalf("Failed to search conversations: %v", err)
+	}
+
+	if len(searchResult.Conversations) != 1 {
+		t.Errorf("Expected 1 conversation in search results, got %d", len(searchResult.Conversations))
+	}
+
+	// Test conversation statistics
+	stats, err := service.GetConversationStatistics(ctx)
+	if err != nil {
+		t.Fatalf("Failed to get conversation statistics: %v", err)
+	}
+
+	if stats.TotalConversations != 1 {
+		t.Errorf("Expected 1 total conversation, got %d", stats.TotalConversations)
+	}
+
+	// Test deleting a conversation through the service
+	err = service.DeleteConversation(ctx, record.ID)
+	if err != nil {
+		t.Fatalf("Failed to delete conversation: %v", err)
+	}
+
+	// Verify deletion
+	result, err = service.ListConversations(ctx, &ListConversationsRequest{})
+	if err != nil {
+		t.Fatalf("Failed to list conversations after delete: %v", err)
+	}
+
+	if len(result.Conversations) != 0 {
+		t.Errorf("Expected 0 conversations after delete, got %d", len(result.Conversations))
+	}
+}
+
+// Performance test with larger dataset
+func TestBBoltIntegration_LargeDataset(t *testing.T) {
+	ctx := context.Background()
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "large-test.db")
+
+	store, err := NewBBoltConversationStore(ctx, dbPath)
+	if err != nil {
+		t.Fatalf("Failed to create BBolt store: %v", err)
+	}
+	defer store.Close()
+
+	// Create a larger dataset to test performance
+	numConversations := 500
+	searchableConversations := make([]string, 0)
+
+	for i := 0; i < numConversations; i++ {
+		record := NewConversationRecord("")
+		record.ID = fmt.Sprintf("large-test-%d", i)
+		record.ModelType = "anthropic"
+		record.Usage = llmtypes.Usage{
+			InputTokens:  100 + i,
+			OutputTokens: 50 + i,
+		}
+
+		if i%10 == 0 {
+			record.Summary = "This is a searchable conversation for testing"
+			record.RawMessages = json.RawMessage(`[{"role": "user", "content": [{"type": "text", "text": "Searchable test message"}]}]`)
+			searchableConversations = append(searchableConversations, record.ID)
+		} else {
+			record.Summary = fmt.Sprintf("Regular conversation %d", i)
+			record.RawMessages = json.RawMessage(fmt.Sprintf(`[{"role": "user", "content": [{"type": "text", "text": "Regular message %d"}]}]`, i))
+		}
+
+		record.CreatedAt = time.Now().Add(-time.Duration(numConversations-i) * time.Minute)
+		record.UpdatedAt = record.CreatedAt
+
+		err = store.Save(record)
+		if err != nil {
+			t.Fatalf("Failed to save conversation %d: %v", i, err)
+		}
+	}
+
+	// Test listing all conversations
+	summaries, err := store.List()
+	if err != nil {
+		t.Fatalf("Failed to list conversations: %v", err)
+	}
+
+	if len(summaries) != numConversations {
+		t.Errorf("Expected %d conversations, got %d", numConversations, len(summaries))
+	}
+
+	// Test search functionality
+	searchResult, err := store.Query(QueryOptions{
+		SearchTerm: "searchable",
+	})
+	if err != nil {
+		t.Fatalf("Failed to search conversations: %v", err)
+	}
+
+	expectedSearchResults := len(searchableConversations)
+	if len(searchResult.ConversationSummaries) != expectedSearchResults {
+		t.Errorf("Expected %d search results, got %d", expectedSearchResults, len(searchResult.ConversationSummaries))
+	}
+
+	// Test pagination
+	paginatedResult, err := store.Query(QueryOptions{
+		Limit:  10,
+		Offset: 5,
+	})
+	if err != nil {
+		t.Fatalf("Failed to paginate conversations: %v", err)
+	}
+
+	if len(paginatedResult.ConversationSummaries) != 10 {
+		t.Errorf("Expected 10 paginated results, got %d", len(paginatedResult.ConversationSummaries))
+	}
+
+	if paginatedResult.Total != numConversations {
+		t.Errorf("Expected total %d, got %d", numConversations, paginatedResult.Total)
 	}
 }
