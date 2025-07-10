@@ -1,11 +1,11 @@
 package renderers
 
 import (
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestFileReadRenderer(t *testing.T) {
@@ -27,15 +27,9 @@ func TestFileReadRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "File Read: /test/file.go") {
-			t.Errorf("Expected file path in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Offset: 1") {
-			t.Errorf("Expected offset in output, got: %s", output)
-		}
-		if !strings.Contains(output, "package main") {
-			t.Errorf("Expected file content in output, got: %s", output)
-		}
+		assert.Contains(t, output, "File Read: /test/file.go", "Expected file path in output")
+		assert.Contains(t, output, "Offset: 1", "Expected offset in output")
+		assert.Contains(t, output, "package main", "Expected file content in output")
 	})
 
 	t.Run("Truncated file read", func(t *testing.T) {
@@ -54,9 +48,7 @@ func TestFileReadRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "[truncated]") {
-			t.Errorf("Expected truncation indicator in output, got: %s", output)
-		}
+		assert.Contains(t, output, "[truncated]", "Expected truncation indicator in output")
 	})
 
 	t.Run("Error handling", func(t *testing.T) {
@@ -69,9 +61,7 @@ func TestFileReadRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "Error: File not found") {
-			t.Errorf("Expected error message in output, got: %s", output)
-		}
+		assert.Contains(t, output, "Error: File not found", "Expected error message in output")
 	})
 
 	t.Run("Invalid metadata type", func(t *testing.T) {
@@ -84,9 +74,7 @@ func TestFileReadRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "Invalid metadata type") {
-			t.Errorf("Expected invalid metadata error, got: %s", output)
-		}
+		assert.Contains(t, output, "Invalid metadata type", "Expected invalid metadata error")
 	})
 }
 
@@ -115,13 +103,9 @@ func TestFileEditRenderer(t *testing.T) {
 		output := renderer.RenderCLI(result)
 
 		// Should contain unified diff output
-		if output == "" {
-			t.Errorf("Expected diff output, got empty string")
-		}
+		assert.NotEmpty(t, output, "Expected diff output")
 		// Basic check that it looks like a diff (udiff will handle actual formatting)
-		if !strings.Contains(output, "/test/file.go") {
-			t.Errorf("Expected file path in diff output, got: %s", output)
-		}
+		assert.Contains(t, output, "/test/file.go", "Expected file path in diff output")
 	})
 
 	t.Run("No edits", func(t *testing.T) {
@@ -138,8 +122,6 @@ func TestFileEditRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "(no changes)") {
-			t.Errorf("Expected no changes message, got: %s", output)
-		}
+		assert.Contains(t, output, "(no changes)", "Expected no changes message")
 	})
 }

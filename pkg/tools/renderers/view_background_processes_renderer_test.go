@@ -1,11 +1,11 @@
 package renderers
 
 import (
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestViewBackgroundProcessesRenderer(t *testing.T) {
@@ -48,42 +48,18 @@ func TestViewBackgroundProcessesRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "Background Processes:") {
-			t.Errorf("Expected background processes header in output, got: %s", output)
-		}
-		if !strings.Contains(output, "PID") {
-			t.Errorf("Expected PID column header in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Status") {
-			t.Errorf("Expected Status column header in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Start Time") {
-			t.Errorf("Expected Start Time column header in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Log Path") {
-			t.Errorf("Expected Log Path column header in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Command") {
-			t.Errorf("Expected Command column header in output, got: %s", output)
-		}
-		if !strings.Contains(output, "12345") {
-			t.Errorf("Expected first PID in output, got: %s", output)
-		}
-		if !strings.Contains(output, "running") {
-			t.Errorf("Expected running status in output, got: %s", output)
-		}
-		if !strings.Contains(output, "python server.py") {
-			t.Errorf("Expected first command in output, got: %s", output)
-		}
-		if !strings.Contains(output, "npm start") {
-			t.Errorf("Expected second command in output, got: %s", output)
-		}
-		if !strings.Contains(output, "go run main.go") {
-			t.Errorf("Expected third command in output, got: %s", output)
-		}
-		if !strings.Contains(output, "/tmp/log1.log") {
-			t.Errorf("Expected first log path in output, got: %s", output)
-		}
+		assert.Contains(t, output, "Background Processes:")
+		assert.Contains(t, output, "PID")
+		assert.Contains(t, output, "Status")
+		assert.Contains(t, output, "Start Time")
+		assert.Contains(t, output, "Log Path")
+		assert.Contains(t, output, "Command")
+		assert.Contains(t, output, "12345")
+		assert.Contains(t, output, "running")
+		assert.Contains(t, output, "python server.py")
+		assert.Contains(t, output, "npm start")
+		assert.Contains(t, output, "go run main.go")
+		assert.Contains(t, output, "/tmp/log1.log")
 	})
 
 	t.Run("Single background process", func(t *testing.T) {
@@ -109,18 +85,10 @@ func TestViewBackgroundProcessesRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "Background Processes:") {
-			t.Errorf("Expected background processes header in output, got: %s", output)
-		}
-		if !strings.Contains(output, "9999") {
-			t.Errorf("Expected PID in output, got: %s", output)
-		}
-		if !strings.Contains(output, "./my-service --port=8080") {
-			t.Errorf("Expected command in output, got: %s", output)
-		}
-		if !strings.Contains(output, "/var/log/service.log") {
-			t.Errorf("Expected log path in output, got: %s", output)
-		}
+		assert.Contains(t, output, "Background Processes:")
+		assert.Contains(t, output, "9999")
+		assert.Contains(t, output, "./my-service --port=8080")
+		assert.Contains(t, output, "/var/log/service.log")
 	})
 
 	t.Run("No background processes", func(t *testing.T) {
@@ -136,15 +104,9 @@ func TestViewBackgroundProcessesRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "No background processes running.") {
-			t.Errorf("Expected no processes message in output, got: %s", output)
-		}
-		if strings.Contains(output, "Background Processes:") {
-			t.Errorf("Should not show table header when no processes, got: %s", output)
-		}
-		if strings.Contains(output, "PID") {
-			t.Errorf("Should not show column headers when no processes, got: %s", output)
-		}
+		assert.Contains(t, output, "No background processes running.")
+		assert.NotContains(t, output, "Background Processes:")
+		assert.NotContains(t, output, "PID")
 	})
 
 	t.Run("Processes with different statuses", func(t *testing.T) {
@@ -191,27 +153,13 @@ func TestViewBackgroundProcessesRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "1001") {
-			t.Errorf("Expected first PID in output, got: %s", output)
-		}
-		if !strings.Contains(output, "running") {
-			t.Errorf("Expected running status in output, got: %s", output)
-		}
-		if !strings.Contains(output, "stopped") {
-			t.Errorf("Expected stopped status in output, got: %s", output)
-		}
-		if !strings.Contains(output, "failed") {
-			t.Errorf("Expected failed status in output, got: %s", output)
-		}
-		if !strings.Contains(output, "pending") {
-			t.Errorf("Expected pending status in output, got: %s", output)
-		}
-		if !strings.Contains(output, "app1") {
-			t.Errorf("Expected first command in output, got: %s", output)
-		}
-		if !strings.Contains(output, "app2 --config=prod") {
-			t.Errorf("Expected second command with args in output, got: %s", output)
-		}
+		assert.Contains(t, output, "1001")
+		assert.Contains(t, output, "running")
+		assert.Contains(t, output, "stopped")
+		assert.Contains(t, output, "failed")
+		assert.Contains(t, output, "pending")
+		assert.Contains(t, output, "app1")
+		assert.Contains(t, output, "app2 --config=prod")
 	})
 
 	t.Run("Error handling", func(t *testing.T) {
@@ -224,9 +172,7 @@ func TestViewBackgroundProcessesRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "Error: Failed to retrieve background processes") {
-			t.Errorf("Expected error message in output, got: %s", output)
-		}
+		assert.Contains(t, output, "Error: Failed to retrieve background processes")
 	})
 
 	t.Run("Invalid metadata type", func(t *testing.T) {
@@ -239,9 +185,7 @@ func TestViewBackgroundProcessesRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "Error: Invalid metadata type for view_background_processes") {
-			t.Errorf("Expected invalid metadata error, got: %s", output)
-		}
+		assert.Contains(t, output, "Error: Invalid metadata type for view_background_processes")
 	})
 
 	t.Run("Nil metadata", func(t *testing.T) {
@@ -254,8 +198,6 @@ func TestViewBackgroundProcessesRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "Error: Invalid metadata type for view_background_processes") {
-			t.Errorf("Expected invalid metadata error for nil metadata, got: %s", output)
-		}
+		assert.Contains(t, output, "Error: Invalid metadata type for view_background_processes")
 	})
 }

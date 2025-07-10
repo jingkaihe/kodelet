@@ -1,11 +1,11 @@
 package renderers
 
 import (
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestFileMultiEditRenderer(t *testing.T) {
@@ -33,24 +33,12 @@ func TestFileMultiEditRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "File Multi Edit: /test/file.go") {
-			t.Errorf("Expected file path in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Total edits: 2") {
-			t.Errorf("Expected total edits count in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Edit 1:") {
-			t.Errorf("Expected edit 1 in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Edit 2:") {
-			t.Errorf("Expected edit 2 in output, got: %s", output)
-		}
-		if !strings.Contains(output, "- old function() {") {
-			t.Errorf("Expected old content in output, got: %s", output)
-		}
-		if !strings.Contains(output, "+ new function() {") {
-			t.Errorf("Expected new content in output, got: %s", output)
-		}
+		assert.Contains(t, output, "File Multi Edit: /test/file.go", "Expected file path in output")
+		assert.Contains(t, output, "Total edits: 2", "Expected total edits count in output")
+		assert.Contains(t, output, "Edit 1:", "Expected edit 1 in output")
+		assert.Contains(t, output, "Edit 2:", "Expected edit 2 in output")
+		assert.Contains(t, output, "- old function() {", "Expected old content in output")
+		assert.Contains(t, output, "+ new function() {", "Expected new content in output")
 	})
 
 	t.Run("Single edit with multiline content", func(t *testing.T) {
@@ -71,21 +59,11 @@ func TestFileMultiEditRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "Total edits: 1") {
-			t.Errorf("Expected total edits count in output, got: %s", output)
-		}
-		if !strings.Contains(output, "- # old config") {
-			t.Errorf("Expected old content first line in output, got: %s", output)
-		}
-		if !strings.Contains(output, "- key: value1") {
-			t.Errorf("Expected old content second line in output, got: %s", output)
-		}
-		if !strings.Contains(output, "+ # new config") {
-			t.Errorf("Expected new content first line in output, got: %s", output)
-		}
-		if !strings.Contains(output, "+ key: value3") {
-			t.Errorf("Expected new content second line in output, got: %s", output)
-		}
+		assert.Contains(t, output, "Total edits: 1", "Expected total edits count in output")
+		assert.Contains(t, output, "- # old config", "Expected old content first line in output")
+		assert.Contains(t, output, "- key: value1", "Expected old content second line in output")
+		assert.Contains(t, output, "+ # new config", "Expected new content first line in output")
+		assert.Contains(t, output, "+ key: value3", "Expected new content second line in output")
 	})
 
 	t.Run("Edit with only old content", func(t *testing.T) {
@@ -106,12 +84,8 @@ func TestFileMultiEditRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "- line to be deleted") {
-			t.Errorf("Expected old content in output, got: %s", output)
-		}
-		if strings.Contains(output, "+ ") {
-			t.Errorf("Should not have new content marker, got: %s", output)
-		}
+		assert.Contains(t, output, "- line to be deleted", "Expected old content in output")
+		assert.NotContains(t, output, "+ ", "Should not have new content marker")
 	})
 
 	t.Run("Edit with only new content", func(t *testing.T) {
@@ -132,12 +106,8 @@ func TestFileMultiEditRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "+ new line to be added") {
-			t.Errorf("Expected new content in output, got: %s", output)
-		}
-		if strings.Contains(output, "- ") {
-			t.Errorf("Should not have old content marker, got: %s", output)
-		}
+		assert.Contains(t, output, "+ new line to be added", "Expected new content in output")
+		assert.NotContains(t, output, "- ", "Should not have old content marker")
 	})
 
 	t.Run("No edits", func(t *testing.T) {
@@ -153,9 +123,7 @@ func TestFileMultiEditRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "Total edits: 0") {
-			t.Errorf("Expected zero edits count in output, got: %s", output)
-		}
+		assert.Contains(t, output, "Total edits: 0", "Expected zero edits count in output")
 	})
 
 	t.Run("Error handling", func(t *testing.T) {
@@ -168,9 +136,7 @@ func TestFileMultiEditRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "Error: File not found") {
-			t.Errorf("Expected error message in output, got: %s", output)
-		}
+		assert.Contains(t, output, "Error: File not found", "Expected error message in output")
 	})
 
 	t.Run("Invalid metadata type", func(t *testing.T) {
@@ -183,8 +149,6 @@ func TestFileMultiEditRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "Error: Invalid metadata type for file_multi_edit") {
-			t.Errorf("Expected invalid metadata error, got: %s", output)
-		}
+		assert.Contains(t, output, "Error: Invalid metadata type for file_multi_edit", "Expected invalid metadata error")
 	})
 }

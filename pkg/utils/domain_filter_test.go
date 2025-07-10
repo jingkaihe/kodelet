@@ -5,6 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestDomainFilter_IsAllowed(t *testing.T) {
@@ -19,9 +22,7 @@ google.com
 example.org
 `
 	err := os.WriteFile(domainsFile, []byte(domainsContent), 0644)
-	if err != nil {
-		t.Fatalf("Failed to create test domains file: %v", err)
-	}
+	require.NoError(t, err, "Failed to create test domains file")
 
 	filter := NewDomainFilter(domainsFile)
 
@@ -64,20 +65,16 @@ example.org
 			allowed, err := filter.IsAllowed(tt.url)
 
 			if tt.wantErr {
-				if err == nil {
-					t.Errorf("Expected error for URL %s, but got none", tt.url)
-				}
+				assert.NotNil(t, err, "Expected error for URL %s, but got none", tt.url)
 				return
 			}
 
+			assert.NoError(t, err, "Unexpected error for URL %s: %v", tt.url, err)
 			if err != nil {
-				t.Errorf("Unexpected error for URL %s: %v", tt.url, err)
 				return
 			}
 
-			if allowed != tt.expected {
-				t.Errorf("For URL %s, expected %v but got %v", tt.url, tt.expected, allowed)
-			}
+			assert.Equal(t, tt.expected, allowed, "For URL %s, expected %v but got %v", tt.url, tt.expected, allowed)
 		})
 	}
 }
@@ -94,13 +91,11 @@ func TestDomainFilter_EmptyFile(t *testing.T) {
 
 	for _, url := range testURLs {
 		allowed, err := filter.IsAllowed(url)
+		assert.NoError(t, err, "Unexpected error for URL %s with empty file: %v", url, err)
 		if err != nil {
-			t.Errorf("Unexpected error for URL %s with empty file: %v", url, err)
 			continue
 		}
-		if !allowed {
-			t.Errorf("Expected %s to be allowed with empty/nonexistent file", url)
-		}
+		assert.True(t, allowed, "Expected %s to be allowed with empty/nonexistent file", url)
 	}
 }
 
@@ -112,29 +107,21 @@ func TestDomainFilter_FileReload(t *testing.T) {
 	// Initially write one domain
 	initialContent := "github.com\n"
 	err := os.WriteFile(domainsFile, []byte(initialContent), 0644)
-	if err != nil {
-		t.Fatalf("Failed to create test file: %v", err)
-	}
+	require.NoError(t, err, "Failed to create test file")
 
 	filter := NewDomainFilter(domainsFile)
 
 	// Test initial state
 	allowed, _ := filter.IsAllowed("https://github.com")
-	if !allowed {
-		t.Error("Expected github.com to be allowed initially")
-	}
+	assert.True(t, allowed, "Expected github.com to be allowed initially")
 
 	allowed, _ = filter.IsAllowed("https://stackoverflow.com")
-	if allowed {
-		t.Error("Expected stackoverflow.com to be blocked initially")
-	}
+	assert.False(t, allowed, "Expected stackoverflow.com to be blocked initially")
 
 	// Modify the file to add another domain
 	newContent := "github.com\nstackoverflow.com\n"
 	err = os.WriteFile(domainsFile, []byte(newContent), 0644)
-	if err != nil {
-		t.Fatalf("Failed to update test file: %v", err)
-	}
+	require.NoError(t, err, "Failed to update test file")
 
 	// Force reload by simulating time passage
 	// We'll manipulate the lastLoadTime to trigger a reload
@@ -144,9 +131,7 @@ func TestDomainFilter_FileReload(t *testing.T) {
 
 	// Test after reload
 	allowed, _ = filter.IsAllowed("https://stackoverflow.com")
-	if !allowed {
-		t.Error("Expected stackoverflow.com to be allowed after reload")
-	}
+	assert.True(t, allowed, "Expected stackoverflow.com to be allowed after reload")
 }
 
 func TestDomainFilter_GetAllowedDomains(t *testing.T) {
@@ -159,17 +144,13 @@ stackoverflow.com
 google.com
 `
 	err := os.WriteFile(domainsFile, []byte(content), 0644)
-	if err != nil {
-		t.Fatalf("Failed to create test file: %v", err)
-	}
+	require.NoError(t, err, "Failed to create test file")
 
 	filter := NewDomainFilter(domainsFile)
 	domains := filter.GetAllowedDomains()
 
 	expected := []string{"github.com", "stackoverflow.com", "google.com"}
-	if len(domains) != len(expected) {
-		t.Errorf("Expected %d domains, got %d", len(expected), len(domains))
-	}
+	assert.Len(t, domains, len(expected), "Expected %d domains, got %d", len(expected), len(domains))
 
 	// Check that all expected domains are present
 	domainMap := make(map[string]bool)
@@ -178,9 +159,7 @@ google.com
 	}
 
 	for _, expectedDomain := range expected {
-		if !domainMap[expectedDomain] {
-			t.Errorf("Expected domain %s not found in result", expectedDomain)
-		}
+		assert.True(t, domainMap[expectedDomain], "Expected domain %s not found in result", expectedDomain)
 	}
 }
 
@@ -195,9 +174,7 @@ http://example.org/
 Google.Com/path
 `
 	err := os.WriteFile(domainsFile, []byte(content), 0644)
-	if err != nil {
-		t.Fatalf("Failed to create test file: %v", err)
-	}
+	require.NoError(t, err, "Failed to create test file")
 
 	filter := NewDomainFilter(domainsFile)
 
@@ -214,13 +191,11 @@ Google.Com/path
 
 	for _, tt := range tests {
 		allowed, err := filter.IsAllowed(tt.url)
+		assert.NoError(t, err, "Error checking %s: %v", tt.url, err)
 		if err != nil {
-			t.Errorf("Error checking %s: %v", tt.url, err)
 			continue
 		}
-		if allowed != tt.expected {
-			t.Errorf("For %s, expected %v but got %v", tt.url, tt.expected, allowed)
-		}
+		assert.Equal(t, tt.expected, allowed, "For %s, expected %v but got %v", tt.url, tt.expected, allowed)
 	}
 }
 
@@ -230,9 +205,7 @@ func TestDomainFilter_TildeExpansion(t *testing.T) {
 
 	// We can't easily test the actual file loading without creating files in the user's home,
 	// but we can test that the path was expanded
-	if filter.filePath == "~/test_domains.txt" {
-		t.Error("Tilde was not expanded in file path")
-	}
+	assert.NotEqual(t, "~/test_domains.txt", filter.filePath, "Tilde was not expanded in file path")
 }
 
 func TestDomainFilter_GlobPatterns(t *testing.T) {
@@ -252,9 +225,7 @@ sub*.test.com
 *.dev
 `
 	err := os.WriteFile(domainsFile, []byte(domainsContent), 0644)
-	if err != nil {
-		t.Fatalf("Failed to create test domains file: %v", err)
-	}
+	require.NoError(t, err, "Failed to create test domains file")
 
 	filter := NewDomainFilter(domainsFile)
 
@@ -309,20 +280,16 @@ sub*.test.com
 			allowed, err := filter.IsAllowed(tt.url)
 
 			if tt.wantErr {
-				if err == nil {
-					t.Errorf("Expected error for URL %s, but got none", tt.url)
-				}
+				assert.NotNil(t, err, "Expected error for URL %s, but got none", tt.url)
 				return
 			}
 
+			assert.NoError(t, err, "Unexpected error for URL %s: %v", tt.url, err)
 			if err != nil {
-				t.Errorf("Unexpected error for URL %s: %v", tt.url, err)
 				return
 			}
 
-			if allowed != tt.expected {
-				t.Errorf("For URL %s, expected %v but got %v", tt.url, tt.expected, allowed)
-			}
+			assert.Equal(t, tt.expected, allowed, "For URL %s, expected %v but got %v", tt.url, tt.expected, allowed)
 		})
 	}
 }
@@ -338,9 +305,7 @@ example.com
 *.example.com
 `
 	err := os.WriteFile(domainsFile, []byte(domainsContent), 0644)
-	if err != nil {
-		t.Fatalf("Failed to create test domains file: %v", err)
-	}
+	require.NoError(t, err, "Failed to create test domains file")
 
 	filter := NewDomainFilter(domainsFile)
 
@@ -362,14 +327,12 @@ example.com
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			allowed, err := filter.IsAllowed(tt.url)
+			assert.NoError(t, err, "Unexpected error for URL %s: %v", tt.url, err)
 			if err != nil {
-				t.Errorf("Unexpected error for URL %s: %v", tt.url, err)
 				return
 			}
 
-			if allowed != tt.expected {
-				t.Errorf("For URL %s, expected %v but got %v", tt.url, tt.expected, allowed)
-			}
+			assert.Equal(t, tt.expected, allowed, "For URL %s, expected %v but got %v", tt.url, tt.expected, allowed)
 		})
 	}
 }
@@ -386,17 +349,13 @@ stackoverflow.com
 api.*.example.org
 `
 	err := os.WriteFile(domainsFile, []byte(content), 0644)
-	if err != nil {
-		t.Fatalf("Failed to create test file: %v", err)
-	}
+	require.NoError(t, err, "Failed to create test file")
 
 	filter := NewDomainFilter(domainsFile)
 	domains := filter.GetAllowedDomains()
 
 	expected := []string{"github.com", "stackoverflow.com", "*.github.com", "*.amazonaws.com", "api.*.example.org"}
-	if len(domains) != len(expected) {
-		t.Errorf("Expected %d domains/patterns, got %d: %v", len(expected), len(domains), domains)
-	}
+	assert.Len(t, domains, len(expected), "Expected %d domains/patterns, got %d: %v", len(expected), len(domains), domains)
 
 	// Check that all expected domains and patterns are present
 	domainMap := make(map[string]bool)
@@ -405,9 +364,7 @@ api.*.example.org
 	}
 
 	for _, expectedItem := range expected {
-		if !domainMap[expectedItem] {
-			t.Errorf("Expected domain/pattern %s not found in result: %v", expectedItem, domains)
-		}
+		assert.True(t, domainMap[expectedItem], "Expected domain/pattern %s not found in result: %v", expectedItem, domains)
 	}
 }
 
@@ -424,37 +381,23 @@ valid.example.com
 *.valid.com
 `
 	err := os.WriteFile(domainsFile, []byte(domainsContent), 0644)
-	if err != nil {
-		t.Fatalf("Failed to create test domains file: %v", err)
-	}
+	require.NoError(t, err, "Failed to create test domains file")
 
 	// Should not panic and should still load valid patterns
 	filter := NewDomainFilter(domainsFile)
 
 	// Test that valid patterns still work
 	allowed, err := filter.IsAllowed("https://github.com")
-	if err != nil {
-		t.Errorf("Unexpected error: %v", err)
-	}
-	if !allowed {
-		t.Error("Expected github.com to be allowed")
-	}
+	assert.NoError(t, err, "Unexpected error: %v", err)
+	assert.True(t, allowed, "Expected github.com to be allowed")
 
 	allowed, err = filter.IsAllowed("https://api.github.com")
-	if err != nil {
-		t.Errorf("Unexpected error: %v", err)
-	}
-	if !allowed {
-		t.Error("Expected api.github.com to be allowed via glob pattern")
-	}
+	assert.NoError(t, err, "Unexpected error: %v", err)
+	assert.True(t, allowed, "Expected api.github.com to be allowed via glob pattern")
 
 	allowed, err = filter.IsAllowed("https://valid.example.com")
-	if err != nil {
-		t.Errorf("Unexpected error: %v", err)
-	}
-	if !allowed {
-		t.Error("Expected valid.example.com to be allowed")
-	}
+	assert.NoError(t, err, "Unexpected error: %v", err)
+	assert.True(t, allowed, "Expected valid.example.com to be allowed")
 }
 
 func TestDomainFilter_CaseSensitiveGlobPatterns(t *testing.T) {
@@ -466,9 +409,7 @@ func TestDomainFilter_CaseSensitiveGlobPatterns(t *testing.T) {
 *.EXAMPLE.ORG
 `
 	err := os.WriteFile(domainsFile, []byte(domainsContent), 0644)
-	if err != nil {
-		t.Fatalf("Failed to create test domains file: %v", err)
-	}
+	require.NoError(t, err, "Failed to create test domains file")
 
 	filter := NewDomainFilter(domainsFile)
 
@@ -487,14 +428,12 @@ func TestDomainFilter_CaseSensitiveGlobPatterns(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			allowed, err := filter.IsAllowed(tt.url)
+			assert.NoError(t, err, "Unexpected error for URL %s: %v", tt.url, err)
 			if err != nil {
-				t.Errorf("Unexpected error for URL %s: %v", tt.url, err)
 				return
 			}
 
-			if allowed != tt.expected {
-				t.Errorf("For URL %s, expected %v but got %v", tt.url, tt.expected, allowed)
-			}
+			assert.Equal(t, tt.expected, allowed, "For URL %s, expected %v but got %v", tt.url, tt.expected, allowed)
 		})
 	}
 }
@@ -509,9 +448,7 @@ func TestDomainFilter_ComplexGlobPatterns(t *testing.T) {
 *-staging.*.com
 `
 	err := os.WriteFile(domainsFile, []byte(domainsContent), 0644)
-	if err != nil {
-		t.Fatalf("Failed to create test domains file: %v", err)
-	}
+	require.NoError(t, err, "Failed to create test domains file")
 
 	filter := NewDomainFilter(domainsFile)
 
@@ -541,14 +478,12 @@ func TestDomainFilter_ComplexGlobPatterns(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			allowed, err := filter.IsAllowed(tt.url)
+			assert.NoError(t, err, "Unexpected error for URL %s: %v", tt.url, err)
 			if err != nil {
-				t.Errorf("Unexpected error for URL %s: %v", tt.url, err)
 				return
 			}
 
-			if allowed != tt.expected {
-				t.Errorf("For URL %s, expected %v but got %v", tt.url, tt.expected, allowed)
-			}
+			assert.Equal(t, tt.expected, allowed, "For URL %s, expected %v but got %v", tt.url, tt.expected, allowed)
 		})
 	}
 }

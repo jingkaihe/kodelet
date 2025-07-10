@@ -103,6 +103,30 @@ make frontend-test-ui # Run frontend tests with UI
 make frontend-test-coverage # Run frontend tests with coverage
 ```
 
+### Testing Conventions
+
+**Prefer testify assert and require over t.Errorf and t.Fatalf**:
+
+```go
+import (
+    "github.com/stretchr/testify/assert"
+    "github.com/stretchr/testify/require"
+)
+
+// Good - use testify for assertions
+assert.Equal(t, expected, actual)
+assert.NoError(t, err)
+require.NotNil(t, result) // require stops execution on failure
+
+// Bad - avoid t.Errorf and t.Fatalf
+if expected != actual {
+    t.Errorf("expected %v, got %v", expected, actual)
+}
+if err != nil {
+    t.Fatalf("unexpected error: %v", err)
+}
+```
+
 ## Key Commands
 
 For comprehensive usage documentation and examples, see [./docs/MANUAL.md](./docs/MANUAL.md).

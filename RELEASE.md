@@ -1,5 +1,9 @@
 # Kodelet
 
+## 0.0.60.alpha (2025-07-10)
+
+### refactor: replace `t.Error` with `t.Fatal` in tests with testify `assert` and `require`.
+
 ## 0.0.59.alpha (2025-07-09)
 
 ### refactor: replace fmt.Errorf with pkg/errors for consistent error wrapping

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestFileReadTool_GenerateSchema(t *testing.T) {
@@ -99,15 +100,15 @@ func TestFileReadTool_Execute(t *testing.T) {
 	content := []byte("Line 1\nLine 2\nLine 3\nLine 4\nLine 5\n")
 	tmpfile, err := os.CreateTemp("", "FileReadtest")
 	if err != nil {
-		t.Fatal(err)
+		require.NoError(t, err)
 	}
 	defer os.Remove(tmpfile.Name())
 
 	if _, err := tmpfile.Write(content); err != nil {
-		t.Fatal(err)
+		require.NoError(t, err)
 	}
 	if err := tmpfile.Close(); err != nil {
-		t.Fatal(err)
+		require.NoError(t, err)
 	}
 
 	tool := &FileReadTool{}
@@ -185,15 +186,15 @@ func TestFileReadTool_Line_Padding(t *testing.T) {
 
 	tmpfile, err := os.CreateTemp("", "FileReadtest_padding")
 	if err != nil {
-		t.Fatal(err)
+		require.NoError(t, err)
 	}
 	defer os.Remove(tmpfile.Name())
 
 	if _, err := tmpfile.WriteString(content.String()); err != nil {
-		t.Fatal(err)
+		require.NoError(t, err)
 	}
 	if err := tmpfile.Close(); err != nil {
-		t.Fatal(err)
+		require.NoError(t, err)
 	}
 
 	tool := &FileReadTool{}
@@ -247,15 +248,15 @@ func TestFileReadTool_MaxOutputBytes(t *testing.T) {
 
 	tmpfile, err := os.CreateTemp("", "FileReadtest_large")
 	if err != nil {
-		t.Fatal(err)
+		require.NoError(t, err)
 	}
 	defer os.Remove(tmpfile.Name())
 
 	if _, err := tmpfile.WriteString(content.String()); err != nil {
-		t.Fatal(err)
+		require.NoError(t, err)
 	}
 	if err := tmpfile.Close(); err != nil {
-		t.Fatal(err)
+		require.NoError(t, err)
 	}
 
 	tool := &FileReadTool{}
@@ -280,7 +281,7 @@ func TestFileReadTool_MaxOutputBytes(t *testing.T) {
 		// First, count how many lines are in the file
 		file, err := os.Open(tmpfile.Name())
 		if err != nil {
-			t.Fatal(err)
+			require.NoError(t, err)
 		}
 		defer file.Close()
 

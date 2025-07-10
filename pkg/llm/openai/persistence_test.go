@@ -324,7 +324,7 @@ func TestSaveConversationMessageCleanup(t *testing.T) {
 
 			for i, expectedMsg := range tt.expectedMessages {
 				if i >= len(thread.messages) {
-					t.Errorf("Expected message %d missing in test: %s", i, tt.description)
+					assert.Fail(t, "Expected message %d missing in test: %s", i, tt.description)
 					continue
 				}
 
@@ -340,7 +340,7 @@ func TestSaveConversationMessageCleanup(t *testing.T) {
 
 				for j, expectedToolCall := range expectedMsg.ToolCalls {
 					if j >= len(actualMsg.ToolCalls) {
-						t.Errorf("Expected tool call %d missing at message %d for test: %s",
+						assert.Fail(t, "Expected tool call %d missing at message %d for test: %s",
 							j, i, tt.description)
 						continue
 					}

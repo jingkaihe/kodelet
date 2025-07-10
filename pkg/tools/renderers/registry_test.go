@@ -1,11 +1,11 @@
 package renderers
 
 import (
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestRendererRegistry_ExactMatches(t *testing.T) {
@@ -45,12 +45,10 @@ func TestRendererRegistry_ExactMatches(t *testing.T) {
 
 			output := registry.Render(result)
 
-			if tt.expectRender && output == "" {
-				t.Errorf("Expected render output for %s, got empty string", tt.toolName)
-			}
-
-			if !tt.expectRender && output != "" {
-				t.Errorf("Expected no render output for %s, got: %s", tt.toolName, output)
+			if tt.expectRender {
+				assert.NotEmpty(t, output, "Expected render output for %s", tt.toolName)
+			} else {
+				assert.Empty(t, output, "Expected no render output for %s", tt.toolName)
 			}
 		})
 	}
@@ -91,9 +89,7 @@ func TestRendererRegistry_PatternMatches(t *testing.T) {
 
 			output := registry.Render(result)
 
-			if !strings.Contains(output, tt.expected) {
-				t.Errorf("Expected output to contain %q for %s, got: %s", tt.expected, tt.toolName, output)
-			}
+			assert.Contains(t, output, tt.expected, "Expected output to contain %q for %s", tt.expected, tt.toolName)
 		})
 	}
 }
@@ -110,9 +106,7 @@ func TestRendererRegistry_ErrorHandling(t *testing.T) {
 
 	output := registry.Render(result)
 
-	if !strings.Contains(output, "Error: File not found") {
-		t.Errorf("Expected error message in output, got: %s", output)
-	}
+	assert.Contains(t, output, "Error: File not found", "Expected error message in output")
 }
 
 func TestRendererRegistry_FallbackRenderer(t *testing.T) {
@@ -127,12 +121,8 @@ func TestRendererRegistry_FallbackRenderer(t *testing.T) {
 	output := registry.Render(result)
 
 	// Should use the default renderer and include tool name
-	if !strings.Contains(output, "completely_unknown_tool") {
-		t.Errorf("Expected fallback renderer output to contain tool name, got: %s", output)
-	}
-	if !strings.Contains(output, "Success: true") {
-		t.Errorf("Expected fallback renderer output to contain success status, got: %s", output)
-	}
+	assert.Contains(t, output, "completely_unknown_tool", "Expected fallback renderer output to contain tool name")
+	assert.Contains(t, output, "Success: true", "Expected fallback renderer output to contain success status")
 }
 
 func TestRendererRegistry_CustomRenderer(t *testing.T) {
@@ -152,9 +142,7 @@ func TestRendererRegistry_CustomRenderer(t *testing.T) {
 
 	output := registry.Render(result)
 
-	if !strings.Contains(output, "Custom Test Renderer") {
-		t.Errorf("Expected custom renderer output, got: %s", output)
-	}
+	assert.Contains(t, output, "Custom Test Renderer", "Expected custom renderer output")
 }
 
 func TestRendererRegistry_PatternRegistration(t *testing.T) {
@@ -186,9 +174,7 @@ func TestRendererRegistry_PatternRegistration(t *testing.T) {
 
 			output := registry.Render(result)
 
-			if !strings.Contains(output, tt.expected) {
-				t.Errorf("Expected output to contain %q for %s, got: %s", tt.expected, tt.toolName, output)
-			}
+			assert.Contains(t, output, tt.expected, "Expected output to contain %q for %s", tt.expected, tt.toolName)
 		})
 	}
 }

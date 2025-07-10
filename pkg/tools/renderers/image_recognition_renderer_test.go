@@ -1,10 +1,10 @@
 package renderers
 
 import (
-	"strings"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
@@ -26,18 +26,10 @@ func TestImageRecognitionRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "Image Recognition: /test/image.png") {
-			t.Errorf("Expected image path in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Type: screenshot") {
-			t.Errorf("Expected image type in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Prompt: Describe what you see in this image") {
-			t.Errorf("Expected prompt in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Analysis:\nThe image shows a desktop") {
-			t.Errorf("Expected analysis in output, got: %s", output)
-		}
+		assert.Contains(t, output, "Image Recognition: /test/image.png", "Expected image path in output")
+		assert.Contains(t, output, "Type: screenshot", "Expected image type in output")
+		assert.Contains(t, output, "Prompt: Describe what you see in this image", "Expected prompt in output")
+		assert.Contains(t, output, "Analysis:\nThe image shows a desktop", "Expected analysis in output")
 	})
 
 	t.Run("Image recognition with diagram type", func(t *testing.T) {
@@ -55,15 +47,9 @@ func TestImageRecognitionRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "Image Recognition: /test/diagram.jpg") {
-			t.Errorf("Expected image path in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Type: diagram") {
-			t.Errorf("Expected image type in output, got: %s", output)
-		}
-		if !strings.Contains(output, "microservices architecture") {
-			t.Errorf("Expected analysis content in output, got: %s", output)
-		}
+		assert.Contains(t, output, "Image Recognition: /test/diagram.jpg", "Expected image path in output")
+		assert.Contains(t, output, "Type: diagram", "Expected image type in output")
+		assert.Contains(t, output, "microservices architecture", "Expected analysis content in output")
 	})
 
 	t.Run("Image recognition with photo type", func(t *testing.T) {
@@ -81,15 +67,9 @@ func TestImageRecognitionRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "Image Recognition: /test/photo.jpg") {
-			t.Errorf("Expected image path in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Type: photo") {
-			t.Errorf("Expected image type in output, got: %s", output)
-		}
-		if !strings.Contains(output, "sunset over a mountain range") {
-			t.Errorf("Expected analysis content in output, got: %s", output)
-		}
+		assert.Contains(t, output, "Image Recognition: /test/photo.jpg", "Expected image path in output")
+		assert.Contains(t, output, "Type: photo", "Expected image type in output")
+		assert.Contains(t, output, "sunset over a mountain range", "Expected analysis content in output")
 	})
 
 	t.Run("Image recognition with empty fields", func(t *testing.T) {
@@ -107,18 +87,10 @@ func TestImageRecognitionRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "Image Recognition: /test/empty.png") {
-			t.Errorf("Expected image path in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Type: \n") {
-			t.Errorf("Expected empty type field in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Prompt: \n") {
-			t.Errorf("Expected empty prompt field in output, got: %s", output)
-		}
-		if !strings.Contains(output, "Analysis:\n") {
-			t.Errorf("Expected empty analysis field in output, got: %s", output)
-		}
+		assert.Contains(t, output, "Image Recognition: /test/empty.png", "Expected image path in output")
+		assert.Contains(t, output, "Type: \n", "Expected empty type field in output")
+		assert.Contains(t, output, "Prompt: \n", "Expected empty prompt field in output")
+		assert.Contains(t, output, "Analysis:\n", "Expected empty analysis field in output")
 	})
 
 	t.Run("Image recognition with long analysis", func(t *testing.T) {
@@ -140,15 +112,9 @@ func TestImageRecognitionRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "Image Recognition: /test/complex.png") {
-			t.Errorf("Expected image path in output, got: %s", output)
-		}
-		if !strings.Contains(output, "detailed analysis of the image") {
-			t.Errorf("Expected analysis content in output, got: %s", output)
-		}
-		if !strings.Contains(output, "comprehensive insights") {
-			t.Errorf("Expected full analysis content in output, got: %s", output)
-		}
+		assert.Contains(t, output, "Image Recognition: /test/complex.png", "Expected image path in output")
+		assert.Contains(t, output, "detailed analysis of the image", "Expected analysis content in output")
+		assert.Contains(t, output, "comprehensive insights", "Expected full analysis content in output")
 	})
 
 	t.Run("Error handling", func(t *testing.T) {
@@ -161,9 +127,7 @@ func TestImageRecognitionRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "Error: Unable to process image: file not found") {
-			t.Errorf("Expected error message in output, got: %s", output)
-		}
+		assert.Contains(t, output, "Error: Unable to process image: file not found", "Expected error message in output")
 	})
 
 	t.Run("Invalid metadata type", func(t *testing.T) {
@@ -176,9 +140,7 @@ func TestImageRecognitionRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "Error: Invalid metadata type for image_recognition") {
-			t.Errorf("Expected invalid metadata error, got: %s", output)
-		}
+		assert.Contains(t, output, "Error: Invalid metadata type for image_recognition", "Expected invalid metadata error")
 	})
 
 	t.Run("Nil metadata", func(t *testing.T) {
@@ -191,8 +153,6 @@ func TestImageRecognitionRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		if !strings.Contains(output, "Error: Invalid metadata type for image_recognition") {
-			t.Errorf("Expected invalid metadata error for nil metadata, got: %s", output)
-		}
+		assert.Contains(t, output, "Error: Invalid metadata type for image_recognition", "Expected invalid metadata error for nil metadata")
 	})
 }

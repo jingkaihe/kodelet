@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestFileEditTool_GenerateSchema(t *testing.T) {
@@ -37,17 +38,13 @@ func TestFileEditTool_ValidateInput(t *testing.T) {
 	// Create a temporary test file
 	content := []byte("Line 1\nLine 2\nLine 3\nLine 4\nLine 5\nLine 2\n")
 	tmpfile, err := os.CreateTemp("", "FileEditTest")
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	defer os.Remove(tmpfile.Name())
 
-	if _, err := tmpfile.Write(content); err != nil {
-		t.Fatal(err)
-	}
-	if err := tmpfile.Close(); err != nil {
-		t.Fatal(err)
-	}
+	_, err = tmpfile.Write(content)
+	require.NoError(t, err)
+	err = tmpfile.Close()
+	require.NoError(t, err)
 
 	mockState := NewBasicState(context.TODO())
 	mockState.SetFileLastAccessed(tmpfile.Name(), time.Now())
@@ -124,17 +121,13 @@ func TestFileEditTool_Execute(t *testing.T) {
 		// Create a temporary test file
 		content := []byte("Line 1\nLine 2\nLine 3x\nLine 4\nLine 5\n")
 		tmpfile, err := os.CreateTemp("", "FileEditTest")
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		defer os.Remove(tmpfile.Name())
 
-		if _, err := tmpfile.Write(content); err != nil {
-			t.Fatal(err)
-		}
-		if err := tmpfile.Close(); err != nil {
-			t.Fatal(err)
-		}
+		_, err = tmpfile.Write(content)
+		require.NoError(t, err)
+		err = tmpfile.Close()
+		require.NoError(t, err)
 
 		mockState := NewBasicState(context.TODO())
 
@@ -182,17 +175,13 @@ func TestFileEditTool_MultipleEdits(t *testing.T) {
 	// Create a temporary test file with content that will be edited multiple times
 	content := []byte("First line\nSecond line X\nThird line\nFourth line X\nFifth line\n")
 	tmpfile, err := os.CreateTemp("", "FileEditMultipleTest")
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	defer os.Remove(tmpfile.Name())
 
-	if _, err := tmpfile.Write(content); err != nil {
-		t.Fatal(err)
-	}
-	if err := tmpfile.Close(); err != nil {
-		t.Fatal(err)
-	}
+	_, err = tmpfile.Write(content)
+	require.NoError(t, err)
+	err = tmpfile.Close()
+	require.NoError(t, err)
 
 	tool := &FileEditTool{}
 	mockState := NewBasicState(context.TODO())
@@ -303,17 +292,13 @@ func TestFileEditTool_ExecuteOutputsFormattedEdit(t *testing.T) {
 	// Create a temporary test file
 	content := []byte("Line 1\nLine 2\nLine 3\nLine 4\nLine 5\n")
 	tmpfile, err := os.CreateTemp("", "FileEditFormatTest")
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	defer os.Remove(tmpfile.Name())
 
-	if _, err := tmpfile.Write(content); err != nil {
-		t.Fatal(err)
-	}
-	if err := tmpfile.Close(); err != nil {
-		t.Fatal(err)
-	}
+	_, err = tmpfile.Write(content)
+	require.NoError(t, err)
+	err = tmpfile.Close()
+	require.NoError(t, err)
 
 	tool := &FileEditTool{}
 	mockState := NewBasicState(context.TODO())
@@ -351,17 +336,13 @@ func main() {
 }
 `)
 	tmpfile, err := os.CreateTemp("", "FileEditCodeTest")
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	defer os.Remove(tmpfile.Name())
 
-	if _, err := tmpfile.Write(content); err != nil {
-		t.Fatal(err)
-	}
-	if err := tmpfile.Close(); err != nil {
-		t.Fatal(err)
-	}
+	_, err = tmpfile.Write(content)
+	require.NoError(t, err)
+	err = tmpfile.Close()
+	require.NoError(t, err)
 
 	tool := &FileEditTool{}
 	mockState := NewBasicState(context.TODO())
