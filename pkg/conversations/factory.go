@@ -24,8 +24,11 @@ func NewConversationStore(ctx context.Context, config *Config) (ConversationStor
 	case "bbolt":
 		dbPath := filepath.Join(config.BasePath, "storage.db")
 		return NewBBoltConversationStore(ctx, dbPath)
+	case "sqlite":
+		dbPath := filepath.Join(config.BasePath, "storage.db")
+		return NewSQLiteConversationStore(ctx, dbPath)
 	default:
-		// Default to BBolt store for better performance
+		// Default to BBolt store for compatibility
 		dbPath := filepath.Join(config.BasePath, "storage.db")
 		return NewBBoltConversationStore(ctx, dbPath)
 	}
