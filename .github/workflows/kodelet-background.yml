@@ -66,3 +66,28 @@ jobs:
             max_tokens: 16000
             weak_model_max_tokens: 8192
             thinking_budget_tokens: 8000
+            mcp:
+              servers:
+                github:
+                  command: "docker"
+                  args:
+                    - run
+                    - -i
+                    - --rm
+                    - -e
+                    - GITHUB_PERSONAL_ACCESS_TOKEN
+                    - -e
+                    - GITHUB_TOOLSETS
+                    - ghcr.io/github/github-mcp-server
+                  envs:
+                    GITHUB_TOOLSETS: "issues,pull_requests"
+                    GITHUB_PERSONAL_ACCESS_TOKEN: $GITHUB_TOKEN
+                  tool_white_list:
+                    - get_issue
+                    - get_issue_comments
+                    - add_issue_comment
+                    - create_pull_request
+                    - create_pending_pull_request_review
+                    - add_pull_request_review_comment_to_pending_review
+                    - submit_pending_pull_request_review
+                    - get_pull_request_diff
