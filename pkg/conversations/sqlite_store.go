@@ -64,7 +64,7 @@ func configureDatabase(ctx context.Context, db *sqlx.DB) error {
 	pragmas := []string{
 		"PRAGMA journal_mode=WAL",
 		"PRAGMA synchronous=NORMAL",
-		"PRAGMA cache_size=1000", 
+		"PRAGMA cache_size=1000",
 		"PRAGMA temp_store=memory",
 		"PRAGMA busy_timeout=5000",
 		"PRAGMA foreign_keys=ON",
@@ -78,7 +78,8 @@ func configureDatabase(ctx context.Context, db *sqlx.DB) error {
 			return errors.Wrapf(err, "failed to execute pragma: %s", pragma)
 		}
 	}
-
+	db.SetMaxIdleConns(1)
+	db.SetMaxOpenConns(1)
 	// Verify WAL mode is enabled
 	var journalMode string
 	queryCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -137,35 +138,7 @@ func (s *SQLiteConversationStore) initializeSchema() error {
 	return nil
 }
 
-// Save stores a conversation record using atomic transactions with retry mechanism
 func (s *SQLiteConversationStore) Save(record ConversationRecord) error {
-	const maxRetries = 3
-	const baseDelay = 50 * time.Millisecond
-	
-	for attempt := 0; attempt < maxRetries; attempt++ {
-		err := s.saveWithContext(record)
-		if err == nil {
-			return nil
-		}
-		
-		// Check if it's a busy error that we can retry
-		if strings.Contains(err.Error(), "database is locked") || strings.Contains(err.Error(), "SQLITE_BUSY") {
-			if attempt < maxRetries-1 {
-				// Exponential backoff with jitter
-				delay := time.Duration(attempt+1) * baseDelay
-				time.Sleep(delay)
-				continue
-			}
-		}
-		
-		return err
-	}
-	
-	return errors.New("save operation failed after retries")
-}
-
-// saveWithContext performs the actual save operation with context
-func (s *SQLiteConversationStore) saveWithContext(record ConversationRecord) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second) // Increased timeout
 	defer cancel()
 
@@ -182,10 +155,10 @@ func (s *SQLiteConversationStore) saveWithContext(record ConversationRecord) err
 	// Insert or update conversation record
 	conversationQuery := `
 		INSERT OR REPLACE INTO conversations (
-			id, raw_messages, model_type, file_last_access, usage, 
+			id, raw_messages, model_type, file_last_access, usage,
 			summary, created_at, updated_at, metadata, tool_results
 		) VALUES (
-			:id, :raw_messages, :model_type, :file_last_access, :usage, 
+			:id, :raw_messages, :model_type, :file_last_access, :usage,
 			:summary, :created_at, :updated_at, :metadata, :tool_results
 		)
 	`
@@ -216,7 +189,7 @@ func (s *SQLiteConversationStore) Load(id string) (ConversationRecord, error) {
 	defer cancel()
 
 	var dbRecord dbConversationRecord
-	
+
 	query := "SELECT * FROM conversations WHERE id = ?"
 	err := s.db.GetContext(ctx, &dbRecord, query, id)
 	if err != nil {
@@ -235,7 +208,7 @@ func (s *SQLiteConversationStore) List() ([]ConversationSummary, error) {
 	defer cancel()
 
 	var dbSummaries []dbConversationSummary
-	
+
 	query := "SELECT * FROM conversation_summaries ORDER BY created_at DESC"
 	err := s.db.SelectContext(ctx, &dbSummaries, query)
 	if err != nil {
@@ -328,7 +301,7 @@ func (s *SQLiteConversationStore) Query(options QueryOptions) (QueryResult, erro
 	if options.Limit > 0 {
 		baseQuery += " LIMIT :limit"
 		args["limit"] = options.Limit
-		
+
 		if options.Offset > 0 {
 			baseQuery += " OFFSET :offset"
 			args["offset"] = options.Offset
@@ -341,7 +314,7 @@ func (s *SQLiteConversationStore) Query(options QueryOptions) (QueryResult, erro
 	if err != nil {
 		return QueryResult{}, errors.Wrap(err, "failed to build named query")
 	}
-	
+
 	finalQuery = s.db.Rebind(finalQuery)
 	err = s.db.SelectContext(ctx, &dbSummaries, finalQuery, argsSlice...)
 	if err != nil {
@@ -373,7 +346,7 @@ func (s *SQLiteConversationStore) Query(options QueryOptions) (QueryResult, erro
 	if err != nil {
 		return QueryResult{}, errors.Wrap(err, "failed to build named count query")
 	}
-	
+
 	finalCountQuery = s.db.Rebind(finalCountQuery)
 	err = s.db.GetContext(ctx, &total, finalCountQuery, countArgsSlice...)
 	if err != nil {
