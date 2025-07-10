@@ -78,11 +78,11 @@ func (t *OpenAIThread) SaveConversation(ctx context.Context, summarize bool) err
 	}
 
 	// Save to the store
-	return t.store.Save(record)
+	return t.store.Save(ctx, record)
 }
 
 // loadConversation loads a conversation from the store
-func (t *OpenAIThread) loadConversation() error {
+func (t *OpenAIThread) loadConversation(ctx context.Context) error {
 	t.conversationMu.Lock()
 	defer t.conversationMu.Unlock()
 
@@ -91,7 +91,7 @@ func (t *OpenAIThread) loadConversation() error {
 	}
 
 	// Try to load the conversation
-	record, err := t.store.Load(t.conversationID)
+	record, err := t.store.Load(ctx, t.conversationID)
 	if err != nil {
 		return errors.Wrap(err, "failed to load conversation")
 	}

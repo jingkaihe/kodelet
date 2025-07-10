@@ -488,7 +488,7 @@ func listConversationsCmd(ctx context.Context, config *ConversationListConfig) {
 	}
 
 	// Query conversations with options
-	result, err := store.Query(options)
+	result, err := store.Query(ctx, options)
 	if err != nil {
 		presenter.Error(err, "Failed to list conversations")
 		os.Exit(1)
@@ -536,7 +536,7 @@ func deleteConversationCmd(ctx context.Context, id string, config *ConversationD
 	}
 
 	// Delete the conversation
-	err = store.Delete(id)
+	err = store.Delete(ctx, id)
 	if err != nil {
 		presenter.Error(err, "Failed to delete conversation")
 		os.Exit(1)
@@ -557,7 +557,7 @@ func showConversationCmd(ctx context.Context, id string, config *ConversationSho
 	defer store.Close()
 
 	// Load the conversation record
-	record, err := store.Load(id)
+	record, err := store.Load(ctx, id)
 	if err != nil {
 		presenter.Error(err, "Failed to load conversation")
 		os.Exit(1)
@@ -647,7 +647,7 @@ func importConversationCmd(ctx context.Context, source string, config *Conversat
 	}
 
 	// Check if conversation already exists
-	if _, err := store.Load(record.ID); err == nil {
+	if _, err := store.Load(ctx, record.ID); err == nil {
 		if !config.Force {
 			presenter.Error(errors.Errorf("conversation with ID %s already exists", record.ID), "Use --force to overwrite")
 			os.Exit(1)
@@ -655,7 +655,7 @@ func importConversationCmd(ctx context.Context, source string, config *Conversat
 	}
 
 	// Save the conversation
-	if err := store.Save(*record); err != nil {
+	if err := store.Save(ctx, *record); err != nil {
 		presenter.Error(err, "Failed to save conversation")
 		os.Exit(1)
 	}
@@ -674,7 +674,7 @@ func exportConversationCmd(ctx context.Context, conversationID string, path stri
 	defer store.Close()
 
 	// Load the conversation
-	record, err := store.Load(conversationID)
+	record, err := store.Load(ctx, conversationID)
 	if err != nil {
 		presenter.Error(err, "Failed to load conversation")
 		os.Exit(1)
@@ -841,7 +841,7 @@ func editConversationCmd(ctx context.Context, conversationID string, config *Con
 	defer store.Close()
 
 	// Load the conversation
-	record, err := store.Load(conversationID)
+	record, err := store.Load(ctx, conversationID)
 	if err != nil {
 		presenter.Error(err, "Failed to load conversation")
 		os.Exit(1)
@@ -911,7 +911,7 @@ func editConversationCmd(ctx context.Context, conversationID string, config *Con
 	}
 
 	// Save the edited conversation
-	if err := store.Save(*editedRecord); err != nil {
+	if err := store.Save(ctx, *editedRecord); err != nil {
 		presenter.Error(err, "Failed to save edited conversation")
 		os.Exit(1)
 	}

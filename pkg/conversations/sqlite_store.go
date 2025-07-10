@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/jmoiron/sqlx"
 	"github.com/pkg/errors"
@@ -71,9 +70,7 @@ func configureDatabase(ctx context.Context, db *sqlx.DB) error {
 	}
 
 	for _, pragma := range pragmas {
-		pragmaCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		_, err := db.ExecContext(pragmaCtx, pragma)
-		cancel()
+		_, err := db.ExecContext(ctx, pragma)
 		if err != nil {
 			return errors.Wrapf(err, "failed to execute pragma: %s", pragma)
 		}
@@ -82,9 +79,7 @@ func configureDatabase(ctx context.Context, db *sqlx.DB) error {
 	db.SetMaxOpenConns(1)
 	// Verify WAL mode is enabled
 	var journalMode string
-	queryCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	err := db.QueryRowContext(queryCtx, "PRAGMA journal_mode").Scan(&journalMode)
-	cancel()
+	err := db.QueryRowContext(ctx, "PRAGMA journal_mode").Scan(&journalMode)
 	if err != nil {
 		return errors.Wrap(err, "failed to query journal mode")
 	}
@@ -138,9 +133,7 @@ func (s *SQLiteConversationStore) initializeSchema() error {
 	return nil
 }
 
-func (s *SQLiteConversationStore) Save(record ConversationRecord) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second) // Increased timeout
-	defer cancel()
+func (s *SQLiteConversationStore) Save(ctx context.Context, record ConversationRecord) error {
 
 	tx, err := s.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -184,9 +177,7 @@ func (s *SQLiteConversationStore) Save(record ConversationRecord) error {
 }
 
 // Load retrieves a conversation record by ID
-func (s *SQLiteConversationStore) Load(id string) (ConversationRecord, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+func (s *SQLiteConversationStore) Load(ctx context.Context, id string) (ConversationRecord, error) {
 
 	var dbRecord dbConversationRecord
 
@@ -203,9 +194,7 @@ func (s *SQLiteConversationStore) Load(id string) (ConversationRecord, error) {
 }
 
 // List returns all conversation summaries sorted by creation time (newest first)
-func (s *SQLiteConversationStore) List() ([]ConversationSummary, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+func (s *SQLiteConversationStore) List(ctx context.Context) ([]ConversationSummary, error) {
 
 	var dbSummaries []dbConversationSummary
 
@@ -225,9 +214,7 @@ func (s *SQLiteConversationStore) List() ([]ConversationSummary, error) {
 }
 
 // Delete removes a conversation and its associated data
-func (s *SQLiteConversationStore) Delete(id string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+func (s *SQLiteConversationStore) Delete(ctx context.Context, id string) error {
 
 	tx, err := s.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -250,9 +237,7 @@ func (s *SQLiteConversationStore) Delete(id string) error {
 }
 
 // Query performs advanced queries with filtering, sorting, and pagination
-func (s *SQLiteConversationStore) Query(options QueryOptions) (QueryResult, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
+func (s *SQLiteConversationStore) Query(ctx context.Context, options QueryOptions) (QueryResult, error) {
 
 	// Build WHERE conditions
 	conditions := []string{}

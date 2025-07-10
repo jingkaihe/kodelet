@@ -119,7 +119,7 @@ func (s *ConversationService) ListConversations(ctx context.Context, req *ListCo
 	}
 
 	// Query conversations with pagination
-	result, err := s.store.Query(options)
+	result, err := s.store.Query(ctx, options)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to query conversations")
 	}
@@ -173,7 +173,7 @@ func (s *ConversationService) GetConversation(ctx context.Context, id string) (*
 	logger.G(ctx).WithField("id", id).Debug("Getting conversation")
 
 	// Load the conversation record
-	record, err := s.store.Load(id)
+	record, err := s.store.Load(ctx, id)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to load conversation")
 	}
@@ -208,7 +208,7 @@ func (s *ConversationService) GetToolResult(ctx context.Context, conversationID,
 	logger.G(ctx).WithField("conversationID", conversationID).WithField("toolCallID", toolCallID).Debug("Getting tool result")
 
 	// Load the conversation record
-	record, err := s.store.Load(conversationID)
+	record, err := s.store.Load(ctx, conversationID)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to load conversation")
 	}
@@ -232,7 +232,7 @@ func (s *ConversationService) GetToolResult(ctx context.Context, conversationID,
 func (s *ConversationService) DeleteConversation(ctx context.Context, id string) error {
 	logger.G(ctx).WithField("id", id).Debug("Deleting conversation")
 
-	err := s.store.Delete(id)
+	err := s.store.Delete(ctx, id)
 	if err != nil {
 		return errors.Wrap(err, "failed to delete conversation")
 	}
@@ -251,7 +251,7 @@ func (s *ConversationService) ResolveConversationID(ctx context.Context, id stri
 	}
 
 	// For short IDs, we need to search through conversations
-	summaries, err := s.store.List()
+	summaries, err := s.store.List(ctx)
 	if err != nil {
 		return "", errors.Wrap(err, "failed to list conversations")
 	}
@@ -281,7 +281,7 @@ func (s *ConversationService) ResolveConversationID(ctx context.Context, id stri
 func (s *ConversationService) GetConversationStatistics(ctx context.Context) (*ConversationStatistics, error) {
 	logger.G(ctx).Debug("Getting conversation statistics")
 
-	summaries, err := s.store.List()
+	summaries, err := s.store.List(ctx)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to list conversations")
 	}

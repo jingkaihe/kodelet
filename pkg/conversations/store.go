@@ -1,6 +1,7 @@
 package conversations
 
 import (
+	"context"
 	"time"
 )
 
@@ -18,16 +19,16 @@ type QueryOptions struct {
 // ConversationStore defines the interface for conversation persistence
 type ConversationStore interface {
 	// Basic CRUD operations
-	Save(record ConversationRecord) error
-	Load(id string) (ConversationRecord, error)
-	List() ([]ConversationSummary, error)
-	Delete(id string) error
+	Save(ctx context.Context, record ConversationRecord) error
+	Load(ctx context.Context, id string) (ConversationRecord, error)
+	List(ctx context.Context) ([]ConversationSummary, error)
+	Delete(ctx context.Context, id string) error
 
 	// Advanced query operations
-	Query(options QueryOptions) (QueryResult, error)
+	Query(ctx context.Context, options QueryOptions) (QueryResult, error)
 
 	// Lifecycle methods
-	Close() error
+	Close() error // Close doesn't need context
 }
 
 // Config holds configuration for the conversation store

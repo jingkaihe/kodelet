@@ -66,7 +66,7 @@ func GetMostRecentConversationID(ctx context.Context) (string, error) {
 		SortOrder: "desc",
 	}
 
-	result, err := store.Query(options)
+	result, err := store.Query(ctx, options)
 	if err != nil {
 		return "", err
 	}

@@ -55,11 +55,11 @@ func TestSQLiteConversationStore_BasicOperations(t *testing.T) {
 	}
 
 	// Test Save
-	err = store.Save(record)
+	err = store.Save(ctx, record)
 	require.NoError(t, err)
 
 	// Test Load
-	loaded, err := store.Load("test-conversation-1")
+	loaded, err := store.Load(ctx, "test-conversation-1")
 	require.NoError(t, err)
 	assert.Equal(t, record.ID, loaded.ID)
 	assert.Equal(t, record.ModelType, loaded.ModelType)
@@ -69,26 +69,26 @@ func TestSQLiteConversationStore_BasicOperations(t *testing.T) {
 	assert.Equal(t, string(record.RawMessages), string(loaded.RawMessages))
 
 	// Test Load non-existent
-	_, err = store.Load("non-existent")
+	_, err = store.Load(ctx, "non-existent")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "conversation not found")
 
 	// Test List
-	summaries, err := store.List()
+	summaries, err := store.List(ctx)
 	require.NoError(t, err)
 	assert.Len(t, summaries, 1)
 	assert.Equal(t, "test-conversation-1", summaries[0].ID)
 	assert.Equal(t, "Hello world", summaries[0].FirstMessage)
 
 	// Test Delete
-	err = store.Delete("test-conversation-1")
+	err = store.Delete(ctx, "test-conversation-1")
 	require.NoError(t, err)
 
 	// Verify deletion
-	_, err = store.Load("test-conversation-1")
+	_, err = store.Load(ctx, "test-conversation-1")
 	assert.Error(t, err)
 
-	summaries, err = store.List()
+	summaries, err = store.List(ctx)
 	require.NoError(t, err)
 	assert.Len(t, summaries, 0)
 }
@@ -145,12 +145,12 @@ func TestSQLiteConversationStore_Query(t *testing.T) {
 
 	// Save all records
 	for _, record := range records {
-		err = store.Save(record)
+		err = store.Save(ctx, record)
 		require.NoError(t, err)
 	}
 
 	// Test search by term
-	result, err := store.Query(QueryOptions{
+	result, err := store.Query(ctx, QueryOptions{
 		SearchTerm: "search",
 	})
 	require.NoError(t, err)
@@ -158,7 +158,7 @@ func TestSQLiteConversationStore_Query(t *testing.T) {
 	assert.Equal(t, "conv-2", result.ConversationSummaries[0].ID)
 
 	// Test sorting by creation time (default)
-	result, err = store.Query(QueryOptions{})
+	result, err = store.Query(ctx, QueryOptions{})
 	require.NoError(t, err)
 	assert.Len(t, result.ConversationSummaries, 3)
 	assert.Equal(t, "conv-3", result.ConversationSummaries[0].ID) // Most recent first
@@ -166,7 +166,7 @@ func TestSQLiteConversationStore_Query(t *testing.T) {
 	assert.Equal(t, "conv-1", result.ConversationSummaries[2].ID)
 
 	// Test sorting by message count
-	result, err = store.Query(QueryOptions{
+	result, err = store.Query(ctx, QueryOptions{
 		SortBy:    "messageCount",
 		SortOrder: "desc",
 	})
@@ -174,7 +174,7 @@ func TestSQLiteConversationStore_Query(t *testing.T) {
 	assert.Len(t, result.ConversationSummaries, 3)
 
 	// Test pagination
-	result, err = store.Query(QueryOptions{
+	result, err = store.Query(ctx, QueryOptions{
 		Limit: 2,
 	})
 	require.NoError(t, err)
@@ -182,7 +182,7 @@ func TestSQLiteConversationStore_Query(t *testing.T) {
 	assert.Equal(t, 3, result.Total)
 
 	// Test offset
-	result, err = store.Query(QueryOptions{
+	result, err = store.Query(ctx, QueryOptions{
 		Limit:  2,
 		Offset: 1,
 	})
@@ -195,7 +195,7 @@ func TestSQLiteConversationStore_Query(t *testing.T) {
 	// Test date filtering
 	startDate := now.Add(-90 * time.Minute)
 	endDate := now.Add(-30 * time.Minute)
-	result, err = store.Query(QueryOptions{
+	result, err = store.Query(ctx, QueryOptions{
 		StartDate: &startDate,
 		EndDate:   &endDate,
 	})
@@ -290,10 +290,10 @@ func TestSQLiteConversationStore_Factory(t *testing.T) {
 		ToolResults: map[string]tools.StructuredToolResult{},
 	}
 
-	err = store.Save(record)
+	err = store.Save(ctx, record)
 	require.NoError(t, err)
 
-	loaded, err := store.Load("factory-test")
+	loaded, err := store.Load(ctx, "factory-test")
 	require.NoError(t, err)
 	assert.Equal(t, "factory-test", loaded.ID)
 }
@@ -347,11 +347,11 @@ func TestSQLiteConversationStore_WALMode(t *testing.T) {
 	}
 
 	// Save record (this should write to WAL)
-	err = store.Save(record)
+	err = store.Save(ctx, record)
 	require.NoError(t, err)
 
 	// Verify we can read it back
-	loaded, err := store.Load("wal-test")
+	loaded, err := store.Load(ctx, "wal-test")
 	require.NoError(t, err)
 	assert.Equal(t, "wal-test", loaded.ID)
 
@@ -440,11 +440,11 @@ func TestSQLiteConversationStore_DatabaseIntegration(t *testing.T) {
 	}
 
 	// Save complex record
-	err = store.Save(record)
+	err = store.Save(ctx, record)
 	require.NoError(t, err)
 
 	// Load and verify all data is preserved
-	loaded, err := store.Load("integration-test")
+	loaded, err := store.Load(ctx, "integration-test")
 	require.NoError(t, err)
 
 	// Verify complex JSON data integrity
@@ -482,7 +482,7 @@ func TestSQLiteConversationStore_DatabaseIntegration(t *testing.T) {
 	assert.Contains(t, failedResult.Error, "éxit with status 1")
 
 	// Test list with complex data
-	summaries, err := store.List()
+	summaries, err := store.List(ctx)
 	require.NoError(t, err)
 	assert.Len(t, summaries, 1)
 	assert.Equal(t, "Test with unicode characters: éñ中文🌟", summaries[0].Summary)
@@ -516,7 +516,7 @@ func TestSQLiteConversationStore_NullHandling(t *testing.T) {
 	}
 
 	// Save record
-	err = store.Save(record)
+	err = store.Save(ctx, record)
 	require.NoError(t, err)
 
 	// Verify in database using direct SQL query
@@ -526,7 +526,7 @@ func TestSQLiteConversationStore_NullHandling(t *testing.T) {
 	assert.Nil(t, summary) // Should be NULL in database
 
 	// Load record and verify empty string is returned
-	loaded, err := store.Load("null-test")
+	loaded, err := store.Load(ctx, "null-test")
 	require.NoError(t, err)
 	assert.Equal(t, "", loaded.Summary)     // Should be empty string in domain model
 	assert.NotNil(t, loaded.FileLastAccess) // Should be empty map, not nil
@@ -581,7 +581,7 @@ func TestSQLiteConversationStore_ConcurrentAccess(t *testing.T) {
 					ToolResults: map[string]tools.StructuredToolResult{},
 				}
 
-				if err := store.Save(record); err != nil {
+				if err := store.Save(ctx, record); err != nil {
 					errChan <- err
 					return
 				}
@@ -606,7 +606,7 @@ func TestSQLiteConversationStore_ConcurrentAccess(t *testing.T) {
 	}
 
 	// Verify all records were saved
-	summaries, err := store.List()
+	summaries, err := store.List(ctx)
 	require.NoError(t, err)
 	assert.Len(t, summaries, numGoroutines*recordsPerGoroutine)
 
@@ -619,14 +619,14 @@ func TestSQLiteConversationStore_ConcurrentAccess(t *testing.T) {
 			defer func() { readDone <- true }()
 
 			// Read all records
-			if _, err := store.List(); err != nil {
+			if _, err := store.List(ctx); err != nil {
 				readErrChan <- err
 				return
 			}
 
 			// Read specific record
 			recordID := fmt.Sprintf("concurrent-%d-0", routineID)
-			if _, err := store.Load(recordID); err != nil {
+			if _, err := store.Load(ctx, recordID); err != nil {
 				readErrChan <- err
 				return
 			}
@@ -722,7 +722,7 @@ func TestSQLiteConversationStore_DirectDatabaseAccess(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify using store methods
-	loaded, err := store.Load("direct-test")
+	loaded, err := store.Load(ctx, "direct-test")
 	require.NoError(t, err)
 	assert.Equal(t, "direct-test", loaded.ID)
 	assert.Equal(t, "", loaded.Summary) // NULL becomes empty string
@@ -755,7 +755,7 @@ func TestSQLiteConversationStore_ErrorScenarios(t *testing.T) {
 
 	// Test load non-existent record
 	t.Run("load non-existent record", func(t *testing.T) {
-		_, err := store.Load("non-existent")
+		_, err := store.Load(ctx, "non-existent")
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "conversation not found")
 	})
@@ -773,7 +773,7 @@ func TestSQLiteConversationStore_ErrorScenarios(t *testing.T) {
 		require.NoError(t, err)
 
 		// Try to use after close
-		_, err = store2.List()
+		_, err = store2.List(ctx)
 		assert.Error(t, err)
 	})
 }

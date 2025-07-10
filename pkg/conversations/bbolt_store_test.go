@@ -33,11 +33,11 @@ func TestBBoltConversationStore_CRUD(t *testing.T) {
 	}
 	record.RawMessages = json.RawMessage(`[{"role": "user", "content": [{"type": "text", "text": "Hello world"}]}]`)
 
-	err = store.Save(record)
+	err = store.Save(ctx, record)
 	require.NoError(t, err, "Failed to save conversation")
 
 	// Test Load
-	loadedRecord, err := store.Load("test-id-1")
+	loadedRecord, err := store.Load(ctx, "test-id-1")
 	require.NoError(t, err, "Failed to load conversation")
 
 	assert.Equal(t, record.ID, loadedRecord.ID)
@@ -46,21 +46,21 @@ func TestBBoltConversationStore_CRUD(t *testing.T) {
 	assert.Equal(t, record.Usage.TotalTokens(), loadedRecord.Usage.TotalTokens())
 
 	// Test List
-	summaries, err := store.List()
+	summaries, err := store.List(ctx)
 	require.NoError(t, err, "Failed to list conversations")
 
 	assert.Equal(t, 1, len(summaries))
 	assert.Equal(t, "test-id-1", summaries[0].ID)
 
 	// Test Delete
-	err = store.Delete("test-id-1")
+	err = store.Delete(ctx, "test-id-1")
 	require.NoError(t, err, "Failed to delete conversation")
 
 	// Verify deletion
-	_, err = store.Load("test-id-1")
+	_, err = store.Load(ctx, "test-id-1")
 	assert.Error(t, err, "Expected error when loading deleted conversation")
 
-	summaries, err = store.List()
+	summaries, err = store.List(ctx)
 	require.NoError(t, err, "Failed to list conversations after delete")
 
 	assert.Equal(t, 0, len(summaries))
@@ -106,19 +106,19 @@ func TestBBoltConversationStore_Query(t *testing.T) {
 
 	// Save all conversations
 	for _, conv := range conversations {
-		err = store.Save(conv)
+		err = store.Save(ctx, conv)
 		require.NoError(t, err, "Failed to save conversation")
 	}
 
 	// Test basic query (no filters)
-	result, err := store.Query(QueryOptions{})
+	result, err := store.Query(ctx, QueryOptions{})
 	require.NoError(t, err, "Failed to query conversations")
 
 	assert.Equal(t, 3, len(result.ConversationSummaries))
 	assert.Equal(t, 3, result.Total)
 
 	// Test search query
-	result, err = store.Query(QueryOptions{
+	result, err = store.Query(ctx, QueryOptions{
 		SearchTerm: "coding",
 	})
 	require.NoError(t, err, "Failed to query conversations with search")
@@ -127,7 +127,7 @@ func TestBBoltConversationStore_Query(t *testing.T) {
 	assert.Equal(t, "conv-1", result.ConversationSummaries[0].ID)
 
 	// Test search in first message
-	result, err = store.Query(QueryOptions{
+	result, err = store.Query(ctx, QueryOptions{
 		SearchTerm: "BoltDB",
 	})
 	require.NoError(t, err, "Failed to query conversations with message search")
@@ -136,7 +136,7 @@ func TestBBoltConversationStore_Query(t *testing.T) {
 	assert.Equal(t, "conv-3", result.ConversationSummaries[0].ID)
 
 	// Test date filtering
-	result, err = store.Query(QueryOptions{
+	result, err = store.Query(ctx, QueryOptions{
 		StartDate: &now,
 		EndDate:   &tomorrow,
 	})
@@ -145,7 +145,7 @@ func TestBBoltConversationStore_Query(t *testing.T) {
 	assert.Equal(t, 2, len(result.ConversationSummaries))
 
 	// Test pagination
-	result, err = store.Query(QueryOptions{
+	result, err = store.Query(ctx, QueryOptions{
 		Limit:  2,
 		Offset: 1,
 	})
@@ -154,7 +154,7 @@ func TestBBoltConversationStore_Query(t *testing.T) {
 	assert.Equal(t, 2, len(result.ConversationSummaries))
 
 	// Test sorting
-	result, err = store.Query(QueryOptions{
+	result, err = store.Query(ctx, QueryOptions{
 		SortBy:    "createdAt",
 		SortOrder: "asc",
 	})
@@ -188,7 +188,7 @@ func TestBBoltConversationStore_ConcurrentAccess(t *testing.T) {
 			record.Summary = fmt.Sprintf("Concurrent test %d", id)
 			record.RawMessages = json.RawMessage(fmt.Sprintf(`[{"role": "user", "content": [{"type": "text", "text": "Test message %d"}]}]`, id))
 
-			if err := store.Save(record); err != nil {
+			if err := store.Save(ctx, record); err != nil {
 				errors <- err
 				return
 			}
@@ -209,7 +209,7 @@ func TestBBoltConversationStore_ConcurrentAccess(t *testing.T) {
 	}
 
 	// Verify all conversations were saved
-	summaries, err := store.List()
+	summaries, err := store.List(ctx)
 	require.NoError(t, err, "Failed to list conversations after concurrent saves")
 
 	assert.Equal(t, 10, len(summaries))
@@ -228,7 +228,7 @@ func TestBBoltConversationStore_DatabasePersistence(t *testing.T) {
 	record.Summary = "Test persistence"
 	record.RawMessages = json.RawMessage(`[{"role": "user", "content": [{"type": "text", "text": "Hello persistence"}]}]`)
 
-	err = store1.Save(record)
+	err = store1.Save(ctx, record)
 	require.NoError(t, err, "Failed to save conversation")
 
 	store1.Close()
@@ -238,7 +238,7 @@ func TestBBoltConversationStore_DatabasePersistence(t *testing.T) {
 	require.NoError(t, err, "Failed to reopen BBolt store")
 	defer store2.Close()
 
-	loadedRecord, err := store2.Load("persistence-test")
+	loadedRecord, err := store2.Load(ctx, "persistence-test")
 	require.NoError(t, err, "Failed to load conversation from reopened store")
 
 	assert.Equal(t, record.ID, loadedRecord.ID)
@@ -255,11 +255,11 @@ func TestBBoltConversationStore_ErrorHandling(t *testing.T) {
 	defer store.Close()
 
 	// Test loading non-existent conversation
-	_, err = store.Load("non-existent")
+	_, err = store.Load(ctx, "non-existent")
 	assert.Error(t, err, "Expected error when loading non-existent conversation")
 
 	// Test deleting non-existent conversation (should not error)
-	err = store.Delete("non-existent")
+	err = store.Delete(ctx, "non-existent")
 	assert.NoError(t, err, "Unexpected error when deleting non-existent conversation")
 }
 
@@ -276,7 +276,7 @@ func TestBBoltConversationStore_TripleStorage(t *testing.T) {
 	record.Summary = "Triple storage test"
 	record.RawMessages = json.RawMessage(`[{"role": "user", "content": [{"type": "text", "text": "Test triple storage"}]}]`)
 
-	err = store.Save(record)
+	err = store.Save(ctx, record)
 	require.NoError(t, err, "Failed to save conversation")
 
 	// Verify data exists in all three buckets
@@ -337,7 +337,7 @@ func TestBBoltIntegration_ConversationService(t *testing.T) {
 	}
 	record.RawMessages = json.RawMessage(`[{"role": "user", "content": [{"type": "text", "text": "Hello integration test"}]}]`)
 
-	err = store.Save(record)
+	err = store.Save(ctx, record)
 	require.NoError(t, err, "Failed to save conversation")
 
 	// Test listing conversations through the service
@@ -414,18 +414,18 @@ func TestBBoltIntegration_LargeDataset(t *testing.T) {
 		record.CreatedAt = time.Now().Add(-time.Duration(numConversations-i) * time.Minute)
 		record.UpdatedAt = record.CreatedAt
 
-		err = store.Save(record)
+		err = store.Save(ctx, record)
 		require.NoError(t, err, "Failed to save conversation")
 	}
 
 	// Test listing all conversations
-	summaries, err := store.List()
+	summaries, err := store.List(ctx)
 	require.NoError(t, err, "Failed to list conversations")
 
 	assert.Equal(t, numConversations, len(summaries))
 
 	// Test search functionality
-	searchResult, err := store.Query(QueryOptions{
+	searchResult, err := store.Query(ctx, QueryOptions{
 		SearchTerm: "searchable",
 	})
 	require.NoError(t, err, "Failed to search conversations")
@@ -434,7 +434,7 @@ func TestBBoltIntegration_LargeDataset(t *testing.T) {
 	assert.Equal(t, expectedSearchResults, len(searchResult.ConversationSummaries))
 
 	// Test pagination
-	paginatedResult, err := store.Query(QueryOptions{
+	paginatedResult, err := store.Query(ctx, QueryOptions{
 		Limit:  10,
 		Offset: 5,
 	})

@@ -182,7 +182,7 @@ func runUsageCmd(ctx context.Context, config *UsageConfig) {
 		options.EndDate = &endTime
 	}
 
-	result, err := store.Query(options)
+	result, err := store.Query(ctx, options)
 	if err != nil {
 		presenter.Error(err, "Failed to query conversations")
 		os.Exit(1)

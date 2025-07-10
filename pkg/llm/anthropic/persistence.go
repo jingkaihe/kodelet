@@ -87,11 +87,11 @@ func (t *AnthropicThread) SaveConversation(ctx context.Context, summarise bool) 
 	}
 
 	// Save the record
-	return t.store.Save(record)
+	return t.store.Save(ctx, record)
 }
 
 // loadConversation loads a conversation from the store into the thread
-func (t *AnthropicThread) loadConversation() error {
+func (t *AnthropicThread) loadConversation(ctx context.Context) error {
 	t.conversationMu.Lock()
 	defer t.conversationMu.Unlock()
 
@@ -100,7 +100,7 @@ func (t *AnthropicThread) loadConversation() error {
 	}
 
 	// Try to load the conversation
-	record, err := t.store.Load(t.conversationID)
+	record, err := t.store.Load(ctx, t.conversationID)
 	if err != nil {
 		return errors.Wrap(err, "failed to load conversation")
 	}

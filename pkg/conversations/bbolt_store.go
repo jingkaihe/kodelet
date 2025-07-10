@@ -74,7 +74,7 @@ func NewBBoltConversationStore(ctx context.Context, dbPath string) (*BBoltConver
 }
 
 // Save stores a conversation record using the triple storage pattern
-func (s *BBoltConversationStore) Save(record ConversationRecord) error {
+func (s *BBoltConversationStore) Save(ctx context.Context, record ConversationRecord) error {
 	return s.withDB(func(db *bbolt.DB) error {
 		return db.Update(func(tx *bbolt.Tx) error {
 			// 1. Save full record
@@ -115,7 +115,7 @@ func (s *BBoltConversationStore) Save(record ConversationRecord) error {
 }
 
 // Load retrieves a conversation record by ID
-func (s *BBoltConversationStore) Load(id string) (ConversationRecord, error) {
+func (s *BBoltConversationStore) Load(ctx context.Context, id string) (ConversationRecord, error) {
 	var record ConversationRecord
 	err := s.withDB(func(db *bbolt.DB) error {
 		return db.View(func(tx *bbolt.Tx) error {
@@ -131,7 +131,7 @@ func (s *BBoltConversationStore) Load(id string) (ConversationRecord, error) {
 }
 
 // List returns all conversation summaries
-func (s *BBoltConversationStore) List() ([]ConversationSummary, error) {
+func (s *BBoltConversationStore) List(ctx context.Context) ([]ConversationSummary, error) {
 	var summaries []ConversationSummary
 
 	err := s.withDB(func(db *bbolt.DB) error {
@@ -165,7 +165,7 @@ func (s *BBoltConversationStore) List() ([]ConversationSummary, error) {
 }
 
 // Delete removes a conversation and its associated data
-func (s *BBoltConversationStore) Delete(id string) error {
+func (s *BBoltConversationStore) Delete(ctx context.Context, id string) error {
 	return s.withDB(func(db *bbolt.DB) error {
 		return db.Update(func(tx *bbolt.Tx) error {
 			// Remove from all three buckets
@@ -197,7 +197,7 @@ func (s *BBoltConversationStore) Delete(id string) error {
 }
 
 // Query performs advanced queries with filtering, sorting, and pagination
-func (s *BBoltConversationStore) Query(options QueryOptions) (QueryResult, error) {
+func (s *BBoltConversationStore) Query(ctx context.Context, options QueryOptions) (QueryResult, error) {
 	var allSummaries []ConversationSummary
 	var filteredSummaries []ConversationSummary
 

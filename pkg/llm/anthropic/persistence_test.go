@@ -23,12 +23,12 @@ type MockConversationStore struct {
 	LoadedRecord *conversations.ConversationRecord
 }
 
-func (m *MockConversationStore) Save(record conversations.ConversationRecord) error {
+func (m *MockConversationStore) Save(ctx context.Context, record conversations.ConversationRecord) error {
 	m.SavedRecords = append(m.SavedRecords, record)
 	return nil
 }
 
-func (m *MockConversationStore) Load(id string) (conversations.ConversationRecord, error) {
+func (m *MockConversationStore) Load(ctx context.Context, id string) (conversations.ConversationRecord, error) {
 	if m.LoadedRecord != nil {
 		return *m.LoadedRecord, nil
 	}
@@ -43,15 +43,15 @@ func (m *MockConversationStore) Load(id string) (conversations.ConversationRecor
 	return conversations.ConversationRecord{}, nil
 }
 
-func (m *MockConversationStore) List() ([]conversations.ConversationSummary, error) {
+func (m *MockConversationStore) List(ctx context.Context) ([]conversations.ConversationSummary, error) {
 	return nil, nil
 }
 
-func (m *MockConversationStore) Delete(id string) error {
+func (m *MockConversationStore) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-func (m *MockConversationStore) Query(options conversations.QueryOptions) (conversations.QueryResult, error) {
+func (m *MockConversationStore) Query(ctx context.Context, options conversations.QueryOptions) (conversations.QueryResult, error) {
 	return conversations.QueryResult{}, nil
 }
 
@@ -208,7 +208,7 @@ func TestSaveAndLoadConversationWithFileLastAccess(t *testing.T) {
 	newThread.isPersisted = true
 
 	// Load the conversation
-	newThread.loadConversation()
+	newThread.loadConversation(context.Background())
 
 	// Verify the file last access data was preserved
 	loadedState := newThread.GetState()

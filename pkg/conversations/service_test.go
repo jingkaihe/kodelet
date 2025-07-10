@@ -16,10 +16,10 @@ import (
 type mockConversationStore struct {
 	conversations map[string]*ConversationRecord
 	summaries     []ConversationSummary
-	queryFunc     func(options QueryOptions) (QueryResult, error)
-	loadFunc      func(id string) (*ConversationRecord, error)
-	deleteFunc    func(id string) error
-	listFunc      func() ([]ConversationSummary, error)
+	queryFunc     func(ctx context.Context, options QueryOptions) (QueryResult, error)
+	loadFunc      func(ctx context.Context, id string) (*ConversationRecord, error)
+	deleteFunc    func(ctx context.Context, id string) error
+	listFunc      func(ctx context.Context) ([]ConversationSummary, error)
 	closeFunc     func() error
 }
 
@@ -30,14 +30,14 @@ func newMockConversationStore() *mockConversationStore {
 	}
 }
 
-func (m *mockConversationStore) Save(record ConversationRecord) error {
+func (m *mockConversationStore) Save(ctx context.Context, record ConversationRecord) error {
 	m.conversations[record.ID] = &record
 	return nil
 }
 
-func (m *mockConversationStore) Load(id string) (ConversationRecord, error) {
+func (m *mockConversationStore) Load(ctx context.Context, id string) (ConversationRecord, error) {
 	if m.loadFunc != nil {
-		rec, err := m.loadFunc(id)
+		rec, err := m.loadFunc(ctx, id)
 		if err != nil {
 			return ConversationRecord{}, err
 		}
@@ -53,16 +53,16 @@ func (m *mockConversationStore) Load(id string) (ConversationRecord, error) {
 	return *record, nil
 }
 
-func (m *mockConversationStore) List() ([]ConversationSummary, error) {
+func (m *mockConversationStore) List(ctx context.Context) ([]ConversationSummary, error) {
 	if m.listFunc != nil {
-		return m.listFunc()
+		return m.listFunc(ctx)
 	}
 	return m.summaries, nil
 }
 
-func (m *mockConversationStore) Query(options QueryOptions) (QueryResult, error) {
+func (m *mockConversationStore) Query(ctx context.Context, options QueryOptions) (QueryResult, error) {
 	if m.queryFunc != nil {
-		return m.queryFunc(options)
+		return m.queryFunc(ctx, options)
 	}
 	return QueryResult{
 		ConversationSummaries: m.summaries,
@@ -71,9 +71,9 @@ func (m *mockConversationStore) Query(options QueryOptions) (QueryResult, error)
 	}, nil
 }
 
-func (m *mockConversationStore) Delete(id string) error {
+func (m *mockConversationStore) Delete(ctx context.Context, id string) error {
 	if m.deleteFunc != nil {
-		return m.deleteFunc(id)
+		return m.deleteFunc(ctx, id)
 	}
 	delete(m.conversations, id)
 	return nil
@@ -134,7 +134,7 @@ func TestConversationService_ListConversations(t *testing.T) {
 			mockStore := newMockConversationStore()
 			mockStore.summaries = tt.storeSummaries
 			if tt.storeError != nil {
-				mockStore.queryFunc = func(options QueryOptions) (QueryResult, error) {
+				mockStore.queryFunc = func(ctx context.Context, options QueryOptions) (QueryResult, error) {
 					return QueryResult{}, tt.storeError
 				}
 			}
@@ -205,7 +205,7 @@ func TestConversationService_GetConversation(t *testing.T) {
 				mockStore.conversations[tt.storeRecord.ID] = tt.storeRecord
 			}
 			if tt.storeError != nil {
-				mockStore.loadFunc = func(id string) (*ConversationRecord, error) {
+				mockStore.loadFunc = func(ctx context.Context, id string) (*ConversationRecord, error) {
 					return nil, tt.storeError
 				}
 			}
@@ -252,7 +252,7 @@ func TestConversationService_DeleteConversation(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mockStore := newMockConversationStore()
 			if tt.storeError != nil {
-				mockStore.deleteFunc = func(id string) error {
+				mockStore.deleteFunc = func(ctx context.Context, id string) error {
 					return tt.storeError
 				}
 			}
@@ -399,7 +399,7 @@ func TestConversationService_GetConversationStatistics(t *testing.T) {
 			}
 
 			if tt.storeError != nil {
-				mockStore.listFunc = func() ([]ConversationSummary, error) {
+				mockStore.listFunc = func(ctx context.Context) ([]ConversationSummary, error) {
 					return nil, tt.storeError
 				}
 			}

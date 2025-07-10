@@ -812,7 +812,7 @@ func (t *OpenAIThread) EnablePersistence(ctx context.Context, enabled bool) {
 	// If enabling persistence and there's an existing conversation ID,
 	// try to load it from the store
 	if enabled && t.conversationID != "" && t.store != nil {
-		t.loadConversation()
+		t.loadConversation(ctx)
 	}
 }
 
