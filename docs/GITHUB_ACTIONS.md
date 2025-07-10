@@ -223,7 +223,7 @@ Configure Kodelet through environment variables:
     anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
   env:
     KODELET_PROVIDER: "anthropic"
-    KODELET_MODEL: "claude-sonnet-4-0"
+    KODELET_MODEL: "claude-sonnet-4-20250514"
     KODELET_MAX_TOKENS: "8192"
 ```
 
@@ -248,7 +248,7 @@ Place `kodelet-config.yaml` in your repository root:
 
 ```yaml
 provider: anthropic
-model: claude-sonnet-4-0
+model: claude-sonnet-4-20250514
 max_tokens: 8192
 tracing:
   enabled: false

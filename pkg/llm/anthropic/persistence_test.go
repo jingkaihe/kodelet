@@ -2,20 +2,68 @@ package anthropic
 
 import (
 	"context"
+	"fmt"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
+	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
+// MockConversationStore is a test implementation of the ConversationStore interface
+type MockConversationStore struct {
+	SavedRecords []conversations.ConversationRecord
+	LoadedRecord *conversations.ConversationRecord
+}
+
+func (m *MockConversationStore) Save(record conversations.ConversationRecord) error {
+	m.SavedRecords = append(m.SavedRecords, record)
+	return nil
+}
+
+func (m *MockConversationStore) Load(id string) (conversations.ConversationRecord, error) {
+	if m.LoadedRecord != nil {
+		return *m.LoadedRecord, nil
+	}
+
+	// Find the record with the matching ID
+	for _, record := range m.SavedRecords {
+		if record.ID == id {
+			return record, nil
+		}
+	}
+
+	return conversations.ConversationRecord{}, nil
+}
+
+func (m *MockConversationStore) List() ([]conversations.ConversationSummary, error) {
+	return nil, nil
+}
+
+func (m *MockConversationStore) Delete(id string) error {
+	return nil
+}
+
+func (m *MockConversationStore) Query(options conversations.QueryOptions) (conversations.QueryResult, error) {
+	return conversations.QueryResult{}, nil
+}
+
+func (m *MockConversationStore) Close() error {
+	return nil
+}
+
 func TestDeserializeMessages(t *testing.T) {
-	thread := NewAnthropicThread(llmtypes.Config{
-		Model: string(anthropic.ModelClaudeSonnet4_0),
+	thread, err := NewAnthropicThread(llmtypes.Config{
+		Model: string(anthropic.ModelClaudeSonnet4_20250514),
 	})
+	require.NoError(t, err)
 	messages, err := DeserializeMessages([]byte(`[]`))
 	assert.NoError(t, err)
 	assert.Equal(t, 0, len(messages))
@@ -107,19 +155,30 @@ func TestDeserializeMessages(t *testing.T) {
 }
 
 func TestSaveAndLoadConversationWithFileLastAccess(t *testing.T) {
+	// Create a unique temporary directory for this test
+	tempDir := t.TempDir()
+
+	// Create a BBolt store directly with a unique database path
+	dbPath := filepath.Join(tempDir, fmt.Sprintf("test-%d.db", time.Now().UnixNano()))
+	store, err := conversations.NewBBoltConversationStore(context.Background(), dbPath)
+	require.NoError(t, err)
+	defer store.Close()
+
 	// Create a thread with a unique conversation ID
-	conversationID := "test-file-last-access"
-	thread := NewAnthropicThread(llmtypes.Config{
-		Model: string(anthropic.ModelClaudeSonnet4_0),
+	conversationID := fmt.Sprintf("test-file-last-access-%d", time.Now().UnixNano())
+	thread, err := NewAnthropicThread(llmtypes.Config{
+		Model: string(anthropic.ModelClaudeSonnet4_20250514),
 	})
+	require.NoError(t, err)
 	thread.SetConversationID(conversationID)
 
 	// Setup state with file access data
 	state := tools.NewBasicState(context.TODO())
 	thread.SetState(state)
 
-	// Enable persistence
-	thread.EnablePersistence(true)
+	// Manually set the store instead of using EnablePersistence
+	thread.store = store
+	thread.isPersisted = true
 
 	// Set file access times
 	now := time.Now()
@@ -132,19 +191,24 @@ func TestSaveAndLoadConversationWithFileLastAccess(t *testing.T) {
 	state.SetFileLastAccess(fileAccessMap)
 
 	// Save the conversation
-	err := thread.SaveConversation(context.Background(), false)
+	err = thread.SaveConversation(context.Background(), false)
 	assert.NoError(t, err)
 
 	// Create a new thread with the same conversation ID
-	newThread := NewAnthropicThread(llmtypes.Config{
-		Model: string(anthropic.ModelClaudeSonnet4_0),
+	newThread, err := NewAnthropicThread(llmtypes.Config{
+		Model: string(anthropic.ModelClaudeSonnet4_20250514),
 	})
+	require.NoError(t, err)
 	newThread.SetConversationID(conversationID)
 	newState := tools.NewBasicState(context.TODO())
 	newThread.SetState(newState)
 
-	// Enable persistence to load the conversation
-	newThread.EnablePersistence(true)
+	// Manually set the store and enable persistence
+	newThread.store = store
+	newThread.isPersisted = true
+
+	// Load the conversation
+	newThread.loadConversation()
 
 	// Verify the file last access data was preserved
 	loadedState := newThread.GetState()
@@ -430,9 +494,10 @@ func TestSaveConversationMessageCleanup(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create a thread without persistence to avoid store issues
-			thread := NewAnthropicThread(llmtypes.Config{
-				Model: string(anthropic.ModelClaudeSonnet4_0),
+			thread, err := NewAnthropicThread(llmtypes.Config{
+				Model: string(anthropic.ModelClaudeSonnet4_20250514),
 			})
+			require.NoError(t, err)
 
 			// Set up state
 			state := tools.NewBasicState(context.TODO())
@@ -450,7 +515,7 @@ func TestSaveConversationMessageCleanup(t *testing.T) {
 
 			for i, expectedMsg := range tt.expectedMessages {
 				if i >= len(thread.messages) {
-					t.Errorf("Expected message %d missing in test: %s", i, tt.description)
+					assert.Fail(t, fmt.Sprintf("Expected message %d missing in test: %s", i, tt.description))
 					continue
 				}
 
@@ -463,8 +528,8 @@ func TestSaveConversationMessageCleanup(t *testing.T) {
 				// Compare content blocks - focus on key properties
 				for j, expectedContent := range expectedMsg.Content {
 					if j >= len(actualMsg.Content) {
-						t.Errorf("Expected content block %d missing at message %d for test: %s",
-							j, i, tt.description)
+						assert.Fail(t, fmt.Sprintf("Expected content block %d missing at message %d for test: %s",
+							j, i, tt.description))
 						continue
 					}
 
@@ -493,4 +558,323 @@ func TestSaveConversationMessageCleanup(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestExtractMessages(t *testing.T) {
+	// Test basic message extraction
+	rawMessages := `[
+		{
+			"content": [
+				{
+					"text": "Hello there!",
+					"type": "text"
+				}
+			],
+			"role": "user"
+		},
+		{
+			"content": [
+				{
+					"text": "Hi! How can I help you today?",
+					"type": "text"
+				}
+			],
+			"role": "assistant"
+		}
+	]`
+
+	messages, err := ExtractMessages([]byte(rawMessages), nil)
+	assert.NoError(t, err)
+	assert.Len(t, messages, 2)
+
+	// Check first message
+	assert.Equal(t, "user", messages[0].Role)
+	assert.Equal(t, "Hello there!", messages[0].Content)
+
+	// Check second message
+	assert.Equal(t, "assistant", messages[1].Role)
+	assert.Equal(t, "Hi! How can I help you today?", messages[1].Content)
+}
+
+func TestExtractMessagesWithToolUse(t *testing.T) {
+	// Test with tool use and tool result
+	rawMessages := `[
+		{
+			"content": [
+				{
+					"text": "List the files in the current directory",
+					"type": "text"
+				}
+			],
+			"role": "user"
+		},
+		{
+			"content": [
+				{
+					"text": "I'll list the files for you.",
+					"type": "text"
+				},
+				{
+					"id": "toolu_123",
+					"input": {
+						"command": "ls -la",
+						"description": "List files"
+					},
+					"name": "bash",
+					"type": "tool_use"
+				}
+			],
+			"role": "assistant"
+		},
+		{
+			"content": [
+				{
+					"tool_use_id": "toolu_123",
+					"is_error": false,
+					"content": [
+						{
+							"text": "file1.txt\nfile2.txt\nREADME.md",
+							"type": "text"
+						}
+					],
+					"type": "tool_result"
+				}
+			],
+			"role": "user"
+		},
+		{
+			"content": [
+				{
+					"text": "Here are the files in your directory: file1.txt, file2.txt, README.md",
+					"type": "text"
+				}
+			],
+			"role": "assistant"
+		}
+	]`
+
+	messages, err := ExtractMessages([]byte(rawMessages), nil)
+	assert.NoError(t, err)
+	assert.Len(t, messages, 5) // user + assistant text + tool use + tool result + assistant final
+
+	// Check user message
+	assert.Equal(t, "user", messages[0].Role)
+	assert.Equal(t, "List the files in the current directory", messages[0].Content)
+
+	// Check assistant text message
+	assert.Equal(t, "assistant", messages[1].Role)
+	assert.Equal(t, "I'll list the files for you.", messages[1].Content)
+
+	// Check tool use message
+	assert.Equal(t, "assistant", messages[2].Role)
+	assert.Contains(t, messages[2].Content, "🔧 Using tool: bash")
+	assert.Contains(t, messages[2].Content, "ls -la")
+
+	// Check tool result message
+	assert.Equal(t, "assistant", messages[3].Role)
+	assert.Contains(t, messages[3].Content, "🔄 Tool result:")
+	assert.Contains(t, messages[3].Content, "file1.txt\nfile2.txt\nREADME.md")
+
+	// Check final assistant message
+	assert.Equal(t, "assistant", messages[4].Role)
+	assert.Equal(t, "Here are the files in your directory: file1.txt, file2.txt, README.md", messages[4].Content)
+}
+
+func TestExtractMessagesWithMultipleToolResults(t *testing.T) {
+	// Test with multiple tool calls and results
+	rawMessages := `[
+		{
+			"content": [
+				{
+					"text": "Get me the weather and time",
+					"type": "text"
+				}
+			],
+			"role": "user"
+		},
+		{
+			"content": [
+				{
+					"text": "I'll get both the weather and time for you.",
+					"type": "text"
+				},
+				{
+					"id": "toolu_weather",
+					"input": {
+						"location": "NYC"
+					},
+					"name": "get_weather",
+					"type": "tool_use"
+				},
+				{
+					"id": "toolu_time",
+					"input": {},
+					"name": "get_time",
+					"type": "tool_use"
+				}
+			],
+			"role": "assistant"
+		},
+		{
+			"content": [
+				{
+					"tool_use_id": "toolu_weather",
+					"is_error": false,
+					"content": [
+						{
+							"text": "Weather: 75°F, cloudy",
+							"type": "text"
+						}
+					],
+					"type": "tool_result"
+				}
+			],
+			"role": "user"
+		},
+		{
+			"content": [
+				{
+					"tool_use_id": "toolu_time",
+					"is_error": false,
+					"content": [
+						{
+							"text": "Current time: 2:30 PM",
+							"type": "text"
+						}
+					],
+					"type": "tool_result"
+				}
+			],
+			"role": "user"
+		},
+		{
+			"content": [
+				{
+					"text": "Here's the information: It's 75°F and cloudy, and the time is 2:30 PM.",
+					"type": "text"
+				}
+			],
+			"role": "assistant"
+		}
+	]`
+
+	toolResults := map[string]tooltypes.StructuredToolResult{
+		"toolu_weather": {
+			ToolName:  "get_weather",
+			Success:   true,
+			Timestamp: time.Now(),
+			Metadata:  nil,
+		},
+		"toolu_time": {
+			ToolName:  "get_time",
+			Success:   true,
+			Timestamp: time.Now(),
+			Metadata:  nil,
+		},
+	}
+
+	messages, err := ExtractMessages([]byte(rawMessages), toolResults)
+	assert.NoError(t, err)
+	assert.Len(t, messages, 7) // user + assistant text + weather tool use + time tool use + weather result + time result + assistant final
+
+	// Check weather tool result uses CLI rendering
+	weatherToolResult := messages[4]
+	assert.Equal(t, "assistant", weatherToolResult.Role)
+	assert.Contains(t, weatherToolResult.Content, "get_weather")
+
+	// Check time tool result uses CLI rendering
+	timeToolResult := messages[5]
+	assert.Equal(t, "assistant", timeToolResult.Role)
+	assert.Contains(t, timeToolResult.Content, "get_time")
+}
+
+func TestExtractMessagesWithThinking(t *testing.T) {
+	// Test with thinking content
+	rawMessages := `[
+		{
+			"content": [
+				{
+					"text": "What is 2+2?",
+					"type": "text"
+				}
+			],
+			"role": "user"
+		},
+		{
+			"content": [
+				{
+					"thinking": "The user is asking for a simple arithmetic calculation. 2+2 equals 4.",
+					"type": "thinking"
+				},
+				{
+					"text": "2+2 equals 4.",
+					"type": "text"
+				}
+			],
+			"role": "assistant"
+		}
+	]`
+
+	messages, err := ExtractMessages([]byte(rawMessages), nil)
+	assert.NoError(t, err)
+	assert.Len(t, messages, 3) // user + thinking + assistant text
+
+	// Check user message
+	assert.Equal(t, "user", messages[0].Role)
+	assert.Equal(t, "What is 2+2?", messages[0].Content)
+
+	// Check thinking message
+	assert.Equal(t, "assistant", messages[1].Role)
+	assert.Contains(t, messages[1].Content, "💭 Thinking:")
+	assert.Contains(t, messages[1].Content, "The user is asking for a simple arithmetic calculation. 2+2 equals 4.")
+
+	// Check final assistant message
+	assert.Equal(t, "assistant", messages[2].Role)
+	assert.Equal(t, "2+2 equals 4.", messages[2].Content)
+}
+
+func TestExtractMessagesWithThinkingLeadingNewlines(t *testing.T) {
+	// Test with thinking content that has leading newlines
+	rawMessages := `[
+		{
+			"content": [
+				{
+					"text": "What is 2+2?",
+					"type": "text"
+				}
+			],
+			"role": "user"
+		},
+		{
+			"content": [
+				{
+					"thinking": "\n\nThe user is asking for a simple arithmetic calculation. 2+2 equals 4.",
+					"type": "thinking"
+				},
+				{
+					"text": "2+2 equals 4.",
+					"type": "text"
+				}
+			],
+			"role": "assistant"
+		}
+	]`
+
+	messages, err := ExtractMessages([]byte(rawMessages), nil)
+	assert.NoError(t, err)
+	assert.Len(t, messages, 3) // user + thinking + assistant text
+
+	// Check user message
+	assert.Equal(t, "user", messages[0].Role)
+	assert.Equal(t, "What is 2+2?", messages[0].Content)
+
+	// Check thinking message - should NOT have leading newlines
+	assert.Equal(t, "assistant", messages[1].Role)
+	assert.Equal(t, "💭 Thinking: The user is asking for a simple arithmetic calculation. 2+2 equals 4.", messages[1].Content)
+	// Verify no leading newlines in the thinking content
+	assert.NotContains(t, messages[1].Content, "💭 Thinking: \n")
+
+	// Check final assistant message
+	assert.Equal(t, "assistant", messages[2].Role)
+	assert.Equal(t, "2+2 equals 4.", messages[2].Content)
 }

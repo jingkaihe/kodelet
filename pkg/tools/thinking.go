@@ -3,9 +3,10 @@ package tools
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"time"
 
 	"github.com/invopop/jsonschema"
+	"github.com/pkg/errors"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -29,13 +30,6 @@ func (r *ThinkingToolResult) IsError() bool {
 
 func (r *ThinkingToolResult) AssistantFacing() string {
 	return tooltypes.StringifyToolResult("Your thought have been recorded.", r.err)
-}
-
-func (r *ThinkingToolResult) UserFacing() string {
-	if r.IsError() {
-		return r.GetError()
-	}
-	return fmt.Sprintf("Thought: %s\nYour thought have been recorded.", r.thought)
 }
 
 type ThinkingTool struct{}
@@ -63,11 +57,11 @@ func (t *ThinkingTool) TracingKVs(parameters string) ([]attribute.KeyValue, erro
 func (t *ThinkingTool) ValidateInput(state tooltypes.State, parameters string) error {
 	var input ThinkingInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
-		return fmt.Errorf("invalid input: %w", err)
+		return errors.Wrap(err, "invalid input")
 	}
 
 	if input.Thought == "" {
-		return fmt.Errorf("thought is required")
+		return errors.New("thought is required")
 	}
 
 	return nil
@@ -103,4 +97,23 @@ func (t *ThinkingTool) Execute(ctx context.Context, state tooltypes.State, param
 	return &ThinkingToolResult{
 		thought: input.Thought,
 	}
+}
+
+func (r *ThinkingToolResult) StructuredData() tooltypes.StructuredToolResult {
+	result := tooltypes.StructuredToolResult{
+		ToolName:  "thinking",
+		Success:   !r.IsError(),
+		Timestamp: time.Now(),
+	}
+
+	if r.IsError() {
+		result.Error = r.GetError()
+		return result
+	}
+
+	result.Metadata = &tooltypes.ThinkingMetadata{
+		Thought: r.thought,
+	}
+
+	return result
 }

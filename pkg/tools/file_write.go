@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -10,6 +9,7 @@ import (
 	"time"
 
 	"github.com/invopop/jsonschema"
+	"github.com/pkg/errors"
 	"go.opentelemetry.io/otel/attribute"
 
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -46,17 +46,29 @@ func (r *FileWriteToolResult) AssistantFacing() string {
 	return tooltypes.StringifyToolResult(content, r.GetError())
 }
 
-func (r *FileWriteToolResult) UserFacing() string {
-	if r.IsError() {
-		return r.GetError()
+func (r *FileWriteToolResult) StructuredData() tooltypes.StructuredToolResult {
+	result := tooltypes.StructuredToolResult{
+		ToolName:  "file_write",
+		Success:   !r.IsError(),
+		Timestamp: time.Now(),
 	}
 
-	lines := strings.Split(r.text, "\n")
-	textWithLineNumber := utils.ContentWithLineNumber(lines, 0)
+	// Detect language from file extension
+	language := utils.DetectLanguageFromPath(r.filename)
 
-	buf := bytes.NewBufferString(fmt.Sprintf("File Written: %s\n", r.filename))
-	buf.WriteString(textWithLineNumber)
-	return buf.String()
+	// Always populate metadata, even for errors
+	result.Metadata = &tooltypes.FileWriteMetadata{
+		FilePath: r.filename,
+		Content:  r.text,
+		Size:     int64(len(r.text)),
+		Language: language,
+	}
+
+	if r.IsError() {
+		result.Error = r.GetError()
+	}
+
+	return result
 }
 
 type FileWriteTool struct{}
@@ -91,11 +103,11 @@ By default the file is created with 0644 permissions. You can change the permiss
 func (t *FileWriteTool) ValidateInput(state tooltypes.State, parameters string) error {
 	var input FileWriteInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
-		return fmt.Errorf("invalid input: %w", err)
+		return errors.Wrap(err, "invalid input")
 	}
 
 	if input.Text == "" {
-		return fmt.Errorf("text is required. run 'touch' command to create an empty file")
+		return errors.New("text is required. run 'touch' command to create an empty file")
 	}
 
 	// check if the file exists
@@ -105,18 +117,18 @@ func (t *FileWriteTool) ValidateInput(state tooltypes.State, parameters string) 
 			// if the file does not exist, we can create it
 			return nil
 		}
-		return fmt.Errorf("failed to check the file status: %w", err)
+		return errors.Wrap(err, "failed to check the file status")
 	}
 
 	// get the last modified time of the file
 	lastAccessed := info.ModTime()
 	lastRead, err := state.GetFileLastAccessed(input.FilePath)
 	if err != nil {
-		return fmt.Errorf("failed to get the last access time of the file: %w", err)
+		return errors.Wrap(err, "failed to get the last access time of the file")
 	}
 
 	if lastAccessed.After(lastRead) {
-		return fmt.Errorf("file %s has been modified since the last read either by another tool or by the user, please read the file again", input.FilePath)
+		return errors.Errorf("file %s has been modified since the last read either by another tool or by the user, please read the file again", input.FilePath)
 	}
 
 	return nil

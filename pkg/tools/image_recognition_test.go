@@ -225,7 +225,7 @@ func (m *mockThread) GetConversationID() string                                 
 func (m *mockThread) SetConversationID(id string)                                              {}
 func (m *mockThread) SaveConversation(ctx context.Context, summarise bool) error               { return nil }
 func (m *mockThread) IsPersisted() bool                                                        { return false }
-func (m *mockThread) EnablePersistence(enabled bool)                                           {}
+func (m *mockThread) EnablePersistence(ctx context.Context, enabled bool)                      {}
 func (m *mockThread) Provider() string                                                         { return "mock" }
 func (m *mockThread) GetMessages() ([]llm.Message, error)                                      { return nil, nil }
 

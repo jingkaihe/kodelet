@@ -21,11 +21,14 @@ func init() {
 	viper.SetDefault("max_tokens", 8192)
 	viper.SetDefault("weak_model_max_tokens", 8192)
 	viper.SetDefault("thinking_budget_tokens", 4048)
-	viper.SetDefault("model", anthropic.ModelClaudeSonnet4_0)
-	viper.SetDefault("weak_model", anthropic.ModelClaude3_5HaikuLatest)
+	viper.SetDefault("model", anthropic.ModelClaudeSonnet4_20250514)
+	viper.SetDefault("weak_model", anthropic.ModelClaude3_5Haiku20241022)
 	viper.SetDefault("provider", "anthropic")
 	viper.SetDefault("reasoning_effort", "medium")
 	viper.SetDefault("cache_every", 10)
+	viper.SetDefault("allowed_commands", []string{})
+	viper.SetDefault("allowed_domains_file", "~/.kodelet/allowed_domains.txt")
+	viper.SetDefault("anthropic_api_access", "auto")
 
 	// Set default MCP configuration
 	viper.SetDefault("mcp", map[string]tools.MCPConfig{})
@@ -52,7 +55,7 @@ func init() {
 	viper.SetConfigName("config")
 	viper.SetConfigType("yaml")
 	viper.AddConfigPath("$HOME/.kodelet")
-	
+
 	if err := viper.ReadInConfig(); err == nil {
 		logger.G(context.TODO()).WithField("config_file", viper.ConfigFileUsed()).Debug("Using global config file")
 	}
@@ -100,15 +103,18 @@ func main() {
 
 	// Add global flags
 	rootCmd.PersistentFlags().String("provider", "anthropic", "LLM provider to use (anthropic, openai)")
-	rootCmd.PersistentFlags().String("model", string(anthropic.ModelClaudeSonnet4_0), "LLM model to use (overrides config)")
+	rootCmd.PersistentFlags().String("model", string(anthropic.ModelClaudeSonnet4_20250514), "LLM model to use (overrides config)")
 	rootCmd.PersistentFlags().Int("max-tokens", 8192, "Maximum tokens for response (overrides config)")
 	rootCmd.PersistentFlags().Int("thinking-budget-tokens", 4048, "Maximum tokens for thinking capability (overrides config)")
-	rootCmd.PersistentFlags().String("weak-model", string(anthropic.ModelClaude3_5HaikuLatest), "Weak model to use (overrides config)")
+	rootCmd.PersistentFlags().String("weak-model", string(anthropic.ModelClaude3_5Haiku20241022), "Weak model to use (overrides config)")
 	rootCmd.PersistentFlags().Int("weak-model-max-tokens", 8192, "Maximum tokens for weak model response (overrides config)")
 	rootCmd.PersistentFlags().String("reasoning-effort", "medium", "Reasoning effort for OpenAI models (low, medium, high)")
 	rootCmd.PersistentFlags().Int("cache-every", 10, "Cache messages every N interactions (0 to disable, Anthropic only)")
 	rootCmd.PersistentFlags().String("log-level", "info", "Log level (panic, fatal, error, warn, info, debug, trace)")
 	rootCmd.PersistentFlags().String("log-format", "fmt", "Log format (json, text, fmt)")
+	rootCmd.PersistentFlags().StringSlice("allowed-commands", []string{}, "Allowed command patterns for bash tool (e.g. 'yarn start,ls *')")
+	rootCmd.PersistentFlags().String("allowed-domains-file", "~/.kodelet/allowed_domains.txt", "Path to file containing allowed domains for web_fetch and browser tools (one domain per line)")
+	rootCmd.PersistentFlags().String("anthropic-api-access", "auto", "Anthropic API access mode (auto, subscription, api-key)")
 
 	// Bind flags to viper
 	viper.BindPFlag("provider", rootCmd.PersistentFlags().Lookup("provider"))
@@ -122,6 +128,9 @@ func main() {
 	viper.BindPFlag("cache_every", rootCmd.PersistentFlags().Lookup("cache-every"))
 	viper.BindPFlag("log_level", rootCmd.PersistentFlags().Lookup("log-level"))
 	viper.BindPFlag("log_format", rootCmd.PersistentFlags().Lookup("log-format"))
+	viper.BindPFlag("allowed_commands", rootCmd.PersistentFlags().Lookup("allowed-commands"))
+	viper.BindPFlag("allowed_domains_file", rootCmd.PersistentFlags().Lookup("allowed-domains-file"))
+	viper.BindPFlag("anthropic_api_access", rootCmd.PersistentFlags().Lookup("anthropic-api-access"))
 
 	// Add subcommands
 	rootCmd.AddCommand(chatCmd)
@@ -132,11 +141,15 @@ func main() {
 	rootCmd.AddCommand(updateCmd)
 	rootCmd.AddCommand(initCmd)
 	rootCmd.AddCommand(conversationCmd)
+	rootCmd.AddCommand(usageCmd)
 	rootCmd.AddCommand(prCmd)
 	rootCmd.AddCommand(prRespondCmd)
 	rootCmd.AddCommand(issueResolveCmd)
 	rootCmd.AddCommand(resolveCmd)
 	rootCmd.AddCommand(ghaAgentOnboardCmd)
+	rootCmd.AddCommand(anthropicLoginCmd)
+	rootCmd.AddCommand(anthropicLogoutCmd)
+	rootCmd.AddCommand(serveCmd)
 
 	// Initialize telemetry with tracing
 	tracingShutdown, err := initTracing(ctx)
@@ -165,11 +178,15 @@ func main() {
 	updateCmd = withTracing(updateCmd)
 	initCmd = withTracing(initCmd)
 	conversationCmd = withTracing(conversationCmd)
+	usageCmd = withTracing(usageCmd)
 	prCmd = withTracing(prCmd)
 	prRespondCmd = withTracing(prRespondCmd)
 	issueResolveCmd = withTracing(issueResolveCmd)
 	resolveCmd = withTracing(resolveCmd)
 	ghaAgentOnboardCmd = withTracing(ghaAgentOnboardCmd)
+	anthropicLoginCmd = withTracing(anthropicLoginCmd)
+	anthropicLogoutCmd = withTracing(anthropicLogoutCmd)
+	serveCmd = withTracing(serveCmd)
 
 	// Set the root command context to include the tracing context
 	rootCmd.SetContext(ctx)

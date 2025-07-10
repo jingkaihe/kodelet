@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/tools"
 )
 
 // PromptContext holds all variables for template rendering
@@ -29,6 +30,10 @@ type PromptContext struct {
 
 	// Feature flags
 	Features map[string]bool
+
+	// Bash tool configuration
+	BashBannedCommands  []string
+	BashAllowedCommands []string
 }
 
 // NewPromptContext creates a new PromptContext with default values
@@ -52,21 +57,22 @@ func NewPromptContext() *PromptContext {
 
 	// Initialize feature flags
 	features := map[string]bool{
-		"grepToolEnabled":  true,
 		"subagentEnabled":  true,
 		"todoToolsEnabled": true,
 		"batchToolEnabled": true,
 	}
 
 	return &PromptContext{
-		WorkingDirectory: pwd,
-		IsGitRepo:        isGitRepo,
-		Platform:         platform,
-		OSVersion:        osVersion,
-		Date:             date,
-		ToolNames:        toolNames,
-		ContextFiles:     loadContexts(),
-		Features:         features,
+		WorkingDirectory:    pwd,
+		IsGitRepo:           isGitRepo,
+		Platform:            platform,
+		OSVersion:           osVersion,
+		Date:                date,
+		ToolNames:           toolNames,
+		ContextFiles:        loadContexts(),
+		Features:            features,
+		BashBannedCommands:  tools.BannedCommands,
+		BashAllowedCommands: []string{}, // Empty by default, can be set via configuration
 	}
 }
 

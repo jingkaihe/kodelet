@@ -1,6 +1,7 @@
 package conversations
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -24,6 +25,15 @@ func GenerateID() string {
 
 // GetDefaultBasePath returns the default path for storing conversations
 func GetDefaultBasePath() (string, error) {
+	// Check for environment variable override
+	if basePath := os.Getenv("KODELET_BASE_PATH"); basePath != "" {
+		// Make sure the directory exists
+		if err := os.MkdirAll(basePath, 0755); err != nil {
+			return "", err
+		}
+		return basePath, nil
+	}
+
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
@@ -41,8 +51,8 @@ func GetDefaultBasePath() (string, error) {
 }
 
 // GetMostRecentConversationID returns the ID of the most recent conversation
-func GetMostRecentConversationID() (string, error) {
-	store, err := GetConversationStore()
+func GetMostRecentConversationID(ctx context.Context) (string, error) {
+	store, err := GetConversationStore(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -56,11 +66,12 @@ func GetMostRecentConversationID() (string, error) {
 		SortOrder: "desc",
 	}
 
-	conversations, err := store.Query(options)
+	result, err := store.Query(options)
 	if err != nil {
 		return "", err
 	}
 
+	conversations := result.ConversationSummaries
 	if len(conversations) == 0 {
 		return "", errors.New("no conversations found")
 	}

@@ -2,14 +2,17 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
 
 	"github.com/jingkaihe/kodelet/pkg/llm"
+	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
 
@@ -41,33 +44,34 @@ You must stage your changes (using 'git add') before running this command.`,
 		// Create a new state for the commit operation
 		ctx := cmd.Context()
 
-		s := tools.NewBasicState(ctx)
+		llmConfig := llm.GetConfigFromViper()
+		s := tools.NewBasicState(ctx, tools.WithLLMConfig(llmConfig))
 
 		// Get commit config from flags
 		config := getCommitConfigFromFlags(cmd)
 
 		// Check if we're in a git repository
 		if !isGitRepository() {
-			fmt.Println("Error: Not a git repository. Please run this command from a git repository.")
+			presenter.Error(errors.New("not a git repository"), "Please run this command from a git repository")
 			os.Exit(1)
 		}
 
 		// Check if there are staged changes
 		if !hasStagedChanges() {
-			fmt.Println("Error: No staged changes found. Please stage your changes using 'git add' first.")
+			presenter.Error(errors.New("no staged changes found"), "Please stage your changes using 'git add' first")
 			os.Exit(1)
 		}
 
 		// Get the git diff of staged changes
 		diff, err := getGitDiff()
 		if err != nil {
-			fmt.Printf("Error getting git diff: %s\n", err)
+			presenter.Error(err, "Failed to get git diff")
 			os.Exit(1)
 		}
 
 		// If diff is empty, notify the user and exit
 		if len(strings.TrimSpace(diff)) == 0 {
-			fmt.Println("No changes detected. Please stage changes using 'git add' before committing.")
+			presenter.Warning("No changes detected. Please stage changes using 'git add' before committing")
 			os.Exit(1)
 		}
 
@@ -91,27 +95,22 @@ IMPORTANT: The output of the commit message should not be wrapped with any markd
 %s`, diff)
 		}
 
-		fmt.Println("Analyzing staged changes and generating commit message...")
-		fmt.Println("-----------------------------------------------------------")
+		presenter.Info("Analyzing staged changes and generating commit message...")
 
 		// Get the commit message using the Thread abstraction with usage stats
-		commitMsg, usage := llm.SendMessageAndGetTextWithUsage(ctx, s, prompt, llm.GetConfigFromViper(), true, llmtypes.MessageOpt{
+		commitMsg, usage := llm.SendMessageAndGetTextWithUsage(ctx, s, prompt, llmConfig, true, llmtypes.MessageOpt{
 			UseWeakModel: true,
 			PromptCache:  false,
 			NoToolUse:    true,
 		})
 		commitMsg = sanitizeCommitMessage(commitMsg)
 
-		fmt.Println("-----------------------------------------------------------")
-		fmt.Printf("\nGenerated commit message:\n\n%s\n\n", commitMsg)
+		presenter.Section("Generated Commit Message")
+		fmt.Printf("%s\n\n", commitMsg)
 
 		// Display usage statistics
-		fmt.Printf("\033[1;36m[Usage Stats] Input tokens: %d | Output tokens: %d | Cache write: %d | Cache read: %d | Total: %d\033[0m\n",
-			usage.InputTokens, usage.OutputTokens, usage.CacheCreationInputTokens, usage.CacheReadInputTokens, usage.TotalTokens())
-
-		// Display cost information
-		fmt.Printf("\033[1;36m[Cost Stats] Input: $%.4f | Output: $%.4f | Cache write: $%.4f | Cache read: $%.4f | Total: $%.4f\033[0m\n",
-			usage.InputCost, usage.OutputCost, usage.CacheCreationCost, usage.CacheReadCost, usage.TotalCost())
+		usageStats := presenter.ConvertUsageStats(&usage)
+		presenter.Stats(usageStats)
 
 		// Confirm with user (unless --no-confirm is set)
 		if !config.NoConfirm && !confirmCommit(commitMsg) {
@@ -119,12 +118,12 @@ IMPORTANT: The output of the commit message should not be wrapped with any markd
 		}
 
 		// Create the commit
-		if err := createCommit(commitMsg, !config.NoSign); err != nil {
-			fmt.Printf("Error creating commit: %s\n", err)
+		if err := createCommit(ctx, commitMsg, !config.NoSign); err != nil {
+			presenter.Error(err, "Failed to create commit")
 			os.Exit(1)
 		}
 
-		fmt.Println("Commit created successfully!")
+		presenter.Success("Commit created successfully!")
 	},
 }
 
@@ -194,9 +193,10 @@ func confirmCommit(message string) bool {
 	response, _ := reader.ReadString('\n')
 	response = strings.ToLower(strings.TrimSpace(response))
 
-	if response == "" || response == "y" || response == "yes" {
+	switch response {
+	case "", "y", "yes":
 		return true
-	} else if response == "e" || response == "edit" {
+	case "e", "edit":
 		// Allow user to edit the message
 		editedMsg := editMessage(message)
 		if editedMsg == "" {
@@ -272,20 +272,20 @@ func getEditor() string {
 }
 
 // createCommit creates a git commit with the provided message
-func createCommit(message string, sign bool) error {
+func createCommit(_ context.Context, message string, sign bool) error {
 	// Add co-authorship attribution
 	message = message + "\n\nCo-authored-by: Kodelet <noreply@kodelet.com>"
 
 	// Create a temporary file for the commit message
 	tempFile, err := os.CreateTemp("", "kodelet-commit-*.txt")
 	if err != nil {
-		return fmt.Errorf("error creating temporary file: %w", err)
+		return errors.Wrapf(err, "error creating temporary file")
 	}
 	defer os.Remove(tempFile.Name())
 
 	// Write the message to the file
 	if _, err := tempFile.WriteString(message); err != nil {
-		return fmt.Errorf("error writing to temporary file: %w", err)
+		return errors.Wrapf(err, "error writing to temporary file")
 	}
 	tempFile.Close()
 

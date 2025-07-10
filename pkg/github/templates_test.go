@@ -23,7 +23,7 @@ func TestRenderBackgroundAgentWorkflow(t *testing.T) {
 				"name: Background Kodelet",
 				"auth-gateway-endpoint: https://gha-auth-gateway.kodelet.com/api/github",
 				"jingkaihe/kodelet-action@v0.1.7-alpha",
-				"claude-sonnet-4-0",
+				"claude-sonnet-4-20250514",
 				"github.event_name == 'issues'",
 				"@kodelet",
 			},
@@ -60,13 +60,49 @@ func TestRenderBackgroundAgentWorkflow(t *testing.T) {
 	}
 }
 
-func TestRenderBackgroundAgentWorkflow_ErrorHandling(t *testing.T) {
-	// Test with valid data to ensure no errors
-	data := WorkflowTemplateData{
-		AuthGatewayEndpoint: "https://test.com",
+func TestRenderBackgroundAgentWorkflow_Validation(t *testing.T) {
+	tests := []struct {
+		name        string
+		data        WorkflowTemplateData
+		shouldError bool
+	}{
+		{
+			name: "empty auth gateway endpoint",
+			data: WorkflowTemplateData{
+				AuthGatewayEndpoint: "",
+			},
+			shouldError: false, // Template should still render with empty value
+		},
+		{
+			name: "auth gateway with special characters",
+			data: WorkflowTemplateData{
+				AuthGatewayEndpoint: "https://gateway.com/api?key=value&token=123",
+			},
+			shouldError: false,
+		},
+		{
+			name: "auth gateway with spaces",
+			data: WorkflowTemplateData{
+				AuthGatewayEndpoint: "https://gateway.com/api with spaces",
+			},
+			shouldError: false,
+		},
 	}
 
-	result, err := RenderBackgroundAgentWorkflow(data)
-	require.NoError(t, err)
-	require.NotEmpty(t, result)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := RenderBackgroundAgentWorkflow(tt.data)
+
+			if tt.shouldError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.NotEmpty(t, result)
+				// Verify the endpoint is included in the output
+				if tt.data.AuthGatewayEndpoint != "" {
+					assert.Contains(t, result, tt.data.AuthGatewayEndpoint)
+				}
+			}
+		})
+	}
 }

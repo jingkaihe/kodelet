@@ -9,7 +9,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jingkaihe/kodelet/pkg/tools/browser"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/jingkaihe/kodelet/pkg/utils"
+	"github.com/pkg/errors"
 )
 
 var (
@@ -17,12 +21,15 @@ var (
 )
 
 type BasicState struct {
-	lastAccessed map[string]time.Time
-	mu           sync.RWMutex
-	sessionID    string
-	todoFilePath string
-	basicTools   []tooltypes.Tool
-	mcpTools     []tooltypes.Tool
+	lastAccessed        map[string]time.Time
+	backgroundProcesses []tooltypes.BackgroundProcess
+	browserManager      tooltypes.BrowserManager
+	mu                  sync.RWMutex
+	sessionID           string
+	todoFilePath        string
+	tools               []tooltypes.Tool
+	mcpTools            []tooltypes.Tool
+	llmConfig           llmtypes.Config
 }
 
 type BasicStateOption func(ctx context.Context, s *BasicState) error
@@ -39,8 +46,10 @@ func NewBasicState(ctx context.Context, opts ...BasicStateOption) *BasicState {
 		opt(ctx, state)
 	}
 
-	if len(state.basicTools) == 0 {
-		state.basicTools = MainTools
+	if len(state.tools) == 0 {
+		state.tools = GetMainTools(false) // Default without browser tools
+		// Configure tools with LLM config parameters
+		state.configureTools()
 	}
 
 	return state
@@ -48,7 +57,24 @@ func NewBasicState(ctx context.Context, opts ...BasicStateOption) *BasicState {
 
 func WithSubAgentTools() BasicStateOption {
 	return func(ctx context.Context, s *BasicState) error {
-		s.basicTools = SubAgentTools
+		s.tools = GetSubAgentTools(false) // Default without browser tools
+		s.configureTools()
+		return nil
+	}
+}
+
+func WithMainToolsAndBrowser() BasicStateOption {
+	return func(ctx context.Context, s *BasicState) error {
+		s.tools = GetMainTools(true) // Main tools with browser support
+		s.configureTools()
+		return nil
+	}
+}
+
+func WithSubAgentToolsAndBrowser() BasicStateOption {
+	return func(ctx context.Context, s *BasicState) error {
+		s.tools = GetSubAgentTools(true) // Sub-agent tools with browser support
+		s.configureTools()
 		return nil
 	}
 }
@@ -69,6 +95,13 @@ func WithMCPTools(mcpManager *MCPManager) BasicStateOption {
 func WithExtraMCPTools(tools []tooltypes.Tool) BasicStateOption {
 	return func(ctx context.Context, s *BasicState) error {
 		s.mcpTools = append(s.mcpTools, tools...)
+		return nil
+	}
+}
+
+func WithLLMConfig(config llmtypes.Config) BasicStateOption {
+	return func(ctx context.Context, s *BasicState) error {
+		s.llmConfig = config
 		return nil
 	}
 }
@@ -114,7 +147,7 @@ func (s *BasicState) GetFileLastAccessed(path string) (time.Time, error) {
 	defer s.mu.RUnlock()
 	lastAccessed, ok := s.lastAccessed[path]
 	if !ok {
-		return time.Time{}, fmt.Errorf("file %s has not been read yet", path)
+		return time.Time{}, errors.Errorf("file %s has not been read yet", path)
 	}
 	return lastAccessed, nil
 }
@@ -127,7 +160,7 @@ func (s *BasicState) ClearFileLastAccessed(path string) error {
 }
 
 func (s *BasicState) BasicTools() []tooltypes.Tool {
-	return s.basicTools
+	return s.tools
 }
 
 func (s *BasicState) MCPTools() []tooltypes.Tool {
@@ -135,8 +168,73 @@ func (s *BasicState) MCPTools() []tooltypes.Tool {
 }
 
 func (s *BasicState) Tools() []tooltypes.Tool {
-	tools := make([]tooltypes.Tool, 0, len(s.basicTools)+len(s.mcpTools))
-	tools = append(tools, s.basicTools...)
+	tools := make([]tooltypes.Tool, 0, len(s.tools)+len(s.mcpTools))
+	tools = append(tools, s.tools...)
 	tools = append(tools, s.mcpTools...)
 	return tools
+}
+
+func (s *BasicState) AddBackgroundProcess(process tooltypes.BackgroundProcess) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.backgroundProcesses = append(s.backgroundProcesses, process)
+	return nil
+}
+
+func (s *BasicState) GetBackgroundProcesses() []tooltypes.BackgroundProcess {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	// Return a copy to avoid race conditions
+	processes := make([]tooltypes.BackgroundProcess, len(s.backgroundProcesses))
+	copy(processes, s.backgroundProcesses)
+	return processes
+}
+
+func (s *BasicState) RemoveBackgroundProcess(pid int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, process := range s.backgroundProcesses {
+		if process.PID == pid {
+			s.backgroundProcesses = append(s.backgroundProcesses[:i], s.backgroundProcesses[i+1:]...)
+			return nil
+		}
+	}
+	return errors.Errorf("background process with PID %d not found", pid)
+}
+
+func (s *BasicState) GetBrowserManager() tooltypes.BrowserManager {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.browserManager
+}
+
+func (s *BasicState) SetBrowserManager(manager tooltypes.BrowserManager) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.browserManager = manager
+}
+
+func (s *BasicState) GetLLMConfig() interface{} {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.llmConfig
+}
+
+// configureTools configures tools with LLM config parameters
+func (s *BasicState) configureTools() {
+	var domainFilter *utils.DomainFilter
+	if s.llmConfig.AllowedDomainsFile != "" {
+		domainFilter = utils.NewDomainFilter(s.llmConfig.AllowedDomainsFile)
+	}
+
+	for i, tool := range s.tools {
+		switch tool.Name() {
+		case "bash":
+			s.tools[i] = NewBashTool(s.llmConfig.AllowedCommands)
+		case "web_fetch":
+			s.tools[i] = NewWebFetchTool(s.llmConfig.AllowedDomainsFile)
+		case "browser_navigate":
+			s.tools[i] = browser.NewNavigateTool(domainFilter)
+		}
+	}
 }

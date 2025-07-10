@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/jingkaihe/kodelet/pkg/tools"
+	"github.com/pkg/errors"
 )
 
 // StartChat starts the TUI chat interface
@@ -16,6 +17,9 @@ func StartChat(ctx context.Context,
 	enablePersistence bool,
 	mcpManager *tools.MCPManager,
 	maxTurns int,
+	enableBrowserTools bool,
+	compactRatio float64,
+	disableAutoCompact bool,
 ) error {
 	// Check terminal capabilities
 	var teaOptions []tea.ProgramOption
@@ -33,7 +37,7 @@ func StartChat(ctx context.Context,
 	var p *tea.Program
 
 	// Create model separately to add welcome messages
-	model := NewModel(ctx, conversationID, enablePersistence, mcpManager, maxTurns)
+	model := NewModel(ctx, conversationID, enablePersistence, mcpManager, maxTurns, enableBrowserTools, compactRatio, disableAutoCompact)
 
 	// Add welcome message with ASCII art
 	kodaletArt := `
@@ -73,11 +77,11 @@ func StartChat(ctx context.Context,
 
 	result, err := p.Run()
 	if err != nil {
-		return fmt.Errorf("error running program: %w", err)
+		return errors.Wrap(err, "error running program")
 	}
 
 	// use a new context to avoid cancellation
-	defer model.assistant.SaveConversation(context.Background())
+	// defer model.assistant.SaveConversation(context.Background())
 
 	// Display final usage statistics on exit
 	if model, ok := result.(Model); ok {
@@ -85,6 +89,13 @@ func StartChat(ctx context.Context,
 		if usage.TotalTokens() > 0 {
 			fmt.Printf("\n\033[1;36m[Usage Stats] Input tokens: %d | Output tokens: %d | Cache write: %d | Cache read: %d | Total: %d\033[0m\n",
 				usage.InputTokens, usage.OutputTokens, usage.CacheCreationInputTokens, usage.CacheReadInputTokens, usage.TotalTokens())
+
+			// Display context window information
+			if usage.MaxContextWindow > 0 {
+				percentage := float64(usage.CurrentContextWindow) / float64(usage.MaxContextWindow) * 100
+				fmt.Printf("\033[1;36m[Context Window] Current: %d | Max: %d | Usage: %.1f%%\033[0m\n",
+					usage.CurrentContextWindow, usage.MaxContextWindow, percentage)
+			}
 
 			// Display cost information
 			fmt.Printf("\033[1;36m[Cost Stats] Input: $%.4f | Output: $%.4f | Cache write: $%.4f | Cache read: $%.4f | Total: $%.4f\033[0m\n",
@@ -109,8 +120,8 @@ func isTTY() bool {
 }
 
 // StartChatCmd is a wrapper that can be called from a command line
-func StartChatCmd(ctx context.Context, conversationID string, enablePersistence bool, mcpManager *tools.MCPManager, maxTurns int) {
-	if err := StartChat(ctx, conversationID, enablePersistence, mcpManager, maxTurns); err != nil {
+func StartChatCmd(ctx context.Context, conversationID string, enablePersistence bool, mcpManager *tools.MCPManager, maxTurns int, enableBrowserTools bool, compactRatio float64, disableAutoCompact bool) {
+	if err := StartChat(ctx, conversationID, enablePersistence, mcpManager, maxTurns, enableBrowserTools, compactRatio, disableAutoCompact); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}

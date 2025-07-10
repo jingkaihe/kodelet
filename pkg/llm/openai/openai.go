@@ -4,19 +4,22 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/llm/prompts"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/sysprompt"
 	"github.com/jingkaihe/kodelet/pkg/telemetry"
 	"github.com/jingkaihe/kodelet/pkg/tools"
+	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
+	"github.com/pkg/errors"
 	"github.com/sashabaranov/go-openai"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -234,6 +237,7 @@ type OpenAIThread struct {
 	store           ConversationStore
 	mu              sync.Mutex
 	conversationMu  sync.Mutex
+	toolResults     map[string]tooltypes.StructuredToolResult // Maps tool_call_id to structured result
 }
 
 func (t *OpenAIThread) Provider() string {
@@ -262,6 +266,7 @@ func NewOpenAIThread(config llmtypes.Config) *OpenAIThread {
 		conversationID:  conversations.GenerateID(),
 		isPersisted:     false,
 		usage:           &llmtypes.Usage{}, // must be initialized to avoid nil pointer dereference
+		toolResults:     make(map[string]tooltypes.StructuredToolResult),
 	}
 }
 
@@ -345,9 +350,9 @@ func (t *OpenAIThread) SendMessage(
 	if len(t.messages) == 0 || t.messages[0].Role != openai.ChatMessageRoleSystem {
 		var systemPrompt string
 		if t.config.IsSubAgent {
-			systemPrompt = sysprompt.SubAgentPrompt(model)
+			systemPrompt = sysprompt.SubAgentPrompt(model, t.config)
 		} else {
-			systemPrompt = sysprompt.SystemPrompt(model)
+			systemPrompt = sysprompt.SystemPrompt(model, t.config)
 		}
 
 		systemMessage := openai.ChatCompletionMessage{
@@ -384,6 +389,17 @@ OUTER:
 				break OUTER
 			}
 
+			// Check if auto-compact should be triggered before each exchange
+			if !opt.DisableAutoCompact && t.shouldAutoCompact(opt.CompactRatio) {
+				logger.G(ctx).WithField("context_utilization", float64(t.GetUsage().CurrentContextWindow)/float64(t.GetUsage().MaxContextWindow)).Info("triggering auto-compact")
+				err := t.CompactContext(ctx)
+				if err != nil {
+					logger.G(ctx).WithError(err).Error("failed to auto-compact context")
+				} else {
+					logger.G(ctx).Info("auto-compact completed successfully")
+				}
+			}
+
 			var exchangeOutput string
 			exchangeOutput, toolsUsed, err := t.processMessageExchange(ctx, handler, model, maxTokens, opt)
 			if err != nil {
@@ -418,7 +434,7 @@ OUTER:
 	// Save conversation state after completing the interaction
 	if t.isPersisted && t.store != nil && !opt.NoSaveConversation {
 		saveCtx := context.Background() // use new context to avoid cancellation
-		t.SaveConversation(saveCtx, false)
+		t.SaveConversation(saveCtx, true)
 	}
 
 	if !t.config.IsSubAgent {
@@ -474,7 +490,7 @@ func (t *OpenAIThread) processMessageExchange(
 	// Make the API request
 	response, err := t.client.CreateChatCompletion(ctx, requestParams)
 	if err != nil {
-		return "", false, fmt.Errorf("error sending message to OpenAI: %w", err)
+		return "", false, errors.Wrap(err, "error sending message to OpenAI")
 	}
 
 	// Record API call completion
@@ -488,7 +504,7 @@ func (t *OpenAIThread) processMessageExchange(
 
 	// Process the response
 	if len(response.Choices) == 0 {
-		return "", false, fmt.Errorf("no response choices returned from OpenAI")
+		return "", false, errors.New("no response choices returned from OpenAI")
 	}
 
 	// Add the assistant response to history
@@ -518,9 +534,17 @@ func (t *OpenAIThread) processMessageExchange(
 		)
 
 		// Execute the tool
-		runToolCtx := t.WithSubAgent(ctx, handler)
+		runToolCtx := t.WithSubAgent(ctx, handler, opt.CompactRatio, opt.DisableAutoCompact)
 		output := tools.RunTool(runToolCtx, t.state, toolCall.Function.Name, toolCall.Function.Arguments)
-		handler.HandleToolResult(toolCall.Function.Name, output.UserFacing())
+
+		// Use CLI rendering for consistent output formatting
+		structuredResult := output.StructuredData()
+		registry := renderers.NewRendererRegistry()
+		renderedOutput := registry.Render(structuredResult)
+		handler.HandleToolResult(toolCall.Function.Name, renderedOutput)
+
+		// Store the structured result for this tool call
+		t.SetStructuredToolResult(toolCall.ID, structuredResult)
 
 		// For tracing, add tool execution completion event
 		telemetry.AddEvent(ctx, "tool_execution_complete",
@@ -573,46 +597,150 @@ func (t *OpenAIThread) updateUsage(usage openai.Usage, model string) {
 func (t *OpenAIThread) NewSubAgent(ctx context.Context) llmtypes.Thread {
 	config := t.config
 	config.IsSubAgent = true
-	thread := NewOpenAIThread(config)
-	thread.isPersisted = false // subagent is not persisted
+
+	// Create subagent thread reusing the parent's client instead of creating a new one
+	thread := &OpenAIThread{
+		client:          t.client, // Reuse parent's client
+		config:          config,
+		reasoningEffort: t.reasoningEffort, // Reuse parent's reasoning effort
+		conversationID:  conversations.GenerateID(),
+		isPersisted:     false,   // subagent is not persisted
+		usage:           t.usage, // Share usage tracking with parent
+	}
+
 	thread.SetState(tools.NewBasicState(ctx, tools.WithSubAgentTools(), tools.WithExtraMCPTools(t.state.MCPTools())))
-	thread.usage = t.usage
 
 	return thread
 }
 
-func (t *OpenAIThread) WithSubAgent(ctx context.Context, handler llmtypes.MessageHandler) context.Context {
+func (t *OpenAIThread) WithSubAgent(ctx context.Context, handler llmtypes.MessageHandler, compactRatio float64, disableAutoCompact bool) context.Context {
 	subAgent := t.NewSubAgent(ctx)
 	ctx = context.WithValue(ctx, llmtypes.SubAgentConfig{}, llmtypes.SubAgentConfig{
-		Thread:         subAgent,
-		MessageHandler: handler,
+		Thread:             subAgent,
+		MessageHandler:     handler,
+		CompactRatio:       compactRatio,
+		DisableAutoCompact: disableAutoCompact,
 	})
 	return ctx
 }
 
-func (t *OpenAIThread) ShortSummary(ctx context.Context) string {
-	prompt := `Summarise the conversation in one sentence, less or equal than 12 words. Keep it short and concise.
-Treat the USER role as the first person (I), and the ASSISTANT role as the person you are talking to.
-`
-	handler := &llmtypes.StringCollectorHandler{
-		Silent: true,
+// getLastAssistantMessageText extracts text content from the most recent assistant message
+func (t *OpenAIThread) getLastAssistantMessageText() (string, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if len(t.messages) == 0 {
+		return "", errors.New("no messages found")
 	}
+
+	// Find the last assistant message
+	var messageText string
+	for i := len(t.messages) - 1; i >= 0; i-- {
+		msg := t.messages[i]
+		if msg.Role == openai.ChatMessageRoleAssistant {
+			messageText = msg.Content
+			break
+		}
+	}
+
+	if messageText == "" {
+		return "", errors.New("no text content found in assistant message")
+	}
+
+	return messageText, nil
+}
+
+func (t *OpenAIThread) ShortSummary(ctx context.Context) string {
+	// Temporarily disable persistence during summarization
 	t.isPersisted = false
 	defer func() {
 		t.isPersisted = true
 	}()
 
 	// Use a faster model for summarization as it's a simpler task
-	_, err := t.SendMessage(ctx, prompt, handler, llmtypes.MessageOpt{
+	_, err := t.SendMessage(ctx, prompts.ShortSummaryPrompt, &llmtypes.StringCollectorHandler{Silent: true}, llmtypes.MessageOpt{
 		UseWeakModel:       true,
 		NoToolUse:          true,
-		NoSaveConversation: true,
+		DisableAutoCompact: true, // Prevent auto-compact during summarization
+		// Note: Not using NoSaveConversation so we can access the assistant response
 	})
 	if err != nil {
 		return err.Error()
 	}
 
-	return handler.CollectedText()
+	// Get the summary from the last assistant message
+	summary, err := t.getLastAssistantMessageText()
+	if err != nil {
+		return err.Error()
+	}
+
+	return summary
+}
+
+// shouldAutoCompact checks if auto-compact should be triggered based on context window utilization
+func (t *OpenAIThread) shouldAutoCompact(compactRatio float64) bool {
+	if compactRatio <= 0.0 || compactRatio > 1.0 {
+		return false
+	}
+
+	usage := t.GetUsage()
+	if usage.MaxContextWindow == 0 {
+		return false
+	}
+
+	utilizationRatio := float64(usage.CurrentContextWindow) / float64(usage.MaxContextWindow)
+	return utilizationRatio >= compactRatio
+}
+
+// CompactContext performs comprehensive context compacting by creating a detailed summary
+func (t *OpenAIThread) CompactContext(ctx context.Context) error {
+	// Temporarily disable persistence during compacting
+	wasPersistedOriginal := t.isPersisted
+	t.isPersisted = false
+	defer func() {
+		t.isPersisted = wasPersistedOriginal
+	}()
+
+	// Use the strong model for comprehensive compacting (opposite of ShortSummary)
+	_, err := t.SendMessage(ctx, prompts.CompactPrompt, &llmtypes.StringCollectorHandler{Silent: true}, llmtypes.MessageOpt{
+		UseWeakModel:       false, // Use strong model for comprehensive compacting
+		NoToolUse:          true,
+		DisableAutoCompact: true, // Prevent recursion
+		// Note: Not using NoSaveConversation so we can access the assistant response
+	})
+	if err != nil {
+		return errors.Wrap(err, "failed to generate compact summary")
+	}
+
+	// Get the compact summary from the last assistant message
+	compactSummary, err := t.getLastAssistantMessageText()
+	if err != nil {
+		return errors.Wrap(err, "failed to get compact summary from assistant message")
+	}
+
+	// Replace the conversation history with the compact summary
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	t.messages = []openai.ChatCompletionMessage{
+		{
+			Role:    openai.ChatMessageRoleUser,
+			Content: compactSummary,
+		},
+	}
+
+	// Clear stale tool results - they reference tool calls that no longer exist
+	t.toolResults = make(map[string]tooltypes.StructuredToolResult)
+
+	// Get state reference while under mutex protection
+	state := t.state
+
+	// Clear file access tracking to start fresh with context retrieval
+	if state != nil {
+		state.SetFileLastAccess(make(map[string]time.Time))
+	}
+
+	return nil
 }
 
 // GetUsage returns the current token usage for the thread
@@ -651,7 +779,7 @@ func (t *OpenAIThread) GetMessages() ([]llmtypes.Message, error) {
 		content := msg.Content
 
 		// Handle tool calls
-		if msg.ToolCalls != nil && len(msg.ToolCalls) > 0 {
+		if len(msg.ToolCalls) > 0 {
 			toolCallContent, _ := json.Marshal(msg.ToolCalls)
 			content = string(toolCallContent)
 		}
@@ -666,12 +794,12 @@ func (t *OpenAIThread) GetMessages() ([]llmtypes.Message, error) {
 }
 
 // EnablePersistence enables conversation persistence for this thread
-func (t *OpenAIThread) EnablePersistence(enabled bool) {
+func (t *OpenAIThread) EnablePersistence(ctx context.Context, enabled bool) {
 	t.isPersisted = enabled
 
 	// Initialize the store if enabling persistence and it's not already initialized
 	if enabled && t.store == nil {
-		store, err := conversations.GetConversationStore()
+		store, err := conversations.GetConversationStore(ctx)
 		if err != nil {
 			// Log the error but continue without persistence
 			fmt.Printf("Error initializing conversation store: %v\n", err)
@@ -739,7 +867,7 @@ func (t *OpenAIThread) processImage(imagePath string) (*openai.ChatMessagePart, 
 		return t.processImageURL(imagePath)
 	} else if strings.HasPrefix(imagePath, "http://") {
 		// Explicitly reject HTTP URLs for security
-		return nil, fmt.Errorf("only HTTPS URLs are supported for security: %s", imagePath)
+		return nil, errors.New(fmt.Sprintf("only HTTPS URLs are supported for security: %s", imagePath))
 	} else if strings.HasPrefix(imagePath, "file://") {
 		// Remove file:// prefix and process as file
 		filePath := strings.TrimPrefix(imagePath, "file://")
@@ -754,7 +882,7 @@ func (t *OpenAIThread) processImage(imagePath string) (*openai.ChatMessagePart, 
 func (t *OpenAIThread) processImageURL(url string) (*openai.ChatMessagePart, error) {
 	// Validate URL format (HTTPS only)
 	if !strings.HasPrefix(url, "https://") {
-		return nil, fmt.Errorf("only HTTPS URLs are supported for security: %s", url)
+		return nil, errors.New(fmt.Sprintf("only HTTPS URLs are supported for security: %s", url))
 	}
 
 	part := &openai.ChatMessagePart{
@@ -771,28 +899,28 @@ func (t *OpenAIThread) processImageURL(url string) (*openai.ChatMessagePart, err
 func (t *OpenAIThread) processImageFile(filePath string) (*openai.ChatMessagePart, error) {
 	// Check if file exists
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		return nil, fmt.Errorf("image file not found: %s", filePath)
+		return nil, errors.New(fmt.Sprintf("image file not found: %s", filePath))
 	}
 
 	// Determine media type from file extension first
 	mediaType, err := getImageMediaType(filepath.Ext(filePath))
 	if err != nil {
-		return nil, fmt.Errorf("unsupported image format: %s (supported: .jpg, .jpeg, .png, .gif, .webp)", filepath.Ext(filePath))
+		return nil, errors.New(fmt.Sprintf("unsupported image format: %s (supported: .jpg, .jpeg, .png, .gif, .webp)", filepath.Ext(filePath)))
 	}
 
 	// Check file size
 	fileInfo, err := os.Stat(filePath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get file info: %w", err)
+		return nil, errors.Wrap(err, "failed to get file info")
 	}
 	if fileInfo.Size() > MaxImageFileSize {
-		return nil, fmt.Errorf("image file too large: %d bytes (max: %d bytes)", fileInfo.Size(), MaxImageFileSize)
+		return nil, errors.New(fmt.Sprintf("image file too large: %d bytes (max: %d bytes)", fileInfo.Size(), MaxImageFileSize))
 	}
 
 	// Read and encode the file
 	imageData, err := os.ReadFile(filePath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read image file: %w", err)
+		return nil, errors.Wrap(err, "failed to read image file")
 	}
 
 	// Encode to base64
@@ -823,6 +951,45 @@ func getImageMediaType(ext string) (string, error) {
 	case ".webp":
 		return "image/webp", nil
 	default:
-		return "", fmt.Errorf("unsupported format")
+		return "", errors.New("unsupported format")
+	}
+}
+
+// SetStructuredToolResult stores the structured result for a tool call
+func (t *OpenAIThread) SetStructuredToolResult(toolCallID string, result tooltypes.StructuredToolResult) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.toolResults == nil {
+		t.toolResults = make(map[string]tooltypes.StructuredToolResult)
+	}
+	t.toolResults[toolCallID] = result
+}
+
+// GetStructuredToolResults returns all structured tool results
+func (t *OpenAIThread) GetStructuredToolResults() map[string]tooltypes.StructuredToolResult {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.toolResults == nil {
+		return make(map[string]tooltypes.StructuredToolResult)
+	}
+	// Return a copy to avoid race conditions
+	result := make(map[string]tooltypes.StructuredToolResult)
+	for k, v := range t.toolResults {
+		result[k] = v
+	}
+	return result
+}
+
+// SetStructuredToolResults sets all structured tool results (for loading from conversation)
+func (t *OpenAIThread) SetStructuredToolResults(results map[string]tooltypes.StructuredToolResult) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if results == nil {
+		t.toolResults = make(map[string]tooltypes.StructuredToolResult)
+	} else {
+		t.toolResults = make(map[string]tooltypes.StructuredToolResult)
+		for k, v := range results {
+			t.toolResults[k] = v
+		}
 	}
 }

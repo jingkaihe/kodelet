@@ -11,28 +11,36 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/llm"
+	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
 
 // RunConfig holds configuration for the run command
 type RunConfig struct {
-	ResumeConvID string
-	Follow       bool
-	NoSave       bool
-	Images       []string // Image paths or URLs to include with the message
-	MaxTurns     int      // Maximum number of turns within a single SendMessage call
+	ResumeConvID       string
+	Follow             bool
+	NoSave             bool
+	Images             []string // Image paths or URLs to include with the message
+	MaxTurns           int      // Maximum number of turns within a single SendMessage call
+	EnableBrowserTools bool     // Enable browser automation tools
+	CompactRatio       float64  // Ratio of context window at which to trigger auto-compact (0.0-1.0)
+	DisableAutoCompact bool     // Disable auto-compact functionality
 }
 
 // NewRunConfig creates a new RunConfig with default values
 func NewRunConfig() *RunConfig {
 	return &RunConfig{
-		ResumeConvID: "",
-		Follow:       false,
-		NoSave:       false,
-		Images:       []string{},
-		MaxTurns:     50, // Default to 50 turns
+		ResumeConvID:       "",
+		Follow:             false,
+		NoSave:             false,
+		Images:             []string{},
+		MaxTurns:           50, // Default to 50 turns
+		EnableBrowserTools: false,
+		CompactRatio:       0.8, // Default to 80% context window utilization
+		DisableAutoCompact: false,
 	}
 }
 
@@ -47,14 +55,14 @@ var runCmd = &cobra.Command{
 		defer cancel()
 
 		// Get run config from flags
-		config := getRunConfigFromFlags(cmd)
+		config := getRunConfigFromFlags(ctx, cmd)
 
 		// Set up signal handling
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 		go func() {
 			<-sigCh
-			fmt.Println("\n\033[1;33m[kodelet]: Cancellation requested, shutting down...\033[0m")
+			presenter.Warning("Cancellation requested, shutting down...")
 			cancel()
 		}()
 
@@ -67,7 +75,7 @@ var runCmd = &cobra.Command{
 			// Read from stdin
 			stdinBytes, err := io.ReadAll(os.Stdin)
 			if err != nil {
-				fmt.Printf("\n\033[1;31mError reading from stdin: %v\033[0m\n", err)
+				presenter.Error(err, "Failed to read from stdin")
 				return
 			}
 
@@ -84,7 +92,7 @@ var runCmd = &cobra.Command{
 		} else {
 			// No pipe, just use args
 			if len(args) == 0 {
-				fmt.Printf("\n\033[1;31mError: No query provided\033[0m\n")
+				presenter.Error(errors.New("no query provided"), "Please provide a query to execute")
 				return
 			}
 			query = strings.Join(args, " ")
@@ -93,53 +101,66 @@ var runCmd = &cobra.Command{
 		// Create the MCP manager from Viper configuration
 		mcpManager, err := tools.CreateMCPManagerFromViper(ctx)
 		if err != nil {
-			fmt.Printf("\n\033[1;31mError creating MCP manager: %v\033[0m\n", err)
+			presenter.Error(err, "Failed to create MCP manager")
 			return
 		}
 
-		appState := tools.NewBasicState(ctx, tools.WithMCPTools(mcpManager))
+		// Get LLM config
+		llmConfig := llm.GetConfigFromViper()
+
+		// Create state with appropriate tools based on browser support
+		var stateOpts []tools.BasicStateOption
+		stateOpts = append(stateOpts, tools.WithLLMConfig(llmConfig))
+		stateOpts = append(stateOpts, tools.WithMCPTools(mcpManager))
+		if config.EnableBrowserTools {
+			stateOpts = append(stateOpts, tools.WithMainToolsAndBrowser())
+		}
+		appState := tools.NewBasicState(ctx, stateOpts...)
 
 		// Print the user query
 		fmt.Printf("\033[1;33m[user]: \033[0m%s\n", query)
 
 		// Process the query using the Thread abstraction
 		handler := &llmtypes.ConsoleMessageHandler{Silent: false}
-		thread := llm.NewThread(llm.GetConfigFromViper())
+		thread, err := llm.NewThread(llmConfig)
+		if err != nil {
+			presenter.Error(err, "Failed to create LLM thread")
+			return
+		}
 		thread.SetState(appState)
 
 		// Configure conversation persistence
 		if config.ResumeConvID != "" {
 			thread.SetConversationID(config.ResumeConvID)
-			fmt.Printf("Resuming conversation: %s\n", config.ResumeConvID)
+			presenter.Info(fmt.Sprintf("Resuming conversation: %s", config.ResumeConvID))
 		}
 
-		thread.EnablePersistence(!config.NoSave)
+		thread.EnablePersistence(ctx, !config.NoSave)
 
 		// Send the message and process the response
 		_, err = thread.SendMessage(ctx, query, handler, llmtypes.MessageOpt{
-			PromptCache: true,
-			Images:      config.Images,
-			MaxTurns:    config.MaxTurns,
+			PromptCache:        true,
+			Images:             config.Images,
+			MaxTurns:           config.MaxTurns,
+			CompactRatio:       config.CompactRatio,
+			DisableAutoCompact: config.DisableAutoCompact,
 		})
 		if err != nil {
-			fmt.Printf("\n\033[1;31mError: %v\033[0m\n", err)
+			presenter.Error(err, "Failed to process query")
 			return
 		}
 
 		// Display usage statistics
 		usage := thread.GetUsage()
-		fmt.Printf("\n\033[1;36m[Usage Stats] Input tokens: %d | Output tokens: %d | Cache write: %d | Cache read: %d | Total: %d\033[0m\n",
-			usage.InputTokens, usage.OutputTokens, usage.CacheCreationInputTokens, usage.CacheReadInputTokens, usage.TotalTokens())
-
-		// Display cost information
-		fmt.Printf("\033[1;36m[Cost Stats] Input: $%.4f | Output: $%.4f | Cache write: $%.4f | Cache read: $%.4f | Total: $%.4f\033[0m\n",
-			usage.InputCost, usage.OutputCost, usage.CacheCreationCost, usage.CacheReadCost, usage.TotalCost())
+		usageStats := presenter.ConvertUsageStats(&usage)
+		presenter.Stats(usageStats)
 
 		// Display conversation ID if persistence was enabled
 		if thread.IsPersisted() {
-			fmt.Printf("\033[1;36m[Conversation] ID: %s\033[0m\n", thread.GetConversationID())
-			fmt.Printf("To resume this conversation: kodelet run --resume %s\n", thread.GetConversationID())
-			fmt.Printf("To delete this conversation: kodelet conversation delete %s\n", thread.GetConversationID())
+			presenter.Section("Conversation Information")
+			presenter.Info(fmt.Sprintf("ID: %s", thread.GetConversationID()))
+			presenter.Info(fmt.Sprintf("To resume this conversation: kodelet run --resume %s", thread.GetConversationID()))
+			presenter.Info(fmt.Sprintf("To delete this conversation: kodelet conversation delete %s", thread.GetConversationID()))
 		}
 	},
 }
@@ -151,10 +172,13 @@ func init() {
 	runCmd.Flags().Bool("no-save", defaults.NoSave, "Disable conversation persistence")
 	runCmd.Flags().StringSliceP("image", "I", defaults.Images, "Add image input (can be used multiple times)")
 	runCmd.Flags().Int("max-turns", defaults.MaxTurns, "Maximum number of turns within a single message exchange (0 for no limit)")
+	runCmd.Flags().Bool("enable-browser-tools", defaults.EnableBrowserTools, "Enable browser automation tools (navigate, click, type, screenshot, etc.)")
+	runCmd.Flags().Float64("compact-ratio", defaults.CompactRatio, "Context window utilization ratio to trigger auto-compact (0.0-1.0)")
+	runCmd.Flags().Bool("disable-auto-compact", defaults.DisableAutoCompact, "Disable auto-compact functionality")
 }
 
 // getRunConfigFromFlags extracts run configuration from command flags
-func getRunConfigFromFlags(cmd *cobra.Command) *RunConfig {
+func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
 	config := NewRunConfig()
 
 	if resumeConvID, err := cmd.Flags().GetString("resume"); err == nil {
@@ -165,13 +189,13 @@ func getRunConfigFromFlags(cmd *cobra.Command) *RunConfig {
 	}
 	if config.Follow {
 		if config.ResumeConvID != "" {
-			fmt.Printf("Error: --auto-resume and --resume cannot be used together\n")
+			presenter.Error(errors.New("conflicting flags"), "--follow and --resume cannot be used together")
 			os.Exit(1)
 		}
 		var err error
-		config.ResumeConvID, err = conversations.GetMostRecentConversationID()
+		config.ResumeConvID, err = conversations.GetMostRecentConversationID(ctx)
 		if err != nil {
-			fmt.Println("Warning: no conversations found, starting a new conversation")
+			presenter.Warning("No conversations found, starting a new conversation")
 		}
 	}
 
@@ -187,6 +211,20 @@ func getRunConfigFromFlags(cmd *cobra.Command) *RunConfig {
 			maxTurns = 0
 		}
 		config.MaxTurns = maxTurns
+	}
+	if enableBrowserTools, err := cmd.Flags().GetBool("enable-browser-tools"); err == nil {
+		config.EnableBrowserTools = enableBrowserTools
+	}
+	if compactRatio, err := cmd.Flags().GetFloat64("compact-ratio"); err == nil {
+		// Validate compact ratio is between 0.0 and 1.0
+		if compactRatio < 0.0 || compactRatio > 1.0 {
+			presenter.Error(errors.New("invalid compact-ratio"), "compact-ratio must be between 0.0 and 1.0")
+			os.Exit(1)
+		}
+		config.CompactRatio = compactRatio
+	}
+	if disableAutoCompact, err := cmd.Flags().GetBool("disable-auto-compact"); err == nil {
+		config.DisableAutoCompact = disableAutoCompact
 	}
 
 	return config

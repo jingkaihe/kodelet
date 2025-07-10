@@ -4,12 +4,55 @@ import (
 	"context"
 	"testing"
 
+	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	"github.com/sashabaranov/go-openai"
 	"github.com/stretchr/testify/assert"
 
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
+
+// MockConversationStore is a test implementation of the ConversationStore interface
+type MockConversationStore struct {
+	SavedRecords []conversations.ConversationRecord
+	LoadedRecord *conversations.ConversationRecord
+}
+
+func (m *MockConversationStore) Save(record conversations.ConversationRecord) error {
+	m.SavedRecords = append(m.SavedRecords, record)
+	return nil
+}
+
+func (m *MockConversationStore) Load(id string) (conversations.ConversationRecord, error) {
+	if m.LoadedRecord != nil {
+		return *m.LoadedRecord, nil
+	}
+
+	// Find the record with the matching ID
+	for _, record := range m.SavedRecords {
+		if record.ID == id {
+			return record, nil
+		}
+	}
+
+	return conversations.ConversationRecord{}, nil
+}
+
+func (m *MockConversationStore) List() ([]conversations.ConversationSummary, error) {
+	return nil, nil
+}
+
+func (m *MockConversationStore) Delete(id string) error {
+	return nil
+}
+
+func (m *MockConversationStore) Query(options conversations.QueryOptions) ([]conversations.ConversationSummary, error) {
+	return nil, nil
+}
+
+func (m *MockConversationStore) Close() error {
+	return nil
+}
 
 func TestSaveConversationMessageCleanup(t *testing.T) {
 	tests := []struct {
@@ -281,7 +324,7 @@ func TestSaveConversationMessageCleanup(t *testing.T) {
 
 			for i, expectedMsg := range tt.expectedMessages {
 				if i >= len(thread.messages) {
-					t.Errorf("Expected message %d missing in test: %s", i, tt.description)
+					assert.Fail(t, "Expected message %d missing in test: %s", i, tt.description)
 					continue
 				}
 
@@ -297,7 +340,7 @@ func TestSaveConversationMessageCleanup(t *testing.T) {
 
 				for j, expectedToolCall := range expectedMsg.ToolCalls {
 					if j >= len(actualMsg.ToolCalls) {
-						t.Errorf("Expected tool call %d missing at message %d for test: %s",
+						assert.Fail(t, "Expected tool call %d missing at message %d for test: %s",
 							j, i, tt.description)
 						continue
 					}

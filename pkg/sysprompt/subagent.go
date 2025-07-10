@@ -4,10 +4,11 @@ import (
 	"context"
 
 	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/types/llm"
 )
 
 // SubAgentPrompt generates a subagent prompt for the given model
-func SubAgentPrompt(model string) string {
+func SubAgentPrompt(model string, llmConfig llm.Config) string {
 	// Create a new prompt context with default values
 	promptCtx := NewPromptContext()
 
@@ -15,10 +16,16 @@ func SubAgentPrompt(model string) string {
 	renderer := NewRenderer(TemplateFS)
 
 	// Create a default config and update with model
-	config := NewDefaultConfig().WithModel(model)
+	config := NewDefaultConfig().WithModel(model).WithFeatures([]string{
+		"todoTools",
+		"batchTool",
+	})
 
 	// Update the context with the configuration
-	UpdateContextWithConfig(promptCtx, config)
+	updateContextWithConfig(promptCtx, config)
+
+	// Update the context with LLM configuration
+	promptCtx.BashAllowedCommands = llmConfig.AllowedCommands
 
 	// Render the subagent prompt
 	prompt, err := renderer.RenderSubagentPrompt(promptCtx)

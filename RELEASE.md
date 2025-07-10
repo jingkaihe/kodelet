@@ -1,5 +1,180 @@
 # Kodelet
 
+## 0.0.60.alpha (2025-07-10)
+
+### refactor: replace `t.Error` with `t.Fatal` in tests with testify `assert` and `require`.
+
+## 0.0.59.alpha (2025-07-09)
+
+### refactor: replace fmt.Errorf with pkg/errors for consistent error wrapping
+
+
+## 0.0.58.alpha (2025-07-08)
+
+### Support boltdb as the conversation store
+
+### Support conversation import and export feature for sharing and backup
+
+Added `kodelet conversation import|export|edit` commands for importing, exporting and editing conversations. Here are some examples of how to use it:
+
+```bash
+kodelet conversation export <conversation-id> $PATH # export conversation to a local file
+kodelet conversation export --gist <conversation-id> # export conversation to a private gist
+kodelet conversation export --public-gist <conversation-id> # export conversation to a public gist
+kodelet conversation import $PATH # import conversation from a local file
+kodelet conversation import https://example.com/conversation.json # import conversation from a URL
+kodelet conversation edit <conversation-id> # edit conversation in a text editor
+```
+
+## 0.0.57.alpha (2025-07-08)
+
+### Subagent Tool Simplification
+
+- **Removed Model Strength Parameter**: Simplified subagent tool interface by removing the `model_strength` parameter. Going forward subagent will use the default model for tasks.
+
+### Automatic Compacting
+
+Add context auto-compact support to allow kodelet to run for a long period of time without hitting the context window limit.
+
+## 0.0.56.alpha (2025-07-06)
+
+### Test Improvements
+
+Generally improve ROI of the tests by either removing the low value tests or improving the test coverage.
+
+### Conversation WebUI and API Improvements
+
+* Drastically improve conversation loading performance in web UI by implementing in-memory caching and file watching.
+* Fixed the pagination issue in web UI.
+
+### Others
+
+* Support auto-reload of the Web UI via `make dev-server` in the dev mode using [air](https://github.com/air-verse/air).
+
+## 0.0.55.alpha (2025-07-06)
+
+### Conversation Web UI
+
+Provide Web UI for conversations
+
+## 0.0.54.alpha (2025-07-04)
+
+### Store Structured Tool Result in Conversation
+
+- **Structured Tool Results**: Complete architectural overhaul replacing string-based tool results with structured metadata storage
+  - **Rich Metadata**: Tool results now capture structured data (file paths, line numbers, execution context, etc.) instead of plain strings
+  - **Type-Safe Storage**: All tool outputs stored with type-safe metadata structures for better data integrity
+  - **Improved Conversation Persistence**: Enhanced conversation storage with structured tool result metadata
+  - **CLI Renderer System**: New renderer architecture generates CLI output from structured data at display time
+  - **Web UI Foundation**: Structured data provides foundation for upcoming web UI conversation viewer
+
+## 0.0.53.alpha (2025-07-03)
+
+### Conversation Enhancement
+- **Tool Results Display**: Tool execution results now properly display in conversation history and persist across sessions for both Anthropic and OpenAI
+
+### SDLC Improvements
+- **Linting Integration**: Added golangci-lint with comprehensive rules, Makefile targets, and CI integration
+- **Code Cleanup**: Removed unused code and enhanced test coverage
+
+### Usage Analytics Enhancement
+- **Time Range Filtering**: Fixed `kodelet usage` command to properly filter conversations by `--since` and `--until` flags
+
+## 0.0.52.alpha (2025-07-02)
+
+### Security & Web Tools Enhancement
+- **Domain Filtering for Web Tools**: Added configurable domain filtering system for web_fetch and browser tools
+  - **Security Control**: New `allowed_domains_file` configuration option to restrict web tool access to specific domains
+  - **Flexible Patterns**: Support for exact domain matches and glob patterns (e.g., `*.github.com`, `api.*.com`)
+  - **Auto-Refresh**: Domain list refreshes every 30 seconds for dynamic control
+  - **Localhost Bypass**: Localhost and internal addresses are always allowed regardless of domain filter
+  - **Graceful Defaults**: When no domain file is configured, all domains are allowed for backward compatibility
+
+### Anthropic Thinking Enhancements
+**Interleaved Thinking**: Added support for interleaved thinking for Anthropic models that support it
+
+Extended thinking with tool use in Claude 4 models supports [interleaved thinking](https://docs.anthropic.com/en/docs/build-with-claude/extended-thinking#interleaved-thinking), which enables Claude to think between tool calls and make more sophisticated reasoning after receiving tool results.
+
+## 0.0.51.alpha (2025-07-01)
+
+### Web Fetch Tool Enhancement
+- **Localhost HTTP Support**: Enhanced web_fetch tool to allow HTTP URLs for localhost and internal addresses (127.0.0.1, ::1, localhost, etc.) while maintaining HTTPS requirement for external domains
+
+## 0.0.50.alpha (2025-06-30)
+
+### Configuration Enhancements
+- **Optimized Thread Management**: Subagent thread creation now reuses parent client and usage tracking for better resource efficiency
+- **Configurable Anthropic Access**: Added support for configurable Anthropic API access mode to improve API interaction flexibility
+
+## 0.0.49.alpha (2025-06-30)
+
+### Usage Analytics Command
+- **New `kodelet usage` Command**: Added comprehensive token usage and cost tracking functionality
+
+## 0.0.48.alpha (2025-06-30)
+
+### Enhanced CLI Output System
+- **New Presenter Package**: Introduced dedicated presenter package for consistent CLI output with color support and context-aware formatting
+- **Improved User Experience**: Better structured output with success/error/warning indicators and statistics reporting
+- **Context-Aware Colors**: Automatic terminal detection with color override support
+
+## 0.0.47.alpha (2025-06-21)
+
+### Token Refresh Improvements
+- Improved Anthropic token refresh logic to refresh 10 minutes before expiration instead of after expiration
+
+### Web Fetch Tool Enhancements
+- Allow web fetch tool to fetch files directly without prompt summarise. This is particularly useful for fetching source code where you just want to have the raw content.
+
+## 0.0.46.alpha (2025-06-20)
+
+### Anthropic Usage Enhancements
+- System prompt includes official Anthropic branding when using subscription models
+
+## 0.0.45.alpha (2025-06-20)
+
+### Authentication & Model Access
+
+**Anthropic OAuth Login**: Added `kodelet anthropic-login` command for accessing subscription-based models
+- OAuth-based authentication flow with automatic browser opening
+- Supports subscription models not available via standard API key
+- Credentials saved to `~/.kodelet/anthropic-subscription.json`
+- Cross-platform browser support (macOS, Linux, Windows)
+
+## 0.0.44.alpha (2025-06-18)
+
+### Security & Configuration
+
+**Configurable Bash Commands**: Added `allowed_commands` configuration to restrict bash tool execution
+
+## 0.0.43.alpha (2025-06-18)
+
+### Browser Automation Tools
+
+- **New Browser Tools**: Added `navigate`, `get_page`, `click`, `type`, `screenshot`, and `wait_for` tools
+
+### Chat Experience
+
+- **TUI Log Redirection**: Chat logs redirected to separate files for cleaner TUI interface
+
+## 0.0.42.alpha (2025-06-15)
+
+### Background Process Management
+
+- **Background Process Execution**: Enhanced bash tool with background process support for long-running tasks
+  - **Background Flag**: New `background=true` parameter runs commands in background with process tracking
+  - **Process Monitoring**: Background processes write output to `.kodelet/{PID}/out.log` files
+  - **Non-blocking Execution**: Bash tool returns immediately with PID and log file location for background tasks
+- **View Background Processes Tool**: Added comprehensive background process management capabilities
+  - **Process Tracking**: View all background processes with PID, status, start time, and command details
+  - **Status Monitoring**: Track running/stopped status of background processes across sessions
+  - **Log File Access**: Easy access to log file paths for debugging and monitoring background tasks
+
+### Developer Experience Improvements
+
+- **Enhanced File Reading**: Changed file_read tool line numbering from 0-indexed to 1-indexed for better readability and consistency with editors
+- **Comprehensive Documentation**: Added detailed MCP language server tools documentation with code intelligence capabilities and best practices
+
 ## 0.0.41.alpha (2025-06-12)
 
 ### Message Cleanup

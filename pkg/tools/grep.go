@@ -55,29 +55,50 @@ func (r *GrepToolResult) AssistantFacing() string {
 	return tooltypes.StringifyToolResult(content, r.GetError())
 }
 
-func (r *GrepToolResult) UserFacing() string {
+func (r *GrepToolResult) StructuredData() tooltypes.StructuredToolResult {
+	result := tooltypes.StructuredToolResult{
+		ToolName:  "grep_tool",
+		Success:   !r.IsError(),
+		Timestamp: time.Now(),
+	}
+
+	// Convert internal SearchResult to metadata format
+	metadataResults := make([]tooltypes.SearchResult, 0, len(r.results))
+	for _, res := range r.results {
+		matches := make([]tooltypes.SearchMatch, 0, len(res.MatchedLines))
+		for _, match := range res.MatchedLines {
+			matches = append(matches, tooltypes.SearchMatch{
+				LineNumber: match.LineNumber,
+				Content:    match.LineContent,
+				MatchStart: 0, // TODO: Calculate actual match positions
+				MatchEnd:   0,
+			})
+		}
+
+		// Detect language from file extension
+		language := utils.DetectLanguageFromPath(res.Filename)
+
+		metadataResults = append(metadataResults, tooltypes.SearchResult{
+			FilePath: res.Filename,
+			Language: language,
+			Matches:  matches,
+		})
+	}
+
+	// Always populate metadata, even for errors
+	result.Metadata = &tooltypes.GrepMetadata{
+		Pattern:   r.pattern,
+		Path:      r.path,
+		Include:   r.include,
+		Results:   metadataResults,
+		Truncated: r.truncated,
+	}
+
 	if r.IsError() {
-		return r.GetError()
+		result.Error = r.GetError()
 	}
 
-	var result strings.Builder
-	result.WriteString(fmt.Sprintf("Search Pattern: %s\n", r.pattern))
-	if r.path != "" {
-		result.WriteString(fmt.Sprintf("Search Path: %s\n", r.path))
-	}
-	if r.include != "" {
-		result.WriteString(fmt.Sprintf("Include Pattern: %s\n", r.include))
-	}
-	result.WriteString(fmt.Sprintf("Found matches in %d files:\n\n", len(r.results)))
-
-	content := r.GetResult()
-	result.WriteString(content)
-
-	if r.truncated {
-		result.WriteString("\n\n[TRUNCATED DUE TO MAXIMUM 100 RESULT LIMIT]")
-	}
-
-	return result.String()
+	return result
 }
 
 type GrepTool struct{}

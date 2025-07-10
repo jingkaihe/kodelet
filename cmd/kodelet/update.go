@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,7 +12,9 @@ import (
 	"strings"
 
 	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/jingkaihe/kodelet/pkg/version"
+	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
 
@@ -34,7 +37,7 @@ func NewUpdateConfig() *UpdateConfig {
 // Validate validates the UpdateConfig and returns an error if invalid
 func (c *UpdateConfig) Validate() error {
 	if c.Version == "" {
-		return fmt.Errorf("version cannot be empty")
+		return errors.New("version cannot be empty")
 	}
 
 	return nil
@@ -49,8 +52,8 @@ var updateCmd = &cobra.Command{
 		// Get update config from flags
 		config := getUpdateConfigFromFlags(cmd)
 
-		if err := updateKodelet(config); err != nil {
-			logger.G(ctx).WithError(err).Error("Failed to update Kodelet")
+		if err := updateKodelet(ctx, config); err != nil {
+			presenter.Error(err, "Failed to update Kodelet")
 			os.Exit(1)
 		}
 	},
@@ -72,10 +75,10 @@ func getUpdateConfigFromFlags(cmd *cobra.Command) *UpdateConfig {
 	return config
 }
 
-func updateKodelet(config *UpdateConfig) error {
+func updateKodelet(ctx context.Context, config *UpdateConfig) error {
 	// Get current version info
 	currentVersion := version.Get()
-	fmt.Printf("Current version: %s\n", currentVersion.Version)
+	presenter.Info(fmt.Sprintf("Current version: %s", currentVersion.Version))
 
 	// Detect OS and architecture
 	osType := runtime.GOOS
@@ -88,7 +91,7 @@ func updateKodelet(config *UpdateConfig) error {
 	case "arm64":
 		// arm64 is already correct
 	default:
-		return fmt.Errorf("unsupported architecture: %s", arch)
+		return errors.New(fmt.Sprintf("unsupported architecture: %s", arch))
 	}
 
 	// Check for supported OS
@@ -96,7 +99,7 @@ func updateKodelet(config *UpdateConfig) error {
 	case "linux", "darwin":
 		// These are supported
 	default:
-		return fmt.Errorf("unsupported operating system: %s", osType)
+		return errors.New(fmt.Sprintf("unsupported operating system: %s", osType))
 	}
 
 	// Construct download URL based on version
@@ -111,24 +114,25 @@ func updateKodelet(config *UpdateConfig) error {
 		}
 		downloadURL = fmt.Sprintf("https://%s/releases/download/%s/kodelet-%s-%s", GitHubRepoURL, version, osType, arch)
 	}
-	fmt.Printf("Downloading latest version from: %s\n", downloadURL)
+
+	presenter.Info(fmt.Sprintf("Downloading from: %s", downloadURL))
 
 	// Find the current executable path
 	execPath, err := os.Executable()
 	if err != nil {
-		return fmt.Errorf("failed to determine current executable path: %w", err)
+		return errors.Wrap(err, "failed to determine current executable path")
 	}
 	execPath, err = filepath.EvalSymlinks(execPath)
 	if err != nil {
-		return fmt.Errorf("failed to resolve symlinks for executable path: %w", err)
+		return errors.Wrap(err, "failed to resolve symlinks for executable path")
 	}
 
-	fmt.Printf("Current executable: %s\n", execPath)
+	logger.G(ctx).WithField("executable_path", execPath).Debug("Resolved current executable path")
 
 	// Create a temporary file for downloading
 	tempFile, err := os.CreateTemp("", "kodelet-update-*")
 	if err != nil {
-		return fmt.Errorf("failed to create temporary file: %w", err)
+		return errors.Wrap(err, "failed to create temporary file")
 	}
 	tempFilePath := tempFile.Name()
 	defer os.Remove(tempFilePath) // Clean up temp file on exit
@@ -136,24 +140,24 @@ func updateKodelet(config *UpdateConfig) error {
 	// Download the new binary
 	resp, err := http.Get(downloadURL)
 	if err != nil {
-		return fmt.Errorf("failed to download new version: %w", err)
+		return errors.Wrap(err, "failed to download new version")
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to download new version: HTTP %d", resp.StatusCode)
+		return errors.New(fmt.Sprintf("failed to download new version: HTTP %d", resp.StatusCode))
 	}
 
 	// Write the downloaded binary to the temporary file
 	_, err = io.Copy(tempFile, resp.Body)
 	if err != nil {
-		return fmt.Errorf("failed to write downloaded binary: %w", err)
+		return errors.Wrap(err, "failed to write downloaded binary")
 	}
 	tempFile.Close()
 
 	// Make the temporary file executable
 	if err := os.Chmod(tempFilePath, 0755); err != nil {
-		return fmt.Errorf("failed to make downloaded binary executable: %w", err)
+		return errors.Wrap(err, "failed to make downloaded binary executable")
 	}
 
 	// Check if we need sudo to replace the current binary
@@ -162,25 +166,25 @@ func updateKodelet(config *UpdateConfig) error {
 		if strings.Contains(err.Error(), "permission denied") {
 			needsSudo = true
 		} else {
-			return fmt.Errorf("failed to replace current binary: %w", err)
+			return errors.Wrap(err, "failed to replace current binary")
 		}
 	}
 
 	// If we need sudo, try to use it
 	if needsSudo {
-		fmt.Println("Elevated permissions required to update. You may be prompted for your password.")
+		presenter.Warning("Elevated permissions required to update. You may be prompted for your password.")
 		cmd := exec.Command("sudo", "mv", tempFilePath, execPath)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		cmd.Stdin = os.Stdin
 
 		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("failed to replace current binary with sudo: %w", err)
+			return errors.Wrap(err, "failed to replace current binary with sudo")
 		}
 	}
 
-	fmt.Println("Update completed successfully!")
-	fmt.Println("Please run 'kodelet version' to verify the new version.")
+	presenter.Success("Update completed successfully!")
+	presenter.Info("Please run 'kodelet version' to verify the new version.")
 
 	return nil
 }

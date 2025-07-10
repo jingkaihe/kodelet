@@ -24,6 +24,8 @@ Kodelet is a lightweight agentic SWE Agent that runs as an interactive CLI tool 
   - [Environment Variables](#environment-variables)
   - [Configuration File](#configuration-file)
   - [Command Line Flags](#command-line-flags)
+- [Security Configuration](#security-configuration)
+  - [Bash Command Restrictions](#bash-command-restrictions)
 - [LLM Providers](#llm-providers)
   - [Anthropic Claude](#anthropic-claude)
   - [OpenAI](#openai)
@@ -307,7 +309,7 @@ export KODELET_LOG_LEVEL="info"  # panic, fatal, error, warn, info, debug, trace
 # LLM configuration - Anthropic
 export ANTHROPIC_API_KEY="sk-ant-api..."
 export KODELET_PROVIDER="anthropic"  # Optional, detected from model name
-export KODELET_MODEL="claude-sonnet-4-0"
+export KODELET_MODEL="claude-sonnet-4-20250514"
 export KODELET_MAX_TOKENS="8192"
 export KODELET_CACHE_EVERY="5"  # Cache messages every N interactions (0 to disable)
 
@@ -317,6 +319,9 @@ export KODELET_PROVIDER="openai"
 export KODELET_MODEL="gpt-4.1"
 export KODELET_MAX_TOKENS="8192"
 export KODELET_REASONING_EFFORT="medium"  # low, medium, high
+
+# Command restriction configuration
+export KODELET_ALLOWED_COMMANDS="ls *,pwd,echo *,git status"  # Comma-separated allowed command patterns
 ```
 
 ### Configuration File
@@ -334,7 +339,7 @@ Use `kodelet-config.yaml` in your project root for project-specific settings. Th
 ```yaml
 # Global config (~/.kodelet/config.yaml)
 provider: "anthropic"
-model: "claude-sonnet-4-0"
+model: "claude-sonnet-4-20250514"
 max_tokens: 8192
 log_level: "info"
 ```
@@ -363,9 +368,9 @@ log_level: "info"  # panic, fatal, error, warn, info, debug, trace
 
 # Anthropic configuration
 provider: "anthropic"
-model: "claude-sonnet-4-0"
+model: "claude-sonnet-4-20250514"
 max_tokens: 8192
-weak_model: "claude-3-5-haiku-latest"
+weak_model: "claude-3-5-haiku-20241022"
 weak_model_max_tokens: 8192
 cache_every: 10  # Cache messages every N interactions (0 to disable)
 
@@ -377,6 +382,20 @@ cache_every: 10  # Cache messages every N interactions (0 to disable)
 # weak_model_max_tokens: 4096
 # reasoning_effort: "medium"
 # weak_reasoning_effort: "low"
+
+# Security configuration
+allowed_commands: []  # Empty means use default banned commands
+# allowed_commands:   # Example: restrict bash tool to specific commands
+#   - "ls *"
+#   - "pwd"
+#   - "echo *"
+#   - "cat *"
+#   - "grep *"
+#   - "find *"
+#   - "npm *"
+#   - "yarn *"
+#   - "git status"
+#   - "git log *"
 
 # MCP configuration
 mcp:
@@ -405,15 +424,70 @@ kodelet run --provider "anthropic" --model "claude-3-opus-20240229" --max-tokens
 
 # OpenAI example
 kodelet run --provider "openai" --model "gpt-4.1" --max-tokens 4096 --reasoning-effort "high" "query"
+
+# Command restriction example
+kodelet run --allowed-commands "ls *,pwd,echo *" "query"
 ```
+
+## Security Configuration
+
+Kodelet includes security features to control command execution and protect your system from potentially harmful operations.
+
+### Bash Command Restrictions
+
+The `allowed_commands` configuration option provides fine-grained control over which bash commands Kodelet can execute. This is particularly useful in automated environments or when working with untrusted queries.
+
+**Pattern Matching:**
+
+The allowed commands support glob patterns for flexible matching:
+
+- `ls` - Exact match for the `ls` command only
+- `ls *` - Allows `ls` with any arguments (e.g., `ls -la`, `ls /home`)
+- `git status` - Exact match for `git status`
+- `git log *` - Allows `git log` with any arguments
+- `npm *` - Allows any npm command
+
+**Configuration Examples:**
+
+Environment variable:
+```bash
+export KODELET_ALLOWED_COMMANDS="ls *,pwd,echo *,git status,git log *"
+```
+
+Configuration file:
+```yaml
+allowed_commands:
+  - "ls *"
+  - "pwd"
+  - "echo *"
+  - "cat *"
+  - "grep *"
+  - "find *"
+  - "npm *"
+  - "yarn *"
+  - "git status"
+  - "git log *"
+```
+
+Command line:
+```bash
+kodelet run --allowed-commands "ls *,pwd,echo *" "analyze this directory"
+```
+
+**Usage Notes:**
+
+- If the command appears in the default banned commands list, it will be rejected even if it matches the allowed commands pattern
+- Commands are validated before execution, and non-matching commands are rejected with an error
+- Patterns are matched against the entire command string, not just the command name
+- Use specific patterns rather than overly broad wildcards for better security
 
 ## LLM Providers
 
 ### Anthropic Claude
 
 Kodelet supports various Anthropic Claude models:
-- `claude-sonnet-4-0` (recommended for standard tasks)
-- `claude-3-5-haiku-latest` (recommended for lightweight tasks)
+- `claude-sonnet-4-20250514` (recommended for standard tasks)
+- `claude-3-5-haiku-20241022` (recommended for lightweight tasks)
 - `claude-3-opus-20240229`
 
 Features:
@@ -452,6 +526,8 @@ Features:
 - API keys are stored in environment variables or configuration files
 - No sensitive data is logged by default
 - All external connections use secure protocols
+- Bash command execution can be restricted using `allowed_commands` configuration (see [Security Configuration](#security-configuration))
+- Default banned commands list prevents execution of potentially dangerous commands like `vim`, `less`, `more`, and `cd`
 
 ## Troubleshooting
 
@@ -474,5 +550,11 @@ Features:
    - Ensure you're using an Anthropic Claude model
    - Check image format and size limitations
    - Verify image URLs are accessible (HTTPS only)
+
+5. **Command Execution Blocked**
+   - Check if the command is in the banned commands list (default behavior)
+   - If using `allowed_commands`, ensure the command matches one of the allowed patterns
+   - Verify glob patterns are correctly formatted (e.g., `ls *` not `ls*`)
+   - Use `--allowed-commands` flag to override configuration for testing
 
 For more help, check the project repository: https://github.com/jingkaihe/kodelet

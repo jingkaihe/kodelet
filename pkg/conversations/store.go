@@ -24,7 +24,7 @@ type ConversationStore interface {
 	Delete(id string) error
 
 	// Advanced query operations
-	Query(options QueryOptions) ([]ConversationSummary, error)
+	Query(options QueryOptions) (QueryResult, error)
 
 	// Lifecycle methods
 	Close() error
@@ -32,7 +32,7 @@ type ConversationStore interface {
 
 // Config holds configuration for the conversation store
 type Config struct {
-	StoreType string // "json" or "sqlite"
+	StoreType string // "json", "bbolt", or "sqlite"
 	BasePath  string // Base storage path
 }
 
@@ -44,7 +44,7 @@ func DefaultConfig() (*Config, error) {
 	}
 
 	return &Config{
-		StoreType: "json",
+		StoreType: "bbolt", // BBolt store is now the default
 		BasePath:  basePath,
 	}, nil
 }

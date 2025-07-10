@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestCoreFunctionality(t *testing.T) {
@@ -28,15 +30,13 @@ func TestCoreFunctionality(t *testing.T) {
 					// Also check current working directory as fallback
 					content, err = os.ReadFile("hello.txt")
 					if err != nil {
-						t.Errorf("hello.txt file was not created: %v", err)
+						assert.Fail(t, "hello.txt file was not created", err.Error())
 						return
 					}
 				}
 
 				contentStr := strings.TrimSpace(string(content))
-				if contentStr != "hello world" {
-					t.Errorf("Expected content 'hello world', got '%s'", contentStr)
-				}
+				assert.Equal(t, "hello world", contentStr)
 			},
 		},
 		{
@@ -44,9 +44,7 @@ func TestCoreFunctionality(t *testing.T) {
 			query: "is the operating system linux or windows",
 			validate: func(t *testing.T, output string, testDir string) {
 				outputLower := strings.ToLower(output)
-				if !strings.Contains(outputLower, "linux") {
-					t.Errorf("Expected output to contain 'linux' (case insensitive), got: %s", output)
-				}
+				assert.Contains(t, outputLower, "linux", "Expected output to contain 'linux' (case insensitive)")
 			},
 		},
 		{
@@ -58,7 +56,7 @@ func TestCoreFunctionality(t *testing.T) {
 				if _, err := os.Stat(fibFile); os.IsNotExist(err) {
 					// Also check if it was created in current directory
 					if _, err := os.Stat("fib.py"); os.IsNotExist(err) {
-						t.Errorf("fib.py file was not created")
+						assert.Fail(t, "fib.py file was not created")
 						return
 					}
 					fibFile = "fib.py"
@@ -86,13 +84,11 @@ func TestCoreFunctionality(t *testing.T) {
 					t.Run(tc.input, func(t *testing.T) {
 						cmd := exec.Command("python3", fibFile, tc.input)
 						output, err := cmd.CombinedOutput()
+						assert.NoError(t, err, "Python execution failed")
 						if err != nil {
-							t.Errorf("Python execution failed: %v", err)
 							return
 						}
-						if strings.TrimSpace(string(output)) != tc.output {
-							t.Errorf("Expected output %s, got %s", tc.output, string(output))
-						}
+						assert.Equal(t, tc.output, strings.TrimSpace(string(output)))
 					})
 				}
 			},
@@ -120,7 +116,7 @@ func TestCoreFunctionality(t *testing.T) {
 			// For these tests, we mainly care that the command doesn't crash
 			// and produces reasonable output
 			if strings.Contains(outputStr, "panic") || strings.Contains(outputStr, "fatal") {
-				t.Errorf("Command should not panic or crash: %s", outputStr)
+				assert.Fail(t, "Command should not panic or crash", outputStr)
 				return
 			}
 

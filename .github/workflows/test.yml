@@ -7,7 +7,8 @@ on:
     branches: [ main ]
 
 jobs:
-  test:
+  backend:
+    name: Backend Tests & Linting
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -17,8 +18,73 @@ jobs:
         with:
           go-version: '1.24'
 
-      - name: Lint
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.17.0'
+          cache: 'npm'
+          cache-dependency-path: 'pkg/webui/frontend/package-lock.json'
+
+      - name: Pin npm version
+        run: npm install -g npm@10.9.2
+
+      - name: Code generation
+        run: make code-generation
+
+      - name: Install linters
+        run: make install-linters
+
+      - name: Lint Go code
         run: make lint
 
-      - name: Test
+      - name: Test Go code
         run: make test
+
+  frontend:
+    name: Frontend Tests & Linting
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.17.0'
+          cache: 'npm'
+          cache-dependency-path: 'pkg/webui/frontend/package-lock.json'
+
+      - name: Pin npm version
+        run: npm install -g npm@10.9.2
+
+      - name: Install frontend dependencies
+        run: npm install --prefix pkg/webui/frontend
+
+      - name: Lint frontend code
+        run: make eslint
+
+      - name: Test frontend code
+        run: make frontend-test
+
+  build:
+    name: Build Verification
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.17.0'
+          cache: 'npm'
+          cache-dependency-path: 'pkg/webui/frontend/package-lock.json'
+
+      - name: Pin npm version
+        run: npm install -g npm@10.9.2
+
+      - name: Verify build
+        run: make build

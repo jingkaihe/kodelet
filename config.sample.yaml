@@ -13,7 +13,7 @@ log_format: "json"
 provider: "anthropic"
 
 # Model to use for LLM interactions
-model: "claude-sonnet-4-0"
+model: "claude-sonnet-4-20250514"
 
 # Maximum tokens for responses
 max_tokens: 8192
@@ -22,7 +22,7 @@ max_tokens: 8192
 thinking_budget_tokens: 4048
 
 # Weak model to use for less complex tasks
-weak_model: "claude-3-5-haiku-latest"
+weak_model: "claude-3-5-haiku-20241022"
 
 # Maximum tokens for weak model responses
 weak_model_max_tokens: 8192
@@ -30,6 +30,28 @@ weak_model_max_tokens: 8192
 # OpenAI specific settings
 # Reasoning effort for OpenAI models (low, medium, high)
 reasoning_effort: "medium"
+
+# Security Configuration
+# Command allow list for bash tool (empty means use default banned commands)
+# When specified, only commands matching these patterns are allowed
+# Supports wildcards: * matches any string
+# Example patterns:
+#   - "ls": exact match for ls command
+#   - "ls *": ls with any arguments
+#   - "npm *": any npm command
+#   - "echo hello": exact echo hello command
+allowed_commands: []
+# allowed_commands:
+#   - "ls *"
+#   - "pwd"
+#   - "echo *"
+#   - "cat *"
+#   - "grep *"
+#   - "find *"
+#   - "npm *"
+#   - "yarn *"
+#   - "git status"
+#   - "git log *"
 
 
 # Example OpenAI configuration (uncomment to use)
@@ -62,6 +84,7 @@ tracing:
 # - KODELET_WEAK_MODEL_MAX_TOKENS: Overrides the weak_model_max_tokens setting
 # - KODELET_REASONING_EFFORT: Overrides the reasoning_effort setting (OpenAI)
 # - KODELET_WEAK_REASONING_EFFORT: Overrides the weak_reasoning_effort setting (OpenAI)
+# - KODELET_ALLOWED_COMMANDS: Comma-separated list of allowed command patterns
 # - KODELET_TRACING_ENABLED: Enables/disables tracing
 # - KODELET_TRACING_SAMPLER: Sets the sampling strategy
 # - KODELET_TRACING_RATIO: Sets the sampling ratio

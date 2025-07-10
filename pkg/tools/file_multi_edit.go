@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -9,9 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/aymanbagabas/go-udiff"
 	"github.com/invopop/jsonschema"
+	"github.com/pkg/errors"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/jingkaihe/kodelet/pkg/utils"
 	"go.opentelemetry.io/otel/attribute"
 )
 
@@ -55,22 +55,6 @@ func (r *FileMultiEditToolResult) AssistantFacing() string {
 	result := fmt.Sprintf("File %s has been edited successfully. Replaced %d occurrence(s) of the text.\n\nExample of edited code block:\n%s",
 		r.filename, r.actualReplaced, formattedEdit)
 	return tooltypes.StringifyToolResult(result, "")
-}
-
-func (r *FileMultiEditToolResult) UserFacing() string {
-	if r.IsError() {
-		return r.GetError()
-	}
-
-	buf := bytes.NewBufferString(fmt.Sprintf("File Multi Edit: %s\n", r.filename))
-	buf.WriteString(fmt.Sprintf("Replaced %d occurrence(s) of the text\n\n", r.actualReplaced))
-
-	buf.WriteString("Diff:\n")
-
-	out := udiff.Unified(r.filename, r.filename, r.oldContent, r.newContent)
-	buf.WriteString(out)
-
-	return buf.String()
 }
 
 type FileMultiEditTool struct{}
@@ -132,49 +116,49 @@ func (t *FileMultiEditTool) TracingKVs(parameters string) ([]attribute.KeyValue,
 func (t *FileMultiEditTool) ValidateInput(state tooltypes.State, parameters string) error {
 	var input FileMultiEditInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
-		return fmt.Errorf("invalid input: %w", err)
+		return errors.Wrap(err, "invalid input")
 	}
 
 	// Check if occurrence is valid
 	if input.Occurrence <= 0 {
-		return fmt.Errorf("occurrence must be greater than 0")
+		return errors.New("occurrence must be greater than 0")
 	}
 
 	// check if the file exists
 	info, err := os.Stat(input.FilePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return fmt.Errorf("file %s does not exist, use the 'FileWrite' tool to create instead", input.FilePath)
+			return errors.Errorf("file %s does not exist, use the 'FileWrite' tool to create instead", input.FilePath)
 		}
-		return fmt.Errorf("failed to check the file status: %w", err)
+		return errors.Wrap(err, "failed to check the file status")
 	}
 
 	lastAccessed := info.ModTime()
 	lastRead, err := state.GetFileLastAccessed(input.FilePath)
 	if err != nil {
-		return fmt.Errorf("failed to get the last access time of the file: %w", err)
+		return errors.Wrap(err, "failed to get the last access time of the file")
 	}
 
 	if lastAccessed.After(lastRead) {
-		return fmt.Errorf("file %s has been modified since the last read either by another tool or by the user, please read the file again", input.FilePath)
+		return errors.Errorf("file %s has been modified since the last read either by another tool or by the user, please read the file again", input.FilePath)
 	}
 
 	// check if the old text exists in the file
 	content, err := os.ReadFile(input.FilePath)
 	if err != nil {
-		return fmt.Errorf("failed to read the file: %w", err)
+		return errors.Wrap(err, "failed to read the file")
 	}
 
 	oldText := input.OldText
 
 	if !strings.Contains(string(content), oldText) {
-		return fmt.Errorf("old text not found in the file, please ensure the text exists")
+		return errors.New("old text not found in the file, please ensure the text exists")
 	}
 
 	// Count occurrences to ensure there are enough instances
 	occurrences := strings.Count(string(content), oldText)
 	if occurrences < input.Occurrence {
-		return fmt.Errorf("old text appears %d times in the file, but %d occurrences were requested", occurrences, input.Occurrence)
+		return errors.Errorf("old text appears %d times in the file, but %d occurrences were requested", occurrences, input.Occurrence)
 	}
 
 	return nil
@@ -226,4 +210,40 @@ func (t *FileMultiEditTool) Execute(ctx context.Context, state tooltypes.State, 
 		occurrence:     occurrence,
 		actualReplaced: actualReplaced,
 	}
+}
+
+func (r *FileMultiEditToolResult) StructuredData() tooltypes.StructuredToolResult {
+	result := tooltypes.StructuredToolResult{
+		ToolName:  "file_multi_edit",
+		Success:   !r.IsError(),
+		Timestamp: time.Now(),
+	}
+
+	// Detect language from file extension
+	language := utils.DetectLanguageFromPath(r.filename)
+
+	// For multi-edit, we only have info about the last edit
+	// This tool would need restructuring to track all edits properly
+	edits := []tooltypes.Edit{
+		{
+			StartLine:  0, // Not tracked in current structure
+			EndLine:    0, // Not tracked in current structure
+			OldContent: r.oldText,
+			NewContent: r.newText,
+		},
+	}
+
+	// Always populate metadata, even for errors
+	result.Metadata = &tooltypes.FileMultiEditMetadata{
+		FilePath:       r.filename,
+		Edits:          edits,
+		Language:       language,
+		ActualReplaced: r.actualReplaced,
+	}
+
+	if r.IsError() {
+		result.Error = r.GetError()
+	}
+
+	return result
 }

@@ -4,11 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
 	"github.com/jingkaihe/kodelet/pkg/types/llm"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/pkg/errors"
 )
 
 // cleanupOrphanedMessages removes orphaned messages from the end of the message list.
@@ -16,13 +20,15 @@ import (
 // - Empty messages (messages with no content)
 // - Messages containing tool use blocks that are not followed by tool result messages
 func (t *AnthropicThread) cleanupOrphanedMessages() {
-	for {
-		if len(t.messages) == 0 {
-			break
-		}
+	for len(t.messages) > 0 {
 		lastMessage := t.messages[len(t.messages)-1]
 		// remove the last message if it is empty
 		if len(lastMessage.Content) == 0 {
+			t.messages = t.messages[:len(t.messages)-1]
+			continue
+		}
+		// remove the last message if it is an empty message
+		if len(lastMessage.Content) == 1 && lastMessage.Content[0].OfText != nil && lastMessage.Content[0].OfText.Text == "" {
 			t.messages = t.messages[:len(t.messages)-1]
 			continue
 		}
@@ -58,7 +64,7 @@ func (t *AnthropicThread) SaveConversation(ctx context.Context, summarise bool) 
 	// Marshall the messages to JSON
 	rawMessages, err := json.Marshal(t.messages)
 	if err != nil {
-		return fmt.Errorf("failed to marshal conversation messages: %w", err)
+		return errors.Wrap(err, "failed to marshal conversation messages")
 	}
 
 	if summarise {
@@ -77,6 +83,7 @@ func (t *AnthropicThread) SaveConversation(ctx context.Context, summarise bool) 
 		CreatedAt:      time.Now(),
 		UpdatedAt:      time.Now(),
 		FileLastAccess: t.state.FileLastAccess(),
+		ToolResults:    t.GetStructuredToolResults(),
 	}
 
 	// Save the record
@@ -95,49 +102,46 @@ func (t *AnthropicThread) loadConversation() error {
 	// Try to load the conversation
 	record, err := t.store.Load(t.conversationID)
 	if err != nil {
-		return fmt.Errorf("failed to load conversation: %w", err)
+		return errors.Wrap(err, "failed to load conversation")
 	}
 
 	// Check if this is an Anthropic model conversation
 	if record.ModelType != "" && record.ModelType != "anthropic" {
-		return fmt.Errorf("incompatible model type: %s", record.ModelType)
+		return errors.Errorf("incompatible model type: %s", record.ModelType)
 	}
 
 	// Reset current messages
 	messages, err := DeserializeMessages(record.RawMessages)
 	if err != nil {
-		return fmt.Errorf("failed to deserialize conversation messages: %w", err)
+		return errors.Wrap(err, "failed to deserialize conversation messages")
 	}
 	t.messages = messages
 
+	t.cleanupOrphanedMessages()
 	// Restore usage statistics
 	t.usage = &record.Usage
 	t.summary = record.Summary
 	t.state.SetFileLastAccess(record.FileLastAccess)
+	// Restore structured tool results
+	t.SetStructuredToolResults(record.ToolResults)
 	return nil
-}
-
-type contentBlock map[string]interface{}
-type messageParam struct {
-	Role    string         `json:"role"`
-	Content []contentBlock `json:"content"`
 }
 
 func DeserializeMessages(b []byte) ([]anthropic.MessageParam, error) {
 	var messages []anthropic.MessageParam
 	if err := json.Unmarshal(b, &messages); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal conversation messages: %w", err)
+		return nil, errors.Wrap(err, "failed to unmarshal conversation messages")
 	}
 
 	return messages, nil
 }
 
 // ExtractMessages parses the raw messages from a conversation record
-func ExtractMessages(rawMessages json.RawMessage) ([]llm.Message, error) {
+func ExtractMessages(rawMessages json.RawMessage, toolResults map[string]tooltypes.StructuredToolResult) ([]llm.Message, error) {
 	// Deserialize the raw messages using the existing DeserializeMessages function
 	anthropicMessages, err := DeserializeMessages(rawMessages)
 	if err != nil {
-		return nil, fmt.Errorf("error deserializing messages: %w", err)
+		return nil, errors.Wrap(err, "error deserializing messages")
 	}
 
 	var messages []llm.Message
@@ -159,16 +163,22 @@ func ExtractMessages(rawMessages json.RawMessage) ([]llm.Message, error) {
 				}
 				messages = append(messages, llm.Message{
 					Role:    string(msg.Role),
-					Content: fmt.Sprintf("🔧 Using tool: %s", string(inputJSON)),
+					Content: fmt.Sprintf("🔧 Using tool: %s with input: %s", toolUseBlock.Name, string(inputJSON)),
 				})
 			}
 			// Handle tool result blocks
 			if toolResultBlock := contentBlock.OfToolResult; toolResultBlock != nil {
 				for _, resultContent := range toolResultBlock.Content {
 					if textBlock := resultContent.OfText; textBlock != nil {
+						text := textBlock.Text
+						// Use CLI rendering if structured result is available
+						if structuredResult, ok := toolResults[toolResultBlock.ToolUseID]; ok {
+							registry := renderers.NewRendererRegistry()
+							text = registry.Render(structuredResult)
+						}
 						messages = append(messages, llm.Message{
 							Role:    "assistant",
-							Content: fmt.Sprintf("🔄 Tool result: %s", textBlock.Text),
+							Content: fmt.Sprintf("🔄 Tool result:\n%s", text),
 						})
 					}
 				}
@@ -177,7 +187,7 @@ func ExtractMessages(rawMessages json.RawMessage) ([]llm.Message, error) {
 			if thinkingBlock := contentBlock.OfThinking; thinkingBlock != nil {
 				messages = append(messages, llm.Message{
 					Role:    "assistant",
-					Content: fmt.Sprintf("💭 Thinking: %s", thinkingBlock.Thinking),
+					Content: fmt.Sprintf("💭 Thinking: %s", strings.TrimLeft(thinkingBlock.Thinking, "\n")),
 				})
 			}
 		}

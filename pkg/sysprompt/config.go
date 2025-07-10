@@ -12,9 +12,8 @@ type PromptConfig struct {
 // NewDefaultConfig creates a default configuration
 func NewDefaultConfig() *PromptConfig {
 	return &PromptConfig{
-		Model: "claude-3-sonnet-20240229",
+		Model: "claude-sonnet-4-20250514",
 		EnabledFeatures: []string{
-			"grepTool",
 			"subagent",
 			"todoTools",
 			"batchTool",
@@ -44,10 +43,9 @@ func (c *PromptConfig) IsFeatureEnabled(feature string) bool {
 	return false
 }
 
-// UpdateContextWithConfig updates a PromptContext with configuration settings
-func UpdateContextWithConfig(ctx *PromptContext, config *PromptConfig) {
+// updateContextWithConfig updates a PromptContext with configuration settings
+func updateContextWithConfig(ctx *PromptContext, config *PromptConfig) {
 	// Update feature flags based on config
-	ctx.Features["grepToolEnabled"] = config.IsFeatureEnabled("grepTool")
 	ctx.Features["subagentEnabled"] = config.IsFeatureEnabled("subagent")
 	ctx.Features["todoToolsEnabled"] = config.IsFeatureEnabled("todoTools")
 	ctx.Features["batchToolEnabled"] = config.IsFeatureEnabled("batchTool")

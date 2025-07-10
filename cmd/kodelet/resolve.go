@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 
+	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
 
@@ -25,11 +26,11 @@ func NewResolveConfig() *ResolveConfig {
 // Validate validates the ResolveConfig and returns an error if invalid
 func (c *ResolveConfig) Validate() error {
 	if c.Provider != "github" {
-		return fmt.Errorf("unsupported provider: %s, only 'github' is supported", c.Provider)
+		return errors.New(fmt.Sprintf("unsupported provider: %s, only 'github' is supported", c.Provider))
 	}
 
 	if c.IssueURL == "" {
-		return fmt.Errorf("issue URL cannot be empty")
+		return errors.New("issue URL cannot be empty")
 	}
 
 	return nil
@@ -52,21 +53,4 @@ func init() {
 	resolveCmd.Flags().String("issue-url", defaults.IssueURL, "Issue URL (required)")
 	resolveCmd.Flags().String("bot-mention", defaults.BotMention, "Bot mention to look for in comments")
 	resolveCmd.MarkFlagRequired("issue-url")
-}
-
-// getResolveConfigFromFlags extracts resolve configuration from command flags
-func getResolveConfigFromFlags(cmd *cobra.Command) *ResolveConfig {
-	config := NewResolveConfig()
-
-	if provider, err := cmd.Flags().GetString("provider"); err == nil {
-		config.Provider = provider
-	}
-	if issueURL, err := cmd.Flags().GetString("issue-url"); err == nil {
-		config.IssueURL = issueURL
-	}
-	if botMention, err := cmd.Flags().GetString("bot-mention"); err == nil {
-		config.BotMention = botMention
-	}
-
-	return config
 }

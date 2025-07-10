@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -9,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/aymanbagabas/go-udiff"
 	"github.com/invopop/jsonschema"
+	"github.com/pkg/errors"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/jingkaihe/kodelet/pkg/utils"
 	"go.opentelemetry.io/otel/attribute"
@@ -57,20 +56,35 @@ func (r *FileEditToolResult) AssistantFacing() string {
 	return tooltypes.StringifyToolResult(result, "")
 }
 
-func (r *FileEditToolResult) UserFacing() string {
-	if r.IsError() {
-		return r.GetError()
+func (r *FileEditToolResult) StructuredData() tooltypes.StructuredToolResult {
+	result := tooltypes.StructuredToolResult{
+		ToolName:  "file_edit",
+		Success:   !r.IsError(),
+		Timestamp: time.Now(),
 	}
 
-	buf := bytes.NewBufferString(fmt.Sprintf("File Edit: %s\n", r.filename))
-	buf.WriteString(fmt.Sprintf("Lines %d-%d\n\n", r.startLine, r.endLine))
+	// Detect language from file extension
+	language := utils.DetectLanguageFromPath(r.filename)
 
-	buf.WriteString("Diff:\n")
+	// Always populate metadata, even for errors
+	result.Metadata = &tooltypes.FileEditMetadata{
+		FilePath: r.filename,
+		Language: language,
+		Edits: []tooltypes.Edit{
+			{
+				StartLine:  r.startLine,
+				EndLine:    r.endLine,
+				OldContent: r.oldText,
+				NewContent: r.newText,
+			},
+		},
+	}
 
-	out := udiff.Unified(r.filename, r.filename, r.oldContent, r.newContent)
-	buf.WriteString(out)
+	if r.IsError() {
+		result.Error = r.GetError()
+	}
 
-	return buf.String()
+	return result
 }
 
 type FileEditTool struct{}
@@ -136,44 +150,44 @@ func (t *FileEditTool) TracingKVs(parameters string) ([]attribute.KeyValue, erro
 func (t *FileEditTool) ValidateInput(state tooltypes.State, parameters string) error {
 	var input FileEditInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
-		return fmt.Errorf("invalid input: %w", err)
+		return errors.Wrap(err, "invalid input")
 	}
 
 	// check if the file exists
 	info, err := os.Stat(input.FilePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return fmt.Errorf("file %s does not exist, use the 'FileWrite' tool to create instead", input.FilePath)
+			return errors.Errorf("file %s does not exist, use the 'FileWrite' tool to create instead", input.FilePath)
 		}
-		return fmt.Errorf("failed to check the file status: %w", err)
+		return errors.Wrap(err, "failed to check the file status")
 	}
 
 	lastAccessed := info.ModTime()
 	lastRead, err := state.GetFileLastAccessed(input.FilePath)
 	if err != nil {
-		return fmt.Errorf("failed to get the last access time of the file: %w", err)
+		return errors.Wrap(err, "failed to get the last access time of the file")
 	}
 
 	if lastAccessed.After(lastRead) {
-		return fmt.Errorf("file %s has been modified since the last read either by another tool or by the user, please read the file again", input.FilePath)
+		return errors.Errorf("file %s has been modified since the last read either by another tool or by the user, please read the file again", input.FilePath)
 	}
 
 	// check if the old text is unique
 	content, err := os.ReadFile(input.FilePath)
 	if err != nil {
-		return fmt.Errorf("failed to read the file: %w", err)
+		return errors.Wrap(err, "failed to read the file")
 	}
 
 	oldText := input.OldText
 
 	if !strings.Contains(string(content), oldText) {
-		return fmt.Errorf("old text not found in the file, please ensure the text exists")
+		return errors.New("old text not found in the file, please ensure the text exists")
 	}
 
 	// Count occurrences to ensure uniqueness
 	occurrences := strings.Count(string(content), oldText)
 	if occurrences > 1 {
-		return fmt.Errorf("old text appears %d times in the file, please ensure the old text is unique", occurrences)
+		return errors.Errorf("old text appears %d times in the file, please ensure the old text is unique", occurrences)
 	}
 
 	return nil

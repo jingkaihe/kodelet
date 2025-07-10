@@ -8,6 +8,12 @@ import (
 
 // GetConfigFromViper returns a Config object based on the current Viper settings
 func GetConfigFromViper() llmtypes.Config {
+	// Set default to auto if not specified
+	anthropicAPIAccess := viper.GetString("anthropic_api_access")
+	if anthropicAPIAccess == "" {
+		anthropicAPIAccess = string(llmtypes.AnthropicAPIAccessAuto)
+	}
+
 	return llmtypes.Config{
 		Provider:             viper.GetString("provider"),
 		Model:                viper.GetString("model"),
@@ -17,5 +23,8 @@ func GetConfigFromViper() llmtypes.Config {
 		ThinkingBudgetTokens: viper.GetInt("thinking_budget_tokens"),
 		ReasoningEffort:      viper.GetString("reasoning_effort"),
 		CacheEvery:           viper.GetInt("cache_every"),
+		AllowedCommands:      viper.GetStringSlice("allowed_commands"),
+		AllowedDomainsFile:   viper.GetString("allowed_domains_file"),
+		AnthropicAPIAccess:   llmtypes.AnthropicAPIAccess(anthropicAPIAccess),
 	}
 }

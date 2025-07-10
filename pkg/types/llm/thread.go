@@ -27,12 +27,18 @@ type MessageOpt struct {
 	// MaxTurns limits the number of turns within a single SendMessage call
 	// A value of 0 means no limit, and negative values are treated as 0
 	MaxTurns int
+	// CompactRatio is the ratio of context window at which to trigger auto-compact (0.0-1.0)
+	CompactRatio float64
+	// DisableAutoCompact disables auto-compact functionality
+	DisableAutoCompact bool
 }
 
 // SubAgentConfig is the key for the thread in the context
 type SubAgentConfig struct {
-	Thread         Thread         // Thread used by the sub-agent
-	MessageHandler MessageHandler // Message handler for the sub-agent
+	Thread             Thread         // Thread used by the sub-agent
+	MessageHandler     MessageHandler // Message handler for the sub-agent
+	CompactRatio       float64        // CompactRatio from parent agent
+	DisableAutoCompact bool           // DisableAutoCompact from parent agent
 }
 
 // Thread represents a conversation thread with an LLM
@@ -56,7 +62,7 @@ type Thread interface {
 	// IsPersisted returns whether this thread is being persisted
 	IsPersisted() bool
 	// EnablePersistence enables conversation persistence for this thread
-	EnablePersistence(enabled bool)
+	EnablePersistence(ctx context.Context, enabled bool)
 	// Provider returns the provider of the thread
 	Provider() string
 	// GetMessages returns the messages from the thread

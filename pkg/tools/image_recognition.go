@@ -3,15 +3,16 @@ package tools
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/invopop/jsonschema"
+	"github.com/pkg/errors"
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/jingkaihe/kodelet/pkg/logger"
@@ -40,13 +41,6 @@ func (r *ImageRecognitionToolResult) IsError() bool {
 
 func (r *ImageRecognitionToolResult) AssistantFacing() string {
 	return tooltypes.StringifyToolResult(r.result, r.err)
-}
-
-func (r *ImageRecognitionToolResult) UserFacing() string {
-	if r.IsError() {
-		return r.GetError()
-	}
-	return fmt.Sprintf("Image Recognition: %s\nPrompt: %s\n%s", r.imagePath, r.prompt, r.result)
 }
 
 // ImageRecognitionTool implements the image_recognition tool for processing and understanding images.
@@ -129,7 +123,7 @@ func (t *ImageRecognitionTool) validateImagePath(imagePath string) error {
 		// Validate HTTPS URL format
 		parsedURL, err := url.Parse(imagePath)
 		if err != nil {
-			return fmt.Errorf("invalid URL: %w", err)
+			return errors.Wrap(err, "invalid URL")
 		}
 		if parsedURL.Scheme != "https" {
 			return errors.New("only HTTPS URLs are supported for security")
@@ -149,7 +143,7 @@ func (t *ImageRecognitionTool) validateImagePath(imagePath string) error {
 func (t *ImageRecognitionTool) validateLocalImageFile(filePath string) error {
 	// Check if file exists
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		return fmt.Errorf("image file not found: %s", filePath)
+		return errors.Errorf("image file not found: %s", filePath)
 	}
 
 	// Check file extension
@@ -163,16 +157,16 @@ func (t *ImageRecognitionTool) validateLocalImageFile(filePath string) error {
 		}
 	}
 	if !isSupported {
-		return fmt.Errorf("unsupported image format: %s (supported: %v)", ext, supportedFormats)
+		return errors.Errorf("unsupported image format: %s (supported: %v)", ext, supportedFormats)
 	}
 
 	// Check file size
 	fileInfo, err := os.Stat(filePath)
 	if err != nil {
-		return fmt.Errorf("failed to get file info: %w", err)
+		return errors.Wrap(err, "failed to get file info")
 	}
 	if fileInfo.Size() > 5*1024*1024 { // 5MB limit
-		return fmt.Errorf("image file too large: %d bytes (max: 5MB)", fileInfo.Size())
+		return errors.Errorf("image file too large: %d bytes (max: 5MB)", fileInfo.Size())
 	}
 
 	return nil
@@ -258,19 +252,19 @@ func (t *ImageRecognitionTool) validateRemoteImage(ctx context.Context, imageURL
 	client := &http.Client{
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			// For security, don't follow redirects
-			return fmt.Errorf("redirects are not allowed for security reasons")
+			return errors.New("redirects are not allowed for security reasons")
 		},
 	}
 
 	resp, err := client.Head(imageURL)
 	if err != nil {
-		return fmt.Errorf("failed to access image URL: %w", err)
+		return errors.Wrap(err, "failed to access image URL")
 	}
 	defer resp.Body.Close()
 
 	// Check status code
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("HTTP error: %d %s", resp.StatusCode, resp.Status)
+		return errors.Errorf("HTTP error: %d %s", resp.StatusCode, resp.Status)
 	}
 
 	// Check content type to ensure it's an image
@@ -278,7 +272,7 @@ func (t *ImageRecognitionTool) validateRemoteImage(ctx context.Context, imageURL
 	if contentType == "" {
 		logger.G(ctx).Warnf("No Content-Type header found for image URL: %s", imageURL)
 	} else if !strings.HasPrefix(contentType, "image/") {
-		return fmt.Errorf("URL does not point to an image (Content-Type: %s)", contentType)
+		return errors.Errorf("URL does not point to an image (Content-Type: %s)", contentType)
 	}
 
 	// Check content length if available
@@ -287,7 +281,7 @@ func (t *ImageRecognitionTool) validateRemoteImage(ctx context.Context, imageURL
 		var size int64
 		if _, err := fmt.Sscanf(contentLength, "%d", &size); err == nil {
 			if size > 5*1024*1024 { // 5MB limit
-				return fmt.Errorf("image file too large: %d bytes (max: 5MB)", size)
+				return errors.Errorf("image file too large: %d bytes (max: 5MB)", size)
 			}
 		}
 	}
@@ -319,4 +313,33 @@ func (t *ImageRecognitionTool) TracingKVs(parameters string) ([]attribute.KeyVal
 	}
 
 	return attrs, nil
+}
+
+func (r *ImageRecognitionToolResult) StructuredData() tooltypes.StructuredToolResult {
+	result := tooltypes.StructuredToolResult{
+		ToolName:  "image_recognition",
+		Success:   !r.IsError(),
+		Timestamp: time.Now(),
+	}
+
+	// Determine if image is local or remote
+	imageType := "local"
+	if strings.HasPrefix(r.imagePath, "http://") || strings.HasPrefix(r.imagePath, "https://") {
+		imageType = "remote"
+	}
+
+	// Always populate metadata, even for errors
+	result.Metadata = &tooltypes.ImageRecognitionMetadata{
+		ImagePath: r.imagePath,
+		ImageType: imageType,
+		Prompt:    r.prompt,
+		Analysis:  r.result,
+		// ImageSize would require additional processing to extract
+	}
+
+	if r.IsError() {
+		result.Error = r.GetError()
+	}
+
+	return result
 }

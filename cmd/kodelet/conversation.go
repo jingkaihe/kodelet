@@ -1,17 +1,25 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
+	"net/url"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"text/tabwriter"
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/llm"
+	"github.com/jingkaihe/kodelet/pkg/presenter"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	"github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
 
@@ -65,6 +73,68 @@ func NewConversationShowConfig() *ConversationShowConfig {
 	}
 }
 
+// ConversationImportConfig holds configuration for the conversation import command
+type ConversationImportConfig struct {
+	Force bool
+}
+
+// NewConversationImportConfig creates a new ConversationImportConfig with default values
+func NewConversationImportConfig() *ConversationImportConfig {
+	return &ConversationImportConfig{
+		Force: false,
+	}
+}
+
+// ConversationExportConfig holds configuration for the conversation export command
+type ConversationExportConfig struct {
+	UseGist       bool
+	UsePublicGist bool
+}
+
+// NewConversationExportConfig creates a new ConversationExportConfig with default values
+func NewConversationExportConfig() *ConversationExportConfig {
+	return &ConversationExportConfig{
+		UseGist:       false,
+		UsePublicGist: false,
+	}
+}
+
+// ConversationEditConfig holds configuration for the conversation edit command
+type ConversationEditConfig struct {
+	Editor   string
+	EditArgs string
+}
+
+// NewConversationEditConfig creates a new ConversationEditConfig with default values
+func NewConversationEditConfig() *ConversationEditConfig {
+	return &ConversationEditConfig{
+		Editor:   "",
+		EditArgs: "",
+	}
+}
+
+// MigrationConfig holds configuration for the migration command
+type MigrationConfig struct {
+	DryRun     bool
+	Force      bool
+	BackupPath string
+	Verbose    bool
+	JSONPath   string
+	DBPath     string
+}
+
+// NewMigrationConfig creates a new MigrationConfig with default values
+func NewMigrationConfig() *MigrationConfig {
+	return &MigrationConfig{
+		DryRun:     false,
+		Force:      false,
+		BackupPath: "",
+		Verbose:    false,
+		JSONPath:   "",
+		DBPath:     "",
+	}
+}
+
 var conversationCmd = &cobra.Command{
 	Use:   "conversation",
 	Short: "Manage saved conversations",
@@ -79,8 +149,9 @@ var conversationListCmd = &cobra.Command{
 	Short: "List all saved conversations",
 	Long:  `List saved conversations with filtering and sorting options.`,
 	Run: func(cmd *cobra.Command, args []string) {
+		ctx := cmd.Context()
 		config := getConversationListConfigFromFlags(cmd)
-		listConversationsCmd(config)
+		listConversationsCmd(ctx, config)
 	},
 }
 
@@ -89,8 +160,9 @@ var conversationDeleteCmd = &cobra.Command{
 	Short: "Delete a specific conversation",
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
+		ctx := cmd.Context()
 		config := getConversationDeleteConfigFromFlags(cmd)
-		deleteConversationCmd(args[0], config)
+		deleteConversationCmd(ctx, args[0], config)
 	},
 }
 
@@ -99,8 +171,59 @@ var conversationShowCmd = &cobra.Command{
 	Short: "Show a specific conversation",
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
+		ctx := cmd.Context()
 		config := getConversationShowConfigFromFlags(cmd)
-		showConversationCmd(args[0], config)
+		showConversationCmd(ctx, args[0], config)
+	},
+}
+
+var conversationImportCmd = &cobra.Command{
+	Use:   "import [path_or_url]",
+	Short: "Import a conversation from a file or URL",
+	Args:  cobra.ExactArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		ctx := cmd.Context()
+		config := getConversationImportConfigFromFlags(cmd)
+		importConversationCmd(ctx, args[0], config)
+	},
+}
+
+var conversationExportCmd = &cobra.Command{
+	Use:   "export [conversationID] [path]",
+	Short: "Export a conversation to a file or create a gist",
+	Args:  cobra.RangeArgs(1, 2),
+	Run: func(cmd *cobra.Command, args []string) {
+		ctx := cmd.Context()
+		config := getConversationExportConfigFromFlags(cmd)
+
+		var path string
+		if len(args) > 1 {
+			path = args[1]
+		}
+
+		exportConversationCmd(ctx, args[0], path, config)
+	},
+}
+
+var conversationEditCmd = &cobra.Command{
+	Use:   "edit [conversationID]",
+	Short: "Edit a conversation record in JSON format",
+	Args:  cobra.ExactArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		ctx := cmd.Context()
+		config := getConversationEditConfigFromFlags(cmd)
+		editConversationCmd(ctx, args[0], config)
+	},
+}
+
+var conversationMigrateCmd = &cobra.Command{
+	Use:   "migrate",
+	Short: "Migrate conversations from JSON to BBolt format",
+	Long:  `Migrate existing JSON conversations to the new BBolt format for better performance and multi-process support.`,
+	Run: func(cmd *cobra.Command, args []string) {
+		ctx := cmd.Context()
+		config := getMigrationConfigFromFlags(cmd)
+		migrateConversationsCmd(ctx, config)
 	},
 }
 
@@ -124,10 +247,37 @@ func init() {
 	showDefaults := NewConversationShowConfig()
 	conversationShowCmd.Flags().String("format", showDefaults.Format, "Output format: raw, json, or text")
 
+	// Add import command flags
+	importDefaults := NewConversationImportConfig()
+	conversationImportCmd.Flags().Bool("force", importDefaults.Force, "Force overwrite existing conversation")
+
+	// Add export command flags
+	exportDefaults := NewConversationExportConfig()
+	conversationExportCmd.Flags().Bool("gist", exportDefaults.UseGist, "Create a private gist using gh command")
+	conversationExportCmd.Flags().Bool("public-gist", exportDefaults.UsePublicGist, "Create a public gist using gh command")
+
+	// Add edit command flags
+	editDefaults := NewConversationEditConfig()
+	conversationEditCmd.Flags().String("editor", editDefaults.Editor, "Editor to use for editing the conversation (default: git config core.editor, then $EDITOR, then vim)")
+	conversationEditCmd.Flags().String("edit-args", editDefaults.EditArgs, "Additional arguments to pass to the editor (e.g., '--wait' for VS Code)")
+
+	// Add migrate command flags
+	migrateDefaults := NewMigrationConfig()
+	conversationMigrateCmd.Flags().Bool("dry-run", migrateDefaults.DryRun, "Show what would be migrated without actually migrating")
+	conversationMigrateCmd.Flags().Bool("force", migrateDefaults.Force, "Overwrite existing conversations in target store")
+	conversationMigrateCmd.Flags().String("backup-path", migrateDefaults.BackupPath, "Path to backup JSON files (default: ~/.kodelet/backup)")
+	conversationMigrateCmd.Flags().Bool("verbose", migrateDefaults.Verbose, "Show detailed migration progress")
+	conversationMigrateCmd.Flags().String("json-path", migrateDefaults.JSONPath, "Path to JSON conversations directory (default: ~/.kodelet/conversations)")
+	conversationMigrateCmd.Flags().String("db-path", migrateDefaults.DBPath, "Path to BBolt database file (default: ~/.kodelet/storage.db)")
+
 	// Add subcommands
 	conversationCmd.AddCommand(conversationListCmd)
 	conversationCmd.AddCommand(conversationDeleteCmd)
 	conversationCmd.AddCommand(conversationShowCmd)
+	conversationCmd.AddCommand(conversationImportCmd)
+	conversationCmd.AddCommand(conversationExportCmd)
+	conversationCmd.AddCommand(conversationEditCmd)
+	conversationCmd.AddCommand(conversationMigrateCmd)
 }
 
 // getConversationListConfigFromFlags extracts list configuration from command flags
@@ -179,6 +329,73 @@ func getConversationShowConfigFromFlags(cmd *cobra.Command) *ConversationShowCon
 
 	if format, err := cmd.Flags().GetString("format"); err == nil {
 		config.Format = format
+	}
+
+	return config
+}
+
+// getConversationImportConfigFromFlags extracts import configuration from command flags
+func getConversationImportConfigFromFlags(cmd *cobra.Command) *ConversationImportConfig {
+	config := NewConversationImportConfig()
+
+	if force, err := cmd.Flags().GetBool("force"); err == nil {
+		config.Force = force
+	}
+
+	return config
+}
+
+// getConversationExportConfigFromFlags extracts export configuration from command flags
+func getConversationExportConfigFromFlags(cmd *cobra.Command) *ConversationExportConfig {
+	config := NewConversationExportConfig()
+
+	if useGist, err := cmd.Flags().GetBool("gist"); err == nil {
+		config.UseGist = useGist
+	}
+
+	if usePublicGist, err := cmd.Flags().GetBool("public-gist"); err == nil {
+		config.UsePublicGist = usePublicGist
+	}
+
+	return config
+}
+
+// getConversationEditConfigFromFlags extracts edit configuration from command flags
+func getConversationEditConfigFromFlags(cmd *cobra.Command) *ConversationEditConfig {
+	config := NewConversationEditConfig()
+
+	if editor, err := cmd.Flags().GetString("editor"); err == nil {
+		config.Editor = editor
+	}
+
+	if editArgs, err := cmd.Flags().GetString("edit-args"); err == nil {
+		config.EditArgs = editArgs
+	}
+
+	return config
+}
+
+// getMigrationConfigFromFlags extracts migration configuration from command flags
+func getMigrationConfigFromFlags(cmd *cobra.Command) *MigrationConfig {
+	config := NewMigrationConfig()
+
+	if dryRun, err := cmd.Flags().GetBool("dry-run"); err == nil {
+		config.DryRun = dryRun
+	}
+	if force, err := cmd.Flags().GetBool("force"); err == nil {
+		config.Force = force
+	}
+	if backupPath, err := cmd.Flags().GetString("backup-path"); err == nil {
+		config.BackupPath = backupPath
+	}
+	if verbose, err := cmd.Flags().GetBool("verbose"); err == nil {
+		config.Verbose = verbose
+	}
+	if jsonPath, err := cmd.Flags().GetString("json-path"); err == nil {
+		config.JSONPath = jsonPath
+	}
+	if dbPath, err := cmd.Flags().GetString("db-path"); err == nil {
+		config.DBPath = dbPath
 	}
 
 	return config
@@ -244,7 +461,7 @@ func (o *ConversationListOutput) renderJSON(w io.Writer) error {
 
 	jsonData, err := json.MarshalIndent(output, "", "  ")
 	if err != nil {
-		return fmt.Errorf("error generating JSON output: %v", err)
+		return errors.Wrap(err, "error generating JSON output")
 	}
 
 	_, err = fmt.Fprintln(w, string(jsonData))
@@ -293,13 +510,15 @@ type ConversationSummaryOutput struct {
 }
 
 // listConversationsCmd displays a list of saved conversations with query options
-func listConversationsCmd(config *ConversationListConfig) {
+func listConversationsCmd(ctx context.Context, config *ConversationListConfig) {
+
 	// Create a store
-	store, err := conversations.GetConversationStore()
+	store, err := conversations.GetConversationStore(ctx)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		presenter.Error(err, "Failed to initialize conversation store")
 		os.Exit(1)
 	}
+	defer store.Close()
 
 	// Prepare query options
 	options := conversations.QueryOptions{
@@ -314,7 +533,7 @@ func listConversationsCmd(config *ConversationListConfig) {
 	if config.StartDate != "" {
 		startDate, err := time.Parse("2006-01-02", config.StartDate)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error parsing start date: %v\n", err)
+			presenter.Error(err, "Invalid start date format. Please use YYYY-MM-DD")
 			os.Exit(1)
 		}
 		options.StartDate = &startDate
@@ -324,7 +543,7 @@ func listConversationsCmd(config *ConversationListConfig) {
 	if config.EndDate != "" {
 		endDate, err := time.Parse("2006-01-02", config.EndDate)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error parsing end date: %v\n", err)
+			presenter.Error(err, "Invalid end date format. Please use YYYY-MM-DD")
 			os.Exit(1)
 		}
 		// Set to end of day
@@ -333,14 +552,15 @@ func listConversationsCmd(config *ConversationListConfig) {
 	}
 
 	// Query conversations with options
-	summaries, err := store.Query(options)
+	result, err := store.Query(options)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error listing conversations: %v\n", err)
+		presenter.Error(err, "Failed to list conversations")
 		os.Exit(1)
 	}
 
+	summaries := result.ConversationSummaries
 	if len(summaries) == 0 {
-		fmt.Println("No conversations found matching your criteria.")
+		presenter.Info("No conversations found matching your criteria.")
 		return
 	}
 
@@ -353,28 +573,28 @@ func listConversationsCmd(config *ConversationListConfig) {
 	// Create and render the output
 	output := NewConversationListOutput(summaries, format)
 	if err := output.Render(os.Stdout); err != nil {
-		fmt.Fprintf(os.Stderr, "Error rendering output: %v\n", err)
+		presenter.Error(err, "Failed to render conversation list")
 		os.Exit(1)
 	}
 }
 
 // deleteConversationCmd deletes a specific conversation
-func deleteConversationCmd(id string, config *ConversationDeleteConfig) {
+func deleteConversationCmd(ctx context.Context, id string, config *ConversationDeleteConfig) {
+
 	// Create a store
-	store, err := conversations.GetConversationStore()
+	store, err := conversations.GetConversationStore(ctx)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		presenter.Error(err, "Failed to initialize conversation store")
 		os.Exit(1)
 	}
+	defer store.Close()
 
 	// If no-confirm flag is not set, prompt for confirmation
 	if !config.NoConfirm {
-		fmt.Printf("Are you sure you want to delete conversation %s? (y/N): ", id)
-		var response string
-		fmt.Scanln(&response)
+		response := presenter.Prompt(fmt.Sprintf("Are you sure you want to delete conversation %s?", id), "y", "N")
 
 		if response != "y" && response != "Y" {
-			fmt.Println("Deletion cancelled.")
+			presenter.Info("Deletion cancelled.")
 			return
 		}
 	}
@@ -382,33 +602,35 @@ func deleteConversationCmd(id string, config *ConversationDeleteConfig) {
 	// Delete the conversation
 	err = store.Delete(id)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error deleting conversation: %v\n", err)
+		presenter.Error(err, "Failed to delete conversation")
 		os.Exit(1)
 	}
 
-	fmt.Printf("Conversation %s deleted successfully.\n", id)
+	presenter.Success(fmt.Sprintf("Conversation %s deleted successfully", id))
 }
 
 // showConversationCmd displays a specific conversation
-func showConversationCmd(id string, config *ConversationShowConfig) {
+func showConversationCmd(ctx context.Context, id string, config *ConversationShowConfig) {
+
 	// Create a store
-	store, err := conversations.GetConversationStore()
+	store, err := conversations.GetConversationStore(ctx)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		presenter.Error(err, "Failed to initialize conversation store")
 		os.Exit(1)
 	}
+	defer store.Close()
 
 	// Load the conversation record
 	record, err := store.Load(id)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading conversation: %v\n", err)
+		presenter.Error(err, "Failed to load conversation")
 		os.Exit(1)
 	}
 
 	// Extract messages from raw message data
-	messages, err := llm.ExtractMessages(record.ModelType, record.RawMessages)
+	messages, err := llm.ExtractMessages(record.ModelType, record.RawMessages, record.ToolResults)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error parsing messages: %v\n", err)
+		presenter.Error(err, "Failed to parse conversation messages")
 		os.Exit(1)
 	}
 
@@ -421,7 +643,7 @@ func showConversationCmd(id string, config *ConversationShowConfig) {
 		// Convert to simpler JSON format and output
 		outputJSON, err := json.MarshalIndent(messages, "", "  ")
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error generating JSON output: %v\n", err)
+			presenter.Error(err, "Failed to generate JSON output")
 			os.Exit(1)
 		}
 		fmt.Println(string(outputJSON))
@@ -429,7 +651,7 @@ func showConversationCmd(id string, config *ConversationShowConfig) {
 		// Format as readable text with user/assistant prefixes
 		displayConversation(messages)
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown format: %s. Supported formats are raw, json, and text.\n", config.Format)
+		presenter.Error(errors.Errorf("unsupported format: %s", config.Format), "Unknown format. Supported formats are raw, json, and text")
 		os.Exit(1)
 	}
 }
@@ -439,7 +661,7 @@ func displayConversation(messages []llmtypes.Message) {
 	for i, msg := range messages {
 		// Add a separator between messages
 		if i > 0 {
-			fmt.Println(strings.Repeat("-", 80))
+			presenter.Separator()
 		}
 
 		// Format based on role
@@ -458,7 +680,397 @@ func displayConversation(messages []llmtypes.Message) {
 			}
 		}
 
-		// Output the formatted message
-		fmt.Printf("%s:\n%s\n", roleLabel, msg.Content)
+		// Output the formatted message with section header
+		presenter.Section(roleLabel)
+		fmt.Printf("%s\n", msg.Content)
+	}
+}
+
+// importConversationCmd imports a conversation from a file or URL
+func importConversationCmd(ctx context.Context, source string, config *ConversationImportConfig) {
+	// Create a store
+	store, err := conversations.GetConversationStore(ctx)
+	if err != nil {
+		presenter.Error(err, "Failed to initialize conversation store")
+		os.Exit(1)
+	}
+	defer store.Close()
+
+	// Read the conversation data
+	data, err := readConversationData(source)
+	if err != nil {
+		presenter.Error(err, "Failed to read conversation data")
+		os.Exit(1)
+	}
+
+	// Validate and parse the conversation record
+	record, err := validateConversationRecord(data)
+	if err != nil {
+		presenter.Error(err, "Invalid conversation data")
+		os.Exit(1)
+	}
+
+	// Check if conversation already exists
+	if _, err := store.Load(record.ID); err == nil {
+		if !config.Force {
+			presenter.Error(errors.Errorf("conversation with ID %s already exists", record.ID), "Use --force to overwrite")
+			os.Exit(1)
+		}
+	}
+
+	// Save the conversation
+	if err := store.Save(*record); err != nil {
+		presenter.Error(err, "Failed to save conversation")
+		os.Exit(1)
+	}
+
+	presenter.Success(fmt.Sprintf("Conversation %s imported successfully", record.ID))
+}
+
+// exportConversationCmd exports a conversation to a file or creates a gist
+func exportConversationCmd(ctx context.Context, conversationID string, path string, config *ConversationExportConfig) {
+	// Create a store
+	store, err := conversations.GetConversationStore(ctx)
+	if err != nil {
+		presenter.Error(err, "Failed to initialize conversation store")
+		os.Exit(1)
+	}
+	defer store.Close()
+
+	// Load the conversation
+	record, err := store.Load(conversationID)
+	if err != nil {
+		presenter.Error(err, "Failed to load conversation")
+		os.Exit(1)
+	}
+
+	// Convert to JSON
+	jsonData, err := json.MarshalIndent(record, "", "  ")
+	if err != nil {
+		presenter.Error(err, "Failed to serialize conversation")
+		os.Exit(1)
+	}
+
+	// Handle gist export
+	if config.UseGist || config.UsePublicGist {
+		// Check for conflicting flags
+		if config.UseGist && config.UsePublicGist {
+			presenter.Error(errors.New("cannot use both --gist and --public-gist flags"), "Conflicting flags")
+			os.Exit(1)
+		}
+
+		isPrivate := config.UseGist // private if --gist, public if --public-gist
+		if err := createGist(conversationID, jsonData, isPrivate); err != nil {
+			presenter.Error(err, "Failed to create gist")
+			os.Exit(1)
+		}
+		return
+	}
+
+	// Handle file export
+	if path == "" {
+		path = fmt.Sprintf("%s.json", conversationID)
+	}
+
+	if err := os.WriteFile(path, jsonData, 0644); err != nil {
+		presenter.Error(err, "Failed to write file")
+		os.Exit(1)
+	}
+
+	presenter.Success(fmt.Sprintf("Conversation %s exported to %s", conversationID, path))
+}
+
+// readConversationData reads conversation data from a file or URL
+func readConversationData(source string) ([]byte, error) {
+	// Check if it's a URL
+	if parsedURL, err := url.Parse(source); err == nil && parsedURL.Scheme != "" {
+		return readFromURL(source)
+	}
+
+	// It's a file path
+	return os.ReadFile(source)
+}
+
+// readFromURL reads data from a URL
+func readFromURL(urlStr string) ([]byte, error) {
+	resp, err := http.Get(urlStr)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to fetch from URL")
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, errors.Errorf("HTTP error %d: %s", resp.StatusCode, resp.Status)
+	}
+
+	return io.ReadAll(resp.Body)
+}
+
+// validateConversationRecord validates and parses a conversation record
+func validateConversationRecord(data []byte) (*conversations.ConversationRecord, error) {
+	var record conversations.ConversationRecord
+	if err := json.Unmarshal(data, &record); err != nil {
+		return nil, errors.Wrap(err, "invalid JSON format")
+	}
+
+	// Validate required fields
+	if record.ID == "" {
+		return nil, errors.New("conversation ID is required")
+	}
+
+	if record.ModelType == "" {
+		return nil, errors.New("model type is required")
+	}
+
+	// Validate supported providers
+	if record.ModelType != "anthropic" && record.ModelType != "openai" {
+		return nil, errors.Errorf("unsupported model type: %s (supported: anthropic, openai)", record.ModelType)
+	}
+
+	if len(record.RawMessages) == 0 {
+		return nil, errors.New("raw messages are required")
+	}
+
+	// Validate that messages can be extracted
+	if record.ToolResults == nil {
+		record.ToolResults = make(map[string]tools.StructuredToolResult)
+	}
+
+	_, err := llm.ExtractMessages(record.ModelType, record.RawMessages, record.ToolResults)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to extract messages")
+	}
+
+	// Set timestamps if not provided
+	if record.CreatedAt.IsZero() {
+		record.CreatedAt = time.Now()
+	}
+	if record.UpdatedAt.IsZero() {
+		record.UpdatedAt = time.Now()
+	}
+
+	return &record, nil
+}
+
+// createGist creates a gist using the gh command
+func createGist(conversationID string, jsonData []byte, isPrivate bool) error {
+	// Create a temporary file
+	tmpFile, err := os.CreateTemp("", fmt.Sprintf("conversation_%s_*.json", conversationID))
+	if err != nil {
+		return errors.Wrap(err, "failed to create temporary file")
+	}
+	defer os.Remove(tmpFile.Name())
+
+	// Write data to temporary file
+	if _, err := tmpFile.Write(jsonData); err != nil {
+		tmpFile.Close()
+		return errors.Wrap(err, "failed to write to temporary file")
+	}
+	tmpFile.Close()
+
+	// Build gh command with appropriate visibility flag
+	args := []string{"gist", "create"}
+	if !isPrivate {
+		// Only add --public flag for public gists; private is the default
+		args = append(args, "--public")
+	}
+	args = append(args, "--filename", fmt.Sprintf("conversation_%s.json", conversationID), tmpFile.Name())
+
+	// Create gist using gh command
+	cmd := exec.Command("gh", args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return errors.Wrapf(err, "failed to create gist (output: %s)", string(output))
+	}
+
+	result := strings.TrimSpace(string(output))
+	visibility := "private"
+	if !isPrivate {
+		visibility = "public"
+	}
+
+	presenter.Info(result)
+	presenter.Success(fmt.Sprintf("Conversation %s exported to %s gist", conversationID, visibility))
+	return nil
+}
+
+// editConversationCmd opens a conversation record in JSON format for editing
+func editConversationCmd(ctx context.Context, conversationID string, config *ConversationEditConfig) {
+	// Create a store
+	store, err := conversations.GetConversationStore(ctx)
+	if err != nil {
+		presenter.Error(err, "Failed to initialize conversation store")
+		os.Exit(1)
+	}
+	defer store.Close()
+
+	// Load the conversation
+	record, err := store.Load(conversationID)
+	if err != nil {
+		presenter.Error(err, "Failed to load conversation")
+		os.Exit(1)
+	}
+
+	// Convert to JSON
+	jsonData, err := json.MarshalIndent(record, "", "  ")
+	if err != nil {
+		presenter.Error(err, "Failed to serialize conversation")
+		os.Exit(1)
+	}
+
+	// Create a temporary file for editing
+	tempFile, err := os.CreateTemp("", fmt.Sprintf("conversation_%s_*.json", conversationID))
+	if err != nil {
+		presenter.Error(err, "Failed to create temporary file")
+		os.Exit(1)
+	}
+	defer os.Remove(tempFile.Name())
+
+	// Write the JSON to the temporary file
+	if _, err := tempFile.Write(jsonData); err != nil {
+		presenter.Error(err, "Failed to write to temporary file")
+		os.Exit(1)
+	}
+	tempFile.Close()
+
+	// Determine which editor to use
+	editor := config.Editor
+	if editor == "" {
+		editor = getEditor()
+	}
+
+	// Parse editor command and arguments
+	editorCmd := []string{editor}
+	if config.EditArgs != "" {
+		args := strings.Fields(config.EditArgs)
+		editorCmd = append(editorCmd, args...)
+	}
+	editorCmd = append(editorCmd, tempFile.Name())
+
+	fmt.Println(editorCmd)
+
+	// Open the file in the editor
+	cmd := exec.Command(editorCmd[0], editorCmd[1:]...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		presenter.Error(err, "Failed to open editor")
+		os.Exit(1)
+	}
+
+	// Read the edited content
+	editedData, err := os.ReadFile(tempFile.Name())
+	if err != nil {
+		presenter.Error(err, "Failed to read edited file")
+		os.Exit(1)
+	}
+
+	// Parse the edited JSON to validate it
+	editedRecord, err := validateConversationRecord(editedData)
+	if err != nil {
+		presenter.Error(err, "Invalid edited conversation data")
+		os.Exit(1)
+	}
+
+	// Save the edited conversation
+	if err := store.Save(*editedRecord); err != nil {
+		presenter.Error(err, "Failed to save edited conversation")
+		os.Exit(1)
+	}
+
+	presenter.Success(fmt.Sprintf("Conversation %s edited successfully", conversationID))
+}
+
+// migrateConversationsCmd performs the migration operation
+func migrateConversationsCmd(ctx context.Context, config *MigrationConfig) {
+	basePath, err := conversations.GetDefaultBasePath()
+	if err != nil {
+		presenter.Error(err, "Failed to get default base path")
+		os.Exit(1)
+	}
+
+	// Set default paths if not provided
+	if config.JSONPath == "" {
+		config.JSONPath = basePath
+	}
+
+	if config.DBPath == "" {
+		config.DBPath = filepath.Join(basePath, "storage.db")
+	}
+
+	if config.BackupPath == "" {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			presenter.Error(err, "Failed to get home directory")
+			os.Exit(1)
+		}
+		config.BackupPath = filepath.Join(homeDir, ".cache", "kodelet", "backup")
+	}
+
+	// Check if there are conversations to migrate
+	conversationIDs, err := conversations.DetectJSONConversations(ctx, config.JSONPath)
+	if err != nil {
+		presenter.Error(err, "Failed to detect JSON conversations")
+		os.Exit(1)
+	}
+
+	if len(conversationIDs) == 0 {
+		presenter.Info("No JSON conversations found to migrate")
+		return
+	}
+
+	presenter.Info(fmt.Sprintf("Found %d conversations to migrate", len(conversationIDs)))
+
+	// Create backup if not dry run
+	if !config.DryRun {
+		presenter.Info("Creating backup of JSON conversations...")
+		if err := conversations.BackupJSONConversations(ctx, config.JSONPath, config.BackupPath); err != nil {
+			presenter.Error(err, "Failed to create backup")
+			os.Exit(1)
+		}
+		presenter.Success(fmt.Sprintf("Backup created at: %s", config.BackupPath))
+	}
+
+	// Perform migration
+	migrationOptions := conversations.MigrationOptions{
+		DryRun:     config.DryRun,
+		Force:      config.Force,
+		BackupPath: config.BackupPath,
+		Verbose:    config.Verbose,
+	}
+
+	result, err := conversations.MigrateJSONToBBolt(ctx, config.JSONPath, config.DBPath, migrationOptions)
+	if err != nil {
+		presenter.Error(err, "Migration failed")
+		os.Exit(1)
+	}
+
+	// Display results
+	if config.DryRun {
+		presenter.Info("Dry run completed - no changes made")
+	} else {
+		presenter.Success("Migration completed successfully")
+	}
+
+	presenter.Info(fmt.Sprintf("Total conversations: %d", result.TotalConversations))
+	presenter.Info(fmt.Sprintf("Successfully migrated: %d", result.MigratedCount))
+	if result.FailedCount > 0 {
+		presenter.Warning(fmt.Sprintf("Failed: %d", result.FailedCount))
+	}
+	if result.SkippedCount > 0 {
+		presenter.Info(fmt.Sprintf("Skipped: %d", result.SkippedCount))
+	}
+	presenter.Info(fmt.Sprintf("Duration: %v", result.Duration))
+
+	if len(result.FailedIDs) > 0 {
+		presenter.Warning(fmt.Sprintf("Failed to migrate: %s", strings.Join(result.FailedIDs, ", ")))
+	}
+
+	if !config.DryRun && result.MigratedCount > 0 {
+		presenter.Info("Your conversations have been migrated to the new BBolt format")
+		presenter.Info("You can now use all Kodelet features with improved performance")
+		presenter.Info(fmt.Sprintf("Original JSON files have been backed up to: %s", config.BackupPath))
 	}
 }

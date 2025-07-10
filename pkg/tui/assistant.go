@@ -11,17 +11,31 @@ import (
 
 // AssistantClient handles the interaction with the LLM thread
 type AssistantClient struct {
-	thread     llmtypes.Thread
-	mcpManager *tools.MCPManager
-	maxTurns   int
+	thread             llmtypes.Thread
+	mcpManager         *tools.MCPManager
+	maxTurns           int
+	compactRatio       float64
+	disableAutoCompact bool
 }
 
 // NewAssistantClient creates a new assistant client
-func NewAssistantClient(ctx context.Context, conversationID string, enablePersistence bool, mcpManager *tools.MCPManager, maxTurns int) *AssistantClient {
+func NewAssistantClient(ctx context.Context, conversationID string, enablePersistence bool, mcpManager *tools.MCPManager, maxTurns int, enableBrowserTools bool, compactRatio float64, disableAutoCompact bool) *AssistantClient {
 	// Create a persistent thread with config from viper
-	thread := llm.NewThread(llm.GetConfigFromViper())
+	config := llm.GetConfigFromViper()
+	thread, err := llm.NewThread(config)
+	if err != nil {
+		// This is a critical error during initialization
+		panic(fmt.Sprintf("failed to create LLM thread: %v", err))
+	}
 
-	state := tools.NewBasicState(ctx, tools.WithMCPTools(mcpManager))
+	// Create state with appropriate tools based on browser support
+	var stateOpts []tools.BasicStateOption
+	stateOpts = append(stateOpts, tools.WithLLMConfig(config))
+	stateOpts = append(stateOpts, tools.WithMCPTools(mcpManager))
+	if enableBrowserTools {
+		stateOpts = append(stateOpts, tools.WithMainToolsAndBrowser())
+	}
+	state := tools.NewBasicState(ctx, stateOpts...)
 	thread.SetState(state)
 
 	// Configure conversation persistence
@@ -29,12 +43,14 @@ func NewAssistantClient(ctx context.Context, conversationID string, enablePersis
 		thread.SetConversationID(conversationID)
 	}
 
-	thread.EnablePersistence(enablePersistence)
+	thread.EnablePersistence(ctx, enablePersistence)
 
 	return &AssistantClient{
-		thread:     thread,
-		mcpManager: mcpManager,
-		maxTurns:   maxTurns,
+		thread:             thread,
+		mcpManager:         mcpManager,
+		maxTurns:           maxTurns,
+		compactRatio:       compactRatio,
+		disableAutoCompact: disableAutoCompact,
 	}
 }
 
@@ -47,9 +63,9 @@ func (a *AssistantClient) GetThreadMessages() ([]llmtypes.Message, error) {
 // 	a.thread.AddUserMessage(message, imagePaths...)
 // }
 
-func (a *AssistantClient) SaveConversation(ctx context.Context) error {
-	return a.thread.SaveConversation(ctx, true)
-}
+// func (a *AssistantClient) SaveConversation(ctx context.Context) error {
+// 	return a.thread.SaveConversation(ctx, true)
+// }
 
 // SendMessage sends a message to the assistant and processes the response
 func (a *AssistantClient) SendMessage(ctx context.Context, message string, messageCh chan llmtypes.MessageEvent, imagePaths ...string) error {
@@ -58,9 +74,11 @@ func (a *AssistantClient) SendMessage(ctx context.Context, message string, messa
 
 	// Send the message using the persistent thread
 	_, err := a.thread.SendMessage(ctx, message, handler, llmtypes.MessageOpt{
-		PromptCache: true,
-		Images:      imagePaths,
-		MaxTurns:    a.maxTurns,
+		PromptCache:        true,
+		Images:             imagePaths,
+		MaxTurns:           a.maxTurns,
+		CompactRatio:       a.compactRatio,
+		DisableAutoCompact: a.disableAutoCompact,
 	})
 
 	return err

@@ -11,6 +11,7 @@ import (
 	"github.com/invopop/jsonschema"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/telemetry"
+	"github.com/jingkaihe/kodelet/pkg/tools/browser"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
 	"go.opentelemetry.io/otel/codes"
@@ -27,7 +28,31 @@ func GenerateSchema[T any]() *jsonschema.Schema {
 	return reflector.Reflect(v)
 }
 
-var MainTools = []tooltypes.Tool{
+// GetMainTools returns the main tools, optionally including browser tools
+func GetMainTools(enableBrowserTools bool) []tooltypes.Tool {
+	tools := make([]tooltypes.Tool, len(baseMainTools))
+	copy(tools, baseMainTools)
+
+	if enableBrowserTools {
+		tools = append(tools, browserTools...)
+	}
+
+	return tools
+}
+
+// GetSubAgentTools returns the sub-agent tools, optionally including browser tools
+func GetSubAgentTools(enableBrowserTools bool) []tooltypes.Tool {
+	tools := make([]tooltypes.Tool, len(baseSubAgentTools))
+	copy(tools, baseSubAgentTools)
+
+	if enableBrowserTools {
+		tools = append(tools, browserTools...)
+	}
+
+	return tools
+}
+
+var baseMainTools = []tooltypes.Tool{
 	&BashTool{},
 	&FileReadTool{},
 	&FileWriteTool{},
@@ -42,9 +67,19 @@ var MainTools = []tooltypes.Tool{
 	&BatchTool{},
 	&WebFetchTool{},
 	&ImageRecognitionTool{},
+	&ViewBackgroundProcessesTool{},
 }
 
-var SubAgentTools = []tooltypes.Tool{
+var browserTools = []tooltypes.Tool{
+	&browser.NavigateTool{},
+	&browser.GetPageTool{},
+	&browser.ClickTool{},
+	&browser.TypeTool{},
+	&browser.WaitForTool{},
+	&browser.ScreenshotTool{},
+}
+
+var baseSubAgentTools = []tooltypes.Tool{
 	&BashTool{},
 	&FileReadTool{},
 	&FileWriteTool{},
@@ -111,7 +146,7 @@ func RunTool(ctx context.Context, state tooltypes.State, toolName string, parame
 
 	if result.IsError() {
 		span.SetStatus(codes.Error, result.GetError())
-		span.RecordError(fmt.Errorf("%s", result.GetError()))
+		span.RecordError(errors.New(result.GetError()))
 	} else {
 		span.SetStatus(codes.Ok, "")
 	}

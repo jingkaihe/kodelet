@@ -3,6 +3,9 @@ package utils
 import (
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestContentWithLineNumber(t *testing.T) {
@@ -47,9 +50,7 @@ func TestContentWithLineNumber(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			result := ContentWithLineNumber(tc.lines, tc.offset)
-			if result != tc.expected {
-				t.Errorf("Expected:\n%s\nGot:\n%s", tc.expected, result)
-			}
+			assert.Equal(t, tc.expected, result)
 		})
 	}
 }
@@ -61,23 +62,17 @@ func TestContentWithLineNumberAlignment(t *testing.T) {
 
 	// Split result into lines and check each line starts with properly padded number
 	resultLines := strings.Split(strings.TrimSuffix(result, "\n"), "\n")
-	if len(resultLines) != 3 {
-		t.Fatalf("Expected 3 lines, got %d", len(resultLines))
-	}
+	require.Equal(t, 3, len(resultLines))
 
 	// Each line should start with " 9: ", "10: ", "11: " respectively
 	expectedPrefixes := []string{" 9: ", "10: ", "11: "}
 	for i, line := range resultLines {
-		if !strings.HasSuffix(line, "line") {
-			t.Errorf("Line %d doesn't end with 'line': %s", i, line)
-		}
+		assert.True(t, strings.HasSuffix(line, "line"), "Line %d doesn't end with 'line': %s", i, line)
 
 		// Check if padding is correct
 		prefixLen := len(line) - 4 // 4 is the length of "line"
 		prefix := line[:prefixLen]
 
-		if prefix != expectedPrefixes[i] {
-			t.Errorf("Expected prefix '%s', got '%s'", expectedPrefixes[i], prefix)
-		}
+		assert.Equal(t, expectedPrefixes[i], prefix)
 	}
 }

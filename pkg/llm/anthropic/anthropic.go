@@ -4,20 +4,26 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
+	"github.com/jingkaihe/kodelet/pkg/auth"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/llm/prompts"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/sysprompt"
 	"github.com/jingkaihe/kodelet/pkg/telemetry"
 	"github.com/jingkaihe/kodelet/pkg/tools"
+	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
+	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
@@ -38,17 +44,19 @@ const (
 
 // AnthropicThread implements the Thread interface using Anthropic's Claude API
 type AnthropicThread struct {
-	client         anthropic.Client
-	config         llmtypes.Config
-	state          tooltypes.State
-	messages       []anthropic.MessageParam
-	usage          *llmtypes.Usage
-	conversationID string
-	summary        string
-	isPersisted    bool
-	store          ConversationStore
-	mu             sync.Mutex
-	conversationMu sync.Mutex
+	client          anthropic.Client
+	config          llmtypes.Config
+	state           tooltypes.State
+	messages        []anthropic.MessageParam
+	usage           *llmtypes.Usage
+	conversationID  string
+	summary         string
+	isPersisted     bool
+	store           ConversationStore
+	mu              sync.Mutex
+	conversationMu  sync.Mutex
+	useSubscription bool
+	toolResults     map[string]tooltypes.StructuredToolResult // Maps tool_call_id to structured result
 }
 
 func (t *AnthropicThread) Provider() string {
@@ -56,22 +64,80 @@ func (t *AnthropicThread) Provider() string {
 }
 
 // NewAnthropicThread creates a new thread with Anthropic's Claude API
-func NewAnthropicThread(config llmtypes.Config) *AnthropicThread {
+func NewAnthropicThread(config llmtypes.Config) (*AnthropicThread, error) {
 	// Apply defaults if not provided
 	if config.Model == "" {
-		config.Model = string(anthropic.ModelClaudeSonnet4_0)
+		config.Model = string(anthropic.ModelClaudeSonnet4_20250514)
 	}
 	if config.MaxTokens == 0 {
 		config.MaxTokens = 8192
 	}
 
-	return &AnthropicThread{
-		client:         anthropic.NewClient(),
-		config:         config,
-		conversationID: conversations.GenerateID(),
-		isPersisted:    false,
-		usage:          &llmtypes.Usage{}, // must be initialised to avoid nil pointer dereference
+	opts := []option.RequestOption{}
+	if isThinkingModel(anthropic.Model(config.Model)) {
+		opts = append(opts, option.WithHeaderAdd("anthropic-beta", "interleaved-thinking-2025-05-14"))
 	}
+
+	logger := logger.G(context.Background())
+	var client anthropic.Client
+	var useSubscription bool
+
+	// Determine authentication method based on access mode configuration
+	switch config.AnthropicAPIAccess {
+	case llmtypes.AnthropicAPIAccessAPIKey:
+		// Force API key usage
+		logger.Debug("using API key authentication (forced by configuration)")
+		client = anthropic.NewClient(opts...)
+		useSubscription = false
+
+	case llmtypes.AnthropicAPIAccessSubscription:
+		// Force subscription usage - no fallbacks allowed
+		antCredsExists, _ := auth.GetAnthropicCredentialsExists()
+		if !antCredsExists {
+			return nil, errors.New("subscription authentication forced but no credentials found")
+		}
+		accessToken, err := auth.AnthropicAccessToken(context.Background())
+		if err != nil {
+			return nil, errors.Wrap(err, "subscription authentication forced but failed to get access token")
+		}
+		logger.Debug("using anthropic access token (forced by configuration)")
+		opts = append(opts, auth.AnthropicHeader(accessToken)...)
+		client = anthropic.NewClient(opts...)
+		useSubscription = true
+
+	case llmtypes.AnthropicAPIAccessAuto:
+		fallthrough
+	default:
+		// Auto mode: try subscription first, then fall back to API key
+		antCredsExists, _ := auth.GetAnthropicCredentialsExists()
+		if antCredsExists {
+			accessToken, err := auth.AnthropicAccessToken(context.Background())
+			if err != nil {
+				logger.WithError(err).Error("failed to get anthropic access token, falling back to use API key")
+				client = anthropic.NewClient()
+				useSubscription = false
+			} else {
+				logger.Debug("using anthropic access token")
+				opts = append(opts, auth.AnthropicHeader(accessToken)...)
+				client = anthropic.NewClient(opts...)
+				useSubscription = true
+			}
+		} else {
+			logger.Debug("no anthropic credentials found, falling back to use API key")
+			client = anthropic.NewClient(opts...)
+			useSubscription = false
+		}
+	}
+
+	return &AnthropicThread{
+		client:          client,
+		config:          config,
+		useSubscription: useSubscription,
+		conversationID:  conversations.GenerateID(),
+		isPersisted:     false,
+		usage:           &llmtypes.Usage{}, // must be initialised to avoid nil pointer dereference
+		toolResults:     make(map[string]tooltypes.StructuredToolResult),
+	}, nil
 }
 
 // SetState sets the state for the thread
@@ -160,9 +226,9 @@ func (t *AnthropicThread) SendMessage(
 	model, maxTokens := t.getModelAndTokens(opt)
 	var systemPrompt string
 	if t.config.IsSubAgent {
-		systemPrompt = sysprompt.SubAgentPrompt(string(model))
+		systemPrompt = sysprompt.SubAgentPrompt(string(model), t.config)
 	} else {
-		systemPrompt = sysprompt.SystemPrompt(string(model))
+		systemPrompt = sysprompt.SystemPrompt(string(model), t.config)
 	}
 
 	// Main interaction loop for handling tool calls
@@ -196,6 +262,17 @@ OUTER:
 			if opt.PromptCache && turnCount > 0 && cacheEvery > 0 && turnCount%cacheEvery == 0 {
 				logger.G(ctx).WithField("turn_count", turnCount).WithField("cache_every", cacheEvery).Debug("caching messages")
 				t.cacheMessages()
+			}
+
+			// Check if auto-compact should be triggered before each exchange
+			if !opt.DisableAutoCompact && t.shouldAutoCompact(opt.CompactRatio) {
+				logger.G(ctx).WithField("context_utilization", float64(t.GetUsage().CurrentContextWindow)/float64(t.GetUsage().MaxContextWindow)).Info("triggering auto-compact")
+				err := t.CompactContext(ctx)
+				if err != nil {
+					logger.G(ctx).WithError(err).Error("failed to auto-compact context")
+				} else {
+					logger.G(ctx).Info("auto-compact completed successfully")
+				}
 			}
 
 			var exchangeOutput string
@@ -236,7 +313,7 @@ OUTER:
 	// Save conversation state after completing the interaction
 	if t.isPersisted && t.store != nil && !opt.NoSaveConversation {
 		saveCtx := context.Background() // use new context to avoid cancellation
-		t.SaveConversation(saveCtx, false)
+		t.SaveConversation(saveCtx, true)
 	}
 
 	if !t.config.IsSubAgent {
@@ -270,20 +347,24 @@ func (t *AnthropicThread) processMessageExchange(
 ) (string, bool, error) {
 	var finalOutput string
 
+	systemPromptBlocks := []anthropic.TextBlockParam{}
+	if t.useSubscription {
+		systemPromptBlocks = append(systemPromptBlocks, auth.AnthropicSystemPrompt()...)
+	}
+	systemPromptBlocks = append(systemPromptBlocks, anthropic.TextBlockParam{
+		Text: systemPrompt,
+		CacheControl: anthropic.CacheControlEphemeralParam{
+			Type: "ephemeral",
+		},
+	})
+
 	// Prepare message parameters
 	messageParams := anthropic.MessageNewParams{
 		MaxTokens: int64(maxTokens),
-		System: []anthropic.TextBlockParam{
-			{
-				Text: systemPrompt,
-				CacheControl: anthropic.CacheControlEphemeralParam{
-					Type: "ephemeral",
-				},
-			},
-		},
-		Messages: t.messages,
-		Model:    model,
-		Tools:    tools.ToAnthropicTools(t.tools(opt)),
+		System:    systemPromptBlocks,
+		Messages:  t.messages,
+		Model:     model,
+		Tools:     tools.ToAnthropicTools(t.tools(opt)),
 	}
 	if t.shouldUtiliseThinking(model) {
 		messageParams.Thinking = anthropic.ThinkingConfigParamUnion{
@@ -335,9 +416,17 @@ func (t *AnthropicThread) processMessageExchange(
 				attribute.String("tool_name", block.Name),
 			)
 
-			runToolCtx := t.WithSubAgent(ctx, handler)
+			runToolCtx := t.WithSubAgent(ctx, handler, opt.CompactRatio, opt.DisableAutoCompact)
 			output := tools.RunTool(runToolCtx, t.state, block.Name, string(variant.JSON.Input.Raw()))
-			handler.HandleToolResult(block.Name, output.UserFacing())
+
+			// Use CLI rendering for consistent output formatting
+			structuredResult := output.StructuredData()
+			registry := renderers.NewRendererRegistry()
+			renderedOutput := registry.Render(structuredResult)
+			handler.HandleToolResult(block.Name, renderedOutput)
+
+			// Store structured results
+			t.SetStructuredToolResult(block.ID, structuredResult)
 
 			// For tracing, add tool execution completion event
 			telemetry.AddEvent(ctx, "tool_execution_complete",
@@ -377,13 +466,31 @@ func (t *AnthropicThread) getModelAndTokens(opt llmtypes.MessageOpt) (anthropic.
 }
 
 func (t *AnthropicThread) shouldUtiliseThinking(model anthropic.Model) bool {
+	if !isThinkingModel(model) {
+		return false
+	}
 	if t.config.ThinkingBudgetTokens == 0 {
 		return false
 	}
-	if model != anthropic.ModelClaudeSonnet4_0 {
-		return false
-	}
 	return true
+}
+
+func isThinkingModel(model anthropic.Model) bool {
+	thinkingModels := []anthropic.Model{
+		// sonnet 4 models
+		anthropic.ModelClaudeSonnet4_0,
+		anthropic.ModelClaudeSonnet4_20250514,
+		// opus 4 models
+		anthropic.ModelClaudeOpus4_0,
+		anthropic.ModelClaude4Opus20250514,
+		// sonnet 3.7 models
+		anthropic.ModelClaude3_7Sonnet20250219,
+		anthropic.ModelClaude3_7SonnetLatest,
+		// opus 3 models
+		anthropic.ModelClaude_3_Opus_20240229,
+		anthropic.ModelClaude3OpusLatest,
+	}
+	return slices.Contains(thinkingModels, model)
 }
 
 // NewMessage sends a message to Anthropic with OTEL tracing
@@ -405,6 +512,17 @@ func (t *AnthropicThread) NewMessage(ctx context.Context, params anthropic.Messa
 	for i, sys := range params.System {
 		spanAttrs = append(spanAttrs, attribute.String(fmt.Sprintf("system.%d", i), sys.Text))
 	}
+
+	logFields := logrus.Fields{
+		"model":      string(params.Model),
+		"max_tokens": params.MaxTokens,
+	}
+	if t.shouldUtiliseThinking(params.Model) {
+		logFields["thinking"] = params.Thinking.OfEnabled.BudgetTokens > 0
+		logFields["budget_tokens"] = params.Thinking.OfEnabled.BudgetTokens
+	}
+	log := logger.G(ctx).WithFields(logFields)
+	log.Debug("new message")
 
 	// Add the last 10 messages (or fewer if there aren't 10) to the span attributes
 	spanAttrs = append(spanAttrs, t.getLastMessagesAttributes(params.Messages, 10)...)
@@ -438,6 +556,7 @@ func (t *AnthropicThread) NewMessage(ctx context.Context, params anthropic.Messa
 		}
 
 		if stream.Err() != nil {
+			logger.G(ctx).WithError(stream.Err()).Error("error streaming message from anthropic")
 			telemetry.RecordError(ctx, stream.Err())
 			span.SetStatus(codes.Error, stream.Err().Error())
 			return nil, stream.Err()
@@ -509,12 +628,27 @@ func (t *AnthropicThread) updateUsage(response *anthropic.Message, model anthrop
 
 	// Calculate costs based on model pricing
 	pricing := getModelPricing(model)
+	// var inputPricing, outputPricing, cacheCreationPricing, cacheReadPricing float64
+	// if !t.useSubscription {
+	// 	inputPricing = pricing.Input
+	// 	outputPricing = pricing.Output
+	// 	cacheCreationPricing = pricing.PromptCachingWrite
+	// 	cacheReadPricing = pricing.PromptCachingRead
+	// }
+
+	// showing the usage regardless of subscription
+	var (
+		inputPricing         = pricing.Input
+		outputPricing        = pricing.Output
+		cacheCreationPricing = pricing.PromptCachingWrite
+		cacheReadPricing     = pricing.PromptCachingRead
+	)
 
 	// Calculate individual costs
-	t.usage.InputCost += float64(response.Usage.InputTokens) * pricing.Input
-	t.usage.OutputCost += float64(response.Usage.OutputTokens) * pricing.Output
-	t.usage.CacheCreationCost += float64(response.Usage.CacheCreationInputTokens) * pricing.PromptCachingWrite
-	t.usage.CacheReadCost += float64(response.Usage.CacheReadInputTokens) * pricing.PromptCachingRead
+	t.usage.InputCost += float64(response.Usage.InputTokens) * inputPricing
+	t.usage.OutputCost += float64(response.Usage.OutputTokens) * outputPricing
+	t.usage.CacheCreationCost += float64(response.Usage.CacheCreationInputTokens) * cacheCreationPricing
+	t.usage.CacheReadCost += float64(response.Usage.CacheReadInputTokens) * cacheReadPricing
 
 	t.usage.CurrentContextWindow = int(response.Usage.InputTokens) + int(response.Usage.OutputTokens) + int(response.Usage.CacheCreationInputTokens) + int(response.Usage.CacheReadInputTokens)
 	t.usage.MaxContextWindow = pricing.ContextWindow
@@ -522,47 +656,159 @@ func (t *AnthropicThread) updateUsage(response *anthropic.Message, model anthrop
 func (t *AnthropicThread) NewSubAgent(ctx context.Context) llmtypes.Thread {
 	config := t.config
 	config.IsSubAgent = true
-	thread := NewAnthropicThread(config)
-	thread.isPersisted = false // subagent is not persisted
+
+	// Create subagent thread reusing the parent's client instead of creating a new one
+	thread := &AnthropicThread{
+		client:          t.client, // Reuse parent's client
+		config:          config,
+		useSubscription: t.useSubscription, // Reuse parent's subscription status
+		conversationID:  conversations.GenerateID(),
+		isPersisted:     false,   // subagent is not persisted
+		usage:           t.usage, // Share usage tracking with parent
+	}
+
 	thread.SetState(tools.NewBasicState(ctx, tools.WithSubAgentTools(), tools.WithExtraMCPTools(t.state.MCPTools())))
-	thread.usage = t.usage
 
 	return thread
 }
 
-func (t *AnthropicThread) WithSubAgent(ctx context.Context, handler llmtypes.MessageHandler) context.Context {
+func (t *AnthropicThread) WithSubAgent(ctx context.Context, handler llmtypes.MessageHandler, compactRatio float64, disableAutoCompact bool) context.Context {
 	subAgent := t.NewSubAgent(ctx)
 	ctx = context.WithValue(ctx, llmtypes.SubAgentConfig{}, llmtypes.SubAgentConfig{
-		Thread:         subAgent,
-		MessageHandler: handler,
+		Thread:             subAgent,
+		MessageHandler:     handler,
+		CompactRatio:       compactRatio,
+		DisableAutoCompact: disableAutoCompact,
 	})
 	return ctx
 }
 
-func (t *AnthropicThread) ShortSummary(ctx context.Context) string {
-	prompt := `Summarise the conversation in one sentence, less or equal than 12 words. Keep it short and concise.
-Treat the USER role as the first person (I), and the ASSISTANT role as the person you are talking to.
-`
-	handler := &llmtypes.StringCollectorHandler{
-		Silent: true,
+// getLastAssistantMessageText extracts text content from the most recent assistant message
+func (t *AnthropicThread) getLastAssistantMessageText() (string, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if len(t.messages) == 0 {
+		return "", errors.New("no messages found")
 	}
+
+	// Find the last assistant message
+	var messageText string
+	for i := len(t.messages) - 1; i >= 0; i-- {
+		msg := t.messages[i]
+		if msg.Role == anthropic.MessageParamRoleAssistant {
+			// Extract text from the assistant message content blocks
+			for _, block := range msg.Content {
+				if block.OfText != nil {
+					messageText += block.OfText.Text
+				}
+			}
+			break
+		}
+	}
+
+	if messageText == "" {
+		return "", errors.New("no text content found in assistant message")
+	}
+
+	return messageText, nil
+}
+
+func (t *AnthropicThread) ShortSummary(ctx context.Context) string {
+	// Temporarily disable persistence during summarization
 	t.isPersisted = false
 	defer func() {
 		t.isPersisted = true
 	}()
 
 	// Use a faster model for summarization as it's a simpler task
-	_, err := t.SendMessage(ctx, prompt, handler, llmtypes.MessageOpt{
+	_, err := t.SendMessage(ctx, prompts.ShortSummaryPrompt, &llmtypes.StringCollectorHandler{Silent: true}, llmtypes.MessageOpt{
 		UseWeakModel:       true,
 		PromptCache:        false, // maybe we should make it configurable, but there is likely no cache for weak model
 		NoToolUse:          true,
-		NoSaveConversation: true,
+		DisableAutoCompact: true, // Prevent auto-compact during summarization
+		// Note: Not using NoSaveConversation so we can access the assistant response
 	})
 	if err != nil {
 		return err.Error()
 	}
 
-	return handler.CollectedText()
+	// Get the summary from the last assistant message
+	summary, err := t.getLastAssistantMessageText()
+	if err != nil {
+		return err.Error()
+	}
+
+	return summary
+}
+
+// shouldAutoCompact checks if auto-compact should be triggered based on context window utilization
+func (t *AnthropicThread) shouldAutoCompact(compactRatio float64) bool {
+	if compactRatio <= 0.0 || compactRatio > 1.0 {
+		return false
+	}
+
+	usage := t.GetUsage()
+	if usage.MaxContextWindow == 0 {
+		return false
+	}
+
+	utilizationRatio := float64(usage.CurrentContextWindow) / float64(usage.MaxContextWindow)
+	return utilizationRatio >= compactRatio
+}
+
+// CompactContext performs comprehensive context compacting by creating a detailed summary
+func (t *AnthropicThread) CompactContext(ctx context.Context) error {
+	// Temporarily disable persistence during compacting
+	wasPersistedOriginal := t.isPersisted
+	t.isPersisted = false
+	defer func() {
+		t.isPersisted = wasPersistedOriginal
+	}()
+
+	// Use the strong model for comprehensive compacting (opposite of ShortSummary)
+	_, err := t.SendMessage(ctx, prompts.CompactPrompt, &llmtypes.StringCollectorHandler{Silent: true}, llmtypes.MessageOpt{
+		UseWeakModel:       false, // Use strong model for comprehensive compacting
+		PromptCache:        false, // Don't cache the compacting prompt
+		NoToolUse:          true,
+		DisableAutoCompact: true, // Prevent recursion
+		// Note: Not using NoSaveConversation so we can access the assistant response
+	})
+	if err != nil {
+		return errors.Wrap(err, "failed to generate compact summary")
+	}
+
+	// Get the compact summary from the last assistant message
+	compactSummary, err := t.getLastAssistantMessageText()
+	if err != nil {
+		return errors.Wrap(err, "failed to get compact summary from assistant message")
+	}
+
+	// Replace the conversation history with the compact summary
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	t.messages = []anthropic.MessageParam{
+		{
+			Role: anthropic.MessageParamRoleUser,
+			Content: []anthropic.ContentBlockParamUnion{
+				anthropic.NewTextBlock(compactSummary),
+			},
+		},
+	}
+
+	// Clear stale tool results - they reference tool calls that no longer exist
+	t.toolResults = make(map[string]tooltypes.StructuredToolResult)
+
+	// Get state reference while under mutex protection
+	state := t.state
+
+	// Clear file access tracking to start fresh with context retrieval
+	if state != nil {
+		state.SetFileLastAccess(make(map[string]time.Time))
+	}
+
+	return nil
 }
 
 // GetUsage returns the current token usage for the thread
@@ -593,16 +839,16 @@ func (t *AnthropicThread) GetMessages() ([]llmtypes.Message, error) {
 	if err != nil {
 		return nil, err
 	}
-	return ExtractMessages(b)
+	return ExtractMessages(b, t.GetStructuredToolResults())
 }
 
 // EnablePersistence enables conversation persistence for this thread
-func (t *AnthropicThread) EnablePersistence(enabled bool) {
+func (t *AnthropicThread) EnablePersistence(ctx context.Context, enabled bool) {
 	t.isPersisted = enabled
 
 	// Initialize the store if enabling persistence and it's not already initialized
 	if enabled && t.store == nil {
-		store, err := conversations.GetConversationStore()
+		store, err := conversations.GetConversationStore(ctx)
 		if err != nil {
 			// Log the error but continue without persistence
 			fmt.Printf("Error initializing conversation store: %v\n", err)
@@ -685,7 +931,7 @@ func (t *AnthropicThread) processImage(imagePath string) (*anthropic.ContentBloc
 func (t *AnthropicThread) processImageURL(url string) (*anthropic.ContentBlockParamUnion, error) {
 	// Validate URL format (HTTPS only)
 	if !strings.HasPrefix(url, "https://") {
-		return nil, fmt.Errorf("only HTTPS URLs are supported for security: %s", url)
+		return nil, errors.Errorf("only HTTPS URLs are supported for security: %s", url)
 	}
 
 	block := anthropic.NewImageBlock(anthropic.URLImageSourceParam{
@@ -699,28 +945,28 @@ func (t *AnthropicThread) processImageURL(url string) (*anthropic.ContentBlockPa
 func (t *AnthropicThread) processImageFile(filePath string) (*anthropic.ContentBlockParamUnion, error) {
 	// Check if file exists
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		return nil, fmt.Errorf("image file not found: %s", filePath)
+		return nil, errors.Errorf("image file not found: %s", filePath)
 	}
 
 	// Determine media type from file extension first
 	mediaType, err := getMediaTypeFromExtension(filepath.Ext(filePath))
 	if err != nil {
-		return nil, fmt.Errorf("unsupported image format: %s (supported: .jpg, .jpeg, .png, .gif, .webp)", filepath.Ext(filePath))
+		return nil, errors.Errorf("unsupported image format: %s (supported: .jpg, .jpeg, .png, .gif, .webp)", filepath.Ext(filePath))
 	}
 
 	// Check file size
 	fileInfo, err := os.Stat(filePath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get file info: %w", err)
+		return nil, errors.Wrap(err, "failed to get file info")
 	}
 	if fileInfo.Size() > MaxImageFileSize {
-		return nil, fmt.Errorf("image file too large: %d bytes (max: %d bytes)", fileInfo.Size(), MaxImageFileSize)
+		return nil, errors.Errorf("image file too large: %d bytes (max: %d bytes)", fileInfo.Size(), MaxImageFileSize)
 	}
 
 	// Read and encode the file
 	imageData, err := os.ReadFile(filePath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read image file: %w", err)
+		return nil, errors.Wrap(err, "failed to read image file")
 	}
 
 	// Encode to base64
@@ -746,6 +992,45 @@ func getMediaTypeFromExtension(ext string) (anthropic.Base64ImageSourceMediaType
 	case ".webp":
 		return anthropic.Base64ImageSourceMediaTypeImageWebP, nil
 	default:
-		return "", fmt.Errorf("unsupported format")
+		return "", errors.New("unsupported format")
+	}
+}
+
+// SetStructuredToolResult stores the structured result for a tool call
+func (t *AnthropicThread) SetStructuredToolResult(toolCallID string, result tooltypes.StructuredToolResult) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.toolResults == nil {
+		t.toolResults = make(map[string]tooltypes.StructuredToolResult)
+	}
+	t.toolResults[toolCallID] = result
+}
+
+// GetStructuredToolResults returns all structured tool results
+func (t *AnthropicThread) GetStructuredToolResults() map[string]tooltypes.StructuredToolResult {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.toolResults == nil {
+		return make(map[string]tooltypes.StructuredToolResult)
+	}
+	// Return a copy to avoid race conditions
+	result := make(map[string]tooltypes.StructuredToolResult)
+	for k, v := range t.toolResults {
+		result[k] = v
+	}
+	return result
+}
+
+// SetStructuredToolResults sets all structured tool results (for loading from conversation)
+func (t *AnthropicThread) SetStructuredToolResults(results map[string]tooltypes.StructuredToolResult) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if results == nil {
+		t.toolResults = make(map[string]tooltypes.StructuredToolResult)
+	} else {
+		t.toolResults = make(map[string]tooltypes.StructuredToolResult)
+		for k, v := range results {
+			t.toolResults[k] = v
+		}
 	}
 }

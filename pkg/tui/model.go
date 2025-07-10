@@ -29,7 +29,6 @@ type Model struct {
 	height             int
 	isProcessing       bool
 	spinnerIndex       int
-	showCommands       bool
 	windowSizeMsg      tea.WindowSizeMsg
 	statusMessage      string
 	senderStyle        lipgloss.Style
@@ -51,7 +50,7 @@ type Model struct {
 }
 
 // NewModel creates a new TUI model
-func NewModel(ctx context.Context, conversationID string, enablePersistence bool, mcpManager *tools.MCPManager, maxTurns int) Model {
+func NewModel(ctx context.Context, conversationID string, enablePersistence bool, mcpManager *tools.MCPManager, maxTurns int, enableBrowserTools bool, compactRatio float64, disableAutoCompact bool) Model {
 	ta := textarea.New()
 	ta.Placeholder = "Type your message..."
 	ta.Focus()
@@ -87,7 +86,7 @@ func NewModel(ctx context.Context, conversationID string, enablePersistence bool
 	statusMessage := "Ready"
 
 	// Create assistant client
-	assistant := NewAssistantClient(ctx, conversationID, enablePersistence, mcpManager, maxTurns)
+	assistant := NewAssistantClient(ctx, conversationID, enablePersistence, mcpManager, maxTurns, enableBrowserTools, compactRatio, disableAutoCompact)
 
 	ctx, cancel := context.WithCancel(ctx)
 
@@ -168,10 +167,11 @@ func (m *Model) updateViewportContent() {
 	for i, msg := range m.messages {
 		var renderedMsg string
 
-		if msg.Role == "" {
+		switch msg.Role {
+		case "":
 			// No prefix for system messages
 			renderedMsg = msg.Content
-		} else if msg.Role == "user" {
+		case "user":
 			// Create a styled user message
 			userPrefix := m.userStyle.Render("You")
 			messageText := lipgloss.NewStyle().
@@ -179,7 +179,7 @@ func (m *Model) updateViewportContent() {
 				Width(m.width - 15). // Ensure text wraps within viewport width
 				Render(msg.Content)
 			renderedMsg = userPrefix + " → " + messageText
-		} else {
+		default:
 			// Create a styled assistant message
 			assistantPrefix := m.assistantStyle.Render("Assistant")
 			messageText := lipgloss.NewStyle().
@@ -542,13 +542,6 @@ func (m Model) View() string {
 			dropdownContent += style.Render(cmd) + "\n"
 		}
 
-		// Create dropdown box with border
-		commandDropdown = lipgloss.NewStyle().
-			BorderStyle(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("205")).
-			Width(20).
-			Render(dropdownContent)
-
 		// Create dropdown box with border and navigation hint
 		hintText := "↑↓:Navigate Tab:Next Enter:Select"
 		hint := lipgloss.NewStyle().
@@ -650,9 +643,18 @@ func (m *Model) updateUsage() (usageText string, costText string) {
 	usage := m.assistant.GetUsage()
 
 	if usage.TotalTokens() > 0 {
-		usageText = fmt.Sprintf("Tokens: %d in / %d out / %d cw / %d cr / %d total | Ctx: %d / %d",
+		// Build context window display with percentage if available
+		var ctxDisplay string
+		if usage.MaxContextWindow > 0 {
+			percentage := float64(usage.CurrentContextWindow) / float64(usage.MaxContextWindow) * 100
+			ctxDisplay = fmt.Sprintf("Ctx: %d / %d (%.1f%%)", usage.CurrentContextWindow, usage.MaxContextWindow, percentage)
+		} else {
+			ctxDisplay = fmt.Sprintf("Ctx: %d / %d", usage.CurrentContextWindow, usage.MaxContextWindow)
+		}
+
+		usageText = fmt.Sprintf("Tokens: %d in / %d out / %d cw / %d cr / %d total | %s",
 			usage.InputTokens, usage.OutputTokens, usage.CacheCreationInputTokens, usage.CacheReadInputTokens, usage.TotalTokens(),
-			usage.CurrentContextWindow, usage.MaxContextWindow)
+			ctxDisplay)
 
 		// Add cost information if available
 		if usage.TotalCost() > 0 {

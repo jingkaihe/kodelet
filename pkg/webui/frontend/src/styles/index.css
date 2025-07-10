@@ -1,0 +1,336 @@
+/* Import subagent-specific styles */
+@import './subagent.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom styles for Kodelet Web UI */
+
+/* Line number styling for code blocks */
+.line-number {
+  @apply text-gray-400 select-none mr-2;
+}
+
+/* Syntax highlighting adjustments */
+pre code {
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+code[class*="language-"] {
+  text-shadow: none !important;
+}
+
+/* Custom scrollbar for webkit browsers */
+.overflow-x-auto::-webkit-scrollbar {
+  height: 8px;
+}
+
+.overflow-x-auto::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.overflow-x-auto::-webkit-scrollbar-thumb {
+  @apply bg-gray-600 rounded;
+}
+
+.overflow-x-auto::-webkit-scrollbar-thumb:hover {
+  @apply bg-gray-700;
+}
+
+/* Prose adjustments for markdown content */
+.prose {
+  max-width: none;
+}
+
+.prose p {
+  margin-bottom: 1rem;
+}
+
+.prose pre {
+  @apply bg-gray-800 text-gray-100 rounded-lg p-4 overflow-x-auto my-4;
+}
+
+.prose code {
+  @apply bg-gray-800 text-gray-100 px-2 py-1 rounded text-sm;
+}
+
+.prose pre code {
+  @apply bg-transparent p-0;
+}
+
+/* Enhanced prose styling for subagent and other technical content */
+.prose-enhanced {
+  max-width: none;
+  
+  /* Use DaisyUI CSS custom properties for theme compatibility */
+  --tw-prose-body: hsl(var(--bc));
+  --tw-prose-headings: hsl(var(--bc));
+  --tw-prose-links: hsl(var(--p));
+  --tw-prose-bold: hsl(var(--bc));
+  --tw-prose-code: hsl(var(--bc));
+  --tw-prose-pre-code: hsl(var(--bc));
+  --tw-prose-pre-bg: hsl(var(--b3));
+  --tw-prose-borders: hsl(var(--bc) / 0.2);
+  --tw-prose-quotes: hsl(var(--bc) / 0.8);
+  
+  /* Improved spacing and typography */
+  line-height: 1.6;
+}
+
+.prose-enhanced p {
+  margin-bottom: 1rem;
+}
+
+.prose-enhanced h1, .prose-enhanced h2, .prose-enhanced h3, .prose-enhanced h4, .prose-enhanced h5, .prose-enhanced h6 {
+  margin-top: 1.5rem;
+  margin-bottom: 0.75rem;
+  font-weight: 600;
+  color: hsl(var(--bc));
+}
+
+.prose-enhanced h1 { font-size: 1.5rem; }
+.prose-enhanced h2 { font-size: 1.375rem; }
+.prose-enhanced h3 { font-size: 1.25rem; }
+.prose-enhanced h4 { font-size: 1.125rem; }
+
+.prose-enhanced code {
+  background-color: hsl(var(--b3));
+  color: hsl(var(--bc));
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.25rem;
+  font-size: 0.875rem;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  border: 1px solid hsl(var(--bc) / 0.1);
+}
+
+.prose-enhanced pre {
+  background-color: hsl(var(--b3));
+  color: hsl(var(--bc));
+  border-radius: 0.5rem;
+  padding: 1rem;
+  margin: 1rem 0;
+  overflow-x: auto;
+  border: 1px solid hsl(var(--bc) / 0.1);
+}
+
+.prose-enhanced pre code {
+  background-color: transparent;
+  padding: 0;
+  border: none;
+  font-size: 0.875rem;
+}
+
+.prose-enhanced ul, .prose-enhanced ol {
+  margin: 1rem 0;
+  padding-left: 1.5rem;
+}
+
+.prose-enhanced li {
+  margin-bottom: 0.5rem;
+}
+
+.prose-enhanced blockquote {
+  border-left: 4px solid hsl(var(--p));
+  margin: 1rem 0;
+  padding-left: 1rem;
+  font-style: italic;
+  color: hsl(var(--bc) / 0.8);
+}
+
+.prose-enhanced table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+}
+
+.prose-enhanced th, .prose-enhanced td {
+  border: 1px solid hsl(var(--bc) / 0.2);
+  padding: 0.5rem;
+  text-align: left;
+}
+
+.prose-enhanced th {
+  background-color: hsl(var(--b2));
+  font-weight: 600;
+}
+
+.prose-enhanced a {
+  color: hsl(var(--p));
+  text-decoration: underline;
+}
+
+.prose-enhanced a:hover {
+  color: hsl(var(--pf));
+}
+
+.prose-enhanced hr {
+  border: none;
+  border-top: 1px solid hsl(var(--bc) / 0.2);
+  margin: 2rem 0;
+}
+
+/* Toast notifications positioning */
+.toast {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  z-index: 9999;
+  animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* Hover effects for interactive elements */
+.card:hover {
+  transform: translateY(-2px);
+  transition: all 0.2s ease-in-out;
+}
+
+/* Tool result specific styling */
+.tool-result-header {
+  @apply border-b border-gray-200 pb-2 mb-2;
+}
+
+/* Diff styling */
+.diff-line-added {
+  @apply bg-green-100 text-green-800;
+}
+
+.diff-line-removed {
+  @apply bg-red-100 text-red-800;
+}
+
+.diff-line-context {
+  @apply bg-gray-50 text-gray-600;
+}
+
+/* Dark mode adjustments */
+@media (prefers-color-scheme: dark) {
+  .prose pre {
+    @apply bg-gray-900;
+  }
+
+  .prose code {
+    @apply bg-gray-900;
+  }
+
+  .diff-line-added {
+    @apply bg-green-900 text-green-200;
+  }
+
+  .diff-line-removed {
+    @apply bg-red-900 text-red-200;
+  }
+
+  .diff-line-context {
+    @apply bg-gray-800 text-gray-400;
+  }
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .container {
+    @apply px-4;
+  }
+
+  .card-body {
+    @apply p-4;
+  }
+
+  .prose {
+    @apply text-sm;
+  }
+}
+
+/* Animation for loading states */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.fade-in {
+  animation: fadeIn 0.3s ease-in-out;
+}
+
+/* Copy button styling */
+.copy-button {
+  @apply absolute top-2 right-2 opacity-0 transition-opacity duration-200;
+}
+
+.card:hover .copy-button {
+  @apply opacity-100;
+}
+
+/* Collapsible content styling */
+.collapse-content {
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+/* Message styling */
+.message-user {
+  @apply bg-gradient-to-br from-blue-50 to-blue-100;
+}
+
+.message-assistant {
+  @apply bg-gradient-to-br from-gray-50 to-gray-100;
+}
+
+/* Tool call styling */
+.tool-call {
+  @apply border-l-4 border-blue-500 pl-4 my-2;
+}
+
+/* Accessibility improvements */
+.sr-only {
+  @apply absolute w-px h-px p-0 -m-px overflow-hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+/* Focus visible for keyboard navigation */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+[role="button"]:focus-visible {
+  @apply outline-2 outline-blue-500 outline-offset-2;
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .badge {
+    @apply border border-current;
+  }
+
+  .card {
+    @apply border-2 border-current;
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

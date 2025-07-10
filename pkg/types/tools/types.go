@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/invopop/jsonschema"
@@ -20,10 +21,10 @@ type Tool interface {
 
 type ToolResult interface {
 	AssistantFacing() string
-	UserFacing() string
 	IsError() bool
 	GetError() string  // xxx: to be removed
 	GetResult() string // xxx: to be removed
+	StructuredData() StructuredToolResult
 }
 
 type BaseToolResult struct {
@@ -48,10 +49,6 @@ func (t BaseToolResult) AssistantFacing() string {
 	return out
 }
 
-func (t BaseToolResult) UserFacing() string {
-	return t.AssistantFacing()
-}
-
 func (t BaseToolResult) IsError() bool {
 	return t.Error != ""
 }
@@ -62,6 +59,16 @@ func (t BaseToolResult) GetError() string {
 
 func (t BaseToolResult) GetResult() string {
 	return t.Result
+}
+
+func (t BaseToolResult) StructuredData() StructuredToolResult {
+	return StructuredToolResult{
+		ToolName:  "unknown", // This will be overridden by specific tool implementations
+		Success:   !t.IsError(),
+		Error:     t.Error,
+		Timestamp: time.Now(),
+		// Metadata will be nil for BaseToolResult
+	}
 }
 
 func StringifyToolResult(result, err string) string {
@@ -81,6 +88,22 @@ func StringifyToolResult(result, err string) string {
 	return out
 }
 
+type BackgroundProcess struct {
+	PID       int         `json:"pid"`
+	Command   string      `json:"command"`
+	LogPath   string      `json:"log_path"`
+	StartTime time.Time   `json:"start_time"`
+	Process   *os.Process `json:"-"` // Not serialized
+}
+
+type BrowserManager interface {
+	Start(ctx context.Context) error
+	Stop()
+	GetContext() context.Context
+	IsActive() bool
+	EnsureActive(ctx context.Context) error
+}
+
 type State interface {
 	SetFileLastAccessed(path string, lastAccessed time.Time) error
 	GetFileLastAccessed(path string) (time.Time, error)
@@ -92,4 +115,13 @@ type State interface {
 	BasicTools() []Tool
 	MCPTools() []Tool
 	Tools() []Tool
+	// Background process management
+	AddBackgroundProcess(process BackgroundProcess) error
+	GetBackgroundProcesses() []BackgroundProcess
+	RemoveBackgroundProcess(pid int) error
+	// Browser management
+	GetBrowserManager() BrowserManager
+	SetBrowserManager(manager BrowserManager)
+	// LLM configuration access
+	GetLLMConfig() interface{} // Returns llmtypes.Config but using interface{} to avoid circular import
 }

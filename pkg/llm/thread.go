@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/pkg/errors"
+
 	"github.com/jingkaihe/kodelet/pkg/llm/anthropic"
 	"github.com/jingkaihe/kodelet/pkg/llm/openai"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -15,12 +17,12 @@ import (
 )
 
 // NewThread creates a new thread based on the model specified in the config
-func NewThread(config llmtypes.Config) llmtypes.Thread {
+func NewThread(config llmtypes.Config) (llmtypes.Thread, error) {
 	// If a provider is explicitly specified, use that
 	if config.Provider != "" {
 		switch strings.ToLower(config.Provider) {
 		case "openai":
-			return openai.NewOpenAIThread(config)
+			return openai.NewOpenAIThread(config), nil
 		case "anthropic":
 			return anthropic.NewAnthropicThread(config)
 		default:
@@ -44,7 +46,7 @@ func NewThread(config llmtypes.Config) llmtypes.Thread {
 
 	// If the model starts with "gpt" or matches OpenAI's naming conventions, use OpenAI
 	case openai.IsOpenAIModel(modelName):
-		return openai.NewOpenAIThread(config)
+		return openai.NewOpenAIThread(config), nil
 
 	// Default to Anthropic for now
 	default:
@@ -54,11 +56,14 @@ func NewThread(config llmtypes.Config) llmtypes.Thread {
 
 // SendMessageAndGetTextWithUsage is a convenience method for one-shot queries that returns the response as a string and usage information
 func SendMessageAndGetTextWithUsage(ctx context.Context, state tooltypes.State, query string, config llmtypes.Config, silent bool, opt llmtypes.MessageOpt) (string, llmtypes.Usage) {
-	thread := NewThread(config)
+	thread, err := NewThread(config)
+	if err != nil {
+		return fmt.Sprintf("Error creating thread: %v", err), llmtypes.Usage{}
+	}
 	thread.SetState(state)
 
 	handler := &llmtypes.StringCollectorHandler{Silent: silent}
-	_, err := thread.SendMessage(ctx, query, handler, opt)
+	_, err = thread.SendMessage(ctx, query, handler, opt)
 	if err != nil {
 		return fmt.Sprintf("Error: %v", err), llmtypes.Usage{}
 	}
@@ -72,13 +77,13 @@ func SendMessageAndGetText(ctx context.Context, state tooltypes.State, query str
 }
 
 // ExtractMessages parses the raw messages from a conversation record
-func ExtractMessages(provider string, rawMessages []byte) ([]llmtypes.Message, error) {
+func ExtractMessages(provider string, rawMessages []byte, toolResults map[string]tooltypes.StructuredToolResult) ([]llmtypes.Message, error) {
 	switch provider {
 	case "anthropic":
-		return anthropic.ExtractMessages(rawMessages)
+		return anthropic.ExtractMessages(rawMessages, toolResults)
 	case "openai":
-		return openai.ExtractMessages(rawMessages)
+		return openai.ExtractMessages(rawMessages, toolResults)
 	default:
-		return nil, fmt.Errorf("unsupported provider: %s", provider)
+		return nil, errors.Errorf("unsupported provider: %s", provider)
 	}
 }

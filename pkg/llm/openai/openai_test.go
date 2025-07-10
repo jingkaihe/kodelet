@@ -5,8 +5,11 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/tools"
 	"github.com/jingkaihe/kodelet/pkg/types/llm"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/sashabaranov/go-openai"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -66,7 +69,7 @@ func TestExtractMessages(t *testing.T) {
 		{"role": "assistant", "content": "Of course! What kind of project are you working on?"}
 	]`
 
-	messages, err := ExtractMessages([]byte(messagesJSON))
+	messages, err := ExtractMessages([]byte(messagesJSON), nil)
 	assert.NoError(t, err)
 	assert.Len(t, messages, 4) // System message should be filtered out
 
@@ -87,14 +90,68 @@ func TestExtractMessages(t *testing.T) {
 		{"role": "assistant", "content": "The current time is 10:30 AM."}
 	]`
 
-	messages, err = ExtractMessages([]byte(messagesWithToolsJSON))
+	messages, err = ExtractMessages([]byte(messagesWithToolsJSON), nil)
 	assert.NoError(t, err)
-	assert.Len(t, messages, 4) // System message should be filtered out
+	assert.Len(t, messages, 4) // System message should be filtered out, tool message processed
 
 	// Check that tool calls are properly serialized
 	toolCallMessage := messages[1]
 	assert.Equal(t, "assistant", toolCallMessage.Role)
 	assert.Contains(t, toolCallMessage.Content, "get_time") // The content should contain the serialized tool call
+}
+
+func TestExtractMessagesWithMultipleToolResults(t *testing.T) {
+	// Test with multiple tool calls and results
+	messagesWithMultipleToolsJSON := `[
+		{"role": "system", "content": "You are a helpful AI assistant."},
+		{"role": "user", "content": "Get weather and time"},
+		{"role": "assistant", "content": "", "tool_calls": [
+			{"id": "call_time", "function": {"name": "get_time", "arguments": "{}"}},
+			{"id": "call_weather", "function": {"name": "get_weather", "arguments": "{\"location\": \"NYC\"}"}}
+		]},
+		{"role": "tool", "content": "Current time: 10:30 AM", "tool_call_id": "call_time"},
+		{"role": "tool", "content": "Weather: 72°F, sunny", "tool_call_id": "call_weather"},
+		{"role": "assistant", "content": "Here's the info you requested."}
+	]`
+
+	toolResults := map[string]tooltypes.StructuredToolResult{
+		"call_time": {
+			ToolName:  "get_time",
+			Success:   true,
+			Timestamp: time.Now(),
+			Metadata:  nil,
+		},
+		"call_weather": {
+			ToolName:  "get_weather",
+			Success:   true,
+			Timestamp: time.Now(),
+			Metadata:  nil,
+		},
+	}
+
+	messages, err := ExtractMessages([]byte(messagesWithMultipleToolsJSON), toolResults)
+	assert.NoError(t, err)
+	assert.Len(t, messages, 6) // user + 2 tool calls + 2 tool results + assistant final
+
+	// Check first tool call
+	firstToolCall := messages[1]
+	assert.Equal(t, "assistant", firstToolCall.Role)
+	assert.Contains(t, firstToolCall.Content, "get_time")
+
+	// Check second tool call
+	secondToolCall := messages[2]
+	assert.Equal(t, "assistant", secondToolCall.Role)
+	assert.Contains(t, secondToolCall.Content, "get_weather")
+
+	// Check first tool result uses CLI rendering
+	firstToolResult := messages[3]
+	assert.Equal(t, "assistant", firstToolResult.Role)
+	assert.Contains(t, firstToolResult.Content, "get_time")
+
+	// Check second tool result uses CLI rendering
+	secondToolResult := messages[4]
+	assert.Equal(t, "assistant", secondToolResult.Role)
+	assert.Contains(t, secondToolResult.Content, "get_weather")
 }
 
 // Image Processing Tests
@@ -486,4 +543,349 @@ func TestConstants(t *testing.T) {
 	// Test that constants are set to expected values
 	assert.Equal(t, 5*1024*1024, MaxImageFileSize)
 	assert.Equal(t, 10, MaxImageCount)
+}
+
+func TestShouldAutoCompactOpenAI(t *testing.T) {
+	tests := []struct {
+		name                 string
+		compactRatio         float64
+		currentContextWindow int
+		maxContextWindow     int
+		expectedResult       bool
+	}{
+		{
+			name:                 "should compact when ratio exceeded",
+			compactRatio:         0.8,
+			currentContextWindow: 80,
+			maxContextWindow:     100,
+			expectedResult:       true,
+		},
+		{
+			name:                 "should not compact when ratio not exceeded",
+			compactRatio:         0.8,
+			currentContextWindow: 70,
+			maxContextWindow:     100,
+			expectedResult:       false,
+		},
+		{
+			name:                 "should not compact when ratio is zero",
+			compactRatio:         0.0,
+			currentContextWindow: 90,
+			maxContextWindow:     100,
+			expectedResult:       false,
+		},
+		{
+			name:                 "should not compact when ratio is negative",
+			compactRatio:         -0.5,
+			currentContextWindow: 90,
+			maxContextWindow:     100,
+			expectedResult:       false,
+		},
+		{
+			name:                 "should not compact when ratio is greater than 1",
+			compactRatio:         1.5,
+			currentContextWindow: 90,
+			maxContextWindow:     100,
+			expectedResult:       false,
+		},
+		{
+			name:                 "should not compact when max context window is zero",
+			compactRatio:         0.8,
+			currentContextWindow: 80,
+			maxContextWindow:     0,
+			expectedResult:       false,
+		},
+		{
+			name:                 "should compact when ratio is exactly at threshold",
+			compactRatio:         0.8,
+			currentContextWindow: 80,
+			maxContextWindow:     100,
+			expectedResult:       true,
+		},
+		{
+			name:                 "should compact when ratio is 1.0 and context is full",
+			compactRatio:         1.0,
+			currentContextWindow: 100,
+			maxContextWindow:     100,
+			expectedResult:       true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			thread := NewOpenAIThread(llm.Config{})
+
+			// Mock the usage stats
+			thread.usage.CurrentContextWindow = test.currentContextWindow
+			thread.usage.MaxContextWindow = test.maxContextWindow
+
+			result := thread.shouldAutoCompact(test.compactRatio)
+			assert.Equal(t, test.expectedResult, result)
+		})
+	}
+}
+
+func TestGetLastAssistantMessageTextOpenAI(t *testing.T) {
+	tests := []struct {
+		name          string
+		messages      []openai.ChatCompletionMessage
+		expectedText  string
+		expectedError bool
+	}{
+		{
+			name: "single assistant message",
+			messages: []openai.ChatCompletionMessage{
+				{
+					Role:    openai.ChatMessageRoleAssistant,
+					Content: "Assistant response",
+				},
+			},
+			expectedText:  "Assistant response",
+			expectedError: false,
+		},
+		{
+			name: "multiple messages with assistant last",
+			messages: []openai.ChatCompletionMessage{
+				{
+					Role:    openai.ChatMessageRoleUser,
+					Content: "User message",
+				},
+				{
+					Role:    openai.ChatMessageRoleAssistant,
+					Content: "Assistant response",
+				},
+			},
+			expectedText:  "Assistant response",
+			expectedError: false,
+		},
+		{
+			name: "multiple assistant messages - should get last one",
+			messages: []openai.ChatCompletionMessage{
+				{
+					Role:    openai.ChatMessageRoleAssistant,
+					Content: "First assistant response",
+				},
+				{
+					Role:    openai.ChatMessageRoleUser,
+					Content: "User message",
+				},
+				{
+					Role:    openai.ChatMessageRoleAssistant,
+					Content: "Second assistant response",
+				},
+			},
+			expectedText:  "Second assistant response",
+			expectedError: false,
+		},
+		{
+			name:          "no messages",
+			messages:      []openai.ChatCompletionMessage{},
+			expectedText:  "",
+			expectedError: true,
+		},
+		{
+			name: "no assistant messages",
+			messages: []openai.ChatCompletionMessage{
+				{
+					Role:    openai.ChatMessageRoleUser,
+					Content: "User message",
+				},
+			},
+			expectedText:  "",
+			expectedError: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			thread := NewOpenAIThread(llm.Config{})
+
+			thread.messages = test.messages
+
+			result, err := thread.getLastAssistantMessageText()
+
+			if test.expectedError {
+				assert.Error(t, err)
+				assert.Equal(t, test.expectedText, result)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, test.expectedText, result)
+			}
+		})
+	}
+}
+
+func TestCompactContextIntegrationOpenAI(t *testing.T) {
+	// Skip if no API key is available
+	if os.Getenv("OPENAI_API_KEY") == "" {
+		t.Skip("OPENAI_API_KEY not set, skipping integration test")
+	}
+
+	t.Run("real compact context with API call", func(t *testing.T) {
+		thread := NewOpenAIThread(llm.Config{
+			Model:     "gpt-4o-mini", // Use faster/cheaper model for testing
+			MaxTokens: 1000,          // Limit tokens for test
+		})
+
+		// Set up some realistic conversation history
+		thread.AddUserMessage(context.Background(), "Help me understand JavaScript closures", []string{}...)
+		thread.messages = append(thread.messages, openai.ChatCompletionMessage{
+			Role:    openai.ChatMessageRoleAssistant,
+			Content: "Closures are a fundamental concept in JavaScript. A closure is created when a function is defined inside another function and has access to the outer function's variables.",
+		})
+		thread.AddUserMessage(context.Background(), "Can you give me a simple example?", []string{}...)
+		thread.messages = append(thread.messages, openai.ChatCompletionMessage{
+			Role:    openai.ChatMessageRoleAssistant,
+			Content: "Sure! Here's a simple example: function outer() { let x = 10; return function inner() { return x; }; } const closure = outer(); console.log(closure()); // outputs 10",
+		})
+
+		// Add some tool results to verify they get cleared
+		thread.toolResults = map[string]tooltypes.StructuredToolResult{
+			"tool1": {ToolName: "test_tool", Success: true, Timestamp: time.Now()},
+			"tool2": {ToolName: "another_tool", Success: false, Error: "test error", Timestamp: time.Now()},
+		}
+
+		// Record initial state
+		initialMessageCount := len(thread.messages)
+		initialToolResultCount := len(thread.toolResults)
+
+		// Verify we have multiple messages and tool results
+		assert.Greater(t, initialMessageCount, 2, "Should have multiple messages for meaningful test")
+		assert.Greater(t, initialToolResultCount, 0, "Should have tool results to verify clearing")
+
+		// Call the real CompactContext method
+		err := thread.CompactContext(context.Background())
+		require.NoError(t, err, "CompactContext should succeed with real API")
+
+		// Verify the compacting worked
+		assert.Equal(t, 1, len(thread.messages), "Should be compacted to single user message")
+		assert.Equal(t, 0, len(thread.toolResults), "Tool results should be cleared")
+
+		// Verify the single remaining message is a user message containing a summary
+		if len(thread.messages) > 0 {
+			assert.Equal(t, openai.ChatMessageRoleUser, thread.messages[0].Role)
+			assert.Greater(t, len(thread.messages[0].Content), 50, "Compact summary should be substantial")
+			assert.Contains(t, thread.messages[0].Content, "JavaScript", "Summary should mention the context discussed")
+		}
+	})
+
+	t.Run("compact context preserves thread functionality", func(t *testing.T) {
+		// Skip if no API key is available
+		if os.Getenv("OPENAI_API_KEY") == "" {
+			t.Skip("OPENAI_API_KEY not set, skipping integration test")
+		}
+
+		thread := NewOpenAIThread(llm.Config{
+			Model:     "gpt-4o-mini",
+			MaxTokens: 500,
+		})
+
+		// Add some conversation history
+		thread.AddUserMessage(context.Background(), "What is the capital of France?", []string{}...)
+		thread.messages = append(thread.messages, openai.ChatCompletionMessage{
+			Role:    openai.ChatMessageRoleAssistant,
+			Content: "The capital of France is Paris.",
+		})
+
+		// Compact the context
+		err := thread.CompactContext(context.Background())
+		require.NoError(t, err)
+
+		// Verify thread is still functional by sending a new message
+		thread.AddUserMessage(context.Background(), "What about Germany?", []string{}...)
+
+		// Should now have 2 messages: the compact summary + new user message
+		assert.Equal(t, 2, len(thread.messages))
+		assert.Equal(t, openai.ChatMessageRoleUser, thread.messages[1].Role)
+	})
+}
+
+func TestWithSubAgentOpenAI(t *testing.T) {
+	t.Run("WithSubAgent correctly passes compact configuration", func(t *testing.T) {
+		parentThread := NewOpenAIThread(llm.Config{})
+
+		// Set up a basic state for the parent thread using NewBasicState
+		parentThread.SetState(tools.NewBasicState(context.Background()))
+
+		// Test different compact configurations
+		testCases := []struct {
+			name               string
+			compactRatio       float64
+			disableAutoCompact bool
+		}{
+			{
+				name:               "Default configuration",
+				compactRatio:       0.0,
+				disableAutoCompact: false,
+			},
+			{
+				name:               "High compact ratio, enabled",
+				compactRatio:       0.9,
+				disableAutoCompact: false,
+			},
+			{
+				name:               "Auto-compact disabled",
+				compactRatio:       0.8,
+				disableAutoCompact: true,
+			},
+			{
+				name:               "Edge case: ratio 1.0",
+				compactRatio:       1.0,
+				disableAutoCompact: false,
+			},
+		}
+
+		for _, tc := range testCases {
+			t.Run(tc.name, func(t *testing.T) {
+				// Create a context with subagent configuration
+				ctx := parentThread.WithSubAgent(
+					context.Background(),
+					&llm.StringCollectorHandler{Silent: true},
+					tc.compactRatio,
+					tc.disableAutoCompact,
+				)
+
+				// Retrieve the configuration from the context
+				config, ok := ctx.Value(llm.SubAgentConfig{}).(llm.SubAgentConfig)
+				require.True(t, ok, "SubAgentConfig should be present in context")
+
+				// Verify the compact configuration is correctly passed
+				assert.Equal(t, tc.compactRatio, config.CompactRatio,
+					"CompactRatio should match the provided value")
+				assert.Equal(t, tc.disableAutoCompact, config.DisableAutoCompact,
+					"DisableAutoCompact should match the provided value")
+
+				// Verify the thread and handler are also correctly set
+				assert.NotNil(t, config.Thread, "Thread should be set")
+				assert.NotNil(t, config.MessageHandler, "MessageHandler should be set")
+			})
+		}
+	})
+
+	t.Run("WithSubAgent creates independent subagent", func(t *testing.T) {
+		parentThread := NewOpenAIThread(llm.Config{})
+
+		// Set up a basic state for the parent thread using NewBasicState
+		parentThread.SetState(tools.NewBasicState(context.Background()))
+
+		// Create subagent context
+		ctx := parentThread.WithSubAgent(
+			context.Background(),
+			&llm.StringCollectorHandler{Silent: true},
+			0.8,
+			false,
+		)
+
+		// Retrieve the configuration
+		config, ok := ctx.Value(llm.SubAgentConfig{}).(llm.SubAgentConfig)
+		require.True(t, ok, "SubAgentConfig should be present in context")
+
+		// Verify the subagent thread is independent
+		assert.NotSame(t, parentThread, config.Thread,
+			"Subagent thread should be different from parent thread")
+
+		// Verify the subagent has the correct configuration
+		assert.Equal(t, "openai", config.Thread.Provider(),
+			"Subagent should use the same provider as parent")
+	})
 }

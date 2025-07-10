@@ -1,10 +1,11 @@
 package sysprompt
 
 import (
-	"fmt"
 	"io/fs"
 	"strings"
 	"text/template"
+
+	"github.com/pkg/errors"
 )
 
 // Renderer provides prompt template rendering capabilities
@@ -25,12 +26,12 @@ func NewRenderer(fs fs.FS) *Renderer {
 func (r *Renderer) RenderPrompt(name string, ctx *PromptContext) (string, error) {
 	tmpl, err := r.getTemplate(name)
 	if err != nil {
-		return "", fmt.Errorf("failed to get template %s: %w", name, err)
+		return "", errors.Wrapf(err, "failed to get template %s", name)
 	}
 
 	var buf strings.Builder
 	if err := tmpl.Execute(&buf, ctx); err != nil {
-		return "", fmt.Errorf("failed to execute template %s: %w", name, err)
+		return "", errors.Wrapf(err, "failed to execute template %s", name)
 	}
 
 	return buf.String(), nil
@@ -70,13 +71,13 @@ func (r *Renderer) getTemplate(name string) (*template.Template, error) {
 	// First parse the main template
 	content, err := fs.ReadFile(r.templateFS, name)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read template file %s: %w", name, err)
+		return nil, errors.Wrapf(err, "failed to read template file %s", name)
 	}
 
 	// Parse the main template
 	tmpl, err = tmpl.Parse(string(content))
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse template %s: %w", name, err)
+		return nil, errors.Wrapf(err, "failed to parse template %s", name)
 	}
 
 	// Now parse all the component templates
@@ -98,7 +99,7 @@ func (r *Renderer) getTemplate(name string) (*template.Template, error) {
 	})
 
 	if err != nil {
-		return nil, fmt.Errorf("failed to load component templates: %w", err)
+		return nil, errors.Wrap(err, "failed to load component templates")
 	}
 
 	// Cache template

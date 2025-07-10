@@ -6,29 +6,39 @@ import (
 	"time"
 
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	"github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
 // ConversationRecord represents a persisted conversation with its messages and metadata
 type ConversationRecord struct {
-	ID             string                 `json:"id"`
-	RawMessages    json.RawMessage        `json:"rawMessages"` // Raw LLM provider messages
-	ModelType      string                 `json:"modelType"`   // e.g., "anthropic"
-	FileLastAccess map[string]time.Time   `json:"fileLastAccess"`
-	Usage          llmtypes.Usage         `json:"usage"`
-	Summary        string                 `json:"summary,omitempty"`
-	CreatedAt      time.Time              `json:"createdAt"`
-	UpdatedAt      time.Time              `json:"updatedAt"`
-	Metadata       map[string]interface{} `json:"metadata,omitempty"`
+	ID             string                                `json:"id"`
+	RawMessages    json.RawMessage                       `json:"rawMessages"` // Raw LLM provider messages
+	ModelType      string                                `json:"modelType"`   // e.g., "anthropic"
+	FileLastAccess map[string]time.Time                  `json:"fileLastAccess"`
+	Usage          llmtypes.Usage                        `json:"usage"`
+	Summary        string                                `json:"summary,omitempty"`
+	CreatedAt      time.Time                             `json:"createdAt"`
+	UpdatedAt      time.Time                             `json:"updatedAt"`
+	Metadata       map[string]interface{}                `json:"metadata,omitempty"`
+	ToolResults    map[string]tools.StructuredToolResult `json:"toolResults,omitempty"` // Maps tool_call_id to structured result
 }
 
 // ConversationSummary provides a brief overview of a conversation
 type ConversationSummary struct {
-	ID           string    `json:"id"`
-	MessageCount int       `json:"messageCount"`
-	FirstMessage string    `json:"firstMessage"`
-	Summary      string    `json:"summary,omitempty"`
-	CreatedAt    time.Time `json:"createdAt"`
-	UpdatedAt    time.Time `json:"updatedAt"`
+	ID           string         `json:"id"`
+	MessageCount int            `json:"messageCount"`
+	FirstMessage string         `json:"firstMessage"`
+	Summary      string         `json:"summary,omitempty"`
+	Usage        llmtypes.Usage `json:"usage"`
+	CreatedAt    time.Time      `json:"createdAt"`
+	UpdatedAt    time.Time      `json:"updatedAt"`
+}
+
+// QueryResult represents the result of a query operation
+type QueryResult struct {
+	ConversationSummaries []ConversationSummary `json:"conversationSummaries"`
+	Total                 int                   `json:"total"` // Represents the total number of the entries that match the query without pagination
+	QueryOptions
 }
 
 // NewConversationRecord creates a new conversation record with a unique ID
@@ -47,6 +57,7 @@ func NewConversationRecord(id string) ConversationRecord {
 		UpdatedAt:      now,
 		Metadata:       make(map[string]interface{}),
 		FileLastAccess: make(map[string]time.Time),
+		ToolResults:    make(map[string]tools.StructuredToolResult),
 	}
 }
 
@@ -89,7 +100,29 @@ func (cr *ConversationRecord) ToSummary() ConversationSummary {
 		MessageCount: messageCount,
 		FirstMessage: firstMessage,
 		Summary:      cr.Summary,
+		Usage:        cr.Usage,
 		CreatedAt:    cr.CreatedAt,
 		UpdatedAt:    cr.UpdatedAt,
 	}
+}
+
+// Interface methods for usage.ConversationSummary compatibility
+func (cs ConversationSummary) GetID() string {
+	return cs.ID
+}
+
+func (cs ConversationSummary) GetCreatedAt() time.Time {
+	return cs.CreatedAt
+}
+
+func (cs ConversationSummary) GetUpdatedAt() time.Time {
+	return cs.UpdatedAt
+}
+
+func (cs ConversationSummary) GetMessageCount() int {
+	return cs.MessageCount
+}
+
+func (cs ConversationSummary) GetUsage() llmtypes.Usage {
+	return cs.Usage
 }
