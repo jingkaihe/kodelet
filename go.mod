@@ -18,6 +18,7 @@ require (
 	github.com/gorilla/mux v1.8.1
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/invopop/jsonschema v0.13.0
+	github.com/jmoiron/sqlx v1.4.0
 	github.com/mark3labs/mcp-go v0.29.0
 	github.com/pkg/errors v0.9.1
 	github.com/sashabaranov/go-openai v1.40.0

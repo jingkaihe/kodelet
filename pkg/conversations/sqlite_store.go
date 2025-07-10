@@ -2,13 +2,12 @@ package conversations
 
 import (
 	"context"
-	"database/sql"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/pkg/errors"
 	_ "modernc.org/sqlite"
 )
@@ -16,7 +15,7 @@ import (
 // SQLiteConversationStore implements ConversationStore using SQLite database
 type SQLiteConversationStore struct {
 	dbPath string
-	db     *sql.DB
+	db     *sqlx.DB
 }
 
 // NewSQLiteConversationStore creates a new SQLite-based conversation store
@@ -28,7 +27,7 @@ func NewSQLiteConversationStore(ctx context.Context, dbPath string) (*SQLiteConv
 	}
 
 	// Open SQLite database
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := sqlx.Open("sqlite", dbPath)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to open database")
 	}
@@ -60,7 +59,7 @@ func NewSQLiteConversationStore(ctx context.Context, dbPath string) (*SQLiteConv
 }
 
 // configureDatabase sets up SQLite pragmas for optimal WAL mode performance
-func configureDatabase(ctx context.Context, db *sql.DB) error {
+func configureDatabase(ctx context.Context, db *sqlx.DB) error {
 	// Configure database for optimal WAL mode performance
 	pragmas := []string{
 		"PRAGMA journal_mode=WAL",
@@ -97,10 +96,10 @@ func configureDatabase(ctx context.Context, db *sql.DB) error {
 }
 
 // verifyDatabaseConfiguration checks if the database is properly configured
-func verifyDatabaseConfiguration(db *sql.DB) error {
+func verifyDatabaseConfiguration(db *sqlx.DB) error {
 	// Check journal mode
 	var journalMode string
-	if err := db.QueryRow("PRAGMA journal_mode").Scan(&journalMode); err != nil {
+	if err := db.Get(&journalMode, "PRAGMA journal_mode"); err != nil {
 		return errors.Wrap(err, "failed to query journal mode")
 	}
 	if strings.ToLower(journalMode) != "wal" {
@@ -109,7 +108,7 @@ func verifyDatabaseConfiguration(db *sql.DB) error {
 
 	// Check synchronous mode
 	var synchronous string
-	if err := db.QueryRow("PRAGMA synchronous").Scan(&synchronous); err != nil {
+	if err := db.Get(&synchronous, "PRAGMA synchronous"); err != nil {
 		return errors.Wrap(err, "failed to query synchronous mode")
 	}
 	if synchronous != "1" { // NORMAL = 1
@@ -118,7 +117,7 @@ func verifyDatabaseConfiguration(db *sql.DB) error {
 
 	// Check foreign keys
 	var foreignKeys string
-	if err := db.QueryRow("PRAGMA foreign_keys").Scan(&foreignKeys); err != nil {
+	if err := db.Get(&foreignKeys, "PRAGMA foreign_keys"); err != nil {
 		return errors.Wrap(err, "failed to query foreign keys")
 	}
 	if foreignKeys != "1" { // ON = 1
@@ -138,67 +137,72 @@ func (s *SQLiteConversationStore) initializeSchema() error {
 	return nil
 }
 
-// Save stores a conversation record using atomic transactions
+// Save stores a conversation record using atomic transactions with retry mechanism
 func (s *SQLiteConversationStore) Save(record ConversationRecord) error {
-	tx, err := s.db.Begin()
+	const maxRetries = 3
+	const baseDelay = 50 * time.Millisecond
+	
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		err := s.saveWithContext(record)
+		if err == nil {
+			return nil
+		}
+		
+		// Check if it's a busy error that we can retry
+		if strings.Contains(err.Error(), "database is locked") || strings.Contains(err.Error(), "SQLITE_BUSY") {
+			if attempt < maxRetries-1 {
+				// Exponential backoff with jitter
+				delay := time.Duration(attempt+1) * baseDelay
+				time.Sleep(delay)
+				continue
+			}
+		}
+		
+		return err
+	}
+	
+	return errors.New("save operation failed after retries")
+}
+
+// saveWithContext performs the actual save operation with context
+func (s *SQLiteConversationStore) saveWithContext(record ConversationRecord) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second) // Increased timeout
+	defer cancel()
+
+	tx, err := s.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return errors.Wrap(err, "failed to begin transaction")
 	}
 	defer tx.Rollback()
 
-	// Convert complex types to JSON for storage
-	rawMessagesStr := string(record.RawMessages)
-	
-	fileLastAccessJSON, err := json.Marshal(record.FileLastAccess)
-	if err != nil {
-		return errors.Wrap(err, "failed to marshal file last access")
-	}
-
-	usageJSON, err := json.Marshal(record.Usage)
-	if err != nil {
-		return errors.Wrap(err, "failed to marshal usage")
-	}
-
-	metadataJSON, err := json.Marshal(record.Metadata)
-	if err != nil {
-		return errors.Wrap(err, "failed to marshal metadata")
-	}
-
-	toolResultsJSON, err := json.Marshal(record.ToolResults)
-	if err != nil {
-		return errors.Wrap(err, "failed to marshal tool results")
-	}
+	// Convert to database models
+	dbRecord := FromConversationRecord(record)
+	dbSummary := FromConversationSummary(record.ToSummary())
 
 	// Insert or update conversation record
-	query := `
+	conversationQuery := `
 		INSERT OR REPLACE INTO conversations (
 			id, raw_messages, model_type, file_last_access, usage, 
 			summary, created_at, updated_at, metadata, tool_results
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (
+			:id, :raw_messages, :model_type, :file_last_access, :usage, 
+			:summary, :created_at, :updated_at, :metadata, :tool_results
+		)
 	`
-	_, err = tx.Exec(query, record.ID, rawMessagesStr, record.ModelType, string(fileLastAccessJSON), 
-		string(usageJSON), record.Summary, record.CreatedAt.Format(time.RFC3339Nano), 
-		record.UpdatedAt.Format(time.RFC3339Nano), string(metadataJSON), string(toolResultsJSON))
+	_, err = tx.NamedExecContext(ctx, conversationQuery, dbRecord)
 	if err != nil {
 		return errors.Wrap(err, "failed to save conversation record")
-	}
-
-	// Create summary for denormalized table
-	summary := record.ToSummary()
-	summaryUsageJSON, err := json.Marshal(summary.Usage)
-	if err != nil {
-		return errors.Wrap(err, "failed to marshal summary usage")
 	}
 
 	// Insert or update conversation summary
 	summaryQuery := `
 		INSERT OR REPLACE INTO conversation_summaries (
 			id, message_count, first_message, summary, usage, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?)
+		) VALUES (
+			:id, :message_count, :first_message, :summary, :usage, :created_at, :updated_at
+		)
 	`
-	_, err = tx.Exec(summaryQuery, summary.ID, summary.MessageCount, summary.FirstMessage, 
-		summary.Summary, string(summaryUsageJSON), summary.CreatedAt.Format(time.RFC3339Nano), 
-		summary.UpdatedAt.Format(time.RFC3339Nano))
+	_, err = tx.NamedExecContext(ctx, summaryQuery, dbSummary)
 	if err != nil {
 		return errors.Wrap(err, "failed to save conversation summary")
 	}
@@ -208,108 +212,40 @@ func (s *SQLiteConversationStore) Save(record ConversationRecord) error {
 
 // Load retrieves a conversation record by ID
 func (s *SQLiteConversationStore) Load(id string) (ConversationRecord, error) {
-	var record ConversationRecord
-	var rawMessages, fileLastAccess, usage, metadata, toolResults string
-	var createdAt, updatedAt string
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
-	query := `
-		SELECT id, raw_messages, model_type, file_last_access, usage, 
-			   summary, created_at, updated_at, metadata, tool_results
-		FROM conversations 
-		WHERE id = ?
-	`
-
-	row := s.db.QueryRow(query, id)
-	err := row.Scan(&record.ID, &rawMessages, &record.ModelType, &fileLastAccess, 
-		&usage, &record.Summary, &createdAt, &updatedAt, &metadata, &toolResults)
+	var dbRecord dbConversationRecord
+	
+	query := "SELECT * FROM conversations WHERE id = ?"
+	err := s.db.GetContext(ctx, &dbRecord, query, id)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return record, errors.Errorf("conversation not found: %s", id)
+		if err.Error() == "sql: no rows in result set" {
+			return ConversationRecord{}, errors.Errorf("conversation not found: %s", id)
 		}
-		return record, errors.Wrap(err, "failed to load conversation record")
+		return ConversationRecord{}, errors.Wrap(err, "failed to load conversation record")
 	}
 
-	// Parse JSON fields
-	record.RawMessages = json.RawMessage(rawMessages)
-
-	if err := json.Unmarshal([]byte(fileLastAccess), &record.FileLastAccess); err != nil {
-		return record, errors.Wrap(err, "failed to unmarshal file last access")
-	}
-
-	if err := json.Unmarshal([]byte(usage), &record.Usage); err != nil {
-		return record, errors.Wrap(err, "failed to unmarshal usage")
-	}
-
-	if err := json.Unmarshal([]byte(metadata), &record.Metadata); err != nil {
-		return record, errors.Wrap(err, "failed to unmarshal metadata")
-	}
-
-	if err := json.Unmarshal([]byte(toolResults), &record.ToolResults); err != nil {
-		return record, errors.Wrap(err, "failed to unmarshal tool results")
-	}
-
-	// Parse timestamps
-	record.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt)
-	if err != nil {
-		return record, errors.Wrap(err, "failed to parse created at timestamp")
-	}
-
-	record.UpdatedAt, err = time.Parse(time.RFC3339Nano, updatedAt)
-	if err != nil {
-		return record, errors.Wrap(err, "failed to parse updated at timestamp")
-	}
-
-	return record, nil
+	return dbRecord.ToConversationRecord(), nil
 }
 
 // List returns all conversation summaries sorted by creation time (newest first)
 func (s *SQLiteConversationStore) List() ([]ConversationSummary, error) {
-	var summaries []ConversationSummary
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
-	query := `
-		SELECT id, message_count, first_message, summary, usage, created_at, updated_at
-		FROM conversation_summaries
-		ORDER BY created_at DESC
-	`
-
-	rows, err := s.db.Query(query)
+	var dbSummaries []dbConversationSummary
+	
+	query := "SELECT * FROM conversation_summaries ORDER BY created_at DESC"
+	err := s.db.SelectContext(ctx, &dbSummaries, query)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to query conversation summaries")
 	}
-	defer rows.Close()
 
-	for rows.Next() {
-		var summary ConversationSummary
-		var usage, createdAt, updatedAt string
-
-		err := rows.Scan(&summary.ID, &summary.MessageCount, &summary.FirstMessage, 
-			&summary.Summary, &usage, &createdAt, &updatedAt)
-		if err != nil {
-			// Skip corrupted entries
-			continue
-		}
-
-		// Parse JSON usage
-		if err := json.Unmarshal([]byte(usage), &summary.Usage); err != nil {
-			continue
-		}
-
-		// Parse timestamps
-		summary.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt)
-		if err != nil {
-			continue
-		}
-
-		summary.UpdatedAt, err = time.Parse(time.RFC3339Nano, updatedAt)
-		if err != nil {
-			continue
-		}
-
-		summaries = append(summaries, summary)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, errors.Wrap(err, "error iterating rows")
+	// Convert to domain models
+	summaries := make([]ConversationSummary, len(dbSummaries))
+	for i, dbSummary := range dbSummaries {
+		summaries[i] = dbSummary.ToConversationSummary()
 	}
 
 	return summaries, nil
@@ -317,20 +253,22 @@ func (s *SQLiteConversationStore) List() ([]ConversationSummary, error) {
 
 // Delete removes a conversation and its associated data
 func (s *SQLiteConversationStore) Delete(id string) error {
-	tx, err := s.db.Begin()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	tx, err := s.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return errors.Wrap(err, "failed to begin transaction")
 	}
 	defer tx.Rollback()
 
-	// Delete from conversations table
-	_, err = tx.Exec("DELETE FROM conversations WHERE id = ?", id)
+	// Delete from both tables
+	_, err = tx.ExecContext(ctx, "DELETE FROM conversations WHERE id = ?", id)
 	if err != nil {
 		return errors.Wrap(err, "failed to delete conversation record")
 	}
 
-	// Delete from conversation_summaries table
-	_, err = tx.Exec("DELETE FROM conversation_summaries WHERE id = ?", id)
+	_, err = tx.ExecContext(ctx, "DELETE FROM conversation_summaries WHERE id = ?", id)
 	if err != nil {
 		return errors.Wrap(err, "failed to delete conversation summary")
 	}
@@ -340,39 +278,38 @@ func (s *SQLiteConversationStore) Delete(id string) error {
 
 // Query performs advanced queries with filtering, sorting, and pagination
 func (s *SQLiteConversationStore) Query(options QueryOptions) (QueryResult, error) {
-	var args []interface{}
-	var conditions []string
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
 
-	// Build WHERE clause
+	// Build WHERE conditions
+	conditions := []string{}
+	args := map[string]interface{}{}
+
 	if options.StartDate != nil {
-		conditions = append(conditions, "created_at >= ?")
-		args = append(args, options.StartDate.Format(time.RFC3339Nano))
+		conditions = append(conditions, "created_at >= :start_date")
+		args["start_date"] = *options.StartDate
 	}
 
 	if options.EndDate != nil {
-		conditions = append(conditions, "created_at <= ?")
-		args = append(args, options.EndDate.Format(time.RFC3339Nano))
+		conditions = append(conditions, "created_at <= :end_date")
+		args["end_date"] = *options.EndDate
 	}
 
 	if options.SearchTerm != "" {
 		searchPattern := "%" + strings.ToLower(options.SearchTerm) + "%"
-		conditions = append(conditions, "(LOWER(first_message) LIKE ? OR LOWER(summary) LIKE ?)")
-		args = append(args, searchPattern, searchPattern)
+		conditions = append(conditions, "(LOWER(first_message) LIKE :search_term OR LOWER(summary) LIKE :search_term)")
+		args["search_term"] = searchPattern
 	}
 
 	// Build ORDER BY clause
 	sortBy := "created_at"
-	if options.SortBy != "" {
-		switch options.SortBy {
-		case "createdAt":
-			sortBy = "created_at"
-		case "updatedAt":
-			sortBy = "updated_at"
-		case "messageCount":
-			sortBy = "message_count"
-		default:
-			sortBy = "created_at"
-		}
+	switch options.SortBy {
+	case "createdAt":
+		sortBy = "created_at"
+	case "updatedAt":
+		sortBy = "updated_at"
+	case "messageCount":
+		sortBy = "message_count"
 	}
 
 	sortOrder := "DESC"
@@ -380,84 +317,65 @@ func (s *SQLiteConversationStore) Query(options QueryOptions) (QueryResult, erro
 		sortOrder = "ASC"
 	}
 
-	// Build complete query
-	query := `
-		SELECT id, message_count, first_message, summary, usage, created_at, updated_at
-		FROM conversation_summaries
-	`
-
+	// Build main query
+	baseQuery := "SELECT * FROM conversation_summaries"
 	if len(conditions) > 0 {
-		query += " WHERE " + strings.Join(conditions, " AND ")
+		baseQuery += " WHERE " + strings.Join(conditions, " AND ")
 	}
+	baseQuery += " ORDER BY " + sortBy + " " + sortOrder
 
-	query += " ORDER BY " + sortBy + " " + sortOrder
-
-	// Add LIMIT and OFFSET if specified
+	// Add pagination
 	if options.Limit > 0 {
-		query += " LIMIT ?"
-		args = append(args, options.Limit)
+		baseQuery += " LIMIT :limit"
+		args["limit"] = options.Limit
 		
 		if options.Offset > 0 {
-			query += " OFFSET ?"
-			args = append(args, options.Offset)
+			baseQuery += " OFFSET :offset"
+			args["offset"] = options.Offset
 		}
 	}
 
-	// Execute query
-	rows, err := s.db.Query(query, args...)
+	// Execute main query
+	var dbSummaries []dbConversationSummary
+	finalQuery, argsSlice, err := sqlx.Named(baseQuery, args)
+	if err != nil {
+		return QueryResult{}, errors.Wrap(err, "failed to build named query")
+	}
+	
+	finalQuery = s.db.Rebind(finalQuery)
+	err = s.db.SelectContext(ctx, &dbSummaries, finalQuery, argsSlice...)
 	if err != nil {
 		return QueryResult{}, errors.Wrap(err, "failed to execute query")
 	}
-	defer rows.Close()
 
-	var summaries []ConversationSummary
-	for rows.Next() {
-		var summary ConversationSummary
-		var usage, createdAt, updatedAt string
-
-		err := rows.Scan(&summary.ID, &summary.MessageCount, &summary.FirstMessage, 
-			&summary.Summary, &usage, &createdAt, &updatedAt)
-		if err != nil {
-			continue
-		}
-
-		// Parse JSON usage
-		if err := json.Unmarshal([]byte(usage), &summary.Usage); err != nil {
-			continue
-		}
-
-		// Parse timestamps
-		summary.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt)
-		if err != nil {
-			continue
-		}
-
-		summary.UpdatedAt, err = time.Parse(time.RFC3339Nano, updatedAt)
-		if err != nil {
-			continue
-		}
-
-		summaries = append(summaries, summary)
+	// Convert to domain models
+	summaries := make([]ConversationSummary, len(dbSummaries))
+	for i, dbSummary := range dbSummaries {
+		summaries[i] = dbSummary.ToConversationSummary()
 	}
 
 	// Get total count (without pagination)
-	totalQuery := `SELECT COUNT(*) FROM conversation_summaries`
-	var totalArgs []interface{}
+	countQuery := "SELECT COUNT(*) FROM conversation_summaries"
 	if len(conditions) > 0 {
-		totalQuery += " WHERE " + strings.Join(conditions, " AND ")
-		// Calculate how many args are for conditions (exclude LIMIT/OFFSET)
-		conditionsArgsCount := len(args)
-		if options.Limit > 0 {
-			conditionsArgsCount--
-			if options.Offset > 0 {
-				conditionsArgsCount--
-			}
+		countQuery += " WHERE " + strings.Join(conditions, " AND ")
+	}
+
+	// Remove pagination args for count query
+	countArgs := make(map[string]interface{})
+	for k, v := range args {
+		if k != "limit" && k != "offset" {
+			countArgs[k] = v
 		}
-		totalArgs = args[:conditionsArgsCount]
 	}
 
 	var total int
-	err = s.db.QueryRow(totalQuery, totalArgs...).Scan(&total)
+	finalCountQuery, countArgsSlice, err := sqlx.Named(countQuery, countArgs)
+	if err != nil {
+		return QueryResult{}, errors.Wrap(err, "failed to build named count query")
+	}
+	
+	finalCountQuery = s.db.Rebind(finalCountQuery)
+	err = s.db.GetContext(ctx, &total, finalCountQuery, countArgsSlice...)
 	if err != nil {
 		return QueryResult{}, errors.Wrap(err, "failed to get total count")
 	}

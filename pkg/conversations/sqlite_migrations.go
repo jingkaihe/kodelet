@@ -1,6 +1,7 @@
 package conversations
 
 import (
+	"context"
 	"database/sql"
 	"time"
 
@@ -151,19 +152,22 @@ func (s *SQLiteConversationStore) getCurrentSchemaVersion() (int, error) {
 
 // applyMigration applies a single migration
 func (s *SQLiteConversationStore) applyMigration(migration Migration) error {
-	tx, err := s.db.Begin()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second) // Longer timeout for migrations
+	defer cancel()
+
+	tx, err := s.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return errors.Wrap(err, "failed to begin transaction")
 	}
 	defer tx.Rollback() // This will be a no-op if transaction is committed
 
-	// Apply migration
-	if err := migration.Up(tx); err != nil {
+	// Apply migration (note: migration.Up expects *sql.Tx, so we use tx.Tx)
+	if err := migration.Up(tx.Tx); err != nil {
 		return errors.Wrapf(err, "migration %d failed", migration.Version)
 	}
 
 	// Record migration in schema_version table
-	_, err = tx.Exec(`
+	_, err = tx.ExecContext(ctx, `
 		INSERT INTO schema_version (version, applied_at, description) 
 		VALUES (?, ?, ?)
 	`, migration.Version, time.Now().Format(time.RFC3339), migration.Description)
