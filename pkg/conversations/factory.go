@@ -21,13 +21,9 @@ func NewConversationStore(ctx context.Context, config *Config) (ConversationStor
 	}
 
 	switch config.StoreType {
-	case "json":
-		return NewJSONConversationStore(ctx, config.BasePath)
 	case "bbolt":
 		dbPath := filepath.Join(config.BasePath, "storage.db")
 		return NewBBoltConversationStore(ctx, dbPath)
-	case "sqlite":
-		return nil, errors.New("SQLite store not yet implemented")
 	default:
 		// Default to BBolt store for better performance
 		dbPath := filepath.Join(config.BasePath, "storage.db")
