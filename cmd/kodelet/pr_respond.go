@@ -105,10 +105,35 @@ func (c *PRRespondConfig) Validate() error {
 
 var prRespondCmd = &cobra.Command{
 	Use:   "pr-respond",
-	Short: "Respond to a specific PR comment with code changes",
-	Long: `Respond to a specific pull request comment by analyzing the feedback and implementing the requested changes.
+	Short: "Intelligently respond to PR comments based on their type",
+	Long: `Respond to pull request comments using appropriate workflows based on comment type:
 
-This command focuses on addressing a specific comment or review feedback within a PR. You must provide either --review-id for review comments or --issue-comment-id for issue comments. Currently supports GitHub PRs only.`,
+CODE CHANGE REQUESTS (bug fixes, feature updates, implementation feedback):
+- Analyzes the specific comment and requirements
+- Makes targeted code changes to the PR branch
+- Commits changes and pushes updates
+- Responds to the comment with a summary of changes
+
+QUESTION REQUESTS (clarifications, explanations, discussions):
+- Analyzes the codebase and PR context to understand the question
+- Researches relevant code and documentation
+- Provides comprehensive answers directly in comment replies
+- No code changes or commits made
+
+CODE REVIEW REQUESTS (code quality assessment, security analysis, best practices):
+- Conducts comprehensive code review of the PR changes
+- Analyzes for security vulnerabilities, performance issues, and best practices
+- Provides detailed feedback with specific recommendations
+- Organizes findings by category and severity
+- No code changes or commits made
+
+The command automatically detects comment type and applies the appropriate workflow.
+You must provide either --review-id for review comments or --issue-comment-id for issue comments.
+Currently supports GitHub PRs only.
+
+Examples:
+  kodelet pr-respond --pr-url https://github.com/user/repo/pull/123 --review-id 456789
+  kodelet pr-respond --pr-url https://github.com/user/repo/pull/123 --issue-comment-id 987654`,
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx, cancel := context.WithCancel(cmd.Context())
 		defer cancel()
@@ -184,7 +209,7 @@ This command focuses on addressing a specific comment or review feedback within 
 		logger.G(ctx).WithField("prompt_length", len(prompt)).Debug("Generated PR respond prompt")
 
 		// Send to LLM using existing architecture
-		presenter.Info("Analyzing specific PR comment and implementing response...")
+		presenter.Info("Analyzing PR comment and determining appropriate response workflow...")
 		presenter.Separator()
 
 		out, usage := llm.SendMessageAndGetTextWithUsage(ctx, s, prompt,
@@ -444,7 +469,7 @@ func fetchFocusedIssueComment(ctx context.Context, prURL, commentID string) (str
 	return focusedComment, relatedDiscussion, nil
 }
 
-const prRespondPromptTemplate = `Here is the information for pull request {{.PRURL}}:
+const prRespondPromptTemplate = `Please respond to the PR comment {{.PRURL}} following the appropriate workflow based on the comment type:
 
 <pr_basic_info>
 {{.PRData.BasicInfo}}
@@ -456,37 +481,151 @@ const prRespondPromptTemplate = `Here is the information for pull request {{.PRU
 
 {{.FocusedSections}}
 
-Please respond to the comment and discussions in <pr_focused_comment> section following the steps below:
+## Step 1: Analyze the Comment
+1. Review the focused comment in the <pr_focused_comment> section above
+2. Understand exactly what is being requested or asked
+3. Determine the comment type:
+   - **CODE CHANGE REQUEST**: Requires code modifications, bug fixes, implementation changes, refactoring, or testing updates
+   - **QUESTION REQUEST**: Asks for clarification, explanation, discussion, or information about the code/architecture
+   - **CODE REVIEW REQUEST**: Asks for code review, quality assessment, security analysis, or best practices evaluation
 
+## Step 2: Choose the Appropriate Workflow
+
+### For CODE CHANGE REQUESTS (Implementation/Fix/Update):
 1. Check the current state of the PR branch:
    - Use "git checkout <pr-branch>" to switch to the PR branch
    - Run "git pull origin <pr-branch>" to ensure latest changes
    - Check current working directory state
 
-2. Analyze the specific comment request:
-   - Review the PR comments section above to understand exactly what is being asked for
-   - Determine if it requires code changes, documentation, tests, or clarification
-   - Create a focused todo list for this specific request
-   - If the request is unclear, ask for clarification in your comment response, do not implement any changes
+2. Analyze the specific change request:
+   - Review the comment details to understand exactly what changes are needed
+   - Create a focused todo list for the specific request
+   - If the request is unclear, ask for clarification in your comment response, do not implement changes
 
-3. Implement the specific change:
+3. Implement the specific changes:
    - Focus only on what was requested in the comment
-   - Make precise, targeted changes
+   - Make precise, targeted changes to address the feedback
    - Avoid scope creep or unrelated improvements
+   - Make sure that you run 'git add ...' to add the changes to the staging area before you commit
 
-4. Respond appropriately:
-   - Make necessary code changes if requested
-	 - Make sure that you run 'git add ...' to add the changes to the staging area before you commit.
-   - Ask subagent to run "{{.BinPath}} commit --short --no-confirm" for changes
+4. Finalize the changes:
+   - Ask subagent to run "{{.BinPath}} commit --short --no-confirm" to commit changes
    - Push updates with "git push origin <pr-branch>"
-   - Reply to the specific comment with a summary of actions taken using "gh pr comment <pr-number> --body <summary>". Keep the summary short, concise and to the point.
+   - Reply to the specific comment with a summary of actions taken using "gh pr comment <pr-number> --body <summary>"
+
+### For QUESTION REQUESTS (Clarification/Discussion):
+1. Understand the question by analyzing the PR context and codebase
+2. Research relevant code, documentation, and architecture to gather information
+3. Provide a comprehensive answer that addresses the question directly
+4. Reply to the specific comment with your detailed explanation using "gh pr comment <pr-number> --body <answer>"
+5. Do NOT make code changes, commits, or push updates for questions
+
+### For CODE REVIEW REQUESTS (Review/Quality Assessment):
+1. Analyze the PR code changes and identify areas for review:
+   - Use subagent to examine the codebase and understand the changes
+   - Review the git diff to understand what was modified
+   - Check for code quality, security, performance, and best practices issues
+   
+2. Conduct comprehensive code review:
+   - Look for potential bugs, security vulnerabilities, or logic errors
+   - Check for adherence to coding standards and best practices
+   - Evaluate code maintainability, readability, and performance
+   - Assess test coverage and documentation quality
+   - Review for potential side effects or breaking changes
+   
+3. Create and submit proper GitHub review using MCP tools:
+   - First, create a pending review using 'mcp_create_pending_pull_request_review'
+   - Add specific review comments on code lines using 'mcp_add_pull_request_review_comment_to_pending_review'
+   - Organize findings by category (security, performance, style, etc.)
+   - Include specific line references and code examples where applicable
+   - Suggest concrete improvements or alternatives
+   - Highlight both positive aspects and areas for improvement
+   - Prioritize issues by severity (critical, major, minor)
+   - Finally, submit the review using 'mcp_submit_pending_pull_request_review' with event "COMMENT"
+   
+4. Do NOT make code changes, commits, or push updates for code reviews - only provide feedback through GitHub review system
+
+## Tool Usage Guidelines:
+
+### For CODE CHANGE REQUESTS - Use Standard Git/GitHub Tools:
+- 'git checkout', 'git pull', 'git add', 'git push' for branch management
+- '{{.BinPath}} commit --short --no-confirm' for committing changes
+- 'gh pr comment <pr-number> --body <summary>' for responding with change summary
+
+### For QUESTION REQUESTS - Use GitHub CLI:
+- 'gh pr comment <pr-number> --body <answer>' for providing explanations
+- Use subagent for codebase analysis and research
+
+### For CODE REVIEW REQUESTS - Use MCP Tools:
+- 'mcp_create_pending_pull_request_review' to start a review
+- 'mcp_add_pull_request_review_comment_to_pending_review' to add line-specific comments
+- 'mcp_submit_pending_pull_request_review' with event "COMMENT" to submit the review
+- Use subagent for comprehensive code analysis
+
+## Examples:
+
+**CODE CHANGE REQUEST Example:**
+<example>
+Comment: "The error handling in lines 45-50 should use our custom error wrapper instead of the standard library errors"
+This requires code modification -> Use CODE CHANGE workflow
+</example>
+
+**QUESTION REQUEST Example:**
+<example>
+Comment: "Can you explain why you chose this approach over using channels here?"
+This asks for explanation -> Use QUESTION workflow
+</example>
+
+**CODE CHANGE REQUEST Example:**
+<example>
+Comment: "Please add unit tests for the new authentication function and fix the linting issues"
+This requires code implementation -> Use CODE CHANGE workflow
+</example>
+
+**QUESTION REQUEST Example:**
+<example>
+Comment: "How does this change affect the existing database migrations? Will there be any backward compatibility issues?"
+This asks for clarification -> Use QUESTION workflow
+</example>
+
+**CODE CHANGE REQUEST Example:**
+<example>
+Comment: "The timeout value should be configurable through environment variables instead of hardcoded"
+This requires refactoring -> Use CODE CHANGE workflow
+</example>
+
+**QUESTION REQUEST Example:**
+<example>
+Comment: "What's the performance impact of this change compared to the previous implementation?"
+This asks for information -> Use QUESTION workflow
+</example>
+
+**CODE REVIEW REQUEST Example:**
+<example>
+Comment: "Can you please review this code for security vulnerabilities and best practices?"
+This asks for code review -> Use CODE REVIEW workflow
+</example>
+
+**CODE REVIEW REQUEST Example:**
+<example>
+Comment: "Please do a thorough code review of the authentication logic and check for potential issues"
+This asks for code review -> Use CODE REVIEW workflow
+</example>
+
+**CODE REVIEW REQUEST Example:**
+<example>
+Comment: "Could you review this implementation for performance bottlenecks and suggest optimizations?"
+This asks for code review -> Use CODE REVIEW workflow
+</example>
 
 IMPORTANT:
-- !!!CRITICAL!!!: You should never update user's git config under any circumstances.
-- Focus ONLY on the specific comment/request - don't address other feedback
-- Be precise and targeted in your response
-- If the request is unclear, ask for clarification in your comment response
-- Always acknowledge the specific comment you're responding to
+- !!!CRITICAL!!!: Never update user's git config under any circumstances
+- Use a checklist to keep track of progress
+- Focus ONLY on the specific comment - don't address other feedback in the same response
+- For questions, provide thorough, helpful explanations without making code changes
+- For code changes, follow the full development workflow with proper commits and responses
+- Always acknowledge the specific comment you're responding to in your reply
+- Keep comment responses concise but informative
 `
 
 func generatePRRespondPrompt(bin, prURL, commentID string, prData *PRData) string {

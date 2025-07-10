@@ -4,6 +4,10 @@
 
 ### refactor: replace `t.Error` with `t.Fatal` in tests with testify `assert` and `require`.
 
+### PR response improvements
+
+Now kodelet can not only make commit based on the PR comment, but also doing code review and answer questions based on user's comment.
+
 ## 0.0.59.alpha (2025-07-09)
 
 ### refactor: replace fmt.Errorf with pkg/errors for consistent error wrapping
