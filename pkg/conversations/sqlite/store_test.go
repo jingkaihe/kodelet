@@ -24,7 +24,7 @@ func TestSQLiteConversationStore_BasicOperations(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "test_conversations.db")
 
 	// Create store
-	store, err := NewSQLiteConversationStore(ctx, dbPath)
+	store, err := NewStore(ctx, dbPath)
 	require.NoError(t, err)
 	defer store.Close()
 
@@ -103,7 +103,7 @@ func TestSQLiteConversationStore_Query(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "test_conversations.db")
 
 	// Create store
-	store, err := NewSQLiteConversationStore(ctx, dbPath)
+	store, err := NewStore(ctx, dbPath)
 	require.NoError(t, err)
 	defer store.Close()
 
@@ -222,7 +222,7 @@ func TestSQLiteConversationStore_DefaultSorting(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "test_default_sorting.db")
 
 	// Create store
-	store, err := NewSQLiteConversationStore(ctx, dbPath)
+	store, err := NewStore(ctx, dbPath)
 	require.NoError(t, err)
 	defer store.Close()
 
@@ -409,7 +409,7 @@ func TestSQLiteConversationStore_SchemaValidation(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "test_conversations.db")
 
 	// Create store
-	store, err := NewSQLiteConversationStore(ctx, dbPath)
+	store, err := NewStore(ctx, dbPath)
 	require.NoError(t, err)
 	defer store.Close()
 
@@ -431,7 +431,7 @@ func TestSQLiteConversationStore_Migrations(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "test_conversations.db")
 
 	// Create store - this should run migrations
-	store, err := NewSQLiteConversationStore(ctx, dbPath)
+	store, err := NewStore(ctx, dbPath)
 	require.NoError(t, err)
 	defer store.Close()
 
@@ -462,7 +462,7 @@ func TestSQLiteConversationStore_WALMode(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "test_wal.db")
 
 	// Create store
-	store, err := NewSQLiteConversationStore(ctx, dbPath)
+	store, err := NewStore(ctx, dbPath)
 	require.NoError(t, err)
 	defer store.Close()
 
@@ -524,7 +524,7 @@ func TestSQLiteConversationStore_DatabaseIntegration(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "test_integration.db")
 
 	// Create store
-	store, err := NewSQLiteConversationStore(ctx, dbPath)
+	store, err := NewStore(ctx, dbPath)
 	require.NoError(t, err)
 	defer store.Close()
 
@@ -653,7 +653,7 @@ func TestSQLiteConversationStore_NullHandling(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "test_null.db")
 
 	// Create store
-	store, err := NewSQLiteConversationStore(ctx, dbPath)
+	store, err := NewStore(ctx, dbPath)
 	require.NoError(t, err)
 	defer store.Close()
 
@@ -699,7 +699,7 @@ func TestSQLiteConversationStore_ConcurrentAccess(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "test_concurrent.db")
 
 	// Create store
-	store, err := NewSQLiteConversationStore(ctx, dbPath)
+	store, err := NewStore(ctx, dbPath)
 	require.NoError(t, err)
 	defer store.Close()
 
@@ -813,7 +813,7 @@ func TestSQLiteConversationStore_DirectDatabaseAccess(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "test_direct.db")
 
 	// Create store
-	store, err := NewSQLiteConversationStore(ctx, dbPath)
+	store, err := NewStore(ctx, dbPath)
 	require.NoError(t, err)
 	defer store.Close()
 
@@ -902,7 +902,7 @@ func TestSQLiteConversationStore_TimestampBehavior(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "test_timestamps.db")
 
 	// Create store
-	store, err := NewSQLiteConversationStore(ctx, dbPath)
+	store, err := NewStore(ctx, dbPath)
 	require.NoError(t, err)
 	defer store.Close()
 
@@ -1005,7 +1005,7 @@ func TestSQLiteConversationStore_ErrorScenarios(t *testing.T) {
 
 	// Test with invalid database path
 	t.Run("invalid database path", func(t *testing.T) {
-		_, err := NewSQLiteConversationStore(ctx, "/invalid/path/db.sqlite")
+		_, err := NewStore(ctx, "/invalid/path/db.sqlite")
 		assert.Error(t, err)
 	})
 
@@ -1013,7 +1013,7 @@ func TestSQLiteConversationStore_ErrorScenarios(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test_errors.db")
 
-	store, err := NewSQLiteConversationStore(ctx, dbPath)
+	store, err := NewStore(ctx, dbPath)
 	require.NoError(t, err)
 	defer store.Close()
 
@@ -1029,7 +1029,7 @@ func TestSQLiteConversationStore_ErrorScenarios(t *testing.T) {
 		tmpDir2 := t.TempDir()
 		dbPath2 := filepath.Join(tmpDir2, "test_closed.db")
 
-		store2, err := NewSQLiteConversationStore(ctx, dbPath2)
+		store2, err := NewStore(ctx, dbPath2)
 		require.NoError(t, err)
 
 		// Close the store
