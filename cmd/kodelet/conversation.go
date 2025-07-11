@@ -43,7 +43,7 @@ func NewConversationListConfig() *ConversationListConfig {
 		Search:     "",
 		Limit:      0,
 		Offset:     0,
-		SortBy:     "updated",
+		SortBy:     "updated_at",
 		SortOrder:  "desc",
 		JSONOutput: false,
 	}
@@ -202,7 +202,7 @@ func init() {
 	conversationListCmd.Flags().String("search", listDefaults.Search, "Search term to filter conversations")
 	conversationListCmd.Flags().Int("limit", listDefaults.Limit, "Maximum number of conversations to display")
 	conversationListCmd.Flags().Int("offset", listDefaults.Offset, "Offset for pagination")
-	conversationListCmd.Flags().String("sort-by", listDefaults.SortBy, "Field to sort by: updated, created, or messages")
+	conversationListCmd.Flags().String("sort-by", listDefaults.SortBy, "Field to sort by: updated_at, created_at, or messages")
 	conversationListCmd.Flags().String("sort-order", listDefaults.SortOrder, "Sort order: asc (ascending) or desc (descending)")
 	conversationListCmd.Flags().Bool("json", listDefaults.JSONOutput, "Output in JSON format")
 

@@ -14,14 +14,14 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/types/conversations"
 )
 
-// SQLiteConversationStore implements ConversationStore using SQLite database
-type SQLiteConversationStore struct {
+// Store implements ConversationStore using SQLite database
+type Store struct {
 	dbPath string
 	db     *sqlx.DB
 }
 
-// NewSQLiteConversationStore creates a new SQLite-based conversation store
-func NewSQLiteConversationStore(ctx context.Context, dbPath string) (*SQLiteConversationStore, error) {
+// NewStore creates a new SQLite-based conversation store
+func NewStore(ctx context.Context, dbPath string) (*Store, error) {
 	// Create directory if needed
 	dir := filepath.Dir(dbPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -46,7 +46,7 @@ func NewSQLiteConversationStore(ctx context.Context, dbPath string) (*SQLiteConv
 		return nil, errors.Wrap(err, "failed to configure database")
 	}
 
-	store := &SQLiteConversationStore{
+	store := &Store{
 		dbPath: dbPath,
 		db:     db,
 	}
@@ -127,7 +127,7 @@ func verifyDatabaseConfiguration(db *sqlx.DB) error {
 }
 
 // initializeSchema creates the database schema and runs migrations
-func (s *SQLiteConversationStore) initializeSchema() error {
+func (s *Store) initializeSchema() error {
 	// Run migrations
 	if err := s.runMigrations(); err != nil {
 		return errors.Wrap(err, "failed to run migrations")
@@ -136,7 +136,7 @@ func (s *SQLiteConversationStore) initializeSchema() error {
 	return nil
 }
 
-func (s *SQLiteConversationStore) Save(ctx context.Context, record conversations.ConversationRecord) error {
+func (s *Store) Save(ctx context.Context, record conversations.ConversationRecord) error {
 
 	tx, err := s.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -198,7 +198,7 @@ func (s *SQLiteConversationStore) Save(ctx context.Context, record conversations
 }
 
 // Load retrieves a conversation record by ID
-func (s *SQLiteConversationStore) Load(ctx context.Context, id string) (conversations.ConversationRecord, error) {
+func (s *Store) Load(ctx context.Context, id string) (conversations.ConversationRecord, error) {
 
 	var dbRecord dbConversationRecord
 
@@ -214,27 +214,8 @@ func (s *SQLiteConversationStore) Load(ctx context.Context, id string) (conversa
 	return dbRecord.ToConversationRecord(), nil
 }
 
-// List returns all conversation summaries sorted by creation time (newest first)
-func (s *SQLiteConversationStore) List(ctx context.Context) ([]conversations.ConversationSummary, error) {
-	var dbSummaries []dbConversationSummary
-
-	query := "SELECT * FROM conversation_summaries ORDER BY created_at DESC"
-	err := s.db.SelectContext(ctx, &dbSummaries, query)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to query conversation summaries")
-	}
-
-	// Convert to domain models
-	summaries := make([]conversations.ConversationSummary, len(dbSummaries))
-	for i, dbSummary := range dbSummaries {
-		summaries[i] = dbSummary.ToConversationSummary()
-	}
-
-	return summaries, nil
-}
-
 // Delete removes a conversation and its associated data
-func (s *SQLiteConversationStore) Delete(ctx context.Context, id string) error {
+func (s *Store) Delete(ctx context.Context, id string) error {
 
 	tx, err := s.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -257,7 +238,7 @@ func (s *SQLiteConversationStore) Delete(ctx context.Context, id string) error {
 }
 
 // Query performs advanced queries with filtering, sorting, and pagination
-func (s *SQLiteConversationStore) Query(ctx context.Context, options conversations.QueryOptions) (conversations.QueryResult, error) {
+func (s *Store) Query(ctx context.Context, options conversations.QueryOptions) (conversations.QueryResult, error) {
 	// Build WHERE conditions
 	conditions := []string{}
 	args := map[string]interface{}{}
@@ -279,7 +260,7 @@ func (s *SQLiteConversationStore) Query(ctx context.Context, options conversatio
 	}
 
 	// Build ORDER BY clause
-	sortBy := "created_at"
+	sortBy := "updated_at"
 	switch options.SortBy {
 	case "createdAt":
 		sortBy = "created_at"
@@ -365,7 +346,7 @@ func (s *SQLiteConversationStore) Query(ctx context.Context, options conversatio
 }
 
 // Close closes the database connection
-func (s *SQLiteConversationStore) Close() error {
+func (s *Store) Close() error {
 	if s.db != nil {
 		return s.db.Close()
 	}

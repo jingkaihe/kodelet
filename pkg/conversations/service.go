@@ -3,7 +3,6 @@ package conversations
 import (
 	"context"
 	"encoding/json"
-	"strings"
 	"time"
 
 	"github.com/pkg/errors"
@@ -30,8 +29,6 @@ type ConversationServiceInterface interface {
 	GetConversation(ctx context.Context, id string) (*GetConversationResponse, error)
 	GetToolResult(ctx context.Context, conversationID, toolCallID string) (*GetToolResultResponse, error)
 	DeleteConversation(ctx context.Context, id string) error
-	ResolveConversationID(ctx context.Context, id string) (string, error)
-	GetConversationStatistics(ctx context.Context) (*ConversationStatistics, error)
 	Close() error
 }
 
@@ -240,82 +237,6 @@ func (s *ConversationService) DeleteConversation(ctx context.Context, id string)
 
 	logger.G(ctx).WithField("id", id).Info("Deleted conversation")
 	return nil
-}
-
-// ResolveConversationID resolves a conversation ID, supporting both full and short IDs
-func (s *ConversationService) ResolveConversationID(ctx context.Context, id string) (string, error) {
-	logger.G(ctx).WithField("id", id).Debug("Resolving conversation ID")
-
-	// If it's already a full ID (UUID format), return as-is
-	if len(id) == 36 && strings.Count(id, "-") == 4 {
-		return id, nil
-	}
-
-	// For short IDs, we need to search through conversations
-	summaries, err := s.store.List(ctx)
-	if err != nil {
-		return "", errors.Wrap(err, "failed to list conversations")
-	}
-
-	// Find conversations that start with the short ID
-	var matches []string
-	for _, summary := range summaries {
-		if strings.HasPrefix(summary.ID, id) {
-			matches = append(matches, summary.ID)
-		}
-	}
-
-	if len(matches) == 0 {
-		return "", errors.Errorf("no conversation found with ID starting with '%s'", id)
-	}
-
-	if len(matches) > 1 {
-		return "", errors.Errorf("multiple conversations found with ID starting with '%s': %v", id, matches)
-	}
-
-	resolvedID := matches[0]
-	logger.G(ctx).WithField("originalID", id).WithField("resolvedID", resolvedID).Debug("Resolved conversation ID")
-	return resolvedID, nil
-}
-
-// GetConversationStatistics returns statistics about conversations
-func (s *ConversationService) GetConversationStatistics(ctx context.Context) (*ConversationStatistics, error) {
-	logger.G(ctx).Debug("Getting conversation statistics")
-
-	summaries, err := s.store.List(ctx)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to list conversations")
-	}
-
-	if len(summaries) == 0 {
-		stats := &ConversationStatistics{
-			TotalConversations: 0,
-			TotalMessages:      0,
-		}
-		return stats, nil
-	}
-
-	// Calculate usage statistics directly from summaries
-	usageStats := usage.CalculateConversationUsageStats(toUsageSummaries(summaries))
-
-	// Convert to ConversationStatistics
-	stats := &ConversationStatistics{
-		TotalConversations: usageStats.TotalConversations,
-		TotalMessages:      usageStats.TotalMessages,
-		TotalTokens:        usageStats.TotalTokens,
-		TotalCost:          usageStats.TotalCost,
-		InputTokens:        usageStats.InputTokens,
-		OutputTokens:       usageStats.OutputTokens,
-		CacheReadTokens:    usageStats.CacheReadTokens,
-		CacheWriteTokens:   usageStats.CacheWriteTokens,
-		InputCost:          usageStats.InputCost,
-		OutputCost:         usageStats.OutputCost,
-		CacheReadCost:      usageStats.CacheReadCost,
-		CacheWriteCost:     usageStats.CacheWriteCost,
-	}
-
-	logger.G(ctx).WithField("stats", stats).Debug("Retrieved conversation statistics")
-	return stats, nil
 }
 
 // ConversationStatistics represents conversation statistics

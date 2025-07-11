@@ -22,9 +22,7 @@ type mockConversationService struct {
 	listFunc    func(ctx context.Context, req *conversations.ListConversationsRequest) (*conversations.ListConversationsResponse, error)
 	getFunc     func(ctx context.Context, id string) (*conversations.GetConversationResponse, error)
 	deleteFunc  func(ctx context.Context, id string) error
-	resolveFunc func(ctx context.Context, id string) (string, error)
 	getToolFunc func(ctx context.Context, conversationID, toolCallID string) (*conversations.GetToolResultResponse, error)
-	statsFunc   func(ctx context.Context) (*conversations.ConversationStatistics, error)
 	closeFunc   func() error
 }
 
@@ -49,25 +47,13 @@ func (m *mockConversationService) DeleteConversation(ctx context.Context, id str
 	return nil
 }
 
-func (m *mockConversationService) ResolveConversationID(ctx context.Context, id string) (string, error) {
-	if m.resolveFunc != nil {
-		return m.resolveFunc(ctx, id)
-	}
-	return id, nil
-}
+
 
 func (m *mockConversationService) GetToolResult(ctx context.Context, conversationID, toolCallID string) (*conversations.GetToolResultResponse, error) {
 	if m.getToolFunc != nil {
 		return m.getToolFunc(ctx, conversationID, toolCallID)
 	}
 	return &conversations.GetToolResultResponse{}, nil
-}
-
-func (m *mockConversationService) GetConversationStatistics(ctx context.Context) (*conversations.ConversationStatistics, error) {
-	if m.statsFunc != nil {
-		return m.statsFunc(ctx)
-	}
-	return &conversations.ConversationStatistics{}, nil
 }
 
 func (m *mockConversationService) Close() error {
@@ -165,19 +151,16 @@ func TestServer_handleListConversations(t *testing.T) {
 func TestServer_handleGetConversation(t *testing.T) {
 	conversationID := "test-id-123"
 	mockService := &mockConversationService{
-		resolveFunc: func(ctx context.Context, id string) (string, error) {
-			if id == conversationID {
-				return conversationID, nil
-			}
-			return "", errors.New("conversation not found")
-		},
 		getFunc: func(ctx context.Context, id string) (*conversations.GetConversationResponse, error) {
-			return &conversations.GetConversationResponse{
-				ID:          conversationID,
-				Summary:     "Test conversation",
-				ModelType:   "anthropic",
-				RawMessages: json.RawMessage(`[{"role":"user","content":[{"type":"text","text":"hello"}]}]`),
-			}, nil
+			if id == conversationID {
+				return &conversations.GetConversationResponse{
+					ID:          conversationID,
+					Summary:     "Test conversation",
+					ModelType:   "anthropic",
+					RawMessages: json.RawMessage(`[{"role":"user","content":[{"type":"text","text":"hello"}]}]`),
+				}, nil
+			}
+			return nil, errors.New("conversation not found")
 		},
 	}
 
@@ -207,9 +190,6 @@ func TestServer_handleDeleteConversation(t *testing.T) {
 	deleteCalled := false
 
 	mockService := &mockConversationService{
-		resolveFunc: func(ctx context.Context, id string) (string, error) {
-			return conversationID, nil
-		},
 		deleteFunc: func(ctx context.Context, id string) error {
 			deleteCalled = true
 			assert.Equal(t, conversationID, id)
@@ -237,9 +217,6 @@ func TestServer_handleGetToolResult(t *testing.T) {
 	toolCallID := "tool-456"
 
 	mockService := &mockConversationService{
-		resolveFunc: func(ctx context.Context, id string) (string, error) {
-			return conversationID, nil
-		},
 		getToolFunc: func(ctx context.Context, convID, toolID string) (*conversations.GetToolResultResponse, error) {
 			assert.Equal(t, conversationID, convID)
 			assert.Equal(t, toolCallID, toolID)

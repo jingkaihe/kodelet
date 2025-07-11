@@ -265,15 +265,8 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	id := vars["id"]
 
-	// Resolve conversation ID (supports short IDs)
-	resolvedID, err := s.conversationService.ResolveConversationID(ctx, id)
-	if err != nil {
-		s.writeErrorResponse(w, http.StatusNotFound, "conversation not found", err)
-		return
-	}
-
 	// Get conversation
-	response, err := s.conversationService.GetConversation(ctx, resolvedID)
+	response, err := s.conversationService.GetConversation(ctx, id)
 	if err != nil {
 		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to get conversation", err)
 		return
@@ -475,15 +468,8 @@ func (s *Server) handleGetToolResult(w http.ResponseWriter, r *http.Request) {
 	id := vars["id"]
 	toolCallID := vars["toolCallId"]
 
-	// Resolve conversation ID
-	resolvedID, err := s.conversationService.ResolveConversationID(ctx, id)
-	if err != nil {
-		s.writeErrorResponse(w, http.StatusNotFound, "conversation not found", err)
-		return
-	}
-
 	// Get tool result
-	response, err := s.conversationService.GetToolResult(ctx, resolvedID, toolCallID)
+	response, err := s.conversationService.GetToolResult(ctx, id, toolCallID)
 	if err != nil {
 		s.writeErrorResponse(w, http.StatusNotFound, "tool result not found", err)
 		return
@@ -498,15 +484,8 @@ func (s *Server) handleDeleteConversation(w http.ResponseWriter, r *http.Request
 	vars := mux.Vars(r)
 	id := vars["id"]
 
-	// Resolve conversation ID
-	resolvedID, err := s.conversationService.ResolveConversationID(ctx, id)
-	if err != nil {
-		s.writeErrorResponse(w, http.StatusNotFound, "conversation not found", err)
-		return
-	}
-
 	// Delete conversation
-	err = s.conversationService.DeleteConversation(ctx, resolvedID)
+	err := s.conversationService.DeleteConversation(ctx, id)
 	if err != nil {
 		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to delete conversation", err)
 		return

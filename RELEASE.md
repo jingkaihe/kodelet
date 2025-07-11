@@ -1,5 +1,13 @@
 # Kodelet
 
+## 0.0.62.alpha (2025-07-11)
+
+### Conversation management improvements
+
+- **Improved default sorting**: Changed default conversation sort order to `updated_at` for better user experience
+- **Code organization**: Simplified SQLite conversation store naming and removed unused management methods
+- **Documentation**: Updated project structure documentation with current file counts
+
 ## 0.0.61.alpha (2025-07-11)
 
 ### Introduce `sqlite` as the default conversation store

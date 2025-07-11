@@ -103,7 +103,7 @@ var migrations = []Migration{
 }
 
 // runMigrations executes all pending migrations
-func (s *SQLiteConversationStore) runMigrations() error {
+func (s *Store) runMigrations() error {
 	currentVersion, err := s.getCurrentSchemaVersion()
 	if err != nil {
 		return errors.Wrap(err, "failed to get current schema version")
@@ -121,7 +121,7 @@ func (s *SQLiteConversationStore) runMigrations() error {
 }
 
 // getCurrentSchemaVersion returns the current schema version
-func (s *SQLiteConversationStore) getCurrentSchemaVersion() (int, error) {
+func (s *Store) getCurrentSchemaVersion() (int, error) {
 	// Check if schema_version table exists
 	var tableExists bool
 	err := s.db.QueryRow(`
@@ -151,7 +151,7 @@ func (s *SQLiteConversationStore) getCurrentSchemaVersion() (int, error) {
 }
 
 // applyMigration applies a single migration
-func (s *SQLiteConversationStore) applyMigration(migration Migration) error {
+func (s *Store) applyMigration(migration Migration) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second) // Longer timeout for migrations
 	defer cancel()
 
@@ -179,7 +179,7 @@ func (s *SQLiteConversationStore) applyMigration(migration Migration) error {
 }
 
 // validateSchema validates that the database schema matches expectations
-func (s *SQLiteConversationStore) validateSchema() error {
+func (s *Store) validateSchema() error {
 	// Check that all required tables exist
 	requiredTables := []string{
 		"schema_version",
