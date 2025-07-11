@@ -1,4 +1,4 @@
-package conversations
+package sqlite
 
 import (
 	"context"

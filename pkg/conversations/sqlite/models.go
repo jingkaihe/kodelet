@@ -1,4 +1,4 @@
-package conversations
+package sqlite
 
 import (
 	"database/sql/driver"
@@ -8,6 +8,8 @@ import (
 	"github.com/pkg/errors"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/jingkaihe/kodelet/pkg/types/tools"
+
+	"github.com/jingkaihe/kodelet/pkg/types/conversations"
 )
 
 // JSONField is a generic type for handling JSON marshaling/unmarshaling in database
@@ -64,8 +66,8 @@ type dbConversationSummary struct {
 }
 
 // ToConversationRecord converts database record to domain model
-func (dbr *dbConversationRecord) ToConversationRecord() ConversationRecord {
-	record := ConversationRecord{
+func (dbr *dbConversationRecord) ToConversationRecord() conversations.ConversationRecord {
+	record := conversations.ConversationRecord{
 		ID:             dbr.ID,
 		RawMessages:    dbr.RawMessages,
 		ModelType:      dbr.ModelType,
@@ -85,8 +87,8 @@ func (dbr *dbConversationRecord) ToConversationRecord() ConversationRecord {
 }
 
 // ToConversationSummary converts database summary to domain model
-func (dbs *dbConversationSummary) ToConversationSummary() ConversationSummary {
-	summary := ConversationSummary{
+func (dbs *dbConversationSummary) ToConversationSummary() conversations.ConversationSummary {
+	summary := conversations.ConversationSummary{
 		ID:           dbs.ID,
 		MessageCount: dbs.MessageCount,
 		FirstMessage: dbs.FirstMessage,
@@ -103,7 +105,7 @@ func (dbs *dbConversationSummary) ToConversationSummary() ConversationSummary {
 }
 
 // FromConversationRecord converts domain model to database record
-func FromConversationRecord(record ConversationRecord) *dbConversationRecord {
+func FromConversationRecord(record conversations.ConversationRecord) *dbConversationRecord {
 	dbRecord := &dbConversationRecord{
 		ID:             record.ID,
 		RawMessages:    record.RawMessages,
@@ -124,7 +126,7 @@ func FromConversationRecord(record ConversationRecord) *dbConversationRecord {
 }
 
 // FromConversationSummary converts domain model to database summary
-func FromConversationSummary(summary ConversationSummary) *dbConversationSummary {
+func FromConversationSummary(summary conversations.ConversationSummary) *dbConversationSummary {
 	dbSummary := &dbConversationSummary{
 		ID:           summary.ID,
 		MessageCount: summary.MessageCount,

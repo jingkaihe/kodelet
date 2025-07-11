@@ -1,4 +1,4 @@
-package conversations
+package sqlite
 
 // SQL schema definitions for SQLite conversation store
 

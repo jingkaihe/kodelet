@@ -1,4 +1,4 @@
-package conversations
+package bbolt
 
 import (
 	"bytes"
@@ -12,6 +12,8 @@ import (
 
 	"github.com/pkg/errors"
 	"go.etcd.io/bbolt"
+
+	"github.com/jingkaihe/kodelet/pkg/types/conversations"
 )
 
 // BBoltConversationStore implements ConversationStore using BoltDB
@@ -74,7 +76,7 @@ func NewBBoltConversationStore(ctx context.Context, dbPath string) (*BBoltConver
 }
 
 // Save stores a conversation record using the triple storage pattern
-func (s *BBoltConversationStore) Save(ctx context.Context, record ConversationRecord) error {
+func (s *BBoltConversationStore) Save(ctx context.Context, record conversations.ConversationRecord) error {
 	return s.withDB(func(db *bbolt.DB) error {
 		return db.Update(func(tx *bbolt.Tx) error {
 			// 1. Save full record
@@ -115,8 +117,8 @@ func (s *BBoltConversationStore) Save(ctx context.Context, record ConversationRe
 }
 
 // Load retrieves a conversation record by ID
-func (s *BBoltConversationStore) Load(ctx context.Context, id string) (ConversationRecord, error) {
-	var record ConversationRecord
+func (s *BBoltConversationStore) Load(ctx context.Context, id string) (conversations.ConversationRecord, error) {
+	var record conversations.ConversationRecord
 	err := s.withDB(func(db *bbolt.DB) error {
 		return db.View(func(tx *bbolt.Tx) error {
 			bucket := tx.Bucket([]byte("conversations"))
@@ -131,8 +133,8 @@ func (s *BBoltConversationStore) Load(ctx context.Context, id string) (Conversat
 }
 
 // List returns all conversation summaries
-func (s *BBoltConversationStore) List(ctx context.Context) ([]ConversationSummary, error) {
-	var summaries []ConversationSummary
+func (s *BBoltConversationStore) List(ctx context.Context) ([]conversations.ConversationSummary, error) {
+	var summaries []conversations.ConversationSummary
 
 	err := s.withDB(func(db *bbolt.DB) error {
 		return db.View(func(tx *bbolt.Tx) error {
@@ -141,7 +143,7 @@ func (s *BBoltConversationStore) List(ctx context.Context) ([]ConversationSummar
 			prefix := []byte("conv:")
 
 			for k, v := cursor.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, v = cursor.Next() {
-				var summary ConversationSummary
+				var summary conversations.ConversationSummary
 				if err := json.Unmarshal(v, &summary); err != nil {
 					continue // Skip corrupted entries
 				}
@@ -197,9 +199,9 @@ func (s *BBoltConversationStore) Delete(ctx context.Context, id string) error {
 }
 
 // Query performs advanced queries with filtering, sorting, and pagination
-func (s *BBoltConversationStore) Query(ctx context.Context, options QueryOptions) (QueryResult, error) {
-	var allSummaries []ConversationSummary
-	var filteredSummaries []ConversationSummary
+func (s *BBoltConversationStore) Query(ctx context.Context, options conversations.QueryOptions) (conversations.QueryResult, error) {
+	var allSummaries []conversations.ConversationSummary
+	var filteredSummaries []conversations.ConversationSummary
 
 	err := s.withDB(func(db *bbolt.DB) error {
 		return db.View(func(tx *bbolt.Tx) error {
@@ -214,7 +216,7 @@ func (s *BBoltConversationStore) Query(ctx context.Context, options QueryOptions
 				prefix := []byte("conv:")
 
 				for k, v := cursor.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, v = cursor.Next() {
-					var summary ConversationSummary
+					var summary conversations.ConversationSummary
 					if err := json.Unmarshal(v, &summary); err != nil {
 						continue // Skip corrupted entries
 					}
@@ -228,12 +230,12 @@ func (s *BBoltConversationStore) Query(ctx context.Context, options QueryOptions
 	})
 
 	if err != nil {
-		return QueryResult{}, err
+		return conversations.QueryResult{}, err
 	}
 
 	// Apply date filtering
 	if options.StartDate != nil || options.EndDate != nil {
-		var dateFiltered []ConversationSummary
+		var dateFiltered []conversations.ConversationSummary
 		for _, summary := range filteredSummaries {
 			if options.StartDate != nil && summary.CreatedAt.Before(*options.StartDate) {
 				continue
@@ -255,7 +257,7 @@ func (s *BBoltConversationStore) Query(ctx context.Context, options QueryOptions
 	// Apply pagination
 	if options.Offset > 0 {
 		if options.Offset >= len(filteredSummaries) {
-			filteredSummaries = []ConversationSummary{}
+			filteredSummaries = []conversations.ConversationSummary{}
 		} else {
 			filteredSummaries = filteredSummaries[options.Offset:]
 		}
@@ -265,7 +267,7 @@ func (s *BBoltConversationStore) Query(ctx context.Context, options QueryOptions
 		filteredSummaries = filteredSummaries[:options.Limit]
 	}
 
-	return QueryResult{
+	return conversations.QueryResult{
 		ConversationSummaries: filteredSummaries,
 		Total:                 total,
 		QueryOptions:          options,
@@ -310,14 +312,14 @@ func (s *BBoltConversationStore) searchConversations(tx *bbolt.Tx, searchTerm st
 }
 
 // getSummariesByIDs retrieves summaries for specific conversation IDs
-func (s *BBoltConversationStore) getSummariesByIDs(tx *bbolt.Tx, ids []string) []ConversationSummary {
-	var summaries []ConversationSummary
+func (s *BBoltConversationStore) getSummariesByIDs(tx *bbolt.Tx, ids []string) []conversations.ConversationSummary {
+	var summaries []conversations.ConversationSummary
 	summariesBucket := tx.Bucket([]byte("summaries"))
 
 	for _, id := range ids {
 		key := []byte("conv:" + id)
 		if data := summariesBucket.Get(key); data != nil {
-			var summary ConversationSummary
+			var summary conversations.ConversationSummary
 			if err := json.Unmarshal(data, &summary); err == nil {
 				summaries = append(summaries, summary)
 			}
@@ -328,7 +330,7 @@ func (s *BBoltConversationStore) getSummariesByIDs(tx *bbolt.Tx, ids []string) [
 }
 
 // applySorting sorts summaries based on the specified criteria
-func (s *BBoltConversationStore) applySorting(summaries []ConversationSummary, sortBy, sortOrder string) {
+func (s *BBoltConversationStore) applySorting(summaries []conversations.ConversationSummary, sortBy, sortOrder string) {
 	if sortBy == "" {
 		sortBy = "createdAt"
 	}

@@ -1,4 +1,4 @@
-package conversations
+package sqlite
 
 import (
 	"context"
@@ -9,6 +9,8 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/pkg/errors"
 	_ "modernc.org/sqlite"
+
+	"github.com/jingkaihe/kodelet/pkg/types/conversations"
 )
 
 // SQLiteConversationStore implements ConversationStore using SQLite database
@@ -133,7 +135,7 @@ func (s *SQLiteConversationStore) initializeSchema() error {
 	return nil
 }
 
-func (s *SQLiteConversationStore) Save(ctx context.Context, record ConversationRecord) error {
+func (s *SQLiteConversationStore) Save(ctx context.Context, record conversations.ConversationRecord) error {
 
 	tx, err := s.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -177,7 +179,7 @@ func (s *SQLiteConversationStore) Save(ctx context.Context, record ConversationR
 }
 
 // Load retrieves a conversation record by ID
-func (s *SQLiteConversationStore) Load(ctx context.Context, id string) (ConversationRecord, error) {
+func (s *SQLiteConversationStore) Load(ctx context.Context, id string) (conversations.ConversationRecord, error) {
 
 	var dbRecord dbConversationRecord
 
@@ -185,16 +187,16 @@ func (s *SQLiteConversationStore) Load(ctx context.Context, id string) (Conversa
 	err := s.db.GetContext(ctx, &dbRecord, query, id)
 	if err != nil {
 		if err.Error() == "sql: no rows in result set" {
-			return ConversationRecord{}, errors.Errorf("conversation not found: %s", id)
+			return conversations.ConversationRecord{}, errors.Errorf("conversation not found: %s", id)
 		}
-		return ConversationRecord{}, errors.Wrap(err, "failed to load conversation record")
+		return conversations.ConversationRecord{}, errors.Wrap(err, "failed to load conversation record")
 	}
 
 	return dbRecord.ToConversationRecord(), nil
 }
 
 // List returns all conversation summaries sorted by creation time (newest first)
-func (s *SQLiteConversationStore) List(ctx context.Context) ([]ConversationSummary, error) {
+func (s *SQLiteConversationStore) List(ctx context.Context) ([]conversations.ConversationSummary, error) {
 
 	var dbSummaries []dbConversationSummary
 
@@ -205,7 +207,7 @@ func (s *SQLiteConversationStore) List(ctx context.Context) ([]ConversationSumma
 	}
 
 	// Convert to domain models
-	summaries := make([]ConversationSummary, len(dbSummaries))
+	summaries := make([]conversations.ConversationSummary, len(dbSummaries))
 	for i, dbSummary := range dbSummaries {
 		summaries[i] = dbSummary.ToConversationSummary()
 	}
@@ -237,7 +239,7 @@ func (s *SQLiteConversationStore) Delete(ctx context.Context, id string) error {
 }
 
 // Query performs advanced queries with filtering, sorting, and pagination
-func (s *SQLiteConversationStore) Query(ctx context.Context, options QueryOptions) (QueryResult, error) {
+func (s *SQLiteConversationStore) Query(ctx context.Context, options conversations.QueryOptions) (conversations.QueryResult, error) {
 
 	// Build WHERE conditions
 	conditions := []string{}
@@ -297,17 +299,17 @@ func (s *SQLiteConversationStore) Query(ctx context.Context, options QueryOption
 	var dbSummaries []dbConversationSummary
 	finalQuery, argsSlice, err := sqlx.Named(baseQuery, args)
 	if err != nil {
-		return QueryResult{}, errors.Wrap(err, "failed to build named query")
+		return conversations.QueryResult{}, errors.Wrap(err, "failed to build named query")
 	}
 
 	finalQuery = s.db.Rebind(finalQuery)
 	err = s.db.SelectContext(ctx, &dbSummaries, finalQuery, argsSlice...)
 	if err != nil {
-		return QueryResult{}, errors.Wrap(err, "failed to execute query")
+		return conversations.QueryResult{}, errors.Wrap(err, "failed to execute query")
 	}
 
 	// Convert to domain models
-	summaries := make([]ConversationSummary, len(dbSummaries))
+	summaries := make([]conversations.ConversationSummary, len(dbSummaries))
 	for i, dbSummary := range dbSummaries {
 		summaries[i] = dbSummary.ToConversationSummary()
 	}
@@ -329,16 +331,16 @@ func (s *SQLiteConversationStore) Query(ctx context.Context, options QueryOption
 	var total int
 	finalCountQuery, countArgsSlice, err := sqlx.Named(countQuery, countArgs)
 	if err != nil {
-		return QueryResult{}, errors.Wrap(err, "failed to build named count query")
+		return conversations.QueryResult{}, errors.Wrap(err, "failed to build named count query")
 	}
 
 	finalCountQuery = s.db.Rebind(finalCountQuery)
 	err = s.db.GetContext(ctx, &total, finalCountQuery, countArgsSlice...)
 	if err != nil {
-		return QueryResult{}, errors.Wrap(err, "failed to get total count")
+		return conversations.QueryResult{}, errors.Wrap(err, "failed to get total count")
 	}
 
-	return QueryResult{
+	return conversations.QueryResult{
 		ConversationSummaries: summaries,
 		Total:                 total,
 		QueryOptions:          options,

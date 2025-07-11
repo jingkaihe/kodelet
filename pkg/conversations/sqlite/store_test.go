@@ -1,4 +1,4 @@
-package conversations
+package sqlite
 
 import (
 	"context"
@@ -11,7 +11,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
+	conversations "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/jingkaihe/kodelet/pkg/types/tools"
 )
@@ -30,7 +30,7 @@ func TestSQLiteConversationStore_BasicOperations(t *testing.T) {
 
 	// Create test conversation record
 	now := time.Now()
-	record := ConversationRecord{
+	record := conversations.ConversationRecord{
 		ID:          "test-conversation-1",
 		RawMessages: json.RawMessage(`[{"role": "user", "content": [{"type": "text", "text": "Hello world"}]}]`),
 		ModelType:   "anthropic",
@@ -107,7 +107,7 @@ func TestSQLiteConversationStore_Query(t *testing.T) {
 
 	// Create test records
 	now := time.Now()
-	records := []ConversationRecord{
+	records := []conversations.ConversationRecord{
 		{
 			ID:          "conv-1",
 			RawMessages: json.RawMessage(`[{"role": "user", "content": [{"type": "text", "text": "Hello world"}]}]`),
@@ -150,7 +150,7 @@ func TestSQLiteConversationStore_Query(t *testing.T) {
 	}
 
 	// Test search by term
-	result, err := store.Query(ctx, QueryOptions{
+	result, err := store.Query(ctx, conversations.QueryOptions{
 		SearchTerm: "search",
 	})
 	require.NoError(t, err)
@@ -158,7 +158,7 @@ func TestSQLiteConversationStore_Query(t *testing.T) {
 	assert.Equal(t, "conv-2", result.ConversationSummaries[0].ID)
 
 	// Test sorting by creation time (default)
-	result, err = store.Query(ctx, QueryOptions{})
+	result, err = store.Query(ctx, conversations.QueryOptions{})
 	require.NoError(t, err)
 	assert.Len(t, result.ConversationSummaries, 3)
 	assert.Equal(t, "conv-3", result.ConversationSummaries[0].ID) // Most recent first
@@ -166,7 +166,7 @@ func TestSQLiteConversationStore_Query(t *testing.T) {
 	assert.Equal(t, "conv-1", result.ConversationSummaries[2].ID)
 
 	// Test sorting by message count
-	result, err = store.Query(ctx, QueryOptions{
+	result, err = store.Query(ctx, conversations.QueryOptions{
 		SortBy:    "messageCount",
 		SortOrder: "desc",
 	})
@@ -174,7 +174,7 @@ func TestSQLiteConversationStore_Query(t *testing.T) {
 	assert.Len(t, result.ConversationSummaries, 3)
 
 	// Test pagination
-	result, err = store.Query(ctx, QueryOptions{
+	result, err = store.Query(ctx, conversations.QueryOptions{
 		Limit: 2,
 	})
 	require.NoError(t, err)
@@ -182,7 +182,7 @@ func TestSQLiteConversationStore_Query(t *testing.T) {
 	assert.Equal(t, 3, result.Total)
 
 	// Test offset
-	result, err = store.Query(ctx, QueryOptions{
+	result, err = store.Query(ctx, conversations.QueryOptions{
 		Limit:  2,
 		Offset: 1,
 	})
@@ -195,7 +195,7 @@ func TestSQLiteConversationStore_Query(t *testing.T) {
 	// Test date filtering
 	startDate := now.Add(-90 * time.Minute)
 	endDate := now.Add(-30 * time.Minute)
-	result, err = store.Query(ctx, QueryOptions{
+	result, err = store.Query(ctx, conversations.QueryOptions{
 		StartDate: &startDate,
 		EndDate:   &endDate,
 	})
@@ -257,46 +257,7 @@ func TestSQLiteConversationStore_Migrations(t *testing.T) {
 	}
 }
 
-func TestSQLiteConversationStore_Factory(t *testing.T) {
-	ctx := context.Background()
 
-	// Create temporary directory
-	tmpDir := t.TempDir()
-
-	// Test factory creation with SQLite config
-	config := &Config{
-		StoreType: "sqlite",
-		BasePath:  tmpDir,
-	}
-
-	store, err := NewConversationStore(ctx, config)
-	require.NoError(t, err)
-	defer store.Close()
-
-	// Verify it's a SQLite store
-	sqliteStore, ok := store.(*SQLiteConversationStore)
-	assert.True(t, ok)
-	assert.NotNil(t, sqliteStore)
-
-	// Test basic functionality
-	record := ConversationRecord{
-		ID:          "factory-test",
-		RawMessages: json.RawMessage(`[{"role": "user", "content": [{"type": "text", "text": "Factory test"}]}]`),
-		ModelType:   "anthropic",
-		Usage:       llmtypes.Usage{InputTokens: 50, OutputTokens: 25},
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
-		Metadata:    map[string]interface{}{},
-		ToolResults: map[string]tools.StructuredToolResult{},
-	}
-
-	err = store.Save(ctx, record)
-	require.NoError(t, err)
-
-	loaded, err := store.Load(ctx, "factory-test")
-	require.NoError(t, err)
-	assert.Equal(t, "factory-test", loaded.ID)
-}
 
 func TestSQLiteConversationStore_WALMode(t *testing.T) {
 	ctx := context.Background()
@@ -335,7 +296,7 @@ func TestSQLiteConversationStore_WALMode(t *testing.T) {
 	// Test that WAL mode actually works by doing some writes
 	// This should create WAL files
 	now := time.Now()
-	record := ConversationRecord{
+	record := conversations.ConversationRecord{
 		ID:          "wal-test",
 		RawMessages: json.RawMessage(`[{"role": "user", "content": [{"type": "text", "text": "WAL test"}]}]`),
 		ModelType:   "anthropic",
@@ -374,7 +335,7 @@ func TestSQLiteConversationStore_DatabaseIntegration(t *testing.T) {
 
 	// Test with complex data that exercises JSON fields
 	now := time.Now().UTC().Truncate(time.Second)
-	record := ConversationRecord{
+	record := conversations.ConversationRecord{
 		ID:          "integration-test",
 		RawMessages: json.RawMessage(`[{"role": "user", "content": [{"type": "text", "text": "Complex test with émoticônes 🚀"}]}]`),
 		ModelType:   "anthropic",
@@ -502,7 +463,7 @@ func TestSQLiteConversationStore_NullHandling(t *testing.T) {
 
 	// Test record with empty/null fields
 	now := time.Now().UTC().Truncate(time.Second)
-	record := ConversationRecord{
+	record := conversations.ConversationRecord{
 		ID:             "null-test",
 		RawMessages:    json.RawMessage(`[]`),
 		ModelType:      "anthropic",
@@ -560,7 +521,7 @@ func TestSQLiteConversationStore_ConcurrentAccess(t *testing.T) {
 
 			for j := 0; j < recordsPerGoroutine; j++ {
 				now := time.Now().UTC()
-				record := ConversationRecord{
+				record := conversations.ConversationRecord{
 					ID:          fmt.Sprintf("concurrent-%d-%d", routineID, j),
 					RawMessages: json.RawMessage(fmt.Sprintf(`[{"role": "user", "content": "Message from routine %d record %d"}]`, routineID, j)),
 					ModelType:   "anthropic",

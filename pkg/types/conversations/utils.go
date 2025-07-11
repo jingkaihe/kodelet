@@ -1,10 +1,8 @@
 package conversations
 
 import (
-	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"errors"
 	"os"
 	"path/filepath"
 	"time"
@@ -48,33 +46,4 @@ func GetDefaultBasePath() (string, error) {
 	}
 
 	return basePath, nil
-}
-
-// GetMostRecentConversationID returns the ID of the most recent conversation
-func GetMostRecentConversationID(ctx context.Context) (string, error) {
-	store, err := GetConversationStore(ctx)
-	if err != nil {
-		return "", err
-	}
-	defer store.Close()
-
-	// Query for the most recent conversation
-	options := QueryOptions{
-		Limit:     1,
-		Offset:    0,
-		SortBy:    "updated_at",
-		SortOrder: "desc",
-	}
-
-	result, err := store.Query(ctx, options)
-	if err != nil {
-		return "", err
-	}
-
-	conversations := result.ConversationSummaries
-	if len(conversations) == 0 {
-		return "", errors.New("no conversations found")
-	}
-
-	return conversations[0].ID, nil
 }

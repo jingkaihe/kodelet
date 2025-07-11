@@ -1,4 +1,4 @@
-package conversations
+package sqlite
 
 import (
 	"encoding/json"
@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/jingkaihe/kodelet/pkg/types/tools"
 )
@@ -120,7 +121,7 @@ func TestJSONField_Value_Success(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			value, err := tt.field.Value()
 			require.NoError(t, err)
-			
+
 			// Convert driver.Value to string for comparison
 			jsonBytes, ok := value.([]byte)
 			require.True(t, ok)
@@ -180,7 +181,7 @@ func TestJSONField_ComplexTypes(t *testing.T) {
 		var newField JSONField[map[string]time.Time]
 		err = newField.Scan(value)
 		require.NoError(t, err)
-		
+
 		// Compare times with RFC3339 precision (JSON time format)
 		for key, expectedTime := range timeMap {
 			actualTime, exists := newField.Data[key]
@@ -190,7 +191,7 @@ func TestJSONField_ComplexTypes(t *testing.T) {
 	})
 }
 
-func TestDbConversationRecord_ToConversationRecord(t *testing.T) {
+func TestConversationRecord_ToConversations(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	summary := "Test summary"
 
@@ -236,7 +237,7 @@ func TestDbConversationRecord_ToConversationRecord(t *testing.T) {
 	assert.Contains(t, record.ToolResults, "call1")
 }
 
-func TestDbConversationRecord_ToConversationRecord_NullSummary(t *testing.T) {
+func TestDb_ConversationRecord_ToConversationRecord_NullSummary(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 
 	dbRecord := &dbConversationRecord{
@@ -296,7 +297,7 @@ func TestDbConversationSummary_ToConversationSummary(t *testing.T) {
 func TestFromConversationRecord(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 
-	record := ConversationRecord{
+	record := conversations.ConversationRecord{
 		ID:          "test-id",
 		RawMessages: json.RawMessage(`[{"role": "user", "content": "test"}]`),
 		ModelType:   "anthropic",
@@ -339,7 +340,7 @@ func TestFromConversationRecord(t *testing.T) {
 func TestFromConversationRecord_EmptySummary(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 
-	record := ConversationRecord{
+	record := conversations.ConversationRecord{
 		ID:             "test-id",
 		RawMessages:    json.RawMessage(`[]`),
 		ModelType:      "anthropic",
@@ -360,7 +361,7 @@ func TestFromConversationRecord_EmptySummary(t *testing.T) {
 func TestFromConversationSummary(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 
-	summary := ConversationSummary{
+	summary := conversations.ConversationSummary{
 		ID:           "test-id",
 		MessageCount: 5,
 		FirstMessage: "Hello world",
@@ -387,7 +388,7 @@ func TestFromConversationSummary(t *testing.T) {
 func TestFromConversationSummary_EmptySummary(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 
-	summary := ConversationSummary{
+	summary := conversations.ConversationSummary{
 		ID:           "test-id",
 		MessageCount: 5,
 		FirstMessage: "Hello world",
@@ -406,7 +407,7 @@ func TestRoundTripConversion(t *testing.T) {
 	// Test that converting from domain -> db -> domain preserves data
 	now := time.Now().UTC().Truncate(time.Second)
 
-	originalRecord := ConversationRecord{
+	originalRecord := conversations.ConversationRecord{
 		ID:          "test-id",
 		RawMessages: json.RawMessage(`[{"role": "user", "content": [{"type": "text", "text": "Hello"}]}]`),
 		ModelType:   "anthropic",
@@ -458,7 +459,7 @@ func TestRoundTripConversion(t *testing.T) {
 	assert.Equal(t, originalRecord.Summary, convertedRecord.Summary)
 	assert.Equal(t, originalRecord.CreatedAt, convertedRecord.CreatedAt)
 	assert.Equal(t, originalRecord.UpdatedAt, convertedRecord.UpdatedAt)
-	
+
 	// Compare Usage (all fields)
 	assert.Equal(t, originalRecord.Usage.InputTokens, convertedRecord.Usage.InputTokens)
 	assert.Equal(t, originalRecord.Usage.OutputTokens, convertedRecord.Usage.OutputTokens)
@@ -468,7 +469,7 @@ func TestRoundTripConversion(t *testing.T) {
 	assert.Equal(t, originalRecord.Usage.OutputCost, convertedRecord.Usage.OutputCost)
 	assert.Equal(t, originalRecord.Usage.CurrentContextWindow, convertedRecord.Usage.CurrentContextWindow)
 	assert.Equal(t, originalRecord.Usage.MaxContextWindow, convertedRecord.Usage.MaxContextWindow)
-	
+
 	// Compare FileLastAccess
 	assert.Equal(t, len(originalRecord.FileLastAccess), len(convertedRecord.FileLastAccess))
 	for file, originalTime := range originalRecord.FileLastAccess {
@@ -476,10 +477,10 @@ func TestRoundTripConversion(t *testing.T) {
 		assert.True(t, exists)
 		assert.Equal(t, originalTime.Format(time.RFC3339), convertedTime.Format(time.RFC3339))
 	}
-	
+
 	// Compare Metadata
 	assert.Equal(t, originalRecord.Metadata, convertedRecord.Metadata)
-	
+
 	// Compare ToolResults
 	assert.Equal(t, len(originalRecord.ToolResults), len(convertedRecord.ToolResults))
 	for callID, originalResult := range originalRecord.ToolResults {

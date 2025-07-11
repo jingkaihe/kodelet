@@ -3,7 +3,6 @@ package anthropic
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -11,24 +10,25 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/jingkaihe/kodelet/pkg/conversations"
+	conversations "github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/tools"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
 // MockConversationStore is a test implementation of the ConversationStore interface
 type MockConversationStore struct {
-	SavedRecords []conversations.ConversationRecord
-	LoadedRecord *conversations.ConversationRecord
+	SavedRecords []convtypes.ConversationRecord
+	LoadedRecord *convtypes.ConversationRecord
 }
 
-func (m *MockConversationStore) Save(ctx context.Context, record conversations.ConversationRecord) error {
+func (m *MockConversationStore) Save(ctx context.Context, record convtypes.ConversationRecord) error {
 	m.SavedRecords = append(m.SavedRecords, record)
 	return nil
 }
 
-func (m *MockConversationStore) Load(ctx context.Context, id string) (conversations.ConversationRecord, error) {
+func (m *MockConversationStore) Load(ctx context.Context, id string) (convtypes.ConversationRecord, error) {
 	if m.LoadedRecord != nil {
 		return *m.LoadedRecord, nil
 	}
@@ -40,10 +40,10 @@ func (m *MockConversationStore) Load(ctx context.Context, id string) (conversati
 		}
 	}
 
-	return conversations.ConversationRecord{}, nil
+	return convtypes.ConversationRecord{}, nil
 }
 
-func (m *MockConversationStore) List(ctx context.Context) ([]conversations.ConversationSummary, error) {
+func (m *MockConversationStore) List(ctx context.Context) ([]convtypes.ConversationSummary, error) {
 	return nil, nil
 }
 
@@ -51,8 +51,8 @@ func (m *MockConversationStore) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-func (m *MockConversationStore) Query(ctx context.Context, options conversations.QueryOptions) (conversations.QueryResult, error) {
-	return conversations.QueryResult{}, nil
+func (m *MockConversationStore) Query(ctx context.Context, options convtypes.QueryOptions) (convtypes.QueryResult, error) {
+	return convtypes.QueryResult{}, nil
 }
 
 func (m *MockConversationStore) Close() error {
@@ -159,8 +159,10 @@ func TestSaveAndLoadConversationWithFileLastAccess(t *testing.T) {
 	tempDir := t.TempDir()
 
 	// Create a BBolt store directly with a unique database path
-	dbPath := filepath.Join(tempDir, fmt.Sprintf("test-%d.db", time.Now().UnixNano()))
-	store, err := conversations.NewBBoltConversationStore(context.Background(), dbPath)
+	store, err := conversations.NewConversationStore(context.Background(), &conversations.Config{
+		StoreType: "sqlite",
+		BasePath:  tempDir,
+	})
 	require.NoError(t, err)
 	defer store.Close()
 

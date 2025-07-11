@@ -1,4 +1,4 @@
-package conversations
+package bbolt
 
 import (
 	"context"
@@ -8,9 +8,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/types/conversations"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"go.etcd.io/bbolt"
 )
 
@@ -24,7 +25,7 @@ func TestBBoltConversationStore_CRUD(t *testing.T) {
 	defer store.Close()
 
 	// Test Save
-	record := NewConversationRecord("test-id-1")
+	record := conversations.NewConversationRecord("test-id-1")
 	record.Summary = "Test conversation"
 	record.ModelType = "anthropic"
 	record.Usage = llmtypes.Usage{
@@ -80,7 +81,7 @@ func TestBBoltConversationStore_Query(t *testing.T) {
 	tomorrow := now.Add(24 * time.Hour)
 
 	// Create test conversations
-	conversations := []ConversationRecord{
+	testConversations := []conversations.ConversationRecord{
 		{
 			ID:          "conv-1",
 			Summary:     "First conversation about coding",
@@ -105,20 +106,20 @@ func TestBBoltConversationStore_Query(t *testing.T) {
 	}
 
 	// Save all conversations
-	for _, conv := range conversations {
+	for _, conv := range testConversations {
 		err = store.Save(ctx, conv)
 		require.NoError(t, err, "Failed to save conversation")
 	}
 
 	// Test basic query (no filters)
-	result, err := store.Query(ctx, QueryOptions{})
+	result, err := store.Query(ctx, conversations.QueryOptions{})
 	require.NoError(t, err, "Failed to query conversations")
 
 	assert.Equal(t, 3, len(result.ConversationSummaries))
 	assert.Equal(t, 3, result.Total)
 
 	// Test search query
-	result, err = store.Query(ctx, QueryOptions{
+	result, err = store.Query(ctx, conversations.QueryOptions{
 		SearchTerm: "coding",
 	})
 	require.NoError(t, err, "Failed to query conversations with search")
@@ -127,7 +128,7 @@ func TestBBoltConversationStore_Query(t *testing.T) {
 	assert.Equal(t, "conv-1", result.ConversationSummaries[0].ID)
 
 	// Test search in first message
-	result, err = store.Query(ctx, QueryOptions{
+	result, err = store.Query(ctx, conversations.QueryOptions{
 		SearchTerm: "BoltDB",
 	})
 	require.NoError(t, err, "Failed to query conversations with message search")
@@ -136,7 +137,7 @@ func TestBBoltConversationStore_Query(t *testing.T) {
 	assert.Equal(t, "conv-3", result.ConversationSummaries[0].ID)
 
 	// Test date filtering
-	result, err = store.Query(ctx, QueryOptions{
+	result, err = store.Query(ctx, conversations.QueryOptions{
 		StartDate: &now,
 		EndDate:   &tomorrow,
 	})
@@ -145,7 +146,7 @@ func TestBBoltConversationStore_Query(t *testing.T) {
 	assert.Equal(t, 2, len(result.ConversationSummaries))
 
 	// Test pagination
-	result, err = store.Query(ctx, QueryOptions{
+	result, err = store.Query(ctx, conversations.QueryOptions{
 		Limit:  2,
 		Offset: 1,
 	})
@@ -154,7 +155,7 @@ func TestBBoltConversationStore_Query(t *testing.T) {
 	assert.Equal(t, 2, len(result.ConversationSummaries))
 
 	// Test sorting
-	result, err = store.Query(ctx, QueryOptions{
+	result, err = store.Query(ctx, conversations.QueryOptions{
 		SortBy:    "createdAt",
 		SortOrder: "asc",
 	})
@@ -183,7 +184,7 @@ func TestBBoltConversationStore_ConcurrentAccess(t *testing.T) {
 	// Launch 10 concurrent goroutines
 	for i := 0; i < 10; i++ {
 		go func(id int) {
-			record := NewConversationRecord("")
+			record := conversations.NewConversationRecord("")
 			record.ID = fmt.Sprintf("concurrent-test-%d", id)
 			record.Summary = fmt.Sprintf("Concurrent test %d", id)
 			record.RawMessages = json.RawMessage(fmt.Sprintf(`[{"role": "user", "content": [{"type": "text", "text": "Test message %d"}]}]`, id))
@@ -224,7 +225,7 @@ func TestBBoltConversationStore_DatabasePersistence(t *testing.T) {
 	store1, err := NewBBoltConversationStore(ctx, dbPath)
 	require.NoError(t, err, "Failed to create BBolt store")
 
-	record := NewConversationRecord("persistence-test")
+	record := conversations.NewConversationRecord("persistence-test")
 	record.Summary = "Test persistence"
 	record.RawMessages = json.RawMessage(`[{"role": "user", "content": [{"type": "text", "text": "Hello persistence"}]}]`)
 
@@ -272,7 +273,7 @@ func TestBBoltConversationStore_TripleStorage(t *testing.T) {
 	require.NoError(t, err, "Failed to create BBolt store")
 	defer store.Close()
 
-	record := NewConversationRecord("triple-test")
+	record := conversations.NewConversationRecord("triple-test")
 	record.Summary = "Triple storage test"
 	record.RawMessages = json.RawMessage(`[{"role": "user", "content": [{"type": "text", "text": "Test triple storage"}]}]`)
 
@@ -306,78 +307,7 @@ func TestBBoltConversationStore_TripleStorage(t *testing.T) {
 	require.NoError(t, err, "Failed to verify triple storage")
 }
 
-// Integration test through the service layer
-func TestBBoltIntegration_ConversationService(t *testing.T) {
-	ctx := context.Background()
-	tempDir := t.TempDir()
 
-	// Create BBolt store
-	config := &Config{
-		StoreType: "bbolt",
-		BasePath:  tempDir,
-	}
-
-	store, err := NewConversationStore(ctx, config)
-	require.NoError(t, err, "Failed to create BBolt store")
-	defer store.Close()
-
-	// Create conversation service
-	service := NewConversationService(store)
-	defer service.Close()
-
-	// Test creating and saving a conversation directly through the store
-	record := NewConversationRecord("")
-	record.Summary = "Integration test conversation"
-	record.ModelType = "anthropic"
-	record.Usage = llmtypes.Usage{
-		InputTokens:  100,
-		OutputTokens: 50,
-		InputCost:    0.001,
-		OutputCost:   0.002,
-	}
-	record.RawMessages = json.RawMessage(`[{"role": "user", "content": [{"type": "text", "text": "Hello integration test"}]}]`)
-
-	err = store.Save(ctx, record)
-	require.NoError(t, err, "Failed to save conversation")
-
-	// Test listing conversations through the service
-	req := &ListConversationsRequest{}
-	result, err := service.ListConversations(ctx, req)
-	require.NoError(t, err, "Failed to list conversations")
-
-	assert.Equal(t, 1, len(result.Conversations))
-
-	// Test getting a conversation through the service
-	retrievedRecord, err := service.GetConversation(ctx, record.ID)
-	require.NoError(t, err, "Failed to get conversation")
-
-	assert.Equal(t, record.ID, retrievedRecord.ID)
-
-	// Test searching conversations through the service
-	searchReq := &ListConversationsRequest{
-		SearchTerm: "integration",
-	}
-	searchResult, err := service.ListConversations(ctx, searchReq)
-	require.NoError(t, err, "Failed to search conversations")
-
-	assert.Equal(t, 1, len(searchResult.Conversations))
-
-	// Test conversation statistics
-	stats, err := service.GetConversationStatistics(ctx)
-	require.NoError(t, err, "Failed to get conversation statistics")
-
-	assert.Equal(t, 1, stats.TotalConversations)
-
-	// Test deleting a conversation through the service
-	err = service.DeleteConversation(ctx, record.ID)
-	require.NoError(t, err, "Failed to delete conversation")
-
-	// Verify deletion
-	result, err = service.ListConversations(ctx, &ListConversationsRequest{})
-	require.NoError(t, err, "Failed to list conversations after delete")
-
-	assert.Equal(t, 0, len(result.Conversations))
-}
 
 // Performance test with larger dataset
 func TestBBoltIntegration_LargeDataset(t *testing.T) {
@@ -394,7 +324,7 @@ func TestBBoltIntegration_LargeDataset(t *testing.T) {
 	searchableConversations := make([]string, 0)
 
 	for i := 0; i < numConversations; i++ {
-		record := NewConversationRecord("")
+		record := conversations.NewConversationRecord("")
 		record.ID = fmt.Sprintf("large-test-%d", i)
 		record.ModelType = "anthropic"
 		record.Usage = llmtypes.Usage{
@@ -425,7 +355,7 @@ func TestBBoltIntegration_LargeDataset(t *testing.T) {
 	assert.Equal(t, numConversations, len(summaries))
 
 	// Test search functionality
-	searchResult, err := store.Query(ctx, QueryOptions{
+	searchResult, err := store.Query(ctx, conversations.QueryOptions{
 		SearchTerm: "searchable",
 	})
 	require.NoError(t, err, "Failed to search conversations")
@@ -434,7 +364,7 @@ func TestBBoltIntegration_LargeDataset(t *testing.T) {
 	assert.Equal(t, expectedSearchResults, len(searchResult.ConversationSummaries))
 
 	// Test pagination
-	paginatedResult, err := store.Query(ctx, QueryOptions{
+	paginatedResult, err := store.Query(ctx, conversations.QueryOptions{
 		Limit:  10,
 		Offset: 5,
 	})

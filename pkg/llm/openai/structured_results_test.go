@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )

@@ -10,6 +10,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/jingkaihe/kodelet/pkg/tools"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/jingkaihe/kodelet/pkg/tui"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
@@ -111,7 +112,7 @@ var chatCmd = &cobra.Command{
 			// Generate or use existing conversation ID for log redirection
 			conversationID := chatOptions.resumeConvID
 			if conversationID == "" && !chatOptions.noSave {
-				conversationID = conversations.GenerateID()
+				conversationID = convtypes.GenerateID()
 			}
 
 			// Set up TUI log redirection if we have a conversation ID

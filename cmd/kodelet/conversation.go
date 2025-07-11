@@ -16,6 +16,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
@@ -352,7 +353,7 @@ type ConversationListOutput struct {
 }
 
 // NewConversationListOutput creates a new ConversationListOutput
-func NewConversationListOutput(summaries []conversations.ConversationSummary, format OutputFormat) *ConversationListOutput {
+func NewConversationListOutput(summaries []convtypes.ConversationSummary, format OutputFormat) *ConversationListOutput {
 	output := &ConversationListOutput{
 		Conversations: make([]ConversationSummaryOutput, 0, len(summaries)),
 		Format:        format,
@@ -457,7 +458,7 @@ func listConversationsCmd(ctx context.Context, config *ConversationListConfig) {
 	defer store.Close()
 
 	// Prepare query options
-	options := conversations.QueryOptions{
+	options := convtypes.QueryOptions{
 		SearchTerm: config.Search,
 		Limit:      config.Limit,
 		Offset:     config.Offset,
@@ -743,8 +744,8 @@ func readFromURL(urlStr string) ([]byte, error) {
 }
 
 // validateConversationRecord validates and parses a conversation record
-func validateConversationRecord(data []byte) (*conversations.ConversationRecord, error) {
-	var record conversations.ConversationRecord
+func validateConversationRecord(data []byte) (*convtypes.ConversationRecord, error) {
+	var record convtypes.ConversationRecord
 	if err := json.Unmarshal(data, &record); err != nil {
 		return nil, errors.Wrap(err, "invalid JSON format")
 	}

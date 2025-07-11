@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
 	"github.com/pkg/errors"
 	"github.com/sashabaranov/go-openai"
 
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
@@ -64,7 +64,7 @@ func (t *OpenAIThread) SaveConversation(ctx context.Context, summarize bool) err
 	}
 
 	// Build the conversation record
-	record := conversations.ConversationRecord{
+	record := convtypes.ConversationRecord{
 		ID:             t.conversationID,
 		RawMessages:    messagesJSON,
 		ModelType:      "openai",

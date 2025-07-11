@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
-	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
@@ -73,7 +73,7 @@ func (t *AnthropicThread) SaveConversation(ctx context.Context, summarise bool) 
 	}
 
 	// Create a new conversation record
-	record := conversations.ConversationRecord{
+	record := convtypes.ConversationRecord{
 		ID:             t.conversationID,
 		RawMessages:    rawMessages,
 		ModelType:      "anthropic",

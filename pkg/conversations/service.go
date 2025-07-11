@@ -12,10 +12,11 @@ import (
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/jingkaihe/kodelet/pkg/usage"
+	"github.com/jingkaihe/kodelet/pkg/types/conversations"
 )
 
-// toUsageSummaries converts ConversationSummary slice to usage.ConversationSummary interface slice
-func toUsageSummaries(summaries []ConversationSummary) []usage.ConversationSummary {
+// toUsageSummaries converts conversations.ConversationSummary slice to usage.ConversationSummary interface slice
+func toUsageSummaries(summaries []conversations.ConversationSummary) []usage.ConversationSummary {
 	result := make([]usage.ConversationSummary, len(summaries))
 	for i, s := range summaries {
 		result[i] = s
@@ -68,7 +69,7 @@ type ListConversationsRequest struct {
 
 // ListConversationsResponse represents the response from listing conversations
 type ListConversationsResponse struct {
-	Conversations []ConversationSummary   `json:"conversations"`
+	Conversations []conversations.ConversationSummary   `json:"conversations"`
 	Total         int                     `json:"total"`
 	Limit         int                     `json:"limit"`
 	Offset        int                     `json:"offset"`
@@ -108,7 +109,7 @@ func (s *ConversationService) ListConversations(ctx context.Context, req *ListCo
 	}
 
 	// Convert request to query options
-	options := QueryOptions{
+	options := conversations.QueryOptions{
 		StartDate:  req.StartDate,
 		EndDate:    req.EndDate,
 		SearchTerm: req.SearchTerm,
@@ -152,7 +153,7 @@ func (s *ConversationService) ListConversations(ctx context.Context, req *ListCo
 			CacheWriteCost:     usageStats.CacheWriteCost,
 		}
 	} else {
-		summaries = []ConversationSummary{}
+		summaries = []conversations.ConversationSummary{}
 	}
 
 	response := &ListConversationsResponse{

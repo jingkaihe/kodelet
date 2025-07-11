@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/tools"
+	"github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/sashabaranov/go-openai"
 	"github.com/stretchr/testify/assert"
 

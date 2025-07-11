@@ -17,6 +17,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/auth"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/llm/prompts"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/sysprompt"
 	"github.com/jingkaihe/kodelet/pkg/telemetry"
@@ -133,7 +134,7 @@ func NewAnthropicThread(config llmtypes.Config) (*AnthropicThread, error) {
 		client:          client,
 		config:          config,
 		useSubscription: useSubscription,
-		conversationID:  conversations.GenerateID(),
+		conversationID:  convtypes.GenerateID(),
 		isPersisted:     false,
 		usage:           &llmtypes.Usage{}, // must be initialised to avoid nil pointer dereference
 		toolResults:     make(map[string]tooltypes.StructuredToolResult),
@@ -662,7 +663,7 @@ func (t *AnthropicThread) NewSubAgent(ctx context.Context) llmtypes.Thread {
 		client:          t.client, // Reuse parent's client
 		config:          config,
 		useSubscription: t.useSubscription, // Reuse parent's subscription status
-		conversationID:  conversations.GenerateID(),
+		conversationID:  convtypes.GenerateID(),
 		isPersisted:     false,   // subagent is not persisted
 		usage:           t.usage, // Share usage tracking with parent
 	}
