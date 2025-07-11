@@ -214,11 +214,11 @@ func (s *SQLiteConversationStore) Load(ctx context.Context, id string) (conversa
 	return dbRecord.ToConversationRecord(), nil
 }
 
-// List returns all conversation summaries sorted by creation time (newest first)
+// List returns all conversation summaries sorted by update time (newest first)
 func (s *SQLiteConversationStore) List(ctx context.Context) ([]conversations.ConversationSummary, error) {
 	var dbSummaries []dbConversationSummary
 
-	query := "SELECT * FROM conversation_summaries ORDER BY created_at DESC"
+	query := "SELECT * FROM conversation_summaries ORDER BY updated_at DESC"
 	err := s.db.SelectContext(ctx, &dbSummaries, query)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to query conversation summaries")
@@ -279,7 +279,7 @@ func (s *SQLiteConversationStore) Query(ctx context.Context, options conversatio
 	}
 
 	// Build ORDER BY clause
-	sortBy := "created_at"
+	sortBy := "updated_at"
 	switch options.SortBy {
 	case "createdAt":
 		sortBy = "created_at"
