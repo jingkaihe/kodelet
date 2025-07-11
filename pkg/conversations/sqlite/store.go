@@ -214,25 +214,6 @@ func (s *SQLiteConversationStore) Load(ctx context.Context, id string) (conversa
 	return dbRecord.ToConversationRecord(), nil
 }
 
-// List returns all conversation summaries sorted by update time (newest first)
-func (s *SQLiteConversationStore) List(ctx context.Context) ([]conversations.ConversationSummary, error) {
-	var dbSummaries []dbConversationSummary
-
-	query := "SELECT * FROM conversation_summaries ORDER BY updated_at DESC"
-	err := s.db.SelectContext(ctx, &dbSummaries, query)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to query conversation summaries")
-	}
-
-	// Convert to domain models
-	summaries := make([]conversations.ConversationSummary, len(dbSummaries))
-	for i, dbSummary := range dbSummaries {
-		summaries[i] = dbSummary.ToConversationSummary()
-	}
-
-	return summaries, nil
-}
-
 // Delete removes a conversation and its associated data
 func (s *SQLiteConversationStore) Delete(ctx context.Context, id string) error {
 

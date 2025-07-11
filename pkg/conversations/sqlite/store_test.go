@@ -73,9 +73,10 @@ func TestSQLiteConversationStore_BasicOperations(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "conversation not found")
 
-	// Test List
-	summaries, err := store.List(ctx)
+	// Test Query (replaces List)
+	result, err := store.Query(ctx, conversations.QueryOptions{})
 	require.NoError(t, err)
+	summaries := result.ConversationSummaries
 	assert.Len(t, summaries, 1)
 	assert.Equal(t, "test-conversation-1", summaries[0].ID)
 	assert.Equal(t, "Hello world", summaries[0].FirstMessage)
@@ -88,8 +89,9 @@ func TestSQLiteConversationStore_BasicOperations(t *testing.T) {
 	_, err = store.Load(ctx, "test-conversation-1")
 	assert.Error(t, err)
 
-	summaries, err = store.List(ctx)
+	result, err = store.Query(ctx, conversations.QueryOptions{})
 	require.NoError(t, err)
+	summaries = result.ConversationSummaries
 	assert.Len(t, summaries, 0)
 }
 
@@ -268,10 +270,11 @@ func TestSQLiteConversationStore_DefaultSorting(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	// Test List method default sorting (should be updated_at DESC)
-	t.Run("List default sorting", func(t *testing.T) {
-		summaries, err := store.List(ctx)
+	// Test Query method default sorting (should be updated_at DESC)
+	t.Run("Query default sorting", func(t *testing.T) {
+		result, err := store.Query(ctx, conversations.QueryOptions{})
 		require.NoError(t, err)
+		summaries := result.ConversationSummaries
 		assert.Len(t, summaries, 3)
 		
 		// Should be sorted by updated_at DESC (most recently updated first)
@@ -634,9 +637,10 @@ func TestSQLiteConversationStore_DatabaseIntegration(t *testing.T) {
 	assert.False(t, failedResult.Success)
 	assert.Contains(t, failedResult.Error, "éxit with status 1")
 
-	// Test list with complex data
-	summaries, err := store.List(ctx)
+	// Test query with complex data
+	result, err := store.Query(ctx, conversations.QueryOptions{})
 	require.NoError(t, err)
+	summaries := result.ConversationSummaries
 	assert.Len(t, summaries, 1)
 	assert.Equal(t, "Test with unicode characters: éñ中文🌟", summaries[0].Summary)
 }
@@ -759,8 +763,9 @@ func TestSQLiteConversationStore_ConcurrentAccess(t *testing.T) {
 	}
 
 	// Verify all records were saved
-	summaries, err := store.List(ctx)
+	result, err := store.Query(ctx, conversations.QueryOptions{})
 	require.NoError(t, err)
+	summaries := result.ConversationSummaries
 	assert.Len(t, summaries, numGoroutines*recordsPerGoroutine)
 
 	// Test concurrent reads
@@ -772,7 +777,7 @@ func TestSQLiteConversationStore_ConcurrentAccess(t *testing.T) {
 			defer func() { readDone <- true }()
 
 			// Read all records
-			if _, err := store.List(ctx); err != nil {
+			if _, err := store.Query(ctx, conversations.QueryOptions{}); err != nil {
 				readErrChan <- err
 				return
 			}
@@ -984,8 +989,9 @@ func TestSQLiteConversationStore_TimestampBehavior(t *testing.T) {
 	assert.Equal(t, "Final summary", final.Summary)
 
 	// Test that the same behavior applies to conversation summaries
-	summaries, err := store.List(ctx)
+	result, err := store.Query(ctx, conversations.QueryOptions{})
 	require.NoError(t, err)
+	summaries := result.ConversationSummaries
 	require.Len(t, summaries, 1)
 
 	summary := summaries[0]
@@ -1031,7 +1037,7 @@ func TestSQLiteConversationStore_ErrorScenarios(t *testing.T) {
 		require.NoError(t, err)
 
 		// Try to use after close
-		_, err = store2.List(ctx)
+		_, err = store2.Query(ctx, conversations.QueryOptions{})
 		assert.Error(t, err)
 	})
 }

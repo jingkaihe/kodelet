@@ -12,7 +12,6 @@ type ConversationStore interface {
 	// Basic CRUD operations
 	Save(ctx context.Context, record conversations.ConversationRecord) error
 	Load(ctx context.Context, id string) (conversations.ConversationRecord, error)
-	List(ctx context.Context) ([]conversations.ConversationSummary, error)
 	Delete(ctx context.Context, id string) error
 
 	// Advanced query operations
