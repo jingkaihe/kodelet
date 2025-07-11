@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.0.61.alpha (2025-07-11)
+
+### Introduce `sqlite` as the default conversation store
+
+We use the `modernc.org/sqlite` for the sqlite implementation, which is a pure Go SQLite implementation that ensures compatibility across different platforms without requiring any C dependencies. This replaces the previous `bbolt` based store as bolt does not native support multiple-process access.
+
 ## 0.0.60.alpha (2025-07-10)
 
 ### refactor: replace `t.Error` with `t.Fatal` in tests with testify `assert` and `require`.
