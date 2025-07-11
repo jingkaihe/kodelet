@@ -566,6 +566,9 @@ func (t *OpenAIThread) processMessageExchange(
 		})
 	}
 
+	if t.isPersisted && t.store != nil && !opt.NoSaveConversation {
+		t.SaveConversation(ctx, false)
+	}
 	return finalOutput, true, nil
 }
 

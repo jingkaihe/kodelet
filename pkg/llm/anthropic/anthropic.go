@@ -447,6 +447,10 @@ func (t *AnthropicThread) processMessageExchange(
 		}
 	}
 
+	if t.isPersisted && t.store != nil && !opt.NoSaveConversation {
+		t.SaveConversation(ctx, false)
+	}
+
 	// Return whether tools were used in this exchange
 	return finalOutput, toolUseCount > 0, nil
 }
