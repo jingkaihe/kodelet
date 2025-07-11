@@ -294,7 +294,8 @@ func TestSaveConversationMessageCleanup(t *testing.T) {
 						"role": "assistant"
 					}
 				]`
-				messages, _ := DeserializeMessages([]byte(rawMessages))
+				messages, err := DeserializeMessages([]byte(rawMessages))
+				assert.NoError(t, err)
 				return messages
 			}(),
 			expectedMessages: []anthropic.MessageParam{
@@ -362,7 +363,8 @@ func TestSaveConversationMessageCleanup(t *testing.T) {
 						"role": "user"
 					}
 				]`
-				messages, _ := DeserializeMessages([]byte(rawMessages))
+				messages, err := DeserializeMessages([]byte(rawMessages))
+				assert.NoError(t, err)
 				return messages
 			}(),
 			expectedMessages: func() []anthropic.MessageParam {
@@ -406,10 +408,47 @@ func TestSaveConversationMessageCleanup(t *testing.T) {
 						"role": "user"
 					}
 				]`
-				messages, _ := DeserializeMessages([]byte(rawMessages))
+				messages, err := DeserializeMessages([]byte(rawMessages))
+				assert.NoError(t, err)
 				return messages
 			}(),
 			description: "should preserve valid tool use when followed by tool result",
+		},
+		{
+			name: "remove empty textblock with thinking content",
+			initialMessages: func() []anthropic.MessageParam {
+				rawMessages := `[
+					{
+						"content": [
+							{
+								"text": "Hello",
+								"type": "text"
+							}
+						],
+						"role": "user"
+					},
+					{
+						"content": [
+							{
+								"text": "",
+								"type": "text"
+							},
+							{
+								"thinking": "The user is asking for a simple arithmetic calculation. 2+2 equals 4.",
+								"type": "thinking"
+							}
+						],
+						"role": "assistant"
+					}
+				]`
+				messages, err := DeserializeMessages([]byte(rawMessages))
+				require.NoError(t, err)
+				return messages
+			}(),
+			expectedMessages: []anthropic.MessageParam{
+				anthropic.NewUserMessage(anthropic.NewTextBlock("Hello")),
+			},
+			description: "should remove empty textblock even with thinking content",
 		},
 		{
 			name: "complex cleanup scenario",
@@ -455,7 +494,8 @@ func TestSaveConversationMessageCleanup(t *testing.T) {
 						"role": "assistant"
 					}
 				]`
-				messages, _ := DeserializeMessages([]byte(rawMessages))
+				messages, err := DeserializeMessages([]byte(rawMessages))
+				assert.NoError(t, err)
 				return messages
 			}(),
 			expectedMessages: []anthropic.MessageParam{

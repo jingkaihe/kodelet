@@ -15,6 +15,15 @@ import (
 	"github.com/pkg/errors"
 )
 
+func hasAnyEmptyContentTextBlock(message *anthropic.MessageParam) bool {
+	for _, contentBlock := range message.Content {
+		if textBlock := contentBlock.OfText; textBlock != nil && strings.TrimSpace(textBlock.Text) == "" {
+			return true
+		}
+	}
+	return false
+}
+
 // cleanupOrphanedMessages removes orphaned messages from the end of the message list.
 // This includes:
 // - Empty messages (messages with no content)
@@ -28,7 +37,7 @@ func (t *AnthropicThread) cleanupOrphanedMessages() {
 			continue
 		}
 		// remove the last message if it is an empty message
-		if len(lastMessage.Content) == 1 && lastMessage.Content[0].OfText != nil && lastMessage.Content[0].OfText.Text == "" {
+		if hasAnyEmptyContentTextBlock(&lastMessage) {
 			t.messages = t.messages[:len(t.messages)-1]
 			continue
 		}
