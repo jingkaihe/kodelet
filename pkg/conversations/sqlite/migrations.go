@@ -178,8 +178,6 @@ func (s *SQLiteConversationStore) applyMigration(migration Migration) error {
 	return tx.Commit()
 }
 
-
-
 // validateSchema validates that the database schema matches expectations
 func (s *SQLiteConversationStore) validateSchema() error {
 	// Check that all required tables exist
@@ -212,7 +210,7 @@ func (s *SQLiteConversationStore) validateSchema() error {
 	}
 
 	if currentVersion != CurrentSchemaVersion {
-		return errors.Errorf("schema version mismatch: expected %d, got %d", 
+		return errors.Errorf("schema version mismatch: expected %d, got %d",
 			CurrentSchemaVersion, currentVersion)
 	}
 

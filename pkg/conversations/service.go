@@ -9,10 +9,10 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/jingkaihe/kodelet/pkg/usage"
-	"github.com/jingkaihe/kodelet/pkg/types/conversations"
 )
 
 // toUsageSummaries converts conversations.ConversationSummary slice to usage.ConversationSummary interface slice
@@ -69,12 +69,12 @@ type ListConversationsRequest struct {
 
 // ListConversationsResponse represents the response from listing conversations
 type ListConversationsResponse struct {
-	Conversations []conversations.ConversationSummary   `json:"conversations"`
-	Total         int                     `json:"total"`
-	Limit         int                     `json:"limit"`
-	Offset        int                     `json:"offset"`
-	HasMore       bool                    `json:"hasMore"`
-	Stats         *ConversationStatistics `json:"stats,omitempty"`
+	Conversations []conversations.ConversationSummary `json:"conversations"`
+	Total         int                                 `json:"total"`
+	Limit         int                                 `json:"limit"`
+	Offset        int                                 `json:"offset"`
+	HasMore       bool                                `json:"hasMore"`
+	Stats         *ConversationStatistics             `json:"stats,omitempty"`
 }
 
 // GetConversationResponse represents the response from getting a conversation

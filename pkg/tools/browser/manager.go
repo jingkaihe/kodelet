@@ -13,8 +13,8 @@ import (
 	"github.com/chromedp/chromedp"
 	"github.com/google/uuid"
 	"github.com/jingkaihe/kodelet/pkg/logger"
-	"github.com/pkg/errors"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/pkg/errors"
 )
 
 // Element represents a crawled element with its position and metadata

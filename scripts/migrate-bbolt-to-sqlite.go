@@ -122,7 +122,7 @@ func writeConversationsToSQLite(dbPath string, records []conversations.Conversat
 		if err := store.Save(ctx, record); err != nil {
 			return errors.Wrapf(err, "failed to save conversation %s (record %d)", record.ID, i+1)
 		}
-		
+
 		// Print progress for large migrations
 		if (i+1)%10 == 0 || i+1 == len(records) {
 			fmt.Printf("Migrated %d/%d conversations\n", i+1, len(records))

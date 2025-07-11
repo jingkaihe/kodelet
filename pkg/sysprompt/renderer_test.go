@@ -56,7 +56,7 @@ func TestRenderer(t *testing.T) {
 		for _, component := range components {
 			result, err := renderer.RenderPrompt(component, ctx)
 			assert.NoError(t, err, "Failed to render component %s", component)
-			
+
 			assert.NotEqual(t, 0, len(result), "Rendered component %s has zero length", component)
 		}
 	})

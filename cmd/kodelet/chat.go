@@ -10,8 +10,8 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/jingkaihe/kodelet/pkg/tools"
-	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/jingkaihe/kodelet/pkg/tui"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )

@@ -4,9 +4,9 @@ package sqlite
 
 const (
 	// Schema version constants
-	SchemaVersion1         = 1
-	SchemaVersion2         = 2
-	CurrentSchemaVersion   = SchemaVersion2
+	SchemaVersion1       = 1
+	SchemaVersion2       = 2
+	CurrentSchemaVersion = SchemaVersion2
 )
 
 // createSchemaVersionTable creates the schema version tracking table

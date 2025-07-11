@@ -113,8 +113,6 @@ func NewConversationEditConfig() *ConversationEditConfig {
 	}
 }
 
-
-
 var conversationCmd = &cobra.Command{
 	Use:   "conversation",
 	Short: "Manage saved conversations",
@@ -195,8 +193,6 @@ var conversationEditCmd = &cobra.Command{
 		editConversationCmd(ctx, args[0], config)
 	},
 }
-
-
 
 func init() {
 	// Add list command flags
@@ -335,8 +331,6 @@ func getConversationEditConfigFromFlags(cmd *cobra.Command) *ConversationEditCon
 
 	return config
 }
-
-
 
 // OutputFormat defines the format of the output
 type OutputFormat int
@@ -919,5 +913,3 @@ func editConversationCmd(ctx context.Context, conversationID string, config *Con
 
 	presenter.Success(fmt.Sprintf("Conversation %s edited successfully", conversationID))
 }
-
-

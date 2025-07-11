@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/invopop/jsonschema"
-	"github.com/pkg/errors"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/jingkaihe/kodelet/pkg/utils"
+	"github.com/pkg/errors"
 	"go.opentelemetry.io/otel/attribute"
 )
 

@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/pkg/errors"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/pkg/errors"
 
 	"github.com/jingkaihe/kodelet/pkg/types/conversations"
 )
@@ -42,27 +42,27 @@ func (j JSONField[T]) Value() (driver.Value, error) {
 
 // dbConversationRecord represents the conversations table structure
 type dbConversationRecord struct {
-	ID             string                                                 `db:"id"`
-	RawMessages    json.RawMessage                                        `db:"raw_messages"`
-	ModelType      string                                                 `db:"model_type"`
-	FileLastAccess JSONField[map[string]time.Time]                       `db:"file_last_access"`
-	Usage          JSONField[llmtypes.Usage]                              `db:"usage"`
-	Summary        *string                                                `db:"summary"` // NULL in database
-	CreatedAt      time.Time                                              `db:"created_at"`
-	UpdatedAt      time.Time                                              `db:"updated_at"`
-	Metadata       JSONField[map[string]interface{}]                      `db:"metadata"`
-	ToolResults    JSONField[map[string]tools.StructuredToolResult]       `db:"tool_results"`
+	ID             string                                           `db:"id"`
+	RawMessages    json.RawMessage                                  `db:"raw_messages"`
+	ModelType      string                                           `db:"model_type"`
+	FileLastAccess JSONField[map[string]time.Time]                  `db:"file_last_access"`
+	Usage          JSONField[llmtypes.Usage]                        `db:"usage"`
+	Summary        *string                                          `db:"summary"` // NULL in database
+	CreatedAt      time.Time                                        `db:"created_at"`
+	UpdatedAt      time.Time                                        `db:"updated_at"`
+	Metadata       JSONField[map[string]interface{}]                `db:"metadata"`
+	ToolResults    JSONField[map[string]tools.StructuredToolResult] `db:"tool_results"`
 }
 
 // dbConversationSummary represents the conversation_summaries table structure
 type dbConversationSummary struct {
-	ID           string                        `db:"id"`
-	MessageCount int                           `db:"message_count"`
-	FirstMessage string                        `db:"first_message"`
-	Summary      *string                       `db:"summary"` // NULL in database
-	Usage        JSONField[llmtypes.Usage]     `db:"usage"`
-	CreatedAt    time.Time                     `db:"created_at"`
-	UpdatedAt    time.Time                     `db:"updated_at"`
+	ID           string                    `db:"id"`
+	MessageCount int                       `db:"message_count"`
+	FirstMessage string                    `db:"first_message"`
+	Summary      *string                   `db:"summary"` // NULL in database
+	Usage        JSONField[llmtypes.Usage] `db:"usage"`
+	CreatedAt    time.Time                 `db:"created_at"`
+	UpdatedAt    time.Time                 `db:"updated_at"`
 }
 
 // ToConversationRecord converts database record to domain model

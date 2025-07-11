@@ -47,7 +47,7 @@ func TestBashToolBackgroundParameter(t *testing.T) {
 				// Wait for the server to start and curl to complete
 				indexFile := filepath.Join(testDir, "index.html")
 				helloFile := filepath.Join(testDir, "hello.txt")
-				
+
 				assert.True(t, utils.WaitForFiles(10*time.Second, 100*time.Millisecond, indexFile, helloFile), "Expected files to be created within timeout")
 
 				// Check if index.html was created
@@ -278,7 +278,7 @@ func TestBackgroundProcessLogFiles(t *testing.T) {
 
 		// Wait for the background process to complete and log to contain all expected lines
 		expectedLines := []string{"Hello from background", "Line 2", "Line 3"}
-		
+
 		assert.True(t, utils.WaitForFileContent(5*time.Second, 100*time.Millisecond, logPath, expectedLines), "Expected log file to contain all expected lines within timeout")
 
 		// Check if log file exists
