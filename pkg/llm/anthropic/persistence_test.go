@@ -158,7 +158,7 @@ func TestSaveAndLoadConversationWithFileLastAccess(t *testing.T) {
 	// Create a unique temporary directory for this test
 	tempDir := t.TempDir()
 
-	// Create a BBolt store directly with a unique database path
+	// Create a conversation store directly with a unique database path
 	store, err := conversations.NewConversationStore(context.Background(), &conversations.Config{
 		StoreType: "sqlite",
 		BasePath:  tempDir,

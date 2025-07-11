@@ -24,7 +24,7 @@ type ConversationStore interface {
 
 // Config holds configuration for the conversation store
 type Config struct {
-	StoreType string // "bbolt" or "sqlite"
+	StoreType string // "sqlite"
 	BasePath  string // Base storage path
 }
 

@@ -7,7 +7,6 @@ import (
 
 	"github.com/pkg/errors"
 
-	"github.com/jingkaihe/kodelet/pkg/conversations/bbolt"
 	"github.com/jingkaihe/kodelet/pkg/conversations/sqlite"
 )
 
@@ -24,16 +23,13 @@ func NewConversationStore(ctx context.Context, config *Config) (ConversationStor
 	}
 
 	switch config.StoreType {
-	case "bbolt":
-		dbPath := filepath.Join(config.BasePath, "storage.db")
-		return bbolt.NewBBoltConversationStore(ctx, dbPath)
 	case "sqlite":
 		dbPath := filepath.Join(config.BasePath, "storage.db")
 		return sqlite.NewSQLiteConversationStore(ctx, dbPath)
 	default:
-		// Default to BBolt store for compatibility
+		// Default to SQLite store
 		dbPath := filepath.Join(config.BasePath, "storage.db")
-		return bbolt.NewBBoltConversationStore(ctx, dbPath)
+		return sqlite.NewSQLiteConversationStore(ctx, dbPath)
 	}
 }
 
