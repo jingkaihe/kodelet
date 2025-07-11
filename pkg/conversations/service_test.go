@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
@@ -14,66 +15,66 @@ import (
 
 // mockConversationStore implements ConversationStore for testing
 type mockConversationStore struct {
-	conversations map[string]*ConversationRecord
-	summaries     []ConversationSummary
-	queryFunc     func(options QueryOptions) (QueryResult, error)
-	loadFunc      func(id string) (*ConversationRecord, error)
-	deleteFunc    func(id string) error
-	listFunc      func() ([]ConversationSummary, error)
+	conversations map[string]*conversations.ConversationRecord
+	summaries     []conversations.ConversationSummary
+	queryFunc     func(ctx context.Context, options conversations.QueryOptions) (conversations.QueryResult, error)
+	loadFunc      func(ctx context.Context, id string) (*conversations.ConversationRecord, error)
+	deleteFunc    func(ctx context.Context, id string) error
+	listFunc      func(ctx context.Context) ([]conversations.ConversationSummary, error)
 	closeFunc     func() error
 }
 
 func newMockConversationStore() *mockConversationStore {
 	return &mockConversationStore{
-		conversations: make(map[string]*ConversationRecord),
-		summaries:     []ConversationSummary{},
+		conversations: make(map[string]*conversations.ConversationRecord),
+		summaries:     []conversations.ConversationSummary{},
 	}
 }
 
-func (m *mockConversationStore) Save(record ConversationRecord) error {
+func (m *mockConversationStore) Save(ctx context.Context, record conversations.ConversationRecord) error {
 	m.conversations[record.ID] = &record
 	return nil
 }
 
-func (m *mockConversationStore) Load(id string) (ConversationRecord, error) {
+func (m *mockConversationStore) Load(ctx context.Context, id string) (conversations.ConversationRecord, error) {
 	if m.loadFunc != nil {
-		rec, err := m.loadFunc(id)
+		rec, err := m.loadFunc(ctx, id)
 		if err != nil {
-			return ConversationRecord{}, err
+			return conversations.ConversationRecord{}, err
 		}
 		if rec == nil {
-			return ConversationRecord{}, errors.New("conversation not found")
+			return conversations.ConversationRecord{}, errors.New("conversation not found")
 		}
 		return *rec, nil
 	}
 	record, exists := m.conversations[id]
 	if !exists {
-		return ConversationRecord{}, errors.New("conversation not found")
+		return conversations.ConversationRecord{}, errors.New("conversation not found")
 	}
 	return *record, nil
 }
 
-func (m *mockConversationStore) List() ([]ConversationSummary, error) {
+func (m *mockConversationStore) List(ctx context.Context) ([]conversations.ConversationSummary, error) {
 	if m.listFunc != nil {
-		return m.listFunc()
+		return m.listFunc(ctx)
 	}
 	return m.summaries, nil
 }
 
-func (m *mockConversationStore) Query(options QueryOptions) (QueryResult, error) {
+func (m *mockConversationStore) Query(ctx context.Context, options conversations.QueryOptions) (conversations.QueryResult, error) {
 	if m.queryFunc != nil {
-		return m.queryFunc(options)
+		return m.queryFunc(ctx, options)
 	}
-	return QueryResult{
+	return conversations.QueryResult{
 		ConversationSummaries: m.summaries,
 		Total:                 len(m.summaries),
 		QueryOptions:          options,
 	}, nil
 }
 
-func (m *mockConversationStore) Delete(id string) error {
+func (m *mockConversationStore) Delete(ctx context.Context, id string) error {
 	if m.deleteFunc != nil {
-		return m.deleteFunc(id)
+		return m.deleteFunc(ctx, id)
 	}
 	delete(m.conversations, id)
 	return nil
@@ -90,7 +91,7 @@ func TestConversationService_ListConversations(t *testing.T) {
 	tests := []struct {
 		name           string
 		request        *ListConversationsRequest
-		storeSummaries []ConversationSummary
+		storeSummaries []conversations.ConversationSummary
 		storeError     error
 		expectedError  bool
 		expectedCount  int
@@ -98,7 +99,7 @@ func TestConversationService_ListConversations(t *testing.T) {
 		{
 			name:    "successful list with defaults",
 			request: &ListConversationsRequest{},
-			storeSummaries: []ConversationSummary{
+			storeSummaries: []conversations.ConversationSummary{
 				{ID: "1", CreatedAt: time.Now(), UpdatedAt: time.Now()},
 				{ID: "2", CreatedAt: time.Now(), UpdatedAt: time.Now()},
 			},
@@ -110,7 +111,7 @@ func TestConversationService_ListConversations(t *testing.T) {
 				SearchTerm: "test",
 				Limit:      10,
 			},
-			storeSummaries: []ConversationSummary{
+			storeSummaries: []conversations.ConversationSummary{
 				{ID: "1", Summary: "test conversation"},
 			},
 			expectedCount: 1,
@@ -118,7 +119,7 @@ func TestConversationService_ListConversations(t *testing.T) {
 		{
 			name:           "empty list",
 			request:        &ListConversationsRequest{},
-			storeSummaries: []ConversationSummary{},
+			storeSummaries: []conversations.ConversationSummary{},
 			expectedCount:  0,
 		},
 		{
@@ -134,8 +135,8 @@ func TestConversationService_ListConversations(t *testing.T) {
 			mockStore := newMockConversationStore()
 			mockStore.summaries = tt.storeSummaries
 			if tt.storeError != nil {
-				mockStore.queryFunc = func(options QueryOptions) (QueryResult, error) {
-					return QueryResult{}, tt.storeError
+				mockStore.queryFunc = func(ctx context.Context, options conversations.QueryOptions) (conversations.QueryResult, error) {
+					return conversations.QueryResult{}, tt.storeError
 				}
 			}
 
@@ -159,7 +160,7 @@ func TestConversationService_ListConversations(t *testing.T) {
 
 func TestConversationService_GetConversation(t *testing.T) {
 	now := time.Now()
-	testRecord := &ConversationRecord{
+	testRecord := &conversations.ConversationRecord{
 		ID:          "test-id",
 		CreatedAt:   now,
 		UpdatedAt:   now,
@@ -175,7 +176,7 @@ func TestConversationService_GetConversation(t *testing.T) {
 	tests := []struct {
 		name          string
 		id            string
-		storeRecord   *ConversationRecord
+		storeRecord   *conversations.ConversationRecord
 		storeError    error
 		expectedError bool
 	}{
@@ -205,7 +206,7 @@ func TestConversationService_GetConversation(t *testing.T) {
 				mockStore.conversations[tt.storeRecord.ID] = tt.storeRecord
 			}
 			if tt.storeError != nil {
-				mockStore.loadFunc = func(id string) (*ConversationRecord, error) {
+				mockStore.loadFunc = func(ctx context.Context, id string) (*conversations.ConversationRecord, error) {
 					return nil, tt.storeError
 				}
 			}
@@ -252,7 +253,7 @@ func TestConversationService_DeleteConversation(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mockStore := newMockConversationStore()
 			if tt.storeError != nil {
-				mockStore.deleteFunc = func(id string) error {
+				mockStore.deleteFunc = func(ctx context.Context, id string) error {
 					return tt.storeError
 				}
 			}
@@ -276,7 +277,7 @@ func TestConversationService_ResolveConversationID(t *testing.T) {
 	tests := []struct {
 		name           string
 		id             string
-		storeSummaries []ConversationSummary
+		storeSummaries []conversations.ConversationSummary
 		expectedID     string
 		expectedError  bool
 		errorContains  string
@@ -289,7 +290,7 @@ func TestConversationService_ResolveConversationID(t *testing.T) {
 		{
 			name: "short ID with single match",
 			id:   "abc",
-			storeSummaries: []ConversationSummary{
+			storeSummaries: []conversations.ConversationSummary{
 				{ID: "abcdef12-1234-1234-1234-123456789012"},
 				{ID: "defabc12-1234-1234-1234-123456789012"},
 			},
@@ -298,7 +299,7 @@ func TestConversationService_ResolveConversationID(t *testing.T) {
 		{
 			name: "short ID with no matches",
 			id:   "xyz",
-			storeSummaries: []ConversationSummary{
+			storeSummaries: []conversations.ConversationSummary{
 				{ID: "abcdef12-1234-1234-1234-123456789012"},
 			},
 			expectedError: true,
@@ -307,7 +308,7 @@ func TestConversationService_ResolveConversationID(t *testing.T) {
 		{
 			name: "short ID with multiple matches",
 			id:   "abc",
-			storeSummaries: []ConversationSummary{
+			storeSummaries: []conversations.ConversationSummary{
 				{ID: "abcdef12-1234-1234-1234-123456789012"},
 				{ID: "abc12345-1234-1234-1234-123456789012"},
 			},
@@ -347,14 +348,14 @@ func TestConversationService_GetConversationStatistics(t *testing.T) {
 
 	tests := []struct {
 		name           string
-		storeSummaries []ConversationSummary
+		storeSummaries []conversations.ConversationSummary
 		storeError     error
 		expectedStats  *ConversationStatistics
 		expectedError  bool
 	}{
 		{
 			name: "statistics with conversations",
-			storeSummaries: []ConversationSummary{
+			storeSummaries: []conversations.ConversationSummary{
 				{ID: "1", CreatedAt: earlier, UpdatedAt: now, MessageCount: 5},
 				{ID: "2", CreatedAt: now, UpdatedAt: later, MessageCount: 3},
 			},
@@ -365,7 +366,7 @@ func TestConversationService_GetConversationStatistics(t *testing.T) {
 		},
 		{
 			name:           "empty statistics",
-			storeSummaries: []ConversationSummary{},
+			storeSummaries: []conversations.ConversationSummary{},
 			expectedStats: &ConversationStatistics{
 				TotalConversations: 0,
 				TotalMessages:      0,
@@ -385,7 +386,7 @@ func TestConversationService_GetConversationStatistics(t *testing.T) {
 
 			// Set up conversation records for the summaries
 			for _, summary := range tt.storeSummaries {
-				record := &ConversationRecord{
+				record := &conversations.ConversationRecord{
 					ID:          summary.ID,
 					CreatedAt:   summary.CreatedAt,
 					UpdatedAt:   summary.UpdatedAt,
@@ -399,7 +400,7 @@ func TestConversationService_GetConversationStatistics(t *testing.T) {
 			}
 
 			if tt.storeError != nil {
-				mockStore.listFunc = func() ([]ConversationSummary, error) {
+				mockStore.listFunc = func(ctx context.Context) ([]conversations.ConversationSummary, error) {
 					return nil, tt.storeError
 				}
 			}

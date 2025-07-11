@@ -8,12 +8,21 @@ import (
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
-	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
 )
+
+func hasAnyEmptyContentTextBlock(message *anthropic.MessageParam) bool {
+	for _, contentBlock := range message.Content {
+		if textBlock := contentBlock.OfText; textBlock != nil && strings.TrimSpace(textBlock.Text) == "" {
+			return true
+		}
+	}
+	return false
+}
 
 // cleanupOrphanedMessages removes orphaned messages from the end of the message list.
 // This includes:
@@ -28,7 +37,7 @@ func (t *AnthropicThread) cleanupOrphanedMessages() {
 			continue
 		}
 		// remove the last message if it is an empty message
-		if len(lastMessage.Content) == 1 && lastMessage.Content[0].OfText != nil && lastMessage.Content[0].OfText.Text == "" {
+		if hasAnyEmptyContentTextBlock(&lastMessage) {
 			t.messages = t.messages[:len(t.messages)-1]
 			continue
 		}
@@ -73,7 +82,7 @@ func (t *AnthropicThread) SaveConversation(ctx context.Context, summarise bool) 
 	}
 
 	// Create a new conversation record
-	record := conversations.ConversationRecord{
+	record := convtypes.ConversationRecord{
 		ID:             t.conversationID,
 		RawMessages:    rawMessages,
 		ModelType:      "anthropic",
@@ -87,11 +96,11 @@ func (t *AnthropicThread) SaveConversation(ctx context.Context, summarise bool) 
 	}
 
 	// Save the record
-	return t.store.Save(record)
+	return t.store.Save(ctx, record)
 }
 
 // loadConversation loads a conversation from the store into the thread
-func (t *AnthropicThread) loadConversation() error {
+func (t *AnthropicThread) loadConversation(ctx context.Context) error {
 	t.conversationMu.Lock()
 	defer t.conversationMu.Unlock()
 
@@ -100,7 +109,7 @@ func (t *AnthropicThread) loadConversation() error {
 	}
 
 	// Try to load the conversation
-	record, err := t.store.Load(t.conversationID)
+	record, err := t.store.Load(ctx, t.conversationID)
 	if err != nil {
 		return errors.Wrap(err, "failed to load conversation")
 	}

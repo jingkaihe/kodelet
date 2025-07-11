@@ -1,50 +1,71 @@
 package conversations
 
 import (
-	"time"
-)
+	"context"
+	"errors"
 
-// QueryOptions provides filtering and sorting options for conversation queries
-type QueryOptions struct {
-	StartDate  *time.Time // Filter by start date
-	EndDate    *time.Time // Filter by end date
-	SearchTerm string     // Text to search for in messages
-	Limit      int        // Maximum number of results
-	Offset     int        // Offset for pagination
-	SortBy     string     // Field to sort by
-	SortOrder  string     // "asc" or "desc"
-}
+	"github.com/jingkaihe/kodelet/pkg/types/conversations"
+)
 
 // ConversationStore defines the interface for conversation persistence
 type ConversationStore interface {
 	// Basic CRUD operations
-	Save(record ConversationRecord) error
-	Load(id string) (ConversationRecord, error)
-	List() ([]ConversationSummary, error)
-	Delete(id string) error
+	Save(ctx context.Context, record conversations.ConversationRecord) error
+	Load(ctx context.Context, id string) (conversations.ConversationRecord, error)
+	List(ctx context.Context) ([]conversations.ConversationSummary, error)
+	Delete(ctx context.Context, id string) error
 
 	// Advanced query operations
-	Query(options QueryOptions) (QueryResult, error)
+	Query(ctx context.Context, options conversations.QueryOptions) (conversations.QueryResult, error)
 
 	// Lifecycle methods
-	Close() error
+	Close() error // Close doesn't need context
 }
 
 // Config holds configuration for the conversation store
 type Config struct {
-	StoreType string // "json", "bbolt", or "sqlite"
+	StoreType string // "sqlite"
 	BasePath  string // Base storage path
 }
 
 // DefaultConfig returns a default configuration
 func DefaultConfig() (*Config, error) {
-	basePath, err := GetDefaultBasePath()
+	basePath, err := conversations.GetDefaultBasePath()
 	if err != nil {
 		return nil, err
 	}
 
 	return &Config{
-		StoreType: "bbolt", // BBolt store is now the default
+		StoreType: "sqlite", // SQLite store is now the default
 		BasePath:  basePath,
 	}, nil
+}
+
+// GetMostRecentConversationID returns the ID of the most recent conversation
+func GetMostRecentConversationID(ctx context.Context) (string, error) {
+	store, err := GetConversationStore(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer store.Close()
+
+	// Query for the most recent conversation
+	options := conversations.QueryOptions{
+		Limit:     1,
+		Offset:    0,
+		SortBy:    "updated_at",
+		SortOrder: "desc",
+	}
+
+	result, err := store.Query(ctx, options)
+	if err != nil {
+		return "", err
+	}
+
+	summaries := result.ConversationSummaries
+	if len(summaries) == 0 {
+		return "", errors.New("no conversations found")
+	}
+
+	return summaries[0].ID, nil
 }

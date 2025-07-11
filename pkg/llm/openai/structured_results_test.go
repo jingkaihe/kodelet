@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
@@ -175,12 +175,12 @@ type mockConversationStore struct {
 	loadErr error
 }
 
-func (m *mockConversationStore) Save(record conversations.ConversationRecord) error {
+func (m *mockConversationStore) Save(ctx context.Context, record conversations.ConversationRecord) error {
 	m.saved = record
 	return m.saveErr
 }
 
-func (m *mockConversationStore) Load(id string) (conversations.ConversationRecord, error) {
+func (m *mockConversationStore) Load(ctx context.Context, id string) (conversations.ConversationRecord, error) {
 	if m.loadErr != nil {
 		return conversations.ConversationRecord{}, m.loadErr
 	}
@@ -191,15 +191,15 @@ func (m *mockConversationStore) Close() error {
 	return nil
 }
 
-func (m *mockConversationStore) Delete(id string) error {
+func (m *mockConversationStore) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-func (m *mockConversationStore) List() ([]conversations.ConversationSummary, error) {
+func (m *mockConversationStore) List(ctx context.Context) ([]conversations.ConversationSummary, error) {
 	return []conversations.ConversationSummary{}, nil
 }
 
-func (m *mockConversationStore) Query(options conversations.QueryOptions) (conversations.QueryResult, error) {
+func (m *mockConversationStore) Query(ctx context.Context, options conversations.QueryOptions) (conversations.QueryResult, error) {
 	return conversations.QueryResult{
 		ConversationSummaries: []conversations.ConversationSummary{},
 		Total:                 0,
@@ -302,7 +302,7 @@ func TestOpenAIThread_PersistenceWithStructuredResults(t *testing.T) {
 	thread2.conversationID = mockStore.saved.ID
 	thread2.state = &mockState{}
 
-	err = thread2.loadConversation()
+	err = thread2.loadConversation(context.Background())
 	require.NoError(t, err)
 
 	// Verify loaded structured results

@@ -10,6 +10,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
@@ -132,7 +133,7 @@ func TestServer_handleListConversations(t *testing.T) {
 	mockService := &mockConversationService{
 		listFunc: func(ctx context.Context, req *conversations.ListConversationsRequest) (*conversations.ListConversationsResponse, error) {
 			return &conversations.ListConversationsResponse{
-				Conversations: []conversations.ConversationSummary{
+				Conversations: []convtypes.ConversationSummary{
 					{ID: "1", Summary: "Test 1"},
 					{ID: "2", Summary: "Test 2"},
 				},

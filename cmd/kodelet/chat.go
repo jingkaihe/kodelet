@@ -11,6 +11,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	"github.com/jingkaihe/kodelet/pkg/tui"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
@@ -34,7 +35,7 @@ func init() {
 	chatCmd.Flags().BoolVar(&chatOptions.usePlainUI, "plain", false, "Use the plain command-line interface instead of the TUI")
 	chatCmd.Flags().StringVar(&chatOptions.resumeConvID, "resume", "", "Resume a specific conversation")
 	chatCmd.Flags().BoolVarP(&chatOptions.follow, "follow", "f", false, "Follow the most recent conversation")
-	chatCmd.Flags().StringVar(&chatOptions.storageType, "storage", "json", "Specify storage backend (json or sqlite)")
+	chatCmd.Flags().StringVar(&chatOptions.storageType, "storage", "sqlite", "Storage backend (sqlite only)")
 	chatCmd.Flags().BoolVar(&chatOptions.noSave, "no-save", false, "Disable conversation persistence")
 	chatCmd.Flags().IntVar(&chatOptions.maxTurns, "max-turns", 50, "Maximum number of turns within a single message exchange (0 for no limit)")
 	chatCmd.Flags().BoolVar(&chatOptions.enableBrowserTools, "enable-browser-tools", false, "Enable browser automation tools (navigate, click, type, screenshot, etc.)")
@@ -111,7 +112,7 @@ var chatCmd = &cobra.Command{
 			// Generate or use existing conversation ID for log redirection
 			conversationID := chatOptions.resumeConvID
 			if conversationID == "" && !chatOptions.noSave {
-				conversationID = conversations.GenerateID()
+				conversationID = convtypes.GenerateID()
 			}
 
 			// Set up TUI log redirection if we have a conversation ID

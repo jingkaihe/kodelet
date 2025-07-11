@@ -9,6 +9,17 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
+// QueryOptions provides filtering and sorting options for conversation queries
+type QueryOptions struct {
+	StartDate  *time.Time // Filter by start date
+	EndDate    *time.Time // Filter by end date
+	SearchTerm string     // Text to search for in messages
+	Limit      int        // Maximum number of results
+	Offset     int        // Offset for pagination
+	SortBy     string     // Field to sort by
+	SortOrder  string     // "asc" or "desc"
+}
+
 // ConversationRecord represents a persisted conversation with its messages and metadata
 type ConversationRecord struct {
 	ID             string                                `json:"id"`

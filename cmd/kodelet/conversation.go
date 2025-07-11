@@ -9,7 +9,6 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -17,6 +16,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
@@ -113,28 +113,6 @@ func NewConversationEditConfig() *ConversationEditConfig {
 	}
 }
 
-// MigrationConfig holds configuration for the migration command
-type MigrationConfig struct {
-	DryRun     bool
-	Force      bool
-	BackupPath string
-	Verbose    bool
-	JSONPath   string
-	DBPath     string
-}
-
-// NewMigrationConfig creates a new MigrationConfig with default values
-func NewMigrationConfig() *MigrationConfig {
-	return &MigrationConfig{
-		DryRun:     false,
-		Force:      false,
-		BackupPath: "",
-		Verbose:    false,
-		JSONPath:   "",
-		DBPath:     "",
-	}
-}
-
 var conversationCmd = &cobra.Command{
 	Use:   "conversation",
 	Short: "Manage saved conversations",
@@ -216,17 +194,6 @@ var conversationEditCmd = &cobra.Command{
 	},
 }
 
-var conversationMigrateCmd = &cobra.Command{
-	Use:   "migrate",
-	Short: "Migrate conversations from JSON to BBolt format",
-	Long:  `Migrate existing JSON conversations to the new BBolt format for better performance and multi-process support.`,
-	Run: func(cmd *cobra.Command, args []string) {
-		ctx := cmd.Context()
-		config := getMigrationConfigFromFlags(cmd)
-		migrateConversationsCmd(ctx, config)
-	},
-}
-
 func init() {
 	// Add list command flags
 	listDefaults := NewConversationListConfig()
@@ -261,15 +228,6 @@ func init() {
 	conversationEditCmd.Flags().String("editor", editDefaults.Editor, "Editor to use for editing the conversation (default: git config core.editor, then $EDITOR, then vim)")
 	conversationEditCmd.Flags().String("edit-args", editDefaults.EditArgs, "Additional arguments to pass to the editor (e.g., '--wait' for VS Code)")
 
-	// Add migrate command flags
-	migrateDefaults := NewMigrationConfig()
-	conversationMigrateCmd.Flags().Bool("dry-run", migrateDefaults.DryRun, "Show what would be migrated without actually migrating")
-	conversationMigrateCmd.Flags().Bool("force", migrateDefaults.Force, "Overwrite existing conversations in target store")
-	conversationMigrateCmd.Flags().String("backup-path", migrateDefaults.BackupPath, "Path to backup JSON files (default: ~/.kodelet/backup)")
-	conversationMigrateCmd.Flags().Bool("verbose", migrateDefaults.Verbose, "Show detailed migration progress")
-	conversationMigrateCmd.Flags().String("json-path", migrateDefaults.JSONPath, "Path to JSON conversations directory (default: ~/.kodelet/conversations)")
-	conversationMigrateCmd.Flags().String("db-path", migrateDefaults.DBPath, "Path to BBolt database file (default: ~/.kodelet/storage.db)")
-
 	// Add subcommands
 	conversationCmd.AddCommand(conversationListCmd)
 	conversationCmd.AddCommand(conversationDeleteCmd)
@@ -277,7 +235,6 @@ func init() {
 	conversationCmd.AddCommand(conversationImportCmd)
 	conversationCmd.AddCommand(conversationExportCmd)
 	conversationCmd.AddCommand(conversationEditCmd)
-	conversationCmd.AddCommand(conversationMigrateCmd)
 }
 
 // getConversationListConfigFromFlags extracts list configuration from command flags
@@ -375,32 +332,6 @@ func getConversationEditConfigFromFlags(cmd *cobra.Command) *ConversationEditCon
 	return config
 }
 
-// getMigrationConfigFromFlags extracts migration configuration from command flags
-func getMigrationConfigFromFlags(cmd *cobra.Command) *MigrationConfig {
-	config := NewMigrationConfig()
-
-	if dryRun, err := cmd.Flags().GetBool("dry-run"); err == nil {
-		config.DryRun = dryRun
-	}
-	if force, err := cmd.Flags().GetBool("force"); err == nil {
-		config.Force = force
-	}
-	if backupPath, err := cmd.Flags().GetString("backup-path"); err == nil {
-		config.BackupPath = backupPath
-	}
-	if verbose, err := cmd.Flags().GetBool("verbose"); err == nil {
-		config.Verbose = verbose
-	}
-	if jsonPath, err := cmd.Flags().GetString("json-path"); err == nil {
-		config.JSONPath = jsonPath
-	}
-	if dbPath, err := cmd.Flags().GetString("db-path"); err == nil {
-		config.DBPath = dbPath
-	}
-
-	return config
-}
-
 // OutputFormat defines the format of the output
 type OutputFormat int
 
@@ -416,7 +347,7 @@ type ConversationListOutput struct {
 }
 
 // NewConversationListOutput creates a new ConversationListOutput
-func NewConversationListOutput(summaries []conversations.ConversationSummary, format OutputFormat) *ConversationListOutput {
+func NewConversationListOutput(summaries []convtypes.ConversationSummary, format OutputFormat) *ConversationListOutput {
 	output := &ConversationListOutput{
 		Conversations: make([]ConversationSummaryOutput, 0, len(summaries)),
 		Format:        format,
@@ -521,7 +452,7 @@ func listConversationsCmd(ctx context.Context, config *ConversationListConfig) {
 	defer store.Close()
 
 	// Prepare query options
-	options := conversations.QueryOptions{
+	options := convtypes.QueryOptions{
 		SearchTerm: config.Search,
 		Limit:      config.Limit,
 		Offset:     config.Offset,
@@ -552,7 +483,7 @@ func listConversationsCmd(ctx context.Context, config *ConversationListConfig) {
 	}
 
 	// Query conversations with options
-	result, err := store.Query(options)
+	result, err := store.Query(ctx, options)
 	if err != nil {
 		presenter.Error(err, "Failed to list conversations")
 		os.Exit(1)
@@ -600,7 +531,7 @@ func deleteConversationCmd(ctx context.Context, id string, config *ConversationD
 	}
 
 	// Delete the conversation
-	err = store.Delete(id)
+	err = store.Delete(ctx, id)
 	if err != nil {
 		presenter.Error(err, "Failed to delete conversation")
 		os.Exit(1)
@@ -621,7 +552,7 @@ func showConversationCmd(ctx context.Context, id string, config *ConversationSho
 	defer store.Close()
 
 	// Load the conversation record
-	record, err := store.Load(id)
+	record, err := store.Load(ctx, id)
 	if err != nil {
 		presenter.Error(err, "Failed to load conversation")
 		os.Exit(1)
@@ -711,7 +642,7 @@ func importConversationCmd(ctx context.Context, source string, config *Conversat
 	}
 
 	// Check if conversation already exists
-	if _, err := store.Load(record.ID); err == nil {
+	if _, err := store.Load(ctx, record.ID); err == nil {
 		if !config.Force {
 			presenter.Error(errors.Errorf("conversation with ID %s already exists", record.ID), "Use --force to overwrite")
 			os.Exit(1)
@@ -719,7 +650,7 @@ func importConversationCmd(ctx context.Context, source string, config *Conversat
 	}
 
 	// Save the conversation
-	if err := store.Save(*record); err != nil {
+	if err := store.Save(ctx, *record); err != nil {
 		presenter.Error(err, "Failed to save conversation")
 		os.Exit(1)
 	}
@@ -738,7 +669,7 @@ func exportConversationCmd(ctx context.Context, conversationID string, path stri
 	defer store.Close()
 
 	// Load the conversation
-	record, err := store.Load(conversationID)
+	record, err := store.Load(ctx, conversationID)
 	if err != nil {
 		presenter.Error(err, "Failed to load conversation")
 		os.Exit(1)
@@ -807,8 +738,8 @@ func readFromURL(urlStr string) ([]byte, error) {
 }
 
 // validateConversationRecord validates and parses a conversation record
-func validateConversationRecord(data []byte) (*conversations.ConversationRecord, error) {
-	var record conversations.ConversationRecord
+func validateConversationRecord(data []byte) (*convtypes.ConversationRecord, error) {
+	var record convtypes.ConversationRecord
 	if err := json.Unmarshal(data, &record); err != nil {
 		return nil, errors.Wrap(err, "invalid JSON format")
 	}
@@ -905,7 +836,7 @@ func editConversationCmd(ctx context.Context, conversationID string, config *Con
 	defer store.Close()
 
 	// Load the conversation
-	record, err := store.Load(conversationID)
+	record, err := store.Load(ctx, conversationID)
 	if err != nil {
 		presenter.Error(err, "Failed to load conversation")
 		os.Exit(1)
@@ -975,102 +906,10 @@ func editConversationCmd(ctx context.Context, conversationID string, config *Con
 	}
 
 	// Save the edited conversation
-	if err := store.Save(*editedRecord); err != nil {
+	if err := store.Save(ctx, *editedRecord); err != nil {
 		presenter.Error(err, "Failed to save edited conversation")
 		os.Exit(1)
 	}
 
 	presenter.Success(fmt.Sprintf("Conversation %s edited successfully", conversationID))
-}
-
-// migrateConversationsCmd performs the migration operation
-func migrateConversationsCmd(ctx context.Context, config *MigrationConfig) {
-	basePath, err := conversations.GetDefaultBasePath()
-	if err != nil {
-		presenter.Error(err, "Failed to get default base path")
-		os.Exit(1)
-	}
-
-	// Set default paths if not provided
-	if config.JSONPath == "" {
-		config.JSONPath = basePath
-	}
-
-	if config.DBPath == "" {
-		config.DBPath = filepath.Join(basePath, "storage.db")
-	}
-
-	if config.BackupPath == "" {
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			presenter.Error(err, "Failed to get home directory")
-			os.Exit(1)
-		}
-		config.BackupPath = filepath.Join(homeDir, ".cache", "kodelet", "backup")
-	}
-
-	// Check if there are conversations to migrate
-	conversationIDs, err := conversations.DetectJSONConversations(ctx, config.JSONPath)
-	if err != nil {
-		presenter.Error(err, "Failed to detect JSON conversations")
-		os.Exit(1)
-	}
-
-	if len(conversationIDs) == 0 {
-		presenter.Info("No JSON conversations found to migrate")
-		return
-	}
-
-	presenter.Info(fmt.Sprintf("Found %d conversations to migrate", len(conversationIDs)))
-
-	// Create backup if not dry run
-	if !config.DryRun {
-		presenter.Info("Creating backup of JSON conversations...")
-		if err := conversations.BackupJSONConversations(ctx, config.JSONPath, config.BackupPath); err != nil {
-			presenter.Error(err, "Failed to create backup")
-			os.Exit(1)
-		}
-		presenter.Success(fmt.Sprintf("Backup created at: %s", config.BackupPath))
-	}
-
-	// Perform migration
-	migrationOptions := conversations.MigrationOptions{
-		DryRun:     config.DryRun,
-		Force:      config.Force,
-		BackupPath: config.BackupPath,
-		Verbose:    config.Verbose,
-	}
-
-	result, err := conversations.MigrateJSONToBBolt(ctx, config.JSONPath, config.DBPath, migrationOptions)
-	if err != nil {
-		presenter.Error(err, "Migration failed")
-		os.Exit(1)
-	}
-
-	// Display results
-	if config.DryRun {
-		presenter.Info("Dry run completed - no changes made")
-	} else {
-		presenter.Success("Migration completed successfully")
-	}
-
-	presenter.Info(fmt.Sprintf("Total conversations: %d", result.TotalConversations))
-	presenter.Info(fmt.Sprintf("Successfully migrated: %d", result.MigratedCount))
-	if result.FailedCount > 0 {
-		presenter.Warning(fmt.Sprintf("Failed: %d", result.FailedCount))
-	}
-	if result.SkippedCount > 0 {
-		presenter.Info(fmt.Sprintf("Skipped: %d", result.SkippedCount))
-	}
-	presenter.Info(fmt.Sprintf("Duration: %v", result.Duration))
-
-	if len(result.FailedIDs) > 0 {
-		presenter.Warning(fmt.Sprintf("Failed to migrate: %s", strings.Join(result.FailedIDs, ", ")))
-	}
-
-	if !config.DryRun && result.MigratedCount > 0 {
-		presenter.Info("Your conversations have been migrated to the new BBolt format")
-		presenter.Info("You can now use all Kodelet features with improved performance")
-		presenter.Info(fmt.Sprintf("Original JSON files have been backed up to: %s", config.BackupPath))
-	}
 }

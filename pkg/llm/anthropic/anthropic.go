@@ -22,6 +22,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/telemetry"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"go.opentelemetry.io/otel/attribute"
@@ -133,7 +134,7 @@ func NewAnthropicThread(config llmtypes.Config) (*AnthropicThread, error) {
 		client:          client,
 		config:          config,
 		useSubscription: useSubscription,
-		conversationID:  conversations.GenerateID(),
+		conversationID:  convtypes.GenerateID(),
 		isPersisted:     false,
 		usage:           &llmtypes.Usage{}, // must be initialised to avoid nil pointer dereference
 		toolResults:     make(map[string]tooltypes.StructuredToolResult),
@@ -446,6 +447,10 @@ func (t *AnthropicThread) processMessageExchange(
 		}
 	}
 
+	if t.isPersisted && t.store != nil && !opt.NoSaveConversation {
+		t.SaveConversation(ctx, false)
+	}
+
 	// Return whether tools were used in this exchange
 	return finalOutput, toolUseCount > 0, nil
 }
@@ -662,7 +667,7 @@ func (t *AnthropicThread) NewSubAgent(ctx context.Context) llmtypes.Thread {
 		client:          t.client, // Reuse parent's client
 		config:          config,
 		useSubscription: t.useSubscription, // Reuse parent's subscription status
-		conversationID:  conversations.GenerateID(),
+		conversationID:  convtypes.GenerateID(),
 		isPersisted:     false,   // subagent is not persisted
 		usage:           t.usage, // Share usage tracking with parent
 	}
@@ -861,7 +866,7 @@ func (t *AnthropicThread) EnablePersistence(ctx context.Context, enabled bool) {
 	// If enabling persistence and there's an existing conversation ID,
 	// try to load it from the store
 	if enabled && t.conversationID != "" && t.store != nil {
-		t.loadConversation()
+		t.loadConversation(ctx)
 	}
 }
 

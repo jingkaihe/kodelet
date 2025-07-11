@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
 	"github.com/pkg/errors"
 	"github.com/sashabaranov/go-openai"
 
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
@@ -64,7 +64,7 @@ func (t *OpenAIThread) SaveConversation(ctx context.Context, summarize bool) err
 	}
 
 	// Build the conversation record
-	record := conversations.ConversationRecord{
+	record := convtypes.ConversationRecord{
 		ID:             t.conversationID,
 		RawMessages:    messagesJSON,
 		ModelType:      "openai",
@@ -78,11 +78,11 @@ func (t *OpenAIThread) SaveConversation(ctx context.Context, summarize bool) err
 	}
 
 	// Save to the store
-	return t.store.Save(record)
+	return t.store.Save(ctx, record)
 }
 
 // loadConversation loads a conversation from the store
-func (t *OpenAIThread) loadConversation() error {
+func (t *OpenAIThread) loadConversation(ctx context.Context) error {
 	t.conversationMu.Lock()
 	defer t.conversationMu.Unlock()
 
@@ -91,7 +91,7 @@ func (t *OpenAIThread) loadConversation() error {
 	}
 
 	// Try to load the conversation
-	record, err := t.store.Load(t.conversationID)
+	record, err := t.store.Load(ctx, t.conversationID)
 	if err != nil {
 		return errors.Wrap(err, "failed to load conversation")
 	}

@@ -3,7 +3,6 @@ package anthropic
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -11,24 +10,25 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/jingkaihe/kodelet/pkg/conversations"
+	conversations "github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/tools"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
 // MockConversationStore is a test implementation of the ConversationStore interface
 type MockConversationStore struct {
-	SavedRecords []conversations.ConversationRecord
-	LoadedRecord *conversations.ConversationRecord
+	SavedRecords []convtypes.ConversationRecord
+	LoadedRecord *convtypes.ConversationRecord
 }
 
-func (m *MockConversationStore) Save(record conversations.ConversationRecord) error {
+func (m *MockConversationStore) Save(ctx context.Context, record convtypes.ConversationRecord) error {
 	m.SavedRecords = append(m.SavedRecords, record)
 	return nil
 }
 
-func (m *MockConversationStore) Load(id string) (conversations.ConversationRecord, error) {
+func (m *MockConversationStore) Load(ctx context.Context, id string) (convtypes.ConversationRecord, error) {
 	if m.LoadedRecord != nil {
 		return *m.LoadedRecord, nil
 	}
@@ -40,19 +40,19 @@ func (m *MockConversationStore) Load(id string) (conversations.ConversationRecor
 		}
 	}
 
-	return conversations.ConversationRecord{}, nil
+	return convtypes.ConversationRecord{}, nil
 }
 
-func (m *MockConversationStore) List() ([]conversations.ConversationSummary, error) {
+func (m *MockConversationStore) List(ctx context.Context) ([]convtypes.ConversationSummary, error) {
 	return nil, nil
 }
 
-func (m *MockConversationStore) Delete(id string) error {
+func (m *MockConversationStore) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-func (m *MockConversationStore) Query(options conversations.QueryOptions) (conversations.QueryResult, error) {
-	return conversations.QueryResult{}, nil
+func (m *MockConversationStore) Query(ctx context.Context, options convtypes.QueryOptions) (convtypes.QueryResult, error) {
+	return convtypes.QueryResult{}, nil
 }
 
 func (m *MockConversationStore) Close() error {
@@ -158,9 +158,11 @@ func TestSaveAndLoadConversationWithFileLastAccess(t *testing.T) {
 	// Create a unique temporary directory for this test
 	tempDir := t.TempDir()
 
-	// Create a BBolt store directly with a unique database path
-	dbPath := filepath.Join(tempDir, fmt.Sprintf("test-%d.db", time.Now().UnixNano()))
-	store, err := conversations.NewBBoltConversationStore(context.Background(), dbPath)
+	// Create a conversation store directly with a unique database path
+	store, err := conversations.NewConversationStore(context.Background(), &conversations.Config{
+		StoreType: "sqlite",
+		BasePath:  tempDir,
+	})
 	require.NoError(t, err)
 	defer store.Close()
 
@@ -208,7 +210,7 @@ func TestSaveAndLoadConversationWithFileLastAccess(t *testing.T) {
 	newThread.isPersisted = true
 
 	// Load the conversation
-	newThread.loadConversation()
+	newThread.loadConversation(context.Background())
 
 	// Verify the file last access data was preserved
 	loadedState := newThread.GetState()
@@ -292,7 +294,8 @@ func TestSaveConversationMessageCleanup(t *testing.T) {
 						"role": "assistant"
 					}
 				]`
-				messages, _ := DeserializeMessages([]byte(rawMessages))
+				messages, err := DeserializeMessages([]byte(rawMessages))
+				assert.NoError(t, err)
 				return messages
 			}(),
 			expectedMessages: []anthropic.MessageParam{
@@ -360,7 +363,8 @@ func TestSaveConversationMessageCleanup(t *testing.T) {
 						"role": "user"
 					}
 				]`
-				messages, _ := DeserializeMessages([]byte(rawMessages))
+				messages, err := DeserializeMessages([]byte(rawMessages))
+				assert.NoError(t, err)
 				return messages
 			}(),
 			expectedMessages: func() []anthropic.MessageParam {
@@ -404,10 +408,47 @@ func TestSaveConversationMessageCleanup(t *testing.T) {
 						"role": "user"
 					}
 				]`
-				messages, _ := DeserializeMessages([]byte(rawMessages))
+				messages, err := DeserializeMessages([]byte(rawMessages))
+				assert.NoError(t, err)
 				return messages
 			}(),
 			description: "should preserve valid tool use when followed by tool result",
+		},
+		{
+			name: "remove empty textblock with thinking content",
+			initialMessages: func() []anthropic.MessageParam {
+				rawMessages := `[
+					{
+						"content": [
+							{
+								"text": "Hello",
+								"type": "text"
+							}
+						],
+						"role": "user"
+					},
+					{
+						"content": [
+							{
+								"text": "",
+								"type": "text"
+							},
+							{
+								"thinking": "The user is asking for a simple arithmetic calculation. 2+2 equals 4.",
+								"type": "thinking"
+							}
+						],
+						"role": "assistant"
+					}
+				]`
+				messages, err := DeserializeMessages([]byte(rawMessages))
+				require.NoError(t, err)
+				return messages
+			}(),
+			expectedMessages: []anthropic.MessageParam{
+				anthropic.NewUserMessage(anthropic.NewTextBlock("Hello")),
+			},
+			description: "should remove empty textblock even with thinking content",
 		},
 		{
 			name: "complex cleanup scenario",
@@ -453,7 +494,8 @@ func TestSaveConversationMessageCleanup(t *testing.T) {
 						"role": "assistant"
 					}
 				]`
-				messages, _ := DeserializeMessages([]byte(rawMessages))
+				messages, err := DeserializeMessages([]byte(rawMessages))
+				assert.NoError(t, err)
 				return messages
 			}(),
 			expectedMessages: []anthropic.MessageParam{

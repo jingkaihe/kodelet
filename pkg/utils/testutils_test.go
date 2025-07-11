@@ -77,7 +77,7 @@ func TestWaitForFiles(t *testing.T) {
 
 	t.Run("wait for files created during wait", func(t *testing.T) {
 		delayedFile := filepath.Join(tempDir, "delayed.txt")
-		
+
 		// Create file after a short delay
 		go func() {
 			time.Sleep(30 * time.Millisecond)

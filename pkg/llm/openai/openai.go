@@ -19,6 +19,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/telemetry"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/pkg/errors"
 	"github.com/sashabaranov/go-openai"
 	"go.opentelemetry.io/otel/attribute"
@@ -263,7 +264,7 @@ func NewOpenAIThread(config llmtypes.Config) *OpenAIThread {
 		client:          openai.NewClient(os.Getenv("OPENAI_API_KEY")), // API key will be set via env var
 		config:          config,
 		reasoningEffort: reasoningEffort,
-		conversationID:  conversations.GenerateID(),
+		conversationID:  convtypes.GenerateID(),
 		isPersisted:     false,
 		usage:           &llmtypes.Usage{}, // must be initialized to avoid nil pointer dereference
 		toolResults:     make(map[string]tooltypes.StructuredToolResult),
@@ -565,6 +566,9 @@ func (t *OpenAIThread) processMessageExchange(
 		})
 	}
 
+	if t.isPersisted && t.store != nil && !opt.NoSaveConversation {
+		t.SaveConversation(ctx, false)
+	}
 	return finalOutput, true, nil
 }
 
@@ -603,7 +607,7 @@ func (t *OpenAIThread) NewSubAgent(ctx context.Context) llmtypes.Thread {
 		client:          t.client, // Reuse parent's client
 		config:          config,
 		reasoningEffort: t.reasoningEffort, // Reuse parent's reasoning effort
-		conversationID:  conversations.GenerateID(),
+		conversationID:  convtypes.GenerateID(),
 		isPersisted:     false,   // subagent is not persisted
 		usage:           t.usage, // Share usage tracking with parent
 	}
@@ -812,7 +816,7 @@ func (t *OpenAIThread) EnablePersistence(ctx context.Context, enabled bool) {
 	// If enabling persistence and there's an existing conversation ID,
 	// try to load it from the store
 	if enabled && t.conversationID != "" && t.store != nil {
-		t.loadConversation()
+		t.loadConversation(ctx)
 	}
 }
 

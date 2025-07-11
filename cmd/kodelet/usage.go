@@ -13,6 +13,7 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/jingkaihe/kodelet/pkg/usage"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
@@ -80,7 +81,7 @@ func getUsageConfigFromFlags(cmd *cobra.Command) *UsageConfig {
 }
 
 // toUsageSummaries converts ConversationSummary slice to usage.ConversationSummary interface slice
-func toUsageSummaries(summaries []conversations.ConversationSummary) []usage.ConversationSummary {
+func toUsageSummaries(summaries []convtypes.ConversationSummary) []usage.ConversationSummary {
 	result := make([]usage.ConversationSummary, len(summaries))
 	for i, s := range summaries {
 		result[i] = s
@@ -170,7 +171,7 @@ func runUsageCmd(ctx context.Context, config *UsageConfig) {
 	defer store.Close()
 
 	// Query conversations with date filters
-	options := conversations.QueryOptions{
+	options := convtypes.QueryOptions{
 		SortBy:    "updated",
 		SortOrder: "desc",
 	}
@@ -182,7 +183,7 @@ func runUsageCmd(ctx context.Context, config *UsageConfig) {
 		options.EndDate = &endTime
 	}
 
-	result, err := store.Query(options)
+	result, err := store.Query(ctx, options)
 	if err != nil {
 		presenter.Error(err, "Failed to query conversations")
 		os.Exit(1)
@@ -325,6 +326,6 @@ func formatNumber(n int) string {
 }
 
 // aggregateUsageStats is a wrapper around usage.CalculateUsageStats for testing
-func aggregateUsageStats(summaries []conversations.ConversationSummary, startTime, endTime time.Time) *UsageStats {
+func aggregateUsageStats(summaries []convtypes.ConversationSummary, startTime, endTime time.Time) *UsageStats {
 	return usage.CalculateUsageStats(toUsageSummaries(summaries), startTime, endTime)
 }
