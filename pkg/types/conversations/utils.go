@@ -37,8 +37,8 @@ func GetDefaultBasePath() (string, error) {
 		return "", err
 	}
 
-	// Create the base cache directory structure
-	basePath := filepath.Join(homeDir, ".cache", "kodelet", "conversations")
+	// Create the base directory structure
+	basePath := filepath.Join(homeDir, ".kodelet")
 
 	// Make sure the directory exists
 	if err := os.MkdirAll(basePath, 0755); err != nil {

@@ -36,7 +36,7 @@ func DefaultConfig() (*Config, error) {
 	}
 
 	return &Config{
-		StoreType: "bbolt", // BBolt store is now the default
+		StoreType: "sqlite", // SQLite store is now the default
 		BasePath:  basePath,
 	}, nil
 }

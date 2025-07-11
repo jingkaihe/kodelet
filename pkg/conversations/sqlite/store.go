@@ -197,7 +197,6 @@ func (s *SQLiteConversationStore) Load(ctx context.Context, id string) (conversa
 
 // List returns all conversation summaries sorted by creation time (newest first)
 func (s *SQLiteConversationStore) List(ctx context.Context) ([]conversations.ConversationSummary, error) {
-
 	var dbSummaries []dbConversationSummary
 
 	query := "SELECT * FROM conversation_summaries ORDER BY created_at DESC"
@@ -240,7 +239,6 @@ func (s *SQLiteConversationStore) Delete(ctx context.Context, id string) error {
 
 // Query performs advanced queries with filtering, sorting, and pagination
 func (s *SQLiteConversationStore) Query(ctx context.Context, options conversations.QueryOptions) (conversations.QueryResult, error) {
-
 	// Build WHERE conditions
 	conditions := []string{}
 	args := map[string]interface{}{}
