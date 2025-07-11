@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	conversations "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSQLiteConversationStore_BasicOperations(t *testing.T) {
@@ -256,8 +256,6 @@ func TestSQLiteConversationStore_Migrations(t *testing.T) {
 		assert.True(t, exists, "Table %s should exist", table)
 	}
 }
-
-
 
 func TestSQLiteConversationStore_WALMode(t *testing.T) {
 	ctx := context.Background()
@@ -695,6 +693,110 @@ func TestSQLiteConversationStore_DirectDatabaseAccess(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, records, 1)
 	assert.Equal(t, "direct-test", records[0].ID)
+}
+
+func TestSQLiteConversationStore_TimestampBehavior(t *testing.T) {
+	ctx := context.Background()
+
+	// Create temporary database file
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test_timestamps.db")
+
+	// Create store
+	store, err := NewSQLiteConversationStore(ctx, dbPath)
+	require.NoError(t, err)
+	defer store.Close()
+
+	// Test initial save - both timestamps should be set
+	originalCreatedAt := time.Now().UTC().Add(-1 * time.Hour) // 1 hour ago
+	originalUpdatedAt := originalCreatedAt
+
+	record := conversations.ConversationRecord{
+		ID:          "timestamp-test",
+		RawMessages: json.RawMessage(`[{"role": "user", "content": [{"type": "text", "text": "Initial message"}]}]`),
+		ModelType:   "anthropic",
+		FileLastAccess: map[string]time.Time{
+			"test.txt": originalCreatedAt,
+		},
+		Usage: llmtypes.Usage{
+			InputTokens:  100,
+			OutputTokens: 50,
+		},
+		Summary:     "Initial summary",
+		CreatedAt:   originalCreatedAt,
+		UpdatedAt:   originalUpdatedAt,
+		Metadata:    map[string]interface{}{"version": 1},
+		ToolResults: map[string]tools.StructuredToolResult{},
+	}
+
+	// Save the record for the first time
+	err = store.Save(ctx, record)
+	require.NoError(t, err)
+
+	// Load the record to check initial timestamps
+	loaded, err := store.Load(ctx, "timestamp-test")
+	require.NoError(t, err)
+
+	// CreatedAt should match what we set, UpdatedAt should be current (due to Save() setting it)
+	assert.Equal(t, originalCreatedAt.Unix(), loaded.CreatedAt.Unix(), "CreatedAt should match original")
+	assert.True(t, loaded.UpdatedAt.After(originalUpdatedAt), "UpdatedAt should be refreshed by Save()")
+
+	// Store the actual created_at from database for comparison
+	firstCreatedAt := loaded.CreatedAt
+	firstUpdatedAt := loaded.UpdatedAt
+
+	// Wait a bit to ensure timestamp difference
+	time.Sleep(100 * time.Millisecond)
+
+	// Update the record with new content
+	record.RawMessages = json.RawMessage(`[{"role": "user", "content": [{"type": "text", "text": "Updated message"}]}]`)
+	record.Summary = "Updated summary"
+	record.Metadata["version"] = 2
+	record.Usage.InputTokens = 150
+
+	// Save the updated record
+	err = store.Save(ctx, record)
+	require.NoError(t, err)
+
+	// Load the updated record
+	updated, err := store.Load(ctx, "timestamp-test")
+	require.NoError(t, err)
+
+	// Verify CreatedAt is preserved but UpdatedAt is refreshed
+	assert.Equal(t, firstCreatedAt.Unix(), updated.CreatedAt.Unix(), "CreatedAt should be preserved on update")
+	assert.True(t, updated.UpdatedAt.After(firstUpdatedAt), "UpdatedAt should be refreshed on update")
+
+	// Verify the content was actually updated
+	assert.Contains(t, string(updated.RawMessages), "Updated message")
+	assert.Equal(t, "Updated summary", updated.Summary)
+	assert.Equal(t, 2, int(updated.Metadata["version"].(float64)))
+	assert.Equal(t, 150, updated.Usage.InputTokens)
+
+	// Test multiple updates to ensure CreatedAt never changes
+	secondUpdatedAt := updated.UpdatedAt
+	time.Sleep(100 * time.Millisecond)
+
+	// Another update
+	record.Summary = "Final summary"
+	err = store.Save(ctx, record)
+	require.NoError(t, err)
+
+	final, err := store.Load(ctx, "timestamp-test")
+	require.NoError(t, err)
+
+	// CreatedAt should still be the same, UpdatedAt should be newer
+	assert.Equal(t, firstCreatedAt.Unix(), final.CreatedAt.Unix(), "CreatedAt should never change")
+	assert.True(t, final.UpdatedAt.After(secondUpdatedAt), "UpdatedAt should be refreshed on each update")
+	assert.Equal(t, "Final summary", final.Summary)
+
+	// Test that the same behavior applies to conversation summaries
+	summaries, err := store.List(ctx)
+	require.NoError(t, err)
+	require.Len(t, summaries, 1)
+
+	summary := summaries[0]
+	assert.Equal(t, firstCreatedAt.Unix(), summary.CreatedAt.Unix(), "Summary CreatedAt should match record CreatedAt")
+	assert.True(t, summary.UpdatedAt.After(secondUpdatedAt), "Summary UpdatedAt should be refreshed")
 }
 
 func TestSQLiteConversationStore_ErrorScenarios(t *testing.T) {

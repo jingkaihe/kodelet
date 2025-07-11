@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 	"github.com/pkg/errors"
@@ -143,32 +144,50 @@ func (s *SQLiteConversationStore) Save(ctx context.Context, record conversations
 	}
 	defer tx.Rollback()
 
+	// Ensure UpdatedAt is set to current time for saves
+	record.UpdatedAt = time.Now()
+
 	// Convert to database models
 	dbRecord := FromConversationRecord(record)
 	dbSummary := FromConversationSummary(record.ToSummary())
 
-	// Insert or update conversation record
+	// Insert or update conversation record with UPSERT to preserve created_at
 	conversationQuery := `
-		INSERT OR REPLACE INTO conversations (
+		INSERT INTO conversations (
 			id, raw_messages, model_type, file_last_access, usage,
 			summary, created_at, updated_at, metadata, tool_results
 		) VALUES (
 			:id, :raw_messages, :model_type, :file_last_access, :usage,
 			:summary, :created_at, :updated_at, :metadata, :tool_results
 		)
+		ON CONFLICT(id) DO UPDATE SET
+			raw_messages = excluded.raw_messages,
+			model_type = excluded.model_type,
+			file_last_access = excluded.file_last_access,
+			usage = excluded.usage,
+			summary = excluded.summary,
+			updated_at = excluded.updated_at,
+			metadata = excluded.metadata,
+			tool_results = excluded.tool_results
 	`
 	_, err = tx.NamedExecContext(ctx, conversationQuery, dbRecord)
 	if err != nil {
 		return errors.Wrap(err, "failed to save conversation record")
 	}
 
-	// Insert or update conversation summary
+	// Insert or update conversation summary with UPSERT to preserve created_at
 	summaryQuery := `
-		INSERT OR REPLACE INTO conversation_summaries (
+		INSERT INTO conversation_summaries (
 			id, message_count, first_message, summary, usage, created_at, updated_at
 		) VALUES (
 			:id, :message_count, :first_message, :summary, :usage, :created_at, :updated_at
 		)
+		ON CONFLICT(id) DO UPDATE SET
+			message_count = excluded.message_count,
+			first_message = excluded.first_message,
+			summary = excluded.summary,
+			usage = excluded.usage,
+			updated_at = excluded.updated_at
 	`
 	_, err = tx.NamedExecContext(ctx, summaryQuery, dbSummary)
 	if err != nil {
