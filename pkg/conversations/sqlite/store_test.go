@@ -16,7 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestSQLiteConversationStore_BasicOperations(t *testing.T) {
+func TestStore_BasicOperations(t *testing.T) {
 	ctx := context.Background()
 
 	// Create temporary database file
@@ -95,7 +95,7 @@ func TestSQLiteConversationStore_BasicOperations(t *testing.T) {
 	assert.Len(t, summaries, 0)
 }
 
-func TestSQLiteConversationStore_Query(t *testing.T) {
+func TestStore_Query(t *testing.T) {
 	ctx := context.Background()
 
 	// Create temporary database file
@@ -214,7 +214,7 @@ func TestSQLiteConversationStore_Query(t *testing.T) {
 	assert.Equal(t, "conv-2", result.ConversationSummaries[0].ID)
 }
 
-func TestSQLiteConversationStore_DefaultSorting(t *testing.T) {
+func TestStore_DefaultSorting(t *testing.T) {
 	ctx := context.Background()
 
 	// Create temporary database file
@@ -401,7 +401,7 @@ func TestSQLiteConversationStore_DefaultSorting(t *testing.T) {
 	})
 }
 
-func TestSQLiteConversationStore_SchemaValidation(t *testing.T) {
+func TestStore_SchemaValidation(t *testing.T) {
 	ctx := context.Background()
 
 	// Create temporary database file
@@ -423,7 +423,7 @@ func TestSQLiteConversationStore_SchemaValidation(t *testing.T) {
 	assert.Equal(t, CurrentSchemaVersion, version)
 }
 
-func TestSQLiteConversationStore_Migrations(t *testing.T) {
+func TestStore_Migrations(t *testing.T) {
 	ctx := context.Background()
 
 	// Create temporary database file
@@ -454,7 +454,7 @@ func TestSQLiteConversationStore_Migrations(t *testing.T) {
 	}
 }
 
-func TestSQLiteConversationStore_WALMode(t *testing.T) {
+func TestStore_WALMode(t *testing.T) {
 	ctx := context.Background()
 
 	// Create temporary database file
@@ -516,7 +516,7 @@ func TestSQLiteConversationStore_WALMode(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestSQLiteConversationStore_DatabaseIntegration(t *testing.T) {
+func TestStore_DatabaseIntegration(t *testing.T) {
 	ctx := context.Background()
 
 	// Create temporary database file
@@ -645,7 +645,7 @@ func TestSQLiteConversationStore_DatabaseIntegration(t *testing.T) {
 	assert.Equal(t, "Test with unicode characters: éñ中文🌟", summaries[0].Summary)
 }
 
-func TestSQLiteConversationStore_NullHandling(t *testing.T) {
+func TestStore_NullHandling(t *testing.T) {
 	ctx := context.Background()
 
 	// Create temporary database file
@@ -691,7 +691,7 @@ func TestSQLiteConversationStore_NullHandling(t *testing.T) {
 	assert.NotNil(t, loaded.ToolResults)    // Should be empty map, not nil
 }
 
-func TestSQLiteConversationStore_ConcurrentAccess(t *testing.T) {
+func TestStore_ConcurrentAccess(t *testing.T) {
 	ctx := context.Background()
 
 	// Create temporary database file
@@ -805,7 +805,7 @@ func TestSQLiteConversationStore_ConcurrentAccess(t *testing.T) {
 	}
 }
 
-func TestSQLiteConversationStore_DirectDatabaseAccess(t *testing.T) {
+func TestStore_DirectDatabaseAccess(t *testing.T) {
 	ctx := context.Background()
 
 	// Create temporary database file
@@ -894,7 +894,7 @@ func TestSQLiteConversationStore_DirectDatabaseAccess(t *testing.T) {
 	assert.Equal(t, "direct-test", records[0].ID)
 }
 
-func TestSQLiteConversationStore_TimestampBehavior(t *testing.T) {
+func TestStore_TimestampBehavior(t *testing.T) {
 	ctx := context.Background()
 
 	// Create temporary database file
@@ -1000,7 +1000,7 @@ func TestSQLiteConversationStore_TimestampBehavior(t *testing.T) {
 }
 
 
-func TestSQLiteConversationStore_ErrorScenarios(t *testing.T) {
+func TestStore_ErrorScenarios(t *testing.T) {
 	ctx := context.Background()
 
 	// Test with invalid database path
