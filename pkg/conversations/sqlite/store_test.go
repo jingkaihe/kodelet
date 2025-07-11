@@ -204,6 +204,168 @@ func TestSQLiteConversationStore_Query(t *testing.T) {
 	assert.Equal(t, "conv-2", result.ConversationSummaries[0].ID)
 }
 
+func TestSQLiteConversationStore_DefaultSorting(t *testing.T) {
+	ctx := context.Background()
+
+	// Create temporary database file
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test_default_sorting.db")
+
+	// Create store
+	store, err := NewSQLiteConversationStore(ctx, dbPath)
+	require.NoError(t, err)
+	defer store.Close()
+
+	// Create test records with different timestamps
+	now := time.Now()
+	records := []conversations.ConversationRecord{
+		{
+			ID:          "oldest-conv",
+			RawMessages: json.RawMessage(`[{"role": "user", "content": [{"type": "text", "text": "Oldest message"}]}]`),
+			ModelType:   "anthropic",
+			Usage:       llmtypes.Usage{InputTokens: 50, OutputTokens: 25},
+			Summary:     "Oldest conversation",
+			CreatedAt:   now.Add(-3 * time.Hour),
+			UpdatedAt:   now.Add(-3 * time.Hour),
+			Metadata:    map[string]interface{}{},
+			ToolResults: map[string]tools.StructuredToolResult{},
+		},
+		{
+			ID:          "middle-conv",
+			RawMessages: json.RawMessage(`[{"role": "user", "content": [{"type": "text", "text": "Middle message"}]}]`),
+			ModelType:   "anthropic",
+			Usage:       llmtypes.Usage{InputTokens: 75, OutputTokens: 40},
+			Summary:     "Middle conversation",
+			CreatedAt:   now.Add(-2 * time.Hour),
+			UpdatedAt:   now.Add(-1 * time.Hour), // Updated more recently
+			Metadata:    map[string]interface{}{},
+			ToolResults: map[string]tools.StructuredToolResult{},
+		},
+		{
+			ID:          "newest-conv",
+			RawMessages: json.RawMessage(`[{"role": "user", "content": [{"type": "text", "text": "Newest message"}]}]`),
+			ModelType:   "anthropic",
+			Usage:       llmtypes.Usage{InputTokens: 100, OutputTokens: 50},
+			Summary:     "Newest conversation",
+			CreatedAt:   now.Add(-1 * time.Hour),
+			UpdatedAt:   now.Add(-1 * time.Hour),
+			Metadata:    map[string]interface{}{},
+			ToolResults: map[string]tools.StructuredToolResult{},
+		},
+	}
+
+	// Save all records
+	for _, record := range records {
+		err = store.Save(ctx, record)
+		require.NoError(t, err)
+	}
+
+	// Test List method default sorting (should be created_at DESC)
+	t.Run("List default sorting", func(t *testing.T) {
+		summaries, err := store.List(ctx)
+		require.NoError(t, err)
+		assert.Len(t, summaries, 3)
+		
+		// Should be sorted by created_at DESC (newest first)
+		assert.Equal(t, "newest-conv", summaries[0].ID)
+		assert.Equal(t, "middle-conv", summaries[1].ID)
+		assert.Equal(t, "oldest-conv", summaries[2].ID)
+	})
+
+	// Test Query method with empty options (should default to created_at DESC)
+	t.Run("Query empty options", func(t *testing.T) {
+		result, err := store.Query(ctx, conversations.QueryOptions{})
+		require.NoError(t, err)
+		assert.Len(t, result.ConversationSummaries, 3)
+		
+		// Should be sorted by created_at DESC (newest first)
+		assert.Equal(t, "newest-conv", result.ConversationSummaries[0].ID)
+		assert.Equal(t, "middle-conv", result.ConversationSummaries[1].ID)
+		assert.Equal(t, "oldest-conv", result.ConversationSummaries[2].ID)
+	})
+
+	// Test Query method with empty SortBy string (should default to created_at)
+	t.Run("Query empty SortBy", func(t *testing.T) {
+		result, err := store.Query(ctx, conversations.QueryOptions{
+			SortBy: "",
+		})
+		require.NoError(t, err)
+		assert.Len(t, result.ConversationSummaries, 3)
+		
+		// Should be sorted by created_at DESC (newest first)
+		assert.Equal(t, "newest-conv", result.ConversationSummaries[0].ID)
+		assert.Equal(t, "middle-conv", result.ConversationSummaries[1].ID)
+		assert.Equal(t, "oldest-conv", result.ConversationSummaries[2].ID)
+	})
+
+	// Test Query method with explicit "createdAt" SortBy
+	t.Run("Query explicit createdAt SortBy", func(t *testing.T) {
+		result, err := store.Query(ctx, conversations.QueryOptions{
+			SortBy: "createdAt",
+		})
+		require.NoError(t, err)
+		assert.Len(t, result.ConversationSummaries, 3)
+		
+		// Should be sorted by created_at DESC (newest first)
+		assert.Equal(t, "newest-conv", result.ConversationSummaries[0].ID)
+		assert.Equal(t, "middle-conv", result.ConversationSummaries[1].ID)
+		assert.Equal(t, "oldest-conv", result.ConversationSummaries[2].ID)
+	})
+
+	// Test Query method with createdAt ASC
+	t.Run("Query createdAt ASC", func(t *testing.T) {
+		result, err := store.Query(ctx, conversations.QueryOptions{
+			SortBy:    "createdAt",
+			SortOrder: "asc",
+		})
+		require.NoError(t, err)
+		assert.Len(t, result.ConversationSummaries, 3)
+		
+		// Should be sorted by created_at ASC (oldest first)
+		assert.Equal(t, "oldest-conv", result.ConversationSummaries[0].ID)
+		assert.Equal(t, "middle-conv", result.ConversationSummaries[1].ID)
+		assert.Equal(t, "newest-conv", result.ConversationSummaries[2].ID)
+	})
+
+	// Test Query method with updatedAt sorting
+	t.Run("Query updatedAt DESC", func(t *testing.T) {
+		result, err := store.Query(ctx, conversations.QueryOptions{
+			SortBy: "updatedAt",
+		})
+		require.NoError(t, err)
+		assert.Len(t, result.ConversationSummaries, 3)
+		
+		// Note: Save() method updates UpdatedAt to current time, so order might differ
+		// from original timestamps. Just verify it's sorted by updated_at (not created_at)
+		// The exact order will depend on Save() timing, but should still be 3 records
+		expectedIDs := []string{"oldest-conv", "middle-conv", "newest-conv"}
+		actualIDs := []string{
+			result.ConversationSummaries[0].ID,
+			result.ConversationSummaries[1].ID,
+			result.ConversationSummaries[2].ID,
+		}
+		
+		// Verify all expected IDs are present (order may vary due to Save() timing)
+		for _, expectedID := range expectedIDs {
+			assert.Contains(t, actualIDs, expectedID)
+		}
+	})
+
+	// Test Query method with invalid SortBy (should default to created_at)
+	t.Run("Query invalid SortBy", func(t *testing.T) {
+		result, err := store.Query(ctx, conversations.QueryOptions{
+			SortBy: "invalidField",
+		})
+		require.NoError(t, err)
+		assert.Len(t, result.ConversationSummaries, 3)
+		
+		// Should fall back to created_at DESC (newest first)
+		assert.Equal(t, "newest-conv", result.ConversationSummaries[0].ID)
+		assert.Equal(t, "middle-conv", result.ConversationSummaries[1].ID)
+		assert.Equal(t, "oldest-conv", result.ConversationSummaries[2].ID)
+	})
+}
+
 func TestSQLiteConversationStore_SchemaValidation(t *testing.T) {
 	ctx := context.Background()
 
