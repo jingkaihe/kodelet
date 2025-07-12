@@ -40,10 +40,11 @@ model: grok-3
 
 # OpenAI-compatible provider configuration
 openai:
-  # Custom base URL (overrides OPENAI_API_BASE env var)
+  # Option 1: Use a built-in preset (recommended for popular providers)
+  preset: "xai-grok"  # Built-in preset with all xAI models and current pricing
+  
+  # Option 2: Custom configuration (overrides preset if both are specified)
   base_url: https://api.x.ai/v1
-
-  # Custom models configuration
   models:
     # Only these Grok models support reasoning capabilities (per xAI docs)
     reasoning:
@@ -52,38 +53,12 @@ openai:
       - grok-3-mini-fast
     # non_reasoning is optional - if not specified, it will be auto-populated
     # with all models from pricing that are not in the reasoning list
-
-  # Custom pricing configuration (based on xAI's actual pricing)
   pricing:
     grok-4-0709:
       input: 0.000003         # $3 per million tokens
       output: 0.000015        # $15 per million tokens
       context_window: 256000  # 256k tokens
-
-    grok-3:
-      input: 0.000003         # $3 per million tokens
-      output: 0.000015        # $15 per million tokens
-      context_window: 131072  # 131k tokens
-
-    grok-3-mini:
-      input: 0.0000003        # $0.30 per million tokens
-      output: 0.0000009       # $0.90 per million tokens
-      context_window: 131072  # 131k tokens
-
-    grok-3-fast:
-      input: 0.000005         # $5 per million tokens
-      output: 0.000025        # $25 per million tokens
-      context_window: 131072  # 131k tokens
-
-    grok-3-mini-fast:
-      input: 0.0000006        # $0.60 per million tokens
-      output: 0.000004        # $4 per million tokens
-      context_window: 131072  # 131k tokens
-
-    grok-2-vision-1212:
-      input: 0.000002         # $2 per million tokens
-      output: 0.00001         # $10 per million tokens
-      context_window: 32768   # 32k tokens (vision model)
+    # ... other models
 ```
 
 ### Implementation Changes
@@ -105,8 +80,16 @@ func NewOpenAIThread(config llmtypes.Config, store conversations.Store) (*OpenAI
     // Check for custom base URL (environment variable takes precedence)
     if baseURL := os.Getenv("OPENAI_API_BASE"); baseURL != "" {
         clientConfig.BaseURL = baseURL
-    } else if config.OpenAI != nil && config.OpenAI.BaseURL != "" {
-        clientConfig.BaseURL = config.OpenAI.BaseURL
+    } else if config.OpenAI != nil {
+        // Check preset first, then custom base URL
+        if config.OpenAI.Preset != "" {
+            if presetBaseURL := getPresetBaseURL(config.OpenAI.Preset); presetBaseURL != "" {
+                clientConfig.BaseURL = presetBaseURL
+            }
+        }
+        if config.OpenAI.BaseURL != "" {
+            clientConfig.BaseURL = config.OpenAI.BaseURL  // Override preset
+        }
     }
 
     client := openai.NewClientWithConfig(clientConfig)
@@ -141,30 +124,28 @@ func loadCustomConfiguration(config llmtypes.Config) (*CustomModels, CustomPrici
     }
 
     var models *CustomModels
-    if config.OpenAI.Models != nil {
-        models = &CustomModels{
-            Reasoning:    config.OpenAI.Models.Reasoning,
-            NonReasoning: config.OpenAI.Models.NonReasoning,
-        }
+    var pricing CustomPricing
 
-        // Auto-populate NonReasoning if not explicitly set
-        if len(models.NonReasoning) == 0 && len(models.Reasoning) > 0 && config.OpenAI.Pricing != nil {
-            reasoningSet := make(map[string]bool)
-            for _, model := range models.Reasoning {
-                reasoningSet[model] = true
-            }
-
-            for model := range config.OpenAI.Pricing {
-                if !reasoningSet[model] {
-                    models.NonReasoning = append(models.NonReasoning, model)
-                }
-            }
-        }
+    // Load preset if specified
+    if config.OpenAI.Preset != "" {
+        presetModels, presetPricing := loadPreset(config.OpenAI.Preset)
+        models = presetModels
+        pricing = presetPricing
     }
 
-    var pricing CustomPricing
+    // Override with custom configuration if provided
+    if config.OpenAI.Models != nil {
+        if models == nil {
+            models = &CustomModels{}
+        }
+        models.Reasoning = config.OpenAI.Models.Reasoning
+        models.NonReasoning = config.OpenAI.Models.NonReasoning
+    }
+
     if config.OpenAI.Pricing != nil {
-        pricing = make(CustomPricing)
+        if pricing == nil {
+            pricing = make(CustomPricing)
+        }
         for model, p := range config.OpenAI.Pricing {
             pricing[model] = ModelPricing{
                 Input:         p.Input,
@@ -175,7 +156,89 @@ func loadCustomConfiguration(config llmtypes.Config) (*CustomModels, CustomPrici
         }
     }
 
+    // Auto-populate NonReasoning if not explicitly set
+    if models != nil && len(models.NonReasoning) == 0 && len(models.Reasoning) > 0 && pricing != nil {
+        reasoningSet := make(map[string]bool)
+        for _, model := range models.Reasoning {
+            reasoningSet[model] = true
+        }
+
+        for model := range pricing {
+            if !reasoningSet[model] {
+                models.NonReasoning = append(models.NonReasoning, model)
+            }
+        }
+    }
+
     return models, pricing
+}
+
+func loadPreset(presetName string) (*CustomModels, CustomPricing) {
+    switch presetName {
+    case "xai-grok":
+        return loadXAIGrokPreset()
+    default:
+        return nil, nil
+    }
+}
+
+func loadXAIGrokPreset() (*CustomModels, CustomPricing) {
+    models := &CustomModels{
+        Reasoning: []string{
+            "grok-4-0709",
+            "grok-3-mini",
+            "grok-3-mini-fast",
+        },
+        NonReasoning: []string{
+            "grok-3",
+            "grok-3-fast",
+            "grok-2-vision-1212",
+        },
+    }
+
+    pricing := CustomPricing{
+        "grok-4-0709": ModelPricing{
+            Input:         0.000003,  // $3 per million tokens
+            Output:        0.000015,  // $15 per million tokens
+            ContextWindow: 256000,    // 256k tokens
+        },
+        "grok-3": ModelPricing{
+            Input:         0.000003,  // $3 per million tokens
+            Output:        0.000015,  // $15 per million tokens
+            ContextWindow: 131072,    // 131k tokens
+        },
+        "grok-3-mini": ModelPricing{
+            Input:         0.0000003, // $0.30 per million tokens
+            Output:        0.0000009, // $0.90 per million tokens
+            ContextWindow: 131072,    // 131k tokens
+        },
+        "grok-3-fast": ModelPricing{
+            Input:         0.000005,  // $5 per million tokens
+            Output:        0.000025,  // $25 per million tokens
+            ContextWindow: 131072,    // 131k tokens
+        },
+        "grok-3-mini-fast": ModelPricing{
+            Input:         0.0000006, // $0.60 per million tokens
+            Output:        0.000004,  // $4 per million tokens
+            ContextWindow: 131072,    // 131k tokens
+        },
+        "grok-2-vision-1212": ModelPricing{
+            Input:         0.000002,  // $2 per million tokens
+            Output:        0.00001,   // $10 per million tokens
+            ContextWindow: 32768,     // 32k tokens (vision model)
+        },
+    }
+
+    return models, pricing
+}
+
+func getPresetBaseURL(presetName string) string {
+    switch presetName {
+    case "xai-grok":
+        return "https://api.x.ai/v1"
+    default:
+        return ""
+    }
 }
 ```
 
@@ -230,6 +293,7 @@ type Config struct {
 }
 
 type OpenAIConfig struct {
+    Preset  string                    `mapstructure:"preset"`
     BaseURL string                    `mapstructure:"base_url"`
     Models  *OpenAIModelsConfig       `mapstructure:"models"`
     Pricing map[string]PricingConfig  `mapstructure:"pricing"`
@@ -246,6 +310,47 @@ type PricingConfig struct {
     Output        float64 `mapstructure:"output"`
     ContextWindow int     `mapstructure:"context_window"`
 }
+```
+
+### Provider Presets
+
+To simplify configuration for popular providers, Kodelet ships with built-in presets that include pre-configured models, pricing, and base URLs. This eliminates the need to manually configure every model and price.
+
+#### Available Presets
+
+1. **xai-grok**: Complete configuration for xAI's Grok models
+   - Base URL: `https://api.x.ai/v1`
+   - All current Grok models with up-to-date pricing
+   - Correct reasoning/non-reasoning categorization per xAI docs
+
+#### Preset Behavior
+
+1. **Preset Loading**: When a preset is specified, it loads the complete configuration for that provider
+2. **Override Support**: Custom configuration fields override preset values when both are specified
+3. **Base URL Handling**: Presets include base URLs, but `OPENAI_API_BASE` environment variable still takes precedence
+4. **Pricing Updates**: Presets can be updated in new Kodelet releases to reflect current pricing
+
+#### Usage Examples
+
+**Simple preset usage:**
+```yaml
+provider: openai
+model: grok-3
+openai:
+  preset: "xai-grok"
+```
+
+**Preset with custom overrides:**
+```yaml
+provider: openai
+model: grok-3
+openai:
+  preset: "xai-grok"
+  # Override specific pricing for local testing
+  pricing:
+    grok-3-mini:
+      input: 0.0
+      output: 0.0
 ```
 
 ### Model Auto-Population
@@ -275,7 +380,16 @@ This approach provides:
 
 ## Example Configurations
 
-### xAI (Grok)
+### xAI (Grok) - Using Preset (Recommended)
+```yaml
+provider: openai
+model: grok-3
+
+openai:
+  preset: "xai-grok"  # Automatically configures all Grok models and pricing
+```
+
+### xAI (Grok) - Custom Configuration
 ```yaml
 provider: openai
 model: grok-3
@@ -364,16 +478,18 @@ openai:
 
 ## Implementation Plan
 
-1. Update configuration types in `pkg/llm/types/config.go`
+1. Update configuration types in `pkg/llm/types/config.go` to include preset field
 2. Modify `pkg/llm/config.go` to handle the new OpenAI configuration section
 3. Update `pkg/llm/openai/openai.go` to:
    - Accept custom base URL during client initialization
    - Load and use custom models and pricing
+   - Implement preset loading with override support
    - Implement fallback logic
-4. Add validation for custom configuration
-5. Update documentation with examples for popular providers
-6. Add tests for configuration loading and fallback behavior
-7. Test with at least one alternative provider (e.g., xAI)
+4. Add built-in presets starting with xAI Grok configuration
+5. Add validation for custom configuration and preset names
+6. Update documentation with examples for popular providers
+7. Add tests for configuration loading, preset loading, and fallback behavior
+8. Test with at least one alternative provider (e.g., xAI)
 
 ## Security Considerations
 
@@ -383,9 +499,10 @@ openai:
 
 ## Future Enhancements
 
-1. **Provider Presets**: Ship with pre-configured settings for popular providers
+1. **Additional Provider Presets**: Add presets for other popular providers (Groq, Together AI, Perplexity)
 2. **Model Discovery**: Add optional endpoint to query available models
 3. **Feature Flags**: Allow providers to specify supported features (e.g., tool calling, vision, image generation)
 4. **Response Validation**: Add optional schema validation for non-standard responses
 5. **Multi-modal Support**: Extend configuration to support image generation models (e.g., xAI's grok-2-image-1212)
 6. **Vision Model Integration**: Better support for vision-enabled models with image input capabilities
+7. **Preset Auto-Update**: Mechanism to update presets from remote sources while maintaining local overrides
