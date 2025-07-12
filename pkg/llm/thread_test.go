@@ -14,6 +14,7 @@ import (
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNewThread(t *testing.T) {
@@ -24,14 +25,20 @@ func TestNewThread(t *testing.T) {
 		expectedMax   int
 	}{
 		{
-			name:          "WithConfigValues",
-			config:        llmtypes.Config{Model: "test-model", MaxTokens: 5000},
+			name: "WithConfigValues",
+			config: llmtypes.Config{
+				Provider:  "openai",
+				Model:     "test-model",
+				MaxTokens: 5000,
+			},
 			expectedModel: "test-model",
 			expectedMax:   5000,
 		},
 		{
-			name:          "WithDefaultValues",
-			config:        llmtypes.Config{},
+			name: "WithDefaultValues",
+			config: llmtypes.Config{
+				Provider: "anthropic",
+			},
 			expectedModel: string(anthropic.ModelClaudeSonnet4_20250514),
 			expectedMax:   8192,
 		},
@@ -136,6 +143,7 @@ func TestSendMessageAndGetText(t *testing.T) {
 		tools.NewBasicState(ctx),
 		query,
 		llmtypes.Config{
+			Provider:  "anthropic",
 			Model:     string(anthropic.ModelClaude3_5Haiku20241022),
 			MaxTokens: 100,
 		},
@@ -194,6 +202,7 @@ func TestSendMessageRealClient(t *testing.T) {
 
 	// Create a real thread
 	thread, err := NewThread(llmtypes.Config{
+		Provider:  "anthropic",
 		Model:     string(anthropic.ModelClaude3_5Haiku20241022), // Using a real model
 		MaxTokens: 100,
 	})
@@ -258,6 +267,7 @@ func TestSendMessageWithToolUse(t *testing.T) {
 
 	// Create thread
 	thread, err := NewThread(llmtypes.Config{
+		Provider:  "anthropic",
 		Model:     string(anthropic.ModelClaude3_5Haiku20241022),
 		MaxTokens: 1000,
 	})
@@ -273,4 +283,104 @@ func TestSendMessageWithToolUse(t *testing.T) {
 
 	// The response should contain the calculation result (800)
 	assert.Contains(t, responseText, "800", "Response should include the calculation result")
+}
+
+func TestResolveModelAlias(t *testing.T) {
+	tests := []struct {
+		name     string
+		model    string
+		aliases  map[string]string
+		expected string
+	}{
+		{
+			name:     "resolves existing alias",
+			model:    "sonnet-4",
+			aliases:  map[string]string{"sonnet-4": "claude-sonnet-4-20250514"},
+			expected: "claude-sonnet-4-20250514",
+		},
+		{
+			name:     "returns original when no alias found",
+			model:    "claude-sonnet-4-20250514",
+			aliases:  map[string]string{"sonnet-4": "claude-sonnet-4-20250514"},
+			expected: "claude-sonnet-4-20250514",
+		},
+		{
+			name:     "handles nil aliases map",
+			model:    "claude-sonnet-4-20250514",
+			aliases:  nil,
+			expected: "claude-sonnet-4-20250514",
+		},
+		{
+			name:  "resolves from multiple aliases",
+			model: "gpt41",
+			aliases: map[string]string{
+				"sonnet-4": "claude-sonnet-4-20250514",
+				"gpt41":    "gpt-4.1",
+			},
+			expected: "gpt-4.1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := resolveModelAlias(tt.model, tt.aliases)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestNewThreadWithAliases(t *testing.T) {
+	tests := []struct {
+		name        string
+		config      llmtypes.Config
+		description string
+	}{
+		{
+			name: "resolves Anthropic alias to Claude model",
+			config: llmtypes.Config{
+				Provider: "anthropic",
+				Model:    "sonnet-4",
+				Aliases: map[string]string{
+					"sonnet-4": "claude-sonnet-4-20250514",
+				},
+			},
+			description: "should resolve sonnet-4 alias to full Claude model name",
+		},
+		{
+			name: "resolves OpenAI alias to GPT model",
+			config: llmtypes.Config{
+				Provider: "openai",
+				Model:    "gpt41",
+				Aliases: map[string]string{
+					"gpt41": "gpt-4.1",
+				},
+			},
+			description: "should resolve gpt41 alias to full OpenAI model name",
+		},
+		{
+			name: "uses full model name when no alias exists",
+			config: llmtypes.Config{
+				Provider: "anthropic",
+				Model:    "claude-sonnet-4-20250514",
+				Aliases: map[string]string{
+					"sonnet-4": "claude-sonnet-4-20250514",
+				},
+			},
+			description: "should use original model name when it's not an alias",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			originalModel := tt.config.Model
+
+			thread, err := NewThread(tt.config)
+
+			require.NoError(t, err, tt.description)
+			require.NotNil(t, thread, "thread should not be nil")
+
+			// Verify that the original config was NOT modified (passed by value)
+			assert.Equal(t, originalModel, tt.config.Model, "original config should not be modified")
+		})
+	}
 }

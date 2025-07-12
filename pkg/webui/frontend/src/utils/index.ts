@@ -196,7 +196,7 @@ export const highlightSearchTerm = (text: string, searchTerm: string): string =>
     const escaped = escapeHtml(text);
     const regex = new RegExp(`(${searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
     return escaped.replace(regex, '<mark class="bg-yellow-200 text-black">$1</mark>');
-  } catch (e) {
+  } catch {
     return escapeHtml(text);
   }
 };

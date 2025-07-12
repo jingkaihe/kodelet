@@ -451,6 +451,168 @@ func TestSaveConversationMessageCleanup(t *testing.T) {
 			description: "should remove empty textblock even with thinking content",
 		},
 		{
+			name: "remove empty thinking block only",
+			initialMessages: func() []anthropic.MessageParam {
+				rawMessages := `[
+					{
+						"content": [
+							{
+								"text": "Hello",
+								"type": "text"
+							}
+						],
+						"role": "user"
+					},
+					{
+						"content": [
+							{
+								"thinking": "",
+								"type": "thinking"
+							}
+						],
+						"role": "assistant"
+					}
+				]`
+				messages, err := DeserializeMessages([]byte(rawMessages))
+				require.NoError(t, err)
+				return messages
+			}(),
+			expectedMessages: []anthropic.MessageParam{
+				anthropic.NewUserMessage(anthropic.NewTextBlock("Hello")),
+			},
+			description: "should remove message with only empty thinking block",
+		},
+		{
+			name: "remove whitespace-only thinking block",
+			initialMessages: func() []anthropic.MessageParam {
+				rawMessages := `[
+					{
+						"content": [
+							{
+								"text": "Hello",
+								"type": "text"
+							}
+						],
+						"role": "user"
+					},
+					{
+						"content": [
+							{
+								"thinking": "   \n\t  ",
+								"type": "thinking"
+							}
+						],
+						"role": "assistant"
+					}
+				]`
+				messages, err := DeserializeMessages([]byte(rawMessages))
+				require.NoError(t, err)
+				return messages
+			}(),
+			expectedMessages: []anthropic.MessageParam{
+				anthropic.NewUserMessage(anthropic.NewTextBlock("Hello")),
+			},
+			description: "should remove message with only whitespace thinking block",
+		},
+		{
+			name: "remove message with valid text but empty thinking block",
+			initialMessages: func() []anthropic.MessageParam {
+				rawMessages := `[
+					{
+						"content": [
+							{
+								"text": "Hello",
+								"type": "text"
+							}
+						],
+						"role": "user"
+					},
+					{
+						"content": [
+							{
+								"text": "Hi there!",
+								"type": "text"
+							},
+							{
+								"thinking": "",
+								"type": "thinking"
+							}
+						],
+						"role": "assistant"
+					}
+				]`
+				messages, err := DeserializeMessages([]byte(rawMessages))
+				require.NoError(t, err)
+				return messages
+			}(),
+			expectedMessages: []anthropic.MessageParam{
+				anthropic.NewUserMessage(anthropic.NewTextBlock("Hello")),
+			},
+			description: "should remove message with valid text but empty thinking block",
+		},
+		{
+			name: "preserve message with valid thinking block",
+			initialMessages: func() []anthropic.MessageParam {
+				rawMessages := `[
+					{
+						"content": [
+							{
+								"text": "Hello",
+								"type": "text"
+							}
+						],
+						"role": "user"
+					},
+					{
+						"content": [
+							{
+								"text": "Hi there!",
+								"type": "text"
+							},
+							{
+								"thinking": "The user is greeting me, I should respond politely.",
+								"type": "thinking"
+							}
+						],
+						"role": "assistant"
+					}
+				]`
+				messages, err := DeserializeMessages([]byte(rawMessages))
+				require.NoError(t, err)
+				return messages
+			}(),
+			expectedMessages: func() []anthropic.MessageParam {
+				rawMessages := `[
+					{
+						"content": [
+							{
+								"text": "Hello",
+								"type": "text"
+							}
+						],
+						"role": "user"
+					},
+					{
+						"content": [
+							{
+								"text": "Hi there!",
+								"type": "text"
+							},
+							{
+								"thinking": "The user is greeting me, I should respond politely.",
+								"type": "thinking"
+							}
+						],
+						"role": "assistant"
+					}
+				]`
+				messages, err := DeserializeMessages([]byte(rawMessages))
+				require.NoError(t, err)
+				return messages
+			}(),
+			description: "should preserve message with valid thinking block",
+		},
+		{
 			name: "complex cleanup scenario",
 			initialMessages: func() []anthropic.MessageParam {
 				rawMessages := `[
@@ -919,4 +1081,165 @@ func TestExtractMessagesWithThinkingLeadingNewlines(t *testing.T) {
 	// Check final assistant message
 	assert.Equal(t, "assistant", messages[2].Role)
 	assert.Equal(t, "2+2 equals 4.", messages[2].Content)
+}
+
+func TestHasAnyEmptyBlock(t *testing.T) {
+	tests := []struct {
+		name     string
+		message  anthropic.MessageParam
+		expected bool
+		description string
+	}{
+		{
+			name: "message with empty text block",
+			message: anthropic.MessageParam{
+				Role: anthropic.MessageParamRoleAssistant,
+				Content: []anthropic.ContentBlockParamUnion{
+					anthropic.NewTextBlock(""),
+				},
+			},
+			expected: true,
+			description: "should detect empty text block",
+		},
+		{
+			name: "message with whitespace-only text block",
+			message: anthropic.MessageParam{
+				Role: anthropic.MessageParamRoleAssistant,
+				Content: []anthropic.ContentBlockParamUnion{
+					anthropic.NewTextBlock("   \n\t  "),
+				},
+			},
+			expected: true,
+			description: "should detect whitespace-only text block",
+		},
+
+		{
+			name: "message with empty thinking block",
+			message: func() anthropic.MessageParam {
+				rawMessage := `{
+					"content": [
+						{
+							"thinking": "",
+							"type": "thinking"
+						}
+					],
+					"role": "assistant"
+				}`
+				var msg anthropic.MessageParam
+				err := msg.UnmarshalJSON([]byte(rawMessage))
+				require.NoError(t, err)
+				return msg
+			}(),
+			expected: true,
+			description: "should detect empty thinking block",
+		},
+		{
+			name: "message with whitespace-only thinking block",
+			message: func() anthropic.MessageParam {
+				rawMessage := `{
+					"content": [
+						{
+							"thinking": "   \n\t  ",
+							"type": "thinking"
+						}
+					],
+					"role": "assistant"
+				}`
+				var msg anthropic.MessageParam
+				err := msg.UnmarshalJSON([]byte(rawMessage))
+				require.NoError(t, err)
+				return msg
+			}(),
+			expected: true,
+			description: "should detect whitespace-only thinking block",
+		},
+		{
+			name: "message with valid thinking block",
+			message: func() anthropic.MessageParam {
+				rawMessage := `{
+					"content": [
+						{
+							"thinking": "I need to think about this problem...",
+							"type": "thinking"
+						}
+					],
+					"role": "assistant"
+				}`
+				var msg anthropic.MessageParam
+				err := msg.UnmarshalJSON([]byte(rawMessage))
+				require.NoError(t, err)
+				return msg
+			}(),
+			expected: false,
+			description: "should not detect valid thinking block as empty",
+		},
+		{
+			name: "message with empty text and valid thinking block",
+			message: func() anthropic.MessageParam {
+				rawMessage := `{
+					"content": [
+						{
+							"text": "",
+							"type": "text"
+						},
+						{
+							"thinking": "Let me consider this...",
+							"type": "thinking"
+						}
+					],
+					"role": "assistant"
+				}`
+				var msg anthropic.MessageParam
+				err := msg.UnmarshalJSON([]byte(rawMessage))
+				require.NoError(t, err)
+				return msg
+			}(),
+			expected: true,
+			description: "should detect empty text block even with valid thinking block",
+		},
+		{
+			name: "message with valid text and empty thinking block",
+			message: func() anthropic.MessageParam {
+				rawMessage := `{
+					"content": [
+						{
+							"text": "Here is my response",
+							"type": "text"
+						},
+						{
+							"thinking": "",
+							"type": "thinking"
+						}
+					],
+					"role": "assistant"
+				}`
+				var msg anthropic.MessageParam
+				err := msg.UnmarshalJSON([]byte(rawMessage))
+				require.NoError(t, err)
+				return msg
+			}(),
+			expected: true,
+			description: "should detect empty thinking block even with valid text block",
+		},
+
+		{
+			name: "message with tool use block only",
+			message: anthropic.MessageParam{
+				Role: anthropic.MessageParamRoleAssistant,
+				Content: []anthropic.ContentBlockParamUnion{
+					anthropic.NewToolUseBlock("tool_123", "test_tool", "test"),
+				},
+			},
+			expected: false,
+			description: "should not detect tool use block as empty",
+		},
+
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := hasAnyEmptyBlock(&tt.message)
+			assert.Equal(t, tt.expected, result, tt.description)
+		})
+	}
 }

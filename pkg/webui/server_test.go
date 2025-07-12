@@ -47,8 +47,6 @@ func (m *mockConversationService) DeleteConversation(ctx context.Context, id str
 	return nil
 }
 
-
-
 func (m *mockConversationService) GetToolResult(ctx context.Context, conversationID, toolCallID string) (*conversations.GetToolResultResponse, error) {
 	if m.getToolFunc != nil {
 		return m.getToolFunc(ctx, conversationID, toolCallID)
