@@ -26,5 +26,6 @@ func GetConfigFromViper() llmtypes.Config {
 		AllowedCommands:      viper.GetStringSlice("allowed_commands"),
 		AllowedDomainsFile:   viper.GetString("allowed_domains_file"),
 		AnthropicAPIAccess:   llmtypes.AnthropicAPIAccess(anthropicAPIAccess),
+		Aliases:              viper.GetStringMapString("aliases"),
 	}
 }

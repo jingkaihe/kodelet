@@ -384,6 +384,9 @@ func (t *AnthropicThread) processMessageExchange(
 
 	response, err := t.NewMessage(ctx, messageParams)
 	if err != nil {
+		if t.isPersisted && t.store != nil && !opt.NoSaveConversation {
+			t.SaveConversation(ctx, false)
+		}
 		return "", false, err
 	}
 
@@ -488,6 +491,9 @@ func isThinkingModel(model anthropic.Model) bool {
 		// opus 4 models
 		anthropic.ModelClaudeOpus4_0,
 		anthropic.ModelClaude4Opus20250514,
+		anthropic.ModelClaudeOpus4_20250514,
+		anthropic.ModelClaude4Opus20250514,
+
 		// sonnet 3.7 models
 		anthropic.ModelClaude3_7Sonnet20250219,
 		anthropic.ModelClaude3_7SonnetLatest,
@@ -539,6 +545,14 @@ func (t *AnthropicThread) NewMessage(ctx context.Context, params anthropic.Messa
 	// Call the Anthropic API
 	stream := t.client.Messages.NewStreaming(ctx, params, option.WithMaxRetries(3))
 	defer stream.Close()
+
+	if stream.Err() != nil {
+		log.WithError(stream.Err()).Error("failed to start streaming messages")
+		telemetry.RecordError(ctx, stream.Err())
+		span.SetStatus(codes.Error, stream.Err().Error())
+		return nil, stream.Err()
+	}
+
 	message := anthropic.Message{}
 	for stream.Next() {
 		event := stream.Current()

@@ -276,7 +276,7 @@ func TestStore_DefaultSorting(t *testing.T) {
 		require.NoError(t, err)
 		summaries := result.ConversationSummaries
 		assert.Len(t, summaries, 3)
-		
+
 		// Should be sorted by updated_at DESC (most recently updated first)
 		// Note: Save() updates UpdatedAt to current time, so order depends on save order
 		// All conversations have the same UpdatedAt, but we should still get 3 records
@@ -293,7 +293,7 @@ func TestStore_DefaultSorting(t *testing.T) {
 		result, err := store.Query(ctx, conversations.QueryOptions{})
 		require.NoError(t, err)
 		assert.Len(t, result.ConversationSummaries, 3)
-		
+
 		// Should be sorted by updated_at DESC (most recently updated first)
 		// Note: Save() updates UpdatedAt to current time, so order depends on save order
 		expectedIDs := []string{"oldest-conv", "middle-conv", "newest-conv"}
@@ -314,7 +314,7 @@ func TestStore_DefaultSorting(t *testing.T) {
 		})
 		require.NoError(t, err)
 		assert.Len(t, result.ConversationSummaries, 3)
-		
+
 		// Should be sorted by updated_at DESC (most recently updated first)
 		expectedIDs := []string{"oldest-conv", "middle-conv", "newest-conv"}
 		actualIDs := []string{
@@ -334,7 +334,7 @@ func TestStore_DefaultSorting(t *testing.T) {
 		})
 		require.NoError(t, err)
 		assert.Len(t, result.ConversationSummaries, 3)
-		
+
 		// Should be sorted by created_at DESC (newest first)
 		assert.Equal(t, "newest-conv", result.ConversationSummaries[0].ID)
 		assert.Equal(t, "middle-conv", result.ConversationSummaries[1].ID)
@@ -349,7 +349,7 @@ func TestStore_DefaultSorting(t *testing.T) {
 		})
 		require.NoError(t, err)
 		assert.Len(t, result.ConversationSummaries, 3)
-		
+
 		// Should be sorted by created_at ASC (oldest first)
 		assert.Equal(t, "oldest-conv", result.ConversationSummaries[0].ID)
 		assert.Equal(t, "middle-conv", result.ConversationSummaries[1].ID)
@@ -363,7 +363,7 @@ func TestStore_DefaultSorting(t *testing.T) {
 		})
 		require.NoError(t, err)
 		assert.Len(t, result.ConversationSummaries, 3)
-		
+
 		// Note: Save() method updates UpdatedAt to current time, so order might differ
 		// from original timestamps. Just verify it's sorted by updated_at (not created_at)
 		// The exact order will depend on Save() timing, but should still be 3 records
@@ -373,7 +373,7 @@ func TestStore_DefaultSorting(t *testing.T) {
 			result.ConversationSummaries[1].ID,
 			result.ConversationSummaries[2].ID,
 		}
-		
+
 		// Verify all expected IDs are present (order may vary due to Save() timing)
 		for _, expectedID := range expectedIDs {
 			assert.Contains(t, actualIDs, expectedID)
@@ -387,7 +387,7 @@ func TestStore_DefaultSorting(t *testing.T) {
 		})
 		require.NoError(t, err)
 		assert.Len(t, result.ConversationSummaries, 3)
-		
+
 		// Should fall back to updated_at DESC (most recently updated first)
 		expectedIDs := []string{"oldest-conv", "middle-conv", "newest-conv"}
 		actualIDs := []string{
@@ -998,7 +998,6 @@ func TestStore_TimestampBehavior(t *testing.T) {
 	assert.Equal(t, firstCreatedAt.Unix(), summary.CreatedAt.Unix(), "Summary CreatedAt should match record CreatedAt")
 	assert.True(t, summary.UpdatedAt.After(secondUpdatedAt), "Summary UpdatedAt should be refreshed")
 }
-
 
 func TestStore_ErrorScenarios(t *testing.T) {
 	ctx := context.Background()
