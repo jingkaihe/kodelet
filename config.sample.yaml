@@ -33,10 +33,6 @@ aliases:
   sonnet-4: "claude-sonnet-4-20250514"
   haiku-35: "claude-3-5-haiku-20241022"
   opus-4: "claude-opus-4-20250514"
-  gpt41: "gpt-4.1"
-  gpt41-mini: "gpt-4.1-mini"
-  o3: "o3"
-  o3-mini: "o3-mini"
 
 # OpenAI specific settings
 # Reasoning effort for OpenAI models (low, medium, high)

@@ -200,27 +200,9 @@ export OPENAI_API_KEY="sk-..."            # For OpenAI models
 **Common Environment Variables**:
 ```bash
 export KODELET_PROVIDER="anthropic|openai"
-export KODELET_MODEL="claude-sonnet-4-20250514|gpt-4.1|sonnet-4|haiku-35"  # Supports aliases
+export KODELET_MODEL="claude-sonnet-4-20250514|gpt-4.1"
 export KODELET_MAX_TOKENS="8192"
 export KODELET_LOG_LEVEL="info"
-```
-
-**Model Aliases**:
-You can define short aliases for long model names in your configuration:
-
-```yaml
-# In ~/.kodelet/config.yaml or kodelet-config.yaml
-aliases:
-  sonnet-4: "claude-sonnet-4-20250514"
-  haiku-35: "claude-3-5-haiku-20241022"
-  opus-4: "claude-opus-4-20250514"
-  gpt41: "gpt-4.1"
-```
-
-Then use aliases anywhere model names are accepted:
-```bash
-kodelet run --model sonnet-4 "your query"  # Resolves to claude-sonnet-4-20250514
-kodelet run --model gpt41 "your query"      # Resolves to gpt-4.1
 ```
 
 For complete configuration options including tracing, model settings, and environment variable overrides, see [`config.sample.yaml`](./config.sample.yaml).
