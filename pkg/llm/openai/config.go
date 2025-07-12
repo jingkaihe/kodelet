@@ -101,14 +101,14 @@ func loadXAIGrokPreset() (*CustomModels, CustomPricing) {
 
 	pricing := CustomPricing{
 		"grok-4-0709": ModelPricing{
-			Input:         0.000003,  // $3 per million tokens
-			Output:        0.000015,  // $15 per million tokens
-			ContextWindow: 256000,    // 256k tokens
+			Input:         0.000003, // $3 per million tokens
+			Output:        0.000015, // $15 per million tokens
+			ContextWindow: 256000,   // 256k tokens
 		},
 		"grok-3": ModelPricing{
-			Input:         0.000003,  // $3 per million tokens
-			Output:        0.000015,  // $15 per million tokens
-			ContextWindow: 131072,    // 131k tokens
+			Input:         0.000003, // $3 per million tokens
+			Output:        0.000015, // $15 per million tokens
+			ContextWindow: 131072,   // 131k tokens
 		},
 		"grok-3-mini": ModelPricing{
 			Input:         0.0000003, // $0.30 per million tokens
@@ -116,9 +116,9 @@ func loadXAIGrokPreset() (*CustomModels, CustomPricing) {
 			ContextWindow: 131072,    // 131k tokens
 		},
 		"grok-3-fast": ModelPricing{
-			Input:         0.000005,  // $5 per million tokens
-			Output:        0.000025,  // $25 per million tokens
-			ContextWindow: 131072,    // 131k tokens
+			Input:         0.000005, // $5 per million tokens
+			Output:        0.000025, // $25 per million tokens
+			ContextWindow: 131072,   // 131k tokens
 		},
 		"grok-3-mini-fast": ModelPricing{
 			Input:         0.0000006, // $0.60 per million tokens
@@ -126,9 +126,9 @@ func loadXAIGrokPreset() (*CustomModels, CustomPricing) {
 			ContextWindow: 131072,    // 131k tokens
 		},
 		"grok-2-vision-1212": ModelPricing{
-			Input:         0.000002,  // $2 per million tokens
-			Output:        0.00001,   // $10 per million tokens
-			ContextWindow: 32768,     // 32k tokens (vision model)
+			Input:         0.000002, // $2 per million tokens
+			Output:        0.00001,  // $10 per million tokens
+			ContextWindow: 32768,    // 32k tokens (vision model)
 		},
 	}
 

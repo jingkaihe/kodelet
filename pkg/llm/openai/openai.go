@@ -531,7 +531,9 @@ func (t *OpenAIThread) processMessageExchange(
 	}
 
 	if t.isReasoningModelDynamic(model) {
-		requestParams.ReasoningEffort = t.reasoningEffort
+		if t.reasoningEffort != "none" {
+			requestParams.ReasoningEffort = t.reasoningEffort
+		}
 		requestParams.MaxTokens = 0
 	}
 
@@ -579,6 +581,11 @@ func (t *OpenAIThread) processMessageExchange(
 	if content != "" {
 		handler.HandleText(content)
 		finalOutput = content
+	}
+
+	thinking := assistantMessage.ReasoningContent
+	if thinking != "" {
+		handler.HandleThinking(thinking)
 	}
 
 	// Check for tool calls

@@ -11,17 +11,17 @@ import (
 
 func TestLoadCustomConfiguration(t *testing.T) {
 	tests := []struct {
-		name     string
-		config   llmtypes.Config
-		expected *CustomModels
-		hasModels bool
+		name       string
+		config     llmtypes.Config
+		expected   *CustomModels
+		hasModels  bool
 		hasPricing bool
 	}{
 		{
-			name:      "no custom config",
-			config:    llmtypes.Config{},
-			expected:  nil,
-			hasModels: false,
+			name:       "no custom config",
+			config:     llmtypes.Config{},
+			expected:   nil,
+			hasModels:  false,
 			hasPricing: false,
 		},
 		{
@@ -43,7 +43,7 @@ func TestLoadCustomConfiguration(t *testing.T) {
 					"grok-2-vision-1212",
 				},
 			},
-			hasModels: true,
+			hasModels:  true,
 			hasPricing: true,
 		},
 		{
@@ -60,7 +60,7 @@ func TestLoadCustomConfiguration(t *testing.T) {
 				Reasoning:    []string{"custom-reasoning-model"},
 				NonReasoning: []string{"custom-regular-model"},
 			},
-			hasModels: true,
+			hasModels:  true,
 			hasPricing: false,
 		},
 		{
@@ -78,7 +78,7 @@ func TestLoadCustomConfiguration(t *testing.T) {
 				// Auto-populated from preset pricing since reasoning was overridden but non-reasoning wasn't
 				NonReasoning: []string{"grok-4-0709", "grok-3", "grok-3-mini", "grok-3-fast", "grok-3-mini-fast", "grok-2-vision-1212"},
 			},
-			hasModels: true,
+			hasModels:  true,
 			hasPricing: true,
 		},
 		{
@@ -99,7 +99,7 @@ func TestLoadCustomConfiguration(t *testing.T) {
 				Reasoning:    []string{"model-a"},
 				NonReasoning: []string{"model-b", "model-c"}, // Auto-populated from pricing
 			},
-			hasModels: true,
+			hasModels:  true,
 			hasPricing: true,
 		},
 	}
@@ -182,9 +182,9 @@ func TestGetPresetBaseURL(t *testing.T) {
 
 func TestValidateCustomConfiguration(t *testing.T) {
 	tests := []struct {
-		name        string
-		config      llmtypes.Config
-		expectError bool
+		name          string
+		config        llmtypes.Config
+		expectError   bool
 		errorContains string
 	}{
 		{
@@ -208,7 +208,7 @@ func TestValidateCustomConfiguration(t *testing.T) {
 					Preset: "invalid-preset",
 				},
 			},
-			expectError: true,
+			expectError:   true,
 			errorContains: "invalid preset",
 		},
 		{
@@ -236,7 +236,7 @@ func TestValidateCustomConfiguration(t *testing.T) {
 					BaseURL: "invalid-url",
 				},
 			},
-			expectError: true,
+			expectError:   true,
 			errorContains: "base_url must start with",
 		},
 		{
@@ -268,7 +268,7 @@ func TestValidateCustomConfiguration(t *testing.T) {
 					},
 				},
 			},
-			expectError: true,
+			expectError:   true,
 			errorContains: "invalid input pricing",
 		},
 		{
@@ -284,7 +284,7 @@ func TestValidateCustomConfiguration(t *testing.T) {
 					},
 				},
 			},
-			expectError: true,
+			expectError:   true,
 			errorContains: "invalid context_window",
 		},
 	}
@@ -292,7 +292,7 @@ func TestValidateCustomConfiguration(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := validateCustomConfiguration(tt.config)
-			
+
 			if tt.expectError {
 				require.Error(t, err)
 				if tt.errorContains != "" {

@@ -32,11 +32,11 @@ func GetConfigFromViper() llmtypes.Config {
 	// Load OpenAI-specific configuration
 	if viper.IsSet("openai") {
 		openaiConfig := &llmtypes.OpenAIConfig{}
-		
+
 		// Load basic settings
 		openaiConfig.Preset = viper.GetString("openai.preset")
 		openaiConfig.BaseURL = viper.GetString("openai.base_url")
-		
+
 		// Load models configuration
 		if viper.IsSet("openai.models") {
 			openaiConfig.Models = &llmtypes.OpenAIModelsConfig{
@@ -44,16 +44,16 @@ func GetConfigFromViper() llmtypes.Config {
 				NonReasoning: viper.GetStringSlice("openai.models.non_reasoning"),
 			}
 		}
-		
+
 		// Load pricing configuration
 		if viper.IsSet("openai.pricing") {
 			openaiConfig.Pricing = make(map[string]llmtypes.PricingConfig)
 			pricingMap := viper.GetStringMap("openai.pricing")
-			
+
 			for model, pricingData := range pricingMap {
 				if pricingSubMap, ok := pricingData.(map[string]interface{}); ok {
 					pricing := llmtypes.PricingConfig{}
-					
+
 					if input, ok := pricingSubMap["input"].(float64); ok {
 						pricing.Input = input
 					}
@@ -66,12 +66,12 @@ func GetConfigFromViper() llmtypes.Config {
 					if contextWindow, ok := pricingSubMap["context_window"].(int); ok {
 						pricing.ContextWindow = contextWindow
 					}
-					
+
 					openaiConfig.Pricing[model] = pricing
 				}
 			}
 		}
-		
+
 		config.OpenAI = openaiConfig
 	}
 

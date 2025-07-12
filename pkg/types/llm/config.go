@@ -34,10 +34,10 @@ type Config struct {
 
 // OpenAIConfig holds OpenAI-specific configuration including support for compatible APIs
 type OpenAIConfig struct {
-	Preset  string                    `mapstructure:"preset"`     // Built-in preset for popular providers (e.g., "xai-grok")
-	BaseURL string                    `mapstructure:"base_url"`   // Custom API base URL (overrides preset)
-	Models  *OpenAIModelsConfig       `mapstructure:"models"`     // Custom model configuration
-	Pricing map[string]PricingConfig  `mapstructure:"pricing"`    // Custom pricing configuration
+	Preset  string                   `mapstructure:"preset"`   // Built-in preset for popular providers (e.g., "xai-grok")
+	BaseURL string                   `mapstructure:"base_url"` // Custom API base URL (overrides preset)
+	Models  *OpenAIModelsConfig      `mapstructure:"models"`   // Custom model configuration
+	Pricing map[string]PricingConfig `mapstructure:"pricing"`  // Custom pricing configuration
 }
 
 // OpenAIModelsConfig defines which models support reasoning capabilities

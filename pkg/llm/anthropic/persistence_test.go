@@ -1085,9 +1085,9 @@ func TestExtractMessagesWithThinkingLeadingNewlines(t *testing.T) {
 
 func TestHasAnyEmptyBlock(t *testing.T) {
 	tests := []struct {
-		name     string
-		message  anthropic.MessageParam
-		expected bool
+		name        string
+		message     anthropic.MessageParam
+		expected    bool
 		description string
 	}{
 		{
@@ -1098,7 +1098,7 @@ func TestHasAnyEmptyBlock(t *testing.T) {
 					anthropic.NewTextBlock(""),
 				},
 			},
-			expected: true,
+			expected:    true,
 			description: "should detect empty text block",
 		},
 		{
@@ -1109,7 +1109,7 @@ func TestHasAnyEmptyBlock(t *testing.T) {
 					anthropic.NewTextBlock("   \n\t  "),
 				},
 			},
-			expected: true,
+			expected:    true,
 			description: "should detect whitespace-only text block",
 		},
 
@@ -1130,7 +1130,7 @@ func TestHasAnyEmptyBlock(t *testing.T) {
 				require.NoError(t, err)
 				return msg
 			}(),
-			expected: true,
+			expected:    true,
 			description: "should detect empty thinking block",
 		},
 		{
@@ -1150,7 +1150,7 @@ func TestHasAnyEmptyBlock(t *testing.T) {
 				require.NoError(t, err)
 				return msg
 			}(),
-			expected: true,
+			expected:    true,
 			description: "should detect whitespace-only thinking block",
 		},
 		{
@@ -1170,7 +1170,7 @@ func TestHasAnyEmptyBlock(t *testing.T) {
 				require.NoError(t, err)
 				return msg
 			}(),
-			expected: false,
+			expected:    false,
 			description: "should not detect valid thinking block as empty",
 		},
 		{
@@ -1194,7 +1194,7 @@ func TestHasAnyEmptyBlock(t *testing.T) {
 				require.NoError(t, err)
 				return msg
 			}(),
-			expected: true,
+			expected:    true,
 			description: "should detect empty text block even with valid thinking block",
 		},
 		{
@@ -1218,7 +1218,7 @@ func TestHasAnyEmptyBlock(t *testing.T) {
 				require.NoError(t, err)
 				return msg
 			}(),
-			expected: true,
+			expected:    true,
 			description: "should detect empty thinking block even with valid text block",
 		},
 
@@ -1230,10 +1230,9 @@ func TestHasAnyEmptyBlock(t *testing.T) {
 					anthropic.NewToolUseBlock("tool_123", "test_tool", "test"),
 				},
 			},
-			expected: false,
+			expected:    false,
 			description: "should not detect tool use block as empty",
 		},
-
 	}
 
 	for _, tt := range tests {
