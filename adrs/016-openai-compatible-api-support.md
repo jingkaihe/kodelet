@@ -42,46 +42,44 @@ model: grok-3
 openai:
   # Custom base URL (overrides OPENAI_API_BASE env var)
   base_url: https://api.x.ai/v1
-  
+
   # Custom models configuration
   models:
-    # All Grok models support reasoning capabilities
+    # Only these Grok models support reasoning capabilities (per xAI docs)
     reasoning:
       - grok-4-0709
-      - grok-3
-      - grok-3-fast
-      - grok-2-vision-1212
-    non_reasoning:
       - grok-3-mini
       - grok-3-mini-fast
-  
+    # non_reasoning is optional - if not specified, it will be auto-populated
+    # with all models from pricing that are not in the reasoning list
+
   # Custom pricing configuration (based on xAI's actual pricing)
   pricing:
     grok-4-0709:
       input: 0.000003         # $3 per million tokens
       output: 0.000015        # $15 per million tokens
       context_window: 256000  # 256k tokens
-    
+
     grok-3:
       input: 0.000003         # $3 per million tokens
       output: 0.000015        # $15 per million tokens
       context_window: 131072  # 131k tokens
-      
+
     grok-3-mini:
       input: 0.0000003        # $0.30 per million tokens
       output: 0.0000009       # $0.90 per million tokens
       context_window: 131072  # 131k tokens
-      
+
     grok-3-fast:
       input: 0.000005         # $5 per million tokens
       output: 0.000025        # $25 per million tokens
       context_window: 131072  # 131k tokens
-      
+
     grok-3-mini-fast:
       input: 0.0000006        # $0.60 per million tokens
       output: 0.000004        # $4 per million tokens
       context_window: 131072  # 131k tokens
-      
+
     grok-2-vision-1212:
       input: 0.000002         # $2 per million tokens
       output: 0.00001         # $10 per million tokens
@@ -100,22 +98,22 @@ func NewOpenAIThread(config llmtypes.Config, store conversations.Store) (*OpenAI
     if apiKey == "" {
         return nil, errors.New("OPENAI_API_KEY environment variable is required")
     }
-    
+
     // Initialize client configuration
     clientConfig := openai.DefaultConfig(apiKey)
-    
+
     // Check for custom base URL (environment variable takes precedence)
     if baseURL := os.Getenv("OPENAI_API_BASE"); baseURL != "" {
         clientConfig.BaseURL = baseURL
     } else if config.OpenAI != nil && config.OpenAI.BaseURL != "" {
         clientConfig.BaseURL = config.OpenAI.BaseURL
     }
-    
+
     client := openai.NewClientWithConfig(clientConfig)
-    
+
     // Load custom models and pricing if available
     models, pricing := loadCustomConfiguration(config)
-    
+
     return &OpenAIThread{
         client:         client,
         config:         config,
@@ -141,15 +139,29 @@ func loadCustomConfiguration(config llmtypes.Config) (*CustomModels, CustomPrici
     if config.OpenAI == nil {
         return nil, nil
     }
-    
+
     var models *CustomModels
     if config.OpenAI.Models != nil {
         models = &CustomModels{
             Reasoning:    config.OpenAI.Models.Reasoning,
             NonReasoning: config.OpenAI.Models.NonReasoning,
         }
+
+        // Auto-populate NonReasoning if not explicitly set
+        if len(models.NonReasoning) == 0 && len(models.Reasoning) > 0 && config.OpenAI.Pricing != nil {
+            reasoningSet := make(map[string]bool)
+            for _, model := range models.Reasoning {
+                reasoningSet[model] = true
+            }
+
+            for model := range config.OpenAI.Pricing {
+                if !reasoningSet[model] {
+                    models.NonReasoning = append(models.NonReasoning, model)
+                }
+            }
+        }
     }
-    
+
     var pricing CustomPricing
     if config.OpenAI.Pricing != nil {
         pricing = make(CustomPricing)
@@ -162,7 +174,7 @@ func loadCustomConfiguration(config llmtypes.Config) (*CustomModels, CustomPrici
             }
         }
     }
-    
+
     return models, pricing
 }
 ```
@@ -179,7 +191,7 @@ func (o *OpenAIThread) getAvailableModels(reasoning bool) []string {
         }
         return o.customModels.NonReasoning
     }
-    
+
     // Fall back to hardcoded defaults
     if reasoning {
         return ReasoningModels
@@ -194,7 +206,7 @@ func (o *OpenAIThread) getPricing(model string) (ModelPricing, bool) {
             return pricing, true
         }
     }
-    
+
     // Fall back to hardcoded pricing
     pricing, ok := ModelPricingMap[model]
     return pricing, ok
@@ -212,7 +224,7 @@ type Config struct {
     ReasoningEffort string
     WeakModel       string
     // ... existing fields
-    
+
     // Provider-specific configurations
     OpenAI *OpenAIConfig `mapstructure:"openai"`
 }
@@ -235,6 +247,19 @@ type PricingConfig struct {
     ContextWindow int     `mapstructure:"context_window"`
 }
 ```
+
+### Model Auto-Population
+
+To reduce configuration duplication and prevent inconsistencies, the system supports auto-populating the `non_reasoning` model list:
+
+1. **Explicit Configuration**: If both `reasoning` and `non_reasoning` are explicitly configured, use them as-is
+2. **Auto-Population**: If `reasoning` is configured but `non_reasoning` is empty/omitted, automatically populate `non_reasoning` with all models from the pricing section that are not in the reasoning list
+3. **Validation**: This ensures all models with pricing information are categorized and available for use
+
+This approach provides:
+- **Reduced duplication**: Only need to maintain the reasoning model list
+- **Consistency**: Impossible to have a model in pricing but missing from both lists
+- **Flexibility**: Can still explicitly override non_reasoning if needed
 
 ### Migration Strategy
 
@@ -260,25 +285,34 @@ openai:
   models:
     reasoning:
       - grok-4-0709
-      - grok-3
-      - grok-3-fast
-      - grok-2-vision-1212
-    non_reasoning:
       - grok-3-mini
       - grok-3-mini-fast
+    # non_reasoning will be auto-populated with: grok-3, grok-3-fast, grok-2-vision-1212
   pricing:
+    grok-4-0709:
+      input: 0.000003         # $3 per million tokens
+      output: 0.000015        # $15 per million tokens
+      context_window: 256000  # 256k context window
     grok-3:
       input: 0.000003         # $3 per million tokens
       output: 0.000015        # $15 per million tokens
       context_window: 131072
     grok-3-mini:
-      input: 0.0000003        # $0.30 per million tokens  
+      input: 0.0000003        # $0.30 per million tokens
       output: 0.0000009       # $0.90 per million tokens
       context_window: 131072
-    grok-4-0709:
-      input: 0.000003         # $3 per million tokens
-      output: 0.000015        # $15 per million tokens
-      context_window: 256000  # 256k context window
+    grok-3-mini-fast:
+      input: 0.0000006        # $0.60 per million tokens
+      output: 0.000004        # $4 per million tokens
+      context_window: 131072
+    grok-3-fast:
+      input: 0.000005         # $5 per million tokens
+      output: 0.000025        # $25 per million tokens
+      context_window: 131072
+    grok-2-vision-1212:
+      input: 0.000002         # $2 per million tokens
+      output: 0.00001         # $10 per million tokens
+      context_window: 32768   # 32k tokens (vision model)
 ```
 
 ### Local LLM (e.g., Ollama with OpenAI-compatible endpoint)
