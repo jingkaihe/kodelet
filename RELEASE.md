@@ -1,5 +1,13 @@
 # Kodelet
 
+## 0.0.63.alpha (2025-07-12)
+
+### Model Aliases Support
+
+- **Configuration-based Model Aliases**: Added support for custom model aliases in configuration files
+  to allow memorable names for frequently used models (e.g., `claude-sonnet-4-20250514` -> `sonnet-4`, `claude-4-opus-20250514` -> `opus-4`).
+- **Streaming Improvements**: Better error handling and conversation saving for streaming message responses
+
 ## 0.0.62.alpha (2025-07-11)
 
 ### Conversation management improvements
