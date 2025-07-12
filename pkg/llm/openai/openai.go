@@ -60,6 +60,31 @@ func IsOpenAIModel(model string) bool {
 	return slices.Contains(ReasoningModels, model) || slices.Contains(NonReasoningModels, model)
 }
 
+// isReasoningModelDynamic checks if a model supports reasoning using custom configuration
+func (o *OpenAIThread) isReasoningModelDynamic(model string) bool {
+	// Use custom models if configured
+	if o.customModels != nil {
+		return slices.Contains(o.customModels.Reasoning, model)
+	}
+
+	// Fall back to hardcoded check
+	return IsReasoningModel(model)
+}
+
+// getPricing returns the pricing information for a model, checking custom pricing first
+func (o *OpenAIThread) getPricing(model string) (ModelPricing, bool) {
+	// Check custom pricing first
+	if o.customPricing != nil {
+		if pricing, ok := o.customPricing[model]; ok {
+			return pricing, true
+		}
+	}
+
+	// Fall back to hardcoded pricing
+	pricing, ok := ModelPricingMap[model]
+	return pricing, ok
+}
+
 // ConversationStore is an alias for the conversations.ConversationStore interface
 // to avoid direct dependency on the conversations package
 type ConversationStore = conversations.ConversationStore
@@ -239,6 +264,8 @@ type OpenAIThread struct {
 	mu              sync.Mutex
 	conversationMu  sync.Mutex
 	toolResults     map[string]tooltypes.StructuredToolResult // Maps tool_call_id to structured result
+	customModels    *CustomModels                             // Custom model configuration
+	customPricing   CustomPricing                             // Custom pricing configuration
 }
 
 func (t *OpenAIThread) Provider() string {
@@ -260,14 +287,49 @@ func NewOpenAIThread(config llmtypes.Config) *OpenAIThread {
 		reasoningEffort = "medium" // Default reasoning effort
 	}
 
+	// Validate custom configuration
+	if err := validateCustomConfiguration(config); err != nil {
+		// For now, we'll log the error and continue with defaults
+		// In the future, we could return an error from this function
+		fmt.Printf("Warning: OpenAI configuration validation failed: %v\n", err)
+	}
+
+	// Get API key
+	apiKey := os.Getenv("OPENAI_API_KEY")
+
+	// Initialize client configuration
+	clientConfig := openai.DefaultConfig(apiKey)
+
+	// Check for custom base URL (environment variable takes precedence)
+	if baseURL := os.Getenv("OPENAI_API_BASE"); baseURL != "" {
+		clientConfig.BaseURL = baseURL
+	} else if config.OpenAI != nil {
+		// Check preset first, then custom base URL
+		if config.OpenAI.Preset != "" {
+			if presetBaseURL := getPresetBaseURL(config.OpenAI.Preset); presetBaseURL != "" {
+				clientConfig.BaseURL = presetBaseURL
+			}
+		}
+		if config.OpenAI.BaseURL != "" {
+			clientConfig.BaseURL = config.OpenAI.BaseURL // Override preset
+		}
+	}
+
+	client := openai.NewClientWithConfig(clientConfig)
+
+	// Load custom models and pricing if available
+	customModels, customPricing := loadCustomConfiguration(config)
+
 	return &OpenAIThread{
-		client:          openai.NewClient(os.Getenv("OPENAI_API_KEY")), // API key will be set via env var
+		client:          client,
 		config:          config,
 		reasoningEffort: reasoningEffort,
 		conversationID:  convtypes.GenerateID(),
 		isPersisted:     false,
 		usage:           &llmtypes.Usage{}, // must be initialized to avoid nil pointer dereference
 		toolResults:     make(map[string]tooltypes.StructuredToolResult),
+		customModels:    customModels,
+		customPricing:   customPricing,
 	}
 }
 
@@ -468,7 +530,7 @@ func (t *OpenAIThread) processMessageExchange(
 		MaxTokens: maxTokens,
 	}
 
-	if IsReasoningModel(model) {
+	if t.isReasoningModelDynamic(model) {
 		requestParams.ReasoningEffort = t.reasoningEffort
 		requestParams.MaxTokens = 0
 	}
@@ -587,8 +649,12 @@ func (t *OpenAIThread) updateUsage(usage openai.Usage, model string) {
 	t.usage.InputTokens += usage.PromptTokens
 	t.usage.OutputTokens += usage.CompletionTokens
 
-	// Calculate costs based on model pricing
-	pricing := getModelPricing(model)
+	// Calculate costs based on model pricing (use dynamic pricing method)
+	pricing, found := t.getPricing(model)
+	if !found {
+		// Fall back to the old method if dynamic pricing doesn't find the model
+		pricing = getModelPricing(model)
+	}
 
 	// Calculate individual costs
 	t.usage.InputCost += float64(usage.PromptTokens) * pricing.Input
@@ -608,8 +674,10 @@ func (t *OpenAIThread) NewSubAgent(ctx context.Context) llmtypes.Thread {
 		config:          config,
 		reasoningEffort: t.reasoningEffort, // Reuse parent's reasoning effort
 		conversationID:  convtypes.GenerateID(),
-		isPersisted:     false,   // subagent is not persisted
-		usage:           t.usage, // Share usage tracking with parent
+		isPersisted:     false,           // subagent is not persisted
+		usage:           t.usage,         // Share usage tracking with parent
+		customModels:    t.customModels,  // Share custom models configuration
+		customPricing:   t.customPricing, // Share custom pricing configuration
 	}
 
 	thread.SetState(tools.NewBasicState(ctx, tools.WithSubAgentTools(), tools.WithExtraMCPTools(t.state.MCPTools())))

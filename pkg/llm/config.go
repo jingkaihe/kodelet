@@ -14,7 +14,7 @@ func GetConfigFromViper() llmtypes.Config {
 		anthropicAPIAccess = string(llmtypes.AnthropicAPIAccessAuto)
 	}
 
-	return llmtypes.Config{
+	config := llmtypes.Config{
 		Provider:             viper.GetString("provider"),
 		Model:                viper.GetString("model"),
 		MaxTokens:            viper.GetInt("max_tokens"),
@@ -28,4 +28,52 @@ func GetConfigFromViper() llmtypes.Config {
 		AnthropicAPIAccess:   llmtypes.AnthropicAPIAccess(anthropicAPIAccess),
 		Aliases:              viper.GetStringMapString("aliases"),
 	}
+
+	// Load OpenAI-specific configuration
+	if viper.IsSet("openai") {
+		openaiConfig := &llmtypes.OpenAIConfig{}
+		
+		// Load basic settings
+		openaiConfig.Preset = viper.GetString("openai.preset")
+		openaiConfig.BaseURL = viper.GetString("openai.base_url")
+		
+		// Load models configuration
+		if viper.IsSet("openai.models") {
+			openaiConfig.Models = &llmtypes.OpenAIModelsConfig{
+				Reasoning:    viper.GetStringSlice("openai.models.reasoning"),
+				NonReasoning: viper.GetStringSlice("openai.models.non_reasoning"),
+			}
+		}
+		
+		// Load pricing configuration
+		if viper.IsSet("openai.pricing") {
+			openaiConfig.Pricing = make(map[string]llmtypes.PricingConfig)
+			pricingMap := viper.GetStringMap("openai.pricing")
+			
+			for model, pricingData := range pricingMap {
+				if pricingSubMap, ok := pricingData.(map[string]interface{}); ok {
+					pricing := llmtypes.PricingConfig{}
+					
+					if input, ok := pricingSubMap["input"].(float64); ok {
+						pricing.Input = input
+					}
+					if cachedInput, ok := pricingSubMap["cached_input"].(float64); ok {
+						pricing.CachedInput = cachedInput
+					}
+					if output, ok := pricingSubMap["output"].(float64); ok {
+						pricing.Output = output
+					}
+					if contextWindow, ok := pricingSubMap["context_window"].(int); ok {
+						pricing.ContextWindow = contextWindow
+					}
+					
+					openaiConfig.Pricing[model] = pricing
+				}
+			}
+		}
+		
+		config.OpenAI = openaiConfig
+	}
+
+	return config
 }
