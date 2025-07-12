@@ -16,6 +16,21 @@ import (
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
+// resolveModelAlias resolves a model name through the configured aliases
+// If the model name exists as an alias, returns the mapped full name
+// Otherwise returns the original model name unchanged
+func resolveModelAlias(modelName string, aliases map[string]string) string {
+	if aliases == nil {
+		return modelName
+	}
+
+	if resolvedName, exists := aliases[modelName]; exists {
+		return resolvedName
+	}
+
+	return modelName
+}
+
 // NewThread creates a new thread based on the model specified in the config
 func NewThread(config llmtypes.Config) (llmtypes.Thread, error) {
 	// If a provider is explicitly specified, use that
@@ -31,7 +46,11 @@ func NewThread(config llmtypes.Config) (llmtypes.Thread, error) {
 	}
 
 	// Determine which provider to use based on the model name
-	modelName := config.Model
+	// First resolve any aliases before provider selection
+	modelName := resolveModelAlias(config.Model, config.Aliases)
+
+	// Update config with resolved model name for provider
+	config.Model = modelName
 
 	// Default to Anthropic Claude if no model specified
 	if modelName == "" {

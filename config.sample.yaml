@@ -27,6 +27,17 @@ weak_model: "claude-3-5-haiku-20241022"
 # Maximum tokens for weak model responses
 weak_model_max_tokens: 8192
 
+# Model aliases for easier reference
+# Allows using short names instead of full model identifiers
+aliases:
+  sonnet-4: "claude-sonnet-4-20250514"
+  haiku-35: "claude-3-5-haiku-20241022"
+  opus-4: "claude-opus-4-20250514"
+  gpt41: "gpt-4.1"
+  gpt41-mini: "gpt-4.1-mini"
+  o3: "o3"
+  o3-mini: "o3-mini"
+
 # OpenAI specific settings
 # Reasoning effort for OpenAI models (low, medium, high)
 reasoning_effort: "medium"
@@ -88,6 +99,7 @@ tracing:
 # - KODELET_TRACING_ENABLED: Enables/disables tracing
 # - KODELET_TRACING_SAMPLER: Sets the sampling strategy
 # - KODELET_TRACING_RATIO: Sets the sampling ratio
+# - KODELET_ALIASES_*: Define individual aliases (e.g., KODELET_ALIASES_SONNET4=claude-sonnet-4-20250514)
 #
 # API Keys:
 # - ANTHROPIC_API_KEY: Required when using the Anthropic provider
