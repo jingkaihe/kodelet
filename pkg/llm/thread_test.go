@@ -25,14 +25,20 @@ func TestNewThread(t *testing.T) {
 		expectedMax   int
 	}{
 		{
-			name:          "WithConfigValues",
-			config:        llmtypes.Config{Model: "test-model", MaxTokens: 5000},
+			name: "WithConfigValues",
+			config: llmtypes.Config{
+				Provider:  "openai",
+				Model:     "test-model",
+				MaxTokens: 5000,
+			},
 			expectedModel: "test-model",
 			expectedMax:   5000,
 		},
 		{
-			name:          "WithDefaultValues",
-			config:        llmtypes.Config{},
+			name: "WithDefaultValues",
+			config: llmtypes.Config{
+				Provider: "anthropic",
+			},
 			expectedModel: string(anthropic.ModelClaudeSonnet4_20250514),
 			expectedMax:   8192,
 		},
@@ -137,6 +143,7 @@ func TestSendMessageAndGetText(t *testing.T) {
 		tools.NewBasicState(ctx),
 		query,
 		llmtypes.Config{
+			Provider:  "anthropic",
 			Model:     string(anthropic.ModelClaude3_5Haiku20241022),
 			MaxTokens: 100,
 		},
@@ -195,6 +202,7 @@ func TestSendMessageRealClient(t *testing.T) {
 
 	// Create a real thread
 	thread, err := NewThread(llmtypes.Config{
+		Provider:  "anthropic",
 		Model:     string(anthropic.ModelClaude3_5Haiku20241022), // Using a real model
 		MaxTokens: 100,
 	})
@@ -259,6 +267,7 @@ func TestSendMessageWithToolUse(t *testing.T) {
 
 	// Create thread
 	thread, err := NewThread(llmtypes.Config{
+		Provider:  "anthropic",
 		Model:     string(anthropic.ModelClaude3_5Haiku20241022),
 		MaxTokens: 1000,
 	})
@@ -329,7 +338,8 @@ func TestNewThreadWithAliases(t *testing.T) {
 		{
 			name: "resolves Anthropic alias to Claude model",
 			config: llmtypes.Config{
-				Model: "sonnet-4",
+				Provider: "anthropic",
+				Model:    "sonnet-4",
 				Aliases: map[string]string{
 					"sonnet-4": "claude-sonnet-4-20250514",
 				},
@@ -339,7 +349,8 @@ func TestNewThreadWithAliases(t *testing.T) {
 		{
 			name: "resolves OpenAI alias to GPT model",
 			config: llmtypes.Config{
-				Model: "gpt41",
+				Provider: "openai",
+				Model:    "gpt41",
 				Aliases: map[string]string{
 					"gpt41": "gpt-4.1",
 				},
@@ -349,7 +360,8 @@ func TestNewThreadWithAliases(t *testing.T) {
 		{
 			name: "uses full model name when no alias exists",
 			config: llmtypes.Config{
-				Model: "claude-sonnet-4-20250514",
+				Provider: "anthropic",
+				Model:    "claude-sonnet-4-20250514",
 				Aliases: map[string]string{
 					"sonnet-4": "claude-sonnet-4-20250514",
 				},

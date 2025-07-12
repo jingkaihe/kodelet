@@ -12,6 +12,7 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/llm/anthropic"
 	"github.com/jingkaihe/kodelet/pkg/llm/openai"
+	"github.com/jingkaihe/kodelet/pkg/logger"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
@@ -20,6 +21,10 @@ import (
 // If the model name exists as an alias, returns the mapped full name
 // Otherwise returns the original model name unchanged
 func resolveModelAlias(modelName string, aliases map[string]string) string {
+	logger.G(context.TODO()).
+		WithField("modelName", modelName).
+		WithField("aliases", aliases).Debug("Resolving model alias")
+
 	if aliases == nil {
 		return modelName
 	}
@@ -33,43 +38,14 @@ func resolveModelAlias(modelName string, aliases map[string]string) string {
 
 // NewThread creates a new thread based on the model specified in the config
 func NewThread(config llmtypes.Config) (llmtypes.Thread, error) {
-	// If a provider is explicitly specified, use that
-	if config.Provider != "" {
-		switch strings.ToLower(config.Provider) {
-		case "openai":
-			return openai.NewOpenAIThread(config), nil
-		case "anthropic":
-			return anthropic.NewAnthropicThread(config)
-		default:
-			// If unknown provider, fall back to model name detection
-		}
-	}
-
-	// Determine which provider to use based on the model name
-	// First resolve any aliases before provider selection
-	modelName := resolveModelAlias(config.Model, config.Aliases)
-
-	// Update config with resolved model name for provider
-	config.Model = modelName
-
-	// Default to Anthropic Claude if no model specified
-	if modelName == "" {
-		return anthropic.NewAnthropicThread(config)
-	}
-
-	// Check model name patterns to determine provider
-	switch {
-	// If the model starts with "claude" or matches Anthropic's constants, use Anthropic
-	case strings.HasPrefix(strings.ToLower(modelName), "claude"):
-		return anthropic.NewAnthropicThread(config)
-
-	// If the model starts with "gpt" or matches OpenAI's naming conventions, use OpenAI
-	case openai.IsOpenAIModel(modelName):
+	config.Model = resolveModelAlias(config.Model, config.Aliases)
+	switch strings.ToLower(config.Provider) {
+	case "openai":
 		return openai.NewOpenAIThread(config), nil
-
-	// Default to Anthropic for now
-	default:
+	case "anthropic":
 		return anthropic.NewAnthropicThread(config)
+	default:
+		return nil, errors.Errorf("unsupported provider: %s", config.Provider)
 	}
 }
 

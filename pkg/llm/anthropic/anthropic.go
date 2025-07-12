@@ -488,6 +488,9 @@ func isThinkingModel(model anthropic.Model) bool {
 		// opus 4 models
 		anthropic.ModelClaudeOpus4_0,
 		anthropic.ModelClaude4Opus20250514,
+		anthropic.ModelClaudeOpus4_20250514,
+		anthropic.ModelClaude4Opus20250514,
+
 		// sonnet 3.7 models
 		anthropic.ModelClaude3_7Sonnet20250219,
 		anthropic.ModelClaude3_7SonnetLatest,
