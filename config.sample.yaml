@@ -73,8 +73,8 @@ allowed_commands: []
 # Supports any OpenAI-compatible provider (xAI, Groq, Together AI, etc.)
 openai:
   # Option 1: Use a built-in preset (recommended for popular providers)
-  # preset: "xai-grok"  # Built-in preset for xAI's Grok models
-  
+  # preset: "xai"  # Built-in preset for xAI's Grok models
+
   # Option 2: Custom configuration (overrides preset if both are specified)
   # base_url: "https://api.x.ai/v1"  # Custom API endpoint
   # models:

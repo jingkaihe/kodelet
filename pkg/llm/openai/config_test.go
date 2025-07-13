@@ -25,10 +25,10 @@ func TestLoadCustomConfiguration(t *testing.T) {
 			hasPricing: false,
 		},
 		{
-			name: "xai-grok preset",
+			name: "xai preset",
 			config: llmtypes.Config{
 				OpenAI: &llmtypes.OpenAIConfig{
-					Preset: "xai-grok",
+					Preset: "xai",
 				},
 			},
 			expected: &llmtypes.CustomModels{
@@ -67,7 +67,7 @@ func TestLoadCustomConfiguration(t *testing.T) {
 			name: "preset with custom override",
 			config: llmtypes.Config{
 				OpenAI: &llmtypes.OpenAIConfig{
-					Preset: "xai-grok",
+					Preset: "xai",
 					Models: &llmtypes.CustomModels{
 						Reasoning: []string{"custom-override-model"},
 					},
@@ -159,7 +159,7 @@ func TestGetPresetBaseURL(t *testing.T) {
 		expected string
 	}{
 		{
-			preset:   "xai-grok",
+			preset:   "xai",
 			expected: "https://api.x.ai/v1",
 		},
 		{
@@ -196,7 +196,7 @@ func TestValidateCustomConfiguration(t *testing.T) {
 			name: "valid preset",
 			config: llmtypes.Config{
 				OpenAI: &llmtypes.OpenAIConfig{
-					Preset: "xai-grok",
+					Preset: "xai",
 				},
 			},
 			expectError: false,

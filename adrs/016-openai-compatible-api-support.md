@@ -41,8 +41,8 @@ model: grok-3
 # OpenAI-compatible provider configuration
 openai:
   # Option 1: Use a built-in preset (recommended for popular providers)
-  preset: "xai-grok"  # Built-in preset with all xAI models and current pricing
-  
+  preset: "xai"  # Built-in preset with all xAI models and current pricing
+
   # Option 2: Custom configuration (overrides preset if both are specified)
   base_url: https://api.x.ai/v1
   models:
@@ -175,7 +175,7 @@ func loadCustomConfiguration(config llmtypes.Config) (*CustomModels, CustomPrici
 
 func loadPreset(presetName string) (*CustomModels, CustomPricing) {
     switch presetName {
-    case "xai-grok":
+    case "xai":
         return loadXAIGrokPreset()
     default:
         return nil, nil
@@ -234,7 +234,7 @@ func loadXAIGrokPreset() (*CustomModels, CustomPricing) {
 
 func getPresetBaseURL(presetName string) string {
     switch presetName {
-    case "xai-grok":
+    case "xai":
         return "https://api.x.ai/v1"
     default:
         return ""
@@ -318,7 +318,7 @@ To simplify configuration for popular providers, Kodelet ships with built-in pre
 
 #### Available Presets
 
-1. **xai-grok**: Complete configuration for xAI's Grok models
+1. **xai**: Complete configuration for xAI's Grok models
    - Base URL: `https://api.x.ai/v1`
    - All current Grok models with up-to-date pricing
    - Correct reasoning/non-reasoning categorization per xAI docs
@@ -337,7 +337,7 @@ To simplify configuration for popular providers, Kodelet ships with built-in pre
 provider: openai
 model: grok-3
 openai:
-  preset: "xai-grok"
+  preset: "xai"
 ```
 
 **Preset with custom overrides:**
@@ -345,7 +345,7 @@ openai:
 provider: openai
 model: grok-3
 openai:
-  preset: "xai-grok"
+  preset: "xai"
   # Override specific pricing for local testing
   pricing:
     grok-3-mini:
@@ -386,7 +386,7 @@ provider: openai
 model: grok-3
 
 openai:
-  preset: "xai-grok"  # Automatically configures all Grok models and pricing
+  preset: "xai"  # Automatically configures all Grok models and pricing
 ```
 
 ### xAI (Grok) - Custom Configuration

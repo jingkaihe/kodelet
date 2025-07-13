@@ -64,7 +64,7 @@ func loadCustomConfiguration(config llmtypes.Config) (*llmtypes.CustomModels, ll
 // loadPreset loads a built-in preset configuration for popular providers
 func loadPreset(presetName string) (*llmtypes.CustomModels, llmtypes.CustomPricing) {
 	switch presetName {
-	case "xai-grok":
+	case "xai":
 		return loadXAIGrokPreset()
 	default:
 		return nil, nil
@@ -96,7 +96,7 @@ func loadXAIGrokPreset() (*llmtypes.CustomModels, llmtypes.CustomPricing) {
 // getPresetBaseURL returns the base URL for a given preset
 func getPresetBaseURL(presetName string) string {
 	switch presetName {
-	case "xai-grok":
+	case "xai":
 		return grok.BaseURL
 	default:
 		return ""
@@ -111,7 +111,7 @@ func validateCustomConfiguration(config llmtypes.Config) error {
 
 	// Validate preset name if specified
 	if config.OpenAI.Preset != "" {
-		validPresets := []string{"xai-grok"}
+		validPresets := []string{"xai"}
 		isValidPreset := false
 		for _, preset := range validPresets {
 			if config.OpenAI.Preset == preset {

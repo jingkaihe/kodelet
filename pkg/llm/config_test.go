@@ -158,7 +158,7 @@ func TestGetConfigFromViperOpenAIBasicConfig(t *testing.T) {
 	// Setup
 	viper.Reset()
 	viper.Set("provider", "openai")
-	viper.Set("openai.preset", "xai-grok")
+	viper.Set("openai.preset", "xai")
 	viper.Set("openai.base_url", "https://api.x.ai/v1")
 
 	// Execute
@@ -166,7 +166,7 @@ func TestGetConfigFromViperOpenAIBasicConfig(t *testing.T) {
 
 	// Verify
 	require.NotNil(t, config.OpenAI, "OpenAI config should not be nil")
-	assert.Equal(t, "xai-grok", config.OpenAI.Preset)
+	assert.Equal(t, "xai", config.OpenAI.Preset)
 	assert.Equal(t, "https://api.x.ai/v1", config.OpenAI.BaseURL)
 	assert.Nil(t, config.OpenAI.Models, "Models should be nil when not set")
 	assert.Nil(t, config.OpenAI.Pricing, "Pricing should be nil when not set")
