@@ -13,7 +13,7 @@ func TestLoadCustomConfiguration(t *testing.T) {
 	tests := []struct {
 		name       string
 		config     llmtypes.Config
-		expected   *CustomModels
+		expected   *llmtypes.CustomModels
 		hasModels  bool
 		hasPricing bool
 	}{
@@ -31,7 +31,7 @@ func TestLoadCustomConfiguration(t *testing.T) {
 					Preset: "xai-grok",
 				},
 			},
-			expected: &CustomModels{
+			expected: &llmtypes.CustomModels{
 				Reasoning: []string{
 					"grok-4-0709",
 					"grok-3-mini",
@@ -50,13 +50,13 @@ func TestLoadCustomConfiguration(t *testing.T) {
 			name: "custom models only",
 			config: llmtypes.Config{
 				OpenAI: &llmtypes.OpenAIConfig{
-					Models: &llmtypes.OpenAIModelsConfig{
+					Models: &llmtypes.CustomModels{
 						Reasoning:    []string{"custom-reasoning-model"},
 						NonReasoning: []string{"custom-regular-model"},
 					},
 				},
 			},
-			expected: &CustomModels{
+			expected: &llmtypes.CustomModels{
 				Reasoning:    []string{"custom-reasoning-model"},
 				NonReasoning: []string{"custom-regular-model"},
 			},
@@ -68,12 +68,12 @@ func TestLoadCustomConfiguration(t *testing.T) {
 			config: llmtypes.Config{
 				OpenAI: &llmtypes.OpenAIConfig{
 					Preset: "xai-grok",
-					Models: &llmtypes.OpenAIModelsConfig{
+					Models: &llmtypes.CustomModels{
 						Reasoning: []string{"custom-override-model"},
 					},
 				},
 			},
-			expected: &CustomModels{
+			expected: &llmtypes.CustomModels{
 				Reasoning: []string{"custom-override-model"},
 				// Auto-populated from preset pricing since reasoning was overridden but non-reasoning wasn't
 				NonReasoning: []string{"grok-4-0709", "grok-3", "grok-3-mini", "grok-3-fast", "grok-3-mini-fast", "grok-2-vision-1212"},
@@ -85,17 +85,17 @@ func TestLoadCustomConfiguration(t *testing.T) {
 			name: "auto-populate non-reasoning models",
 			config: llmtypes.Config{
 				OpenAI: &llmtypes.OpenAIConfig{
-					Models: &llmtypes.OpenAIModelsConfig{
+					Models: &llmtypes.CustomModels{
 						Reasoning: []string{"model-a"},
 					},
-					Pricing: map[string]llmtypes.PricingConfig{
+					Pricing: map[string]llmtypes.ModelPricing{
 						"model-a": {Input: 0.001, Output: 0.002, ContextWindow: 128000},
 						"model-b": {Input: 0.003, Output: 0.004, ContextWindow: 64000},
 						"model-c": {Input: 0.005, Output: 0.006, ContextWindow: 32000},
 					},
 				},
 			},
-			expected: &CustomModels{
+			expected: &llmtypes.CustomModels{
 				Reasoning:    []string{"model-a"},
 				NonReasoning: []string{"model-b", "model-c"}, // Auto-populated from pricing
 			},
@@ -243,7 +243,7 @@ func TestValidateCustomConfiguration(t *testing.T) {
 			name: "valid pricing",
 			config: llmtypes.Config{
 				OpenAI: &llmtypes.OpenAIConfig{
-					Pricing: map[string]llmtypes.PricingConfig{
+					Pricing: map[string]llmtypes.ModelPricing{
 						"test-model": {
 							Input:         0.001,
 							Output:        0.002,
@@ -259,7 +259,7 @@ func TestValidateCustomConfiguration(t *testing.T) {
 			name: "invalid input pricing",
 			config: llmtypes.Config{
 				OpenAI: &llmtypes.OpenAIConfig{
-					Pricing: map[string]llmtypes.PricingConfig{
+					Pricing: map[string]llmtypes.ModelPricing{
 						"test-model": {
 							Input:         -0.001,
 							Output:        0.002,
@@ -275,7 +275,7 @@ func TestValidateCustomConfiguration(t *testing.T) {
 			name: "invalid context window",
 			config: llmtypes.Config{
 				OpenAI: &llmtypes.OpenAIConfig{
-					Pricing: map[string]llmtypes.PricingConfig{
+					Pricing: map[string]llmtypes.ModelPricing{
 						"test-model": {
 							Input:         0.001,
 							Output:        0.002,

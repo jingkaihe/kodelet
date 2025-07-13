@@ -4,27 +4,19 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/jingkaihe/kodelet/pkg/llm/openai/preset/grok"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
 
-// CustomModels holds model categorization for custom configurations
-type CustomModels struct {
-	Reasoning    []string
-	NonReasoning []string
-}
-
-// CustomPricing maps model names to their pricing information
-type CustomPricing map[string]ModelPricing
-
 // loadCustomConfiguration loads custom models and pricing from configuration
 // It processes presets first, then applies custom overrides if provided
-func loadCustomConfiguration(config llmtypes.Config) (*CustomModels, CustomPricing) {
+func loadCustomConfiguration(config llmtypes.Config) (*llmtypes.CustomModels, llmtypes.CustomPricing) {
 	if config.OpenAI == nil {
 		return nil, nil
 	}
 
-	var models *CustomModels
-	var pricing CustomPricing
+	var models *llmtypes.CustomModels
+	var pricing llmtypes.CustomPricing
 
 	// Load preset if specified
 	if config.OpenAI.Preset != "" {
@@ -36,7 +28,7 @@ func loadCustomConfiguration(config llmtypes.Config) (*CustomModels, CustomPrici
 	// Override with custom configuration if provided
 	if config.OpenAI.Models != nil {
 		if models == nil {
-			models = &CustomModels{}
+			models = &llmtypes.CustomModels{}
 		}
 		// If custom models are specified, override the preset completely
 		models.Reasoning = config.OpenAI.Models.Reasoning
@@ -45,15 +37,10 @@ func loadCustomConfiguration(config llmtypes.Config) (*CustomModels, CustomPrici
 
 	if config.OpenAI.Pricing != nil {
 		if pricing == nil {
-			pricing = make(CustomPricing)
+			pricing = make(llmtypes.CustomPricing)
 		}
 		for model, p := range config.OpenAI.Pricing {
-			pricing[model] = ModelPricing{
-				Input:         p.Input,
-				CachedInput:   p.CachedInput,
-				Output:        p.Output,
-				ContextWindow: p.ContextWindow,
-			}
+			pricing[model] = p
 		}
 	}
 
@@ -75,7 +62,7 @@ func loadCustomConfiguration(config llmtypes.Config) (*CustomModels, CustomPrici
 }
 
 // loadPreset loads a built-in preset configuration for popular providers
-func loadPreset(presetName string) (*CustomModels, CustomPricing) {
+func loadPreset(presetName string) (*llmtypes.CustomModels, llmtypes.CustomPricing) {
 	switch presetName {
 	case "xai-grok":
 		return loadXAIGrokPreset()
@@ -85,51 +72,22 @@ func loadPreset(presetName string) (*CustomModels, CustomPricing) {
 }
 
 // loadXAIGrokPreset loads the complete xAI Grok configuration
-func loadXAIGrokPreset() (*CustomModels, CustomPricing) {
-	models := &CustomModels{
-		Reasoning: []string{
-			"grok-4-0709",
-			"grok-3-mini",
-			"grok-3-mini-fast",
-		},
-		NonReasoning: []string{
-			"grok-3",
-			"grok-3-fast",
-			"grok-2-vision-1212",
-		},
+func loadXAIGrokPreset() (*llmtypes.CustomModels, llmtypes.CustomPricing) {
+	// Convert grok.Models to llmtypes.CustomModels
+	models := &llmtypes.CustomModels{
+		Reasoning:    grok.Models.Reasoning,
+		NonReasoning: grok.Models.NonReasoning,
 	}
 
-	pricing := CustomPricing{
-		"grok-4-0709": ModelPricing{
-			Input:         0.000003, // $3 per million tokens
-			Output:        0.000015, // $15 per million tokens
-			ContextWindow: 256000,   // 256k tokens
-		},
-		"grok-3": ModelPricing{
-			Input:         0.000003, // $3 per million tokens
-			Output:        0.000015, // $15 per million tokens
-			ContextWindow: 131072,   // 131k tokens
-		},
-		"grok-3-mini": ModelPricing{
-			Input:         0.0000003, // $0.30 per million tokens
-			Output:        0.0000009, // $0.90 per million tokens
-			ContextWindow: 131072,    // 131k tokens
-		},
-		"grok-3-fast": ModelPricing{
-			Input:         0.000005, // $5 per million tokens
-			Output:        0.000025, // $25 per million tokens
-			ContextWindow: 131072,   // 131k tokens
-		},
-		"grok-3-mini-fast": ModelPricing{
-			Input:         0.0000006, // $0.60 per million tokens
-			Output:        0.000004,  // $4 per million tokens
-			ContextWindow: 131072,    // 131k tokens
-		},
-		"grok-2-vision-1212": ModelPricing{
-			Input:         0.000002, // $2 per million tokens
-			Output:        0.00001,  // $10 per million tokens
-			ContextWindow: 32768,    // 32k tokens (vision model)
-		},
+	// Convert grok.Pricing to llmtypes.CustomPricing
+	pricing := make(llmtypes.CustomPricing)
+	for model, grokPricing := range grok.Pricing {
+		pricing[model] = llmtypes.ModelPricing{
+			Input:         grokPricing.Input,
+			CachedInput:   grokPricing.CachedInput,
+			Output:        grokPricing.Output,
+			ContextWindow: grokPricing.ContextWindow,
+		}
 	}
 
 	return models, pricing
@@ -139,7 +97,7 @@ func loadXAIGrokPreset() (*CustomModels, CustomPricing) {
 func getPresetBaseURL(presetName string) string {
 	switch presetName {
 	case "xai-grok":
-		return "https://api.x.ai/v1"
+		return grok.BaseURL
 	default:
 		return ""
 	}

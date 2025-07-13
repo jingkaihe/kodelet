@@ -72,7 +72,7 @@ func (o *OpenAIThread) isReasoningModelDynamic(model string) bool {
 }
 
 // getPricing returns the pricing information for a model, checking custom pricing first
-func (o *OpenAIThread) getPricing(model string) (ModelPricing, bool) {
+func (o *OpenAIThread) getPricing(model string) (llmtypes.ModelPricing, bool) {
 	// Check custom pricing first
 	if o.customPricing != nil {
 		if pricing, ok := o.customPricing[model]; ok {
@@ -89,16 +89,8 @@ func (o *OpenAIThread) getPricing(model string) (ModelPricing, bool) {
 // to avoid direct dependency on the conversations package
 type ConversationStore = conversations.ConversationStore
 
-// ModelPricing holds the per-token pricing for different operations
-type ModelPricing struct {
-	Input         float64
-	CachedInput   float64
-	Output        float64
-	ContextWindow int
-}
-
 // ModelPricingMap maps model names to their pricing information
-var ModelPricingMap = map[string]ModelPricing{
+var ModelPricingMap = map[string]llmtypes.ModelPricing{
 	"gpt-4.1": {
 		Input:         0.000002,
 		CachedInput:   0.0000005,
@@ -228,7 +220,7 @@ var ModelPricingMap = map[string]ModelPricing{
 }
 
 // getModelPricing returns the pricing information for a given model
-func getModelPricing(model string) ModelPricing {
+func getModelPricing(model string) llmtypes.ModelPricing {
 	// First try exact match
 	if pricing, ok := ModelPricingMap[model]; ok {
 		return pricing
@@ -264,8 +256,8 @@ type OpenAIThread struct {
 	mu              sync.Mutex
 	conversationMu  sync.Mutex
 	toolResults     map[string]tooltypes.StructuredToolResult // Maps tool_call_id to structured result
-	customModels    *CustomModels                             // Custom model configuration
-	customPricing   CustomPricing                             // Custom pricing configuration
+	customModels    *llmtypes.CustomModels                    // Custom model configuration
+	customPricing   llmtypes.CustomPricing                    // Custom pricing configuration
 }
 
 func (t *OpenAIThread) Provider() string {

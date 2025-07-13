@@ -39,7 +39,7 @@ func GetConfigFromViper() llmtypes.Config {
 
 		// Load models configuration
 		if viper.IsSet("openai.models") {
-			openaiConfig.Models = &llmtypes.OpenAIModelsConfig{
+			openaiConfig.Models = &llmtypes.CustomModels{
 				Reasoning:    viper.GetStringSlice("openai.models.reasoning"),
 				NonReasoning: viper.GetStringSlice("openai.models.non_reasoning"),
 			}
@@ -47,12 +47,12 @@ func GetConfigFromViper() llmtypes.Config {
 
 		// Load pricing configuration
 		if viper.IsSet("openai.pricing") {
-			openaiConfig.Pricing = make(map[string]llmtypes.PricingConfig)
+			openaiConfig.Pricing = make(map[string]llmtypes.ModelPricing)
 			pricingMap := viper.GetStringMap("openai.pricing")
 
 			for model, pricingData := range pricingMap {
 				if pricingSubMap, ok := pricingData.(map[string]interface{}); ok {
-					pricing := llmtypes.PricingConfig{}
+					pricing := llmtypes.ModelPricing{}
 
 					if input, ok := pricingSubMap["input"].(float64); ok {
 						pricing.Input = input
