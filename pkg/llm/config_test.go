@@ -140,3 +140,242 @@ func TestConfigAliasIntegrationWithNewThread(t *testing.T) {
 	// Verify the original config was not modified (passed by value to NewThread)
 	assert.Equal(t, originalModel, config.Model, "original config should not be modified")
 }
+
+func TestGetConfigFromViperOpenAINotSet(t *testing.T) {
+	// Setup
+	viper.Reset()
+	viper.Set("provider", "openai")
+	viper.Set("model", "gpt-4")
+
+	// Execute
+	config := GetConfigFromViper()
+
+	// Verify
+	assert.Nil(t, config.OpenAI, "OpenAI config should be nil when not set")
+}
+
+func TestGetConfigFromViperOpenAIBasicConfig(t *testing.T) {
+	// Setup
+	viper.Reset()
+	viper.Set("provider", "openai")
+	viper.Set("openai.preset", "xai-grok")
+	viper.Set("openai.base_url", "https://api.x.ai/v1")
+
+	// Execute
+	config := GetConfigFromViper()
+
+	// Verify
+	require.NotNil(t, config.OpenAI, "OpenAI config should not be nil")
+	assert.Equal(t, "xai-grok", config.OpenAI.Preset)
+	assert.Equal(t, "https://api.x.ai/v1", config.OpenAI.BaseURL)
+	assert.Nil(t, config.OpenAI.Models, "Models should be nil when not set")
+	assert.Nil(t, config.OpenAI.Pricing, "Pricing should be nil when not set")
+}
+
+func TestGetConfigFromViperOpenAIModelsConfig(t *testing.T) {
+	// Setup
+	viper.Reset()
+	viper.Set("provider", "openai")
+	viper.Set("openai.models.reasoning", []string{"o1-preview", "o1-mini", "o3-mini"})
+	viper.Set("openai.models.non_reasoning", []string{"gpt-4", "gpt-4-turbo", "gpt-3.5-turbo"})
+
+	// Execute
+	config := GetConfigFromViper()
+
+	// Verify
+	require.NotNil(t, config.OpenAI, "OpenAI config should not be nil")
+	require.NotNil(t, config.OpenAI.Models, "Models config should not be nil")
+	assert.Equal(t, []string{"o1-preview", "o1-mini", "o3-mini"}, config.OpenAI.Models.Reasoning)
+	assert.Equal(t, []string{"gpt-4", "gpt-4-turbo", "gpt-3.5-turbo"}, config.OpenAI.Models.NonReasoning)
+}
+
+func TestGetConfigFromViperOpenAIPartialModelsConfig(t *testing.T) {
+	// Setup
+	viper.Reset()
+	viper.Set("provider", "openai")
+	viper.Set("openai.models.reasoning", []string{"o1-preview"})
+	// Don't set non_reasoning
+
+	// Execute
+	config := GetConfigFromViper()
+
+	// Verify
+	require.NotNil(t, config.OpenAI, "OpenAI config should not be nil")
+	require.NotNil(t, config.OpenAI.Models, "Models config should not be nil")
+	assert.Equal(t, []string{"o1-preview"}, config.OpenAI.Models.Reasoning)
+	assert.Nil(t, config.OpenAI.Models.NonReasoning, "NonReasoning should be nil when not set")
+}
+
+func TestGetConfigFromViperOpenAIPricingConfig(t *testing.T) {
+	// Setup
+	viper.Reset()
+	viper.Set("provider", "openai")
+
+	// Create complex pricing configuration
+	pricingConfig := map[string]interface{}{
+		"gpt-4": map[string]interface{}{
+			"input":          0.00003,
+			"cached_input":   0.000015,
+			"output":         0.00006,
+			"context_window": 128000,
+		},
+		"o1-preview": map[string]interface{}{
+			"input":          0.000015,
+			"output":         0.00006,
+			"context_window": 32768,
+		},
+	}
+	viper.Set("openai.pricing", pricingConfig)
+
+	// Execute
+	config := GetConfigFromViper()
+
+	// Verify
+	require.NotNil(t, config.OpenAI, "OpenAI config should not be nil")
+	require.NotNil(t, config.OpenAI.Pricing, "Pricing should not be nil")
+	require.Len(t, config.OpenAI.Pricing, 2, "Should have 2 pricing entries")
+
+	// Check gpt-4 pricing
+	gpt4Pricing, exists := config.OpenAI.Pricing["gpt-4"]
+	require.True(t, exists, "gpt-4 pricing should exist")
+	assert.Equal(t, 0.00003, gpt4Pricing.Input)
+	assert.Equal(t, 0.000015, gpt4Pricing.CachedInput)
+	assert.Equal(t, 0.00006, gpt4Pricing.Output)
+	assert.Equal(t, 128000, gpt4Pricing.ContextWindow)
+
+	// Check o1-preview pricing
+	o1Pricing, exists := config.OpenAI.Pricing["o1-preview"]
+	require.True(t, exists, "o1-preview pricing should exist")
+	assert.Equal(t, 0.000015, o1Pricing.Input)
+	assert.Equal(t, 0.0, o1Pricing.CachedInput) // Not set, should be zero value
+	assert.Equal(t, 0.00006, o1Pricing.Output)
+	assert.Equal(t, 32768, o1Pricing.ContextWindow)
+}
+
+func TestGetConfigFromViperOpenAIPricingPartialConfig(t *testing.T) {
+	// Setup
+	viper.Reset()
+	viper.Set("provider", "openai")
+
+	// Create pricing configuration with only some fields
+	pricingConfig := map[string]interface{}{
+		"gpt-4": map[string]interface{}{
+			"input":  0.00003,
+			"output": 0.00006,
+			// Missing cached_input and context_window
+		},
+	}
+	viper.Set("openai.pricing", pricingConfig)
+
+	// Execute
+	config := GetConfigFromViper()
+
+	// Verify
+	require.NotNil(t, config.OpenAI, "OpenAI config should not be nil")
+	require.NotNil(t, config.OpenAI.Pricing, "Pricing should not be nil")
+
+	gpt4Pricing, exists := config.OpenAI.Pricing["gpt-4"]
+	require.True(t, exists, "gpt-4 pricing should exist")
+	assert.Equal(t, 0.00003, gpt4Pricing.Input)
+	assert.Equal(t, 0.0, gpt4Pricing.CachedInput) // Should be zero value
+	assert.Equal(t, 0.00006, gpt4Pricing.Output)
+	assert.Equal(t, 0, gpt4Pricing.ContextWindow) // Should be zero value
+}
+
+func TestGetConfigFromViperOpenAIPricingInvalidTypes(t *testing.T) {
+	// Setup
+	viper.Reset()
+	viper.Set("provider", "openai")
+
+	// Create pricing configuration with invalid types
+	pricingConfig := map[string]interface{}{
+		"gpt-4": map[string]interface{}{
+			"input":          "invalid", // Should be float64
+			"cached_input":   0.000015,
+			"output":         0.00006,
+			"context_window": "invalid", // Should be int
+		},
+		"invalid-entry": "not-a-map", // Should be a map
+	}
+	viper.Set("openai.pricing", pricingConfig)
+
+	// Execute
+	config := GetConfigFromViper()
+
+	// Verify
+	require.NotNil(t, config.OpenAI, "OpenAI config should not be nil")
+	require.NotNil(t, config.OpenAI.Pricing, "Pricing should not be nil")
+
+	// Should only have one valid entry (gpt-4) but with invalid fields as zero values
+	require.Len(t, config.OpenAI.Pricing, 1, "Should have 1 pricing entry (invalid entry skipped)")
+
+	gpt4Pricing, exists := config.OpenAI.Pricing["gpt-4"]
+	require.True(t, exists, "gpt-4 pricing should exist")
+	assert.Equal(t, 0.0, gpt4Pricing.Input) // Invalid type, should be zero value
+	assert.Equal(t, 0.000015, gpt4Pricing.CachedInput)
+	assert.Equal(t, 0.00006, gpt4Pricing.Output)
+	assert.Equal(t, 0, gpt4Pricing.ContextWindow) // Invalid type, should be zero value
+}
+
+func TestGetConfigFromViperOpenAIFullConfig(t *testing.T) {
+	// Setup
+	viper.Reset()
+	viper.Set("provider", "openai")
+	viper.Set("model", "gpt-4")
+	viper.Set("max_tokens", 4096)
+
+	// Set full OpenAI configuration
+	viper.Set("openai.preset", "custom")
+	viper.Set("openai.base_url", "https://api.custom.ai/v1")
+	viper.Set("openai.models.reasoning", []string{"o1-preview", "o1-mini"})
+	viper.Set("openai.models.non_reasoning", []string{"gpt-4", "gpt-3.5-turbo"})
+
+	pricingConfig := map[string]interface{}{
+		"gpt-4": map[string]interface{}{
+			"input":          0.00003,
+			"cached_input":   0.000015,
+			"output":         0.00006,
+			"context_window": 128000,
+		},
+		"o1-preview": map[string]interface{}{
+			"input":          0.000015,
+			"output":         0.00006,
+			"context_window": 32768,
+		},
+	}
+	viper.Set("openai.pricing", pricingConfig)
+
+	// Execute
+	config := GetConfigFromViper()
+
+	// Verify basic config
+	assert.Equal(t, "openai", config.Provider)
+	assert.Equal(t, "gpt-4", config.Model)
+	assert.Equal(t, 4096, config.MaxTokens)
+
+	// Verify OpenAI config
+	require.NotNil(t, config.OpenAI, "OpenAI config should not be nil")
+	assert.Equal(t, "custom", config.OpenAI.Preset)
+	assert.Equal(t, "https://api.custom.ai/v1", config.OpenAI.BaseURL)
+
+	// Verify models config
+	require.NotNil(t, config.OpenAI.Models, "Models config should not be nil")
+	assert.Equal(t, []string{"o1-preview", "o1-mini"}, config.OpenAI.Models.Reasoning)
+	assert.Equal(t, []string{"gpt-4", "gpt-3.5-turbo"}, config.OpenAI.Models.NonReasoning)
+
+	// Verify pricing config
+	require.NotNil(t, config.OpenAI.Pricing, "Pricing should not be nil")
+	require.Len(t, config.OpenAI.Pricing, 2, "Should have 2 pricing entries")
+
+	gpt4Pricing := config.OpenAI.Pricing["gpt-4"]
+	assert.Equal(t, 0.00003, gpt4Pricing.Input)
+	assert.Equal(t, 0.000015, gpt4Pricing.CachedInput)
+	assert.Equal(t, 0.00006, gpt4Pricing.Output)
+	assert.Equal(t, 128000, gpt4Pricing.ContextWindow)
+
+	o1Pricing := config.OpenAI.Pricing["o1-preview"]
+	assert.Equal(t, 0.000015, o1Pricing.Input)
+	assert.Equal(t, 0.0, o1Pricing.CachedInput)
+	assert.Equal(t, 0.00006, o1Pricing.Output)
+	assert.Equal(t, 32768, o1Pricing.ContextWindow)
+}
