@@ -18,11 +18,11 @@ func TestLoadCustomConfiguration(t *testing.T) {
 		hasPricing bool
 	}{
 		{
-			name:       "no custom config uses openai preset",
-			config:     llmtypes.Config{},
+			name:   "no custom config uses openai preset",
+			config: llmtypes.Config{},
 			expected: &llmtypes.CustomModels{
 				Reasoning: []string{
-					"o1", "o1-pro", "o1-mini", "o3", "o3-pro", "o3-mini", 
+					"o1", "o1-pro", "o1-mini", "o3", "o3-pro", "o3-mini",
 					"o3-deep-research", "o4-mini", "o4-mini-deep-research",
 				},
 				NonReasoning: []string{
@@ -45,7 +45,7 @@ func TestLoadCustomConfiguration(t *testing.T) {
 			},
 			expected: &llmtypes.CustomModels{
 				Reasoning: []string{
-					"o1", "o1-pro", "o1-mini", "o3", "o3-pro", "o3-mini", 
+					"o1", "o1-pro", "o1-mini", "o3", "o3-pro", "o3-mini",
 					"o3-deep-research", "o4-mini", "o4-mini-deep-research",
 				},
 				NonReasoning: []string{
@@ -198,7 +198,7 @@ func TestLoadOpenAIPreset(t *testing.T) {
 
 	// Check reasoning models
 	expectedReasoning := []string{
-		"o1", "o1-pro", "o1-mini", "o3", "o3-pro", "o3-mini", 
+		"o1", "o1-pro", "o1-mini", "o3", "o3-pro", "o3-mini",
 		"o3-deep-research", "o4-mini", "o4-mini-deep-research",
 	}
 	assert.ElementsMatch(t, expectedReasoning, models.Reasoning)
