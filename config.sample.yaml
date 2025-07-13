@@ -69,6 +69,36 @@ allowed_commands: []
 # weak_model_max_tokens: 4096
 # reasoning_effort: "medium"
 
+# OpenAI-compatible API configuration
+# Supports any OpenAI-compatible provider (xAI, Groq, Together AI, etc.)
+openai:
+  # Option 1: Use a built-in preset (recommended for popular providers)
+  # preset: "xai"  # Built-in preset for xAI's Grok models
+
+  # Option 2: Custom configuration (overrides preset if both are specified)
+  # base_url: "https://api.x.ai/v1"  # Custom API endpoint
+  # models:
+  #   # Models that support reasoning capabilities (o1, o3, grok reasoning models, etc.)
+  #   reasoning:
+  #     - "grok-4-0709"
+  #     - "grok-3-mini"
+  #     - "grok-3-mini-fast"
+  #   # Non-reasoning models (auto-populated if not specified)
+  #   non_reasoning:
+  #     - "grok-3"
+  #     - "grok-3-fast"
+  #     - "grok-2-vision-1212"
+  # pricing:
+  #   grok-4-0709:
+  #     input: 0.000003         # $3 per million tokens
+  #     output: 0.000015        # $15 per million tokens
+  #     context_window: 256000  # 256k tokens
+  #   grok-3:
+  #     input: 0.000003         # $3 per million tokens
+  #     output: 0.000015        # $15 per million tokens
+  #     context_window: 131072  # 131k tokens
+  #   # ... additional models
+
 # Tracing Configuration
 tracing:
   # Enable OpenTelemetry tracing (default: false)
@@ -100,6 +130,7 @@ tracing:
 # API Keys:
 # - ANTHROPIC_API_KEY: Required when using the Anthropic provider
 # - OPENAI_API_KEY: Required when using the OpenAI provider
+# - OPENAI_API_BASE: Custom OpenAI API endpoint (overrides config base_url)
 #
 # Standard OpenTelemetry environment variables are also supported:
 # - OTEL_EXPORTER_OTLP_ENDPOINT: The endpoint to send telemetry data to

@@ -31,18 +31,35 @@ import (
 )
 
 var (
+	// These arrays are now managed by the preset system but kept for backward compatibility
+	// with the IsReasoningModel and IsOpenAIModel functions
 	ReasoningModels = []string{
-		"o3",
-		"o4-mini",
-		"o3-mini",
+		"o1",
+		"o1-pro",
 		"o1-mini",
+		"o3",
+		"o3-pro",
+		"o3-mini",
+		"o3-deep-research",
+		"o4-mini",
+		"o4-mini-deep-research",
 	}
 	NonReasoningModels = []string{
 		"gpt-4.1",
 		"gpt-4.1-mini",
 		"gpt-4.1-nano",
+		"gpt-4.5-preview",
 		"gpt-4o",
 		"gpt-4o-mini",
+		"gpt-4o-audio-preview",
+		"gpt-4o-realtime-preview",
+		"gpt-4o-mini-audio-preview",
+		"gpt-4o-mini-realtime-preview",
+		"gpt-4o-mini-search-preview",
+		"gpt-4o-search-preview",
+		"computer-use-preview",
+		"gpt-image-1",
+		"codex-mini-latest",
 	}
 )
 
@@ -60,169 +77,33 @@ func IsOpenAIModel(model string) bool {
 	return slices.Contains(ReasoningModels, model) || slices.Contains(NonReasoningModels, model)
 }
 
+// isReasoningModelDynamic checks if a model supports reasoning using custom configuration
+func (o *OpenAIThread) isReasoningModelDynamic(model string) bool {
+	// Use custom models if configured
+	if o.customModels != nil {
+		return slices.Contains(o.customModels.Reasoning, model)
+	}
+
+	// Fall back to hardcoded check
+	return IsReasoningModel(model)
+}
+
+// getPricing returns the pricing information for a model, checking custom pricing first
+func (o *OpenAIThread) getPricing(model string) (llmtypes.ModelPricing, bool) {
+	// Check custom pricing first
+	if o.customPricing != nil {
+		if pricing, ok := o.customPricing[model]; ok {
+			return pricing, true
+		}
+	}
+
+	// No custom pricing found, return empty pricing
+	return llmtypes.ModelPricing{}, false
+}
+
 // ConversationStore is an alias for the conversations.ConversationStore interface
 // to avoid direct dependency on the conversations package
 type ConversationStore = conversations.ConversationStore
-
-// ModelPricing holds the per-token pricing for different operations
-type ModelPricing struct {
-	Input         float64
-	CachedInput   float64
-	Output        float64
-	ContextWindow int
-}
-
-// ModelPricingMap maps model names to their pricing information
-var ModelPricingMap = map[string]ModelPricing{
-	"gpt-4.1": {
-		Input:         0.000002,
-		CachedInput:   0.0000005,
-		Output:        0.000008,
-		ContextWindow: 1047576,
-	},
-	"gpt-4.1-mini": {
-		Input:         0.0000004,
-		CachedInput:   0.0000001,
-		Output:        0.0000016,
-		ContextWindow: 1047576,
-	},
-	"gpt-4.1-nano": {
-		Input:         0.0000001,
-		CachedInput:   0.000000025,
-		Output:        0.0000004,
-		ContextWindow: 1047576,
-	},
-	// "gpt-4.5-preview": {
-	// 	Input:         0.000075,
-	// 	CachedInput:   0.0000375,
-	// 	Output:        0.00015,
-	// 	ContextWindow: 128_000,
-	// },
-	"gpt-4o": {
-		Input:         0.0000025,
-		CachedInput:   0.00000125,
-		Output:        0.00001,
-		ContextWindow: 128_000,
-	},
-	// "gpt-4o-audio-preview": {
-	// 	Input:         0.0000025,
-	// 	CachedInput:   nil,
-	// 	Output:        0.00001,
-	// 	ContextWindow: 128_000,
-	// },
-	// "gpt-4o-realtime-preview": {
-	// 	Input:         0.000005,
-	// 	CachedInput:   0.0000025,
-	// 	Output:        0.00002,
-	// 	ContextWindow: 128_000,
-	// },
-	"gpt-4o-mini": {
-		Input:         0.00000015,
-		CachedInput:   0.000000075,
-		Output:        0.0000006,
-		ContextWindow: 128_000,
-	},
-	// "gpt-4o-mini-audio-preview": {
-	// 	Input:         0.00000015,
-	// 	CachedInput:   nil,
-	// 	Output:        0.0000006,
-	// 	ContextWindow: 128_000,
-	// },
-	// "gpt-4o-mini-realtime-preview": {
-	// 	Input:         0.0000006,
-	// 	CachedInput:   0.0000003,
-	// 	Output:        0.0000024,
-	// 	ContextWindow: 128_000,
-	// },
-	// "o1": {
-	// 	Input:         0.000015,
-	// 	CachedInput:   0.0000075,
-	// 	Output:        0.00006,
-	// 	ContextWindow: 128_000,
-	// },
-	// "o1-pro": {
-	// 	Input:         0.00015,
-	// 	CachedInput:   nil,
-	// 	Output:        0.0006,
-	// 	ContextWindow: 128_000,
-	// },
-	"o3": {
-		Input:         0.00001,
-		CachedInput:   0.0000025,
-		Output:        0.00004,
-		ContextWindow: 200_000,
-	},
-	"o4-mini": {
-		Input:         0.0000011,
-		CachedInput:   0.000000275,
-		Output:        0.0000044,
-		ContextWindow: 200_000,
-	},
-	"o3-mini": {
-		Input:         0.0000011,
-		CachedInput:   0.00000055,
-		Output:        0.0000044,
-		ContextWindow: 200_000,
-	},
-	"o1-mini": {
-		Input:         0.0000011,
-		CachedInput:   0.00000055,
-		Output:        0.0000044,
-		ContextWindow: 128_000,
-	},
-	"codex-mini-latest": {
-		Input:         0.0000015,
-		CachedInput:   0.000000375,
-		Output:        0.000006,
-		ContextWindow: 200_000,
-	},
-	// "gpt-4o-mini-search-preview": {
-	// 	Input:         0.00000015,
-	// 	CachedInput:   nil,
-	// 	Output:        0.0000006,
-	// 	ContextWindow: 128_000,
-	// },
-	// "gpt-4o-search-preview": {
-	// 	Input:         0.0000025,
-	// 	CachedInput:   nil,
-	// 	Output:        0.00001,
-	// 	ContextWindow: 128_000,
-	// },
-	// "computer-use-preview": {
-	// 	Input:         0.000003,
-	// 	CachedInput:   nil,
-	// 	Output:        0.000012,
-	// 	ContextWindow: 128_000,
-	// },
-	// "gpt-image-1": {
-	// 	Input:         0.000005,
-	// 	CachedInput:   0.00000125,
-	// 	Output:        nil,
-	// 	ContextWindow: 128_000,
-	// },
-}
-
-// getModelPricing returns the pricing information for a given model
-func getModelPricing(model string) ModelPricing {
-	// First try exact match
-	if pricing, ok := ModelPricingMap[model]; ok {
-		return pricing
-	}
-	// Try to find a match based on model family
-	lowerModel := strings.ToLower(model)
-	if strings.Contains(lowerModel, "gpt-4.1") && !strings.Contains(lowerModel, "mini") {
-		return ModelPricingMap["gpt-4.1"]
-	} else if strings.Contains(lowerModel, "gpt-4.1-mini") {
-		return ModelPricingMap["gpt-4.1-mini"]
-	} else if strings.Contains(lowerModel, "gpt-4o") {
-		return ModelPricingMap["gpt-4o"]
-	} else if strings.Contains(lowerModel, "gpt-3.5") {
-		return ModelPricingMap["gpt-3.5-turbo"]
-	}
-
-	// Default to GPT-4.1 pricing if no match
-	return ModelPricingMap["gpt-4.1"]
-}
 
 // OpenAIThread implements the Thread interface using OpenAI's API
 type OpenAIThread struct {
@@ -239,6 +120,8 @@ type OpenAIThread struct {
 	mu              sync.Mutex
 	conversationMu  sync.Mutex
 	toolResults     map[string]tooltypes.StructuredToolResult // Maps tool_call_id to structured result
+	customModels    *llmtypes.CustomModels                    // Custom model configuration
+	customPricing   llmtypes.CustomPricing                    // Custom pricing configuration
 }
 
 func (t *OpenAIThread) Provider() string {
@@ -260,14 +143,49 @@ func NewOpenAIThread(config llmtypes.Config) *OpenAIThread {
 		reasoningEffort = "medium" // Default reasoning effort
 	}
 
+	// Validate custom configuration
+	if err := validateCustomConfiguration(config); err != nil {
+		// For now, we'll log the error and continue with defaults
+		// In the future, we could return an error from this function
+		fmt.Printf("Warning: OpenAI configuration validation failed: %v\n", err)
+	}
+
+	// Get API key
+	apiKey := os.Getenv("OPENAI_API_KEY")
+
+	// Initialize client configuration
+	clientConfig := openai.DefaultConfig(apiKey)
+
+	// Check for custom base URL (environment variable takes precedence)
+	if baseURL := os.Getenv("OPENAI_API_BASE"); baseURL != "" {
+		clientConfig.BaseURL = baseURL
+	} else if config.OpenAI != nil {
+		// Check preset first, then custom base URL
+		if config.OpenAI.Preset != "" {
+			if presetBaseURL := getPresetBaseURL(config.OpenAI.Preset); presetBaseURL != "" {
+				clientConfig.BaseURL = presetBaseURL
+			}
+		}
+		if config.OpenAI.BaseURL != "" {
+			clientConfig.BaseURL = config.OpenAI.BaseURL // Override preset
+		}
+	}
+
+	client := openai.NewClientWithConfig(clientConfig)
+
+	// Load custom models and pricing if available
+	customModels, customPricing := loadCustomConfiguration(config)
+
 	return &OpenAIThread{
-		client:          openai.NewClient(os.Getenv("OPENAI_API_KEY")), // API key will be set via env var
+		client:          client,
 		config:          config,
 		reasoningEffort: reasoningEffort,
 		conversationID:  convtypes.GenerateID(),
 		isPersisted:     false,
 		usage:           &llmtypes.Usage{}, // must be initialized to avoid nil pointer dereference
 		toolResults:     make(map[string]tooltypes.StructuredToolResult),
+		customModels:    customModels,
+		customPricing:   customPricing,
 	}
 }
 
@@ -468,8 +386,10 @@ func (t *OpenAIThread) processMessageExchange(
 		MaxTokens: maxTokens,
 	}
 
-	if IsReasoningModel(model) {
-		requestParams.ReasoningEffort = t.reasoningEffort
+	if t.isReasoningModelDynamic(model) {
+		if t.reasoningEffort != "none" {
+			requestParams.ReasoningEffort = t.reasoningEffort
+		}
 		requestParams.MaxTokens = 0
 	}
 
@@ -517,6 +437,11 @@ func (t *OpenAIThread) processMessageExchange(
 	if content != "" {
 		handler.HandleText(content)
 		finalOutput = content
+	}
+
+	thinking := assistantMessage.ReasoningContent
+	if thinking != "" {
+		handler.HandleThinking(thinking)
 	}
 
 	// Check for tool calls
@@ -587,8 +512,17 @@ func (t *OpenAIThread) updateUsage(usage openai.Usage, model string) {
 	t.usage.InputTokens += usage.PromptTokens
 	t.usage.OutputTokens += usage.CompletionTokens
 
-	// Calculate costs based on model pricing
-	pricing := getModelPricing(model)
+	// Calculate costs based on model pricing (use dynamic pricing method)
+	pricing, found := t.getPricing(model)
+	if !found {
+		// If no pricing found, use default GPT-4.1 pricing as fallback
+		pricing = llmtypes.ModelPricing{
+			Input:         0.000002,
+			CachedInput:   0.0000005,
+			Output:        0.000008,
+			ContextWindow: 1047576,
+		}
+	}
 
 	// Calculate individual costs
 	t.usage.InputCost += float64(usage.PromptTokens) * pricing.Input
@@ -608,8 +542,10 @@ func (t *OpenAIThread) NewSubAgent(ctx context.Context) llmtypes.Thread {
 		config:          config,
 		reasoningEffort: t.reasoningEffort, // Reuse parent's reasoning effort
 		conversationID:  convtypes.GenerateID(),
-		isPersisted:     false,   // subagent is not persisted
-		usage:           t.usage, // Share usage tracking with parent
+		isPersisted:     false,           // subagent is not persisted
+		usage:           t.usage,         // Share usage tracking with parent
+		customModels:    t.customModels,  // Share custom models configuration
+		customPricing:   t.customPricing, // Share custom pricing configuration
 	}
 
 	thread.SetState(tools.NewBasicState(ctx, tools.WithSubAgentTools(), tools.WithExtraMCPTools(t.state.MCPTools())))

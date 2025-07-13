@@ -1,5 +1,17 @@
 # Kodelet
 
+## 0.0.64.alpha (2025-07-12)
+
+### OpenAI-Compatible Provider Support
+
+- **Provider Presets**: Added configuration-based preset system for popular OpenAI-compatible providers
+  - Built-in `xai` preset with complete xAI Grok model configuration including pricing and reasoning categorization
+  - Configurable via `openai.preset` in configuration files for seamless provider switching
+- **Custom Provider Configuration**: Enhanced OpenAI client to support custom base URLs and model configurations
+  - `OPENAI_API_BASE` environment variable support for alternative API endpoints
+  - Auto-population of non-reasoning models from pricing configuration to reduce duplication
+- **Backward Compatibility**: Maintains full compatibility with existing OpenAI configurations while enabling third-party providers
+
 ## 0.0.63.alpha (2025-07-12)
 
 ### Model Aliases Support

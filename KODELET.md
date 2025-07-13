@@ -194,13 +194,14 @@ Kodelet uses a layered configuration approach with environment variables, global
 **Required API Keys**:
 ```bash
 export ANTHROPIC_API_KEY="sk-ant-api..."  # For Claude models
-export OPENAI_API_KEY="sk-..."            # For OpenAI models
+export OPENAI_API_KEY="sk-..."            # For OpenAI models (also for compatible APIs)
+export OPENAI_API_BASE="https://api.x.ai/v1"  # Optional: Custom API endpoint for OpenAI-compatible providers
 ```
 
 **Common Environment Variables**:
 ```bash
 export KODELET_PROVIDER="anthropic|openai"
-export KODELET_MODEL="claude-sonnet-4-20250514|gpt-4.1"
+export KODELET_MODEL="claude-sonnet-4-20250514|gpt-4.1|grok-3"
 export KODELET_MAX_TOKENS="8192"
 export KODELET_LOG_LEVEL="info"
 ```
