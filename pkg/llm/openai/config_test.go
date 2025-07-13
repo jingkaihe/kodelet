@@ -18,11 +18,46 @@ func TestLoadCustomConfiguration(t *testing.T) {
 		hasPricing bool
 	}{
 		{
-			name:       "no custom config",
+			name:       "no custom config uses openai preset",
 			config:     llmtypes.Config{},
-			expected:   nil,
-			hasModels:  false,
-			hasPricing: false,
+			expected: &llmtypes.CustomModels{
+				Reasoning: []string{
+					"o1", "o1-pro", "o1-mini", "o3", "o3-pro", "o3-mini", 
+					"o3-deep-research", "o4-mini", "o4-mini-deep-research",
+				},
+				NonReasoning: []string{
+					"gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano", "gpt-4.5-preview",
+					"gpt-4o", "gpt-4o-mini", "gpt-4o-audio-preview", "gpt-4o-realtime-preview",
+					"gpt-4o-mini-audio-preview", "gpt-4o-mini-realtime-preview",
+					"gpt-4o-mini-search-preview", "gpt-4o-search-preview",
+					"computer-use-preview", "gpt-image-1", "codex-mini-latest",
+				},
+			},
+			hasModels:  true,
+			hasPricing: true,
+		},
+		{
+			name: "explicit openai preset",
+			config: llmtypes.Config{
+				OpenAI: &llmtypes.OpenAIConfig{
+					Preset: "openai",
+				},
+			},
+			expected: &llmtypes.CustomModels{
+				Reasoning: []string{
+					"o1", "o1-pro", "o1-mini", "o3", "o3-pro", "o3-mini", 
+					"o3-deep-research", "o4-mini", "o4-mini-deep-research",
+				},
+				NonReasoning: []string{
+					"gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano", "gpt-4.5-preview",
+					"gpt-4o", "gpt-4o-mini", "gpt-4o-audio-preview", "gpt-4o-realtime-preview",
+					"gpt-4o-mini-audio-preview", "gpt-4o-mini-realtime-preview",
+					"gpt-4o-mini-search-preview", "gpt-4o-search-preview",
+					"computer-use-preview", "gpt-image-1", "codex-mini-latest",
+				},
+			},
+			hasModels:  true,
+			hasPricing: true,
 		},
 		{
 			name: "xai preset",
@@ -47,9 +82,10 @@ func TestLoadCustomConfiguration(t *testing.T) {
 			hasPricing: true,
 		},
 		{
-			name: "custom models only",
+			name: "custom models only (no preset)",
 			config: llmtypes.Config{
 				OpenAI: &llmtypes.OpenAIConfig{
+					Preset: "", // Explicitly empty preset
 					Models: &llmtypes.CustomModels{
 						Reasoning:    []string{"custom-reasoning-model"},
 						NonReasoning: []string{"custom-regular-model"},
@@ -61,7 +97,7 @@ func TestLoadCustomConfiguration(t *testing.T) {
 				NonReasoning: []string{"custom-regular-model"},
 			},
 			hasModels:  true,
-			hasPricing: false,
+			hasPricing: false, // No preset loaded since explicitly empty
 		},
 		{
 			name: "preset with custom override",
@@ -85,6 +121,7 @@ func TestLoadCustomConfiguration(t *testing.T) {
 			name: "auto-populate non-reasoning models",
 			config: llmtypes.Config{
 				OpenAI: &llmtypes.OpenAIConfig{
+					Preset: "", // Explicitly empty preset to avoid default OpenAI preset loading
 					Models: &llmtypes.CustomModels{
 						Reasoning: []string{"model-a"},
 					},
@@ -100,7 +137,7 @@ func TestLoadCustomConfiguration(t *testing.T) {
 				NonReasoning: []string{"model-b", "model-c"}, // Auto-populated from pricing
 			},
 			hasModels:  true,
-			hasPricing: true,
+			hasPricing: true, // Has pricing because custom pricing is provided
 		},
 	}
 
@@ -153,11 +190,68 @@ func TestLoadXAIGrokPreset(t *testing.T) {
 	assert.Equal(t, 131072, grok3MiniPricing.ContextWindow)
 }
 
+func TestLoadOpenAIPreset(t *testing.T) {
+	models, pricing := loadOpenAIPreset()
+
+	require.NotNil(t, models)
+	require.NotNil(t, pricing)
+
+	// Check reasoning models
+	expectedReasoning := []string{
+		"o1", "o1-pro", "o1-mini", "o3", "o3-pro", "o3-mini", 
+		"o3-deep-research", "o4-mini", "o4-mini-deep-research",
+	}
+	assert.ElementsMatch(t, expectedReasoning, models.Reasoning)
+
+	// Check non-reasoning models
+	expectedNonReasoning := []string{
+		"gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano", "gpt-4.5-preview",
+		"gpt-4o", "gpt-4o-mini", "gpt-4o-audio-preview", "gpt-4o-realtime-preview",
+		"gpt-4o-mini-audio-preview", "gpt-4o-mini-realtime-preview",
+		"gpt-4o-mini-search-preview", "gpt-4o-search-preview",
+		"computer-use-preview", "gpt-image-1", "codex-mini-latest",
+	}
+	assert.ElementsMatch(t, expectedNonReasoning, models.NonReasoning)
+
+	// Check pricing for key models
+	gpt41Pricing, exists := pricing["gpt-4.1"]
+	require.True(t, exists)
+	assert.Equal(t, 0.000002, gpt41Pricing.Input)
+	assert.Equal(t, 0.0000005, gpt41Pricing.CachedInput)
+	assert.Equal(t, 0.000008, gpt41Pricing.Output)
+	assert.Equal(t, 1047576, gpt41Pricing.ContextWindow)
+
+	gpt4oPricing, exists := pricing["gpt-4o"]
+	require.True(t, exists)
+	assert.Equal(t, 0.0000025, gpt4oPricing.Input)
+	assert.Equal(t, 0.00000125, gpt4oPricing.CachedInput)
+	assert.Equal(t, 0.00001, gpt4oPricing.Output)
+	assert.Equal(t, 128_000, gpt4oPricing.ContextWindow)
+
+	o3Pricing, exists := pricing["o3"]
+	require.True(t, exists)
+	assert.Equal(t, 0.000002, o3Pricing.Input)
+	assert.Equal(t, 0.0000005, o3Pricing.CachedInput)
+	assert.Equal(t, 0.000008, o3Pricing.Output)
+	assert.Equal(t, 200_000, o3Pricing.ContextWindow)
+
+	// Test all models have pricing
+	allModels := append(models.Reasoning, models.NonReasoning...)
+	for _, model := range allModels {
+		_, exists := pricing[model]
+		assert.True(t, exists, "Model %s should have pricing information", model)
+	}
+}
+
 func TestGetPresetBaseURL(t *testing.T) {
 	tests := []struct {
 		preset   string
 		expected string
 	}{
+		{
+			preset:   "openai",
+			expected: "https://api.openai.com/v1",
+		},
 		{
 			preset:   "xai",
 			expected: "https://api.x.ai/v1",
@@ -193,7 +287,16 @@ func TestValidateCustomConfiguration(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name: "valid preset",
+			name: "valid preset openai",
+			config: llmtypes.Config{
+				OpenAI: &llmtypes.OpenAIConfig{
+					Preset: "openai",
+				},
+			},
+			expectError: false,
+		},
+		{
+			name: "valid preset xai",
 			config: llmtypes.Config{
 				OpenAI: &llmtypes.OpenAIConfig{
 					Preset: "xai",

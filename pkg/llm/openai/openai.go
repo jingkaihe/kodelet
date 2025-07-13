@@ -31,6 +31,8 @@ import (
 )
 
 var (
+	// These arrays are now managed by the preset system but kept for backward compatibility
+	// with the IsReasoningModel and IsOpenAIModel functions
 	ReasoningModels = []string{
 		"o1",
 		"o1-pro",
@@ -95,176 +97,13 @@ func (o *OpenAIThread) getPricing(model string) (llmtypes.ModelPricing, bool) {
 		}
 	}
 
-	// Fall back to hardcoded pricing
-	pricing, ok := ModelPricingMap[model]
-	return pricing, ok
+	// No custom pricing found, return empty pricing
+	return llmtypes.ModelPricing{}, false
 }
 
 // ConversationStore is an alias for the conversations.ConversationStore interface
 // to avoid direct dependency on the conversations package
 type ConversationStore = conversations.ConversationStore
-
-// ModelPricingMap maps model names to their pricing information
-var ModelPricingMap = map[string]llmtypes.ModelPricing{
-	"gpt-4.1": {
-		Input:         0.000002,
-		CachedInput:   0.0000005,
-		Output:        0.000008,
-		ContextWindow: 1047576,
-	},
-	"gpt-4.1-mini": {
-		Input:         0.0000004,
-		CachedInput:   0.0000001,
-		Output:        0.0000016,
-		ContextWindow: 1047576,
-	},
-	"gpt-4.1-nano": {
-		Input:         0.0000001,
-		CachedInput:   0.000000025,
-		Output:        0.0000004,
-		ContextWindow: 1047576,
-	},
-	"gpt-4.5-preview": {
-		Input:         0.000075,
-		CachedInput:   0.0000375,
-		Output:        0.00015,
-		ContextWindow: 128_000,
-	},
-	"gpt-4o": {
-		Input:         0.0000025,
-		CachedInput:   0.00000125,
-		Output:        0.00001,
-		ContextWindow: 128_000,
-	},
-	"gpt-4o-audio-preview": {
-		Input:         0.0000025,
-		Output:        0.00001,
-		ContextWindow: 128_000,
-	},
-	"gpt-4o-realtime-preview": {
-		Input:         0.000005,
-		CachedInput:   0.0000025,
-		Output:        0.00002,
-		ContextWindow: 128_000,
-	},
-	"gpt-4o-mini": {
-		Input:         0.00000015,
-		CachedInput:   0.000000075,
-		Output:        0.0000006,
-		ContextWindow: 128_000,
-	},
-	"gpt-4o-mini-audio-preview": {
-		Input:         0.00000015,
-		Output:        0.0000006,
-		ContextWindow: 128_000,
-	},
-	"gpt-4o-mini-realtime-preview": {
-		Input:         0.0000006,
-		CachedInput:   0.0000003,
-		Output:        0.0000024,
-		ContextWindow: 128_000,
-	},
-	"o1": {
-		Input:         0.000015,
-		CachedInput:   0.0000075,
-		Output:        0.00006,
-		ContextWindow: 128_000,
-	},
-	"o1-pro": {
-		Input:         0.00015,
-		Output:        0.0006,
-		ContextWindow: 128_000,
-	},
-	"o3": {
-		Input:         0.000002,
-		CachedInput:   0.0000005,
-		Output:        0.000008,
-		ContextWindow: 200_000,
-	},
-	"o4-mini": {
-		Input:         0.0000011,
-		CachedInput:   0.000000275,
-		Output:        0.0000044,
-		ContextWindow: 200_000,
-	},
-	"o3-mini": {
-		Input:         0.0000011,
-		CachedInput:   0.00000055,
-		Output:        0.0000044,
-		ContextWindow: 200_000,
-	},
-	"o1-mini": {
-		Input:         0.0000011,
-		CachedInput:   0.00000055,
-		Output:        0.0000044,
-		ContextWindow: 128_000,
-	},
-	"codex-mini-latest": {
-		Input:         0.0000015,
-		CachedInput:   0.000000375,
-		Output:        0.000006,
-		ContextWindow: 200_000,
-	},
-	"gpt-4o-mini-search-preview": {
-		Input:         0.00000015,
-		Output:        0.0000006,
-		ContextWindow: 128_000,
-	},
-	"gpt-4o-search-preview": {
-		Input:         0.0000025,
-		Output:        0.00001,
-		ContextWindow: 128_000,
-	},
-	"computer-use-preview": {
-		Input:         0.000003,
-		Output:        0.000012,
-		ContextWindow: 128_000,
-	},
-	"gpt-image-1": {
-		Input:         0.000005,
-		CachedInput:   0.00000125,
-		ContextWindow: 128_000,
-	},
-	"o3-pro": {
-		Input:         0.00002,
-		Output:        0.00008,
-		ContextWindow: 200_000,
-	},
-	"o3-deep-research": {
-		Input:         0.00001,
-		CachedInput:   0.0000025,
-		Output:        0.00004,
-		ContextWindow: 200_000,
-	},
-	"o4-mini-deep-research": {
-		Input:         0.000002,
-		CachedInput:   0.0000005,
-		Output:        0.000008,
-		ContextWindow: 200_000,
-	},
-}
-
-// getModelPricing returns the pricing information for a given model
-func getModelPricing(model string) llmtypes.ModelPricing {
-	// First try exact match
-	if pricing, ok := ModelPricingMap[model]; ok {
-		return pricing
-	}
-	// Try to find a match based on model family
-	lowerModel := strings.ToLower(model)
-	if strings.Contains(lowerModel, "gpt-4.1") && !strings.Contains(lowerModel, "mini") {
-		return ModelPricingMap["gpt-4.1"]
-	} else if strings.Contains(lowerModel, "gpt-4.1-mini") {
-		return ModelPricingMap["gpt-4.1-mini"]
-	} else if strings.Contains(lowerModel, "gpt-4o") {
-		return ModelPricingMap["gpt-4o"]
-	} else if strings.Contains(lowerModel, "gpt-3.5") {
-		return ModelPricingMap["gpt-3.5-turbo"]
-	}
-
-	// Default to GPT-4.1 pricing if no match
-	return ModelPricingMap["gpt-4.1"]
-}
 
 // OpenAIThread implements the Thread interface using OpenAI's API
 type OpenAIThread struct {
@@ -676,8 +515,13 @@ func (t *OpenAIThread) updateUsage(usage openai.Usage, model string) {
 	// Calculate costs based on model pricing (use dynamic pricing method)
 	pricing, found := t.getPricing(model)
 	if !found {
-		// Fall back to the old method if dynamic pricing doesn't find the model
-		pricing = getModelPricing(model)
+		// If no pricing found, use default GPT-4.1 pricing as fallback
+		pricing = llmtypes.ModelPricing{
+			Input:         0.000002,
+			CachedInput:   0.0000005,
+			Output:        0.000008,
+			ContextWindow: 1047576,
+		}
 	}
 
 	// Calculate individual costs

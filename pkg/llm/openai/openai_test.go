@@ -37,28 +37,6 @@ func TestNewOpenAIThread(t *testing.T) {
 	assert.Equal(t, "high", thread.reasoningEffort)
 }
 
-func TestGetModelPricing(t *testing.T) {
-	// Test exact matches
-	pricing := getModelPricing("gpt-4.1")
-	assert.Equal(t, 0.000002, pricing.Input)
-	assert.Equal(t, 0.000008, pricing.Output)
-	assert.Equal(t, 1047576, pricing.ContextWindow)
-
-	// Test fuzzy matches
-	pricing = getModelPricing("gpt-4.1-preview")
-	assert.Equal(t, 0.000002, pricing.Input) // Should match gpt-4.1
-
-	pricing = getModelPricing("gpt-4.1-mini-preview")
-	assert.Equal(t, 0.0000004, pricing.Input) // Should match gpt-4.1-mini
-
-	pricing = getModelPricing("gpt-4o-latest")
-	assert.Equal(t, 0.0000025, pricing.Input) // Should match gpt-4o
-
-	// Test unknown model
-	pricing = getModelPricing("unknown-model")
-	assert.Equal(t, 0.000002, pricing.Input) // Should default to gpt-4.1
-}
-
 func TestExtractMessages(t *testing.T) {
 	// Simple test case with a few messages
 	messagesJSON := `[
