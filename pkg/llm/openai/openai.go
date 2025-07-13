@@ -32,17 +32,32 @@ import (
 
 var (
 	ReasoningModels = []string{
-		"o3",
-		"o4-mini",
-		"o3-mini",
+		"o1",
+		"o1-pro",
 		"o1-mini",
+		"o3",
+		"o3-pro",
+		"o3-mini",
+		"o3-deep-research",
+		"o4-mini",
+		"o4-mini-deep-research",
 	}
 	NonReasoningModels = []string{
 		"gpt-4.1",
 		"gpt-4.1-mini",
 		"gpt-4.1-nano",
+		"gpt-4.5-preview",
 		"gpt-4o",
 		"gpt-4o-mini",
+		"gpt-4o-audio-preview",
+		"gpt-4o-realtime-preview",
+		"gpt-4o-mini-audio-preview",
+		"gpt-4o-mini-realtime-preview",
+		"gpt-4o-mini-search-preview",
+		"gpt-4o-search-preview",
+		"computer-use-preview",
+		"gpt-image-1",
+		"codex-mini-latest",
 	}
 )
 
@@ -109,64 +124,61 @@ var ModelPricingMap = map[string]llmtypes.ModelPricing{
 		Output:        0.0000004,
 		ContextWindow: 1047576,
 	},
-	// "gpt-4.5-preview": {
-	// 	Input:         0.000075,
-	// 	CachedInput:   0.0000375,
-	// 	Output:        0.00015,
-	// 	ContextWindow: 128_000,
-	// },
+	"gpt-4.5-preview": {
+		Input:         0.000075,
+		CachedInput:   0.0000375,
+		Output:        0.00015,
+		ContextWindow: 128_000,
+	},
 	"gpt-4o": {
 		Input:         0.0000025,
 		CachedInput:   0.00000125,
 		Output:        0.00001,
 		ContextWindow: 128_000,
 	},
-	// "gpt-4o-audio-preview": {
-	// 	Input:         0.0000025,
-	// 	CachedInput:   nil,
-	// 	Output:        0.00001,
-	// 	ContextWindow: 128_000,
-	// },
-	// "gpt-4o-realtime-preview": {
-	// 	Input:         0.000005,
-	// 	CachedInput:   0.0000025,
-	// 	Output:        0.00002,
-	// 	ContextWindow: 128_000,
-	// },
+	"gpt-4o-audio-preview": {
+		Input:         0.0000025,
+		Output:        0.00001,
+		ContextWindow: 128_000,
+	},
+	"gpt-4o-realtime-preview": {
+		Input:         0.000005,
+		CachedInput:   0.0000025,
+		Output:        0.00002,
+		ContextWindow: 128_000,
+	},
 	"gpt-4o-mini": {
 		Input:         0.00000015,
 		CachedInput:   0.000000075,
 		Output:        0.0000006,
 		ContextWindow: 128_000,
 	},
-	// "gpt-4o-mini-audio-preview": {
-	// 	Input:         0.00000015,
-	// 	CachedInput:   nil,
-	// 	Output:        0.0000006,
-	// 	ContextWindow: 128_000,
-	// },
-	// "gpt-4o-mini-realtime-preview": {
-	// 	Input:         0.0000006,
-	// 	CachedInput:   0.0000003,
-	// 	Output:        0.0000024,
-	// 	ContextWindow: 128_000,
-	// },
-	// "o1": {
-	// 	Input:         0.000015,
-	// 	CachedInput:   0.0000075,
-	// 	Output:        0.00006,
-	// 	ContextWindow: 128_000,
-	// },
-	// "o1-pro": {
-	// 	Input:         0.00015,
-	// 	CachedInput:   nil,
-	// 	Output:        0.0006,
-	// 	ContextWindow: 128_000,
-	// },
+	"gpt-4o-mini-audio-preview": {
+		Input:         0.00000015,
+		Output:        0.0000006,
+		ContextWindow: 128_000,
+	},
+	"gpt-4o-mini-realtime-preview": {
+		Input:         0.0000006,
+		CachedInput:   0.0000003,
+		Output:        0.0000024,
+		ContextWindow: 128_000,
+	},
+	"o1": {
+		Input:         0.000015,
+		CachedInput:   0.0000075,
+		Output:        0.00006,
+		ContextWindow: 128_000,
+	},
+	"o1-pro": {
+		Input:         0.00015,
+		Output:        0.0006,
+		ContextWindow: 128_000,
+	},
 	"o3": {
-		Input:         0.00001,
-		CachedInput:   0.0000025,
-		Output:        0.00004,
+		Input:         0.000002,
+		CachedInput:   0.0000005,
+		Output:        0.000008,
 		ContextWindow: 200_000,
 	},
 	"o4-mini": {
@@ -193,30 +205,43 @@ var ModelPricingMap = map[string]llmtypes.ModelPricing{
 		Output:        0.000006,
 		ContextWindow: 200_000,
 	},
-	// "gpt-4o-mini-search-preview": {
-	// 	Input:         0.00000015,
-	// 	CachedInput:   nil,
-	// 	Output:        0.0000006,
-	// 	ContextWindow: 128_000,
-	// },
-	// "gpt-4o-search-preview": {
-	// 	Input:         0.0000025,
-	// 	CachedInput:   nil,
-	// 	Output:        0.00001,
-	// 	ContextWindow: 128_000,
-	// },
-	// "computer-use-preview": {
-	// 	Input:         0.000003,
-	// 	CachedInput:   nil,
-	// 	Output:        0.000012,
-	// 	ContextWindow: 128_000,
-	// },
-	// "gpt-image-1": {
-	// 	Input:         0.000005,
-	// 	CachedInput:   0.00000125,
-	// 	Output:        nil,
-	// 	ContextWindow: 128_000,
-	// },
+	"gpt-4o-mini-search-preview": {
+		Input:         0.00000015,
+		Output:        0.0000006,
+		ContextWindow: 128_000,
+	},
+	"gpt-4o-search-preview": {
+		Input:         0.0000025,
+		Output:        0.00001,
+		ContextWindow: 128_000,
+	},
+	"computer-use-preview": {
+		Input:         0.000003,
+		Output:        0.000012,
+		ContextWindow: 128_000,
+	},
+	"gpt-image-1": {
+		Input:         0.000005,
+		CachedInput:   0.00000125,
+		ContextWindow: 128_000,
+	},
+	"o3-pro": {
+		Input:         0.00002,
+		Output:        0.00008,
+		ContextWindow: 200_000,
+	},
+	"o3-deep-research": {
+		Input:         0.00001,
+		CachedInput:   0.0000025,
+		Output:        0.00004,
+		ContextWindow: 200_000,
+	},
+	"o4-mini-deep-research": {
+		Input:         0.000002,
+		CachedInput:   0.0000005,
+		Output:        0.000008,
+		ContextWindow: 200_000,
+	},
 }
 
 // getModelPricing returns the pricing information for a given model
