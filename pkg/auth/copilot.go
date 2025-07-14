@@ -14,6 +14,31 @@ import (
 	"github.com/pkg/errors"
 )
 
+// CopilotTransport is a custom HTTP transport for GitHub Copilot requests
+type CopilotTransport struct {
+	underlying http.RoundTripper
+	token      string
+}
+
+// NewCopilotTransport creates a new transport for GitHub Copilot with the given token
+func NewCopilotTransport(token string) *CopilotTransport {
+	return &CopilotTransport{
+		underlying: http.DefaultTransport,
+		token:      token,
+	}
+}
+
+// RoundTrip implements the http.RoundTripper interface for GitHub Copilot
+func (t *CopilotTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	// Set GitHub Copilot specific headers
+	req.Header.Set("Authorization", "Bearer "+t.token)
+	req.Header.Set("User-Agent", "GithubCopilot/1.342.0")
+	req.Header.Set("Editor-Version", "vscode/1.102.0")
+	req.Header.Del("x-api-key") // Remove default OpenAI API key header
+
+	return t.underlying.RoundTrip(req)
+}
+
 type CopilotDeviceCodeResponse struct {
 	DeviceCode      string `json:"device_code"`
 	UserCode        string `json:"user_code"`
@@ -23,11 +48,11 @@ type CopilotDeviceCodeResponse struct {
 }
 
 type CopilotTokenResponse struct {
-	AccessToken  string `json:"access_token"`
-	TokenType    string `json:"token_type"`
-	Scope        string `json:"scope"`
-	Error        string `json:"error"`
-	ErrorDesc    string `json:"error_description"`
+	AccessToken string `json:"access_token"`
+	TokenType   string `json:"token_type"`
+	Scope       string `json:"scope"`
+	Error       string `json:"error"`
+	ErrorDesc   string `json:"error_description"`
 }
 
 type CopilotExchangeResponse struct {
@@ -36,17 +61,17 @@ type CopilotExchangeResponse struct {
 }
 
 type CopilotCredentials struct {
-	AccessToken     string `json:"access_token"`
-	CopilotToken    string `json:"copilot_token"`
-	Scope           string `json:"scope"`
-	CopilotExpires  int64  `json:"copilot_expires_at"`
+	AccessToken    string `json:"access_token"`
+	CopilotToken   string `json:"copilot_token"`
+	Scope          string `json:"scope"`
+	CopilotExpires int64  `json:"copilot_expires_at"`
 }
 
 const (
-	copilotClientID      = "Iv1.b507a08c87ecfe98"
-	copilotDeviceURL     = "https://github.com/login/device/code"
-	copilotTokenURL      = "https://github.com/login/oauth/access_token"
-	copilotExchangeURL   = "https://api.github.com/copilot_internal/v2/token"
+	copilotClientID    = "Iv1.b507a08c87ecfe98"
+	copilotDeviceURL   = "https://github.com/login/device/code"
+	copilotTokenURL    = "https://github.com/login/oauth/access_token"
+	copilotExchangeURL = "https://api.github.com/copilot_internal/v2/token"
 )
 
 var (
@@ -232,15 +257,13 @@ func DeleteCopilotCredentials() error {
 	}
 
 	filePath := filepath.Join(home, ".kodelet", "copilot-subscription.json")
-	
+
 	if err := os.Remove(filePath); err != nil && !os.IsNotExist(err) {
 		return errors.Wrap(err, "failed to delete copilot credentials file")
 	}
 
 	return nil
 }
-
-
 
 func refreshCopilotExchangeToken(ctx context.Context, creds *CopilotCredentials) (*CopilotCredentials, error) {
 	// Re-exchange the OAuth access token for a new Copilot token
@@ -250,10 +273,10 @@ func refreshCopilotExchangeToken(ctx context.Context, creds *CopilotCredentials)
 	}
 
 	refreshed := &CopilotCredentials{
-		AccessToken:     creds.AccessToken,
-		CopilotToken:    copilotResp.Token,
-		Scope:           creds.Scope,
-		CopilotExpires:  copilotResp.ExpiresAt,
+		AccessToken:    creds.AccessToken,
+		CopilotToken:   copilotResp.Token,
+		Scope:          creds.Scope,
+		CopilotExpires: copilotResp.ExpiresAt,
 	}
 
 	if _, err := SaveCopilotCredentials(refreshed); err != nil {
