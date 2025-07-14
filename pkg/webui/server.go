@@ -231,7 +231,7 @@ type WebConversationResponse struct {
 	ID           string       `json:"id"`
 	CreatedAt    time.Time    `json:"createdAt"`
 	UpdatedAt    time.Time    `json:"updatedAt"`
-	ModelType    string       `json:"modelType"`
+	Provider     string       `json:"provider"`
 	Summary      string       `json:"summary,omitempty"`
 	Usage        interface{}  `json:"usage"`
 	Messages     []WebMessage `json:"messages"`
@@ -273,7 +273,7 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Convert to web messages with tool call structure preserved
-	webMessages, err := s.convertToWebMessages(response.RawMessages, response.ModelType)
+	webMessages, err := s.convertToWebMessages(response.RawMessages, response.Provider)
 	if err != nil {
 		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to parse conversation messages", err)
 		return
@@ -284,7 +284,7 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 		ID:           response.ID,
 		CreatedAt:    response.CreatedAt,
 		UpdatedAt:    response.UpdatedAt,
-		ModelType:    response.ModelType,
+		Provider:     response.Provider,
 		Summary:      response.Summary,
 		Usage:        response.Usage,
 		Messages:     webMessages,
@@ -296,7 +296,7 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 }
 
 // convertToWebMessages converts raw messages to web messages with tool call structure
-func (s *Server) convertToWebMessages(rawMessages json.RawMessage, modelType string) ([]WebMessage, error) {
+func (s *Server) convertToWebMessages(rawMessages json.RawMessage, provider string) ([]WebMessage, error) {
 	var messages []WebMessage
 
 	// Parse the raw JSON messages
@@ -320,7 +320,7 @@ func (s *Server) convertToWebMessages(rawMessages json.RawMessage, modelType str
 		}
 
 		// Extract tool calls and thinking content based on provider
-		switch modelType {
+		switch provider {
 		case "anthropic":
 			// For Anthropic, we need to use the full raw message to properly deserialize
 			if toolCalls, err := s.extractAnthropicToolCalls(rawMsg); err == nil {

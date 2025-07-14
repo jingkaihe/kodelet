@@ -58,7 +58,7 @@ export interface Conversation {
   updatedAt: string;
   messageCount: number;
   summary?: string;
-  modelType?: string;
+  provider?: string;
   preview?: string;
   firstMessage?: string; // For list view - truncated first user message
   created_at?: string; // Alternative format

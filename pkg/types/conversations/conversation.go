@@ -14,6 +14,7 @@ type QueryOptions struct {
 	StartDate  *time.Time // Filter by start date
 	EndDate    *time.Time // Filter by end date
 	SearchTerm string     // Text to search for in messages
+	Provider   string     // Filter by LLM provider (e.g., "anthropic", "openai")
 	Limit      int        // Maximum number of results
 	Offset     int        // Offset for pagination
 	SortBy     string     // Field to sort by
@@ -24,7 +25,7 @@ type QueryOptions struct {
 type ConversationRecord struct {
 	ID             string                                `json:"id"`
 	RawMessages    json.RawMessage                       `json:"rawMessages"` // Raw LLM provider messages
-	ModelType      string                                `json:"modelType"`   // e.g., "anthropic"
+	Provider       string                                `json:"provider"`    // e.g., "anthropic"
 	FileLastAccess map[string]time.Time                  `json:"fileLastAccess"`
 	Usage          llmtypes.Usage                        `json:"usage"`
 	Summary        string                                `json:"summary,omitempty"`
@@ -40,6 +41,7 @@ type ConversationSummary struct {
 	MessageCount int            `json:"messageCount"`
 	FirstMessage string         `json:"firstMessage"`
 	Summary      string         `json:"summary,omitempty"`
+	Provider     string         `json:"provider"`
 	Usage        llmtypes.Usage `json:"usage"`
 	CreatedAt    time.Time      `json:"createdAt"`
 	UpdatedAt    time.Time      `json:"updatedAt"`
@@ -111,6 +113,7 @@ func (cr *ConversationRecord) ToSummary() ConversationSummary {
 		MessageCount: messageCount,
 		FirstMessage: firstMessage,
 		Summary:      cr.Summary,
+		Provider:     cr.Provider,
 		Usage:        cr.Usage,
 		CreatedAt:    cr.CreatedAt,
 		UpdatedAt:    cr.UpdatedAt,
@@ -136,4 +139,8 @@ func (cs ConversationSummary) GetMessageCount() int {
 
 func (cs ConversationSummary) GetUsage() llmtypes.Usage {
 	return cs.Usage
+}
+
+func (cs ConversationSummary) GetProvider() string {
+	return cs.Provider
 }

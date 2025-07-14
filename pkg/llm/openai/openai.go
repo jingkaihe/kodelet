@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -12,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/auth"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/llm/prompts"
 	"github.com/jingkaihe/kodelet/pkg/logger"
@@ -122,6 +124,7 @@ type OpenAIThread struct {
 	toolResults     map[string]tooltypes.StructuredToolResult // Maps tool_call_id to structured result
 	customModels    *llmtypes.CustomModels                    // Custom model configuration
 	customPricing   llmtypes.CustomPricing                    // Custom pricing configuration
+	useCopilot      bool                                      // Whether this thread uses GitHub Copilot
 }
 
 func (t *OpenAIThread) Provider() string {
@@ -150,11 +153,48 @@ func NewOpenAIThread(config llmtypes.Config) *OpenAIThread {
 		fmt.Printf("Warning: OpenAI configuration validation failed: %v\n", err)
 	}
 
-	// Get API key
-	apiKey := os.Getenv("OPENAI_API_KEY")
-
 	// Initialize client configuration
-	clientConfig := openai.DefaultConfig(apiKey)
+	var clientConfig openai.ClientConfig
+	var useCopilot bool
+	ctx := context.Background()
+	logger := logger.G(ctx)
+
+	// Check if Copilot usage is requested via flag
+	if config.UseCopilot {
+		// Verify Copilot credentials exist
+		copilotCredsExists, _ := auth.GetCopilotCredentialsExists()
+		if !copilotCredsExists {
+			logger.Error("use-copilot flag set but no GitHub Copilot credentials found, run 'kodelet copilot-login'")
+			// Fall back to OpenAI API key
+			apiKey := os.Getenv("OPENAI_API_KEY")
+			clientConfig = openai.DefaultConfig(apiKey)
+			useCopilot = false
+		} else {
+			copilotToken, err := auth.CopilotAccessToken(ctx)
+			if err != nil {
+				logger.WithError(err).Error("failed to get copilot access token despite credentials existing")
+				// Fall back to OpenAI API key
+				apiKey := os.Getenv("OPENAI_API_KEY")
+				clientConfig = openai.DefaultConfig(apiKey)
+				useCopilot = false
+			} else {
+				logger.Debug("using GitHub Copilot token")
+				// Create custom HTTP client with Copilot transport
+				copilotTransport := auth.NewCopilotTransport(copilotToken)
+				clientConfig = openai.DefaultConfig("") // No API key needed
+				clientConfig.HTTPClient = &http.Client{
+					Transport: copilotTransport,
+				}
+				useCopilot = true
+			}
+		}
+	} else {
+		logger.Debug("using OpenAI API key (use-copilot flag not set)")
+		// Use OpenAI API key
+		apiKey := os.Getenv("OPENAI_API_KEY")
+		clientConfig = openai.DefaultConfig(apiKey)
+		useCopilot = false
+	}
 
 	// Check for custom base URL (environment variable takes precedence)
 	if baseURL := os.Getenv("OPENAI_API_BASE"); baseURL != "" {
@@ -169,6 +209,9 @@ func NewOpenAIThread(config llmtypes.Config) *OpenAIThread {
 		if config.OpenAI.BaseURL != "" {
 			clientConfig.BaseURL = config.OpenAI.BaseURL // Override preset
 		}
+	} else if useCopilot {
+		// Only set Copilot base URL if no other base URL is configured
+		clientConfig.BaseURL = "https://api.githubcopilot.com"
 	}
 
 	client := openai.NewClientWithConfig(clientConfig)
@@ -186,6 +229,7 @@ func NewOpenAIThread(config llmtypes.Config) *OpenAIThread {
 		toolResults:     make(map[string]tooltypes.StructuredToolResult),
 		customModels:    customModels,
 		customPricing:   customPricing,
+		useCopilot:      useCopilot,
 	}
 }
 
@@ -546,6 +590,7 @@ func (t *OpenAIThread) NewSubAgent(ctx context.Context) llmtypes.Thread {
 		usage:           t.usage,         // Share usage tracking with parent
 		customModels:    t.customModels,  // Share custom models configuration
 		customPricing:   t.customPricing, // Share custom pricing configuration
+		useCopilot:      t.useCopilot,    // Share Copilot usage with parent
 	}
 
 	thread.SetState(tools.NewBasicState(ctx, tools.WithSubAgentTools(), tools.WithExtraMCPTools(t.state.MCPTools())))
@@ -773,6 +818,7 @@ func (t *OpenAIThread) createMessageSpan(
 		attribute.Bool("is_persisted", t.isPersisted),
 		attribute.Int("message_length", len(message)),
 		attribute.String("reasoning_effort", t.reasoningEffort),
+		attribute.Bool("use_copilot", t.useCopilot),
 	}
 
 	return tracer.Start(ctx, "llm.send_message", trace.WithAttributes(attributes...))

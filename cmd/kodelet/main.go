@@ -24,6 +24,7 @@ func init() {
 	viper.SetDefault("model", anthropic.ModelClaudeSonnet4_20250514)
 	viper.SetDefault("weak_model", anthropic.ModelClaude3_5Haiku20241022)
 	viper.SetDefault("provider", "anthropic")
+	viper.SetDefault("use_copilot", false)
 	viper.SetDefault("reasoning_effort", "medium")
 	viper.SetDefault("cache_every", 10)
 	viper.SetDefault("allowed_commands", []string{})
@@ -103,6 +104,7 @@ func main() {
 
 	// Add global flags
 	rootCmd.PersistentFlags().String("provider", "anthropic", "LLM provider to use (anthropic, openai)")
+	rootCmd.PersistentFlags().Bool("use-copilot", false, "Use GitHub Copilot subscription for OpenAI requests (env: KODELET_USE_COPILOT)")
 	rootCmd.PersistentFlags().String("model", string(anthropic.ModelClaudeSonnet4_20250514), "LLM model to use (overrides config)")
 	rootCmd.PersistentFlags().Int("max-tokens", 8192, "Maximum tokens for response (overrides config)")
 	rootCmd.PersistentFlags().Int("thinking-budget-tokens", 4048, "Maximum tokens for thinking capability (overrides config)")
@@ -118,6 +120,7 @@ func main() {
 
 	// Bind flags to viper
 	viper.BindPFlag("provider", rootCmd.PersistentFlags().Lookup("provider"))
+	viper.BindPFlag("use_copilot", rootCmd.PersistentFlags().Lookup("use-copilot"))
 	viper.BindPFlag("model", rootCmd.PersistentFlags().Lookup("model"))
 	viper.BindPFlag("max_tokens", rootCmd.PersistentFlags().Lookup("max-tokens"))
 	viper.BindPFlag("thinking_budget_tokens", rootCmd.PersistentFlags().Lookup("thinking-budget-tokens"))
@@ -149,6 +152,8 @@ func main() {
 	rootCmd.AddCommand(ghaAgentOnboardCmd)
 	rootCmd.AddCommand(anthropicLoginCmd)
 	rootCmd.AddCommand(anthropicLogoutCmd)
+	rootCmd.AddCommand(copilotLoginCmd)
+	rootCmd.AddCommand(copilotLogoutCmd)
 	rootCmd.AddCommand(serveCmd)
 
 	// Initialize telemetry with tracing
@@ -186,6 +191,8 @@ func main() {
 	ghaAgentOnboardCmd = withTracing(ghaAgentOnboardCmd)
 	anthropicLoginCmd = withTracing(anthropicLoginCmd)
 	anthropicLogoutCmd = withTracing(anthropicLogoutCmd)
+	copilotLoginCmd = withTracing(copilotLoginCmd)
+	copilotLogoutCmd = withTracing(copilotLogoutCmd)
 	serveCmd = withTracing(serveCmd)
 
 	// Set the root command context to include the tracing context

@@ -198,7 +198,7 @@ func TestConversationRecord_ToConversations(t *testing.T) {
 	dbRecord := &dbConversationRecord{
 		ID:          "test-id",
 		RawMessages: json.RawMessage(`[{"role": "user", "content": "test"}]`),
-		ModelType:   "anthropic",
+		Provider:    "anthropic",
 		FileLastAccess: JSONField[map[string]time.Time]{
 			Data: map[string]time.Time{"file.txt": now},
 		},
@@ -226,7 +226,7 @@ func TestConversationRecord_ToConversations(t *testing.T) {
 
 	assert.Equal(t, "test-id", record.ID)
 	assert.Equal(t, `[{"role": "user", "content": "test"}]`, string(record.RawMessages))
-	assert.Equal(t, "anthropic", record.ModelType)
+	assert.Equal(t, "anthropic", record.Provider)
 	assert.Equal(t, "Test summary", record.Summary)
 	assert.Equal(t, now, record.CreatedAt)
 	assert.Equal(t, now.Add(time.Hour), record.UpdatedAt)
@@ -243,7 +243,7 @@ func TestDb_ConversationRecord_ToConversationRecord_NullSummary(t *testing.T) {
 	dbRecord := &dbConversationRecord{
 		ID:          "test-id",
 		RawMessages: json.RawMessage(`[]`),
-		ModelType:   "anthropic",
+		Provider:    "anthropic",
 		FileLastAccess: JSONField[map[string]time.Time]{
 			Data: map[string]time.Time{},
 		},
@@ -300,7 +300,7 @@ func TestFromConversationRecord(t *testing.T) {
 	record := conversations.ConversationRecord{
 		ID:          "test-id",
 		RawMessages: json.RawMessage(`[{"role": "user", "content": "test"}]`),
-		ModelType:   "anthropic",
+		Provider:    "anthropic",
 		FileLastAccess: map[string]time.Time{
 			"file.txt": now,
 		},
@@ -327,7 +327,7 @@ func TestFromConversationRecord(t *testing.T) {
 
 	assert.Equal(t, "test-id", dbRecord.ID)
 	assert.Equal(t, `[{"role": "user", "content": "test"}]`, string(dbRecord.RawMessages))
-	assert.Equal(t, "anthropic", dbRecord.ModelType)
+	assert.Equal(t, "anthropic", dbRecord.Provider)
 	assert.Equal(t, "Test summary", *dbRecord.Summary)
 	assert.Equal(t, now, dbRecord.CreatedAt)
 	assert.Equal(t, now.Add(time.Hour), dbRecord.UpdatedAt)
@@ -343,7 +343,7 @@ func TestFromConversationRecord_EmptySummary(t *testing.T) {
 	record := conversations.ConversationRecord{
 		ID:             "test-id",
 		RawMessages:    json.RawMessage(`[]`),
-		ModelType:      "anthropic",
+		Provider:       "anthropic",
 		FileLastAccess: map[string]time.Time{},
 		Usage:          llmtypes.Usage{},
 		Summary:        "", // Empty summary
@@ -410,7 +410,7 @@ func TestRoundTripConversion(t *testing.T) {
 	originalRecord := conversations.ConversationRecord{
 		ID:          "test-id",
 		RawMessages: json.RawMessage(`[{"role": "user", "content": [{"type": "text", "text": "Hello"}]}]`),
-		ModelType:   "anthropic",
+		Provider:    "anthropic",
 		FileLastAccess: map[string]time.Time{
 			"file1.txt": now,
 			"file2.txt": now.Add(time.Hour),
@@ -455,7 +455,7 @@ func TestRoundTripConversion(t *testing.T) {
 	// Compare all fields
 	assert.Equal(t, originalRecord.ID, convertedRecord.ID)
 	assert.Equal(t, string(originalRecord.RawMessages), string(convertedRecord.RawMessages))
-	assert.Equal(t, originalRecord.ModelType, convertedRecord.ModelType)
+	assert.Equal(t, originalRecord.Provider, convertedRecord.Provider)
 	assert.Equal(t, originalRecord.Summary, convertedRecord.Summary)
 	assert.Equal(t, originalRecord.CreatedAt, convertedRecord.CreatedAt)
 	assert.Equal(t, originalRecord.UpdatedAt, convertedRecord.UpdatedAt)

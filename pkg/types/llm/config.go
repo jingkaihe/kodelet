@@ -26,6 +26,7 @@ type Config struct {
 	AllowedCommands      []string           // AllowedCommands is a list of allowed command patterns for the bash tool
 	AllowedDomainsFile   string             // AllowedDomainsFile is the path to the file containing allowed domains for web_fetch and browser tools
 	AnthropicAPIAccess   AnthropicAPIAccess // AnthropicAPIAccess controls how to authenticate with Anthropic API
+	UseCopilot           bool               // UseCopilot enables GitHub Copilot subscription for OpenAI requests
 	Aliases              map[string]string  // Aliases maps short model names to full model names
 
 	// Provider-specific configurations

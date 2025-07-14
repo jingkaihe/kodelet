@@ -79,7 +79,7 @@ type GetConversationResponse struct {
 	ID           string                                `json:"id"`
 	CreatedAt    time.Time                             `json:"createdAt"`
 	UpdatedAt    time.Time                             `json:"updatedAt"`
-	ModelType    string                                `json:"modelType"`
+	Provider     string                                `json:"provider"`
 	Summary      string                                `json:"summary,omitempty"`
 	Usage        llmtypes.Usage                        `json:"usage"`
 	RawMessages  json.RawMessage                       `json:"rawMessages"`
@@ -189,7 +189,7 @@ func (s *ConversationService) GetConversation(ctx context.Context, id string) (*
 		ID:           record.ID,
 		CreatedAt:    record.CreatedAt,
 		UpdatedAt:    record.UpdatedAt,
-		ModelType:    record.ModelType,
+		Provider:     record.Provider,
 		Summary:      record.Summary,
 		Usage:        record.Usage,
 		RawMessages:  record.RawMessages,

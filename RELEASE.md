@@ -1,5 +1,18 @@
 # Kodelet
 
+## 0.0.65.alpha (2025-07-14)
+
+### GitHub Copilot Integration
+
+- **Copilot Authentication**: Added `kodelet copilot-login` and `kodelet copilot-logout` commands for GitHub Copilot integration
+  - OAuth-based authentication flow for accessing GitHub Copilot services
+  - Seamless integration with OpenAI client for Copilot-powered requests
+  - Streamlined login process with improved user experience
+- **Provider Terminology**: Refactored terminology from "ModelType" to "Provider" throughout the codebase for clarity
+  - Updated conversation management, database schema, and web UI to use consistent "Provider" naming
+  - Enhanced provider filtering and breakdown in conversation and usage commands
+- **Database Optimizations**: Improved SQL query performance with explicit column selection and schema cleanup
+
 ## 0.0.64.alpha (2025-07-12)
 
 ### OpenAI-Compatible Provider Support

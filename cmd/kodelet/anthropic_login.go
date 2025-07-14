@@ -5,12 +5,11 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
-	"runtime"
 	"strings"
 
 	"github.com/jingkaihe/kodelet/pkg/auth"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
+	"github.com/jingkaihe/kodelet/pkg/utils"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
@@ -51,7 +50,7 @@ func runAnthropicLogin(ctx context.Context) error {
 
 	// Try to open the browser automatically
 	presenter.Info("Opening your browser for authentication...")
-	if err := openBrowser(authURL); err != nil {
+	if err := utils.OpenBrowser(authURL); err != nil {
 		presenter.Warning("Could not open browser automatically. Please visit the following URL manually:")
 		fmt.Printf("\n   %s\n\n", authURL)
 	} else {
@@ -103,26 +102,4 @@ func runAnthropicLogin(ctx context.Context) error {
 	presenter.Info("You can now use subscription-based Anthropic models with Kodelet.")
 
 	return nil
-}
-
-// openBrowser attempts to open the default browser with the given URL
-func openBrowser(url string) error {
-	var cmd string
-	var args []string
-
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = "open"
-		args = []string{url}
-	case "linux":
-		cmd = "xdg-open"
-		args = []string{url}
-	case "windows":
-		cmd = "cmd"
-		args = []string{"/c", "start", url}
-	default:
-		return errors.New("unsupported operating system")
-	}
-
-	return exec.Command(cmd, args...).Start()
 }

@@ -3,7 +3,11 @@ package utils
 import (
 	"fmt"
 	"os"
+	"os/exec"
+	"runtime"
 	"strconv"
+
+	"github.com/pkg/errors"
 )
 
 // ContentWithLineNumber formats a slice of strings by prefixing each line with its line number
@@ -51,4 +55,26 @@ func IsBinaryFile(filePath string) bool {
 	}
 
 	return false
+}
+
+// OpenBrowser attempts to open the default browser with the given URL
+func OpenBrowser(url string) error {
+	var cmd string
+	var args []string
+
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = "open"
+		args = []string{url}
+	case "linux":
+		cmd = "xdg-open"
+		args = []string{url}
+	case "windows":
+		cmd = "cmd"
+		args = []string{"/c", "start", url}
+	default:
+		return errors.New("unsupported operating system")
+	}
+
+	return exec.Command(cmd, args...).Start()
 }

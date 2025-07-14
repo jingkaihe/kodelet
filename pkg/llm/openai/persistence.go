@@ -67,7 +67,7 @@ func (t *OpenAIThread) SaveConversation(ctx context.Context, summarize bool) err
 	record := convtypes.ConversationRecord{
 		ID:             t.conversationID,
 		RawMessages:    messagesJSON,
-		ModelType:      "openai",
+		Provider:       "openai",
 		Usage:          *t.usage,
 		Metadata:       map[string]interface{}{"model": t.config.Model},
 		Summary:        t.summary,
@@ -97,8 +97,8 @@ func (t *OpenAIThread) loadConversation(ctx context.Context) error {
 	}
 
 	// Check if this is an OpenAI model conversation
-	if record.ModelType != "" && record.ModelType != "openai" {
-		return errors.Errorf("incompatible model type: %s", record.ModelType)
+	if record.Provider != "" && record.Provider != "openai" {
+		return errors.Errorf("incompatible model type: %s", record.Provider)
 	}
 
 	// Deserialize the messages

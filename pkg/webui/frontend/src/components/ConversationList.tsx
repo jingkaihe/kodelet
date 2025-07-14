@@ -32,8 +32,8 @@ const ConversationList: React.FC<ConversationListProps> = ({
     <div className="space-y-4">
       {/* Conversation Cards */}
       {conversations.map((conversation) => (
-        <div 
-          key={conversation.id} 
+        <div
+          key={conversation.id}
           className="card bg-base-100 shadow-lg hover:shadow-xl transition-shadow duration-200"
         >
           <div className="card-body">
@@ -62,9 +62,9 @@ const ConversationList: React.FC<ConversationListProps> = ({
                   <div className="badge badge-outline">
                     Updated: <span>{formatDate(conversation.updatedAt || conversation.updated_at)}</span>
                   </div>
-                  {conversation.modelType && (
+                  {conversation.provider && (
                     <div className="badge badge-outline">
-                      Model: <span>{conversation.modelType}</span>
+                      Model: <span>{conversation.provider}</span>
                     </div>
                   )}
                   {conversation.usage && (
@@ -81,30 +81,30 @@ const ConversationList: React.FC<ConversationListProps> = ({
               </div>
 
               <div className="dropdown dropdown-end">
-                <div 
-                  tabIndex={0} 
-                  role="button" 
+                <div
+                  tabIndex={0}
+                  role="button"
                   className="btn btn-ghost btn-sm"
                   aria-label="Conversation actions"
                 >
-                  <svg 
-                    xmlns="http://www.w3.org/2000/svg" 
-                    className="h-5 w-5" 
-                    fill="none" 
-                    viewBox="0 0 24 24" 
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="h-5 w-5"
+                    fill="none"
+                    viewBox="0 0 24 24"
                     stroke="currentColor"
                     aria-hidden="true"
                   >
-                    <path 
-                      strokeLinecap="round" 
-                      strokeLinejoin="round" 
-                      strokeWidth="2" 
-                      d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" 
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"
                     />
                   </svg>
                 </div>
-                <ul 
-                  tabIndex={0} 
+                <ul
+                  tabIndex={0}
                   className="dropdown-content menu bg-base-100 rounded-box z-[1] w-52 p-2 shadow"
                 >
                   <li>

@@ -28,6 +28,7 @@ type ConversationListConfig struct {
 	StartDate  string
 	EndDate    string
 	Search     string
+	Provider   string
 	Limit      int
 	Offset     int
 	SortBy     string
@@ -41,6 +42,7 @@ func NewConversationListConfig() *ConversationListConfig {
 		StartDate:  "",
 		EndDate:    "",
 		Search:     "",
+		Provider:   "",
 		Limit:      0,
 		Offset:     0,
 		SortBy:     "updated_at",
@@ -200,6 +202,7 @@ func init() {
 	conversationListCmd.Flags().String("start", listDefaults.StartDate, "Filter conversations after this date (format: YYYY-MM-DD)")
 	conversationListCmd.Flags().String("end", listDefaults.EndDate, "Filter conversations before this date (format: YYYY-MM-DD)")
 	conversationListCmd.Flags().String("search", listDefaults.Search, "Search term to filter conversations")
+	conversationListCmd.Flags().String("provider", listDefaults.Provider, "Filter conversations by LLM provider (anthropic or openai)")
 	conversationListCmd.Flags().Int("limit", listDefaults.Limit, "Maximum number of conversations to display")
 	conversationListCmd.Flags().Int("offset", listDefaults.Offset, "Offset for pagination")
 	conversationListCmd.Flags().String("sort-by", listDefaults.SortBy, "Field to sort by: updated_at, created_at, or messages")
@@ -249,6 +252,9 @@ func getConversationListConfigFromFlags(cmd *cobra.Command) *ConversationListCon
 	}
 	if search, err := cmd.Flags().GetString("search"); err == nil {
 		config.Search = search
+	}
+	if provider, err := cmd.Flags().GetString("provider"); err == nil {
+		config.Provider = provider
 	}
 	if limit, err := cmd.Flags().GetInt("limit"); err == nil {
 		config.Limit = limit
@@ -360,11 +366,21 @@ func NewConversationListOutput(summaries []convtypes.ConversationSummary, format
 			preview = summary.Summary
 		}
 
+		// Convert model type to friendly provider name
+		provider := summary.Provider
+		switch summary.Provider {
+		case "anthropic":
+			provider = "Anthropic"
+		case "openai":
+			provider = "OpenAI"
+		}
+
 		output.Conversations = append(output.Conversations, ConversationSummaryOutput{
 			ID:           summary.ID,
 			CreatedAt:    summary.CreatedAt,
 			UpdatedAt:    summary.UpdatedAt,
 			MessageCount: summary.MessageCount,
+			Provider:     provider,
 			Preview:      preview,
 		})
 	}
@@ -405,25 +421,26 @@ func (o *ConversationListOutput) renderTable(w io.Writer) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 
 	// Print table header
-	fmt.Fprintln(tw, "ID\tCreated\tUpdated\tMessages\tSummary")
-	fmt.Fprintln(tw, "----\t-------\t-------\t--------\t-------")
+	fmt.Fprintln(tw, "ID\tCreated\tUpdated\tMessages\tProvider\tSummary")
+	fmt.Fprintln(tw, "----\t-------\t-------\t--------\t--------\t-------")
 
 	for _, summary := range o.Conversations {
 		// Format creation and update dates
 		created := summary.CreatedAt.Format(time.RFC3339)
 		updated := summary.UpdatedAt.Format(time.RFC3339)
 
-		// Truncate long previews
+		// Truncate long previews to allow room for provider column
 		preview := summary.Preview
-		if len(preview) > 60 {
-			preview = strings.TrimSpace(preview[:57]) + "..."
+		if len(preview) > 50 {
+			preview = strings.TrimSpace(preview[:47]) + "..."
 		}
 
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%s\n",
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%s\t%s\n",
 			summary.ID,
 			created,
 			updated,
 			summary.MessageCount,
+			summary.Provider,
 			preview,
 		)
 	}
@@ -437,6 +454,7 @@ type ConversationSummaryOutput struct {
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 	MessageCount int       `json:"message_count"`
+	Provider     string    `json:"provider"`
 	Preview      string    `json:"preview"`
 }
 
@@ -454,6 +472,7 @@ func listConversationsCmd(ctx context.Context, config *ConversationListConfig) {
 	// Prepare query options
 	options := convtypes.QueryOptions{
 		SearchTerm: config.Search,
+		Provider:   config.Provider,
 		Limit:      config.Limit,
 		Offset:     config.Offset,
 		SortBy:     config.SortBy,
@@ -559,7 +578,7 @@ func showConversationCmd(ctx context.Context, id string, config *ConversationSho
 	}
 
 	// Extract messages from raw message data
-	messages, err := llm.ExtractMessages(record.ModelType, record.RawMessages, record.ToolResults)
+	messages, err := llm.ExtractMessages(record.Provider, record.RawMessages, record.ToolResults)
 	if err != nil {
 		presenter.Error(err, "Failed to parse conversation messages")
 		os.Exit(1)
@@ -749,13 +768,13 @@ func validateConversationRecord(data []byte) (*convtypes.ConversationRecord, err
 		return nil, errors.New("conversation ID is required")
 	}
 
-	if record.ModelType == "" {
+	if record.Provider == "" {
 		return nil, errors.New("model type is required")
 	}
 
 	// Validate supported providers
-	if record.ModelType != "anthropic" && record.ModelType != "openai" {
-		return nil, errors.Errorf("unsupported model type: %s (supported: anthropic, openai)", record.ModelType)
+	if record.Provider != "anthropic" && record.Provider != "openai" {
+		return nil, errors.Errorf("unsupported model type: %s (supported: anthropic, openai)", record.Provider)
 	}
 
 	if len(record.RawMessages) == 0 {
@@ -767,7 +786,7 @@ func validateConversationRecord(data []byte) (*convtypes.ConversationRecord, err
 		record.ToolResults = make(map[string]tools.StructuredToolResult)
 	}
 
-	_, err := llm.ExtractMessages(record.ModelType, record.RawMessages, record.ToolResults)
+	_, err := llm.ExtractMessages(record.Provider, record.RawMessages, record.ToolResults)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to extract messages")
 	}

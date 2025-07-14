@@ -154,15 +154,15 @@ func (s *Store) Save(ctx context.Context, record conversations.ConversationRecor
 	// Insert or update conversation record with UPSERT to preserve created_at
 	conversationQuery := `
 		INSERT INTO conversations (
-			id, raw_messages, model_type, file_last_access, usage,
+			id, raw_messages, provider, file_last_access, usage,
 			summary, created_at, updated_at, metadata, tool_results
 		) VALUES (
-			:id, :raw_messages, :model_type, :file_last_access, :usage,
+			:id, :raw_messages, :provider, :file_last_access, :usage,
 			:summary, :created_at, :updated_at, :metadata, :tool_results
 		)
 		ON CONFLICT(id) DO UPDATE SET
 			raw_messages = excluded.raw_messages,
-			model_type = excluded.model_type,
+			provider = excluded.provider,
 			file_last_access = excluded.file_last_access,
 			usage = excluded.usage,
 			summary = excluded.summary,
@@ -178,14 +178,15 @@ func (s *Store) Save(ctx context.Context, record conversations.ConversationRecor
 	// Insert or update conversation summary with UPSERT to preserve created_at
 	summaryQuery := `
 		INSERT INTO conversation_summaries (
-			id, message_count, first_message, summary, usage, created_at, updated_at
+			id, message_count, first_message, summary, provider, usage, created_at, updated_at
 		) VALUES (
-			:id, :message_count, :first_message, :summary, :usage, :created_at, :updated_at
+			:id, :message_count, :first_message, :summary, :provider, :usage, :created_at, :updated_at
 		)
 		ON CONFLICT(id) DO UPDATE SET
 			message_count = excluded.message_count,
 			first_message = excluded.first_message,
 			summary = excluded.summary,
+			provider = excluded.provider,
 			usage = excluded.usage,
 			updated_at = excluded.updated_at
 	`
@@ -202,7 +203,9 @@ func (s *Store) Load(ctx context.Context, id string) (conversations.Conversation
 
 	var dbRecord dbConversationRecord
 
-	query := "SELECT * FROM conversations WHERE id = ?"
+	query := `SELECT id, raw_messages, provider, file_last_access, usage,
+		summary, created_at, updated_at, metadata, tool_results
+		FROM conversations WHERE id = ?`
 	err := s.db.GetContext(ctx, &dbRecord, query, id)
 	if err != nil {
 		if err.Error() == "sql: no rows in result set" {
@@ -259,6 +262,11 @@ func (s *Store) Query(ctx context.Context, options conversations.QueryOptions) (
 		args["search_term"] = searchPattern
 	}
 
+	if options.Provider != "" {
+		conditions = append(conditions, "provider = :provider")
+		args["provider"] = options.Provider
+	}
+
 	// Build ORDER BY clause
 	sortBy := "updated_at"
 	switch options.SortBy {
@@ -276,7 +284,8 @@ func (s *Store) Query(ctx context.Context, options conversations.QueryOptions) (
 	}
 
 	// Build main query
-	baseQuery := "SELECT * FROM conversation_summaries"
+	baseQuery := `SELECT id, message_count, first_message, summary, provider,
+		usage, created_at, updated_at FROM conversation_summaries`
 	if len(conditions) > 0 {
 		baseQuery += " WHERE " + strings.Join(conditions, " AND ")
 	}

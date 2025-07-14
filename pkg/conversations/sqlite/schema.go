@@ -6,7 +6,8 @@ const (
 	// Schema version constants
 	SchemaVersion1       = 1
 	SchemaVersion2       = 2
-	CurrentSchemaVersion = SchemaVersion2
+	SchemaVersion3       = 3
+	CurrentSchemaVersion = SchemaVersion3
 )
 
 // createSchemaVersionTable creates the schema version tracking table
@@ -23,7 +24,7 @@ const createConversationsTable = `
 CREATE TABLE IF NOT EXISTS conversations (
     id TEXT PRIMARY KEY,
     raw_messages TEXT NOT NULL,
-    model_type TEXT NOT NULL,
+    provider TEXT NOT NULL,
     file_last_access TEXT,
     usage TEXT NOT NULL,
     summary TEXT,
@@ -56,8 +57,8 @@ const createIndexConversationsUpdatedAt = `
 CREATE INDEX IF NOT EXISTS idx_conversations_updated_at ON conversations(updated_at DESC);
 `
 
-const createIndexConversationsModelType = `
-CREATE INDEX IF NOT EXISTS idx_conversations_model_type ON conversations(model_type);
+const createIndexConversationsProvider = `
+CREATE INDEX IF NOT EXISTS idx_conversations_provider ON conversations(provider);
 `
 
 const createIndexSummariesCreatedAt = `
@@ -80,12 +81,22 @@ const createIndexSummariesSummary = `
 CREATE INDEX IF NOT EXISTS idx_summaries_summary ON conversation_summaries(summary);
 `
 
+// Schema version 3 changes
+const addProviderToSummariesTable = `
+ALTER TABLE conversation_summaries ADD COLUMN provider TEXT;
+`
+
+const createIndexSummariesProvider = `
+CREATE INDEX IF NOT EXISTS idx_summaries_provider ON conversation_summaries(provider);
+`
+
 // Drop indexes for rollback
 const dropIndexConversationsCreatedAt = `DROP INDEX IF EXISTS idx_conversations_created_at;`
 const dropIndexConversationsUpdatedAt = `DROP INDEX IF EXISTS idx_conversations_updated_at;`
-const dropIndexConversationsModelType = `DROP INDEX IF EXISTS idx_conversations_model_type;`
+const dropIndexConversationsProvider = `DROP INDEX IF EXISTS idx_conversations_provider;`
 const dropIndexSummariesCreatedAt = `DROP INDEX IF EXISTS idx_summaries_created_at;`
 const dropIndexSummariesUpdatedAt = `DROP INDEX IF EXISTS idx_summaries_updated_at;`
 const dropIndexSummariesMessageCount = `DROP INDEX IF EXISTS idx_summaries_message_count;`
 const dropIndexSummariesFirstMessage = `DROP INDEX IF EXISTS idx_summaries_first_message;`
 const dropIndexSummariesSummary = `DROP INDEX IF EXISTS idx_summaries_summary;`
+const dropIndexSummariesProvider = `DROP INDEX IF EXISTS idx_summaries_provider;`
