@@ -33,7 +33,7 @@ func TestStore_BasicOperations(t *testing.T) {
 	record := conversations.ConversationRecord{
 		ID:          "test-conversation-1",
 		RawMessages: json.RawMessage(`[{"role": "user", "content": [{"type": "text", "text": "Hello world"}]}]`),
-		ModelType:   "anthropic",
+		Provider:    "anthropic",
 		FileLastAccess: map[string]time.Time{
 			"test.txt": now,
 		},
@@ -62,7 +62,7 @@ func TestStore_BasicOperations(t *testing.T) {
 	loaded, err := store.Load(ctx, "test-conversation-1")
 	require.NoError(t, err)
 	assert.Equal(t, record.ID, loaded.ID)
-	assert.Equal(t, record.ModelType, loaded.ModelType)
+	assert.Equal(t, record.Provider, loaded.Provider)
 	assert.Equal(t, record.Summary, loaded.Summary)
 	assert.Equal(t, record.Usage.InputTokens, loaded.Usage.InputTokens)
 	assert.Equal(t, record.Usage.OutputTokens, loaded.Usage.OutputTokens)
@@ -113,7 +113,7 @@ func TestStore_Query(t *testing.T) {
 		{
 			ID:          "conv-1",
 			RawMessages: json.RawMessage(`[{"role": "user", "content": [{"type": "text", "text": "Hello world"}]}]`),
-			ModelType:   "anthropic",
+			Provider:    "anthropic",
 			Usage:       llmtypes.Usage{InputTokens: 100, OutputTokens: 50},
 			Summary:     "First conversation",
 			CreatedAt:   now.Add(-2 * time.Hour),
@@ -124,7 +124,7 @@ func TestStore_Query(t *testing.T) {
 		{
 			ID:          "conv-2",
 			RawMessages: json.RawMessage(`[{"role": "user", "content": [{"type": "text", "text": "Testing search"}]}]`),
-			ModelType:   "openai",
+			Provider:    "openai",
 			Usage:       llmtypes.Usage{InputTokens: 200, OutputTokens: 100},
 			Summary:     "Second conversation",
 			CreatedAt:   now.Add(-1 * time.Hour),
@@ -135,7 +135,7 @@ func TestStore_Query(t *testing.T) {
 		{
 			ID:          "conv-3",
 			RawMessages: json.RawMessage(`[{"role": "user", "content": [{"type": "text", "text": "Another message"}]}]`),
-			ModelType:   "anthropic",
+			Provider:    "anthropic",
 			Usage:       llmtypes.Usage{InputTokens: 150, OutputTokens: 75},
 			Summary:     "Third conversation",
 			CreatedAt:   now,
@@ -232,7 +232,7 @@ func TestStore_DefaultSorting(t *testing.T) {
 		{
 			ID:          "oldest-conv",
 			RawMessages: json.RawMessage(`[{"role": "user", "content": [{"type": "text", "text": "Oldest message"}]}]`),
-			ModelType:   "anthropic",
+			Provider:    "anthropic",
 			Usage:       llmtypes.Usage{InputTokens: 50, OutputTokens: 25},
 			Summary:     "Oldest conversation",
 			CreatedAt:   now.Add(-3 * time.Hour),
@@ -243,7 +243,7 @@ func TestStore_DefaultSorting(t *testing.T) {
 		{
 			ID:          "middle-conv",
 			RawMessages: json.RawMessage(`[{"role": "user", "content": [{"type": "text", "text": "Middle message"}]}]`),
-			ModelType:   "anthropic",
+			Provider:    "anthropic",
 			Usage:       llmtypes.Usage{InputTokens: 75, OutputTokens: 40},
 			Summary:     "Middle conversation",
 			CreatedAt:   now.Add(-2 * time.Hour),
@@ -254,7 +254,7 @@ func TestStore_DefaultSorting(t *testing.T) {
 		{
 			ID:          "newest-conv",
 			RawMessages: json.RawMessage(`[{"role": "user", "content": [{"type": "text", "text": "Newest message"}]}]`),
-			ModelType:   "anthropic",
+			Provider:    "anthropic",
 			Usage:       llmtypes.Usage{InputTokens: 100, OutputTokens: 50},
 			Summary:     "Newest conversation",
 			CreatedAt:   now.Add(-1 * time.Hour),
@@ -494,7 +494,7 @@ func TestStore_WALMode(t *testing.T) {
 	record := conversations.ConversationRecord{
 		ID:          "wal-test",
 		RawMessages: json.RawMessage(`[{"role": "user", "content": [{"type": "text", "text": "WAL test"}]}]`),
-		ModelType:   "anthropic",
+		Provider:    "anthropic",
 		Usage:       llmtypes.Usage{InputTokens: 10, OutputTokens: 5},
 		CreatedAt:   now,
 		UpdatedAt:   now,
@@ -533,7 +533,7 @@ func TestStore_DatabaseIntegration(t *testing.T) {
 	record := conversations.ConversationRecord{
 		ID:          "integration-test",
 		RawMessages: json.RawMessage(`[{"role": "user", "content": [{"type": "text", "text": "Complex test with émoticônes 🚀"}]}]`),
-		ModelType:   "anthropic",
+		Provider:    "anthropic",
 		FileLastAccess: map[string]time.Time{
 			"file1.txt":  now,
 			"file2.go":   now.Add(time.Hour),
@@ -662,7 +662,7 @@ func TestStore_NullHandling(t *testing.T) {
 	record := conversations.ConversationRecord{
 		ID:             "null-test",
 		RawMessages:    json.RawMessage(`[]`),
-		ModelType:      "anthropic",
+		Provider:       "anthropic",
 		FileLastAccess: map[string]time.Time{}, // Empty map
 		Usage:          llmtypes.Usage{},       // Zero values
 		Summary:        "",                     // Empty string (should become NULL)
@@ -720,7 +720,7 @@ func TestStore_ConcurrentAccess(t *testing.T) {
 				record := conversations.ConversationRecord{
 					ID:          fmt.Sprintf("concurrent-%d-%d", routineID, j),
 					RawMessages: json.RawMessage(fmt.Sprintf(`[{"role": "user", "content": "Message from routine %d record %d"}]`, routineID, j)),
-					ModelType:   "anthropic",
+					Provider:    "anthropic",
 					FileLastAccess: map[string]time.Time{
 						fmt.Sprintf("file-%d-%d.txt", routineID, j): now,
 					},
@@ -824,7 +824,7 @@ func TestStore_DirectDatabaseAccess(t *testing.T) {
 	dbRecord := &dbConversationRecord{
 		ID:          "direct-test",
 		RawMessages: json.RawMessage(`[{"role": "user", "content": "Direct insert"}]`),
-		ModelType:   "anthropic",
+		Provider:    "anthropic",
 		FileLastAccess: JSONField[map[string]time.Time]{
 			Data: map[string]time.Time{"direct.txt": now},
 		},
@@ -844,10 +844,10 @@ func TestStore_DirectDatabaseAccess(t *testing.T) {
 
 	query := `
 		INSERT INTO conversations (
-			id, raw_messages, model_type, file_last_access, usage,
+			id, raw_messages, provider, file_last_access, usage,
 			summary, created_at, updated_at, metadata, tool_results
 		) VALUES (
-			:id, :raw_messages, :model_type, :file_last_access, :usage,
+			:id, :raw_messages, :provider, :file_last_access, :usage,
 			:summary, :created_at, :updated_at, :metadata, :tool_results
 		)
 	`
@@ -888,9 +888,9 @@ func TestStore_DirectDatabaseAccess(t *testing.T) {
 
 	// Test direct query using sqlx
 	var records []dbConversationRecord
-	err = store.db.Select(&records, `SELECT id, raw_messages, model_type, file_last_access, usage, 
-		summary, created_at, updated_at, metadata, tool_results 
-		FROM conversations WHERE model_type = ?`, "anthropic")
+	err = store.db.Select(&records, `SELECT id, raw_messages, provider, file_last_access, usage,
+		summary, created_at, updated_at, metadata, tool_results
+		FROM conversations WHERE provider = ?`, "anthropic")
 	require.NoError(t, err)
 	assert.Len(t, records, 1)
 	assert.Equal(t, "direct-test", records[0].ID)
@@ -915,7 +915,7 @@ func TestStore_TimestampBehavior(t *testing.T) {
 	record := conversations.ConversationRecord{
 		ID:          "timestamp-test",
 		RawMessages: json.RawMessage(`[{"role": "user", "content": [{"type": "text", "text": "Initial message"}]}]`),
-		ModelType:   "anthropic",
+		Provider:    "anthropic",
 		FileLastAccess: map[string]time.Time{
 			"test.txt": originalCreatedAt,
 		},

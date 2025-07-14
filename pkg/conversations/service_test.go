@@ -164,7 +164,7 @@ func TestConversationService_GetConversation(t *testing.T) {
 		ID:          "test-id",
 		CreatedAt:   now,
 		UpdatedAt:   now,
-		ModelType:   "anthropic",
+		Provider:    "anthropic",
 		Summary:     "Test conversation",
 		Usage:       llm.Usage{InputTokens: 50, OutputTokens: 50},
 		RawMessages: []byte(`[{"role":"user","content":"hello"}]`),

@@ -23,7 +23,7 @@ const mockConversations: Conversation[] = [
     updatedAt: '2023-01-04T00:00:00Z',
     messageCount: 3,
     summary: 'Another test conversation summary',
-    modelType: 'gpt-4',
+    provider: 'gpt-4',
   },
 ];
 
@@ -43,11 +43,11 @@ describe('ConversationList', () => {
     // Verify conversations are displayed
     expect(screen.getByText('conv-123')).toBeInTheDocument();
     expect(screen.getByText('conv-456')).toBeInTheDocument();
-    
+
     // Verify previews/summaries
     expect(screen.getByText('This is a test conversation preview')).toBeInTheDocument();
     expect(screen.getByText('Another test conversation summary')).toBeInTheDocument();
-    
+
     // Verify metadata
     expect(screen.getByText('5')).toBeInTheDocument();
     expect(screen.getByText('3')).toBeInTheDocument();
@@ -77,7 +77,7 @@ describe('ConversationList', () => {
 
     const nextButton = screen.getByRole('button', { name: /next page/i });
     fireEvent.click(nextButton);
-    
+
     expect(onPageChange).toHaveBeenCalledWith(2);
   });
 
@@ -99,7 +99,7 @@ describe('ConversationList', () => {
 
     // Click delete
     fireEvent.click(screen.getAllByText('Delete')[0]);
-    
+
     expect(onDelete).toHaveBeenCalledWith('conv-123');
   });
 

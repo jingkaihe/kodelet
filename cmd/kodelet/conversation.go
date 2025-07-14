@@ -367,8 +367,8 @@ func NewConversationListOutput(summaries []convtypes.ConversationSummary, format
 		}
 
 		// Convert model type to friendly provider name
-		provider := summary.ModelType
-		switch summary.ModelType {
+		provider := summary.Provider
+		switch summary.Provider {
 		case "anthropic":
 			provider = "Anthropic"
 		case "openai":
@@ -578,7 +578,7 @@ func showConversationCmd(ctx context.Context, id string, config *ConversationSho
 	}
 
 	// Extract messages from raw message data
-	messages, err := llm.ExtractMessages(record.ModelType, record.RawMessages, record.ToolResults)
+	messages, err := llm.ExtractMessages(record.Provider, record.RawMessages, record.ToolResults)
 	if err != nil {
 		presenter.Error(err, "Failed to parse conversation messages")
 		os.Exit(1)
@@ -768,13 +768,13 @@ func validateConversationRecord(data []byte) (*convtypes.ConversationRecord, err
 		return nil, errors.New("conversation ID is required")
 	}
 
-	if record.ModelType == "" {
+	if record.Provider == "" {
 		return nil, errors.New("model type is required")
 	}
 
 	// Validate supported providers
-	if record.ModelType != "anthropic" && record.ModelType != "openai" {
-		return nil, errors.Errorf("unsupported model type: %s (supported: anthropic, openai)", record.ModelType)
+	if record.Provider != "anthropic" && record.Provider != "openai" {
+		return nil, errors.Errorf("unsupported model type: %s (supported: anthropic, openai)", record.Provider)
 	}
 
 	if len(record.RawMessages) == 0 {
@@ -786,7 +786,7 @@ func validateConversationRecord(data []byte) (*convtypes.ConversationRecord, err
 		record.ToolResults = make(map[string]tools.StructuredToolResult)
 	}
 
-	_, err := llm.ExtractMessages(record.ModelType, record.RawMessages, record.ToolResults)
+	_, err := llm.ExtractMessages(record.Provider, record.RawMessages, record.ToolResults)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to extract messages")
 	}

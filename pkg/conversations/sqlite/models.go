@@ -44,7 +44,7 @@ func (j JSONField[T]) Value() (driver.Value, error) {
 type dbConversationRecord struct {
 	ID             string                                           `db:"id"`
 	RawMessages    json.RawMessage                                  `db:"raw_messages"`
-	ModelType      string                                           `db:"model_type"`
+	Provider       string                                           `db:"provider"`
 	FileLastAccess JSONField[map[string]time.Time]                  `db:"file_last_access"`
 	Usage          JSONField[llmtypes.Usage]                        `db:"usage"`
 	Summary        *string                                          `db:"summary"` // NULL in database
@@ -60,7 +60,7 @@ type dbConversationSummary struct {
 	MessageCount int                       `db:"message_count"`
 	FirstMessage string                    `db:"first_message"`
 	Summary      *string                   `db:"summary"` // NULL in database
-	ModelType    string                    `db:"model_type"`
+	Provider     string                    `db:"provider"`
 	Usage        JSONField[llmtypes.Usage] `db:"usage"`
 	CreatedAt    time.Time                 `db:"created_at"`
 	UpdatedAt    time.Time                 `db:"updated_at"`
@@ -71,7 +71,7 @@ func (dbr *dbConversationRecord) ToConversationRecord() conversations.Conversati
 	record := conversations.ConversationRecord{
 		ID:             dbr.ID,
 		RawMessages:    dbr.RawMessages,
-		ModelType:      dbr.ModelType,
+		Provider:       dbr.Provider,
 		FileLastAccess: dbr.FileLastAccess.Data,
 		Usage:          dbr.Usage.Data,
 		CreatedAt:      dbr.CreatedAt,
@@ -93,7 +93,7 @@ func (dbs *dbConversationSummary) ToConversationSummary() conversations.Conversa
 		ID:           dbs.ID,
 		MessageCount: dbs.MessageCount,
 		FirstMessage: dbs.FirstMessage,
-		ModelType:    dbs.ModelType,
+		Provider:     dbs.Provider,
 		Usage:        dbs.Usage.Data,
 		CreatedAt:    dbs.CreatedAt,
 		UpdatedAt:    dbs.UpdatedAt,
@@ -111,7 +111,7 @@ func FromConversationRecord(record conversations.ConversationRecord) *dbConversa
 	dbRecord := &dbConversationRecord{
 		ID:             record.ID,
 		RawMessages:    record.RawMessages,
-		ModelType:      record.ModelType,
+		Provider:       record.Provider,
 		FileLastAccess: JSONField[map[string]time.Time]{Data: record.FileLastAccess},
 		Usage:          JSONField[llmtypes.Usage]{Data: record.Usage},
 		CreatedAt:      record.CreatedAt,
@@ -133,7 +133,7 @@ func FromConversationSummary(summary conversations.ConversationSummary) *dbConve
 		ID:           summary.ID,
 		MessageCount: summary.MessageCount,
 		FirstMessage: summary.FirstMessage,
-		ModelType:    summary.ModelType,
+		Provider:     summary.Provider,
 		Usage:        JSONField[llmtypes.Usage]{Data: summary.Usage},
 		CreatedAt:    summary.CreatedAt,
 		UpdatedAt:    summary.UpdatedAt,

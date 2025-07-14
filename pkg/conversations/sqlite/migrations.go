@@ -62,7 +62,7 @@ var migrations = []Migration{
 			indexes := []string{
 				createIndexConversationsCreatedAt,
 				createIndexConversationsUpdatedAt,
-				createIndexConversationsModelType,
+				createIndexConversationsProvider,
 				createIndexSummariesCreatedAt,
 				createIndexSummariesUpdatedAt,
 				createIndexSummariesMessageCount,
@@ -86,7 +86,7 @@ var migrations = []Migration{
 				dropIndexSummariesMessageCount,
 				dropIndexSummariesUpdatedAt,
 				dropIndexSummariesCreatedAt,
-				dropIndexConversationsModelType,
+				dropIndexConversationsProvider,
 				dropIndexConversationsUpdatedAt,
 				dropIndexConversationsCreatedAt,
 			}
@@ -102,39 +102,39 @@ var migrations = []Migration{
 	},
 	{
 		Version:     3,
-		Description: "Add model_type to conversation_summaries table",
+		Description: "Add provider to conversation_summaries table",
 		Up: func(tx *sql.Tx) error {
-			// Add model_type column to conversation_summaries table
-			if _, err := tx.Exec(addModelTypeToSummariesTable); err != nil {
-				return errors.Wrap(err, "failed to add model_type column to conversation_summaries")
+			// Add provider column to conversation_summaries table
+			if _, err := tx.Exec(addProviderToSummariesTable); err != nil {
+				return errors.Wrap(err, "failed to add provider column to conversation_summaries")
 			}
 
-			// Create index for model_type column
-			if _, err := tx.Exec(createIndexSummariesModelType); err != nil {
-				return errors.Wrap(err, "failed to create model_type index on conversation_summaries")
+			// Create index for provider column
+			if _, err := tx.Exec(createIndexSummariesProvider); err != nil {
+				return errors.Wrap(err, "failed to create provider index on conversation_summaries")
 			}
 
-			// Backfill model_type for existing conversation summaries
-			// This query updates all existing summaries with the model_type from the main conversations table
+			// Backfill provider for existing conversation summaries
+			// This query updates all existing summaries with the provider from the main conversations table
 			_, err := tx.Exec(`
-				UPDATE conversation_summaries 
-				SET model_type = (
-					SELECT model_type 
-					FROM conversations 
+				UPDATE conversation_summaries
+				SET provider = (
+					SELECT provider
+					FROM conversations
 					WHERE conversations.id = conversation_summaries.id
 				)
-				WHERE model_type IS NULL
+				WHERE provider IS NULL
 			`)
 			if err != nil {
-				return errors.Wrap(err, "failed to backfill model_type in conversation_summaries")
+				return errors.Wrap(err, "failed to backfill provider in conversation_summaries")
 			}
 
 			return nil
 		},
 		Down: func(tx *sql.Tx) error {
 			// Drop the index first
-			if _, err := tx.Exec(dropIndexSummariesModelType); err != nil {
-				return errors.Wrap(err, "failed to drop model_type index")
+			if _, err := tx.Exec(dropIndexSummariesProvider); err != nil {
+				return errors.Wrap(err, "failed to drop provider index")
 			}
 
 			// Note: SQLite doesn't support dropping columns directly
@@ -168,8 +168,8 @@ func (s *Store) getCurrentSchemaVersion() (int, error) {
 	// Check if schema_version table exists
 	var tableExists bool
 	err := s.db.QueryRow(`
-		SELECT COUNT(*) > 0 
-		FROM sqlite_master 
+		SELECT COUNT(*) > 0
+		FROM sqlite_master
 		WHERE type='table' AND name='schema_version'
 	`).Scan(&tableExists)
 	if err != nil {
@@ -183,7 +183,7 @@ func (s *Store) getCurrentSchemaVersion() (int, error) {
 	// Get the highest version number
 	var version int
 	err = s.db.QueryRow(`
-		SELECT COALESCE(MAX(version), 0) 
+		SELECT COALESCE(MAX(version), 0)
 		FROM schema_version
 	`).Scan(&version)
 	if err != nil {
@@ -211,7 +211,7 @@ func (s *Store) applyMigration(migration Migration) error {
 
 	// Record migration in schema_version table
 	_, err = tx.ExecContext(ctx, `
-		INSERT INTO schema_version (version, applied_at, description) 
+		INSERT INTO schema_version (version, applied_at, description)
 		VALUES (?, ?, ?)
 	`, migration.Version, time.Now().Format(time.RFC3339), migration.Description)
 	if err != nil {
@@ -233,8 +233,8 @@ func (s *Store) validateSchema() error {
 	for _, table := range requiredTables {
 		var exists bool
 		err := s.db.QueryRow(`
-			SELECT COUNT(*) > 0 
-			FROM sqlite_master 
+			SELECT COUNT(*) > 0
+			FROM sqlite_master
 			WHERE type='table' AND name=?
 		`, table).Scan(&exists)
 		if err != nil {

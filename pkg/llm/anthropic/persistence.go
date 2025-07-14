@@ -88,7 +88,7 @@ func (t *AnthropicThread) SaveConversation(ctx context.Context, summarise bool) 
 	record := convtypes.ConversationRecord{
 		ID:             t.conversationID,
 		RawMessages:    rawMessages,
-		ModelType:      "anthropic",
+		Provider:       "anthropic",
 		Usage:          *t.usage,
 		Metadata:       map[string]interface{}{"model": t.config.Model},
 		Summary:        t.summary,
@@ -118,8 +118,8 @@ func (t *AnthropicThread) loadConversation(ctx context.Context) error {
 	}
 
 	// Check if this is an Anthropic model conversation
-	if record.ModelType != "" && record.ModelType != "anthropic" {
-		return errors.Errorf("incompatible model type: %s", record.ModelType)
+	if record.Provider != "" && record.Provider != "anthropic" {
+		return errors.Errorf("incompatible model type: %s", record.Provider)
 	}
 
 	// Reset current messages

@@ -41,7 +41,7 @@ const ConversationMetadata: React.FC<ConversationMetadataProps> = ({ conversatio
           <div className="stat">
             <div className="stat-title">Model</div>
             <div className="text-lg font-semibold">
-              {conversation.modelType || 'Unknown'}
+              {conversation.provider || 'Unknown'}
             </div>
           </div>
           <div className="stat">

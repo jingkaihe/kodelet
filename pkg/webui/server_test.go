@@ -154,7 +154,7 @@ func TestServer_handleGetConversation(t *testing.T) {
 				return &conversations.GetConversationResponse{
 					ID:          conversationID,
 					Summary:     "Test conversation",
-					ModelType:   "anthropic",
+					Provider:    "anthropic",
 					RawMessages: json.RawMessage(`[{"role":"user","content":[{"type":"text","text":"hello"}]}]`),
 				}, nil
 			}
@@ -256,47 +256,47 @@ func TestServer_convertToWebMessages(t *testing.T) {
 	tests := []struct {
 		name          string
 		rawMessages   json.RawMessage
-		modelType     string
+		provider      string
 		expectedMsgs  int
 		checkToolCall bool
 	}{
 		{
 			name:          "anthropic messages with tool calls",
 			rawMessages:   json.RawMessage(`[{"role":"assistant","content":[{"type":"text","text":"Let me help"},{"type":"tool_use","id":"tool-123","name":"TestTool","input":{"arg":"value"}}]}]`),
-			modelType:     "anthropic",
+			provider:      "anthropic",
 			expectedMsgs:  1,
 			checkToolCall: true,
 		},
 		{
 			name:          "openai messages with tool calls",
 			rawMessages:   json.RawMessage(`[{"role":"assistant","content":"Let me help","tool_calls":[{"id":"tool-123","function":{"name":"TestTool","arguments":"{\"arg\":\"value\"}"}}]}]`),
-			modelType:     "openai",
+			provider:      "openai",
 			expectedMsgs:  1,
 			checkToolCall: true,
 		},
 		{
 			name:         "simple text messages",
 			rawMessages:  json.RawMessage(`[{"role":"user","content":[{"type":"text","text":"Hello"}]},{"role":"assistant","content":[{"type":"text","text":"Hi there!"}]}]`),
-			modelType:    "anthropic",
+			provider:     "anthropic",
 			expectedMsgs: 2,
 		},
 		{
 			name:         "empty messages should be filtered out",
 			rawMessages:  json.RawMessage(`[{"role":"user","content":[]},{"role":"assistant","content":[{"type":"text","text":"Hi there!"}]},{"role":"user","content":[]}]`),
-			modelType:    "anthropic",
+			provider:     "anthropic",
 			expectedMsgs: 1,
 		},
 		{
 			name:         "empty messages with tool calls should be preserved",
 			rawMessages:  json.RawMessage(`[{"role":"user","content":""},{"role":"assistant","content":"","tool_calls":[{"id":"tool-123","function":{"name":"TestTool","arguments":"{\"arg\":\"value\"}"}}]}]`),
-			modelType:    "openai",
+			provider:     "openai",
 			expectedMsgs: 1,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			messages, err := server.convertToWebMessages(tt.rawMessages, tt.modelType)
+			messages, err := server.convertToWebMessages(tt.rawMessages, tt.provider)
 			require.NoError(t, err)
 			assert.Equal(t, tt.expectedMsgs, len(messages))
 

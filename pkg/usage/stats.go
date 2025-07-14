@@ -16,7 +16,7 @@ type ConversationSummary interface {
 	GetUpdatedAt() time.Time
 	GetMessageCount() int
 	GetUsage() llmtypes.Usage
-	GetModelType() string
+	GetProvider() string
 }
 
 // DailyUsage represents usage statistics for a single day
@@ -225,7 +225,7 @@ func CalculateProviderBreakdownStats(summaries []ConversationSummary, startTime,
 			continue
 		}
 
-		provider := summary.GetModelType()
+		provider := summary.GetProvider()
 
 		// Initialize provider usage if not exists
 		if _, exists := providerMap[provider]; !exists {
@@ -289,7 +289,7 @@ func CalculateDailyProviderBreakdownStats(summaries []ConversationSummary, start
 		}
 
 		dateKey := date.Format("2006-01-02")
-		provider := summary.GetModelType()
+		provider := summary.GetProvider()
 
 		// Initialize daily usage if not exists
 		if _, exists := dailyMap[dateKey]; !exists {
