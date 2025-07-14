@@ -178,14 +178,15 @@ func (s *Store) Save(ctx context.Context, record conversations.ConversationRecor
 	// Insert or update conversation summary with UPSERT to preserve created_at
 	summaryQuery := `
 		INSERT INTO conversation_summaries (
-			id, message_count, first_message, summary, usage, created_at, updated_at
+			id, message_count, first_message, summary, model_type, usage, created_at, updated_at
 		) VALUES (
-			:id, :message_count, :first_message, :summary, :usage, :created_at, :updated_at
+			:id, :message_count, :first_message, :summary, :model_type, :usage, :created_at, :updated_at
 		)
 		ON CONFLICT(id) DO UPDATE SET
 			message_count = excluded.message_count,
 			first_message = excluded.first_message,
 			summary = excluded.summary,
+			model_type = excluded.model_type,
 			usage = excluded.usage,
 			updated_at = excluded.updated_at
 	`
@@ -257,6 +258,11 @@ func (s *Store) Query(ctx context.Context, options conversations.QueryOptions) (
 		searchPattern := "%" + strings.ToLower(options.SearchTerm) + "%"
 		conditions = append(conditions, "(LOWER(first_message) LIKE :search_term OR LOWER(summary) LIKE :search_term)")
 		args["search_term"] = searchPattern
+	}
+
+	if options.Provider != "" {
+		conditions = append(conditions, "model_type = :provider")
+		args["provider"] = options.Provider
 	}
 
 	// Build ORDER BY clause

@@ -100,6 +100,49 @@ var migrations = []Migration{
 			return nil
 		},
 	},
+	{
+		Version:     3,
+		Description: "Add model_type to conversation_summaries table",
+		Up: func(tx *sql.Tx) error {
+			// Add model_type column to conversation_summaries table
+			if _, err := tx.Exec(addModelTypeToSummariesTable); err != nil {
+				return errors.Wrap(err, "failed to add model_type column to conversation_summaries")
+			}
+
+			// Create index for model_type column
+			if _, err := tx.Exec(createIndexSummariesModelType); err != nil {
+				return errors.Wrap(err, "failed to create model_type index on conversation_summaries")
+			}
+
+			// Backfill model_type for existing conversation summaries
+			// This query updates all existing summaries with the model_type from the main conversations table
+			_, err := tx.Exec(`
+				UPDATE conversation_summaries 
+				SET model_type = (
+					SELECT model_type 
+					FROM conversations 
+					WHERE conversations.id = conversation_summaries.id
+				)
+				WHERE model_type IS NULL
+			`)
+			if err != nil {
+				return errors.Wrap(err, "failed to backfill model_type in conversation_summaries")
+			}
+
+			return nil
+		},
+		Down: func(tx *sql.Tx) error {
+			// Drop the index first
+			if _, err := tx.Exec(dropIndexSummariesModelType); err != nil {
+				return errors.Wrap(err, "failed to drop model_type index")
+			}
+
+			// Note: SQLite doesn't support dropping columns directly
+			// We would need to recreate the table to fully rollback
+			// For simplicity, we'll just drop the index
+			return nil
+		},
+	},
 }
 
 // runMigrations executes all pending migrations

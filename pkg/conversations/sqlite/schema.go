@@ -6,7 +6,8 @@ const (
 	// Schema version constants
 	SchemaVersion1       = 1
 	SchemaVersion2       = 2
-	CurrentSchemaVersion = SchemaVersion2
+	SchemaVersion3       = 3
+	CurrentSchemaVersion = SchemaVersion3
 )
 
 // createSchemaVersionTable creates the schema version tracking table
@@ -41,6 +42,7 @@ CREATE TABLE IF NOT EXISTS conversation_summaries (
     message_count INTEGER NOT NULL,
     first_message TEXT NOT NULL,
     summary TEXT,
+    model_type TEXT NOT NULL,
     usage TEXT NOT NULL,
     created_at DATETIME NOT NULL,
     updated_at DATETIME NOT NULL
@@ -80,6 +82,15 @@ const createIndexSummariesSummary = `
 CREATE INDEX IF NOT EXISTS idx_summaries_summary ON conversation_summaries(summary);
 `
 
+// Schema version 3 changes
+const addModelTypeToSummariesTable = `
+ALTER TABLE conversation_summaries ADD COLUMN model_type TEXT;
+`
+
+const createIndexSummariesModelType = `
+CREATE INDEX IF NOT EXISTS idx_summaries_model_type ON conversation_summaries(model_type);
+`
+
 // Drop indexes for rollback
 const dropIndexConversationsCreatedAt = `DROP INDEX IF EXISTS idx_conversations_created_at;`
 const dropIndexConversationsUpdatedAt = `DROP INDEX IF EXISTS idx_conversations_updated_at;`
@@ -89,3 +100,4 @@ const dropIndexSummariesUpdatedAt = `DROP INDEX IF EXISTS idx_summaries_updated_
 const dropIndexSummariesMessageCount = `DROP INDEX IF EXISTS idx_summaries_message_count;`
 const dropIndexSummariesFirstMessage = `DROP INDEX IF EXISTS idx_summaries_first_message;`
 const dropIndexSummariesSummary = `DROP INDEX IF EXISTS idx_summaries_summary;`
+const dropIndexSummariesModelType = `DROP INDEX IF EXISTS idx_summaries_model_type;`

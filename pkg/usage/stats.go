@@ -16,6 +16,7 @@ type ConversationSummary interface {
 	GetUpdatedAt() time.Time
 	GetMessageCount() int
 	GetUsage() llmtypes.Usage
+	GetModelType() string
 }
 
 // DailyUsage represents usage statistics for a single day
@@ -29,6 +30,34 @@ type DailyUsage struct {
 type UsageStats struct {
 	Daily []DailyUsage
 	Total llmtypes.Usage
+}
+
+// ProviderUsageStats represents usage statistics for a single provider
+type ProviderUsageStats struct {
+	Usage         llmtypes.Usage
+	Conversations int
+}
+
+// ProviderBreakdownStats represents usage statistics broken down by provider
+type ProviderBreakdownStats struct {
+	ProviderStats        map[string]*ProviderUsageStats
+	Total                llmtypes.Usage
+	TotalConversations   int
+}
+
+// DailyProviderUsage represents usage statistics for a single day with provider breakdown
+type DailyProviderUsage struct {
+	Date              time.Time
+	ProviderUsage     map[string]*ProviderUsageStats // provider -> usage stats
+	TotalUsage        llmtypes.Usage
+	TotalConversations int
+}
+
+// DailyProviderBreakdownStats represents daily usage statistics broken down by provider
+type DailyProviderBreakdownStats struct {
+	Daily []DailyProviderUsage
+	Total llmtypes.Usage
+	TotalConversations int
 }
 
 // ConversationUsageStats represents usage statistics for the conversation list
@@ -175,4 +204,169 @@ func FormatNumber(n int) string {
 // FormatCost formats cost values for display
 func FormatCost(cost float64) string {
 	return fmt.Sprintf("$%.4f", cost)
+}
+
+// CalculateProviderBreakdownStats calculates usage statistics broken down by provider (accumulated totals)
+func CalculateProviderBreakdownStats(summaries []ConversationSummary, startTime, endTime time.Time) *ProviderBreakdownStats {
+	// Create map to aggregate provider usage
+	providerMap := make(map[string]*ProviderUsageStats)
+	totalUsage := llmtypes.Usage{}
+	totalConversations := 0
+
+	for _, summary := range summaries {
+		// Use UpdatedAt as the date for this conversation's usage
+		date := summary.GetUpdatedAt().Truncate(24 * time.Hour)
+
+		// Filter by time range if specified
+		if !startTime.IsZero() && date.Before(startTime) {
+			continue
+		}
+		if !endTime.IsZero() && date.After(endTime) {
+			continue
+		}
+
+		provider := summary.GetModelType()
+		
+		// Initialize provider usage if not exists
+		if _, exists := providerMap[provider]; !exists {
+			providerMap[provider] = &ProviderUsageStats{
+				Usage:         llmtypes.Usage{},
+				Conversations: 0,
+			}
+		}
+
+		// Add to provider and total usage
+		providerStats := providerMap[provider]
+		usage := summary.GetUsage()
+		
+		// Add to provider stats
+		providerStats.Usage.InputTokens += usage.InputTokens
+		providerStats.Usage.OutputTokens += usage.OutputTokens
+		providerStats.Usage.CacheCreationInputTokens += usage.CacheCreationInputTokens
+		providerStats.Usage.CacheReadInputTokens += usage.CacheReadInputTokens
+		providerStats.Usage.InputCost += usage.InputCost
+		providerStats.Usage.OutputCost += usage.OutputCost
+		providerStats.Usage.CacheCreationCost += usage.CacheCreationCost
+		providerStats.Usage.CacheReadCost += usage.CacheReadCost
+		providerStats.Conversations++
+
+		// Add to total
+		totalUsage.InputTokens += usage.InputTokens
+		totalUsage.OutputTokens += usage.OutputTokens
+		totalUsage.CacheCreationInputTokens += usage.CacheCreationInputTokens
+		totalUsage.CacheReadInputTokens += usage.CacheReadInputTokens
+		totalUsage.InputCost += usage.InputCost
+		totalUsage.OutputCost += usage.OutputCost
+		totalUsage.CacheCreationCost += usage.CacheCreationCost
+		totalUsage.CacheReadCost += usage.CacheReadCost
+		totalConversations++
+	}
+
+	return &ProviderBreakdownStats{
+		ProviderStats:      providerMap,
+		Total:              totalUsage,
+		TotalConversations: totalConversations,
+	}
+}
+
+// CalculateDailyProviderBreakdownStats calculates daily usage statistics broken down by provider
+func CalculateDailyProviderBreakdownStats(summaries []ConversationSummary, startTime, endTime time.Time) *DailyProviderBreakdownStats {
+	// Create map to aggregate daily usage by date
+	dailyMap := make(map[string]*DailyProviderUsage)
+	totalUsage := llmtypes.Usage{}
+	totalConversations := 0
+
+	for _, summary := range summaries {
+		// Use UpdatedAt as the date for this conversation's usage
+		date := summary.GetUpdatedAt().Truncate(24 * time.Hour)
+
+		// Filter by time range if specified
+		if !startTime.IsZero() && date.Before(startTime) {
+			continue
+		}
+		if !endTime.IsZero() && date.After(endTime) {
+			continue
+		}
+
+		dateKey := date.Format("2006-01-02")
+		provider := summary.GetModelType()
+
+		// Initialize daily usage if not exists
+		if _, exists := dailyMap[dateKey]; !exists {
+			dailyMap[dateKey] = &DailyProviderUsage{
+				Date:              date,
+				ProviderUsage:     make(map[string]*ProviderUsageStats),
+				TotalUsage:        llmtypes.Usage{},
+				TotalConversations: 0,
+			}
+		}
+
+		daily := dailyMap[dateKey]
+
+		// Initialize provider usage for this day if not exists
+		if _, exists := daily.ProviderUsage[provider]; !exists {
+			daily.ProviderUsage[provider] = &ProviderUsageStats{
+				Usage:         llmtypes.Usage{},
+				Conversations: 0,
+			}
+		}
+
+		// Add to daily provider and daily total usage
+		providerStats := daily.ProviderUsage[provider]
+		usage := summary.GetUsage()
+		
+		// Add to provider stats for this day
+		providerStats.Usage.InputTokens += usage.InputTokens
+		providerStats.Usage.OutputTokens += usage.OutputTokens
+		providerStats.Usage.CacheCreationInputTokens += usage.CacheCreationInputTokens
+		providerStats.Usage.CacheReadInputTokens += usage.CacheReadInputTokens
+		providerStats.Usage.InputCost += usage.InputCost
+		providerStats.Usage.OutputCost += usage.OutputCost
+		providerStats.Usage.CacheCreationCost += usage.CacheCreationCost
+		providerStats.Usage.CacheReadCost += usage.CacheReadCost
+		providerStats.Conversations++
+
+		// Add to daily total
+		daily.TotalUsage.InputTokens += usage.InputTokens
+		daily.TotalUsage.OutputTokens += usage.OutputTokens
+		daily.TotalUsage.CacheCreationInputTokens += usage.CacheCreationInputTokens
+		daily.TotalUsage.CacheReadInputTokens += usage.CacheReadInputTokens
+		daily.TotalUsage.InputCost += usage.InputCost
+		daily.TotalUsage.OutputCost += usage.OutputCost
+		daily.TotalUsage.CacheCreationCost += usage.CacheCreationCost
+		daily.TotalUsage.CacheReadCost += usage.CacheReadCost
+		daily.TotalConversations++
+
+		// Add to overall total
+		totalUsage.InputTokens += usage.InputTokens
+		totalUsage.OutputTokens += usage.OutputTokens
+		totalUsage.CacheCreationInputTokens += usage.CacheCreationInputTokens
+		totalUsage.CacheReadInputTokens += usage.CacheReadInputTokens
+		totalUsage.InputCost += usage.InputCost
+		totalUsage.OutputCost += usage.OutputCost
+		totalUsage.CacheCreationCost += usage.CacheCreationCost
+		totalUsage.CacheReadCost += usage.CacheReadCost
+		totalConversations++
+	}
+
+	// Convert map to sorted slice
+	var dailyUsage []DailyProviderUsage
+	for _, usage := range dailyMap {
+		dailyUsage = append(dailyUsage, *usage)
+	}
+
+	// Sort by date (newest first)
+	for i := 0; i < len(dailyUsage); i++ {
+		for j := i + 1; j < len(dailyUsage); j++ {
+			if dailyUsage[i].Date.Before(dailyUsage[j].Date) {
+				dailyUsage[i], dailyUsage[j] = dailyUsage[j], dailyUsage[i]
+			}
+		}
+	}
+
+	return &DailyProviderBreakdownStats{
+		Daily:              dailyUsage,
+		Total:              totalUsage,
+		TotalConversations: totalConversations,
+	}
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/jingkaihe/kodelet/pkg/usage"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
@@ -21,17 +22,21 @@ import (
 
 // UsageConfig holds configuration for the usage command
 type UsageConfig struct {
-	Since  string
-	Until  string
-	Format string
+	Since     string
+	Until     string
+	Format    string
+	Provider  string
+	Breakdown bool
 }
 
 // NewUsageConfig creates a new UsageConfig with default values
 func NewUsageConfig() *UsageConfig {
 	return &UsageConfig{
-		Since:  "10d", // Default to past 10 days
-		Until:  "",
-		Format: "table",
+		Since:     "10d", // Default to past 10 days
+		Until:     "",
+		Format:    "table",
+		Provider:  "",
+		Breakdown: false,
 	}
 }
 
@@ -48,6 +53,10 @@ Examples:
   kodelet usage --since 1d                  # Since 1 day ago
   kodelet usage --since 1w                  # Since 1 week ago
   kodelet usage --since 1w --until 2025-06-01  # Date range
+  kodelet usage --provider anthropic        # Filter by Anthropic/Claude
+  kodelet usage --provider openai           # Filter by OpenAI
+  kodelet usage --breakdown                  # Show breakdown by provider
+  kodelet usage --breakdown --since 1w      # Provider breakdown for past week
 `,
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx := cmd.Context()
@@ -61,6 +70,8 @@ func init() {
 	usageCmd.Flags().String("since", defaults.Since, "Show usage since this time (e.g., 2025-06-01, 1d, 1w)")
 	usageCmd.Flags().String("until", defaults.Until, "Show usage until this time (e.g., 2025-06-01)")
 	usageCmd.Flags().String("format", defaults.Format, "Output format: table or json")
+	usageCmd.Flags().String("provider", defaults.Provider, "Filter usage by LLM provider (anthropic or openai)")
+	usageCmd.Flags().Bool("breakdown", defaults.Breakdown, "Show usage breakdown by provider")
 }
 
 // getUsageConfigFromFlags extracts usage configuration from command flags
@@ -75,6 +86,12 @@ func getUsageConfigFromFlags(cmd *cobra.Command) *UsageConfig {
 	}
 	if format, err := cmd.Flags().GetString("format"); err == nil {
 		config.Format = format
+	}
+	if provider, err := cmd.Flags().GetString("provider"); err == nil {
+		config.Provider = provider
+	}
+	if breakdown, err := cmd.Flags().GetBool("breakdown"); err == nil {
+		config.Breakdown = breakdown
 	}
 
 	return config
@@ -174,6 +191,7 @@ func runUsageCmd(ctx context.Context, config *UsageConfig) {
 	options := convtypes.QueryOptions{
 		SortBy:    "updated",
 		SortOrder: "desc",
+		Provider:  config.Provider, // Add provider filtering
 	}
 
 	if !startTime.IsZero() {
@@ -197,13 +215,26 @@ func runUsageCmd(ctx context.Context, config *UsageConfig) {
 	}
 
 	// Calculate usage statistics directly from summaries
-	stats := usage.CalculateUsageStats(toUsageSummaries(summaries), startTime, endTime)
+	if config.Breakdown {
+		// Calculate daily provider breakdown statistics
+		dailyProviderStats := usage.CalculateDailyProviderBreakdownStats(toUsageSummaries(summaries), startTime, endTime)
 
-	// Display results
-	if config.Format == "json" {
-		displayUsageJSON(os.Stdout, stats)
+		// Display results with daily provider breakdown
+		if config.Format == "json" {
+			displayDailyProviderBreakdownJSON(os.Stdout, dailyProviderStats)
+		} else {
+			displayDailyProviderBreakdownTable(os.Stdout, dailyProviderStats)
+		}
 	} else {
-		displayUsageTable(os.Stdout, stats)
+		// Calculate regular daily usage statistics
+		stats := usage.CalculateUsageStats(toUsageSummaries(summaries), startTime, endTime)
+
+		// Display results
+		if config.Format == "json" {
+			displayUsageJSON(os.Stdout, stats)
+		} else {
+			displayUsageTable(os.Stdout, stats)
+		}
 	}
 }
 
@@ -328,4 +359,214 @@ func formatNumber(n int) string {
 // aggregateUsageStats is a wrapper around usage.CalculateUsageStats for testing
 func aggregateUsageStats(summaries []convtypes.ConversationSummary, startTime, endTime time.Time) *UsageStats {
 	return usage.CalculateUsageStats(toUsageSummaries(summaries), startTime, endTime)
+}
+
+// displayDailyProviderBreakdownTable displays daily provider breakdown statistics in table format
+func displayDailyProviderBreakdownTable(w io.Writer, stats *usage.DailyProviderBreakdownStats) {
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+
+	// Print header (similar to regular usage table but with Provider column)
+	fmt.Fprintln(tw, "Date\tProvider\tConversations\tInput Tokens\tOutput Tokens\tCache Write\tCache Read\tTotal Cost")
+	fmt.Fprintln(tw, "----\t--------\t-------------\t------------\t-------------\t-----------\t----------\t----------")
+
+	// Print daily breakdown - one row per provider per day
+	for _, daily := range stats.Daily {
+		// Sort providers for consistent display (Claude first, then OpenAI)
+		providers := []string{}
+		if _, exists := daily.ProviderUsage["anthropic"]; exists {
+			providers = append(providers, "anthropic")
+		}
+		if _, exists := daily.ProviderUsage["openai"]; exists {
+			providers = append(providers, "openai")
+		}
+		// Add any other providers
+		for provider := range daily.ProviderUsage {
+			if provider != "anthropic" && provider != "openai" {
+				providers = append(providers, provider)
+			}
+		}
+
+		for _, provider := range providers {
+			providerStat := daily.ProviderUsage[provider]
+
+			// Convert provider name to friendly display name
+			displayName := provider
+			switch provider {
+			case "anthropic":
+				displayName = "Anthropic"
+			case "openai":
+				displayName = "OpenAI"
+			}
+
+			fmt.Fprintf(tw, "%s\t%s\t%d\t%s\t%s\t%s\t%s\t$%.4f\n",
+				daily.Date.Format("2006-01-02"),
+				displayName,
+				providerStat.Conversations,
+				usage.FormatNumber(providerStat.Usage.InputTokens),
+				usage.FormatNumber(providerStat.Usage.OutputTokens),
+				usage.FormatNumber(providerStat.Usage.CacheCreationInputTokens),
+				usage.FormatNumber(providerStat.Usage.CacheReadInputTokens),
+				providerStat.Usage.TotalCost(),
+			)
+		}
+	}
+
+	// Print separator and total if there are multiple days
+	if len(stats.Daily) > 1 {
+		fmt.Fprintln(tw, "----\t--------\t-------------\t------------\t-------------\t-----------\t----------\t----------")
+
+		// Calculate totals by provider across all days
+		providerTotals := make(map[string]*usage.ProviderUsageStats)
+		for _, daily := range stats.Daily {
+			for provider, providerStat := range daily.ProviderUsage {
+				if _, exists := providerTotals[provider]; !exists {
+					providerTotals[provider] = &usage.ProviderUsageStats{
+						Usage:         llmtypes.Usage{},
+						Conversations: 0,
+					}
+				}
+				total := providerTotals[provider]
+				total.Conversations += providerStat.Conversations
+				total.Usage.InputTokens += providerStat.Usage.InputTokens
+				total.Usage.OutputTokens += providerStat.Usage.OutputTokens
+				total.Usage.CacheCreationInputTokens += providerStat.Usage.CacheCreationInputTokens
+				total.Usage.CacheReadInputTokens += providerStat.Usage.CacheReadInputTokens
+				total.Usage.InputCost += providerStat.Usage.InputCost
+				total.Usage.OutputCost += providerStat.Usage.OutputCost
+				total.Usage.CacheCreationCost += providerStat.Usage.CacheCreationCost
+				total.Usage.CacheReadCost += providerStat.Usage.CacheReadCost
+			}
+		}
+
+		// Sort providers for totals (Claude first, then OpenAI)
+		providers := []string{}
+		if _, exists := providerTotals["anthropic"]; exists {
+			providers = append(providers, "anthropic")
+		}
+		if _, exists := providerTotals["openai"]; exists {
+			providers = append(providers, "openai")
+		}
+		// Add any other providers
+		for provider := range providerTotals {
+			if provider != "anthropic" && provider != "openai" {
+				providers = append(providers, provider)
+			}
+		}
+
+		// Print provider totals
+		for _, provider := range providers {
+			total := providerTotals[provider]
+
+			// Convert provider name to friendly display name
+			displayName := provider
+			switch provider {
+			case "anthropic":
+				displayName = "Anthropic"
+			case "openai":
+				displayName = "OpenAI"
+			}
+
+			fmt.Fprintf(tw, "TOTAL\t%s\t%d\t%s\t%s\t%s\t%s\t$%.4f\n",
+				displayName,
+				total.Conversations,
+				usage.FormatNumber(total.Usage.InputTokens),
+				usage.FormatNumber(total.Usage.OutputTokens),
+				usage.FormatNumber(total.Usage.CacheCreationInputTokens),
+				usage.FormatNumber(total.Usage.CacheReadInputTokens),
+				total.Usage.TotalCost(),
+			)
+		}
+	}
+
+	tw.Flush()
+}
+
+// DailyProviderBreakdownJSONOutput represents the JSON structure for daily provider breakdown statistics
+type DailyProviderBreakdownJSONOutput struct {
+	Daily []DailyProviderUsageJSON `json:"daily"`
+	Total TotalUsageJSON           `json:"total"`
+}
+
+// DailyProviderUsageJSON represents daily provider usage in JSON format
+type DailyProviderUsageJSON struct {
+	Date      string                       `json:"date"`
+	Providers map[string]ProviderUsageJSON `json:"providers"`
+	Total     DailyTotalUsageJSON          `json:"total"`
+}
+
+// DailyTotalUsageJSON represents daily total usage in JSON format
+type DailyTotalUsageJSON struct {
+	Conversations int     `json:"conversations"`
+	TotalCost     float64 `json:"total_cost"`
+}
+
+// ProviderUsageJSON represents provider usage in JSON format
+type ProviderUsageJSON struct {
+	Conversations    int     `json:"conversations"`
+	InputTokens      int     `json:"input_tokens"`
+	OutputTokens     int     `json:"output_tokens"`
+	CacheWriteTokens int     `json:"cache_write_tokens"`
+	CacheReadTokens  int     `json:"cache_read_tokens"`
+	TotalCost        float64 `json:"total_cost"`
+}
+
+// displayDailyProviderBreakdownJSON displays daily provider breakdown statistics in JSON format
+func displayDailyProviderBreakdownJSON(w io.Writer, stats *usage.DailyProviderBreakdownStats) {
+	// Convert to JSON-friendly structure
+	output := DailyProviderBreakdownJSONOutput{
+		Daily: make([]DailyProviderUsageJSON, len(stats.Daily)),
+	}
+
+	// Convert daily usage
+	for i, daily := range stats.Daily {
+		providers := make(map[string]ProviderUsageJSON)
+
+		for provider, providerStat := range daily.ProviderUsage {
+			// Use friendly display names in JSON
+			displayName := provider
+			switch provider {
+			case "anthropic":
+				displayName = "Anthropic"
+			case "openai":
+				displayName = "OpenAI"
+			}
+
+			providers[displayName] = ProviderUsageJSON{
+				Conversations:    providerStat.Conversations,
+				InputTokens:      providerStat.Usage.InputTokens,
+				OutputTokens:     providerStat.Usage.OutputTokens,
+				CacheWriteTokens: providerStat.Usage.CacheCreationInputTokens,
+				CacheReadTokens:  providerStat.Usage.CacheReadInputTokens,
+				TotalCost:        providerStat.Usage.TotalCost(),
+			}
+		}
+
+		output.Daily[i] = DailyProviderUsageJSON{
+			Date:      daily.Date.Format("2006-01-02"),
+			Providers: providers,
+			Total: DailyTotalUsageJSON{
+				Conversations: daily.TotalConversations,
+				TotalCost:     daily.TotalUsage.TotalCost(),
+			},
+		}
+	}
+
+	// Convert total usage
+	output.Total = TotalUsageJSON{
+		Conversations:    stats.TotalConversations,
+		InputTokens:      stats.Total.InputTokens,
+		OutputTokens:     stats.Total.OutputTokens,
+		CacheWriteTokens: stats.Total.CacheCreationInputTokens,
+		CacheReadTokens:  stats.Total.CacheReadInputTokens,
+		TotalCost:        stats.Total.TotalCost(),
+	}
+
+	// Marshal to JSON with indentation
+	jsonData, err := json.MarshalIndent(output, "", "  ")
+	if err != nil {
+		fmt.Fprintf(w, "Error generating JSON output: %v\n", err)
+		return
+	}
+
+	fmt.Fprintln(w, string(jsonData))
 }
