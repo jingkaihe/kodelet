@@ -203,7 +203,9 @@ func (s *Store) Load(ctx context.Context, id string) (conversations.Conversation
 
 	var dbRecord dbConversationRecord
 
-	query := "SELECT * FROM conversations WHERE id = ?"
+	query := `SELECT id, raw_messages, model_type, file_last_access, usage, 
+		summary, created_at, updated_at, metadata, tool_results 
+		FROM conversations WHERE id = ?`
 	err := s.db.GetContext(ctx, &dbRecord, query, id)
 	if err != nil {
 		if err.Error() == "sql: no rows in result set" {
@@ -282,7 +284,8 @@ func (s *Store) Query(ctx context.Context, options conversations.QueryOptions) (
 	}
 
 	// Build main query
-	baseQuery := "SELECT * FROM conversation_summaries"
+	baseQuery := `SELECT id, message_count, first_message, summary, model_type, 
+		usage, created_at, updated_at FROM conversation_summaries`
 	if len(conditions) > 0 {
 		baseQuery += " WHERE " + strings.Join(conditions, " AND ")
 	}

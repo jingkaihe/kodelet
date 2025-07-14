@@ -40,23 +40,23 @@ type ProviderUsageStats struct {
 
 // ProviderBreakdownStats represents usage statistics broken down by provider
 type ProviderBreakdownStats struct {
-	ProviderStats        map[string]*ProviderUsageStats
-	Total                llmtypes.Usage
-	TotalConversations   int
+	ProviderStats      map[string]*ProviderUsageStats
+	Total              llmtypes.Usage
+	TotalConversations int
 }
 
 // DailyProviderUsage represents usage statistics for a single day with provider breakdown
 type DailyProviderUsage struct {
-	Date              time.Time
-	ProviderUsage     map[string]*ProviderUsageStats // provider -> usage stats
-	TotalUsage        llmtypes.Usage
+	Date               time.Time
+	ProviderUsage      map[string]*ProviderUsageStats // provider -> usage stats
+	TotalUsage         llmtypes.Usage
 	TotalConversations int
 }
 
 // DailyProviderBreakdownStats represents daily usage statistics broken down by provider
 type DailyProviderBreakdownStats struct {
-	Daily []DailyProviderUsage
-	Total llmtypes.Usage
+	Daily              []DailyProviderUsage
+	Total              llmtypes.Usage
 	TotalConversations int
 }
 
@@ -226,7 +226,7 @@ func CalculateProviderBreakdownStats(summaries []ConversationSummary, startTime,
 		}
 
 		provider := summary.GetModelType()
-		
+
 		// Initialize provider usage if not exists
 		if _, exists := providerMap[provider]; !exists {
 			providerMap[provider] = &ProviderUsageStats{
@@ -238,7 +238,7 @@ func CalculateProviderBreakdownStats(summaries []ConversationSummary, startTime,
 		// Add to provider and total usage
 		providerStats := providerMap[provider]
 		usage := summary.GetUsage()
-		
+
 		// Add to provider stats
 		providerStats.Usage.InputTokens += usage.InputTokens
 		providerStats.Usage.OutputTokens += usage.OutputTokens
@@ -294,9 +294,9 @@ func CalculateDailyProviderBreakdownStats(summaries []ConversationSummary, start
 		// Initialize daily usage if not exists
 		if _, exists := dailyMap[dateKey]; !exists {
 			dailyMap[dateKey] = &DailyProviderUsage{
-				Date:              date,
-				ProviderUsage:     make(map[string]*ProviderUsageStats),
-				TotalUsage:        llmtypes.Usage{},
+				Date:               date,
+				ProviderUsage:      make(map[string]*ProviderUsageStats),
+				TotalUsage:         llmtypes.Usage{},
 				TotalConversations: 0,
 			}
 		}
@@ -314,7 +314,7 @@ func CalculateDailyProviderBreakdownStats(summaries []ConversationSummary, start
 		// Add to daily provider and daily total usage
 		providerStats := daily.ProviderUsage[provider]
 		usage := summary.GetUsage()
-		
+
 		// Add to provider stats for this day
 		providerStats.Usage.InputTokens += usage.InputTokens
 		providerStats.Usage.OutputTokens += usage.OutputTokens

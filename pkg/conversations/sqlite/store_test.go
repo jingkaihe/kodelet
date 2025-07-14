@@ -888,7 +888,9 @@ func TestStore_DirectDatabaseAccess(t *testing.T) {
 
 	// Test direct query using sqlx
 	var records []dbConversationRecord
-	err = store.db.Select(&records, "SELECT * FROM conversations WHERE model_type = ?", "anthropic")
+	err = store.db.Select(&records, `SELECT id, raw_messages, model_type, file_last_access, usage, 
+		summary, created_at, updated_at, metadata, tool_results 
+		FROM conversations WHERE model_type = ?`, "anthropic")
 	require.NoError(t, err)
 	assert.Len(t, records, 1)
 	assert.Equal(t, "direct-test", records[0].ID)
