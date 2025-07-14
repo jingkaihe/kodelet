@@ -647,13 +647,6 @@ func (t *AnthropicThread) updateUsage(response *anthropic.Message, model anthrop
 
 	// Calculate costs based on model pricing
 	pricing := getModelPricing(model)
-	// var inputPricing, outputPricing, cacheCreationPricing, cacheReadPricing float64
-	// if !t.useSubscription {
-	// 	inputPricing = pricing.Input
-	// 	outputPricing = pricing.Output
-	// 	cacheCreationPricing = pricing.PromptCachingWrite
-	// 	cacheReadPricing = pricing.PromptCachingRead
-	// }
 
 	// showing the usage regardless of subscription
 	var (

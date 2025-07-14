@@ -13,6 +13,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const copilotConfigSuggestion = `provider: "openai"
+use_copilot: true
+model: "gpt-4.1"
+weak_model: "gpt-4.1"
+max_tokens: 16000`
+
 var copilotLoginCmd = &cobra.Command{
 	Use:   "copilot-login",
 	Short: "Login to GitHub Copilot via OAuth to access subscription-based models",
@@ -61,9 +67,6 @@ func runCopilotLogin(ctx context.Context) error {
 		presenter.Info("If your browser didn't open automatically, visit the URL above.")
 	}
 
-	fmt.Printf("\n🔑 Device Code: %s\n", deviceResp.UserCode)
-	fmt.Printf("⏰ This code expires in %d minutes\n\n", deviceResp.ExpiresIn/60)
-
 	presenter.Info("Waiting for authentication to complete...")
 	fmt.Println("(You can close this terminal after completing authentication in your browser)")
 
@@ -75,10 +78,6 @@ func runCopilotLogin(ctx context.Context) error {
 	if err != nil {
 		return errors.Wrap(err, "failed to get OAuth access token")
 	}
-
-	// Exchange OAuth token for Copilot token
-	fmt.Println()
-	presenter.Info("Exchanging OAuth token for GitHub Copilot token...")
 
 	copilotToken, err := auth.ExchangeCopilotToken(ctx, tokenResp.AccessToken)
 	if err != nil {
@@ -94,7 +93,7 @@ func runCopilotLogin(ctx context.Context) error {
 	}
 
 	// Save credentials
-	credentialsPath, err := auth.SaveCopilotCredentials(creds)
+	_, err = auth.SaveCopilotCredentials(creds)
 	if err != nil {
 		return errors.Wrap(err, "failed to save credentials")
 	}
@@ -102,11 +101,13 @@ func runCopilotLogin(ctx context.Context) error {
 	// Success message
 	fmt.Println()
 	presenter.Success("Authentication successful!")
-	fmt.Printf("Scopes: %s\n", creds.Scope)
-	fmt.Printf("Copilot token expires: %s\n", time.Unix(copilotToken.ExpiresAt, 0).Format(time.RFC3339))
-	fmt.Printf("Credentials saved to: %s\n", credentialsPath)
 	fmt.Println()
 	presenter.Info("You can now use GitHub Copilot subscription-based models with Kodelet.")
+	fmt.Println()
+	presenter.Info("To use Copilot features, consider adding the following to your ~/.kodelet/config.yaml:")
+	fmt.Println()
+	fmt.Println(copilotConfigSuggestion)
+	fmt.Println()
 
 	return nil
 }
