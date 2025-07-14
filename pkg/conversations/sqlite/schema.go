@@ -42,7 +42,6 @@ CREATE TABLE IF NOT EXISTS conversation_summaries (
     message_count INTEGER NOT NULL,
     first_message TEXT NOT NULL,
     summary TEXT,
-    model_type TEXT NOT NULL,
     usage TEXT NOT NULL,
     created_at DATETIME NOT NULL,
     updated_at DATETIME NOT NULL
