@@ -88,3 +88,12 @@ jobs:
 
       - name: Verify build
         run: make build
+
+  cross-build:
+    name: Cross Build Verification
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Test cross compilation
+        run: make cross-build-docker
