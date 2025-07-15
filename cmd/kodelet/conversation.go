@@ -897,8 +897,6 @@ func editConversationCmd(ctx context.Context, conversationID string, config *Con
 	}
 	editorCmd = append(editorCmd, tempFile.Name())
 
-	fmt.Println(editorCmd)
-
 	// Open the file in the editor
 	cmd := exec.Command(editorCmd[0], editorCmd[1:]...)
 	cmd.Stdin = os.Stdin
