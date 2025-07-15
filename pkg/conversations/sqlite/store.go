@@ -204,7 +204,7 @@ func (s *Store) Load(ctx context.Context, id string) (conversations.Conversation
 	var dbRecord dbConversationRecord
 
 	query := `SELECT id, raw_messages, provider, file_last_access, usage,
-		summary, created_at, updated_at, metadata, tool_results
+		summary, created_at, updated_at, metadata, tool_results, background_processes
 		FROM conversations WHERE id = ?`
 	err := s.db.GetContext(ctx, &dbRecord, query, id)
 	if err != nil {

@@ -279,6 +279,7 @@ OUTER:
 			var exchangeOutput string
 			exchangeOutput, toolsUsed, err := t.processMessageExchange(ctx, handler, model, maxTokens, systemPrompt, opt)
 			if err != nil {
+				logger.G(ctx).WithError(err).Error("error processing message exchange")
 				// xxx: based on the observation, the anthropic sdk swallows context cancellation, and return empty message
 				if errors.Is(err, context.Canceled) {
 					logger.G(ctx).Info("Request to anthropic cancelled, stopping kodelet.llm.anthropic")
@@ -302,6 +303,7 @@ OUTER:
 
 			// If no tools were used, we're done
 			if !toolsUsed {
+				logger.G(ctx).Debug("no tools used, ending interaction")
 				break OUTER
 			}
 		}

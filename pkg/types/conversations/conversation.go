@@ -23,16 +23,17 @@ type QueryOptions struct {
 
 // ConversationRecord represents a persisted conversation with its messages and metadata
 type ConversationRecord struct {
-	ID             string                                `json:"id"`
-	RawMessages    json.RawMessage                       `json:"rawMessages"` // Raw LLM provider messages
-	Provider       string                                `json:"provider"`    // e.g., "anthropic"
-	FileLastAccess map[string]time.Time                  `json:"fileLastAccess"`
-	Usage          llmtypes.Usage                        `json:"usage"`
-	Summary        string                                `json:"summary,omitempty"`
-	CreatedAt      time.Time                             `json:"createdAt"`
-	UpdatedAt      time.Time                             `json:"updatedAt"`
-	Metadata       map[string]interface{}                `json:"metadata,omitempty"`
-	ToolResults    map[string]tools.StructuredToolResult `json:"toolResults,omitempty"` // Maps tool_call_id to structured result
+	ID                  string                                `json:"id"`
+	RawMessages         json.RawMessage                       `json:"rawMessages"` // Raw LLM provider messages
+	Provider            string                                `json:"provider"`    // e.g., "anthropic"
+	FileLastAccess      map[string]time.Time                  `json:"fileLastAccess"`
+	Usage               llmtypes.Usage                        `json:"usage"`
+	Summary             string                                `json:"summary,omitempty"`
+	CreatedAt           time.Time                             `json:"createdAt"`
+	UpdatedAt           time.Time                             `json:"updatedAt"`
+	Metadata            map[string]interface{}                `json:"metadata,omitempty"`
+	ToolResults         map[string]tools.StructuredToolResult `json:"toolResults,omitempty"`         // Maps tool_call_id to structured result
+	BackgroundProcesses []tools.BackgroundProcess             `json:"backgroundProcesses,omitempty"` // Persistent background processes
 }
 
 // ConversationSummary provides a brief overview of a conversation
@@ -64,13 +65,14 @@ func NewConversationRecord(id string) ConversationRecord {
 	}
 
 	return ConversationRecord{
-		ID:             id,
-		RawMessages:    json.RawMessage("[]"),
-		CreatedAt:      now,
-		UpdatedAt:      now,
-		Metadata:       make(map[string]interface{}),
-		FileLastAccess: make(map[string]time.Time),
-		ToolResults:    make(map[string]tools.StructuredToolResult),
+		ID:                  id,
+		RawMessages:         json.RawMessage("[]"),
+		CreatedAt:           now,
+		UpdatedAt:           now,
+		Metadata:            make(map[string]interface{}),
+		FileLastAccess:      make(map[string]time.Time),
+		ToolResults:         make(map[string]tools.StructuredToolResult),
+		BackgroundProcesses: make([]tools.BackgroundProcess, 0),
 	}
 }
 

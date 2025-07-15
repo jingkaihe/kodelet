@@ -143,6 +143,24 @@ var migrations = []Migration{
 			return nil
 		},
 	},
+	{
+		Version:     4,
+		Description: "Add background_processes to conversations table",
+		Up: func(tx *sql.Tx) error {
+			// Add background_processes column to conversations table
+			if _, err := tx.Exec(addBackgroundProcessesToConversationsTable); err != nil {
+				return errors.Wrap(err, "failed to add background_processes column to conversations")
+			}
+
+			return nil
+		},
+		Down: func(tx *sql.Tx) error {
+			// Note: SQLite doesn't support dropping columns directly
+			// We would need to recreate the table to fully rollback
+			// For simplicity, we'll just leave the column (it won't hurt)
+			return nil
+		},
+	},
 }
 
 // runMigrations executes all pending migrations

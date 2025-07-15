@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"syscall"
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
@@ -65,16 +67,17 @@ func (t *OpenAIThread) SaveConversation(ctx context.Context, summarize bool) err
 
 	// Build the conversation record
 	record := convtypes.ConversationRecord{
-		ID:             t.conversationID,
-		RawMessages:    messagesJSON,
-		Provider:       "openai",
-		Usage:          *t.usage,
-		Metadata:       map[string]interface{}{"model": t.config.Model},
-		Summary:        t.summary,
-		CreatedAt:      time.Now(),
-		UpdatedAt:      time.Now(),
-		FileLastAccess: t.state.FileLastAccess(),
-		ToolResults:    t.GetStructuredToolResults(),
+		ID:                  t.conversationID,
+		RawMessages:         messagesJSON,
+		Provider:            "openai",
+		Usage:               *t.usage,
+		Metadata:            map[string]interface{}{"model": t.config.Model},
+		Summary:             t.summary,
+		CreatedAt:           time.Now(),
+		UpdatedAt:           time.Now(),
+		FileLastAccess:      t.state.FileLastAccess(),
+		ToolResults:         t.GetStructuredToolResults(),
+		BackgroundProcesses: t.state.GetBackgroundProcesses(),
 	}
 
 	// Save to the store
@@ -115,8 +118,44 @@ func (t *OpenAIThread) loadConversation(ctx context.Context) error {
 	t.state.SetFileLastAccess(record.FileLastAccess)
 	// Restore structured tool results
 	t.SetStructuredToolResults(record.ToolResults)
+	// Restore background processes
+	t.restoreBackgroundProcesses(record.BackgroundProcesses)
 
 	return nil
+}
+
+// restoreBackgroundProcesses restores background processes from the conversation record
+func (t *OpenAIThread) restoreBackgroundProcesses(processes []tooltypes.BackgroundProcess) {
+	for _, process := range processes {
+		// Check if process is still alive
+		if t.isProcessAlive(process.PID) {
+			// Reattach to the process
+			if restoredProcess, err := t.reattachProcess(process); err == nil {
+				t.state.AddBackgroundProcess(restoredProcess)
+			}
+		}
+	}
+}
+
+// isProcessAlive checks if a process with the given PID is still running
+func (t *OpenAIThread) isProcessAlive(pid int) bool {
+	// Send signal 0 to check if process exists
+	err := syscall.Kill(pid, 0)
+	return err == nil
+}
+
+// reattachProcess attempts to reattach to an existing process
+func (t *OpenAIThread) reattachProcess(savedProcess tooltypes.BackgroundProcess) (tooltypes.BackgroundProcess, error) {
+	process, err := os.FindProcess(savedProcess.PID)
+	if err != nil {
+		return tooltypes.BackgroundProcess{}, errors.Wrap(err, "failed to find process")
+	}
+
+	// Create a new BackgroundProcess with the reattached process
+	restoredProcess := savedProcess
+	restoredProcess.Process = process
+
+	return restoredProcess, nil
 }
 
 // ExtractMessages converts the internal message format to the common format
