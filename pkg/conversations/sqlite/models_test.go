@@ -321,6 +321,14 @@ func TestFromConversationRecord(t *testing.T) {
 				Timestamp: now,
 			},
 		},
+		BackgroundProcesses: []tools.BackgroundProcess{
+			{
+				PID:       123,
+				StartTime: now,
+				LogPath:   "/tmp/test.log",
+				Command:   "echo hello",
+			},
+		},
 	}
 
 	dbRecord := FromConversationRecord(record)
@@ -335,22 +343,25 @@ func TestFromConversationRecord(t *testing.T) {
 	assert.Equal(t, llmtypes.Usage{InputTokens: 100, OutputTokens: 50}, dbRecord.Usage.Data)
 	assert.Equal(t, map[string]interface{}{"key": "value"}, dbRecord.Metadata.Data)
 	assert.Contains(t, dbRecord.ToolResults.Data, "call1")
+	assert.Len(t, dbRecord.BackgroundProcesses.Data, 1)
+	assert.Equal(t, 123, dbRecord.BackgroundProcesses.Data[0].PID)
 }
 
 func TestFromConversationRecord_EmptySummary(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 
 	record := conversations.ConversationRecord{
-		ID:             "test-id",
-		RawMessages:    json.RawMessage(`[]`),
-		Provider:       "anthropic",
-		FileLastAccess: map[string]time.Time{},
-		Usage:          llmtypes.Usage{},
-		Summary:        "", // Empty summary
-		CreatedAt:      now,
-		UpdatedAt:      now,
-		Metadata:       map[string]interface{}{},
-		ToolResults:    map[string]tools.StructuredToolResult{},
+		ID:                  "test-id",
+		RawMessages:         json.RawMessage(`[]`),
+		Provider:            "anthropic",
+		FileLastAccess:      map[string]time.Time{},
+		Usage:               llmtypes.Usage{},
+		Summary:             "", // Empty summary
+		CreatedAt:           now,
+		UpdatedAt:           now,
+		Metadata:            map[string]interface{}{},
+		ToolResults:         map[string]tools.StructuredToolResult{},
+		BackgroundProcesses: []tools.BackgroundProcess{},
 	}
 
 	dbRecord := FromConversationRecord(record)
@@ -446,6 +457,14 @@ func TestRoundTripConversion(t *testing.T) {
 				},
 			},
 		},
+		BackgroundProcesses: []tools.BackgroundProcess{
+			{
+				PID:       456,
+				StartTime: now.Add(30 * time.Minute),
+				LogPath:   "/tmp/bg_process.log",
+				Command:   "long_running_command",
+			},
+		},
 	}
 
 	// Convert to database model and back
@@ -490,4 +509,95 @@ func TestRoundTripConversion(t *testing.T) {
 		assert.Equal(t, originalResult.Success, convertedResult.Success)
 		assert.Equal(t, originalResult.Timestamp.Format(time.RFC3339), convertedResult.Timestamp.Format(time.RFC3339))
 	}
+
+	// Compare BackgroundProcesses
+	assert.Equal(t, len(originalRecord.BackgroundProcesses), len(convertedRecord.BackgroundProcesses))
+	for i, originalProcess := range originalRecord.BackgroundProcesses {
+		convertedProcess := convertedRecord.BackgroundProcesses[i]
+		assert.Equal(t, originalProcess.PID, convertedProcess.PID)
+		assert.Equal(t, originalProcess.StartTime.Format(time.RFC3339), convertedProcess.StartTime.Format(time.RFC3339))
+		assert.Equal(t, originalProcess.LogPath, convertedProcess.LogPath)
+		assert.Equal(t, originalProcess.Command, convertedProcess.Command)
+	}
+}
+
+func TestBackgroundProcesses_DefaultToEmptySlice(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+
+	// Test with nil BackgroundProcesses field (simulating old database records)
+	dbRecord := &dbConversationRecord{
+		ID:          "test-id",
+		RawMessages: json.RawMessage(`[]`),
+		Provider:    "anthropic",
+		FileLastAccess: JSONField[map[string]time.Time]{
+			Data: map[string]time.Time{},
+		},
+		Usage: JSONField[llmtypes.Usage]{
+			Data: llmtypes.Usage{},
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+		Metadata: JSONField[map[string]interface{}]{
+			Data: map[string]interface{}{},
+		},
+		ToolResults: JSONField[map[string]tools.StructuredToolResult]{
+			Data: map[string]tools.StructuredToolResult{},
+		},
+		// BackgroundProcesses field is zero-initialized (nil slice)
+		BackgroundProcesses: JSONField[[]tools.BackgroundProcess]{},
+	}
+
+	// Convert to domain model
+	record := dbRecord.ToConversationRecord()
+
+	// Should get empty slice, not nil
+	assert.NotNil(t, record.BackgroundProcesses)
+	assert.Empty(t, record.BackgroundProcesses)
+	assert.Equal(t, []tools.BackgroundProcess{}, record.BackgroundProcesses)
+}
+
+func TestBackgroundProcesses_NullDatabaseValue(t *testing.T) {
+	// Test JSONField behavior with NULL database value
+	var field JSONField[[]tools.BackgroundProcess]
+
+	// Simulate scanning a NULL value from database
+	err := field.Scan(nil)
+	assert.NoError(t, err)
+
+	// Should have nil slice (this is the issue we need to fix)
+	assert.Nil(t, field.Data)
+}
+
+func TestBackgroundProcesses_EmptyJsonArray(t *testing.T) {
+	// Test JSONField behavior with empty JSON array
+	var field JSONField[[]tools.BackgroundProcess]
+
+	// Simulate scanning an empty JSON array from database
+	err := field.Scan([]byte("[]"))
+	assert.NoError(t, err)
+
+	// Should have empty slice
+	assert.NotNil(t, field.Data)
+	assert.Empty(t, field.Data)
+	assert.Equal(t, []tools.BackgroundProcess{}, field.Data)
+}
+
+func TestBackgroundProcesses_ValidData(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+
+	// Test JSONField behavior with valid data
+	var field JSONField[[]tools.BackgroundProcess]
+
+	jsonData := `[{"pid":123,"start_time":"` + now.Format(time.RFC3339) + `","log_path":"/tmp/test.log","command":"echo hello"}]`
+
+	err := field.Scan([]byte(jsonData))
+	assert.NoError(t, err)
+
+	// Should have the correct data
+	assert.NotNil(t, field.Data)
+	assert.Len(t, field.Data, 1)
+	assert.Equal(t, 123, field.Data[0].PID)
+	assert.Equal(t, "/tmp/test.log", field.Data[0].LogPath)
+	assert.Equal(t, "echo hello", field.Data[0].Command)
+	assert.Equal(t, now.Format(time.RFC3339), field.Data[0].StartTime.Format(time.RFC3339))
 }

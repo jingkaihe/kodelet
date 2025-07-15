@@ -70,16 +70,22 @@ type dbConversationSummary struct {
 // ToConversationRecord converts database record to domain model
 func (dbr *dbConversationRecord) ToConversationRecord() conversations.ConversationRecord {
 	record := conversations.ConversationRecord{
-		ID:                  dbr.ID,
-		RawMessages:         dbr.RawMessages,
-		Provider:            dbr.Provider,
-		FileLastAccess:      dbr.FileLastAccess.Data,
-		Usage:               dbr.Usage.Data,
-		CreatedAt:           dbr.CreatedAt,
-		UpdatedAt:           dbr.UpdatedAt,
-		Metadata:            dbr.Metadata.Data,
-		ToolResults:         dbr.ToolResults.Data,
-		BackgroundProcesses: dbr.BackgroundProcesses.Data,
+		ID:             dbr.ID,
+		RawMessages:    dbr.RawMessages,
+		Provider:       dbr.Provider,
+		FileLastAccess: dbr.FileLastAccess.Data,
+		Usage:          dbr.Usage.Data,
+		CreatedAt:      dbr.CreatedAt,
+		UpdatedAt:      dbr.UpdatedAt,
+		Metadata:       dbr.Metadata.Data,
+		ToolResults:    dbr.ToolResults.Data,
+	}
+
+	// Ensure BackgroundProcesses is always a non-nil slice
+	if dbr.BackgroundProcesses.Data == nil {
+		record.BackgroundProcesses = []tools.BackgroundProcess{}
+	} else {
+		record.BackgroundProcesses = dbr.BackgroundProcesses.Data
 	}
 
 	if dbr.Summary != nil {
