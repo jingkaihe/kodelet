@@ -6,11 +6,11 @@ Kodelet is a lightweight CLI tool that helps with software engineering tasks. It
 ## Project Structure
 ```
 ├── .github/             # GitHub configuration
-│   └── workflows/       # GitHub Actions workflows (5 workflow files)
-├── adrs/                # Architecture Decision Records (15 ADRs)
+│   └── workflows/       # GitHub Actions workflows (8 workflow files)
+├── adrs/                # Architecture Decision Records (19 ADRs)
 ├── bin/                 # Compiled binaries
 ├── cmd/                 # Application entry point
-│   └── kodelet/         # Main application command (23 command files)
+│   └── kodelet/         # Main application command (28 command files)
 ├── config.sample.yaml   # Sample configuration file
 ├── docs/                # Documentation files
 ├── Dockerfile           # Docker configuration
@@ -32,6 +32,9 @@ Kodelet is a lightweight CLI tool that helps with software engineering tasks. It
 │   ├── llm/             # LLM client for AI interactions
 │   │   ├── anthropic/   # Anthropic Claude API client
 │   │   ├── openai/      # OpenAI API client
+│   │   │   └── preset/  # OpenAI model presets
+│   │   │       ├── grok/    # Grok model presets
+│   │   │       └── openai/  # OpenAI model presets
 │   │   └── prompts/     # Common LLM prompts
 │   ├── logger/          # Context-aware structured logging
 │   ├── presenter/       # User-facing output and formatting
