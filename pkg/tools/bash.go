@@ -14,7 +14,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"text/template"
 	"time"
 
@@ -23,6 +22,7 @@ import (
 	"github.com/gobwas/glob"
 	"github.com/invopop/jsonschema"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/jingkaihe/kodelet/pkg/utils"
 	"go.opentelemetry.io/otel/attribute"
 )
 
@@ -515,10 +515,7 @@ func (b *BashTool) executeBackground(state tooltypes.State, input *BashInput) to
 	cmd := exec.Command("bash", "-c", input.Command)
 
 	// Make the process detached from the parent process
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setpgid: true, // Create a new process group
-		Pgid:    0,    // Use the process's own PID as the process group ID
-	}
+	cmd.SysProcAttr = &utils.DetachSysProcAttr
 
 	// Setup stdout and stderr pipes before starting
 	stdout, err := cmd.StdoutPipe()
