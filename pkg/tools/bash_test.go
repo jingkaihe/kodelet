@@ -3,7 +3,11 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
+	"path/filepath"
+	"strconv"
+	"syscall"
 	"testing"
 	"time"
 
@@ -348,6 +352,9 @@ func TestBashTool_BackgroundExecution(t *testing.T) {
 	defer os.Chdir(oldPwd)
 	os.Chdir(tempDir)
 
+	state := NewBasicState(context.TODO())
+	defer cleanupBackgroundProcesses(t, state)
+
 	input := BashInput{
 		Description: "Background echo test",
 		Command:     "echo 'background process' && sleep 0.1 && echo 'done'",
@@ -356,7 +363,6 @@ func TestBashTool_BackgroundExecution(t *testing.T) {
 	}
 	params, _ := json.Marshal(input)
 
-	state := NewBasicState(context.TODO())
 	result := tool.Execute(context.Background(), state, string(params))
 
 	assert.False(t, result.IsError(), "Background execution should not error: %s", result.GetError())
@@ -927,4 +933,303 @@ func TestBashToolResult_StructuredDataFields(t *testing.T) {
 		// Verify timeout error message
 		assert.Contains(t, bashResult.error, "Command timed out after 10 seconds")
 	})
+}
+
+// Helper function to check if a process is still running
+func isProcessRunning(pid int) bool {
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	return process.Signal(syscall.Signal(0)) == nil
+}
+
+// Helper function to kill a process and wait for it to exit
+func killAndWaitProcess(pid int) error {
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return err
+	}
+
+	// Try graceful termination first
+	if err := process.Signal(syscall.SIGTERM); err != nil {
+		// If SIGTERM fails, try SIGKILL
+		if err := process.Signal(syscall.SIGKILL); err != nil {
+			return err
+		}
+	}
+
+	// Wait for process to actually exit
+	for i := 0; i < 50; i++ { // Wait up to 500ms
+		if !isProcessRunning(pid) {
+			return nil
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	return nil
+}
+
+// Helper function to cleanup background processes during test teardown
+func cleanupBackgroundProcesses(t *testing.T, state tooltypes.State) {
+	t.Helper()
+	processes := state.GetBackgroundProcesses()
+	for _, process := range processes {
+		if isProcessRunning(process.PID) {
+			t.Logf("Cleaning up background process PID %d", process.PID)
+			if err := killAndWaitProcess(process.PID); err != nil {
+				t.Logf("Failed to kill process %d: %v", process.PID, err)
+			}
+		}
+		// Remove from state tracking
+		state.RemoveBackgroundProcess(process.PID)
+	}
+}
+
+func TestBashTool_ProcessDetachment_MultipleProcesses(t *testing.T) {
+	tool := &BashTool{}
+
+	// Create a temporary directory for testing
+	tempDir, err := os.MkdirTemp("", "bash_multi_detach_test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	// Change to temp directory
+	oldPwd, _ := os.Getwd()
+	defer os.Chdir(oldPwd)
+	os.Chdir(tempDir)
+
+	state := NewBasicState(context.TODO())
+	defer cleanupBackgroundProcesses(t, state)
+
+	// Start multiple background processes
+	var results []*BackgroundBashToolResult
+	for i := 0; i < 3; i++ {
+		input := BashInput{
+			Description: fmt.Sprintf("Background process %d", i),
+			Command:     fmt.Sprintf("sleep 1 && echo 'process_%d_done' > output_%d.txt", i, i),
+			Timeout:     0,
+			Background:  true,
+		}
+		params, _ := json.Marshal(input)
+
+		result := tool.Execute(context.Background(), state, string(params))
+		assert.False(t, result.IsError(), "Background execution should not error")
+
+		bgResult, ok := result.(*BackgroundBashToolResult)
+		require.True(t, ok, "Result should be BackgroundBashToolResult")
+		results = append(results, bgResult)
+	}
+
+	// Verify all processes are tracked
+	processes := state.GetBackgroundProcesses()
+	assert.Len(t, processes, 3, "Should have three background processes")
+
+	// Verify all processes are running
+	for _, bgResult := range results {
+		assert.True(t, isProcessRunning(bgResult.pid), "Background process %d should be running", bgResult.pid)
+	}
+
+	// Wait for all processes to complete
+	time.Sleep(1500 * time.Millisecond)
+
+	// Verify all processes have completed
+	for _, bgResult := range results {
+		assert.False(t, isProcessRunning(bgResult.pid), "Background process %d should have completed", bgResult.pid)
+	}
+
+	// Check that all output files were created
+	for i := 0; i < 3; i++ {
+		outputFile := filepath.Join(tempDir, fmt.Sprintf("output_%d.txt", i))
+		assert.FileExists(t, outputFile)
+
+		content, err := os.ReadFile(outputFile)
+		require.NoError(t, err)
+		assert.Contains(t, string(content), fmt.Sprintf("process_%d_done", i))
+	}
+
+	// Allow time for cleanup
+	time.Sleep(100 * time.Millisecond)
+
+	// All processes should be removed from state tracking
+	processes = state.GetBackgroundProcesses()
+	assert.Len(t, processes, 0, "All background processes should be removed from state after completion")
+}
+
+func TestBashTool_ProcessDetachment_LogFileOutput(t *testing.T) {
+	tool := &BashTool{}
+
+	// Create a temporary directory for testing
+	tempDir, err := os.MkdirTemp("", "bash_log_test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	// Change to temp directory
+	oldPwd, _ := os.Getwd()
+	defer os.Chdir(oldPwd)
+	os.Chdir(tempDir)
+
+	state := NewBasicState(context.TODO())
+	defer cleanupBackgroundProcesses(t, state)
+
+	// Start a background process that produces output
+	input := BashInput{
+		Description: "Process with output",
+		Command:     "echo 'first_line' && echo 'second_line' && echo 'third_line'",
+		Timeout:     0,
+		Background:  true,
+	}
+	params, _ := json.Marshal(input)
+
+	result := tool.Execute(context.Background(), state, string(params))
+	assert.False(t, result.IsError(), "Background execution should not error")
+
+	bgResult, ok := result.(*BackgroundBashToolResult)
+	require.True(t, ok, "Result should be BackgroundBashToolResult")
+
+	// Verify log file path is correct
+	expectedLogPath := filepath.Join(tempDir, ".kodelet", strconv.Itoa(bgResult.pid), "out.log")
+	assert.Equal(t, expectedLogPath, bgResult.logPath)
+
+	// Wait for process to complete and output to be written
+	// Poll until process completes
+	for i := 0; i < 50; i++ {
+		if !isProcessRunning(bgResult.pid) {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	// Give a bit more time for the goroutine to capture all output
+	time.Sleep(200 * time.Millisecond)
+
+	// Verify log file contains expected output
+	logContent, err := os.ReadFile(bgResult.logPath)
+	require.NoError(t, err)
+
+	logString := string(logContent)
+	assert.Contains(t, logString, "first_line")
+	assert.Contains(t, logString, "second_line")
+	assert.Contains(t, logString, "third_line")
+
+	// Verify the log file has proper directory structure
+	assert.FileExists(t, bgResult.logPath)
+	assert.DirExists(t, filepath.Dir(bgResult.logPath))
+}
+
+func TestBashTool_ProcessDetachment_ErrorHandling(t *testing.T) {
+	tool := &BashTool{}
+
+	// Create a temporary directory for testing
+	tempDir, err := os.MkdirTemp("", "bash_error_test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	// Change to temp directory
+	oldPwd, _ := os.Getwd()
+	defer os.Chdir(oldPwd)
+	os.Chdir(tempDir)
+
+	state := NewBasicState(context.TODO())
+	defer cleanupBackgroundProcesses(t, state)
+
+	t.Run("command that fails", func(t *testing.T) {
+		input := BashInput{
+			Description: "Failing command",
+			Command:     "exit 42",
+			Timeout:     0,
+			Background:  true,
+		}
+		params, _ := json.Marshal(input)
+
+		result := tool.Execute(context.Background(), state, string(params))
+		assert.False(t, result.IsError(), "Background execution should not error even if command fails")
+
+		bgResult, ok := result.(*BackgroundBashToolResult)
+		require.True(t, ok, "Result should be BackgroundBashToolResult")
+
+		// Wait for process to complete
+		time.Sleep(200 * time.Millisecond)
+
+		// Check log file for error message
+		logContent, err := os.ReadFile(bgResult.logPath)
+		require.NoError(t, err)
+		assert.Contains(t, string(logContent), "Process exited with error")
+	})
+
+	t.Run("invalid command", func(t *testing.T) {
+		input := BashInput{
+			Description: "Invalid command",
+			Command:     "nonexistentcommand12345",
+			Timeout:     0,
+			Background:  true,
+		}
+		params, _ := json.Marshal(input)
+
+		result := tool.Execute(context.Background(), state, string(params))
+		assert.False(t, result.IsError(), "Background execution should not error even if command is invalid")
+
+		bgResult, ok := result.(*BackgroundBashToolResult)
+		require.True(t, ok, "Result should be BackgroundBashToolResult")
+
+		// Wait for process to complete
+		time.Sleep(200 * time.Millisecond)
+
+		// Check log file for error message
+		logContent, err := os.ReadFile(bgResult.logPath)
+		require.NoError(t, err)
+		assert.Contains(t, string(logContent), "command not found")
+	})
+}
+
+func TestBashTool_ProcessDetachment_StructuredData(t *testing.T) {
+	tool := &BashTool{}
+
+	// Create a temporary directory for testing
+	tempDir, err := os.MkdirTemp("", "bash_structured_test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	// Change to temp directory
+	oldPwd, _ := os.Getwd()
+	defer os.Chdir(oldPwd)
+	os.Chdir(tempDir)
+
+	state := NewBasicState(context.TODO())
+	defer cleanupBackgroundProcesses(t, state)
+
+	// Start a background process
+	input := BashInput{
+		Description: "Structured data test",
+		Command:     "echo 'structured test'",
+		Timeout:     0,
+		Background:  true,
+	}
+	params, _ := json.Marshal(input)
+
+	result := tool.Execute(context.Background(), state, string(params))
+	assert.False(t, result.IsError(), "Background execution should not error")
+
+	bgResult, ok := result.(*BackgroundBashToolResult)
+	require.True(t, ok, "Result should be BackgroundBashToolResult")
+
+	// Test structured data
+	structuredData := result.StructuredData()
+	assert.Equal(t, "bash_background", structuredData.ToolName)
+	assert.True(t, structuredData.Success)
+	assert.Empty(t, structuredData.Error)
+	assert.NotNil(t, structuredData.Metadata)
+
+	// Check background-specific metadata
+	metadata, ok := structuredData.Metadata.(*tooltypes.BackgroundBashMetadata)
+	require.True(t, ok, "Metadata should be BackgroundBashMetadata")
+	assert.Equal(t, input.Command, metadata.Command)
+	assert.Equal(t, bgResult.pid, metadata.PID)
+	assert.Equal(t, bgResult.logPath, metadata.LogPath)
+	assert.False(t, metadata.StartTime.IsZero())
+
+	// Test assistant-facing result
+	assistantResult := result.AssistantFacing()
+	assert.Contains(t, assistantResult, "Process is up and running")
+	assert.Contains(t, assistantResult, bgResult.logPath)
 }

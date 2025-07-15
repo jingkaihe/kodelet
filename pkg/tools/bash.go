@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"text/template"
 	"time"
 
@@ -434,7 +435,7 @@ func (b *BashTool) Execute(ctx context.Context, state tooltypes.State, parameter
 	}
 
 	if input.Background {
-		return b.executeBackground(ctx, state, input)
+		return b.executeBackground(state, input)
 	} else {
 		return b.executeForeground(ctx, input)
 	}
@@ -489,7 +490,7 @@ func (b *BashTool) executeForeground(ctx context.Context, input *BashInput) tool
 	}
 }
 
-func (b *BashTool) executeBackground(ctx context.Context, state tooltypes.State, input *BashInput) tooltypes.ToolResult {
+func (b *BashTool) executeBackground(state tooltypes.State, input *BashInput) tooltypes.ToolResult {
 	// Create kodelet directory if it doesn't exist
 	pwd, err := os.Getwd()
 	if err != nil {
@@ -510,7 +511,14 @@ func (b *BashTool) executeBackground(ctx context.Context, state tooltypes.State,
 	}
 
 	// Create the command - no timeout for background processes
-	cmd := exec.CommandContext(ctx, "bash", "-c", input.Command)
+	// Use context.Background() to detach from the current context
+	cmd := exec.Command("bash", "-c", input.Command)
+
+	// Make the process detached from the parent process
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Setpgid: true, // Create a new process group
+		Pgid:    0,    // Use the process's own PID as the process group ID
+	}
 
 	// Setup stdout and stderr pipes before starting
 	stdout, err := cmd.StdoutPipe()

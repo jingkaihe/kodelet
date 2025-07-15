@@ -155,10 +155,10 @@ func (s *Store) Save(ctx context.Context, record conversations.ConversationRecor
 	conversationQuery := `
 		INSERT INTO conversations (
 			id, raw_messages, provider, file_last_access, usage,
-			summary, created_at, updated_at, metadata, tool_results
+			summary, created_at, updated_at, metadata, tool_results, background_processes
 		) VALUES (
 			:id, :raw_messages, :provider, :file_last_access, :usage,
-			:summary, :created_at, :updated_at, :metadata, :tool_results
+			:summary, :created_at, :updated_at, :metadata, :tool_results, :background_processes
 		)
 		ON CONFLICT(id) DO UPDATE SET
 			raw_messages = excluded.raw_messages,
@@ -168,7 +168,8 @@ func (s *Store) Save(ctx context.Context, record conversations.ConversationRecor
 			summary = excluded.summary,
 			updated_at = excluded.updated_at,
 			metadata = excluded.metadata,
-			tool_results = excluded.tool_results
+			tool_results = excluded.tool_results,
+			background_processes = excluded.background_processes
 	`
 	_, err = tx.NamedExecContext(ctx, conversationQuery, dbRecord)
 	if err != nil {
@@ -204,7 +205,7 @@ func (s *Store) Load(ctx context.Context, id string) (conversations.Conversation
 	var dbRecord dbConversationRecord
 
 	query := `SELECT id, raw_messages, provider, file_last_access, usage,
-		summary, created_at, updated_at, metadata, tool_results
+		summary, created_at, updated_at, metadata, tool_results, background_processes
 		FROM conversations WHERE id = ?`
 	err := s.db.GetContext(ctx, &dbRecord, query, id)
 	if err != nil {

@@ -7,7 +7,8 @@ const (
 	SchemaVersion1       = 1
 	SchemaVersion2       = 2
 	SchemaVersion3       = 3
-	CurrentSchemaVersion = SchemaVersion3
+	SchemaVersion4       = 4
+	CurrentSchemaVersion = SchemaVersion4
 )
 
 // createSchemaVersionTable creates the schema version tracking table
@@ -100,3 +101,8 @@ const dropIndexSummariesMessageCount = `DROP INDEX IF EXISTS idx_summaries_messa
 const dropIndexSummariesFirstMessage = `DROP INDEX IF EXISTS idx_summaries_first_message;`
 const dropIndexSummariesSummary = `DROP INDEX IF EXISTS idx_summaries_summary;`
 const dropIndexSummariesProvider = `DROP INDEX IF EXISTS idx_summaries_provider;`
+
+// Schema version 4 changes - Add background_processes column
+const addBackgroundProcessesToConversationsTable = `
+ALTER TABLE conversations ADD COLUMN background_processes TEXT;
+`
