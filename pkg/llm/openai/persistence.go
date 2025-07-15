@@ -4,11 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"syscall"
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
+	"github.com/jingkaihe/kodelet/pkg/utils"
 	"github.com/pkg/errors"
 	"github.com/sashabaranov/go-openai"
 
@@ -128,34 +127,13 @@ func (t *OpenAIThread) loadConversation(ctx context.Context) error {
 func (t *OpenAIThread) restoreBackgroundProcesses(processes []tooltypes.BackgroundProcess) {
 	for _, process := range processes {
 		// Check if process is still alive
-		if t.isProcessAlive(process.PID) {
+		if utils.IsProcessAlive(process.PID) {
 			// Reattach to the process
-			if restoredProcess, err := t.reattachProcess(process); err == nil {
+			if restoredProcess, err := utils.ReattachProcess(process); err == nil {
 				t.state.AddBackgroundProcess(restoredProcess)
 			}
 		}
 	}
-}
-
-// isProcessAlive checks if a process with the given PID is still running
-func (t *OpenAIThread) isProcessAlive(pid int) bool {
-	// Send signal 0 to check if process exists
-	err := syscall.Kill(pid, 0)
-	return err == nil
-}
-
-// reattachProcess attempts to reattach to an existing process
-func (t *OpenAIThread) reattachProcess(savedProcess tooltypes.BackgroundProcess) (tooltypes.BackgroundProcess, error) {
-	process, err := os.FindProcess(savedProcess.PID)
-	if err != nil {
-		return tooltypes.BackgroundProcess{}, errors.Wrap(err, "failed to find process")
-	}
-
-	// Create a new BackgroundProcess with the reattached process
-	restoredProcess := savedProcess
-	restoredProcess.Process = process
-
-	return restoredProcess, nil
 }
 
 // ExtractMessages converts the internal message format to the common format

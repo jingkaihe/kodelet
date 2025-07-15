@@ -4,9 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
@@ -14,6 +12,7 @@ import (
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/jingkaihe/kodelet/pkg/utils"
 	"github.com/pkg/errors"
 )
 
@@ -148,34 +147,13 @@ func (t *AnthropicThread) loadConversation(ctx context.Context) error {
 func (t *AnthropicThread) restoreBackgroundProcesses(processes []tooltypes.BackgroundProcess) {
 	for _, process := range processes {
 		// Check if process is still alive
-		if t.isProcessAlive(process.PID) {
+		if utils.IsProcessAlive(process.PID) {
 			// Reattach to the process
-			if restoredProcess, err := t.reattachProcess(process); err == nil {
+			if restoredProcess, err := utils.ReattachProcess(process); err == nil {
 				t.state.AddBackgroundProcess(restoredProcess)
 			}
 		}
 	}
-}
-
-// isProcessAlive checks if a process with the given PID is still running
-func (t *AnthropicThread) isProcessAlive(pid int) bool {
-	// Send signal 0 to check if process exists
-	err := syscall.Kill(pid, 0)
-	return err == nil
-}
-
-// reattachProcess attempts to reattach to an existing process
-func (t *AnthropicThread) reattachProcess(savedProcess tooltypes.BackgroundProcess) (tooltypes.BackgroundProcess, error) {
-	process, err := os.FindProcess(savedProcess.PID)
-	if err != nil {
-		return tooltypes.BackgroundProcess{}, errors.Wrap(err, "failed to find process")
-	}
-
-	// Create a new BackgroundProcess with the reattached process
-	restoredProcess := savedProcess
-	restoredProcess.Process = process
-
-	return restoredProcess, nil
 }
 
 func DeserializeMessages(b []byte) ([]anthropic.MessageParam, error) {
