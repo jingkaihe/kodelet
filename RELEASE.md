@@ -1,5 +1,18 @@
 # Kodelet
 
+## 0.0.67.alpha (2025-07-15)
+
+### Background Process Persistence
+
+- **Conversation Storage Enhancement**: Added support for background processes in conversation persistence
+  - Background processes now properly saved and restored across conversation sessions
+  - Enhanced SQLite storage with background process metadata and state tracking
+  - Improved conversation continuity for long-running tasks and background operations
+- **Database Schema Updates**: Extended conversation models to include background process information
+  - New migration system for seamless database schema upgrades
+  - Enhanced process utilities for better background task management
+  - Updated conversation types to support background process lifecycle
+
 ## 0.0.65.alpha (2025-07-14)
 
 ### GitHub Copilot Integration
