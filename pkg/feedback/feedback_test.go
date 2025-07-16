@@ -2,7 +2,6 @@ package feedback
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -140,32 +139,7 @@ func TestListFeedbackFiles(t *testing.T) {
 	}
 }
 
-func TestCleanupOldFeedback(t *testing.T) {
-	store, err := NewFeedbackStore()
-	require.NoError(t, err)
 
-	conversationID := "test-cleanup"
-
-	// Create feedback file
-	err = store.WriteFeedback(conversationID, "Test message")
-	require.NoError(t, err)
-
-	// Verify file exists
-	assert.True(t, store.HasPendingFeedback(conversationID))
-
-	// Create the file with an old timestamp by manually touching the file
-	filePath := store.getFeedbackPath(conversationID)
-	oldTime := time.Now().Add(-25 * time.Hour) // 25 hours ago
-	err = os.Chtimes(filePath, oldTime, oldTime)
-	require.NoError(t, err)
-
-	// Cleanup old feedback (older than 24 hours)
-	err = store.CleanupOldFeedback(24 * time.Hour)
-	require.NoError(t, err)
-
-	// Verify file is removed
-	assert.False(t, store.HasPendingFeedback(conversationID))
-}
 
 func TestConcurrentAccess(t *testing.T) {
 	store, err := NewFeedbackStore()

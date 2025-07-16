@@ -10,6 +10,7 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/pkg/errors"
+	"github.com/rogpeppe/go-internal/lockedfile"
 )
 
 // Message represents a feedback message
@@ -61,16 +62,14 @@ func (fs *FeedbackStore) WriteFeedback(conversationID, message string) error {
 
 	filePath := fs.getFeedbackPath(conversationID)
 	
-	return withLock(filePath, func() error {
-		// Read existing feedback data
+	return lockedfile.Transform(filePath, func(data []byte) ([]byte, error) {
+		// Parse existing feedback data
 		feedbackData := &FeedbackData{Messages: []Message{}}
-		if data, err := os.ReadFile(filePath); err == nil {
+		if len(data) > 0 {
 			if err := json.Unmarshal(data, feedbackData); err != nil {
 				logger.G(nil).WithError(err).Warn("failed to unmarshal existing feedback data, creating new")
 				feedbackData = &FeedbackData{Messages: []Message{}}
 			}
-		} else if !os.IsNotExist(err) {
-			return errors.Wrap(err, "failed to read existing feedback file")
 		}
 
 		// Append new message
@@ -81,17 +80,13 @@ func (fs *FeedbackStore) WriteFeedback(conversationID, message string) error {
 		}
 		feedbackData.Messages = append(feedbackData.Messages, newMessage)
 
-		// Write back to file
-		data, err := json.MarshalIndent(feedbackData, "", "  ")
+		// Marshal back to JSON
+		result, err := json.MarshalIndent(feedbackData, "", "  ")
 		if err != nil {
-			return errors.Wrap(err, "failed to marshal feedback data")
+			return nil, errors.Wrap(err, "failed to marshal feedback data")
 		}
 
-		if err := os.WriteFile(filePath, data, 0644); err != nil {
-			return errors.Wrap(err, "failed to write feedback file")
-		}
-
-		return nil
+		return result, nil
 	})
 }
 
@@ -107,23 +102,15 @@ func (fs *FeedbackStore) ReadPendingFeedback(conversationID string) ([]Message, 
 		return []Message{}, nil
 	}
 
-	var feedbackData FeedbackData
-	err := withLock(filePath, func() error {
-		// Read feedback data
-		data, err := os.ReadFile(filePath)
-		if err != nil {
-			return errors.Wrap(err, "failed to read feedback file")
-		}
-
-		if err := json.Unmarshal(data, &feedbackData); err != nil {
-			return errors.Wrap(err, "failed to unmarshal feedback data")
-		}
-
-		return nil
-	})
-
+	// Read feedback data with locked file
+	data, err := lockedfile.Read(filePath)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to read feedback file")
+	}
+
+	var feedbackData FeedbackData
+	if err := json.Unmarshal(data, &feedbackData); err != nil {
+		return nil, errors.Wrap(err, "failed to unmarshal feedback data")
 	}
 
 	return feedbackData.Messages, nil
@@ -136,18 +123,11 @@ func (fs *FeedbackStore) ClearPendingFeedback(conversationID string) error {
 
 	filePath := fs.getFeedbackPath(conversationID)
 	
-	// Check if feedback file exists
-	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		return nil // Nothing to clear
+	// Remove the feedback file (os.Remove is atomic)
+	if err := os.Remove(filePath); err != nil && !os.IsNotExist(err) {
+		return errors.Wrap(err, "failed to remove feedback file")
 	}
-
-	return withLock(filePath, func() error {
-		// Remove the feedback file
-		if err := os.Remove(filePath); err != nil && !os.IsNotExist(err) {
-			return errors.Wrap(err, "failed to remove feedback file")
-		}
-		return nil
-	})
+	return nil
 }
 
 // HasPendingFeedback checks if there are pending feedback messages
@@ -179,34 +159,3 @@ func (fs *FeedbackStore) ListFeedbackFiles() ([]string, error) {
 	return files, nil
 }
 
-// CleanupOldFeedback removes feedback files older than the specified duration
-func (fs *FeedbackStore) CleanupOldFeedback(maxAge time.Duration) error {
-	fs.mu.Lock()
-	defer fs.mu.Unlock()
-
-	entries, err := os.ReadDir(fs.feedbackDir)
-	if err != nil {
-		return errors.Wrap(err, "failed to read feedback directory")
-	}
-
-	cutoff := time.Now().Add(-maxAge)
-	for _, entry := range entries {
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
-			continue
-		}
-
-		filePath := filepath.Join(fs.feedbackDir, entry.Name())
-		info, err := entry.Info()
-		if err != nil {
-			continue
-		}
-
-		if info.ModTime().Before(cutoff) {
-			if err := os.Remove(filePath); err != nil {
-				logger.G(nil).WithError(err).Warnf("failed to remove old feedback file: %s", filePath)
-			}
-		}
-	}
-
-	return nil
-}

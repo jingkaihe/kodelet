@@ -403,7 +403,7 @@ func (t *AnthropicThread) processMessageExchange(
 
 			if len(pendingFeedback) > 0 {
 				logger.G(ctx).WithField("feedback_count", len(pendingFeedback)).Info("processing pending feedback messages")
-				
+
 				// Convert feedback messages to anthropic messages and append to messageParams
 				for i, fbMsg := range pendingFeedback {
 					// Add some basic validation
@@ -413,11 +413,12 @@ func (t *AnthropicThread) processMessageExchange(
 					}
 
 					userMessage := anthropic.NewUserMessage(
-						anthropic.NewTextBlock(fmt.Sprintf("🗣️ User feedback: %s", fbMsg.Content)),
+						anthropic.NewTextBlock(fbMsg.Content),
 					)
 					messageParams.Messages = append(messageParams.Messages, userMessage)
+					handler.HandleText(fmt.Sprintf("🗣️ User feedback: %s", fbMsg.Content))
 				}
-				
+
 				// Clear the feedback now that we've processed it
 				if err := feedbackStore.ClearPendingFeedback(t.conversationID); err != nil {
 					logger.G(ctx).WithError(err).Warn("failed to clear pending feedback, may be processed again")
