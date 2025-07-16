@@ -21,6 +21,7 @@ require (
 	github.com/jmoiron/sqlx v1.4.0
 	github.com/mark3labs/mcp-go v0.29.0
 	github.com/pkg/errors v0.9.1
+	github.com/rogpeppe/go-internal v1.14.1
 	github.com/sashabaranov/go-openai v1.40.0
 	github.com/shirou/gopsutil/v4 v4.25.6
 	github.com/sirupsen/logrus v1.9.3
