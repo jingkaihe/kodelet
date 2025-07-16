@@ -10,7 +10,7 @@ Kodelet is a lightweight CLI tool that helps with software engineering tasks. It
 ├── adrs/                # Architecture Decision Records (19 ADRs)
 ├── bin/                 # Compiled binaries
 ├── cmd/                 # Application entry point
-│   └── kodelet/         # Main application command (28 command files)
+│   └── kodelet/         # Main application command (27 command files)
 ├── config.sample.yaml   # Sample configuration file
 ├── docs/                # Documentation files
 ├── Dockerfile           # Docker configuration
@@ -28,6 +28,7 @@ Kodelet is a lightweight CLI tool that helps with software engineering tasks. It
 │   │   ├── service.go   # Main conversation service
 │   │   ├── factory.go   # Store factory for different backends
 │   │   └── store.go     # Store interface definitions
+│   ├── feedback/        # Feedback system for autonomous conversations
 │   ├── github/          # GitHub Actions templates and utilities
 │   ├── llm/             # LLM client for AI interactions
 │   │   ├── anthropic/   # Anthropic Claude API client
@@ -157,6 +158,10 @@ kodelet conversation edit [--editor editor] [--edit-args "args"] ID  # Edit conv
 kodelet run --resume ID "more"         # Continue specific conversation
 kodelet run --follow "continue"        # Continue most recent conversation
 kodelet chat --follow                  # Resume most recent in chat mode
+
+# Feedback system
+kodelet feedback --conversation-id ID "message"  # Send feedback to specific conversation
+kodelet feedback --follow "message"             # Send feedback to most recent conversation
 
 # Git integration
 kodelet commit [--no-confirm|--short]  # AI commit messages
