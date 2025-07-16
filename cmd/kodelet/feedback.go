@@ -148,7 +148,7 @@ func sendFeedbackCmd(ctx context.Context, conversationID, message string, isFoll
 		presenter.Success(fmt.Sprintf("Feedback sent to conversation %s", conversationID))
 	}
 	presenter.Info(fmt.Sprintf("Message: %s", message))
-	
+
 	// Show helpful information
 	presenter.Info("The feedback will be processed when the conversation makes its next API call.")
 	presenter.Info("If the conversation is not currently running, start it with:")

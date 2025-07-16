@@ -39,7 +39,7 @@ func NewFeedbackStore() (*FeedbackStore, error) {
 	}
 
 	feedbackDir := filepath.Join(homeDir, ".kodelet", "feedback")
-	
+
 	// Ensure feedback directory exists
 	if err := os.MkdirAll(feedbackDir, 0755); err != nil {
 		return nil, errors.Wrap(err, "failed to create feedback directory")
@@ -61,7 +61,7 @@ func (fs *FeedbackStore) WriteFeedback(conversationID, message string) error {
 	defer fs.mu.Unlock()
 
 	filePath := fs.getFeedbackPath(conversationID)
-	
+
 	return lockedfile.Transform(filePath, func(data []byte) ([]byte, error) {
 		// Parse existing feedback data
 		feedbackData := &FeedbackData{Messages: []Message{}}
@@ -96,7 +96,7 @@ func (fs *FeedbackStore) ReadPendingFeedback(conversationID string) ([]Message, 
 	defer fs.mu.RUnlock()
 
 	filePath := fs.getFeedbackPath(conversationID)
-	
+
 	// Check if feedback file exists
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		return []Message{}, nil
@@ -122,7 +122,7 @@ func (fs *FeedbackStore) ClearPendingFeedback(conversationID string) error {
 	defer fs.mu.Unlock()
 
 	filePath := fs.getFeedbackPath(conversationID)
-	
+
 	// Remove the feedback file (os.Remove is atomic)
 	if err := os.Remove(filePath); err != nil && !os.IsNotExist(err) {
 		return errors.Wrap(err, "failed to remove feedback file")
@@ -133,12 +133,12 @@ func (fs *FeedbackStore) ClearPendingFeedback(conversationID string) error {
 // HasPendingFeedback checks if there are pending feedback messages
 func (fs *FeedbackStore) HasPendingFeedback(conversationID string) bool {
 	filePath := fs.getFeedbackPath(conversationID)
-	
+
 	// Check if feedback file exists and has content
 	if info, err := os.Stat(filePath); err == nil && info.Size() > 0 {
 		return true
 	}
-	
+
 	return false
 }
 
@@ -158,4 +158,3 @@ func (fs *FeedbackStore) ListFeedbackFiles() ([]string, error) {
 
 	return files, nil
 }
-

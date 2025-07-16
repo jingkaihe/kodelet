@@ -139,8 +139,6 @@ func TestListFeedbackFiles(t *testing.T) {
 	}
 }
 
-
-
 func TestConcurrentAccess(t *testing.T) {
 	store, err := NewFeedbackStore()
 	require.NoError(t, err)
