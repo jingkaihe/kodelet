@@ -61,52 +61,38 @@ func (fs *FeedbackStore) WriteFeedback(conversationID, message string) error {
 
 	filePath := fs.getFeedbackPath(conversationID)
 	
-	// Create a file lock by creating a temporary lock file
-	lockPath := filePath + ".lock"
-	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
-	if err != nil {
-		if os.IsExist(err) {
-			// Lock file exists, wait and retry
-			time.Sleep(100 * time.Millisecond)
-			return fs.WriteFeedback(conversationID, message)
+	return withLock(filePath, func() error {
+		// Read existing feedback data
+		feedbackData := &FeedbackData{Messages: []Message{}}
+		if data, err := os.ReadFile(filePath); err == nil {
+			if err := json.Unmarshal(data, feedbackData); err != nil {
+				logger.G(nil).WithError(err).Warn("failed to unmarshal existing feedback data, creating new")
+				feedbackData = &FeedbackData{Messages: []Message{}}
+			}
+		} else if !os.IsNotExist(err) {
+			return errors.Wrap(err, "failed to read existing feedback file")
 		}
-		return errors.Wrap(err, "failed to create lock file")
-	}
-	defer func() {
-		lockFile.Close()
-		os.Remove(lockPath)
-	}()
 
-	// Read existing feedback data
-	feedbackData := &FeedbackData{Messages: []Message{}}
-	if data, err := os.ReadFile(filePath); err == nil {
-		if err := json.Unmarshal(data, feedbackData); err != nil {
-			logger.G(nil).WithError(err).Warn("failed to unmarshal existing feedback data, creating new")
-			feedbackData = &FeedbackData{Messages: []Message{}}
+		// Append new message
+		newMessage := Message{
+			Role:      "user",
+			Content:   message,
+			Timestamp: time.Now(),
 		}
-	} else if !os.IsNotExist(err) {
-		return errors.Wrap(err, "failed to read existing feedback file")
-	}
+		feedbackData.Messages = append(feedbackData.Messages, newMessage)
 
-	// Append new message
-	newMessage := Message{
-		Role:      "user",
-		Content:   message,
-		Timestamp: time.Now(),
-	}
-	feedbackData.Messages = append(feedbackData.Messages, newMessage)
+		// Write back to file
+		data, err := json.MarshalIndent(feedbackData, "", "  ")
+		if err != nil {
+			return errors.Wrap(err, "failed to marshal feedback data")
+		}
 
-	// Write back to file
-	data, err := json.MarshalIndent(feedbackData, "", "  ")
-	if err != nil {
-		return errors.Wrap(err, "failed to marshal feedback data")
-	}
+		if err := os.WriteFile(filePath, data, 0644); err != nil {
+			return errors.Wrap(err, "failed to write feedback file")
+		}
 
-	if err := os.WriteFile(filePath, data, 0644); err != nil {
-		return errors.Wrap(err, "failed to write feedback file")
-	}
-
-	return nil
+		return nil
+	})
 }
 
 // ReadPendingFeedback reads and returns pending feedback messages
@@ -121,31 +107,23 @@ func (fs *FeedbackStore) ReadPendingFeedback(conversationID string) ([]Message, 
 		return []Message{}, nil
 	}
 
-	// Create a file lock by creating a temporary lock file
-	lockPath := filePath + ".lock"
-	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
-	if err != nil {
-		if os.IsExist(err) {
-			// Lock file exists, wait and retry
-			time.Sleep(100 * time.Millisecond)
-			return fs.ReadPendingFeedback(conversationID)
-		}
-		return nil, errors.Wrap(err, "failed to create lock file")
-	}
-	defer func() {
-		lockFile.Close()
-		os.Remove(lockPath)
-	}()
-
-	// Read feedback data
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to read feedback file")
-	}
-
 	var feedbackData FeedbackData
-	if err := json.Unmarshal(data, &feedbackData); err != nil {
-		return nil, errors.Wrap(err, "failed to unmarshal feedback data")
+	err := withLock(filePath, func() error {
+		// Read feedback data
+		data, err := os.ReadFile(filePath)
+		if err != nil {
+			return errors.Wrap(err, "failed to read feedback file")
+		}
+
+		if err := json.Unmarshal(data, &feedbackData); err != nil {
+			return errors.Wrap(err, "failed to unmarshal feedback data")
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
 	}
 
 	return feedbackData.Messages, nil
@@ -163,28 +141,13 @@ func (fs *FeedbackStore) ClearPendingFeedback(conversationID string) error {
 		return nil // Nothing to clear
 	}
 
-	// Create a file lock by creating a temporary lock file
-	lockPath := filePath + ".lock"
-	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
-	if err != nil {
-		if os.IsExist(err) {
-			// Lock file exists, wait and retry
-			time.Sleep(100 * time.Millisecond)
-			return fs.ClearPendingFeedback(conversationID)
+	return withLock(filePath, func() error {
+		// Remove the feedback file
+		if err := os.Remove(filePath); err != nil && !os.IsNotExist(err) {
+			return errors.Wrap(err, "failed to remove feedback file")
 		}
-		return errors.Wrap(err, "failed to create lock file")
-	}
-	defer func() {
-		lockFile.Close()
-		os.Remove(lockPath)
-	}()
-
-	// Remove the feedback file
-	if err := os.Remove(filePath); err != nil && !os.IsNotExist(err) {
-		return errors.Wrap(err, "failed to remove feedback file")
-	}
-
-	return nil
+		return nil
+	})
 }
 
 // HasPendingFeedback checks if there are pending feedback messages
