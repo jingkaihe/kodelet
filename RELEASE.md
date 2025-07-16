@@ -1,5 +1,13 @@
 # Kodelet
 
+## 0.0.68.alpha (2025-07-16)
+
+### Feedback System
+
+- **New Feedback Command**: Added `kodelet feedback` command for interactive conversation feedback during the middle of a kodelet run
+  - Send feedback to specific conversations with `--conversation-id` flag
+  - Use `--follow` flag to send feedback to most recent conversation
+
 ## 0.0.67.alpha (2025-07-15)
 
 ### Background Process Persistence
