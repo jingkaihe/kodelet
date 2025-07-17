@@ -9,6 +9,12 @@
 - **Usage Logging Control**: Added option to disable usage logging for internal operations to reduce noise in weak model workflows
 - **Testing Coverage**: Added comprehensive test suite for LLM usage logging functionality to ensure reliability
 
+### OpenAI Provider Configuration
+
+Allow custom OpenAI provider configuration via `openai.api_key_env_var` setting in `config.yaml` to specify which environment variable to use for OpenAI-compatible LLM providers. There are sane presets for popular providers:
+* OpenAI: `OPENAI_API_KEY`
+* xAI: `XAI_API_KEY`
+
 ## 0.0.68.alpha (2025-07-16)
 
 ### Feedback System
