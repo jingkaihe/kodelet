@@ -99,3 +99,16 @@ func TestNoDuplicateModels(t *testing.T) {
 		allModels[model] = true
 	}
 }
+
+func TestAPIKeyEnvVar(t *testing.T) {
+	// Test that APIKeyEnvVar is correctly defined
+	assert.Equal(t, "XAI_API_KEY", grok.APIKeyEnvVar, "APIKeyEnvVar should be XAI_API_KEY")
+
+	// Test that it doesn't contain whitespace
+	assert.NotContains(t, grok.APIKeyEnvVar, " ", "APIKeyEnvVar should not contain spaces")
+	assert.NotContains(t, grok.APIKeyEnvVar, "\t", "APIKeyEnvVar should not contain tabs")
+	assert.NotContains(t, grok.APIKeyEnvVar, "\n", "APIKeyEnvVar should not contain newlines")
+
+	// Test that it's not empty
+	assert.NotEmpty(t, grok.APIKeyEnvVar, "APIKeyEnvVar should not be empty")
+}

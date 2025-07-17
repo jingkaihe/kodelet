@@ -164,12 +164,12 @@ func GetAPIKeyEnvVar(config llmtypes.Config) string {
 	if config.OpenAI != nil && config.OpenAI.APIKeyEnvVar != "" {
 		return config.OpenAI.APIKeyEnvVar
 	}
-	
+
 	// Check preset default
 	if config.OpenAI != nil && config.OpenAI.Preset != "" {
 		return getPresetAPIKeyEnvVar(config.OpenAI.Preset)
 	}
-	
+
 	// Fallback to default
 	return "OPENAI_API_KEY"
 }

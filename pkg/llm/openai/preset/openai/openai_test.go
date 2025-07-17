@@ -87,3 +87,16 @@ func TestBaseURL(t *testing.T) {
 	// Test that BaseURL is correctly defined
 	assert.Equal(t, "https://api.openai.com/v1", BaseURL)
 }
+
+func TestAPIKeyEnvVar(t *testing.T) {
+	// Test that APIKeyEnvVar is correctly defined
+	assert.Equal(t, "OPENAI_API_KEY", APIKeyEnvVar)
+
+	// Test that it doesn't contain whitespace
+	assert.NotContains(t, APIKeyEnvVar, " ", "APIKeyEnvVar should not contain spaces")
+	assert.NotContains(t, APIKeyEnvVar, "\t", "APIKeyEnvVar should not contain tabs")
+	assert.NotContains(t, APIKeyEnvVar, "\n", "APIKeyEnvVar should not contain newlines")
+
+	// Test that it's not empty
+	assert.NotEmpty(t, APIKeyEnvVar, "APIKeyEnvVar should not be empty")
+}
