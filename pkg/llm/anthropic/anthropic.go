@@ -68,7 +68,7 @@ func (t *AnthropicThread) Provider() string {
 }
 
 // NewAnthropicThread creates a new thread with Anthropic's Claude API
-func NewAnthropicThread(config llmtypes.Config) (*AnthropicThread, error) {
+func NewAnthropicThread(config llmtypes.Config, withSubAgentFunc llmtypes.WithSubAgentFunc) (*AnthropicThread, error) {
 	// Apply defaults if not provided
 	if config.Model == "" {
 		config.Model = string(anthropic.ModelClaudeSonnet4_20250514)
@@ -134,20 +134,18 @@ func NewAnthropicThread(config llmtypes.Config) (*AnthropicThread, error) {
 	}
 
 	return &AnthropicThread{
-		client:          client,
-		config:          config,
-		useSubscription: useSubscription,
-		conversationID:  convtypes.GenerateID(),
-		isPersisted:     false,
-		usage:           &llmtypes.Usage{}, // must be initialised to avoid nil pointer dereference
-		toolResults:     make(map[string]tooltypes.StructuredToolResult),
+		client:           client,
+		config:           config,
+		useSubscription:  useSubscription,
+		conversationID:   convtypes.GenerateID(),
+		isPersisted:      false,
+		usage:            &llmtypes.Usage{}, // must be initialised to avoid nil pointer dereference
+		toolResults:      make(map[string]tooltypes.StructuredToolResult),
+		withSubAgentFunc: withSubAgentFunc, // Set directly during creation
 	}, nil
 }
 
-// InjectWithSubAgentFunc injects the centralized WithSubAgent function to enable cross-provider support
-func InjectWithSubAgentFunc(thread *AnthropicThread, fn llmtypes.WithSubAgentFunc) {
-	thread.withSubAgentFunc = fn
-}
+
 
 // SetState sets the state for the thread
 func (t *AnthropicThread) SetState(s tooltypes.State) {

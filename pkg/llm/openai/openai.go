@@ -135,7 +135,7 @@ func (t *OpenAIThread) Provider() string {
 }
 
 // NewOpenAIThread creates a new thread with OpenAI's API
-func NewOpenAIThread(config llmtypes.Config) *OpenAIThread {
+func NewOpenAIThread(config llmtypes.Config, withSubAgentFunc llmtypes.WithSubAgentFunc) (*OpenAIThread, error) {
 	// Apply defaults if not provided
 	if config.Model == "" {
 		config.Model = "gpt-4.1" // Default to GPT-4.1
@@ -225,24 +225,30 @@ func NewOpenAIThread(config llmtypes.Config) *OpenAIThread {
 	// Load custom models and pricing if available
 	customModels, customPricing := loadCustomConfiguration(config)
 
-	return &OpenAIThread{
-		client:          client,
-		config:          config,
-		reasoningEffort: reasoningEffort,
-		conversationID:  convtypes.GenerateID(),
-		isPersisted:     false,
-		usage:           &llmtypes.Usage{}, // must be initialized to avoid nil pointer dereference
-		toolResults:     make(map[string]tooltypes.StructuredToolResult),
-		customModels:    customModels,
-		customPricing:   customPricing,
-		useCopilot:      useCopilot,
+	// Validate API key if not using Copilot
+	if !useCopilot {
+		apiKeyEnvVar := GetAPIKeyEnvVar(config)
+		if os.Getenv(apiKeyEnvVar) == "" {
+			return nil, errors.Errorf("%s environment variable is required", apiKeyEnvVar)
+		}
 	}
+
+	return &OpenAIThread{
+		client:           client,
+		config:           config,
+		reasoningEffort:  reasoningEffort,
+		conversationID:   convtypes.GenerateID(),
+		isPersisted:      false,
+		usage:            &llmtypes.Usage{}, // must be initialized to avoid nil pointer dereference
+		toolResults:      make(map[string]tooltypes.StructuredToolResult),
+		customModels:     customModels,
+		customPricing:    customPricing,
+		useCopilot:       useCopilot,
+		withSubAgentFunc: withSubAgentFunc, // Set directly during creation
+	}, nil
 }
 
-// InjectWithSubAgentFunc injects the centralized WithSubAgent function to enable cross-provider support
-func InjectWithSubAgentFunc(thread *OpenAIThread, fn llmtypes.WithSubAgentFunc) {
-	thread.withSubAgentFunc = fn
-}
+
 
 // SetState sets the state for the thread
 func (t *OpenAIThread) SetState(s tooltypes.State) {

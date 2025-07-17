@@ -8,6 +8,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/sashabaranov/go-openai"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
@@ -304,9 +305,10 @@ func TestSaveConversationMessageCleanup(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create a thread without persistence to avoid store issues
-			thread := NewOpenAIThread(llmtypes.Config{
+			thread, err := NewOpenAIThread(llmtypes.Config{
 				Model: "gpt-4.1",
-			})
+			}, nil)
+			require.NoError(t, err)
 
 			// Set up state
 			state := tools.NewBasicState(context.TODO())

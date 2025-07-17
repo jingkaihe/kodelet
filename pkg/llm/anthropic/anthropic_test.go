@@ -52,7 +52,7 @@ func TestGetMediaTypeFromExtension(t *testing.T) {
 }
 
 func TestProcessImageURL(t *testing.T) {
-	thread, err := NewAnthropicThread(llmtypes.Config{})
+	thread, err := NewAnthropicThread(llmtypes.Config{}, nil)
 	require.NoError(t, err)
 
 	tests := []struct {
@@ -81,7 +81,7 @@ func TestProcessImageURL(t *testing.T) {
 }
 
 func TestProcessImageFile(t *testing.T) {
-	thread, err := NewAnthropicThread(llmtypes.Config{})
+	thread, err := NewAnthropicThread(llmtypes.Config{}, nil)
 	require.NoError(t, err)
 
 	// Create a temporary directory for test files
@@ -141,7 +141,7 @@ func TestProcessImageFile(t *testing.T) {
 }
 
 func TestAddUserMessage(t *testing.T) {
-	thread, err := NewAnthropicThread(llmtypes.Config{})
+	thread, err := NewAnthropicThread(llmtypes.Config{}, nil)
 	require.NoError(t, err)
 
 	// Create a temporary directory for test files
@@ -276,7 +276,7 @@ func TestShouldAutoCompact(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			thread, err := NewAnthropicThread(llmtypes.Config{})
+			thread, err := NewAnthropicThread(llmtypes.Config{}, nil)
 			require.NoError(t, err)
 
 			// Mock the usage stats
@@ -390,7 +390,7 @@ func TestGetLastAssistantMessageText(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			thread, err := NewAnthropicThread(llmtypes.Config{})
+			thread, err := NewAnthropicThread(llmtypes.Config{}, nil)
 			require.NoError(t, err)
 
 			thread.messages = test.messages
@@ -418,7 +418,7 @@ func TestCompactContextIntegration(t *testing.T) {
 		thread, err := NewAnthropicThread(llmtypes.Config{
 			Model:     "claude-3-5-haiku-20241022", // Use faster/cheaper model for testing
 			MaxTokens: 1000,                        // Limit tokens for test
-		})
+		}, nil)
 		require.NoError(t, err)
 
 		// Set up some realistic conversation history
@@ -487,7 +487,7 @@ func TestCompactContextIntegration(t *testing.T) {
 		thread, err := NewAnthropicThread(llmtypes.Config{
 			Model:     "claude-3-5-haiku-20241022",
 			MaxTokens: 500,
-		})
+		}, nil)
 		require.NoError(t, err)
 
 		// Add some conversation history
@@ -516,7 +516,7 @@ func TestCompactContextIntegration(t *testing.T) {
 
 func TestAutoCompactTriggerLogic(t *testing.T) {
 	t.Run("auto-compact triggers when ratio exceeded", func(t *testing.T) {
-		thread, err := NewAnthropicThread(llmtypes.Config{})
+		thread, err := NewAnthropicThread(llmtypes.Config{}, nil)
 		require.NoError(t, err)
 
 		// Set up context window to trigger auto-compact
@@ -529,7 +529,7 @@ func TestAutoCompactTriggerLogic(t *testing.T) {
 	})
 
 	t.Run("auto-compact does not trigger when ratio not exceeded", func(t *testing.T) {
-		thread, err := NewAnthropicThread(llmtypes.Config{})
+		thread, err := NewAnthropicThread(llmtypes.Config{}, nil)
 		require.NoError(t, err)
 
 		// Set up context window below auto-compact threshold
@@ -542,7 +542,7 @@ func TestAutoCompactTriggerLogic(t *testing.T) {
 	})
 
 	t.Run("auto-compact disabled when DisableAutoCompact is true", func(t *testing.T) {
-		thread, err := NewAnthropicThread(llmtypes.Config{})
+		thread, err := NewAnthropicThread(llmtypes.Config{}, nil)
 		require.NoError(t, err)
 
 		// Set up context window to trigger auto-compact
@@ -594,7 +594,7 @@ func TestAutoCompactTriggerLogic(t *testing.T) {
 
 		for _, test := range tests {
 			t.Run(test.name, func(t *testing.T) {
-				thread, err := NewAnthropicThread(llmtypes.Config{})
+				thread, err := NewAnthropicThread(llmtypes.Config{}, nil)
 				require.NoError(t, err)
 
 				// Set up context window
@@ -612,7 +612,7 @@ func TestAutoCompactTriggerLogic(t *testing.T) {
 
 func TestWithSubAgent(t *testing.T) {
 	t.Run("WithSubAgent correctly passes compact configuration", func(t *testing.T) {
-		parentThread, err := NewAnthropicThread(llmtypes.Config{})
+		parentThread, err := NewAnthropicThread(llmtypes.Config{}, nil)
 		require.NoError(t, err)
 
 		// Set up a basic state for the parent thread using NewBasicState
@@ -674,7 +674,7 @@ func TestWithSubAgent(t *testing.T) {
 	})
 
 	t.Run("WithSubAgent creates independent subagent", func(t *testing.T) {
-		parentThread, err := NewAnthropicThread(llmtypes.Config{})
+		parentThread, err := NewAnthropicThread(llmtypes.Config{}, nil)
 		require.NoError(t, err)
 
 		// Set up a basic state for the parent thread using NewBasicState

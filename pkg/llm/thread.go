@@ -6,7 +6,6 @@ package llm
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/pkg/errors"
@@ -42,27 +41,12 @@ func resolveModelAlias(modelName string, aliases map[string]string) string {
 func NewThread(config llmtypes.Config) (llmtypes.Thread, error) {
 	config.Model = resolveModelAlias(config.Model, config.Aliases)
 	
-	// Ensure API keys are available for the requested provider
+	// Create thread based on provider
 	switch strings.ToLower(config.Provider) {
 	case "openai":
-		if os.Getenv("OPENAI_API_KEY") == "" && !config.UseCopilot {
-			return nil, errors.New("OPENAI_API_KEY environment variable is required")
-		}
-		thread := openai.NewOpenAIThread(config)
-		// Inject the centralized WithSubAgent function to enable cross-provider support
-		openai.InjectWithSubAgentFunc(thread, WithSubAgent)
-		return thread, nil
+		return openai.NewOpenAIThread(config, WithSubAgent)
 	case "anthropic":
-		if os.Getenv("ANTHROPIC_API_KEY") == "" {
-			return nil, errors.New("ANTHROPIC_API_KEY environment variable is required")
-		}
-		thread, err := anthropic.NewAnthropicThread(config)
-		if err != nil {
-			return nil, err
-		}
-		// Inject the centralized WithSubAgent function to enable cross-provider support
-		anthropic.InjectWithSubAgentFunc(thread, WithSubAgent)
-		return thread, nil
+		return anthropic.NewAnthropicThread(config, WithSubAgent)
 	default:
 		return nil, errors.Errorf("unsupported provider: %s", config.Provider)
 	}
