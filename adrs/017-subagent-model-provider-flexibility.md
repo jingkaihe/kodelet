@@ -57,6 +57,9 @@ type SubAgentConfig struct {
     MaxTokens        int    `yaml:"max_tokens"`
     ReasoningEffort  string `yaml:"reasoning_effort"`  // OpenAI specific
     ThinkingBudget   int    `yaml:"thinking_budget"`   // Anthropic specific
+    
+    // OpenAI-compatible provider configuration
+    OpenAI *OpenAIConfig `yaml:"openai,omitempty"`
 }
 
 type Config struct {
@@ -148,39 +151,65 @@ func (t *OpenAIThread) NewSubAgent(ctx context.Context) llmtypes.Thread {
         subConfig := t.config.SubAgent
         
         // Check if we need a different provider
-        if subConfig.Provider != "" && subConfig.Provider != "openai" {
-            // Create a new thread with different provider
-            newConfig := config
-            newConfig.Provider = subConfig.Provider
-            newConfig.Model = subConfig.Model
-            newConfig.MaxTokens = subConfig.MaxTokens
-            newConfig.ReasoningEffort = subConfig.ReasoningEffort
-            newConfig.ThinkingBudgetTokens = subConfig.ThinkingBudget
+        if subConfig.Provider != "" && subConfig.Provider != "anthropic" {
+            // For OpenAI-compatible providers, check if we need different configuration
+            needNewThread := false
             
-            newThread, err := llm.NewThread(newConfig)
-            if err != nil {
-                logger.G(ctx).WithError(err).Error("Failed to create subagent with different provider, falling back to parent config")
-                // Fall back to same provider
-            } else {
-                return newThread
+            // Check if subagent has different OpenAI configuration (different base URL, preset, etc.)
+            if subConfig.OpenAI != nil {
+                // Compare with parent's OpenAI config
+                parentOpenAI := t.config.OpenAI
+                subOpenAI := subConfig.OpenAI
+                
+                if (parentOpenAI == nil && subOpenAI != nil) ||
+                   (parentOpenAI != nil && subOpenAI != nil && 
+                    (parentOpenAI.BaseURL != subOpenAI.BaseURL || 
+                     parentOpenAI.Preset != subOpenAI.Preset)) {
+                    needNewThread = true
+                }
             }
-        } else {
-            // Same provider - apply subagent settings
-            if subConfig.Model != "" {
-                config.Model = subConfig.Model
+            
+            // Check if it's a different provider entirely
+            if subConfig.Provider != "openai" {
+                needNewThread = true
             }
-            if subConfig.MaxTokens > 0 {
-                config.MaxTokens = subConfig.MaxTokens
-            }
-            if subConfig.ReasoningEffort != "" {
-                config.ReasoningEffort = subConfig.ReasoningEffort
+            
+            if needNewThread {
+                // Create a new thread with different provider/configuration
+                newConfig := config
+                newConfig.Provider = subConfig.Provider
+                newConfig.Model = subConfig.Model
+                newConfig.MaxTokens = subConfig.MaxTokens
+                newConfig.ReasoningEffort = subConfig.ReasoningEffort
+                newConfig.ThinkingBudgetTokens = subConfig.ThinkingBudget
+                newConfig.OpenAI = subConfig.OpenAI  // Use subagent's OpenAI config
+                
+                newThread, err := llm.NewThread(newConfig)
+                if err != nil {
+                    logger.G(ctx).WithError(err).Error("Failed to create subagent with different provider/config, falling back to parent config")
+                    // Fall back to same provider
+                } else {
+                    return newThread
+                }
             }
         }
+        
+        // Same provider/configuration - apply subagent settings to current config
+        if subConfig.Model != "" {
+            config.Model = subConfig.Model
+        }
+        if subConfig.MaxTokens > 0 {
+            config.MaxTokens = subConfig.MaxTokens
+        }
+        if subConfig.ReasoningEffort != "" {
+            config.ReasoningEffort = subConfig.ReasoningEffort
+        }
+        // Note: We don't change OpenAI config here since we're reusing the same client
     }
     
-    // Same provider path - can reuse client
+    // Same provider/configuration path - can reuse client
     thread := &OpenAIThread{
-        client:          t.client,  // Reuse parent's client for same provider
+        client:          t.client,  // Reuse parent's client for same configuration
         config:          config,
         reasoningEffort: config.ReasoningEffort,
         conversationID:  convtypes.GenerateID(),
@@ -276,13 +305,59 @@ func GetConfigFromViper() llmtypes.Config {
             subConfig.ThinkingBudget = thinkingBudget
         }
         
+        // Load OpenAI-specific configuration for subagent
+        if viper.IsSet("subagent.openai") {
+            openaiConfig := &llmtypes.OpenAIConfig{}
+            
+            // Load basic settings
+            openaiConfig.Preset = viper.GetString("subagent.openai.preset")
+            openaiConfig.BaseURL = viper.GetString("subagent.openai.base_url")
+            
+            // Load models configuration
+            if viper.IsSet("subagent.openai.models") {
+                openaiConfig.Models = &llmtypes.CustomModels{
+                    Reasoning:    viper.GetStringSlice("subagent.openai.models.reasoning"),
+                    NonReasoning: viper.GetStringSlice("subagent.openai.models.non_reasoning"),
+                }
+            }
+            
+            // Load pricing configuration
+            if viper.IsSet("subagent.openai.pricing") {
+                openaiConfig.Pricing = make(map[string]llmtypes.ModelPricing)
+                pricingMap := viper.GetStringMap("subagent.openai.pricing")
+                
+                for model, pricingData := range pricingMap {
+                    if pricingSubMap, ok := pricingData.(map[string]interface{}); ok {
+                        pricing := llmtypes.ModelPricing{}
+                        
+                        if input, ok := pricingSubMap["input"].(float64); ok {
+                            pricing.Input = input
+                        }
+                        if cachedInput, ok := pricingSubMap["cached_input"].(float64); ok {
+                            pricing.CachedInput = cachedInput
+                        }
+                        if output, ok := pricingSubMap["output"].(float64); ok {
+                            pricing.Output = output
+                        }
+                        if contextWindow, ok := pricingSubMap["context_window"].(int); ok {
+                            pricing.ContextWindow = contextWindow
+                        }
+                        
+                        openaiConfig.Pricing[model] = pricing
+                    }
+                }
+            }
+            
+            subConfig.OpenAI = openaiConfig
+        }
+        
         config.SubAgent = subConfig
     }
     
     return config
 }
 
-// pkg/llm/thread.go - No changes needed
+// pkg/llm/thread.go - No changes needed, but enhanced validation
 func NewThread(config llmtypes.Config) (llmtypes.Thread, error) {
     config.Model = resolveModelAlias(config.Model, config.Aliases)
     
@@ -341,30 +416,78 @@ func NewThread(config llmtypes.Config) (llmtypes.Thread, error) {
 
 ## Implementation Considerations
 
-### 1. API Key Management
+### 1. OpenAI-Compatible Provider Support
+
+The design handles the complexity of OpenAI-compatible providers (like xAI, together.ai, etc.) that use the same client but different endpoints:
+
+**Key Challenge**: How to enable scenarios like:
+- Main agent: OpenAI GPT-4o 
+- Subagent: xAI Grok-3 (different provider, same client type)
+
+**Solution**: 
+- Both providers use `provider: openai` (same client)
+- Differentiation happens through the `openai` configuration block
+- When base URLs or presets differ, a new thread is created
+- When they're the same, the existing client is reused
+
+**Example Scenarios**:
+```yaml
+# Scenario 1: OpenAI -> xAI
+provider: openai
+model: gpt-4o
+
+subagent:
+  provider: openai
+  model: grok-3
+  openai:
+    preset: grok
+    base_url: "https://api.x.ai/v1"
+```
+
+```yaml
+# Scenario 2: xAI -> OpenAI  
+provider: openai
+model: grok-2
+openai:
+  preset: grok
+  base_url: "https://api.x.ai/v1"
+
+subagent:
+  provider: openai
+  model: o3
+  openai:
+    preset: openai  # Uses default OpenAI endpoint
+```
+
+### 2. API Key Management
 - Both providers' API keys must be available in environment variables
 - The system will validate API key availability when creating cross-provider subagents
 - Clear error messages when API keys are missing
+- For OpenAI-compatible providers, the same OPENAI_API_KEY variable is used with different base URLs
 
-### 2. Usage Tracking
+### 3. Usage Tracking
 - Usage from subagents with different providers should be tracked separately
 - Consider implementing provider-specific usage aggregation
 - Token costs should reflect the actual model used
+- OpenAI-compatible providers may have different pricing structures
 
-### 3. Client Instance Management
-- Same-provider subagents can safely reuse parent's client instance
+### 4. Client Instance Management
+- Same-provider subagents can safely reuse parent's client instance **only if base URL and configuration match**
 - Cross-provider subagents require new client instances
+- OpenAI-compatible providers with different base URLs require new client instances even though they use the same OpenAI client type
 - Client lifecycle management is handled within the thread implementation
 
-### 4. System Prompt Compatibility
+### 5. System Prompt Compatibility
 - System prompts may need adjustment based on the target model
 - Consider provider-specific prompt templates for subagents
 - Ensure tool descriptions work across different providers
+- OpenAI-compatible providers may have model-specific prompt requirements
 
-### 5. Error Handling
+### 6. Error Handling
 - Graceful fallback to parent's provider if override fails
 - Clear error messages for configuration issues
 - Validation of model names against known models
+- Special handling for OpenAI-compatible provider configuration validation
 
 ## Alternatives Considered
 
@@ -389,6 +512,7 @@ func NewThread(config llmtypes.Config) (llmtypes.Thread, error) {
 
 Users can add a subagent configuration to their `config.yaml` or `kodelet-config.yaml`:
 
+### Basic Cross-Provider Configuration
 ```yaml
 # Example configuration showing subagent setup
 provider: anthropic
@@ -400,6 +524,59 @@ subagent:
   model: o3
   reasoning_effort: high
   max_tokens: 32000
+```
+
+### OpenAI-Compatible Provider Mix-and-Match
+
+The design supports mixing different OpenAI-compatible providers:
+
+```yaml
+# Example: Main agent using OpenAI, subagent using xAI (Grok)
+provider: openai
+model: gpt-4o
+
+subagent:
+  provider: openai  # Still uses OpenAI client
+  model: grok-3
+  reasoning_effort: high
+  max_tokens: 25000
+  openai:
+    preset: grok      # Uses xAI preset
+    base_url: "https://api.x.ai/v1"
+```
+
+```yaml
+# Example: Both using OpenAI-compatible providers but different ones
+provider: openai
+model: gpt-4o
+openai:
+  preset: openai
+
+subagent:
+  provider: openai
+  model: grok-3
+  openai:
+    preset: grok
+    base_url: "https://api.x.ai/v1"
+```
+
+```yaml
+# Example: Custom OpenAI-compatible provider for subagent
+provider: anthropic
+model: claude-sonnet-4
+
+subagent:
+  provider: openai
+  model: custom-reasoning-model
+  max_tokens: 32000
+  openai:
+    base_url: "https://api.custom-ai.com/v1"
+    # Custom pricing can also be specified
+    pricing:
+      custom-reasoning-model:
+        input: 0.00005
+        output: 0.00015
+        context_window: 64000
 ```
 
 ### Alternative Examples
@@ -421,17 +598,6 @@ subagent:
 provider: openai
 model: gpt-4o
 # No subagent section - subagents will use gpt-4o like parent
-```
-
-```yaml
-# Example 3: Cross-provider setup with cost consideration
-provider: anthropic
-model: claude-sonnet-4
-
-subagent:
-  provider: openai
-  model: gpt-4o  # Less expensive than o3 but still capable
-  max_tokens: 16000
 ```
 
 ## Consequences
