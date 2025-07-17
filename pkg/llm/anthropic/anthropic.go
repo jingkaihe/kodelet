@@ -24,6 +24,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
+	"github.com/jingkaihe/kodelet/pkg/usage"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"go.opentelemetry.io/otel/attribute"
@@ -435,6 +436,9 @@ func (t *AnthropicThread) processMessageExchange(
 		attribute.Int("max_tokens", maxTokens),
 	)
 
+	// Record start time for usage logging
+	apiStartTime := time.Now()
+
 	response, err := t.NewMessage(ctx, messageParams)
 	if err != nil {
 		if t.isPersisted && t.store != nil && !opt.NoSaveConversation {
@@ -501,6 +505,11 @@ func (t *AnthropicThread) processMessageExchange(
 				anthropic.NewToolResultBlock(block.ID, output.AssistantFacing(), false),
 			))
 		}
+	}
+
+	// Log structured LLM usage after all content processing is complete (main agent only)
+	if !t.config.IsSubAgent && !opt.DisableUsageLog {
+		usage.LogLLMUsage(ctx, t.GetUsage(), string(model), apiStartTime, int(response.Usage.OutputTokens))
 	}
 
 	if t.isPersisted && t.store != nil && !opt.NoSaveConversation {
@@ -792,6 +801,7 @@ func (t *AnthropicThread) ShortSummary(ctx context.Context) string {
 		PromptCache:        false, // maybe we should make it configurable, but there is likely no cache for weak model
 		NoToolUse:          true,
 		DisableAutoCompact: true, // Prevent auto-compact during summarization
+		DisableUsageLog:    true, // Don't log usage for internal summary operations
 		// Note: Not using NoSaveConversation so we can access the assistant response
 	})
 	if err != nil {
@@ -837,6 +847,7 @@ func (t *AnthropicThread) CompactContext(ctx context.Context) error {
 		PromptCache:        false, // Don't cache the compacting prompt
 		NoToolUse:          true,
 		DisableAutoCompact: true, // Prevent recursion
+		DisableUsageLog:    true, // Don't log usage for internal compact operations
 		// Note: Not using NoSaveConversation so we can access the assistant response
 	})
 	if err != nil {

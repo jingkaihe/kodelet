@@ -31,6 +31,8 @@ type MessageOpt struct {
 	CompactRatio float64
 	// DisableAutoCompact disables auto-compact functionality
 	DisableAutoCompact bool
+	// DisableUsageLog disables LLM usage logging for this message
+	DisableUsageLog bool
 }
 
 // SubAgentConfig is the key for the thread in the context

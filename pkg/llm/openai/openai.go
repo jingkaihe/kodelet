@@ -23,6 +23,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
+	"github.com/jingkaihe/kodelet/pkg/usage"
 	"github.com/pkg/errors"
 	"github.com/sashabaranov/go-openai"
 	"go.opentelemetry.io/otel/attribute"
@@ -504,6 +505,9 @@ func (t *OpenAIThread) processMessageExchange(
 		attribute.Int("max_tokens", maxTokens),
 	)
 
+	// Record start time for usage logging
+	apiStartTime := time.Now()
+
 	// Make the API request
 	response, err := t.client.CreateChatCompletion(ctx, requestParams)
 	if err != nil {
@@ -543,6 +547,10 @@ func (t *OpenAIThread) processMessageExchange(
 	// Check for tool calls
 	toolCalls := assistantMessage.ToolCalls
 	if len(toolCalls) == 0 {
+		// Log structured LLM usage when no tool calls are made (main agent only)
+		if !t.config.IsSubAgent && !opt.DisableUsageLog {
+			usage.LogLLMUsage(ctx, t.GetUsage(), model, apiStartTime, response.Usage.CompletionTokens)
+		}
 		return finalOutput, false, nil
 	}
 
@@ -585,6 +593,11 @@ func (t *OpenAIThread) processMessageExchange(
 			Content:    output.AssistantFacing(),
 			ToolCallID: toolCall.ID,
 		})
+	}
+
+	// Log structured LLM usage after all content processing is complete (main agent only)
+	if !t.config.IsSubAgent && !opt.DisableUsageLog {
+		usage.LogLLMUsage(ctx, t.GetUsage(), model, apiStartTime, response.Usage.CompletionTokens)
 	}
 
 	if t.isPersisted && t.store != nil && !opt.NoSaveConversation {
@@ -699,6 +712,7 @@ func (t *OpenAIThread) ShortSummary(ctx context.Context) string {
 		UseWeakModel:       true,
 		NoToolUse:          true,
 		DisableAutoCompact: true, // Prevent auto-compact during summarization
+		DisableUsageLog:    true, // Don't log usage for internal summary operations
 		// Note: Not using NoSaveConversation so we can access the assistant response
 	})
 	if err != nil {
@@ -743,6 +757,7 @@ func (t *OpenAIThread) CompactContext(ctx context.Context) error {
 		UseWeakModel:       false, // Use strong model for comprehensive compacting
 		NoToolUse:          true,
 		DisableAutoCompact: true, // Prevent recursion
+		DisableUsageLog:    true, // Don't log usage for internal compact operations
 		// Note: Not using NoSaveConversation so we can access the assistant response
 	})
 	if err != nil {

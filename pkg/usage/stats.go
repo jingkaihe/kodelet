@@ -1,11 +1,13 @@
 package usage
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/logger"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
 
@@ -369,4 +371,38 @@ func CalculateDailyProviderBreakdownStats(summaries []ConversationSummary, start
 		Total:              totalUsage,
 		TotalConversations: totalConversations,
 	}
+}
+
+// LogLLMUsage logs structured LLM usage information after request completion
+func LogLLMUsage(ctx context.Context, usage llmtypes.Usage, model string, startTime time.Time, requestOutputTokens int) {
+	fields := map[string]interface{}{
+		"model":                       model,
+		"input_tokens":                usage.InputTokens,
+		"output_tokens":               usage.OutputTokens,
+		"cache_creation_input_tokens": usage.CacheCreationInputTokens,
+		"cache_read_input_tokens":     usage.CacheReadInputTokens,
+		"input_cost":                  usage.InputCost,
+		"output_cost":                 usage.OutputCost,
+		"cache_creation_cost":         usage.CacheCreationCost,
+		"cache_read_cost":             usage.CacheReadCost,
+		"total_cost":                  usage.TotalCost(),
+		"total_tokens":                usage.TotalTokens(),
+		"current_context_window":      usage.CurrentContextWindow,
+		"max_context_window":          usage.MaxContextWindow,
+	}
+
+	// Add context window usage ratio if max context window is not zero
+	if usage.MaxContextWindow != 0 {
+		ratio := float64(usage.CurrentContextWindow) / float64(usage.MaxContextWindow)
+		fields["context_window_usage_ratio"] = ratio
+	}
+
+	// Calculate output tokens per second using per-request tokens
+	duration := time.Since(startTime)
+	if duration > 0 && requestOutputTokens > 0 {
+		tokensPerSecond := float64(requestOutputTokens) / duration.Seconds()
+		fields["output_tokens/s"] = tokensPerSecond
+	}
+
+	logger.G(ctx).WithFields(fields).Info("LLM usage completed")
 }

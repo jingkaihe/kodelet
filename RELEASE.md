@@ -1,5 +1,14 @@
 # Kodelet
 
+## 0.0.69.alpha (2025-07-17)
+
+### LLM Usage Logging Enhancements
+
+- **Enhanced Usage Tracking**: Improved LLM usage logging with request-specific output token tracking for more granular cost analysis
+- **Structured Logging**: Added comprehensive structured logging for LLM usage metrics with detailed diagnostics
+- **Usage Logging Control**: Added option to disable usage logging for internal operations to reduce noise in weak model workflows
+- **Testing Coverage**: Added comprehensive test suite for LLM usage logging functionality to ensure reliability
+
 ## 0.0.68.alpha (2025-07-16)
 
 ### Feedback System
