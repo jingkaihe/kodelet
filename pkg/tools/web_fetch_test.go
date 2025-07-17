@@ -568,6 +568,14 @@ func (m *MockThread) GetMessages() ([]llm.Message, error) {
 	return []llm.Message{}, nil
 }
 
+func (m *MockThread) GetConfig() llm.Config {
+	return llm.Config{}
+}
+
+func (m *MockThread) NewSubAgent(ctx context.Context, config llm.Config) llm.Thread {
+	return m
+}
+
 func (m *MockThread) Reset() {
 	m.called = false
 	m.lastPrompt = ""

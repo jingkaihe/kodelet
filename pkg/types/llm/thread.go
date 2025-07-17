@@ -43,6 +43,9 @@ type SubAgentConfig struct {
 	DisableAutoCompact bool           // DisableAutoCompact from parent agent
 }
 
+// WithSubAgentFunc is a function type for creating subagent contexts
+type WithSubAgentFunc func(ctx context.Context, parentThread Thread, handler MessageHandler, compactRatio float64, disableAutoCompact bool) context.Context
+
 // Thread represents a conversation thread with an LLM
 type Thread interface {
 	// SetState sets the state for the thread
@@ -69,4 +72,8 @@ type Thread interface {
 	Provider() string
 	// GetMessages returns the messages from the thread
 	GetMessages() ([]Message, error)
+	// GetConfig returns the configuration of the thread
+	GetConfig() Config
+	// NewSubAgent creates a new subagent thread with the given configuration
+	NewSubAgent(ctx context.Context, config Config) Thread
 }

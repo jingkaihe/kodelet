@@ -30,7 +30,8 @@ type Config struct {
 	Aliases              map[string]string  // Aliases maps short model names to full model names
 
 	// Provider-specific configurations
-	OpenAI *OpenAIConfig `mapstructure:"openai"` // OpenAI-specific configuration including compatible providers
+	OpenAI   *OpenAIConfig            `mapstructure:"openai"`   // OpenAI-specific configuration including compatible providers
+	SubAgent *SubAgentConfigSettings `mapstructure:"subagent"` // SubAgent configuration for different models/providers
 }
 
 // OpenAIConfig holds OpenAI-specific configuration including support for compatible APIs
@@ -58,3 +59,13 @@ type ModelPricing struct {
 
 // CustomPricing maps model names to their pricing information
 type CustomPricing map[string]ModelPricing
+
+// SubAgentConfigSettings holds the configuration for subagent behavior
+type SubAgentConfigSettings struct {
+	Provider         string       `mapstructure:"provider"`          // Provider for subagent (anthropic, openai)
+	Model            string       `mapstructure:"model"`             // Model for subagent
+	MaxTokens        int          `mapstructure:"max_tokens"`        // Maximum tokens for subagent
+	ReasoningEffort  string       `mapstructure:"reasoning_effort"`  // OpenAI specific reasoning effort
+	ThinkingBudget   int          `mapstructure:"thinking_budget"`   // Anthropic specific thinking budget
+	OpenAI           *OpenAIConfig `mapstructure:"openai"`           // OpenAI-compatible provider configuration
+}

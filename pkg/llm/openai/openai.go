@@ -111,22 +111,23 @@ type ConversationStore = conversations.ConversationStore
 
 // OpenAIThread implements the Thread interface using OpenAI's API
 type OpenAIThread struct {
-	client          *openai.Client
-	config          llmtypes.Config
-	reasoningEffort string // low, medium, high to determine token allocation
-	state           tooltypes.State
-	messages        []openai.ChatCompletionMessage
-	usage           *llmtypes.Usage
-	conversationID  string
-	summary         string
-	isPersisted     bool
-	store           ConversationStore
-	mu              sync.Mutex
-	conversationMu  sync.Mutex
-	toolResults     map[string]tooltypes.StructuredToolResult // Maps tool_call_id to structured result
-	customModels    *llmtypes.CustomModels                    // Custom model configuration
-	customPricing   llmtypes.CustomPricing                    // Custom pricing configuration
-	useCopilot      bool                                      // Whether this thread uses GitHub Copilot
+	client           *openai.Client
+	config           llmtypes.Config
+	reasoningEffort  string // low, medium, high to determine token allocation
+	state            tooltypes.State
+	messages         []openai.ChatCompletionMessage
+	usage            *llmtypes.Usage
+	conversationID   string
+	summary          string
+	isPersisted      bool
+	store            ConversationStore
+	mu               sync.Mutex
+	conversationMu   sync.Mutex
+	toolResults      map[string]tooltypes.StructuredToolResult // Maps tool_call_id to structured result
+	customModels     *llmtypes.CustomModels                    // Custom model configuration
+	customPricing    llmtypes.CustomPricing                    // Custom pricing configuration
+	useCopilot       bool                                      // Whether this thread uses GitHub Copilot
+	withSubAgentFunc llmtypes.WithSubAgentFunc                 // Injected function for cross-provider subagent creation
 }
 
 func (t *OpenAIThread) Provider() string {
@@ -236,6 +237,11 @@ func NewOpenAIThread(config llmtypes.Config) *OpenAIThread {
 		customPricing:   customPricing,
 		useCopilot:      useCopilot,
 	}
+}
+
+// InjectWithSubAgentFunc injects the centralized WithSubAgent function to enable cross-provider support
+func InjectWithSubAgentFunc(thread *OpenAIThread, fn llmtypes.WithSubAgentFunc) {
+	thread.withSubAgentFunc = fn
 }
 
 // SetState sets the state for the thread
@@ -567,7 +573,13 @@ func (t *OpenAIThread) processMessageExchange(
 		)
 
 		// Execute the tool
-		runToolCtx := t.WithSubAgent(ctx, handler, opt.CompactRatio, opt.DisableAutoCompact)
+		// Use injected WithSubAgent function for cross-provider support, fallback to local method
+		var runToolCtx context.Context
+		if t.withSubAgentFunc != nil {
+			runToolCtx = t.withSubAgentFunc(ctx, t, handler, opt.CompactRatio, opt.DisableAutoCompact)
+		} else {
+			runToolCtx = t.WithSubAgent(ctx, handler, opt.CompactRatio, opt.DisableAutoCompact)
+		}
 		output := tools.RunTool(runToolCtx, t.state, toolCall.Function.Name, toolCall.Function.Arguments)
 
 		// Use CLI rendering for consistent output formatting
@@ -644,30 +656,49 @@ func (t *OpenAIThread) updateUsage(usage openai.Usage, model string) {
 	t.usage.MaxContextWindow = pricing.ContextWindow
 }
 
-func (t *OpenAIThread) NewSubAgent(ctx context.Context) llmtypes.Thread {
-	config := t.config
-	config.IsSubAgent = true
-
+func (t *OpenAIThread) NewSubAgent(ctx context.Context, config llmtypes.Config) llmtypes.Thread {
 	// Create subagent thread reusing the parent's client instead of creating a new one
 	thread := &OpenAIThread{
-		client:          t.client, // Reuse parent's client
-		config:          config,
-		reasoningEffort: t.reasoningEffort, // Reuse parent's reasoning effort
-		conversationID:  convtypes.GenerateID(),
-		isPersisted:     false,           // subagent is not persisted
-		usage:           t.usage,         // Share usage tracking with parent
-		customModels:    t.customModels,  // Share custom models configuration
-		customPricing:   t.customPricing, // Share custom pricing configuration
-		useCopilot:      t.useCopilot,    // Share Copilot usage with parent
+		client:           t.client, // Reuse parent's client
+		config:           config,
+		reasoningEffort:  config.ReasoningEffort, // Use config's reasoning effort
+		conversationID:   convtypes.GenerateID(),
+		isPersisted:      false,           // subagent is not persisted
+		usage:            t.usage,         // Share usage tracking with parent
+		customModels:     t.customModels,  // Share custom models configuration
+		customPricing:    t.customPricing, // Share custom pricing configuration
+		useCopilot:       t.useCopilot,    // Share Copilot usage with parent
+		withSubAgentFunc: t.withSubAgentFunc, // Propagate the injected function
 	}
-
-	thread.SetState(tools.NewBasicState(ctx, tools.WithSubAgentTools(), tools.WithExtraMCPTools(t.state.MCPTools())))
 
 	return thread
 }
 
 func (t *OpenAIThread) WithSubAgent(ctx context.Context, handler llmtypes.MessageHandler, compactRatio float64, disableAutoCompact bool) context.Context {
-	subAgent := t.NewSubAgent(ctx)
+	// Create subagent using simplified approach - will use centralized logic in the future
+	subAgentConfig := t.config
+	subAgentConfig.IsSubAgent = true
+	
+	// Apply basic subagent configuration if specified
+	if t.config.SubAgent != nil {
+		subConfig := t.config.SubAgent
+		// For now, only handle same-provider configurations
+		if subConfig.Provider == "" || subConfig.Provider == "openai" {
+			if subConfig.Model != "" {
+				subAgentConfig.Model = subConfig.Model
+			}
+			if subConfig.MaxTokens > 0 {
+				subAgentConfig.MaxTokens = subConfig.MaxTokens
+			}
+			if subConfig.ReasoningEffort != "" {
+				subAgentConfig.ReasoningEffort = subConfig.ReasoningEffort
+			}
+		}
+	}
+	
+	subAgent := t.NewSubAgent(ctx, subAgentConfig)
+	subAgent.SetState(tools.NewBasicState(ctx, tools.WithSubAgentTools(), tools.WithExtraMCPTools(t.state.MCPTools())))
+	
 	ctx = context.WithValue(ctx, llmtypes.SubAgentConfig{}, llmtypes.SubAgentConfig{
 		Thread:             subAgent,
 		MessageHandler:     handler,
@@ -803,6 +834,11 @@ func (t *OpenAIThread) GetUsage() llmtypes.Usage {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return *t.usage
+}
+
+// GetConfig returns the configuration of the thread
+func (t *OpenAIThread) GetConfig() llmtypes.Config {
+	return t.config
 }
 
 // GetConversationID returns the current conversation ID

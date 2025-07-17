@@ -36,6 +36,10 @@ func (m *subagentMockThread) IsPersisted() bool                                 
 func (m *subagentMockThread) EnablePersistence(ctx context.Context, enabled bool)        {}
 func (m *subagentMockThread) Provider() string                                           { return "" }
 func (m *subagentMockThread) GetMessages() ([]llmtypes.Message, error)                   { return nil, nil }
+func (m *subagentMockThread) GetConfig() llmtypes.Config                                 { return llmtypes.Config{} }
+func (m *subagentMockThread) NewSubAgent(ctx context.Context, config llmtypes.Config) llmtypes.Thread {
+	return m
+}
 
 func TestSubAgentTool_BasicMethods(t *testing.T) {
 	tool := &SubAgentTool{}

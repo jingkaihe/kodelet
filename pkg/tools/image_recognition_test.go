@@ -228,6 +228,8 @@ func (m *mockThread) IsPersisted() bool                                         
 func (m *mockThread) EnablePersistence(ctx context.Context, enabled bool)                      {}
 func (m *mockThread) Provider() string                                                         { return "mock" }
 func (m *mockThread) GetMessages() ([]llm.Message, error)                                      { return nil, nil }
+func (m *mockThread) GetConfig() llm.Config                                                    { return llm.Config{} }
+func (m *mockThread) NewSubAgent(ctx context.Context, config llm.Config) llm.Thread            { return m }
 
 func TestImageRecognitionTool_Execute(t *testing.T) {
 	tool := &ImageRecognitionTool{}
