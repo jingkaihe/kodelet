@@ -508,7 +508,7 @@ func (t *AnthropicThread) processMessageExchange(
 	}
 
 	// Log structured LLM usage after all content processing is complete (main agent only)
-	if !t.config.IsSubAgent {
+	if !t.config.IsSubAgent && !opt.DisableUsageLog {
 		usage.LogLLMUsage(ctx, t.GetUsage(), string(model), apiStartTime)
 	}
 
@@ -801,6 +801,7 @@ func (t *AnthropicThread) ShortSummary(ctx context.Context) string {
 		PromptCache:        false, // maybe we should make it configurable, but there is likely no cache for weak model
 		NoToolUse:          true,
 		DisableAutoCompact: true, // Prevent auto-compact during summarization
+		DisableUsageLog:    true, // Don't log usage for internal summary operations
 		// Note: Not using NoSaveConversation so we can access the assistant response
 	})
 	if err != nil {
@@ -846,6 +847,7 @@ func (t *AnthropicThread) CompactContext(ctx context.Context) error {
 		PromptCache:        false, // Don't cache the compacting prompt
 		NoToolUse:          true,
 		DisableAutoCompact: true, // Prevent recursion
+		DisableUsageLog:    true, // Don't log usage for internal compact operations
 		// Note: Not using NoSaveConversation so we can access the assistant response
 	})
 	if err != nil {

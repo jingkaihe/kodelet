@@ -548,7 +548,7 @@ func (t *OpenAIThread) processMessageExchange(
 	toolCalls := assistantMessage.ToolCalls
 	if len(toolCalls) == 0 {
 		// Log structured LLM usage when no tool calls are made (main agent only)
-		if !t.config.IsSubAgent {
+		if !t.config.IsSubAgent && !opt.DisableUsageLog {
 			usage.LogLLMUsage(ctx, t.GetUsage(), model, apiStartTime)
 		}
 		return finalOutput, false, nil
@@ -596,7 +596,7 @@ func (t *OpenAIThread) processMessageExchange(
 	}
 
 	// Log structured LLM usage after all content processing is complete (main agent only)
-	if !t.config.IsSubAgent {
+	if !t.config.IsSubAgent && !opt.DisableUsageLog {
 		usage.LogLLMUsage(ctx, t.GetUsage(), model, apiStartTime)
 	}
 
@@ -712,6 +712,7 @@ func (t *OpenAIThread) ShortSummary(ctx context.Context) string {
 		UseWeakModel:       true,
 		NoToolUse:          true,
 		DisableAutoCompact: true, // Prevent auto-compact during summarization
+		DisableUsageLog:    true, // Don't log usage for internal summary operations
 		// Note: Not using NoSaveConversation so we can access the assistant response
 	})
 	if err != nil {
@@ -756,6 +757,7 @@ func (t *OpenAIThread) CompactContext(ctx context.Context) error {
 		UseWeakModel:       false, // Use strong model for comprehensive compacting
 		NoToolUse:          true,
 		DisableAutoCompact: true, // Prevent recursion
+		DisableUsageLog:    true, // Don't log usage for internal compact operations
 		// Note: Not using NoSaveConversation so we can access the assistant response
 	})
 	if err != nil {
