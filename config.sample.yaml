@@ -77,6 +77,7 @@ openai:
 
   # Option 2: Custom configuration (overrides preset if both are specified)
   # base_url: "https://api.x.ai/v1"  # Custom API endpoint
+  # api_key_env_var: "XAI_API_KEY"   # Environment variable name for API key (defaults to OPENAI_API_KEY)
   # models:
   #   # Models that support reasoning capabilities (o1, o3, grok reasoning models, etc.)
   #   reasoning:
@@ -129,8 +130,10 @@ tracing:
 #
 # API Keys:
 # - ANTHROPIC_API_KEY: Required when using the Anthropic provider
-# - OPENAI_API_KEY: Required when using the OpenAI provider
+# - OPENAI_API_KEY: Required when using the OpenAI provider (default)
+# - XAI_API_KEY: Required when using the xAI preset
 # - OPENAI_API_BASE: Custom OpenAI API endpoint (overrides config base_url)
+# Note: The API key environment variable can be customized using the api_key_env_var setting
 #
 # Standard OpenTelemetry environment variables are also supported:
 # - OTEL_EXPORTER_OTLP_ENDPOINT: The endpoint to send telemetry data to

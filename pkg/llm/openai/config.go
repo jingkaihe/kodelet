@@ -145,6 +145,35 @@ func getPresetBaseURL(presetName string) string {
 	}
 }
 
+// getPresetAPIKeyEnvVar returns the environment variable name for the API key for a given preset
+func getPresetAPIKeyEnvVar(presetName string) string {
+	switch presetName {
+	case "openai":
+		return openaipreset.APIKeyEnvVar
+	case "xai":
+		return grok.APIKeyEnvVar
+	default:
+		return "OPENAI_API_KEY" // default fallback
+	}
+}
+
+// GetAPIKeyEnvVar returns the API key environment variable name from configuration
+// Priority: custom api_key_env_var > preset default > fallback to OPENAI_API_KEY
+func GetAPIKeyEnvVar(config llmtypes.Config) string {
+	// Check for custom api_key_env_var first
+	if config.OpenAI != nil && config.OpenAI.APIKeyEnvVar != "" {
+		return config.OpenAI.APIKeyEnvVar
+	}
+	
+	// Check preset default
+	if config.OpenAI != nil && config.OpenAI.Preset != "" {
+		return getPresetAPIKeyEnvVar(config.OpenAI.Preset)
+	}
+	
+	// Fallback to default
+	return "OPENAI_API_KEY"
+}
+
 // validateCustomConfiguration validates the custom OpenAI configuration
 func validateCustomConfiguration(config llmtypes.Config) error {
 	if config.OpenAI == nil {
@@ -170,6 +199,17 @@ func validateCustomConfiguration(config llmtypes.Config) error {
 	if config.OpenAI.BaseURL != "" {
 		if !strings.HasPrefix(config.OpenAI.BaseURL, "http://") && !strings.HasPrefix(config.OpenAI.BaseURL, "https://") {
 			return fmt.Errorf("base_url must start with http:// or https://")
+		}
+	}
+
+	// Validate API key environment variable format if specified
+	if config.OpenAI.APIKeyEnvVar != "" {
+		if strings.TrimSpace(config.OpenAI.APIKeyEnvVar) == "" {
+			return fmt.Errorf("api_key_env_var cannot be empty or whitespace")
+		}
+		// Check for common problematic characters that might cause issues
+		if strings.ContainsAny(config.OpenAI.APIKeyEnvVar, " \t\n\r") {
+			return fmt.Errorf("api_key_env_var cannot contain whitespace characters")
 		}
 	}
 

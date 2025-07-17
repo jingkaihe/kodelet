@@ -168,7 +168,8 @@ func NewOpenAIThread(config llmtypes.Config) *OpenAIThread {
 		if !copilotCredsExists {
 			logger.Error("use-copilot flag set but no GitHub Copilot credentials found, run 'kodelet copilot-login'")
 			// Fall back to OpenAI API key
-			apiKey := os.Getenv("OPENAI_API_KEY")
+			apiKeyEnvVar := GetAPIKeyEnvVar(config)
+			apiKey := os.Getenv(apiKeyEnvVar)
 			clientConfig = openai.DefaultConfig(apiKey)
 			useCopilot = false
 		} else {
@@ -176,7 +177,8 @@ func NewOpenAIThread(config llmtypes.Config) *OpenAIThread {
 			if err != nil {
 				logger.WithError(err).Error("failed to get copilot access token despite credentials existing")
 				// Fall back to OpenAI API key
-				apiKey := os.Getenv("OPENAI_API_KEY")
+				apiKeyEnvVar := GetAPIKeyEnvVar(config)
+				apiKey := os.Getenv(apiKeyEnvVar)
 				clientConfig = openai.DefaultConfig(apiKey)
 				useCopilot = false
 			} else {
@@ -191,9 +193,10 @@ func NewOpenAIThread(config llmtypes.Config) *OpenAIThread {
 			}
 		}
 	} else {
-		logger.Debug("using OpenAI API key (use-copilot flag not set)")
 		// Use OpenAI API key
-		apiKey := os.Getenv("OPENAI_API_KEY")
+		apiKeyEnvVar := GetAPIKeyEnvVar(config)
+		logger.WithField("api_key_env_var", apiKeyEnvVar).Debug("using OpenAI API key")
+		apiKey := os.Getenv(apiKeyEnvVar)
 		clientConfig = openai.DefaultConfig(apiKey)
 		useCopilot = false
 	}
