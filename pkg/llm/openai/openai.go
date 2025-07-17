@@ -549,7 +549,7 @@ func (t *OpenAIThread) processMessageExchange(
 	if len(toolCalls) == 0 {
 		// Log structured LLM usage when no tool calls are made (main agent only)
 		if !t.config.IsSubAgent && !opt.DisableUsageLog {
-			usage.LogLLMUsage(ctx, t.GetUsage(), model, apiStartTime)
+			usage.LogLLMUsage(ctx, t.GetUsage(), model, apiStartTime, response.Usage.CompletionTokens)
 		}
 		return finalOutput, false, nil
 	}
@@ -597,7 +597,7 @@ func (t *OpenAIThread) processMessageExchange(
 
 	// Log structured LLM usage after all content processing is complete (main agent only)
 	if !t.config.IsSubAgent && !opt.DisableUsageLog {
-		usage.LogLLMUsage(ctx, t.GetUsage(), model, apiStartTime)
+		usage.LogLLMUsage(ctx, t.GetUsage(), model, apiStartTime, response.Usage.CompletionTokens)
 	}
 
 	if t.isPersisted && t.store != nil && !opt.NoSaveConversation {

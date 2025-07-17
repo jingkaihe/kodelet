@@ -374,7 +374,7 @@ func CalculateDailyProviderBreakdownStats(summaries []ConversationSummary, start
 }
 
 // LogLLMUsage logs structured LLM usage information after request completion
-func LogLLMUsage(ctx context.Context, usage llmtypes.Usage, model string, startTime time.Time) {
+func LogLLMUsage(ctx context.Context, usage llmtypes.Usage, model string, startTime time.Time, requestOutputTokens int) {
 	fields := map[string]interface{}{
 		"model":                      model,
 		"input_tokens":               usage.InputTokens,
@@ -397,10 +397,10 @@ func LogLLMUsage(ctx context.Context, usage llmtypes.Usage, model string, startT
 		fields["context_window_usage_ratio"] = ratio
 	}
 
-	// Calculate output tokens per second
+	// Calculate output tokens per second using per-request tokens
 	duration := time.Since(startTime)
-	if duration > 0 && usage.OutputTokens > 0 {
-		tokensPerSecond := float64(usage.OutputTokens) / duration.Seconds()
+	if duration > 0 && requestOutputTokens > 0 {
+		tokensPerSecond := float64(requestOutputTokens) / duration.Seconds()
 		fields["output_tokens/s"] = tokensPerSecond
 	}
 

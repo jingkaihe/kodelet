@@ -509,7 +509,7 @@ func (t *AnthropicThread) processMessageExchange(
 
 	// Log structured LLM usage after all content processing is complete (main agent only)
 	if !t.config.IsSubAgent && !opt.DisableUsageLog {
-		usage.LogLLMUsage(ctx, t.GetUsage(), string(model), apiStartTime)
+		usage.LogLLMUsage(ctx, t.GetUsage(), string(model), apiStartTime, int(response.Usage.OutputTokens))
 	}
 
 	if t.isPersisted && t.store != nil && !opt.NoSaveConversation {
