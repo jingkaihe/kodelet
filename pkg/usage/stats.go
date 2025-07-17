@@ -376,19 +376,19 @@ func CalculateDailyProviderBreakdownStats(summaries []ConversationSummary, start
 // LogLLMUsage logs structured LLM usage information after request completion
 func LogLLMUsage(ctx context.Context, usage llmtypes.Usage, model string, startTime time.Time, requestOutputTokens int) {
 	fields := map[string]interface{}{
-		"model":                      model,
-		"input_tokens":               usage.InputTokens,
-		"output_tokens":              usage.OutputTokens,
+		"model":                       model,
+		"input_tokens":                usage.InputTokens,
+		"output_tokens":               usage.OutputTokens,
 		"cache_creation_input_tokens": usage.CacheCreationInputTokens,
-		"cache_read_input_tokens":    usage.CacheReadInputTokens,
-		"input_cost":                 usage.InputCost,
-		"output_cost":                usage.OutputCost,
-		"cache_creation_cost":        usage.CacheCreationCost,
-		"cache_read_cost":            usage.CacheReadCost,
-		"total_cost":                 usage.TotalCost(),
-		"total_tokens":               usage.TotalTokens(),
-		"current_context_window":     usage.CurrentContextWindow,
-		"max_context_window":         usage.MaxContextWindow,
+		"cache_read_input_tokens":     usage.CacheReadInputTokens,
+		"input_cost":                  usage.InputCost,
+		"output_cost":                 usage.OutputCost,
+		"cache_creation_cost":         usage.CacheCreationCost,
+		"cache_read_cost":             usage.CacheReadCost,
+		"total_cost":                  usage.TotalCost(),
+		"total_tokens":                usage.TotalTokens(),
+		"current_context_window":      usage.CurrentContextWindow,
+		"max_context_window":          usage.MaxContextWindow,
 	}
 
 	// Add context window usage ratio if max context window is not zero

@@ -93,7 +93,7 @@ func TestLogLLMUsage_NormalCase(t *testing.T) {
 	assert.Equal(t, 0.002, logEntry["output_cost"])
 	assert.Equal(t, 0.0001, logEntry["cache_creation_cost"])
 	assert.Equal(t, 0.0002, logEntry["cache_read_cost"])
-	assert.Equal(t, 0.0033, logEntry["total_cost"]) // 0.001 + 0.002 + 0.0001 + 0.0002
+	assert.Equal(t, 0.0033, logEntry["total_cost"])          // 0.001 + 0.002 + 0.0001 + 0.0002
 	assert.Equal(t, float64(2000), logEntry["total_tokens"]) // 1000 + 500 + 200 + 300
 	assert.Equal(t, float64(2000), logEntry["current_context_window"])
 	assert.Equal(t, float64(8000), logEntry["max_context_window"])
@@ -225,8 +225,8 @@ func TestLogLLMUsage_AllFieldsPresent(t *testing.T) {
 	}
 
 	// Verify calculated fields
-	assert.Equal(t, 0.0033, logEntry["total_cost"])     // Sum of all costs
-	assert.Equal(t, float64(185), logEntry["total_tokens"]) // Sum of all tokens
+	assert.Equal(t, 0.0033, logEntry["total_cost"])                // Sum of all costs
+	assert.Equal(t, float64(185), logEntry["total_tokens"])        // Sum of all tokens
 	assert.Equal(t, 0.185, logEntry["context_window_usage_ratio"]) // 185/1000
 }
 
@@ -249,7 +249,7 @@ func TestLogLLMUsage_LargeNumbers(t *testing.T) {
 
 	assert.Equal(t, float64(1000000), logEntry["input_tokens"])
 	assert.Equal(t, float64(500000), logEntry["output_tokens"])
-	assert.Equal(t, 4.0, logEntry["total_cost"]) // 1.5 + 2.5
+	assert.Equal(t, 4.0, logEntry["total_cost"])                  // 1.5 + 2.5
 	assert.Equal(t, 0.75, logEntry["context_window_usage_ratio"]) // 1500000/2000000
 
 	// Verify tokens per second is reasonable for large numbers
