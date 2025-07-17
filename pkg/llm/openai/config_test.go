@@ -274,6 +274,128 @@ func TestGetPresetBaseURL(t *testing.T) {
 	}
 }
 
+func TestGetPresetAPIKeyEnvVar(t *testing.T) {
+	tests := []struct {
+		preset   string
+		expected string
+	}{
+		{
+			preset:   "openai",
+			expected: "OPENAI_API_KEY",
+		},
+		{
+			preset:   "xai",
+			expected: "XAI_API_KEY",
+		},
+		{
+			preset:   "unknown-preset",
+			expected: "OPENAI_API_KEY", // fallback
+		},
+		{
+			preset:   "",
+			expected: "OPENAI_API_KEY", // fallback
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.preset, func(t *testing.T) {
+			result := getPresetAPIKeyEnvVar(tt.preset)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestGetAPIKeyEnvVar(t *testing.T) {
+	tests := []struct {
+		name     string
+		config   llmtypes.Config
+		expected string
+	}{
+		{
+			name: "default config uses OPENAI_API_KEY",
+			config: llmtypes.Config{
+				Provider: "openai",
+				Model:    "gpt-4.1",
+			},
+			expected: "OPENAI_API_KEY",
+		},
+		{
+			name: "openai preset uses OPENAI_API_KEY",
+			config: llmtypes.Config{
+				Provider: "openai",
+				Model:    "gpt-4.1",
+				OpenAI: &llmtypes.OpenAIConfig{
+					Preset: "openai",
+				},
+			},
+			expected: "OPENAI_API_KEY",
+		},
+		{
+			name: "xai preset uses XAI_API_KEY",
+			config: llmtypes.Config{
+				Provider: "openai",
+				Model:    "grok-3",
+				OpenAI: &llmtypes.OpenAIConfig{
+					Preset: "xai",
+				},
+			},
+			expected: "XAI_API_KEY",
+		},
+		{
+			name: "custom api_key_env_var overrides default",
+			config: llmtypes.Config{
+				Provider: "openai",
+				Model:    "gpt-4.1",
+				OpenAI: &llmtypes.OpenAIConfig{
+					APIKeyEnvVar: "MY_CUSTOM_API_KEY",
+				},
+			},
+			expected: "MY_CUSTOM_API_KEY",
+		},
+		{
+			name: "custom api_key_env_var overrides preset",
+			config: llmtypes.Config{
+				Provider: "openai",
+				Model:    "grok-3",
+				OpenAI: &llmtypes.OpenAIConfig{
+					Preset:       "xai",
+					APIKeyEnvVar: "MY_CUSTOM_XAI_KEY",
+				},
+			},
+			expected: "MY_CUSTOM_XAI_KEY",
+		},
+		{
+			name: "unknown preset falls back to OPENAI_API_KEY",
+			config: llmtypes.Config{
+				Provider: "openai",
+				Model:    "some-model",
+				OpenAI: &llmtypes.OpenAIConfig{
+					Preset: "unknown-preset",
+				},
+			},
+			expected: "OPENAI_API_KEY",
+		},
+		{
+			name: "empty preset with no custom env var falls back to OPENAI_API_KEY",
+			config: llmtypes.Config{
+				Provider: "openai",
+				Model:    "some-model",
+				OpenAI: &llmtypes.OpenAIConfig{
+					Preset: "",
+				},
+			},
+			expected: "OPENAI_API_KEY",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := GetAPIKeyEnvVar(tt.config)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
 func TestValidateCustomConfiguration(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -389,6 +511,64 @@ func TestValidateCustomConfiguration(t *testing.T) {
 			},
 			expectError:   true,
 			errorContains: "invalid context_window",
+		},
+		{
+			name: "valid api_key_env_var",
+			config: llmtypes.Config{
+				OpenAI: &llmtypes.OpenAIConfig{
+					APIKeyEnvVar: "MY_CUSTOM_API_KEY",
+				},
+			},
+			expectError: false,
+		},
+		{
+			name: "empty api_key_env_var",
+			config: llmtypes.Config{
+				OpenAI: &llmtypes.OpenAIConfig{
+					APIKeyEnvVar: "",
+				},
+			},
+			expectError: false, // Empty string is allowed, will use default
+		},
+		{
+			name: "api_key_env_var with only whitespace",
+			config: llmtypes.Config{
+				OpenAI: &llmtypes.OpenAIConfig{
+					APIKeyEnvVar: "   ",
+				},
+			},
+			expectError:   true,
+			errorContains: "api_key_env_var cannot be empty or whitespace",
+		},
+		{
+			name: "api_key_env_var with space",
+			config: llmtypes.Config{
+				OpenAI: &llmtypes.OpenAIConfig{
+					APIKeyEnvVar: "MY API KEY",
+				},
+			},
+			expectError:   true,
+			errorContains: "api_key_env_var cannot contain whitespace characters",
+		},
+		{
+			name: "api_key_env_var with tab",
+			config: llmtypes.Config{
+				OpenAI: &llmtypes.OpenAIConfig{
+					APIKeyEnvVar: "MY_API\tKEY",
+				},
+			},
+			expectError:   true,
+			errorContains: "api_key_env_var cannot contain whitespace characters",
+		},
+		{
+			name: "api_key_env_var with newline",
+			config: llmtypes.Config{
+				OpenAI: &llmtypes.OpenAIConfig{
+					APIKeyEnvVar: "MY_API_KEY\n",
+				},
+			},
+			expectError:   true,
+			errorContains: "api_key_env_var cannot contain whitespace characters",
 		},
 	}
 

@@ -53,3 +53,6 @@ var Pricing = llm.CustomPricing{
 
 // BaseURL is the API endpoint for xAI Grok models
 const BaseURL = "https://api.x.ai/v1"
+
+// APIKeyEnvVar is the environment variable name for the xAI API key
+const APIKeyEnvVar = "XAI_API_KEY"

@@ -177,3 +177,6 @@ var Pricing = llm.CustomPricing{
 
 // BaseURL is the API endpoint for OpenAI models
 const BaseURL = "https://api.openai.com/v1"
+
+// APIKeyEnvVar is the environment variable name for the OpenAI API key
+const APIKeyEnvVar = "OPENAI_API_KEY"
