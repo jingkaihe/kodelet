@@ -24,6 +24,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
+	"github.com/jingkaihe/kodelet/pkg/usage"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"go.opentelemetry.io/otel/attribute"
@@ -435,6 +436,9 @@ func (t *AnthropicThread) processMessageExchange(
 		attribute.Int("max_tokens", maxTokens),
 	)
 
+	// Record start time for usage logging
+	apiStartTime := time.Now()
+
 	response, err := t.NewMessage(ctx, messageParams)
 	if err != nil {
 		if t.isPersisted && t.store != nil && !opt.NoSaveConversation {
@@ -501,6 +505,11 @@ func (t *AnthropicThread) processMessageExchange(
 				anthropic.NewToolResultBlock(block.ID, output.AssistantFacing(), false),
 			))
 		}
+	}
+
+	// Log structured LLM usage after all content processing is complete (main agent only)
+	if !t.config.IsSubAgent {
+		usage.LogLLMUsage(ctx, t.GetUsage(), string(model), apiStartTime)
 	}
 
 	if t.isPersisted && t.store != nil && !opt.NoSaveConversation {
