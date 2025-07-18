@@ -113,7 +113,9 @@ export interface FileMetadata {
   size?: number;
   lines?: string[];
   offset?: number;
+  lineLimit?: number;
   totalLines?: number;
+  remainingLines?: number;
   truncated?: boolean;
 }
 
