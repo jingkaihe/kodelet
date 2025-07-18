@@ -120,11 +120,13 @@ type ToolMetadata interface {
 // File operation metadata structures
 
 type FileReadMetadata struct {
-	FilePath  string   `json:"filePath"`
-	Offset    int      `json:"offset"`
-	Lines     []string `json:"lines"`
-	Language  string   `json:"language,omitempty"`
-	Truncated bool     `json:"truncated"`
+	FilePath       string   `json:"filePath"`
+	Offset         int      `json:"offset"`
+	LineLimit      int      `json:"lineLimit"`
+	Lines          []string `json:"lines"`
+	Language       string   `json:"language,omitempty"`
+	Truncated      bool     `json:"truncated"`
+	RemainingLines int      `json:"remainingLines,omitempty"`
 }
 
 func (m FileReadMetadata) ToolType() string { return "file_read" }

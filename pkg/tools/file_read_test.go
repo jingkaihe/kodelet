@@ -11,6 +11,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
 func TestFileReadTool_GenerateSchema(t *testing.T) {
@@ -76,6 +78,35 @@ func TestFileReadTool_ValidateInput(t *testing.T) {
 			},
 			expectError: true,
 			errorMsg:    "offset must be a positive integer",
+		},
+		{
+			name: "valid input with line limit",
+			input: FileReadInput{
+				FilePath:  "/tmp/test.txt",
+				Offset:    1,
+				LineLimit: 100,
+			},
+			expectError: false,
+		},
+		{
+			name: "line limit too low",
+			input: FileReadInput{
+				FilePath:  "/tmp/test.txt",
+				Offset:    1,
+				LineLimit: 0,
+			},
+			expectError: false, // 0 gets converted to default 2000
+		},
+
+		{
+			name: "line limit too high",
+			input: FileReadInput{
+				FilePath:  "/tmp/test.txt",
+				Offset:    1,
+				LineLimit: 2001,
+			},
+			expectError: true,
+			errorMsg:    "line_limit cannot exceed 2000",
 		},
 	}
 
@@ -305,5 +336,182 @@ func TestFileReadTool_MaxOutputBytes(t *testing.T) {
 		assert.False(t, result.IsError())
 		assert.Contains(t, result.GetResult(), fmt.Sprintf("%d: Line %d", validOffset, validOffset))
 		assert.Contains(t, result.GetResult(), "truncated due to max output bytes limit")
+	})
+}
+
+func TestFileReadTool_LineLimit(t *testing.T) {
+	// Create a temporary test file with 50 lines
+	var content strings.Builder
+	for i := 1; i <= 50; i++ {
+		content.WriteString(fmt.Sprintf("Line %d\n", i))
+	}
+
+	tmpfile, err := os.CreateTemp("", "FileReadtest_linelimit")
+	if err != nil {
+		require.NoError(t, err)
+	}
+	defer os.Remove(tmpfile.Name())
+
+	if _, err := tmpfile.WriteString(content.String()); err != nil {
+		require.NoError(t, err)
+	}
+	if err := tmpfile.Close(); err != nil {
+		require.NoError(t, err)
+	}
+
+	tool := &FileReadTool{}
+
+	// Test default line limit (should read all 50 lines since default is 2000)
+	t.Run("default line limit", func(t *testing.T) {
+		input := FileReadInput{
+			FilePath: tmpfile.Name(),
+			Offset:   1,
+		}
+		params, _ := json.Marshal(input)
+		result := tool.Execute(context.Background(), NewBasicState(context.TODO()), string(params))
+
+		assert.False(t, result.IsError())
+		assert.Contains(t, result.GetResult(), "1: Line 1")
+		assert.Contains(t, result.GetResult(), "50: Line 50")
+		assert.NotContains(t, result.GetResult(), "lines remaining")
+	})
+
+	// Test with line limit smaller than file size
+	t.Run("line limit smaller than file", func(t *testing.T) {
+		input := FileReadInput{
+			FilePath:  tmpfile.Name(),
+			Offset:    1,
+			LineLimit: 10,
+		}
+		params, _ := json.Marshal(input)
+		result := tool.Execute(context.Background(), NewBasicState(context.TODO()), string(params))
+
+		assert.False(t, result.IsError())
+		assert.Contains(t, result.GetResult(), "1: Line 1")
+		assert.Contains(t, result.GetResult(), "10: Line 10")
+		assert.NotContains(t, result.GetResult(), "11: Line 11")
+		assert.Contains(t, result.GetResult(), "40 lines remaining")
+		assert.Contains(t, result.GetResult(), "use offset=11 to continue reading")
+	})
+
+	// Test with line limit and offset
+	t.Run("line limit with offset", func(t *testing.T) {
+		input := FileReadInput{
+			FilePath:  tmpfile.Name(),
+			Offset:    20,
+			LineLimit: 5,
+		}
+		params, _ := json.Marshal(input)
+		result := tool.Execute(context.Background(), NewBasicState(context.TODO()), string(params))
+
+		assert.False(t, result.IsError())
+		assert.Contains(t, result.GetResult(), "20: Line 20")
+		assert.Contains(t, result.GetResult(), "24: Line 24")
+		assert.NotContains(t, result.GetResult(), "25: Line 25")
+		assert.Contains(t, result.GetResult(), "26 lines remaining")
+		assert.Contains(t, result.GetResult(), "use offset=25 to continue reading")
+	})
+
+	// Test line limit exactly matching remaining lines
+	t.Run("line limit matches remaining lines", func(t *testing.T) {
+		input := FileReadInput{
+			FilePath:  tmpfile.Name(),
+			Offset:    41,
+			LineLimit: 10,
+		}
+		params, _ := json.Marshal(input)
+		result := tool.Execute(context.Background(), NewBasicState(context.TODO()), string(params))
+
+		assert.False(t, result.IsError())
+		assert.Contains(t, result.GetResult(), "41: Line 41")
+		assert.Contains(t, result.GetResult(), "50: Line 50")
+		assert.NotContains(t, result.GetResult(), "lines remaining")
+	})
+
+	// Test line limit larger than remaining lines
+	t.Run("line limit larger than remaining lines", func(t *testing.T) {
+		input := FileReadInput{
+			FilePath:  tmpfile.Name(),
+			Offset:    45,
+			LineLimit: 20,
+		}
+		params, _ := json.Marshal(input)
+		result := tool.Execute(context.Background(), NewBasicState(context.TODO()), string(params))
+
+		assert.False(t, result.IsError())
+		assert.Contains(t, result.GetResult(), "45: Line 45")
+		assert.Contains(t, result.GetResult(), "50: Line 50")
+		assert.NotContains(t, result.GetResult(), "lines remaining")
+	})
+}
+
+func TestFileReadTool_LineLimitMetadata(t *testing.T) {
+	// Create a temporary test file with 20 lines
+	var content strings.Builder
+	for i := 1; i <= 20; i++ {
+		content.WriteString(fmt.Sprintf("Line %d\n", i))
+	}
+
+	tmpfile, err := os.CreateTemp("", "FileReadtest_metadata")
+	if err != nil {
+		require.NoError(t, err)
+	}
+	defer os.Remove(tmpfile.Name())
+
+	if _, err := tmpfile.WriteString(content.String()); err != nil {
+		require.NoError(t, err)
+	}
+	if err := tmpfile.Close(); err != nil {
+		require.NoError(t, err)
+	}
+
+	tool := &FileReadTool{}
+
+	t.Run("metadata includes line limit and remaining lines", func(t *testing.T) {
+		input := FileReadInput{
+			FilePath:  tmpfile.Name(),
+			Offset:    5,
+			LineLimit: 10,
+		}
+		params, _ := json.Marshal(input)
+		result := tool.Execute(context.Background(), NewBasicState(context.TODO()), string(params))
+
+		assert.False(t, result.IsError())
+		structured := result.StructuredData()
+		
+		assert.Equal(t, "file_read", structured.ToolName)
+		assert.True(t, structured.Success)
+		
+		// Check metadata type and extract it
+		meta, ok := structured.Metadata.(*tooltypes.FileReadMetadata)
+		require.True(t, ok, "Expected FileReadMetadata, got %T", structured.Metadata)
+		
+		assert.Equal(t, tmpfile.Name(), meta.FilePath)
+		assert.Equal(t, 5, meta.Offset)
+		assert.Equal(t, 10, meta.LineLimit)
+		assert.Equal(t, 6, meta.RemainingLines) // 20 total - 5 offset - 10 read + 1 = 6 remaining
+		assert.True(t, meta.Truncated)
+		assert.Len(t, meta.Lines, 11) // 10 content lines + 1 truncation message
+	})
+
+	t.Run("metadata with no remaining lines", func(t *testing.T) {
+		input := FileReadInput{
+			FilePath:  tmpfile.Name(),
+			Offset:    1,
+			LineLimit: 20, // Read all lines
+		}
+		params, _ := json.Marshal(input)
+		result := tool.Execute(context.Background(), NewBasicState(context.TODO()), string(params))
+
+		assert.False(t, result.IsError())
+		structured := result.StructuredData()
+		
+		meta, ok := structured.Metadata.(*tooltypes.FileReadMetadata)
+		require.True(t, ok)
+		
+		assert.Equal(t, 20, meta.LineLimit)
+		assert.Equal(t, 0, meta.RemainingLines)
+		assert.False(t, meta.Truncated)
+		assert.Len(t, meta.Lines, 20) // Exactly 20 lines, no truncation message
 	})
 }
