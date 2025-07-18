@@ -16,11 +16,14 @@ import (
 )
 
 func TestOpenAIThread_StructuredToolResults(t *testing.T) {
+	skipIfNoOpenAIAPIKey(t)
+
 	config := llmtypes.Config{
 		Model:     "gpt-4.1",
 		MaxTokens: 1000,
 	}
-	thread := NewOpenAIThread(config)
+	thread, err := NewOpenAIThread(config, nil)
+	require.NoError(t, err)
 
 	// Test initial state
 	results := thread.GetStructuredToolResults()
@@ -69,11 +72,14 @@ func TestOpenAIThread_StructuredToolResults(t *testing.T) {
 }
 
 func TestOpenAIThread_SetStructuredToolResults(t *testing.T) {
+	skipIfNoOpenAIAPIKey(t)
+
 	config := llmtypes.Config{
 		Model:     "gpt-4.1",
 		MaxTokens: 1000,
 	}
-	thread := NewOpenAIThread(config)
+	thread, err := NewOpenAIThread(config, nil)
+	require.NoError(t, err)
 
 	// Create bulk results
 	bulkResults := map[string]tooltypes.StructuredToolResult{
@@ -121,11 +127,14 @@ func TestOpenAIThread_SetStructuredToolResults(t *testing.T) {
 }
 
 func TestOpenAIThread_StructuredResultsConcurrency(t *testing.T) {
+	skipIfNoOpenAIAPIKey(t)
+
 	config := llmtypes.Config{
 		Model:     "gpt-4.1",
 		MaxTokens: 1000,
 	}
-	thread := NewOpenAIThread(config)
+	thread, err := NewOpenAIThread(config, nil)
+	require.NoError(t, err)
 
 	var wg sync.WaitGroup
 	numGoroutines := 10
@@ -235,11 +244,14 @@ func (m *mockState) SetBrowserManager(manager tooltypes.BrowserManager)         
 func (m *mockState) GetLLMConfig() interface{}                                      { return nil }
 
 func TestOpenAIThread_PersistenceWithStructuredResults(t *testing.T) {
+	skipIfNoOpenAIAPIKey(t)
+
 	config := llmtypes.Config{
 		Model:     "gpt-4.1",
 		MaxTokens: 1000,
 	}
-	thread := NewOpenAIThread(config)
+	thread, err := NewOpenAIThread(config, nil)
+	require.NoError(t, err)
 
 	// Set up mock store
 	mockStore := &mockConversationStore{}
@@ -283,7 +295,7 @@ func TestOpenAIThread_PersistenceWithStructuredResults(t *testing.T) {
 
 	// Test saving
 	ctx := context.Background()
-	err := thread.SaveConversation(ctx, false)
+	err = thread.SaveConversation(ctx, false)
 	require.NoError(t, err)
 
 	// Verify the saved record contains structured results
@@ -294,7 +306,8 @@ func TestOpenAIThread_PersistenceWithStructuredResults(t *testing.T) {
 	assert.Equal(t, "file_read", savedResult1.ToolName)
 
 	// Test loading
-	thread2 := NewOpenAIThread(config)
+	thread2, err := NewOpenAIThread(config, nil)
+	require.NoError(t, err)
 	thread2.store = &mockConversationStore{
 		loaded: &mockStore.saved,
 	}

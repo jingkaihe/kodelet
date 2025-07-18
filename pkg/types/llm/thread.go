@@ -35,13 +35,22 @@ type MessageOpt struct {
 	DisableUsageLog bool
 }
 
-// SubAgentConfig is the key for the thread in the context
+// subAgentConfigKey is a dedicated context key type to avoid collisions
+type subAgentConfigKey struct{}
+
+// SubAgentConfigKey is the context key for SubAgentConfig
+var SubAgentConfigKey = subAgentConfigKey{}
+
+// SubAgentConfig holds the configuration for a subagent in the context
 type SubAgentConfig struct {
 	Thread             Thread         // Thread used by the sub-agent
 	MessageHandler     MessageHandler // Message handler for the sub-agent
 	CompactRatio       float64        // CompactRatio from parent agent
 	DisableAutoCompact bool           // DisableAutoCompact from parent agent
 }
+
+// SubagentContextFactory is a function type for creating subagent contexts
+type SubagentContextFactory func(ctx context.Context, parentThread Thread, handler MessageHandler, compactRatio float64, disableAutoCompact bool) context.Context
 
 // Thread represents a conversation thread with an LLM
 type Thread interface {
@@ -69,4 +78,8 @@ type Thread interface {
 	Provider() string
 	// GetMessages returns the messages from the thread
 	GetMessages() ([]Message, error)
+	// GetConfig returns the configuration of the thread
+	GetConfig() Config
+	// NewSubAgent creates a new subagent thread with the given configuration
+	NewSubAgent(ctx context.Context, config Config) Thread
 }

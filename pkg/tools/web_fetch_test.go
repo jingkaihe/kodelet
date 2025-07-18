@@ -248,7 +248,7 @@ func TestWebFetchToolHTMLContentWithPrompt(t *testing.T) {
 			response: "The main heading is: Welcome to Example.com",
 		}
 
-		ctx := context.WithValue(context.Background(), llm.SubAgentConfig{}, llm.SubAgentConfig{
+		ctx := context.WithValue(context.Background(), llm.SubAgentConfigKey, llm.SubAgentConfig{
 			Thread: mockThread,
 		})
 
@@ -566,6 +566,14 @@ func (m *MockThread) Provider() string {
 
 func (m *MockThread) GetMessages() ([]llm.Message, error) {
 	return []llm.Message{}, nil
+}
+
+func (m *MockThread) GetConfig() llm.Config {
+	return llm.Config{}
+}
+
+func (m *MockThread) NewSubAgent(ctx context.Context, config llm.Config) llm.Thread {
+	return m
 }
 
 func (m *MockThread) Reset() {

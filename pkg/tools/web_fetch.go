@@ -461,7 +461,7 @@ func (t *WebFetchTool) handleHtmlMarkdownWithPrompt(ctx context.Context, input *
 	}
 
 	// Use AI to extract the requested information
-	subAgentConfig, ok := ctx.Value(llm.SubAgentConfig{}).(llm.SubAgentConfig)
+	subAgentConfig, ok := ctx.Value(llm.SubAgentConfigKey).(llm.SubAgentConfig)
 	if !ok {
 		return &WebFetchToolResult{
 			url:    input.URL,

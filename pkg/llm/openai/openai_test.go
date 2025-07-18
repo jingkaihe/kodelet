@@ -15,10 +15,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// skipIfNoOpenAIAPIKey skips the test if OPENAI_API_KEY is not set
+func skipIfNoOpenAIAPIKey(t *testing.T) {
+	if os.Getenv("OPENAI_API_KEY") == "" {
+		t.Skip("OPENAI_API_KEY environment variable not set")
+	}
+}
+
 func TestNewOpenAIThread(t *testing.T) {
+	skipIfNoOpenAIAPIKey(t)
+
 	// Test with default values
 	config := llm.Config{}
-	thread := NewOpenAIThread(config)
+	thread, err := NewOpenAIThread(config, nil)
+	require.NoError(t, err)
 
 	assert.Equal(t, "gpt-4.1", thread.config.Model)
 	assert.Equal(t, 8192, thread.config.MaxTokens)
@@ -30,7 +40,8 @@ func TestNewOpenAIThread(t *testing.T) {
 		MaxTokens:       4096,
 		ReasoningEffort: "high",
 	}
-	thread = NewOpenAIThread(config)
+	thread, err = NewOpenAIThread(config, nil)
+	require.NoError(t, err)
 
 	assert.Equal(t, "gpt-4o", thread.config.Model)
 	assert.Equal(t, 4096, thread.config.MaxTokens)
@@ -171,7 +182,10 @@ func TestGetImageMediaType(t *testing.T) {
 }
 
 func TestProcessImageURL(t *testing.T) {
-	thread := NewOpenAIThread(llm.Config{})
+	skipIfNoOpenAIAPIKey(t)
+
+	thread, err := NewOpenAIThread(llm.Config{}, nil)
+	require.NoError(t, err)
 
 	tests := []struct {
 		name        string
@@ -232,7 +246,10 @@ func TestProcessImageURL(t *testing.T) {
 }
 
 func TestProcessImageFile(t *testing.T) {
-	thread := NewOpenAIThread(llm.Config{})
+	skipIfNoOpenAIAPIKey(t)
+
+	thread, err := NewOpenAIThread(llm.Config{}, nil)
+	require.NoError(t, err)
 
 	// Create temporary test directory
 	tempDir := t.TempDir()
@@ -244,7 +261,7 @@ func TestProcessImageFile(t *testing.T) {
 
 	// Create a small valid JPEG-like file (just some bytes for testing)
 	smallImageData := []byte("fake-jpeg-data-for-testing")
-	err := os.WriteFile(smallImagePath, smallImageData, 0644)
+	err = os.WriteFile(smallImagePath, smallImageData, 0644)
 	require.NoError(t, err)
 
 	// Create a large file (exceeding MaxImageFileSize)
@@ -311,13 +328,16 @@ func TestProcessImageFile(t *testing.T) {
 }
 
 func TestProcessImage(t *testing.T) {
-	thread := NewOpenAIThread(llm.Config{})
+	skipIfNoOpenAIAPIKey(t)
+
+	thread, err := NewOpenAIThread(llm.Config{}, nil)
+	require.NoError(t, err)
 
 	// Create temporary test file
 	tempDir := t.TempDir()
 	testImagePath := filepath.Join(tempDir, "test.png")
 	imageData := []byte("fake-png-data-for-testing")
-	err := os.WriteFile(testImagePath, imageData, 0644)
+	err = os.WriteFile(testImagePath, imageData, 0644)
 	require.NoError(t, err)
 
 	tests := []struct {
@@ -376,7 +396,10 @@ func TestProcessImage(t *testing.T) {
 }
 
 func TestAddUserMessageWithImages(t *testing.T) {
-	thread := NewOpenAIThread(llm.Config{})
+	skipIfNoOpenAIAPIKey(t)
+
+	thread, err := NewOpenAIThread(llm.Config{}, nil)
+	require.NoError(t, err)
 
 	// Create temporary test files
 	tempDir := t.TempDir()
@@ -385,7 +408,7 @@ func TestAddUserMessageWithImages(t *testing.T) {
 
 	// Create a valid image file
 	imageData := []byte("fake-jpeg-data-for-testing")
-	err := os.WriteFile(validImagePath, imageData, 0644)
+	err = os.WriteFile(validImagePath, imageData, 0644)
 	require.NoError(t, err)
 
 	// Create an invalid file
@@ -485,7 +508,10 @@ func TestAddUserMessageWithImages(t *testing.T) {
 }
 
 func TestAddUserMessageWithTooManyImages(t *testing.T) {
-	thread := NewOpenAIThread(llm.Config{})
+	skipIfNoOpenAIAPIKey(t)
+
+	thread, err := NewOpenAIThread(llm.Config{}, nil)
+	require.NoError(t, err)
 
 	// Create more image paths than the maximum allowed
 	imagePaths := make([]string, MaxImageCount+5)
@@ -591,7 +617,10 @@ func TestShouldAutoCompactOpenAI(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			thread := NewOpenAIThread(llm.Config{})
+			skipIfNoOpenAIAPIKey(t)
+
+			thread, err := NewOpenAIThread(llm.Config{}, nil)
+			require.NoError(t, err)
 
 			// Mock the usage stats
 			thread.usage.CurrentContextWindow = test.currentContextWindow
@@ -676,7 +705,10 @@ func TestGetLastAssistantMessageTextOpenAI(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			thread := NewOpenAIThread(llm.Config{})
+			skipIfNoOpenAIAPIKey(t)
+
+			thread, err := NewOpenAIThread(llm.Config{}, nil)
+			require.NoError(t, err)
 
 			thread.messages = test.messages
 
@@ -700,10 +732,11 @@ func TestCompactContextIntegrationOpenAI(t *testing.T) {
 	}
 
 	t.Run("real compact context with API call", func(t *testing.T) {
-		thread := NewOpenAIThread(llm.Config{
+		thread, err := NewOpenAIThread(llm.Config{
 			Model:     "gpt-4o-mini", // Use faster/cheaper model for testing
 			MaxTokens: 1000,          // Limit tokens for test
-		})
+		}, nil)
+		require.NoError(t, err)
 
 		// Set up some realistic conversation history
 		thread.AddUserMessage(context.Background(), "Help me understand JavaScript closures", []string{}...)
@@ -732,7 +765,7 @@ func TestCompactContextIntegrationOpenAI(t *testing.T) {
 		assert.Greater(t, initialToolResultCount, 0, "Should have tool results to verify clearing")
 
 		// Call the real CompactContext method
-		err := thread.CompactContext(context.Background())
+		err = thread.CompactContext(context.Background())
 		require.NoError(t, err, "CompactContext should succeed with real API")
 
 		// Verify the compacting worked
@@ -753,10 +786,11 @@ func TestCompactContextIntegrationOpenAI(t *testing.T) {
 			t.Skip("OPENAI_API_KEY not set, skipping integration test")
 		}
 
-		thread := NewOpenAIThread(llm.Config{
+		thread, err := NewOpenAIThread(llm.Config{
 			Model:     "gpt-4o-mini",
 			MaxTokens: 500,
-		})
+		}, nil)
+		require.NoError(t, err)
 
 		// Add some conversation history
 		thread.AddUserMessage(context.Background(), "What is the capital of France?", []string{}...)
@@ -766,7 +800,7 @@ func TestCompactContextIntegrationOpenAI(t *testing.T) {
 		})
 
 		// Compact the context
-		err := thread.CompactContext(context.Background())
+		err = thread.CompactContext(context.Background())
 		require.NoError(t, err)
 
 		// Verify thread is still functional by sending a new message
@@ -778,9 +812,12 @@ func TestCompactContextIntegrationOpenAI(t *testing.T) {
 	})
 }
 
-func TestWithSubAgentOpenAI(t *testing.T) {
-	t.Run("WithSubAgent correctly passes compact configuration", func(t *testing.T) {
-		parentThread := NewOpenAIThread(llm.Config{})
+func TestNewSubagentContextOpenAI(t *testing.T) {
+	t.Run("NewSubagentContext correctly passes compact configuration", func(t *testing.T) {
+		skipIfNoOpenAIAPIKey(t)
+
+		parentThread, err := NewOpenAIThread(llm.Config{}, nil)
+		require.NoError(t, err)
 
 		// Set up a basic state for the parent thread using NewBasicState
 		parentThread.SetState(tools.NewBasicState(context.Background()))
@@ -816,7 +853,7 @@ func TestWithSubAgentOpenAI(t *testing.T) {
 		for _, tc := range testCases {
 			t.Run(tc.name, func(t *testing.T) {
 				// Create a context with subagent configuration
-				ctx := parentThread.WithSubAgent(
+				ctx := parentThread.NewSubagentContext(
 					context.Background(),
 					&llm.StringCollectorHandler{Silent: true},
 					tc.compactRatio,
@@ -824,7 +861,7 @@ func TestWithSubAgentOpenAI(t *testing.T) {
 				)
 
 				// Retrieve the configuration from the context
-				config, ok := ctx.Value(llm.SubAgentConfig{}).(llm.SubAgentConfig)
+				config, ok := ctx.Value(llm.SubAgentConfigKey).(llm.SubAgentConfig)
 				require.True(t, ok, "SubAgentConfig should be present in context")
 
 				// Verify the compact configuration is correctly passed
@@ -840,14 +877,17 @@ func TestWithSubAgentOpenAI(t *testing.T) {
 		}
 	})
 
-	t.Run("WithSubAgent creates independent subagent", func(t *testing.T) {
-		parentThread := NewOpenAIThread(llm.Config{})
+	t.Run("NewSubagentContext creates independent subagent", func(t *testing.T) {
+		skipIfNoOpenAIAPIKey(t)
+
+		parentThread, err := NewOpenAIThread(llm.Config{}, nil)
+		require.NoError(t, err)
 
 		// Set up a basic state for the parent thread using NewBasicState
 		parentThread.SetState(tools.NewBasicState(context.Background()))
 
 		// Create subagent context
-		ctx := parentThread.WithSubAgent(
+		ctx := parentThread.NewSubagentContext(
 			context.Background(),
 			&llm.StringCollectorHandler{Silent: true},
 			0.8,
@@ -855,7 +895,7 @@ func TestWithSubAgentOpenAI(t *testing.T) {
 		)
 
 		// Retrieve the configuration
-		config, ok := ctx.Value(llm.SubAgentConfig{}).(llm.SubAgentConfig)
+		config, ok := ctx.Value(llm.SubAgentConfigKey).(llm.SubAgentConfig)
 		require.True(t, ok, "SubAgentConfig should be present in context")
 
 		// Verify the subagent thread is independent

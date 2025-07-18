@@ -1,5 +1,20 @@
 # Kodelet
 
+## 0.0.70.alpha (2025-07-18)
+
+### Cross-Provider Subagent Support
+
+- **Provider Mix-and-Match**: Added support for using different LLM providers and models between main agent and subagents
+  - Configure main agent with Claude while using GPT models for subagents for cost optimization
+  - Mix providers based on task requirements (e.g., Claude for complex analysis, GPT for simple tasks)
+  - Independent configuration of provider, model, max tokens, and provider-specific settings
+- **Flexible Configuration**: New `subagent` configuration section in `config.yaml` with comprehensive options
+  - Provider selection independent of main agent
+  - Model-specific configurations for optimal performance
+  - Provider-specific settings (reasoning_effort for OpenAI, thinking_budget for Anthropic)
+  - Complete OpenAI configuration support for subagents when using different providers
+- **Enhanced Testing**: Comprehensive test coverage for cross-provider functionality and improved CI security
+
 ## 0.0.69.alpha (2025-07-17)
 
 ### LLM Usage Logging Enhancements

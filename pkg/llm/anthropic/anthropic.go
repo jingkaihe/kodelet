@@ -47,19 +47,20 @@ const (
 
 // AnthropicThread implements the Thread interface using Anthropic's Claude API
 type AnthropicThread struct {
-	client          anthropic.Client
-	config          llmtypes.Config
-	state           tooltypes.State
-	messages        []anthropic.MessageParam
-	usage           *llmtypes.Usage
-	conversationID  string
-	summary         string
-	isPersisted     bool
-	store           ConversationStore
-	mu              sync.Mutex
-	conversationMu  sync.Mutex
-	useSubscription bool
-	toolResults     map[string]tooltypes.StructuredToolResult // Maps tool_call_id to structured result
+	client                 anthropic.Client
+	config                 llmtypes.Config
+	state                  tooltypes.State
+	messages               []anthropic.MessageParam
+	usage                  *llmtypes.Usage
+	conversationID         string
+	summary                string
+	isPersisted            bool
+	store                  ConversationStore
+	mu                     sync.Mutex
+	conversationMu         sync.Mutex
+	useSubscription        bool
+	toolResults            map[string]tooltypes.StructuredToolResult // Maps tool_call_id to structured result
+	subagentContextFactory llmtypes.SubagentContextFactory           // Injected function for cross-provider subagent creation
 }
 
 func (t *AnthropicThread) Provider() string {
@@ -67,7 +68,7 @@ func (t *AnthropicThread) Provider() string {
 }
 
 // NewAnthropicThread creates a new thread with Anthropic's Claude API
-func NewAnthropicThread(config llmtypes.Config) (*AnthropicThread, error) {
+func NewAnthropicThread(config llmtypes.Config, subagentContextFactory llmtypes.SubagentContextFactory) (*AnthropicThread, error) {
 	// Apply defaults if not provided
 	if config.Model == "" {
 		config.Model = string(anthropic.ModelClaudeSonnet4_20250514)
@@ -133,13 +134,14 @@ func NewAnthropicThread(config llmtypes.Config) (*AnthropicThread, error) {
 	}
 
 	return &AnthropicThread{
-		client:          client,
-		config:          config,
-		useSubscription: useSubscription,
-		conversationID:  convtypes.GenerateID(),
-		isPersisted:     false,
-		usage:           &llmtypes.Usage{}, // must be initialised to avoid nil pointer dereference
-		toolResults:     make(map[string]tooltypes.StructuredToolResult),
+		client:                 client,
+		config:                 config,
+		useSubscription:        useSubscription,
+		conversationID:         convtypes.GenerateID(),
+		isPersisted:            false,
+		usage:                  &llmtypes.Usage{}, // must be initialised to avoid nil pointer dereference
+		toolResults:            make(map[string]tooltypes.StructuredToolResult),
+		subagentContextFactory: subagentContextFactory, // Set directly during creation
 	}, nil
 }
 
@@ -477,7 +479,13 @@ func (t *AnthropicThread) processMessageExchange(
 				attribute.String("tool_name", block.Name),
 			)
 
-			runToolCtx := t.WithSubAgent(ctx, handler, opt.CompactRatio, opt.DisableAutoCompact)
+			// Use injected subagent context factory for cross-provider support, fallback to local method
+			var runToolCtx context.Context
+			if t.subagentContextFactory != nil {
+				runToolCtx = t.subagentContextFactory(ctx, t, handler, opt.CompactRatio, opt.DisableAutoCompact)
+			} else {
+				runToolCtx = t.NewSubagentContext(ctx, handler, opt.CompactRatio, opt.DisableAutoCompact)
+			}
 			output := tools.RunTool(runToolCtx, t.state, block.Name, string(variant.JSON.Input.Raw()))
 
 			// Use CLI rendering for consistent output formatting
@@ -727,28 +735,47 @@ func (t *AnthropicThread) updateUsage(response *anthropic.Message, model anthrop
 	t.usage.CurrentContextWindow = int(response.Usage.InputTokens) + int(response.Usage.OutputTokens) + int(response.Usage.CacheCreationInputTokens) + int(response.Usage.CacheReadInputTokens)
 	t.usage.MaxContextWindow = pricing.ContextWindow
 }
-func (t *AnthropicThread) NewSubAgent(ctx context.Context) llmtypes.Thread {
-	config := t.config
-	config.IsSubAgent = true
-
+func (t *AnthropicThread) NewSubAgent(ctx context.Context, config llmtypes.Config) llmtypes.Thread {
 	// Create subagent thread reusing the parent's client instead of creating a new one
 	thread := &AnthropicThread{
-		client:          t.client, // Reuse parent's client
-		config:          config,
-		useSubscription: t.useSubscription, // Reuse parent's subscription status
-		conversationID:  convtypes.GenerateID(),
-		isPersisted:     false,   // subagent is not persisted
-		usage:           t.usage, // Share usage tracking with parent
+		client:                 t.client, // Reuse parent's client
+		config:                 config,
+		useSubscription:        t.useSubscription, // Reuse parent's subscription status
+		conversationID:         convtypes.GenerateID(),
+		isPersisted:            false,                    // subagent is not persisted
+		usage:                  t.usage,                  // Share usage tracking with parent
+		subagentContextFactory: t.subagentContextFactory, // Propagate the injected function
 	}
-
-	thread.SetState(tools.NewBasicState(ctx, tools.WithSubAgentTools(), tools.WithExtraMCPTools(t.state.MCPTools())))
 
 	return thread
 }
 
-func (t *AnthropicThread) WithSubAgent(ctx context.Context, handler llmtypes.MessageHandler, compactRatio float64, disableAutoCompact bool) context.Context {
-	subAgent := t.NewSubAgent(ctx)
-	ctx = context.WithValue(ctx, llmtypes.SubAgentConfig{}, llmtypes.SubAgentConfig{
+func (t *AnthropicThread) NewSubagentContext(ctx context.Context, handler llmtypes.MessageHandler, compactRatio float64, disableAutoCompact bool) context.Context {
+	// Create subagent using simplified approach - will use centralized logic in the future
+	subAgentConfig := t.config
+	subAgentConfig.IsSubAgent = true
+
+	// Apply basic subagent configuration if specified
+	if t.config.SubAgent != nil {
+		subConfig := t.config.SubAgent
+		// For now, only handle same-provider configurations
+		if subConfig.Provider == "" || subConfig.Provider == "anthropic" {
+			if subConfig.Model != "" {
+				subAgentConfig.Model = subConfig.Model
+			}
+			if subConfig.MaxTokens > 0 {
+				subAgentConfig.MaxTokens = subConfig.MaxTokens
+			}
+			if subConfig.ThinkingBudget > 0 {
+				subAgentConfig.ThinkingBudgetTokens = subConfig.ThinkingBudget
+			}
+		}
+	}
+
+	subAgent := t.NewSubAgent(ctx, subAgentConfig)
+	subAgent.SetState(tools.NewBasicState(ctx, tools.WithSubAgentTools(), tools.WithExtraMCPTools(t.state.MCPTools())))
+
+	ctx = context.WithValue(ctx, llmtypes.SubAgentConfigKey, llmtypes.SubAgentConfig{
 		Thread:             subAgent,
 		MessageHandler:     handler,
 		CompactRatio:       compactRatio,
@@ -892,6 +919,11 @@ func (t *AnthropicThread) GetUsage() llmtypes.Usage {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return *t.usage
+}
+
+// GetConfig returns the configuration of the thread
+func (t *AnthropicThread) GetConfig() llmtypes.Config {
+	return t.config
 }
 
 // GetConversationID returns the current conversation ID

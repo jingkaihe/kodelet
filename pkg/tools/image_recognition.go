@@ -196,7 +196,7 @@ func (t *ImageRecognitionTool) Execute(ctx context.Context, state tooltypes.Stat
 	}
 
 	// Get sub-agent config from context for LLM interaction
-	subAgentConfig, ok := ctx.Value(llm.SubAgentConfig{}).(llm.SubAgentConfig)
+	subAgentConfig, ok := ctx.Value(llm.SubAgentConfigKey).(llm.SubAgentConfig)
 	if !ok {
 		return &ImageRecognitionToolResult{
 			imagePath: input.ImagePath,

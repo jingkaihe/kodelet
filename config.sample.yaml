@@ -100,6 +100,63 @@ openai:
   #     context_window: 131072  # 131k tokens
   #   # ... additional models
 
+# Subagent Configuration
+# Configure how subagents behave, including provider mix-and-match capabilities
+# This allows main agent and subagents to use different providers/models
+subagent:
+  # Provider for subagents (can be different from main agent)
+  # Example: Use GPT for subagents while main agent uses Claude
+  # provider: "openai"
+  
+  # Model for subagents (typically a lighter/faster model)
+  # model: "gpt-4o-mini"
+  
+  # Maximum tokens for subagent responses
+  # max_tokens: 2048
+  
+  # OpenAI-specific: Reasoning effort for subagent (low, medium, high)
+  # reasoning_effort: "low"
+  
+  # Anthropic-specific: Thinking budget for subagent
+  # thinking_budget: 1024
+  
+  # OpenAI configuration for subagent (when using different provider)
+  # openai:
+  #   preset: "openai"
+  #   # Or custom configuration:
+  #   # base_url: "https://api.openai.com/v1"
+  #   # pricing:
+  #   #   gpt-4o-mini:
+  #   #     input: 0.00015    # $0.15 per million tokens
+  #   #     output: 0.0006    # $0.60 per million tokens
+  #   #     context_window: 128000
+
+# Example configurations for common scenarios:
+
+# Scenario 1: Claude main agent with GPT subagents for cost optimization
+# provider: "anthropic"
+# model: "claude-sonnet-4-20250514"
+# subagent:
+#   provider: "openai"
+#   model: "gpt-4o-mini"
+#   max_tokens: 2048
+
+# Scenario 2: GPT main agent with Claude subagents for specific tasks
+# provider: "openai"
+# model: "gpt-4.1"
+# reasoning_effort: "high"
+# subagent:
+#   provider: "anthropic"
+#   model: "claude-3-5-haiku-20241022"
+#   max_tokens: 4096
+
+# Scenario 3: Same provider, different models for performance
+# provider: "anthropic"
+# model: "claude-opus-4-20250514"
+# subagent:
+#   model: "claude-3-5-haiku-20241022"  # Faster model for subagent tasks
+#   max_tokens: 2048
+
 # Tracing Configuration
 tracing:
   # Enable OpenTelemetry tracing (default: false)

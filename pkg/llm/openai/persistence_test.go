@@ -2,15 +2,24 @@ package openai
 
 import (
 	"context"
+	"os"
 	"testing"
 
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	"github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/sashabaranov/go-openai"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
+
+// skipIfNoOpenAIAPIKeyPersistence skips the test if OPENAI_API_KEY is not set
+func skipIfNoOpenAIAPIKeyPersistence(t *testing.T) {
+	if os.Getenv("OPENAI_API_KEY") == "" {
+		t.Skip("OPENAI_API_KEY environment variable not set")
+	}
+}
 
 // MockConversationStore is a test implementation of the ConversationStore interface
 type MockConversationStore struct {
@@ -303,10 +312,13 @@ func TestSaveConversationMessageCleanup(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			skipIfNoOpenAIAPIKeyPersistence(t)
+
 			// Create a thread without persistence to avoid store issues
-			thread := NewOpenAIThread(llmtypes.Config{
+			thread, err := NewOpenAIThread(llmtypes.Config{
 				Model: "gpt-4.1",
-			})
+			}, nil)
+			require.NoError(t, err)
 
 			// Set up state
 			state := tools.NewBasicState(context.TODO())

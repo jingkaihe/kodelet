@@ -36,6 +36,10 @@ func (m *subagentMockThread) IsPersisted() bool                                 
 func (m *subagentMockThread) EnablePersistence(ctx context.Context, enabled bool)        {}
 func (m *subagentMockThread) Provider() string                                           { return "" }
 func (m *subagentMockThread) GetMessages() ([]llmtypes.Message, error)                   { return nil, nil }
+func (m *subagentMockThread) GetConfig() llmtypes.Config                                 { return llmtypes.Config{} }
+func (m *subagentMockThread) NewSubAgent(ctx context.Context, config llmtypes.Config) llmtypes.Thread {
+	return m
+}
 
 func TestSubAgentTool_BasicMethods(t *testing.T) {
 	tool := &SubAgentTool{}
@@ -82,7 +86,7 @@ func TestSubAgentTool_Execute_Success(t *testing.T) {
 		DisableAutoCompact: false,
 	}).Return("test response", nil)
 
-	ctx := context.WithValue(context.Background(), llmtypes.SubAgentConfig{}, llmtypes.SubAgentConfig{
+	ctx := context.WithValue(context.Background(), llmtypes.SubAgentConfigKey, llmtypes.SubAgentConfig{
 		Thread:             mockThread,
 		MessageHandler:     &llmtypes.StringCollectorHandler{Silent: true},
 		CompactRatio:       0.0,
@@ -120,7 +124,7 @@ func TestSubAgentTool_Execute_InheritsCompactConfig(t *testing.T) {
 		DisableAutoCompact: true,
 	}).Return("test response", nil)
 
-	ctx := context.WithValue(context.Background(), llmtypes.SubAgentConfig{}, llmtypes.SubAgentConfig{
+	ctx := context.WithValue(context.Background(), llmtypes.SubAgentConfigKey, llmtypes.SubAgentConfig{
 		Thread:             mockThread,
 		MessageHandler:     &llmtypes.StringCollectorHandler{Silent: true},
 		CompactRatio:       0.8,
@@ -184,7 +188,7 @@ func TestSubAgentTool_Execute_InheritsVariousCompactConfigs(t *testing.T) {
 
 			mockThread.On("SendMessage", mock.Anything, "test question", mock.Anything, expectedOpt).Return("test response", nil)
 
-			ctx := context.WithValue(context.Background(), llmtypes.SubAgentConfig{}, llmtypes.SubAgentConfig{
+			ctx := context.WithValue(context.Background(), llmtypes.SubAgentConfigKey, llmtypes.SubAgentConfig{
 				Thread:             mockThread,
 				MessageHandler:     &llmtypes.StringCollectorHandler{Silent: true},
 				CompactRatio:       tc.compactRatio,
@@ -213,7 +217,7 @@ func TestSubAgentTool_Execute_Errors(t *testing.T) {
 	mockThread := new(subagentMockThread)
 	mockThread.On("SendMessage", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return("", errors.New("thread error"))
 
-	ctx := context.WithValue(context.Background(), llmtypes.SubAgentConfig{}, llmtypes.SubAgentConfig{
+	ctx := context.WithValue(context.Background(), llmtypes.SubAgentConfigKey, llmtypes.SubAgentConfig{
 		Thread:             mockThread,
 		MessageHandler:     &llmtypes.StringCollectorHandler{Silent: true},
 		CompactRatio:       0.0,
