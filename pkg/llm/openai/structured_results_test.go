@@ -16,6 +16,8 @@ import (
 )
 
 func TestOpenAIThread_StructuredToolResults(t *testing.T) {
+	skipIfNoOpenAIAPIKey(t)
+
 	config := llmtypes.Config{
 		Model:     "gpt-4.1",
 		MaxTokens: 1000,
@@ -70,6 +72,8 @@ func TestOpenAIThread_StructuredToolResults(t *testing.T) {
 }
 
 func TestOpenAIThread_SetStructuredToolResults(t *testing.T) {
+	skipIfNoOpenAIAPIKey(t)
+
 	config := llmtypes.Config{
 		Model:     "gpt-4.1",
 		MaxTokens: 1000,
@@ -123,6 +127,8 @@ func TestOpenAIThread_SetStructuredToolResults(t *testing.T) {
 }
 
 func TestOpenAIThread_StructuredResultsConcurrency(t *testing.T) {
+	skipIfNoOpenAIAPIKey(t)
+
 	config := llmtypes.Config{
 		Model:     "gpt-4.1",
 		MaxTokens: 1000,
@@ -238,6 +244,8 @@ func (m *mockState) SetBrowserManager(manager tooltypes.BrowserManager)         
 func (m *mockState) GetLLMConfig() interface{}                                      { return nil }
 
 func TestOpenAIThread_PersistenceWithStructuredResults(t *testing.T) {
+	skipIfNoOpenAIAPIKey(t)
+
 	config := llmtypes.Config{
 		Model:     "gpt-4.1",
 		MaxTokens: 1000,

@@ -17,6 +17,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// skipIfNoOpenAIAPIKey skips the test if OPENAI_API_KEY is not set
+func skipIfNoOpenAIAPIKey(t *testing.T) {
+	if os.Getenv("OPENAI_API_KEY") == "" {
+		t.Skip("OPENAI_API_KEY environment variable not set")
+	}
+}
+
 func TestNewThread(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -46,6 +53,11 @@ func TestNewThread(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			// Skip OpenAI tests if API key is not set
+			if tc.config.Provider == "openai" {
+				skipIfNoOpenAIAPIKey(t)
+			}
+
 			// Cannot type assert with the new structure - need a different approach
 			thread, err := NewThread(tc.config)
 			assert.NoError(t, err)
@@ -372,6 +384,11 @@ func TestNewThreadWithAliases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Skip OpenAI tests if API key is not set
+			if tt.config.Provider == "openai" {
+				skipIfNoOpenAIAPIKey(t)
+			}
+
 			originalModel := tt.config.Model
 
 			thread, err := NewThread(tt.config)

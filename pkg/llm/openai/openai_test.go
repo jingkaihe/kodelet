@@ -15,7 +15,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// skipIfNoOpenAIAPIKey skips the test if OPENAI_API_KEY is not set
+func skipIfNoOpenAIAPIKey(t *testing.T) {
+	if os.Getenv("OPENAI_API_KEY") == "" {
+		t.Skip("OPENAI_API_KEY environment variable not set")
+	}
+}
+
 func TestNewOpenAIThread(t *testing.T) {
+	skipIfNoOpenAIAPIKey(t)
+
 	// Test with default values
 	config := llm.Config{}
 	thread, err := NewOpenAIThread(config, nil)
@@ -173,6 +182,8 @@ func TestGetImageMediaType(t *testing.T) {
 }
 
 func TestProcessImageURL(t *testing.T) {
+	skipIfNoOpenAIAPIKey(t)
+
 	thread, err := NewOpenAIThread(llm.Config{}, nil)
 	require.NoError(t, err)
 
@@ -235,6 +246,8 @@ func TestProcessImageURL(t *testing.T) {
 }
 
 func TestProcessImageFile(t *testing.T) {
+	skipIfNoOpenAIAPIKey(t)
+
 	thread, err := NewOpenAIThread(llm.Config{}, nil)
 	require.NoError(t, err)
 
@@ -315,6 +328,8 @@ func TestProcessImageFile(t *testing.T) {
 }
 
 func TestProcessImage(t *testing.T) {
+	skipIfNoOpenAIAPIKey(t)
+
 	thread, err := NewOpenAIThread(llm.Config{}, nil)
 	require.NoError(t, err)
 
@@ -381,6 +396,8 @@ func TestProcessImage(t *testing.T) {
 }
 
 func TestAddUserMessageWithImages(t *testing.T) {
+	skipIfNoOpenAIAPIKey(t)
+
 	thread, err := NewOpenAIThread(llm.Config{}, nil)
 	require.NoError(t, err)
 
@@ -491,6 +508,8 @@ func TestAddUserMessageWithImages(t *testing.T) {
 }
 
 func TestAddUserMessageWithTooManyImages(t *testing.T) {
+	skipIfNoOpenAIAPIKey(t)
+
 	thread, err := NewOpenAIThread(llm.Config{}, nil)
 	require.NoError(t, err)
 
@@ -598,6 +617,8 @@ func TestShouldAutoCompactOpenAI(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			skipIfNoOpenAIAPIKey(t)
+
 			thread, err := NewOpenAIThread(llm.Config{}, nil)
 			require.NoError(t, err)
 
@@ -684,6 +705,8 @@ func TestGetLastAssistantMessageTextOpenAI(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			skipIfNoOpenAIAPIKey(t)
+
 			thread, err := NewOpenAIThread(llm.Config{}, nil)
 			require.NoError(t, err)
 
@@ -791,6 +814,8 @@ func TestCompactContextIntegrationOpenAI(t *testing.T) {
 
 func TestNewSubagentContextOpenAI(t *testing.T) {
 	t.Run("NewSubagentContext correctly passes compact configuration", func(t *testing.T) {
+		skipIfNoOpenAIAPIKey(t)
+
 		parentThread, err := NewOpenAIThread(llm.Config{}, nil)
 		require.NoError(t, err)
 
@@ -853,6 +878,8 @@ func TestNewSubagentContextOpenAI(t *testing.T) {
 	})
 
 	t.Run("NewSubagentContext creates independent subagent", func(t *testing.T) {
+		skipIfNoOpenAIAPIKey(t)
+
 		parentThread, err := NewOpenAIThread(llm.Config{}, nil)
 		require.NoError(t, err)
 
