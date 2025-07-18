@@ -10,7 +10,6 @@ import WebFetchRenderer from './tool-renderers/WebFetchRenderer';
 import ThinkingRenderer from './tool-renderers/ThinkingRenderer';
 import TodoRenderer from './tool-renderers/TodoRenderer';
 import SubagentRenderer from './tool-renderers/SubagentRenderer';
-import BatchRenderer from './tool-renderers/BatchRenderer';
 import ImageRecognitionRenderer from './tool-renderers/ImageRecognitionRenderer';
 import BrowserRenderer from './tool-renderers/BrowserRenderer';
 import BackgroundProcessesRenderer from './tool-renderers/BackgroundProcessesRenderer';
@@ -72,8 +71,6 @@ const ToolRenderer: React.FC<ToolRendererProps> = ({ toolResult }) => {
         return <TodoRenderer toolResult={toolResult} />;
       case 'subagent':
         return <SubagentRenderer toolResult={toolResult} />;
-      case 'batch':
-        return <BatchRenderer toolResult={toolResult} />;
       case 'image_recognition':
         return <ImageRecognitionRenderer toolResult={toolResult} />;
       case 'browser_navigate':

@@ -64,7 +64,6 @@ var metadataTypeRegistry = map[string]reflect.Type{
 	"mcp_tool":                  reflect.TypeOf(MCPToolMetadata{}),
 	"todo":                      reflect.TypeOf(TodoMetadata{}),
 	"thinking":                  reflect.TypeOf(ThinkingMetadata{}),
-	"batch":                     reflect.TypeOf(BatchMetadata{}),
 	"browser_navigate":          reflect.TypeOf(BrowserNavigateMetadata{}),
 	"browser_click":             reflect.TypeOf(BrowserClickMetadata{}),
 	"browser_get_page":          reflect.TypeOf(BrowserGetPageMetadata{}),
@@ -272,16 +271,6 @@ type ThinkingMetadata struct {
 }
 
 func (m ThinkingMetadata) ToolType() string { return "thinking" }
-
-type BatchMetadata struct {
-	Description   string                 `json:"description"`
-	SubResults    []StructuredToolResult `json:"subResults"`
-	ExecutionTime time.Duration          `json:"executionTime"`
-	SuccessCount  int                    `json:"successCount"`
-	FailureCount  int                    `json:"failureCount"`
-}
-
-func (m BatchMetadata) ToolType() string { return "batch" }
 
 // Browser tool metadata structures
 

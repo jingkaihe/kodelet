@@ -290,41 +290,6 @@ func TestStructuredToolResult_ComplexMetadata(t *testing.T) {
 		result StructuredToolResult
 	}{
 		{
-			name: "BatchMetadata with nested results",
-			result: StructuredToolResult{
-				ToolName:  "batch",
-				Success:   true,
-				Timestamp: time.Now(),
-				Metadata: &BatchMetadata{
-					Description:   "Running multiple commands",
-					SuccessCount:  2,
-					FailureCount:  0,
-					ExecutionTime: 500 * time.Millisecond,
-					SubResults: []StructuredToolResult{
-						{
-							ToolName:  "bash",
-							Success:   true,
-							Timestamp: time.Now(),
-							Metadata: BashMetadata{
-								Command:  "echo 'test'",
-								ExitCode: 0,
-								Output:   "test",
-							},
-						},
-						{
-							ToolName:  "file_read",
-							Success:   true,
-							Timestamp: time.Now(),
-							Metadata: FileReadMetadata{
-								FilePath: "/test.txt",
-								Lines:    []string{"content"},
-							},
-						},
-					},
-				},
-			},
-		},
-		{
 			name: "MCPToolMetadata with content array",
 			result: StructuredToolResult{
 				ToolName:  "mcp_definition",
@@ -361,18 +326,6 @@ func TestStructuredToolResult_ComplexMetadata(t *testing.T) {
 			// Verify the metadata type
 			require.NotNil(t, unmarshaled.Metadata, "Expected metadata")
 			assert.Equal(t, tt.result.Metadata.ToolType(), unmarshaled.Metadata.ToolType(), "Metadata type mismatch")
-
-			// For BatchMetadata, verify nested results
-			if tt.result.ToolName == "batch" {
-				batchMeta, ok := unmarshaled.Metadata.(BatchMetadata)
-				require.True(t, ok, "Failed to assert BatchMetadata type, got %T", unmarshaled.Metadata)
-				assert.Equal(t, 2, len(batchMeta.SubResults), "Expected 2 sub-results")
-				// Check that nested metadata also unmarshal correctly
-				for i, subResult := range batchMeta.SubResults {
-					assert.NotNil(t, subResult.Metadata, "Sub-result %d has nil metadata", i)
-					t.Logf("Sub-result %d metadata type: %T", i, subResult.Metadata)
-				}
-			}
 		})
 	}
 }
@@ -591,29 +544,6 @@ func TestExtractMetadata(t *testing.T) {
 			want:     false,
 		},
 		{
-			name: "complex nested metadata",
-			metadata: BatchMetadata{
-				Description:  "batch test",
-				SuccessCount: 2,
-				FailureCount: 0,
-				SubResults: []StructuredToolResult{
-					{
-						ToolName: "bash",
-						Success:  true,
-						Metadata: BashMetadata{Command: "echo test"},
-					},
-				},
-			},
-			target: &BatchMetadata{},
-			want:   true,
-			validate: func(t *testing.T, target interface{}) {
-				result := target.(*BatchMetadata)
-				assert.Equal(t, "batch test", result.Description, "Description mismatch")
-				assert.Equal(t, 2, result.SuccessCount, "SuccessCount mismatch")
-				assert.Equal(t, 1, len(result.SubResults), "SubResults length mismatch")
-			},
-		},
-		{
 			name: "metadata with slices and maps",
 			metadata: &MCPToolMetadata{
 				MCPToolName: "test_tool",
@@ -684,7 +614,6 @@ func TestExtractMetadata_AllTypes(t *testing.T) {
 		{"GlobMetadata", GlobMetadata{Pattern: "*.go"}, &GlobMetadata{}},
 		{"TodoMetadata", TodoMetadata{Action: "read"}, &TodoMetadata{}},
 		{"ThinkingMetadata", ThinkingMetadata{Thought: "test"}, &ThinkingMetadata{}},
-		{"BatchMetadata", BatchMetadata{Description: "test"}, &BatchMetadata{}},
 		{"SubAgentMetadata", SubAgentMetadata{Question: "test"}, &SubAgentMetadata{}},
 		{"ImageRecognitionMetadata", ImageRecognitionMetadata{ImagePath: "/test.png"}, &ImageRecognitionMetadata{}},
 		{"WebFetchMetadata", WebFetchMetadata{URL: "https://test"}, &WebFetchMetadata{}},

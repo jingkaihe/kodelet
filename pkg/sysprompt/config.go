@@ -16,7 +16,6 @@ func NewDefaultConfig() *PromptConfig {
 		EnabledFeatures: []string{
 			"subagent",
 			"todoTools",
-			"batchTool",
 		},
 	}
 }
@@ -48,5 +47,4 @@ func updateContextWithConfig(ctx *PromptContext, config *PromptConfig) {
 	// Update feature flags based on config
 	ctx.Features["subagentEnabled"] = config.IsFeatureEnabled("subagent")
 	ctx.Features["todoToolsEnabled"] = config.IsFeatureEnabled("todoTools")
-	ctx.Features["batchToolEnabled"] = config.IsFeatureEnabled("batchTool")
 }

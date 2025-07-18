@@ -56,7 +56,7 @@ The following commands are banned and cannot be used:
 # Important
 * The command argument is required.
 * You must specify a timeout from 10 to 120 seconds (or 0 for no timeout when background=true).
-* You **MUST** use batch tool to wrap multiple independent commands together.
+* You **MUST** use parallel tool calling to execute multiple independent commands together.
 * Please provide a clear and concise description of what this command does in 5-10 words.
 * If the output exceeds 30000 characters, output will be truncated before being returned to you.
 * You **MUST NOT** run commands that require user interaction.

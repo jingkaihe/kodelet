@@ -74,7 +74,7 @@ You must use this tool proactively in the following use cases:
 - Write down the plan as todos when you start a new task.
 - When you start a new task, mark it as "in_progress".
 - You MUST mark a todo as "completed" AS SOON AS you have completed it. If there are new todos surface, add them as new todos in "pending" status.
-- You MUST compelete a todo one at a time without batching.
+- You MUST complete todos one at a time, focusing on a single task.
 - You MUST have only one todo in "in_progress" status at any time.
 - When you are given new instructions, and you already have a todo list working in progress, add the new todos to the existing list.
 - Mark a todo as "canceled" if a task is no longer needed.

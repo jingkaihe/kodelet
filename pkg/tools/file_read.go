@@ -124,7 +124,7 @@ Example:
 
 ---
 
-If you need to read multiple files, use batch tool to wrap multiple read_file calls together.
+If you need to read multiple files, use parallel tool calling to read multiple files simultaneously.
 `
 }
 

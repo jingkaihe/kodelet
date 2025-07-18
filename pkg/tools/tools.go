@@ -64,7 +64,7 @@ var baseMainTools = []tooltypes.Tool{
 	&GlobTool{},
 	&TodoReadTool{},
 	&TodoWriteTool{},
-	&BatchTool{},
+	// &BatchTool{},
 	&WebFetchTool{},
 	&ImageRecognitionTool{},
 	&ViewBackgroundProcessesTool{},
@@ -90,7 +90,7 @@ var baseSubAgentTools = []tooltypes.Tool{
 	&ThinkingTool{},
 	&TodoReadTool{},
 	&TodoWriteTool{},
-	&BatchTool{},
+	// &BatchTool{},
 	&WebFetchTool{},
 	// &ImageRecognitionTool{}, // subagent will directly recognise the image using api
 }

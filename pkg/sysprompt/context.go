@@ -52,14 +52,12 @@ func NewPromptContext() *PromptContext {
 		"subagent":   "subagent",
 		"grep":       "grep_tool",
 		"glob":       "glob_tool",
-		"batch":      "batch",
 	}
 
 	// Initialize feature flags
 	features := map[string]bool{
 		"subagentEnabled":  true,
 		"todoToolsEnabled": true,
-		"batchToolEnabled": true,
 	}
 
 	return &PromptContext{

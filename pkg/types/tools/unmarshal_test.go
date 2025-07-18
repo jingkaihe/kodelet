@@ -87,7 +87,7 @@ func TestMetadataTypeRegistry_Completeness(t *testing.T) {
 	expectedTypes := []string{
 		"file_read", "file_write", "file_edit", "file_multi_edit",
 		"grep_tool", "glob_tool", "bash", "bash_background", "mcp_tool", "todo",
-		"thinking", "batch", "browser_navigate", "browser_click",
+		"thinking", "browser_navigate", "browser_click",
 		"browser_get_page", "browser_screenshot", "browser_type",
 		"browser_wait_for", "image_recognition", "subagent",
 		"web_fetch", "view_background_processes",

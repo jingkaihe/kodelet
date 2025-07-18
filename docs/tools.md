@@ -180,7 +180,6 @@ The structured data is **not** used in the LLM response - it's stored separately
 | Tool | Description | Use Case |
 |------|-------------|----------|
 | `bash` | Execute shell commands with restrictions | System operations, build processes |
-| `batch` | Execute multiple tools in parallel | Parallel operations, efficiency |
 | `view_background_processes` | Monitor background processes | Process management, system monitoring |
 
 ### AI/Agent Tools
