@@ -127,7 +127,7 @@ type OpenAIThread struct {
 	customModels     *llmtypes.CustomModels                    // Custom model configuration
 	customPricing    llmtypes.CustomPricing                    // Custom pricing configuration
 	useCopilot       bool                                      // Whether this thread uses GitHub Copilot
-	withSubAgentFunc llmtypes.WithSubAgentFunc                 // Injected function for cross-provider subagent creation
+	subagentContextFactory llmtypes.SubagentContextFactory    // Injected function for cross-provider subagent creation
 }
 
 func (t *OpenAIThread) Provider() string {
@@ -135,7 +135,7 @@ func (t *OpenAIThread) Provider() string {
 }
 
 // NewOpenAIThread creates a new thread with OpenAI's API
-func NewOpenAIThread(config llmtypes.Config, withSubAgentFunc llmtypes.WithSubAgentFunc) (*OpenAIThread, error) {
+func NewOpenAIThread(config llmtypes.Config, subagentContextFactory llmtypes.SubagentContextFactory) (*OpenAIThread, error) {
 	// Apply defaults if not provided
 	if config.Model == "" {
 		config.Model = "gpt-4.1" // Default to GPT-4.1
@@ -244,11 +244,9 @@ func NewOpenAIThread(config llmtypes.Config, withSubAgentFunc llmtypes.WithSubAg
 		customModels:     customModels,
 		customPricing:    customPricing,
 		useCopilot:       useCopilot,
-		withSubAgentFunc: withSubAgentFunc, // Set directly during creation
+		subagentContextFactory: subagentContextFactory, // Set directly during creation
 	}, nil
 }
-
-
 
 // SetState sets the state for the thread
 func (t *OpenAIThread) SetState(s tooltypes.State) {
@@ -579,12 +577,12 @@ func (t *OpenAIThread) processMessageExchange(
 		)
 
 		// Execute the tool
-		// Use injected WithSubAgent function for cross-provider support, fallback to local method
+		// Use injected subagent context factory for cross-provider support, fallback to local method
 		var runToolCtx context.Context
-		if t.withSubAgentFunc != nil {
-			runToolCtx = t.withSubAgentFunc(ctx, t, handler, opt.CompactRatio, opt.DisableAutoCompact)
+		if t.subagentContextFactory != nil {
+			runToolCtx = t.subagentContextFactory(ctx, t, handler, opt.CompactRatio, opt.DisableAutoCompact)
 		} else {
-			runToolCtx = t.WithSubAgent(ctx, handler, opt.CompactRatio, opt.DisableAutoCompact)
+			runToolCtx = t.NewSubagentContext(ctx, handler, opt.CompactRatio, opt.DisableAutoCompact)
 		}
 		output := tools.RunTool(runToolCtx, t.state, toolCall.Function.Name, toolCall.Function.Arguments)
 
@@ -669,22 +667,22 @@ func (t *OpenAIThread) NewSubAgent(ctx context.Context, config llmtypes.Config) 
 		config:           config,
 		reasoningEffort:  config.ReasoningEffort, // Use config's reasoning effort
 		conversationID:   convtypes.GenerateID(),
-		isPersisted:      false,           // subagent is not persisted
-		usage:            t.usage,         // Share usage tracking with parent
-		customModels:     t.customModels,  // Share custom models configuration
-		customPricing:    t.customPricing, // Share custom pricing configuration
-		useCopilot:       t.useCopilot,    // Share Copilot usage with parent
-		withSubAgentFunc: t.withSubAgentFunc, // Propagate the injected function
+		isPersisted:      false,              // subagent is not persisted
+		usage:            t.usage,            // Share usage tracking with parent
+		customModels:     t.customModels,     // Share custom models configuration
+		customPricing:    t.customPricing,    // Share custom pricing configuration
+		useCopilot:       t.useCopilot,       // Share Copilot usage with parent
+		subagentContextFactory: t.subagentContextFactory, // Propagate the injected function
 	}
 
 	return thread
 }
 
-func (t *OpenAIThread) WithSubAgent(ctx context.Context, handler llmtypes.MessageHandler, compactRatio float64, disableAutoCompact bool) context.Context {
+func (t *OpenAIThread) NewSubagentContext(ctx context.Context, handler llmtypes.MessageHandler, compactRatio float64, disableAutoCompact bool) context.Context {
 	// Create subagent using simplified approach - will use centralized logic in the future
 	subAgentConfig := t.config
 	subAgentConfig.IsSubAgent = true
-	
+
 	// Apply basic subagent configuration if specified
 	if t.config.SubAgent != nil {
 		subConfig := t.config.SubAgent
@@ -701,10 +699,10 @@ func (t *OpenAIThread) WithSubAgent(ctx context.Context, handler llmtypes.Messag
 			}
 		}
 	}
-	
+
 	subAgent := t.NewSubAgent(ctx, subAgentConfig)
 	subAgent.SetState(tools.NewBasicState(ctx, tools.WithSubAgentTools(), tools.WithExtraMCPTools(t.state.MCPTools())))
-	
+
 	ctx = context.WithValue(ctx, llmtypes.SubAgentConfig{}, llmtypes.SubAgentConfig{
 		Thread:             subAgent,
 		MessageHandler:     handler,

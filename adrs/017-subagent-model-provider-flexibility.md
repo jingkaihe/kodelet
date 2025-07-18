@@ -57,7 +57,7 @@ type SubAgentConfig struct {
     MaxTokens        int    `yaml:"max_tokens"`
     ReasoningEffort  string `yaml:"reasoning_effort"`  // OpenAI specific
     ThinkingBudget   int    `yaml:"thinking_budget"`   // Anthropic specific
-    
+
     // OpenAI-compatible provider configuration
     OpenAI *OpenAIConfig `yaml:"openai,omitempty"`
 }
@@ -73,7 +73,7 @@ type Config struct {
 // pkg/types/llm/thread.go
 type Thread interface {
     // ... existing methods ...
-    
+
     // Enhanced NewSubAgent - uses configured subagent settings automatically
     NewSubAgent(ctx context.Context) Thread
 }
@@ -87,11 +87,11 @@ type Thread interface {
 func (t *AnthropicThread) NewSubAgent(ctx context.Context) llmtypes.Thread {
     config := t.config  // Start with parent's config
     config.IsSubAgent = true
-    
+
     // Apply subagent configuration if specified
     if t.config.SubAgent != nil {
         subConfig := t.config.SubAgent
-        
+
         // Check if we need a different provider
         if subConfig.Provider != "" && subConfig.Provider != "anthropic" {
             // Create a new thread with different provider
@@ -101,7 +101,7 @@ func (t *AnthropicThread) NewSubAgent(ctx context.Context) llmtypes.Thread {
             newConfig.MaxTokens = subConfig.MaxTokens
             newConfig.ReasoningEffort = subConfig.ReasoningEffort
             newConfig.ThinkingBudgetTokens = subConfig.ThinkingBudget
-            
+
             newThread, err := llm.NewThread(newConfig)
             if err != nil {
                 logger.G(ctx).WithError(err).Error("Failed to create subagent with different provider, falling back to parent config")
@@ -122,7 +122,7 @@ func (t *AnthropicThread) NewSubAgent(ctx context.Context) llmtypes.Thread {
             }
         }
     }
-    
+
     // Same provider path - can reuse client
     thread := &AnthropicThread{
         client:          t.client,  // Reuse parent's client for same provider
@@ -132,9 +132,9 @@ func (t *AnthropicThread) NewSubAgent(ctx context.Context) llmtypes.Thread {
         isPersisted:     false,
         usage:           t.usage,  // Share usage tracking
     }
-    
+
     // ... rest of initialization ...
-    
+
     return thread
 }
 ```
@@ -145,35 +145,35 @@ func (t *AnthropicThread) NewSubAgent(ctx context.Context) llmtypes.Thread {
 func (t *OpenAIThread) NewSubAgent(ctx context.Context) llmtypes.Thread {
     config := t.config  // Start with parent's config
     config.IsSubAgent = true
-    
+
     // Apply subagent configuration if specified
     if t.config.SubAgent != nil {
         subConfig := t.config.SubAgent
-        
+
         // Check if we need a different provider
         if subConfig.Provider != "" && subConfig.Provider != "anthropic" {
             // For OpenAI-compatible providers, check if we need different configuration
             needNewThread := false
-            
+
             // Check if subagent has different OpenAI configuration (different base URL, preset, etc.)
             if subConfig.OpenAI != nil {
                 // Compare with parent's OpenAI config
                 parentOpenAI := t.config.OpenAI
                 subOpenAI := subConfig.OpenAI
-                
+
                 if (parentOpenAI == nil && subOpenAI != nil) ||
-                   (parentOpenAI != nil && subOpenAI != nil && 
-                    (parentOpenAI.BaseURL != subOpenAI.BaseURL || 
+                   (parentOpenAI != nil && subOpenAI != nil &&
+                    (parentOpenAI.BaseURL != subOpenAI.BaseURL ||
                      parentOpenAI.Preset != subOpenAI.Preset)) {
                     needNewThread = true
                 }
             }
-            
+
             // Check if it's a different provider entirely
             if subConfig.Provider != "openai" {
                 needNewThread = true
             }
-            
+
             if needNewThread {
                 // Create a new thread with different provider/configuration
                 newConfig := config
@@ -183,7 +183,7 @@ func (t *OpenAIThread) NewSubAgent(ctx context.Context) llmtypes.Thread {
                 newConfig.ReasoningEffort = subConfig.ReasoningEffort
                 newConfig.ThinkingBudgetTokens = subConfig.ThinkingBudget
                 newConfig.OpenAI = subConfig.OpenAI  // Use subagent's OpenAI config
-                
+
                 newThread, err := llm.NewThread(newConfig)
                 if err != nil {
                     logger.G(ctx).WithError(err).Error("Failed to create subagent with different provider/config, falling back to parent config")
@@ -193,7 +193,7 @@ func (t *OpenAIThread) NewSubAgent(ctx context.Context) llmtypes.Thread {
                 }
             }
         }
-        
+
         // Same provider/configuration - apply subagent settings to current config
         if subConfig.Model != "" {
             config.Model = subConfig.Model
@@ -206,7 +206,7 @@ func (t *OpenAIThread) NewSubAgent(ctx context.Context) llmtypes.Thread {
         }
         // Note: We don't change OpenAI config here since we're reusing the same client
     }
-    
+
     // Same provider/configuration path - can reuse client
     thread := &OpenAIThread{
         client:          t.client,  // Reuse parent's client for same configuration
@@ -219,9 +219,9 @@ func (t *OpenAIThread) NewSubAgent(ctx context.Context) llmtypes.Thread {
         customPricing:   t.customPricing,
         useCopilot:      t.useCopilot,
     }
-    
+
     // ... rest of initialization ...
-    
+
     return thread
 }
 ```
@@ -237,7 +237,7 @@ func (t *SubAgentTool) Execute(ctx context.Context, state tooltypes.State, param
             err: err.Error(),
         }
     }
-    
+
     // Get subagent config from context
     subAgentConfig, ok := ctx.Value(llmtypes.SubAgentConfig{}).(llmtypes.SubAgentConfig)
     if !ok {
@@ -246,16 +246,16 @@ func (t *SubAgentTool) Execute(ctx context.Context, state tooltypes.State, param
             question: input.Question,
         }
     }
-    
+
     // Create subagent thread - will automatically use configured subagent settings
     thread := subAgentConfig.Thread.NewSubAgent(ctx)
-    
+
     handler := subAgentConfig.MessageHandler
     if handler == nil {
         logger.G(ctx).Warn("no message handler found in context, using console handler")
         handler = &llmtypes.ConsoleMessageHandler{}
     }
-    
+
     text, err := thread.SendMessage(ctx, input.Question, handler, llmtypes.MessageOpt{
         PromptCache:        true,
         UseWeakModel:       false,
@@ -263,14 +263,14 @@ func (t *SubAgentTool) Execute(ctx context.Context, state tooltypes.State, param
         CompactRatio:       subAgentConfig.CompactRatio,
         DisableAutoCompact: subAgentConfig.DisableAutoCompact,
     })
-    
+
     if err != nil {
         return &SubAgentToolResult{
             err:      err.Error(),
             question: input.Question,
         }
     }
-    
+
     return &SubAgentToolResult{
         result:   text,
         question: input.Question,
@@ -283,12 +283,12 @@ func (t *SubAgentTool) Execute(ctx context.Context, state tooltypes.State, param
 // pkg/llm/config.go - Enhanced to load subagent configuration
 func GetConfigFromViper() llmtypes.Config {
     // ... existing configuration loading ...
-    
+
     // Load subagent configuration
     if viper.IsSet("subagent") {
         subagentMap := viper.GetStringMap("subagent")
         subConfig := &llmtypes.SubAgentConfig{}
-        
+
         if provider, ok := subagentMap["provider"].(string); ok {
             subConfig.Provider = provider
         }
@@ -304,15 +304,15 @@ func GetConfigFromViper() llmtypes.Config {
         if thinkingBudget, ok := subagentMap["thinking_budget"].(int); ok {
             subConfig.ThinkingBudget = thinkingBudget
         }
-        
+
         // Load OpenAI-specific configuration for subagent
         if viper.IsSet("subagent.openai") {
             openaiConfig := &llmtypes.OpenAIConfig{}
-            
+
             // Load basic settings
             openaiConfig.Preset = viper.GetString("subagent.openai.preset")
             openaiConfig.BaseURL = viper.GetString("subagent.openai.base_url")
-            
+
             // Load models configuration
             if viper.IsSet("subagent.openai.models") {
                 openaiConfig.Models = &llmtypes.CustomModels{
@@ -320,16 +320,16 @@ func GetConfigFromViper() llmtypes.Config {
                     NonReasoning: viper.GetStringSlice("subagent.openai.models.non_reasoning"),
                 }
             }
-            
+
             // Load pricing configuration
             if viper.IsSet("subagent.openai.pricing") {
                 openaiConfig.Pricing = make(map[string]llmtypes.ModelPricing)
                 pricingMap := viper.GetStringMap("subagent.openai.pricing")
-                
+
                 for model, pricingData := range pricingMap {
                     if pricingSubMap, ok := pricingData.(map[string]interface{}); ok {
                         pricing := llmtypes.ModelPricing{}
-                        
+
                         if input, ok := pricingSubMap["input"].(float64); ok {
                             pricing.Input = input
                         }
@@ -342,25 +342,25 @@ func GetConfigFromViper() llmtypes.Config {
                         if contextWindow, ok := pricingSubMap["context_window"].(int); ok {
                             pricing.ContextWindow = contextWindow
                         }
-                        
+
                         openaiConfig.Pricing[model] = pricing
                     }
                 }
             }
-            
+
             subConfig.OpenAI = openaiConfig
         }
-        
+
         config.SubAgent = subConfig
     }
-    
+
     return config
 }
 
 // pkg/llm/thread.go - No changes needed, but enhanced validation
 func NewThread(config llmtypes.Config) (llmtypes.Thread, error) {
     config.Model = resolveModelAlias(config.Model, config.Aliases)
-    
+
     // Ensure API keys are available for the requested provider
     switch strings.ToLower(config.Provider) {
     case "openai":
@@ -395,7 +395,7 @@ func NewThread(config llmtypes.Config) (llmtypes.Thread, error) {
 ### Example 2: Complex Analysis Task
 ```json
 {
-  "tool_name": "subagent", 
+  "tool_name": "subagent",
   "parameters": {
     "question": "Review this entire microservices architecture and provide a detailed report on potential scalability issues, security vulnerabilities, and recommendations for improvement"
   }
@@ -421,10 +421,10 @@ func NewThread(config llmtypes.Config) (llmtypes.Thread, error) {
 The design handles the complexity of OpenAI-compatible providers (like xAI, together.ai, etc.) that use the same client but different endpoints:
 
 **Key Challenge**: How to enable scenarios like:
-- Main agent: OpenAI GPT-4o 
+- Main agent: OpenAI GPT-4o
 - Subagent: xAI Grok-3 (different provider, same client type)
 
-**Solution**: 
+**Solution**:
 - Both providers use `provider: openai` (same client)
 - Differentiation happens through the `openai` configuration block
 - When base URLs or presets differ, a new thread is created
@@ -445,7 +445,7 @@ subagent:
 ```
 
 ```yaml
-# Scenario 2: xAI -> OpenAI  
+# Scenario 2: xAI -> OpenAI
 provider: openai
 model: grok-2
 openai:
@@ -613,7 +613,7 @@ model: gpt-4o
 - Simple configuration - just one subagent setting, no complex profiles
 - Perfect for the high-quality analysis tasks subagents typically handle
 
-### Negative  
+### Negative
 - Increased complexity in thread creation logic
 - Requires multiple API keys for cross-provider functionality
 - Potential for increased costs if not managed carefully (but subagents are used for complex tasks where quality matters)

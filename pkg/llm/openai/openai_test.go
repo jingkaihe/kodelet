@@ -789,8 +789,8 @@ func TestCompactContextIntegrationOpenAI(t *testing.T) {
 	})
 }
 
-func TestWithSubAgentOpenAI(t *testing.T) {
-	t.Run("WithSubAgent correctly passes compact configuration", func(t *testing.T) {
+func TestNewSubagentContextOpenAI(t *testing.T) {
+	t.Run("NewSubagentContext correctly passes compact configuration", func(t *testing.T) {
 		parentThread, err := NewOpenAIThread(llm.Config{}, nil)
 		require.NoError(t, err)
 
@@ -828,7 +828,7 @@ func TestWithSubAgentOpenAI(t *testing.T) {
 		for _, tc := range testCases {
 			t.Run(tc.name, func(t *testing.T) {
 				// Create a context with subagent configuration
-				ctx := parentThread.WithSubAgent(
+				ctx := parentThread.NewSubagentContext(
 					context.Background(),
 					&llm.StringCollectorHandler{Silent: true},
 					tc.compactRatio,
@@ -852,7 +852,7 @@ func TestWithSubAgentOpenAI(t *testing.T) {
 		}
 	})
 
-	t.Run("WithSubAgent creates independent subagent", func(t *testing.T) {
+	t.Run("NewSubagentContext creates independent subagent", func(t *testing.T) {
 		parentThread, err := NewOpenAIThread(llm.Config{}, nil)
 		require.NoError(t, err)
 
@@ -860,7 +860,7 @@ func TestWithSubAgentOpenAI(t *testing.T) {
 		parentThread.SetState(tools.NewBasicState(context.Background()))
 
 		// Create subagent context
-		ctx := parentThread.WithSubAgent(
+		ctx := parentThread.NewSubagentContext(
 			context.Background(),
 			&llm.StringCollectorHandler{Silent: true},
 			0.8,

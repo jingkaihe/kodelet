@@ -40,13 +40,13 @@ func resolveModelAlias(modelName string, aliases map[string]string) string {
 // NewThread creates a new thread based on the model specified in the config
 func NewThread(config llmtypes.Config) (llmtypes.Thread, error) {
 	config.Model = resolveModelAlias(config.Model, config.Aliases)
-	
+
 	// Create thread based on provider
 	switch strings.ToLower(config.Provider) {
 	case "openai":
-		return openai.NewOpenAIThread(config, WithSubAgent)
+		return openai.NewOpenAIThread(config, NewSubagentContext)
 	case "anthropic":
-		return anthropic.NewAnthropicThread(config, WithSubAgent)
+		return anthropic.NewAnthropicThread(config, NewSubagentContext)
 	default:
 		return nil, errors.Errorf("unsupported provider: %s", config.Provider)
 	}
@@ -133,9 +133,9 @@ func getThreadConfig(thread llmtypes.Thread) llmtypes.Config {
 	}
 }
 
-// WithSubAgent creates a subagent context for the given thread
+// NewSubagentContext creates a subagent context for the given thread
 // This centralized function handles cross-provider subagent creation
-func WithSubAgent(ctx context.Context, parentThread llmtypes.Thread, handler llmtypes.MessageHandler, compactRatio float64, disableAutoCompact bool) context.Context {
+func NewSubagentContext(ctx context.Context, parentThread llmtypes.Thread, handler llmtypes.MessageHandler, compactRatio float64, disableAutoCompact bool) context.Context {
 	state := tools.NewBasicState(ctx, tools.WithSubAgentTools(), tools.WithExtraMCPTools(parentThread.GetState().MCPTools()))
 	subAgent := NewSubagentThread(ctx, parentThread, state)
 	ctx = context.WithValue(ctx, llmtypes.SubAgentConfig{}, llmtypes.SubAgentConfig{
