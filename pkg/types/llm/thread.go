@@ -35,7 +35,13 @@ type MessageOpt struct {
 	DisableUsageLog bool
 }
 
-// SubAgentConfig is the key for the thread in the context
+// subAgentConfigKey is a dedicated context key type to avoid collisions
+type subAgentConfigKey struct{}
+
+// SubAgentConfigKey is the context key for SubAgentConfig
+var SubAgentConfigKey = subAgentConfigKey{}
+
+// SubAgentConfig holds the configuration for a subagent in the context
 type SubAgentConfig struct {
 	Thread             Thread         // Thread used by the sub-agent
 	MessageHandler     MessageHandler // Message handler for the sub-agent

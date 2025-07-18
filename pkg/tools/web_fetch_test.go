@@ -248,7 +248,7 @@ func TestWebFetchToolHTMLContentWithPrompt(t *testing.T) {
 			response: "The main heading is: Welcome to Example.com",
 		}
 
-		ctx := context.WithValue(context.Background(), llm.SubAgentConfig{}, llm.SubAgentConfig{
+		ctx := context.WithValue(context.Background(), llm.SubAgentConfigKey, llm.SubAgentConfig{
 			Thread: mockThread,
 		})
 

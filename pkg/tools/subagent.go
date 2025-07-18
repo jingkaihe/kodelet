@@ -111,7 +111,7 @@ func (t *SubAgentTool) Execute(ctx context.Context, state tooltypes.State, param
 	}
 
 	// get type.Thread from context
-	subAgentConfig, ok := ctx.Value(llmtypes.SubAgentConfig{}).(llmtypes.SubAgentConfig)
+	subAgentConfig, ok := ctx.Value(llmtypes.SubAgentConfigKey).(llmtypes.SubAgentConfig)
 	if !ok {
 		return &SubAgentToolResult{
 			err:      "sub-agent config not found in context",

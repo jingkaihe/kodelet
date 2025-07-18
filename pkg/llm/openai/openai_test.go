@@ -836,7 +836,7 @@ func TestNewSubagentContextOpenAI(t *testing.T) {
 				)
 
 				// Retrieve the configuration from the context
-				config, ok := ctx.Value(llm.SubAgentConfig{}).(llm.SubAgentConfig)
+				config, ok := ctx.Value(llm.SubAgentConfigKey).(llm.SubAgentConfig)
 				require.True(t, ok, "SubAgentConfig should be present in context")
 
 				// Verify the compact configuration is correctly passed
@@ -868,7 +868,7 @@ func TestNewSubagentContextOpenAI(t *testing.T) {
 		)
 
 		// Retrieve the configuration
-		config, ok := ctx.Value(llm.SubAgentConfig{}).(llm.SubAgentConfig)
+		config, ok := ctx.Value(llm.SubAgentConfigKey).(llm.SubAgentConfig)
 		require.True(t, ok, "SubAgentConfig should be present in context")
 
 		// Verify the subagent thread is independent

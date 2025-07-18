@@ -119,18 +119,8 @@ func NewSubagentThread(ctx context.Context, parentThread llmtypes.Thread, state 
 // getThreadConfig extracts configuration from a thread
 // This is a helper function to get config from different thread types
 func getThreadConfig(thread llmtypes.Thread) llmtypes.Config {
-	switch t := thread.(type) {
-	case *anthropic.AnthropicThread:
-		return t.GetConfig()
-	case *openai.OpenAIThread:
-		return t.GetConfig()
-	default:
-		// Return a default config if we can't determine the type
-		logger.G(context.Background()).Warn("Unknown thread type, using default config")
-		return llmtypes.Config{
-			Provider: thread.Provider(),
-		}
-	}
+	// Now that GetConfig() is part of the Thread interface, we can call it directly
+	return thread.GetConfig()
 }
 
 // NewSubagentContext creates a subagent context for the given thread
@@ -138,7 +128,7 @@ func getThreadConfig(thread llmtypes.Thread) llmtypes.Config {
 func NewSubagentContext(ctx context.Context, parentThread llmtypes.Thread, handler llmtypes.MessageHandler, compactRatio float64, disableAutoCompact bool) context.Context {
 	state := tools.NewBasicState(ctx, tools.WithSubAgentTools(), tools.WithExtraMCPTools(parentThread.GetState().MCPTools()))
 	subAgent := NewSubagentThread(ctx, parentThread, state)
-	ctx = context.WithValue(ctx, llmtypes.SubAgentConfig{}, llmtypes.SubAgentConfig{
+	ctx = context.WithValue(ctx, llmtypes.SubAgentConfigKey, llmtypes.SubAgentConfig{
 		Thread:             subAgent,
 		MessageHandler:     handler,
 		CompactRatio:       compactRatio,

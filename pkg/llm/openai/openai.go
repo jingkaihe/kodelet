@@ -197,6 +197,12 @@ func NewOpenAIThread(config llmtypes.Config, subagentContextFactory llmtypes.Sub
 		// Use OpenAI API key
 		apiKeyEnvVar := GetAPIKeyEnvVar(config)
 		logger.WithField("api_key_env_var", apiKeyEnvVar).Debug("using OpenAI API key")
+		
+		// Validate API key early
+		if os.Getenv(apiKeyEnvVar) == "" {
+			return nil, errors.Errorf("%s environment variable is required", apiKeyEnvVar)
+		}
+		
 		apiKey := os.Getenv(apiKeyEnvVar)
 		clientConfig = openai.DefaultConfig(apiKey)
 		useCopilot = false
@@ -224,14 +230,6 @@ func NewOpenAIThread(config llmtypes.Config, subagentContextFactory llmtypes.Sub
 
 	// Load custom models and pricing if available
 	customModels, customPricing := loadCustomConfiguration(config)
-
-	// Validate API key if not using Copilot
-	if !useCopilot {
-		apiKeyEnvVar := GetAPIKeyEnvVar(config)
-		if os.Getenv(apiKeyEnvVar) == "" {
-			return nil, errors.Errorf("%s environment variable is required", apiKeyEnvVar)
-		}
-	}
 
 	return &OpenAIThread{
 		client:                 client,
@@ -703,7 +701,7 @@ func (t *OpenAIThread) NewSubagentContext(ctx context.Context, handler llmtypes.
 	subAgent := t.NewSubAgent(ctx, subAgentConfig)
 	subAgent.SetState(tools.NewBasicState(ctx, tools.WithSubAgentTools(), tools.WithExtraMCPTools(t.state.MCPTools())))
 
-	ctx = context.WithValue(ctx, llmtypes.SubAgentConfig{}, llmtypes.SubAgentConfig{
+	ctx = context.WithValue(ctx, llmtypes.SubAgentConfigKey, llmtypes.SubAgentConfig{
 		Thread:             subAgent,
 		MessageHandler:     handler,
 		CompactRatio:       compactRatio,

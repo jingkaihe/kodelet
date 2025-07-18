@@ -263,7 +263,7 @@ func TestImageRecognitionTool_Execute(t *testing.T) {
 			},
 		}
 
-		ctx := context.WithValue(context.Background(), llm.SubAgentConfig{}, subAgentConfig)
+		ctx := context.WithValue(context.Background(), llm.SubAgentConfigKey, subAgentConfig)
 		state := &mockState{}
 		parameters := `{"image_path": "` + imagePath + `", "prompt": "What is this?"}`
 

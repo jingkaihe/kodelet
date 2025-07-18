@@ -657,7 +657,7 @@ func TestNewSubagentContext(t *testing.T) {
 				)
 
 				// Retrieve the configuration from the context
-				config, ok := ctx.Value(llmtypes.SubAgentConfig{}).(llmtypes.SubAgentConfig)
+				config, ok := ctx.Value(llmtypes.SubAgentConfigKey).(llmtypes.SubAgentConfig)
 				require.True(t, ok, "SubAgentConfig should be present in context")
 
 				// Verify the compact configuration is correctly passed
@@ -689,7 +689,7 @@ func TestNewSubagentContext(t *testing.T) {
 		)
 
 		// Retrieve the configuration
-		config, ok := ctx.Value(llmtypes.SubAgentConfig{}).(llmtypes.SubAgentConfig)
+		config, ok := ctx.Value(llmtypes.SubAgentConfigKey).(llmtypes.SubAgentConfig)
 		require.True(t, ok, "SubAgentConfig should be present in context")
 
 		// Verify the subagent thread is independent

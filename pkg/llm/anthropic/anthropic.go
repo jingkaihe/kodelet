@@ -775,7 +775,7 @@ func (t *AnthropicThread) NewSubagentContext(ctx context.Context, handler llmtyp
 	subAgent := t.NewSubAgent(ctx, subAgentConfig)
 	subAgent.SetState(tools.NewBasicState(ctx, tools.WithSubAgentTools(), tools.WithExtraMCPTools(t.state.MCPTools())))
 
-	ctx = context.WithValue(ctx, llmtypes.SubAgentConfig{}, llmtypes.SubAgentConfig{
+	ctx = context.WithValue(ctx, llmtypes.SubAgentConfigKey, llmtypes.SubAgentConfig{
 		Thread:             subAgent,
 		MessageHandler:     handler,
 		CompactRatio:       compactRatio,
