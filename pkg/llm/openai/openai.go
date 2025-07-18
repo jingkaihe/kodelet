@@ -111,23 +111,23 @@ type ConversationStore = conversations.ConversationStore
 
 // OpenAIThread implements the Thread interface using OpenAI's API
 type OpenAIThread struct {
-	client           *openai.Client
-	config           llmtypes.Config
-	reasoningEffort  string // low, medium, high to determine token allocation
-	state            tooltypes.State
-	messages         []openai.ChatCompletionMessage
-	usage            *llmtypes.Usage
-	conversationID   string
-	summary          string
-	isPersisted      bool
-	store            ConversationStore
-	mu               sync.Mutex
-	conversationMu   sync.Mutex
-	toolResults      map[string]tooltypes.StructuredToolResult // Maps tool_call_id to structured result
-	customModels     *llmtypes.CustomModels                    // Custom model configuration
-	customPricing    llmtypes.CustomPricing                    // Custom pricing configuration
-	useCopilot       bool                                      // Whether this thread uses GitHub Copilot
-	subagentContextFactory llmtypes.SubagentContextFactory    // Injected function for cross-provider subagent creation
+	client                 *openai.Client
+	config                 llmtypes.Config
+	reasoningEffort        string // low, medium, high to determine token allocation
+	state                  tooltypes.State
+	messages               []openai.ChatCompletionMessage
+	usage                  *llmtypes.Usage
+	conversationID         string
+	summary                string
+	isPersisted            bool
+	store                  ConversationStore
+	mu                     sync.Mutex
+	conversationMu         sync.Mutex
+	toolResults            map[string]tooltypes.StructuredToolResult // Maps tool_call_id to structured result
+	customModels           *llmtypes.CustomModels                    // Custom model configuration
+	customPricing          llmtypes.CustomPricing                    // Custom pricing configuration
+	useCopilot             bool                                      // Whether this thread uses GitHub Copilot
+	subagentContextFactory llmtypes.SubagentContextFactory           // Injected function for cross-provider subagent creation
 }
 
 func (t *OpenAIThread) Provider() string {
@@ -234,16 +234,16 @@ func NewOpenAIThread(config llmtypes.Config, subagentContextFactory llmtypes.Sub
 	}
 
 	return &OpenAIThread{
-		client:           client,
-		config:           config,
-		reasoningEffort:  reasoningEffort,
-		conversationID:   convtypes.GenerateID(),
-		isPersisted:      false,
-		usage:            &llmtypes.Usage{}, // must be initialized to avoid nil pointer dereference
-		toolResults:      make(map[string]tooltypes.StructuredToolResult),
-		customModels:     customModels,
-		customPricing:    customPricing,
-		useCopilot:       useCopilot,
+		client:                 client,
+		config:                 config,
+		reasoningEffort:        reasoningEffort,
+		conversationID:         convtypes.GenerateID(),
+		isPersisted:            false,
+		usage:                  &llmtypes.Usage{}, // must be initialized to avoid nil pointer dereference
+		toolResults:            make(map[string]tooltypes.StructuredToolResult),
+		customModels:           customModels,
+		customPricing:          customPricing,
+		useCopilot:             useCopilot,
 		subagentContextFactory: subagentContextFactory, // Set directly during creation
 	}, nil
 }
@@ -663,15 +663,15 @@ func (t *OpenAIThread) updateUsage(usage openai.Usage, model string) {
 func (t *OpenAIThread) NewSubAgent(ctx context.Context, config llmtypes.Config) llmtypes.Thread {
 	// Create subagent thread reusing the parent's client instead of creating a new one
 	thread := &OpenAIThread{
-		client:           t.client, // Reuse parent's client
-		config:           config,
-		reasoningEffort:  config.ReasoningEffort, // Use config's reasoning effort
-		conversationID:   convtypes.GenerateID(),
-		isPersisted:      false,              // subagent is not persisted
-		usage:            t.usage,            // Share usage tracking with parent
-		customModels:     t.customModels,     // Share custom models configuration
-		customPricing:    t.customPricing,    // Share custom pricing configuration
-		useCopilot:       t.useCopilot,       // Share Copilot usage with parent
+		client:                 t.client, // Reuse parent's client
+		config:                 config,
+		reasoningEffort:        config.ReasoningEffort, // Use config's reasoning effort
+		conversationID:         convtypes.GenerateID(),
+		isPersisted:            false,                    // subagent is not persisted
+		usage:                  t.usage,                  // Share usage tracking with parent
+		customModels:           t.customModels,           // Share custom models configuration
+		customPricing:          t.customPricing,          // Share custom pricing configuration
+		useCopilot:             t.useCopilot,             // Share Copilot usage with parent
 		subagentContextFactory: t.subagentContextFactory, // Propagate the injected function
 	}
 

@@ -47,20 +47,20 @@ const (
 
 // AnthropicThread implements the Thread interface using Anthropic's Claude API
 type AnthropicThread struct {
-	client           anthropic.Client
-	config           llmtypes.Config
-	state            tooltypes.State
-	messages         []anthropic.MessageParam
-	usage            *llmtypes.Usage
-	conversationID   string
-	summary          string
-	isPersisted      bool
-	store            ConversationStore
-	mu               sync.Mutex
-	conversationMu   sync.Mutex
-	useSubscription  bool
-	toolResults      map[string]tooltypes.StructuredToolResult // Maps tool_call_id to structured result
-	subagentContextFactory llmtypes.SubagentContextFactory    // Injected function for cross-provider subagent creation
+	client                 anthropic.Client
+	config                 llmtypes.Config
+	state                  tooltypes.State
+	messages               []anthropic.MessageParam
+	usage                  *llmtypes.Usage
+	conversationID         string
+	summary                string
+	isPersisted            bool
+	store                  ConversationStore
+	mu                     sync.Mutex
+	conversationMu         sync.Mutex
+	useSubscription        bool
+	toolResults            map[string]tooltypes.StructuredToolResult // Maps tool_call_id to structured result
+	subagentContextFactory llmtypes.SubagentContextFactory           // Injected function for cross-provider subagent creation
 }
 
 func (t *AnthropicThread) Provider() string {
@@ -134,13 +134,13 @@ func NewAnthropicThread(config llmtypes.Config, subagentContextFactory llmtypes.
 	}
 
 	return &AnthropicThread{
-		client:           client,
-		config:           config,
-		useSubscription:  useSubscription,
-		conversationID:   convtypes.GenerateID(),
-		isPersisted:      false,
-		usage:            &llmtypes.Usage{}, // must be initialised to avoid nil pointer dereference
-		toolResults:      make(map[string]tooltypes.StructuredToolResult),
+		client:                 client,
+		config:                 config,
+		useSubscription:        useSubscription,
+		conversationID:         convtypes.GenerateID(),
+		isPersisted:            false,
+		usage:                  &llmtypes.Usage{}, // must be initialised to avoid nil pointer dereference
+		toolResults:            make(map[string]tooltypes.StructuredToolResult),
 		subagentContextFactory: subagentContextFactory, // Set directly during creation
 	}, nil
 }
@@ -738,12 +738,12 @@ func (t *AnthropicThread) updateUsage(response *anthropic.Message, model anthrop
 func (t *AnthropicThread) NewSubAgent(ctx context.Context, config llmtypes.Config) llmtypes.Thread {
 	// Create subagent thread reusing the parent's client instead of creating a new one
 	thread := &AnthropicThread{
-		client:           t.client, // Reuse parent's client
-		config:           config,
-		useSubscription:  t.useSubscription, // Reuse parent's subscription status
-		conversationID:   convtypes.GenerateID(),
-		isPersisted:      false,              // subagent is not persisted
-		usage:            t.usage,            // Share usage tracking with parent
+		client:                 t.client, // Reuse parent's client
+		config:                 config,
+		useSubscription:        t.useSubscription, // Reuse parent's subscription status
+		conversationID:         convtypes.GenerateID(),
+		isPersisted:            false,                    // subagent is not persisted
+		usage:                  t.usage,                  // Share usage tracking with parent
 		subagentContextFactory: t.subagentContextFactory, // Propagate the injected function
 	}
 
