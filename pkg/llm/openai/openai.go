@@ -197,12 +197,12 @@ func NewOpenAIThread(config llmtypes.Config, subagentContextFactory llmtypes.Sub
 		// Use OpenAI API key
 		apiKeyEnvVar := GetAPIKeyEnvVar(config)
 		logger.WithField("api_key_env_var", apiKeyEnvVar).Debug("using OpenAI API key")
-		
+
 		// Validate API key early
 		if os.Getenv(apiKeyEnvVar) == "" {
 			return nil, errors.Errorf("%s environment variable is required", apiKeyEnvVar)
 		}
-		
+
 		apiKey := os.Getenv(apiKeyEnvVar)
 		clientConfig = openai.DefaultConfig(apiKey)
 		useCopilot = false
