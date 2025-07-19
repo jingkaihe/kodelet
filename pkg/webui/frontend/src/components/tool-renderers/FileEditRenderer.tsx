@@ -25,8 +25,7 @@ const FileEditRenderer: React.FC<FileEditRendererProps> = ({ toolResult }) => {
   if (!meta) return null;
 
   const edits = meta.edits || [];
-  const isMultiEdit = toolResult.toolName === 'file_multi_edit';
-  const replacements = meta.actualReplaced || 0;
+
 
   const renderEdits = (edits: FileEdit[]) => {
     return edits.map((edit: FileEdit, index: number) => {
@@ -152,28 +151,7 @@ const FileEditRenderer: React.FC<FileEditRendererProps> = ({ toolResult }) => {
     });
   };
 
-  if (isMultiEdit) {
-    return (
-      <ToolCard
-        title="🔄 File Multi Edit"
-        badge={{ text: `${replacements} replacements`, className: 'badge-info' }}
-      >
-        <div className="text-xs text-base-content/60 mb-3 font-mono">
-          <MetadataRow label="Path" value={meta.filePath} monospace />
-        </div>
 
-        {edits.length > 0 && (
-          <Collapsible
-            title="View Changes"
-            collapsed={false}
-            badge={{ text: `${edits.length} changes`, className: 'badge-info' }}
-          >
-            <div>{renderEdits(edits)}</div>
-          </Collapsible>
-        )}
-      </ToolCard>
-    );
-  }
 
   return (
     <ToolCard

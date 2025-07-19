@@ -607,7 +607,7 @@ func TestExtractMetadata_AllTypes(t *testing.T) {
 		{"FileReadMetadata", FileReadMetadata{FilePath: "/test"}, &FileReadMetadata{}},
 		{"FileWriteMetadata", FileWriteMetadata{FilePath: "/test"}, &FileWriteMetadata{}},
 		{"FileEditMetadata", FileEditMetadata{FilePath: "/test"}, &FileEditMetadata{}},
-		{"FileMultiEditMetadata", FileMultiEditMetadata{FilePath: "/test"}, &FileMultiEditMetadata{}},
+
 		{"BashMetadata", BashMetadata{Command: "test"}, &BashMetadata{}},
 		{"BackgroundBashMetadata", BackgroundBashMetadata{Command: "test", PID: 1234, LogPath: "/tmp/log.txt"}, &BackgroundBashMetadata{}},
 		{"GrepMetadata", GrepMetadata{Pattern: "test"}, &GrepMetadata{}},

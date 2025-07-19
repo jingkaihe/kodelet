@@ -135,32 +135,7 @@ describe('FileEditRenderer', () => {
     });
   });
 
-  describe('Multi File Edit', () => {
-    it('renders multi edit with correct title', () => {
-      const toolResult = createToolResult({
-        filePath: '/src/app.js',
-        edits: [],
-        actualReplaced: 3,
-      }, 'file_multi_edit');
 
-      render(<FileEditRenderer toolResult={toolResult} />);
-
-      expect(screen.getByText('🔄 File Multi Edit')).toBeInTheDocument();
-      expect(screen.getByText('3 replacements')).toBeInTheDocument();
-    });
-
-    it('handles zero replacements', () => {
-      const toolResult = createToolResult({
-        filePath: '/src/app.js',
-        edits: [],
-        actualReplaced: 0,
-      }, 'file_multi_edit');
-
-      render(<FileEditRenderer toolResult={toolResult} />);
-
-      expect(screen.getByText('0 replacements')).toBeInTheDocument();
-    });
-  });
 
   describe('Diff Rendering', () => {
     it('renders simple line change', () => {

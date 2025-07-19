@@ -54,7 +54,6 @@ const ToolRenderer: React.FC<ToolRendererProps> = ({ toolResult }) => {
       case 'file_write':
         return <FileWriteRenderer toolResult={toolResult} />;
       case 'file_edit':
-      case 'file_multi_edit':
         return <FileEditRenderer toolResult={toolResult} />;
       case 'bash':
         return <BashRenderer toolResult={toolResult} />;

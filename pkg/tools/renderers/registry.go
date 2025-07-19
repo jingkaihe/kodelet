@@ -29,7 +29,7 @@ func NewRendererRegistry() *RendererRegistry {
 	registry.Register("file_read", &FileReadRenderer{})
 	registry.Register("file_write", &FileWriteRenderer{})
 	registry.Register("file_edit", &FileEditRenderer{})
-	registry.Register("file_multi_edit", &FileMultiEditRenderer{})
+
 	registry.Register("bash", &BashRenderer{})
 	registry.Register("bash_background", &BashRenderer{})
 	registry.Register("grep_tool", &GrepRenderer{})

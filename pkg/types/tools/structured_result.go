@@ -56,7 +56,7 @@ var metadataTypeRegistry = map[string]reflect.Type{
 	"file_read":                 reflect.TypeOf(FileReadMetadata{}),
 	"file_write":                reflect.TypeOf(FileWriteMetadata{}),
 	"file_edit":                 reflect.TypeOf(FileEditMetadata{}),
-	"file_multi_edit":           reflect.TypeOf(FileMultiEditMetadata{}),
+
 	"grep_tool":                 reflect.TypeOf(GrepMetadata{}),
 	"glob_tool":                 reflect.TypeOf(GlobMetadata{}),
 	"bash":                      reflect.TypeOf(BashMetadata{}),
@@ -380,14 +380,7 @@ type BackgroundProcessInfo struct {
 
 func (m ViewBackgroundProcessesMetadata) ToolType() string { return "view_background_processes" }
 
-type FileMultiEditMetadata struct {
-	FilePath       string `json:"filePath"`
-	Edits          []Edit `json:"edits"`
-	Language       string `json:"language,omitempty"`
-	ActualReplaced int    `json:"actualReplaced"`
-}
 
-func (m FileMultiEditMetadata) ToolType() string { return "file_multi_edit" }
 
 // ExtractMetadata is a helper that handles both pointer and value type assertions
 // This is necessary because JSON unmarshaling creates value types, while
