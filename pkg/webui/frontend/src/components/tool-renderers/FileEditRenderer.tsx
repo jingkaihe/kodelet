@@ -5,6 +5,10 @@ import { ToolCard, MetadataRow, Collapsible } from './shared';
 interface FileEditMetadata {
   filePath: string;
   edits: FileEdit[];
+  language?: string;
+  replaceAll?: boolean;
+  replacedCount?: number;
+  // Legacy fields for backward compatibility
   actualReplaced?: number;
   occurrence?: number;
 }
@@ -25,6 +29,8 @@ const FileEditRenderer: React.FC<FileEditRendererProps> = ({ toolResult }) => {
   if (!meta) return null;
 
   const edits = meta.edits || [];
+  const replaceAll = meta.replaceAll || false;
+  const replacedCount = meta.replacedCount || meta.actualReplaced || 0;
 
 
   const renderEdits = (edits: FileEdit[]) => {
@@ -153,22 +159,73 @@ const FileEditRenderer: React.FC<FileEditRendererProps> = ({ toolResult }) => {
 
 
 
+  // Determine title and badge based on ReplaceAll
+  const getTitle = () => {
+    if (replaceAll && replacedCount > 1) {
+      return "🔄 File Edit (Replace All)";
+    }
+    return "✏️ File Edit";
+  };
+
+  const getBadge = () => {
+    if (replaceAll) {
+      return {
+        text: `${replacedCount} replacement${replacedCount !== 1 ? 's' : ''}`,
+        className: 'badge-info'
+      };
+    }
+    return {
+      text: `${edits.length} edit${edits.length !== 1 ? 's' : ''}`,
+      className: 'badge-info'
+    };
+  };
+
+  const getCollapsibleTitle = () => {
+    if (replaceAll && edits.length > 1) {
+      return "View All Changes";
+    }
+    return "View Changes";
+  };
+
+  const getCollapsibleBadge = () => {
+    if (replaceAll && replacedCount > 0) {
+      return {
+        text: `${edits.length} locations`,
+        className: 'badge-info'
+      };
+    }
+    return {
+      text: `${edits.length} changes`,
+      className: 'badge-info'
+    };
+  };
+
   return (
     <ToolCard
-      title="✏️ File Edit"
-      badge={{ text: `${edits.length} edit${edits.length !== 1 ? 's' : ''}`, className: 'badge-info' }}
+      title={getTitle()}
+      badge={getBadge()}
     >
       <div className="text-xs text-base-content/60 mb-3 font-mono">
         <MetadataRow label="Path" value={meta.filePath} monospace />
+        {replaceAll && (
+          <MetadataRow label="Mode" value="Replace All" />
+        )}
       </div>
 
       {edits.length > 0 && (
         <Collapsible
-          title="View Changes"
+          title={getCollapsibleTitle()}
           collapsed={false}
-          badge={{ text: `${edits.length} changes`, className: 'badge-info' }}
+          badge={getCollapsibleBadge()}
         >
-          <div>{renderEdits(edits)}</div>
+          <div>
+            {replaceAll && edits.length > 3 && (
+              <div className="text-xs text-base-content/60 mb-2">
+                Showing all {edits.length} replacement locations:
+              </div>
+            )}
+            {renderEdits(edits)}
+          </div>
         </Collapsible>
       )}
     </ToolCard>

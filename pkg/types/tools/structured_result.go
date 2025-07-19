@@ -140,9 +140,11 @@ type FileWriteMetadata struct {
 func (m FileWriteMetadata) ToolType() string { return "file_write" }
 
 type FileEditMetadata struct {
-	FilePath string `json:"filePath"`
-	Edits    []Edit `json:"edits"`
-	Language string `json:"language,omitempty"`
+	FilePath      string `json:"filePath"`
+	Edits         []Edit `json:"edits"`
+	Language      string `json:"language,omitempty"`
+	ReplaceAll    bool   `json:"replaceAll,omitempty"`
+	ReplacedCount int    `json:"replacedCount,omitempty"`
 }
 
 type Edit struct {

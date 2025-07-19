@@ -16,19 +16,32 @@ import (
 )
 
 type FileEditToolResult struct {
-	filename   string
-	oldText    string
-	newText    string
-	oldContent string
-	newContent string
-	startLine  int
-	endLine    int
-	err        string
+	filename      string
+	oldText       string
+	newText       string
+	oldContent    string
+	newContent    string
+	startLine     int
+	endLine       int
+	replaceAll    bool
+	replacedCount int
+	edits         []EditInfo
+	err           string
+}
+
+type EditInfo struct {
+	StartLine  int
+	EndLine    int
+	OldContent string
+	NewContent string
 }
 
 func (r *FileEditToolResult) GetResult() string {
 	if r.IsError() {
 		return ""
+	}
+	if r.replaceAll {
+		return fmt.Sprintf("File %s has been edited successfully. Replaced %d occurrences", r.filename, r.replacedCount)
 	}
 	return fmt.Sprintf("File %s has been edited successfully", r.filename)
 }
@@ -46,14 +59,41 @@ func (r *FileEditToolResult) AssistantFacing() string {
 		return tooltypes.StringifyToolResult("", r.GetError())
 	}
 
-	formattedEdit := ""
-	if r.newText != "" {
-		newLines := strings.Split(r.newText, "\n")
-		formattedEdit = utils.ContentWithLineNumber(newLines, r.startLine)
+	var result string
+	if r.replaceAll && r.replacedCount > 1 {
+		result = fmt.Sprintf("File %s has been edited successfully. Replaced %d occurrences", r.filename, r.replacedCount)
+		if len(r.edits) > 0 {
+			result += "\n\nSample edited code blocks:"
+			// Show first few edits as examples
+			maxEdits := min(3, len(r.edits))
+			for i := 0; i < maxEdits; i++ {
+				edit := r.edits[i]
+				if edit.NewContent != "" {
+					newLines := strings.Split(edit.NewContent, "\n")
+					formattedEdit := utils.ContentWithLineNumber(newLines, edit.StartLine)
+					result += fmt.Sprintf("\n\nEdit %d (lines %d-%d):\n%s", i+1, edit.StartLine, edit.EndLine, formattedEdit)
+				}
+			}
+			if len(r.edits) > maxEdits {
+				result += fmt.Sprintf("\n\n... and %d more replacements", len(r.edits)-maxEdits)
+			}
+		}
+	} else {
+		formattedEdit := ""
+		if r.newText != "" {
+			newLines := strings.Split(r.newText, "\n")
+			formattedEdit = utils.ContentWithLineNumber(newLines, r.startLine)
+		}
+		result = fmt.Sprintf("File %s has been edited successfully\n\nEdited code block:\n%s", r.filename, formattedEdit)
 	}
-
-	result := fmt.Sprintf("File %s has been edited successfully\n\nEdited code block:\n%s", r.filename, formattedEdit)
 	return tooltypes.StringifyToolResult(result, "")
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func (r *FileEditToolResult) StructuredData() tooltypes.StructuredToolResult {
@@ -66,18 +106,37 @@ func (r *FileEditToolResult) StructuredData() tooltypes.StructuredToolResult {
 	// Detect language from file extension
 	language := utils.DetectLanguageFromPath(r.filename)
 
-	// Always populate metadata, even for errors
-	result.Metadata = &tooltypes.FileEditMetadata{
-		FilePath: r.filename,
-		Language: language,
-		Edits: []tooltypes.Edit{
+	// Create edits array for structured data
+	var edits []tooltypes.Edit
+	if r.replaceAll && len(r.edits) > 0 {
+		// Use multiple edits for replace all
+		for _, edit := range r.edits {
+			edits = append(edits, tooltypes.Edit{
+				StartLine:  edit.StartLine,
+				EndLine:    edit.EndLine,
+				OldContent: edit.OldContent,
+				NewContent: edit.NewContent,
+			})
+		}
+	} else {
+		// Use single edit for normal case
+		edits = []tooltypes.Edit{
 			{
 				StartLine:  r.startLine,
 				EndLine:    r.endLine,
 				OldContent: r.oldText,
 				NewContent: r.newText,
 			},
-		},
+		}
+	}
+
+	// Always populate metadata, even for errors
+	result.Metadata = &tooltypes.FileEditMetadata{
+		FilePath:      r.filename,
+		Language:      language,
+		Edits:         edits,
+		ReplaceAll:    r.replaceAll,
+		ReplacedCount: r.replacedCount,
 	}
 
 	if r.IsError() {
@@ -94,9 +153,10 @@ func (t *FileEditTool) Name() string {
 }
 
 type FileEditInput struct {
-	FilePath string `json:"file_path" jsonschema:"description=The absolute path of the file to edit"`
-	OldText  string `json:"old_text" jsonschema:"description=The unique text to be replaced"`
-	NewText  string `json:"new_text" jsonschema:"description=The text to replace the old text with"`
+	FilePath   string `json:"file_path" jsonschema:"description=The absolute path of the file to edit"`
+	OldText    string `json:"old_text" jsonschema:"description=The text to be replaced"`
+	NewText    string `json:"new_text" jsonschema:"description=The text to replace the old text with"`
+	ReplaceAll bool   `json:"replace_all" jsonschema:"description=If true, replace all occurrences of old_text; if false (default), old_text must be unique"`
 }
 
 func (t *FileEditTool) GenerateSchema() *jsonschema.Schema {
@@ -104,14 +164,15 @@ func (t *FileEditTool) GenerateSchema() *jsonschema.Schema {
 }
 
 func (t *FileEditTool) Description() string {
-	return `Edit a file by replacing the UNIQUE old text with the new text.
+	return `Edit a file by replacing old text with new text.
 
 If you are creating a new file, you can use the "FileWrite" tool to create instead of using this tool.
 
-This tool takes three parameters:
+This tool takes four parameters:
 - file_path: The absolute path of the file to edit
-- old_text: The **UNIQUE** text to be replaced - The text must exactly match the text block in the file including the spaces and indentations.
+- old_text: The text to be replaced - The text must exactly match the text block in the file including the spaces and indentations.
 - new_text: The text to replace the old text with
+- replace_all: (optional, default: false) If true, replace all occurrences of old_text; if false, old_text must be unique
 
 # RULES
 ## Read before editing
@@ -120,16 +181,22 @@ You must read the file using the "FileRead" tool before making any edits.
 ## Validate after edit
 If the text edit is code or configuration related, you are encouraged to validate the edit via running the linting tool using bash.
 
-## Unique text
+## Replace All vs Unique text
+**Default behavior (replace_all: false):**
 The old text must be unique in the file. To ensure the uniqueness of the old text, make sure:
 * Include the 3-5 lines BEFORE the block of text to be replaced.
 * Include the 3-5 lines AFTER the block of text to be replaced.
 * Any spaces and indentations must be honoured.
+This tool will only edit one occurrence of the old text.
 
-## Edit ONCE
-!!! IMPORTANT !!! This tool will only edit one occurrence of the old text.
+**Replace All behavior (replace_all: true):**
+When replace_all is set to true, the tool will replace ALL occurrences of the old_text in the file.
+This is useful for:
+* Renaming variables or function names across a file
+* Updating repeated patterns throughout the code
+* Bulk text replacements
 
-If you have multiple text blocks to be replaced, you can call this tool multiple times in a single message.
+If you have multiple different text blocks to be replaced, you can call this tool multiple times in a single message.
 `
 }
 
@@ -144,6 +211,7 @@ func (t *FileEditTool) TracingKVs(parameters string) ([]attribute.KeyValue, erro
 		attribute.String("file_path", input.FilePath),
 		attribute.String("old_text", input.OldText),
 		attribute.String("new_text", input.NewText),
+		attribute.Bool("replace_all", input.ReplaceAll),
 	}, nil
 }
 
@@ -184,13 +252,74 @@ func (t *FileEditTool) ValidateInput(state tooltypes.State, parameters string) e
 		return errors.New("old text not found in the file, please ensure the text exists")
 	}
 
-	// Count occurrences to ensure uniqueness
-	occurrences := strings.Count(string(content), oldText)
-	if occurrences > 1 {
-		return errors.Errorf("old text appears %d times in the file, please ensure the old text is unique", occurrences)
+	// Count occurrences to ensure uniqueness (only if not replacing all)
+	if !input.ReplaceAll {
+		occurrences := strings.Count(string(content), oldText)
+		if occurrences > 1 {
+			return errors.Errorf("old text appears %d times in the file, please ensure the old text is unique or set replace_all to true", occurrences)
+		}
 	}
 
 	return nil
+}
+
+// findAllOccurrences finds all occurrences of oldText in content and returns their positions and line numbers
+func findAllOccurrences(content, oldText string) []EditInfo {
+	var edits []EditInfo
+	lines := strings.Split(content, "\n")
+	oldTextLines := strings.Split(oldText, "\n")
+	
+	// Find all occurrences line by line
+	for i := 0; i <= len(lines)-len(oldTextLines); i++ {
+		match := true
+		for j, oldLine := range oldTextLines {
+			if i+j >= len(lines) || lines[i+j] != oldLine {
+				match = false
+				break
+			}
+		}
+		if match {
+			startLine := i + 1 // 1-indexed
+			endLine := i + len(oldTextLines)
+			edits = append(edits, EditInfo{
+				StartLine:  startLine,
+				EndLine:    endLine,
+				OldContent: oldText,
+				NewContent: "",
+			})
+			// Skip to avoid overlapping matches
+			i += len(oldTextLines) - 1
+		}
+	}
+	
+	// If no exact line matches found, fall back to simple string search
+	if len(edits) == 0 {
+		searchText := content
+		startPos := 0
+		for {
+			pos := strings.Index(searchText, oldText)
+			if pos == -1 {
+				break
+			}
+			
+			// Find line number for this position
+			beforeText := content[:startPos+pos]
+			lineNum := strings.Count(beforeText, "\n") + 1
+			
+			edits = append(edits, EditInfo{
+				StartLine:  lineNum,
+				EndLine:    lineNum + strings.Count(oldText, "\n"),
+				OldContent: oldText,
+				NewContent: "",
+			})
+			
+			// Move past this match
+			startPos += pos + len(oldText)
+			searchText = content[startPos:]
+		}
+	}
+	
+	return edits
 }
 
 // findLineNumbers finds the start and end line numbers for the given old text in the content
@@ -296,12 +425,52 @@ func (t *FileEditTool) Execute(ctx context.Context, state tooltypes.State, param
 	originalContent := string(b)
 	oldText := input.OldText
 	newText := input.NewText
+	replaceAll := input.ReplaceAll
 
-	// Find the line numbers for the old text
-	startLine, endLine := findLineNumbers(originalContent, oldText)
+	var content string
+	var replacedCount int
+	var edits []EditInfo
+	var startLine, endLine int
 
-	// Since we already validated the text exists and is unique, we can safely replace it
-	content := strings.Replace(originalContent, oldText, newText, 1)
+	if replaceAll {
+		// Find all occurrences and replace them
+		allOccurrences := findAllOccurrences(originalContent, oldText)
+		replacedCount = len(allOccurrences)
+		
+		// Update edits with new content
+		for i := range allOccurrences {
+			allOccurrences[i].NewContent = newText
+		}
+		edits = allOccurrences
+		
+		// Replace all occurrences
+		content = strings.ReplaceAll(originalContent, oldText, newText)
+		
+		// For single edit compatibility, use first occurrence for startLine/endLine
+		if len(allOccurrences) > 0 {
+			startLine = allOccurrences[0].StartLine
+			endLine = allOccurrences[0].EndLine
+		} else {
+			startLine, endLine = findLineNumbers(originalContent, oldText)
+		}
+	} else {
+		// Find the line numbers for the old text (single occurrence)
+		startLine, endLine = findLineNumbers(originalContent, oldText)
+		
+		// Replace only the first occurrence
+		content = strings.Replace(originalContent, oldText, newText, 1)
+		replacedCount = 1
+		
+		// Create single edit info
+		edits = []EditInfo{
+			{
+				StartLine:  startLine,
+				EndLine:    endLine,
+				OldContent: oldText,
+				NewContent: newText,
+			},
+		}
+	}
 
 	err = os.WriteFile(input.FilePath, []byte(content), 0644)
 	if err != nil {
@@ -313,12 +482,15 @@ func (t *FileEditTool) Execute(ctx context.Context, state tooltypes.State, param
 	state.SetFileLastAccessed(input.FilePath, time.Now())
 
 	return &FileEditToolResult{
-		filename:   input.FilePath,
-		oldText:    oldText,
-		newText:    newText,
-		oldContent: originalContent,
-		newContent: content,
-		startLine:  startLine,
-		endLine:    endLine,
+		filename:      input.FilePath,
+		oldText:       oldText,
+		newText:       newText,
+		oldContent:    originalContent,
+		newContent:    content,
+		startLine:     startLine,
+		endLine:       endLine,
+		replaceAll:    replaceAll,
+		replacedCount: replacedCount,
+		edits:         edits,
 	}
 }

@@ -331,4 +331,115 @@ describe('FileEditRenderer', () => {
       expect(container.querySelector('.bg-white')).toBeInTheDocument();
     });
   });
+
+  describe('Replace All Functionality', () => {
+    it('renders replace all with multiple replacements', () => {
+      const toolResult = createToolResult({
+        filePath: '/src/app.js',
+        replaceAll: true,
+        replacedCount: 3,
+        edits: [
+          { startLine: 1, endLine: 1, oldContent: 'old', newContent: 'new' },
+          { startLine: 5, endLine: 5, oldContent: 'old', newContent: 'new' },
+          { startLine: 10, endLine: 10, oldContent: 'old', newContent: 'new' },
+        ],
+      });
+
+      render(<FileEditRenderer toolResult={toolResult} />);
+
+      expect(screen.getByText('🔄 File Edit (Replace All)')).toBeInTheDocument();
+      expect(screen.getByText('3 replacements')).toBeInTheDocument();
+      expect(screen.getByText('Mode: Replace All')).toBeInTheDocument();
+      expect(screen.getByText('View All Changes')).toBeInTheDocument();
+      expect(screen.getByText('3 locations')).toBeInTheDocument();
+    });
+
+    it('renders replace all with single replacement', () => {
+      const toolResult = createToolResult({
+        filePath: '/src/app.js',
+        replaceAll: true,
+        replacedCount: 1,
+        edits: [
+          { startLine: 5, endLine: 7, oldContent: 'old code', newContent: 'new code' },
+        ],
+      });
+
+      render(<FileEditRenderer toolResult={toolResult} />);
+
+      expect(screen.getByText('✏️ File Edit')).toBeInTheDocument();
+      expect(screen.getByText('1 replacement')).toBeInTheDocument();
+      expect(screen.getByText('Mode: Replace All')).toBeInTheDocument();
+    });
+
+    it('renders replace all with zero replacements', () => {
+      const toolResult = createToolResult({
+        filePath: '/src/app.js',
+        replaceAll: true,
+        replacedCount: 0,
+        edits: [],
+      });
+
+      render(<FileEditRenderer toolResult={toolResult} />);
+
+      expect(screen.getByText('✏️ File Edit')).toBeInTheDocument();
+      expect(screen.getByText('0 replacements')).toBeInTheDocument();
+      expect(screen.getByText('Mode: Replace All')).toBeInTheDocument();
+    });
+
+    it('shows summary message for many replacements', () => {
+      const edits = Array.from({ length: 5 }, (_, i) => ({
+        startLine: (i + 1) * 5,
+        endLine: (i + 1) * 5,
+        oldContent: 'old',
+        newContent: 'new',
+      }));
+
+      const toolResult = createToolResult({
+        filePath: '/src/app.js',
+        replaceAll: true,
+        replacedCount: 5,
+        edits,
+      });
+
+      render(<FileEditRenderer toolResult={toolResult} />);
+
+      expect(screen.getByText('Showing all 5 replacement locations:')).toBeInTheDocument();
+      expect(screen.getByText('5 replacements')).toBeInTheDocument();
+      expect(screen.getByText('5 locations')).toBeInTheDocument();
+    });
+
+    it('uses legacy actualReplaced field when replacedCount is not available', () => {
+      const toolResult = createToolResult({
+        filePath: '/src/app.js',
+        replaceAll: true,
+        actualReplaced: 2,
+        edits: [
+          { startLine: 1, endLine: 1, oldContent: 'old', newContent: 'new' },
+          { startLine: 5, endLine: 5, oldContent: 'old', newContent: 'new' },
+        ],
+      });
+
+      render(<FileEditRenderer toolResult={toolResult} />);
+
+      expect(screen.getByText('🔄 File Edit (Replace All)')).toBeInTheDocument();
+      expect(screen.getByText('2 replacements')).toBeInTheDocument();
+    });
+
+    it('handles normal file edit when replaceAll is false', () => {
+      const toolResult = createToolResult({
+        filePath: '/src/app.js',
+        replaceAll: false,
+        replacedCount: 1,
+        edits: [
+          { startLine: 5, endLine: 7, oldContent: 'old code', newContent: 'new code' },
+        ],
+      });
+
+      render(<FileEditRenderer toolResult={toolResult} />);
+
+      expect(screen.getByText('✏️ File Edit')).toBeInTheDocument();
+      expect(screen.getByText('1 edit')).toBeInTheDocument();
+      expect(screen.queryByText('Mode: Replace All')).not.toBeInTheDocument();
+    });
+  });
 });
