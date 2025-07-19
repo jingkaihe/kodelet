@@ -166,29 +166,3 @@ func TestTodoToolResult_StructuredData(t *testing.T) {
 	assert.Equal(t, 1, meta.Statistics.Pending)
 	assert.Equal(t, 1, meta.Statistics.Completed)
 }
-
-func TestBatchToolResult_StructuredData(t *testing.T) {
-	// Create a sub-result for testing
-	subResult := &FileReadToolResult{
-		filename: "test.txt",
-		lines:    []string{"content"},
-	}
-
-	result := &BatchToolResult{
-		description: "Test batch",
-		toolResults: []tooltypes.ToolResult{subResult},
-	}
-
-	structured := result.StructuredData()
-
-	assert.Equal(t, "batch", structured.ToolName)
-
-	meta, ok := structured.Metadata.(*tooltypes.BatchMetadata)
-	require.True(t, ok, "Expected BatchMetadata, got %T", structured.Metadata)
-
-	assert.Equal(t, "Test batch", meta.Description)
-	assert.Equal(t, 1, meta.SuccessCount)
-	assert.Equal(t, 0, meta.FailureCount)
-	assert.Len(t, meta.SubResults, 1)
-	assert.Equal(t, "file_read", meta.SubResults[0].ToolName)
-}

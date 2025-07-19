@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
 func TestFileEditTool_GenerateSchema(t *testing.T) {
@@ -28,7 +29,7 @@ func TestFileEditTool_Name(t *testing.T) {
 func TestFileEditTool_Description(t *testing.T) {
 	tool := &FileEditTool{}
 	desc := tool.Description()
-	assert.Contains(t, desc, "Edit a file by replacing the UNIQUE old text with the new text")
+	assert.Contains(t, desc, "Edit a file by replacing old text with new text")
 	assert.Contains(t, desc, "file_path")
 	assert.Contains(t, desc, "old_text")
 	assert.Contains(t, desc, "new_text")
@@ -387,4 +388,308 @@ func main() {
 	assert.Contains(t, string(updatedContent), "// Process data with sum")
 	assert.Contains(t, string(updatedContent), "sum := 0")
 	assert.NotContains(t, string(updatedContent), "fmt.Println(d)")
+}
+
+func TestFileEditTool_ReplaceAll(t *testing.T) {
+	tool := &FileEditTool{}
+
+	t.Run("replace all occurrences", func(t *testing.T) {
+		// Create a test file with multiple occurrences
+		content := []byte("Hello world\nHello everyone\nGoodbye world\nHello again\n")
+		tmpfile, err := os.CreateTemp("", "FileEditReplaceAllTest")
+		require.NoError(t, err)
+		defer os.Remove(tmpfile.Name())
+
+		_, err = tmpfile.Write(content)
+		require.NoError(t, err)
+		err = tmpfile.Close()
+		require.NoError(t, err)
+
+		mockState := NewBasicState(context.TODO())
+
+		input := FileEditInput{
+			FilePath:   tmpfile.Name(),
+			OldText:    "Hello",
+			NewText:    "Hi",
+			ReplaceAll: true,
+		}
+		params, _ := json.Marshal(input)
+		result := tool.Execute(context.Background(), mockState, string(params))
+
+		assert.False(t, result.IsError())
+		assert.Contains(t, result.GetResult(), "Replaced 3 occurrences")
+
+		// Verify the file was edited correctly
+		updatedContent, err := os.ReadFile(tmpfile.Name())
+		assert.NoError(t, err)
+		updatedStr := string(updatedContent)
+
+		// All "Hello" should be replaced with "Hi"
+		assert.Contains(t, updatedStr, "Hi world")
+		assert.Contains(t, updatedStr, "Hi everyone")
+		assert.Contains(t, updatedStr, "Hi again")
+		assert.NotContains(t, updatedStr, "Hello")
+		assert.Contains(t, updatedStr, "Goodbye world") // Should remain unchanged
+	})
+
+	t.Run("replace all multiline occurrences", func(t *testing.T) {
+		content := []byte(`func test() {
+    return "test"
+}
+
+func main() {
+    test()
+}
+
+func test() {
+    return "test"
+}`)
+		tmpfile, err := os.CreateTemp("", "FileEditReplaceAllMultilineTest")
+		require.NoError(t, err)
+		defer os.Remove(tmpfile.Name())
+
+		_, err = tmpfile.Write(content)
+		require.NoError(t, err)
+		err = tmpfile.Close()
+		require.NoError(t, err)
+
+		mockState := NewBasicState(context.TODO())
+
+		input := FileEditInput{
+			FilePath:   tmpfile.Name(),
+			OldText:    `func test() {
+    return "test"
+}`,
+			NewText: `func test() {
+    return "modified"
+}`,
+			ReplaceAll: true,
+		}
+		params, _ := json.Marshal(input)
+		result := tool.Execute(context.Background(), mockState, string(params))
+
+		assert.False(t, result.IsError())
+		assert.Contains(t, result.GetResult(), "Replaced 2 occurrences")
+
+		// Verify the file was edited correctly
+		updatedContent, err := os.ReadFile(tmpfile.Name())
+		assert.NoError(t, err)
+		updatedStr := string(updatedContent)
+
+		// Count occurrences of "modified"
+		modifiedCount := strings.Count(updatedStr, `return "modified"`)
+		assert.Equal(t, 2, modifiedCount)
+		assert.NotContains(t, updatedStr, `return "test"`)
+		assert.Contains(t, updatedStr, "func main()") // Should remain unchanged
+	})
+
+	t.Run("replace all with zero occurrences", func(t *testing.T) {
+		content := []byte("No matching text here\n")
+		tmpfile, err := os.CreateTemp("", "FileEditReplaceAllZeroTest")
+		require.NoError(t, err)
+		defer os.Remove(tmpfile.Name())
+
+		_, err = tmpfile.Write(content)
+		require.NoError(t, err)
+		err = tmpfile.Close()
+		require.NoError(t, err)
+
+		mockState := NewBasicState(context.TODO())
+
+		input := FileEditInput{
+			FilePath:   tmpfile.Name(),
+			OldText:    "nonexistent",
+			NewText:    "replacement",
+			ReplaceAll: true,
+		}
+		params, _ := json.Marshal(input)
+		result := tool.Execute(context.Background(), mockState, string(params))
+
+		assert.False(t, result.IsError())
+		assert.Contains(t, result.GetResult(), "Replaced 0 occurrences")
+
+		// Verify the file was not changed
+		updatedContent, err := os.ReadFile(tmpfile.Name())
+		assert.NoError(t, err)
+		assert.Equal(t, string(content), string(updatedContent))
+	})
+
+	t.Run("single occurrence with replace_all true", func(t *testing.T) {
+		content := []byte("Single occurrence of unique text\n")
+		tmpfile, err := os.CreateTemp("", "FileEditReplaceAllSingleTest")
+		require.NoError(t, err)
+		defer os.Remove(tmpfile.Name())
+
+		_, err = tmpfile.Write(content)
+		require.NoError(t, err)
+		err = tmpfile.Close()
+		require.NoError(t, err)
+
+		mockState := NewBasicState(context.TODO())
+
+		input := FileEditInput{
+			FilePath:   tmpfile.Name(),
+			OldText:    "unique",
+			NewText:    "special",
+			ReplaceAll: true,
+		}
+		params, _ := json.Marshal(input)
+		result := tool.Execute(context.Background(), mockState, string(params))
+
+		assert.False(t, result.IsError())
+		assert.Contains(t, result.GetResult(), "Replaced 1 occurrences")
+
+		// Verify the file was edited correctly
+		updatedContent, err := os.ReadFile(tmpfile.Name())
+		assert.NoError(t, err)
+		assert.Contains(t, string(updatedContent), "special")
+		assert.NotContains(t, string(updatedContent), "unique")
+	})
+}
+
+func TestFileEditTool_ValidateInputReplaceAll(t *testing.T) {
+	// Create a temporary test file with multiple occurrences
+	content := []byte("Line 1\nLine 2\nLine 3\nLine 4\nLine 5\nLine 2\n")
+	tmpfile, err := os.CreateTemp("", "FileEditValidateReplaceAllTest")
+	require.NoError(t, err)
+	defer os.Remove(tmpfile.Name())
+
+	_, err = tmpfile.Write(content)
+	require.NoError(t, err)
+	err = tmpfile.Close()
+	require.NoError(t, err)
+
+	mockState := NewBasicState(context.TODO())
+	mockState.SetFileLastAccessed(tmpfile.Name(), time.Now())
+
+	tool := &FileEditTool{}
+
+	t.Run("multiple occurrences with replace_all true - should pass", func(t *testing.T) {
+		input := FileEditInput{
+			FilePath:   tmpfile.Name(),
+			OldText:    "Line 2",
+			NewText:    "New Line 2",
+			ReplaceAll: true,
+		}
+		inputJson, _ := json.Marshal(input)
+		err := tool.ValidateInput(mockState, string(inputJson))
+		assert.NoError(t, err)
+	})
+
+	t.Run("multiple occurrences with replace_all false - should fail", func(t *testing.T) {
+		input := FileEditInput{
+			FilePath:   tmpfile.Name(),
+			OldText:    "Line 2",
+			NewText:    "New Line 2",
+			ReplaceAll: false,
+		}
+		inputJson, _ := json.Marshal(input)
+		err := tool.ValidateInput(mockState, string(inputJson))
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "old text appears 2 times")
+		assert.Contains(t, err.Error(), "set replace_all to true")
+	})
+
+	t.Run("unique occurrence with replace_all false - should pass", func(t *testing.T) {
+		input := FileEditInput{
+			FilePath:   tmpfile.Name(),
+			OldText:    "Line 3",
+			NewText:    "New Line 3",
+			ReplaceAll: false,
+		}
+		inputJson, _ := json.Marshal(input)
+		err := tool.ValidateInput(mockState, string(inputJson))
+		assert.NoError(t, err)
+	})
+}
+
+func TestFileEditTool_StructuredDataReplaceAll(t *testing.T) {
+	result := &FileEditToolResult{
+		filename:      "/test/file.go",
+		oldText:       "old",
+		newText:       "new",
+		oldContent:    "old content old",
+		newContent:    "new content new",
+		startLine:     1,
+		endLine:       1,
+		replaceAll:    true,
+		replacedCount: 2,
+		edits: []EditInfo{
+			{StartLine: 1, EndLine: 1, OldContent: "old", NewContent: "new"},
+			{StartLine: 1, EndLine: 1, OldContent: "old", NewContent: "new"},
+		},
+	}
+
+	structuredData := result.StructuredData()
+	
+	assert.Equal(t, "file_edit", structuredData.ToolName)
+	assert.True(t, structuredData.Success)
+	
+	meta, ok := structuredData.Metadata.(*tooltypes.FileEditMetadata)
+	require.True(t, ok)
+	
+	assert.Equal(t, "/test/file.go", meta.FilePath)
+	assert.True(t, meta.ReplaceAll)
+	assert.Equal(t, 2, meta.ReplacedCount)
+	assert.Len(t, meta.Edits, 2)
+}
+
+func TestFindAllOccurrences(t *testing.T) {
+	tests := []struct {
+		name        string
+		content     string
+		oldText     string
+		expectedLen int
+	}{
+		{
+			name:        "single occurrence",
+			content:     "Hello world\nHow are you\n",
+			oldText:     "Hello",
+			expectedLen: 1,
+		},
+		{
+			name:        "multiple occurrences same line",
+			content:     "Hello Hello world\n",
+			oldText:     "Hello",
+			expectedLen: 2,
+		},
+		{
+			name:        "multiple occurrences different lines",
+			content:     "Hello world\nHello everyone\nGoodbye Hello\n",
+			oldText:     "Hello",
+			expectedLen: 3,
+		},
+		{
+			name:        "multiline text",
+			content:     "func test() {\n    return 1\n}\n\nfunc test() {\n    return 1\n}\n",
+			oldText:     "func test() {\n    return 1\n}",
+			expectedLen: 2,
+		},
+		{
+			name:        "no occurrences",
+			content:     "Hello world\n",
+			oldText:     "goodbye",
+			expectedLen: 0,
+		},
+		{
+			name:        "overlapping pattern",
+			content:     "aaaa\n",
+			oldText:     "aa",
+			expectedLen: 2, // Non-overlapping: should find 2 occurrences
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			edits := findAllOccurrences(tt.content, tt.oldText)
+			assert.Len(t, edits, tt.expectedLen)
+			
+			// Verify each edit has proper line numbers
+			for _, edit := range edits {
+				assert.Greater(t, edit.StartLine, 0)
+				assert.GreaterOrEqual(t, edit.EndLine, edit.StartLine)
+				assert.Equal(t, tt.oldText, edit.OldContent)
+			}
+		})
+	}
 }

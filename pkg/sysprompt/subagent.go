@@ -18,7 +18,6 @@ func SubAgentPrompt(model string, llmConfig llm.Config) string {
 	// Create a default config and update with model
 	config := NewDefaultConfig().WithModel(model).WithFeatures([]string{
 		"todoTools",
-		"batchTool",
 	})
 
 	// Update the context with the configuration

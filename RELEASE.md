@@ -1,5 +1,14 @@
 # Kodelet
 
+## 0.0.71.alpha (2025-07-19)
+
+### Tool System Improvements
+
+- **Enhanced File Edit Tool**: Added support for replace-all functionality to efficiently update multiple occurrences of text patterns across files
+- **Streamlined File Reading**: Improved file_read tool with line limits, truncation handling, and better navigation metadata for large files
+- **Tool Simplification**: Removed redundant file_multi_edit and batch tools, consolidating functionality into core tools for better performance and maintainability
+- **Enhanced Web UI**: Updated frontend components with improved file truncation display and navigation controls
+
 ## 0.0.70.alpha (2025-07-18)
 
 ### Cross-Provider Subagent Support

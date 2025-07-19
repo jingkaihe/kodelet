@@ -56,7 +56,7 @@ var metadataTypeRegistry = map[string]reflect.Type{
 	"file_read":                 reflect.TypeOf(FileReadMetadata{}),
 	"file_write":                reflect.TypeOf(FileWriteMetadata{}),
 	"file_edit":                 reflect.TypeOf(FileEditMetadata{}),
-	"file_multi_edit":           reflect.TypeOf(FileMultiEditMetadata{}),
+
 	"grep_tool":                 reflect.TypeOf(GrepMetadata{}),
 	"glob_tool":                 reflect.TypeOf(GlobMetadata{}),
 	"bash":                      reflect.TypeOf(BashMetadata{}),
@@ -64,7 +64,6 @@ var metadataTypeRegistry = map[string]reflect.Type{
 	"mcp_tool":                  reflect.TypeOf(MCPToolMetadata{}),
 	"todo":                      reflect.TypeOf(TodoMetadata{}),
 	"thinking":                  reflect.TypeOf(ThinkingMetadata{}),
-	"batch":                     reflect.TypeOf(BatchMetadata{}),
 	"browser_navigate":          reflect.TypeOf(BrowserNavigateMetadata{}),
 	"browser_click":             reflect.TypeOf(BrowserClickMetadata{}),
 	"browser_get_page":          reflect.TypeOf(BrowserGetPageMetadata{}),
@@ -120,11 +119,13 @@ type ToolMetadata interface {
 // File operation metadata structures
 
 type FileReadMetadata struct {
-	FilePath  string   `json:"filePath"`
-	Offset    int      `json:"offset"`
-	Lines     []string `json:"lines"`
-	Language  string   `json:"language,omitempty"`
-	Truncated bool     `json:"truncated"`
+	FilePath       string   `json:"filePath"`
+	Offset         int      `json:"offset"`
+	LineLimit      int      `json:"lineLimit"`
+	Lines          []string `json:"lines"`
+	Language       string   `json:"language,omitempty"`
+	Truncated      bool     `json:"truncated"`
+	RemainingLines int      `json:"remainingLines,omitempty"`
 }
 
 func (m FileReadMetadata) ToolType() string { return "file_read" }
@@ -139,9 +140,11 @@ type FileWriteMetadata struct {
 func (m FileWriteMetadata) ToolType() string { return "file_write" }
 
 type FileEditMetadata struct {
-	FilePath string `json:"filePath"`
-	Edits    []Edit `json:"edits"`
-	Language string `json:"language,omitempty"`
+	FilePath      string `json:"filePath"`
+	Edits         []Edit `json:"edits"`
+	Language      string `json:"language,omitempty"`
+	ReplaceAll    bool   `json:"replaceAll,omitempty"`
+	ReplacedCount int    `json:"replacedCount,omitempty"`
 }
 
 type Edit struct {
@@ -271,16 +274,6 @@ type ThinkingMetadata struct {
 
 func (m ThinkingMetadata) ToolType() string { return "thinking" }
 
-type BatchMetadata struct {
-	Description   string                 `json:"description"`
-	SubResults    []StructuredToolResult `json:"subResults"`
-	ExecutionTime time.Duration          `json:"executionTime"`
-	SuccessCount  int                    `json:"successCount"`
-	FailureCount  int                    `json:"failureCount"`
-}
-
-func (m BatchMetadata) ToolType() string { return "batch" }
-
 // Browser tool metadata structures
 
 type BrowserNavigateMetadata struct {
@@ -389,14 +382,7 @@ type BackgroundProcessInfo struct {
 
 func (m ViewBackgroundProcessesMetadata) ToolType() string { return "view_background_processes" }
 
-type FileMultiEditMetadata struct {
-	FilePath       string `json:"filePath"`
-	Edits          []Edit `json:"edits"`
-	Language       string `json:"language,omitempty"`
-	ActualReplaced int    `json:"actualReplaced"`
-}
 
-func (m FileMultiEditMetadata) ToolType() string { return "file_multi_edit" }
 
 // ExtractMetadata is a helper that handles both pointer and value type assertions
 // This is necessary because JSON unmarshaling creates value types, while

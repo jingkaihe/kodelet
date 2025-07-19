@@ -124,7 +124,7 @@ Please create a pull request following the steps below:
 
 1. make sure that the branch is up to date with the target branch. Push the branch to the remote repository if it is not already up to date.
 
-2. To understand the current state of the branch, use the batch tool to parallelise the following checks:
+2. To understand the current state of the branch, use parallel tool calling to perform the following checks:
   - Run "git status" to check the the current status and any untracked files
   - Run "git diff" to check the changes to the working directory
   - Run "git diff --cached" to check the changes to the staging area
@@ -149,7 +149,7 @@ The body of the pull request should follow the following format:
 </pr_body_format>
 
 IMPORTANT:
-- After the batch command run, when you performing the PR analysis, do not carry out extra tool calls to gather extra information, but instead use the information provided by the batch tool.
+- After the parallel tool calls, when you performing the PR analysis, do not carry out extra tool calls to gather extra information, but instead use the information provided by the initial parallel analysis.
 - Once you have created the PR, provide a link to the PR in your final response.
 - !!!CRITICAL!!!: You should never update user's git config under any circumstances.`, config.Target, config.Target, config.Target, template)
 

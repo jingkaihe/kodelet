@@ -18,7 +18,6 @@ const (
 	SubagentTool  = "subagent"
 	GrepTool      = "grep_tool"
 	GlobTool      = "glob_tool"
-	BatchTool     = "batch"
 	Backtick      = "`"
 
 	// Context file names
