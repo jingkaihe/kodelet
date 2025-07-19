@@ -18,7 +18,9 @@ import (
 )
 
 const (
-	MaxOutputBytes = 100_000 // 100KB
+	MaxOutputBytes        = 100_000 // 100KB
+	MaxLineCharacterLimit = 2000    // Maximum characters per line before truncation
+	MaxLineLimit          = 2000    // Maximum number of lines that can be read at once
 )
 
 type FileReadToolResult struct {
@@ -146,11 +148,11 @@ func (r *FileReadTool) ValidateInput(state tooltypes.State, parameters string) e
 
 	// Set default line limit if not provided
 	if input.LineLimit == 0 {
-		input.LineLimit = 2000
+		input.LineLimit = MaxLineLimit
 	}
 
-	if input.LineLimit > 2000 {
-		return errors.New("line_limit cannot exceed 2000")
+	if input.LineLimit > MaxLineLimit {
+		return fmt.Errorf("line_limit cannot exceed %d", MaxLineLimit)
 	}
 
 	return nil
@@ -165,7 +167,7 @@ func (r *FileReadTool) TracingKVs(parameters string) ([]attribute.KeyValue, erro
 
 	// Set default line limit if not provided
 	if input.LineLimit == 0 {
-		input.LineLimit = 2000
+		input.LineLimit = MaxLineLimit
 	}
 
 	return []attribute.KeyValue{
@@ -187,7 +189,7 @@ func (r *FileReadTool) Execute(ctx context.Context, state tooltypes.State, param
 
 	// Set default line limit if not provided
 	if input.LineLimit == 0 {
-		input.LineLimit = 2000
+		input.LineLimit = MaxLineLimit
 	}
 
 	state.SetFileLastAccessed(input.FilePath, time.Now())
@@ -228,14 +230,21 @@ func (r *FileReadTool) Execute(ctx context.Context, state tooltypes.State, param
 	var lines []string
 
 	for linesRead < input.LineLimit && scanner.Scan() {
-		lineBytes := scanner.Bytes()
-		// Check if adding this line would exceed the byte limit
-		if bytesRead+len(lineBytes) > MaxOutputBytes {
+		lineText := scanner.Text()
+		// Truncate line if it exceeds MaxLineCharacterLimit characters
+		if len(lineText) > MaxLineCharacterLimit {
+			lineText = lineText[:MaxLineCharacterLimit] + "..."
+		}
+
+		// Check if adding this (potentially truncated) line would exceed the byte limit
+		lineBytes := len([]byte(lineText))
+		if bytesRead+lineBytes > MaxOutputBytes {
 			// This line would exceed the limit, so stop here
 			break
 		}
-		lines = append(lines, scanner.Text())
-		bytesRead += len(lineBytes)
+
+		lines = append(lines, lineText)
+		bytesRead += lineBytes
 		linesRead++
 	}
 

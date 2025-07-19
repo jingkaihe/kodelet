@@ -34,7 +34,7 @@ func TestFileReadTool_Description(t *testing.T) {
 	assert.Contains(t, desc, "Reads a file and returns its contents with line numbers")
 	assert.Contains(t, desc, "file_path")
 	assert.Contains(t, desc, "offset")
-	assert.Contains(t, desc, "Non-zero offset is recommended for the purpose of reading large files")
+	assert.Contains(t, desc, "Use these parameters only for large files when you need specific sections")
 }
 
 func TestFileReadTool_ValidateInput(t *testing.T) {
@@ -95,7 +95,7 @@ func TestFileReadTool_ValidateInput(t *testing.T) {
 				Offset:    1,
 				LineLimit: 0,
 			},
-			expectError: false, // 0 gets converted to default 2000
+			expectError: false, // 0 gets converted to default MaxLineLimit
 		},
 
 		{
@@ -106,7 +106,7 @@ func TestFileReadTool_ValidateInput(t *testing.T) {
 				LineLimit: 2001,
 			},
 			expectError: true,
-			errorMsg:    "line_limit cannot exceed 2000",
+			errorMsg:    fmt.Sprintf("line_limit cannot exceed %d", MaxLineLimit),
 		},
 	}
 
@@ -361,7 +361,7 @@ func TestFileReadTool_LineLimit(t *testing.T) {
 
 	tool := &FileReadTool{}
 
-	// Test default line limit (should read all 50 lines since default is 2000)
+	// Test default line limit (should read all 50 lines since default is MaxLineLimit)
 	t.Run("default line limit", func(t *testing.T) {
 		input := FileReadInput{
 			FilePath: tmpfile.Name(),
@@ -513,5 +513,287 @@ func TestFileReadTool_LineLimitMetadata(t *testing.T) {
 		assert.Equal(t, 0, meta.RemainingLines)
 		assert.False(t, meta.Truncated)
 		assert.Len(t, meta.Lines, 20) // Exactly 20 lines, no truncation message
+	})
+}
+
+func TestFileReadTool_LineTruncation(t *testing.T) {
+	tool := &FileReadTool{}
+
+	t.Run(fmt.Sprintf("line exactly %d characters", MaxLineCharacterLimit), func(t *testing.T) {
+		// Create a line that is exactly MaxLineCharacterLimit characters
+		exactLine := strings.Repeat("A", MaxLineCharacterLimit)
+		content := fmt.Sprintf("Short line\n%s\nAnother short line\n", exactLine)
+
+		tmpfile, err := os.CreateTemp("", "FileReadtest_exactMax")
+		require.NoError(t, err)
+		defer os.Remove(tmpfile.Name())
+
+		_, err = tmpfile.WriteString(content)
+		require.NoError(t, err)
+		require.NoError(t, tmpfile.Close())
+
+		input := FileReadInput{
+			FilePath: tmpfile.Name(),
+			Offset:   1,
+		}
+		params, _ := json.Marshal(input)
+		result := tool.Execute(context.Background(), NewBasicState(context.TODO()), string(params))
+
+		assert.False(t, result.IsError())
+		resultContent := result.GetResult()
+
+		// Line should not be truncated (no "...")
+		assert.Contains(t, resultContent, "1: Short line")
+		assert.Contains(t, resultContent, "3: Another short line")
+
+		// The MaxLineCharacterLimit-character line should be present and not truncated
+		lines := strings.Split(resultContent, "\n")
+		var longLine string
+		for _, line := range lines {
+			if strings.HasPrefix(line, "2: ") {
+				longLine = line[3:] // Remove "2: " prefix
+				break
+			}
+		}
+		assert.Equal(t, exactLine, longLine)
+		assert.NotContains(t, longLine, "...")
+	})
+
+	t.Run(fmt.Sprintf("line longer than %d characters", MaxLineCharacterLimit), func(t *testing.T) {
+		// Create a line that is longer than MaxLineCharacterLimit characters
+		longLine := strings.Repeat("B", MaxLineCharacterLimit+1000)
+		content := fmt.Sprintf("Short line\n%s\nAnother short line\n", longLine)
+
+		tmpfile, err := os.CreateTemp("", "FileReadtest_long3000")
+		require.NoError(t, err)
+		defer os.Remove(tmpfile.Name())
+
+		_, err = tmpfile.WriteString(content)
+		require.NoError(t, err)
+		require.NoError(t, tmpfile.Close())
+
+		input := FileReadInput{
+			FilePath: tmpfile.Name(),
+			Offset:   1,
+		}
+		params, _ := json.Marshal(input)
+		result := tool.Execute(context.Background(), NewBasicState(context.TODO()), string(params))
+
+		assert.False(t, result.IsError())
+		resultContent := result.GetResult()
+
+		// Find the truncated line
+		lines := strings.Split(resultContent, "\n")
+		var truncatedLine string
+		for _, line := range lines {
+			if strings.HasPrefix(line, "2: ") {
+				truncatedLine = line[3:] // Remove "2: " prefix
+				break
+			}
+		}
+
+		// Line should be truncated to MaxLineCharacterLimit chars + "..."
+		assert.Equal(t, MaxLineCharacterLimit+3, len(truncatedLine)) // MaxLineCharacterLimit + len("...")
+		assert.Equal(t, strings.Repeat("B", MaxLineCharacterLimit)+"...", truncatedLine)
+		assert.Contains(t, truncatedLine, "...")
+		assert.True(t, strings.HasSuffix(truncatedLine, "..."))
+	})
+
+	t.Run("multiple long lines", func(t *testing.T) {
+		// Create multiple lines that are longer than MaxLineCharacterLimit characters
+		longLine1 := strings.Repeat("X", MaxLineCharacterLimit+500)
+		longLine2 := strings.Repeat("Y", MaxLineCharacterLimit+800)
+		longLine3 := strings.Repeat("Z", MaxLineCharacterLimit+200)
+		content := fmt.Sprintf("%s\n%s\n%s\n", longLine1, longLine2, longLine3)
+
+		tmpfile, err := os.CreateTemp("", "FileReadtest_multiple_long")
+		require.NoError(t, err)
+		defer os.Remove(tmpfile.Name())
+
+		_, err = tmpfile.WriteString(content)
+		require.NoError(t, err)
+		require.NoError(t, tmpfile.Close())
+
+		input := FileReadInput{
+			FilePath: tmpfile.Name(),
+			Offset:   1,
+		}
+		params, _ := json.Marshal(input)
+		result := tool.Execute(context.Background(), NewBasicState(context.TODO()), string(params))
+
+		assert.False(t, result.IsError())
+		resultContent := result.GetResult()
+
+		// All lines should be truncated
+		lines := strings.Split(resultContent, "\n")
+
+		// Check first line
+		var line1 string
+		for _, line := range lines {
+			if strings.HasPrefix(line, "1: ") {
+				line1 = line[3:]
+				break
+			}
+		}
+		assert.Equal(t, strings.Repeat("X", MaxLineCharacterLimit)+"...", line1)
+
+		// Check second line
+		var line2 string
+		for _, line := range lines {
+			if strings.HasPrefix(line, "2: ") {
+				line2 = line[3:]
+				break
+			}
+		}
+		assert.Equal(t, strings.Repeat("Y", MaxLineCharacterLimit)+"...", line2)
+
+		// Check third line
+		var line3 string
+		for _, line := range lines {
+			if strings.HasPrefix(line, "3: ") {
+				line3 = line[3:]
+				break
+			}
+		}
+		assert.Equal(t, strings.Repeat("Z", MaxLineCharacterLimit)+"...", line3)
+	})
+
+	t.Run("line truncation with byte limit interaction", func(t *testing.T) {
+		// Create many long lines to test interaction with MaxOutputBytes
+		var content strings.Builder
+		for i := 1; i <= 100; i++ {
+			// Each line will be longer than MaxLineCharacterLimit, truncated to MaxLineCharacterLimit + "..."
+			longLine := strings.Repeat(fmt.Sprintf("%d", i%10), MaxLineCharacterLimit+500)
+			content.WriteString(longLine + "\n")
+		}
+
+		tmpfile, err := os.CreateTemp("", "FileReadtest_truncation_byte_limit")
+		require.NoError(t, err)
+		defer os.Remove(tmpfile.Name())
+
+		_, err = tmpfile.WriteString(content.String())
+		require.NoError(t, err)
+		require.NoError(t, tmpfile.Close())
+
+		input := FileReadInput{
+			FilePath: tmpfile.Name(),
+			Offset:   1,
+		}
+		params, _ := json.Marshal(input)
+		result := tool.Execute(context.Background(), NewBasicState(context.TODO()), string(params))
+
+		assert.False(t, result.IsError())
+		resultContent := result.GetResult()
+
+		// Should hit byte limit before reading all 100 lines
+		assert.Contains(t, resultContent, "truncated due to max output bytes limit")
+
+		// Verify that all included lines are properly truncated
+		lines := strings.Split(resultContent, "\n")
+		for _, line := range lines {
+			if strings.Contains(line, ": ") && !strings.Contains(line, "truncated") {
+				// Extract the content part (after line number)
+				parts := strings.SplitN(line, ": ", 2)
+				if len(parts) == 2 {
+					content := parts[1]
+					if len(content) > MaxLineCharacterLimit {
+						// Should be truncated
+						assert.Equal(t, MaxLineCharacterLimit+3, len(content))
+						assert.True(t, strings.HasSuffix(content, "..."))
+					}
+				}
+			}
+		}
+	})
+
+	t.Run("mixed short and long lines", func(t *testing.T) {
+		// Mix of short and long lines
+		content := fmt.Sprintf("Short line 1\n%s\nShort line 2\n%s\nShort line 3\n",
+			strings.Repeat("L", MaxLineCharacterLimit+1000), // Long line
+			strings.Repeat("M", MaxLineCharacterLimit+100))  // Another long line
+
+		tmpfile, err := os.CreateTemp("", "FileReadtest_mixed")
+		require.NoError(t, err)
+		defer os.Remove(tmpfile.Name())
+
+		_, err = tmpfile.WriteString(content)
+		require.NoError(t, err)
+		require.NoError(t, tmpfile.Close())
+
+		input := FileReadInput{
+			FilePath: tmpfile.Name(),
+			Offset:   1,
+		}
+		params, _ := json.Marshal(input)
+		result := tool.Execute(context.Background(), NewBasicState(context.TODO()), string(params))
+
+		assert.False(t, result.IsError())
+		resultContent := result.GetResult()
+
+		// Short lines should remain unchanged
+		assert.Contains(t, resultContent, "1: Short line 1")
+		assert.Contains(t, resultContent, "3: Short line 2")
+		assert.Contains(t, resultContent, "5: Short line 3")
+
+		// Long lines should be truncated
+		lines := strings.Split(resultContent, "\n")
+
+		// Check line 2 (first long line)
+		var line2 string
+		for _, line := range lines {
+			if strings.HasPrefix(line, "2: ") {
+				line2 = line[3:]
+				break
+			}
+		}
+		assert.Equal(t, strings.Repeat("L", MaxLineCharacterLimit)+"...", line2)
+
+		// Check line 4 (second long line)
+		var line4 string
+		for _, line := range lines {
+			if strings.HasPrefix(line, "4: ") {
+				line4 = line[3:]
+				break
+			}
+		}
+		assert.Equal(t, strings.Repeat("M", MaxLineCharacterLimit)+"...", line4)
+	})
+
+	t.Run(fmt.Sprintf("edge case: line with exactly %d characters", MaxLineCharacterLimit+1), func(t *testing.T) {
+		// Test the boundary condition
+		longLine := strings.Repeat("C", MaxLineCharacterLimit+1)
+		content := fmt.Sprintf("Before\n%s\nAfter\n", longLine)
+
+		tmpfile, err := os.CreateTemp("", "FileReadtest_edge")
+		require.NoError(t, err)
+		defer os.Remove(tmpfile.Name())
+
+		_, err = tmpfile.WriteString(content)
+		require.NoError(t, err)
+		require.NoError(t, tmpfile.Close())
+
+		input := FileReadInput{
+			FilePath: tmpfile.Name(),
+			Offset:   1,
+		}
+		params, _ := json.Marshal(input)
+		result := tool.Execute(context.Background(), NewBasicState(context.TODO()), string(params))
+
+		assert.False(t, result.IsError())
+		resultContent := result.GetResult()
+
+		// Find the truncated line
+		lines := strings.Split(resultContent, "\n")
+		var truncatedLine string
+		for _, line := range lines {
+			if strings.HasPrefix(line, "2: ") {
+				truncatedLine = line[3:]
+				break
+			}
+		}
+
+		// Should be truncated to exactly MaxLineCharacterLimit chars + "..."
+		assert.Equal(t, MaxLineCharacterLimit+3, len(truncatedLine))
+		assert.Equal(t, strings.Repeat("C", MaxLineCharacterLimit)+"...", truncatedLine)
 	})
 }
