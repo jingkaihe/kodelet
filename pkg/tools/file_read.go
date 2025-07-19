@@ -106,7 +106,7 @@ This tool takes three parameters:
 - offset: The 1-indexed line number to start reading from (default: 1, minimum: 1)
 - line_limit: The maximum number of lines to read from the offset (default: 2000, minimum: 1, maximum: 2000)
 
-Non-zero offset is recommended for the purpose of reading large files.
+For most files, omit offset and line_limit to read the entire file. Use these parameters only for large files when you need specific sections.
 
 The result will include line numbers padded appropriately, followed by the content of each line.
 If there are more lines beyond the line limit, a truncation message will be shown with the exact count of remaining lines.
@@ -226,11 +226,11 @@ func (r *FileReadTool) Execute(ctx context.Context, state tooltypes.State, param
 	bytesRead := 0
 	linesRead := 0
 	var lines []string
-	
+
 	for linesRead < input.LineLimit && scanner.Scan() {
 		lineBytes := scanner.Bytes()
 		// Check if adding this line would exceed the byte limit
-		if bytesRead + len(lineBytes) > MaxOutputBytes {
+		if bytesRead+len(lineBytes) > MaxOutputBytes {
 			// This line would exceed the limit, so stop here
 			break
 		}
@@ -283,10 +283,10 @@ func (r *FileReadTool) Execute(ctx context.Context, state tooltypes.State, param
 
 	return &FileReadToolResult{
 		filename:         input.FilePath,
-		lines:           lines,
-		offset:          input.Offset,
-		lineLimit:       input.LineLimit,
-		remainingLines:  remainingLines,
+		lines:            lines,
+		offset:           input.Offset,
+		lineLimit:        input.LineLimit,
+		remainingLines:   remainingLines,
 		truncationReason: truncationReason,
 	}
 }

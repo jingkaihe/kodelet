@@ -11,7 +11,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	
+
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
@@ -478,14 +478,14 @@ func TestFileReadTool_LineLimitMetadata(t *testing.T) {
 
 		assert.False(t, result.IsError())
 		structured := result.StructuredData()
-		
+
 		assert.Equal(t, "file_read", structured.ToolName)
 		assert.True(t, structured.Success)
-		
+
 		// Check metadata type and extract it
 		meta, ok := structured.Metadata.(*tooltypes.FileReadMetadata)
 		require.True(t, ok, "Expected FileReadMetadata, got %T", structured.Metadata)
-		
+
 		assert.Equal(t, tmpfile.Name(), meta.FilePath)
 		assert.Equal(t, 5, meta.Offset)
 		assert.Equal(t, 10, meta.LineLimit)
@@ -505,10 +505,10 @@ func TestFileReadTool_LineLimitMetadata(t *testing.T) {
 
 		assert.False(t, result.IsError())
 		structured := result.StructuredData()
-		
+
 		meta, ok := structured.Metadata.(*tooltypes.FileReadMetadata)
 		require.True(t, ok)
-		
+
 		assert.Equal(t, 20, meta.LineLimit)
 		assert.Equal(t, 0, meta.RemainingLines)
 		assert.False(t, meta.Truncated)
