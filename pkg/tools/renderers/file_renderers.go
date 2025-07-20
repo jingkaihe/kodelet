@@ -63,13 +63,35 @@ func (r *FileEditRenderer) RenderCLI(result tools.StructuredToolResult) string {
 		return "Error: Invalid metadata type for file_edit"
 	}
 
-	// For file edits, we expect a single edit that represents the whole file change
+	// For file edits, we expect at least one edit
 	if len(meta.Edits) == 0 {
 		return fmt.Sprintf("File edited: %s (no changes)", meta.FilePath)
 	}
 
-	// Use the first edit which should contain the full old/new content
-	edit := meta.Edits[0]
-	out := udiff.Unified(meta.FilePath, meta.FilePath, edit.OldContent, edit.NewContent)
-	return out
+	var output bytes.Buffer
+	if meta.ReplaceAll && meta.ReplacedCount > 1 {
+		fmt.Fprintf(&output, "File edited: %s (%d replacements)\n\n", meta.FilePath, meta.ReplacedCount)
+		
+		// Show all edits
+		for i, edit := range meta.Edits {
+			fmt.Fprintf(&output, "Edit %d (lines %d-%d):\n", i+1, edit.StartLine, edit.EndLine)
+			diff := udiff.Unified(meta.FilePath, meta.FilePath, edit.OldContent, edit.NewContent)
+			output.WriteString(diff)
+			if i < len(meta.Edits)-1 {
+				output.WriteString("\n")
+			}
+		}
+	} else {
+		// Single edit or replace_all with single occurrence
+		edit := meta.Edits[0]
+		if meta.ReplaceAll {
+			fmt.Fprintf(&output, "File edited: %s (1 replacement)\n\n", meta.FilePath)
+		} else {
+			fmt.Fprintf(&output, "File edited: %s\n\n", meta.FilePath)
+		}
+		diff := udiff.Unified(meta.FilePath, meta.FilePath, edit.OldContent, edit.NewContent)
+		output.WriteString(diff)
+	}
+	
+	return output.String()
 }

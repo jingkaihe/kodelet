@@ -252,4 +252,105 @@ describe('FileReadRenderer', () => {
     expect(codeContainer).toHaveClass('text-sm', 'font-mono', 'rounded-lg');
     expect(codeContainer).toHaveStyle({ maxHeight: '600px', overflowY: 'auto' });
   });
+
+  it('shows line limit when not default value', () => {
+    const toolResult = createToolResult({
+      filePath: '/test.txt',
+      lines: ['line 1', 'line 2'],
+      lineLimit: 500,
+    });
+
+    render(<FileReadRenderer toolResult={toolResult} />);
+
+    expect(screen.getByText('Line limit: 500')).toBeInTheDocument();
+  });
+
+  it('does not show line limit when default value', () => {
+    const toolResult = createToolResult({
+      filePath: '/test.txt',
+      lines: ['line 1', 'line 2'],
+      lineLimit: 2000,
+    });
+
+    render(<FileReadRenderer toolResult={toolResult} />);
+
+    expect(screen.queryByText('Line limit: 2000')).not.toBeInTheDocument();
+  });
+
+  it('shows remaining lines information', () => {
+    const toolResult = createToolResult({
+      filePath: '/test.txt',
+      lines: ['line 1', 'line 2', '... [50 lines remaining - use offset=3 to continue reading]'],
+      offset: 1,
+      lineLimit: 2,
+      remainingLines: 50,
+      truncated: true,
+    });
+
+    render(<FileReadRenderer toolResult={toolResult} />);
+
+    expect(screen.getByText('Remaining: 50 lines')).toBeInTheDocument();
+  });
+
+  it('shows helpful continuation tip when there are remaining lines', () => {
+    const toolResult = createToolResult({
+      filePath: '/test.txt',
+      lines: ['line 1', 'line 2'],
+      offset: 10,
+      lineLimit: 2,
+      remainingLines: 25,
+      truncated: true,
+    });
+
+    render(<FileReadRenderer toolResult={toolResult} />);
+
+    expect(screen.getByText('💡 Use offset=12 to continue reading')).toBeInTheDocument();
+  });
+
+  it('shows improved badge for remaining lines', () => {
+    const toolResult = createToolResult({
+      filePath: '/test.txt',
+      lines: ['line 1', 'line 2'],
+      remainingLines: 100,
+      truncated: true,
+    });
+
+    render(<FileReadRenderer toolResult={toolResult} />);
+
+    expect(screen.getByText('100 more lines')).toBeInTheDocument();
+    const badge = screen.getByText('100 more lines');
+    expect(badge.className).toContain('badge-info');
+  });
+
+  it('preserves truncation messages in display', () => {
+    const toolResult = createToolResult({
+      filePath: '/test.txt',
+      lines: [
+        'line 1',
+        'line 2',
+        '... [50 lines remaining - use offset=3 to continue reading]'
+      ],
+      remainingLines: 50,
+      truncated: true,
+    });
+
+    render(<FileReadRenderer toolResult={toolResult} />);
+
+    expect(screen.getByText('... [50 lines remaining - use offset=3 to continue reading]')).toBeInTheDocument();
+  });
+
+  it('falls back to generic truncated badge when no remaining lines info', () => {
+    const toolResult = createToolResult({
+      filePath: '/test.txt',
+      lines: ['line 1', '... [truncated due to max output bytes limit of 100000]'],
+      truncated: true,
+      remainingLines: 0,
+    });
+
+    render(<FileReadRenderer toolResult={toolResult} />);
+
+    expect(screen.getByText('Truncated')).toBeInTheDocument();
+    const badge = screen.getByText('Truncated');
+    expect(badge.className).toContain('badge-warning');
+  });
 });
