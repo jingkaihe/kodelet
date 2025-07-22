@@ -29,9 +29,8 @@ Your occupation is {{.occupation}}.`
 	require.NoError(t, err)
 
 	// Create processor with custom directory
-	processor := &FragmentProcessor{
-		fragmentDirs: []string{tempDir},
-	}
+	processor, err := NewFragmentProcessor(WithFragmentDirs(tempDir))
+	require.NoError(t, err)
 
 	// Test fragment loading and processing
 	config := &FragmentConfig{
@@ -70,9 +69,8 @@ Hello message: {{bash "sh" "-c" "echo 'Hello World' | tr '[:lower:]' '[:upper:]'
 	err = os.WriteFile(fragmentPath, []byte(fragmentContent), 0644)
 	require.NoError(t, err)
 
-	processor := &FragmentProcessor{
-		fragmentDirs: []string{tempDir},
-	}
+	processor, err := NewFragmentProcessor(WithFragmentDirs(tempDir))
+	require.NoError(t, err)
 
 	config := &FragmentConfig{
 		FragmentName: "complex",
@@ -101,9 +99,8 @@ func TestFragmentProcessor_LoadFragment_BashCommandError(t *testing.T) {
 	err = os.WriteFile(fragmentPath, []byte(fragmentContent), 0644)
 	require.NoError(t, err)
 
-	processor := &FragmentProcessor{
-		fragmentDirs: []string{tempDir},
-	}
+	processor, err := NewFragmentProcessor(WithFragmentDirs(tempDir))
+	require.NoError(t, err)
 
 	config := &FragmentConfig{
 		FragmentName: "failing",
@@ -131,9 +128,8 @@ func TestFragmentProcessor_findFragmentFile(t *testing.T) {
 	err = os.WriteFile(filepath.Join(tempDir, "test2"), []byte("test2"), 0644)
 	require.NoError(t, err)
 
-	processor := &FragmentProcessor{
-		fragmentDirs: []string{tempDir},
-	}
+	processor, err := NewFragmentProcessor(WithFragmentDirs(tempDir))
+	require.NoError(t, err)
 
 	// Test finding .md file
 	path, err := processor.findFragmentFile("test1")
@@ -169,9 +165,8 @@ func TestFragmentProcessor_DirectoryPrecedence(t *testing.T) {
 	require.NoError(t, err)
 
 	// High precedence directory comes first
-	processor := &FragmentProcessor{
-		fragmentDirs: []string{highPrecDir, lowPrecDir},
-	}
+	processor, err := NewFragmentProcessor(WithFragmentDirs(highPrecDir, lowPrecDir))
+	require.NoError(t, err)
 
 	path, err := processor.findFragmentFile("same")
 	require.NoError(t, err)
@@ -179,7 +174,8 @@ func TestFragmentProcessor_DirectoryPrecedence(t *testing.T) {
 }
 
 func TestFragmentProcessor_processTemplate_VariablesOnly(t *testing.T) {
-	processor := &FragmentProcessor{}
+	processor, err := NewFragmentProcessor()
+	require.NoError(t, err)
 
 	content := "Hello {{.name}}! You work as a {{.job}}."
 	args := map[string]string{
@@ -195,7 +191,8 @@ func TestFragmentProcessor_processTemplate_VariablesOnly(t *testing.T) {
 }
 
 func TestFragmentProcessor_processTemplate_BashOnly(t *testing.T) {
-	processor := &FragmentProcessor{}
+	processor, err := NewFragmentProcessor()
+	require.NoError(t, err)
 
 	content := `Hello {{bash "echo" "world"}}! Today is {{bash "date" "+%A"}}.`
 
@@ -207,7 +204,8 @@ func TestFragmentProcessor_processTemplate_BashOnly(t *testing.T) {
 }
 
 func TestFragmentProcessor_processTemplate_MixedContent(t *testing.T) {
-	processor := &FragmentProcessor{}
+	processor, err := NewFragmentProcessor()
+	require.NoError(t, err)
 
 	content := `User: {{.name}}
 Command output: {{bash "echo" "test output"}}`
@@ -249,9 +247,8 @@ func TestFragmentProcessor_ListFragments(t *testing.T) {
 	err = os.WriteFile(filepath.Join(dir2, "duplicate.md"), []byte("second"), 0644)
 	require.NoError(t, err)
 
-	processor := &FragmentProcessor{
-		fragmentDirs: []string{dir1, dir2},
-	}
+	processor, err := NewFragmentProcessor(WithFragmentDirs(dir1, dir2))
+	require.NoError(t, err)
 
 	fragments, err := processor.ListFragments()
 	require.NoError(t, err)
@@ -262,7 +259,8 @@ func TestFragmentProcessor_ListFragments(t *testing.T) {
 }
 
 func TestFragmentProcessor_createBashFunc(t *testing.T) {
-	processor := &FragmentProcessor{}
+	processor, err := NewFragmentProcessor()
+	require.NoError(t, err)
 	ctx := context.Background()
 
 	bashFunc := processor.createBashFunc(ctx)
@@ -289,11 +287,12 @@ func TestFragmentProcessor_createBashFunc(t *testing.T) {
 }
 
 func TestFragmentProcessor_ErrorHandling(t *testing.T) {
-	processor := &FragmentProcessor{}
+	processor, err := NewFragmentProcessor()
+	require.NoError(t, err)
 
 	// Test malformed template syntax
 	content := "Hello {{range}}" // Invalid range without end
-	_, err := processor.processTemplate(context.Background(), content, map[string]string{})
+	_, err = processor.processTemplate(context.Background(), content, map[string]string{})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to parse template")
 
@@ -314,10 +313,88 @@ func TestFragmentProcessor_ErrorHandling(t *testing.T) {
 }
 
 func TestFragmentProcessor_NewFragmentProcessor(t *testing.T) {
-	processor := NewFragmentProcessor()
+	processor, err := NewFragmentProcessor()
+	require.NoError(t, err)
 
 	// Should have two directories configured
 	assert.Len(t, processor.fragmentDirs, 2)
 	assert.Equal(t, "./receipts", processor.fragmentDirs[0])
 	assert.True(t, strings.HasSuffix(processor.fragmentDirs[1], "/.kodelet/receipts"))
+}
+
+func TestFragmentProcessor_BuilderPattern(t *testing.T) {
+	// Test default behavior
+	processor, err := NewFragmentProcessor()
+	require.NoError(t, err)
+	assert.Len(t, processor.fragmentDirs, 2)
+	assert.Equal(t, "./receipts", processor.fragmentDirs[0])
+	assert.True(t, strings.HasSuffix(processor.fragmentDirs[1], "/.kodelet/receipts"))
+
+	// Test WithFragmentDirs option
+	processor, err = NewFragmentProcessor(WithFragmentDirs("/custom1", "/custom2"))
+	require.NoError(t, err)
+	assert.Len(t, processor.fragmentDirs, 2)
+	assert.Equal(t, "/custom1", processor.fragmentDirs[0])
+	assert.Equal(t, "/custom2", processor.fragmentDirs[1])
+
+	// Test WithAdditionalFragmentDirs option
+	processor, err = NewFragmentProcessor(WithAdditionalFragmentDirs("/extra1", "/extra2"))
+	require.NoError(t, err)
+	assert.Len(t, processor.fragmentDirs, 4)
+	assert.Equal(t, "./receipts", processor.fragmentDirs[0])
+	assert.True(t, strings.HasSuffix(processor.fragmentDirs[1], "/.kodelet/receipts"))
+	assert.Equal(t, "/extra1", processor.fragmentDirs[2])
+	assert.Equal(t, "/extra2", processor.fragmentDirs[3])
+
+	// Test WithDefaultFragmentDirs option (explicit defaults)
+	processor, err = NewFragmentProcessor(WithDefaultFragmentDirs())
+	require.NoError(t, err)
+	assert.Len(t, processor.fragmentDirs, 2)
+	assert.Equal(t, "./receipts", processor.fragmentDirs[0])
+	assert.True(t, strings.HasSuffix(processor.fragmentDirs[1], "/.kodelet/receipts"))
+
+	// Test multiple WithFragmentDirs calls (last one wins)
+	processor, err = NewFragmentProcessor(
+		WithFragmentDirs("/temp1", "/temp2"),
+		WithFragmentDirs("/final1", "/final2"),
+	)
+	require.NoError(t, err)
+	assert.Len(t, processor.fragmentDirs, 2)
+	assert.Equal(t, "/final1", processor.fragmentDirs[0])
+	assert.Equal(t, "/final2", processor.fragmentDirs[1])
+
+	// Test WithDefaultFragmentDirs after custom dirs
+	processor, err = NewFragmentProcessor(
+		WithFragmentDirs("/temp1", "/temp2"),
+		WithDefaultFragmentDirs(),
+	)
+	require.NoError(t, err)
+	assert.Len(t, processor.fragmentDirs, 2)
+	assert.Equal(t, "./receipts", processor.fragmentDirs[0])
+	assert.True(t, strings.HasSuffix(processor.fragmentDirs[1], "/.kodelet/receipts"))
+
+	// Test combining WithFragmentDirs and WithAdditionalFragmentDirs
+	processor, err = NewFragmentProcessor(
+		WithFragmentDirs("/base1", "/base2"),
+		WithAdditionalFragmentDirs("/extra1"),
+	)
+	require.NoError(t, err)
+	assert.Len(t, processor.fragmentDirs, 3)
+	assert.Equal(t, "/base1", processor.fragmentDirs[0])
+	assert.Equal(t, "/base2", processor.fragmentDirs[1])
+	assert.Equal(t, "/extra1", processor.fragmentDirs[2])
+
+	// Test WithAdditionalFragmentDirs with empty directories (should be no-op)
+	processor, err = NewFragmentProcessor(WithAdditionalFragmentDirs())
+	require.NoError(t, err)
+	assert.Len(t, processor.fragmentDirs, 2) // Should have defaults
+	assert.Equal(t, "./receipts", processor.fragmentDirs[0])
+	assert.True(t, strings.HasSuffix(processor.fragmentDirs[1], "/.kodelet/receipts"))
+}
+
+func TestFragmentProcessor_BuilderPatternErrors(t *testing.T) {
+	// Test WithFragmentDirs with no directories
+	_, err := NewFragmentProcessor(WithFragmentDirs())
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "at least one fragment directory must be specified")
 }

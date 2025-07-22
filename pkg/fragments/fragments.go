@@ -26,15 +26,85 @@ type FragmentProcessor struct {
 	fragmentDirs []string
 }
 
-// NewFragmentProcessor creates a new fragment processor
-func NewFragmentProcessor() *FragmentProcessor {
-	homeDir, _ := os.UserHomeDir()
-	return &FragmentProcessor{
-		fragmentDirs: []string{
+// FragmentProcessorOption is a function that configures a FragmentProcessor
+type FragmentProcessorOption func(*FragmentProcessor) error
+
+// WithFragmentDirs sets custom fragment directories
+func WithFragmentDirs(dirs ...string) FragmentProcessorOption {
+	return func(fp *FragmentProcessor) error {
+		if len(dirs) == 0 {
+			return errors.New("at least one fragment directory must be specified")
+		}
+		fp.fragmentDirs = dirs
+		return nil
+	}
+}
+
+// WithAdditionalFragmentDirs adds additional fragment directories to the current ones
+// If no directories are currently set, it starts with defaults first
+// If dirs is empty, this is a no-op
+func WithAdditionalFragmentDirs(dirs ...string) FragmentProcessorOption {
+	return func(fp *FragmentProcessor) error {
+		// If no directories provided, this is a no-op
+		if len(dirs) == 0 {
+			return nil
+		}
+		
+		// If no directories are set yet, start with defaults
+		if len(fp.fragmentDirs) == 0 {
+			if err := WithDefaultFragmentDirs()(fp); err != nil {
+				return errors.Wrap(err, "failed to initialize with default directories")
+			}
+		}
+		
+		fp.fragmentDirs = append(fp.fragmentDirs, dirs...)
+		return nil
+	}
+}
+
+// WithDefaultFragmentDirs resets to default fragment directories
+func WithDefaultFragmentDirs() FragmentProcessorOption {
+	return func(fp *FragmentProcessor) error {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return errors.Wrap(err, "failed to get user home directory")
+		}
+		fp.fragmentDirs = []string{
 			"./receipts", // Repo-specific (higher precedence)
 			filepath.Join(homeDir, ".kodelet/receipts"), // User home directory
-		},
+		}
+		return nil
 	}
+}
+
+// NewFragmentProcessor creates a new fragment processor with optional configuration
+func NewFragmentProcessor(opts ...FragmentProcessorOption) (*FragmentProcessor, error) {
+	// Start with empty processor
+	fp := &FragmentProcessor{}
+	
+	// If no options provided, use defaults
+	if len(opts) == 0 {
+		if err := WithDefaultFragmentDirs()(fp); err != nil {
+			return nil, errors.Wrap(err, "failed to apply default fragment directories")
+		}
+		return fp, nil
+	}
+	
+	// Apply provided options
+	for _, opt := range opts {
+		if err := opt(fp); err != nil {
+			return nil, errors.Wrap(err, "failed to apply fragment processor option")
+		}
+	}
+	
+	// If no directories were set after applying options, apply defaults
+	if len(fp.fragmentDirs) == 0 {
+		if err := WithDefaultFragmentDirs()(fp); err != nil {
+			return nil, errors.Wrap(err, "failed to apply default fragment directories")
+		}
+	}
+	
+	return fp, nil
 }
 
 // findFragmentFile searches for a fragment file in the configured directories

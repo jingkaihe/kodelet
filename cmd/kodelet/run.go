@@ -31,6 +31,7 @@ type RunConfig struct {
 	DisableAutoCompact bool              // Disable auto-compact functionality
 	FragmentName       string            // Name of fragment to use
 	FragmentArgs       map[string]string // Arguments to pass to fragment
+	FragmentDirs       []string          // Additional fragment directories
 }
 
 // NewRunConfig creates a new RunConfig with default values
@@ -46,6 +47,7 @@ func NewRunConfig() *RunConfig {
 		DisableAutoCompact: false,
 		FragmentName:       "",
 		FragmentArgs:       make(map[string]string),
+		FragmentDirs:       []string{}, // Empty by default
 	}
 }
 
@@ -75,7 +77,24 @@ var runCmd = &cobra.Command{
 		var query string
 		if config.FragmentName != "" {
 			// Process fragment
-			fragmentProcessor := fragments.NewFragmentProcessor()
+			var fragmentProcessor *fragments.FragmentProcessor
+			var err error
+			
+			// Create fragment processor with additional directories if specified
+			var validDirs []string
+			for _, dir := range config.FragmentDirs {
+				trimmed := strings.TrimSpace(dir)
+				if trimmed != "" {
+					validDirs = append(validDirs, trimmed)
+				}
+			}
+			fragmentProcessor, err = fragments.NewFragmentProcessor(fragments.WithAdditionalFragmentDirs(validDirs...))
+			
+			if err != nil {
+				presenter.Error(err, "Failed to create fragment processor")
+				return
+			}
+			
 			fragmentConfig := &fragments.FragmentConfig{
 				FragmentName: config.FragmentName,
 				Arguments:    config.FragmentArgs,
@@ -207,6 +226,7 @@ func init() {
 	runCmd.Flags().Bool("disable-auto-compact", defaults.DisableAutoCompact, "Disable auto-compact functionality")
 	runCmd.Flags().StringP("receipt", "r", defaults.FragmentName, "Use a fragment/receipt template")
 	runCmd.Flags().StringToString("arg", defaults.FragmentArgs, "Arguments to pass to fragment (e.g., --arg name=John --arg occupation=Engineer)")
+	runCmd.Flags().StringSlice("fragment-dirs", defaults.FragmentDirs, "Additional fragment directories (e.g., --fragment-dirs ./project-fragments --fragment-dirs ./team-fragments)")
 }
 
 // getRunConfigFromFlags extracts run configuration from command flags
@@ -263,6 +283,9 @@ func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
 	}
 	if fragmentArgs, err := cmd.Flags().GetStringToString("arg"); err == nil {
 		config.FragmentArgs = fragmentArgs
+	}
+	if fragmentDirs, err := cmd.Flags().GetStringSlice("fragment-dirs"); err == nil {
+		config.FragmentDirs = fragmentDirs
 	}
 
 	return config
