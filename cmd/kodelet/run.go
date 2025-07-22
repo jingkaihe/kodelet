@@ -10,6 +10,7 @@ import (
 	"syscall"
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/jingkaihe/kodelet/pkg/tools"
@@ -23,11 +24,13 @@ type RunConfig struct {
 	ResumeConvID       string
 	Follow             bool
 	NoSave             bool
-	Images             []string // Image paths or URLs to include with the message
-	MaxTurns           int      // Maximum number of turns within a single SendMessage call
-	EnableBrowserTools bool     // Enable browser automation tools
-	CompactRatio       float64  // Ratio of context window at which to trigger auto-compact (0.0-1.0)
-	DisableAutoCompact bool     // Disable auto-compact functionality
+	Images             []string          // Image paths or URLs to include with the message
+	MaxTurns           int               // Maximum number of turns within a single SendMessage call
+	EnableBrowserTools bool              // Enable browser automation tools
+	CompactRatio       float64           // Ratio of context window at which to trigger auto-compact (0.0-1.0)
+	DisableAutoCompact bool              // Disable auto-compact functionality
+	FragmentName       string            // Name of fragment to use
+	FragmentArgs       map[string]string // Arguments to pass to fragment
 }
 
 // NewRunConfig creates a new RunConfig with default values
@@ -41,6 +44,8 @@ func NewRunConfig() *RunConfig {
 		EnableBrowserTools: false,
 		CompactRatio:       0.8, // Default to 80% context window utilization
 		DisableAutoCompact: false,
+		FragmentName:       "",
+		FragmentArgs:       make(map[string]string),
 	}
 }
 
@@ -66,36 +71,61 @@ var runCmd = &cobra.Command{
 			cancel()
 		}()
 
-		// Check if there's input from stdin (pipe)
-		stat, _ := os.Stdin.Stat()
-		isPipe := (stat.Mode() & os.ModeCharDevice) == 0
-
+		// Handle fragment processing if -r flag is provided
 		var query string
-		if isPipe {
-			// Read from stdin
-			stdinBytes, err := io.ReadAll(os.Stdin)
+		if config.FragmentName != "" {
+			// Process fragment
+			fragmentProcessor := fragments.NewFragmentProcessor()
+			fragmentConfig := &fragments.FragmentConfig{
+				FragmentName: config.FragmentName,
+				Arguments:    config.FragmentArgs,
+			}
+
+			fragmentContent, err := fragmentProcessor.LoadFragment(ctx, fragmentConfig)
 			if err != nil {
-				presenter.Error(err, "Failed to read from stdin")
+				presenter.Error(err, "Failed to load fragment")
 				return
 			}
 
-			stdinContent := string(stdinBytes)
-
-			// If there are command line args, prepend them to the stdin content
+			// If there are additional command line args, append them to the fragment
 			if len(args) > 0 {
 				argsContent := strings.Join(args, " ")
-				query = argsContent + "\n" + stdinContent
+				query = fragmentContent + "\n" + argsContent
 			} else {
-				// If no args, just use stdin content
-				query = stdinContent
+				query = fragmentContent
 			}
 		} else {
-			// No pipe, just use args
-			if len(args) == 0 {
-				presenter.Error(errors.New("no query provided"), "Please provide a query to execute")
-				return
+			// Original logic for non-fragment queries
+			// Check if there's input from stdin (pipe)
+			stat, _ := os.Stdin.Stat()
+			isPipe := (stat.Mode() & os.ModeCharDevice) == 0
+
+			if isPipe {
+				// Read from stdin
+				stdinBytes, err := io.ReadAll(os.Stdin)
+				if err != nil {
+					presenter.Error(err, "Failed to read from stdin")
+					return
+				}
+
+				stdinContent := string(stdinBytes)
+
+				// If there are command line args, prepend them to the stdin content
+				if len(args) > 0 {
+					argsContent := strings.Join(args, " ")
+					query = argsContent + "\n" + stdinContent
+				} else {
+					// If no args, just use stdin content
+					query = stdinContent
+				}
+			} else {
+				// No pipe, just use args
+				if len(args) == 0 {
+					presenter.Error(errors.New("no query provided"), "Please provide a query to execute")
+					return
+				}
+				query = strings.Join(args, " ")
 			}
-			query = strings.Join(args, " ")
 		}
 
 		// Create the MCP manager from Viper configuration
@@ -175,6 +205,8 @@ func init() {
 	runCmd.Flags().Bool("enable-browser-tools", defaults.EnableBrowserTools, "Enable browser automation tools (navigate, click, type, screenshot, etc.)")
 	runCmd.Flags().Float64("compact-ratio", defaults.CompactRatio, "Context window utilization ratio to trigger auto-compact (0.0-1.0)")
 	runCmd.Flags().Bool("disable-auto-compact", defaults.DisableAutoCompact, "Disable auto-compact functionality")
+	runCmd.Flags().StringP("receipt", "r", defaults.FragmentName, "Use a fragment/receipt template")
+	runCmd.Flags().StringToString("arg", defaults.FragmentArgs, "Arguments to pass to fragment (e.g., --arg name=John --arg occupation=Engineer)")
 }
 
 // getRunConfigFromFlags extracts run configuration from command flags
@@ -225,6 +257,12 @@ func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
 	}
 	if disableAutoCompact, err := cmd.Flags().GetBool("disable-auto-compact"); err == nil {
 		config.DisableAutoCompact = disableAutoCompact
+	}
+	if fragmentName, err := cmd.Flags().GetString("receipt"); err == nil {
+		config.FragmentName = fragmentName
+	}
+	if fragmentArgs, err := cmd.Flags().GetStringToString("arg"); err == nil {
+		config.FragmentArgs = fragmentArgs
 	}
 
 	return config
