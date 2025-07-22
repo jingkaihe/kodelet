@@ -53,9 +53,9 @@ func (s StructuredToolResult) MarshalJSON() ([]byte, error) {
 
 // metadataTypeRegistry maps metadata type strings to their corresponding Go types
 var metadataTypeRegistry = map[string]reflect.Type{
-	"file_read":                 reflect.TypeOf(FileReadMetadata{}),
-	"file_write":                reflect.TypeOf(FileWriteMetadata{}),
-	"file_edit":                 reflect.TypeOf(FileEditMetadata{}),
+	"file_read":  reflect.TypeOf(FileReadMetadata{}),
+	"file_write": reflect.TypeOf(FileWriteMetadata{}),
+	"file_edit":  reflect.TypeOf(FileEditMetadata{}),
 
 	"grep_tool":                 reflect.TypeOf(GrepMetadata{}),
 	"glob_tool":                 reflect.TypeOf(GlobMetadata{}),
@@ -381,8 +381,6 @@ type BackgroundProcessInfo struct {
 }
 
 func (m ViewBackgroundProcessesMetadata) ToolType() string { return "view_background_processes" }
-
-
 
 // ExtractMetadata is a helper that handles both pointer and value type assertions
 // This is necessary because JSON unmarshaling creates value types, while
