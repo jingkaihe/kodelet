@@ -15,23 +15,23 @@ import (
 	"github.com/pkg/errors"
 )
 
-// FragmentConfig holds configuration for fragment processing
-type FragmentConfig struct {
+// Config holds configuration for fragment processing
+type Config struct {
 	FragmentName string
 	Arguments    map[string]string
 }
 
-// FragmentProcessor handles fragment loading and rendering
-type FragmentProcessor struct {
+// Processor handles fragment loading and rendering
+type Processor struct {
 	fragmentDirs []string
 }
 
-// FragmentProcessorOption is a function that configures a FragmentProcessor
-type FragmentProcessorOption func(*FragmentProcessor) error
+// Option is a function that configures a FragmentProcessor
+type Option func(*Processor) error
 
 // WithFragmentDirs sets custom fragment directories
-func WithFragmentDirs(dirs ...string) FragmentProcessorOption {
-	return func(fp *FragmentProcessor) error {
+func WithFragmentDirs(dirs ...string) Option {
+	return func(fp *Processor) error {
 		if len(dirs) == 0 {
 			return errors.New("at least one fragment directory must be specified")
 		}
@@ -40,11 +40,11 @@ func WithFragmentDirs(dirs ...string) FragmentProcessorOption {
 	}
 }
 
-// WithAdditionalFragmentDirs adds additional fragment directories to the current ones
+// WithAdditionalDirs adds additional fragment directories to the current ones
 // If no directories are currently set, it starts with defaults first
 // If dirs is empty, this is a no-op
-func WithAdditionalFragmentDirs(dirs ...string) FragmentProcessorOption {
-	return func(fp *FragmentProcessor) error {
+func WithAdditionalDirs(dirs ...string) Option {
+	return func(fp *Processor) error {
 		// If no directories provided, this is a no-op
 		if len(dirs) == 0 {
 			return nil
@@ -52,7 +52,7 @@ func WithAdditionalFragmentDirs(dirs ...string) FragmentProcessorOption {
 		
 		// If no directories are set yet, start with defaults
 		if len(fp.fragmentDirs) == 0 {
-			if err := WithDefaultFragmentDirs()(fp); err != nil {
+			if err := WithDefaultDirs()(fp); err != nil {
 				return errors.Wrap(err, "failed to initialize with default directories")
 			}
 		}
@@ -62,9 +62,9 @@ func WithAdditionalFragmentDirs(dirs ...string) FragmentProcessorOption {
 	}
 }
 
-// WithDefaultFragmentDirs resets to default fragment directories
-func WithDefaultFragmentDirs() FragmentProcessorOption {
-	return func(fp *FragmentProcessor) error {
+// WithDefaultDirs resets to default fragment directories
+func WithDefaultDirs() Option {
+	return func(fp *Processor) error {
 		homeDir, err := os.UserHomeDir()
 		if err != nil {
 			return errors.Wrap(err, "failed to get user home directory")
@@ -78,13 +78,13 @@ func WithDefaultFragmentDirs() FragmentProcessorOption {
 }
 
 // NewFragmentProcessor creates a new fragment processor with optional configuration
-func NewFragmentProcessor(opts ...FragmentProcessorOption) (*FragmentProcessor, error) {
+func NewFragmentProcessor(opts ...Option) (*Processor, error) {
 	// Start with empty processor
-	fp := &FragmentProcessor{}
+	fp := &Processor{}
 	
 	// If no options provided, use defaults
 	if len(opts) == 0 {
-		if err := WithDefaultFragmentDirs()(fp); err != nil {
+		if err := WithDefaultDirs()(fp); err != nil {
 			return nil, errors.Wrap(err, "failed to apply default fragment directories")
 		}
 		return fp, nil
@@ -99,7 +99,7 @@ func NewFragmentProcessor(opts ...FragmentProcessorOption) (*FragmentProcessor, 
 	
 	// If no directories were set after applying options, apply defaults
 	if len(fp.fragmentDirs) == 0 {
-		if err := WithDefaultFragmentDirs()(fp); err != nil {
+		if err := WithDefaultDirs()(fp); err != nil {
 			return nil, errors.Wrap(err, "failed to apply default fragment directories")
 		}
 	}
@@ -108,7 +108,7 @@ func NewFragmentProcessor(opts ...FragmentProcessorOption) (*FragmentProcessor, 
 }
 
 // findFragmentFile searches for a fragment file in the configured directories
-func (fp *FragmentProcessor) findFragmentFile(fragmentName string) (string, error) {
+func (fp *Processor) findFragmentFile(fragmentName string) (string, error) {
 	// Try both .md and no extension
 	possibleNames := []string{
 		fragmentName + ".md",
@@ -128,7 +128,7 @@ func (fp *FragmentProcessor) findFragmentFile(fragmentName string) (string, erro
 }
 
 // LoadFragment loads and processes a fragment with the given arguments
-func (fp *FragmentProcessor) LoadFragment(ctx context.Context, config *FragmentConfig) (string, error) {
+func (fp *Processor) LoadFragment(ctx context.Context, config *Config) (string, error) {
 	logger.G(ctx).WithField("fragment", config.FragmentName).Debug("Loading fragment")
 
 	// Find the fragment file
@@ -155,7 +155,7 @@ func (fp *FragmentProcessor) LoadFragment(ctx context.Context, config *FragmentC
 }
 
 // processTemplate processes a template string with variable substitution and bash command execution using FuncMap
-func (fp *FragmentProcessor) processTemplate(ctx context.Context, templateContent string, args map[string]string) (string, error) {
+func (fp *Processor) processTemplate(ctx context.Context, templateContent string, args map[string]string) (string, error) {
 	// Create template with custom FuncMap for bash command execution
 	tmpl, err := template.New("fragment").Funcs(template.FuncMap{
 		"bash": fp.createBashFunc(ctx),
@@ -174,7 +174,7 @@ func (fp *FragmentProcessor) processTemplate(ctx context.Context, templateConten
 }
 
 // createBashFunc returns a function that can be used in templates to execute bash commands
-func (fp *FragmentProcessor) createBashFunc(ctx context.Context) func(...string) string {
+func (fp *Processor) createBashFunc(ctx context.Context) func(...string) string {
 	return func(args ...string) string {
 		if len(args) == 0 {
 			return "[ERROR: bash function requires at least one argument]"
@@ -210,7 +210,7 @@ func (fp *FragmentProcessor) createBashFunc(ctx context.Context) func(...string)
 }
 
 // ListFragments returns a list of available fragments
-func (fp *FragmentProcessor) ListFragments() ([]string, error) {
+func (fp *Processor) ListFragments() ([]string, error) {
 	var fragments []string
 	seen := make(map[string]bool)
 

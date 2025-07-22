@@ -33,7 +33,7 @@ Your occupation is {{.occupation}}.`
 	require.NoError(t, err)
 
 	// Test fragment loading and processing
-	config := &FragmentConfig{
+	config := &Config{
 		FragmentName: "test",
 		Arguments: map[string]string{
 			"name":       "Alice",
@@ -72,7 +72,7 @@ Hello message: {{bash "sh" "-c" "echo 'Hello World' | tr '[:lower:]' '[:upper:]'
 	processor, err := NewFragmentProcessor(WithFragmentDirs(tempDir))
 	require.NoError(t, err)
 
-	config := &FragmentConfig{
+	config := &Config{
 		FragmentName: "complex",
 		Arguments: map[string]string{
 			"project": "Kodelet",
@@ -102,7 +102,7 @@ func TestFragmentProcessor_LoadFragment_BashCommandError(t *testing.T) {
 	processor, err := NewFragmentProcessor(WithFragmentDirs(tempDir))
 	require.NoError(t, err)
 
-	config := &FragmentConfig{
+	config := &Config{
 		FragmentName: "failing",
 		Arguments:    map[string]string{},
 	}
@@ -303,7 +303,7 @@ func TestFragmentProcessor_ErrorHandling(t *testing.T) {
 	assert.Equal(t, "Hello <no value>", result)
 
 	// Test fragment file not found
-	config := &FragmentConfig{
+	config := &Config{
 		FragmentName: "nonexistent-fragment-xyz",
 		Arguments:    map[string]string{},
 	}
@@ -338,7 +338,7 @@ func TestFragmentProcessor_BuilderPattern(t *testing.T) {
 	assert.Equal(t, "/custom2", processor.fragmentDirs[1])
 
 	// Test WithAdditionalFragmentDirs option
-	processor, err = NewFragmentProcessor(WithAdditionalFragmentDirs("/extra1", "/extra2"))
+	processor, err = NewFragmentProcessor(WithAdditionalDirs("/extra1", "/extra2"))
 	require.NoError(t, err)
 	assert.Len(t, processor.fragmentDirs, 4)
 	assert.Equal(t, "./receipts", processor.fragmentDirs[0])
@@ -347,7 +347,7 @@ func TestFragmentProcessor_BuilderPattern(t *testing.T) {
 	assert.Equal(t, "/extra2", processor.fragmentDirs[3])
 
 	// Test WithDefaultFragmentDirs option (explicit defaults)
-	processor, err = NewFragmentProcessor(WithDefaultFragmentDirs())
+	processor, err = NewFragmentProcessor(WithDefaultDirs())
 	require.NoError(t, err)
 	assert.Len(t, processor.fragmentDirs, 2)
 	assert.Equal(t, "./receipts", processor.fragmentDirs[0])
@@ -366,7 +366,7 @@ func TestFragmentProcessor_BuilderPattern(t *testing.T) {
 	// Test WithDefaultFragmentDirs after custom dirs
 	processor, err = NewFragmentProcessor(
 		WithFragmentDirs("/temp1", "/temp2"),
-		WithDefaultFragmentDirs(),
+		WithDefaultDirs(),
 	)
 	require.NoError(t, err)
 	assert.Len(t, processor.fragmentDirs, 2)
@@ -376,7 +376,7 @@ func TestFragmentProcessor_BuilderPattern(t *testing.T) {
 	// Test combining WithFragmentDirs and WithAdditionalFragmentDirs
 	processor, err = NewFragmentProcessor(
 		WithFragmentDirs("/base1", "/base2"),
-		WithAdditionalFragmentDirs("/extra1"),
+		WithAdditionalDirs("/extra1"),
 	)
 	require.NoError(t, err)
 	assert.Len(t, processor.fragmentDirs, 3)
@@ -385,7 +385,7 @@ func TestFragmentProcessor_BuilderPattern(t *testing.T) {
 	assert.Equal(t, "/extra1", processor.fragmentDirs[2])
 
 	// Test WithAdditionalFragmentDirs with empty directories (should be no-op)
-	processor, err = NewFragmentProcessor(WithAdditionalFragmentDirs())
+	processor, err = NewFragmentProcessor(WithAdditionalDirs())
 	require.NoError(t, err)
 	assert.Len(t, processor.fragmentDirs, 2) // Should have defaults
 	assert.Equal(t, "./receipts", processor.fragmentDirs[0])
