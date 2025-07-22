@@ -1,5 +1,13 @@
 # Kodelet
 
+## 0.0.72.alpha (2025-07-22)
+
+### Fragments/Receipts System
+
+- **Template-Based Prompt Management**: Added fragments system for creating reusable prompt templates with variable substitution and bash command execution
+- **Usage**: Use `kodelet run -r fragment-name` to execute templates stored in `./receipts/` directories
+- **Dynamic Content**: Support for `{{bash "cmd"}}` syntax and `--arg key=value` parameter passing
+
 ## 0.0.71.alpha (2025-07-19)
 
 ### Tool System Improvements
