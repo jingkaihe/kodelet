@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
 func TestFileEditTool_GenerateSchema(t *testing.T) {
@@ -456,8 +456,8 @@ func test() {
 		mockState := NewBasicState(context.TODO())
 
 		input := FileEditInput{
-			FilePath:   tmpfile.Name(),
-			OldText:    `func test() {
+			FilePath: tmpfile.Name(),
+			OldText: `func test() {
     return "test"
 }`,
 			NewText: `func test() {
@@ -621,13 +621,13 @@ func TestFileEditTool_StructuredDataReplaceAll(t *testing.T) {
 	}
 
 	structuredData := result.StructuredData()
-	
+
 	assert.Equal(t, "file_edit", structuredData.ToolName)
 	assert.True(t, structuredData.Success)
-	
+
 	meta, ok := structuredData.Metadata.(*tooltypes.FileEditMetadata)
 	require.True(t, ok)
-	
+
 	assert.Equal(t, "/test/file.go", meta.FilePath)
 	assert.True(t, meta.ReplaceAll)
 	assert.Equal(t, 2, meta.ReplacedCount)
@@ -683,7 +683,7 @@ func TestFindAllOccurrences(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			edits := findAllOccurrences(tt.content, tt.oldText)
 			assert.Len(t, edits, tt.expectedLen)
-			
+
 			// Verify each edit has proper line numbers
 			for _, edit := range edits {
 				assert.Greater(t, edit.StartLine, 0)

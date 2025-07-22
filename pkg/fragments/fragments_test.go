@@ -48,7 +48,7 @@ Your occupation is {{.occupation}}.`
 	// Verify variable substitution worked
 	assert.Contains(t, result, "Hello Alice!")
 	assert.Contains(t, result, "Your occupation is Engineer.")
-	
+
 	// Verify bash command was executed (should contain a date)
 	assert.Contains(t, result, "Current date: 20")
 }
@@ -127,7 +127,7 @@ func TestFragmentProcessor_findFragmentFile(t *testing.T) {
 	// Create test fragments
 	err = os.WriteFile(filepath.Join(tempDir, "test1.md"), []byte("test1"), 0644)
 	require.NoError(t, err)
-	
+
 	err = os.WriteFile(filepath.Join(tempDir, "test2"), []byte("test2"), 0644)
 	require.NoError(t, err)
 
@@ -164,7 +164,7 @@ func TestFragmentProcessor_DirectoryPrecedence(t *testing.T) {
 	// Create the same fragment name in both directories
 	err = os.WriteFile(filepath.Join(highPrecDir, "same.md"), []byte("high priority"), 0644)
 	require.NoError(t, err)
-	
+
 	err = os.WriteFile(filepath.Join(lowPrecDir, "same.md"), []byte("low priority"), 0644)
 	require.NoError(t, err)
 
@@ -180,44 +180,44 @@ func TestFragmentProcessor_DirectoryPrecedence(t *testing.T) {
 
 func TestFragmentProcessor_processTemplate_VariablesOnly(t *testing.T) {
 	processor := &FragmentProcessor{}
-	
+
 	content := "Hello {{.name}}! You work as a {{.job}}."
 	args := map[string]string{
 		"name": "Bob",
 		"job":  "Developer",
 	}
-	
+
 	result, err := processor.processTemplate(context.Background(), content, args)
 	require.NoError(t, err)
-	
+
 	expected := "Hello Bob! You work as a Developer."
 	assert.Equal(t, expected, result)
 }
 
 func TestFragmentProcessor_processTemplate_BashOnly(t *testing.T) {
 	processor := &FragmentProcessor{}
-	
+
 	content := `Hello {{bash "echo" "world"}}! Today is {{bash "date" "+%A"}}.`
-	
+
 	result, err := processor.processTemplate(context.Background(), content, map[string]string{})
 	require.NoError(t, err)
-	
+
 	assert.Contains(t, result, "Hello world!")
 	assert.Contains(t, result, "Today is ")
 }
 
 func TestFragmentProcessor_processTemplate_MixedContent(t *testing.T) {
 	processor := &FragmentProcessor{}
-	
+
 	content := `User: {{.name}}
 Command output: {{bash "echo" "test output"}}`
 	args := map[string]string{
 		"name": "TestUser",
 	}
-	
+
 	result, err := processor.processTemplate(context.Background(), content, args)
 	require.NoError(t, err)
-	
+
 	assert.Contains(t, result, "User: TestUser")
 	assert.Contains(t, result, "Command output: test output")
 }
@@ -235,17 +235,17 @@ func TestFragmentProcessor_ListFragments(t *testing.T) {
 	// Create fragments in both directories
 	err = os.WriteFile(filepath.Join(dir1, "frag1.md"), []byte("fragment1"), 0644)
 	require.NoError(t, err)
-	
+
 	err = os.WriteFile(filepath.Join(dir1, "frag2"), []byte("fragment2"), 0644)
 	require.NoError(t, err)
-	
+
 	err = os.WriteFile(filepath.Join(dir2, "frag3.md"), []byte("fragment3"), 0644)
 	require.NoError(t, err)
-	
+
 	// Same name in both directories (should prioritize first)
 	err = os.WriteFile(filepath.Join(dir1, "duplicate.md"), []byte("first"), 0644)
 	require.NoError(t, err)
-	
+
 	err = os.WriteFile(filepath.Join(dir2, "duplicate.md"), []byte("second"), 0644)
 	require.NoError(t, err)
 
@@ -264,25 +264,25 @@ func TestFragmentProcessor_ListFragments(t *testing.T) {
 func TestFragmentProcessor_createBashFunc(t *testing.T) {
 	processor := &FragmentProcessor{}
 	ctx := context.Background()
-	
+
 	bashFunc := processor.createBashFunc(ctx)
-	
+
 	// Test successful command
 	result := bashFunc("echo", "hello")
 	assert.Equal(t, "hello", result)
-	
+
 	// Test command with trailing newlines
 	result = bashFunc("echo", "test")
 	assert.Equal(t, "test", result)
-	
+
 	// Test failing command
 	result = bashFunc("nonexistent-command")
 	assert.Contains(t, result, "[ERROR executing command")
-	
+
 	// Test no arguments
 	result = bashFunc()
 	assert.Contains(t, result, "[ERROR: bash function requires at least one argument]")
-	
+
 	// Test multiple arguments
 	result = bashFunc("echo", "-n", "hello world")
 	assert.Equal(t, "hello world", result)
@@ -290,19 +290,19 @@ func TestFragmentProcessor_createBashFunc(t *testing.T) {
 
 func TestFragmentProcessor_ErrorHandling(t *testing.T) {
 	processor := &FragmentProcessor{}
-	
-	// Test malformed template syntax  
-	content := "Hello {{range}}"  // Invalid range without end
+
+	// Test malformed template syntax
+	content := "Hello {{range}}" // Invalid range without end
 	_, err := processor.processTemplate(context.Background(), content, map[string]string{})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to parse template")
-	
+
 	// Test missing variable in strict mode - this should work fine as template engine handles missing variables
 	content = "Hello {{.missing}}"
 	result, err := processor.processTemplate(context.Background(), content, map[string]string{})
 	require.NoError(t, err)
 	assert.Equal(t, "Hello <no value>", result)
-	
+
 	// Test fragment file not found
 	config := &FragmentConfig{
 		FragmentName: "nonexistent-fragment-xyz",
@@ -315,7 +315,7 @@ func TestFragmentProcessor_ErrorHandling(t *testing.T) {
 
 func TestFragmentProcessor_NewFragmentProcessor(t *testing.T) {
 	processor := NewFragmentProcessor()
-	
+
 	// Should have two directories configured
 	assert.Len(t, processor.fragmentDirs, 2)
 	assert.Equal(t, "./receipts", processor.fragmentDirs[0])

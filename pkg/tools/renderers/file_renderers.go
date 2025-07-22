@@ -71,7 +71,7 @@ func (r *FileEditRenderer) RenderCLI(result tools.StructuredToolResult) string {
 	var output bytes.Buffer
 	if meta.ReplaceAll && meta.ReplacedCount > 1 {
 		fmt.Fprintf(&output, "File edited: %s (%d replacements)\n\n", meta.FilePath, meta.ReplacedCount)
-		
+
 		// Show all edits
 		for i, edit := range meta.Edits {
 			fmt.Fprintf(&output, "Edit %d (lines %d-%d):\n", i+1, edit.StartLine, edit.EndLine)
@@ -92,6 +92,6 @@ func (r *FileEditRenderer) RenderCLI(result tools.StructuredToolResult) string {
 		diff := udiff.Unified(meta.FilePath, meta.FilePath, edit.OldContent, edit.NewContent)
 		output.WriteString(diff)
 	}
-	
+
 	return output.String()
 }

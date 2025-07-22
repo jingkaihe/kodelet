@@ -31,7 +31,7 @@ func NewFragmentProcessor() *FragmentProcessor {
 	homeDir, _ := os.UserHomeDir()
 	return &FragmentProcessor{
 		fragmentDirs: []string{
-			"./receipts",                            // Repo-specific (higher precedence)
+			"./receipts", // Repo-specific (higher precedence)
 			filepath.Join(homeDir, ".kodelet/receipts"), // User home directory
 		},
 	}
@@ -113,7 +113,7 @@ func (fp *FragmentProcessor) createBashFunc(ctx context.Context) func(...string)
 		// First argument is the command, rest are arguments
 		command := args[0]
 		cmdArgs := args[1:]
-		
+
 		logger.G(ctx).WithFields(map[string]interface{}{
 			"command": command,
 			"args":    cmdArgs,

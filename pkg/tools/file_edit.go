@@ -268,7 +268,7 @@ func findAllOccurrences(content, oldText string) []EditInfo {
 	var edits []EditInfo
 	lines := strings.Split(content, "\n")
 	oldTextLines := strings.Split(oldText, "\n")
-	
+
 	// Find all occurrences line by line
 	for i := 0; i <= len(lines)-len(oldTextLines); i++ {
 		match := true
@@ -291,7 +291,7 @@ func findAllOccurrences(content, oldText string) []EditInfo {
 			i += len(oldTextLines) - 1
 		}
 	}
-	
+
 	// If no exact line matches found, fall back to simple string search
 	if len(edits) == 0 {
 		searchText := content
@@ -301,24 +301,24 @@ func findAllOccurrences(content, oldText string) []EditInfo {
 			if pos == -1 {
 				break
 			}
-			
+
 			// Find line number for this position
 			beforeText := content[:startPos+pos]
 			lineNum := strings.Count(beforeText, "\n") + 1
-			
+
 			edits = append(edits, EditInfo{
 				StartLine:  lineNum,
 				EndLine:    lineNum + strings.Count(oldText, "\n"),
 				OldContent: oldText,
 				NewContent: "",
 			})
-			
+
 			// Move past this match
 			startPos += pos + len(oldText)
 			searchText = content[startPos:]
 		}
 	}
-	
+
 	return edits
 }
 
@@ -436,16 +436,16 @@ func (t *FileEditTool) Execute(ctx context.Context, state tooltypes.State, param
 		// Find all occurrences and replace them
 		allOccurrences := findAllOccurrences(originalContent, oldText)
 		replacedCount = len(allOccurrences)
-		
+
 		// Update edits with new content
 		for i := range allOccurrences {
 			allOccurrences[i].NewContent = newText
 		}
 		edits = allOccurrences
-		
+
 		// Replace all occurrences
 		content = strings.ReplaceAll(originalContent, oldText, newText)
-		
+
 		// For single edit compatibility, use first occurrence for startLine/endLine
 		if len(allOccurrences) > 0 {
 			startLine = allOccurrences[0].StartLine
@@ -456,11 +456,11 @@ func (t *FileEditTool) Execute(ctx context.Context, state tooltypes.State, param
 	} else {
 		// Find the line numbers for the old text (single occurrence)
 		startLine, endLine = findLineNumbers(originalContent, oldText)
-		
+
 		// Replace only the first occurrence
 		content = strings.Replace(originalContent, oldText, newText, 1)
 		replacedCount = 1
-		
+
 		// Create single edit info
 		edits = []EditInfo{
 			{
