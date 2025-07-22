@@ -79,7 +79,7 @@ var runCmd = &cobra.Command{
 			// Process fragment
 			var fragmentProcessor *fragments.Processor
 			var err error
-			
+
 			// Create fragment processor with additional directories if specified
 			var validDirs []string
 			for _, dir := range config.FragmentDirs {
@@ -89,12 +89,12 @@ var runCmd = &cobra.Command{
 				}
 			}
 			fragmentProcessor, err = fragments.NewFragmentProcessor(fragments.WithAdditionalDirs(validDirs...))
-			
+
 			if err != nil {
 				presenter.Error(err, "Failed to create fragment processor")
 				return
 			}
-			
+
 			fragmentConfig := &fragments.Config{
 				FragmentName: config.FragmentName,
 				Arguments:    config.FragmentArgs,

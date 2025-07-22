@@ -4,10 +4,13 @@
 
 ### Fragments/Receipts System
 
-- **Template-Based Prompt Management**: Added fragments system for creating reusable prompt templates with variable substitution and bash command execution
-- **Usage**: Use `kodelet run -r fragment-name` to execute templates stored in `./receipts/` directories
-- **Dynamic Content**: Support for `{{bash "cmd"}}` syntax and `--arg key=value` parameter passing
-- **CLI Integration**: Added `--fragment-dirs` flag supporting both multiple occurrences and comma-separated values for custom fragment directories
+- **Template-Based Prompt Management**: Added comprehensive fragments system for creating reusable prompt templates with variable substitution and bash command execution
+- **Dynamic Content Generation**: Support for `{{bash "cmd" "arg1" "arg2"}}` syntax to execute shell commands and embed their output directly into prompts
+- **Variable Substitution**: Use `{{.variable_name}}` syntax with `--arg key=value` parameter passing for customizable templates
+- **Flexible Directory Structure**: Fragments discovered in `./receipts/` (repository-specific) and `~/.kodelet/receipts/` (user-global) with precedence support
+- **CLI Integration**: New `-r` flag for fragment selection, `--arg` for parameter passing, and `--fragment-dirs` for custom fragment directories
+- **Comprehensive Documentation**: Added detailed documentation in `docs/FRAGMENTS.md` with examples and best practices
+
 
 ## 0.0.71.alpha (2025-07-19)
 

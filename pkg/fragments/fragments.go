@@ -49,14 +49,14 @@ func WithAdditionalDirs(dirs ...string) Option {
 		if len(dirs) == 0 {
 			return nil
 		}
-		
+
 		// If no directories are set yet, start with defaults
 		if len(fp.fragmentDirs) == 0 {
 			if err := WithDefaultDirs()(fp); err != nil {
 				return errors.Wrap(err, "failed to initialize with default directories")
 			}
 		}
-		
+
 		fp.fragmentDirs = append(fp.fragmentDirs, dirs...)
 		return nil
 	}
@@ -81,7 +81,7 @@ func WithDefaultDirs() Option {
 func NewFragmentProcessor(opts ...Option) (*Processor, error) {
 	// Start with empty processor
 	fp := &Processor{}
-	
+
 	// If no options provided, use defaults
 	if len(opts) == 0 {
 		if err := WithDefaultDirs()(fp); err != nil {
@@ -89,21 +89,21 @@ func NewFragmentProcessor(opts ...Option) (*Processor, error) {
 		}
 		return fp, nil
 	}
-	
+
 	// Apply provided options
 	for _, opt := range opts {
 		if err := opt(fp); err != nil {
 			return nil, errors.Wrap(err, "failed to apply fragment processor option")
 		}
 	}
-	
+
 	// If no directories were set after applying options, apply defaults
 	if len(fp.fragmentDirs) == 0 {
 		if err := WithDefaultDirs()(fp); err != nil {
 			return nil, errors.Wrap(err, "failed to apply default fragment directories")
 		}
 	}
-	
+
 	return fp, nil
 }
 
