@@ -614,7 +614,7 @@ func (t *AnthropicThread) NewMessage(ctx context.Context, params anthropic.Messa
 
 	retryAttempts := t.config.Retry.Attempts
 	if retryAttempts == 0 {
-		retryAttempts = llmtypes.DefaultRetryConfig().Attempts
+		retryAttempts = llmtypes.DefaultRetryConfig.Attempts
 	}
 
 	stream := t.client.Messages.NewStreaming(ctx, params, option.WithMaxRetries(retryAttempts))

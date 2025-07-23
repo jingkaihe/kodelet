@@ -69,14 +69,12 @@ type RetryConfig struct {
 	BackoffType  string `mapstructure:"backoff_type"`  // Backoff strategy: "fixed", "exponential" (default: "exponential")
 }
 
-// DefaultRetryConfig returns the default retry configuration
-func DefaultRetryConfig() RetryConfig {
-	return RetryConfig{
-		Attempts:     3,
-		InitialDelay: 1000,  // 1 second
-		MaxDelay:     10000, // 10 seconds
-		BackoffType:  "exponential",
-	}
+// DefaultRetryConfig holds the default retry configuration
+var DefaultRetryConfig = RetryConfig{
+	Attempts:     3,
+	InitialDelay: 1000,  // 1 second
+	MaxDelay:     10000, // 10 seconds
+	BackoffType:  "exponential",
 }
 
 // SubAgentConfigSettings holds the configuration for subagent behavior
