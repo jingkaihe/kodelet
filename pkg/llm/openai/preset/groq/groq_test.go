@@ -100,7 +100,7 @@ func TestModelCount(t *testing.T) {
 	// Ensure we have the expected number of models
 	assert.Len(t, groq.Models.Reasoning, 2, "Should have 2 reasoning models")
 	assert.Len(t, groq.Models.NonReasoning, 15, "Should have 15 non-reasoning models")
-	
+
 	// Check that we have pricing for all models in our lists
 	totalModels := len(groq.Models.Reasoning) + len(groq.Models.NonReasoning)
 	assert.Len(t, groq.Pricing, totalModels, "Should have pricing for all models")
@@ -148,7 +148,7 @@ func TestPricingValidation(t *testing.T) {
 func TestModelNames(t *testing.T) {
 	// Test that model names are correctly formatted (basic validation)
 	allModels := append(groq.Models.Reasoning, groq.Models.NonReasoning...)
-	
+
 	for _, model := range allModels {
 		assert.NotEmpty(t, model, "Model name should not be empty")
 		assert.NotContains(t, model, " ", "Model name should not contain spaces")

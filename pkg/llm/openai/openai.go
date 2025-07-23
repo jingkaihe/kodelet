@@ -551,23 +551,7 @@ func (t *OpenAIThread) processMessageExchange(
 	apiStartTime := time.Now()
 
 	// Make the API request with retry logic
-	var response openai.ChatCompletionResponse
-	err := retry.Do(
-		func() error {
-			var apiErr error
-			response, apiErr = t.client.CreateChatCompletion(ctx, requestParams)
-			return apiErr
-		},
-		retry.RetryIf(isRetryableError),
-		retry.Attempts(10),
-		retry.Delay(time.Second),
-		retry.DelayType(retry.BackOffDelay),
-		retry.MaxDelay(30*time.Second),
-		retry.Context(ctx),
-		retry.OnRetry(func(n uint, err error) {
-			logger.G(ctx).WithError(err).WithField("attempt", n+1).Warn("retrying OpenAI API call")
-		}),
-	)
+	response, err := t.createChatCompletionWithRetry(ctx, requestParams)
 	if err != nil {
 		return "", false, errors.Wrap(err, "error sending message to OpenAI")
 	}
@@ -668,6 +652,30 @@ func (t *OpenAIThread) processMessageExchange(
 		t.SaveConversation(ctx, false)
 	}
 	return finalOutput, true, nil
+}
+
+// createChatCompletionWithRetry executes the OpenAI API call with retry logic
+func (t *OpenAIThread) createChatCompletionWithRetry(ctx context.Context, requestParams openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
+	var response openai.ChatCompletionResponse
+
+	err := retry.Do(
+		func() error {
+			var apiErr error
+			response, apiErr = t.client.CreateChatCompletion(ctx, requestParams)
+			return apiErr
+		},
+		retry.RetryIf(isRetryableError),
+		retry.Attempts(10),
+		retry.Delay(time.Second),
+		retry.DelayType(retry.BackOffDelay),
+		retry.MaxDelay(30*time.Second),
+		retry.Context(ctx),
+		retry.OnRetry(func(n uint, err error) {
+			logger.G(ctx).WithError(err).WithField("attempt", n+1).Warn("retrying OpenAI API call")
+		}),
+	)
+
+	return response, err
 }
 
 func (t *OpenAIThread) tools(opt llmtypes.MessageOpt) []tooltypes.Tool {
