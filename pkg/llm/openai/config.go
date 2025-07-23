@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/jingkaihe/kodelet/pkg/llm/openai/preset/grok"
+	"github.com/jingkaihe/kodelet/pkg/llm/openai/preset/groq"
 	openaipreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/openai"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
@@ -84,6 +85,8 @@ func loadPreset(presetName string) (*llmtypes.CustomModels, llmtypes.CustomPrici
 		return loadOpenAIPreset()
 	case "xai":
 		return loadXAIGrokPreset()
+	case "groq":
+		return loadGroqPreset()
 	default:
 		return nil, nil
 	}
@@ -133,6 +136,28 @@ func loadXAIGrokPreset() (*llmtypes.CustomModels, llmtypes.CustomPricing) {
 	return models, pricing
 }
 
+// loadGroqPreset loads the complete Groq configuration
+func loadGroqPreset() (*llmtypes.CustomModels, llmtypes.CustomPricing) {
+	// Convert groq.Models to llmtypes.CustomModels
+	models := &llmtypes.CustomModels{
+		Reasoning:    groq.Models.Reasoning,
+		NonReasoning: groq.Models.NonReasoning,
+	}
+
+	// Convert groq.Pricing to llmtypes.CustomPricing
+	pricing := make(llmtypes.CustomPricing)
+	for model, groqPricing := range groq.Pricing {
+		pricing[model] = llmtypes.ModelPricing{
+			Input:         groqPricing.Input,
+			CachedInput:   groqPricing.CachedInput,
+			Output:        groqPricing.Output,
+			ContextWindow: groqPricing.ContextWindow,
+		}
+	}
+
+	return models, pricing
+}
+
 // getPresetBaseURL returns the base URL for a given preset
 func getPresetBaseURL(presetName string) string {
 	switch presetName {
@@ -140,6 +165,8 @@ func getPresetBaseURL(presetName string) string {
 		return openaipreset.BaseURL
 	case "xai":
 		return grok.BaseURL
+	case "groq":
+		return groq.BaseURL
 	default:
 		return ""
 	}
@@ -152,6 +179,8 @@ func getPresetAPIKeyEnvVar(presetName string) string {
 		return openaipreset.APIKeyEnvVar
 	case "xai":
 		return grok.APIKeyEnvVar
+	case "groq":
+		return groq.APIKeyEnvVar
 	default:
 		return "OPENAI_API_KEY" // default fallback
 	}
@@ -182,7 +211,7 @@ func validateCustomConfiguration(config llmtypes.Config) error {
 
 	// Validate preset name if specified
 	if config.OpenAI.Preset != "" {
-		validPresets := []string{"openai", "xai"}
+		validPresets := []string{"openai", "xai", "groq"}
 		isValidPreset := false
 		for _, preset := range validPresets {
 			if config.OpenAI.Preset == preset {

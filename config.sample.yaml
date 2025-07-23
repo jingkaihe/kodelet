@@ -69,11 +69,22 @@ allowed_commands: []
 # weak_model_max_tokens: 4096
 # reasoning_effort: "medium"
 
+# Example Groq configuration (uncomment to use)
+# provider: "openai"
+# model: "moonshotai/kimi-k2-instruct"  # High-capability Groq model
+# max_tokens: 16384
+# weak_model: "moonshotai/kimi-k2-instruct"
+# weak_model_max_tokens: 16384
+# openai:
+#   preset: "groq"
+
 # OpenAI-compatible API configuration
 # Supports any OpenAI-compatible provider (xAI, Groq, Together AI, etc.)
 openai:
   # Option 1: Use a built-in preset (recommended for popular providers)
-  # preset: "xai"  # Built-in preset for xAI's Grok models
+  # preset: "xai"    # Built-in preset for xAI's Grok models
+  # preset: "groq"   # Built-in preset for Groq's models (includes Llama, Gemma, Whisper, etc.)
+  # preset: "openai" # Built-in preset for OpenAI models (default)
 
   # Option 2: Custom configuration (overrides preset if both are specified)
   # base_url: "https://api.x.ai/v1"  # Custom API endpoint
@@ -107,19 +118,19 @@ subagent:
   # Provider for subagents (can be different from main agent)
   # Example: Use GPT for subagents while main agent uses Claude
   # provider: "openai"
-  
+
   # Model for subagents (typically a lighter/faster model)
   # model: "gpt-4o-mini"
-  
+
   # Maximum tokens for subagent responses
   # max_tokens: 2048
-  
+
   # OpenAI-specific: Reasoning effort for subagent (low, medium, high)
   # reasoning_effort: "low"
-  
+
   # Anthropic-specific: Thinking budget for subagent
   # thinking_budget: 1024
-  
+
   # OpenAI configuration for subagent (when using different provider)
   # openai:
   #   preset: "openai"
@@ -157,6 +168,16 @@ subagent:
 #   model: "claude-3-5-haiku-20241022"  # Faster model for subagent tasks
 #   max_tokens: 2048
 
+# Scenario 4: Using Groq for high-speed inference
+# provider: "openai"
+# model: "moonshotai/kimi-k2-instruct"  # High-capability Groq model
+# max_tokens: 16384
+# openai:
+#   preset: "groq"
+# subagent:
+#   model: "moonshotai/kimi-k2-instruct"  # Same model for consistency
+#   max_tokens: 16384
+
 # Tracing Configuration
 tracing:
   # Enable OpenTelemetry tracing (default: false)
@@ -184,11 +205,13 @@ tracing:
 # - KODELET_TRACING_SAMPLER: Sets the sampling strategy
 # - KODELET_TRACING_RATIO: Sets the sampling ratio
 # - KODELET_ALIASES_*: Define individual aliases (e.g., KODELET_ALIASES_SONNET4=claude-sonnet-4-20250514)
+# - KODELET_OPENAI_PRESET: Sets the OpenAI preset (openai, xai, groq)
 #
 # API Keys:
 # - ANTHROPIC_API_KEY: Required when using the Anthropic provider
 # - OPENAI_API_KEY: Required when using the OpenAI provider (default)
 # - XAI_API_KEY: Required when using the xAI preset
+# - GROQ_API_KEY: Required when using the Groq preset
 # - OPENAI_API_BASE: Custom OpenAI API endpoint (overrides config base_url)
 # Note: The API key environment variable can be customized using the api_key_env_var setting
 #

@@ -82,6 +82,39 @@ func TestLoadCustomConfiguration(t *testing.T) {
 			hasPricing: true,
 		},
 		{
+			name: "groq preset",
+			config: llmtypes.Config{
+				OpenAI: &llmtypes.OpenAIConfig{
+					Preset: "groq",
+				},
+			},
+			expected: &llmtypes.CustomModels{
+				Reasoning: []string{
+					"deepseek-r1-distill-llama-70b",
+					"qwen/qwen3-32b",
+				},
+				NonReasoning: []string{
+					"llama-3.1-8b-instant",
+					"llama-3.3-70b-versatile",
+					"llama3-8b-8192",
+					"llama3-70b-8192",
+					"gemma2-9b-it",
+					"meta-llama/llama-guard-4-12b",
+					"meta-llama/llama-prompt-guard-2-22m",
+					"meta-llama/llama-prompt-guard-2-86m",
+					"meta-llama/llama-4-maverick-17b-128e-instruct",
+					"meta-llama/llama-4-scout-17b-16e-instruct",
+					"mistral-saba-24b",
+					"moonshotai/kimi-k2-instruct",
+					"whisper-large-v3",
+					"whisper-large-v3-turbo",
+					"distil-whisper-large-v3-en",
+				},
+			},
+			hasModels:  true,
+			hasPricing: true,
+		},
+		{
 			name: "custom models only (no preset)",
 			config: llmtypes.Config{
 				OpenAI: &llmtypes.OpenAIConfig{
@@ -257,6 +290,10 @@ func TestGetPresetBaseURL(t *testing.T) {
 			expected: "https://api.x.ai/v1",
 		},
 		{
+			preset:   "groq",
+			expected: "https://api.groq.com/openai/v1",
+		},
+		{
 			preset:   "unknown-preset",
 			expected: "",
 		},
@@ -286,6 +323,10 @@ func TestGetPresetAPIKeyEnvVar(t *testing.T) {
 		{
 			preset:   "xai",
 			expected: "XAI_API_KEY",
+		},
+		{
+			preset:   "groq",
+			expected: "GROQ_API_KEY",
 		},
 		{
 			preset:   "unknown-preset",
@@ -340,6 +381,17 @@ func TestGetAPIKeyEnvVar(t *testing.T) {
 				},
 			},
 			expected: "XAI_API_KEY",
+		},
+		{
+			name: "groq preset uses GROQ_API_KEY",
+			config: llmtypes.Config{
+				Provider: "openai",
+				Model:    "llama-3.1-8b-instant",
+				OpenAI: &llmtypes.OpenAIConfig{
+					Preset: "groq",
+				},
+			},
+			expected: "GROQ_API_KEY",
 		},
 		{
 			name: "custom api_key_env_var overrides default",
@@ -422,6 +474,15 @@ func TestValidateCustomConfiguration(t *testing.T) {
 			config: llmtypes.Config{
 				OpenAI: &llmtypes.OpenAIConfig{
 					Preset: "xai",
+				},
+			},
+			expectError: false,
+		},
+		{
+			name: "valid preset groq",
+			config: llmtypes.Config{
+				OpenAI: &llmtypes.OpenAIConfig{
+					Preset: "groq",
 				},
 			},
 			expectError: false,
