@@ -2,6 +2,7 @@ package openai
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -905,5 +906,123 @@ func TestNewSubagentContextOpenAI(t *testing.T) {
 		// Verify the subagent has the correct configuration
 		assert.Equal(t, "openai", config.Thread.Provider(),
 			"Subagent should use the same provider as parent")
+	})
+}
+
+func TestIsRetryableError(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		expected bool
+	}{
+		{
+			name:     "nil error should not be retryable",
+			err:      nil,
+			expected: false,
+		},
+		{
+			name: "4xx API error should be retryable",
+			err: &openai.APIError{
+				HTTPStatusCode: 400,
+				Message:        "Bad Request",
+			},
+			expected: true,
+		},
+		{
+			name: "5xx API error should be retryable",
+			err: &openai.APIError{
+				HTTPStatusCode: 500,
+				Message:        "Internal Server Error",
+			},
+			expected: true,
+		},
+		{
+			name: "429 rate limit should be retryable",
+			err: &openai.APIError{
+				HTTPStatusCode: 429,
+				Message:        "Rate limit exceeded",
+			},
+			expected: true,
+		},
+		{
+			name: "3xx API error should not be retryable",
+			err: &openai.APIError{
+				HTTPStatusCode: 301,
+				Message:        "Moved Permanently",
+			},
+			expected: false,
+		},
+		{
+			name: "2xx API error should not be retryable",
+			err: &openai.APIError{
+				HTTPStatusCode: 200,
+				Message:        "OK",
+			},
+			expected: false,
+		},
+		{
+			name:     "request error should be retryable",
+			err:      &openai.RequestError{Err: errors.New("connection failed")},
+			expected: true,
+		},
+		{
+			name:     "context canceled should not be retryable",
+			err:      context.Canceled,
+			expected: false,
+		},
+		{
+			name:     "context deadline exceeded should not be retryable",
+			err:      context.DeadlineExceeded,
+			expected: false,
+		},
+		{
+			name:     "generic error should not be retryable",
+			err:      errors.New("some other error"),
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isRetryableError(tt.err)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestIsRetryableError_EdgeCases(t *testing.T) {
+	t.Run("API error at boundary values", func(t *testing.T) {
+		// Test edge cases for status code boundaries
+		tests := []struct {
+			statusCode int
+			expected   bool
+		}{
+			{399, false}, // Just below 4xx
+			{400, true},  // Start of 4xx
+			{404, true},  // Common 4xx
+			{499, true},  // End of 4xx
+			{500, true},  // Start of 5xx
+			{599, true},  // End of 5xx
+			{600, false}, // Just above 5xx
+		}
+
+		for _, tt := range tests {
+			err := &openai.APIError{
+				HTTPStatusCode: tt.statusCode,
+				Message:        "Test error",
+			}
+			result := isRetryableError(err)
+			assert.Equal(t, tt.expected, result, "Status code %d should return %v", tt.statusCode, tt.expected)
+		}
+	})
+
+	t.Run("wrapped context errors", func(t *testing.T) {
+		// Test wrapped context errors
+		wrappedCanceled := errors.New("operation failed: context canceled")
+		assert.False(t, isRetryableError(wrappedCanceled), "Wrapped context errors should not be retryable based on error content")
+
+		// But context errors should be detected properly when unwrapped
+		assert.False(t, isRetryableError(context.Canceled))
+		assert.False(t, isRetryableError(context.DeadlineExceeded))
 	})
 }
