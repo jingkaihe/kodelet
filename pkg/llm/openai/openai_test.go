@@ -907,3 +907,43 @@ func TestNewSubagentContextOpenAI(t *testing.T) {
 			"Subagent should use the same provider as parent")
 	})
 }
+
+func TestIsRetryableError(t *testing.T) {
+	t.Run("should retry on API errors with 4xx status codes", func(t *testing.T) {
+		apiErr := &openai.APIError{
+			HTTPStatusCode: 429, // Rate limit
+		}
+		assert.True(t, isRetryableError(apiErr))
+	})
+
+	t.Run("should retry on API errors with 5xx status codes", func(t *testing.T) {
+		apiErr := &openai.APIError{
+			HTTPStatusCode: 500, // Internal server error
+		}
+		assert.True(t, isRetryableError(apiErr))
+	})
+
+	t.Run("should retry on request errors", func(t *testing.T) {
+		reqErr := &openai.RequestError{}
+		assert.True(t, isRetryableError(reqErr))
+	})
+
+	t.Run("should not retry on context cancellation", func(t *testing.T) {
+		err := context.Canceled
+		assert.False(t, isRetryableError(err))
+	})
+
+	t.Run("should not retry on context timeout", func(t *testing.T) {
+		err := context.DeadlineExceeded
+		assert.False(t, isRetryableError(err))
+	})
+
+	t.Run("should not retry on nil error", func(t *testing.T) {
+		assert.False(t, isRetryableError(nil))
+	})
+
+	t.Run("should not retry on generic errors", func(t *testing.T) {
+		err := assert.AnError
+		assert.False(t, isRetryableError(err))
+	})
+}

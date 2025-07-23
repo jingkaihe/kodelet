@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/avast/retry-go/v4"
 	"github.com/jingkaihe/kodelet/pkg/auth"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/feedback"
@@ -79,6 +80,36 @@ func IsReasoningModel(model string) bool {
 
 func IsOpenAIModel(model string) bool {
 	return slices.Contains(ReasoningModels, model) || slices.Contains(NonReasoningModels, model)
+}
+
+// isRetryableError determines if an error should trigger a retry
+// Returns true for 4xx and 5xx HTTP errors (client and server errors)
+func isRetryableError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	// Check if it's an OpenAI API error
+	var apiErr *openai.APIError
+	if errors.As(err, &apiErr) {
+		statusCode := apiErr.HTTPStatusCode
+		// Retry on 4xx and 5xx status codes
+		return statusCode >= 400 && statusCode < 600
+	}
+
+	// Also retry on general HTTP errors and context timeout errors
+	var httpErr *openai.RequestError
+	if errors.As(err, &httpErr) {
+		return true
+	}
+
+	// Check for context timeout/cancellation - don't retry these
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+
+	// For other errors, don't retry
+	return false
 }
 
 // isReasoningModelDynamic checks if a model supports reasoning using custom configuration
@@ -519,8 +550,24 @@ func (t *OpenAIThread) processMessageExchange(
 	// Record start time for usage logging
 	apiStartTime := time.Now()
 
-	// Make the API request
-	response, err := t.client.CreateChatCompletion(ctx, requestParams)
+	// Make the API request with retry logic
+	var response openai.ChatCompletionResponse
+	err := retry.Do(
+		func() error {
+			var apiErr error
+			response, apiErr = t.client.CreateChatCompletion(ctx, requestParams)
+			return apiErr
+		},
+		retry.RetryIf(isRetryableError),
+		retry.Attempts(10),
+		retry.Delay(time.Second),
+		retry.DelayType(retry.BackOffDelay),
+		retry.MaxDelay(30*time.Second),
+		retry.Context(ctx),
+		retry.OnRetry(func(n uint, err error) {
+			logger.G(ctx).WithError(err).WithField("attempt", n+1).Warn("retrying OpenAI API call")
+		}),
+	)
 	if err != nil {
 		return "", false, errors.Wrap(err, "error sending message to OpenAI")
 	}
