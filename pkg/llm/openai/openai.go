@@ -22,7 +22,6 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/sysprompt"
 	"github.com/jingkaihe/kodelet/pkg/telemetry"
 	"github.com/jingkaihe/kodelet/pkg/tools"
-	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/jingkaihe/kodelet/pkg/usage"
 	"github.com/pkg/errors"
@@ -615,11 +614,15 @@ func (t *OpenAIThread) processMessageExchange(
 		}
 		output := tools.RunTool(runToolCtx, t.state, toolCall.Function.Name, toolCall.Function.Arguments)
 
+		if output.AssistantFacing() == "" {
+			fmt.Println("nooooooo")
+			fmt.Println(toolCall.Function.Arguments)
+		}
 		// Use CLI rendering for consistent output formatting
 		structuredResult := output.StructuredData()
-		registry := renderers.NewRendererRegistry()
-		renderedOutput := registry.Render(structuredResult)
-		handler.HandleToolResult(toolCall.Function.Name, renderedOutput)
+		// registry := renderers.NewRendererRegistry()
+		// renderedOutput := registry.Render(structuredResult)
+		// handler.HandleToolResult(toolCall.Function.Name, renderedOutput)
 
 		// Store the structured result for this tool call
 		t.SetStructuredToolResult(toolCall.ID, structuredResult)

@@ -79,12 +79,9 @@ func StringifyToolResult(result, err string) string {
 </error>
 `, err)
 	}
-	if result != "" {
-		out += fmt.Sprintf(`<result>
+	out += fmt.Sprintf(`<result>
 %s
-</result>
-`, result)
-	}
+</result>`, result)
 	return out
 }
 
