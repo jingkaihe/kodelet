@@ -82,33 +82,26 @@ func IsOpenAIModel(model string) bool {
 	return slices.Contains(ReasoningModels, model) || slices.Contains(NonReasoningModels, model)
 }
 
-// isRetryableError determines if an error should trigger a retry
-// Returns true for 4xx and 5xx HTTP errors (client and server errors)
 func isRetryableError(err error) bool {
 	if err == nil {
 		return false
 	}
 
-	// Check if it's an OpenAI API error
 	var apiErr *openai.APIError
 	if errors.As(err, &apiErr) {
 		statusCode := apiErr.HTTPStatusCode
-		// Retry on 4xx and 5xx status codes
 		return statusCode >= 400 && statusCode < 600
 	}
 
-	// Also retry on general HTTP errors
 	var httpErr *openai.RequestError
 	if errors.As(err, &httpErr) {
 		return true
 	}
 
-	// Check for context timeout/cancellation - don't retry these
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return false
 	}
 
-	// For other errors, don't retry
 	return false
 }
 
@@ -621,10 +614,8 @@ func (t *OpenAIThread) processMessageExchange(
 		renderedOutput := registry.Render(structuredResult)
 		handler.HandleToolResult(toolCall.Function.Name, renderedOutput)
 
-		// Store the structured result for this tool call
 		t.SetStructuredToolResult(toolCall.ID, structuredResult)
 
-		// For tracing, add tool execution completion event
 		telemetry.AddEvent(ctx, "tool_execution_complete",
 			attribute.String("tool_name", toolCall.Function.Name),
 			attribute.String("result", output.AssistantFacing()),
@@ -664,11 +655,9 @@ func (t *OpenAIThread) createChatCompletionWithRetry(ctx context.Context, reques
 		retryConfig = llmtypes.DefaultRetryConfig()
 	}
 
-	// Convert milliseconds to time.Duration
 	initialDelay := time.Duration(retryConfig.InitialDelay) * time.Millisecond
 	maxDelay := time.Duration(retryConfig.MaxDelay) * time.Millisecond
 
-	// Determine delay type
 	var delayType retry.DelayTypeFunc
 	switch retryConfig.BackoffType {
 	case "fixed":
@@ -699,7 +688,6 @@ func (t *OpenAIThread) createChatCompletionWithRetry(ctx context.Context, reques
 		}),
 	)
 
-	// If all retries failed, provide better error context
 	if err != nil && len(originalErrors) > 0 {
 		return response, errors.Wrapf(err, "all %d retry attempts failed, original errors: %v", len(originalErrors), originalErrors)
 	}

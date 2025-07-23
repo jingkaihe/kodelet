@@ -71,15 +71,6 @@ func (t BaseToolResult) StructuredData() StructuredToolResult {
 	}
 }
 
-// StringifyToolResult formats the tool output and error into a consistent structure
-// 
-// This function ensures that LLM parsing remains consistent by always including both
-// <error> (if present) and <result> sections. Empty results are displayed as "(No output)"
-// to provide clear feedback to the LLM about tool execution status.
-//
-// Format:
-//   - Error section (optional): <error>error_message</error>
-//   - Result section (always present): <result>output_or_no_output</result>
 func StringifyToolResult(result, err string) string {
 	out := ""
 	if err != "" {
