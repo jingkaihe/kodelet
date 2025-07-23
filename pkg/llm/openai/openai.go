@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/avast/retry-go/v4"
 	"github.com/jingkaihe/kodelet/pkg/auth"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/feedback"
@@ -79,6 +80,29 @@ func IsReasoningModel(model string) bool {
 
 func IsOpenAIModel(model string) bool {
 	return slices.Contains(ReasoningModels, model) || slices.Contains(NonReasoningModels, model)
+}
+
+func isRetryableError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	var apiErr *openai.APIError
+	if errors.As(err, &apiErr) {
+		statusCode := apiErr.HTTPStatusCode
+		return statusCode >= 400 && statusCode < 600
+	}
+
+	var httpErr *openai.RequestError
+	if errors.As(err, &httpErr) {
+		return true
+	}
+
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+
+	return false
 }
 
 // isReasoningModelDynamic checks if a model supports reasoning using custom configuration
@@ -519,8 +543,8 @@ func (t *OpenAIThread) processMessageExchange(
 	// Record start time for usage logging
 	apiStartTime := time.Now()
 
-	// Make the API request
-	response, err := t.client.CreateChatCompletion(ctx, requestParams)
+	// Make the API request with retry logic
+	response, err := t.createChatCompletionWithRetry(ctx, requestParams)
 	if err != nil {
 		return "", false, errors.Wrap(err, "error sending message to OpenAI")
 	}
@@ -590,10 +614,8 @@ func (t *OpenAIThread) processMessageExchange(
 		renderedOutput := registry.Render(structuredResult)
 		handler.HandleToolResult(toolCall.Function.Name, renderedOutput)
 
-		// Store the structured result for this tool call
 		t.SetStructuredToolResult(toolCall.ID, structuredResult)
 
-		// For tracing, add tool execution completion event
 		telemetry.AddEvent(ctx, "tool_execution_complete",
 			attribute.String("tool_name", toolCall.Function.Name),
 			attribute.String("result", output.AssistantFacing()),
@@ -621,6 +643,56 @@ func (t *OpenAIThread) processMessageExchange(
 		t.SaveConversation(ctx, false)
 	}
 	return finalOutput, true, nil
+}
+
+// createChatCompletionWithRetry executes the OpenAI API call with retry logic
+func (t *OpenAIThread) createChatCompletionWithRetry(ctx context.Context, requestParams openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
+	var response openai.ChatCompletionResponse
+	var originalErrors []error // Store all errors for better context
+
+	retryConfig := t.config.Retry
+	if retryConfig.Attempts == 0 {
+		retryConfig = llmtypes.DefaultRetryConfig
+	}
+
+	initialDelay := time.Duration(retryConfig.InitialDelay) * time.Millisecond
+	maxDelay := time.Duration(retryConfig.MaxDelay) * time.Millisecond
+
+	var delayType retry.DelayTypeFunc
+	switch retryConfig.BackoffType {
+	case "fixed":
+		delayType = retry.FixedDelay
+	case "exponential":
+		fallthrough
+	default:
+		delayType = retry.BackOffDelay
+	}
+
+	err := retry.Do(
+		func() error {
+			var apiErr error
+			response, apiErr = t.client.CreateChatCompletion(ctx, requestParams)
+			if apiErr != nil {
+				originalErrors = append(originalErrors, apiErr)
+			}
+			return apiErr
+		},
+		retry.RetryIf(isRetryableError),
+		retry.Attempts(uint(retryConfig.Attempts)),
+		retry.Delay(initialDelay),
+		retry.DelayType(delayType),
+		retry.MaxDelay(maxDelay),
+		retry.Context(ctx),
+		retry.OnRetry(func(n uint, err error) {
+			logger.G(ctx).WithError(err).WithField("attempt", n+1).WithField("max_attempts", retryConfig.Attempts).Warn("retrying OpenAI API call")
+		}),
+	)
+
+	if err != nil && len(originalErrors) > 0 {
+		return response, errors.Wrapf(err, "all %d retry attempts failed, original errors: %v", len(originalErrors), originalErrors)
+	}
+
+	return response, err
 }
 
 func (t *OpenAIThread) tools(opt llmtypes.MessageOpt) []tooltypes.Tool {

@@ -28,6 +28,7 @@ type Config struct {
 	AnthropicAPIAccess   AnthropicAPIAccess // AnthropicAPIAccess controls how to authenticate with Anthropic API
 	UseCopilot           bool               // UseCopilot enables GitHub Copilot subscription for OpenAI requests
 	Aliases              map[string]string  // Aliases maps short model names to full model names
+	Retry                RetryConfig        // Retry configuration for API calls
 
 	// Provider-specific configurations
 	OpenAI   *OpenAIConfig           `mapstructure:"openai"`   // OpenAI-specific configuration including compatible providers
@@ -59,6 +60,23 @@ type ModelPricing struct {
 
 // CustomPricing maps model names to their pricing information
 type CustomPricing map[string]ModelPricing
+
+// RetryConfig holds the retry configuration for API calls
+// Note: Anthropic only uses Attempts (relies on SDK retry), OpenAI uses all fields
+type RetryConfig struct {
+	Attempts     int    `mapstructure:"attempts"`      // Maximum number of retry attempts (default: 3)
+	InitialDelay int    `mapstructure:"initial_delay"` // Initial delay in milliseconds (default: 1000) - OpenAI only
+	MaxDelay     int    `mapstructure:"max_delay"`     // Maximum delay in milliseconds (default: 10000) - OpenAI only
+	BackoffType  string `mapstructure:"backoff_type"`  // Backoff strategy: "fixed", "exponential" (default: "exponential") - OpenAI only
+}
+
+// DefaultRetryConfig holds the default retry configuration
+var DefaultRetryConfig = RetryConfig{
+	Attempts:     3,
+	InitialDelay: 1000,  // 1 second
+	MaxDelay:     10000, // 10 seconds
+	BackoffType:  "exponential",
+}
 
 // SubAgentConfigSettings holds the configuration for subagent behavior
 type SubAgentConfigSettings struct {

@@ -612,8 +612,12 @@ func (t *AnthropicThread) NewMessage(ctx context.Context, params anthropic.Messa
 	ctx, span := tracer.Start(ctx, "llm.anthropic.new_message", trace.WithAttributes(spanAttrs...))
 	defer span.End()
 
-	// Call the Anthropic API
-	stream := t.client.Messages.NewStreaming(ctx, params, option.WithMaxRetries(3))
+	retryAttempts := t.config.Retry.Attempts
+	if retryAttempts == 0 {
+		retryAttempts = llmtypes.DefaultRetryConfig.Attempts
+	}
+
+	stream := t.client.Messages.NewStreaming(ctx, params, option.WithMaxRetries(retryAttempts))
 	defer stream.Close()
 
 	if stream.Err() != nil {
