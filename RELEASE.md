@@ -1,5 +1,20 @@
 # Kodelet
 
+## 0.0.73.alpha (2025-07-23)
+
+### API Reliability Enhancements
+
+**Configurable API Retry Mechanism**: Added comprehensive retry configuration for improved API call reliability
+
+```yaml
+# API Retry Configuration
+retry:
+  attempts: 3              # Maximum retry attempts (both providers)
+  initial_delay: 1000      # Initial delay in ms (OpenAI only)
+  max_delay: 10000         # Maximum delay in ms (OpenAI only)
+  backoff_type: "exponential"  # Backoff strategy (OpenAI only)
+```
+
 ## 0.0.72.alpha (2025-07-22)
 
 ### Fragments/Receipts System
