@@ -39,18 +39,24 @@ aliases:
 reasoning_effort: "medium"
 
 # API Retry Configuration
-# Controls retry behavior for API calls to both Anthropic and OpenAI
+# Controls retry behavior for API calls
+# - Anthropic: Only 'attempts' is used (relies on SDK's built-in retry)
+# - OpenAI: All fields are used (custom retry implementation)
 retry:
   # Maximum number of retry attempts (default: 3)
+  # Used by both Anthropic and OpenAI
   attempts: 3
   
   # Initial delay in milliseconds before first retry (default: 1000)
+  # Used by OpenAI only
   initial_delay: 1000
   
   # Maximum delay in milliseconds between retries (default: 10000)
+  # Used by OpenAI only
   max_delay: 10000
   
   # Backoff strategy: "fixed" or "exponential" (default: "exponential")
+  # Used by OpenAI only
   backoff_type: "exponential"
 
 # Security Configuration

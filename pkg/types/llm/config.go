@@ -62,11 +62,12 @@ type ModelPricing struct {
 type CustomPricing map[string]ModelPricing
 
 // RetryConfig holds the retry configuration for API calls
+// Note: Anthropic only uses Attempts (relies on SDK retry), OpenAI uses all fields
 type RetryConfig struct {
 	Attempts     int    `mapstructure:"attempts"`      // Maximum number of retry attempts (default: 3)
-	InitialDelay int    `mapstructure:"initial_delay"` // Initial delay in milliseconds (default: 1000)
-	MaxDelay     int    `mapstructure:"max_delay"`     // Maximum delay in milliseconds (default: 10000)
-	BackoffType  string `mapstructure:"backoff_type"`  // Backoff strategy: "fixed", "exponential" (default: "exponential")
+	InitialDelay int    `mapstructure:"initial_delay"` // Initial delay in milliseconds (default: 1000) - OpenAI only
+	MaxDelay     int    `mapstructure:"max_delay"`     // Maximum delay in milliseconds (default: 10000) - OpenAI only
+	BackoffType  string `mapstructure:"backoff_type"`  // Backoff strategy: "fixed", "exponential" (default: "exponential") - OpenAI only
 }
 
 // DefaultRetryConfig holds the default retry configuration
