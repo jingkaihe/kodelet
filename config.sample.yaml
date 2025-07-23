@@ -38,6 +38,21 @@ aliases:
 # Reasoning effort for OpenAI models (low, medium, high)
 reasoning_effort: "medium"
 
+# API Retry Configuration
+# Controls retry behavior for API calls to both Anthropic and OpenAI
+retry:
+  # Maximum number of retry attempts (default: 3)
+  attempts: 3
+  
+  # Initial delay in milliseconds before first retry (default: 1000)
+  initial_delay: 1000
+  
+  # Maximum delay in milliseconds between retries (default: 10000)
+  max_delay: 10000
+  
+  # Backoff strategy: "fixed" or "exponential" (default: "exponential")
+  backoff_type: "exponential"
+
 # Security Configuration
 # Command allow list for bash tool (empty means use default banned commands)
 # When specified, only commands matching these patterns are allowed
@@ -179,6 +194,10 @@ tracing:
 # - KODELET_WEAK_MODEL_MAX_TOKENS: Overrides the weak_model_max_tokens setting
 # - KODELET_REASONING_EFFORT: Overrides the reasoning_effort setting (OpenAI)
 # - KODELET_WEAK_REASONING_EFFORT: Overrides the weak_reasoning_effort setting (OpenAI)
+# - KODELET_RETRY_ATTEMPTS: Overrides the retry.attempts setting
+# - KODELET_RETRY_INITIAL_DELAY: Overrides the retry.initial_delay setting (milliseconds)
+# - KODELET_RETRY_MAX_DELAY: Overrides the retry.max_delay setting (milliseconds)
+# - KODELET_RETRY_BACKOFF_TYPE: Overrides the retry.backoff_type setting (fixed, exponential)
 # - KODELET_ALLOWED_COMMANDS: Comma-separated list of allowed command patterns
 # - KODELET_TRACING_ENABLED: Enables/disables tracing
 # - KODELET_TRACING_SAMPLER: Sets the sampling strategy

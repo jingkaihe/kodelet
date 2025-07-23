@@ -97,7 +97,7 @@ func isRetryableError(err error) bool {
 		return statusCode >= 400 && statusCode < 600
 	}
 
-	// Also retry on general HTTP errors and context timeout errors
+	// Also retry on general HTTP errors
 	var httpErr *openai.RequestError
 	if errors.As(err, &httpErr) {
 		return true
@@ -657,23 +657,52 @@ func (t *OpenAIThread) processMessageExchange(
 // createChatCompletionWithRetry executes the OpenAI API call with retry logic
 func (t *OpenAIThread) createChatCompletionWithRetry(ctx context.Context, requestParams openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
 	var response openai.ChatCompletionResponse
+	var originalErrors []error // Store all errors for better context
+
+	retryConfig := t.config.Retry
+	if retryConfig.Attempts == 0 {
+		retryConfig = llmtypes.DefaultRetryConfig()
+	}
+
+	// Convert milliseconds to time.Duration
+	initialDelay := time.Duration(retryConfig.InitialDelay) * time.Millisecond
+	maxDelay := time.Duration(retryConfig.MaxDelay) * time.Millisecond
+
+	// Determine delay type
+	var delayType retry.DelayTypeFunc
+	switch retryConfig.BackoffType {
+	case "fixed":
+		delayType = retry.FixedDelay
+	case "exponential":
+		fallthrough
+	default:
+		delayType = retry.BackOffDelay
+	}
 
 	err := retry.Do(
 		func() error {
 			var apiErr error
 			response, apiErr = t.client.CreateChatCompletion(ctx, requestParams)
+			if apiErr != nil {
+				originalErrors = append(originalErrors, apiErr)
+			}
 			return apiErr
 		},
 		retry.RetryIf(isRetryableError),
-		retry.Attempts(3),
-		retry.Delay(time.Second),
-		retry.DelayType(retry.BackOffDelay),
-		retry.MaxDelay(10*time.Second),
+		retry.Attempts(uint(retryConfig.Attempts)),
+		retry.Delay(initialDelay),
+		retry.DelayType(delayType),
+		retry.MaxDelay(maxDelay),
 		retry.Context(ctx),
 		retry.OnRetry(func(n uint, err error) {
-			logger.G(ctx).WithError(err).WithField("attempt", n+1).Warn("retrying OpenAI API call")
+			logger.G(ctx).WithError(err).WithField("attempt", n+1).WithField("max_attempts", retryConfig.Attempts).Warn("retrying OpenAI API call")
 		}),
 	)
+
+	// If all retries failed, provide better error context
+	if err != nil && len(originalErrors) > 0 {
+		return response, errors.Wrapf(err, "all %d retry attempts failed, original errors: %v", len(originalErrors), originalErrors)
+	}
 
 	return response, err
 }
