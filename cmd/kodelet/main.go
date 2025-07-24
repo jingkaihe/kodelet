@@ -30,6 +30,11 @@ func init() {
 	viper.SetDefault("allowed_commands", []string{})
 	viper.SetDefault("allowed_domains_file", "~/.kodelet/allowed_domains.txt")
 	viper.SetDefault("anthropic_api_access", "auto")
+	
+	// Commit coauthor configuration defaults
+	viper.SetDefault("commit.coauthor.enabled", true)
+	viper.SetDefault("commit.coauthor.name", "Kodelet")
+	viper.SetDefault("commit.coauthor.email", "noreply@kodelet.com")
 
 	// Set default MCP configuration
 	viper.SetDefault("mcp", map[string]tools.MCPConfig{})
