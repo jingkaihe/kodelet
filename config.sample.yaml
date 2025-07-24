@@ -81,6 +81,17 @@ allowed_commands: []
 #   - "git status"
 #   - "git log *"
 
+# Commit Configuration
+# Configure coauthor attribution for commit messages
+commit:
+  coauthor:
+    # Enable or disable coauthor attribution (default: true)
+    enabled: true
+    # Coauthor name (default: "Kodelet")
+    name: "Kodelet"
+    # Coauthor email (default: "noreply@kodelet.com")  
+    email: "noreply@kodelet.com"
+
 
 # Example OpenAI configuration (uncomment to use)
 # provider: "openai"
@@ -209,6 +220,9 @@ tracing:
 # - KODELET_TRACING_SAMPLER: Sets the sampling strategy
 # - KODELET_TRACING_RATIO: Sets the sampling ratio
 # - KODELET_ALIASES_*: Define individual aliases (e.g., KODELET_ALIASES_SONNET4=claude-sonnet-4-20250514)
+# - KODELET_COMMIT_COAUTHOR_ENABLED: Enable/disable coauthor attribution in commits
+# - KODELET_COMMIT_COAUTHOR_NAME: Name for coauthor attribution
+# - KODELET_COMMIT_COAUTHOR_EMAIL: Email for coauthor attribution
 #
 # API Keys:
 # - ANTHROPIC_API_KEY: Required when using the Anthropic provider

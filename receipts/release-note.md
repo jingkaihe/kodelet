@@ -21,6 +21,8 @@ Current version: {{bash "cat" "VERSION.txt"}}
 ## Task:
 Based on the above git information, please analyze the changes since the previous release and write comprehensive release notes in RELEASE.md.
 
+Before writing the release note, please read the first 100 lines of the release notes to understand the tone and style of the existing notes
+
 The release notes should:
 - Be short, concise, and to the point
 - Focus on user-facing changes and improvements

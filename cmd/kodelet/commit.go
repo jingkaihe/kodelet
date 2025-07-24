@@ -14,23 +14,26 @@ import (
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 // CommitConfig holds configuration for the commit command
 type CommitConfig struct {
-	NoSign    bool
-	Template  string
-	Short     bool
-	NoConfirm bool
+	NoSign     bool
+	Template   string
+	Short      bool
+	NoConfirm  bool
+	NoCoauthor bool
 }
 
 // NewCommitConfig creates a new CommitConfig with default values
 func NewCommitConfig() *CommitConfig {
 	return &CommitConfig{
-		NoSign:    false,
-		Template:  "",
-		Short:     false,
-		NoConfirm: false,
+		NoSign:     false,
+		Template:   "",
+		Short:      false,
+		NoConfirm:  false,
+		NoCoauthor: false,
 	}
 }
 
@@ -119,7 +122,7 @@ IMPORTANT: The output of the commit message should not be wrapped with any markd
 		}
 
 		// Create the commit
-		if err := createCommit(ctx, commitMsg, !config.NoSign); err != nil {
+		if err := createCommit(ctx, commitMsg, !config.NoSign, config); err != nil {
 			presenter.Error(err, "Failed to create commit")
 			os.Exit(1)
 		}
@@ -134,6 +137,7 @@ func init() {
 	commitCmd.Flags().StringP("template", "t", defaults.Template, "Template for commit message")
 	commitCmd.Flags().Bool("short", defaults.Short, "Generate a short commit message with just a description, no bullet points")
 	commitCmd.Flags().Bool("no-confirm", defaults.NoConfirm, "Skip confirmation prompt and create commit automatically")
+	commitCmd.Flags().Bool("no-coauthor", defaults.NoCoauthor, "Disable coauthor attribution in commit messages")
 }
 
 // getCommitConfigFromFlags extracts commit configuration from command flags
@@ -151,6 +155,9 @@ func getCommitConfigFromFlags(cmd *cobra.Command) *CommitConfig {
 	}
 	if noConfirm, err := cmd.Flags().GetBool("no-confirm"); err == nil {
 		config.NoConfirm = noConfirm
+	}
+	if noCoauthor, err := cmd.Flags().GetBool("no-coauthor"); err == nil {
+		config.NoCoauthor = noCoauthor
 	}
 
 	return config
@@ -273,9 +280,16 @@ func getEditor() string {
 }
 
 // createCommit creates a git commit with the provided message
-func createCommit(_ context.Context, message string, sign bool) error {
-	// Add co-authorship attribution
-	message = message + "\n\nCo-authored-by: Kodelet <noreply@kodelet.com>"
+func createCommit(_ context.Context, message string, sign bool, config *CommitConfig) error {
+	// Add co-authorship attribution if enabled
+	if !config.NoCoauthor {
+		coauthorEnabled := viper.GetBool("commit.coauthor.enabled")
+		if coauthorEnabled {
+			coauthorName := viper.GetString("commit.coauthor.name")
+			coauthorEmail := viper.GetString("commit.coauthor.email")
+			message = message + fmt.Sprintf("\n\nCo-authored-by: %s <%s>", coauthorName, coauthorEmail)
+		}
+	}
 
 	// Create a temporary file for the commit message
 	tempFile, err := os.CreateTemp("", "kodelet-commit-*.txt")
