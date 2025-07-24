@@ -1,5 +1,23 @@
 # Kodelet
 
+## 0.0.74.alpha (2025-07-24)
+
+### Commit Command Enhancements
+
+**Configurable Coauthor Attribution**: Added flexible coauthor configuration for commit messages
+
+- **Global Configuration**: Control coauthor attribution through `config.yaml` settings
+  ```yaml
+  commit:
+    coauthor:
+      enabled: true                    # Enable/disable coauthor attribution (default: true)
+      name: "Kodelet"                  # Coauthor name (default: "Kodelet")
+      email: "noreply@kodelet.com"     # Coauthor email (default: "noreply@kodelet.com")
+  ```
+- **Per-Command Control**: New `--no-coauthor` flag to disable coauthor attribution for individual commits
+- **Environment Variable Support**: Configure via `KODELET_COMMIT_COAUTHOR_*` environment variables
+- **Backward Compatibility**: Existing behavior maintained with coauthor attribution enabled by default
+
 ## 0.0.73.alpha (2025-07-23)
 
 ### API Reliability Enhancements
