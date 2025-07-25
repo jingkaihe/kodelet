@@ -1,5 +1,14 @@
 # Kodelet
 
+## 0.0.75.alpha (2025-07-25)
+
+### Security
+
+- **Dependency Updates**: Updated vulnerable dependencies to resolve Dependabot alerts
+  - `golang.org/x/net`: Fixed XSS vulnerabilities and HTTP proxy bypass issues
+  - `golang.org/x/oauth2`: Fixed input validation flaws
+  - `github.com/go-viper/mapstructure/v2`: Fixed information leakage in logs
+
 ## 0.0.74.alpha (2025-07-24)
 
 ### Commit Command Enhancements
