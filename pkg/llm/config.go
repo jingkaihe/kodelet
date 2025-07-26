@@ -23,6 +23,7 @@ func GetConfigFromViper() llmtypes.Config {
 		ThinkingBudgetTokens: viper.GetInt("thinking_budget_tokens"),
 		ReasoningEffort:      viper.GetString("reasoning_effort"),
 		CacheEvery:           viper.GetInt("cache_every"),
+		AllowedTools:         viper.GetStringSlice("allowed_tools"),
 		AllowedCommands:      viper.GetStringSlice("allowed_commands"),
 		AllowedDomainsFile:   viper.GetString("allowed_domains_file"),
 		AnthropicAPIAccess:   llmtypes.AnthropicAPIAccess(anthropicAPIAccess),
@@ -86,6 +87,7 @@ func GetConfigFromViper() llmtypes.Config {
 		subagentConfig.MaxTokens = viper.GetInt("subagent.max_tokens")
 		subagentConfig.ReasoningEffort = viper.GetString("subagent.reasoning_effort")
 		subagentConfig.ThinkingBudget = viper.GetInt("subagent.thinking_budget")
+		subagentConfig.AllowedTools = viper.GetStringSlice("subagent.allowed_tools")
 
 		// Load OpenAI-specific configuration for subagent
 		if viper.IsSet("subagent.openai") {

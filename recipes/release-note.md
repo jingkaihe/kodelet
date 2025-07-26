@@ -1,6 +1,17 @@
 ---
 name: Release Note Generator
 description: Generates comprehensive release notes by analyzing git changes since the previous release
+allowed_commands:
+  - "git *"
+  - "cat *"
+  - "sh *"
+allowed_tools:
+  - "bash"
+  - "file_read"
+  - "file_write"
+  - "grep_tool"
+  - "glob_tool"
+  - "thinking"
 ---
 
 ## Release Note Generation

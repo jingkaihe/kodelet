@@ -47,7 +47,88 @@ func NewRunConfig() *RunConfig {
 		DisableAutoCompact: false,
 		FragmentName:       "",
 		FragmentArgs:       make(map[string]string),
-		FragmentDirs:       []string{}, // Empty by default
+		FragmentDirs:       []string{},
+	}
+}
+
+// processFragment handles fragment loading and processing
+func processFragment(ctx context.Context, config *RunConfig, args []string) (string, *fragments.Metadata, error) {
+	var validDirs []string
+	for _, dir := range config.FragmentDirs {
+		trimmed := strings.TrimSpace(dir)
+		if trimmed != "" {
+			validDirs = append(validDirs, trimmed)
+		}
+	}
+	
+	fragmentProcessor, err := fragments.NewFragmentProcessor(fragments.WithAdditionalDirs(validDirs...))
+	if err != nil {
+		return "", nil, errors.Wrap(err, "failed to create fragment processor")
+	}
+
+	fragmentConfig := &fragments.Config{
+		FragmentName: config.FragmentName,
+		Arguments:    config.FragmentArgs,
+	}
+
+	fragment, err := fragmentProcessor.LoadFragment(ctx, fragmentConfig)
+	if err != nil {
+		return "", nil, errors.Wrap(err, "failed to load fragment")
+	}
+
+	var query string
+	if len(args) > 0 {
+		argsContent := strings.Join(args, " ")
+		query = fragment.Content + "\n" + argsContent
+	} else {
+		query = fragment.Content
+	}
+
+	return query, &fragment.Metadata, nil
+}
+
+// getQueryFromStdinOrArgs handles reading query from stdin or command line args
+func getQueryFromStdinOrArgs(args []string) (string, error) {
+	stat, _ := os.Stdin.Stat()
+	isPipe := (stat.Mode() & os.ModeCharDevice) == 0
+
+	if isPipe {
+		stdinBytes, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return "", errors.Wrap(err, "failed to read from stdin")
+		}
+
+		stdinContent := string(stdinBytes)
+
+		if len(args) > 0 {
+			argsContent := strings.Join(args, " ")
+			return argsContent + "\n" + stdinContent, nil
+		}
+		return stdinContent, nil
+	}
+
+	if len(args) == 0 {
+		return "", errors.New("no query provided")
+	}
+	return strings.Join(args, " "), nil
+}
+
+// applyFragmentRestrictions applies fragment metadata restrictions to LLM config
+func applyFragmentRestrictions(llmConfig *llmtypes.Config, fragmentMetadata *fragments.Metadata) {
+	if fragmentMetadata == nil {
+		return
+	}
+
+	if len(fragmentMetadata.AllowedTools) > 0 {
+		if err := tools.ValidateTools(fragmentMetadata.AllowedTools); err != nil {
+			presenter.Warning(fmt.Sprintf("Invalid tools in fragment metadata, ignoring: %v", err))
+		} else {
+			llmConfig.AllowedTools = fragmentMetadata.AllowedTools
+		}
+	}
+
+	if len(fragmentMetadata.AllowedCommands) > 0 {
+		llmConfig.AllowedCommands = fragmentMetadata.AllowedCommands
 	}
 }
 
@@ -57,14 +138,11 @@ var runCmd = &cobra.Command{
 	Long:  `Execute a one-shot query with Kodelet and return the result.`,
 	Args:  cobra.MinimumNArgs(0),
 	Run: func(cmd *cobra.Command, args []string) {
-		// Create a cancellable context that listens for signals
 		ctx, cancel := context.WithCancel(cmd.Context())
 		defer cancel()
 
-		// Get run config from flags
 		config := getRunConfigFromFlags(ctx, cmd)
 
-		// Set up signal handling
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 		go func() {
@@ -73,92 +151,36 @@ var runCmd = &cobra.Command{
 			cancel()
 		}()
 
-		// Handle fragment processing if -r flag is provided
 		var query string
+		var fragmentMetadata *fragments.Metadata
+		var err error
+
 		if config.FragmentName != "" {
-			// Process fragment
-			var fragmentProcessor *fragments.Processor
-			var err error
-
-			// Create fragment processor with additional directories if specified
-			var validDirs []string
-			for _, dir := range config.FragmentDirs {
-				trimmed := strings.TrimSpace(dir)
-				if trimmed != "" {
-					validDirs = append(validDirs, trimmed)
-				}
-			}
-			fragmentProcessor, err = fragments.NewFragmentProcessor(fragments.WithAdditionalDirs(validDirs...))
-
+			query, fragmentMetadata, err = processFragment(ctx, config, args)
 			if err != nil {
-				presenter.Error(err, "Failed to create fragment processor")
+				presenter.Error(err, "Failed to process fragment")
 				return
-			}
-
-			fragmentConfig := &fragments.Config{
-				FragmentName: config.FragmentName,
-				Arguments:    config.FragmentArgs,
-			}
-
-			fragmentContent, err := fragmentProcessor.LoadFragment(ctx, fragmentConfig)
-			if err != nil {
-				presenter.Error(err, "Failed to load fragment")
-				return
-			}
-
-			// If there are additional command line args, append them to the fragment
-			if len(args) > 0 {
-				argsContent := strings.Join(args, " ")
-				query = fragmentContent + "\n" + argsContent
-			} else {
-				query = fragmentContent
 			}
 		} else {
-			// Original logic for non-fragment queries
-			// Check if there's input from stdin (pipe)
-			stat, _ := os.Stdin.Stat()
-			isPipe := (stat.Mode() & os.ModeCharDevice) == 0
-
-			if isPipe {
-				// Read from stdin
-				stdinBytes, err := io.ReadAll(os.Stdin)
-				if err != nil {
-					presenter.Error(err, "Failed to read from stdin")
-					return
-				}
-
-				stdinContent := string(stdinBytes)
-
-				// If there are command line args, prepend them to the stdin content
-				if len(args) > 0 {
-					argsContent := strings.Join(args, " ")
-					query = argsContent + "\n" + stdinContent
-				} else {
-					// If no args, just use stdin content
-					query = stdinContent
-				}
-			} else {
-				// No pipe, just use args
-				if len(args) == 0 {
-					presenter.Error(errors.New("no query provided"), "Please provide a query to execute")
-					return
-				}
-				query = strings.Join(args, " ")
+			query, err = getQueryFromStdinOrArgs(args)
+			if err != nil {
+				presenter.Error(err, "Please provide a query to execute")
+				return
 			}
 		}
 
-		// Create the MCP manager from Viper configuration
 		mcpManager, err := tools.CreateMCPManagerFromViper(ctx)
 		if err != nil {
 			presenter.Error(err, "Failed to create MCP manager")
 			return
 		}
 
-		// Get LLM config
 		llmConfig := llm.GetConfigFromViper()
 
-		// Create state with appropriate tools based on browser support
+		applyFragmentRestrictions(&llmConfig, fragmentMetadata)
+
 		var stateOpts []tools.BasicStateOption
+
 		stateOpts = append(stateOpts, tools.WithLLMConfig(llmConfig))
 		stateOpts = append(stateOpts, tools.WithMCPTools(mcpManager))
 		if config.EnableBrowserTools {
@@ -166,10 +188,8 @@ var runCmd = &cobra.Command{
 		}
 		appState := tools.NewBasicState(ctx, stateOpts...)
 
-		// Print the user query
 		fmt.Printf("\033[1;33m[user]: \033[0m%s\n", query)
 
-		// Process the query using the Thread abstraction
 		handler := &llmtypes.ConsoleMessageHandler{Silent: false}
 		thread, err := llm.NewThread(llmConfig)
 		if err != nil {
@@ -178,7 +198,6 @@ var runCmd = &cobra.Command{
 		}
 		thread.SetState(appState)
 
-		// Configure conversation persistence
 		if config.ResumeConvID != "" {
 			thread.SetConversationID(config.ResumeConvID)
 			presenter.Info(fmt.Sprintf("Resuming conversation: %s", config.ResumeConvID))
@@ -186,7 +205,6 @@ var runCmd = &cobra.Command{
 
 		thread.EnablePersistence(ctx, !config.NoSave)
 
-		// Send the message and process the response
 		_, err = thread.SendMessage(ctx, query, handler, llmtypes.MessageOpt{
 			PromptCache:        true,
 			Images:             config.Images,
@@ -199,12 +217,10 @@ var runCmd = &cobra.Command{
 			return
 		}
 
-		// Display usage statistics
 		usage := thread.GetUsage()
 		usageStats := presenter.ConvertUsageStats(&usage)
 		presenter.Stats(usageStats)
 
-		// Display conversation ID if persistence was enabled
 		if thread.IsPersisted() {
 			presenter.Section("Conversation Information")
 			presenter.Info(fmt.Sprintf("ID: %s", thread.GetConversationID()))
@@ -224,7 +240,7 @@ func init() {
 	runCmd.Flags().Bool("enable-browser-tools", defaults.EnableBrowserTools, "Enable browser automation tools (navigate, click, type, screenshot, etc.)")
 	runCmd.Flags().Float64("compact-ratio", defaults.CompactRatio, "Context window utilization ratio to trigger auto-compact (0.0-1.0)")
 	runCmd.Flags().Bool("disable-auto-compact", defaults.DisableAutoCompact, "Disable auto-compact functionality")
-	runCmd.Flags().StringP("receipt", "r", defaults.FragmentName, "Use a fragment/receipt template")
+	runCmd.Flags().StringP("recipe", "r", defaults.FragmentName, "Use a fragment/recipe template")
 	runCmd.Flags().StringToString("arg", defaults.FragmentArgs, "Arguments to pass to fragment (e.g., --arg name=John --arg occupation=Engineer)")
 	runCmd.Flags().StringSlice("fragment-dirs", defaults.FragmentDirs, "Additional fragment directories (e.g., --fragment-dirs ./project-fragments --fragment-dirs ./team-fragments)")
 }
@@ -278,7 +294,7 @@ func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
 	if disableAutoCompact, err := cmd.Flags().GetBool("disable-auto-compact"); err == nil {
 		config.DisableAutoCompact = disableAutoCompact
 	}
-	if fragmentName, err := cmd.Flags().GetString("receipt"); err == nil {
+	if fragmentName, err := cmd.Flags().GetString("recipe"); err == nil {
 		config.FragmentName = fragmentName
 	}
 	if fragmentArgs, err := cmd.Flags().GetStringToString("arg"); err == nil {

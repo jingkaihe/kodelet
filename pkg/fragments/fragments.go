@@ -20,8 +20,10 @@ import (
 
 // Metadata represents YAML frontmatter in fragment files
 type Metadata struct {
-	Name        string `yaml:"name,omitempty"`
-	Description string `yaml:"description,omitempty"`
+	Name            string   `yaml:"name,omitempty"`
+	Description     string   `yaml:"description,omitempty"`
+	AllowedTools    []string `yaml:"allowed_tools,omitempty"`
+	AllowedCommands []string `yaml:"allowed_commands,omitempty"`
 }
 
 // Fragment represents a fragment with its metadata and content
@@ -86,8 +88,8 @@ func WithDefaultDirs() Option {
 			return errors.Wrap(err, "failed to get user home directory")
 		}
 		fp.fragmentDirs = []string{
-			"./receipts", // Repo-specific (higher precedence)
-			filepath.Join(homeDir, ".kodelet/receipts"), // User home directory
+			"./recipes", // Repo-specific (higher precedence)
+			filepath.Join(homeDir, ".kodelet/recipes"), // User home directory
 		}
 		return nil
 	}
@@ -169,11 +171,50 @@ func (fp *Processor) parseFrontmatter(content string) (Metadata, string, error) 
 		if description, ok := metaData["description"].(string); ok {
 			metadata.Description = description
 		}
+
+		// Parse allowed_tools (support both string array and comma-separated string)
+		if allowedTools := metaData["allowed_tools"]; allowedTools != nil {
+			metadata.AllowedTools = fp.parseStringArrayField(allowedTools)
+		}
+
+		// Parse allowed_commands (support both string array and comma-separated string)
+		if allowedCommands := metaData["allowed_commands"]; allowedCommands != nil {
+			metadata.AllowedCommands = fp.parseStringArrayField(allowedCommands)
+		}
 	}
 
 	bodyContent := fp.extractBodyContent(content)
 
 	return metadata, bodyContent, nil
+}
+
+// parseStringArrayField handles both []interface{} (YAML array) and string (comma-separated) formats
+func (fp *Processor) parseStringArrayField(field interface{}) []string {
+	switch v := field.(type) {
+	case []interface{}:
+		// YAML array format: ["tool1", "tool2"]
+		var result []string
+		for _, item := range v {
+			if str, ok := item.(string); ok {
+				result = append(result, strings.TrimSpace(str))
+			}
+		}
+		return result
+	case string:
+		// Comma-separated string format: "tool1,tool2,tool3"
+		if v == "" {
+			return []string{}
+		}
+		var result []string
+		for _, item := range strings.Split(v, ",") {
+			if trimmed := strings.TrimSpace(item); trimmed != "" {
+				result = append(result, trimmed)
+			}
+		}
+		return result
+	default:
+		return []string{}
+	}
 }
 
 func (fp *Processor) extractBodyContent(content string) string {
@@ -199,35 +240,8 @@ func (fp *Processor) extractBodyContent(content string) string {
 	return strings.Join(contentLines, "\n")
 }
 
-func (fp *Processor) LoadFragment(ctx context.Context, config *Config) (string, error) {
-	logger.G(ctx).WithField("fragment", config.FragmentName).Debug("Loading fragment")
 
-	fragmentPath, err := fp.findFragmentFile(config.FragmentName)
-	if err != nil {
-		return "", err
-	}
-
-	logger.G(ctx).WithField("path", fragmentPath).Debug("Found fragment file")
-
-	content, err := os.ReadFile(fragmentPath)
-	if err != nil {
-		return "", errors.Wrapf(err, "failed to read fragment file '%s'", fragmentPath)
-	}
-
-	_, bodyContent, err := fp.parseFrontmatter(string(content))
-	if err != nil {
-		return "", errors.Wrapf(err, "failed to parse frontmatter in fragment '%s'", fragmentPath)
-	}
-
-	processed, err := fp.processTemplate(ctx, bodyContent, config.Arguments)
-	if err != nil {
-		return "", errors.Wrapf(err, "failed to process fragment template '%s'", fragmentPath)
-	}
-
-	return processed, nil
-}
-
-func (fp *Processor) LoadFragmentWithMetadata(ctx context.Context, config *Config) (*Fragment, error) {
+func (fp *Processor) LoadFragment(ctx context.Context, config *Config) (*Fragment, error) {
 	logger.G(ctx).WithField("fragment", config.FragmentName).Debug("Loading fragment with metadata")
 
 	fragmentPath, err := fp.findFragmentFile(config.FragmentName)

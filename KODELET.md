@@ -29,7 +29,7 @@ Kodelet is a lightweight CLI tool that helps with software engineering tasks. It
 │   │   ├── factory.go   # Store factory for different backends
 │   │   └── store.go     # Store interface definitions
 │   ├── feedback/        # Feedback system for autonomous conversations
-│   ├── fragments/       # Fragment/receipt template system
+│   ├── fragments/       # Fragment/recipe template system
 │   ├── github/          # GitHub Actions templates and utilities
 │   ├── llm/             # LLM client for AI interactions
 │   │   ├── anthropic/   # Anthropic Claude API client
@@ -60,7 +60,7 @@ Kodelet is a lightweight CLI tool that helps with software engineering tasks. It
 │       ├── frontend/    # React/TypeScript SPA with Vite build
 │       └── dist/        # Built frontend assets (embedded in binary)
 ├── README.md            # Project overview
-├── receipts/            # Sample fragment/receipt templates
+├── recipes/             # Sample fragment/recipe templates
 ├── RELEASE.md           # Release notes
 ├── scripts/             # Build and utility scripts
 ├── tests/               # Test files
@@ -155,7 +155,7 @@ kodelet watch                          # File watcher
 kodelet serve [--host HOST] [--port PORT] # Web UI server (default: localhost:8080)
 
 # Fragment/Receipt system (see docs/FRAGMENTS.md)
-kodelet run -r fragment-name           # Use fragment/receipt template
+kodelet run -r fragment-name           # Use fragment/recipe template
 kodelet run -r fragment --arg key=value  # Fragment with arguments
 kodelet run -r fragment "additional instructions"  # Fragment with extra context
 

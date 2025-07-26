@@ -81,6 +81,28 @@ allowed_commands: []
 #   - "git status"
 #   - "git log *"
 
+# Tool Configuration
+# Tools allowed for main agent (empty means use defaults)
+# Meta tools (file_read, grep_tool, glob_tool, thinking) are always enabled for basic functionality
+# Available tools: bash, file_read, file_write, file_edit, thinking, subagent, grep_tool, 
+#                  glob_tool, todo_read, todo_write, web_fetch, image_recognition, 
+#                  view_background_processes, browser_navigate, browser_get_page, 
+#                  browser_click, browser_type, browser_wait_for, browser_screenshot
+allowed_tools: []
+# allowed_tools:
+#   - "bash"
+#   - "file_read"      # Always enabled (meta tool)
+#   - "file_write"
+#   - "file_edit"
+#   - "thinking"       # Always enabled (meta tool)
+#   - "subagent"
+#   - "grep_tool"      # Always enabled (meta tool)
+#   - "glob_tool"      # Always enabled (meta tool)
+#   - "todo_read"
+#   - "todo_write"
+#   - "web_fetch"
+#   - "image_recognition"
+
 # Commit Configuration
 # Configure coauthor attribution for commit messages
 commit:
@@ -152,6 +174,21 @@ subagent:
   # Anthropic-specific: Thinking budget for subagent
   # thinking_budget: 1024
   
+  # Tools allowed for subagent (empty means use defaults)
+  # Note: subagent tool is automatically excluded to prevent infinite recursion
+  # Meta tools (file_read, grep_tool, glob_tool, thinking) are always enabled
+  # allowed_tools:
+  #   - "bash"
+  #   - "file_read"      # Always enabled (meta tool)
+  #   - "file_write"
+  #   - "file_edit"
+  #   - "grep_tool"      # Always enabled (meta tool)
+  #   - "glob_tool"      # Always enabled (meta tool)
+  #   - "thinking"       # Always enabled (meta tool)
+  #   - "todo_read"
+  #   - "todo_write"
+  #   - "web_fetch"
+  
   # OpenAI configuration for subagent (when using different provider)
   # openai:
   #   preset: "openai"
@@ -216,6 +253,7 @@ tracing:
 # - KODELET_RETRY_MAX_DELAY: Overrides the retry.max_delay setting (milliseconds)
 # - KODELET_RETRY_BACKOFF_TYPE: Overrides the retry.backoff_type setting (fixed, exponential)
 # - KODELET_ALLOWED_COMMANDS: Comma-separated list of allowed command patterns
+# - KODELET_ALLOWED_TOOLS: Comma-separated list of allowed tools for main agent
 # - KODELET_TRACING_ENABLED: Enables/disables tracing
 # - KODELET_TRACING_SAMPLER: Sets the sampling strategy
 # - KODELET_TRACING_RATIO: Sets the sampling ratio

@@ -44,10 +44,10 @@ Command result: {{bash "echo" "test"}}`
 	result, err := processor.LoadFragment(context.Background(), config)
 	require.NoError(t, err)
 
-	assert.Contains(t, result, "Hello Alice!")
-	assert.Contains(t, result, "Your role is Engineer.")
-	assert.Contains(t, result, "Current date: 20")
-	assert.Contains(t, result, "Command result: test")
+	assert.Contains(t, result.Content, "Hello Alice!")
+	assert.Contains(t, result.Content, "Your role is Engineer.")
+	assert.Contains(t, result.Content, "Current date: 20")
+	assert.Contains(t, result.Content, "Command result: test")
 }
 
 func TestFragmentProcessor_BashCommandError(t *testing.T) {
@@ -71,8 +71,8 @@ func TestFragmentProcessor_BashCommandError(t *testing.T) {
 	result, err := processor.LoadFragment(context.Background(), config)
 	require.NoError(t, err)
 
-	assert.Contains(t, result, "[ERROR executing command")
-	assert.Contains(t, result, "nonexistent-command-xyz")
+	assert.Contains(t, result.Content, "[ERROR executing command")
+	assert.Contains(t, result.Content, "nonexistent-command-xyz")
 }
 
 func TestFragmentProcessor_findFragmentFile(t *testing.T) {
@@ -207,8 +207,8 @@ func TestFragmentProcessor_BuilderPattern(t *testing.T) {
 	processor, err := NewFragmentProcessor()
 	require.NoError(t, err)
 	assert.Len(t, processor.fragmentDirs, 2)
-	assert.Equal(t, "./receipts", processor.fragmentDirs[0])
-	assert.True(t, strings.HasSuffix(processor.fragmentDirs[1], "/.kodelet/receipts"))
+	assert.Equal(t, "./recipes", processor.fragmentDirs[0])
+	assert.True(t, strings.HasSuffix(processor.fragmentDirs[1], "/.kodelet/recipes"))
 
 	processor, err = NewFragmentProcessor(WithFragmentDirs("/custom1", "/custom2"))
 	require.NoError(t, err)
@@ -219,8 +219,8 @@ func TestFragmentProcessor_BuilderPattern(t *testing.T) {
 	processor, err = NewFragmentProcessor(WithAdditionalDirs("/extra1"))
 	require.NoError(t, err)
 	assert.Len(t, processor.fragmentDirs, 3)
-	assert.Equal(t, "./receipts", processor.fragmentDirs[0])
-	assert.True(t, strings.HasSuffix(processor.fragmentDirs[1], "/.kodelet/receipts"))
+	assert.Equal(t, "./recipes", processor.fragmentDirs[0])
+	assert.True(t, strings.HasSuffix(processor.fragmentDirs[1], "/.kodelet/recipes"))
 	assert.Equal(t, "/extra1", processor.fragmentDirs[2])
 
 	_, err = NewFragmentProcessor(WithFragmentDirs())
@@ -265,7 +265,7 @@ Hello {{.name}}!`
 	assert.Equal(t, "\nHello {{.name}}!", content)
 }
 
-func TestFragmentProcessor_LoadFragmentWithMetadata(t *testing.T) {
+func TestFragmentProcessor_LoadFragmentMetadata(t *testing.T) {
 	tempDir, err := os.MkdirTemp("", "kodelet-fragments-metadata-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(tempDir)
@@ -294,7 +294,7 @@ Current date: {{bash "date" "+%Y-%m-%d"}}`
 		},
 	}
 
-	result, err := processor.LoadFragmentWithMetadata(context.Background(), config)
+	result, err := processor.LoadFragment(context.Background(), config)
 	require.NoError(t, err)
 
 	assert.Equal(t, "Test Fragment", result.Metadata.Name)
@@ -371,4 +371,61 @@ Unique content`
 	assert.Equal(t, "Unique Fragment", unique.Metadata.Name)
 	assert.Equal(t, "Only in second directory", unique.Metadata.Description)
 	assert.Contains(t, unique.Path, dir2)
+}
+
+func TestFragmentProcessor_ParseAllowedToolsAndCommands(t *testing.T) {
+	dir, err := os.MkdirTemp("", "fragments-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	// Test fragment with both YAML array and comma-separated formats
+	fragmentContent := `---
+name: Test Restrictions
+description: Fragment with tool and command restrictions
+allowed_tools:
+  - "bash"
+  - "file_read"
+  - "thinking"
+allowed_commands: "ls *,echo *,pwd"
+---
+
+Test content here.`
+
+	fragmentPath := filepath.Join(dir, "test-restrictions.md")
+	err = os.WriteFile(fragmentPath, []byte(fragmentContent), 0644)
+	require.NoError(t, err)
+
+	processor, err := NewFragmentProcessor(WithFragmentDirs(dir))
+	require.NoError(t, err)
+
+	metadata, err := processor.GetFragmentMetadata("test-restrictions")
+	require.NoError(t, err)
+
+	assert.Equal(t, "Test Restrictions", metadata.Metadata.Name)
+	assert.Equal(t, "Fragment with tool and command restrictions", metadata.Metadata.Description)
+	assert.Equal(t, []string{"bash", "file_read", "thinking"}, metadata.Metadata.AllowedTools)
+	assert.Equal(t, []string{"ls *", "echo *", "pwd"}, metadata.Metadata.AllowedCommands)
+
+	// Test fragment with comma-separated tools
+	fragmentContent2 := `---
+name: Test Comma Format
+description: Fragment with comma-separated tools
+allowed_tools: "bash,file_read,grep_tool"
+allowed_commands:
+  - "git *"
+  - "cat *"
+---
+
+Test content here.`
+
+	fragmentPath2 := filepath.Join(dir, "test-comma.md")
+	err = os.WriteFile(fragmentPath2, []byte(fragmentContent2), 0644)
+	require.NoError(t, err)
+
+	metadata2, err := processor.GetFragmentMetadata("test-comma")
+	require.NoError(t, err)
+
+	assert.Equal(t, "Test Comma Format", metadata2.Metadata.Name)
+	assert.Equal(t, []string{"bash", "file_read", "grep_tool"}, metadata2.Metadata.AllowedTools)
+	assert.Equal(t, []string{"git *", "cat *"}, metadata2.Metadata.AllowedCommands)
 }
