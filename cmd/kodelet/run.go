@@ -247,7 +247,7 @@ func init() {
 	runCmd.Flags().Bool("enable-browser-tools", defaults.EnableBrowserTools, "Enable browser automation tools (navigate, click, type, screenshot, etc.)")
 	runCmd.Flags().Float64("compact-ratio", defaults.CompactRatio, "Context window utilization ratio to trigger auto-compact (0.0-1.0)")
 	runCmd.Flags().Bool("disable-auto-compact", defaults.DisableAutoCompact, "Disable auto-compact functionality")
-	runCmd.Flags().StringP("receipt", "r", defaults.FragmentName, "Use a fragment/receipt template")
+	runCmd.Flags().StringP("recipe", "r", defaults.FragmentName, "Use a fragment/recipe template")
 	runCmd.Flags().StringToString("arg", defaults.FragmentArgs, "Arguments to pass to fragment (e.g., --arg name=John --arg occupation=Engineer)")
 	runCmd.Flags().StringSlice("fragment-dirs", defaults.FragmentDirs, "Additional fragment directories (e.g., --fragment-dirs ./project-fragments --fragment-dirs ./team-fragments)")
 }
@@ -301,7 +301,7 @@ func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
 	if disableAutoCompact, err := cmd.Flags().GetBool("disable-auto-compact"); err == nil {
 		config.DisableAutoCompact = disableAutoCompact
 	}
-	if fragmentName, err := cmd.Flags().GetString("receipt"); err == nil {
+	if fragmentName, err := cmd.Flags().GetString("recipe"); err == nil {
 		config.FragmentName = fragmentName
 	}
 	if fragmentArgs, err := cmd.Flags().GetStringToString("arg"); err == nil {

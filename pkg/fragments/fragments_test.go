@@ -207,8 +207,8 @@ func TestFragmentProcessor_BuilderPattern(t *testing.T) {
 	processor, err := NewFragmentProcessor()
 	require.NoError(t, err)
 	assert.Len(t, processor.fragmentDirs, 2)
-	assert.Equal(t, "./receipts", processor.fragmentDirs[0])
-	assert.True(t, strings.HasSuffix(processor.fragmentDirs[1], "/.kodelet/receipts"))
+	assert.Equal(t, "./recipes", processor.fragmentDirs[0])
+	assert.True(t, strings.HasSuffix(processor.fragmentDirs[1], "/.kodelet/recipes"))
 
 	processor, err = NewFragmentProcessor(WithFragmentDirs("/custom1", "/custom2"))
 	require.NoError(t, err)
@@ -219,8 +219,8 @@ func TestFragmentProcessor_BuilderPattern(t *testing.T) {
 	processor, err = NewFragmentProcessor(WithAdditionalDirs("/extra1"))
 	require.NoError(t, err)
 	assert.Len(t, processor.fragmentDirs, 3)
-	assert.Equal(t, "./receipts", processor.fragmentDirs[0])
-	assert.True(t, strings.HasSuffix(processor.fragmentDirs[1], "/.kodelet/receipts"))
+	assert.Equal(t, "./recipes", processor.fragmentDirs[0])
+	assert.True(t, strings.HasSuffix(processor.fragmentDirs[1], "/.kodelet/recipes"))
 	assert.Equal(t, "/extra1", processor.fragmentDirs[2])
 
 	_, err = NewFragmentProcessor(WithFragmentDirs())

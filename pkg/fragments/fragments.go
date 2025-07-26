@@ -88,8 +88,8 @@ func WithDefaultDirs() Option {
 			return errors.Wrap(err, "failed to get user home directory")
 		}
 		fp.fragmentDirs = []string{
-			"./receipts", // Repo-specific (higher precedence)
-			filepath.Join(homeDir, ".kodelet/receipts"), // User home directory
+			"./recipes", // Repo-specific (higher precedence)
+			filepath.Join(homeDir, ".kodelet/recipes"), // User home directory
 		}
 		return nil
 	}
