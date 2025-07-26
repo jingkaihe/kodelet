@@ -20,8 +20,10 @@ import (
 
 // Metadata represents YAML frontmatter in fragment files
 type Metadata struct {
-	Name        string `yaml:"name,omitempty"`
-	Description string `yaml:"description,omitempty"`
+	Name            string   `yaml:"name,omitempty"`
+	Description     string   `yaml:"description,omitempty"`
+	AllowedTools    []string `yaml:"allowed_tools,omitempty"`
+	AllowedCommands []string `yaml:"allowed_commands,omitempty"`
 }
 
 // Fragment represents a fragment with its metadata and content
@@ -169,11 +171,50 @@ func (fp *Processor) parseFrontmatter(content string) (Metadata, string, error) 
 		if description, ok := metaData["description"].(string); ok {
 			metadata.Description = description
 		}
+		
+		// Parse allowed_tools (support both string array and comma-separated string)
+		if allowedTools := metaData["allowed_tools"]; allowedTools != nil {
+			metadata.AllowedTools = fp.parseStringArrayField(allowedTools)
+		}
+		
+		// Parse allowed_commands (support both string array and comma-separated string)
+		if allowedCommands := metaData["allowed_commands"]; allowedCommands != nil {
+			metadata.AllowedCommands = fp.parseStringArrayField(allowedCommands)
+		}
 	}
 
 	bodyContent := fp.extractBodyContent(content)
 
 	return metadata, bodyContent, nil
+}
+
+// parseStringArrayField handles both []interface{} (YAML array) and string (comma-separated) formats
+func (fp *Processor) parseStringArrayField(field interface{}) []string {
+	switch v := field.(type) {
+	case []interface{}:
+		// YAML array format: ["tool1", "tool2"]
+		var result []string
+		for _, item := range v {
+			if str, ok := item.(string); ok {
+				result = append(result, strings.TrimSpace(str))
+			}
+		}
+		return result
+	case string:
+		// Comma-separated string format: "tool1,tool2,tool3"
+		if v == "" {
+			return []string{}
+		}
+		var result []string
+		for _, item := range strings.Split(v, ",") {
+			if trimmed := strings.TrimSpace(item); trimmed != "" {
+				result = append(result, trimmed)
+			}
+		}
+		return result
+	default:
+		return []string{}
+	}
 }
 
 func (fp *Processor) extractBodyContent(content string) string {

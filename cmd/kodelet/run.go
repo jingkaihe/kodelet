@@ -75,6 +75,7 @@ var runCmd = &cobra.Command{
 
 		// Handle fragment processing if -r flag is provided
 		var query string
+		var fragmentMetadata *fragments.Metadata
 		if config.FragmentName != "" {
 			// Process fragment
 			var fragmentProcessor *fragments.Processor
@@ -100,18 +101,22 @@ var runCmd = &cobra.Command{
 				Arguments:    config.FragmentArgs,
 			}
 
-			fragmentContent, err := fragmentProcessor.LoadFragment(ctx, fragmentConfig)
+			// Load fragment with metadata to get tool restrictions
+			fragmentWithMetadata, err := fragmentProcessor.LoadFragmentWithMetadata(ctx, fragmentConfig)
 			if err != nil {
 				presenter.Error(err, "Failed to load fragment")
 				return
 			}
+			
+			// Store fragment metadata for later use
+			fragmentMetadata = &fragmentWithMetadata.Metadata
 
 			// If there are additional command line args, append them to the fragment
 			if len(args) > 0 {
 				argsContent := strings.Join(args, " ")
-				query = fragmentContent + "\n" + argsContent
+				query = fragmentWithMetadata.Content + "\n" + argsContent
 			} else {
-				query = fragmentContent
+				query = fragmentWithMetadata.Content
 			}
 		} else {
 			// Original logic for non-fragment queries
@@ -156,6 +161,24 @@ var runCmd = &cobra.Command{
 
 		// Get LLM config
 		llmConfig := llm.GetConfigFromViper()
+		
+		// Apply fragment restrictions if available
+		if fragmentMetadata != nil {
+			// Apply allowed_tools from fragment if specified
+			if len(fragmentMetadata.AllowedTools) > 0 {
+				// Validate the tools before applying
+				if err := tools.ValidateTools(fragmentMetadata.AllowedTools); err != nil {
+					presenter.Warning(fmt.Sprintf("Invalid tools in fragment metadata, ignoring: %v", err))
+				} else {
+					llmConfig.AllowedTools = fragmentMetadata.AllowedTools
+				}
+			}
+			
+			// Apply allowed_commands from fragment if specified
+			if len(fragmentMetadata.AllowedCommands) > 0 {
+				llmConfig.AllowedCommands = fragmentMetadata.AllowedCommands
+			}
+		}
 
 		// Create state with appropriate tools based on browser support
 		var stateOpts []tools.BasicStateOption

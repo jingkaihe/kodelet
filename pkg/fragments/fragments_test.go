@@ -372,3 +372,60 @@ Unique content`
 	assert.Equal(t, "Only in second directory", unique.Metadata.Description)
 	assert.Contains(t, unique.Path, dir2)
 }
+
+func TestFragmentProcessor_ParseAllowedToolsAndCommands(t *testing.T) {
+	dir, err := os.MkdirTemp("", "fragments-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	// Test fragment with both YAML array and comma-separated formats
+	fragmentContent := `---
+name: Test Restrictions
+description: Fragment with tool and command restrictions
+allowed_tools:
+  - "bash"
+  - "file_read"
+  - "thinking"
+allowed_commands: "ls *,echo *,pwd"
+---
+
+Test content here.`
+
+	fragmentPath := filepath.Join(dir, "test-restrictions.md")
+	err = os.WriteFile(fragmentPath, []byte(fragmentContent), 0644)
+	require.NoError(t, err)
+
+	processor, err := NewFragmentProcessor(WithFragmentDirs(dir))
+	require.NoError(t, err)
+
+	metadata, err := processor.GetFragmentMetadata("test-restrictions")
+	require.NoError(t, err)
+
+	assert.Equal(t, "Test Restrictions", metadata.Metadata.Name)
+	assert.Equal(t, "Fragment with tool and command restrictions", metadata.Metadata.Description)
+	assert.Equal(t, []string{"bash", "file_read", "thinking"}, metadata.Metadata.AllowedTools)
+	assert.Equal(t, []string{"ls *", "echo *", "pwd"}, metadata.Metadata.AllowedCommands)
+
+	// Test fragment with comma-separated tools
+	fragmentContent2 := `---
+name: Test Comma Format
+description: Fragment with comma-separated tools
+allowed_tools: "bash,file_read,grep_tool"
+allowed_commands:
+  - "git *"
+  - "cat *"
+---
+
+Test content here.`
+
+	fragmentPath2 := filepath.Join(dir, "test-comma.md")
+	err = os.WriteFile(fragmentPath2, []byte(fragmentContent2), 0644)
+	require.NoError(t, err)
+
+	metadata2, err := processor.GetFragmentMetadata("test-comma")
+	require.NoError(t, err)
+
+	assert.Equal(t, "Test Comma Format", metadata2.Metadata.Name)
+	assert.Equal(t, []string{"bash", "file_read", "grep_tool"}, metadata2.Metadata.AllowedTools)
+	assert.Equal(t, []string{"git *", "cat *"}, metadata2.Metadata.AllowedCommands)
+}
