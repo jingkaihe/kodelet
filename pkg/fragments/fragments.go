@@ -171,12 +171,12 @@ func (fp *Processor) parseFrontmatter(content string) (Metadata, string, error) 
 		if description, ok := metaData["description"].(string); ok {
 			metadata.Description = description
 		}
-		
+
 		// Parse allowed_tools (support both string array and comma-separated string)
 		if allowedTools := metaData["allowed_tools"]; allowedTools != nil {
 			metadata.AllowedTools = fp.parseStringArrayField(allowedTools)
 		}
-		
+
 		// Parse allowed_commands (support both string array and comma-separated string)
 		if allowedCommands := metaData["allowed_commands"]; allowedCommands != nil {
 			metadata.AllowedCommands = fp.parseStringArrayField(allowedCommands)

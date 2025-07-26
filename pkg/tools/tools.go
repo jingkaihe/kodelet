@@ -31,31 +31,31 @@ func GenerateSchema[T any]() *jsonschema.Schema {
 
 // toolRegistry holds all available tools mapped by their names
 var toolRegistry = map[string]tooltypes.Tool{
-	"bash":                        &BashTool{},
-	"file_read":                   &FileReadTool{},
-	"file_write":                  &FileWriteTool{},
-	"file_edit":                   &FileEditTool{},
-	"thinking":                    &ThinkingTool{},
-	"subagent":                    &SubAgentTool{},
-	"grep_tool":                   &GrepTool{},
-	"glob_tool":                   &GlobTool{},
-	"todo_read":                   &TodoReadTool{},
-	"todo_write":                  &TodoWriteTool{},
-	"web_fetch":                   &WebFetchTool{},
-	"image_recognition":           &ImageRecognitionTool{},
-	"view_background_processes":   &ViewBackgroundProcessesTool{},
-	"browser_navigate":            &browser.NavigateTool{},
-	"browser_get_page":            &browser.GetPageTool{},
-	"browser_click":               &browser.ClickTool{},
-	"browser_type":                &browser.TypeTool{},
-	"browser_wait_for":            &browser.WaitForTool{},
-	"browser_screenshot":          &browser.ScreenshotTool{},
+	"bash":                      &BashTool{},
+	"file_read":                 &FileReadTool{},
+	"file_write":                &FileWriteTool{},
+	"file_edit":                 &FileEditTool{},
+	"thinking":                  &ThinkingTool{},
+	"subagent":                  &SubAgentTool{},
+	"grep_tool":                 &GrepTool{},
+	"glob_tool":                 &GlobTool{},
+	"todo_read":                 &TodoReadTool{},
+	"todo_write":                &TodoWriteTool{},
+	"web_fetch":                 &WebFetchTool{},
+	"image_recognition":         &ImageRecognitionTool{},
+	"view_background_processes": &ViewBackgroundProcessesTool{},
+	"browser_navigate":          &browser.NavigateTool{},
+	"browser_get_page":          &browser.GetPageTool{},
+	"browser_click":             &browser.ClickTool{},
+	"browser_type":              &browser.TypeTool{},
+	"browser_wait_for":          &browser.WaitForTool{},
+	"browser_screenshot":        &browser.ScreenshotTool{},
 }
 
 // metaTools are always enabled regardless of configuration
 var metaTools = []string{
 	"file_read",
-	"grep_tool", 
+	"grep_tool",
 	"glob_tool",
 	"thinking",
 }
@@ -63,7 +63,7 @@ var metaTools = []string{
 // browserToolNames are the available browser tools
 var browserToolNames = []string{
 	"browser_navigate",
-	"browser_get_page", 
+	"browser_get_page",
 	"browser_click",
 	"browser_type",
 	"browser_wait_for",
@@ -101,23 +101,72 @@ var defaultSubAgentTools = []string{
 	"web_fetch",
 }
 
+// getAvailableToolNames returns a list of all available tool names
+func getAvailableToolNames() []string {
+	var tools []string
+	for toolName := range toolRegistry {
+		tools = append(tools, toolName)
+	}
+	return tools
+}
+
+// getAvailableSubAgentToolNames returns a list of available tool names for subagents (excluding subagent tool)
+func getAvailableSubAgentToolNames() []string {
+	var tools []string
+	for toolName := range toolRegistry {
+		if toolName != "subagent" {
+			tools = append(tools, toolName)
+		}
+	}
+	return tools
+}
+
 func ValidateTools(toolNames []string) error {
+	var unknownTools []string
 	for _, toolName := range toolNames {
 		if _, exists := toolRegistry[toolName]; !exists {
-			return errors.Errorf("unknown tool: %s", toolName)
+			unknownTools = append(unknownTools, toolName)
 		}
+	}
+
+	if len(unknownTools) > 0 {
+		availableTools := getAvailableToolNames()
+		if len(unknownTools) == 1 {
+			return errors.Errorf("unknown tool: %s\nAvailable tools: %s", unknownTools[0], strings.Join(availableTools, ", "))
+		}
+		return errors.Errorf("unknown tools: %s\nAvailable tools: %s", strings.Join(unknownTools, ", "), strings.Join(availableTools, ", "))
 	}
 	return nil
 }
 
 func ValidateSubAgentTools(toolNames []string) error {
+	var invalidTools []string
+	var subagentToolFound bool
+
 	for _, toolName := range toolNames {
 		if toolName == "subagent" {
-			return errors.New("subagent tool cannot be used by subagent to prevent infinite recursion")
+			subagentToolFound = true
+			invalidTools = append(invalidTools, toolName)
+		} else if _, exists := toolRegistry[toolName]; !exists {
+			invalidTools = append(invalidTools, toolName)
 		}
-		if _, exists := toolRegistry[toolName]; !exists {
-			return errors.Errorf("unknown tool: %s", toolName)
+	}
+
+	if len(invalidTools) > 0 {
+		availableTools := getAvailableSubAgentToolNames()
+
+		if subagentToolFound && len(invalidTools) == 1 {
+			return errors.Errorf("subagent tool cannot be used by subagent to prevent infinite recursion\nAvailable tools: %s", strings.Join(availableTools, ", "))
 		}
+
+		if subagentToolFound {
+			return errors.Errorf("invalid tools: %s (subagent tool cannot be used by subagent to prevent infinite recursion)\nAvailable tools: %s", strings.Join(invalidTools, ", "), strings.Join(availableTools, ", "))
+		}
+
+		if len(invalidTools) == 1 {
+			return errors.Errorf("unknown tool: %s\nAvailable tools: %s", invalidTools[0], strings.Join(availableTools, ", "))
+		}
+		return errors.Errorf("unknown tools: %s\nAvailable tools: %s", strings.Join(invalidTools, ", "), strings.Join(availableTools, ", "))
 	}
 	return nil
 }
@@ -129,7 +178,7 @@ func GetToolsFromNames(toolNames []string, enableBrowserTools bool) []tooltypes.
 
 	toolSet := make(map[string]bool)
 	var orderedToolNames []string
-	
+
 	// Always include meta tools first
 	for _, metaTool := range metaTools {
 		if !toolSet[metaTool] {
@@ -137,7 +186,7 @@ func GetToolsFromNames(toolNames []string, enableBrowserTools bool) []tooltypes.
 			orderedToolNames = append(orderedToolNames, metaTool)
 		}
 	}
-	
+
 	// Add requested tools in the order provided
 	for _, toolName := range toolNames {
 		if !toolSet[toolName] {
@@ -167,46 +216,31 @@ func GetToolsFromNames(toolNames []string, enableBrowserTools bool) []tooltypes.
 	return tools
 }
 
-func ParseAllowedToolsString(allowedToolsStr string) []string {
-	if allowedToolsStr == "" {
-		return []string{}
-	}
-	
-	var tools []string
-	for _, tool := range strings.Split(allowedToolsStr, ",") {
-		tool = strings.TrimSpace(tool)
-		if tool != "" {
-			tools = append(tools, tool)
-		}
-	}
-	return tools
-}
-
-func GetMainTools(allowedTools []string, enableBrowserTools bool) []tooltypes.Tool {
+func GetMainTools(ctx context.Context, allowedTools []string, enableBrowserTools bool) []tooltypes.Tool {
 	if len(allowedTools) == 0 {
 		allowedTools = defaultMainTools
 	}
 
 	if err := ValidateTools(allowedTools); err != nil {
+		logger.G(ctx).WithError(err).Warn("Invalid main agent tool configuration, falling back to defaults")
 		allowedTools = defaultMainTools
 	}
 
 	return GetToolsFromNames(allowedTools, enableBrowserTools)
 }
 
-func GetSubAgentTools(allowedTools []string, enableBrowserTools bool) []tooltypes.Tool {
+func GetSubAgentTools(ctx context.Context, allowedTools []string, enableBrowserTools bool) []tooltypes.Tool {
 	if len(allowedTools) == 0 {
 		allowedTools = defaultSubAgentTools
 	}
 
 	if err := ValidateSubAgentTools(allowedTools); err != nil {
+		logger.G(ctx).WithError(err).Warn("Invalid subagent tool configuration, falling back to defaults")
 		allowedTools = defaultSubAgentTools
 	}
 
 	return GetToolsFromNames(allowedTools, enableBrowserTools)
 }
-
-
 
 func ToAnthropicTools(tools []tooltypes.Tool) []anthropic.ToolUnionParam {
 	anthropicTools := make([]anthropic.ToolUnionParam, len(tools))

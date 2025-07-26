@@ -51,7 +51,7 @@ func NewBasicState(ctx context.Context, opts ...BasicStateOption) *BasicState {
 		if state.llmConfig.AllowedTools != nil {
 			allowedTools = state.llmConfig.AllowedTools
 		}
-		state.tools = GetMainTools(allowedTools, false) // Default without browser tools
+		state.tools = GetMainTools(ctx, allowedTools, false) // Default without browser tools
 		// Configure tools with LLM config parameters
 		state.configureTools()
 	}
@@ -69,7 +69,7 @@ func WithSubAgentTools(config interface{}) BasicStateOption {
 		if config.SubAgent != nil && config.SubAgent.AllowedTools != nil {
 			allowedTools = config.SubAgent.AllowedTools
 		}
-		s.tools = GetSubAgentTools(allowedTools, false) // Default without browser tools
+		s.tools = GetSubAgentTools(ctx, allowedTools, false) // Default without browser tools
 		s.configureTools()
 		return nil
 	}
@@ -81,7 +81,7 @@ func WithMainToolsAndBrowser() BasicStateOption {
 		if s.llmConfig.AllowedTools != nil {
 			allowedTools = s.llmConfig.AllowedTools
 		}
-		s.tools = GetMainTools(allowedTools, true) // Main tools with browser support
+		s.tools = GetMainTools(ctx, allowedTools, true) // Main tools with browser support
 		s.configureTools()
 		return nil
 	}
@@ -93,7 +93,7 @@ func WithSubAgentToolsAndBrowser() BasicStateOption {
 		if s.llmConfig.SubAgent != nil && s.llmConfig.SubAgent.AllowedTools != nil {
 			allowedTools = s.llmConfig.SubAgent.AllowedTools
 		}
-		s.tools = GetSubAgentTools(allowedTools, true) // Sub-agent tools with browser support
+		s.tools = GetSubAgentTools(ctx, allowedTools, true) // Sub-agent tools with browser support
 		s.configureTools()
 		return nil
 	}
