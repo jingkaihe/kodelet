@@ -14,8 +14,15 @@
   ---
   name: Recipe Display Name
   description: Brief recipe description
+  allowed_tools: ["bash", "file_read"]
+  allowed_commands: ["git *", "echo *"]
   ---
   ```
+
+### Allowed Tools for agent and subagents
+
+* Added `allowed_tools` config for agents and subagents to restrict tool usage.
+* Also allow `allowed_tools` and `allowed_commands` to be specified in the recipe metadata.
 
 ## 0.0.75.alpha (2025-07-25)
 
