@@ -47,7 +47,11 @@ func NewBasicState(ctx context.Context, opts ...BasicStateOption) *BasicState {
 	}
 
 	if len(state.tools) == 0 {
-		state.tools = GetMainTools(false) // Default without browser tools
+		var allowedTools []string
+		if state.llmConfig.AllowedTools != nil {
+			allowedTools = state.llmConfig.AllowedTools
+		}
+		state.tools = GetMainTools(allowedTools, false) // Default without browser tools
 		// Configure tools with LLM config parameters
 		state.configureTools()
 	}
@@ -57,7 +61,11 @@ func NewBasicState(ctx context.Context, opts ...BasicStateOption) *BasicState {
 
 func WithSubAgentTools() BasicStateOption {
 	return func(ctx context.Context, s *BasicState) error {
-		s.tools = GetSubAgentTools(false) // Default without browser tools
+		var allowedTools []string
+		if s.llmConfig.SubAgent != nil && s.llmConfig.SubAgent.AllowedTools != nil {
+			allowedTools = s.llmConfig.SubAgent.AllowedTools
+		}
+		s.tools = GetSubAgentTools(allowedTools, false) // Default without browser tools
 		s.configureTools()
 		return nil
 	}
@@ -65,7 +73,11 @@ func WithSubAgentTools() BasicStateOption {
 
 func WithMainToolsAndBrowser() BasicStateOption {
 	return func(ctx context.Context, s *BasicState) error {
-		s.tools = GetMainTools(true) // Main tools with browser support
+		var allowedTools []string
+		if s.llmConfig.AllowedTools != nil {
+			allowedTools = s.llmConfig.AllowedTools
+		}
+		s.tools = GetMainTools(allowedTools, true) // Main tools with browser support
 		s.configureTools()
 		return nil
 	}
@@ -73,7 +85,11 @@ func WithMainToolsAndBrowser() BasicStateOption {
 
 func WithSubAgentToolsAndBrowser() BasicStateOption {
 	return func(ctx context.Context, s *BasicState) error {
-		s.tools = GetSubAgentTools(true) // Sub-agent tools with browser support
+		var allowedTools []string
+		if s.llmConfig.SubAgent != nil && s.llmConfig.SubAgent.AllowedTools != nil {
+			allowedTools = s.llmConfig.SubAgent.AllowedTools
+		}
+		s.tools = GetSubAgentTools(allowedTools, true) // Sub-agent tools with browser support
 		s.configureTools()
 		return nil
 	}

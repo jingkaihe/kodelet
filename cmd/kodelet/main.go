@@ -121,6 +121,7 @@ func main() {
 	rootCmd.PersistentFlags().String("log-format", "fmt", "Log format (json, text, fmt)")
 	rootCmd.PersistentFlags().StringSlice("allowed-commands", []string{}, "Allowed command patterns for bash tool (e.g. 'yarn start,ls *')")
 	rootCmd.PersistentFlags().String("allowed-domains-file", "~/.kodelet/allowed_domains.txt", "Path to file containing allowed domains for web_fetch and browser tools (one domain per line)")
+	rootCmd.PersistentFlags().StringSlice("allowed-tools", []string{}, "Comma-separated list of allowed tools for main agent (e.g. 'bash,file_read,grep_tool')")
 	rootCmd.PersistentFlags().String("anthropic-api-access", "auto", "Anthropic API access mode (auto, subscription, api-key)")
 
 	// Bind flags to viper
@@ -138,6 +139,7 @@ func main() {
 	viper.BindPFlag("log_format", rootCmd.PersistentFlags().Lookup("log-format"))
 	viper.BindPFlag("allowed_commands", rootCmd.PersistentFlags().Lookup("allowed-commands"))
 	viper.BindPFlag("allowed_domains_file", rootCmd.PersistentFlags().Lookup("allowed-domains-file"))
+	viper.BindPFlag("allowed_tools", rootCmd.PersistentFlags().Lookup("allowed-tools"))
 	viper.BindPFlag("anthropic_api_access", rootCmd.PersistentFlags().Lookup("anthropic-api-access"))
 
 	// Add subcommands

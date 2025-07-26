@@ -33,14 +33,14 @@ func TestBasicState(t *testing.T) {
 
 	// Test tools
 	tools := s.Tools()
-	mainTools := GetMainTools(false)
+	mainTools := GetMainTools([]string{}, false)
 	assert.Equal(t, len(mainTools), len(tools), "Should have the correct number of tools")
 	for i, tool := range tools {
 		assert.Equal(t, mainTools[i].Name(), tool.Name(), "Tool names should match")
 	}
 
 	subAgentTools := NewBasicState(context.TODO(), WithSubAgentTools())
-	expectedSubAgentTools := GetSubAgentTools(false)
+	expectedSubAgentTools := GetSubAgentTools([]string{}, false)
 	assert.Equal(t, len(expectedSubAgentTools), len(subAgentTools.Tools()), "Should have the correct number of subagent tools")
 	for i, tool := range subAgentTools.Tools() {
 		assert.Equal(t, expectedSubAgentTools[i].Name(), tool.Name(), "Subagent tool names should match")
