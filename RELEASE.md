@@ -1,5 +1,22 @@
 # Kodelet
 
+## 0.0.76.alpha (2025-07-26)
+
+### Recipe Management System
+
+**New Recipe Command**: Added comprehensive `kodelet recipe` command for managing fragments/receipts with metadata support
+
+- **Recipe Listing**: `kodelet recipe list` displays all available recipes with metadata including name, description, and optional file paths
+- **Recipe Preview**: `kodelet recipe show <recipe>` renders recipe content with metadata display and template argument substitution
+- **JSON Output Support**: `--json` flag for programmatic recipe information access
+- **Metadata Integration**: YAML frontmatter support in recipe files for enhanced organization
+  ```yaml
+  ---
+  name: Recipe Display Name
+  description: Brief recipe description
+  ---
+  ```
+
 ## 0.0.75.alpha (2025-07-25)
 
 ### Security
