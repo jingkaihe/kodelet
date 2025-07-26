@@ -240,35 +240,8 @@ func (fp *Processor) extractBodyContent(content string) string {
 	return strings.Join(contentLines, "\n")
 }
 
-func (fp *Processor) LoadFragment(ctx context.Context, config *Config) (string, error) {
-	logger.G(ctx).WithField("fragment", config.FragmentName).Debug("Loading fragment")
 
-	fragmentPath, err := fp.findFragmentFile(config.FragmentName)
-	if err != nil {
-		return "", err
-	}
-
-	logger.G(ctx).WithField("path", fragmentPath).Debug("Found fragment file")
-
-	content, err := os.ReadFile(fragmentPath)
-	if err != nil {
-		return "", errors.Wrapf(err, "failed to read fragment file '%s'", fragmentPath)
-	}
-
-	_, bodyContent, err := fp.parseFrontmatter(string(content))
-	if err != nil {
-		return "", errors.Wrapf(err, "failed to parse frontmatter in fragment '%s'", fragmentPath)
-	}
-
-	processed, err := fp.processTemplate(ctx, bodyContent, config.Arguments)
-	if err != nil {
-		return "", errors.Wrapf(err, "failed to process fragment template '%s'", fragmentPath)
-	}
-
-	return processed, nil
-}
-
-func (fp *Processor) LoadFragmentWithMetadata(ctx context.Context, config *Config) (*Fragment, error) {
+func (fp *Processor) LoadFragment(ctx context.Context, config *Config) (*Fragment, error) {
 	logger.G(ctx).WithField("fragment", config.FragmentName).Debug("Loading fragment with metadata")
 
 	fragmentPath, err := fp.findFragmentFile(config.FragmentName)

@@ -44,10 +44,10 @@ Command result: {{bash "echo" "test"}}`
 	result, err := processor.LoadFragment(context.Background(), config)
 	require.NoError(t, err)
 
-	assert.Contains(t, result, "Hello Alice!")
-	assert.Contains(t, result, "Your role is Engineer.")
-	assert.Contains(t, result, "Current date: 20")
-	assert.Contains(t, result, "Command result: test")
+	assert.Contains(t, result.Content, "Hello Alice!")
+	assert.Contains(t, result.Content, "Your role is Engineer.")
+	assert.Contains(t, result.Content, "Current date: 20")
+	assert.Contains(t, result.Content, "Command result: test")
 }
 
 func TestFragmentProcessor_BashCommandError(t *testing.T) {
@@ -71,8 +71,8 @@ func TestFragmentProcessor_BashCommandError(t *testing.T) {
 	result, err := processor.LoadFragment(context.Background(), config)
 	require.NoError(t, err)
 
-	assert.Contains(t, result, "[ERROR executing command")
-	assert.Contains(t, result, "nonexistent-command-xyz")
+	assert.Contains(t, result.Content, "[ERROR executing command")
+	assert.Contains(t, result.Content, "nonexistent-command-xyz")
 }
 
 func TestFragmentProcessor_findFragmentFile(t *testing.T) {
@@ -265,7 +265,7 @@ Hello {{.name}}!`
 	assert.Equal(t, "\nHello {{.name}}!", content)
 }
 
-func TestFragmentProcessor_LoadFragmentWithMetadata(t *testing.T) {
+func TestFragmentProcessor_LoadFragmentMetadata(t *testing.T) {
 	tempDir, err := os.MkdirTemp("", "kodelet-fragments-metadata-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(tempDir)
@@ -294,7 +294,7 @@ Current date: {{bash "date" "+%Y-%m-%d"}}`
 		},
 	}
 
-	result, err := processor.LoadFragmentWithMetadata(context.Background(), config)
+	result, err := processor.LoadFragment(context.Background(), config)
 	require.NoError(t, err)
 
 	assert.Equal(t, "Test Fragment", result.Metadata.Name)

@@ -7,4 +7,6 @@ allowed_commands: []
 
 My name is {{.name}}, a {{.occupation}}.
 
-Please write a short introduction about me and save it to a file called introduction.txt.
+Please write a short introduction about me.
+
+Also tell me what tools you can use.

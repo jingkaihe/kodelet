@@ -254,28 +254,28 @@ func runRecipeShow(ctx context.Context, recipeName string, config *RecipeShowCon
 		Arguments:    config.Arguments,
 	}
 
-	fragmentWithMetadata, err := processor.LoadFragmentWithMetadata(ctx, fragmentConfig)
+	fragment, err := processor.LoadFragment(ctx, fragmentConfig)
 	if err != nil {
 		return errors.Wrapf(err, "failed to load recipe '%s'", recipeName)
 	}
 
-	if fragmentWithMetadata.Metadata.Name != "" || fragmentWithMetadata.Metadata.Description != "" {
+	if fragment.Metadata.Name != "" || fragment.Metadata.Description != "" {
 		presenter.Section("Recipe Metadata")
 
-		if fragmentWithMetadata.Metadata.Name != "" {
-			fmt.Printf("Name: %s\n", fragmentWithMetadata.Metadata.Name)
+		if fragment.Metadata.Name != "" {
+			fmt.Printf("Name: %s\n", fragment.Metadata.Name)
 		}
 
-		if fragmentWithMetadata.Metadata.Description != "" {
-			fmt.Printf("Description: %s\n", fragmentWithMetadata.Metadata.Description)
+		if fragment.Metadata.Description != "" {
+			fmt.Printf("Description: %s\n", fragment.Metadata.Description)
 		}
 
-		fmt.Printf("Path: %s\n", fragmentWithMetadata.Path)
+		fmt.Printf("Path: %s\n", fragment.Path)
 		fmt.Println()
 	}
 
 	presenter.Section("Recipe Content")
-	fmt.Print(fragmentWithMetadata.Content)
+	fmt.Print(fragment.Content)
 
 	return nil
 }
