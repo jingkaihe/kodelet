@@ -13,7 +13,23 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/pkg/errors"
+	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark-meta"
+	"github.com/yuin/goldmark/parser"
 )
+
+// Metadata represents YAML frontmatter in fragment files
+type Metadata struct {
+	Name        string `yaml:"name,omitempty"`
+	Description string `yaml:"description,omitempty"`
+}
+
+// Fragment represents a fragment with its metadata and content
+type Fragment struct {
+	Metadata Metadata
+	Content  string
+	Path     string
+}
 
 // Config holds configuration for fragment processing
 type Config struct {
@@ -127,11 +143,65 @@ func (fp *Processor) findFragmentFile(fragmentName string) (string, error) {
 	return "", errors.Errorf("fragment '%s' not found in directories: %v", fragmentName, fp.fragmentDirs)
 }
 
-// LoadFragment loads and processes a fragment with the given arguments
+func (fp *Processor) parseFrontmatter(content string) (Metadata, string, error) {
+	var metadata Metadata
+
+	md := goldmark.New(
+		goldmark.WithExtensions(
+			meta.Meta,
+		),
+	)
+
+	source := []byte(content)
+	var buf bytes.Buffer
+	pctx := parser.NewContext()
+
+	if err := md.Convert(source, &buf, parser.WithContext(pctx)); err != nil {
+		return metadata, content, errors.Wrap(err, "failed to convert markdown")
+	}
+
+	metaData := meta.Get(pctx)
+
+	if metaData != nil {
+		if name, ok := metaData["name"].(string); ok {
+			metadata.Name = name
+		}
+		if description, ok := metaData["description"].(string); ok {
+			metadata.Description = description
+		}
+	}
+
+	bodyContent := fp.extractBodyContent(content)
+
+	return metadata, bodyContent, nil
+}
+
+func (fp *Processor) extractBodyContent(content string) string {
+	if !strings.HasPrefix(content, "---") {
+		return content
+	}
+
+	lines := strings.Split(content, "\n")
+	var frontmatterEnd = -1
+
+	for i := 1; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) == "---" {
+			frontmatterEnd = i
+			break
+		}
+	}
+
+	if frontmatterEnd == -1 {
+		return content
+	}
+
+	contentLines := lines[frontmatterEnd+1:]
+	return strings.Join(contentLines, "\n")
+}
+
 func (fp *Processor) LoadFragment(ctx context.Context, config *Config) (string, error) {
 	logger.G(ctx).WithField("fragment", config.FragmentName).Debug("Loading fragment")
 
-	// Find the fragment file
 	fragmentPath, err := fp.findFragmentFile(config.FragmentName)
 	if err != nil {
 		return "", err
@@ -139,19 +209,77 @@ func (fp *Processor) LoadFragment(ctx context.Context, config *Config) (string, 
 
 	logger.G(ctx).WithField("path", fragmentPath).Debug("Found fragment file")
 
-	// Read the fragment content
 	content, err := os.ReadFile(fragmentPath)
 	if err != nil {
 		return "", errors.Wrapf(err, "failed to read fragment file '%s'", fragmentPath)
 	}
 
-	// Process the template
-	processed, err := fp.processTemplate(ctx, string(content), config.Arguments)
+	_, bodyContent, err := fp.parseFrontmatter(string(content))
+	if err != nil {
+		return "", errors.Wrapf(err, "failed to parse frontmatter in fragment '%s'", fragmentPath)
+	}
+
+	processed, err := fp.processTemplate(ctx, bodyContent, config.Arguments)
 	if err != nil {
 		return "", errors.Wrapf(err, "failed to process fragment template '%s'", fragmentPath)
 	}
 
 	return processed, nil
+}
+
+func (fp *Processor) LoadFragmentWithMetadata(ctx context.Context, config *Config) (*Fragment, error) {
+	logger.G(ctx).WithField("fragment", config.FragmentName).Debug("Loading fragment with metadata")
+
+	fragmentPath, err := fp.findFragmentFile(config.FragmentName)
+	if err != nil {
+		return nil, err
+	}
+
+	logger.G(ctx).WithField("path", fragmentPath).Debug("Found fragment file")
+
+	content, err := os.ReadFile(fragmentPath)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to read fragment file '%s'", fragmentPath)
+	}
+
+	metadata, bodyContent, err := fp.parseFrontmatter(string(content))
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to parse frontmatter in fragment '%s'", fragmentPath)
+	}
+
+	processed, err := fp.processTemplate(ctx, bodyContent, config.Arguments)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to process fragment template '%s'", fragmentPath)
+	}
+
+	return &Fragment{
+		Metadata: metadata,
+		Content:  processed,
+		Path:     fragmentPath,
+	}, nil
+}
+
+func (fp *Processor) GetFragmentMetadata(fragmentName string) (*Fragment, error) {
+	fragmentPath, err := fp.findFragmentFile(fragmentName)
+	if err != nil {
+		return nil, err
+	}
+
+	content, err := os.ReadFile(fragmentPath)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to read fragment file '%s'", fragmentPath)
+	}
+
+	metadata, bodyContent, err := fp.parseFrontmatter(string(content))
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to parse frontmatter in fragment '%s'", fragmentPath)
+	}
+
+	return &Fragment{
+		Metadata: metadata,
+		Content:  bodyContent,
+		Path:     fragmentPath,
+	}, nil
 }
 
 // processTemplate processes a template string with variable substitution and bash command execution using FuncMap
@@ -234,6 +362,54 @@ func (fp *Processor) ListFragments() ([]string, error) {
 			if !seen[name] {
 				fragments = append(fragments, name)
 				seen[name] = true
+			}
+		}
+	}
+
+	return fragments, nil
+}
+
+func (fp *Processor) ListFragmentsWithMetadata() ([]*Fragment, error) {
+	var fragments []*Fragment
+	seen := make(map[string]bool)
+
+	for _, dir := range fp.fragmentDirs {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+
+			name := entry.Name()
+			fragmentName := strings.TrimSuffix(name, ".md")
+
+			if !seen[fragmentName] {
+				fragmentPath := filepath.Join(dir, name)
+
+				content, err := os.ReadFile(fragmentPath)
+				if err != nil {
+					continue
+				}
+
+				metadata, bodyContent, err := fp.parseFrontmatter(string(content))
+				if err != nil {
+					continue
+				}
+
+				if metadata.Name == "" {
+					metadata.Name = fragmentName
+				}
+
+				fragments = append(fragments, &Fragment{
+					Metadata: metadata,
+					Content:  bodyContent,
+					Path:     fragmentPath,
+				})
+				seen[fragmentName] = true
 			}
 		}
 	}

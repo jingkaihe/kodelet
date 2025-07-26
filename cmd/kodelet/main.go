@@ -30,7 +30,7 @@ func init() {
 	viper.SetDefault("allowed_commands", []string{})
 	viper.SetDefault("allowed_domains_file", "~/.kodelet/allowed_domains.txt")
 	viper.SetDefault("anthropic_api_access", "auto")
-	
+
 	// Commit coauthor configuration defaults
 	viper.SetDefault("commit.coauthor.enabled", true)
 	viper.SetDefault("commit.coauthor.name", "Kodelet")
@@ -163,6 +163,7 @@ func main() {
 	rootCmd.AddCommand(copilotLogoutCmd)
 	rootCmd.AddCommand(serveCmd)
 	rootCmd.AddCommand(feedbackCmd)
+	rootCmd.AddCommand(recipeCmd)
 
 	// Initialize telemetry with tracing
 	tracingShutdown, err := initTracing(ctx)
@@ -203,6 +204,7 @@ func main() {
 	copilotLogoutCmd = withTracing(copilotLogoutCmd)
 	serveCmd = withTracing(serveCmd)
 	feedbackCmd = withTracing(feedbackCmd)
+	recipeCmd = withTracing(recipeCmd)
 
 	// Set the root command context to include the tracing context
 	rootCmd.SetContext(ctx)
