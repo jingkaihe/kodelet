@@ -601,11 +601,7 @@ func (t *OpenAIThread) processMessageExchange(
 		// Execute the tool
 		// Use injected subagent context factory for cross-provider support, fallback to local method
 		var runToolCtx context.Context
-		if t.subagentContextFactory != nil {
-			runToolCtx = t.subagentContextFactory(ctx, t, handler, opt.CompactRatio, opt.DisableAutoCompact)
-		} else {
-			runToolCtx = t.NewSubagentContext(ctx, handler, opt.CompactRatio, opt.DisableAutoCompact)
-		}
+		runToolCtx = t.subagentContextFactory(ctx, t, handler, opt.CompactRatio, opt.DisableAutoCompact)
 		output := tools.RunTool(runToolCtx, t.state, toolCall.Function.Name, toolCall.Function.Arguments)
 
 		// Use CLI rendering for consistent output formatting
@@ -746,40 +742,6 @@ func (t *OpenAIThread) NewSubAgent(ctx context.Context, config llmtypes.Config) 
 	}
 
 	return thread
-}
-
-func (t *OpenAIThread) NewSubagentContext(ctx context.Context, handler llmtypes.MessageHandler, compactRatio float64, disableAutoCompact bool) context.Context {
-	// Create subagent using simplified approach - will use centralized logic in the future
-	subAgentConfig := t.config
-	subAgentConfig.IsSubAgent = true
-
-	// Apply basic subagent configuration if specified
-	if t.config.SubAgent != nil {
-		subConfig := t.config.SubAgent
-		// For now, only handle same-provider configurations
-		if subConfig.Provider == "" || subConfig.Provider == "openai" {
-			if subConfig.Model != "" {
-				subAgentConfig.Model = subConfig.Model
-			}
-			if subConfig.MaxTokens > 0 {
-				subAgentConfig.MaxTokens = subConfig.MaxTokens
-			}
-			if subConfig.ReasoningEffort != "" {
-				subAgentConfig.ReasoningEffort = subConfig.ReasoningEffort
-			}
-		}
-	}
-
-	subAgent := t.NewSubAgent(ctx, subAgentConfig)
-	subAgent.SetState(tools.NewBasicState(ctx, tools.WithSubAgentTools(), tools.WithExtraMCPTools(t.state.MCPTools())))
-
-	ctx = context.WithValue(ctx, llmtypes.SubAgentConfigKey, llmtypes.SubAgentConfig{
-		Thread:             subAgent,
-		MessageHandler:     handler,
-		CompactRatio:       compactRatio,
-		DisableAutoCompact: disableAutoCompact,
-	})
-	return ctx
 }
 
 // getLastAssistantMessageText extracts text content from the most recent assistant message

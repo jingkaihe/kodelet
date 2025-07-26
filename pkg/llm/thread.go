@@ -82,6 +82,7 @@ func NewSubagentThread(ctx context.Context, parentThread llmtypes.Thread, state 
 			if subConfig.OpenAI != nil {
 				newConfig.OpenAI = subConfig.OpenAI
 			}
+			newConfig.AllowedTools = subConfig.AllowedTools
 
 			// Create new thread with different provider using central NewThread function
 			newThread, err := NewThread(newConfig)
@@ -108,6 +109,7 @@ func NewSubagentThread(ctx context.Context, parentThread llmtypes.Thread, state 
 		if subConfig.ThinkingBudget > 0 {
 			config.ThinkingBudgetTokens = subConfig.ThinkingBudget
 		}
+		config.AllowedTools = subConfig.AllowedTools
 	}
 
 	// Create same-provider subagent using the parent's NewSubAgent method
@@ -125,7 +127,13 @@ func getThreadConfig(thread llmtypes.Thread) llmtypes.Config {
 
 // NewSubagentContext creates a subagent context for the given thread
 // This centralized function handles cross-provider subagent creation
-func NewSubagentContext(ctx context.Context, parentThread llmtypes.Thread, handler llmtypes.MessageHandler, compactRatio float64, disableAutoCompact bool) context.Context {
+func NewSubagentContext(
+	ctx context.Context,
+	parentThread llmtypes.Thread,
+	handler llmtypes.MessageHandler,
+	compactRatio float64,
+	disableAutoCompact bool,
+) context.Context {
 	state := tools.NewBasicState(ctx, tools.WithSubAgentTools(), tools.WithExtraMCPTools(parentThread.GetState().MCPTools()))
 	subAgent := NewSubagentThread(ctx, parentThread, state)
 	ctx = context.WithValue(ctx, llmtypes.SubAgentConfigKey, llmtypes.SubAgentConfig{

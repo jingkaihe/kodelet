@@ -107,7 +107,7 @@ var runCmd = &cobra.Command{
 				presenter.Error(err, "Failed to load fragment")
 				return
 			}
-			
+
 			// Store fragment metadata for later use
 			fragmentMetadata = &fragmentWithMetadata.Metadata
 
@@ -161,7 +161,7 @@ var runCmd = &cobra.Command{
 
 		// Get LLM config
 		llmConfig := llm.GetConfigFromViper()
-		
+
 		// Apply fragment restrictions if available
 		if fragmentMetadata != nil {
 			// Apply allowed_tools from fragment if specified
@@ -173,7 +173,7 @@ var runCmd = &cobra.Command{
 					llmConfig.AllowedTools = fragmentMetadata.AllowedTools
 				}
 			}
-			
+
 			// Apply allowed_commands from fragment if specified
 			if len(fragmentMetadata.AllowedCommands) > 0 {
 				llmConfig.AllowedCommands = fragmentMetadata.AllowedCommands
@@ -182,6 +182,7 @@ var runCmd = &cobra.Command{
 
 		// Create state with appropriate tools based on browser support
 		var stateOpts []tools.BasicStateOption
+
 		stateOpts = append(stateOpts, tools.WithLLMConfig(llmConfig))
 		stateOpts = append(stateOpts, tools.WithMCPTools(mcpManager))
 		if config.EnableBrowserTools {
