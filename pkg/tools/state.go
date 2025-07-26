@@ -59,11 +59,15 @@ func NewBasicState(ctx context.Context, opts ...BasicStateOption) *BasicState {
 	return state
 }
 
-func WithSubAgentTools() BasicStateOption {
+func WithSubAgentTools(config interface{}) BasicStateOption {
 	return func(ctx context.Context, s *BasicState) error {
+		config, ok := config.(llmtypes.Config)
+		if !ok {
+			return errors.New("invalid config type")
+		}
 		var allowedTools []string
-		if s.llmConfig.SubAgent != nil && s.llmConfig.SubAgent.AllowedTools != nil {
-			allowedTools = s.llmConfig.SubAgent.AllowedTools
+		if config.SubAgent != nil && config.SubAgent.AllowedTools != nil {
+			allowedTools = config.SubAgent.AllowedTools
 		}
 		s.tools = GetSubAgentTools(allowedTools, false) // Default without browser tools
 		s.configureTools()

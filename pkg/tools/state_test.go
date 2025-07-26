@@ -39,7 +39,9 @@ func TestBasicState(t *testing.T) {
 		assert.Equal(t, mainTools[i].Name(), tool.Name(), "Tool names should match")
 	}
 
-	subAgentTools := NewBasicState(context.TODO(), WithSubAgentTools())
+	// Create a basic config for sub-agent tools test
+	basicConfig := llmtypes.Config{}
+	subAgentTools := NewBasicState(context.TODO(), WithSubAgentTools(basicConfig))
 	expectedSubAgentTools := GetSubAgentTools([]string{}, false)
 	assert.Equal(t, len(expectedSubAgentTools), len(subAgentTools.Tools()), "Should have the correct number of subagent tools")
 	for i, tool := range subAgentTools.Tools() {
@@ -177,7 +179,7 @@ func TestBasicState_ConfigureBashTool_WithSubAgentTools(t *testing.T) {
 		AllowedCommands: allowedCommands,
 	}
 
-	s := NewBasicState(context.TODO(), WithLLMConfig(config), WithSubAgentTools())
+	s := NewBasicState(context.TODO(), WithLLMConfig(config), WithSubAgentTools(config))
 
 	// Find the bash tool in the tools list
 	tools := s.BasicTools()

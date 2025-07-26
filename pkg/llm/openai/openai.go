@@ -598,10 +598,7 @@ func (t *OpenAIThread) processMessageExchange(
 			attribute.String("tool_name", toolCall.Function.Name),
 		)
 
-		// Execute the tool
-		// Use injected subagent context factory for cross-provider support, fallback to local method
-		var runToolCtx context.Context
-		runToolCtx = t.subagentContextFactory(ctx, t, handler, opt.CompactRatio, opt.DisableAutoCompact)
+		runToolCtx := t.subagentContextFactory(ctx, t, handler, opt.CompactRatio, opt.DisableAutoCompact)
 		output := tools.RunTool(runToolCtx, t.state, toolCall.Function.Name, toolCall.Function.Arguments)
 
 		// Use CLI rendering for consistent output formatting
