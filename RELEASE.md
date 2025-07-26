@@ -4,7 +4,7 @@
 
 ### Recipe Management System
 
-**New Recipe Command**: Added comprehensive `kodelet recipe` command for managing fragments/receipts with metadata support
+**New Recipe Command**: Added comprehensive `kodelet recipe` command for managing fragments/recipes with metadata support
 
 - **Recipe Listing**: `kodelet recipe list` displays all available recipes with metadata including name, description, and optional file paths
 - **Recipe Preview**: `kodelet recipe show <recipe>` renders recipe content with metadata display and template argument substitution
@@ -66,7 +66,7 @@ retry:
 - **Template-Based Prompt Management**: Added comprehensive fragments system for creating reusable prompt templates with variable substitution and bash command execution
 - **Dynamic Content Generation**: Support for `{{bash "cmd" "arg1" "arg2"}}` syntax to execute shell commands and embed their output directly into prompts
 - **Variable Substitution**: Use `{{.variable_name}}` syntax with `--arg key=value` parameter passing for customizable templates
-- **Flexible Directory Structure**: Fragments discovered in `./receipts/` (repository-specific) and `~/.kodelet/receipts/` (user-global) with precedence support
+- **Flexible Directory Structure**: Fragments discovered in `./recipes/` (repository-specific) and `~/.kodelet/recipes/` (user-global) with precedence support
 - **CLI Integration**: New `-r` flag for fragment selection, `--arg` for parameter passing, and `--fragment-dirs` for custom fragment directories
 - **Comprehensive Documentation**: Added detailed documentation in `docs/FRAGMENTS.md` with examples and best practices
 

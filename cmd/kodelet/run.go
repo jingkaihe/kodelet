@@ -75,6 +75,7 @@ var runCmd = &cobra.Command{
 
 		// Handle fragment processing if -r flag is provided
 		var query string
+		var fragmentMetadata *fragments.Metadata
 		if config.FragmentName != "" {
 			// Process fragment
 			var fragmentProcessor *fragments.Processor
@@ -100,18 +101,22 @@ var runCmd = &cobra.Command{
 				Arguments:    config.FragmentArgs,
 			}
 
-			fragmentContent, err := fragmentProcessor.LoadFragment(ctx, fragmentConfig)
+			// Load fragment with metadata to get tool restrictions
+			fragmentWithMetadata, err := fragmentProcessor.LoadFragmentWithMetadata(ctx, fragmentConfig)
 			if err != nil {
 				presenter.Error(err, "Failed to load fragment")
 				return
 			}
 
+			// Store fragment metadata for later use
+			fragmentMetadata = &fragmentWithMetadata.Metadata
+
 			// If there are additional command line args, append them to the fragment
 			if len(args) > 0 {
 				argsContent := strings.Join(args, " ")
-				query = fragmentContent + "\n" + argsContent
+				query = fragmentWithMetadata.Content + "\n" + argsContent
 			} else {
-				query = fragmentContent
+				query = fragmentWithMetadata.Content
 			}
 		} else {
 			// Original logic for non-fragment queries
@@ -157,8 +162,27 @@ var runCmd = &cobra.Command{
 		// Get LLM config
 		llmConfig := llm.GetConfigFromViper()
 
+		// Apply fragment restrictions if available
+		if fragmentMetadata != nil {
+			// Apply allowed_tools from fragment if specified
+			if len(fragmentMetadata.AllowedTools) > 0 {
+				// Validate the tools before applying
+				if err := tools.ValidateTools(fragmentMetadata.AllowedTools); err != nil {
+					presenter.Warning(fmt.Sprintf("Invalid tools in fragment metadata, ignoring: %v", err))
+				} else {
+					llmConfig.AllowedTools = fragmentMetadata.AllowedTools
+				}
+			}
+
+			// Apply allowed_commands from fragment if specified
+			if len(fragmentMetadata.AllowedCommands) > 0 {
+				llmConfig.AllowedCommands = fragmentMetadata.AllowedCommands
+			}
+		}
+
 		// Create state with appropriate tools based on browser support
 		var stateOpts []tools.BasicStateOption
+
 		stateOpts = append(stateOpts, tools.WithLLMConfig(llmConfig))
 		stateOpts = append(stateOpts, tools.WithMCPTools(mcpManager))
 		if config.EnableBrowserTools {
@@ -224,7 +248,7 @@ func init() {
 	runCmd.Flags().Bool("enable-browser-tools", defaults.EnableBrowserTools, "Enable browser automation tools (navigate, click, type, screenshot, etc.)")
 	runCmd.Flags().Float64("compact-ratio", defaults.CompactRatio, "Context window utilization ratio to trigger auto-compact (0.0-1.0)")
 	runCmd.Flags().Bool("disable-auto-compact", defaults.DisableAutoCompact, "Disable auto-compact functionality")
-	runCmd.Flags().StringP("receipt", "r", defaults.FragmentName, "Use a fragment/receipt template")
+	runCmd.Flags().StringP("recipe", "r", defaults.FragmentName, "Use a fragment/recipe template")
 	runCmd.Flags().StringToString("arg", defaults.FragmentArgs, "Arguments to pass to fragment (e.g., --arg name=John --arg occupation=Engineer)")
 	runCmd.Flags().StringSlice("fragment-dirs", defaults.FragmentDirs, "Additional fragment directories (e.g., --fragment-dirs ./project-fragments --fragment-dirs ./team-fragments)")
 }
@@ -278,7 +302,7 @@ func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
 	if disableAutoCompact, err := cmd.Flags().GetBool("disable-auto-compact"); err == nil {
 		config.DisableAutoCompact = disableAutoCompact
 	}
-	if fragmentName, err := cmd.Flags().GetString("receipt"); err == nil {
+	if fragmentName, err := cmd.Flags().GetString("recipe"); err == nil {
 		config.FragmentName = fragmentName
 	}
 	if fragmentArgs, err := cmd.Flags().GetStringToString("arg"); err == nil {

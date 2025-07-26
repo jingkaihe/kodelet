@@ -25,6 +25,7 @@ type Config struct {
 	CacheEvery           int                // CacheEvery represents how often Thread messages should be cached (Anthropic only)
 	AllowedCommands      []string           // AllowedCommands is a list of allowed command patterns for the bash tool
 	AllowedDomainsFile   string             // AllowedDomainsFile is the path to the file containing allowed domains for web_fetch and browser tools
+	AllowedTools         []string           // AllowedTools is a list of allowed tools for the main agent (empty means use defaults)
 	AnthropicAPIAccess   AnthropicAPIAccess // AnthropicAPIAccess controls how to authenticate with Anthropic API
 	UseCopilot           bool               // UseCopilot enables GitHub Copilot subscription for OpenAI requests
 	Aliases              map[string]string  // Aliases maps short model names to full model names
@@ -85,5 +86,6 @@ type SubAgentConfigSettings struct {
 	MaxTokens       int           `mapstructure:"max_tokens"`       // Maximum tokens for subagent
 	ReasoningEffort string        `mapstructure:"reasoning_effort"` // OpenAI specific reasoning effort
 	ThinkingBudget  int           `mapstructure:"thinking_budget"`  // Anthropic specific thinking budget
+	AllowedTools    []string      `mapstructure:"allowed_tools"`    // AllowedTools is a list of allowed tools for the subagent (empty means use defaults)
 	OpenAI          *OpenAIConfig `mapstructure:"openai"`           // OpenAI-compatible provider configuration
 }

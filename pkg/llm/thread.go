@@ -56,7 +56,7 @@ func NewThread(config llmtypes.Config) (llmtypes.Thread, error) {
 // This function handles cross-provider subagent creation at the centralized level
 func NewSubagentThread(ctx context.Context, parentThread llmtypes.Thread, state tooltypes.State) llmtypes.Thread {
 	// Get the parent's configuration
-	parentConfig := getThreadConfig(parentThread)
+	parentConfig := parentThread.GetConfig()
 	config := parentConfig
 	config.IsSubAgent = true
 
@@ -82,6 +82,7 @@ func NewSubagentThread(ctx context.Context, parentThread llmtypes.Thread, state 
 			if subConfig.OpenAI != nil {
 				newConfig.OpenAI = subConfig.OpenAI
 			}
+			newConfig.AllowedTools = subConfig.AllowedTools
 
 			// Create new thread with different provider using central NewThread function
 			newThread, err := NewThread(newConfig)
@@ -108,6 +109,7 @@ func NewSubagentThread(ctx context.Context, parentThread llmtypes.Thread, state 
 		if subConfig.ThinkingBudget > 0 {
 			config.ThinkingBudgetTokens = subConfig.ThinkingBudget
 		}
+		config.AllowedTools = subConfig.AllowedTools
 	}
 
 	// Create same-provider subagent using the parent's NewSubAgent method
@@ -116,17 +118,20 @@ func NewSubagentThread(ctx context.Context, parentThread llmtypes.Thread, state 
 	return subagent
 }
 
-// getThreadConfig extracts configuration from a thread
-// This is a helper function to get config from different thread types
-func getThreadConfig(thread llmtypes.Thread) llmtypes.Config {
-	// Now that GetConfig() is part of the Thread interface, we can call it directly
-	return thread.GetConfig()
-}
-
 // NewSubagentContext creates a subagent context for the given thread
 // This centralized function handles cross-provider subagent creation
-func NewSubagentContext(ctx context.Context, parentThread llmtypes.Thread, handler llmtypes.MessageHandler, compactRatio float64, disableAutoCompact bool) context.Context {
-	state := tools.NewBasicState(ctx, tools.WithSubAgentTools(), tools.WithExtraMCPTools(parentThread.GetState().MCPTools()))
+func NewSubagentContext(
+	ctx context.Context,
+	parentThread llmtypes.Thread,
+	handler llmtypes.MessageHandler,
+	compactRatio float64,
+	disableAutoCompact bool,
+) context.Context {
+	state := tools.NewBasicState(
+		ctx,
+		tools.WithSubAgentTools(parentThread.GetState().GetLLMConfig()),
+		tools.WithExtraMCPTools(parentThread.GetState().MCPTools()),
+	)
 	subAgent := NewSubagentThread(ctx, parentThread, state)
 	ctx = context.WithValue(ctx, llmtypes.SubAgentConfigKey, llmtypes.SubAgentConfig{
 		Thread:             subAgent,

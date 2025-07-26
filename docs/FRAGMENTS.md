@@ -1,6 +1,6 @@
-# Fragments/Receipts System
+# Fragments/Recipes System
 
-Kodelet's fragments (also called "receipts") system allows you to create reusable prompt templates with dynamic content generation. Fragments support variable substitution and bash command execution, making complex queries maintainable and shareable.
+Kodelet's fragments (also called "recipes") system allows you to create reusable prompt templates with dynamic content generation. Fragments support variable substitution and bash command execution, making complex queries maintainable and shareable.
 
 ## Table of Contents
 
@@ -30,10 +30,10 @@ Fragments solve the problem of repeatedly typing lengthy, complex instructions b
 Create a directory for fragments and add your first template:
 
 ```bash
-mkdir -p ./receipts
+mkdir -p ./recipes
 ```
 
-Create `./receipts/commit.md`:
+Create `./recipes/commit.md`:
 ```markdown
 ## Context:
 
@@ -107,8 +107,8 @@ Please analyze the {{.project_name}} codebase focusing on {{.focus_area}}.
 
 Fragments are discovered in two locations with precedence order:
 
-1. **`./receipts/`** - Repository-specific fragments (higher precedence)
-2. **`~/.kodelet/receipts/`** - User-global fragments
+1. **`./recipes/`** - Repository-specific fragments (higher precedence)
+2. **`~/.kodelet/recipes/`** - User-global fragments
 
 ### File Naming
 
@@ -124,10 +124,10 @@ kodelet run -r my-fragment  # Finds my-fragment.md or my-fragment
 ### Precedence Example
 
 If you have:
-- `./receipts/commit.md`
-- `~/.kodelet/receipts/commit.md`
+- `./recipes/commit.md`
+- `~/.kodelet/recipes/commit.md`
 
-The local repository version (`./receipts/commit.md`) will be used.
+The local repository version (`./recipes/commit.md`) will be used.
 
 ## Command Line Usage
 
@@ -146,7 +146,7 @@ kodelet run -r fragment-name "Make it more detailed"
 
 ### Flag Reference
 
-- `-r, --receipt FRAGMENT` - Specify the fragment/receipt to use
+- `-r, --recipe FRAGMENT` - Specify the fragment/recipe to use
 - `--arg KEY=VALUE` - Pass arguments to the fragment (repeatable)
 
 ### Examples
@@ -170,7 +170,7 @@ kodelet run -r commit "Focus on the breaking changes"
 
 ## Example Fragments
 
-### Git Commit Assistant (`./receipts/commit.md`)
+### Git Commit Assistant (`./recipes/commit.md`)
 
 ```markdown
 ## Context:
@@ -189,7 +189,7 @@ Please review the above git status and diff, and create a git commit message tha
 
 Usage: `kodelet run -r commit`
 
-### Personal Introduction (`./receipts/intro.md`)
+### Personal Introduction (`./recipes/intro.md`)
 
 ```markdown
 What is your name?
@@ -202,7 +202,7 @@ Write a short introduction about me.
 
 Usage: `kodelet run -r intro --arg name="Alice Smith" --arg occupation="Software Engineer"`
 
-### Code Review Template (`./receipts/code-review.md`)
+### Code Review Template (`./recipes/code-review.md`)
 
 ```markdown
 ## Code Review Request
@@ -232,7 +232,7 @@ Please review the above changes focusing on:
 
 Usage: `kodelet run -r code-review --arg specific_concerns="Check the error handling in the new functions"`
 
-### Project Analysis (`./receipts/analyze.md`)
+### Project Analysis (`./recipes/analyze.md`)
 
 ```markdown
 ## {{.project_name}} Project Analysis
@@ -321,14 +321,14 @@ If a command fails, you'll see: `[ERROR executing command 'node --version': exec
 
 ```bash
 # Good
-./receipts/git-commit-analyzer.md
-./receipts/code-review-golang.md
-./receipts/deploy-checklist.md
+./recipes/git-commit-analyzer.md
+./recipes/code-review-golang.md
+./recipes/deploy-checklist.md
 
 # Avoid
-./receipts/script.md
-./receipts/temp.md
-./receipts/x.md
+./recipes/script.md
+./recipes/temp.md
+./recipes/x.md
 ```
 
 ### 2. Document Your Fragments
@@ -351,10 +351,10 @@ Keep your fragments in version control:
 
 ```bash
 # Repository-specific fragments
-./receipts/           # Committed with the project
+./recipes/           # Committed with the project
 
 # Global fragments (optional)
-~/.kodelet/receipts/  # Personal collection
+~/.kodelet/recipes/  # Personal collection
 ```
 
 ### 4. Validate Arguments
