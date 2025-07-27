@@ -60,7 +60,7 @@ func processFragment(ctx context.Context, config *RunConfig, args []string) (str
 			validDirs = append(validDirs, trimmed)
 		}
 	}
-	
+
 	fragmentProcessor, err := fragments.NewFragmentProcessor(fragments.WithAdditionalDirs(validDirs...))
 	if err != nil {
 		return "", nil, errors.Wrap(err, "failed to create fragment processor")
