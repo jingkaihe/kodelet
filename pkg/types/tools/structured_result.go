@@ -64,12 +64,7 @@ var metadataTypeRegistry = map[string]reflect.Type{
 	"mcp_tool":                  reflect.TypeOf(MCPToolMetadata{}),
 	"todo":                      reflect.TypeOf(TodoMetadata{}),
 	"thinking":                  reflect.TypeOf(ThinkingMetadata{}),
-	"browser_navigate":          reflect.TypeOf(BrowserNavigateMetadata{}),
-	"browser_click":             reflect.TypeOf(BrowserClickMetadata{}),
-	"browser_get_page":          reflect.TypeOf(BrowserGetPageMetadata{}),
-	"browser_screenshot":        reflect.TypeOf(BrowserScreenshotMetadata{}),
-	"browser_type":              reflect.TypeOf(BrowserTypeMetadata{}),
-	"browser_wait_for":          reflect.TypeOf(BrowserWaitForMetadata{}),
+
 	"image_recognition":         reflect.TypeOf(ImageRecognitionMetadata{}),
 	"subagent":                  reflect.TypeOf(SubAgentMetadata{}),
 	"web_fetch":                 reflect.TypeOf(WebFetchMetadata{}),
@@ -274,62 +269,7 @@ type ThinkingMetadata struct {
 
 func (m ThinkingMetadata) ToolType() string { return "thinking" }
 
-// Browser tool metadata structures
 
-type BrowserNavigateMetadata struct {
-	URL      string        `json:"url"`
-	FinalURL string        `json:"finalURL,omitempty"`
-	Title    string        `json:"title,omitempty"`
-	LoadTime time.Duration `json:"loadTime,omitempty"`
-}
-
-func (m BrowserNavigateMetadata) ToolType() string { return "browser_navigate" }
-
-type BrowserClickMetadata struct {
-	ElementID    int    `json:"elementId"`
-	ElementFound bool   `json:"elementFound"`
-	ElementType  string `json:"elementType,omitempty"`
-	ElementText  string `json:"elementText,omitempty"`
-}
-
-func (m BrowserClickMetadata) ToolType() string { return "browser_click" }
-
-type BrowserGetPageMetadata struct {
-	URL       string `json:"url"`
-	Title     string `json:"title"`
-	HTMLSize  int    `json:"htmlSize"`
-	Truncated bool   `json:"truncated"`
-}
-
-func (m BrowserGetPageMetadata) ToolType() string { return "browser_get_page" }
-
-type BrowserScreenshotMetadata struct {
-	OutputPath string `json:"outputPath"`
-	Width      int    `json:"width"`
-	Height     int    `json:"height"`
-	Format     string `json:"format"`
-	FullPage   bool   `json:"fullPage"`
-	FileSize   int64  `json:"fileSize"`
-}
-
-func (m BrowserScreenshotMetadata) ToolType() string { return "browser_screenshot" }
-
-type BrowserTypeMetadata struct {
-	ElementID int    `json:"elementId"`
-	Text      string `json:"text"`
-	Cleared   bool   `json:"cleared"`
-}
-
-func (m BrowserTypeMetadata) ToolType() string { return "browser_type" }
-
-type BrowserWaitForMetadata struct {
-	Condition string        `json:"condition"`
-	Selector  string        `json:"selector,omitempty"`
-	Timeout   time.Duration `json:"timeout"`
-	Found     bool          `json:"found"`
-}
-
-func (m BrowserWaitForMetadata) ToolType() string { return "browser_wait_for" }
 
 // Additional tool metadata structures
 

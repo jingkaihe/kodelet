@@ -46,7 +46,6 @@ Kodelet is a lightweight CLI tool that helps with software engineering tasks. It
 │   │           └── examples/ # Example components
 │   ├── telemetry/       # Telemetry and tracing components
 │   ├── tools/           # Tool implementations (43 tools)
-│   │   ├── browser/     # Browser automation tools package
 │   │   └── renderers/   # Tool output renderers
 │   ├── tui/             # Terminal UI components
 │   ├── types/           # Common types

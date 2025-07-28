@@ -567,23 +567,6 @@ func TestExtractMetadata(t *testing.T) {
 				assert.Equal(t, 2, len(result.Content), "Content length mismatch")
 			},
 		},
-		{
-			name: "all browser metadata types",
-			metadata: BrowserNavigateMetadata{
-				URL:      "https://example.com",
-				FinalURL: "https://example.com/home",
-				Title:    "Example",
-				LoadTime: 100 * time.Millisecond,
-			},
-			target: &BrowserNavigateMetadata{},
-			want:   true,
-			validate: func(t *testing.T, target interface{}) {
-				result := target.(*BrowserNavigateMetadata)
-				assert.Equal(t, "https://example.com", result.URL, "URL mismatch")
-				assert.Equal(t, "Example", result.Title, "Title mismatch")
-				assert.Equal(t, 100*time.Millisecond, result.LoadTime, "LoadTime mismatch")
-			},
-		},
 	}
 
 	for _, tt := range tests {
@@ -619,12 +602,6 @@ func TestExtractMetadata_AllTypes(t *testing.T) {
 		{"WebFetchMetadata", WebFetchMetadata{URL: "https://test"}, &WebFetchMetadata{}},
 		{"ViewBackgroundProcessesMetadata", ViewBackgroundProcessesMetadata{Count: 1}, &ViewBackgroundProcessesMetadata{}},
 		{"MCPToolMetadata", MCPToolMetadata{MCPToolName: "test"}, &MCPToolMetadata{}},
-		{"BrowserNavigateMetadata", BrowserNavigateMetadata{URL: "https://test"}, &BrowserNavigateMetadata{}},
-		{"BrowserClickMetadata", BrowserClickMetadata{ElementID: 123, ElementFound: true}, &BrowserClickMetadata{}},
-		{"BrowserTypeMetadata", BrowserTypeMetadata{ElementID: 456, Text: "hello"}, &BrowserTypeMetadata{}},
-		{"BrowserScreenshotMetadata", BrowserScreenshotMetadata{OutputPath: "/test.png", Width: 800, Height: 600}, &BrowserScreenshotMetadata{}},
-		{"BrowserGetPageMetadata", BrowserGetPageMetadata{URL: "https://test"}, &BrowserGetPageMetadata{}},
-		{"BrowserWaitForMetadata", BrowserWaitForMetadata{Condition: "visible", Selector: "#test"}, &BrowserWaitForMetadata{}},
 	}
 
 	for _, tt := range metadataTypes {

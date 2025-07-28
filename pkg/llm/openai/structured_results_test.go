@@ -239,8 +239,6 @@ func (m *mockState) Tools() []tooltypes.Tool                                    
 func (m *mockState) AddBackgroundProcess(process tooltypes.BackgroundProcess) error { return nil }
 func (m *mockState) GetBackgroundProcesses() []tooltypes.BackgroundProcess          { return nil }
 func (m *mockState) RemoveBackgroundProcess(pid int) error                          { return nil }
-func (m *mockState) GetBrowserManager() tooltypes.BrowserManager                    { return nil }
-func (m *mockState) SetBrowserManager(manager tooltypes.BrowserManager)             {}
 func (m *mockState) GetLLMConfig() interface{}                                      { return nil }
 
 func TestOpenAIThread_PersistenceWithStructuredResults(t *testing.T) {

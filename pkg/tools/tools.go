@@ -12,7 +12,6 @@ import (
 	"github.com/invopop/jsonschema"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/telemetry"
-	"github.com/jingkaihe/kodelet/pkg/tools/browser"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
 	"go.opentelemetry.io/otel/codes"
@@ -44,12 +43,6 @@ var toolRegistry = map[string]tooltypes.Tool{
 	"web_fetch":                 &WebFetchTool{},
 	"image_recognition":         &ImageRecognitionTool{},
 	"view_background_processes": &ViewBackgroundProcessesTool{},
-	"browser_navigate":          &browser.NavigateTool{},
-	"browser_get_page":          &browser.GetPageTool{},
-	"browser_click":             &browser.ClickTool{},
-	"browser_type":              &browser.TypeTool{},
-	"browser_wait_for":          &browser.WaitForTool{},
-	"browser_screenshot":        &browser.ScreenshotTool{},
 }
 
 // metaTools are always enabled regardless of configuration
@@ -60,15 +53,7 @@ var metaTools = []string{
 	"thinking",
 }
 
-// browserToolNames are the available browser tools
-var browserToolNames = []string{
-	"browser_navigate",
-	"browser_get_page",
-	"browser_click",
-	"browser_type",
-	"browser_wait_for",
-	"browser_screenshot",
-}
+
 
 // defaultMainTools are the default tools for main agent
 var defaultMainTools = []string{
@@ -171,7 +156,7 @@ func ValidateSubAgentTools(toolNames []string) error {
 	return nil
 }
 
-func GetToolsFromNames(toolNames []string, enableBrowserTools bool) []tooltypes.Tool {
+func GetToolsFromNames(toolNames []string) []tooltypes.Tool {
 	if len(toolNames) == 0 {
 		return nil
 	}
@@ -195,16 +180,6 @@ func GetToolsFromNames(toolNames []string, enableBrowserTools bool) []tooltypes.
 		}
 	}
 
-	// Add browser tools if enabled
-	if enableBrowserTools {
-		for _, browserTool := range browserToolNames {
-			if !toolSet[browserTool] {
-				toolSet[browserTool] = true
-				orderedToolNames = append(orderedToolNames, browserTool)
-			}
-		}
-	}
-
 	// Convert ordered names to tools
 	var tools []tooltypes.Tool
 	for _, toolName := range orderedToolNames {
@@ -216,7 +191,7 @@ func GetToolsFromNames(toolNames []string, enableBrowserTools bool) []tooltypes.
 	return tools
 }
 
-func GetMainTools(ctx context.Context, allowedTools []string, enableBrowserTools bool) []tooltypes.Tool {
+func GetMainTools(ctx context.Context, allowedTools []string) []tooltypes.Tool {
 	if len(allowedTools) == 0 {
 		allowedTools = defaultMainTools
 	}
@@ -226,10 +201,10 @@ func GetMainTools(ctx context.Context, allowedTools []string, enableBrowserTools
 		allowedTools = defaultMainTools
 	}
 
-	return GetToolsFromNames(allowedTools, enableBrowserTools)
+	return GetToolsFromNames(allowedTools)
 }
 
-func GetSubAgentTools(ctx context.Context, allowedTools []string, enableBrowserTools bool) []tooltypes.Tool {
+func GetSubAgentTools(ctx context.Context, allowedTools []string) []tooltypes.Tool {
 	if len(allowedTools) == 0 {
 		allowedTools = defaultSubAgentTools
 	}
@@ -239,7 +214,7 @@ func GetSubAgentTools(ctx context.Context, allowedTools []string, enableBrowserT
 		allowedTools = defaultSubAgentTools
 	}
 
-	return GetToolsFromNames(allowedTools, enableBrowserTools)
+	return GetToolsFromNames(allowedTools)
 }
 
 func ToAnthropicTools(tools []tooltypes.Tool) []anthropic.ToolUnionParam {
