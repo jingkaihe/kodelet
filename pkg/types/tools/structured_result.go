@@ -72,6 +72,7 @@ var metadataTypeRegistry = map[string]reflect.Type{
 	"browser_wait_for":          reflect.TypeOf(BrowserWaitForMetadata{}),
 	"image_recognition":         reflect.TypeOf(ImageRecognitionMetadata{}),
 	"subagent":                  reflect.TypeOf(SubAgentMetadata{}),
+	"named_agent":               reflect.TypeOf(NamedAgentMetadata{}),
 	"web_fetch":                 reflect.TypeOf(WebFetchMetadata{}),
 	"view_background_processes": reflect.TypeOf(ViewBackgroundProcessesMetadata{}),
 }
@@ -354,6 +355,13 @@ type SubAgentMetadata struct {
 }
 
 func (m SubAgentMetadata) ToolType() string { return "subagent" }
+
+type NamedAgentMetadata struct {
+	Query    string `json:"query"`
+	Response string `json:"response"`
+}
+
+func (m NamedAgentMetadata) ToolType() string { return "named_agent" }
 
 type WebFetchMetadata struct {
 	URL           string `json:"url"`

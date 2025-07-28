@@ -38,6 +38,7 @@ func plainChatUI(ctx context.Context, options *ChatOptions) {
 	var stateOpts []tools.BasicStateOption
 	stateOpts = append(stateOpts, tools.WithLLMConfig(config))
 	stateOpts = append(stateOpts, tools.WithMCPTools(mcpManager))
+	stateOpts = append(stateOpts, tools.WithNamedAgentTools())
 	if options.enableBrowserTools {
 		stateOpts = append(stateOpts, tools.WithMainToolsAndBrowser())
 	}

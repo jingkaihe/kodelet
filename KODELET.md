@@ -22,6 +22,7 @@ Kodelet is a lightweight CLI tool that helps with software engineering tasks. It
 ├── LICENSE              # License file
 ├── Makefile             # Build automation
 ├── pkg/                 # Core packages
+│   ├── agents/          # Named agents system for specialized subagents
 │   ├── auth/            # Authentication and login management
 │   ├── conversations/   # Conversation storage and management
 │   │   ├── sqlite/      # SQLite storage implementation

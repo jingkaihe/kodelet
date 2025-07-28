@@ -60,7 +60,7 @@ func processFragment(ctx context.Context, config *RunConfig, args []string) (str
 			validDirs = append(validDirs, trimmed)
 		}
 	}
-	
+
 	fragmentProcessor, err := fragments.NewFragmentProcessor(fragments.WithAdditionalDirs(validDirs...))
 	if err != nil {
 		return "", nil, errors.Wrap(err, "failed to create fragment processor")
@@ -183,6 +183,7 @@ var runCmd = &cobra.Command{
 
 		stateOpts = append(stateOpts, tools.WithLLMConfig(llmConfig))
 		stateOpts = append(stateOpts, tools.WithMCPTools(mcpManager))
+		stateOpts = append(stateOpts, tools.WithNamedAgentTools())
 		if config.EnableBrowserTools {
 			stateOpts = append(stateOpts, tools.WithMainToolsAndBrowser())
 		}

@@ -104,7 +104,7 @@ ignoring common directories like .git and node_modules.`,
 		}
 
 		llmConfig := llm.GetConfigFromViper()
-		s := tools.NewBasicState(ctx, tools.WithLLMConfig(llmConfig), tools.WithMCPTools(mcpManager))
+		s := tools.NewBasicState(ctx, tools.WithLLMConfig(llmConfig), tools.WithMCPTools(mcpManager), tools.WithNamedAgentTools())
 
 		// Validate configuration
 		if err := config.Validate(); err != nil {

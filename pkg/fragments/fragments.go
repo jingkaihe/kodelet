@@ -240,7 +240,6 @@ func (fp *Processor) extractBodyContent(content string) string {
 	return strings.Join(contentLines, "\n")
 }
 
-
 func (fp *Processor) LoadFragment(ctx context.Context, config *Config) (*Fragment, error) {
 	logger.G(ctx).WithField("fragment", config.FragmentName).Debug("Loading fragment with metadata")
 

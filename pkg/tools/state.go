@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jingkaihe/kodelet/pkg/agents"
+	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/tools/browser"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -115,6 +117,24 @@ func WithMCPTools(mcpManager *MCPManager) BasicStateOption {
 func WithExtraMCPTools(tools []tooltypes.Tool) BasicStateOption {
 	return func(ctx context.Context, s *BasicState) error {
 		s.mcpTools = append(s.mcpTools, tools...)
+		return nil
+	}
+}
+
+// WithNamedAgentTools loads named agents and adds them as tools
+func WithNamedAgentTools() BasicStateOption {
+	return func(ctx context.Context, s *BasicState) error {
+		agentManager, err := agents.CreateAgentManagerFromContext(ctx)
+		if err != nil {
+			// Log warning but don't fail - agents are optional
+			logger.G(ctx).WithError(err).Warn("Failed to load named agents, continuing without them")
+			return nil
+		}
+
+		agentTools := agentManager.GetAgentTools()
+		s.mcpTools = append(s.mcpTools, agentTools...)
+
+		logger.G(ctx).WithField("count", len(agentTools)).Debug("Added named agent tools to state")
 		return nil
 	}
 }
