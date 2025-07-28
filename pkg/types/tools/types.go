@@ -94,8 +94,6 @@ type BackgroundProcess struct {
 	Process   *os.Process `json:"-"` // Not serialized
 }
 
-
-
 type State interface {
 	SetFileLastAccessed(path string, lastAccessed time.Time) error
 	GetFileLastAccessed(path string) (time.Time, error)

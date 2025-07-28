@@ -207,8 +207,6 @@ func (s *BasicState) RemoveBackgroundProcess(pid int) error {
 	return errors.Errorf("background process with PID %d not found", pid)
 }
 
-
-
 func (s *BasicState) GetLLMConfig() interface{} {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

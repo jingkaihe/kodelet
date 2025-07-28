@@ -57,13 +57,13 @@ var metadataTypeRegistry = map[string]reflect.Type{
 	"file_write": reflect.TypeOf(FileWriteMetadata{}),
 	"file_edit":  reflect.TypeOf(FileEditMetadata{}),
 
-	"grep_tool":                 reflect.TypeOf(GrepMetadata{}),
-	"glob_tool":                 reflect.TypeOf(GlobMetadata{}),
-	"bash":                      reflect.TypeOf(BashMetadata{}),
-	"bash_background":           reflect.TypeOf(BackgroundBashMetadata{}),
-	"mcp_tool":                  reflect.TypeOf(MCPToolMetadata{}),
-	"todo":                      reflect.TypeOf(TodoMetadata{}),
-	"thinking":                  reflect.TypeOf(ThinkingMetadata{}),
+	"grep_tool":       reflect.TypeOf(GrepMetadata{}),
+	"glob_tool":       reflect.TypeOf(GlobMetadata{}),
+	"bash":            reflect.TypeOf(BashMetadata{}),
+	"bash_background": reflect.TypeOf(BackgroundBashMetadata{}),
+	"mcp_tool":        reflect.TypeOf(MCPToolMetadata{}),
+	"todo":            reflect.TypeOf(TodoMetadata{}),
+	"thinking":        reflect.TypeOf(ThinkingMetadata{}),
 
 	"image_recognition":         reflect.TypeOf(ImageRecognitionMetadata{}),
 	"subagent":                  reflect.TypeOf(SubAgentMetadata{}),
@@ -268,8 +268,6 @@ type ThinkingMetadata struct {
 }
 
 func (m ThinkingMetadata) ToolType() string { return "thinking" }
-
-
 
 // Additional tool metadata structures
 

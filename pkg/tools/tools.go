@@ -53,8 +53,6 @@ var metaTools = []string{
 	"thinking",
 }
 
-
-
 // defaultMainTools are the default tools for main agent
 var defaultMainTools = []string{
 	"bash",

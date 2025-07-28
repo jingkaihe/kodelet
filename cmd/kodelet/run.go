@@ -40,7 +40,7 @@ func NewRunConfig() *RunConfig {
 		Follow:             false,
 		NoSave:             false,
 		Images:             []string{},
-		MaxTurns:           50, // Default to 50 turns
+		MaxTurns:           50,  // Default to 50 turns
 		CompactRatio:       0.8, // Default to 80% context window utilization
 		DisableAutoCompact: false,
 		FragmentName:       "",
@@ -58,7 +58,7 @@ func processFragment(ctx context.Context, config *RunConfig, args []string) (str
 			validDirs = append(validDirs, trimmed)
 		}
 	}
-	
+
 	fragmentProcessor, err := fragments.NewFragmentProcessor(fragments.WithAdditionalDirs(validDirs...))
 	if err != nil {
 		return "", nil, errors.Wrap(err, "failed to create fragment processor")
