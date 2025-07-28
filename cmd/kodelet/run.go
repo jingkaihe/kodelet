@@ -26,7 +26,6 @@ type RunConfig struct {
 	NoSave             bool
 	Images             []string          // Image paths or URLs to include with the message
 	MaxTurns           int               // Maximum number of turns within a single SendMessage call
-	EnableBrowserTools bool              // Enable browser automation tools
 	CompactRatio       float64           // Ratio of context window at which to trigger auto-compact (0.0-1.0)
 	DisableAutoCompact bool              // Disable auto-compact functionality
 	FragmentName       string            // Name of fragment to use
@@ -41,8 +40,7 @@ func NewRunConfig() *RunConfig {
 		Follow:             false,
 		NoSave:             false,
 		Images:             []string{},
-		MaxTurns:           50, // Default to 50 turns
-		EnableBrowserTools: false,
+		MaxTurns:           50,  // Default to 50 turns
 		CompactRatio:       0.8, // Default to 80% context window utilization
 		DisableAutoCompact: false,
 		FragmentName:       "",
@@ -60,7 +58,7 @@ func processFragment(ctx context.Context, config *RunConfig, args []string) (str
 			validDirs = append(validDirs, trimmed)
 		}
 	}
-	
+
 	fragmentProcessor, err := fragments.NewFragmentProcessor(fragments.WithAdditionalDirs(validDirs...))
 	if err != nil {
 		return "", nil, errors.Wrap(err, "failed to create fragment processor")
@@ -183,9 +181,7 @@ var runCmd = &cobra.Command{
 
 		stateOpts = append(stateOpts, tools.WithLLMConfig(llmConfig))
 		stateOpts = append(stateOpts, tools.WithMCPTools(mcpManager))
-		if config.EnableBrowserTools {
-			stateOpts = append(stateOpts, tools.WithMainToolsAndBrowser())
-		}
+		stateOpts = append(stateOpts, tools.WithMainTools())
 		appState := tools.NewBasicState(ctx, stateOpts...)
 
 		fmt.Printf("\033[1;33m[user]: \033[0m%s\n", query)
@@ -237,7 +233,6 @@ func init() {
 	runCmd.Flags().Bool("no-save", defaults.NoSave, "Disable conversation persistence")
 	runCmd.Flags().StringSliceP("image", "I", defaults.Images, "Add image input (can be used multiple times)")
 	runCmd.Flags().Int("max-turns", defaults.MaxTurns, "Maximum number of turns within a single message exchange (0 for no limit)")
-	runCmd.Flags().Bool("enable-browser-tools", defaults.EnableBrowserTools, "Enable browser automation tools (navigate, click, type, screenshot, etc.)")
 	runCmd.Flags().Float64("compact-ratio", defaults.CompactRatio, "Context window utilization ratio to trigger auto-compact (0.0-1.0)")
 	runCmd.Flags().Bool("disable-auto-compact", defaults.DisableAutoCompact, "Disable auto-compact functionality")
 	runCmd.Flags().StringP("recipe", "r", defaults.FragmentName, "Use a fragment/recipe template")
@@ -279,9 +274,6 @@ func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
 			maxTurns = 0
 		}
 		config.MaxTurns = maxTurns
-	}
-	if enableBrowserTools, err := cmd.Flags().GetBool("enable-browser-tools"); err == nil {
-		config.EnableBrowserTools = enableBrowserTools
 	}
 	if compactRatio, err := cmd.Flags().GetFloat64("compact-ratio"); err == nil {
 		// Validate compact ratio is between 0.0 and 1.0

@@ -16,7 +16,6 @@ func TestGetAvailableToolNames(t *testing.T) {
 	assert.Contains(t, tools, "bash")
 	assert.Contains(t, tools, "file_read")
 	assert.Contains(t, tools, "subagent")
-	assert.Contains(t, tools, "browser_navigate")
 
 	// Should have the expected number of tools (check against toolRegistry)
 	assert.Equal(t, len(toolRegistry), len(tools))
@@ -28,7 +27,6 @@ func TestGetAvailableSubAgentToolNames(t *testing.T) {
 	// Should include most tools from toolRegistry except subagent
 	assert.Contains(t, tools, "bash")
 	assert.Contains(t, tools, "file_read")
-	assert.Contains(t, tools, "browser_navigate")
 
 	// Should NOT include subagent tool
 	assert.NotContains(t, tools, "subagent")
@@ -187,10 +185,10 @@ func TestErrorMessageFormat(t *testing.T) {
 func TestGetMainTools_FallsBackOnValidationErrors(t *testing.T) {
 	// Test with invalid tools
 	invalidTools := []string{"unknown_tool", "bash"}
-	tools := GetMainTools(context.Background(), invalidTools, false)
+	tools := GetMainTools(context.Background(), invalidTools)
 
 	// Should fallback to default tools
-	defaultTools := GetMainTools(context.Background(), []string{}, false)
+	defaultTools := GetMainTools(context.Background(), []string{})
 	assert.Equal(t, len(defaultTools), len(tools), "Should fallback to default tools")
 
 	// Verify we got the default tools, not the invalid ones
@@ -204,10 +202,10 @@ func TestGetMainTools_FallsBackOnValidationErrors(t *testing.T) {
 func TestGetSubAgentTools_FallsBackOnValidationErrors(t *testing.T) {
 	// Test with subagent tool (invalid for subagents)
 	invalidTools := []string{"bash", "subagent", "file_read"}
-	tools := GetSubAgentTools(context.Background(), invalidTools, false)
+	tools := GetSubAgentTools(context.Background(), invalidTools)
 
 	// Should fallback to default tools
-	defaultTools := GetSubAgentTools(context.Background(), []string{}, false)
+	defaultTools := GetSubAgentTools(context.Background(), []string{})
 	assert.Equal(t, len(defaultTools), len(tools), "Should fallback to default tools")
 
 	// Verify we got the default tools, not the invalid ones
@@ -221,7 +219,7 @@ func TestGetSubAgentTools_FallsBackOnValidationErrors(t *testing.T) {
 func TestGetMainTools_UsesValidTools(t *testing.T) {
 	// Test with valid tools
 	validTools := []string{"bash", "file_read", "thinking"}
-	tools := GetMainTools(context.Background(), validTools, false)
+	tools := GetMainTools(context.Background(), validTools)
 
 	// Should use the requested tools (plus meta tools)
 	assert.GreaterOrEqual(t, len(tools), len(validTools), "Should include at least the requested tools")

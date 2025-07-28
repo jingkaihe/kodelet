@@ -120,7 +120,7 @@ func main() {
 	rootCmd.PersistentFlags().String("log-level", "info", "Log level (panic, fatal, error, warn, info, debug, trace)")
 	rootCmd.PersistentFlags().String("log-format", "fmt", "Log format (json, text, fmt)")
 	rootCmd.PersistentFlags().StringSlice("allowed-commands", []string{}, "Allowed command patterns for bash tool (e.g. 'yarn start,ls *')")
-	rootCmd.PersistentFlags().String("allowed-domains-file", "~/.kodelet/allowed_domains.txt", "Path to file containing allowed domains for web_fetch and browser tools (one domain per line)")
+	rootCmd.PersistentFlags().String("allowed-domains-file", "~/.kodelet/allowed_domains.txt", "Path to file containing allowed domains for web_fetch tool (one domain per line)")
 	rootCmd.PersistentFlags().StringSlice("allowed-tools", []string{}, "Comma-separated list of allowed tools for main agent (e.g. 'bash,file_read,grep_tool')")
 	rootCmd.PersistentFlags().String("anthropic-api-access", "auto", "Anthropic API access mode (auto, subscription, api-key)")
 

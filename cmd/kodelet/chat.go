@@ -24,7 +24,6 @@ type ChatOptions struct {
 	storageType        string
 	noSave             bool
 	maxTurns           int
-	enableBrowserTools bool
 	compactRatio       float64
 	disableAutoCompact bool
 }
@@ -38,7 +37,6 @@ func init() {
 	chatCmd.Flags().StringVar(&chatOptions.storageType, "storage", "sqlite", "Storage backend (sqlite only)")
 	chatCmd.Flags().BoolVar(&chatOptions.noSave, "no-save", false, "Disable conversation persistence")
 	chatCmd.Flags().IntVar(&chatOptions.maxTurns, "max-turns", 50, "Maximum number of turns within a single message exchange (0 for no limit)")
-	chatCmd.Flags().BoolVar(&chatOptions.enableBrowserTools, "enable-browser-tools", false, "Enable browser automation tools (navigate, click, type, screenshot, etc.)")
 	chatCmd.Flags().Float64Var(&chatOptions.compactRatio, "compact-ratio", 0.80, "Context window utilization ratio to trigger auto-compact (0.0-1.0)")
 	chatCmd.Flags().BoolVar(&chatOptions.disableAutoCompact, "disable-auto-compact", false, "Disable automatic context compacting")
 }
@@ -129,7 +127,7 @@ var chatCmd = &cobra.Command{
 				}
 			}
 
-			tui.StartChatCmd(ctx, conversationID, !chatOptions.noSave, mcpManager, maxTurns, chatOptions.enableBrowserTools, chatOptions.compactRatio, chatOptions.disableAutoCompact)
+			tui.StartChatCmd(ctx, conversationID, !chatOptions.noSave, mcpManager, maxTurns, chatOptions.compactRatio, chatOptions.disableAutoCompact)
 
 			// Restore stderr logging after TUI exits and show log file location
 			if logFile != nil {

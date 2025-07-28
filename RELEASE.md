@@ -1,5 +1,9 @@
 # Kodelet
 
+## 0.0.77.alpha (2025-07-28)
+
+**Browser Automation Removal**: Completely removed browser automation functionality from Kodelet in favour of Playwright MCP
+
 ## 0.0.76.alpha (2025-07-26)
 
 ### Recipe Management System

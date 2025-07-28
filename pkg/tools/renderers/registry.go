@@ -42,14 +42,6 @@ func NewRendererRegistry() *RendererRegistry {
 	registry.Register("web_fetch", &WebFetchRenderer{})
 	registry.Register("view_background_processes", &ViewBackgroundProcessesRenderer{})
 
-	// Register browser tools
-	registry.Register("browser_navigate", &BrowserNavigateRenderer{})
-	registry.Register("browser_click", &BrowserClickRenderer{})
-	registry.Register("browser_get_page", &BrowserGetPageRenderer{})
-	registry.Register("browser_screenshot", &BrowserScreenshotRenderer{})
-	registry.Register("browser_type", &BrowserTypeRenderer{})
-	registry.Register("browser_wait_for", &BrowserWaitForRenderer{})
-
 	// Register MCP tools - pattern matches any tool prefixed with "mcp_"
 	registry.RegisterPattern("mcp_*", &MCPToolRenderer{})
 

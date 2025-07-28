@@ -34,13 +34,11 @@ func plainChatUI(ctx context.Context, options *ChatOptions) {
 		return
 	}
 
-	// Create state with appropriate tools based on browser support
+	// Create state with main tools
 	var stateOpts []tools.BasicStateOption
 	stateOpts = append(stateOpts, tools.WithLLMConfig(config))
 	stateOpts = append(stateOpts, tools.WithMCPTools(mcpManager))
-	if options.enableBrowserTools {
-		stateOpts = append(stateOpts, tools.WithMainToolsAndBrowser())
-	}
+	stateOpts = append(stateOpts, tools.WithMainTools())
 	thread.SetState(tools.NewBasicState(ctx, stateOpts...))
 
 	// Configure conversation persistence

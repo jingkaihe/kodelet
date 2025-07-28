@@ -11,7 +11,6 @@ import ThinkingRenderer from './tool-renderers/ThinkingRenderer';
 import TodoRenderer from './tool-renderers/TodoRenderer';
 import SubagentRenderer from './tool-renderers/SubagentRenderer';
 import ImageRecognitionRenderer from './tool-renderers/ImageRecognitionRenderer';
-import BrowserRenderer from './tool-renderers/BrowserRenderer';
 import BackgroundProcessesRenderer from './tool-renderers/BackgroundProcessesRenderer';
 import FallbackRenderer from './tool-renderers/FallbackRenderer';
 
@@ -72,9 +71,6 @@ const ToolRenderer: React.FC<ToolRendererProps> = ({ toolResult }) => {
         return <SubagentRenderer toolResult={toolResult} />;
       case 'image_recognition':
         return <ImageRecognitionRenderer toolResult={toolResult} />;
-      case 'browser_navigate':
-      case 'browser_screenshot':
-        return <BrowserRenderer toolResult={toolResult} />;
       case 'view_background_processes':
         return <BackgroundProcessesRenderer toolResult={toolResult} />;
       default:
