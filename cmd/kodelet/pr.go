@@ -83,7 +83,7 @@ This command analyzes the current branch changes compared to the target branch a
 		}
 
 		llmConfig := llm.GetConfigFromViper()
-		s := tools.NewBasicState(ctx, tools.WithLLMConfig(llmConfig), tools.WithMCPTools(mcpManager))
+		s := tools.NewBasicState(ctx, tools.WithLLMConfig(llmConfig), tools.WithMCPTools(mcpManager), tools.WithNamedAgentTools())
 
 		// Get PR config from flags
 		config := getPRConfigFromFlags(cmd)

@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strconv"
 
+	"github.com/invopop/jsonschema"
 	"github.com/pkg/errors"
 )
 
@@ -55,6 +56,17 @@ func IsBinaryFile(filePath string) bool {
 	}
 
 	return false
+}
+
+// GenerateSchema generates a JSON schema for the given type T
+func GenerateSchema[T any]() *jsonschema.Schema {
+	reflector := jsonschema.Reflector{
+		AllowAdditionalProperties: false,
+		DoNotReference:            true,
+	}
+	var v T
+
+	return reflector.Reflect(v)
 }
 
 // OpenBrowser attempts to open the default browser with the given URL

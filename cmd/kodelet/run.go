@@ -183,6 +183,7 @@ var runCmd = &cobra.Command{
 
 		stateOpts = append(stateOpts, tools.WithLLMConfig(llmConfig))
 		stateOpts = append(stateOpts, tools.WithMCPTools(mcpManager))
+		stateOpts = append(stateOpts, tools.WithNamedAgentTools())
 		if config.EnableBrowserTools {
 			stateOpts = append(stateOpts, tools.WithMainToolsAndBrowser())
 		}

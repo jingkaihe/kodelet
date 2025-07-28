@@ -32,6 +32,7 @@ func NewAssistantClient(ctx context.Context, conversationID string, enablePersis
 	var stateOpts []tools.BasicStateOption
 	stateOpts = append(stateOpts, tools.WithLLMConfig(config))
 	stateOpts = append(stateOpts, tools.WithMCPTools(mcpManager))
+	stateOpts = append(stateOpts, tools.WithNamedAgentTools())
 	if enableBrowserTools {
 		stateOpts = append(stateOpts, tools.WithMainToolsAndBrowser())
 	}

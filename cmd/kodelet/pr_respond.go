@@ -153,7 +153,7 @@ Examples:
 			return
 		}
 
-		s := tools.NewBasicState(ctx, tools.WithMCPTools(mcpManager))
+		s := tools.NewBasicState(ctx, tools.WithMCPTools(mcpManager), tools.WithNamedAgentTools())
 
 		// Get pr-respond config from flags
 		config := getPRRespondConfigFromFlags(cmd)
