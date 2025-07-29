@@ -15,7 +15,7 @@ env:
 
 jobs:
   background-kodelet:
-    runs-on: ubuntu-latest
+    runs-on: kodelet-runner
     permissions:
       id-token: write
       issues: read
