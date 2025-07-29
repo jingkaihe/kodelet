@@ -13,6 +13,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install make
+        run: sudo apt-get update && sudo apt-get install -y make
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
@@ -46,6 +49,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install make
+        run: sudo apt-get update && sudo apt-get install -y make
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -71,6 +77,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install make
+        run: sudo apt-get update && sudo apt-get install -y make
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
@@ -94,6 +103,9 @@ jobs:
     runs-on: kodelet-runner
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install make
+        run: sudo apt-get update && sudo apt-get install -y make
 
       - name: Test cross compilation
         run: make cross-build-docker
