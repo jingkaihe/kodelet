@@ -554,6 +554,7 @@ func isThinkingModel(model anthropic.Model) bool {
 		anthropic.ModelClaudeSonnet4_20250514,
 		// opus 4 models
 		anthropic.ModelClaudeOpus4_0,
+		anthropic.ModelClaudeOpus4_1_20250805,
 		anthropic.ModelClaude4Opus20250514,
 		anthropic.ModelClaudeOpus4_20250514,
 		anthropic.ModelClaude4Opus20250514,
