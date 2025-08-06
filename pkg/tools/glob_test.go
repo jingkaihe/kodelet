@@ -184,7 +184,23 @@ func TestGlobTool_Execute(t *testing.T) {
 		// 	},
 		// 	expectError: true,
 		// },
+		{
+			name: "Match .github workflows with ** pattern",
+			input: GlobInput{
+				Pattern: "**/.github/workflows/*.yml",
+				Path:    tmpDir,
+			},
+			expectedFiles: []string{".github/workflows/test.yml"},
+			notExpected:   []string{"file1.go", ".hidden/secret.txt"},
+		},
 	}
+
+	// Create .github/workflows directory for the specific test
+	githubDir := filepath.Join(tmpDir, ".github", "workflows")
+	err = os.MkdirAll(githubDir, 0755)
+	require.NoError(t, err)
+	err = os.WriteFile(filepath.Join(githubDir, "test.yml"), []byte("name: test"), 0644)
+	require.NoError(t, err)
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {

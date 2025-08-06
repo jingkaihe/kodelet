@@ -216,8 +216,25 @@ func (t *GlobTool) Execute(ctx context.Context, state tooltypes.State, parameter
 			return nil
 		}
 
+		// Skip hidden files and directories, but allow common development directories
 		if strings.HasPrefix(path, ".") {
-			return nil
+			// Allow common development directories that start with dot
+			pathParts := strings.Split(path, string(filepath.Separator))
+			firstPart := pathParts[0]
+
+			// List of allowed dot directories
+			allowedDotDirs := []string{".github", ".vscode", ".idea", ".gitignore", ".gitattributes"}
+			allowed := false
+			for _, allowedDir := range allowedDotDirs {
+				if firstPart == allowedDir {
+					allowed = true
+					break
+				}
+			}
+
+			if !allowed {
+				return nil
+			}
 		}
 
 		absPath := filepath.Join(searchPath, path)
