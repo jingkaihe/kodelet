@@ -554,6 +554,7 @@ func isThinkingModel(model anthropic.Model) bool {
 		anthropic.ModelClaudeSonnet4_20250514,
 		// opus 4 models
 		anthropic.ModelClaudeOpus4_0,
+		anthropic.ModelClaudeOpus4_1_20250805,
 		anthropic.ModelClaude4Opus20250514,
 		anthropic.ModelClaudeOpus4_20250514,
 		anthropic.ModelClaude4Opus20250514,
@@ -561,9 +562,6 @@ func isThinkingModel(model anthropic.Model) bool {
 		// sonnet 3.7 models
 		anthropic.ModelClaude3_7Sonnet20250219,
 		anthropic.ModelClaude3_7SonnetLatest,
-		// opus 3 models
-		anthropic.ModelClaude_3_Opus_20240229,
-		anthropic.ModelClaude3OpusLatest,
 	}
 	return slices.Contains(thinkingModels, model)
 }
