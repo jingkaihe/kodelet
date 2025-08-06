@@ -19,6 +19,34 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 )
 
+// excludedHighVolumeDirs contains directories that are typically very large
+// and would flood the glob results with thousands of irrelevant files.
+// These are skipped by default for performance reasons.
+var excludedHighVolumeDirs = map[string]bool{
+	".git":           true, // Git objects, refs, hooks - thousands of files
+	"node_modules":   true, // NPM packages - can be 10,000+ files
+	".next":          true, // Next.js build output
+	".nuxt":          true, // Nuxt.js build output
+	"dist":           true, // Build outputs
+	"build":          true, // Build outputs
+	".cache":         true, // Various tool caches
+	".parcel-cache":  true, // Parcel bundler cache
+	"coverage":       true, // Test coverage reports
+	".nyc_output":    true, // NYC coverage data
+	".pytest_cache":  true, // Pytest cache
+	"__pycache__":    true, // Python bytecode cache
+	".venv":          true, // Python virtual environments
+	"venv":           true, // Python virtual environments
+	".tox":           true, // Tox test environments
+	"vendor":         true, // Go vendor directory
+	".terraform":     true, // Terraform providers and modules
+	".serverless":    true, // Serverless framework
+	"target":         true, // Rust/Maven build output
+	".turbo":         true, // Turborepo cache
+	".yarn":          true, // Yarn cache
+	"bower_components": true, // Bower packages
+}
+
 type GlobToolResult struct {
 	pattern   string
 	path      string
@@ -113,8 +141,9 @@ func (r *GlobToolResult) StructuredData() tooltypes.StructuredToolResult {
 type GlobTool struct{}
 
 type GlobInput struct {
-	Pattern string `json:"pattern" jsonschema:"description=The glob pattern"`
-	Path    string `json:"path" jsonschema:"description=The optional path to search in, defaults to current directory, MUST NOT be a relative path"`
+	Pattern           string `json:"pattern" jsonschema:"description=The glob pattern"`
+	Path              string `json:"path" jsonschema:"description=The optional path to search in, defaults to current directory, MUST NOT be a relative path"`
+	IncludeHighVolume bool   `json:"include_high_volume,omitempty" jsonschema:"description=Include high-volume directories like .git and node_modules (default: false)"`
 }
 
 func (t *GlobTool) Name() string {
@@ -142,7 +171,7 @@ func (t *GlobTool) Description() string {
 	return `Find files matching a glob pattern in the filesystem.
 
 ## Important Notes
-* Hidden files/directories (starting with .) are skipped by default.
+* High-volume directories (node_modules, .git, build outputs, etc.) are skipped by default for performance.
 * The result returns at maximum 100 files sorted by modification time (newest first). Pay attention to the truncation notice and refine your pattern to narrow down the results.
 * This tool only supports glob pattern matching, not regex.
 * This tool only matches filenames. For file content matching, use the ${grep_tool}.
@@ -154,6 +183,7 @@ func (t *GlobTool) Description() string {
   * "*.{json,yaml}" - Find all JSON and YAML files
   * "cmd/*.go" - Find all Go files in the cmd directory
 - path: The optional path to search in, defaults to the current directory. If specified, it must be an absolute path.
+- include_high_volume: (optional) Include high-volume directories like .git and node_modules. Default is false.
 
 If you need to do multi-turn search using grep_tool and glob_tool, use subagentTool instead.
 
@@ -174,6 +204,23 @@ func (t *GlobTool) ValidateInput(state tooltypes.State, parameters string) error
 	}
 
 	return nil
+}
+
+// shouldExcludePath checks if a path should be excluded based on high-volume directories
+func shouldExcludePath(path string, includeHighVolume bool) bool {
+	if includeHighVolume {
+		return false
+	}
+
+	// Check all path segments for excluded directories
+	pathParts := strings.Split(path, string(filepath.Separator))
+	for _, part := range pathParts {
+		if excludedHighVolumeDirs[part] {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (t *GlobTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
@@ -211,30 +258,19 @@ func (t *GlobTool) Execute(ctx context.Context, state tooltypes.State, parameter
 
 	// Walk the file tree
 	err = doublestar.GlobWalk(os.DirFS(searchPath), input.Pattern, func(path string, d fs.DirEntry) error {
-		// Skip directories in the result list, but continue walking
-		if d.IsDir() {
+		// Check if this path should be excluded
+		if shouldExcludePath(path, input.IncludeHighVolume) {
+			if d.IsDir() {
+				// Skip entire directory tree for performance
+				return filepath.SkipDir
+			}
+			// Skip this individual file
 			return nil
 		}
 
-		// Skip hidden files and directories, but allow common development directories
-		if strings.HasPrefix(path, ".") {
-			// Allow common development directories that start with dot
-			pathParts := strings.Split(path, string(filepath.Separator))
-			firstPart := pathParts[0]
-
-			// List of allowed dot directories
-			allowedDotDirs := []string{".github", ".vscode", ".idea", ".gitignore", ".gitattributes"}
-			allowed := false
-			for _, allowedDir := range allowedDotDirs {
-				if firstPart == allowedDir {
-					allowed = true
-					break
-				}
-			}
-
-			if !allowed {
-				return nil
-			}
+		// Skip directories in the result list, but continue walking
+		if d.IsDir() {
+			return nil
 		}
 
 		absPath := filepath.Join(searchPath, path)
