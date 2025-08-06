@@ -1,5 +1,18 @@
 # Kodelet
 
+## 0.0.79.alpha (2025-08-06)
+
+### File Search Performance Improvements
+
+**Intelligent Directory Filtering**: Enhanced glob tool with smart high-volume directory exclusion for significantly improved performance
+
+- **Performance Optimization**: Automatically excludes high-volume directories (`.git`, `node_modules`, `build`, `dist`, `.cache`, `vendor`, etc.) by default to prevent result flooding and improve search speed
+- **Selective Access Control**: New `include_high_volume` parameter allows including excluded directories when specifically needed
+- **Development-Friendly**: Preserves access to common development directories (`.github`, `.vscode`, etc.) while filtering out performance-heavy directories
+- **Backward Compatibility**: Existing glob patterns work unchanged with improved performance characteristics
+- **Comprehensive Coverage**: Supports major build systems and package managers (NPM, Python, Go, Rust, Terraform, etc.)
+
+
 ## 0.0.78.alpha (2025-08-06)
 
 ### Model Support Enhancement
