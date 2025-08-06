@@ -49,6 +49,77 @@ func TestGlobTool_TracingKVs(t *testing.T) {
 	assert.Nil(t, kvs)
 }
 
+func TestShouldExcludePath(t *testing.T) {
+	testCases := []struct {
+		name              string
+		path              string
+		includeHighVolume bool
+		expectExclude     bool
+	}{
+		{
+			name:              "Exclude node_modules by default",
+			path:              "node_modules/package/index.js",
+			includeHighVolume: false,
+			expectExclude:     true,
+		},
+		{
+			name:              "Include node_modules when flag is set",
+			path:              "node_modules/package/index.js",
+			includeHighVolume: true,
+			expectExclude:     false,
+		},
+		{
+			name:              "Exclude .git directory",
+			path:              ".git/objects/abc123",
+			includeHighVolume: false,
+			expectExclude:     true,
+		},
+		{
+			name:              "Exclude build directory",
+			path:              "src/build/output.js",
+			includeHighVolume: false,
+			expectExclude:     true,
+		},
+		{
+			name:              "Allow normal paths",
+			path:              "src/components/App.js",
+			includeHighVolume: false,
+			expectExclude:     false,
+		},
+		{
+			name:              "Allow .github directory",
+			path:              ".github/workflows/test.yml",
+			includeHighVolume: false,
+			expectExclude:     false,
+		},
+		{
+			name:              "Allow .vscode directory",
+			path:              ".vscode/settings.json",
+			includeHighVolume: false,
+			expectExclude:     false,
+		},
+		{
+			name:              "Exclude vendor directory",
+			path:              "vendor/github.com/pkg/errors",
+			includeHighVolume: false,
+			expectExclude:     true,
+		},
+		{
+			name:              "Exclude dist directory",
+			path:              "dist/bundle.js",
+			includeHighVolume: false,
+			expectExclude:     true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			shouldExclude := shouldExcludePath(tc.path, tc.includeHighVolume)
+			assert.Equal(t, tc.expectExclude, shouldExclude, "shouldExclude mismatch")
+		})
+	}
+}
+
 func TestGlobTool_ValidateInput(t *testing.T) {
 	tool := &GlobTool{}
 	state := NewBasicState(context.TODO())
@@ -169,22 +240,101 @@ func TestGlobTool_Execute(t *testing.T) {
 			notExpected:   []string{"file1.go", "subdir/file3.go"},
 		},
 		{
-			name: "Skip hidden files",
+			name: "Allows .github directory while still working",
 			input: GlobInput{
-				Pattern: "**/*.txt",
+				Pattern: "**/*.yml",
 				Path:    tmpDir,
 			},
-			expectedFiles: []string{"subdir/file4.txt"},
-			notExpected:   []string{".hidden/secret.txt", ".hidden_file.txt"},
+			expectedFiles: []string{".github/workflows/test.yml"},
+			notExpected:   []string{},
 		},
-		// {
-		// 	name: "Invalid JSON input",
-		// 	input: GlobInput{
-		// 		Pattern: "",
-		// 	},
-		// 	expectError: true,
-		// },
+		{
+			name: "Excludes node_modules by default",
+			input: GlobInput{
+				Pattern: "**/*.js",
+				Path:    tmpDir,
+			},
+			expectedFiles: []string{},
+			notExpected:   []string{"node_modules/package/index.js"},
+		},
+		{
+			name: "Include node_modules with include_high_volume flag",
+			input: GlobInput{
+				Pattern:           "**/*.js",
+				Path:              tmpDir,
+				IncludeHighVolume: true,
+			},
+			expectedFiles: []string{"node_modules/package/index.js"},
+			notExpected:   []string{},
+		},
+		{
+			name: "Excludes .git directory by default",
+			input: GlobInput{
+				Pattern: "**/*",
+				Path:    tmpDir,
+			},
+			notExpected: []string{".git/objects/abc123"},
+		},
+		{
+			name: "Allows .vscode directory",
+			input: GlobInput{
+				Pattern: "**/*.json",
+				Path:    tmpDir,
+			},
+			expectedFiles: []string{".vscode/settings.json"},
+			notExpected:   []string{},
+		},
+		{
+			name: "Excludes build directory by default",
+			input: GlobInput{
+				Pattern: "**/*.js",
+				Path:    tmpDir,
+			},
+			notExpected: []string{"build/bundle.js", "dist/main.js"},
+		},
 	}
+
+	// Create test directories and files
+	// .github/workflows directory
+	githubDir := filepath.Join(tmpDir, ".github", "workflows")
+	err = os.MkdirAll(githubDir, 0755)
+	require.NoError(t, err)
+	err = os.WriteFile(filepath.Join(githubDir, "test.yml"), []byte("name: test"), 0644)
+	require.NoError(t, err)
+
+	// node_modules directory (excluded by default)
+	nodeModulesDir := filepath.Join(tmpDir, "node_modules", "package")
+	err = os.MkdirAll(nodeModulesDir, 0755)
+	require.NoError(t, err)
+	err = os.WriteFile(filepath.Join(nodeModulesDir, "index.js"), []byte("module.exports = {}"), 0644)
+	require.NoError(t, err)
+
+	// .git directory (excluded by default)
+	gitDir := filepath.Join(tmpDir, ".git", "objects")
+	err = os.MkdirAll(gitDir, 0755)
+	require.NoError(t, err)
+	err = os.WriteFile(filepath.Join(gitDir, "abc123"), []byte("git object"), 0644)
+	require.NoError(t, err)
+
+	// .vscode directory (allowed)
+	vscodeDir := filepath.Join(tmpDir, ".vscode")
+	err = os.MkdirAll(vscodeDir, 0755)
+	require.NoError(t, err)
+	err = os.WriteFile(filepath.Join(vscodeDir, "settings.json"), []byte("{}"), 0644)
+	require.NoError(t, err)
+
+	// build and dist directories (excluded by default)
+	buildDir := filepath.Join(tmpDir, "build")
+	err = os.MkdirAll(buildDir, 0755)
+	require.NoError(t, err)
+	err = os.WriteFile(filepath.Join(buildDir, "bundle.js"), []byte("// bundle"), 0644)
+	require.NoError(t, err)
+
+	distDir := filepath.Join(tmpDir, "dist")
+	err = os.MkdirAll(distDir, 0755)
+	require.NoError(t, err)
+	err = os.WriteFile(filepath.Join(distDir, "main.js"), []byte("// main"), 0644)
+	require.NoError(t, err)
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
