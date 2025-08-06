@@ -1,5 +1,13 @@
 # Kodelet
 
+## 0.0.78.alpha (2025-08-06)
+
+### Model Support Enhancement
+
+**Claude Opus 4.1 Model Support**: Added support for the new Claude Opus 4.1 model.
+**Anthropic SDK**: Updated `anthropic-sdk-go` from v1.4.0 to v1.7.0 for improved API compatibility and performance
+
+
 ## 0.0.77.alpha (2025-07-28)
 
 **Browser Automation Removal**: Completely removed browser automation functionality from Kodelet in favour of Playwright MCP
