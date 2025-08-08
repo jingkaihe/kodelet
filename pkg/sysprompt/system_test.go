@@ -34,7 +34,7 @@ func TestSystemPrompt(t *testing.T) {
 
 		// Context section
 		"Context",
-		"KODELET.md",
+		"file, it will be automatically loaded", // Should mention the file loading
 
 		// System information section
 		"System Information",

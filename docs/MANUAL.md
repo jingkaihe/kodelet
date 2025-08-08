@@ -17,6 +17,10 @@ Kodelet is a lightweight agentic SWE Agent that runs as an interactive CLI tool 
   - [Image Input Support](#image-input-support)
   - [Conversation Continuation](#conversation-continuation)
   - [Conversation Management](#conversation-management)
+- [Agent Context Files](#agent-context-files)
+  - [Creating Context Files](#creating-context-files)
+  - [Context File Priority](#context-file-priority)
+  - [Best Practices](#best-practices)
 - [Shell Completion](#shell-completion)
   - [Setup Instructions](#setup-instructions)
   - [Additional Options](#additional-options)
@@ -244,6 +248,68 @@ kodelet conversation show <conversation-id> --format [text|json|raw]
 kodelet conversation delete <conversation-id>
 kodelet conversation delete --no-confirm <conversation-id>
 ```
+
+## Agent Context Files
+
+Agent context files provide project-specific information to Kodelet, enabling it to better understand your codebase, conventions, and workflows. These files are automatically loaded and made available to the AI assistant when working in your project directory.
+
+### Creating Context Files
+
+To bootstrap the context file simply use the following command:
+
+```bash
+cat <<EOF | kodelet run
+Please analyse this repository and create an AGENT.md file that will serve as context for future Kodelet sessions. Include:
+
+1. **Project Overview** - Brief description of what this project does
+2. **Project Structure** - Key directories and their purposes
+3. **Tech Stack** - Languages, frameworks, and major dependencies
+4. **Engineering Principles** - Code style, testing approach, and development workflow
+5. **Key Commands** - Common commands for building, testing, linting, running, and deploying
+6. **Configuration** - Environment variables, config files, and setup requirements
+7. **Testing** - How to run tests and testing conventions
+8. **Error Handling** - Project-specific error handling patterns
+9. **Development Workflow** - How to contribute, PR process, and release process
+
+Focus on information that would be repeatedly useful for an AI assistant working on this codebase. Include specific commands, file paths, and conventions that are unique to this project.
+EOF
+```
+
+Make sure that you sanity check the generated `AGENT.md` file, and update it as necessary. The context file often have great influnce on quality of the results produced by Kodelet. It is recommended to create a context file for each project you work on, and keep it up to date as the project evolves.
+
+### Context File Priority
+
+Kodelet automatically detects and loads context files with the following priority:
+
+1. **`AGENT.md`** - Used if present (recommended)
+2. **`KODELET.md`** - Used only if `AGENT.md` doesn't exist (fallback)
+
+**Migration from KODELET.md:**
+
+If you have an existing `KODELET.md` file, you can rename it via `mv KODELET.md AGENT.md`
+
+### Best Practices
+
+**What to include in your context file:**
+
+1. **Project Overview** - Brief description of what this project does
+2. **Project Structure** - Key directories and their purposes
+3. **Tech Stack** - Languages, frameworks, and major dependencies
+4. **Engineering Principles** - Code style, testing approach, and development workflow
+5. **Key Commands** - Common commands for building, testing, linting, running, and deploying
+6. **Configuration** - Environment variables, config files, and setup requirements
+7. **Testing** - How to run tests and testing conventions
+8. **Error Handling** - Project-specific error handling patterns
+9. **Development Workflow** - How to contribute, PR process, and release process
+
+**Keep it up to date:**
+
+- Update context files when architecture changes
+- Add new commands as they become part of regular workflow
+- Include lessons learned and common pitfalls
+- Review and refresh content during major project milestones
+
+**Note**: Context files are loaded automatically - no special commands needed. Kodelet will inform you which context file is being used when debug logging is enabled (`KODELET_LOG_LEVEL=debug`).
 
 ## Shell Completion
 
@@ -511,6 +577,7 @@ Features:
 - **Intelligent Engineering Assistant**: Automates software engineering tasks and production operations with agentic capabilities.
 - **Interactive Architecture Design**: Collaboratively design and refine system architectures through natural dialogue.
 - **Continuous Code Intelligence**: Analyzes, understands, and improves your codebase while answering technical questions in context.
+- **Agent Context Files**: Automatic loading of project-specific context from `AGENT.md` or `KODELET.md` files for enhanced project understanding.
 - **Vision Capabilities**: Support for image inputs including screenshots, diagrams, and mockups (Anthropic Claude models).
 - **Multiple LLM Providers**: Supports both Anthropic Claude and OpenAI models, giving you flexibility in choosing the best model for your needs.
 
@@ -556,5 +623,11 @@ Features:
    - If using `allowed_commands`, ensure the command matches one of the allowed patterns
    - Verify glob patterns are correctly formatted (e.g., `ls *` not `ls*`)
    - Use `--allowed-commands` flag to override configuration for testing
+
+6. **Context Files Not Loading**
+   - Ensure the context file (`AGENT.md` or `KODELET.md`) is in the current working directory
+   - Verify file permissions are readable
+   - Use `KODELET_LOG_LEVEL=debug` to see which context file is being loaded
+   - Check file syntax if content seems to be ignored
 
 For more help, check the project repository: https://github.com/jingkaihe/kodelet
