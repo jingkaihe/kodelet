@@ -79,24 +79,20 @@ func NewPromptContext() *PromptContext {
 }
 
 // getContextFileName returns the name of the context file to use
-// It checks for AGENT.md first, then falls back to KODELET.md, then defaults to AGENT.md
 func getContextFileName() string {
 	ctx := context.Background()
 	log := logger.G(ctx)
 
-	// Check for AGENT.md first
 	if _, err := os.Stat(AgentMd); err == nil {
 		log.WithField("context_file", AgentMd).Debug("Using AGENT.md as context file")
 		return AgentMd
 	}
 
-	// Fall back to KODELET.md
 	if _, err := os.Stat(KodeletMd); err == nil {
 		log.WithField("context_file", KodeletMd).Debug("Using KODELET.md as context file (fallback)")
 		return KodeletMd
 	}
 
-	// Default to AGENT.md for new projects
 	log.WithField("context_file", AgentMd).Debug("No context file found, defaulting to AGENT.md")
 	return AgentMd
 }
