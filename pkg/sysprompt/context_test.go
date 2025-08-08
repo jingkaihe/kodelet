@@ -178,3 +178,69 @@ func TestFormatContexts(t *testing.T) {
 		assert.Empty(t, result, "Expected empty string when no contexts are available")
 	})
 }
+
+// TestPromptContextActiveContextFile tests the ActiveContextFile field
+func TestPromptContextActiveContextFile(t *testing.T) {
+	// Create a temporary directory for testing
+	tmpDir, err := os.MkdirTemp("", "sysprompt-active-context-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(tmpDir)
+
+	// Save the current working directory
+	originalDir, err := os.Getwd()
+	require.NoError(t, err)
+	defer os.Chdir(originalDir)
+
+	// Change to the temporary directory
+	err = os.Chdir(tmpDir)
+	require.NoError(t, err)
+
+	t.Run("ActiveContextFile is AGENT.md when AGENT.md exists", func(t *testing.T) {
+		// Clean up any existing files
+		os.Remove(KodeletMd)
+		
+		// Create AGENT.md
+		err := os.WriteFile(AgentMd, []byte("# AGENT Context"), 0644)
+		require.NoError(t, err)
+		defer os.Remove(AgentMd)
+		
+		ctx := NewPromptContext()
+		assert.Equal(t, AgentMd, ctx.ActiveContextFile, "Expected ActiveContextFile to be AGENT.md")
+	})
+
+	t.Run("ActiveContextFile is KODELET.md when only KODELET.md exists", func(t *testing.T) {
+		// Clean up any existing files
+		os.Remove(AgentMd)
+		
+		// Create KODELET.md
+		err := os.WriteFile(KodeletMd, []byte("# KODELET Context"), 0644)
+		require.NoError(t, err)
+		defer os.Remove(KodeletMd)
+		
+		ctx := NewPromptContext()
+		assert.Equal(t, KodeletMd, ctx.ActiveContextFile, "Expected ActiveContextFile to be KODELET.md")
+	})
+
+	t.Run("ActiveContextFile defaults to AGENT.md when neither file exists", func(t *testing.T) {
+		// Clean up both files
+		os.Remove(AgentMd)
+		os.Remove(KodeletMd)
+		
+		ctx := NewPromptContext()
+		assert.Equal(t, AgentMd, ctx.ActiveContextFile, "Expected ActiveContextFile to default to AGENT.md")
+	})
+
+	t.Run("ActiveContextFile prefers AGENT.md when both files exist", func(t *testing.T) {
+		// Create both files
+		err := os.WriteFile(AgentMd, []byte("# AGENT Context"), 0644)
+		require.NoError(t, err)
+		defer os.Remove(AgentMd)
+		
+		err = os.WriteFile(KodeletMd, []byte("# KODELET Context"), 0644)
+		require.NoError(t, err)
+		defer os.Remove(KodeletMd)
+		
+		ctx := NewPromptContext()
+		assert.Equal(t, AgentMd, ctx.ActiveContextFile, "Expected ActiveContextFile to prefer AGENT.md")
+	})
+}

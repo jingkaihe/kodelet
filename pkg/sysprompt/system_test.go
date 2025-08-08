@@ -34,7 +34,7 @@ func TestSystemPrompt(t *testing.T) {
 
 		// Context section
 		"Context",
-		"AGENT.md", // Should mention AGENT.md now
+		"file, it will be automatically loaded", // Should mention the file loading
 
 		// System information section
 		"System Information",

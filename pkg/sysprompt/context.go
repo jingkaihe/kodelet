@@ -27,6 +27,9 @@ type PromptContext struct {
 
 	// Content contexts (README, AGENT.md/KODELET.md)
 	ContextFiles map[string]string
+	
+	// Active context file name (AGENT.md, KODELET.md, or empty)
+	ActiveContextFile string
 
 	// Feature flags
 	Features map[string]bool
@@ -60,6 +63,13 @@ func NewPromptContext() *PromptContext {
 		"todoToolsEnabled": true,
 	}
 
+	// Get active context file name
+	activeContextFile := getContextFileName()
+	if activeContextFile == "" {
+		// Default to AGENT.md for new projects
+		activeContextFile = AgentMd
+	}
+
 	return &PromptContext{
 		WorkingDirectory:    pwd,
 		IsGitRepo:           isGitRepo,
@@ -68,6 +78,7 @@ func NewPromptContext() *PromptContext {
 		Date:                date,
 		ToolNames:           toolNames,
 		ContextFiles:        loadContexts(),
+		ActiveContextFile:   activeContextFile,
 		Features:            features,
 		BashBannedCommands:  tools.BannedCommands,
 		BashAllowedCommands: []string{}, // Empty by default, can be set via configuration

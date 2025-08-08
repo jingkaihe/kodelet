@@ -1,10 +1,8 @@
 # Context
-If the current working directory contains an `AGENT.md` or `KODELET.md` file, it will be automatically loaded as a context. Use it for:
+If the current working directory contains a `{{.ActiveContextFile}}` file, it will be automatically loaded as a context. Use it for:
 * Understanding the structure, organisation and tech stack of the project.
 * Keeping record of commands (for linting, testing, building etc) that you have to use repeatedly.
 * Recording coding style, conventions and preferences of the project.
 
-If you find a new command that you have to use repeatedly, you can add it to the context file (`AGENT.md` or `KODELET.md`).
-If you have made any significant changes to the project structure, or modified the tech stack, you should update the context file.
-
-Note: `AGENT.md` takes precedence over `KODELET.md` if both exist.
+If you find a new command that you have to use repeatedly, you can add it to the `{{.ActiveContextFile}}` file.
+If you have made any significant changes to the project structure, or modified the tech stack, you should update the `{{.ActiveContextFile}}` file.
