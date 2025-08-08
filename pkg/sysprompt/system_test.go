@@ -34,7 +34,7 @@ func TestSystemPrompt(t *testing.T) {
 
 		// Context section
 		"Context",
-		"KODELET.md",
+		"AGENT.md", // Should mention AGENT.md now
 
 		// System information section
 		"System Information",

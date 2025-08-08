@@ -25,7 +25,7 @@ type PromptContext struct {
 	// Tool names
 	ToolNames map[string]string
 
-	// Content contexts (README, KODELET.md)
+	// Content contexts (README, AGENT.md/KODELET.md)
 	ContextFiles map[string]string
 
 	// Feature flags
@@ -74,21 +74,54 @@ func NewPromptContext() *PromptContext {
 	}
 }
 
-// loadContexts loads context files (KODELET.md, README.md) from disk
+// getContextFileName returns the name of the context file to use
+// It checks for AGENT.md first, then falls back to KODELET.md
+func getContextFileName() string {
+	ctx := context.Background()
+	log := logger.G(ctx)
+	
+	// Check for AGENT.md first
+	if _, err := os.Stat(AgentMd); err == nil {
+		log.WithField("context_file", AgentMd).Debug("Using AGENT.md as context file")
+		return AgentMd
+	}
+	
+	// Fall back to KODELET.md
+	if _, err := os.Stat(KodeletMd); err == nil {
+		log.WithField("context_file", KodeletMd).Debug("Using KODELET.md as context file (fallback)")
+		return KodeletMd
+	}
+	
+	log.Debug("No context file found (neither AGENT.md nor KODELET.md)")
+	return ""
+}
+
+// loadContexts loads context files (AGENT.md/KODELET.md, README.md) from disk
 func loadContexts() map[string]string {
-	filenames := []string{KodeletMd, ReadmeMd}
 	results := make(map[string]string)
 	ctx := context.Background()
 	log := logger.G(ctx)
-
-	for _, filename := range filenames {
-		content, err := os.ReadFile(filename)
+	
+	// Load the primary context file (AGENT.md or KODELET.md)
+	contextFile := getContextFileName()
+	if contextFile != "" {
+		content, err := os.ReadFile(contextFile)
 		if err != nil {
-			log.WithError(err).WithField("filename", filename).Debug("failed to read file")
-			continue
+			log.WithError(err).WithField("filename", contextFile).Debug("failed to read context file")
+		} else {
+			results[contextFile] = string(content)
+			log.WithField("filename", contextFile).WithField("size", len(content)).Debug("Loaded context file")
 		}
-		results[filename] = string(content)
 	}
+	
+	// Load README.md
+	if content, err := os.ReadFile(ReadmeMd); err == nil {
+		results[ReadmeMd] = string(content)
+		log.WithField("filename", ReadmeMd).WithField("size", len(content)).Debug("Loaded README.md")
+	} else {
+		log.WithError(err).WithField("filename", ReadmeMd).Debug("failed to read README.md")
+	}
+	
 	return results
 }
 

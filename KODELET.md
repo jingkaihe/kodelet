@@ -1,5 +1,7 @@
 # Kodelet Documentation
 
+> **Note**: This file is maintained for backward compatibility. The project now supports `AGENT.md` as the primary context file, which takes precedence when both files exist.
+
 ## Project Overview
 Kodelet is a lightweight CLI tool that helps with software engineering tasks. It supports both Anthropic Claude and OpenAI APIs to process user queries and execute various tools.
 
