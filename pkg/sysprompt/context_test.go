@@ -30,7 +30,7 @@ func TestGetContextFileName(t *testing.T) {
 		os.Remove(KodeletMd)
 		
 		result := getContextFileName()
-		assert.Empty(t, result, "Expected empty string when no context files exist")
+		assert.Equal(t, AgentMd, result, "Expected AGENT.md when no context files exist (default)")
 	})
 
 	t.Run("Only KODELET.md exists", func(t *testing.T) {

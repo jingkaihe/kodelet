@@ -63,13 +63,6 @@ func NewPromptContext() *PromptContext {
 		"todoToolsEnabled": true,
 	}
 
-	// Get active context file name
-	activeContextFile := getContextFileName()
-	if activeContextFile == "" {
-		// Default to AGENT.md for new projects
-		activeContextFile = AgentMd
-	}
-
 	return &PromptContext{
 		WorkingDirectory:    pwd,
 		IsGitRepo:           isGitRepo,
@@ -78,7 +71,7 @@ func NewPromptContext() *PromptContext {
 		Date:                date,
 		ToolNames:           toolNames,
 		ContextFiles:        loadContexts(),
-		ActiveContextFile:   activeContextFile,
+		ActiveContextFile:   getContextFileName(),
 		Features:            features,
 		BashBannedCommands:  tools.BannedCommands,
 		BashAllowedCommands: []string{}, // Empty by default, can be set via configuration
@@ -86,7 +79,7 @@ func NewPromptContext() *PromptContext {
 }
 
 // getContextFileName returns the name of the context file to use
-// It checks for AGENT.md first, then falls back to KODELET.md
+// It checks for AGENT.md first, then falls back to KODELET.md, then defaults to AGENT.md
 func getContextFileName() string {
 	ctx := context.Background()
 	log := logger.G(ctx)
@@ -103,8 +96,9 @@ func getContextFileName() string {
 		return KodeletMd
 	}
 	
-	log.Debug("No context file found (neither AGENT.md nor KODELET.md)")
-	return ""
+	// Default to AGENT.md for new projects
+	log.WithField("context_file", AgentMd).Debug("No context file found, defaulting to AGENT.md")
+	return AgentMd
 }
 
 // loadContexts loads context files (AGENT.md/KODELET.md, README.md) from disk
