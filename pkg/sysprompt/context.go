@@ -103,30 +103,19 @@ func getContextFileName() string {
 
 // loadContexts loads context files (AGENT.md/KODELET.md, README.md) from disk
 func loadContexts() map[string]string {
+	filenames := []string{getContextFileName(), ReadmeMd}
 	results := make(map[string]string)
 	ctx := context.Background()
 	log := logger.G(ctx)
 
-	// Load the primary context file (AGENT.md or KODELET.md)
-	contextFile := getContextFileName()
-	if contextFile != "" {
-		content, err := os.ReadFile(contextFile)
+	for _, filename := range filenames {
+		content, err := os.ReadFile(filename)
 		if err != nil {
-			log.WithError(err).WithField("filename", contextFile).Debug("failed to read context file")
-		} else {
-			results[contextFile] = string(content)
-			log.WithField("filename", contextFile).WithField("size", len(content)).Debug("Loaded context file")
+			log.WithError(err).WithField("filename", filename).Debug("failed to read file")
+			continue
 		}
+		results[filename] = string(content)
 	}
-
-	// Load README.md
-	if content, err := os.ReadFile(ReadmeMd); err == nil {
-		results[ReadmeMd] = string(content)
-		log.WithField("filename", ReadmeMd).WithField("size", len(content)).Debug("Loaded README.md")
-	} else {
-		log.WithError(err).WithField("filename", ReadmeMd).Debug("failed to read README.md")
-	}
-
 	return results
 }
 
