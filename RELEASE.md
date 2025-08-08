@@ -1,5 +1,14 @@
 # Kodelet
 
+## 0.0.80.alpha (2025-08-08)
+
+### Agent Context Files Enhancement
+
+**AGENT.md Context File Migration**: Enhanced context file management with migration from KODELET.md to AGENT.md for improved project understanding
+
+- **Context File Priority System**: Automatic detection with AGENT.md taking precedence over KODELET.md, providing clear migration path for existing projects
+- **Enhanced Documentation**: Added extensive agent context files section to MANUAL.md with creation guidelines and usage examples
+
 ## 0.0.79.alpha (2025-08-06)
 
 ### File Search Performance Improvements
