@@ -23,27 +23,27 @@ import (
 // and would flood the glob results with thousands of irrelevant files.
 // These are skipped by default for performance reasons.
 var excludedHighVolumeDirs = map[string]bool{
-	".git":           true, // Git objects, refs, hooks - thousands of files
-	"node_modules":   true, // NPM packages - can be 10,000+ files
-	".next":          true, // Next.js build output
-	".nuxt":          true, // Nuxt.js build output
-	"dist":           true, // Build outputs
-	"build":          true, // Build outputs
-	".cache":         true, // Various tool caches
-	".parcel-cache":  true, // Parcel bundler cache
-	"coverage":       true, // Test coverage reports
-	".nyc_output":    true, // NYC coverage data
-	".pytest_cache":  true, // Pytest cache
-	"__pycache__":    true, // Python bytecode cache
-	".venv":          true, // Python virtual environments
-	"venv":           true, // Python virtual environments
-	".tox":           true, // Tox test environments
-	"vendor":         true, // Go vendor directory
-	".terraform":     true, // Terraform providers and modules
-	".serverless":    true, // Serverless framework
-	"target":         true, // Rust/Maven build output
-	".turbo":         true, // Turborepo cache
-	".yarn":          true, // Yarn cache
+	".git":             true, // Git objects, refs, hooks - thousands of files
+	"node_modules":     true, // NPM packages - can be 10,000+ files
+	".next":            true, // Next.js build output
+	".nuxt":            true, // Nuxt.js build output
+	"dist":             true, // Build outputs
+	"build":            true, // Build outputs
+	".cache":           true, // Various tool caches
+	".parcel-cache":    true, // Parcel bundler cache
+	"coverage":         true, // Test coverage reports
+	".nyc_output":      true, // NYC coverage data
+	".pytest_cache":    true, // Pytest cache
+	"__pycache__":      true, // Python bytecode cache
+	".venv":            true, // Python virtual environments
+	"venv":             true, // Python virtual environments
+	".tox":             true, // Tox test environments
+	"vendor":           true, // Go vendor directory
+	".terraform":       true, // Terraform providers and modules
+	".serverless":      true, // Serverless framework
+	"target":           true, // Rust/Maven build output
+	".turbo":           true, // Turborepo cache
+	".yarn":            true, // Yarn cache
 	"bower_components": true, // Bower packages
 }
 

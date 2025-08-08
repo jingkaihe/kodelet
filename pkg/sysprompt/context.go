@@ -27,7 +27,7 @@ type PromptContext struct {
 
 	// Content contexts (README, AGENT.md/KODELET.md)
 	ContextFiles map[string]string
-	
+
 	// Active context file name (AGENT.md, KODELET.md, or empty)
 	ActiveContextFile string
 
@@ -83,19 +83,19 @@ func NewPromptContext() *PromptContext {
 func getContextFileName() string {
 	ctx := context.Background()
 	log := logger.G(ctx)
-	
+
 	// Check for AGENT.md first
 	if _, err := os.Stat(AgentMd); err == nil {
 		log.WithField("context_file", AgentMd).Debug("Using AGENT.md as context file")
 		return AgentMd
 	}
-	
+
 	// Fall back to KODELET.md
 	if _, err := os.Stat(KodeletMd); err == nil {
 		log.WithField("context_file", KodeletMd).Debug("Using KODELET.md as context file (fallback)")
 		return KodeletMd
 	}
-	
+
 	// Default to AGENT.md for new projects
 	log.WithField("context_file", AgentMd).Debug("No context file found, defaulting to AGENT.md")
 	return AgentMd
@@ -106,7 +106,7 @@ func loadContexts() map[string]string {
 	results := make(map[string]string)
 	ctx := context.Background()
 	log := logger.G(ctx)
-	
+
 	// Load the primary context file (AGENT.md or KODELET.md)
 	contextFile := getContextFileName()
 	if contextFile != "" {
@@ -118,7 +118,7 @@ func loadContexts() map[string]string {
 			log.WithField("filename", contextFile).WithField("size", len(content)).Debug("Loaded context file")
 		}
 	}
-	
+
 	// Load README.md
 	if content, err := os.ReadFile(ReadmeMd); err == nil {
 		results[ReadmeMd] = string(content)
@@ -126,7 +126,7 @@ func loadContexts() map[string]string {
 	} else {
 		log.WithError(err).WithField("filename", ReadmeMd).Debug("failed to read README.md")
 	}
-	
+
 	return results
 }
 
