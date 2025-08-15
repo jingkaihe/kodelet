@@ -177,11 +177,11 @@ Examples:
 		}
 
 		fragment, err := processor.LoadFragment(ctx, &fragments.Config{
-			FragmentName: "pr_respond",
+			FragmentName: "pr-respond",
 			Arguments:    fragmentArgs,
 		})
 		if err != nil {
-			presenter.Error(err, "Failed to load built-in pr_respond recipe")
+			presenter.Error(err, "Failed to load built-in pr-respond recipe")
 			os.Exit(1)
 		}
 
