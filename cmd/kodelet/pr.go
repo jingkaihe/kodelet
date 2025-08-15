@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/jingkaihe/kodelet/pkg/tools"
@@ -44,17 +45,6 @@ func (c *PRConfig) Validate() error {
 
 	return nil
 }
-
-// Default PR template
-const defaultTemplate = `## Description
-<high level summary of the changes>
-
-## Changes
-<changes in a few bullet points>
-
-## Impact
-<impact in a few bullet points>
-`
 
 var prCmd = &cobra.Command{
 	Use:   "pr",
@@ -114,44 +104,33 @@ This command analyzes the current branch changes compared to the target branch a
 		// 	os.Exit(1)
 		// }
 
-		// Load the template
-		template := loadTemplate(config.TemplateFile)
+		// Load the built-in pr fragment
+		processor, err := fragments.NewFragmentProcessor()
+		if err != nil {
+			presenter.Error(err, "Failed to create fragment processor")
+			os.Exit(1)
+		}
 
-		// Generate the prompt for the LLM
-		prompt := fmt.Sprintf(`Create a pull request for the changes you have made on the current branch.
+		// Prepare template arguments
+		fragmentArgs := map[string]string{
+			"target": config.Target,
+		}
 
-Please create a pull request following the steps below:
+		// Add template file if provided
+		if config.TemplateFile != "" {
+			fragmentArgs["template_file"] = config.TemplateFile
+		}
 
-1. make sure that the branch is up to date with the target branch. Push the branch to the remote repository if it is not already up to date.
+		fragment, err := processor.LoadFragment(ctx, &fragments.Config{
+			FragmentName: "pr",
+			Arguments:    fragmentArgs,
+		})
+		if err != nil {
+			presenter.Error(err, "Failed to load built-in pr recipe")
+			os.Exit(1)
+		}
 
-2. To understand the current state of the branch, use parallel tool calling to perform the following checks:
-  - Run "git status" to check the the current status and any untracked files
-  - Run "git diff" to check the changes to the working directory
-  - Run "git diff --cached" to check the changes to the staging area
-  - Run "git diff %s...HEAD" to understand the changes to the target branch
-  - Run "git log --oneline %s...HEAD" to understand the commit history
-
-3. Thoroughly review and analyse the changes, and wrap up your thoughts into the following sections:
-- The category of the changes (chore, feat, fix, refactor, perf, test, style, docs, build, ci, revert)
-- A summary of the changes as a title
-- A detailed description of the changes based on the changes impact on the project.
-- Break down the changes into a few bullet points
-
-4. Create a pull request against the target branch %s:
-- **MUST USE** the 'mcp_create_pull_request' MCP tool if it is available in your tool list
-- The 'mcp_create_pull_request' tool requires: owner, repo, title, body, head (current branch), base (target branch)
-- Only use 'gh pr create ...' bash command as a last resort fallback if the MCP tool is not available
-
-The body of the pull request should follow the following format:
-
-<pr_body_format>
-%s
-</pr_body_format>
-
-IMPORTANT:
-- After the parallel tool calls, when you performing the PR analysis, do not carry out extra tool calls to gather extra information, but instead use the information provided by the initial parallel analysis.
-- Once you have created the PR, provide a link to the PR in your final response.
-- !!!CRITICAL!!!: You should never update user's git config under any circumstances.`, config.Target, config.Target, config.Target, template)
+		prompt := fragment.Content
 
 		// Send the prompt to the LLM
 		presenter.Info("Analyzing branch changes and generating PR description...")
@@ -196,22 +175,6 @@ func getPRConfigFromFlags(cmd *cobra.Command) *PRConfig {
 	}
 
 	return config
-}
-
-// loadTemplate loads the template from a file or returns the default template
-func loadTemplate(templateFile string) string {
-	if templateFile == "" {
-		return defaultTemplate
-	}
-
-	content, err := os.ReadFile(templateFile)
-	if err != nil {
-		presenter.Warning(fmt.Sprintf("Could not read template file %s: %s", templateFile, err))
-		presenter.Info("Using default template instead")
-		return defaultTemplate
-	}
-
-	return string(content)
 }
 
 // isGhCliInstalled checks if GitHub CLI is installed
