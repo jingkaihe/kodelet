@@ -6,8 +6,10 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"strings"
 	"syscall"
 
+	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/jingkaihe/kodelet/pkg/tools"
@@ -117,41 +119,12 @@ This command analyzes the current branch changes compared to the target branch a
 		// Load the template
 		template := loadTemplate(config.TemplateFile)
 
-		// Generate the prompt for the LLM
-		prompt := fmt.Sprintf(`Create a pull request for the changes you have made on the current branch.
-
-Please create a pull request following the steps below:
-
-1. make sure that the branch is up to date with the target branch. Push the branch to the remote repository if it is not already up to date.
-
-2. To understand the current state of the branch, use parallel tool calling to perform the following checks:
-  - Run "git status" to check the the current status and any untracked files
-  - Run "git diff" to check the changes to the working directory
-  - Run "git diff --cached" to check the changes to the staging area
-  - Run "git diff %s...HEAD" to understand the changes to the target branch
-  - Run "git log --oneline %s...HEAD" to understand the commit history
-
-3. Thoroughly review and analyse the changes, and wrap up your thoughts into the following sections:
-- The category of the changes (chore, feat, fix, refactor, perf, test, style, docs, build, ci, revert)
-- A summary of the changes as a title
-- A detailed description of the changes based on the changes impact on the project.
-- Break down the changes into a few bullet points
-
-4. Create a pull request against the target branch %s:
-- **MUST USE** the 'mcp_create_pull_request' MCP tool if it is available in your tool list
-- The 'mcp_create_pull_request' tool requires: owner, repo, title, body, head (current branch), base (target branch)
-- Only use 'gh pr create ...' bash command as a last resort fallback if the MCP tool is not available
-
-The body of the pull request should follow the following format:
-
-<pr_body_format>
-%s
-</pr_body_format>
-
-IMPORTANT:
-- After the parallel tool calls, when you performing the PR analysis, do not carry out extra tool calls to gather extra information, but instead use the information provided by the initial parallel analysis.
-- Once you have created the PR, provide a link to the PR in your final response.
-- !!!CRITICAL!!!: You should never update user's git config under any circumstances.`, config.Target, config.Target, config.Target, template)
+		// Generate the prompt using builtin fragment
+		prompt, err := loadPRGenerationPrompt(ctx, config, template)
+		if err != nil {
+			presenter.Error(err, "Failed to load PR generation prompt")
+			os.Exit(1)
+		}
 
 		// Send the prompt to the LLM
 		presenter.Info("Analyzing branch changes and generating PR description...")
@@ -226,4 +199,44 @@ func isGhAuthenticated() bool {
 	cmd := exec.Command("gh", "auth", "status")
 	err := cmd.Run()
 	return err == nil
+}
+
+// loadPRGenerationPrompt loads the PR generation prompt using the builtin fragment system
+func loadPRGenerationPrompt(ctx context.Context, config *PRConfig, template string) (string, error) {
+	// Create fragment processor with builtin fragments enabled
+	processor, err := fragments.NewFragmentProcessor(fragments.WithBuiltinFragments())
+	if err != nil {
+		return "", errors.Wrap(err, "failed to create fragment processor")
+	}
+
+	// Prepare fragment arguments
+	args := map[string]string{
+		"TargetBranch": config.Target,
+		"Template":     template,
+	}
+
+	// Add context based on configuration if needed
+	var contextParts []string
+	if config.Provider != "github" {
+		contextParts = append(contextParts, fmt.Sprintf("Using provider: %s", config.Provider))
+	}
+	if config.TemplateFile != "" {
+		contextParts = append(contextParts, fmt.Sprintf("Using custom template from: %s", config.TemplateFile))
+	}
+	if len(contextParts) > 0 {
+		args["Context"] = fmt.Sprintf("Configuration notes: %s", strings.Join(contextParts, "; "))
+	}
+
+	// Load and process the builtin pr-generation fragment
+	fragmentConfig := &fragments.Config{
+		FragmentName: "pr-generation",
+		Arguments:    args,
+	}
+
+	fragment, err := processor.LoadFragment(ctx, fragmentConfig)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to load pr-generation fragment")
+	}
+
+	return fragment.Content, nil
 }

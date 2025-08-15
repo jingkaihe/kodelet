@@ -79,13 +79,13 @@ func TestBuiltinFS_ReadDir(t *testing.T) {
 			name:        "read root directory",
 			dirName:     ".",
 			expectError: false,
-			expectedLen: 3, // issue-resolve.md, commit-message.md, pr-response.md
+			expectedLen: 4, // issue-resolve.md, commit-message.md, pr-response.md, pr-generation.md
 		},
 		{
 			name:        "read empty string directory",
 			dirName:     "",
 			expectError: false,
-			expectedLen: 3,
+			expectedLen: 4,
 		},
 		{
 			name:        "read non-existent directory",
@@ -108,7 +108,7 @@ func TestBuiltinFS_ReadDir(t *testing.T) {
 				
 				// Check that entries are valid builtin fragments
 				if len(entries) > 0 {
-					expectedNames := []string{"issue-resolve.md", "commit-message.md", "pr-response.md"}
+					expectedNames := []string{"issue-resolve.md", "commit-message.md", "pr-response.md", "pr-generation.md"}
 					for i, entry := range entries {
 						assert.Equal(t, expectedNames[i], entry.Name())
 						assert.False(t, entry.IsDir())
@@ -251,6 +251,18 @@ func TestGetBuiltinContent(t *testing.T) {
 			fileName:    "pr-response",
 			expectFound: true,
 			shouldContain: "name: Pull Request Response",
+		},
+		{
+			name:        "pr-generation.md",
+			fileName:    "pr-generation.md",
+			expectFound: true,
+			shouldContain: "name: Pull Request Generator",
+		},
+		{
+			name:        "pr-generation without extension",
+			fileName:    "pr-generation",
+			expectFound: true,
+			shouldContain: "name: Pull Request Generator",
 		},
 		{
 			name:        "issue-resolve with leading slash",

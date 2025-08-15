@@ -18,6 +18,9 @@ var (
 	
 	//go:embed recipes/pr-response.md
 	prResponseContent string
+	
+	//go:embed recipes/pr-generation.md
+	prGenerationContent string
 )
 
 // BuiltinFS implements fs.FS interface for builtin fragments
@@ -50,6 +53,7 @@ func (b BuiltinFS) ReadDir(name string) ([]fs.DirEntry, error) {
 		&builtinDirEntry{name: "issue-resolve.md"},
 		&builtinDirEntry{name: "commit-message.md"},
 		&builtinDirEntry{name: "pr-response.md"},
+		&builtinDirEntry{name: "pr-generation.md"},
 	}
 	
 	return entries, nil
@@ -68,6 +72,8 @@ func getBuiltinContent(name string) (string, bool) {
 		return commitMessageContent, true
 	case "pr-response.md", "pr-response":
 		return prResponseContent, true
+	case "pr-generation.md", "pr-generation":
+		return prGenerationContent, true
 	default:
 		return "", false
 	}
