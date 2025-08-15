@@ -1,6 +1,14 @@
 # Kodelet
 
-## 0.0.80.alpha (2025-08-08)
+## 0.0.81.alpha (2025-08-15)
+
+### Fragment-Based Architecture Enhancement
+
+**Built-in Recipe System**: Core commands now use unified fragment-based architecture with built-in recipes for improved consistency and maintainability
+
+- **Fragment-Powered Commands**: Migrated `commit`, `pr`, and `issue-resolve` commands to use built-in fragment recipes, providing more consistent and template-driven workflows
+- **Enhanced Template Support**: PR command now supports custom template files through fragment arguments while maintaining backward compatibility
+- **Improved Error Handling**: Fragment bash command execution now returns actual command output instead of generic error messages, improving debugging experience
 
 ### Agent Context Files Enhancement
 
