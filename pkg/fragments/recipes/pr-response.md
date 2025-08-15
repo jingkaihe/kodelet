@@ -13,6 +13,9 @@ allowed_tools:
   - "mcp_get_pr_comments"
   - "mcp_add_pr_comment"
   - "mcp_get_pr_review_comments"
+  - "mcp_create_pending_pull_request_review"
+  - "mcp_add_pull_request_review_comment_to_pending_review"
+  - "mcp_submit_pending_pull_request_review"
 allowed_commands:
   - "git *"
   - "gh *"
@@ -20,13 +23,17 @@ allowed_commands:
 
 Please respond to the pull request {{.PullRequestURL}} following the appropriate workflow:
 
-## Step 1: Analyze the Pull Request
-1. Get the PR details, comments, and review comments
-   - Preferrably use 'mcp_get_pr_comments' and 'mcp_get_pr_review_comments' if available
-   - If not, use 'gh pr view {{.PullRequestURL}}' and 'gh pr view {{.PullRequestURL}} --comments' to get details
-2. Review the PR description, changes, and any existing comments
-3. Pay special attention to mentions of {{.BotMention}} - these are direct requests for action
-4. Determine the type of response needed:
+{{if .Context}}
+## Context Information:
+
+{{.Context}}
+
+{{end}}
+## Step 1: Analyze the Request
+
+1. Review the PR details and focused comment
+2. Understand exactly what is being requested or asked
+3. Determine the type of response needed:
    - **CODE REVIEW**: Provide feedback on code quality, bugs, improvements
    - **QUESTION RESPONSE**: Answer questions about the implementation
    - **ISSUE RESOLUTION**: Address specific issues or requests for changes
@@ -35,87 +42,82 @@ Please respond to the pull request {{.PullRequestURL}} following the appropriate
 ## Step 2: Choose the Appropriate Response
 
 ### For CODE REVIEW:
-1. Analyze the code changes in the PR
-2. Look for:
-   - Potential bugs or issues
-   - Code quality improvements
-   - Performance considerations
-   - Security concerns
-   - Best practices adherence
-3. Provide constructive feedback with specific suggestions
-4. Comment on the PR with your analysis
+1. Analyze the code changes in the PR using subagent
+2. Look for potential issues: bugs, security, performance, best practices
+3. Create a comprehensive GitHub review:
+   - Use 'mcp_create_pending_pull_request_review' to start
+   - Add line-specific comments with 'mcp_add_pull_request_review_comment_to_pending_review'
+   - Submit with 'mcp_submit_pending_pull_request_review' (event: "COMMENT")
+4. Organize findings by category and severity
+5. Provide specific, actionable suggestions
 
 ### For QUESTION RESPONSE:
-1. Understand the specific questions being asked
-2. Research the codebase to provide accurate answers
-3. Provide clear, detailed explanations
-4. Include code examples when helpful
-5. Comment on the PR with your response
+1. Research the codebase to understand the question
+2. Provide clear, detailed explanations with examples
+3. Comment on the PR with your response using 'gh pr comment'
+4. Do NOT make code changes
 
 ### For ISSUE RESOLUTION:
 1. Identify the specific issues raised
 2. Checkout the PR branch: "git fetch origin && git checkout {{.BranchName}}"
-3. Make necessary changes to address the issues
-4. Test the changes to ensure they work correctly
-5. Commit the changes: "git add . && git commit -m 'fix: address PR feedback'"
-6. Push the changes: "git push origin {{.BranchName}}"
-7. Comment on the PR explaining what was fixed
+3. Make targeted changes to address the feedback
+4. Test changes and ensure they work correctly
+5. Commit: "git add . && {{.BinPath}} commit --short --no-confirm"
+6. Push: "git push origin {{.BranchName}}"
+7. Comment explaining what was fixed
 
 ### For IMPLEMENTATION REQUEST:
-1. Understand what new functionality is being requested
-2. Checkout the PR branch: "git fetch origin && git checkout {{.BranchName}}"
-3. Implement the requested functionality
-4. Add appropriate tests if needed
-5. Update documentation if necessary
-6. Commit the changes: "git add . && git commit -m 'feat: implement requested functionality'"
-7. Push the changes: "git push origin {{.BranchName}}"
-8. Comment on the PR explaining what was implemented
+1. Understand the requested functionality
+2. Checkout PR branch: "git fetch origin && git checkout {{.BranchName}}"
+3. Implement the requested features
+4. Add tests and update documentation if needed
+5. Commit: "git add . && {{.BinPath}} commit --short --no-confirm"
+6. Push: "git push origin {{.BranchName}}"
+7. Comment explaining what was implemented
 
-## Examples:
+## Tool Usage Guidelines:
 
-**CODE REVIEW Example:**
+- **Code Changes**: Standard git commands + GitHub CLI for comments
+- **Questions**: GitHub CLI for responses + subagent for research
+- **Code Reviews**: MCP tools for structured GitHub reviews + subagent for analysis
+
+## Response Examples:
+
+**Code Review:**
 ```
-I've reviewed the changes and have a few suggestions:
+I've reviewed the changes and have suggestions:
 
-1. Line 45: Consider adding null checks before accessing `user.email`
-2. The `validateInput` function could benefit from more specific error messages
-3. Great job on the comprehensive test coverage!
+1. Line 45: Add null checks before accessing `user.email`
+2. Consider more specific error messages in `validateInput`
+3. Excellent test coverage!
 
-Overall, the implementation looks solid. Just address the null check issue and we should be good to go.
-```
-
-**QUESTION RESPONSE Example:**
-```
-Great question! The caching strategy works as follows:
-
-1. We use Redis for session storage (expire after 24h)
-2. Database queries are cached using the `@Cacheable` annotation
-3. Cache invalidation happens automatically on data updates
-
-Here's how to add caching to a new endpoint:
-[code example]
+Overall solid implementation. Address the null check and we're good to go.
 ```
 
-**ISSUE RESOLUTION Example:**
+**Question Response:**
 ```
-I've addressed the feedback:
+Great question! The caching works as follows:
 
-✅ Fixed the null pointer exception in user validation
-✅ Added proper error handling for API timeouts  
-✅ Updated tests to cover edge cases
-✅ Improved variable naming for clarity
+1. Redis for sessions (24h expiry)
+2. Database queries cached with `@Cacheable`
+3. Auto-invalidation on updates
 
-The changes are now ready for another review.
+Here's how to add caching to new endpoints: [example]
 ```
 
-## Additional Context:
-{{if .Context}}
-{{.Context}}
-{{end}}
+**Issue Resolution:**
+```
+✅ Fixed null pointer in user validation
+✅ Added timeout error handling  
+✅ Updated tests for edge cases
+✅ Improved variable naming
 
-IMPORTANT:
-* Always be constructive and professional in feedback
-* Focus on the code, not the person
-* Provide specific, actionable suggestions
-* If making code changes, ensure they don't break existing functionality
-* Test your changes before pushing
+Ready for re-review!
+```
+
+## Important Notes:
+- Focus on the specific comment/request only
+- Be constructive and professional
+- Provide actionable suggestions
+- Test changes before pushing
+- Never update git config

@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/jingkaihe/kodelet/pkg/tools"
@@ -78,24 +79,11 @@ You must stage your changes (using 'git add') before running this command.`,
 			os.Exit(1)
 		}
 
-		// Generate commit message based on diff
-		var prompt string
-		if config.Template != "" {
-			prompt = fmt.Sprintf("Generate a commit message following this template: '%s' for the following git diff:\n\n%s", config.Template, diff)
-		} else if config.Short {
-			prompt = fmt.Sprintf(`Generate a concise commit message following conventional commits format for the following git diff.
-The commit message should have only a short, descriptive title that summarizes the changes.
-
-IMPORTANT: The output of the commit message should be a single line with no bullet points or additional descriptions. It should not be wrapped with any markdown code block.
-%s`, diff)
-		} else {
-			prompt = fmt.Sprintf(`Generate a concise commit message following conventional commits format for the following git diff.
-The commit message should have:
-* A short description as the title
-* Bullet points that breaks down the changes, with 2-3 sentences for each bullet point, while maintaining the accuracy and completeness of the git diff.
-
-IMPORTANT: The output of the commit message should not be wrapped with any markdown code block.
-%s`, diff)
+		// Generate commit message using builtin fragment
+		prompt, err := loadCommitMessagePrompt(ctx, config)
+		if err != nil {
+			presenter.Error(err, "Failed to load commit message prompt")
+			os.Exit(1)
 		}
 
 		presenter.Info("Analyzing staged changes and generating commit message...")
@@ -316,4 +304,41 @@ func createCommit(_ context.Context, message string, sign bool, config *CommitCo
 	cmd.Stderr = os.Stderr
 
 	return cmd.Run()
+}
+
+// loadCommitMessagePrompt loads the commit message prompt using the builtin fragment system
+func loadCommitMessagePrompt(ctx context.Context, config *CommitConfig) (string, error) {
+	// Create fragment processor with builtin fragments enabled
+	processor, err := fragments.NewFragmentProcessor(fragments.WithBuiltinFragments())
+	if err != nil {
+		return "", errors.Wrap(err, "failed to create fragment processor")
+	}
+
+	// Prepare fragment arguments
+	args := map[string]string{}
+	
+	// Add context based on configuration
+	var contextParts []string
+	if config.Template != "" {
+		contextParts = append(contextParts, fmt.Sprintf("Use this template: %s", config.Template))
+	}
+	if config.Short {
+		contextParts = append(contextParts, "Generate a short, single-line commit message with no bullet points")
+	}
+	if len(contextParts) > 0 {
+		args["Context"] = strings.Join(contextParts, ". ")
+	}
+
+	// Load and process the builtin commit-message fragment
+	fragmentConfig := &fragments.Config{
+		FragmentName: "commit-message",
+		Arguments:    args,
+	}
+
+	fragment, err := processor.LoadFragment(ctx, fragmentConfig)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to load commit-message fragment")
+	}
+
+	return fragment.Content, nil
 }

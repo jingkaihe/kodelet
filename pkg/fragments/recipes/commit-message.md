@@ -39,10 +39,25 @@ Based on the staged changes above, generate a conventional commit message that:
    - `test`: adding or updating tests
    - `chore`: maintenance tasks
    - `ci`: CI/CD related changes
+   - `perf`: performance improvements
+   - `build`: build system or dependency changes
 3. **Includes scope** when applicable (e.g., component, module, or file affected)
 4. **Provides clear, concise description** (50 chars or less for the summary)
 5. **Adds body** if needed for complex changes (wrap at 72 chars)
 6. **Includes breaking change footer** if applicable
+
+## Output Format:
+
+**IMPORTANT**: The output should be the commit message ONLY. Do not wrap in markdown code blocks or add explanations unless specifically requested.
+
+## Style Guidelines:
+{{if .Context}}
+{{.Context}}
+{{else}}
+- Default style: Title + bullet points for detailed changes
+- For simple changes: Single descriptive line
+- For complex changes: Title + body with bullet points explaining each major change
+{{end}}
 
 ## Example formats:
 - `feat(auth): add JWT token validation`
@@ -50,12 +65,4 @@ Based on the staged changes above, generate a conventional commit message that:
 - `docs(readme): update installation instructions`
 - `refactor(utils): extract common validation logic`
 
-## Additional Context:
-{{if .Context}}
-{{.Context}}
-{{end}}
-
-Please provide:
-1. The commit message
-2. Brief explanation of why this type/scope was chosen
-3. Any suggestions for improving the changes if needed
+Generate the commit message now:
