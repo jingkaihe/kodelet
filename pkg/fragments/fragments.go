@@ -298,7 +298,6 @@ func (fp *Processor) LoadFragment(ctx context.Context, config *Config) (*Fragmen
 		return nil, errors.Wrapf(err, "failed to process fragment template '%s'", fragmentPath)
 	}
 
-	// Set user-friendly path for built-in recipes
 	displayPath := fragmentPath
 	if strings.HasPrefix(fragmentPath, "embed:") {
 		displayPath = "builtin:" + strings.TrimPrefix(fragmentPath, "embed:")
@@ -327,7 +326,6 @@ func (fp *Processor) GetFragmentMetadata(fragmentName string) (*Fragment, error)
 		return nil, errors.Wrapf(err, "failed to parse frontmatter in fragment '%s'", fragmentPath)
 	}
 
-	// Set user-friendly path for built-in recipes
 	displayPath := fragmentPath
 	if strings.HasPrefix(fragmentPath, "embed:") {
 		displayPath = "builtin:" + strings.TrimPrefix(fragmentPath, "embed:")
@@ -387,7 +385,6 @@ func (fp *Processor) createBashFunc(ctx context.Context) func(...string) string 
 				"args":    cmdArgs,
 			}).WithError(err).Warn("Bash command failed")
 			
-			// Return the actual output even on error, as it may contain useful information
 			return strings.TrimRight(string(output), "\n\r")
 		}
 
