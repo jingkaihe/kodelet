@@ -3,7 +3,8 @@ package fragments
 import (
 	"bytes"
 	"context"
-	"fmt"
+	"embed"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,6 +18,9 @@ import (
 	"github.com/yuin/goldmark-meta"
 	"github.com/yuin/goldmark/parser"
 )
+
+//go:embed recipes/*.md
+var embedFS embed.FS
 
 // Metadata represents YAML frontmatter in fragment files
 type Metadata struct {
@@ -41,7 +45,8 @@ type Config struct {
 
 // Processor handles fragment loading and rendering
 type Processor struct {
-	fragmentDirs []string
+	fragmentDirs     []string
+	builtinRecipesFS fs.FS
 }
 
 // Option is a function that configures a FragmentProcessor
@@ -100,6 +105,13 @@ func NewFragmentProcessor(opts ...Option) (*Processor, error) {
 	// Start with empty processor
 	fp := &Processor{}
 
+	// Create embedded recipes filesystem once
+	builtinRecipesFS, err := fs.Sub(embedFS, "recipes")
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create built-in recipes filesystem")
+	}
+	fp.builtinRecipesFS = builtinRecipesFS
+
 	// If no options provided, use defaults
 	if len(opts) == 0 {
 		if err := WithDefaultDirs()(fp); err != nil {
@@ -125,6 +137,20 @@ func NewFragmentProcessor(opts ...Option) (*Processor, error) {
 	return fp, nil
 }
 
+// readEmbedded reads an embedded recipe file
+func (fp *Processor) readEmbedded(name string) ([]byte, error) {
+	return fs.ReadFile(fp.builtinRecipesFS, name)
+}
+
+// readFragmentContent reads fragment content from either file system or embedded resources
+func (fp *Processor) readFragmentContent(path string) ([]byte, error) {
+	if strings.HasPrefix(path, "embed:") {
+		name := strings.TrimPrefix(path, "embed:")
+		return fp.readEmbedded(name)
+	}
+	return os.ReadFile(path)
+}
+
 // findFragmentFile searches for a fragment file in the configured directories
 func (fp *Processor) findFragmentFile(fragmentName string) (string, error) {
 	// Try both .md and no extension
@@ -142,7 +168,14 @@ func (fp *Processor) findFragmentFile(fragmentName string) (string, error) {
 		}
 	}
 
-	return "", errors.Errorf("fragment '%s' not found in directories: %v", fragmentName, fp.fragmentDirs)
+	// Try embedded recipes as fallback
+	for _, name := range possibleNames {
+		if _, err := fs.Stat(fp.builtinRecipesFS, name); err == nil {
+			return "embed:" + name, nil
+		}
+	}
+
+	return "", errors.Errorf("fragment '%s' not found in directories: %v or built-in recipes", fragmentName, fp.fragmentDirs)
 }
 
 func (fp *Processor) parseFrontmatter(content string) (Metadata, string, error) {
@@ -250,7 +283,7 @@ func (fp *Processor) LoadFragment(ctx context.Context, config *Config) (*Fragmen
 
 	logger.G(ctx).WithField("path", fragmentPath).Debug("Found fragment file")
 
-	content, err := os.ReadFile(fragmentPath)
+	content, err := fp.readFragmentContent(fragmentPath)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to read fragment file '%s'", fragmentPath)
 	}
@@ -265,10 +298,15 @@ func (fp *Processor) LoadFragment(ctx context.Context, config *Config) (*Fragmen
 		return nil, errors.Wrapf(err, "failed to process fragment template '%s'", fragmentPath)
 	}
 
+	displayPath := fragmentPath
+	if strings.HasPrefix(fragmentPath, "embed:") {
+		displayPath = "builtin:" + strings.TrimPrefix(fragmentPath, "embed:")
+	}
+
 	return &Fragment{
 		Metadata: metadata,
 		Content:  processed,
-		Path:     fragmentPath,
+		Path:     displayPath,
 	}, nil
 }
 
@@ -278,7 +316,7 @@ func (fp *Processor) GetFragmentMetadata(fragmentName string) (*Fragment, error)
 		return nil, err
 	}
 
-	content, err := os.ReadFile(fragmentPath)
+	content, err := fp.readFragmentContent(fragmentPath)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to read fragment file '%s'", fragmentPath)
 	}
@@ -288,10 +326,15 @@ func (fp *Processor) GetFragmentMetadata(fragmentName string) (*Fragment, error)
 		return nil, errors.Wrapf(err, "failed to parse frontmatter in fragment '%s'", fragmentPath)
 	}
 
+	displayPath := fragmentPath
+	if strings.HasPrefix(fragmentPath, "embed:") {
+		displayPath = "builtin:" + strings.TrimPrefix(fragmentPath, "embed:")
+	}
+
 	return &Fragment{
 		Metadata: metadata,
 		Content:  bodyContent,
-		Path:     fragmentPath,
+		Path:     displayPath,
 	}, nil
 }
 
@@ -337,12 +380,12 @@ func (fp *Processor) createBashFunc(ctx context.Context) func(...string) string 
 		cmd := exec.CommandContext(cmdCtx, command, cmdArgs...)
 		output, err := cmd.CombinedOutput()
 		if err != nil {
-			fullCmd := append([]string{command}, cmdArgs...)
 			logger.G(ctx).WithFields(map[string]interface{}{
 				"command": command,
 				"args":    cmdArgs,
 			}).WithError(err).Warn("Bash command failed")
-			return fmt.Sprintf("[ERROR executing command '%s': %v]", strings.Join(fullCmd, " "), err)
+
+			return strings.TrimRight(string(output), "\n\r")
 		}
 
 		// Remove trailing newlines for cleaner substitution
@@ -350,82 +393,73 @@ func (fp *Processor) createBashFunc(ctx context.Context) func(...string) string 
 	}
 }
 
-// ListFragments returns a list of available fragments
-func (fp *Processor) ListFragments() ([]string, error) {
-	var fragments []string
-	seen := make(map[string]bool)
+// processFragmentEntry processes a single fragment entry and returns a Fragment if valid
+func (fp *Processor) processFragmentEntry(name, path string, content []byte, seen map[string]bool) *Fragment {
+	fragmentName := strings.TrimSuffix(name, ".md")
 
-	for _, dir := range fp.fragmentDirs {
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			// Directory might not exist, continue
+	if seen[fragmentName] {
+		return nil
+	}
+
+	metadata, bodyContent, err := fp.parseFrontmatter(string(content))
+	if err != nil {
+		return nil
+	}
+
+	if metadata.Name == "" {
+		metadata.Name = fragmentName
+	}
+
+	seen[fragmentName] = true
+	return &Fragment{
+		Metadata: metadata,
+		Content:  bodyContent,
+		Path:     path,
+	}
+}
+
+// processFragmentsFromFS processes fragments from any filesystem and adds them to the fragments slice
+func (fp *Processor) processFragmentsFromFS(fragmentsFS fs.FS, pathConstructor func(string) string, fragments *[]*Fragment, seen map[string]bool) {
+	entries, err := fs.ReadDir(fragmentsFS, ".")
+	if err != nil {
+		return
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
 			continue
 		}
 
-		for _, entry := range entries {
-			if entry.IsDir() {
-				continue
-			}
+		name := entry.Name()
+		content, err := fs.ReadFile(fragmentsFS, name)
+		if err != nil {
+			continue
+		}
 
-			name := entry.Name()
-			// Remove .md extension if present
-			name = strings.TrimSuffix(name, ".md")
-
-			// Only add if not already seen (precedence: repo > home)
-			if !seen[name] {
-				fragments = append(fragments, name)
-				seen[name] = true
-			}
+		displayPath := pathConstructor(name)
+		if fragment := fp.processFragmentEntry(name, displayPath, content, seen); fragment != nil {
+			*fragments = append(*fragments, fragment)
 		}
 	}
-
-	return fragments, nil
 }
 
 func (fp *Processor) ListFragmentsWithMetadata() ([]*Fragment, error) {
 	var fragments []*Fragment
 	seen := make(map[string]bool)
 
+	// Process filesystem fragments
 	for _, dir := range fp.fragmentDirs {
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			continue
-		}
-
-		for _, entry := range entries {
-			if entry.IsDir() {
-				continue
-			}
-
-			name := entry.Name()
-			fragmentName := strings.TrimSuffix(name, ".md")
-
-			if !seen[fragmentName] {
-				fragmentPath := filepath.Join(dir, name)
-
-				content, err := os.ReadFile(fragmentPath)
-				if err != nil {
-					continue
-				}
-
-				metadata, bodyContent, err := fp.parseFrontmatter(string(content))
-				if err != nil {
-					continue
-				}
-
-				if metadata.Name == "" {
-					metadata.Name = fragmentName
-				}
-
-				fragments = append(fragments, &Fragment{
-					Metadata: metadata,
-					Content:  bodyContent,
-					Path:     fragmentPath,
-				})
-				seen[fragmentName] = true
-			}
-		}
+		dirFS := os.DirFS(dir)
+		fp.processFragmentsFromFS(dirFS, func(name string) string {
+			return filepath.Join(dir, name)
+		}, &fragments, seen)
 	}
+
+	// Process built-in recipes from embedded FS
+	fp.processFragmentsFromFS(fp.builtinRecipesFS, func(name string) string {
+		fragmentName := strings.TrimSuffix(name, ".md")
+		return "builtin:" + fragmentName + ".md"
+	}, &fragments, seen)
 
 	return fragments, nil
 }

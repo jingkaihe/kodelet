@@ -72,7 +72,15 @@ func NewRecipeListOutput(fragmentsWithMetadata []*fragments.Fragment, format Rec
 	}
 
 	for _, fragment := range fragmentsWithMetadata {
-		id := strings.TrimSuffix(filepath.Base(fragment.Path), ".md")
+		// Handle built-in recipes specially
+		var id string
+		if strings.HasPrefix(fragment.Path, "builtin:") {
+			// For built-in recipes, extract the ID from the path
+			id = strings.TrimSuffix(strings.TrimPrefix(fragment.Path, "builtin:"), ".md")
+		} else {
+			// For regular recipes, use the base filename
+			id = strings.TrimSuffix(filepath.Base(fragment.Path), ".md")
+		}
 
 		name := fragment.Metadata.Name
 		if name == "" {

@@ -1,21 +1,35 @@
 package main
 
 import (
+	"context"
 	"strings"
 	"testing"
 
+	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestGenerateIssueResolutionPrompt(t *testing.T) {
-	issueURL := "https://github.com/owner/repo/issues/123"
-	bin := "kodelet"
-	botMention := "@kodelet"
-	prompt := generateIssueResolutionPrompt(bin, issueURL, botMention)
+func TestIssueResolveFragmentContent(t *testing.T) {
+	ctx := context.Background()
+	processor, err := fragments.NewFragmentProcessor()
+	require.NoError(t, err, "Failed to create fragment processor")
+
+	// Load the built-in issue-resolve fragment with test arguments
+	fragment, err := processor.LoadFragment(ctx, &fragments.Config{
+		FragmentName: "issue-resolve",
+		Arguments: map[string]string{
+			"bin":         "kodelet",
+			"issue_url":   "https://github.com/owner/repo/issues/123",
+			"bot_mention": "@kodelet",
+		},
+	})
+	require.NoError(t, err, "Failed to load issue-resolve fragment")
+
+	prompt := fragment.Content
 
 	// Test that the prompt contains the issue URL in the right places
-	assert.Contains(t, prompt, issueURL, "Expected prompt to contain issue URL")
+	assert.Contains(t, prompt, "https://github.com/owner/repo/issues/123", "Expected prompt to contain issue URL")
 
 	// Test that the prompt contains dual workflow detection
 	workflowKeywords := []string{
@@ -58,7 +72,7 @@ func TestGenerateIssueResolutionPrompt(t *testing.T) {
 	assert.Contains(t, prompt, "!!!CRITICAL!!!", "Expected prompt to contain critical warning about git config")
 
 	// Test that the bot mention is included
-	assert.Contains(t, prompt, botMention, "Expected prompt to contain bot mention")
+	assert.Contains(t, prompt, "@kodelet", "Expected prompt to contain bot mention")
 
 	// Test that examples are included
 	exampleKeywords := []string{
@@ -74,28 +88,51 @@ func TestGenerateIssueResolutionPrompt(t *testing.T) {
 	}
 }
 
-func TestGenerateIssueResolutionPromptWithCustomBotMention(t *testing.T) {
-	issueURL := "https://github.com/owner/repo/issues/456"
-	bin := "kodelet"
-	customBotMention := "@mybot"
-	prompt := generateIssueResolutionPrompt(bin, issueURL, customBotMention)
+func TestIssueResolveFragmentWithCustomBotMention(t *testing.T) {
+	ctx := context.Background()
+	processor, err := fragments.NewFragmentProcessor()
+	require.NoError(t, err, "Failed to create fragment processor")
+
+	// Load the fragment with custom bot mention
+	fragment, err := processor.LoadFragment(ctx, &fragments.Config{
+		FragmentName: "issue-resolve",
+		Arguments: map[string]string{
+			"bin":         "kodelet",
+			"issue_url":   "https://github.com/owner/repo/issues/456",
+			"bot_mention": "@mybot",
+		},
+	})
+	require.NoError(t, err, "Failed to load issue-resolve fragment")
+
+	prompt := fragment.Content
 
 	// Test that the custom bot mention is included
-	assert.Contains(t, prompt, customBotMention, "Expected prompt to contain custom bot mention")
+	assert.Contains(t, prompt, "@mybot", "Expected prompt to contain custom bot mention")
 
 	// Test that the prompt still contains dual workflow functionality
 	assert.Contains(t, prompt, "IMPLEMENTATION ISSUE", "Expected prompt to contain implementation workflow even with custom bot mention")
-
 	assert.Contains(t, prompt, "QUESTION ISSUE", "Expected prompt to contain question workflow even with custom bot mention")
+}
+
+func TestIssueResolveFragmentMetadata(t *testing.T) {
+	processor, err := fragments.NewFragmentProcessor()
+	require.NoError(t, err, "Failed to create fragment processor")
+
+	// Get the metadata for the built-in issue-resolve fragment
+	fragment, err := processor.GetFragmentMetadata("issue-resolve")
+	require.NoError(t, err, "Failed to get issue-resolve fragment metadata")
+
+	// Test metadata
+	assert.Equal(t, "GitHub Issue Resolver", fragment.Metadata.Name, "Expected fragment name to be 'GitHub Issue Resolver'")
+	assert.Contains(t, fragment.Metadata.Description, "GitHub issues", "Expected description to mention GitHub issues")
+	assert.Contains(t, fragment.Path, "builtin:", "Expected path to indicate built-in fragment")
 }
 
 func TestIssueResolveConfigDefaults(t *testing.T) {
 	config := NewIssueResolveConfig()
 
 	assert.Equal(t, GitHubProvider, config.Provider, "Expected default provider to be %s", GitHubProvider)
-
 	assert.Equal(t, DefaultBotMention, config.BotMention, "Expected default bot mention to be %s", DefaultBotMention)
-
 	assert.Empty(t, config.IssueURL, "Expected default issue URL to be empty")
 }
 
@@ -150,11 +187,23 @@ func TestIssueResolveConfigValidation(t *testing.T) {
 	}
 }
 
-func TestPromptContainsBinaryPath(t *testing.T) {
-	issueURL := "https://github.com/owner/repo/issues/123"
+func TestIssueResolveFragmentWithCustomBinaryPath(t *testing.T) {
+	ctx := context.Background()
+	processor, err := fragments.NewFragmentProcessor()
+	require.NoError(t, err, "Failed to create fragment processor")
+
 	customBin := "/custom/path/to/kodelet"
-	botMention := "@kodelet"
-	prompt := generateIssueResolutionPrompt(customBin, issueURL, botMention)
+	fragment, err := processor.LoadFragment(ctx, &fragments.Config{
+		FragmentName: "issue-resolve",
+		Arguments: map[string]string{
+			"bin":         customBin,
+			"issue_url":   "https://github.com/owner/repo/issues/123",
+			"bot_mention": "@kodelet",
+		},
+	})
+	require.NoError(t, err, "Failed to load issue-resolve fragment")
+
+	prompt := fragment.Content
 
 	// Test that the custom binary path is used in subagent commands
 	expectedCommands := []string{
@@ -167,18 +216,28 @@ func TestPromptContainsBinaryPath(t *testing.T) {
 	}
 }
 
-func TestPromptWorkflowSeparation(t *testing.T) {
-	issueURL := "https://github.com/owner/repo/issues/123"
-	bin := "kodelet"
-	botMention := "@kodelet"
-	prompt := generateIssueResolutionPrompt(bin, issueURL, botMention)
+func TestIssueResolveFragmentWorkflowSeparation(t *testing.T) {
+	ctx := context.Background()
+	processor, err := fragments.NewFragmentProcessor()
+	require.NoError(t, err, "Failed to create fragment processor")
+
+	fragment, err := processor.LoadFragment(ctx, &fragments.Config{
+		FragmentName: "issue-resolve",
+		Arguments: map[string]string{
+			"bin":         "kodelet",
+			"issue_url":   "https://github.com/owner/repo/issues/123",
+			"bot_mention": "@kodelet",
+		},
+	})
+	require.NoError(t, err, "Failed to load issue-resolve fragment")
+
+	prompt := fragment.Content
 
 	// Test that implementation and question workflows are clearly separated
 	implementationSection := "### For IMPLEMENTATION ISSUES (Feature/Fix/Code Changes):"
 	questionSection := "### For QUESTION ISSUES (Information/Clarification):"
 
 	assert.Contains(t, prompt, implementationSection, "Expected prompt to contain implementation workflow section")
-
 	assert.Contains(t, prompt, questionSection, "Expected prompt to contain question workflow section")
 
 	// Test that the sections appear in the correct order
