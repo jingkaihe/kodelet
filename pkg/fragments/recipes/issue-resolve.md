@@ -1,8 +1,6 @@
 ---
 name: GitHub Issue Resolver
 description: Intelligently resolves GitHub issues choosing between implementation workflow and Q&A
-allowed_tools: "thinking,todo_write,llm_send_message"
-allowed_commands: "git,gh"
 ---
 
 {{/* Template variables: .issue_url  .bot_mention .bin */}}

@@ -201,5 +201,3 @@ func validatePrerequisites() error {
 
 	return nil
 }
-
-

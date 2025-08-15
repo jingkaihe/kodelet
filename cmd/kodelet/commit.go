@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/jingkaihe/kodelet/pkg/tools"
@@ -65,38 +66,36 @@ You must stage your changes (using 'git add') before running this command.`,
 			os.Exit(1)
 		}
 
-		// Get the git diff of staged changes
-		diff, err := getGitDiff()
+		// Load the built-in commit fragment
+		processor, err := fragments.NewFragmentProcessor()
 		if err != nil {
-			presenter.Error(err, "Failed to get git diff")
+			presenter.Error(err, "Failed to create fragment processor")
 			os.Exit(1)
 		}
 
-		// If diff is empty, notify the user and exit
-		if len(strings.TrimSpace(diff)) == 0 {
-			presenter.Warning("No changes detected. Please stage changes using 'git add' before committing")
-			os.Exit(1)
-		}
+		// Prepare template arguments
+		fragmentArgs := map[string]string{}
 
-		// Generate commit message based on diff
-		var prompt string
+		// Add template if provided
 		if config.Template != "" {
-			prompt = fmt.Sprintf("Generate a commit message following this template: '%s' for the following git diff:\n\n%s", config.Template, diff)
-		} else if config.Short {
-			prompt = fmt.Sprintf(`Generate a concise commit message following conventional commits format for the following git diff.
-The commit message should have only a short, descriptive title that summarizes the changes.
-
-IMPORTANT: The output of the commit message should be a single line with no bullet points or additional descriptions. It should not be wrapped with any markdown code block.
-%s`, diff)
-		} else {
-			prompt = fmt.Sprintf(`Generate a concise commit message following conventional commits format for the following git diff.
-The commit message should have:
-* A short description as the title
-* Bullet points that breaks down the changes, with 2-3 sentences for each bullet point, while maintaining the accuracy and completeness of the git diff.
-
-IMPORTANT: The output of the commit message should not be wrapped with any markdown code block.
-%s`, diff)
+			fragmentArgs["template"] = config.Template
 		}
+
+		// Add short flag if set
+		if config.Short {
+			fragmentArgs["short"] = "true"
+		}
+
+		fragment, err := processor.LoadFragment(ctx, &fragments.Config{
+			FragmentName: "commit",
+			Arguments:    fragmentArgs,
+		})
+		if err != nil {
+			presenter.Error(err, "Failed to load built-in commit recipe")
+			os.Exit(1)
+		}
+
+		prompt := fragment.Content
 
 		presenter.Info("Analyzing staged changes and generating commit message...")
 
@@ -182,16 +181,6 @@ func hasStagedChanges() bool {
 	cmd := exec.Command("git", "diff", "--cached", "--quiet")
 	err := cmd.Run()
 	return err != nil // Non-zero exit code means there are staged changes
-}
-
-// getGitDiff returns the git diff for staged changes
-func getGitDiff() (string, error) {
-	cmd := exec.Command("git", "diff", "--cached")
-	output, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-	return string(output), nil
 }
 
 // confirmCommit asks the user to confirm the commit

@@ -46,8 +46,8 @@ type Config struct {
 
 // Processor handles fragment loading and rendering
 type Processor struct {
-	fragmentDirs      []string
-	builtinRecipesFS  fs.FS
+	fragmentDirs     []string
+	builtinRecipesFS fs.FS
 }
 
 // Option is a function that configures a FragmentProcessor
@@ -395,8 +395,6 @@ func (fp *Processor) createBashFunc(ctx context.Context) func(...string) string 
 		return strings.TrimRight(string(output), "\n\r")
 	}
 }
-
-
 
 // processFragmentEntry processes a single fragment entry and returns a Fragment if valid
 func (fp *Processor) processFragmentEntry(name, path string, content []byte, seen map[string]bool) *Fragment {
