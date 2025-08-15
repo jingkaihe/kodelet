@@ -384,7 +384,7 @@ func (fp *Processor) createBashFunc(ctx context.Context) func(...string) string 
 				"command": command,
 				"args":    cmdArgs,
 			}).WithError(err).Warn("Bash command failed")
-			
+
 			return strings.TrimRight(string(output), "\n\r")
 		}
 
