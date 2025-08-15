@@ -176,7 +176,8 @@ func TestFragmentProcessor_ListFragments(t *testing.T) {
 	fragments, err := processor.ListFragments()
 	require.NoError(t, err)
 
-	expected := []string{"frag1", "frag2", "duplicate", "frag3"}
+	// Should include both filesystem fragments and built-in recipes
+	expected := []string{"frag1", "frag2", "duplicate", "frag3", "issue-resolve"}
 	assert.ElementsMatch(t, expected, fragments)
 }
 
@@ -344,7 +345,8 @@ Unique content`
 	fragments, err := processor.ListFragmentsWithMetadata()
 	require.NoError(t, err)
 
-	assert.Len(t, fragments, 3)
+	// Should include 3 filesystem fragments + 1 built-in recipe
+	assert.Len(t, fragments, 4)
 
 	var withMeta, withoutMeta, unique *Fragment
 	for _, f := range fragments {
