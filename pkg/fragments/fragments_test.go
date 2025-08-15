@@ -146,41 +146,6 @@ Echo test: {{bash "echo" "hello world"}}`
 	assert.Contains(t, result, "Echo test: hello world")
 }
 
-func TestFragmentProcessor_ListFragments(t *testing.T) {
-	dir1, err := os.MkdirTemp("", "kodelet-fragments-1")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir1)
-
-	dir2, err := os.MkdirTemp("", "kodelet-fragments-2")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir2)
-
-	err = os.WriteFile(filepath.Join(dir1, "frag1.md"), []byte("fragment1"), 0644)
-	require.NoError(t, err)
-
-	err = os.WriteFile(filepath.Join(dir1, "frag2"), []byte("fragment2"), 0644)
-	require.NoError(t, err)
-
-	err = os.WriteFile(filepath.Join(dir2, "frag3.md"), []byte("fragment3"), 0644)
-	require.NoError(t, err)
-
-	err = os.WriteFile(filepath.Join(dir1, "duplicate.md"), []byte("first"), 0644)
-	require.NoError(t, err)
-
-	err = os.WriteFile(filepath.Join(dir2, "duplicate.md"), []byte("second"), 0644)
-	require.NoError(t, err)
-
-	processor, err := NewFragmentProcessor(WithFragmentDirs(dir1, dir2))
-	require.NoError(t, err)
-
-	fragments, err := processor.ListFragments()
-	require.NoError(t, err)
-
-	// Should include both filesystem fragments and built-in recipes
-	expected := []string{"frag1", "frag2", "duplicate", "frag3", "issue-resolve"}
-	assert.ElementsMatch(t, expected, fragments)
-}
-
 func TestFragmentProcessor_ErrorHandling(t *testing.T) {
 	processor, err := NewFragmentProcessor()
 	require.NoError(t, err)
