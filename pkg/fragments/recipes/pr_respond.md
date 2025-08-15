@@ -3,7 +3,7 @@ name: GitHub PR Comment Responder
 description: Intelligently responds to PR comments based on their type (code changes, questions, or code reviews)
 ---
 
-{{/* Template variables: .pr_url .review_id .issue_comment_id .bin */}}
+{{/* Template variables: .pr_url .owner .repo .pr_number .review_id .issue_comment_id .bin */}}
 
 Please respond to the PR comment {{.pr_url}} following the appropriate workflow based on the comment type:
 
@@ -15,27 +15,37 @@ Please respond to the PR comment {{.pr_url}} following the appropriate workflow 
 {{bash "gh" "pr" "diff" .pr_url}}
 </git_diff>
 
-{{if .review_id}}
+{{if ne .review_id ""}}
 <pr_focused_comment>
 	<pr_comment>
 Review Comment ID {{.review_id}}:
-{{bash "sh" "-c" "owner_repo=$(gh pr view " .pr_url " --json headRepository --jq -r '.headRepository.owner.login + \"/\" + .headRepository.name') && pr_number=$(gh pr view " .pr_url " --json number --jq -r '.number') && gh api repos/$owner_repo/pulls/$pr_number/reviews/" .review_id " --jq '{body: .body, author: .user.login, submitted_at: .submitted_at}'"}}
+{{$review_comment_path := print "repos/" .owner "/" .repo "/pulls/" .pr_number "/reviews/" .review_id}}{{bash "gh" "api" $review_comment_path "--jq" "{body: .body, author: .user.login, submitted_at: .submitted_at}"}}
 	</pr_comment>
 
 	<pr_discussions>
 Related review discussions for comment {{.review_id}}:
-{{bash "sh" "-c" "owner_repo=$(gh pr view " .pr_url " --json headRepository --jq -r '.headRepository.owner.login + \"/\" + .headRepository.name') && pr_number=$(gh pr view " .pr_url " --json number --jq -r '.number') && gh api repos/$owner_repo/pulls/$pr_number/reviews/" .review_id "/comments --jq '[.[] | {id: .id, author: .user.login, body: .body, line: .line, created_at: .created_at, diff_hunk: .diff_hunk}]' | yq eval -P"}}
+{{$review_discussions_path := print "repos/" .owner "/" .repo "/pulls/" .pr_number "/reviews/" .review_id "/comments"}}{{bash "gh" "api" $review_discussions_path "--jq" "[.[] | {id: .id, author: .user.login, body: .body, line: .line, created_at: .created_at, diff_hunk: .diff_hunk}]"}}
+	</pr_discussions>
+</pr_focused_comment>
+{{else if ne .issue_comment_id ""}}
+<pr_focused_comment>
+	<pr_comment>
+Issue Comment ID {{.issue_comment_id}}:
+{{$issue_comment_path := print "repos/" .owner "/" .repo "/issues/comments/" .issue_comment_id}}{{bash "gh" "api" $issue_comment_path "--jq" "{author: .user.login, body: .body, created_at: .created_at}"}}
+	</pr_comment>
+
+	<pr_discussions>
+Issue comments don't have related discussions like review comments
 	</pr_discussions>
 </pr_focused_comment>
 {{else}}
 <pr_focused_comment>
 	<pr_comment>
-Issue Comment ID {{.issue_comment_id}}:
-{{bash "sh" "-c" "owner_repo=$(gh pr view " .pr_url " --json headRepository --jq -r '.headRepository.owner.login + \"/\" + .headRepository.name') && gh api repos/$owner_repo/issues/comments/" .issue_comment_id " --jq '{author: .user.login, body: .body, created_at: .created_at}'"}}
+No specific comment ID provided. Please provide either --review-id or --issue-comment-id.
 	</pr_comment>
 
 	<pr_discussions>
-Issue comments don't have related discussions like review comments
+Use the general PR context above to understand and respond to the comment.
 	</pr_discussions>
 </pr_focused_comment>
 {{end}}
@@ -84,14 +94,14 @@ Issue comments don't have related discussions like review comments
    - Use subagent to examine the codebase and understand the changes
    - Review the git diff to understand what was modified
    - Check for code quality, security, performance, and best practices issues
-   
+
 2. Conduct comprehensive code review:
    - Look for potential bugs, security vulnerabilities, or logic errors
    - Check for adherence to coding standards and best practices
    - Evaluate code maintainability, readability, and performance
    - Assess test coverage and documentation quality
    - Review for potential side effects or breaking changes
-   
+
 3. Create and submit proper GitHub review using MCP tools:
    - First, create a pending review using 'mcp_create_pending_pull_request_review'
    - Add specific review comments on code lines using 'mcp_add_pull_request_review_comment_to_pending_review'
@@ -101,7 +111,7 @@ Issue comments don't have related discussions like review comments
    - Highlight both positive aspects and areas for improvement
    - Prioritize issues by severity (critical, major, minor)
    - Finally, submit the review using 'mcp_submit_pending_pull_request_review' with event "COMMENT"
-   
+
 4. Do NOT make code changes, commits, or push updates for code reviews - only provide feedback through GitHub review system
 
 ## Tool Usage Guidelines:

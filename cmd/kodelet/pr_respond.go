@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/jingkaihe/kodelet/pkg/fragments"
@@ -144,6 +145,13 @@ Examples:
 			os.Exit(1)
 		}
 
+		// Parse GitHub URL to extract components
+		owner, repo, prNumber, err := parseGitHubURL(config.PRURL)
+		if err != nil {
+			presenter.Error(err, "Failed to parse GitHub URL")
+			os.Exit(1)
+		}
+
 		// Load the built-in pr_respond fragment
 		processor, err := fragments.NewFragmentProcessor()
 		if err != nil {
@@ -153,8 +161,11 @@ Examples:
 
 		// Prepare template arguments
 		fragmentArgs := map[string]string{
-			"pr_url": config.PRURL,
-			"bin":    bin,
+			"pr_url":    config.PRURL,
+			"owner":     owner,
+			"repo":      repo,
+			"pr_number": prNumber,
+			"bin":       bin,
 		}
 
 		// Add comment IDs if provided
@@ -223,4 +234,22 @@ func getPRRespondConfigFromFlags(cmd *cobra.Command) *PRRespondConfig {
 	return config
 }
 
-
+// parseGitHubURL extracts owner, repo, and PR number from GitHub PR URL
+// Expected URL format: https://github.com/owner/repo/pull/123
+// When split by "/", the parts array becomes:
+//
+//	parts[0]: "https:"
+//	parts[1]: "" (empty string)
+//	parts[2]: "github.com"
+//	parts[3]: "owner" (GitHub username/organization)
+//	parts[4]: "repo" (repository name)
+//	parts[5]: "pull" (literal "pull")
+//	parts[6]: "123" (PR number)
+func parseGitHubURL(prURL string) (owner, repo, prNumber string, err error) {
+	parts := strings.Split(prURL, "/")
+	if len(parts) < 7 {
+		return "", "", "", errors.New("invalid PR URL format")
+	}
+	// Extract: owner (parts[3]), repo (parts[4]), prNumber (parts[6])
+	return parts[3], parts[4], parts[6], nil
+}
