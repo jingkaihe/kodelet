@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -127,7 +128,11 @@ func NewFragmentProcessor(opts ...Option) (*Processor, error) {
 
 // readEmbedded reads an embedded recipe file
 func readEmbedded(name string) ([]byte, error) {
-	return embedFS.ReadFile("recipes/" + name)
+	recipesFS, err := fs.Sub(embedFS, "recipes")
+	if err != nil {
+		return nil, err
+	}
+	return fs.ReadFile(recipesFS, name)
 }
 
 // readFragmentContent reads fragment content from either file system or embedded resources
@@ -157,10 +162,12 @@ func (fp *Processor) findFragmentFile(fragmentName string) (string, error) {
 	}
 
 	// Try embedded recipes as fallback
-	for _, name := range possibleNames {
-		embeddedPath := "recipes/" + name
-		if _, err := embedFS.ReadFile(embeddedPath); err == nil {
-			return "embed:" + name, nil
+	recipesFS, err := fs.Sub(embedFS, "recipes")
+	if err == nil {
+		for _, name := range possibleNames {
+			if _, err := fs.Stat(recipesFS, name); err == nil {
+				return "embed:" + name, nil
+			}
 		}
 	}
 
@@ -414,21 +421,24 @@ func (fp *Processor) ListFragments() ([]string, error) {
 	}
 
 	// Add built-in recipes from embedded FS
-	entries, err := embedFS.ReadDir("recipes")
+	recipesFS, err := fs.Sub(embedFS, "recipes")
 	if err == nil {
-		for _, entry := range entries {
-			if entry.IsDir() {
-				continue
-			}
+		entries, err := fs.ReadDir(recipesFS, ".")
+		if err == nil {
+			for _, entry := range entries {
+				if entry.IsDir() {
+					continue
+				}
 
-			name := entry.Name()
-			// Remove .md extension if present
-			name = strings.TrimSuffix(name, ".md")
+				name := entry.Name()
+				// Remove .md extension if present
+				name = strings.TrimSuffix(name, ".md")
 
-			// Only add if not already seen (user-provided recipes have precedence)
-			if !seen[name] {
-				fragments = append(fragments, name)
-				seen[name] = true
+				// Only add if not already seen (user-provided recipes have precedence)
+				if !seen[name] {
+					fragments = append(fragments, name)
+					seen[name] = true
+				}
 			}
 		}
 	}
@@ -436,10 +446,36 @@ func (fp *Processor) ListFragments() ([]string, error) {
 	return fragments, nil
 }
 
+// processFragmentEntry processes a single fragment entry and returns a Fragment if valid
+func (fp *Processor) processFragmentEntry(name, path string, content []byte, seen map[string]bool) *Fragment {
+	fragmentName := strings.TrimSuffix(name, ".md")
+
+	if seen[fragmentName] {
+		return nil
+	}
+
+	metadata, bodyContent, err := fp.parseFrontmatter(string(content))
+	if err != nil {
+		return nil
+	}
+
+	if metadata.Name == "" {
+		metadata.Name = fragmentName
+	}
+
+	seen[fragmentName] = true
+	return &Fragment{
+		Metadata: metadata,
+		Content:  bodyContent,
+		Path:     path,
+	}
+}
+
 func (fp *Processor) ListFragmentsWithMetadata() ([]*Fragment, error) {
 	var fragments []*Fragment
 	seen := make(map[string]bool)
 
+	// Process filesystem fragments
 	for _, dir := range fp.fragmentDirs {
 		entries, err := os.ReadDir(dir)
 		if err != nil {
@@ -452,69 +488,42 @@ func (fp *Processor) ListFragmentsWithMetadata() ([]*Fragment, error) {
 			}
 
 			name := entry.Name()
-			fragmentName := strings.TrimSuffix(name, ".md")
+			fragmentPath := filepath.Join(dir, name)
 
-			if !seen[fragmentName] {
-				fragmentPath := filepath.Join(dir, name)
+			content, err := os.ReadFile(fragmentPath)
+			if err != nil {
+				continue
+			}
 
-				content, err := os.ReadFile(fragmentPath)
-				if err != nil {
-					continue
-				}
-
-				metadata, bodyContent, err := fp.parseFrontmatter(string(content))
-				if err != nil {
-					continue
-				}
-
-				if metadata.Name == "" {
-					metadata.Name = fragmentName
-				}
-
-				fragments = append(fragments, &Fragment{
-					Metadata: metadata,
-					Content:  bodyContent,
-					Path:     fragmentPath,
-				})
-				seen[fragmentName] = true
+			if fragment := fp.processFragmentEntry(name, fragmentPath, content, seen); fragment != nil {
+				fragments = append(fragments, fragment)
 			}
 		}
 	}
 
-	// Add built-in recipes from embedded FS
-	entries, err := embedFS.ReadDir("recipes")
+	// Process built-in recipes from embedded FS
+	recipesFS, err := fs.Sub(embedFS, "recipes")
 	if err == nil {
-		for _, entry := range entries {
-			if entry.IsDir() {
-				continue
-			}
+		entries, err := fs.ReadDir(recipesFS, ".")
+		if err == nil {
+			for _, entry := range entries {
+				if entry.IsDir() {
+					continue
+				}
 
-			name := entry.Name()
-			fragmentName := strings.TrimSuffix(name, ".md")
+				name := entry.Name()
 
-			if !seen[fragmentName] {
-				embeddedPath := "recipes/" + name
-
-				content, err := embedFS.ReadFile(embeddedPath)
+				content, err := fs.ReadFile(recipesFS, name)
 				if err != nil {
 					continue
 				}
 
-				metadata, bodyContent, err := fp.parseFrontmatter(string(content))
-				if err != nil {
-					continue
-				}
+				fragmentName := strings.TrimSuffix(name, ".md")
+				displayPath := "builtin:" + fragmentName + ".md"
 
-				if metadata.Name == "" {
-					metadata.Name = fragmentName
+				if fragment := fp.processFragmentEntry(name, displayPath, content, seen); fragment != nil {
+					fragments = append(fragments, fragment)
 				}
-
-				fragments = append(fragments, &Fragment{
-					Metadata: metadata,
-					Content:  bodyContent,
-					Path:     "builtin:" + fragmentName + ".md",
-				})
-				seen[fragmentName] = true
 			}
 		}
 	}
