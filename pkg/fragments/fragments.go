@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -42,6 +44,7 @@ type Config struct {
 // Processor handles fragment loading and rendering
 type Processor struct {
 	fragmentDirs []string
+	builtinFS    bool // Whether to include builtin fragments
 }
 
 // Option is a function that configures a FragmentProcessor
@@ -95,6 +98,14 @@ func WithDefaultDirs() Option {
 	}
 }
 
+// WithBuiltinFragments enables loading of builtin fragments
+func WithBuiltinFragments() Option {
+	return func(fp *Processor) error {
+		fp.builtinFS = true
+		return nil
+	}
+}
+
 // NewFragmentProcessor creates a new fragment processor with optional configuration
 func NewFragmentProcessor(opts ...Option) (*Processor, error) {
 	// Start with empty processor
@@ -115,8 +126,8 @@ func NewFragmentProcessor(opts ...Option) (*Processor, error) {
 		}
 	}
 
-	// If no directories were set after applying options, apply defaults
-	if len(fp.fragmentDirs) == 0 {
+	// If no directories were set after applying options and builtin is not enabled, apply defaults
+	if len(fp.fragmentDirs) == 0 && !fp.builtinFS {
 		if err := WithDefaultDirs()(fp); err != nil {
 			return nil, errors.Wrap(err, "failed to apply default fragment directories")
 		}
@@ -127,6 +138,14 @@ func NewFragmentProcessor(opts ...Option) (*Processor, error) {
 
 // findFragmentFile searches for a fragment file in the configured directories
 func (fp *Processor) findFragmentFile(fragmentName string) (string, error) {
+	// Check builtin fragments first if enabled
+	if fp.builtinFS {
+		if _, err := fp.loadBuiltinFragment(fragmentName); err == nil {
+			// Return a special path prefix for builtin fragments
+			return "builtin:" + fragmentName, nil
+		}
+	}
+	
 	// Try both .md and no extension
 	possibleNames := []string{
 		fragmentName + ".md",
@@ -142,7 +161,31 @@ func (fp *Processor) findFragmentFile(fragmentName string) (string, error) {
 		}
 	}
 
+	if fp.builtinFS {
+		return "", errors.Errorf("fragment '%s' not found", fragmentName)
+	}
 	return "", errors.Errorf("fragment '%s' not found in directories: %v", fragmentName, fp.fragmentDirs)
+}
+
+// loadBuiltinFragment loads a builtin fragment content
+func (fp *Processor) loadBuiltinFragment(fragmentName string) (string, error) {
+	fs := NewBuiltinFS()
+	
+	// Try with .md extension first
+	names := []string{fragmentName + ".md", fragmentName}
+	
+	for _, name := range names {
+		file, err := fs.Open(name)
+		if err == nil {
+			defer file.Close()
+			content, err := io.ReadAll(file)
+			if err == nil {
+				return string(content), nil
+			}
+		}
+	}
+	
+	return "", errors.Errorf("builtin fragment '%s' not found", fragmentName)
 }
 
 func (fp *Processor) parseFrontmatter(content string) (Metadata, string, error) {
@@ -250,9 +293,22 @@ func (fp *Processor) LoadFragment(ctx context.Context, config *Config) (*Fragmen
 
 	logger.G(ctx).WithField("path", fragmentPath).Debug("Found fragment file")
 
-	content, err := os.ReadFile(fragmentPath)
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to read fragment file '%s'", fragmentPath)
+	var content []byte
+	
+	// Check if this is a builtin fragment
+	if strings.HasPrefix(fragmentPath, "builtin:") {
+		fragmentName := strings.TrimPrefix(fragmentPath, "builtin:")
+		contentStr, err := fp.loadBuiltinFragment(fragmentName)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to load builtin fragment '%s'", fragmentName)
+		}
+		content = []byte(contentStr)
+	} else {
+		// Regular file fragment
+		content, err = os.ReadFile(fragmentPath)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to read fragment file '%s'", fragmentPath)
+		}
 	}
 
 	metadata, bodyContent, err := fp.parseFrontmatter(string(content))
@@ -355,6 +411,25 @@ func (fp *Processor) ListFragments() ([]string, error) {
 	var fragments []string
 	seen := make(map[string]bool)
 
+	// Add builtin fragments first if enabled
+	if fp.builtinFS {
+		builtinFS := NewBuiltinFS()
+		entries, err := fs.ReadDir(builtinFS, ".")
+		if err == nil {
+			for _, entry := range entries {
+				if entry.IsDir() {
+					continue
+				}
+				name := entry.Name()
+				name = strings.TrimSuffix(name, ".md")
+				if !seen[name] {
+					fragments = append(fragments, name)
+					seen[name] = true
+				}
+			}
+		}
+	}
+
 	for _, dir := range fp.fragmentDirs {
 		entries, err := os.ReadDir(dir)
 		if err != nil {
@@ -371,7 +446,7 @@ func (fp *Processor) ListFragments() ([]string, error) {
 			// Remove .md extension if present
 			name = strings.TrimSuffix(name, ".md")
 
-			// Only add if not already seen (precedence: repo > home)
+			// Only add if not already seen (precedence: builtin > repo > home)
 			if !seen[name] {
 				fragments = append(fragments, name)
 				seen[name] = true
@@ -385,6 +460,52 @@ func (fp *Processor) ListFragments() ([]string, error) {
 func (fp *Processor) ListFragmentsWithMetadata() ([]*Fragment, error) {
 	var fragments []*Fragment
 	seen := make(map[string]bool)
+
+	// Add builtin fragments first if enabled
+	if fp.builtinFS {
+		builtinFS := NewBuiltinFS()
+		entries, err := fs.ReadDir(builtinFS, ".")
+		if err == nil {
+			for _, entry := range entries {
+				if entry.IsDir() {
+					continue
+				}
+
+				name := entry.Name()
+				fragmentName := strings.TrimSuffix(name, ".md")
+
+				if !seen[fragmentName] {
+					// Load builtin fragment content
+					file, err := builtinFS.Open(name)
+					if err != nil {
+						continue
+					}
+					defer file.Close()
+
+					content, err := io.ReadAll(file)
+					if err != nil {
+						continue
+					}
+
+					metadata, bodyContent, err := fp.parseFrontmatter(string(content))
+					if err != nil {
+						continue
+					}
+
+					if metadata.Name == "" {
+						metadata.Name = fragmentName
+					}
+
+					fragments = append(fragments, &Fragment{
+						Metadata: metadata,
+						Content:  bodyContent,
+						Path:     "builtin:" + fragmentName,
+					})
+					seen[fragmentName] = true
+				}
+			}
+		}
+	}
 
 	for _, dir := range fp.fragmentDirs {
 		entries, err := os.ReadDir(dir)

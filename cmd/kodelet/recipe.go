@@ -215,7 +215,10 @@ func init() {
 }
 
 func runRecipeList(_ context.Context, config *RecipeListConfig) error {
-	processor, err := fragments.NewFragmentProcessor()
+	processor, err := fragments.NewFragmentProcessor(
+		fragments.WithDefaultDirs(),
+		fragments.WithBuiltinFragments(),
+	)
 	if err != nil {
 		return errors.Wrap(err, "failed to create fragment processor")
 	}
@@ -244,7 +247,10 @@ func runRecipeList(_ context.Context, config *RecipeListConfig) error {
 }
 
 func runRecipeShow(ctx context.Context, recipeName string, config *RecipeShowConfig) error {
-	processor, err := fragments.NewFragmentProcessor()
+	processor, err := fragments.NewFragmentProcessor(
+		fragments.WithDefaultDirs(),
+		fragments.WithBuiltinFragments(),
+	)
 	if err != nil {
 		return errors.Wrap(err, "failed to create fragment processor")
 	}

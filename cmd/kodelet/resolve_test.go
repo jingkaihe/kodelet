@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -8,11 +9,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestGenerateIssueResolutionPrompt(t *testing.T) {
+func TestLoadIssueResolvePrompt(t *testing.T) {
+	ctx := context.Background()
 	issueURL := "https://github.com/owner/repo/issues/123"
 	bin := "kodelet"
 	botMention := "@kodelet"
-	prompt := generateIssueResolutionPrompt(bin, issueURL, botMention)
+	prompt, err := loadIssueResolvePrompt(ctx, bin, issueURL, botMention)
+	require.NoError(t, err, "Expected no error loading issue resolve prompt")
 
 	// Test that the prompt contains the issue URL in the right places
 	assert.Contains(t, prompt, issueURL, "Expected prompt to contain issue URL")
@@ -74,11 +77,13 @@ func TestGenerateIssueResolutionPrompt(t *testing.T) {
 	}
 }
 
-func TestGenerateIssueResolutionPromptWithCustomBotMention(t *testing.T) {
+func TestLoadIssueResolvePromptWithCustomBotMention(t *testing.T) {
+	ctx := context.Background()
 	issueURL := "https://github.com/owner/repo/issues/456"
 	bin := "kodelet"
 	customBotMention := "@mybot"
-	prompt := generateIssueResolutionPrompt(bin, issueURL, customBotMention)
+	prompt, err := loadIssueResolvePrompt(ctx, bin, issueURL, customBotMention)
+	require.NoError(t, err, "Expected no error loading issue resolve prompt")
 
 	// Test that the custom bot mention is included
 	assert.Contains(t, prompt, customBotMention, "Expected prompt to contain custom bot mention")
@@ -151,10 +156,12 @@ func TestIssueResolveConfigValidation(t *testing.T) {
 }
 
 func TestPromptContainsBinaryPath(t *testing.T) {
+	ctx := context.Background()
 	issueURL := "https://github.com/owner/repo/issues/123"
 	customBin := "/custom/path/to/kodelet"
 	botMention := "@kodelet"
-	prompt := generateIssueResolutionPrompt(customBin, issueURL, botMention)
+	prompt, err := loadIssueResolvePrompt(ctx, customBin, issueURL, botMention)
+	require.NoError(t, err, "Expected no error loading issue resolve prompt")
 
 	// Test that the custom binary path is used in subagent commands
 	expectedCommands := []string{
@@ -168,10 +175,12 @@ func TestPromptContainsBinaryPath(t *testing.T) {
 }
 
 func TestPromptWorkflowSeparation(t *testing.T) {
+	ctx := context.Background()
 	issueURL := "https://github.com/owner/repo/issues/123"
 	bin := "kodelet"
 	botMention := "@kodelet"
-	prompt := generateIssueResolutionPrompt(bin, issueURL, botMention)
+	prompt, err := loadIssueResolvePrompt(ctx, bin, issueURL, botMention)
+	require.NoError(t, err, "Expected no error loading issue resolve prompt")
 
 	// Test that implementation and question workflows are clearly separated
 	implementationSection := "### For IMPLEMENTATION ISSUES (Feature/Fix/Code Changes):"
