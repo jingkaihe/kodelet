@@ -2,6 +2,7 @@ package fragments
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -55,7 +56,8 @@ func TestFragmentProcessor_BashCommandError(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(tempDir)
 
-	fragmentContent := `This will fail: {{bash "nonexistent-command-xyz"}}`
+	// Test with a command that produces output but fails
+	fragmentContent := `Error output: {{bash "ls" "/nonexistent-directory-xyz"}}`
 	fragmentPath := filepath.Join(tempDir, "failing.md")
 	err = os.WriteFile(fragmentPath, []byte(fragmentContent), 0644)
 	require.NoError(t, err)
@@ -71,8 +73,70 @@ func TestFragmentProcessor_BashCommandError(t *testing.T) {
 	result, err := processor.LoadFragment(context.Background(), config)
 	require.NoError(t, err)
 
-	assert.Contains(t, result.Content, "[ERROR executing command")
-	assert.Contains(t, result.Content, "nonexistent-command-xyz")
+	// Should contain the actual error output from the command, not a generic error message
+	assert.Contains(t, result.Content, "Error output: ")
+	// The output should contain the actual error message from ls command
+	assert.Contains(t, result.Content, "cannot access")
+	// Should NOT contain the old generic error format
+	assert.NotContains(t, result.Content, "[ERROR executing command")
+}
+
+func TestFragmentProcessor_BashCommandNotFound(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "kodelet-fragments-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	// Test with a command that doesn't exist - this should return empty output
+	fragmentContent := `Command not found: {{bash "nonexistent-command-xyz"}}`
+	fragmentPath := filepath.Join(tempDir, "not-found.md")
+	err = os.WriteFile(fragmentPath, []byte(fragmentContent), 0644)
+	require.NoError(t, err)
+
+	processor, err := NewFragmentProcessor(WithFragmentDirs(tempDir))
+	require.NoError(t, err)
+
+	config := &Config{
+		FragmentName: "not-found",
+		Arguments:    map[string]string{},
+	}
+
+	result, err := processor.LoadFragment(context.Background(), config)
+	require.NoError(t, err)
+
+	// Since the command doesn't exist, there should be no output, just the prefix
+	assert.Equal(t, "Command not found: ", result.Content)
+}
+
+func TestFragmentProcessor_BashCommandErrorWithOutput(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "kodelet-fragments-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	// Create a test file first
+	testFile := filepath.Join(tempDir, "test.txt")
+	err = os.WriteFile(testFile, []byte("hello world\ntest content"), 0644)
+	require.NoError(t, err)
+
+	// Test with grep that produces no output but returns non-zero exit code
+	fragmentContent := fmt.Sprintf(`Search result: {{bash "grep" "nonexistent" "%s"}}`, testFile)
+	fragmentPath := filepath.Join(tempDir, "grep-test.md")
+	err = os.WriteFile(fragmentPath, []byte(fragmentContent), 0644)
+	require.NoError(t, err)
+
+	processor, err := NewFragmentProcessor(WithFragmentDirs(tempDir))
+	require.NoError(t, err)
+
+	config := &Config{
+		FragmentName: "grep-test",
+		Arguments:    map[string]string{},
+	}
+
+	result, err := processor.LoadFragment(context.Background(), config)
+	require.NoError(t, err)
+
+	// grep with no matches produces no output but returns exit code 1
+	// So we should get just the prefix with no error message
+	assert.Equal(t, "Search result: ", result.Content)
 }
 
 func TestFragmentProcessor_findFragmentFile(t *testing.T) {
@@ -310,8 +374,8 @@ Unique content`
 	fragments, err := processor.ListFragmentsWithMetadata()
 	require.NoError(t, err)
 
-	// Should include 3 filesystem fragments + 3 built-in recipes (issue-resolve, commit, and pr)
-	assert.Len(t, fragments, 6)
+	// Should include 3 filesystem fragments + 4 built-in recipes (issue-resolve, commit, pr, and pr_respond)
+	assert.Len(t, fragments, 7)
 
 	var withMeta, withoutMeta, unique *Fragment
 	for _, f := range fragments {

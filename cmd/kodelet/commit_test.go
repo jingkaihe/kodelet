@@ -25,7 +25,7 @@ func TestCommitFragmentContent(t *testing.T) {
 
 	// Test that the prompt contains expected elements for default format
 	assert.Contains(t, prompt, "conventional commits format", "Expected conventional commits mention")
-	assert.Contains(t, prompt, "short description as the title", "Expected title instruction")
+	assert.Contains(t, prompt, "Short description as the title", "Expected title instruction")
 	assert.Contains(t, prompt, "Bullet points", "Expected bullet points instruction")
 	assert.Contains(t, prompt, "markdown code block", "Expected markdown instruction")
 }

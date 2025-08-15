@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"embed"
-	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -383,12 +382,13 @@ func (fp *Processor) createBashFunc(ctx context.Context) func(...string) string 
 		cmd := exec.CommandContext(cmdCtx, command, cmdArgs...)
 		output, err := cmd.CombinedOutput()
 		if err != nil {
-			fullCmd := append([]string{command}, cmdArgs...)
 			logger.G(ctx).WithFields(map[string]interface{}{
 				"command": command,
 				"args":    cmdArgs,
 			}).WithError(err).Warn("Bash command failed")
-			return fmt.Sprintf("[ERROR executing command '%s': %v]", strings.Join(fullCmd, " "), err)
+			
+			// Return the actual output even on error, as it may contain useful information
+			return strings.TrimRight(string(output), "\n\r")
 		}
 
 		// Remove trailing newlines for cleaner substitution
