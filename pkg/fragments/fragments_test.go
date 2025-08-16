@@ -460,3 +460,134 @@ Test content here.`
 	assert.Equal(t, []string{"bash", "file_read", "grep_tool"}, metadata2.Metadata.AllowedTools)
 	assert.Equal(t, []string{"git *", "cat *"}, metadata2.Metadata.AllowedCommands)
 }
+
+func TestFragmentProcessor_Subdirectories(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "kodelet-fragments-subdir-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	// Create subdirectory structure
+	githubDir := filepath.Join(tempDir, "github")
+	err = os.MkdirAll(githubDir, 0755)
+	require.NoError(t, err)
+
+	ciDir := filepath.Join(tempDir, "ci")
+	err = os.MkdirAll(ciDir, 0755)
+	require.NoError(t, err)
+
+	// Create fragments in subdirectories
+	prFragmentContent := `---
+name: GitHub PR Fragment
+description: Fragment for GitHub PRs
+---
+
+Create a PR for {{.branch}} targeting {{.target}}.`
+
+	issueFragmentContent := `---
+name: GitHub Issue Fragment
+description: Fragment for GitHub Issues
+---
+
+Create an issue about {{.topic}}.`
+
+	ciFragmentContent := `---
+name: CI Pipeline Fragment
+description: Fragment for CI configuration
+---
+
+Setup CI for {{.language}} project.`
+
+	// Write fragments to subdirectories
+	err = os.WriteFile(filepath.Join(githubDir, "pr.md"), []byte(prFragmentContent), 0644)
+	require.NoError(t, err)
+
+	err = os.WriteFile(filepath.Join(githubDir, "issue.md"), []byte(issueFragmentContent), 0644)
+	require.NoError(t, err)
+
+	err = os.WriteFile(filepath.Join(ciDir, "setup.md"), []byte(ciFragmentContent), 0644)
+	require.NoError(t, err)
+
+	// Also create a root-level fragment
+	rootFragmentContent := `---
+name: Root Fragment
+description: Fragment in root directory
+---
+
+Root level fragment content.`
+
+	err = os.WriteFile(filepath.Join(tempDir, "root.md"), []byte(rootFragmentContent), 0644)
+	require.NoError(t, err)
+
+	processor, err := NewFragmentProcessor(WithFragmentDirs(tempDir))
+	require.NoError(t, err)
+
+	// Test loading fragments with subdirectory paths
+	prConfig := &Config{
+		FragmentName: "github/pr",
+		Arguments: map[string]string{
+			"branch": "feature-branch",
+			"target": "main",
+		},
+	}
+
+	prResult, err := processor.LoadFragment(context.Background(), prConfig)
+	require.NoError(t, err)
+	assert.Equal(t, "GitHub PR Fragment", prResult.Metadata.Name)
+	assert.Contains(t, prResult.Content, "Create a PR for feature-branch targeting main.")
+
+	issueConfig := &Config{
+		FragmentName: "github/issue",
+		Arguments: map[string]string{
+			"topic": "bug report",
+		},
+	}
+
+	issueResult, err := processor.LoadFragment(context.Background(), issueConfig)
+	require.NoError(t, err)
+	assert.Equal(t, "GitHub Issue Fragment", issueResult.Metadata.Name)
+	assert.Contains(t, issueResult.Content, "Create an issue about bug report.")
+
+	ciConfig := &Config{
+		FragmentName: "ci/setup",
+		Arguments: map[string]string{
+			"language": "Go",
+		},
+	}
+
+	ciResult, err := processor.LoadFragment(context.Background(), ciConfig)
+	require.NoError(t, err)
+	assert.Equal(t, "CI Pipeline Fragment", ciResult.Metadata.Name)
+	assert.Contains(t, ciResult.Content, "Setup CI for Go project.")
+
+	// Test root level fragment still works
+	rootConfig := &Config{
+		FragmentName: "root",
+		Arguments:    map[string]string{},
+	}
+
+	rootResult, err := processor.LoadFragment(context.Background(), rootConfig)
+	require.NoError(t, err)
+	assert.Equal(t, "Root Fragment", rootResult.Metadata.Name)
+	assert.Contains(t, rootResult.Content, "Root level fragment content.")
+
+	// Test listing fragments includes subdirectory fragments
+	fragments, err := processor.ListFragmentsWithMetadata()
+	require.NoError(t, err)
+
+	fragmentNames := make(map[string]bool)
+	for _, fragment := range fragments {
+		// Extract fragment name from path for comparison
+		path := fragment.Path
+		if strings.HasPrefix(path, tempDir) {
+			relPath, _ := filepath.Rel(tempDir, path)
+			fragmentName := strings.TrimSuffix(relPath, ".md")
+			fragmentName = filepath.ToSlash(fragmentName) // Normalize for comparison
+			fragmentNames[fragmentName] = true
+		}
+	}
+
+	assert.True(t, fragmentNames["github/pr"], "github/pr fragment should be found")
+	assert.True(t, fragmentNames["github/issue"], "github/issue fragment should be found")
+	assert.True(t, fragmentNames["ci/setup"], "ci/setup fragment should be found") 
+	assert.True(t, fragmentNames["root"], "root fragment should be found")
+}
