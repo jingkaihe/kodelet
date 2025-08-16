@@ -149,6 +149,7 @@ func SendMessageAndGetTextWithUsage(ctx context.Context, state tooltypes.State, 
 		return fmt.Sprintf("Error creating thread: %v", err), llmtypes.Usage{}
 	}
 	thread.SetState(state)
+	thread.EnablePersistence(ctx, !opt.NoSaveConversation)
 
 	handler := &llmtypes.StringCollectorHandler{Silent: silent}
 	_, err = thread.SendMessage(ctx, query, handler, opt)

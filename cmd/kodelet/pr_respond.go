@@ -177,7 +177,7 @@ Examples:
 		}
 
 		fragment, err := processor.LoadFragment(ctx, &fragments.Config{
-			FragmentName: "pr-respond",
+			FragmentName: "github/pr-respond",
 			Arguments:    fragmentArgs,
 		})
 		if err != nil {

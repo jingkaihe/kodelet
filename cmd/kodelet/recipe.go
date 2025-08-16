@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"text/tabwriter"
 
@@ -64,7 +63,6 @@ type RecipeOutput struct {
 	Path        string `json:"path,omitempty"`
 }
 
-// NewRecipeListOutput creates a new RecipeListOutput
 func NewRecipeListOutput(fragmentsWithMetadata []*fragments.Fragment, format RecipeOutputFormat, showPath bool) *RecipeListOutput {
 	output := &RecipeListOutput{
 		Recipes: make([]RecipeOutput, 0, len(fragmentsWithMetadata)),
@@ -72,23 +70,13 @@ func NewRecipeListOutput(fragmentsWithMetadata []*fragments.Fragment, format Rec
 	}
 
 	for _, fragment := range fragmentsWithMetadata {
-		// Handle built-in recipes specially
-		var id string
-		if strings.HasPrefix(fragment.Path, "builtin:") {
-			// For built-in recipes, extract the ID from the path
-			id = strings.TrimSuffix(strings.TrimPrefix(fragment.Path, "builtin:"), ".md")
-		} else {
-			// For regular recipes, use the base filename
-			id = strings.TrimSuffix(filepath.Base(fragment.Path), ".md")
-		}
-
 		name := fragment.Metadata.Name
 		if name == "" {
-			name = id
+			name = fragment.ID
 		}
 
 		recipe := RecipeOutput{
-			ID:          id,
+			ID:          fragment.ID,
 			Name:        name,
 			Description: fragment.Metadata.Description,
 		}
@@ -103,7 +91,6 @@ func NewRecipeListOutput(fragmentsWithMetadata []*fragments.Fragment, format Rec
 	return output
 }
 
-// Render formats and renders the recipe list to the specified writer
 func (o *RecipeListOutput) Render(w io.Writer) error {
 	if o.Format == RecipeJSONFormat {
 		return o.renderJSON(w)

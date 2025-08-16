@@ -1,5 +1,16 @@
 # Kodelet
 
+## 0.0.82.alpha (2025-08-16)
+
+### Fragment Organization Enhancement
+
+**Hierarchical Fragment System**: Enhanced fragment architecture with nested directory support for improved organization and discoverability
+
+- **GitHub Fragment Reorganization**: Moved GitHub-related fragments (`issue-resolve`, `pr`, `pr-respond`) from root level to organized `github/` subdirectory for better categorization
+- **Nested Directory Support**: Fragment system now supports hierarchical organization with subdirectory paths (e.g., `github/issue-resolve` instead of `issue-resolve`)
+- **Improved Fragment ID Generation**: Enhanced path handling to support nested fragment references while maintaining backward compatibility
+- **Automated Migration**: Built-in commands automatically updated to use new fragment paths without user intervention
+
 ## 0.0.81.alpha (2025-08-15)
 
 ### Fragment-Based Architecture Enhancement
