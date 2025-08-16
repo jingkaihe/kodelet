@@ -122,7 +122,7 @@ This command analyzes the current branch changes compared to the target branch a
 		}
 
 		fragment, err := processor.LoadFragment(ctx, &fragments.Config{
-			FragmentName: "pr",
+			FragmentName: "github/pr",
 			Arguments:    fragmentArgs,
 		})
 		if err != nil {

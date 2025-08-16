@@ -19,7 +19,7 @@ import (
 	"github.com/yuin/goldmark/parser"
 )
 
-//go:embed recipes/*.md
+//go:embed recipes
 var embedFS embed.FS
 
 // Metadata represents YAML frontmatter in fragment files

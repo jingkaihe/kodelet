@@ -374,7 +374,7 @@ Unique content`
 	fragments, err := processor.ListFragmentsWithMetadata()
 	require.NoError(t, err)
 
-	// Should include 3 filesystem fragments + 4 built-in recipes (issue-resolve, commit, pr, pr-respond)
+	// Should include 3 filesystem fragments + 4 built-in recipes (github/issue-resolve, commit, github/pr, github/pr-respond)
 	assert.Len(t, fragments, 7)
 
 	var withMeta, withoutMeta, unique *Fragment

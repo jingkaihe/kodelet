@@ -128,7 +128,7 @@ Examples:
 		}
 
 		fragment, err := processor.LoadFragment(ctx, &fragments.Config{
-			FragmentName: "issue-resolve",
+			FragmentName: "github/issue-resolve",
 			Arguments: map[string]string{
 				"bin":         bin,
 				"issue_url":   config.IssueURL,

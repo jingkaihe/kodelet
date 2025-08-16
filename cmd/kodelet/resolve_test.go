@@ -17,7 +17,7 @@ func TestIssueResolveFragmentContent(t *testing.T) {
 
 	// Load the built-in issue-resolve fragment with test arguments
 	fragment, err := processor.LoadFragment(ctx, &fragments.Config{
-		FragmentName: "issue-resolve",
+		FragmentName: "github/issue-resolve",
 		Arguments: map[string]string{
 			"bin":         "kodelet",
 			"issue_url":   "https://github.com/owner/repo/issues/123",
@@ -95,7 +95,7 @@ func TestIssueResolveFragmentWithCustomBotMention(t *testing.T) {
 
 	// Load the fragment with custom bot mention
 	fragment, err := processor.LoadFragment(ctx, &fragments.Config{
-		FragmentName: "issue-resolve",
+		FragmentName: "github/issue-resolve",
 		Arguments: map[string]string{
 			"bin":         "kodelet",
 			"issue_url":   "https://github.com/owner/repo/issues/456",
@@ -119,7 +119,7 @@ func TestIssueResolveFragmentMetadata(t *testing.T) {
 	require.NoError(t, err, "Failed to create fragment processor")
 
 	// Get the metadata for the built-in issue-resolve fragment
-	fragment, err := processor.GetFragmentMetadata("issue-resolve")
+	fragment, err := processor.GetFragmentMetadata("github/issue-resolve")
 	require.NoError(t, err, "Failed to get issue-resolve fragment metadata")
 
 	// Test metadata
@@ -194,7 +194,7 @@ func TestIssueResolveFragmentWithCustomBinaryPath(t *testing.T) {
 
 	customBin := "/custom/path/to/kodelet"
 	fragment, err := processor.LoadFragment(ctx, &fragments.Config{
-		FragmentName: "issue-resolve",
+		FragmentName: "github/issue-resolve",
 		Arguments: map[string]string{
 			"bin":         customBin,
 			"issue_url":   "https://github.com/owner/repo/issues/123",
@@ -222,7 +222,7 @@ func TestIssueResolveFragmentWorkflowSeparation(t *testing.T) {
 	require.NoError(t, err, "Failed to create fragment processor")
 
 	fragment, err := processor.LoadFragment(ctx, &fragments.Config{
-		FragmentName: "issue-resolve",
+		FragmentName: "github/issue-resolve",
 		Arguments: map[string]string{
 			"bin":         "kodelet",
 			"issue_url":   "https://github.com/owner/repo/issues/123",

@@ -16,7 +16,7 @@ func TestPRFragmentContent(t *testing.T) {
 
 	// Test default format
 	fragment, err := processor.LoadFragment(ctx, &fragments.Config{
-		FragmentName: "pr",
+		FragmentName: "github/pr",
 		Arguments: map[string]string{
 			"target": "main",
 		},
@@ -42,7 +42,7 @@ func TestPRFragmentWithCustomTemplate(t *testing.T) {
 
 	// Test custom template format
 	fragment, err := processor.LoadFragment(ctx, &fragments.Config{
-		FragmentName: "pr",
+		FragmentName: "github/pr",
 		Arguments: map[string]string{
 			"target":        "develop",
 			"template_file": "/tmp/custom_template.md",
