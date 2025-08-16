@@ -63,7 +63,7 @@ func TestPRFragmentMetadata(t *testing.T) {
 	require.NoError(t, err, "Failed to create fragment processor")
 
 	// Get the metadata for the built-in pr fragment
-	fragment, err := processor.GetFragmentMetadata("pr")
+	fragment, err := processor.GetFragmentMetadata("github/pr")
 	require.NoError(t, err, "Failed to get pr fragment metadata")
 
 	// Test metadata
