@@ -9,6 +9,23 @@ import (
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
 
+// Define expected OpenAI preset models once to avoid duplication
+var (
+	expectedOpenAIReasoningModels = []string{
+		"gpt-5", "gpt-5-mini", "gpt-5-nano", "gpt-5-chat-latest",
+		"o1", "o1-pro", "o1-mini", "o3", "o3-pro", "o3-mini",
+		"o3-deep-research", "o4-mini", "o4-mini-deep-research",
+	}
+
+	expectedOpenAINonReasoningModels = []string{
+		"gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano", "gpt-4.5-preview",
+		"gpt-4o", "gpt-4o-2024-05-13", "gpt-4o-mini", "gpt-4o-audio-preview", "gpt-4o-realtime-preview",
+		"gpt-4o-mini-audio-preview", "gpt-4o-mini-realtime-preview",
+		"gpt-4o-mini-search-preview", "gpt-4o-search-preview",
+		"computer-use-preview", "gpt-image-1", "codex-mini-latest",
+	}
+)
+
 func TestLoadCustomConfiguration(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -21,17 +38,8 @@ func TestLoadCustomConfiguration(t *testing.T) {
 			name:   "no custom config uses openai preset",
 			config: llmtypes.Config{},
 			expected: &llmtypes.CustomModels{
-				Reasoning: []string{
-					"o1", "o1-pro", "o1-mini", "o3", "o3-pro", "o3-mini",
-					"o3-deep-research", "o4-mini", "o4-mini-deep-research",
-				},
-				NonReasoning: []string{
-					"gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano", "gpt-4.5-preview",
-					"gpt-4o", "gpt-4o-mini", "gpt-4o-audio-preview", "gpt-4o-realtime-preview",
-					"gpt-4o-mini-audio-preview", "gpt-4o-mini-realtime-preview",
-					"gpt-4o-mini-search-preview", "gpt-4o-search-preview",
-					"computer-use-preview", "gpt-image-1", "codex-mini-latest",
-				},
+				Reasoning:    expectedOpenAIReasoningModels,
+				NonReasoning: expectedOpenAINonReasoningModels,
 			},
 			hasModels:  true,
 			hasPricing: true,
@@ -44,17 +52,8 @@ func TestLoadCustomConfiguration(t *testing.T) {
 				},
 			},
 			expected: &llmtypes.CustomModels{
-				Reasoning: []string{
-					"o1", "o1-pro", "o1-mini", "o3", "o3-pro", "o3-mini",
-					"o3-deep-research", "o4-mini", "o4-mini-deep-research",
-				},
-				NonReasoning: []string{
-					"gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano", "gpt-4.5-preview",
-					"gpt-4o", "gpt-4o-mini", "gpt-4o-audio-preview", "gpt-4o-realtime-preview",
-					"gpt-4o-mini-audio-preview", "gpt-4o-mini-realtime-preview",
-					"gpt-4o-mini-search-preview", "gpt-4o-search-preview",
-					"computer-use-preview", "gpt-image-1", "codex-mini-latest",
-				},
+				Reasoning:    expectedOpenAIReasoningModels,
+				NonReasoning: expectedOpenAINonReasoningModels,
 			},
 			hasModels:  true,
 			hasPricing: true,
@@ -197,21 +196,10 @@ func TestLoadOpenAIPreset(t *testing.T) {
 	require.NotNil(t, pricing)
 
 	// Check reasoning models
-	expectedReasoning := []string{
-		"o1", "o1-pro", "o1-mini", "o3", "o3-pro", "o3-mini",
-		"o3-deep-research", "o4-mini", "o4-mini-deep-research",
-	}
-	assert.ElementsMatch(t, expectedReasoning, models.Reasoning)
+	assert.ElementsMatch(t, expectedOpenAIReasoningModels, models.Reasoning)
 
 	// Check non-reasoning models
-	expectedNonReasoning := []string{
-		"gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano", "gpt-4.5-preview",
-		"gpt-4o", "gpt-4o-mini", "gpt-4o-audio-preview", "gpt-4o-realtime-preview",
-		"gpt-4o-mini-audio-preview", "gpt-4o-mini-realtime-preview",
-		"gpt-4o-mini-search-preview", "gpt-4o-search-preview",
-		"computer-use-preview", "gpt-image-1", "codex-mini-latest",
-	}
-	assert.ElementsMatch(t, expectedNonReasoning, models.NonReasoning)
+	assert.ElementsMatch(t, expectedOpenAINonReasoningModels, models.NonReasoning)
 
 	// Check pricing for key models
 	gpt41Pricing, exists := pricing["gpt-4.1"]
