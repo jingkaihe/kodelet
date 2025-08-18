@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.0.83.alpha (2025-08-18)
+
+### Model Support Enhancement
+
+**GPT-5 Model Series Support**: Added models and pricing support for the new GPT-5 model family
+
 ## 0.0.82.alpha (2025-08-16)
 
 ### Fragment Organization Enhancement
