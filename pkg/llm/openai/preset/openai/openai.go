@@ -6,6 +6,10 @@ import "github.com/jingkaihe/kodelet/pkg/types/llm"
 // Models defines the OpenAI model categorization for reasoning and non-reasoning models
 var Models = llm.CustomModels{
 	Reasoning: []string{
+		"gpt-5",
+		"gpt-5-mini",
+		"gpt-5-nano",
+		"gpt-5-chat-latest",
 		"o1",
 		"o1-pro",
 		"o1-mini",
@@ -22,6 +26,7 @@ var Models = llm.CustomModels{
 		"gpt-4.1-nano",
 		"gpt-4.5-preview",
 		"gpt-4o",
+		"gpt-4o-2024-05-13",
 		"gpt-4o-mini",
 		"gpt-4o-audio-preview",
 		"gpt-4o-realtime-preview",
@@ -37,6 +42,30 @@ var Models = llm.CustomModels{
 
 // Pricing defines the pricing information for all OpenAI models
 var Pricing = llm.CustomPricing{
+	"gpt-5": llm.ModelPricing{
+		Input:         0.00000125,  // $1.25 per million tokens
+		CachedInput:   0.000000125, // $0.125 per million tokens
+		Output:        0.00001,     // $10.00 per million tokens
+		ContextWindow: 400_000,
+	},
+	"gpt-5-mini": llm.ModelPricing{
+		Input:         0.00000025,  // $0.25 per million tokens
+		CachedInput:   0.000000025, // $0.025 per million tokens
+		Output:        0.000002,    // $2.00 per million tokens
+		ContextWindow: 400_000,
+	},
+	"gpt-5-nano": llm.ModelPricing{
+		Input:         0.00000005,  // $0.05 per million tokens
+		CachedInput:   0.000000005, // $0.005 per million tokens
+		Output:        0.0000004,   // $0.40 per million tokens
+		ContextWindow: 400_000,
+	},
+	"gpt-5-chat-latest": llm.ModelPricing{
+		Input:         0.00000125,  // $1.25 per million tokens
+		CachedInput:   0.000000125, // $0.125 per million tokens
+		Output:        0.00001,     // $10.00 per million tokens
+		ContextWindow: 400_000,
+	},
 	"gpt-4.1": llm.ModelPricing{
 		Input:         0.000002,  // $2.00 per million tokens
 		CachedInput:   0.0000005, // $0.50 per million tokens
@@ -65,6 +94,11 @@ var Pricing = llm.CustomPricing{
 		Input:         0.0000025,  // $2.50 per million tokens
 		CachedInput:   0.00000125, // $1.25 per million tokens
 		Output:        0.00001,    // $10.00 per million tokens
+		ContextWindow: 128_000,
+	},
+	"gpt-4o-2024-05-13": llm.ModelPricing{
+		Input:         0.000005, // $5.00 per million tokens
+		Output:        0.000015, // $15.00 per million tokens
 		ContextWindow: 128_000,
 	},
 	"gpt-4o-audio-preview": llm.ModelPricing{
