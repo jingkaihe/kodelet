@@ -17,7 +17,7 @@ Kodelet is a lightweight CLI tool that helps with software engineering tasks. It
 ├── Dockerfile.cross-build # Docker cross-compilation configuration
 ├── .dockerignore        # Docker ignore patterns
 ├── install.sh           # Installation script
-├── AGENT.md             # Project documentation (this file)
+├── AGENTS.md            # Project documentation (this file)
 ├── kodelet-config.yaml  # Repository-specific configuration
 ├── LICENSE              # License file
 ├── Makefile             # Build automation

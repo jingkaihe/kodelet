@@ -21,7 +21,7 @@ const (
 	Backtick      = "`"
 
 	// Context file names
-	AgentMd   = "AGENT.md"
+	AgentsMd  = "AGENTS.md"
 	KodeletMd = "KODELET.md"
 	ReadmeMd  = "README.md"
 

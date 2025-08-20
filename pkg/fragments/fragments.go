@@ -154,7 +154,7 @@ func (fp *Processor) readFragmentContent(path string) ([]byte, error) {
 
 func (fp *Processor) findFragmentFile(fragmentName string) (string, error) {
 	fragmentName = filepath.ToSlash(fragmentName)
-	
+
 	possibleNames := []string{
 		fragmentName + ".md",
 		fragmentName,
@@ -431,7 +431,7 @@ func (fp *Processor) walkFragmentsDir(fragmentsFS fs.FS, dir string, pathConstru
 
 	for _, entry := range entries {
 		entryPath := filepath.Join(dir, entry.Name())
-		
+
 		if entry.IsDir() {
 			fp.walkFragmentsDir(fragmentsFS, entryPath, pathConstructor, fragments, seen)
 			continue
