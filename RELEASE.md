@@ -1,5 +1,16 @@
 # Kodelet
 
+## 0.0.84.alpha (2025-08-20)
+
+### Documentation Enhancement
+
+**Context File Naming Consistency**: Renamed AGENT.md to AGENTS.md throughout the codebase for improved clarity and consistency
+
+- **File Rename**: Updated context file name from `AGENT.md` to `AGENTS.md` to better reflect its purpose as agent context documentation
+- **Comprehensive Updates**: Updated all references in documentation, constants, tests, and system prompts to use the new naming convention
+- **Backward Compatibility**: Maintained existing fallback behavior where `KODELET.md` is used when `AGENTS.md` is not present
+
+
 ## 0.0.83.alpha (2025-08-18)
 
 ### Model Support Enhancement
