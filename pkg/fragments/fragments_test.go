@@ -588,6 +588,6 @@ Root level fragment content.`
 
 	assert.True(t, fragmentNames["github/pr"], "github/pr fragment should be found")
 	assert.True(t, fragmentNames["github/issue"], "github/issue fragment should be found")
-	assert.True(t, fragmentNames["ci/setup"], "ci/setup fragment should be found") 
+	assert.True(t, fragmentNames["ci/setup"], "ci/setup fragment should be found")
 	assert.True(t, fragmentNames["root"], "root fragment should be found")
 }

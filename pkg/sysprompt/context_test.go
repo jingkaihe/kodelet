@@ -26,16 +26,16 @@ func TestGetContextFileName(t *testing.T) {
 
 	t.Run("No context files", func(t *testing.T) {
 		// Ensure no context files exist
-		os.Remove(AgentMd)
+		os.Remove(AgentsMd)
 		os.Remove(KodeletMd)
 
 		result := getContextFileName()
-		assert.Equal(t, AgentMd, result, "Expected AGENT.md when no context files exist (default)")
+		assert.Equal(t, AgentsMd, result, "Expected AGENTS.md when no context files exist (default)")
 	})
 
 	t.Run("Only KODELET.md exists", func(t *testing.T) {
 		// Clean up any existing files
-		os.Remove(AgentMd)
+		os.Remove(AgentsMd)
 
 		// Create KODELET.md
 		err := os.WriteFile(KodeletMd, []byte("# KODELET Context"), 0644)
@@ -46,31 +46,31 @@ func TestGetContextFileName(t *testing.T) {
 		assert.Equal(t, KodeletMd, result, "Expected KODELET.md when only KODELET.md exists")
 	})
 
-	t.Run("Only AGENT.md exists", func(t *testing.T) {
+	t.Run("Only AGENTS.md exists", func(t *testing.T) {
 		// Clean up any existing files
 		os.Remove(KodeletMd)
 
-		// Create AGENT.md
-		err := os.WriteFile(AgentMd, []byte("# AGENT Context"), 0644)
+		// Create AGENTS.md
+		err := os.WriteFile(AgentsMd, []byte("# AGENTS Context"), 0644)
 		require.NoError(t, err)
-		defer os.Remove(AgentMd)
+		defer os.Remove(AgentsMd)
 
 		result := getContextFileName()
-		assert.Equal(t, AgentMd, result, "Expected AGENT.md when only AGENT.md exists")
+		assert.Equal(t, AgentsMd, result, "Expected AGENTS.md when only AGENTS.md exists")
 	})
 
-	t.Run("Both AGENT.md and KODELET.md exist", func(t *testing.T) {
+	t.Run("Both AGENTS.md and KODELET.md exist", func(t *testing.T) {
 		// Create both files
-		err := os.WriteFile(AgentMd, []byte("# AGENT Context"), 0644)
+		err := os.WriteFile(AgentsMd, []byte("# AGENTS Context"), 0644)
 		require.NoError(t, err)
-		defer os.Remove(AgentMd)
+		defer os.Remove(AgentsMd)
 
 		err = os.WriteFile(KodeletMd, []byte("# KODELET Context"), 0644)
 		require.NoError(t, err)
 		defer os.Remove(KodeletMd)
 
 		result := getContextFileName()
-		assert.Equal(t, AgentMd, result, "Expected AGENT.md to take precedence when both files exist")
+		assert.Equal(t, AgentsMd, result, "Expected AGENTS.md to take precedence when both files exist")
 	})
 }
 
@@ -90,14 +90,14 @@ func TestLoadContexts(t *testing.T) {
 	err = os.Chdir(tmpDir)
 	require.NoError(t, err)
 
-	t.Run("Load AGENT.md when present", func(t *testing.T) {
-		// Create AGENT.md and README.md
-		agentContent := "# AGENT Context\nThis is the agent context."
+	t.Run("Load AGENTS.md when present", func(t *testing.T) {
+		// Create AGENTS.md and README.md
+		agentsContent := "# AGENTS Context\nThis is the agents context."
 		readmeContent := "# README\nThis is the readme."
 
-		err := os.WriteFile(AgentMd, []byte(agentContent), 0644)
+		err := os.WriteFile(AgentsMd, []byte(agentsContent), 0644)
 		require.NoError(t, err)
-		defer os.Remove(AgentMd)
+		defer os.Remove(AgentsMd)
 
 		err = os.WriteFile(ReadmeMd, []byte(readmeContent), 0644)
 		require.NoError(t, err)
@@ -105,16 +105,16 @@ func TestLoadContexts(t *testing.T) {
 
 		contexts := loadContexts()
 
-		assert.Contains(t, contexts, AgentMd, "Expected AGENT.md to be loaded")
-		assert.Equal(t, agentContent, contexts[AgentMd], "Expected correct AGENT.md content")
+		assert.Contains(t, contexts, AgentsMd, "Expected AGENTS.md to be loaded")
+		assert.Equal(t, agentsContent, contexts[AgentsMd], "Expected correct AGENTS.md content")
 		assert.Contains(t, contexts, ReadmeMd, "Expected README.md to be loaded")
 		assert.Equal(t, readmeContent, contexts[ReadmeMd], "Expected correct README.md content")
-		assert.NotContains(t, contexts, KodeletMd, "Expected KODELET.md not to be loaded when AGENT.md exists")
+		assert.NotContains(t, contexts, KodeletMd, "Expected KODELET.md not to be loaded when AGENTS.md exists")
 	})
 
-	t.Run("Fall back to KODELET.md when AGENT.md not present", func(t *testing.T) {
-		// Clean up AGENT.md if it exists
-		os.Remove(AgentMd)
+	t.Run("Fall back to KODELET.md when AGENTS.md not present", func(t *testing.T) {
+		// Clean up AGENTS.md if it exists
+		os.Remove(AgentsMd)
 
 		// Create KODELET.md and README.md
 		kodeletContent := "# KODELET Context\nThis is the kodelet context."
@@ -134,12 +134,12 @@ func TestLoadContexts(t *testing.T) {
 		assert.Equal(t, kodeletContent, contexts[KodeletMd], "Expected correct KODELET.md content")
 		assert.Contains(t, contexts, ReadmeMd, "Expected README.md to be loaded")
 		assert.Equal(t, readmeContent, contexts[ReadmeMd], "Expected correct README.md content")
-		assert.NotContains(t, contexts, AgentMd, "Expected AGENT.md not to be loaded when it doesn't exist")
+		assert.NotContains(t, contexts, AgentsMd, "Expected AGENTS.md not to be loaded when it doesn't exist")
 	})
 
 	t.Run("Handle missing context files gracefully", func(t *testing.T) {
 		// Clean up all files
-		os.Remove(AgentMd)
+		os.Remove(AgentsMd)
 		os.Remove(KodeletMd)
 		os.Remove(ReadmeMd)
 
@@ -154,7 +154,7 @@ func TestFormatContexts(t *testing.T) {
 	t.Run("Format with contexts", func(t *testing.T) {
 		ctx := &PromptContext{
 			ContextFiles: map[string]string{
-				"AGENT.md":  "# Agent Context",
+				"AGENTS.md": "# Agents Context",
 				"README.md": "# README Content",
 			},
 		}
@@ -162,8 +162,8 @@ func TestFormatContexts(t *testing.T) {
 		result := ctx.FormatContexts()
 
 		assert.Contains(t, result, "Here are some useful context", "Expected context header")
-		assert.Contains(t, result, `<context filename="AGENT.md">`, "Expected AGENT.md context tag")
-		assert.Contains(t, result, "# Agent Context", "Expected AGENT.md content")
+		assert.Contains(t, result, `<context filename="AGENTS.md">`, "Expected AGENTS.md context tag")
+		assert.Contains(t, result, "# Agents Context", "Expected AGENTS.md content")
 		assert.Contains(t, result, `<context filename="README.md">`, "Expected README.md context tag")
 		assert.Contains(t, result, "# README Content", "Expected README.md content")
 	})
@@ -195,22 +195,22 @@ func TestPromptContextActiveContextFile(t *testing.T) {
 	err = os.Chdir(tmpDir)
 	require.NoError(t, err)
 
-	t.Run("ActiveContextFile is AGENT.md when AGENT.md exists", func(t *testing.T) {
+	t.Run("ActiveContextFile is AGENTS.md when AGENTS.md exists", func(t *testing.T) {
 		// Clean up any existing files
 		os.Remove(KodeletMd)
 
-		// Create AGENT.md
-		err := os.WriteFile(AgentMd, []byte("# AGENT Context"), 0644)
+		// Create AGENTS.md
+		err := os.WriteFile(AgentsMd, []byte("# AGENTS Context"), 0644)
 		require.NoError(t, err)
-		defer os.Remove(AgentMd)
+		defer os.Remove(AgentsMd)
 
 		ctx := NewPromptContext()
-		assert.Equal(t, AgentMd, ctx.ActiveContextFile, "Expected ActiveContextFile to be AGENT.md")
+		assert.Equal(t, AgentsMd, ctx.ActiveContextFile, "Expected ActiveContextFile to be AGENTS.md")
 	})
 
 	t.Run("ActiveContextFile is KODELET.md when only KODELET.md exists", func(t *testing.T) {
 		// Clean up any existing files
-		os.Remove(AgentMd)
+		os.Remove(AgentsMd)
 
 		// Create KODELET.md
 		err := os.WriteFile(KodeletMd, []byte("# KODELET Context"), 0644)
@@ -221,26 +221,26 @@ func TestPromptContextActiveContextFile(t *testing.T) {
 		assert.Equal(t, KodeletMd, ctx.ActiveContextFile, "Expected ActiveContextFile to be KODELET.md")
 	})
 
-	t.Run("ActiveContextFile defaults to AGENT.md when neither file exists", func(t *testing.T) {
+	t.Run("ActiveContextFile defaults to AGENTS.md when neither file exists", func(t *testing.T) {
 		// Clean up both files
-		os.Remove(AgentMd)
+		os.Remove(AgentsMd)
 		os.Remove(KodeletMd)
 
 		ctx := NewPromptContext()
-		assert.Equal(t, AgentMd, ctx.ActiveContextFile, "Expected ActiveContextFile to default to AGENT.md")
+		assert.Equal(t, AgentsMd, ctx.ActiveContextFile, "Expected ActiveContextFile to default to AGENTS.md")
 	})
 
-	t.Run("ActiveContextFile prefers AGENT.md when both files exist", func(t *testing.T) {
+	t.Run("ActiveContextFile prefers AGENTS.md when both files exist", func(t *testing.T) {
 		// Create both files
-		err := os.WriteFile(AgentMd, []byte("# AGENT Context"), 0644)
+		err := os.WriteFile(AgentsMd, []byte("# AGENTS Context"), 0644)
 		require.NoError(t, err)
-		defer os.Remove(AgentMd)
+		defer os.Remove(AgentsMd)
 
 		err = os.WriteFile(KodeletMd, []byte("# KODELET Context"), 0644)
 		require.NoError(t, err)
 		defer os.Remove(KodeletMd)
 
 		ctx := NewPromptContext()
-		assert.Equal(t, AgentMd, ctx.ActiveContextFile, "Expected ActiveContextFile to prefer AGENT.md")
+		assert.Equal(t, AgentsMd, ctx.ActiveContextFile, "Expected ActiveContextFile to prefer AGENTS.md")
 	})
 }

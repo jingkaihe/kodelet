@@ -25,10 +25,10 @@ type PromptContext struct {
 	// Tool names
 	ToolNames map[string]string
 
-	// Content contexts (README, AGENT.md/KODELET.md)
+	// Content contexts (README, AGENTS.md/KODELET.md)
 	ContextFiles map[string]string
 
-	// Active context file name (AGENT.md, KODELET.md, or empty)
+	// Active context file name (AGENTS.md, KODELET.md, or empty)
 	ActiveContextFile string
 
 	// Feature flags
@@ -83,9 +83,9 @@ func getContextFileName() string {
 	ctx := context.Background()
 	log := logger.G(ctx)
 
-	if _, err := os.Stat(AgentMd); err == nil {
-		log.WithField("context_file", AgentMd).Debug("Using AGENT.md as context file")
-		return AgentMd
+	if _, err := os.Stat(AgentsMd); err == nil {
+		log.WithField("context_file", AgentsMd).Debug("Using AGENTS.md as context file")
+		return AgentsMd
 	}
 
 	if _, err := os.Stat(KodeletMd); err == nil {
@@ -93,11 +93,11 @@ func getContextFileName() string {
 		return KodeletMd
 	}
 
-	log.WithField("context_file", AgentMd).Debug("No context file found, defaulting to AGENT.md")
-	return AgentMd
+	log.WithField("context_file", AgentsMd).Debug("No context file found, defaulting to AGENTS.md")
+	return AgentsMd
 }
 
-// loadContexts loads context files (AGENT.md/KODELET.md, README.md) from disk
+// loadContexts loads context files (AGENTS.md/KODELET.md, README.md) from disk
 func loadContexts() map[string]string {
 	filenames := []string{getContextFileName(), ReadmeMd}
 	results := make(map[string]string)

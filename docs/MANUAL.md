@@ -259,7 +259,7 @@ To bootstrap the context file simply use the following command:
 
 ```bash
 cat <<EOF | kodelet run
-Please analyse this repository and create an AGENT.md file that will serve as context for future Kodelet sessions. Include:
+Please analyse this repository and create an AGENTS.md file that will serve as context for future Kodelet sessions. Include:
 
 1. **Project Overview** - Brief description of what this project does
 2. **Project Structure** - Key directories and their purposes
@@ -275,18 +275,18 @@ Focus on information that would be repeatedly useful for an AI assistant working
 EOF
 ```
 
-Make sure that you sanity check the generated `AGENT.md` file, and update it as necessary. The context file often have great influnce on quality of the results produced by Kodelet. It is recommended to create a context file for each project you work on, and keep it up to date as the project evolves.
+Make sure that you sanity check the generated `AGENTS.md` file, and update it as necessary. The context file often have great influnce on quality of the results produced by Kodelet. It is recommended to create a context file for each project you work on, and keep it up to date as the project evolves.
 
 ### Context File Priority
 
 Kodelet automatically detects and loads context files with the following priority:
 
-1. **`AGENT.md`** - Used if present (recommended)
-2. **`KODELET.md`** - Used only if `AGENT.md` doesn't exist (fallback)
+1. **`AGENTS.md`** - Used if present (recommended)
+2. **`KODELET.md`** - Used only if `AGENTS.md` doesn't exist (fallback)
 
 **Migration from KODELET.md:**
 
-If you have an existing `KODELET.md` file, you can rename it via `mv KODELET.md AGENT.md`
+If you have an existing `KODELET.md` file, you can rename it via `mv KODELET.md AGENTS.md`
 
 ### Best Practices
 
@@ -577,7 +577,7 @@ Features:
 - **Intelligent Engineering Assistant**: Automates software engineering tasks and production operations with agentic capabilities.
 - **Interactive Architecture Design**: Collaboratively design and refine system architectures through natural dialogue.
 - **Continuous Code Intelligence**: Analyzes, understands, and improves your codebase while answering technical questions in context.
-- **Agent Context Files**: Automatic loading of project-specific context from `AGENT.md` or `KODELET.md` files for enhanced project understanding.
+- **Agent Context Files**: Automatic loading of project-specific context from `AGENTS.md` or `KODELET.md` files for enhanced project understanding.
 - **Vision Capabilities**: Support for image inputs including screenshots, diagrams, and mockups (Anthropic Claude models).
 - **Multiple LLM Providers**: Supports both Anthropic Claude and OpenAI models, giving you flexibility in choosing the best model for your needs.
 
@@ -625,7 +625,7 @@ Features:
    - Use `--allowed-commands` flag to override configuration for testing
 
 6. **Context Files Not Loading**
-   - Ensure the context file (`AGENT.md` or `KODELET.md`) is in the current working directory
+   - Ensure the context file (`AGENTS.md` or `KODELET.md`) is in the current working directory
    - Verify file permissions are readable
    - Use `KODELET_LOG_LEVEL=debug` to see which context file is being loaded
    - Check file syntax if content seems to be ignored
