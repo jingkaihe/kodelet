@@ -1,9 +1,12 @@
 VERSION=$(shell cat VERSION.txt)
 GIT_COMMIT=$(shell git rev-parse --short HEAD)
+BUILD_TIME=$(shell date -u +"%a %b %d %I:%M:%S %p UTC %Y")
 NODE_VERSION=22.17.0
 NPM_VERSION=10.9.2
 
-VERSION_FLAG=-X 'github.com/jingkaihe/kodelet/pkg/version.Version=$(VERSION)' -X 'github.com/jingkaihe/kodelet/pkg/version.GitCommit=$(GIT_COMMIT)'
+# Version package path for ldflags
+VERSION_PKG=github.com/jingkaihe/kodelet/pkg/version
+VERSION_FLAG=-X '$(VERSION_PKG).Version=$(VERSION)' -X '$(VERSION_PKG).GitCommit=$(GIT_COMMIT)' -X '$(VERSION_PKG).BuildTime=$(BUILD_TIME)'
 .PHONY: build build-dev cross-build cross-build-docker run test lint golangci-lint code-generation install-linters install-air install-npm install-deps format docker-build docker-run e2e-test e2e-test-docker eslint eslint-fix frontend-test frontend-test-watch frontend-test-ui frontend-test-coverage release github-release push-tag dev-server
 
 # Build the application
@@ -126,7 +129,7 @@ cross-build: code-generation
 cross-build-docker:
 	mkdir -p bin
 	@echo "Cross-compiling for multiple platforms using Docker..."
-	docker build --build-arg VERSION="$(VERSION)" --build-arg GIT_COMMIT="$(GIT_COMMIT)" --build-arg NODE_VERSION="$(NODE_VERSION)" --build-arg NPM_VERSION="$(NPM_VERSION)" -f Dockerfile.cross-build -t kodelet-cross-build .
+	docker build --build-arg VERSION="$(VERSION)" --build-arg GIT_COMMIT="$(GIT_COMMIT)" --build-arg BUILD_TIME="$(BUILD_TIME)" --build-arg NODE_VERSION="$(NODE_VERSION)" --build-arg NPM_VERSION="$(NPM_VERSION)" -f Dockerfile.cross-build -t kodelet-cross-build .
 	@echo "Extracting binaries from Docker container..."
 	docker run --rm -v $(shell pwd)/bin:/output kodelet-cross-build cp /bin/kodelet-linux-amd64 /bin/kodelet-linux-arm64 /bin/kodelet-darwin-amd64 /bin/kodelet-darwin-arm64 /bin/kodelet-windows-amd64.exe /output/
 	@echo "Cross-build complete. Binaries available in ./bin/"
@@ -134,7 +137,7 @@ cross-build-docker:
 
 # Build Docker image
 docker-build:
-	docker build --build-arg VERSION="$$(cat VERSION.txt)" --build-arg GIT_COMMIT="$$(git rev-parse --short HEAD)" --build-arg NODE_VERSION="$(NODE_VERSION)" --build-arg NPM_VERSION="$(NPM_VERSION)" -t kodelet .
+	docker build --build-arg VERSION="$$(cat VERSION.txt)" --build-arg GIT_COMMIT="$$(git rev-parse --short HEAD)" --build-arg BUILD_TIME="$$(date -u +"%a %b %d %I:%M:%S %p UTC %Y")" --build-arg NODE_VERSION="$(NODE_VERSION)" --build-arg NPM_VERSION="$(NPM_VERSION)" -t kodelet .
 
 # Run with Docker
 docker-run:

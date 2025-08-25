@@ -3,6 +3,7 @@ FROM golang:1.24-bookworm AS builder
 # Add build arguments for version and git commit
 ARG VERSION=dev
 ARG GIT_COMMIT=unknown
+ARG BUILD_TIME=unknown
 
 # Add Node.js and npm version arguments with defaults
 ARG NODE_VERSION=22.17.0
@@ -32,7 +33,8 @@ RUN bash -c 'export NVM_DIR="/root/.nvm" && \
     [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh" && \
     nvm use ${NODE_VERSION} && \
     go generate ./pkg/webui && \
-    CGO_ENABLED=0 go build -ldflags="-X '\''github.com/jingkaihe/kodelet/pkg/version.Version=${VERSION}'\'' -X '\''github.com/jingkaihe/kodelet/pkg/version.GitCommit=${GIT_COMMIT}'\''" -o /kodelet ./cmd/kodelet'
+    VERSION_PKG="github.com/jingkaihe/kodelet/pkg/version" && \
+    CGO_ENABLED=0 go build -ldflags="-X '\''${VERSION_PKG}.Version=${VERSION}'\'' -X '\''${VERSION_PKG}.GitCommit=${GIT_COMMIT}'\'' -X '\''${VERSION_PKG}.BuildTime=${BUILD_TIME}'\''" -o /kodelet ./cmd/kodelet'
 
 FROM debian:bookworm-slim
 

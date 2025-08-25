@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.0.85.alpha (2025-08-25)
+
+### Version Information Enhancement
+
+**Build Time Tracking**: Enhanced version information with build timestamp for improved debugging and binary identification
+
 ## 0.0.84.alpha (2025-08-20)
 
 ### Documentation Enhancement
