@@ -1,5 +1,5 @@
 # Air configuration for auto-reload development server
-# Run with: make dev-server or ./bin/air
+# Run with: mise run dev-server or ./bin/air
 #
 # This configuration is optimized for full-stack development.
 # It watches Go files, config files, and frontend source files.
@@ -12,7 +12,7 @@ tmp_dir = "tmp"
 [build]
   args_bin = ["serve", "--host", "0.0.0.0", "--port", "8080"]
   bin = "./bin/kodelet"
-  cmd = "make build"
+  cmd = "mise run build"
   delay = 1000
   # Exclude directories that shouldn't trigger rebuilds (build artifacts, dependencies, etc.)
   exclude_dir = ["assets", "tmp", "vendor", "testdata", "bin", "dist", "node_modules", ".github", ".git", "pkg/webui/frontend/node_modules", "pkg/webui/dist", "pkg/webui/frontend/dist", "pkg/webui/frontend/.next", "pkg/webui/frontend/coverage", ".kodelet"]

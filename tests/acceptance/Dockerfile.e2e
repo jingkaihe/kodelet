@@ -1,37 +1,42 @@
-FROM golang:1.24-bookworm AS builder
+FROM debian:12-slim AS builder
 
 WORKDIR /app
 
-# Add Node.js and npm version arguments with defaults
-ARG NODE_VERSION=22.17.0
-ARG NPM_VERSION=10.9.2
+# Install basic dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    git \
+    ca-certificates \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install make, git, curl and setup nvm for exact Node.js/npm versions
-RUN apt-get update && apt-get install -y make git curl && \
-    curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash && \
-    export NVM_DIR="/root/.nvm" && \
-    [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh" && \
-    nvm install ${NODE_VERSION} && \
-    nvm use ${NODE_VERSION} && \
-    npm install -g npm@${NPM_VERSION} && \
-    nvm alias default ${NODE_VERSION} && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
+# Install mise
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+ENV MISE_DATA_DIR="/mise"
+ENV MISE_CONFIG_DIR="/app"
+ENV MISE_CACHE_DIR="/mise/cache"
+ENV MISE_INSTALL_PATH="/usr/local/bin/mise"
+ENV PATH="/mise/shims:$PATH"
 
-# Copy go modules
+RUN curl https://mise.run | sh
+
+# Copy mise configuration and VERSION.txt first (needed for env templates)
+COPY mise.toml ./
+COPY VERSION.txt ./
+
+# Install tools defined in mise.toml (go, node, npm, etc.)
+RUN mise install
+
+# Copy go modules and install dependencies
 COPY go.mod go.sum ./
 RUN go mod download
 
 # Copy source code
 COPY cmd/ ./cmd/
 COPY pkg/ ./pkg/
-COPY VERSION.txt ./
-COPY Makefile ./
 
-# Build the application with nvm environment
-RUN bash -c 'export NVM_DIR="/root/.nvm" && \
-    [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh" && \
-    nvm use ${NODE_VERSION} && \
-    make build'
+# Build the application using mise
+RUN mise run build
 
 # Build acceptance tests as binary
 COPY tests/ ./tests/

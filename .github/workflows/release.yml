@@ -16,21 +16,20 @@ jobs:
         with:
           fetch-depth: 0  # Fetch all history for proper version detection
 
-      - name: Install make and GitHub CLI
+      - name: Install mise
         run: |
-          # Add GitHub CLI repository
-          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
-          sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
-          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+          curl https://mise.jdx.dev/install.sh | sh
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
 
-          # Update package list and install both tools
-          sudo apt-get update
-          sudo apt-get install -y make gh
+      - name: Install tools and dependencies
+        run: |
+          mise install
+          mise run install
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
       - name: Create GitHub Release
-        run: make github-release
+        run: mise run github-release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
