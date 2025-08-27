@@ -1,41 +1,36 @@
-FROM golang:1.24-bookworm AS builder
+FROM ubuntu:24.04 AS builder
 
 WORKDIR /app
 
-# Add Node.js and npm version arguments with defaults
-ARG NODE_VERSION=22.17.0
-ARG NPM_VERSION=10.9.2
+# Install curl for mise installation
+RUN apt-get update && apt-get install -y curl git && \
+    rm -rf /var/lib/apt/lists/*
 
-# Install make, git, curl and setup nvm for exact Node.js/npm versions
-RUN apt-get update && apt-get install -y make git curl && \
-    curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash && \
-    export NVM_DIR="/root/.nvm" && \
-    [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh" && \
-    nvm install ${NODE_VERSION} && \
-    nvm use ${NODE_VERSION} && \
-    npm install -g npm@${NPM_VERSION} && \
-    nvm alias default ${NODE_VERSION} && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
+# Install mise for tool management
+RUN curl https://mise.jdx.dev/install.sh | sh
+ENV PATH="/root/.local/bin:$PATH"
 
-# Copy go modules
+# Copy mise configuration first to leverage Docker layer caching
+COPY mise.toml ./
+
+# Install all tools (Go, Node.js, npm, etc.)
+RUN mise install
+
+# Copy go modules and download dependencies
 COPY go.mod go.sum ./
-RUN go mod download
+RUN mise exec -- go mod download
 
 # Copy source code
 COPY cmd/ ./cmd/
 COPY pkg/ ./pkg/
 COPY VERSION.txt ./
-COPY Makefile ./
 
-# Build the application with nvm environment
-RUN bash -c 'export NVM_DIR="/root/.nvm" && \
-    [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh" && \
-    nvm use ${NODE_VERSION} && \
-    make build'
+# Build the application
+RUN mise run build
 
 # Build acceptance tests as binary
 COPY tests/ ./tests/
-RUN go test -c -o acceptance-tests ./tests/acceptance/
+RUN mise exec -- go test -c -o acceptance-tests ./tests/acceptance/
 
 # Use ubuntu:24.04 for runtime
 FROM ubuntu:24.04

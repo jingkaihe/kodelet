@@ -20,7 +20,7 @@ Kodelet is a lightweight CLI tool that helps with software engineering tasks. It
 ├── AGENTS.md            # Project documentation (this file)
 ├── kodelet-config.yaml  # Repository-specific configuration
 ├── LICENSE              # License file
-├── Makefile             # Build automation
+├── mise.toml            # Tool management and task automation
 ├── pkg/                 # Core packages
 │   ├── auth/            # Authentication and login management
 │   ├── conversations/   # Conversation storage and management
@@ -77,6 +77,13 @@ The codebase follows a modular structure with separation of concerns between LLM
 - **Charm libraries** - TUI components
 - **Cobra & Viper** - CLI commands and configuration
 - **Docker** - For containerization
+- **mise** - Tool version management and task automation
+
+## Build System & Tool Management
+
+The project uses [mise](https://mise.jdx.dev/) for tool version management and task automation. This ensures consistent tool versions across all development environments and replaces the previous Makefile-based system.
+
+All development commands use `mise run <task>`. The `mise.toml` file defines all available tasks and manages tool versions automatically.
 
 ## Frontend Bundling
 
@@ -89,7 +96,7 @@ The web UI is a React/TypeScript SPA built with Vite and embedded directly into 
 - Go's `//go:embed dist/*` directive embeds all built assets into the binary at compile time
 - Web server serves embedded React SPA with `/api/*` endpoints for conversation management
 
-**Development**: Use `make build-dev` to skip frontend build for faster Go-only builds.
+**Development**: Use `mise run build-dev` to skip frontend build for faster Go-only builds.
 
 The embedded approach eliminates external dependencies and ensures the web UI is always available with the binary.
 
@@ -99,23 +106,23 @@ For detailed frontend development workflow and commands, see [docs/DEVELOPMENT.m
 
 All development work must follow these core principles:
 
-1. **Always run linting**: Make sure you run `make lint` after you finish any work to ensure code quality and consistency. For frontend changes, also run `make eslint` to check TypeScript/React code quality.
+1. **Always run linting**: Make sure you run `mise run lint` after you finish any work to ensure code quality and consistency. For frontend changes, also run `mise run eslint` to check TypeScript/React code quality.
 2. **Write comprehensive tests**: Always write tests for new features you add, and regression tests for changes you make to existing functionality.
 3. **Document CLI changes**: Always document when you have changed the CLI interface to maintain clear usage documentation.
 
 ## Testing
 
 ```bash
-make test # Run all tests
-make e2e-test-docker # Run acceptance tests in Docker
+mise run test # Run all tests
+mise run e2e-test-docker # Run acceptance tests in Docker
 go test ./pkg/... # Run tests for a specific package
 go test -v -cover ./pkg/... ./cmd/... # Run tests with coverage
 
 # Frontend testing
-make frontend-test # Run frontend tests
-make frontend-test-watch # Run frontend tests in watch mode
-make frontend-test-ui # Run frontend tests with UI
-make frontend-test-coverage # Run frontend tests with coverage
+mise run frontend-test # Run frontend tests
+mise run frontend-test-watch # Run frontend tests in watch mode
+mise run frontend-test-ui # Run frontend tests with UI
+mise run frontend-test-coverage # Run frontend tests with coverage
 ```
 
 ### Testing Conventions
@@ -184,19 +191,18 @@ kodelet run --image path.png "query"   # Single/multiple images
 kodelet run --image file1.png --image file2.png "compare these"
 
 # Development
-make build|test|lint|format|release    # Standard dev commands
-make build-dev                          # Fast build without frontend assets
-make dev-server                         # Start development server with auto-reload
-make cross-build                        # Cross-compile for multiple platforms
-make cross-build-docker                 # Cross-compile using Docker (recommended)
-make eslint                            # Run frontend linting
-make eslint-fix                        # Run frontend linting with auto-fix
+mise run build|test|lint|format|release    # Standard dev commands
+mise run build-dev                          # Fast build without frontend assets
+mise run dev-server                         # Start development server with auto-reload
+mise run cross-build                        # Cross-compile for multiple platforms
+mise run cross-build-docker                 # Cross-compile using Docker (recommended)
+mise run eslint                            # Run frontend linting
+mise run eslint-fix                        # Run frontend linting with auto-fix
 
-# Dependency installation
-make install-deps                       # Install all tooling dependencies
-make install-linters                    # Install golangci-lint only
-make install-air                        # Install air for development auto-reload
-make install-npm                        # Install npm dependencies for frontend
+# Dependency management (handled automatically by mise)
+mise install                            # Install all tools and dependencies
+mise run install                        # Install Go modules and npm dependencies
+mise run install-npm                    # Install npm dependencies for frontend only
 
 # For detailed build instructions and release process, see docs/DEVELOPMENT.md
 ```

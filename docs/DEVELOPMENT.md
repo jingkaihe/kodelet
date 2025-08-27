@@ -7,39 +7,40 @@ For user documentation, see the [User Manual](MANUAL.md).
 ## Prerequisites
 
 ### Required
-- Go 1.24 or higher
-- Make (for using Makefile commands)
+- [mise](https://mise.jdx.dev/) (for tool management and task automation)
 - Git
 
-### Optional (for frontend development)
-- Node.js 22.17.0
-- npm 10.9.2
+### Automatically Managed by mise
+- Go 1.24.2 (exact version automatically installed)
+- Node.js 22.17.0 (exact version automatically installed)
+- npm 10.9.2 (exact version automatically installed)
+- golangci-lint (latest version)
+- air (for development auto-reload)
+- gh CLI (for GitHub releases)
 
 ### Optional (for Docker-based builds)
 - Docker (for containerized cross-compilation)
 
 ## Setting Up Development Environment
 
-1. Clone the repository:
+1. Install mise (if not already installed):
+   ```bash
+   curl https://mise.jdx.dev/install.sh | sh
+   ```
+
+2. Clone the repository:
    ```bash
    git clone https://github.com/jingkaihe/kodelet.git
    cd kodelet
    ```
 
-2. Install dependencies:
+3. Install all tools and dependencies:
    ```bash
-   go mod download
-   ```
-
-3. (Optional) Set up Node.js for frontend development:
-   ```bash
-   # Install Node.js 22.17.0 and npm 10.9.2
-   # You can use nvm, Docker, or your preferred method
-
-   # Install frontend dependencies
-   cd pkg/webui/frontend
-   npm install
-   cd ../../..
+   # Install all required tools (Go, Node.js, npm, etc.) and dependencies
+   mise install
+   
+   # Install Go modules and npm dependencies
+   mise run install
    ```
 
 4. Set up your API keys for testing:
@@ -49,12 +50,14 @@ For user documentation, see the [User Manual](MANUAL.md).
    export OPENAI_API_KEY="sk-..."
    ```
 
+That's it! mise automatically manages all tool versions and ensures everyone on the team uses the same versions of Go, Node.js, npm, and other development tools.
+
 ## Building from Source
 
 ### Local Build
 
 ```bash
-make build
+mise run build
 ```
 
 This creates the binary in `./bin/kodelet`.
@@ -65,18 +68,17 @@ With the complex toolchain including Go, Node.js, and npm, Kodelet provides both
 
 #### Local Cross-Build
 ```bash
-make cross-build
+mise run cross-build
 ```
 
 **Requirements:**
-- Go 1.24+
-- Node.js 22.17.0/npm 10.9.2 locally
+- All tools automatically managed by mise (Go 1.24.2, Node.js 22.17.0, npm 10.9.2)
 - Runs `go generate ./pkg/webui` to build frontend assets
 - Cross-compiles for all supported platforms
 
 #### Docker Cross-Build (Recommended)
 ```bash
-make cross-build-docker
+mise run cross-build-docker
 ```
 
 **Benefits:**
@@ -96,7 +98,7 @@ Both approaches create binaries for multiple platforms in the `./bin/` directory
 ### Docker Build
 
 ```bash
-make docker-build
+mise run docker-build
 ```
 
 This builds a runtime Docker image using the regular `Dockerfile`.
@@ -111,7 +113,7 @@ This builds a runtime Docker image using the regular `Dockerfile`.
 
 ```bash
 # Run all tests
-make test
+mise run test
 
 # Run tests with coverage
 go test -v -cover ./pkg/... ./cmd/...
@@ -120,23 +122,23 @@ go test -v -cover ./pkg/... ./cmd/...
 go test -v ./pkg/llm/...
 
 # Acceptance tests
-make e2e-test-docker
+mise run e2e-test-docker
 ```
 
 ### Code Quality
 
 ```bash
 # Run Go linter
-make lint
+mise run lint
 
 # Run frontend linter
-make eslint
+mise run eslint
 
 # Run frontend linter with auto-fix
-make eslint-fix
+mise run eslint-fix
 
 # Format code
-make format
+mise run format
 
 # Check for formatting issues
 gofmt -d .
@@ -153,28 +155,28 @@ The web UI is a React/TypeScript SPA built with Vite and embedded directly into 
 - Vite builds optimized assets to `pkg/webui/dist/` directory
 - Go's `//go:embed dist/*` directive embeds all built assets into the binary at compile time
 
-**Development**: Use `make build-dev` to skip frontend build for faster Go-only builds.
+**Development**: Use `mise run build-dev` to skip frontend build for faster Go-only builds.
 
 **Frontend Commands**:
 ```bash
 # Run frontend tests
-make frontend-test
+mise run frontend-test
 
 # Run frontend tests in watch mode
-make frontend-test-watch
+mise run frontend-test-watch
 
 # Run frontend tests with interactive UI
-make frontend-test-ui
+mise run frontend-test-ui
 
 # Run frontend tests with coverage
-make frontend-test-coverage
+mise run frontend-test-coverage
 ```
 
 ### Local Development
 
 1. Build the development version:
    ```bash
-   make build
+   mise run build
    ```
 
 2. Test your changes:
@@ -213,7 +215,7 @@ make frontend-test-coverage
 ├── scripts/             # Build and release automation scripts
 ├── Dockerfile           # Docker configuration for runtime
 ├── Dockerfile.cross-build # Docker configuration for cross-compilation
-├── Makefile             # Build automation
+├── mise.toml            # Tool management and task automation
 └── VERSION.txt          # Version information file
 ```
 
@@ -222,8 +224,8 @@ make frontend-test-coverage
 1. Fork the repository
 2. Create a feature branch: `git checkout -b feature/my-feature`
 3. Make your changes
-4. Run tests: `make test`
-5. Run linter: `make lint`
+4. Run tests: `mise run test`
+5. Run linter: `mise run lint`
 6. Commit your changes: `git commit -am 'Add some feature'`
 7. Push to the branch: `git push origin feature/my-feature`
 8. Submit a pull request
@@ -241,13 +243,13 @@ make frontend-test-coverage
    - **Feature Name**: Description of changes
    - **Another Feature**: More details about improvements
    ```
-3. Create release using make:
+3. Create release using mise:
    ```bash
-   # Traditional release (requires local Node.js/npm)
-   make release
+   # Traditional release
+   mise run release
 
    # GitHub release with RELEASE.md notes (recommended)
-   make github-release
+   mise run github-release
    ```
 
 ### Automated Release
@@ -275,22 +277,41 @@ To trigger an automated release:
 
 The release notes will be automatically extracted from the top entry in `RELEASE.md` and used in the GitHub release.
 
-## Available Make Commands
+## Available mise Tasks
 
-For a complete list of available commands:
+For a complete list of available tasks:
 
 ```bash
-make help
+mise run help
+# or view all tasks
+mise tasks
 ```
 
-Common commands:
-- `make build` - Build the application
-- `make build-dev` - Build without frontend assets (faster for Go-only development)
-- `make test` - Run tests
-- `make lint` - Run linter
-- `make format` - Format code
-- `make docker-build` - Build Docker image
-- `make cross-build` - Build for multiple platforms (requires local Node.js/npm)
-- `make cross-build-docker` - Build for multiple platforms using Docker (recommended)
-- `make release` - Create a release
-- `make github-release` - Create GitHub release with RELEASE.md notes (recommended)
+Common tasks:
+- `mise run build` - Build the application
+- `mise run build-dev` - Build without frontend assets (faster for Go-only development)
+- `mise run test` - Run tests
+- `mise run lint` - Run linter
+- `mise run format` - Format code
+- `mise run docker-build` - Build Docker image
+- `mise run cross-build` - Build for multiple platforms
+- `mise run cross-build-docker` - Build for multiple platforms using Docker (recommended)
+- `mise run release` - Create a release
+- `mise run github-release` - Create GitHub release with RELEASE.md notes (recommended)
+
+## Tool Management
+
+mise automatically manages all development tools:
+
+```bash
+# Install all required tools
+mise install
+
+# Check current tool versions
+mise list
+
+# Show which tools would be installed
+mise list --outdated
+```
+
+All team members automatically get the same versions of Go, Node.js, npm, and other tools as defined in `mise.toml`.

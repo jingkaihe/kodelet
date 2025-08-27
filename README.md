@@ -37,7 +37,7 @@ Kodelet supports both Anthropic Claude and OpenAI models. Currently, we recommen
 
 ## Development
 
-For detailed development instructions, including prerequisites, running locally, configuration options, and available make commands, please see the [Development Guide](docs/DEVELOPMENT.md).
+For detailed development instructions, including prerequisites, running locally, configuration options, and available mise tasks, please see the [Development Guide](docs/DEVELOPMENT.md).
 
 ## License
 

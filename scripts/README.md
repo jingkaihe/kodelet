@@ -15,8 +15,8 @@ Extracts the top release notes from `RELEASE.md` for use in GitHub releases.
 
 **Output:** The content between the first `##` heading and the second `##` heading in `RELEASE.md`, with leading/trailing empty lines removed.
 
-**Used by:** The `github-release` make target to automatically include release notes in GitHub releases.
+**Used by:** The `github-release` mise task to automatically include release notes in GitHub releases.
 
-## Usage in Make Targets
+## Usage in mise Tasks
 
-- `make github-release` - Uses `extract-release-notes.sh` to create GitHub releases with proper release notes from `RELEASE.md`
+- `mise run github-release` - Uses `extract-release-notes.sh` to create GitHub releases with proper release notes from `RELEASE.md`
