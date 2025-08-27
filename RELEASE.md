@@ -1,5 +1,14 @@
 # Kodelet
 
+## 0.0.86.alpha (2025-08-27)
+
+### Build System Modernization
+
+**mise Migration**: Comprehensive migration from Make to mise for improved development workflow and tool management
+
+**Unified Tool Management**: Replaced Makefile with `mise.toml` configuration that automatically manages Go, Node.js, npm, and development tool versions for consistent environments across all team members
+
+
 ## 0.0.85.alpha (2025-08-25)
 
 ### Version Information Enhancement
