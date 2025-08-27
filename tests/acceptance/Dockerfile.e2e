@@ -1,36 +1,46 @@
-FROM ubuntu:24.04 AS builder
+FROM debian:12-slim AS builder
 
 WORKDIR /app
 
-# Install curl for mise installation
-RUN apt-get update && apt-get install -y curl git && \
-    rm -rf /var/lib/apt/lists/*
+# Install basic dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    git \
+    ca-certificates \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install mise for tool management
-RUN curl https://mise.jdx.dev/install.sh | sh
-ENV PATH="/root/.local/bin:$PATH"
+# Install mise
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+ENV MISE_DATA_DIR="/mise"
+ENV MISE_CONFIG_DIR="/app"
+ENV MISE_CACHE_DIR="/mise/cache"
+ENV MISE_INSTALL_PATH="/usr/local/bin/mise"
+ENV PATH="/mise/shims:$PATH"
 
-# Copy mise configuration first to leverage Docker layer caching
+RUN curl https://mise.run | sh
+
+# Copy mise configuration and VERSION.txt first (needed for env templates)
 COPY mise.toml ./
+COPY VERSION.txt ./
 
-# Install all tools (Go, Node.js, npm, etc.)
+# Install tools defined in mise.toml (go, node, npm, etc.)
 RUN mise install
 
-# Copy go modules and download dependencies
+# Copy go modules and install dependencies
 COPY go.mod go.sum ./
-RUN mise exec -- go mod download
+RUN go mod download
 
 # Copy source code
 COPY cmd/ ./cmd/
 COPY pkg/ ./pkg/
-COPY VERSION.txt ./
 
-# Build the application
+# Build the application using mise
 RUN mise run build
 
 # Build acceptance tests as binary
 COPY tests/ ./tests/
-RUN mise exec -- go test -c -o acceptance-tests ./tests/acceptance/
+RUN go test -c -o acceptance-tests ./tests/acceptance/
 
 # Use ubuntu:24.04 for runtime
 FROM ubuntu:24.04

@@ -81,7 +81,7 @@ The codebase follows a modular structure with separation of concerns between LLM
 
 ## Build System & Tool Management
 
-The project uses [mise](https://mise.jdx.dev/) for tool version management and task automation. This ensures consistent tool versions across all development environments and replaces the previous Makefile-based system.
+The project uses [mise](https://mise.jdx.dev/) for tool version management and task automation. This ensures consistent tool versions across all development environments.
 
 All development commands use `mise run <task>`. The `mise.toml` file defines all available tasks and manages tool versions automatically.
 

@@ -12,7 +12,7 @@ gh = "latest"  # GitHub CLI for releases
 [env]
 # Version-related environment variables
 VERSION = "{{exec(command='cat VERSION.txt')}}"
-GIT_COMMIT = "{{exec(command='git rev-parse --short HEAD')}}"
+GIT_COMMIT = "{{exec(command='git rev-parse --short HEAD 2>/dev/null || echo unknown')}}"
 BUILD_TIME = "{{exec(command='date -u \"+%a %b %d %I:%M:%S %p UTC %Y\"')}}"
 
 # Version package path for ldflags
@@ -164,7 +164,7 @@ run = [
 [tasks.e2e-test-docker]
 description = "Run end-to-end tests in Docker"
 run = [
-  "docker build --build-arg NODE_VERSION=\"$NODE_VERSION\" --build-arg NPM_VERSION=\"$NPM_VERSION\" -f tests/acceptance/Dockerfile.e2e -t kodelet-e2e-tests .",
+  "docker build -f tests/acceptance/Dockerfile.e2e -t kodelet-e2e-tests .",
   "docker run --rm -e ANTHROPIC_API_KEY -e OPENAI_API_KEY kodelet-e2e-tests"
 ]
 
