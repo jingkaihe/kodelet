@@ -22,6 +22,8 @@ jobs:
         run: |
           mise install
           mise run install
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Code generation
         run: mise run code-generation
@@ -47,6 +49,8 @@ jobs:
         run: |
           mise install
           mise run install
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Lint frontend code
         run: mise run eslint
@@ -69,6 +73,8 @@ jobs:
         run: |
           mise install
           mise run install
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Verify build
         run: mise run build
@@ -88,6 +94,8 @@ jobs:
         run: |
           mise install
           mise run install
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Test cross compilation
         run: mise run cross-build-docker

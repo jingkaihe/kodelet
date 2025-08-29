@@ -29,6 +29,8 @@ jobs:
         run: |
           mise install
           mise run install
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run E2E tests
         run: mise run e2e-test-docker

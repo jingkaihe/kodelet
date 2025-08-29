@@ -41,23 +41,17 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set up Go # as the dev env
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.24'
+      - name: Install mise
+        run: |
+          curl https://mise.jdx.dev/install.sh | sh
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
 
-      - name: Set up Node.js # required for building with embedded frontend
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22.17.0'
-          cache: 'npm'
-          cache-dependency-path: 'pkg/webui/frontend/package-lock.json'
-
-      - name: Pin npm version
-        run: npm install -g npm@10.9.2
-
-      - name: Install make
-        run: sudo apt-get update && sudo apt-get install -y make
+      - name: Install tools and dependencies
+        run: |
+          mise install
+          mise run install
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run Kodelet
         uses: jingkaihe/kodelet-action@v0.1.7-alpha

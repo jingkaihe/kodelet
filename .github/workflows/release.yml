@@ -25,6 +25,8 @@ jobs:
         run: |
           mise install
           mise run install
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
