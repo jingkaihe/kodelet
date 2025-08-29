@@ -22,6 +22,7 @@ type PRConfig struct {
 	Provider     string
 	Target       string
 	TemplateFile string
+	Draft        bool
 }
 
 // NewPRConfig creates a new PRConfig with default values
@@ -30,6 +31,7 @@ func NewPRConfig() *PRConfig {
 		Provider:     "github",
 		Target:       "main",
 		TemplateFile: "",
+		Draft:        false,
 	}
 }
 
@@ -51,7 +53,9 @@ var prCmd = &cobra.Command{
 	Short: "Create a pull request with AI-generated title and description",
 	Long: `Create a pull request for the changes you have made on the current branch.
 
-This command analyzes the current branch changes compared to the target branch and generates an appropriate PR title and description.`,
+This command analyzes the current branch changes compared to the target branch and generates an appropriate PR title and description.
+
+Use the --draft flag to create a draft pull request that is not ready for review.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		// Create a new state for the PR operation
 		ctx, cancel := context.WithCancel(cmd.Context())
@@ -121,6 +125,11 @@ This command analyzes the current branch changes compared to the target branch a
 			fragmentArgs["template_file"] = config.TemplateFile
 		}
 
+		// Add draft flag
+		if config.Draft {
+			fragmentArgs["draft"] = "true"
+		}
+
 		fragment, err := processor.LoadFragment(ctx, &fragments.Config{
 			FragmentName: "github/pr",
 			Arguments:    fragmentArgs,
@@ -158,6 +167,7 @@ func init() {
 	prCmd.Flags().StringP("provider", "p", defaults.Provider, "The CVS provider to use")
 	prCmd.Flags().StringP("target", "t", defaults.Target, "The target branch to create the pull request on")
 	prCmd.Flags().String("template-file", defaults.TemplateFile, "The path to the template file for the pull request")
+	prCmd.Flags().BoolP("draft", "d", defaults.Draft, "Create the pull request as a draft")
 }
 
 // getPRConfigFromFlags extracts PR configuration from command flags
@@ -172,6 +182,9 @@ func getPRConfigFromFlags(cmd *cobra.Command) *PRConfig {
 	}
 	if templateFile, err := cmd.Flags().GetString("template-file"); err == nil {
 		config.TemplateFile = templateFile
+	}
+	if draft, err := cmd.Flags().GetBool("draft"); err == nil {
+		config.Draft = draft
 	}
 
 	return config

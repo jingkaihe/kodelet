@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.0.87.alpha (2025-08-29)
+
+### Pull Request Workflow Enhancement
+
+**Draft Pull Request Support**: Added `-d/--draft` flag to `kodelet pr` command for creating draft pull requests that are not ready for review
+
 ## 0.0.86.alpha (2025-08-27)
 
 ### Build System Modernization
