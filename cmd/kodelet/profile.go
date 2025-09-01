@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"text/tabwriter"
 
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
@@ -16,6 +17,17 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+)
+
+// Profile scope constants for consistent display
+const (
+	ScopeBuiltIn         = "built-in"
+	ScopeRepo            = "repo"
+	ScopeGlobal          = "global"
+	ScopeRepoOverrides   = "repo (overrides global)"
+	ScopeSourceRepo      = "repo"
+	ScopeSourceGlobal    = "global"
+	ScopeSourceBoth      = "both"
 )
 
 var profileCmd = &cobra.Command{
@@ -39,7 +51,7 @@ var profileCurrentCmd = &cobra.Command{
 				presenter.Success(fmt.Sprintf("Current profile: %s (from global config)", globalProfile))
 			}
 		} else {
-			presenter.Success(fmt.Sprintf("Current profile: %s (from repository config)", repoProfile))
+			presenter.Success(fmt.Sprintf("Current profile: %s (from repo config)", repoProfile))
 		}
 		return nil
 	},
@@ -47,49 +59,59 @@ var profileCurrentCmd = &cobra.Command{
 
 var profileListCmd = &cobra.Command{
 	Use:   "list",
-	Short: "List all available profiles from both global and repository configs",
+	Short: "List all available profiles from both global and repo configs",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Get merged profiles from both configs
 		globalProfiles := getGlobalProfiles()
 		repoProfiles := getRepoProfiles()
 		mergedProfiles := mergeProfiles(globalProfiles, repoProfiles)
 		
-		if len(mergedProfiles) == 0 {
-			presenter.Info("No profiles defined")
-			return nil
-		}
-		
 		activeProfile := viper.GetString("profile")
-		// Treat "default" as no active profile
+		// Treat "default" as no active profile for determining which profile is active
+		activeProfileName := activeProfile
 		if activeProfile == "default" {
-			activeProfile = ""
+			activeProfileName = ""
 		}
 		
 		presenter.Section("Available Profiles")
 		
-		for name, source := range mergedProfiles {
-			marker := ""
-			if name == activeProfile {
-				marker = "* "
-			}
-			
-			location := ""
-			switch source {
-			case "both":
-				location = " (repo overrides global)"
-			case "global":
-				location = " (global)"
-			default:
-				location = " (repo)"
-			}
-			
-			if marker != "" {
-				presenter.Success(fmt.Sprintf("%s%s%s", marker, name, location))
-			} else {
-				presenter.Info(fmt.Sprintf("  %s%s", name, location))
+		// Create a tabwriter for formatted output
+		tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		
+		// Print table header
+		fmt.Fprintln(tw, "NAME\tSCOPE\tSTATUS")
+		fmt.Fprintln(tw, "----\t-----\t------")
+		
+		// Always show "default" profile first
+		status := ""
+		if activeProfileName == "" {
+			status = "ACTIVE"
+		}
+		fmt.Fprintf(tw, "default\t%s\t%s\n", ScopeBuiltIn, status)
+		
+		// Show user-defined profiles
+		if len(mergedProfiles) > 0 {
+			for name, source := range mergedProfiles {
+				status := ""
+				if name == activeProfileName {
+					status = "ACTIVE"
+				}
+				
+				scope := ""
+				switch source {
+				case ScopeSourceBoth:
+					scope = ScopeRepoOverrides
+				case ScopeSourceGlobal:
+					scope = ScopeGlobal
+				default:
+					scope = ScopeRepo
+				}
+				
+				fmt.Fprintf(tw, "%s\t%s\t%s\n", name, scope, status)
 			}
 		}
-		return nil
+		
+		return tw.Flush()
 	},
 }
 
@@ -152,7 +174,7 @@ Use "default" to use base configuration without any profile.`,
 				return err
 			}
 			
-			location := "repository"
+			location := "repo"
 			if global {
 				location = "global"
 			}
@@ -179,7 +201,7 @@ Use "default" to use base configuration without any profile.`,
 			return err
 		}
 		
-		location := "repository"
+		location := "repo"
 		if global {
 			location = "global"
 		}
@@ -195,14 +217,14 @@ func init() {
 	profileCmd.AddCommand(profileUseCmd)
 	
 	// Add global flag for use command
-	profileUseCmd.Flags().BoolP("global", "g", false, "Update global config instead of repository config")
+	profileUseCmd.Flags().BoolP("global", "g", false, "Update global config instead of repo config")
 }
 
 // Helper functions for profile management
 
-// getRepoProfileSetting gets the profile setting from repository config
+// getRepoProfileSetting gets the profile setting from repo config
 func getRepoProfileSetting() string {
-	// Create a new viper instance for repository config
+	// Create a new viper instance for repo config
 	v := viper.New()
 	v.SetConfigName("kodelet-config")
 	v.SetConfigType("yaml")
@@ -272,7 +294,7 @@ func getGlobalProfiles() map[string]llmtypes.ProfileConfig {
 	return profiles
 }
 
-// getRepoProfiles gets profiles from repository config
+// getRepoProfiles gets profiles from repo config
 func getRepoProfiles() map[string]llmtypes.ProfileConfig {
 	v := viper.New()
 	v.SetConfigName("kodelet-config")
@@ -304,21 +326,21 @@ func getRepoProfiles() map[string]llmtypes.ProfileConfig {
 	return profiles
 }
 
-// mergeProfiles merges global and repository profiles, with repo taking precedence
+// mergeProfiles merges global and repo profiles, with repo taking precedence
 func mergeProfiles(globalProfiles, repoProfiles map[string]llmtypes.ProfileConfig) map[string]string {
 	merged := make(map[string]string)
 	
 	// Add global profiles
 	for name := range globalProfiles {
-		merged[name] = "global"
+		merged[name] = ScopeSourceGlobal
 	}
 	
 	// Add repo profiles, overriding globals with same name
 	for name := range repoProfiles {
 		if _, exists := merged[name]; exists {
-			merged[name] = "both"
+			merged[name] = ScopeSourceBoth
 		} else {
-			merged[name] = "repo"
+			merged[name] = ScopeSourceRepo
 		}
 	}
 	
