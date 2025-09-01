@@ -45,14 +45,14 @@ func TestPricing(t *testing.T) {
 		for _, model := range Models.NonReasoning {
 			pricing, exists := Pricing[model]
 			assert.True(t, exists, "Non-reasoning model %s should have pricing", model)
-			
+
 			// Special case for image generation models that don't charge for input tokens
 			if model == "grok-2-image-1212" {
 				assert.Equal(t, 0.0, pricing.Input, "Image generation model %s should have no input cost", model)
 			} else {
 				assert.Greater(t, pricing.Input, 0.0, "Input price for %s should be positive", model)
 			}
-			
+
 			assert.Greater(t, pricing.Output, 0.0, "Output price for %s should be positive", model)
 			assert.Greater(t, pricing.ContextWindow, 0, "Context window for %s should be positive", model)
 		}

@@ -144,7 +144,6 @@ func main() {
 	viper.BindPFlag("anthropic_api_access", rootCmd.PersistentFlags().Lookup("anthropic-api-access"))
 	viper.BindPFlag("profile", rootCmd.PersistentFlags().Lookup("profile"))
 
-	// Add subcommands
 	rootCmd.AddCommand(chatCmd)
 	rootCmd.AddCommand(runCmd)
 	rootCmd.AddCommand(versionCmd)

@@ -15,7 +15,7 @@ Users need a streamlined way to:
 - Define multiple named configurations (profiles)
 - Switch between profiles quickly via CLI
 - Override profiles for specific commands
-- Maintain different profiles for different use cases (e.g., "premium" for best quality, "fast" for quick tasks, "local" for offline work)
+- Maintain different profiles for different use cases (e.g., "premium" for best quality, "fast" for quick tasks)
 
 ## Decision
 We will implement a profile system that allows users to:
@@ -101,27 +101,6 @@ profiles:
       reasoning_effort: "high"
       allowed_tools: ["file_read", "glob_tool", "grep_tool", "thinking"]
 
-  local:
-    provider: "openai"
-    model: "llama3.3:70b"
-    weak_model: "qwen2.5-coder:32b"
-    max_tokens: 8192
-    openai:
-      base_url: "http://localhost:11434/v1"
-      models:
-        non_reasoning:
-          - "llama3.3:70b"
-          - "qwen2.5-coder:32b"
-      pricing:
-        "llama3.3:70b":
-          input: 0.0
-          output: 0.0
-          context_window: 131072
-        "qwen2.5-coder:32b":
-          input: 0.0
-          output: 0.0
-          context_window: 32768
-
 # Aliases work across all profiles
 aliases:
   sonnet-4: "claude-sonnet-4-20250514"
@@ -158,7 +137,7 @@ kodelet profile show premium      # Display merged configuration for a profile
 # Use a specific profile for a single command
 kodelet run --profile premium "explain this architecture"
 kodelet chat --profile fast
-kodelet commit --profile local
+kodelet commit --profile fast
 
 # Profile flag takes precedence over configured profile
 
