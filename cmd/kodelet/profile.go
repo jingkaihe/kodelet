@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -112,24 +113,68 @@ var profileShowCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		profileName := args[0]
+		format, _ := cmd.Flags().GetString("format")
 
+		// Get the current profile setting to restore later
+		currentProfile := viper.GetString("profile")
+		defer viper.Set("profile", currentProfile)
+
+		// Check if non-default profile exists before setting it
+		if profileName != "default" {
+			globalProfiles := getGlobalProfiles()
+			repoProfiles := getRepoProfiles()
+
+			profileExists := false
+			if globalProfiles != nil {
+				if _, exists := globalProfiles[profileName]; exists {
+					profileExists = true
+				}
+			}
+			if repoProfiles != nil {
+				if _, exists := repoProfiles[profileName]; exists {
+					profileExists = true
+				}
+			}
+
+			if !profileExists {
+				return fmt.Errorf("profile '%s' not found", profileName)
+			}
+		}
+
+		// Set the profile (empty string for "default")
 		if profileName == "default" {
-			presenter.Section("Default Configuration (base config without profile)")
-			baseConfig := getBaseConfig()
-			yamlOutput, _ := yaml.Marshal(baseConfig)
-			presenter.Info(string(yamlOutput))
-			return nil
+			viper.Set("profile", "")
+		} else {
+			viper.Set("profile", profileName)
 		}
 
-		mergedConfig := getMergedProfileConfig(profileName)
-		if mergedConfig == nil {
-			return fmt.Errorf("profile '%s' not found", profileName)
+		// Get the merged configuration using the more robust method
+		config := llm.GetConfigFromViper()
+
+		// Clear metadata fields that aren't part of the effective configuration
+		// The omitempty tags will ensure these don't appear in output
+		config.Profile = ""
+		config.Profiles = nil
+		config.Aliases = nil
+
+		// Format and output based on flag
+		var output []byte
+		var err error
+
+		switch format {
+		case "yaml":
+			output, err = yaml.Marshal(config)
+		case "json":
+			output, err = json.MarshalIndent(config, "", "  ")
+		default:
+			return fmt.Errorf("unsupported format '%s'. Supported formats: json, yaml", format)
 		}
 
-		presenter.Section(fmt.Sprintf("Profile: %s", profileName))
-		yamlOutput, _ := yaml.Marshal(mergedConfig)
-		presenter.Info(string(yamlOutput))
+		if err != nil {
+			return fmt.Errorf("failed to marshal config: %w", err)
+		}
 
+		fmt.Print(string(output))
 		return nil
 	},
 }
@@ -170,6 +215,7 @@ func init() {
 	profileCmd.AddCommand(profileShowCmd)
 	profileCmd.AddCommand(profileUseCmd)
 
+	profileShowCmd.Flags().StringP("format", "f", "json", "Output format (json, yaml)")
 	profileUseCmd.Flags().BoolP("global", "g", false, "Update global config instead of repo config")
 }
 
@@ -291,60 +337,6 @@ func getMergedProfiles() map[string]string {
 	globalProfiles := getGlobalProfiles()
 	repoProfiles := getRepoProfiles()
 	return mergeProfiles(globalProfiles, repoProfiles)
-}
-
-func getBaseConfig() *llmtypes.Config {
-	currentProfile := viper.GetString("profile")
-
-	viper.Set("profile", "")
-
-	config := llm.GetConfigFromViper()
-
-	viper.Set("profile", currentProfile)
-
-	return &config
-}
-
-func getMergedProfileConfig(profileName string) *llmtypes.Config {
-	globalProfiles := getGlobalProfiles()
-	repoProfiles := getRepoProfiles()
-
-	var profileConfig llmtypes.ProfileConfig
-	var found bool
-
-	if repoProfiles != nil {
-		if profile, exists := repoProfiles[profileName]; exists {
-			profileConfig = profile
-			found = true
-		}
-	}
-
-	if !found && globalProfiles != nil {
-		if profile, exists := globalProfiles[profileName]; exists {
-			profileConfig = profile
-			found = true
-		}
-	}
-
-	if !found {
-		return nil
-	}
-
-	baseConfig := getBaseConfig()
-
-	mergedConfig := *baseConfig
-
-	if provider, ok := profileConfig["provider"].(string); ok {
-		mergedConfig.Provider = provider
-	}
-	if model, ok := profileConfig["model"].(string); ok {
-		mergedConfig.Model = model
-	}
-	if weakModel, ok := profileConfig["weak_model"].(string); ok {
-		mergedConfig.WeakModel = weakModel
-	}
-
-	return &mergedConfig
 }
 
 func getConfigFilePath(global bool) (string, error) {
