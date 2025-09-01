@@ -7,7 +7,7 @@ import (
 )
 
 func GetConfigFromViper() llmtypes.Config {
-	config := loadConfigManually()
+	config := loadViperConfig()
 
 	if config.Profiles != nil {
 		delete(config.Profiles, "default")
@@ -26,7 +26,7 @@ func GetConfigFromViper() llmtypes.Config {
 	return config
 }
 
-func loadConfigManually() llmtypes.Config {
+func loadViperConfig() llmtypes.Config {
 	anthropicAPIAccess := viper.GetString("anthropic_api_access")
 	if anthropicAPIAccess == "" {
 		anthropicAPIAccess = string(llmtypes.AnthropicAPIAccessAuto)
