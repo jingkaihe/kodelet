@@ -495,7 +495,7 @@ Override configuration for specific commands:
 kodelet run --log-level debug "query"
 
 # Anthropic example
-kodelet run --provider "anthropic" --model "claude-3-opus-20240229" --max-tokens 4096 --weak-model-max-tokens 2048 --cache-every 3 "query"
+kodelet run --provider "anthropic" --model "claude-opus-4-1-20250805" --max-tokens 4096 --weak-model-max-tokens 2048 --cache-every 3 "query"
 
 # OpenAI example
 kodelet run --provider "openai" --model "gpt-4.1" --max-tokens 4096 --reasoning-effort "high" "query"
@@ -530,8 +530,8 @@ profile: "premium"  # Optional: specify the active profile
 # Profile definitions
 profiles:
   premium:
-    model: "claude-opus-4-20250514"
-    weak_model: "claude-sonnet-4-20250514"
+    model: "opus-41" # alias to "claude-opus-4-1-20250805"
+    weak_model: "sonnet-4" # alias to "claude-sonnet-4-20250514"
     max_tokens: 16000
     weak_model_max_tokens: 8192
     thinking_budget_tokens: 8000
@@ -569,9 +569,9 @@ profiles:
 
 # Model aliases work across all profiles
 aliases:
-  sonnet-4: "claude-sonnet-4-20250514"
-  haiku-35: "claude-3-5-haiku-20241022"
-  opus-4: "claude-opus-4-20250514"
+    haiku-35: claude-3-5-haiku-20241022
+    opus-41: claude-opus-4-1-20250805
+    sonnet-4: claude-sonnet-4-20250514
 ```
 
 ### Profile Management Commands
@@ -729,7 +729,7 @@ kodelet run --allowed-commands "ls *,pwd,echo *" "analyze this directory"
 Kodelet supports various Anthropic Claude models:
 - `claude-sonnet-4-20250514` (recommended for standard tasks)
 - `claude-3-5-haiku-20241022` (recommended for lightweight tasks)
-- `claude-3-opus-20240229`
+- `claude-opus-4-1-20250805` (high-end model for complex tasks)
 
 Features:
 - Vision capabilities for image analysis
