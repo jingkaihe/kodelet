@@ -28,6 +28,12 @@ Kodelet is a lightweight agentic SWE Agent that runs as an interactive CLI tool 
   - [Environment Variables](#environment-variables)
   - [Configuration File](#configuration-file)
   - [Command Line Flags](#command-line-flags)
+- [Configuration Profiles](#configuration-profiles)
+  - [Profile Definition](#profile-definition)
+  - [Profile Management Commands](#profile-management-commands)
+  - [Profile Usage](#profile-usage)
+  - [Profile Precedence and Merging](#profile-precedence-and-merging)
+  - [Special "Default" Profile](#special-default-profile)
 - [Security Configuration](#security-configuration)
   - [Bash Command Restrictions](#bash-command-restrictions)
 - [LLM Providers](#llm-providers)
@@ -386,6 +392,9 @@ export KODELET_MODEL="gpt-4.1"
 export KODELET_MAX_TOKENS="8192"
 export KODELET_REASONING_EFFORT="medium"  # low, medium, high
 
+# Profile configuration
+export KODELET_PROFILE="premium"  # Use a specific profile
+
 # Command restriction configuration
 export KODELET_ALLOWED_COMMANDS="ls *,pwd,echo *,git status"  # Comma-separated allowed command patterns
 ```
@@ -493,7 +502,173 @@ kodelet run --provider "openai" --model "gpt-4.1" --max-tokens 4096 --reasoning-
 
 # Command restriction example
 kodelet run --allowed-commands "ls *,pwd,echo *" "query"
+
+# Profile override for single command
+kodelet run --profile premium "explain this architecture"
 ```
+
+## Configuration Profiles
+
+Kodelet includes a comprehensive profile system that allows you to define and switch between named configurations for different use cases. This eliminates the need to manually edit configuration files when experimenting with different model setups.
+
+### Profile Definition
+
+Profiles are defined in your configuration files using the `profiles` section. Each profile can override any configuration setting:
+
+```yaml
+
+# Default profile
+model: "claude-sonnet-4-20250514"
+weak_model: "claude-3-5-haiku-20241022"
+max_tokens: 16000
+weak_model_max_tokens: 8192
+thinking_budget_tokens: 8000
+
+# Active profile selection
+profile: "premium"  # Optional: specify the active profile
+
+# Profile definitions
+profiles:
+  premium:
+    model: "claude-opus-4-20250514"
+    weak_model: "claude-sonnet-4-20250514"
+    max_tokens: 16000
+    weak_model_max_tokens: 8192
+    thinking_budget_tokens: 8000
+
+  openai:
+    provider: "openai"
+    use_copilot: true
+    model: "gpt-4.1"
+    weak_model: "gpt-4.1-mini"
+    max_tokens: 16000
+    reasoning_effort: "medium"
+
+  xai:
+    provider: "openai"
+    model: "grok-3"
+    weak_model: "grok-3-mini"
+    max_tokens: 16000
+    reasoning_effort: "none"
+    openai:
+      preset: "xai"
+
+  mix-n-match:
+    # Main agent uses Claude
+    provider: "anthropic"
+    model: "claude-sonnet-4-20250514"
+    weak_model: "claude-3-5-haiku-20241022"
+    max_tokens: 16000
+
+    # Subagent uses OpenAI for complex reasoning
+    subagent:
+      provider: "openai"
+      model: "o3"
+      reasoning_effort: "high"
+      allowed_tools: ["file_read", "glob_tool", "grep_tool", "thinking"]
+
+# Model aliases work across all profiles
+aliases:
+  sonnet-4: "claude-sonnet-4-20250514"
+  haiku-35: "claude-3-5-haiku-20241022"
+  opus-4: "claude-opus-4-20250514"
+```
+
+### Profile Management Commands
+
+**View current active profile:**
+```bash
+kodelet profile current
+```
+
+**List all available profiles:**
+```bash
+kodelet profile list
+```
+
+**Show detailed configuration for a profile:**
+```bash
+kodelet profile show premium
+kodelet profile show default  # Shows base configuration
+```
+
+**Switch to a different profile:**
+```bash
+kodelet profile use premium       # Switch in repository config (./kodelet-config.yaml)
+kodelet profile use openai -g     # Switch in global config (~/.kodelet/config.yaml)
+kodelet profile use default       # Use base configuration without any profile
+```
+
+**Practical workflow examples:**
+```bash
+# Check what's currently active, then switch to a different profile
+kodelet profile current
+kodelet profile use development
+
+# Use a premium profile globally across all projects
+kodelet profile use premium -g
+
+# Show the merged configuration for a specific profile
+kodelet profile show mix-n-match
+
+# Return to base configuration (no profile)
+kodelet profile use default
+```
+
+### Profile Usage
+
+**Temporary profile override for single commands:**
+```bash
+# Use a specific profile for a single command without changing config
+kodelet run --profile premium "explain this architecture"
+kodelet chat --profile openai
+kodelet commit --profile premium
+kodelet run --profile openai "what does this function do?"
+
+# Use base configuration without any profile
+kodelet run --profile default "use base configuration"
+```
+
+**Environment variable override:**
+```bash
+export KODELET_PROFILE="premium"
+kodelet run "this will use the premium profile"
+```
+
+### Profile Precedence and Merging
+
+Profiles follow a hierarchical approach with intelligent merging:
+
+**Profile Selection Priority:**
+1. Command-line `--profile` flag (highest)
+2. `KODELET_PROFILE` environment variable
+3. `profile` field in repository config (`kodelet-config.yaml`)
+4. `profile` field in global config (`~/.kodelet/config.yaml`) (lowest)
+
+**Profile Definition Priority:**
+- Repository profiles override global profiles with the same name
+- All profiles from both global and repository configs are available
+- Profile settings override base configuration
+- Undefined fields in profiles inherit from base configuration
+
+**Configuration Priority (overall):**
+1. Command-line flags (highest)
+2. Active profile settings
+3. Repository configuration base settings
+4. Global configuration base settings
+5. Default values (lowest)
+
+### Special "Default" Profile
+
+The `"default"` profile is a special reserved name that means "use base configuration without any profile":
+
+```bash
+# These are equivalent - both use base configuration
+kodelet profile use default
+kodelet run --profile default "query"
+```
+
+You cannot define a profile named "default" in your configuration files - it's reserved for this special purpose.
 
 ## Security Configuration
 
