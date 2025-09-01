@@ -1,5 +1,5 @@
-// Package grok provides preset configurations for xAI Grok models
-package grok
+// Package xai provides preset configurations for xAI Grok models
+package xai
 
 import "github.com/jingkaihe/kodelet/pkg/types/llm"
 

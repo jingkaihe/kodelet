@@ -67,14 +67,13 @@ func TestLoadCustomConfiguration(t *testing.T) {
 			},
 			expected: &llmtypes.CustomModels{
 				Reasoning: []string{
+					"grok-code-fast-1",
 					"grok-4-0709",
 					"grok-3-mini",
-					"grok-3-mini-fast",
 				},
 				NonReasoning: []string{
 					"grok-3",
-					"grok-3-fast",
-					"grok-2-vision-1212",
+					"grok-2-image-1212",
 				},
 			},
 			hasModels:  true,
@@ -111,7 +110,7 @@ func TestLoadCustomConfiguration(t *testing.T) {
 			expected: &llmtypes.CustomModels{
 				Reasoning: []string{"custom-override-model"},
 				// Auto-populated from preset pricing since reasoning was overridden but non-reasoning wasn't
-				NonReasoning: []string{"grok-4-0709", "grok-3", "grok-3-mini", "grok-3-fast", "grok-3-mini-fast", "grok-2-vision-1212"},
+				NonReasoning: []string{"grok-3", "grok-3-mini", "grok-2-image-1212", "grok-code-fast-1", "grok-4-0709"},
 			},
 			hasModels:  true,
 			hasPricing: true,
@@ -168,11 +167,11 @@ func TestLoadXAIGrokPreset(t *testing.T) {
 	require.NotNil(t, pricing)
 
 	// Check reasoning models
-	expectedReasoning := []string{"grok-4-0709", "grok-3-mini", "grok-3-mini-fast"}
+	expectedReasoning := []string{"grok-code-fast-1", "grok-4-0709", "grok-3-mini"}
 	assert.ElementsMatch(t, expectedReasoning, models.Reasoning)
 
 	// Check non-reasoning models
-	expectedNonReasoning := []string{"grok-3", "grok-3-fast", "grok-2-vision-1212"}
+	expectedNonReasoning := []string{"grok-3", "grok-2-image-1212"}
 	assert.ElementsMatch(t, expectedNonReasoning, models.NonReasoning)
 
 	// Check pricing for a few key models
@@ -185,7 +184,7 @@ func TestLoadXAIGrokPreset(t *testing.T) {
 	grok3MiniPricing, exists := pricing["grok-3-mini"]
 	require.True(t, exists)
 	assert.Equal(t, 0.0000003, grok3MiniPricing.Input)
-	assert.Equal(t, 0.0000009, grok3MiniPricing.Output)
+	assert.Equal(t, 0.0000005, grok3MiniPricing.Output)
 	assert.Equal(t, 131072, grok3MiniPricing.ContextWindow)
 }
 
