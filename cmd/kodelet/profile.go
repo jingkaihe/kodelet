@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"text/tabwriter"
 
 	"github.com/pkg/errors"
@@ -148,46 +147,19 @@ Use "default" to use base configuration without any profile.`,
 		profileName := args[0]
 		global, _ := cmd.Flags().GetBool("global")
 
-		if profileName == "default" {
-			var configFile string
-			if global {
-				configFile = "~/.kodelet/config.yaml"
-			} else {
-				configFile = "./kodelet-config.yaml"
+		// Validate non-default profiles exist
+		if profileName != "default" {
+			mergedProfiles := getMergedProfiles()
+			if _, exists := mergedProfiles[profileName]; !exists {
+				return fmt.Errorf("profile '%s' not found", profileName)
 			}
-
-			if err := updateProfileInConfig(configFile, "default"); err != nil {
-				return err
-			}
-
-			location := "repo"
-			if global {
-				location = "global"
-			}
-			presenter.Success(fmt.Sprintf("Switched to default configuration in %s config", location))
-			return nil
 		}
 
-		mergedProfiles := getMergedProfiles()
-		if _, exists := mergedProfiles[profileName]; !exists {
-			return fmt.Errorf("profile '%s' not found", profileName)
-		}
-
-		var configFile string
-		if global {
-			configFile = "~/.kodelet/config.yaml"
-		} else {
-			configFile = "./kodelet-config.yaml"
-		}
-		if err := updateProfileInConfig(configFile, profileName); err != nil {
+		if err := updateProfileInConfig(global, profileName); err != nil {
 			return err
 		}
 
-		location := "repo"
-		if global {
-			location = "global"
-		}
-		presenter.Success(fmt.Sprintf("Switched to profile '%s' in %s config", profileName, location))
+		presenter.Success(getProfileSwitchMessage(profileName, global))
 		return nil
 	},
 }
@@ -375,13 +347,33 @@ func getMergedProfileConfig(profileName string) *llmtypes.Config {
 	return &mergedConfig
 }
 
-func updateProfileInConfig(configPath string, profileName string) error {
-	if strings.HasPrefix(configPath, "~") {
-		home, err := os.UserHomeDir()
+func getConfigFilePath(global bool) (string, error) {
+	if global {
+		homeDir, err := os.UserHomeDir()
 		if err != nil {
-			return errors.Wrap(err, "failed to get home directory")
+			return "", errors.Wrap(err, "failed to get home directory")
 		}
-		configPath = filepath.Join(home, configPath[1:])
+		return filepath.Join(homeDir, ".kodelet", "config.yaml"), nil
+	}
+	return "./kodelet-config.yaml", nil
+}
+
+func getProfileSwitchMessage(profileName string, global bool) string {
+	location := "repo"
+	if global {
+		location = "global"
+	}
+
+	if profileName == "default" {
+		return fmt.Sprintf("Switched to default configuration in %s config", location)
+	}
+	return fmt.Sprintf("Switched to profile '%s' in %s config", profileName, location)
+}
+
+func updateProfileInConfig(global bool, profileName string) error {
+	configPath, err := getConfigFilePath(global)
+	if err != nil {
+		return err
 	}
 
 	data, err := os.ReadFile(configPath)
