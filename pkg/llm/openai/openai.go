@@ -644,9 +644,6 @@ func (t *OpenAIThread) createChatCompletionWithRetry(ctx context.Context, reques
 	var originalErrors []error // Store all errors for better context
 
 	retryConfig := t.config.Retry
-	if retryConfig.Attempts == 0 {
-		retryConfig = llmtypes.DefaultRetryConfig
-	}
 
 	initialDelay := time.Duration(retryConfig.InitialDelay) * time.Millisecond
 	maxDelay := time.Duration(retryConfig.MaxDelay) * time.Millisecond

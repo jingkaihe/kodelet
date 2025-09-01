@@ -52,6 +52,7 @@ func loadConfigManually() llmtypes.Config {
 	}
 
 	config.OpenAI = loadOpenAIConfig("openai")
+	config.Retry = loadRetryConfig()
 
 	if viper.IsSet("subagent") {
 		config.SubAgent = &llmtypes.SubAgentConfigSettings{
@@ -91,6 +92,36 @@ func loadOpenAIConfig(keyPrefix string) *llmtypes.OpenAIConfig {
 	pricingKey := keyPrefix + ".pricing"
 	if viper.IsSet(pricingKey) {
 		config.Pricing = loadPricingConfig(pricingKey)
+	}
+
+	return config
+}
+
+// loadRetryConfig loads retry configuration from viper with defaults
+func loadRetryConfig() llmtypes.RetryConfig {
+	if !viper.IsSet("retry") {
+		return llmtypes.DefaultRetryConfig
+	}
+
+	config := llmtypes.RetryConfig{
+		Attempts:     viper.GetInt("retry.attempts"),
+		InitialDelay: viper.GetInt("retry.initial_delay"),
+		MaxDelay:     viper.GetInt("retry.max_delay"),
+		BackoffType:  viper.GetString("retry.backoff_type"),
+	}
+
+	// Apply defaults for any zero values
+	if config.Attempts == 0 {
+		config.Attempts = llmtypes.DefaultRetryConfig.Attempts
+	}
+	if config.InitialDelay == 0 {
+		config.InitialDelay = llmtypes.DefaultRetryConfig.InitialDelay
+	}
+	if config.MaxDelay == 0 {
+		config.MaxDelay = llmtypes.DefaultRetryConfig.MaxDelay
+	}
+	if config.BackoffType == "" {
+		config.BackoffType = llmtypes.DefaultRetryConfig.BackoffType
 	}
 
 	return config
@@ -194,6 +225,12 @@ func applyProfile(config *llmtypes.Config, profile llmtypes.ProfileConfig) {
 			config.SubAgent = applySubAgentConfigFromMap(config.SubAgent, subagentMap)
 		}
 	}
+
+	if retryConfig, ok := profile["retry"]; ok {
+		if retryMap, ok := retryConfig.(map[string]interface{}); ok {
+			config.Retry = applyRetryConfigFromMap(config.Retry, retryMap)
+		}
+	}
 }
 
 func applyOpenAIConfigFromMap(existing *llmtypes.OpenAIConfig, openaiMap map[string]interface{}) *llmtypes.OpenAIConfig {
@@ -276,6 +313,25 @@ func applySubAgentConfigFromMap(existing *llmtypes.SubAgentConfigSettings, subag
 	}
 
 	return existing
+}
+
+func applyRetryConfigFromMap(existing llmtypes.RetryConfig, retryMap map[string]interface{}) llmtypes.RetryConfig {
+	config := existing
+
+	if attempts, ok := retryMap["attempts"]; ok {
+		config.Attempts = toInt(attempts)
+	}
+	if initialDelay, ok := retryMap["initial_delay"]; ok {
+		config.InitialDelay = toInt(initialDelay)
+	}
+	if maxDelay, ok := retryMap["max_delay"]; ok {
+		config.MaxDelay = toInt(maxDelay)
+	}
+	if backoffType, ok := retryMap["backoff_type"].(string); ok {
+		config.BackoffType = backoffType
+	}
+
+	return config
 }
 
 func applyStringField(profile llmtypes.ProfileConfig, key string, target *string) {
