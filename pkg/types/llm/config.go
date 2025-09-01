@@ -87,11 +87,11 @@ var DefaultRetryConfig = RetryConfig{
 
 // SubAgentConfigSettings holds the configuration for subagent behavior
 type SubAgentConfigSettings struct {
-	Provider        string        `mapstructure:"provider" json:"provider" yaml:"provider"`                       // Provider for subagent (anthropic, openai)
-	Model           string        `mapstructure:"model" json:"model" yaml:"model"`                                 // Model for subagent
-	MaxTokens       int           `mapstructure:"max_tokens" json:"max_tokens" yaml:"max_tokens"`                 // Maximum tokens for subagent
+	Provider        string        `mapstructure:"provider" json:"provider" yaml:"provider"`                         // Provider for subagent (anthropic, openai)
+	Model           string        `mapstructure:"model" json:"model" yaml:"model"`                                  // Model for subagent
+	MaxTokens       int           `mapstructure:"max_tokens" json:"max_tokens" yaml:"max_tokens"`                   // Maximum tokens for subagent
 	ReasoningEffort string        `mapstructure:"reasoning_effort" json:"reasoning_effort" yaml:"reasoning_effort"` // OpenAI specific reasoning effort
-	ThinkingBudget  int           `mapstructure:"thinking_budget" json:"thinking_budget" yaml:"thinking_budget"`  // Anthropic specific thinking budget
-	AllowedTools    []string      `mapstructure:"allowed_tools" json:"allowed_tools" yaml:"allowed_tools"`        // AllowedTools is a list of allowed tools for the subagent (empty means use defaults)
-	OpenAI          *OpenAIConfig `mapstructure:"openai" json:"openai,omitempty" yaml:"openai,omitempty"`         // OpenAI-compatible provider configuration
+	ThinkingBudget  int           `mapstructure:"thinking_budget" json:"thinking_budget" yaml:"thinking_budget"`    // Anthropic specific thinking budget
+	AllowedTools    []string      `mapstructure:"allowed_tools" json:"allowed_tools" yaml:"allowed_tools"`          // AllowedTools is a list of allowed tools for the subagent (empty means use defaults)
+	OpenAI          *OpenAIConfig `mapstructure:"openai" json:"openai,omitempty" yaml:"openai,omitempty"`           // OpenAI-compatible provider configuration
 }

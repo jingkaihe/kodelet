@@ -32,7 +32,7 @@ func GetConfigFromViper() llmtypes.Config {
 
 func loadViperConfig() llmtypes.Config {
 	var config llmtypes.Config
-	
+
 	// Use viper's automatic unmarshaling with mapstructure tags
 	if err := viper.Unmarshal(&config); err != nil {
 		// Fallback to defaults if unmarshaling fails
