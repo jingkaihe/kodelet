@@ -2,13 +2,17 @@ package llm
 
 import (
 	"github.com/mitchellh/mapstructure"
+	"github.com/pkg/errors"
 	"github.com/spf13/viper"
 
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
 
-func GetConfigFromViper() llmtypes.Config {
-	config := loadViperConfig()
+func GetConfigFromViper() (llmtypes.Config, error) {
+	config, err := loadViperConfig()
+	if err != nil {
+		return config, err
+	}
 
 	// Clean up profiles - remove default profile if it exists
 	if config.Profiles != nil {
@@ -19,7 +23,9 @@ func GetConfigFromViper() llmtypes.Config {
 	profileName := getActiveProfile()
 	if profileName != "" && config.Profiles != nil {
 		if profile, exists := config.Profiles[profileName]; exists {
-			applyProfile(&config, profile)
+			if err := applyProfile(&config, profile); err != nil {
+				return config, err
+			}
 		}
 	}
 
@@ -27,29 +33,15 @@ func GetConfigFromViper() llmtypes.Config {
 	config.Model = resolveModelAlias(config.Model, config.Aliases)
 	config.WeakModel = resolveModelAlias(config.WeakModel, config.Aliases)
 
-	return config
+	return config, nil
 }
 
-func loadViperConfig() llmtypes.Config {
+func loadViperConfig() (llmtypes.Config, error) {
 	var config llmtypes.Config
 
 	// Use viper's automatic unmarshaling with mapstructure tags
 	if err := viper.Unmarshal(&config); err != nil {
-		// Fallback to defaults if unmarshaling fails
-		config = llmtypes.Config{
-			Provider:           "anthropic",
-			Model:              "claude-sonnet-4-20250514",
-			WeakModel:          "claude-3-5-haiku-20241022",
-			MaxTokens:          16000,
-			WeakModelMaxTokens: 8192,
-			AnthropicAPIAccess: llmtypes.AnthropicAPIAccessAuto,
-			Retry:              llmtypes.DefaultRetryConfig,
-		}
-	}
-
-	// Apply retry defaults if not set
-	if config.Retry.Attempts == 0 {
-		config.Retry = llmtypes.DefaultRetryConfig
+		return config, errors.Wrap(err, "failed to unmarshal configuration")
 	}
 
 	// Set default anthropic_api_access if empty
@@ -57,7 +49,12 @@ func loadViperConfig() llmtypes.Config {
 		config.AnthropicAPIAccess = llmtypes.AnthropicAPIAccessAuto
 	}
 
-	return config
+	// Apply retry defaults if not set
+	if config.Retry.Attempts == 0 {
+		config.Retry = llmtypes.DefaultRetryConfig
+	}
+
+	return config, nil
 }
 
 func getActiveProfile() string {
@@ -68,7 +65,7 @@ func getActiveProfile() string {
 	return profile
 }
 
-func applyProfile(config *llmtypes.Config, profile llmtypes.ProfileConfig) {
+func applyProfile(config *llmtypes.Config, profile llmtypes.ProfileConfig) error {
 	// Use mapstructure to decode profile into config, merging values
 	decoder, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
 		Result:           config,
@@ -76,9 +73,13 @@ func applyProfile(config *llmtypes.Config, profile llmtypes.ProfileConfig) {
 		ZeroFields:       false, // Don't overwrite with zero values
 	})
 	if err != nil {
-		return
+		return errors.Wrap(err, "failed to create profile decoder")
 	}
 
 	// Apply profile settings on top of existing config
-	_ = decoder.Decode(profile)
+	if err := decoder.Decode(profile); err != nil {
+		return errors.Wrap(err, "failed to apply profile configuration")
+	}
+
+	return nil
 }

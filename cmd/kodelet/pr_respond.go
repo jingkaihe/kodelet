@@ -110,7 +110,11 @@ Examples:
 			return
 		}
 
-		llmConfig := llm.GetConfigFromViper()
+		llmConfig, err := llm.GetConfigFromViper()
+		if err != nil {
+			presenter.Error(err, "Failed to load configuration")
+			return
+		}
 		s := tools.NewBasicState(ctx, tools.WithLLMConfig(llmConfig), tools.WithMCPTools(mcpManager))
 
 		// Get pr-respond config from flags
@@ -192,7 +196,7 @@ Examples:
 		presenter.Separator()
 
 		out, usage := llm.SendMessageAndGetTextWithUsage(ctx, s, prompt,
-			llm.GetConfigFromViper(), false, llmtypes.MessageOpt{
+			llmConfig, false, llmtypes.MessageOpt{
 				PromptCache: true,
 			})
 

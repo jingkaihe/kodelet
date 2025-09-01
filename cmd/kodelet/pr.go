@@ -76,7 +76,11 @@ Use the --draft flag to create a draft pull request that is not ready for review
 			os.Exit(1)
 		}
 
-		llmConfig := llm.GetConfigFromViper()
+		llmConfig, err := llm.GetConfigFromViper()
+		if err != nil {
+			presenter.Error(err, "Failed to load configuration")
+			return
+		}
 		s := tools.NewBasicState(ctx, tools.WithLLMConfig(llmConfig), tools.WithMCPTools(mcpManager))
 
 		// Get PR config from flags
@@ -145,7 +149,7 @@ Use the --draft flag to create a draft pull request that is not ready for review
 		presenter.Info("Analyzing branch changes and generating PR description...")
 		presenter.Separator()
 
-		out, usage := llm.SendMessageAndGetTextWithUsage(ctx, s, prompt, llm.GetConfigFromViper(), false, llmtypes.MessageOpt{
+		out, usage := llm.SendMessageAndGetTextWithUsage(ctx, s, prompt, llmConfig, false, llmtypes.MessageOpt{
 			// UseWeakModel:       false,
 			PromptCache: true,
 			// NoToolUse:          false,

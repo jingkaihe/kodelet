@@ -103,7 +103,11 @@ ignoring common directories like .git and node_modules.`,
 			return
 		}
 
-		llmConfig := llm.GetConfigFromViper()
+		llmConfig, err := llm.GetConfigFromViper()
+		if err != nil {
+			presenter.Error(err, "Failed to load configuration")
+			return
+		}
 		s := tools.NewBasicState(ctx, tools.WithLLMConfig(llmConfig), tools.WithMCPTools(mcpManager))
 
 		// Validate configuration
@@ -400,7 +404,11 @@ def multiply(a, b):
 	}
 
 	// Get configuration for the LLM
-	llmConfig := llm.GetConfigFromViper()
+	llmConfig, err := llm.GetConfigFromViper()
+	if err != nil {
+		presenter.Error(err, "Failed to load configuration")
+		return
+	}
 
 	var response string
 	var usage llmtypes.Usage

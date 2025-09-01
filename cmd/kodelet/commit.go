@@ -48,7 +48,11 @@ You must stage your changes (using 'git add') before running this command.`,
 		// Create a new state for the commit operation
 		ctx := cmd.Context()
 
-		llmConfig := llm.GetConfigFromViper()
+		llmConfig, err := llm.GetConfigFromViper()
+		if err != nil {
+			presenter.Error(err, "Failed to load configuration")
+			return
+		}
 		s := tools.NewBasicState(ctx, tools.WithLLMConfig(llmConfig))
 
 		// Get commit config from flags

@@ -149,7 +149,10 @@ var profileShowCmd = &cobra.Command{
 		}
 
 		// Get the merged configuration using the more robust method
-		config := llm.GetConfigFromViper()
+		config, err := llm.GetConfigFromViper()
+		if err != nil {
+			return errors.Wrap(err, "failed to load configuration")
+		}
 
 		// Clear metadata fields that aren't part of the effective configuration
 		// The omitempty tags will ensure these don't appear in output
@@ -159,7 +162,6 @@ var profileShowCmd = &cobra.Command{
 
 		// Format and output based on flag
 		var output []byte
-		var err error
 
 		switch format {
 		case "yaml":
