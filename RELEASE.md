@@ -1,5 +1,20 @@
 # Kodelet
 
+## 0.0.89.alpha (2025-09-01)
+
+### Configuration Management Enhancement
+
+**Configuration Profile System**: Added comprehensive profile system for streamlined model configuration switching and management
+
+- **Profile Management Commands**: New `kodelet profile` command group with `current`, `list`, `show`, and `use` subcommands for easy profile management
+- **Dynamic Profile Switching**: Switch between named configuration profiles instantly without manual config file editing (`kodelet profile use premium`)
+- **Profile Override Support**: New `--profile` flag available on all commands for temporary profile override (`kodelet run --profile fast "query"`)
+- **Hierarchical Configuration**: Profiles support both global (`~/.kodelet/config.yaml`) and repository (`kodelet-config.yaml`) scopes with intelligent merging
+- **Built-in Default Profile**: Special "default" profile uses base configuration without any profile settings
+- **Tabular Profile Display**: Enhanced `kodelet profile list` with clean tabular format showing profile scope and active status
+- **Mix-and-Match Support**: Profiles can configure different providers for main agent and subagent (e.g., Claude for main, OpenAI o3 for reasoning tasks)
+- **Comprehensive Documentation**: Added detailed Architecture Decision Record (ADR 017) documenting the profile system design and implementation
+
 ## 0.0.88.alpha (2025-09-01)
 
 ### Model Support Enhancement
