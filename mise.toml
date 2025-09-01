@@ -206,44 +206,6 @@ run = [
   "echo 'GitHub Actions will automatically create a release with binaries and release notes.'"
 ]
 
-[tasks.help]
-description = "Display help information"
-run = '''
-echo "Available tasks:"
-echo "  build        - Build the application with embedded web UI"
-echo "  build-dev    - Build the application without web UI (faster for development)"
-echo "  cross-build  - Cross-compile for multiple platforms (linux, macOS, Windows)"
-echo "  cross-build-docker - Cross-compile using Docker (includes complete toolchain)"
-echo "  code-generation - Generate frontend assets"
-echo "  chat         - Build and run in interactive chat mode"
-echo "  dev-server   - Run development server with auto-reload using air"
-echo "  test         - Run Go tests"
-echo "  e2e-test-docker - Run e2e tests in Docker"
-echo "  lint         - Run all linters (go vet, golangci-lint)"
-echo "  golangci-lint - Run golangci-lint"
-echo "  install-npm  - Install npm dependencies for frontend"
-echo "  format       - Format Go code"
-echo "  eslint       - Run eslint on frontend code"
-echo "  eslint-fix   - Run eslint with auto-fix on frontend code"
-echo "  frontend-test - Run frontend tests"
-echo "  frontend-test-watch - Run frontend tests in watch mode"
-echo "  frontend-test-ui - Run frontend tests with UI"
-echo "  frontend-test-coverage - Run frontend tests with coverage"
-echo "  docker-build - Build Docker image"
-echo "  docker-run   - Run with Docker (use: mise run docker-run query='your query')"
-echo "  release      - Create GitHub release with cross-compiled binaries"
-echo "  github-release - Create GitHub release with release notes from RELEASE.md"
-echo "  push-tag     - Push version tag to trigger automated GitHub Actions release"
-echo ""
-echo "Examples:"
-echo "  mise run build      # Build the application"
-echo "  mise run test       # Run tests"
-echo "  mise run dev-server # Start development server"
-echo "  mise run chat       # Start chat interface"
-echo ""
-echo "Tool versions managed by mise - run 'mise install' to install all tools"
-'''
-
 # Convenience aliases for common tasks
 [tasks.run]
 description = "Build and run in one-shot mode"
