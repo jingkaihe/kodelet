@@ -173,7 +173,11 @@ var runCmd = &cobra.Command{
 			return
 		}
 
-		llmConfig := llm.GetConfigFromViper()
+		llmConfig, err := llm.GetConfigFromViper()
+		if err != nil {
+			presenter.Error(err, "Failed to load configuration")
+			return
+		}
 
 		applyFragmentRestrictions(&llmConfig, fragmentMetadata)
 

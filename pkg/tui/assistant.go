@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/jingkaihe/kodelet/pkg/llm"
+	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
@@ -21,11 +22,13 @@ type AssistantClient struct {
 // NewAssistantClient creates a new assistant client
 func NewAssistantClient(ctx context.Context, conversationID string, enablePersistence bool, mcpManager *tools.MCPManager, maxTurns int, compactRatio float64, disableAutoCompact bool) *AssistantClient {
 	// Create a persistent thread with config from viper
-	config := llm.GetConfigFromViper()
+	config, err := llm.GetConfigFromViper()
+	if err != nil {
+		logger.G(ctx).WithError(err).Fatal("Failed to load configuration during assistant client initialization")
+	}
 	thread, err := llm.NewThread(config)
 	if err != nil {
-		// This is a critical error during initialization
-		panic(fmt.Sprintf("failed to create LLM thread: %v", err))
+		logger.G(ctx).WithError(err).Fatal("Failed to create LLM thread during assistant client initialization")
 	}
 
 	// Create state with main tools

@@ -1,142 +1,85 @@
 package llm
 
 import (
+	"github.com/mitchellh/mapstructure"
+	"github.com/pkg/errors"
 	"github.com/spf13/viper"
 
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
 
-// GetConfigFromViper returns a Config object based on the current Viper settings
-func GetConfigFromViper() llmtypes.Config {
-	// Set default to auto if not specified
-	anthropicAPIAccess := viper.GetString("anthropic_api_access")
-	if anthropicAPIAccess == "" {
-		anthropicAPIAccess = string(llmtypes.AnthropicAPIAccessAuto)
+func GetConfigFromViper() (llmtypes.Config, error) {
+	config, err := loadViperConfig()
+	if err != nil {
+		return config, err
 	}
 
-	config := llmtypes.Config{
-		Provider:             viper.GetString("provider"),
-		Model:                viper.GetString("model"),
-		MaxTokens:            viper.GetInt("max_tokens"),
-		WeakModel:            viper.GetString("weak_model"),
-		WeakModelMaxTokens:   viper.GetInt("weak_model_max_tokens"),
-		ThinkingBudgetTokens: viper.GetInt("thinking_budget_tokens"),
-		ReasoningEffort:      viper.GetString("reasoning_effort"),
-		CacheEvery:           viper.GetInt("cache_every"),
-		AllowedTools:         viper.GetStringSlice("allowed_tools"),
-		AllowedCommands:      viper.GetStringSlice("allowed_commands"),
-		AllowedDomainsFile:   viper.GetString("allowed_domains_file"),
-		AnthropicAPIAccess:   llmtypes.AnthropicAPIAccess(anthropicAPIAccess),
-		UseCopilot:           viper.GetBool("use_copilot"),
-		Aliases:              viper.GetStringMapString("aliases"),
+	// Clean up profiles - remove default profile if it exists
+	if config.Profiles != nil {
+		delete(config.Profiles, "default")
 	}
 
-	// Load OpenAI-specific configuration
-	if viper.IsSet("openai") {
-		openaiConfig := &llmtypes.OpenAIConfig{}
-
-		// Load basic settings
-		openaiConfig.Preset = viper.GetString("openai.preset")
-		openaiConfig.BaseURL = viper.GetString("openai.base_url")
-
-		// Load models configuration
-		if viper.IsSet("openai.models") {
-			openaiConfig.Models = &llmtypes.CustomModels{
-				Reasoning:    viper.GetStringSlice("openai.models.reasoning"),
-				NonReasoning: viper.GetStringSlice("openai.models.non_reasoning"),
+	// Apply active profile if set
+	profileName := getActiveProfile()
+	if profileName != "" && config.Profiles != nil {
+		if profile, exists := config.Profiles[profileName]; exists {
+			if err := applyProfile(&config, profile); err != nil {
+				return config, err
 			}
 		}
-
-		// Load pricing configuration
-		if viper.IsSet("openai.pricing") {
-			openaiConfig.Pricing = make(map[string]llmtypes.ModelPricing)
-			pricingMap := viper.GetStringMap("openai.pricing")
-
-			for model, pricingData := range pricingMap {
-				if pricingSubMap, ok := pricingData.(map[string]interface{}); ok {
-					pricing := llmtypes.ModelPricing{}
-
-					if input, ok := pricingSubMap["input"].(float64); ok {
-						pricing.Input = input
-					}
-					if cachedInput, ok := pricingSubMap["cached_input"].(float64); ok {
-						pricing.CachedInput = cachedInput
-					}
-					if output, ok := pricingSubMap["output"].(float64); ok {
-						pricing.Output = output
-					}
-					if contextWindow, ok := pricingSubMap["context_window"].(int); ok {
-						pricing.ContextWindow = contextWindow
-					}
-
-					openaiConfig.Pricing[model] = pricing
-				}
-			}
-		}
-
-		config.OpenAI = openaiConfig
 	}
 
-	// Load subagent configuration
-	if viper.IsSet("subagent") {
-		subagentConfig := &llmtypes.SubAgentConfigSettings{}
+	// Resolve model aliases
+	config.Model = resolveModelAlias(config.Model, config.Aliases)
+	config.WeakModel = resolveModelAlias(config.WeakModel, config.Aliases)
 
-		// Load basic settings
-		subagentConfig.Provider = viper.GetString("subagent.provider")
-		subagentConfig.Model = viper.GetString("subagent.model")
-		subagentConfig.MaxTokens = viper.GetInt("subagent.max_tokens")
-		subagentConfig.ReasoningEffort = viper.GetString("subagent.reasoning_effort")
-		subagentConfig.ThinkingBudget = viper.GetInt("subagent.thinking_budget")
-		subagentConfig.AllowedTools = viper.GetStringSlice("subagent.allowed_tools")
+	return config, nil
+}
 
-		// Load OpenAI-specific configuration for subagent
-		if viper.IsSet("subagent.openai") {
-			openaiConfig := &llmtypes.OpenAIConfig{}
+func loadViperConfig() (llmtypes.Config, error) {
+	var config llmtypes.Config
 
-			// Load basic settings
-			openaiConfig.Preset = viper.GetString("subagent.openai.preset")
-			openaiConfig.BaseURL = viper.GetString("subagent.openai.base_url")
-
-			// Load models configuration
-			if viper.IsSet("subagent.openai.models") {
-				openaiConfig.Models = &llmtypes.CustomModels{
-					Reasoning:    viper.GetStringSlice("subagent.openai.models.reasoning"),
-					NonReasoning: viper.GetStringSlice("subagent.openai.models.non_reasoning"),
-				}
-			}
-
-			// Load pricing configuration
-			if viper.IsSet("subagent.openai.pricing") {
-				openaiConfig.Pricing = make(map[string]llmtypes.ModelPricing)
-				pricingMap := viper.GetStringMap("subagent.openai.pricing")
-
-				for model, pricingData := range pricingMap {
-					if pricingSubMap, ok := pricingData.(map[string]interface{}); ok {
-						pricing := llmtypes.ModelPricing{}
-
-						if input, ok := pricingSubMap["input"].(float64); ok {
-							pricing.Input = input
-						}
-						if cachedInput, ok := pricingSubMap["cached_input"].(float64); ok {
-							pricing.CachedInput = cachedInput
-						}
-						if output, ok := pricingSubMap["output"].(float64); ok {
-							pricing.Output = output
-						}
-						if contextWindow, ok := pricingSubMap["context_window"].(int); ok {
-							pricing.ContextWindow = contextWindow
-						}
-
-						openaiConfig.Pricing[model] = pricing
-					}
-				}
-			}
-
-			subagentConfig.OpenAI = openaiConfig
-		}
-
-		config.SubAgent = subagentConfig
+	// Use viper's automatic unmarshaling with mapstructure tags
+	if err := viper.Unmarshal(&config); err != nil {
+		return config, errors.Wrap(err, "failed to unmarshal configuration")
 	}
 
-	return config
+	// Set default anthropic_api_access if empty
+	if config.AnthropicAPIAccess == "" {
+		config.AnthropicAPIAccess = llmtypes.AnthropicAPIAccessAuto
+	}
+
+	// Apply retry defaults if not set
+	if config.Retry.Attempts == 0 {
+		config.Retry = llmtypes.DefaultRetryConfig
+	}
+
+	return config, nil
+}
+
+func getActiveProfile() string {
+	profile := viper.GetString("profile")
+	if profile == "default" || profile == "" {
+		return ""
+	}
+	return profile
+}
+
+func applyProfile(config *llmtypes.Config, profile llmtypes.ProfileConfig) error {
+	// Use mapstructure to decode profile into config, merging values
+	decoder, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
+		Result:           config,
+		WeaklyTypedInput: true,
+		ZeroFields:       false, // Don't overwrite with zero values
+	})
+	if err != nil {
+		return errors.Wrap(err, "failed to create profile decoder")
+	}
+
+	// Apply profile settings on top of existing config
+	if err := decoder.Decode(profile); err != nil {
+		return errors.Wrap(err, "failed to apply profile configuration")
+	}
+
+	return nil
 }

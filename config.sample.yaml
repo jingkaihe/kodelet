@@ -34,6 +34,55 @@ aliases:
   haiku-35: "claude-3-5-haiku-20241022"
   opus-4: "claude-opus-4-20250514"
 
+# Active profile selection (uncomment to activate a specific profile)
+# profile: "premium"
+
+# Profile definitions for different use cases
+# Each profile can override any configuration setting
+profiles:
+  premium:
+    model: "claude-opus-4-20250514"
+    weak_model: "claude-sonnet-4-20250514"
+    max_tokens: 16000
+    weak_model_max_tokens: 8192
+    thinking_budget_tokens: 8000
+
+  fast:
+    model: "haiku-35"
+    weak_model: "haiku-35"
+    max_tokens: 4096
+    weak_model_max_tokens: 4096
+    thinking_budget_tokens: 2000
+
+  openai:
+    provider: "openai"
+    use_copilot: true
+    model: "gpt-4.1"
+    weak_model: "gpt-4.1-mini"
+    max_tokens: 16000
+    reasoning_effort: "medium"
+
+  xai:
+    provider: "openai"
+    model: "grok-3"
+    weak_model: "grok-3-mini"
+    max_tokens: 16000
+    reasoning_effort: "none"
+    openai:
+      preset: "xai"
+
+  mix-n-match:
+    provider: "anthropic"
+    model: "sonnet-4"
+    weak_model: "haiku-35"
+    max_tokens: 16000
+    
+    subagent:
+      provider: "openai"
+      model: "o3"
+      reasoning_effort: "high"
+      allowed_tools: ["file_read", "glob_tool", "grep_tool", "thinking"]
+
 # OpenAI specific settings
 # Reasoning effort for OpenAI models (low, medium, high)
 reasoning_effort: "medium"

@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jingkaihe/kodelet/pkg/llm/openai/preset/xai"
 	openaipreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/openai"
+	"github.com/jingkaihe/kodelet/pkg/llm/openai/preset/xai"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
 

@@ -20,7 +20,11 @@ func plainChatUI(ctx context.Context, options *ChatOptions) {
 	presenter.Separator()
 
 	// Create a persistent thread with state
-	config := llm.GetConfigFromViper()
+	config, err := llm.GetConfigFromViper()
+	if err != nil {
+		presenter.Error(err, "Failed to load configuration")
+		return
+	}
 	thread, err := llm.NewThread(config)
 	if err != nil {
 		presenter.Error(err, "Failed to create LLM thread")

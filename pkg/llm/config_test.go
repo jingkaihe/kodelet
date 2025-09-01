@@ -15,7 +15,8 @@ func TestGetConfigFromViper(t *testing.T) {
 	viper.Set("max_tokens", 1234)
 
 	// Execute
-	config := GetConfigFromViper()
+	config, err := GetConfigFromViper()
+	require.NoError(t, err)
 
 	// Verify
 	assert.Equal(t, "test-model", config.Model)
@@ -27,7 +28,8 @@ func TestGetConfigFromViperDefaults(t *testing.T) {
 	viper.Reset()
 
 	// Execute
-	config := GetConfigFromViper()
+	config, err := GetConfigFromViper()
+	require.NoError(t, err)
 
 	// Verify
 	assert.Empty(t, config.Model)
@@ -76,7 +78,7 @@ func TestGetConfigFromViperWithAliases(t *testing.T) {
 				"model":      "claude-sonnet-4-20250514",
 				"max_tokens": 8192,
 			},
-			expectedAliases: map[string]string{},
+			expectedAliases: nil,
 			description:     "should handle missing aliases configuration",
 		},
 	}
@@ -92,7 +94,8 @@ func TestGetConfigFromViperWithAliases(t *testing.T) {
 			}
 
 			// Get config
-			config := GetConfigFromViper()
+			config, err := GetConfigFromViper()
+			require.NoError(t, err)
 
 			// Verify aliases
 			assert.Equal(t, tt.expectedAliases, config.Aliases, tt.description)
@@ -129,7 +132,8 @@ func TestConfigAliasIntegrationWithNewThread(t *testing.T) {
 	})
 
 	// Get config and create thread
-	config := GetConfigFromViper()
+	config, err := GetConfigFromViper()
+	require.NoError(t, err)
 	originalModel := config.Model
 
 	thread, err := NewThread(config)
@@ -148,7 +152,8 @@ func TestGetConfigFromViperOpenAINotSet(t *testing.T) {
 	viper.Set("model", "gpt-4")
 
 	// Execute
-	config := GetConfigFromViper()
+	config, err := GetConfigFromViper()
+	require.NoError(t, err)
 
 	// Verify
 	assert.Nil(t, config.OpenAI, "OpenAI config should be nil when not set")
@@ -162,7 +167,8 @@ func TestGetConfigFromViperOpenAIBasicConfig(t *testing.T) {
 	viper.Set("openai.base_url", "https://api.x.ai/v1")
 
 	// Execute
-	config := GetConfigFromViper()
+	config, err := GetConfigFromViper()
+	require.NoError(t, err)
 
 	// Verify
 	require.NotNil(t, config.OpenAI, "OpenAI config should not be nil")
@@ -180,7 +186,8 @@ func TestGetConfigFromViperOpenAIModelsConfig(t *testing.T) {
 	viper.Set("openai.models.non_reasoning", []string{"gpt-4", "gpt-4-turbo", "gpt-3.5-turbo"})
 
 	// Execute
-	config := GetConfigFromViper()
+	config, err := GetConfigFromViper()
+	require.NoError(t, err)
 
 	// Verify
 	require.NotNil(t, config.OpenAI, "OpenAI config should not be nil")
@@ -197,7 +204,8 @@ func TestGetConfigFromViperOpenAIPartialModelsConfig(t *testing.T) {
 	// Don't set non_reasoning
 
 	// Execute
-	config := GetConfigFromViper()
+	config, err := GetConfigFromViper()
+	require.NoError(t, err)
 
 	// Verify
 	require.NotNil(t, config.OpenAI, "OpenAI config should not be nil")
@@ -228,7 +236,8 @@ func TestGetConfigFromViperOpenAIPricingConfig(t *testing.T) {
 	viper.Set("openai.pricing", pricingConfig)
 
 	// Execute
-	config := GetConfigFromViper()
+	config, err := GetConfigFromViper()
+	require.NoError(t, err)
 
 	// Verify
 	require.NotNil(t, config.OpenAI, "OpenAI config should not be nil")
@@ -268,7 +277,8 @@ func TestGetConfigFromViperOpenAIPricingPartialConfig(t *testing.T) {
 	viper.Set("openai.pricing", pricingConfig)
 
 	// Execute
-	config := GetConfigFromViper()
+	config, err := GetConfigFromViper()
+	require.NoError(t, err)
 
 	// Verify
 	require.NotNil(t, config.OpenAI, "OpenAI config should not be nil")
@@ -299,22 +309,12 @@ func TestGetConfigFromViperOpenAIPricingInvalidTypes(t *testing.T) {
 	}
 	viper.Set("openai.pricing", pricingConfig)
 
-	// Execute
-	config := GetConfigFromViper()
+	// Execute - invalid types should cause configuration to fail
+	_, err := GetConfigFromViper()
 
-	// Verify
-	require.NotNil(t, config.OpenAI, "OpenAI config should not be nil")
-	require.NotNil(t, config.OpenAI.Pricing, "Pricing should not be nil")
-
-	// Should only have one valid entry (gpt-4) but with invalid fields as zero values
-	require.Len(t, config.OpenAI.Pricing, 1, "Should have 1 pricing entry (invalid entry skipped)")
-
-	gpt4Pricing, exists := config.OpenAI.Pricing["gpt-4"]
-	require.True(t, exists, "gpt-4 pricing should exist")
-	assert.Equal(t, 0.0, gpt4Pricing.Input) // Invalid type, should be zero value
-	assert.Equal(t, 0.000015, gpt4Pricing.CachedInput)
-	assert.Equal(t, 0.00006, gpt4Pricing.Output)
-	assert.Equal(t, 0, gpt4Pricing.ContextWindow) // Invalid type, should be zero value
+	// Verify that error is returned for invalid configuration
+	assert.Error(t, err, "should return error for invalid pricing configuration types")
+	assert.Contains(t, err.Error(), "failed to unmarshal configuration", "error should mention unmarshaling failure")
 }
 
 func TestGetConfigFromViperOpenAIFullConfig(t *testing.T) {
@@ -346,7 +346,8 @@ func TestGetConfigFromViperOpenAIFullConfig(t *testing.T) {
 	viper.Set("openai.pricing", pricingConfig)
 
 	// Execute
-	config := GetConfigFromViper()
+	config, err := GetConfigFromViper()
+	require.NoError(t, err)
 
 	// Verify basic config
 	assert.Equal(t, "openai", config.Provider)
