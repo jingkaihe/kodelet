@@ -31,6 +31,10 @@ type Config struct {
 	Aliases              map[string]string  // Aliases maps short model names to full model names
 	Retry                RetryConfig        // Retry configuration for API calls
 
+	// Profile configuration
+	Profile  string                    `mapstructure:"profile"`  // Active profile name (empty means no profile active)
+	Profiles map[string]ProfileConfig `mapstructure:"profiles"` // Named profile configurations
+
 	// Provider-specific configurations
 	OpenAI   *OpenAIConfig           `mapstructure:"openai"`   // OpenAI-specific configuration including compatible providers
 	SubAgent *SubAgentConfigSettings `mapstructure:"subagent"` // SubAgent configuration for different models/providers
@@ -61,6 +65,9 @@ type ModelPricing struct {
 
 // CustomPricing maps model names to their pricing information
 type CustomPricing map[string]ModelPricing
+
+// ProfileConfig is a flexible configuration map that can hold any config fields
+type ProfileConfig map[string]interface{}
 
 // RetryConfig holds the retry configuration for API calls
 // Note: Anthropic only uses Attempts (relies on SDK retry), OpenAI uses all fields

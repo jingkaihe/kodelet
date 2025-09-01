@@ -34,6 +34,86 @@ aliases:
   haiku-35: "claude-3-5-haiku-20241022"
   opus-4: "claude-opus-4-20250514"
 
+# Profile Configuration
+# Profiles allow you to define multiple named configurations for different use cases
+# You can switch between profiles using: kodelet profile use <name>
+# Use "default" or omit profile to use the base configuration without any profile
+# profile: "premium"  # Uncomment to set active profile
+
+# Profile definitions - each profile can override any configuration setting
+profiles:
+  # Premium profile - Best quality models for important work
+  premium:
+    model: "claude-opus-4-20250514"           # Use aliases for cleaner configs
+    weak_model: "claude-sonnet-4-20250514"
+    max_tokens: 16000
+    weak_model_max_tokens: 8192
+    thinking_budget_tokens: 8000
+
+  # Fast profile - Quick responses for rapid iteration
+  fast:
+    model: "haiku-35"
+    weak_model: "haiku-35"
+    max_tokens: 4096
+    weak_model_max_tokens: 4096
+    thinking_budget_tokens: 2000
+
+  # OpenAI profile - Using OpenAI GPT models
+  openai:
+    provider: "openai"
+    use_copilot: true
+    model: "gpt-4.1"
+    weak_model: "gpt-4.1-mini"
+    max_tokens: 16000
+    reasoning_effort: "medium"
+
+  # XAI Grok profile - Using XAI Grok models
+  xai:
+    provider: "openai"
+    model: "grok-3"
+    weak_model: "grok-3-mini"
+    max_tokens: 16000
+    reasoning_effort: "none"
+    openai:
+      preset: "xai"
+
+  # Mixed agent profile - Main agent uses Claude, subagent uses OpenAI
+  mix-n-match:
+    # Main agent settings
+    provider: "anthropic"
+    model: "sonnet-4"
+    weak_model: "haiku-35"
+    max_tokens: 16000
+    
+    # Subagent uses different provider for specialized tasks
+    subagent:
+      provider: "openai"
+      model: "o3"
+      reasoning_effort: "high"
+      allowed_tools: ["file_read", "glob_tool", "grep_tool", "thinking"]
+
+  # Local/Offline profile - Using local Ollama models
+  local:
+    provider: "openai"
+    model: "llama3.3:70b"
+    weak_model: "qwen2.5-coder:32b"
+    max_tokens: 8192
+    openai:
+      base_url: "http://localhost:11434/v1"
+      models:
+        non_reasoning:
+          - "llama3.3:70b"
+          - "qwen2.5-coder:32b"
+      pricing:
+        "llama3.3:70b":
+          input: 0.0
+          output: 0.0
+          context_window: 131072
+        "qwen2.5-coder:32b":
+          input: 0.0
+          output: 0.0
+          context_window: 32768
+
 # OpenAI specific settings
 # Reasoning effort for OpenAI models (low, medium, high)
 reasoning_effort: "medium"

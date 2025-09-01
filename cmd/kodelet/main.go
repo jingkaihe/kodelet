@@ -123,6 +123,7 @@ func main() {
 	rootCmd.PersistentFlags().String("allowed-domains-file", "~/.kodelet/allowed_domains.txt", "Path to file containing allowed domains for web_fetch tool (one domain per line)")
 	rootCmd.PersistentFlags().StringSlice("allowed-tools", []string{}, "Comma-separated list of allowed tools for main agent (e.g. 'bash,file_read,grep_tool')")
 	rootCmd.PersistentFlags().String("anthropic-api-access", "auto", "Anthropic API access mode (auto, subscription, api-key)")
+	rootCmd.PersistentFlags().String("profile", "", "Configuration profile to use (overrides config file)")
 
 	// Bind flags to viper
 	viper.BindPFlag("provider", rootCmd.PersistentFlags().Lookup("provider"))
@@ -141,6 +142,7 @@ func main() {
 	viper.BindPFlag("allowed_domains_file", rootCmd.PersistentFlags().Lookup("allowed-domains-file"))
 	viper.BindPFlag("allowed_tools", rootCmd.PersistentFlags().Lookup("allowed-tools"))
 	viper.BindPFlag("anthropic_api_access", rootCmd.PersistentFlags().Lookup("anthropic-api-access"))
+	viper.BindPFlag("profile", rootCmd.PersistentFlags().Lookup("profile"))
 
 	// Add subcommands
 	rootCmd.AddCommand(chatCmd)
@@ -164,6 +166,7 @@ func main() {
 	rootCmd.AddCommand(serveCmd)
 	rootCmd.AddCommand(feedbackCmd)
 	rootCmd.AddCommand(recipeCmd)
+	rootCmd.AddCommand(profileCmd)
 
 	// Initialize telemetry with tracing
 	tracingShutdown, err := initTracing(ctx)
