@@ -1,5 +1,15 @@
 # Kodelet
 
+## 0.0.88.alpha (2025-09-01)
+
+### Model Support Enhancement
+
+**xAI Grok Preset Renaming**: Renamed Grok preset package to xai for improved branding consistency
+
+**Updated xAI Grok Model Configurations**: Enhanced model support with latest xAI Grok configurations
+- Added new `grok-code-fast-1` model optimized for code-related tasks
+- Updated pricing information for improved cost accuracy and transparency
+
 ## 0.0.87.alpha (2025-08-29)
 
 ### Pull Request Workflow Enhancement

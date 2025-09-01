@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jingkaihe/kodelet/pkg/llm/openai/preset/grok"
+	"github.com/jingkaihe/kodelet/pkg/llm/openai/preset/xai"
 	openaipreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/openai"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
@@ -113,20 +113,20 @@ func loadOpenAIPreset() (*llmtypes.CustomModels, llmtypes.CustomPricing) {
 
 // loadXAIGrokPreset loads the complete xAI Grok configuration
 func loadXAIGrokPreset() (*llmtypes.CustomModels, llmtypes.CustomPricing) {
-	// Convert grok.Models to llmtypes.CustomModels
+	// Convert xai.Models to llmtypes.CustomModels
 	models := &llmtypes.CustomModels{
-		Reasoning:    grok.Models.Reasoning,
-		NonReasoning: grok.Models.NonReasoning,
+		Reasoning:    xai.Models.Reasoning,
+		NonReasoning: xai.Models.NonReasoning,
 	}
 
-	// Convert grok.Pricing to llmtypes.CustomPricing
+	// Convert xai.Pricing to llmtypes.CustomPricing
 	pricing := make(llmtypes.CustomPricing)
-	for model, grokPricing := range grok.Pricing {
+	for model, xaiPricing := range xai.Pricing {
 		pricing[model] = llmtypes.ModelPricing{
-			Input:         grokPricing.Input,
-			CachedInput:   grokPricing.CachedInput,
-			Output:        grokPricing.Output,
-			ContextWindow: grokPricing.ContextWindow,
+			Input:         xaiPricing.Input,
+			CachedInput:   xaiPricing.CachedInput,
+			Output:        xaiPricing.Output,
+			ContextWindow: xaiPricing.ContextWindow,
 		}
 	}
 
@@ -139,7 +139,7 @@ func getPresetBaseURL(presetName string) string {
 	case "openai":
 		return openaipreset.BaseURL
 	case "xai":
-		return grok.BaseURL
+		return xai.BaseURL
 	default:
 		return ""
 	}
@@ -151,7 +151,7 @@ func getPresetAPIKeyEnvVar(presetName string) string {
 	case "openai":
 		return openaipreset.APIKeyEnvVar
 	case "xai":
-		return grok.APIKeyEnvVar
+		return xai.APIKeyEnvVar
 	default:
 		return "OPENAI_API_KEY" // default fallback
 	}

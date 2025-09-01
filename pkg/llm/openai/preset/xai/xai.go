@@ -1,24 +1,28 @@
-// Package grok provides preset configurations for xAI Grok models
-package grok
+// Package xai provides preset configurations for xAI Grok models
+package xai
 
 import "github.com/jingkaihe/kodelet/pkg/types/llm"
 
 // Models defines the xAI Grok model categorization for reasoning and non-reasoning models
 var Models = llm.CustomModels{
 	Reasoning: []string{
+		"grok-code-fast-1",
 		"grok-4-0709",
 		"grok-3-mini",
-		"grok-3-mini-fast",
 	},
 	NonReasoning: []string{
 		"grok-3",
-		"grok-3-fast",
-		"grok-2-vision-1212",
+		"grok-2-image-1212",
 	},
 }
 
 // Pricing defines the pricing information for all xAI Grok models
 var Pricing = llm.CustomPricing{
+	"grok-code-fast-1": llm.ModelPricing{
+		Input:         0.0000002, // $0.20 per million tokens
+		Output:        0.0000015, // $1.50 per million tokens
+		ContextWindow: 256000,    // 256k tokens
+	},
 	"grok-4-0709": llm.ModelPricing{
 		Input:         0.000003, // $3 per million tokens
 		Output:        0.000015, // $15 per million tokens
@@ -31,23 +35,13 @@ var Pricing = llm.CustomPricing{
 	},
 	"grok-3-mini": llm.ModelPricing{
 		Input:         0.0000003, // $0.30 per million tokens
-		Output:        0.0000009, // $0.90 per million tokens
+		Output:        0.0000005, // $0.50 per million tokens
 		ContextWindow: 131072,    // 131k tokens
 	},
-	"grok-3-fast": llm.ModelPricing{
-		Input:         0.000005, // $5 per million tokens
-		Output:        0.000025, // $25 per million tokens
-		ContextWindow: 131072,   // 131k tokens
-	},
-	"grok-3-mini-fast": llm.ModelPricing{
-		Input:         0.0000006, // $0.60 per million tokens
-		Output:        0.000004,  // $4 per million tokens
-		ContextWindow: 131072,    // 131k tokens
-	},
-	"grok-2-vision-1212": llm.ModelPricing{
-		Input:         0.000002, // $2 per million tokens
-		Output:        0.00001,  // $10 per million tokens
-		ContextWindow: 32768,    // 32k tokens (vision model)
+	"grok-2-image-1212": llm.ModelPricing{
+		Input:         0,       // Image generation model - no input token cost
+		Output:        0.00007, // $0.07 per image output
+		ContextWindow: 32768,   // Context window for image generation
 	},
 }
 
