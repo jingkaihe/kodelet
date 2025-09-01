@@ -13,9 +13,9 @@ func TestModels(t *testing.T) {
 
 	t.Run("ReasoningModels", func(t *testing.T) {
 		expectedReasoning := []string{
+			"grok-code-fast-1",
 			"grok-4-0709",
 			"grok-3-mini",
-			"grok-3-mini-fast",
 		}
 		assert.Equal(t, expectedReasoning, grok.Models.Reasoning, "Reasoning models should match expected list")
 	})
@@ -23,8 +23,7 @@ func TestModels(t *testing.T) {
 	t.Run("NonReasoningModels", func(t *testing.T) {
 		expectedNonReasoning := []string{
 			"grok-3",
-			"grok-3-fast",
-			"grok-2-vision-1212",
+			"grok-2-image-1212",
 		}
 		assert.Equal(t, expectedNonReasoning, grok.Models.NonReasoning, "Non-reasoning models should match expected list")
 	})
@@ -47,7 +46,14 @@ func TestPricing(t *testing.T) {
 		for _, model := range grok.Models.NonReasoning {
 			pricing, exists := grok.Pricing[model]
 			assert.True(t, exists, "Non-reasoning model %s should have pricing", model)
-			assert.Greater(t, pricing.Input, 0.0, "Input price for %s should be positive", model)
+			
+			// Special case for image generation models that don't charge for input tokens
+			if model == "grok-2-image-1212" {
+				assert.Equal(t, 0.0, pricing.Input, "Image generation model %s should have no input cost", model)
+			} else {
+				assert.Greater(t, pricing.Input, 0.0, "Input price for %s should be positive", model)
+			}
+			
 			assert.Greater(t, pricing.Output, 0.0, "Output price for %s should be positive", model)
 			assert.Greater(t, pricing.ContextWindow, 0, "Context window for %s should be positive", model)
 		}
@@ -62,13 +68,13 @@ func TestPricing(t *testing.T) {
 		assert.Equal(t, 0.000015, grok4Pricing.Output, "grok-4-0709 output pricing should match")
 		assert.Equal(t, 256000, grok4Pricing.ContextWindow, "grok-4-0709 context window should match")
 
-		// Test vision model pricing
-		visionPricing, exists := grok.Pricing["grok-2-vision-1212"]
-		require.True(t, exists, "grok-2-vision-1212 should exist in pricing")
+		// Test image generation model pricing
+		imagePricing, exists := grok.Pricing["grok-2-image-1212"]
+		require.True(t, exists, "grok-2-image-1212 should exist in pricing")
 
-		assert.Equal(t, 0.000002, visionPricing.Input, "grok-2-vision-1212 input pricing should match")
-		assert.Equal(t, 0.00001, visionPricing.Output, "grok-2-vision-1212 output pricing should match")
-		assert.Equal(t, 32768, visionPricing.ContextWindow, "grok-2-vision-1212 context window should match")
+		assert.Equal(t, 0.0, imagePricing.Input, "grok-2-image-1212 input pricing should match")
+		assert.Equal(t, 0.00007, imagePricing.Output, "grok-2-image-1212 output pricing should match")
+		assert.Equal(t, 32768, imagePricing.ContextWindow, "grok-2-image-1212 context window should match")
 	})
 }
 
@@ -80,8 +86,8 @@ func TestBaseURL(t *testing.T) {
 func TestModelCount(t *testing.T) {
 	// Ensure we have the expected number of models
 	assert.Len(t, grok.Models.Reasoning, 3, "Should have 3 reasoning models")
-	assert.Len(t, grok.Models.NonReasoning, 3, "Should have 3 non-reasoning models")
-	assert.Len(t, grok.Pricing, 6, "Should have pricing for 6 total models")
+	assert.Len(t, grok.Models.NonReasoning, 2, "Should have 2 non-reasoning models")
+	assert.Len(t, grok.Pricing, 5, "Should have pricing for 5 total models")
 }
 
 func TestNoDuplicateModels(t *testing.T) {
