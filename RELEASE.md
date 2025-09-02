@@ -1,5 +1,16 @@
 # Kodelet
 
+## 0.0.90.alpha (2025-09-02)
+
+### Custom Tools System
+
+**Custom Tools System**: Revolutionary custom tool integration allowing users to extend Kodelet with executable tools written in any programming language
+
+- **Universal Language Support**: Create custom tools using Python, Bash, or any executable language with simple two-command protocol (`description` and `run`)
+- **Automatic Discovery**: Tools automatically discovered from global (`~/.kodelet/tools`) and local (`./kodelet-tools`) directories with local override support
+- **JSON Protocol**: Simple JSON-based input/output protocol with schema validation and structured error handling
+- **Built-in Tool Generator**: New `custom-tools` fragment recipe generates complete tool templates with best practices and proper structure
+
 ## 0.0.89.alpha (2025-09-01)
 
 ### Configuration Management Enhancement
