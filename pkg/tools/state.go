@@ -26,6 +26,7 @@ type BasicState struct {
 	todoFilePath        string
 	tools               []tooltypes.Tool
 	mcpTools            []tooltypes.Tool
+	customTools         []tooltypes.Tool
 	llmConfig           llmtypes.Config
 }
 
@@ -104,6 +105,14 @@ func WithExtraMCPTools(tools []tooltypes.Tool) BasicStateOption {
 	}
 }
 
+func WithCustomTools(customManager *CustomToolManager) BasicStateOption {
+	return func(ctx context.Context, s *BasicState) error {
+		tools := customManager.ListTools()
+		s.customTools = append(s.customTools, tools...)
+		return nil
+	}
+}
+
 func WithLLMConfig(config llmtypes.Config) BasicStateOption {
 	return func(ctx context.Context, s *BasicState) error {
 		s.llmConfig = config
@@ -173,9 +182,10 @@ func (s *BasicState) MCPTools() []tooltypes.Tool {
 }
 
 func (s *BasicState) Tools() []tooltypes.Tool {
-	tools := make([]tooltypes.Tool, 0, len(s.tools)+len(s.mcpTools))
+	tools := make([]tooltypes.Tool, 0, len(s.tools)+len(s.mcpTools)+len(s.customTools))
 	tools = append(tools, s.tools...)
 	tools = append(tools, s.mcpTools...)
+	tools = append(tools, s.customTools...)
 	return tools
 }
 

@@ -375,7 +375,7 @@ Unique content`
 	require.NoError(t, err)
 
 	// Should include 3 filesystem fragments + 4 built-in recipes (github/issue-resolve, commit, github/pr, github/pr-respond)
-	assert.Len(t, fragments, 7)
+	assert.Len(t, fragments, 8)
 
 	var withMeta, withoutMeta, unique *Fragment
 	for _, f := range fragments {

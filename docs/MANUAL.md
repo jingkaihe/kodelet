@@ -39,6 +39,13 @@ Kodelet is a lightweight agentic SWE Agent that runs as an interactive CLI tool 
 - [LLM Providers](#llm-providers)
   - [Anthropic Claude](#anthropic-claude)
   - [OpenAI](#openai)
+- [Custom Tools](#custom-tools)
+  - [Creating Custom Tools](#creating-custom-tools)
+  - [Tool Protocol](#tool-protocol)
+  - [Directory Structure](#directory-structure)
+  - [Configuration](#custom-tools-configuration)
+  - [Examples](#custom-tools-examples)
+  - [Generate Custom Tool](#generate-custom-tool)
 - [Key Features](#key-features)
 - [Security & Limitations](#security--limitations)
   - [Image Input Security](#image-input-security)
@@ -747,12 +754,318 @@ Features:
 - Function calling capabilities
 - Vision support (planned)
 
+## Custom Tools
+
+Kodelet supports custom executable tools that extend its capabilities beyond the built-in tool set. Custom tools are standalone executables (scripts or binaries) that implement a simple two-command protocol and can be written in any programming language.
+
+### Creating Custom Tools
+
+Custom tools are executable files that respond to two commands:
+- `<tool> description` - Returns a JSON schema describing the tool
+- `<tool> run` - Executes the tool with JSON input from stdin
+
+**Basic Requirements:**
+1. **Executable**: The file must have execute permissions (`chmod +x`)
+2. **Two Commands**: Must support `description` and `run` commands
+3. **JSON Protocol**: Uses JSON for both schema definition and input/output
+
+### Tool Protocol
+
+**Description Command:**
+```bash
+./my-tool description
+```
+
+Must return a JSON object with this structure:
+```json
+{
+  "name": "my_tool",
+  "description": "Brief description of what this tool does",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "param1": {
+        "type": "string",
+        "description": "Description of parameter"
+      },
+      "param2": {
+        "type": "integer",
+        "description": "Another parameter"
+      }
+    },
+    "required": ["param1"]
+  }
+}
+```
+
+**Run Command:**
+```bash
+echo '{"param1": "value", "param2": 42}' | ./my-tool run
+```
+
+The tool receives JSON input via stdin and can:
+- **Success**: Write output to stdout and exit with code 0
+- **Error**: Write error message to stderr and exit with non-zero code
+- **JSON Error**: Write `{"error": "message"}` to stdout for structured errors
+
+### Directory Structure
+
+Custom tools are discovered from two directories:
+
+**Global Tools**: `~/.kodelet/tools/`
+- Available across all projects
+- Good for general-purpose utilities
+
+**Local Tools**: `./kodelet-tools/`
+- Project-specific tools
+- Override global tools with the same name
+- Should be committed to your repository
+
+### Custom Tools Configuration
+
+Configure custom tools behavior in your `config.yaml` or `kodelet-config.yaml`:
+
+```yaml
+custom_tools:
+  # Enable/disable custom tools (default: true)
+  enabled: true
+
+  # Global tools directory (default: ~/.kodelet/tools)
+  global_dir: "~/.kodelet/tools"
+
+  # Local tools directory (default: ./kodelet-tools)
+  local_dir: "./kodelet-tools"
+
+  # Execution timeout (default: 30s)
+  timeout: 30s
+
+  # Maximum output size (default: 100KB)
+  max_output_size: 102400
+
+  # Tool whitelist - only specified tools will be loaded (empty means load all tools)
+  # When the whitelist is empty, all discovered custom tools will be available
+  # When specified, only tools with these exact names will be loaded
+  tool_white_list:
+    - "my-custom-tool"
+    - "database-backup"
+    - "deploy-script"
+```
+
+**Tool Whitelisting:**
+The `tool_white_list` configuration allows you to control which custom tools are loaded and available for use. When the whitelist is empty or not specified, all discovered custom tools in the configured directories will be available. When you specify tool names in the whitelist, only those exact tools will be loaded, providing granular control over which tools are accessible in your environment.
+
+**Command Line Override:**
+```bash
+# Temporary disable custom tools
+kodelet run --config custom_tools.enabled=false "query"
+```
+
+### Custom Tools Examples
+
+**1. Simple Hello Tool (Bash):**
+
+```bash
+#!/bin/bash
+# File: ~/.kodelet/tools/hello
+
+case "$1" in
+  "description")
+    cat <<EOF
+{
+  "name": "hello",
+  "description": "Say hello to a person",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "name": {
+        "type": "string",
+        "description": "The name of the person"
+      },
+      "age": {
+        "type": "integer",
+        "description": "The age of the person (optional)"
+      }
+    },
+    "required": ["name"]
+  }
+}
+EOF
+    ;;
+  "run")
+    # Read JSON from stdin
+    input=$(cat)
+    name=$(echo "$input" | jq -r '.name')
+    age=$(echo "$input" | jq -r '.age // empty')
+
+    if [ -n "$age" ]; then
+      echo "Hello, $name! You are $age years old."
+    else
+      echo "Hello, $name!"
+    fi
+    ;;
+  *)
+    echo "Usage: hello [description|run]" >&2
+    exit 1
+    ;;
+esac
+```
+
+**2. Git Info Tool (Advanced Bash):**
+
+```bash
+#!/bin/bash
+# File: ./kodelet-tools/git_info
+
+case "$1" in
+  "description")
+    cat <<EOF
+{
+  "name": "git_info",
+  "description": "Get current git repository information",
+  "input_schema": {
+    "type": "object",
+    "properties": {}
+  }
+}
+EOF
+    ;;
+  "run")
+    if ! git rev-parse --git-dir >/dev/null 2>&1; then
+      echo '{"error": "Not in a git repository"}'
+      exit 0
+    fi
+
+    branch=$(git branch --show-current)
+    commit=$(git rev-parse HEAD)
+    uncommitted=$(git status --porcelain | wc -l)
+
+    cat <<EOF
+{
+  "branch": "$branch",
+  "commit": "$commit",
+  "uncommitted_changes": $uncommitted
+}
+EOF
+    ;;
+esac
+```
+
+**3. Python Tool Example:**
+
+```python
+#!/usr/bin/env python3
+# File: ~/.kodelet/tools/analyze_logs
+
+import json
+import sys
+import os
+
+def description():
+    return {
+        "name": "analyze_logs",
+        "description": "Analyze log files for errors and patterns",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "file_path": {
+                    "type": "string",
+                    "description": "Path to the log file"
+                },
+                "pattern": {
+                    "type": "string",
+                    "description": "Pattern to search for (optional)"
+                }
+            },
+            "required": ["file_path"]
+        }
+    }
+
+def run():
+    try:
+        input_data = json.load(sys.stdin)
+        file_path = input_data['file_path']
+        pattern = input_data.get('pattern', 'ERROR')
+
+        if not os.path.exists(file_path):
+            print(json.dumps({"error": f"File not found: {file_path}"}))
+            return
+
+        with open(file_path, 'r') as f:
+            lines = f.readlines()
+
+        matches = [line.strip() for line in lines if pattern in line]
+
+        result = {
+            "total_lines": len(lines),
+            "matches": len(matches),
+            "pattern": pattern,
+            "sample_matches": matches[:10]  # First 10 matches
+        }
+
+        print(json.dumps(result, indent=2))
+
+    except Exception as e:
+        print(json.dumps({"error": str(e)}))
+
+if __name__ == "__main__":
+    if len(sys.argv) != 2:
+        print("Usage: analyze_logs [description|run]", file=sys.stderr)
+        sys.exit(1)
+
+    command = sys.argv[1]
+    if command == "description":
+        print(json.dumps(description(), indent=2))
+    elif command == "run":
+        run()
+    else:
+        print(f"Unknown command: {command}", file=sys.stderr)
+        sys.exit(1)
+```
+
+**Usage in Kodelet:**
+
+Once tools are created and made executable, Kodelet automatically discovers them and makes them available:
+
+```bash
+# Kodelet will find and use your custom tools
+kodelet run "Say hello to Alice who is 25 years old"
+# Uses: custom_tool_hello
+
+kodelet run "What's the current git status of this repo?"
+# Uses: custom_tool_git_info
+
+kodelet run "Analyze the server logs for any ERROR patterns"
+# Uses: custom_tool_analyze_logs
+```
+
+**Best Practices:**
+
+1. **Error Handling**: Always handle errors gracefully and provide helpful error messages
+2. **Input Validation**: Validate required parameters and provide clear error messages
+3. **Documentation**: Write clear descriptions and parameter documentation
+4. **Testing**: Test both `description` and `run` commands manually before use
+5. **Permissions**: Ensure tools have proper execute permissions (`chmod +x`)
+6. **Dependencies**: Document any external dependencies (jq, python, etc.)
+7. **Security**: Be careful with user input, especially when executing system commands
+
+### Generate Custom Tool
+
+Kodelet includes a built-in `custom-tools` recipe that automatically generates custom tool templates based on your task description. This is the fastest way to create new tools with proper structure and best practices.
+
+**Generate a Custom Tool:**
+
+```bash
+# Generate a weather tool without API key requirement
+kodelet run -r custom-tools --arg task="implement a tool to fetch the weather based on the location, ideally without requiring api key"
+```
+
 ## Key Features
 
 - **Intelligent Engineering Assistant**: Automates software engineering tasks and production operations with agentic capabilities.
 - **Interactive Architecture Design**: Collaboratively design and refine system architectures through natural dialogue.
 - **Continuous Code Intelligence**: Analyzes, understands, and improves your codebase while answering technical questions in context.
 - **Agent Context Files**: Automatic loading of project-specific context from `AGENTS.md` or `KODELET.md` files for enhanced project understanding.
+- **Custom Tools**: Extend Kodelet with your own executable tools written in any programming language using a simple JSON protocol.
 - **Vision Capabilities**: Support for image inputs including screenshots, diagrams, and mockups (Anthropic Claude models).
 - **Multiple LLM Providers**: Supports both Anthropic Claude and OpenAI models, giving you flexibility in choosing the best model for your needs.
 

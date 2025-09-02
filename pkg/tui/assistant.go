@@ -14,13 +14,14 @@ import (
 type AssistantClient struct {
 	thread             llmtypes.Thread
 	mcpManager         *tools.MCPManager
+	customManager      *tools.CustomToolManager
 	maxTurns           int
 	compactRatio       float64
 	disableAutoCompact bool
 }
 
 // NewAssistantClient creates a new assistant client
-func NewAssistantClient(ctx context.Context, conversationID string, enablePersistence bool, mcpManager *tools.MCPManager, maxTurns int, compactRatio float64, disableAutoCompact bool) *AssistantClient {
+func NewAssistantClient(ctx context.Context, conversationID string, enablePersistence bool, mcpManager *tools.MCPManager, customManager *tools.CustomToolManager, maxTurns int, compactRatio float64, disableAutoCompact bool) *AssistantClient {
 	// Create a persistent thread with config from viper
 	config, err := llm.GetConfigFromViper()
 	if err != nil {
@@ -35,6 +36,7 @@ func NewAssistantClient(ctx context.Context, conversationID string, enablePersis
 	var stateOpts []tools.BasicStateOption
 	stateOpts = append(stateOpts, tools.WithLLMConfig(config))
 	stateOpts = append(stateOpts, tools.WithMCPTools(mcpManager))
+	stateOpts = append(stateOpts, tools.WithCustomTools(customManager))
 	stateOpts = append(stateOpts, tools.WithMainTools())
 	state := tools.NewBasicState(ctx, stateOpts...)
 	thread.SetState(state)
@@ -49,6 +51,7 @@ func NewAssistantClient(ctx context.Context, conversationID string, enablePersis
 	return &AssistantClient{
 		thread:             thread,
 		mcpManager:         mcpManager,
+		customManager:      customManager,
 		maxTurns:           maxTurns,
 		compactRatio:       compactRatio,
 		disableAutoCompact: disableAutoCompact,

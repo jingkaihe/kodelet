@@ -76,7 +76,7 @@ profiles:
     model: "sonnet-4"
     weak_model: "haiku-35"
     max_tokens: 16000
-    
+
     subagent:
       provider: "openai"
       model: "o3"
@@ -95,15 +95,15 @@ retry:
   # Maximum number of retry attempts (default: 3)
   # Used by both Anthropic and OpenAI
   attempts: 3
-  
+
   # Initial delay in milliseconds before first retry (default: 1000)
   # Used by OpenAI only
   initial_delay: 1000
-  
+
   # Maximum delay in milliseconds between retries (default: 10000)
   # Used by OpenAI only
   max_delay: 10000
-  
+
   # Backoff strategy: "fixed" or "exponential" (default: "exponential")
   # Used by OpenAI only
   backoff_type: "exponential"
@@ -140,8 +140,8 @@ allowed_domains_file: "~/.kodelet/allowed_domains.txt"
 # Tool Configuration
 # Tools allowed for main agent (empty means use defaults)
 # Meta tools (file_read, grep_tool, glob_tool, thinking) are always enabled for basic functionality
-# Available tools: bash, file_read, file_write, file_edit, thinking, subagent, grep_tool, 
-#                  glob_tool, todo_read, todo_write, web_fetch, image_recognition, 
+# Available tools: bash, file_read, file_write, file_edit, thinking, subagent, grep_tool,
+#                  glob_tool, todo_read, todo_write, web_fetch, image_recognition,
 #                  view_background_processes
 allowed_tools: []
 # allowed_tools:
@@ -166,7 +166,7 @@ commit:
     enabled: true
     # Coauthor name (default: "Kodelet")
     name: "Kodelet"
-    # Coauthor email (default: "noreply@kodelet.com")  
+    # Coauthor email (default: "noreply@kodelet.com")
     email: "noreply@kodelet.com"
 
 
@@ -216,19 +216,19 @@ subagent:
   # Provider for subagents (can be different from main agent)
   # Example: Use GPT for subagents while main agent uses Claude
   # provider: "openai"
-  
+
   # Model for subagents (typically a lighter/faster model)
   # model: "gpt-4o-mini"
-  
+
   # Maximum tokens for subagent responses
   # max_tokens: 2048
-  
+
   # OpenAI-specific: Reasoning effort for subagent (low, medium, high)
   # reasoning_effort: "low"
-  
+
   # Anthropic-specific: Thinking budget for subagent
   # thinking_budget: 1024
-  
+
   # Tools allowed for subagent (empty means use defaults)
   # Note: subagent tool is automatically excluded to prevent infinite recursion
   # Meta tools (file_read, grep_tool, glob_tool, thinking) are always enabled
@@ -243,7 +243,7 @@ subagent:
   #   - "todo_read"
   #   - "todo_write"
   #   - "web_fetch"
-  
+
   # OpenAI configuration for subagent (when using different provider)
   # openai:
   #   preset: "openai"
@@ -280,6 +280,30 @@ subagent:
 # subagent:
 #   model: "claude-3-5-haiku-20241022"  # Faster model for subagent tasks
 #   max_tokens: 2048
+
+# Custom Tools Configuration
+# Kodelet can discover and execute custom executable tools from specified directories
+custom_tools:
+  # Enable/disable custom tools discovery (default: true)
+  enabled: true
+
+  # Global custom tools directory (default: ~/.kodelet/tools)
+  global_dir: "~/.kodelet/tools"
+
+  # Local custom tools directory (default: ./kodelet-tools)
+  local_dir: "./kodelet-tools"
+
+  # Execution timeout for custom tools (default: 30s)
+  timeout: 30s
+
+  # Maximum output size for custom tools (default: 100KB)
+  max_output_size: 102400
+
+  # Tool whitelist - only tools in this list will be loaded (empty means load all tools)
+  # When specified, only custom tools with these names will be available
+  # tool_white_list:
+  #   - "my-custom-tool"
+  #   - "another-tool"
 
 # Tracing Configuration
 tracing:
