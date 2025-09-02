@@ -45,6 +45,7 @@ Kodelet is a lightweight agentic SWE Agent that runs as an interactive CLI tool 
   - [Directory Structure](#directory-structure)
   - [Configuration](#custom-tools-configuration)
   - [Examples](#custom-tools-examples)
+  - [Generate Custom Tool](#generate-custom-tool)
 - [Key Features](#key-features)
 - [Security & Limitations](#security--limitations)
   - [Image Input Security](#image-input-security)
@@ -828,16 +829,16 @@ Configure custom tools behavior in your `config.yaml` or `kodelet-config.yaml`:
 custom_tools:
   # Enable/disable custom tools (default: true)
   enabled: true
-  
+
   # Global tools directory (default: ~/.kodelet/tools)
   global_dir: "~/.kodelet/tools"
-  
+
   # Local tools directory (default: ./kodelet-tools)
   local_dir: "./kodelet-tools"
-  
+
   # Execution timeout (default: 30s)
   timeout: 30s
-  
+
   # Maximum output size (default: 100KB)
   max_output_size: 102400
 ```
@@ -884,7 +885,7 @@ EOF
     input=$(cat)
     name=$(echo "$input" | jq -r '.name')
     age=$(echo "$input" | jq -r '.age // empty')
-    
+
     if [ -n "$age" ]; then
       echo "Hello, $name! You are $age years old."
     else
@@ -919,14 +920,14 @@ EOF
     ;;
   "run")
     if ! git rev-parse --git-dir >/dev/null 2>&1; then
-      echo '{"error": "Not in a git repository"}' 
+      echo '{"error": "Not in a git repository"}'
       exit 0
     fi
-    
+
     branch=$(git branch --show-current)
     commit=$(git rev-parse HEAD)
     uncommitted=$(git status --porcelain | wc -l)
-    
+
     cat <<EOF
 {
   "branch": "$branch",
@@ -953,14 +954,14 @@ def description():
         "name": "analyze_logs",
         "description": "Analyze log files for errors and patterns",
         "input_schema": {
-            "type": "object", 
+            "type": "object",
             "properties": {
                 "file_path": {
                     "type": "string",
                     "description": "Path to the log file"
                 },
                 "pattern": {
-                    "type": "string", 
+                    "type": "string",
                     "description": "Pattern to search for (optional)"
                 }
             },
@@ -973,25 +974,25 @@ def run():
         input_data = json.load(sys.stdin)
         file_path = input_data['file_path']
         pattern = input_data.get('pattern', 'ERROR')
-        
+
         if not os.path.exists(file_path):
             print(json.dumps({"error": f"File not found: {file_path}"}))
             return
-        
+
         with open(file_path, 'r') as f:
             lines = f.readlines()
-        
+
         matches = [line.strip() for line in lines if pattern in line]
-        
+
         result = {
             "total_lines": len(lines),
             "matches": len(matches),
             "pattern": pattern,
             "sample_matches": matches[:10]  # First 10 matches
         }
-        
+
         print(json.dumps(result, indent=2))
-        
+
     except Exception as e:
         print(json.dumps({"error": str(e)}))
 
@@ -999,7 +1000,7 @@ if __name__ == "__main__":
     if len(sys.argv) != 2:
         print("Usage: analyze_logs [description|run]", file=sys.stderr)
         sys.exit(1)
-    
+
     command = sys.argv[1]
     if command == "description":
         print(json.dumps(description(), indent=2))
@@ -1019,7 +1020,7 @@ Once tools are created and made executable, Kodelet automatically discovers them
 kodelet run "Say hello to Alice who is 25 years old"
 # Uses: custom_tool_hello
 
-kodelet run "What's the current git status of this repo?"  
+kodelet run "What's the current git status of this repo?"
 # Uses: custom_tool_git_info
 
 kodelet run "Analyze the server logs for any ERROR patterns"
@@ -1035,6 +1036,17 @@ kodelet run "Analyze the server logs for any ERROR patterns"
 5. **Permissions**: Ensure tools have proper execute permissions (`chmod +x`)
 6. **Dependencies**: Document any external dependencies (jq, python, etc.)
 7. **Security**: Be careful with user input, especially when executing system commands
+
+### Generate Custom Tool
+
+Kodelet includes a built-in `custom-tools` recipe that automatically generates custom tool templates based on your task description. This is the fastest way to create new tools with proper structure and best practices.
+
+**Generate a Custom Tool:**
+
+```bash
+# Generate a weather tool without API key requirement
+kodelet run -r custom-tools --arg task="implement a tool to fetch the weather based on the location, ideally without requiring api key"
+```
 
 ## Key Features
 
