@@ -841,7 +841,18 @@ custom_tools:
 
   # Maximum output size (default: 100KB)
   max_output_size: 102400
+
+  # Tool whitelist - only specified tools will be loaded (empty means load all tools)
+  # When the whitelist is empty, all discovered custom tools will be available
+  # When specified, only tools with these exact names will be loaded
+  tool_white_list:
+    - "my-custom-tool"
+    - "database-backup"
+    - "deploy-script"
 ```
+
+**Tool Whitelisting:**
+The `tool_white_list` configuration allows you to control which custom tools are loaded and available for use. When the whitelist is empty or not specified, all discovered custom tools in the configured directories will be available. When you specify tool names in the whitelist, only those exact tools will be loaded, providing granular control over which tools are accessible in your environment.
 
 **Command Line Override:**
 ```bash

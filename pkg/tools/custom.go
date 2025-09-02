@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -34,11 +35,12 @@ type CustomToolDescription struct {
 
 // CustomToolConfig represents the configuration for custom tools
 type CustomToolConfig struct {
-	Enabled       bool          `mapstructure:"enabled"`
-	GlobalDir     string        `mapstructure:"global_dir"`
-	LocalDir      string        `mapstructure:"local_dir"`
-	Timeout       time.Duration `mapstructure:"timeout"`
-	MaxOutputSize int           `mapstructure:"max_output_size"`
+	Enabled       bool          `mapstructure:"enabled" json:"enabled" yaml:"enabled"`
+	GlobalDir     string        `mapstructure:"global_dir" json:"global_dir" yaml:"global_dir"`
+	LocalDir      string        `mapstructure:"local_dir" json:"local_dir" yaml:"local_dir"`
+	Timeout       time.Duration `mapstructure:"timeout" json:"timeout" yaml:"timeout"`
+	MaxOutputSize int           `mapstructure:"max_output_size" json:"max_output_size" yaml:"max_output_size"`
+	ToolWhiteList []string      `mapstructure:"tool_white_list" json:"tool_white_list" yaml:"tool_white_list"`
 }
 
 // CustomTool represents a custom executable tool
@@ -108,6 +110,10 @@ func expandHomePath(path string) string {
 	return path
 }
 
+func customToolWhiteListed(toolName string, whiteList []string) bool {
+	return len(whiteList) == 0 || slices.Contains(whiteList, toolName)
+}
+
 // DiscoverTools scans directories and discovers available custom tools
 func (m *CustomToolManager) DiscoverTools(ctx context.Context) error {
 	if !m.config.Enabled {
@@ -163,6 +169,11 @@ func (m *CustomToolManager) discoverToolsInDir(ctx context.Context, dir string, 
 		tool, err := m.validateTool(ctx, execPath)
 		if err != nil {
 			logger.G(ctx).WithError(err).WithField("path", execPath).Debug("failed to validate tool")
+			continue
+		}
+
+		if !customToolWhiteListed(tool.name, m.config.ToolWhiteList) {
+			logger.G(ctx).WithField("name", tool.name).Debug("skipping tool, not in whitelist")
 			continue
 		}
 

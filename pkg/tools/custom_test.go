@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -466,4 +467,136 @@ func TestLoadCustomToolConfig(t *testing.T) {
 	assert.Equal(t, "./kodelet-tools", config.LocalDir)
 	assert.Equal(t, 30*time.Second, config.Timeout)
 	assert.Equal(t, 102400, config.MaxOutputSize) // 100KB
+	assert.Empty(t, config.ToolWhiteList)         // Default should be empty (no whitelist)
+}
+
+func TestCustomToolWhiteListed(t *testing.T) {
+	t.Run("Empty whitelist allows all tools", func(t *testing.T) {
+		var emptyWhitelist []string
+		assert.True(t, customToolWhiteListed("any-tool", emptyWhitelist))
+		assert.True(t, customToolWhiteListed("another-tool", emptyWhitelist))
+	})
+
+	t.Run("Whitelist with entries only allows listed tools", func(t *testing.T) {
+		whitelist := []string{"allowed-tool", "another-allowed"}
+		assert.True(t, customToolWhiteListed("allowed-tool", whitelist))
+		assert.True(t, customToolWhiteListed("another-allowed", whitelist))
+		assert.False(t, customToolWhiteListed("not-allowed", whitelist))
+		assert.False(t, customToolWhiteListed("some-other-tool", whitelist))
+	})
+
+	t.Run("Case sensitive matching", func(t *testing.T) {
+		whitelist := []string{"MyTool"}
+		assert.True(t, customToolWhiteListed("MyTool", whitelist))
+		assert.False(t, customToolWhiteListed("mytool", whitelist))
+		assert.False(t, customToolWhiteListed("MYTOOL", whitelist))
+	})
+}
+
+func TestCustomToolManager_DiscoverTools_WithWhitelist(t *testing.T) {
+	// Create temporary directory
+	tempDir := t.TempDir()
+
+	// Create mock tools
+	createMockTool(t, tempDir, "allowed-tool")
+	createMockTool(t, tempDir, "blocked-tool")
+	createMockTool(t, tempDir, "another-allowed")
+
+	t.Run("Empty whitelist loads all tools", func(t *testing.T) {
+		manager := &CustomToolManager{
+			tools:     make(map[string]*CustomTool),
+			globalDir: tempDir,
+			localDir:  "",
+			config: CustomToolConfig{
+				Enabled:       true,
+				Timeout:       5 * time.Second,
+				MaxOutputSize: 1024,
+				ToolWhiteList: []string{}, // Empty whitelist
+			},
+		}
+
+		err := manager.DiscoverTools(context.Background())
+		require.NoError(t, err)
+
+		tools := manager.ListTools()
+		assert.Len(t, tools, 3) // All tools should be loaded
+
+		toolNames := make([]string, len(tools))
+		for i, tool := range tools {
+			toolNames[i] = strings.TrimPrefix(tool.Name(), "custom_tool_")
+		}
+		assert.ElementsMatch(t, []string{"allowed-tool", "blocked-tool", "another-allowed"}, toolNames)
+	})
+
+	t.Run("Whitelist filters tools correctly", func(t *testing.T) {
+		manager := &CustomToolManager{
+			tools:     make(map[string]*CustomTool),
+			globalDir: tempDir,
+			localDir:  "",
+			config: CustomToolConfig{
+				Enabled:       true,
+				Timeout:       5 * time.Second,
+				MaxOutputSize: 1024,
+				ToolWhiteList: []string{"allowed-tool", "another-allowed"}, // Whitelist specific tools
+			},
+		}
+
+		err := manager.DiscoverTools(context.Background())
+		require.NoError(t, err)
+
+		tools := manager.ListTools()
+		assert.Len(t, tools, 2) // Only whitelisted tools should be loaded
+
+		toolNames := make([]string, len(tools))
+		for i, tool := range tools {
+			toolNames[i] = strings.TrimPrefix(tool.Name(), "custom_tool_")
+		}
+		assert.ElementsMatch(t, []string{"allowed-tool", "another-allowed"}, toolNames)
+
+		// Verify blocked tool is not present
+		_, exists := manager.GetTool("blocked-tool")
+		assert.False(t, exists)
+	})
+
+	t.Run("Whitelist with non-existing tools", func(t *testing.T) {
+		manager := &CustomToolManager{
+			tools:     make(map[string]*CustomTool),
+			globalDir: tempDir,
+			localDir:  "",
+			config: CustomToolConfig{
+				Enabled:       true,
+				Timeout:       5 * time.Second,
+				MaxOutputSize: 1024,
+				ToolWhiteList: []string{"allowed-tool", "non-existing-tool"}, // One real, one fake
+			},
+		}
+
+		err := manager.DiscoverTools(context.Background())
+		require.NoError(t, err)
+
+		tools := manager.ListTools()
+		assert.Len(t, tools, 1) // Only the real whitelisted tool should be loaded
+
+		toolNames := make([]string, len(tools))
+		for i, tool := range tools {
+			toolNames[i] = strings.TrimPrefix(tool.Name(), "custom_tool_")
+		}
+		assert.ElementsMatch(t, []string{"allowed-tool"}, toolNames)
+	})
+}
+
+// Helper function to create mock tools for testing
+func createMockTool(t *testing.T, dir, name string) {
+	toolPath := filepath.Join(dir, name)
+
+	toolScript := `#!/bin/bash
+if [ "$1" = "description" ]; then
+    echo '{"name": "` + name + `", "description": "A test tool named ` + name + `", "input_schema": {"type": "object", "properties": {"message": {"type": "string"}}}}'
+else
+    echo "Tool ` + name + ` executed"
+fi
+`
+
+	err := os.WriteFile(toolPath, []byte(toolScript), 0755)
+	require.NoError(t, err)
 }
