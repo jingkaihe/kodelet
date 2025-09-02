@@ -1,6 +1,6 @@
 ---
 name: Custom Tool Generator
-description: Creates a custom tool for Kodelet using Python (uv) or Bash, implementing the Kodelet custom tool protocol
+description: Creates a custom tool for Kodelet, implementing the Kodelet custom tool protocol
 ---
 
 {{/* Template variables: .task */}}
