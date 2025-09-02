@@ -62,6 +62,7 @@ var metadataTypeRegistry = map[string]reflect.Type{
 	"bash":            reflect.TypeOf(BashMetadata{}),
 	"bash_background": reflect.TypeOf(BackgroundBashMetadata{}),
 	"mcp_tool":        reflect.TypeOf(MCPToolMetadata{}),
+	"custom_tool":     reflect.TypeOf(CustomToolMetadata{}),
 	"todo":            reflect.TypeOf(TodoMetadata{}),
 	"thinking":        reflect.TypeOf(ThinkingMetadata{}),
 
@@ -235,6 +236,15 @@ type MCPContent struct {
 }
 
 func (m MCPToolMetadata) ToolType() string { return "mcp_tool" }
+
+// Custom tool metadata
+
+type CustomToolMetadata struct {
+	ExecutionTime time.Duration `json:"executionTime"`
+	Output        string        `json:"output"`
+}
+
+func (m CustomToolMetadata) ToolType() string { return "custom_tool" }
 
 // Other tool metadata
 

@@ -76,12 +76,18 @@ Use the --draft flag to create a draft pull request that is not ready for review
 			os.Exit(1)
 		}
 
+		customManager, err := tools.CreateCustomToolManagerFromViper(ctx)
+		if err != nil {
+			presenter.Error(err, "Failed to create custom tool manager")
+			os.Exit(1)
+		}
+
 		llmConfig, err := llm.GetConfigFromViper()
 		if err != nil {
 			presenter.Error(err, "Failed to load configuration")
 			return
 		}
-		s := tools.NewBasicState(ctx, tools.WithLLMConfig(llmConfig), tools.WithMCPTools(mcpManager))
+		s := tools.NewBasicState(ctx, tools.WithLLMConfig(llmConfig), tools.WithMCPTools(mcpManager), tools.WithCustomTools(customManager))
 
 		// Get PR config from flags
 		config := getPRConfigFromFlags(cmd)

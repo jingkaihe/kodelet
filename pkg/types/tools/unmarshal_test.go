@@ -88,7 +88,7 @@ func TestMetadataTypeRegistry_Completeness(t *testing.T) {
 		"file_read", "file_write", "file_edit",
 		"grep_tool", "glob_tool", "bash", "bash_background", "mcp_tool", "todo",
 		"thinking", "image_recognition", "subagent",
-		"web_fetch", "view_background_processes",
+		"web_fetch", "view_background_processes", "custom_tool",
 	}
 
 	for _, typeName := range expectedTypes {

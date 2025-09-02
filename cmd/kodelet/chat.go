@@ -99,6 +99,12 @@ var chatCmd = &cobra.Command{
 			presenter.Error(err, "Failed to create MCP manager")
 			os.Exit(1)
 		}
+
+		customManager, err := tools.CreateCustomToolManagerFromViper(ctx)
+		if err != nil {
+			presenter.Error(err, "Failed to create custom tool manager")
+			os.Exit(1)
+		}
 		// Start the Bubble Tea UI
 		if !chatOptions.usePlainUI {
 			// Ensure non-negative values (treat negative as 0/no limit)
@@ -127,7 +133,7 @@ var chatCmd = &cobra.Command{
 				}
 			}
 
-			tui.StartChatCmd(ctx, conversationID, !chatOptions.noSave, mcpManager, maxTurns, chatOptions.compactRatio, chatOptions.disableAutoCompact)
+			tui.StartChatCmd(ctx, conversationID, !chatOptions.noSave, mcpManager, customManager, maxTurns, chatOptions.compactRatio, chatOptions.disableAutoCompact)
 
 			// Restore stderr logging after TUI exits and show log file location
 			if logFile != nil {

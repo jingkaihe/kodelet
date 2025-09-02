@@ -38,10 +38,17 @@ func plainChatUI(ctx context.Context, options *ChatOptions) {
 		return
 	}
 
+	customManager, err := tools.CreateCustomToolManagerFromViper(ctx)
+	if err != nil {
+		presenter.Error(err, "Failed to create custom tool manager")
+		return
+	}
+
 	// Create state with main tools
 	var stateOpts []tools.BasicStateOption
 	stateOpts = append(stateOpts, tools.WithLLMConfig(config))
 	stateOpts = append(stateOpts, tools.WithMCPTools(mcpManager))
+	stateOpts = append(stateOpts, tools.WithCustomTools(customManager))
 	stateOpts = append(stateOpts, tools.WithMainTools())
 	thread.SetState(tools.NewBasicState(ctx, stateOpts...))
 

@@ -103,12 +103,18 @@ ignoring common directories like .git and node_modules.`,
 			return
 		}
 
+		customManager, err := tools.CreateCustomToolManagerFromViper(ctx)
+		if err != nil {
+			presenter.Error(err, "Failed to create custom tool manager")
+			return
+		}
+
 		llmConfig, err := llm.GetConfigFromViper()
 		if err != nil {
 			presenter.Error(err, "Failed to load configuration")
 			return
 		}
-		s := tools.NewBasicState(ctx, tools.WithLLMConfig(llmConfig), tools.WithMCPTools(mcpManager))
+		s := tools.NewBasicState(ctx, tools.WithLLMConfig(llmConfig), tools.WithMCPTools(mcpManager), tools.WithCustomTools(customManager))
 
 		// Validate configuration
 		if err := config.Validate(); err != nil {

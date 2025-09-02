@@ -173,6 +173,12 @@ var runCmd = &cobra.Command{
 			return
 		}
 
+		customManager, err := tools.CreateCustomToolManagerFromViper(ctx)
+		if err != nil {
+			presenter.Error(err, "Failed to create custom tool manager")
+			return
+		}
+
 		llmConfig, err := llm.GetConfigFromViper()
 		if err != nil {
 			presenter.Error(err, "Failed to load configuration")
@@ -185,6 +191,7 @@ var runCmd = &cobra.Command{
 
 		stateOpts = append(stateOpts, tools.WithLLMConfig(llmConfig))
 		stateOpts = append(stateOpts, tools.WithMCPTools(mcpManager))
+		stateOpts = append(stateOpts, tools.WithCustomTools(customManager))
 		stateOpts = append(stateOpts, tools.WithMainTools())
 		appState := tools.NewBasicState(ctx, stateOpts...)
 

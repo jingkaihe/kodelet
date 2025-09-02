@@ -281,6 +281,24 @@ subagent:
 #   model: "claude-3-5-haiku-20241022"  # Faster model for subagent tasks
 #   max_tokens: 2048
 
+# Custom Tools Configuration
+# Kodelet can discover and execute custom executable tools from specified directories
+custom_tools:
+  # Enable/disable custom tools discovery (default: true)
+  enabled: true
+  
+  # Global custom tools directory (default: ~/.kodelet/tools)
+  global_dir: "~/.kodelet/tools"
+  
+  # Local custom tools directory (default: ./kodelet-tools)
+  local_dir: "./kodelet-tools"
+  
+  # Execution timeout for custom tools (default: 30s)
+  timeout: 30s
+  
+  # Maximum output size for custom tools (default: 100KB)
+  max_output_size: 102400
+
 # Tracing Configuration
 tracing:
   # Enable OpenTelemetry tracing (default: false)

@@ -1,0 +1,58 @@
+#!/bin/bash
+
+set -e
+
+case "$1" in
+    description)
+        cat <<EOF
+{
+    "name": "git_info",
+    "description": "Get git repository information",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "Repository path (default: current directory)"
+            }
+        }
+    }
+}
+EOF
+        ;;
+    run)
+        # Read JSON input
+        input=$(cat)
+        path=$(echo "$input" | jq -r '.path // "."')
+
+        # Check if directory exists and is a git repo
+        if [ ! -d "$path" ]; then
+            echo '{"error": "Directory does not exist"}'
+            exit 1
+        fi
+
+        if [ ! -d "$path/.git" ]; then
+            echo '{"error": "Not a git repository"}'
+            exit 1
+        fi
+
+        # Get git info
+        cd "$path"
+        branch=$(git branch --show-current)
+        commit=$(git rev-parse HEAD)
+        status=$(git status --porcelain | wc -l)
+
+        # Output JSON result
+        cat <<EOF
+{
+    "branch": "$branch",
+    "commit": "$commit",
+    "uncommitted_changes": $status
+}
+EOF
+        ;;
+    *)
+        echo "Usage: $0 {description|run}" >&2
+        exit 1
+        ;;
+esac

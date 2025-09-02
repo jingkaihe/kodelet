@@ -45,6 +45,9 @@ func NewRendererRegistry() *RendererRegistry {
 	// Register MCP tools - pattern matches any tool prefixed with "mcp_"
 	registry.RegisterPattern("mcp_*", &MCPToolRenderer{})
 
+	// Register Custom tools - pattern matches any tool prefixed with "custom_tool_"
+	registry.RegisterPattern("custom_tool_*", &CustomToolRenderer{})
+
 	return registry
 }
 
