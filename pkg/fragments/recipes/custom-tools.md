@@ -164,13 +164,6 @@ EOF
 esac
 ```
 
-### Dependencies:
-```bash
-# Install jq for JSON processing
-sudo apt install jq       # Ubuntu/Debian
-brew install jq           # macOS
-```
-
 ## Task-Specific Implementation
 
 For the task "{{.task}}", consider:
