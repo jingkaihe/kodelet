@@ -38,7 +38,7 @@ For user documentation, see the [User Manual](MANUAL.md).
    ```bash
    # Install all required tools (Go, Node.js, npm, etc.) and dependencies
    mise install
-   
+
    # Install Go modules and npm dependencies
    mise run install
    ```
@@ -49,6 +49,14 @@ For user documentation, see the [User Manual](MANUAL.md).
    # or
    export OPENAI_API_KEY="sk-..."
    ```
+
+5. (Optional) Set up MCP tools configuration:
+   ```bash
+   # Copy the sample configuration to enable MCP tools
+   cp ./kodelet-config.sample.yaml ./kodelet-config.yaml
+   ```
+
+   Adjust the configuration in `kodelet-config.yaml` based on your requirements and usage. In most cases you don't want to enable all the tools as it will bloat the context window
 
 That's it! mise automatically manages all tool versions and ensures everyone on the team uses the same versions of Go, Node.js, npm, and other development tools.
 

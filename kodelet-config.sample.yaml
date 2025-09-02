@@ -1,0 +1,59 @@
+mcp:
+    servers:
+        lsp:
+            args:
+                - --workspace
+                - .
+                - --lsp
+                - gopls
+            command: mcp-language-server
+        playwright:
+            command: "npx"
+            args:
+                - "@playwright/mcp@latest"
+                - "--caps=core"
+            # tool_white_list:
+            #    - browser_close
+            #    - browser_resize
+            #    - browser_console_messages
+            #    - browser_handle_dialog
+            #    - browser_evaluate
+            #    - browser_file_upload
+            #    - browser_fill_form
+            #    - browser_install
+            #    - browser_press_key
+            #    - browser_type
+            #    - browser_navigate
+            #    - browser_navigate_back
+            #    - browser_network_requests
+            #    - browser_take_screenshot
+            #    - browser_snapshot
+            #    - browser_click
+            #    - browser_drag
+            #    - browser_hover
+            #    - browser_select_option
+            #    - browser_tabs
+            #    - browser_wait_for
+        github:
+            command: "docker"
+            args:
+                - run
+                - -i
+                - --rm
+                - -e
+                - GITHUB_PERSONAL_ACCESS_TOKEN
+                - -e
+                - GITHUB_TOOLSETS
+                - ghcr.io/github/github-mcp-server
+            envs:
+                GITHUB_TOOLSETS: "issues,pull_requests"
+                GITHUB_PERSONAL_ACCESS_TOKEN: $GITHUB_PAT_TOKEN
+            tool_white_list:
+                - get_issue
+                - get_issue_comments
+                - add_issue_comment
+                - create_pull_request
+                - create_pending_pull_request_review
+                - add_pull_request_review_comment_to_pending_review
+                - submit_pending_pull_request_review
+                - get_pull_request_diff
