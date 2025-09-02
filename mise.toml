@@ -4,12 +4,16 @@ go = "1.24.2"
 node = "22.17.0"
 npm = "10.9.2"
 
+
 # Development and build tools
 golangci-lint = "latest"
 air = "latest"
-gh = "latest"  # GitHub CLI for releases
+gh = "latest"                                           # GitHub CLI for releases
 "go:github.com/isaacphi/mcp-language-server" = "latest"
 "go:golang.org/x/tools/gopls" = "latest"
+
+[settings]
+experimental = true
 
 [env]
 # Version-related environment variables
@@ -30,7 +34,7 @@ depends = ["code-generation"]
 run = [
   "mkdir -p bin",
   "echo 'Building kodelet binary...'",
-  "CGO_ENABLED=0 go build -ldflags=\"-X '$VERSION_PKG.Version=$VERSION' -X '$VERSION_PKG.GitCommit=$GIT_COMMIT' -X '$VERSION_PKG.BuildTime=$BUILD_TIME'\" -o ./bin/kodelet ./cmd/kodelet/"
+  "CGO_ENABLED=0 go build -ldflags=\"-X '$VERSION_PKG.Version=$VERSION' -X '$VERSION_PKG.GitCommit=$GIT_COMMIT' -X '$VERSION_PKG.BuildTime=$BUILD_TIME'\" -o ./bin/kodelet ./cmd/kodelet/",
 ]
 
 [tasks.build-dev]
@@ -38,7 +42,7 @@ description = "Build the application without web UI (faster for development)"
 run = [
   "mkdir -p bin",
   "echo 'Building kodelet binary (without frontend)...'",
-  "CGO_ENABLED=0 go build -ldflags=\"-X '$VERSION_PKG.Version=$VERSION' -X '$VERSION_PKG.GitCommit=$GIT_COMMIT' -X '$VERSION_PKG.BuildTime=$BUILD_TIME'\" -o ./bin/kodelet ./cmd/kodelet/"
+  "CGO_ENABLED=0 go build -ldflags=\"-X '$VERSION_PKG.Version=$VERSION' -X '$VERSION_PKG.GitCommit=$GIT_COMMIT' -X '$VERSION_PKG.BuildTime=$BUILD_TIME'\" -o ./bin/kodelet ./cmd/kodelet/",
 ]
 
 [tasks.code-generation]
@@ -52,10 +56,7 @@ run = ["./bin/kodelet chat"]
 
 [tasks.dev-server]
 description = "Run development server with auto-reload"
-run = [
-  "echo 'Starting development server with auto-reload...'",
-  "air"
-]
+run = ["echo 'Starting development server with auto-reload...'", "air"]
 
 [tasks.test]
 description = "Run Go tests"
@@ -67,11 +68,7 @@ run = ["go fmt ./..."]
 
 [tasks.lint]
 description = "Run all linters (go vet, golangci-lint)"
-run = [
-  "go vet ./...",
-  "echo 'Running golangci-lint...'",
-  "golangci-lint run"
-]
+run = ["go vet ./...", "echo 'Running golangci-lint...'", "golangci-lint run"]
 
 [tasks.golangci-lint]
 description = "Run golangci-lint"
@@ -81,49 +78,49 @@ run = ["golangci-lint run"]
 description = "Install npm dependencies for frontend"
 run = [
   "echo 'Installing npm dependencies for frontend...'",
-  "cd pkg/webui/frontend && npm install"
+  "cd pkg/webui/frontend && npm install",
 ]
 
 [tasks.eslint]
 description = "Run eslint on frontend code"
 run = [
   "echo 'Running eslint on frontend code...'",
-  "cd pkg/webui/frontend && npm run lint"
+  "cd pkg/webui/frontend && npm run lint",
 ]
 
 [tasks.eslint-fix]
 description = "Run eslint with auto-fix on frontend code"
 run = [
   "echo 'Running eslint with auto-fix on frontend code...'",
-  "cd pkg/webui/frontend && npm run lint:fix"
+  "cd pkg/webui/frontend && npm run lint:fix",
 ]
 
 [tasks.frontend-test]
 description = "Run frontend tests"
 run = [
   "echo 'Running frontend tests...'",
-  "cd pkg/webui/frontend && npm run test:run"
+  "cd pkg/webui/frontend && npm run test:run",
 ]
 
 [tasks.frontend-test-watch]
 description = "Run frontend tests in watch mode"
 run = [
   "echo 'Running frontend tests in watch mode...'",
-  "cd pkg/webui/frontend && npm run test:watch"
+  "cd pkg/webui/frontend && npm run test:watch",
 ]
 
 [tasks.frontend-test-ui]
 description = "Run frontend tests with UI"
 run = [
   "echo 'Running frontend tests with UI...'",
-  "cd pkg/webui/frontend && npm run test:ui"
+  "cd pkg/webui/frontend && npm run test:ui",
 ]
 
 [tasks.frontend-test-coverage]
 description = "Run frontend tests with coverage"
 run = [
   "echo 'Running frontend tests with coverage...'",
-  "cd pkg/webui/frontend && npm run test:coverage"
+  "cd pkg/webui/frontend && npm run test:coverage",
 ]
 
 [tasks.cross-build]
@@ -136,7 +133,7 @@ run = [
   "CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags=\"-X '$VERSION_PKG.Version=$VERSION' -X '$VERSION_PKG.GitCommit=$GIT_COMMIT' -X '$VERSION_PKG.BuildTime=$BUILD_TIME'\" -o ./bin/kodelet-linux-arm64 ./cmd/kodelet/",
   "CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags=\"-X '$VERSION_PKG.Version=$VERSION' -X '$VERSION_PKG.GitCommit=$GIT_COMMIT' -X '$VERSION_PKG.BuildTime=$BUILD_TIME'\" -o ./bin/kodelet-darwin-amd64 ./cmd/kodelet/",
   "CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags=\"-X '$VERSION_PKG.Version=$VERSION' -X '$VERSION_PKG.GitCommit=$GIT_COMMIT' -X '$VERSION_PKG.BuildTime=$BUILD_TIME'\" -o ./bin/kodelet-darwin-arm64 ./cmd/kodelet/",
-  "CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags=\"-X '$VERSION_PKG.Version=$VERSION' -X '$VERSION_PKG.GitCommit=$GIT_COMMIT' -X '$VERSION_PKG.BuildTime=$BUILD_TIME'\" -o ./bin/kodelet-windows-amd64.exe ./cmd/kodelet/"
+  "CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags=\"-X '$VERSION_PKG.Version=$VERSION' -X '$VERSION_PKG.GitCommit=$GIT_COMMIT' -X '$VERSION_PKG.BuildTime=$BUILD_TIME'\" -o ./bin/kodelet-windows-amd64.exe ./cmd/kodelet/",
 ]
 
 [tasks.cross-build-docker]
@@ -148,26 +145,26 @@ run = [
   "echo 'Extracting binaries from Docker container...'",
   "docker run --rm -v $(pwd)/bin:/output kodelet-cross-build cp /bin/kodelet-linux-amd64 /bin/kodelet-linux-arm64 /bin/kodelet-darwin-amd64 /bin/kodelet-darwin-arm64 /bin/kodelet-windows-amd64.exe /output/",
   "echo 'Cross-build complete. Binaries available in ./bin/'",
-  "ls -la ./bin/kodelet-*"
+  "ls -la ./bin/kodelet-*",
 ]
 
 [tasks.docker-build]
 description = "Build Docker image"
 run = [
-  "docker build --build-arg VERSION=\"$VERSION\" --build-arg GIT_COMMIT=\"$GIT_COMMIT\" --build-arg BUILD_TIME=\"$BUILD_TIME\" --build-arg NODE_VERSION=\"$NODE_VERSION\" --build-arg NPM_VERSION=\"$NPM_VERSION\" -t kodelet ."
+  "docker build --build-arg VERSION=\"$VERSION\" --build-arg GIT_COMMIT=\"$GIT_COMMIT\" --build-arg BUILD_TIME=\"$BUILD_TIME\" --build-arg NODE_VERSION=\"$NODE_VERSION\" --build-arg NPM_VERSION=\"$NPM_VERSION\" -t kodelet .",
 ]
 
 [tasks.docker-run]
 description = "Run with Docker"
 run = [
-  "docker run -e ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY} kodelet \"${query:-}\""
+  "docker run -e ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY} kodelet \"${query:-}\"",
 ]
 
 [tasks.e2e-test-docker]
 description = "Run end-to-end tests in Docker"
 run = [
   "docker build -f tests/acceptance/Dockerfile.e2e -t kodelet-e2e-tests .",
-  "docker run --rm -e ANTHROPIC_API_KEY -e OPENAI_API_KEY kodelet-e2e-tests"
+  "docker run --rm -e ANTHROPIC_API_KEY -e OPENAI_API_KEY kodelet-e2e-tests",
 ]
 
 [tasks.release-note]
@@ -184,7 +181,7 @@ run = [
   "gh release upload v$VERSION ./bin/kodelet-linux-arm64",
   "gh release upload v$VERSION ./bin/kodelet-darwin-amd64",
   "gh release upload v$VERSION ./bin/kodelet-darwin-arm64",
-  "gh release upload v$VERSION ./bin/kodelet-windows-amd64.exe"
+  "gh release upload v$VERSION ./bin/kodelet-windows-amd64.exe",
 ]
 
 [tasks.github-release]
@@ -195,7 +192,7 @@ run = [
   "./scripts/extract-release-notes.sh > /tmp/release-notes.md",
   "gh release create v$VERSION --title \"v$VERSION\" --notes-file /tmp/release-notes.md ./bin/kodelet-linux-amd64 ./bin/kodelet-linux-arm64 ./bin/kodelet-darwin-amd64 ./bin/kodelet-darwin-arm64 ./bin/kodelet-windows-amd64.exe",
   "rm -f /tmp/release-notes.md",
-  "echo 'GitHub release v$VERSION created successfully!'"
+  "echo 'GitHub release v$VERSION created successfully!'",
 ]
 
 [tasks.push-tag]
@@ -205,7 +202,7 @@ run = [
   "if git rev-parse \"v$VERSION\" >/dev/null 2>&1; then echo 'Tag v$VERSION already exists locally. Pushing to origin...'; else echo 'Creating new tag v$VERSION...'; git tag v$VERSION; fi",
   "git push origin v$VERSION",
   "echo 'Tag v$VERSION pushed successfully!'",
-  "echo 'GitHub Actions will automatically create a release with binaries and release notes.'"
+  "echo 'GitHub Actions will automatically create a release with binaries and release notes.'",
 ]
 
 # Convenience aliases for common tasks
@@ -226,5 +223,5 @@ run = [
   "go mod download",
   "echo 'Installing npm dependencies...'",
   "cd pkg/webui/frontend && npm install",
-  "echo 'All dependencies installed successfully!'"
+  "echo 'All dependencies installed successfully!'",
 ]
