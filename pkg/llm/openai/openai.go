@@ -346,18 +346,11 @@ func (t *OpenAIThread) SendMessage(
 		}
 	}
 
-	// Add system message if it doesn't exist
+	// Add initial system message if it doesn't exist
 	if len(t.messages) == 0 || t.messages[0].Role != openai.ChatMessageRoleSystem {
-		var systemPrompt string
-		if t.config.IsSubAgent {
-			systemPrompt = sysprompt.SubAgentPrompt(model, t.config)
-		} else {
-			systemPrompt = sysprompt.SystemPrompt(model, t.config)
-		}
-
 		systemMessage := openai.ChatCompletionMessage{
 			Role:    openai.ChatMessageRoleSystem,
-			Content: systemPrompt,
+			Content: "", // Will be set in OUTER loop
 		}
 
 		// Insert system message at the beginning
@@ -387,6 +380,23 @@ OUTER:
 					WithField("max_turns", maxTurns).
 					Warn("reached maximum turn limit, stopping interaction")
 				break OUTER
+			}
+
+			// Get relevant contexts from state and regenerate system prompt
+			var contexts map[string]tooltypes.ContextInfo
+			if t.state != nil {
+				contexts = t.state.GetRelevantContexts()
+			}
+			var systemPrompt string
+			if t.config.IsSubAgent {
+				systemPrompt = sysprompt.SubAgentPrompt(model, t.config, contexts)
+			} else {
+				systemPrompt = sysprompt.SystemPrompt(model, t.config, contexts)
+			}
+
+			// Update system message content
+			if len(t.messages) > 0 && t.messages[0].Role == openai.ChatMessageRoleSystem {
+				t.messages[0].Content = systemPrompt
 			}
 
 			// Check if auto-compact should be triggered before each exchange

@@ -94,6 +94,12 @@ type BackgroundProcess struct {
 	Process   *os.Process `json:"-"` // Not serialized
 }
 
+type ContextInfo struct {
+	Content      string    `json:"content"`
+	Path         string    `json:"path"`          // Full path to the context file
+	LastModified time.Time `json:"last_modified"`
+}
+
 type State interface {
 	SetFileLastAccessed(path string, lastAccessed time.Time) error
 	GetFileLastAccessed(path string) (time.Time, error)
@@ -109,6 +115,9 @@ type State interface {
 	AddBackgroundProcess(process BackgroundProcess) error
 	GetBackgroundProcesses() []BackgroundProcess
 	RemoveBackgroundProcess(pid int) error
+
+	// Context discovery
+	GetRelevantContexts() map[string]ContextInfo
 
 	// LLM configuration access
 	GetLLMConfig() interface{} // Returns llmtypes.Config but using interface{} to avoid circular import

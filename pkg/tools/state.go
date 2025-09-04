@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -28,16 +29,36 @@ type BasicState struct {
 	mcpTools            []tooltypes.Tool
 	customTools         []tooltypes.Tool
 	llmConfig           llmtypes.Config
+	
+	// Context discovery fields
+	contextCache        map[string]*tooltypes.ContextInfo
+	contextDiscovery    *ContextDiscovery
+}
+
+// Context discovery component handles finding relevant context files
+type ContextDiscovery struct {
+	workingDir      string
+	homeDir         string
+	contextPatterns []string // ["AGENTS.md", "KODELET.md"]
 }
 
 type BasicStateOption func(ctx context.Context, s *BasicState) error
 
 // NewBasicState creates a new instance of BasicState with initialized map
 func NewBasicState(ctx context.Context, opts ...BasicStateOption) *BasicState {
+	homeDir, _ := os.UserHomeDir()
+	workingDir, _ := os.Getwd()
+	
 	state := &BasicState{
 		lastAccessed: make(map[string]time.Time),
 		sessionID:    uuid.New().String(),
 		todoFilePath: "",
+		contextCache: make(map[string]*tooltypes.ContextInfo),
+		contextDiscovery: &ContextDiscovery{
+			workingDir:      workingDir,
+			homeDir:         filepath.Join(homeDir, ".kodelet"),
+			contextPatterns: []string{"AGENTS.md", "KODELET.md"},
+		},
 	}
 
 	for _, opt := range opts {
@@ -233,4 +254,98 @@ func (s *BasicState) configureTools() {
 			s.tools[i] = NewWebFetchTool(s.llmConfig.AllowedDomainsFile)
 		}
 	}
+}
+
+// GetRelevantContexts returns all relevant context files based on file access patterns
+func (s *BasicState) GetRelevantContexts() map[string]tooltypes.ContextInfo {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	
+	contexts := make(map[string]tooltypes.ContextInfo)
+	
+	// 1. Add working directory context
+	if ctx := s.loadWorkingDirContext(); ctx != nil {
+		contexts[ctx.Path] = *ctx
+	}
+	
+	// 2. Add access-based contexts
+	for path := range s.lastAccessed {
+		if ctx := s.findContextForPath(path); ctx != nil {
+			contexts[ctx.Path] = *ctx
+		}
+	}
+	
+	// 3. Add home directory context
+	if ctx := s.loadHomeContext(); ctx != nil {
+		contexts[ctx.Path] = *ctx
+	}
+	
+	return contexts
+}
+
+// findContextForPath searches up the directory tree from the given file path to find context files
+func (s *BasicState) findContextForPath(filePath string) *tooltypes.ContextInfo {
+	dir := filepath.Dir(filePath)
+	for dir != "/" && dir != "." && dir != filepath.Dir(dir) { // Stop at root or when no more parent
+		for _, pattern := range s.contextDiscovery.contextPatterns {
+			contextPath := filepath.Join(dir, pattern)
+			if info := s.loadContextFile(contextPath); info != nil {
+				return info
+			}
+		}
+		dir = filepath.Dir(dir)
+	}
+	return nil
+}
+
+// loadWorkingDirContext loads context file from working directory
+func (s *BasicState) loadWorkingDirContext() *tooltypes.ContextInfo {
+	for _, pattern := range s.contextDiscovery.contextPatterns {
+		if info := s.loadContextFile(filepath.Join(s.contextDiscovery.workingDir, pattern)); info != nil {
+			return info
+		}
+	}
+	return nil
+}
+
+// loadHomeContext loads context file from user home directory
+func (s *BasicState) loadHomeContext() *tooltypes.ContextInfo {
+	for _, pattern := range s.contextDiscovery.contextPatterns {
+		if info := s.loadContextFile(filepath.Join(s.contextDiscovery.homeDir, pattern)); info != nil {
+			return info
+		}
+	}
+	return nil
+}
+
+// loadContextFile loads a context file with caching
+func (s *BasicState) loadContextFile(path string) *tooltypes.ContextInfo {
+	// Check if file exists and get modification time
+	stat, err := os.Stat(path)
+	if err != nil {
+		return nil
+	}
+	
+	// Check cache - only use if file hasn't been modified
+	if cached, ok := s.contextCache[path]; ok {
+		if cached.LastModified.Equal(stat.ModTime()) {
+			return cached
+		}
+	}
+	
+	// Load from disk
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	
+	info := &tooltypes.ContextInfo{
+		Content:      string(content),
+		Path:         path,
+		LastModified: stat.ModTime(),
+	}
+	
+	// Update cache
+	s.contextCache[path] = info
+	return info
 }

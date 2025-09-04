@@ -229,12 +229,6 @@ func (t *AnthropicThread) SendMessage(
 
 	// Determine which model to use
 	model, maxTokens := t.getModelAndTokens(opt)
-	var systemPrompt string
-	if t.config.IsSubAgent {
-		systemPrompt = sysprompt.SubAgentPrompt(string(model), t.config)
-	} else {
-		systemPrompt = sysprompt.SystemPrompt(string(model), t.config)
-	}
 
 	// Main interaction loop for handling tool calls
 	turnCount := 0
@@ -278,6 +272,18 @@ OUTER:
 				} else {
 					logger.G(ctx).Info("auto-compact completed successfully")
 				}
+			}
+
+			// Get relevant contexts from state and regenerate system prompt
+			var contexts map[string]tooltypes.ContextInfo
+			if t.state != nil {
+				contexts = t.state.GetRelevantContexts()
+			}
+			var systemPrompt string
+			if t.config.IsSubAgent {
+				systemPrompt = sysprompt.SubAgentPrompt(string(model), t.config, contexts)
+			} else {
+				systemPrompt = sysprompt.SystemPrompt(string(model), t.config, contexts)
 			}
 
 			var exchangeOutput string

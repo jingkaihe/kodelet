@@ -3,11 +3,13 @@ package tools
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestBasicState(t *testing.T) {
@@ -219,4 +221,261 @@ func TestBasicState_ConfigureBashTool_EmptyAllowedCommands(t *testing.T) {
 
 	assert.NotNil(t, bashTool, "BashTool should be found in tools list")
 	assert.Equal(t, []string{}, bashTool.allowedCommands, "BashTool should have empty allowed commands")
+}
+
+// TestBasicState_GetRelevantContexts tests the context discovery functionality
+func TestBasicState_GetRelevantContexts(t *testing.T) {
+	// Create temporary test directory structure
+	tmpDir := t.TempDir()
+	
+	// Create test directories
+	subDir := filepath.Join(tmpDir, "submodule")
+	require.NoError(t, os.MkdirAll(subDir, 0755))
+	
+	deepDir := filepath.Join(subDir, "deep", "nested")
+	require.NoError(t, os.MkdirAll(deepDir, 0755))
+
+	// Create context files
+	rootAgents := filepath.Join(tmpDir, "AGENTS.md")
+	require.NoError(t, os.WriteFile(rootAgents, []byte("# Root project context"), 0644))
+	
+	subKodelet := filepath.Join(subDir, "KODELET.md")
+	require.NoError(t, os.WriteFile(subKodelet, []byte("# Submodule context"), 0644))
+	
+	// Change to test directory
+	oldWd, _ := os.Getwd()
+	defer os.Chdir(oldWd)
+	require.NoError(t, os.Chdir(tmpDir))
+
+	// Create state
+	ctx := context.Background()
+	state := NewBasicState(ctx)
+
+	t.Run("working_directory_context_only", func(t *testing.T) {
+		// With no accessed files, should only find working directory context
+		contexts := state.GetRelevantContexts()
+		
+		assert.Len(t, contexts, 1, "Should find exactly 1 context file")
+		assert.Contains(t, contexts, rootAgents, "Should contain root AGENTS.md")
+		assert.Equal(t, "# Root project context", contexts[rootAgents].Content)
+		assert.Equal(t, rootAgents, contexts[rootAgents].Path)
+	})
+
+	t.Run("access_based_context_discovery", func(t *testing.T) {
+		// Simulate accessing a file in the submodule
+		testFile := filepath.Join(subDir, "test.go")
+		state.SetFileLastAccessed(testFile, time.Now())
+		
+		contexts := state.GetRelevantContexts()
+		
+		assert.Len(t, contexts, 2, "Should find exactly 2 context files")
+		assert.Contains(t, contexts, rootAgents, "Should contain root AGENTS.md")
+		assert.Contains(t, contexts, subKodelet, "Should contain submodule KODELET.md")
+		assert.Equal(t, "# Root project context", contexts[rootAgents].Content)
+		assert.Equal(t, "# Submodule context", contexts[subKodelet].Content)
+	})
+
+	t.Run("deep_nested_access", func(t *testing.T) {
+		// Simulate accessing a file deep in the hierarchy
+		deepFile := filepath.Join(deepDir, "nested.go")
+		state.SetFileLastAccessed(deepFile, time.Now())
+		
+		contexts := state.GetRelevantContexts()
+		
+		// Should still find the submodule context by walking up the tree
+		assert.Contains(t, contexts, subKodelet, "Should find submodule KODELET.md by walking up")
+		assert.Equal(t, "# Submodule context", contexts[subKodelet].Content)
+	})
+}
+
+func TestBasicState_ContextFilePreference(t *testing.T) {
+	// Test AGENTS.md vs KODELET.md preference
+	tmpDir := t.TempDir()
+	
+	// Create both AGENTS.md and KODELET.md in the same directory
+	agentsFile := filepath.Join(tmpDir, "AGENTS.md")
+	kodeletFile := filepath.Join(tmpDir, "KODELET.md")
+	require.NoError(t, os.WriteFile(agentsFile, []byte("# Agents context"), 0644))
+	require.NoError(t, os.WriteFile(kodeletFile, []byte("# Kodelet context"), 0644))
+	
+	// Change to test directory
+	oldWd, _ := os.Getwd()
+	defer os.Chdir(oldWd)
+	require.NoError(t, os.Chdir(tmpDir))
+
+	state := NewBasicState(context.Background())
+	contexts := state.GetRelevantContexts()
+	
+	assert.Len(t, contexts, 1, "Should find exactly 1 context file")
+	assert.Contains(t, contexts, agentsFile, "Should prefer AGENTS.md over KODELET.md")
+	assert.Equal(t, "# Agents context", contexts[agentsFile].Content)
+}
+
+func TestBasicState_ContextFileCaching(t *testing.T) {
+	tmpDir := t.TempDir()
+	contextFile := filepath.Join(tmpDir, "AGENTS.md")
+	
+	// Create initial context file
+	initialContent := "# Initial content"
+	require.NoError(t, os.WriteFile(contextFile, []byte(initialContent), 0644))
+	
+	// Change to test directory
+	oldWd, _ := os.Getwd()
+	defer os.Chdir(oldWd)
+	require.NoError(t, os.Chdir(tmpDir))
+
+	state := NewBasicState(context.Background())
+	
+	t.Run("initial_load", func(t *testing.T) {
+		contexts := state.GetRelevantContexts()
+		assert.Len(t, contexts, 1)
+		assert.Equal(t, initialContent, contexts[contextFile].Content)
+	})
+
+	t.Run("cached_content", func(t *testing.T) {
+		// Should return cached content without reading from disk
+		contexts := state.GetRelevantContexts()
+		assert.Equal(t, initialContent, contexts[contextFile].Content)
+	})
+
+	t.Run("cache_invalidation", func(t *testing.T) {
+		// Modify the file
+		newContent := "# Updated content"
+		time.Sleep(10 * time.Millisecond) // Ensure different modification time
+		require.NoError(t, os.WriteFile(contextFile, []byte(newContent), 0644))
+		
+		// Should detect the change and reload
+		contexts := state.GetRelevantContexts()
+		assert.Equal(t, newContent, contexts[contextFile].Content, "Should reload modified file")
+	})
+}
+
+func TestBasicState_HomeDirectoryContext(t *testing.T) {
+	// Create temporary home directory
+	tmpHome := t.TempDir()
+	kodeletDir := filepath.Join(tmpHome, ".kodelet")
+	require.NoError(t, os.MkdirAll(kodeletDir, 0755))
+	
+	homeContext := filepath.Join(kodeletDir, "AGENTS.md")
+	require.NoError(t, os.WriteFile(homeContext, []byte("# User home context"), 0644))
+
+	// Create temporary working directory (without context files)
+	tmpWork := t.TempDir()
+	oldWd, _ := os.Getwd()
+	defer os.Chdir(oldWd)
+	require.NoError(t, os.Chdir(tmpWork))
+
+	// Create state with custom home directory
+	ctx := context.Background()
+	state := NewBasicState(ctx)
+	
+	// Manually set the home directory in context discovery
+	state.contextDiscovery.homeDir = kodeletDir
+
+	t.Run("home_context_discovery", func(t *testing.T) {
+		contexts := state.GetRelevantContexts()
+		
+		assert.Len(t, contexts, 1, "Should find home directory context")
+		assert.Contains(t, contexts, homeContext, "Should contain home AGENTS.md")
+		assert.Equal(t, "# User home context", contexts[homeContext].Content)
+	})
+
+	t.Run("multiple_context_sources", func(t *testing.T) {
+		// Create working directory context
+		workContext := filepath.Join(tmpWork, "KODELET.md")
+		require.NoError(t, os.WriteFile(workContext, []byte("# Work context"), 0644))
+		
+		contexts := state.GetRelevantContexts()
+		
+		assert.Len(t, contexts, 2, "Should find both home and work contexts")
+		assert.Contains(t, contexts, homeContext, "Should contain home context")
+		assert.Contains(t, contexts, workContext, "Should contain work context")
+	})
+}
+
+func TestBasicState_ContextDiscoveryEdgeCases(t *testing.T) {
+	tmpDir := t.TempDir()
+	
+	t.Run("no_context_files", func(t *testing.T) {
+		// Change to directory with no context files
+		oldWd, _ := os.Getwd()
+		defer os.Chdir(oldWd)
+		require.NoError(t, os.Chdir(tmpDir))
+
+		state := NewBasicState(context.Background())
+		contexts := state.GetRelevantContexts()
+		
+		assert.Empty(t, contexts, "Should return empty map when no context files exist")
+	})
+
+	t.Run("permission_denied", func(t *testing.T) {
+		// Create a context file and make it unreadable
+		restrictedFile := filepath.Join(tmpDir, "AGENTS.md")
+		require.NoError(t, os.WriteFile(restrictedFile, []byte("# Restricted"), 0644))
+		require.NoError(t, os.Chmod(restrictedFile, 0000)) // No permissions
+		defer os.Chmod(restrictedFile, 0644) // Cleanup
+		
+		oldWd, _ := os.Getwd()
+		defer os.Chdir(oldWd)
+		require.NoError(t, os.Chdir(tmpDir))
+
+		state := NewBasicState(context.Background())
+		contexts := state.GetRelevantContexts()
+		
+		// Should gracefully handle permission errors
+		assert.Empty(t, contexts, "Should handle permission errors gracefully")
+	})
+
+	t.Run("file_access_outside_working_directory", func(t *testing.T) {
+		// Create context in a different location
+		otherDir := filepath.Join(tmpDir, "other")
+		require.NoError(t, os.MkdirAll(otherDir, 0755))
+		
+		otherContext := filepath.Join(otherDir, "KODELET.md")
+		require.NoError(t, os.WriteFile(otherContext, []byte("# Other context"), 0644))
+		
+		// Set working directory to somewhere else
+		workDir := filepath.Join(tmpDir, "work")
+		require.NoError(t, os.MkdirAll(workDir, 0755))
+		
+		oldWd, _ := os.Getwd()
+		defer os.Chdir(oldWd)
+		require.NoError(t, os.Chdir(workDir))
+
+		state := NewBasicState(context.Background())
+		
+		// Simulate accessing a file in the other directory
+		accessedFile := filepath.Join(otherDir, "test.go")
+		state.SetFileLastAccessed(accessedFile, time.Now())
+		
+		contexts := state.GetRelevantContexts()
+		
+		assert.Contains(t, contexts, otherContext, "Should find context in accessed file's directory")
+		assert.Equal(t, "# Other context", contexts[otherContext].Content)
+	})
+}
+
+func TestBasicState_ContextFileLastModified(t *testing.T) {
+	tmpDir := t.TempDir()
+	contextFile := filepath.Join(tmpDir, "AGENTS.md")
+	
+	// Create context file
+	require.NoError(t, os.WriteFile(contextFile, []byte("# Test content"), 0644))
+	
+	oldWd, _ := os.Getwd()
+	defer os.Chdir(oldWd)
+	require.NoError(t, os.Chdir(tmpDir))
+
+	state := NewBasicState(context.Background())
+	contexts := state.GetRelevantContexts()
+	
+	// Check that LastModified field is populated
+	assert.Len(t, contexts, 1)
+	contextInfo := contexts[contextFile]
+	assert.False(t, contextInfo.LastModified.IsZero(), "LastModified should be set")
+	
+	// Get file info for comparison
+	fileInfo, err := os.Stat(contextFile)
+	require.NoError(t, err)
+	assert.True(t, contextInfo.LastModified.Equal(fileInfo.ModTime()), "LastModified should match file's modification time")
 }

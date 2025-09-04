@@ -2,9 +2,11 @@ package sysprompt
 
 import (
 	"testing"
+	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	"github.com/jingkaihe/kodelet/pkg/types/llm"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -12,7 +14,7 @@ import (
 // TestSubAgentPrompt verifies that key elements from templates appear in the generated subagent prompt
 func TestSubAgentPrompt(t *testing.T) {
 	// Generate a subagent prompt
-	prompt := SubAgentPrompt("claude-sonnet-4-20250514", llm.Config{})
+	prompt := SubAgentPrompt("claude-sonnet-4-20250514", llm.Config{}, map[string]tooltypes.ContextInfo{})
 
 	// Define expected fragments that should appear in the prompt
 	expectedFragments := []string{
@@ -57,7 +59,7 @@ func TestSubAgentPrompt(t *testing.T) {
 
 // TestSubAgentPromptBashBannedCommands verifies that banned commands appear in the default subagent prompt
 func TestSubAgentPromptBashBannedCommands(t *testing.T) {
-	prompt := SubAgentPrompt("claude-sonnet-4-20250514", llm.Config{})
+	prompt := SubAgentPrompt("claude-sonnet-4-20250514", llm.Config{}, map[string]tooltypes.ContextInfo{})
 
 	// Should contain bash command restrictions section
 	assert.Contains(t, prompt, "Bash Command Restrictions", "Expected subagent prompt to contain 'Bash Command Restrictions' section")
@@ -142,4 +144,142 @@ func TestSubAgentPromptContextConsistency(t *testing.T) {
 
 	assert.NotContains(t, systemPrompt, "Banned Commands", "Did not expect system prompt to contain 'Banned Commands' section when allowed commands are configured")
 	assert.NotContains(t, subagentPrompt, "Banned Commands", "Did not expect subagent prompt to contain 'Banned Commands' section when allowed commands are configured")
+}
+
+// TestSubAgentPrompt_WithContexts verifies that provided contexts are properly included in subagent prompt
+func TestSubAgentPrompt_WithContexts(t *testing.T) {
+	contexts := map[string]tooltypes.ContextInfo{
+		"/path/to/project/AGENTS.md": {
+			Content:      "# Project Context\nGeneral project guidelines and conventions.",
+			Path:         "/path/to/project/AGENTS.md",
+			LastModified: time.Now(),
+		},
+		"/home/user/.kodelet/AGENTS.md": {
+			Content:      "# User Preferences\nPersonal coding style and preferences.",
+			Path:         "/home/user/.kodelet/AGENTS.md",
+			LastModified: time.Now(),
+		},
+	}
+
+	prompt := SubAgentPrompt("claude-sonnet-4-20250514", llm.Config{}, contexts)
+
+	// Verify this is a subagent prompt (contains subagent-specific elements)
+	assert.Contains(t, prompt, "You are an AI SWE Agent", "Expected subagent introduction")
+
+	// Verify context section exists
+	assert.Contains(t, prompt, "Here are some useful context to help you solve the user's problem:", "Expected context introduction")
+
+	// Verify both context files are included with proper formatting
+	assert.Contains(t, prompt, `<context filename="/path/to/project/AGENTS.md">`, "Expected project AGENTS.md context with filename")
+	assert.Contains(t, prompt, "# Project Context", "Expected project AGENTS.md content")
+	assert.Contains(t, prompt, "General project guidelines and conventions.", "Expected project AGENTS.md content")
+
+	assert.Contains(t, prompt, `<context filename="/home/user/.kodelet/AGENTS.md">`, "Expected home AGENTS.md context with filename")
+	assert.Contains(t, prompt, "# User Preferences", "Expected home AGENTS.md content")
+	assert.Contains(t, prompt, "Personal coding style and preferences.", "Expected home AGENTS.md content")
+
+	// Verify context sections are properly closed
+	assert.Contains(t, prompt, "</context>", "Expected context closing tags")
+}
+
+// TestSubAgentPrompt_WithEmptyContexts verifies fallback behavior with empty contexts
+func TestSubAgentPrompt_WithEmptyContexts(t *testing.T) {
+	emptyContexts := map[string]tooltypes.ContextInfo{}
+	prompt := SubAgentPrompt("claude-sonnet-4-20250514", llm.Config{}, emptyContexts)
+
+	// Should still generate a valid subagent prompt 
+	assert.Contains(t, prompt, "You are an AI SWE Agent", "Expected subagent introduction")
+	assert.Contains(t, prompt, "System Information", "Expected system information section")
+
+	// Should not contain context section when no contexts provided
+	assert.NotContains(t, prompt, "Here are some useful context to help you solve the user's problem:", "Should not have context intro when no contexts")
+}
+
+// TestSubAgentPrompt_WithNilContexts verifies fallback behavior with nil contexts
+func TestSubAgentPrompt_WithNilContexts(t *testing.T) {
+	prompt := SubAgentPrompt("claude-sonnet-4-20250514", llm.Config{}, nil)
+
+	// Should still generate a valid subagent prompt and use default context loading
+	assert.Contains(t, prompt, "You are an AI SWE Agent", "Expected subagent introduction")
+	assert.Contains(t, prompt, "System Information", "Expected system information section")
+
+	// When nil contexts are passed, it should fall back to the default loadContexts() behavior
+	// which may or may not find context files in the current directory
+}
+
+// TestSubAgentPrompt_ContextFormattingConsistency tests that contexts are formatted the same as system prompt
+func TestSubAgentPrompt_ContextFormattingConsistency(t *testing.T) {
+	t.Run("context_with_code_blocks", func(t *testing.T) {
+		contexts := map[string]tooltypes.ContextInfo{
+			"/project/docs/CODING_STYLE.md": {
+				Content: "# Coding Style\n\n```go\nfunc Example() {\n    fmt.Println(\"hello\")\n}\n```\n\nUse proper indentation.",
+				Path:    "/project/docs/CODING_STYLE.md",
+			},
+		}
+
+		prompt := SubAgentPrompt("claude-sonnet-4-20250514", llm.Config{}, contexts)
+
+		assert.Contains(t, prompt, `<context filename="/project/docs/CODING_STYLE.md">`, "Expected context file with full path")
+		assert.Contains(t, prompt, "# Coding Style", "Expected markdown header")
+		assert.Contains(t, prompt, "```go", "Expected code block start")
+		assert.Contains(t, prompt, "func Example() {", "Expected code content")
+		assert.Contains(t, prompt, "```", "Expected code block end")
+		assert.Contains(t, prompt, "Use proper indentation.", "Expected text after code block")
+	})
+
+	t.Run("multiple_contexts_in_subagent", func(t *testing.T) {
+		contexts := map[string]tooltypes.ContextInfo{
+			"/project/AGENTS.md": {
+				Content: "# Main Project\nThis is the main project context for subagents.",
+				Path:    "/project/AGENTS.md",
+			},
+			"/project/modules/auth/KODELET.md": {
+				Content: "# Auth Module\nAuthentication-specific guidelines for subagents.",
+				Path:    "/project/modules/auth/KODELET.md",
+			},
+		}
+
+		prompt := SubAgentPrompt("gpt-4", llm.Config{}, contexts)
+
+		// Verify subagent-specific content is present
+		assert.Contains(t, prompt, "You are an AI SWE Agent", "Expected subagent introduction")
+
+		// Verify both contexts are included
+		assert.Contains(t, prompt, "This is the main project context for subagents.", "Expected main project context")
+		assert.Contains(t, prompt, "Authentication-specific guidelines for subagents.", "Expected auth module context")
+
+		// Verify proper context formatting
+		assert.Contains(t, prompt, `<context filename="/project/AGENTS.md">`, "Expected main project context file")
+		assert.Contains(t, prompt, `<context filename="/project/modules/auth/KODELET.md">`, "Expected auth module context file")
+	})
+}
+
+// TestSubAgentPrompt_FeatureConsistency tests that subagent prompts maintain consistency with system prompts for context handling
+func TestSubAgentPrompt_FeatureConsistency(t *testing.T) {
+	contexts := map[string]tooltypes.ContextInfo{
+		"/shared/context.md": {
+			Content: "# Shared Context\nThis content should appear in both system and subagent prompts.",
+			Path:    "/shared/context.md",
+		},
+	}
+
+	llmConfig := llm.Config{}
+
+	// Generate both prompts with the same contexts
+	systemPrompt := SystemPrompt("claude-sonnet-4-20250514", llmConfig, contexts)
+	subagentPrompt := SubAgentPrompt("claude-sonnet-4-20250514", llmConfig, contexts)
+
+	// Both should include the same context content
+	assert.Contains(t, systemPrompt, "# Shared Context", "Expected shared context in system prompt")
+	assert.Contains(t, subagentPrompt, "# Shared Context", "Expected shared context in subagent prompt")
+	assert.Contains(t, systemPrompt, "This content should appear in both", "Expected shared context content in system prompt")
+	assert.Contains(t, subagentPrompt, "This content should appear in both", "Expected shared context content in subagent prompt")
+
+	// Both should format contexts the same way
+	assert.Contains(t, systemPrompt, `<context filename="/shared/context.md">`, "Expected context file formatting in system prompt")
+	assert.Contains(t, subagentPrompt, `<context filename="/shared/context.md">`, "Expected context file formatting in subagent prompt")
+
+	// Both should close context tags properly
+	assert.Contains(t, systemPrompt, "</context>", "Expected context closing tags in system prompt")
+	assert.Contains(t, subagentPrompt, "</context>", "Expected context closing tags in subagent prompt")
 }

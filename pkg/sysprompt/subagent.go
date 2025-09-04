@@ -5,12 +5,22 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/types/llm"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
 // SubAgentPrompt generates a subagent prompt for the given model
-func SubAgentPrompt(model string, llmConfig llm.Config) string {
+func SubAgentPrompt(model string, llmConfig llm.Config, contexts map[string]tooltypes.ContextInfo) string {
 	// Create a new prompt context with default values
 	promptCtx := NewPromptContext()
+
+	// Override context files if provided
+	if len(contexts) > 0 {
+		contextFiles := make(map[string]string)
+		for path, info := range contexts {
+			contextFiles[path] = info.Content
+		}
+		promptCtx.ContextFiles = contextFiles
+	}
 
 	// Create a new template renderer
 	renderer := NewRenderer(TemplateFS)
