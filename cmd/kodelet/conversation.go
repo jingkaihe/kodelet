@@ -23,7 +23,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// ConversationListConfig holds configuration for the conversation list command
 type ConversationListConfig struct {
 	StartDate  string
 	EndDate    string
@@ -36,7 +35,6 @@ type ConversationListConfig struct {
 	JSONOutput bool
 }
 
-// NewConversationListConfig creates a new ConversationListConfig with default values
 func NewConversationListConfig() *ConversationListConfig {
 	return &ConversationListConfig{
 		StartDate:  "",
@@ -51,49 +49,41 @@ func NewConversationListConfig() *ConversationListConfig {
 	}
 }
 
-// ConversationDeleteConfig holds configuration for the conversation delete command
 type ConversationDeleteConfig struct {
 	NoConfirm bool
 }
 
-// NewConversationDeleteConfig creates a new ConversationDeleteConfig with default values
 func NewConversationDeleteConfig() *ConversationDeleteConfig {
 	return &ConversationDeleteConfig{
 		NoConfirm: false,
 	}
 }
 
-// ConversationShowConfig holds configuration for the conversation show command
 type ConversationShowConfig struct {
 	Format string
 }
 
-// NewConversationShowConfig creates a new ConversationShowConfig with default values
 func NewConversationShowConfig() *ConversationShowConfig {
 	return &ConversationShowConfig{
 		Format: "text",
 	}
 }
 
-// ConversationImportConfig holds configuration for the conversation import command
 type ConversationImportConfig struct {
 	Force bool
 }
 
-// NewConversationImportConfig creates a new ConversationImportConfig with default values
 func NewConversationImportConfig() *ConversationImportConfig {
 	return &ConversationImportConfig{
 		Force: false,
 	}
 }
 
-// ConversationExportConfig holds configuration for the conversation export command
 type ConversationExportConfig struct {
 	UseGist       bool
 	UsePublicGist bool
 }
 
-// NewConversationExportConfig creates a new ConversationExportConfig with default values
 func NewConversationExportConfig() *ConversationExportConfig {
 	return &ConversationExportConfig{
 		UseGist:       false,
@@ -101,13 +91,11 @@ func NewConversationExportConfig() *ConversationExportConfig {
 	}
 }
 
-// ConversationEditConfig holds configuration for the conversation edit command
 type ConversationEditConfig struct {
 	Editor   string
 	EditArgs string
 }
 
-// NewConversationEditConfig creates a new ConversationEditConfig with default values
 func NewConversationEditConfig() *ConversationEditConfig {
 	return &ConversationEditConfig{
 		Editor:   "",
@@ -197,7 +185,6 @@ var conversationEditCmd = &cobra.Command{
 }
 
 func init() {
-	// Add list command flags
 	listDefaults := NewConversationListConfig()
 	conversationListCmd.Flags().String("start", listDefaults.StartDate, "Filter conversations after this date (format: YYYY-MM-DD)")
 	conversationListCmd.Flags().String("end", listDefaults.EndDate, "Filter conversations before this date (format: YYYY-MM-DD)")
@@ -209,29 +196,22 @@ func init() {
 	conversationListCmd.Flags().String("sort-order", listDefaults.SortOrder, "Sort order: asc (ascending) or desc (descending)")
 	conversationListCmd.Flags().Bool("json", listDefaults.JSONOutput, "Output in JSON format")
 
-	// Add delete command flags
 	deleteDefaults := NewConversationDeleteConfig()
 	conversationDeleteCmd.Flags().Bool("no-confirm", deleteDefaults.NoConfirm, "Skip confirmation prompt")
 
-	// Add show command flags
 	showDefaults := NewConversationShowConfig()
 	conversationShowCmd.Flags().String("format", showDefaults.Format, "Output format: raw, json, or text")
 
-	// Add import command flags
 	importDefaults := NewConversationImportConfig()
 	conversationImportCmd.Flags().Bool("force", importDefaults.Force, "Force overwrite existing conversation")
 
-	// Add export command flags
 	exportDefaults := NewConversationExportConfig()
 	conversationExportCmd.Flags().Bool("gist", exportDefaults.UseGist, "Create a private gist using gh command")
 	conversationExportCmd.Flags().Bool("public-gist", exportDefaults.UsePublicGist, "Create a public gist using gh command")
 
-	// Add edit command flags
 	editDefaults := NewConversationEditConfig()
 	conversationEditCmd.Flags().String("editor", editDefaults.Editor, "Editor to use for editing the conversation (default: git config core.editor, then $EDITOR, then vim)")
 	conversationEditCmd.Flags().String("edit-args", editDefaults.EditArgs, "Additional arguments to pass to the editor (e.g., '--wait' for VS Code)")
-
-	// Add subcommands
 	conversationCmd.AddCommand(conversationListCmd)
 	conversationCmd.AddCommand(conversationDeleteCmd)
 	conversationCmd.AddCommand(conversationShowCmd)
@@ -240,7 +220,6 @@ func init() {
 	conversationCmd.AddCommand(conversationEditCmd)
 }
 
-// getConversationListConfigFromFlags extracts list configuration from command flags
 func getConversationListConfigFromFlags(cmd *cobra.Command) *ConversationListConfig {
 	config := NewConversationListConfig()
 
@@ -275,7 +254,6 @@ func getConversationListConfigFromFlags(cmd *cobra.Command) *ConversationListCon
 	return config
 }
 
-// getConversationDeleteConfigFromFlags extracts delete configuration from command flags
 func getConversationDeleteConfigFromFlags(cmd *cobra.Command) *ConversationDeleteConfig {
 	config := NewConversationDeleteConfig()
 
@@ -286,7 +264,6 @@ func getConversationDeleteConfigFromFlags(cmd *cobra.Command) *ConversationDelet
 	return config
 }
 
-// getConversationShowConfigFromFlags extracts show configuration from command flags
 func getConversationShowConfigFromFlags(cmd *cobra.Command) *ConversationShowConfig {
 	config := NewConversationShowConfig()
 
@@ -297,7 +274,6 @@ func getConversationShowConfigFromFlags(cmd *cobra.Command) *ConversationShowCon
 	return config
 }
 
-// getConversationImportConfigFromFlags extracts import configuration from command flags
 func getConversationImportConfigFromFlags(cmd *cobra.Command) *ConversationImportConfig {
 	config := NewConversationImportConfig()
 
@@ -308,7 +284,6 @@ func getConversationImportConfigFromFlags(cmd *cobra.Command) *ConversationImpor
 	return config
 }
 
-// getConversationExportConfigFromFlags extracts export configuration from command flags
 func getConversationExportConfigFromFlags(cmd *cobra.Command) *ConversationExportConfig {
 	config := NewConversationExportConfig()
 
@@ -323,7 +298,6 @@ func getConversationExportConfigFromFlags(cmd *cobra.Command) *ConversationExpor
 	return config
 }
 
-// getConversationEditConfigFromFlags extracts edit configuration from command flags
 func getConversationEditConfigFromFlags(cmd *cobra.Command) *ConversationEditConfig {
 	config := NewConversationEditConfig()
 
@@ -338,7 +312,6 @@ func getConversationEditConfigFromFlags(cmd *cobra.Command) *ConversationEditCon
 	return config
 }
 
-// OutputFormat defines the format of the output
 type OutputFormat int
 
 const (
@@ -346,13 +319,11 @@ const (
 	JSONFormat
 )
 
-// ConversationListOutput represents the output for conversation list
 type ConversationListOutput struct {
 	Conversations []ConversationSummaryOutput
 	Format        OutputFormat
 }
 
-// NewConversationListOutput creates a new ConversationListOutput
 func NewConversationListOutput(summaries []convtypes.ConversationSummary, format OutputFormat) *ConversationListOutput {
 	output := &ConversationListOutput{
 		Conversations: make([]ConversationSummaryOutput, 0, len(summaries)),
@@ -360,13 +331,11 @@ func NewConversationListOutput(summaries []convtypes.ConversationSummary, format
 	}
 
 	for _, summary := range summaries {
-		// Extract first message or summary
 		preview := summary.FirstMessage
 		if summary.Summary != "" {
 			preview = summary.Summary
 		}
 
-		// Convert model type to friendly provider name
 		provider := summary.Provider
 		switch summary.Provider {
 		case "anthropic":
@@ -388,7 +357,6 @@ func NewConversationListOutput(summaries []convtypes.ConversationSummary, format
 	return output
 }
 
-// Render formats and renders the conversation list to the specified writer
 func (o *ConversationListOutput) Render(w io.Writer) error {
 	if o.Format == JSONFormat {
 		return o.renderJSON(w)
@@ -396,7 +364,6 @@ func (o *ConversationListOutput) Render(w io.Writer) error {
 	return o.renderTable(w)
 }
 
-// renderJSON renders the output in JSON format
 func (o *ConversationListOutput) renderJSON(w io.Writer) error {
 	type jsonOutput struct {
 		Conversations []ConversationSummaryOutput `json:"conversations"`
@@ -415,17 +382,13 @@ func (o *ConversationListOutput) renderJSON(w io.Writer) error {
 	return err
 }
 
-// renderTable renders the output in table format
 func (o *ConversationListOutput) renderTable(w io.Writer) error {
-	// Create a tabwriter with padding for better readability
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 
-	// Print table header
 	fmt.Fprintln(tw, "ID\tCreated\tUpdated\tMessages\tProvider\tSummary")
 	fmt.Fprintln(tw, "----\t-------\t-------\t--------\t--------\t-------")
 
 	for _, summary := range o.Conversations {
-		// Format creation and update dates
 		created := summary.CreatedAt.Format(time.RFC3339)
 		updated := summary.UpdatedAt.Format(time.RFC3339)
 
@@ -448,7 +411,6 @@ func (o *ConversationListOutput) renderTable(w io.Writer) error {
 	return tw.Flush()
 }
 
-// ConversationSummaryOutput represents a single conversation summary for output
 type ConversationSummaryOutput struct {
 	ID           string    `json:"id"`
 	CreatedAt    time.Time `json:"created_at"`
@@ -458,10 +420,7 @@ type ConversationSummaryOutput struct {
 	Preview      string    `json:"preview"`
 }
 
-// listConversationsCmd displays a list of saved conversations with query options
 func listConversationsCmd(ctx context.Context, config *ConversationListConfig) {
-
-	// Create a store
 	store, err := conversations.GetConversationStore(ctx)
 	if err != nil {
 		presenter.Error(err, "Failed to initialize conversation store")
@@ -469,7 +428,6 @@ func listConversationsCmd(ctx context.Context, config *ConversationListConfig) {
 	}
 	defer store.Close()
 
-	// Prepare query options
 	options := convtypes.QueryOptions{
 		SearchTerm: config.Search,
 		Provider:   config.Provider,
@@ -479,7 +437,6 @@ func listConversationsCmd(ctx context.Context, config *ConversationListConfig) {
 		SortOrder:  config.SortOrder,
 	}
 
-	// Parse start date if provided
 	if config.StartDate != "" {
 		startDate, err := time.Parse("2006-01-02", config.StartDate)
 		if err != nil {
@@ -489,7 +446,6 @@ func listConversationsCmd(ctx context.Context, config *ConversationListConfig) {
 		options.StartDate = &startDate
 	}
 
-	// Parse end date if provided
 	if config.EndDate != "" {
 		endDate, err := time.Parse("2006-01-02", config.EndDate)
 		if err != nil {
@@ -501,7 +457,6 @@ func listConversationsCmd(ctx context.Context, config *ConversationListConfig) {
 		options.EndDate = &endDate
 	}
 
-	// Query conversations with options
 	result, err := store.Query(ctx, options)
 	if err != nil {
 		presenter.Error(err, "Failed to list conversations")
@@ -514,13 +469,10 @@ func listConversationsCmd(ctx context.Context, config *ConversationListConfig) {
 		return
 	}
 
-	// Determine output format
 	format := TableFormat
 	if config.JSONOutput {
 		format = JSONFormat
 	}
-
-	// Create and render the output
 	output := NewConversationListOutput(summaries, format)
 	if err := output.Render(os.Stdout); err != nil {
 		presenter.Error(err, "Failed to render conversation list")
@@ -528,10 +480,7 @@ func listConversationsCmd(ctx context.Context, config *ConversationListConfig) {
 	}
 }
 
-// deleteConversationCmd deletes a specific conversation
 func deleteConversationCmd(ctx context.Context, id string, config *ConversationDeleteConfig) {
-
-	// Create a store
 	store, err := conversations.GetConversationStore(ctx)
 	if err != nil {
 		presenter.Error(err, "Failed to initialize conversation store")
@@ -539,7 +488,6 @@ func deleteConversationCmd(ctx context.Context, id string, config *ConversationD
 	}
 	defer store.Close()
 
-	// If no-confirm flag is not set, prompt for confirmation
 	if !config.NoConfirm {
 		response := presenter.Prompt(fmt.Sprintf("Are you sure you want to delete conversation %s?", id), "y", "N")
 
@@ -548,8 +496,6 @@ func deleteConversationCmd(ctx context.Context, id string, config *ConversationD
 			return
 		}
 	}
-
-	// Delete the conversation
 	err = store.Delete(ctx, id)
 	if err != nil {
 		presenter.Error(err, "Failed to delete conversation")
@@ -559,10 +505,7 @@ func deleteConversationCmd(ctx context.Context, id string, config *ConversationD
 	presenter.Success(fmt.Sprintf("Conversation %s deleted successfully", id))
 }
 
-// showConversationCmd displays a specific conversation
 func showConversationCmd(ctx context.Context, id string, config *ConversationShowConfig) {
-
-	// Create a store
 	store, err := conversations.GetConversationStore(ctx)
 	if err != nil {
 		presenter.Error(err, "Failed to initialize conversation store")
@@ -570,27 +513,21 @@ func showConversationCmd(ctx context.Context, id string, config *ConversationSho
 	}
 	defer store.Close()
 
-	// Load the conversation record
 	record, err := store.Load(ctx, id)
 	if err != nil {
 		presenter.Error(err, "Failed to load conversation")
 		os.Exit(1)
 	}
 
-	// Extract messages from raw message data
 	messages, err := llm.ExtractMessages(record.Provider, record.RawMessages, record.ToolResults)
 	if err != nil {
 		presenter.Error(err, "Failed to parse conversation messages")
 		os.Exit(1)
 	}
-
-	// Render messages according to the format
 	switch config.Format {
 	case "raw":
-		// Output the raw messages as stored
 		fmt.Println(string(record.RawMessages))
 	case "json":
-		// Convert to simpler JSON format and output
 		outputJSON, err := json.MarshalIndent(messages, "", "  ")
 		if err != nil {
 			presenter.Error(err, "Failed to generate JSON output")
@@ -598,7 +535,6 @@ func showConversationCmd(ctx context.Context, id string, config *ConversationSho
 		}
 		fmt.Println(string(outputJSON))
 	case "text":
-		// Format as readable text with user/assistant prefixes
 		displayConversation(messages)
 	default:
 		presenter.Error(errors.Errorf("unsupported format: %s", config.Format), "Unknown format. Supported formats are raw, json, and text")
@@ -606,15 +542,12 @@ func showConversationCmd(ctx context.Context, id string, config *ConversationSho
 	}
 }
 
-// displayConversation renders the messages in a readable text format
 func displayConversation(messages []llmtypes.Message) {
 	for i, msg := range messages {
-		// Add a separator between messages
 		if i > 0 {
 			presenter.Separator()
 		}
 
-		// Format based on role
 		roleLabel := ""
 		switch msg.Role {
 		case "user":
@@ -629,16 +562,12 @@ func displayConversation(messages []llmtypes.Message) {
 				roleLabel = msg.Role
 			}
 		}
-
-		// Output the formatted message with section header
 		presenter.Section(roleLabel)
 		fmt.Printf("%s\n", msg.Content)
 	}
 }
 
-// importConversationCmd imports a conversation from a file or URL
 func importConversationCmd(ctx context.Context, source string, config *ConversationImportConfig) {
-	// Create a store
 	store, err := conversations.GetConversationStore(ctx)
 	if err != nil {
 		presenter.Error(err, "Failed to initialize conversation store")
@@ -646,29 +575,23 @@ func importConversationCmd(ctx context.Context, source string, config *Conversat
 	}
 	defer store.Close()
 
-	// Read the conversation data
 	data, err := readConversationData(source)
 	if err != nil {
 		presenter.Error(err, "Failed to read conversation data")
 		os.Exit(1)
 	}
 
-	// Validate and parse the conversation record
 	record, err := validateConversationRecord(data)
 	if err != nil {
 		presenter.Error(err, "Invalid conversation data")
 		os.Exit(1)
 	}
-
-	// Check if conversation already exists
 	if _, err := store.Load(ctx, record.ID); err == nil {
 		if !config.Force {
 			presenter.Error(errors.Errorf("conversation with ID %s already exists", record.ID), "Use --force to overwrite")
 			os.Exit(1)
 		}
 	}
-
-	// Save the conversation
 	if err := store.Save(ctx, *record); err != nil {
 		presenter.Error(err, "Failed to save conversation")
 		os.Exit(1)
@@ -677,9 +600,7 @@ func importConversationCmd(ctx context.Context, source string, config *Conversat
 	presenter.Success(fmt.Sprintf("Conversation %s imported successfully", record.ID))
 }
 
-// exportConversationCmd exports a conversation to a file or creates a gist
 func exportConversationCmd(ctx context.Context, conversationID string, path string, config *ConversationExportConfig) {
-	// Create a store
 	store, err := conversations.GetConversationStore(ctx)
 	if err != nil {
 		presenter.Error(err, "Failed to initialize conversation store")
@@ -687,21 +608,17 @@ func exportConversationCmd(ctx context.Context, conversationID string, path stri
 	}
 	defer store.Close()
 
-	// Load the conversation
 	record, err := store.Load(ctx, conversationID)
 	if err != nil {
 		presenter.Error(err, "Failed to load conversation")
 		os.Exit(1)
 	}
 
-	// Convert to JSON
 	jsonData, err := json.MarshalIndent(record, "", "  ")
 	if err != nil {
 		presenter.Error(err, "Failed to serialize conversation")
 		os.Exit(1)
 	}
-
-	// Handle gist export
 	if config.UseGist || config.UsePublicGist {
 		// Check for conflicting flags
 		if config.UseGist && config.UsePublicGist {
@@ -717,7 +634,6 @@ func exportConversationCmd(ctx context.Context, conversationID string, path stri
 		return
 	}
 
-	// Handle file export
 	if path == "" {
 		path = fmt.Sprintf("%s.json", conversationID)
 	}
@@ -730,18 +646,14 @@ func exportConversationCmd(ctx context.Context, conversationID string, path stri
 	presenter.Success(fmt.Sprintf("Conversation %s exported to %s", conversationID, path))
 }
 
-// readConversationData reads conversation data from a file or URL
 func readConversationData(source string) ([]byte, error) {
-	// Check if it's a URL
 	if parsedURL, err := url.Parse(source); err == nil && parsedURL.Scheme != "" {
 		return readFromURL(source)
 	}
 
-	// It's a file path
 	return os.ReadFile(source)
 }
 
-// readFromURL reads data from a URL
 func readFromURL(urlStr string) ([]byte, error) {
 	resp, err := http.Get(urlStr)
 	if err != nil {
@@ -756,14 +668,12 @@ func readFromURL(urlStr string) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
-// validateConversationRecord validates and parses a conversation record
 func validateConversationRecord(data []byte) (*convtypes.ConversationRecord, error) {
 	var record convtypes.ConversationRecord
 	if err := json.Unmarshal(data, &record); err != nil {
 		return nil, errors.Wrap(err, "invalid JSON format")
 	}
 
-	// Validate required fields
 	if record.ID == "" {
 		return nil, errors.New("conversation ID is required")
 	}
@@ -772,7 +682,6 @@ func validateConversationRecord(data []byte) (*convtypes.ConversationRecord, err
 		return nil, errors.New("model type is required")
 	}
 
-	// Validate supported providers
 	if record.Provider != "anthropic" && record.Provider != "openai" {
 		return nil, errors.Errorf("unsupported model type: %s (supported: anthropic, openai)", record.Provider)
 	}
@@ -781,7 +690,6 @@ func validateConversationRecord(data []byte) (*convtypes.ConversationRecord, err
 		return nil, errors.New("raw messages are required")
 	}
 
-	// Validate that messages can be extracted
 	if record.ToolResults == nil {
 		record.ToolResults = make(map[string]tools.StructuredToolResult)
 	}
@@ -790,8 +698,6 @@ func validateConversationRecord(data []byte) (*convtypes.ConversationRecord, err
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to extract messages")
 	}
-
-	// Set timestamps if not provided
 	if record.CreatedAt.IsZero() {
 		record.CreatedAt = time.Now()
 	}
@@ -802,16 +708,13 @@ func validateConversationRecord(data []byte) (*convtypes.ConversationRecord, err
 	return &record, nil
 }
 
-// createGist creates a gist using the gh command
 func createGist(conversationID string, jsonData []byte, isPrivate bool) error {
-	// Create a temporary file
 	tmpFile, err := os.CreateTemp("", fmt.Sprintf("conversation_%s_*.json", conversationID))
 	if err != nil {
 		return errors.Wrap(err, "failed to create temporary file")
 	}
 	defer os.Remove(tmpFile.Name())
 
-	// Write data to temporary file
 	if _, err := tmpFile.Write(jsonData); err != nil {
 		tmpFile.Close()
 		return errors.Wrap(err, "failed to write to temporary file")
@@ -825,8 +728,6 @@ func createGist(conversationID string, jsonData []byte, isPrivate bool) error {
 		args = append(args, "--public")
 	}
 	args = append(args, "--filename", fmt.Sprintf("conversation_%s.json", conversationID), tmpFile.Name())
-
-	// Create gist using gh command
 	cmd := exec.Command("gh", args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -844,9 +745,7 @@ func createGist(conversationID string, jsonData []byte, isPrivate bool) error {
 	return nil
 }
 
-// editConversationCmd opens a conversation record in JSON format for editing
 func editConversationCmd(ctx context.Context, conversationID string, config *ConversationEditConfig) {
-	// Create a store
 	store, err := conversations.GetConversationStore(ctx)
 	if err != nil {
 		presenter.Error(err, "Failed to initialize conversation store")
@@ -854,21 +753,18 @@ func editConversationCmd(ctx context.Context, conversationID string, config *Con
 	}
 	defer store.Close()
 
-	// Load the conversation
 	record, err := store.Load(ctx, conversationID)
 	if err != nil {
 		presenter.Error(err, "Failed to load conversation")
 		os.Exit(1)
 	}
 
-	// Convert to JSON
 	jsonData, err := json.MarshalIndent(record, "", "  ")
 	if err != nil {
 		presenter.Error(err, "Failed to serialize conversation")
 		os.Exit(1)
 	}
 
-	// Create a temporary file for editing
 	tempFile, err := os.CreateTemp("", fmt.Sprintf("conversation_%s_*.json", conversationID))
 	if err != nil {
 		presenter.Error(err, "Failed to create temporary file")
@@ -876,28 +772,23 @@ func editConversationCmd(ctx context.Context, conversationID string, config *Con
 	}
 	defer os.Remove(tempFile.Name())
 
-	// Write the JSON to the temporary file
 	if _, err := tempFile.Write(jsonData); err != nil {
 		presenter.Error(err, "Failed to write to temporary file")
 		os.Exit(1)
 	}
 	tempFile.Close()
 
-	// Determine which editor to use
 	editor := config.Editor
 	if editor == "" {
 		editor = getEditor()
 	}
 
-	// Parse editor command and arguments
 	editorCmd := []string{editor}
 	if config.EditArgs != "" {
 		args := strings.Fields(config.EditArgs)
 		editorCmd = append(editorCmd, args...)
 	}
 	editorCmd = append(editorCmd, tempFile.Name())
-
-	// Open the file in the editor
 	cmd := exec.Command(editorCmd[0], editorCmd[1:]...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
@@ -908,21 +799,17 @@ func editConversationCmd(ctx context.Context, conversationID string, config *Con
 		os.Exit(1)
 	}
 
-	// Read the edited content
 	editedData, err := os.ReadFile(tempFile.Name())
 	if err != nil {
 		presenter.Error(err, "Failed to read edited file")
 		os.Exit(1)
 	}
 
-	// Parse the edited JSON to validate it
 	editedRecord, err := validateConversationRecord(editedData)
 	if err != nil {
 		presenter.Error(err, "Invalid edited conversation data")
 		os.Exit(1)
 	}
-
-	// Save the edited conversation
 	if err := store.Save(ctx, *editedRecord); err != nil {
 		presenter.Error(err, "Failed to save edited conversation")
 		os.Exit(1)

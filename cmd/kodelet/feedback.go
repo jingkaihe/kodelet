@@ -12,13 +12,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// FeedbackConfig holds configuration for the feedback command
 type FeedbackConfig struct {
 	ConversationID string
 	Follow         bool
 }
 
-// NewFeedbackConfig creates a new FeedbackConfig with default values
 func NewFeedbackConfig() *FeedbackConfig {
 	return &FeedbackConfig{
 		ConversationID: "",
@@ -47,13 +45,11 @@ Example:
 }
 
 func init() {
-	// Add feedback command flags
 	feedbackDefaults := NewFeedbackConfig()
 	feedbackCmd.Flags().StringVar(&feedbackDefaults.ConversationID, "conversation-id", feedbackDefaults.ConversationID, "ID of the conversation to send feedback to")
 	feedbackCmd.Flags().BoolP("follow", "f", feedbackDefaults.Follow, "Send feedback to the most recent conversation")
 }
 
-// getFeedbackConfigFromFlags extracts feedback configuration from command flags
 func getFeedbackConfigFromFlags(ctx context.Context, cmd *cobra.Command) *FeedbackConfig {
 	config := NewFeedbackConfig()
 
@@ -81,9 +77,7 @@ func getFeedbackConfigFromFlags(ctx context.Context, cmd *cobra.Command) *Feedba
 	return config
 }
 
-// sendFeedbackCmd sends feedback to a conversation
 func sendFeedbackCmd(ctx context.Context, conversationID, message string, isFollow bool) {
-	// Validate input
 	if conversationID == "" {
 		presenter.Error(errors.New("conversation ID is required"), "Please provide a conversation ID using --conversation-id or use -f to target the most recent conversation")
 		os.Exit(1)
@@ -94,19 +88,16 @@ func sendFeedbackCmd(ctx context.Context, conversationID, message string, isFoll
 		os.Exit(1)
 	}
 
-	// Additional validation for message length
 	if len(message) > 10000 {
 		presenter.Error(errors.New("message too long"), "Feedback message must be less than 10,000 characters")
 		os.Exit(1)
 	}
 
-	// Basic validation for conversation ID format
 	if len(conversationID) < 10 {
 		presenter.Error(errors.New("invalid conversation ID format"), "Conversation ID appears to be invalid (too short)")
 		os.Exit(1)
 	}
 
-	// Check if conversation exists
 	store, err := conversations.GetConversationStore(ctx)
 	if err != nil {
 		presenter.Error(err, "Failed to initialize conversation store")
@@ -114,7 +105,6 @@ func sendFeedbackCmd(ctx context.Context, conversationID, message string, isFoll
 	}
 	defer store.Close()
 
-	// Try to load the conversation to validate it exists
 	_, err = store.Load(ctx, conversationID)
 	if err != nil {
 		presenter.Error(err, fmt.Sprintf("Failed to find conversation with ID: %s", conversationID))
@@ -122,26 +112,22 @@ func sendFeedbackCmd(ctx context.Context, conversationID, message string, isFoll
 		os.Exit(1)
 	}
 
-	// Create feedback store
 	feedbackStore, err := feedback.NewFeedbackStore()
 	if err != nil {
 		presenter.Error(err, "Failed to initialize feedback store")
 		os.Exit(1)
 	}
 
-	// Check if there's already pending feedback (optional warning)
 	if feedbackStore.HasPendingFeedback(conversationID) {
 		presenter.Warning("There is already pending feedback for this conversation. The new message will be queued.")
 	}
 
-	// Write feedback
 	err = feedbackStore.WriteFeedback(conversationID, message)
 	if err != nil {
 		presenter.Error(err, "Failed to write feedback")
 		os.Exit(1)
 	}
 
-	// Success message
 	if isFollow {
 		presenter.Success(fmt.Sprintf("Feedback sent to most recent conversation: %s", conversationID))
 	} else {
@@ -149,7 +135,6 @@ func sendFeedbackCmd(ctx context.Context, conversationID, message string, isFoll
 	}
 	presenter.Info(fmt.Sprintf("Message: %s", message))
 
-	// Show helpful information
 	presenter.Info("The feedback will be processed when the conversation makes its next API call.")
 	presenter.Info("If the conversation is not currently running, start it with:")
 	presenter.Info(fmt.Sprintf("  kodelet run --resume %s \"continue\"", conversationID))

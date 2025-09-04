@@ -41,7 +41,6 @@ func init() {
 }
 
 func runCopilotLogout(_ context.Context, noConfirm bool) error {
-	// Check if credentials file exists
 	exists, err := auth.GetCopilotCredentialsExists()
 	if err != nil {
 		return errors.Wrap(err, "failed to check credentials file")
@@ -52,18 +51,15 @@ func runCopilotLogout(_ context.Context, noConfirm bool) error {
 		return nil
 	}
 
-	// Confirm with user (unless --no-confirm is set)
 	if !noConfirm && !confirmCopilotLogout() {
 		presenter.Info("Logout cancelled.")
 		return nil
 	}
 
-	// Remove the credentials file
 	if err := auth.DeleteCopilotCredentials(); err != nil {
 		return errors.Wrap(err, "failed to remove credentials file")
 	}
 
-	// Success message
 	presenter.Section("GitHub Copilot Logout")
 	presenter.Success("Successfully logged out from GitHub Copilot.")
 	presenter.Info("Removed credentials file: ~/.kodelet/copilot-subscription.json")
@@ -73,7 +69,6 @@ func runCopilotLogout(_ context.Context, noConfirm bool) error {
 	return nil
 }
 
-// confirmCopilotLogout asks the user to confirm the logout
 func confirmCopilotLogout() bool {
 	reader := bufio.NewReader(os.Stdin)
 	fmt.Print("Are you sure you want to logout from GitHub Copilot? This will remove your stored credentials. (y/N): ")

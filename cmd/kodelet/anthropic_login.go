@@ -37,18 +37,15 @@ that are not available via the standard API key authentication.`,
 }
 
 func runAnthropicLogin(ctx context.Context) error {
-	// Generate authorization URL
 	authURL, verifier, err := auth.GenerateAnthropicAuthURL()
 	if err != nil {
 		return errors.Wrap(err, "failed to generate authorization URL")
 	}
 
-	// Display instructions to user
 	presenter.Section("Anthropic OAuth Login")
 	presenter.Info("To authenticate with Anthropic and access subscription-based models:")
 	fmt.Println()
 
-	// Try to open the browser automatically
 	presenter.Info("Opening your browser for authentication...")
 	if err := utils.OpenBrowser(authURL); err != nil {
 		presenter.Warning("Could not open browser automatically. Please visit the following URL manually:")
@@ -64,7 +61,6 @@ func runAnthropicLogin(ctx context.Context) error {
 	fmt.Println("3. Copy the authorization code displayed on that page")
 	fmt.Println()
 
-	// Read authorization code from user
 	reader := bufio.NewReader(os.Stdin)
 	fmt.Print("Enter the authorization code: ")
 	code, err := reader.ReadString('\n')
@@ -77,7 +73,6 @@ func runAnthropicLogin(ctx context.Context) error {
 		return errors.New("authorization code cannot be empty")
 	}
 
-	// Exchange code for credentials
 	fmt.Println()
 	presenter.Info("Exchanging authorization code for access token...")
 
@@ -86,13 +81,11 @@ func runAnthropicLogin(ctx context.Context) error {
 		return errors.Wrap(err, "failed to exchange authorization code for credentials")
 	}
 
-	// Save credentials
 	credentialsPath, err := auth.SaveAnthropicCredentials(creds)
 	if err != nil {
 		return errors.Wrap(err, "failed to save credentials")
 	}
 
-	// Success message
 	fmt.Println()
 	presenter.Success("Authentication successful!")
 	fmt.Printf("Logged in as: %s\n", creds.Email)

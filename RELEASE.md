@@ -1,5 +1,12 @@
 # Kodelet
 
+## 0.0.92.alpha (2025-09-04)
+
+### Internal Changes
+
+**Chat Interface Simplification**: Removed plain UI mode from chat command for streamlined user experience
+**Code Cleanup**: Extensive removal of unnecessary code comments across CLI commands for improved code maintainability and readability
+
 ## 0.0.91.alpha (2025-09-04)
 
 ### Bug Fixes

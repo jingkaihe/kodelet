@@ -1,6 +1,4 @@
 // Package main provides the entry point for the Kodelet CLI application.
-// It initializes configuration, sets up command structure with Cobra,
-// and manages application lifecycle including tracing and error handling.
 package main
 
 import (
@@ -17,7 +15,6 @@ import (
 )
 
 func init() {
-	// Set default configuration values
 	viper.SetDefault("max_tokens", 8192)
 	viper.SetDefault("weak_model_max_tokens", 8192)
 	viper.SetDefault("thinking_budget_tokens", 4048)
@@ -31,24 +28,19 @@ func init() {
 	viper.SetDefault("allowed_domains_file", "~/.kodelet/allowed_domains.txt")
 	viper.SetDefault("anthropic_api_access", "auto")
 
-	// Commit coauthor configuration defaults
 	viper.SetDefault("commit.coauthor.enabled", true)
 	viper.SetDefault("commit.coauthor.name", "Kodelet")
 	viper.SetDefault("commit.coauthor.email", "noreply@kodelet.com")
 
-	// Set default MCP configuration
 	viper.SetDefault("mcp", map[string]tools.MCPConfig{})
 
-	// Set default tracing configuration
 	viper.SetDefault("tracing.enabled", false)
 	viper.SetDefault("tracing.sampler", "ratio")
 	viper.SetDefault("tracing.ratio", 1)
 
-	// Set default logging configuration
 	viper.SetDefault("log_level", "info")
 	viper.SetDefault("log_format", "fmt")
 
-	// Environment variables
 	viper.SetEnvPrefix("KODELET")
 	viper.AutomaticEnv()
 
@@ -56,8 +48,7 @@ func init() {
 	// e.g. KODELET_TRACING_ENABLED -> tracing.enabled
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 
-	// Config file support - layered approach (global first, then repo-level override)
-	// First, try to load global config
+	// Layered config: global first, then repo-level override
 	viper.SetConfigName("config")
 	viper.SetConfigType("yaml")
 	viper.AddConfigPath("$HOME/.kodelet")
@@ -92,10 +83,8 @@ var rootCmd = &cobra.Command{
 }
 
 func main() {
-	// Create a context
 	ctx := context.Background()
 
-	// Initialize log level and format from configuration after CLI parsing
 	cobra.OnInitialize(func() {
 		if logLevel := viper.GetString("log_level"); logLevel != "" {
 			if err := logger.SetLogLevel(logLevel); err != nil {
@@ -107,7 +96,6 @@ func main() {
 		}
 	})
 
-	// Add global flags
 	rootCmd.PersistentFlags().String("provider", "anthropic", "LLM provider to use (anthropic, openai)")
 	rootCmd.PersistentFlags().Bool("use-copilot", false, "Use GitHub Copilot subscription for OpenAI requests (env: KODELET_USE_COPILOT)")
 	rootCmd.PersistentFlags().String("model", string(anthropic.ModelClaudeSonnet4_20250514), "LLM model to use (overrides config)")
@@ -125,7 +113,6 @@ func main() {
 	rootCmd.PersistentFlags().String("anthropic-api-access", "auto", "Anthropic API access mode (auto, subscription, api-key)")
 	rootCmd.PersistentFlags().String("profile", "", "Configuration profile to use (overrides config file)")
 
-	// Bind flags to viper
 	viper.BindPFlag("provider", rootCmd.PersistentFlags().Lookup("provider"))
 	viper.BindPFlag("use_copilot", rootCmd.PersistentFlags().Lookup("use-copilot"))
 	viper.BindPFlag("model", rootCmd.PersistentFlags().Lookup("model"))
@@ -184,7 +171,6 @@ func main() {
 		}()
 	}
 
-	// Apply tracing to all commands
 	rootCmd = withTracing(rootCmd)
 	runCmd = withTracing(runCmd)
 	chatCmd = withTracing(chatCmd)

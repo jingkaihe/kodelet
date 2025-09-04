@@ -41,7 +41,6 @@ func init() {
 }
 
 func runAnthropicLogout(_ context.Context, noConfirm bool) error {
-	// Get the credentials file path
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return errors.Wrap(err, "failed to get user home directory")
@@ -49,7 +48,6 @@ func runAnthropicLogout(_ context.Context, noConfirm bool) error {
 
 	credentialsPath := filepath.Join(home, ".kodelet", "anthropic-subscription.json")
 
-	// Check if credentials file exists
 	if _, err := os.Stat(credentialsPath); os.IsNotExist(err) {
 		presenter.Info("No Anthropic credentials found. You are already logged out.")
 		return nil
@@ -57,18 +55,15 @@ func runAnthropicLogout(_ context.Context, noConfirm bool) error {
 		return errors.Wrap(err, "failed to check credentials file")
 	}
 
-	// Confirm with user (unless --no-confirm is set)
 	if !noConfirm && !confirmLogout() {
 		presenter.Info("Logout cancelled.")
 		return nil
 	}
 
-	// Remove the credentials file
 	if err := os.Remove(credentialsPath); err != nil {
 		return errors.Wrap(err, "failed to remove credentials file")
 	}
 
-	// Success message
 	presenter.Section("Anthropic Logout")
 	presenter.Success("Successfully logged out from Anthropic.")
 	presenter.Info("Removed credentials file: " + credentialsPath)
@@ -78,7 +73,6 @@ func runAnthropicLogout(_ context.Context, noConfirm bool) error {
 	return nil
 }
 
-// confirmLogout asks the user to confirm the logout
 func confirmLogout() bool {
 	reader := bufio.NewReader(os.Stdin)
 	fmt.Print("Are you sure you want to logout from Anthropic? This will remove your stored credentials. (y/N): ")

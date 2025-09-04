@@ -20,7 +20,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// UsageConfig holds configuration for the usage command
 type UsageConfig struct {
 	Since     string
 	Until     string
@@ -29,7 +28,6 @@ type UsageConfig struct {
 	Breakdown bool
 }
 
-// NewUsageConfig creates a new UsageConfig with default values
 func NewUsageConfig() *UsageConfig {
 	return &UsageConfig{
 		Since:     "10d", // Default to past 10 days
@@ -74,7 +72,6 @@ func init() {
 	usageCmd.Flags().Bool("breakdown", defaults.Breakdown, "Show usage breakdown by provider")
 }
 
-// getUsageConfigFromFlags extracts usage configuration from command flags
 func getUsageConfigFromFlags(cmd *cobra.Command) *UsageConfig {
 	config := NewUsageConfig()
 
@@ -97,7 +94,6 @@ func getUsageConfigFromFlags(cmd *cobra.Command) *UsageConfig {
 	return config
 }
 
-// toUsageSummaries converts ConversationSummary slice to usage.ConversationSummary interface slice
 func toUsageSummaries(summaries []convtypes.ConversationSummary) []usage.ConversationSummary {
 	result := make([]usage.ConversationSummary, len(summaries))
 	for i, s := range summaries {
@@ -106,12 +102,10 @@ func toUsageSummaries(summaries []convtypes.ConversationSummary) []usage.Convers
 	return result
 }
 
-// parseTimeSpec parses time specifications like "1d", "1w", "2025-06-01"
 func parseTimeSpec(spec string) (time.Time, error) {
 	return parseTimeSpecWithClock(spec, time.Now)
 }
 
-// parseTimeSpecWithClock parses time specifications with a custom clock function for testing
 func parseTimeSpecWithClock(spec string, now func() time.Time) (time.Time, error) {
 	if spec == "" {
 		return time.Time{}, nil
@@ -149,13 +143,10 @@ func parseTimeSpecWithClock(spec string, now func() time.Time) (time.Time, error
 	}
 }
 
-// Use types from usage package
 type DailyUsage = usage.DailyUsage
 type UsageStats = usage.UsageStats
 
-// runUsageCmd executes the usage command
 func runUsageCmd(ctx context.Context, config *UsageConfig) {
-	// Parse time specifications
 	var startTime, endTime time.Time
 	var err error
 
@@ -165,7 +156,6 @@ func runUsageCmd(ctx context.Context, config *UsageConfig) {
 			presenter.Error(err, "Invalid since time specification")
 			os.Exit(1)
 		}
-		// Set to beginning of day
 		startTime = startTime.Truncate(24 * time.Hour)
 	}
 
@@ -175,11 +165,9 @@ func runUsageCmd(ctx context.Context, config *UsageConfig) {
 			presenter.Error(err, "Invalid until time specification")
 			os.Exit(1)
 		}
-		// Set to end of day
 		endTime = endTime.Truncate(24 * time.Hour).Add(24*time.Hour - time.Second)
 	}
 
-	// Create conversation store
 	store, err := conversations.GetConversationStore(ctx)
 	if err != nil {
 		presenter.Error(err, "Failed to initialize conversation store")
@@ -187,11 +175,10 @@ func runUsageCmd(ctx context.Context, config *UsageConfig) {
 	}
 	defer store.Close()
 
-	// Query conversations with date filters
 	options := convtypes.QueryOptions{
 		SortBy:    "updated",
 		SortOrder: "desc",
-		Provider:  config.Provider, // Add provider filtering
+		Provider:  config.Provider,
 	}
 
 	if !startTime.IsZero() {
@@ -214,22 +201,17 @@ func runUsageCmd(ctx context.Context, config *UsageConfig) {
 		return
 	}
 
-	// Calculate usage statistics directly from summaries
 	if config.Breakdown {
-		// Calculate daily provider breakdown statistics
 		dailyProviderStats := usage.CalculateDailyProviderBreakdownStats(toUsageSummaries(summaries), startTime, endTime)
 
-		// Display results with daily provider breakdown
 		if config.Format == "json" {
 			displayDailyProviderBreakdownJSON(os.Stdout, dailyProviderStats)
 		} else {
 			displayDailyProviderBreakdownTable(os.Stdout, dailyProviderStats)
 		}
 	} else {
-		// Calculate regular daily usage statistics
 		stats := usage.CalculateUsageStats(toUsageSummaries(summaries), startTime, endTime)
 
-		// Display results
 		if config.Format == "json" {
 			displayUsageJSON(os.Stdout, stats)
 		} else {
@@ -238,15 +220,12 @@ func runUsageCmd(ctx context.Context, config *UsageConfig) {
 	}
 }
 
-// displayUsageTable displays usage statistics in table format
 func displayUsageTable(w io.Writer, stats *UsageStats) {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 
-	// Print header
 	fmt.Fprintln(tw, "Date\tConversations\tInput Tokens\tOutput Tokens\tCache Write\tCache Read\tTotal Cost")
 	fmt.Fprintln(tw, "----\t-------------\t------------\t-------------\t-----------\t----------\t----------")
 
-	// Print daily breakdown
 	for _, daily := range stats.Daily {
 		fmt.Fprintf(tw, "%s\t%d\t%s\t%s\t%s\t%s\t$%.4f\n",
 			daily.Date.Format("2006-01-02"),
@@ -259,7 +238,6 @@ func displayUsageTable(w io.Writer, stats *UsageStats) {
 		)
 	}
 
-	// Print separator and total
 	fmt.Fprintln(tw, "----\t-------------\t------------\t-------------\t-----------\t----------\t----------")
 	totalConversations := 0
 	for _, daily := range stats.Daily {
@@ -278,13 +256,11 @@ func displayUsageTable(w io.Writer, stats *UsageStats) {
 	tw.Flush()
 }
 
-// UsageJSONOutput represents the JSON structure for usage statistics
 type UsageJSONOutput struct {
 	Daily []DailyUsageJSON `json:"daily"`
 	Total TotalUsageJSON   `json:"total"`
 }
 
-// DailyUsageJSON represents daily usage in JSON format
 type DailyUsageJSON struct {
 	Date             string  `json:"date"`
 	Conversations    int     `json:"conversations"`
@@ -295,7 +271,6 @@ type DailyUsageJSON struct {
 	TotalCost        float64 `json:"total_cost"`
 }
 
-// TotalUsageJSON represents total usage in JSON format
 type TotalUsageJSON struct {
 	Conversations    int     `json:"conversations"`
 	InputTokens      int     `json:"input_tokens"`
@@ -305,14 +280,11 @@ type TotalUsageJSON struct {
 	TotalCost        float64 `json:"total_cost"`
 }
 
-// displayUsageJSON displays usage statistics in JSON format
 func displayUsageJSON(w io.Writer, stats *UsageStats) {
-	// Convert to JSON-friendly structure
 	output := UsageJSONOutput{
 		Daily: make([]DailyUsageJSON, len(stats.Daily)),
 	}
 
-	// Convert daily usage
 	for i, daily := range stats.Daily {
 		output.Daily[i] = DailyUsageJSON{
 			Date:             daily.Date.Format("2006-01-02"),
@@ -325,7 +297,6 @@ func displayUsageJSON(w io.Writer, stats *UsageStats) {
 		}
 	}
 
-	// Calculate total conversations
 	totalConversations := 0
 	for _, daily := range stats.Daily {
 		totalConversations += daily.Conversations
@@ -351,27 +322,21 @@ func displayUsageJSON(w io.Writer, stats *UsageStats) {
 	fmt.Fprintln(w, string(jsonData))
 }
 
-// formatNumber is a wrapper around usage.FormatNumber for testing
 func formatNumber(n int) string {
 	return usage.FormatNumber(n)
 }
 
-// aggregateUsageStats is a wrapper around usage.CalculateUsageStats for testing
 func aggregateUsageStats(summaries []convtypes.ConversationSummary, startTime, endTime time.Time) *UsageStats {
 	return usage.CalculateUsageStats(toUsageSummaries(summaries), startTime, endTime)
 }
 
-// displayDailyProviderBreakdownTable displays daily provider breakdown statistics in table format
 func displayDailyProviderBreakdownTable(w io.Writer, stats *usage.DailyProviderBreakdownStats) {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 
-	// Print header (similar to regular usage table but with Provider column)
 	fmt.Fprintln(tw, "Date\tProvider\tConversations\tInput Tokens\tOutput Tokens\tCache Write\tCache Read\tTotal Cost")
 	fmt.Fprintln(tw, "----\t--------\t-------------\t------------\t-------------\t-----------\t----------\t----------")
 
-	// Print daily breakdown - one row per provider per day
 	for _, daily := range stats.Daily {
-		// Sort providers for consistent display (Claude first, then OpenAI)
 		providers := []string{}
 		if _, exists := daily.ProviderUsage["anthropic"]; exists {
 			providers = append(providers, "anthropic")
@@ -379,7 +344,6 @@ func displayDailyProviderBreakdownTable(w io.Writer, stats *usage.DailyProviderB
 		if _, exists := daily.ProviderUsage["openai"]; exists {
 			providers = append(providers, "openai")
 		}
-		// Add any other providers
 		for provider := range daily.ProviderUsage {
 			if provider != "anthropic" && provider != "openai" {
 				providers = append(providers, provider)
@@ -389,7 +353,6 @@ func displayDailyProviderBreakdownTable(w io.Writer, stats *usage.DailyProviderB
 		for _, provider := range providers {
 			providerStat := daily.ProviderUsage[provider]
 
-			// Convert provider name to friendly display name
 			displayName := provider
 			switch provider {
 			case "anthropic":
@@ -411,11 +374,9 @@ func displayDailyProviderBreakdownTable(w io.Writer, stats *usage.DailyProviderB
 		}
 	}
 
-	// Print separator and total if there are multiple days
 	if len(stats.Daily) > 1 {
 		fmt.Fprintln(tw, "----\t--------\t-------------\t------------\t-------------\t-----------\t----------\t----------")
 
-		// Calculate totals by provider across all days
 		providerTotals := make(map[string]*usage.ProviderUsageStats)
 		for _, daily := range stats.Daily {
 			for provider, providerStat := range daily.ProviderUsage {
@@ -438,7 +399,6 @@ func displayDailyProviderBreakdownTable(w io.Writer, stats *usage.DailyProviderB
 			}
 		}
 
-		// Sort providers for totals (Claude first, then OpenAI)
 		providers := []string{}
 		if _, exists := providerTotals["anthropic"]; exists {
 			providers = append(providers, "anthropic")
@@ -446,18 +406,15 @@ func displayDailyProviderBreakdownTable(w io.Writer, stats *usage.DailyProviderB
 		if _, exists := providerTotals["openai"]; exists {
 			providers = append(providers, "openai")
 		}
-		// Add any other providers
 		for provider := range providerTotals {
 			if provider != "anthropic" && provider != "openai" {
 				providers = append(providers, provider)
 			}
 		}
 
-		// Print provider totals
 		for _, provider := range providers {
 			total := providerTotals[provider]
 
-			// Convert provider name to friendly display name
 			displayName := provider
 			switch provider {
 			case "anthropic":
@@ -481,26 +438,22 @@ func displayDailyProviderBreakdownTable(w io.Writer, stats *usage.DailyProviderB
 	tw.Flush()
 }
 
-// DailyProviderBreakdownJSONOutput represents the JSON structure for daily provider breakdown statistics
 type DailyProviderBreakdownJSONOutput struct {
 	Daily []DailyProviderUsageJSON `json:"daily"`
 	Total TotalUsageJSON           `json:"total"`
 }
 
-// DailyProviderUsageJSON represents daily provider usage in JSON format
 type DailyProviderUsageJSON struct {
 	Date      string                       `json:"date"`
 	Providers map[string]ProviderUsageJSON `json:"providers"`
 	Total     DailyTotalUsageJSON          `json:"total"`
 }
 
-// DailyTotalUsageJSON represents daily total usage in JSON format
 type DailyTotalUsageJSON struct {
 	Conversations int     `json:"conversations"`
 	TotalCost     float64 `json:"total_cost"`
 }
 
-// ProviderUsageJSON represents provider usage in JSON format
 type ProviderUsageJSON struct {
 	Conversations    int     `json:"conversations"`
 	InputTokens      int     `json:"input_tokens"`
@@ -510,19 +463,15 @@ type ProviderUsageJSON struct {
 	TotalCost        float64 `json:"total_cost"`
 }
 
-// displayDailyProviderBreakdownJSON displays daily provider breakdown statistics in JSON format
 func displayDailyProviderBreakdownJSON(w io.Writer, stats *usage.DailyProviderBreakdownStats) {
-	// Convert to JSON-friendly structure
 	output := DailyProviderBreakdownJSONOutput{
 		Daily: make([]DailyProviderUsageJSON, len(stats.Daily)),
 	}
 
-	// Convert daily usage
 	for i, daily := range stats.Daily {
 		providers := make(map[string]ProviderUsageJSON)
 
 		for provider, providerStat := range daily.ProviderUsage {
-			// Use friendly display names in JSON
 			displayName := provider
 			switch provider {
 			case "anthropic":
@@ -551,7 +500,6 @@ func displayDailyProviderBreakdownJSON(w io.Writer, stats *usage.DailyProviderBr
 		}
 	}
 
-	// Convert total usage
 	output.Total = TotalUsageJSON{
 		Conversations:    stats.TotalConversations,
 		InputTokens:      stats.Total.InputTokens,

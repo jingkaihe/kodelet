@@ -25,14 +25,12 @@ const (
 	DefaultBotMention = "@kodelet"
 )
 
-// IssueResolveConfig holds configuration for the issue-resolve command
 type IssueResolveConfig struct {
 	Provider   string
 	IssueURL   string
 	BotMention string
 }
 
-// NewIssueResolveConfig creates a new IssueResolveConfig with default values
 func NewIssueResolveConfig() *IssueResolveConfig {
 	return &IssueResolveConfig{
 		Provider:   GitHubProvider,
@@ -41,7 +39,6 @@ func NewIssueResolveConfig() *IssueResolveConfig {
 	}
 }
 
-// Validate validates the IssueResolveConfig and returns an error if invalid
 func (c *IssueResolveConfig) Validate() error {
 	if c.Provider != GitHubProvider {
 		return errors.Errorf("unsupported provider: %s, only '%s' is supported", c.Provider, GitHubProvider)
@@ -81,7 +78,6 @@ Examples:
 		ctx, cancel := context.WithCancel(cmd.Context())
 		defer cancel()
 
-		// Set up signal handling
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 		go func() {
@@ -109,10 +105,8 @@ Examples:
 		}
 		s := tools.NewBasicState(ctx, tools.WithLLMConfig(llmConfig), tools.WithMCPTools(mcpManager), tools.WithCustomTools(customManager))
 
-		// Get issue-resolve config from flags
 		config := getIssueResolveConfigFromFlags(cmd)
 
-		// Validate configuration
 		if err := config.Validate(); err != nil {
 			presenter.Error(err, "Configuration validation failed")
 			os.Exit(1)
@@ -130,7 +124,6 @@ Examples:
 			os.Exit(1)
 		}
 
-		// Load the built-in issue-resolve fragment
 		processor, err := fragments.NewFragmentProcessor()
 		if err != nil {
 			presenter.Error(err, "Failed to create fragment processor")
@@ -152,7 +145,6 @@ Examples:
 
 		prompt := fragment.Content
 
-		// Send to LLM using existing architecture
 		presenter.Info("Analyzing GitHub issue and determining appropriate resolution workflow...")
 		presenter.Separator()
 
@@ -164,7 +156,6 @@ Examples:
 		presenter.Info(out)
 		presenter.Separator()
 
-		// Display usage statistics
 		usageStats := presenter.ConvertUsageStats(&usage)
 		presenter.Stats(usageStats)
 	},
@@ -178,7 +169,6 @@ func init() {
 	issueResolveCmd.MarkFlagRequired("issue-url")
 }
 
-// getIssueResolveConfigFromFlags extracts issue-resolve configuration from command flags
 func getIssueResolveConfigFromFlags(cmd *cobra.Command) *IssueResolveConfig {
 	config := NewIssueResolveConfig()
 
@@ -195,7 +185,6 @@ func getIssueResolveConfigFromFlags(cmd *cobra.Command) *IssueResolveConfig {
 	return config
 }
 
-// validatePrerequisites checks that all necessary tools and authentication are in place
 func validatePrerequisites() error {
 	if !isGitRepository() {
 		return errors.New("not a git repository. Please run this command from a git repository")
