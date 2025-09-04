@@ -135,27 +135,3 @@ func TestSanitizeCommitMessage(t *testing.T) {
 		})
 	}
 }
-
-func TestConfirmCommitReturnsBothConfirmationAndMessage(t *testing.T) {
-	// Test that confirmCommit function signature returns both bool and string
-	// This ensures the fix for the edit message bug is in place
-	originalMessage := "feat: test commit message"
-	
-	// Since confirmCommit requires user input, we can't easily test the interactive behavior
-	// But we can verify the function signature is correct by checking it compiles
-	// and that it would return the expected types
-	
-	// This is a compilation test - if the function signature is wrong, this won't compile
-	var confirmed bool
-	var message string
-	
-	// We can't actually call confirmCommit in automated tests due to stdin requirements
-	// But this ensures the function has the correct signature
-	_ = func() (bool, string) {
-		return confirmed, message
-	}
-	
-	// Verify the original message format
-	assert.NotEmpty(t, originalMessage)
-	assert.Contains(t, originalMessage, "feat:")
-}
