@@ -1,5 +1,15 @@
 # Kodelet
 
+## 0.0.91.alpha (2025-09-04)
+
+### Bug Fixes
+
+**Commit Message Confirmation**: Fixed commit message editing workflow to properly use edited messages
+
+### Conversation Enhancements
+
+**Conversation List Default Limit**: Changed default limit for `kodelet conversation list` from 0 (unlimited) to 10 conversations for improved usability. Users can still set `--limit 0` to show all conversations.
+
 ## 0.0.90.alpha (2025-09-02)
 
 ### Custom Tools System

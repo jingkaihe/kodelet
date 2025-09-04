@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"os"
@@ -113,19 +112,24 @@ You must stage your changes (using 'git add') before running this command.`,
 		commitMsg = sanitizeCommitMessage(commitMsg)
 
 		presenter.Section("Generated Commit Message")
-		fmt.Printf("%s\n\n", commitMsg)
+		presenter.Info(commitMsg)
 
 		// Display usage statistics
 		usageStats := presenter.ConvertUsageStats(&usage)
 		presenter.Stats(usageStats)
 
 		// Confirm with user (unless --no-confirm is set)
-		if !config.NoConfirm && !confirmCommit(commitMsg) {
-			os.Exit(0)
+		finalCommitMsg := commitMsg
+		if !config.NoConfirm {
+			confirmed, editedMsg := confirmCommit(commitMsg)
+			if !confirmed {
+				os.Exit(0)
+			}
+			finalCommitMsg = editedMsg
 		}
 
 		// Create the commit
-		if err := createCommit(ctx, commitMsg, !config.NoSign, config); err != nil {
+		if err := createCommit(ctx, finalCommitMsg, !config.NoSign, config); err != nil {
 			presenter.Error(err, "Failed to create commit")
 			os.Exit(1)
 		}
@@ -143,7 +147,6 @@ func init() {
 	commitCmd.Flags().Bool("no-coauthor", defaults.NoCoauthor, "Disable coauthor attribution in commit messages")
 }
 
-// getCommitConfigFromFlags extracts commit configuration from command flags
 func getCommitConfigFromFlags(cmd *cobra.Command) *CommitConfig {
 	config := NewCommitConfig()
 
@@ -167,97 +170,81 @@ func getCommitConfigFromFlags(cmd *cobra.Command) *CommitConfig {
 }
 
 func sanitizeCommitMessage(message string) string {
-	// Remove the starting and ending backticks
 	message = strings.TrimPrefix(message, "```")
 	message = strings.TrimSuffix(message, "```")
 	return message
 }
 
-// isGitRepository checks if the current directory is a git repository
 func isGitRepository() bool {
 	cmd := exec.Command("git", "rev-parse", "--is-inside-work-tree")
 	err := cmd.Run()
 	return err == nil
 }
 
-// hasStagedChanges checks if there are staged changes ready to commit
 func hasStagedChanges() bool {
 	cmd := exec.Command("git", "diff", "--cached", "--quiet")
 	err := cmd.Run()
-	return err != nil // Non-zero exit code means there are staged changes
+	return err != nil
 }
 
-// confirmCommit asks the user to confirm the commit
-func confirmCommit(message string) bool {
-	reader := bufio.NewReader(os.Stdin)
-	fmt.Print("Create commit with this message? [Y/n/e (edit)]: ")
-	response, _ := reader.ReadString('\n')
-	response = strings.ToLower(strings.TrimSpace(response))
+func confirmCommit(message string) (bool, string) {
+	response := presenter.Prompt("Create commit with this message?", "Y/n/e (edit)")
+	response = strings.ToLower(response)
 
 	switch response {
 	case "", "y", "yes":
-		return true
+		return true, message
 	case "e", "edit":
-		// Allow user to edit the message
 		editedMsg := editMessage(message)
 		if editedMsg == "" {
-			fmt.Println("Commit message is empty. Aborting.")
-			return false
+			presenter.Warning("Commit message is empty. Aborting.")
+			return false, message
 		}
 		return confirmCommit(editedMsg)
 	}
 
-	fmt.Println("Commit aborted.")
-	return false
+	presenter.Info("Commit aborted.")
+	return false, message
 }
 
-// editMessage allows the user to edit the commit message
 func editMessage(message string) string {
-	// Create a temporary file
 	tempFile, err := os.CreateTemp("", "kodelet-commit-*.txt")
 	if err != nil {
-		fmt.Printf("Error creating temporary file: %s\n", err)
+		presenter.Error(err, "Failed to create temporary file")
 		return message
 	}
 	defer os.Remove(tempFile.Name())
 
-	// Write the message to the file
 	tempFile.WriteString(message)
 	tempFile.Close()
 
-	// Get the editor from git config or environment
 	editor := getEditor()
 
-	// Open the file in the editor
 	cmd := exec.Command(editor, tempFile.Name())
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	err = cmd.Run()
 	if err != nil {
-		fmt.Printf("Error opening editor: %s\n", err)
+		presenter.Error(err, "Failed to open editor")
 		return message
 	}
 
-	// Read the edited message
 	content, err := os.ReadFile(tempFile.Name())
 	if err != nil {
-		fmt.Printf("Error reading temporary file: %s\n", err)
+		presenter.Error(err, "Failed to read edited message")
 		return message
 	}
 
 	return string(content)
 }
 
-// getEditor gets the editor to use for editing the commit message
 func getEditor() string {
-	// Try to get the editor from git config
 	gitEditor, err := exec.Command("git", "config", "--get", "core.editor").Output()
 	if err == nil && len(gitEditor) > 0 {
 		return strings.TrimSpace(string(gitEditor))
 	}
 
-	// Try environment variables
 	if editor := os.Getenv("GIT_EDITOR"); editor != "" {
 		return editor
 	}
@@ -268,13 +255,10 @@ func getEditor() string {
 		return editor
 	}
 
-	// Default to vim
 	return "vim"
 }
 
-// createCommit creates a git commit with the provided message
 func createCommit(_ context.Context, message string, sign bool, config *CommitConfig) error {
-	// Add co-authorship attribution if enabled
 	if !config.NoCoauthor {
 		coauthorEnabled := viper.GetBool("commit.coauthor.enabled")
 		if coauthorEnabled {
@@ -284,26 +268,22 @@ func createCommit(_ context.Context, message string, sign bool, config *CommitCo
 		}
 	}
 
-	// Create a temporary file for the commit message
 	tempFile, err := os.CreateTemp("", "kodelet-commit-*.txt")
 	if err != nil {
 		return errors.Wrapf(err, "error creating temporary file")
 	}
 	defer os.Remove(tempFile.Name())
 
-	// Write the message to the file
 	if _, err := tempFile.WriteString(message); err != nil {
 		return errors.Wrapf(err, "error writing to temporary file")
 	}
 	tempFile.Close()
 
-	// Prepare git commit command
 	args := []string{"commit", "-F", tempFile.Name()}
 	if sign {
 		args = append(args, "-s")
 	}
 
-	// Execute git commit
 	cmd := exec.Command("git", args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

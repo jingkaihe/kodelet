@@ -43,7 +43,7 @@ func NewConversationListConfig() *ConversationListConfig {
 		EndDate:    "",
 		Search:     "",
 		Provider:   "",
-		Limit:      0,
+		Limit:      10,
 		Offset:     0,
 		SortBy:     "updated_at",
 		SortOrder:  "desc",
