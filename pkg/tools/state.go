@@ -19,6 +19,13 @@ var (
 	_ tooltypes.State = &BasicState{}
 )
 
+// contextInfo holds cached context file information for internal use
+type contextInfo struct {
+	Content      string    `json:"content"`
+	Path         string    `json:"path"`          // Full path to the context file  
+	LastModified time.Time `json:"last_modified"`
+}
+
 type BasicState struct {
 	lastAccessed        map[string]time.Time
 	backgroundProcesses []tooltypes.BackgroundProcess
@@ -31,7 +38,7 @@ type BasicState struct {
 	llmConfig           llmtypes.Config
 	
 	// Context discovery fields
-	contextCache        map[string]*tooltypes.ContextInfo
+	contextCache        map[string]*contextInfo
 	contextDiscovery    *ContextDiscovery
 }
 
@@ -53,7 +60,7 @@ func NewBasicState(ctx context.Context, opts ...BasicStateOption) *BasicState {
 		lastAccessed: make(map[string]time.Time),
 		sessionID:    uuid.New().String(),
 		todoFilePath: "",
-		contextCache: make(map[string]*tooltypes.ContextInfo),
+		contextCache: make(map[string]*contextInfo),
 		contextDiscovery: &ContextDiscovery{
 			workingDir:      workingDir,
 			homeDir:         filepath.Join(homeDir, ".kodelet"),
@@ -284,7 +291,7 @@ func (s *BasicState) GetRelevantContexts() map[string]string {
 }
 
 // findContextForPath searches up the directory tree from the given file path to find context files
-func (s *BasicState) findContextForPath(filePath string) *tooltypes.ContextInfo {
+func (s *BasicState) findContextForPath(filePath string) *contextInfo {
 	dir := filepath.Dir(filePath)
 	for dir != "/" && dir != "." && dir != filepath.Dir(dir) { // Stop at root or when no more parent
 		for _, pattern := range s.contextDiscovery.contextPatterns {
@@ -299,7 +306,7 @@ func (s *BasicState) findContextForPath(filePath string) *tooltypes.ContextInfo 
 }
 
 // loadWorkingDirContext loads context file from working directory
-func (s *BasicState) loadWorkingDirContext() *tooltypes.ContextInfo {
+func (s *BasicState) loadWorkingDirContext() *contextInfo {
 	for _, pattern := range s.contextDiscovery.contextPatterns {
 		if info := s.loadContextFile(filepath.Join(s.contextDiscovery.workingDir, pattern)); info != nil {
 			return info
@@ -309,7 +316,7 @@ func (s *BasicState) loadWorkingDirContext() *tooltypes.ContextInfo {
 }
 
 // loadHomeContext loads context file from user home directory
-func (s *BasicState) loadHomeContext() *tooltypes.ContextInfo {
+func (s *BasicState) loadHomeContext() *contextInfo {
 	for _, pattern := range s.contextDiscovery.contextPatterns {
 		if info := s.loadContextFile(filepath.Join(s.contextDiscovery.homeDir, pattern)); info != nil {
 			return info
@@ -319,7 +326,7 @@ func (s *BasicState) loadHomeContext() *tooltypes.ContextInfo {
 }
 
 // loadContextFile loads a context file with caching
-func (s *BasicState) loadContextFile(path string) *tooltypes.ContextInfo {
+func (s *BasicState) loadContextFile(path string) *contextInfo {
 	// Check if file exists and get modification time
 	stat, err := os.Stat(path)
 	if err != nil {
@@ -339,7 +346,7 @@ func (s *BasicState) loadContextFile(path string) *tooltypes.ContextInfo {
 		return nil
 	}
 	
-	info := &tooltypes.ContextInfo{
+	info := &contextInfo{
 		Content:      string(content),
 		Path:         path,
 		LastModified: stat.ModTime(),

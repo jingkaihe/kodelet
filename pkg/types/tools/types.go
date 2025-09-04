@@ -94,12 +94,6 @@ type BackgroundProcess struct {
 	Process   *os.Process `json:"-"` // Not serialized
 }
 
-type ContextInfo struct {
-	Content      string    `json:"content"`
-	Path         string    `json:"path"`          // Full path to the context file
-	LastModified time.Time `json:"last_modified"`
-}
-
 type State interface {
 	SetFileLastAccessed(path string, lastAccessed time.Time) error
 	GetFileLastAccessed(path string) (time.Time, error)
