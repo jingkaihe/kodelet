@@ -19,7 +19,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// RunConfig holds configuration for the run command
 type RunConfig struct {
 	ResumeConvID       string
 	Follow             bool
@@ -33,7 +32,6 @@ type RunConfig struct {
 	FragmentDirs       []string          // Additional fragment directories
 }
 
-// NewRunConfig creates a new RunConfig with default values
 func NewRunConfig() *RunConfig {
 	return &RunConfig{
 		ResumeConvID:       "",
@@ -49,7 +47,6 @@ func NewRunConfig() *RunConfig {
 	}
 }
 
-// processFragment handles fragment loading and processing
 func processFragment(ctx context.Context, config *RunConfig, args []string) (string, *fragments.Metadata, error) {
 	var validDirs []string
 	for _, dir := range config.FragmentDirs {
@@ -85,7 +82,6 @@ func processFragment(ctx context.Context, config *RunConfig, args []string) (str
 	return query, &fragment.Metadata, nil
 }
 
-// getQueryFromStdinOrArgs handles reading query from stdin or command line args
 func getQueryFromStdinOrArgs(args []string) (string, error) {
 	stat, _ := os.Stdin.Stat()
 	isPipe := (stat.Mode() & os.ModeCharDevice) == 0
@@ -111,7 +107,6 @@ func getQueryFromStdinOrArgs(args []string) (string, error) {
 	return strings.Join(args, " "), nil
 }
 
-// applyFragmentRestrictions applies fragment metadata restrictions to LLM config
 func applyFragmentRestrictions(llmConfig *llmtypes.Config, fragmentMetadata *fragments.Metadata) {
 	if fragmentMetadata == nil {
 		return
@@ -251,7 +246,6 @@ func init() {
 	runCmd.Flags().StringSlice("fragment-dirs", defaults.FragmentDirs, "Additional fragment directories (e.g., --fragment-dirs ./project-fragments --fragment-dirs ./team-fragments)")
 }
 
-// getRunConfigFromFlags extracts run configuration from command flags
 func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
 	config := NewRunConfig()
 

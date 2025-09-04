@@ -13,13 +13,11 @@ import (
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
 
-// plainChatUI implements the plain CLI interface
 func plainChatUI(ctx context.Context, options *ChatOptions) {
 	presenter.Section("Kodelet Chat Mode (Plain UI)")
 	presenter.Info("Type 'exit' or 'quit' to end the session")
 	presenter.Separator()
 
-	// Create a persistent thread with state
 	config, err := llm.GetConfigFromViper()
 	if err != nil {
 		presenter.Error(err, "Failed to load configuration")
@@ -31,7 +29,6 @@ func plainChatUI(ctx context.Context, options *ChatOptions) {
 		return
 	}
 
-	// Create the MCP manager from Viper configuration
 	mcpManager, err := tools.CreateMCPManagerFromViper(ctx)
 	if err != nil {
 		presenter.Error(err, "Failed to create MCP manager")
@@ -44,7 +41,6 @@ func plainChatUI(ctx context.Context, options *ChatOptions) {
 		return
 	}
 
-	// Create state with main tools
 	var stateOpts []tools.BasicStateOption
 	stateOpts = append(stateOpts, tools.WithLLMConfig(config))
 	stateOpts = append(stateOpts, tools.WithMCPTools(mcpManager))
@@ -52,7 +48,6 @@ func plainChatUI(ctx context.Context, options *ChatOptions) {
 	stateOpts = append(stateOpts, tools.WithMainTools())
 	thread.SetState(tools.NewBasicState(ctx, stateOpts...))
 
-	// Configure conversation persistence
 	if options.resumeConvID != "" {
 		thread.SetConversationID(options.resumeConvID)
 		presenter.Info(fmt.Sprintf("Resuming conversation: %s", options.resumeConvID))
@@ -66,7 +61,6 @@ func plainChatUI(ctx context.Context, options *ChatOptions) {
 		presenter.Info("Conversation persistence is disabled (--no-save)")
 	}
 
-	// Create a console handler
 	handler := &llmtypes.ConsoleMessageHandler{Silent: false}
 
 	reader := bufio.NewReader(os.Stdin)
@@ -79,20 +73,15 @@ func plainChatUI(ctx context.Context, options *ChatOptions) {
 			continue
 		}
 
-		// Trim whitespace and newlines
 		input = strings.TrimSpace(input)
 
-		// Check for exit commands
 		if input == "exit" || input == "quit" {
-			// Display final usage statistics before exiting
 			usage := thread.GetUsage()
 			presenter.Separator()
 
-			// Convert and display usage statistics using presenter
 			usageStats := presenter.ConvertUsageStats(&usage)
 			presenter.Stats(usageStats)
 
-			// Display conversation ID if persistence was enabled
 			if thread.IsPersisted() {
 				presenter.Section("Conversation Information")
 				presenter.Info(fmt.Sprintf("Conversation ID: %s", thread.GetConversationID()))
@@ -104,12 +93,10 @@ func plainChatUI(ctx context.Context, options *ChatOptions) {
 			return
 		}
 
-		// Skip empty inputs
 		if input == "" {
 			continue
 		}
 
-		// Process the query using the persistent thread
 		_, err = thread.SendMessage(ctx, input, handler, llmtypes.MessageOpt{
 			PromptCache:        true,
 			MaxTurns:           options.maxTurns,

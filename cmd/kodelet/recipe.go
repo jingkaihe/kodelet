@@ -15,13 +15,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// RecipeListConfig holds configuration for the recipe list command
 type RecipeListConfig struct {
 	ShowPath   bool
 	JSONOutput bool
 }
 
-// NewRecipeListConfig creates a new RecipeListConfig with default values
 func NewRecipeListConfig() *RecipeListConfig {
 	return &RecipeListConfig{
 		ShowPath:   false,
@@ -29,19 +27,16 @@ func NewRecipeListConfig() *RecipeListConfig {
 	}
 }
 
-// RecipeShowConfig holds configuration for the recipe show command
 type RecipeShowConfig struct {
 	Arguments map[string]string
 }
 
-// NewRecipeShowConfig creates a new RecipeShowConfig with default values
 func NewRecipeShowConfig() *RecipeShowConfig {
 	return &RecipeShowConfig{
 		Arguments: make(map[string]string),
 	}
 }
 
-// RecipeOutputFormat defines the format of the output
 type RecipeOutputFormat int
 
 const (
@@ -49,13 +44,11 @@ const (
 	RecipeJSONFormat
 )
 
-// RecipeListOutput represents the output for recipe list
 type RecipeListOutput struct {
 	Recipes []RecipeOutput
 	Format  RecipeOutputFormat
 }
 
-// RecipeOutput represents a single recipe for output
 type RecipeOutput struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
@@ -98,7 +91,6 @@ func (o *RecipeListOutput) Render(w io.Writer) error {
 	return o.renderTable(w)
 }
 
-// renderJSON renders the output in JSON format
 func (o *RecipeListOutput) renderJSON(w io.Writer) error {
 	type jsonOutput struct {
 		Recipes []RecipeOutput `json:"recipes"`
@@ -117,7 +109,6 @@ func (o *RecipeListOutput) renderJSON(w io.Writer) error {
 	return err
 }
 
-// renderTable renders the output in table format
 func (o *RecipeListOutput) renderTable(w io.Writer) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 
@@ -149,7 +140,6 @@ func (o *RecipeListOutput) renderTable(w io.Writer) error {
 	return tw.Flush()
 }
 
-// hasPath checks if any recipe has a path to display
 func (o *RecipeListOutput) hasPath() bool {
 	for _, recipe := range o.Recipes {
 		if recipe.Path != "" {

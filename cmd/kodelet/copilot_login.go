@@ -43,7 +43,6 @@ through Kodelet.`,
 }
 
 func runCopilotLogin(ctx context.Context) error {
-	// Generate device flow
 	presenter.Section("GitHub Copilot OAuth Login")
 	presenter.Info("Starting GitHub Copilot OAuth device flow...")
 
@@ -52,14 +51,12 @@ func runCopilotLogin(ctx context.Context) error {
 		return errors.Wrap(err, "failed to start device flow")
 	}
 
-	// Display instructions to user
 	fmt.Println()
 	presenter.Info("To authenticate with GitHub Copilot:")
 	fmt.Printf("   1. Open this URL in your browser: %s\n", deviceResp.VerificationURI)
 	fmt.Printf("   2. Enter this code when prompted: %s\n", deviceResp.UserCode)
 	fmt.Println()
 
-	// Try to open the browser automatically
 	presenter.Info("Opening your browser for authentication...")
 	if err := utils.OpenBrowser(deviceResp.VerificationURI); err != nil {
 		presenter.Warning("Could not open browser automatically. Please visit the URL manually.")
@@ -84,7 +81,6 @@ func runCopilotLogin(ctx context.Context) error {
 		return errors.Wrap(err, "failed to exchange token for Copilot access")
 	}
 
-	// Create credentials struct
 	creds := &auth.CopilotCredentials{
 		AccessToken:    tokenResp.AccessToken,
 		CopilotToken:   copilotToken.Token,
@@ -92,13 +88,11 @@ func runCopilotLogin(ctx context.Context) error {
 		CopilotExpires: copilotToken.ExpiresAt,
 	}
 
-	// Save credentials
 	_, err = auth.SaveCopilotCredentials(creds)
 	if err != nil {
 		return errors.Wrap(err, "failed to save credentials")
 	}
 
-	// Success message
 	fmt.Println()
 	presenter.Success("Authentication successful!")
 	fmt.Println()

@@ -17,7 +17,6 @@ import (
 	"github.com/spf13/viper"
 )
 
-// CommitConfig holds configuration for the commit command
 type CommitConfig struct {
 	NoSign     bool
 	Template   string
@@ -26,7 +25,6 @@ type CommitConfig struct {
 	NoCoauthor bool
 }
 
-// NewCommitConfig creates a new CommitConfig with default values
 func NewCommitConfig() *CommitConfig {
 	return &CommitConfig{
 		NoSign:     false,
@@ -44,7 +42,6 @@ var commitCmd = &cobra.Command{
 This command analyzes your 'git diff --cached' and uses AI to generate an appropriate commit message.
 You must stage your changes (using 'git add') before running this command.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		// Create a new state for the commit operation
 		ctx := cmd.Context()
 
 		llmConfig, err := llm.GetConfigFromViper()
@@ -54,37 +51,30 @@ You must stage your changes (using 'git add') before running this command.`,
 		}
 		s := tools.NewBasicState(ctx, tools.WithLLMConfig(llmConfig))
 
-		// Get commit config from flags
 		config := getCommitConfigFromFlags(cmd)
 
-		// Check if we're in a git repository
 		if !isGitRepository() {
 			presenter.Error(errors.New("not a git repository"), "Please run this command from a git repository")
 			os.Exit(1)
 		}
 
-		// Check if there are staged changes
 		if !hasStagedChanges() {
 			presenter.Error(errors.New("no staged changes found"), "Please stage your changes using 'git add' first")
 			os.Exit(1)
 		}
 
-		// Load the built-in commit fragment
 		processor, err := fragments.NewFragmentProcessor()
 		if err != nil {
 			presenter.Error(err, "Failed to create fragment processor")
 			os.Exit(1)
 		}
 
-		// Prepare template arguments
 		fragmentArgs := map[string]string{}
 
-		// Add template if provided
 		if config.Template != "" {
 			fragmentArgs["template"] = config.Template
 		}
 
-		// Add short flag if set
 		if config.Short {
 			fragmentArgs["short"] = "true"
 		}
@@ -102,7 +92,6 @@ You must stage your changes (using 'git add') before running this command.`,
 
 		presenter.Info("Analyzing staged changes and generating commit message...")
 
-		// Get the commit message using the Thread abstraction with usage stats
 		commitMsg, usage := llm.SendMessageAndGetTextWithUsage(ctx, s, prompt, llmConfig, true, llmtypes.MessageOpt{
 			UseWeakModel:    true,
 			PromptCache:     false,
@@ -118,7 +107,6 @@ You must stage your changes (using 'git add') before running this command.`,
 		usageStats := presenter.ConvertUsageStats(&usage)
 		presenter.Stats(usageStats)
 
-		// Confirm with user (unless --no-confirm is set)
 		finalCommitMsg := commitMsg
 		if !config.NoConfirm {
 			confirmed, editedMsg := confirmCommit(commitMsg)
@@ -128,7 +116,6 @@ You must stage your changes (using 'git add') before running this command.`,
 			finalCommitMsg = editedMsg
 		}
 
-		// Create the commit
 		if err := createCommit(ctx, finalCommitMsg, !config.NoSign, config); err != nil {
 			presenter.Error(err, "Failed to create commit")
 			os.Exit(1)

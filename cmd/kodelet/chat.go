@@ -16,7 +16,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// ChatOptions contains all options for the chat command
 type ChatOptions struct {
 	usePlainUI         bool
 	resumeConvID       string
@@ -41,9 +40,8 @@ func init() {
 	chatCmd.Flags().BoolVar(&chatOptions.disableAutoCompact, "disable-auto-compact", false, "Disable automatic context compacting")
 }
 
-// setupTUILogRedirection redirects logs to a file for TUI mode to prevent interference
+// Prevents TUI interference by redirecting logs to file
 func setupTUILogRedirection(conversationID string) (*os.File, string, error) {
-	// Create logs directory if it doesn't exist
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return nil, "", errors.Wrap(err, "failed to get home directory")
@@ -54,7 +52,6 @@ func setupTUILogRedirection(conversationID string) (*os.File, string, error) {
 		return nil, "", errors.Wrap(err, "failed to create logs directory")
 	}
 
-	// Create log file with conversation ID
 	logFileName := fmt.Sprintf("chat-%s.log", conversationID)
 	logFilePath := filepath.Join(logsDir, logFileName)
 
@@ -63,7 +60,6 @@ func setupTUILogRedirection(conversationID string) (*os.File, string, error) {
 		return nil, "", errors.Wrap(err, "failed to open log file")
 	}
 
-	// Redirect logger output to file
 	logger.L.Logger.SetOutput(logFile)
 
 	return logFile, logFilePath, nil

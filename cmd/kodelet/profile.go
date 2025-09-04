@@ -115,11 +115,9 @@ var profileShowCmd = &cobra.Command{
 		profileName := args[0]
 		format, _ := cmd.Flags().GetString("format")
 
-		// Get the current profile setting to restore later
 		currentProfile := viper.GetString("profile")
 		defer viper.Set("profile", currentProfile)
 
-		// Check if non-default profile exists before setting it
 		if profileName != "default" {
 			globalProfiles := getGlobalProfiles()
 			repoProfiles := getRepoProfiles()
@@ -141,26 +139,21 @@ var profileShowCmd = &cobra.Command{
 			}
 		}
 
-		// Set the profile (empty string for "default")
 		if profileName == "default" {
 			viper.Set("profile", "")
 		} else {
 			viper.Set("profile", profileName)
 		}
 
-		// Get the merged configuration using the more robust method
 		config, err := llm.GetConfigFromViper()
 		if err != nil {
 			return errors.Wrap(err, "failed to load configuration")
 		}
 
-		// Clear metadata fields that aren't part of the effective configuration
-		// The omitempty tags will ensure these don't appear in output
 		config.Profile = ""
 		config.Profiles = nil
 		config.Aliases = nil
 
-		// Format and output based on flag
 		var output []byte
 
 		switch format {
@@ -194,7 +187,6 @@ Use "default" to use base configuration without any profile.`,
 		profileName := args[0]
 		global, _ := cmd.Flags().GetBool("global")
 
-		// Validate non-default profiles exist
 		if profileName != "default" {
 			mergedProfiles := getMergedProfiles()
 			if _, exists := mergedProfiles[profileName]; !exists {

@@ -17,7 +17,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// PRRespondConfig holds configuration for the pr-respond command
 type PRRespondConfig struct {
 	Provider        string
 	PRURL           string
@@ -25,7 +24,6 @@ type PRRespondConfig struct {
 	IssueCommentID  string
 }
 
-// NewPRRespondConfig creates a new PRRespondConfig with default values
 func NewPRRespondConfig() *PRRespondConfig {
 	return &PRRespondConfig{
 		Provider:        "github",
@@ -35,7 +33,6 @@ func NewPRRespondConfig() *PRRespondConfig {
 	}
 }
 
-// Validate validates the PRRespondConfig and returns an error if invalid
 func (c *PRRespondConfig) Validate() error {
 	if c.Provider != "github" {
 		return errors.New(fmt.Sprintf("unsupported provider: %s, only 'github' is supported", c.Provider))
@@ -95,7 +92,6 @@ Examples:
 		ctx, cancel := context.WithCancel(cmd.Context())
 		defer cancel()
 
-		// Set up signal handling
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 		go func() {
@@ -123,16 +119,13 @@ Examples:
 		}
 		s := tools.NewBasicState(ctx, tools.WithLLMConfig(llmConfig), tools.WithMCPTools(mcpManager), tools.WithCustomTools(customManager))
 
-		// Get pr-respond config from flags
 		config := getPRRespondConfigFromFlags(cmd)
 
-		// Validate configuration
 		if err := config.Validate(); err != nil {
 			presenter.Error(err, "Configuration validation failed")
 			os.Exit(1)
 		}
 
-		// Prerequisites checking
 		if !isGitRepository() {
 			presenter.Error(errors.New("not a git repository"), "Please run this command from a git repository")
 			os.Exit(1)
@@ -155,21 +148,18 @@ Examples:
 			os.Exit(1)
 		}
 
-		// Parse GitHub URL to extract components
 		owner, repo, prNumber, err := parseGitHubURL(config.PRURL)
 		if err != nil {
 			presenter.Error(err, "Failed to parse GitHub URL")
 			os.Exit(1)
 		}
 
-		// Load the built-in pr_respond fragment
 		processor, err := fragments.NewFragmentProcessor()
 		if err != nil {
 			presenter.Error(err, "Failed to create fragment processor")
 			os.Exit(1)
 		}
 
-		// Prepare template arguments
 		fragmentArgs := map[string]string{
 			"pr_url":    config.PRURL,
 			"owner":     owner,
@@ -178,7 +168,6 @@ Examples:
 			"bin":       bin,
 		}
 
-		// Add comment IDs if provided
 		if config.ReviewCommentID != "" {
 			fragmentArgs["review_id"] = config.ReviewCommentID
 		}
@@ -197,7 +186,6 @@ Examples:
 
 		prompt := fragment.Content
 
-		// Send to LLM using existing architecture
 		presenter.Info("Analyzing PR comment and determining appropriate response workflow...")
 		presenter.Separator()
 
@@ -209,7 +197,6 @@ Examples:
 		fmt.Println(out)
 		presenter.Separator()
 
-		// Display usage statistics
 		usageStats := presenter.ConvertUsageStats(&usage)
 		presenter.Stats(usageStats)
 	},
@@ -224,7 +211,6 @@ func init() {
 	prRespondCmd.MarkFlagRequired("pr-url")
 }
 
-// getPRRespondConfigFromFlags extracts pr-respond configuration from command flags
 func getPRRespondConfigFromFlags(cmd *cobra.Command) *PRRespondConfig {
 	config := NewPRRespondConfig()
 
