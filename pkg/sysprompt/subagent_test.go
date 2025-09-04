@@ -2,11 +2,9 @@ package sysprompt
 
 import (
 	"testing"
-	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	"github.com/jingkaihe/kodelet/pkg/types/llm"
-	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -14,7 +12,7 @@ import (
 // TestSubAgentPrompt verifies that key elements from templates appear in the generated subagent prompt
 func TestSubAgentPrompt(t *testing.T) {
 	// Generate a subagent prompt
-	prompt := SubAgentPrompt("claude-sonnet-4-20250514", llm.Config{}, map[string]tooltypes.ContextInfo{})
+	prompt := SubAgentPrompt("claude-sonnet-4-20250514", llm.Config{}, map[string]string{})
 
 	// Define expected fragments that should appear in the prompt
 	expectedFragments := []string{
@@ -59,7 +57,7 @@ func TestSubAgentPrompt(t *testing.T) {
 
 // TestSubAgentPromptBashBannedCommands verifies that banned commands appear in the default subagent prompt
 func TestSubAgentPromptBashBannedCommands(t *testing.T) {
-	prompt := SubAgentPrompt("claude-sonnet-4-20250514", llm.Config{}, map[string]tooltypes.ContextInfo{})
+	prompt := SubAgentPrompt("claude-sonnet-4-20250514", llm.Config{}, map[string]string{})
 
 	// Should contain bash command restrictions section
 	assert.Contains(t, prompt, "Bash Command Restrictions", "Expected subagent prompt to contain 'Bash Command Restrictions' section")
@@ -148,17 +146,9 @@ func TestSubAgentPromptContextConsistency(t *testing.T) {
 
 // TestSubAgentPrompt_WithContexts verifies that provided contexts are properly included in subagent prompt
 func TestSubAgentPrompt_WithContexts(t *testing.T) {
-	contexts := map[string]tooltypes.ContextInfo{
-		"/path/to/project/AGENTS.md": {
-			Content:      "# Project Context\nGeneral project guidelines and conventions.",
-			Path:         "/path/to/project/AGENTS.md",
-			LastModified: time.Now(),
-		},
-		"/home/user/.kodelet/AGENTS.md": {
-			Content:      "# User Preferences\nPersonal coding style and preferences.",
-			Path:         "/home/user/.kodelet/AGENTS.md",
-			LastModified: time.Now(),
-		},
+	contexts := map[string]string{
+		"/path/to/project/AGENTS.md":   "# Project Context\nGeneral project guidelines and conventions.",
+		"/home/user/.kodelet/AGENTS.md": "# User Preferences\nPersonal coding style and preferences.",
 	}
 
 	prompt := SubAgentPrompt("claude-sonnet-4-20250514", llm.Config{}, contexts)
@@ -184,7 +174,7 @@ func TestSubAgentPrompt_WithContexts(t *testing.T) {
 
 // TestSubAgentPrompt_WithEmptyContexts verifies fallback behavior with empty contexts
 func TestSubAgentPrompt_WithEmptyContexts(t *testing.T) {
-	emptyContexts := map[string]tooltypes.ContextInfo{}
+	emptyContexts := map[string]string{}
 	prompt := SubAgentPrompt("claude-sonnet-4-20250514", llm.Config{}, emptyContexts)
 
 	// Should still generate a valid subagent prompt 
@@ -210,11 +200,8 @@ func TestSubAgentPrompt_WithNilContexts(t *testing.T) {
 // TestSubAgentPrompt_ContextFormattingConsistency tests that contexts are formatted the same as system prompt
 func TestSubAgentPrompt_ContextFormattingConsistency(t *testing.T) {
 	t.Run("context_with_code_blocks", func(t *testing.T) {
-		contexts := map[string]tooltypes.ContextInfo{
-			"/project/docs/CODING_STYLE.md": {
-				Content: "# Coding Style\n\n```go\nfunc Example() {\n    fmt.Println(\"hello\")\n}\n```\n\nUse proper indentation.",
-				Path:    "/project/docs/CODING_STYLE.md",
-			},
+		contexts := map[string]string{
+			"/project/docs/CODING_STYLE.md": "# Coding Style\n\n```go\nfunc Example() {\n    fmt.Println(\"hello\")\n}\n```\n\nUse proper indentation.",
 		}
 
 		prompt := SubAgentPrompt("claude-sonnet-4-20250514", llm.Config{}, contexts)
@@ -228,15 +215,9 @@ func TestSubAgentPrompt_ContextFormattingConsistency(t *testing.T) {
 	})
 
 	t.Run("multiple_contexts_in_subagent", func(t *testing.T) {
-		contexts := map[string]tooltypes.ContextInfo{
-			"/project/AGENTS.md": {
-				Content: "# Main Project\nThis is the main project context for subagents.",
-				Path:    "/project/AGENTS.md",
-			},
-			"/project/modules/auth/KODELET.md": {
-				Content: "# Auth Module\nAuthentication-specific guidelines for subagents.",
-				Path:    "/project/modules/auth/KODELET.md",
-			},
+		contexts := map[string]string{
+			"/project/AGENTS.md":               "# Main Project\nThis is the main project context for subagents.",
+			"/project/modules/auth/KODELET.md": "# Auth Module\nAuthentication-specific guidelines for subagents.",
 		}
 
 		prompt := SubAgentPrompt("gpt-4", llm.Config{}, contexts)
@@ -256,11 +237,8 @@ func TestSubAgentPrompt_ContextFormattingConsistency(t *testing.T) {
 
 // TestSubAgentPrompt_FeatureConsistency tests that subagent prompts maintain consistency with system prompts for context handling
 func TestSubAgentPrompt_FeatureConsistency(t *testing.T) {
-	contexts := map[string]tooltypes.ContextInfo{
-		"/shared/context.md": {
-			Content: "# Shared Context\nThis content should appear in both system and subagent prompts.",
-			Path:    "/shared/context.md",
-		},
+	contexts := map[string]string{
+		"/shared/context.md": "# Shared Context\nThis content should appear in both system and subagent prompts.",
 	}
 
 	llmConfig := llm.Config{}

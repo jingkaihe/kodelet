@@ -117,7 +117,7 @@ type State interface {
 	RemoveBackgroundProcess(pid int) error
 
 	// Context discovery
-	GetRelevantContexts() map[string]ContextInfo
+	GetRelevantContexts() map[string]string
 
 	// LLM configuration access
 	GetLLMConfig() interface{} // Returns llmtypes.Config but using interface{} to avoid circular import

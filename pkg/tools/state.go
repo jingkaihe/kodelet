@@ -257,27 +257,27 @@ func (s *BasicState) configureTools() {
 }
 
 // GetRelevantContexts returns all relevant context files based on file access patterns
-func (s *BasicState) GetRelevantContexts() map[string]tooltypes.ContextInfo {
+func (s *BasicState) GetRelevantContexts() map[string]string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	
-	contexts := make(map[string]tooltypes.ContextInfo)
+	contexts := make(map[string]string)
 	
 	// 1. Add working directory context
 	if ctx := s.loadWorkingDirContext(); ctx != nil {
-		contexts[ctx.Path] = *ctx
+		contexts[ctx.Path] = ctx.Content
 	}
 	
 	// 2. Add access-based contexts
 	for path := range s.lastAccessed {
 		if ctx := s.findContextForPath(path); ctx != nil {
-			contexts[ctx.Path] = *ctx
+			contexts[ctx.Path] = ctx.Content
 		}
 	}
 	
 	// 3. Add home directory context
 	if ctx := s.loadHomeContext(); ctx != nil {
-		contexts[ctx.Path] = *ctx
+		contexts[ctx.Path] = ctx.Content
 	}
 	
 	return contexts

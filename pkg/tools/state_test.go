@@ -257,8 +257,7 @@ func TestBasicState_GetRelevantContexts(t *testing.T) {
 		
 		assert.Len(t, contexts, 1, "Should find exactly 1 context file")
 		assert.Contains(t, contexts, rootAgents, "Should contain root AGENTS.md")
-		assert.Equal(t, "# Root project context", contexts[rootAgents].Content)
-		assert.Equal(t, rootAgents, contexts[rootAgents].Path)
+		assert.Equal(t, "# Root project context", contexts[rootAgents])
 	})
 
 	t.Run("access_based_context_discovery", func(t *testing.T) {
@@ -271,8 +270,8 @@ func TestBasicState_GetRelevantContexts(t *testing.T) {
 		assert.Len(t, contexts, 2, "Should find exactly 2 context files")
 		assert.Contains(t, contexts, rootAgents, "Should contain root AGENTS.md")
 		assert.Contains(t, contexts, subKodelet, "Should contain submodule KODELET.md")
-		assert.Equal(t, "# Root project context", contexts[rootAgents].Content)
-		assert.Equal(t, "# Submodule context", contexts[subKodelet].Content)
+		assert.Equal(t, "# Root project context", contexts[rootAgents])
+		assert.Equal(t, "# Submodule context", contexts[subKodelet])
 	})
 
 	t.Run("deep_nested_access", func(t *testing.T) {
@@ -284,7 +283,7 @@ func TestBasicState_GetRelevantContexts(t *testing.T) {
 		
 		// Should still find the submodule context by walking up the tree
 		assert.Contains(t, contexts, subKodelet, "Should find submodule KODELET.md by walking up")
-		assert.Equal(t, "# Submodule context", contexts[subKodelet].Content)
+		assert.Equal(t, "# Submodule context", contexts[subKodelet])
 	})
 }
 
@@ -308,7 +307,7 @@ func TestBasicState_ContextFilePreference(t *testing.T) {
 	
 	assert.Len(t, contexts, 1, "Should find exactly 1 context file")
 	assert.Contains(t, contexts, agentsFile, "Should prefer AGENTS.md over KODELET.md")
-	assert.Equal(t, "# Agents context", contexts[agentsFile].Content)
+	assert.Equal(t, "# Agents context", contexts[agentsFile])
 }
 
 func TestBasicState_ContextFileCaching(t *testing.T) {
@@ -329,13 +328,13 @@ func TestBasicState_ContextFileCaching(t *testing.T) {
 	t.Run("initial_load", func(t *testing.T) {
 		contexts := state.GetRelevantContexts()
 		assert.Len(t, contexts, 1)
-		assert.Equal(t, initialContent, contexts[contextFile].Content)
+		assert.Equal(t, initialContent, contexts[contextFile])
 	})
 
 	t.Run("cached_content", func(t *testing.T) {
 		// Should return cached content without reading from disk
 		contexts := state.GetRelevantContexts()
-		assert.Equal(t, initialContent, contexts[contextFile].Content)
+		assert.Equal(t, initialContent, contexts[contextFile])
 	})
 
 	t.Run("cache_invalidation", func(t *testing.T) {
@@ -346,7 +345,7 @@ func TestBasicState_ContextFileCaching(t *testing.T) {
 		
 		// Should detect the change and reload
 		contexts := state.GetRelevantContexts()
-		assert.Equal(t, newContent, contexts[contextFile].Content, "Should reload modified file")
+		assert.Equal(t, newContent, contexts[contextFile], "Should reload modified file")
 	})
 }
 
@@ -377,7 +376,7 @@ func TestBasicState_HomeDirectoryContext(t *testing.T) {
 		
 		assert.Len(t, contexts, 1, "Should find home directory context")
 		assert.Contains(t, contexts, homeContext, "Should contain home AGENTS.md")
-		assert.Equal(t, "# User home context", contexts[homeContext].Content)
+		assert.Equal(t, "# User home context", contexts[homeContext])
 	})
 
 	t.Run("multiple_context_sources", func(t *testing.T) {
@@ -451,31 +450,8 @@ func TestBasicState_ContextDiscoveryEdgeCases(t *testing.T) {
 		contexts := state.GetRelevantContexts()
 		
 		assert.Contains(t, contexts, otherContext, "Should find context in accessed file's directory")
-		assert.Equal(t, "# Other context", contexts[otherContext].Content)
+		assert.Equal(t, "# Other context", contexts[otherContext])
 	})
 }
 
-func TestBasicState_ContextFileLastModified(t *testing.T) {
-	tmpDir := t.TempDir()
-	contextFile := filepath.Join(tmpDir, "AGENTS.md")
-	
-	// Create context file
-	require.NoError(t, os.WriteFile(contextFile, []byte("# Test content"), 0644))
-	
-	oldWd, _ := os.Getwd()
-	defer os.Chdir(oldWd)
-	require.NoError(t, os.Chdir(tmpDir))
 
-	state := NewBasicState(context.Background())
-	contexts := state.GetRelevantContexts()
-	
-	// Check that LastModified field is populated
-	assert.Len(t, contexts, 1)
-	contextInfo := contexts[contextFile]
-	assert.False(t, contextInfo.LastModified.IsZero(), "LastModified should be set")
-	
-	// Get file info for comparison
-	fileInfo, err := os.Stat(contextFile)
-	require.NoError(t, err)
-	assert.True(t, contextInfo.LastModified.Equal(fileInfo.ModTime()), "LastModified should match file's modification time")
-}

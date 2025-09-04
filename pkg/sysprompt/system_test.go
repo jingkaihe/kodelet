@@ -2,11 +2,9 @@ package sysprompt
 
 import (
 	"testing"
-	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	"github.com/jingkaihe/kodelet/pkg/types/llm"
-	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -14,7 +12,7 @@ import (
 // TestSystemPrompt verifies that key elements from templates appear in the generated system prompt
 func TestSystemPrompt(t *testing.T) {
 	// Generate a system prompt
-	prompt := SystemPrompt("claude-sonnet-4-20250514", llm.Config{}, map[string]tooltypes.ContextInfo{})
+	prompt := SystemPrompt("claude-sonnet-4-20250514", llm.Config{}, map[string]string{})
 
 	// Define expected fragments that should appear in the prompt
 	expectedFragments := []string{
@@ -52,7 +50,7 @@ func TestSystemPrompt(t *testing.T) {
 
 // TestSystemPromptBashBannedCommands verifies that banned commands appear in the default system prompt
 func TestSystemPromptBashBannedCommands(t *testing.T) {
-	prompt := SystemPrompt("claude-sonnet-4-20250514", llm.Config{}, map[string]tooltypes.ContextInfo{})
+	prompt := SystemPrompt("claude-sonnet-4-20250514", llm.Config{}, map[string]string{})
 
 	// Should contain bash command restrictions section
 	assert.Contains(t, prompt, "Bash Command Restrictions", "Expected system prompt to contain 'Bash Command Restrictions' section")
@@ -129,17 +127,9 @@ func TestSystemPromptBashEmptyAllowedCommands(t *testing.T) {
 
 // TestSystemPrompt_WithContexts verifies that provided contexts are properly included in system prompt
 func TestSystemPrompt_WithContexts(t *testing.T) {
-	contexts := map[string]tooltypes.ContextInfo{
-		"/path/to/project/AGENTS.md": {
-			Content:      "# Project Guidelines\nThis is the main project context.",
-			Path:         "/path/to/project/AGENTS.md",
-			LastModified: time.Now(),
-		},
-		"/path/to/project/module/KODELET.md": {
-			Content:      "# Module Specific\nThis module handles authentication.",
-			Path:         "/path/to/project/module/KODELET.md", 
-			LastModified: time.Now(),
-		},
+	contexts := map[string]string{
+		"/path/to/project/AGENTS.md":        "# Project Guidelines\nThis is the main project context.",
+		"/path/to/project/module/KODELET.md": "# Module Specific\nThis module handles authentication.",
 	}
 
 	prompt := SystemPrompt("claude-sonnet-4-20250514", llm.Config{}, contexts)
@@ -162,7 +152,7 @@ func TestSystemPrompt_WithContexts(t *testing.T) {
 
 // TestSystemPrompt_WithEmptyContexts verifies fallback behavior with empty contexts
 func TestSystemPrompt_WithEmptyContexts(t *testing.T) {
-	emptyContexts := map[string]tooltypes.ContextInfo{}
+	emptyContexts := map[string]string{}
 	prompt := SystemPrompt("claude-sonnet-4-20250514", llm.Config{}, emptyContexts)
 
 	// Should still generate a valid prompt 
@@ -188,11 +178,8 @@ func TestSystemPrompt_WithNilContexts(t *testing.T) {
 // TestSystemPrompt_ContextFormattingEdgeCases tests edge cases in context formatting
 func TestSystemPrompt_ContextFormattingEdgeCases(t *testing.T) {
 	t.Run("context_with_special_characters", func(t *testing.T) {
-		contexts := map[string]tooltypes.ContextInfo{
-			"/path/with spaces/AGENTS.md": {
-				Content: "Content with <tags> & special chars: quotes \"test\" and 'test'",
-				Path:    "/path/with spaces/AGENTS.md",
-			},
+		contexts := map[string]string{
+			"/path/with spaces/AGENTS.md": "Content with <tags> & special chars: quotes \"test\" and 'test'",
 		}
 
 		prompt := SystemPrompt("claude-sonnet-4-20250514", llm.Config{}, contexts)
@@ -203,11 +190,8 @@ func TestSystemPrompt_ContextFormattingEdgeCases(t *testing.T) {
 	})
 
 	t.Run("empty_context_content", func(t *testing.T) {
-		contexts := map[string]tooltypes.ContextInfo{
-			"/empty/AGENTS.md": {
-				Content: "",
-				Path:    "/empty/AGENTS.md",
-			},
+		contexts := map[string]string{
+			"/empty/AGENTS.md": "",
 		}
 
 		prompt := SystemPrompt("claude-sonnet-4-20250514", llm.Config{}, contexts)
@@ -217,19 +201,10 @@ func TestSystemPrompt_ContextFormattingEdgeCases(t *testing.T) {
 	})
 
 	t.Run("multiple_contexts_ordering", func(t *testing.T) {
-		contexts := map[string]tooltypes.ContextInfo{
-			"/z/last.md": {
-				Content: "Last content",
-				Path:    "/z/last.md",
-			},
-			"/a/first.md": {
-				Content: "First content", 
-				Path:    "/a/first.md",
-			},
-			"/m/middle.md": {
-				Content: "Middle content",
-				Path:    "/m/middle.md",
-			},
+		contexts := map[string]string{
+			"/z/last.md":   "Last content",
+			"/a/first.md":  "First content",
+			"/m/middle.md": "Middle content",
 		}
 
 		prompt := SystemPrompt("claude-sonnet-4-20250514", llm.Config{}, contexts)
