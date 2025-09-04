@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.0.91.alpha (2025-09-04)
+
+### Bug Fixes
+
+**Commit Message Confirmation**: Fixed commit message editing workflow to properly use edited messages
+
 ## 0.0.90.alpha (2025-09-02)
 
 ### Custom Tools System
