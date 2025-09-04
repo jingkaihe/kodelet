@@ -120,12 +120,17 @@ You must stage your changes (using 'git add') before running this command.`,
 		presenter.Stats(usageStats)
 
 		// Confirm with user (unless --no-confirm is set)
-		if !config.NoConfirm && !confirmCommit(commitMsg) {
-			os.Exit(0)
+		finalCommitMsg := commitMsg
+		if !config.NoConfirm {
+			confirmed, editedMsg := confirmCommit(commitMsg)
+			if !confirmed {
+				os.Exit(0)
+			}
+			finalCommitMsg = editedMsg
 		}
 
 		// Create the commit
-		if err := createCommit(ctx, commitMsg, !config.NoSign, config); err != nil {
+		if err := createCommit(ctx, finalCommitMsg, !config.NoSign, config); err != nil {
 			presenter.Error(err, "Failed to create commit")
 			os.Exit(1)
 		}
@@ -187,8 +192,8 @@ func hasStagedChanges() bool {
 	return err != nil // Non-zero exit code means there are staged changes
 }
 
-// confirmCommit asks the user to confirm the commit
-func confirmCommit(message string) bool {
+// confirmCommit asks the user to confirm the commit and returns (confirmed, finalMessage)
+func confirmCommit(message string) (bool, string) {
 	reader := bufio.NewReader(os.Stdin)
 	fmt.Print("Create commit with this message? [Y/n/e (edit)]: ")
 	response, _ := reader.ReadString('\n')
@@ -196,19 +201,19 @@ func confirmCommit(message string) bool {
 
 	switch response {
 	case "", "y", "yes":
-		return true
+		return true, message
 	case "e", "edit":
 		// Allow user to edit the message
 		editedMsg := editMessage(message)
 		if editedMsg == "" {
 			fmt.Println("Commit message is empty. Aborting.")
-			return false
+			return false, message
 		}
 		return confirmCommit(editedMsg)
 	}
 
 	fmt.Println("Commit aborted.")
-	return false
+	return false, message
 }
 
 // editMessage allows the user to edit the commit message
