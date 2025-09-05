@@ -400,8 +400,154 @@ func TestBasicState_ContextDiscoveryEdgeCases(t *testing.T) {
 
 		contexts := state.DiscoverContexts()
 
-		assert.Contains(t, contexts, otherContext)
-		assert.Equal(t, "# Other context", contexts[otherContext])
+		// With the new behavior, files outside working directory should NOT have their contexts discovered
+		assert.NotContains(t, contexts, otherContext)
+		assert.Empty(t, contexts) // Should only find working directory contexts (none in this case)
+	})
+}
+
+func TestBasicState_ContextTraversalAndDeduplication(t *testing.T) {
+	tmpDir := t.TempDir()
+	
+	// Set up directory structure: tmpDir/foo/bar/baz
+	fooDir := filepath.Join(tmpDir, "foo")
+	barDir := filepath.Join(fooDir, "bar")
+	bazDir := filepath.Join(barDir, "baz")
+	require.NoError(t, os.MkdirAll(bazDir, 0755))
+	
+	// Create context files at different levels
+	fooAgents := filepath.Join(fooDir, "AGENTS.md")
+	barAgents := filepath.Join(barDir, "AGENTS.md") 
+	bazAgents := filepath.Join(bazDir, "AGENTS.md")
+	
+	require.NoError(t, os.WriteFile(fooAgents, []byte("# Foo context"), 0644))
+	require.NoError(t, os.WriteFile(barAgents, []byte("# Bar context"), 0644))
+	require.NoError(t, os.WriteFile(bazAgents, []byte("# Baz context"), 0644))
+	
+	// Set working directory to tmpDir/foo
+	oldWd, _ := os.Getwd()
+	defer os.Chdir(oldWd)
+	require.NoError(t, os.Chdir(fooDir))
+	
+	ctx := context.Background()
+	state := NewBasicState(ctx)
+	
+	t.Run("single_deep_file_access", func(t *testing.T) {
+		// Access file in baz directory
+		bazFile := filepath.Join(bazDir, "test.go")
+		state.SetFileLastAccessed(bazFile, time.Now())
+		
+		contexts := state.DiscoverContexts()
+		
+		// Should find:
+		// 1. Working directory context: fooAgents (from step 1 of DiscoverContexts)
+		// 2. Traversal contexts: bazAgents, barAgents (from step 2 - traverse up from baz to working dir boundary)
+		expectedContexts := []string{fooAgents, barAgents, bazAgents}
+		
+		assert.Len(t, contexts, len(expectedContexts), "Should find exactly %d contexts", len(expectedContexts))
+		for _, expected := range expectedContexts {
+			assert.Contains(t, contexts, expected, "Should contain context file: %s", expected)
+		}
+		
+		assert.Equal(t, "# Foo context", contexts[fooAgents])
+		assert.Equal(t, "# Bar context", contexts[barAgents]) 
+		assert.Equal(t, "# Baz context", contexts[bazAgents])
+	})
+	
+	t.Run("multiple_file_access_with_deduplication", func(t *testing.T) {
+		// Clear previous state
+		state = NewBasicState(ctx)
+		
+		// Access files in both bar and baz directories
+		barFile := filepath.Join(barDir, "service.go")
+		bazFile := filepath.Join(bazDir, "handler.go")
+		state.SetFileLastAccessed(barFile, time.Now())
+		state.SetFileLastAccessed(bazFile, time.Now())
+		
+		contexts := state.DiscoverContexts()
+		
+		// Should find:
+		// 1. Working directory context: fooAgents (from step 1)
+		// 2. From barFile traversal: barAgents (stops at working dir boundary)
+		// 3. From bazFile traversal: bazAgents, barAgents (but barAgents already found, should not duplicate)
+		expectedContexts := []string{fooAgents, barAgents, bazAgents}
+		
+		assert.Len(t, contexts, len(expectedContexts), "Should find exactly %d unique contexts (no duplicates)", len(expectedContexts))
+		for _, expected := range expectedContexts {
+			assert.Contains(t, contexts, expected, "Should contain context file: %s", expected)
+		}
+		
+		// Verify content is correct
+		assert.Equal(t, "# Foo context", contexts[fooAgents])
+		assert.Equal(t, "# Bar context", contexts[barAgents])
+		assert.Equal(t, "# Baz context", contexts[bazAgents])
+	})
+	
+	t.Run("traversal_stops_at_working_directory_boundary", func(t *testing.T) {
+		// Create context file above working directory
+		rootAgents := filepath.Join(tmpDir, "AGENTS.md")
+		require.NoError(t, os.WriteFile(rootAgents, []byte("# Root context"), 0644))
+		
+		// Clear and test
+		state = NewBasicState(ctx)
+		bazFile := filepath.Join(bazDir, "deep.go")
+		state.SetFileLastAccessed(bazFile, time.Now())
+		
+		contexts := state.DiscoverContexts()
+		
+		// Should NOT find rootAgents because traversal stops at working directory boundary
+		assert.NotContains(t, contexts, rootAgents, "Should NOT traverse above working directory")
+		
+		// Should still find the others
+		expectedContexts := []string{fooAgents, barAgents, bazAgents}
+		assert.Len(t, contexts, len(expectedContexts))
+		for _, expected := range expectedContexts {
+			assert.Contains(t, contexts, expected)
+		}
+		
+		// Clean up
+		os.Remove(rootAgents)
+	})
+	
+	t.Run("missing_intermediate_context_files", func(t *testing.T) {
+		// Remove bar context file to test gaps in hierarchy
+		require.NoError(t, os.Remove(barAgents))
+		
+		state = NewBasicState(ctx)
+		bazFile := filepath.Join(bazDir, "missing.go")
+		state.SetFileLastAccessed(bazFile, time.Now())
+		
+		contexts := state.DiscoverContexts()
+		
+		// Should find fooAgents (working dir) and bazAgents (direct), but skip missing barAgents
+		expectedContexts := []string{fooAgents, bazAgents}
+		assert.Len(t, contexts, len(expectedContexts))
+		assert.Contains(t, contexts, fooAgents)
+		assert.Contains(t, contexts, bazAgents)
+		assert.NotContains(t, contexts, barAgents, "Should not find removed context file")
+		
+		// Restore for other tests
+		require.NoError(t, os.WriteFile(barAgents, []byte("# Bar context"), 0644))
+	})
+	
+	t.Run("context_file_precedence_during_traversal", func(t *testing.T) {
+		// Add KODELET.md alongside AGENTS.md in bar directory
+		barKodelet := filepath.Join(barDir, "KODELET.md")
+		require.NoError(t, os.WriteFile(barKodelet, []byte("# Bar Kodelet context"), 0644))
+		
+		state = NewBasicState(ctx)
+		bazFile := filepath.Join(bazDir, "precedence.go")
+		state.SetFileLastAccessed(bazFile, time.Now())
+		
+		contexts := state.DiscoverContexts()
+		
+		// Should find AGENTS.md (higher precedence) in bar directory, not KODELET.md
+		assert.Contains(t, contexts, barAgents, "Should find AGENTS.md (higher precedence)")
+		assert.NotContains(t, contexts, barKodelet, "Should not find KODELET.md (lower precedence)")
+		assert.Equal(t, "# Bar context", contexts[barAgents])
+		
+		// Clean up
+		os.Remove(barKodelet)
 	})
 }
 
@@ -414,27 +560,15 @@ func TestNewBasicState_ErrorHandling(t *testing.T) {
 		assert.NotNil(t, state.contextDiscovery)
 	})
 
-	t.Run("working_dir_fallback", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		oldWd, err := os.Getwd()
-		require.NoError(t, err)
-		defer os.Chdir(oldWd)
-
-		require.NoError(t, os.Chdir(tmpDir))
-		require.NoError(t, os.Remove(tmpDir))
-
-		state := NewBasicState(ctx)
-		assert.Equal(t, ".", state.contextDiscovery.workingDir)
-		assert.NotNil(t, state.contextCache)
-		assert.NotEmpty(t, state.sessionID)
-	})
+	// Note: removed "working_dir_fallback" test since we now use Fatal() 
+	// when working directory cannot be determined (no fallback behavior)
 
 	t.Run("home_context_disabled_on_error", func(t *testing.T) {
 		state := NewBasicState(ctx)
 		assert.NotNil(t, state.contextDiscovery)
 
 		state.contextDiscovery.homeDir = ""
-		homeContext := state.loadHomeContext()
+		homeContext := state.loadContextFromPatterns("")
 		assert.Nil(t, homeContext, "Home context should be nil when homeDir is empty")
 	})
 

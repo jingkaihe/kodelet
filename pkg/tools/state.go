@@ -6,6 +6,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -51,11 +52,10 @@ type ContextDiscovery struct {
 type BasicStateOption func(ctx context.Context, s *BasicState) error
 
 func NewBasicState(ctx context.Context, opts ...BasicStateOption) *BasicState {
-	// Get working directory with fallback
+	// Get working directory - this is critical for proper context discovery
 	workingDir, err := os.Getwd()
 	if err != nil {
-		logger.G(ctx).WithError(err).Warning("Failed to get current working directory, using '.' as fallback")
-		workingDir = "."
+		logger.G(ctx).WithError(err).Fatal("Failed to get current working directory. Context discovery requires a valid working directory.")
 	}
 
 	// Get home directory with fallback
@@ -280,57 +280,69 @@ func (s *BasicState) DiscoverContexts() map[string]string {
 	contexts := make(map[string]string)
 
 	// 1. Add working directory context
-	if ctx := s.loadWorkingDirContext(); ctx != nil {
+	if ctx := s.loadContextFromPatterns(s.contextDiscovery.workingDir); ctx != nil {
 		contexts[ctx.Path] = ctx.Content
 	}
 
 	// 2. Add access-based contexts
-	for path := range s.lastAccessed {
-		if ctx := s.findContextForPath(path); ctx != nil {
-			contexts[ctx.Path] = ctx.Content
-		}
+	for _, ctx := range s.discoverAccessBasedContexts() {
+		contexts[ctx.Path] = ctx.Content
 	}
 
 	// 3. Add home directory context
-	if ctx := s.loadHomeContext(); ctx != nil {
+	if ctx := s.loadContextFromPatterns(s.contextDiscovery.homeDir); ctx != nil {
 		contexts[ctx.Path] = ctx.Content
 	}
 
 	return contexts
 }
 
-// findContextForPath searches up the directory tree from the given file path to find context files
-func (s *BasicState) findContextForPath(filePath string) *contextInfo {
-	dir := filepath.Dir(filePath)
-	for dir != "/" && dir != "." && dir != filepath.Dir(dir) { // Stop at root or when no more parent
-		for _, pattern := range s.contextDiscovery.contextPatterns {
-			contextPath := filepath.Join(dir, pattern)
-			if info := s.loadContextFile(contextPath); info != nil {
-				return info
-			}
+// discover contexts in the working directory hierarchy for files that have been accessed
+// only considers accessed files within the working directory
+// e.g. for /workdir/foo/bar/baz/code.py with /workdir as the working directory:
+// /workdir/foo/bar/baz/AGENTS.md, /workdir/foo/bar/AGENTS.md, /workdir/AGENTS.md will be discovered if they exist
+func (s *BasicState) discoverAccessBasedContexts() []contextInfo {
+	contexts := []contextInfo{}
+	visited := make(map[string]bool)
+
+	for path := range s.lastAccessed {
+		dir := filepath.Dir(path)
+		// Only process directories within the working directory
+		if strings.HasPrefix(dir, s.contextDiscovery.workingDir) {
+			ctxs := s.findContextsForPath(dir, visited)
+			contexts = append(contexts, ctxs...)
 		}
+	}
+
+	return contexts
+}
+
+
+
+// findContextsForPath searches up the directory tree from the given file path to find context files
+func (s *BasicState) findContextsForPath(dir string, visited map[string]bool) []contextInfo {
+	result := []contextInfo{}
+	
+	for !visited[dir] && dir != filepath.Dir(dir) && dir != s.contextDiscovery.workingDir {
+		visited[dir] = true
+
+		if info := s.loadContextFromPatterns(dir); info != nil {
+			result = append(result, *info)
+		}
+		
 		dir = filepath.Dir(dir)
 	}
-	return nil
+
+	return result
 }
 
-func (s *BasicState) loadWorkingDirContext() *contextInfo {
-	for _, pattern := range s.contextDiscovery.contextPatterns {
-		if info := s.loadContextFile(filepath.Join(s.contextDiscovery.workingDir, pattern)); info != nil {
-			return info
-		}
-	}
-	return nil
-}
-
-func (s *BasicState) loadHomeContext() *contextInfo {
-	// Skip home context discovery if home directory could not be determined
-	if s.contextDiscovery.homeDir == "" {
+func (s *BasicState) loadContextFromPatterns(path string) *contextInfo {
+	if path == "" {
 		return nil
 	}
 
 	for _, pattern := range s.contextDiscovery.contextPatterns {
-		if info := s.loadContextFile(filepath.Join(s.contextDiscovery.homeDir, pattern)); info != nil {
+		if info := s.loadContextFile(filepath.Join(path, pattern)); info != nil {
 			return info
 		}
 	}
