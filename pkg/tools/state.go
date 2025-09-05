@@ -317,19 +317,17 @@ func (s *BasicState) discoverAccessBasedContexts() []contextInfo {
 	return contexts
 }
 
-
-
 // findContextsForPath searches up the directory tree from the given file path to find context files
 func (s *BasicState) findContextsForPath(dir string, visited map[string]bool) []contextInfo {
 	result := []contextInfo{}
-	
+
 	for !visited[dir] && dir != filepath.Dir(dir) && dir != s.contextDiscovery.workingDir {
 		visited[dir] = true
 
 		if info := s.loadContextFromPatterns(dir); info != nil {
 			result = append(result, *info)
 		}
-		
+
 		dir = filepath.Dir(dir)
 	}
 
