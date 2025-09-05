@@ -9,7 +9,6 @@ type PromptConfig struct {
 	EnabledFeatures []string
 }
 
-// NewDefaultConfig creates a default configuration
 func NewDefaultConfig() *PromptConfig {
 	return &PromptConfig{
 		Model: "claude-sonnet-4-20250514",
@@ -20,19 +19,16 @@ func NewDefaultConfig() *PromptConfig {
 	}
 }
 
-// WithModel sets the model in the configuration
 func (c *PromptConfig) WithModel(model string) *PromptConfig {
 	c.Model = model
 	return c
 }
 
-// WithFeatures sets the enabled features in the configuration
 func (c *PromptConfig) WithFeatures(features []string) *PromptConfig {
 	c.EnabledFeatures = features
 	return c
 }
 
-// IsFeatureEnabled checks if a feature is enabled
 func (c *PromptConfig) IsFeatureEnabled(feature string) bool {
 	for _, f := range c.EnabledFeatures {
 		if f == feature {
@@ -42,9 +38,7 @@ func (c *PromptConfig) IsFeatureEnabled(feature string) bool {
 	return false
 }
 
-// updateContextWithConfig updates a PromptContext with configuration settings
 func updateContextWithConfig(ctx *PromptContext, config *PromptConfig) {
-	// Update feature flags based on config
 	ctx.Features["subagentEnabled"] = config.IsFeatureEnabled("subagent")
 	ctx.Features["todoToolsEnabled"] = config.IsFeatureEnabled("todoTools")
 }

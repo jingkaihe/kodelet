@@ -15,14 +15,12 @@ import (
 
 // PromptContext holds all variables for template rendering
 type PromptContext struct {
-	// System info
 	WorkingDirectory string
 	IsGitRepo        bool
 	Platform         string
 	OSVersion        string
 	Date             string
 
-	// Tool names
 	ToolNames map[string]string
 
 	// Content contexts (README, AGENTS.md/KODELET.md)
@@ -31,10 +29,8 @@ type PromptContext struct {
 	// Active context file name (AGENTS.md, KODELET.md, or empty)
 	ActiveContextFile string
 
-	// Feature flags
 	Features map[string]bool
 
-	// Bash tool configuration
 	BashBannedCommands  []string
 	BashAllowedCommands []string
 }
@@ -47,7 +43,6 @@ func NewPromptContext() *PromptContext {
 	osVersion := getOSVersion()
 	date := time.Now().Format("2006-01-02")
 
-	// Initialize tool names
 	toolNames := map[string]string{
 		"todo_write": "todo_write",
 		"todo_read":  "todo_read",
@@ -57,7 +52,6 @@ func NewPromptContext() *PromptContext {
 		"glob":       "glob_tool",
 	}
 
-	// Initialize feature flags
 	features := map[string]bool{
 		"subagentEnabled":  true,
 		"todoToolsEnabled": true,
@@ -74,7 +68,7 @@ func NewPromptContext() *PromptContext {
 		ActiveContextFile:   getContextFileName(),
 		Features:            features,
 		BashBannedCommands:  tools.BannedCommands,
-		BashAllowedCommands: []string{}, // Empty by default, can be set via configuration
+		BashAllowedCommands: []string{},
 	}
 }
 

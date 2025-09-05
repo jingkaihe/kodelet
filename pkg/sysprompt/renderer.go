@@ -39,24 +39,20 @@ func (r *Renderer) RenderPrompt(name string, ctx *PromptContext) (string, error)
 
 // getTemplate loads a template from the FS or returns it from cache
 func (r *Renderer) getTemplate(name string) (*template.Template, error) {
-	// Check if template is already cached
 	if tmpl, ok := r.cache[name]; ok {
 		return tmpl, nil
 	}
 
-	// Create template with base name as identifier
 	baseName := name
 	if idx := strings.LastIndex(name, "/"); idx >= 0 {
 		baseName = name[idx+1:]
 	}
 
-	// Create a new template with include function
 	tmpl := template.New(baseName)
 
 	// We'll need to create a self-reference for the include function
 	var selfRef *template.Template
 
-	// Add custom functions
 	tmpl = tmpl.Funcs(template.FuncMap{
 		"include": func(tplName string, data interface{}) (string, error) {
 			var buf strings.Builder
@@ -68,19 +64,16 @@ func (r *Renderer) getTemplate(name string) (*template.Template, error) {
 	// Set the self reference after template creation
 	selfRef = tmpl
 
-	// First parse the main template
 	content, err := fs.ReadFile(r.templateFS, name)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to read template file %s", name)
 	}
 
-	// Parse the main template
 	tmpl, err = tmpl.Parse(string(content))
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to parse template %s", name)
 	}
 
-	// Now parse all the component templates
 	err = fs.WalkDir(r.templateFS, "templates/components", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -102,7 +95,6 @@ func (r *Renderer) getTemplate(name string) (*template.Template, error) {
 		return nil, errors.Wrap(err, "failed to load component templates")
 	}
 
-	// Cache template
 	r.cache[name] = tmpl
 	return tmpl, nil
 }
@@ -114,7 +106,6 @@ func (r *Renderer) RenderSystemPrompt(ctx *PromptContext) (string, error) {
 		return "", err
 	}
 
-	// Append system info and context files
 	prompt += ctx.FormatSystemInfo()
 	prompt += ctx.FormatContexts()
 
@@ -128,7 +119,6 @@ func (r *Renderer) RenderSubagentPrompt(ctx *PromptContext) (string, error) {
 		return "", err
 	}
 
-	// Append system info and context files
 	prompt += ctx.FormatSystemInfo()
 	prompt += ctx.FormatContexts()
 

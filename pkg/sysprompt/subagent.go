@@ -9,29 +9,22 @@ import (
 
 // SubAgentPrompt generates a subagent prompt for the given model
 func SubAgentPrompt(model string, llmConfig llm.Config, contexts map[string]string) string {
-	// Create a new prompt context with default values
 	promptCtx := NewPromptContext()
 
-	// Override context files if provided
 	if len(contexts) > 0 {
 		promptCtx.ContextFiles = contexts
 	}
 
-	// Create a new template renderer
 	renderer := NewRenderer(TemplateFS)
 
-	// Create a default config and update with model
 	config := NewDefaultConfig().WithModel(model).WithFeatures([]string{
 		"todoTools",
 	})
 
-	// Update the context with the configuration
 	updateContextWithConfig(promptCtx, config)
 
-	// Update the context with LLM configuration
 	promptCtx.BashAllowedCommands = llmConfig.AllowedCommands
 
-	// Render the subagent prompt
 	prompt, err := renderer.RenderSubagentPrompt(promptCtx)
 	if err != nil {
 		ctx := context.Background()
