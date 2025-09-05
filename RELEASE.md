@@ -1,5 +1,15 @@
 # Kodelet
 
+## 0.0.93.alpha (2025-09-05)
+
+### Hierarchical Context Discovery
+
+**Hierarchical Context Discovery**: Improve context system enabling dynamic discovery and composition of context files from multiple sources
+
+- **Multi-Source Context Discovery**: Automatically discovers context files from working directory, accessed file paths, and user home directory (`~/.kodelet/`)
+- **Access-Based Context Intelligence**: Dynamically includes relevant context files based on actual file access patterns during conversation
+- **Hierarchical Context Search**: Walks up directory tree to find nearest context files for accessed files, providing contextually relevant guidance
+
 ## 0.0.92.alpha (2025-09-04)
 
 ### Internal Changes
