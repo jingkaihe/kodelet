@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jingkaihe/kodelet/pkg/logger"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
@@ -19,11 +20,10 @@ var (
 	_ tooltypes.State = &BasicState{}
 )
 
-// contextInfo holds cached context file information for internal use
 type contextInfo struct {
-	Content      string    `json:"content"`
-	Path         string    `json:"path"`          // Full path to the context file  
-	LastModified time.Time `json:"last_modified"`
+	Content      string
+	Path         string
+	LastModified time.Time
 }
 
 type BasicState struct {
@@ -42,7 +42,6 @@ type BasicState struct {
 	contextDiscovery    *ContextDiscovery
 }
 
-// Context discovery component handles finding relevant context files
 type ContextDiscovery struct {
 	workingDir      string
 	homeDir         string
@@ -51,10 +50,23 @@ type ContextDiscovery struct {
 
 type BasicStateOption func(ctx context.Context, s *BasicState) error
 
-// NewBasicState creates a new instance of BasicState with initialized map
 func NewBasicState(ctx context.Context, opts ...BasicStateOption) *BasicState {
-	homeDir, _ := os.UserHomeDir()
-	workingDir, _ := os.Getwd()
+	// Get working directory with fallback
+	workingDir, err := os.Getwd()
+	if err != nil {
+		logger.G(ctx).WithError(err).Warning("Failed to get current working directory, using '.' as fallback")
+		workingDir = "."
+	}
+
+	// Get home directory with fallback  
+	homeDir, err := os.UserHomeDir()
+	var kodeletHomeDir string
+	if err != nil {
+		logger.G(ctx).WithError(err).Warning("Failed to get user home directory, home context discovery will be disabled")
+		kodeletHomeDir = "" // Empty string disables home context discovery
+	} else {
+		kodeletHomeDir = filepath.Join(homeDir, ".kodelet")
+	}
 	
 	state := &BasicState{
 		lastAccessed: make(map[string]time.Time),
@@ -63,7 +75,7 @@ func NewBasicState(ctx context.Context, opts ...BasicStateOption) *BasicState {
 		contextCache: make(map[string]*contextInfo),
 		contextDiscovery: &ContextDiscovery{
 			workingDir:      workingDir,
-			homeDir:         filepath.Join(homeDir, ".kodelet"),
+			homeDir:         kodeletHomeDir,
 			contextPatterns: []string{"AGENTS.md", "KODELET.md"},
 		},
 	}
@@ -78,7 +90,6 @@ func NewBasicState(ctx context.Context, opts ...BasicStateOption) *BasicState {
 			allowedTools = state.llmConfig.AllowedTools
 		}
 		state.tools = GetMainTools(ctx, allowedTools)
-		// Configure tools with LLM config parameters
 		state.configureTools()
 	}
 
@@ -251,7 +262,6 @@ func (s *BasicState) GetLLMConfig() interface{} {
 	return s.llmConfig
 }
 
-// configureTools configures tools with LLM config parameters
 func (s *BasicState) configureTools() {
 	for i, tool := range s.tools {
 		switch tool.Name() {
@@ -263,7 +273,6 @@ func (s *BasicState) configureTools() {
 	}
 }
 
-// GetRelevantContexts returns all relevant context files based on file access patterns
 func (s *BasicState) GetRelevantContexts() map[string]string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -305,7 +314,6 @@ func (s *BasicState) findContextForPath(filePath string) *contextInfo {
 	return nil
 }
 
-// loadWorkingDirContext loads context file from working directory
 func (s *BasicState) loadWorkingDirContext() *contextInfo {
 	for _, pattern := range s.contextDiscovery.contextPatterns {
 		if info := s.loadContextFile(filepath.Join(s.contextDiscovery.workingDir, pattern)); info != nil {
@@ -315,8 +323,12 @@ func (s *BasicState) loadWorkingDirContext() *contextInfo {
 	return nil
 }
 
-// loadHomeContext loads context file from user home directory
 func (s *BasicState) loadHomeContext() *contextInfo {
+	// Skip home context discovery if home directory could not be determined
+	if s.contextDiscovery.homeDir == "" {
+		return nil
+	}
+	
 	for _, pattern := range s.contextDiscovery.contextPatterns {
 		if info := s.loadContextFile(filepath.Join(s.contextDiscovery.homeDir, pattern)); info != nil {
 			return info
@@ -325,9 +337,7 @@ func (s *BasicState) loadHomeContext() *contextInfo {
 	return nil
 }
 
-// loadContextFile loads a context file with caching
 func (s *BasicState) loadContextFile(path string) *contextInfo {
-	// Check if file exists and get modification time
 	stat, err := os.Stat(path)
 	if err != nil {
 		return nil
@@ -340,7 +350,6 @@ func (s *BasicState) loadContextFile(path string) *contextInfo {
 		}
 	}
 	
-	// Load from disk
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return nil
@@ -352,7 +361,6 @@ func (s *BasicState) loadContextFile(path string) *contextInfo {
 		LastModified: stat.ModTime(),
 	}
 	
-	// Update cache
 	s.contextCache[path] = info
 	return info
 }
