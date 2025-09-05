@@ -1,6 +1,6 @@
 module github.com/jingkaihe/kodelet
 
-go 1.24.2
+go 1.25.1
 
 require (
 	github.com/JohannesKaufmann/html-to-markdown v1.6.0
