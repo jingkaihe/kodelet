@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -15,14 +16,12 @@ import (
 
 // PromptContext holds all variables for template rendering
 type PromptContext struct {
-	// System info
 	WorkingDirectory string
 	IsGitRepo        bool
 	Platform         string
 	OSVersion        string
 	Date             string
 
-	// Tool names
 	ToolNames map[string]string
 
 	// Content contexts (README, AGENTS.md/KODELET.md)
@@ -31,23 +30,20 @@ type PromptContext struct {
 	// Active context file name (AGENTS.md, KODELET.md, or empty)
 	ActiveContextFile string
 
-	// Feature flags
 	Features map[string]bool
 
-	// Bash tool configuration
 	BashBannedCommands  []string
 	BashAllowedCommands []string
 }
 
 // NewPromptContext creates a new PromptContext with default values
-func NewPromptContext() *PromptContext {
+func NewPromptContext(contexts map[string]string) *PromptContext {
 	pwd, _ := os.Getwd()
 	isGitRepo := checkIsGitRepo(pwd)
 	platform := runtime.GOOS
 	osVersion := getOSVersion()
 	date := time.Now().Format("2006-01-02")
 
-	// Initialize tool names
 	toolNames := map[string]string{
 		"todo_write": "todo_write",
 		"todo_read":  "todo_read",
@@ -57,10 +53,15 @@ func NewPromptContext() *PromptContext {
 		"glob":       "glob_tool",
 	}
 
-	// Initialize feature flags
 	features := map[string]bool{
 		"subagentEnabled":  true,
 		"todoToolsEnabled": true,
+	}
+
+	// Use provided contexts or initialize empty map
+	contextFiles := contexts
+	if contextFiles == nil {
+		contextFiles = make(map[string]string)
 	}
 
 	return &PromptContext{
@@ -70,11 +71,11 @@ func NewPromptContext() *PromptContext {
 		OSVersion:           osVersion,
 		Date:                date,
 		ToolNames:           toolNames,
-		ContextFiles:        loadContexts(),
+		ContextFiles:        contextFiles,
 		ActiveContextFile:   getContextFileName(),
 		Features:            features,
 		BashBannedCommands:  tools.BannedCommands,
-		BashAllowedCommands: []string{}, // Empty by default, can be set via configuration
+		BashAllowedCommands: []string{},
 	}
 }
 
@@ -97,23 +98,7 @@ func getContextFileName() string {
 	return AgentsMd
 }
 
-// loadContexts loads context files (AGENTS.md/KODELET.md, README.md) from disk
-func loadContexts() map[string]string {
-	filenames := []string{getContextFileName(), ReadmeMd}
-	results := make(map[string]string)
-	ctx := context.Background()
-	log := logger.G(ctx)
 
-	for _, filename := range filenames {
-		content, err := os.ReadFile(filename)
-		if err != nil {
-			log.WithError(err).WithField("filename", filename).Debug("failed to read file")
-			continue
-		}
-		results[filename] = string(content)
-	}
-	return results
-}
 
 // FormatContexts formats the loaded contexts into a string
 func (ctx *PromptContext) FormatContexts() string {
@@ -121,14 +106,23 @@ func (ctx *PromptContext) FormatContexts() string {
 		return ""
 	}
 
-	prompt := "\nHere are some useful context to help you solve the user's problem:\n"
+	ctxFiles := []string{}
+
+	prompt := `Here are some useful context to help you solve the user's problem.
+When you are working in these directories, make sure that you are following the guidelines provided in the context.
+Note that the contexts in $HOME/.kodelet/ are universally applicable.
+`
 	for filename, content := range ctx.ContextFiles {
+		ctxFiles = append(ctxFiles, filename)
+		dir := filepath.Dir(filename)
 		prompt += fmt.Sprintf(`
-<context filename="%s">
+<context filename="%s", dir="%s">
 %s
 </context>
-`, filename, content)
+`, filename, dir, content)
 	}
+
+	logger.G(context.Background()).WithField("context_files", ctxFiles).Debug("loaded context files")
 	return prompt
 }
 
