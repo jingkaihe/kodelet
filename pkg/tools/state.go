@@ -36,10 +36,10 @@ type BasicState struct {
 	mcpTools            []tooltypes.Tool
 	customTools         []tooltypes.Tool
 	llmConfig           llmtypes.Config
-	
+
 	// Context discovery fields
-	contextCache        map[string]*contextInfo
-	contextDiscovery    *ContextDiscovery
+	contextCache     map[string]*contextInfo
+	contextDiscovery *ContextDiscovery
 }
 
 type ContextDiscovery struct {
@@ -58,7 +58,7 @@ func NewBasicState(ctx context.Context, opts ...BasicStateOption) *BasicState {
 		workingDir = "."
 	}
 
-	// Get home directory with fallback  
+	// Get home directory with fallback
 	homeDir, err := os.UserHomeDir()
 	var kodeletHomeDir string
 	if err != nil {
@@ -67,7 +67,7 @@ func NewBasicState(ctx context.Context, opts ...BasicStateOption) *BasicState {
 	} else {
 		kodeletHomeDir = filepath.Join(homeDir, ".kodelet")
 	}
-	
+
 	state := &BasicState{
 		lastAccessed: make(map[string]time.Time),
 		sessionID:    uuid.New().String(),
@@ -276,26 +276,26 @@ func (s *BasicState) configureTools() {
 func (s *BasicState) DiscoverContexts() map[string]string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	
+
 	contexts := make(map[string]string)
-	
+
 	// 1. Add working directory context
 	if ctx := s.loadWorkingDirContext(); ctx != nil {
 		contexts[ctx.Path] = ctx.Content
 	}
-	
+
 	// 2. Add access-based contexts
 	for path := range s.lastAccessed {
 		if ctx := s.findContextForPath(path); ctx != nil {
 			contexts[ctx.Path] = ctx.Content
 		}
 	}
-	
+
 	// 3. Add home directory context
 	if ctx := s.loadHomeContext(); ctx != nil {
 		contexts[ctx.Path] = ctx.Content
 	}
-	
+
 	return contexts
 }
 
@@ -328,7 +328,7 @@ func (s *BasicState) loadHomeContext() *contextInfo {
 	if s.contextDiscovery.homeDir == "" {
 		return nil
 	}
-	
+
 	for _, pattern := range s.contextDiscovery.contextPatterns {
 		if info := s.loadContextFile(filepath.Join(s.contextDiscovery.homeDir, pattern)); info != nil {
 			return info
@@ -342,25 +342,25 @@ func (s *BasicState) loadContextFile(path string) *contextInfo {
 	if err != nil {
 		return nil
 	}
-	
+
 	// Check cache - only use if file hasn't been modified
 	if cached, ok := s.contextCache[path]; ok {
 		if cached.LastModified.Equal(stat.ModTime()) {
 			return cached
 		}
 	}
-	
+
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return nil
 	}
-	
+
 	info := &contextInfo{
 		Content:      string(content),
 		Path:         path,
 		LastModified: stat.ModTime(),
 	}
-	
+
 	s.contextCache[path] = info
 	return info
 }

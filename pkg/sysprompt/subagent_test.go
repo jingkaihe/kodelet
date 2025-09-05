@@ -147,7 +147,7 @@ func TestSubAgentPromptContextConsistency(t *testing.T) {
 // TestSubAgentPrompt_WithContexts verifies that provided contexts are properly included in subagent prompt
 func TestSubAgentPrompt_WithContexts(t *testing.T) {
 	contexts := map[string]string{
-		"/path/to/project/AGENTS.md":   "# Project Context\nGeneral project guidelines and conventions.",
+		"/path/to/project/AGENTS.md":    "# Project Context\nGeneral project guidelines and conventions.",
 		"/home/user/.kodelet/AGENTS.md": "# User Preferences\nPersonal coding style and preferences.",
 	}
 
@@ -177,7 +177,7 @@ func TestSubAgentPrompt_WithEmptyContexts(t *testing.T) {
 	emptyContexts := map[string]string{}
 	prompt := SubAgentPrompt("claude-sonnet-4-20250514", llm.Config{}, emptyContexts)
 
-	// Should still generate a valid subagent prompt 
+	// Should still generate a valid subagent prompt
 	assert.Contains(t, prompt, "You are an AI SWE Agent", "Expected subagent introduction")
 	assert.Contains(t, prompt, "System Information", "Expected system information section")
 
