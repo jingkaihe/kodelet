@@ -115,14 +115,19 @@ func (ctx *PromptContext) FormatContexts() string {
 		return ""
 	}
 
+	ctxFiles := []string{}
+
 	prompt := "\nHere are some useful context to help you solve the user's problem:\n"
 	for filename, content := range ctx.ContextFiles {
+		ctxFiles = append(ctxFiles, filename)
 		prompt += fmt.Sprintf(`
 <context filename="%s">
 %s
 </context>
 `, filename, content)
 	}
+
+	logger.G(context.Background()).WithField("context_files", ctxFiles).Debug("loaded context files")
 	return prompt
 }
 
