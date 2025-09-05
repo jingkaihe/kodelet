@@ -50,7 +50,7 @@ func TestSystemPromptBashBannedCommands(t *testing.T) {
 
 // TestSystemPromptBashAllowedCommands verifies that allowed commands work correctly
 func TestSystemPromptBashAllowedCommands(t *testing.T) {
-	promptCtx := NewPromptContext()
+	promptCtx := NewPromptContext(nil)
 	config := NewDefaultConfig().WithModel("claude-sonnet-4-20250514")
 	allowedCommands := []string{"ls *", "pwd", "git status", "echo *"}
 	llmConfig := &llm.Config{
@@ -78,7 +78,7 @@ func TestSystemPromptBashAllowedCommands(t *testing.T) {
 // TestSystemPromptBashEmptyAllowedCommands verifies behavior with empty allowed commands
 func TestSystemPromptBashEmptyAllowedCommands(t *testing.T) {
 	// Empty allowed commands should fall back to banned commands behavior
-	promptCtx := NewPromptContext()
+	promptCtx := NewPromptContext(nil)
 	config := NewDefaultConfig().WithModel("claude-sonnet-4-20250514")
 	llmConfig := &llm.Config{
 		AllowedCommands: []string{},
@@ -134,8 +134,7 @@ func TestSystemPrompt_WithNilContexts(t *testing.T) {
 	assert.Contains(t, prompt, "You are an interactive CLI tool", "Expected basic kodelet introduction")
 	assert.Contains(t, prompt, "System Information", "Expected system information section")
 
-	// When nil contexts are passed, it should fall back to the default loadContexts() behavior
-	// which may or may not find context files in the current directory
+	// When nil contexts are passed, it should initialize with empty map
 }
 
 // TestSystemPrompt_ContextFormattingEdgeCases tests edge cases in context formatting

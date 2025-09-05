@@ -37,7 +37,7 @@ type PromptContext struct {
 }
 
 // NewPromptContext creates a new PromptContext with default values
-func NewPromptContext() *PromptContext {
+func NewPromptContext(contexts map[string]string) *PromptContext {
 	pwd, _ := os.Getwd()
 	isGitRepo := checkIsGitRepo(pwd)
 	platform := runtime.GOOS
@@ -58,6 +58,12 @@ func NewPromptContext() *PromptContext {
 		"todoToolsEnabled": true,
 	}
 
+	// Use provided contexts or initialize empty map
+	contextFiles := contexts
+	if contextFiles == nil {
+		contextFiles = make(map[string]string)
+	}
+
 	return &PromptContext{
 		WorkingDirectory:    pwd,
 		IsGitRepo:           isGitRepo,
@@ -65,7 +71,7 @@ func NewPromptContext() *PromptContext {
 		OSVersion:           osVersion,
 		Date:                date,
 		ToolNames:           toolNames,
-		ContextFiles:        loadContexts(),
+		ContextFiles:        contextFiles,
 		ActiveContextFile:   getContextFileName(),
 		Features:            features,
 		BashBannedCommands:  tools.BannedCommands,
@@ -92,23 +98,7 @@ func getContextFileName() string {
 	return AgentsMd
 }
 
-// loadContexts loads context files (AGENTS.md/KODELET.md, README.md) from disk
-func loadContexts() map[string]string {
-	filenames := []string{getContextFileName(), ReadmeMd}
-	results := make(map[string]string)
-	ctx := context.Background()
-	log := logger.G(ctx)
 
-	for _, filename := range filenames {
-		content, err := os.ReadFile(filename)
-		if err != nil {
-			log.WithError(err).WithField("filename", filename).Debug("failed to read file")
-			continue
-		}
-		results[filename] = string(content)
-	}
-	return results
-}
 
 // FormatContexts formats the loaded contexts into a string
 func (ctx *PromptContext) FormatContexts() string {

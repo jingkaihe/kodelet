@@ -13,7 +13,7 @@ func TestConditionalRendering(t *testing.T) {
 	renderer := NewRenderer(TemplateFS)
 
 	t.Run("With all features enabled", func(t *testing.T) {
-		ctx := NewPromptContext()
+		ctx := NewPromptContext(nil)
 		ctx.Features["subagentEnabled"] = true
 
 		prompt, err := renderer.RenderSystemPrompt(ctx)
@@ -23,7 +23,7 @@ func TestConditionalRendering(t *testing.T) {
 	})
 
 	t.Run("With some features disabled", func(t *testing.T) {
-		ctx := NewPromptContext()
+		ctx := NewPromptContext(nil)
 		ctx.Features["subagentEnabled"] = true
 
 		config := NewDefaultConfig()
@@ -37,7 +37,7 @@ func TestConditionalRendering(t *testing.T) {
 // TestRenderer tests the core functionality of the template renderer
 func TestRenderer(t *testing.T) {
 	renderer := NewRenderer(TemplateFS)
-	ctx := NewPromptContext()
+	ctx := NewPromptContext(nil)
 
 	t.Run("Component template rendering", func(t *testing.T) {
 		components := []string{

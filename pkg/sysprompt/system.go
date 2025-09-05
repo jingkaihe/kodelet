@@ -9,11 +9,7 @@ import (
 
 // SystemPrompt generates a system prompt for the given model
 func SystemPrompt(model string, llmConfig llm.Config, contexts map[string]string) string {
-	promptCtx := NewPromptContext()
-
-	if len(contexts) > 0 {
-		promptCtx.ContextFiles = contexts
-	}
+	promptCtx := NewPromptContext(contexts)
 
 	renderer := NewRenderer(TemplateFS)
 	config := NewDefaultConfig().WithModel(model)

@@ -67,73 +67,7 @@ func TestGetContextFileName(t *testing.T) {
 	})
 }
 
-// TestLoadContexts tests the context loading logic
-func TestLoadContexts(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "sysprompt-context-test-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
 
-	originalDir, err := os.Getwd()
-	require.NoError(t, err)
-	defer os.Chdir(originalDir)
-
-	err = os.Chdir(tmpDir)
-	require.NoError(t, err)
-
-	t.Run("Load AGENTS.md when present", func(t *testing.T) {
-		agentsContent := "# AGENTS Context\nThis is the agents context."
-		readmeContent := "# README\nThis is the readme."
-
-		err := os.WriteFile(AgentsMd, []byte(agentsContent), 0644)
-		require.NoError(t, err)
-		defer os.Remove(AgentsMd)
-
-		err = os.WriteFile(ReadmeMd, []byte(readmeContent), 0644)
-		require.NoError(t, err)
-		defer os.Remove(ReadmeMd)
-
-		contexts := loadContexts()
-
-		assert.Contains(t, contexts, AgentsMd)
-		assert.Equal(t, agentsContent, contexts[AgentsMd])
-		assert.Contains(t, contexts, ReadmeMd)
-		assert.Equal(t, readmeContent, contexts[ReadmeMd])
-		assert.NotContains(t, contexts, KodeletMd, "Expected KODELET.md not to be loaded when AGENTS.md exists")
-	})
-
-	t.Run("Fall back to KODELET.md when AGENTS.md not present", func(t *testing.T) {
-		os.Remove(AgentsMd)
-
-		kodeletContent := "# KODELET Context\nThis is the kodelet context."
-		readmeContent := "# README\nThis is the readme."
-
-		err := os.WriteFile(KodeletMd, []byte(kodeletContent), 0644)
-		require.NoError(t, err)
-		defer os.Remove(KodeletMd)
-
-		err = os.WriteFile(ReadmeMd, []byte(readmeContent), 0644)
-		require.NoError(t, err)
-		defer os.Remove(ReadmeMd)
-
-		contexts := loadContexts()
-
-		assert.Contains(t, contexts, KodeletMd, "Expected KODELET.md to be loaded as fallback")
-		assert.Equal(t, kodeletContent, contexts[KodeletMd])
-		assert.Contains(t, contexts, ReadmeMd)
-		assert.Equal(t, readmeContent, contexts[ReadmeMd])
-		assert.NotContains(t, contexts, AgentsMd, "Expected AGENTS.md not to be loaded when it doesn't exist")
-	})
-
-	t.Run("Handle missing context files gracefully", func(t *testing.T) {
-		os.Remove(AgentsMd)
-		os.Remove(KodeletMd)
-		os.Remove(ReadmeMd)
-
-		contexts := loadContexts()
-
-		assert.Empty(t, contexts, "Expected empty map when no context files exist")
-	})
-}
 
 // TestFormatContexts tests the context formatting logic
 func TestFormatContexts(t *testing.T) {
@@ -185,7 +119,7 @@ func TestPromptContextActiveContextFile(t *testing.T) {
 		require.NoError(t, err)
 		defer os.Remove(AgentsMd)
 
-		ctx := NewPromptContext()
+		ctx := NewPromptContext(nil)
 		assert.Equal(t, AgentsMd, ctx.ActiveContextFile, "Expected ActiveContextFile to be AGENTS.md")
 	})
 
@@ -196,7 +130,7 @@ func TestPromptContextActiveContextFile(t *testing.T) {
 		require.NoError(t, err)
 		defer os.Remove(KodeletMd)
 
-		ctx := NewPromptContext()
+		ctx := NewPromptContext(nil)
 		assert.Equal(t, KodeletMd, ctx.ActiveContextFile, "Expected ActiveContextFile to be KODELET.md")
 	})
 
@@ -204,7 +138,7 @@ func TestPromptContextActiveContextFile(t *testing.T) {
 		os.Remove(AgentsMd)
 		os.Remove(KodeletMd)
 
-		ctx := NewPromptContext()
+		ctx := NewPromptContext(nil)
 		assert.Equal(t, AgentsMd, ctx.ActiveContextFile, "Expected ActiveContextFile to default to AGENTS.md")
 	})
 
@@ -217,7 +151,7 @@ func TestPromptContextActiveContextFile(t *testing.T) {
 		require.NoError(t, err)
 		defer os.Remove(KodeletMd)
 
-		ctx := NewPromptContext()
+		ctx := NewPromptContext(nil)
 		assert.Equal(t, AgentsMd, ctx.ActiveContextFile, "Expected ActiveContextFile to prefer AGENTS.md")
 	})
 }

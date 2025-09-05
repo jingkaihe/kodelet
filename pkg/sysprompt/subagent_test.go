@@ -55,7 +55,7 @@ func TestSubAgentPromptBashBannedCommands(t *testing.T) {
 }
 
 func TestSubAgentPromptBashAllowedCommands(t *testing.T) {
-	promptCtx := NewPromptContext()
+	promptCtx := NewPromptContext(nil)
 	config := NewDefaultConfig().WithModel("claude-sonnet-4-20250514")
 	allowedCommands := []string{"find *", "grep *", "cat *", "head *", "tail *"}
 	llmConfig := &llm.Config{
@@ -81,7 +81,7 @@ func TestSubAgentPromptBashAllowedCommands(t *testing.T) {
 }
 
 func TestSubAgentPromptContextConsistency(t *testing.T) {
-	promptCtx := NewPromptContext()
+	promptCtx := NewPromptContext(nil)
 	config := NewDefaultConfig().WithModel("claude-sonnet-4-20250514")
 	allowedCommands := []string{"test *", "verify *"}
 	llmConfig := &llm.Config{
