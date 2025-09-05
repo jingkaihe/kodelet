@@ -119,7 +119,8 @@ func (ctx *PromptContext) FormatContexts() string {
 	ctxFiles := []string{}
 
 	prompt := `Here are some useful context to help you solve the user's problem.
-When you are working in these directories, make sure that you are following the guidelines provided in the context:
+When you are working in these directories, make sure that you are following the guidelines provided in the context.
+Note that the contexts in $HOME/.kodelet/ are universally applicable.
 `
 	for filename, content := range ctx.ContextFiles {
 		ctxFiles = append(ctxFiles, filename)

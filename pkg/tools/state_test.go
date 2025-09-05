@@ -536,6 +536,72 @@ func TestBasicState_ContextTraversalAndDeduplication(t *testing.T) {
 	})
 }
 
+func TestBasicState_ReadmeBasicAndCaching(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("no_readme_file", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		oldWd, _ := os.Getwd()
+		defer os.Chdir(oldWd)
+		require.NoError(t, os.Chdir(tmpDir))
+
+		state := NewBasicState(ctx)
+		contexts := state.DiscoverContexts()
+
+		readmePath := filepath.Join(tmpDir, "README.md")
+		assert.NotContains(t, contexts, readmePath)
+	})
+
+	t.Run("readme_only", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		readmePath := filepath.Join(tmpDir, "README.md")
+		require.NoError(t, os.WriteFile(readmePath, []byte("# Project README\n\nProject documentation"), 0644))
+
+		oldWd, _ := os.Getwd()
+		defer os.Chdir(oldWd)
+		require.NoError(t, os.Chdir(tmpDir))
+
+		state := NewBasicState(ctx)
+		contexts := state.DiscoverContexts()
+
+		assert.Len(t, contexts, 1)
+		assert.Contains(t, contexts, readmePath)
+		assert.Equal(t, "# Project README\n\nProject documentation", contexts[readmePath])
+	})
+
+	t.Run("readme_caching", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		readmePath := filepath.Join(tmpDir, "README.md")
+
+		oldWd, _ := os.Getwd()
+		defer os.Chdir(oldWd)
+		require.NoError(t, os.Chdir(tmpDir))
+
+		state := NewBasicState(ctx)
+
+		initialContent := "# Initial README"
+		require.NoError(t, os.WriteFile(readmePath, []byte(initialContent), 0644))
+
+		// Initial load
+		contexts := state.DiscoverContexts()
+		assert.Len(t, contexts, 1)
+		assert.Equal(t, initialContent, contexts[readmePath])
+
+		// Cached content
+		contexts = state.DiscoverContexts()
+		assert.Equal(t, initialContent, contexts[readmePath])
+
+		// Cache invalidation
+		newContent := "# Updated README\n\nNew documentation"
+		time.Sleep(10 * time.Millisecond)
+		require.NoError(t, os.WriteFile(readmePath, []byte(newContent), 0644))
+
+		contexts = state.DiscoverContexts()
+		assert.Equal(t, newContent, contexts[readmePath])
+	})
+}
+
 func TestNewBasicState_ErrorHandling(t *testing.T) {
 	ctx := context.Background()
 

@@ -284,13 +284,18 @@ func (s *BasicState) DiscoverContexts() map[string]string {
 		contexts[ctx.Path] = ctx.Content
 	}
 
-	// 2. Add access-based contexts
-	for _, ctx := range s.discoverAccessBasedContexts() {
+	// 2. Add README.md from home directory
+	if ctx := s.loadContextFile(filepath.Join(s.contextDiscovery.workingDir, "README.md")); ctx != nil {
 		contexts[ctx.Path] = ctx.Content
 	}
 
 	// 3. Add home directory context
 	if ctx := s.loadContextFromPatterns(s.contextDiscovery.homeDir); ctx != nil {
+		contexts[ctx.Path] = ctx.Content
+	}
+
+	// 4. Add access-based contexts
+	for _, ctx := range s.discoverAccessBasedContexts() {
 		contexts[ctx.Path] = ctx.Content
 	}
 
