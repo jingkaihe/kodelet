@@ -76,7 +76,7 @@ func TestNewBasicState_ErrorHandling(t *testing.T) {
 		require.NoError(t, os.Chdir(tmpDir))
 
 		state := NewBasicState(ctx)
-		contexts := state.GetRelevantContexts()
+		contexts := state.DiscoverContexts()
 
 		// Should still discover working directory context even with error handling
 		assert.Len(t, contexts, 1)

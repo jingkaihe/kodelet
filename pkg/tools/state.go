@@ -273,7 +273,7 @@ func (s *BasicState) configureTools() {
 	}
 }
 
-func (s *BasicState) GetRelevantContexts() map[string]string {
+func (s *BasicState) DiscoverContexts() map[string]string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	

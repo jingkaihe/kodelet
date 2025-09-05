@@ -385,7 +385,7 @@ OUTER:
 			// Get relevant contexts from state and regenerate system prompt
 			var contexts map[string]string
 			if t.state != nil {
-				contexts = t.state.GetRelevantContexts()
+				contexts = t.state.DiscoverContexts()
 			}
 			var systemPrompt string
 			if t.config.IsSubAgent {

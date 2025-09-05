@@ -223,8 +223,8 @@ func TestBasicState_ConfigureBashTool_EmptyAllowedCommands(t *testing.T) {
 	assert.Equal(t, []string{}, bashTool.allowedCommands, "BashTool should have empty allowed commands")
 }
 
-// TestBasicState_GetRelevantContexts tests the context discovery functionality
-func TestBasicState_GetRelevantContexts(t *testing.T) {
+// TestBasicState_DiscoverContexts tests the context discovery functionality
+func TestBasicState_DiscoverContexts(t *testing.T) {
 	// Create temporary test directory structure
 	tmpDir := t.TempDir()
 	
@@ -253,7 +253,7 @@ func TestBasicState_GetRelevantContexts(t *testing.T) {
 
 	t.Run("working_directory_context_only", func(t *testing.T) {
 		// With no accessed files, should only find working directory context
-		contexts := state.GetRelevantContexts()
+		contexts := state.DiscoverContexts()
 		
 		assert.Len(t, contexts, 1, "Should find exactly 1 context file")
 		assert.Contains(t, contexts, rootAgents, "Should contain root AGENTS.md")
@@ -265,7 +265,7 @@ func TestBasicState_GetRelevantContexts(t *testing.T) {
 		testFile := filepath.Join(subDir, "test.go")
 		state.SetFileLastAccessed(testFile, time.Now())
 		
-		contexts := state.GetRelevantContexts()
+		contexts := state.DiscoverContexts()
 		
 		assert.Len(t, contexts, 2, "Should find exactly 2 context files")
 		assert.Contains(t, contexts, rootAgents, "Should contain root AGENTS.md")
@@ -279,7 +279,7 @@ func TestBasicState_GetRelevantContexts(t *testing.T) {
 		deepFile := filepath.Join(deepDir, "nested.go")
 		state.SetFileLastAccessed(deepFile, time.Now())
 		
-		contexts := state.GetRelevantContexts()
+		contexts := state.DiscoverContexts()
 		
 		// Should still find the submodule context by walking up the tree
 		assert.Contains(t, contexts, subKodelet, "Should find submodule KODELET.md by walking up")
@@ -303,7 +303,7 @@ func TestBasicState_ContextFilePreference(t *testing.T) {
 	require.NoError(t, os.Chdir(tmpDir))
 
 	state := NewBasicState(context.Background())
-	contexts := state.GetRelevantContexts()
+	contexts := state.DiscoverContexts()
 	
 	assert.Len(t, contexts, 1, "Should find exactly 1 context file")
 	assert.Contains(t, contexts, agentsFile, "Should prefer AGENTS.md over KODELET.md")
@@ -326,14 +326,14 @@ func TestBasicState_ContextFileCaching(t *testing.T) {
 	state := NewBasicState(context.Background())
 	
 	t.Run("initial_load", func(t *testing.T) {
-		contexts := state.GetRelevantContexts()
+		contexts := state.DiscoverContexts()
 		assert.Len(t, contexts, 1)
 		assert.Equal(t, initialContent, contexts[contextFile])
 	})
 
 	t.Run("cached_content", func(t *testing.T) {
 		// Should return cached content without reading from disk
-		contexts := state.GetRelevantContexts()
+		contexts := state.DiscoverContexts()
 		assert.Equal(t, initialContent, contexts[contextFile])
 	})
 
@@ -344,7 +344,7 @@ func TestBasicState_ContextFileCaching(t *testing.T) {
 		require.NoError(t, os.WriteFile(contextFile, []byte(newContent), 0644))
 		
 		// Should detect the change and reload
-		contexts := state.GetRelevantContexts()
+		contexts := state.DiscoverContexts()
 		assert.Equal(t, newContent, contexts[contextFile], "Should reload modified file")
 	})
 }
@@ -372,7 +372,7 @@ func TestBasicState_HomeDirectoryContext(t *testing.T) {
 	state.contextDiscovery.homeDir = kodeletDir
 
 	t.Run("home_context_discovery", func(t *testing.T) {
-		contexts := state.GetRelevantContexts()
+		contexts := state.DiscoverContexts()
 		
 		assert.Len(t, contexts, 1, "Should find home directory context")
 		assert.Contains(t, contexts, homeContext, "Should contain home AGENTS.md")
@@ -384,7 +384,7 @@ func TestBasicState_HomeDirectoryContext(t *testing.T) {
 		workContext := filepath.Join(tmpWork, "KODELET.md")
 		require.NoError(t, os.WriteFile(workContext, []byte("# Work context"), 0644))
 		
-		contexts := state.GetRelevantContexts()
+		contexts := state.DiscoverContexts()
 		
 		assert.Len(t, contexts, 2, "Should find both home and work contexts")
 		assert.Contains(t, contexts, homeContext, "Should contain home context")
@@ -402,7 +402,7 @@ func TestBasicState_ContextDiscoveryEdgeCases(t *testing.T) {
 		require.NoError(t, os.Chdir(tmpDir))
 
 		state := NewBasicState(context.Background())
-		contexts := state.GetRelevantContexts()
+		contexts := state.DiscoverContexts()
 		
 		assert.Empty(t, contexts, "Should return empty map when no context files exist")
 	})
@@ -419,7 +419,7 @@ func TestBasicState_ContextDiscoveryEdgeCases(t *testing.T) {
 		require.NoError(t, os.Chdir(tmpDir))
 
 		state := NewBasicState(context.Background())
-		contexts := state.GetRelevantContexts()
+		contexts := state.DiscoverContexts()
 		
 		// Should gracefully handle permission errors
 		assert.Empty(t, contexts, "Should handle permission errors gracefully")
@@ -447,7 +447,7 @@ func TestBasicState_ContextDiscoveryEdgeCases(t *testing.T) {
 		accessedFile := filepath.Join(otherDir, "test.go")
 		state.SetFileLastAccessed(accessedFile, time.Now())
 		
-		contexts := state.GetRelevantContexts()
+		contexts := state.DiscoverContexts()
 		
 		assert.Contains(t, contexts, otherContext, "Should find context in accessed file's directory")
 		assert.Equal(t, "# Other context", contexts[otherContext])
