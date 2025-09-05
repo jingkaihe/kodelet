@@ -148,9 +148,9 @@ func TestFormatContexts(t *testing.T) {
 		result := ctx.FormatContexts()
 
 		assert.Contains(t, result, "Here are some useful context")
-		assert.Contains(t, result, `<context filename="AGENTS.md">`)
+		assert.Contains(t, result, `<context filename="AGENTS.md", dir=".">`)
 		assert.Contains(t, result, "# Agents Context")
-		assert.Contains(t, result, `<context filename="README.md">`)
+		assert.Contains(t, result, `<context filename="README.md", dir=".">`)
 		assert.Contains(t, result, "# README Content")
 	})
 

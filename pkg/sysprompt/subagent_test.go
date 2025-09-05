@@ -120,13 +120,13 @@ func TestSubAgentPrompt_WithContexts(t *testing.T) {
 	prompt := SubAgentPrompt("claude-sonnet-4-20250514", llm.Config{}, contexts)
 
 	assert.Contains(t, prompt, "You are an AI SWE Agent", "Expected subagent introduction")
-	assert.Contains(t, prompt, "Here are some useful context to help you solve the user's problem:", "Expected context introduction")
+	assert.Contains(t, prompt, "Here are some useful context to help you solve the user's problem.", "Expected context introduction")
 
-	assert.Contains(t, prompt, `<context filename="/path/to/project/AGENTS.md">`, "Expected project AGENTS.md context with filename")
+	assert.Contains(t, prompt, `<context filename="/path/to/project/AGENTS.md", dir="/path/to/project">`, "Expected project AGENTS.md context with filename")
 	assert.Contains(t, prompt, "# Project Context", "Expected project AGENTS.md content")
 	assert.Contains(t, prompt, "General project guidelines and conventions.", "Expected project AGENTS.md content")
 
-	assert.Contains(t, prompt, `<context filename="/home/user/.kodelet/AGENTS.md">`, "Expected home AGENTS.md context with filename")
+	assert.Contains(t, prompt, `<context filename="/home/user/.kodelet/AGENTS.md", dir="/home/user/.kodelet">`, "Expected home AGENTS.md context with filename")
 	assert.Contains(t, prompt, "# User Preferences", "Expected home AGENTS.md content")
 	assert.Contains(t, prompt, "Personal coding style and preferences.", "Expected home AGENTS.md content")
 
@@ -157,7 +157,7 @@ func TestSubAgentPrompt_ContextFormattingConsistency(t *testing.T) {
 
 		prompt := SubAgentPrompt("claude-sonnet-4-20250514", llm.Config{}, contexts)
 
-		assert.Contains(t, prompt, `<context filename="/project/docs/CODING_STYLE.md">`, "Expected context file with full path")
+		assert.Contains(t, prompt, `<context filename="/project/docs/CODING_STYLE.md", dir="/project/docs">`, "Expected context file with full path")
 		assert.Contains(t, prompt, "# Coding Style", "Expected markdown header")
 		assert.Contains(t, prompt, "```go", "Expected code block start")
 		assert.Contains(t, prompt, "func Example() {", "Expected code content")
@@ -176,8 +176,8 @@ func TestSubAgentPrompt_ContextFormattingConsistency(t *testing.T) {
 		assert.Contains(t, prompt, "You are an AI SWE Agent", "Expected subagent introduction")
 		assert.Contains(t, prompt, "This is the main project context for subagents.", "Expected main project context")
 		assert.Contains(t, prompt, "Authentication-specific guidelines for subagents.", "Expected auth module context")
-		assert.Contains(t, prompt, `<context filename="/project/AGENTS.md">`, "Expected main project context file")
-		assert.Contains(t, prompt, `<context filename="/project/modules/auth/KODELET.md">`, "Expected auth module context file")
+		assert.Contains(t, prompt, `<context filename="/project/AGENTS.md", dir="/project">`, "Expected main project context file")
+		assert.Contains(t, prompt, `<context filename="/project/modules/auth/KODELET.md", dir="/project/modules/auth">`, "Expected auth module context file")
 	})
 }
 
@@ -196,8 +196,8 @@ func TestSubAgentPrompt_FeatureConsistency(t *testing.T) {
 	assert.Contains(t, systemPrompt, "This content should appear in both", "Expected shared context content in system prompt")
 	assert.Contains(t, subagentPrompt, "This content should appear in both", "Expected shared context content in subagent prompt")
 
-	assert.Contains(t, systemPrompt, `<context filename="/shared/context.md">`, "Expected context file formatting in system prompt")
-	assert.Contains(t, subagentPrompt, `<context filename="/shared/context.md">`, "Expected context file formatting in subagent prompt")
+	assert.Contains(t, systemPrompt, `<context filename="/shared/context.md", dir="/shared">`, "Expected context file formatting in system prompt")
+	assert.Contains(t, subagentPrompt, `<context filename="/shared/context.md", dir="/shared">`, "Expected context file formatting in subagent prompt")
 
 	assert.Contains(t, systemPrompt, "</context>", "Expected context closing tags in system prompt")
 	assert.Contains(t, subagentPrompt, "</context>", "Expected context closing tags in subagent prompt")

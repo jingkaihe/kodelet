@@ -54,7 +54,7 @@ func (r *Renderer) getTemplate(name string) (*template.Template, error) {
 	var selfRef *template.Template
 
 	tmpl = tmpl.Funcs(template.FuncMap{
-		"include": func(tplName string, data interface{}) (string, error) {
+		"include": func(tplName string, data any) (string, error) {
 			var buf strings.Builder
 			err := selfRef.ExecuteTemplate(&buf, tplName, data)
 			return buf.String(), err

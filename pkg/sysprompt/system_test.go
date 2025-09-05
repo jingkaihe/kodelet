@@ -104,13 +104,13 @@ func TestSystemPrompt_WithContexts(t *testing.T) {
 
 	prompt := SystemPrompt("claude-sonnet-4-20250514", llm.Config{}, contexts)
 
-	assert.Contains(t, prompt, "Here are some useful context to help you solve the user's problem:", "Expected context introduction")
+	assert.Contains(t, prompt, "Here are some useful context to help you solve the user's problem.", "Expected context introduction")
 
-	assert.Contains(t, prompt, `<context filename="/path/to/project/AGENTS.md">`, "Expected AGENTS.md context with filename")
+	assert.Contains(t, prompt, `<context filename="/path/to/project/AGENTS.md", dir="/path/to/project">`, "Expected AGENTS.md context with filename")
 	assert.Contains(t, prompt, "# Project Guidelines", "Expected AGENTS.md content")
 	assert.Contains(t, prompt, "This is the main project context.", "Expected AGENTS.md content")
 
-	assert.Contains(t, prompt, `<context filename="/path/to/project/module/KODELET.md">`, "Expected KODELET.md context with filename")
+	assert.Contains(t, prompt, `<context filename="/path/to/project/module/KODELET.md", dir="/path/to/project/module">`, "Expected KODELET.md context with filename")
 	assert.Contains(t, prompt, "# Module Specific", "Expected KODELET.md content")
 	assert.Contains(t, prompt, "This module handles authentication.", "Expected KODELET.md content")
 
@@ -147,7 +147,7 @@ func TestSystemPrompt_ContextFormattingEdgeCases(t *testing.T) {
 
 		prompt := SystemPrompt("claude-sonnet-4-20250514", llm.Config{}, contexts)
 
-		assert.Contains(t, prompt, `<context filename="/path/with spaces/AGENTS.md">`, "Expected path with spaces")
+		assert.Contains(t, prompt, `<context filename="/path/with spaces/AGENTS.md", dir="/path/with spaces">`, "Expected path with spaces")
 		assert.Contains(t, prompt, "Content with <tags> & special chars", "Expected content with special characters")
 		assert.Contains(t, prompt, `quotes "test" and 'test'`, "Expected quotes preserved")
 	})
@@ -159,7 +159,7 @@ func TestSystemPrompt_ContextFormattingEdgeCases(t *testing.T) {
 
 		prompt := SystemPrompt("claude-sonnet-4-20250514", llm.Config{}, contexts)
 
-		assert.Contains(t, prompt, `<context filename="/empty/AGENTS.md">`, "Expected empty context file to be included")
+		assert.Contains(t, prompt, `<context filename="/empty/AGENTS.md", dir="/empty">`, "Expected empty context file to be included")
 		assert.Contains(t, prompt, "</context>", "Expected context to be properly closed even when empty")
 	})
 
@@ -177,8 +177,8 @@ func TestSystemPrompt_ContextFormattingEdgeCases(t *testing.T) {
 		assert.Contains(t, prompt, "Middle content", "Expected middle context")
 		assert.Contains(t, prompt, "Last content", "Expected last context")
 
-		assert.Contains(t, prompt, `<context filename="/a/first.md">`, "Expected first context file")
-		assert.Contains(t, prompt, `<context filename="/m/middle.md">`, "Expected middle context file")
-		assert.Contains(t, prompt, `<context filename="/z/last.md">`, "Expected last context file")
+		assert.Contains(t, prompt, `<context filename="/a/first.md", dir="/a">`, "Expected first context file")
+		assert.Contains(t, prompt, `<context filename="/m/middle.md", dir="/m">`, "Expected middle context file")
+		assert.Contains(t, prompt, `<context filename="/z/last.md", dir="/z">`, "Expected last context file")
 	})
 }

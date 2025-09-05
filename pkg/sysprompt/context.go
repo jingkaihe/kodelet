@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -117,14 +118,17 @@ func (ctx *PromptContext) FormatContexts() string {
 
 	ctxFiles := []string{}
 
-	prompt := "\nHere are some useful context to help you solve the user's problem:\n"
+	prompt := `Here are some useful context to help you solve the user's problem.
+When you are working in these directories, make sure that you are following the guidelines provided in the context:
+`
 	for filename, content := range ctx.ContextFiles {
 		ctxFiles = append(ctxFiles, filename)
+		dir := filepath.Dir(filename)
 		prompt += fmt.Sprintf(`
-<context filename="%s">
+<context filename="%s", dir="%s">
 %s
 </context>
-`, filename, content)
+`, filename, dir, content)
 	}
 
 	logger.G(context.Background()).WithField("context_files", ctxFiles).Debug("loaded context files")
