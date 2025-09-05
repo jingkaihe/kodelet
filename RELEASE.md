@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.0.94.alpha (2025-09-05)
+
+### Go Version Upgrade
+
+**Go Version Upgrade**: Updated Go runtime from 1.24.2 to 1.25.1
+
 ## 0.0.93.alpha (2025-09-05)
 
 ### Hierarchical Context Discovery
