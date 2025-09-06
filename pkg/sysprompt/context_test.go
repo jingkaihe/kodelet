@@ -67,8 +67,6 @@ func TestGetContextFileName(t *testing.T) {
 	})
 }
 
-
-
 // TestFormatContexts tests the context formatting logic
 func TestFormatContexts(t *testing.T) {
 	t.Run("Format with contexts", func(t *testing.T) {

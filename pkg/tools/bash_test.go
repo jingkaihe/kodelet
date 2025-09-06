@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -357,7 +358,7 @@ func TestBashTool_BackgroundExecution(t *testing.T) {
 
 	input := BashInput{
 		Description: "Background echo test",
-		Command:     "echo 'background process' && sleep 0.1 && echo 'done'",
+		Command:     "echo 'background process' && sleep 0.2 && echo 'done'",
 		Timeout:     0, // Background processes must have timeout=0
 		Background:  true,
 	}
@@ -384,18 +385,11 @@ func TestBashTool_BackgroundExecution(t *testing.T) {
 	assert.Equal(t, bgResult.pid, processes[0].PID)
 	assert.Equal(t, input.Command, processes[0].Command)
 
-	// Wait a bit for the process to write to log file
-	time.Sleep(50 * time.Millisecond)
-
-	content, err := os.ReadFile(bgResult.logPath)
-	require.NoError(t, err)
-	assert.Contains(t, string(content), "background process")
+	content := waitForLogContent(t, bgResult.logPath, "background process", 20, 0)
 	assert.NotContains(t, string(content), "done")
 
-	time.Sleep(80 * time.Millisecond)
-
-	content, err = os.ReadFile(bgResult.logPath)
-	require.NoError(t, err)
+	content = waitForLogContent(t, bgResult.logPath, "done", 20, 0)
+	assert.Contains(t, string(content), "background process")
 	assert.Contains(t, string(content), "done")
 }
 
@@ -1232,4 +1226,26 @@ func TestBashTool_ProcessDetachment_StructuredData(t *testing.T) {
 	assistantResult := result.AssistantFacing()
 	assert.Contains(t, assistantResult, "Process is up and running")
 	assert.Contains(t, assistantResult, bgResult.logPath)
+}
+
+// waitForLogContent polls a log file until the expected content is found or max retries is reached.
+// It returns the file content when the expected content is found, or fails the test if not found within the retry limit.
+// The interval parameter specifies the delay between polling attempts. Use 0 to default to 25ms.
+func waitForLogContent(t *testing.T, logPath, expectedContent string, maxRetries int, interval time.Duration) []byte {
+	t.Helper()
+
+	if interval == 0 {
+		interval = 25 * time.Millisecond
+	}
+
+	for i := 0; i < maxRetries; i++ {
+		time.Sleep(interval)
+		content, err := os.ReadFile(logPath)
+		if err == nil && strings.Contains(string(content), expectedContent) {
+			return content
+		}
+	}
+
+	require.Failf(t, "Content not found", "Should find '%s' in log file %s within reasonable time (%d retries, %v interval)", expectedContent, logPath, maxRetries, interval)
+	return nil // unreachable, but needed for compilation
 }

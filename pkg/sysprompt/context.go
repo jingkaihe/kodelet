@@ -98,8 +98,6 @@ func getContextFileName() string {
 	return AgentsMd
 }
 
-
-
 // FormatContexts formats the loaded contexts into a string
 func (ctx *PromptContext) FormatContexts() string {
 	if len(ctx.ContextFiles) == 0 {
