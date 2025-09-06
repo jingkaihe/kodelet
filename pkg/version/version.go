@@ -3,6 +3,7 @@ package version
 import (
 	"encoding/json"
 	"fmt"
+	"runtime"
 )
 
 var (
@@ -24,6 +25,7 @@ type Info struct {
 	Version   string `json:"version"`
 	GitCommit string `json:"gitCommit"`
 	BuildTime string `json:"buildTime"`
+	GoVersion string `json:"goVersion"`
 }
 
 // Get returns the version information
@@ -32,12 +34,13 @@ func Get() Info {
 		Version:   Version,
 		GitCommit: GitCommit,
 		BuildTime: BuildTime,
+		GoVersion: runtime.Version(),
 	}
 }
 
 // String returns the string representation of version info
 func (i Info) String() string {
-	return fmt.Sprintf("Version: %s, GitCommit: %s, BuildTime: %s", i.Version, i.GitCommit, i.BuildTime)
+	return fmt.Sprintf("Version: %s, GitCommit: %s, BuildTime: %s, GoVersion: %s", i.Version, i.GitCommit, i.BuildTime, i.GoVersion)
 }
 
 // JSON returns the JSON representation of version info

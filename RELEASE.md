@@ -4,7 +4,8 @@
 
 ### Go Version Upgrade
 
-**Go Version Upgrade**: Updated Go runtime from 1.24.2 to 1.25.1
+* Updated Go runtime from 1.24.2 to 1.25.1
+* Display the Go version in `kodelet version` command
 
 ## 0.0.93.alpha (2025-09-05)
 
