@@ -121,7 +121,7 @@ def render_sidebar(conversation_manager: ConversationManager) -> Optional[str]:
 
 def render_chat_interface(conversation_manager: ConversationManager):
     """
-    Render the main chat interface.
+    Render the main chat interface with real-time streaming support.
     
     Args:
         conversation_manager: The conversation manager instance
@@ -140,6 +140,7 @@ def render_chat_interface(conversation_manager: ConversationManager):
     chat_container = st.container()
     
     with chat_container:
+        # Display existing messages
         for message in messages:
             with st.chat_message(message["role"]):
                 # Render message content
@@ -150,6 +151,106 @@ def render_chat_interface(conversation_manager: ConversationManager):
                     st.code(content, language="text")
                 else:
                     st.markdown(content)
+        
+        # Handle real-time streaming if active
+        if st.session_state.get("streaming_active", False):
+            render_streaming_response(conversation_manager)
+
+
+def render_streaming_response(conversation_manager: ConversationManager):
+    """
+    Render streaming response in the main chat area.
+    
+    Args:
+        conversation_manager: The conversation manager instance
+    """
+    # Create containers for the streaming response
+    streaming_message_container = st.empty()
+    status_container = st.empty()
+    
+    # Get the message generator from session state
+    message_generator = st.session_state.get("message_generator")
+    if not message_generator:
+        return
+    
+    status_container.info("🤖 Kodelet is thinking...")
+    
+    # Collect streaming content for real-time display
+    accumulated_content = ""
+    message_count = 0
+    
+    # Process messages as they arrive
+    try:
+        for message in message_generator:
+            # Process the message in the conversation manager
+            success = conversation_manager.process_streaming_message(message)
+            message_count += 1
+            
+            if not success:
+                status_container.error("❌ Error occurred")
+                break
+            
+            # Build up the content for real-time display
+            message_text = message.content
+            if message.thinking_text:
+                message_text = f"*Thinking: {message.thinking_text}*\n\n{message.content}"
+            
+            accumulated_content += message_text + "\n\n"
+            
+            # Handle tool calls
+            if message.tool_calls:
+                for tool_call in message.tool_calls:
+                    tool_info = f"🔧 Tool: {tool_call.get('function', {}).get('name', 'Unknown')}"
+                    if 'function' in tool_call and 'arguments' in tool_call['function']:
+                        tool_info += f"\nArgs: {tool_call['function']['arguments']}"
+                    accumulated_content += tool_info + "\n\n"
+            
+            # Update the streaming display in real-time in the main chat area
+            with streaming_message_container.container():
+                with st.chat_message("assistant"):
+                    st.markdown(accumulated_content)
+            
+            # Update status
+            status_container.success(f"📝 Receiving response... ({message_count} parts received)")
+        
+        # Clear the streaming container since messages are now in session state
+        streaming_message_container.empty()
+        
+        # Finalize the conversation
+        conversation_manager.finalize_streaming_conversation()
+        
+        # Show completion status briefly
+        if message_count > 0:
+            status_container.success(f"✅ Response complete! ({message_count} parts received)")
+        else:
+            status_container.warning("🤔 No response received")
+        
+        # Clean up after a moment
+        import time
+        time.sleep(2)
+        status_container.empty()
+        
+    except Exception as e:
+        status_container.error(f"Streaming error: {str(e)}")
+        import time
+        time.sleep(2)
+        status_container.empty()
+    
+    finally:
+        # Clean up temp files
+        temp_image_paths = st.session_state.get("temp_image_paths", [])
+        for path in temp_image_paths:
+            try:
+                import os
+                os.unlink(path)
+            except:
+                pass
+        
+        # Clear streaming state and trigger refresh to show final conversation
+        st.session_state.streaming_active = False
+        st.session_state.message_generator = None
+        st.session_state.temp_image_paths = []
+        st.rerun()
 
 
 def render_input_area(conversation_manager: ConversationManager):
@@ -159,6 +260,11 @@ def render_input_area(conversation_manager: ConversationManager):
     Args:
         conversation_manager: The conversation manager instance
     """
+    # Don't show input if streaming is active
+    if st.session_state.get("streaming_active", False):
+        st.info("🤖 Processing your message... please wait")
+        return
+    
     # Image upload (optional)
     uploaded_files = st.file_uploader(
         "Upload images (optional)", 
@@ -183,40 +289,28 @@ def render_input_area(conversation_manager: ConversationManager):
                     tmp_file.write(uploaded_file.read())
                     image_paths.append(tmp_file.name)
         
-        # Create a placeholder for streaming updates
-        with st.spinner("🤖 Kodelet is thinking..."):
-            # Create containers for real-time updates
-            message_placeholder = st.empty()
-            status_placeholder = st.empty()
+        try:
+            # Get the message generator and set up streaming state
+            message_generator = conversation_manager.send_message(user_input, image_paths)
             
-            # Send the message with streaming
-            try:
-                response, success = conversation_manager.send_message(user_input, image_paths)
-                
-                if success:
-                    message_placeholder.success("✅ Response received!")
-                else:
-                    message_placeholder.error("❌ Error occurred")
-                    
-                # Clear status after a moment
-                import time
-                time.sleep(1)
-                message_placeholder.empty()
-                status_placeholder.empty()
-                
-            except Exception as e:
-                st.error(f"Unexpected error: {str(e)}")
-        
-        # Clean up temp files
-        for path in image_paths:
-            try:
-                import os
-                os.unlink(path)
-            except:
-                pass
-        
-        # Rerun to update the UI
-        st.rerun()
+            # Store the generator and image paths in session state for the main chat interface to handle
+            st.session_state.message_generator = message_generator
+            st.session_state.streaming_active = True
+            st.session_state.temp_image_paths = image_paths  # Store for cleanup
+            
+            # Trigger rerun to start streaming in the main chat interface
+            st.rerun()
+            
+        except Exception as e:
+            st.error(f"Failed to start message: {str(e)}")
+            
+            # Clean up temp files on error
+            for path in image_paths:
+                try:
+                    import os
+                    os.unlink(path)
+                except:
+                    pass
 
 
 def render_status_bar(conversation_manager: ConversationManager):

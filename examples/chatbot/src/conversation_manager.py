@@ -44,73 +44,71 @@ class ConversationManager:
         """Set the current conversation ID."""
         st.session_state.current_conversation_id = conversation_id
     
-    def send_message(self, user_message: str, images: Optional[List[str]] = None) -> Tuple[str, bool]:
+    def send_message(self, user_message: str, images: Optional[List[str]] = None):
         """
-        Send a message using kodelet and update the conversation.
+        Send a message using kodelet and return the message generator.
         
         Args:
             user_message: The user's message
             images: Optional list of image paths
             
         Returns:
-            Tuple of (final_response, success)
+            Generator that yields messages as they arrive
         """
         # Add user message to UI immediately
         self.add_message("user", user_message)
         
-        # Send to kodelet and process streaming responses
-        final_response = ""
-        success = True
+        # Return the generator - let the UI handle the streaming
+        return self.client.run_query(
+            user_message, 
+            self.get_current_conversation_id(),
+            images
+        )
+    
+    def process_streaming_message(self, message) -> bool:
+        """
+        Process a single streaming message and update the conversation.
         
-        try:
-            message_generator = self.client.run_query(
-                user_message, 
-                self.get_current_conversation_id(),
-                images
-            )
+        Args:
+            message: KodeletMessage object
             
-            for message in message_generator:
-                if message.content.startswith("Error:"):
-                    final_response = message.content
-                    success = False
-                    self.add_message("assistant", message.content)
-                    break
-                
-                # Handle thinking text if present (for Claude)
-                if message.thinking_text:
-                    thinking_content = f"*Thinking: {message.thinking_text}*\n\n{message.content}"
-                    self.add_message("assistant", thinking_content)
-                    final_response += thinking_content + "\n"
-                else:
-                    self.add_message("assistant", message.content)
-                    final_response += message.content + "\n"
-                
-                # Handle tool calls if present
-                if message.tool_calls:
-                    for tool_call in message.tool_calls:
-                        tool_info = f"🔧 Tool: {tool_call.get('function', {}).get('name', 'Unknown')}"
-                        if 'function' in tool_call and 'arguments' in tool_call['function']:
-                            tool_info += f"\nArgs: {tool_call['function']['arguments']}"
-                        self.add_message("assistant", tool_info)
-                        final_response += tool_info + "\n"
-            
-            # Update conversation ID if we don't have one yet
-            if not self.get_current_conversation_id():
-                # Try to get the latest conversation ID
-                latest_conv_id = self.client._get_latest_conversation_id()
-                if latest_conv_id:
-                    self.set_current_conversation_id(latest_conv_id)
-            
-        except Exception as e:
-            error_msg = f"Error: {str(e)}"
-            final_response = error_msg
-            success = False
-            self.add_message("assistant", error_msg)
+        Returns:
+            True if message was processed successfully, False if error
+        """
+        if message.content.startswith("Error:"):
+            self.add_message("assistant", message.content)
+            return False
+        
+        # Handle thinking text if present (for Claude)
+        if message.thinking_text:
+            thinking_content = f"*Thinking: {message.thinking_text}*\n\n{message.content}"
+            self.add_message("assistant", thinking_content)
+        else:
+            self.add_message("assistant", message.content)
+        
+        # Handle tool calls if present
+        if message.tool_calls:
+            for tool_call in message.tool_calls:
+                tool_info = f"🔧 Tool: {tool_call.get('function', {}).get('name', 'Unknown')}"
+                if 'function' in tool_call and 'arguments' in tool_call['function']:
+                    tool_info += f"\nArgs: {tool_call['function']['arguments']}"
+                self.add_message("assistant", tool_info)
+        
+        return True
+    
+    def finalize_streaming_conversation(self):
+        """
+        Finalize the streaming conversation by updating conversation ID and refreshing the list.
+        """
+        # Update conversation ID if we don't have one yet
+        if not self.get_current_conversation_id():
+            # Try to get the latest conversation ID
+            latest_conv_id = self.client._get_latest_conversation_id()
+            if latest_conv_id:
+                self.set_current_conversation_id(latest_conv_id)
         
         # Refresh conversation list to show updated conversation
         self.refresh_conversation_list()
-        
-        return final_response.strip(), success
     
     def load_conversation(self, conversation_id: str) -> bool:
         """

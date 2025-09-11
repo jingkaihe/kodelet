@@ -34,12 +34,15 @@ This document outlines the plan for implementing a chatbot web UI powered by kod
 
 ## Implementation Plan
 
-### Phase 1: Basic Chat Interface ✅ (IMPROVED)
+### Phase 1: Basic Chat Interface ✅ (REAL-TIME STREAMING v2.1)
 1. Create basic streamlit app with chat interface ✅
 2. Implement generator-based streaming with subprocess.Popen ✅
 3. API polling for real-time message streaming ✅
 4. Enable multi-turn conversations with conversation ID discovery ✅
 5. Handle user input and display responses incrementally ✅
+6. **v2.0**: Real-time UI updates with `st.empty()` containers ✅
+7. **v2.0**: Live progress indicators and message streaming ✅
+8. **v2.1**: FIXED streaming message location - now appears in main chat thread ✅
 
 ### Phase 2: Conversation Management ✅
 1. Start kodelet serve in background thread
@@ -269,9 +272,123 @@ for message in client.run_query(query, conversation_id):
    - Process lifecycle management
 
 4. **Enhanced User Experience**
-   - Messages appear as kodelet generates them
-   - Better status indicators ("🤖 Kodelet is thinking...")
-   - Improved error feedback and recovery
+   - Messages appear as kodelet generates them ✅
+   - Better status indicators ("🤖 Kodelet is thinking...") ✅  
+   - Improved error feedback and recovery ✅
+   - **FIXED**: Real-time UI updates using `st.empty()` containers ✅
+   - **NEW**: Live message accumulation and progress tracking ✅
+
+### Critical Fix: Real-time UI Updates
+
+**Problem Identified**: The original v2.0 implementation collected all streaming messages internally before updating the UI, which defeated the purpose of real-time streaming.
+
+**Solution Implemented**:
+```python
+# Before: Messages collected invisibly, UI updated once at end
+for message in generator:
+    process_message(message)  # Internal processing only
+# st.rerun()  # UI updates only at the end
+
+# After: Messages streamed to UI in real-time
+accumulated_content = ""
+for message in generator:
+    process_message(message)  # Add to session state
+    accumulated_content += message.content
+    # Update streaming container immediately
+    with streaming_container.container():
+        with st.chat_message("assistant"):
+            st.markdown(accumulated_content)  # Live update!
+    status_container.success(f"📝 Receiving... ({count} parts)")
+```
+
+**Key Technical Improvements**:
+- Moved streaming handling from conversation manager to UI layer
+- Used `st.empty()` containers for real-time content updates  
+- Separated session state management from UI rendering
+- Added live progress indicators and message counters
+- Eliminated blocking behavior that prevented real-time updates
+
+**Critical Fix: Streaming Message Location**
+
+**Problem Identified**: Streaming messages appeared below the input box instead of integrating into the main conversation thread, causing poor UX where messages would "jump up" after completion.
+
+**Solution Implemented**:
+```python
+# BEFORE: Streaming in input area (wrong location)
+def render_input_area():
+    user_input = st.chat_input()
+    if user_input:
+        # Streaming containers created here (below input)
+        streaming_container = st.empty()
+        for message in generator:
+            # Messages appear below input box ❌
+            streaming_container.update(content)
+
+# AFTER: Streaming in main chat interface (correct location)  
+def render_chat_interface():
+    # Display existing messages
+    for message in session_state.messages:
+        render_message(message)
+    
+    # Handle streaming in main chat area
+    if session_state.streaming_active:
+        render_streaming_response()  # ✅ Appears in conversation thread
+
+def render_input_area():
+    user_input = st.chat_input()
+    if user_input:
+        # Just setup streaming state, don't do UI updates
+        session_state.message_generator = get_generator()
+        session_state.streaming_active = True
+        st.rerun()  # Let main interface handle streaming
+```
+
+**Key Architectural Changes**:
+- **Separated Concerns**: Input handling vs. streaming display
+- **Session State**: Streaming state managed via `st.session_state`
+- **Correct Layout**: Streaming happens in main chat area, not input area
+- **Proper Flow**: Input → State Setup → Main Interface Streaming
+
+**Result**: Streaming messages now appear seamlessly in the main conversation thread where users expect them! 🎯
+
+## Summary of Implementation Evolution
+
+### v1.0 (Initial Implementation)
+- ❌ Brittle CLI output parsing with regex
+- ❌ Blocking subprocess calls
+- ❌ Messages only appeared after completion
+- ❌ Poor error handling and recovery
+
+### v2.0 (Real-time Streaming) 
+- ✅ Generator-based streaming architecture
+- ✅ API polling for robust conversation discovery
+- ✅ Real-time message streaming with live updates
+- ❌ Messages appeared below input box (poor UX)
+
+### v2.1 (Fixed Layout + Polish)
+- ✅ All v2.0 improvements retained
+- ✅ **FIXED**: Streaming messages appear in main conversation thread
+- ✅ Proper UI architecture with separated concerns
+- ✅ Session state management for streaming flow
+- ✅ Clean input handling and file management
+- ✅ Professional chat experience with proper message flow
+
+### Technical Architecture (Final)
+```
+User Input (render_input_area)
+    ↓
+Set Session State (streaming_active=True)
+    ↓
+st.rerun() → Main Chat Interface (render_chat_interface)
+    ↓
+Streaming Response (render_streaming_response)
+    ↓
+Real-time Updates in Main Chat Thread
+    ↓
+Finalize & Clean State
+```
+
+This provides the most intuitive and responsive chat experience, with messages appearing exactly where users expect them in the conversation flow! 🚀
 
 ### Performance Benefits
 

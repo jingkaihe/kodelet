@@ -91,11 +91,20 @@ The `run_query` method now works as a generator that yields messages incremental
    - Polls `/api/conversations/{id}` for new messages beyond the offset
    - Yields only new assistant messages (user messages already in UI)
 
+3. **Real-time UI Updates**:
+   - Uses `st.empty()` containers for live message streaming **in the main chat area**
+   - Updates content incrementally as kodelet generates responses
+   - Shows progress indicators and message counts in real-time  
+   - Messages appear **in the conversation thread**, not below input box
+   - Finalizes conversation state when streaming completes
+
 ### Benefits of New Approach
 - **Robust**: No more brittle CLI output parsing
-- **Real-time**: Messages appear as kodelet generates them
+- **Real-time**: Messages appear as kodelet generates them (truly streaming!)
 - **Reliable**: Uses structured API instead of text parsing
-- **Better UX**: Incremental message display with status indicators
+- **Better UX**: Incremental message display with live status indicators
+- **Responsive**: Users see progress immediately, not just final results
+- **Proper Layout**: Streaming messages appear in main conversation thread ✅
 
 ### Key Components
 
