@@ -134,40 +134,90 @@ class TestKodeletClientMocked:
     """Tests for KodeletClient with mocked dependencies."""
     
     @patch('src.kodelet_client.subprocess.run')
-    def test_run_query_success(self, mock_subprocess):
-        """Test successful query execution."""
-        # Mock subprocess response
+    def test_get_latest_conversation_id_success(self, mock_subprocess):
+        """Test successful retrieval of latest conversation ID."""
+        # Mock subprocess response for conversation list
         mock_result = Mock()
         mock_result.returncode = 0
-        mock_result.stdout = """[user]: Hello
-        
-Hi there! How can I help you?
-
-ID: test-conv-789
-To resume this conversation: kodelet run --resume test-conv-789"""
+        mock_result.stdout = '{"conversations": [{"id": "test-conv-123", "createdAt": "2024-01-01T00:00:00Z"}]}'
         mock_subprocess.return_value = mock_result
         
         client = KodeletClient()
-        response, conv_id = client.run_query("Hello")
+        conv_id = client._get_latest_conversation_id()
         
-        assert response == "Hi there! How can I help you?"
-        assert conv_id == "test-conv-789"
+        assert conv_id == "test-conv-123"
         mock_subprocess.assert_called_once()
     
+    @patch('src.kodelet_client.KodeletClient.get_conversations')  # Mock the fallback too
     @patch('src.kodelet_client.subprocess.run')
-    def test_run_query_error(self, mock_subprocess):
-        """Test query execution with error."""
-        # Mock subprocess error response
+    def test_get_latest_conversation_id_no_conversations(self, mock_subprocess, mock_get_conversations):
+        """Test when there are no conversations."""
+        # Mock subprocess response with empty list
         mock_result = Mock()
-        mock_result.returncode = 1
-        mock_result.stderr = "API key not configured"
+        mock_result.returncode = 0
+        mock_result.stdout = '{"conversations": []}'
         mock_subprocess.return_value = mock_result
         
-        client = KodeletClient()
-        response, conv_id = client.run_query("Hello")
+        # Mock the API fallback to also return empty list
+        mock_get_conversations.return_value = []
         
-        assert response == "Error: API key not configured"
+        client = KodeletClient()
+        conv_id = client._get_latest_conversation_id()
+        
         assert conv_id is None
+    
+    @patch('src.kodelet_client.time.sleep')  # Mock sleep to speed up tests
+    @patch('src.kodelet_client.subprocess.Popen')
+    @patch('src.kodelet_client.KodeletClient._get_latest_conversation_id')
+    @patch('src.kodelet_client.KodeletClient.get_conversation')
+    def test_run_query_generator_success(self, mock_get_conv, mock_get_latest_id, mock_popen, mock_sleep):
+        """Test run_query as generator with successful response."""
+        # Mock process - make it exit immediately to avoid polling loop
+        mock_process = Mock()
+        mock_process.poll.return_value = 0  # Process already finished
+        mock_process.wait.return_value = None
+        mock_popen.return_value = mock_process
+        
+        # Mock conversation ID lookup
+        mock_get_latest_id.return_value = "test-conv-456"
+        
+        # Mock conversation with one message
+        mock_conv_with_message = Mock()
+        mock_message = KodeletMessage("assistant", "Hello there!")
+        mock_conv_with_message.messages = [mock_message]
+        
+        # Only the final check will run since process.poll() returns 0 immediately
+        mock_get_conv.return_value = mock_conv_with_message
+        
+        client = KodeletClient()
+        
+        # Collect messages from generator
+        messages = list(client.run_query("Hello"))
+        
+        assert len(messages) == 1
+        assert messages[0].role == "assistant"
+        assert messages[0].content == "Hello there!"
+    
+    @patch('src.kodelet_client.KodeletClient._get_latest_conversation_id')
+    @patch('src.kodelet_client.subprocess.Popen')  
+    def test_run_query_generator_error(self, mock_popen, mock_get_latest_id):
+        """Test run_query generator with error."""
+        # Mock process that fails immediately
+        mock_process = Mock()
+        mock_process.poll.return_value = 1  # Process failed
+        mock_popen.return_value = mock_process
+        
+        # Mock that we can't get conversation ID (service not running)
+        mock_get_latest_id.return_value = None
+        
+        client = KodeletClient()
+        
+        # Collect messages from generator
+        messages = list(client.run_query("Hello"))
+        
+        # Should get error message about conversation ID
+        assert len(messages) == 1
+        assert "Error: Unable to determine conversation ID" in messages[0].content
     
     @patch('src.kodelet_client.requests.get')
     def test_is_serve_running_true(self, mock_get):

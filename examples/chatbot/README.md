@@ -71,11 +71,31 @@ A streamlit-based web UI that provides a chat interface powered by kodelet. This
 
 ## Architecture
 
-The chatbot uses a hybrid approach:
-- **CLI Integration**: Uses `subprocess` to call `kodelet run` and `kodelet run --resume`
-- **API Integration**: Uses `kodelet serve` REST API for conversation history and management
+The chatbot uses a hybrid approach with real-time streaming:
+- **CLI Integration**: Uses `subprocess.Popen` to run `kodelet run` and `kodelet run --resume` in background
+- **API Polling**: Polls `kodelet serve` REST API for real-time message streaming as they arrive
 - **State Management**: Streamlit session state for UI consistency
 - **Background Process**: Automatically manages kodelet serve lifecycle
+
+### Real-time Streaming Implementation
+
+The `run_query` method now works as a generator that yields messages incrementally:
+
+1. **For new conversations** (`kodelet run`):
+   - Starts kodelet process in background
+   - Polls `kodelet conversation list --limit 1 --json` to discover new conversation ID
+   - Streams messages as they appear via `/api/conversations/{id}`
+
+2. **For resumed conversations** (`kodelet run --resume {id}`):
+   - Gets existing message count as offset
+   - Polls `/api/conversations/{id}` for new messages beyond the offset
+   - Yields only new assistant messages (user messages already in UI)
+
+### Benefits of New Approach
+- **Robust**: No more brittle CLI output parsing
+- **Real-time**: Messages appear as kodelet generates them
+- **Reliable**: Uses structured API instead of text parsing
+- **Better UX**: Incremental message display with status indicators
 
 ### Key Components
 

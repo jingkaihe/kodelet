@@ -34,12 +34,12 @@ This document outlines the plan for implementing a chatbot web UI powered by kod
 
 ## Implementation Plan
 
-### Phase 1: Basic Chat Interface ✅
-1. Create basic streamlit app with chat interface
-2. Implement subprocess calls to `kodelet run`
-3. Parse conversation IDs from kodelet output
-4. Enable multi-turn conversations with `--resume`
-5. Handle user input and display responses
+### Phase 1: Basic Chat Interface ✅ (IMPROVED)
+1. Create basic streamlit app with chat interface ✅
+2. Implement generator-based streaming with subprocess.Popen ✅
+3. API polling for real-time message streaming ✅
+4. Enable multi-turn conversations with conversation ID discovery ✅
+5. Handle user input and display responses incrementally ✅
 
 ### Phase 2: Conversation Management ✅
 1. Start kodelet serve in background thread
@@ -231,4 +231,53 @@ CMD ["uv", "run", "streamlit", "run", "app.py", "--server.address", "0.0.0.0"]
 **Phase 3** (Enhanced): Tool visualization and advanced features
 **Phase 4** (Production): Polish, deployment, documentation
 
-This approach provides a clear roadmap for building a production-ready chatbot while maintaining simplicity in the core implementation.
+## Implementation Improvements (v2.0)
+
+### Real-time Streaming Architecture
+
+The chatbot has been upgraded from simple CLI output parsing to a sophisticated real-time streaming system:
+
+#### Original Approach (v1.0)
+```python
+# Old: Brittle text parsing
+response, conv_id = client.run_query(query, conversation_id)
+```
+
+#### New Approach (v2.0) 
+```python
+# New: Generator-based streaming with API polling
+for message in client.run_query(query, conversation_id):
+    # Messages arrive incrementally as kodelet generates them
+    display_message(message)
+```
+
+### Technical Improvements
+
+1. **Robust Conversation ID Discovery**
+   - New conversations: Uses `kodelet conversation list --limit 1 --json`
+   - Resumed conversations: Uses existing ID with message offset
+   - No more regex parsing of CLI output
+
+2. **Real-time Message Streaming**
+   - Polls `/api/conversations/{id}` every second
+   - Yields messages as they appear in the conversation
+   - Handles thinking text, tool calls, and multi-part responses
+
+3. **Better Error Handling** 
+   - Graceful handling of API failures
+   - Timeout protection (30 seconds without changes)
+   - Process lifecycle management
+
+4. **Enhanced User Experience**
+   - Messages appear as kodelet generates them
+   - Better status indicators ("🤖 Kodelet is thinking...")
+   - Improved error feedback and recovery
+
+### Performance Benefits
+
+- **Lower Latency**: Messages appear immediately when generated
+- **More Reliable**: Uses structured API instead of text parsing  
+- **Better Resource Usage**: Background process management
+- **Scalable**: Can handle long-running conversations efficiently
+
+This approach provides a much more professional and responsive chat experience while maintaining full compatibility with kodelet's features.

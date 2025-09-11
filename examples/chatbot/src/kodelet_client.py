@@ -92,17 +92,17 @@ class KodeletClient:
             return False
     
     def run_query(self, query: str, conversation_id: Optional[str] = None,
-                  images: Optional[List[str]] = None) -> Tuple[str, Optional[str]]:
+                  images: Optional[List[str]] = None):
         """
-        Run a kodelet query and return the response and conversation ID.
+        Run a kodelet query and yield messages as they arrive.
         
         Args:
             query: The query to send to kodelet
             conversation_id: Optional conversation ID to resume
             images: Optional list of image paths
             
-        Returns:
-            Tuple of (response, conversation_id)
+        Yields:
+            KodeletMessage objects as they arrive
         """
         cmd = [self.kodelet_binary, "run"]
         
@@ -119,30 +119,124 @@ class KodeletClient:
         cmd.append(query)
         
         try:
-            result = subprocess.run(
-                cmd, 
-                capture_output=True, 
-                text=True, 
-                timeout=300  # 5 minute timeout
+            # Start kodelet in background
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
             )
             
-            if result.returncode != 0:
-                error_msg = result.stderr.strip() if result.stderr else "Unknown error"
-                return f"Error: {error_msg}", conversation_id
+            # Give it a moment to start
+            time.sleep(1)
+            
+            # Get conversation ID
+            if conversation_id:
+                target_conv_id = conversation_id
+                # Get existing message count for offset
+                existing_conv = self.get_conversation(conversation_id)
+                message_offset = len(existing_conv.messages) if existing_conv else 0
+            else:
+                # For new conversations, we need to wait for kodelet to create the conversation
+                # Start with no conversation ID and discover it during polling
+                target_conv_id = None
+                message_offset = 0
+            
+            # Poll for new messages
+            last_message_count = message_offset
+            consecutive_no_change = 0
+            max_no_change = 30  # 30 seconds without change
+            
+            while process.poll() is None or consecutive_no_change < max_no_change:
+                try:
+                    # For new conversations, discover the conversation ID
+                    if target_conv_id is None:
+                        target_conv_id = self._get_latest_conversation_id()
+                        if target_conv_id is None:
+                            consecutive_no_change += 1
+                            time.sleep(1)
+                            continue
+                    
+                    conversation = self.get_conversation(target_conv_id)
+                    if conversation and len(conversation.messages) > last_message_count:
+                        # Yield new messages
+                        new_messages = conversation.messages[last_message_count:]
+                        for message in new_messages:
+                            # Only yield assistant messages (user messages are already in UI)
+                            if message.role == "assistant":
+                                yield message
+                        
+                        last_message_count = len(conversation.messages)
+                        consecutive_no_change = 0
+                    else:
+                        consecutive_no_change += 1
+                        
+                except Exception as e:
+                    print(f"Error polling conversation: {e}")
+                    consecutive_no_change += 1
                 
-            # Parse the output to extract response and conversation ID
-            output = result.stdout
-            response, parsed_conv_id = self._parse_kodelet_output(output)
+                time.sleep(1)  # Poll every second
             
-            # Use parsed conversation ID if we got one, otherwise use the provided one
-            final_conv_id = parsed_conv_id or conversation_id
+            # If we still don't have a conversation ID after all that time, it's an error
+            if target_conv_id is None:
+                yield KodeletMessage("assistant", "Error: Unable to determine conversation ID")
+                return
             
-            return response, final_conv_id
+            # Wait for process to complete if still running
+            if process.poll() is None:
+                try:
+                    process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    process.terminate()
+                    yield KodeletMessage("assistant", "Error: Request timed out")
+                    return
             
+            # Final check for any remaining messages
+            if target_conv_id:
+                try:
+                    conversation = self.get_conversation(target_conv_id)
+                    if conversation and len(conversation.messages) > last_message_count:
+                        new_messages = conversation.messages[last_message_count:]
+                        for message in new_messages:
+                            if message.role == "assistant":
+                                yield message
+                except:
+                    pass  # Ignore errors in final check
+                
         except subprocess.TimeoutExpired:
-            return "Error: Request timed out", conversation_id
+            yield KodeletMessage("assistant", "Error: Request timed out")
         except Exception as e:
-            return f"Error: {str(e)}", conversation_id
+            yield KodeletMessage("assistant", f"Error: {str(e)}")
+    
+    def _get_latest_conversation_id(self) -> Optional[str]:
+        """Get the ID of the most recent conversation."""
+        try:
+            # Use kodelet CLI to get latest conversation
+            result = subprocess.run(
+                [self.kodelet_binary, "conversation", "list", "--limit", "1", "--json"],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            
+            if result.returncode == 0 and result.stdout.strip():
+                data = json.loads(result.stdout)
+                conversations = data.get("conversations", [])
+                if conversations:
+                    return conversations[0]["id"]
+                    
+        except Exception as e:
+            print(f"Error getting latest conversation ID: {e}")
+        
+        # Fallback: try API if CLI fails
+        try:
+            conversations = self.get_conversations(limit=1)
+            if conversations:
+                return conversations[0].id
+        except:
+            pass
+            
+        return None
     
     def _parse_kodelet_output(self, output: str) -> Tuple[str, Optional[str]]:
         """

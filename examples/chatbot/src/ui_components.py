@@ -183,13 +183,34 @@ def render_input_area(conversation_manager: ConversationManager):
                     tmp_file.write(uploaded_file.read())
                     image_paths.append(tmp_file.name)
         
-        # Send the message
-        with st.spinner("Thinking..."):
-            response, success = conversation_manager.send_message(user_input, image_paths)
+        # Create a placeholder for streaming updates
+        with st.spinner("🤖 Kodelet is thinking..."):
+            # Create containers for real-time updates
+            message_placeholder = st.empty()
+            status_placeholder = st.empty()
+            
+            # Send the message with streaming
+            try:
+                response, success = conversation_manager.send_message(user_input, image_paths)
+                
+                if success:
+                    message_placeholder.success("✅ Response received!")
+                else:
+                    message_placeholder.error("❌ Error occurred")
+                    
+                # Clear status after a moment
+                import time
+                time.sleep(1)
+                message_placeholder.empty()
+                status_placeholder.empty()
+                
+            except Exception as e:
+                st.error(f"Unexpected error: {str(e)}")
         
         # Clean up temp files
         for path in image_paths:
             try:
+                import os
                 os.unlink(path)
             except:
                 pass
