@@ -1,17 +1,19 @@
 """Conversation state management for the streamlit chatbot."""
 
+from typing import Optional
+
 import streamlit as st
-from typing import Dict, List, Optional, Tuple
-from .kodelet_client import KodeletClient, KodeletConversation, KodeletMessage
+
+from .kodelet_client import KodeletClient, KodeletConversation
 
 
 class ConversationManager:
     """Manages conversation state for the streamlit app."""
-    
+
     def __init__(self, kodelet_client: KodeletClient):
         self.client = kodelet_client
         self._initialize_session_state()
-    
+
     def _initialize_session_state(self):
         """Initialize streamlit session state variables."""
         if "messages" not in st.session_state:
@@ -22,29 +24,29 @@ class ConversationManager:
             st.session_state.conversation_list = []
         if "conversation_list_last_updated" not in st.session_state:
             st.session_state.conversation_list_last_updated = 0
-            
-    def get_current_messages(self) -> List[Dict[str, str]]:
+
+    def get_current_messages(self) -> list[dict[str, str]]:
         """Get current conversation messages."""
         return st.session_state.messages
-    
+
     def add_message(self, role: str, content: str):
         """Add a message to the current conversation."""
         st.session_state.messages.append({"role": role, "content": content})
-    
+
     def clear_current_conversation(self):
         """Clear the current conversation and start a new one."""
         st.session_state.messages = []
         st.session_state.current_conversation_id = None
-    
+
     def get_current_conversation_id(self) -> Optional[str]:
         """Get the current conversation ID."""
         return st.session_state.current_conversation_id
-    
+
     def set_current_conversation_id(self, conversation_id: str):
         """Set the current conversation ID."""
         st.session_state.current_conversation_id = conversation_id
-    
-    def send_message(self, user_message: str, images: Optional[List[str]] = None):
+
+    def send_message(self, user_message: str, images: Optional[list[str]] = None):
         """
         Send a message using kodelet and return the message generator.
         
@@ -57,14 +59,14 @@ class ConversationManager:
         """
         # Add user message to UI immediately
         self.add_message("user", user_message)
-        
+
         # Return the generator - let the UI handle the streaming
         return self.client.run_query(
-            user_message, 
+            user_message,
             self.get_current_conversation_id(),
             images
         )
-    
+
     def process_streaming_message(self, message) -> bool:
         """
         Process a single streaming message and update the conversation.
@@ -78,14 +80,14 @@ class ConversationManager:
         if message.content.startswith("Error:"):
             self.add_message("assistant", message.content)
             return False
-        
+
         # Handle thinking text if present (for Claude)
         if message.thinking_text:
             thinking_content = f"*Thinking: {message.thinking_text}*\n\n{message.content}"
             self.add_message("assistant", thinking_content)
         else:
             self.add_message("assistant", message.content)
-        
+
         # Handle tool calls if present
         if message.tool_calls:
             for tool_call in message.tool_calls:
@@ -93,9 +95,9 @@ class ConversationManager:
                 if 'function' in tool_call and 'arguments' in tool_call['function']:
                     tool_info += f"\nArgs: {tool_call['function']['arguments']}"
                 self.add_message("assistant", tool_info)
-        
+
         return True
-    
+
     def finalize_streaming_conversation(self):
         """
         Finalize the streaming conversation by updating conversation ID and refreshing the list.
@@ -106,10 +108,10 @@ class ConversationManager:
             latest_conv_id = self.client._get_latest_conversation_id()
             if latest_conv_id:
                 self.set_current_conversation_id(latest_conv_id)
-        
+
         # Refresh conversation list to show updated conversation
         self.refresh_conversation_list()
-    
+
     def load_conversation(self, conversation_id: str) -> bool:
         """
         Load an existing conversation from the API.
@@ -123,10 +125,10 @@ class ConversationManager:
         conversation = self.client.get_conversation(conversation_id)
         if not conversation:
             return False
-            
+
         # Clear current conversation
         st.session_state.messages = []
-        
+
         # Load messages from the conversation
         for message in conversation.messages:
             # Add thinking text if present (for Claude)
@@ -134,7 +136,7 @@ class ConversationManager:
                 self.add_message("assistant", f"*Thinking: {message.thinking_text}*\n\n{message.content}")
             else:
                 self.add_message(message.role, message.content)
-                
+
             # Add tool calls if present
             if message.tool_calls:
                 for tool_call in message.tool_calls:
@@ -142,13 +144,13 @@ class ConversationManager:
                     if 'function' in tool_call and 'arguments' in tool_call['function']:
                         tool_info += f"\nArgs: {tool_call['function']['arguments']}"
                     self.add_message("assistant", tool_info)
-        
+
         # Set the current conversation ID
         self.set_current_conversation_id(conversation_id)
-        
+
         return True
-    
-    def get_conversation_list(self, refresh: bool = False) -> List[KodeletConversation]:
+
+    def get_conversation_list(self, refresh: bool = False) -> list[KodeletConversation]:
         """
         Get the list of conversations, with optional refresh.
         
@@ -160,19 +162,19 @@ class ConversationManager:
         """
         import time
         current_time = time.time()
-        
+
         # Refresh if forced or if it's been more than 30 seconds
-        if (refresh or 
-            current_time - st.session_state.conversation_list_last_updated > 30):
+        last_updated = getattr(st.session_state, 'conversation_list_last_updated', 0)
+        if (refresh or current_time - last_updated > 30):
             st.session_state.conversation_list = self.client.get_conversations()
             st.session_state.conversation_list_last_updated = current_time
-            
+
         return st.session_state.conversation_list
-    
+
     def refresh_conversation_list(self):
         """Force refresh the conversation list."""
         self.get_conversation_list(refresh=True)
-    
+
     def delete_conversation(self, conversation_id: str) -> bool:
         """
         Delete a conversation.
@@ -184,17 +186,17 @@ class ConversationManager:
             True if successful, False otherwise
         """
         success = self.client.delete_conversation(conversation_id)
-        
+
         if success:
             # If we're currently viewing this conversation, clear it
             if st.session_state.current_conversation_id == conversation_id:
                 self.clear_current_conversation()
-                
+
             # Refresh the conversation list
             self.refresh_conversation_list()
-            
+
         return success
-    
+
     def get_conversation_preview(self, conversation: KodeletConversation) -> str:
         """
         Get a preview string for a conversation.
@@ -207,20 +209,20 @@ class ConversationManager:
         """
         if conversation.summary:
             return conversation.summary[:100] + "..." if len(conversation.summary) > 100 else conversation.summary
-        
+
         # If no summary, try to create one from first message
         if conversation.messages:
             first_user_msg = next((msg for msg in conversation.messages if msg.role == "user"), None)
             if first_user_msg:
                 content = first_user_msg.content
                 return content[:100] + "..." if len(content) > 100 else content
-        
+
         return f"{conversation.message_count} messages"
-    
+
     def start_kodelet_serve(self) -> bool:
         """Start kodelet serve if not already running."""
         return self.client.start_serve()
-    
+
     def stop_kodelet_serve(self):
         """Stop kodelet serve."""
         self.client.stop_serve()

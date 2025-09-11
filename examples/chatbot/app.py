@@ -87,6 +87,9 @@ def main():
     # Get conversation manager
     conversation_manager = get_conversation_manager()
     
+    # Ensure session state is initialized for this session
+    conversation_manager._initialize_session_state()
+    
     # Initialize session state
     if "initialized" not in st.session_state:
         st.session_state.initialized = True
