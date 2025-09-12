@@ -1,260 +1,320 @@
-# LogHandler Implementation Plan
+# Conversation Stream Implementation Plan
 
 ## Overview
-Implement a new LogHandler that emits structured log messages with different `kind` fields for different message types. This will be available through a `--headless` command line flag that switches from the default ConsoleMessageHandler to the new LogHandler.
+Implement a new `kodelet conversation stream CONV_ID` command that outputs stored conversations in structured JSON format with different `kind` fields for different message types. This approach leverages the existing conversation storage system without modifying the live execution path.
 
-## Current Architecture Analysis
+## Architecture Advantages
 
-### Handler Interface
-The current `MessageHandler` interface in `pkg/types/llm/handler.go` defines:
-- `HandleText(text string)`
-- `HandleToolUse(toolName string, input string)`
-- `HandleToolResult(toolName string, result string)`
-- `HandleThinking(thinking string)`
-- `HandleDone()`
+### Why `conversation stream` is Better Than LogHandler
+- **Cleaner Architecture**: No changes to complex MessageHandler/execution system
+- **Separation of Concerns**: Execution vs structured output are independent
+- **True Streaming**: Always live by default, like `tail -f` for conversations
+- **Historical Context**: Option to include past data before streaming new entries
+- **Focused Output**: Clean JSON format optimized for real-time analysis and automation
+- **Simpler Implementation**: Uses existing conversation parsing functions
 
-### Existing Handlers
-1. **ConsoleMessageHandler** - Human-readable console output with emojis
-2. **ChannelMessageHandler** - Channel-based messages for TUI
-3. **StringCollectorHandler** - Collects text responses into a string
-
-### Integration Points
-- Handler instantiation: `cmd/kodelet/run.go` line 195
-- Command flags defined: `cmd/kodelet/run.go` lines 237-246
-- Usage throughout codebase for various message processing scenarios
+### Current Conversation Architecture
+- **Persistence**: Conversations store `RawMessages` (raw LLM provider messages), `ToolResults` (structured tool results), usage stats, and metadata
+- **Existing Parsers**: `anthropic.ExtractMessages()` and `openai.ExtractMessages()` already parse provider-specific formats
+- **Storage**: Complete conversation history available immediately after execution
 
 ## Implementation Plan
 
-### 1. Create LogHandler Structure
+### 1. Create Stream Command Structure
 
-**File**: `pkg/types/llm/handler.go`
+**File**: `cmd/kodelet/conversation.go`
 
-Add a new `LogHandler` struct that outputs structured JSON logs with the required `kind` field:
+Add a new subcommand for conversation streaming:
 
 ```go
-// LogHandler emits structured log messages in JSON format
-type LogHandler struct {
-    Silent bool // For consistency with other handlers
+var conversationStreamCmd = &cobra.Command{
+    Use:   "stream [conversation-id]",
+    Short: "Live stream conversation updates in structured JSON format",
+    Long:  "Stream new conversation entries in real-time. Use --include-history to show historical data first, then stream new entries (like tail -f). All output is JSON - use jq for filtering and analysis.",
+    Args:  cobra.ExactArgs(1),
+    RunE:  streamConversation,
+}
+
+func init() {
+    conversationStreamCmd.Flags().Bool("include-history", false, "Include historical conversation data before streaming new entries")
+    conversationCmd.AddCommand(conversationStreamCmd)
 }
 ```
 
-The handler will emit logs in the following JSON format:
-```json
-{"kind": "text", "content": "message content", "timestamp": "2024-01-01T12:00:00Z"}
-{"kind": "tool-use", "tool_name": "bash", "input": "ls -la", "timestamp": "2024-01-01T12:00:00Z"}
-{"kind": "tool-result", "tool_name": "bash", "result": "file listing output", "timestamp": "2024-01-01T12:00:00Z"}
-{"kind": "thinking", "content": "thinking content", "timestamp": "2024-01-01T12:00:00Z"}
-{"kind": "log", "content": "Done", "timestamp": "2024-01-01T12:00:00Z"}
-```
+### 2. Add Stream Service Method
 
-### 2. Implement LogHandler Methods
+**File**: `pkg/conversations/service.go`
 
-**File**: `pkg/types/llm/handler.go`
-
-Implement the `MessageHandler` interface:
+Add streaming capability to the ConversationService:
 
 ```go
-func (h *LogHandler) HandleText(text string)
-func (h *LogHandler) HandleToolUse(toolName string, input string)  
-func (h *LogHandler) HandleToolResult(toolName string, result string)
-func (h *LogHandler) HandleThinking(thinking string)
-func (h *LogHandler) HandleDone()
+// StreamRequest represents a request to stream a conversation
+type StreamRequest struct {
+    ConversationID   string `json:"conversationId"`
+    IncludeHistory   bool   `json:"includeHistory"`  // Include historical data before streaming
+}
+
+// StreamEntry represents a single stream entry
+type StreamEntry struct {
+    Kind      string     `json:"kind"`
+    Content   *string    `json:"content,omitempty"`
+    ToolName  *string    `json:"tool_name,omitempty"`
+    Input     *string    `json:"input,omitempty"`
+    Result    *string    `json:"result,omitempty"`
+    Role      string     `json:"role,omitempty"` // "user", "assistant"
+}
+
+func (s *ConversationService) GetHistoricalEntries(ctx context.Context, req *StreamRequest) ([]StreamEntry, error)
+func (s *ConversationService) StreamNewEntries(ctx context.Context, req *StreamRequest) error
 ```
 
-Each method will:
-- Create a structured log entry with appropriate `kind` and fields
-- Include timestamp in ISO 8601 format  
-- Output as JSON to stdout
-- Use different field structures based on message type:
-  - Text/thinking/log: `{"kind": "text", "content": "...", "timestamp": "..."}`
-  - Tool use: `{"kind": "tool-use", "tool_name": "...", "input": "...", "timestamp": "..."}`
-  - Tool result: `{"kind": "tool-result", "tool_name": "...", "result": "...", "timestamp": "..."}`
-- Respect the `Silent` flag for consistency
+### 3. Provider-Specific Message Streaming
 
-### 3. Update RunConfig Structure
+**Files**: `pkg/llm/anthropic/persistence.go`, `pkg/llm/openai/persistence.go`
 
-**File**: `cmd/kodelet/run.go`
-
-Add `Headless` field to `RunConfig` struct:
+Extend existing parsing functions to return streaming-compatible data:
 
 ```go
-type RunConfig struct {
-    // ... existing fields ...
-    Headless bool // Use LogHandler instead of ConsoleMessageHandler
+// StreamableMessage contains parsed message data for streaming
+type StreamableMessage struct {
+    Kind        string    // "text", "tool-use", "tool-result", "thinking"
+    Role        string    // "user", "assistant", "system"
+    Content     string    // Text content
+    ToolName    string    // For tool use/result
+    ToolCallID  string    // For matching tool results
+    Input       string    // For tool use
+}
+
+// StreamMessages parses raw messages into streamable format
+func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tools.StructuredToolResult) ([]StreamableMessage, error)
+```
+
+### 4. Update Anthropic Parser
+
+**File**: `pkg/llm/anthropic/persistence.go`
+
+```go
+func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tools.StructuredToolResult) ([]StreamableMessage, error) {
+    messages, err := DeserializeMessages(rawMessages)
+    if err != nil {
+        return nil, err
+    }
+
+    var streamable []StreamableMessage
+    
+    for _, msg := range messages {
+        for _, contentBlock := range msg.Content {
+            if textBlock := contentBlock.OfText; textBlock != nil {
+                streamable = append(streamable, StreamableMessage{
+                    Kind:      "text",
+                    Role:      string(msg.Role),
+                    Content:   textBlock.Text,
+                })
+            }
+            
+            if toolUseBlock := contentBlock.OfToolUse; toolUseBlock != nil {
+                inputJSON, _ := json.Marshal(toolUseBlock.Input)
+                streamable = append(streamable, StreamableMessage{
+                    Kind:       "tool-use",
+                    Role:       string(msg.Role),
+                    ToolName:   toolUseBlock.Name,
+                    ToolCallID: toolUseBlock.ID,
+                    Input:      string(inputJSON),
+                })
+            }
+            
+            if toolResultBlock := contentBlock.OfToolResult; toolResultBlock != nil {
+                result := ""
+                if structuredResult, ok := toolResults[toolResultBlock.ToolUseID]; ok {
+                    registry := renderers.NewRendererRegistry()
+                    result = registry.Render(structuredResult)
+                }
+                streamable = append(streamable, StreamableMessage{
+                    Kind:      "tool-result",
+                    Role:      string(msg.Role),
+                    ToolName:  extractToolName(toolResultBlock.ToolUseID, toolResults),
+                    Result:    result,
+                })
+            }
+        }
+    }
+    
+    return streamable, nil
 }
 ```
 
-Update `NewRunConfig()` to initialize `Headless: false` by default.
+### 5. Update OpenAI Parser
 
-### 4. Add Command Line Flag
+**File**: `pkg/llm/openai/persistence.go`
 
-**File**: `cmd/kodelet/run.go`
+Similar implementation for OpenAI message format parsing.
 
-Add the `--headless` flag after line 246:
+### 6. Stream Command Implementation
 
-```go
-runCmd.Flags().Bool("headless", defaults.Headless, "Use structured logging output instead of console formatting")
-```
-
-### 5. Update Handler Selection Logic
-
-**File**: `cmd/kodelet/run.go`
-
-Replace the hardcoded ConsoleMessageHandler instantiation (line 195) with conditional logic:
+**File**: `cmd/kodelet/conversation.go`
 
 ```go
-var handler llmtypes.MessageHandler
-if config.Headless {
-    handler = &llmtypes.LogHandler{Silent: false}
-} else {
-    handler = &llmtypes.ConsoleMessageHandler{Silent: false}
+func streamConversation(cmd *cobra.Command, args []string) error {
+    conversationID := args[0]
+    
+    // Parse flags
+    includeHistory, _ := cmd.Flags().GetBool("include-history")
+    
+    service, err := conversations.GetDefaultConversationService(ctx)
+    if err != nil {
+        return err
+    }
+    defer service.Close()
+    
+    req := &conversations.StreamRequest{
+        ConversationID: conversationID,
+        IncludeHistory: includeHistory,
+    }
+    
+    return streamLive(ctx, service, req)
 }
-```
 
-### 6. Bind Command Flag to Config
+func streamLive(ctx context.Context, service *conversations.ConversationService, req *conversations.StreamRequest) error {
+    // If include-history is true, first output historical data
+    if req.IncludeHistory {
+        entries, err := service.GetHistoricalEntries(ctx, req)
+        if err != nil {
+            return err
+        }
+        
+        for _, entry := range entries {
+            data, _ := json.Marshal(entry)
+            fmt.Println(string(data))
+        }
+    }
+    
+    // Then start live streaming of new entries
+    // Implementation: watch for conversation updates and stream new entries
+    // Could use file watching, polling, or database triggers
+    return streamNewEntries(ctx, service, req)
+}
 
-**File**: `cmd/kodelet/run.go`
-
-Add flag binding in the `RunE` function where other flags are processed:
-
-```go
-headless, _ := cmd.Flags().GetBool("headless")
-config.Headless = headless
+func streamLive(ctx context.Context, service *conversations.ConversationService, req *conversations.StreamRequest) error {
+    // Implementation for live streaming with conversation updates
+    // Could use file watching or polling mechanism
+    return fmt.Errorf("live streaming not yet implemented")
+}
 ```
 
 ### 7. Add Tests
 
-**File**: `pkg/types/llm/handler_test.go`
+**File**: `pkg/conversations/stream_test.go`
 
-Add comprehensive tests for LogHandler:
-
-```go
-func TestLogHandler_HandleText(t *testing.T)
-func TestLogHandler_HandleToolUse(t *testing.T)
-func TestLogHandler_HandleToolResult(t *testing.T)
-func TestLogHandler_HandleThinking(t *testing.T)
-func TestLogHandler_HandleDone(t *testing.T)
-func TestLogHandler_JSONFormat(t *testing.T)
-func TestLogHandler_SilentMode(t *testing.T)
-```
-
-Tests should verify:
-- Proper JSON structure
-- Correct `kind` field values
-- Timestamp format validation
-- Silent mode functionality
-- Proper handling of newlines and special characters
-
-### 8. Update Documentation
-
-**Files**: `AGENTS.md`, `docs/MANUAL.md`
-
-Add documentation for:
-- `--headless` flag usage
-- LogHandler output format
-- Use cases for structured logging
-- Integration with log aggregation systems
-
-### 9. Consider Additional Integration Points
-
-**Files**: Various tool implementations
-
-Review other locations where handlers are used to ensure consistency:
-- `pkg/tools/subagent.go` - May benefit from headless mode
-- `pkg/tools/web_fetch.go` - Consider structured output option
-- `pkg/tools/image_recognition.go` - Consider structured output option
+Comprehensive tests for:
+- Anthropic message parsing
+- OpenAI message parsing  
+- JSON output format
+- Historical data inclusion
+- Live streaming behavior
 
 ## Output Format Specification
 
-The LogHandler will emit newline-delimited JSON (NDJSON) with the following structure:
+All output is JSON format (newline-delimited JSON):
 
-```typescript
-interface BaseLogEntry {
-  kind: 'text' | 'tool-use' | 'tool-result' | 'thinking' | 'log';
-  timestamp: string; // ISO 8601 format
-}
-
-interface TextLogEntry extends BaseLogEntry {
-  kind: 'text' | 'thinking' | 'log';
-  content: string;
-}
-
-interface ToolUseLogEntry extends BaseLogEntry {
-  kind: 'tool-use';
-  tool_name: string;
-  input: string;
-}
-
-interface ToolResultLogEntry extends BaseLogEntry {
-  kind: 'tool-result';
-  tool_name: string;
-  result: string;
-}
-
-type LogEntry = TextLogEntry | ToolUseLogEntry | ToolResultLogEntry;
+```json
+{"kind": "text", "content": "Hello, I'll help you deploy the app", "role": "assistant"}
+{"kind": "tool-use", "tool_name": "bash", "input": "kubectl get pods", "role": "assistant"}
+{"kind": "tool-result", "tool_name": "bash", "result": "NAME                 READY   STATUS\napp-123              1/1     Running", "role": "assistant"}
+{"kind": "thinking", "content": "The deployment looks successful", "role": "assistant"}
 ```
 
-### Kind Mapping and Field Structure
-- `text` - Regular LLM text output (HandleText)
-  - Fields: `kind`, `content`, `timestamp`
-- `tool-use` - Tool invocation (HandleToolUse)  
-  - Fields: `kind`, `tool_name`, `input`, `timestamp`
-- `tool-result` - Tool execution result (HandleToolResult)
-  - Fields: `kind`, `tool_name`, `result`, `timestamp`
-- `thinking` - LLM thinking/reasoning (HandleThinking)
-  - Fields: `kind`, `content`, `timestamp`
-- `log` - System messages like "Done" (HandleDone)
-  - Fields: `kind`, `content`, `timestamp`
+## Usage Examples
 
-### Benefits of Structured Fields
-Having separate fields for `tool_name`, `input`, and `result` provides several advantages:
-- **Easy filtering** - Query logs by specific tool types (`tool_name="bash"`)
-- **Better analytics** - Analyze tool usage patterns and performance
-- **Structured parsing** - No need to parse combined strings
-- **Database integration** - Direct mapping to database columns
-- **Log aggregation** - Better support for tools like Elasticsearch, Splunk, etc.
+### Basic Streaming
+```bash
+# Run conversation in one terminal
+kodelet run "deploy the app"
 
-## Backward Compatibility
+# In another terminal, stream new entries only (from now forward)
+kodelet conversation stream conv-123
 
-- Default behavior unchanged (ConsoleMessageHandler remains default)
-- All existing command line flags continue to work
-- No breaking changes to API or interface
-- Silent mode maintained for consistency with other handlers
+# Or include historical data + stream new entries (like tail -f)
+kodelet conversation stream --include-history conv-123
+```
 
-## Testing Strategy
+### Live Monitoring and Analysis
+```bash
+# Stream new entries only
+kodelet conversation stream conv-123
 
-1. **Unit Tests** - Test each handler method individually
-2. **Integration Tests** - Test flag parsing and handler selection
-3. **Format Tests** - Validate JSON structure and content
-4. **End-to-End Tests** - Test complete workflow with `--headless` flag
+# Include historical context + live streaming
+kodelet conversation stream --include-history conv-123
 
-## Future Considerations
+# Filter with jq - only show tool usage
+kodelet conversation stream conv-123 | jq -r 'select(.kind=="tool-use" or .kind=="tool-result")'
 
-- **Log Levels** - Consider adding log level support (debug, info, warn, error)
-- **Structured Data** - Consider adding metadata fields (conversation ID, turn number)
-- **Output Destinations** - Consider adding file output option instead of just stdout
-- **Filtering** - Consider allowing filtering of specific message kinds
-- **Batching** - Consider batching multiple log entries for high-throughput scenarios
+# Filter out thinking blocks
+kodelet conversation stream conv-123 | jq -r 'select(.kind != "thinking")'
+
+# Real-time tool analysis
+kodelet conversation stream --include-history conv-123 | jq -r 'select(.kind=="tool-use") | .tool_name' | sort | uniq -c
+
+# Complex filtering - only bash commands that failed
+kodelet conversation stream conv-123 | jq -r 'select(.kind=="tool-result" and .tool_name=="bash" and (.result | contains("error") or contains("failed")))'
+```
+
+### CI/CD Integration
+```bash
+# Terminal 1: Start deployment
+kodelet run "run tests and deploy" 
+
+# Terminal 2: Monitor in real-time and capture only bash tool results
+kodelet conversation stream --include-history conv-123 | jq -r 'select(.kind=="tool-result" and .tool_name=="bash") | .result' > deployment.log
+
+# Monitor tool failures in real-time
+kodelet conversation stream conv-123 | jq -r 'select(.kind=="tool-result") | select(.result | contains("error") or contains("failed"))'
+```
+
+## Benefits
+
+1. **Clean Architecture** - No changes to execution path or handlers
+2. **Live Streaming** - True real-time monitoring of conversation updates
+3. **KISS Principle** - Single flag (`--include-history`), jq handles all filtering
+4. **Unix Philosophy** - Plays well with standard tools (jq, grep, etc.)
+5. **Powerful Analysis** - jq enables complex filtering and data extraction
+6. **CI/CD Integration** - Perfect for automated deployment monitoring with custom filtering
 
 ## Implementation Order
 
-1. Create LogHandler struct and methods
-2. Add command line flag and config field
-3. Update handler selection logic
-4. Write comprehensive tests
-5. Update documentation
-6. Test end-to-end functionality
-7. Consider additional integration points
+1. Create basic `conversation stream` command with `--include-history` flag
+2. Implement `StreamMessages` functions for Anthropic and OpenAI  
+3. Add service methods for historical entries and live streaming
+4. Implement JSON output (no filtering - jq handles that)
+5. Implement live streaming mechanism (polling or file watching)
+6. Write comprehensive tests
+7. Document usage patterns with jq examples
 
 ## Success Criteria
 
-- `kodelet run --headless "query"` produces structured JSON logs with separate fields for tool operations:
-  ```
-  {"kind": "tool-use", "tool_name": "bash", "input": "pwd", "timestamp": "2024-01-01T12:00:00Z"}
-  {"kind": "tool-result", "tool_name": "bash", "result": "/home/user", "timestamp": "2024-01-01T12:00:01Z"}
-  {"kind": "text", "content": "You are currently in /home/user", "timestamp": "2024-01-01T12:00:02Z"}
-  ```
-- All existing functionality works unchanged when `--headless` is not used
-- JSON output is valid and parseable with proper field separation for tools
+- `kodelet conversation stream conv-123` starts live streaming of new entries in structured JSON format
+- `kodelet conversation stream --include-history conv-123` shows historical data then streams new entries (like `tail -f`)
+- JSON output is valid and parseable with proper field separation
+- All conversation data (including thinking) is streamed - users filter with jq as needed
+- Tool usage analysis works in real-time with jq: `| jq -r 'select(.kind=="tool-use") | .tool_name'`
+- Integration with CI/CD monitoring pipelines is straightforward using jq filtering
 - Tests achieve >90% coverage for new code
-- Documentation clearly explains the feature and use cases
+- All existing conversation functionality remains unchanged
+
+**CI/CD Integration**:
+```bash
+# In CI pipeline, monitor tool usage and parse results
+kodelet run --headless "run the tests and fix any failures" | jq -r 'select(.kind=="tool-use") | .tool_name' | sort | uniq -c
+```
+
+**Log Aggregation**:
+```bash
+# Stream to log aggregation system
+kodelet run --headless "deploy the application" | fluent-cat kodelet.operations
+```
+
+**Conversation Management**:
+```bash
+# Resume conversation with structured output
+konv_id=$(kodelet conversation list --limit 1 | jq -r '.conversations[0].id')
+kodelet run --headless --resume $konv_id "continue with the deployment"
+```
