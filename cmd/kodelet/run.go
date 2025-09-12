@@ -190,7 +190,7 @@ var runCmd = &cobra.Command{
 		stateOpts = append(stateOpts, tools.WithMainTools())
 		appState := tools.NewBasicState(ctx, stateOpts...)
 
-		fmt.Printf("\033[1;33m[user]: \033[0m%s\n", query)
+		presenter.Info(fmt.Sprintf("[User]: %s", query))
 
 		handler := &llmtypes.ConsoleMessageHandler{Silent: false}
 		thread, err := llm.NewThread(llmConfig)
