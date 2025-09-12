@@ -15,6 +15,8 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/llm"
+	"github.com/jingkaihe/kodelet/pkg/llm/anthropic"
+	"github.com/jingkaihe/kodelet/pkg/llm/openai"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -184,6 +186,28 @@ var conversationEditCmd = &cobra.Command{
 	},
 }
 
+type ConversationStreamConfig struct {
+	IncludeHistory bool
+}
+
+func NewConversationStreamConfig() *ConversationStreamConfig {
+	return &ConversationStreamConfig{
+		IncludeHistory: false,
+	}
+}
+
+var conversationStreamCmd = &cobra.Command{
+	Use:   "stream [conversationID]",
+	Short: "Stream conversation updates in structured JSON format",
+	Long:  "Stream conversation entries in real-time. Use --include-history to show historical data first, then stream new entries (like tail -f). All output is JSON - use jq for filtering and analysis.",
+	Args:  cobra.ExactArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		ctx := cmd.Context()
+		config := getConversationStreamConfigFromFlags(cmd)
+		streamConversationCmd(ctx, args[0], config)
+	},
+}
+
 func init() {
 	listDefaults := NewConversationListConfig()
 	conversationListCmd.Flags().String("start", listDefaults.StartDate, "Filter conversations after this date (format: YYYY-MM-DD)")
@@ -212,12 +236,17 @@ func init() {
 	editDefaults := NewConversationEditConfig()
 	conversationEditCmd.Flags().String("editor", editDefaults.Editor, "Editor to use for editing the conversation (default: git config core.editor, then $EDITOR, then vim)")
 	conversationEditCmd.Flags().String("edit-args", editDefaults.EditArgs, "Additional arguments to pass to the editor (e.g., '--wait' for VS Code)")
+
+	streamDefaults := NewConversationStreamConfig()
+	conversationStreamCmd.Flags().Bool("include-history", streamDefaults.IncludeHistory, "Include historical conversation data before streaming new entries")
+
 	conversationCmd.AddCommand(conversationListCmd)
 	conversationCmd.AddCommand(conversationDeleteCmd)
 	conversationCmd.AddCommand(conversationShowCmd)
 	conversationCmd.AddCommand(conversationImportCmd)
 	conversationCmd.AddCommand(conversationExportCmd)
 	conversationCmd.AddCommand(conversationEditCmd)
+	conversationCmd.AddCommand(conversationStreamCmd)
 }
 
 func getConversationListConfigFromFlags(cmd *cobra.Command) *ConversationListConfig {
@@ -293,6 +322,16 @@ func getConversationExportConfigFromFlags(cmd *cobra.Command) *ConversationExpor
 
 	if usePublicGist, err := cmd.Flags().GetBool("public-gist"); err == nil {
 		config.UsePublicGist = usePublicGist
+	}
+
+	return config
+}
+
+func getConversationStreamConfigFromFlags(cmd *cobra.Command) *ConversationStreamConfig {
+	config := NewConversationStreamConfig()
+
+	if includeHistory, err := cmd.Flags().GetBool("include-history"); err == nil {
+		config.IncludeHistory = includeHistory
 	}
 
 	return config
@@ -816,4 +855,58 @@ func editConversationCmd(ctx context.Context, conversationID string, config *Con
 	}
 
 	presenter.Success(fmt.Sprintf("Conversation %s edited successfully", conversationID))
+}
+
+func streamConversationCmd(ctx context.Context, conversationID string, config *ConversationStreamConfig) {
+	// Import the provider packages to ensure streaming functions are available
+	// (imports already exist at the top of the file)
+
+	service, err := conversations.GetDefaultConversationService(ctx)
+	if err != nil {
+		presenter.Error(err, "Failed to get conversation service")
+		os.Exit(1)
+	}
+	defer service.Close()
+
+	// Check if conversation exists
+	_, err = service.GetConversation(ctx, conversationID)
+	if err != nil {
+		presenter.Error(err, fmt.Sprintf("Conversation %s not found", conversationID))
+		os.Exit(1)
+	}
+
+	streamer := conversations.NewConversationStreamer(service)
+
+	// Register message parsers for different providers
+	streamer.RegisterMessageParser("anthropic", func(rawMessages json.RawMessage, toolResults map[string]tools.StructuredToolResult) ([]conversations.StreamableMessage, error) {
+		msgs, err := anthropic.StreamMessages(rawMessages, toolResults)
+		if err != nil {
+			return nil, err
+		}
+		return convertAnthropicStreamableMessages(msgs), nil
+	})
+
+	streamer.RegisterMessageParser("openai", func(rawMessages json.RawMessage, toolResults map[string]tools.StructuredToolResult) ([]conversations.StreamableMessage, error) {
+		msgs, err := openai.StreamMessages(rawMessages, toolResults)
+		if err != nil {
+			return nil, err
+		}
+		return convertOpenAIStreamableMessages(msgs), nil
+	})
+
+	// Stream historical data first if requested
+	if config.IncludeHistory {
+		err := streamer.StreamHistoricalData(ctx, conversationID)
+		if err != nil {
+			presenter.Error(err, "Failed to stream historical data")
+			os.Exit(1)
+		}
+	}
+
+	// Then stream live updates
+	err = streamer.StreamLiveUpdates(ctx, conversationID)
+	if err != nil {
+		presenter.Error(err, "Failed to stream conversation updates")
+		os.Exit(1)
+	}
 }

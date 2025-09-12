@@ -165,6 +165,91 @@ func DeserializeMessages(b []byte) ([]anthropic.MessageParam, error) {
 	return messages, nil
 }
 
+// StreamableMessage contains parsed message data for streaming
+type StreamableMessage struct {
+	Kind       string // "text", "tool-use", "tool-result", "thinking"
+	Role       string // "user", "assistant", "system"
+	Content    string // Text content
+	ToolName   string // For tool use/result
+	ToolCallID string // For matching tool results
+	Input      string // For tool use (JSON string)
+}
+
+// StreamMessages parses raw messages into streamable format for conversation streaming
+func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltypes.StructuredToolResult) ([]StreamableMessage, error) {
+	messages, err := DeserializeMessages(rawMessages)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to deserialize anthropic messages")
+	}
+
+	var streamable []StreamableMessage
+
+	for _, msg := range messages {
+		for _, contentBlock := range msg.Content {
+			// Handle text blocks
+			if textBlock := contentBlock.OfText; textBlock != nil && textBlock.Text != "" {
+				streamable = append(streamable, StreamableMessage{
+					Kind:    "text",
+					Role:    string(msg.Role),
+					Content: textBlock.Text,
+				})
+			}
+
+			// Handle tool use blocks
+			if toolUseBlock := contentBlock.OfToolUse; toolUseBlock != nil {
+				inputJSON, _ := json.Marshal(toolUseBlock.Input)
+				streamable = append(streamable, StreamableMessage{
+					Kind:       "tool-use",
+					Role:       string(msg.Role),
+					ToolName:   toolUseBlock.Name,
+					ToolCallID: toolUseBlock.ID,
+					Input:      string(inputJSON),
+				})
+			}
+
+			// Handle tool result blocks
+			if toolResultBlock := contentBlock.OfToolResult; toolResultBlock != nil {
+				result := ""
+				toolName := ""
+
+				// Extract tool name from tool results map
+				if structuredResult, ok := toolResults[toolResultBlock.ToolUseID]; ok {
+					toolName = structuredResult.ToolName
+					// Render the structured result using the CLI renderer
+					registry := renderers.NewRendererRegistry()
+					result = registry.Render(structuredResult)
+				} else {
+					// Fallback: extract raw text from tool result
+					for _, resultContent := range toolResultBlock.Content {
+						if textBlock := resultContent.OfText; textBlock != nil {
+							result += textBlock.Text
+						}
+					}
+				}
+
+				streamable = append(streamable, StreamableMessage{
+					Kind:       "tool-result",
+					Role:       string(msg.Role),
+					ToolName:   toolName,
+					ToolCallID: toolResultBlock.ToolUseID,
+					Content:    result,
+				})
+			}
+
+			// Handle thinking blocks
+			if thinkingBlock := contentBlock.OfThinking; thinkingBlock != nil && thinkingBlock.Thinking != "" {
+				streamable = append(streamable, StreamableMessage{
+					Kind:    "thinking",
+					Role:    string(msg.Role),
+					Content: thinkingBlock.Thinking,
+				})
+			}
+		}
+	}
+
+	return streamable, nil
+}
+
 // ExtractMessages parses the raw messages from a conversation record
 func ExtractMessages(rawMessages json.RawMessage, toolResults map[string]tooltypes.StructuredToolResult) ([]llm.Message, error) {
 	// Deserialize the raw messages using the existing DeserializeMessages function

@@ -136,6 +136,89 @@ func (t *OpenAIThread) restoreBackgroundProcesses(processes []tooltypes.Backgrou
 	}
 }
 
+// StreamableMessage contains parsed message data for streaming
+type StreamableMessage struct {
+	Kind       string // "text", "tool-use", "tool-result", "thinking"
+	Role       string // "user", "assistant", "system"
+	Content    string // Text content
+	ToolName   string // For tool use/result
+	ToolCallID string // For matching tool results
+	Input      string // For tool use (JSON string)
+}
+
+// StreamMessages parses raw messages into streamable format for conversation streaming
+func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltypes.StructuredToolResult) ([]StreamableMessage, error) {
+	var messages []openai.ChatCompletionMessage
+	if err := json.Unmarshal(rawMessages, &messages); err != nil {
+		return nil, errors.Wrap(err, "error unmarshaling messages")
+	}
+
+	var streamable []StreamableMessage
+
+	for _, msg := range messages {
+		// Skip system messages as they are implementation details
+		if msg.Role == openai.ChatMessageRoleSystem {
+			continue
+		}
+
+		// Handle tool results first (before plain content)
+		if msg.Role == openai.ChatMessageRoleTool {
+			result := msg.Content
+			toolName := ""
+			// Use CLI rendering if structured result is available
+			if structuredResult, ok := toolResults[msg.ToolCallID]; ok {
+				toolName = structuredResult.ToolName
+				registry := renderers.NewRendererRegistry()
+				result = registry.Render(structuredResult)
+			}
+			streamable = append(streamable, StreamableMessage{
+				Kind:       "tool-result",
+				Role:       "assistant", // Tool results are shown as assistant messages
+				ToolName:   toolName,
+				ToolCallID: msg.ToolCallID,
+				Content:    result,
+			})
+			continue
+		}
+
+		// Handle plain content (legacy format)
+		if msg.Content != "" && len(msg.MultiContent) == 0 && len(msg.ToolCalls) == 0 {
+			streamable = append(streamable, StreamableMessage{
+				Kind:    "text",
+				Role:    string(msg.Role),
+				Content: msg.Content,
+			})
+		}
+
+		// Handle text blocks in MultiContent
+		for _, contentBlock := range msg.MultiContent {
+			if contentBlock.Text != "" {
+				streamable = append(streamable, StreamableMessage{
+					Kind:    "text",
+					Role:    string(msg.Role),
+					Content: contentBlock.Text,
+				})
+			}
+		}
+
+		// Handle tool calls
+		if len(msg.ToolCalls) > 0 {
+			for _, toolCall := range msg.ToolCalls {
+				inputJSON, _ := json.Marshal(toolCall.Function.Arguments)
+				streamable = append(streamable, StreamableMessage{
+					Kind:       "tool-use",
+					Role:       string(msg.Role),
+					ToolName:   toolCall.Function.Name,
+					ToolCallID: toolCall.ID,
+					Input:      string(inputJSON),
+				})
+			}
+		}
+	}
+
+	return streamable, nil
+}
+
 // ExtractMessages converts the internal message format to the common format
 func ExtractMessages(data []byte, toolResults map[string]tooltypes.StructuredToolResult) ([]llmtypes.Message, error) {
 	var messages []openai.ChatCompletionMessage

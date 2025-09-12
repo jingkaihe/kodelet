@@ -2,19 +2,25 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/llm"
+	"github.com/jingkaihe/kodelet/pkg/llm/anthropic"
+	"github.com/jingkaihe/kodelet/pkg/llm/openai"
+	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
@@ -23,6 +29,7 @@ type RunConfig struct {
 	ResumeConvID       string
 	Follow             bool
 	NoSave             bool
+	Headless           bool              // Use structured JSON output instead of console formatting
 	Images             []string          // Image paths or URLs to include with the message
 	MaxTurns           int               // Maximum number of turns within a single SendMessage call
 	CompactRatio       float64           // Ratio of context window at which to trigger auto-compact (0.0-1.0)
@@ -37,6 +44,7 @@ func NewRunConfig() *RunConfig {
 		ResumeConvID:       "",
 		Follow:             false,
 		NoSave:             false,
+		Headless:           false,
 		Images:             []string{},
 		MaxTurns:           50,  // Default to 50 turns
 		CompactRatio:       0.8, // Default to 80% context window utilization
@@ -45,6 +53,38 @@ func NewRunConfig() *RunConfig {
 		FragmentArgs:       make(map[string]string),
 		FragmentDirs:       []string{},
 	}
+}
+
+// convertAnthropicStreamableMessages converts anthropic.StreamableMessage to conversations.StreamableMessage
+func convertAnthropicStreamableMessages(msgs []anthropic.StreamableMessage) []conversations.StreamableMessage {
+	result := make([]conversations.StreamableMessage, len(msgs))
+	for i, msg := range msgs {
+		result[i] = conversations.StreamableMessage{
+			Kind:       msg.Kind,
+			Role:       msg.Role,
+			Content:    msg.Content,
+			ToolName:   msg.ToolName,
+			ToolCallID: msg.ToolCallID,
+			Input:      msg.Input,
+		}
+	}
+	return result
+}
+
+// convertOpenAIStreamableMessages converts openai.StreamableMessage to conversations.StreamableMessage
+func convertOpenAIStreamableMessages(msgs []openai.StreamableMessage) []conversations.StreamableMessage {
+	result := make([]conversations.StreamableMessage, len(msgs))
+	for i, msg := range msgs {
+		result[i] = conversations.StreamableMessage{
+			Kind:       msg.Kind,
+			Role:       msg.Role,
+			Content:    msg.Content,
+			ToolName:   msg.ToolName,
+			ToolCallID: msg.ToolCallID,
+			Input:      msg.Input,
+		}
+	}
+	return result
 }
 
 func processFragment(ctx context.Context, config *RunConfig, args []string) (string, *fragments.Metadata, error) {
@@ -190,44 +230,141 @@ var runCmd = &cobra.Command{
 		stateOpts = append(stateOpts, tools.WithMainTools())
 		appState := tools.NewBasicState(ctx, stateOpts...)
 
-		presenter.Info(fmt.Sprintf("[User]: %s", query))
+		if config.Headless {
+			// Headless mode: set up streaming and silent operation
+			presenter.SetQuiet(true)
 
-		handler := &llmtypes.ConsoleMessageHandler{Silent: false}
-		thread, err := llm.NewThread(llmConfig)
-		if err != nil {
-			presenter.Error(err, "Failed to create LLM thread")
-			return
-		}
-		thread.SetState(appState)
+			// Configure logging for headless mode to avoid contaminating JSON output
+			// Set log format to JSON and level to error to minimize noise
+			logger.SetLogFormat("json")
+			logger.SetLogLevel("error")
 
-		if config.ResumeConvID != "" {
-			thread.SetConversationID(config.ResumeConvID)
-			presenter.Info(fmt.Sprintf("Resuming conversation: %s", config.ResumeConvID))
-		}
+			thread, err := llm.NewThread(llmConfig)
+			if err != nil {
+				presenter.Error(err, "Failed to create LLM thread")
+				return
+			}
+			thread.SetState(appState)
 
-		thread.EnablePersistence(ctx, !config.NoSave)
+			if config.ResumeConvID != "" {
+				thread.SetConversationID(config.ResumeConvID)
+			}
 
-		_, err = thread.SendMessage(ctx, query, handler, llmtypes.MessageOpt{
-			PromptCache:        true,
-			Images:             config.Images,
-			MaxTurns:           config.MaxTurns,
-			CompactRatio:       config.CompactRatio,
-			DisableAutoCompact: config.DisableAutoCompact,
-		})
-		if err != nil {
-			presenter.Error(err, "Failed to process query")
-			return
-		}
+			thread.EnablePersistence(ctx, !config.NoSave)
 
-		usage := thread.GetUsage()
-		usageStats := presenter.ConvertUsageStats(&usage)
-		presenter.Stats(usageStats)
+			// Get conversation service and set up streamer
+			service, err := conversations.GetDefaultConversationService(ctx)
+			if err != nil {
+				presenter.Error(err, "Failed to get conversation service")
+				return
+			}
+			defer service.Close()
 
-		if thread.IsPersisted() {
-			presenter.Section("Conversation Information")
-			presenter.Info(fmt.Sprintf("ID: %s", thread.GetConversationID()))
-			presenter.Info(fmt.Sprintf("To resume this conversation: kodelet run --resume %s", thread.GetConversationID()))
-			presenter.Info(fmt.Sprintf("To delete this conversation: kodelet conversation delete %s", thread.GetConversationID()))
+			streamer := conversations.NewConversationStreamer(service)
+
+			// Register message parsers for different providers
+			streamer.RegisterMessageParser("anthropic", func(rawMessages json.RawMessage, toolResults map[string]tooltypes.StructuredToolResult) ([]conversations.StreamableMessage, error) {
+				msgs, err := anthropic.StreamMessages(rawMessages, toolResults)
+				if err != nil {
+					return nil, err
+				}
+				return convertAnthropicStreamableMessages(msgs), nil
+			})
+
+			streamer.RegisterMessageParser("openai", func(rawMessages json.RawMessage, toolResults map[string]tooltypes.StructuredToolResult) ([]conversations.StreamableMessage, error) {
+				msgs, err := openai.StreamMessages(rawMessages, toolResults)
+				if err != nil {
+					return nil, err
+				}
+				return convertOpenAIStreamableMessages(msgs), nil
+			})
+
+			// Run the conversation in background and stream updates
+			conversationID := thread.GetConversationID()
+
+			// Create a channel to signal when conversation is done
+			done := make(chan error, 1)
+
+			// Start the conversation processing in a goroutine
+			go func() {
+				handler := &llmtypes.ConsoleMessageHandler{Silent: true}
+				_, err := thread.SendMessage(ctx, query, handler, llmtypes.MessageOpt{
+					PromptCache:        true,
+					Images:             config.Images,
+					MaxTurns:           config.MaxTurns,
+					CompactRatio:       config.CompactRatio,
+					DisableAutoCompact: config.DisableAutoCompact,
+				})
+				done <- err
+			}()
+
+			// Stream live updates with a timeout context
+			streamCtx, cancel := context.WithTimeout(ctx, 5*time.Minute) // 5 minute max streaming time
+			defer cancel()
+
+			// Monitor for both streaming completion and conversation completion
+			streamDone := make(chan error, 1)
+			go func() {
+				streamDone <- streamer.StreamLiveUpdates(streamCtx, conversationID)
+			}()
+
+			// Wait for either conversation completion or streaming to finish
+			select {
+			case err := <-done:
+				if err != nil {
+					// In headless mode, log errors to stderr
+					fmt.Fprintf(os.Stderr, "Error processing query: %v\n", err)
+				}
+				// Give streaming a bit more time to catch final messages
+				time.Sleep(1 * time.Second)
+				cancel()     // Cancel streaming context
+				<-streamDone // Wait for streaming to finish
+			case err := <-streamDone:
+				if err != nil && err != context.Canceled {
+					fmt.Fprintf(os.Stderr, "Error streaming updates: %v\n", err)
+				}
+			}
+		} else {
+			// Normal console mode
+			presenter.Info(fmt.Sprintf("[User]: %s", query))
+
+			handler := &llmtypes.ConsoleMessageHandler{Silent: false}
+			thread, err := llm.NewThread(llmConfig)
+			if err != nil {
+				presenter.Error(err, "Failed to create LLM thread")
+				return
+			}
+			thread.SetState(appState)
+
+			if config.ResumeConvID != "" {
+				thread.SetConversationID(config.ResumeConvID)
+				presenter.Info(fmt.Sprintf("Resuming conversation: %s", config.ResumeConvID))
+			}
+
+			thread.EnablePersistence(ctx, !config.NoSave)
+
+			_, err = thread.SendMessage(ctx, query, handler, llmtypes.MessageOpt{
+				PromptCache:        true,
+				Images:             config.Images,
+				MaxTurns:           config.MaxTurns,
+				CompactRatio:       config.CompactRatio,
+				DisableAutoCompact: config.DisableAutoCompact,
+			})
+			if err != nil {
+				presenter.Error(err, "Failed to process query")
+				return
+			}
+
+			usage := thread.GetUsage()
+			usageStats := presenter.ConvertUsageStats(&usage)
+			presenter.Stats(usageStats)
+
+			if thread.IsPersisted() {
+				presenter.Section("Conversation Information")
+				presenter.Info(fmt.Sprintf("ID: %s", thread.GetConversationID()))
+				presenter.Info(fmt.Sprintf("To resume this conversation: kodelet run --resume %s", thread.GetConversationID()))
+				presenter.Info(fmt.Sprintf("To delete this conversation: kodelet conversation delete %s", thread.GetConversationID()))
+			}
 		}
 	},
 }
@@ -237,6 +374,7 @@ func init() {
 	runCmd.Flags().String("resume", defaults.ResumeConvID, "Resume a specific conversation")
 	runCmd.Flags().BoolP("follow", "f", defaults.Follow, "Follow the most recent conversation")
 	runCmd.Flags().Bool("no-save", defaults.NoSave, "Disable conversation persistence")
+	runCmd.Flags().Bool("headless", defaults.Headless, "Output structured JSON instead of console formatting")
 	runCmd.Flags().StringSliceP("image", "I", defaults.Images, "Add image input (can be used multiple times)")
 	runCmd.Flags().Int("max-turns", defaults.MaxTurns, "Maximum number of turns within a single message exchange (0 for no limit)")
 	runCmd.Flags().Float64("compact-ratio", defaults.CompactRatio, "Context window utilization ratio to trigger auto-compact (0.0-1.0)")
@@ -269,6 +407,9 @@ func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
 
 	if noSave, err := cmd.Flags().GetBool("no-save"); err == nil {
 		config.NoSave = noSave
+	}
+	if headless, err := cmd.Flags().GetBool("headless"); err == nil {
+		config.Headless = headless
 	}
 	if images, err := cmd.Flags().GetStringSlice("image"); err == nil {
 		config.Images = images
