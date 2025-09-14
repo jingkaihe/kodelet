@@ -15,8 +15,6 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/llm"
-	"github.com/jingkaihe/kodelet/pkg/llm/anthropic"
-	"github.com/jingkaihe/kodelet/pkg/llm/openai"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -858,9 +856,15 @@ func editConversationCmd(ctx context.Context, conversationID string, config *Con
 }
 
 func streamConversationCmd(ctx context.Context, conversationID string, config *ConversationStreamConfig) {
-	// Import the provider packages to ensure streaming functions are available
-	// (imports already exist at the top of the file)
+	// Create fully configured streamer with all parsers pre-registered
+	streamer, closeFunc, err := llm.NewConversationStreamer(ctx)
+	if err != nil {
+		presenter.Error(err, "Failed to create conversation streamer")
+		os.Exit(1)
+	}
+	defer closeFunc()
 
+	// Check if conversation exists by attempting to get it
 	service, err := conversations.GetDefaultConversationService(ctx)
 	if err != nil {
 		presenter.Error(err, "Failed to get conversation service")
@@ -868,31 +872,11 @@ func streamConversationCmd(ctx context.Context, conversationID string, config *C
 	}
 	defer service.Close()
 
-	// Check if conversation exists
 	_, err = service.GetConversation(ctx, conversationID)
 	if err != nil {
 		presenter.Error(err, fmt.Sprintf("Conversation %s not found", conversationID))
 		os.Exit(1)
 	}
-
-	streamer := conversations.NewConversationStreamer(service)
-
-	// Register message parsers for different providers
-	streamer.RegisterMessageParser("anthropic", func(rawMessages json.RawMessage, toolResults map[string]tools.StructuredToolResult) ([]conversations.StreamableMessage, error) {
-		msgs, err := anthropic.StreamMessages(rawMessages, toolResults)
-		if err != nil {
-			return nil, err
-		}
-		return convertAnthropicStreamableMessages(msgs), nil
-	})
-
-	streamer.RegisterMessageParser("openai", func(rawMessages json.RawMessage, toolResults map[string]tools.StructuredToolResult) ([]conversations.StreamableMessage, error) {
-		msgs, err := openai.StreamMessages(rawMessages, toolResults)
-		if err != nil {
-			return nil, err
-		}
-		return convertOpenAIStreamableMessages(msgs), nil
-	})
 
 	// Stream historical data first if requested
 	if config.IncludeHistory {
@@ -904,7 +888,8 @@ func streamConversationCmd(ctx context.Context, conversationID string, config *C
 	}
 
 	// Then stream live updates
-	err = streamer.StreamLiveUpdates(ctx, conversationID)
+	liveUpdateInterval := 200 * time.Millisecond
+	err = streamer.StreamLiveUpdates(ctx, conversationID, liveUpdateInterval)
 	if err != nil {
 		presenter.Error(err, "Failed to stream conversation updates")
 		os.Exit(1)

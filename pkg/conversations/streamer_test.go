@@ -296,7 +296,8 @@ func TestStreamLiveUpdates_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
-	err := streamer.StreamLiveUpdates(ctx, "test-conv")
+	testInterval := 50 * time.Millisecond
+	err := streamer.StreamLiveUpdates(ctx, "test-conv", testInterval)
 
 	// Should return context.DeadlineExceeded
 	assert.Error(t, err)

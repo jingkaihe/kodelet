@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -14,13 +13,10 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/llm"
-	"github.com/jingkaihe/kodelet/pkg/llm/anthropic"
-	"github.com/jingkaihe/kodelet/pkg/llm/openai"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
-	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
@@ -55,37 +51,7 @@ func NewRunConfig() *RunConfig {
 	}
 }
 
-// convertAnthropicStreamableMessages converts anthropic.StreamableMessage to conversations.StreamableMessage
-func convertAnthropicStreamableMessages(msgs []anthropic.StreamableMessage) []conversations.StreamableMessage {
-	result := make([]conversations.StreamableMessage, len(msgs))
-	for i, msg := range msgs {
-		result[i] = conversations.StreamableMessage{
-			Kind:       msg.Kind,
-			Role:       msg.Role,
-			Content:    msg.Content,
-			ToolName:   msg.ToolName,
-			ToolCallID: msg.ToolCallID,
-			Input:      msg.Input,
-		}
-	}
-	return result
-}
 
-// convertOpenAIStreamableMessages converts openai.StreamableMessage to conversations.StreamableMessage
-func convertOpenAIStreamableMessages(msgs []openai.StreamableMessage) []conversations.StreamableMessage {
-	result := make([]conversations.StreamableMessage, len(msgs))
-	for i, msg := range msgs {
-		result[i] = conversations.StreamableMessage{
-			Kind:       msg.Kind,
-			Role:       msg.Role,
-			Content:    msg.Content,
-			ToolName:   msg.ToolName,
-			ToolCallID: msg.ToolCallID,
-			Input:      msg.Input,
-		}
-	}
-	return result
-}
 
 func processFragment(ctx context.Context, config *RunConfig, args []string) (string, *fragments.Metadata, error) {
 	var validDirs []string
@@ -252,32 +218,13 @@ var runCmd = &cobra.Command{
 
 			thread.EnablePersistence(ctx, !config.NoSave)
 
-			// Get conversation service and set up streamer
-			service, err := conversations.GetDefaultConversationService(ctx)
+			// Create fully configured streamer with all parsers pre-registered
+			streamer, closeFunc, err := llm.NewConversationStreamer(ctx)
 			if err != nil {
-				presenter.Error(err, "Failed to get conversation service")
+				presenter.Error(err, "Failed to create conversation streamer")
 				return
 			}
-			defer service.Close()
-
-			streamer := conversations.NewConversationStreamer(service)
-
-			// Register message parsers for different providers
-			streamer.RegisterMessageParser("anthropic", func(rawMessages json.RawMessage, toolResults map[string]tooltypes.StructuredToolResult) ([]conversations.StreamableMessage, error) {
-				msgs, err := anthropic.StreamMessages(rawMessages, toolResults)
-				if err != nil {
-					return nil, err
-				}
-				return convertAnthropicStreamableMessages(msgs), nil
-			})
-
-			streamer.RegisterMessageParser("openai", func(rawMessages json.RawMessage, toolResults map[string]tooltypes.StructuredToolResult) ([]conversations.StreamableMessage, error) {
-				msgs, err := openai.StreamMessages(rawMessages, toolResults)
-				if err != nil {
-					return nil, err
-				}
-				return convertOpenAIStreamableMessages(msgs), nil
-			})
+			defer closeFunc()
 
 			// Run the conversation in background and stream updates
 			conversationID := thread.GetConversationID()
@@ -302,26 +249,28 @@ var runCmd = &cobra.Command{
 			streamCtx, cancel := context.WithTimeout(ctx, 5*time.Minute) // 5 minute max streaming time
 			defer cancel()
 
+			// Define streaming interval for live updates
+			liveUpdateInterval := 200 * time.Millisecond
+
 			// Monitor for both streaming completion and conversation completion
 			streamDone := make(chan error, 1)
 			go func() {
-				streamDone <- streamer.StreamLiveUpdates(streamCtx, conversationID)
+				streamDone <- streamer.StreamLiveUpdates(streamCtx, conversationID, liveUpdateInterval)
 			}()
 
 			// Wait for either conversation completion or streaming to finish
 			select {
 			case err := <-done:
 				if err != nil {
-					// In headless mode, log errors to stderr
-					fmt.Fprintf(os.Stderr, "Error processing query: %v\n", err)
+					logger.G(ctx).WithError(err).Error("Error processing query")
 				}
-				// Give streaming a bit more time to catch final messages
-				time.Sleep(1 * time.Second)
+				// Give streaming time to catch final messages (2 polling cycles)
+				time.Sleep(2 * liveUpdateInterval)
 				cancel()     // Cancel streaming context
 				<-streamDone // Wait for streaming to finish
 			case err := <-streamDone:
 				if err != nil && err != context.Canceled {
-					fmt.Fprintf(os.Stderr, "Error streaming updates: %v\n", err)
+					logger.G(ctx).WithError(err).Error("Error streaming updates")
 				}
 			}
 		} else {

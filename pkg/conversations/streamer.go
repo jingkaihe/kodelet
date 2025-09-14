@@ -89,10 +89,10 @@ func (cs *ConversationStreamer) StreamHistoricalData(ctx context.Context, conver
 }
 
 // StreamLiveUpdates watches for conversation updates and streams new entries
-func (cs *ConversationStreamer) StreamLiveUpdates(ctx context.Context, conversationID string) error {
-	logger.G(ctx).WithField("conversationID", conversationID).Debug("Starting live stream for conversation")
+func (cs *ConversationStreamer) StreamLiveUpdates(ctx context.Context, conversationID string, interval time.Duration) error {
+	logger.G(ctx).WithField("conversationID", conversationID).WithField("interval", interval).Debug("Starting live stream for conversation")
 
-	ticker := time.NewTicker(200 * time.Millisecond)
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	var lastUpdateTime time.Time
