@@ -1,5 +1,18 @@
 # Kodelet
 
+## 0.0.95.alpha (2025-01-14)
+
+### Headless Mode
+
+- **Headless Mode**: New `--headless` flag for `kodelet run` outputs structured JSON instead of console formatting, useful for automation and 3rd-party UI integration
+- **Conversation Stream Command**: New `kodelet conversation stream` command enables streaming of both historical and live conversation updates with unified JSON format
+- **Historical Streaming**: Use `--include-history` flag to replay existing conversation data before streaming new entries (similar to `tail -f`)
+
+### Security Updates
+
+**Frontend Security**: Updated Vite from 6.3.5 to 6.3.6 to address security vulnerabilities identified by Dependabot alerts
+
+
 ## 0.0.94.alpha (2025-09-05)
 
 ### Go Version Upgrade
