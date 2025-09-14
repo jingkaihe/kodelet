@@ -146,7 +146,7 @@ func TestConvertToStreamEntry(t *testing.T) {
 	}
 }
 
-func TestStreamHistoricalData_Success(t *testing.T) {
+func TestStreamLiveUpdates_WithHistory_Success(t *testing.T) {
 	// Mock conversation response
 	rawMessages := json.RawMessage(`[{"role": "user", "content": "test"}]`)
 	toolResults := make(map[string]tools.StructuredToolResult)
@@ -157,6 +157,7 @@ func TestStreamHistoricalData_Success(t *testing.T) {
 			Provider:    "test-provider",
 			RawMessages: rawMessages,
 			ToolResults: toolResults,
+			UpdatedAt:   time.Now(),
 		},
 	}
 
@@ -171,15 +172,22 @@ func TestStreamHistoricalData_Success(t *testing.T) {
 		return capturedMessages, nil
 	})
 
-	// Capture output by redirecting stdout (simplified for test)
-	ctx := context.Background()
-	err := streamer.StreamHistoricalData(ctx, "test-conv-123")
+	// Test with history included - should timeout quickly for testing
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	
+	streamOpts := StreamOpts{
+		Interval:       50 * time.Millisecond,
+		IncludeHistory: true,
+	}
+	err := streamer.StreamLiveUpdates(ctx, "test-conv-123", streamOpts)
 
-	assert.NoError(t, err)
-	// Note: In a real test, we'd capture stdout to verify JSON output
+	// Should timeout after processing initial messages
+	assert.Error(t, err)
+	assert.Equal(t, context.DeadlineExceeded, err)
 }
 
-func TestStreamHistoricalData_ConversationNotFound(t *testing.T) {
+func TestStreamLiveUpdates_ConversationNotFound(t *testing.T) {
 	service := &mockConversationService{
 		err: fmt.Errorf("conversation not found"),
 	}
@@ -187,34 +195,44 @@ func TestStreamHistoricalData_ConversationNotFound(t *testing.T) {
 	streamer := NewConversationStreamer(service)
 
 	ctx := context.Background()
-	err := streamer.StreamHistoricalData(ctx, "non-existent")
+	streamOpts := StreamOpts{
+		Interval:       50 * time.Millisecond,
+		IncludeHistory: true,
+	}
+	err := streamer.StreamLiveUpdates(ctx, "non-existent", streamOpts)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to get conversation")
 }
 
-func TestStreamHistoricalData_NoParserRegistered(t *testing.T) {
+func TestStreamLiveUpdates_NoParserRegistered(t *testing.T) {
 	service := &mockConversationService{
 		conversation: &GetConversationResponse{
-			ID:       "test-conv",
-			Provider: "unknown-provider",
+			ID:        "test-conv",
+			Provider:  "unknown-provider",
+			UpdatedAt: time.Now(),
 		},
 	}
 
 	streamer := NewConversationStreamer(service)
 
 	ctx := context.Background()
-	err := streamer.StreamHistoricalData(ctx, "test-conv")
+	streamOpts := StreamOpts{
+		Interval:       50 * time.Millisecond,
+		IncludeHistory: false, // Test live-only mode which triggers parser check early
+	}
+	err := streamer.StreamLiveUpdates(ctx, "test-conv", streamOpts)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "no message parser registered for provider: unknown-provider")
 }
 
-func TestStreamHistoricalData_ParserError(t *testing.T) {
+func TestStreamLiveUpdates_ParserError(t *testing.T) {
 	service := &mockConversationService{
 		conversation: &GetConversationResponse{
-			ID:       "test-conv",
-			Provider: "error-provider",
+			ID:        "test-conv",
+			Provider:  "error-provider",
+			UpdatedAt: time.Now(),
 		},
 	}
 
@@ -224,7 +242,11 @@ func TestStreamHistoricalData_ParserError(t *testing.T) {
 	})
 
 	ctx := context.Background()
-	err := streamer.StreamHistoricalData(ctx, "test-conv")
+	streamOpts := StreamOpts{
+		Interval:       50 * time.Millisecond,
+		IncludeHistory: false, // Test live-only mode which triggers parser check early
+	}
+	err := streamer.StreamLiveUpdates(ctx, "test-conv", streamOpts)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to parse messages")
@@ -293,10 +315,47 @@ func TestStreamLiveUpdates_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
-	testInterval := 50 * time.Millisecond
-	err := streamer.StreamLiveUpdates(ctx, "test-conv", testInterval)
+	streamOpts := StreamOpts{
+		Interval:       50 * time.Millisecond,
+		IncludeHistory: false,
+	}
+	err := streamer.StreamLiveUpdates(ctx, "test-conv", streamOpts)
 
 	// Should return context.DeadlineExceeded
+	assert.Error(t, err)
+	assert.Equal(t, context.DeadlineExceeded, err)
+}
+
+func TestStreamLiveUpdates_LiveOnly_SkipsExistingMessages(t *testing.T) {
+	existingMessages := []StreamableMessage{
+		{Kind: "text", Role: "user", Content: "Existing message 1"},
+		{Kind: "text", Role: "assistant", Content: "Existing response 1"},
+	}
+
+	service := &mockConversationService{
+		conversation: &GetConversationResponse{
+			ID:        "test-conv",
+			Provider:  "test-provider",
+			UpdatedAt: time.Now(),
+		},
+	}
+
+	streamer := NewConversationStreamer(service)
+	streamer.RegisterMessageParser("test-provider", func(raw json.RawMessage, results map[string]tools.StructuredToolResult) ([]StreamableMessage, error) {
+		return existingMessages, nil
+	})
+
+	// Test live-only mode should skip existing messages
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	
+	streamOpts := StreamOpts{
+		Interval:       50 * time.Millisecond,
+		IncludeHistory: false,
+	}
+	err := streamer.StreamLiveUpdates(ctx, "test-conv", streamOpts)
+
+	// Should timeout after initializing (but not streaming existing messages)
 	assert.Error(t, err)
 	assert.Equal(t, context.DeadlineExceeded, err)
 }

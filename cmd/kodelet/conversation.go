@@ -876,16 +876,12 @@ func streamConversationCmd(ctx context.Context, conversationID string, config *C
 		os.Exit(1)
 	}
 
-	if config.IncludeHistory {
-		err := streamer.StreamHistoricalData(ctx, conversationID)
-		if err != nil {
-			presenter.Error(err, "Failed to stream historical data")
-			os.Exit(1)
-		}
-	}
-
 	liveUpdateInterval := 200 * time.Millisecond
-	err = streamer.StreamLiveUpdates(ctx, conversationID, liveUpdateInterval)
+	streamOpts := conversations.StreamOpts{
+		Interval:       liveUpdateInterval,
+		IncludeHistory: config.IncludeHistory,
+	}
+	err = streamer.StreamLiveUpdates(ctx, conversationID, streamOpts)
 	if err != nil {
 		presenter.Error(err, "Failed to stream conversation updates")
 		os.Exit(1)

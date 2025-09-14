@@ -26,6 +26,12 @@ type StreamEntry struct {
 	ToolCallID *string `json:"tool_call_id,omitempty"` // For matching tool calls to results
 }
 
+// StreamOpts contains options for streaming conversation data
+type StreamOpts struct {
+	Interval       time.Duration
+	IncludeHistory bool
+}
+
 // StreamableMessage contains parsed message data for streaming
 type StreamableMessage struct {
 	Kind       string // "text", "tool-use", "tool-result", "thinking"
@@ -55,69 +61,91 @@ func (cs *ConversationStreamer) RegisterMessageParser(provider string, parser Me
 	cs.messageParsers[provider] = parser
 }
 
-// StreamHistoricalData streams all existing conversation data
-func (cs *ConversationStreamer) StreamHistoricalData(ctx context.Context, conversationID string) error {
-	logger.G(ctx).WithField("conversationID", conversationID).Debug("Streaming historical conversation data")
-
-	response, err := cs.service.GetConversation(ctx, conversationID)
-	if err != nil {
-		return errors.Wrap(err, "failed to get conversation")
-	}
-
-	parser, exists := cs.messageParsers[response.Provider]
-	if !exists {
-		return errors.Errorf("no message parser registered for provider: %s", response.Provider)
-	}
-
-	streamableMessages, err := parser(response.RawMessages, response.ToolResults)
-	if err != nil {
-		return errors.Wrap(err, "failed to parse messages")
-	}
-
-	for _, msg := range streamableMessages {
-		entry := cs.convertToStreamEntry(msg)
-		if err := cs.outputStreamEntry(entry); err != nil {
-			return errors.Wrap(err, "failed to output stream entry")
-		}
-	}
-
-	logger.G(ctx).WithField("messageCount", len(streamableMessages)).Debug("Completed streaming historical data")
-	return nil
+// streamState holds the current streaming state
+type streamState struct {
+	lastUpdateTime  time.Time
+	streamedEntries int
 }
 
-// StreamLiveUpdates watches for conversation updates and streams new entries
-func (cs *ConversationStreamer) StreamLiveUpdates(ctx context.Context, conversationID string, interval time.Duration) error {
-	logger.G(ctx).WithField("conversationID", conversationID).WithField("interval", interval).Debug("Starting live stream for conversation")
+// StreamLiveUpdates watches for conversation updates and streams entries based on options
+func (cs *ConversationStreamer) StreamLiveUpdates(ctx context.Context, conversationID string, streamOpts StreamOpts) error {
+	logger.G(ctx).WithField("conversationID", conversationID).WithField("interval", streamOpts.Interval).WithField("includeHistory", streamOpts.IncludeHistory).Debug("Starting stream for conversation")
 
-	ticker := time.NewTicker(interval)
+	ticker := time.NewTicker(streamOpts.Interval)
 	defer ticker.Stop()
 
-	var lastUpdateTime time.Time
-	var streamedEntries int // Track how many entries we've already streamed
+	state, err := cs.initializeStream(ctx, conversationID, streamOpts.IncludeHistory)
+	if err != nil {
+		return err
+	}
 
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
-			response, err := cs.service.GetConversation(ctx, conversationID)
-			if err != nil {
-				continue
-			}
+			cs.processLiveUpdate(ctx, conversationID, state)
+		}
+	}
+}
 
-			if response.UpdatedAt.After(lastUpdateTime) {
-				newlyStreamed, err := cs.streamNewMessagesSince(ctx, response, streamedEntries)
-				if err != nil {
-					logger.G(ctx).WithError(err).Error("Failed to stream new messages")
-					continue
-				}
+// initializeStream sets up the initial streaming state and optionally streams history
+func (cs *ConversationStreamer) initializeStream(ctx context.Context, conversationID string, includeHistory bool) (*streamState, error) {
+	response, err := cs.service.GetConversation(ctx, conversationID)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get conversation")
+	}
 
-				if newlyStreamed > 0 {
-					streamedEntries += newlyStreamed
-					lastUpdateTime = response.UpdatedAt
-				}
+	parser, exists := cs.messageParsers[response.Provider]
+	if !exists {
+		return nil, errors.Errorf("no message parser registered for provider: %s", response.Provider)
+	}
+
+	messages, err := parser(response.RawMessages, response.ToolResults)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to parse messages")
+	}
+
+	state := &streamState{
+		lastUpdateTime:  response.UpdatedAt,
+		streamedEntries: len(messages),
+	}
+
+	if includeHistory {
+		for _, msg := range messages {
+			entry := cs.convertToStreamEntry(msg)
+			if err := cs.outputStreamEntry(entry); err != nil {
+				return nil, errors.Wrap(err, "failed to output stream entry")
 			}
 		}
+		logger.G(ctx).WithField("messageCount", len(messages)).Debug("Streamed historical messages")
+	} else {
+		logger.G(ctx).WithField("skippedMessages", len(messages)).Debug("Initialized for live-only streaming")
+	}
+
+	return state, nil
+}
+
+// processLiveUpdate checks for new messages and streams them
+func (cs *ConversationStreamer) processLiveUpdate(ctx context.Context, conversationID string, state *streamState) {
+	response, err := cs.service.GetConversation(ctx, conversationID)
+	if err != nil {
+		return // Continue on error, as per original logic
+	}
+
+	if !response.UpdatedAt.After(state.lastUpdateTime) {
+		return
+	}
+
+	newlyStreamed, err := cs.streamNewMessagesSince(ctx, response, state.streamedEntries)
+	if err != nil {
+		logger.G(ctx).WithError(err).Error("Failed to stream new messages")
+		return
+	}
+
+	if newlyStreamed > 0 {
+		state.streamedEntries += newlyStreamed
+		state.lastUpdateTime = response.UpdatedAt
 	}
 }
 
@@ -136,6 +164,7 @@ func (cs *ConversationStreamer) streamNewMessagesSince(ctx context.Context, resp
 	newlyStreamed := 0
 	if len(streamableMessages) > alreadyStreamed {
 		newMessages := streamableMessages[alreadyStreamed:]
+		logger.G(ctx).WithField("newMessageCount", len(newMessages)).Debug("Streaming new messages")
 		for _, msg := range newMessages {
 			entry := cs.convertToStreamEntry(msg)
 			if err := cs.outputStreamEntry(entry); err != nil {

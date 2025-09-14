@@ -242,9 +242,13 @@ var runCmd = &cobra.Command{
 			defer cancel()
 
 			liveUpdateInterval := 200 * time.Millisecond
+			streamOpts := conversations.StreamOpts{
+				Interval:       liveUpdateInterval,
+				IncludeHistory: false, // For run command, we don't want historical data
+			}
 			streamDone := make(chan error, 1)
 			go func() {
-				streamDone <- streamer.StreamLiveUpdates(streamCtx, conversationID, liveUpdateInterval)
+				streamDone <- streamer.StreamLiveUpdates(streamCtx, conversationID, streamOpts)
 			}()
 
 			select {
