@@ -245,8 +245,8 @@ var runCmd = &cobra.Command{
 				done <- err
 			}()
 
-			// Stream live updates with a timeout context
-			streamCtx, cancel := context.WithTimeout(ctx, 5*time.Minute) // 5 minute max streaming time
+			// Create cancellable context for streaming control
+			streamCtx, cancel := context.WithCancel(ctx)
 			defer cancel()
 
 			// Define streaming interval for live updates
