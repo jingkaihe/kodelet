@@ -17,13 +17,13 @@ type MessageParser func(rawMessages json.RawMessage, toolResults map[string]tool
 
 // StreamEntry represents a single stream entry in the unified JSON format
 type StreamEntry struct {
-	Kind       string  `json:"kind"`                   // "text", "tool-use", "tool-result", "thinking"
-	Content    *string `json:"content,omitempty"`      // Text content for text and thinking
-	ToolName   *string `json:"tool_name,omitempty"`    // Tool name for tool-use and tool-result
-	Input      *string `json:"input,omitempty"`        // JSON input for tool-use
-	Result     *string `json:"result,omitempty"`       // Tool execution result for tool-result
-	Role       string  `json:"role"`                   // "user", "assistant", "system"
-	ToolCallID *string `json:"tool_call_id,omitempty"` // For matching tool calls to results
+	Kind       string `json:"kind"`                   // "text", "tool-use", "tool-result", "thinking"
+	Content    string `json:"content,omitempty"`      // Text content for text and thinking
+	ToolName   string `json:"tool_name,omitempty"`    // Tool name for tool-use and tool-result
+	Input      string `json:"input,omitempty"`        // JSON input for tool-use
+	Result     string `json:"result,omitempty"`       // Tool execution result for tool-result
+	Role       string `json:"role"`                   // "user", "assistant", "system"
+	ToolCallID string `json:"tool_call_id,omitempty"` // For matching tool calls to results
 }
 
 // StreamOpts contains options for streaming conversation data
@@ -186,21 +186,15 @@ func (cs *ConversationStreamer) convertToStreamEntry(msg StreamableMessage) Stre
 
 	switch msg.Kind {
 	case "text", "thinking":
-		entry.Content = &msg.Content
+		entry.Content = msg.Content
 	case "tool-use":
-		entry.ToolName = &msg.ToolName
-		entry.Input = &msg.Input
-		if msg.ToolCallID != "" {
-			entry.ToolCallID = &msg.ToolCallID
-		}
+		entry.ToolName = msg.ToolName
+		entry.Input = msg.Input
+		entry.ToolCallID = msg.ToolCallID
 	case "tool-result":
-		if msg.ToolName != "" {
-			entry.ToolName = &msg.ToolName
-		}
-		entry.Result = &msg.Content
-		if msg.ToolCallID != "" {
-			entry.ToolCallID = &msg.ToolCallID
-		}
+		entry.ToolName = msg.ToolName
+		entry.Result = msg.Content
+		entry.ToolCallID = msg.ToolCallID
 	}
 
 	return entry

@@ -86,7 +86,7 @@ func TestConvertToStreamEntry(t *testing.T) {
 			expected: StreamEntry{
 				Kind:    "text",
 				Role:    "user",
-				Content: stringPtr("Hello world"),
+				Content: "Hello world",
 			},
 		},
 		{
@@ -99,7 +99,7 @@ func TestConvertToStreamEntry(t *testing.T) {
 			expected: StreamEntry{
 				Kind:    "thinking",
 				Role:    "assistant",
-				Content: stringPtr("Let me think about this"),
+				Content: "Let me think about this",
 			},
 		},
 		{
@@ -114,9 +114,9 @@ func TestConvertToStreamEntry(t *testing.T) {
 			expected: StreamEntry{
 				Kind:       "tool-use",
 				Role:       "assistant",
-				ToolName:   stringPtr("bash"),
-				Input:      stringPtr(`{"command": "ls"}`),
-				ToolCallID: stringPtr("call-123"),
+				ToolName:   "bash",
+				Input:      `{"command": "ls"}`,
+				ToolCallID: "call-123",
 			},
 		},
 		{
@@ -131,9 +131,9 @@ func TestConvertToStreamEntry(t *testing.T) {
 			expected: StreamEntry{
 				Kind:       "tool-result",
 				Role:       "user",
-				ToolName:   stringPtr("bash"),
-				Result:     stringPtr("file1.txt\nfile2.txt"),
-				ToolCallID: stringPtr("call-123"),
+				ToolName:   "bash",
+				Result:     "file1.txt\nfile2.txt",
+				ToolCallID: "call-123",
 			},
 		},
 	}
@@ -360,10 +360,6 @@ func TestStreamLiveUpdates_LiveOnly_SkipsExistingMessages(t *testing.T) {
 	assert.Equal(t, context.DeadlineExceeded, err)
 }
 
-func stringPtr(s string) *string {
-	return &s
-}
-
 // Integration test that captures actual output (simplified)
 func TestStreamEntry_JSONOutput(t *testing.T) {
 	service := &mockConversationService{}
@@ -372,7 +368,7 @@ func TestStreamEntry_JSONOutput(t *testing.T) {
 	entry := StreamEntry{
 		Kind:    "text",
 		Role:    "user",
-		Content: stringPtr("Hello world"),
+		Content: "Hello world",
 	}
 
 	jsonBytes, err := json.Marshal(entry)
@@ -386,7 +382,7 @@ func TestStreamEntry_JSONOutput(t *testing.T) {
 	assert.Equal(t, "user", decoded["role"])
 	assert.Equal(t, "Hello world", decoded["content"])
 
-	// Verify no null fields for omitempty fields
+	// Verify no empty fields for omitempty fields
 	assert.NotContains(t, string(jsonBytes), "tool_name")
 	assert.NotContains(t, string(jsonBytes), "input")
 	assert.NotContains(t, string(jsonBytes), "result")
@@ -396,9 +392,9 @@ func TestStreamEntry_JSONOutput_ToolUse(t *testing.T) {
 	entry := StreamEntry{
 		Kind:       "tool-use",
 		Role:       "assistant",
-		ToolName:   stringPtr("bash"),
-		Input:      stringPtr(`{"command": "ls"}`),
-		ToolCallID: stringPtr("call-123"),
+		ToolName:   "bash",
+		Input:      `{"command": "ls"}`,
+		ToolCallID: "call-123",
 	}
 
 	jsonBytes, err := json.Marshal(entry)
