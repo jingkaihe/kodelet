@@ -59,13 +59,11 @@ func (cs *ConversationStreamer) RegisterMessageParser(provider string, parser Me
 func (cs *ConversationStreamer) StreamHistoricalData(ctx context.Context, conversationID string) error {
 	logger.G(ctx).WithField("conversationID", conversationID).Debug("Streaming historical conversation data")
 
-	// Get the conversation
 	response, err := cs.service.GetConversation(ctx, conversationID)
 	if err != nil {
 		return errors.Wrap(err, "failed to get conversation")
 	}
 
-	// Parse the messages using the registered parser
 	parser, exists := cs.messageParsers[response.Provider]
 	if !exists {
 		return errors.Errorf("no message parser registered for provider: %s", response.Provider)
@@ -76,7 +74,6 @@ func (cs *ConversationStreamer) StreamHistoricalData(ctx context.Context, conver
 		return errors.Wrap(err, "failed to parse messages")
 	}
 
-	// Stream each message as JSON
 	for _, msg := range streamableMessages {
 		entry := cs.convertToStreamEntry(msg)
 		if err := cs.outputStreamEntry(entry); err != nil {
@@ -103,16 +100,12 @@ func (cs *ConversationStreamer) StreamLiveUpdates(ctx context.Context, conversat
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
-			// Check if conversation has been updated
 			response, err := cs.service.GetConversation(ctx, conversationID)
 			if err != nil {
-				// If conversation doesn't exist yet, continue polling
 				continue
 			}
 
-			// Check if conversation has new updates
 			if response.UpdatedAt.After(lastUpdateTime) {
-				// Stream new messages since last count
 				newlyStreamed, err := cs.streamNewMessagesSince(ctx, response, streamedEntries)
 				if err != nil {
 					logger.G(ctx).WithError(err).Error("Failed to stream new messages")
@@ -130,7 +123,6 @@ func (cs *ConversationStreamer) StreamLiveUpdates(ctx context.Context, conversat
 
 // streamNewMessagesSince streams only the new messages since the last streamed count
 func (cs *ConversationStreamer) streamNewMessagesSince(ctx context.Context, response *GetConversationResponse, alreadyStreamed int) (int, error) {
-	// Parse all messages using the registered parser
 	parser, exists := cs.messageParsers[response.Provider]
 	if !exists {
 		return 0, errors.Errorf("no message parser registered for provider: %s", response.Provider)
@@ -141,7 +133,6 @@ func (cs *ConversationStreamer) streamNewMessagesSince(ctx context.Context, resp
 		return 0, errors.Wrap(err, "failed to parse messages")
 	}
 
-	// Stream only the new messages since what we've already streamed
 	newlyStreamed := 0
 	if len(streamableMessages) > alreadyStreamed {
 		newMessages := streamableMessages[alreadyStreamed:]
@@ -193,7 +184,6 @@ func (cs *ConversationStreamer) outputStreamEntry(entry StreamEntry) error {
 		return errors.Wrap(err, "failed to marshal stream entry")
 	}
 
-	// Output as newline-delimited JSON
 	fmt.Fprintf(os.Stdout, "%s\n", string(jsonBytes))
 	return nil
 }

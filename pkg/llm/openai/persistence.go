@@ -161,11 +161,9 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 			continue
 		}
 
-		// Handle tool results first (before plain content)
 		if msg.Role == openai.ChatMessageRoleTool {
 			result := msg.Content
 			toolName := ""
-			// Use CLI rendering if structured result is available
 			if structuredResult, ok := toolResults[msg.ToolCallID]; ok {
 				toolName = structuredResult.ToolName
 				registry := renderers.NewRendererRegistry()
@@ -190,7 +188,6 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 			})
 		}
 
-		// Handle text blocks in MultiContent
 		for _, contentBlock := range msg.MultiContent {
 			if contentBlock.Text != "" {
 				streamable = append(streamable, StreamableMessage{
@@ -201,7 +198,6 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 			}
 		}
 
-		// Handle tool calls
 		if len(msg.ToolCalls) > 0 {
 			for _, toolCall := range msg.ToolCalls {
 				inputJSON, _ := json.Marshal(toolCall.Function.Arguments)

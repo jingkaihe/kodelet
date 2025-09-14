@@ -186,7 +186,6 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 
 	for _, msg := range messages {
 		for _, contentBlock := range msg.Content {
-			// Handle text blocks
 			if textBlock := contentBlock.OfText; textBlock != nil && textBlock.Text != "" {
 				streamable = append(streamable, StreamableMessage{
 					Kind:    "text",
@@ -195,7 +194,6 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 				})
 			}
 
-			// Handle tool use blocks
 			if toolUseBlock := contentBlock.OfToolUse; toolUseBlock != nil {
 				inputJSON, _ := json.Marshal(toolUseBlock.Input)
 				streamable = append(streamable, StreamableMessage{
@@ -207,15 +205,12 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 				})
 			}
 
-			// Handle tool result blocks
 			if toolResultBlock := contentBlock.OfToolResult; toolResultBlock != nil {
 				result := ""
 				toolName := ""
 
-				// Extract tool name from tool results map
 				if structuredResult, ok := toolResults[toolResultBlock.ToolUseID]; ok {
 					toolName = structuredResult.ToolName
-					// Render the structured result using the CLI renderer
 					registry := renderers.NewRendererRegistry()
 					result = registry.Render(structuredResult)
 				} else {
@@ -236,7 +231,6 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 				})
 			}
 
-			// Handle thinking blocks
 			if thinkingBlock := contentBlock.OfThinking; thinkingBlock != nil && thinkingBlock.Thinking != "" {
 				streamable = append(streamable, StreamableMessage{
 					Kind:    "thinking",

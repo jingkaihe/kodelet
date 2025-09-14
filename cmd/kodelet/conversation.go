@@ -856,7 +856,6 @@ func editConversationCmd(ctx context.Context, conversationID string, config *Con
 }
 
 func streamConversationCmd(ctx context.Context, conversationID string, config *ConversationStreamConfig) {
-	// Create fully configured streamer with all parsers pre-registered
 	streamer, closeFunc, err := llm.NewConversationStreamer(ctx)
 	if err != nil {
 		presenter.Error(err, "Failed to create conversation streamer")
@@ -864,7 +863,6 @@ func streamConversationCmd(ctx context.Context, conversationID string, config *C
 	}
 	defer closeFunc()
 
-	// Check if conversation exists by attempting to get it
 	service, err := conversations.GetDefaultConversationService(ctx)
 	if err != nil {
 		presenter.Error(err, "Failed to get conversation service")
@@ -878,7 +876,6 @@ func streamConversationCmd(ctx context.Context, conversationID string, config *C
 		os.Exit(1)
 	}
 
-	// Stream historical data first if requested
 	if config.IncludeHistory {
 		err := streamer.StreamHistoricalData(ctx, conversationID)
 		if err != nil {
@@ -887,7 +884,6 @@ func streamConversationCmd(ctx context.Context, conversationID string, config *C
 		}
 	}
 
-	// Then stream live updates
 	liveUpdateInterval := 200 * time.Millisecond
 	err = streamer.StreamLiveUpdates(ctx, conversationID, liveUpdateInterval)
 	if err != nil {

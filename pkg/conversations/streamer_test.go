@@ -162,7 +162,6 @@ func TestStreamHistoricalData_Success(t *testing.T) {
 
 	streamer := NewConversationStreamer(service)
 
-	// Register mock parser
 	var capturedMessages []StreamableMessage
 	streamer.RegisterMessageParser("test-provider", func(raw json.RawMessage, results map[string]tools.StructuredToolResult) ([]StreamableMessage, error) {
 		capturedMessages = []StreamableMessage{
@@ -232,7 +231,6 @@ func TestStreamHistoricalData_ParserError(t *testing.T) {
 }
 
 func TestStreamNewMessagesSince(t *testing.T) {
-	// Mock conversation response
 	service := &mockConversationService{
 		conversation: &GetConversationResponse{
 			ID:       "test-conv",
@@ -292,7 +290,6 @@ func TestStreamLiveUpdates_ContextCancellation(t *testing.T) {
 		return []StreamableMessage{}, nil
 	})
 
-	// Create context that cancels after short time
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
@@ -304,7 +301,6 @@ func TestStreamLiveUpdates_ContextCancellation(t *testing.T) {
 	assert.Equal(t, context.DeadlineExceeded, err)
 }
 
-// Helper function for string pointers
 func stringPtr(s string) *string {
 	return &s
 }
@@ -320,11 +316,9 @@ func TestStreamEntry_JSONOutput(t *testing.T) {
 		Content: stringPtr("Hello world"),
 	}
 
-	// Test JSON marshaling
 	jsonBytes, err := json.Marshal(entry)
 	require.NoError(t, err)
 
-	// Verify JSON structure
 	var decoded map[string]interface{}
 	err = json.Unmarshal(jsonBytes, &decoded)
 	require.NoError(t, err)

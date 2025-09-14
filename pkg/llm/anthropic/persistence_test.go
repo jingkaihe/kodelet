@@ -792,11 +792,9 @@ func TestExtractMessages(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Len(t, messages, 2)
 
-	// Check first message
 	assert.Equal(t, "user", messages[0].Role)
 	assert.Equal(t, "Hello there!", messages[0].Content)
 
-	// Check second message
 	assert.Equal(t, "assistant", messages[1].Role)
 	assert.Equal(t, "Hi! How can I help you today?", messages[1].Content)
 }
@@ -862,25 +860,20 @@ func TestExtractMessagesWithToolUse(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Len(t, messages, 5) // user + assistant text + tool use + tool result + assistant final
 
-	// Check user message
 	assert.Equal(t, "user", messages[0].Role)
 	assert.Equal(t, "List the files in the current directory", messages[0].Content)
 
-	// Check assistant text message
 	assert.Equal(t, "assistant", messages[1].Role)
 	assert.Equal(t, "I'll list the files for you.", messages[1].Content)
 
-	// Check tool use message
 	assert.Equal(t, "assistant", messages[2].Role)
 	assert.Contains(t, messages[2].Content, "🔧 Using tool: bash")
 	assert.Contains(t, messages[2].Content, "ls -la")
 
-	// Check tool result message
 	assert.Equal(t, "assistant", messages[3].Role)
 	assert.Contains(t, messages[3].Content, "🔄 Tool result:")
 	assert.Contains(t, messages[3].Content, "file1.txt\nfile2.txt\nREADME.md")
 
-	// Check final assistant message
 	assert.Equal(t, "assistant", messages[4].Role)
 	assert.Equal(t, "Here are the files in your directory: file1.txt, file2.txt, README.md", messages[4].Content)
 }
@@ -1024,16 +1017,13 @@ func TestExtractMessagesWithThinking(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Len(t, messages, 3) // user + thinking + assistant text
 
-	// Check user message
 	assert.Equal(t, "user", messages[0].Role)
 	assert.Equal(t, "What is 2+2?", messages[0].Content)
 
-	// Check thinking message
 	assert.Equal(t, "assistant", messages[1].Role)
 	assert.Contains(t, messages[1].Content, "💭 Thinking:")
 	assert.Contains(t, messages[1].Content, "The user is asking for a simple arithmetic calculation. 2+2 equals 4.")
 
-	// Check final assistant message
 	assert.Equal(t, "assistant", messages[2].Role)
 	assert.Equal(t, "2+2 equals 4.", messages[2].Content)
 }
@@ -1069,7 +1059,6 @@ func TestExtractMessagesWithThinkingLeadingNewlines(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Len(t, messages, 3) // user + thinking + assistant text
 
-	// Check user message
 	assert.Equal(t, "user", messages[0].Role)
 	assert.Equal(t, "What is 2+2?", messages[0].Content)
 
@@ -1079,7 +1068,6 @@ func TestExtractMessagesWithThinkingLeadingNewlines(t *testing.T) {
 	// Verify no leading newlines in the thinking content
 	assert.NotContains(t, messages[1].Content, "💭 Thinking: \n")
 
-	// Check final assistant message
 	assert.Equal(t, "assistant", messages[2].Role)
 	assert.Equal(t, "2+2 equals 4.", messages[2].Content)
 }
@@ -1245,7 +1233,6 @@ func TestHasAnyEmptyBlock(t *testing.T) {
 }
 
 func TestStreamMessages_SimpleTextMessage(t *testing.T) {
-	// Test data: simple text message
 	messages := []anthropic.MessageParam{
 		anthropic.NewUserMessage(anthropic.NewTextBlock("Hello, how are you?")),
 		{
@@ -1261,25 +1248,21 @@ func TestStreamMessages_SimpleTextMessage(t *testing.T) {
 
 	toolResults := make(map[string]tooltypes.StructuredToolResult)
 
-	// Call StreamMessages
 	streamableMessages, err := StreamMessages(rawMessages, toolResults)
 
 	require.NoError(t, err)
 	assert.Equal(t, 2, len(streamableMessages))
 
-	// Check user message
 	assert.Equal(t, "text", streamableMessages[0].Kind)
 	assert.Equal(t, "user", streamableMessages[0].Role)
 	assert.Equal(t, "Hello, how are you?", streamableMessages[0].Content)
 
-	// Check assistant message
 	assert.Equal(t, "text", streamableMessages[1].Kind)
 	assert.Equal(t, "assistant", streamableMessages[1].Role)
 	assert.Equal(t, "I'm doing well, thank you!", streamableMessages[1].Content)
 }
 
 func TestStreamMessages_ThinkingMessage(t *testing.T) {
-	// Test data: message with thinking block
 	messages := []anthropic.MessageParam{
 		anthropic.NewUserMessage(anthropic.NewTextBlock("What is 2+2?")),
 		{
@@ -1296,18 +1279,16 @@ func TestStreamMessages_ThinkingMessage(t *testing.T) {
 
 	toolResults := make(map[string]tooltypes.StructuredToolResult)
 
-	// Call StreamMessages
+
 	streamableMessages, err := StreamMessages(rawMessages, toolResults)
 
 	require.NoError(t, err)
 	assert.Equal(t, 3, len(streamableMessages))
 
-	// Check user message
 	assert.Equal(t, "text", streamableMessages[0].Kind)
 	assert.Equal(t, "user", streamableMessages[0].Role)
 	assert.Equal(t, "What is 2+2?", streamableMessages[0].Content)
 
-	// Check thinking message
 	assert.Equal(t, "thinking", streamableMessages[1].Kind)
 	assert.Equal(t, "assistant", streamableMessages[1].Role)
 	assert.Contains(t, streamableMessages[1].Content, "Let me think")
@@ -1319,7 +1300,6 @@ func TestStreamMessages_ThinkingMessage(t *testing.T) {
 }
 
 func TestStreamMessages_ToolUseMessage(t *testing.T) {
-	// Test data: message with tool use
 	messages := []anthropic.MessageParam{
 		anthropic.NewUserMessage(anthropic.NewTextBlock("List the files in the current directory")),
 		{
@@ -1339,18 +1319,16 @@ func TestStreamMessages_ToolUseMessage(t *testing.T) {
 
 	toolResults := make(map[string]tooltypes.StructuredToolResult)
 
-	// Call StreamMessages
+
 	streamableMessages, err := StreamMessages(rawMessages, toolResults)
 
 	require.NoError(t, err)
 	assert.Equal(t, 2, len(streamableMessages))
 
-	// Check user message
 	assert.Equal(t, "text", streamableMessages[0].Kind)
 	assert.Equal(t, "user", streamableMessages[0].Role)
 	assert.Equal(t, "List the files in the current directory", streamableMessages[0].Content)
 
-	// Check tool use message
 	assert.Equal(t, "tool-use", streamableMessages[1].Kind)
 	assert.Equal(t, "assistant", streamableMessages[1].Role)
 	assert.Equal(t, "bash", streamableMessages[1].ToolName)
@@ -1359,7 +1337,6 @@ func TestStreamMessages_ToolUseMessage(t *testing.T) {
 }
 
 func TestStreamMessages_ToolResultMessage(t *testing.T) {
-	// Test data: message with tool result
 	messages := []anthropic.MessageParam{
 		{
 			Role: anthropic.MessageParamRoleUser,
@@ -1386,13 +1363,12 @@ func TestStreamMessages_ToolResultMessage(t *testing.T) {
 		},
 	}
 
-	// Call StreamMessages
+
 	streamableMessages, err := StreamMessages(rawMessages, toolResults)
 
 	require.NoError(t, err)
 	assert.Equal(t, 1, len(streamableMessages))
 
-	// Check tool result message
 	assert.Equal(t, "tool-result", streamableMessages[0].Kind)
 	assert.Equal(t, "user", streamableMessages[0].Role)
 	assert.Equal(t, "bash", streamableMessages[0].ToolName)
@@ -1401,7 +1377,6 @@ func TestStreamMessages_ToolResultMessage(t *testing.T) {
 }
 
 func TestStreamMessages_ComplexConversation(t *testing.T) {
-	// Test data: complex conversation with multiple message types
 	messages := []anthropic.MessageParam{
 		anthropic.NewUserMessage(anthropic.NewTextBlock("Run a command to check the date")),
 		{
@@ -1446,48 +1421,41 @@ func TestStreamMessages_ComplexConversation(t *testing.T) {
 		},
 	}
 
-	// Call StreamMessages
+
 	streamableMessages, err := StreamMessages(rawMessages, toolResults)
 
 	require.NoError(t, err)
 	assert.Equal(t, 6, len(streamableMessages))
 
-	// Check user message
 	assert.Equal(t, "text", streamableMessages[0].Kind)
 	assert.Equal(t, "user", streamableMessages[0].Role)
 	assert.Equal(t, "Run a command to check the date", streamableMessages[0].Content)
 
-	// Check thinking message
 	assert.Equal(t, "thinking", streamableMessages[1].Kind)
 	assert.Equal(t, "assistant", streamableMessages[1].Role)
 	assert.Contains(t, streamableMessages[1].Content, "bash tool")
 
-	// Check assistant text message
 	assert.Equal(t, "text", streamableMessages[2].Kind)
 	assert.Equal(t, "assistant", streamableMessages[2].Role)
 	assert.Equal(t, "I'll check the current date for you.", streamableMessages[2].Content)
 
-	// Check tool use message
 	assert.Equal(t, "tool-use", streamableMessages[3].Kind)
 	assert.Equal(t, "assistant", streamableMessages[3].Role)
 	assert.Equal(t, "bash", streamableMessages[3].ToolName)
 	assert.Equal(t, "call-456", streamableMessages[3].ToolCallID)
 
-	// Check tool result message
 	assert.Equal(t, "tool-result", streamableMessages[4].Kind)
 	assert.Equal(t, "user", streamableMessages[4].Role)
 	assert.Equal(t, "bash", streamableMessages[4].ToolName)
 	assert.Equal(t, "call-456", streamableMessages[4].ToolCallID)
 	assert.Contains(t, streamableMessages[4].Content, "Fri Sep 12")
 
-	// Check final assistant message
 	assert.Equal(t, "text", streamableMessages[5].Kind)
 	assert.Equal(t, "assistant", streamableMessages[5].Role)
 	assert.Contains(t, streamableMessages[5].Content, "Friday, September 12")
 }
 
 func TestStreamMessages_EmptyContent(t *testing.T) {
-	// Test data: messages with empty content should be skipped
 	messages := []anthropic.MessageParam{
 		anthropic.NewUserMessage(anthropic.NewTextBlock("Hello")),
 		{
@@ -1504,13 +1472,12 @@ func TestStreamMessages_EmptyContent(t *testing.T) {
 
 	toolResults := make(map[string]tooltypes.StructuredToolResult)
 
-	// Call StreamMessages
+
 	streamableMessages, err := StreamMessages(rawMessages, toolResults)
 
 	require.NoError(t, err)
 	assert.Equal(t, 2, len(streamableMessages)) // Empty text should be skipped
 
-	// Check user message
 	assert.Equal(t, "text", streamableMessages[0].Kind)
 	assert.Equal(t, "user", streamableMessages[0].Role)
 	assert.Equal(t, "Hello", streamableMessages[0].Content)
@@ -1522,12 +1489,11 @@ func TestStreamMessages_EmptyContent(t *testing.T) {
 }
 
 func TestStreamMessages_InvalidJSON(t *testing.T) {
-	// Test data: invalid JSON
 	rawMessages := json.RawMessage(`{"invalid": json}`)
 
 	toolResults := make(map[string]tooltypes.StructuredToolResult)
 
-	// Call StreamMessages
+
 	streamableMessages, err := StreamMessages(rawMessages, toolResults)
 
 	require.Error(t, err)
@@ -1536,7 +1502,6 @@ func TestStreamMessages_InvalidJSON(t *testing.T) {
 }
 
 func TestStreamMessages_EmptyMessages(t *testing.T) {
-	// Test data: empty message array
 	messages := []anthropic.MessageParam{}
 
 	rawMessages, err := json.Marshal(messages)
@@ -1544,7 +1509,7 @@ func TestStreamMessages_EmptyMessages(t *testing.T) {
 
 	toolResults := make(map[string]tooltypes.StructuredToolResult)
 
-	// Call StreamMessages
+
 	streamableMessages, err := StreamMessages(rawMessages, toolResults)
 
 	require.NoError(t, err)

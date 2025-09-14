@@ -378,7 +378,6 @@ func TestSaveConversationMessageCleanup(t *testing.T) {
 }
 
 func TestStreamMessages_SimpleTextMessage(t *testing.T) {
-	// Test data: simple text message
 	messages := []openai.ChatCompletionMessage{
 		{
 			Role:    openai.ChatMessageRoleUser,
@@ -395,25 +394,21 @@ func TestStreamMessages_SimpleTextMessage(t *testing.T) {
 
 	toolResults := make(map[string]tooltypes.StructuredToolResult)
 
-	// Call StreamMessages
 	streamableMessages, err := StreamMessages(rawMessages, toolResults)
 
 	require.NoError(t, err)
 	assert.Equal(t, 2, len(streamableMessages))
 
-	// Check user message
 	assert.Equal(t, "text", streamableMessages[0].Kind)
 	assert.Equal(t, "user", streamableMessages[0].Role)
 	assert.Equal(t, "Hello, how are you?", streamableMessages[0].Content)
 
-	// Check assistant message
 	assert.Equal(t, "text", streamableMessages[1].Kind)
 	assert.Equal(t, "assistant", streamableMessages[1].Role)
 	assert.Equal(t, "I'm doing well, thank you!", streamableMessages[1].Content)
 }
 
 func TestStreamMessages_ToolUseMessage(t *testing.T) {
-	// Test data: message with tool call
 	toolCall := openai.ToolCall{
 		ID:   "call-123",
 		Type: openai.ToolTypeFunction,
@@ -440,18 +435,15 @@ func TestStreamMessages_ToolUseMessage(t *testing.T) {
 
 	toolResults := make(map[string]tooltypes.StructuredToolResult)
 
-	// Call StreamMessages
 	streamableMessages, err := StreamMessages(rawMessages, toolResults)
 
 	require.NoError(t, err)
 	assert.Equal(t, 2, len(streamableMessages))
 
-	// Check user message
 	assert.Equal(t, "text", streamableMessages[0].Kind)
 	assert.Equal(t, "user", streamableMessages[0].Role)
 	assert.Equal(t, "List the files in the current directory", streamableMessages[0].Content)
 
-	// Check tool use message
 	assert.Equal(t, "tool-use", streamableMessages[1].Kind)
 	assert.Equal(t, "assistant", streamableMessages[1].Role)
 	assert.Equal(t, "bash", streamableMessages[1].ToolName)
@@ -460,7 +452,6 @@ func TestStreamMessages_ToolUseMessage(t *testing.T) {
 }
 
 func TestStreamMessages_ToolResultMessage(t *testing.T) {
-	// Test data: tool result message
 	messages := []openai.ChatCompletionMessage{
 		{
 			Role:       openai.ChatMessageRoleTool,
@@ -486,13 +477,11 @@ func TestStreamMessages_ToolResultMessage(t *testing.T) {
 		},
 	}
 
-	// Call StreamMessages
 	streamableMessages, err := StreamMessages(rawMessages, toolResults)
 
 	require.NoError(t, err)
 	assert.Equal(t, 1, len(streamableMessages))
 
-	// Check tool result message
 	assert.Equal(t, "tool-result", streamableMessages[0].Kind)
 	assert.Equal(t, "assistant", streamableMessages[0].Role) // Tool results show as assistant
 	assert.Equal(t, "bash", streamableMessages[0].ToolName)
@@ -501,7 +490,6 @@ func TestStreamMessages_ToolResultMessage(t *testing.T) {
 }
 
 func TestStreamMessages_SystemMessageSkipped(t *testing.T) {
-	// Test data: includes system message which should be skipped
 	messages := []openai.ChatCompletionMessage{
 		{
 			Role:    openai.ChatMessageRoleSystem,
@@ -522,30 +510,25 @@ func TestStreamMessages_SystemMessageSkipped(t *testing.T) {
 
 	toolResults := make(map[string]tooltypes.StructuredToolResult)
 
-	// Call StreamMessages
 	streamableMessages, err := StreamMessages(rawMessages, toolResults)
 
 	require.NoError(t, err)
 	assert.Equal(t, 2, len(streamableMessages)) // System message should be skipped
 
-	// Check user message (first after skipping system)
 	assert.Equal(t, "text", streamableMessages[0].Kind)
 	assert.Equal(t, "user", streamableMessages[0].Role)
 	assert.Equal(t, "Hello", streamableMessages[0].Content)
 
-	// Check assistant message
 	assert.Equal(t, "text", streamableMessages[1].Kind)
 	assert.Equal(t, "assistant", streamableMessages[1].Role)
 	assert.Equal(t, "Hi there!", streamableMessages[1].Content)
 }
 
 func TestStreamMessages_InvalidJSON(t *testing.T) {
-	// Test data: invalid JSON
 	rawMessages := json.RawMessage(`{"invalid": json}`)
 
 	toolResults := make(map[string]tooltypes.StructuredToolResult)
 
-	// Call StreamMessages
 	streamableMessages, err := StreamMessages(rawMessages, toolResults)
 
 	require.Error(t, err)

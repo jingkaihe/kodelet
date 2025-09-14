@@ -197,11 +197,9 @@ var runCmd = &cobra.Command{
 		appState := tools.NewBasicState(ctx, stateOpts...)
 
 		if config.Headless {
-			// Headless mode: set up streaming and silent operation
 			presenter.SetQuiet(true)
 
 			// Configure logging for headless mode to avoid contaminating JSON output
-			// Set log format to JSON and level to error to minimize noise
 			logger.SetLogFormat("json")
 			logger.SetLogLevel("error")
 
@@ -218,7 +216,6 @@ var runCmd = &cobra.Command{
 
 			thread.EnablePersistence(ctx, !config.NoSave)
 
-			// Create fully configured streamer with all parsers pre-registered
 			streamer, closeFunc, err := llm.NewConversationStreamer(ctx)
 			if err != nil {
 				presenter.Error(err, "Failed to create conversation streamer")
@@ -226,13 +223,9 @@ var runCmd = &cobra.Command{
 			}
 			defer closeFunc()
 
-			// Run the conversation in background and stream updates
 			conversationID := thread.GetConversationID()
-
-			// Create a channel to signal when conversation is done
 			done := make(chan error, 1)
 
-			// Start the conversation processing in a goroutine
 			go func() {
 				handler := &llmtypes.ConsoleMessageHandler{Silent: true}
 				_, err := thread.SendMessage(ctx, query, handler, llmtypes.MessageOpt{
@@ -245,20 +238,15 @@ var runCmd = &cobra.Command{
 				done <- err
 			}()
 
-			// Create cancellable context for streaming control
 			streamCtx, cancel := context.WithCancel(ctx)
 			defer cancel()
 
-			// Define streaming interval for live updates
 			liveUpdateInterval := 200 * time.Millisecond
-
-			// Monitor for both streaming completion and conversation completion
 			streamDone := make(chan error, 1)
 			go func() {
 				streamDone <- streamer.StreamLiveUpdates(streamCtx, conversationID, liveUpdateInterval)
 			}()
 
-			// Wait for either conversation completion or streaming to finish
 			select {
 			case err := <-done:
 				if err != nil {
@@ -266,15 +254,14 @@ var runCmd = &cobra.Command{
 				}
 				// Give streaming time to catch final messages (2 polling cycles)
 				time.Sleep(2 * liveUpdateInterval)
-				cancel()     // Cancel streaming context
-				<-streamDone // Wait for streaming to finish
+				cancel()
+				<-streamDone
 			case err := <-streamDone:
 				if err != nil && err != context.Canceled {
 					logger.G(ctx).WithError(err).Error("Error streaming updates")
 				}
 			}
 		} else {
-			// Normal console mode
 			presenter.Info(fmt.Sprintf("[User]: %s", query))
 
 			handler := &llmtypes.ConsoleMessageHandler{Silent: false}

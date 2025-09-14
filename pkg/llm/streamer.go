@@ -20,7 +20,6 @@ func NewConversationStreamer(ctx context.Context) (streamer *conversations.Conve
 
 	streamer = conversations.NewConversationStreamer(service)
 
-	// Register Anthropic message parser
 	streamer.RegisterMessageParser("anthropic", func(rawMessages json.RawMessage, toolResults map[string]tooltypes.StructuredToolResult) ([]conversations.StreamableMessage, error) {
 		msgs, err := anthropic.StreamMessages(rawMessages, toolResults)
 		if err != nil {
@@ -29,7 +28,6 @@ func NewConversationStreamer(ctx context.Context) (streamer *conversations.Conve
 		return convertAnthropicStreamableMessages(msgs), nil
 	})
 
-	// Register OpenAI message parser  
 	streamer.RegisterMessageParser("openai", func(rawMessages json.RawMessage, toolResults map[string]tooltypes.StructuredToolResult) ([]conversations.StreamableMessage, error) {
 		msgs, err := openai.StreamMessages(rawMessages, toolResults)
 		if err != nil {
@@ -41,7 +39,6 @@ func NewConversationStreamer(ctx context.Context) (streamer *conversations.Conve
 	return streamer, service.Close, nil
 }
 
-// Convert anthropic StreamableMessage to conversations StreamableMessage
 func convertAnthropicStreamableMessages(msgs []anthropic.StreamableMessage) []conversations.StreamableMessage {
 	result := make([]conversations.StreamableMessage, len(msgs))
 	for i, msg := range msgs {
@@ -57,7 +54,6 @@ func convertAnthropicStreamableMessages(msgs []anthropic.StreamableMessage) []co
 	return result
 }
 
-// Convert openai StreamableMessage to conversations StreamableMessage  
 func convertOpenAIStreamableMessages(msgs []openai.StreamableMessage) []conversations.StreamableMessage {
 	result := make([]conversations.StreamableMessage, len(msgs))
 	for i, msg := range msgs {
