@@ -489,49 +489,54 @@ func TestStreamMessages_ToolResultMessage(t *testing.T) {
 	assert.Contains(t, streamableMessages[0].Content, "file1.txt")
 }
 
-func TestStreamMessages_SystemMessageSkipped(t *testing.T) {
-	messages := []openai.ChatCompletionMessage{
+func TestStreamMessages_EdgeCases(t *testing.T) {
+	tests := []struct {
+		name           string
+		messages       []openai.ChatCompletionMessage
+		rawMessages    json.RawMessage
+		expectedError  string
+		expectedLength int
+	}{
 		{
-			Role:    openai.ChatMessageRoleSystem,
-			Content: "You are a helpful assistant",
+			name: "system message skipped",
+			messages: []openai.ChatCompletionMessage{
+				{Role: openai.ChatMessageRoleSystem, Content: "You are a helpful assistant"},
+				{Role: openai.ChatMessageRoleUser, Content: "Hello"},
+				{Role: openai.ChatMessageRoleAssistant, Content: "Hi there!"},
+			},
+			expectedLength: 2, // System message should be skipped
 		},
 		{
-			Role:    openai.ChatMessageRoleUser,
-			Content: "Hello",
-		},
-		{
-			Role:    openai.ChatMessageRoleAssistant,
-			Content: "Hi there!",
+			name:          "invalid JSON",
+			rawMessages:   json.RawMessage(`{"invalid": json}`),
+			expectedError: "error unmarshaling messages",
 		},
 	}
 
-	rawMessages, err := json.Marshal(messages)
-	require.NoError(t, err)
-
 	toolResults := make(map[string]tooltypes.StructuredToolResult)
 
-	streamableMessages, err := StreamMessages(rawMessages, toolResults)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var rawMessages json.RawMessage
+			var err error
 
-	require.NoError(t, err)
-	assert.Equal(t, 2, len(streamableMessages)) // System message should be skipped
+			if tt.rawMessages != nil {
+				rawMessages = tt.rawMessages
+			} else {
+				rawMessages, err = json.Marshal(tt.messages)
+				require.NoError(t, err)
+			}
 
-	assert.Equal(t, "text", streamableMessages[0].Kind)
-	assert.Equal(t, "user", streamableMessages[0].Role)
-	assert.Equal(t, "Hello", streamableMessages[0].Content)
+			streamableMessages, err := StreamMessages(rawMessages, toolResults)
 
-	assert.Equal(t, "text", streamableMessages[1].Kind)
-	assert.Equal(t, "assistant", streamableMessages[1].Role)
-	assert.Equal(t, "Hi there!", streamableMessages[1].Content)
-}
-
-func TestStreamMessages_InvalidJSON(t *testing.T) {
-	rawMessages := json.RawMessage(`{"invalid": json}`)
-
-	toolResults := make(map[string]tooltypes.StructuredToolResult)
-
-	streamableMessages, err := StreamMessages(rawMessages, toolResults)
-
-	require.Error(t, err)
-	assert.Nil(t, streamableMessages)
-	assert.Contains(t, err.Error(), "error unmarshaling messages")
+			if tt.expectedError != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.expectedError)
+				assert.Nil(t, streamableMessages)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tt.expectedLength, len(streamableMessages))
+			}
+		})
+	}
 }

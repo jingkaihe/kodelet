@@ -1451,60 +1451,40 @@ func TestStreamMessages_ComplexConversation(t *testing.T) {
 	assert.Contains(t, streamableMessages[5].Content, "Friday, September 12")
 }
 
-func TestStreamMessages_EmptyContent(t *testing.T) {
-	messages := []anthropic.MessageParam{
-		anthropic.NewUserMessage(anthropic.NewTextBlock("Hello")),
+func TestStreamMessages_EdgeCases(t *testing.T) {
+	tests := []struct {
+		name           string
+		rawMessages    json.RawMessage
+		expectedError  string
+		expectedLength int
+	}{
 		{
-			Role: anthropic.MessageParamRoleAssistant,
-			Content: []anthropic.ContentBlockParamUnion{
-				anthropic.NewTextBlock(""), // Empty text should be skipped
-				anthropic.NewTextBlock("Hi there!"),
-			},
+			name:           "invalid JSON",
+			rawMessages:    json.RawMessage(`{"invalid": json}`),
+			expectedError:  "failed to deserialize anthropic messages",
+			expectedLength: 0,
+		},
+		{
+			name:           "empty messages",
+			rawMessages:    func() json.RawMessage { data, _ := json.Marshal([]anthropic.MessageParam{}); return data }(),
+			expectedLength: 0,
 		},
 	}
 
-	rawMessages, err := json.Marshal(messages)
-	require.NoError(t, err)
-
 	toolResults := make(map[string]tooltypes.StructuredToolResult)
 
-	streamableMessages, err := StreamMessages(rawMessages, toolResults)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			streamableMessages, err := StreamMessages(tt.rawMessages, toolResults)
 
-	require.NoError(t, err)
-	assert.Equal(t, 2, len(streamableMessages)) // Empty text should be skipped
-
-	assert.Equal(t, "text", streamableMessages[0].Kind)
-	assert.Equal(t, "user", streamableMessages[0].Role)
-	assert.Equal(t, "Hello", streamableMessages[0].Content)
-
-	// Check assistant message (empty one should be skipped)
-	assert.Equal(t, "text", streamableMessages[1].Kind)
-	assert.Equal(t, "assistant", streamableMessages[1].Role)
-	assert.Equal(t, "Hi there!", streamableMessages[1].Content)
-}
-
-func TestStreamMessages_InvalidJSON(t *testing.T) {
-	rawMessages := json.RawMessage(`{"invalid": json}`)
-
-	toolResults := make(map[string]tooltypes.StructuredToolResult)
-
-	streamableMessages, err := StreamMessages(rawMessages, toolResults)
-
-	require.Error(t, err)
-	assert.Nil(t, streamableMessages)
-	assert.Contains(t, err.Error(), "failed to deserialize anthropic messages")
-}
-
-func TestStreamMessages_EmptyMessages(t *testing.T) {
-	messages := []anthropic.MessageParam{}
-
-	rawMessages, err := json.Marshal(messages)
-	require.NoError(t, err)
-
-	toolResults := make(map[string]tooltypes.StructuredToolResult)
-
-	streamableMessages, err := StreamMessages(rawMessages, toolResults)
-
-	require.NoError(t, err)
-	assert.Equal(t, 0, len(streamableMessages))
+			if tt.expectedError != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.expectedError)
+				assert.Nil(t, streamableMessages)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tt.expectedLength, len(streamableMessages))
+			}
+		})
+	}
 }

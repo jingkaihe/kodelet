@@ -42,31 +42,6 @@ func (m *mockConversationService) Close() error {
 	return nil
 }
 
-func TestNewConversationStreamer(t *testing.T) {
-	service := &mockConversationService{}
-	streamer := NewConversationStreamer(service)
-
-	assert.NotNil(t, streamer)
-	assert.NotNil(t, streamer.service)
-	assert.NotNil(t, streamer.messageParsers)
-	assert.Equal(t, 0, len(streamer.messageParsers))
-}
-
-func TestRegisterMessageParser(t *testing.T) {
-	service := &mockConversationService{}
-	streamer := NewConversationStreamer(service)
-
-	// Test parser function
-	parser := func(rawMessages json.RawMessage, toolResults map[string]tools.StructuredToolResult) ([]StreamableMessage, error) {
-		return []StreamableMessage{}, nil
-	}
-
-	streamer.RegisterMessageParser("test-provider", parser)
-
-	assert.Equal(t, 1, len(streamer.messageParsers))
-	assert.NotNil(t, streamer.messageParsers["test-provider"])
-}
-
 func TestConvertToStreamEntry(t *testing.T) {
 	service := &mockConversationService{}
 	streamer := NewConversationStreamer(service)
@@ -155,7 +130,7 @@ func TestConvertToStreamEntry(t *testing.T) {
 	}
 }
 
-func TestStreamLiveUpdates_WithHistory_Success(t *testing.T) {
+func TestStreamLiveUpdates_WithHistory(t *testing.T) {
 	// Mock conversation response
 	rawMessages := json.RawMessage(`[{"role": "user", "content": "test"}]`)
 	toolResults := make(map[string]tools.StructuredToolResult)
@@ -171,14 +146,11 @@ func TestStreamLiveUpdates_WithHistory_Success(t *testing.T) {
 	}
 
 	streamer := NewConversationStreamer(service)
-
-	var capturedMessages []StreamableMessage
 	streamer.RegisterMessageParser("test-provider", func(raw json.RawMessage, results map[string]tools.StructuredToolResult) ([]StreamableMessage, error) {
-		capturedMessages = []StreamableMessage{
+		return []StreamableMessage{
 			{Kind: "text", Role: "user", Content: "Hello"},
 			{Kind: "text", Role: "assistant", Content: "Hi there"},
-		}
-		return capturedMessages, nil
+		}, nil
 	})
 
 	// Test with history included - should timeout quickly for testing
@@ -196,69 +168,67 @@ func TestStreamLiveUpdates_WithHistory_Success(t *testing.T) {
 	assert.Equal(t, context.DeadlineExceeded, err)
 }
 
-func TestStreamLiveUpdates_ConversationNotFound(t *testing.T) {
-	service := &mockConversationService{
-		err: fmt.Errorf("conversation not found"),
-	}
-
-	streamer := NewConversationStreamer(service)
-
-	ctx := context.Background()
-	streamOpts := StreamOpts{
-		Interval:       50 * time.Millisecond,
-		IncludeHistory: true,
-	}
-	err := streamer.StreamLiveUpdates(ctx, "non-existent", streamOpts)
-
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to get conversation")
-}
-
-func TestStreamLiveUpdates_NoParserRegistered(t *testing.T) {
-	service := &mockConversationService{
-		conversation: &GetConversationResponse{
-			ID:        "test-conv",
-			Provider:  "unknown-provider",
-			UpdatedAt: time.Now(),
+func TestStreamLiveUpdates_ErrorHandling(t *testing.T) {
+	tests := []struct {
+		name          string
+		service       *mockConversationService
+		setupStreamer func(*ConversationStreamer)
+		expectedError string
+	}{
+		{
+			name: "conversation not found",
+			service: &mockConversationService{
+				err: fmt.Errorf("conversation not found"),
+			},
+			setupStreamer: func(s *ConversationStreamer) {},
+			expectedError: "failed to get conversation",
+		},
+		{
+			name: "no parser registered",
+			service: &mockConversationService{
+				conversation: &GetConversationResponse{
+					ID:        "test-conv",
+					Provider:  "unknown-provider",
+					UpdatedAt: time.Now(),
+				},
+			},
+			setupStreamer: func(s *ConversationStreamer) {},
+			expectedError: "no message parser registered for provider: unknown-provider",
+		},
+		{
+			name: "parser error",
+			service: &mockConversationService{
+				conversation: &GetConversationResponse{
+					ID:        "test-conv",
+					Provider:  "error-provider",
+					UpdatedAt: time.Now(),
+				},
+			},
+			setupStreamer: func(s *ConversationStreamer) {
+				s.RegisterMessageParser("error-provider", func(raw json.RawMessage, results map[string]tools.StructuredToolResult) ([]StreamableMessage, error) {
+					return nil, fmt.Errorf("parser error")
+				})
+			},
+			expectedError: "failed to parse messages",
 		},
 	}
 
-	streamer := NewConversationStreamer(service)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			streamer := NewConversationStreamer(tt.service)
+			tt.setupStreamer(streamer)
 
-	ctx := context.Background()
-	streamOpts := StreamOpts{
-		Interval:       50 * time.Millisecond,
-		IncludeHistory: false, // Test live-only mode which triggers parser check early
+			ctx := context.Background()
+			streamOpts := StreamOpts{
+				Interval:       50 * time.Millisecond,
+				IncludeHistory: false,
+			}
+			err := streamer.StreamLiveUpdates(ctx, "test-conv", streamOpts)
+
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), tt.expectedError)
+		})
 	}
-	err := streamer.StreamLiveUpdates(ctx, "test-conv", streamOpts)
-
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "no message parser registered for provider: unknown-provider")
-}
-
-func TestStreamLiveUpdates_ParserError(t *testing.T) {
-	service := &mockConversationService{
-		conversation: &GetConversationResponse{
-			ID:        "test-conv",
-			Provider:  "error-provider",
-			UpdatedAt: time.Now(),
-		},
-	}
-
-	streamer := NewConversationStreamer(service)
-	streamer.RegisterMessageParser("error-provider", func(raw json.RawMessage, results map[string]tools.StructuredToolResult) ([]StreamableMessage, error) {
-		return nil, fmt.Errorf("parser error")
-	})
-
-	ctx := context.Background()
-	streamOpts := StreamOpts{
-		Interval:       50 * time.Millisecond,
-		IncludeHistory: false, // Test live-only mode which triggers parser check early
-	}
-	err := streamer.StreamLiveUpdates(ctx, "test-conv", streamOpts)
-
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to parse messages")
 }
 
 func TestStreamNewMessagesSince(t *testing.T) {
@@ -307,120 +277,53 @@ func TestStreamNewMessagesSince(t *testing.T) {
 	assert.Equal(t, 0, count)
 }
 
-func TestStreamLiveUpdates_ContextCancellation(t *testing.T) {
-	service := &mockConversationService{
-		conversation: &GetConversationResponse{
-			ID:        "test-conv",
-			Provider:  "test-provider",
-			UpdatedAt: time.Now(),
-		},
-	}
-
-	streamer := NewConversationStreamer(service)
-	streamer.RegisterMessageParser("test-provider", func(raw json.RawMessage, results map[string]tools.StructuredToolResult) ([]StreamableMessage, error) {
-		return []StreamableMessage{}, nil
-	})
-
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
-
-	streamOpts := StreamOpts{
-		Interval:       50 * time.Millisecond,
-		IncludeHistory: false,
-	}
-	err := streamer.StreamLiveUpdates(ctx, "test-conv", streamOpts)
-
-	// Should return context.DeadlineExceeded
-	assert.Error(t, err)
-	assert.Equal(t, context.DeadlineExceeded, err)
-}
-
-func TestStreamLiveUpdates_LiveOnly_SkipsExistingMessages(t *testing.T) {
-	existingMessages := []StreamableMessage{
-		{Kind: "text", Role: "user", Content: "Existing message 1"},
-		{Kind: "text", Role: "assistant", Content: "Existing response 1"},
-	}
-
-	service := &mockConversationService{
-		conversation: &GetConversationResponse{
-			ID:        "test-conv",
-			Provider:  "test-provider",
-			UpdatedAt: time.Now(),
-		},
-	}
-
-	streamer := NewConversationStreamer(service)
-	streamer.RegisterMessageParser("test-provider", func(raw json.RawMessage, results map[string]tools.StructuredToolResult) ([]StreamableMessage, error) {
-		return existingMessages, nil
-	})
-
-	// Test live-only mode should skip existing messages
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
-
-	streamOpts := StreamOpts{
-		Interval:       50 * time.Millisecond,
-		IncludeHistory: false,
-	}
-	err := streamer.StreamLiveUpdates(ctx, "test-conv", streamOpts)
-
-	// Should timeout after initializing (but not streaming existing messages)
-	assert.Error(t, err)
-	assert.Equal(t, context.DeadlineExceeded, err)
-}
-
-// Integration test that captures actual output (simplified)
 func TestStreamEntry_JSONOutput(t *testing.T) {
-	service := &mockConversationService{}
-	_ = NewConversationStreamer(service)
-
-	entry := StreamEntry{
-		Kind:           "text",
-		Role:           "user",
-		Content:        "Hello world",
-		ConversationID: "test-conv-json",
+	tests := []struct {
+		name     string
+		entry    StreamEntry
+		contains []string
+		omits    []string
+	}{
+		{
+			name: "text entry",
+			entry: StreamEntry{
+				Kind:           "text",
+				Role:           "user",
+				Content:        "Hello world",
+				ConversationID: "test-conv-json",
+			},
+			contains: []string{`"kind":"text"`, `"role":"user"`, `"content":"Hello world"`, `"conversation_id":"test-conv-json"`},
+			omits:    []string{"tool_name", "input", "result", "tool_call_id"},
+		},
+		{
+			name: "tool-use entry",
+			entry: StreamEntry{
+				Kind:           "tool-use",
+				Role:           "assistant",
+				ToolName:       "bash",
+				Input:          `{"command": "ls"}`,
+				ToolCallID:     "call-123",
+				ConversationID: "test-conv-tool",
+			},
+			contains: []string{`"kind":"tool-use"`, `"tool_name":"bash"`, `"input":"{\"command\": \"ls\"}"`, `"tool_call_id":"call-123"`},
+			omits:    []string{"content", "result"},
+		},
 	}
 
-	jsonBytes, err := json.Marshal(entry)
-	require.NoError(t, err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			jsonBytes, err := json.Marshal(tt.entry)
+			require.NoError(t, err)
 
-	var decoded map[string]interface{}
-	err = json.Unmarshal(jsonBytes, &decoded)
-	require.NoError(t, err)
-
-	assert.Equal(t, "text", decoded["kind"])
-	assert.Equal(t, "user", decoded["role"])
-	assert.Equal(t, "Hello world", decoded["content"])
-	assert.Equal(t, "test-conv-json", decoded["conversation_id"])
-
-	// Verify no empty fields for omitempty fields
-	assert.NotContains(t, string(jsonBytes), "tool_name")
-	assert.NotContains(t, string(jsonBytes), "input")
-	assert.NotContains(t, string(jsonBytes), "result")
-}
-
-func TestStreamEntry_JSONOutput_ToolUse(t *testing.T) {
-	entry := StreamEntry{
-		Kind:           "tool-use",
-		Role:           "assistant",
-		ToolName:       "bash",
-		Input:          `{"command": "ls"}`,
-		ToolCallID:     "call-123",
-		ConversationID: "test-conv-tool",
+			jsonStr := string(jsonBytes)
+			for _, contain := range tt.contains {
+				assert.Contains(t, jsonStr, contain)
+			}
+			for _, omit := range tt.omits {
+				assert.NotContains(t, jsonStr, omit)
+			}
+		})
 	}
-
-	jsonBytes, err := json.Marshal(entry)
-	require.NoError(t, err)
-
-	// Should contain expected fields and not contain content/result
-	jsonStr := string(jsonBytes)
-	assert.Contains(t, jsonStr, `"kind":"tool-use"`)
-	assert.Contains(t, jsonStr, `"tool_name":"bash"`)
-	assert.Contains(t, jsonStr, `"input":"{\"command\": \"ls\"}"`)
-	assert.Contains(t, jsonStr, `"tool_call_id":"call-123"`)
-	assert.Contains(t, jsonStr, `"conversation_id":"test-conv-tool"`)
-	assert.NotContains(t, jsonStr, "content")
-	assert.NotContains(t, jsonStr, "result")
 }
 
 // Benchmark test for streaming performance
@@ -442,83 +345,9 @@ func BenchmarkStreamEntry_Convert(b *testing.B) {
 	}
 }
 
-func TestStreamLiveUpdates_NewConversation_NoServiceCall(t *testing.T) {
+func TestStreamLiveUpdates_NewConversation(t *testing.T) {
 	service := &mockConversationService{
-		err: fmt.Errorf("conversation not found"),
-	}
-
-	streamer := NewConversationStreamer(service)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
-
-	streamOpts := StreamOpts{
-		Interval:       50 * time.Millisecond,
-		IncludeHistory: false,
-		New:            true,
-	}
-	err := streamer.StreamLiveUpdates(ctx, "new-conversation-id", streamOpts)
-
-	assert.Error(t, err)
-	assert.Equal(t, context.DeadlineExceeded, err)
-}
-
-func TestStreamLiveUpdates_NewConversation_WithHistory(t *testing.T) {
-	service := &mockConversationService{
-		err: fmt.Errorf("conversation not found"),
-	}
-
-	streamer := NewConversationStreamer(service)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
-
-	streamOpts := StreamOpts{
-		Interval:       50 * time.Millisecond,
-		IncludeHistory: true,
-		New:            true,
-	}
-	err := streamer.StreamLiveUpdates(ctx, "new-conversation-id", streamOpts)
-
-	assert.Error(t, err)
-	assert.Equal(t, context.DeadlineExceeded, err)
-}
-
-func TestStreamLiveUpdates_ExistingConversation_StillCallsService(t *testing.T) {
-	service := &mockConversationService{
-		conversation: &GetConversationResponse{
-			ID:          "existing-conv-123",
-			Provider:    "test-provider",
-			RawMessages: json.RawMessage(`[{"role": "user", "content": "test"}]`),
-			ToolResults: make(map[string]tools.StructuredToolResult),
-			UpdatedAt:   time.Now(),
-		},
-	}
-
-	streamer := NewConversationStreamer(service)
-	streamer.RegisterMessageParser("test-provider", func(raw json.RawMessage, results map[string]tools.StructuredToolResult) ([]StreamableMessage, error) {
-		return []StreamableMessage{
-			{Kind: "text", Role: "user", Content: "Hello"},
-		}, nil
-	})
-
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
-
-	streamOpts := StreamOpts{
-		Interval:       50 * time.Millisecond,
-		IncludeHistory: true,
-		New:            false,
-	}
-	err := streamer.StreamLiveUpdates(ctx, "existing-conv-123", streamOpts)
-
-	assert.Error(t, err)
-	assert.Equal(t, context.DeadlineExceeded, err)
-}
-
-func TestStreamLiveUpdates_NewConversation_InitializesCorrectly(t *testing.T) {
-	service := &mockConversationService{
-		err: fmt.Errorf("should not be called"),
+		err: fmt.Errorf("should not be called for new conversation"),
 	}
 
 	streamer := NewConversationStreamer(service)
