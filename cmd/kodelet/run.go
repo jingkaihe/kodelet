@@ -8,10 +8,12 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/llm"
+	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -23,6 +25,7 @@ type RunConfig struct {
 	ResumeConvID       string
 	Follow             bool
 	NoSave             bool
+	Headless           bool              // Use structured JSON output instead of console formatting
 	Images             []string          // Image paths or URLs to include with the message
 	MaxTurns           int               // Maximum number of turns within a single SendMessage call
 	CompactRatio       float64           // Ratio of context window at which to trigger auto-compact (0.0-1.0)
@@ -30,6 +33,7 @@ type RunConfig struct {
 	FragmentName       string            // Name of fragment to use
 	FragmentArgs       map[string]string // Arguments to pass to fragment
 	FragmentDirs       []string          // Additional fragment directories
+	IncludeHistory     bool              // Include historical conversation data in headless streaming
 }
 
 func NewRunConfig() *RunConfig {
@@ -37,13 +41,15 @@ func NewRunConfig() *RunConfig {
 		ResumeConvID:       "",
 		Follow:             false,
 		NoSave:             false,
+		Headless:           false,
 		Images:             []string{},
-		MaxTurns:           50,  // Default to 50 turns
-		CompactRatio:       0.8, // Default to 80% context window utilization
+		MaxTurns:           50,
+		CompactRatio:       0.8,
 		DisableAutoCompact: false,
 		FragmentName:       "",
 		FragmentArgs:       make(map[string]string),
 		FragmentDirs:       []string{},
+		IncludeHistory:     false,
 	}
 }
 
@@ -190,44 +196,116 @@ var runCmd = &cobra.Command{
 		stateOpts = append(stateOpts, tools.WithMainTools())
 		appState := tools.NewBasicState(ctx, stateOpts...)
 
-		fmt.Printf("\033[1;33m[user]: \033[0m%s\n", query)
+		if config.Headless {
+			presenter.SetQuiet(true)
 
-		handler := &llmtypes.ConsoleMessageHandler{Silent: false}
-		thread, err := llm.NewThread(llmConfig)
-		if err != nil {
-			presenter.Error(err, "Failed to create LLM thread")
-			return
-		}
-		thread.SetState(appState)
+			// Configure logging for headless mode to avoid contaminating JSON output
+			logger.SetLogFormat("json")
+			logger.SetLogLevel("error")
 
-		if config.ResumeConvID != "" {
-			thread.SetConversationID(config.ResumeConvID)
-			presenter.Info(fmt.Sprintf("Resuming conversation: %s", config.ResumeConvID))
-		}
+			thread, err := llm.NewThread(llmConfig)
+			if err != nil {
+				presenter.Error(err, "Failed to create LLM thread")
+				return
+			}
+			thread.SetState(appState)
 
-		thread.EnablePersistence(ctx, !config.NoSave)
+			if config.ResumeConvID != "" {
+				thread.SetConversationID(config.ResumeConvID)
+			}
 
-		_, err = thread.SendMessage(ctx, query, handler, llmtypes.MessageOpt{
-			PromptCache:        true,
-			Images:             config.Images,
-			MaxTurns:           config.MaxTurns,
-			CompactRatio:       config.CompactRatio,
-			DisableAutoCompact: config.DisableAutoCompact,
-		})
-		if err != nil {
-			presenter.Error(err, "Failed to process query")
-			return
-		}
+			thread.EnablePersistence(ctx, !config.NoSave)
 
-		usage := thread.GetUsage()
-		usageStats := presenter.ConvertUsageStats(&usage)
-		presenter.Stats(usageStats)
+			streamer, closeFunc, err := llm.NewConversationStreamer(ctx)
+			if err != nil {
+				presenter.Error(err, "Failed to create conversation streamer")
+				return
+			}
+			defer closeFunc()
 
-		if thread.IsPersisted() {
-			presenter.Section("Conversation Information")
-			presenter.Info(fmt.Sprintf("ID: %s", thread.GetConversationID()))
-			presenter.Info(fmt.Sprintf("To resume this conversation: kodelet run --resume %s", thread.GetConversationID()))
-			presenter.Info(fmt.Sprintf("To delete this conversation: kodelet conversation delete %s", thread.GetConversationID()))
+			conversationID := thread.GetConversationID()
+			done := make(chan error, 1)
+
+			go func() {
+				handler := &llmtypes.ConsoleMessageHandler{Silent: true}
+				_, err := thread.SendMessage(ctx, query, handler, llmtypes.MessageOpt{
+					PromptCache:        true,
+					Images:             config.Images,
+					MaxTurns:           config.MaxTurns,
+					CompactRatio:       config.CompactRatio,
+					DisableAutoCompact: config.DisableAutoCompact,
+				})
+				done <- err
+			}()
+
+			streamCtx, cancel := context.WithCancel(ctx)
+			defer cancel()
+
+			liveUpdateInterval := 200 * time.Millisecond
+			streamOpts := conversations.StreamOpts{
+				Interval:       liveUpdateInterval,
+				IncludeHistory: config.IncludeHistory,
+				New:            config.ResumeConvID == "",
+			}
+			streamDone := make(chan error, 1)
+			go func() {
+				streamDone <- streamer.StreamLiveUpdates(streamCtx, conversationID, streamOpts)
+			}()
+
+			select {
+			case err := <-done:
+				if err != nil {
+					logger.G(ctx).WithError(err).Error("Error processing query")
+				}
+				// Give streaming time to catch final messages (2 polling cycles)
+				time.Sleep(2 * liveUpdateInterval)
+				cancel()
+				<-streamDone
+			case err := <-streamDone:
+				if err != nil && err != context.Canceled {
+					logger.G(ctx).WithError(err).Error("Error streaming updates")
+				}
+			}
+		} else {
+			presenter.Info(fmt.Sprintf("[User]: %s", query))
+
+			handler := &llmtypes.ConsoleMessageHandler{Silent: false}
+			thread, err := llm.NewThread(llmConfig)
+			if err != nil {
+				presenter.Error(err, "Failed to create LLM thread")
+				return
+			}
+			thread.SetState(appState)
+
+			if config.ResumeConvID != "" {
+				thread.SetConversationID(config.ResumeConvID)
+				presenter.Info(fmt.Sprintf("Resuming conversation: %s", config.ResumeConvID))
+			}
+
+			thread.EnablePersistence(ctx, !config.NoSave)
+
+			_, err = thread.SendMessage(ctx, query, handler, llmtypes.MessageOpt{
+				PromptCache:        true,
+				Images:             config.Images,
+				MaxTurns:           config.MaxTurns,
+				CompactRatio:       config.CompactRatio,
+				DisableAutoCompact: config.DisableAutoCompact,
+			})
+			if err != nil {
+				presenter.Error(err, "Failed to process query")
+				return
+			}
+
+			usage := thread.GetUsage()
+			usageStats := presenter.ConvertUsageStats(&usage)
+			presenter.Stats(usageStats)
+
+			if thread.IsPersisted() {
+				presenter.Section("Conversation Information")
+				presenter.Info(fmt.Sprintf("ID: %s", thread.GetConversationID()))
+				presenter.Info(fmt.Sprintf("To resume this conversation: kodelet run --resume %s", thread.GetConversationID()))
+				presenter.Info(fmt.Sprintf("To delete this conversation: kodelet conversation delete %s", thread.GetConversationID()))
+			}
 		}
 	},
 }
@@ -237,6 +315,7 @@ func init() {
 	runCmd.Flags().String("resume", defaults.ResumeConvID, "Resume a specific conversation")
 	runCmd.Flags().BoolP("follow", "f", defaults.Follow, "Follow the most recent conversation")
 	runCmd.Flags().Bool("no-save", defaults.NoSave, "Disable conversation persistence")
+	runCmd.Flags().Bool("headless", defaults.Headless, "Output structured JSON instead of console formatting")
 	runCmd.Flags().StringSliceP("image", "I", defaults.Images, "Add image input (can be used multiple times)")
 	runCmd.Flags().Int("max-turns", defaults.MaxTurns, "Maximum number of turns within a single message exchange (0 for no limit)")
 	runCmd.Flags().Float64("compact-ratio", defaults.CompactRatio, "Context window utilization ratio to trigger auto-compact (0.0-1.0)")
@@ -244,6 +323,7 @@ func init() {
 	runCmd.Flags().StringP("recipe", "r", defaults.FragmentName, "Use a fragment/recipe template")
 	runCmd.Flags().StringToString("arg", defaults.FragmentArgs, "Arguments to pass to fragment (e.g., --arg name=John --arg occupation=Engineer)")
 	runCmd.Flags().StringSlice("fragment-dirs", defaults.FragmentDirs, "Additional fragment directories (e.g., --fragment-dirs ./project-fragments --fragment-dirs ./team-fragments)")
+	runCmd.Flags().Bool("include-history", defaults.IncludeHistory, "Include historical conversation data in headless streaming")
 }
 
 func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
@@ -269,6 +349,14 @@ func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
 
 	if noSave, err := cmd.Flags().GetBool("no-save"); err == nil {
 		config.NoSave = noSave
+	}
+	if headless, err := cmd.Flags().GetBool("headless"); err == nil {
+		config.Headless = headless
+	}
+
+	if config.NoSave && config.Headless {
+		presenter.Error(errors.New("conflicting flags"), "--no-save and --headless cannot be used together (headless mode requires conversation storage)")
+		os.Exit(1)
 	}
 	if images, err := cmd.Flags().GetStringSlice("image"); err == nil {
 		config.Images = images
@@ -299,6 +387,9 @@ func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
 	}
 	if fragmentDirs, err := cmd.Flags().GetStringSlice("fragment-dirs"); err == nil {
 		config.FragmentDirs = fragmentDirs
+	}
+	if includeHistory, err := cmd.Flags().GetBool("include-history"); err == nil {
+		config.IncludeHistory = includeHistory
 	}
 
 	return config

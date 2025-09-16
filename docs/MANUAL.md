@@ -17,6 +17,12 @@ Kodelet is a lightweight agentic SWE Agent that runs as an interactive CLI tool 
   - [Image Input Support](#image-input-support)
   - [Conversation Continuation](#conversation-continuation)
   - [Conversation Management](#conversation-management)
+- [Streaming and Programmatic Access](#streaming-and-programmatic-access)
+  - [Headless Mode](#headless-mode)
+  - [Conversation Stream Command](#conversation-stream-command)
+  - [StreamEntry JSON Schema](#streamentry-json-schema)
+  - [Example Stream Output](#example-stream-output)
+  - [Processing Stream Output](#processing-stream-output)
 - [Agent Context Files](#agent-context-files)
   - [Creating Context Files](#creating-context-files)
   - [Context File Priority](#context-file-priority)
@@ -98,6 +104,10 @@ kodelet run --resume CONVERSATION_ID "more"  # continue a conversation
 kodelet run --follow "continue most recent"  # continue the most recent conversation
 kodelet run -f "quick follow-up"             # short form
 kodelet run --no-save "temporary query"      # don't save the conversation
+
+# Headless mode for programmatic use
+kodelet run --headless "your query"          # outputs structured JSON stream
+kodelet run --headless --include-history "query"  # include historical data in stream
 ```
 
 ### Interactive Chat Mode
@@ -257,9 +267,97 @@ kodelet conversation list --search "term" --sort-by "updated" --sort-order "desc
 kodelet conversation show <conversation-id>
 kodelet conversation show <conversation-id> --format [text|json|raw]
 
+# Stream conversation updates in real-time
+kodelet conversation stream <conversation-id>
+kodelet conversation stream <conversation-id> --include-history
+
 # Delete conversations
 kodelet conversation delete <conversation-id>
 kodelet conversation delete --no-confirm <conversation-id>
+```
+
+## Streaming and Programmatic Access
+
+Kodelet provides structured JSON streaming capabilities for programmatic integration, enabling you to build custom UIs, monitoring tools, and automation pipelines.
+
+### Headless Mode
+
+The `--headless` flag transforms `kodelet run` into a JSON streaming service, outputting structured data instead of formatted console text:
+
+```bash
+# Stream JSON output for a new query
+kodelet run --headless "analyze this codebase"
+
+# Include historical conversation data in the stream
+kodelet run --headless --include-history "continue the analysis"
+
+# Continue a specific conversation in headless mode
+kodelet run --headless --resume CONVERSATION_ID "more questions"
+```
+
+**Use Cases:**
+- CI/CD pipeline integration
+- Custom web interfaces
+- Monitoring and logging systems
+
+### Conversation Stream Command
+
+Stream real-time updates from any conversation:
+
+```bash
+# Stream live updates from a conversation (like tail -f)
+kodelet conversation stream CONVERSATION_ID
+
+# Include historical data before streaming new entries
+kodelet conversation stream CONVERSATION_ID --include-history
+```
+
+This command is useful for:
+- Monitoring ongoing conversations
+- Building real-time dashboards
+- Debugging conversation flow
+- Creating custom conversation viewers
+
+### StreamEntry JSON Schema
+
+Both headless mode and conversation streaming output data using the `StreamEntry` format. Each line is a complete JSON object representing one conversation event:
+
+```typescript
+interface StreamEntry {
+  kind: "text" | "tool-use" | "tool-result" | "thinking";  // Type of entry
+  content?: string;         // Text content (for text and thinking entries)
+  tool_name?: string;       // Name of the tool (for tool-use and tool-result)
+  input?: string;          // JSON input for tool-use
+  result?: string;         // Tool execution result
+  role: "user" | "assistant" | "system";  // Message role
+  tool_call_id?: string;   // Unique ID to match tool calls with results
+  conversation_id?: string; // ID of the conversation
+}
+```
+
+### Example Stream Output
+
+```json
+{"kind":"text","role":"user","content":"What files are in this directory?","conversation_id":"conv_123"}
+{"kind":"thinking","role":"assistant","content":"The user wants to see the files...","conversation_id":"conv_123"}
+{"kind":"tool-use","tool_name":"bash","input":"{\"command\":\"ls -la\"}","tool_call_id":"call_456","role":"assistant","conversation_id":"conv_123"}
+{"kind":"tool-result","tool_name":"bash","result":"total 24\ndrwxr-xr-x  3 user user 4096 ...\n","tool_call_id":"call_456","role":"assistant","conversation_id":"conv_123"}
+{"kind":"text","role":"assistant","content":"Here are the files in the current directory...","conversation_id":"conv_123"}
+```
+
+### Processing Stream Output
+
+**Using jq for filtering:**
+
+```bash
+# Extract only text messages
+kodelet run --headless "query" | jq -r 'select(.kind == "text") | .content'
+
+# Monitor tool usage
+kodelet conversation stream ID | jq 'select(.kind == "tool-use") | {tool: .tool_name, input: .input}'
+
+# Get assistant responses only
+kodelet run --headless "query" | jq -r 'select(.role == "assistant" and .kind == "text") | .content'
 ```
 
 ## Agent Context Files
