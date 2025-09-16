@@ -33,7 +33,7 @@ def render_sidebar(conversation_manager: ConversationManager) -> Optional[str]:
     
     with col2:
         # Start/check kodelet serve
-        if conversation_manager.client._is_serve_running():
+        if conversation_manager.is_serve_running():
             st.success("📡 API Online", icon="✅")
         else:
             if st.button("📡 Start API", use_container_width=True):
@@ -51,7 +51,7 @@ def render_sidebar(conversation_manager: ConversationManager) -> Optional[str]:
     conversations = conversation_manager.get_conversation_list()
     
     if not conversations:
-        if conversation_manager.client._is_serve_running():
+        if conversation_manager.is_serve_running():
             st.sidebar.info("No conversations found")
         else:
             st.sidebar.warning("Start API to load conversations")
@@ -159,7 +159,7 @@ def render_chat_interface(conversation_manager: ConversationManager):
 
 def render_streaming_response(conversation_manager: ConversationManager):
     """
-    Render streaming response in the main chat area.
+    Render streaming response in the main chat area using the new StreamEntry format.
     
     Args:
         conversation_manager: The conversation manager instance
@@ -168,50 +168,51 @@ def render_streaming_response(conversation_manager: ConversationManager):
     streaming_message_container = st.empty()
     status_container = st.empty()
     
-    # Get the message generator from session state
-    message_generator = st.session_state.get("message_generator")
-    if not message_generator:
+    # Get the stream entry generator from session state
+    stream_generator = st.session_state.get("message_generator")
+    if not stream_generator:
         return
     
     status_container.info("🤖 Kodelet is thinking...")
     
     # Collect streaming content for real-time display
     accumulated_content = ""
-    message_count = 0
+    entry_count = 0
     
-    # Process messages as they arrive
+    # Process stream entries as they arrive
     try:
-        for message in message_generator:
-            # Process the message in the conversation manager
-            success = conversation_manager.process_streaming_message(message)
-            message_count += 1
+        for entry in stream_generator:
+            # Process the entry in the conversation manager
+            success = conversation_manager.process_streaming_message(entry)
+            entry_count += 1
             
             if not success:
                 status_container.error("❌ Error occurred")
                 break
             
-            # Build up the content for real-time display
-            message_text = message.content
-            if message.thinking_text:
-                message_text = f"*Thinking: {message.thinking_text}*\n\n{message.content}"
-            
-            accumulated_content += message_text + "\n\n"
-            
-            # Handle tool calls
-            if message.tool_calls:
-                for tool_call in message.tool_calls:
-                    tool_info = f"🔧 Tool: {tool_call.get('function', {}).get('name', 'Unknown')}"
-                    if 'function' in tool_call and 'arguments' in tool_call['function']:
-                        tool_info += f"\nArgs: {tool_call['function']['arguments']}"
-                    accumulated_content += tool_info + "\n\n"
+            # Build up the content for real-time display based on entry type
+            if entry.kind == "text" and entry.role == "assistant" and entry.content:
+                accumulated_content += entry.content + "\n\n"
+            elif entry.kind == "thinking" and entry.content:
+                accumulated_content += f"*Thinking: {entry.content}*\n\n"
+            elif entry.kind == "tool-use" and entry.tool_name:
+                tool_info = f"🔧 Tool: {entry.tool_name}"
+                if entry.input:
+                    tool_info += f"\nInput: {entry.input}"
+                accumulated_content += tool_info + "\n\n"
+            elif entry.kind == "tool-result" and entry.tool_name and entry.result:
+                result_info = f"📋 Tool Result ({entry.tool_name}):\n{entry.result}"
+                accumulated_content += result_info + "\n\n"
             
             # Update the streaming display in real-time in the main chat area
-            with streaming_message_container.container():
-                with st.chat_message("assistant"):
-                    st.markdown(accumulated_content)
+            if accumulated_content.strip():
+                with streaming_message_container.container():
+                    with st.chat_message("assistant"):
+                        st.markdown(accumulated_content)
             
-            # Update status
-            status_container.success(f"📝 Receiving response... ({message_count} parts received)")
+            # Update status with entry type information
+            entry_type = entry.kind.replace("-", " ").title()
+            status_container.success(f"📝 Receiving {entry_type}... ({entry_count} parts received)")
         
         # Clear the streaming container since messages are now in session state
         streaming_message_container.empty()
@@ -220,8 +221,8 @@ def render_streaming_response(conversation_manager: ConversationManager):
         conversation_manager.finalize_streaming_conversation()
         
         # Show completion status briefly
-        if message_count > 0:
-            status_container.success(f"✅ Response complete! ({message_count} parts received)")
+        if entry_count > 0:
+            status_container.success(f"✅ Response complete! ({entry_count} parts received)")
         else:
             status_container.warning("🤔 No response received")
         
@@ -290,11 +291,11 @@ def render_input_area(conversation_manager: ConversationManager):
                     image_paths.append(tmp_file.name)
         
         try:
-            # Get the message generator and set up streaming state
-            message_generator = conversation_manager.send_message(user_input, image_paths)
+            # Get the stream entry generator and set up streaming state
+            stream_generator = conversation_manager.send_message(user_input, image_paths)
             
             # Store the generator and image paths in session state for the main chat interface to handle
-            st.session_state.message_generator = message_generator
+            st.session_state.message_generator = stream_generator
             st.session_state.streaming_active = True
             st.session_state.temp_image_paths = image_paths  # Store for cleanup
             
@@ -324,7 +325,7 @@ def render_status_bar(conversation_manager: ConversationManager):
     
     with col1:
         # API status
-        if conversation_manager.client._is_serve_running():
+        if conversation_manager.is_serve_running():
             st.success("🟢 API Connected")
         else:
             st.error("🔴 API Disconnected")

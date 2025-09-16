@@ -71,47 +71,57 @@ A streamlit-based web UI that provides a chat interface powered by kodelet. This
 
 ## Architecture
 
-The chatbot uses a hybrid approach with real-time streaming:
-- **CLI Integration**: Uses `subprocess.Popen` to run `kodelet run` and `kodelet run --resume` in background
-- **API Polling**: Polls `kodelet serve` REST API for real-time message streaming as they arrive
+The chatbot uses a clean functional approach with structured JSON streaming:
+- **Functional API**: Simple functions for kodelet operations instead of class-based wrappers
+- **Headless Streaming**: Uses `kodelet run --headless [--resume]` for all conversations  
+- **StreamEntry Processing**: Handles structured JSON entries from kodelet's streaming API
 - **State Management**: Streamlit session state for UI consistency
-- **Background Process**: Automatically manages kodelet serve lifecycle
+- **Background Process**: Automatically manages kodelet serve lifecycle for conversation history
 
-### Real-time Streaming Implementation
+### Clean Functional Implementation
 
-The `run_query` method now works as a generator that yields messages incrementally:
+The refactored implementation eliminates unnecessary OOP overhead in favor of simple functions:
 
-1. **For new conversations** (`kodelet run`):
-   - Starts kodelet process in background
-   - Polls `kodelet conversation list --limit 1 --json` to discover new conversation ID
-   - Streams messages as they appear via `/api/conversations/{id}`
+1. **Unified Headless Streaming** (`kodelet run --headless [--resume CONV_ID]`):
+   - Single function `run_headless_query()` handles both new and resumed conversations
+   - Outputs structured JSON stream with type, content, and metadata
+   - Processes entries in real-time: text, thinking, tool-use, tool-result
+   - Conversation ID extracted from StreamEntry metadata automatically
 
-2. **For resumed conversations** (`kodelet run --resume {id}`):
-   - Gets existing message count as offset
-   - Polls `/api/conversations/{id}` for new messages beyond the offset
-   - Yields only new assistant messages (user messages already in UI)
+2. **StreamEntry JSON Format**:
+   ```json
+   {"kind":"text","role":"user","content":"your query","conversation_id":"conv_123"}
+   {"kind":"thinking","role":"assistant","content":"Thinking process...","conversation_id":"conv_123"}
+   {"kind":"tool-use","tool_name":"bash","input":"{\"command\":\"ls\"}","tool_call_id":"call_456","role":"assistant"}
+   {"kind":"tool-result","tool_name":"bash","result":"file1.txt\nfile2.txt","tool_call_id":"call_456","role":"assistant"}
+   {"kind":"text","role":"assistant","content":"Response text","conversation_id":"conv_123"}
+   ```
 
-3. **Real-time UI Updates**:
-   - Uses `st.empty()` containers for live message streaming **in the main chat area**
-   - Updates content incrementally as kodelet generates responses
-   - Shows progress indicators and message counts in real-time  
-   - Messages appear **in the conversation thread**, not below input box
-   - Finalizes conversation state when streaming completes
+3. **Functional API Design**:
+   ```python
+   # Simple function calls instead of method calls
+   from kodelet_api import run_headless_query, start_serve, get_conversations
+   
+   # Direct streaming without class instantiation
+   for entry in run_headless_query("your query", conversation_id, images):
+       process_entry(entry)
+   ```
 
-### Benefits of New Approach
-- **Robust**: No more brittle CLI output parsing
-- **Real-time**: Messages appear as kodelet generates them (truly streaming!)
-- **Reliable**: Uses structured API instead of text parsing
-- **Better UX**: Incremental message display with live status indicators
-- **Responsive**: Users see progress immediately, not just final results
-- **Proper Layout**: Streaming messages appear in main conversation thread ✅
+### Benefits of Functional Approach
+- **Maximum Simplicity**: Direct function calls instead of class methods and object management
+- **No OOP Overhead**: Eliminated unnecessary class wrappers around subprocess calls  
+- **Pure Functions**: Easy to test, reason about, and debug
+- **Stateless**: No complex object state management, just simple module-level variables
+- **Real-time**: True streaming with immediate updates as kodelet processes
+- **Better Error Handling**: Structured error responses instead of text parsing
+- **Extensible**: Easy to add new functions as kodelet evolves
 
 ### Key Components
 
-- **`src/kodelet_client.py`**: Handles CLI and API communication with kodelet
-- **`src/conversation_manager.py`**: Manages conversation state and UI synchronization
-- **`src/ui_components.py`**: Reusable UI components for different parts of the interface
-- **`app.py`**: Main streamlit application that ties everything together
+- **`src/kodelet_api.py`**: Pure functions for headless streaming, conversation management, and serve lifecycle
+- **`src/conversation_manager.py`**: Streamlit-specific state management with functional API integration  
+- **`src/ui_components.py`**: Reusable UI components with real-time StreamEntry rendering support
+- **`app.py`**: Main streamlit application that orchestrates the clean functional architecture
 
 ## Configuration
 

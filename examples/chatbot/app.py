@@ -7,7 +7,6 @@ CLI and API to provide intelligent assistance with software engineering tasks.
 
 import streamlit as st
 import atexit
-from src.kodelet_client import KodeletClient
 from src.conversation_manager import ConversationManager
 from src.ui_components import (
     render_sidebar,
@@ -67,8 +66,7 @@ st.markdown("""
 @st.cache_resource
 def get_conversation_manager():
     """Initialize and cache the conversation manager."""
-    client = KodeletClient()
-    manager = ConversationManager(client)
+    manager = ConversationManager()
     
     # Register cleanup function
     def cleanup():
