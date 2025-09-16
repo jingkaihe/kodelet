@@ -9,7 +9,7 @@ import requests
 
 # Global configuration
 KODELET_BINARY = "kodelet"
-API_HOST = "localhost" 
+API_HOST = "localhost"
 API_PORT = 8080
 BASE_URL = f"http://{API_HOST}:{API_PORT}"
 
@@ -30,7 +30,7 @@ class StreamEntry:
     conversation_id: Optional[str] = None
 
 
-@dataclass 
+@dataclass
 class KodeletConversation:
     """Represents a kodelet conversation."""
     id: str
@@ -42,7 +42,7 @@ class KodeletConversation:
     messages: Optional[List[Dict[str, Any]]] = None
 
 
-def run_headless_query(query: str, conversation_id: Optional[str] = None, 
+def run_headless_query(query: str, conversation_id: Optional[str] = None,
                       images: Optional[List[str]] = None) -> Iterator[StreamEntry]:
     """
     Run a kodelet query using headless mode for both new and resumed conversations.
@@ -56,16 +56,16 @@ def run_headless_query(query: str, conversation_id: Optional[str] = None,
         StreamEntry objects as they arrive from the stream
     """
     cmd = [KODELET_BINARY, "run", "--headless"]
-    
+
     # Add resume flag if conversation ID provided
     if conversation_id:
         cmd.extend(["--resume", conversation_id])
-    
+
     # Add images if provided
     if images:
         for image in images:
             cmd.extend(["--image", image])
-    
+
     # Add the query
     cmd.append(query)
 
@@ -88,11 +88,11 @@ def run_headless_query(query: str, conversation_id: Optional[str] = None,
                 if process.poll() is not None:
                     break
                 continue
-            
+
             line = line.strip()
             if not line:
                 continue
-            
+
             try:
                 # Parse JSON stream entry
                 stream_data = json.loads(line)
@@ -112,7 +112,7 @@ def run_headless_query(query: str, conversation_id: Optional[str] = None,
             if stderr_output.strip():
                 yield StreamEntry(
                     kind="text",
-                    role="assistant", 
+                    role="assistant",
                     content=f"Error: {stderr_output.strip()}"
                 )
 
@@ -127,16 +127,16 @@ def run_headless_query(query: str, conversation_id: Optional[str] = None,
 def stream_conversation(conversation_id: str, include_history: bool = False) -> Iterator[StreamEntry]:
     """
     Stream updates from an existing conversation.
-    
+
     Args:
         conversation_id: The conversation ID to stream
         include_history: Whether to include historical messages
-        
+
     Yields:
         StreamEntry objects from the conversation stream
     """
     cmd = [KODELET_BINARY, "conversation", "stream", conversation_id]
-    
+
     if include_history:
         cmd.append("--include-history")
 
@@ -157,7 +157,7 @@ def stream_conversation(conversation_id: str, include_history: bool = False) -> 
 
         while timeout_counter < max_timeout:
             line = process.stdout.readline()
-            
+
             if not line:
                 # Check if process has ended
                 if process.poll() is not None:
@@ -166,14 +166,14 @@ def stream_conversation(conversation_id: str, include_history: bool = False) -> 
                 time.sleep(1)
                 timeout_counter += 1
                 continue
-            
+
             # Reset timeout when we get data
             timeout_counter = 0
-            
+
             line = line.strip()
             if not line:
                 continue
-            
+
             try:
                 # Parse JSON stream entry
                 stream_data = json.loads(line)
@@ -192,7 +192,7 @@ def stream_conversation(conversation_id: str, include_history: bool = False) -> 
 
     except Exception as e:
         yield StreamEntry(
-            kind="text", 
+            kind="text",
             role="assistant",
             content=f"Error streaming conversation: {str(e)}"
         )
@@ -201,7 +201,7 @@ def stream_conversation(conversation_id: str, include_history: bool = False) -> 
 def start_serve() -> bool:
     """Start kodelet serve in background if not already running."""
     global _serve_process
-    
+
     if _serve_process is not None:
         return True
 

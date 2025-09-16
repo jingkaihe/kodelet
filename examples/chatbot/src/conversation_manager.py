@@ -4,7 +4,7 @@ from typing import Optional
 
 import streamlit as st
 
-from .kodelet_api import (
+from kodelet_api import (
     run_headless_query, 
     start_serve, 
     stop_serve, 
