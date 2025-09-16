@@ -17,13 +17,14 @@ type MessageParser func(rawMessages json.RawMessage, toolResults map[string]tool
 
 // StreamEntry represents a single stream entry in the unified JSON format
 type StreamEntry struct {
-	Kind       string `json:"kind"`                   // "text", "tool-use", "tool-result", "thinking"
-	Content    string `json:"content,omitempty"`      // Text content for text and thinking
-	ToolName   string `json:"tool_name,omitempty"`    // Tool name for tool-use and tool-result
-	Input      string `json:"input,omitempty"`        // JSON input for tool-use
-	Result     string `json:"result,omitempty"`       // Tool execution result for tool-result
-	Role       string `json:"role"`                   // "user", "assistant", "system"
-	ToolCallID string `json:"tool_call_id,omitempty"` // For matching tool calls to results
+	Kind           string `json:"kind"`                      // "text", "tool-use", "tool-result", "thinking"
+	Content        string `json:"content,omitempty"`         // Text content for text and thinking
+	ToolName       string `json:"tool_name,omitempty"`       // Tool name for tool-use and tool-result
+	Input          string `json:"input,omitempty"`           // JSON input for tool-use
+	Result         string `json:"result,omitempty"`          // Tool execution result for tool-result
+	Role           string `json:"role"`                      // "user", "assistant", "system"
+	ToolCallID     string `json:"tool_call_id,omitempty"`    // For matching tool calls to results
+	ConversationID string `json:"conversation_id,omitempty"` // ID of the conversation this entry belongs to
 }
 
 // StreamOpts contains options for streaming conversation data
@@ -129,7 +130,7 @@ func (cs *ConversationStreamer) initializeStream(
 
 	if includeHistory {
 		for _, msg := range messages {
-			entry := cs.convertToStreamEntry(msg)
+			entry := cs.convertToStreamEntry(msg, conversationID)
 			if err := cs.outputStreamEntry(entry); err != nil {
 				return nil, errors.Wrap(err, "failed to output stream entry")
 			}
@@ -146,6 +147,7 @@ func (cs *ConversationStreamer) initializeStream(
 func (cs *ConversationStreamer) processLiveUpdate(ctx context.Context, conversationID string, state *streamState) {
 	response, err := cs.service.GetConversation(ctx, conversationID)
 	if err != nil {
+		logger.G(ctx).WithError(err).Debug("Failed to get conversation update")
 		return // Continue on error, as per original logic
 	}
 
@@ -153,7 +155,7 @@ func (cs *ConversationStreamer) processLiveUpdate(ctx context.Context, conversat
 		return
 	}
 
-	newlyStreamed, err := cs.streamNewMessagesSince(ctx, response, state.streamedEntries)
+	newlyStreamed, err := cs.streamNewMessagesSince(ctx, response, state.streamedEntries, conversationID)
 	if err != nil {
 		logger.G(ctx).WithError(err).Error("Failed to stream new messages")
 		return
@@ -166,7 +168,7 @@ func (cs *ConversationStreamer) processLiveUpdate(ctx context.Context, conversat
 }
 
 // streamNewMessagesSince streams only the new messages since the last streamed count
-func (cs *ConversationStreamer) streamNewMessagesSince(ctx context.Context, response *GetConversationResponse, alreadyStreamed int) (int, error) {
+func (cs *ConversationStreamer) streamNewMessagesSince(ctx context.Context, response *GetConversationResponse, alreadyStreamed int, conversationID string) (int, error) {
 	parser, exists := cs.messageParsers[response.Provider]
 	if !exists {
 		return 0, errors.Errorf("no message parser registered for provider: %s", response.Provider)
@@ -182,7 +184,7 @@ func (cs *ConversationStreamer) streamNewMessagesSince(ctx context.Context, resp
 		newMessages := streamableMessages[alreadyStreamed:]
 		logger.G(ctx).WithField("newMessageCount", len(newMessages)).Debug("Streaming new messages")
 		for _, msg := range newMessages {
-			entry := cs.convertToStreamEntry(msg)
+			entry := cs.convertToStreamEntry(msg, conversationID)
 			if err := cs.outputStreamEntry(entry); err != nil {
 				return newlyStreamed, errors.Wrap(err, "failed to output stream entry")
 			}
@@ -194,10 +196,11 @@ func (cs *ConversationStreamer) streamNewMessagesSince(ctx context.Context, resp
 }
 
 // convertToStreamEntry converts a StreamableMessage to a StreamEntry
-func (cs *ConversationStreamer) convertToStreamEntry(msg StreamableMessage) StreamEntry {
+func (cs *ConversationStreamer) convertToStreamEntry(msg StreamableMessage, conversationID string) StreamEntry {
 	entry := StreamEntry{
-		Kind: msg.Kind,
-		Role: msg.Role,
+		Kind:           msg.Kind,
+		Role:           msg.Role,
+		ConversationID: conversationID,
 	}
 
 	switch msg.Kind {

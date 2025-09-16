@@ -72,9 +72,10 @@ func TestConvertToStreamEntry(t *testing.T) {
 	streamer := NewConversationStreamer(service)
 
 	tests := []struct {
-		name     string
-		input    StreamableMessage
-		expected StreamEntry
+		name           string
+		input          StreamableMessage
+		conversationID string
+		expected       StreamEntry
 	}{
 		{
 			name: "text message",
@@ -83,10 +84,12 @@ func TestConvertToStreamEntry(t *testing.T) {
 				Role:    "user",
 				Content: "Hello world",
 			},
+			conversationID: "test-conv-123",
 			expected: StreamEntry{
-				Kind:    "text",
-				Role:    "user",
-				Content: "Hello world",
+				Kind:           "text",
+				Role:           "user",
+				Content:        "Hello world",
+				ConversationID: "test-conv-123",
 			},
 		},
 		{
@@ -96,10 +99,12 @@ func TestConvertToStreamEntry(t *testing.T) {
 				Role:    "assistant",
 				Content: "Let me think about this",
 			},
+			conversationID: "test-conv-456",
 			expected: StreamEntry{
-				Kind:    "thinking",
-				Role:    "assistant",
-				Content: "Let me think about this",
+				Kind:           "thinking",
+				Role:           "assistant",
+				Content:        "Let me think about this",
+				ConversationID: "test-conv-456",
 			},
 		},
 		{
@@ -111,12 +116,14 @@ func TestConvertToStreamEntry(t *testing.T) {
 				ToolCallID: "call-123",
 				Input:      `{"command": "ls"}`,
 			},
+			conversationID: "test-conv-789",
 			expected: StreamEntry{
-				Kind:       "tool-use",
-				Role:       "assistant",
-				ToolName:   "bash",
-				Input:      `{"command": "ls"}`,
-				ToolCallID: "call-123",
+				Kind:           "tool-use",
+				Role:           "assistant",
+				ToolName:       "bash",
+				Input:          `{"command": "ls"}`,
+				ToolCallID:     "call-123",
+				ConversationID: "test-conv-789",
 			},
 		},
 		{
@@ -128,19 +135,21 @@ func TestConvertToStreamEntry(t *testing.T) {
 				ToolCallID: "call-123",
 				Content:    "file1.txt\nfile2.txt",
 			},
+			conversationID: "test-conv-000",
 			expected: StreamEntry{
-				Kind:       "tool-result",
-				Role:       "user",
-				ToolName:   "bash",
-				Result:     "file1.txt\nfile2.txt",
-				ToolCallID: "call-123",
+				Kind:           "tool-result",
+				Role:           "user",
+				ToolName:       "bash",
+				Result:         "file1.txt\nfile2.txt",
+				ToolCallID:     "call-123",
+				ConversationID: "test-conv-000",
 			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := streamer.convertToStreamEntry(tt.input)
+			result := streamer.convertToStreamEntry(tt.input, tt.conversationID)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
@@ -278,22 +287,22 @@ func TestStreamNewMessagesSince(t *testing.T) {
 	ctx := context.Background()
 
 	// Test streaming from message 0 (should get all 5)
-	count, err := streamer.streamNewMessagesSince(ctx, service.conversation, 0)
+	count, err := streamer.streamNewMessagesSince(ctx, service.conversation, 0, "test-conv")
 	assert.NoError(t, err)
 	assert.Equal(t, 5, count)
 
 	// Test streaming from message 3 (should get 2 new messages)
-	count, err = streamer.streamNewMessagesSince(ctx, service.conversation, 3)
+	count, err = streamer.streamNewMessagesSince(ctx, service.conversation, 3, "test-conv")
 	assert.NoError(t, err)
 	assert.Equal(t, 2, count)
 
 	// Test streaming from message 5 (should get 0 new messages)
-	count, err = streamer.streamNewMessagesSince(ctx, service.conversation, 5)
+	count, err = streamer.streamNewMessagesSince(ctx, service.conversation, 5, "test-conv")
 	assert.NoError(t, err)
 	assert.Equal(t, 0, count)
 
 	// Test streaming from message 10 (beyond available, should get 0)
-	count, err = streamer.streamNewMessagesSince(ctx, service.conversation, 10)
+	count, err = streamer.streamNewMessagesSince(ctx, service.conversation, 10, "test-conv")
 	assert.NoError(t, err)
 	assert.Equal(t, 0, count)
 }
@@ -366,9 +375,10 @@ func TestStreamEntry_JSONOutput(t *testing.T) {
 	_ = NewConversationStreamer(service)
 
 	entry := StreamEntry{
-		Kind:    "text",
-		Role:    "user",
-		Content: "Hello world",
+		Kind:           "text",
+		Role:           "user",
+		Content:        "Hello world",
+		ConversationID: "test-conv-json",
 	}
 
 	jsonBytes, err := json.Marshal(entry)
@@ -381,6 +391,7 @@ func TestStreamEntry_JSONOutput(t *testing.T) {
 	assert.Equal(t, "text", decoded["kind"])
 	assert.Equal(t, "user", decoded["role"])
 	assert.Equal(t, "Hello world", decoded["content"])
+	assert.Equal(t, "test-conv-json", decoded["conversation_id"])
 
 	// Verify no empty fields for omitempty fields
 	assert.NotContains(t, string(jsonBytes), "tool_name")
@@ -390,11 +401,12 @@ func TestStreamEntry_JSONOutput(t *testing.T) {
 
 func TestStreamEntry_JSONOutput_ToolUse(t *testing.T) {
 	entry := StreamEntry{
-		Kind:       "tool-use",
-		Role:       "assistant",
-		ToolName:   "bash",
-		Input:      `{"command": "ls"}`,
-		ToolCallID: "call-123",
+		Kind:           "tool-use",
+		Role:           "assistant",
+		ToolName:       "bash",
+		Input:          `{"command": "ls"}`,
+		ToolCallID:     "call-123",
+		ConversationID: "test-conv-tool",
 	}
 
 	jsonBytes, err := json.Marshal(entry)
@@ -406,6 +418,7 @@ func TestStreamEntry_JSONOutput_ToolUse(t *testing.T) {
 	assert.Contains(t, jsonStr, `"tool_name":"bash"`)
 	assert.Contains(t, jsonStr, `"input":"{\"command\": \"ls\"}"`)
 	assert.Contains(t, jsonStr, `"tool_call_id":"call-123"`)
+	assert.Contains(t, jsonStr, `"conversation_id":"test-conv-tool"`)
 	assert.NotContains(t, jsonStr, "content")
 	assert.NotContains(t, jsonStr, "result")
 }
@@ -425,7 +438,7 @@ func BenchmarkStreamEntry_Convert(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = streamer.convertToStreamEntry(msg)
+		_ = streamer.convertToStreamEntry(msg, "test-conv-benchmark")
 	}
 }
 
