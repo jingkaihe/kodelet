@@ -175,7 +175,7 @@ func TestStreamLiveUpdates_WithHistory_Success(t *testing.T) {
 	// Test with history included - should timeout quickly for testing
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
-	
+
 	streamOpts := StreamOpts{
 		Interval:       50 * time.Millisecond,
 		IncludeHistory: true,
@@ -348,7 +348,7 @@ func TestStreamLiveUpdates_LiveOnly_SkipsExistingMessages(t *testing.T) {
 	// Test live-only mode should skip existing messages
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
-	
+
 	streamOpts := StreamOpts{
 		Interval:       50 * time.Millisecond,
 		IncludeHistory: false,

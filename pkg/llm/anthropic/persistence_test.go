@@ -1279,7 +1279,6 @@ func TestStreamMessages_ThinkingMessage(t *testing.T) {
 
 	toolResults := make(map[string]tooltypes.StructuredToolResult)
 
-
 	streamableMessages, err := StreamMessages(rawMessages, toolResults)
 
 	require.NoError(t, err)
@@ -1318,7 +1317,6 @@ func TestStreamMessages_ToolUseMessage(t *testing.T) {
 	require.NoError(t, err)
 
 	toolResults := make(map[string]tooltypes.StructuredToolResult)
-
 
 	streamableMessages, err := StreamMessages(rawMessages, toolResults)
 
@@ -1362,7 +1360,6 @@ func TestStreamMessages_ToolResultMessage(t *testing.T) {
 			},
 		},
 	}
-
 
 	streamableMessages, err := StreamMessages(rawMessages, toolResults)
 
@@ -1421,7 +1418,6 @@ func TestStreamMessages_ComplexConversation(t *testing.T) {
 		},
 	}
 
-
 	streamableMessages, err := StreamMessages(rawMessages, toolResults)
 
 	require.NoError(t, err)
@@ -1472,7 +1468,6 @@ func TestStreamMessages_EmptyContent(t *testing.T) {
 
 	toolResults := make(map[string]tooltypes.StructuredToolResult)
 
-
 	streamableMessages, err := StreamMessages(rawMessages, toolResults)
 
 	require.NoError(t, err)
@@ -1493,7 +1488,6 @@ func TestStreamMessages_InvalidJSON(t *testing.T) {
 
 	toolResults := make(map[string]tooltypes.StructuredToolResult)
 
-
 	streamableMessages, err := StreamMessages(rawMessages, toolResults)
 
 	require.Error(t, err)
@@ -1508,7 +1502,6 @@ func TestStreamMessages_EmptyMessages(t *testing.T) {
 	require.NoError(t, err)
 
 	toolResults := make(map[string]tooltypes.StructuredToolResult)
-
 
 	streamableMessages, err := StreamMessages(rawMessages, toolResults)
 

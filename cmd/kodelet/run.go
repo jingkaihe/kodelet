@@ -51,8 +51,6 @@ func NewRunConfig() *RunConfig {
 	}
 }
 
-
-
 func processFragment(ctx context.Context, config *RunConfig, args []string) (string, *fragments.Metadata, error) {
 	var validDirs []string
 	for _, dir := range config.FragmentDirs {
