@@ -211,8 +211,9 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 
 				if structuredResult, ok := toolResults[toolResultBlock.ToolUseID]; ok {
 					toolName = structuredResult.ToolName
-					registry := renderers.NewRendererRegistry()
-					result = registry.Render(structuredResult)
+					if jsonData, err := structuredResult.MarshalJSON(); err == nil {
+						result = string(jsonData)
+					}
 				} else {
 					// Fallback: extract raw text from tool result
 					for _, resultContent := range toolResultBlock.Content {

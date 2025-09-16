@@ -166,8 +166,9 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 			toolName := ""
 			if structuredResult, ok := toolResults[msg.ToolCallID]; ok {
 				toolName = structuredResult.ToolName
-				registry := renderers.NewRendererRegistry()
-				result = registry.Render(structuredResult)
+				if jsonData, err := structuredResult.MarshalJSON(); err == nil {
+					result = string(jsonData)
+				}
 			}
 			streamable = append(streamable, StreamableMessage{
 				Kind:       "tool-result",
