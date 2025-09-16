@@ -245,6 +245,7 @@ var runCmd = &cobra.Command{
 			streamOpts := conversations.StreamOpts{
 				Interval:       liveUpdateInterval,
 				IncludeHistory: config.IncludeHistory,
+				New:            config.ResumeConvID == "",
 			}
 			streamDone := make(chan error, 1)
 			go func() {

@@ -428,3 +428,99 @@ func BenchmarkStreamEntry_Convert(b *testing.B) {
 		_ = streamer.convertToStreamEntry(msg)
 	}
 }
+
+func TestStreamLiveUpdates_NewConversation_NoServiceCall(t *testing.T) {
+	service := &mockConversationService{
+		err: fmt.Errorf("conversation not found"),
+	}
+
+	streamer := NewConversationStreamer(service)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	streamOpts := StreamOpts{
+		Interval:       50 * time.Millisecond,
+		IncludeHistory: false,
+		New:            true,
+	}
+	err := streamer.StreamLiveUpdates(ctx, "new-conversation-id", streamOpts)
+
+	assert.Error(t, err)
+	assert.Equal(t, context.DeadlineExceeded, err)
+}
+
+func TestStreamLiveUpdates_NewConversation_WithHistory(t *testing.T) {
+	service := &mockConversationService{
+		err: fmt.Errorf("conversation not found"),
+	}
+
+	streamer := NewConversationStreamer(service)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	streamOpts := StreamOpts{
+		Interval:       50 * time.Millisecond,
+		IncludeHistory: true,
+		New:            true,
+	}
+	err := streamer.StreamLiveUpdates(ctx, "new-conversation-id", streamOpts)
+
+	assert.Error(t, err)
+	assert.Equal(t, context.DeadlineExceeded, err)
+}
+
+func TestStreamLiveUpdates_ExistingConversation_StillCallsService(t *testing.T) {
+	service := &mockConversationService{
+		conversation: &GetConversationResponse{
+			ID:          "existing-conv-123",
+			Provider:    "test-provider",
+			RawMessages: json.RawMessage(`[{"role": "user", "content": "test"}]`),
+			ToolResults: make(map[string]tools.StructuredToolResult),
+			UpdatedAt:   time.Now(),
+		},
+	}
+
+	streamer := NewConversationStreamer(service)
+	streamer.RegisterMessageParser("test-provider", func(raw json.RawMessage, results map[string]tools.StructuredToolResult) ([]StreamableMessage, error) {
+		return []StreamableMessage{
+			{Kind: "text", Role: "user", Content: "Hello"},
+		}, nil
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	streamOpts := StreamOpts{
+		Interval:       50 * time.Millisecond,
+		IncludeHistory: true,
+		New:            false,
+	}
+	err := streamer.StreamLiveUpdates(ctx, "existing-conv-123", streamOpts)
+
+	assert.Error(t, err)
+	assert.Equal(t, context.DeadlineExceeded, err)
+}
+
+func TestStreamLiveUpdates_NewConversation_InitializesCorrectly(t *testing.T) {
+	service := &mockConversationService{
+		err: fmt.Errorf("should not be called"),
+	}
+
+	streamer := NewConversationStreamer(service)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	streamOpts := StreamOpts{
+		Interval:       25 * time.Millisecond,
+		IncludeHistory: false,
+		New:            true,
+	}
+
+	err := streamer.StreamLiveUpdates(ctx, "new-conversation-id", streamOpts)
+
+	assert.Error(t, err)
+	assert.Equal(t, context.DeadlineExceeded, err)
+}

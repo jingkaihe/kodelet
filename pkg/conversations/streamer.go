@@ -30,6 +30,7 @@ type StreamEntry struct {
 type StreamOpts struct {
 	Interval       time.Duration
 	IncludeHistory bool
+	New            bool
 }
 
 // StreamableMessage contains parsed message data for streaming
@@ -68,13 +69,17 @@ type streamState struct {
 }
 
 // StreamLiveUpdates watches for conversation updates and streams entries based on options
-func (cs *ConversationStreamer) StreamLiveUpdates(ctx context.Context, conversationID string, streamOpts StreamOpts) error {
+func (cs *ConversationStreamer) StreamLiveUpdates(
+	ctx context.Context,
+	conversationID string,
+	streamOpts StreamOpts,
+) error {
 	logger.G(ctx).WithField("conversationID", conversationID).WithField("interval", streamOpts.Interval).WithField("includeHistory", streamOpts.IncludeHistory).Debug("Starting stream for conversation")
 
 	ticker := time.NewTicker(streamOpts.Interval)
 	defer ticker.Stop()
 
-	state, err := cs.initializeStream(ctx, conversationID, streamOpts.IncludeHistory)
+	state, err := cs.initializeStream(ctx, conversationID, streamOpts.IncludeHistory, streamOpts.New)
 	if err != nil {
 		return err
 	}
@@ -90,7 +95,18 @@ func (cs *ConversationStreamer) StreamLiveUpdates(ctx context.Context, conversat
 }
 
 // initializeStream sets up the initial streaming state and optionally streams history
-func (cs *ConversationStreamer) initializeStream(ctx context.Context, conversationID string, includeHistory bool) (*streamState, error) {
+func (cs *ConversationStreamer) initializeStream(
+	ctx context.Context,
+	conversationID string,
+	includeHistory bool,
+	isNew bool,
+) (*streamState, error) {
+	if isNew {
+		return &streamState{
+			lastUpdateTime:  time.Now(),
+			streamedEntries: 0,
+		}, nil
+	}
 	response, err := cs.service.GetConversation(ctx, conversationID)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get conversation")
