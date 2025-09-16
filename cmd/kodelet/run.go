@@ -353,6 +353,11 @@ func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
 	if headless, err := cmd.Flags().GetBool("headless"); err == nil {
 		config.Headless = headless
 	}
+
+	if config.NoSave && config.Headless {
+		presenter.Error(errors.New("conflicting flags"), "--no-save and --headless cannot be used together (headless mode requires conversation storage)")
+		os.Exit(1)
+	}
 	if images, err := cmd.Flags().GetStringSlice("image"); err == nil {
 		config.Images = images
 	}
