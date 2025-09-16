@@ -33,6 +33,7 @@ type RunConfig struct {
 	FragmentName       string            // Name of fragment to use
 	FragmentArgs       map[string]string // Arguments to pass to fragment
 	FragmentDirs       []string          // Additional fragment directories
+	IncludeHistory     bool              // Include historical conversation data in headless streaming
 }
 
 func NewRunConfig() *RunConfig {
@@ -42,12 +43,13 @@ func NewRunConfig() *RunConfig {
 		NoSave:             false,
 		Headless:           false,
 		Images:             []string{},
-		MaxTurns:           50,  // Default to 50 turns
-		CompactRatio:       0.8, // Default to 80% context window utilization
+		MaxTurns:           50,
+		CompactRatio:       0.8,
 		DisableAutoCompact: false,
 		FragmentName:       "",
 		FragmentArgs:       make(map[string]string),
 		FragmentDirs:       []string{},
+		IncludeHistory:     false,
 	}
 }
 
@@ -242,7 +244,7 @@ var runCmd = &cobra.Command{
 			liveUpdateInterval := 200 * time.Millisecond
 			streamOpts := conversations.StreamOpts{
 				Interval:       liveUpdateInterval,
-				IncludeHistory: false, // For run command, we don't want historical data
+				IncludeHistory: config.IncludeHistory,
 			}
 			streamDone := make(chan error, 1)
 			go func() {
@@ -320,6 +322,7 @@ func init() {
 	runCmd.Flags().StringP("recipe", "r", defaults.FragmentName, "Use a fragment/recipe template")
 	runCmd.Flags().StringToString("arg", defaults.FragmentArgs, "Arguments to pass to fragment (e.g., --arg name=John --arg occupation=Engineer)")
 	runCmd.Flags().StringSlice("fragment-dirs", defaults.FragmentDirs, "Additional fragment directories (e.g., --fragment-dirs ./project-fragments --fragment-dirs ./team-fragments)")
+	runCmd.Flags().Bool("include-history", defaults.IncludeHistory, "Include historical conversation data in headless streaming")
 }
 
 func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
@@ -378,6 +381,9 @@ func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
 	}
 	if fragmentDirs, err := cmd.Flags().GetStringSlice("fragment-dirs"); err == nil {
 		config.FragmentDirs = fragmentDirs
+	}
+	if includeHistory, err := cmd.Flags().GetBool("include-history"); err == nil {
+		config.IncludeHistory = includeHistory
 	}
 
 	return config
