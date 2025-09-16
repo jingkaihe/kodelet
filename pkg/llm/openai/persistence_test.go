@@ -2,11 +2,14 @@ package openai
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	"github.com/jingkaihe/kodelet/pkg/types/conversations"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/sashabaranov/go-openai"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -369,6 +372,170 @@ func TestSaveConversationMessageCleanup(t *testing.T) {
 					assert.Equal(t, expectedMsg.ToolCallID, actualMsg.ToolCallID,
 						"Tool call ID mismatch at message %d for test: %s", i, tt.description)
 				}
+			}
+		})
+	}
+}
+
+func TestStreamMessages_SimpleTextMessage(t *testing.T) {
+	messages := []openai.ChatCompletionMessage{
+		{
+			Role:    openai.ChatMessageRoleUser,
+			Content: "Hello, how are you?",
+		},
+		{
+			Role:    openai.ChatMessageRoleAssistant,
+			Content: "I'm doing well, thank you!",
+		},
+	}
+
+	rawMessages, err := json.Marshal(messages)
+	require.NoError(t, err)
+
+	toolResults := make(map[string]tooltypes.StructuredToolResult)
+
+	streamableMessages, err := StreamMessages(rawMessages, toolResults)
+
+	require.NoError(t, err)
+	assert.Equal(t, 2, len(streamableMessages))
+
+	assert.Equal(t, "text", streamableMessages[0].Kind)
+	assert.Equal(t, "user", streamableMessages[0].Role)
+	assert.Equal(t, "Hello, how are you?", streamableMessages[0].Content)
+
+	assert.Equal(t, "text", streamableMessages[1].Kind)
+	assert.Equal(t, "assistant", streamableMessages[1].Role)
+	assert.Equal(t, "I'm doing well, thank you!", streamableMessages[1].Content)
+}
+
+func TestStreamMessages_ToolUseMessage(t *testing.T) {
+	toolCall := openai.ToolCall{
+		ID:   "call-123",
+		Type: openai.ToolTypeFunction,
+		Function: openai.FunctionCall{
+			Name:      "bash",
+			Arguments: `{"command": "ls -la", "timeout": 10}`,
+		},
+	}
+
+	messages := []openai.ChatCompletionMessage{
+		{
+			Role:    openai.ChatMessageRoleUser,
+			Content: "List the files in the current directory",
+		},
+		{
+			Role:      openai.ChatMessageRoleAssistant,
+			Content:   "",
+			ToolCalls: []openai.ToolCall{toolCall},
+		},
+	}
+
+	rawMessages, err := json.Marshal(messages)
+	require.NoError(t, err)
+
+	toolResults := make(map[string]tooltypes.StructuredToolResult)
+
+	streamableMessages, err := StreamMessages(rawMessages, toolResults)
+
+	require.NoError(t, err)
+	assert.Equal(t, 2, len(streamableMessages))
+
+	assert.Equal(t, "text", streamableMessages[0].Kind)
+	assert.Equal(t, "user", streamableMessages[0].Role)
+	assert.Equal(t, "List the files in the current directory", streamableMessages[0].Content)
+
+	assert.Equal(t, "tool-use", streamableMessages[1].Kind)
+	assert.Equal(t, "assistant", streamableMessages[1].Role)
+	assert.Equal(t, "bash", streamableMessages[1].ToolName)
+	assert.Equal(t, "call-123", streamableMessages[1].ToolCallID)
+	assert.Contains(t, streamableMessages[1].Input, "command")
+}
+
+func TestStreamMessages_ToolResultMessage(t *testing.T) {
+	messages := []openai.ChatCompletionMessage{
+		{
+			Role:       openai.ChatMessageRoleTool,
+			Content:    "file1.txt\nfile2.txt\n",
+			ToolCallID: "call-123",
+		},
+	}
+
+	rawMessages, err := json.Marshal(messages)
+	require.NoError(t, err)
+
+	// Mock structured tool result
+	toolResults := map[string]tooltypes.StructuredToolResult{
+		"call-123": {
+			ToolName: "bash",
+			Success:  true,
+			Metadata: tooltypes.BashMetadata{
+				Command:       "ls -la",
+				ExitCode:      0,
+				Output:        "file1.txt\nfile2.txt\n",
+				ExecutionTime: 100 * time.Millisecond,
+			},
+		},
+	}
+
+	streamableMessages, err := StreamMessages(rawMessages, toolResults)
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, len(streamableMessages))
+
+	assert.Equal(t, "tool-result", streamableMessages[0].Kind)
+	assert.Equal(t, "assistant", streamableMessages[0].Role) // Tool results show as assistant
+	assert.Equal(t, "bash", streamableMessages[0].ToolName)
+	assert.Equal(t, "call-123", streamableMessages[0].ToolCallID)
+	assert.Contains(t, streamableMessages[0].Content, "file1.txt")
+}
+
+func TestStreamMessages_EdgeCases(t *testing.T) {
+	tests := []struct {
+		name           string
+		messages       []openai.ChatCompletionMessage
+		rawMessages    json.RawMessage
+		expectedError  string
+		expectedLength int
+	}{
+		{
+			name: "system message skipped",
+			messages: []openai.ChatCompletionMessage{
+				{Role: openai.ChatMessageRoleSystem, Content: "You are a helpful assistant"},
+				{Role: openai.ChatMessageRoleUser, Content: "Hello"},
+				{Role: openai.ChatMessageRoleAssistant, Content: "Hi there!"},
+			},
+			expectedLength: 2, // System message should be skipped
+		},
+		{
+			name:          "invalid JSON",
+			rawMessages:   json.RawMessage(`{"invalid": json}`),
+			expectedError: "error unmarshaling messages",
+		},
+	}
+
+	toolResults := make(map[string]tooltypes.StructuredToolResult)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var rawMessages json.RawMessage
+			var err error
+
+			if tt.rawMessages != nil {
+				rawMessages = tt.rawMessages
+			} else {
+				rawMessages, err = json.Marshal(tt.messages)
+				require.NoError(t, err)
+			}
+
+			streamableMessages, err := StreamMessages(rawMessages, toolResults)
+
+			if tt.expectedError != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.expectedError)
+				assert.Nil(t, streamableMessages)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tt.expectedLength, len(streamableMessages))
 			}
 		})
 	}
