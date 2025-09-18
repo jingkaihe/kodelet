@@ -1,3 +1,6 @@
+// Package conversations defines types and interfaces for conversation
+// data structures, query options, and conversation records used
+// throughout kodelet's conversation management system.
 package conversations
 
 import (
@@ -122,7 +125,7 @@ func (cr *ConversationRecord) ToSummary() ConversationSummary {
 	}
 }
 
-// Interface methods for usage.ConversationSummary compatibility
+// GetID returns the conversation ID for usage.ConversationSummary compatibility
 func (cs ConversationSummary) GetID() string {
 	return cs.ID
 }

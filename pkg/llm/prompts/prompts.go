@@ -1,3 +1,6 @@
+// Package prompts provides common prompt templates for LLM interactions
+// including context compacting prompts and other reusable prompt text
+// used throughout kodelet's LLM communication.
 package prompts
 
 // CompactPrompt is the prompt used for comprehensive context compacting

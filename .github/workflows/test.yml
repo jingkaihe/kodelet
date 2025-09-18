@@ -7,8 +7,8 @@ on:
     branches: [ main ]
 
 jobs:
-  backend:
-    name: Backend Tests & Linting
+  test:
+    name: Tests & Linting
     runs-on: kodelet-runner
     steps:
       - uses: actions/checkout@v4
@@ -36,51 +36,11 @@ jobs:
       - name: Test Go code
         run: mise run test
 
-  frontend:
-    name: Frontend Tests & Linting
-    runs-on: kodelet-runner
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup mise
-        uses: jdx/mise-action@v2
-        with:
-          install: true
-          cache: true
-          experimental: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Install dependencies
-        run: mise run install
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Lint frontend code
         run: mise run eslint
 
       - name: Test frontend code
         run: mise run frontend-test
-
-  build:
-    name: Build Verification
-    runs-on: kodelet-runner
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup mise
-        uses: jdx/mise-action@v2
-        with:
-          install: true
-          cache: true
-          experimental: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Install dependencies
-        run: mise run install
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Verify build
         run: mise run build
@@ -94,14 +54,9 @@ jobs:
       - name: Setup mise
         uses: jdx/mise-action@v2
         with:
-          install: true
+          install: false
           cache: true
           experimental: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Install dependencies
-        run: mise run install
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

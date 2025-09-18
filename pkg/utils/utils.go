@@ -1,3 +1,6 @@
+// Package utils provides common utility functions for kodelet including
+// content formatting with line numbers, process management, language detection,
+// domain filtering, and various helper functions used across the application.
 package utils
 
 import (

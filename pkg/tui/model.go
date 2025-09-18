@@ -1,3 +1,6 @@
+// Package tui provides terminal user interface components using the Bubble Tea
+// framework. It implements interactive chat functionality, command execution
+// views, and real-time conversation display for kodelet's CLI interface.
 package tui
 
 import (
@@ -392,14 +395,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if err != nil {
 			m.AddSystemMessage("Error: " + err.Error())
 		}
-		cmd_out := `
+		cmdOut := `
 ## command
 ` + string(msg) + `
 
 ## output
 ` + string(output) + `
 `
-		m.AddMessage(cmd_out, true)
+		m.AddMessage(cmdOut, true)
 		m.SetProcessing(false)
 	case llmtypes.MessageEvent:
 		if !msg.Done {

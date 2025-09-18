@@ -1,3 +1,6 @@
+// Package version provides version information for kodelet including
+// semantic version, git commit SHA, build time, and build information
+// that are set during the build process.
 package version
 
 import (

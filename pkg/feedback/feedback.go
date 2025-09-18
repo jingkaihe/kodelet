@@ -1,3 +1,6 @@
+// Package feedback provides functionality for managing user feedback messages
+// for autonomous conversations in kodelet. It handles storing, loading and
+// managing feedback messages with file-based persistence.
 package feedback
 
 import (

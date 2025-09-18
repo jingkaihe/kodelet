@@ -1,3 +1,6 @@
+// Package renderers provides CLI output rendering functionality for tool results.
+// It includes a registry system for managing tool renderers and supports
+// pattern-based matching for custom and MCP tools.
 package renderers
 
 import (

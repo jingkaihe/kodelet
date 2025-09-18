@@ -32,7 +32,7 @@ var initCmd = &cobra.Command{
 		presenter.Separator()
 
 		apiKey := os.Getenv("ANTHROPIC_API_KEY")
-		needsApiKeySetup := false
+		needsAPIKeySetup := false
 
 		var shellName string
 		var profilePath string
@@ -51,7 +51,7 @@ var initCmd = &cobra.Command{
 
 			if apiKey != "" {
 				presenter.Success("API key received")
-				needsApiKeySetup = true
+				needsAPIKeySetup = true
 			} else {
 				presenter.Warning("No API key provided. You will need to set ANTHROPIC_API_KEY environment variable to use Kodelet")
 			}
@@ -59,14 +59,14 @@ var initCmd = &cobra.Command{
 			presenter.Success("Found Anthropic API key in environment variables")
 		}
 
-		if needsApiKeySetup && apiKey != "" {
+		if needsAPIKeySetup && apiKey != "" {
 			shellName, profilePath = detectShell(ctx)
 
-			if checkApiKeyInProfile(ctx, profilePath) {
+			if checkAPIKeyInProfile(ctx, profilePath) {
 				presenter.Info("🔑 API key is already configured in your shell profile")
 			} else {
 				if askForPermission(reader, profilePath) {
-					err := writeApiKeyToProfile(ctx, profilePath, shellName, apiKey)
+					err := writeAPIKeyToProfile(ctx, profilePath, shellName, apiKey)
 					if err != nil {
 						presenter.Error(err, "Failed to update shell profile")
 						presenter.Info("📝 To manually set your API key, add the following to your shell profile:")
@@ -214,7 +214,7 @@ var initCmd = &cobra.Command{
 		presenter.Success("🎉 Kodelet setup complete! You can now use Kodelet")
 		logger.G(ctx).Info("Kodelet initialization completed successfully")
 
-		if needsApiKeySetup && apiKey != "" && apiKeyAddedToProfile {
+		if needsAPIKeySetup && apiKey != "" && apiKeyAddedToProfile {
 			presenter.Separator()
 			presenter.Warning("⚠️  IMPORTANT ACTION REQUIRED ⚠️")
 			presenter.Info("To activate your API key, you must restart your terminal")
@@ -265,7 +265,7 @@ func detectShell(ctx context.Context) (string, string) {
 	}
 }
 
-func checkApiKeyInProfile(_ context.Context, profilePath string) bool {
+func checkAPIKeyInProfile(_ context.Context, profilePath string) bool {
 	content, err := os.ReadFile(profilePath)
 	if err != nil {
 		return false
@@ -275,7 +275,7 @@ func checkApiKeyInProfile(_ context.Context, profilePath string) bool {
 		strings.Contains(string(content), "set -x ANTHROPIC_API_KEY")
 }
 
-func writeApiKeyToProfile(_ context.Context, profilePath, shellName, apiKey string) error {
+func writeAPIKeyToProfile(_ context.Context, profilePath, shellName, apiKey string) error {
 	file, err := os.OpenFile(profilePath, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
 	if err != nil {
 		return err

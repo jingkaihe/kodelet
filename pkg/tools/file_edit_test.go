@@ -571,8 +571,8 @@ func TestFileEditTool_ValidateInputReplaceAll(t *testing.T) {
 			NewText:    "New Line 2",
 			ReplaceAll: true,
 		}
-		inputJson, _ := json.Marshal(input)
-		err := tool.ValidateInput(mockState, string(inputJson))
+		inputJSON, _ := json.Marshal(input)
+		err := tool.ValidateInput(mockState, string(inputJSON))
 		assert.NoError(t, err)
 	})
 
@@ -583,8 +583,8 @@ func TestFileEditTool_ValidateInputReplaceAll(t *testing.T) {
 			NewText:    "New Line 2",
 			ReplaceAll: false,
 		}
-		inputJson, _ := json.Marshal(input)
-		err := tool.ValidateInput(mockState, string(inputJson))
+		inputJSON, _ := json.Marshal(input)
+		err := tool.ValidateInput(mockState, string(inputJSON))
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "old text appears 2 times")
 		assert.Contains(t, err.Error(), "set replace_all to true")
@@ -597,8 +597,8 @@ func TestFileEditTool_ValidateInputReplaceAll(t *testing.T) {
 			NewText:    "New Line 3",
 			ReplaceAll: false,
 		}
-		inputJson, _ := json.Marshal(input)
-		err := tool.ValidateInput(mockState, string(inputJson))
+		inputJSON, _ := json.Marshal(input)
+		err := tool.ValidateInput(mockState, string(inputJSON))
 		assert.NoError(t, err)
 	})
 }

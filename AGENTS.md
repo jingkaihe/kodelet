@@ -106,7 +106,7 @@ For detailed frontend development workflow and commands, see [docs/DEVELOPMENT.m
 
 All development work must follow these core principles:
 
-1. **Always run linting**: Make sure you run `mise run lint` after you finish any work to ensure code quality and consistency. For frontend changes, also run `mise run eslint` to check TypeScript/React code quality.
+1. **Always run linting**: Make sure you run `mise run lint` after you finish any work to ensure code quality and consistency. The lint command runs go vet, golangci-lint and staticcheck with all checks enabled for comprehensive analysis. For frontend changes, also run `mise run eslint` to check TypeScript/React code quality.
 2. **Write comprehensive tests**: Always write tests for new features you add, and regression tests for changes you make to existing functionality.
 3. **Document CLI changes**: Always document when you have changed the CLI interface to maintain clear usage documentation.
 

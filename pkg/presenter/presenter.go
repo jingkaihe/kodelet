@@ -1,3 +1,5 @@
+// Package presenter provides consistent CLI output functionality for user-facing messages,
+// including success, error, warning, and informational output with color support and quiet mode.
 package presenter
 
 import (
@@ -248,7 +250,7 @@ func ConvertUsageStats(stats *llmtypes.Usage) *UsageStats {
 // Global presenter instance for convenience
 var defaultPresenter = New()
 
-// Package-level convenience functions
+// Error displays an error message using the default presenter instance.
 func Error(err error, context string) {
 	defaultPresenter.Error(err, context)
 }
