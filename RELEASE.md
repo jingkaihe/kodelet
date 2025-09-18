@@ -1,6 +1,15 @@
 # Kodelet
 
-## 0.0.95.alpha (2025-01-14)
+## 0.0.96.alpha (2025-09-18)
+
+### Internal Code Quality
+
+**Comprehensive Package Documentation**: Added standardized package-level documentation comments across all major packages for improved developer experience
+
+- **Enhanced Linting**: Updated lint configuration to include staticcheck with comprehensive analysis including style and documentation rules
+- **Code Quality Improvements**: Standardised variable naming conventions throughout the codebase
+
+## 0.0.95.alpha (2025-09-16)
 
 ### Headless Mode
 
