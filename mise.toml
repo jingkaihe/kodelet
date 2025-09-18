@@ -7,11 +7,11 @@ npm = "10.9.2"
 
 # Development and build tools
 golangci-lint = "latest"
-staticcheck = "latest"
 air = "latest"
 gh = "latest"                                           # GitHub CLI for releases
 "go:github.com/isaacphi/mcp-language-server" = "latest"
 "go:golang.org/x/tools/gopls" = "latest"
+"go:honnef.co/go/tools/cmd/staticcheck" = "latest"
 
 [settings]
 experimental = true
@@ -70,14 +70,6 @@ run = ["go fmt ./..."]
 [tasks.lint]
 description = "Run all linters (go vet, golangci-lint, staticcheck)"
 run = ["go vet ./...", "echo 'Running golangci-lint...'", "golangci-lint run", "echo 'Running staticcheck...'", "staticcheck -checks=all ./..."]
-
-[tasks.golangci-lint]
-description = "Run golangci-lint"
-run = ["golangci-lint run"]
-
-[tasks.staticcheck]
-description = "Run staticcheck with all checks (including non-default style and documentation rules)"
-run = ["staticcheck -checks=all ./..."]
 
 [tasks.install-npm]
 description = "Install npm dependencies for frontend"
