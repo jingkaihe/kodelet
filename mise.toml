@@ -67,12 +67,16 @@ description = "Format Go code"
 run = ["go fmt ./..."]
 
 [tasks.lint]
-description = "Run all linters (go vet, golangci-lint)"
-run = ["go vet ./...", "echo 'Running golangci-lint...'", "golangci-lint run"]
+description = "Run all linters (go vet, golangci-lint, staticcheck)"
+run = ["go vet ./...", "echo 'Running golangci-lint...'", "golangci-lint run", "echo 'Running staticcheck...'", "staticcheck -checks=all ./..."]
 
 [tasks.golangci-lint]
 description = "Run golangci-lint"
 run = ["golangci-lint run"]
+
+[tasks.staticcheck]
+description = "Run staticcheck with all checks (including non-default style and documentation rules)"
+run = ["staticcheck -checks=all ./..."]
 
 [tasks.install-npm]
 description = "Install npm dependencies for frontend"

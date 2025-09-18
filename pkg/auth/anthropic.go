@@ -1,3 +1,6 @@
+// Package auth provides authentication mechanisms for various AI providers.
+// It handles OAuth2 flows, credential storage, and token management for
+// Anthropic Claude and GitHub Copilot integrations.
 package auth
 
 import (

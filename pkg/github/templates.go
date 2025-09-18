@@ -1,3 +1,7 @@
+// Package github provides GitHub Actions workflow templates and utilities for
+// generating and rendering GitHub workflow files. It includes embedded template
+// files and functions for creating background agent workflows with customizable
+// parameters.
 package github
 
 import (
@@ -8,7 +12,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-// Template files
+// TemplateFS embeds the template files from the templates directory
 //
 //go:embed templates/*
 var TemplateFS embed.FS

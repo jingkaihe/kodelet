@@ -1,3 +1,6 @@
+// Package llm defines types and interfaces for Large Language Model
+// interactions including message handlers, threads, configuration,
+// and usage tracking for different LLM providers.
 package llm
 
 import (
@@ -34,7 +37,7 @@ type ConsoleMessageHandler struct {
 	Silent bool
 }
 
-// Implementation of MessageHandler for ConsoleMessageHandler
+// HandleText prints the text to the console unless Silent is true
 func (h *ConsoleMessageHandler) HandleText(text string) {
 	if !h.Silent {
 		fmt.Println(text)
@@ -69,7 +72,7 @@ type ChannelMessageHandler struct {
 	MessageCh chan MessageEvent
 }
 
-// Implementation of MessageHandler for ChannelMessageHandler
+// HandleText sends the text through the message channel as a text event
 func (h *ChannelMessageHandler) HandleText(text string) {
 	h.MessageCh <- MessageEvent{
 		Type:    EventTypeText,
@@ -112,7 +115,7 @@ type StringCollectorHandler struct {
 	text   strings.Builder
 }
 
-// Implementation of MessageHandler for StringCollectorHandler
+// HandleText collects the text in a string builder and optionally prints to console
 func (h *StringCollectorHandler) HandleText(text string) {
 	h.text.WriteString(text)
 	h.text.WriteString("\n")

@@ -1,3 +1,5 @@
+// Package anthropic provides a client implementation for interacting with Anthropic's Claude AI models.
+// It implements the LLM Thread interface for managing conversations, tool execution, and message processing.
 package anthropic
 
 import (
@@ -681,7 +683,7 @@ func (t *AnthropicThread) getLastMessagesAttributes(messages []anthropic.Message
 		// Add message role
 		attrs = append(attrs, attribute.String(fmt.Sprintf("message.%d.role", idx), string(msg.Role)))
 
-		contentJson, err := json.Marshal(msg.Content)
+		contentJSON, err := json.Marshal(msg.Content)
 		if err != nil {
 			attrs = append(attrs, attribute.String(
 				fmt.Sprintf("message.%d.content", idx),
@@ -690,7 +692,7 @@ func (t *AnthropicThread) getLastMessagesAttributes(messages []anthropic.Message
 		} else {
 			attrs = append(attrs, attribute.String(
 				fmt.Sprintf("message.%d.content", idx),
-				string(contentJson),
+				string(contentJSON),
 			))
 		}
 	}

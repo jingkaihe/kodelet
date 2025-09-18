@@ -1,3 +1,7 @@
+// Package sysprompt provides system prompt generation and template rendering
+// for LLM interactions. It manages prompt configuration, template rendering,
+// context data collection (system info, file contexts), and feature toggles
+// for different prompt types including main system prompts and subagent prompts.
 package sysprompt
 
 // PromptConfig defines configuration options for prompt generation

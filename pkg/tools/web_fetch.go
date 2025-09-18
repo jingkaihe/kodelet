@@ -251,22 +251,22 @@ func (t *WebFetchTool) Execute(ctx context.Context, state tooltypes.State, param
 	}
 
 	// 2. Determine content handling strategy
-	isHtmlOrMarkdown := strings.Contains(contentType, "text/html") ||
+	isHTMLOrMarkdown := strings.Contains(contentType, "text/html") ||
 		strings.Contains(contentType, "text/markdown") ||
 		isMarkdownFromURL(input.URL)
 
 	// Scenario 1: Code/Text content - save to file with line numbers
-	if !isHtmlOrMarkdown {
+	if !isHTMLOrMarkdown {
 		return t.handleCodeTextContent(ctx, input, content, contentType)
 	}
 
 	// Scenario 2: HTML/Markdown content
 	if input.Prompt == "" {
 		// No prompt: return converted markdown content directly
-		return t.handleHtmlMarkdownContent(ctx, input, content, contentType)
+		return t.handleHTMLMarkdownContent(ctx, input, content, contentType)
 	} else {
 		// With prompt: use AI extraction
-		return t.handleHtmlMarkdownWithPrompt(ctx, input, content, contentType)
+		return t.handleHTMLMarkdownWithPrompt(ctx, input, content, contentType)
 	}
 }
 
@@ -432,9 +432,9 @@ func (t *WebFetchTool) handleCodeTextContent(_ context.Context, input *WebFetchI
 	}
 }
 
-// handleHtmlMarkdownContent processes HTML/Markdown content without AI extraction
+// handleHTMLMarkdownContent processes HTML/Markdown content without AI extraction
 // Returns the converted markdown content directly
-func (t *WebFetchTool) handleHtmlMarkdownContent(ctx context.Context, input *WebFetchInput, content, contentType string) tooltypes.ToolResult {
+func (t *WebFetchTool) handleHTMLMarkdownContent(ctx context.Context, input *WebFetchInput, content, contentType string) tooltypes.ToolResult {
 	// Convert HTML to Markdown if needed
 	var processedContent string
 	if strings.Contains(contentType, "text/html") {
@@ -450,8 +450,8 @@ func (t *WebFetchTool) handleHtmlMarkdownContent(ctx context.Context, input *Web
 	}
 }
 
-// handleHtmlMarkdownWithPrompt processes HTML/Markdown content with AI extraction
-func (t *WebFetchTool) handleHtmlMarkdownWithPrompt(ctx context.Context, input *WebFetchInput, content, contentType string) tooltypes.ToolResult {
+// handleHTMLMarkdownWithPrompt processes HTML/Markdown content with AI extraction
+func (t *WebFetchTool) handleHTMLMarkdownWithPrompt(ctx context.Context, input *WebFetchInput, content, contentType string) tooltypes.ToolResult {
 	// Convert HTML to Markdown if needed
 	var processedContent string
 	if strings.Contains(contentType, "text/html") {

@@ -71,6 +71,7 @@ func (t *ThinkingTool) GenerateSchema() *jsonschema.Schema {
 	return GenerateSchema[ThinkingInput]()
 }
 
+// Description returns the description of the thinking tool.
 // Thinking tool is inspired by https://www.anthropic.com/engineering/claude-think-tool
 func (t *ThinkingTool) Description() string {
 	return `Use the tool to think about something.

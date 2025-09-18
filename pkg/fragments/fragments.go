@@ -1,3 +1,6 @@
+// Package fragments provides a template system for reusable prompt fragments
+// and recipes. It supports variable substitution, bash command execution,
+// and markdown-based template processing for automating routine tasks.
 package fragments
 
 import (

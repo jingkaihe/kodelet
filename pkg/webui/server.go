@@ -1,3 +1,6 @@
+// Package webui provides a web server and HTTP API for kodelet's web interface.
+// It serves the embedded React frontend and provides REST endpoints for
+// conversation management and LLM interactions through a browser interface.
 package webui
 
 import (
