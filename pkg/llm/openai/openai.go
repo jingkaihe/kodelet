@@ -1,3 +1,5 @@
+// Package openai provides a client implementation for interacting with OpenAI and OpenAI-compatible AI models.
+// It implements the LLM Thread interface for managing conversations, tool execution, and message processing.
 package openai
 
 import (
@@ -106,10 +108,10 @@ func isRetryableError(err error) bool {
 }
 
 // isReasoningModelDynamic checks if a model supports reasoning using custom configuration
-func (o *OpenAIThread) isReasoningModelDynamic(model string) bool {
+func (t *OpenAIThread) isReasoningModelDynamic(model string) bool {
 	// Use custom models if configured
-	if o.customModels != nil {
-		return slices.Contains(o.customModels.Reasoning, model)
+	if t.customModels != nil {
+		return slices.Contains(t.customModels.Reasoning, model)
 	}
 
 	// Fall back to hardcoded check
@@ -117,10 +119,10 @@ func (o *OpenAIThread) isReasoningModelDynamic(model string) bool {
 }
 
 // getPricing returns the pricing information for a model, checking custom pricing first
-func (o *OpenAIThread) getPricing(model string) (llmtypes.ModelPricing, bool) {
+func (t *OpenAIThread) getPricing(model string) (llmtypes.ModelPricing, bool) {
 	// Check custom pricing first
-	if o.customPricing != nil {
-		if pricing, ok := o.customPricing[model]; ok {
+	if t.customPricing != nil {
+		if pricing, ok := t.customPricing[model]; ok {
 			return pricing, true
 		}
 	}

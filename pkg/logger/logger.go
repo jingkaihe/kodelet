@@ -1,3 +1,6 @@
+// Package logger provides context-aware structured logging functionality
+// using logrus. It offers global logger access and context-based logger
+// management for consistent logging across the application.
 package logger
 
 import (

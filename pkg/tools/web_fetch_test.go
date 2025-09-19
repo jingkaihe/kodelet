@@ -252,14 +252,14 @@ func TestWebFetchToolHTMLContentWithPrompt(t *testing.T) {
 			Thread: mockThread,
 		})
 
-		// Test the handleHtmlMarkdownWithPrompt function directly
+		// Test the handleHTMLMarkdownWithPrompt function directly
 		input := &WebFetchInput{
 			URL:    "https://example.com/page.html",
 			Prompt: "What is the main heading?",
 		}
 
 		htmlContent := `<html><body><h1>Welcome to Example.com</h1></body></html>`
-		result := tool.handleHtmlMarkdownWithPrompt(ctx, input, htmlContent, "text/html")
+		result := tool.handleHTMLMarkdownWithPrompt(ctx, input, htmlContent, "text/html")
 
 		assert.False(t, result.IsError())
 		assert.Equal(t, "The main heading is: Welcome to Example.com", result.GetResult())
@@ -274,7 +274,7 @@ func TestWebFetchToolHTMLContentWithPrompt(t *testing.T) {
 		}
 
 		htmlContent := `<html><body><h1>Welcome to Example.com</h1><p>This is a test page.</p></body></html>`
-		result := tool.handleHtmlMarkdownContent(context.Background(), input, htmlContent, "text/html")
+		result := tool.handleHTMLMarkdownContent(context.Background(), input, htmlContent, "text/html")
 
 		assert.False(t, result.IsError())
 		content := result.GetResult()
@@ -303,7 +303,7 @@ This is the main documentation for our API.
 ### Authentication
 Use your API key in the header.`
 
-		result := tool.handleHtmlMarkdownContent(context.Background(), input, markdownContent, "text/markdown")
+		result := tool.handleHTMLMarkdownContent(context.Background(), input, markdownContent, "text/markdown")
 
 		assert.False(t, result.IsError())
 		content := result.GetResult()

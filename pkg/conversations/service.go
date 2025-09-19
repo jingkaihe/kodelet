@@ -1,3 +1,6 @@
+// Package conversations provides conversation management functionality for kodelet.
+// It offers high-level services for storing, retrieving, querying, and managing
+// conversation records with support for filtering, pagination, and statistics.
 package conversations
 
 import (

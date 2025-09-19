@@ -415,7 +415,7 @@ func sortSearchResultsByModTime(results []SearchResult) {
 	}
 }
 
-// Limit for maximum search results
+// MaxSearchResults is the limit for maximum search results returned by the grep tool.
 const MaxSearchResults = 100
 
 func (t *GrepTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {

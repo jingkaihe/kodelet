@@ -1,3 +1,6 @@
+// Package sqlite provides SQLite-specific implementation for conversation storage.
+// It implements the ConversationStore interface using SQLite database with
+// optimized WAL mode configuration, schema migrations, and efficient querying.
 package sqlite
 
 import (

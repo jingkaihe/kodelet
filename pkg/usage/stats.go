@@ -1,3 +1,6 @@
+// Package usage provides functionality for tracking and calculating usage
+// statistics for LLM conversations including token counts, conversation
+// metrics, and time-based analytics for monitoring system performance.
 package usage
 
 import (

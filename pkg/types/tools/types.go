@@ -1,3 +1,6 @@
+// Package tools defines interfaces and types for kodelet's tool system
+// including tool execution, result structures, state management,
+// and JSON schema generation for LLM tool integration.
 package tools
 
 import (
