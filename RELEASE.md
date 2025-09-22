@@ -1,5 +1,15 @@
 # Kodelet
 
+## 0.0.97.alpha (2025-09-22)
+
+### Internal Code Quality
+
+**Precise Cost and Usage Reporting**: Enhanced cost calculation precision with standardized rounding to prevent floating-point inconsistencies
+
+- **Improved Precision**: Added rounding function for cost and usage metrics to ensure consistent 4-decimal place precision across all financial calculations
+- **Code Cleanup**: Removed unnecessary code comments throughout usage statistics package for improved maintainability
+- **Enhanced Testing**: Updated test suite to validate precise rounding behavior for financial calculations
+
 ## 0.0.96.alpha (2025-09-18)
 
 ### Internal Code Quality
