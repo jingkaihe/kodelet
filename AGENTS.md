@@ -70,12 +70,16 @@ Kodelet is a lightweight CLI tool that helps with software engineering tasks. It
 The codebase follows a modular structure with separation of concerns between LLM communication, tools, UI, and core functionality.
 
 ## Tech Stack
-- **Go 1.24.2** - Programming language
-- **Anthropic SDK** - For Claude AI integration (v0.2.0-beta.3)
-- **OpenAI SDK** - For GPT models integration
+- **Go 1.25.1** - Programming language
+- **Node.js 22.17.0** - Frontend development and build tooling
+- **Anthropic SDK v1.7.0** - For Claude AI integration
+- **OpenAI SDK v1.40.0** - For GPT and compatible models
+- **MCP v0.29.0** - Language server protocol for AI tool integration
+- **SQLite** - Pure Go database implementation
 - **Logrus** - Structured logging library
 - **Charm libraries** - TUI components
 - **Cobra & Viper** - CLI commands and configuration
+- **React & TypeScript** - Web UI frontend
 - **Docker** - For containerization
 - **mise** - Tool version management and task automation
 
