@@ -16,13 +16,11 @@ import (
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
 
-// testSetup creates a test logger setup and returns the buffer, context, and a helper to parse log entries
 type testSetup struct {
 	buf *bytes.Buffer
 	ctx context.Context
 }
 
-// setupTestLogger creates a standardized test logger setup
 func setupTestLogger(logLevel logrus.Level) *testSetup {
 	var buf bytes.Buffer
 	testLogger := logrus.New()
@@ -41,16 +39,14 @@ func setupTestLogger(logLevel logrus.Level) *testSetup {
 	}
 }
 
-// parseLogEntry parses the JSON log entry from the buffer
-func (ts *testSetup) parseLogEntry(t *testing.T) map[string]interface{} {
-	var logEntry map[string]interface{}
+func (ts *testSetup) parseLogEntry(t *testing.T) map[string]any {
+	var logEntry map[string]any
 	err := json.Unmarshal(ts.buf.Bytes(), &logEntry)
 	require.NoError(t, err)
 	return logEntry
 }
 
-// assertLogMessage verifies the basic log message properties
-func (ts *testSetup) assertLogMessage(t *testing.T, logEntry map[string]interface{}) {
+func (ts *testSetup) assertLogMessage(t *testing.T, logEntry map[string]any) {
 	assert.Equal(t, "LLM usage completed", logEntry["msg"])
 	assert.Equal(t, "info", logEntry["level"])
 }
@@ -58,7 +54,6 @@ func (ts *testSetup) assertLogMessage(t *testing.T, logEntry map[string]interfac
 func TestLogLLMUsage_NormalCase(t *testing.T) {
 	ts := setupTestLogger(logrus.InfoLevel)
 
-	// Create test usage data
 	usage := llmtypes.Usage{
 		InputTokens:              1000,
 		OutputTokens:             500,
@@ -76,14 +71,11 @@ func TestLogLLMUsage_NormalCase(t *testing.T) {
 	startTime := time.Now().Add(-2 * time.Second) // 2 seconds ago
 	requestOutputTokens := 150
 
-	// Call the function
 	LogLLMUsage(ts.ctx, usage, model, startTime, requestOutputTokens)
 
-	// Parse and verify the log entry
 	logEntry := ts.parseLogEntry(t)
 	ts.assertLogMessage(t, logEntry)
 
-	// Verify all expected fields are present and correct
 	assert.Equal(t, model, logEntry["model"])
 	assert.Equal(t, float64(1000), logEntry["input_tokens"])
 	assert.Equal(t, float64(500), logEntry["output_tokens"])
@@ -98,7 +90,6 @@ func TestLogLLMUsage_NormalCase(t *testing.T) {
 	assert.Equal(t, float64(2000), logEntry["current_context_window"])
 	assert.Equal(t, float64(8000), logEntry["max_context_window"])
 
-	// Verify context window usage ratio
 	assert.Equal(t, 0.25, logEntry["context_window_usage_ratio"]) // 2000/8000 = 0.25
 
 	// Verify tokens per second calculation (should be around 75 tokens/s for 150 tokens in ~2s)
@@ -111,7 +102,6 @@ func TestLogLLMUsage_NormalCase(t *testing.T) {
 func TestLogLLMUsage_ZeroMaxContextWindow(t *testing.T) {
 	ts := setupTestLogger(logrus.InfoLevel)
 
-	// Create usage with zero max context window
 	usage := llmtypes.Usage{
 		InputTokens:          100,
 		OutputTokens:         50,
@@ -127,7 +117,6 @@ func TestLogLLMUsage_ZeroMaxContextWindow(t *testing.T) {
 	_, exists := logEntry["context_window_usage_ratio"]
 	assert.False(t, exists, "context_window_usage_ratio should not be calculated when max_context_window is 0")
 
-	// Verify other fields are still present
 	assert.Equal(t, float64(150), logEntry["current_context_window"])
 	assert.Equal(t, float64(0), logEntry["max_context_window"])
 }
@@ -212,7 +201,6 @@ func TestLogLLMUsage_AllFieldsPresent(t *testing.T) {
 
 	logEntry := ts.parseLogEntry(t)
 
-	// Verify all required fields are present
 	requiredFields := []string{
 		"model", "input_tokens", "output_tokens", "cache_creation_input_tokens",
 		"cache_read_input_tokens", "input_cost", "output_cost", "cache_creation_cost",
@@ -224,7 +212,6 @@ func TestLogLLMUsage_AllFieldsPresent(t *testing.T) {
 		assert.Contains(t, logEntry, field, "Field %s should be present in log entry", field)
 	}
 
-	// Verify calculated fields
 	assert.Equal(t, 0.0033, logEntry["total_cost"])                // Sum of all costs
 	assert.Equal(t, float64(185), logEntry["total_tokens"])        // Sum of all tokens
 	assert.Equal(t, 0.185, logEntry["context_window_usage_ratio"]) // 185/1000
@@ -280,13 +267,15 @@ func TestLogLLMUsage_PrecisionValidation(t *testing.T) {
 
 	logEntry := ts.parseLogEntry(t)
 
-	// Verify precise total cost calculation
-	expectedTotalCost := 0.0012345 + 0.0067890 + 0.0001111 + 0.0002222
-	assert.InDelta(t, expectedTotalCost, logEntry["total_cost"], 0.0000001)
+	// Verify total cost calculation (rounded to 4 decimal places)
+	// Original: 0.0012345 + 0.0067890 + 0.0001111 + 0.0002222 = 0.0083568
+	expectedRoundedTotalCost := 0.0084 // rounded to 4 decimal places
+	assert.Equal(t, expectedRoundedTotalCost, logEntry["total_cost"])
 
-	// Verify precise context window ratio
-	expectedRatio := float64(250) / float64(3000)
-	assert.InDelta(t, expectedRatio, logEntry["context_window_usage_ratio"], 0.0000001)
+	// Verify context window ratio (rounded to 4 decimal places)
+	// Original: 250/3000 = 0.08333333333333333
+	expectedRoundedRatio := 0.0833 // rounded to 4 decimal places
+	assert.Equal(t, expectedRoundedRatio, logEntry["context_window_usage_ratio"])
 
 	// Verify tokens per second (75 tokens in 0.5 seconds = 150 tokens/s)
 	tokensPerSecond, ok := logEntry["output_tokens/s"].(float64)
