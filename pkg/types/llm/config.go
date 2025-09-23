@@ -69,13 +69,11 @@ type CustomPricing map[string]ModelPricing
 
 // GoogleConfig holds Google GenAI-specific configuration for both Vertex AI and Gemini API
 type GoogleConfig struct {
-	Backend             string `mapstructure:"backend" json:"backend" yaml:"backend"`                                     // Backend to use: "gemini" or "vertexai" (auto-detected if not specified)
-	APIKey              string `mapstructure:"api_key" json:"api_key" yaml:"api_key"`                                     // API key for Gemini API
-	Project             string `mapstructure:"project" json:"project" yaml:"project"`                                    // Google Cloud project ID for Vertex AI
-	Location            string `mapstructure:"location" json:"location" yaml:"location"`                                 // Google Cloud region for Vertex AI (e.g., "us-central1")
-	ThinkingBudget      int32  `mapstructure:"thinking_budget" json:"thinking_budget" yaml:"thinking_budget"`            // Token budget for thinking capability
-	EnableCodeExecution bool   `mapstructure:"enable_code_execution" json:"enable_code_execution" yaml:"enable_code_execution"` // Enable Python code execution
-	EnableGoogleSearch  bool   `mapstructure:"enable_google_search" json:"enable_google_search" yaml:"enable_google_search"`   // Enable web search capability
+	Backend        string `mapstructure:"backend" json:"backend" yaml:"backend"`                         // Backend to use: "gemini" or "vertexai" (auto-detected if not specified)
+	APIKey         string `mapstructure:"api_key" json:"api_key" yaml:"api_key"`                         // API key for Gemini API
+	Project        string `mapstructure:"project" json:"project" yaml:"project"`                        // Google Cloud project ID for Vertex AI
+	Location       string `mapstructure:"location" json:"location" yaml:"location"`                     // Google Cloud region for Vertex AI (e.g., "us-central1")
+	ThinkingBudget int32  `mapstructure:"thinking_budget" json:"thinking_budget" yaml:"thinking_budget"` // Token budget for thinking capability
 }
 
 type ProfileConfig map[string]interface{}

@@ -244,9 +244,7 @@ google:
   # Token budget for thinking capability (Google models support thinking)
   # thinking_budget: 8000  # Default: 8000 tokens
 
-  # Enable Google-specific tools (optional)
-  # enable_code_execution: false  # Enable Python code execution
-  # enable_google_search: false   # Enable web search capability
+
 
   # Model-specific pricing and configuration (advanced users)
   # pricing:
@@ -374,7 +372,7 @@ subagent:
 #   backend: "vertexai"
 #   project: "my-company-project"
 #   location: "us-central1"
-#   enable_code_execution: true
+
 
 # Custom Tools Configuration
 # Kodelet can discover and execute custom executable tools from specified directories

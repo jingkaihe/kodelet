@@ -19,7 +19,7 @@ import (
 )
 
 // toGoogleTools converts kodelet's tools to Google's function declaration format
-func toGoogleTools(tools []tooltypes.Tool, config llmtypes.Config) []*genai.Tool {
+func toGoogleTools(tools []tooltypes.Tool) []*genai.Tool {
 	var googleTools []*genai.Tool
 
 	// Convert standard tools
@@ -32,20 +32,6 @@ func toGoogleTools(tools []tooltypes.Tool, config llmtypes.Config) []*genai.Tool
 				Parameters:  schema,
 			}},
 		})
-	}
-
-	// Add Google-specific tools if enabled
-	if config.Google != nil {
-		if config.Google.EnableCodeExecution {
-			googleTools = append(googleTools, &genai.Tool{
-				CodeExecution: &genai.ToolCodeExecution{},
-			})
-		}
-		if config.Google.EnableGoogleSearch {
-			googleTools = append(googleTools, &genai.Tool{
-				GoogleSearch: &genai.GoogleSearch{},
-			})
-		}
 	}
 
 	return googleTools

@@ -295,17 +295,7 @@ func toGoogleTools(tools []tooltypes.Tool) []*genai.Tool {
         })
     }
     
-    // Add Google-specific tools if enabled
-    if config.EnableCodeExecution {
-        googleTools = append(googleTools, &genai.Tool{
-            CodeExecution: &genai.ToolCodeExecution{},
-        })
-    }
-    if config.EnableGoogleSearch {
-        googleTools = append(googleTools, &genai.Tool{
-            GoogleSearch: &genai.GoogleSearch{},
-        })
-    }
+
     
     return googleTools
 }
@@ -689,8 +679,7 @@ google:
   project: your-project             # For Vertex AI
   location: us-central1             # For Vertex AI
   thinking_budget: 8000             # Token budget for thinking
-  enable_code_execution: false     # Enable Python code execution
-  enable_google_search: false      # Enable web search
+
 
 # Subagent configuration (existing pattern)
 subagent:

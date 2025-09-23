@@ -23,7 +23,7 @@ func (t *GoogleThread) processMessageExchange(ctx context.Context, handler llmty
 	config := &genai.GenerateContentConfig{
 		Temperature:     genai.Ptr(float32(1.0)), // Default temperature for Google GenAI
 		MaxOutputTokens: int32(t.config.MaxTokens),
-		Tools:          toGoogleTools(t.tools(opt), t.config),
+		Tools:          toGoogleTools(t.tools(opt)),
 	}
 
 	// Get model name (weak model override)
