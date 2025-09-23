@@ -16,6 +16,7 @@ func SubAgentPrompt(model string, llmConfig llm.Config, contexts map[string]stri
 
 	config := NewDefaultConfig().WithModel(model).WithFeatures([]string{
 		"todoTools",
+		"isSubagent",
 	})
 
 	updateContextWithConfig(promptCtx, config)

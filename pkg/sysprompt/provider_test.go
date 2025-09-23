@@ -58,7 +58,8 @@ func TestSubAgentPrompt_ProviderSelection(t *testing.T) {
 func TestOpenAIPromptLoading(t *testing.T) {
 	t.Run("OpenAI prompt loading from embedded template", func(t *testing.T) {
 		renderer := NewRenderer(TemplateFS)
-		content, err := renderer.loadOpenAIPrompt()
+		ctx := NewPromptContext(map[string]string{})
+		content, err := renderer.RenderOpenAIPrompt(ctx)
 		assert.NoError(t, err)
 		assert.NotEmpty(t, content)
 		assert.Contains(t, content, "coding agent")
