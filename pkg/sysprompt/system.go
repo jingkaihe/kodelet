@@ -18,17 +18,14 @@ func SystemPrompt(model string, llmConfig llm.Config, contexts map[string]string
 	updateContextWithConfig(promptCtx, config)
 	promptCtx.BashAllowedCommands = llmConfig.AllowedCommands
 
-	// Choose prompt rendering method based on provider
 	var prompt string
 	var err error
 
 	provider := strings.ToLower(llmConfig.Provider)
 	switch provider {
 	case ProviderOpenAI:
-		// Use OpenAI-optimized prompt from embedded template
 		prompt, err = renderer.RenderOpenAIPrompt(promptCtx)
 	default:
-		// Use template-based prompt for Anthropic and unknown providers
 		prompt, err = renderer.RenderSystemPrompt(promptCtx)
 	}
 
