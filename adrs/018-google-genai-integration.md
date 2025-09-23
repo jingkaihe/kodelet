@@ -22,6 +22,114 @@ Adding Google GenAI support will provide users with:
 - More competitive pricing options
 - Better multi-modal capabilities
 
+## Google GenAI SDK Overview
+
+To understand the implementation approach, it's important to understand how the Google GenAI Go SDK works. The SDK provides a unified interface for both Gemini API and Vertex AI with the following key patterns:
+
+### Basic Client Creation and Usage
+```go
+// Create client with auto-detection from environment
+client, err := genai.NewClient(ctx, nil)
+
+// Or explicitly configure backend
+client, err := genai.NewClient(ctx, &genai.ClientConfig{
+    Backend: genai.BackendGeminiAPI,  // or genai.BackendVertexAI
+    APIKey:  "your-api-key",          // for Gemini API
+})
+
+// Simple content generation
+contents := []*genai.Content{
+    genai.NewContentFromText("What is 1+1?", genai.RoleUser),
+}
+response, err := client.Models.GenerateContent(ctx, "gemini-2.5-pro", contents, nil)
+```
+
+### Streaming Pattern
+The SDK uses Go's iterator pattern (`iter.Seq2`) for streaming:
+```go
+for chunk, err := range client.Models.GenerateContentStream(ctx, "gemini-2.5-pro", contents, config) {
+    if err != nil {
+        // Handle error
+        continue
+    }
+    // Process streaming chunk
+    for _, part := range chunk.Candidates[0].Content.Parts {
+        fmt.Print(part.Text)
+    }
+}
+```
+
+### Chat Sessions
+For multi-turn conversations:
+```go
+chat, err := client.Chats.Create(ctx, "gemini-2.5-pro", config, history)
+for response, err := range chat.SendMessageStream(ctx, genai.Text("Continue our conversation")) {
+    // Process response
+}
+```
+
+### Tool/Function Calling
+```go
+tools := []*genai.Tool{{
+    FunctionDeclarations: []*genai.FunctionDeclaration{{
+        Name:        "getWeather",
+        Description: "Get current weather",
+        Parameters: &genai.Schema{
+            Type: genai.TypeObject,
+            Properties: map[string]*genai.Schema{
+                "location": {Type: genai.TypeString},
+            },
+        },
+    }},
+}}
+
+config := &genai.GenerateContentConfig{
+    Tools: tools,
+    ToolConfig: &genai.ToolConfig{
+        FunctionCallingConfig: &genai.FunctionCallingConfig{
+            Mode: genai.FunctionCallingConfigModeAuto,
+        },
+    },
+}
+
+// Tool calls appear in response parts as FunctionCall
+for _, part := range response.Candidates[0].Content.Parts {
+    if part.FunctionCall != nil {
+        // Execute tool and return result
+        result := executeFunction(part.FunctionCall.Name, part.FunctionCall.Args)
+        // Add result back to conversation
+    }
+}
+```
+
+### Multi-modal Content
+```go
+parts := []*genai.Part{
+    genai.NewPartFromText("What's in this image?"),
+    genai.NewPartFromBytes(imageData, "image/jpeg"),
+}
+content := genai.NewContentFromParts(parts, genai.RoleUser)
+```
+
+### Provider-Specific Features
+```go
+// Thinking capability
+config := &genai.GenerateContentConfig{
+    ThinkingConfig: &genai.ThinkingConfig{
+        IncludeThoughts: true,
+        ThinkingBudget:  genai.Ptr[int32](8000),
+    },
+}
+
+// Built-in tools
+tools := []*genai.Tool{
+    {CodeExecution: &genai.ToolCodeExecution{}},
+    {GoogleSearch: &genai.GoogleSearch{}},
+}
+```
+
+This SDK design provides a clean foundation for implementing kodelet's `Thread` interface while supporting both Gemini API and Vertex AI backends transparently.
+
 ## Decision
 We will implement a new Google GenAI provider using the official `github.com/googleapis/go-genai` SDK that supports both Vertex AI and Gemini API backends through a unified interface. This implementation will:
 
@@ -809,7 +917,7 @@ Add Google provider tests to existing acceptance test suite:
    - `auth_test.go`: Backend detection and authentication
    - `models_test.go`: Model configuration and pricing logic
 
-### Phase 2: Core Feature Implementation (Week 2)
+### Phase 2: Feature Implementation & Advanced Features (Week 2-3)
 5. **SendMessage Implementation**:
    - Implement complete message exchange loop
    - Add streaming response handling with iterator pattern
@@ -833,7 +941,6 @@ Add Google provider tests to existing acceptance test suite:
    - Implement backend-specific client configuration
    - Add error handling for different auth methods
 
-### Phase 3: Advanced Features & Polish (Week 3)
 9. **Provider-Specific Features**:
    - Implement thinking capability support
    - Add context caching integration
@@ -858,45 +965,27 @@ Add Google provider tests to existing acceptance test suite:
     - `persistence_test.go`: Test conversation management and compaction
     - Add integration tests for both Gemini and Vertex AI backends
     - Test cross-provider subagent functionality
+    - Test conversation management features
     - Add mock implementations for testing
 
-### Phase 4: Quality Assurance & Documentation (Week 4)
-13. **Comprehensive Testing**:
-    - Update acceptance tests to include Google provider
-    - Add performance benchmarking tests
-    - Test conversation persistence and resume
-    - Test thinking capability and tool execution
-
-14. **Documentation & Examples**:
-    - Update user documentation with Google setup
-    - Add configuration examples for both backends
-    - Document unique Google features
+### Phase 3: Documentation & Integration (Week 4)
+13. **Documentation & Examples**:
+    - Update user documentation with Google setup instructions
+    - Add configuration examples for both Gemini API and Vertex AI backends
+    - Document unique Google features (thinking, code execution, search)
     - Update CLI help text and error messages
+    - Add troubleshooting guide for common authentication issues
 
-15. **Integration & Validation**:
+14. **Integration Updates**:
+    - Update AGENTS.md with Google-specific patterns and commands
+    - Add migration examples from other providers
+    - Update build system dependencies (`go.mod`, `go.sum`)
+    - Validate existing kodelet commands work with Google provider
+
+15. **Final Validation**:
     - Test with existing kodelet commands (run, chat, etc.)
     - Validate fragment/recipe compatibility
-    - Test web UI integration
-    - Validate conversation management features
-
-### Phase 5: Release Preparation & Deployment
-16. **Performance & Cost Analysis**:
-    - Benchmark response latency vs other providers
-    - Document cost comparison across providers
-    - Test with various model configurations
-    - Validate token counting accuracy
-
-17. **Developer Experience**:
-    - Update AGENTS.md with Google-specific patterns
-    - Add migration guides from other providers
-    - Document troubleshooting for common issues
-    - Add debugging and logging support
-
-18. **Final Integration**:
-    - Update build system and dependencies
-    - Test cross-compilation and releases
-    - Validate Docker image builds
-    - Update installation scripts if needed
+    - Verify cost tracking accuracy
 
 ## Success Criteria
 
