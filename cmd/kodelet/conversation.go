@@ -379,6 +379,8 @@ func NewConversationListOutput(summaries []convtypes.ConversationSummary, format
 			provider = "Anthropic"
 		case "openai":
 			provider = "OpenAI"
+		case "google":
+			provider = "Google"
 		}
 
 		output.Conversations = append(output.Conversations, ConversationSummaryOutput{

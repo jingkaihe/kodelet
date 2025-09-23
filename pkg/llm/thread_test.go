@@ -49,6 +49,14 @@ func TestNewThread(t *testing.T) {
 			expectedModel: string(anthropic.ModelClaudeSonnet4_20250514),
 			expectedMax:   8192,
 		},
+		{
+			name: "GoogleProvider",
+			config: llmtypes.Config{
+				Provider: "google",
+			},
+			expectedModel: "gemini-2.5-pro",
+			expectedMax:   8192,
+		},
 	}
 
 	for _, tc := range tests {

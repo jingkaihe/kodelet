@@ -37,6 +37,7 @@ type Config struct {
 
 	// Provider-specific configurations
 	OpenAI   *OpenAIConfig           `mapstructure:"openai" json:"openai,omitempty" yaml:"openai,omitempty"`       // OpenAI-specific configuration including compatible providers
+	Google   *GoogleConfig           `mapstructure:"google" json:"google,omitempty" yaml:"google,omitempty"`       // Google GenAI-specific configuration
 	SubAgent *SubAgentConfigSettings `mapstructure:"subagent" json:"subagent,omitempty" yaml:"subagent,omitempty"` // SubAgent configuration for different models/providers
 }
 
@@ -66,6 +67,17 @@ type ModelPricing struct {
 // CustomPricing maps model names to their pricing information
 type CustomPricing map[string]ModelPricing
 
+// GoogleConfig holds Google GenAI-specific configuration for both Vertex AI and Gemini API
+type GoogleConfig struct {
+	Backend             string `mapstructure:"backend" json:"backend" yaml:"backend"`                                     // Backend to use: "gemini" or "vertexai" (auto-detected if not specified)
+	APIKey              string `mapstructure:"api_key" json:"api_key" yaml:"api_key"`                                     // API key for Gemini API
+	Project             string `mapstructure:"project" json:"project" yaml:"project"`                                    // Google Cloud project ID for Vertex AI
+	Location            string `mapstructure:"location" json:"location" yaml:"location"`                                 // Google Cloud region for Vertex AI (e.g., "us-central1")
+	ThinkingBudget      int32  `mapstructure:"thinking_budget" json:"thinking_budget" yaml:"thinking_budget"`            // Token budget for thinking capability
+	EnableCodeExecution bool   `mapstructure:"enable_code_execution" json:"enable_code_execution" yaml:"enable_code_execution"` // Enable Python code execution
+	EnableGoogleSearch  bool   `mapstructure:"enable_google_search" json:"enable_google_search" yaml:"enable_google_search"`   // Enable web search capability
+}
+
 type ProfileConfig map[string]interface{}
 
 // RetryConfig holds the retry configuration for API calls
@@ -87,11 +99,12 @@ var DefaultRetryConfig = RetryConfig{
 
 // SubAgentConfigSettings holds the configuration for subagent behavior
 type SubAgentConfigSettings struct {
-	Provider        string        `mapstructure:"provider" json:"provider" yaml:"provider"`                         // Provider for subagent (anthropic, openai)
+	Provider        string        `mapstructure:"provider" json:"provider" yaml:"provider"`                         // Provider for subagent (anthropic, openai, google)
 	Model           string        `mapstructure:"model" json:"model" yaml:"model"`                                  // Model for subagent
 	MaxTokens       int           `mapstructure:"max_tokens" json:"max_tokens" yaml:"max_tokens"`                   // Maximum tokens for subagent
 	ReasoningEffort string        `mapstructure:"reasoning_effort" json:"reasoning_effort" yaml:"reasoning_effort"` // OpenAI specific reasoning effort
-	ThinkingBudget  int           `mapstructure:"thinking_budget" json:"thinking_budget" yaml:"thinking_budget"`    // Anthropic specific thinking budget
+	ThinkingBudget  int           `mapstructure:"thinking_budget" json:"thinking_budget" yaml:"thinking_budget"`    // Anthropic/Google specific thinking budget
 	AllowedTools    []string      `mapstructure:"allowed_tools" json:"allowed_tools" yaml:"allowed_tools"`          // AllowedTools is a list of allowed tools for the subagent (empty means use defaults)
 	OpenAI          *OpenAIConfig `mapstructure:"openai" json:"openai,omitempty" yaml:"openai,omitempty"`           // OpenAI-compatible provider configuration
+	Google          *GoogleConfig `mapstructure:"google" json:"google,omitempty" yaml:"google,omitempty"`           // Google GenAI-specific configuration
 }
