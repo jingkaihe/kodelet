@@ -2,6 +2,7 @@ package sysprompt
 
 import (
 	"context"
+	"strings"
 
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -15,17 +16,28 @@ func SubAgentPrompt(model string, llmConfig llm.Config, contexts map[string]stri
 
 	config := NewDefaultConfig().WithModel(model).WithFeatures([]string{
 		"todoTools",
+		"isSubagent",
 	})
 
 	updateContextWithConfig(promptCtx, config)
 
 	promptCtx.BashAllowedCommands = llmConfig.AllowedCommands
 
-	prompt, err := renderer.RenderSubagentPrompt(promptCtx)
+	var prompt string
+	var err error
+
+	provider := strings.ToLower(llmConfig.Provider)
+	switch provider {
+	case ProviderOpenAI:
+		prompt, err = renderer.RenderOpenAIPrompt(promptCtx)
+	default:
+		prompt, err = renderer.RenderSubagentPrompt(promptCtx)
+	}
+
 	if err != nil {
 		ctx := context.Background()
 		log := logger.G(ctx)
-		log.WithError(err).Fatal("Error rendering subagent prompt")
+		log.WithError(err).WithField("provider", provider).Fatal("Error rendering subagent prompt")
 	}
 
 	return prompt

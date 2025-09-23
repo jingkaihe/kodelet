@@ -22,4 +22,9 @@ const (
 
 	SystemTemplate   = "templates/system.tmpl"
 	SubagentTemplate = "templates/subagent.tmpl"
+
+	OpenAITemplate = "templates/openai_system.tmpl"
+
+	ProviderAnthropic = "anthropic"
+	ProviderOpenAI    = "openai"
 )

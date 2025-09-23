@@ -1,5 +1,22 @@
 # Kodelet
 
+## 0.0.98.alpha (2025-09-23)
+
+### Features
+
+**Provider-Aware Prompt Rendering**: OpenAI provider now uses an embedded, OpenAI-optimized system and subagent prompt for better alignment and behavior.
+
+### Dependencies
+
+- Bumped `github.com/sashabaranov/go-openai` to v1.41.2.
+
+
+### Internal Changes
+
+- Removed redundant comments in sysprompt code and tests.
+- Added provider selection tests for system/subagent prompt rendering.
+
+
 ## 0.0.97.alpha (2025-09-22)
 
 ### Internal Code Quality
@@ -1369,3 +1386,4 @@ The main feature in this release is the addition of conversation persistence, al
 ## 0.0.2.alpha1
 
 Initial release of the kodelet
+

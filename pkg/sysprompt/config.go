@@ -45,4 +45,5 @@ func (c *PromptConfig) IsFeatureEnabled(feature string) bool {
 func updateContextWithConfig(ctx *PromptContext, config *PromptConfig) {
 	ctx.Features["subagentEnabled"] = config.IsFeatureEnabled("subagent")
 	ctx.Features["todoToolsEnabled"] = config.IsFeatureEnabled("todoTools")
+	ctx.Features["isSubagent"] = config.IsFeatureEnabled("isSubagent")
 }
