@@ -20,6 +20,14 @@ const (
 	KodeletMd = "KODELET.md"
 	ReadmeMd  = "README.md"
 
+	// Template paths for Anthropic provider
 	SystemTemplate   = "templates/system.tmpl"
 	SubagentTemplate = "templates/subagent.tmpl"
+
+	// Template path for OpenAI provider (embedded)
+	OpenAITemplate = "templates/openai_prompt.md"
+
+	// Provider constants
+	ProviderAnthropic = "anthropic"
+	ProviderOpenAI    = "openai"
 )

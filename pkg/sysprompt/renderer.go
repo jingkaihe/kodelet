@@ -124,3 +124,25 @@ func (r *Renderer) RenderSubagentPrompt(ctx *PromptContext) (string, error) {
 
 	return prompt, nil
 }
+
+// loadOpenAIPrompt loads the OpenAI prompt from the embedded template
+func (r *Renderer) loadOpenAIPrompt() (string, error) {
+	content, err := fs.ReadFile(r.templateFS, OpenAITemplate)
+	if err != nil {
+		return "", errors.Wrapf(err, "failed to read OpenAI prompt template %s", OpenAITemplate)
+	}
+	return string(content), nil
+}
+
+// RenderOpenAIPrompt renders the OpenAI prompt with system info and contexts appended
+func (r *Renderer) RenderOpenAIPrompt(ctx *PromptContext) (string, error) {
+	prompt, err := r.loadOpenAIPrompt()
+	if err != nil {
+		return "", err
+	}
+
+	prompt += ctx.FormatSystemInfo()
+	prompt += ctx.FormatContexts()
+
+	return prompt, nil
+}
