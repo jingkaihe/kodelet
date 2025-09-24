@@ -625,9 +625,7 @@ func (t *GoogleThread) processImage(imagePath string) (*genai.Part, error) {
 	}
 
 	// Remove file:// prefix if present
-	if strings.HasPrefix(imagePath, "file://") {
-		imagePath = strings.TrimPrefix(imagePath, "file://")
-	}
+	imagePath = strings.TrimPrefix(imagePath, "file://")
 
 	// Check if file exists
 	if _, err := os.Stat(imagePath); os.IsNotExist(err) {

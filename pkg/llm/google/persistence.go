@@ -17,6 +17,9 @@ import (
 )
 
 func (t *GoogleThread) SaveConversation(ctx context.Context, summarise bool) error {
+	t.conversationMu.Lock()
+	defer t.conversationMu.Unlock()
+
 	if !t.isPersisted || t.store == nil {
 		return nil
 	}
@@ -57,6 +60,9 @@ func (t *GoogleThread) SaveConversation(ctx context.Context, summarise bool) err
 }
 
 func (t *GoogleThread) LoadConversation(ctx context.Context, conversationID string) error {
+	t.conversationMu.Lock()
+	defer t.conversationMu.Unlock()
+
 	if t.store == nil {
 		return errors.New("conversation store not initialized")
 	}
