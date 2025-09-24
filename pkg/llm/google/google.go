@@ -474,7 +474,6 @@ func (t *GoogleThread) processMessageExchange(
 		}
 		return nil
 	})
-
 	if err != nil {
 		return "", false, err
 	}
@@ -666,33 +665,22 @@ func getMimeTypeFromExtension(ext string) string {
 	}
 }
 
-// isRetryableError determines if an error should be retried
+// isRetryableError determines if an error should be retried based on structured error types.
 func isRetryableError(err error) bool {
 	if err == nil {
 		return false
 	}
 
+	// Don't retry context cancellation or deadline exceeded
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return false
 	}
-	errStr := err.Error()
 
-	retryablePatterns := []string{
-		"connection refused",
-		"connection reset",
-		"timeout",
-		"temporary failure",
-		"service unavailable",
-		"internal error",
-		"quota exceeded",
-		"rate limit",
-		"too many requests",
-	}
-
-	for _, pattern := range retryablePatterns {
-		if strings.Contains(strings.ToLower(errStr), pattern) {
-			return true
-		}
+	// Check for Google GenAI APIError with HTTP status code
+	var apiErr *genai.APIError
+	if errors.As(err, &apiErr) {
+		statusCode := apiErr.Code
+		return statusCode >= 400 && statusCode < 600
 	}
 
 	return false
@@ -737,7 +725,6 @@ func (t *GoogleThread) executeWithRetry(ctx context.Context, operation func() er
 			logger.G(ctx).WithError(err).WithField("attempt", n+1).WithField("max_attempts", retryConfig.Attempts).Warn("retrying Google GenAI API call")
 		}),
 	)
-
 	if err != nil {
 		return errors.Wrapf(err, "all %d retry attempts failed, original errors: %v", len(originalErrors), originalErrors)
 	}

@@ -333,28 +333,89 @@ func TestIsRetryableError(t *testing.T) {
 			retryable: false,
 		},
 		{
-			name:      "connection refused should be retryable",
-			err:       errors.New("connection refused"),
-			retryable: true,
-		},
-		{
-			name:      "timeout should be retryable",
-			err:       errors.New("timeout occurred"),
-			retryable: true,
-		},
-		{
-			name:      "rate limit should be retryable",
-			err:       errors.New("rate limit exceeded"),
-			retryable: true,
-		},
-		{
-			name:      "quota exceeded should be retryable",
-			err:       errors.New("quota exceeded"),
-			retryable: true,
-		},
-		{
 			name:      "generic error should not be retryable",
 			err:       errors.New("some random error"),
+			retryable: false,
+		},
+		{
+			name: "genai.APIError with 429 should be retryable",
+			err: &genai.APIError{
+				Code:    429,
+				Message: "Too Many Requests",
+				Status:  "RESOURCE_EXHAUSTED",
+			},
+			retryable: true,
+		},
+		{
+			name: "genai.APIError with 500 should be retryable",
+			err: &genai.APIError{
+				Code:    500,
+				Message: "Internal Server Error",
+				Status:  "INTERNAL",
+			},
+			retryable: true,
+		},
+		{
+			name: "genai.APIError with 503 should be retryable",
+			err: &genai.APIError{
+				Code:    503,
+				Message: "Service Unavailable",
+				Status:  "UNAVAILABLE",
+			},
+			retryable: true,
+		},
+		{
+			name: "genai.APIError with 400 should be retryable",
+			err: &genai.APIError{
+				Code:    400,
+				Message: "Bad Request",
+				Status:  "INVALID_ARGUMENT",
+			},
+			retryable: true,
+		},
+		{
+			name: "genai.APIError with 401 should be retryable",
+			err: &genai.APIError{
+				Code:    401,
+				Message: "Unauthorized",
+				Status:  "UNAUTHENTICATED",
+			},
+			retryable: true,
+		},
+		{
+			name: "genai.APIError with 404 should be retryable",
+			err: &genai.APIError{
+				Code:    404,
+				Message: "Not Found",
+				Status:  "NOT_FOUND",
+			},
+			retryable: true,
+		},
+		{
+			name: "genai.APIError with 200 should not be retryable",
+			err: &genai.APIError{
+				Code:    200,
+				Message: "OK",
+				Status:  "OK",
+			},
+			retryable: false,
+		},
+		{
+			name: "genai.APIError with 399 should not be retryable",
+			err: &genai.APIError{
+				Code:    399,
+				Message: "Custom Code",
+				Status:  "CUSTOM",
+			},
+			retryable: false,
+		},
+		{
+			name: "genai.APIError with 600 should not be retryable",
+			err: &genai.APIError{
+				Code:    600,
+				Message: "Custom Code",
+				Status:  "CUSTOM",
+			},
 			retryable: false,
 		},
 	}
