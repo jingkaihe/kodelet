@@ -15,6 +15,10 @@ jobs:
       contents: read
       id-token: write
 
+    env:
+      GOOGLE_CLOUD_PROJECT: ${{ secrets.GCP_PROJECT_ID }}
+      GOOGLE_CLOUD_LOCATION: ${{ secrets.GCP_LOCATION }}
+
     steps:
       - uses: actions/checkout@v4
 
