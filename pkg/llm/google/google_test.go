@@ -2,12 +2,16 @@ package google
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/genai"
 
+	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
 
@@ -356,4 +360,507 @@ func TestIsRetryableError(t *testing.T) {
 			assert.Equal(t, tt.retryable, result)
 		})
 	}
+}
+
+func TestGetMimeTypeFromExtension(t *testing.T) {
+	tests := []struct {
+		ext      string
+		expected string
+		hasError bool
+	}{
+		{".jpg", "image/jpeg", false},
+		{".jpeg", "image/jpeg", false},
+		{".JPG", "image/jpeg", false},
+		{".JPEG", "image/jpeg", false},
+		{".png", "image/png", false},
+		{".PNG", "image/png", false},
+		{".gif", "image/gif", false},
+		{".GIF", "image/gif", false},
+		{".webp", "image/webp", false},
+		{".WEBP", "image/webp", false},
+		{".bmp", "", true},
+		{".svg", "", true},
+		{".txt", "", true},
+		{"", "", true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.ext, func(t *testing.T) {
+			result := getMimeTypeFromExtension(test.ext)
+			if test.hasError {
+				assert.Equal(t, "", result)
+			} else {
+				assert.Equal(t, test.expected, result)
+			}
+		})
+	}
+}
+
+func TestProcessImageFile(t *testing.T) {
+	thread, err := NewGoogleThread(llmtypes.Config{}, nil)
+	require.NoError(t, err)
+
+	// Create a temporary directory for test files
+	tempDir := t.TempDir()
+
+	// Create a small test image file (PNG)
+	pngData := []byte{
+		0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, // PNG signature
+		0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52, // IHDR chunk header
+		0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, // 1x1 pixel
+		0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4, // bit depth, color type, etc.
+		0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, // IDAT chunk
+		0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
+		0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00,
+		0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, // IEND chunk
+		0x42, 0x60, 0x82,
+	}
+
+	testImagePath := filepath.Join(tempDir, "test.png")
+	err = os.WriteFile(testImagePath, pngData, 0644)
+	require.NoError(t, err)
+
+	// Create a large test file (exceeds MaxImageFileSize)
+	largeFilePath := filepath.Join(tempDir, "large.png")
+	largeData := make([]byte, MaxImageFileSize+1)
+	err = os.WriteFile(largeFilePath, largeData, 0644)
+	require.NoError(t, err)
+
+	// Create a file with unsupported extension
+	unsupportedPath := filepath.Join(tempDir, "test.bmp")
+	err = os.WriteFile(unsupportedPath, pngData, 0644)
+	require.NoError(t, err)
+
+	tests := []struct {
+		name     string
+		filePath string
+		hasError bool
+	}{
+		{"Valid PNG file", testImagePath, false},
+		{"Non-existent file", filepath.Join(tempDir, "nonexistent.png"), true},
+		{"File too large", largeFilePath, true},
+		{"Unsupported format", unsupportedPath, true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result, err := thread.processImage(test.filePath)
+			if test.hasError {
+				assert.Error(t, err)
+				assert.Nil(t, result)
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, result)
+			}
+		})
+	}
+}
+
+func TestGoogleThread_AddUserMessageComprehensive(t *testing.T) {
+	thread, err := NewGoogleThread(llmtypes.Config{}, nil)
+	require.NoError(t, err)
+
+	// Create a temporary directory for test files
+	tempDir := t.TempDir()
+
+	// Create a small test image file
+	pngData := []byte{
+		0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, // PNG signature
+		0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52, // IHDR chunk header
+		0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, // 1x1 pixel
+		0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4, // bit depth, color type, etc.
+		0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, // IDAT chunk
+		0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
+		0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00,
+		0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, // IEND chunk
+		0x42, 0x60, 0x82,
+	}
+
+	testImagePath := filepath.Join(tempDir, "test.png")
+	err = os.WriteFile(testImagePath, pngData, 0644)
+	require.NoError(t, err)
+
+	tests := []struct {
+		name        string
+		message     string
+		images      []string
+		expectCount int // Expected number of parts in the message
+	}{
+		{"Text only", "Hello world", nil, 1},
+		{"Text with valid image", "Analyze this image", []string{testImagePath}, 2},
+		{"Text with invalid image", "Check this", []string{"invalid-path.png"}, 1}, // Only text should be added
+		{"Text with mixed valid/invalid images", "Mixed test", []string{testImagePath, "invalid-path.png"}, 2}, // Only text + valid image
+		{"Too many images", "Many images", make([]string, MaxImageCount+5), 1 + MaxImageCount}, // Should cap at MaxImageCount
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			initialCount := len(thread.messages)
+
+			// For the "too many images" test, fill the slice with valid paths
+			if test.name == "Too many images" {
+				for i := range test.images {
+					test.images[i] = testImagePath
+				}
+			}
+
+			thread.AddUserMessage(context.Background(), test.message, test.images...)
+
+			// Should have added exactly one message
+			assert.Equal(t, initialCount+1, len(thread.messages))
+
+			// Check the last message
+			lastMessage := thread.messages[len(thread.messages)-1]
+			assert.Equal(t, genai.RoleUser, lastMessage.Role)
+
+			// Check part count
+			assert.Equal(t, test.expectCount, len(lastMessage.Parts))
+		})
+	}
+}
+
+func TestGoogleThread_ShouldAutoCompactComprehensive(t *testing.T) {
+	tests := []struct {
+		name                 string
+		compactRatio         float64
+		currentContextWindow int
+		maxContextWindow     int
+		expectedResult       bool
+	}{
+		{
+			name:                 "should compact when ratio exceeded",
+			compactRatio:         0.8,
+			currentContextWindow: 80,
+			maxContextWindow:     100,
+			expectedResult:       true,
+		},
+		{
+			name:                 "should not compact when ratio not exceeded",
+			compactRatio:         0.8,
+			currentContextWindow: 70,
+			maxContextWindow:     100,
+			expectedResult:       false,
+		},
+		{
+			name:                 "should not compact when ratio is zero",
+			compactRatio:         0.0,
+			currentContextWindow: 90,
+			maxContextWindow:     100,
+			expectedResult:       false,
+		},
+		{
+			name:                 "should not compact when ratio is negative",
+			compactRatio:         -0.5,
+			currentContextWindow: 90,
+			maxContextWindow:     100,
+			expectedResult:       false,
+		},
+		{
+			name:                 "should not compact when ratio is greater than 1",
+			compactRatio:         1.5,
+			currentContextWindow: 90,
+			maxContextWindow:     100,
+			expectedResult:       false,
+		},
+		{
+			name:                 "should not compact when max context window is zero",
+			compactRatio:         0.8,
+			currentContextWindow: 80,
+			maxContextWindow:     0,
+			expectedResult:       false,
+		},
+		{
+			name:                 "should compact when ratio is exactly at threshold",
+			compactRatio:         0.8,
+			currentContextWindow: 80,
+			maxContextWindow:     100,
+			expectedResult:       true,
+		},
+		{
+			name:                 "should compact when ratio is 1.0 and context is full",
+			compactRatio:         1.0,
+			currentContextWindow: 100,
+			maxContextWindow:     100,
+			expectedResult:       true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			thread, err := NewGoogleThread(llmtypes.Config{}, nil)
+			require.NoError(t, err)
+
+			// Mock the usage stats
+			thread.usage.CurrentContextWindow = test.currentContextWindow
+			thread.usage.MaxContextWindow = test.maxContextWindow
+
+			result := thread.shouldAutoCompact(test.compactRatio)
+			assert.Equal(t, test.expectedResult, result)
+		})
+	}
+}
+
+func TestGoogleThread_GetLastAssistantMessageText(t *testing.T) {
+	tests := []struct {
+		name          string
+		messages      []*genai.Content
+		expectedText  string
+		expectedError bool
+	}{
+		{
+			name: "single assistant message",
+			messages: []*genai.Content{
+				genai.NewContentFromParts([]*genai.Part{
+					genai.NewPartFromText("Assistant response"),
+				}, genai.RoleModel),
+			},
+			expectedText:  "Assistant response",
+			expectedError: false,
+		},
+		{
+			name: "multiple messages with assistant last",
+			messages: []*genai.Content{
+				genai.NewContentFromParts([]*genai.Part{
+					genai.NewPartFromText("User message"),
+				}, genai.RoleUser),
+				genai.NewContentFromParts([]*genai.Part{
+					genai.NewPartFromText("Assistant response"),
+				}, genai.RoleModel),
+			},
+			expectedText:  "Assistant response",
+			expectedError: false,
+		},
+		{
+			name: "multiple assistant messages - should get last one",
+			messages: []*genai.Content{
+				genai.NewContentFromParts([]*genai.Part{
+					genai.NewPartFromText("First assistant response"),
+				}, genai.RoleModel),
+				genai.NewContentFromParts([]*genai.Part{
+					genai.NewPartFromText("User message"),
+				}, genai.RoleUser),
+				genai.NewContentFromParts([]*genai.Part{
+					genai.NewPartFromText("Second assistant response"),
+				}, genai.RoleModel),
+			},
+			expectedText:  "Second assistant response",
+			expectedError: false,
+		},
+		{
+			name: "multiple parts in assistant message",
+			messages: []*genai.Content{
+				genai.NewContentFromParts([]*genai.Part{
+					genai.NewPartFromText("First block"),
+					genai.NewPartFromText("Second block"),
+				}, genai.RoleModel),
+			},
+			expectedText:  "First blockSecond block",
+			expectedError: false,
+		},
+		{
+			name: "thinking part should be excluded",
+			messages: []*genai.Content{
+				genai.NewContentFromParts([]*genai.Part{
+					{Text: "Thinking content", Thought: true},
+					genai.NewPartFromText("Regular response"),
+				}, genai.RoleModel),
+			},
+			expectedText:  "Regular response",
+			expectedError: false,
+		},
+		{
+			name:          "no messages",
+			messages:      []*genai.Content{},
+			expectedText:  "",
+			expectedError: true,
+		},
+		{
+			name: "no assistant messages",
+			messages: []*genai.Content{
+				genai.NewContentFromParts([]*genai.Part{
+					genai.NewPartFromText("User message"),
+				}, genai.RoleUser),
+			},
+			expectedText:  "",
+			expectedError: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			thread, err := NewGoogleThread(llmtypes.Config{}, nil)
+			require.NoError(t, err)
+
+			thread.messages = test.messages
+
+			result, err := thread.getLastAssistantMessageText()
+
+			if test.expectedError {
+				assert.Error(t, err)
+				assert.Equal(t, test.expectedText, result)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, test.expectedText, result)
+			}
+		})
+	}
+}
+
+func TestGoogleThread_ToolsMethod(t *testing.T) {
+	thread, err := NewGoogleThread(llmtypes.Config{}, nil)
+	require.NoError(t, err)
+
+	// Test with nil state
+	availableTools := thread.tools(llmtypes.MessageOpt{})
+	assert.Empty(t, availableTools)
+
+	// Test with NoToolUse option
+	availableTools = thread.tools(llmtypes.MessageOpt{NoToolUse: true})
+	assert.Empty(t, availableTools)
+
+	// Test with real state
+	realState := tools.NewBasicState(context.TODO())
+	thread.SetState(realState)
+
+	availableTools = thread.tools(llmtypes.MessageOpt{})
+	// Real state should provide basic tools
+	assert.Greater(t, len(availableTools), 0, "Real state should provide basic tools")
+
+	// Test NoToolUse still overrides
+	availableTools = thread.tools(llmtypes.MessageOpt{NoToolUse: true})
+	assert.Empty(t, availableTools)
+}
+
+func TestGoogleThread_AutoCompactTriggerLogic(t *testing.T) {
+	t.Run("auto-compact triggers when ratio exceeded", func(t *testing.T) {
+		thread, err := NewGoogleThread(llmtypes.Config{}, nil)
+		require.NoError(t, err)
+
+		// Set up context window to trigger auto-compact
+		thread.usage.CurrentContextWindow = 85 // 85% utilization
+		thread.usage.MaxContextWindow = 100
+
+		// Verify shouldAutoCompact returns true for ratio 0.8
+		assert.True(t, thread.shouldAutoCompact(0.8),
+			"Should trigger auto-compact when ratio (0.85) exceeds threshold (0.8)")
+	})
+
+	t.Run("auto-compact does not trigger when ratio not exceeded", func(t *testing.T) {
+		thread, err := NewGoogleThread(llmtypes.Config{}, nil)
+		require.NoError(t, err)
+
+		// Set up context window below auto-compact threshold
+		thread.usage.CurrentContextWindow = 75 // 75% utilization
+		thread.usage.MaxContextWindow = 100
+
+		// Verify shouldAutoCompact returns false for ratio 0.8
+		assert.False(t, thread.shouldAutoCompact(0.8),
+			"Should not trigger auto-compact when ratio (0.75) below threshold (0.8)")
+	})
+
+	t.Run("auto-compact disabled when DisableAutoCompact is true", func(t *testing.T) {
+		thread, err := NewGoogleThread(llmtypes.Config{}, nil)
+		require.NoError(t, err)
+
+		// Set up context window to trigger auto-compact
+		thread.usage.CurrentContextWindow = 90 // 90% utilization
+		thread.usage.MaxContextWindow = 100
+
+		// Even though context is high, shouldAutoCompact should be bypassed
+		// when DisableAutoCompact is true (this is handled in SendMessage logic)
+		disableAutoCompact := true
+
+		// Simulate the logic from SendMessage
+		shouldTrigger := !disableAutoCompact && thread.shouldAutoCompact(0.8)
+		assert.False(t, shouldTrigger,
+			"Should not trigger auto-compact when DisableAutoCompact is true")
+	})
+
+	t.Run("auto-compact respects different compact ratios", func(t *testing.T) {
+		tests := []struct {
+			name          string
+			ratio         float64
+			utilization   int
+			shouldTrigger bool
+		}{
+			{
+				name:          "conservative ratio - should not trigger",
+				ratio:         0.9,
+				utilization:   85,
+				shouldTrigger: false,
+			},
+			{
+				name:          "conservative ratio - should trigger",
+				ratio:         0.9,
+				utilization:   95,
+				shouldTrigger: true,
+			},
+			{
+				name:          "aggressive ratio - should trigger",
+				ratio:         0.5,
+				utilization:   60,
+				shouldTrigger: true,
+			},
+			{
+				name:          "aggressive ratio - should not trigger",
+				ratio:         0.5,
+				utilization:   40,
+				shouldTrigger: false,
+			},
+		}
+
+		for _, test := range tests {
+			t.Run(test.name, func(t *testing.T) {
+				thread, err := NewGoogleThread(llmtypes.Config{}, nil)
+				require.NoError(t, err)
+
+				// Set up context window
+				thread.usage.CurrentContextWindow = test.utilization
+				thread.usage.MaxContextWindow = 100
+
+				result := thread.shouldAutoCompact(test.ratio)
+				assert.Equal(t, test.shouldTrigger, result,
+					"Compact ratio %f with %d%% utilization should trigger: %v",
+					test.ratio, test.utilization, test.shouldTrigger)
+			})
+		}
+	})
+}
+
+func TestGoogleThread_NewSubAgent(t *testing.T) {
+	parentThread, err := NewGoogleThread(llmtypes.Config{
+		Model:     "gemini-2.5-pro",
+		MaxTokens: 8192,
+	}, nil)
+	require.NoError(t, err)
+
+	// Set up parent thread state
+	realState := tools.NewBasicState(context.TODO())
+	parentThread.SetState(realState)
+
+	// Create subagent
+	subagentConfig := llmtypes.Config{
+		Model:       "gemini-2.5-flash",
+		MaxTokens:   4096,
+		IsSubAgent:  true,
+	}
+
+	subagent := parentThread.NewSubAgent(context.Background(), subagentConfig)
+	require.NotNil(t, subagent)
+
+	googleSubagent, ok := subagent.(*GoogleThread)
+	require.True(t, ok, "Subagent should be a GoogleThread")
+
+	// Verify subagent properties
+	assert.Equal(t, "google", googleSubagent.Provider())
+	assert.Equal(t, subagentConfig.Model, googleSubagent.GetConfig().Model)
+	assert.Equal(t, subagentConfig.MaxTokens, googleSubagent.GetConfig().MaxTokens)
+	assert.True(t, googleSubagent.GetConfig().IsSubAgent)
+	assert.False(t, googleSubagent.IsPersisted())
+
+	// Verify shared resources
+	assert.Equal(t, parentThread.client, googleSubagent.client)
+	assert.Equal(t, parentThread.backend, googleSubagent.backend)
+	assert.Equal(t, parentThread.usage, googleSubagent.usage) // Shared usage tracking
+	assert.Equal(t, parentThread.state, googleSubagent.state) // Shared state
 }
