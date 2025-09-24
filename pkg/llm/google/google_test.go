@@ -17,8 +17,8 @@ import (
 
 func TestNewGoogleThread(t *testing.T) {
 	tests := []struct {
-		name     string
-		config   llmtypes.Config
+		name      string
+		config    llmtypes.Config
 		expectErr bool
 	}{
 		{
@@ -73,7 +73,7 @@ func TestNewGoogleThread(t *testing.T) {
 				assert.Equal(t, tt.config.Model, thread.GetConfig().Model)
 				assert.NotEmpty(t, thread.GetConversationID())
 				assert.False(t, thread.IsPersisted())
-				
+
 				// Verify defaults were applied
 				if tt.config.MaxTokens == 0 {
 					assert.Equal(t, 8192, thread.GetConfig().MaxTokens)
@@ -100,21 +100,21 @@ func TestGoogleThread_InterfaceCompliance(t *testing.T) {
 	// Test all interface methods exist and work
 	assert.Equal(t, "google", thread.Provider())
 	assert.NotEmpty(t, thread.GetConversationID())
-	
+
 	// Test that the config has defaults applied
 	threadConfig := thread.GetConfig()
 	assert.Equal(t, "google", threadConfig.Provider)
 	assert.Equal(t, "gemini-2.5-pro", threadConfig.Model)
 	assert.Equal(t, 8192, threadConfig.MaxTokens) // Default should be applied
-	
+
 	// Test state management
 	assert.Nil(t, thread.GetState())
-	
+
 	// Test persistence
 	assert.False(t, thread.IsPersisted())
 	thread.EnablePersistence(context.Background(), true)
 	assert.True(t, thread.IsPersisted())
-	
+
 	// Test conversation ID management
 	originalID := thread.GetConversationID()
 	newID := "test-conversation-id"
@@ -283,8 +283,8 @@ func TestCalculateCost(t *testing.T) {
 			inputTokens:  100000, // Below 200K threshold
 			outputTokens: 1000,
 			hasAudio:     false,
-			expectInput:  0.000125,  // 100000 * 0.00125 / 1000000
-			expectOutput: 0.00001,   // 1000 * 0.01 / 1000000
+			expectInput:  0.000125, // 100000 * 0.00125 / 1000000
+			expectOutput: 0.00001,  // 1000 * 0.01 / 1000000
 		},
 		{
 			name:         "unknown model",
@@ -488,9 +488,9 @@ func TestGoogleThread_AddUserMessageComprehensive(t *testing.T) {
 	}{
 		{"Text only", "Hello world", nil, 1},
 		{"Text with valid image", "Analyze this image", []string{testImagePath}, 2},
-		{"Text with invalid image", "Check this", []string{"invalid-path.png"}, 1}, // Only text should be added
+		{"Text with invalid image", "Check this", []string{"invalid-path.png"}, 1},                             // Only text should be added
 		{"Text with mixed valid/invalid images", "Mixed test", []string{testImagePath, "invalid-path.png"}, 2}, // Only text + valid image
-		{"Too many images", "Many images", make([]string, MaxImageCount+5), 1 + MaxImageCount}, // Should cap at MaxImageCount
+		{"Too many images", "Many images", make([]string, MaxImageCount+5), 1 + MaxImageCount},                 // Should cap at MaxImageCount
 	}
 
 	for _, test := range tests {
@@ -840,9 +840,9 @@ func TestGoogleThread_NewSubAgent(t *testing.T) {
 
 	// Create subagent
 	subagentConfig := llmtypes.Config{
-		Model:       "gemini-2.5-flash",
-		MaxTokens:   4096,
-		IsSubAgent:  true,
+		Model:      "gemini-2.5-flash",
+		MaxTokens:  4096,
+		IsSubAgent: true,
 	}
 
 	subagent := parentThread.NewSubAgent(context.Background(), subagentConfig)

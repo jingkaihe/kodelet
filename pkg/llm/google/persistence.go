@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"google.golang.org/genai"
 	"github.com/pkg/errors"
+	"google.golang.org/genai"
 
 	"github.com/jingkaihe/kodelet/pkg/llm/prompts"
 	"github.com/jingkaihe/kodelet/pkg/logger"
@@ -33,7 +33,7 @@ func (t *GoogleThread) SaveConversation(ctx context.Context, summarise bool) err
 
 	var fileLastAccess map[string]time.Time
 	var backgroundProcesses []tooltypes.BackgroundProcess
-	
+
 	if t.state != nil {
 		fileLastAccess = t.state.FileLastAccess()
 		backgroundProcesses = t.state.GetBackgroundProcesses()
@@ -126,8 +126,6 @@ func (t *GoogleThread) generateSummary(ctx context.Context) string {
 	return handler.CollectedText()
 }
 
-
-
 func ExtractMessages(rawMessages []byte, toolResults map[string]tooltypes.StructuredToolResult) ([]llmtypes.Message, error) {
 	var googleMessages []*genai.Content
 	if err := json.Unmarshal(rawMessages, &googleMessages); err != nil {
@@ -185,8 +183,6 @@ func ExtractMessages(rawMessages []byte, toolResults map[string]tooltypes.Struct
 
 	return messages, nil
 }
-
-
 
 func DeserializeMessages(rawMessages []byte) ([]*genai.Content, error) {
 	var messages []*genai.Content

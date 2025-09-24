@@ -15,10 +15,10 @@ import (
 	"sync"
 	"time"
 
-	"google.golang.org/genai"
 	"github.com/avast/retry-go/v4"
 	"github.com/invopop/jsonschema"
 	"github.com/pkg/errors"
+	"google.golang.org/genai"
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/feedback"
@@ -28,10 +28,10 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/telemetry"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
-	"github.com/jingkaihe/kodelet/pkg/usage"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/jingkaihe/kodelet/pkg/usage"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
@@ -89,7 +89,7 @@ func (t *GoogleThread) Provider() string {
 func NewGoogleThread(config llmtypes.Config, subagentContextFactory llmtypes.SubagentContextFactory) (*GoogleThread, error) {
 	// Create a copy of the config to avoid modifying the original
 	configCopy := config
-	
+
 	// Apply defaults if not provided
 	if configCopy.Model == "" {
 		configCopy.Model = "gemini-2.5-pro"
@@ -161,21 +161,21 @@ func detectBackend(config llmtypes.Config) string {
 	}
 
 	// 3. Auto-detect based on available configuration and environment
-	
+
 	// Check for Vertex AI indicators
 	hasVertexAIConfig := false
 	if config.Google != nil {
 		hasVertexAIConfig = config.Google.Project != "" || config.Google.Location != ""
 	}
-	
+
 	// Check for Vertex AI environment variables
 	hasVertexAIEnv := os.Getenv("GOOGLE_CLOUD_PROJECT") != "" ||
 		os.Getenv("GOOGLE_APPLICATION_CREDENTIALS") != "" ||
 		os.Getenv("GCLOUD_PROJECT") != ""
-		
+
 	// Check for Gemini API key
 	hasGeminiAPIKey := config.Google != nil && config.Google.APIKey != ""
-	
+
 	// Check for Gemini API key in environment
 	hasGeminiAPIKeyEnv := os.Getenv("GOOGLE_API_KEY") != "" ||
 		os.Getenv("GEMINI_API_KEY") != ""
@@ -188,15 +188,15 @@ func detectBackend(config llmtypes.Config) string {
 	if hasGeminiAPIKey {
 		return "gemini"
 	}
-	
+
 	if hasVertexAIConfig {
 		return "vertexai"
 	}
-	
+
 	if hasVertexAIEnv {
 		return "vertexai"
 	}
-	
+
 	if hasGeminiAPIKeyEnv {
 		return "gemini"
 	}
@@ -474,7 +474,7 @@ func (t *GoogleThread) processMessageExchange(
 		}
 		return nil
 	})
-	
+
 	if err != nil {
 		return "", false, err
 	}
@@ -535,7 +535,7 @@ func (t *GoogleThread) processPart(part *genai.Part, response *GoogleResponse, h
 			Args: part.FunctionCall.Args,
 		}
 		response.ToolCalls = append(response.ToolCalls, toolCall)
-		
+
 		argsJSON, err := json.Marshal(toolCall.Args)
 		if err != nil {
 			return errors.Wrap(err, "failed to marshal tool arguments")
@@ -623,7 +623,7 @@ func (t *GoogleThread) processImage(imagePath string) (*genai.Part, error) {
 	if strings.HasPrefix(imagePath, "http://") || strings.HasPrefix(imagePath, "https://") {
 		return nil, errors.New("URL images not supported yet")
 	}
-	
+
 	// Remove file:// prefix if present
 	if strings.HasPrefix(imagePath, "file://") {
 		imagePath = strings.TrimPrefix(imagePath, "file://")
@@ -640,7 +640,7 @@ func (t *GoogleThread) processImage(imagePath string) (*genai.Part, error) {
 	}
 
 	if len(imageData) > MaxImageFileSize {
-		return nil, errors.Errorf("image file %s is too large (%d bytes), maximum is %d bytes", 
+		return nil, errors.Errorf("image file %s is too large (%d bytes), maximum is %d bytes",
 			imagePath, len(imageData), MaxImageFileSize)
 	}
 
@@ -678,7 +678,7 @@ func isRetryableError(err error) bool {
 		return false
 	}
 	errStr := err.Error()
-	
+
 	retryablePatterns := []string{
 		"connection refused",
 		"connection reset",
@@ -690,13 +690,13 @@ func isRetryableError(err error) bool {
 		"rate limit",
 		"too many requests",
 	}
-	
+
 	for _, pattern := range retryablePatterns {
 		if strings.Contains(strings.ToLower(errStr), pattern) {
 			return true
 		}
 	}
-	
+
 	return false
 }
 
@@ -833,7 +833,7 @@ func generateToolCallID() string {
 // executeToolCalls executes tool calls and adds results to the conversation
 func (t *GoogleThread) executeToolCalls(ctx context.Context, response *GoogleResponse, handler llmtypes.MessageHandler, opt llmtypes.MessageOpt) {
 	var toolResultParts []*genai.Part
-	
+
 	for _, toolCall := range response.ToolCalls {
 		logger.G(ctx).WithField("tool", toolCall.Name).Debug("Executing tool call")
 
@@ -880,7 +880,7 @@ func (t *GoogleThread) executeToolCalls(ctx context.Context, response *GoogleRes
 		}
 		toolResultParts = append(toolResultParts, resultPart)
 	}
-	
+
 	// Google GenAI requires all function responses for a turn in one message
 	if len(toolResultParts) > 0 {
 		content := genai.NewContentFromParts(toolResultParts, genai.RoleUser)
@@ -921,7 +921,7 @@ func (t *GoogleThread) convertToStandardMessages() []llmtypes.Message {
 				if content.Role == genai.RoleUser {
 					role = "user"
 				}
-				
+
 				if part.Thought {
 					continue
 				}
@@ -960,7 +960,7 @@ func (t *GoogleThread) NewSubAgent(ctx context.Context, config llmtypes.Config) 
 		backend:                t.backend, // Reuse parent's backend
 		usage:                  t.usage,   // Share usage tracking with parent
 		conversationID:         convtypes.GenerateID(),
-		isPersisted:            false,                    // subagent is not persisted
+		isPersisted:            false, // subagent is not persisted
 		toolResults:            make(map[string]tooltypes.StructuredToolResult),
 		subagentContextFactory: t.subagentContextFactory, // Propagate the injected function
 		thinkingBudget:         t.thinkingBudget,         // Use same thinking budget
@@ -1295,7 +1295,7 @@ func (t *GoogleThread) updateUsage(metadata *genai.UsageMetadata) {
 	if t.usage.MaxContextWindow == 0 {
 		t.usage.MaxContextWindow = getContextWindow(t.config.Model)
 	}
-	
+
 	t.usage.CurrentContextWindow = t.usage.InputTokens + t.usage.OutputTokens + t.usage.CacheReadInputTokens
 }
 

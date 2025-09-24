@@ -71,8 +71,8 @@ type CustomPricing map[string]ModelPricing
 type GoogleConfig struct {
 	Backend        string `mapstructure:"backend" json:"backend" yaml:"backend"`                         // Backend to use: "gemini" or "vertexai" (auto-detected if not specified)
 	APIKey         string `mapstructure:"api_key" json:"api_key" yaml:"api_key"`                         // API key for Gemini API
-	Project        string `mapstructure:"project" json:"project" yaml:"project"`                        // Google Cloud project ID for Vertex AI
-	Location       string `mapstructure:"location" json:"location" yaml:"location"`                     // Google Cloud region for Vertex AI (e.g., "us-central1")
+	Project        string `mapstructure:"project" json:"project" yaml:"project"`                         // Google Cloud project ID for Vertex AI
+	Location       string `mapstructure:"location" json:"location" yaml:"location"`                      // Google Cloud region for Vertex AI (e.g., "us-central1")
 	ThinkingBudget int32  `mapstructure:"thinking_budget" json:"thinking_budget" yaml:"thinking_budget"` // Token budget for thinking capability
 }
 

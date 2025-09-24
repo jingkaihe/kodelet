@@ -22,10 +22,10 @@ type ModelPricing struct {
 var ModelPricingMap = map[string]ModelPricing{
 	// Gemini 2.5 Pro - Tiered pricing based on input tokens
 	"gemini-2.5-pro": {
-		Input:             0.00125,  // $1.25 per 1M tokens (<=200K input)
-		InputHigh:         0.0025,   // $2.50 per 1M tokens (>200K input)
-		Output:            0.01,     // $10 per 1M tokens (<=200K input)
-		OutputHigh:        0.015,    // $15 per 1M tokens (>200K input)
+		Input:             0.00125,   // $1.25 per 1M tokens (<=200K input)
+		InputHigh:         0.0025,    // $2.50 per 1M tokens (>200K input)
+		Output:            0.01,      // $10 per 1M tokens (<=200K input)
+		OutputHigh:        0.015,     // $15 per 1M tokens (>200K input)
 		ContextWindow:     2_097_152, // 2M tokens
 		HasThinking:       true,
 		TieredPricing:     true,
@@ -34,9 +34,9 @@ var ModelPricingMap = map[string]ModelPricing{
 
 	// Gemini 2.5 Flash - Standard multi-modal model
 	"gemini-2.5-flash": {
-		Input:         0.0003,   // $0.30 per 1M tokens (text, image, video)
-		AudioInput:    0.001,    // $1 per 1M tokens (audio)
-		Output:        0.0025,   // $2.50 per 1M tokens
+		Input:         0.0003,    // $0.30 per 1M tokens (text, image, video)
+		AudioInput:    0.001,     // $1 per 1M tokens (audio)
+		Output:        0.0025,    // $2.50 per 1M tokens
 		ContextWindow: 1_048_576, // 1M tokens
 		HasThinking:   false,
 		TieredPricing: false,
@@ -44,9 +44,9 @@ var ModelPricingMap = map[string]ModelPricing{
 
 	// Gemini 2.5 Flash Lite - Lightweight model
 	"gemini-2.5-flash-lite": {
-		Input:         0.0001,   // $0.10 per 1M tokens (text, image, video)
-		AudioInput:    0.0003,   // $0.30 per 1M tokens (audio)
-		Output:        0.0004,   // $0.40 per 1M tokens
+		Input:         0.0001,    // $0.10 per 1M tokens (text, image, video)
+		AudioInput:    0.0003,    // $0.30 per 1M tokens (audio)
+		Output:        0.0004,    // $0.40 per 1M tokens
 		ContextWindow: 1_048_576, // 1M tokens
 		HasThinking:   false,
 		TieredPricing: false,
