@@ -59,6 +59,11 @@ func TestNewGoogleThread(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			if tt.config.Google != nil && tt.config.Google.Backend == "gemini" && os.Getenv("GOOGLE_API_KEY") == "" {
+				t.Skip("Skipping Gemini backend test; GOOGLE_API_KEY not set in environment")
+				return
+			}
+
 			thread, err := NewGoogleThread(tt.config, nil)
 
 			if tt.expectErr {
@@ -417,18 +422,18 @@ func TestProcessImageFile(t *testing.T) {
 	}
 
 	testImagePath := filepath.Join(tempDir, "test.png")
-	err = os.WriteFile(testImagePath, pngData, 0644)
+	err = os.WriteFile(testImagePath, pngData, 0o644)
 	require.NoError(t, err)
 
 	// Create a large test file (exceeds MaxImageFileSize)
 	largeFilePath := filepath.Join(tempDir, "large.png")
 	largeData := make([]byte, MaxImageFileSize+1)
-	err = os.WriteFile(largeFilePath, largeData, 0644)
+	err = os.WriteFile(largeFilePath, largeData, 0o644)
 	require.NoError(t, err)
 
 	// Create a file with unsupported extension
 	unsupportedPath := filepath.Join(tempDir, "test.bmp")
-	err = os.WriteFile(unsupportedPath, pngData, 0644)
+	err = os.WriteFile(unsupportedPath, pngData, 0o644)
 	require.NoError(t, err)
 
 	tests := []struct {
@@ -477,7 +482,7 @@ func TestGoogleThread_AddUserMessageComprehensive(t *testing.T) {
 	}
 
 	testImagePath := filepath.Join(tempDir, "test.png")
-	err = os.WriteFile(testImagePath, pngData, 0644)
+	err = os.WriteFile(testImagePath, pngData, 0o644)
 	require.NoError(t, err)
 
 	tests := []struct {
