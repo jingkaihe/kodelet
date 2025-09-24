@@ -168,7 +168,7 @@ func TestSendMessageAndGetText(t *testing.T) {
 			MaxTokens: 100,
 		},
 		true,
-		llmtypes.MessageOpt{},
+		llmtypes.MessageOpt{NoSaveConversation: true},
 	)
 
 	// Verify we got a non-error response
