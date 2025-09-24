@@ -20,34 +20,29 @@ import (
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
-// ConversationStore is an alias for the conversations.ConversationStore interface
-// to avoid direct dependency on the conversations package
 type ConversationStore = conversations.ConversationStore
 
-// Constants for image processing
 const (
-	MaxImageFileSize = 5 * 1024 * 1024 // 5MB limit
-	MaxImageCount    = 10              // Maximum 10 images per message
+	MaxImageFileSize = 5 * 1024 * 1024
+	MaxImageCount    = 10
 )
 
-// GoogleThread implements the Thread interface using Google's GenAI API
 type GoogleThread struct {
 	client                 *genai.Client
 	config                 llmtypes.Config
-	backend                string                         // "gemini" or "vertexai"
+	backend                string
 	state                  tooltypes.State
-	messages               []*genai.Content               // Google's message format
+	messages               []*genai.Content
 	usage                  *llmtypes.Usage
 	conversationID         string
 	isPersisted            bool
 	store                  ConversationStore
-	thinkingBudget         int32                          // Token budget for thinking
-	toolResults            map[string]tooltypes.StructuredToolResult // For structured tool storage
-	subagentContextFactory llmtypes.SubagentContextFactory // Cross-provider subagent support
+	thinkingBudget         int32
+	toolResults            map[string]tooltypes.StructuredToolResult
+	subagentContextFactory llmtypes.SubagentContextFactory
 	mu                     sync.Mutex
 }
 
-// GoogleResponse represents a response from Google GenAI
 type GoogleResponse struct {
 	Text         string
 	ThinkingText string
@@ -55,19 +50,15 @@ type GoogleResponse struct {
 	Usage        *genai.UsageMetadata
 }
 
-// GoogleToolCall represents a tool call in Google's format
 type GoogleToolCall struct {
 	ID   string
 	Name string
 	Args map[string]interface{}
 }
 
-// Provider returns the provider name for this thread
 func (t *GoogleThread) Provider() string {
 	return "google"
 }
-
-// NewGoogleThread creates a new thread with Google's GenAI API
 func NewGoogleThread(config llmtypes.Config, subagentContextFactory llmtypes.SubagentContextFactory) (*GoogleThread, error) {
 	// Create a copy of the config to avoid modifying the original
 	configCopy := config
@@ -127,46 +118,37 @@ func NewGoogleThread(config llmtypes.Config, subagentContextFactory llmtypes.Sub
 	}, nil
 }
 
-// SetState sets the state for the thread
 func (t *GoogleThread) SetState(s tooltypes.State) {
 	t.state = s
 }
 
-// GetState returns the current state of the thread
 func (t *GoogleThread) GetState() tooltypes.State {
 	return t.state
 }
 
-// GetConfig returns the configuration of the thread
 func (t *GoogleThread) GetConfig() llmtypes.Config {
 	return t.config
 }
 
-// GetUsage returns the current token usage for the thread
 func (t *GoogleThread) GetUsage() llmtypes.Usage {
 	return *t.usage
 }
 
-// GetConversationID returns the current conversation ID
 func (t *GoogleThread) GetConversationID() string {
 	return t.conversationID
 }
 
-// SetConversationID sets the conversation ID
 func (t *GoogleThread) SetConversationID(id string) {
 	t.conversationID = id
 }
 
-// IsPersisted returns whether this thread is being persisted
 func (t *GoogleThread) IsPersisted() bool {
 	return t.isPersisted
 }
 
-// EnablePersistence enables conversation persistence for this thread
 func (t *GoogleThread) EnablePersistence(ctx context.Context, enabled bool) {
 	t.isPersisted = enabled
 
-	// Initialize the store if enabling persistence and it's not already initialized
 	if enabled && t.store == nil {
 		store, err := conversations.GetConversationStore(ctx)
 		if err != nil {
@@ -179,17 +161,14 @@ func (t *GoogleThread) EnablePersistence(ctx context.Context, enabled bool) {
 	}
 }
 
-// AddUserMessage adds a user message with optional images to the thread
 func (t *GoogleThread) AddUserMessage(ctx context.Context, message string, imagePaths ...string) {
 	var parts []*genai.Part
 
-	// Validate image count
 	if len(imagePaths) > MaxImageCount {
 		logger.G(ctx).Warnf("Too many images provided (%d), maximum is %d. Only processing first %d images", len(imagePaths), MaxImageCount, MaxImageCount)
 		imagePaths = imagePaths[:MaxImageCount]
 	}
 
-	// Process images and add them as parts
 	for _, imagePath := range imagePaths {
 		imagePart, err := t.processImage(imagePath)
 		if err != nil {
@@ -199,10 +178,8 @@ func (t *GoogleThread) AddUserMessage(ctx context.Context, message string, image
 		parts = append(parts, imagePart)
 	}
 
-	// Add text part
 	parts = append(parts, genai.NewPartFromText(message))
 
-	// Create content and add to messages
 	content := genai.NewContentFromParts(parts, genai.RoleUser)
 	t.messages = append(t.messages, content)
 }
@@ -212,17 +189,14 @@ func (t *GoogleThread) SendMessage(ctx context.Context, message string, handler 
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	// Check for pending feedback (following existing pattern)
 	if !t.config.IsSubAgent && t.conversationID != "" {
 		if err := t.processPendingFeedback(ctx); err != nil {
 			return "", errors.Wrap(err, "failed to process pending feedback")
 		}
 	}
 
-	// Add user message to history
 	t.AddUserMessage(ctx, message, opt.Images...)
 
-	// Auto-compaction check (following existing pattern)
 	if !opt.DisableAutoCompact && t.shouldAutoCompact(opt.CompactRatio) {
 		if err := t.CompactContext(ctx); err != nil {
 			return "", errors.Wrap(err, "failed to compact context")
@@ -231,12 +205,11 @@ func (t *GoogleThread) SendMessage(ctx context.Context, message string, handler 
 
 	maxTurns := opt.MaxTurns
 	if maxTurns == 0 {
-		maxTurns = 10 // Default max turns
+		maxTurns = 10
 	}
 
 	var finalOutput strings.Builder
 
-	// Message exchange loop (similar to existing providers)
 	for turn := 0; turn < maxTurns; turn++ {
 		response, err := t.processMessageExchange(ctx, handler, opt)
 		if err != nil {
@@ -245,21 +218,17 @@ func (t *GoogleThread) SendMessage(ctx context.Context, message string, handler 
 
 		finalOutput.WriteString(response.Text)
 
-		// Update usage tracking
 		t.updateUsage(response.Usage)
 
-		// Check if we need another turn (tool calls present)
 		if !t.hasToolCalls(response) {
 			break
 		}
 
-		// Execute tools and add results
 		t.executeToolCalls(ctx, response, handler, opt)
 	}
 
 	handler.HandleDone()
 
-	// Save conversation if enabled
 	if !opt.NoSaveConversation && t.isPersisted {
 		if err := t.SaveConversation(ctx, false); err != nil {
 			return "", errors.Wrap(err, "failed to save conversation")
@@ -269,21 +238,16 @@ func (t *GoogleThread) SendMessage(ctx context.Context, message string, handler 
 	return finalOutput.String(), nil
 }
 
-// isRetryableError determines if an error should trigger a retry
 func isRetryableError(err error) bool {
 	if err == nil {
 		return false
 	}
 
-	// Don't retry context cancellations
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return false
 	}
-
-	// Retry on network errors and specific Google API errors
 	errStr := err.Error()
 	
-	// Common retryable patterns
 	retryablePatterns := []string{
 		"connection refused",
 		"connection reset",
@@ -305,11 +269,9 @@ func isRetryableError(err error) bool {
 	return false
 }
 
-// executeWithRetry executes a function with retry logic
 func (t *GoogleThread) executeWithRetry(ctx context.Context, operation func() error) error {
 	retryConfig := t.config.Retry
 	if retryConfig.Attempts == 0 {
-		// If no retry config, just execute once
 		return operation()
 	}
 
@@ -353,13 +315,10 @@ func (t *GoogleThread) executeWithRetry(ctx context.Context, operation func() er
 	return nil
 }
 
-// GetMessages returns the messages from the thread
 func (t *GoogleThread) GetMessages() ([]llmtypes.Message, error) {
-	// Convert Google Content format back to llmtypes.Message
 	return t.convertToStandardMessages(), nil
 }
 
-// NewSubAgent creates a new subagent thread with the given configuration
 func (t *GoogleThread) NewSubAgent(ctx context.Context, config llmtypes.Config) llmtypes.Thread {
 	subagentThread, err := NewGoogleThread(config, t.subagentContextFactory)
 	if err != nil {
@@ -370,27 +329,14 @@ func (t *GoogleThread) NewSubAgent(ctx context.Context, config llmtypes.Config) 
 	return subagentThread
 }
 
-// SaveConversation is implemented in persistence.go
-
-// SetStructuredToolResult stores structured tool results for persistence
 func (t *GoogleThread) SetStructuredToolResult(toolCallID string, result tooltypes.StructuredToolResult) {
 	t.toolResults[toolCallID] = result
 }
 
-// GetStructuredToolResults returns all structured tool results
 func (t *GoogleThread) GetStructuredToolResults() map[string]tooltypes.StructuredToolResult {
 	return t.toolResults
 }
 
-// Helper functions implemented in other files:
-// - processImage: streaming.go
-// - processPendingFeedback: persistence.go  
-// - processMessageExchange: streaming.go
-// - executeToolCalls: tools.go
-// - convertToStandardMessages: streaming.go
-// - CompactContext: persistence.go
-
-// shouldAutoCompact checks if auto-compaction should be triggered
 func (t *GoogleThread) shouldAutoCompact(compactRatio float64) bool {
 	if t.usage.MaxContextWindow == 0 {
 		return false
@@ -398,10 +344,4 @@ func (t *GoogleThread) shouldAutoCompact(compactRatio float64) bool {
 	utilizationRatio := float64(t.usage.CurrentContextWindow) / float64(t.usage.MaxContextWindow)
 	return utilizationRatio >= compactRatio
 }
-
-// updateUsage is implemented in models.go
-
-
-
-// ExtractMessages is implemented in persistence.go
 

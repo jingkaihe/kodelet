@@ -1,5 +1,3 @@
-// Package google provides streaming response handling and message conversion
-// for Google GenAI integration.
 package google
 
 import (
@@ -17,22 +15,18 @@ import (
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
 
-// processMessageExchange handles the core message exchange with Google GenAI
 func (t *GoogleThread) processMessageExchange(ctx context.Context, handler llmtypes.MessageHandler, opt llmtypes.MessageOpt) (*GoogleResponse, error) {
-	// Build the generation config
 	config := &genai.GenerateContentConfig{
-		Temperature:     genai.Ptr(float32(1.0)), // Default temperature for Google GenAI
+		Temperature:     genai.Ptr(float32(1.0)),
 		MaxOutputTokens: int32(t.config.MaxTokens),
 		Tools:          toGoogleTools(t.tools(opt)),
 	}
 
-	// Get model name (weak model override)
 	modelName := t.config.Model
 	if opt.UseWeakModel && t.config.WeakModel != "" {
 		modelName = t.config.WeakModel
 	}
 
-	// Enable thinking if supported and model supports it
 	if t.supportsThinking(modelName) && !opt.UseWeakModel {
 		config.ThinkingConfig = &genai.ThinkingConfig{
 			IncludeThoughts: true,
@@ -40,17 +34,12 @@ func (t *GoogleThread) processMessageExchange(ctx context.Context, handler llmty
 		}
 	}
 
-	// Build the prompt from messages
 	prompt := t.buildPrompt()
 
 	response := &GoogleResponse{}
 
-	// Execute streaming with retry logic
 	err := t.executeWithRetry(ctx, func() error {
-		// Reset response for retry attempts
 		response = &GoogleResponse{}
-		
-		// Use streaming generation
 		for chunk, err := range t.client.Models.GenerateContentStream(ctx, modelName, prompt, config) {
 			if err != nil {
 				return errors.Wrap(err, "streaming failed")
@@ -72,12 +61,10 @@ func (t *GoogleThread) processMessageExchange(ctx context.Context, handler llmty
 				}
 			}
 
-			// Update usage from chunk (the types are different but compatible)
 			if chunk.UsageMetadata != nil {
-				// Convert the usage metadata type
 				response.Usage = &genai.UsageMetadata{
 					PromptTokenCount:        chunk.UsageMetadata.PromptTokenCount,
-					ResponseTokenCount:      chunk.UsageMetadata.CandidatesTokenCount, // Note: different field name
+					ResponseTokenCount:      chunk.UsageMetadata.CandidatesTokenCount, // Different field name
 					CachedContentTokenCount: chunk.UsageMetadata.CachedContentTokenCount,
 					TotalTokenCount:         chunk.UsageMetadata.TotalTokenCount,
 				}
@@ -90,13 +77,11 @@ func (t *GoogleThread) processMessageExchange(ctx context.Context, handler llmty
 		return nil, err
 	}
 
-	// Add assistant message to history
 	t.addAssistantMessage(response)
 
 	return response, nil
 }
 
-// processPart processes individual parts of a Google GenAI response
 func (t *GoogleThread) processPart(part *genai.Part, response *GoogleResponse, handler llmtypes.MessageHandler) error {
 	switch {
 	case part.Text != "":
@@ -116,7 +101,6 @@ func (t *GoogleThread) processPart(part *genai.Part, response *GoogleResponse, h
 		}
 		response.ToolCalls = append(response.ToolCalls, toolCall)
 		
-		// Convert arguments to JSON for handler
 		argsJSON, err := json.Marshal(toolCall.Args)
 		if err != nil {
 			return errors.Wrap(err, "failed to marshal tool arguments")
@@ -124,7 +108,6 @@ func (t *GoogleThread) processPart(part *genai.Part, response *GoogleResponse, h
 		handler.HandleToolUse(toolCall.Name, string(argsJSON))
 
 	case part.CodeExecutionResult != nil:
-		// Handle Google's built-in code execution results
 		result := fmt.Sprintf("Code execution result:\n%s", part.CodeExecutionResult.Output)
 		if part.CodeExecutionResult.Outcome == genai.OutcomeUnspecified {
 			result += "\nOutcome: Unspecified"
@@ -133,25 +116,20 @@ func (t *GoogleThread) processPart(part *genai.Part, response *GoogleResponse, h
 		response.Text += result
 
 	default:
-		// Handle any other part types that might be added in the future
 		logger.G(context.Background()).Debug("Unhandled part type in Google response")
 	}
 
 	return nil
 }
 
-// buildPrompt builds the prompt content from the current message history
 func (t *GoogleThread) buildPrompt() []*genai.Content {
-	// For now, return the current messages
-	// In a full implementation, this might include system messages, etc.
+	// TODO: system messages support
 	return t.messages
 }
 
-// addAssistantMessage adds the assistant's response to the message history
 func (t *GoogleThread) addAssistantMessage(response *GoogleResponse) {
 	var parts []*genai.Part
 
-	// Add thinking content if present
 	if response.ThinkingText != "" {
 		parts = append(parts, &genai.Part{
 			Text:    response.ThinkingText,
@@ -159,12 +137,10 @@ func (t *GoogleThread) addAssistantMessage(response *GoogleResponse) {
 		})
 	}
 
-	// Add regular text content
 	if response.Text != "" {
 		parts = append(parts, genai.NewPartFromText(response.Text))
 	}
 
-	// Add tool calls
 	for _, toolCall := range response.ToolCalls {
 		parts = append(parts, &genai.Part{
 			FunctionCall: &genai.FunctionCall{
@@ -180,11 +156,9 @@ func (t *GoogleThread) addAssistantMessage(response *GoogleResponse) {
 	}
 }
 
-// supportsThinking checks if the given model supports thinking capability
 func (t *GoogleThread) supportsThinking(modelName string) bool {
 	pricing, exists := ModelPricingMap[modelName]
 	if !exists {
-		// Try to find a match with different casing or partial match
 		for key, value := range ModelPricingMap {
 			if strings.Contains(strings.ToLower(modelName), strings.ToLower(key)) {
 				return value.HasThinking
@@ -195,38 +169,28 @@ func (t *GoogleThread) supportsThinking(modelName string) bool {
 	return pricing.HasThinking
 }
 
-// processImage processes an image path and returns a Google Part
 func (t *GoogleThread) processImage(imagePath string) (*genai.Part, error) {
-	// Check if it's a URL or file path
 	if strings.HasPrefix(imagePath, "http://") || strings.HasPrefix(imagePath, "https://") {
-		// For URLs, we would need to download the image first
-		// For now, return an error for URLs
 		return nil, errors.New("URL images not supported yet")
 	}
-
-	// Handle file path
 	imageData, err := os.ReadFile(imagePath)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to read image file: %s", imagePath)
 	}
 
-	// Check file size
 	if len(imageData) > MaxImageFileSize {
 		return nil, errors.Errorf("image file %s is too large (%d bytes), maximum is %d bytes", 
 			imagePath, len(imageData), MaxImageFileSize)
 	}
 
-	// Determine MIME type from file extension
 	mimeType := getMimeTypeFromExtension(filepath.Ext(imagePath))
 	if mimeType == "" {
 		return nil, errors.Errorf("unsupported image format for file: %s", imagePath)
 	}
 
-	// Create image part
 	return genai.NewPartFromBytes(imageData, mimeType), nil
 }
 
-// getMimeTypeFromExtension returns the MIME type for common image extensions
 func getMimeTypeFromExtension(ext string) string {
 	switch strings.ToLower(ext) {
 	case ".jpg", ".jpeg":
@@ -242,7 +206,6 @@ func getMimeTypeFromExtension(ext string) string {
 	}
 }
 
-// convertToStandardMessages converts Google Content format to standard Message format
 func (t *GoogleThread) convertToStandardMessages() []llmtypes.Message {
 	var messages []llmtypes.Message
 
@@ -255,7 +218,6 @@ func (t *GoogleThread) convertToStandardMessages() []llmtypes.Message {
 					role = "user"
 				}
 				
-				// Skip thinking content in standard messages
 				if part.Thought {
 					continue
 				}
@@ -266,7 +228,6 @@ func (t *GoogleThread) convertToStandardMessages() []llmtypes.Message {
 				})
 
 			case part.FunctionCall != nil:
-				// Convert tool calls to readable format
 				argsJSON, _ := json.Marshal(part.FunctionCall.Args)
 				messages = append(messages, llmtypes.Message{
 					Role:    "assistant",
@@ -274,7 +235,6 @@ func (t *GoogleThread) convertToStandardMessages() []llmtypes.Message {
 				})
 
 			case part.FunctionResponse != nil:
-				// Convert tool results to readable format
 				resultJSON, _ := json.Marshal(part.FunctionResponse.Response)
 				messages = append(messages, llmtypes.Message{
 					Role:    "user",

@@ -1,4 +1,3 @@
-// Package google provides model pricing and configuration for Google GenAI integration.
 package google
 
 import (
@@ -7,17 +6,16 @@ import (
 	"google.golang.org/genai"
 )
 
-// ModelPricing holds pricing information for Google GenAI models
 type ModelPricing struct {
-	Input             float64 // Per token cost for input
-	InputHigh         float64 // Per token cost for input >200K tokens (Pro only)
-	Output            float64 // Per token cost for output
-	OutputHigh        float64 // Per token cost for output >200K tokens (Pro only)
-	AudioInput        float64 // Per token cost for audio input (Flash/Flash Lite)
-	ContextWindow     int     // Maximum context window size
-	HasThinking       bool    // Supports thinking capability
-	TieredPricing     bool    // Has different pricing tiers
-	HighTierThreshold int     // Token threshold for high tier pricing
+	Input             float64
+	InputHigh         float64
+	Output            float64
+	OutputHigh        float64
+	AudioInput        float64
+	ContextWindow     int
+	HasThinking       bool
+	TieredPricing     bool
+	HighTierThreshold int
 }
 
 // ModelPricingMap contains pricing information for Google GenAI models
@@ -120,51 +118,39 @@ func calculateCost(modelName string, inputTokens, outputTokens int, hasAudio boo
 	return inputCost, outputCost
 }
 
-// getContextWindow returns the context window size for the given model
 func getContextWindow(modelName string) int {
 	pricing, exists := ModelPricingMap[modelName]
 	if !exists {
-		// Try to find a match with different casing or partial match
 		for key, value := range ModelPricingMap {
 			if strings.Contains(strings.ToLower(modelName), strings.ToLower(key)) {
 				return value.ContextWindow
 			}
 		}
-		// Default context window if model not found
-		return 1_048_576 // 1M tokens default
+		return 1_048_576
 	}
 	return pricing.ContextWindow
 }
-
-// Additional model utility functions will be added as needed
-
-// updateUsageFromMetadata updates the usage tracking from Google's usage metadata
 func (t *GoogleThread) updateUsage(metadata *genai.UsageMetadata) {
 	if metadata == nil {
 		return
 	}
 
-	// Convert Google's usage metadata to our usage format
 	inputTokens := int(metadata.PromptTokenCount)
 	outputTokens := int(metadata.ResponseTokenCount)
 	cacheReadTokens := int(metadata.CachedContentTokenCount)
 
-	// Calculate costs
 	hasAudio := false // TODO: Detect if audio was used in the request
 	inputCost, outputCost := calculateCost(t.config.Model, inputTokens, outputTokens, hasAudio)
 
-	// Update usage tracking
 	t.usage.InputTokens += inputTokens
 	t.usage.OutputTokens += outputTokens
 	t.usage.CacheReadInputTokens += cacheReadTokens
 	t.usage.InputCost += inputCost
 	t.usage.OutputCost += outputCost
 
-	// Update context window tracking
 	if t.usage.MaxContextWindow == 0 {
 		t.usage.MaxContextWindow = getContextWindow(t.config.Model)
 	}
 	
-	// Estimate current context window (this is approximate)
 	t.usage.CurrentContextWindow = t.usage.InputTokens + t.usage.OutputTokens + t.usage.CacheReadInputTokens
 }

@@ -1,5 +1,3 @@
-// Package google provides authentication and backend detection utilities
-// for Google GenAI integration supporting both Vertex AI and Gemini API.
 package google
 
 import (
@@ -9,7 +7,6 @@ import (
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
 
-// detectBackend determines which backend to use based on config and environment
 func detectBackend(config llmtypes.Config) string {
 	// 1. Explicit configuration takes precedence
 	if config.Google != nil && config.Google.Backend != "" {
@@ -68,6 +65,3 @@ func detectBackend(config llmtypes.Config) string {
 	// Default to Gemini API if no clear indicators
 	return "gemini"
 }
-
-// These helper functions will be added back when we implement
-// the full authentication and validation logic

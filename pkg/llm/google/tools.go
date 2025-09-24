@@ -1,5 +1,3 @@
-// Package google provides tool conversion and execution utilities
-// for Google GenAI integration.
 package google
 
 import (
@@ -20,14 +18,12 @@ import (
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
-// toGoogleTools converts kodelet's tools to Google's function declaration format
 func toGoogleTools(tools []tooltypes.Tool) []*genai.Tool {
 	if len(tools) == 0 {
 		return nil
 	}
 
-	// Google GenAI expects all function declarations to be grouped under a single Tool
-	// This is different from OpenAI which expects separate tools for each function
+	// Google GenAI expects all function declarations grouped under a single Tool
 	var functionDeclarations []*genai.FunctionDeclaration
 	for _, tool := range tools {
 		schema := convertToGoogleSchema(tool.GenerateSchema())
@@ -38,13 +34,10 @@ func toGoogleTools(tools []tooltypes.Tool) []*genai.Tool {
 		})
 	}
 
-	// Return a single Tool containing all function declarations
 	return []*genai.Tool{{
 		FunctionDeclarations: functionDeclarations,
 	}}
 }
-
-// convertToGoogleSchema converts a tool schema to Google's schema format
 func convertToGoogleSchema(schema *jsonschema.Schema) *genai.Schema {
 	googleSchema := &genai.Schema{
 		Type: convertSchemaType(schema.Type),
@@ -54,11 +47,8 @@ func convertToGoogleSchema(schema *jsonschema.Schema) *genai.Schema {
 		googleSchema.Description = schema.Description
 	}
 
-	// Handle schema properties properly
 	if schema.Properties != nil {
 		googleSchema.Properties = make(map[string]*genai.Schema)
-		// jsonschema.Properties is an *orderedmap.OrderedMap
-		// Iterate through the ordered map properly
 		for pair := schema.Properties.Oldest(); pair != nil; pair = pair.Next() {
 			propName := pair.Key
 			propSchema := pair.Value
@@ -77,7 +67,6 @@ func convertToGoogleSchema(schema *jsonschema.Schema) *genai.Schema {
 	return googleSchema
 }
 
-// convertSchemaType converts schema type strings to Google's type enum
 func convertSchemaType(schemaType string) genai.Type {
 	switch strings.ToLower(schemaType) {
 	case "string":
@@ -93,52 +82,41 @@ func convertSchemaType(schemaType string) genai.Type {
 	case "object":
 		return genai.TypeObject
 	default:
-		return genai.TypeString // Default fallback
+		return genai.TypeString
 	}
 }
 
-// generateToolCallID generates a unique tool call ID
 func generateToolCallID() string {
-	// Generate a random 8-byte hex string for unique tool call IDs
 	bytes := make([]byte, 8)
 	if _, err := rand.Read(bytes); err != nil {
-		// Fallback to timestamp-based ID if random generation fails
 		return fmt.Sprintf("call_%d", len(fmt.Sprintf("%d", 1000000)))
 	}
 	return fmt.Sprintf("call_%s", hex.EncodeToString(bytes))
 }
 
-// executeToolCalls executes tool calls and handles tool results
 func (t *GoogleThread) executeToolCalls(ctx context.Context, response *GoogleResponse, handler llmtypes.MessageHandler, opt llmtypes.MessageOpt) {
 	var toolResultParts []*genai.Part
 	
 	for _, toolCall := range response.ToolCalls {
 		logger.G(ctx).WithField("tool", toolCall.Name).Debug("Executing tool call")
 
-		// Create subagent context (cross-provider support)
 		runToolCtx := t.subagentContextFactory(ctx, t, handler, opt.CompactRatio, opt.DisableAutoCompact)
 
-		// Convert arguments to JSON string
 		argsJSON, err := json.Marshal(toolCall.Args)
 		if err != nil {
 			logger.G(ctx).WithError(err).Error("Failed to marshal tool arguments")
 			continue
 		}
 
-		// Execute tool
 		output := tools.RunTool(runToolCtx, t.state, toolCall.Name, string(argsJSON))
 
-		// Use renderer registry for consistent output (following existing pattern)
 		structuredResult := output.StructuredData()
 		registry := renderers.NewRendererRegistry()
 		renderedOutput := registry.Render(structuredResult)
 
 		handler.HandleToolResult(toolCall.Name, renderedOutput)
 
-		// Store structured results for persistence
 		t.toolResults[toolCall.ID] = structuredResult
-
-		// Collect tool result part for batch addition
 		resultPart := &genai.Part{
 			FunctionResponse: &genai.FunctionResponse{
 				Name: toolCall.Name,
@@ -152,20 +130,17 @@ func (t *GoogleThread) executeToolCalls(ctx context.Context, response *GoogleRes
 		toolResultParts = append(toolResultParts, resultPart)
 	}
 	
-	// Add all tool results as a single user message
-	// This is required by Google GenAI - all function responses for a turn must be in one message
+	// Google GenAI requires all function responses for a turn in one message
 	if len(toolResultParts) > 0 {
 		content := genai.NewContentFromParts(toolResultParts, genai.RoleUser)
 		t.messages = append(t.messages, content)
 	}
 }
 
-// hasToolCalls checks if a response contains tool calls
 func (t *GoogleThread) hasToolCalls(response *GoogleResponse) bool {
 	return len(response.ToolCalls) > 0
 }
 
-// tools returns the tools available for this thread
 func (t *GoogleThread) tools(opt llmtypes.MessageOpt) []tooltypes.Tool {
 	if opt.NoToolUse {
 		return []tooltypes.Tool{}
