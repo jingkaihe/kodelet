@@ -2,10 +2,9 @@ package google
 
 import (
 	"strings"
-
-	"google.golang.org/genai"
 )
 
+// ModelPricing holds the per-token pricing for different operations
 type ModelPricing struct {
 	Input             float64
 	InputHigh         float64
@@ -118,6 +117,7 @@ func calculateCost(modelName string, inputTokens, outputTokens int, hasAudio boo
 	return inputCost, outputCost
 }
 
+// getContextWindow returns the context window size for a given model
 func getContextWindow(modelName string) int {
 	pricing, exists := ModelPricingMap[modelName]
 	if !exists {
@@ -126,31 +126,7 @@ func getContextWindow(modelName string) int {
 				return value.ContextWindow
 			}
 		}
-		return 1_048_576
+		return 1_048_576 // Default to 1M tokens
 	}
 	return pricing.ContextWindow
-}
-func (t *GoogleThread) updateUsage(metadata *genai.UsageMetadata) {
-	if metadata == nil {
-		return
-	}
-
-	inputTokens := int(metadata.PromptTokenCount)
-	outputTokens := int(metadata.ResponseTokenCount)
-	cacheReadTokens := int(metadata.CachedContentTokenCount)
-
-	hasAudio := false // TODO: Detect if audio was used in the request
-	inputCost, outputCost := calculateCost(t.config.Model, inputTokens, outputTokens, hasAudio)
-
-	t.usage.InputTokens += inputTokens
-	t.usage.OutputTokens += outputTokens
-	t.usage.CacheReadInputTokens += cacheReadTokens
-	t.usage.InputCost += inputCost
-	t.usage.OutputCost += outputCost
-
-	if t.usage.MaxContextWindow == 0 {
-		t.usage.MaxContextWindow = getContextWindow(t.config.Model)
-	}
-	
-	t.usage.CurrentContextWindow = t.usage.InputTokens + t.usage.OutputTokens + t.usage.CacheReadInputTokens
 }
