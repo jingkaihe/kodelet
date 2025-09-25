@@ -11,6 +11,7 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/jingkaihe/kodelet/pkg/llm/anthropic"
+	"github.com/jingkaihe/kodelet/pkg/llm/google"
 	"github.com/jingkaihe/kodelet/pkg/llm/openai"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/tools"
@@ -47,6 +48,8 @@ func NewThread(config llmtypes.Config) (llmtypes.Thread, error) {
 		return openai.NewOpenAIThread(config, NewSubagentContext)
 	case "anthropic":
 		return anthropic.NewAnthropicThread(config, NewSubagentContext)
+	case "google":
+		return google.NewGoogleThread(config, NewSubagentContext)
 	default:
 		return nil, errors.Errorf("unsupported provider: %s", config.Provider)
 	}
@@ -81,6 +84,9 @@ func NewSubagentThread(ctx context.Context, parentThread llmtypes.Thread, state 
 			}
 			if subConfig.OpenAI != nil {
 				newConfig.OpenAI = subConfig.OpenAI
+			}
+			if subConfig.Google != nil {
+				newConfig.Google = subConfig.Google
 			}
 			newConfig.AllowedTools = subConfig.AllowedTools
 
@@ -172,6 +178,8 @@ func ExtractMessages(provider string, rawMessages []byte, toolResults map[string
 		return anthropic.ExtractMessages(rawMessages, toolResults)
 	case "openai":
 		return openai.ExtractMessages(rawMessages, toolResults)
+	case "google":
+		return google.ExtractMessages(rawMessages, toolResults)
 	default:
 		return nil, errors.Errorf("unsupported provider: %s", provider)
 	}

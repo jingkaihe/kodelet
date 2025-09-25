@@ -1,5 +1,21 @@
 # Kodelet
 
+## 0.0.99.alpha (2025-09-24)
+
+### Features
+
+**Google GenAI Integration**: Complete support for Google's Gemini and Vertex AI models as a third LLM provider option alongside Anthropic Claude and OpenAI
+- **Dual Backend Support**: Seamless integration with both Gemini API (developer-focused) and Vertex AI (enterprise-grade) with automatic backend detection
+- **Thinking Capability**: Native support for Google's thinking feature in compatible models (Gemini 2.5 Pro)
+- **Tiered Pricing Model**: Intelligent cost calculation supporting Google's complex tiered pricing structure for accurate usage tracking
+- **Model Selection**: Support for Gemini 2.5 Pro, Gemini 2.5 Flash, and Gemini 2.5 Flash Lite with appropriate default configurations
+- **Thread Interface Compliance**: Full implementation of kodelet's Thread interface including conversation persistence, auto-compaction, and subagent creation
+
+
+### CI/Build
+
+- **GCP Integration**: Added Google Cloud Workload Identity authentication to test workflow
+
 ## 0.0.98.alpha (2025-09-23)
 
 ### Features

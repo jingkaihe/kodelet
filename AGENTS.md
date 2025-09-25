@@ -10,7 +10,7 @@ Kodelet is a lightweight CLI tool that helps with software engineering tasks. It
 ├── adrs/                # Architecture Decision Records (18 ADRs)
 ├── bin/                 # Compiled binaries
 ├── cmd/                 # Application entry point
-│   └── kodelet/         # Main application command (28 command files)
+│   └── kodelet/         # Main application command (30 command files)
 ├── config.sample.yaml   # Sample configuration file
 ├── docs/                # Documentation files
 ├── Dockerfile           # Docker configuration
@@ -30,13 +30,17 @@ Kodelet is a lightweight CLI tool that helps with software engineering tasks. It
 │   │   └── store.go     # Store interface definitions
 │   ├── feedback/        # Feedback system for autonomous conversations
 │   ├── fragments/       # Fragment/recipe template system
+│   │   └── recipes/     # Built-in recipe templates
+│   │       └── github/  # GitHub-specific recipes
 │   ├── github/          # GitHub Actions templates and utilities
+│   │   └── templates/   # GitHub workflow templates
 │   ├── llm/             # LLM client for AI interactions
 │   │   ├── anthropic/   # Anthropic Claude API client
+│   │   ├── google/      # Google GenAI API client
 │   │   ├── openai/      # OpenAI API client
 │   │   │   └── preset/  # OpenAI model presets
-│   │   │       ├── grok/    # Grok model presets
-│   │   │       └── openai/  # OpenAI model presets
+│   │   │       ├── openai/  # OpenAI model presets
+│   │   │       └── xai/     # X.AI (Grok) model presets
 │   │   └── prompts/     # Common LLM prompts
 │   ├── logger/          # Context-aware structured logging
 │   ├── presenter/       # User-facing output and formatting
@@ -45,7 +49,7 @@ Kodelet is a lightweight CLI tool that helps with software engineering tasks. It
 │   │       └── components/ # Template components
 │   │           └── examples/ # Example components
 │   ├── telemetry/       # Telemetry and tracing components
-│   ├── tools/           # Tool implementations (29 tool files)
+│   ├── tools/           # Tool implementations (31 tool files)
 │   │   └── renderers/   # Tool output renderers
 │   ├── tui/             # Terminal UI components
 │   ├── types/           # Common types
@@ -74,6 +78,7 @@ The codebase follows a modular structure with separation of concerns between LLM
 - **Node.js 22.17.0** - Frontend development and build tooling
 - **Anthropic SDK v1.7.0** - For Claude AI integration
 - **OpenAI SDK v1.40.0** - For GPT and compatible models
+- **Google GenAI SDK v1.25.0** - For Google Gemini and Vertex AI integration
 - **MCP v0.29.0** - Language server protocol for AI tool integration
 - **SQLite** - Pure Go database implementation
 - **Logrus** - Structured logging library
@@ -220,12 +225,19 @@ Kodelet uses a layered configuration approach with environment variables, global
 export ANTHROPIC_API_KEY="sk-ant-api..."  # For Claude models
 export OPENAI_API_KEY="sk-..."            # For OpenAI models (also for compatible APIs)
 export OPENAI_API_BASE="https://api.x.ai/v1"  # Optional: Custom API endpoint for OpenAI-compatible providers
+
+# Google GenAI (choose one authentication method)
+export GOOGLE_API_KEY="your-api-key"      # For Gemini API
+# OR for Vertex AI:
+export GOOGLE_CLOUD_PROJECT="your-project"
+export GOOGLE_CLOUD_LOCATION="us-central1"
+export GOOGLE_APPLICATION_CREDENTIALS="/path/to/service-account.json"
 ```
 
 **Common Environment Variables**:
 ```bash
-export KODELET_PROVIDER="anthropic|openai"
-export KODELET_MODEL="claude-sonnet-4-20250514|gpt-4.1|grok-3"
+export KODELET_PROVIDER="anthropic|openai|google"
+export KODELET_MODEL="claude-sonnet-4-20250514|gpt-4.1|grok-3|gemini-2.5-pro"
 export KODELET_MAX_TOKENS="8192"
 export KODELET_LOG_LEVEL="info"
 ```
@@ -234,11 +246,11 @@ For complete configuration options including tracing, model settings, and enviro
 
 ## LLM Architecture
 
-Kodelet uses a `Thread` abstraction for all interactions with LLM providers (Anthropic Claude and OpenAI):
+Kodelet uses a `Thread` abstraction for all interactions with LLM providers (Anthropic Claude, OpenAI, and Google GenAI):
 - Maintains message history and state
 - Handles tool execution and responses
 - Uses a handler-based pattern for processing responses
-- Supports provider-specific features (thinking for Claude, reasoning effort for OpenAI)
+- Supports provider-specific features (thinking for Claude, reasoning effort for OpenAI, thinking for Google)
 
 The architecture provides a unified approach for both interactive and one-shot uses with token usage tracking for all API calls across different providers.
 
@@ -299,3 +311,4 @@ if err != nil {
     return errors.Wrap(err, "failed to process")
 }
 ```
+

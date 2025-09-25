@@ -21,6 +21,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/pkg/errors"
 	"github.com/sashabaranov/go-openai"
+	"google.golang.org/genai"
 )
 
 //go:generate bash -c "cd frontend && npm install && npm run build"
@@ -342,6 +343,15 @@ func (s *Server) convertToWebMessages(rawMessages json.RawMessage, provider stri
 			if textContent, err := s.extractOpenAIContent(rawMsg); err == nil {
 				webMsg.Content = textContent
 			}
+		case "google":
+			if toolCalls, err := s.extractGoogleToolCalls(rawMsg); err == nil {
+				webMsg.ToolCalls = toolCalls
+			}
+			// Extract content and thinking text using Google SDK
+			if textContent, thinkingText, err := s.extractGoogleContent(rawMsg); err == nil {
+				webMsg.Content = textContent
+				webMsg.ThinkingText = thinkingText
+			}
 		}
 
 		// Skip empty messages (no content, no tool calls, and no thinking text)
@@ -562,6 +572,67 @@ func (s *Server) Stop() error {
 		return s.server.Close()
 	}
 	return nil
+}
+
+// extractGoogleContent extracts text content and thinking text from Google Content using Google SDK
+func (s *Server) extractGoogleContent(rawMessage json.RawMessage) (string, string, error) {
+	// Deserialize single message using the Google GenAI SDK
+	var googleContent genai.Content
+	if err := json.Unmarshal(rawMessage, &googleContent); err != nil {
+		return "", "", errors.Wrap(err, "failed to deserialize Google message")
+	}
+
+	var textParts []string
+	var thinkingText string
+
+	for _, part := range googleContent.Parts {
+		// Handle text parts
+		if part.Text != "" {
+			if part.Thought {
+				// This is thinking content
+				thinkingText = part.Text
+			} else {
+				// Regular text content
+				textParts = append(textParts, part.Text)
+			}
+		}
+	}
+
+	return strings.Join(textParts, "\n"), thinkingText, nil
+}
+
+// extractGoogleToolCalls extracts tool calls from Google Content using Google SDK
+func (s *Server) extractGoogleToolCalls(rawMessage json.RawMessage) ([]WebToolCall, error) {
+	// Deserialize single message using the Google GenAI SDK
+	var googleContent genai.Content
+	if err := json.Unmarshal(rawMessage, &googleContent); err != nil {
+		return nil, errors.Wrap(err, "failed to deserialize Google message")
+	}
+
+	var toolCalls []WebToolCall
+
+	for _, part := range googleContent.Parts {
+		// Handle function call parts
+		if part.FunctionCall != nil {
+			// Convert arguments to JSON string
+			inputJSON := "{}"
+			if part.FunctionCall.Args != nil {
+				if inputBytes, err := json.Marshal(part.FunctionCall.Args); err == nil {
+					inputJSON = string(inputBytes)
+				}
+			}
+
+			toolCalls = append(toolCalls, WebToolCall{
+				ID: fmt.Sprintf("google_%s_%d", part.FunctionCall.Name, len(toolCalls)), // Generate ID since Google doesn't provide one
+				Function: WebToolCallFunction{
+					Name:      part.FunctionCall.Name,
+					Arguments: inputJSON,
+				},
+			})
+		}
+	}
+
+	return toolCalls, nil
 }
 
 // Close closes the server and releases resources
