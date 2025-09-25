@@ -59,7 +59,8 @@ func (h *ConsoleMessageHandler) HandleToolResult(toolName string, result string)
 
 func (h *ConsoleMessageHandler) HandleThinking(thinking string) {
 	if !h.Silent {
-		fmt.Printf("💭 Thinking: %s\n\n", strings.TrimLeft(thinking, "\n"))
+		thinking = strings.Trim(thinking, "\n")
+		fmt.Printf("💭 Thinking: %s\n\n", thinking)
 	}
 }
 
@@ -103,6 +104,7 @@ func (h *ChannelMessageHandler) HandleDone() {
 }
 
 func (h *ChannelMessageHandler) HandleThinking(thinking string) {
+	thinking = strings.Trim(thinking, "\n")
 	h.MessageCh <- MessageEvent{
 		Type:    EventTypeThinking,
 		Content: strings.TrimLeft(thinking, "\n"),
@@ -139,8 +141,9 @@ func (h *StringCollectorHandler) HandleToolResult(toolName string, result string
 }
 
 func (h *StringCollectorHandler) HandleThinking(thinking string) {
+	thinking = strings.Trim(thinking, "\n")
 	if !h.Silent {
-		fmt.Printf("💭 Thinking: %s\n\n", strings.TrimLeft(thinking, "\n"))
+		fmt.Printf("💭 Thinking: %s\n\n", thinking)
 	}
 }
 
