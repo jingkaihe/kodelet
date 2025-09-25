@@ -510,10 +510,51 @@ func TestProcessImageFile(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			result, err := thread.processImage(test.filePath)
+			result, err := thread.processImage(context.Background(), test.filePath)
 			if test.hasError {
 				assert.Error(t, err)
 				assert.Nil(t, result)
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, result)
+			}
+		})
+	}
+}
+
+func TestProcessImageURL(t *testing.T) {
+	thread, err := NewGoogleThread(llmtypes.Config{}, nil)
+	require.NoError(t, err)
+
+	tests := []struct {
+		name     string
+		url      string
+		hasError bool
+		errorMsg string
+	}{
+		{
+			name:     "HTTP URL (should fail)",
+			url:      "http://example.com/image.jpg",
+			hasError: true,
+			errorMsg: "HTTP URLs are not supported for security reasons",
+		},
+		{
+			name:     "Invalid empty HTTPS URL",
+			url:      "https://",
+			hasError: true,
+			errorMsg: "no Host in request URL",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result, err := thread.processImage(context.Background(), test.url)
+			if test.hasError {
+				assert.Error(t, err)
+				assert.Nil(t, result)
+				if test.errorMsg != "" {
+					assert.Contains(t, err.Error(), test.errorMsg)
+				}
 			} else {
 				assert.NoError(t, err)
 				assert.NotNil(t, result)

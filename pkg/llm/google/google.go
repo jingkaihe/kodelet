@@ -9,6 +9,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -277,7 +280,7 @@ func (t *GoogleThread) AddUserMessage(ctx context.Context, message string, image
 
 	// Process images and add them as parts
 	for _, imagePath := range imagePaths {
-		imagePart, err := t.processImage(imagePath)
+		imagePart, err := t.processImage(ctx, imagePath)
 		if err != nil {
 			logger.G(ctx).Warnf("Failed to process image %s: %v", imagePath, err)
 			continue
@@ -618,15 +621,113 @@ func (t *GoogleThread) supportsThinking(modelName string) bool {
 }
 
 // processImage converts an image path/URL to a Google GenAI part
-func (t *GoogleThread) processImage(imagePath string) (*genai.Part, error) {
-	if strings.HasPrefix(imagePath, "http://") || strings.HasPrefix(imagePath, "https://") {
-		return nil, errors.New("URL images not supported yet")
+func (t *GoogleThread) processImage(ctx context.Context, imagePath string) (*genai.Part, error) {
+	if strings.HasPrefix(imagePath, "https://") {
+		return t.processImageURL(ctx, imagePath)
 	}
 
-	// Remove file:// prefix if present
+	if strings.HasPrefix(imagePath, "http://") {
+		return nil, errors.New("HTTP URLs are not supported for security reasons, use HTTPS only")
+	}
+
+	return t.processImageFile(ctx, imagePath)
+}
+
+// processImageURL fetches image from HTTPS URL and creates a Google GenAI part
+func (t *GoogleThread) processImageURL(ctx context.Context, imageURL string) (*genai.Part, error) {
+	parsedURL, err := url.Parse(imageURL)
+	if err != nil {
+		return nil, errors.Wrapf(err, "invalid URL: %s", imageURL)
+	}
+
+	if parsedURL.Scheme != "https" {
+		return nil, errors.Errorf("only HTTPS URLs are supported for security: %s", imageURL)
+	}
+
+	originalDomain := parsedURL.Hostname()
+
+	// Create HTTP client with redirect policy similar to web_fetch
+	client := &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if req.URL.Hostname() != originalDomain {
+				return errors.Errorf("redirect to different domain not allowed: %s -> %s",
+					originalDomain, req.URL.Hostname())
+			}
+
+			if len(via) >= 10 {
+				return errors.New("stopped after 10 redirects")
+			}
+
+			return nil
+		},
+		Timeout: 30 * time.Second,
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, imageURL, nil)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to create request for URL: %s", imageURL)
+	}
+
+	req.Header.Set("User-Agent", "Kodelet/1.0")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to fetch image from URL: %s", imageURL)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, errors.Errorf("HTTP error %d when fetching image from %s: %s", resp.StatusCode, imageURL, resp.Status)
+	}
+
+	contentType := resp.Header.Get("Content-Type")
+	if !strings.HasPrefix(contentType, "image/") {
+		return nil, errors.Errorf("URL does not return an image, got content-type: %s", contentType)
+	}
+
+	// Read the image data with size limit
+	imageData, err := io.ReadAll(io.LimitReader(resp.Body, MaxImageFileSize+1))
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to read image data from URL: %s", imageURL)
+	}
+
+	if len(imageData) > MaxImageFileSize {
+		return nil, errors.Errorf("image from URL %s is too large (%d bytes), maximum is %d bytes",
+			imageURL, len(imageData), MaxImageFileSize)
+	}
+
+	// Determine MIME type from extension in URL or use content-type
+	mimeType := contentType
+	if urlPath := parsedURL.Path; urlPath != "" {
+		if extMimeType := getMimeTypeFromExtension(filepath.Ext(urlPath)); extMimeType != "" {
+			mimeType = extMimeType
+		}
+	}
+
+	supportedFormats := []string{"image/jpeg", "image/png", "image/gif", "image/webp"}
+	supported := false
+	for _, format := range supportedFormats {
+		if strings.Contains(mimeType, format) {
+			supported = true
+			mimeType = format // Normalize to exact format
+			break
+		}
+	}
+
+	if !supported {
+		return nil, errors.Errorf("unsupported image format from URL %s: %s (supported: jpeg, png, gif, webp)", imageURL, mimeType)
+	}
+
+	return genai.NewPartFromBytes(imageData, mimeType), nil
+}
+
+// processImageFile creates a Google GenAI part from a local image file
+func (t *GoogleThread) processImageFile(ctx context.Context, imagePath string) (*genai.Part, error) {
+	// ctx parameter included for consistency with processImageURL but not used for local file operations
+	_ = ctx
+
 	imagePath = strings.TrimPrefix(imagePath, "file://")
 
-	// Check if file exists
 	if _, err := os.Stat(imagePath); os.IsNotExist(err) {
 		return nil, errors.Errorf("image file not found: %s", imagePath)
 	}
