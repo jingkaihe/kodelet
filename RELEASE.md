@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.0.100.alpha (2025-09-25)
+
+### Features
+
+**Enhanced Image Analysis**: Improved image analysis prompt structure and guidance for more accurate and actionable responses
+
 ## 0.0.99.alpha (2025-09-24)
 
 ### Features

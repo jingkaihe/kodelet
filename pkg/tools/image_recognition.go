@@ -206,13 +206,21 @@ func (t *ImageRecognitionTool) Execute(ctx context.Context, state tooltypes.Stat
 	}
 
 	// Create a prompt for image analysis
-	analysisPrompt := fmt.Sprintf(`Please analyze the provided image and %s
+	analysisPrompt := fmt.Sprintf(`Examine the image and respond to the following request.
 
-Here are the details of what I need:
+<request>
 %s
+</request>
 
-Please provide a clear and detailed response based on what you can see in the image.`,
-		input.Prompt, input.Prompt)
+Focus on directly relevant information for the request above. When describing the image:
+- State observable facts rather than assumptions
+- Note any text, labels, or annotations exactly as shown
+- Describe spatial layout and relationships between elements
+- Highlight technical details if applicable (UI components, architecture patterns, data flows)
+- Explicitly mention anything unclear or ambiguous
+
+Organize your response to be clear and actionable.`,
+		input.Prompt)
 
 	// Prepare image paths for the LLM
 	imagePaths := []string{input.ImagePath}
