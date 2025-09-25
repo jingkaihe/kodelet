@@ -35,6 +35,8 @@ import (
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/jingkaihe/kodelet/pkg/usage"
+	"github.com/jingkaihe/kodelet/pkg/utils"
+	"github.com/jingkaihe/kodelet/pkg/version"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
@@ -668,7 +670,7 @@ func (t *GoogleThread) processImageURL(ctx context.Context, imageURL string) (*g
 		return nil, errors.Wrapf(err, "failed to create request for URL: %s", imageURL)
 	}
 
-	req.Header.Set("User-Agent", "Kodelet/1.0")
+	req.Header.Set("User-Agent", fmt.Sprintf("Kodelet/%s", version.Get().Version))
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -1388,10 +1390,11 @@ func (t *GoogleThread) updateUsage(metadata *genai.UsageMetadata) {
 // restoreBackgroundProcesses restores background processes from the conversation record
 func (t *GoogleThread) restoreBackgroundProcesses(processes []tooltypes.BackgroundProcess) {
 	for _, process := range processes {
-		if process.PID > 0 {
-			// Only restore processes that have valid PIDs
-			if err := t.state.AddBackgroundProcess(process); err != nil {
-				logger.G(context.Background()).WithError(err).WithField("pid", process.PID).Warn("failed to restore background process")
+		// Check if process is still alive
+		if utils.IsProcessAlive(process.PID) {
+			// Reattach to the process
+			if restoredProcess, err := utils.ReattachProcess(process); err == nil {
+				t.state.AddBackgroundProcess(restoredProcess)
 			}
 		}
 	}
