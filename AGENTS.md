@@ -10,7 +10,7 @@ Kodelet is a lightweight CLI tool that helps with software engineering tasks. It
 ├── adrs/                # Architecture Decision Records (18 ADRs)
 ├── bin/                 # Compiled binaries
 ├── cmd/                 # Application entry point
-│   └── kodelet/         # Main application command (28 command files)
+│   └── kodelet/         # Main application command (30 command files)
 ├── config.sample.yaml   # Sample configuration file
 ├── docs/                # Documentation files
 ├── Dockerfile           # Docker configuration
@@ -30,13 +30,17 @@ Kodelet is a lightweight CLI tool that helps with software engineering tasks. It
 │   │   └── store.go     # Store interface definitions
 │   ├── feedback/        # Feedback system for autonomous conversations
 │   ├── fragments/       # Fragment/recipe template system
+│   │   └── recipes/     # Built-in recipe templates
+│   │       └── github/  # GitHub-specific recipes
 │   ├── github/          # GitHub Actions templates and utilities
+│   │   └── templates/   # GitHub workflow templates
 │   ├── llm/             # LLM client for AI interactions
 │   │   ├── anthropic/   # Anthropic Claude API client
+│   │   ├── google/      # Google GenAI API client
 │   │   ├── openai/      # OpenAI API client
 │   │   │   └── preset/  # OpenAI model presets
-│   │   │       ├── grok/    # Grok model presets
-│   │   │       └── openai/  # OpenAI model presets
+│   │   │       ├── openai/  # OpenAI model presets
+│   │   │       └── xai/     # X.AI (Grok) model presets
 │   │   └── prompts/     # Common LLM prompts
 │   ├── logger/          # Context-aware structured logging
 │   ├── presenter/       # User-facing output and formatting
@@ -45,7 +49,7 @@ Kodelet is a lightweight CLI tool that helps with software engineering tasks. It
 │   │       └── components/ # Template components
 │   │           └── examples/ # Example components
 │   ├── telemetry/       # Telemetry and tracing components
-│   ├── tools/           # Tool implementations (29 tool files)
+│   ├── tools/           # Tool implementations (31 tool files)
 │   │   └── renderers/   # Tool output renderers
 │   ├── tui/             # Terminal UI components
 │   ├── types/           # Common types
@@ -307,3 +311,4 @@ if err != nil {
     return errors.Wrap(err, "failed to process")
 }
 ```
+
