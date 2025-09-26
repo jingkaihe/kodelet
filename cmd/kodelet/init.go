@@ -18,6 +18,10 @@ var initCmd = &cobra.Command{
 		ctx := cmd.Context()
 		override, _ := cmd.Flags().GetBool("override")
 
+		if override {
+			presenter.Warning("Override flag detected - existing configuration will be replaced")
+		}
+
 		presenter.Section("Kodelet Configuration Setup")
 		presenter.Info("Setting up Kodelet with recommended defaults.")
 		presenter.Separator()
@@ -28,7 +32,6 @@ var initCmd = &cobra.Command{
 		anthropicKey := os.Getenv("ANTHROPIC_API_KEY")
 		openaiKey := os.Getenv("OPENAI_API_KEY")
 		xaiKey := os.Getenv("XAI_API_KEY")
-		googleKey := os.Getenv("GOOGLE_API_KEY")
 
 		if anthropicKey != "" {
 			presenter.Success("Found ANTHROPIC_API_KEY in environment")
@@ -45,13 +48,7 @@ var initCmd = &cobra.Command{
 		if xaiKey != "" {
 			presenter.Success("Found XAI_API_KEY in environment")
 		} else {
-			presenter.Info("You will need XAI_API_KEY environment variable set to use X.AI Grok models")
-		}
-
-		if googleKey != "" {
-			presenter.Success("Found GOOGLE_API_KEY in environment")
-		} else {
-			presenter.Info("You will need GOOGLE_API_KEY environment variable set to use Gemini models")
+			presenter.Info("You will need XAI_API_KEY environment variable set to use xAI Grok models")
 		}
 
 		presenter.Separator()
@@ -74,6 +71,27 @@ var initCmd = &cobra.Command{
 				presenter.Warning(fmt.Sprintf("Configuration file already exists at %s", configFile))
 				presenter.Info("To overwrite, use the --override flag or remove the file and run 'kodelet init' again")
 				return
+			}
+		} else {
+			// When overriding, backup existing config if it exists
+			if _, err := os.Stat(configFile); err == nil {
+				backupFile := filepath.Join(configDir, "config.yaml.bak")
+
+				// Read existing config
+				existingConfig, err := os.ReadFile(configFile)
+				if err != nil {
+					presenter.Error(err, "Failed to read existing configuration for backup")
+					return
+				}
+
+				// Write backup
+				err = os.WriteFile(backupFile, existingConfig, 0644)
+				if err != nil {
+					presenter.Error(err, "Failed to create backup of existing configuration")
+					return
+				}
+
+				presenter.Info(fmt.Sprintf("Existing configuration backed up to %s", backupFile))
 			}
 		}
 
@@ -154,13 +172,13 @@ profiles:
 		presenter.Success("Kodelet has been configured with sensible defaults")
 
 		// Only show setup instructions if no API keys are found
-		if anthropicKey == "" && openaiKey == "" && xaiKey == "" && googleKey == "" {
+		if anthropicKey == "" && openaiKey == "" && xaiKey == "" {
 			presenter.Separator()
 			presenter.Warning("No API keys found. Please set at least one of the following environment variables:")
 			presenter.Info("  export ANTHROPIC_API_KEY=\"your-key-here\"  # For Claude models")
 			presenter.Info("  export OPENAI_API_KEY=\"your-key-here\"     # For OpenAI models")
-			presenter.Info("  export XAI_API_KEY=\"your-key-here\"        # For X.AI Grok models")
-			presenter.Info("  export GOOGLE_API_KEY=\"your-key-here\"     # For Gemini models")
+			presenter.Info("  export XAI_API_KEY=\"your-key-here\"        # For xAI Grok models")
+			presenter.Info("For Google models, see the configuration documentation for authentication options")
 		}
 
 		presenter.Separator()
