@@ -1,5 +1,18 @@
 # Kodelet
 
+## 0.1.0.beta (2025-09-26)
+
+### Features
+
+**Streamlined Multi-Provider Initialization**: Complete redesign of the `kodelet init` command with intelligent defaults and multi-provider support
+
+- **Simplified Setup Process**: Replaced interactive wizard with automatic configuration using sensible defaults, eliminating complex user prompts
+- **Multi-Provider Configuration**: Added comprehensive support for Anthropic Claude, OpenAI, Google GenAI, and xAI Grok models with provider-specific profiles
+- **Configuration Profiles**: Pre-configured profiles (`default`, `hybrid`, `openai`, `premium`, `google`, `xai`) for different use cases and provider preferences
+- **Intelligent API Key Detection**: Smart environment variable detection with clear messaging about API key requirements for each provider
+- **Configuration Backup**: Added `--override` flag with automatic backup of existing configuration files to prevent accidental data loss
+- **Enhanced Model Aliases**: Built-in model aliases (`sonnet-4`, `haiku-35`, `opus-41`, `gemini-pro`, `gemini-flash`) for easier model selection
+
 ## 0.0.100.alpha (2025-09-25)
 
 ### Features
