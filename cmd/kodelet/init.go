@@ -1,179 +1,62 @@
 package main
 
 import (
-	"bufio"
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
-	"strings"
-	"syscall"
 
-	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
-	"golang.org/x/term"
 )
 
 var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Set up Kodelet configuration",
-	Long:  `Interactive setup for Kodelet configuration including API key and model preferences.`,
+	Long:  `Set up Kodelet configuration with sensible defaults.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx := cmd.Context()
+		override, _ := cmd.Flags().GetBool("override")
 
-		reader := bufio.NewReader(os.Stdin)
-
-		presenter.Section("🚀 Kodelet Configuration Setup")
-		presenter.Info("This wizard will help you set up Kodelet with the recommended configuration.")
+		presenter.Section("Kodelet Configuration Setup")
+		presenter.Info("Setting up Kodelet with recommended defaults.")
 		presenter.Separator()
 
-		apiKey := os.Getenv("ANTHROPIC_API_KEY")
-		needsAPIKeySetup := false
+		// Check for API keys and inform about requirements
+		presenter.Section("API Key Requirements")
 
-		var shellName string
-		var profilePath string
-		var apiKeyAddedToProfile bool
+		anthropicKey := os.Getenv("ANTHROPIC_API_KEY")
+		openaiKey := os.Getenv("OPENAI_API_KEY")
+		xaiKey := os.Getenv("XAI_API_KEY")
+		googleKey := os.Getenv("GOOGLE_API_KEY")
 
-		if apiKey == "" {
-			fmt.Print("🔑 Enter your Anthropic API key: ")
-			apiKeyBytes, err := term.ReadPassword(int(syscall.Stdin))
-			if err != nil {
-				fmt.Println()
-				presenter.Error(err, "Failed to read API key")
-				return
-			}
-			apiKey = strings.TrimSpace(string(apiKeyBytes))
-			fmt.Println()
-
-			if apiKey != "" {
-				presenter.Success("API key received")
-				needsAPIKeySetup = true
-			} else {
-				presenter.Warning("No API key provided. You will need to set ANTHROPIC_API_KEY environment variable to use Kodelet")
-			}
+		if anthropicKey != "" {
+			presenter.Success("Found ANTHROPIC_API_KEY in environment")
 		} else {
-			presenter.Success("Found Anthropic API key in environment variables")
+			presenter.Info("You will need ANTHROPIC_API_KEY environment variable set to use Claude models")
 		}
 
-		if needsAPIKeySetup && apiKey != "" {
-			shellName, profilePath = detectShell(ctx)
-
-			if checkAPIKeyInProfile(ctx, profilePath) {
-				presenter.Info("🔑 API key is already configured in your shell profile")
-			} else {
-				if askForPermission(reader, profilePath) {
-					err := writeAPIKeyToProfile(ctx, profilePath, shellName, apiKey)
-					if err != nil {
-						presenter.Error(err, "Failed to update shell profile")
-						presenter.Info("📝 To manually set your API key, add the following to your shell profile:")
-
-						if shellName == "fish" {
-							presenter.Info(fmt.Sprintf("   set -x ANTHROPIC_API_KEY \"%s\"", apiKey))
-						} else {
-							presenter.Info(fmt.Sprintf("   export ANTHROPIC_API_KEY=\"%s\"", apiKey))
-						}
-					} else {
-						presenter.Success(fmt.Sprintf("API key added to %s", profilePath))
-						apiKeyAddedToProfile = true
-					}
-				} else {
-					presenter.Info("📝 To manually set your API key, add the following to your shell profile:")
-
-					if shellName == "fish" {
-						presenter.Info(fmt.Sprintf("   set -x ANTHROPIC_API_KEY \"%s\"", apiKey))
-					} else {
-						presenter.Info(fmt.Sprintf("   export ANTHROPIC_API_KEY=\"%s\"", apiKey))
-					}
-				}
-			}
+		if openaiKey != "" {
+			presenter.Success("Found OPENAI_API_KEY in environment")
+		} else {
+			presenter.Info("You will need OPENAI_API_KEY environment variable set to use OpenAI models")
 		}
 
-		presenter.Section("📋 Model Configuration")
-
-		defaultModel := viper.GetString("model")
-		if defaultModel == "" {
-			defaultModel = string(anthropic.ModelClaudeSonnet4_20250514)
+		if xaiKey != "" {
+			presenter.Success("Found XAI_API_KEY in environment")
+		} else {
+			presenter.Info("You will need XAI_API_KEY environment variable set to use X.AI Grok models")
 		}
 
-		fmt.Printf("   Primary model [%s]: ", defaultModel)
-		modelInput, _ := reader.ReadString('\n')
-		modelInput = strings.TrimSpace(modelInput)
-
-		if modelInput != "" {
-			defaultModel = modelInput
+		if googleKey != "" {
+			presenter.Success("Found GOOGLE_API_KEY in environment")
+		} else {
+			presenter.Info("You will need GOOGLE_API_KEY environment variable set to use Gemini models")
 		}
 
-		defaultWeakModel := viper.GetString("weak_model")
-		if defaultWeakModel == "" {
-			defaultWeakModel = string(anthropic.ModelClaude3_5Haiku20241022)
-		}
+		presenter.Separator()
 
-		fmt.Printf("   Secondary (weak) model [%s]: ", defaultWeakModel)
-		weakModelInput, _ := reader.ReadString('\n')
-		weakModelInput = strings.TrimSpace(weakModelInput)
-
-		if weakModelInput != "" {
-			defaultWeakModel = weakModelInput
-		}
-
-		defaultMaxTokens := viper.GetInt("max_tokens")
-		if defaultMaxTokens == 0 {
-			defaultMaxTokens = 8192
-		}
-
-		fmt.Printf("   Maximum output tokens [%d]: ", defaultMaxTokens)
-		maxTokensInput, _ := reader.ReadString('\n')
-		maxTokensInput = strings.TrimSpace(maxTokensInput)
-
-		if maxTokensInput != "" {
-			maxTokens, err := strconv.Atoi(maxTokensInput)
-			if err == nil {
-				defaultMaxTokens = maxTokens
-			}
-		}
-
-		defaultWeakModelMaxTokens := viper.GetInt("weak_model_max_tokens")
-		if defaultWeakModelMaxTokens == 0 {
-			defaultWeakModelMaxTokens = 8192
-		}
-
-		fmt.Printf("   Maximum weak model output tokens [%d]: ", defaultWeakModelMaxTokens)
-		weakModelMaxTokensInput, _ := reader.ReadString('\n')
-		weakModelMaxTokensInput = strings.TrimSpace(weakModelMaxTokensInput)
-
-		if weakModelMaxTokensInput != "" {
-			weakModelMaxTokens, err := strconv.Atoi(weakModelMaxTokensInput)
-			if err == nil {
-				defaultWeakModelMaxTokens = weakModelMaxTokens
-			}
-		}
-
-		defaultThinkingBudgetTokens := viper.GetInt("thinking_budget_tokens")
-		if defaultThinkingBudgetTokens == 0 {
-			defaultThinkingBudgetTokens = 4048
-		}
-
-		fmt.Printf("   Maximum thinking tokens [%d]: ", defaultThinkingBudgetTokens)
-		thinkingBudgetTokensInput, _ := reader.ReadString('\n')
-		thinkingBudgetTokensInput = strings.TrimSpace(thinkingBudgetTokensInput)
-
-		if thinkingBudgetTokensInput != "" {
-			thinkingBudgetTokens, err := strconv.Atoi(thinkingBudgetTokensInput)
-			if err == nil {
-				defaultThinkingBudgetTokens = thinkingBudgetTokens
-			}
-		}
-
-		logger.G(ctx).WithFields(map[string]interface{}{
-			"max_tokens":             defaultMaxTokens,
-			"weak_model_max_tokens":  defaultWeakModelMaxTokens,
-			"thinking_budget_tokens": defaultThinkingBudgetTokens,
-		}).Debug("Token limits configured")
-
+		// Create config directory
 		configDir := filepath.Join(os.Getenv("HOME"), ".kodelet")
 		err := os.MkdirAll(configDir, 0755)
 		if err != nil {
@@ -185,21 +68,70 @@ var initCmd = &cobra.Command{
 
 		configFile := filepath.Join(configDir, "config.yaml")
 
-		configContent := "# Kodelet Configuration\n\n"
-		configContent += "# Primary model for standard requests\n"
-		configContent += fmt.Sprintf("model: \"%s\"\n\n", defaultModel)
+		// Check if config already exists (unless override is specified)
+		if !override {
+			if _, err := os.Stat(configFile); err == nil {
+				presenter.Warning(fmt.Sprintf("Configuration file already exists at %s", configFile))
+				presenter.Info("To overwrite, use the --override flag or remove the file and run 'kodelet init' again")
+				return
+			}
+		}
 
-		configContent += "# Secondary model for lightweight tasks\n"
-		configContent += fmt.Sprintf("weak_model: \"%s\"\n\n", defaultWeakModel)
-
-		configContent += "# Maximum output tokens\n"
-		configContent += fmt.Sprintf("max_tokens: %d\n\n", defaultMaxTokens)
-
-		configContent += "# Maximum output tokens for weak model\n"
-		configContent += fmt.Sprintf("weak_model_max_tokens: %d\n\n", defaultWeakModelMaxTokens)
-
-		configContent += "# Maximum thinking tokens\n"
-		configContent += fmt.Sprintf("thinking_budget_tokens: %d\n", defaultThinkingBudgetTokens)
+		// Create config with the excellent defaults
+		configContent := `aliases:
+    gemini-flash: gemini-2.5-flash
+    gemini-pro: gemini-2.5-pro
+    haiku-35: claude-3-5-haiku-20241022
+    opus-41: claude-opus-4-1-20250805
+    sonnet-4: claude-sonnet-4-20250514
+max_tokens: 16000
+model: sonnet-4
+profile: default
+thinking_budget_tokens: 8000
+weak_model: haiku-35
+weak_model_max_tokens: 8192
+profiles:
+    hybrid:
+        max_tokens: 16000
+        model: sonnet-4
+        subagent:
+            allowed_tools:
+                - file_read
+                - glob_tool
+                - grep_tool
+            model: o3
+            provider: openai
+            reasoning_effort: high
+        thinking_budget_tokens: 8000
+        weak_model: haiku-35
+        weak_model_max_tokens: 8192
+    openai:
+        max_tokens: 16000
+        model: gpt-5
+        provider: openai
+        reasoning_effort: medium
+        weak_model: gpt-5
+    premium:
+        max_tokens: 16000
+        model: opus-41
+        thinking_budget_tokens: 8000
+        weak_model: sonnet-4
+        weak_model_max_tokens: 8192
+    google:
+        max_tokens: 16000
+        model: gemini-pro
+        provider: google
+        weak_model: gemini-flash
+        weak_model_max_tokens: 8192
+    xai:
+        max_tokens: 16000
+        model: grok-code-fast-1
+        openai:
+            preset: xai
+        provider: openai
+        reasoning_effort: none
+        weak_model: grok-code-fast-1
+`
 
 		err = os.WriteFile(configFile, []byte(configContent), 0644)
 		if err != nil {
@@ -208,101 +140,42 @@ var initCmd = &cobra.Command{
 			return
 		}
 
-		presenter.Success(fmt.Sprintf("Configuration saved to %s", configFile))
+		if override {
+			presenter.Success(fmt.Sprintf("Configuration overwritten at %s", configFile))
+		} else {
+			presenter.Success(fmt.Sprintf("Configuration saved to %s", configFile))
+		}
+		presenter.Info("You can modify these settings at any time by editing the config file")
+		presenter.Info("Use different profiles with: --profile hybrid|openai|premium|google|xai")
 		logger.G(ctx).WithField("config_file", configFile).Info("Configuration file created successfully")
-		presenter.Separator()
-		presenter.Success("🎉 Kodelet setup complete! You can now use Kodelet")
-		logger.G(ctx).Info("Kodelet initialization completed successfully")
 
-		if needsAPIKeySetup && apiKey != "" && apiKeyAddedToProfile {
+		presenter.Separator()
+		presenter.Section("Setup Complete")
+		presenter.Success("Kodelet has been configured with sensible defaults")
+
+		// Only show setup instructions if no API keys are found
+		if anthropicKey == "" && openaiKey == "" && xaiKey == "" && googleKey == "" {
 			presenter.Separator()
-			presenter.Warning("⚠️  IMPORTANT ACTION REQUIRED ⚠️")
-			presenter.Info("To activate your API key, you must restart your terminal")
-			presenter.Info("or run the following command:")
-			presenter.Info(fmt.Sprintf("   $ source %s", profilePath))
-			presenter.Separator()
+			presenter.Warning("No API keys found. Please set at least one of the following environment variables:")
+			presenter.Info("  export ANTHROPIC_API_KEY=\"your-key-here\"  # For Claude models")
+			presenter.Info("  export OPENAI_API_KEY=\"your-key-here\"     # For OpenAI models")
+			presenter.Info("  export XAI_API_KEY=\"your-key-here\"        # For X.AI Grok models")
+			presenter.Info("  export GOOGLE_API_KEY=\"your-key-here\"     # For Gemini models")
 		}
 
-		presenter.Section("Example Commands")
-		presenter.Info("  kodelet chat                  # Start an interactive chat session")
-		presenter.Info("  kodelet run \"your query\"      # Run a one-shot query")
-		presenter.Info("  kodelet watch                 # Start watch mode to monitor file changes")
-		presenter.Info("  kodelet --help                # Show available commands")
+		presenter.Separator()
+		presenter.Section("Getting Started")
+		presenter.Info("  kodelet chat                          # Start interactive chat (default profile)")
+		presenter.Info("  kodelet run \"your query\"              # Run one-shot query")
+		presenter.Info("  kodelet run --profile hybrid \"query\"  # Use hybrid profile (Claude + OpenAI subagent)")
+		presenter.Info("  kodelet watch                         # Monitor file changes")
+		presenter.Info("  kodelet serve                         # Start web UI server")
+		presenter.Info("  kodelet --help                        # Show all available commands")
+
+		logger.G(ctx).Info("Kodelet initialization completed successfully")
 	},
 }
 
-func detectShell(ctx context.Context) (string, string) {
-	shell := os.Getenv("SHELL")
-	if shell == "" {
-		logger.G(ctx).Warn("SHELL environment variable not set, defaulting to bash")
-		return "bash", filepath.Join(os.Getenv("HOME"), ".bashrc")
-	}
-
-	shellName := filepath.Base(shell)
-	logger.G(ctx).WithField("detected_shell", shellName).Debug("Shell detected from SHELL environment variable")
-
-	switch shellName {
-	case "bash":
-		bashProfile := filepath.Join(os.Getenv("HOME"), ".bash_profile")
-		if _, err := os.Stat(bashProfile); err == nil {
-			logger.G(ctx).WithField("profile_file", bashProfile).Debug("Using .bash_profile for bash shell")
-			return "bash", bashProfile
-		}
-		bashrc := filepath.Join(os.Getenv("HOME"), ".bashrc")
-		logger.G(ctx).WithField("profile_file", bashrc).Debug("Using .bashrc for bash shell")
-		return "bash", bashrc
-	case "zsh":
-		zshrc := filepath.Join(os.Getenv("HOME"), ".zshrc")
-		logger.G(ctx).WithField("profile_file", zshrc).Debug("Using .zshrc for zsh shell")
-		return "zsh", zshrc
-	case "fish":
-		// Fish uses a different directory structure
-		fishConfig := filepath.Join(os.Getenv("HOME"), ".config/fish/config.fish")
-		logger.G(ctx).WithField("profile_file", fishConfig).Debug("Using config.fish for fish shell")
-		return "fish", fishConfig
-	default:
-		return shellName, filepath.Join(os.Getenv("HOME"), ".profile")
-	}
-}
-
-func checkAPIKeyInProfile(_ context.Context, profilePath string) bool {
-	content, err := os.ReadFile(profilePath)
-	if err != nil {
-		return false
-	}
-
-	return strings.Contains(string(content), "export ANTHROPIC_API_KEY=") ||
-		strings.Contains(string(content), "set -x ANTHROPIC_API_KEY")
-}
-
-func writeAPIKeyToProfile(_ context.Context, profilePath, shellName, apiKey string) error {
-	file, err := os.OpenFile(profilePath, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	_, err = file.WriteString("\n# Added by Kodelet\n")
-	if err != nil {
-		return err
-	}
-
-	switch shellName {
-	case "fish":
-		_, err = fmt.Fprintf(file, "set -x ANTHROPIC_API_KEY \"%s\"\n", apiKey)
-	default:
-		_, err = fmt.Fprintf(file, "export ANTHROPIC_API_KEY=\"%s\"\n", apiKey)
-	}
-
-	return err
-}
-
-func askForPermission(reader *bufio.Reader, profilePath string) bool {
-	fmt.Printf("📝 Would you like to add your API key to %s? [Y/n] ", profilePath)
-	response, _ := reader.ReadString('\n')
-	response = strings.TrimSpace(strings.ToLower(response))
-	return response == "y" || response == "yes" || response == ""
-}
-
 func init() {
+	initCmd.Flags().Bool("override", false, "Overwrite existing configuration file if it exists")
 }
