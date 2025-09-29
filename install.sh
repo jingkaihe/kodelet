@@ -56,7 +56,7 @@ echo -e "${GREEN}Detected architecture: $ARCH${NC}"
 echo -e "${GREEN}Installing version: $VERSION${NC}"
 
 # Create installation directory
-INSTALL_DIR="$HOME/.kodelet"
+INSTALL_DIR="$HOME/.local"
 mkdir -p "$INSTALL_DIR/bin"
 
 # Download URL construction
@@ -107,9 +107,9 @@ else
         EXPORT_CMD="export PATH=\$PATH:$INSTALL_DIR/bin"
     fi
 
-    # Check if the path is already in the profile
-    if [ -f "$PROFILE_FILE" ] && grep -q "$INSTALL_DIR/bin" "$PROFILE_FILE"; then
-        echo -e "${GREEN}Path already in $PROFILE_FILE${NC}"
+    # Check if the path is already in $PATH
+    if echo "$PATH" | grep -q "$INSTALL_DIR/bin"; then
+        echo -e "${GREEN}$INSTALL_DIR/bin is already in your PATH${NC}"
     else
         # Add the PATH export to shell profile
         echo "" >> "$PROFILE_FILE"

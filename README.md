@@ -13,6 +13,15 @@ Kodelet is a lightweight agentic SWE Agent. It runs as an interactive CLI tool i
 
 ## Installation
 
+### Via Homebrew (macOS/Linux)
+
+```bash
+brew tap jingkaihe/kodelet
+brew install kodelet
+```
+
+### Via Install Script
+
 ```bash
 curl -sSL https://raw.githubusercontent.com/jingkaihe/kodelet/main/install.sh | bash
 ```
