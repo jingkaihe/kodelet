@@ -557,6 +557,10 @@ func (t *AnthropicThread) shouldUtiliseThinking(model anthropic.Model) bool {
 
 func isThinkingModel(model anthropic.Model) bool {
 	thinkingModels := []anthropic.Model{
+		// sonnet 4.5 models
+		anthropic.ModelClaudeSonnet4_5,
+		anthropic.ModelClaudeSonnet4_5_20250929,
+
 		// sonnet 4 models
 		anthropic.ModelClaudeSonnet4_0,
 		anthropic.ModelClaudeSonnet4_20250514,

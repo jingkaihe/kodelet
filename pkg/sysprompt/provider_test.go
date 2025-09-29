@@ -15,7 +15,7 @@ func TestSystemPrompt_ProviderSelection(t *testing.T) {
 		}
 		contexts := map[string]string{}
 
-		prompt := SystemPrompt("claude-sonnet-4", config, contexts)
+		prompt := SystemPrompt("claude-sonnet-45", config, contexts)
 		assert.NotEmpty(t, prompt)
 		assert.Contains(t, prompt, "interactive CLI tool")
 	})
@@ -39,7 +39,7 @@ func TestSubAgentPrompt_ProviderSelection(t *testing.T) {
 		}
 		contexts := map[string]string{}
 
-		prompt := SubAgentPrompt("claude-sonnet-4", config, contexts)
+		prompt := SubAgentPrompt("claude-sonnet-45", config, contexts)
 		assert.NotEmpty(t, prompt)
 		assert.Contains(t, prompt, "AI SWE Agent")
 	})

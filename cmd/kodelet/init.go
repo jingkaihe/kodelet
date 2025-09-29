@@ -101,9 +101,9 @@ var initCmd = &cobra.Command{
     gemini-pro: gemini-2.5-pro
     haiku-35: claude-3-5-haiku-20241022
     opus-41: claude-opus-4-1-20250805
-    sonnet-4: claude-sonnet-4-20250514
+    sonnet-45: claude-sonnet-4-5-20250929
 max_tokens: 16000
-model: sonnet-4
+model: sonnet-45
 profile: default
 thinking_budget_tokens: 8000
 weak_model: haiku-35
@@ -111,7 +111,7 @@ weak_model_max_tokens: 8192
 profiles:
     hybrid:
         max_tokens: 16000
-        model: sonnet-4
+        model: sonnet-45
         subagent:
             allowed_tools:
                 - file_read
@@ -133,7 +133,7 @@ profiles:
         max_tokens: 16000
         model: opus-41
         thinking_budget_tokens: 8000
-        weak_model: sonnet-4
+        weak_model: sonnet-45
         weak_model_max_tokens: 8192
     google:
         max_tokens: 16000

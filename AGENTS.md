@@ -237,7 +237,7 @@ export GOOGLE_APPLICATION_CREDENTIALS="/path/to/service-account.json"
 **Common Environment Variables**:
 ```bash
 export KODELET_PROVIDER="anthropic|openai|google"
-export KODELET_MODEL="claude-sonnet-4-20250514|gpt-4.1|grok-3|gemini-2.5-pro"
+export KODELET_MODEL="claude-sonnet-4-5-20250929|gpt-4.1|grok-3|gemini-2.5-pro"
 export KODELET_MAX_TOKENS="8192"
 export KODELET_LOG_LEVEL="info"
 ```
