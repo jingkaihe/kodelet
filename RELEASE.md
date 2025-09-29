@@ -1,5 +1,28 @@
 # Kodelet
 
+## 0.1.1.beta (2025-09-29)
+
+### Features
+
+**Claude Sonnet 4.5 Support**: Added support for Anthropic's latest Claude Sonnet 4.5 model (20250929) with enhanced capabilities
+
+- **New Model Alias**: Added `sonnet-45` alias for `claude-sonnet-4-5-20250929` model
+- **Updated Defaults**: Changed default model from Claude Sonnet 4 to Claude Sonnet 4.5 across all configurations and profiles
+- **Pricing Integration**: Added pricing information for the new model with prompt caching support
+- **Thinking Support**: Full support for extended thinking capabilities in Claude Sonnet 4.5
+
+### Dependencies
+
+- Upgraded `anthropic-sdk-go` from v1.7.0 to v1.13.0 for Claude Sonnet 4.5 support
+- Upgraded `tidwall/match` from v1.1.1 to v1.2.0
+- Moved `google.golang.org/genai` from indirect to direct dependency
+
+### Internal Changes
+
+- Updated all configuration samples, templates, and documentation to reference Claude Sonnet 4.5
+- Updated GitHub Actions workflow templates with new default model
+- Refreshed test suites to use Claude Sonnet 4.5 model identifier
+
 ## 0.1.0.beta (2025-09-26)
 
 ### Features

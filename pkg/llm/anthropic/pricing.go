@@ -32,6 +32,13 @@ var ModelPricingMap = map[anthropic.Model]ModelPricing{
 		PromptCachingRead:  0.0000003,  // $0.30 per million tokens
 		ContextWindow:      200_000,
 	},
+	anthropic.ModelClaudeSonnet4_5_20250929: {
+		Input:              0.000003,   // $3.00 per million tokens
+		Output:             0.000015,   // $15.00 per million tokens
+		PromptCachingWrite: 0.00000375, // $3.75 per million tokens
+		PromptCachingRead:  0.0000003,  // $0.30 per million tokens
+		ContextWindow:      200_000,
+	},
 	anthropic.ModelClaude4Opus20250514: {
 		Input:              0.000015,   // $15.00 per million tokens
 		Output:             0.000075,   // $75.00 per million tokens
