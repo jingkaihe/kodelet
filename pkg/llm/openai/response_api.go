@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/logger"
@@ -305,6 +306,10 @@ func (t *OpenAIThread) sendMessageResponseAPIStreaming(
 
 	var fullText string
 	var currentResponse *responses.Response
+	
+	// Buffer for streaming text (accumulate before sending to handler)
+	var textBuffer strings.Builder
+	var reasoningBuffer strings.Builder
 
 	for stream.Next() {
 		event := stream.Current()
@@ -312,13 +317,13 @@ func (t *OpenAIThread) sendMessageResponseAPIStreaming(
 		// Use AsAny() to switch on event type
 		switch e := event.AsAny().(type) {
 		case responses.ResponseTextDeltaEvent:
-			// Stream text as it arrives
-			handler.HandleText(e.Delta)
+			// Accumulate text deltas
+			textBuffer.WriteString(e.Delta)
 			fullText += e.Delta
 
 		case responses.ResponseReasoningTextDeltaEvent:
-			// Stream reasoning tokens (for o-series models)
-			handler.HandleThinking(e.Delta)
+			// Accumulate reasoning deltas
+			reasoningBuffer.WriteString(e.Delta)
 
 		case responses.ResponseFunctionCallArgumentsDoneEvent:
 			// Function call complete - will handle in output processing
@@ -343,6 +348,22 @@ func (t *OpenAIThread) sendMessageResponseAPIStreaming(
 
 	if currentResponse == nil {
 		return nil, errors.New("stream ended without completion event")
+	}
+	
+	// Send accumulated text to handler (after streaming completes)
+	if textBuffer.Len() > 0 {
+		text := strings.TrimRight(textBuffer.String(), "\n")
+		if text != "" {
+			handler.HandleText(text)
+		}
+	}
+	
+	// Send accumulated reasoning to handler
+	if reasoningBuffer.Len() > 0 {
+		reasoning := strings.TrimRight(reasoningBuffer.String(), "\n")
+		if reasoning != "" {
+			handler.HandleThinking(reasoning)
+		}
 	}
 
 	return currentResponse, nil
