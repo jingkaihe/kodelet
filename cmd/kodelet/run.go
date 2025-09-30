@@ -70,7 +70,7 @@ func processFragment(ctx context.Context, config *RunConfig, args []string) (str
 
 	fragmentArgs := make(map[string]string)
 	maps.Copy(fragmentArgs, config.FragmentArgs)
-	
+
 	customToolsConfig := tools.LoadCustomToolConfig()
 	fragmentArgs["custom_tools_local_dir"] = customToolsConfig.LocalDir
 	fragmentArgs["custom_tools_global_dir"] = customToolsConfig.GlobalDir
