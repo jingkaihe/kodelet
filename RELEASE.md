@@ -1,5 +1,20 @@
 # Kodelet
 
+## 0.1.2.beta (2025-09-30)
+
+### Features
+
+**Conversation Fork Command**: Added ability to fork conversations for experimenting with different directions while preserving context
+
+- **New Command**: `kodelet conversation fork [conversationID]` creates a copy of an existing conversation with reset usage statistics (tokens and costs)
+- **Context Preservation**: Forked conversations retain all messages, tool results, file access history, and metadata from the source
+
+**Enhanced Conversation Listing**: Improved `kodelet conversation list` output with usage and context information
+
+- **Cost Display**: Shows total cost (input + output + caching) for each conversation in table format
+- **Context Window Tracking**: Displays current/max context window usage (e.g., "50000/200000") to monitor conversation capacity
+- **Cleaner Formatting**: Removed newlines from preview text to maintain clean table formatting
+
 ## 0.1.1.beta (2025-09-29)
 
 ### Features
