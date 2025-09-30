@@ -54,7 +54,6 @@ func (t *OpenAIThread) SaveConversation(ctx context.Context, summarize bool) err
 	if summarize {
 		t.summary = t.ShortSummary(ctx)
 	}
-
 	var messagesJSON []byte
 	var err error
 	var metadata map[string]interface{}

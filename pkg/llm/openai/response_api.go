@@ -50,33 +50,6 @@ func (t *OpenAIThread) sendMessageResponseAPI(
 ) (string, error) {
 	logger.G(ctx).Debug("using Response API for message sending")
 
-	// Check if auto-compact should be triggered before processing
-	if !opt.DisableAutoCompact && t.shouldAutoCompact(opt.CompactRatio) {
-		logger.G(ctx).WithField("context_utilization", float64(t.GetUsage().CurrentContextWindow)/float64(t.GetUsage().MaxContextWindow)).Info("triggering auto-compact for Response API")
-		err := t.CompactContext(ctx)
-		if err != nil {
-			logger.G(ctx).WithError(err).Error("failed to auto-compact context")
-		} else {
-			logger.G(ctx).Info("auto-compact completed successfully")
-		}
-	}
-
-	// Check if we have a compact summary from a previous compact operation
-	// If so, prepend it to the message to preserve context
-	if len(t.conversationItems) == 1 && t.conversationItems[0].Type == "compact_summary" {
-		var compactData struct {
-			Text string `json:"text"`
-		}
-		if err := json.Unmarshal(t.conversationItems[0].Item, &compactData); err == nil && compactData.Text != "" {
-			if message != "" {
-				logger.G(ctx).WithField("compact_context_length", len(compactData.Text)).Info("prepending compact context to message")
-				message = compactData.Text + "\n\n" + message
-			}
-			// Clear the compact summary item - it's been used
-			t.conversationItems = []ConversationItem{}
-		}
-	}
-
 	// Build the request
 	params := t.buildResponseRequest(ctx, message, opt)
 

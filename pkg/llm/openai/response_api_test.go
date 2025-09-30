@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	openai "github.com/sashabaranov/go-openai"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -448,5 +449,149 @@ func TestResponseAPIConversationPersistence(t *testing.T) {
 		assert.Equal(t, "responses", restored["api_type"])
 		assert.Equal(t, "resp_123", restored["previous_response_id"])
 		assert.NotNil(t, restored["conversation_items"])
+	})
+}
+
+func TestGetLastAssistantMessageText(t *testing.T) {
+	t.Run("Chat Completion format - extracts assistant message", func(t *testing.T) {
+		thread := &OpenAIThread{
+			useResponsesAPI: false,
+			messages: []openai.ChatCompletionMessage{
+				{Role: openai.ChatMessageRoleUser, Content: "Hello"},
+				{Role: openai.ChatMessageRoleAssistant, Content: "Hi there!"},
+			},
+		}
+
+		text, err := thread.getLastAssistantMessageText()
+		require.NoError(t, err)
+		assert.Equal(t, "Hi there!", text)
+	})
+
+	t.Run("Chat Completion format - finds last assistant message", func(t *testing.T) {
+		thread := &OpenAIThread{
+			useResponsesAPI: false,
+			messages: []openai.ChatCompletionMessage{
+				{Role: openai.ChatMessageRoleUser, Content: "Hello"},
+				{Role: openai.ChatMessageRoleAssistant, Content: "First response"},
+				{Role: openai.ChatMessageRoleUser, Content: "Follow up"},
+				{Role: openai.ChatMessageRoleAssistant, Content: "Second response"},
+			},
+		}
+
+		text, err := thread.getLastAssistantMessageText()
+		require.NoError(t, err)
+		assert.Equal(t, "Second response", text)
+	})
+
+	t.Run("Chat Completion format - returns error when no messages", func(t *testing.T) {
+		thread := &OpenAIThread{
+			useResponsesAPI: false,
+			messages:        []openai.ChatCompletionMessage{},
+		}
+
+		_, err := thread.getLastAssistantMessageText()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no messages found")
+	})
+
+	t.Run("Chat Completion format - returns error when no assistant messages", func(t *testing.T) {
+		thread := &OpenAIThread{
+			useResponsesAPI: false,
+			messages: []openai.ChatCompletionMessage{
+				{Role: openai.ChatMessageRoleUser, Content: "Hello"},
+				{Role: openai.ChatMessageRoleSystem, Content: "System message"},
+			},
+		}
+
+		_, err := thread.getLastAssistantMessageText()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no text content found in assistant message")
+	})
+}
+
+func TestResponseAPISimplifiedSummarization(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("ShortSummary returns first 10 words of initial user input", func(t *testing.T) {
+		thread := &OpenAIThread{
+			useResponsesAPI: true,
+			conversationItems: []ConversationItem{
+				{
+					Type: "input",
+					Item: json.RawMessage(`{"role":"user","content":[{"type":"input_text","text":"This is a very long message with more than ten words to test the summary"}]}`),
+					Timestamp: time.Now(),
+				},
+				{
+					Type: "output",
+					Item: json.RawMessage(`{"content":[{"type":"text","text":"Response"}]}`),
+					Timestamp: time.Now(),
+				},
+			},
+		}
+
+		summary := thread.ShortSummary(ctx)
+		assert.Equal(t, "This is a very long message with more than ten", summary)
+	})
+
+	t.Run("ShortSummary handles message with fewer than 10 words", func(t *testing.T) {
+		thread := &OpenAIThread{
+			useResponsesAPI: true,
+			conversationItems: []ConversationItem{
+				{
+					Type: "input",
+					Item: json.RawMessage(`{"role":"user","content":[{"type":"input_text","text":"Short message here"}]}`),
+					Timestamp: time.Now(),
+				},
+			},
+		}
+
+		summary := thread.ShortSummary(ctx)
+		assert.Equal(t, "Short message here", summary)
+	})
+
+	t.Run("ShortSummary handles empty conversation", func(t *testing.T) {
+		thread := &OpenAIThread{
+			useResponsesAPI:   true,
+			conversationItems: []ConversationItem{},
+		}
+
+		summary := thread.ShortSummary(ctx)
+		assert.Equal(t, "No conversation yet", summary)
+	})
+
+	t.Run("ShortSummary falls back to item count if no user input found", func(t *testing.T) {
+		thread := &OpenAIThread{
+			useResponsesAPI: true,
+			conversationItems: []ConversationItem{
+				{
+					Type: "output",
+					Item: json.RawMessage(`{"content":[{"type":"text","text":"Response"}]}`),
+					Timestamp: time.Now(),
+				},
+			},
+		}
+
+		summary := thread.ShortSummary(ctx)
+		assert.Equal(t, "Conversation with 1 items", summary)
+	})
+
+	t.Run("CompactContext is a no-op for Response API", func(t *testing.T) {
+		thread := &OpenAIThread{
+			useResponsesAPI: true,
+			conversationItems: []ConversationItem{
+				{Type: "input", Item: json.RawMessage(`{}`), Timestamp: time.Now()},
+				{Type: "output", Item: json.RawMessage(`{}`), Timestamp: time.Now()},
+			},
+		}
+
+		// Capture original state
+		originalCount := len(thread.conversationItems)
+
+		// Call CompactContext - should be a no-op
+		err := thread.CompactContext(ctx)
+		require.NoError(t, err)
+
+		// Verify state unchanged
+		assert.Equal(t, originalCount, len(thread.conversationItems))
 	})
 }

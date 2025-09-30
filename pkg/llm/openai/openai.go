@@ -27,10 +27,10 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/jingkaihe/kodelet/pkg/usage"
-	"github.com/pkg/errors"
-	"github.com/sashabaranov/go-openai"
 	openai_v2 "github.com/openai/openai-go/v2"
 	"github.com/openai/openai-go/v2/option"
+	"github.com/pkg/errors"
+	"github.com/sashabaranov/go-openai"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
@@ -156,13 +156,13 @@ type OpenAIThread struct {
 	customPricing          llmtypes.CustomPricing                    // Custom pricing configuration
 	useCopilot             bool                                      // Whether this thread uses GitHub Copilot
 	subagentContextFactory llmtypes.SubagentContextFactory           // Injected function for cross-provider subagent creation
-	
+
 	// Response API support
-	useResponsesAPI    bool                  // Whether to use Response API instead of Chat Completion API
-	responsesClient    openai_v2.Client      // Official SDK client for Response API (value, not pointer)
-	previousResponseID string                // For Response API conversation continuity
-	conversationItems  []ConversationItem    // Unified conversation history (input + output items)
-	pendingInputItems  []interface{}         // Pending input items to include in next request (e.g., tool results)
+	useResponsesAPI    bool               // Whether to use Response API instead of Chat Completion API
+	responsesClient    openai_v2.Client   // Official SDK client for Response API (value, not pointer)
+	previousResponseID string             // For Response API conversation continuity
+	conversationItems  []ConversationItem // Unified conversation history (input + output items)
+	pendingInputItems  []interface{}      // Pending input items to include in next request (e.g., tool results)
 }
 
 func (t *OpenAIThread) Provider() string {
@@ -268,7 +268,7 @@ func NewOpenAIThread(config llmtypes.Config, subagentContextFactory llmtypes.Sub
 
 	// Determine if Response API should be used
 	useResponsesAPI := config.OpenAI != nil && config.OpenAI.ResponsesAPI
-	
+
 	// Auto-enable Response API for models that require it
 	if needsResponsesAPI(config.Model) {
 		useResponsesAPI = true
@@ -302,7 +302,7 @@ func NewOpenAIThread(config llmtypes.Config, subagentContextFactory llmtypes.Sub
 			// For now, Response API doesn't fully support Copilot - log a warning
 			logger.Warn("Response API with GitHub Copilot is experimental and may not work properly")
 		}
-		
+
 		// Create Response API client - NewClient returns Client (not *Client)
 		thread.responsesClient = openai_v2.NewClient(
 			option.WithAPIKey(apiKey),
@@ -826,25 +826,52 @@ func (t *OpenAIThread) getLastAssistantMessageText() (string, error) {
 }
 
 func (t *OpenAIThread) ShortSummary(ctx context.Context) string {
+	// For Response API, use first 10 words of initial user input
+	if t.useResponsesAPI {
+		t.mu.Lock()
+		defer t.mu.Unlock()
+		
+		if len(t.conversationItems) == 0 {
+			return "No conversation yet"
+		}
+
+		// Find the first input item and extract text
+		for _, item := range t.conversationItems {
+			if item.Type != "input" {
+				continue
+			}
+
+			// Try to parse as user message input
+			var inputMsg struct {
+				Content []struct {
+					Type string `json:"type"`
+					Text string `json:"text"`
+				} `json:"content"`
+				Role string `json:"role"`
+			}
+			if err := json.Unmarshal(item.Item, &inputMsg); err == nil && inputMsg.Role == "user" {
+				for _, content := range inputMsg.Content {
+					if content.Type == "input_text" && content.Text != "" {
+						// Get first 10 words
+						words := strings.Fields(content.Text)
+						if len(words) > 10 {
+							words = words[:10]
+						}
+						return strings.Join(words, " ")
+					}
+				}
+			}
+		}
+
+		return fmt.Sprintf("Conversation with %d items", len(t.conversationItems))
+	}
+
+	// For Chat Completion API, use LLM summarization
 	// Temporarily disable persistence during summarization
 	t.isPersisted = false
 	defer func() {
 		t.isPersisted = true
 	}()
-
-	// For Response API, preserve the conversation state to avoid polluting it
-	// The summary is a meta-operation and shouldn't be part of the conversation chain
-	var savedPreviousResponseID string
-	var savedConversationItems []ConversationItem
-	if t.useResponsesAPI {
-		savedPreviousResponseID = t.previousResponseID
-		savedConversationItems = make([]ConversationItem, len(t.conversationItems))
-		copy(savedConversationItems, t.conversationItems)
-		defer func() {
-			t.previousResponseID = savedPreviousResponseID
-			t.conversationItems = savedConversationItems
-		}()
-	}
 
 	// Use a faster model for summarization as it's a simpler task
 	_, err := t.SendMessage(ctx, prompts.ShortSummaryPrompt, &llmtypes.StringCollectorHandler{Silent: true}, llmtypes.MessageOpt{
@@ -884,6 +911,14 @@ func (t *OpenAIThread) shouldAutoCompact(compactRatio float64) bool {
 
 // CompactContext performs comprehensive context compacting by creating a detailed summary
 func (t *OpenAIThread) CompactContext(ctx context.Context) error {
+	// For Response API, keep it simple - no compacting needed
+	// Let OpenAI's server-side conversation management handle context
+	if t.useResponsesAPI {
+		logger.G(ctx).Debug("skipping context compacting for Response API")
+		return nil
+	}
+
+	// For Chat Completion API, use LLM-based compacting
 	// Temporarily disable persistence during compacting
 	wasPersistedOriginal := t.isPersisted
 	t.isPersisted = false
@@ -891,7 +926,7 @@ func (t *OpenAIThread) CompactContext(ctx context.Context) error {
 		t.isPersisted = wasPersistedOriginal
 	}()
 
-	// Use the strong model for comprehensive compacting (opposite of ShortSummary)
+	// Use the strong model for comprehensive compacting
 	_, err := t.SendMessage(ctx, prompts.CompactPrompt, &llmtypes.StringCollectorHandler{Silent: true}, llmtypes.MessageOpt{
 		UseWeakModel:       false, // Use strong model for comprehensive compacting
 		NoToolUse:          true,
@@ -913,29 +948,13 @@ func (t *OpenAIThread) CompactContext(ctx context.Context) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	if t.useResponsesAPI {
-		// For Response API, store the compact summary as a special conversation item
-		// It will be extracted and prepended to the next user message
-		// This preserves context while breaking the server-side conversation chain
-		// Note: No need to restore state - we're replacing it anyway
-		compactItem := ConversationItem{
-			Type: "compact_summary",
-			Item: json.RawMessage(fmt.Sprintf(`{"text": %q}`, compactSummary)),
-			Timestamp: time.Now(),
-		}
-		t.conversationItems = []ConversationItem{compactItem}
-		t.previousResponseID = "" // Start fresh, break server-side conversation chain
-		
-		logger.G(ctx).WithField("compact_summary_length", len(compactSummary)).Info("stored compact summary in conversationItems")
-	} else {
-		// For Chat Completion API, replace messages with the compact summary
-		// This preserves the context in a compressed form
-		t.messages = []openai.ChatCompletionMessage{
-			{
-				Role:    openai.ChatMessageRoleUser,
-				Content: compactSummary,
-			},
-		}
+	// For Chat Completion API, replace messages with the compact summary
+	// This preserves the context in a compressed form
+	t.messages = []openai.ChatCompletionMessage{
+		{
+			Role:    openai.ChatMessageRoleUser,
+			Content: compactSummary,
+		},
 	}
 
 	// Clear stale tool results - they reference tool calls that no longer exist
