@@ -162,6 +162,7 @@ type OpenAIThread struct {
 	responsesClient    openai_v2.Client      // Official SDK client for Response API (value, not pointer)
 	previousResponseID string                // For Response API conversation continuity
 	conversationItems  []ConversationItem    // Unified conversation history (input + output items)
+	pendingInputItems  []interface{}         // Pending input items to include in next request (e.g., tool results)
 }
 
 func (t *OpenAIThread) Provider() string {

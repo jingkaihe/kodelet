@@ -152,6 +152,17 @@ func (t *OpenAIThread) buildResponseRequest(
 func (t *OpenAIThread) buildInputItems(message string, images []string) []responses.ResponseInputItemUnionParam {
 	var inputItems []responses.ResponseInputItemUnionParam
 
+	// First, include any pending input items (e.g., tool results from previous turn)
+	for _, pendingItem := range t.pendingInputItems {
+		// Type assert to the correct type
+		if item, ok := pendingItem.(responses.ResponseInputItemUnionParam); ok {
+			inputItems = append(inputItems, item)
+		}
+	}
+	
+	// Clear pending items after including them
+	t.pendingInputItems = nil
+
 	// If we have a message or images, create an input message
 	if message != "" || len(images) > 0 {
 		var contentList responses.ResponseInputMessageContentListParam
@@ -241,7 +252,7 @@ func (t *OpenAIThread) buildResponseAPITools(opt llmtypes.MessageOpt) []response
 				Name:        tool.Name(),
 				Description: openai_v2.String(tool.Description()),
 				Parameters:  schemaMap,
-				Strict:      openai_v2.Bool(true), // Enable strict parameter validation
+				// Note: Strict mode disabled to support optional parameters in tool schemas
 			},
 		})
 	}
@@ -394,13 +405,8 @@ func (t *OpenAIThread) processResponseOutput(
 				output.AssistantFacing(),
 			)
 
-			// Append tool result to conversation history
-			toolResultJSON, _ := json.Marshal(toolResultItem)
-			t.conversationItems = append(t.conversationItems, ConversationItem{
-				Type:      "input",
-				Item:      toolResultJSON,
-				Timestamp: time.Now(),
-			})
+			// Store in pending items to be included in next request
+			t.pendingInputItems = append(t.pendingInputItems, toolResultItem)
 
 		case "reasoning":
 			// Handle reasoning content (for o-series models)
