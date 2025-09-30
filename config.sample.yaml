@@ -225,6 +225,37 @@ openai:
   #     output: 0.000015        # $15 per million tokens
   #     context_window: 131072  # 131k tokens
   #   # ... additional models
+  
+  # Response API Configuration (OpenAI's new unified API)
+  # The Response API provides enhanced capabilities over Chat Completion API:
+  # - Stateful conversation management with automatic context handling
+  # - Enhanced multimodal support (text, images, audio, files)
+  # - Fine-grained streaming with 30+ event types
+  # - Background processing for long-running tasks
+  # 
+  # Some models (like gpt-5-codex) only support Response API and will auto-enable it
+  # responses_api: false          # Enable Response API instead of Chat Completion API (default: false)
+  # store_responses: false        # Store responses for later retrieval via API (default: false)
+  # conversation_id: ""           # Persistent conversation ID for stateful conversations (optional)
+  
+  # Example: Using Response API with gpt-5-codex (automatically enabled)
+  # provider: "openai"
+  # model: "gpt-5-codex"          # Automatically uses Response API
+  # max_tokens: 16000
+  
+  # Example: Explicitly enabling Response API for any model
+  # provider: "openai"
+  # model: "gpt-4.1"
+  # openai:
+  #   responses_api: true         # Force use of Response API
+  #   store_responses: true       # Store for retrieval
+  
+  # Example: Stateful conversation with Response API
+  # provider: "openai"
+  # model: "gpt-4.1"
+  # openai:
+  #   responses_api: true
+  #   conversation_id: "my-conversation-123"  # Persistent across sessions
 
 # Google GenAI Configuration
 # Supports both Gemini API (developer-focused) and Vertex AI (enterprise-grade)
