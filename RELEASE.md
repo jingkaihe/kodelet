@@ -1,5 +1,14 @@
 # Kodelet
 
+## 0.1.4.beta (2025-09-30)
+
+### Features
+
+**Enhanced Custom Tool Generation**: Improved custom tool creation with global and local scope support
+
+- **Global Tools**: Added `--arg global=true` option to create tools available across all projects in `~/.kodelet/tools`
+- **Recipe Rename**: Renamed `custom-tools` recipe to `custom-tool` (singular) for consistency
+
 ## 0.1.2.beta (2025-09-30)
 
 ### Features
