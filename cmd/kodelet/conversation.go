@@ -405,15 +405,15 @@ func NewConversationListOutput(summaries []convtypes.ConversationSummary, format
 		}
 
 		output.Conversations = append(output.Conversations, ConversationSummaryOutput{
-			ID:                 summary.ID,
-			CreatedAt:          summary.CreatedAt,
-			UpdatedAt:          summary.UpdatedAt,
-			MessageCount:       summary.MessageCount,
-			Provider:           provider,
-			Preview:            preview,
-			TotalCost:          summary.Usage.TotalCost(),
-			CurrentContext:     summary.Usage.CurrentContextWindow,
-			MaxContext:         summary.Usage.MaxContextWindow,
+			ID:             summary.ID,
+			CreatedAt:      summary.CreatedAt,
+			UpdatedAt:      summary.UpdatedAt,
+			MessageCount:   summary.MessageCount,
+			Provider:       provider,
+			Preview:        preview,
+			TotalCost:      summary.Usage.TotalCost(),
+			CurrentContext: summary.Usage.CurrentContextWindow,
+			MaxContext:     summary.Usage.MaxContextWindow,
 		})
 	}
 

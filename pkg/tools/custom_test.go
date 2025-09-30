@@ -459,7 +459,7 @@ func TestExpandHomePath(t *testing.T) {
 }
 
 func TestLoadCustomToolConfig(t *testing.T) {
-	config := loadCustomToolConfig()
+	config := LoadCustomToolConfig()
 
 	// Check defaults
 	assert.True(t, config.Enabled)

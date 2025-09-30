@@ -95,11 +95,11 @@ You must stage your changes (using 'git add') before running this command.`,
 		presenter.Info("Analyzing staged changes and generating commit message...")
 
 		commitMsg, usage := llm.SendMessageAndGetTextWithUsage(ctx, s, prompt, llmConfig, true, llmtypes.MessageOpt{
-			UseWeakModel:         true,
-			PromptCache:          false,
-			NoToolUse:            true,
-			DisableUsageLog:      true,
-			NoSaveConversation:   config.NoSave,
+			UseWeakModel:       true,
+			PromptCache:        false,
+			NoToolUse:          true,
+			DisableUsageLog:    true,
+			NoSaveConversation: config.NoSave,
 		})
 		commitMsg = sanitizeCommitMessage(commitMsg)
 

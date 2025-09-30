@@ -335,7 +335,7 @@ func TestResolveModelAlias(t *testing.T) {
 			model: "gpt41",
 			aliases: map[string]string{
 				"sonnet-45": "claude-sonnet-4-5-20250929",
-				"gpt41":    "gpt-4.1",
+				"gpt41":     "gpt-4.1",
 			},
 			expected: "gpt-4.1",
 		},

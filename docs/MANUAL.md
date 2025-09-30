@@ -1148,13 +1148,16 @@ kodelet run "Analyze the server logs for any ERROR patterns"
 
 ### Generate Custom Tool
 
-Kodelet includes a built-in `custom-tools` recipe that automatically generates custom tool templates based on your task description. This is the fastest way to create new tools with proper structure and best practices.
+Kodelet includes a built-in `custom-tool` recipe that automatically generates custom tool templates based on your task description. This is the fastest way to create new tools with proper structure and best practices.
 
 **Generate a Custom Tool:**
 
 ```bash
-# Generate a weather tool without API key requirement
-kodelet run -r custom-tools --arg task="implement a tool to fetch the weather based on the location, ideally without requiring api key"
+# Generate a weather tool without API key requirement (saved locally)
+kodelet run -r custom-tool --arg task="implement a tool to fetch the weather based on the location, ideally without requiring api key"
+
+# Generate a global tool available across all projects
+kodelet run -r custom-tool --arg task="format and validate JSON" --arg global=true
 ```
 
 ## Key Features
