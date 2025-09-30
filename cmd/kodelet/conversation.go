@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
@@ -206,6 +207,21 @@ var conversationStreamCmd = &cobra.Command{
 	},
 }
 
+var conversationForkCmd = &cobra.Command{
+	Use:   "fork [conversationID]",
+	Short: "Fork a conversation to create a copy with reset usage statistics",
+	Long:  "Fork a conversation by copying its messages and context while resetting usage statistics (tokens and costs). If no conversation ID is provided, the most recent conversation will be forked.",
+	Args:  cobra.MaximumNArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		ctx := cmd.Context()
+		conversationID := ""
+		if len(args) > 0 {
+			conversationID = args[0]
+		}
+		forkConversationCmd(ctx, conversationID)
+	},
+}
+
 func init() {
 	listDefaults := NewConversationListConfig()
 	conversationListCmd.Flags().String("start", listDefaults.StartDate, "Filter conversations after this date (format: YYYY-MM-DD)")
@@ -245,6 +261,7 @@ func init() {
 	conversationCmd.AddCommand(conversationExportCmd)
 	conversationCmd.AddCommand(conversationEditCmd)
 	conversationCmd.AddCommand(conversationStreamCmd)
+	conversationCmd.AddCommand(conversationForkCmd)
 }
 
 func getConversationListConfigFromFlags(cmd *cobra.Command) *ConversationListConfig {
@@ -373,6 +390,10 @@ func NewConversationListOutput(summaries []convtypes.ConversationSummary, format
 			preview = summary.Summary
 		}
 
+		// Remove newlines from preview to keep table formatting clean
+		preview = strings.ReplaceAll(preview, "\n", " ")
+		preview = strings.ReplaceAll(preview, "\r", " ")
+
 		provider := summary.Provider
 		switch summary.Provider {
 		case "anthropic":
@@ -384,12 +405,15 @@ func NewConversationListOutput(summaries []convtypes.ConversationSummary, format
 		}
 
 		output.Conversations = append(output.Conversations, ConversationSummaryOutput{
-			ID:           summary.ID,
-			CreatedAt:    summary.CreatedAt,
-			UpdatedAt:    summary.UpdatedAt,
-			MessageCount: summary.MessageCount,
-			Provider:     provider,
-			Preview:      preview,
+			ID:                 summary.ID,
+			CreatedAt:          summary.CreatedAt,
+			UpdatedAt:          summary.UpdatedAt,
+			MessageCount:       summary.MessageCount,
+			Provider:           provider,
+			Preview:            preview,
+			TotalCost:          summary.Usage.TotalCost(),
+			CurrentContext:     summary.Usage.CurrentContextWindow,
+			MaxContext:         summary.Usage.MaxContextWindow,
 		})
 	}
 
@@ -424,25 +448,38 @@ func (o *ConversationListOutput) renderJSON(w io.Writer) error {
 func (o *ConversationListOutput) renderTable(w io.Writer) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 
-	fmt.Fprintln(tw, "ID\tCreated\tUpdated\tMessages\tProvider\tSummary")
-	fmt.Fprintln(tw, "----\t-------\t-------\t--------\t--------\t-------")
+	fmt.Fprintln(tw, "ID\tCreated\tUpdated\tMessages\tProvider\tCost\tContext\tSummary")
+	fmt.Fprintln(tw, "----\t-------\t-------\t--------\t--------\t----\t-------\t-------")
 
 	for _, summary := range o.Conversations {
 		created := summary.CreatedAt.Format(time.RFC3339)
 		updated := summary.UpdatedAt.Format(time.RFC3339)
 
-		// Truncate long previews to allow room for provider column
+		// Format cost as dollars with 4 decimal places
+		costStr := fmt.Sprintf("$%.4f", summary.TotalCost)
+
+		// Format context window usage
+		var contextStr string
+		if summary.MaxContext > 0 {
+			contextStr = fmt.Sprintf("%d/%d", summary.CurrentContext, summary.MaxContext)
+		} else {
+			contextStr = "-"
+		}
+
+		// Truncate long previews to allow room for other columns
 		preview := summary.Preview
 		if len(preview) > 50 {
 			preview = strings.TrimSpace(preview[:47]) + "..."
 		}
 
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%s\t%s\n",
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%s\t%s\t%s\t%s\n",
 			summary.ID,
 			created,
 			updated,
 			summary.MessageCount,
 			summary.Provider,
+			costStr,
+			contextStr,
 			preview,
 		)
 	}
@@ -451,12 +488,15 @@ func (o *ConversationListOutput) renderTable(w io.Writer) error {
 }
 
 type ConversationSummaryOutput struct {
-	ID           string    `json:"id"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
-	MessageCount int       `json:"message_count"`
-	Provider     string    `json:"provider"`
-	Preview      string    `json:"preview"`
+	ID             string    `json:"id"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+	MessageCount   int       `json:"message_count"`
+	Provider       string    `json:"provider"`
+	Preview        string    `json:"preview"`
+	TotalCost      float64   `json:"total_cost"`
+	CurrentContext int       `json:"current_context_window"`
+	MaxContext     int       `json:"max_context_window"`
 }
 
 func listConversationsCmd(ctx context.Context, config *ConversationListConfig) {
@@ -888,4 +928,65 @@ func streamConversationCmd(ctx context.Context, conversationID string, config *C
 		presenter.Error(err, "Failed to stream conversation updates")
 		os.Exit(1)
 	}
+}
+
+func forkConversationCmd(ctx context.Context, conversationID string) {
+	store, err := conversations.GetConversationStore(ctx)
+	if err != nil {
+		presenter.Error(err, "Failed to initialize conversation store")
+		os.Exit(1)
+	}
+	defer store.Close()
+
+	// If no conversation ID is provided, get the most recent one
+	if conversationID == "" {
+		conversationID, err = conversations.GetMostRecentConversationID(ctx)
+		if err != nil {
+			presenter.Error(err, "Failed to get most recent conversation")
+			os.Exit(1)
+		}
+		presenter.Info(fmt.Sprintf("Forking most recent conversation: %s", conversationID))
+	}
+
+	// Load the source conversation
+	sourceRecord, err := store.Load(ctx, conversationID)
+	if err != nil {
+		presenter.Error(err, fmt.Sprintf("Failed to load conversation %s", conversationID))
+		os.Exit(1)
+	}
+
+	// Create a new conversation record with a new ID
+	forkedRecord := convtypes.NewConversationRecord("")
+
+	// Copy messages and context from source
+	forkedRecord.RawMessages = sourceRecord.RawMessages
+	forkedRecord.Provider = sourceRecord.Provider
+	forkedRecord.Summary = sourceRecord.Summary
+	forkedRecord.ToolResults = sourceRecord.ToolResults
+	forkedRecord.BackgroundProcesses = sourceRecord.BackgroundProcesses
+
+	// Copy FileLastAccess and Metadata maps
+	if sourceRecord.FileLastAccess != nil {
+		forkedRecord.FileLastAccess = make(map[string]time.Time)
+		maps.Copy(forkedRecord.FileLastAccess, sourceRecord.FileLastAccess)
+	}
+
+	if sourceRecord.Metadata != nil {
+		forkedRecord.Metadata = make(map[string]any)
+		maps.Copy(forkedRecord.Metadata, sourceRecord.Metadata)
+	}
+
+	// Usage is already initialized to zero by NewConversationRecord
+	// Preserve context window information from source
+	forkedRecord.Usage.CurrentContextWindow = sourceRecord.Usage.CurrentContextWindow
+	forkedRecord.Usage.MaxContextWindow = sourceRecord.Usage.MaxContextWindow
+
+	// Save the forked conversation
+	if err := store.Save(ctx, forkedRecord); err != nil {
+		presenter.Error(err, "Failed to save forked conversation")
+		os.Exit(1)
+	}
+
+	presenter.Success(fmt.Sprintf("Conversation forked successfully. New ID: %s", forkedRecord.ID))
+	presenter.Info(fmt.Sprintf("Original: %s → Forked: %s", conversationID, forkedRecord.ID))
 }

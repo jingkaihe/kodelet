@@ -23,6 +23,7 @@ type CommitConfig struct {
 	Short      bool
 	NoConfirm  bool
 	NoCoauthor bool
+	NoSave     bool
 }
 
 func NewCommitConfig() *CommitConfig {
@@ -32,6 +33,7 @@ func NewCommitConfig() *CommitConfig {
 		Short:      false,
 		NoConfirm:  false,
 		NoCoauthor: false,
+		NoSave:     false,
 	}
 }
 
@@ -93,10 +95,11 @@ You must stage your changes (using 'git add') before running this command.`,
 		presenter.Info("Analyzing staged changes and generating commit message...")
 
 		commitMsg, usage := llm.SendMessageAndGetTextWithUsage(ctx, s, prompt, llmConfig, true, llmtypes.MessageOpt{
-			UseWeakModel:    true,
-			PromptCache:     false,
-			NoToolUse:       true,
-			DisableUsageLog: true,
+			UseWeakModel:         true,
+			PromptCache:          false,
+			NoToolUse:            true,
+			DisableUsageLog:      true,
+			NoSaveConversation:   config.NoSave,
 		})
 		commitMsg = sanitizeCommitMessage(commitMsg)
 
@@ -132,6 +135,7 @@ func init() {
 	commitCmd.Flags().Bool("short", defaults.Short, "Generate a short commit message with just a description, no bullet points")
 	commitCmd.Flags().Bool("no-confirm", defaults.NoConfirm, "Skip confirmation prompt and create commit automatically")
 	commitCmd.Flags().Bool("no-coauthor", defaults.NoCoauthor, "Disable coauthor attribution in commit messages")
+	commitCmd.Flags().Bool("no-save", defaults.NoSave, "Disable conversation persistence")
 }
 
 func getCommitConfigFromFlags(cmd *cobra.Command) *CommitConfig {
@@ -151,6 +155,9 @@ func getCommitConfigFromFlags(cmd *cobra.Command) *CommitConfig {
 	}
 	if noCoauthor, err := cmd.Flags().GetBool("no-coauthor"); err == nil {
 		config.NoCoauthor = noCoauthor
+	}
+	if noSave, err := cmd.Flags().GetBool("no-save"); err == nil {
+		config.NoSave = noSave
 	}
 
 	return config

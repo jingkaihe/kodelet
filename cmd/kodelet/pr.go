@@ -22,6 +22,7 @@ type PRConfig struct {
 	Target       string
 	TemplateFile string
 	Draft        bool
+	NoSave       bool
 }
 
 func NewPRConfig() *PRConfig {
@@ -30,6 +31,7 @@ func NewPRConfig() *PRConfig {
 		Target:       "main",
 		TemplateFile: "",
 		Draft:        false,
+		NoSave:       false,
 	}
 }
 
@@ -135,7 +137,8 @@ Use the --draft flag to create a draft pull request that is not ready for review
 		presenter.Separator()
 
 		out, usage := llm.SendMessageAndGetTextWithUsage(ctx, s, prompt, llmConfig, false, llmtypes.MessageOpt{
-			PromptCache: true,
+			PromptCache:        true,
+			NoSaveConversation: config.NoSave,
 		})
 
 		fmt.Println(out)
@@ -153,6 +156,7 @@ func init() {
 	prCmd.Flags().StringP("target", "t", defaults.Target, "The target branch to create the pull request on")
 	prCmd.Flags().String("template-file", defaults.TemplateFile, "The path to the template file for the pull request")
 	prCmd.Flags().BoolP("draft", "d", defaults.Draft, "Create the pull request as a draft")
+	prCmd.Flags().Bool("no-save", defaults.NoSave, "Disable conversation persistence")
 }
 
 func getPRConfigFromFlags(cmd *cobra.Command) *PRConfig {
@@ -169,6 +173,9 @@ func getPRConfigFromFlags(cmd *cobra.Command) *PRConfig {
 	}
 	if draft, err := cmd.Flags().GetBool("draft"); err == nil {
 		config.Draft = draft
+	}
+	if noSave, err := cmd.Flags().GetBool("no-save"); err == nil {
+		config.NoSave = noSave
 	}
 
 	return config
