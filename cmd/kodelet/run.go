@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/signal"
 	"strings"
@@ -67,9 +68,16 @@ func processFragment(ctx context.Context, config *RunConfig, args []string) (str
 		return "", nil, errors.Wrap(err, "failed to create fragment processor")
 	}
 
+	fragmentArgs := make(map[string]string)
+	maps.Copy(fragmentArgs, config.FragmentArgs)
+	
+	customToolsConfig := tools.LoadCustomToolConfig()
+	fragmentArgs["custom_tools_local_dir"] = customToolsConfig.LocalDir
+	fragmentArgs["custom_tools_global_dir"] = customToolsConfig.GlobalDir
+
 	fragmentConfig := &fragments.Config{
 		FragmentName: config.FragmentName,
-		Arguments:    config.FragmentArgs,
+		Arguments:    fragmentArgs,
 	}
 
 	fragment, err := fragmentProcessor.LoadFragment(ctx, fragmentConfig)

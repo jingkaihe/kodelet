@@ -64,7 +64,7 @@ type CustomToolManager struct {
 
 // NewCustomToolManager creates a new custom tool manager
 func NewCustomToolManager() (*CustomToolManager, error) {
-	config := loadCustomToolConfig()
+	config := LoadCustomToolConfig()
 
 	globalDir := expandHomePath(config.GlobalDir)
 	localDir := config.LocalDir
@@ -79,8 +79,9 @@ func NewCustomToolManager() (*CustomToolManager, error) {
 	return manager, nil
 }
 
-// loadCustomToolConfig loads custom tool configuration from Viper
-func loadCustomToolConfig() CustomToolConfig {
+// LoadCustomToolConfig loads custom tool configuration from Viper
+// This is exported so it can be used by other packages (e.g., for injecting into fragments)
+func LoadCustomToolConfig() CustomToolConfig {
 	config := CustomToolConfig{
 		Enabled:       true,
 		GlobalDir:     "~/.kodelet/tools",

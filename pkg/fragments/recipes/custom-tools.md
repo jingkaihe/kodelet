@@ -3,17 +3,20 @@ name: Custom Tool Generator
 description: Creates a custom tool for Kodelet, implementing the Kodelet custom tool protocol
 ---
 
-{{/* Template variables: .task */}}
+{{/* Template variables: .task, .global */}}
+{{/* Configuration variables: .custom_tools_local_dir, .custom_tools_global_dir */}}
 
 Create a custom tool that {{.task}}.
+
+{{if eq .global "true"}}The tool will be saved to the **global** custom tools directory ({{.custom_tools_global_dir}}) and will be available across all projects.{{else}}The tool will be saved to the **local** custom tools directory ({{.custom_tools_local_dir}}) and will only be available in this project.{{end}}
 
 Choose one of the following implementation approaches:
 ## Python Implementation (using uv)
 
 Create the tool as a Python script using uv for dependency management:
 
-1. **File Location**: Save as `./kodelet-tools/[task_in_snake_case]` (e.g., "analyze log files" → `./kodelet-tools/analyze_log_files`)
-2. **Make it executable**: `chmod +x ./kodelet-tools/[task_in_snake_case]`
+1. **File Location**: Save as `{{if eq .global "true"}}{{.custom_tools_global_dir}}{{else}}{{.custom_tools_local_dir}}{{end}}/[task_in_snake_case]` (e.g., "analyze log files" → `{{if eq .global "true"}}{{.custom_tools_global_dir}}{{else}}{{.custom_tools_local_dir}}{{end}}/analyze_log_files`)
+2. **Make it executable**: `chmod +x {{if eq .global "true"}}{{.custom_tools_global_dir}}{{else}}{{.custom_tools_local_dir}}{{end}}/[task_in_snake_case]`
 3. **Use proper shebang**: `#!/usr/bin/env uv` (automatically handles dependencies via inline script metadata)
 
 ### Python Template:
@@ -99,8 +102,8 @@ if __name__ == "__main__":
 
 Create the tool as a Bash script:
 
-1. **File Location**: Save as `./kodelet-tools/[task_in_snake_case]` (e.g., "analyze log files" → `./kodelet-tools/analyze_log_files`)
-2. **Make it executable**: `chmod +x ./kodelet-tools/[task_in_snake_case]`
+1. **File Location**: Save as `{{if eq .global "true"}}{{.custom_tools_global_dir}}{{else}}{{.custom_tools_local_dir}}{{end}}/[task_in_snake_case]` (e.g., "analyze log files" → `{{if eq .global "true"}}{{.custom_tools_global_dir}}{{else}}{{.custom_tools_local_dir}}{{end}}/analyze_log_files`)
+2. **Make it executable**: `chmod +x {{if eq .global "true"}}{{.custom_tools_global_dir}}{{else}}{{.custom_tools_local_dir}}{{end}}/[task_in_snake_case]`
 3. **Use proper shebang**: `#!/bin/bash`
 
 ### Bash Template:
@@ -187,13 +190,13 @@ For the task "{{.task}}", consider:
 
 ```bash
 # Test description
-./kodelet-tools/[task_in_snake_case] description
+{{if eq .global "true"}}{{.custom_tools_global_dir}}{{else}}{{.custom_tools_local_dir}}{{end}}/[task_in_snake_case] description
 
 # Test execution
-echo '{"input": "test data"}' | ./kodelet-tools/[task_in_snake_case] run
+echo '{"input": "test data"}' | {{if eq .global "true"}}{{.custom_tools_global_dir}}{{else}}{{.custom_tools_local_dir}}{{end}}/[task_in_snake_case] run
 
 # Test error handling
-echo '{}' | ./kodelet-tools/[task_in_snake_case] run
+echo '{}' | {{if eq .global "true"}}{{.custom_tools_global_dir}}{{else}}{{.custom_tools_local_dir}}{{end}}/[task_in_snake_case] run
 ```
 
 Now implement your custom tool for the specific requirements of: **{{.task}}**
