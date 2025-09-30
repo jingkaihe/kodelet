@@ -832,6 +832,20 @@ func (t *OpenAIThread) ShortSummary(ctx context.Context) string {
 		t.isPersisted = true
 	}()
 
+	// For Response API, preserve the conversation state to avoid polluting it
+	// The summary is a meta-operation and shouldn't be part of the conversation chain
+	var savedPreviousResponseID string
+	var savedConversationItems []ConversationItem
+	if t.useResponsesAPI {
+		savedPreviousResponseID = t.previousResponseID
+		savedConversationItems = make([]ConversationItem, len(t.conversationItems))
+		copy(savedConversationItems, t.conversationItems)
+		defer func() {
+			t.previousResponseID = savedPreviousResponseID
+			t.conversationItems = savedConversationItems
+		}()
+	}
+
 	// Use a faster model for summarization as it's a simpler task
 	_, err := t.SendMessage(ctx, prompts.ShortSummaryPrompt, &llmtypes.StringCollectorHandler{Silent: true}, llmtypes.MessageOpt{
 		UseWeakModel:       true,
@@ -899,11 +913,29 @@ func (t *OpenAIThread) CompactContext(ctx context.Context) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	t.messages = []openai.ChatCompletionMessage{
-		{
-			Role:    openai.ChatMessageRoleUser,
-			Content: compactSummary,
-		},
+	if t.useResponsesAPI {
+		// For Response API, store the compact summary as a special conversation item
+		// It will be extracted and prepended to the next user message
+		// This preserves context while breaking the server-side conversation chain
+		// Note: No need to restore state - we're replacing it anyway
+		compactItem := ConversationItem{
+			Type: "compact_summary",
+			Item: json.RawMessage(fmt.Sprintf(`{"text": %q}`, compactSummary)),
+			Timestamp: time.Now(),
+		}
+		t.conversationItems = []ConversationItem{compactItem}
+		t.previousResponseID = "" // Start fresh, break server-side conversation chain
+		
+		logger.G(ctx).WithField("compact_summary_length", len(compactSummary)).Info("stored compact summary in conversationItems")
+	} else {
+		// For Chat Completion API, replace messages with the compact summary
+		// This preserves the context in a compressed form
+		t.messages = []openai.ChatCompletionMessage{
+			{
+				Role:    openai.ChatMessageRoleUser,
+				Content: compactSummary,
+			},
+		}
 	}
 
 	// Clear stale tool results - they reference tool calls that no longer exist
