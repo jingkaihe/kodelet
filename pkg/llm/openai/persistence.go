@@ -436,6 +436,21 @@ func streamResponseAPIMessages(rawMessages json.RawMessage, toolResults map[stri
 
 // ExtractMessages converts the internal message format to the common format
 func ExtractMessages(data []byte, toolResults map[string]tooltypes.StructuredToolResult) ([]llmtypes.Message, error) {
+	// Try to determine the API type
+	var typeCheck struct {
+		APIType string `json:"api_type"`
+	}
+	if err := json.Unmarshal(data, &typeCheck); err == nil && typeCheck.APIType == "responses" {
+		// Response API format
+		return extractResponseAPIMessages(data, toolResults)
+	}
+
+	// Chat Completion API format (existing implementation)
+	return extractChatCompletionMessages(data, toolResults)
+}
+
+// extractChatCompletionMessages handles Chat Completion API format
+func extractChatCompletionMessages(data []byte, toolResults map[string]tooltypes.StructuredToolResult) ([]llmtypes.Message, error) {
 	var messages []openai.ChatCompletionMessage
 	if err := json.Unmarshal(data, &messages); err != nil {
 		return nil, errors.Wrap(err, "error unmarshaling messages")
@@ -491,6 +506,115 @@ func ExtractMessages(data []byte, toolResults map[string]tooltypes.StructuredToo
 				result = append(result, llmtypes.Message{
 					Role:    string(msg.Role),
 					Content: fmt.Sprintf("🔧 Using tool: %s", string(inputJSON)),
+				})
+			}
+		}
+	}
+
+	return result, nil
+}
+
+// extractResponseAPIMessages handles Response API format
+func extractResponseAPIMessages(data []byte, toolResults map[string]tooltypes.StructuredToolResult) ([]llmtypes.Message, error) {
+	var conversationData struct {
+		ConversationItems []ConversationItem `json:"conversation_items"`
+	}
+
+	if err := json.Unmarshal(data, &conversationData); err != nil {
+		return nil, errors.Wrap(err, "error unmarshaling response API messages")
+	}
+
+	result := make([]llmtypes.Message, 0)
+
+	// Process conversation items in chronological order
+	for _, convItem := range conversationData.ConversationItems {
+		if convItem.Type == "input" {
+			// Try to parse as user message first
+			var inputMsg struct {
+				Content []struct {
+					Type string `json:"type"`
+					Text string `json:"text"`
+				} `json:"content"`
+				Role string `json:"role"`
+			}
+			if err := json.Unmarshal(convItem.Item, &inputMsg); err == nil && inputMsg.Role != "" {
+				// Extract text content
+				for _, content := range inputMsg.Content {
+					if content.Type == "input_text" && content.Text != "" {
+						result = append(result, llmtypes.Message{
+							Role:    inputMsg.Role,
+							Content: content.Text,
+						})
+					}
+				}
+				continue
+			}
+
+			// Try to parse as function call output (tool result)
+			var toolResult struct {
+				CallID string `json:"call_id"`
+				Output string `json:"output"`
+			}
+			if err := json.Unmarshal(convItem.Item, &toolResult); err == nil && toolResult.CallID != "" {
+				text := toolResult.Output
+				// Use CLI rendering if structured result is available
+				if structuredResult, ok := toolResults[toolResult.CallID]; ok {
+					registry := renderers.NewRendererRegistry()
+					text = registry.Render(structuredResult)
+				}
+
+				result = append(result, llmtypes.Message{
+					Role:    "assistant",
+					Content: fmt.Sprintf("🔄 Tool result:\n%s", text),
+				})
+			}
+
+		} else if convItem.Type == "output" {
+			// Parse output item
+			var itemType struct {
+				Type string `json:"type"`
+			}
+			if err := json.Unmarshal(convItem.Item, &itemType); err != nil {
+				continue
+			}
+
+			switch itemType.Type {
+			case "message":
+				// Assistant message
+				var outputMsg struct {
+					Content []struct {
+						Type string `json:"type"`
+						Text string `json:"text"`
+					} `json:"content"`
+					Role string `json:"role"`
+				}
+				if err := json.Unmarshal(convItem.Item, &outputMsg); err != nil {
+					continue
+				}
+
+				// Extract text content
+				for _, content := range outputMsg.Content {
+					if content.Type == "output_text" && content.Text != "" {
+						result = append(result, llmtypes.Message{
+							Role:    outputMsg.Role,
+							Content: content.Text,
+						})
+					}
+				}
+
+			case "function_call":
+				// Tool call
+				var toolCall struct {
+					Name      string `json:"name"`
+					Arguments string `json:"arguments"`
+				}
+				if err := json.Unmarshal(convItem.Item, &toolCall); err != nil {
+					continue
+				}
+
+				result = append(result, llmtypes.Message{
+					Role:    "assistant",
+					Content: fmt.Sprintf("🔧 Using tool: %s: %s", toolCall.Name, toolCall.Arguments),
 				})
 			}
 		}

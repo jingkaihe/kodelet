@@ -78,6 +78,17 @@ func (t *OpenAIThread) sendMessageResponseAPI(
 	// Update previousResponseID for conversation continuity
 	t.previousResponseID = resp.ID
 
+	// Save conversation state after completing the interaction
+	if t.isPersisted && t.store != nil && !opt.NoSaveConversation {
+		saveCtx := context.Background() // use new context to avoid cancellation
+		t.SaveConversation(saveCtx, true)
+	}
+
+	// Signal completion for non-subagents
+	if !t.config.IsSubAgent {
+		handler.HandleDone()
+	}
+
 	return output, nil
 }
 
