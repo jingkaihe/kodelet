@@ -37,6 +37,7 @@ var Models = llm.CustomModels{
 		"computer-use-preview",
 		"gpt-image-1",
 		"codex-mini-latest",
+		"gpt-5-codex", // Response API only model
 	},
 }
 
@@ -206,6 +207,12 @@ var Pricing = llm.CustomPricing{
 		CachedInput:   0.0000005, // $0.50 per million tokens
 		Output:        0.000008,  // $8.00 per million tokens
 		ContextWindow: 200_000,
+	},
+	"gpt-5-codex": llm.ModelPricing{
+		Input:         0.00000125,  // $1.25 per million tokens (same as gpt-5)
+		CachedInput:   0.000000125, // $0.125 per million tokens (same as gpt-5)
+		Output:        0.00001,     // $10.00 per million tokens (same as gpt-5)
+		ContextWindow: 400_000,     // Same as gpt-5
 	},
 }
 

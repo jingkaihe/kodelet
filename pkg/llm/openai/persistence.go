@@ -50,27 +50,50 @@ func (t *OpenAIThread) SaveConversation(ctx context.Context, summarize bool) err
 		return nil
 	}
 
-	// Clean up orphaned messages before saving
-	t.cleanupOrphanedMessages()
-
 	// Generate a new summary if requested
 	if summarize {
 		t.summary = t.ShortSummary(ctx)
 	}
 
-	// Serialize the thread state
-	messagesJSON, err := json.Marshal(t.messages)
-	if err != nil {
-		return errors.Wrap(err, "error marshaling messages")
+	var messagesJSON []byte
+	var err error
+	var metadata map[string]interface{}
+
+	if t.useResponsesAPI {
+		// For Response API, serialize the unified conversation history
+		conversationData := map[string]interface{}{
+			"api_type":             "responses", // Discriminator for Response API
+			"previous_response_id": t.previousResponseID,
+			"conversation_items":   t.conversationItems, // Unified history for visualization
+		}
+		messagesJSON, err = json.Marshal(conversationData)
+		if err != nil {
+			return errors.Wrap(err, "error marshaling response items")
+		}
+		metadata = map[string]interface{}{
+			"model":    t.config.Model,
+			"api_type": "responses",
+		}
+	} else {
+		// For Chat Completion API, use existing logic
+		t.cleanupOrphanedMessages()
+		messagesJSON, err = json.Marshal(t.messages)
+		if err != nil {
+			return errors.Wrap(err, "error marshaling messages")
+		}
+		metadata = map[string]interface{}{
+			"model":    t.config.Model,
+			"api_type": "chat_completion",
+		}
 	}
 
-	// Build the conversation record
+	// Build the conversation record (same structure for both APIs)
 	record := convtypes.ConversationRecord{
 		ID:                  t.conversationID,
 		RawMessages:         messagesJSON,
 		Provider:            "openai",
 		Usage:               *t.usage,
-		Metadata:            map[string]interface{}{"model": t.config.Model},
+		Metadata:            metadata,
 		Summary:             t.summary,
 		CreatedAt:           time.Now(),
 		UpdatedAt:           time.Now(),
@@ -103,15 +126,41 @@ func (t *OpenAIThread) loadConversation(ctx context.Context) error {
 		return errors.Errorf("incompatible model type: %s", record.Provider)
 	}
 
-	// Deserialize the messages
-	var messages []openai.ChatCompletionMessage
-	if err := json.Unmarshal(record.RawMessages, &messages); err != nil {
-		return errors.Wrap(err, "error unmarshaling messages")
+	// Check which API type was used
+	apiType := "chat_completion" // default
+	if metadata, ok := record.Metadata["api_type"].(string); ok {
+		apiType = metadata
 	}
 
-	t.cleanupOrphanedMessages()
+	if apiType == "responses" && t.useResponsesAPI {
+		// Load Response API conversation
+		var conversationData struct {
+			APIType            string             `json:"api_type"`
+			PreviousResponseID string             `json:"previous_response_id"`
+			ConversationItems  []ConversationItem `json:"conversation_items"`
+		}
 
-	t.messages = messages
+		if err := json.Unmarshal(record.RawMessages, &conversationData); err != nil {
+			return errors.Wrap(err, "error unmarshaling response items")
+		}
+
+		t.previousResponseID = conversationData.PreviousResponseID
+		t.conversationItems = conversationData.ConversationItems
+	} else if apiType == "chat_completion" && !t.useResponsesAPI {
+		// Load Chat Completion API conversation (existing logic)
+		var messages []openai.ChatCompletionMessage
+		if err := json.Unmarshal(record.RawMessages, &messages); err != nil {
+			return errors.Wrap(err, "error unmarshaling messages")
+		}
+
+		t.cleanupOrphanedMessages()
+		t.messages = messages
+	} else {
+		return errors.Errorf("API type mismatch: conversation uses %s but thread is configured for %s",
+			apiType, map[bool]string{true: "responses", false: "chat_completion"}[t.useResponsesAPI])
+	}
+
+	// Common restoration for both APIs
 	t.usage = &record.Usage
 	t.summary = record.Summary
 	t.state.SetFileLastAccess(record.FileLastAccess)
@@ -148,6 +197,20 @@ type StreamableMessage struct {
 
 // StreamMessages parses raw messages into streamable format for conversation streaming
 func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltypes.StructuredToolResult) ([]StreamableMessage, error) {
+	// Try to determine the API type
+	var typeCheck struct {
+		APIType string `json:"api_type"`
+	}
+	if err := json.Unmarshal(rawMessages, &typeCheck); err == nil && typeCheck.APIType == "responses" {
+		return streamResponseAPIMessages(rawMessages, toolResults)
+	}
+
+	// Fall back to Chat Completion API format (existing implementation)
+	return streamChatCompletionMessages(rawMessages, toolResults)
+}
+
+// streamChatCompletionMessages handles Chat Completion API format
+func streamChatCompletionMessages(rawMessages json.RawMessage, toolResults map[string]tooltypes.StructuredToolResult) ([]StreamableMessage, error) {
 	var messages []openai.ChatCompletionMessage
 	if err := json.Unmarshal(rawMessages, &messages); err != nil {
 		return nil, errors.Wrap(err, "error unmarshaling messages")
@@ -209,6 +272,161 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 					ToolCallID: toolCall.ID,
 					Input:      string(inputJSON),
 				})
+			}
+		}
+	}
+
+	return streamable, nil
+}
+
+// streamResponseAPIMessages handles Response API format
+func streamResponseAPIMessages(rawMessages json.RawMessage, toolResults map[string]tooltypes.StructuredToolResult) ([]StreamableMessage, error) {
+	var conversationData struct {
+		ConversationItems []ConversationItem `json:"conversation_items"`
+	}
+
+	if err := json.Unmarshal(rawMessages, &conversationData); err != nil {
+		return nil, errors.Wrap(err, "error unmarshaling response API messages")
+	}
+
+	streamable := make([]StreamableMessage, 0)
+
+	// Process conversation items in chronological order
+	for _, convItem := range conversationData.ConversationItems {
+		if convItem.Type == "input" {
+			// Parse input item to determine its type
+			var itemType struct {
+				Type string `json:"type"`
+			}
+			if err := json.Unmarshal(convItem.Item, &itemType); err != nil {
+				continue
+			}
+
+			switch itemType.Type {
+			case "message":
+				// User message
+				var inputMsg struct {
+					Content []struct {
+						Type string `json:"type"`
+						Text string `json:"text"`
+					} `json:"content"`
+					Role string `json:"role"`
+				}
+				if err := json.Unmarshal(convItem.Item, &inputMsg); err != nil {
+					continue
+				}
+
+				// Extract text content
+				for _, content := range inputMsg.Content {
+					if content.Type == "input_text" && content.Text != "" {
+						streamable = append(streamable, StreamableMessage{
+							Kind:    "text",
+							Role:    inputMsg.Role,
+							Content: content.Text,
+						})
+					}
+				}
+
+			case "function_call_output":
+				// Tool result
+				var toolResult struct {
+					CallID string `json:"call_id"`
+					Output string `json:"output"`
+				}
+				if err := json.Unmarshal(convItem.Item, &toolResult); err != nil {
+					continue
+				}
+
+				result := toolResult.Output
+				toolName := ""
+				if structuredResult, ok := toolResults[toolResult.CallID]; ok {
+					toolName = structuredResult.ToolName
+					if jsonData, err := structuredResult.MarshalJSON(); err == nil {
+						result = string(jsonData)
+					}
+				}
+
+				streamable = append(streamable, StreamableMessage{
+					Kind:       "tool-result",
+					Role:       "assistant",
+					ToolName:   toolName,
+					ToolCallID: toolResult.CallID,
+					Content:    result,
+				})
+			}
+
+		} else if convItem.Type == "output" {
+			// Parse output item
+			var itemType struct {
+				Type string `json:"type"`
+			}
+			if err := json.Unmarshal(convItem.Item, &itemType); err != nil {
+				continue
+			}
+
+			switch itemType.Type {
+			case "message":
+				// Assistant message
+				var outputMsg struct {
+					Content []struct {
+						Type string `json:"type"`
+						Text string `json:"text"`
+					} `json:"content"`
+				}
+				if err := json.Unmarshal(convItem.Item, &outputMsg); err != nil {
+					continue
+				}
+
+				for _, content := range outputMsg.Content {
+					if content.Type == "output_text" && content.Text != "" {
+						streamable = append(streamable, StreamableMessage{
+							Kind:    "text",
+							Role:    "assistant",
+							Content: content.Text,
+						})
+					}
+				}
+
+			case "function_call":
+				// Tool use
+				var functionCall struct {
+					Name      string `json:"name"`
+					Arguments string `json:"arguments"`
+					CallID    string `json:"call_id"`
+				}
+				if err := json.Unmarshal(convItem.Item, &functionCall); err != nil {
+					continue
+				}
+
+				streamable = append(streamable, StreamableMessage{
+					Kind:       "tool-use",
+					Role:       "assistant",
+					ToolName:   functionCall.Name,
+					ToolCallID: functionCall.CallID,
+					Input:      functionCall.Arguments,
+				})
+
+			case "reasoning":
+				// Reasoning content (o-series models)
+				var reasoning struct {
+					Content []struct {
+						Type string `json:"type"`
+						Text string `json:"text"`
+					} `json:"content"`
+				}
+				if err := json.Unmarshal(convItem.Item, &reasoning); err != nil {
+					continue
+				}
+
+				for _, content := range reasoning.Content {
+					if content.Text != "" {
+						streamable = append(streamable, StreamableMessage{
+							Kind:    "thinking",
+							Role:    "assistant",
+							Content: content.Text,
+						})
+					}
+				}
 			}
 		}
 	}

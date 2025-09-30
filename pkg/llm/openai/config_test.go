@@ -22,7 +22,7 @@ var (
 		"gpt-4o", "gpt-4o-2024-05-13", "gpt-4o-mini", "gpt-4o-audio-preview", "gpt-4o-realtime-preview",
 		"gpt-4o-mini-audio-preview", "gpt-4o-mini-realtime-preview",
 		"gpt-4o-mini-search-preview", "gpt-4o-search-preview",
-		"computer-use-preview", "gpt-image-1", "codex-mini-latest",
+		"computer-use-preview", "gpt-image-1", "codex-mini-latest", "gpt-5-codex",
 	}
 )
 
