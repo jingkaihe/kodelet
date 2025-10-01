@@ -138,3 +138,44 @@ func TestShouldShowCommandDropdown(t *testing.T) {
 		})
 	}
 }
+
+func TestFormatModelInfo(t *testing.T) {
+	tests := []struct {
+		name     string
+		provider string
+		model    string
+		expected string
+	}{
+		{
+			name:     "anthropic model",
+			provider: "anthropic",
+			model:    "claude-sonnet-4-20250514",
+			expected: "anthropic/claude-sonnet-4-20250514",
+		},
+		{
+			name:     "openai model",
+			provider: "openai",
+			model:    "gpt-4o",
+			expected: "openai/gpt-4o",
+		},
+		{
+			name:     "google model",
+			provider: "google",
+			model:    "gemini-2.0-flash-exp",
+			expected: "google/gemini-2.0-flash-exp",
+		},
+		{
+			name:     "claude haiku",
+			provider: "anthropic",
+			model:    "claude-3-5-haiku-20241022",
+			expected: "anthropic/claude-3-5-haiku-20241022",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := FormatModelInfo(tt.provider, tt.model)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}

@@ -13,6 +13,8 @@ type MockAssistant struct {
 	conversationID   string
 	persisted        bool
 	sendMessageError error
+	provider         string
+	model            string
 }
 
 // NewMockAssistant creates a new mock assistant for testing
@@ -21,10 +23,12 @@ func NewMockAssistant() *MockAssistant {
 		messages:       []llmtypes.Message{},
 		conversationID: "test-conversation-id",
 		persisted:      true,
+		provider:       "anthropic",
+		model:          "claude-sonnet-4-20250514",
 		usage: llmtypes.Usage{
-			InputTokens:  100,
-			OutputTokens: 50,
-			MaxContextWindow: 200000,
+			InputTokens:          100,
+			OutputTokens:         50,
+			MaxContextWindow:     200000,
 			CurrentContextWindow: 150,
 		},
 	}
@@ -87,4 +91,15 @@ func (m *MockAssistant) AddMessage(content, role string) {
 		Content: content,
 		Role:    role,
 	})
+}
+
+// GetModelInfo returns the provider and model name
+func (m *MockAssistant) GetModelInfo() (provider, model string) {
+	return m.provider, m.model
+}
+
+// SetModelInfo sets the provider and model for testing
+func (m *MockAssistant) SetModelInfo(provider, model string) {
+	m.provider = provider
+	m.model = model
 }

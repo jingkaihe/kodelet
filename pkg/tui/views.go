@@ -57,3 +57,8 @@ func ShouldShowCommandDropdown(input string, commands []string, isProcessing boo
 	
 	return true
 }
+
+// FormatModelInfo formats the provider and model name for display
+func FormatModelInfo(provider, model string) string {
+	return fmt.Sprintf("%s/%s", provider, model)
+}

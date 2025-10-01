@@ -515,20 +515,24 @@ func (m Model) statusView() string {
 
 	usageText, costText := FormatUsageStats(m.assistant.GetUsage())
 
+	// Get model info
+	provider, model := m.assistant.GetModelInfo()
+	modelInfo := FormatModelInfo(provider, model)
+
 	// Add conversation ID to status if persistence is enabled
 	var persistenceStatus string
 	if m.assistant.IsPersisted() {
 		persistenceStatus = fmt.Sprintf(" │ Conv: %s", m.assistant.GetConversationID())
 	}
 
-	// Create main status line with controls
+	// Create main status line with controls and model info
 	mainStatus := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("205")).
 		Background(lipgloss.Color("236")).
 		Padding(0, 1).
 		MarginTop(0).
 		Bold(true).
-		Render(statusText + persistenceStatus + " │ Ctrl+C (twice): Quit │ Ctrl+H (/help): Help │ Ctrl+S: Submit │ ↑/↓: Scroll")
+		Render(statusText + " │ Model: " + modelInfo + persistenceStatus + " │ Ctrl+C (twice): Quit │ Ctrl+H (/help): Help │ Ctrl+S: Submit │ ↑/↓: Scroll")
 
 	// Create separate usage and cost line if available
 	if usageText != "" {

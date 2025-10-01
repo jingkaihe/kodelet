@@ -102,6 +102,12 @@ func (a *AssistantClient) IsPersisted() bool {
 	return a.thread.IsPersisted()
 }
 
+// GetModelInfo returns the provider and model name being used
+func (a *AssistantClient) GetModelInfo() (provider, model string) {
+	config := a.thread.GetConfig()
+	return config.Provider, config.Model
+}
+
 // Close performs cleanup operations for the assistant client
 func (a *AssistantClient) Close(ctx context.Context) error {
 	if a.mcpManager != nil {
