@@ -19,6 +19,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/auth"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/feedback"
+	"github.com/jingkaihe/kodelet/pkg/ide"
 	"github.com/jingkaihe/kodelet/pkg/llm/prompts"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/sysprompt"
@@ -438,6 +439,43 @@ func (t *AnthropicThread) processMessageExchange(
 				}
 			}
 		}()
+	}
+
+	// Check for IDE context if this is not a subagent
+	if !t.config.IsSubAgent && t.conversationID != "" {
+		ideStore, err := ide.NewIDEStore()
+		if err != nil {
+			logger.G(ctx).WithError(err).Warn("failed to create IDE store, continuing without IDE context")
+		} else {
+			ideContext, err := ideStore.ReadContext(t.conversationID)
+			if err != nil {
+				logger.G(ctx).WithError(err).Warn("failed to read IDE context, continuing without IDE context")
+			} else if ideContext != nil {
+				logger.G(ctx).WithFields(map[string]interface{}{
+					"open_files_count":  len(ideContext.OpenFiles),
+					"has_selection":     ideContext.Selection != nil,
+					"diagnostics_count": len(ideContext.Diagnostics),
+				}).Info("processing IDE context")
+
+				// Format IDE context as a text prompt and prepend to system prompt
+				ideContextPrompt := ide.FormatContextPrompt(ideContext)
+				if ideContextPrompt != "" {
+					// Insert IDE context at the beginning of system prompts (before cache control)
+					ideContextBlock := anthropic.TextBlockParam{
+						Text: ideContextPrompt,
+					}
+					// Prepend to system prompt blocks
+					messageParams.System = append([]anthropic.TextBlockParam{ideContextBlock}, messageParams.System...)
+				}
+
+				// Clear the IDE context now that we've processed it
+				if err := ideStore.ClearContext(t.conversationID); err != nil {
+					logger.G(ctx).WithError(err).Warn("failed to clear IDE context, may be processed again")
+				} else {
+					logger.G(ctx).Debug("successfully cleared IDE context")
+				}
+			}
+		}
 	}
 
 	// Add a tracing event for API call start

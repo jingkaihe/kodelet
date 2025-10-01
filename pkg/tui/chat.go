@@ -21,6 +21,7 @@ func StartChat(ctx context.Context,
 	maxTurns int,
 	compactRatio float64,
 	disableAutoCompact bool,
+	ideMode bool,
 ) error {
 	// Check terminal capabilities
 	var teaOptions []tea.ProgramOption
@@ -60,6 +61,16 @@ Kodelet (%s)
 		fullWelcomeMsg += "\nConversation persistence is enabled."
 	} else {
 		fullWelcomeMsg += "\nConversation persistence is disabled (--no-save)."
+	}
+
+	// Display conversation ID prominently in IDE mode
+	if ideMode {
+		idMsg := lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.AdaptiveColor{Light: "#9ece6a", Dark: "#9ece6a"}). // Green
+			Render(fmt.Sprintf("\n📋 Conversation ID: %s", conversationID))
+		fullWelcomeMsg += idMsg
+		fullWelcomeMsg += "\n💡 Attach your IDE using: :KodeletAttach " + conversationID
 	}
 
 	model.AddSystemMessage(fullWelcomeMsg)
@@ -113,8 +124,8 @@ func isTTY() bool {
 }
 
 // StartChatCmd is a wrapper that can be called from a command line
-func StartChatCmd(ctx context.Context, conversationID string, enablePersistence bool, mcpManager *tools.MCPManager, customManager *tools.CustomToolManager, maxTurns int, compactRatio float64, disableAutoCompact bool) {
-	if err := StartChat(ctx, conversationID, enablePersistence, mcpManager, customManager, maxTurns, compactRatio, disableAutoCompact); err != nil {
+func StartChatCmd(ctx context.Context, conversationID string, enablePersistence bool, mcpManager *tools.MCPManager, customManager *tools.CustomToolManager, maxTurns int, compactRatio float64, disableAutoCompact bool, ideMode bool) {
+	if err := StartChat(ctx, conversationID, enablePersistence, mcpManager, customManager, maxTurns, compactRatio, disableAutoCompact, ideMode); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
