@@ -44,7 +44,7 @@ func (m *MockAssistant) SendMessage(ctx context.Context, message string, message
 	if m.sendMessageError != nil {
 		return m.sendMessageError
 	}
-	
+
 	// Simulate assistant response
 	go func() {
 		messageCh <- llmtypes.MessageEvent{
@@ -56,7 +56,7 @@ func (m *MockAssistant) SendMessage(ctx context.Context, message string, message
 			Done: true,
 		}
 	}()
-	
+
 	return nil
 }
 

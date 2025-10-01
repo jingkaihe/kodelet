@@ -45,16 +45,16 @@ func ShouldShowCommandDropdown(input string, commands []string, isProcessing boo
 	if isProcessing {
 		return false
 	}
-	
+
 	if !strings.HasPrefix(input, "/") {
 		return false
 	}
-	
+
 	// Don't show if command is already complete
 	if IsCommandComplete(input, commands) {
 		return false
 	}
-	
+
 	return true
 }
 

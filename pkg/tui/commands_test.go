@@ -85,20 +85,22 @@ func TestParseCommand(t *testing.T) {
 
 func TestGetHelpText(t *testing.T) {
 	helpText := GetHelpText()
-	
+
 	require.NotEmpty(t, helpText)
-	assert.Contains(t, helpText, "Keyboard Shortcuts:")
+	assert.Contains(t, helpText, "KEYBOARD SHORTCUTS")
+	assert.Contains(t, helpText, "AVAILABLE COMMANDS")
 	assert.Contains(t, helpText, "Ctrl+C")
 	assert.Contains(t, helpText, "/bash")
 	assert.Contains(t, helpText, "/add-image")
 	assert.Contains(t, helpText, "/remove-image")
 	assert.Contains(t, helpText, "/help")
 	assert.Contains(t, helpText, "/clear")
+	assert.Contains(t, helpText, "TIP:")
 }
 
 func TestGetAvailableCommands(t *testing.T) {
 	commands := GetAvailableCommands()
-	
+
 	require.NotEmpty(t, commands)
 	assert.Contains(t, commands, "/bash")
 	assert.Contains(t, commands, "/add-image")
@@ -109,7 +111,7 @@ func TestGetAvailableCommands(t *testing.T) {
 
 func TestIsCommandComplete(t *testing.T) {
 	commands := GetAvailableCommands()
-	
+
 	tests := []struct {
 		name     string
 		input    string

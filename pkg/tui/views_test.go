@@ -3,8 +3,8 @@ package tui
 import (
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestFormatUsageStats(t *testing.T) {
@@ -56,14 +56,14 @@ func TestFormatUsageStats(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			usageText, costText := FormatUsageStats(tt.usage)
-			
+
 			if tt.wantText {
 				assert.NotEmpty(t, usageText)
 				assert.Contains(t, usageText, "Tokens:")
 			} else {
 				assert.Empty(t, usageText)
 			}
-			
+
 			if tt.wantCost {
 				assert.NotEmpty(t, costText)
 				assert.Contains(t, costText, "Cost:")
@@ -80,19 +80,19 @@ func TestGetSpinnerChar(t *testing.T) {
 	char2 := GetSpinnerChar(1)
 	char3 := GetSpinnerChar(7)
 	char4 := GetSpinnerChar(8) // Should wrap around
-	
+
 	assert.NotEmpty(t, char1)
 	assert.NotEmpty(t, char2)
 	assert.NotEmpty(t, char3)
 	assert.Equal(t, char1, char4) // Should wrap around
-	
+
 	// Test that different indices give different characters
 	assert.NotEqual(t, char1, char2)
 }
 
 func TestShouldShowCommandDropdown(t *testing.T) {
 	commands := GetAvailableCommands()
-	
+
 	tests := []struct {
 		name         string
 		input        string

@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/jingkaihe/kodelet/pkg/tools"
+	"github.com/jingkaihe/kodelet/pkg/version"
 	"github.com/pkg/errors"
 )
 
@@ -39,37 +40,30 @@ func StartChat(ctx context.Context,
 	// Create model separately to add welcome messages
 	model := NewModel(ctx, conversationID, enablePersistence, mcpManager, customManager, maxTurns, compactRatio, disableAutoCompact)
 
-	// Add welcome message with ASCII art
-	kodaletArt := `
+	// Add welcome message
+	welcomeMsg := fmt.Sprintf(`
+Kodelet (%s)
+	`, version.Version)
 
-	▗▖ ▗▖ ▗▄▖ ▗▄▄▄ ▗▄▄▄▖▗▖   ▗▄▄▄▖▗▄▄▄▖
-	▐▌▗▞▘▐▌ ▐▌▐▌  █▐▌   ▐▌   ▐▌     █
-	▐▛▚▖ ▐▌ ▐▌▐▌  █▐▛▀▀▘▐▌   ▐▛▀▀▘  █
-	▐▌ ▐▌▝▚▄▞▘▐▙▄▄▀▐▙▄▄▖▐▙▄▄▖▐▙▄▄▖  █
-
-`
-
-	// Style the ASCII art to be bold and blood red like Khorne
-	styledArt := lipgloss.NewStyle().
+	// Style the banner
+	styledBanner := lipgloss.NewStyle().
 		Bold(true).
-		Italic(true).
-		Foreground(lipgloss.AdaptiveColor{Light: "#990000", Dark: "#FF0000"}).
-		Margin(1).
-		Render(kodaletArt)
+		Foreground(lipgloss.AdaptiveColor{Light: "#D946EF", Dark: "#E879F9"}).
+		Render(welcomeMsg)
 
-	welcomeMsg := styledArt + "\n\nWelcome to Kodelet Chat! Type your message and press Enter to send."
+	fullWelcomeMsg := styledBanner + "\nWelcome to Kodelet Chat! Type your message and press Enter to send."
 	if !isTTY() {
-		welcomeMsg += "\nLimited terminal capabilities detected. Some features may not work properly."
+		fullWelcomeMsg += "\nLimited terminal capabilities detected. Some features may not work properly."
 	}
 
 	// Add persistence status
 	if enablePersistence {
-		welcomeMsg += "\nConversation persistence is enabled."
+		fullWelcomeMsg += "\nConversation persistence is enabled."
 	} else {
-		welcomeMsg += "\nConversation persistence is disabled (--no-save)."
+		fullWelcomeMsg += "\nConversation persistence is disabled (--no-save)."
 	}
 
-	model.AddSystemMessage(welcomeMsg)
+	model.AddSystemMessage(fullWelcomeMsg)
 	model.AddSystemMessage("Press Ctrl+H for help with keyboard shortcuts.")
 
 	// Create a new program with the updated model

@@ -237,7 +237,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if content != "" {
 					// Try to parse as a command
 					cmd, args, isCommand := ParseCommand(content)
-					
+
 					if isCommand {
 						switch Command(cmd) {
 						case CommandHelp:
@@ -355,7 +355,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Check for slash commands in the textarea
 	currentInput := m.textarea.Value()
 	shouldShow := ShouldShowCommandDropdown(currentInput, m.availableCommands, m.isProcessing)
-	
+
 	if shouldShow {
 		// Show dropdown if it's not already showing
 		if !m.showCommandDropdown {
@@ -548,5 +548,3 @@ func (m Model) statusView() string {
 
 	return mainStatus
 }
-
-

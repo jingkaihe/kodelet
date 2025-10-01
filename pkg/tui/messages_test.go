@@ -3,8 +3,8 @@ package tui
 import (
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestFormatMessage(t *testing.T) {
@@ -120,7 +120,7 @@ func TestFormatMessages(t *testing.T) {
 	}
 
 	result := formatter.FormatMessages(messages)
-	
+
 	// Check that all messages are present in the output
 	assert.Contains(t, result, "You")
 	assert.Contains(t, result, "Hello")
