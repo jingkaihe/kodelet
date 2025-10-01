@@ -2,13 +2,13 @@ local M = {}
 
 function M.setup(opts)
     opts = opts or {}
-    
+
     -- Setup commands
     require('kodelet.commands').setup()
-    
+
     -- Setup context tracking (only if attached to a session)
     require('kodelet.context').setup_autocmds()
-    
+
     -- Auto-attach if KODELET_CONVERSATION_ID env var is set
     local env_conv_id = vim.env.KODELET_CONVERSATION_ID
     if env_conv_id and env_conv_id ~= "" then
