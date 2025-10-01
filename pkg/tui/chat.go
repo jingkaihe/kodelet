@@ -45,10 +45,10 @@ func StartChat(ctx context.Context,
 Kodelet (%s)
 	`, version.Version)
 
-	// Style the banner
+	// Style the banner (Tokyo Night)
 	styledBanner := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.AdaptiveColor{Light: "#D946EF", Dark: "#E879F9"}).
+		Foreground(lipgloss.AdaptiveColor{Light: "#7aa2f7", Dark: "#7aa2f7"}). // Blue
 		Render(welcomeMsg)
 
 	fullWelcomeMsg := styledBanner + "\nWelcome to Kodelet Chat! Type your message and press Enter to send."

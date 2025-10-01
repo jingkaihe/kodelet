@@ -60,12 +60,12 @@ func NewModel(ctx context.Context, conversationID string, enablePersistence bool
 	// Style the textarea
 	ta.Prompt = "❯ "
 
-	// Set custom styles for the textarea
+	// Set custom styles for the textarea (Tokyo Night)
 	ta.FocusedStyle.CursorLine = lipgloss.NewStyle()
-	ta.BlurredStyle.Base = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	ta.FocusedStyle.Base = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
-	ta.FocusedStyle.Prompt = lipgloss.NewStyle().Foreground(lipgloss.Color("205")).Bold(true)
-	ta.BlurredStyle.Prompt = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	ta.BlurredStyle.Base = lipgloss.NewStyle().Foreground(lipgloss.Color("#565f89"))      // Comment
+	ta.FocusedStyle.Base = lipgloss.NewStyle().Foreground(lipgloss.Color("#c0caf5"))      // Foreground
+	ta.FocusedStyle.Prompt = lipgloss.NewStyle().Foreground(lipgloss.Color("#7aa2f7")).Bold(true) // Blue
+	ta.BlurredStyle.Prompt = lipgloss.NewStyle().Foreground(lipgloss.Color("#565f89"))    // Comment
 
 	vp := viewport.New(0, 0)
 	vp.KeyMap.PageDown.SetEnabled(true)
@@ -405,10 +405,10 @@ func (m Model) View() string {
 		return "Initializing..."
 	}
 
-	// Create a more polished input box
+	// Create a more polished input box (Tokyo Night)
 	inputBox := lipgloss.NewStyle().
 		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("205")).
+		BorderForeground(lipgloss.Color("#7aa2f7")). // Blue
 		Padding(0, 2).
 		PaddingTop(0).
 		PaddingBottom(0).
@@ -421,9 +421,9 @@ func (m Model) View() string {
 		Bold(false).
 		Render(m.textarea.View())
 
-	// Add a subtle shadow effect
+	// Add a subtle shadow effect (Tokyo Night)
 	inputBox = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("205")).
+		Foreground(lipgloss.Color("#7aa2f7")). // Blue
 		Render(inputBox)
 
 	// Render command dropdown if needed
@@ -434,31 +434,31 @@ func (m Model) View() string {
 		for i, cmd := range m.availableCommands {
 			style := lipgloss.NewStyle().PaddingLeft(1).PaddingRight(1)
 
-			// Highlight the selected command
+			// Highlight the selected command (Tokyo Night)
 			if i == m.selectedCommandIdx {
 				style = style.
-					Background(lipgloss.Color("205")).
-					Foreground(lipgloss.Color("0"))
+					Background(lipgloss.Color("#7aa2f7")). // Blue
+					Foreground(lipgloss.Color("#1a1b26"))  // Background dark
 			} else {
 				style = style.
-					Background(lipgloss.Color("236")).
-					Foreground(lipgloss.Color("252"))
+					Background(lipgloss.Color("#292e42")). // Background highlight
+					Foreground(lipgloss.Color("#c0caf5"))  // Foreground
 			}
 
 			// Add the styled command to the dropdown
 			dropdownContent += style.Render(cmd) + "\n"
 		}
 
-		// Create dropdown box with border and navigation hint
+		// Create dropdown box with border and navigation hint (Tokyo Night)
 		hintText := "↑↓:Navigate Tab:Next Enter:Select"
 		hint := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("240")).
+			Foreground(lipgloss.Color("#565f89")). // Comment
 			Align(lipgloss.Center).
 			Render(hintText)
 
 		commandDropdown = lipgloss.NewStyle().
 			BorderStyle(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("205")).
+			BorderForeground(lipgloss.Color("#7aa2f7")). // Blue
 			Width(40).
 			Render(dropdownContent + "\n" + hint)
 	}
@@ -491,7 +491,7 @@ func (m Model) View() string {
 			lipgloss.Top,
 			commandDropdown,
 			lipgloss.WithWhitespaceChars(" "),
-			lipgloss.WithWhitespaceForeground(lipgloss.Color("0")),
+			lipgloss.WithWhitespaceForeground(lipgloss.Color("#1a1b26")), // Background dark
 		)
 
 		// Insert the dropdown right after the input box
@@ -525,20 +525,20 @@ func (m Model) statusView() string {
 		persistenceStatus = fmt.Sprintf(" │ Conv: %s", m.assistant.GetConversationID())
 	}
 
-	// Create main status line with controls and model info
+	// Create main status line with controls and model info (Tokyo Night)
 	mainStatus := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("205")).
-		Background(lipgloss.Color("236")).
+		Foreground(lipgloss.Color("#7aa2f7")). // Blue
+		Background(lipgloss.Color("#292e42")). // Background highlight
 		Padding(0, 1).
 		MarginTop(0).
 		Bold(true).
 		Render(statusText + " │ Model: " + modelInfo + persistenceStatus + " │ Ctrl+C (twice): Quit │ Ctrl+H (/help): Help │ Ctrl+S: Submit │ ↑/↓: Scroll")
 
-	// Create separate usage and cost line if available
+	// Create separate usage and cost line if available (Tokyo Night)
 	if usageText != "" {
 		usageLine := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("205")).
-			Background(lipgloss.Color("236")).
+			Foreground(lipgloss.Color("#7aa2f7")). // Blue
+			Background(lipgloss.Color("#292e42")). // Background highlight
 			Padding(0, 1).
 			Bold(true).
 			Render(usageText + costText)

@@ -16,13 +16,13 @@ type MessageFormatter struct {
 	systemStyle    lipgloss.Style
 }
 
-// NewMessageFormatter creates a new message formatter
+// NewMessageFormatter creates a new message formatter (Tokyo Night)
 func NewMessageFormatter(width int) *MessageFormatter {
 	return &MessageFormatter{
 		width:          width,
-		userStyle:      lipgloss.NewStyle().Foreground(lipgloss.Color("86")).Bold(true),
-		assistantStyle: lipgloss.NewStyle().Foreground(lipgloss.Color("212")).Bold(true),
-		systemStyle:    lipgloss.NewStyle().Foreground(lipgloss.Color("yellow")).Bold(true),
+		userStyle:      lipgloss.NewStyle().Foreground(lipgloss.Color("#7dcfff")).Bold(true), // Cyan
+		assistantStyle: lipgloss.NewStyle().Foreground(lipgloss.Color("#bb9af7")).Bold(true), // Purple
+		systemStyle:    lipgloss.NewStyle().Foreground(lipgloss.Color("#9ece6a")).Bold(true), // Green
 	}
 }
 
