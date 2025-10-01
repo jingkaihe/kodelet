@@ -1,8 +1,11 @@
-# Neovim Integration for Kodelet
+# ADR 019: Neovim IDE Integration
+
+## Status
+Implemented
 
 ## Table of Contents
 
-- [Executive Summary](#executive-summary)
+- [Context](#context)
 - [Architecture Overview](#architecture-overview)
 - [Implementation Design](#implementation-design)
   - [Kodelet Side Implementation](#1-kodelet-side-implementation)
@@ -18,7 +21,7 @@
 - [Alternative Approaches](#alternative-approaches-considered)
 - [Conclusion](#conclusion)
 
-## Executive Summary
+## Context
 
 This document outlines the design and implementation strategy for `kodelet.nvim`, a Neovim plugin that provides deep integration between Neovim and Kodelet. The plugin will enable bidirectional communication, allowing Neovim to share context (open files, selected code, LSP diagnostics) with Kodelet and send messages similar to the existing feedback mechanism.
 
