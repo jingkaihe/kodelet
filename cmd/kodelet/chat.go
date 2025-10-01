@@ -46,14 +46,14 @@ func setupTUILogRedirection(conversationID string) (*os.File, string, error) {
 	}
 
 	logsDir := filepath.Join(homeDir, ".kodelet", "logs")
-	if err := os.MkdirAll(logsDir, 0755); err != nil {
+	if err := os.MkdirAll(logsDir, 0o755); err != nil {
 		return nil, "", errors.Wrap(err, "failed to create logs directory")
 	}
 
 	logFileName := fmt.Sprintf("chat-%s.log", conversationID)
 	logFilePath := filepath.Join(logsDir, logFileName)
 
-	logFile, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	logFile, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return nil, "", errors.Wrap(err, "failed to open log file")
 	}
@@ -107,7 +107,7 @@ var chatCmd = &cobra.Command{
 
 		// Generate or use existing conversation ID for log redirection
 		conversationID := chatOptions.resumeConvID
-		if conversationID == "" && !chatOptions.noSave {
+		if conversationID == "" {
 			conversationID = convtypes.GenerateID()
 		}
 
