@@ -34,7 +34,6 @@ func ParseCommand(input string) (command string, args string, isCommand bool) {
 		return "", "", false
 	}
 
-	// Split command and arguments
 	parts := strings.SplitN(input, " ", 2)
 	commandName := strings.TrimPrefix(parts[0], "/")
 
@@ -43,7 +42,6 @@ func ParseCommand(input string) (command string, args string, isCommand bool) {
 		arguments = parts[1]
 	}
 
-	// Check if it's a valid command
 	validCommands := map[string]bool{
 		string(CommandHelp):        true,
 		string(CommandClear):       true,

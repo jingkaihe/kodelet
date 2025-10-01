@@ -40,7 +40,6 @@ func StartChat(ctx context.Context,
 	// Create model separately to add welcome messages
 	model := NewModel(ctx, conversationID, enablePersistence, mcpManager, customManager, maxTurns, compactRatio, disableAutoCompact)
 
-	// Add welcome message
 	welcomeMsg := fmt.Sprintf(`
 Kodelet (%s)
 	`, version.Version)

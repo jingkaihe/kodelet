@@ -35,10 +35,8 @@ func (f *MessageFormatter) SetWidth(width int) {
 func (f *MessageFormatter) FormatMessage(msg llmtypes.Message) string {
 	switch msg.Role {
 	case "":
-		// No prefix for system messages
 		return msg.Content
 	case "user":
-		// Create a styled user message
 		userPrefix := f.userStyle.Render("You")
 		messageText := lipgloss.NewStyle().
 			PaddingLeft(1).
@@ -46,7 +44,6 @@ func (f *MessageFormatter) FormatMessage(msg llmtypes.Message) string {
 			Render(msg.Content)
 		return userPrefix + " → " + messageText
 	default:
-		// Create a styled assistant message
 		assistantPrefix := f.assistantStyle.Render("Assistant")
 		messageText := lipgloss.NewStyle().
 			PaddingLeft(1).
@@ -60,11 +57,9 @@ func (f *MessageFormatter) FormatMessage(msg llmtypes.Message) string {
 func (f *MessageFormatter) FormatMessages(messages []llmtypes.Message) string {
 	var content string
 
-	// Format and render each message
 	for i, msg := range messages {
 		renderedMsg := f.FormatMessage(msg)
 
-		// Add padding between messages
 		if i > 0 {
 			content += "\n\n"
 		}

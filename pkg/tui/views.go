@@ -50,7 +50,6 @@ func ShouldShowCommandDropdown(input string, commands []string, isProcessing boo
 		return false
 	}
 
-	// Don't show if command is already complete
 	if IsCommandComplete(input, commands) {
 		return false
 	}

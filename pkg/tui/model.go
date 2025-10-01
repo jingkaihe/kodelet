@@ -71,15 +71,12 @@ func NewModel(ctx context.Context, conversationID string, enablePersistence bool
 	vp.KeyMap.PageDown.SetEnabled(true)
 	vp.KeyMap.PageUp.SetEnabled(true)
 
-	// Create status message
 	statusMessage := "Ready"
 
-	// Create assistant client
 	assistant := NewAssistantClient(ctx, conversationID, enablePersistence, mcpManager, customManager, maxTurns, compactRatio, disableAutoCompact)
 
 	ctx, cancel := context.WithCancel(ctx)
 
-	// Create message formatter
 	formatter := NewMessageFormatter(80) // Initial width, will be updated on resize
 
 	// Create the initial model
@@ -215,27 +212,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Schedule a reset using the proper command system
 			return m, resetCtrlCCmd()
 		case tea.KeyCtrlH:
-			// Show help/shortcuts
 			m.AddSystemMessage(GetHelpText())
 		case tea.KeyCtrlL:
-			// Clear the screen
 			m.messages = []llmtypes.Message{}
 			m.updateViewportContent()
 			m.AddSystemMessage("Screen cleared")
 		case tea.KeyPgUp:
-			// Scroll up a page
 			m.viewport.PageUp()
 		case tea.KeyPgDown:
-			// Scroll down a page
 			m.viewport.PageDown()
 		case tea.KeyCtrlS:
-			// Always hide dropdown on Enter regardless of what happens next
 			m.showCommandDropdown = false
 
 			if !m.isProcessing {
 				content := m.textarea.Value()
 				if content != "" {
-					// Try to parse as a command
 					cmd, args, isCommand := ParseCommand(content)
 
 					if isCommand {
@@ -426,7 +417,6 @@ func (m Model) View() string {
 		Foreground(lipgloss.Color("#7aa2f7")). // Blue
 		Render(inputBox)
 
-	// Render command dropdown if needed
 	var commandDropdown string
 	if m.showCommandDropdown && len(m.availableCommands) > 0 {
 		var dropdownContent string
@@ -434,7 +424,6 @@ func (m Model) View() string {
 		for i, cmd := range m.availableCommands {
 			style := lipgloss.NewStyle().PaddingLeft(1).PaddingRight(1)
 
-			// Highlight the selected command (Tokyo Night)
 			if i == m.selectedCommandIdx {
 				style = style.
 					Background(lipgloss.Color("#7aa2f7")). // Blue
@@ -445,7 +434,6 @@ func (m Model) View() string {
 					Foreground(lipgloss.Color("#c0caf5"))  // Foreground
 			}
 
-			// Add the styled command to the dropdown
 			dropdownContent += style.Render(cmd) + "\n"
 		}
 
@@ -515,17 +503,14 @@ func (m Model) statusView() string {
 
 	usageText, costText := FormatUsageStats(m.assistant.GetUsage())
 
-	// Get model info
 	provider, model := m.assistant.GetModelInfo()
 	modelInfo := FormatModelInfo(provider, model)
 
-	// Add conversation ID to status if persistence is enabled
 	var persistenceStatus string
 	if m.assistant.IsPersisted() {
 		persistenceStatus = fmt.Sprintf(" │ Conv: %s", m.assistant.GetConversationID())
 	}
 
-	// Create main status line with controls and model info (Tokyo Night)
 	mainStatus := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#7aa2f7")). // Blue
 		Background(lipgloss.Color("#292e42")). // Background highlight
@@ -534,7 +519,6 @@ func (m Model) statusView() string {
 		Bold(true).
 		Render(statusText + " │ Model: " + modelInfo + persistenceStatus + " │ Ctrl+C (twice): Quit │ Ctrl+H (/help): Help │ Ctrl+S: Submit │ ↑/↓: Scroll")
 
-	// Create separate usage and cost line if available (Tokyo Night)
 	if usageText != "" {
 		usageLine := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#7aa2f7")). // Blue
