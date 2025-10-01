@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -242,10 +243,7 @@ func (t *AnthropicThread) SendMessage(
 
 	// Main interaction loop for handling tool calls
 	turnCount := 0
-	maxTurns := opt.MaxTurns
-	if maxTurns < 0 {
-		maxTurns = 0 // treat negative as no limit
-	}
+	maxTurns := max(opt.MaxTurns, 0) // treat negative as no limit
 
 	// Check cache-every setting and cache if needed
 	cacheEvery := t.config.CacheEvery
@@ -560,7 +558,7 @@ func (t *AnthropicThread) processIDEContext(ctx context.Context, handler llmtype
 	}
 
 	if ideContext != nil {
-		logger.G(ctx).WithFields(map[string]interface{}{
+		logger.G(ctx).WithFields(map[string]any{
 			"open_files_count":  len(ideContext.OpenFiles),
 			"has_selection":     ideContext.Selection != nil,
 			"diagnostics_count": len(ideContext.Diagnostics),
@@ -1052,9 +1050,8 @@ func (t *AnthropicThread) processImage(imagePath string) (*anthropic.ContentBloc
 	// Only allow HTTPS URLs for security
 	if strings.HasPrefix(imagePath, "https://") {
 		return t.processImageURL(imagePath)
-	} else if strings.HasPrefix(imagePath, "file://") {
+	} else if filePath, ok := strings.CutPrefix(imagePath, "file://"); ok {
 		// Remove file:// prefix and process as file
-		filePath := strings.TrimPrefix(imagePath, "file://")
 		return t.processImageFile(filePath)
 	} else {
 		// Treat as a local file path
@@ -1150,9 +1147,7 @@ func (t *AnthropicThread) GetStructuredToolResults() map[string]tooltypes.Struct
 	}
 	// Return a copy to avoid race conditions
 	result := make(map[string]tooltypes.StructuredToolResult)
-	for k, v := range t.toolResults {
-		result[k] = v
-	}
+	maps.Copy(result, t.toolResults)
 	return result
 }
 
@@ -1164,8 +1159,6 @@ func (t *AnthropicThread) SetStructuredToolResults(results map[string]tooltypes.
 		t.toolResults = make(map[string]tooltypes.StructuredToolResult)
 	} else {
 		t.toolResults = make(map[string]tooltypes.StructuredToolResult)
-		for k, v := range results {
-			t.toolResults[k] = v
-		}
+		maps.Copy(t.toolResults, results)
 	}
 }
