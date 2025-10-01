@@ -1,8 +1,34 @@
 # Neovim Integration for Kodelet
 
+## Table of Contents
+
+- [Executive Summary](#executive-summary)
+- [Architecture Overview](#architecture-overview)
+- [Implementation Design](#implementation-design)
+  - [Kodelet Side Implementation](#1-kodelet-side-implementation)
+  - [Neovim Plugin Implementation](#2-neovim-plugin-implementation)
+  - [Usage Workflow](#3-usage-workflow)
+- [Implementation Phases](#implementation-phases)
+- [Installation and Testing](#installation-and-testing)
+  - [Plugin Installation](#plugin-installation)
+  - [Development Setup](#development-setup)
+  - [Testing Checklist](#testing-checklist)
+  - [Troubleshooting](#troubleshooting)
+- [Security Considerations](#security-considerations)
+- [Alternative Approaches](#alternative-approaches-considered)
+- [Conclusion](#conclusion)
+
 ## Executive Summary
 
 This document outlines the design and implementation strategy for `kodelet.nvim`, a Neovim plugin that provides deep integration between Neovim and Kodelet. The plugin will enable bidirectional communication, allowing Neovim to share context (open files, selected code, LSP diagnostics) with Kodelet and send messages similar to the existing feedback mechanism.
+
+**Key Features:**
+- 🔗 **Easy Attachment**: Tab completion to browse and attach to Kodelet conversations
+- 📁 **Context Sharing**: Automatically share open files and project structure
+- 🐛 **Diagnostics Integration**: Share LSP diagnostics (errors, warnings, hints)
+- 📝 **Code Selection**: Send specific code snippets for focused discussion
+- 💬 **Feedback System**: Send messages to running Kodelet sessions
+- 🔄 **Auto-Updates**: Context updates automatically on buffer changes
 
 ## Architecture Overview
 
@@ -853,6 +879,296 @@ Neovim will auto-attach to the session on startup.
 - [ ] Inline code suggestions
 - [ ] Multi-file refactoring support
 - [ ] Session management UI
+
+## Installation and Testing
+
+### Plugin Installation
+
+#### For LazyVim / lazy.nvim Users (Recommended)
+
+Create a new file `~/.config/nvim/lua/plugins/kodelet.lua`:
+
+```lua
+return {
+  -- From GitHub (once published)
+  {
+    "jingkaihe/kodelet.nvim",
+    event = "VeryLazy", -- Load after Neovim startup
+    config = function()
+      require("kodelet").setup({
+        -- Optional configuration
+        auto_attach = false, -- Set to true to auto-attach to most recent conversation
+      })
+    end,
+  },
+  
+  -- Or for local development
+  {
+    dir = "~/workspace/kodelet.nvim",
+    name = "kodelet",
+    event = "VeryLazy",
+    config = function()
+      require("kodelet").setup()
+    end,
+  },
+}
+```
+
+**With Optional Key Mappings:**
+
+```lua
+return {
+  "jingkaihe/kodelet.nvim",
+  event = "VeryLazy",
+  keys = {
+    { "<leader>ka", "<cmd>KodeletAttach<cr>", desc = "Kodelet: Attach to conversation" },
+    { "<leader>ks", "<cmd>KodeletAttachSelect<cr>", desc = "Kodelet: Attach with picker" },
+    { "<leader>kf", "<cmd>KodeletFeedback<cr>", desc = "Kodelet: Send feedback" },
+    { "<leader>kd", "<cmd>KodeletDetach<cr>", desc = "Kodelet: Detach" },
+    { "<leader>kc", "<cmd>KodeletClearContext<cr>", desc = "Kodelet: Clear context" },
+    { "<leader>kt", "<cmd>KodeletStatus<cr>", desc = "Kodelet: Show status" },
+    -- Visual mode mapping for selection
+    { "<leader>ks", ":'<,'>KodeletSendSelection<cr>", mode = "v", desc = "Kodelet: Send selection" },
+  },
+  config = function()
+    require("kodelet").setup()
+  end,
+}
+```
+
+#### For packer.nvim Users
+
+Add to your `~/.config/nvim/lua/plugins.lua`:
+
+```lua
+use {
+  'jingkaihe/kodelet.nvim',
+  config = function()
+    require('kodelet').setup()
+  end
+}
+
+-- Or for local development
+use {
+  '~/workspace/kodelet.nvim',
+  config = function()
+    require('kodelet').setup()
+  end
+}
+```
+
+#### For vim-plug Users
+
+Add to your `~/.config/nvim/init.vim`:
+
+```vim
+Plug 'jingkaihe/kodelet.nvim'
+
+" Or for local development
+Plug '~/workspace/kodelet.nvim'
+
+lua << EOF
+require('kodelet').setup()
+EOF
+```
+
+#### Manual Installation
+
+Clone the repository into your Neovim runtime path:
+
+```bash
+# For Neovim 0.8+
+mkdir -p ~/.local/share/nvim/site/pack/kodelet/start
+cd ~/.local/share/nvim/site/pack/kodelet/start
+git clone https://github.com/jingkaihe/kodelet.nvim.git
+
+# Or use a local development copy
+ln -s ~/workspace/kodelet.nvim ~/.local/share/nvim/site/pack/kodelet/start/kodelet.nvim
+```
+
+Add to your `~/.config/nvim/init.lua`:
+
+```lua
+require('kodelet').setup()
+```
+
+### Development Setup
+
+#### Directory Structure for Development
+
+```
+~/workspace/
+├── kodelet/                    # Main kodelet repository
+│   └── pkg/ide/                # Kodelet IDE integration code
+└── kodelet.nvim/               # Neovim plugin (separate repo)
+    ├── lua/
+    │   └── kodelet/
+    │       ├── init.lua
+    │       ├── writer.lua
+    │       ├── context.lua
+    │       └── commands.lua
+    ├── plugin/
+    │   └── kodelet.vim         # Optional vim script entry
+    ├── README.md
+    └── LICENSE
+```
+
+#### Testing During Development
+
+**1. Set up local plugin loading in LazyVim:**
+
+Create `~/.config/nvim/lua/plugins/kodelet-dev.lua`:
+
+```lua
+return {
+  {
+    dir = vim.fn.expand("~/workspace/kodelet.nvim"),
+    name = "kodelet-dev",
+    event = "VeryLazy",
+    config = function()
+      -- Reload the module on changes
+      package.loaded['kodelet'] = nil
+      package.loaded['kodelet.writer'] = nil
+      package.loaded['kodelet.context'] = nil
+      package.loaded['kodelet.commands'] = nil
+      
+      require("kodelet").setup({
+        debug = true,
+      })
+    end,
+  },
+}
+```
+
+**2. Quick reload during development:**
+
+Add a command to reload the plugin:
+
+```lua
+vim.api.nvim_create_user_command("KodeletReload", function()
+  -- Unload all kodelet modules
+  for module_name, _ in pairs(package.loaded) do
+    if module_name:match("^kodelet") then
+      package.loaded[module_name] = nil
+    end
+  end
+  
+  -- Reload
+  require("kodelet").setup()
+  vim.notify("Kodelet reloaded", vim.log.levels.INFO)
+end, {})
+```
+
+**3. Manual testing workflow:**
+
+```bash
+# Terminal 1: Start kodelet
+cd ~/workspace/kodelet
+kodelet chat
+
+# Terminal 2: Start neovim with test files
+cd ~/workspace/test-project
+nvim main.go utils.go
+
+# In Neovim:
+:KodeletAttach <Tab>          # Select conversation
+:KodeletStatus                # Verify attached
+:lua print(vim.inspect(require('kodelet.writer').gather_context(true)))  # Debug context
+:KodeletFeedback Test message # Send test feedback
+
+# Terminal 1: Verify feedback received in kodelet
+# Type something to trigger next turn and see if context appears
+```
+
+**4. Debugging tips:**
+
+```lua
+-- Add debug output in your plugin code
+local function debug_log(msg)
+  if vim.g.kodelet_debug then
+    vim.notify(string.format("[Kodelet Debug] %s", msg), vim.log.levels.DEBUG)
+  end
+end
+
+-- Enable debug mode
+vim.g.kodelet_debug = true
+
+-- View logs
+:messages
+
+-- Check if context file is being written
+:lua vim.notify(vim.fn.expand("~/.kodelet/ide/"))
+:!ls -la ~/.kodelet/ide/
+
+-- Inspect context file
+:lua vim.notify(vim.fn.join(vim.fn.readfile(vim.fn.expand("~/.kodelet/ide/context-*.json")), "\n"))
+```
+
+### Testing Checklist
+
+Before considering the plugin ready:
+
+- [ ] **Basic Attach**: Can attach to conversation using `:KodeletAttach`
+- [ ] **Tab Completion**: Tab completion shows conversation list with summaries
+- [ ] **Interactive Picker**: `:KodeletAttachSelect` works with vim.ui.select
+- [ ] **Context Writing**: Open files are written to context file
+- [ ] **Diagnostics**: LSP diagnostics are included in context
+- [ ] **Auto-Update**: Context updates when opening/closing buffers
+- [ ] **Selection**: Visual selection can be sent with `:KodeletSendSelection`
+- [ ] **Feedback**: `:KodeletFeedback` sends message via CLI
+- [ ] **Status**: `:KodeletStatus` shows current attachment status
+- [ ] **Clear**: `:KodeletClearContext` removes context file
+- [ ] **Detach**: `:KodeletDetach` clears conversation ID
+- [ ] **Integration**: Kodelet receives and processes IDE context
+- [ ] **Cleanup**: Context file is cleared after Kodelet processes it
+
+### Troubleshooting
+
+**Plugin not loading:**
+```bash
+# Check if plugin directory exists
+ls -la ~/.local/share/nvim/site/pack/kodelet/start/
+
+# Check Neovim runtime path
+nvim --cmd "set runtimepath?" +q
+```
+
+**Commands not available:**
+```vim
+" Check if kodelet module is loaded
+:lua print(vim.inspect(package.loaded['kodelet']))
+
+" Manually load the plugin
+:lua require('kodelet').setup()
+
+" List all commands
+:command Kodelet
+```
+
+**Context file not being created:**
+```bash
+# Check directory exists and permissions
+ls -la ~/.kodelet/ide/
+
+# Manually create directory
+mkdir -p ~/.kodelet/ide
+
+# Test file writing
+:lua require('kodelet.writer').set_conversation_id('test-123')
+:lua require('kodelet.writer').write_context()
+:!cat ~/.kodelet/ide/context-test-123.json
+```
+
+**Kodelet not receiving context:**
+```bash
+# Verify file exists
+ls -la ~/.kodelet/ide/context-*.json
+
+# Check file contents
+cat ~/.kodelet/ide/context-*.json | jq .
+
+# Verify kodelet is reading IDE context (add debug output to pkg/ide/store.go)
+```
 
 ## Security Considerations
 
