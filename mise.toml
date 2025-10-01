@@ -138,9 +138,9 @@ description = "Cross-compile for multiple platforms using Docker"
 run = [
   "mkdir -p bin",
   "echo 'Cross-compiling for multiple platforms using Docker...'",
-  "docker build --build-arg VERSION=\"$VERSION\" --build-arg GIT_COMMIT=\"$GIT_COMMIT\" --build-arg BUILD_TIME=\"$BUILD_TIME\" --build-arg NODE_VERSION=\"$NODE_VERSION\" --build-arg NPM_VERSION=\"$NPM_VERSION\" -f Dockerfile.cross-build -t kodelet-cross-build .",
+  "${DOCKER_CMD:-docker} build --build-arg VERSION=\"$VERSION\" --build-arg GIT_COMMIT=\"$GIT_COMMIT\" --build-arg BUILD_TIME=\"$BUILD_TIME\" --build-arg NODE_VERSION=\"$NODE_VERSION\" --build-arg NPM_VERSION=\"$NPM_VERSION\" -f Dockerfile.cross-build -t kodelet-cross-build .",
   "echo 'Extracting binaries from Docker container...'",
-  "docker run --rm -v $(pwd)/bin:/output kodelet-cross-build cp /bin/kodelet-linux-amd64 /bin/kodelet-linux-arm64 /bin/kodelet-darwin-amd64 /bin/kodelet-darwin-arm64 /bin/kodelet-windows-amd64.exe /output/",
+  "${DOCKER_CMD:-docker} run --rm -v $(pwd)/bin:/output kodelet-cross-build cp /bin/kodelet-linux-amd64 /bin/kodelet-linux-arm64 /bin/kodelet-darwin-amd64 /bin/kodelet-darwin-arm64 /bin/kodelet-windows-amd64.exe /output/",
   "echo 'Cross-build complete. Binaries available in ./bin/'",
   "ls -la ./bin/kodelet-*",
 ]
@@ -148,20 +148,20 @@ run = [
 [tasks.docker-build]
 description = "Build Docker image"
 run = [
-  "docker build --build-arg VERSION=\"$VERSION\" --build-arg GIT_COMMIT=\"$GIT_COMMIT\" --build-arg BUILD_TIME=\"$BUILD_TIME\" --build-arg NODE_VERSION=\"$NODE_VERSION\" --build-arg NPM_VERSION=\"$NPM_VERSION\" -t kodelet .",
+  "${DOCKER_CMD:-docker} build --build-arg VERSION=\"$VERSION\" --build-arg GIT_COMMIT=\"$GIT_COMMIT\" --build-arg BUILD_TIME=\"$BUILD_TIME\" --build-arg NODE_VERSION=\"$NODE_VERSION\" --build-arg NPM_VERSION=\"$NPM_VERSION\" -t kodelet .",
 ]
 
 [tasks.docker-run]
 description = "Run with Docker"
 run = [
-  "docker run -e ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY} kodelet \"${query:-}\"",
+  "${DOCKER_CMD:-docker} run -e ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY} kodelet \"${query:-}\"",
 ]
 
 [tasks.e2e-test-docker]
 description = "Run end-to-end tests in Docker"
 run = [
-  "docker build -f tests/acceptance/Dockerfile.e2e -t kodelet-e2e-tests .",
-  "docker run --rm -e ANTHROPIC_API_KEY -e OPENAI_API_KEY kodelet-e2e-tests",
+  "${DOCKER_CMD:-docker} build -f tests/acceptance/Dockerfile.e2e -t kodelet-e2e-tests .",
+  "${DOCKER_CMD:-docker} run --rm -e ANTHROPIC_API_KEY -e OPENAI_API_KEY kodelet-e2e-tests",
 ]
 
 [tasks.release-note]
