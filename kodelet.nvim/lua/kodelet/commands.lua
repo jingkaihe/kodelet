@@ -193,6 +193,16 @@ function M.setup()
             vim.notify("No context to clear", vim.log.levels.INFO)
         end
     end, { desc = "Clear Kodelet context" })
+    
+    -- Clear only selection (keep files and diagnostics)
+    vim.api.nvim_create_user_command("KodeletClearSelection", function()
+        if not writer.conversation_id then
+            vim.notify("Not attached to a Kodelet session", vim.log.levels.WARN)
+            return
+        end
+        
+        writer.clear_selection()
+    end, { desc = "Clear Kodelet selection only" })
 end
 
 return M

@@ -83,6 +83,7 @@ function M.gather_diagnostics()
 end
 
 -- Write IDE context to file (always includes diagnostics)
+-- This function preserves any existing selection in the file
 function M.write_context()
     if not M.conversation_id then
         vim.notify("Not attached to Kodelet session", vim.log.levels.WARN)
@@ -91,6 +92,18 @@ function M.write_context()
     
     local context = M.gather_context(true)  -- Always include diagnostics
     local context_path = M.get_context_path()
+    
+    -- Read existing context to preserve selection field
+    if vim.fn.filereadable(context_path) == 1 then
+        local existing_content = vim.fn.readfile(context_path)
+        if #existing_content > 0 then
+            local ok, existing_context = pcall(vim.fn.json_decode, existing_content[1])
+            if ok and existing_context and existing_context.selection then
+                -- Preserve the existing selection
+                context.selection = existing_context.selection
+            end
+        end
+    end
     
     local json_str = vim.fn.json_encode(context)
     local success = vim.fn.writefile({json_str}, context_path)
@@ -115,9 +128,17 @@ function M.write_context_with_selection(selection_info)
     
     local context_path = M.get_context_path()
     local json_str = vim.fn.json_encode(context)
+    
+    -- Write to file with proper line splitting for readability
     local success = vim.fn.writefile({json_str}, context_path)
     
-    return success == 0
+    if success == 0 then
+        vim.notify("Selection written to: " .. context_path, vim.log.levels.INFO)
+        return true
+    else
+        vim.notify("Failed to write selection (code: " .. tostring(success) .. ")", vim.log.levels.ERROR)
+        return false
+    end
 end
 
 -- Clear IDE context file
@@ -131,6 +152,39 @@ function M.clear_context()
         vim.fn.delete(context_path)
         return true
     end
+    return false
+end
+
+-- Clear only the selection from context (keep open files and diagnostics)
+function M.clear_selection()
+    if not M.conversation_id then
+        vim.notify("Not attached to Kodelet session", vim.log.levels.WARN)
+        return false
+    end
+    
+    local context_path = M.get_context_path()
+    
+    -- Read existing context
+    if vim.fn.filereadable(context_path) == 1 then
+        local existing_content = vim.fn.readfile(context_path)
+        if #existing_content > 0 then
+            local ok, existing_context = pcall(vim.fn.json_decode, existing_content[1])
+            if ok and existing_context then
+                -- Remove selection field
+                existing_context.selection = vim.NIL  -- Use vim.NIL to remove from JSON
+                
+                local json_str = vim.fn.json_encode(existing_context)
+                local success = vim.fn.writefile({json_str}, context_path)
+                
+                if success == 0 then
+                    vim.notify("Selection cleared from context", vim.log.levels.INFO)
+                    return true
+                end
+            end
+        end
+    end
+    
+    vim.notify("No selection to clear", vim.log.levels.INFO)
     return false
 end
 

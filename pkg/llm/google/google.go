@@ -317,6 +317,13 @@ func (t *GoogleThread) SendMessage(
 		}
 	}
 
+	// Process IDE context if this is not a subagent
+	if !t.config.IsSubAgent && t.conversationID != "" {
+		if err := t.processIDEContext(ctx, handler); err != nil {
+			logger.G(ctx).WithError(err).Warn("failed to process IDE context, continuing")
+		}
+	}
+
 	// Add user message with images if provided
 	t.AddUserMessage(ctx, message, opt.Images...)
 
@@ -410,38 +417,6 @@ func (t *GoogleThread) processMessageExchange(
 		systemPrompt = sysprompt.SubAgentPrompt(t.config.Model, t.config, contexts)
 	} else {
 		systemPrompt = sysprompt.SystemPrompt(t.config.Model, t.config, contexts)
-	}
-
-	// Check for IDE context if this is not a subagent
-	if !t.config.IsSubAgent && t.conversationID != "" {
-		ideStore, err := ide.NewIDEStore()
-		if err != nil {
-			logger.G(ctx).WithError(err).Warn("failed to create IDE store, continuing without IDE context")
-		} else {
-			ideContext, err := ideStore.ReadContext(t.conversationID)
-			if err != nil {
-				logger.G(ctx).WithError(err).Warn("failed to read IDE context, continuing without IDE context")
-			} else if ideContext != nil {
-				logger.G(ctx).WithFields(map[string]interface{}{
-					"open_files_count":  len(ideContext.OpenFiles),
-					"has_selection":     ideContext.Selection != nil,
-					"diagnostics_count": len(ideContext.Diagnostics),
-				}).Info("processing IDE context")
-
-				// Format IDE context as a text prompt and prepend to system prompt
-				ideContextPrompt := ide.FormatContextPrompt(ideContext)
-				if ideContextPrompt != "" {
-					systemPrompt = ideContextPrompt + "\n\n" + systemPrompt
-				}
-
-				// Clear the IDE context now that we've processed it
-				if err := ideStore.ClearContext(t.conversationID); err != nil {
-					logger.G(ctx).WithError(err).Warn("failed to clear IDE context, may be processed again")
-				} else {
-					logger.G(ctx).Debug("successfully cleared IDE context")
-				}
-			}
-		}
 	}
 
 	config := &genai.GenerateContentConfig{
@@ -1298,6 +1273,55 @@ func (t *GoogleThread) processPendingFeedback(ctx context.Context, handler llmty
 			logger.G(ctx).WithError(err).Warn("failed to clear pending feedback, may be processed again")
 		} else {
 			logger.G(ctx).Debug("successfully cleared pending feedback")
+		}
+	}
+
+	return nil
+}
+
+// processIDEContext processes IDE context from the editor
+func (t *GoogleThread) processIDEContext(ctx context.Context, handler llmtypes.MessageHandler) error {
+	// Use a separate function to ensure IDE context processing doesn't break the main flow
+	defer func() {
+		if r := recover(); r != nil {
+			logger.G(ctx).WithField("panic", r).Error("panic occurred while processing IDE context")
+		}
+	}()
+
+	ideStore, err := ide.NewIDEStore()
+	if err != nil {
+		logger.G(ctx).WithError(err).Warn("failed to create IDE store, continuing without IDE context")
+		return nil
+	}
+
+	ideContext, err := ideStore.ReadContext(t.conversationID)
+	if err != nil {
+		logger.G(ctx).WithError(err).Warn("failed to read IDE context, continuing without IDE context")
+		return nil
+	}
+
+	if ideContext != nil {
+		ideContextPrompt := ide.FormatContextPrompt(ideContext)
+		if ideContextPrompt != "" {
+			logger.G(ctx).WithFields(map[string]interface{}{
+				"open_files":    len(ideContext.OpenFiles),
+				"diagnostics":   len(ideContext.Diagnostics),
+				"has_selection": ideContext.Selection != nil,
+			}).Info("processing IDE context")
+
+			userContent := genai.NewContentFromParts([]*genai.Part{
+				genai.NewPartFromText(ideContextPrompt),
+			}, genai.RoleUser)
+			t.messages = append(t.messages, userContent)
+			handler.HandleText(fmt.Sprintf("📋 IDE Context: %d files, %d diagnostics",
+				len(ideContext.OpenFiles), len(ideContext.Diagnostics)))
+		}
+
+		// Clear the IDE context now that we've processed it
+		if err := ideStore.ClearContext(t.conversationID); err != nil {
+			logger.G(ctx).WithError(err).Warn("failed to clear IDE context, may be processed again")
+		} else {
+			logger.G(ctx).Debug("successfully cleared IDE context")
 		}
 	}
 

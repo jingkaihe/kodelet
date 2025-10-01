@@ -457,15 +457,15 @@ func (t *AnthropicThread) processMessageExchange(
 					"diagnostics_count": len(ideContext.Diagnostics),
 				}).Info("processing IDE context")
 
-				// Format IDE context as a text prompt and prepend to system prompt
+				// Format IDE context as a text prompt and append as user message
 				ideContextPrompt := ide.FormatContextPrompt(ideContext)
 				if ideContextPrompt != "" {
-					// Insert IDE context at the beginning of system prompts (before cache control)
-					ideContextBlock := anthropic.TextBlockParam{
-						Text: ideContextPrompt,
-					}
-					// Prepend to system prompt blocks
-					messageParams.System = append([]anthropic.TextBlockParam{ideContextBlock}, messageParams.System...)
+					userMessage := anthropic.NewUserMessage(
+						anthropic.NewTextBlock(ideContextPrompt),
+					)
+					messageParams.Messages = append(messageParams.Messages, userMessage)
+					handler.HandleText(fmt.Sprintf("📋 IDE Context: %d files, %d diagnostics", 
+						len(ideContext.OpenFiles), len(ideContext.Diagnostics)))
 				}
 
 				// Clear the IDE context now that we've processed it

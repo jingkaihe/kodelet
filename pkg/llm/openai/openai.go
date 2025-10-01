@@ -563,16 +563,16 @@ func (t *OpenAIThread) processMessageExchange(
 					"diagnostics_count": len(ideContext.Diagnostics),
 				}).Info("processing IDE context")
 
-				// Format IDE context as a text prompt and prepend to system message
+				// Format IDE context as a text prompt and append as user message
 				ideContextPrompt := ide.FormatContextPrompt(ideContext)
 				if ideContextPrompt != "" {
-					// Find the system message and prepend IDE context
-					for i, msg := range requestParams.Messages {
-						if msg.Role == openai.ChatMessageRoleSystem {
-							requestParams.Messages[i].Content = ideContextPrompt + "\n\n" + msg.Content
-							break
-						}
+					userMessage := openai.ChatCompletionMessage{
+						Role:    openai.ChatMessageRoleUser,
+						Content: ideContextPrompt,
 					}
+					requestParams.Messages = append(requestParams.Messages, userMessage)
+					handler.HandleText(fmt.Sprintf("📋 IDE Context: %d files, %d diagnostics",
+						len(ideContext.OpenFiles), len(ideContext.Diagnostics)))
 				}
 
 				// Clear the IDE context now that we've processed it
