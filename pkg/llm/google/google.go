@@ -1301,18 +1301,16 @@ func (t *GoogleThread) processIDEContext(ctx context.Context, handler llmtypes.M
 	}
 
 	if ideContext != nil {
+		logger.G(ctx).WithFields(map[string]interface{}{
+			"open_files_count":  len(ideContext.OpenFiles),
+			"has_selection":     ideContext.Selection != nil,
+			"diagnostics_count": len(ideContext.Diagnostics),
+		}).Info("processing IDE context")
+
+		// Format IDE context as a text prompt and append as user message
 		ideContextPrompt := ide.FormatContextPrompt(ideContext)
 		if ideContextPrompt != "" {
-			logger.G(ctx).WithFields(map[string]interface{}{
-				"open_files":    len(ideContext.OpenFiles),
-				"diagnostics":   len(ideContext.Diagnostics),
-				"has_selection": ideContext.Selection != nil,
-			}).Info("processing IDE context")
-
-			userContent := genai.NewContentFromParts([]*genai.Part{
-				genai.NewPartFromText(ideContextPrompt),
-			}, genai.RoleUser)
-			t.messages = append(t.messages, userContent)
+			t.AddUserMessage(ctx, ideContextPrompt)
 			handler.HandleText(fmt.Sprintf("📋 IDE Context: %d files, %d diagnostics",
 				len(ideContext.OpenFiles), len(ideContext.Diagnostics)))
 		}

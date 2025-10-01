@@ -332,6 +332,13 @@ func (t *OpenAIThread) SendMessage(
 		copy(originalMessages, t.messages)
 	}
 
+	// Process IDE context if this is not a subagent
+	if !t.config.IsSubAgent && t.conversationID != "" {
+		if err := t.processIDEContext(ctx, handler); err != nil {
+			logger.G(ctx).WithError(err).Warn("failed to process IDE context, continuing")
+		}
+	}
+
 	// Add user message with images if provided
 	if len(opt.Images) > 0 {
 		t.AddUserMessage(ctx, message, opt.Images...)
@@ -547,44 +554,6 @@ func (t *OpenAIThread) processMessageExchange(
 		}()
 	}
 
-	// Check for IDE context if this is not a subagent
-	if !t.config.IsSubAgent && t.conversationID != "" {
-		ideStore, err := ide.NewIDEStore()
-		if err != nil {
-			logger.G(ctx).WithError(err).Warn("failed to create IDE store, continuing without IDE context")
-		} else {
-			ideContext, err := ideStore.ReadContext(t.conversationID)
-			if err != nil {
-				logger.G(ctx).WithError(err).Warn("failed to read IDE context, continuing without IDE context")
-			} else if ideContext != nil {
-				logger.G(ctx).WithFields(map[string]interface{}{
-					"open_files_count":  len(ideContext.OpenFiles),
-					"has_selection":     ideContext.Selection != nil,
-					"diagnostics_count": len(ideContext.Diagnostics),
-				}).Info("processing IDE context")
-
-				// Format IDE context as a text prompt and append as user message
-				ideContextPrompt := ide.FormatContextPrompt(ideContext)
-				if ideContextPrompt != "" {
-					userMessage := openai.ChatCompletionMessage{
-						Role:    openai.ChatMessageRoleUser,
-						Content: ideContextPrompt,
-					}
-					requestParams.Messages = append(requestParams.Messages, userMessage)
-					handler.HandleText(fmt.Sprintf("📋 IDE Context: %d files, %d diagnostics",
-						len(ideContext.OpenFiles), len(ideContext.Diagnostics)))
-				}
-
-				// Clear the IDE context now that we've processed it
-				if err := ideStore.ClearContext(t.conversationID); err != nil {
-					logger.G(ctx).WithError(err).Warn("failed to clear IDE context, may be processed again")
-				} else {
-					logger.G(ctx).Debug("successfully cleared IDE context")
-				}
-			}
-		}
-	}
-
 	// Add a tracing event for API call start
 	telemetry.AddEvent(ctx, "api_call_start",
 		attribute.String("model", model),
@@ -687,6 +656,53 @@ func (t *OpenAIThread) processMessageExchange(
 		t.SaveConversation(ctx, false)
 	}
 	return finalOutput, true, nil
+}
+
+// processIDEContext processes IDE context from the editor
+func (t *OpenAIThread) processIDEContext(ctx context.Context, handler llmtypes.MessageHandler) error {
+	// Use a separate function to ensure IDE context processing doesn't break the main flow
+	defer func() {
+		if r := recover(); r != nil {
+			logger.G(ctx).WithField("panic", r).Error("panic occurred while processing IDE context")
+		}
+	}()
+
+	ideStore, err := ide.NewIDEStore()
+	if err != nil {
+		logger.G(ctx).WithError(err).Warn("failed to create IDE store, continuing without IDE context")
+		return nil
+	}
+
+	ideContext, err := ideStore.ReadContext(t.conversationID)
+	if err != nil {
+		logger.G(ctx).WithError(err).Warn("failed to read IDE context, continuing without IDE context")
+		return nil
+	}
+
+	if ideContext != nil {
+		logger.G(ctx).WithFields(map[string]interface{}{
+			"open_files_count":  len(ideContext.OpenFiles),
+			"has_selection":     ideContext.Selection != nil,
+			"diagnostics_count": len(ideContext.Diagnostics),
+		}).Info("processing IDE context")
+
+		// Format IDE context as a text prompt and append as user message
+		ideContextPrompt := ide.FormatContextPrompt(ideContext)
+		if ideContextPrompt != "" {
+			t.AddUserMessage(ctx, ideContextPrompt)
+			handler.HandleText(fmt.Sprintf("📋 IDE Context: %d files, %d diagnostics",
+				len(ideContext.OpenFiles), len(ideContext.Diagnostics)))
+		}
+
+		// Clear the IDE context now that we've processed it
+		if err := ideStore.ClearContext(t.conversationID); err != nil {
+			logger.G(ctx).WithError(err).Warn("failed to clear IDE context, may be processed again")
+		} else {
+			logger.G(ctx).Debug("successfully cleared IDE context")
+		}
+	}
+
+	return nil
 }
 
 // createChatCompletionWithRetry executes the OpenAI API call with retry logic
