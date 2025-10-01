@@ -1,5 +1,27 @@
 # Kodelet
 
+## 0.1.5.beta (2025-10-01)
+
+### Features
+
+**Enhanced Chat UI**:
+
+- **Tokyo Night Theme**: Applied modern Tokyo Night color palette throughout the chat UI for better visual clarity and reduced eye strain
+- **Version Banner**: Added version information to chat welcome screen for better visibility of current release
+- **Model Info Display**: Status bar now shows active provider and model (e.g., "anthropic/claude-sonnet-4-5-20250929") for transparency
+- **Improved Help Text**: Redesigned keyboard shortcuts and command help with better formatting and clearer organization
+
+### Bug Fixes
+
+- **Conversation ID Generation**: Fixed conversation ID generation logic to ensure unique IDs are created for all chat sessions
+- **Log File Handling**: Corrected log file creation with proper octal permission notation (0o644, 0o755)
+
+### Internal Changes
+
+- **Code Organization**: Refactored TUI package into focused modules (`commands.go`, `messages.go`, `views.go`) for better maintainability
+- **Test Coverage**: Added comprehensive test suites for command parsing, message formatting, and view rendering utilities
+- **Code Cleanup**: Removed redundant code comments throughout TUI implementation
+
 ## 0.1.4.beta (2025-09-30)
 
 ### Features
