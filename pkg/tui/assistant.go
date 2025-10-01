@@ -2,7 +2,6 @@ package tui
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/logger"
@@ -109,21 +108,4 @@ func (a *AssistantClient) Close(ctx context.Context) error {
 		return a.mcpManager.Close(ctx)
 	}
 	return nil
-}
-
-// ProcessAssistantEvent processes the events from the assistant
-// and returns a formatted message
-func ProcessAssistantEvent(event llmtypes.MessageEvent) string {
-	switch event.Type {
-	case llmtypes.EventTypeText:
-		return event.Content
-	case llmtypes.EventTypeToolUse:
-		return fmt.Sprintf("🔧 Using tool: %s", event.Content)
-	case llmtypes.EventTypeToolResult:
-		return fmt.Sprintf("🔄 Tool result: %s", event.Content)
-	case llmtypes.EventTypeThinking:
-		return fmt.Sprintf("💭 Thinking: %s", event.Content)
-	}
-
-	return ""
 }

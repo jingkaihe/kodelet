@@ -34,17 +34,12 @@ type Model struct {
 	spinnerIndex       int
 	windowSizeMsg      tea.WindowSizeMsg
 	statusMessage      string
-	senderStyle        lipgloss.Style
-	userStyle          lipgloss.Style
-	assistantStyle     lipgloss.Style
-	systemStyle        lipgloss.Style
 	assistant          *AssistantClient
 	ctx                context.Context
 	cancel             context.CancelFunc
 	ctrlCPressCount    int
 	lastCtrlCPressTime time.Time
-	usageText          string
-	costText           string
+	messageFormatter   *MessageFormatter
 
 	// Command auto-completion
 	showCommandDropdown bool
@@ -76,15 +71,6 @@ func NewModel(ctx context.Context, conversationID string, enablePersistence bool
 	vp.KeyMap.PageDown.SetEnabled(true)
 	vp.KeyMap.PageUp.SetEnabled(true)
 
-	// Define available slash commands
-	availableCommands := []string{
-		"/bash",
-		"/add-image",
-		"/remove-image",
-		"/help",
-		"/clear",
-	}
-
 	// Create status message
 	statusMessage := "Ready"
 
@@ -92,6 +78,9 @@ func NewModel(ctx context.Context, conversationID string, enablePersistence bool
 	assistant := NewAssistantClient(ctx, conversationID, enablePersistence, mcpManager, customManager, maxTurns, compactRatio, disableAutoCompact)
 
 	ctx, cancel := context.WithCancel(ctx)
+
+	// Create message formatter
+	formatter := NewMessageFormatter(80) // Initial width, will be updated on resize
 
 	// Create the initial model
 	model := Model{
@@ -101,14 +90,11 @@ func NewModel(ctx context.Context, conversationID string, enablePersistence bool
 		textarea:           ta,
 		viewport:           vp,
 		statusMessage:      statusMessage,
-		senderStyle:        lipgloss.NewStyle().Foreground(lipgloss.Color("205")).Bold(true),
-		userStyle:          lipgloss.NewStyle().Foreground(lipgloss.Color("86")).Bold(true),
-		assistantStyle:     lipgloss.NewStyle().Foreground(lipgloss.Color("212")).Bold(true),
-		systemStyle:        lipgloss.NewStyle().Foreground(lipgloss.Color("yellow")).Bold(true),
 		assistant:          assistant,
 		ctx:                ctx,
 		cancel:             cancel,
-		availableCommands:  availableCommands,
+		messageFormatter:   formatter,
+		availableCommands:  GetAvailableCommands(),
 		selectedCommandIdx: 0,
 	}
 
@@ -164,43 +150,7 @@ func (m *Model) SetProcessing(isProcessing bool) {
 
 // updateViewportContent updates the content of the viewport
 func (m *Model) updateViewportContent() {
-	var content string
-
-	// Format and render each message
-	for i, msg := range m.messages {
-		var renderedMsg string
-
-		switch msg.Role {
-		case "":
-			// No prefix for system messages
-			renderedMsg = msg.Content
-		case "user":
-			// Create a styled user message
-			userPrefix := m.userStyle.Render("You")
-			messageText := lipgloss.NewStyle().
-				PaddingLeft(1).
-				Width(m.width - 15). // Ensure text wraps within viewport width
-				Render(msg.Content)
-			renderedMsg = userPrefix + " → " + messageText
-		default:
-			// Create a styled assistant message
-			assistantPrefix := m.assistantStyle.Render("Assistant")
-			messageText := lipgloss.NewStyle().
-				PaddingLeft(1).
-				Width(m.width - 15). // Ensure text wraps within viewport width
-				Render(msg.Content)
-			renderedMsg = assistantPrefix + " → " + messageText
-		}
-
-		// Add padding between messages
-		if i > 0 {
-			content += "\n\n"
-		}
-
-		content += renderedMsg
-	}
-
-	// Set the viewport content
+	content := m.messageFormatter.FormatMessages(m.messages)
 	m.viewport.SetContent(content)
 }
 
@@ -266,19 +216,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, resetCtrlCCmd()
 		case tea.KeyCtrlH:
 			// Show help/shortcuts
-			m.AddSystemMessage("Keyboard Shortcuts:\n" +
-				"Ctrl+C (twice): Quit\n" +
-				"Ctrl+S: Send message\n" +
-				"Ctrl+H: Show this help\n" +
-				"Ctrl+L: Clear screen\n" +
-				"PageUp/PageDown: Scroll history\n" +
-				"Up/Down: Navigate history\n\n" +
-				"Commands:\n" +
-				"/bash [command]: Execute a bash command and include result in chat context\n" +
-				"/add-image [image-path]: Add an image to the chat\n" +
-				"/remove-image [image-path]: Remove an image from the chat\n" +
-				"/help: Show this help message\n" +
-				"/clear: Clear the screen")
+			m.AddSystemMessage(GetHelpText())
 		case tea.KeyCtrlL:
 			// Clear the screen
 			m.messages = []llmtypes.Message{}
@@ -297,70 +235,49 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !m.isProcessing {
 				content := m.textarea.Value()
 				if content != "" {
-					// Handle slash commands
-					if strings.HasPrefix(content, "/") {
-						// First check for exact command matches
-						command := strings.TrimSpace(content)
-						commandParts := strings.SplitN(command, " ", 2)
-
-						switch commandParts[0] {
-						case "/help":
+					// Try to parse as a command
+					cmd, args, isCommand := ParseCommand(content)
+					
+					if isCommand {
+						switch Command(cmd) {
+						case CommandHelp:
 							m.AddMessage(content, true)
 							m.textarea.Reset()
-							// Show help message
-							m.AddSystemMessage("Keyboard Shortcuts:\n" +
-								"Ctrl+C (twice): Quit\n" +
-								"Ctrl+S: Send message\n" +
-								"Ctrl+H: Show this help\n" +
-								"Ctrl+L: Clear screen\n" +
-								"PageUp/PageDown: Scroll history\n" +
-								"Up/Down: Navigate history\n\n" +
-								"Commands:\n" +
-								"/bash [command]: Execute a bash command and include result in chat context\n" +
-								"/add-image [image-path]: Add an image to the chat\n" +
-								"/remove-image [image-path]: Remove an image from the chat\n" +
-								"/help: Show this help message\n" +
-								"/clear: Clear the screen")
+							m.AddSystemMessage(GetHelpText())
 							return m, nil
 
-						case "/clear":
+						case CommandClear:
 							m.AddMessage(content, true)
 							m.textarea.Reset()
-							// Clear the screen
 							m.messages = []llmtypes.Message{}
 							m.updateViewportContent()
 							m.AddSystemMessage("Screen cleared")
 							return m, nil
 
-						case "/bash":
+						case CommandBash:
 							m.AddMessage(content, true)
 							m.textarea.Reset()
 							m.SetProcessing(true)
-
-							// Extract bash command from the input
-							var bashCommand string
-							if len(commandParts) > 1 {
-								bashCommand = commandParts[1]
-							}
-
 							return m, func() tea.Msg {
-								return bashInputMsg(bashCommand)
+								return bashInputMsg(args)
 							}
-						case "/add-image":
+
+						case CommandAddImage:
 							m.textarea.Reset()
-							if len(commandParts) > 1 {
-								m.imagePaths = append(m.imagePaths, commandParts[1])
-								m.AddSystemMessage(fmt.Sprintf("Added image: %s", commandParts[1]))
+							if args != "" {
+								m.imagePaths = append(m.imagePaths, args)
+								m.AddSystemMessage(fmt.Sprintf("Added image: %s", args))
 							}
 							return m, nil
-						case "/remove-image":
+
+						case CommandRemoveImage:
 							m.AddMessage(content, true)
 							m.textarea.Reset()
-							if len(commandParts) > 1 {
+							if args != "" {
 								m.imagePaths = slices.DeleteFunc(m.imagePaths, func(path string) bool {
-									return path == commandParts[1]
+									return path == args
 								})
-								m.AddSystemMessage(fmt.Sprintf("Removed image: %s", commandParts[1]))
+								m.AddSystemMessage(fmt.Sprintf("Removed image: %s", args))
 							}
 							return m, nil
 						}
@@ -395,18 +312,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if err != nil {
 			m.AddSystemMessage("Error: " + err.Error())
 		}
-		cmdOut := `
-## command
-` + string(msg) + `
-
-## output
-` + string(output) + `
-`
+		cmdOut := FormatBashOutput(string(msg), string(output))
 		m.AddMessage(cmdOut, true)
 		m.SetProcessing(false)
 	case llmtypes.MessageEvent:
 		if !msg.Done {
-			m.AddMessage(ProcessAssistantEvent(msg), false)
+			m.AddMessage(FormatAssistantEvent(msg), false)
 			return m, func() tea.Msg {
 				return <-m.messageCh
 			}
@@ -425,6 +336,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewport.Width = msg.Width
 		m.viewport.Height = msg.Height - verticalMargins
 		m.textarea.SetWidth(msg.Width - 2)
+		m.messageFormatter.SetWidth(msg.Width)
 
 		if !m.ready {
 			m.ready = true
@@ -442,7 +354,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Check for slash commands in the textarea
 	currentInput := m.textarea.Value()
-	if strings.HasPrefix(currentInput, "/") && !m.commandSelectionCompleted(currentInput) && !m.isProcessing {
+	shouldShow := ShouldShowCommandDropdown(currentInput, m.availableCommands, m.isProcessing)
+	
+	if shouldShow {
 		// Show dropdown if it's not already showing
 		if !m.showCommandDropdown {
 			m.showCommandDropdown = true
@@ -473,7 +387,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	} else {
-		// Hide dropdown if input doesn't start with "/"
+		// Hide dropdown if conditions not met
 		m.showCommandDropdown = false
 	}
 
@@ -483,16 +397,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, tea.Batch(cmds...)
-}
-
-func (m Model) commandSelectionCompleted(currentInput string) bool {
-	for _, cmd := range m.availableCommands {
-		if strings.HasPrefix(currentInput, cmd) {
-			return true
-		}
-	}
-
-	return false
 }
 
 // View renders the UI
@@ -604,13 +508,12 @@ func (m Model) View() string {
 func (m Model) statusView() string {
 	var statusText string
 	if m.isProcessing {
-		spinChars := []string{".", "∘", "○", "◌", "◍", "◉", "◎", "●"}
-		statusText = fmt.Sprintf("%s %s", spinChars[m.spinnerIndex%8], m.statusMessage)
+		statusText = fmt.Sprintf("%s %s", GetSpinnerChar(m.spinnerIndex), m.statusMessage)
 	} else {
 		statusText = m.statusMessage
 	}
 
-	m.usageText, m.costText = m.updateUsage()
+	usageText, costText := FormatUsageStats(m.assistant.GetUsage())
 
 	// Add conversation ID to status if persistence is enabled
 	var persistenceStatus string
@@ -628,13 +531,13 @@ func (m Model) statusView() string {
 		Render(statusText + persistenceStatus + " │ Ctrl+C (twice): Quit │ Ctrl+H (/help): Help │ Ctrl+S: Submit │ ↑/↓: Scroll")
 
 	// Create separate usage and cost line if available
-	if m.usageText != "" {
+	if usageText != "" {
 		usageLine := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("205")).
 			Background(lipgloss.Color("236")).
 			Padding(0, 1).
 			Bold(true).
-			Render(m.usageText + m.costText)
+			Render(usageText + costText)
 
 		return lipgloss.JoinVertical(lipgloss.Left, mainStatus, usageLine)
 	}
@@ -642,28 +545,4 @@ func (m Model) statusView() string {
 	return mainStatus
 }
 
-func (m *Model) updateUsage() (usageText string, costText string) {
-	usage := m.assistant.GetUsage()
 
-	if usage.TotalTokens() > 0 {
-		// Build context window display with percentage if available
-		var ctxDisplay string
-		if usage.MaxContextWindow > 0 {
-			percentage := float64(usage.CurrentContextWindow) / float64(usage.MaxContextWindow) * 100
-			ctxDisplay = fmt.Sprintf("Ctx: %d / %d (%.1f%%)", usage.CurrentContextWindow, usage.MaxContextWindow, percentage)
-		} else {
-			ctxDisplay = fmt.Sprintf("Ctx: %d / %d", usage.CurrentContextWindow, usage.MaxContextWindow)
-		}
-
-		usageText = fmt.Sprintf("Tokens: %d in / %d out / %d cw / %d cr / %d total | %s",
-			usage.InputTokens, usage.OutputTokens, usage.CacheCreationInputTokens, usage.CacheReadInputTokens, usage.TotalTokens(),
-			ctxDisplay)
-
-		// Add cost information if available
-		if usage.TotalCost() > 0 {
-			costText = fmt.Sprintf(" | Cost: $%.4f", usage.TotalCost())
-		}
-	}
-
-	return usageText, costText
-}
