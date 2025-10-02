@@ -223,3 +223,4 @@ run = [
   "cd pkg/webui/frontend && npm install",
   "echo 'All dependencies installed successfully!'",
 ]
+
