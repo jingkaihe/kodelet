@@ -1,5 +1,23 @@
 # Kodelet
 
+## 0.1.6.beta (2025-10-02)
+
+### Features
+
+**IDE Integration**: Deep IDE integration enabling bidirectional context sharing between Kodelet and your editor
+
+- **Neovim Plugin Support**: Added `--ide` flag for `kodelet run` and `kodelet chat` commands to enable IDE integration mode with prominent conversation ID display
+- **Context Sharing**: Automatic sharing of open files, code selections, and LSP diagnostics from IDE to Kodelet via file-based communication (`~/.kodelet/ide/context-{conversation_id}.json`)
+
+**Usage Example**:
+```bash
+# Start Kodelet with IDE integration
+kodelet chat --ide
+
+# In Neovim, attach to the conversation
+:KodeletAttach <conversation-id>
+```
+
 ## 0.1.5.beta (2025-10-01)
 
 ### Features
