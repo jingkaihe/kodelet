@@ -36,7 +36,7 @@ func TestIDEStore(t *testing.T) {
 		require.NoError(t, err)
 
 		conversationID := "test-conversation-123"
-		context := &IDEContext{
+		context := &Context{
 			OpenFiles: []FileInfo{
 				{Path: "/path/to/file1.go", Language: "go"},
 				{Path: "/path/to/file2.go", Language: "go"},
@@ -75,7 +75,7 @@ func TestIDEStore(t *testing.T) {
 		require.NoError(t, err)
 
 		conversationID := "test-conversation-456"
-		context := &IDEContext{
+		context := &Context{
 			OpenFiles: []FileInfo{
 				{Path: "/path/to/file.go", Language: "go"},
 			},
@@ -114,7 +114,7 @@ func TestIDEStore(t *testing.T) {
 		require.NoError(t, err)
 
 		conversationID := "test-conversation-789"
-		context := &IDEContext{
+		context := &Context{
 			OpenFiles: []FileInfo{
 				{Path: "/path/to/file.go", Language: "go"},
 			},
@@ -145,7 +145,7 @@ func TestIDEStore(t *testing.T) {
 		assert.False(t, store.HasContext(conversationID))
 
 		// Write context
-		context := &IDEContext{
+		context := &Context{
 			OpenFiles: []FileInfo{
 				{Path: "/path/to/file.go", Language: "go"},
 			},
@@ -162,7 +162,7 @@ func TestIDEStore(t *testing.T) {
 		require.NoError(t, err)
 
 		conversationID := "test-conversation-202"
-		context := &IDEContext{
+		context := &Context{
 			OpenFiles: []FileInfo{
 				{Path: "/path/to/file.go", Language: "go"},
 			},

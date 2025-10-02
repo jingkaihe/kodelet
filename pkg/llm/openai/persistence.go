@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/osutil"
 	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
-	"github.com/jingkaihe/kodelet/pkg/utils"
 	"github.com/pkg/errors"
 	"github.com/sashabaranov/go-openai"
 
@@ -20,7 +20,7 @@ import (
 // This includes:
 // - Empty messages (messages with no content and no tool calls)
 // - Assistant messages containing tool calls that are not followed by tool result messages
-func (t *OpenAIThread) cleanupOrphanedMessages() {
+func (t *Thread) cleanupOrphanedMessages() {
 	for len(t.messages) > 0 {
 		lastMessage := t.messages[len(t.messages)-1]
 
@@ -42,7 +42,7 @@ func (t *OpenAIThread) cleanupOrphanedMessages() {
 }
 
 // SaveConversation saves the current thread to the conversation store
-func (t *OpenAIThread) SaveConversation(ctx context.Context, summarize bool) error {
+func (t *Thread) SaveConversation(ctx context.Context, summarize bool) error {
 	t.conversationMu.Lock()
 	defer t.conversationMu.Unlock()
 
@@ -84,7 +84,7 @@ func (t *OpenAIThread) SaveConversation(ctx context.Context, summarize bool) err
 }
 
 // loadConversation loads a conversation from the store
-func (t *OpenAIThread) loadConversation(ctx context.Context) error {
+func (t *Thread) loadConversation(ctx context.Context) error {
 	t.conversationMu.Lock()
 	defer t.conversationMu.Unlock()
 
@@ -124,12 +124,12 @@ func (t *OpenAIThread) loadConversation(ctx context.Context) error {
 }
 
 // restoreBackgroundProcesses restores background processes from the conversation record
-func (t *OpenAIThread) restoreBackgroundProcesses(processes []tooltypes.BackgroundProcess) {
+func (t *Thread) restoreBackgroundProcesses(processes []tooltypes.BackgroundProcess) {
 	for _, process := range processes {
 		// Check if process is still alive
-		if utils.IsProcessAlive(process.PID) {
+		if osutil.IsProcessAlive(process.PID) {
 			// Reattach to the process
-			if restoredProcess, err := utils.ReattachProcess(process); err == nil {
+			if restoredProcess, err := osutil.ReattachProcess(process); err == nil {
 				t.state.AddBackgroundProcess(restoredProcess)
 			}
 		}

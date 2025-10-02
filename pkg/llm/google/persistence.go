@@ -17,7 +17,7 @@ import (
 )
 
 // SaveConversation persists the current conversation state to the conversation store
-func (t *GoogleThread) SaveConversation(ctx context.Context, summarise bool) error {
+func (t *Thread) SaveConversation(ctx context.Context, summarise bool) error {
 	t.conversationMu.Lock()
 	defer t.conversationMu.Unlock()
 
@@ -61,7 +61,7 @@ func (t *GoogleThread) SaveConversation(ctx context.Context, summarise bool) err
 }
 
 // LoadConversation loads a conversation from the conversation store by ID
-func (t *GoogleThread) LoadConversation(ctx context.Context, conversationID string) error {
+func (t *Thread) LoadConversation(ctx context.Context, conversationID string) error {
 	t.conversationMu.Lock()
 	defer t.conversationMu.Unlock()
 
@@ -93,7 +93,7 @@ func (t *GoogleThread) LoadConversation(ctx context.Context, conversationID stri
 	return nil
 }
 
-func (t *GoogleThread) generateSummary(ctx context.Context) string {
+func (t *Thread) generateSummary(ctx context.Context) string {
 	messages := t.convertToStandardMessages()
 	if len(messages) == 0 {
 		return ""

@@ -14,8 +14,8 @@ import (
 
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/invopop/jsonschema"
+	"github.com/jingkaihe/kodelet/pkg/osutil"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
-	"github.com/jingkaihe/kodelet/pkg/utils"
 	"go.opentelemetry.io/otel/attribute"
 )
 
@@ -122,7 +122,7 @@ func (r *GlobToolResult) StructuredData() tooltypes.StructuredToolResult {
 		// Detect language from file extension
 		language := ""
 		if fileType == "file" {
-			language = utils.DetectLanguageFromPath(file)
+			language = osutil.DetectLanguageFromPath(file)
 		}
 
 		fileInfos = append(fileInfos, tooltypes.FileInfo{

@@ -144,7 +144,7 @@ func parseTimeSpecWithClock(spec string, now func() time.Time) (time.Time, error
 
 type (
 	DailyUsage = usage.DailyUsage
-	UsageStats = usage.UsageStats
+	UsageStats = usage.Stats
 )
 
 func runUsageCmd(ctx context.Context, config *UsageConfig) {

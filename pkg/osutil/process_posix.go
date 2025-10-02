@@ -1,6 +1,6 @@
 //go:build unix
 
-package utils
+package osutil
 
 import "syscall"
 

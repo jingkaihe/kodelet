@@ -15,8 +15,8 @@ import (
 
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/invopop/jsonschema"
+	"github.com/jingkaihe/kodelet/pkg/osutil"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
-	"github.com/jingkaihe/kodelet/pkg/utils"
 	"go.opentelemetry.io/otel/attribute"
 )
 
@@ -82,7 +82,7 @@ func (r *GrepToolResult) StructuredData() tooltypes.StructuredToolResult {
 		}
 
 		// Detect language from file extension
-		language := utils.DetectLanguageFromPath(res.Filename)
+		language := osutil.DetectLanguageFromPath(res.Filename)
 
 		metadataResults = append(metadataResults, tooltypes.SearchResult{
 			FilePath: res.Filename,
@@ -380,7 +380,7 @@ func searchDirectory(ctx context.Context, root, pattern, includePattern string, 
 		}
 
 		// Skip binary files (improved detection)
-		if utils.IsBinaryFile(path) {
+		if osutil.IsBinaryFile(path) {
 			return nil
 		}
 

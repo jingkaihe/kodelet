@@ -20,9 +20,9 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/osutil"
 	"github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
-	"github.com/jingkaihe/kodelet/pkg/utils"
 )
 
 // WebFetchToolResult represents the result of fetching content from a web URL
@@ -56,14 +56,14 @@ func (r *WebFetchToolResult) AssistantFacing() string {
 
 // WebFetchTool implements the web_fetch tool for retrieving and processing web content.
 type WebFetchTool struct {
-	domainFilter *utils.DomainFilter
+	domainFilter *osutil.DomainFilter
 }
 
 // NewWebFetchTool creates a new WebFetchTool with optional domain filtering
 func NewWebFetchTool(allowedDomainsFile string) *WebFetchTool {
-	var domainFilter *utils.DomainFilter
+	var domainFilter *osutil.DomainFilter
 	if allowedDomainsFile != "" {
-		domainFilter = utils.NewDomainFilter(allowedDomainsFile)
+		domainFilter = osutil.NewDomainFilter(allowedDomainsFile)
 	}
 	return &WebFetchTool{
 		domainFilter: domainFilter,
@@ -406,7 +406,7 @@ func (t *WebFetchTool) handleCodeTextContent(_ context.Context, input *WebFetchI
 	var resultContent string
 	if contentBytes <= MaxOutputBytes {
 		// Return full content with line numbers
-		resultContent = utils.ContentWithLineNumber(lines, 1)
+		resultContent = osutil.ContentWithLineNumber(lines, 1)
 	} else {
 		// Return truncated content with line numbers
 		bytesRead := 0
@@ -419,7 +419,7 @@ func (t *WebFetchTool) handleCodeTextContent(_ context.Context, input *WebFetchI
 			bytesRead += len(line) + 1
 		}
 
-		resultContent = utils.ContentWithLineNumber(truncatedLines, 1)
+		resultContent = osutil.ContentWithLineNumber(truncatedLines, 1)
 		resultContent += fmt.Sprintf("\n\n[truncated due to max output bytes limit of %d, please read the full file at %s]",
 			MaxOutputBytes, filePath)
 	}

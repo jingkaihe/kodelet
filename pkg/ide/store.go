@@ -17,17 +17,17 @@ import (
 // ErrContextNotFound is returned when an IDE context file does not exist.
 var ErrContextNotFound = errors.New("IDE context not found")
 
-// IDEStore manages persistent storage of IDE context information including
+// Store manages persistent storage of IDE context information including
 // open files, code selections, and diagnostics. It provides thread-safe
 // operations with file-based persistence.
-type IDEStore struct {
+type Store struct {
 	ideDir string
 	mu     sync.RWMutex
 }
 
-// IDEContext represents the current state of the IDE including open files,
+// Context represents the current state of the IDE including open files,
 // selected code regions, and diagnostic messages (errors, warnings, etc.).
-type IDEContext struct {
+type Context struct {
 	OpenFiles   []FileInfo       `json:"open_files"`
 	Selection   *SelectionInfo   `json:"selection,omitempty"`
 	Diagnostics []DiagnosticInfo `json:"diagnostics,omitempty"`
@@ -64,7 +64,7 @@ type DiagnosticInfo struct {
 
 // NewIDEStore creates a new IDE context store with the storage directory
 // initialized in the user's home directory at ~/.kodelet/ide.
-func NewIDEStore() (*IDEStore, error) {
+func NewIDEStore() (*Store, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get user home directory")
@@ -76,18 +76,18 @@ func NewIDEStore() (*IDEStore, error) {
 		return nil, errors.Wrap(err, "failed to create ide directory")
 	}
 
-	return &IDEStore{
+	return &Store{
 		ideDir: ideDir,
 	}, nil
 }
 
-func (s *IDEStore) getContextPath(conversationID string) string {
+func (s *Store) getContextPath(conversationID string) string {
 	return filepath.Join(s.ideDir, fmt.Sprintf("context-%s.json", conversationID))
 }
 
 // WriteContext persists IDE context data to disk for the specified conversation ID.
 // It updates the timestamp and uses locked file operations for thread safety.
-func (s *IDEStore) WriteContext(conversationID string, context *IDEContext) error {
+func (s *Store) WriteContext(conversationID string, context *Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -108,7 +108,7 @@ func (s *IDEStore) WriteContext(conversationID string, context *IDEContext) erro
 
 // ReadContext loads IDE context data from disk for the specified conversation ID.
 // It returns ErrContextNotFound if the context file does not exist.
-func (s *IDEStore) ReadContext(conversationID string) (*IDEContext, error) {
+func (s *Store) ReadContext(conversationID string) (*Context, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -123,7 +123,7 @@ func (s *IDEStore) ReadContext(conversationID string) (*IDEContext, error) {
 		return nil, errors.Wrap(err, "failed to read IDE context file")
 	}
 
-	var context IDEContext
+	var context Context
 	if err := json.Unmarshal(data, &context); err != nil {
 		return nil, errors.Wrap(err, "failed to unmarshal IDE context")
 	}
@@ -133,7 +133,7 @@ func (s *IDEStore) ReadContext(conversationID string) (*IDEContext, error) {
 
 // ClearContext removes the IDE context file for the specified conversation ID.
 // It does not return an error if the file does not exist.
-func (s *IDEStore) ClearContext(conversationID string) error {
+func (s *Store) ClearContext(conversationID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -147,7 +147,7 @@ func (s *IDEStore) ClearContext(conversationID string) error {
 
 // HasContext checks if IDE context data exists for the specified conversation ID.
 // It returns true if a non-empty context file exists.
-func (s *IDEStore) HasContext(conversationID string) bool {
+func (s *Store) HasContext(conversationID string) bool {
 	filePath := s.getContextPath(conversationID)
 
 	if info, err := os.Stat(filePath); err == nil && info.Size() > 0 {

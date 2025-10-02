@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/invopop/jsonschema"
+	"github.com/jingkaihe/kodelet/pkg/osutil"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
-	"github.com/jingkaihe/kodelet/pkg/utils"
 	"github.com/pkg/errors"
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -76,7 +76,7 @@ func (r *FileEditToolResult) AssistantFacing() string {
 				edit := r.edits[i]
 				if edit.NewContent != "" {
 					newLines := strings.Split(edit.NewContent, "\n")
-					formattedEdit := utils.ContentWithLineNumber(newLines, edit.StartLine)
+					formattedEdit := osutil.ContentWithLineNumber(newLines, edit.StartLine)
 					result += fmt.Sprintf("\n\nEdit %d (lines %d-%d):\n%s", i+1, edit.StartLine, edit.EndLine, formattedEdit)
 				}
 			}
@@ -88,7 +88,7 @@ func (r *FileEditToolResult) AssistantFacing() string {
 		formattedEdit := ""
 		if r.newText != "" {
 			newLines := strings.Split(r.newText, "\n")
-			formattedEdit = utils.ContentWithLineNumber(newLines, r.startLine)
+			formattedEdit = osutil.ContentWithLineNumber(newLines, r.startLine)
 		}
 		result = fmt.Sprintf("File %s has been edited successfully\n\nEdited code block:\n%s", r.filename, formattedEdit)
 	}
@@ -112,7 +112,7 @@ func (r *FileEditToolResult) StructuredData() tooltypes.StructuredToolResult {
 	}
 
 	// Detect language from file extension
-	language := utils.DetectLanguageFromPath(r.filename)
+	language := osutil.DetectLanguageFromPath(r.filename)
 
 	// Create edits array for structured data
 	var edits []tooltypes.Edit
@@ -417,7 +417,7 @@ func FormatEditedBlock(originalContent, oldText, newText string) string {
 	editedLines := strings.Split(newText, "\n")
 
 	// Format with line numbers starting from the original position
-	return utils.ContentWithLineNumber(editedLines, oldBlockStartIdx+1)
+	return osutil.ContentWithLineNumber(editedLines, oldBlockStartIdx+1)
 }
 
 // Execute performs the file edit operation

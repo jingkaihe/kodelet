@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jingkaihe/kodelet/pkg/utils"
+	"github.com/jingkaihe/kodelet/pkg/osutil"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -48,7 +48,7 @@ func TestBashToolBackgroundParameter(t *testing.T) {
 				indexFile := filepath.Join(testDir, "index.html")
 				helloFile := filepath.Join(testDir, "hello.txt")
 
-				assert.True(t, utils.WaitForFiles(10*time.Second, 100*time.Millisecond, indexFile, helloFile), "Expected files to be created within timeout")
+				assert.True(t, osutil.WaitForFiles(10*time.Second, 100*time.Millisecond, indexFile, helloFile), "Expected files to be created within timeout")
 
 				// Check if index.html was created
 				indexContent, err := os.ReadFile(indexFile)
@@ -86,7 +86,7 @@ func TestBashToolBackgroundParameter(t *testing.T) {
 
 				// Wait for the process to complete and log to contain expected content
 				logPath := filepath.Join(testDir, ".kodelet", pid, "out.log")
-				assert.True(t, utils.WaitForCondition(10*time.Second, 200*time.Millisecond, func() bool {
+				assert.True(t, osutil.WaitForCondition(10*time.Second, 200*time.Millisecond, func() bool {
 					if logContent, err := os.ReadFile(logPath); err == nil {
 						logStr := string(logContent)
 						// Should contain at least 2 date entries (one per iteration)
@@ -279,7 +279,7 @@ func TestBackgroundProcessLogFiles(t *testing.T) {
 		// Wait for the background process to complete and log to contain all expected lines
 		expectedLines := []string{"Hello from background", "Line 2", "Line 3"}
 
-		assert.True(t, utils.WaitForFileContent(5*time.Second, 100*time.Millisecond, logPath, expectedLines), "Expected log file to contain all expected lines within timeout")
+		assert.True(t, osutil.WaitForFileContent(5*time.Second, 100*time.Millisecond, logPath, expectedLines), "Expected log file to contain all expected lines within timeout")
 
 		// Check if log file exists
 		assert.FileExists(t, logPath, "Log file should exist at %s", logPath)

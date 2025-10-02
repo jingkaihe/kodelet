@@ -13,9 +13,9 @@ import (
 	"github.com/fsnotify/fsnotify"
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/osutil"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/jingkaihe/kodelet/pkg/tools"
-	"github.com/jingkaihe/kodelet/pkg/utils"
 	"github.com/spf13/cobra"
 
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -199,7 +199,7 @@ func runWatchMode(ctx context.Context, state tooltypes.State, config *WatchConfi
 				}
 
 				if event.Op&(fsnotify.Write|fsnotify.Create) != 0 {
-					if utils.IsBinaryFile(event.Name) {
+					if osutil.IsBinaryFile(event.Name) {
 						if config.Verbosity == "verbose" {
 							presenter.Info(fmt.Sprintf("Skipping binary file: %s", event.Name))
 							logger.G(ctx).WithField("file", event.Name).Debug("Skipped binary file")
@@ -301,7 +301,7 @@ func debounceFileEvents(ctx context.Context, input <-chan FileEvent, output chan
 var MagicCommentPatterns = []string{"# @kodelet", "// @kodelet"}
 
 func processFileChange(ctx context.Context, state tooltypes.State, path string, config *WatchConfig) {
-	if utils.IsBinaryFile(path) {
+	if osutil.IsBinaryFile(path) {
 		if config.Verbosity == "verbose" {
 			presenter.Info(fmt.Sprintf("Skipping binary file processing: %s", path))
 			logger.G(ctx).WithField("file", path).Debug("Skipped binary file processing")

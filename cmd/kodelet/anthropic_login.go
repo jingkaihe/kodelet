@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	"github.com/jingkaihe/kodelet/pkg/auth"
+	"github.com/jingkaihe/kodelet/pkg/osutil"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
-	"github.com/jingkaihe/kodelet/pkg/utils"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
@@ -47,7 +47,7 @@ func runAnthropicLogin(ctx context.Context) error {
 	fmt.Println()
 
 	presenter.Info("Opening your browser for authentication...")
-	if err := utils.OpenBrowser(authURL); err != nil {
+	if err := osutil.OpenBrowser(authURL); err != nil {
 		presenter.Warning("Could not open browser automatically. Please visit the following URL manually:")
 		fmt.Printf("\n   %s\n\n", authURL)
 	} else {

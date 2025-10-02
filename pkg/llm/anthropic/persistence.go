@@ -8,11 +8,11 @@ import (
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/jingkaihe/kodelet/pkg/osutil"
 	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
-	"github.com/jingkaihe/kodelet/pkg/utils"
 	"github.com/pkg/errors"
 )
 
@@ -32,7 +32,7 @@ func hasAnyEmptyBlock(message *anthropic.MessageParam) bool {
 // This includes:
 // - Empty messages (messages with no content)
 // - Messages containing tool use blocks that are not followed by tool result messages
-func (t *AnthropicThread) cleanupOrphanedMessages() {
+func (t *Thread) cleanupOrphanedMessages() {
 	for len(t.messages) > 0 {
 		lastMessage := t.messages[len(t.messages)-1]
 		// remove the last message if it is empty
@@ -63,7 +63,7 @@ func (t *AnthropicThread) cleanupOrphanedMessages() {
 }
 
 // SaveConversation saves the current thread to the conversation store
-func (t *AnthropicThread) SaveConversation(ctx context.Context, summarise bool) error {
+func (t *Thread) SaveConversation(ctx context.Context, summarise bool) error {
 	t.conversationMu.Lock()
 	defer t.conversationMu.Unlock()
 
@@ -105,7 +105,7 @@ func (t *AnthropicThread) SaveConversation(ctx context.Context, summarise bool) 
 }
 
 // loadConversation loads a conversation from the store into the thread
-func (t *AnthropicThread) loadConversation(ctx context.Context) error {
+func (t *Thread) loadConversation(ctx context.Context) error {
 	t.conversationMu.Lock()
 	defer t.conversationMu.Unlock()
 
@@ -144,12 +144,12 @@ func (t *AnthropicThread) loadConversation(ctx context.Context) error {
 }
 
 // restoreBackgroundProcesses restores background processes from the conversation record
-func (t *AnthropicThread) restoreBackgroundProcesses(processes []tooltypes.BackgroundProcess) {
+func (t *Thread) restoreBackgroundProcesses(processes []tooltypes.BackgroundProcess) {
 	for _, process := range processes {
 		// Check if process is still alive
-		if utils.IsProcessAlive(process.PID) {
+		if osutil.IsProcessAlive(process.PID) {
 			// Reattach to the process
-			if restoredProcess, err := utils.ReattachProcess(process); err == nil {
+			if restoredProcess, err := osutil.ReattachProcess(process); err == nil {
 				t.state.AddBackgroundProcess(restoredProcess)
 			}
 		}

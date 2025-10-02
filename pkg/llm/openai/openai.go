@@ -114,7 +114,7 @@ func isRetryableError(err error) bool {
 }
 
 // isReasoningModelDynamic checks if a model supports reasoning using custom configuration
-func (t *OpenAIThread) isReasoningModelDynamic(model string) bool {
+func (t *Thread) isReasoningModelDynamic(model string) bool {
 	// Use custom models if configured
 	if t.customModels != nil {
 		return slices.Contains(t.customModels.Reasoning, model)
@@ -125,7 +125,7 @@ func (t *OpenAIThread) isReasoningModelDynamic(model string) bool {
 }
 
 // getPricing returns the pricing information for a model, checking custom pricing first
-func (t *OpenAIThread) getPricing(model string) (llmtypes.ModelPricing, bool) {
+func (t *Thread) getPricing(model string) (llmtypes.ModelPricing, bool) {
 	// Check custom pricing first
 	if t.customPricing != nil {
 		if pricing, ok := t.customPricing[model]; ok {
@@ -141,8 +141,8 @@ func (t *OpenAIThread) getPricing(model string) (llmtypes.ModelPricing, bool) {
 // to avoid direct dependency on the conversations package
 type ConversationStore = conversations.ConversationStore
 
-// OpenAIThread implements the Thread interface using OpenAI's API
-type OpenAIThread struct {
+// Thread implements the Thread interface using OpenAI's API
+type Thread struct {
 	client                 *openai.Client
 	config                 llmtypes.Config
 	reasoningEffort        string
@@ -160,16 +160,16 @@ type OpenAIThread struct {
 	customPricing          llmtypes.CustomPricing
 	useCopilot             bool
 	subagentContextFactory llmtypes.SubagentContextFactory
-	ideStore               *ide.IDEStore // IDE context store (nil if IDE mode disabled)
+	ideStore               *ide.Store // IDE context store (nil if IDE mode disabled)
 }
 
 // Provider returns the provider name for this thread.
-func (t *OpenAIThread) Provider() string {
+func (t *Thread) Provider() string {
 	return "openai"
 }
 
 // NewOpenAIThread creates a new thread with OpenAI's API
-func NewOpenAIThread(config llmtypes.Config, subagentContextFactory llmtypes.SubagentContextFactory) (*OpenAIThread, error) {
+func NewOpenAIThread(config llmtypes.Config, subagentContextFactory llmtypes.SubagentContextFactory) (*Thread, error) {
 	// Apply defaults if not provided
 	if config.Model == "" {
 		config.Model = "gpt-4.1" // Default to GPT-4.1
@@ -265,7 +265,7 @@ func NewOpenAIThread(config llmtypes.Config, subagentContextFactory llmtypes.Sub
 	// Load custom models and pricing if available
 	customModels, customPricing := loadCustomConfiguration(config)
 
-	var ideStore *ide.IDEStore
+	var ideStore *ide.Store
 	if config.IDE && !config.IsSubAgent {
 		store, err := ide.NewIDEStore()
 		if err != nil {
@@ -274,7 +274,7 @@ func NewOpenAIThread(config llmtypes.Config, subagentContextFactory llmtypes.Sub
 		ideStore = store
 	}
 
-	return &OpenAIThread{
+	return &Thread{
 		client:                 client,
 		config:                 config,
 		reasoningEffort:        reasoningEffort,
@@ -291,17 +291,17 @@ func NewOpenAIThread(config llmtypes.Config, subagentContextFactory llmtypes.Sub
 }
 
 // SetState sets the state for the thread
-func (t *OpenAIThread) SetState(s tooltypes.State) {
+func (t *Thread) SetState(s tooltypes.State) {
 	t.state = s
 }
 
 // GetState returns the current state of the thread
-func (t *OpenAIThread) GetState() tooltypes.State {
+func (t *Thread) GetState() tooltypes.State {
 	return t.state
 }
 
 // AddUserMessage adds a user message with optional images to the thread
-func (t *OpenAIThread) AddUserMessage(ctx context.Context, message string, imagePaths ...string) {
+func (t *Thread) AddUserMessage(ctx context.Context, message string, imagePaths ...string) {
 	contentParts := []openai.ChatMessagePart{}
 
 	// Validate image count
@@ -331,7 +331,7 @@ func (t *OpenAIThread) AddUserMessage(ctx context.Context, message string, image
 }
 
 // SendMessage sends a message to the LLM and processes the response
-func (t *OpenAIThread) SendMessage(
+func (t *Thread) SendMessage(
 	ctx context.Context,
 	message string,
 	handler llmtypes.MessageHandler,
@@ -482,7 +482,7 @@ func isToolResultMessage(msg openai.ChatCompletionMessage) bool {
 
 // processMessageExchange handles a single message exchange with the LLM, including
 // preparing message parameters, making the API call, and processing the response
-func (t *OpenAIThread) processMessageExchange(
+func (t *Thread) processMessageExchange(
 	ctx context.Context,
 	handler llmtypes.MessageHandler,
 	model string,
@@ -624,7 +624,7 @@ func (t *OpenAIThread) processMessageExchange(
 	return finalOutput, true, nil
 }
 
-func (t *OpenAIThread) processIDEContext(ctx context.Context, handler llmtypes.MessageHandler) error {
+func (t *Thread) processIDEContext(ctx context.Context, handler llmtypes.MessageHandler) error {
 	ideContext, err := t.ideStore.ReadContext(t.conversationID)
 	if err != nil && !errors.Is(err, ide.ErrContextNotFound) {
 		return errors.Wrap(err, "failed to read IDE context")
@@ -654,7 +654,7 @@ func (t *OpenAIThread) processIDEContext(ctx context.Context, handler llmtypes.M
 	return nil
 }
 
-func (t *OpenAIThread) processPendingFeedback(ctx context.Context, requestParams *openai.ChatCompletionRequest, handler llmtypes.MessageHandler) error {
+func (t *Thread) processPendingFeedback(ctx context.Context, requestParams *openai.ChatCompletionRequest, handler llmtypes.MessageHandler) error {
 	feedbackStore, err := feedback.NewFeedbackStore()
 	if err != nil {
 		return errors.Wrap(err, "failed to create feedback store")
@@ -692,7 +692,7 @@ func (t *OpenAIThread) processPendingFeedback(ctx context.Context, requestParams
 	return nil
 }
 
-func (t *OpenAIThread) createChatCompletionWithRetry(ctx context.Context, requestParams openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
+func (t *Thread) createChatCompletionWithRetry(ctx context.Context, requestParams openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
 	var response openai.ChatCompletionResponse
 	var originalErrors []error // Store all errors for better context
 
@@ -738,14 +738,14 @@ func (t *OpenAIThread) createChatCompletionWithRetry(ctx context.Context, reques
 	return response, err
 }
 
-func (t *OpenAIThread) tools(opt llmtypes.MessageOpt) []tooltypes.Tool {
+func (t *Thread) tools(opt llmtypes.MessageOpt) []tooltypes.Tool {
 	if opt.NoToolUse {
 		return []tooltypes.Tool{}
 	}
 	return t.state.Tools()
 }
 
-func (t *OpenAIThread) updateUsage(usage openai.Usage, model string) {
+func (t *Thread) updateUsage(usage openai.Usage, model string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -773,7 +773,7 @@ func (t *OpenAIThread) updateUsage(usage openai.Usage, model string) {
 }
 
 // getLastAssistantMessageText extracts text content from the most recent assistant message
-func (t *OpenAIThread) getLastAssistantMessageText() (string, error) {
+func (t *Thread) getLastAssistantMessageText() (string, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -799,7 +799,7 @@ func (t *OpenAIThread) getLastAssistantMessageText() (string, error) {
 }
 
 // shouldAutoCompact checks if auto-compact should be triggered based on context window utilization
-func (t *OpenAIThread) shouldAutoCompact(compactRatio float64) bool {
+func (t *Thread) shouldAutoCompact(compactRatio float64) bool {
 	if compactRatio <= 0.0 || compactRatio > 1.0 {
 		return false
 	}
@@ -814,7 +814,7 @@ func (t *OpenAIThread) shouldAutoCompact(compactRatio float64) bool {
 }
 
 // CompactContext performs comprehensive context compacting by creating a detailed summary
-func (t *OpenAIThread) CompactContext(ctx context.Context) error {
+func (t *Thread) CompactContext(ctx context.Context) error {
 	// Temporarily disable persistence during compacting
 	wasPersistedOriginal := t.isPersisted
 	t.isPersisted = false
@@ -866,16 +866,16 @@ func (t *OpenAIThread) CompactContext(ctx context.Context) error {
 }
 
 // GetUsage returns the current token usage for the thread
-func (t *OpenAIThread) GetUsage() llmtypes.Usage {
+func (t *Thread) GetUsage() llmtypes.Usage {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return *t.usage
 }
 
 // NewSubAgent creates a new subagent thread that shares the parent's client and configuration.
-func (t *OpenAIThread) NewSubAgent(_ context.Context, config llmtypes.Config) llmtypes.Thread {
+func (t *Thread) NewSubAgent(_ context.Context, config llmtypes.Config) llmtypes.Thread {
 	// Create subagent thread reusing the parent's client instead of creating a new one
-	thread := &OpenAIThread{
+	thread := &Thread{
 		client:                 t.client, // Reuse parent's client
 		config:                 config,
 		reasoningEffort:        config.ReasoningEffort, // Use config's reasoning effort
@@ -892,7 +892,7 @@ func (t *OpenAIThread) NewSubAgent(_ context.Context, config llmtypes.Config) ll
 }
 
 // ShortSummary generates a concise summary of the conversation using a faster model.
-func (t *OpenAIThread) ShortSummary(ctx context.Context) string {
+func (t *Thread) ShortSummary(ctx context.Context) string {
 	// Temporarily disable persistence during summarization
 	t.isPersisted = false
 	defer func() {
@@ -921,27 +921,27 @@ func (t *OpenAIThread) ShortSummary(ctx context.Context) string {
 }
 
 // GetConfig returns the configuration of the thread
-func (t *OpenAIThread) GetConfig() llmtypes.Config {
+func (t *Thread) GetConfig() llmtypes.Config {
 	return t.config
 }
 
 // GetConversationID returns the current conversation ID
-func (t *OpenAIThread) GetConversationID() string {
+func (t *Thread) GetConversationID() string {
 	return t.conversationID
 }
 
 // SetConversationID sets the conversation ID
-func (t *OpenAIThread) SetConversationID(id string) {
+func (t *Thread) SetConversationID(id string) {
 	t.conversationID = id
 }
 
 // IsPersisted returns whether this thread is being persisted
-func (t *OpenAIThread) IsPersisted() bool {
+func (t *Thread) IsPersisted() bool {
 	return t.isPersisted
 }
 
 // GetMessages returns the current messages in the thread
-func (t *OpenAIThread) GetMessages() ([]llmtypes.Message, error) {
+func (t *Thread) GetMessages() ([]llmtypes.Message, error) {
 	result := make([]llmtypes.Message, 0, len(t.messages))
 
 	for _, msg := range t.messages {
@@ -969,7 +969,7 @@ func (t *OpenAIThread) GetMessages() ([]llmtypes.Message, error) {
 }
 
 // EnablePersistence enables conversation persistence for this thread
-func (t *OpenAIThread) EnablePersistence(ctx context.Context, enabled bool) {
+func (t *Thread) EnablePersistence(ctx context.Context, enabled bool) {
 	t.isPersisted = enabled
 
 	// Initialize the store if enabling persistence and it's not already initialized
@@ -992,7 +992,7 @@ func (t *OpenAIThread) EnablePersistence(ctx context.Context, enabled bool) {
 }
 
 // createMessageSpan creates and configures a tracing span for message handling
-func (t *OpenAIThread) createMessageSpan(
+func (t *Thread) createMessageSpan(
 	ctx context.Context,
 	tracer trace.Tracer,
 	message string,
@@ -1015,7 +1015,7 @@ func (t *OpenAIThread) createMessageSpan(
 }
 
 // finalizeMessageSpan records final metrics and status to the span before ending it
-func (t *OpenAIThread) finalizeMessageSpan(span trace.Span, err error) {
+func (t *Thread) finalizeMessageSpan(span trace.Span, err error) {
 	// Record usage metrics after completion
 	usage := t.GetUsage()
 	span.SetAttributes(
@@ -1037,7 +1037,7 @@ func (t *OpenAIThread) finalizeMessageSpan(span trace.Span, err error) {
 }
 
 // processImage converts an image path/URL to an OpenAI ChatMessagePart
-func (t *OpenAIThread) processImage(imagePath string) (*openai.ChatMessagePart, error) {
+func (t *Thread) processImage(imagePath string) (*openai.ChatMessagePart, error) {
 	// Only allow HTTPS URLs for security
 	if strings.HasPrefix(imagePath, "https://") {
 		return t.processImageURL(imagePath)
@@ -1055,7 +1055,7 @@ func (t *OpenAIThread) processImage(imagePath string) (*openai.ChatMessagePart, 
 }
 
 // processImageURL creates an image part from an HTTPS URL
-func (t *OpenAIThread) processImageURL(url string) (*openai.ChatMessagePart, error) {
+func (t *Thread) processImageURL(url string) (*openai.ChatMessagePart, error) {
 	// Validate URL format (HTTPS only)
 	if !strings.HasPrefix(url, "https://") {
 		return nil, fmt.Errorf("only HTTPS URLs are supported for security: %s", url)
@@ -1072,7 +1072,7 @@ func (t *OpenAIThread) processImageURL(url string) (*openai.ChatMessagePart, err
 }
 
 // processImageFile creates an image part from a local file
-func (t *OpenAIThread) processImageFile(filePath string) (*openai.ChatMessagePart, error) {
+func (t *Thread) processImageFile(filePath string) (*openai.ChatMessagePart, error) {
 	// Check if file exists
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		return nil, fmt.Errorf("image file not found: %s", filePath)
@@ -1132,7 +1132,7 @@ func getImageMediaType(ext string) (string, error) {
 }
 
 // SetStructuredToolResult stores the structured result for a tool call
-func (t *OpenAIThread) SetStructuredToolResult(toolCallID string, result tooltypes.StructuredToolResult) {
+func (t *Thread) SetStructuredToolResult(toolCallID string, result tooltypes.StructuredToolResult) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.toolResults == nil {
@@ -1142,7 +1142,7 @@ func (t *OpenAIThread) SetStructuredToolResult(toolCallID string, result tooltyp
 }
 
 // GetStructuredToolResults returns all structured tool results
-func (t *OpenAIThread) GetStructuredToolResults() map[string]tooltypes.StructuredToolResult {
+func (t *Thread) GetStructuredToolResults() map[string]tooltypes.StructuredToolResult {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.toolResults == nil {
@@ -1154,7 +1154,7 @@ func (t *OpenAIThread) GetStructuredToolResults() map[string]tooltypes.Structure
 }
 
 // SetStructuredToolResults replaces all structured tool results with the provided map.
-func (t *OpenAIThread) SetStructuredToolResults(results map[string]tooltypes.StructuredToolResult) {
+func (t *Thread) SetStructuredToolResults(results map[string]tooltypes.StructuredToolResult) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if results == nil {

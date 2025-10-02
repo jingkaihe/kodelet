@@ -32,8 +32,8 @@ type DailyUsage struct {
 	Conversations int
 }
 
-// UsageStats represents aggregated usage statistics with daily breakdown and totals
-type UsageStats struct {
+// Stats represents aggregated usage statistics with daily breakdown and totals
+type Stats struct {
 	Daily []DailyUsage
 	Total llmtypes.Usage
 }
@@ -84,7 +84,7 @@ type ConversationUsageStats struct {
 
 // CalculateUsageStats calculates aggregated usage statistics from conversation summaries
 // within the specified time range, with daily breakdown sorted newest first
-func CalculateUsageStats(summaries []ConversationSummary, startTime, endTime time.Time) *UsageStats {
+func CalculateUsageStats(summaries []ConversationSummary, startTime, endTime time.Time) *Stats {
 	dailyMap := make(map[string]*DailyUsage)
 	totalUsage := llmtypes.Usage{}
 
@@ -144,7 +144,7 @@ func CalculateUsageStats(summaries []ConversationSummary, startTime, endTime tim
 		}
 	}
 
-	return &UsageStats{
+	return &Stats{
 		Daily: dailyUsage,
 		Total: totalUsage,
 	}

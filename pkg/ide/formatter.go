@@ -9,7 +9,7 @@ import (
 // FormatContextPrompt converts IDE context information into a formatted markdown
 // string suitable for use as additional context in LLM prompts. It includes
 // sections for open files, selected code, and diagnostics grouped by severity.
-func FormatContextPrompt(context *IDEContext) string {
+func FormatContextPrompt(context *Context) string {
 	if context == nil {
 		return ""
 	}

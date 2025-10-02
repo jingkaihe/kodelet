@@ -12,8 +12,8 @@ import (
 	"github.com/pkg/errors"
 	"go.opentelemetry.io/otel/attribute"
 
+	"github.com/jingkaihe/kodelet/pkg/osutil"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
-	"github.com/jingkaihe/kodelet/pkg/utils"
 )
 
 // FileWriteToolResult represents the result of a file write operation
@@ -26,7 +26,7 @@ type FileWriteToolResult struct {
 // GetResult returns a success message
 func (r *FileWriteToolResult) GetResult() string {
 	lines := strings.Split(r.text, "\n")
-	textWithLineNumber := utils.ContentWithLineNumber(lines, 0)
+	textWithLineNumber := osutil.ContentWithLineNumber(lines, 0)
 	return fmt.Sprintf(`file %s has been written successfully
 
 %s`, r.filename, textWithLineNumber)
@@ -60,7 +60,7 @@ func (r *FileWriteToolResult) StructuredData() tooltypes.StructuredToolResult {
 	}
 
 	// Detect language from file extension
-	language := utils.DetectLanguageFromPath(r.filename)
+	language := osutil.DetectLanguageFromPath(r.filename)
 
 	// Always populate metadata, even for errors
 	result.Metadata = &tooltypes.FileWriteMetadata{

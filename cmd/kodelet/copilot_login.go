@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/auth"
+	"github.com/jingkaihe/kodelet/pkg/osutil"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
-	"github.com/jingkaihe/kodelet/pkg/utils"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
@@ -58,7 +58,7 @@ func runCopilotLogin(ctx context.Context) error {
 	fmt.Println()
 
 	presenter.Info("Opening your browser for authentication...")
-	if err := utils.OpenBrowser(deviceResp.VerificationURI); err != nil {
+	if err := osutil.OpenBrowser(deviceResp.VerificationURI); err != nil {
 		presenter.Warning("Could not open browser automatically. Please visit the URL manually.")
 	} else {
 		presenter.Info("If your browser didn't open automatically, visit the URL above.")

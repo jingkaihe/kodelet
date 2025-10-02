@@ -13,8 +13,8 @@ import (
 	"github.com/invopop/jsonschema"
 	"go.opentelemetry.io/otel/attribute"
 
+	"github.com/jingkaihe/kodelet/pkg/osutil"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
-	"github.com/jingkaihe/kodelet/pkg/utils"
 )
 
 const (
@@ -39,7 +39,7 @@ type FileReadToolResult struct {
 
 // GetResult returns the file content
 func (r *FileReadToolResult) GetResult() string {
-	return utils.ContentWithLineNumber(r.lines, r.offset)
+	return osutil.ContentWithLineNumber(r.lines, r.offset)
 }
 
 // GetError returns the error message
@@ -56,7 +56,7 @@ func (r *FileReadToolResult) IsError() bool {
 func (r *FileReadToolResult) AssistantFacing() string {
 	var content string
 	if !r.IsError() {
-		content = utils.ContentWithLineNumber(r.lines, r.offset)
+		content = osutil.ContentWithLineNumber(r.lines, r.offset)
 	}
 	return tooltypes.StringifyToolResult(content, r.GetError())
 }
@@ -73,7 +73,7 @@ func (r *FileReadToolResult) StructuredData() tooltypes.StructuredToolResult {
 	truncated := len(r.lines) > 0 && (strings.Contains(r.lines[len(r.lines)-1], "truncated") || strings.Contains(r.lines[len(r.lines)-1], "lines remaining"))
 
 	// Detect language from file extension
-	language := utils.DetectLanguageFromPath(r.filename)
+	language := osutil.DetectLanguageFromPath(r.filename)
 
 	// Always populate metadata, even for errors
 	result.Metadata = &tooltypes.FileReadMetadata{

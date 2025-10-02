@@ -21,8 +21,8 @@ import (
 
 	"github.com/gobwas/glob"
 	"github.com/invopop/jsonschema"
+	"github.com/jingkaihe/kodelet/pkg/osutil"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
-	"github.com/jingkaihe/kodelet/pkg/utils"
 	"go.opentelemetry.io/otel/attribute"
 )
 
@@ -536,7 +536,7 @@ func (b *BashTool) executeBackground(state tooltypes.State, input *BashInput) to
 	cmd := exec.Command("bash", "-c", input.Command)
 
 	// Make the process detached from the parent process
-	cmd.SysProcAttr = &utils.DetachSysProcAttr
+	cmd.SysProcAttr = &osutil.DetachSysProcAttr
 
 	// Setup stdout and stderr pipes before starting
 	stdout, err := cmd.StdoutPipe()

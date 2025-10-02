@@ -12,6 +12,7 @@ gh = "latest"                                           # GitHub CLI for release
 "go:github.com/isaacphi/mcp-language-server" = "latest"
 "go:golang.org/x/tools/gopls" = "latest"
 "go:honnef.co/go/tools/cmd/staticcheck" = "latest"
+"go:mvdan.cc/gofumpt" = "latest"                        # Stricter Go formatter
 
 [settings]
 experimental = true
@@ -64,8 +65,8 @@ description = "Run Go tests"
 run = ["go test ./pkg/... ./cmd/..."]
 
 [tasks.format]
-description = "Format Go code"
-run = ["go fmt ./..."]
+description = "Format Go code with gofumpt"
+run = ["gofumpt -w ."]
 
 [tasks.lint]
 description = "Run all linters (go vet, golangci-lint, staticcheck)"
