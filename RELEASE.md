@@ -1,5 +1,16 @@
 # Kodelet
 
+## 0.1.7.beta (2025-10-02)
+
+### Internal Changes
+
+**Code Quality and Documentation**: Major refactoring focused on code organization, documentation, and linting standards
+
+- **Enhanced Linting**: Expanded `.golangci.yml` configuration with comprehensive linter suite including staticcheck, unparam, ineffassign, nilnil, and revive
+- **Stricter Formatting**: Switched from `go fmt` to `gofumpt` for more consistent code formatting across the codebase
+
+**Note**: This is a maintenance release with no user-facing changes. All changes are internal improvements to code quality and maintainability.
+
 ## 0.1.6.beta (2025-10-02)
 
 ### Features
