@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -19,6 +20,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/auth"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/feedback"
+	"github.com/jingkaihe/kodelet/pkg/ide"
 	"github.com/jingkaihe/kodelet/pkg/llm/prompts"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/sysprompt"
@@ -139,7 +141,7 @@ type ConversationStore = conversations.ConversationStore
 type OpenAIThread struct {
 	client                 *openai.Client
 	config                 llmtypes.Config
-	reasoningEffort        string // low, medium, high to determine token allocation
+	reasoningEffort        string
 	state                  tooltypes.State
 	messages               []openai.ChatCompletionMessage
 	usage                  *llmtypes.Usage
@@ -149,11 +151,12 @@ type OpenAIThread struct {
 	store                  ConversationStore
 	mu                     sync.Mutex
 	conversationMu         sync.Mutex
-	toolResults            map[string]tooltypes.StructuredToolResult // Maps tool_call_id to structured result
-	customModels           *llmtypes.CustomModels                    // Custom model configuration
-	customPricing          llmtypes.CustomPricing                    // Custom pricing configuration
-	useCopilot             bool                                      // Whether this thread uses GitHub Copilot
-	subagentContextFactory llmtypes.SubagentContextFactory           // Injected function for cross-provider subagent creation
+	toolResults            map[string]tooltypes.StructuredToolResult
+	customModels           *llmtypes.CustomModels
+	customPricing          llmtypes.CustomPricing
+	useCopilot             bool
+	subagentContextFactory llmtypes.SubagentContextFactory
+	ideStore               *ide.IDEStore // IDE context store (nil if IDE mode disabled)
 }
 
 func (t *OpenAIThread) Provider() string {
@@ -257,18 +260,28 @@ func NewOpenAIThread(config llmtypes.Config, subagentContextFactory llmtypes.Sub
 	// Load custom models and pricing if available
 	customModels, customPricing := loadCustomConfiguration(config)
 
+	var ideStore *ide.IDEStore
+	if config.IDE && !config.IsSubAgent {
+		store, err := ide.NewIDEStore()
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to create IDE store")
+		}
+		ideStore = store
+	}
+
 	return &OpenAIThread{
 		client:                 client,
 		config:                 config,
 		reasoningEffort:        reasoningEffort,
 		conversationID:         convtypes.GenerateID(),
 		isPersisted:            false,
-		usage:                  &llmtypes.Usage{}, // must be initialized to avoid nil pointer dereference
+		usage:                  &llmtypes.Usage{},
 		toolResults:            make(map[string]tooltypes.StructuredToolResult),
 		customModels:           customModels,
 		customPricing:          customPricing,
 		useCopilot:             useCopilot,
-		subagentContextFactory: subagentContextFactory, // Set directly during creation
+		subagentContextFactory: subagentContextFactory,
+		ideStore:               ideStore,
 	}, nil
 }
 
@@ -331,7 +344,12 @@ func (t *OpenAIThread) SendMessage(
 		copy(originalMessages, t.messages)
 	}
 
-	// Add user message with images if provided
+	if !t.config.IsSubAgent && t.ideStore != nil {
+		if err := t.processIDEContext(ctx, handler); err != nil {
+			return "", errors.Wrap(err, "failed to process IDE context")
+		}
+	}
+
 	if len(opt.Images) > 0 {
 		t.AddUserMessage(ctx, message, opt.Images...)
 	} else {
@@ -359,12 +377,8 @@ func (t *OpenAIThread) SendMessage(
 		t.messages = append([]openai.ChatCompletionMessage{systemMessage}, t.messages...)
 	}
 
-	// Main interaction loop for handling tool calls
 	turnCount := 0
-	maxTurns := opt.MaxTurns
-	if maxTurns < 0 {
-		maxTurns = 0 // treat negative as no limit
-	}
+	maxTurns := max(opt.MaxTurns, 0)
 
 OUTER:
 	for {
@@ -495,55 +509,10 @@ func (t *OpenAIThread) processMessageExchange(
 		}
 	}
 
-	// Check for pending feedback messages if this is not a subagent
-	if !t.config.IsSubAgent && t.conversationID != "" {
-		func() {
-			// Use a separate function to ensure feedback processing doesn't break the main flow
-			defer func() {
-				if r := recover(); r != nil {
-					logger.G(ctx).WithField("panic", r).Error("panic occurred while processing feedback")
-				}
-			}()
-
-			feedbackStore, err := feedback.NewFeedbackStore()
-			if err != nil {
-				logger.G(ctx).WithError(err).Warn("failed to create feedback store, continuing without feedback")
-				return
-			}
-
-			pendingFeedback, err := feedbackStore.ReadPendingFeedback(t.conversationID)
-			if err != nil {
-				logger.G(ctx).WithError(err).Warn("failed to read pending feedback, continuing without feedback")
-				return
-			}
-
-			if len(pendingFeedback) > 0 {
-				logger.G(ctx).WithField("feedback_count", len(pendingFeedback)).Info("processing pending feedback messages")
-
-				// Convert feedback messages to OpenAI messages and append to requestParams
-				for i, fbMsg := range pendingFeedback {
-					// Add some basic validation
-					if fbMsg.Content == "" {
-						logger.G(ctx).WithField("message_index", i).Warn("skipping empty feedback message")
-						continue
-					}
-
-					userMessage := openai.ChatCompletionMessage{
-						Role:    openai.ChatMessageRoleUser,
-						Content: fbMsg.Content,
-					}
-					requestParams.Messages = append(requestParams.Messages, userMessage)
-					handler.HandleText(fmt.Sprintf("🗣️ User feedback: %s", fbMsg.Content))
-				}
-
-				// Clear the feedback now that we've processed it
-				if err := feedbackStore.ClearPendingFeedback(t.conversationID); err != nil {
-					logger.G(ctx).WithError(err).Warn("failed to clear pending feedback, may be processed again")
-				} else {
-					logger.G(ctx).Debug("successfully cleared pending feedback")
-				}
-			}
-		}()
+	if !t.config.IsSubAgent {
+		if err := t.processPendingFeedback(ctx, &requestParams, handler); err != nil {
+			return "", false, errors.Wrap(err, "failed to process pending feedback")
+		}
 	}
 
 	// Add a tracing event for API call start
@@ -650,7 +619,74 @@ func (t *OpenAIThread) processMessageExchange(
 	return finalOutput, true, nil
 }
 
-// createChatCompletionWithRetry executes the OpenAI API call with retry logic
+func (t *OpenAIThread) processIDEContext(ctx context.Context, handler llmtypes.MessageHandler) error {
+	ideContext, err := t.ideStore.ReadContext(t.conversationID)
+	if err != nil {
+		return errors.Wrap(err, "failed to read IDE context")
+	}
+
+	if ideContext != nil {
+		logger.G(ctx).WithFields(map[string]any{
+			"open_files_count":  len(ideContext.OpenFiles),
+			"has_selection":     ideContext.Selection != nil,
+			"diagnostics_count": len(ideContext.Diagnostics),
+		}).Info("processing IDE context")
+
+		ideContextPrompt := ide.FormatContextPrompt(ideContext)
+		if ideContextPrompt != "" {
+			t.AddUserMessage(ctx, ideContextPrompt)
+			handler.HandleText(fmt.Sprintf("📋 IDE Context: %d files, %d diagnostics",
+				len(ideContext.OpenFiles), len(ideContext.Diagnostics)))
+		}
+
+		if err := t.ideStore.ClearContext(t.conversationID); err != nil {
+			logger.G(ctx).WithError(err).Warn("failed to clear IDE context, may be processed again")
+		} else {
+			logger.G(ctx).Debug("successfully cleared IDE context")
+		}
+	}
+
+	return nil
+}
+
+func (t *OpenAIThread) processPendingFeedback(ctx context.Context, requestParams *openai.ChatCompletionRequest, handler llmtypes.MessageHandler) error {
+	feedbackStore, err := feedback.NewFeedbackStore()
+	if err != nil {
+		return errors.Wrap(err, "failed to create feedback store")
+	}
+
+	pendingFeedback, err := feedbackStore.ReadPendingFeedback(t.conversationID)
+	if err != nil {
+		return errors.Wrap(err, "failed to read pending feedback")
+	}
+
+	if len(pendingFeedback) > 0 {
+		logger.G(ctx).WithField("feedback_count", len(pendingFeedback)).Info("processing pending feedback messages")
+
+		for i, fbMsg := range pendingFeedback {
+			if fbMsg.Content == "" {
+				logger.G(ctx).WithField("message_index", i).Warn("skipping empty feedback message")
+				continue
+			}
+
+			userMessage := openai.ChatCompletionMessage{
+				Role:    openai.ChatMessageRoleUser,
+				Content: fbMsg.Content,
+			}
+			requestParams.Messages = append(requestParams.Messages, userMessage)
+			handler.HandleText(fmt.Sprintf("🗣️ User feedback: %s", fbMsg.Content))
+		}
+
+		if err := feedbackStore.ClearPendingFeedback(t.conversationID); err != nil {
+			logger.G(ctx).WithError(err).Warn("failed to clear pending feedback, may be processed again")
+		} else {
+			logger.G(ctx).Debug("successfully cleared pending feedback")
+		}
+	}
+
+	return nil
+}
+
 func (t *OpenAIThread) createChatCompletionWithRetry(ctx context.Context, requestParams openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
 	var response openai.ChatCompletionResponse
 	var originalErrors []error // Store all errors for better context
@@ -718,7 +754,6 @@ func (t *OpenAIThread) updateUsage(usage openai.Usage, model string) {
 		// If no pricing found, use default GPT-4.1 pricing as fallback
 		pricing = llmtypes.ModelPricing{
 			Input:         0.000002,
-			CachedInput:   0.0000005,
 			Output:        0.000008,
 			ContextWindow: 1047576,
 		}
@@ -944,7 +979,7 @@ func (t *OpenAIThread) EnablePersistence(ctx context.Context, enabled bool) {
 
 	// If enabling persistence and there's an existing conversation ID,
 	// try to load it from the store
-	if enabled && t.conversationID != "" && t.store != nil {
+	if enabled && t.store != nil {
 		t.loadConversation(ctx)
 	}
 }
@@ -1002,9 +1037,8 @@ func (t *OpenAIThread) processImage(imagePath string) (*openai.ChatMessagePart, 
 	} else if strings.HasPrefix(imagePath, "http://") {
 		// Explicitly reject HTTP URLs for security
 		return nil, errors.New(fmt.Sprintf("only HTTPS URLs are supported for security: %s", imagePath))
-	} else if strings.HasPrefix(imagePath, "file://") {
+	} else if filePath, ok := strings.CutPrefix(imagePath, "file://"); ok {
 		// Remove file:// prefix and process as file
-		filePath := strings.TrimPrefix(imagePath, "file://")
 		return t.processImageFile(filePath)
 	} else {
 		// Treat as a local file path
@@ -1106,15 +1140,11 @@ func (t *OpenAIThread) GetStructuredToolResults() map[string]tooltypes.Structure
 	if t.toolResults == nil {
 		return make(map[string]tooltypes.StructuredToolResult)
 	}
-	// Return a copy to avoid race conditions
 	result := make(map[string]tooltypes.StructuredToolResult)
-	for k, v := range t.toolResults {
-		result[k] = v
-	}
+	maps.Copy(result, t.toolResults)
 	return result
 }
 
-// SetStructuredToolResults sets all structured tool results (for loading from conversation)
 func (t *OpenAIThread) SetStructuredToolResults(results map[string]tooltypes.StructuredToolResult) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -1122,8 +1152,6 @@ func (t *OpenAIThread) SetStructuredToolResults(results map[string]tooltypes.Str
 		t.toolResults = make(map[string]tooltypes.StructuredToolResult)
 	} else {
 		t.toolResults = make(map[string]tooltypes.StructuredToolResult)
-		for k, v := range results {
-			t.toolResults[k] = v
-		}
+		maps.Copy(t.toolResults, results)
 	}
 }

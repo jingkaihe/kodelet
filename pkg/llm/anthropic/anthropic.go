@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -19,6 +20,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/auth"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/feedback"
+	"github.com/jingkaihe/kodelet/pkg/ide"
 	"github.com/jingkaihe/kodelet/pkg/llm/prompts"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/sysprompt"
@@ -63,6 +65,7 @@ type AnthropicThread struct {
 	useSubscription        bool
 	toolResults            map[string]tooltypes.StructuredToolResult // Maps tool_call_id to structured result
 	subagentContextFactory llmtypes.SubagentContextFactory           // Injected function for cross-provider subagent creation
+	ideStore               *ide.IDEStore                             // IDE context store (nil if IDE mode disabled)
 }
 
 func (t *AnthropicThread) Provider() string {
@@ -135,15 +138,25 @@ func NewAnthropicThread(config llmtypes.Config, subagentContextFactory llmtypes.
 		}
 	}
 
+	var ideStore *ide.IDEStore
+	if config.IDE && !config.IsSubAgent {
+		store, err := ide.NewIDEStore()
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to create IDE store")
+		}
+		ideStore = store
+	}
+
 	return &AnthropicThread{
 		client:                 client,
 		config:                 config,
 		useSubscription:        useSubscription,
 		conversationID:         convtypes.GenerateID(),
 		isPersisted:            false,
-		usage:                  &llmtypes.Usage{}, // must be initialised to avoid nil pointer dereference
+		usage:                  &llmtypes.Usage{},
 		toolResults:            make(map[string]tooltypes.StructuredToolResult),
-		subagentContextFactory: subagentContextFactory, // Set directly during creation
+		subagentContextFactory: subagentContextFactory,
+		ideStore:               ideStore,
 	}, nil
 }
 
@@ -226,20 +239,19 @@ func (t *AnthropicThread) SendMessage(
 		copy(originalMessages, t.messages)
 	}
 
-	// Add user message with images if provided
-	t.AddUserMessage(ctx, message, opt.Images...)
-
-	// Determine which model to use
-	model, maxTokens := t.getModelAndTokens(opt)
-
-	// Main interaction loop for handling tool calls
-	turnCount := 0
-	maxTurns := opt.MaxTurns
-	if maxTurns < 0 {
-		maxTurns = 0 // treat negative as no limit
+	if !t.config.IsSubAgent && t.ideStore != nil {
+		if err := t.processIDEContext(ctx, handler); err != nil {
+			return "", errors.Wrap(err, "failed to process IDE context")
+		}
 	}
 
-	// Check cache-every setting and cache if needed
+	t.AddUserMessage(ctx, message, opt.Images...)
+
+	model, maxTokens := t.getModelAndTokens(opt)
+
+	turnCount := 0
+	maxTurns := max(opt.MaxTurns, 0)
+
 	cacheEvery := t.config.CacheEvery
 
 OUTER:
@@ -390,54 +402,10 @@ func (t *AnthropicThread) processMessageExchange(
 		}
 	}
 
-	// Check for pending feedback messages if this is not a subagent
-	if !t.config.IsSubAgent && t.conversationID != "" {
-		func() {
-			// Use a separate function to ensure feedback processing doesn't break the main flow
-			defer func() {
-				if r := recover(); r != nil {
-					logger.G(ctx).WithField("panic", r).Error("panic occurred while processing feedback")
-				}
-			}()
-
-			feedbackStore, err := feedback.NewFeedbackStore()
-			if err != nil {
-				logger.G(ctx).WithError(err).Warn("failed to create feedback store, continuing without feedback")
-				return
-			}
-
-			pendingFeedback, err := feedbackStore.ReadPendingFeedback(t.conversationID)
-			if err != nil {
-				logger.G(ctx).WithError(err).Warn("failed to read pending feedback, continuing without feedback")
-				return
-			}
-
-			if len(pendingFeedback) > 0 {
-				logger.G(ctx).WithField("feedback_count", len(pendingFeedback)).Info("processing pending feedback messages")
-
-				// Convert feedback messages to anthropic messages and append to messageParams
-				for i, fbMsg := range pendingFeedback {
-					// Add some basic validation
-					if fbMsg.Content == "" {
-						logger.G(ctx).WithField("message_index", i).Warn("skipping empty feedback message")
-						continue
-					}
-
-					userMessage := anthropic.NewUserMessage(
-						anthropic.NewTextBlock(fbMsg.Content),
-					)
-					messageParams.Messages = append(messageParams.Messages, userMessage)
-					handler.HandleText(fmt.Sprintf("🗣️ User feedback: %s", fbMsg.Content))
-				}
-
-				// Clear the feedback now that we've processed it
-				if err := feedbackStore.ClearPendingFeedback(t.conversationID); err != nil {
-					logger.G(ctx).WithError(err).Warn("failed to clear pending feedback, may be processed again")
-				} else {
-					logger.G(ctx).Debug("successfully cleared pending feedback")
-				}
-			}
-		}()
+	if !t.config.IsSubAgent {
+		if err := t.processPendingFeedback(ctx, &messageParams, handler); err != nil {
+			return "", false, errors.Wrap(err, "failed to process pending feedback")
+		}
 	}
 
 	// Add a tracing event for API call start
@@ -530,7 +498,73 @@ func (t *AnthropicThread) processMessageExchange(
 	return finalOutput, toolUseCount > 0, nil
 }
 
-// getModelAndTokens determines which model and max tokens to use based on configuration and options
+func (t *AnthropicThread) processIDEContext(ctx context.Context, handler llmtypes.MessageHandler) error {
+	ideContext, err := t.ideStore.ReadContext(t.conversationID)
+	if err != nil {
+		return errors.Wrap(err, "failed to read IDE context")
+	}
+
+	if ideContext != nil {
+		logger.G(ctx).WithFields(map[string]any{
+			"open_files_count":  len(ideContext.OpenFiles),
+			"has_selection":     ideContext.Selection != nil,
+			"diagnostics_count": len(ideContext.Diagnostics),
+		}).Info("processing IDE context")
+
+		ideContextPrompt := ide.FormatContextPrompt(ideContext)
+		if ideContextPrompt != "" {
+			t.AddUserMessage(ctx, ideContextPrompt)
+			handler.HandleText(fmt.Sprintf("📋 IDE Context: %d files, %d diagnostics",
+				len(ideContext.OpenFiles), len(ideContext.Diagnostics)))
+		}
+
+		if err := t.ideStore.ClearContext(t.conversationID); err != nil {
+			logger.G(ctx).WithError(err).Warn("failed to clear IDE context, may be processed again")
+		} else {
+			logger.G(ctx).Debug("successfully cleared IDE context")
+		}
+	}
+
+	return nil
+}
+
+func (t *AnthropicThread) processPendingFeedback(ctx context.Context, messageParams *anthropic.MessageNewParams, handler llmtypes.MessageHandler) error {
+	feedbackStore, err := feedback.NewFeedbackStore()
+	if err != nil {
+		return errors.Wrap(err, "failed to create feedback store")
+	}
+
+	pendingFeedback, err := feedbackStore.ReadPendingFeedback(t.conversationID)
+	if err != nil {
+		return errors.Wrap(err, "failed to read pending feedback")
+	}
+
+	if len(pendingFeedback) > 0 {
+		logger.G(ctx).WithField("feedback_count", len(pendingFeedback)).Info("processing pending feedback messages")
+
+		for i, fbMsg := range pendingFeedback {
+			if fbMsg.Content == "" {
+				logger.G(ctx).WithField("message_index", i).Warn("skipping empty feedback message")
+				continue
+			}
+
+			userMessage := anthropic.NewUserMessage(
+				anthropic.NewTextBlock(fbMsg.Content),
+			)
+			messageParams.Messages = append(messageParams.Messages, userMessage)
+			handler.HandleText(fmt.Sprintf("🗣️ User feedback: %s", fbMsg.Content))
+		}
+
+		if err := feedbackStore.ClearPendingFeedback(t.conversationID); err != nil {
+			logger.G(ctx).WithError(err).Warn("failed to clear pending feedback, may be processed again")
+		} else {
+			logger.G(ctx).Debug("successfully cleared pending feedback")
+		}
+	}
+
+	return nil
+}
+
 func (t *AnthropicThread) getModelAndTokens(opt llmtypes.MessageOpt) (anthropic.Model, int) {
 	model := t.config.Model
 	maxTokens := t.config.MaxTokens
@@ -940,7 +974,7 @@ func (t *AnthropicThread) EnablePersistence(ctx context.Context, enabled bool) {
 
 	// If enabling persistence and there's an existing conversation ID,
 	// try to load it from the store
-	if enabled && t.conversationID != "" && t.store != nil {
+	if enabled && t.store != nil {
 		t.loadConversation(ctx)
 	}
 }
@@ -997,9 +1031,8 @@ func (t *AnthropicThread) processImage(imagePath string) (*anthropic.ContentBloc
 	// Only allow HTTPS URLs for security
 	if strings.HasPrefix(imagePath, "https://") {
 		return t.processImageURL(imagePath)
-	} else if strings.HasPrefix(imagePath, "file://") {
+	} else if filePath, ok := strings.CutPrefix(imagePath, "file://"); ok {
 		// Remove file:// prefix and process as file
-		filePath := strings.TrimPrefix(imagePath, "file://")
 		return t.processImageFile(filePath)
 	} else {
 		// Treat as a local file path
@@ -1007,9 +1040,7 @@ func (t *AnthropicThread) processImage(imagePath string) (*anthropic.ContentBloc
 	}
 }
 
-// processImageURL creates an image block from an HTTPS URL
 func (t *AnthropicThread) processImageURL(url string) (*anthropic.ContentBlockParamUnion, error) {
-	// Validate URL format (HTTPS only)
 	if !strings.HasPrefix(url, "https://") {
 		return nil, errors.Errorf("only HTTPS URLs are supported for security: %s", url)
 	}
@@ -1021,9 +1052,7 @@ func (t *AnthropicThread) processImageURL(url string) (*anthropic.ContentBlockPa
 	return &block, nil
 }
 
-// processImageFile creates an image block from a local file
 func (t *AnthropicThread) processImageFile(filePath string) (*anthropic.ContentBlockParamUnion, error) {
-	// Check if file exists
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		return nil, errors.Errorf("image file not found: %s", filePath)
 	}
@@ -1095,9 +1124,7 @@ func (t *AnthropicThread) GetStructuredToolResults() map[string]tooltypes.Struct
 	}
 	// Return a copy to avoid race conditions
 	result := make(map[string]tooltypes.StructuredToolResult)
-	for k, v := range t.toolResults {
-		result[k] = v
-	}
+	maps.Copy(result, t.toolResults)
 	return result
 }
 
@@ -1109,8 +1136,6 @@ func (t *AnthropicThread) SetStructuredToolResults(results map[string]tooltypes.
 		t.toolResults = make(map[string]tooltypes.StructuredToolResult)
 	} else {
 		t.toolResults = make(map[string]tooltypes.StructuredToolResult)
-		for k, v := range results {
-			t.toolResults[k] = v
-		}
+		maps.Copy(t.toolResults, results)
 	}
 }

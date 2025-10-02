@@ -25,6 +25,7 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/feedback"
+	"github.com/jingkaihe/kodelet/pkg/ide"
 	"github.com/jingkaihe/kodelet/pkg/llm/prompts"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/sysprompt"
@@ -67,6 +68,7 @@ type GoogleThread struct {
 	thinkingBudget         int32
 	toolResults            map[string]tooltypes.StructuredToolResult
 	subagentContextFactory llmtypes.SubagentContextFactory
+	ideStore               *ide.IDEStore // IDE context store (nil if IDE mode disabled)
 	mu                     sync.Mutex
 	conversationMu         sync.Mutex
 }
@@ -132,9 +134,18 @@ func NewGoogleThread(config llmtypes.Config, subagentContextFactory llmtypes.Sub
 		return nil, errors.Wrap(err, "failed to create Google GenAI client")
 	}
 
-	thinkingBudget := int32(8000) // Default thinking budget
+	thinkingBudget := int32(8000)
 	if configCopy.Google != nil && configCopy.Google.ThinkingBudget > 0 {
 		thinkingBudget = configCopy.Google.ThinkingBudget
+	}
+
+	var ideStore *ide.IDEStore
+	if configCopy.IDE && !configCopy.IsSubAgent {
+		store, err := ide.NewIDEStore()
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to create IDE store")
+		}
+		ideStore = store
 	}
 
 	return &GoogleThread{
@@ -147,6 +158,7 @@ func NewGoogleThread(config llmtypes.Config, subagentContextFactory llmtypes.Sub
 		toolResults:            make(map[string]tooltypes.StructuredToolResult),
 		subagentContextFactory: subagentContextFactory,
 		thinkingBudget:         thinkingBudget,
+		ideStore:               ideStore,
 	}, nil
 }
 
@@ -265,7 +277,7 @@ func (t *GoogleThread) EnablePersistence(ctx context.Context, enabled bool) {
 
 	// If enabling persistence and there's an existing conversation ID,
 	// try to load it from the store
-	if enabled && t.conversationID != "" && t.store != nil {
+	if enabled && t.store != nil {
 		t.loadConversation(ctx)
 	}
 }
@@ -310,16 +322,20 @@ func (t *GoogleThread) SendMessage(
 	defer t.finalizeMessageSpan(span, err)
 
 	// Process pending feedback messages if this is not a subagent
-	if !t.config.IsSubAgent && t.conversationID != "" {
+	if !t.config.IsSubAgent {
 		if err := t.processPendingFeedback(ctx, handler); err != nil {
 			logger.G(ctx).WithError(err).Warn("failed to process pending feedback, continuing")
 		}
 	}
 
-	// Add user message with images if provided
+	if !t.config.IsSubAgent && t.ideStore != nil {
+		if err := t.processIDEContext(ctx, handler); err != nil {
+			return "", errors.Wrap(err, "failed to process IDE context")
+		}
+	}
+
 	t.AddUserMessage(ctx, message, opt.Images...)
 
-	// Check if auto-compact should be triggered before each exchange
 	if !opt.DisableAutoCompact && t.shouldAutoCompact(opt.CompactRatio) {
 		logger.G(ctx).WithField("context_utilization", float64(t.GetUsage().CurrentContextWindow)/float64(t.GetUsage().MaxContextWindow)).Info("triggering auto-compact")
 		err := t.CompactContext(ctx)
@@ -1223,23 +1239,14 @@ func (t *GoogleThread) ShortSummary(ctx context.Context) string {
 
 // processPendingFeedback processes any pending feedback messages
 func (t *GoogleThread) processPendingFeedback(ctx context.Context, handler llmtypes.MessageHandler) error {
-	// Use a separate function to ensure feedback processing doesn't break the main flow
-	defer func() {
-		if r := recover(); r != nil {
-			logger.G(ctx).WithField("panic", r).Error("panic occurred while processing feedback")
-		}
-	}()
-
 	feedbackStore, err := feedback.NewFeedbackStore()
 	if err != nil {
-		logger.G(ctx).WithError(err).Warn("failed to create feedback store, continuing without feedback")
-		return nil
+		return errors.Wrap(err, "failed to create feedback store")
 	}
 
 	pendingFeedback, err := feedbackStore.ReadPendingFeedback(t.conversationID)
 	if err != nil {
-		logger.G(ctx).WithError(err).Warn("failed to read pending feedback, continuing without feedback")
-		return nil
+		return errors.Wrap(err, "failed to read pending feedback")
 	}
 
 	if len(pendingFeedback) > 0 {
@@ -1265,6 +1272,36 @@ func (t *GoogleThread) processPendingFeedback(ctx context.Context, handler llmty
 			logger.G(ctx).WithError(err).Warn("failed to clear pending feedback, may be processed again")
 		} else {
 			logger.G(ctx).Debug("successfully cleared pending feedback")
+		}
+	}
+
+	return nil
+}
+
+func (t *GoogleThread) processIDEContext(ctx context.Context, handler llmtypes.MessageHandler) error {
+	ideContext, err := t.ideStore.ReadContext(t.conversationID)
+	if err != nil {
+		return errors.Wrap(err, "failed to read IDE context")
+	}
+
+	if ideContext != nil {
+		logger.G(ctx).WithFields(map[string]interface{}{
+			"open_files_count":  len(ideContext.OpenFiles),
+			"has_selection":     ideContext.Selection != nil,
+			"diagnostics_count": len(ideContext.Diagnostics),
+		}).Info("processing IDE context")
+
+		ideContextPrompt := ide.FormatContextPrompt(ideContext)
+		if ideContextPrompt != "" {
+			t.AddUserMessage(ctx, ideContextPrompt)
+			handler.HandleText(fmt.Sprintf("📋 IDE Context: %d files, %d diagnostics",
+				len(ideContext.OpenFiles), len(ideContext.Diagnostics)))
+		}
+
+		if err := t.ideStore.ClearContext(t.conversationID); err != nil {
+			logger.G(ctx).WithError(err).Warn("failed to clear IDE context, may be processed again")
+		} else {
+			logger.G(ctx).Debug("successfully cleared IDE context")
 		}
 	}
 

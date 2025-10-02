@@ -88,7 +88,7 @@ func (t *OpenAIThread) loadConversation(ctx context.Context) error {
 	t.conversationMu.Lock()
 	defer t.conversationMu.Unlock()
 
-	if !t.isPersisted || t.store == nil || t.conversationID == "" {
+	if !t.isPersisted || t.store == nil {
 		return nil
 	}
 

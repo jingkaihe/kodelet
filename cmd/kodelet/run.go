@@ -35,6 +35,7 @@ type RunConfig struct {
 	FragmentArgs       map[string]string // Arguments to pass to fragment
 	FragmentDirs       []string          // Additional fragment directories
 	IncludeHistory     bool              // Include historical conversation data in headless streaming
+	IDE                bool              // Enable IDE integration mode (display conversation ID prominently)
 }
 
 func NewRunConfig() *RunConfig {
@@ -51,6 +52,7 @@ func NewRunConfig() *RunConfig {
 		FragmentArgs:       make(map[string]string),
 		FragmentDirs:       []string{},
 		IncludeHistory:     false,
+		IDE:                false,
 	}
 }
 
@@ -194,6 +196,8 @@ var runCmd = &cobra.Command{
 			return
 		}
 
+		llmConfig.IDE = config.IDE
+
 		applyFragmentRestrictions(&llmConfig, fragmentMetadata)
 
 		var stateOpts []tools.BasicStateOption
@@ -311,6 +315,9 @@ var runCmd = &cobra.Command{
 			if thread.IsPersisted() {
 				presenter.Section("Conversation Information")
 				presenter.Info(fmt.Sprintf("ID: %s", thread.GetConversationID()))
+				if config.IDE {
+					presenter.Success(fmt.Sprintf("💡 Attach your IDE using: :KodeletAttach %s", thread.GetConversationID()))
+				}
 				presenter.Info(fmt.Sprintf("To resume this conversation: kodelet run --resume %s", thread.GetConversationID()))
 				presenter.Info(fmt.Sprintf("To delete this conversation: kodelet conversation delete %s", thread.GetConversationID()))
 			}
@@ -332,6 +339,7 @@ func init() {
 	runCmd.Flags().StringToString("arg", defaults.FragmentArgs, "Arguments to pass to fragment (e.g., --arg name=John --arg occupation=Engineer)")
 	runCmd.Flags().StringSlice("fragment-dirs", defaults.FragmentDirs, "Additional fragment directories (e.g., --fragment-dirs ./project-fragments --fragment-dirs ./team-fragments)")
 	runCmd.Flags().Bool("include-history", defaults.IncludeHistory, "Include historical conversation data in headless streaming")
+	runCmd.Flags().Bool("ide", defaults.IDE, "Enable IDE integration mode (display conversation ID prominently)")
 }
 
 func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
@@ -398,6 +406,10 @@ func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
 	}
 	if includeHistory, err := cmd.Flags().GetBool("include-history"); err == nil {
 		config.IncludeHistory = includeHistory
+	}
+
+	if ide, err := cmd.Flags().GetBool("ide"); err == nil {
+		config.IDE = ide
 	}
 
 	return config
