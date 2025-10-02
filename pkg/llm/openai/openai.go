@@ -140,7 +140,7 @@ type ConversationStore = conversations.ConversationStore
 type OpenAIThread struct {
 	client                 *openai.Client
 	config                 llmtypes.Config
-	reasoningEffort        string // low, medium, high to determine token allocation
+	reasoningEffort        string
 	state                  tooltypes.State
 	messages               []openai.ChatCompletionMessage
 	usage                  *llmtypes.Usage
@@ -150,11 +150,12 @@ type OpenAIThread struct {
 	store                  ConversationStore
 	mu                     sync.Mutex
 	conversationMu         sync.Mutex
-	toolResults            map[string]tooltypes.StructuredToolResult // Maps tool_call_id to structured result
-	customModels           *llmtypes.CustomModels                    // Custom model configuration
-	customPricing          llmtypes.CustomPricing                    // Custom pricing configuration
-	useCopilot             bool                                      // Whether this thread uses GitHub Copilot
-	subagentContextFactory llmtypes.SubagentContextFactory           // Injected function for cross-provider subagent creation
+	toolResults            map[string]tooltypes.StructuredToolResult
+	customModels           *llmtypes.CustomModels
+	customPricing          llmtypes.CustomPricing
+	useCopilot             bool
+	subagentContextFactory llmtypes.SubagentContextFactory
+	ideStore               *ide.IDEStore // IDE context store (nil if IDE mode disabled)
 }
 
 func (t *OpenAIThread) Provider() string {
@@ -258,18 +259,28 @@ func NewOpenAIThread(config llmtypes.Config, subagentContextFactory llmtypes.Sub
 	// Load custom models and pricing if available
 	customModels, customPricing := loadCustomConfiguration(config)
 
+	var ideStore *ide.IDEStore
+	if config.IDE && !config.IsSubAgent {
+		store, err := ide.NewIDEStore()
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to create IDE store")
+		}
+		ideStore = store
+	}
+
 	return &OpenAIThread{
 		client:                 client,
 		config:                 config,
 		reasoningEffort:        reasoningEffort,
 		conversationID:         convtypes.GenerateID(),
 		isPersisted:            false,
-		usage:                  &llmtypes.Usage{}, // must be initialized to avoid nil pointer dereference
+		usage:                  &llmtypes.Usage{},
 		toolResults:            make(map[string]tooltypes.StructuredToolResult),
 		customModels:           customModels,
 		customPricing:          customPricing,
 		useCopilot:             useCopilot,
-		subagentContextFactory: subagentContextFactory, // Set directly during creation
+		subagentContextFactory: subagentContextFactory,
+		ideStore:               ideStore,
 	}, nil
 }
 
@@ -332,7 +343,7 @@ func (t *OpenAIThread) SendMessage(
 		copy(originalMessages, t.messages)
 	}
 
-	if !t.config.IsSubAgent && t.conversationID != "" {
+	if !t.config.IsSubAgent && t.ideStore != nil && t.conversationID != "" {
 		if err := t.processIDEContext(ctx, handler); err != nil {
 			return "", errors.Wrap(err, "failed to process IDE context")
 		}
@@ -657,12 +668,7 @@ func (t *OpenAIThread) processMessageExchange(
 }
 
 func (t *OpenAIThread) processIDEContext(ctx context.Context, handler llmtypes.MessageHandler) error {
-	ideStore, err := ide.NewIDEStore()
-	if err != nil {
-		return errors.Wrap(err, "failed to create IDE store")
-	}
-
-	ideContext, err := ideStore.ReadContext(t.conversationID)
+	ideContext, err := t.ideStore.ReadContext(t.conversationID)
 	if err != nil {
 		return errors.Wrap(err, "failed to read IDE context")
 	}
@@ -681,7 +687,7 @@ func (t *OpenAIThread) processIDEContext(ctx context.Context, handler llmtypes.M
 				len(ideContext.OpenFiles), len(ideContext.Diagnostics)))
 		}
 
-		if err := ideStore.ClearContext(t.conversationID); err != nil {
+		if err := t.ideStore.ClearContext(t.conversationID); err != nil {
 			logger.G(ctx).WithError(err).Warn("failed to clear IDE context, may be processed again")
 		} else {
 			logger.G(ctx).Debug("successfully cleared IDE context")

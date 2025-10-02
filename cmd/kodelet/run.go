@@ -196,6 +196,8 @@ var runCmd = &cobra.Command{
 			return
 		}
 
+		llmConfig.IDE = config.IDE
+
 		applyFragmentRestrictions(&llmConfig, fragmentMetadata)
 
 		var stateOpts []tools.BasicStateOption

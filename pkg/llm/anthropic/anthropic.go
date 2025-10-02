@@ -65,6 +65,7 @@ type AnthropicThread struct {
 	useSubscription        bool
 	toolResults            map[string]tooltypes.StructuredToolResult // Maps tool_call_id to structured result
 	subagentContextFactory llmtypes.SubagentContextFactory           // Injected function for cross-provider subagent creation
+	ideStore               *ide.IDEStore                             // IDE context store (nil if IDE mode disabled)
 }
 
 func (t *AnthropicThread) Provider() string {
@@ -137,15 +138,25 @@ func NewAnthropicThread(config llmtypes.Config, subagentContextFactory llmtypes.
 		}
 	}
 
+	var ideStore *ide.IDEStore
+	if config.IDE && !config.IsSubAgent {
+		store, err := ide.NewIDEStore()
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to create IDE store")
+		}
+		ideStore = store
+	}
+
 	return &AnthropicThread{
 		client:                 client,
 		config:                 config,
 		useSubscription:        useSubscription,
 		conversationID:         convtypes.GenerateID(),
 		isPersisted:            false,
-		usage:                  &llmtypes.Usage{}, // must be initialised to avoid nil pointer dereference
+		usage:                  &llmtypes.Usage{},
 		toolResults:            make(map[string]tooltypes.StructuredToolResult),
-		subagentContextFactory: subagentContextFactory, // Set directly during creation
+		subagentContextFactory: subagentContextFactory,
+		ideStore:               ideStore,
 	}, nil
 }
 
@@ -228,7 +239,7 @@ func (t *AnthropicThread) SendMessage(
 		copy(originalMessages, t.messages)
 	}
 
-	if !t.config.IsSubAgent && t.conversationID != "" {
+	if !t.config.IsSubAgent && t.ideStore != nil && t.conversationID != "" {
 		if err := t.processIDEContext(ctx, handler); err != nil {
 			return "", errors.Wrap(err, "failed to process IDE context")
 		}
@@ -532,12 +543,7 @@ func (t *AnthropicThread) processMessageExchange(
 }
 
 func (t *AnthropicThread) processIDEContext(ctx context.Context, handler llmtypes.MessageHandler) error {
-	ideStore, err := ide.NewIDEStore()
-	if err != nil {
-		return errors.Wrap(err, "failed to create IDE store")
-	}
-
-	ideContext, err := ideStore.ReadContext(t.conversationID)
+	ideContext, err := t.ideStore.ReadContext(t.conversationID)
 	if err != nil {
 		return errors.Wrap(err, "failed to read IDE context")
 	}
@@ -556,7 +562,7 @@ func (t *AnthropicThread) processIDEContext(ctx context.Context, handler llmtype
 				len(ideContext.OpenFiles), len(ideContext.Diagnostics)))
 		}
 
-		if err := ideStore.ClearContext(t.conversationID); err != nil {
+		if err := t.ideStore.ClearContext(t.conversationID); err != nil {
 			logger.G(ctx).WithError(err).Warn("failed to clear IDE context, may be processed again")
 		} else {
 			logger.G(ctx).Debug("successfully cleared IDE context")

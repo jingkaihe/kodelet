@@ -15,8 +15,9 @@ const (
 // Config holds the configuration for the LLM client
 type Config struct {
 	IsSubAgent           bool               `mapstructure:"is_sub_agent" json:"is_sub_agent" yaml:"is_sub_agent"` // IsSubAgent is true if the LLM is a sub-agent
-	Provider             string             `mapstructure:"provider" json:"provider" yaml:"provider"`             // Provider is the LLM provider (anthropic, openai)
-	Model                string             `mapstructure:"model" json:"model" yaml:"model"`                      // Model is the main driver
+	IDE                  bool               `mapstructure:"ide" json:"ide" yaml:"ide"`                             // IDE enables IDE integration mode
+	Provider             string             `mapstructure:"provider" json:"provider" yaml:"provider"`              // Provider is the LLM provider (anthropic, openai)
+	Model                string             `mapstructure:"model" json:"model" yaml:"model"`                       // Model is the main driver
 	WeakModel            string             `mapstructure:"weak_model" json:"weak_model" yaml:"weak_model"`       // WeakModel is the less capable but faster model to use
 	MaxTokens            int                `mapstructure:"max_tokens" json:"max_tokens" yaml:"max_tokens"`
 	WeakModelMaxTokens   int                `mapstructure:"weak_model_max_tokens" json:"weak_model_max_tokens" yaml:"weak_model_max_tokens"`    // WeakModelMaxTokens is the maximum tokens for the weak model

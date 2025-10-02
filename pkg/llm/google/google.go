@@ -68,6 +68,7 @@ type GoogleThread struct {
 	thinkingBudget         int32
 	toolResults            map[string]tooltypes.StructuredToolResult
 	subagentContextFactory llmtypes.SubagentContextFactory
+	ideStore               *ide.IDEStore // IDE context store (nil if IDE mode disabled)
 	mu                     sync.Mutex
 	conversationMu         sync.Mutex
 }
@@ -133,9 +134,18 @@ func NewGoogleThread(config llmtypes.Config, subagentContextFactory llmtypes.Sub
 		return nil, errors.Wrap(err, "failed to create Google GenAI client")
 	}
 
-	thinkingBudget := int32(8000) // Default thinking budget
+	thinkingBudget := int32(8000)
 	if configCopy.Google != nil && configCopy.Google.ThinkingBudget > 0 {
 		thinkingBudget = configCopy.Google.ThinkingBudget
+	}
+
+	var ideStore *ide.IDEStore
+	if configCopy.IDE && !configCopy.IsSubAgent {
+		store, err := ide.NewIDEStore()
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to create IDE store")
+		}
+		ideStore = store
 	}
 
 	return &GoogleThread{
@@ -148,6 +158,7 @@ func NewGoogleThread(config llmtypes.Config, subagentContextFactory llmtypes.Sub
 		toolResults:            make(map[string]tooltypes.StructuredToolResult),
 		subagentContextFactory: subagentContextFactory,
 		thinkingBudget:         thinkingBudget,
+		ideStore:               ideStore,
 	}, nil
 }
 
@@ -317,7 +328,7 @@ func (t *GoogleThread) SendMessage(
 		}
 	}
 
-	if !t.config.IsSubAgent && t.conversationID != "" {
+	if !t.config.IsSubAgent && t.ideStore != nil && t.conversationID != "" {
 		if err := t.processIDEContext(ctx, handler); err != nil {
 			return "", errors.Wrap(err, "failed to process IDE context")
 		}
@@ -1277,12 +1288,7 @@ func (t *GoogleThread) processPendingFeedback(ctx context.Context, handler llmty
 }
 
 func (t *GoogleThread) processIDEContext(ctx context.Context, handler llmtypes.MessageHandler) error {
-	ideStore, err := ide.NewIDEStore()
-	if err != nil {
-		return errors.Wrap(err, "failed to create IDE store")
-	}
-
-	ideContext, err := ideStore.ReadContext(t.conversationID)
+	ideContext, err := t.ideStore.ReadContext(t.conversationID)
 	if err != nil {
 		return errors.Wrap(err, "failed to read IDE context")
 	}
@@ -1301,7 +1307,7 @@ func (t *GoogleThread) processIDEContext(ctx context.Context, handler llmtypes.M
 				len(ideContext.OpenFiles), len(ideContext.Diagnostics)))
 		}
 
-		if err := ideStore.ClearContext(t.conversationID); err != nil {
+		if err := t.ideStore.ClearContext(t.conversationID); err != nil {
 			logger.G(ctx).WithError(err).Warn("failed to clear IDE context, may be processed again")
 		} else {
 			logger.G(ctx).Debug("successfully cleared IDE context")

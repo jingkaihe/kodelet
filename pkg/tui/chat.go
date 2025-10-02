@@ -39,7 +39,7 @@ func StartChat(ctx context.Context,
 	var p *tea.Program
 
 	// Create model separately to add welcome messages
-	model := NewModel(ctx, conversationID, enablePersistence, mcpManager, customManager, maxTurns, compactRatio, disableAutoCompact)
+	model := NewModel(ctx, conversationID, enablePersistence, mcpManager, customManager, maxTurns, compactRatio, disableAutoCompact, ideMode)
 
 	welcomeMsg := fmt.Sprintf(`
 Kodelet (%s)

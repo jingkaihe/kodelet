@@ -20,12 +20,14 @@ type AssistantClient struct {
 }
 
 // NewAssistantClient creates a new assistant client
-func NewAssistantClient(ctx context.Context, conversationID string, enablePersistence bool, mcpManager *tools.MCPManager, customManager *tools.CustomToolManager, maxTurns int, compactRatio float64, disableAutoCompact bool) *AssistantClient {
-	// Create a persistent thread with config from viper
+func NewAssistantClient(ctx context.Context, conversationID string, enablePersistence bool, mcpManager *tools.MCPManager, customManager *tools.CustomToolManager, maxTurns int, compactRatio float64, disableAutoCompact bool, ideMode bool) *AssistantClient {
 	config, err := llm.GetConfigFromViper()
 	if err != nil {
 		logger.G(ctx).WithError(err).Fatal("Failed to load configuration during assistant client initialization")
 	}
+
+	config.IDE = ideMode
+
 	thread, err := llm.NewThread(config)
 	if err != nil {
 		logger.G(ctx).WithError(err).Fatal("Failed to create LLM thread during assistant client initialization")
