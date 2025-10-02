@@ -102,10 +102,7 @@ var chatCmd = &cobra.Command{
 			os.Exit(1)
 		}
 		// Ensure non-negative values (treat negative as 0/no limit)
-		maxTurns := chatOptions.maxTurns
-		if maxTurns < 0 {
-			maxTurns = 0
-		}
+		maxTurns := max(chatOptions.maxTurns, 0)
 
 		// Generate or use existing conversation ID for log redirection
 		conversationID := chatOptions.resumeConvID

@@ -754,7 +754,6 @@ func (t *OpenAIThread) updateUsage(usage openai.Usage, model string) {
 		// If no pricing found, use default GPT-4.1 pricing as fallback
 		pricing = llmtypes.ModelPricing{
 			Input:         0.000002,
-			CachedInput:   0.0000005,
 			Output:        0.000008,
 			ContextWindow: 1047576,
 		}
@@ -1038,9 +1037,8 @@ func (t *OpenAIThread) processImage(imagePath string) (*openai.ChatMessagePart, 
 	} else if strings.HasPrefix(imagePath, "http://") {
 		// Explicitly reject HTTP URLs for security
 		return nil, errors.New(fmt.Sprintf("only HTTPS URLs are supported for security: %s", imagePath))
-	} else if strings.HasPrefix(imagePath, "file://") {
+	} else if filePath, ok := strings.CutPrefix(imagePath, "file://"); ok {
 		// Remove file:// prefix and process as file
-		filePath := strings.TrimPrefix(imagePath, "file://")
 		return t.processImageFile(filePath)
 	} else {
 		// Treat as a local file path
