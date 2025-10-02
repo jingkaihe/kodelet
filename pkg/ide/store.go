@@ -42,10 +42,10 @@ type DiagnosticInfo struct {
 	FilePath string `json:"file_path"`
 	Line     int    `json:"line"`
 	Column   int    `json:"column,omitempty"`
-	Severity string `json:"severity"`           // "error", "warning", "info", "hint"
+	Severity string `json:"severity"` // "error", "warning", "info", "hint"
 	Message  string `json:"message"`
-	Source   string `json:"source,omitempty"`   // e.g., "eslint", "gopls", "rust-analyzer"
-	Code     string `json:"code,omitempty"`     // e.g., "unused-var", "E0308"
+	Source   string `json:"source,omitempty"` // e.g., "eslint", "gopls", "rust-analyzer"
+	Code     string `json:"code,omitempty"`   // e.g., "unused-var", "E0308"
 }
 
 func NewIDEStore() (*IDEStore, error) {

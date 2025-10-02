@@ -195,23 +195,23 @@ func TestFormatContextPrompt(t *testing.T) {
 		}
 
 		result := FormatContextPrompt(context)
-		
+
 		// All sections should be present
 		assert.Contains(t, result, "## Currently Open Files in IDE")
 		assert.Contains(t, result, "## Currently Selected Code in IDE")
 		assert.Contains(t, result, "## IDE Diagnostics")
-		
+
 		// Content should be present
 		assert.Contains(t, result, "file1.go")
 		assert.Contains(t, result, "file2.go")
 		assert.Contains(t, result, "selected code")
 		assert.Contains(t, result, "syntax error")
-		
+
 		// Check section ordering (open files, then selection, then diagnostics)
 		openFilesIdx := strings.Index(result, "## Currently Open Files")
 		selectionIdx := strings.Index(result, "## Currently Selected Code")
 		diagnosticsIdx := strings.Index(result, "## IDE Diagnostics")
-		
+
 		assert.Less(t, openFilesIdx, selectionIdx)
 		assert.Less(t, selectionIdx, diagnosticsIdx)
 	})

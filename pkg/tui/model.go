@@ -62,10 +62,10 @@ func NewModel(ctx context.Context, conversationID string, enablePersistence bool
 
 	// Set custom styles for the textarea (Tokyo Night)
 	ta.FocusedStyle.CursorLine = lipgloss.NewStyle()
-	ta.BlurredStyle.Base = lipgloss.NewStyle().Foreground(lipgloss.Color("#565f89"))      // Comment
-	ta.FocusedStyle.Base = lipgloss.NewStyle().Foreground(lipgloss.Color("#c0caf5"))      // Foreground
+	ta.BlurredStyle.Base = lipgloss.NewStyle().Foreground(lipgloss.Color("#565f89"))              // Comment
+	ta.FocusedStyle.Base = lipgloss.NewStyle().Foreground(lipgloss.Color("#c0caf5"))              // Foreground
 	ta.FocusedStyle.Prompt = lipgloss.NewStyle().Foreground(lipgloss.Color("#7aa2f7")).Bold(true) // Blue
-	ta.BlurredStyle.Prompt = lipgloss.NewStyle().Foreground(lipgloss.Color("#565f89"))    // Comment
+	ta.BlurredStyle.Prompt = lipgloss.NewStyle().Foreground(lipgloss.Color("#565f89"))            // Comment
 
 	vp := viewport.New(0, 0)
 	vp.KeyMap.PageDown.SetEnabled(true)

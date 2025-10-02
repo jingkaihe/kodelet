@@ -277,7 +277,7 @@ func (t *GoogleThread) EnablePersistence(ctx context.Context, enabled bool) {
 
 	// If enabling persistence and there's an existing conversation ID,
 	// try to load it from the store
-	if enabled && t.conversationID != "" && t.store != nil {
+	if enabled && t.store != nil {
 		t.loadConversation(ctx)
 	}
 }
@@ -322,13 +322,13 @@ func (t *GoogleThread) SendMessage(
 	defer t.finalizeMessageSpan(span, err)
 
 	// Process pending feedback messages if this is not a subagent
-	if !t.config.IsSubAgent && t.conversationID != "" {
+	if !t.config.IsSubAgent {
 		if err := t.processPendingFeedback(ctx, handler); err != nil {
 			logger.G(ctx).WithError(err).Warn("failed to process pending feedback, continuing")
 		}
 	}
 
-	if !t.config.IsSubAgent && t.ideStore != nil && t.conversationID != "" {
+	if !t.config.IsSubAgent && t.ideStore != nil {
 		if err := t.processIDEContext(ctx, handler); err != nil {
 			return "", errors.Wrap(err, "failed to process IDE context")
 		}

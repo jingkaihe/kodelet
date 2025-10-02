@@ -140,7 +140,7 @@ func TestIDEStore(t *testing.T) {
 		require.NoError(t, err)
 
 		conversationID := "test-conversation-101"
-		
+
 		// Should not exist initially
 		assert.False(t, store.HasContext(conversationID))
 
@@ -176,7 +176,7 @@ func TestIDEStore(t *testing.T) {
 		readContext, err := store.ReadContext(conversationID)
 		require.NoError(t, err)
 		assert.NotNil(t, readContext)
-		
+
 		// Check that UpdatedAt was set
 		assert.False(t, readContext.UpdatedAt.IsZero())
 		assert.True(t, readContext.UpdatedAt.After(beforeWrite) || readContext.UpdatedAt.Equal(beforeWrite))
