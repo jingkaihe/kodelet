@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -376,12 +377,8 @@ func (t *OpenAIThread) SendMessage(
 		t.messages = append([]openai.ChatCompletionMessage{systemMessage}, t.messages...)
 	}
 
-	// Main interaction loop for handling tool calls
 	turnCount := 0
-	maxTurns := opt.MaxTurns
-	if maxTurns < 0 {
-		maxTurns = 0 // treat negative as no limit
-	}
+	maxTurns := max(opt.MaxTurns, 0)
 
 OUTER:
 	for {
@@ -512,55 +509,10 @@ func (t *OpenAIThread) processMessageExchange(
 		}
 	}
 
-	// Check for pending feedback messages if this is not a subagent
 	if !t.config.IsSubAgent && t.conversationID != "" {
-		func() {
-			// Use a separate function to ensure feedback processing doesn't break the main flow
-			defer func() {
-				if r := recover(); r != nil {
-					logger.G(ctx).WithField("panic", r).Error("panic occurred while processing feedback")
-				}
-			}()
-
-			feedbackStore, err := feedback.NewFeedbackStore()
-			if err != nil {
-				logger.G(ctx).WithError(err).Warn("failed to create feedback store, continuing without feedback")
-				return
-			}
-
-			pendingFeedback, err := feedbackStore.ReadPendingFeedback(t.conversationID)
-			if err != nil {
-				logger.G(ctx).WithError(err).Warn("failed to read pending feedback, continuing without feedback")
-				return
-			}
-
-			if len(pendingFeedback) > 0 {
-				logger.G(ctx).WithField("feedback_count", len(pendingFeedback)).Info("processing pending feedback messages")
-
-				// Convert feedback messages to OpenAI messages and append to requestParams
-				for i, fbMsg := range pendingFeedback {
-					// Add some basic validation
-					if fbMsg.Content == "" {
-						logger.G(ctx).WithField("message_index", i).Warn("skipping empty feedback message")
-						continue
-					}
-
-					userMessage := openai.ChatCompletionMessage{
-						Role:    openai.ChatMessageRoleUser,
-						Content: fbMsg.Content,
-					}
-					requestParams.Messages = append(requestParams.Messages, userMessage)
-					handler.HandleText(fmt.Sprintf("🗣️ User feedback: %s", fbMsg.Content))
-				}
-
-				// Clear the feedback now that we've processed it
-				if err := feedbackStore.ClearPendingFeedback(t.conversationID); err != nil {
-					logger.G(ctx).WithError(err).Warn("failed to clear pending feedback, may be processed again")
-				} else {
-					logger.G(ctx).Debug("successfully cleared pending feedback")
-				}
-			}
-		}()
+		if err := t.processPendingFeedback(ctx, &requestParams, handler); err != nil {
+			return "", false, errors.Wrap(err, "failed to process pending feedback")
+		}
 	}
 
 	// Add a tracing event for API call start
@@ -674,7 +626,7 @@ func (t *OpenAIThread) processIDEContext(ctx context.Context, handler llmtypes.M
 	}
 
 	if ideContext != nil {
-		logger.G(ctx).WithFields(map[string]interface{}{
+		logger.G(ctx).WithFields(map[string]any{
 			"open_files_count":  len(ideContext.OpenFiles),
 			"has_selection":     ideContext.Selection != nil,
 			"diagnostics_count": len(ideContext.Diagnostics),
@@ -697,7 +649,44 @@ func (t *OpenAIThread) processIDEContext(ctx context.Context, handler llmtypes.M
 	return nil
 }
 
-// createChatCompletionWithRetry executes the OpenAI API call with retry logic
+func (t *OpenAIThread) processPendingFeedback(ctx context.Context, requestParams *openai.ChatCompletionRequest, handler llmtypes.MessageHandler) error {
+	feedbackStore, err := feedback.NewFeedbackStore()
+	if err != nil {
+		return errors.Wrap(err, "failed to create feedback store")
+	}
+
+	pendingFeedback, err := feedbackStore.ReadPendingFeedback(t.conversationID)
+	if err != nil {
+		return errors.Wrap(err, "failed to read pending feedback")
+	}
+
+	if len(pendingFeedback) > 0 {
+		logger.G(ctx).WithField("feedback_count", len(pendingFeedback)).Info("processing pending feedback messages")
+
+		for i, fbMsg := range pendingFeedback {
+			if fbMsg.Content == "" {
+				logger.G(ctx).WithField("message_index", i).Warn("skipping empty feedback message")
+				continue
+			}
+
+			userMessage := openai.ChatCompletionMessage{
+				Role:    openai.ChatMessageRoleUser,
+				Content: fbMsg.Content,
+			}
+			requestParams.Messages = append(requestParams.Messages, userMessage)
+			handler.HandleText(fmt.Sprintf("🗣️ User feedback: %s", fbMsg.Content))
+		}
+
+		if err := feedbackStore.ClearPendingFeedback(t.conversationID); err != nil {
+			logger.G(ctx).WithError(err).Warn("failed to clear pending feedback, may be processed again")
+		} else {
+			logger.G(ctx).Debug("successfully cleared pending feedback")
+		}
+	}
+
+	return nil
+}
+
 func (t *OpenAIThread) createChatCompletionWithRetry(ctx context.Context, requestParams openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
 	var response openai.ChatCompletionResponse
 	var originalErrors []error // Store all errors for better context
@@ -1153,15 +1142,11 @@ func (t *OpenAIThread) GetStructuredToolResults() map[string]tooltypes.Structure
 	if t.toolResults == nil {
 		return make(map[string]tooltypes.StructuredToolResult)
 	}
-	// Return a copy to avoid race conditions
 	result := make(map[string]tooltypes.StructuredToolResult)
-	for k, v := range t.toolResults {
-		result[k] = v
-	}
+	maps.Copy(result, t.toolResults)
 	return result
 }
 
-// SetStructuredToolResults sets all structured tool results (for loading from conversation)
 func (t *OpenAIThread) SetStructuredToolResults(results map[string]tooltypes.StructuredToolResult) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -1169,8 +1154,6 @@ func (t *OpenAIThread) SetStructuredToolResults(results map[string]tooltypes.Str
 		t.toolResults = make(map[string]tooltypes.StructuredToolResult)
 	} else {
 		t.toolResults = make(map[string]tooltypes.StructuredToolResult)
-		for k, v := range results {
-			t.toolResults[k] = v
-		}
+		maps.Copy(t.toolResults, results)
 	}
 }

@@ -1239,23 +1239,14 @@ func (t *GoogleThread) ShortSummary(ctx context.Context) string {
 
 // processPendingFeedback processes any pending feedback messages
 func (t *GoogleThread) processPendingFeedback(ctx context.Context, handler llmtypes.MessageHandler) error {
-	// Use a separate function to ensure feedback processing doesn't break the main flow
-	defer func() {
-		if r := recover(); r != nil {
-			logger.G(ctx).WithField("panic", r).Error("panic occurred while processing feedback")
-		}
-	}()
-
 	feedbackStore, err := feedback.NewFeedbackStore()
 	if err != nil {
-		logger.G(ctx).WithError(err).Warn("failed to create feedback store, continuing without feedback")
-		return nil
+		return errors.Wrap(err, "failed to create feedback store")
 	}
 
 	pendingFeedback, err := feedbackStore.ReadPendingFeedback(t.conversationID)
 	if err != nil {
-		logger.G(ctx).WithError(err).Warn("failed to read pending feedback, continuing without feedback")
-		return nil
+		return errors.Wrap(err, "failed to read pending feedback")
 	}
 
 	if len(pendingFeedback) > 0 {

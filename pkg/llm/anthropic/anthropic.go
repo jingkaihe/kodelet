@@ -402,54 +402,10 @@ func (t *AnthropicThread) processMessageExchange(
 		}
 	}
 
-	// Check for pending feedback messages if this is not a subagent
 	if !t.config.IsSubAgent && t.conversationID != "" {
-		func() {
-			// Use a separate function to ensure feedback processing doesn't break the main flow
-			defer func() {
-				if r := recover(); r != nil {
-					logger.G(ctx).WithField("panic", r).Error("panic occurred while processing feedback")
-				}
-			}()
-
-			feedbackStore, err := feedback.NewFeedbackStore()
-			if err != nil {
-				logger.G(ctx).WithError(err).Warn("failed to create feedback store, continuing without feedback")
-				return
-			}
-
-			pendingFeedback, err := feedbackStore.ReadPendingFeedback(t.conversationID)
-			if err != nil {
-				logger.G(ctx).WithError(err).Warn("failed to read pending feedback, continuing without feedback")
-				return
-			}
-
-			if len(pendingFeedback) > 0 {
-				logger.G(ctx).WithField("feedback_count", len(pendingFeedback)).Info("processing pending feedback messages")
-
-				// Convert feedback messages to anthropic messages and append to messageParams
-				for i, fbMsg := range pendingFeedback {
-					// Add some basic validation
-					if fbMsg.Content == "" {
-						logger.G(ctx).WithField("message_index", i).Warn("skipping empty feedback message")
-						continue
-					}
-
-					userMessage := anthropic.NewUserMessage(
-						anthropic.NewTextBlock(fbMsg.Content),
-					)
-					messageParams.Messages = append(messageParams.Messages, userMessage)
-					handler.HandleText(fmt.Sprintf("🗣️ User feedback: %s", fbMsg.Content))
-				}
-
-				// Clear the feedback now that we've processed it
-				if err := feedbackStore.ClearPendingFeedback(t.conversationID); err != nil {
-					logger.G(ctx).WithError(err).Warn("failed to clear pending feedback, may be processed again")
-				} else {
-					logger.G(ctx).Debug("successfully cleared pending feedback")
-				}
-			}
-		}()
+		if err := t.processPendingFeedback(ctx, &messageParams, handler); err != nil {
+			return "", false, errors.Wrap(err, "failed to process pending feedback")
+		}
 	}
 
 	// Add a tracing event for API call start
@@ -531,6 +487,7 @@ func (t *AnthropicThread) processMessageExchange(
 
 	// Log structured LLM usage after all content processing is complete (main agent only)
 	if !t.config.IsSubAgent && !opt.DisableUsageLog {
+		fmt.Println(t.conversationID)
 		usage.LogLLMUsage(ctx, t.GetUsage(), string(model), apiStartTime, int(response.Usage.OutputTokens))
 	}
 
@@ -572,7 +529,43 @@ func (t *AnthropicThread) processIDEContext(ctx context.Context, handler llmtype
 	return nil
 }
 
-// getModelAndTokens determines which model and max tokens to use based on configuration and options
+func (t *AnthropicThread) processPendingFeedback(ctx context.Context, messageParams *anthropic.MessageNewParams, handler llmtypes.MessageHandler) error {
+	feedbackStore, err := feedback.NewFeedbackStore()
+	if err != nil {
+		return errors.Wrap(err, "failed to create feedback store")
+	}
+
+	pendingFeedback, err := feedbackStore.ReadPendingFeedback(t.conversationID)
+	if err != nil {
+		return errors.Wrap(err, "failed to read pending feedback")
+	}
+
+	if len(pendingFeedback) > 0 {
+		logger.G(ctx).WithField("feedback_count", len(pendingFeedback)).Info("processing pending feedback messages")
+
+		for i, fbMsg := range pendingFeedback {
+			if fbMsg.Content == "" {
+				logger.G(ctx).WithField("message_index", i).Warn("skipping empty feedback message")
+				continue
+			}
+
+			userMessage := anthropic.NewUserMessage(
+				anthropic.NewTextBlock(fbMsg.Content),
+			)
+			messageParams.Messages = append(messageParams.Messages, userMessage)
+			handler.HandleText(fmt.Sprintf("🗣️ User feedback: %s", fbMsg.Content))
+		}
+
+		if err := feedbackStore.ClearPendingFeedback(t.conversationID); err != nil {
+			logger.G(ctx).WithError(err).Warn("failed to clear pending feedback, may be processed again")
+		} else {
+			logger.G(ctx).Debug("successfully cleared pending feedback")
+		}
+	}
+
+	return nil
+}
+
 func (t *AnthropicThread) getModelAndTokens(opt llmtypes.MessageOpt) (anthropic.Model, int) {
 	model := t.config.Model
 	maxTokens := t.config.MaxTokens
