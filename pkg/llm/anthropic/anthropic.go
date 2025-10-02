@@ -228,24 +228,19 @@ func (t *AnthropicThread) SendMessage(
 		copy(originalMessages, t.messages)
 	}
 
-	// Process IDE context if this is not a subagent
 	if !t.config.IsSubAgent && t.conversationID != "" {
 		if err := t.processIDEContext(ctx, handler); err != nil {
-			logger.G(ctx).WithError(err).Warn("failed to process IDE context, continuing")
+			return "", errors.Wrap(err, "failed to process IDE context")
 		}
 	}
 
-	// Add user message with images if provided
 	t.AddUserMessage(ctx, message, opt.Images...)
 
-	// Determine which model to use
 	model, maxTokens := t.getModelAndTokens(opt)
 
-	// Main interaction loop for handling tool calls
 	turnCount := 0
-	maxTurns := max(opt.MaxTurns, 0) // treat negative as no limit
+	maxTurns := max(opt.MaxTurns, 0)
 
-	// Check cache-every setting and cache if needed
 	cacheEvery := t.config.CacheEvery
 
 OUTER:
@@ -536,25 +531,15 @@ func (t *AnthropicThread) processMessageExchange(
 	return finalOutput, toolUseCount > 0, nil
 }
 
-// processIDEContext processes IDE context from the editor
 func (t *AnthropicThread) processIDEContext(ctx context.Context, handler llmtypes.MessageHandler) error {
-	// Use a separate function to ensure IDE context processing doesn't break the main flow
-	defer func() {
-		if r := recover(); r != nil {
-			logger.G(ctx).WithField("panic", r).Error("panic occurred while processing IDE context")
-		}
-	}()
-
 	ideStore, err := ide.NewIDEStore()
 	if err != nil {
-		logger.G(ctx).WithError(err).Warn("failed to create IDE store, continuing without IDE context")
-		return nil
+		return errors.Wrap(err, "failed to create IDE store")
 	}
 
 	ideContext, err := ideStore.ReadContext(t.conversationID)
 	if err != nil {
-		logger.G(ctx).WithError(err).Warn("failed to read IDE context, continuing without IDE context")
-		return nil
+		return errors.Wrap(err, "failed to read IDE context")
 	}
 
 	if ideContext != nil {
@@ -564,7 +549,6 @@ func (t *AnthropicThread) processIDEContext(ctx context.Context, handler llmtype
 			"diagnostics_count": len(ideContext.Diagnostics),
 		}).Info("processing IDE context")
 
-		// Format IDE context as a text prompt and append as user message
 		ideContextPrompt := ide.FormatContextPrompt(ideContext)
 		if ideContextPrompt != "" {
 			t.AddUserMessage(ctx, ideContextPrompt)
@@ -572,7 +556,6 @@ func (t *AnthropicThread) processIDEContext(ctx context.Context, handler llmtype
 				len(ideContext.OpenFiles), len(ideContext.Diagnostics)))
 		}
 
-		// Clear the IDE context now that we've processed it
 		if err := ideStore.ClearContext(t.conversationID); err != nil {
 			logger.G(ctx).WithError(err).Warn("failed to clear IDE context, may be processed again")
 		} else {
@@ -1059,9 +1042,7 @@ func (t *AnthropicThread) processImage(imagePath string) (*anthropic.ContentBloc
 	}
 }
 
-// processImageURL creates an image block from an HTTPS URL
 func (t *AnthropicThread) processImageURL(url string) (*anthropic.ContentBlockParamUnion, error) {
-	// Validate URL format (HTTPS only)
 	if !strings.HasPrefix(url, "https://") {
 		return nil, errors.Errorf("only HTTPS URLs are supported for security: %s", url)
 	}
@@ -1073,9 +1054,7 @@ func (t *AnthropicThread) processImageURL(url string) (*anthropic.ContentBlockPa
 	return &block, nil
 }
 
-// processImageFile creates an image block from a local file
 func (t *AnthropicThread) processImageFile(filePath string) (*anthropic.ContentBlockParamUnion, error) {
-	// Check if file exists
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		return nil, errors.Errorf("image file not found: %s", filePath)
 	}

@@ -63,11 +63,10 @@ Kodelet (%s)
 		fullWelcomeMsg += "\nConversation persistence is disabled (--no-save)."
 	}
 
-	// Display conversation ID prominently in IDE mode
 	if ideMode {
 		idMsg := lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.AdaptiveColor{Light: "#9ece6a", Dark: "#9ece6a"}). // Green
+			Foreground(lipgloss.AdaptiveColor{Light: "#9ece6a", Dark: "#9ece6a"}).
 			Render(fmt.Sprintf("\n📋 Conversation ID: %s", conversationID))
 		fullWelcomeMsg += idMsg
 		fullWelcomeMsg += "\n💡 Attach your IDE using: :KodeletAttach " + conversationID

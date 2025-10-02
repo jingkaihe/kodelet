@@ -6,7 +6,6 @@ import (
 	"strings"
 )
 
-// FormatContextPrompt converts IDE context into a prompt string
 func FormatContextPrompt(context *IDEContext) string {
 	if context == nil {
 		return ""
@@ -37,7 +36,6 @@ func FormatContextPrompt(context *IDEContext) string {
 	if len(context.Diagnostics) > 0 {
 		prompt.WriteString("\n## IDE Diagnostics\n")
 
-		// Group by severity: errors, warnings, others
 		errors := []DiagnosticInfo{}
 		warnings := []DiagnosticInfo{}
 		others := []DiagnosticInfo{}
@@ -56,7 +54,6 @@ func FormatContextPrompt(context *IDEContext) string {
 		if len(errors) > 0 {
 			prompt.WriteString("\n### Errors\n")
 			for _, diag := range errors {
-				// Format: file:line:col - [source/code] message
 				sourceCode := ""
 				if diag.Source != "" && diag.Code != "" {
 					sourceCode = fmt.Sprintf("[%s/%s] ", diag.Source, diag.Code)

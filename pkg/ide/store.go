@@ -1,6 +1,4 @@
-// Package ide provides functionality for managing IDE context integration
-// with kodelet. It handles storing and loading IDE state including open files,
-// code selections, and diagnostics with file-based persistence.
+// Package ide manages IDE context integration for kodelet.
 package ide
 
 import (
@@ -16,13 +14,11 @@ import (
 	"github.com/rogpeppe/go-internal/lockedfile"
 )
 
-// IDEStore manages IDE context storage (similar to FeedbackStore)
 type IDEStore struct {
 	ideDir string
 	mu     sync.RWMutex
 }
 
-// IDEContext represents the current IDE state
 type IDEContext struct {
 	OpenFiles   []FileInfo       `json:"open_files"`
 	Selection   *SelectionInfo   `json:"selection,omitempty"`
@@ -30,13 +26,11 @@ type IDEContext struct {
 	UpdatedAt   time.Time        `json:"updated_at"`
 }
 
-// FileInfo represents an open file in the IDE
 type FileInfo struct {
 	Path     string `json:"path"`
 	Language string `json:"language,omitempty"`
 }
 
-// SelectionInfo represents a code selection in the IDE
 type SelectionInfo struct {
 	FilePath  string `json:"file_path"`
 	StartLine int    `json:"start_line"`
@@ -44,18 +38,16 @@ type SelectionInfo struct {
 	Content   string `json:"content"`
 }
 
-// DiagnosticInfo represents a diagnostic message (error, warning, etc.)
 type DiagnosticInfo struct {
 	FilePath string `json:"file_path"`
 	Line     int    `json:"line"`
 	Column   int    `json:"column,omitempty"`
-	Severity string `json:"severity"` // "error", "warning", "info", "hint"
+	Severity string `json:"severity"`           // "error", "warning", "info", "hint"
 	Message  string `json:"message"`
-	Source   string `json:"source,omitempty"` // e.g., "eslint", "gopls", "rust-analyzer"
-	Code     string `json:"code,omitempty"`   // e.g., "unused-var", "E0308"
+	Source   string `json:"source,omitempty"`   // e.g., "eslint", "gopls", "rust-analyzer"
+	Code     string `json:"code,omitempty"`     // e.g., "unused-var", "E0308"
 }
 
-// NewIDEStore creates a new IDE context store
 func NewIDEStore() (*IDEStore, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -73,12 +65,10 @@ func NewIDEStore() (*IDEStore, error) {
 	}, nil
 }
 
-// getContextPath returns the path to the context file for a conversation
 func (s *IDEStore) getContextPath(conversationID string) string {
 	return filepath.Join(s.ideDir, fmt.Sprintf("context-%s.json", conversationID))
 }
 
-// WriteContext writes IDE context using atomic file operations
 func (s *IDEStore) WriteContext(conversationID string, context *IDEContext) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -91,7 +81,6 @@ func (s *IDEStore) WriteContext(conversationID string, context *IDEContext) erro
 		return errors.Wrap(err, "failed to marshal IDE context")
 	}
 
-	// Use lockedfile for atomic write
 	if err := lockedfile.Write(filePath, bytes.NewReader(data), 0644); err != nil {
 		return errors.Wrap(err, "failed to write IDE context file")
 	}
@@ -99,7 +88,6 @@ func (s *IDEStore) WriteContext(conversationID string, context *IDEContext) erro
 	return nil
 }
 
-// ReadContext reads IDE context if available
 func (s *IDEStore) ReadContext(conversationID string) (*IDEContext, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -107,7 +95,7 @@ func (s *IDEStore) ReadContext(conversationID string) (*IDEContext, error) {
 	filePath := s.getContextPath(conversationID)
 
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		return nil, nil // No context available
+		return nil, nil
 	}
 
 	data, err := lockedfile.Read(filePath)
@@ -123,7 +111,6 @@ func (s *IDEStore) ReadContext(conversationID string) (*IDEContext, error) {
 	return &context, nil
 }
 
-// ClearContext removes IDE context file
 func (s *IDEStore) ClearContext(conversationID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -136,7 +123,6 @@ func (s *IDEStore) ClearContext(conversationID string) error {
 	return nil
 }
 
-// HasContext checks if IDE context exists
 func (s *IDEStore) HasContext(conversationID string) bool {
 	filePath := s.getContextPath(conversationID)
 
