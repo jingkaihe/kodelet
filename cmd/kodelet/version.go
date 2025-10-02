@@ -13,7 +13,7 @@ var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print the version information",
 	Long:  `Print the version information of Kodelet in JSON format.`,
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(_ *cobra.Command, _ []string) {
 		info := version.Get()
 		json, err := info.JSON()
 		if err != nil {

@@ -69,7 +69,7 @@ var chatCmd = &cobra.Command{
 	Use:   "chat",
 	Short: "Start an interactive chat session with Kodelet",
 	Long:  `Start an interactive chat session with Kodelet through stdin.`,
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(cmd *cobra.Command, _ []string) {
 		ctx, cancel := context.WithCancel(cmd.Context())
 		defer cancel()
 

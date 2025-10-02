@@ -48,7 +48,7 @@ This command will:
 2. Check and set up the ANTHROPIC_API_KEY secret
 3. Create a git branch and install the Kodelet workflow file
 4. Create a pull request for the changes`,
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(cmd *cobra.Command, _ []string) {
 		ctx := cmd.Context()
 
 		config := getGhaAgentOnboardConfigFromFlags(cmd)
@@ -302,7 +302,7 @@ func createBranchAndWorkflow(_ context.Context, branchName string, config *GhaAg
 	}
 
 	workflowDir := ".github/workflows"
-	if err := os.MkdirAll(workflowDir, 0755); err != nil {
+	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
 		return errors.Wrap(err, "error creating workflow directory")
 	}
 
@@ -312,7 +312,7 @@ func createBranchAndWorkflow(_ context.Context, branchName string, config *GhaAg
 	}
 
 	workflowPath := fmt.Sprintf("%s/kodelet.yaml", workflowDir)
-	if err := os.WriteFile(workflowPath, []byte(workflowContent), 0644); err != nil {
+	if err := os.WriteFile(workflowPath, []byte(workflowContent), 0o644); err != nil {
 		return errors.Wrap(err, "error writing workflow file")
 	}
 

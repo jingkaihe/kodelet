@@ -26,7 +26,7 @@ func GetDefaultBasePath() (string, error) {
 	// Check for environment variable override
 	if basePath := os.Getenv("KODELET_BASE_PATH"); basePath != "" {
 		// Make sure the directory exists
-		if err := os.MkdirAll(basePath, 0755); err != nil {
+		if err := os.MkdirAll(basePath, 0o755); err != nil {
 			return "", err
 		}
 		return basePath, nil
@@ -41,7 +41,7 @@ func GetDefaultBasePath() (string, error) {
 	basePath := filepath.Join(homeDir, ".kodelet")
 
 	// Make sure the directory exists
-	if err := os.MkdirAll(basePath, 0755); err != nil {
+	if err := os.MkdirAll(basePath, 0o755); err != nil {
 		return "", err
 	}
 

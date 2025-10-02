@@ -100,18 +100,18 @@ func TestProcessImageFile(t *testing.T) {
 	}
 
 	testImagePath := filepath.Join(tempDir, "test.png")
-	err = os.WriteFile(testImagePath, pngData, 0644)
+	err = os.WriteFile(testImagePath, pngData, 0o644)
 	require.NoError(t, err)
 
 	// Create a large test file (exceeds MaxImageFileSize)
 	largeFilePath := filepath.Join(tempDir, "large.png")
 	largeData := make([]byte, MaxImageFileSize+1)
-	err = os.WriteFile(largeFilePath, largeData, 0644)
+	err = os.WriteFile(largeFilePath, largeData, 0o644)
 	require.NoError(t, err)
 
 	// Create a file with unsupported extension
 	unsupportedPath := filepath.Join(tempDir, "test.bmp")
-	err = os.WriteFile(unsupportedPath, pngData, 0644)
+	err = os.WriteFile(unsupportedPath, pngData, 0o644)
 	require.NoError(t, err)
 
 	tests := []struct {
@@ -160,7 +160,7 @@ func TestAddUserMessage(t *testing.T) {
 	}
 
 	testImagePath := filepath.Join(tempDir, "test.png")
-	err = os.WriteFile(testImagePath, pngData, 0644)
+	err = os.WriteFile(testImagePath, pngData, 0o644)
 	require.NoError(t, err)
 
 	tests := []struct {

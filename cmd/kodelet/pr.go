@@ -37,7 +37,7 @@ func NewPRConfig() *PRConfig {
 
 func (c *PRConfig) Validate() error {
 	if c.Provider != "github" {
-		return errors.New(fmt.Sprintf("unsupported provider: %s, only 'github' is supported", c.Provider))
+		return fmt.Errorf("unsupported provider: %s, only 'github' is supported", c.Provider)
 	}
 
 	if c.Target == "" {
@@ -55,7 +55,7 @@ var prCmd = &cobra.Command{
 This command analyzes the current branch changes compared to the target branch and generates an appropriate PR title and description.
 
 Use the --draft flag to create a draft pull request that is not ready for review.`,
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(cmd *cobra.Command, _ []string) {
 		ctx, cancel := context.WithCancel(cmd.Context())
 		defer cancel()
 

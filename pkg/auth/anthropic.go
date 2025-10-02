@@ -24,6 +24,7 @@ import (
 	"golang.org/x/oauth2/authhandler"
 )
 
+// AnthropicTokenResponse represents the OAuth2 token response from Anthropic's authentication endpoint.
 type AnthropicTokenResponse struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
@@ -34,6 +35,7 @@ type AnthropicTokenResponse struct {
 	}
 }
 
+// AnthropicCredentials stores the authentication credentials for Anthropic Claude API.
 type AnthropicCredentials struct {
 	Email        string `json:"email"`
 	Scope        string `json:"scope"`
@@ -68,6 +70,8 @@ func generatePKCEParams() *authhandler.PKCEParams {
 	}
 }
 
+// GenerateAnthropicAuthURL generates an OAuth2 authorization URL for Anthropic authentication.
+// It returns the auth URL, PKCE verifier, and any error encountered.
 func GenerateAnthropicAuthURL() (authURL string, verifier string, err error) {
 	pkceParams := generatePKCEParams()
 
@@ -96,6 +100,8 @@ func GenerateAnthropicAuthURL() (authURL string, verifier string, err error) {
 	return u.String(), pkceParams.Verifier, nil
 }
 
+// ExchangeAnthropicCode exchanges an authorization code for Anthropic access credentials.
+// The code parameter should be in the format "code#state".
 func ExchangeAnthropicCode(ctx context.Context, code string, verifier string) (*AnthropicCredentials, error) {
 	// Parse the code to extract code and state
 	splits := strings.Split(code, "#")
@@ -159,6 +165,7 @@ func ExchangeAnthropicCode(ctx context.Context, code string, verifier string) (*
 	}, nil
 }
 
+// GetAnthropicCredentialsExists checks if Anthropic credentials file exists in the user's home directory.
 func GetAnthropicCredentialsExists() (bool, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -175,6 +182,8 @@ func GetAnthropicCredentialsExists() (bool, error) {
 	return false, errors.Wrap(err, "failed to check if anthropic credentials file exists")
 }
 
+// SaveAnthropicCredentials saves Anthropic credentials to a JSON file in the user's home directory.
+// Returns the file path where credentials were saved.
 func SaveAnthropicCredentials(creds *AnthropicCredentials) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -184,7 +193,7 @@ func SaveAnthropicCredentials(creds *AnthropicCredentials) (string, error) {
 	filePath := filepath.Join(home, ".kodelet", "anthropic-subscription.json")
 
 	// Ensure the directory exists
-	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
 		return "", errors.Wrap(err, "failed to create credentials directory")
 	}
 
@@ -257,6 +266,8 @@ func refreshAnthropicToken(ctx context.Context, creds *AnthropicCredentials) (*A
 	return refreshed, nil
 }
 
+// AnthropicAccessToken retrieves a valid Anthropic access token, refreshing it if necessary.
+// It automatically handles token refresh when the token is within 10 minutes of expiration.
 func AnthropicAccessToken(ctx context.Context) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -289,6 +300,7 @@ func AnthropicAccessToken(ctx context.Context) (string, error) {
 	return refreshed.AccessToken, nil
 }
 
+// AnthropicHeader returns the HTTP request options for Anthropic API calls with the given access token.
 func AnthropicHeader(accessToken string) []option.RequestOption {
 	return []option.RequestOption{
 		option.WithHeader("User-Agent", "claude-cli/1.0.30 (external, cli)"),
@@ -298,6 +310,7 @@ func AnthropicHeader(accessToken string) []option.RequestOption {
 	}
 }
 
+// AnthropicSystemPrompt returns the system prompt text blocks for Anthropic Claude interactions.
 func AnthropicSystemPrompt() []anthropic.TextBlockParam {
 	return []anthropic.TextBlockParam{
 		{

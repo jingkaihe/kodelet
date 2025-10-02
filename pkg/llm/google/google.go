@@ -88,6 +88,7 @@ type GoogleToolCall struct {
 	Args map[string]interface{}
 }
 
+// Provider returns the name of the LLM provider for this thread
 func (t *GoogleThread) Provider() string {
 	return "google"
 }
@@ -1056,7 +1057,7 @@ func (t *GoogleThread) convertToStandardMessages() []llmtypes.Message {
 }
 
 // NewSubAgent creates a subagent thread reusing the parent's client
-func (t *GoogleThread) NewSubAgent(ctx context.Context, config llmtypes.Config) llmtypes.Thread {
+func (t *GoogleThread) NewSubAgent(_ context.Context, config llmtypes.Config) llmtypes.Thread {
 	// Create subagent thread reusing the parent's client instead of creating a new one
 	subagentThread := &GoogleThread{
 		client:                 t.client, // Reuse parent's client
@@ -1280,7 +1281,7 @@ func (t *GoogleThread) processPendingFeedback(ctx context.Context, handler llmty
 
 func (t *GoogleThread) processIDEContext(ctx context.Context, handler llmtypes.MessageHandler) error {
 	ideContext, err := t.ideStore.ReadContext(t.conversationID)
-	if err != nil {
+	if err != nil && !errors.Is(err, ide.ErrContextNotFound) {
 		return errors.Wrap(err, "failed to read IDE context")
 	}
 

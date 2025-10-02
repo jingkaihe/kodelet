@@ -159,7 +159,7 @@ var recipeListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all available recipes",
 	Long:  `List all available recipes with their metadata including ID, name and description`,
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, _ []string) error {
 		config := NewRecipeListConfig()
 		config.ShowPath, _ = cmd.Flags().GetBool("show-path")
 		config.JSONOutput, _ = cmd.Flags().GetBool("json")

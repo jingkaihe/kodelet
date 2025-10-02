@@ -14,11 +14,19 @@ import (
 	"github.com/rogpeppe/go-internal/lockedfile"
 )
 
+// ErrContextNotFound is returned when an IDE context file does not exist.
+var ErrContextNotFound = errors.New("IDE context not found")
+
+// IDEStore manages persistent storage of IDE context information including
+// open files, code selections, and diagnostics. It provides thread-safe
+// operations with file-based persistence.
 type IDEStore struct {
 	ideDir string
 	mu     sync.RWMutex
 }
 
+// IDEContext represents the current state of the IDE including open files,
+// selected code regions, and diagnostic messages (errors, warnings, etc.).
 type IDEContext struct {
 	OpenFiles   []FileInfo       `json:"open_files"`
 	Selection   *SelectionInfo   `json:"selection,omitempty"`
@@ -26,11 +34,15 @@ type IDEContext struct {
 	UpdatedAt   time.Time        `json:"updated_at"`
 }
 
+// FileInfo represents an open file in the IDE with its path and programming
+// language identifier.
 type FileInfo struct {
 	Path     string `json:"path"`
 	Language string `json:"language,omitempty"`
 }
 
+// SelectionInfo represents a selected region of code in the IDE including the
+// file path, line range, and the selected text content.
 type SelectionInfo struct {
 	FilePath  string `json:"file_path"`
 	StartLine int    `json:"start_line"`
@@ -38,6 +50,8 @@ type SelectionInfo struct {
 	Content   string `json:"content"`
 }
 
+// DiagnosticInfo represents a diagnostic message (error, warning, info, or hint)
+// from language servers or linters in the IDE.
 type DiagnosticInfo struct {
 	FilePath string `json:"file_path"`
 	Line     int    `json:"line"`
@@ -48,6 +62,8 @@ type DiagnosticInfo struct {
 	Code     string `json:"code,omitempty"`   // e.g., "unused-var", "E0308"
 }
 
+// NewIDEStore creates a new IDE context store with the storage directory
+// initialized in the user's home directory at ~/.kodelet/ide.
 func NewIDEStore() (*IDEStore, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -56,7 +72,7 @@ func NewIDEStore() (*IDEStore, error) {
 
 	ideDir := filepath.Join(homeDir, ".kodelet", "ide")
 
-	if err := os.MkdirAll(ideDir, 0755); err != nil {
+	if err := os.MkdirAll(ideDir, 0o755); err != nil {
 		return nil, errors.Wrap(err, "failed to create ide directory")
 	}
 
@@ -69,6 +85,8 @@ func (s *IDEStore) getContextPath(conversationID string) string {
 	return filepath.Join(s.ideDir, fmt.Sprintf("context-%s.json", conversationID))
 }
 
+// WriteContext persists IDE context data to disk for the specified conversation ID.
+// It updates the timestamp and uses locked file operations for thread safety.
 func (s *IDEStore) WriteContext(conversationID string, context *IDEContext) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -81,13 +99,15 @@ func (s *IDEStore) WriteContext(conversationID string, context *IDEContext) erro
 		return errors.Wrap(err, "failed to marshal IDE context")
 	}
 
-	if err := lockedfile.Write(filePath, bytes.NewReader(data), 0644); err != nil {
+	if err := lockedfile.Write(filePath, bytes.NewReader(data), 0o644); err != nil {
 		return errors.Wrap(err, "failed to write IDE context file")
 	}
 
 	return nil
 }
 
+// ReadContext loads IDE context data from disk for the specified conversation ID.
+// It returns ErrContextNotFound if the context file does not exist.
 func (s *IDEStore) ReadContext(conversationID string) (*IDEContext, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -95,7 +115,7 @@ func (s *IDEStore) ReadContext(conversationID string) (*IDEContext, error) {
 	filePath := s.getContextPath(conversationID)
 
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		return nil, nil
+		return nil, ErrContextNotFound
 	}
 
 	data, err := lockedfile.Read(filePath)
@@ -111,6 +131,8 @@ func (s *IDEStore) ReadContext(conversationID string) (*IDEContext, error) {
 	return &context, nil
 }
 
+// ClearContext removes the IDE context file for the specified conversation ID.
+// It does not return an error if the file does not exist.
 func (s *IDEStore) ClearContext(conversationID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -123,6 +145,8 @@ func (s *IDEStore) ClearContext(conversationID string) error {
 	return nil
 }
 
+// HasContext checks if IDE context data exists for the specified conversation ID.
+// It returns true if a non-empty context file exists.
 func (s *IDEStore) HasContext(conversationID string) bool {
 	filePath := s.getContextPath(conversationID)
 

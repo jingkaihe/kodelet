@@ -259,7 +259,7 @@ func (fp *Processor) extractBodyContent(content string) string {
 	}
 
 	lines := strings.Split(content, "\n")
-	var frontmatterEnd = -1
+	frontmatterEnd := -1
 
 	for i := 1; i < len(lines); i++ {
 		if strings.TrimSpace(lines[i]) == "---" {
@@ -276,6 +276,9 @@ func (fp *Processor) extractBodyContent(content string) string {
 	return strings.Join(contentLines, "\n")
 }
 
+// LoadFragment loads and processes a fragment template by name, applying variable
+// substitution and executing any embedded bash commands. It returns the parsed
+// fragment with its metadata and rendered content.
 func (fp *Processor) LoadFragment(ctx context.Context, config *Config) (*Fragment, error) {
 	logger.G(ctx).WithField("fragment", config.FragmentName).Debug("Loading fragment with metadata")
 
@@ -313,6 +316,9 @@ func (fp *Processor) LoadFragment(ctx context.Context, config *Config) (*Fragmen
 	}, nil
 }
 
+// GetFragmentMetadata retrieves a fragment's metadata and raw content without
+// processing templates or executing bash commands. This is useful for listing
+// and inspecting fragments without side effects.
 func (fp *Processor) GetFragmentMetadata(fragmentName string) (*Fragment, error) {
 	fragmentPath, err := fp.findFragmentFile(fragmentName)
 	if err != nil {
@@ -452,6 +458,9 @@ func (fp *Processor) walkFragmentsDir(fragmentsFS fs.FS, dir string, pathConstru
 	}
 }
 
+// ListFragmentsWithMetadata returns all available fragments from configured
+// directories and built-in recipes, including their parsed metadata and content.
+// Fragments are deduplicated with precedence given to user directories over built-ins.
 func (fp *Processor) ListFragmentsWithMetadata() ([]*Fragment, error) {
 	var fragments []*Fragment
 	seen := make(map[string]bool)

@@ -55,7 +55,7 @@ func TestFileWriteTool_ValidateInput(t *testing.T) {
 
 	t.Run("valid input for existing file", func(t *testing.T) {
 		// Create a test file
-		err := os.WriteFile(testFilePath, []byte("initial content"), 0644)
+		err := os.WriteFile(testFilePath, []byte("initial content"), 0o644)
 		require.NoError(t, err)
 
 		fileInfo, err := os.Stat(testFilePath)
@@ -77,7 +77,7 @@ func TestFileWriteTool_ValidateInput(t *testing.T) {
 
 	t.Run("invalid input - file modified since last read", func(t *testing.T) {
 		// Create a test file
-		err := os.WriteFile(testFilePath, []byte("modified content"), 0644)
+		err := os.WriteFile(testFilePath, []byte("modified content"), 0o644)
 		require.NoError(t, err)
 
 		state.SetFileLastAccessed(testFilePath, time.Now().Add(-time.Hour))
@@ -134,7 +134,7 @@ func TestFileWriteTool_Execute(t *testing.T) {
 
 	t.Run("overwrite existing file", func(t *testing.T) {
 		// Create a file with initial content
-		err := os.WriteFile(testFilePath, []byte("initial content"), 0644)
+		err := os.WriteFile(testFilePath, []byte("initial content"), 0o644)
 		require.NoError(t, err)
 
 		input := FileWriteInput{

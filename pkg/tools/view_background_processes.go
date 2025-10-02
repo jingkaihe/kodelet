@@ -12,12 +12,14 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 )
 
+// ViewBackgroundProcessesToolResult represents the result of viewing background processes
 type ViewBackgroundProcessesToolResult struct {
 	processes []tooltypes.BackgroundProcess
 	statuses  []string
 	err       string
 }
 
+// GetResult returns the formatted list of background processes
 func (r *ViewBackgroundProcessesToolResult) GetResult() string {
 	if r.IsError() {
 		return ""
@@ -25,14 +27,17 @@ func (r *ViewBackgroundProcessesToolResult) GetResult() string {
 	return r.formatProcesses()
 }
 
+// GetError returns the error message
 func (r *ViewBackgroundProcessesToolResult) GetError() string {
 	return r.err
 }
 
+// IsError returns true if the result contains an error
 func (r *ViewBackgroundProcessesToolResult) IsError() bool {
 	return r.err != ""
 }
 
+// AssistantFacing returns the string representation for the AI assistant
 func (r *ViewBackgroundProcessesToolResult) AssistantFacing() string {
 	return tooltypes.StringifyToolResult(r.GetResult(), r.GetError())
 }
@@ -56,14 +61,18 @@ func (r *ViewBackgroundProcessesToolResult) formatProcesses() string {
 	return formatted
 }
 
+// ViewBackgroundProcessesTool provides functionality to view background processes
 type ViewBackgroundProcessesTool struct{}
 
+// ViewBackgroundProcessesInput defines the input parameters for the tool
 type ViewBackgroundProcessesInput struct{}
 
+// Name returns the name of the tool
 func (t *ViewBackgroundProcessesTool) Name() string {
 	return "view_background_processes"
 }
 
+// Description returns the description of the tool
 func (t *ViewBackgroundProcessesTool) Description() string {
 	return `View all background processes currently tracked by the system.
 
@@ -78,21 +87,25 @@ current status (running/stopped), start time, log file path, and the command tha
 `
 }
 
+// GenerateSchema generates the JSON schema for the tool's input parameters
 func (t *ViewBackgroundProcessesTool) GenerateSchema() *jsonschema.Schema {
 	return GenerateSchema[ViewBackgroundProcessesInput]()
 }
 
-func (t *ViewBackgroundProcessesTool) ValidateInput(state tooltypes.State, parameters string) error {
+// ValidateInput validates the input parameters for the tool
+func (t *ViewBackgroundProcessesTool) ValidateInput(_ tooltypes.State, _ string) error {
 	return nil
 }
 
-func (t *ViewBackgroundProcessesTool) TracingKVs(parameters string) ([]attribute.KeyValue, error) {
+// TracingKVs returns tracing key-value pairs for observability
+func (t *ViewBackgroundProcessesTool) TracingKVs(_ string) ([]attribute.KeyValue, error) {
 	return []attribute.KeyValue{
 		attribute.String("tool.name", "view_background_processes"),
 	}, nil
 }
 
-func (t *ViewBackgroundProcessesTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
+// Execute retrieves and formats the list of background processes
+func (t *ViewBackgroundProcessesTool) Execute(_ context.Context, state tooltypes.State, _ string) tooltypes.ToolResult {
 	processes := state.GetBackgroundProcesses()
 	statuses := make([]string, len(processes))
 
@@ -125,6 +138,7 @@ func getProcessStatus(process tooltypes.BackgroundProcess) string {
 	return "running"
 }
 
+// StructuredData returns structured metadata about the background processes
 func (r *ViewBackgroundProcessesToolResult) StructuredData() tooltypes.StructuredToolResult {
 	result := tooltypes.StructuredToolResult{
 		ToolName:  "view_background_processes",

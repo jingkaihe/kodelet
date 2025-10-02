@@ -108,7 +108,7 @@ var conversationCmd = &cobra.Command{
 	Use:   "conversation",
 	Short: "Manage saved conversations",
 	Long:  `List, view, and delete saved conversations.`,
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(cmd *cobra.Command, _ []string) {
 		cmd.Help()
 	},
 }
@@ -117,7 +117,7 @@ var conversationListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all saved conversations",
 	Long:  `List saved conversations with filtering and sorting options.`,
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(cmd *cobra.Command, _ []string) {
 		ctx := cmd.Context()
 		config := getConversationListConfigFromFlags(cmd)
 		listConversationsCmd(ctx, config)
@@ -717,7 +717,7 @@ func exportConversationCmd(ctx context.Context, conversationID string, path stri
 		path = fmt.Sprintf("%s.json", conversationID)
 	}
 
-	if err := os.WriteFile(path, jsonData, 0644); err != nil {
+	if err := os.WriteFile(path, jsonData, 0o644); err != nil {
 		presenter.Error(err, "Failed to write file")
 		os.Exit(1)
 	}

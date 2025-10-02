@@ -23,13 +23,16 @@ type Message struct {
 	Timestamp time.Time `json:"timestamp"`
 }
 
-// FeedbackStore represents the feedback storage
+// FeedbackStore manages persistent storage of user feedback messages for autonomous
+// conversations. It provides thread-safe operations for writing, reading, and
+// clearing feedback data with file-based persistence.
 type FeedbackStore struct {
 	feedbackDir string
 	mu          sync.RWMutex
 }
 
-// FeedbackData represents the structure of feedback file
+// FeedbackData represents the structure of the feedback JSON file containing
+// a collection of feedback messages.
 type FeedbackData struct {
 	Messages []Message `json:"messages"`
 }
@@ -44,7 +47,7 @@ func NewFeedbackStore() (*FeedbackStore, error) {
 	feedbackDir := filepath.Join(homeDir, ".kodelet", "feedback")
 
 	// Ensure feedback directory exists
-	if err := os.MkdirAll(feedbackDir, 0755); err != nil {
+	if err := os.MkdirAll(feedbackDir, 0o755); err != nil {
 		return nil, errors.Wrap(err, "failed to create feedback directory")
 	}
 

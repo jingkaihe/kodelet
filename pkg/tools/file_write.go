@@ -16,12 +16,14 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/utils"
 )
 
+// FileWriteToolResult represents the result of a file write operation
 type FileWriteToolResult struct {
 	filename string
 	text     string
 	err      string
 }
 
+// GetResult returns a success message
 func (r *FileWriteToolResult) GetResult() string {
 	lines := strings.Split(r.text, "\n")
 	textWithLineNumber := utils.ContentWithLineNumber(lines, 0)
@@ -30,14 +32,17 @@ func (r *FileWriteToolResult) GetResult() string {
 %s`, r.filename, textWithLineNumber)
 }
 
+// GetError returns the error message
 func (r *FileWriteToolResult) GetError() string {
 	return r.err
 }
 
+// IsError returns true if the result contains an error
 func (r *FileWriteToolResult) IsError() bool {
 	return r.err != ""
 }
 
+// AssistantFacing returns the string representation for the AI assistant
 func (r *FileWriteToolResult) AssistantFacing() string {
 	var content string
 	if !r.IsError() {
@@ -46,6 +51,7 @@ func (r *FileWriteToolResult) AssistantFacing() string {
 	return tooltypes.StringifyToolResult(content, r.GetError())
 }
 
+// StructuredData returns structured metadata about the file write operation
 func (r *FileWriteToolResult) StructuredData() tooltypes.StructuredToolResult {
 	result := tooltypes.StructuredToolResult{
 		ToolName:  "file_write",
@@ -71,21 +77,26 @@ func (r *FileWriteToolResult) StructuredData() tooltypes.StructuredToolResult {
 	return result
 }
 
+// FileWriteTool provides functionality to write files
 type FileWriteTool struct{}
 
+// Name returns the name of the tool
 func (t *FileWriteTool) Name() string {
 	return "file_write"
 }
 
+// FileWriteInput defines the input parameters for the file_write tool
 type FileWriteInput struct {
 	FilePath string `json:"file_path" jsonschema:"description=The absolute path of the file to write,required"`
 	Text     string `json:"text" jsonschema:"description=The text of the file MUST BE provided"`
 }
 
+// GenerateSchema generates the JSON schema for the tool's input parameters
 func (t *FileWriteTool) GenerateSchema() *jsonschema.Schema {
 	return GenerateSchema[FileWriteInput]()
 }
 
+// Description returns the description of the tool
 func (t *FileWriteTool) Description() string {
 	return `Writes a file with the given text. If the file already exists, its text will be overwritten by the new text.
 
@@ -100,6 +111,7 @@ By default the file is created with 0644 permissions. You can change the permiss
 `
 }
 
+// ValidateInput validates the input parameters for the tool
 func (t *FileWriteTool) ValidateInput(state tooltypes.State, parameters string) error {
 	var input FileWriteInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
@@ -134,6 +146,7 @@ func (t *FileWriteTool) ValidateInput(state tooltypes.State, parameters string) 
 	return nil
 }
 
+// TracingKVs returns tracing key-value pairs for observability
 func (t *FileWriteTool) TracingKVs(parameters string) ([]attribute.KeyValue, error) {
 	input := &FileWriteInput{}
 	err := json.Unmarshal([]byte(parameters), input)
@@ -147,7 +160,8 @@ func (t *FileWriteTool) TracingKVs(parameters string) ([]attribute.KeyValue, err
 	}, nil
 }
 
-func (t *FileWriteTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
+// Execute writes the file and returns the result
+func (t *FileWriteTool) Execute(_ context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
 	var input FileWriteInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
 		return &FileWriteToolResult{
@@ -158,7 +172,7 @@ func (t *FileWriteTool) Execute(ctx context.Context, state tooltypes.State, para
 
 	state.SetFileLastAccessed(input.FilePath, time.Now())
 
-	err := os.WriteFile(input.FilePath, []byte(input.Text), 0644)
+	err := os.WriteFile(input.FilePath, []byte(input.Text), 0o644)
 	if err != nil {
 		return &FileWriteToolResult{
 			filename: input.FilePath,

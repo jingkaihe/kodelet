@@ -24,7 +24,7 @@ This command will:
 
 After running this command, you will no longer have access to GitHub Copilot
 subscription-based models until you authenticate again.`,
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(cmd *cobra.Command, _ []string) {
 		ctx := cmd.Context()
 
 		noConfirm, _ := cmd.Flags().GetBool("no-confirm")

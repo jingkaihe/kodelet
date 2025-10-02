@@ -27,6 +27,7 @@ import (
 )
 
 var (
+	// BannedCommands lists commands that are not allowed to run through the bash tool
 	BannedCommands = []string{
 		"vim",
 		"view",
@@ -62,7 +63,7 @@ The following commands are banned and cannot be used:
 * You **MUST NOT** run commands that require user interaction.
 * When issuing multiple commands, use the ';' or '&&' operator to separate them. Command MUST NOT be multiline.
 * Try to maintain your current working directory throughout the session by using absolute paths and avoid using cd directly. If you need to use cd please wrap it in parentheses.
-* grep_tool and glob_tool are prefered over running grep, egrep and find using the bash tool.
+* grep_tool and glob_tool are preferred over running grep, egrep and find using the bash tool.
 * DO NOT use heredoc. For any command that requires heredoc, use the "file_write" tool instead.
 
 # Background Parameter
@@ -165,11 +166,13 @@ Running a gunicorn server in the background.
 `
 )
 
+// BashTool executes bash commands with configurable restrictions and timeout support
 type BashTool struct {
 	allowedCommands []string
 	compiledGlobs   []glob.Glob
 }
 
+// NewBashTool creates a new BashTool with the specified allowed commands
 func NewBashTool(allowedCommands []string) *BashTool {
 	globs := make([]glob.Glob, len(allowedCommands))
 	for i, pattern := range allowedCommands {
@@ -198,6 +201,7 @@ func (b *BashTool) MatchesCommand(command string) bool {
 	return false
 }
 
+// BashInput defines the input parameters for the bash tool
 type BashInput struct {
 	Description string `json:"description" jsonschema:"description=A description of the command to run"`
 	Command     string `json:"command" jsonschema:"description=The bash command to run"`
@@ -205,14 +209,17 @@ type BashInput struct {
 	Background  bool   `json:"background" jsonschema:"description=Whether to run the command in the background,default=false"`
 }
 
+// GenerateSchema generates the JSON schema for the tool's input parameters
 func (b *BashTool) GenerateSchema() *jsonschema.Schema {
 	return GenerateSchema[BashInput]()
 }
 
+// Name returns the name of the tool
 func (b *BashTool) Name() string {
 	return "bash"
 }
 
+// TracingKVs returns tracing key-value pairs for observability
 func (b *BashTool) TracingKVs(parameters string) ([]attribute.KeyValue, error) {
 	input := &BashInput{}
 	err := json.Unmarshal([]byte(parameters), input)
@@ -228,7 +235,8 @@ func (b *BashTool) TracingKVs(parameters string) ([]attribute.KeyValue, error) {
 	}, nil
 }
 
-func (b *BashTool) ValidateInput(state tooltypes.State, parameters string) error {
+// ValidateInput validates the input parameters for the tool
+func (b *BashTool) ValidateInput(_ tooltypes.State, parameters string) error {
 	input := &BashInput{}
 	err := json.Unmarshal([]byte(parameters), input)
 	if err != nil {
@@ -304,6 +312,7 @@ func (b *BashTool) ValidateInput(state tooltypes.State, parameters string) error
 	return nil
 }
 
+// Description returns the description of the tool
 func (b *BashTool) Description() string {
 	tmpl, err := template.New("bash_description").Parse(descriptionTemplate)
 	if err != nil {
@@ -328,6 +337,7 @@ func (b *BashTool) Description() string {
 	return buf.String()
 }
 
+// BashToolResult represents the result of a bash command execution
 type BashToolResult struct {
 	command        string
 	combinedOutput string
@@ -337,22 +347,27 @@ type BashToolResult struct {
 	workingDir     string
 }
 
+// GetResult returns the command output
 func (r *BashToolResult) GetResult() string {
 	return r.combinedOutput
 }
 
+// GetError returns the error message
 func (r *BashToolResult) GetError() string {
 	return r.error
 }
 
+// IsError returns true if the result contains an error
 func (r *BashToolResult) IsError() bool {
 	return r.error != ""
 }
 
+// AssistantFacing returns the string representation for the AI assistant
 func (r *BashToolResult) AssistantFacing() string {
 	return tooltypes.StringifyToolResult(r.combinedOutput, r.GetError())
 }
 
+// StructuredData returns structured metadata about the tool execution
 func (r *BashToolResult) StructuredData() tooltypes.StructuredToolResult {
 	result := tooltypes.StructuredToolResult{
 		ToolName:  "bash",
@@ -376,6 +391,7 @@ func (r *BashToolResult) StructuredData() tooltypes.StructuredToolResult {
 	return result
 }
 
+// BackgroundBashToolResult represents the result of a background bash command execution
 type BackgroundBashToolResult struct {
 	command   string
 	pid       int
@@ -384,22 +400,27 @@ type BackgroundBashToolResult struct {
 	error     string
 }
 
+// GetResult returns information about the background process
 func (r *BackgroundBashToolResult) GetResult() string {
 	return fmt.Sprintf("Process is up and running, output of the process can be viewed at %s", r.logPath)
 }
 
+// GetError returns the error message
 func (r *BackgroundBashToolResult) GetError() string {
 	return r.error
 }
 
+// IsError returns true if the result contains an error
 func (r *BackgroundBashToolResult) IsError() bool {
 	return r.error != ""
 }
 
+// AssistantFacing returns the string representation for the AI assistant
 func (r *BackgroundBashToolResult) AssistantFacing() string {
 	return tooltypes.StringifyToolResult(r.GetResult(), r.GetError())
 }
 
+// StructuredData returns structured metadata about the background process
 func (r *BackgroundBashToolResult) StructuredData() tooltypes.StructuredToolResult {
 	result := tooltypes.StructuredToolResult{
 		ToolName:  "bash_background",
@@ -422,6 +443,7 @@ func (r *BackgroundBashToolResult) StructuredData() tooltypes.StructuredToolResu
 	return result
 }
 
+// Execute runs the bash command and returns the result
 func (b *BashTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
 	input := &BashInput{}
 	err := json.Unmarshal([]byte(parameters), input)
@@ -436,9 +458,8 @@ func (b *BashTool) Execute(ctx context.Context, state tooltypes.State, parameter
 
 	if input.Background {
 		return b.executeBackground(state, input)
-	} else {
-		return b.executeForeground(ctx, input)
 	}
+	return b.executeForeground(ctx, input)
 }
 
 func (b *BashTool) executeForeground(ctx context.Context, input *BashInput) tooltypes.ToolResult {
@@ -502,7 +523,7 @@ func (b *BashTool) executeBackground(state tooltypes.State, input *BashInput) to
 	}
 
 	kodeletDir := filepath.Join(pwd, ".kodelet")
-	if err := os.MkdirAll(kodeletDir, 0755); err != nil {
+	if err := os.MkdirAll(kodeletDir, 0o755); err != nil {
 		return &BackgroundBashToolResult{
 			command:   input.Command,
 			startTime: time.Now(),
@@ -549,7 +570,7 @@ func (b *BashTool) executeBackground(state tooltypes.State, input *BashInput) to
 
 	// Create PID directory
 	pidDir := filepath.Join(kodeletDir, fmt.Sprintf("%d", pid))
-	if err := os.MkdirAll(pidDir, 0755); err != nil {
+	if err := os.MkdirAll(pidDir, 0o755); err != nil {
 		cmd.Process.Kill()
 		return &BackgroundBashToolResult{
 			command:   input.Command,
@@ -560,7 +581,7 @@ func (b *BashTool) executeBackground(state tooltypes.State, input *BashInput) to
 
 	// Create log file
 	logPath := filepath.Join(pidDir, "out.log")
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
 		cmd.Process.Kill()
 		return &BackgroundBashToolResult{

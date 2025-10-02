@@ -3,11 +3,15 @@ package sqlite
 // SQL schema definitions for SQLite conversation store
 
 const (
-	// Schema version constants
-	SchemaVersion1       = 1
-	SchemaVersion2       = 2
-	SchemaVersion3       = 3
-	SchemaVersion4       = 4
+	// SchemaVersion1 represents the initial database schema version
+	SchemaVersion1 = 1
+	// SchemaVersion2 adds performance indexes
+	SchemaVersion2 = 2
+	// SchemaVersion3 adds provider column to conversation_summaries table
+	SchemaVersion3 = 3
+	// SchemaVersion4 adds background_processes column to conversations table
+	SchemaVersion4 = 4
+	// CurrentSchemaVersion is the latest schema version
 	CurrentSchemaVersion = SchemaVersion4
 )
 
@@ -92,15 +96,17 @@ CREATE INDEX IF NOT EXISTS idx_summaries_provider ON conversation_summaries(prov
 `
 
 // Drop indexes for rollback
-const dropIndexConversationsCreatedAt = `DROP INDEX IF EXISTS idx_conversations_created_at;`
-const dropIndexConversationsUpdatedAt = `DROP INDEX IF EXISTS idx_conversations_updated_at;`
-const dropIndexConversationsProvider = `DROP INDEX IF EXISTS idx_conversations_provider;`
-const dropIndexSummariesCreatedAt = `DROP INDEX IF EXISTS idx_summaries_created_at;`
-const dropIndexSummariesUpdatedAt = `DROP INDEX IF EXISTS idx_summaries_updated_at;`
-const dropIndexSummariesMessageCount = `DROP INDEX IF EXISTS idx_summaries_message_count;`
-const dropIndexSummariesFirstMessage = `DROP INDEX IF EXISTS idx_summaries_first_message;`
-const dropIndexSummariesSummary = `DROP INDEX IF EXISTS idx_summaries_summary;`
-const dropIndexSummariesProvider = `DROP INDEX IF EXISTS idx_summaries_provider;`
+const (
+	dropIndexConversationsCreatedAt = `DROP INDEX IF EXISTS idx_conversations_created_at;`
+	dropIndexConversationsUpdatedAt = `DROP INDEX IF EXISTS idx_conversations_updated_at;`
+	dropIndexConversationsProvider  = `DROP INDEX IF EXISTS idx_conversations_provider;`
+	dropIndexSummariesCreatedAt     = `DROP INDEX IF EXISTS idx_summaries_created_at;`
+	dropIndexSummariesUpdatedAt     = `DROP INDEX IF EXISTS idx_summaries_updated_at;`
+	dropIndexSummariesMessageCount  = `DROP INDEX IF EXISTS idx_summaries_message_count;`
+	dropIndexSummariesFirstMessage  = `DROP INDEX IF EXISTS idx_summaries_first_message;`
+	dropIndexSummariesSummary       = `DROP INDEX IF EXISTS idx_summaries_summary;`
+	dropIndexSummariesProvider      = `DROP INDEX IF EXISTS idx_summaries_provider;`
+)
 
 // Schema version 4 changes - Add background_processes column
 const addBackgroundProcessesToConversationsTable = `

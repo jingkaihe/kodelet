@@ -51,7 +51,7 @@ func TestTodoReadTool_Execute(t *testing.T) {
 		// Write sample todos to file
 		todoBytes, err := json.Marshal(sampleTodos)
 		require.NoError(t, err)
-		err = os.WriteFile(todoFilePath, todoBytes, 0644)
+		err = os.WriteFile(todoFilePath, todoBytes, 0o644)
 		require.NoError(t, err)
 
 		// Execute the tool
@@ -90,7 +90,7 @@ func TestTodoReadTool_Execute(t *testing.T) {
 		// Write empty todos to file
 		todoBytes, err := json.Marshal(emptyTodos)
 		require.NoError(t, err)
-		err = os.WriteFile(todoFilePath, todoBytes, 0644)
+		err = os.WriteFile(todoFilePath, todoBytes, 0o644)
 		require.NoError(t, err)
 
 		// Execute the tool
@@ -123,7 +123,7 @@ func TestTodoReadTool_Execute(t *testing.T) {
 		s.SetTodoFilePath(todoFilePath)
 
 		// Write invalid JSON to file
-		err := os.WriteFile(todoFilePath, []byte("invalid json"), 0644)
+		err := os.WriteFile(todoFilePath, []byte("invalid json"), 0o644)
 		require.NoError(t, err)
 
 		// Execute the tool

@@ -341,12 +341,12 @@ func TestWebFetchToolFilenameConflictResolution(t *testing.T) {
 
 		// Create archive directory manually
 		archiveDir := "./.kodelet/web-archives"
-		err := os.MkdirAll(archiveDir, 0755)
+		err := os.MkdirAll(archiveDir, 0o755)
 		require.NoError(t, err)
 
 		// Create first file
 		firstFile := filepath.Join(archiveDir, "test.txt")
-		err = os.WriteFile(firstFile, []byte("content1"), 0644)
+		err = os.WriteFile(firstFile, []byte("content1"), 0o644)
 		require.NoError(t, err)
 
 		// Test that the conflict resolution would create test_1.txt
@@ -526,11 +526,11 @@ func (m *MockThread) GetState() tooltypes.State {
 	return m.state
 }
 
-func (m *MockThread) AddUserMessage(ctx context.Context, message string, imagePaths ...string) {
+func (m *MockThread) AddUserMessage(_ context.Context, _ string, _ ...string) {
 	// Mock implementation - do nothing
 }
 
-func (m *MockThread) SendMessage(ctx context.Context, prompt string, handler llm.MessageHandler, opts llm.MessageOpt) (string, error) {
+func (m *MockThread) SendMessage(_ context.Context, prompt string, _ llm.MessageHandler, _ llm.MessageOpt) (string, error) {
 	m.called = true
 	m.lastPrompt = prompt
 	return m.response, m.err
@@ -544,11 +544,11 @@ func (m *MockThread) GetConversationID() string {
 	return "test-conversation-id"
 }
 
-func (m *MockThread) SetConversationID(id string) {
+func (m *MockThread) SetConversationID(_ string) {
 	// Mock implementation - do nothing
 }
 
-func (m *MockThread) SaveConversation(ctx context.Context, summarise bool) error {
+func (m *MockThread) SaveConversation(_ context.Context, _ bool) error {
 	return nil
 }
 
@@ -556,7 +556,7 @@ func (m *MockThread) IsPersisted() bool {
 	return false
 }
 
-func (m *MockThread) EnablePersistence(ctx context.Context, enabled bool) {
+func (m *MockThread) EnablePersistence(_ context.Context, _ bool) {
 	// Mock implementation - do nothing
 }
 
@@ -572,7 +572,7 @@ func (m *MockThread) GetConfig() llm.Config {
 	return llm.Config{}
 }
 
-func (m *MockThread) NewSubAgent(ctx context.Context, config llm.Config) llm.Thread {
+func (m *MockThread) NewSubAgent(_ context.Context, _ llm.Config) llm.Thread {
 	return m
 }
 
@@ -1069,7 +1069,7 @@ func TestWebFetchToolDomainFilter(t *testing.T) {
 	t.Run("Domain filter with empty file allows all domains", func(t *testing.T) {
 		// Create empty domains file
 		domainsFile := filepath.Join(tempDir, "empty_domains.txt")
-		err := os.WriteFile(domainsFile, []byte(""), 0644)
+		err := os.WriteFile(domainsFile, []byte(""), 0o644)
 		require.NoError(t, err)
 
 		tool := NewWebFetchTool(domainsFile)
@@ -1114,7 +1114,7 @@ example.com
 api.test.com
 # Comments should be ignored
 `
-		err := os.WriteFile(domainsFile, []byte(domainsContent), 0644)
+		err := os.WriteFile(domainsFile, []byte(domainsContent), 0o644)
 		require.NoError(t, err)
 
 		tool := NewWebFetchTool(domainsFile)
@@ -1156,7 +1156,7 @@ api.test.com
 api.*.com
 test-*.org
 `
-		err := os.WriteFile(domainsFile, []byte(domainsContent), 0644)
+		err := os.WriteFile(domainsFile, []byte(domainsContent), 0o644)
 		require.NoError(t, err)
 
 		tool := NewWebFetchTool(domainsFile)
@@ -1206,7 +1206,7 @@ example.com
 api.*.dev
 # End of config
 `
-		err := os.WriteFile(domainsFile, []byte(domainsContent), 0644)
+		err := os.WriteFile(domainsFile, []byte(domainsContent), 0o644)
 		require.NoError(t, err)
 
 		tool := NewWebFetchTool(domainsFile)
@@ -1259,7 +1259,7 @@ api.*.dev
 		domainsContent := `# Very restrictive - only example.com allowed
 example.com
 `
-		err := os.WriteFile(domainsFile, []byte(domainsContent), 0644)
+		err := os.WriteFile(domainsFile, []byte(domainsContent), 0o644)
 		require.NoError(t, err)
 
 		tool := NewWebFetchTool(domainsFile)
@@ -1294,7 +1294,7 @@ example.com
 https://github.com/
 http://api.test.com/path
 `
-		err := os.WriteFile(domainsFile, []byte(domainsContent), 0644)
+		err := os.WriteFile(domainsFile, []byte(domainsContent), 0o644)
 		require.NoError(t, err)
 
 		tool := NewWebFetchTool(domainsFile)
@@ -1317,7 +1317,7 @@ http://api.test.com/path
 		// Create domains file
 		domainsFile := filepath.Join(tempDir, "test_domains.txt")
 		domainsContent := `example.com`
-		err := os.WriteFile(domainsFile, []byte(domainsContent), 0644)
+		err := os.WriteFile(domainsFile, []byte(domainsContent), 0o644)
 		require.NoError(t, err)
 
 		tool := NewWebFetchTool(domainsFile)
@@ -1384,7 +1384,7 @@ github.com
    
 # Final comment
 `
-		err := os.WriteFile(domainsFile, []byte(domainsContent), 0644)
+		err := os.WriteFile(domainsFile, []byte(domainsContent), 0o644)
 		require.NoError(t, err)
 
 		tool := NewWebFetchTool(domainsFile)

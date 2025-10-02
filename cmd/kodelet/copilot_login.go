@@ -32,7 +32,7 @@ This command will:
 
 The saved credentials will allow you to use GitHub Copilot subscription-based models
 through Kodelet.`,
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(cmd *cobra.Command, _ []string) {
 		ctx := cmd.Context()
 
 		if err := runCopilotLogin(ctx); err != nil {

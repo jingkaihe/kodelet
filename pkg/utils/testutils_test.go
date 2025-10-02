@@ -62,8 +62,8 @@ func TestWaitForFiles(t *testing.T) {
 
 	t.Run("wait for files that exist", func(t *testing.T) {
 		// Create the files
-		os.WriteFile(file1, []byte("content1"), 0644)
-		os.WriteFile(file2, []byte("content2"), 0644)
+		os.WriteFile(file1, []byte("content1"), 0o644)
+		os.WriteFile(file2, []byte("content2"), 0o644)
 
 		result := WaitForFiles(1*time.Second, 10*time.Millisecond, file1, file2)
 		assert.True(t, result, "Expected files to be found")
@@ -81,7 +81,7 @@ func TestWaitForFiles(t *testing.T) {
 		// Create file after a short delay
 		go func() {
 			time.Sleep(30 * time.Millisecond)
-			os.WriteFile(delayedFile, []byte("delayed content"), 0644)
+			os.WriteFile(delayedFile, []byte("delayed content"), 0o644)
 		}()
 
 		result := WaitForFiles(100*time.Millisecond, 10*time.Millisecond, delayedFile)
@@ -95,7 +95,7 @@ func TestWaitForFileContent(t *testing.T) {
 
 	t.Run("wait for content in existing file", func(t *testing.T) {
 		content := "Hello World\nThis is a test file\n"
-		os.WriteFile(testFile, []byte(content), 0644)
+		os.WriteFile(testFile, []byte(content), 0o644)
 
 		result := WaitForFileContent(1*time.Second, 10*time.Millisecond, testFile, []string{"Hello", "test file"})
 		assert.True(t, result, "Expected content to be found")
@@ -103,7 +103,7 @@ func TestWaitForFileContent(t *testing.T) {
 
 	t.Run("wait for content not in file", func(t *testing.T) {
 		content := "Hello World\n"
-		os.WriteFile(testFile, []byte(content), 0644)
+		os.WriteFile(testFile, []byte(content), 0o644)
 
 		result := WaitForFileContent(50*time.Millisecond, 10*time.Millisecond, testFile, []string{"missing content"})
 		assert.False(t, result, "Expected content to not be found")
@@ -117,12 +117,12 @@ func TestWaitForFileContent(t *testing.T) {
 
 	t.Run("wait for content added during wait", func(t *testing.T) {
 		dynamicFile := filepath.Join(tempDir, "dynamic.txt")
-		os.WriteFile(dynamicFile, []byte("initial content\n"), 0644)
+		os.WriteFile(dynamicFile, []byte("initial content\n"), 0o644)
 
 		// Add content after a delay
 		go func() {
 			time.Sleep(30 * time.Millisecond)
-			file, _ := os.OpenFile(dynamicFile, os.O_APPEND|os.O_WRONLY, 0644)
+			file, _ := os.OpenFile(dynamicFile, os.O_APPEND|os.O_WRONLY, 0o644)
 			file.WriteString("added content\n")
 			file.Close()
 		}()
@@ -132,7 +132,7 @@ func TestWaitForFileContent(t *testing.T) {
 	})
 
 	t.Run("empty expected content list", func(t *testing.T) {
-		os.WriteFile(testFile, []byte("any content"), 0644)
+		os.WriteFile(testFile, []byte("any content"), 0o644)
 		result := WaitForFileContent(50*time.Millisecond, 10*time.Millisecond, testFile, []string{})
 		assert.True(t, result, "Expected empty content list to always match")
 	})

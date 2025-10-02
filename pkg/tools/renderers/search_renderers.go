@@ -10,6 +10,8 @@ import (
 // GrepRenderer renders grep search results
 type GrepRenderer struct{}
 
+// RenderCLI renders grep search results in CLI format, showing the search pattern, path,
+// include filter, matched files with line numbers, and truncation status.
 func (r *GrepRenderer) RenderCLI(result tools.StructuredToolResult) string {
 	if !result.Success {
 		return fmt.Sprintf("Error: %s", result.Error)
@@ -49,6 +51,8 @@ func (r *GrepRenderer) RenderCLI(result tools.StructuredToolResult) string {
 // GlobRenderer renders glob file pattern results
 type GlobRenderer struct{}
 
+// RenderCLI renders glob pattern search results in CLI format, showing the pattern, path,
+// matched files with sizes, type indicators, and truncation status.
 func (r *GlobRenderer) RenderCLI(result tools.StructuredToolResult) string {
 	if !result.Success {
 		return fmt.Sprintf("Error: %s", result.Error)

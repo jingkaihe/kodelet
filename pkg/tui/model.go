@@ -157,9 +157,11 @@ func (m Model) Init() tea.Cmd {
 }
 
 // Custom message types
-type userInputMsg string
-type bashInputMsg string
-type resetCtrlCMsg struct{}
+type (
+	userInputMsg  string
+	bashInputMsg  string
+	resetCtrlCMsg struct{}
+)
 
 // resetCtrlCCmd creates a command that resets the Ctrl+C counter after a timeout
 func resetCtrlCCmd() tea.Cmd {
@@ -307,13 +309,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.AddMessage(cmdOut, true)
 		m.SetProcessing(false)
 	case llmtypes.MessageEvent:
-		if !msg.Done {
-			m.AddMessage(FormatAssistantEvent(msg), false)
-			return m, func() tea.Msg {
-				return <-m.messageCh
-			}
-		} else {
+		if msg.Done {
 			m.SetProcessing(false)
+			return m, nil
+		}
+		m.AddMessage(FormatAssistantEvent(msg), false)
+		return m, func() tea.Msg {
+			return <-m.messageCh
 		}
 	case tea.WindowSizeMsg:
 		m.width = msg.Width

@@ -15,6 +15,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 )
 
+// FileEditToolResult represents the result of a file edit operation
 type FileEditToolResult struct {
 	filename      string
 	oldText       string
@@ -29,6 +30,7 @@ type FileEditToolResult struct {
 	err           string
 }
 
+// EditInfo contains information about a single edit operation
 type EditInfo struct {
 	StartLine  int
 	EndLine    int
@@ -36,6 +38,7 @@ type EditInfo struct {
 	NewContent string
 }
 
+// GetResult returns a success message
 func (r *FileEditToolResult) GetResult() string {
 	if r.IsError() {
 		return ""
@@ -46,14 +49,17 @@ func (r *FileEditToolResult) GetResult() string {
 	return fmt.Sprintf("File %s has been edited successfully", r.filename)
 }
 
+// GetError returns the error message
 func (r *FileEditToolResult) GetError() string {
 	return r.err
 }
 
+// IsError returns true if the result contains an error
 func (r *FileEditToolResult) IsError() bool {
 	return r.err != ""
 }
 
+// AssistantFacing returns the string representation for the AI assistant
 func (r *FileEditToolResult) AssistantFacing() string {
 	if r.IsError() {
 		return tooltypes.StringifyToolResult("", r.GetError())
@@ -65,7 +71,7 @@ func (r *FileEditToolResult) AssistantFacing() string {
 		if len(r.edits) > 0 {
 			result += "\n\nSample edited code blocks:"
 			// Show first few edits as examples
-			maxEdits := min(3, len(r.edits))
+			maxEdits := minInt(3, len(r.edits))
 			for i := 0; i < maxEdits; i++ {
 				edit := r.edits[i]
 				if edit.NewContent != "" {
@@ -89,13 +95,15 @@ func (r *FileEditToolResult) AssistantFacing() string {
 	return tooltypes.StringifyToolResult(result, "")
 }
 
-func min(a, b int) int {
+// minInt returns the minimum of two integers
+func minInt(a, b int) int {
 	if a < b {
 		return a
 	}
 	return b
 }
 
+// StructuredData returns structured metadata about the file edit operation
 func (r *FileEditToolResult) StructuredData() tooltypes.StructuredToolResult {
 	result := tooltypes.StructuredToolResult{
 		ToolName:  "file_edit",
@@ -146,12 +154,15 @@ func (r *FileEditToolResult) StructuredData() tooltypes.StructuredToolResult {
 	return result
 }
 
+// FileEditTool provides functionality to edit files by replacing text
 type FileEditTool struct{}
 
+// Name returns the name of the tool
 func (t *FileEditTool) Name() string {
 	return "file_edit"
 }
 
+// FileEditInput defines the input parameters for the file_edit tool
 type FileEditInput struct {
 	FilePath   string `json:"file_path" jsonschema:"description=The absolute path of the file to edit"`
 	OldText    string `json:"old_text" jsonschema:"description=The text to be replaced"`
@@ -159,10 +170,12 @@ type FileEditInput struct {
 	ReplaceAll bool   `json:"replace_all" jsonschema:"description=If true, replace all occurrences of old_text; if false (default), old_text must be unique"`
 }
 
+// GenerateSchema generates the JSON schema for the tool's input parameters
 func (t *FileEditTool) GenerateSchema() *jsonschema.Schema {
 	return GenerateSchema[FileEditInput]()
 }
 
+// Description returns the description of the tool
 func (t *FileEditTool) Description() string {
 	return `Edit a file by replacing old text with new text.
 
@@ -200,6 +213,7 @@ If you have multiple different text blocks to be replaced, you can call this too
 `
 }
 
+// TracingKVs returns tracing key-value pairs for observability
 func (t *FileEditTool) TracingKVs(parameters string) ([]attribute.KeyValue, error) {
 	input := &FileEditInput{}
 	err := json.Unmarshal([]byte(parameters), input)
@@ -215,6 +229,7 @@ func (t *FileEditTool) TracingKVs(parameters string) ([]attribute.KeyValue, erro
 	}, nil
 }
 
+// ValidateInput validates the input parameters for the tool
 func (t *FileEditTool) ValidateInput(state tooltypes.State, parameters string) error {
 	var input FileEditInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
@@ -405,7 +420,8 @@ func FormatEditedBlock(originalContent, oldText, newText string) string {
 	return utils.ContentWithLineNumber(editedLines, oldBlockStartIdx+1)
 }
 
-func (t *FileEditTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
+// Execute performs the file edit operation
+func (t *FileEditTool) Execute(_ context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
 	var input FileEditInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
 		return &FileEditToolResult{
@@ -472,7 +488,7 @@ func (t *FileEditTool) Execute(ctx context.Context, state tooltypes.State, param
 		}
 	}
 
-	err = os.WriteFile(input.FilePath, []byte(content), 0644)
+	err = os.WriteFile(input.FilePath, []byte(content), 0o644)
 	if err != nil {
 		return &FileEditToolResult{
 			filename: input.FilePath,

@@ -25,7 +25,7 @@ func TestBashToolBackgroundParameter(t *testing.T) {
 		{
 			name:  "start simple background process",
 			query: `run "sleep 2" in the background`,
-			validate: func(t *testing.T, output string, testDir string) {
+			validate: func(t *testing.T, output string, _ string) {
 				// Should contain PID information
 				assert.Contains(t, output, "Process ID:", "Expected output to contain PID information")
 
@@ -152,22 +152,22 @@ func TestViewBackgroundProcessesTool(t *testing.T) {
 	}{
 		{
 			name: "view background processes when none are running",
-			setup: func(t *testing.T, testDir string) []string {
+			setup: func(_ *testing.T, _ string) []string {
 				return []string{} // No processes to start
 			},
 			query: "show me all background processes",
-			validate: func(t *testing.T, output string, testDir string, expectedPIDs []string) {
+			validate: func(t *testing.T, output string, _ string, _ []string) {
 				outputLower := strings.ToLower(output)
 				assert.True(t, strings.Contains(outputLower, "no background processes") || strings.Contains(outputLower, "no processes"), "Expected output to indicate no background processes, got: %s", output)
 			},
 		},
 		{
 			name: "view background processes with running processes",
-			setup: func(t *testing.T, testDir string) []string {
+			setup: func(_ *testing.T, _ string) []string {
 				return []string{} // No separate setup needed - everything is done in the query
 			},
 			query: `run "sleep 3" in the background, also run "sleep 2" in the background, then show me all background processes`,
-			validate: func(t *testing.T, output string, testDir string, expectedPIDs []string) {
+			validate: func(t *testing.T, output string, _ string, expectedPIDs []string) {
 				// Should contain table headers
 				assert.True(t, strings.Contains(output, "PID") && strings.Contains(output, "Status") && strings.Contains(output, "Command"), "Expected output to contain table headers (PID, Status, Command), got: %s", output)
 

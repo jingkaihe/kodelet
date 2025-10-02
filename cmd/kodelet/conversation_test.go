@@ -26,12 +26,15 @@ func newMockStore() *mockStore {
 	}
 }
 
+// Save saves a conversation record to the mock store
+//
 //nolint:unparam // error is always nil in mock implementation
 func (m *mockStore) Save(_ context.Context, record convtypes.ConversationRecord) error {
 	m.conversations[record.ID] = record
 	return nil
 }
 
+// Load retrieves a conversation record from the mock store by ID
 func (m *mockStore) Load(_ context.Context, id string) (convtypes.ConversationRecord, error) {
 	record, exists := m.conversations[id]
 	if !exists {
@@ -40,12 +43,14 @@ func (m *mockStore) Load(_ context.Context, id string) (convtypes.ConversationRe
 	return record, nil
 }
 
-func (m *mockStore) Delete(ctx context.Context, id string) error {
+// Delete removes a conversation record from the mock store by ID
+func (m *mockStore) Delete(_ context.Context, id string) error {
 	delete(m.conversations, id)
 	return nil
 }
 
-func (m *mockStore) Query(ctx context.Context, options convtypes.QueryOptions) (convtypes.QueryResult, error) {
+// Query returns all conversation summaries from the mock store
+func (m *mockStore) Query(_ context.Context, options convtypes.QueryOptions) (convtypes.QueryResult, error) {
 	summaries := []convtypes.ConversationSummary{}
 	for _, record := range m.conversations {
 		summaries = append(summaries, record.ToSummary())
@@ -57,10 +62,12 @@ func (m *mockStore) Query(ctx context.Context, options convtypes.QueryOptions) (
 	}, nil
 }
 
+// Close closes the mock store (no-op for in-memory implementation)
 func (m *mockStore) Close() error {
 	return nil
 }
 
+// TestConversationFork tests the conversation fork functionality
 func TestConversationFork(t *testing.T) {
 	ctx := context.Background()
 

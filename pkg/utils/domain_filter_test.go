@@ -21,7 +21,7 @@ google.com
 # This is a comment
 example.org
 `
-	err := os.WriteFile(domainsFile, []byte(domainsContent), 0644)
+	err := os.WriteFile(domainsFile, []byte(domainsContent), 0o644)
 	require.NoError(t, err, "Failed to create test domains file")
 
 	filter := NewDomainFilter(domainsFile)
@@ -106,7 +106,7 @@ func TestDomainFilter_FileReload(t *testing.T) {
 
 	// Initially write one domain
 	initialContent := "github.com\n"
-	err := os.WriteFile(domainsFile, []byte(initialContent), 0644)
+	err := os.WriteFile(domainsFile, []byte(initialContent), 0o644)
 	require.NoError(t, err, "Failed to create test file")
 
 	filter := NewDomainFilter(domainsFile)
@@ -120,7 +120,7 @@ func TestDomainFilter_FileReload(t *testing.T) {
 
 	// Modify the file to add another domain
 	newContent := "github.com\nstackoverflow.com\n"
-	err = os.WriteFile(domainsFile, []byte(newContent), 0644)
+	err = os.WriteFile(domainsFile, []byte(newContent), 0o644)
 	require.NoError(t, err, "Failed to update test file")
 
 	// Force reload by simulating time passage
@@ -143,7 +143,7 @@ stackoverflow.com
 # comment should be ignored
 google.com
 `
-	err := os.WriteFile(domainsFile, []byte(content), 0644)
+	err := os.WriteFile(domainsFile, []byte(content), 0o644)
 	require.NoError(t, err, "Failed to create test file")
 
 	filter := NewDomainFilter(domainsFile)
@@ -173,7 +173,7 @@ https://stackoverflow.com
 http://example.org/
 Google.Com/path
 `
-	err := os.WriteFile(domainsFile, []byte(content), 0644)
+	err := os.WriteFile(domainsFile, []byte(content), 0o644)
 	require.NoError(t, err, "Failed to create test file")
 
 	filter := NewDomainFilter(domainsFile)
@@ -224,7 +224,7 @@ api.*.example.org
 sub*.test.com
 *.dev
 `
-	err := os.WriteFile(domainsFile, []byte(domainsContent), 0644)
+	err := os.WriteFile(domainsFile, []byte(domainsContent), 0o644)
 	require.NoError(t, err, "Failed to create test domains file")
 
 	filter := NewDomainFilter(domainsFile)
@@ -304,7 +304,7 @@ func TestDomainFilter_MixedExactAndGlob(t *testing.T) {
 example.com
 *.example.com
 `
-	err := os.WriteFile(domainsFile, []byte(domainsContent), 0644)
+	err := os.WriteFile(domainsFile, []byte(domainsContent), 0o644)
 	require.NoError(t, err, "Failed to create test domains file")
 
 	filter := NewDomainFilter(domainsFile)
@@ -348,7 +348,7 @@ stackoverflow.com
 # comment should be ignored
 api.*.example.org
 `
-	err := os.WriteFile(domainsFile, []byte(content), 0644)
+	err := os.WriteFile(domainsFile, []byte(content), 0o644)
 	require.NoError(t, err, "Failed to create test file")
 
 	filter := NewDomainFilter(domainsFile)
@@ -380,7 +380,7 @@ func TestDomainFilter_InvalidGlobPatterns(t *testing.T) {
 valid.example.com
 *.valid.com
 `
-	err := os.WriteFile(domainsFile, []byte(domainsContent), 0644)
+	err := os.WriteFile(domainsFile, []byte(domainsContent), 0o644)
 	require.NoError(t, err, "Failed to create test domains file")
 
 	// Should not panic and should still load valid patterns
@@ -408,7 +408,7 @@ func TestDomainFilter_CaseSensitiveGlobPatterns(t *testing.T) {
 	domainsContent := `*.GitHub.Com
 *.EXAMPLE.ORG
 `
-	err := os.WriteFile(domainsFile, []byte(domainsContent), 0644)
+	err := os.WriteFile(domainsFile, []byte(domainsContent), 0o644)
 	require.NoError(t, err, "Failed to create test domains file")
 
 	filter := NewDomainFilter(domainsFile)
@@ -447,7 +447,7 @@ func TestDomainFilter_ComplexGlobPatterns(t *testing.T) {
 *.s3.amazonaws.com
 *-staging.*.com
 `
-	err := os.WriteFile(domainsFile, []byte(domainsContent), 0644)
+	err := os.WriteFile(domainsFile, []byte(domainsContent), 0o644)
 	require.NoError(t, err, "Failed to create test domains file")
 
 	filter := NewDomainFilter(domainsFile)

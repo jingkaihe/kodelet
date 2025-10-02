@@ -14,42 +14,52 @@ import (
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
+// SubAgentToolResult represents the result of a sub-agent tool execution
 type SubAgentToolResult struct {
 	result   string
 	err      string
 	question string
 }
 
+// GetResult returns the sub-agent output
 func (r *SubAgentToolResult) GetResult() string {
 	return r.result
 }
 
+// GetError returns the error message
 func (r *SubAgentToolResult) GetError() string {
 	return r.err
 }
 
+// IsError returns true if the result contains an error
 func (r *SubAgentToolResult) IsError() bool {
 	return r.err != ""
 }
 
+// AssistantFacing returns the string representation for the AI assistant
 func (r *SubAgentToolResult) AssistantFacing() string {
 	return tooltypes.StringifyToolResult(r.result, r.GetError())
 }
 
+// SubAgentTool provides functionality to spawn sub-agents for complex tasks
 type SubAgentTool struct{}
 
+// SubAgentInput defines the input parameters for the sub-agent tool
 type SubAgentInput struct {
 	Question string `json:"question" jsonschema:"description=The question to ask"`
 }
 
+// Name returns the name of the tool
 func (t *SubAgentTool) Name() string {
 	return "subagent"
 }
 
+// GenerateSchema generates the JSON schema for the tool's input parameters
 func (t *SubAgentTool) GenerateSchema() *jsonschema.Schema {
 	return GenerateSchema[SubAgentInput]()
 }
 
+// Description returns the description of the tool
 func (t *SubAgentTool) Description() string {
 	return `Use this tool to delegate tasks to a sub-agent.
 This tool is ideal for tasks that involves code searching, architecture analysis, codebase understanding and troubleshooting.
@@ -75,7 +85,8 @@ This tool is ideal for tasks that involves code searching, architecture analysis
 `
 }
 
-func (t *SubAgentTool) ValidateInput(state tooltypes.State, parameters string) error {
+// ValidateInput validates the input parameters for the tool
+func (t *SubAgentTool) ValidateInput(_ tooltypes.State, parameters string) error {
 	input := &SubAgentInput{}
 	err := json.Unmarshal([]byte(parameters), input)
 	if err != nil {
@@ -89,6 +100,7 @@ func (t *SubAgentTool) ValidateInput(state tooltypes.State, parameters string) e
 	return nil
 }
 
+// TracingKVs returns tracing key-value pairs for observability
 func (t *SubAgentTool) TracingKVs(parameters string) ([]attribute.KeyValue, error) {
 	input := &SubAgentInput{}
 	err := json.Unmarshal([]byte(parameters), input)
@@ -101,7 +113,8 @@ func (t *SubAgentTool) TracingKVs(parameters string) ([]attribute.KeyValue, erro
 	}, nil
 }
 
-func (t *SubAgentTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
+// Execute runs the sub-agent and returns the result
+func (t *SubAgentTool) Execute(ctx context.Context, _ tooltypes.State, parameters string) tooltypes.ToolResult {
 	input := &SubAgentInput{}
 	err := json.Unmarshal([]byte(parameters), input)
 	if err != nil {
@@ -145,6 +158,7 @@ func (t *SubAgentTool) Execute(ctx context.Context, state tooltypes.State, param
 	}
 }
 
+// StructuredData returns structured metadata about the sub-agent execution
 func (r *SubAgentToolResult) StructuredData() tooltypes.StructuredToolResult {
 	result := tooltypes.StructuredToolResult{
 		ToolName:  "subagent",

@@ -156,6 +156,7 @@ func (t *AnthropicThread) restoreBackgroundProcesses(processes []tooltypes.Backg
 	}
 }
 
+// DeserializeMessages deserializes a JSON byte array into Anthropic message parameters
 func DeserializeMessages(b []byte) ([]anthropic.MessageParam, error) {
 	var messages []anthropic.MessageParam
 	if err := json.Unmarshal(b, &messages); err != nil {

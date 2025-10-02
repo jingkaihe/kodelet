@@ -97,7 +97,6 @@ func TestExchangeAnthropicCode(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "invalid state parameter")
 	})
-
 }
 
 func TestGetAnthropicCredentialsExists(t *testing.T) {
@@ -116,10 +115,10 @@ func TestGetAnthropicCredentialsExists(t *testing.T) {
 	t.Run("credentials exist", func(t *testing.T) {
 		// Create the credentials directory and file
 		credsDir := filepath.Join(tempDir, ".kodelet")
-		require.NoError(t, os.MkdirAll(credsDir, 0755))
+		require.NoError(t, os.MkdirAll(credsDir, 0o755))
 
 		credsFile := filepath.Join(credsDir, "anthropic-subscription.json")
-		require.NoError(t, os.WriteFile(credsFile, []byte("{}"), 0644))
+		require.NoError(t, os.WriteFile(credsFile, []byte("{}"), 0o644))
 
 		exists, err := GetAnthropicCredentialsExists()
 		assert.NoError(t, err)
@@ -180,10 +179,10 @@ func TestAnthropicAccessToken(t *testing.T) {
 	t.Run("invalid JSON", func(t *testing.T) {
 		// Create the credentials directory and file with invalid JSON
 		credsDir := filepath.Join(tempDir, ".kodelet")
-		require.NoError(t, os.MkdirAll(credsDir, 0755))
+		require.NoError(t, os.MkdirAll(credsDir, 0o755))
 
 		credsFile := filepath.Join(credsDir, "anthropic-subscription.json")
-		require.NoError(t, os.WriteFile(credsFile, []byte("invalid json"), 0644))
+		require.NoError(t, os.WriteFile(credsFile, []byte("invalid json"), 0o644))
 
 		_, err := AnthropicAccessToken(ctx)
 		assert.Error(t, err)
@@ -202,7 +201,7 @@ func TestAnthropicAccessToken(t *testing.T) {
 		credsFile := filepath.Join(tempDir, ".kodelet", "anthropic-subscription.json")
 		data, err := json.Marshal(creds)
 		require.NoError(t, err)
-		require.NoError(t, os.WriteFile(credsFile, data, 0644))
+		require.NoError(t, os.WriteFile(credsFile, data, 0o644))
 
 		token, err := AnthropicAccessToken(ctx)
 		assert.NoError(t, err)
@@ -244,12 +243,12 @@ func TestAnthropicAccessToken_ExpiredToken(t *testing.T) {
 	}
 
 	credsDir := filepath.Join(tempDir, ".kodelet")
-	require.NoError(t, os.MkdirAll(credsDir, 0755))
+	require.NoError(t, os.MkdirAll(credsDir, 0o755))
 
 	credsFile := filepath.Join(credsDir, "anthropic-subscription.json")
 	data, err := json.Marshal(creds)
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(credsFile, data, 0644))
+	require.NoError(t, os.WriteFile(credsFile, data, 0o644))
 
 	// This will fail because we can't mock the refresh endpoint,
 	// but it tests that the expiration logic is working

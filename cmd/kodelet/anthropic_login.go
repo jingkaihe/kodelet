@@ -26,7 +26,7 @@ This command will:
 
 The saved credentials will allow you to use subscription-based Anthropic models
 that are not available via the standard API key authentication.`,
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(cmd *cobra.Command, _ []string) {
 		ctx := cmd.Context()
 
 		if err := runAnthropicLogin(ctx); err != nil {

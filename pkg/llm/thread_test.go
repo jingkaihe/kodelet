@@ -74,7 +74,7 @@ func TestNewThread(t *testing.T) {
 	}
 }
 
-func TestConsoleMessageHandler(t *testing.T) {
+func TestConsoleMessageHandler(_ *testing.T) {
 	// This test mainly ensures the methods don't panic
 	// For a more thorough test, we would need to capture stdout
 	handler := &llmtypes.ConsoleMessageHandler{Silent: true}

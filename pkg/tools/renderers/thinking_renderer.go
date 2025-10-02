@@ -10,6 +10,8 @@ import (
 // ThinkingRenderer renders thinking results
 type ThinkingRenderer struct{}
 
+// RenderCLI renders thinking tool results in CLI format, showing the category
+// (if available) and the thought content.
 func (r *ThinkingRenderer) RenderCLI(result tools.StructuredToolResult) string {
 	if !result.Success {
 		return fmt.Sprintf("Error: %s", result.Error)

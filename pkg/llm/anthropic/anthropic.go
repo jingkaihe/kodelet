@@ -68,6 +68,7 @@ type AnthropicThread struct {
 	ideStore               *ide.IDEStore                             // IDE context store (nil if IDE mode disabled)
 }
 
+// Provider returns the provider name for this thread
 func (t *AnthropicThread) Provider() string {
 	return "anthropic"
 }
@@ -456,7 +457,7 @@ func (t *AnthropicThread) processMessageExchange(
 			)
 
 			runToolCtx := t.subagentContextFactory(ctx, t, handler, opt.CompactRatio, opt.DisableAutoCompact)
-			output := tools.RunTool(runToolCtx, t.state, block.Name, string(variant.JSON.Input.Raw()))
+			output := tools.RunTool(runToolCtx, t.state, block.Name, variant.JSON.Input.Raw())
 
 			// Use CLI rendering for consistent output formatting
 			structuredResult := output.StructuredData()
@@ -500,7 +501,7 @@ func (t *AnthropicThread) processMessageExchange(
 
 func (t *AnthropicThread) processIDEContext(ctx context.Context, handler llmtypes.MessageHandler) error {
 	ideContext, err := t.ideStore.ReadContext(t.conversationID)
-	if err != nil {
+	if err != nil && !errors.Is(err, ide.ErrContextNotFound) {
 		return errors.Wrap(err, "failed to read IDE context")
 	}
 
@@ -775,7 +776,8 @@ func (t *AnthropicThread) updateUsage(response *anthropic.Message, model anthrop
 	t.usage.MaxContextWindow = pricing.ContextWindow
 }
 
-func (t *AnthropicThread) NewSubAgent(ctx context.Context, config llmtypes.Config) llmtypes.Thread {
+// NewSubAgent creates a new subagent thread that shares the parent's client and usage tracking
+func (t *AnthropicThread) NewSubAgent(_ context.Context, config llmtypes.Config) llmtypes.Thread {
 	// Create subagent thread reusing the parent's client instead of creating a new one
 	thread := &AnthropicThread{
 		client:                 t.client, // Reuse parent's client
@@ -821,6 +823,7 @@ func (t *AnthropicThread) getLastAssistantMessageText() (string, error) {
 	return messageText, nil
 }
 
+// ShortSummary generates a short summary of the conversation using a weak model
 func (t *AnthropicThread) ShortSummary(ctx context.Context) string {
 	// Temporarily disable persistence during summarization
 	t.isPersisted = false
@@ -1031,13 +1034,13 @@ func (t *AnthropicThread) processImage(imagePath string) (*anthropic.ContentBloc
 	// Only allow HTTPS URLs for security
 	if strings.HasPrefix(imagePath, "https://") {
 		return t.processImageURL(imagePath)
-	} else if filePath, ok := strings.CutPrefix(imagePath, "file://"); ok {
+	}
+	if filePath, ok := strings.CutPrefix(imagePath, "file://"); ok {
 		// Remove file:// prefix and process as file
 		return t.processImageFile(filePath)
-	} else {
-		// Treat as a local file path
-		return t.processImageFile(imagePath)
 	}
+	// Treat as a local file path
+	return t.processImageFile(imagePath)
 }
 
 func (t *AnthropicThread) processImageURL(url string) (*anthropic.ContentBlockParamUnion, error) {

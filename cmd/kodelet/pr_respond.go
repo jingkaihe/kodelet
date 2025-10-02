@@ -35,7 +35,7 @@ func NewPRRespondConfig() *PRRespondConfig {
 
 func (c *PRRespondConfig) Validate() error {
 	if c.Provider != "github" {
-		return errors.New(fmt.Sprintf("unsupported provider: %s, only 'github' is supported", c.Provider))
+		return fmt.Errorf("unsupported provider: %s, only 'github' is supported", c.Provider)
 	}
 
 	if c.PRURL == "" {
@@ -88,7 +88,7 @@ Currently supports GitHub PRs only.
 Examples:
   kodelet pr-respond --pr-url https://github.com/user/repo/pull/123 --review-id 456789
   kodelet pr-respond --pr-url https://github.com/user/repo/pull/123 --issue-comment-id 987654`,
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(cmd *cobra.Command, _ []string) {
 		ctx, cancel := context.WithCancel(cmd.Context())
 		defer cancel()
 

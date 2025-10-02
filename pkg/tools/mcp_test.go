@@ -79,33 +79,31 @@ func TestNewMCPManager(t *testing.T) {
 	})
 }
 
-var (
-	goldenMCPConfig = MCPConfig{
-		Servers: map[string]MCPServerConfig{
-			"filesystem": {
-				Command: "docker",
-				Args: []string{
-					"run",
-					"-i",
-					"--rm",
-					"mcp/filesystem",
-					"/",
-				},
-				ToolWhiteList: []string{"list_directory"},
+var goldenMCPConfig = MCPConfig{
+	Servers: map[string]MCPServerConfig{
+		"filesystem": {
+			Command: "docker",
+			Args: []string{
+				"run",
+				"-i",
+				"--rm",
+				"mcp/filesystem",
+				"/",
 			},
-			"time": {
-				Command: "docker",
-				Args: []string{
-					"run",
-					"-i",
-					"--rm",
-					"mcp/time",
-				},
-				ToolWhiteList: []string{"get_current_time", "convert_time"},
-			},
+			ToolWhiteList: []string{"list_directory"},
 		},
-	}
-)
+		"time": {
+			Command: "docker",
+			Args: []string{
+				"run",
+				"-i",
+				"--rm",
+				"mcp/time",
+			},
+			ToolWhiteList: []string{"get_current_time", "convert_time"},
+		},
+	},
+}
 
 func TestMCPManager_Initialize(t *testing.T) {
 	if os.Getenv("SKIP_DOCKER_TEST") == "true" {

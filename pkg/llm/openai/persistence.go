@@ -184,7 +184,7 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 		if msg.Content != "" && len(msg.MultiContent) == 0 && len(msg.ToolCalls) == 0 {
 			streamable = append(streamable, StreamableMessage{
 				Kind:    "text",
-				Role:    string(msg.Role),
+				Role:    msg.Role,
 				Content: msg.Content,
 			})
 		}
@@ -193,7 +193,7 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 			if contentBlock.Text != "" {
 				streamable = append(streamable, StreamableMessage{
 					Kind:    "text",
-					Role:    string(msg.Role),
+					Role:    msg.Role,
 					Content: contentBlock.Text,
 				})
 			}
@@ -204,7 +204,7 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 				inputJSON, _ := json.Marshal(toolCall.Function.Arguments)
 				streamable = append(streamable, StreamableMessage{
 					Kind:       "tool-use",
-					Role:       string(msg.Role),
+					Role:       msg.Role,
 					ToolName:   toolCall.Function.Name,
 					ToolCallID: toolCall.ID,
 					Input:      string(inputJSON),
@@ -248,7 +248,7 @@ func ExtractMessages(data []byte, toolResults map[string]tooltypes.StructuredToo
 		// Handle plain content (legacy format)
 		if msg.Content != "" && len(msg.MultiContent) == 0 && len(msg.ToolCalls) == 0 {
 			result = append(result, llmtypes.Message{
-				Role:    string(msg.Role),
+				Role:    msg.Role,
 				Content: msg.Content,
 			})
 		}
@@ -257,7 +257,7 @@ func ExtractMessages(data []byte, toolResults map[string]tooltypes.StructuredToo
 		for _, contentBlock := range msg.MultiContent {
 			if contentBlock.Text != "" {
 				result = append(result, llmtypes.Message{
-					Role:    string(msg.Role),
+					Role:    msg.Role,
 					Content: contentBlock.Text,
 				})
 			}
@@ -271,7 +271,7 @@ func ExtractMessages(data []byte, toolResults map[string]tooltypes.StructuredToo
 					continue
 				}
 				result = append(result, llmtypes.Message{
-					Role:    string(msg.Role),
+					Role:    msg.Role,
 					Content: fmt.Sprintf("🔧 Using tool: %s", string(inputJSON)),
 				})
 			}

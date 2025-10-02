@@ -105,7 +105,7 @@ func TestIDEStore(t *testing.T) {
 		require.NoError(t, err)
 
 		context, err := store.ReadContext("non-existent-id")
-		require.NoError(t, err)
+		assert.ErrorIs(t, err, ErrContextNotFound)
 		assert.Nil(t, context)
 	})
 

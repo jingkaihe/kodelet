@@ -13,6 +13,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 )
 
+// TodoToolResult represents the result of a todo read operation
 type TodoToolResult struct {
 	filePath string
 	todos    []Todo
@@ -20,6 +21,7 @@ type TodoToolResult struct {
 	isWrite  bool
 }
 
+// GetResult returns the formatted todo list
 func (r *TodoToolResult) GetResult() string {
 	if r.IsError() {
 		return ""
@@ -31,26 +33,33 @@ func (r *TodoToolResult) GetResult() string {
 	return formatTodos(sortedTodos)
 }
 
+// GetError returns the error message
 func (r *TodoToolResult) GetError() string {
 	return r.err
 }
 
+// IsError returns true if the result contains an error
 func (r *TodoToolResult) IsError() bool {
 	return r.err != ""
 }
 
+// AssistantFacing returns the string representation for the AI assistant
 func (r *TodoToolResult) AssistantFacing() string {
 	return tooltypes.StringifyToolResult(r.GetResult(), r.GetError())
 }
 
+// TodoReadTool provides functionality to read the todo list
 type TodoReadTool struct{}
 
+// TodoReadInput defines the input parameters for the todo_read tool
 type TodoReadInput struct{}
 
+// Name returns the name of the tool
 func (t *TodoReadTool) Name() string {
 	return "todo_read"
 }
 
+// Description returns the description of the tool
 func (t *TodoReadTool) Description() string {
 	return `Use TodoRead tool to read the current todo list.
 
@@ -64,14 +73,17 @@ This tool is useful for reviewing the progress of your current task.
 `
 }
 
+// GenerateSchema generates the JSON schema for the tool's input parameters
 func (t *TodoReadTool) GenerateSchema() *jsonschema.Schema {
 	return GenerateSchema[TodoReadInput]()
 }
 
-func (t *TodoReadTool) ValidateInput(state tooltypes.State, parameters string) error {
+// ValidateInput validates the input parameters for the tool
+func (t *TodoReadTool) ValidateInput(_ tooltypes.State, _ string) error {
 	return nil
 }
 
+// TracingKVs returns tracing key-value pairs for observability
 func (t *TodoReadTool) TracingKVs(parameters string) ([]attribute.KeyValue, error) {
 	var todos TodoWriteInput
 	if err := json.Unmarshal([]byte(parameters), &todos); err != nil {
@@ -88,7 +100,8 @@ func (t *TodoReadTool) TracingKVs(parameters string) ([]attribute.KeyValue, erro
 	return kvs, nil
 }
 
-func (t *TodoReadTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
+// Execute reads the todo file and returns the formatted list
+func (t *TodoReadTool) Execute(_ context.Context, state tooltypes.State, _ string) tooltypes.ToolResult {
 	filePath, err := state.TodoFilePath()
 	if err != nil {
 		return &TodoToolResult{
@@ -157,6 +170,7 @@ func formatTodos(todos []Todo) string {
 	return formatted
 }
 
+// StructuredData returns structured metadata about the todo read operation
 func (r *TodoToolResult) StructuredData() tooltypes.StructuredToolResult {
 	toolName := "todo_read"
 	action := "read"

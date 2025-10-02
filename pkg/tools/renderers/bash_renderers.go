@@ -10,6 +10,8 @@ import (
 // BashRenderer renders bash command results
 type BashRenderer struct{}
 
+// RenderCLI renders bash command execution results in CLI format, including command details,
+// exit code, execution time, and output for both regular and background processes.
 func (r *BashRenderer) RenderCLI(result tools.StructuredToolResult) string {
 	var output strings.Builder
 	if !result.Success {

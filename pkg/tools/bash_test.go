@@ -798,7 +798,7 @@ func TestBashTool_ValidateInput_AllowedCommands(t *testing.T) {
 			errorMsg:    "command is banned: vim",
 		},
 		{
-			name:            "work around to banned command - with paranthesis", // this is OK by design
+			name:            "work around to banned command - with parenthesis", // this is OK by design
 			allowedCommands: []string{"(cd *", "ls *", "pwd"},
 			input: BashInput{
 				Description: "cd then ls",

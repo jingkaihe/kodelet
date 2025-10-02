@@ -8,10 +8,15 @@ import (
 type Command string
 
 const (
-	CommandHelp        Command = "help"
-	CommandClear       Command = "clear"
-	CommandBash        Command = "bash"
-	CommandAddImage    Command = "add-image"
+	// CommandHelp displays the help text
+	CommandHelp Command = "help"
+	// CommandClear clears the chat screen
+	CommandClear Command = "clear"
+	// CommandBash executes a bash command
+	CommandBash Command = "bash"
+	// CommandAddImage adds an image to the chat
+	CommandAddImage Command = "add-image"
+	// CommandRemoveImage removes an image from the chat
 	CommandRemoveImage Command = "remove-image"
 )
 

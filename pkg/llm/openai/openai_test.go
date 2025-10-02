@@ -261,17 +261,17 @@ func TestProcessImageFile(t *testing.T) {
 
 	// Create a small valid JPEG-like file (just some bytes for testing)
 	smallImageData := []byte("fake-jpeg-data-for-testing")
-	err = os.WriteFile(smallImagePath, smallImageData, 0644)
+	err = os.WriteFile(smallImagePath, smallImageData, 0o644)
 	require.NoError(t, err)
 
 	// Create a large file (exceeding MaxImageFileSize)
 	largeImageData := make([]byte, MaxImageFileSize+1)
-	err = os.WriteFile(largeImagePath, largeImageData, 0644)
+	err = os.WriteFile(largeImagePath, largeImageData, 0o644)
 	require.NoError(t, err)
 
 	// Create an unsupported file
 	textData := []byte("This is not an image")
-	err = os.WriteFile(unsupportedPath, textData, 0644)
+	err = os.WriteFile(unsupportedPath, textData, 0o644)
 	require.NoError(t, err)
 
 	tests := []struct {
@@ -337,7 +337,7 @@ func TestProcessImage(t *testing.T) {
 	tempDir := t.TempDir()
 	testImagePath := filepath.Join(tempDir, "test.png")
 	imageData := []byte("fake-png-data-for-testing")
-	err = os.WriteFile(testImagePath, imageData, 0644)
+	err = os.WriteFile(testImagePath, imageData, 0o644)
 	require.NoError(t, err)
 
 	tests := []struct {
@@ -408,12 +408,12 @@ func TestAddUserMessageWithImages(t *testing.T) {
 
 	// Create a valid image file
 	imageData := []byte("fake-jpeg-data-for-testing")
-	err = os.WriteFile(validImagePath, imageData, 0644)
+	err = os.WriteFile(validImagePath, imageData, 0o644)
 	require.NoError(t, err)
 
 	// Create an invalid file
 	textData := []byte("This is not an image")
-	err = os.WriteFile(invalidImagePath, textData, 0644)
+	err = os.WriteFile(invalidImagePath, textData, 0o644)
 	require.NoError(t, err)
 
 	tests := []struct {
