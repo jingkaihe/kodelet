@@ -9,9 +9,12 @@ import (
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+var errNotImplemented = errors.New("not implemented in mock")
 
 // mockConversationService implements a mock for testing
 type mockConversationService struct {
@@ -19,22 +22,22 @@ type mockConversationService struct {
 	err          error
 }
 
-func (m *mockConversationService) GetConversation(ctx context.Context, id string) (*GetConversationResponse, error) {
+func (m *mockConversationService) GetConversation(_ context.Context, _ string) (*GetConversationResponse, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
 	return m.conversation, nil
 }
 
-func (m *mockConversationService) ListConversations(ctx context.Context, req *ListConversationsRequest) (*ListConversationsResponse, error) {
-	return nil, nil
+func (m *mockConversationService) ListConversations(_ context.Context, _ *ListConversationsRequest) (*ListConversationsResponse, error) {
+	return nil, errNotImplemented
 }
 
-func (m *mockConversationService) GetToolResult(ctx context.Context, conversationID, toolCallID string) (*GetToolResultResponse, error) {
-	return nil, nil
+func (m *mockConversationService) GetToolResult(_ context.Context, _, _ string) (*GetToolResultResponse, error) {
+	return nil, errNotImplemented
 }
 
-func (m *mockConversationService) DeleteConversation(ctx context.Context, id string) error {
+func (m *mockConversationService) DeleteConversation(_ context.Context, _ string) error {
 	return nil
 }
 
@@ -146,7 +149,7 @@ func TestStreamLiveUpdates_WithHistory(t *testing.T) {
 	}
 
 	streamer := NewConversationStreamer(service)
-	streamer.RegisterMessageParser("test-provider", func(raw json.RawMessage, results map[string]tools.StructuredToolResult) ([]StreamableMessage, error) {
+	streamer.RegisterMessageParser("test-provider", func(_ json.RawMessage, _ map[string]tools.StructuredToolResult) ([]StreamableMessage, error) {
 		return []StreamableMessage{
 			{Kind: "text", Role: "user", Content: "Hello"},
 			{Kind: "text", Role: "assistant", Content: "Hi there"},
@@ -180,7 +183,7 @@ func TestStreamLiveUpdates_ErrorHandling(t *testing.T) {
 			service: &mockConversationService{
 				err: fmt.Errorf("conversation not found"),
 			},
-			setupStreamer: func(s *ConversationStreamer) {},
+			setupStreamer: func(_ *ConversationStreamer) {},
 			expectedError: "failed to get conversation",
 		},
 		{
@@ -192,7 +195,7 @@ func TestStreamLiveUpdates_ErrorHandling(t *testing.T) {
 					UpdatedAt: time.Now(),
 				},
 			},
-			setupStreamer: func(s *ConversationStreamer) {},
+			setupStreamer: func(_ *ConversationStreamer) {},
 			expectedError: "no message parser registered for provider: unknown-provider",
 		},
 		{
@@ -205,7 +208,7 @@ func TestStreamLiveUpdates_ErrorHandling(t *testing.T) {
 				},
 			},
 			setupStreamer: func(s *ConversationStreamer) {
-				s.RegisterMessageParser("error-provider", func(raw json.RawMessage, results map[string]tools.StructuredToolResult) ([]StreamableMessage, error) {
+				s.RegisterMessageParser("error-provider", func(_ json.RawMessage, _ map[string]tools.StructuredToolResult) ([]StreamableMessage, error) {
 					return nil, fmt.Errorf("parser error")
 				})
 			},
@@ -250,7 +253,7 @@ func TestStreamNewMessagesSince(t *testing.T) {
 		{Kind: "text", Role: "user", Content: "Message 5"},
 	}
 
-	streamer.RegisterMessageParser("test-provider", func(raw json.RawMessage, results map[string]tools.StructuredToolResult) ([]StreamableMessage, error) {
+	streamer.RegisterMessageParser("test-provider", func(_ json.RawMessage, _ map[string]tools.StructuredToolResult) ([]StreamableMessage, error) {
 		return allMessages, nil
 	})
 

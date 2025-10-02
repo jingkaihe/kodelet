@@ -43,7 +43,7 @@ var commitCmd = &cobra.Command{
 	Long: `Generate a meaningful commit message based on staged changes and create a signed git commit.
 This command analyzes your 'git diff --cached' and uses AI to generate an appropriate commit message.
 You must stage your changes (using 'git add') before running this command.`,
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(cmd *cobra.Command, _ []string) {
 		ctx := cmd.Context()
 
 		llmConfig, err := llm.GetConfigFromViper()

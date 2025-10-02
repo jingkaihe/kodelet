@@ -90,7 +90,6 @@ func (r *Renderer) getTemplate(name string) (*template.Template, error) {
 		_, err = tmpl.New(path).Parse(string(component))
 		return err
 	})
-
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to load component templates")
 	}

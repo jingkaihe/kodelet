@@ -9,6 +9,8 @@ import (
 // ImageRecognitionRenderer renders image recognition results
 type ImageRecognitionRenderer struct{}
 
+// RenderCLI renders image recognition results in CLI format, showing the image path,
+// type, prompt, and analysis results.
 func (r *ImageRecognitionRenderer) RenderCLI(result tools.StructuredToolResult) string {
 	if !result.Success {
 		return fmt.Sprintf("Error: %s", result.Error)

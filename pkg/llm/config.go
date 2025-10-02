@@ -8,6 +8,8 @@ import (
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
 
+// GetConfigFromViper loads the LLM configuration from Viper, applies the active profile if set,
+// and resolves any model aliases.
 func GetConfigFromViper() (llmtypes.Config, error) {
 	config, err := loadViperConfig()
 	if err != nil {

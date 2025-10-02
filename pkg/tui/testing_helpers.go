@@ -40,7 +40,7 @@ func (m *MockAssistant) GetThreadMessages() ([]llmtypes.Message, error) {
 }
 
 // SendMessage simulates sending a message
-func (m *MockAssistant) SendMessage(ctx context.Context, message string, messageCh chan llmtypes.MessageEvent, imagePaths ...string) error {
+func (m *MockAssistant) SendMessage(_ context.Context, _ string, messageCh chan llmtypes.MessageEvent, _ ...string) error {
 	if m.sendMessageError != nil {
 		return m.sendMessageError
 	}
@@ -76,7 +76,7 @@ func (m *MockAssistant) IsPersisted() bool {
 }
 
 // Close performs cleanup (no-op for mock)
-func (m *MockAssistant) Close(ctx context.Context) error {
+func (m *MockAssistant) Close(_ context.Context) error {
 	return nil
 }
 

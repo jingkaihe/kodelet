@@ -20,6 +20,7 @@ import (
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
+// ImageRecognitionToolResult represents the result of an image recognition operation
 type ImageRecognitionToolResult struct {
 	imagePath string
 	prompt    string
@@ -27,18 +28,22 @@ type ImageRecognitionToolResult struct {
 	err       string
 }
 
+// GetResult returns the recognized text
 func (r *ImageRecognitionToolResult) GetResult() string {
 	return r.result
 }
 
+// GetError returns the error message
 func (r *ImageRecognitionToolResult) GetError() string {
 	return r.err
 }
 
+// IsError returns true if the result contains an error
 func (r *ImageRecognitionToolResult) IsError() bool {
 	return r.err != ""
 }
 
+// AssistantFacing returns the string representation for the AI assistant
 func (r *ImageRecognitionToolResult) AssistantFacing() string {
 	return tooltypes.StringifyToolResult(r.result, r.err)
 }
@@ -92,7 +97,8 @@ The output summarizes the information extracted from the image.
 }
 
 // ValidateInput validates the input parameters for the tool.
-func (t *ImageRecognitionTool) ValidateInput(state tooltypes.State, parameters string) error {
+// ValidateInput validates the input parameters for the tool
+func (t *ImageRecognitionTool) ValidateInput(_ tooltypes.State, parameters string) error {
 	input := &ImageRecognitionInput{}
 	err := json.Unmarshal([]byte(parameters), input)
 	if err != nil {
@@ -173,7 +179,8 @@ func (t *ImageRecognitionTool) validateLocalImageFile(filePath string) error {
 }
 
 // Execute executes the image_recognition tool.
-func (t *ImageRecognitionTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
+// Execute performs the image recognition operation
+func (t *ImageRecognitionTool) Execute(ctx context.Context, _ tooltypes.State, parameters string) tooltypes.ToolResult {
 	input := &ImageRecognitionInput{}
 	err := json.Unmarshal([]byte(parameters), input)
 	if err != nil {
@@ -237,7 +244,6 @@ Organize your response to be clear and actionable.`,
 			NoSaveConversation: true,
 		},
 	)
-
 	if err != nil {
 		return &ImageRecognitionToolResult{
 			imagePath: input.ImagePath,
@@ -258,7 +264,7 @@ func (t *ImageRecognitionTool) validateRemoteImage(ctx context.Context, imageURL
 	// Create a simple HTTP HEAD request to check if the image is accessible
 	// without downloading the full content
 	client := &http.Client{
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
 			// For security, don't follow redirects
 			return errors.New("redirects are not allowed for security reasons")
 		},
@@ -323,6 +329,7 @@ func (t *ImageRecognitionTool) TracingKVs(parameters string) ([]attribute.KeyVal
 	return attrs, nil
 }
 
+// StructuredData returns structured metadata about the image recognition operation
 func (r *ImageRecognitionToolResult) StructuredData() tooltypes.StructuredToolResult {
 	result := tooltypes.StructuredToolResult{
 		ToolName:  "image_recognition",

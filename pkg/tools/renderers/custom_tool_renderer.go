@@ -10,6 +10,8 @@ import (
 // CustomToolRenderer renders custom tool results
 type CustomToolRenderer struct{}
 
+// RenderCLI renders custom tool execution results in CLI format, including the tool name,
+// execution time, and output.
 func (r *CustomToolRenderer) RenderCLI(result tools.StructuredToolResult) string {
 	if !result.Success {
 		return fmt.Sprintf("Error: %s", result.Error)

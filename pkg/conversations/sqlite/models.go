@@ -114,8 +114,8 @@ func (dbs *dbConversationSummary) ToConversationSummary() conversations.Conversa
 	return summary
 }
 
-// FromConversationRecord converts domain model to database record
-func FromConversationRecord(record conversations.ConversationRecord) *dbConversationRecord {
+// fromConversationRecord converts domain model to database record
+func fromConversationRecord(record conversations.ConversationRecord) *dbConversationRecord {
 	dbRecord := &dbConversationRecord{
 		ID:                  record.ID,
 		RawMessages:         record.RawMessages,
@@ -136,8 +136,8 @@ func FromConversationRecord(record conversations.ConversationRecord) *dbConversa
 	return dbRecord
 }
 
-// FromConversationSummary converts domain model to database summary
-func FromConversationSummary(summary conversations.ConversationSummary) *dbConversationSummary {
+// fromConversationSummary converts domain model to database summary
+func fromConversationSummary(summary conversations.ConversationSummary) *dbConversationSummary {
 	dbSummary := &dbConversationSummary{
 		ID:           summary.ID,
 		MessageCount: summary.MessageCount,

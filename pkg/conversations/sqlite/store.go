@@ -12,6 +12,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	"github.com/pkg/errors"
+	// modernc.org/sqlite is a pure Go SQLite driver that requires blank import for database/sql registration
 	_ "modernc.org/sqlite"
 
 	"github.com/jingkaihe/kodelet/pkg/types/conversations"
@@ -27,7 +28,7 @@ type Store struct {
 func NewStore(ctx context.Context, dbPath string) (*Store, error) {
 	// Create directory if needed
 	dir := filepath.Dir(dbPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, errors.Wrap(err, "failed to create database directory")
 	}
 
@@ -139,8 +140,8 @@ func (s *Store) initializeSchema() error {
 	return nil
 }
 
+// Save persists a conversation record to the database using UPSERT to preserve created_at timestamps
 func (s *Store) Save(ctx context.Context, record conversations.ConversationRecord) error {
-
 	tx, err := s.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return errors.Wrap(err, "failed to begin transaction")
@@ -151,8 +152,8 @@ func (s *Store) Save(ctx context.Context, record conversations.ConversationRecor
 	record.UpdatedAt = time.Now()
 
 	// Convert to database models
-	dbRecord := FromConversationRecord(record)
-	dbSummary := FromConversationSummary(record.ToSummary())
+	dbRecord := fromConversationRecord(record)
+	dbSummary := fromConversationSummary(record.ToSummary())
 
 	// Insert or update conversation record with UPSERT to preserve created_at
 	conversationQuery := `
@@ -204,7 +205,6 @@ func (s *Store) Save(ctx context.Context, record conversations.ConversationRecor
 
 // Load retrieves a conversation record by ID
 func (s *Store) Load(ctx context.Context, id string) (conversations.ConversationRecord, error) {
-
 	var dbRecord dbConversationRecord
 
 	query := `SELECT id, raw_messages, provider, file_last_access, usage,
@@ -223,7 +223,6 @@ func (s *Store) Load(ctx context.Context, id string) (conversations.Conversation
 
 // Delete removes a conversation and its associated data
 func (s *Store) Delete(ctx context.Context, id string) error {
-
 	tx, err := s.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return errors.Wrap(err, "failed to begin transaction")

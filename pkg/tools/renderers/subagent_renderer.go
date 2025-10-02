@@ -9,6 +9,8 @@ import (
 // SubAgentRenderer renders subagent results
 type SubAgentRenderer struct{}
 
+// RenderCLI renders subagent execution results in CLI format, showing the question
+// (if available) and the response.
 func (r *SubAgentRenderer) RenderCLI(result tools.StructuredToolResult) string {
 	if !result.Success {
 		return fmt.Sprintf("Error: %s", result.Error)

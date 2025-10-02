@@ -24,20 +24,20 @@ func (m *subagentMockThread) SendMessage(ctx context.Context, message string, ha
 }
 
 // Stub implementations for unused methods
-func (m *subagentMockThread) SetState(s tooltypes.State) {}
+func (m *subagentMockThread) SetState(_ tooltypes.State) {}
 func (m *subagentMockThread) GetState() tooltypes.State  { return nil }
-func (m *subagentMockThread) AddUserMessage(ctx context.Context, message string, imagePaths ...string) {
+func (m *subagentMockThread) AddUserMessage(_ context.Context, _ string, _ ...string) {
 }
-func (m *subagentMockThread) GetUsage() llmtypes.Usage                                   { return llmtypes.Usage{} }
-func (m *subagentMockThread) GetConversationID() string                                  { return "" }
-func (m *subagentMockThread) SetConversationID(id string)                                {}
-func (m *subagentMockThread) SaveConversation(ctx context.Context, summarise bool) error { return nil }
-func (m *subagentMockThread) IsPersisted() bool                                          { return false }
-func (m *subagentMockThread) EnablePersistence(ctx context.Context, enabled bool)        {}
-func (m *subagentMockThread) Provider() string                                           { return "" }
-func (m *subagentMockThread) GetMessages() ([]llmtypes.Message, error)                   { return nil, nil }
-func (m *subagentMockThread) GetConfig() llmtypes.Config                                 { return llmtypes.Config{} }
-func (m *subagentMockThread) NewSubAgent(ctx context.Context, config llmtypes.Config) llmtypes.Thread {
+func (m *subagentMockThread) GetUsage() llmtypes.Usage                         { return llmtypes.Usage{} }
+func (m *subagentMockThread) GetConversationID() string                        { return "" }
+func (m *subagentMockThread) SetConversationID(_ string)                       {}
+func (m *subagentMockThread) SaveConversation(_ context.Context, _ bool) error { return nil }
+func (m *subagentMockThread) IsPersisted() bool                                { return false }
+func (m *subagentMockThread) EnablePersistence(_ context.Context, _ bool)      {}
+func (m *subagentMockThread) Provider() string                                 { return "" }
+func (m *subagentMockThread) GetMessages() ([]llmtypes.Message, error)         { return nil, nil }
+func (m *subagentMockThread) GetConfig() llmtypes.Config                       { return llmtypes.Config{} }
+func (m *subagentMockThread) NewSubAgent(_ context.Context, _ llmtypes.Config) llmtypes.Thread {
 	return m
 }
 

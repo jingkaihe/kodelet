@@ -10,6 +10,8 @@ import (
 // TodoRenderer renders todo list results
 type TodoRenderer struct{}
 
+// RenderCLI renders todo list results in CLI format, showing statistics and todo items
+// with status icons, priorities, IDs, and content.
 func (r *TodoRenderer) RenderCLI(result tools.StructuredToolResult) string {
 	if !result.Success {
 		return fmt.Sprintf("Error: %s", result.Error)

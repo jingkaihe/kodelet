@@ -11,37 +11,46 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 )
 
+// ThinkingToolResult represents the result of a thinking tool execution
 type ThinkingToolResult struct {
 	thought string
 	err     string
 }
 
+// GetResult returns an empty string as thinking is for the model's internal use
 func (r *ThinkingToolResult) GetResult() string {
 	return "Your thought have been recorded."
 }
 
+// GetError returns the error message
 func (r *ThinkingToolResult) GetError() string {
 	return r.err
 }
 
+// IsError returns true if the result contains an error
 func (r *ThinkingToolResult) IsError() bool {
 	return r.err != ""
 }
 
+// AssistantFacing returns the string representation for the AI assistant
 func (r *ThinkingToolResult) AssistantFacing() string {
 	return tooltypes.StringifyToolResult("Your thought have been recorded.", r.err)
 }
 
+// ThinkingTool provides functionality for the model to organize its thoughts
 type ThinkingTool struct{}
 
+// ThinkingInput defines the input parameters for the thinking tool
 type ThinkingInput struct {
 	Thought string `json:"thought" jsonschema:"description=A thought to think about"`
 }
 
+// Name returns the name of the tool
 func (t *ThinkingTool) Name() string {
 	return "thinking"
 }
 
+// TracingKVs returns tracing key-value pairs for observability
 func (t *ThinkingTool) TracingKVs(parameters string) ([]attribute.KeyValue, error) {
 	input := &ThinkingInput{}
 	err := json.Unmarshal([]byte(parameters), input)
@@ -54,7 +63,8 @@ func (t *ThinkingTool) TracingKVs(parameters string) ([]attribute.KeyValue, erro
 	}, nil
 }
 
-func (t *ThinkingTool) ValidateInput(state tooltypes.State, parameters string) error {
+// ValidateInput validates the input parameters for the tool
+func (t *ThinkingTool) ValidateInput(_ tooltypes.State, parameters string) error {
 	var input ThinkingInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
 		return errors.Wrap(err, "invalid input")
@@ -67,6 +77,7 @@ func (t *ThinkingTool) ValidateInput(state tooltypes.State, parameters string) e
 	return nil
 }
 
+// GenerateSchema generates the JSON schema for the tool's input parameters
 func (t *ThinkingTool) GenerateSchema() *jsonschema.Schema {
 	return GenerateSchema[ThinkingInput]()
 }
@@ -86,7 +97,8 @@ It will not obtain new information or change the database, but just append the t
 `
 }
 
-func (t *ThinkingTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
+// Execute processes the thinking and returns an empty result
+func (t *ThinkingTool) Execute(_ context.Context, _ tooltypes.State, parameters string) tooltypes.ToolResult {
 	input := &ThinkingInput{}
 	err := json.Unmarshal([]byte(parameters), input)
 	if err != nil {
@@ -100,6 +112,7 @@ func (t *ThinkingTool) Execute(ctx context.Context, state tooltypes.State, param
 	}
 }
 
+// StructuredData returns structured metadata about the thinking operation
 func (r *ThinkingToolResult) StructuredData() tooltypes.StructuredToolResult {
 	result := tooltypes.StructuredToolResult{
 		ToolName:  "thinking",

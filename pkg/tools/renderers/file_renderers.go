@@ -5,13 +5,15 @@ import (
 	"fmt"
 
 	"github.com/aymanbagabas/go-udiff"
+	"github.com/jingkaihe/kodelet/pkg/osutil"
 	"github.com/jingkaihe/kodelet/pkg/types/tools"
-	"github.com/jingkaihe/kodelet/pkg/utils"
 )
 
 // FileReadRenderer renders file read results
 type FileReadRenderer struct{}
 
+// RenderCLI renders file read results in CLI format with line numbers, showing the file path,
+// offset, content, and truncation status if applicable.
 func (r *FileReadRenderer) RenderCLI(result tools.StructuredToolResult) string {
 	if !result.Success {
 		return fmt.Sprintf("Error: %s", result.Error)
@@ -24,7 +26,7 @@ func (r *FileReadRenderer) RenderCLI(result tools.StructuredToolResult) string {
 
 	buf := bytes.NewBufferString(fmt.Sprintf("File Read: %s\n", meta.FilePath))
 	fmt.Fprintf(buf, "Offset: %d\n", meta.Offset)
-	buf.WriteString(utils.ContentWithLineNumber(meta.Lines, meta.Offset))
+	buf.WriteString(osutil.ContentWithLineNumber(meta.Lines, meta.Offset))
 
 	if meta.Truncated {
 		buf.WriteString("\n... [truncated]")
@@ -36,6 +38,7 @@ func (r *FileReadRenderer) RenderCLI(result tools.StructuredToolResult) string {
 // FileWriteRenderer renders file write results
 type FileWriteRenderer struct{}
 
+// RenderCLI renders file write results in CLI format, showing the file path and size.
 func (r *FileWriteRenderer) RenderCLI(result tools.StructuredToolResult) string {
 	if !result.Success {
 		return fmt.Sprintf("Error: %s", result.Error)
@@ -53,6 +56,8 @@ func (r *FileWriteRenderer) RenderCLI(result tools.StructuredToolResult) string 
 // FileEditRenderer renders file edit results
 type FileEditRenderer struct{}
 
+// RenderCLI renders file edit results in CLI format with unified diff output, showing the
+// file path, number of replacements, and the changes made to the file.
 func (r *FileEditRenderer) RenderCLI(result tools.StructuredToolResult) string {
 	if !result.Success {
 		return fmt.Sprintf("Error: %s", result.Error)

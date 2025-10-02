@@ -14,7 +14,7 @@ var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Set up Kodelet configuration",
 	Long:  `Set up Kodelet configuration with sensible defaults.`,
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(cmd *cobra.Command, _ []string) {
 		ctx := cmd.Context()
 		override, _ := cmd.Flags().GetBool("override")
 
@@ -55,7 +55,7 @@ var initCmd = &cobra.Command{
 
 		// Create config directory
 		configDir := filepath.Join(os.Getenv("HOME"), ".kodelet")
-		err := os.MkdirAll(configDir, 0755)
+		err := os.MkdirAll(configDir, 0o755)
 		if err != nil {
 			presenter.Error(err, "Failed to create config directory")
 			logger.G(ctx).WithError(err).WithField("config_dir", configDir).Error("Config directory creation failed")
@@ -85,7 +85,7 @@ var initCmd = &cobra.Command{
 				}
 
 				// Write backup
-				err = os.WriteFile(backupFile, existingConfig, 0644)
+				err = os.WriteFile(backupFile, existingConfig, 0o644)
 				if err != nil {
 					presenter.Error(err, "Failed to create backup of existing configuration")
 					return
@@ -151,7 +151,7 @@ profiles:
         weak_model: grok-code-fast-1
 `
 
-		err = os.WriteFile(configFile, []byte(configContent), 0644)
+		err = os.WriteFile(configFile, []byte(configContent), 0o644)
 		if err != nil {
 			presenter.Error(err, "Failed to write config file")
 			logger.G(ctx).WithError(err).WithField("config_file", configFile).Error("Config file write failed")

@@ -2,29 +2,46 @@ package sysprompt
 
 import "embed"
 
+// TemplateFS contains the embedded template files for system prompts.
+//
 //go:embed templates/*
 var TemplateFS embed.FS
 
 const (
+	// ProductName is the name of the product used in prompts and documentation.
 	ProductName = "kodelet"
 
+	// TodoWriteTool is the identifier for the todo write tool.
 	TodoWriteTool = "todo_write"
-	TodoReadTool  = "todo_read"
-	BashTool      = "bash"
-	SubagentTool  = "subagent"
-	GrepTool      = "grep_tool"
-	GlobTool      = "glob_tool"
-	Backtick      = "`"
+	// TodoReadTool is the identifier for the todo read tool.
+	TodoReadTool = "todo_read"
+	// BashTool is the identifier for the bash command execution tool.
+	BashTool = "bash"
+	// SubagentTool is the identifier for the subagent tool.
+	SubagentTool = "subagent"
+	// GrepTool is the identifier for the grep search tool.
+	GrepTool = "grep_tool"
+	// GlobTool is the identifier for the glob file matching tool.
+	GlobTool = "glob_tool"
+	// Backtick is the backtick character used in markdown formatting.
+	Backtick = "`"
 
-	AgentsMd  = "AGENTS.md"
+	// AgentsMd is the filename for agent-specific documentation.
+	AgentsMd = "AGENTS.md"
+	// KodeletMd is the filename for kodelet-specific documentation.
 	KodeletMd = "KODELET.md"
-	ReadmeMd  = "README.md"
+	// ReadmeMd is the filename for README documentation.
+	ReadmeMd = "README.md"
 
-	SystemTemplate   = "templates/system.tmpl"
+	// SystemTemplate is the path to the main system prompt template.
+	SystemTemplate = "templates/system.tmpl"
+	// SubagentTemplate is the path to the subagent prompt template.
 	SubagentTemplate = "templates/subagent.tmpl"
-
+	// OpenAITemplate is the path to the OpenAI-specific prompt template.
 	OpenAITemplate = "templates/openai_system.tmpl"
 
+	// ProviderAnthropic is the identifier for the Anthropic provider.
 	ProviderAnthropic = "anthropic"
-	ProviderOpenAI    = "openai"
+	// ProviderOpenAI is the identifier for the OpenAI provider.
+	ProviderOpenAI = "openai"
 )

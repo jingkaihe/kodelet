@@ -16,7 +16,8 @@ import (
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
-func (t *GoogleThread) SaveConversation(ctx context.Context, summarise bool) error {
+// SaveConversation persists the current conversation state to the conversation store
+func (t *Thread) SaveConversation(ctx context.Context, summarise bool) error {
 	t.conversationMu.Lock()
 	defer t.conversationMu.Unlock()
 
@@ -59,7 +60,8 @@ func (t *GoogleThread) SaveConversation(ctx context.Context, summarise bool) err
 	return t.store.Save(ctx, record)
 }
 
-func (t *GoogleThread) LoadConversation(ctx context.Context, conversationID string) error {
+// LoadConversation loads a conversation from the conversation store by ID
+func (t *Thread) LoadConversation(ctx context.Context, conversationID string) error {
 	t.conversationMu.Lock()
 	defer t.conversationMu.Unlock()
 
@@ -91,7 +93,7 @@ func (t *GoogleThread) LoadConversation(ctx context.Context, conversationID stri
 	return nil
 }
 
-func (t *GoogleThread) generateSummary(ctx context.Context) string {
+func (t *Thread) generateSummary(ctx context.Context) string {
 	messages := t.convertToStandardMessages()
 	if len(messages) == 0 {
 		return ""
@@ -123,7 +125,6 @@ func (t *GoogleThread) generateSummary(ctx context.Context) string {
 		NoSaveConversation: true,
 		UseWeakModel:       true,
 	})
-
 	if err != nil {
 		logger.G(ctx).WithError(err).Error("Failed to generate summary")
 		return ""
@@ -132,6 +133,7 @@ func (t *GoogleThread) generateSummary(ctx context.Context) string {
 	return handler.CollectedText()
 }
 
+// ExtractMessages converts raw Google GenAI message bytes to standard message format
 func ExtractMessages(rawMessages []byte, toolResults map[string]tooltypes.StructuredToolResult) ([]llmtypes.Message, error) {
 	var googleMessages []*genai.Content
 	if err := json.Unmarshal(rawMessages, &googleMessages); err != nil {
@@ -190,6 +192,7 @@ func ExtractMessages(rawMessages []byte, toolResults map[string]tooltypes.Struct
 	return messages, nil
 }
 
+// DeserializeMessages deserializes raw message bytes into Google GenAI Content objects
 func DeserializeMessages(rawMessages []byte) ([]*genai.Content, error) {
 	var messages []*genai.Content
 	if err := json.Unmarshal(rawMessages, &messages); err != nil {

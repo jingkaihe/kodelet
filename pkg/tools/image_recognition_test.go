@@ -74,7 +74,7 @@ func TestImageRecognitionTool_ValidateInput(t *testing.T) {
 	// Add a test with a fake file to check unsupported format validation
 	tempDir := t.TempDir()
 	txtPath := filepath.Join(tempDir, "test.txt")
-	err := os.WriteFile(txtPath, []byte("not an image"), 0644)
+	err := os.WriteFile(txtPath, []byte("not an image"), 0o644)
 	require.NoError(t, err)
 
 	tests = append(tests, struct {
@@ -114,7 +114,7 @@ func TestImageRecognitionTool_ValidateLocalImageFile(t *testing.T) {
 	t.Run("valid image file", func(t *testing.T) {
 		// Create a small PNG file
 		imagePath := filepath.Join(tempDir, "test.png")
-		err := os.WriteFile(imagePath, []byte("fake png content"), 0644)
+		err := os.WriteFile(imagePath, []byte("fake png content"), 0o644)
 		require.NoError(t, err)
 
 		// Test with file:// prefix
@@ -134,7 +134,7 @@ func TestImageRecognitionTool_ValidateLocalImageFile(t *testing.T) {
 
 	t.Run("unsupported format", func(t *testing.T) {
 		txtPath := filepath.Join(tempDir, "test.txt")
-		err := os.WriteFile(txtPath, []byte("not an image"), 0644)
+		err := os.WriteFile(txtPath, []byte("not an image"), 0o644)
 		require.NoError(t, err)
 
 		err = tool.validateImagePath(txtPath)
@@ -146,7 +146,7 @@ func TestImageRecognitionTool_ValidateLocalImageFile(t *testing.T) {
 		// Create a file larger than 5MB
 		largePath := filepath.Join(tempDir, "large.jpg")
 		largeContent := make([]byte, 6*1024*1024) // 6MB
-		err := os.WriteFile(largePath, largeContent, 0644)
+		err := os.WriteFile(largePath, largeContent, 0o644)
 		require.NoError(t, err)
 
 		err = tool.validateImagePath(largePath)
@@ -213,23 +213,23 @@ type mockThread struct {
 	sendMessageError  error
 }
 
-func (m *mockThread) SendMessage(ctx context.Context, message string, handler llm.MessageHandler, opt llm.MessageOpt) (string, error) {
+func (m *mockThread) SendMessage(_ context.Context, _ string, _ llm.MessageHandler, _ llm.MessageOpt) (string, error) {
 	return m.sendMessageResult, m.sendMessageError
 }
 
-func (m *mockThread) SetState(s tools.State)                                                   {}
-func (m *mockThread) GetState() tools.State                                                    { return nil }
-func (m *mockThread) AddUserMessage(ctx context.Context, message string, imagePaths ...string) {}
-func (m *mockThread) GetUsage() llm.Usage                                                      { return llm.Usage{} }
-func (m *mockThread) GetConversationID() string                                                { return "" }
-func (m *mockThread) SetConversationID(id string)                                              {}
-func (m *mockThread) SaveConversation(ctx context.Context, summarise bool) error               { return nil }
-func (m *mockThread) IsPersisted() bool                                                        { return false }
-func (m *mockThread) EnablePersistence(ctx context.Context, enabled bool)                      {}
-func (m *mockThread) Provider() string                                                         { return "mock" }
-func (m *mockThread) GetMessages() ([]llm.Message, error)                                      { return nil, nil }
-func (m *mockThread) GetConfig() llm.Config                                                    { return llm.Config{} }
-func (m *mockThread) NewSubAgent(ctx context.Context, config llm.Config) llm.Thread            { return m }
+func (m *mockThread) SetState(_ tools.State)                                  {}
+func (m *mockThread) GetState() tools.State                                   { return nil }
+func (m *mockThread) AddUserMessage(_ context.Context, _ string, _ ...string) {}
+func (m *mockThread) GetUsage() llm.Usage                                     { return llm.Usage{} }
+func (m *mockThread) GetConversationID() string                               { return "" }
+func (m *mockThread) SetConversationID(_ string)                              {}
+func (m *mockThread) SaveConversation(_ context.Context, _ bool) error        { return nil }
+func (m *mockThread) IsPersisted() bool                                       { return false }
+func (m *mockThread) EnablePersistence(_ context.Context, _ bool)             {}
+func (m *mockThread) Provider() string                                        { return "mock" }
+func (m *mockThread) GetMessages() ([]llm.Message, error)                     { return nil, nil }
+func (m *mockThread) GetConfig() llm.Config                                   { return llm.Config{} }
+func (m *mockThread) NewSubAgent(_ context.Context, _ llm.Config) llm.Thread  { return m }
 
 func TestImageRecognitionTool_Execute(t *testing.T) {
 	tool := &ImageRecognitionTool{}
@@ -237,7 +237,7 @@ func TestImageRecognitionTool_Execute(t *testing.T) {
 	// Create a test image file
 	tempDir := t.TempDir()
 	imagePath := filepath.Join(tempDir, "test.png")
-	err := os.WriteFile(imagePath, []byte("fake png content"), 0644)
+	err := os.WriteFile(imagePath, []byte("fake png content"), 0o644)
 	require.NoError(t, err)
 
 	t.Run("missing sub-agent config", func(t *testing.T) {

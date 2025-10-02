@@ -39,6 +39,7 @@ func (t *CopilotTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	return t.underlying.RoundTrip(req)
 }
 
+// CopilotDeviceCodeResponse represents the response from GitHub's device flow initiation endpoint.
 type CopilotDeviceCodeResponse struct {
 	DeviceCode      string `json:"device_code"`
 	UserCode        string `json:"user_code"`
@@ -47,6 +48,7 @@ type CopilotDeviceCodeResponse struct {
 	Interval        int    `json:"interval"`
 }
 
+// CopilotTokenResponse represents the OAuth2 token response from GitHub's device flow.
 type CopilotTokenResponse struct {
 	AccessToken string `json:"access_token"`
 	TokenType   string `json:"token_type"`
@@ -55,11 +57,13 @@ type CopilotTokenResponse struct {
 	ErrorDesc   string `json:"error_description"`
 }
 
+// CopilotExchangeResponse represents the response from exchanging GitHub OAuth token for Copilot token.
 type CopilotExchangeResponse struct {
 	Token     string `json:"token"`
 	ExpiresAt int64  `json:"expires_at"`
 }
 
+// CopilotCredentials stores the authentication credentials for GitHub Copilot API.
 type CopilotCredentials struct {
 	AccessToken    string `json:"access_token"`
 	CopilotToken   string `json:"copilot_token"`
@@ -74,10 +78,10 @@ const (
 	copilotExchangeURL = "https://api.github.com/copilot_internal/v2/token"
 )
 
-var (
-	copilotScopes = []string{"read:user", "user:email", "copilot"}
-)
+var copilotScopes = []string{"read:user", "user:email", "copilot"}
 
+// GenerateCopilotDeviceFlow initiates the GitHub device authorization flow for Copilot.
+// Returns device code information including the user code and verification URI.
 func GenerateCopilotDeviceFlow(ctx context.Context) (*CopilotDeviceCodeResponse, error) {
 	data := url.Values{}
 	data.Set("client_id", copilotClientID)
@@ -112,6 +116,8 @@ func GenerateCopilotDeviceFlow(ctx context.Context) (*CopilotDeviceCodeResponse,
 	return &deviceResp, nil
 }
 
+// PollCopilotToken polls GitHub's OAuth endpoint to check if the user has authorized the device.
+// It continues polling at the specified interval until authorization completes or an error occurs.
 func PollCopilotToken(ctx context.Context, deviceCode string, interval int) (*CopilotTokenResponse, error) {
 	data := url.Values{
 		"client_id":   {copilotClientID},
@@ -174,6 +180,7 @@ func PollCopilotToken(ctx context.Context, deviceCode string, interval int) (*Co
 	}
 }
 
+// ExchangeCopilotToken exchanges a GitHub OAuth access token for a Copilot-specific token.
 func ExchangeCopilotToken(ctx context.Context, accessToken string) (*CopilotExchangeResponse, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", copilotExchangeURL, nil)
 	if err != nil {
@@ -206,6 +213,7 @@ func ExchangeCopilotToken(ctx context.Context, accessToken string) (*CopilotExch
 	return &copilotToken, nil
 }
 
+// GetCopilotCredentialsExists checks if Copilot credentials file exists in the user's home directory.
 func GetCopilotCredentialsExists() (bool, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -222,6 +230,8 @@ func GetCopilotCredentialsExists() (bool, error) {
 	return false, errors.Wrap(err, "failed to check if copilot credentials file exists")
 }
 
+// SaveCopilotCredentials saves Copilot credentials to a JSON file in the user's home directory.
+// Returns the file path where credentials were saved.
 func SaveCopilotCredentials(creds *CopilotCredentials) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -231,7 +241,7 @@ func SaveCopilotCredentials(creds *CopilotCredentials) (string, error) {
 	filePath := filepath.Join(home, ".kodelet", "copilot-subscription.json")
 
 	// Ensure the directory exists
-	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
 		return "", errors.Wrap(err, "failed to create credentials directory")
 	}
 
@@ -250,6 +260,7 @@ func SaveCopilotCredentials(creds *CopilotCredentials) (string, error) {
 	return filePath, nil
 }
 
+// DeleteCopilotCredentials removes the Copilot credentials file from the user's home directory.
 func DeleteCopilotCredentials() error {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -286,6 +297,8 @@ func refreshCopilotExchangeToken(ctx context.Context, creds *CopilotCredentials)
 	return refreshed, nil
 }
 
+// CopilotAccessToken retrieves a valid Copilot token, refreshing it if necessary.
+// It automatically handles token refresh when the token is within 10 minutes of expiration.
 func CopilotAccessToken(ctx context.Context) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {

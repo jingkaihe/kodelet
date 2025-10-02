@@ -115,7 +115,7 @@ func TestServerConfig_Validate(t *testing.T) {
 
 func TestServer_handleListConversations(t *testing.T) {
 	mockService := &mockConversationService{
-		listFunc: func(ctx context.Context, req *conversations.ListConversationsRequest) (*conversations.ListConversationsResponse, error) {
+		listFunc: func(_ context.Context, _ *conversations.ListConversationsRequest) (*conversations.ListConversationsResponse, error) {
 			return &conversations.ListConversationsResponse{
 				Conversations: []convtypes.ConversationSummary{
 					{ID: "1", Summary: "Test 1"},
@@ -149,7 +149,7 @@ func TestServer_handleListConversations(t *testing.T) {
 func TestServer_handleGetConversation(t *testing.T) {
 	conversationID := "test-id-123"
 	mockService := &mockConversationService{
-		getFunc: func(ctx context.Context, id string) (*conversations.GetConversationResponse, error) {
+		getFunc: func(_ context.Context, id string) (*conversations.GetConversationResponse, error) {
 			if id == conversationID {
 				return &conversations.GetConversationResponse{
 					ID:          conversationID,
@@ -188,7 +188,7 @@ func TestServer_handleDeleteConversation(t *testing.T) {
 	deleteCalled := false
 
 	mockService := &mockConversationService{
-		deleteFunc: func(ctx context.Context, id string) error {
+		deleteFunc: func(_ context.Context, id string) error {
 			deleteCalled = true
 			assert.Equal(t, conversationID, id)
 			return nil
@@ -215,7 +215,7 @@ func TestServer_handleGetToolResult(t *testing.T) {
 	toolCallID := "tool-456"
 
 	mockService := &mockConversationService{
-		getToolFunc: func(ctx context.Context, convID, toolID string) (*conversations.GetToolResultResponse, error) {
+		getToolFunc: func(_ context.Context, convID, toolID string) (*conversations.GetToolResultResponse, error) {
 			assert.Equal(t, conversationID, convID)
 			assert.Equal(t, toolCallID, toolID)
 			return &conversations.GetToolResultResponse{

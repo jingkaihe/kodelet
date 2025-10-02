@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestFeedbackConfigFromFlags tests the feedback configuration flag parsing
 func TestFeedbackConfigFromFlags(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -64,7 +65,7 @@ func TestFeedbackConfigFromFlags(t *testing.T) {
 			// Create a mock command with the feedback flags
 			cmd := &cobra.Command{
 				Use: "test",
-				Run: func(cmd *cobra.Command, args []string) {},
+				Run: func(_ *cobra.Command, _ []string) {},
 			}
 
 			// Add the same flags as feedback command
@@ -116,6 +117,7 @@ func TestFeedbackConfigFromFlags(t *testing.T) {
 	}
 }
 
+// TestNewFeedbackConfig tests the feedback configuration initialization
 func TestNewFeedbackConfig(t *testing.T) {
 	config := NewFeedbackConfig()
 
@@ -123,6 +125,7 @@ func TestNewFeedbackConfig(t *testing.T) {
 	assert.False(t, config.Follow)
 }
 
+// TestFeedbackConfigDefaults tests the default feedback configuration values
 func TestFeedbackConfigDefaults(t *testing.T) {
 	defaults := NewFeedbackConfig()
 

@@ -22,9 +22,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 )
 
-var (
-	_ tooltypes.Tool = &CustomTool{}
-)
+var _ tooltypes.Tool = &CustomTool{}
 
 // CustomToolDescription represents the JSON structure returned by tool's description command
 type CustomToolDescription struct {
@@ -163,7 +161,7 @@ func (m *CustomToolManager) discoverToolsInDir(ctx context.Context, dir string, 
 			continue
 		}
 
-		if info.Mode()&0111 == 0 {
+		if info.Mode()&0o111 == 0 {
 			continue
 		}
 
@@ -266,19 +264,23 @@ func (m *CustomToolManager) GetTool(name string) (*CustomTool, bool) {
 
 // CustomTool interface implementation
 
+// Name returns the name of the tool
 func (t *CustomTool) Name() string {
 	return fmt.Sprintf("custom_tool_%s", t.name)
 }
 
+// Description returns the description of the tool
 func (t *CustomTool) Description() string {
 	return t.description
 }
 
+// GenerateSchema generates the JSON schema for the tool's input parameters
 func (t *CustomTool) GenerateSchema() *jsonschema.Schema {
 	return t.schema
 }
 
-func (t *CustomTool) TracingKVs(parameters string) ([]attribute.KeyValue, error) {
+// TracingKVs returns tracing key-value pairs for observability
+func (t *CustomTool) TracingKVs(_ string) ([]attribute.KeyValue, error) {
 	return []attribute.KeyValue{
 		attribute.String("tool.type", "custom"),
 		attribute.String("tool.name", t.name),
@@ -286,7 +288,8 @@ func (t *CustomTool) TracingKVs(parameters string) ([]attribute.KeyValue, error)
 	}, nil
 }
 
-func (t *CustomTool) ValidateInput(state tooltypes.State, parameters string) error {
+// ValidateInput validates the input parameters for the tool
+func (t *CustomTool) ValidateInput(_ tooltypes.State, parameters string) error {
 	var input map[string]interface{}
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
 		return errors.Wrap(err, "invalid JSON input")
@@ -295,7 +298,8 @@ func (t *CustomTool) ValidateInput(state tooltypes.State, parameters string) err
 	return nil
 }
 
-func (t *CustomTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
+// Execute runs the custom tool and returns the result
+func (t *CustomTool) Execute(ctx context.Context, _ tooltypes.State, parameters string) tooltypes.ToolResult {
 	startTime := time.Now()
 
 	execCtx, cancel := context.WithTimeout(ctx, t.timeout)
@@ -365,6 +369,7 @@ func (t *CustomTool) Execute(ctx context.Context, state tooltypes.State, paramet
 	}
 }
 
+// CustomToolResult represents the result of a custom tool execution
 type CustomToolResult struct {
 	toolName      string
 	executionTime time.Duration
@@ -372,22 +377,27 @@ type CustomToolResult struct {
 	err           string
 }
 
+// GetResult returns the tool output
 func (r *CustomToolResult) GetResult() string {
 	return r.result
 }
 
+// GetError returns the error message
 func (r *CustomToolResult) GetError() string {
 	return r.err
 }
 
+// IsError returns true if the result contains an error
 func (r *CustomToolResult) IsError() bool {
 	return r.err != ""
 }
 
+// AssistantFacing returns the string representation for the AI assistant
 func (r *CustomToolResult) AssistantFacing() string {
 	return tooltypes.StringifyToolResult(r.result, r.err)
 }
 
+// StructuredData returns structured metadata about the custom tool execution
 func (r *CustomToolResult) StructuredData() tooltypes.StructuredToolResult {
 	result := tooltypes.StructuredToolResult{
 		ToolName:  r.toolName,
@@ -407,6 +417,7 @@ func (r *CustomToolResult) StructuredData() tooltypes.StructuredToolResult {
 	return result
 }
 
+// CreateCustomToolManagerFromViper creates a custom tool manager from Viper configuration
 func CreateCustomToolManagerFromViper(ctx context.Context) (*CustomToolManager, error) {
 	manager, err := NewCustomToolManager()
 	if err != nil {

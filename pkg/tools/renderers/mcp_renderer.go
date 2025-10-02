@@ -10,6 +10,8 @@ import (
 // MCPToolRenderer renders MCP tool results
 type MCPToolRenderer struct{}
 
+// RenderCLI renders MCP tool execution results in CLI format, including the tool name,
+// server name, parameters, structured content, and execution time.
 func (r *MCPToolRenderer) RenderCLI(result tools.StructuredToolResult) string {
 	if !result.Success {
 		return fmt.Sprintf("Error: %s", result.Error)

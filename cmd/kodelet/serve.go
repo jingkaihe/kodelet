@@ -36,7 +36,7 @@ your conversation history. The web UI offers an intuitive way to explore convers
 with syntax highlighting, tool result visualization, and search capabilities.
 
 The server will be available at http://localhost:8080 by default.`,
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(cmd *cobra.Command, _ []string) {
 		ctx := cmd.Context()
 		config := getServeConfigFromFlags(cmd)
 		runServeCommand(ctx, config)
@@ -70,13 +70,13 @@ func validateServeConfig(config *ServeConfig) error {
 	if config.Host != "localhost" && config.Host != "0.0.0.0" {
 		if ip := net.ParseIP(config.Host); ip == nil {
 			if strings.Contains(config.Host, " ") || strings.Contains(config.Host, ":") {
-				return errors.New(fmt.Sprintf("invalid host: %s", config.Host))
+				return fmt.Errorf("invalid host: %s", config.Host)
 			}
 		}
 	}
 
 	if config.Port < 1 || config.Port > 65535 {
-		return errors.New(fmt.Sprintf("port must be between 1 and 65535, got %d", config.Port))
+		return fmt.Errorf("port must be between 1 and 65535, got %d", config.Port)
 	}
 
 	if config.Port < 1024 {

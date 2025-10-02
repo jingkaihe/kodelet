@@ -53,8 +53,11 @@ type TerminalPresenter struct {
 type ColorMode int
 
 const (
+	// ColorAuto automatically detects whether to use colored output based on terminal capabilities
 	ColorAuto ColorMode = iota
+	// ColorAlways forces colored output regardless of terminal capabilities
 	ColorAlways
+	// ColorNever disables colored output regardless of terminal capabilities
 	ColorNever
 )
 
@@ -255,38 +258,47 @@ func Error(err error, context string) {
 	defaultPresenter.Error(err, context)
 }
 
+// Success displays a success message using the default presenter instance.
 func Success(message string) {
 	defaultPresenter.Success(message)
 }
 
+// Warning displays a warning message using the default presenter instance.
 func Warning(message string) {
 	defaultPresenter.Warning(message)
 }
 
+// Info displays an informational message using the default presenter instance.
 func Info(message string) {
 	defaultPresenter.Info(message)
 }
 
+// Section displays a section header using the default presenter instance.
 func Section(title string) {
 	defaultPresenter.Section(title)
 }
 
+// Prompt displays a prompt and reads user input using the default presenter instance.
 func Prompt(question string, options ...string) string {
 	return defaultPresenter.Prompt(question, options...)
 }
 
+// Stats displays usage statistics using the default presenter instance.
 func Stats(usage *UsageStats) {
 	defaultPresenter.Stats(usage)
 }
 
+// Separator displays a visual separator using the default presenter instance.
 func Separator() {
 	defaultPresenter.Separator()
 }
 
+// SetQuiet enables or disables quiet mode for the default presenter instance.
 func SetQuiet(quiet bool) {
 	defaultPresenter.SetQuiet(quiet)
 }
 
+// IsQuiet returns whether quiet mode is enabled for the default presenter instance.
 func IsQuiet() bool {
 	return defaultPresenter.IsQuiet()
 }

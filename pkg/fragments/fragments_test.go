@@ -28,7 +28,7 @@ Current date: {{bash "date" "+%Y-%m-%d"}}
 Command result: {{bash "echo" "test"}}`
 
 	fragmentPath := filepath.Join(tempDir, "test.md")
-	err = os.WriteFile(fragmentPath, []byte(fragmentContent), 0644)
+	err = os.WriteFile(fragmentPath, []byte(fragmentContent), 0o644)
 	require.NoError(t, err)
 
 	processor, err := NewFragmentProcessor(WithFragmentDirs(tempDir))
@@ -59,7 +59,7 @@ func TestFragmentProcessor_BashCommandError(t *testing.T) {
 	// Test with a command that produces output but fails
 	fragmentContent := `Error output: {{bash "ls" "/nonexistent-directory-xyz"}}`
 	fragmentPath := filepath.Join(tempDir, "failing.md")
-	err = os.WriteFile(fragmentPath, []byte(fragmentContent), 0644)
+	err = os.WriteFile(fragmentPath, []byte(fragmentContent), 0o644)
 	require.NoError(t, err)
 
 	processor, err := NewFragmentProcessor(WithFragmentDirs(tempDir))
@@ -89,7 +89,7 @@ func TestFragmentProcessor_BashCommandNotFound(t *testing.T) {
 	// Test with a command that doesn't exist - this should return empty output
 	fragmentContent := `Command not found: {{bash "nonexistent-command-xyz"}}`
 	fragmentPath := filepath.Join(tempDir, "not-found.md")
-	err = os.WriteFile(fragmentPath, []byte(fragmentContent), 0644)
+	err = os.WriteFile(fragmentPath, []byte(fragmentContent), 0o644)
 	require.NoError(t, err)
 
 	processor, err := NewFragmentProcessor(WithFragmentDirs(tempDir))
@@ -114,13 +114,13 @@ func TestFragmentProcessor_BashCommandErrorWithOutput(t *testing.T) {
 
 	// Create a test file first
 	testFile := filepath.Join(tempDir, "test.txt")
-	err = os.WriteFile(testFile, []byte("hello world\ntest content"), 0644)
+	err = os.WriteFile(testFile, []byte("hello world\ntest content"), 0o644)
 	require.NoError(t, err)
 
 	// Test with grep that produces no output but returns non-zero exit code
 	fragmentContent := fmt.Sprintf(`Search result: {{bash "grep" "nonexistent" "%s"}}`, testFile)
 	fragmentPath := filepath.Join(tempDir, "grep-test.md")
-	err = os.WriteFile(fragmentPath, []byte(fragmentContent), 0644)
+	err = os.WriteFile(fragmentPath, []byte(fragmentContent), 0o644)
 	require.NoError(t, err)
 
 	processor, err := NewFragmentProcessor(WithFragmentDirs(tempDir))
@@ -144,10 +144,10 @@ func TestFragmentProcessor_findFragmentFile(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(tempDir)
 
-	err = os.WriteFile(filepath.Join(tempDir, "test1.md"), []byte("test1"), 0644)
+	err = os.WriteFile(filepath.Join(tempDir, "test1.md"), []byte("test1"), 0o644)
 	require.NoError(t, err)
 
-	err = os.WriteFile(filepath.Join(tempDir, "test2"), []byte("test2"), 0644)
+	err = os.WriteFile(filepath.Join(tempDir, "test2"), []byte("test2"), 0o644)
 	require.NoError(t, err)
 
 	processor, err := NewFragmentProcessor(WithFragmentDirs(tempDir))
@@ -175,10 +175,10 @@ func TestFragmentProcessor_DirectoryPrecedence(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(lowPrecDir)
 
-	err = os.WriteFile(filepath.Join(highPrecDir, "same.md"), []byte("high priority"), 0644)
+	err = os.WriteFile(filepath.Join(highPrecDir, "same.md"), []byte("high priority"), 0o644)
 	require.NoError(t, err)
 
-	err = os.WriteFile(filepath.Join(lowPrecDir, "same.md"), []byte("low priority"), 0644)
+	err = os.WriteFile(filepath.Join(lowPrecDir, "same.md"), []byte("low priority"), 0o644)
 	require.NoError(t, err)
 
 	processor, err := NewFragmentProcessor(WithFragmentDirs(highPrecDir, lowPrecDir))
@@ -310,7 +310,7 @@ Your role is {{.role}}.
 Current date: {{bash "date" "+%Y-%m-%d"}}`
 
 	fragmentPath := filepath.Join(tempDir, "test-with-metadata.md")
-	err = os.WriteFile(fragmentPath, []byte(fragmentContent), 0644)
+	err = os.WriteFile(fragmentPath, []byte(fragmentContent), 0o644)
 	require.NoError(t, err)
 
 	processor, err := NewFragmentProcessor(WithFragmentDirs(tempDir))
@@ -352,11 +352,11 @@ description: This fragment has metadata
 
 Content here`
 
-	err = os.WriteFile(filepath.Join(dir1, "with-meta.md"), []byte(fragmentWithMeta), 0644)
+	err = os.WriteFile(filepath.Join(dir1, "with-meta.md"), []byte(fragmentWithMeta), 0o644)
 	require.NoError(t, err)
 
 	fragmentWithoutMeta := "Content without metadata"
-	err = os.WriteFile(filepath.Join(dir1, "without-meta.md"), []byte(fragmentWithoutMeta), 0644)
+	err = os.WriteFile(filepath.Join(dir1, "without-meta.md"), []byte(fragmentWithoutMeta), 0o644)
 	require.NoError(t, err)
 
 	fragmentUnique := `---
@@ -365,7 +365,7 @@ description: Only in second directory
 ---
 
 Unique content`
-	err = os.WriteFile(filepath.Join(dir2, "unique.md"), []byte(fragmentUnique), 0644)
+	err = os.WriteFile(filepath.Join(dir2, "unique.md"), []byte(fragmentUnique), 0o644)
 	require.NoError(t, err)
 
 	processor, err := NewFragmentProcessor(WithFragmentDirs(dir1, dir2))
@@ -423,7 +423,7 @@ allowed_commands: "ls *,echo *,pwd"
 Test content here.`
 
 	fragmentPath := filepath.Join(dir, "test-restrictions.md")
-	err = os.WriteFile(fragmentPath, []byte(fragmentContent), 0644)
+	err = os.WriteFile(fragmentPath, []byte(fragmentContent), 0o644)
 	require.NoError(t, err)
 
 	processor, err := NewFragmentProcessor(WithFragmentDirs(dir))
@@ -450,7 +450,7 @@ allowed_commands:
 Test content here.`
 
 	fragmentPath2 := filepath.Join(dir, "test-comma.md")
-	err = os.WriteFile(fragmentPath2, []byte(fragmentContent2), 0644)
+	err = os.WriteFile(fragmentPath2, []byte(fragmentContent2), 0o644)
 	require.NoError(t, err)
 
 	metadata2, err := processor.GetFragmentMetadata("test-comma")
@@ -468,11 +468,11 @@ func TestFragmentProcessor_Subdirectories(t *testing.T) {
 
 	// Create subdirectory structure
 	githubDir := filepath.Join(tempDir, "github")
-	err = os.MkdirAll(githubDir, 0755)
+	err = os.MkdirAll(githubDir, 0o755)
 	require.NoError(t, err)
 
 	ciDir := filepath.Join(tempDir, "ci")
-	err = os.MkdirAll(ciDir, 0755)
+	err = os.MkdirAll(ciDir, 0o755)
 	require.NoError(t, err)
 
 	// Create fragments in subdirectories
@@ -498,13 +498,13 @@ description: Fragment for CI configuration
 Setup CI for {{.language}} project.`
 
 	// Write fragments to subdirectories
-	err = os.WriteFile(filepath.Join(githubDir, "pr.md"), []byte(prFragmentContent), 0644)
+	err = os.WriteFile(filepath.Join(githubDir, "pr.md"), []byte(prFragmentContent), 0o644)
 	require.NoError(t, err)
 
-	err = os.WriteFile(filepath.Join(githubDir, "issue.md"), []byte(issueFragmentContent), 0644)
+	err = os.WriteFile(filepath.Join(githubDir, "issue.md"), []byte(issueFragmentContent), 0o644)
 	require.NoError(t, err)
 
-	err = os.WriteFile(filepath.Join(ciDir, "setup.md"), []byte(ciFragmentContent), 0644)
+	err = os.WriteFile(filepath.Join(ciDir, "setup.md"), []byte(ciFragmentContent), 0o644)
 	require.NoError(t, err)
 
 	// Also create a root-level fragment
@@ -515,7 +515,7 @@ description: Fragment in root directory
 
 Root level fragment content.`
 
-	err = os.WriteFile(filepath.Join(tempDir, "root.md"), []byte(rootFragmentContent), 0644)
+	err = os.WriteFile(filepath.Join(tempDir, "root.md"), []byte(rootFragmentContent), 0o644)
 	require.NoError(t, err)
 
 	processor, err := NewFragmentProcessor(WithFragmentDirs(tempDir))

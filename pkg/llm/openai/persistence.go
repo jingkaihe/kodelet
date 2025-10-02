@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/osutil"
 	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
-	"github.com/jingkaihe/kodelet/pkg/utils"
 	"github.com/pkg/errors"
 	"github.com/sashabaranov/go-openai"
 
@@ -20,7 +20,7 @@ import (
 // This includes:
 // - Empty messages (messages with no content and no tool calls)
 // - Assistant messages containing tool calls that are not followed by tool result messages
-func (t *OpenAIThread) cleanupOrphanedMessages() {
+func (t *Thread) cleanupOrphanedMessages() {
 	for len(t.messages) > 0 {
 		lastMessage := t.messages[len(t.messages)-1]
 
@@ -42,7 +42,7 @@ func (t *OpenAIThread) cleanupOrphanedMessages() {
 }
 
 // SaveConversation saves the current thread to the conversation store
-func (t *OpenAIThread) SaveConversation(ctx context.Context, summarize bool) error {
+func (t *Thread) SaveConversation(ctx context.Context, summarize bool) error {
 	t.conversationMu.Lock()
 	defer t.conversationMu.Unlock()
 
@@ -84,7 +84,7 @@ func (t *OpenAIThread) SaveConversation(ctx context.Context, summarize bool) err
 }
 
 // loadConversation loads a conversation from the store
-func (t *OpenAIThread) loadConversation(ctx context.Context) error {
+func (t *Thread) loadConversation(ctx context.Context) error {
 	t.conversationMu.Lock()
 	defer t.conversationMu.Unlock()
 
@@ -124,12 +124,12 @@ func (t *OpenAIThread) loadConversation(ctx context.Context) error {
 }
 
 // restoreBackgroundProcesses restores background processes from the conversation record
-func (t *OpenAIThread) restoreBackgroundProcesses(processes []tooltypes.BackgroundProcess) {
+func (t *Thread) restoreBackgroundProcesses(processes []tooltypes.BackgroundProcess) {
 	for _, process := range processes {
 		// Check if process is still alive
-		if utils.IsProcessAlive(process.PID) {
+		if osutil.IsProcessAlive(process.PID) {
 			// Reattach to the process
-			if restoredProcess, err := utils.ReattachProcess(process); err == nil {
+			if restoredProcess, err := osutil.ReattachProcess(process); err == nil {
 				t.state.AddBackgroundProcess(restoredProcess)
 			}
 		}
@@ -184,7 +184,7 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 		if msg.Content != "" && len(msg.MultiContent) == 0 && len(msg.ToolCalls) == 0 {
 			streamable = append(streamable, StreamableMessage{
 				Kind:    "text",
-				Role:    string(msg.Role),
+				Role:    msg.Role,
 				Content: msg.Content,
 			})
 		}
@@ -193,7 +193,7 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 			if contentBlock.Text != "" {
 				streamable = append(streamable, StreamableMessage{
 					Kind:    "text",
-					Role:    string(msg.Role),
+					Role:    msg.Role,
 					Content: contentBlock.Text,
 				})
 			}
@@ -204,7 +204,7 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 				inputJSON, _ := json.Marshal(toolCall.Function.Arguments)
 				streamable = append(streamable, StreamableMessage{
 					Kind:       "tool-use",
-					Role:       string(msg.Role),
+					Role:       msg.Role,
 					ToolName:   toolCall.Function.Name,
 					ToolCallID: toolCall.ID,
 					Input:      string(inputJSON),
@@ -248,7 +248,7 @@ func ExtractMessages(data []byte, toolResults map[string]tooltypes.StructuredToo
 		// Handle plain content (legacy format)
 		if msg.Content != "" && len(msg.MultiContent) == 0 && len(msg.ToolCalls) == 0 {
 			result = append(result, llmtypes.Message{
-				Role:    string(msg.Role),
+				Role:    msg.Role,
 				Content: msg.Content,
 			})
 		}
@@ -257,7 +257,7 @@ func ExtractMessages(data []byte, toolResults map[string]tooltypes.StructuredToo
 		for _, contentBlock := range msg.MultiContent {
 			if contentBlock.Text != "" {
 				result = append(result, llmtypes.Message{
-					Role:    string(msg.Role),
+					Role:    msg.Role,
 					Content: contentBlock.Text,
 				})
 			}
@@ -271,7 +271,7 @@ func ExtractMessages(data []byte, toolResults map[string]tooltypes.StructuredToo
 					continue
 				}
 				result = append(result, llmtypes.Message{
-					Role:    string(msg.Role),
+					Role:    msg.Role,
 					Content: fmt.Sprintf("🔧 Using tool: %s", string(inputJSON)),
 				})
 			}

@@ -38,7 +38,7 @@ var profileCmd = &cobra.Command{
 var profileCurrentCmd = &cobra.Command{
 	Use:   "current",
 	Short: "Show the current active profile",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, _ []string) error {
 		repoProfile := getRepoProfileSetting()
 		globalProfile := getGlobalProfileSetting()
 
@@ -58,7 +58,7 @@ var profileCurrentCmd = &cobra.Command{
 var profileListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all available profiles from both global and repo configs",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, _ []string) error {
 		globalProfiles := getGlobalProfiles()
 		repoProfiles := getRepoProfiles()
 		mergedProfiles := mergeProfiles(globalProfiles, repoProfiles)
@@ -389,7 +389,7 @@ func updateProfileInConfig(global bool, profileName string) error {
 
 func writeYAMLConfig(configPath string, config map[string]interface{}) error {
 	dir := filepath.Dir(configPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return errors.Wrap(err, "failed to create config directory")
 	}
 
@@ -398,7 +398,7 @@ func writeYAMLConfig(configPath string, config map[string]interface{}) error {
 		return errors.Wrap(err, "failed to marshal config")
 	}
 
-	if err := os.WriteFile(configPath, data, 0644); err != nil {
+	if err := os.WriteFile(configPath, data, 0o644); err != nil {
 		return errors.Wrap(err, "failed to write config file")
 	}
 

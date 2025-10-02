@@ -77,6 +77,7 @@ type GoogleConfig struct {
 	ThinkingBudget int32  `mapstructure:"thinking_budget" json:"thinking_budget" yaml:"thinking_budget"` // Token budget for thinking capability
 }
 
+// ProfileConfig holds the configuration values for a named profile
 type ProfileConfig map[string]interface{}
 
 // RetryConfig holds the retry configuration for API calls

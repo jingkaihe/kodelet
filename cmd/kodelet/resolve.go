@@ -23,7 +23,7 @@ func NewResolveConfig() *ResolveConfig {
 
 func (c *ResolveConfig) Validate() error {
 	if c.Provider != "github" {
-		return errors.New(fmt.Sprintf("unsupported provider: %s, only 'github' is supported", c.Provider))
+		return fmt.Errorf("unsupported provider: %s, only 'github' is supported", c.Provider)
 	}
 
 	if c.IssueURL == "" {

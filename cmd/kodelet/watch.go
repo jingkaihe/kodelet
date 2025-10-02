@@ -13,10 +13,9 @@ import (
 	"github.com/fsnotify/fsnotify"
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/osutil"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/jingkaihe/kodelet/pkg/tools"
-	"github.com/jingkaihe/kodelet/pkg/utils"
-	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -48,11 +47,11 @@ func (c *WatchConfig) Validate() error {
 			goto verbosityValid
 		}
 	}
-	return errors.New(fmt.Sprintf("invalid verbosity level: %s, must be one of: %s", c.Verbosity, strings.Join(validVerbosityLevels, ", ")))
+	return fmt.Errorf("invalid verbosity level: %s, must be one of: %s", c.Verbosity, strings.Join(validVerbosityLevels, ", "))
 
 verbosityValid:
 	if c.DebounceTime < 0 {
-		return errors.New(fmt.Sprintf("debounce time cannot be negative: %d", c.DebounceTime))
+		return fmt.Errorf("debounce time cannot be negative: %d", c.DebounceTime)
 	}
 
 	return nil
@@ -72,7 +71,7 @@ AI-powered insights or assistance whenever changes are detected.
 
 By default, it watches the current directory and all subdirectories,
 ignoring common directories like .git and node_modules.`,
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(cmd *cobra.Command, _ []string) {
 		ctx, cancel := context.WithCancel(cmd.Context())
 		defer cancel()
 
@@ -200,7 +199,7 @@ func runWatchMode(ctx context.Context, state tooltypes.State, config *WatchConfi
 				}
 
 				if event.Op&(fsnotify.Write|fsnotify.Create) != 0 {
-					if utils.IsBinaryFile(event.Name) {
+					if osutil.IsBinaryFile(event.Name) {
 						if config.Verbosity == "verbose" {
 							presenter.Info(fmt.Sprintf("Skipping binary file: %s", event.Name))
 							logger.G(ctx).WithField("file", event.Name).Debug("Skipped binary file")
@@ -265,7 +264,7 @@ func runWatchMode(ctx context.Context, state tooltypes.State, config *WatchConfi
 }
 
 func debounceFileEvents(ctx context.Context, input <-chan FileEvent, output chan<- FileEvent, delay time.Duration) {
-	var pending = make(map[string]*time.Timer)
+	pending := make(map[string]*time.Timer)
 
 	for {
 		select {
@@ -299,12 +298,10 @@ func debounceFileEvents(ctx context.Context, input <-chan FileEvent, output chan
 	}
 }
 
-var (
-	MagicCommentPatterns = []string{"# @kodelet", "// @kodelet"}
-)
+var MagicCommentPatterns = []string{"# @kodelet", "// @kodelet"}
 
 func processFileChange(ctx context.Context, state tooltypes.State, path string, config *WatchConfig) {
-	if utils.IsBinaryFile(path) {
+	if osutil.IsBinaryFile(path) {
 		if config.Verbosity == "verbose" {
 			presenter.Info(fmt.Sprintf("Skipping binary file processing: %s", path))
 			logger.G(ctx).WithField("file", path).Debug("Skipped binary file processing")

@@ -184,12 +184,12 @@ type mockConversationStore struct {
 	loadErr error
 }
 
-func (m *mockConversationStore) Save(ctx context.Context, record conversations.ConversationRecord) error {
+func (m *mockConversationStore) Save(_ context.Context, record conversations.ConversationRecord) error {
 	m.saved = record
 	return m.saveErr
 }
 
-func (m *mockConversationStore) Load(ctx context.Context, id string) (conversations.ConversationRecord, error) {
+func (m *mockConversationStore) Load(_ context.Context, _ string) (conversations.ConversationRecord, error) {
 	if m.loadErr != nil {
 		return conversations.ConversationRecord{}, m.loadErr
 	}
@@ -200,15 +200,15 @@ func (m *mockConversationStore) Close() error {
 	return nil
 }
 
-func (m *mockConversationStore) Delete(ctx context.Context, id string) error {
+func (m *mockConversationStore) Delete(_ context.Context, _ string) error {
 	return nil
 }
 
-func (m *mockConversationStore) List(ctx context.Context) ([]conversations.ConversationSummary, error) {
+func (m *mockConversationStore) List(_ context.Context) ([]conversations.ConversationSummary, error) {
 	return []conversations.ConversationSummary{}, nil
 }
 
-func (m *mockConversationStore) Query(ctx context.Context, options conversations.QueryOptions) (conversations.QueryResult, error) {
+func (m *mockConversationStore) Query(_ context.Context, options conversations.QueryOptions) (conversations.QueryResult, error) {
 	return conversations.QueryResult{
 		ConversationSummaries: []conversations.ConversationSummary{},
 		Total:                 0,
@@ -223,24 +223,24 @@ func (m *mockState) FileLastAccess() map[string]time.Time {
 	return map[string]time.Time{}
 }
 
-func (m *mockState) SetFileLastAccess(access map[string]time.Time) {
+func (m *mockState) SetFileLastAccess(_ map[string]time.Time) {
 	// No-op for mock
 }
 
 // Implement other required State interface methods with minimal implementations
-func (m *mockState) SetFileLastAccessed(path string, lastAccessed time.Time) error  { return nil }
-func (m *mockState) GetFileLastAccessed(path string) (time.Time, error)             { return time.Time{}, nil }
-func (m *mockState) ClearFileLastAccessed(path string) error                        { return nil }
-func (m *mockState) TodoFilePath() (string, error)                                  { return "", nil }
-func (m *mockState) SetTodoFilePath(path string)                                    {}
-func (m *mockState) BasicTools() []tooltypes.Tool                                   { return nil }
-func (m *mockState) MCPTools() []tooltypes.Tool                                     { return nil }
-func (m *mockState) Tools() []tooltypes.Tool                                        { return nil }
-func (m *mockState) AddBackgroundProcess(process tooltypes.BackgroundProcess) error { return nil }
-func (m *mockState) GetBackgroundProcesses() []tooltypes.BackgroundProcess          { return nil }
-func (m *mockState) RemoveBackgroundProcess(pid int) error                          { return nil }
-func (m *mockState) DiscoverContexts() map[string]string                            { return map[string]string{} }
-func (m *mockState) GetLLMConfig() interface{}                                      { return nil }
+func (m *mockState) SetFileLastAccessed(_ string, _ time.Time) error          { return nil }
+func (m *mockState) GetFileLastAccessed(_ string) (time.Time, error)          { return time.Time{}, nil }
+func (m *mockState) ClearFileLastAccessed(_ string) error                     { return nil }
+func (m *mockState) TodoFilePath() (string, error)                            { return "", nil }
+func (m *mockState) SetTodoFilePath(_ string)                                 {}
+func (m *mockState) BasicTools() []tooltypes.Tool                             { return nil }
+func (m *mockState) MCPTools() []tooltypes.Tool                               { return nil }
+func (m *mockState) Tools() []tooltypes.Tool                                  { return nil }
+func (m *mockState) AddBackgroundProcess(_ tooltypes.BackgroundProcess) error { return nil }
+func (m *mockState) GetBackgroundProcesses() []tooltypes.BackgroundProcess    { return nil }
+func (m *mockState) RemoveBackgroundProcess(_ int) error                      { return nil }
+func (m *mockState) DiscoverContexts() map[string]string                      { return map[string]string{} }
+func (m *mockState) GetLLMConfig() interface{}                                { return nil }
 
 func TestOpenAIThread_PersistenceWithStructuredResults(t *testing.T) {
 	skipIfNoOpenAIAPIKey(t)

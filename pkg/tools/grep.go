@@ -15,11 +15,12 @@ import (
 
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/invopop/jsonschema"
+	"github.com/jingkaihe/kodelet/pkg/osutil"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
-	"github.com/jingkaihe/kodelet/pkg/utils"
 	"go.opentelemetry.io/otel/attribute"
 )
 
+// GrepToolResult represents the result of a grep/search operation
 type GrepToolResult struct {
 	pattern   string
 	path      string
@@ -29,6 +30,7 @@ type GrepToolResult struct {
 	err       string
 }
 
+// GetResult returns the formatted search results
 func (r *GrepToolResult) GetResult() string {
 	result := FormatSearchResults(r.pattern, r.results)
 
@@ -39,14 +41,17 @@ func (r *GrepToolResult) GetResult() string {
 	return result
 }
 
+// GetError returns the error message
 func (r *GrepToolResult) GetError() string {
 	return r.err
 }
 
+// IsError returns true if the result contains an error
 func (r *GrepToolResult) IsError() bool {
 	return r.err != ""
 }
 
+// AssistantFacing returns the string representation for the AI assistant
 func (r *GrepToolResult) AssistantFacing() string {
 	var content string
 	if !r.IsError() {
@@ -55,6 +60,7 @@ func (r *GrepToolResult) AssistantFacing() string {
 	return tooltypes.StringifyToolResult(content, r.GetError())
 }
 
+// StructuredData returns structured metadata about the search operation
 func (r *GrepToolResult) StructuredData() tooltypes.StructuredToolResult {
 	result := tooltypes.StructuredToolResult{
 		ToolName:  "grep_tool",
@@ -76,7 +82,7 @@ func (r *GrepToolResult) StructuredData() tooltypes.StructuredToolResult {
 		}
 
 		// Detect language from file extension
-		language := utils.DetectLanguageFromPath(res.Filename)
+		language := osutil.DetectLanguageFromPath(res.Filename)
 
 		metadataResults = append(metadataResults, tooltypes.SearchResult{
 			FilePath: res.Filename,
@@ -101,22 +107,27 @@ func (r *GrepToolResult) StructuredData() tooltypes.StructuredToolResult {
 	return result
 }
 
+// GrepTool provides functionality to search for patterns in files
 type GrepTool struct{}
 
+// CodeSearchInput defines the input parameters for the grep_tool
 type CodeSearchInput struct {
 	Pattern string `json:"pattern" jsonschema:"description=The regex pattern to search for"`
 	Path    string `json:"path" jsonschema:"description=The absolute path to search for the pattern default using the current directory"`
 	Include string `json:"include" jsonschema:"description=The optional include path to search for the pattern for example: '*.go' '*.{go,py}'"`
 }
 
+// Name returns the name of the tool
 func (t *GrepTool) Name() string {
 	return "grep_tool"
 }
 
+// GenerateSchema generates the JSON schema for the tool's input parameters
 func (t *GrepTool) GenerateSchema() *jsonschema.Schema {
 	return GenerateSchema[CodeSearchInput]()
 }
 
+// TracingKVs returns tracing key-value pairs for observability
 func (t *GrepTool) TracingKVs(parameters string) ([]attribute.KeyValue, error) {
 	input := &CodeSearchInput{}
 	err := json.Unmarshal([]byte(parameters), input)
@@ -130,6 +141,8 @@ func (t *GrepTool) TracingKVs(parameters string) ([]attribute.KeyValue, error) {
 		attribute.String("include", input.Include),
 	}, nil
 }
+
+// Description returns the description of the tool
 func (t *GrepTool) Description() string {
 	return `Search for a pattern in the codebase using regex.
 
@@ -154,7 +167,8 @@ If you need to do multi-turn search using grep_tool and glob_tool, use subagentT
 `
 }
 
-func (t *GrepTool) ValidateInput(state tooltypes.State, parameters string) error {
+// ValidateInput validates the input parameters for the tool
+func (t *GrepTool) ValidateInput(_ tooltypes.State, parameters string) error {
 	var input CodeSearchInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
 		return err
@@ -366,7 +380,7 @@ func searchDirectory(ctx context.Context, root, pattern, includePattern string, 
 		}
 
 		// Skip binary files (improved detection)
-		if utils.IsBinaryFile(path) {
+		if osutil.IsBinaryFile(path) {
 			return nil
 		}
 
@@ -418,7 +432,8 @@ func sortSearchResultsByModTime(results []SearchResult) {
 // MaxSearchResults is the limit for maximum search results returned by the grep tool.
 const MaxSearchResults = 100
 
-func (t *GrepTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
+// Execute searches for the pattern in files and returns the results
+func (t *GrepTool) Execute(ctx context.Context, _ tooltypes.State, parameters string) tooltypes.ToolResult {
 	var input CodeSearchInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
 		return &GrepToolResult{

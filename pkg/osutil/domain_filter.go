@@ -1,4 +1,4 @@
-package utils
+package osutil
 
 import (
 	"bufio"
@@ -35,13 +35,12 @@ func NewDomainFilter(filePath string) *DomainFilter {
 	// Expand tilde if present
 	if strings.HasPrefix(filePath, "~/") {
 		home, err := os.UserHomeDir()
-		if err != nil {
-			// If we can't get the home directory, keep the original path
-			// This will likely fail later, but allows for better error reporting
-			// when the file is actually accessed
-		} else {
+		if err == nil {
 			filePath = filepath.Join(home, filePath[2:])
 		}
+		// If we can't get the home directory, keep the original path
+		// This will likely fail later, but allows for better error reporting
+		// when the file is actually accessed
 	}
 
 	df := &DomainFilter{

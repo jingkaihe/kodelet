@@ -14,7 +14,7 @@ func TestFormatContextPrompt(t *testing.T) {
 	})
 
 	t.Run("Only open files", func(t *testing.T) {
-		context := &IDEContext{
+		context := &Context{
 			OpenFiles: []FileInfo{
 				{Path: "/path/to/file1.go", Language: "go"},
 				{Path: "/path/to/file2.py", Language: "python"},
@@ -28,7 +28,7 @@ func TestFormatContextPrompt(t *testing.T) {
 	})
 
 	t.Run("Open files without language", func(t *testing.T) {
-		context := &IDEContext{
+		context := &Context{
 			OpenFiles: []FileInfo{
 				{Path: "/path/to/file.txt"},
 			},
@@ -41,7 +41,7 @@ func TestFormatContextPrompt(t *testing.T) {
 	})
 
 	t.Run("With selection", func(t *testing.T) {
-		context := &IDEContext{
+		context := &Context{
 			OpenFiles: []FileInfo{
 				{Path: "/path/to/file.go", Language: "go"},
 			},
@@ -61,7 +61,7 @@ func TestFormatContextPrompt(t *testing.T) {
 	})
 
 	t.Run("With diagnostics - errors", func(t *testing.T) {
-		context := &IDEContext{
+		context := &Context{
 			OpenFiles: []FileInfo{
 				{Path: "/path/to/file.go", Language: "go"},
 			},
@@ -87,7 +87,7 @@ func TestFormatContextPrompt(t *testing.T) {
 	})
 
 	t.Run("With diagnostics - warnings", func(t *testing.T) {
-		context := &IDEContext{
+		context := &Context{
 			OpenFiles: []FileInfo{
 				{Path: "/path/to/file.go", Language: "go"},
 			},
@@ -113,7 +113,7 @@ func TestFormatContextPrompt(t *testing.T) {
 	})
 
 	t.Run("With multiple diagnostics", func(t *testing.T) {
-		context := &IDEContext{
+		context := &Context{
 			OpenFiles: []FileInfo{
 				{Path: "/path/to/file.go", Language: "go"},
 			},
@@ -152,7 +152,7 @@ func TestFormatContextPrompt(t *testing.T) {
 	})
 
 	t.Run("Diagnostic without source or code", func(t *testing.T) {
-		context := &IDEContext{
+		context := &Context{
 			Diagnostics: []DiagnosticInfo{
 				{
 					FilePath: "/path/to/file.go",
@@ -172,7 +172,7 @@ func TestFormatContextPrompt(t *testing.T) {
 	})
 
 	t.Run("Complete context", func(t *testing.T) {
-		context := &IDEContext{
+		context := &Context{
 			OpenFiles: []FileInfo{
 				{Path: "/path/to/file1.go", Language: "go"},
 				{Path: "/path/to/file2.go", Language: "go"},

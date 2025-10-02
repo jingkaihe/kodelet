@@ -24,17 +24,19 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
-var (
-	_ tooltypes.Tool = &MCPTool{}
-)
+var _ tooltypes.Tool = &MCPTool{}
 
+// MCPServerType represents the type of MCP server
 type MCPServerType string
 
 const (
+	// MCPServerTypeStdio represents a stdio-based MCP server
 	MCPServerTypeStdio MCPServerType = "stdio"
-	MCPServerTypeSSE   MCPServerType = "sse"
+	// MCPServerTypeSSE represents an SSE-based MCP server
+	MCPServerTypeSSE MCPServerType = "sse"
 )
 
+// MCPServerConfig holds the configuration for an MCP server
 type MCPServerConfig struct {
 	ServerType    MCPServerType     `json:"server_type" yaml:"server_type"`         // stdio or sse
 	Command       string            `json:"command" yaml:"command"`                 // stdio: command to start the server
@@ -45,6 +47,7 @@ type MCPServerConfig struct {
 	ToolWhiteList []string          `json:"tool_white_list" yaml:"tool_white_list"` // sse: tool white list
 }
 
+// MCPConfig holds the configuration for all MCP servers
 type MCPConfig struct {
 	Servers map[string]MCPServerConfig `json:"servers"`
 }
@@ -88,12 +91,14 @@ func newMCPClient(config MCPServerConfig) (*client.Client, error) {
 	}
 }
 
+// MCPManager manages MCP clients and tools
 type MCPManager struct {
 	clients map[string]*client.Client
 
 	whiteList map[string][]string
 }
 
+// NewMCPManager creates a new MCP manager with the given configuration
 func NewMCPManager(config MCPConfig) (*MCPManager, error) {
 	clients := &MCPManager{
 		clients:   make(map[string]*client.Client),
@@ -110,10 +115,11 @@ func NewMCPManager(config MCPConfig) (*MCPManager, error) {
 	return clients, nil
 }
 
+// Initialize initializes all MCP clients
 func (m *MCPManager) Initialize(ctx context.Context) error {
 	now := time.Now()
 	logger.G(ctx).WithField("time", now).Debug("initializing mcp manager")
-	var initClient = func(c *client.Client) error {
+	initClient := func(c *client.Client) error {
 		initReq := mcp.InitializeRequest{}
 		initReq.Params.ClientInfo = mcp.Implementation{
 			Name:    "kodelet",
@@ -149,6 +155,7 @@ func (m *MCPManager) Initialize(ctx context.Context) error {
 	return nil
 }
 
+// Close closes all MCP clients
 func (m *MCPManager) Close(ctx context.Context) error {
 	for name, client := range m.clients {
 		err := client.Close()
@@ -159,10 +166,11 @@ func (m *MCPManager) Close(ctx context.Context) error {
 	return nil
 }
 
+// ListMCPTools lists all available MCP tools from all clients
 func (m *MCPManager) ListMCPTools(ctx context.Context) ([]MCPTool, error) {
 	now := time.Now()
 	logger.G(ctx).WithField("time", now).Debug("listing mcp tools")
-	var listTools = func(c *client.Client, serverName string) ([]mcp.Tool, error) {
+	listTools := func(c *client.Client, serverName string) ([]mcp.Tool, error) {
 		listToolResult, err := c.ListTools(ctx, mcp.ListToolsRequest{})
 		if err != nil {
 			return nil, err
@@ -207,6 +215,7 @@ func (m *MCPManager) ListMCPTools(ctx context.Context) ([]MCPTool, error) {
 	return tools, nil
 }
 
+// GetMCPClient gets the MCP client by name
 func (m *MCPManager) GetMCPClient(clientName string) (*client.Client, error) {
 	client, ok := m.clients[clientName]
 	if !ok {
@@ -263,6 +272,7 @@ func CreateMCPManagerFromViper(ctx context.Context) (*MCPManager, error) {
 	return manager, nil
 }
 
+// MCPTool wraps an MCP tool with its client
 type MCPTool struct {
 	client             *client.Client
 	mcpToolInputSchema mcp.ToolInputSchema
@@ -270,6 +280,7 @@ type MCPTool struct {
 	mcpToolDescription string
 }
 
+// NewMCPTool creates a new MCP tool wrapper
 func NewMCPTool(client *client.Client, tool mcp.Tool) *MCPTool {
 	return &MCPTool{
 		client:             client,
@@ -292,22 +303,27 @@ type MCPToolResult struct {
 	err           string
 }
 
+// GetResult returns the tool output
 func (r *MCPToolResult) GetResult() string {
 	return r.result
 }
 
+// GetError returns the error message
 func (r *MCPToolResult) GetError() string {
 	return r.err
 }
 
+// IsError returns true if the result contains an error
 func (r *MCPToolResult) IsError() bool {
 	return r.err != ""
 }
 
+// AssistantFacing returns the string representation for the AI assistant
 func (r *MCPToolResult) AssistantFacing() string {
 	return tooltypes.StringifyToolResult(r.result, r.err)
 }
 
+// StructuredData returns structured metadata about the MCP tool execution
 func (r *MCPToolResult) StructuredData() tooltypes.StructuredToolResult {
 	result := tooltypes.StructuredToolResult{
 		ToolName:  r.toolName,
@@ -332,13 +348,17 @@ func (r *MCPToolResult) StructuredData() tooltypes.StructuredToolResult {
 	return result
 }
 
+// Name returns the name of the tool
 func (t *MCPTool) Name() string {
 	return fmt.Sprintf("mcp_%s", t.mcpToolName)
 }
 
+// Description returns the description of the tool
 func (t *MCPTool) Description() string {
 	return t.mcpToolDescription
 }
+
+// GenerateSchema generates the JSON schema for the tool's input parameters
 func (t *MCPTool) GenerateSchema() *jsonschema.Schema {
 	b, err := t.mcpToolInputSchema.MarshalJSON()
 	if err != nil {
@@ -353,15 +373,18 @@ func (t *MCPTool) GenerateSchema() *jsonschema.Schema {
 	return schema
 }
 
-func (t *MCPTool) TracingKVs(parameters string) ([]attribute.KeyValue, error) {
+// TracingKVs returns tracing key-value pairs for observability
+func (t *MCPTool) TracingKVs(_ string) ([]attribute.KeyValue, error) {
 	return nil, nil
 }
 
-func (t *MCPTool) ValidateInput(state tooltypes.State, parameters string) error {
+// ValidateInput validates the input parameters for the tool
+func (t *MCPTool) ValidateInput(_ tooltypes.State, _ string) error {
 	return nil
 }
 
-func (t *MCPTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
+// Execute runs the MCP tool and returns the result
+func (t *MCPTool) Execute(ctx context.Context, _ tooltypes.State, parameters string) tooltypes.ToolResult {
 	var input map[string]any
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
 		return &MCPToolResult{

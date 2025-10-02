@@ -1,6 +1,57 @@
 version: "2"
+
 linters:
   disable:
     - errcheck
   enable:
-    - unparam
+    # Aligns with gopls analyses
+    - staticcheck      # gopls: staticcheck = true
+    - unparam          # gopls: unusedparams = true
+    - ineffassign      # gopls: unusedwrite = true (detects ineffectual assignments)
+    - nilnil           # gopls: nilness = true (nil comparison checks)
+
+    # Additional recommended linters
+    - govet            # Standard Go vet checks
+    - unconvert        # Unnecessary type conversions
+    - misspell         # Spelling errors
+    - revive           # Fast, configurable linter
+
+formatters:
+  enable:
+    - gofumpt          # gopls: gofumpt = true (stricter formatting)
+
+linters-settings:
+  staticcheck:
+    checks: ["all"]
+
+  revive:
+    # Minimal revive config to avoid conflicts with gopls
+    rules:
+      - name: var-naming
+      - name: context-as-argument
+      - name: error-return
+      - name: error-strings
+      - name: error-naming
+
+issues:
+  # Exclude directories that match gopls directoryFilters
+  exclude-dirs:
+    - .git
+    - .vscode
+    - .vscode-test
+    - .idea
+    - node_modules
+
+  # Maximum issues count per one linter
+  max-issues-per-linter: 0
+
+  # Maximum count of issues with the same text
+  max-same-issues: 0
+
+run:
+  # Timeout for analysis
+  timeout: 5m
+
+  # Include test files
+  tests: true
+

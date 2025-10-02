@@ -15,6 +15,7 @@ import (
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
 
+// ConversationSummary provides access to conversation metadata and usage statistics
 type ConversationSummary interface {
 	GetID() string
 	GetCreatedAt() time.Time
@@ -24,22 +25,26 @@ type ConversationSummary interface {
 	GetProvider() string
 }
 
+// DailyUsage represents usage statistics for a single day
 type DailyUsage struct {
 	Date          time.Time
 	Usage         llmtypes.Usage
 	Conversations int
 }
 
-type UsageStats struct {
+// Stats represents aggregated usage statistics with daily breakdown and totals
+type Stats struct {
 	Daily []DailyUsage
 	Total llmtypes.Usage
 }
 
+// ProviderUsageStats represents usage statistics for a single provider
 type ProviderUsageStats struct {
 	Usage         llmtypes.Usage
 	Conversations int
 }
 
+// ProviderBreakdownStats represents aggregated usage statistics broken down by provider
 type ProviderBreakdownStats struct {
 	ProviderStats      map[string]*ProviderUsageStats
 	Total              llmtypes.Usage
@@ -54,6 +59,7 @@ type DailyProviderUsage struct {
 	TotalConversations int
 }
 
+// DailyProviderBreakdownStats represents usage statistics with daily breakdown and provider breakdown
 type DailyProviderBreakdownStats struct {
 	Daily              []DailyProviderUsage
 	Total              llmtypes.Usage
@@ -76,7 +82,9 @@ type ConversationUsageStats struct {
 	CacheWriteCost     float64 `json:"cacheWriteCost"`
 }
 
-func CalculateUsageStats(summaries []ConversationSummary, startTime, endTime time.Time) *UsageStats {
+// CalculateUsageStats calculates aggregated usage statistics from conversation summaries
+// within the specified time range, with daily breakdown sorted newest first
+func CalculateUsageStats(summaries []ConversationSummary, startTime, endTime time.Time) *Stats {
 	dailyMap := make(map[string]*DailyUsage)
 	totalUsage := llmtypes.Usage{}
 
@@ -136,7 +144,7 @@ func CalculateUsageStats(summaries []ConversationSummary, startTime, endTime tim
 		}
 	}
 
-	return &UsageStats{
+	return &Stats{
 		Daily: dailyUsage,
 		Total: totalUsage,
 	}
@@ -189,6 +197,7 @@ func FormatNumber(n int) string {
 	return result.String()
 }
 
+// FormatCost formats a cost value as a currency string with 4 decimal places
 func FormatCost(cost float64) string {
 	return fmt.Sprintf("$%.4f", cost)
 }
@@ -254,6 +263,8 @@ func CalculateProviderBreakdownStats(summaries []ConversationSummary, startTime,
 	}
 }
 
+// CalculateDailyProviderBreakdownStats calculates usage statistics with both daily and provider breakdown
+// within the specified time range, sorted newest first
 func CalculateDailyProviderBreakdownStats(summaries []ConversationSummary, startTime, endTime time.Time) *DailyProviderBreakdownStats {
 	dailyMap := make(map[string]*DailyProviderUsage)
 	totalUsage := llmtypes.Usage{}
@@ -346,6 +357,7 @@ func CalculateDailyProviderBreakdownStats(summaries []ConversationSummary, start
 	}
 }
 
+// LogLLMUsage logs detailed LLM usage statistics including tokens, costs, and performance metrics
 func LogLLMUsage(ctx context.Context, usage llmtypes.Usage, model string, startTime time.Time, requestOutputTokens int) {
 	fields := map[string]any{
 		"model":                       model,

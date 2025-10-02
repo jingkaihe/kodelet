@@ -331,7 +331,7 @@ func TestFromConversationRecord(t *testing.T) {
 		},
 	}
 
-	dbRecord := FromConversationRecord(record)
+	dbRecord := fromConversationRecord(record)
 
 	assert.Equal(t, "test-id", dbRecord.ID)
 	assert.Equal(t, `[{"role": "user", "content": "test"}]`, string(dbRecord.RawMessages))
@@ -364,7 +364,7 @@ func TestFromConversationRecord_EmptySummary(t *testing.T) {
 		BackgroundProcesses: []tools.BackgroundProcess{},
 	}
 
-	dbRecord := FromConversationRecord(record)
+	dbRecord := fromConversationRecord(record)
 
 	assert.Nil(t, dbRecord.Summary) // Should be nil for database storage
 }
@@ -385,7 +385,7 @@ func TestFromConversationSummary(t *testing.T) {
 		UpdatedAt: now.Add(time.Hour),
 	}
 
-	dbSummary := FromConversationSummary(summary)
+	dbSummary := fromConversationSummary(summary)
 
 	assert.Equal(t, "test-id", dbSummary.ID)
 	assert.Equal(t, 5, dbSummary.MessageCount)
@@ -409,7 +409,7 @@ func TestFromConversationSummary_EmptySummary(t *testing.T) {
 		UpdatedAt:    now,
 	}
 
-	dbSummary := FromConversationSummary(summary)
+	dbSummary := fromConversationSummary(summary)
 
 	assert.Nil(t, dbSummary.Summary) // Should be nil for database storage
 }
@@ -468,7 +468,7 @@ func TestRoundTripConversion(t *testing.T) {
 	}
 
 	// Convert to database model and back
-	dbRecord := FromConversationRecord(originalRecord)
+	dbRecord := fromConversationRecord(originalRecord)
 	convertedRecord := dbRecord.ToConversationRecord()
 
 	// Compare all fields

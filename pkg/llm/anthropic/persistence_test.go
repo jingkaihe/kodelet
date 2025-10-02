@@ -24,12 +24,12 @@ type MockConversationStore struct {
 	LoadedRecord *convtypes.ConversationRecord
 }
 
-func (m *MockConversationStore) Save(ctx context.Context, record convtypes.ConversationRecord) error {
+func (m *MockConversationStore) Save(_ context.Context, record convtypes.ConversationRecord) error {
 	m.SavedRecords = append(m.SavedRecords, record)
 	return nil
 }
 
-func (m *MockConversationStore) Load(ctx context.Context, id string) (convtypes.ConversationRecord, error) {
+func (m *MockConversationStore) Load(_ context.Context, id string) (convtypes.ConversationRecord, error) {
 	if m.LoadedRecord != nil {
 		return *m.LoadedRecord, nil
 	}
@@ -44,15 +44,15 @@ func (m *MockConversationStore) Load(ctx context.Context, id string) (convtypes.
 	return convtypes.ConversationRecord{}, nil
 }
 
-func (m *MockConversationStore) List(ctx context.Context) ([]convtypes.ConversationSummary, error) {
+func (m *MockConversationStore) List(_ context.Context) ([]convtypes.ConversationSummary, error) {
 	return nil, nil
 }
 
-func (m *MockConversationStore) Delete(ctx context.Context, id string) error {
+func (m *MockConversationStore) Delete(_ context.Context, _ string) error {
 	return nil
 }
 
-func (m *MockConversationStore) Query(ctx context.Context, options convtypes.QueryOptions) (convtypes.QueryResult, error) {
+func (m *MockConversationStore) Query(_ context.Context, _ convtypes.QueryOptions) (convtypes.QueryResult, error) {
 	return convtypes.QueryResult{}, nil
 }
 

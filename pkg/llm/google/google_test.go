@@ -955,7 +955,7 @@ func TestGoogleThread_NewSubAgent(t *testing.T) {
 	subagent := parentThread.NewSubAgent(context.Background(), subagentConfig)
 	require.NotNil(t, subagent)
 
-	googleSubagent, ok := subagent.(*GoogleThread)
+	googleSubagent, ok := subagent.(*Thread)
 	require.True(t, ok, "Subagent should be a GoogleThread")
 
 	// Verify subagent properties

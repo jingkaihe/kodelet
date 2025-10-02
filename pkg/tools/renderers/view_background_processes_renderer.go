@@ -10,6 +10,8 @@ import (
 // ViewBackgroundProcessesRenderer renders background process list
 type ViewBackgroundProcessesRenderer struct{}
 
+// RenderCLI renders background process list in CLI format as a table showing PID, status,
+// start time, log path, and command for each running process.
 func (r *ViewBackgroundProcessesRenderer) RenderCLI(result tools.StructuredToolResult) string {
 	if !result.Success {
 		return fmt.Sprintf("Error: %s", result.Error)

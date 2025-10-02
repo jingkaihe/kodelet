@@ -130,22 +130,27 @@ func (cs ConversationSummary) GetID() string {
 	return cs.ID
 }
 
+// GetCreatedAt returns the creation timestamp of the conversation
 func (cs ConversationSummary) GetCreatedAt() time.Time {
 	return cs.CreatedAt
 }
 
+// GetUpdatedAt returns the last update timestamp of the conversation
 func (cs ConversationSummary) GetUpdatedAt() time.Time {
 	return cs.UpdatedAt
 }
 
+// GetMessageCount returns the number of messages in the conversation
 func (cs ConversationSummary) GetMessageCount() int {
 	return cs.MessageCount
 }
 
+// GetUsage returns the LLM usage statistics for the conversation
 func (cs ConversationSummary) GetUsage() llmtypes.Usage {
 	return cs.Usage
 }
 
+// GetProvider returns the LLM provider name used for the conversation
 func (cs ConversationSummary) GetProvider() string {
 	return cs.Provider
 }

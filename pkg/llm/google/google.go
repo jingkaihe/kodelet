@@ -28,6 +28,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/ide"
 	"github.com/jingkaihe/kodelet/pkg/llm/prompts"
 	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/osutil"
 	"github.com/jingkaihe/kodelet/pkg/sysprompt"
 	"github.com/jingkaihe/kodelet/pkg/telemetry"
 	"github.com/jingkaihe/kodelet/pkg/tools"
@@ -36,7 +37,6 @@ import (
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/jingkaihe/kodelet/pkg/usage"
-	"github.com/jingkaihe/kodelet/pkg/utils"
 	"github.com/jingkaihe/kodelet/pkg/version"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -53,8 +53,8 @@ const (
 	MaxImageCount    = 10              // Maximum 10 images per message
 )
 
-// GoogleThread implements the Thread interface using Google's GenAI API
-type GoogleThread struct {
+// Thread implements the Thread interface using Google's GenAI API
+type Thread struct {
 	client                 *genai.Client
 	config                 llmtypes.Config
 	backend                string
@@ -68,32 +68,33 @@ type GoogleThread struct {
 	thinkingBudget         int32
 	toolResults            map[string]tooltypes.StructuredToolResult
 	subagentContextFactory llmtypes.SubagentContextFactory
-	ideStore               *ide.IDEStore // IDE context store (nil if IDE mode disabled)
+	ideStore               *ide.Store // IDE context store (nil if IDE mode disabled)
 	mu                     sync.Mutex
 	conversationMu         sync.Mutex
 }
 
-// GoogleResponse represents a response from Google's GenAI API
-type GoogleResponse struct {
+// Response represents a response from Google's GenAI API
+type Response struct {
 	Text         string
 	ThinkingText string
-	ToolCalls    []*GoogleToolCall
+	ToolCalls    []*ToolCall
 	Usage        *genai.UsageMetadata
 }
 
-// GoogleToolCall represents a tool call in Google's response format
-type GoogleToolCall struct {
+// ToolCall represents a tool call in Google's response format
+type ToolCall struct {
 	ID   string
 	Name string
 	Args map[string]interface{}
 }
 
-func (t *GoogleThread) Provider() string {
+// Provider returns the name of the LLM provider for this thread
+func (t *Thread) Provider() string {
 	return "google"
 }
 
 // NewGoogleThread creates a new thread with Google's GenAI API
-func NewGoogleThread(config llmtypes.Config, subagentContextFactory llmtypes.SubagentContextFactory) (*GoogleThread, error) {
+func NewGoogleThread(config llmtypes.Config, subagentContextFactory llmtypes.SubagentContextFactory) (*Thread, error) {
 	// Create a copy of the config to avoid modifying the original
 	configCopy := config
 
@@ -139,7 +140,7 @@ func NewGoogleThread(config llmtypes.Config, subagentContextFactory llmtypes.Sub
 		thinkingBudget = configCopy.Google.ThinkingBudget
 	}
 
-	var ideStore *ide.IDEStore
+	var ideStore *ide.Store
 	if configCopy.IDE && !configCopy.IsSubAgent {
 		store, err := ide.NewIDEStore()
 		if err != nil {
@@ -148,7 +149,7 @@ func NewGoogleThread(config llmtypes.Config, subagentContextFactory llmtypes.Sub
 		ideStore = store
 	}
 
-	return &GoogleThread{
+	return &Thread{
 		client:                 client,
 		config:                 configCopy,
 		backend:                backend,
@@ -223,44 +224,44 @@ func detectBackend(config llmtypes.Config) string {
 }
 
 // SetState sets the state for the thread
-func (t *GoogleThread) SetState(s tooltypes.State) {
+func (t *Thread) SetState(s tooltypes.State) {
 	t.state = s
 }
 
 // GetState returns the current state of the thread
-func (t *GoogleThread) GetState() tooltypes.State {
+func (t *Thread) GetState() tooltypes.State {
 	return t.state
 }
 
 // GetConfig returns the configuration of the thread
-func (t *GoogleThread) GetConfig() llmtypes.Config {
+func (t *Thread) GetConfig() llmtypes.Config {
 	return t.config
 }
 
 // GetUsage returns the current token usage for the thread
-func (t *GoogleThread) GetUsage() llmtypes.Usage {
+func (t *Thread) GetUsage() llmtypes.Usage {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return *t.usage
 }
 
 // GetConversationID returns the current conversation ID
-func (t *GoogleThread) GetConversationID() string {
+func (t *Thread) GetConversationID() string {
 	return t.conversationID
 }
 
 // SetConversationID sets the conversation ID
-func (t *GoogleThread) SetConversationID(id string) {
+func (t *Thread) SetConversationID(id string) {
 	t.conversationID = id
 }
 
 // IsPersisted returns whether this thread is being persisted
-func (t *GoogleThread) IsPersisted() bool {
+func (t *Thread) IsPersisted() bool {
 	return t.isPersisted
 }
 
 // EnablePersistence enables conversation persistence for this thread
-func (t *GoogleThread) EnablePersistence(ctx context.Context, enabled bool) {
+func (t *Thread) EnablePersistence(ctx context.Context, enabled bool) {
 	t.isPersisted = enabled
 
 	// Initialize the store if enabling persistence and it's not already initialized
@@ -283,7 +284,7 @@ func (t *GoogleThread) EnablePersistence(ctx context.Context, enabled bool) {
 }
 
 // AddUserMessage adds a user message with optional images to the thread
-func (t *GoogleThread) AddUserMessage(ctx context.Context, message string, imagePaths ...string) {
+func (t *Thread) AddUserMessage(ctx context.Context, message string, imagePaths ...string) {
 	var parts []*genai.Part
 
 	// Validate image count
@@ -309,7 +310,7 @@ func (t *GoogleThread) AddUserMessage(ctx context.Context, message string, image
 }
 
 // SendMessage sends a message to the LLM and processes the response
-func (t *GoogleThread) SendMessage(
+func (t *Thread) SendMessage(
 	ctx context.Context,
 	message string,
 	handler llmtypes.MessageHandler,
@@ -410,7 +411,7 @@ OUTER:
 }
 
 // processMessageExchange handles a single message exchange with the LLM
-func (t *GoogleThread) processMessageExchange(
+func (t *Thread) processMessageExchange(
 	ctx context.Context,
 	handler llmtypes.MessageHandler,
 	opt llmtypes.MessageOpt,
@@ -450,7 +451,7 @@ func (t *GoogleThread) processMessageExchange(
 
 	prompt := t.buildPrompt(systemPrompt)
 
-	response := &GoogleResponse{}
+	response := &Response{}
 
 	// Add a tracing event for API call start
 	telemetry.AddEvent(ctx, "api_call_start",
@@ -462,7 +463,7 @@ func (t *GoogleThread) processMessageExchange(
 	apiStartTime := time.Now()
 
 	err := t.executeWithRetry(ctx, func() error {
-		response = &GoogleResponse{}
+		response = &Response{}
 		for chunk, err := range t.client.Models.GenerateContentStream(ctx, modelName, prompt, config) {
 			if err != nil {
 				return errors.Wrap(err, "streaming failed")
@@ -537,7 +538,7 @@ func (t *GoogleThread) processMessageExchange(
 }
 
 // processPart processes a single part of the Google GenAI response
-func (t *GoogleThread) processPart(part *genai.Part, response *GoogleResponse, handler llmtypes.MessageHandler) error {
+func (t *Thread) processPart(part *genai.Part, response *Response, handler llmtypes.MessageHandler) error {
 	switch {
 	case part.Text != "":
 		if part.Thought {
@@ -549,7 +550,7 @@ func (t *GoogleThread) processPart(part *genai.Part, response *GoogleResponse, h
 		}
 
 	case part.FunctionCall != nil:
-		toolCall := &GoogleToolCall{
+		toolCall := &ToolCall{
 			ID:   generateToolCallID(),
 			Name: part.FunctionCall.Name,
 			Args: part.FunctionCall.Args,
@@ -578,7 +579,7 @@ func (t *GoogleThread) processPart(part *genai.Part, response *GoogleResponse, h
 }
 
 // buildPrompt builds the prompt for the Google GenAI API
-func (t *GoogleThread) buildPrompt(systemPrompt string) []*genai.Content {
+func (t *Thread) buildPrompt(systemPrompt string) []*genai.Content {
 	prompt := []*genai.Content{}
 
 	// Add system message if provided
@@ -595,7 +596,7 @@ func (t *GoogleThread) buildPrompt(systemPrompt string) []*genai.Content {
 }
 
 // addAssistantMessage adds the assistant's response to the message history
-func (t *GoogleThread) addAssistantMessage(response *GoogleResponse) {
+func (t *Thread) addAssistantMessage(response *Response) {
 	var parts []*genai.Part
 
 	if response.ThinkingText != "" {
@@ -625,7 +626,7 @@ func (t *GoogleThread) addAssistantMessage(response *GoogleResponse) {
 }
 
 // supportsThinking checks if the model supports thinking capabilities
-func (t *GoogleThread) supportsThinking(modelName string) bool {
+func (t *Thread) supportsThinking(modelName string) bool {
 	pricing, exists := ModelPricingMap[modelName]
 	if !exists {
 		for key, value := range ModelPricingMap {
@@ -639,7 +640,7 @@ func (t *GoogleThread) supportsThinking(modelName string) bool {
 }
 
 // processImage converts an image path/URL to a Google GenAI part
-func (t *GoogleThread) processImage(ctx context.Context, imagePath string) (*genai.Part, error) {
+func (t *Thread) processImage(ctx context.Context, imagePath string) (*genai.Part, error) {
 	if strings.HasPrefix(imagePath, "https://") {
 		return t.processImageURL(ctx, imagePath)
 	}
@@ -652,7 +653,7 @@ func (t *GoogleThread) processImage(ctx context.Context, imagePath string) (*gen
 }
 
 // processImageURL fetches image from HTTPS URL and creates a Google GenAI part
-func (t *GoogleThread) processImageURL(ctx context.Context, imageURL string) (*genai.Part, error) {
+func (t *Thread) processImageURL(ctx context.Context, imageURL string) (*genai.Part, error) {
 	parsedURL, err := url.Parse(imageURL)
 	if err != nil {
 		return nil, errors.Wrapf(err, "invalid URL: %s", imageURL)
@@ -740,7 +741,7 @@ func (t *GoogleThread) processImageURL(ctx context.Context, imageURL string) (*g
 }
 
 // processImageFile creates a Google GenAI part from a local image file
-func (t *GoogleThread) processImageFile(ctx context.Context, imagePath string) (*genai.Part, error) {
+func (t *Thread) processImageFile(ctx context.Context, imagePath string) (*genai.Part, error) {
 	// ctx parameter included for consistency with processImageURL but not used for local file operations
 	_ = ctx
 
@@ -806,7 +807,7 @@ func isRetryableError(err error) bool {
 }
 
 // executeWithRetry executes an operation with retry logic
-func (t *GoogleThread) executeWithRetry(ctx context.Context, operation func() error) error {
+func (t *Thread) executeWithRetry(ctx context.Context, operation func() error) error {
 	retryConfig := t.config.Retry
 	if retryConfig.Attempts == 0 {
 		return operation()
@@ -935,7 +936,7 @@ func generateToolCallID() string {
 }
 
 // executeToolCalls executes tool calls and adds results to the conversation
-func (t *GoogleThread) executeToolCalls(ctx context.Context, response *GoogleResponse, handler llmtypes.MessageHandler, opt llmtypes.MessageOpt) {
+func (t *Thread) executeToolCalls(ctx context.Context, response *Response, handler llmtypes.MessageHandler, opt llmtypes.MessageOpt) {
 	var toolResultParts []*genai.Part
 
 	for _, toolCall := range response.ToolCalls {
@@ -993,12 +994,12 @@ func (t *GoogleThread) executeToolCalls(ctx context.Context, response *GoogleRes
 }
 
 // hasToolCalls checks if the response contains tool calls
-func (t *GoogleThread) hasToolCalls(response *GoogleResponse) bool {
+func (t *Thread) hasToolCalls(response *Response) bool {
 	return len(response.ToolCalls) > 0
 }
 
 // tools returns the available tools, filtered by options
-func (t *GoogleThread) tools(opt llmtypes.MessageOpt) []tooltypes.Tool {
+func (t *Thread) tools(opt llmtypes.MessageOpt) []tooltypes.Tool {
 	if opt.NoToolUse {
 		return []tooltypes.Tool{}
 	}
@@ -1009,12 +1010,12 @@ func (t *GoogleThread) tools(opt llmtypes.MessageOpt) []tooltypes.Tool {
 }
 
 // GetMessages returns the current messages in the thread
-func (t *GoogleThread) GetMessages() ([]llmtypes.Message, error) {
+func (t *Thread) GetMessages() ([]llmtypes.Message, error) {
 	return t.convertToStandardMessages(), nil
 }
 
 // convertToStandardMessages converts Google GenAI messages to standard format
-func (t *GoogleThread) convertToStandardMessages() []llmtypes.Message {
+func (t *Thread) convertToStandardMessages() []llmtypes.Message {
 	var messages []llmtypes.Message
 
 	for _, content := range t.messages {
@@ -1056,9 +1057,9 @@ func (t *GoogleThread) convertToStandardMessages() []llmtypes.Message {
 }
 
 // NewSubAgent creates a subagent thread reusing the parent's client
-func (t *GoogleThread) NewSubAgent(ctx context.Context, config llmtypes.Config) llmtypes.Thread {
+func (t *Thread) NewSubAgent(_ context.Context, config llmtypes.Config) llmtypes.Thread {
 	// Create subagent thread reusing the parent's client instead of creating a new one
-	subagentThread := &GoogleThread{
+	subagentThread := &Thread{
 		client:                 t.client, // Reuse parent's client
 		config:                 config,
 		backend:                t.backend, // Reuse parent's backend
@@ -1075,7 +1076,7 @@ func (t *GoogleThread) NewSubAgent(ctx context.Context, config llmtypes.Config) 
 }
 
 // SetStructuredToolResult stores the structured result for a tool call
-func (t *GoogleThread) SetStructuredToolResult(toolCallID string, result tooltypes.StructuredToolResult) {
+func (t *Thread) SetStructuredToolResult(toolCallID string, result tooltypes.StructuredToolResult) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.toolResults == nil {
@@ -1085,7 +1086,7 @@ func (t *GoogleThread) SetStructuredToolResult(toolCallID string, result tooltyp
 }
 
 // GetStructuredToolResults returns all structured tool results
-func (t *GoogleThread) GetStructuredToolResults() map[string]tooltypes.StructuredToolResult {
+func (t *Thread) GetStructuredToolResults() map[string]tooltypes.StructuredToolResult {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.toolResults == nil {
@@ -1100,7 +1101,7 @@ func (t *GoogleThread) GetStructuredToolResults() map[string]tooltypes.Structure
 }
 
 // SetStructuredToolResults sets all structured tool results (for loading from conversation)
-func (t *GoogleThread) SetStructuredToolResults(results map[string]tooltypes.StructuredToolResult) {
+func (t *Thread) SetStructuredToolResults(results map[string]tooltypes.StructuredToolResult) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if results == nil {
@@ -1114,7 +1115,7 @@ func (t *GoogleThread) SetStructuredToolResults(results map[string]tooltypes.Str
 }
 
 // shouldAutoCompact checks if auto-compact should be triggered based on context window utilization
-func (t *GoogleThread) shouldAutoCompact(compactRatio float64) bool {
+func (t *Thread) shouldAutoCompact(compactRatio float64) bool {
 	if compactRatio <= 0.0 || compactRatio > 1.0 {
 		return false
 	}
@@ -1129,7 +1130,7 @@ func (t *GoogleThread) shouldAutoCompact(compactRatio float64) bool {
 }
 
 // CompactContext performs comprehensive context compacting by creating a detailed summary
-func (t *GoogleThread) CompactContext(ctx context.Context) error {
+func (t *Thread) CompactContext(ctx context.Context) error {
 	// Temporarily disable persistence during compacting
 	wasPersistedOriginal := t.isPersisted
 	t.isPersisted = false
@@ -1179,7 +1180,7 @@ func (t *GoogleThread) CompactContext(ctx context.Context) error {
 }
 
 // getLastAssistantMessageText extracts text content from the most recent assistant message
-func (t *GoogleThread) getLastAssistantMessageText() (string, error) {
+func (t *Thread) getLastAssistantMessageText() (string, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -1210,7 +1211,7 @@ func (t *GoogleThread) getLastAssistantMessageText() (string, error) {
 }
 
 // ShortSummary generates a brief summary of the conversation
-func (t *GoogleThread) ShortSummary(ctx context.Context) string {
+func (t *Thread) ShortSummary(ctx context.Context) string {
 	// Temporarily disable persistence during summarization
 	t.isPersisted = false
 	defer func() {
@@ -1238,7 +1239,7 @@ func (t *GoogleThread) ShortSummary(ctx context.Context) string {
 }
 
 // processPendingFeedback processes any pending feedback messages
-func (t *GoogleThread) processPendingFeedback(ctx context.Context, handler llmtypes.MessageHandler) error {
+func (t *Thread) processPendingFeedback(ctx context.Context, handler llmtypes.MessageHandler) error {
 	feedbackStore, err := feedback.NewFeedbackStore()
 	if err != nil {
 		return errors.Wrap(err, "failed to create feedback store")
@@ -1278,9 +1279,9 @@ func (t *GoogleThread) processPendingFeedback(ctx context.Context, handler llmty
 	return nil
 }
 
-func (t *GoogleThread) processIDEContext(ctx context.Context, handler llmtypes.MessageHandler) error {
+func (t *Thread) processIDEContext(ctx context.Context, handler llmtypes.MessageHandler) error {
 	ideContext, err := t.ideStore.ReadContext(t.conversationID)
-	if err != nil {
+	if err != nil && !errors.Is(err, ide.ErrContextNotFound) {
 		return errors.Wrap(err, "failed to read IDE context")
 	}
 
@@ -1309,7 +1310,7 @@ func (t *GoogleThread) processIDEContext(ctx context.Context, handler llmtypes.M
 }
 
 // loadConversation loads a conversation from the store
-func (t *GoogleThread) loadConversation(ctx context.Context) {
+func (t *Thread) loadConversation(ctx context.Context) {
 	if t.store == nil {
 		return
 	}
@@ -1351,7 +1352,7 @@ func (t *GoogleThread) loadConversation(ctx context.Context) {
 }
 
 // createMessageSpan creates and configures a tracing span for message handling
-func (t *GoogleThread) createMessageSpan(
+func (t *Thread) createMessageSpan(
 	ctx context.Context,
 	tracer trace.Tracer,
 	message string,
@@ -1373,7 +1374,7 @@ func (t *GoogleThread) createMessageSpan(
 }
 
 // finalizeMessageSpan records final metrics and status to the span before ending it
-func (t *GoogleThread) finalizeMessageSpan(span trace.Span, err error) {
+func (t *Thread) finalizeMessageSpan(span trace.Span, err error) {
 	// Record usage metrics after completion
 	usage := t.GetUsage()
 	span.SetAttributes(
@@ -1396,7 +1397,7 @@ func (t *GoogleThread) finalizeMessageSpan(span trace.Span, err error) {
 }
 
 // updateUsage updates the thread's usage statistics
-func (t *GoogleThread) updateUsage(metadata *genai.UsageMetadata) {
+func (t *Thread) updateUsage(metadata *genai.UsageMetadata) {
 	if metadata == nil {
 		return
 	}
@@ -1425,12 +1426,12 @@ func (t *GoogleThread) updateUsage(metadata *genai.UsageMetadata) {
 }
 
 // restoreBackgroundProcesses restores background processes from the conversation record
-func (t *GoogleThread) restoreBackgroundProcesses(processes []tooltypes.BackgroundProcess) {
+func (t *Thread) restoreBackgroundProcesses(processes []tooltypes.BackgroundProcess) {
 	for _, process := range processes {
 		// Check if process is still alive
-		if utils.IsProcessAlive(process.PID) {
+		if osutil.IsProcessAlive(process.PID) {
 			// Reattach to the process
-			if restoredProcess, err := utils.ReattachProcess(process); err == nil {
+			if restoredProcess, err := osutil.ReattachProcess(process); err == nil {
 				t.state.AddBackgroundProcess(restoredProcess)
 			}
 		}

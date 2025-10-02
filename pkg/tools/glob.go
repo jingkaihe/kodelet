@@ -14,8 +14,8 @@ import (
 
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/invopop/jsonschema"
+	"github.com/jingkaihe/kodelet/pkg/osutil"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
-	"github.com/jingkaihe/kodelet/pkg/utils"
 	"go.opentelemetry.io/otel/attribute"
 )
 
@@ -47,6 +47,7 @@ var excludedHighVolumeDirs = map[string]bool{
 	"bower_components": true, // Bower packages
 }
 
+// GlobToolResult represents the result of a glob pattern search
 type GlobToolResult struct {
 	pattern   string
 	path      string
@@ -55,6 +56,7 @@ type GlobToolResult struct {
 	err       string
 }
 
+// GetResult returns the formatted search results
 func (r *GlobToolResult) GetResult() string {
 	var result strings.Builder
 	for _, file := range r.files {
@@ -69,14 +71,17 @@ func (r *GlobToolResult) GetResult() string {
 	return result.String()
 }
 
+// GetError returns the error message
 func (r *GlobToolResult) GetError() string {
 	return r.err
 }
 
+// IsError returns true if the result contains an error
 func (r *GlobToolResult) IsError() bool {
 	return r.err != ""
 }
 
+// AssistantFacing returns the string representation for the AI assistant
 func (r *GlobToolResult) AssistantFacing() string {
 	var content string
 	if !r.IsError() {
@@ -85,6 +90,7 @@ func (r *GlobToolResult) AssistantFacing() string {
 	return tooltypes.StringifyToolResult(content, r.GetError())
 }
 
+// StructuredData returns structured metadata about the glob search
 func (r *GlobToolResult) StructuredData() tooltypes.StructuredToolResult {
 	result := tooltypes.StructuredToolResult{
 		ToolName:  "glob_tool",
@@ -116,7 +122,7 @@ func (r *GlobToolResult) StructuredData() tooltypes.StructuredToolResult {
 		// Detect language from file extension
 		language := ""
 		if fileType == "file" {
-			language = utils.DetectLanguageFromPath(file)
+			language = osutil.DetectLanguageFromPath(file)
 		}
 
 		fileInfos = append(fileInfos, tooltypes.FileInfo{
@@ -138,22 +144,27 @@ func (r *GlobToolResult) StructuredData() tooltypes.StructuredToolResult {
 	return result
 }
 
+// GlobTool provides functionality to search for files using glob patterns
 type GlobTool struct{}
 
+// GlobInput defines the input parameters for the glob_tool
 type GlobInput struct {
 	Pattern           string `json:"pattern" jsonschema:"description=The glob pattern"`
 	Path              string `json:"path" jsonschema:"description=The optional path to search in, defaults to current directory, MUST NOT be a relative path"`
 	IncludeHighVolume bool   `json:"include_high_volume,omitempty" jsonschema:"description=Include high-volume directories like .git and node_modules (default: false)"`
 }
 
+// Name returns the name of the tool
 func (t *GlobTool) Name() string {
 	return "glob_tool"
 }
 
+// GenerateSchema generates the JSON schema for the tool's input parameters
 func (t *GlobTool) GenerateSchema() *jsonschema.Schema {
 	return GenerateSchema[GlobInput]()
 }
 
+// TracingKVs returns tracing key-value pairs for observability
 func (t *GlobTool) TracingKVs(parameters string) ([]attribute.KeyValue, error) {
 	input := &GlobInput{}
 	err := json.Unmarshal([]byte(parameters), input)
@@ -167,6 +178,7 @@ func (t *GlobTool) TracingKVs(parameters string) ([]attribute.KeyValue, error) {
 	}, nil
 }
 
+// Description returns the description of the tool
 func (t *GlobTool) Description() string {
 	return `Find files matching a glob pattern in the filesystem.
 
@@ -190,7 +202,8 @@ If you need to do multi-turn search using grep_tool and glob_tool, use subagentT
 `
 }
 
-func (t *GlobTool) ValidateInput(state tooltypes.State, parameters string) error {
+// ValidateInput validates the input parameters for the tool
+func (t *GlobTool) ValidateInput(_ tooltypes.State, parameters string) error {
 	var input GlobInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
 		return err
@@ -223,7 +236,8 @@ func shouldExcludePath(path string, includeHighVolume bool) bool {
 	return false
 }
 
-func (t *GlobTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
+// Execute searches for files matching the glob pattern
+func (t *GlobTool) Execute(_ context.Context, _ tooltypes.State, parameters string) tooltypes.ToolResult {
 	var input GlobInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
 		return &GlobToolResult{
@@ -286,7 +300,6 @@ func (t *GlobTool) Execute(ctx context.Context, state tooltypes.State, parameter
 
 		return nil
 	})
-
 	if err != nil {
 		return &GlobToolResult{
 			pattern: input.Pattern,

@@ -74,7 +74,7 @@ Currently supports GitHub issues only.
 Examples:
   kodelet issue-resolve --issue-url https://github.com/user/repo/issues/123
   kodelet issue-resolve --issue-url https://github.com/user/repo/issues/456 --bot-mention @mybot`,
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(cmd *cobra.Command, _ []string) {
 		ctx, cancel := context.WithCancel(cmd.Context())
 		defer cancel()
 
