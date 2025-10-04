@@ -794,3 +794,76 @@ Environment: {{.env}}`
 	assert.Contains(t, result.Content, "Branch: <no value>")
 	assert.Contains(t, result.Content, "Environment: <no value>")
 }
+
+func TestFragmentProcessor_DefaultsWithConditionals(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "kodelet-fragments-conditionals-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	// Recipe with defaults and conditional logic (like github/pr.md draft feature)
+	fragmentContent := `---
+name: PR Generator Test
+description: Tests conditional rendering with defaults
+defaults:
+  draft: "false"
+  target: "main"
+---
+
+Create a {{if eq .draft "true"}}**DRAFT** {{end}}pull request.
+
+Target branch: {{.target}}
+{{if eq .draft "true"}}
+Draft PR instructions here.
+{{else}}
+Regular PR instructions here.
+{{end}}`
+
+	fragmentPath := filepath.Join(tempDir, "pr-test.md")
+	err = os.WriteFile(fragmentPath, []byte(fragmentContent), 0o644)
+	require.NoError(t, err)
+
+	processor, err := NewFragmentProcessor(WithFragmentDirs(tempDir))
+	require.NoError(t, err)
+
+	// Test 1: Default (draft=false)
+	config1 := &Config{
+		FragmentName: "pr-test",
+		Arguments:    map[string]string{},
+	}
+
+	result1, err := processor.LoadFragment(context.Background(), config1)
+	require.NoError(t, err)
+	assert.Contains(t, result1.Content, "Create a pull request.")
+	assert.NotContains(t, result1.Content, "DRAFT")
+	assert.Contains(t, result1.Content, "Target branch: main")
+	assert.Contains(t, result1.Content, "Regular PR instructions here.")
+	assert.NotContains(t, result1.Content, "Draft PR instructions here.")
+
+	// Test 2: Override to draft=true
+	config2 := &Config{
+		FragmentName: "pr-test",
+		Arguments: map[string]string{
+			"draft": "true",
+		},
+	}
+
+	result2, err := processor.LoadFragment(context.Background(), config2)
+	require.NoError(t, err)
+	assert.Contains(t, result2.Content, "Create a **DRAFT** pull request.")
+	assert.Contains(t, result2.Content, "Target branch: main")
+	assert.Contains(t, result2.Content, "Draft PR instructions here.")
+	assert.NotContains(t, result2.Content, "Regular PR instructions here.")
+
+	// Test 3: Override target while keeping default draft
+	config3 := &Config{
+		FragmentName: "pr-test",
+		Arguments: map[string]string{
+			"target": "develop",
+		},
+	}
+
+	result3, err := processor.LoadFragment(context.Background(), config3)
+	require.NoError(t, err)
+	assert.Contains(t, result3.Content, "Target branch: develop")
+	assert.NotContains(t, result3.Content, "DRAFT")
+}
