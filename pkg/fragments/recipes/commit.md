@@ -1,9 +1,6 @@
 ---
 name: Git Commit Message Generator
 description: Generates meaningful commit messages based on staged git changes using conventional commits format
-defaults:
-  template: ""
-  short: ""
 ---
 
 {{/* Template variables: .template .short */}}
@@ -37,3 +34,4 @@ defaults:
 <git_diff>
 {{bash "git" "diff" "--cached"}}
 </git_diff>{{end}}{{end}}
+
