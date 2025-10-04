@@ -34,3 +34,4 @@ description: Generates meaningful commit messages based on staged git changes us
 <git_diff>
 {{bash "git" "diff" "--cached"}}
 </git_diff>{{end}}{{end}}
+

@@ -1,5 +1,17 @@
 # Kodelet
 
+## 0.1.8.beta (2025-10-04)
+
+### Features
+
+**Fragment Default Values**: Added support for default values in fragments/recipes to reduce repetition
+
+- **YAML Defaults**: Define default values in fragment frontmatter for common arguments
+- **Template Defaults**: Use `{{default .variable "fallback"}}` function for optional values with inline fallbacks
+- **Smart Merging**: User-provided arguments override defaults, maintaining backward compatibility
+
+**Built-in Recipe Updates**: All built-in recipes now include sensible defaults (e.g., `github/pr` defaults to `target="main"` and `draft="false"`)
+
 ## 0.1.7.beta (2025-10-02)
 
 ### Internal Changes

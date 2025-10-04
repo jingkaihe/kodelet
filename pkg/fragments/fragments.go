@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"embed"
+	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -27,10 +28,11 @@ var embedFS embed.FS
 
 // Metadata represents YAML frontmatter in fragment files
 type Metadata struct {
-	Name            string   `yaml:"name,omitempty"`
-	Description     string   `yaml:"description,omitempty"`
-	AllowedTools    []string `yaml:"allowed_tools,omitempty"`
-	AllowedCommands []string `yaml:"allowed_commands,omitempty"`
+	Name            string            `yaml:"name,omitempty"`
+	Description     string            `yaml:"description,omitempty"`
+	AllowedTools    []string          `yaml:"allowed_tools,omitempty"`
+	AllowedCommands []string          `yaml:"allowed_commands,omitempty"`
+	Defaults        map[string]string `yaml:"defaults,omitempty"`
 }
 
 // Fragment represents a fragment with its metadata and content
@@ -217,6 +219,20 @@ func (fp *Processor) parseFrontmatter(content string) (Metadata, string, error) 
 		if allowedCommands := metaData["allowed_commands"]; allowedCommands != nil {
 			metadata.AllowedCommands = fp.parseStringArrayField(allowedCommands)
 		}
+
+		// Parse defaults (map of key-value pairs)
+		if defaults := metaData["defaults"]; defaults != nil {
+			if defaultsMap, ok := defaults.(map[interface{}]interface{}); ok {
+				metadata.Defaults = make(map[string]string)
+				for k, v := range defaultsMap {
+					if keyStr, ok := k.(string); ok {
+						if valStr, ok := v.(string); ok {
+							metadata.Defaults[keyStr] = valStr
+						}
+					}
+				}
+			}
+		}
 	}
 
 	bodyContent := fp.extractBodyContent(content)
@@ -299,7 +315,17 @@ func (fp *Processor) LoadFragment(ctx context.Context, config *Config) (*Fragmen
 		return nil, errors.Wrapf(err, "failed to parse frontmatter in fragment '%s'", fragmentPath)
 	}
 
-	processed, err := fp.processTemplate(ctx, bodyContent, config.Arguments)
+	// Merge defaults from metadata with provided arguments
+	// User-provided arguments take precedence over defaults
+	mergedArgs := make(map[string]string)
+	for k, v := range metadata.Defaults {
+		mergedArgs[k] = v
+	}
+	for k, v := range config.Arguments {
+		mergedArgs[k] = v
+	}
+
+	processed, err := fp.processTemplate(ctx, bodyContent, mergedArgs)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to process fragment template '%s'", fragmentPath)
 	}
@@ -349,9 +375,10 @@ func (fp *Processor) GetFragmentMetadata(fragmentName string) (*Fragment, error)
 
 // processTemplate processes a template string with variable substitution and bash command execution using FuncMap
 func (fp *Processor) processTemplate(ctx context.Context, templateContent string, args map[string]string) (string, error) {
-	// Create template with custom FuncMap for bash command execution
+	// Create template with custom FuncMap for bash command execution and default values
 	tmpl, err := template.New("fragment").Funcs(template.FuncMap{
-		"bash": fp.createBashFunc(ctx),
+		"bash":    fp.createBashFunc(ctx),
+		"default": fp.createDefaultFunc(),
 	}).Parse(templateContent)
 	if err != nil {
 		return "", errors.Wrap(err, "failed to parse template")
@@ -399,6 +426,24 @@ func (fp *Processor) createBashFunc(ctx context.Context) func(...string) string 
 
 		// Remove trailing newlines for cleaner substitution
 		return strings.TrimRight(string(output), "\n\r")
+	}
+}
+
+// createDefaultFunc returns a function that provides default values for missing template variables
+func (fp *Processor) createDefaultFunc() func(interface{}, string) string {
+	return func(value interface{}, defaultValue string) string {
+		// Handle nil values
+		if value == nil {
+			return defaultValue
+		}
+
+		// Handle empty strings and <no value> placeholder
+		strValue := fmt.Sprint(value)
+		if strValue == "" || strValue == "<no value>" {
+			return defaultValue
+		}
+
+		return strValue
 	}
 }
 

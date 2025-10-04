@@ -1,13 +1,16 @@
 ---
 name: GitHub Pull Request Generator
 description: Creates pull requests with AI-generated title and description based on branch changes
+defaults:
+  target: "main"
+  draft: "false"
 ---
 
 {{/* Template variables: .target .template_file .draft */}}
 
-Create a {{if .draft}}**DRAFT** {{end}}pull request for the changes you have made on the current branch.
+Create a {{if eq .draft "true"}}**DRAFT** {{end}}pull request for the changes you have made on the current branch.
 
-Please create a {{if .draft}}draft {{end}}pull request following the steps below:
+Please create a {{if eq .draft "true"}}draft {{end}}pull request following the steps below:
 
 1. Make sure that the branch is up to date with the target branch. Push the branch to the remote repository if it is not already up to date.
 
@@ -26,9 +29,9 @@ Please create a {{if .draft}}draft {{end}}pull request following the steps below
 
 4. Create a pull request against the target branch {{.target}}:
 - **MUST USE** the 'mcp_create_pull_request' MCP tool if it is available in your tool list
-- The 'mcp_create_pull_request' tool requires: owner, repo, title, body, head (current branch), base (target branch){{if .draft}}
+- The 'mcp_create_pull_request' tool requires: owner, repo, title, body, head (current branch), base (target branch){{if eq .draft "true"}}
 - **IMPORTANT**: Create this pull request as a DRAFT by setting the draft parameter to true when using the MCP tool{{end}}
-- Only use 'gh pr create ...' bash command as a last resort fallback if the MCP tool is not available{{if .draft}}
+- Only use 'gh pr create ...' bash command as a last resort fallback if the MCP tool is not available{{if eq .draft "true"}}
 - If using gh CLI as fallback, add the '--draft' flag to create a draft pull request{{end}}
 
 The body of the pull request should follow the following format:

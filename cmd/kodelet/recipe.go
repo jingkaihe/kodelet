@@ -256,6 +256,15 @@ func runRecipeShow(ctx context.Context, recipeName string, config *RecipeShowCon
 		}
 
 		fmt.Printf("Path: %s\n", fragment.Path)
+
+		if len(fragment.Metadata.Defaults) > 0 {
+			fmt.Println()
+			presenter.Section("Default Arguments")
+			for key, value := range fragment.Metadata.Defaults {
+				fmt.Printf("  %s: %s\n", key, value)
+			}
+		}
+
 		fmt.Println()
 	}
 

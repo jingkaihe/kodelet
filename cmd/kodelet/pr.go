@@ -120,6 +120,8 @@ Use the --draft flag to create a draft pull request that is not ready for review
 
 		if config.Draft {
 			fragmentArgs["draft"] = "true"
+		} else {
+			fragmentArgs["draft"] = "false"
 		}
 
 		fragment, err := processor.LoadFragment(ctx, &fragments.Config{
