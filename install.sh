@@ -133,10 +133,10 @@ if [ -z "${ANTHROPIC_API_KEY}" ]; then
   echo -e "${BLUE}│${NC}    ${GREEN}source $PROFILE_FILE${NC}"
   echo -e "${BLUE}│${NC}"
   echo -e "${BLUE}│${NC} 2. Initialize Kodelet:"
-  echo -e "${BLUE}│${NC}    ${GREEN}kodelet init${NC}"
+  echo -e "${BLUE}│${NC}    ${GREEN}kodelet setup${NC}"
   echo -e "${BLUE}╰─────────────────────────────────────────╯${NC}"
   echo
 else
   echo -e "${GREEN}✅ ANTHROPIC_API_KEY already set. Skipping initialization.${NC}"
-  echo -e "${BLUE}You can run 'kodelet init' manually if you want to change configuration.${NC}"
+  echo -e "${BLUE}You can run 'kodelet setup' manually if you want to change configuration.${NC}"
 fi

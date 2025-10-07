@@ -1,30 +1,30 @@
 # Kodelet Documentation
 
 ## Project Overview
-Kodelet is a lightweight CLI tool that helps with software engineering tasks. It supports both Anthropic Claude and OpenAI APIs to process user queries and execute various tools.
+Kodelet is a lightweight CLI tool that helps with software engineering tasks. It supports Anthropic Claude, OpenAI, and Google GenAI APIs to process user queries and execute various tools through an agentic workflow.
 
 ## Project Structure
 ```
 ├── .github/             # GitHub configuration
-│   └── workflows/       # GitHub Actions workflows (5 workflow files)
-├── adrs/                # Architecture Decision Records (18 ADRs)
+│   └── workflows/       # CI/CD workflows (release, tests, Docker builds)
+├── adrs/                # Architecture Decision Records (18 ADRs documenting key decisions)
 ├── bin/                 # Compiled binaries
 ├── cmd/                 # Application entry point
 │   └── kodelet/         # Main application command (30 command files)
 ├── config.sample.yaml   # Sample configuration file
 ├── docs/                # Documentation files
-├── Dockerfile           # Docker configuration
-├── Dockerfile.cross-build # Docker cross-compilation configuration
+├── Dockerfile           # Docker runtime image configuration
+├── Dockerfile.cross-build # Docker cross-compilation environment
 ├── .dockerignore        # Docker ignore patterns
 ├── install.sh           # Installation script
 ├── AGENTS.md            # Project documentation (this file)
-├── kodelet-config.yaml  # Repository-specific configuration
+├── kodelet-config.yaml  # Repository-specific MCP tools configuration
 ├── LICENSE              # License file
 ├── mise.toml            # Tool management and task automation
 ├── pkg/                 # Core packages
 │   ├── auth/            # Authentication and login management
 │   ├── conversations/   # Conversation storage and management
-│   │   ├── sqlite/      # SQLite storage implementation
+│   │   ├── sqlite/      # SQLite storage implementation (pure Go)
 │   │   ├── service.go   # Main conversation service
 │   │   ├── factory.go   # Store factory for different backends
 │   │   └── store.go     # Store interface definitions
@@ -34,24 +34,26 @@ Kodelet is a lightweight CLI tool that helps with software engineering tasks. It
 │   │       └── github/  # GitHub-specific recipes
 │   ├── github/          # GitHub Actions templates and utilities
 │   │   └── templates/   # GitHub workflow templates
+│   ├── ide/             # IDE integration tools (for kodelet-tools)
 │   ├── llm/             # LLM client for AI interactions
 │   │   ├── anthropic/   # Anthropic Claude API client
-│   │   ├── google/      # Google GenAI API client
+│   │   ├── google/      # Google GenAI API client (Gemini & Vertex AI)
 │   │   ├── openai/      # OpenAI API client
 │   │   │   └── preset/  # OpenAI model presets
 │   │   │       ├── openai/  # OpenAI model presets
 │   │   │       └── xai/     # X.AI (Grok) model presets
 │   │   └── prompts/     # Common LLM prompts
 │   ├── logger/          # Context-aware structured logging
+│   ├── osutil/          # OS utilities and process management
 │   ├── presenter/       # User-facing output and formatting
 │   ├── sysprompt/       # System prompt configuration
 │   │   └── templates/   # Prompt templates
 │   │       └── components/ # Template components
 │   │           └── examples/ # Example components
-│   ├── telemetry/       # Telemetry and tracing components
+│   ├── telemetry/       # Telemetry and tracing components (OpenTelemetry)
 │   ├── tools/           # Tool implementations (31 tool files)
 │   │   └── renderers/   # Tool output renderers
-│   ├── tui/             # Terminal UI components
+│   ├── tui/             # Terminal UI components (Bubble Tea)
 │   ├── types/           # Common types
 │   │   ├── conversations/ # Conversation related types
 │   │   ├── llm/         # LLM related types
@@ -76,15 +78,19 @@ The codebase follows a modular structure with separation of concerns between LLM
 ## Tech Stack
 - **Go 1.25.1** - Programming language
 - **Node.js 22.17.0** - Frontend development and build tooling
-- **Anthropic SDK v1.7.0** - For Claude AI integration
-- **OpenAI SDK v1.40.0** - For GPT and compatible models
+- **Anthropic SDK v1.13.0** - For Claude AI integration
+- **OpenAI SDK v1.41.2** - For GPT and compatible models (including X.AI Grok)
 - **Google GenAI SDK v1.25.0** - For Google Gemini and Vertex AI integration
-- **MCP v0.29.0** - Language server protocol for AI tool integration
-- **SQLite** - Pure Go database implementation
+- **MCP v0.29.0** - Model Context Protocol for AI tool integration
+- **SQLite (modernc.org/sqlite)** - Pure Go database implementation
 - **Logrus** - Structured logging library
-- **Charm libraries** - TUI components
+- **Charm libraries** - TUI components (Bubble Tea, Lipgloss, Bubbles)
 - **Cobra & Viper** - CLI commands and configuration
-- **React & TypeScript** - Web UI frontend
+- **React 18 & TypeScript** - Web UI frontend
+- **Vite** - Frontend build tool
+- **Vitest** - Frontend testing framework
+- **Tailwind CSS & DaisyUI** - Frontend styling
+- **OpenTelemetry** - Distributed tracing and telemetry
 - **Docker** - For containerization
 - **mise** - Tool version management and task automation
 
@@ -98,7 +104,8 @@ All development commands use `mise run <task>`. The `mise.toml` file defines all
 
 The web UI is a React/TypeScript SPA built with Vite and embedded directly into the Go binary:
 
-**Frontend Stack**: React 18, TypeScript, Tailwind CSS, DaisyUI, React Router, Vite
+**Frontend Stack**: React 18, TypeScript, Tailwind CSS, DaisyUI, React Router, Vite, Vitest
+
 **Build Process**:
 - `go generate ./pkg/webui` triggers `npm install && npm run build` in frontend directory
 - Vite builds optimized assets to `pkg/webui/dist/` directory
@@ -115,23 +122,23 @@ For detailed frontend development workflow and commands, see [docs/DEVELOPMENT.m
 
 All development work must follow these core principles:
 
-1. **Always run linting**: Make sure you run `mise run lint` after you finish any work to ensure code quality and consistency. The lint command runs go vet, golangci-lint and staticcheck with all checks enabled for comprehensive analysis. For frontend changes, also run `mise run eslint` to check TypeScript/React code quality.
-2. **Write comprehensive tests**: Always write tests for new features you add, and regression tests for changes you make to existing functionality.
+1. **Always run linting**: Make sure you run `mise run lint` after you finish any work to ensure code quality and consistency. The lint command runs go vet, golangci-lint (with staticcheck, unparam, ineffassign, nilnil, unconvert, misspell, revive) and standalone staticcheck with all checks enabled for comprehensive analysis. For frontend changes, also run `mise run eslint` to check TypeScript/React code quality.
+2. **Write comprehensive tests**: Always write tests for new features you add, and regression tests for changes you make to existing functionality. Use testify for Go tests and Vitest for frontend tests.
 3. **Document CLI changes**: Always document when you have changed the CLI interface to maintain clear usage documentation.
 
 ## Testing
 
 ```bash
-mise run test # Run all tests
-mise run e2e-test-docker # Run acceptance tests in Docker
-go test ./pkg/... # Run tests for a specific package
-go test -v -cover ./pkg/... ./cmd/... # Run tests with coverage
+mise run test                # Run all Go tests
+mise run e2e-test-docker     # Run acceptance tests in Docker
+go test ./pkg/...            # Run tests for a specific package
+go test -v -cover ./pkg/... ./cmd/...  # Run tests with coverage
 
 # Frontend testing
-mise run frontend-test # Run frontend tests
-mise run frontend-test-watch # Run frontend tests in watch mode
-mise run frontend-test-ui # Run frontend tests with UI
-mise run frontend-test-coverage # Run frontend tests with coverage
+mise run frontend-test              # Run frontend tests
+mise run frontend-test-watch        # Run frontend tests in watch mode
+mise run frontend-test-ui           # Run frontend tests with interactive UI
+mise run frontend-test-coverage     # Run frontend tests with coverage
 ```
 
 ### Testing Conventions
@@ -167,9 +174,10 @@ For comprehensive usage documentation and examples, see [./docs/MANUAL.md](./doc
 kodelet run "query"                    # One-shot execution
 kodelet chat                           # Interactive mode
 kodelet watch                          # File watcher
-kodelet serve [--host HOST] [--port PORT] # Web UI server (default: localhost:8080)
+kodelet serve [--host HOST] [--port PORT]  # Web UI server (default: localhost:8080)
 
-# Fragment/Receipt system (see docs/FRAGMENTS.md)
+# Fragment/Recipe system (see docs/FRAGMENTS.md)
+kodelet run -r init                    # Bootstrap AGENTS.md for repository
 kodelet run -r fragment-name           # Use fragment/recipe template
 kodelet run -r fragment --arg key=value  # Fragment with arguments
 kodelet run -r fragment "additional instructions"  # Fragment with extra context
@@ -250,15 +258,18 @@ Kodelet uses a `Thread` abstraction for all interactions with LLM providers (Ant
 - Maintains message history and state
 - Handles tool execution and responses
 - Uses a handler-based pattern for processing responses
-- Supports provider-specific features (thinking for Claude, reasoning effort for OpenAI, thinking for Google)
+- Supports provider-specific features (extended thinking for Claude, reasoning effort for OpenAI, thinking for Google)
+- Token usage tracking for all API calls across different providers
 
-The architecture provides a unified approach for both interactive and one-shot uses with token usage tracking for all API calls across different providers.
+The architecture provides a unified approach for both interactive and one-shot uses with comprehensive observability through OpenTelemetry tracing.
 
 ## Error Handling
 
 **Always prefer pkg/errors over fmt.Errorf** for error wrapping:
 
 ```go
+import "github.com/pkg/errors"
+
 // Good - pkg/errors provides stack traces and better error context
 return errors.Wrap(err, "failed to validate config")
 return errors.Wrapf(err, "failed to process file %s", filename)
@@ -278,6 +289,7 @@ import "github.com/jingkaihe/kodelet/pkg/logger"
 
 // Good - structured logging for diagnostics
 logger.G(ctx).WithField("command", "commit").Info("Starting operation")
+logger.G(ctx).WithError(err).Error("Failed to process request")
 
 // Bad - never use fmt.Printf or log.Printf for diagnostics
 fmt.Printf("Processing request for %s", userID)
@@ -300,15 +312,24 @@ presenter.Stats(usageStats)               // Formatted stats
 **Key principles:**
 - Logger = diagnostics (debug, structured data)
 - Presenter = user interaction (progress, results, errors)
-- Colors auto-detect terminal/CI with `KODELET_COLOR` override
+- Colors auto-detect terminal/CI with `KODELET_COLOR` override (`always`, `never`, `auto`)
 - Quiet mode support via `presenter.SetQuiet(true)`
 
 ### CLI Error Handling
-Handle errors with both user feedback and logging:
+Handle errors with user feedback:
 ```go
 if err != nil {
-    presenter.Error(err, "Operation failed")           // For user
+    presenter.Error(err, "Operation failed")
     return errors.Wrap(err, "failed to process")
 }
 ```
+
+## Resources
+
+- **Documentation**: See `docs/` directory for comprehensive guides
+- **ADRs**: See `adrs/` for architectural decision records
+- **User Manual**: [docs/MANUAL.md](docs/MANUAL.md) for complete CLI reference
+- **Development Guide**: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for setup and workflows
+- **Fragments Guide**: [docs/FRAGMENTS.md](docs/FRAGMENTS.md) for template system
+- **MCP Tools**: [docs/mcp.md](docs/mcp.md) for Model Context Protocol integration
 

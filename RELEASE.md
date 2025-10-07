@@ -1,5 +1,18 @@
 # Kodelet
 
+## 0.1.9.beta (2025-10-07)
+
+### Breaking Changes
+
+**Command Rename**: The `kodelet init` command has been renamed to `kodelet setup` for better clarity
+
+- **Migration**: Update scripts and documentation to use `kodelet setup` instead of `kodelet init`
+- **Reason**: Avoids confusion with the new `init` recipe that bootstraps repository-specific AGENTS.md files
+
+### Features
+
+**Repository Initialization Recipe**: New built-in `init` recipe for bootstrapping workspace context. You can run `kodelet run -r init` to analyze your repository and create/enhance AGENTS.md
+
 ## 0.1.8.beta (2025-10-04)
 
 ### Features

@@ -27,6 +27,27 @@ Fragments solve the problem of repeatedly typing lengthy, complex instructions b
 - **Share fragments** across projects and team members
 - **Maintain consistency** in prompt formatting
 
+### Built-in Recipes
+
+Kodelet includes several built-in recipes for common tasks:
+
+- **`init`** - Bootstrap `AGENTS.md` file with workspace context and conventions
+- **`commit`** - Generate git commit messages from staged changes
+- **`custom-tool`** - Create custom tools for Kodelet
+- **`github/pr`** - Generate pull request descriptions
+- **`github/issue-resolve`** - Resolve GitHub issues
+- **`github/pr-respond`** - Respond to pull request comments
+
+List all available recipes with:
+```bash
+kodelet recipe list
+```
+
+View a recipe's content and metadata:
+```bash
+kodelet recipe show init
+```
+
 ## Quick Start
 
 ### 1. Create a Fragment
@@ -60,6 +81,24 @@ kodelet run -r commit
 ```
 
 This will execute the git commands, substitute their output into the template, and send the complete prompt to the LLM.
+
+### Repository Initialization
+
+The built-in `init` recipe is designed to bootstrap your repository's `AGENTS.md` file:
+
+```bash
+# Initialize or improve AGENTS.md for your repository
+kodelet run -r init
+```
+
+This recipe will:
+- Analyze your repository structure, tech stack, and architecture
+- Identify build systems, testing frameworks, and key commands
+- Extract coding conventions and patterns from existing code
+- Review any existing AI assistant rules (Cursor, Copilot)
+- Create or suggest improvements to `AGENTS.md`
+
+The `AGENTS.md` file provides context that helps Kodelet work more effectively in your workspace by understanding your project's conventions, commands, and architecture.
 
 ## Template Syntax
 
