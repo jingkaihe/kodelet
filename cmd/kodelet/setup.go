@@ -10,8 +10,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var initCmd = &cobra.Command{
-	Use:   "init",
+var setupCmd = &cobra.Command{
+	Use:   "setup",
 	Short: "Set up Kodelet configuration",
 	Long:  `Set up Kodelet configuration with sensible defaults.`,
 	Run: func(cmd *cobra.Command, _ []string) {
@@ -69,7 +69,7 @@ var initCmd = &cobra.Command{
 		if !override {
 			if _, err := os.Stat(configFile); err == nil {
 				presenter.Warning(fmt.Sprintf("Configuration file already exists at %s", configFile))
-				presenter.Info("To overwrite, use the --override flag or remove the file and run 'kodelet init' again")
+				presenter.Info("To overwrite, use the --override flag or remove the file and run 'kodelet setup' again")
 				return
 			}
 		} else {
@@ -190,10 +190,10 @@ profiles:
 		presenter.Info("  kodelet serve                         # Start web UI server")
 		presenter.Info("  kodelet --help                        # Show all available commands")
 
-		logger.G(ctx).Info("Kodelet initialization completed successfully")
+		logger.G(ctx).Info("Kodelet setup completed successfully")
 	},
 }
 
 func init() {
-	initCmd.Flags().Bool("override", false, "Overwrite existing configuration file if it exists")
+	setupCmd.Flags().Bool("override", false, "Overwrite existing configuration file if it exists")
 }
