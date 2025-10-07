@@ -40,6 +40,19 @@ To install a specific version:
 kodelet update --version 0.0.24.alpha
 ```
 
+## Quick Start
+
+After installation, initialize your repository with context for Kodelet:
+
+```bash
+# Bootstrap AGENTS.md with workspace-specific context
+kodelet run -r init
+```
+
+This analyzes your repository and creates an `AGENTS.md` file that helps Kodelet understand your project's structure, tech stack, conventions, and key commands.
+
+For more details on fragments/recipes, see [docs/FRAGMENTS.md](docs/FRAGMENTS.md).
+
 ## Choice of LLM
 
 Kodelet supports both Anthropic Claude and OpenAI models. Currently, we recommend using Claude Sonnet 4 Sonnet for standard requests and Claude 3.5 Haiku for lightweight tasks.

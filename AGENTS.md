@@ -169,7 +169,8 @@ kodelet chat                           # Interactive mode
 kodelet watch                          # File watcher
 kodelet serve [--host HOST] [--port PORT] # Web UI server (default: localhost:8080)
 
-# Fragment/Receipt system (see docs/FRAGMENTS.md)
+# Fragment/Recipe system (see docs/FRAGMENTS.md)
+kodelet run -r init                    # Bootstrap AGENTS.md for repository
 kodelet run -r fragment-name           # Use fragment/recipe template
 kodelet run -r fragment --arg key=value  # Fragment with arguments
 kodelet run -r fragment "additional instructions"  # Fragment with extra context
