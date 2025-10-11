@@ -429,7 +429,7 @@ kodelet run --allowed-tools "file_read,grep_tool,bash" "analyze code"
 ### Best Practices
 1. **Use context files** (`AGENTS.md`) for project-specific conventions
 2. **Create fragments** for repetitive tasks
-3. **Utilize profiles** for different model configurations
+3. **Utilize profiles** for different model configurations (note: can only switch between profiles using the same provider)
 4. **Enable conversation persistence** to build on previous work
 5. **Use `--follow` flag** to continue conversations efficiently
 6. **Restrict commands** in automated environments
