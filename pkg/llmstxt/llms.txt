@@ -88,9 +88,13 @@ kodelet run -r my-recipe --arg project_name="Kodelet" --arg focus_area="security
 **AI Commit Messages:**
 ```bash
 git add .
-kodelet commit                  # Generates conventional commit message
-kodelet commit --short          # Shorter message
-kodelet commit --no-confirm     # Skip confirmation
+# Recommended: fast, non-interactive, no conversation saved
+kodelet commit --short --no-confirm --no-save
+
+# Other options
+kodelet commit                  # Interactive with confirmation
+kodelet commit --short          # Shorter message with confirmation
+kodelet commit --no-confirm     # Skip confirmation only
 ```
 
 **Pull Requests:**
@@ -120,7 +124,7 @@ kodelet gha-agent-onboard       # Complete setup (GitHub app + secrets + workflo
 After setup, team members can mention `@kodelet` in issues and PRs for automated assistance.
 
 ### Image Input Support
-Vision-enabled analysis (Anthropic Claude only):
+Vision-enabled analysis with multi-modal models:
 
 ```bash
 # Single image
@@ -131,6 +135,7 @@ kodelet run --image ./diagram.png --image ./mockup.jpg "Compare these designs"
 ```
 
 **Supported:** JPEG, PNG, GIF, WebP | **Max:** 5MB per image, 10 images per message
+**Provider Support:** All providers (Anthropic, OpenAI, Google) if the model supports multi-modal
 
 ### Custom Tools
 Extend kodelet with executable tools in any language:
@@ -216,7 +221,7 @@ profiles:
                 - file_read
                 - glob_tool
                 - grep_tool
-            model: o3
+            model: gpt-5
             provider: openai
             reasoning_effort: high
         thinking_budget_tokens: 8000
@@ -282,6 +287,7 @@ kodelet run --provider anthropic "query"
 **Features:**
 - Reasoning effort control (low, medium, high)
 - Function calling
+- Vision capabilities (multi-modal models)
 
 **Setup:**
 ```bash
@@ -293,6 +299,10 @@ kodelet run --provider openai --model gpt-5 "query"
 **Models:**
 - `gemini-2.5-pro` - Advanced capabilities
 - `gemini-2.5-flash` - Fast responses
+
+**Features:**
+- Vision capabilities (multi-modal models)
+- Fast inference
 
 **Setup:**
 ```bash
@@ -468,3 +478,4 @@ kodelet version                 # Show version and build info
 ---
 
 **Note:** This guide focuses on end-user usage. For development information, build processes, and contribution guidelines, see the project's GitHub repository and development documentation.
+
