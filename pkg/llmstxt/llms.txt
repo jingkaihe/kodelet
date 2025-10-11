@@ -37,7 +37,7 @@ kodelet run --no-save "temporary query"
 ## Key Features
 
 ### Agent Context Files
-Kodelet automatically loads project-specific context from `AGENTS.md` (or `KODELET.md` as fallback) in your current directory. This file should contain:
+Kodelet automatically loads project-specific context from `AGENTS.md` in your current directory. This file should contain:
 
 - Project overview and structure
 - Tech stack and dependencies
@@ -53,26 +53,49 @@ kodelet run -r init
 ```
 
 ### Fragments/Recipes System
-Reusable prompt templates with variable substitution and bash command execution.
+Reusable prompt templates with variable substitution, bash command execution, and tool/command restrictions.
 
 **Built-in recipes:**
 ```bash
 kodelet recipe list              # List all available recipes
 kodelet recipe show init         # View recipe content
 
-# Use built-in recipes
-kodelet run -r init             # Bootstrap AGENTS.md
-kodelet run -r commit           # Generate commit messages
-kodelet run -r custom-tool      # Create custom tools
+# Repository initialization
+kodelet run -r init             # Bootstrap AGENTS.md with project context
+
+# Custom tool creation
+kodelet run -r custom-tool --arg task="fetch weather data"
+kodelet run -r custom-tool --arg task="validate JSON" --arg global=true
 ```
+
+**Recipe capabilities:**
+- Variable substitution: `{{.variable_name}}`
+- Bash command execution: `{{bash "git" "branch" "--show-current"}}`
+- Default values: Define fallbacks in recipe frontmatter
+- Tool restrictions: Limit available tools with `allowed_tools`
+- Command restrictions: Limit bash commands with `allowed_commands`
 
 **Custom recipes:**
 Create templates in `./recipes/` or `~/.kodelet/recipes/`:
 
 ```markdown
+---
+name: My Custom Recipe
+description: Brief description
+defaults:
+  project: "default-value"
+allowed_tools:
+  - file_read
+  - grep_tool
+  - bash
+allowed_commands:
+  - "git *"
+  - "cat *"
+---
+
 ## Context:
 Current branch: {{bash "git" "branch" "--show-current"}}
-Project: {{.project_name}}
+Project: {{.project}}
 
 ## Task:
 Please analyze {{.focus_area}}
@@ -80,7 +103,8 @@ Please analyze {{.focus_area}}
 
 Usage:
 ```bash
-kodelet run -r my-recipe --arg project_name="Kodelet" --arg focus_area="security"
+kodelet run -r my-recipe --arg project="Kodelet" --arg focus_area="security"
+kodelet run -r my-recipe "additional context or instructions"
 ```
 
 ### Git Integration
@@ -101,6 +125,7 @@ kodelet commit --no-confirm     # Skip confirmation only
 ```bash
 kodelet pr                      # Create PR with AI-generated description
 kodelet pr --target main        # Specify target branch
+kodelet pr --draft              # Create draft PR
 ```
 
 **Issue Resolution:**
@@ -404,7 +429,7 @@ kodelet run --allowed-tools "file_read,grep_tool,bash" "analyze code"
 ### Best Practices
 1. **Use context files** (`AGENTS.md`) for project-specific conventions
 2. **Create fragments** for repetitive tasks
-3. **Utilize profiles** for different model configurations
+3. **Utilize profiles** for different model configurations (note: can only switch between profiles using the same provider)
 4. **Enable conversation persistence** to build on previous work
 5. **Use `--follow` flag** to continue conversations efficiently
 6. **Restrict commands** in automated environments
@@ -437,31 +462,6 @@ kodelet run "add comprehensive docstrings to all functions in this file"
 ```bash
 kodelet run "write unit tests for the payment processing module"
 ```
-
-## Troubleshooting
-
-### API Key Issues
-- Verify environment variable is set: `echo $ANTHROPIC_API_KEY`
-- Check variable name matches provider (ANTHROPIC_API_KEY, OPENAI_API_KEY, GOOGLE_API_KEY)
-
-### Model Not Available
-- Verify model name is correct
-- Check account has access to the specific model
-
-### Context Files Not Loading
-- Ensure `AGENTS.md` or `KODELET.md` exists in current directory
-- Check file is readable
-- Use `--log-level debug` to see which context file is loaded
-
-### Command Execution Blocked
-- Check if command is in banned list (vim, cd, less, more)
-- Verify `allowed_commands` configuration if using allowlist
-- Use `--allowed-commands` flag to override for testing
-
-### Configuration Not Loading
-- Verify YAML syntax is valid
-- Check file location (`~/.kodelet/config.yaml` or `./kodelet-config.yaml`)
-- Review file permissions
 
 ## Resources
 
