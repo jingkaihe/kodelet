@@ -117,7 +117,7 @@ profiles:
                 - file_read
                 - glob_tool
                 - grep_tool
-            model: o3
+            model: gpt-5
             provider: openai
             reasoning_effort: high
         thinking_budget_tokens: 8000

@@ -325,3 +325,37 @@ func TestServer_Close(t *testing.T) {
 	assert.NoError(t, err)
 	assert.True(t, closeCalled)
 }
+
+func TestHandleLlmsTxt(t *testing.T) {
+	// Create a mock service
+	mockService := &mockConversationService{}
+
+	// Create server instance
+	server := &Server{
+		router:              mux.NewRouter(),
+		conversationService: mockService,
+	}
+
+	// Setup routes
+	server.setupRoutes()
+
+	// Create request
+	req := httptest.NewRequest(http.MethodGet, "/llms.txt", nil)
+	w := httptest.NewRecorder()
+
+	// Serve request
+	server.router.ServeHTTP(w, req)
+
+	// Check response
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "text/markdown; charset=utf-8", w.Header().Get("Content-Type"))
+	assert.Equal(t, "public, max-age=3600", w.Header().Get("Cache-Control"))
+
+	// Verify content
+	body := w.Body.String()
+	assert.NotEmpty(t, body)
+	assert.Contains(t, body, "# Kodelet - LLM-Friendly Guide")
+	assert.Contains(t, body, "## Quick Start")
+	assert.Contains(t, body, "## Core Usage Modes")
+	assert.Contains(t, body, "kodelet run")
+}
