@@ -179,6 +179,12 @@ kodelet conversation stream <id>
 
 # Delete conversation
 kodelet conversation delete <id>
+
+# Fork conversation (experimental branching)
+# 1. Ensure clean git status
+# 2. Fork the conversation to try different approaches
+# 3. If it doesn't work: git reset --hard and continue with original
+kodelet conversation fork <id>
 ```
 
 ## Configuration
