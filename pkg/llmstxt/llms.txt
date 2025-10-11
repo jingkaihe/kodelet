@@ -125,6 +125,7 @@ kodelet commit --no-confirm     # Skip confirmation only
 ```bash
 kodelet pr                      # Create PR with AI-generated description
 kodelet pr --target main        # Specify target branch
+kodelet pr --draft              # Create draft PR
 ```
 
 **Issue Resolution:**
