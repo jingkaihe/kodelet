@@ -1,5 +1,20 @@
 # Kodelet
 
+## 0.1.10.beta (2025-10-11)
+
+### Features
+
+**LLM-Friendly Documentation**: Added new `llms.txt` command for comprehensive LLM-optimized usage documentation
+
+- **CLI Command**: `kodelet llms.txt` displays complete guide optimized for LLM consumption
+- **Web Endpoint**: New `/llms.txt` endpoint serves documentation in markdown format with caching
+- **Comprehensive Coverage**: Includes quick start, core usage modes, configuration, providers, advanced features, security, and troubleshooting
+- **LLM Integration**: Designed for AI agents to quickly understand Kodelet's capabilities and usage patterns
+
+### Bug Fixes
+
+**OpenAI Configuration**: Updated default OpenAI model in setup configuration from `o3` to `gpt-5` for improved compatibility
+
 ## 0.1.9.beta (2025-10-07)
 
 ### Breaking Changes
