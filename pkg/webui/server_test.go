@@ -358,5 +358,4 @@ func TestHandleLlmsTxt(t *testing.T) {
 	assert.Contains(t, body, "## Quick Start")
 	assert.Contains(t, body, "## Core Usage Modes")
 	assert.Contains(t, body, "kodelet run")
-	assert.Contains(t, body, "kodelet chat")
 }

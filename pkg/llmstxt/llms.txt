@@ -14,23 +14,6 @@ curl -sSL https://raw.githubusercontent.com/jingkaihe/kodelet/main/install.sh | 
 kodelet update
 ```
 
-### Setup
-
-Configure your API key (choose one):
-
-```bash
-# Anthropic Claude (recommended)
-kodelet anthropic-login              # Interactive login (no env var needed)
-# OR
-export ANTHROPIC_API_KEY="sk-ant-api..."
-
-# OpenAI
-export OPENAI_API_KEY="sk-..."
-
-# Google Gemini
-export GOOGLE_API_KEY="your-api-key"
-```
-
 ## Core Usage Modes
 
 ### One-shot Mode
@@ -49,16 +32,6 @@ kodelet run --resume CONVERSATION_ID "more questions"
 
 # Don't save conversation
 kodelet run --no-save "temporary query"
-```
-
-### Interactive Chat Mode
-Extended conversations:
-
-```bash
-kodelet chat                    # Start new chat
-kodelet chat --follow           # Resume most recent
-kodelet chat -f                 # Short form
-kodelet chat --resume CONV_ID   # Resume specific conversation
 ```
 
 ## Key Features
@@ -210,58 +183,65 @@ kodelet conversation delete <id>
 
 ## Configuration
 
-### Configuration Files
 Kodelet uses layered configuration:
 1. Global: `~/.kodelet/config.yaml`
 2. Repository: `./kodelet-config.yaml` (overrides global)
 
 Example `config.yaml`:
 ```yaml
-provider: "anthropic"
-model: "claude-sonnet-4-5-20250929"
-max_tokens: 8192
-log_level: "info"
-
-# Security
-allowed_commands: ["ls *", "pwd", "git status"]
-
-# Profiles
+aliases:
+    gemini-flash: gemini-2.5-flash
+    gemini-pro: gemini-2.5-pro
+    haiku-35: claude-3-5-haiku-20241022
+    opus-41: claude-opus-4-1-20250805
+    sonnet-45: claude-sonnet-4-5-20250929
+max_tokens: 16000
+model: sonnet-45
+profile: default
+thinking_budget_tokens: 8000
+weak_model: haiku-35
+weak_model_max_tokens: 8192
 profiles:
-  premium:
-    model: "claude-opus-4-1-20250805"
-    max_tokens: 16000
-```
-
-### Environment Variables
-All variables prefixed with `KODELET_`:
-
-```bash
-export KODELET_PROVIDER="anthropic"
-export KODELET_MODEL="claude-sonnet-4-5-20250929"
-export KODELET_MAX_TOKENS="8192"
-export KODELET_LOG_LEVEL="info"
-export KODELET_PROFILE="premium"
-```
-
-### Configuration Profiles
-Switch between different model configurations:
-
-```bash
-kodelet profile list            # List available profiles
-kodelet profile show premium    # Show profile details
-kodelet profile use premium     # Switch profile
-kodelet profile current         # Show active profile
-
-# Temporary profile override
-kodelet run --profile premium "explain this architecture"
-```
-
-### Command Line Flags
-Override any setting for single command:
-
-```bash
-kodelet run --provider anthropic --model claude-opus-4-1-20250805 "query"
-kodelet run --max-tokens 4096 --log-level debug "analyze this"
+    hybrid:
+        max_tokens: 16000
+        model: sonnet-45
+        subagent:
+            allowed_tools:
+                - file_read
+                - glob_tool
+                - grep_tool
+            model: o3
+            provider: openai
+            reasoning_effort: high
+        thinking_budget_tokens: 8000
+        weak_model: haiku-35
+        weak_model_max_tokens: 8192
+    openai:
+        max_tokens: 16000
+        model: gpt-5
+        provider: openai
+        reasoning_effort: medium
+        weak_model: gpt-5
+    premium:
+        max_tokens: 16000
+        model: opus-41
+        thinking_budget_tokens: 8000
+        weak_model: sonnet-45
+        weak_model_max_tokens: 8192
+    google:
+        max_tokens: 16000
+        model: gemini-pro
+        provider: google
+        weak_model: gemini-flash
+        weak_model_max_tokens: 8192
+    xai:
+        max_tokens: 16000
+        model: grok-code-fast-1
+        openai:
+            preset: xai
+        provider: openai
+        reasoning_effort: none
+        weak_model: grok-code-fast-1
 ```
 
 ## LLM Providers

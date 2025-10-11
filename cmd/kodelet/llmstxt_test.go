@@ -31,7 +31,6 @@ func TestLlmstxtCommand(t *testing.T) {
 
 	// Verify specific important topics are covered
 	assert.Contains(t, content, "kodelet run", "llms.txt should document run command")
-	assert.Contains(t, content, "kodelet chat", "llms.txt should document chat command")
 	assert.Contains(t, content, "AGENTS.md", "llms.txt should mention agent context files")
 	assert.Contains(t, content, "Fragments/Recipes", "llms.txt should mention fragments")
 	assert.Contains(t, content, "Custom Tools", "llms.txt should mention custom tools")
