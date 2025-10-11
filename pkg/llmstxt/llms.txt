@@ -438,31 +438,6 @@ kodelet run "add comprehensive docstrings to all functions in this file"
 kodelet run "write unit tests for the payment processing module"
 ```
 
-## Troubleshooting
-
-### API Key Issues
-- Verify environment variable is set: `echo $ANTHROPIC_API_KEY`
-- Check variable name matches provider (ANTHROPIC_API_KEY, OPENAI_API_KEY, GOOGLE_API_KEY)
-
-### Model Not Available
-- Verify model name is correct
-- Check account has access to the specific model
-
-### Context Files Not Loading
-- Ensure `AGENTS.md` or `KODELET.md` exists in current directory
-- Check file is readable
-- Use `--log-level debug` to see which context file is loaded
-
-### Command Execution Blocked
-- Check if command is in banned list (vim, cd, less, more)
-- Verify `allowed_commands` configuration if using allowlist
-- Use `--allowed-commands` flag to override for testing
-
-### Configuration Not Loading
-- Verify YAML syntax is valid
-- Check file location (`~/.kodelet/config.yaml` or `./kodelet-config.yaml`)
-- Review file permissions
-
 ## Resources
 
 - **Website:** https://kodelet.com
