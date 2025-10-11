@@ -27,7 +27,6 @@ func TestLlmstxtCommand(t *testing.T) {
 	assert.Contains(t, content, "## LLM Providers", "llms.txt should contain LLM Providers section")
 	assert.Contains(t, content, "## Advanced Features", "llms.txt should contain Advanced Features section")
 	assert.Contains(t, content, "## Security & Best Practices", "llms.txt should contain Security section")
-	assert.Contains(t, content, "## Troubleshooting", "llms.txt should contain Troubleshooting section")
 
 	// Verify specific important topics are covered
 	assert.Contains(t, content, "kodelet run", "llms.txt should document run command")

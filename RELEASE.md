@@ -1,5 +1,9 @@
 # Kodelet
 
+## 0.1.11.beta (2025-10-11)
+
+Improved `llms.txt` with better recipe system documentation
+
 ## 0.1.10.beta (2025-10-11)
 
 ### Features

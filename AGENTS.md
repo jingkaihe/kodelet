@@ -43,6 +43,7 @@ Kodelet is a lightweight CLI tool that helps with software engineering tasks. It
 │   │   │       ├── openai/  # OpenAI model presets
 │   │   │       └── xai/     # X.AI (Grok) model presets
 │   │   └── prompts/     # Common LLM prompts
+│   ├── llmstxt/         # LLM-friendly documentation (llms.txt)
 │   ├── logger/          # Context-aware structured logging
 │   ├── osutil/          # OS utilities and process management
 │   ├── presenter/       # User-facing output and formatting
@@ -206,6 +207,10 @@ kodelet pr-respond --pr-url URL --issue-comment-id ID     # Respond to issue com
 # Image support
 kodelet run --image path.png "query"   # Single/multiple images
 kodelet run --image file1.png --image file2.png "compare these"
+
+# LLM-friendly documentation
+kodelet llms.txt                       # Display LLM-friendly usage guide
+# Web endpoint: http://localhost:8080/llms.txt (when running kodelet serve)
 
 # Development
 mise run build|test|lint|format|release    # Standard dev commands
