@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/jingkaihe/kodelet/pkg/tools"
+	"github.com/jingkaihe/kodelet/pkg/version"
 	"github.com/pkg/errors"
 )
 
@@ -20,6 +21,7 @@ func StartChat(ctx context.Context,
 	maxTurns int,
 	compactRatio float64,
 	disableAutoCompact bool,
+	ideMode bool,
 ) error {
 	// Check terminal capabilities
 	var teaOptions []tea.ProgramOption
@@ -37,39 +39,40 @@ func StartChat(ctx context.Context,
 	var p *tea.Program
 
 	// Create model separately to add welcome messages
-	model := NewModel(ctx, conversationID, enablePersistence, mcpManager, customManager, maxTurns, compactRatio, disableAutoCompact)
+	model := NewModel(ctx, conversationID, enablePersistence, mcpManager, customManager, maxTurns, compactRatio, disableAutoCompact, ideMode)
 
-	// Add welcome message with ASCII art
-	kodaletArt := `
+	welcomeMsg := fmt.Sprintf(`
+Kodelet (%s)
+	`, version.Version)
 
-	▗▖ ▗▖ ▗▄▖ ▗▄▄▄ ▗▄▄▄▖▗▖   ▗▄▄▄▖▗▄▄▄▖
-	▐▌▗▞▘▐▌ ▐▌▐▌  █▐▌   ▐▌   ▐▌     █
-	▐▛▚▖ ▐▌ ▐▌▐▌  █▐▛▀▀▘▐▌   ▐▛▀▀▘  █
-	▐▌ ▐▌▝▚▄▞▘▐▙▄▄▀▐▙▄▄▖▐▙▄▄▖▐▙▄▄▖  █
-
-`
-
-	// Style the ASCII art to be bold and blood red like Khorne
-	styledArt := lipgloss.NewStyle().
+	// Style the banner (Tokyo Night)
+	styledBanner := lipgloss.NewStyle().
 		Bold(true).
-		Italic(true).
-		Foreground(lipgloss.AdaptiveColor{Light: "#990000", Dark: "#FF0000"}).
-		Margin(1).
-		Render(kodaletArt)
+		Foreground(lipgloss.AdaptiveColor{Light: "#7aa2f7", Dark: "#7aa2f7"}). // Blue
+		Render(welcomeMsg)
 
-	welcomeMsg := styledArt + "\n\nWelcome to Kodelet Chat! Type your message and press Enter to send."
+	fullWelcomeMsg := styledBanner + "\nWelcome to Kodelet Chat! Type your message and press Enter to send."
 	if !isTTY() {
-		welcomeMsg += "\nLimited terminal capabilities detected. Some features may not work properly."
+		fullWelcomeMsg += "\nLimited terminal capabilities detected. Some features may not work properly."
 	}
 
 	// Add persistence status
 	if enablePersistence {
-		welcomeMsg += "\nConversation persistence is enabled."
+		fullWelcomeMsg += "\nConversation persistence is enabled."
 	} else {
-		welcomeMsg += "\nConversation persistence is disabled (--no-save)."
+		fullWelcomeMsg += "\nConversation persistence is disabled (--no-save)."
 	}
 
-	model.AddSystemMessage(welcomeMsg)
+	if ideMode {
+		idMsg := lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.AdaptiveColor{Light: "#9ece6a", Dark: "#9ece6a"}).
+			Render(fmt.Sprintf("\n📋 Conversation ID: %s", conversationID))
+		fullWelcomeMsg += idMsg
+		fullWelcomeMsg += "\n💡 Attach your IDE using: :KodeletAttach " + conversationID
+	}
+
+	model.AddSystemMessage(fullWelcomeMsg)
 	model.AddSystemMessage("Press Ctrl+H for help with keyboard shortcuts.")
 
 	// Create a new program with the updated model
@@ -120,8 +123,8 @@ func isTTY() bool {
 }
 
 // StartChatCmd is a wrapper that can be called from a command line
-func StartChatCmd(ctx context.Context, conversationID string, enablePersistence bool, mcpManager *tools.MCPManager, customManager *tools.CustomToolManager, maxTurns int, compactRatio float64, disableAutoCompact bool) {
-	if err := StartChat(ctx, conversationID, enablePersistence, mcpManager, customManager, maxTurns, compactRatio, disableAutoCompact); err != nil {
+func StartChatCmd(ctx context.Context, conversationID string, enablePersistence bool, mcpManager *tools.MCPManager, customManager *tools.CustomToolManager, maxTurns int, compactRatio float64, disableAutoCompact bool, ideMode bool) {
+	if err := StartChat(ctx, conversationID, enablePersistence, mcpManager, customManager, maxTurns, compactRatio, disableAutoCompact, ideMode); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}

@@ -6,6 +6,7 @@ package usage
 import (
 	"context"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -14,7 +15,7 @@ import (
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
 
-// ConversationSummary represents the interface for conversation summary data needed for usage calculations
+// ConversationSummary provides access to conversation metadata and usage statistics
 type ConversationSummary interface {
 	GetID() string
 	GetCreatedAt() time.Time
@@ -31,8 +32,8 @@ type DailyUsage struct {
 	Conversations int
 }
 
-// UsageStats represents aggregated usage statistics
-type UsageStats struct {
+// Stats represents aggregated usage statistics with daily breakdown and totals
+type Stats struct {
 	Daily []DailyUsage
 	Total llmtypes.Usage
 }
@@ -43,7 +44,7 @@ type ProviderUsageStats struct {
 	Conversations int
 }
 
-// ProviderBreakdownStats represents usage statistics broken down by provider
+// ProviderBreakdownStats represents aggregated usage statistics broken down by provider
 type ProviderBreakdownStats struct {
 	ProviderStats      map[string]*ProviderUsageStats
 	Total              llmtypes.Usage
@@ -58,7 +59,7 @@ type DailyProviderUsage struct {
 	TotalConversations int
 }
 
-// DailyProviderBreakdownStats represents daily usage statistics broken down by provider
+// DailyProviderBreakdownStats represents usage statistics with daily breakdown and provider breakdown
 type DailyProviderBreakdownStats struct {
 	Daily              []DailyProviderUsage
 	Total              llmtypes.Usage
@@ -81,9 +82,9 @@ type ConversationUsageStats struct {
 	CacheWriteCost     float64 `json:"cacheWriteCost"`
 }
 
-// CalculateUsageStats calculates usage statistics from a list of conversation summaries
-func CalculateUsageStats(summaries []ConversationSummary, startTime, endTime time.Time) *UsageStats {
-	// Create map to aggregate daily usage
+// CalculateUsageStats calculates aggregated usage statistics from conversation summaries
+// within the specified time range, with daily breakdown sorted newest first
+func CalculateUsageStats(summaries []ConversationSummary, startTime, endTime time.Time) *Stats {
 	dailyMap := make(map[string]*DailyUsage)
 	totalUsage := llmtypes.Usage{}
 
@@ -91,7 +92,6 @@ func CalculateUsageStats(summaries []ConversationSummary, startTime, endTime tim
 		// Use UpdatedAt as the date for this conversation's usage
 		date := summary.GetUpdatedAt().Truncate(24 * time.Hour)
 
-		// Filter by time range if specified
 		if !startTime.IsZero() && date.Before(startTime) {
 			continue
 		}
@@ -101,7 +101,6 @@ func CalculateUsageStats(summaries []ConversationSummary, startTime, endTime tim
 
 		dateKey := date.Format("2006-01-02")
 
-		// Initialize daily usage if not exists
 		if _, exists := dailyMap[dateKey]; !exists {
 			dailyMap[dateKey] = &DailyUsage{
 				Date:  date,
@@ -109,7 +108,6 @@ func CalculateUsageStats(summaries []ConversationSummary, startTime, endTime tim
 			}
 		}
 
-		// Add to daily and total usage
 		daily := dailyMap[dateKey]
 		usage := summary.GetUsage()
 		daily.Usage.InputTokens += usage.InputTokens
@@ -122,7 +120,6 @@ func CalculateUsageStats(summaries []ConversationSummary, startTime, endTime tim
 		daily.Usage.CacheReadCost += usage.CacheReadCost
 		daily.Conversations++
 
-		// Add to total
 		totalUsage.InputTokens += usage.InputTokens
 		totalUsage.OutputTokens += usage.OutputTokens
 		totalUsage.CacheCreationInputTokens += usage.CacheCreationInputTokens
@@ -133,7 +130,6 @@ func CalculateUsageStats(summaries []ConversationSummary, startTime, endTime tim
 		totalUsage.CacheReadCost += usage.CacheReadCost
 	}
 
-	// Convert map to sorted slice
 	var dailyUsage []DailyUsage
 	for _, usage := range dailyMap {
 		dailyUsage = append(dailyUsage, *usage)
@@ -148,7 +144,7 @@ func CalculateUsageStats(summaries []ConversationSummary, startTime, endTime tim
 		}
 	}
 
-	return &UsageStats{
+	return &Stats{
 		Daily: dailyUsage,
 		Total: totalUsage,
 	}
@@ -164,12 +160,9 @@ func CalculateConversationUsageStats(summaries []ConversationSummary) *Conversat
 		return stats
 	}
 
-	// Calculate totals
 	for _, summary := range summaries {
-		// Count messages
 		stats.TotalMessages += summary.GetMessageCount()
 
-		// Sum up usage
 		usage := summary.GetUsage()
 		stats.InputTokens += usage.InputTokens
 		stats.OutputTokens += usage.OutputTokens
@@ -181,7 +174,6 @@ func CalculateConversationUsageStats(summaries []ConversationSummary) *Conversat
 		stats.CacheWriteCost += usage.CacheCreationCost
 	}
 
-	// Calculate totals
 	stats.TotalTokens = stats.InputTokens + stats.OutputTokens + stats.CacheReadTokens + stats.CacheWriteTokens
 	stats.TotalCost = stats.InputCost + stats.OutputCost + stats.CacheReadCost + stats.CacheWriteCost
 
@@ -195,7 +187,6 @@ func FormatNumber(n int) string {
 		return str
 	}
 
-	// Add commas
 	var result strings.Builder
 	for i, digit := range str {
 		if i > 0 && (len(str)-i)%3 == 0 {
@@ -206,14 +197,17 @@ func FormatNumber(n int) string {
 	return result.String()
 }
 
-// FormatCost formats cost values for display
+// FormatCost formats a cost value as a currency string with 4 decimal places
 func FormatCost(cost float64) string {
 	return fmt.Sprintf("$%.4f", cost)
 }
 
+func roundToFourDecimalPlaces(value float64) float64 {
+	return math.Round(value*10000) / 10000
+}
+
 // CalculateProviderBreakdownStats calculates usage statistics broken down by provider (accumulated totals)
 func CalculateProviderBreakdownStats(summaries []ConversationSummary, startTime, endTime time.Time) *ProviderBreakdownStats {
-	// Create map to aggregate provider usage
 	providerMap := make(map[string]*ProviderUsageStats)
 	totalUsage := llmtypes.Usage{}
 	totalConversations := 0
@@ -222,7 +216,6 @@ func CalculateProviderBreakdownStats(summaries []ConversationSummary, startTime,
 		// Use UpdatedAt as the date for this conversation's usage
 		date := summary.GetUpdatedAt().Truncate(24 * time.Hour)
 
-		// Filter by time range if specified
 		if !startTime.IsZero() && date.Before(startTime) {
 			continue
 		}
@@ -232,7 +225,6 @@ func CalculateProviderBreakdownStats(summaries []ConversationSummary, startTime,
 
 		provider := summary.GetProvider()
 
-		// Initialize provider usage if not exists
 		if _, exists := providerMap[provider]; !exists {
 			providerMap[provider] = &ProviderUsageStats{
 				Usage:         llmtypes.Usage{},
@@ -240,11 +232,9 @@ func CalculateProviderBreakdownStats(summaries []ConversationSummary, startTime,
 			}
 		}
 
-		// Add to provider and total usage
 		providerStats := providerMap[provider]
 		usage := summary.GetUsage()
 
-		// Add to provider stats
 		providerStats.Usage.InputTokens += usage.InputTokens
 		providerStats.Usage.OutputTokens += usage.OutputTokens
 		providerStats.Usage.CacheCreationInputTokens += usage.CacheCreationInputTokens
@@ -255,7 +245,6 @@ func CalculateProviderBreakdownStats(summaries []ConversationSummary, startTime,
 		providerStats.Usage.CacheReadCost += usage.CacheReadCost
 		providerStats.Conversations++
 
-		// Add to total
 		totalUsage.InputTokens += usage.InputTokens
 		totalUsage.OutputTokens += usage.OutputTokens
 		totalUsage.CacheCreationInputTokens += usage.CacheCreationInputTokens
@@ -274,9 +263,9 @@ func CalculateProviderBreakdownStats(summaries []ConversationSummary, startTime,
 	}
 }
 
-// CalculateDailyProviderBreakdownStats calculates daily usage statistics broken down by provider
+// CalculateDailyProviderBreakdownStats calculates usage statistics with both daily and provider breakdown
+// within the specified time range, sorted newest first
 func CalculateDailyProviderBreakdownStats(summaries []ConversationSummary, startTime, endTime time.Time) *DailyProviderBreakdownStats {
-	// Create map to aggregate daily usage by date
 	dailyMap := make(map[string]*DailyProviderUsage)
 	totalUsage := llmtypes.Usage{}
 	totalConversations := 0
@@ -285,7 +274,6 @@ func CalculateDailyProviderBreakdownStats(summaries []ConversationSummary, start
 		// Use UpdatedAt as the date for this conversation's usage
 		date := summary.GetUpdatedAt().Truncate(24 * time.Hour)
 
-		// Filter by time range if specified
 		if !startTime.IsZero() && date.Before(startTime) {
 			continue
 		}
@@ -296,7 +284,6 @@ func CalculateDailyProviderBreakdownStats(summaries []ConversationSummary, start
 		dateKey := date.Format("2006-01-02")
 		provider := summary.GetProvider()
 
-		// Initialize daily usage if not exists
 		if _, exists := dailyMap[dateKey]; !exists {
 			dailyMap[dateKey] = &DailyProviderUsage{
 				Date:               date,
@@ -308,7 +295,6 @@ func CalculateDailyProviderBreakdownStats(summaries []ConversationSummary, start
 
 		daily := dailyMap[dateKey]
 
-		// Initialize provider usage for this day if not exists
 		if _, exists := daily.ProviderUsage[provider]; !exists {
 			daily.ProviderUsage[provider] = &ProviderUsageStats{
 				Usage:         llmtypes.Usage{},
@@ -316,11 +302,9 @@ func CalculateDailyProviderBreakdownStats(summaries []ConversationSummary, start
 			}
 		}
 
-		// Add to daily provider and daily total usage
 		providerStats := daily.ProviderUsage[provider]
 		usage := summary.GetUsage()
 
-		// Add to provider stats for this day
 		providerStats.Usage.InputTokens += usage.InputTokens
 		providerStats.Usage.OutputTokens += usage.OutputTokens
 		providerStats.Usage.CacheCreationInputTokens += usage.CacheCreationInputTokens
@@ -331,7 +315,6 @@ func CalculateDailyProviderBreakdownStats(summaries []ConversationSummary, start
 		providerStats.Usage.CacheReadCost += usage.CacheReadCost
 		providerStats.Conversations++
 
-		// Add to daily total
 		daily.TotalUsage.InputTokens += usage.InputTokens
 		daily.TotalUsage.OutputTokens += usage.OutputTokens
 		daily.TotalUsage.CacheCreationInputTokens += usage.CacheCreationInputTokens
@@ -342,7 +325,6 @@ func CalculateDailyProviderBreakdownStats(summaries []ConversationSummary, start
 		daily.TotalUsage.CacheReadCost += usage.CacheReadCost
 		daily.TotalConversations++
 
-		// Add to overall total
 		totalUsage.InputTokens += usage.InputTokens
 		totalUsage.OutputTokens += usage.OutputTokens
 		totalUsage.CacheCreationInputTokens += usage.CacheCreationInputTokens
@@ -354,7 +336,6 @@ func CalculateDailyProviderBreakdownStats(summaries []ConversationSummary, start
 		totalConversations++
 	}
 
-	// Convert map to sorted slice
 	var dailyUsage []DailyProviderUsage
 	for _, usage := range dailyMap {
 		dailyUsage = append(dailyUsage, *usage)
@@ -376,35 +357,34 @@ func CalculateDailyProviderBreakdownStats(summaries []ConversationSummary, start
 	}
 }
 
-// LogLLMUsage logs structured LLM usage information after request completion
+// LogLLMUsage logs detailed LLM usage statistics including tokens, costs, and performance metrics
 func LogLLMUsage(ctx context.Context, usage llmtypes.Usage, model string, startTime time.Time, requestOutputTokens int) {
-	fields := map[string]interface{}{
+	fields := map[string]any{
 		"model":                       model,
 		"input_tokens":                usage.InputTokens,
 		"output_tokens":               usage.OutputTokens,
 		"cache_creation_input_tokens": usage.CacheCreationInputTokens,
 		"cache_read_input_tokens":     usage.CacheReadInputTokens,
-		"input_cost":                  usage.InputCost,
-		"output_cost":                 usage.OutputCost,
-		"cache_creation_cost":         usage.CacheCreationCost,
-		"cache_read_cost":             usage.CacheReadCost,
-		"total_cost":                  usage.TotalCost(),
+		"input_cost":                  roundToFourDecimalPlaces(usage.InputCost),
+		"output_cost":                 roundToFourDecimalPlaces(usage.OutputCost),
+		"cache_creation_cost":         roundToFourDecimalPlaces(usage.CacheCreationCost),
+		"cache_read_cost":             roundToFourDecimalPlaces(usage.CacheReadCost),
+		"total_cost":                  roundToFourDecimalPlaces(usage.TotalCost()),
 		"total_tokens":                usage.TotalTokens(),
 		"current_context_window":      usage.CurrentContextWindow,
 		"max_context_window":          usage.MaxContextWindow,
 	}
 
-	// Add context window usage ratio if max context window is not zero
 	if usage.MaxContextWindow != 0 {
 		ratio := float64(usage.CurrentContextWindow) / float64(usage.MaxContextWindow)
-		fields["context_window_usage_ratio"] = ratio
+		fields["context_window_usage_ratio"] = roundToFourDecimalPlaces(ratio)
 	}
 
 	// Calculate output tokens per second using per-request tokens
 	duration := time.Since(startTime)
 	if duration > 0 && requestOutputTokens > 0 {
 		tokensPerSecond := float64(requestOutputTokens) / duration.Seconds()
-		fields["output_tokens/s"] = tokensPerSecond
+		fields["output_tokens/s"] = roundToFourDecimalPlaces(tokensPerSecond)
 	}
 
 	logger.G(ctx).WithFields(fields).Info("LLM usage completed")

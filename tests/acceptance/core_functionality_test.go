@@ -22,7 +22,7 @@ func TestCoreFunctionality(t *testing.T) {
 		{
 			name:  "create hello.txt file",
 			query: `create a hello.txt with "hello world" as the content`,
-			validate: func(t *testing.T, output string, testDir string) {
+			validate: func(t *testing.T, _ string, testDir string) {
 				// Check if hello.txt was created in the current directory
 				helloFile := filepath.Join(testDir, "hello.txt")
 				content, err := os.ReadFile(helloFile)
@@ -42,7 +42,7 @@ func TestCoreFunctionality(t *testing.T) {
 		{
 			name:  "detect operating system",
 			query: "is the operating system linux or windows",
-			validate: func(t *testing.T, output string, testDir string) {
+			validate: func(t *testing.T, output string, _ string) {
 				outputLower := strings.ToLower(output)
 				assert.Contains(t, outputLower, "linux", "Expected output to contain 'linux' (case insensitive)")
 			},

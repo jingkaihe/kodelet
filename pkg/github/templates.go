@@ -18,7 +18,9 @@ import (
 var TemplateFS embed.FS
 
 const (
-	// Template file paths
+	// BackgroundAgentWorkflowTemplate is the path to the background agent workflow
+	// template file used for generating GitHub Actions workflows for autonomous
+	// conversation handling.
 	BackgroundAgentWorkflowTemplate = "templates/background_agent_workflow.yaml.tmpl"
 )
 

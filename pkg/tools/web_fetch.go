@@ -20,11 +20,12 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/osutil"
 	"github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
-	"github.com/jingkaihe/kodelet/pkg/utils"
 )
 
+// WebFetchToolResult represents the result of fetching content from a web URL
 type WebFetchToolResult struct {
 	url      string
 	prompt   string
@@ -33,32 +34,36 @@ type WebFetchToolResult struct {
 	filePath string // For saved files
 }
 
+// GetResult returns the fetched content
 func (r *WebFetchToolResult) GetResult() string {
 	return r.result
 }
 
+// GetError returns the error message
 func (r *WebFetchToolResult) GetError() string {
 	return r.err
 }
 
+// IsError returns true if the result contains an error
 func (r *WebFetchToolResult) IsError() bool {
 	return r.err != ""
 }
 
+// AssistantFacing returns the string representation for the AI assistant
 func (r *WebFetchToolResult) AssistantFacing() string {
 	return tooltypes.StringifyToolResult(r.result, r.err)
 }
 
 // WebFetchTool implements the web_fetch tool for retrieving and processing web content.
 type WebFetchTool struct {
-	domainFilter *utils.DomainFilter
+	domainFilter *osutil.DomainFilter
 }
 
 // NewWebFetchTool creates a new WebFetchTool with optional domain filtering
 func NewWebFetchTool(allowedDomainsFile string) *WebFetchTool {
-	var domainFilter *utils.DomainFilter
+	var domainFilter *osutil.DomainFilter
 	if allowedDomainsFile != "" {
-		domainFilter = utils.NewDomainFilter(allowedDomainsFile)
+		domainFilter = osutil.NewDomainFilter(allowedDomainsFile)
 	}
 	return &WebFetchTool{
 		domainFilter: domainFilter,
@@ -187,7 +192,7 @@ URLs requiring authentication cannot be accessed as only public URLs are support
 }
 
 // ValidateInput validates the input parameters for the tool.
-func (t *WebFetchTool) ValidateInput(state tooltypes.State, parameters string) error {
+func (t *WebFetchTool) ValidateInput(_ tooltypes.State, parameters string) error {
 	input := &WebFetchInput{}
 	err := json.Unmarshal([]byte(parameters), input)
 	if err != nil {
@@ -205,11 +210,7 @@ func (t *WebFetchTool) ValidateInput(state tooltypes.State, parameters string) e
 	}
 
 	// Allow HTTP for localhost/internal addresses, require HTTPS for external domains
-	if parsedURL.Scheme == "https" {
-		// HTTPS is always allowed
-	} else if parsedURL.Scheme == "http" && isLocalHost(parsedURL.Hostname()) {
-		// HTTP is allowed for localhost/internal addresses
-	} else {
+	if parsedURL.Scheme != "https" && (parsedURL.Scheme != "http" || !isLocalHost(parsedURL.Hostname())) {
 		return errors.New("only HTTPS scheme is supported for external domains, HTTP is allowed for localhost/internal addresses")
 	}
 
@@ -229,7 +230,7 @@ func (t *WebFetchTool) ValidateInput(state tooltypes.State, parameters string) e
 }
 
 // Execute executes the web_fetch tool.
-func (t *WebFetchTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
+func (t *WebFetchTool) Execute(ctx context.Context, _ tooltypes.State, parameters string) tooltypes.ToolResult {
 	input := &WebFetchInput{}
 	err := json.Unmarshal([]byte(parameters), input)
 	if err != nil {
@@ -264,10 +265,9 @@ func (t *WebFetchTool) Execute(ctx context.Context, state tooltypes.State, param
 	if input.Prompt == "" {
 		// No prompt: return converted markdown content directly
 		return t.handleHTMLMarkdownContent(ctx, input, content, contentType)
-	} else {
-		// With prompt: use AI extraction
-		return t.handleHTMLMarkdownWithPrompt(ctx, input, content, contentType)
 	}
+	// With prompt: use AI extraction
+	return t.handleHTMLMarkdownWithPrompt(ctx, input, content, contentType)
 }
 
 // TracingKVs returns tracing key-value pairs for observability.
@@ -365,7 +365,7 @@ func (t *WebFetchTool) handleCodeTextContent(_ context.Context, input *WebFetchI
 	// Create domain-specific web-archives directory
 	domainName := parsedURL.Hostname()
 	archiveDir := filepath.Join("./.kodelet/web-archives", domainName)
-	if err := os.MkdirAll(archiveDir, 0755); err != nil {
+	if err := os.MkdirAll(archiveDir, 0o755); err != nil {
 		return &WebFetchToolResult{
 			url:    input.URL,
 			prompt: input.Prompt,
@@ -391,7 +391,7 @@ func (t *WebFetchTool) handleCodeTextContent(_ context.Context, input *WebFetchI
 	}
 
 	// Write content to file
-	if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
 		return &WebFetchToolResult{
 			url:    input.URL,
 			prompt: input.Prompt,
@@ -406,7 +406,7 @@ func (t *WebFetchTool) handleCodeTextContent(_ context.Context, input *WebFetchI
 	var resultContent string
 	if contentBytes <= MaxOutputBytes {
 		// Return full content with line numbers
-		resultContent = utils.ContentWithLineNumber(lines, 1)
+		resultContent = osutil.ContentWithLineNumber(lines, 1)
 	} else {
 		// Return truncated content with line numbers
 		bytesRead := 0
@@ -419,7 +419,7 @@ func (t *WebFetchTool) handleCodeTextContent(_ context.Context, input *WebFetchI
 			bytesRead += len(line) + 1
 		}
 
-		resultContent = utils.ContentWithLineNumber(truncatedLines, 1)
+		resultContent = osutil.ContentWithLineNumber(truncatedLines, 1)
 		resultContent += fmt.Sprintf("\n\n[truncated due to max output bytes limit of %d, please read the full file at %s]",
 			MaxOutputBytes, filePath)
 	}
@@ -500,7 +500,6 @@ IMPORTANT: Make sure that you preserve all the links in the content including hy
 			NoToolUse:    true,
 		},
 	)
-
 	if err != nil {
 		return &WebFetchToolResult{
 			url:    input.URL,
@@ -526,11 +525,7 @@ func fetchWithSameDomainRedirects(ctx context.Context, urlStr string) (string, s
 	}
 
 	// Allow HTTP for localhost/internal addresses, require HTTPS for external domains
-	if parsedURL.Scheme == "https" {
-		// HTTPS is always allowed
-	} else if parsedURL.Scheme == "http" && isLocalHost(parsedURL.Hostname()) {
-		// HTTP is allowed for localhost/internal addresses
-	} else {
+	if parsedURL.Scheme != "https" && (parsedURL.Scheme != "http" || !isLocalHost(parsedURL.Hostname())) {
 		return "", "", errors.New("only HTTPS scheme is supported for external domains, HTTP is allowed for localhost/internal addresses")
 	}
 
@@ -603,6 +598,7 @@ func convertHTMLToMarkdown(ctx context.Context, htmlContent string) string {
 	return markdown
 }
 
+// StructuredData returns structured metadata about the web fetch operation
 func (r *WebFetchToolResult) StructuredData() tooltypes.StructuredToolResult {
 	result := tooltypes.StructuredToolResult{
 		ToolName:  "web_fetch",

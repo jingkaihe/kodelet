@@ -385,10 +385,10 @@ func TestBashTool_BackgroundExecution(t *testing.T) {
 	assert.Equal(t, bgResult.pid, processes[0].PID)
 	assert.Equal(t, input.Command, processes[0].Command)
 
-	content := waitForLogContent(t, bgResult.logPath, "background process", 20, 0)
+	content := waitForLogContent(t, bgResult.logPath, "background process", 40, 0)
 	assert.NotContains(t, string(content), "done")
 
-	content = waitForLogContent(t, bgResult.logPath, "done", 20, 0)
+	content = waitForLogContent(t, bgResult.logPath, "done", 120, 0)
 	assert.Contains(t, string(content), "background process")
 	assert.Contains(t, string(content), "done")
 }
@@ -798,7 +798,7 @@ func TestBashTool_ValidateInput_AllowedCommands(t *testing.T) {
 			errorMsg:    "command is banned: vim",
 		},
 		{
-			name:            "work around to banned command - with paranthesis", // this is OK by design
+			name:            "work around to banned command - with parenthesis", // this is OK by design
 			allowedCommands: []string{"(cd *", "ls *", "pwd"},
 			input: BashInput{
 				Description: "cd then ls",

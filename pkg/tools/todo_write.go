@@ -13,39 +13,53 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 )
 
+// TodoWriteTool provides functionality to write and manage the todo list
 type TodoWriteTool struct{}
 
+// Status represents the status of a todo item
 type Status string
 
 const (
-	Pending    Status = "pending"
+	// Pending indicates the todo is pending
+	Pending Status = "pending"
+	// InProgress indicates the todo is in progress
 	InProgress Status = "in_progress"
-	Completed  Status = "completed"
-	Canceled   Status = "canceled"
+	// Completed indicates the todo is completed
+	Completed Status = "completed"
+	// Canceled indicates the todo was canceled
+	Canceled Status = "canceled"
 )
 
+// Priority represents the priority of a todo item
 type Priority string
 
 const (
-	Low    Priority = "low"
+	// Low priority
+	Low Priority = "low"
+	// Medium priority
 	Medium Priority = "medium"
-	High   Priority = "high"
+	// High priority
+	High Priority = "high"
 )
 
+// Todo represents a single todo item
 type Todo struct {
 	Content  string   `json:"content" jsonschema:"description=The content of the todo in 1-2 sentences"`
 	Status   Status   `json:"status" jsonschema:"description=The status of the todo"`
 	Priority Priority `json:"priority" jsonschema:"description=The priority of the todo"`
 }
 
+// TodoWriteInput defines the input parameters for the todo_write tool
 type TodoWriteInput struct {
 	Todos []Todo `json:"todos" jsonschema:"description=The full list of todos including all the pending in_progress and completed ones"`
 }
 
+// Name returns the name of the tool
 func (t *TodoWriteTool) Name() string {
 	return "todo_write"
 }
 
+// Description returns the description of the tool
 func (t *TodoWriteTool) Description() string {
 	return `Use TodoWrite tool to create and update a list of todos for your current task.
 
@@ -137,11 +151,13 @@ The task is conversational and can be answered directly based on your knowledge 
 `
 }
 
+// GenerateSchema generates the JSON schema for the tool's input parameters
 func (t *TodoWriteTool) GenerateSchema() *jsonschema.Schema {
 	return GenerateSchema[TodoWriteInput]()
 }
 
-func (t *TodoWriteTool) ValidateInput(state tooltypes.State, parameters string) error {
+// ValidateInput validates the input parameters for the tool
+func (t *TodoWriteTool) ValidateInput(_ tooltypes.State, parameters string) error {
 	var input TodoWriteInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
 		return errors.Wrap(err, "invalid input")
@@ -166,6 +182,7 @@ func (t *TodoWriteTool) ValidateInput(state tooltypes.State, parameters string) 
 	return nil
 }
 
+// TracingKVs returns tracing key-value pairs for observability
 func (t *TodoWriteTool) TracingKVs(parameters string) ([]attribute.KeyValue, error) {
 	var todos TodoWriteInput
 	if err := json.Unmarshal([]byte(parameters), &todos); err != nil {
@@ -182,7 +199,8 @@ func (t *TodoWriteTool) TracingKVs(parameters string) ([]attribute.KeyValue, err
 	return kvs, nil
 }
 
-func (t *TodoWriteTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
+// Execute writes the todo list to the file
+func (t *TodoWriteTool) Execute(_ context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
 	var input TodoWriteInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
 		return &TodoToolResult{
@@ -199,7 +217,7 @@ func (t *TodoWriteTool) Execute(ctx context.Context, state tooltypes.State, para
 	}
 
 	// make the directory if it doesn't exist
-	if err := os.MkdirAll(filepath.Dir(todosFilePath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(todosFilePath), 0o755); err != nil {
 		return &TodoToolResult{
 			filePath: todosFilePath,
 			err:      fmt.Sprintf("failed to write todos to file: %s", err.Error()),
@@ -207,7 +225,7 @@ func (t *TodoWriteTool) Execute(ctx context.Context, state tooltypes.State, para
 	}
 
 	// write the todos to the file
-	err = os.WriteFile(todosFilePath, []byte(parameters), 0644)
+	err = os.WriteFile(todosFilePath, []byte(parameters), 0o644)
 	if err != nil {
 		return &TodoToolResult{
 			filePath: todosFilePath,

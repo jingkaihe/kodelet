@@ -165,7 +165,7 @@ func TestGrepTool_Execute(t *testing.T) {
 
 	for filename, content := range testFiles {
 		filePath := filepath.Join(tempDir, filename)
-		require.NoError(t, os.WriteFile(filePath, []byte(content), 0644))
+		require.NoError(t, os.WriteFile(filePath, []byte(content), 0o644))
 	}
 
 	tests := []struct {
@@ -341,9 +341,9 @@ func TestGrepHiddenFilesIgnored(t *testing.T) {
 
 		// Ensure directory exists
 		dir := filepath.Dir(filePath)
-		require.NoError(t, os.MkdirAll(dir, 0755))
+		require.NoError(t, os.MkdirAll(dir, 0o755))
 
-		require.NoError(t, os.WriteFile(filePath, []byte(content), 0644))
+		require.NoError(t, os.WriteFile(filePath, []byte(content), 0o644))
 	}
 
 	// Search for "func Test" pattern
@@ -385,10 +385,10 @@ func TestGrepResultLimitAndTruncation(t *testing.T) {
 
 		// Ensure directory exists
 		dir := filepath.Dir(filename)
-		require.NoError(t, os.MkdirAll(dir, 0755))
+		require.NoError(t, os.MkdirAll(dir, 0o755))
 
 		content := "This is a test file with a FIND_ME pattern inside"
-		require.NoError(t, os.WriteFile(filename, []byte(content), 0644))
+		require.NoError(t, os.WriteFile(filename, []byte(content), 0o644))
 	}
 
 	// Search for the pattern
@@ -428,7 +428,7 @@ func TestSortSearchResultsByModTime(t *testing.T) {
 	// Create files and set mod times
 	for i, name := range fileNames {
 		path := filepath.Join(tempDir, name)
-		require.NoError(t, os.WriteFile(path, []byte("test content"), 0644))
+		require.NoError(t, os.WriteFile(path, []byte("test content"), 0o644))
 		require.NoError(t, os.Chtimes(path, fileTimes[i], fileTimes[i]))
 	}
 
@@ -581,7 +581,7 @@ func TestGrepSortByModTime(t *testing.T) {
 	for _, fileInfo := range testFiles {
 		filePath := filepath.Join(tempDir, fileInfo.name)
 
-		require.NoError(t, os.WriteFile(filePath, []byte(fileInfo.content), 0644))
+		require.NoError(t, os.WriteFile(filePath, []byte(fileInfo.content), 0o644))
 
 		// Set modification time
 		require.NoError(t, os.Chtimes(filePath, fileInfo.modTime, fileInfo.modTime))
@@ -635,9 +635,9 @@ func TestGrepFileMatchingByRelativePathOrBaseName(t *testing.T) {
 
 		// Ensure directory exists
 		dir := filepath.Dir(filePath)
-		require.NoError(t, os.MkdirAll(dir, 0755))
+		require.NoError(t, os.MkdirAll(dir, 0o755))
 
-		require.NoError(t, os.WriteFile(filePath, []byte(content), 0644))
+		require.NoError(t, os.WriteFile(filePath, []byte(content), 0o644))
 	}
 
 	// Test cases

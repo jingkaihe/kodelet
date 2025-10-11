@@ -17,9 +17,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-var (
-	_ tooltypes.State = &BasicState{}
-)
+var _ tooltypes.State = &BasicState{}
 
 type contextInfo struct {
 	Content      string
@@ -27,6 +25,7 @@ type contextInfo struct {
 	LastModified time.Time
 }
 
+// BasicState implements the State interface with basic functionality
 type BasicState struct {
 	lastAccessed        map[string]time.Time
 	backgroundProcesses []tooltypes.BackgroundProcess
@@ -43,14 +42,17 @@ type BasicState struct {
 	contextDiscovery *ContextDiscovery
 }
 
+// ContextDiscovery tracks context discovery results
 type ContextDiscovery struct {
 	workingDir      string
 	homeDir         string
 	contextPatterns []string // ["AGENTS.md", "KODELET.md"]
 }
 
+// BasicStateOption is a function that configures a BasicState
 type BasicStateOption func(ctx context.Context, s *BasicState) error
 
+// NewBasicState creates a new BasicState with the given options
 func NewBasicState(ctx context.Context, opts ...BasicStateOption) *BasicState {
 	// Get working directory - this is critical for proper context discovery
 	workingDir, err := os.Getwd()
@@ -96,6 +98,7 @@ func NewBasicState(ctx context.Context, opts ...BasicStateOption) *BasicState {
 	return state
 }
 
+// WithSubAgentTools returns an option that configures sub-agent tools
 func WithSubAgentTools(config interface{}) BasicStateOption {
 	return func(ctx context.Context, s *BasicState) error {
 		config, ok := config.(llmtypes.Config)
@@ -112,6 +115,7 @@ func WithSubAgentTools(config interface{}) BasicStateOption {
 	}
 }
 
+// WithMainTools returns an option that configures main tools
 func WithMainTools() BasicStateOption {
 	return func(ctx context.Context, s *BasicState) error {
 		var allowedTools []string
@@ -124,6 +128,7 @@ func WithMainTools() BasicStateOption {
 	}
 }
 
+// WithMCPTools returns an option that configures MCP tools
 func WithMCPTools(mcpManager *MCPManager) BasicStateOption {
 	return func(ctx context.Context, s *BasicState) error {
 		tools, err := mcpManager.ListMCPTools(ctx)
@@ -137,28 +142,32 @@ func WithMCPTools(mcpManager *MCPManager) BasicStateOption {
 	}
 }
 
+// WithExtraMCPTools returns an option that adds extra MCP tools
 func WithExtraMCPTools(tools []tooltypes.Tool) BasicStateOption {
-	return func(ctx context.Context, s *BasicState) error {
+	return func(_ context.Context, s *BasicState) error {
 		s.mcpTools = append(s.mcpTools, tools...)
 		return nil
 	}
 }
 
+// WithCustomTools returns an option that configures custom tools
 func WithCustomTools(customManager *CustomToolManager) BasicStateOption {
-	return func(ctx context.Context, s *BasicState) error {
+	return func(_ context.Context, s *BasicState) error {
 		tools := customManager.ListTools()
 		s.customTools = append(s.customTools, tools...)
 		return nil
 	}
 }
 
+// WithLLMConfig returns an option that sets the LLM configuration
 func WithLLMConfig(config llmtypes.Config) BasicStateOption {
-	return func(ctx context.Context, s *BasicState) error {
+	return func(_ context.Context, s *BasicState) error {
 		s.llmConfig = config
 		return nil
 	}
 }
 
+// TodoFilePath returns the path to the todo file
 func (s *BasicState) TodoFilePath() (string, error) {
 	if s.todoFilePath != "" {
 		return s.todoFilePath, nil
@@ -172,10 +181,12 @@ func (s *BasicState) TodoFilePath() (string, error) {
 	return todoFilePath, nil
 }
 
+// SetTodoFilePath sets the path to the todo file
 func (s *BasicState) SetTodoFilePath(path string) {
 	s.todoFilePath = path
 }
 
+// SetFileLastAccessed sets the last access time for a file
 func (s *BasicState) SetFileLastAccessed(path string, lastAccessed time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -183,18 +194,21 @@ func (s *BasicState) SetFileLastAccessed(path string, lastAccessed time.Time) er
 	return nil
 }
 
+// FileLastAccess returns a map of file paths to their last access times
 func (s *BasicState) FileLastAccess() map[string]time.Time {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.lastAccessed
 }
 
+// SetFileLastAccess sets the file last access map
 func (s *BasicState) SetFileLastAccess(fileLastAccess map[string]time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.lastAccessed = fileLastAccess
 }
 
+// GetFileLastAccessed gets the last access time for a file
 func (s *BasicState) GetFileLastAccessed(path string) (time.Time, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -205,6 +219,7 @@ func (s *BasicState) GetFileLastAccessed(path string) (time.Time, error) {
 	return lastAccessed, nil
 }
 
+// ClearFileLastAccessed clears the last access time for a file
 func (s *BasicState) ClearFileLastAccessed(path string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -212,14 +227,17 @@ func (s *BasicState) ClearFileLastAccessed(path string) error {
 	return nil
 }
 
+// BasicTools returns the list of basic tools
 func (s *BasicState) BasicTools() []tooltypes.Tool {
 	return s.tools
 }
 
+// MCPTools returns the list of MCP tools
 func (s *BasicState) MCPTools() []tooltypes.Tool {
 	return s.mcpTools
 }
 
+// Tools returns all available tools
 func (s *BasicState) Tools() []tooltypes.Tool {
 	tools := make([]tooltypes.Tool, 0, len(s.tools)+len(s.mcpTools)+len(s.customTools))
 	tools = append(tools, s.tools...)
@@ -228,6 +246,7 @@ func (s *BasicState) Tools() []tooltypes.Tool {
 	return tools
 }
 
+// AddBackgroundProcess adds a background process to the state
 func (s *BasicState) AddBackgroundProcess(process tooltypes.BackgroundProcess) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -235,6 +254,7 @@ func (s *BasicState) AddBackgroundProcess(process tooltypes.BackgroundProcess) e
 	return nil
 }
 
+// GetBackgroundProcesses returns all background processes
 func (s *BasicState) GetBackgroundProcesses() []tooltypes.BackgroundProcess {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -244,6 +264,7 @@ func (s *BasicState) GetBackgroundProcesses() []tooltypes.BackgroundProcess {
 	return processes
 }
 
+// RemoveBackgroundProcess removes a background process by PID
 func (s *BasicState) RemoveBackgroundProcess(pid int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -256,6 +277,7 @@ func (s *BasicState) RemoveBackgroundProcess(pid int) error {
 	return errors.Errorf("background process with PID %d not found", pid)
 }
 
+// GetLLMConfig returns the LLM configuration
 func (s *BasicState) GetLLMConfig() interface{} {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -273,6 +295,7 @@ func (s *BasicState) configureTools() {
 	}
 }
 
+// DiscoverContexts discovers and returns context information for the current state
 func (s *BasicState) DiscoverContexts() map[string]string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

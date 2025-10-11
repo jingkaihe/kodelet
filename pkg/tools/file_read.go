@@ -13,16 +13,20 @@ import (
 	"github.com/invopop/jsonschema"
 	"go.opentelemetry.io/otel/attribute"
 
+	"github.com/jingkaihe/kodelet/pkg/osutil"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
-	"github.com/jingkaihe/kodelet/pkg/utils"
 )
 
 const (
-	MaxOutputBytes        = 100_000 // 100KB
-	MaxLineCharacterLimit = 2000    // Maximum characters per line before truncation
-	MaxLineLimit          = 2000    // Maximum number of lines that can be read at once
+	// MaxOutputBytes is the maximum number of bytes to output from a file read operation
+	MaxOutputBytes = 100_000 // 100KB
+	// MaxLineCharacterLimit is the maximum characters per line before truncation
+	MaxLineCharacterLimit = 2000
+	// MaxLineLimit is the maximum number of lines that can be read at once
+	MaxLineLimit = 2000
 )
 
+// FileReadToolResult represents the result of a file read operation
 type FileReadToolResult struct {
 	filename         string
 	lines            []string
@@ -33,26 +37,31 @@ type FileReadToolResult struct {
 	err              string
 }
 
+// GetResult returns the file content
 func (r *FileReadToolResult) GetResult() string {
-	return utils.ContentWithLineNumber(r.lines, r.offset)
+	return osutil.ContentWithLineNumber(r.lines, r.offset)
 }
 
+// GetError returns the error message
 func (r *FileReadToolResult) GetError() string {
 	return r.err
 }
 
+// IsError returns true if the result contains an error
 func (r *FileReadToolResult) IsError() bool {
 	return r.err != ""
 }
 
+// AssistantFacing returns the string representation for the AI assistant
 func (r *FileReadToolResult) AssistantFacing() string {
 	var content string
 	if !r.IsError() {
-		content = utils.ContentWithLineNumber(r.lines, r.offset)
+		content = osutil.ContentWithLineNumber(r.lines, r.offset)
 	}
 	return tooltypes.StringifyToolResult(content, r.GetError())
 }
 
+// StructuredData returns structured metadata about the file read operation
 func (r *FileReadToolResult) StructuredData() tooltypes.StructuredToolResult {
 	result := tooltypes.StructuredToolResult{
 		ToolName:  "file_read",
@@ -64,7 +73,7 @@ func (r *FileReadToolResult) StructuredData() tooltypes.StructuredToolResult {
 	truncated := len(r.lines) > 0 && (strings.Contains(r.lines[len(r.lines)-1], "truncated") || strings.Contains(r.lines[len(r.lines)-1], "lines remaining"))
 
 	// Detect language from file extension
-	language := utils.DetectLanguageFromPath(r.filename)
+	language := osutil.DetectLanguageFromPath(r.filename)
 
 	// Always populate metadata, even for errors
 	result.Metadata = &tooltypes.FileReadMetadata{
@@ -84,22 +93,27 @@ func (r *FileReadToolResult) StructuredData() tooltypes.StructuredToolResult {
 	return result
 }
 
+// FileReadTool provides functionality to read files with line numbers
 type FileReadTool struct{}
 
+// FileReadInput defines the input parameters for the file_read tool
 type FileReadInput struct {
 	FilePath  string `json:"file_path" jsonschema:"description=The absolute path of the file to read"`
 	Offset    int    `json:"offset" jsonschema:"description=The 1-indexed line number to start reading from,default=1,minimum=1"`
 	LineLimit int    `json:"line_limit" jsonschema:"description=The maximum number of lines to read from the offset,default=2000,minimum=1,maximum=2000"`
 }
 
+// GenerateSchema generates the JSON schema for the tool's input parameters
 func (r *FileReadTool) GenerateSchema() *jsonschema.Schema {
 	return GenerateSchema[FileReadInput]()
 }
 
+// Name returns the name of the tool
 func (r *FileReadTool) Name() string {
 	return "file_read"
 }
 
+// Description returns the description of the tool
 func (r *FileReadTool) Description() string {
 	return `Reads a file and returns its contents with line numbers.
 
@@ -130,7 +144,8 @@ If you need to read multiple files, use parallel tool calling to read multiple f
 `
 }
 
-func (r *FileReadTool) ValidateInput(state tooltypes.State, parameters string) error {
+// ValidateInput validates the input parameters for the tool
+func (r *FileReadTool) ValidateInput(_ tooltypes.State, parameters string) error {
 	input := &FileReadInput{}
 	err := json.Unmarshal([]byte(parameters), input)
 	if err != nil {
@@ -158,6 +173,7 @@ func (r *FileReadTool) ValidateInput(state tooltypes.State, parameters string) e
 	return nil
 }
 
+// TracingKVs returns tracing key-value pairs for observability
 func (r *FileReadTool) TracingKVs(parameters string) ([]attribute.KeyValue, error) {
 	input := &FileReadInput{}
 	err := json.Unmarshal([]byte(parameters), input)
@@ -177,7 +193,8 @@ func (r *FileReadTool) TracingKVs(parameters string) ([]attribute.KeyValue, erro
 	}, nil
 }
 
-func (r *FileReadTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
+// Execute reads the file and returns the result
+func (r *FileReadTool) Execute(_ context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
 	input := &FileReadInput{}
 	err := json.Unmarshal([]byte(parameters), input)
 	if err != nil {

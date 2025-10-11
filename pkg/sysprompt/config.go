@@ -13,9 +13,11 @@ type PromptConfig struct {
 	EnabledFeatures []string
 }
 
+// NewDefaultConfig creates a new PromptConfig with default settings including
+// the default model and enabled features (subagent and todoTools).
 func NewDefaultConfig() *PromptConfig {
 	return &PromptConfig{
-		Model: "claude-sonnet-4-20250514",
+		Model: "claude-sonnet-4-5-20250929",
 		EnabledFeatures: []string{
 			"subagent",
 			"todoTools",
@@ -23,16 +25,19 @@ func NewDefaultConfig() *PromptConfig {
 	}
 }
 
+// WithModel sets the model for the prompt configuration and returns the config for chaining.
 func (c *PromptConfig) WithModel(model string) *PromptConfig {
 	c.Model = model
 	return c
 }
 
+// WithFeatures sets the enabled features for the prompt configuration and returns the config for chaining.
 func (c *PromptConfig) WithFeatures(features []string) *PromptConfig {
 	c.EnabledFeatures = features
 	return c
 }
 
+// IsFeatureEnabled checks whether a specific feature is enabled in the configuration.
 func (c *PromptConfig) IsFeatureEnabled(feature string) bool {
 	for _, f := range c.EnabledFeatures {
 		if f == feature {
@@ -45,4 +50,5 @@ func (c *PromptConfig) IsFeatureEnabled(feature string) bool {
 func updateContextWithConfig(ctx *PromptContext, config *PromptConfig) {
 	ctx.Features["subagentEnabled"] = config.IsFeatureEnabled("subagent")
 	ctx.Features["todoToolsEnabled"] = config.IsFeatureEnabled("todoTools")
+	ctx.Features["isSubagent"] = config.IsFeatureEnabled("isSubagent")
 }

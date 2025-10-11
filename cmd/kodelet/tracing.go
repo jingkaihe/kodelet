@@ -34,9 +34,7 @@ func initTracing(ctx context.Context) (func(context.Context) error, error) {
 	return shutdown, nil
 }
 
-var (
-	tracer = telemetry.Tracer("kodelet.cli")
-)
+var tracer = telemetry.Tracer("kodelet.cli")
 
 func withTracing(cmd *cobra.Command) *cobra.Command {
 	originalRun := cmd.Run

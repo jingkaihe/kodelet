@@ -176,9 +176,9 @@ func TestGlobTool_Execute(t *testing.T) {
 
 	for path, content := range testFiles {
 		fullPath := filepath.Join(tmpDir, path)
-		err := os.MkdirAll(filepath.Dir(fullPath), 0755)
+		err := os.MkdirAll(filepath.Dir(fullPath), 0o755)
 		require.NoError(t, err)
-		err = os.WriteFile(fullPath, []byte(content), 0644)
+		err = os.WriteFile(fullPath, []byte(content), 0o644)
 		require.NoError(t, err)
 	}
 
@@ -297,43 +297,43 @@ func TestGlobTool_Execute(t *testing.T) {
 	// Create test directories and files
 	// .github/workflows directory
 	githubDir := filepath.Join(tmpDir, ".github", "workflows")
-	err = os.MkdirAll(githubDir, 0755)
+	err = os.MkdirAll(githubDir, 0o755)
 	require.NoError(t, err)
-	err = os.WriteFile(filepath.Join(githubDir, "test.yml"), []byte("name: test"), 0644)
+	err = os.WriteFile(filepath.Join(githubDir, "test.yml"), []byte("name: test"), 0o644)
 	require.NoError(t, err)
 
 	// node_modules directory (excluded by default)
 	nodeModulesDir := filepath.Join(tmpDir, "node_modules", "package")
-	err = os.MkdirAll(nodeModulesDir, 0755)
+	err = os.MkdirAll(nodeModulesDir, 0o755)
 	require.NoError(t, err)
-	err = os.WriteFile(filepath.Join(nodeModulesDir, "index.js"), []byte("module.exports = {}"), 0644)
+	err = os.WriteFile(filepath.Join(nodeModulesDir, "index.js"), []byte("module.exports = {}"), 0o644)
 	require.NoError(t, err)
 
 	// .git directory (excluded by default)
 	gitDir := filepath.Join(tmpDir, ".git", "objects")
-	err = os.MkdirAll(gitDir, 0755)
+	err = os.MkdirAll(gitDir, 0o755)
 	require.NoError(t, err)
-	err = os.WriteFile(filepath.Join(gitDir, "abc123"), []byte("git object"), 0644)
+	err = os.WriteFile(filepath.Join(gitDir, "abc123"), []byte("git object"), 0o644)
 	require.NoError(t, err)
 
 	// .vscode directory (allowed)
 	vscodeDir := filepath.Join(tmpDir, ".vscode")
-	err = os.MkdirAll(vscodeDir, 0755)
+	err = os.MkdirAll(vscodeDir, 0o755)
 	require.NoError(t, err)
-	err = os.WriteFile(filepath.Join(vscodeDir, "settings.json"), []byte("{}"), 0644)
+	err = os.WriteFile(filepath.Join(vscodeDir, "settings.json"), []byte("{}"), 0o644)
 	require.NoError(t, err)
 
 	// build and dist directories (excluded by default)
 	buildDir := filepath.Join(tmpDir, "build")
-	err = os.MkdirAll(buildDir, 0755)
+	err = os.MkdirAll(buildDir, 0o755)
 	require.NoError(t, err)
-	err = os.WriteFile(filepath.Join(buildDir, "bundle.js"), []byte("// bundle"), 0644)
+	err = os.WriteFile(filepath.Join(buildDir, "bundle.js"), []byte("// bundle"), 0o644)
 	require.NoError(t, err)
 
 	distDir := filepath.Join(tmpDir, "dist")
-	err = os.MkdirAll(distDir, 0755)
+	err = os.MkdirAll(distDir, 0o755)
 	require.NoError(t, err)
-	err = os.WriteFile(filepath.Join(distDir, "main.js"), []byte("// main"), 0644)
+	err = os.WriteFile(filepath.Join(distDir, "main.js"), []byte("// main"), 0o644)
 	require.NoError(t, err)
 
 	for _, tc := range testCases {

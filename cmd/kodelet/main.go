@@ -137,7 +137,7 @@ func main() {
 	rootCmd.AddCommand(commitCmd)
 	rootCmd.AddCommand(watchCmd)
 	rootCmd.AddCommand(updateCmd)
-	rootCmd.AddCommand(initCmd)
+	rootCmd.AddCommand(setupCmd)
 	rootCmd.AddCommand(conversationCmd)
 	rootCmd.AddCommand(usageCmd)
 	rootCmd.AddCommand(prCmd)
@@ -153,6 +153,7 @@ func main() {
 	rootCmd.AddCommand(feedbackCmd)
 	rootCmd.AddCommand(recipeCmd)
 	rootCmd.AddCommand(profileCmd)
+	rootCmd.AddCommand(llmstxtCmd)
 
 	// Initialize telemetry with tracing
 	tracingShutdown, err := initTracing(ctx)
@@ -178,7 +179,7 @@ func main() {
 	commitCmd = withTracing(commitCmd)
 	watchCmd = withTracing(watchCmd)
 	updateCmd = withTracing(updateCmd)
-	initCmd = withTracing(initCmd)
+	setupCmd = withTracing(setupCmd)
 	conversationCmd = withTracing(conversationCmd)
 	usageCmd = withTracing(usageCmd)
 	prCmd = withTracing(prCmd)

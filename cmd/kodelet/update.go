@@ -44,7 +44,7 @@ var updateCmd = &cobra.Command{
 	Use:   "update",
 	Short: "Update Kodelet to the latest version",
 	Long:  `Download and install the latest version of Kodelet or a specified version.`,
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(cmd *cobra.Command, _ []string) {
 		ctx := cmd.Context()
 		config := getUpdateConfigFromFlags(cmd)
 
@@ -81,13 +81,13 @@ func updateKodelet(ctx context.Context, config *UpdateConfig) error {
 	case "amd64":
 	case "arm64":
 	default:
-		return errors.New(fmt.Sprintf("unsupported architecture: %s", arch))
+		return fmt.Errorf("unsupported architecture: %s", arch)
 	}
 
 	switch osType {
 	case "linux", "darwin":
 	default:
-		return errors.New(fmt.Sprintf("unsupported operating system: %s", osType))
+		return fmt.Errorf("unsupported operating system: %s", osType)
 	}
 
 	var downloadURL string
@@ -128,7 +128,7 @@ func updateKodelet(ctx context.Context, config *UpdateConfig) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return errors.New(fmt.Sprintf("failed to download new version: HTTP %d", resp.StatusCode))
+		return fmt.Errorf("failed to download new version: HTTP %d", resp.StatusCode)
 	}
 
 	_, err = io.Copy(tempFile, resp.Body)
@@ -137,7 +137,7 @@ func updateKodelet(ctx context.Context, config *UpdateConfig) error {
 	}
 	tempFile.Close()
 
-	if err := os.Chmod(tempFilePath, 0755); err != nil {
+	if err := os.Chmod(tempFilePath, 0o755); err != nil {
 		return errors.Wrap(err, "failed to make downloaded binary executable")
 	}
 

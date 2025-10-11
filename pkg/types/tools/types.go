@@ -13,6 +13,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 )
 
+// Tool defines the interface for all kodelet tools
 type Tool interface {
 	GenerateSchema() *jsonschema.Schema
 	Name() string
@@ -22,6 +23,7 @@ type Tool interface {
 	TracingKVs(parameters string) ([]attribute.KeyValue, error)
 }
 
+// ToolResult represents the outcome of a tool execution
 type ToolResult interface {
 	AssistantFacing() string
 	IsError() bool
@@ -30,11 +32,13 @@ type ToolResult interface {
 	StructuredData() StructuredToolResult
 }
 
+// BaseToolResult provides a basic implementation of the ToolResult interface
 type BaseToolResult struct {
 	Result string `json:"result"`
 	Error  string `json:"error"`
 }
 
+// AssistantFacing returns a formatted string representation of the result for the LLM
 func (t BaseToolResult) AssistantFacing() string {
 	out := ""
 	if t.Error != "" {
@@ -52,18 +56,22 @@ func (t BaseToolResult) AssistantFacing() string {
 	return out
 }
 
+// IsError returns true if the tool execution resulted in an error
 func (t BaseToolResult) IsError() bool {
 	return t.Error != ""
 }
 
+// GetError returns the error message if any
 func (t BaseToolResult) GetError() string {
 	return t.Error
 }
 
+// GetResult returns the result string
 func (t BaseToolResult) GetResult() string {
 	return t.Result
 }
 
+// StructuredData returns a structured representation of the tool result
 func (t BaseToolResult) StructuredData() StructuredToolResult {
 	return StructuredToolResult{
 		ToolName:  "unknown", // This will be overridden by specific tool implementations
@@ -74,6 +82,7 @@ func (t BaseToolResult) StructuredData() StructuredToolResult {
 	}
 }
 
+// StringifyToolResult formats a tool result and optional error into a string representation
 func StringifyToolResult(result, err string) string {
 	out := ""
 	if err != "" {
@@ -89,6 +98,7 @@ func StringifyToolResult(result, err string) string {
 	return out
 }
 
+// BackgroundProcess represents a process running in the background
 type BackgroundProcess struct {
 	PID       int         `json:"pid"`
 	Command   string      `json:"command"`
@@ -97,6 +107,7 @@ type BackgroundProcess struct {
 	Process   *os.Process `json:"-"` // Not serialized
 }
 
+// State defines the interface for managing tool execution state and context
 type State interface {
 	SetFileLastAccessed(path string, lastAccessed time.Time) error
 	GetFileLastAccessed(path string) (time.Time, error)

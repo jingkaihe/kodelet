@@ -11,7 +11,9 @@ import (
 )
 
 var (
+	// G is a convenience alias for GetLogger, providing quick access to context-aware logger retrieval.
 	G = GetLogger
+	// L is the global logger entry used as a fallback when no logger is found in context.
 	L = logrus.NewEntry(newLogger())
 )
 
@@ -19,11 +21,14 @@ type (
 	loggerKey struct{}
 )
 
+// WithLogger attaches a logger entry to the given context, making it retrievable via GetLogger.
 func WithLogger(ctx context.Context, logger *logrus.Entry) context.Context {
 	e := logger.WithContext(ctx)
 	return context.WithValue(ctx, loggerKey{}, e)
 }
 
+// GetLogger retrieves the logger entry from the context. If no logger is found,
+// it returns the global logger L with the context attached.
 func GetLogger(ctx context.Context) *logrus.Entry {
 	logger := ctx.Value(loggerKey{})
 

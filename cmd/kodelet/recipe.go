@@ -159,7 +159,7 @@ var recipeListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all available recipes",
 	Long:  `List all available recipes with their metadata including ID, name and description`,
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, _ []string) error {
 		config := NewRecipeListConfig()
 		config.ShowPath, _ = cmd.Flags().GetBool("show-path")
 		config.JSONOutput, _ = cmd.Flags().GetBool("json")
@@ -256,6 +256,15 @@ func runRecipeShow(ctx context.Context, recipeName string, config *RecipeShowCon
 		}
 
 		fmt.Printf("Path: %s\n", fragment.Path)
+
+		if len(fragment.Metadata.Defaults) > 0 {
+			fmt.Println()
+			presenter.Section("Default Arguments")
+			for key, value := range fragment.Metadata.Defaults {
+				fmt.Printf("  %s: %s\n", key, value)
+			}
+		}
+
 		fmt.Println()
 	}
 

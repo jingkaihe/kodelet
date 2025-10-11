@@ -28,7 +28,7 @@ Current date: {{bash "date" "+%Y-%m-%d"}}
 Command result: {{bash "echo" "test"}}`
 
 	fragmentPath := filepath.Join(tempDir, "test.md")
-	err = os.WriteFile(fragmentPath, []byte(fragmentContent), 0644)
+	err = os.WriteFile(fragmentPath, []byte(fragmentContent), 0o644)
 	require.NoError(t, err)
 
 	processor, err := NewFragmentProcessor(WithFragmentDirs(tempDir))
@@ -59,7 +59,7 @@ func TestFragmentProcessor_BashCommandError(t *testing.T) {
 	// Test with a command that produces output but fails
 	fragmentContent := `Error output: {{bash "ls" "/nonexistent-directory-xyz"}}`
 	fragmentPath := filepath.Join(tempDir, "failing.md")
-	err = os.WriteFile(fragmentPath, []byte(fragmentContent), 0644)
+	err = os.WriteFile(fragmentPath, []byte(fragmentContent), 0o644)
 	require.NoError(t, err)
 
 	processor, err := NewFragmentProcessor(WithFragmentDirs(tempDir))
@@ -89,7 +89,7 @@ func TestFragmentProcessor_BashCommandNotFound(t *testing.T) {
 	// Test with a command that doesn't exist - this should return empty output
 	fragmentContent := `Command not found: {{bash "nonexistent-command-xyz"}}`
 	fragmentPath := filepath.Join(tempDir, "not-found.md")
-	err = os.WriteFile(fragmentPath, []byte(fragmentContent), 0644)
+	err = os.WriteFile(fragmentPath, []byte(fragmentContent), 0o644)
 	require.NoError(t, err)
 
 	processor, err := NewFragmentProcessor(WithFragmentDirs(tempDir))
@@ -114,13 +114,13 @@ func TestFragmentProcessor_BashCommandErrorWithOutput(t *testing.T) {
 
 	// Create a test file first
 	testFile := filepath.Join(tempDir, "test.txt")
-	err = os.WriteFile(testFile, []byte("hello world\ntest content"), 0644)
+	err = os.WriteFile(testFile, []byte("hello world\ntest content"), 0o644)
 	require.NoError(t, err)
 
 	// Test with grep that produces no output but returns non-zero exit code
 	fragmentContent := fmt.Sprintf(`Search result: {{bash "grep" "nonexistent" "%s"}}`, testFile)
 	fragmentPath := filepath.Join(tempDir, "grep-test.md")
-	err = os.WriteFile(fragmentPath, []byte(fragmentContent), 0644)
+	err = os.WriteFile(fragmentPath, []byte(fragmentContent), 0o644)
 	require.NoError(t, err)
 
 	processor, err := NewFragmentProcessor(WithFragmentDirs(tempDir))
@@ -144,10 +144,10 @@ func TestFragmentProcessor_findFragmentFile(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(tempDir)
 
-	err = os.WriteFile(filepath.Join(tempDir, "test1.md"), []byte("test1"), 0644)
+	err = os.WriteFile(filepath.Join(tempDir, "test1.md"), []byte("test1"), 0o644)
 	require.NoError(t, err)
 
-	err = os.WriteFile(filepath.Join(tempDir, "test2"), []byte("test2"), 0644)
+	err = os.WriteFile(filepath.Join(tempDir, "test2"), []byte("test2"), 0o644)
 	require.NoError(t, err)
 
 	processor, err := NewFragmentProcessor(WithFragmentDirs(tempDir))
@@ -175,10 +175,10 @@ func TestFragmentProcessor_DirectoryPrecedence(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(lowPrecDir)
 
-	err = os.WriteFile(filepath.Join(highPrecDir, "same.md"), []byte("high priority"), 0644)
+	err = os.WriteFile(filepath.Join(highPrecDir, "same.md"), []byte("high priority"), 0o644)
 	require.NoError(t, err)
 
-	err = os.WriteFile(filepath.Join(lowPrecDir, "same.md"), []byte("low priority"), 0644)
+	err = os.WriteFile(filepath.Join(lowPrecDir, "same.md"), []byte("low priority"), 0o644)
 	require.NoError(t, err)
 
 	processor, err := NewFragmentProcessor(WithFragmentDirs(highPrecDir, lowPrecDir))
@@ -310,7 +310,7 @@ Your role is {{.role}}.
 Current date: {{bash "date" "+%Y-%m-%d"}}`
 
 	fragmentPath := filepath.Join(tempDir, "test-with-metadata.md")
-	err = os.WriteFile(fragmentPath, []byte(fragmentContent), 0644)
+	err = os.WriteFile(fragmentPath, []byte(fragmentContent), 0o644)
 	require.NoError(t, err)
 
 	processor, err := NewFragmentProcessor(WithFragmentDirs(tempDir))
@@ -352,11 +352,11 @@ description: This fragment has metadata
 
 Content here`
 
-	err = os.WriteFile(filepath.Join(dir1, "with-meta.md"), []byte(fragmentWithMeta), 0644)
+	err = os.WriteFile(filepath.Join(dir1, "with-meta.md"), []byte(fragmentWithMeta), 0o644)
 	require.NoError(t, err)
 
 	fragmentWithoutMeta := "Content without metadata"
-	err = os.WriteFile(filepath.Join(dir1, "without-meta.md"), []byte(fragmentWithoutMeta), 0644)
+	err = os.WriteFile(filepath.Join(dir1, "without-meta.md"), []byte(fragmentWithoutMeta), 0o644)
 	require.NoError(t, err)
 
 	fragmentUnique := `---
@@ -365,7 +365,7 @@ description: Only in second directory
 ---
 
 Unique content`
-	err = os.WriteFile(filepath.Join(dir2, "unique.md"), []byte(fragmentUnique), 0644)
+	err = os.WriteFile(filepath.Join(dir2, "unique.md"), []byte(fragmentUnique), 0o644)
 	require.NoError(t, err)
 
 	processor, err := NewFragmentProcessor(WithFragmentDirs(dir1, dir2))
@@ -374,8 +374,7 @@ Unique content`
 	fragments, err := processor.ListFragmentsWithMetadata()
 	require.NoError(t, err)
 
-	// Should include 3 filesystem fragments + 4 built-in recipes (github/issue-resolve, commit, github/pr, github/pr-respond)
-	assert.Len(t, fragments, 8)
+	assert.Len(t, fragments, 9)
 
 	var withMeta, withoutMeta, unique *Fragment
 	for _, f := range fragments {
@@ -423,7 +422,7 @@ allowed_commands: "ls *,echo *,pwd"
 Test content here.`
 
 	fragmentPath := filepath.Join(dir, "test-restrictions.md")
-	err = os.WriteFile(fragmentPath, []byte(fragmentContent), 0644)
+	err = os.WriteFile(fragmentPath, []byte(fragmentContent), 0o644)
 	require.NoError(t, err)
 
 	processor, err := NewFragmentProcessor(WithFragmentDirs(dir))
@@ -450,7 +449,7 @@ allowed_commands:
 Test content here.`
 
 	fragmentPath2 := filepath.Join(dir, "test-comma.md")
-	err = os.WriteFile(fragmentPath2, []byte(fragmentContent2), 0644)
+	err = os.WriteFile(fragmentPath2, []byte(fragmentContent2), 0o644)
 	require.NoError(t, err)
 
 	metadata2, err := processor.GetFragmentMetadata("test-comma")
@@ -468,11 +467,11 @@ func TestFragmentProcessor_Subdirectories(t *testing.T) {
 
 	// Create subdirectory structure
 	githubDir := filepath.Join(tempDir, "github")
-	err = os.MkdirAll(githubDir, 0755)
+	err = os.MkdirAll(githubDir, 0o755)
 	require.NoError(t, err)
 
 	ciDir := filepath.Join(tempDir, "ci")
-	err = os.MkdirAll(ciDir, 0755)
+	err = os.MkdirAll(ciDir, 0o755)
 	require.NoError(t, err)
 
 	// Create fragments in subdirectories
@@ -498,13 +497,13 @@ description: Fragment for CI configuration
 Setup CI for {{.language}} project.`
 
 	// Write fragments to subdirectories
-	err = os.WriteFile(filepath.Join(githubDir, "pr.md"), []byte(prFragmentContent), 0644)
+	err = os.WriteFile(filepath.Join(githubDir, "pr.md"), []byte(prFragmentContent), 0o644)
 	require.NoError(t, err)
 
-	err = os.WriteFile(filepath.Join(githubDir, "issue.md"), []byte(issueFragmentContent), 0644)
+	err = os.WriteFile(filepath.Join(githubDir, "issue.md"), []byte(issueFragmentContent), 0o644)
 	require.NoError(t, err)
 
-	err = os.WriteFile(filepath.Join(ciDir, "setup.md"), []byte(ciFragmentContent), 0644)
+	err = os.WriteFile(filepath.Join(ciDir, "setup.md"), []byte(ciFragmentContent), 0o644)
 	require.NoError(t, err)
 
 	// Also create a root-level fragment
@@ -515,7 +514,7 @@ description: Fragment in root directory
 
 Root level fragment content.`
 
-	err = os.WriteFile(filepath.Join(tempDir, "root.md"), []byte(rootFragmentContent), 0644)
+	err = os.WriteFile(filepath.Join(tempDir, "root.md"), []byte(rootFragmentContent), 0o644)
 	require.NoError(t, err)
 
 	processor, err := NewFragmentProcessor(WithFragmentDirs(tempDir))
@@ -590,4 +589,280 @@ Root level fragment content.`
 	assert.True(t, fragmentNames["github/issue"], "github/issue fragment should be found")
 	assert.True(t, fragmentNames["ci/setup"], "ci/setup fragment should be found")
 	assert.True(t, fragmentNames["root"], "root fragment should be found")
+}
+
+func TestFragmentProcessor_DefaultFunction(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "kodelet-fragments-default-func-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	// Test template default function
+	fragmentContent := `Branch: {{default .branch "main"}}
+Environment: {{default .env "development"}}
+Provided: {{.custom_message}}
+Optional: {{default .optional "N/A"}}`
+
+	fragmentPath := filepath.Join(tempDir, "defaults.md")
+	err = os.WriteFile(fragmentPath, []byte(fragmentContent), 0o644)
+	require.NoError(t, err)
+
+	processor, err := NewFragmentProcessor(WithFragmentDirs(tempDir))
+	require.NoError(t, err)
+
+	// Test 1: No arguments - should use inline defaults
+	config := &Config{
+		FragmentName: "defaults",
+		Arguments:    map[string]string{},
+	}
+
+	result, err := processor.LoadFragment(context.Background(), config)
+	require.NoError(t, err)
+	assert.Contains(t, result.Content, "Branch: main")
+	assert.Contains(t, result.Content, "Environment: development")
+	assert.Contains(t, result.Content, "Provided: <no value>") // No default
+	assert.Contains(t, result.Content, "Optional: N/A")
+
+	// Test 2: Some arguments - should override inline defaults
+	config2 := &Config{
+		FragmentName: "defaults",
+		Arguments: map[string]string{
+			"branch":         "feature-x",
+			"custom_message": "Custom message",
+		},
+	}
+
+	result2, err := processor.LoadFragment(context.Background(), config2)
+	require.NoError(t, err)
+	assert.Contains(t, result2.Content, "Branch: feature-x")
+	assert.Contains(t, result2.Content, "Environment: development") // Still uses default
+	assert.Contains(t, result2.Content, "Provided: Custom message")
+	assert.Contains(t, result2.Content, "Optional: N/A")
+}
+
+func TestFragmentProcessor_MetadataDefaults(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "kodelet-fragments-yaml-defaults-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	// Recipe with metadata defaults
+	fragmentContent := `---
+name: Deployment Recipe
+description: Deploy with sensible defaults
+defaults:
+  branch: main
+  env: development
+  target: production
+---
+
+Deploying branch: {{.branch}}
+Environment: {{.env}}
+Target: {{.target}}
+Extra: {{.extra}}`
+
+	fragmentPath := filepath.Join(tempDir, "deploy.md")
+	err = os.WriteFile(fragmentPath, []byte(fragmentContent), 0o644)
+	require.NoError(t, err)
+
+	processor, err := NewFragmentProcessor(WithFragmentDirs(tempDir))
+	require.NoError(t, err)
+
+	// Test 1: No arguments - should use all metadata defaults
+	config1 := &Config{
+		FragmentName: "deploy",
+		Arguments:    map[string]string{},
+	}
+
+	result1, err := processor.LoadFragment(context.Background(), config1)
+	require.NoError(t, err)
+	assert.Equal(t, "Deployment Recipe", result1.Metadata.Name)
+	assert.Contains(t, result1.Content, "Deploying branch: main")
+	assert.Contains(t, result1.Content, "Environment: development")
+	assert.Contains(t, result1.Content, "Target: production")
+	assert.Contains(t, result1.Content, "Extra: <no value>")
+
+	// Test 2: Override some defaults
+	config2 := &Config{
+		FragmentName: "deploy",
+		Arguments: map[string]string{
+			"branch": "feature-123",
+			"env":    "staging",
+		},
+	}
+
+	result2, err := processor.LoadFragment(context.Background(), config2)
+	require.NoError(t, err)
+	assert.Contains(t, result2.Content, "Deploying branch: feature-123")
+	assert.Contains(t, result2.Content, "Environment: staging")
+	assert.Contains(t, result2.Content, "Target: production") // Still uses default
+
+	// Test 3: Override all + add extra
+	config3 := &Config{
+		FragmentName: "deploy",
+		Arguments: map[string]string{
+			"branch": "hotfix",
+			"env":    "production",
+			"target": "eu-west-1",
+			"extra":  "custom value",
+		},
+	}
+
+	result3, err := processor.LoadFragment(context.Background(), config3)
+	require.NoError(t, err)
+	assert.Contains(t, result3.Content, "Deploying branch: hotfix")
+	assert.Contains(t, result3.Content, "Environment: production")
+	assert.Contains(t, result3.Content, "Target: eu-west-1")
+	assert.Contains(t, result3.Content, "Extra: custom value")
+}
+
+func TestFragmentProcessor_HybridDefaults(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "kodelet-fragments-hybrid-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	// Recipe combining YAML metadata defaults AND template default function
+	fragmentContent := `---
+name: Hybrid Recipe
+description: Uses both YAML and template defaults
+defaults:
+  branch: main
+  env: development
+---
+
+Branch: {{.branch}}
+Environment: {{.env}}
+Optional message: {{default .message "No message provided"}}
+Optional tag: {{default .tag "latest"}}`
+
+	fragmentPath := filepath.Join(tempDir, "hybrid.md")
+	err = os.WriteFile(fragmentPath, []byte(fragmentContent), 0o644)
+	require.NoError(t, err)
+
+	processor, err := NewFragmentProcessor(WithFragmentDirs(tempDir))
+	require.NoError(t, err)
+
+	config := &Config{
+		FragmentName: "hybrid",
+		Arguments: map[string]string{
+			"message": "Custom deployment",
+		},
+	}
+
+	result, err := processor.LoadFragment(context.Background(), config)
+	require.NoError(t, err)
+
+	// YAML metadata defaults applied
+	assert.Contains(t, result.Content, "Branch: main")
+	assert.Contains(t, result.Content, "Environment: development")
+
+	// User arg overrides template default
+	assert.Contains(t, result.Content, "Optional message: Custom deployment")
+
+	// Template default used when no arg provided
+	assert.Contains(t, result.Content, "Optional tag: latest")
+}
+
+func TestFragmentProcessor_EmptyDefaults(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "kodelet-fragments-empty-defaults-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	// Recipe without defaults should work as before (backward compatibility)
+	fragmentContent := `---
+name: No Defaults Recipe
+description: Recipe without any defaults
+---
+
+Branch: {{.branch}}
+Environment: {{.env}}`
+
+	fragmentPath := filepath.Join(tempDir, "no-defaults.md")
+	err = os.WriteFile(fragmentPath, []byte(fragmentContent), 0o644)
+	require.NoError(t, err)
+
+	processor, err := NewFragmentProcessor(WithFragmentDirs(tempDir))
+	require.NoError(t, err)
+
+	// Without args, should render <no value> as before
+	config := &Config{
+		FragmentName: "no-defaults",
+		Arguments:    map[string]string{},
+	}
+
+	result, err := processor.LoadFragment(context.Background(), config)
+	require.NoError(t, err)
+	assert.Contains(t, result.Content, "Branch: <no value>")
+	assert.Contains(t, result.Content, "Environment: <no value>")
+}
+
+func TestFragmentProcessor_DefaultsWithConditionals(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "kodelet-fragments-conditionals-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	// Recipe with defaults and conditional logic (like github/pr.md draft feature)
+	fragmentContent := `---
+name: PR Generator Test
+description: Tests conditional rendering with defaults
+defaults:
+  draft: "false"
+  target: "main"
+---
+
+Create a {{if eq .draft "true"}}**DRAFT** {{end}}pull request.
+
+Target branch: {{.target}}
+{{if eq .draft "true"}}
+Draft PR instructions here.
+{{else}}
+Regular PR instructions here.
+{{end}}`
+
+	fragmentPath := filepath.Join(tempDir, "pr-test.md")
+	err = os.WriteFile(fragmentPath, []byte(fragmentContent), 0o644)
+	require.NoError(t, err)
+
+	processor, err := NewFragmentProcessor(WithFragmentDirs(tempDir))
+	require.NoError(t, err)
+
+	// Test 1: Default (draft=false)
+	config1 := &Config{
+		FragmentName: "pr-test",
+		Arguments:    map[string]string{},
+	}
+
+	result1, err := processor.LoadFragment(context.Background(), config1)
+	require.NoError(t, err)
+	assert.Contains(t, result1.Content, "Create a pull request.")
+	assert.NotContains(t, result1.Content, "DRAFT")
+	assert.Contains(t, result1.Content, "Target branch: main")
+	assert.Contains(t, result1.Content, "Regular PR instructions here.")
+	assert.NotContains(t, result1.Content, "Draft PR instructions here.")
+
+	// Test 2: Override to draft=true
+	config2 := &Config{
+		FragmentName: "pr-test",
+		Arguments: map[string]string{
+			"draft": "true",
+		},
+	}
+
+	result2, err := processor.LoadFragment(context.Background(), config2)
+	require.NoError(t, err)
+	assert.Contains(t, result2.Content, "Create a **DRAFT** pull request.")
+	assert.Contains(t, result2.Content, "Target branch: main")
+	assert.Contains(t, result2.Content, "Draft PR instructions here.")
+	assert.NotContains(t, result2.Content, "Regular PR instructions here.")
+
+	// Test 3: Override target while keeping default draft
+	config3 := &Config{
+		FragmentName: "pr-test",
+		Arguments: map[string]string{
+			"target": "develop",
+		},
+	}
+
+	result3, err := processor.LoadFragment(context.Background(), config3)
+	require.NoError(t, err)
+	assert.Contains(t, result3.Content, "Target branch: develop")
+	assert.NotContains(t, result3.Content, "DRAFT")
 }

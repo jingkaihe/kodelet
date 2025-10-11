@@ -1,7 +1,7 @@
-// Package utils provides common utility functions for kodelet including
+// Package osutil provides common utility functions for kodelet including
 // content formatting with line numbers, process management, language detection,
 // domain filtering, and various helper functions used across the application.
-package utils
+package osutil
 
 import (
 	"fmt"
@@ -34,6 +34,8 @@ func ContentWithLineNumber(lines []string, offset int) string {
 	return result
 }
 
+// IsBinaryFile checks if a file is binary by reading the first 512 bytes
+// and looking for NULL bytes which indicate binary content
 func IsBinaryFile(filePath string) bool {
 	// Open the file
 	file, err := os.Open(filePath)

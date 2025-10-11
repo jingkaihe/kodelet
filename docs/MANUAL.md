@@ -486,7 +486,7 @@ export KODELET_LOG_LEVEL="info"  # panic, fatal, error, warn, info, debug, trace
 # LLM configuration - Anthropic
 export ANTHROPIC_API_KEY="sk-ant-api..."
 export KODELET_PROVIDER="anthropic"  # Optional, detected from model name
-export KODELET_MODEL="claude-sonnet-4-20250514"
+export KODELET_MODEL="claude-sonnet-4-5-20250929"
 export KODELET_MAX_TOKENS="8192"
 export KODELET_CACHE_EVERY="5"  # Cache messages every N interactions (0 to disable)
 
@@ -519,7 +519,7 @@ Use `kodelet-config.yaml` in your project root for project-specific settings. Th
 ```yaml
 # Global config (~/.kodelet/config.yaml)
 provider: "anthropic"
-model: "claude-sonnet-4-20250514"
+model: "claude-sonnet-4-5-20250929"
 max_tokens: 8192
 log_level: "info"
 ```
@@ -548,7 +548,7 @@ log_level: "info"  # panic, fatal, error, warn, info, debug, trace
 
 # Anthropic configuration
 provider: "anthropic"
-model: "claude-sonnet-4-20250514"
+model: "claude-sonnet-4-5-20250929"
 max_tokens: 8192
 weak_model: "claude-3-5-haiku-20241022"
 weak_model_max_tokens: 8192
@@ -623,7 +623,7 @@ Profiles are defined in your configuration files using the `profiles` section. E
 ```yaml
 
 # Default profile
-model: "claude-sonnet-4-20250514"
+model: "claude-sonnet-4-5-20250929"
 weak_model: "claude-3-5-haiku-20241022"
 max_tokens: 16000
 weak_model_max_tokens: 8192
@@ -636,7 +636,7 @@ profile: "premium"  # Optional: specify the active profile
 profiles:
   premium:
     model: "opus-41" # alias to "claude-opus-4-1-20250805"
-    weak_model: "sonnet-4" # alias to "claude-sonnet-4-20250514"
+    weak_model: "sonnet-45" # alias to "claude-sonnet-4-5-20250929"
     max_tokens: 16000
     weak_model_max_tokens: 8192
     thinking_budget_tokens: 8000
@@ -661,7 +661,7 @@ profiles:
   mix-n-match:
     # Main agent uses Claude
     provider: "anthropic"
-    model: "claude-sonnet-4-20250514"
+    model: "claude-sonnet-4-5-20250929"
     weak_model: "claude-3-5-haiku-20241022"
     max_tokens: 16000
 
@@ -676,7 +676,7 @@ profiles:
 aliases:
     haiku-35: claude-3-5-haiku-20241022
     opus-41: claude-opus-4-1-20250805
-    sonnet-4: claude-sonnet-4-20250514
+    sonnet-45: claude-sonnet-4-5-20250929
 ```
 
 ### Profile Management Commands
@@ -832,7 +832,7 @@ kodelet run --allowed-commands "ls *,pwd,echo *" "analyze this directory"
 ### Anthropic Claude
 
 Kodelet supports various Anthropic Claude models:
-- `claude-sonnet-4-20250514` (recommended for standard tasks)
+- `claude-sonnet-4-5-20250929` (recommended for standard tasks)
 - `claude-3-5-haiku-20241022` (recommended for lightweight tasks)
 - `claude-opus-4-1-20250805` (high-end model for complex tasks)
 
@@ -1148,13 +1148,16 @@ kodelet run "Analyze the server logs for any ERROR patterns"
 
 ### Generate Custom Tool
 
-Kodelet includes a built-in `custom-tools` recipe that automatically generates custom tool templates based on your task description. This is the fastest way to create new tools with proper structure and best practices.
+Kodelet includes a built-in `custom-tool` recipe that automatically generates custom tool templates based on your task description. This is the fastest way to create new tools with proper structure and best practices.
 
 **Generate a Custom Tool:**
 
 ```bash
-# Generate a weather tool without API key requirement
-kodelet run -r custom-tools --arg task="implement a tool to fetch the weather based on the location, ideally without requiring api key"
+# Generate a weather tool without API key requirement (saved locally)
+kodelet run -r custom-tool --arg task="implement a tool to fetch the weather based on the location, ideally without requiring api key"
+
+# Generate a global tool available across all projects
+kodelet run -r custom-tool --arg task="format and validate JSON" --arg global=true
 ```
 
 ## Key Features

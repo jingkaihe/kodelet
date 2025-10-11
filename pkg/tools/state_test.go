@@ -207,16 +207,16 @@ func TestBasicState_DiscoverContexts(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	subDir := filepath.Join(tmpDir, "submodule")
-	require.NoError(t, os.MkdirAll(subDir, 0755))
+	require.NoError(t, os.MkdirAll(subDir, 0o755))
 
 	deepDir := filepath.Join(subDir, "deep", "nested")
-	require.NoError(t, os.MkdirAll(deepDir, 0755))
+	require.NoError(t, os.MkdirAll(deepDir, 0o755))
 
 	rootAgents := filepath.Join(tmpDir, "AGENTS.md")
-	require.NoError(t, os.WriteFile(rootAgents, []byte("# Root project context"), 0644))
+	require.NoError(t, os.WriteFile(rootAgents, []byte("# Root project context"), 0o644))
 
 	subKodelet := filepath.Join(subDir, "KODELET.md")
-	require.NoError(t, os.WriteFile(subKodelet, []byte("# Submodule context"), 0644))
+	require.NoError(t, os.WriteFile(subKodelet, []byte("# Submodule context"), 0o644))
 
 	oldWd, _ := os.Getwd()
 	defer os.Chdir(oldWd)
@@ -262,8 +262,8 @@ func TestBasicState_ContextFilePreference(t *testing.T) {
 
 	agentsFile := filepath.Join(tmpDir, "AGENTS.md")
 	kodeletFile := filepath.Join(tmpDir, "KODELET.md")
-	require.NoError(t, os.WriteFile(agentsFile, []byte("# Agents context"), 0644))
-	require.NoError(t, os.WriteFile(kodeletFile, []byte("# Kodelet context"), 0644))
+	require.NoError(t, os.WriteFile(agentsFile, []byte("# Agents context"), 0o644))
+	require.NoError(t, os.WriteFile(kodeletFile, []byte("# Kodelet context"), 0o644))
 
 	oldWd, _ := os.Getwd()
 	defer os.Chdir(oldWd)
@@ -282,7 +282,7 @@ func TestBasicState_ContextFileCaching(t *testing.T) {
 	contextFile := filepath.Join(tmpDir, "AGENTS.md")
 
 	initialContent := "# Initial content"
-	require.NoError(t, os.WriteFile(contextFile, []byte(initialContent), 0644))
+	require.NoError(t, os.WriteFile(contextFile, []byte(initialContent), 0o644))
 
 	oldWd, _ := os.Getwd()
 	defer os.Chdir(oldWd)
@@ -304,7 +304,7 @@ func TestBasicState_ContextFileCaching(t *testing.T) {
 	t.Run("cache_invalidation", func(t *testing.T) {
 		newContent := "# Updated content"
 		time.Sleep(10 * time.Millisecond)
-		require.NoError(t, os.WriteFile(contextFile, []byte(newContent), 0644))
+		require.NoError(t, os.WriteFile(contextFile, []byte(newContent), 0o644))
 
 		contexts := state.DiscoverContexts()
 		assert.Equal(t, newContent, contexts[contextFile])
@@ -314,10 +314,10 @@ func TestBasicState_ContextFileCaching(t *testing.T) {
 func TestBasicState_HomeDirectoryContext(t *testing.T) {
 	tmpHome := t.TempDir()
 	kodeletDir := filepath.Join(tmpHome, ".kodelet")
-	require.NoError(t, os.MkdirAll(kodeletDir, 0755))
+	require.NoError(t, os.MkdirAll(kodeletDir, 0o755))
 
 	homeContext := filepath.Join(kodeletDir, "AGENTS.md")
-	require.NoError(t, os.WriteFile(homeContext, []byte("# User home context"), 0644))
+	require.NoError(t, os.WriteFile(homeContext, []byte("# User home context"), 0o644))
 
 	tmpWork := t.TempDir()
 	oldWd, _ := os.Getwd()
@@ -339,7 +339,7 @@ func TestBasicState_HomeDirectoryContext(t *testing.T) {
 
 	t.Run("multiple_context_sources", func(t *testing.T) {
 		workContext := filepath.Join(tmpWork, "KODELET.md")
-		require.NoError(t, os.WriteFile(workContext, []byte("# Work context"), 0644))
+		require.NoError(t, os.WriteFile(workContext, []byte("# Work context"), 0o644))
 
 		contexts := state.DiscoverContexts()
 
@@ -365,9 +365,9 @@ func TestBasicState_ContextDiscoveryEdgeCases(t *testing.T) {
 
 	t.Run("permission_denied", func(t *testing.T) {
 		restrictedFile := filepath.Join(tmpDir, "AGENTS.md")
-		require.NoError(t, os.WriteFile(restrictedFile, []byte("# Restricted"), 0644))
-		require.NoError(t, os.Chmod(restrictedFile, 0000))
-		defer os.Chmod(restrictedFile, 0644)
+		require.NoError(t, os.WriteFile(restrictedFile, []byte("# Restricted"), 0o644))
+		require.NoError(t, os.Chmod(restrictedFile, 0o000))
+		defer os.Chmod(restrictedFile, 0o644)
 
 		oldWd, _ := os.Getwd()
 		defer os.Chdir(oldWd)
@@ -381,13 +381,13 @@ func TestBasicState_ContextDiscoveryEdgeCases(t *testing.T) {
 
 	t.Run("file_access_outside_working_directory", func(t *testing.T) {
 		otherDir := filepath.Join(tmpDir, "other")
-		require.NoError(t, os.MkdirAll(otherDir, 0755))
+		require.NoError(t, os.MkdirAll(otherDir, 0o755))
 
 		otherContext := filepath.Join(otherDir, "KODELET.md")
-		require.NoError(t, os.WriteFile(otherContext, []byte("# Other context"), 0644))
+		require.NoError(t, os.WriteFile(otherContext, []byte("# Other context"), 0o644))
 
 		workDir := filepath.Join(tmpDir, "work")
-		require.NoError(t, os.MkdirAll(workDir, 0755))
+		require.NoError(t, os.MkdirAll(workDir, 0o755))
 
 		oldWd, _ := os.Getwd()
 		defer os.Chdir(oldWd)
@@ -412,15 +412,15 @@ func TestBasicState_ContextTraversalAndDeduplication(t *testing.T) {
 	fooDir := filepath.Join(tmpDir, "foo")
 	barDir := filepath.Join(fooDir, "bar")
 	bazDir := filepath.Join(barDir, "baz")
-	require.NoError(t, os.MkdirAll(bazDir, 0755))
+	require.NoError(t, os.MkdirAll(bazDir, 0o755))
 
 	fooAgents := filepath.Join(fooDir, "AGENTS.md")
 	barAgents := filepath.Join(barDir, "AGENTS.md")
 	bazAgents := filepath.Join(bazDir, "AGENTS.md")
 
-	require.NoError(t, os.WriteFile(fooAgents, []byte("# Foo context"), 0644))
-	require.NoError(t, os.WriteFile(barAgents, []byte("# Bar context"), 0644))
-	require.NoError(t, os.WriteFile(bazAgents, []byte("# Baz context"), 0644))
+	require.NoError(t, os.WriteFile(fooAgents, []byte("# Foo context"), 0o644))
+	require.NoError(t, os.WriteFile(barAgents, []byte("# Bar context"), 0o644))
+	require.NoError(t, os.WriteFile(bazAgents, []byte("# Baz context"), 0o644))
 
 	oldWd, _ := os.Getwd()
 	defer os.Chdir(oldWd)
@@ -478,7 +478,7 @@ func TestBasicState_ContextTraversalAndDeduplication(t *testing.T) {
 
 	t.Run("traversal_stops_at_working_directory_boundary", func(t *testing.T) {
 		rootAgents := filepath.Join(tmpDir, "AGENTS.md")
-		require.NoError(t, os.WriteFile(rootAgents, []byte("# Root context"), 0644))
+		require.NoError(t, os.WriteFile(rootAgents, []byte("# Root context"), 0o644))
 
 		state = NewBasicState(ctx)
 		bazFile := filepath.Join(bazDir, "deep.go")
@@ -514,12 +514,12 @@ func TestBasicState_ContextTraversalAndDeduplication(t *testing.T) {
 		assert.Contains(t, contexts, bazAgents)
 		assert.NotContains(t, contexts, barAgents, "Should not find removed context file")
 
-		require.NoError(t, os.WriteFile(barAgents, []byte("# Bar context"), 0644))
+		require.NoError(t, os.WriteFile(barAgents, []byte("# Bar context"), 0o644))
 	})
 
 	t.Run("context_file_precedence_during_traversal", func(t *testing.T) {
 		barKodelet := filepath.Join(barDir, "KODELET.md")
-		require.NoError(t, os.WriteFile(barKodelet, []byte("# Bar Kodelet context"), 0644))
+		require.NoError(t, os.WriteFile(barKodelet, []byte("# Bar Kodelet context"), 0o644))
 
 		state = NewBasicState(ctx)
 		bazFile := filepath.Join(bazDir, "precedence.go")
@@ -556,7 +556,7 @@ func TestBasicState_ReadmeBasicAndCaching(t *testing.T) {
 	t.Run("readme_only", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		readmePath := filepath.Join(tmpDir, "README.md")
-		require.NoError(t, os.WriteFile(readmePath, []byte("# Project README\n\nProject documentation"), 0644))
+		require.NoError(t, os.WriteFile(readmePath, []byte("# Project README\n\nProject documentation"), 0o644))
 
 		oldWd, _ := os.Getwd()
 		defer os.Chdir(oldWd)
@@ -581,7 +581,7 @@ func TestBasicState_ReadmeBasicAndCaching(t *testing.T) {
 		state := NewBasicState(ctx)
 
 		initialContent := "# Initial README"
-		require.NoError(t, os.WriteFile(readmePath, []byte(initialContent), 0644))
+		require.NoError(t, os.WriteFile(readmePath, []byte(initialContent), 0o644))
 
 		// Initial load
 		contexts := state.DiscoverContexts()
@@ -595,7 +595,7 @@ func TestBasicState_ReadmeBasicAndCaching(t *testing.T) {
 		// Cache invalidation
 		newContent := "# Updated README\n\nNew documentation"
 		time.Sleep(10 * time.Millisecond)
-		require.NoError(t, os.WriteFile(readmePath, []byte(newContent), 0644))
+		require.NoError(t, os.WriteFile(readmePath, []byte(newContent), 0o644))
 
 		contexts = state.DiscoverContexts()
 		assert.Equal(t, newContent, contexts[readmePath])
@@ -623,7 +623,7 @@ func TestNewBasicState_ErrorHandling(t *testing.T) {
 	t.Run("context_discovery_works_with_fallbacks", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		contextFile := filepath.Join(tmpDir, "AGENTS.md")
-		require.NoError(t, os.WriteFile(contextFile, []byte("# Test context"), 0644))
+		require.NoError(t, os.WriteFile(contextFile, []byte("# Test context"), 0o644))
 
 		oldWd, err := os.Getwd()
 		require.NoError(t, err)

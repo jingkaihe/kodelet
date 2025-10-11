@@ -49,6 +49,14 @@ func TestNewThread(t *testing.T) {
 			expectedModel: string(anthropic.ModelClaudeSonnet4_20250514),
 			expectedMax:   8192,
 		},
+		{
+			name: "GoogleProvider",
+			config: llmtypes.Config{
+				Provider: "google",
+			},
+			expectedModel: "gemini-2.5-pro",
+			expectedMax:   8192,
+		},
 	}
 
 	for _, tc := range tests {
@@ -66,7 +74,7 @@ func TestNewThread(t *testing.T) {
 	}
 }
 
-func TestConsoleMessageHandler(t *testing.T) {
+func TestConsoleMessageHandler(_ *testing.T) {
 	// This test mainly ensures the methods don't panic
 	// For a more thorough test, we would need to capture stdout
 	handler := &llmtypes.ConsoleMessageHandler{Silent: true}
@@ -160,7 +168,7 @@ func TestSendMessageAndGetText(t *testing.T) {
 			MaxTokens: 100,
 		},
 		true,
-		llmtypes.MessageOpt{},
+		llmtypes.MessageOpt{NoSaveConversation: true},
 	)
 
 	// Verify we got a non-error response
@@ -306,28 +314,28 @@ func TestResolveModelAlias(t *testing.T) {
 	}{
 		{
 			name:     "resolves existing alias",
-			model:    "sonnet-4",
-			aliases:  map[string]string{"sonnet-4": "claude-sonnet-4-20250514"},
-			expected: "claude-sonnet-4-20250514",
+			model:    "sonnet-45",
+			aliases:  map[string]string{"sonnet-45": "claude-sonnet-4-5-20250929"},
+			expected: "claude-sonnet-4-5-20250929",
 		},
 		{
 			name:     "returns original when no alias found",
-			model:    "claude-sonnet-4-20250514",
-			aliases:  map[string]string{"sonnet-4": "claude-sonnet-4-20250514"},
-			expected: "claude-sonnet-4-20250514",
+			model:    "claude-sonnet-4-5-20250929",
+			aliases:  map[string]string{"sonnet-45": "claude-sonnet-4-5-20250929"},
+			expected: "claude-sonnet-4-5-20250929",
 		},
 		{
 			name:     "handles nil aliases map",
-			model:    "claude-sonnet-4-20250514",
+			model:    "claude-sonnet-4-5-20250929",
 			aliases:  nil,
-			expected: "claude-sonnet-4-20250514",
+			expected: "claude-sonnet-4-5-20250929",
 		},
 		{
 			name:  "resolves from multiple aliases",
 			model: "gpt41",
 			aliases: map[string]string{
-				"sonnet-4": "claude-sonnet-4-20250514",
-				"gpt41":    "gpt-4.1",
+				"sonnet-45": "claude-sonnet-4-5-20250929",
+				"gpt41":     "gpt-4.1",
 			},
 			expected: "gpt-4.1",
 		},
@@ -351,12 +359,12 @@ func TestNewThreadWithAliases(t *testing.T) {
 			name: "resolves Anthropic alias to Claude model",
 			config: llmtypes.Config{
 				Provider: "anthropic",
-				Model:    "sonnet-4",
+				Model:    "sonnet-45",
 				Aliases: map[string]string{
-					"sonnet-4": "claude-sonnet-4-20250514",
+					"sonnet-45": "claude-sonnet-4-5-20250929",
 				},
 			},
-			description: "should resolve sonnet-4 alias to full Claude model name",
+			description: "should resolve sonnet-45 alias to full Claude model name",
 		},
 		{
 			name: "resolves OpenAI alias to GPT model",
@@ -373,9 +381,9 @@ func TestNewThreadWithAliases(t *testing.T) {
 			name: "uses full model name when no alias exists",
 			config: llmtypes.Config{
 				Provider: "anthropic",
-				Model:    "claude-sonnet-4-20250514",
+				Model:    "claude-sonnet-4-5-20250929",
 				Aliases: map[string]string{
-					"sonnet-4": "claude-sonnet-4-20250514",
+					"sonnet-45": "claude-sonnet-4-5-20250929",
 				},
 			},
 			description: "should use original model name when it's not an alias",
@@ -513,7 +521,7 @@ func TestCrossProviderSubagent(t *testing.T) {
 		// Create Claude main agent with Claude subagent (different model)
 		mainConfig := llmtypes.Config{
 			Provider:  "anthropic",
-			Model:     "claude-sonnet-4-20250514",
+			Model:     "claude-sonnet-4-5-20250929",
 			MaxTokens: 2048,
 			SubAgent: &llmtypes.SubAgentConfigSettings{
 				Model:     "claude-3-5-haiku-20241022", // Faster model for subagent

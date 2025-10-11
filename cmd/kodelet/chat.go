@@ -24,6 +24,7 @@ type ChatOptions struct {
 	maxTurns           int
 	compactRatio       float64
 	disableAutoCompact bool
+	ide                bool
 }
 
 var chatOptions = &ChatOptions{}
@@ -36,6 +37,7 @@ func init() {
 	chatCmd.Flags().IntVar(&chatOptions.maxTurns, "max-turns", 50, "Maximum number of turns within a single message exchange (0 for no limit)")
 	chatCmd.Flags().Float64Var(&chatOptions.compactRatio, "compact-ratio", 0.80, "Context window utilization ratio to trigger auto-compact (0.0-1.0)")
 	chatCmd.Flags().BoolVar(&chatOptions.disableAutoCompact, "disable-auto-compact", false, "Disable automatic context compacting")
+	chatCmd.Flags().BoolVar(&chatOptions.ide, "ide", false, "Enable IDE integration mode (display conversation ID prominently)")
 }
 
 // Prevents TUI interference by redirecting logs to file
@@ -46,14 +48,14 @@ func setupTUILogRedirection(conversationID string) (*os.File, string, error) {
 	}
 
 	logsDir := filepath.Join(homeDir, ".kodelet", "logs")
-	if err := os.MkdirAll(logsDir, 0755); err != nil {
+	if err := os.MkdirAll(logsDir, 0o755); err != nil {
 		return nil, "", errors.Wrap(err, "failed to create logs directory")
 	}
 
 	logFileName := fmt.Sprintf("chat-%s.log", conversationID)
 	logFilePath := filepath.Join(logsDir, logFileName)
 
-	logFile, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	logFile, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return nil, "", errors.Wrap(err, "failed to open log file")
 	}
@@ -67,7 +69,7 @@ var chatCmd = &cobra.Command{
 	Use:   "chat",
 	Short: "Start an interactive chat session with Kodelet",
 	Long:  `Start an interactive chat session with Kodelet through stdin.`,
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(cmd *cobra.Command, _ []string) {
 		ctx, cancel := context.WithCancel(cmd.Context())
 		defer cancel()
 
@@ -100,14 +102,11 @@ var chatCmd = &cobra.Command{
 			os.Exit(1)
 		}
 		// Ensure non-negative values (treat negative as 0/no limit)
-		maxTurns := chatOptions.maxTurns
-		if maxTurns < 0 {
-			maxTurns = 0
-		}
+		maxTurns := max(chatOptions.maxTurns, 0)
 
 		// Generate or use existing conversation ID for log redirection
 		conversationID := chatOptions.resumeConvID
-		if conversationID == "" && !chatOptions.noSave {
+		if conversationID == "" {
 			conversationID = convtypes.GenerateID()
 		}
 
@@ -124,7 +123,7 @@ var chatCmd = &cobra.Command{
 			}
 		}
 
-		tui.StartChatCmd(ctx, conversationID, !chatOptions.noSave, mcpManager, customManager, maxTurns, chatOptions.compactRatio, chatOptions.disableAutoCompact)
+		tui.StartChatCmd(ctx, conversationID, !chatOptions.noSave, mcpManager, customManager, maxTurns, chatOptions.compactRatio, chatOptions.disableAutoCompact, chatOptions.ide)
 
 		// Restore stderr logging after TUI exits and show log file location
 		if logFile != nil {

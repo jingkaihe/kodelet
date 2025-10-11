@@ -9,6 +9,8 @@ import (
 // WebFetchRenderer renders web fetch results
 type WebFetchRenderer struct{}
 
+// RenderCLI renders web fetch results in CLI format, showing the URL, saved path (if applicable),
+// prompt (if used), and the fetched content.
 func (r *WebFetchRenderer) RenderCLI(result tools.StructuredToolResult) string {
 	if !result.Success {
 		return result.Error

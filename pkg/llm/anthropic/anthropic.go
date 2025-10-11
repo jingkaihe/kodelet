@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -19,6 +20,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/auth"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/feedback"
+	"github.com/jingkaihe/kodelet/pkg/ide"
 	"github.com/jingkaihe/kodelet/pkg/llm/prompts"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/sysprompt"
@@ -47,8 +49,8 @@ const (
 	MaxImageCount    = 10              // Maximum 10 images per message
 )
 
-// AnthropicThread implements the Thread interface using Anthropic's Claude API
-type AnthropicThread struct {
+// Thread implements the Thread interface using Anthropic's Claude API
+type Thread struct {
 	client                 anthropic.Client
 	config                 llmtypes.Config
 	state                  tooltypes.State
@@ -63,14 +65,16 @@ type AnthropicThread struct {
 	useSubscription        bool
 	toolResults            map[string]tooltypes.StructuredToolResult // Maps tool_call_id to structured result
 	subagentContextFactory llmtypes.SubagentContextFactory           // Injected function for cross-provider subagent creation
+	ideStore               *ide.Store                                // IDE context store (nil if IDE mode disabled)
 }
 
-func (t *AnthropicThread) Provider() string {
+// Provider returns the provider name for this thread
+func (t *Thread) Provider() string {
 	return "anthropic"
 }
 
 // NewAnthropicThread creates a new thread with Anthropic's Claude API
-func NewAnthropicThread(config llmtypes.Config, subagentContextFactory llmtypes.SubagentContextFactory) (*AnthropicThread, error) {
+func NewAnthropicThread(config llmtypes.Config, subagentContextFactory llmtypes.SubagentContextFactory) (*Thread, error) {
 	// Apply defaults if not provided
 	if config.Model == "" {
 		config.Model = string(anthropic.ModelClaudeSonnet4_20250514)
@@ -135,30 +139,40 @@ func NewAnthropicThread(config llmtypes.Config, subagentContextFactory llmtypes.
 		}
 	}
 
-	return &AnthropicThread{
+	var ideStore *ide.Store
+	if config.IDE && !config.IsSubAgent {
+		store, err := ide.NewIDEStore()
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to create IDE store")
+		}
+		ideStore = store
+	}
+
+	return &Thread{
 		client:                 client,
 		config:                 config,
 		useSubscription:        useSubscription,
 		conversationID:         convtypes.GenerateID(),
 		isPersisted:            false,
-		usage:                  &llmtypes.Usage{}, // must be initialised to avoid nil pointer dereference
+		usage:                  &llmtypes.Usage{},
 		toolResults:            make(map[string]tooltypes.StructuredToolResult),
-		subagentContextFactory: subagentContextFactory, // Set directly during creation
+		subagentContextFactory: subagentContextFactory,
+		ideStore:               ideStore,
 	}, nil
 }
 
 // SetState sets the state for the thread
-func (t *AnthropicThread) SetState(s tooltypes.State) {
+func (t *Thread) SetState(s tooltypes.State) {
 	t.state = s
 }
 
 // GetState returns the current state of the thread
-func (t *AnthropicThread) GetState() tooltypes.State {
+func (t *Thread) GetState() tooltypes.State {
 	return t.state
 }
 
 // AddUserMessage adds a user message with optional images to the thread
-func (t *AnthropicThread) AddUserMessage(ctx context.Context, message string, imagePaths ...string) {
+func (t *Thread) AddUserMessage(ctx context.Context, message string, imagePaths ...string) {
 	contentBlocks := []anthropic.ContentBlockParamUnion{}
 
 	// Validate image count
@@ -181,7 +195,7 @@ func (t *AnthropicThread) AddUserMessage(ctx context.Context, message string, im
 	t.messages = append(t.messages, anthropic.NewUserMessage(contentBlocks...))
 }
 
-func (t *AnthropicThread) cacheMessages() {
+func (t *Thread) cacheMessages() {
 	// remove cache control from the messages
 	for msgIdx, msg := range t.messages {
 		for blkIdx, block := range msg.Content {
@@ -204,7 +218,7 @@ func (t *AnthropicThread) cacheMessages() {
 }
 
 // SendMessage sends a message to the LLM and processes the response
-func (t *AnthropicThread) SendMessage(
+func (t *Thread) SendMessage(
 	ctx context.Context,
 	message string,
 	handler llmtypes.MessageHandler,
@@ -226,20 +240,19 @@ func (t *AnthropicThread) SendMessage(
 		copy(originalMessages, t.messages)
 	}
 
-	// Add user message with images if provided
-	t.AddUserMessage(ctx, message, opt.Images...)
-
-	// Determine which model to use
-	model, maxTokens := t.getModelAndTokens(opt)
-
-	// Main interaction loop for handling tool calls
-	turnCount := 0
-	maxTurns := opt.MaxTurns
-	if maxTurns < 0 {
-		maxTurns = 0 // treat negative as no limit
+	if !t.config.IsSubAgent && t.ideStore != nil {
+		if err := t.processIDEContext(ctx, handler); err != nil {
+			return "", errors.Wrap(err, "failed to process IDE context")
+		}
 	}
 
-	// Check cache-every setting and cache if needed
+	t.AddUserMessage(ctx, message, opt.Images...)
+
+	model, maxTokens := t.getModelAndTokens(opt)
+
+	turnCount := 0
+	maxTurns := max(opt.MaxTurns, 0)
+
 	cacheEvery := t.config.CacheEvery
 
 OUTER:
@@ -352,7 +365,7 @@ func isMessageToolUse(msg anthropic.MessageParam) bool {
 
 // processMessageExchange handles a single message exchange with the LLM, including
 // preparing message parameters, making the API call, and processing the response
-func (t *AnthropicThread) processMessageExchange(
+func (t *Thread) processMessageExchange(
 	ctx context.Context,
 	handler llmtypes.MessageHandler,
 	model anthropic.Model,
@@ -390,54 +403,10 @@ func (t *AnthropicThread) processMessageExchange(
 		}
 	}
 
-	// Check for pending feedback messages if this is not a subagent
-	if !t.config.IsSubAgent && t.conversationID != "" {
-		func() {
-			// Use a separate function to ensure feedback processing doesn't break the main flow
-			defer func() {
-				if r := recover(); r != nil {
-					logger.G(ctx).WithField("panic", r).Error("panic occurred while processing feedback")
-				}
-			}()
-
-			feedbackStore, err := feedback.NewFeedbackStore()
-			if err != nil {
-				logger.G(ctx).WithError(err).Warn("failed to create feedback store, continuing without feedback")
-				return
-			}
-
-			pendingFeedback, err := feedbackStore.ReadPendingFeedback(t.conversationID)
-			if err != nil {
-				logger.G(ctx).WithError(err).Warn("failed to read pending feedback, continuing without feedback")
-				return
-			}
-
-			if len(pendingFeedback) > 0 {
-				logger.G(ctx).WithField("feedback_count", len(pendingFeedback)).Info("processing pending feedback messages")
-
-				// Convert feedback messages to anthropic messages and append to messageParams
-				for i, fbMsg := range pendingFeedback {
-					// Add some basic validation
-					if fbMsg.Content == "" {
-						logger.G(ctx).WithField("message_index", i).Warn("skipping empty feedback message")
-						continue
-					}
-
-					userMessage := anthropic.NewUserMessage(
-						anthropic.NewTextBlock(fbMsg.Content),
-					)
-					messageParams.Messages = append(messageParams.Messages, userMessage)
-					handler.HandleText(fmt.Sprintf("🗣️ User feedback: %s", fbMsg.Content))
-				}
-
-				// Clear the feedback now that we've processed it
-				if err := feedbackStore.ClearPendingFeedback(t.conversationID); err != nil {
-					logger.G(ctx).WithError(err).Warn("failed to clear pending feedback, may be processed again")
-				} else {
-					logger.G(ctx).Debug("successfully cleared pending feedback")
-				}
-			}
-		}()
+	if !t.config.IsSubAgent {
+		if err := t.processPendingFeedback(ctx, &messageParams, handler); err != nil {
+			return "", false, errors.Wrap(err, "failed to process pending feedback")
+		}
 	}
 
 	// Add a tracing event for API call start
@@ -488,7 +457,7 @@ func (t *AnthropicThread) processMessageExchange(
 			)
 
 			runToolCtx := t.subagentContextFactory(ctx, t, handler, opt.CompactRatio, opt.DisableAutoCompact)
-			output := tools.RunTool(runToolCtx, t.state, block.Name, string(variant.JSON.Input.Raw()))
+			output := tools.RunTool(runToolCtx, t.state, block.Name, variant.JSON.Input.Raw())
 
 			// Use CLI rendering for consistent output formatting
 			structuredResult := output.StructuredData()
@@ -530,8 +499,74 @@ func (t *AnthropicThread) processMessageExchange(
 	return finalOutput, toolUseCount > 0, nil
 }
 
-// getModelAndTokens determines which model and max tokens to use based on configuration and options
-func (t *AnthropicThread) getModelAndTokens(opt llmtypes.MessageOpt) (anthropic.Model, int) {
+func (t *Thread) processIDEContext(ctx context.Context, handler llmtypes.MessageHandler) error {
+	ideContext, err := t.ideStore.ReadContext(t.conversationID)
+	if err != nil && !errors.Is(err, ide.ErrContextNotFound) {
+		return errors.Wrap(err, "failed to read IDE context")
+	}
+
+	if ideContext != nil {
+		logger.G(ctx).WithFields(map[string]any{
+			"open_files_count":  len(ideContext.OpenFiles),
+			"has_selection":     ideContext.Selection != nil,
+			"diagnostics_count": len(ideContext.Diagnostics),
+		}).Info("processing IDE context")
+
+		ideContextPrompt := ide.FormatContextPrompt(ideContext)
+		if ideContextPrompt != "" {
+			t.AddUserMessage(ctx, ideContextPrompt)
+			handler.HandleText(fmt.Sprintf("📋 IDE Context: %d files, %d diagnostics",
+				len(ideContext.OpenFiles), len(ideContext.Diagnostics)))
+		}
+
+		if err := t.ideStore.ClearContext(t.conversationID); err != nil {
+			logger.G(ctx).WithError(err).Warn("failed to clear IDE context, may be processed again")
+		} else {
+			logger.G(ctx).Debug("successfully cleared IDE context")
+		}
+	}
+
+	return nil
+}
+
+func (t *Thread) processPendingFeedback(ctx context.Context, messageParams *anthropic.MessageNewParams, handler llmtypes.MessageHandler) error {
+	feedbackStore, err := feedback.NewFeedbackStore()
+	if err != nil {
+		return errors.Wrap(err, "failed to create feedback store")
+	}
+
+	pendingFeedback, err := feedbackStore.ReadPendingFeedback(t.conversationID)
+	if err != nil {
+		return errors.Wrap(err, "failed to read pending feedback")
+	}
+
+	if len(pendingFeedback) > 0 {
+		logger.G(ctx).WithField("feedback_count", len(pendingFeedback)).Info("processing pending feedback messages")
+
+		for i, fbMsg := range pendingFeedback {
+			if fbMsg.Content == "" {
+				logger.G(ctx).WithField("message_index", i).Warn("skipping empty feedback message")
+				continue
+			}
+
+			userMessage := anthropic.NewUserMessage(
+				anthropic.NewTextBlock(fbMsg.Content),
+			)
+			messageParams.Messages = append(messageParams.Messages, userMessage)
+			handler.HandleText(fmt.Sprintf("🗣️ User feedback: %s", fbMsg.Content))
+		}
+
+		if err := feedbackStore.ClearPendingFeedback(t.conversationID); err != nil {
+			logger.G(ctx).WithError(err).Warn("failed to clear pending feedback, may be processed again")
+		} else {
+			logger.G(ctx).Debug("successfully cleared pending feedback")
+		}
+	}
+
+	return nil
+}
+
+func (t *Thread) getModelAndTokens(opt llmtypes.MessageOpt) (anthropic.Model, int) {
 	model := t.config.Model
 	maxTokens := t.config.MaxTokens
 
@@ -545,7 +580,7 @@ func (t *AnthropicThread) getModelAndTokens(opt llmtypes.MessageOpt) (anthropic.
 	return anthropic.Model(model), maxTokens
 }
 
-func (t *AnthropicThread) shouldUtiliseThinking(model anthropic.Model) bool {
+func (t *Thread) shouldUtiliseThinking(model anthropic.Model) bool {
 	if !isThinkingModel(model) {
 		return false
 	}
@@ -557,6 +592,10 @@ func (t *AnthropicThread) shouldUtiliseThinking(model anthropic.Model) bool {
 
 func isThinkingModel(model anthropic.Model) bool {
 	thinkingModels := []anthropic.Model{
+		// sonnet 4.5 models
+		anthropic.ModelClaudeSonnet4_5,
+		anthropic.ModelClaudeSonnet4_5_20250929,
+
 		// sonnet 4 models
 		anthropic.ModelClaudeSonnet4_0,
 		anthropic.ModelClaudeSonnet4_20250514,
@@ -575,7 +614,7 @@ func isThinkingModel(model anthropic.Model) bool {
 }
 
 // NewMessage sends a message to Anthropic with OTEL tracing
-func (t *AnthropicThread) NewMessage(ctx context.Context, params anthropic.MessageNewParams) (*anthropic.Message, error) {
+func (t *Thread) NewMessage(ctx context.Context, params anthropic.MessageNewParams) (*anthropic.Message, error) {
 	tracer := telemetry.Tracer("kodelet.llm.anthropic")
 
 	// Create attributes for the span
@@ -666,7 +705,7 @@ func (t *AnthropicThread) NewMessage(ctx context.Context, params anthropic.Messa
 }
 
 // getLastMessagesAttributes extracts information from the last n messages for telemetry purposes
-func (t *AnthropicThread) getLastMessagesAttributes(messages []anthropic.MessageParam, lastN int) []attribute.KeyValue {
+func (t *Thread) getLastMessagesAttributes(messages []anthropic.MessageParam, lastN int) []attribute.KeyValue {
 	attrs := []attribute.KeyValue{}
 
 	// Determine how many messages to process (last n or all if fewer than n)
@@ -700,14 +739,14 @@ func (t *AnthropicThread) getLastMessagesAttributes(messages []anthropic.Message
 	return attrs
 }
 
-func (t *AnthropicThread) tools(opt llmtypes.MessageOpt) []tooltypes.Tool {
+func (t *Thread) tools(opt llmtypes.MessageOpt) []tooltypes.Tool {
 	if opt.NoToolUse {
 		return []tooltypes.Tool{}
 	}
 	return t.state.Tools()
 }
 
-func (t *AnthropicThread) updateUsage(response *anthropic.Message, model anthropic.Model) {
+func (t *Thread) updateUsage(response *anthropic.Message, model anthropic.Model) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	// Track usage statistics
@@ -737,9 +776,10 @@ func (t *AnthropicThread) updateUsage(response *anthropic.Message, model anthrop
 	t.usage.MaxContextWindow = pricing.ContextWindow
 }
 
-func (t *AnthropicThread) NewSubAgent(ctx context.Context, config llmtypes.Config) llmtypes.Thread {
+// NewSubAgent creates a new subagent thread that shares the parent's client and usage tracking
+func (t *Thread) NewSubAgent(_ context.Context, config llmtypes.Config) llmtypes.Thread {
 	// Create subagent thread reusing the parent's client instead of creating a new one
-	thread := &AnthropicThread{
+	thread := &Thread{
 		client:                 t.client, // Reuse parent's client
 		config:                 config,
 		useSubscription:        t.useSubscription, // Reuse parent's subscription status
@@ -753,7 +793,7 @@ func (t *AnthropicThread) NewSubAgent(ctx context.Context, config llmtypes.Confi
 }
 
 // getLastAssistantMessageText extracts text content from the most recent assistant message
-func (t *AnthropicThread) getLastAssistantMessageText() (string, error) {
+func (t *Thread) getLastAssistantMessageText() (string, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -783,7 +823,8 @@ func (t *AnthropicThread) getLastAssistantMessageText() (string, error) {
 	return messageText, nil
 }
 
-func (t *AnthropicThread) ShortSummary(ctx context.Context) string {
+// ShortSummary generates a short summary of the conversation using a weak model
+func (t *Thread) ShortSummary(ctx context.Context) string {
 	// Temporarily disable persistence during summarization
 	t.isPersisted = false
 	defer func() {
@@ -813,7 +854,7 @@ func (t *AnthropicThread) ShortSummary(ctx context.Context) string {
 }
 
 // shouldAutoCompact checks if auto-compact should be triggered based on context window utilization
-func (t *AnthropicThread) shouldAutoCompact(compactRatio float64) bool {
+func (t *Thread) shouldAutoCompact(compactRatio float64) bool {
 	if compactRatio <= 0.0 || compactRatio > 1.0 {
 		return false
 	}
@@ -828,7 +869,7 @@ func (t *AnthropicThread) shouldAutoCompact(compactRatio float64) bool {
 }
 
 // CompactContext performs comprehensive context compacting by creating a detailed summary
-func (t *AnthropicThread) CompactContext(ctx context.Context) error {
+func (t *Thread) CompactContext(ctx context.Context) error {
 	// Temporarily disable persistence during compacting
 	wasPersistedOriginal := t.isPersisted
 	t.isPersisted = false
@@ -883,34 +924,34 @@ func (t *AnthropicThread) CompactContext(ctx context.Context) error {
 }
 
 // GetUsage returns the current token usage for the thread
-func (t *AnthropicThread) GetUsage() llmtypes.Usage {
+func (t *Thread) GetUsage() llmtypes.Usage {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return *t.usage
 }
 
 // GetConfig returns the configuration of the thread
-func (t *AnthropicThread) GetConfig() llmtypes.Config {
+func (t *Thread) GetConfig() llmtypes.Config {
 	return t.config
 }
 
 // GetConversationID returns the current conversation ID
-func (t *AnthropicThread) GetConversationID() string {
+func (t *Thread) GetConversationID() string {
 	return t.conversationID
 }
 
 // SetConversationID sets the conversation ID
-func (t *AnthropicThread) SetConversationID(id string) {
+func (t *Thread) SetConversationID(id string) {
 	t.conversationID = id
 }
 
 // IsPersisted returns whether this thread is being persisted
-func (t *AnthropicThread) IsPersisted() bool {
+func (t *Thread) IsPersisted() bool {
 	return t.isPersisted
 }
 
 // GetMessages returns the current messages in the thread
-func (t *AnthropicThread) GetMessages() ([]llmtypes.Message, error) {
+func (t *Thread) GetMessages() ([]llmtypes.Message, error) {
 	b, err := json.Marshal(t.messages)
 	if err != nil {
 		return nil, err
@@ -919,7 +960,7 @@ func (t *AnthropicThread) GetMessages() ([]llmtypes.Message, error) {
 }
 
 // EnablePersistence enables conversation persistence for this thread
-func (t *AnthropicThread) EnablePersistence(ctx context.Context, enabled bool) {
+func (t *Thread) EnablePersistence(ctx context.Context, enabled bool) {
 	t.isPersisted = enabled
 
 	// Initialize the store if enabling persistence and it's not already initialized
@@ -936,13 +977,13 @@ func (t *AnthropicThread) EnablePersistence(ctx context.Context, enabled bool) {
 
 	// If enabling persistence and there's an existing conversation ID,
 	// try to load it from the store
-	if enabled && t.conversationID != "" && t.store != nil {
+	if enabled && t.store != nil {
 		t.loadConversation(ctx)
 	}
 }
 
 // createMessageSpan creates and configures a tracing span for message handling
-func (t *AnthropicThread) createMessageSpan(
+func (t *Thread) createMessageSpan(
 	ctx context.Context,
 	tracer trace.Tracer,
 	message string,
@@ -965,7 +1006,7 @@ func (t *AnthropicThread) createMessageSpan(
 }
 
 // finalizeMessageSpan records final metrics and status to the span before ending it
-func (t *AnthropicThread) finalizeMessageSpan(span trace.Span, err error) {
+func (t *Thread) finalizeMessageSpan(span trace.Span, err error) {
 	// Record usage metrics after completion
 	usage := t.GetUsage()
 	span.SetAttributes(
@@ -989,23 +1030,20 @@ func (t *AnthropicThread) finalizeMessageSpan(span trace.Span, err error) {
 }
 
 // processImage converts an image path/URL to an Anthropic image content block
-func (t *AnthropicThread) processImage(imagePath string) (*anthropic.ContentBlockParamUnion, error) {
+func (t *Thread) processImage(imagePath string) (*anthropic.ContentBlockParamUnion, error) {
 	// Only allow HTTPS URLs for security
 	if strings.HasPrefix(imagePath, "https://") {
 		return t.processImageURL(imagePath)
-	} else if strings.HasPrefix(imagePath, "file://") {
-		// Remove file:// prefix and process as file
-		filePath := strings.TrimPrefix(imagePath, "file://")
-		return t.processImageFile(filePath)
-	} else {
-		// Treat as a local file path
-		return t.processImageFile(imagePath)
 	}
+	if filePath, ok := strings.CutPrefix(imagePath, "file://"); ok {
+		// Remove file:// prefix and process as file
+		return t.processImageFile(filePath)
+	}
+	// Treat as a local file path
+	return t.processImageFile(imagePath)
 }
 
-// processImageURL creates an image block from an HTTPS URL
-func (t *AnthropicThread) processImageURL(url string) (*anthropic.ContentBlockParamUnion, error) {
-	// Validate URL format (HTTPS only)
+func (t *Thread) processImageURL(url string) (*anthropic.ContentBlockParamUnion, error) {
 	if !strings.HasPrefix(url, "https://") {
 		return nil, errors.Errorf("only HTTPS URLs are supported for security: %s", url)
 	}
@@ -1017,9 +1055,7 @@ func (t *AnthropicThread) processImageURL(url string) (*anthropic.ContentBlockPa
 	return &block, nil
 }
 
-// processImageFile creates an image block from a local file
-func (t *AnthropicThread) processImageFile(filePath string) (*anthropic.ContentBlockParamUnion, error) {
-	// Check if file exists
+func (t *Thread) processImageFile(filePath string) (*anthropic.ContentBlockParamUnion, error) {
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		return nil, errors.Errorf("image file not found: %s", filePath)
 	}
@@ -1073,7 +1109,7 @@ func getMediaTypeFromExtension(ext string) (anthropic.Base64ImageSourceMediaType
 }
 
 // SetStructuredToolResult stores the structured result for a tool call
-func (t *AnthropicThread) SetStructuredToolResult(toolCallID string, result tooltypes.StructuredToolResult) {
+func (t *Thread) SetStructuredToolResult(toolCallID string, result tooltypes.StructuredToolResult) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.toolResults == nil {
@@ -1083,7 +1119,7 @@ func (t *AnthropicThread) SetStructuredToolResult(toolCallID string, result tool
 }
 
 // GetStructuredToolResults returns all structured tool results
-func (t *AnthropicThread) GetStructuredToolResults() map[string]tooltypes.StructuredToolResult {
+func (t *Thread) GetStructuredToolResults() map[string]tooltypes.StructuredToolResult {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.toolResults == nil {
@@ -1091,22 +1127,18 @@ func (t *AnthropicThread) GetStructuredToolResults() map[string]tooltypes.Struct
 	}
 	// Return a copy to avoid race conditions
 	result := make(map[string]tooltypes.StructuredToolResult)
-	for k, v := range t.toolResults {
-		result[k] = v
-	}
+	maps.Copy(result, t.toolResults)
 	return result
 }
 
 // SetStructuredToolResults sets all structured tool results (for loading from conversation)
-func (t *AnthropicThread) SetStructuredToolResults(results map[string]tooltypes.StructuredToolResult) {
+func (t *Thread) SetStructuredToolResults(results map[string]tooltypes.StructuredToolResult) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if results == nil {
 		t.toolResults = make(map[string]tooltypes.StructuredToolResult)
 	} else {
 		t.toolResults = make(map[string]tooltypes.StructuredToolResult)
-		for k, v := range results {
-			t.toolResults[k] = v
-		}
+		maps.Copy(t.toolResults, results)
 	}
 }

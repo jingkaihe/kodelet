@@ -34,17 +34,12 @@ type Model struct {
 	spinnerIndex       int
 	windowSizeMsg      tea.WindowSizeMsg
 	statusMessage      string
-	senderStyle        lipgloss.Style
-	userStyle          lipgloss.Style
-	assistantStyle     lipgloss.Style
-	systemStyle        lipgloss.Style
 	assistant          *AssistantClient
 	ctx                context.Context
 	cancel             context.CancelFunc
 	ctrlCPressCount    int
 	lastCtrlCPressTime time.Time
-	usageText          string
-	costText           string
+	messageFormatter   *MessageFormatter
 
 	// Command auto-completion
 	showCommandDropdown bool
@@ -53,7 +48,7 @@ type Model struct {
 }
 
 // NewModel creates a new TUI model
-func NewModel(ctx context.Context, conversationID string, enablePersistence bool, mcpManager *tools.MCPManager, customManager *tools.CustomToolManager, maxTurns int, compactRatio float64, disableAutoCompact bool) Model {
+func NewModel(ctx context.Context, conversationID string, enablePersistence bool, mcpManager *tools.MCPManager, customManager *tools.CustomToolManager, maxTurns int, compactRatio float64, disableAutoCompact bool, ideMode bool) Model {
 	ta := textarea.New()
 	ta.Placeholder = "Type your message..."
 	ta.Focus()
@@ -65,33 +60,24 @@ func NewModel(ctx context.Context, conversationID string, enablePersistence bool
 	// Style the textarea
 	ta.Prompt = "❯ "
 
-	// Set custom styles for the textarea
+	// Set custom styles for the textarea (Tokyo Night)
 	ta.FocusedStyle.CursorLine = lipgloss.NewStyle()
-	ta.BlurredStyle.Base = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	ta.FocusedStyle.Base = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
-	ta.FocusedStyle.Prompt = lipgloss.NewStyle().Foreground(lipgloss.Color("205")).Bold(true)
-	ta.BlurredStyle.Prompt = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	ta.BlurredStyle.Base = lipgloss.NewStyle().Foreground(lipgloss.Color("#565f89"))              // Comment
+	ta.FocusedStyle.Base = lipgloss.NewStyle().Foreground(lipgloss.Color("#c0caf5"))              // Foreground
+	ta.FocusedStyle.Prompt = lipgloss.NewStyle().Foreground(lipgloss.Color("#7aa2f7")).Bold(true) // Blue
+	ta.BlurredStyle.Prompt = lipgloss.NewStyle().Foreground(lipgloss.Color("#565f89"))            // Comment
 
 	vp := viewport.New(0, 0)
 	vp.KeyMap.PageDown.SetEnabled(true)
 	vp.KeyMap.PageUp.SetEnabled(true)
 
-	// Define available slash commands
-	availableCommands := []string{
-		"/bash",
-		"/add-image",
-		"/remove-image",
-		"/help",
-		"/clear",
-	}
-
-	// Create status message
 	statusMessage := "Ready"
 
-	// Create assistant client
-	assistant := NewAssistantClient(ctx, conversationID, enablePersistence, mcpManager, customManager, maxTurns, compactRatio, disableAutoCompact)
+	assistant := NewAssistantClient(ctx, conversationID, enablePersistence, mcpManager, customManager, maxTurns, compactRatio, disableAutoCompact, ideMode)
 
 	ctx, cancel := context.WithCancel(ctx)
+
+	formatter := NewMessageFormatter(80) // Initial width, will be updated on resize
 
 	// Create the initial model
 	model := Model{
@@ -101,14 +87,11 @@ func NewModel(ctx context.Context, conversationID string, enablePersistence bool
 		textarea:           ta,
 		viewport:           vp,
 		statusMessage:      statusMessage,
-		senderStyle:        lipgloss.NewStyle().Foreground(lipgloss.Color("205")).Bold(true),
-		userStyle:          lipgloss.NewStyle().Foreground(lipgloss.Color("86")).Bold(true),
-		assistantStyle:     lipgloss.NewStyle().Foreground(lipgloss.Color("212")).Bold(true),
-		systemStyle:        lipgloss.NewStyle().Foreground(lipgloss.Color("yellow")).Bold(true),
 		assistant:          assistant,
 		ctx:                ctx,
 		cancel:             cancel,
-		availableCommands:  availableCommands,
+		messageFormatter:   formatter,
+		availableCommands:  GetAvailableCommands(),
 		selectedCommandIdx: 0,
 	}
 
@@ -164,43 +147,7 @@ func (m *Model) SetProcessing(isProcessing bool) {
 
 // updateViewportContent updates the content of the viewport
 func (m *Model) updateViewportContent() {
-	var content string
-
-	// Format and render each message
-	for i, msg := range m.messages {
-		var renderedMsg string
-
-		switch msg.Role {
-		case "":
-			// No prefix for system messages
-			renderedMsg = msg.Content
-		case "user":
-			// Create a styled user message
-			userPrefix := m.userStyle.Render("You")
-			messageText := lipgloss.NewStyle().
-				PaddingLeft(1).
-				Width(m.width - 15). // Ensure text wraps within viewport width
-				Render(msg.Content)
-			renderedMsg = userPrefix + " → " + messageText
-		default:
-			// Create a styled assistant message
-			assistantPrefix := m.assistantStyle.Render("Assistant")
-			messageText := lipgloss.NewStyle().
-				PaddingLeft(1).
-				Width(m.width - 15). // Ensure text wraps within viewport width
-				Render(msg.Content)
-			renderedMsg = assistantPrefix + " → " + messageText
-		}
-
-		// Add padding between messages
-		if i > 0 {
-			content += "\n\n"
-		}
-
-		content += renderedMsg
-	}
-
-	// Set the viewport content
+	content := m.messageFormatter.FormatMessages(m.messages)
 	m.viewport.SetContent(content)
 }
 
@@ -210,9 +157,11 @@ func (m Model) Init() tea.Cmd {
 }
 
 // Custom message types
-type userInputMsg string
-type bashInputMsg string
-type resetCtrlCMsg struct{}
+type (
+	userInputMsg  string
+	bashInputMsg  string
+	resetCtrlCMsg struct{}
+)
 
 // resetCtrlCCmd creates a command that resets the Ctrl+C counter after a timeout
 func resetCtrlCCmd() tea.Cmd {
@@ -265,102 +214,63 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Schedule a reset using the proper command system
 			return m, resetCtrlCCmd()
 		case tea.KeyCtrlH:
-			// Show help/shortcuts
-			m.AddSystemMessage("Keyboard Shortcuts:\n" +
-				"Ctrl+C (twice): Quit\n" +
-				"Ctrl+S: Send message\n" +
-				"Ctrl+H: Show this help\n" +
-				"Ctrl+L: Clear screen\n" +
-				"PageUp/PageDown: Scroll history\n" +
-				"Up/Down: Navigate history\n\n" +
-				"Commands:\n" +
-				"/bash [command]: Execute a bash command and include result in chat context\n" +
-				"/add-image [image-path]: Add an image to the chat\n" +
-				"/remove-image [image-path]: Remove an image from the chat\n" +
-				"/help: Show this help message\n" +
-				"/clear: Clear the screen")
+			m.AddSystemMessage(GetHelpText())
 		case tea.KeyCtrlL:
-			// Clear the screen
 			m.messages = []llmtypes.Message{}
 			m.updateViewportContent()
 			m.AddSystemMessage("Screen cleared")
 		case tea.KeyPgUp:
-			// Scroll up a page
 			m.viewport.PageUp()
 		case tea.KeyPgDown:
-			// Scroll down a page
 			m.viewport.PageDown()
 		case tea.KeyCtrlS:
-			// Always hide dropdown on Enter regardless of what happens next
 			m.showCommandDropdown = false
 
 			if !m.isProcessing {
 				content := m.textarea.Value()
 				if content != "" {
-					// Handle slash commands
-					if strings.HasPrefix(content, "/") {
-						// First check for exact command matches
-						command := strings.TrimSpace(content)
-						commandParts := strings.SplitN(command, " ", 2)
+					cmd, args, isCommand := ParseCommand(content)
 
-						switch commandParts[0] {
-						case "/help":
+					if isCommand {
+						switch Command(cmd) {
+						case CommandHelp:
 							m.AddMessage(content, true)
 							m.textarea.Reset()
-							// Show help message
-							m.AddSystemMessage("Keyboard Shortcuts:\n" +
-								"Ctrl+C (twice): Quit\n" +
-								"Ctrl+S: Send message\n" +
-								"Ctrl+H: Show this help\n" +
-								"Ctrl+L: Clear screen\n" +
-								"PageUp/PageDown: Scroll history\n" +
-								"Up/Down: Navigate history\n\n" +
-								"Commands:\n" +
-								"/bash [command]: Execute a bash command and include result in chat context\n" +
-								"/add-image [image-path]: Add an image to the chat\n" +
-								"/remove-image [image-path]: Remove an image from the chat\n" +
-								"/help: Show this help message\n" +
-								"/clear: Clear the screen")
+							m.AddSystemMessage(GetHelpText())
 							return m, nil
 
-						case "/clear":
+						case CommandClear:
 							m.AddMessage(content, true)
 							m.textarea.Reset()
-							// Clear the screen
 							m.messages = []llmtypes.Message{}
 							m.updateViewportContent()
 							m.AddSystemMessage("Screen cleared")
 							return m, nil
 
-						case "/bash":
+						case CommandBash:
 							m.AddMessage(content, true)
 							m.textarea.Reset()
 							m.SetProcessing(true)
-
-							// Extract bash command from the input
-							var bashCommand string
-							if len(commandParts) > 1 {
-								bashCommand = commandParts[1]
-							}
-
 							return m, func() tea.Msg {
-								return bashInputMsg(bashCommand)
+								return bashInputMsg(args)
 							}
-						case "/add-image":
+
+						case CommandAddImage:
 							m.textarea.Reset()
-							if len(commandParts) > 1 {
-								m.imagePaths = append(m.imagePaths, commandParts[1])
-								m.AddSystemMessage(fmt.Sprintf("Added image: %s", commandParts[1]))
+							if args != "" {
+								m.imagePaths = append(m.imagePaths, args)
+								m.AddSystemMessage(fmt.Sprintf("Added image: %s", args))
 							}
 							return m, nil
-						case "/remove-image":
+
+						case CommandRemoveImage:
 							m.AddMessage(content, true)
 							m.textarea.Reset()
-							if len(commandParts) > 1 {
+							if args != "" {
 								m.imagePaths = slices.DeleteFunc(m.imagePaths, func(path string) bool {
-									return path == commandParts[1]
+									return path == args
 								})
-								m.AddSystemMessage(fmt.Sprintf("Removed image: %s", commandParts[1]))
+								m.AddSystemMessage(fmt.Sprintf("Removed image: %s", args))
 							}
 							return m, nil
 						}
@@ -395,23 +305,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if err != nil {
 			m.AddSystemMessage("Error: " + err.Error())
 		}
-		cmdOut := `
-## command
-` + string(msg) + `
-
-## output
-` + string(output) + `
-`
+		cmdOut := FormatBashOutput(string(msg), string(output))
 		m.AddMessage(cmdOut, true)
 		m.SetProcessing(false)
 	case llmtypes.MessageEvent:
-		if !msg.Done {
-			m.AddMessage(ProcessAssistantEvent(msg), false)
-			return m, func() tea.Msg {
-				return <-m.messageCh
-			}
-		} else {
+		if msg.Done {
 			m.SetProcessing(false)
+			return m, nil
+		}
+		m.AddMessage(FormatAssistantEvent(msg), false)
+		return m, func() tea.Msg {
+			return <-m.messageCh
 		}
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -425,6 +329,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewport.Width = msg.Width
 		m.viewport.Height = msg.Height - verticalMargins
 		m.textarea.SetWidth(msg.Width - 2)
+		m.messageFormatter.SetWidth(msg.Width)
 
 		if !m.ready {
 			m.ready = true
@@ -442,7 +347,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Check for slash commands in the textarea
 	currentInput := m.textarea.Value()
-	if strings.HasPrefix(currentInput, "/") && !m.commandSelectionCompleted(currentInput) && !m.isProcessing {
+	shouldShow := ShouldShowCommandDropdown(currentInput, m.availableCommands, m.isProcessing)
+
+	if shouldShow {
 		// Show dropdown if it's not already showing
 		if !m.showCommandDropdown {
 			m.showCommandDropdown = true
@@ -473,7 +380,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	} else {
-		// Hide dropdown if input doesn't start with "/"
+		// Hide dropdown if conditions not met
 		m.showCommandDropdown = false
 	}
 
@@ -485,26 +392,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-func (m Model) commandSelectionCompleted(currentInput string) bool {
-	for _, cmd := range m.availableCommands {
-		if strings.HasPrefix(currentInput, cmd) {
-			return true
-		}
-	}
-
-	return false
-}
-
 // View renders the UI
 func (m Model) View() string {
 	if !m.ready {
 		return "Initializing..."
 	}
 
-	// Create a more polished input box
+	// Create a more polished input box (Tokyo Night)
 	inputBox := lipgloss.NewStyle().
 		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("205")).
+		BorderForeground(lipgloss.Color("#7aa2f7")). // Blue
 		Padding(0, 2).
 		PaddingTop(0).
 		PaddingBottom(0).
@@ -517,12 +414,11 @@ func (m Model) View() string {
 		Bold(false).
 		Render(m.textarea.View())
 
-	// Add a subtle shadow effect
+	// Add a subtle shadow effect (Tokyo Night)
 	inputBox = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("205")).
+		Foreground(lipgloss.Color("#7aa2f7")). // Blue
 		Render(inputBox)
 
-	// Render command dropdown if needed
 	var commandDropdown string
 	if m.showCommandDropdown && len(m.availableCommands) > 0 {
 		var dropdownContent string
@@ -530,31 +426,29 @@ func (m Model) View() string {
 		for i, cmd := range m.availableCommands {
 			style := lipgloss.NewStyle().PaddingLeft(1).PaddingRight(1)
 
-			// Highlight the selected command
 			if i == m.selectedCommandIdx {
 				style = style.
-					Background(lipgloss.Color("205")).
-					Foreground(lipgloss.Color("0"))
+					Background(lipgloss.Color("#7aa2f7")). // Blue
+					Foreground(lipgloss.Color("#1a1b26"))  // Background dark
 			} else {
 				style = style.
-					Background(lipgloss.Color("236")).
-					Foreground(lipgloss.Color("252"))
+					Background(lipgloss.Color("#292e42")). // Background highlight
+					Foreground(lipgloss.Color("#c0caf5"))  // Foreground
 			}
 
-			// Add the styled command to the dropdown
 			dropdownContent += style.Render(cmd) + "\n"
 		}
 
-		// Create dropdown box with border and navigation hint
+		// Create dropdown box with border and navigation hint (Tokyo Night)
 		hintText := "↑↓:Navigate Tab:Next Enter:Select"
 		hint := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("240")).
+			Foreground(lipgloss.Color("#565f89")). // Comment
 			Align(lipgloss.Center).
 			Render(hintText)
 
 		commandDropdown = lipgloss.NewStyle().
 			BorderStyle(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("205")).
+			BorderForeground(lipgloss.Color("#7aa2f7")). // Blue
 			Width(40).
 			Render(dropdownContent + "\n" + hint)
 	}
@@ -587,7 +481,7 @@ func (m Model) View() string {
 			lipgloss.Top,
 			commandDropdown,
 			lipgloss.WithWhitespaceChars(" "),
-			lipgloss.WithWhitespaceForeground(lipgloss.Color("0")),
+			lipgloss.WithWhitespaceForeground(lipgloss.Color("#1a1b26")), // Background dark
 		)
 
 		// Insert the dropdown right after the input box
@@ -604,66 +498,39 @@ func (m Model) View() string {
 func (m Model) statusView() string {
 	var statusText string
 	if m.isProcessing {
-		spinChars := []string{".", "∘", "○", "◌", "◍", "◉", "◎", "●"}
-		statusText = fmt.Sprintf("%s %s", spinChars[m.spinnerIndex%8], m.statusMessage)
+		statusText = fmt.Sprintf("%s %s", GetSpinnerChar(m.spinnerIndex), m.statusMessage)
 	} else {
 		statusText = m.statusMessage
 	}
 
-	m.usageText, m.costText = m.updateUsage()
+	usageText, costText := FormatUsageStats(m.assistant.GetUsage())
 
-	// Add conversation ID to status if persistence is enabled
+	provider, model := m.assistant.GetModelInfo()
+	modelInfo := FormatModelInfo(provider, model)
+
 	var persistenceStatus string
 	if m.assistant.IsPersisted() {
 		persistenceStatus = fmt.Sprintf(" │ Conv: %s", m.assistant.GetConversationID())
 	}
 
-	// Create main status line with controls
 	mainStatus := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("205")).
-		Background(lipgloss.Color("236")).
+		Foreground(lipgloss.Color("#7aa2f7")). // Blue
+		Background(lipgloss.Color("#292e42")). // Background highlight
 		Padding(0, 1).
 		MarginTop(0).
 		Bold(true).
-		Render(statusText + persistenceStatus + " │ Ctrl+C (twice): Quit │ Ctrl+H (/help): Help │ Ctrl+S: Submit │ ↑/↓: Scroll")
+		Render(statusText + " │ Model: " + modelInfo + persistenceStatus + " │ Ctrl+C (twice): Quit │ Ctrl+H (/help): Help │ Ctrl+S: Submit │ ↑/↓: Scroll")
 
-	// Create separate usage and cost line if available
-	if m.usageText != "" {
+	if usageText != "" {
 		usageLine := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("205")).
-			Background(lipgloss.Color("236")).
+			Foreground(lipgloss.Color("#7aa2f7")). // Blue
+			Background(lipgloss.Color("#292e42")). // Background highlight
 			Padding(0, 1).
 			Bold(true).
-			Render(m.usageText + m.costText)
+			Render(usageText + costText)
 
 		return lipgloss.JoinVertical(lipgloss.Left, mainStatus, usageLine)
 	}
 
 	return mainStatus
-}
-
-func (m *Model) updateUsage() (usageText string, costText string) {
-	usage := m.assistant.GetUsage()
-
-	if usage.TotalTokens() > 0 {
-		// Build context window display with percentage if available
-		var ctxDisplay string
-		if usage.MaxContextWindow > 0 {
-			percentage := float64(usage.CurrentContextWindow) / float64(usage.MaxContextWindow) * 100
-			ctxDisplay = fmt.Sprintf("Ctx: %d / %d (%.1f%%)", usage.CurrentContextWindow, usage.MaxContextWindow, percentage)
-		} else {
-			ctxDisplay = fmt.Sprintf("Ctx: %d / %d", usage.CurrentContextWindow, usage.MaxContextWindow)
-		}
-
-		usageText = fmt.Sprintf("Tokens: %d in / %d out / %d cw / %d cr / %d total | %s",
-			usage.InputTokens, usage.OutputTokens, usage.CacheCreationInputTokens, usage.CacheReadInputTokens, usage.TotalTokens(),
-			ctxDisplay)
-
-		// Add cost information if available
-		if usage.TotalCost() > 0 {
-			costText = fmt.Sprintf(" | Cost: $%.4f", usage.TotalCost())
-		}
-	}
-
-	return usageText, costText
 }

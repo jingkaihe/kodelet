@@ -16,7 +16,6 @@ import (
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/jingkaihe/kodelet/pkg/usage"
-	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
 
@@ -56,7 +55,7 @@ Examples:
   kodelet usage --breakdown                  # Show breakdown by provider
   kodelet usage --breakdown --since 1w      # Provider breakdown for past week
 `,
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(cmd *cobra.Command, _ []string) {
 		ctx := cmd.Context()
 		config := getUsageConfigFromFlags(cmd)
 		runUsageCmd(ctx, config)
@@ -120,12 +119,12 @@ func parseTimeSpecWithClock(spec string, now func() time.Time) (time.Time, error
 	re := regexp.MustCompile(`^(\d+)([dhw])$`)
 	matches := re.FindStringSubmatch(spec)
 	if len(matches) != 3 {
-		return time.Time{}, errors.New(fmt.Sprintf("invalid time specification: %s (expected format: YYYY-MM-DD, 1d, 1w, etc.)", spec))
+		return time.Time{}, fmt.Errorf("invalid time specification: %s (expected format: YYYY-MM-DD, 1d, 1w, etc.)", spec)
 	}
 
 	amount, err := strconv.Atoi(matches[1])
 	if err != nil {
-		return time.Time{}, errors.New(fmt.Sprintf("invalid number in time specification: %s", matches[1]))
+		return time.Time{}, fmt.Errorf("invalid number in time specification: %s", matches[1])
 	}
 
 	unit := matches[2]
@@ -139,12 +138,14 @@ func parseTimeSpecWithClock(spec string, now func() time.Time) (time.Time, error
 	case "w":
 		return currentTime.AddDate(0, 0, -amount*7), nil
 	default:
-		return time.Time{}, errors.New(fmt.Sprintf("invalid time unit: %s (supported: d, h, w)", unit))
+		return time.Time{}, fmt.Errorf("invalid time unit: %s (supported: d, h, w)", unit)
 	}
 }
 
-type DailyUsage = usage.DailyUsage
-type UsageStats = usage.UsageStats
+type (
+	DailyUsage = usage.DailyUsage
+	UsageStats = usage.Stats
+)
 
 func runUsageCmd(ctx context.Context, config *UsageConfig) {
 	var startTime, endTime time.Time
@@ -359,6 +360,8 @@ func displayDailyProviderBreakdownTable(w io.Writer, stats *usage.DailyProviderB
 				displayName = "Anthropic"
 			case "openai":
 				displayName = "OpenAI"
+			case "google":
+				displayName = "Google"
 			}
 
 			fmt.Fprintf(tw, "%s\t%s\t%d\t%s\t%s\t%s\t%s\t$%.4f\n",
@@ -421,6 +424,8 @@ func displayDailyProviderBreakdownTable(w io.Writer, stats *usage.DailyProviderB
 				displayName = "Anthropic"
 			case "openai":
 				displayName = "OpenAI"
+			case "google":
+				displayName = "Google"
 			}
 
 			fmt.Fprintf(tw, "TOTAL\t%s\t%d\t%s\t%s\t%s\t%s\t$%.4f\n",
@@ -478,6 +483,8 @@ func displayDailyProviderBreakdownJSON(w io.Writer, stats *usage.DailyProviderBr
 				displayName = "Anthropic"
 			case "openai":
 				displayName = "OpenAI"
+			case "google":
+				displayName = "Google"
 			}
 
 			providers[displayName] = ProviderUsageJSON{

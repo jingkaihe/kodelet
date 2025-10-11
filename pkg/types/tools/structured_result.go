@@ -114,6 +114,7 @@ type ToolMetadata interface {
 
 // File operation metadata structures
 
+// FileReadMetadata contains metadata about a file read operation
 type FileReadMetadata struct {
 	FilePath       string   `json:"filePath"`
 	Offset         int      `json:"offset"`
@@ -124,8 +125,10 @@ type FileReadMetadata struct {
 	RemainingLines int      `json:"remainingLines,omitempty"`
 }
 
+// ToolType returns the tool type identifier for file read operations
 func (m FileReadMetadata) ToolType() string { return "file_read" }
 
+// FileWriteMetadata contains metadata about a file write operation
 type FileWriteMetadata struct {
 	FilePath string `json:"filePath"`
 	Content  string `json:"content"`
@@ -133,8 +136,10 @@ type FileWriteMetadata struct {
 	Language string `json:"language,omitempty"`
 }
 
+// ToolType returns the tool type identifier for file write operations
 func (m FileWriteMetadata) ToolType() string { return "file_write" }
 
+// FileEditMetadata contains metadata about a file edit operation
 type FileEditMetadata struct {
 	FilePath      string `json:"filePath"`
 	Edits         []Edit `json:"edits"`
@@ -143,6 +148,7 @@ type FileEditMetadata struct {
 	ReplacedCount int    `json:"replacedCount,omitempty"`
 }
 
+// Edit represents a single text replacement in a file
 type Edit struct {
 	StartLine  int    `json:"startLine"`
 	EndLine    int    `json:"endLine"`
@@ -150,10 +156,12 @@ type Edit struct {
 	NewContent string `json:"newContent"`
 }
 
+// ToolType returns the tool type identifier for file edit operations
 func (m FileEditMetadata) ToolType() string { return "file_edit" }
 
 // Search tool metadata structures
 
+// GrepMetadata contains metadata about a grep search operation
 type GrepMetadata struct {
 	Pattern   string         `json:"pattern"`
 	Path      string         `json:"path,omitempty"`
@@ -162,12 +170,14 @@ type GrepMetadata struct {
 	Truncated bool           `json:"truncated"`
 }
 
+// SearchResult represents the search results for a single file
 type SearchResult struct {
 	FilePath string        `json:"filePath"`
 	Language string        `json:"language,omitempty"`
 	Matches  []SearchMatch `json:"matches"`
 }
 
+// SearchMatch represents a single match in a search result
 type SearchMatch struct {
 	LineNumber int    `json:"lineNumber"`
 	Content    string `json:"content"`
@@ -175,8 +185,10 @@ type SearchMatch struct {
 	MatchEnd   int    `json:"matchEnd"`
 }
 
+// ToolType returns the tool type identifier for grep operations
 func (m GrepMetadata) ToolType() string { return "grep_tool" }
 
+// GlobMetadata contains metadata about a glob pattern match operation
 type GlobMetadata struct {
 	Pattern   string     `json:"pattern"`
 	Path      string     `json:"path,omitempty"`
@@ -184,6 +196,7 @@ type GlobMetadata struct {
 	Truncated bool       `json:"truncated"`
 }
 
+// FileInfo represents information about a matched file
 type FileInfo struct {
 	Path     string    `json:"path"`
 	Size     int64     `json:"size"`
@@ -192,10 +205,12 @@ type FileInfo struct {
 	Language string    `json:"language,omitempty"`
 }
 
+// ToolType returns the tool type identifier for glob operations
 func (m GlobMetadata) ToolType() string { return "glob_tool" }
 
 // Command execution metadata
 
+// BashMetadata contains metadata about a bash command execution
 type BashMetadata struct {
 	Command       string        `json:"command"`
 	ExitCode      int           `json:"exitCode"`
@@ -204,8 +219,10 @@ type BashMetadata struct {
 	WorkingDir    string        `json:"workingDir,omitempty"`
 }
 
+// ToolType returns the tool type identifier for bash command execution
 func (m BashMetadata) ToolType() string { return "bash" }
 
+// BackgroundBashMetadata contains metadata about a background bash process
 type BackgroundBashMetadata struct {
 	Command   string    `json:"command"`
 	PID       int       `json:"pid"`
@@ -213,10 +230,12 @@ type BackgroundBashMetadata struct {
 	StartTime time.Time `json:"startTime"`
 }
 
+// ToolType returns the tool type identifier for background bash processes
 func (m BackgroundBashMetadata) ToolType() string { return "bash_background" }
 
 // MCP tool metadata
 
+// MCPToolMetadata contains metadata about an MCP tool execution
 type MCPToolMetadata struct {
 	MCPToolName   string         `json:"mcpToolName"`
 	ServerName    string         `json:"serverName,omitempty"`
@@ -226,6 +245,7 @@ type MCPToolMetadata struct {
 	ExecutionTime time.Duration  `json:"executionTime"`
 }
 
+// MCPContent represents a content block returned by an MCP tool
 type MCPContent struct {
 	Type     string         `json:"type"`
 	Text     string         `json:"text,omitempty"`
@@ -235,25 +255,30 @@ type MCPContent struct {
 	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
+// ToolType returns the tool type identifier for MCP tool execution
 func (m MCPToolMetadata) ToolType() string { return "mcp_tool" }
 
 // Custom tool metadata
 
+// CustomToolMetadata contains metadata about a custom tool execution
 type CustomToolMetadata struct {
 	ExecutionTime time.Duration `json:"executionTime"`
 	Output        string        `json:"output"`
 }
 
+// ToolType returns the tool type identifier for custom tool execution
 func (m CustomToolMetadata) ToolType() string { return "custom_tool" }
 
 // Other tool metadata
 
+// TodoMetadata contains metadata about a todo list operation
 type TodoMetadata struct {
 	Action     string     `json:"action"` // "read" or "write"
 	TodoList   []TodoItem `json:"todoList"`
 	Statistics TodoStats  `json:"statistics,omitempty"`
 }
 
+// TodoItem represents a single todo list item
 type TodoItem struct {
 	ID        string    `json:"id"`
 	Content   string    `json:"content"`
@@ -263,6 +288,7 @@ type TodoItem struct {
 	UpdatedAt time.Time `json:"updatedAt,omitempty"`
 }
 
+// TodoStats contains statistics about the todo list
 type TodoStats struct {
 	Total      int `json:"total"`
 	Completed  int `json:"completed"`
@@ -270,17 +296,21 @@ type TodoStats struct {
 	Pending    int `json:"pending"`
 }
 
+// ToolType returns the tool type identifier for todo operations
 func (m TodoMetadata) ToolType() string { return "todo" }
 
+// ThinkingMetadata contains metadata about a thinking operation
 type ThinkingMetadata struct {
 	Thought  string `json:"thought"`
 	Category string `json:"category,omitempty"`
 }
 
+// ToolType returns the tool type identifier for thinking operations
 func (m ThinkingMetadata) ToolType() string { return "thinking" }
 
 // Additional tool metadata structures
 
+// ImageRecognitionMetadata contains metadata about an image recognition operation
 type ImageRecognitionMetadata struct {
 	ImagePath string          `json:"imagePath"`
 	ImageType string          `json:"imageType"` // "local" or "remote"
@@ -289,20 +319,25 @@ type ImageRecognitionMetadata struct {
 	ImageSize ImageDimensions `json:"imageSize,omitempty"`
 }
 
+// ImageDimensions represents the dimensions of an image
 type ImageDimensions struct {
 	Width  int `json:"width"`
 	Height int `json:"height"`
 }
 
+// ToolType returns the tool type identifier for image recognition operations
 func (m ImageRecognitionMetadata) ToolType() string { return "image_recognition" }
 
+// SubAgentMetadata contains metadata about a sub-agent invocation
 type SubAgentMetadata struct {
 	Question string `json:"question"`
 	Response string `json:"response"`
 }
 
+// ToolType returns the tool type identifier for sub-agent operations
 func (m SubAgentMetadata) ToolType() string { return "subagent" }
 
+// WebFetchMetadata contains metadata about a web fetch operation
 type WebFetchMetadata struct {
 	URL           string `json:"url"`
 	ContentType   string `json:"contentType"`
@@ -313,13 +348,16 @@ type WebFetchMetadata struct {
 	Content       string `json:"content"`       // The actual fetched content
 }
 
+// ToolType returns the tool type identifier for web fetch operations
 func (m WebFetchMetadata) ToolType() string { return "web_fetch" }
 
+// ViewBackgroundProcessesMetadata contains metadata about viewing background processes
 type ViewBackgroundProcessesMetadata struct {
 	Processes []BackgroundProcessInfo `json:"processes"`
 	Count     int                     `json:"count"`
 }
 
+// BackgroundProcessInfo represents information about a single background process
 type BackgroundProcessInfo struct {
 	PID       int       `json:"pid"`
 	Command   string    `json:"command"`
@@ -328,6 +366,7 @@ type BackgroundProcessInfo struct {
 	Status    string    `json:"status"` // "running", "stopped"
 }
 
+// ToolType returns the tool type identifier for viewing background processes
 func (m ViewBackgroundProcessesMetadata) ToolType() string { return "view_background_processes" }
 
 // ExtractMetadata is a helper that handles both pointer and value type assertions

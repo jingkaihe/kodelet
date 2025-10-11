@@ -34,7 +34,7 @@ func TestGetContextFileName(t *testing.T) {
 	t.Run("Only KODELET.md exists", func(t *testing.T) {
 		os.Remove(AgentsMd)
 
-		err := os.WriteFile(KodeletMd, []byte("# KODELET Context"), 0644)
+		err := os.WriteFile(KodeletMd, []byte("# KODELET Context"), 0o644)
 		require.NoError(t, err)
 		defer os.Remove(KodeletMd)
 
@@ -45,7 +45,7 @@ func TestGetContextFileName(t *testing.T) {
 	t.Run("Only AGENTS.md exists", func(t *testing.T) {
 		os.Remove(KodeletMd)
 
-		err := os.WriteFile(AgentsMd, []byte("# AGENTS Context"), 0644)
+		err := os.WriteFile(AgentsMd, []byte("# AGENTS Context"), 0o644)
 		require.NoError(t, err)
 		defer os.Remove(AgentsMd)
 
@@ -54,11 +54,11 @@ func TestGetContextFileName(t *testing.T) {
 	})
 
 	t.Run("Both AGENTS.md and KODELET.md exist", func(t *testing.T) {
-		err := os.WriteFile(AgentsMd, []byte("# AGENTS Context"), 0644)
+		err := os.WriteFile(AgentsMd, []byte("# AGENTS Context"), 0o644)
 		require.NoError(t, err)
 		defer os.Remove(AgentsMd)
 
-		err = os.WriteFile(KodeletMd, []byte("# KODELET Context"), 0644)
+		err = os.WriteFile(KodeletMd, []byte("# KODELET Context"), 0o644)
 		require.NoError(t, err)
 		defer os.Remove(KodeletMd)
 
@@ -113,7 +113,7 @@ func TestPromptContextActiveContextFile(t *testing.T) {
 	t.Run("ActiveContextFile is AGENTS.md when AGENTS.md exists", func(t *testing.T) {
 		os.Remove(KodeletMd)
 
-		err := os.WriteFile(AgentsMd, []byte("# AGENTS Context"), 0644)
+		err := os.WriteFile(AgentsMd, []byte("# AGENTS Context"), 0o644)
 		require.NoError(t, err)
 		defer os.Remove(AgentsMd)
 
@@ -124,7 +124,7 @@ func TestPromptContextActiveContextFile(t *testing.T) {
 	t.Run("ActiveContextFile is KODELET.md when only KODELET.md exists", func(t *testing.T) {
 		os.Remove(AgentsMd)
 
-		err := os.WriteFile(KodeletMd, []byte("# KODELET Context"), 0644)
+		err := os.WriteFile(KodeletMd, []byte("# KODELET Context"), 0o644)
 		require.NoError(t, err)
 		defer os.Remove(KodeletMd)
 
@@ -141,11 +141,11 @@ func TestPromptContextActiveContextFile(t *testing.T) {
 	})
 
 	t.Run("ActiveContextFile prefers AGENTS.md when both files exist", func(t *testing.T) {
-		err := os.WriteFile(AgentsMd, []byte("# AGENTS Context"), 0644)
+		err := os.WriteFile(AgentsMd, []byte("# AGENTS Context"), 0o644)
 		require.NoError(t, err)
 		defer os.Remove(AgentsMd)
 
-		err = os.WriteFile(KodeletMd, []byte("# KODELET Context"), 0644)
+		err = os.WriteFile(KodeletMd, []byte("# KODELET Context"), 0o644)
 		require.NoError(t, err)
 		defer os.Remove(KodeletMd)
 

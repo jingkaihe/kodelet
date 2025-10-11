@@ -23,19 +23,22 @@ type Message struct {
 	Timestamp time.Time `json:"timestamp"`
 }
 
-// FeedbackStore represents the feedback storage
-type FeedbackStore struct {
+// Store manages persistent storage of user feedback messages for autonomous
+// conversations. It provides thread-safe operations for writing, reading, and
+// clearing feedback data with file-based persistence.
+type Store struct {
 	feedbackDir string
 	mu          sync.RWMutex
 }
 
-// FeedbackData represents the structure of feedback file
-type FeedbackData struct {
+// Data represents the structure of the feedback JSON file containing
+// a collection of feedback messages.
+type Data struct {
 	Messages []Message `json:"messages"`
 }
 
 // NewFeedbackStore creates a new feedback store
-func NewFeedbackStore() (*FeedbackStore, error) {
+func NewFeedbackStore() (*Store, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get user home directory")
@@ -44,22 +47,22 @@ func NewFeedbackStore() (*FeedbackStore, error) {
 	feedbackDir := filepath.Join(homeDir, ".kodelet", "feedback")
 
 	// Ensure feedback directory exists
-	if err := os.MkdirAll(feedbackDir, 0755); err != nil {
+	if err := os.MkdirAll(feedbackDir, 0o755); err != nil {
 		return nil, errors.Wrap(err, "failed to create feedback directory")
 	}
 
-	return &FeedbackStore{
+	return &Store{
 		feedbackDir: feedbackDir,
 	}, nil
 }
 
 // getFeedbackPath returns the path to the feedback file for a conversation
-func (fs *FeedbackStore) getFeedbackPath(conversationID string) string {
+func (fs *Store) getFeedbackPath(conversationID string) string {
 	return filepath.Join(fs.feedbackDir, fmt.Sprintf("feedback-%s.json", conversationID))
 }
 
 // WriteFeedback writes a feedback message to the feedback file
-func (fs *FeedbackStore) WriteFeedback(conversationID, message string) error {
+func (fs *Store) WriteFeedback(conversationID, message string) error {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 
@@ -67,11 +70,11 @@ func (fs *FeedbackStore) WriteFeedback(conversationID, message string) error {
 
 	return lockedfile.Transform(filePath, func(data []byte) ([]byte, error) {
 		// Parse existing feedback data
-		feedbackData := &FeedbackData{Messages: []Message{}}
+		feedbackData := &Data{Messages: []Message{}}
 		if len(data) > 0 {
 			if err := json.Unmarshal(data, feedbackData); err != nil {
 				logger.G(nil).WithError(err).Warn("failed to unmarshal existing feedback data, creating new")
-				feedbackData = &FeedbackData{Messages: []Message{}}
+				feedbackData = &Data{Messages: []Message{}}
 			}
 		}
 
@@ -94,7 +97,7 @@ func (fs *FeedbackStore) WriteFeedback(conversationID, message string) error {
 }
 
 // ReadPendingFeedback reads and returns pending feedback messages
-func (fs *FeedbackStore) ReadPendingFeedback(conversationID string) ([]Message, error) {
+func (fs *Store) ReadPendingFeedback(conversationID string) ([]Message, error) {
 	fs.mu.RLock()
 	defer fs.mu.RUnlock()
 
@@ -111,7 +114,7 @@ func (fs *FeedbackStore) ReadPendingFeedback(conversationID string) ([]Message, 
 		return nil, errors.Wrap(err, "failed to read feedback file")
 	}
 
-	var feedbackData FeedbackData
+	var feedbackData Data
 	if err := json.Unmarshal(data, &feedbackData); err != nil {
 		return nil, errors.Wrap(err, "failed to unmarshal feedback data")
 	}
@@ -120,7 +123,7 @@ func (fs *FeedbackStore) ReadPendingFeedback(conversationID string) ([]Message, 
 }
 
 // ClearPendingFeedback clears all pending feedback messages
-func (fs *FeedbackStore) ClearPendingFeedback(conversationID string) error {
+func (fs *Store) ClearPendingFeedback(conversationID string) error {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 
@@ -134,7 +137,7 @@ func (fs *FeedbackStore) ClearPendingFeedback(conversationID string) error {
 }
 
 // HasPendingFeedback checks if there are pending feedback messages
-func (fs *FeedbackStore) HasPendingFeedback(conversationID string) bool {
+func (fs *Store) HasPendingFeedback(conversationID string) bool {
 	filePath := fs.getFeedbackPath(conversationID)
 
 	// Check if feedback file exists and has content
@@ -146,7 +149,7 @@ func (fs *FeedbackStore) HasPendingFeedback(conversationID string) bool {
 }
 
 // ListFeedbackFiles returns all feedback files for debugging
-func (fs *FeedbackStore) ListFeedbackFiles() ([]string, error) {
+func (fs *Store) ListFeedbackFiles() ([]string, error) {
 	entries, err := os.ReadDir(fs.feedbackDir)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to read feedback directory")

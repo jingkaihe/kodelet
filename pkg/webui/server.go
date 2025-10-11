@@ -17,10 +17,12 @@ import (
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/gorilla/mux"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/llmstxt"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/pkg/errors"
 	"github.com/sashabaranov/go-openai"
+	"google.golang.org/genai"
 )
 
 //go:generate bash -c "cd frontend && npm install && npm run build"
@@ -98,6 +100,9 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/conversations/{id}/tools/{toolCallId}", s.handleGetToolResult).Methods("GET")
 	api.HandleFunc("/conversations/{id}", s.handleDeleteConversation).Methods("DELETE")
 
+	// LLM-friendly documentation
+	s.router.HandleFunc("/llms.txt", s.handleLlmsTxt).Methods("GET")
+
 	// Static assets from the React build
 	s.router.PathPrefix("/assets/").Handler(s.staticFileHandler())
 
@@ -127,6 +132,14 @@ func (s *Server) handleReactSPA(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	w.Write(indexContent)
+}
+
+// handleLlmsTxt serves the embedded llms.txt content as markdown
+func (s *Server) handleLlmsTxt(w http.ResponseWriter, _ *http.Request) {
+	content := llmstxt.GetContent()
+	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=3600") // Cache for 1 hour
+	w.Write([]byte(content))
 }
 
 // loggingMiddleware logs HTTP requests
@@ -341,6 +354,15 @@ func (s *Server) convertToWebMessages(rawMessages json.RawMessage, provider stri
 			// Extract content using SDK for consistency
 			if textContent, err := s.extractOpenAIContent(rawMsg); err == nil {
 				webMsg.Content = textContent
+			}
+		case "google":
+			if toolCalls, err := s.extractGoogleToolCalls(rawMsg); err == nil {
+				webMsg.ToolCalls = toolCalls
+			}
+			// Extract content and thinking text using Google SDK
+			if textContent, thinkingText, err := s.extractGoogleContent(rawMsg); err == nil {
+				webMsg.Content = textContent
+				webMsg.ThinkingText = thinkingText
 			}
 		}
 
@@ -562,6 +584,67 @@ func (s *Server) Stop() error {
 		return s.server.Close()
 	}
 	return nil
+}
+
+// extractGoogleContent extracts text content and thinking text from Google Content using Google SDK
+func (s *Server) extractGoogleContent(rawMessage json.RawMessage) (string, string, error) {
+	// Deserialize single message using the Google GenAI SDK
+	var googleContent genai.Content
+	if err := json.Unmarshal(rawMessage, &googleContent); err != nil {
+		return "", "", errors.Wrap(err, "failed to deserialize Google message")
+	}
+
+	var textParts []string
+	var thinkingText string
+
+	for _, part := range googleContent.Parts {
+		// Handle text parts
+		if part.Text != "" {
+			if part.Thought {
+				// This is thinking content
+				thinkingText = part.Text
+			} else {
+				// Regular text content
+				textParts = append(textParts, part.Text)
+			}
+		}
+	}
+
+	return strings.Join(textParts, "\n"), thinkingText, nil
+}
+
+// extractGoogleToolCalls extracts tool calls from Google Content using Google SDK
+func (s *Server) extractGoogleToolCalls(rawMessage json.RawMessage) ([]WebToolCall, error) {
+	// Deserialize single message using the Google GenAI SDK
+	var googleContent genai.Content
+	if err := json.Unmarshal(rawMessage, &googleContent); err != nil {
+		return nil, errors.Wrap(err, "failed to deserialize Google message")
+	}
+
+	var toolCalls []WebToolCall
+
+	for _, part := range googleContent.Parts {
+		// Handle function call parts
+		if part.FunctionCall != nil {
+			// Convert arguments to JSON string
+			inputJSON := "{}"
+			if part.FunctionCall.Args != nil {
+				if inputBytes, err := json.Marshal(part.FunctionCall.Args); err == nil {
+					inputJSON = string(inputBytes)
+				}
+			}
+
+			toolCalls = append(toolCalls, WebToolCall{
+				ID: fmt.Sprintf("google_%s_%d", part.FunctionCall.Name, len(toolCalls)), // Generate ID since Google doesn't provide one
+				Function: WebToolCallFunction{
+					Name:      part.FunctionCall.Name,
+					Arguments: inputJSON,
+				},
+			})
+		}
+	}
+
+	return toolCalls, nil
 }
 
 // Close closes the server and releases resources

@@ -9,11 +9,11 @@ log_level: "info"
 log_format: "json"
 
 # LLM Configuration
-# Provider to use (anthropic or openai)
+# Provider to use (anthropic, openai, or google)
 provider: "anthropic"
 
 # Model to use for LLM interactions
-model: "claude-sonnet-4-20250514"
+model: "claude-sonnet-4-5-20250929"
 
 # Maximum tokens for responses
 max_tokens: 8192
@@ -30,9 +30,11 @@ weak_model_max_tokens: 8192
 # Model aliases for easier reference
 # Allows using short names instead of full model identifiers
 aliases:
-  sonnet-4: "claude-sonnet-4-20250514"
+  sonnet-45: "claude-sonnet-4-5-20250929"
   haiku-35: "claude-3-5-haiku-20241022"
   opus-4: "claude-opus-4-20250514"
+  gemini-pro: "gemini-2.5-pro"
+  gemini-flash: "gemini-2.5-flash"
 
 # Active profile selection (uncomment to activate a specific profile)
 # profile: "premium"
@@ -42,7 +44,7 @@ aliases:
 profiles:
   premium:
     model: "claude-opus-4-20250514"
-    weak_model: "claude-sonnet-4-20250514"
+    weak_model: "claude-sonnet-4-5-20250929"
     max_tokens: 16000
     weak_model_max_tokens: 8192
     thinking_budget_tokens: 8000
@@ -71,9 +73,16 @@ profiles:
     openai:
       preset: "xai"
 
+  google-pro:
+    provider: "google"
+    model: "gemini-pro"
+    weak_model: "gemini-flash"
+    max_tokens: 8192
+    thinking_budget_tokens: 8000
+
   mix-n-match:
     provider: "anthropic"
-    model: "sonnet-4"
+    model: "sonnet-45"
     weak_model: "haiku-35"
     max_tokens: 16000
 
@@ -178,6 +187,14 @@ commit:
 # weak_model_max_tokens: 4096
 # reasoning_effort: "medium"
 
+# Example Google GenAI configuration (uncomment to use)
+# provider: "google"
+# model: "gemini-2.5-pro"
+# max_tokens: 8192
+# weak_model: "gemini-2.5-flash"
+# weak_model_max_tokens: 4096
+# thinking_budget_tokens: 8000
+
 # OpenAI-compatible API configuration
 # Supports any OpenAI-compatible provider (xAI, Groq, Together AI, etc.)
 openai:
@@ -209,6 +226,40 @@ openai:
   #     context_window: 131072  # 131k tokens
   #   # ... additional models
 
+# Google GenAI Configuration
+# Supports both Gemini API (developer-focused) and Vertex AI (enterprise-grade)
+google:
+  # Backend selection: "gemini" (Gemini API) or "vertexai" (Vertex AI)
+  # Auto-detected based on available authentication if not specified
+  # backend: "gemini"
+
+  # Authentication for Gemini API
+  # api_key: "your-google-api-key"  # Can also use GOOGLE_API_KEY environment variable
+
+  # Authentication for Vertex AI (choose one method)
+  # project: "your-gcp-project-id"      # GCP project ID
+  # location: "us-central1"             # GCP region (default: us-central1)
+  # Using GOOGLE_APPLICATION_CREDENTIALS environment variable is recommended
+
+  # Token budget for thinking capability (Google models support thinking)
+  # thinking_budget: 8000  # Default: 8000 tokens
+
+
+
+  # Model-specific pricing and configuration (advanced users)
+  # pricing:
+  #   gemini-2.5-pro:
+  #     input: 0.00125            # $1.25 per million tokens (≤200K input)
+  #     input_high: 0.0025        # $2.50 per million tokens (>200K input)
+  #     output: 0.01              # $10 per million tokens (≤200K input)
+  #     output_high: 0.015        # $15 per million tokens (>200K input)
+  #     context_window: 2097152   # 2M tokens
+  #   gemini-2.5-flash:
+  #     input: 0.0003             # $0.30 per million tokens
+  #     audio_input: 0.001        # $1.00 per million tokens (audio)
+  #     output: 0.0025            # $2.50 per million tokens
+  #     context_window: 1048576   # 1M tokens
+
 # Subagent Configuration
 # Configure how subagents behave, including provider mix-and-match capabilities
 # This allows main agent and subagents to use different providers/models
@@ -228,6 +279,9 @@ subagent:
 
   # Anthropic-specific: Thinking budget for subagent
   # thinking_budget: 1024
+
+  # Google-specific: Thinking budget for subagent
+  # thinking_budget: 2048
 
   # Tools allowed for subagent (empty means use defaults)
   # Note: subagent tool is automatically excluded to prevent infinite recursion
@@ -255,11 +309,23 @@ subagent:
   #   #     output: 0.0006    # $0.60 per million tokens
   #   #     context_window: 128000
 
+  # Google configuration for subagent (when using different provider)
+  # google:
+  #   backend: "gemini"
+  #   thinking_budget: 2048
+  #   # Or custom configuration:
+  #   # api_key: "your-google-api-key"
+  #   # pricing:
+  #   #   gemini-2.5-flash:
+  #   #     input: 0.0003     # $0.30 per million tokens
+  #   #     output: 0.0025    # $2.50 per million tokens
+  #   #     context_window: 1048576
+
 # Example configurations for common scenarios:
 
 # Scenario 1: Claude main agent with GPT subagents for cost optimization
 # provider: "anthropic"
-# model: "claude-sonnet-4-20250514"
+# model: "claude-sonnet-4-5-20250929"
 # subagent:
 #   provider: "openai"
 #   model: "gpt-4o-mini"
@@ -280,6 +346,33 @@ subagent:
 # subagent:
 #   model: "claude-3-5-haiku-20241022"  # Faster model for subagent tasks
 #   max_tokens: 2048
+
+# Scenario 4: Google main agent with Claude subagents for specific tasks
+# provider: "google"
+# model: "gemini-2.5-pro"
+# thinking_budget_tokens: 8000
+# subagent:
+#   provider: "anthropic"
+#   model: "claude-3-5-haiku-20241022"
+#   max_tokens: 4096
+
+# Scenario 5: Claude main agent with Google subagents for cost optimization
+# provider: "anthropic"
+# model: "claude-sonnet-4-5-20250929"
+# subagent:
+#   provider: "google"
+#   model: "gemini-2.5-flash"
+#   max_tokens: 2048
+
+# Scenario 6: Google Vertex AI for enterprise with thinking capability
+# provider: "google"
+# model: "gemini-2.5-pro"
+# thinking_budget_tokens: 8000
+# google:
+#   backend: "vertexai"
+#   project: "my-company-project"
+#   location: "us-central1"
+
 
 # Custom Tools Configuration
 # Kodelet can discover and execute custom executable tools from specified directories
@@ -319,7 +412,7 @@ tracing:
 # Environment variables can also be used to configure Kodelet:
 # - KODELET_LOG_LEVEL: Overrides the log_level setting
 # - KODELET_LOG_FORMAT: Overrides the log_format setting
-# - KODELET_PROVIDER: Overrides the provider setting (anthropic, openai)
+# - KODELET_PROVIDER: Overrides the provider setting (anthropic, openai, google)
 # - KODELET_MODEL: Overrides the model setting
 # - KODELET_MAX_TOKENS: Overrides the max_tokens setting
 # - KODELET_THINKING_BUDGET_TOKENS: Overrides the thinking_budget_tokens setting
@@ -336,7 +429,7 @@ tracing:
 # - KODELET_TRACING_ENABLED: Enables/disables tracing
 # - KODELET_TRACING_SAMPLER: Sets the sampling strategy
 # - KODELET_TRACING_RATIO: Sets the sampling ratio
-# - KODELET_ALIASES_*: Define individual aliases (e.g., KODELET_ALIASES_SONNET4=claude-sonnet-4-20250514)
+# - KODELET_ALIASES_*: Define individual aliases (e.g., KODELET_ALIASES_SONNET4=claude-sonnet-4-5-20250929)
 # - KODELET_COMMIT_COAUTHOR_ENABLED: Enable/disable coauthor attribution in commits
 # - KODELET_COMMIT_COAUTHOR_NAME: Name for coauthor attribution
 # - KODELET_COMMIT_COAUTHOR_EMAIL: Email for coauthor attribution
@@ -346,6 +439,12 @@ tracing:
 # - OPENAI_API_KEY: Required when using the OpenAI provider (default)
 # - XAI_API_KEY: Required when using the xAI preset
 # - OPENAI_API_BASE: Custom OpenAI API endpoint (overrides config base_url)
+# - GOOGLE_API_KEY: Required when using Google Gemini API
+# - GEMINI_API_KEY: Alternative to GOOGLE_API_KEY for Gemini API
+# - GOOGLE_CLOUD_PROJECT: GCP project ID for Vertex AI
+# - GOOGLE_CLOUD_LOCATION: GCP region for Vertex AI (default: us-central1)
+# - GOOGLE_APPLICATION_CREDENTIALS: Path to GCP service account JSON for Vertex AI
+# - GOOGLE_GENAI_USE_VERTEXAI: Force Vertex AI backend (true/false)
 # Note: The API key environment variable can be customized using the api_key_env_var setting
 #
 # Standard OpenTelemetry environment variables are also supported:

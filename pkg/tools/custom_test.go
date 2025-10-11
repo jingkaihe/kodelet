@@ -64,7 +64,7 @@ else
 fi
 `
 
-	err := os.WriteFile(toolPath, []byte(toolScript), 0755)
+	err := os.WriteFile(toolPath, []byte(toolScript), 0o755)
 	require.NoError(t, err)
 
 	manager := &CustomToolManager{
@@ -95,7 +95,7 @@ else
 fi
 `
 
-	err := os.WriteFile(toolPath, []byte(toolScript), 0755)
+	err := os.WriteFile(toolPath, []byte(toolScript), 0o755)
 	require.NoError(t, err)
 
 	manager := &CustomToolManager{
@@ -120,7 +120,7 @@ if [ "$1" = "description" ]; then
 fi
 `
 
-	err := os.WriteFile(toolPath, []byte(toolScript), 0755)
+	err := os.WriteFile(toolPath, []byte(toolScript), 0o755)
 	require.NoError(t, err)
 
 	manager := &CustomToolManager{
@@ -146,7 +146,7 @@ if [ "$1" = "description" ]; then
 fi
 `
 
-	err := os.WriteFile(toolPath, []byte(toolScript), 0755)
+	err := os.WriteFile(toolPath, []byte(toolScript), 0o755)
 	require.NoError(t, err)
 
 	manager := &CustomToolManager{
@@ -179,7 +179,7 @@ print('Echo:', data.get('message', 'No message'))
 fi
 `
 
-	err := os.WriteFile(toolPath, []byte(toolScript), 0755)
+	err := os.WriteFile(toolPath, []byte(toolScript), 0o755)
 	require.NoError(t, err)
 
 	tool := &CustomTool{
@@ -212,7 +212,7 @@ elif [ "$1" = "run" ]; then
 fi
 `
 
-	err := os.WriteFile(toolPath, []byte(toolScript), 0755)
+	err := os.WriteFile(toolPath, []byte(toolScript), 0o755)
 	require.NoError(t, err)
 
 	tool := &CustomTool{
@@ -245,7 +245,7 @@ elif [ "$1" = "run" ]; then
 fi
 `
 
-	err := os.WriteFile(toolPath, []byte(toolScript), 0755)
+	err := os.WriteFile(toolPath, []byte(toolScript), 0o755)
 	require.NoError(t, err)
 
 	tool := &CustomTool{
@@ -278,7 +278,7 @@ elif [ "$1" = "run" ]; then
 fi
 `
 
-	err := os.WriteFile(toolPath, []byte(toolScript), 0755)
+	err := os.WriteFile(toolPath, []byte(toolScript), 0o755)
 	require.NoError(t, err)
 
 	tool := &CustomTool{
@@ -313,7 +313,7 @@ elif [ "$1" = "run" ]; then
 fi
 `
 
-	err := os.WriteFile(toolPath, []byte(toolScript), 0755)
+	err := os.WriteFile(toolPath, []byte(toolScript), 0o755)
 	require.NoError(t, err)
 
 	tool := &CustomTool{
@@ -459,7 +459,7 @@ func TestExpandHomePath(t *testing.T) {
 }
 
 func TestLoadCustomToolConfig(t *testing.T) {
-	config := loadCustomToolConfig()
+	config := LoadCustomToolConfig()
 
 	// Check defaults
 	assert.True(t, config.Enabled)
@@ -597,6 +597,6 @@ else
 fi
 `
 
-	err := os.WriteFile(toolPath, []byte(toolScript), 0755)
+	err := os.WriteFile(toolPath, []byte(toolScript), 0o755)
 	require.NoError(t, err)
 }

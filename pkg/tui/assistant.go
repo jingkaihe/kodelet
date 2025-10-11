@@ -2,7 +2,6 @@ package tui
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/logger"
@@ -21,12 +20,14 @@ type AssistantClient struct {
 }
 
 // NewAssistantClient creates a new assistant client
-func NewAssistantClient(ctx context.Context, conversationID string, enablePersistence bool, mcpManager *tools.MCPManager, customManager *tools.CustomToolManager, maxTurns int, compactRatio float64, disableAutoCompact bool) *AssistantClient {
-	// Create a persistent thread with config from viper
+func NewAssistantClient(ctx context.Context, conversationID string, enablePersistence bool, mcpManager *tools.MCPManager, customManager *tools.CustomToolManager, maxTurns int, compactRatio float64, disableAutoCompact bool, ideMode bool) *AssistantClient {
 	config, err := llm.GetConfigFromViper()
 	if err != nil {
 		logger.G(ctx).WithError(err).Fatal("Failed to load configuration during assistant client initialization")
 	}
+
+	config.IDE = ideMode
+
 	thread, err := llm.NewThread(config)
 	if err != nil {
 		logger.G(ctx).WithError(err).Fatal("Failed to create LLM thread during assistant client initialization")
@@ -103,27 +104,16 @@ func (a *AssistantClient) IsPersisted() bool {
 	return a.thread.IsPersisted()
 }
 
+// GetModelInfo returns the provider and model name being used
+func (a *AssistantClient) GetModelInfo() (provider, model string) {
+	config := a.thread.GetConfig()
+	return config.Provider, config.Model
+}
+
 // Close performs cleanup operations for the assistant client
 func (a *AssistantClient) Close(ctx context.Context) error {
 	if a.mcpManager != nil {
 		return a.mcpManager.Close(ctx)
 	}
 	return nil
-}
-
-// ProcessAssistantEvent processes the events from the assistant
-// and returns a formatted message
-func ProcessAssistantEvent(event llmtypes.MessageEvent) string {
-	switch event.Type {
-	case llmtypes.EventTypeText:
-		return event.Content
-	case llmtypes.EventTypeToolUse:
-		return fmt.Sprintf("🔧 Using tool: %s", event.Content)
-	case llmtypes.EventTypeToolResult:
-		return fmt.Sprintf("🔄 Tool result: %s", event.Content)
-	case llmtypes.EventTypeThinking:
-		return fmt.Sprintf("💭 Thinking: %s", event.Content)
-	}
-
-	return ""
 }

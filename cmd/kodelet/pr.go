@@ -22,6 +22,7 @@ type PRConfig struct {
 	Target       string
 	TemplateFile string
 	Draft        bool
+	NoSave       bool
 }
 
 func NewPRConfig() *PRConfig {
@@ -30,12 +31,13 @@ func NewPRConfig() *PRConfig {
 		Target:       "main",
 		TemplateFile: "",
 		Draft:        false,
+		NoSave:       false,
 	}
 }
 
 func (c *PRConfig) Validate() error {
 	if c.Provider != "github" {
-		return errors.New(fmt.Sprintf("unsupported provider: %s, only 'github' is supported", c.Provider))
+		return fmt.Errorf("unsupported provider: %s, only 'github' is supported", c.Provider)
 	}
 
 	if c.Target == "" {
@@ -53,7 +55,7 @@ var prCmd = &cobra.Command{
 This command analyzes the current branch changes compared to the target branch and generates an appropriate PR title and description.
 
 Use the --draft flag to create a draft pull request that is not ready for review.`,
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(cmd *cobra.Command, _ []string) {
 		ctx, cancel := context.WithCancel(cmd.Context())
 		defer cancel()
 
@@ -118,6 +120,8 @@ Use the --draft flag to create a draft pull request that is not ready for review
 
 		if config.Draft {
 			fragmentArgs["draft"] = "true"
+		} else {
+			fragmentArgs["draft"] = "false"
 		}
 
 		fragment, err := processor.LoadFragment(ctx, &fragments.Config{
@@ -135,7 +139,8 @@ Use the --draft flag to create a draft pull request that is not ready for review
 		presenter.Separator()
 
 		out, usage := llm.SendMessageAndGetTextWithUsage(ctx, s, prompt, llmConfig, false, llmtypes.MessageOpt{
-			PromptCache: true,
+			PromptCache:        true,
+			NoSaveConversation: config.NoSave,
 		})
 
 		fmt.Println(out)
@@ -153,6 +158,7 @@ func init() {
 	prCmd.Flags().StringP("target", "t", defaults.Target, "The target branch to create the pull request on")
 	prCmd.Flags().String("template-file", defaults.TemplateFile, "The path to the template file for the pull request")
 	prCmd.Flags().BoolP("draft", "d", defaults.Draft, "Create the pull request as a draft")
+	prCmd.Flags().Bool("no-save", defaults.NoSave, "Disable conversation persistence")
 }
 
 func getPRConfigFromFlags(cmd *cobra.Command) *PRConfig {
@@ -169,6 +175,9 @@ func getPRConfigFromFlags(cmd *cobra.Command) *PRConfig {
 	}
 	if draft, err := cmd.Flags().GetBool("draft"); err == nil {
 		config.Draft = draft
+	}
+	if noSave, err := cmd.Flags().GetBool("no-save"); err == nil {
+		config.NoSave = noSave
 	}
 
 	return config

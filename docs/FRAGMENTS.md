@@ -7,6 +7,10 @@ Kodelet's fragments (also called "recipes") system allows you to create reusable
 - [Overview](#overview)
 - [Quick Start](#quick-start)
 - [Template Syntax](#template-syntax)
+  - [Variable Substitution](#variable-substitution)
+  - [Bash Command Execution](#bash-command-execution)
+  - [Combining Variables and Commands](#combining-variables-and-commands)
+  - [Default Values](#default-values)
 - [Directory Structure](#directory-structure)
 - [Command Line Usage](#command-line-usage)
 - [Example Fragments](#example-fragments)
@@ -22,6 +26,27 @@ Fragments solve the problem of repeatedly typing lengthy, complex instructions b
 - **Pass dynamic arguments** for customization
 - **Share fragments** across projects and team members
 - **Maintain consistency** in prompt formatting
+
+### Built-in Recipes
+
+Kodelet includes several built-in recipes for common tasks:
+
+- **`init`** - Bootstrap `AGENTS.md` file with workspace context and conventions
+- **`commit`** - Generate git commit messages from staged changes
+- **`custom-tool`** - Create custom tools for Kodelet
+- **`github/pr`** - Generate pull request descriptions
+- **`github/issue-resolve`** - Resolve GitHub issues
+- **`github/pr-respond`** - Respond to pull request comments
+
+List all available recipes with:
+```bash
+kodelet recipe list
+```
+
+View a recipe's content and metadata:
+```bash
+kodelet recipe show init
+```
 
 ## Quick Start
 
@@ -56,6 +81,24 @@ kodelet run -r commit
 ```
 
 This will execute the git commands, substitute their output into the template, and send the complete prompt to the LLM.
+
+### Repository Initialization
+
+The built-in `init` recipe is designed to bootstrap your repository's `AGENTS.md` file:
+
+```bash
+# Initialize or improve AGENTS.md for your repository
+kodelet run -r init
+```
+
+This recipe will:
+- Analyze your repository structure, tech stack, and architecture
+- Identify build systems, testing frameworks, and key commands
+- Extract coding conventions and patterns from existing code
+- Review any existing AI assistant rules (Cursor, Copilot)
+- Create or suggest improvements to `AGENTS.md`
+
+The `AGENTS.md` file provides context that helps Kodelet work more effectively in your workspace by understanding your project's conventions, commands, and architecture.
 
 ## Template Syntax
 
@@ -102,6 +145,98 @@ Last commit by {{.author}}: {{bash "git" "log" "-1" "--pretty=format:%s"}}
 
 Please analyze the {{.project_name}} codebase focusing on {{.focus_area}}.
 ```
+
+### Default Values
+
+Kodelet supports two complementary approaches for providing default values to fragment arguments:
+
+#### 1. YAML Metadata Defaults (Recommended for Common Arguments)
+
+Define default values in the fragment's YAML frontmatter for expected arguments:
+
+```markdown
+---
+name: Docker Build Recipe
+description: Build and tag a Docker image
+defaults:
+  tag: latest
+  platform: linux/amd64
+  context: .
+  dockerfile: Dockerfile
+---
+
+Building Docker image:
+- Image: {{.image}} (required - no default)
+- Tag: {{.tag}}
+- Platform: {{.platform}}
+- Context: {{.context}}
+- Dockerfile: {{.dockerfile}}
+```
+
+Usage:
+```bash
+# Use all defaults, only provide required image arg
+kodelet run -r docker-build --arg image=myapp
+
+# Override specific defaults
+kodelet run -r docker-build --arg image=myapp --arg tag=v1.2.3 --arg platform=linux/arm64
+```
+
+**When to use YAML defaults:**
+- For expected arguments that users commonly customize
+- To make your fragment's interface self-documenting
+- When you want defaults to be discoverable via `kodelet recipe show`
+
+#### 2. Template `default` Function (For Optional Values)
+
+Use the `default` function for truly optional values inline in your template:
+
+```markdown
+Branch: {{default .branch "main"}}
+Environment: {{default .env "development"}}
+Optional message: {{default .message "No message provided"}}
+```
+
+Usage:
+```bash
+# Uses all inline defaults
+kodelet run -r deployment
+
+# Override specific values
+kodelet run -r deployment --arg branch=feature-x --arg message="Hotfix deployment"
+```
+
+**When to use template defaults:**
+- For truly optional values that may not apply to all use cases
+- For conditional defaults based on other values
+- When you need different defaults in different parts of the template
+
+#### 3. Hybrid Approach (Best of Both)
+
+Combine both approaches for maximum flexibility:
+
+```markdown
+---
+name: Deployment Recipe
+description: Deploy application with sensible defaults
+defaults:
+  branch: main
+  env: development
+---
+
+Deploying {{.branch}} to {{.env}}
+Optional message: {{default .message "Standard deployment"}}
+Build args: {{default .build_args "none"}}
+
+{{if ne (default .notify "false") "false"}}
+Notifications enabled: {{.notify}}
+{{end}}
+```
+
+This gives you:
+- **YAML defaults** for expected arguments (branch, env)
+- **Template defaults** for truly optional fields (message, build_args, notify)
+- **Clean, self-documenting** fragment interface
 
 ## Directory Structure
 

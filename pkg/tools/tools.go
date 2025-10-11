@@ -18,6 +18,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+// GenerateSchema generates a JSON schema for the given type
 func GenerateSchema[T any]() *jsonschema.Schema {
 	reflector := jsonschema.Reflector{
 		AllowAdditionalProperties: false,
@@ -104,6 +105,7 @@ func getAvailableSubAgentToolNames() []string {
 	return tools
 }
 
+// ValidateTools validates that all tool names are available
 func ValidateTools(toolNames []string) error {
 	var unknownTools []string
 	for _, toolName := range toolNames {
@@ -122,6 +124,7 @@ func ValidateTools(toolNames []string) error {
 	return nil
 }
 
+// ValidateSubAgentTools validates that all sub-agent tool names are available
 func ValidateSubAgentTools(toolNames []string) error {
 	var invalidTools []string
 	var subagentToolFound bool
@@ -154,6 +157,7 @@ func ValidateSubAgentTools(toolNames []string) error {
 	return nil
 }
 
+// GetToolsFromNames returns a list of tools from the given tool names
 func GetToolsFromNames(toolNames []string) []tooltypes.Tool {
 	if len(toolNames) == 0 {
 		return nil
@@ -189,6 +193,7 @@ func GetToolsFromNames(toolNames []string) []tooltypes.Tool {
 	return tools
 }
 
+// GetMainTools returns the main tools available for the agent
 func GetMainTools(ctx context.Context, allowedTools []string) []tooltypes.Tool {
 	if len(allowedTools) == 0 {
 		allowedTools = defaultMainTools
@@ -202,6 +207,7 @@ func GetMainTools(ctx context.Context, allowedTools []string) []tooltypes.Tool {
 	return GetToolsFromNames(allowedTools)
 }
 
+// GetSubAgentTools returns the tools available for sub-agents
 func GetSubAgentTools(ctx context.Context, allowedTools []string) []tooltypes.Tool {
 	if len(allowedTools) == 0 {
 		allowedTools = defaultSubAgentTools
@@ -215,6 +221,7 @@ func GetSubAgentTools(ctx context.Context, allowedTools []string) []tooltypes.To
 	return GetToolsFromNames(allowedTools)
 }
 
+// ToAnthropicTools converts tools to Anthropic tool parameters
 func ToAnthropicTools(tools []tooltypes.Tool) []anthropic.ToolUnionParam {
 	anthropicTools := make([]anthropic.ToolUnionParam, len(tools))
 	for i, tool := range tools {
@@ -232,10 +239,9 @@ func ToAnthropicTools(tools []tooltypes.Tool) []anthropic.ToolUnionParam {
 	return anthropicTools
 }
 
-var (
-	tracer = telemetry.Tracer("kodelet.tools")
-)
+var tracer = telemetry.Tracer("kodelet.tools")
 
+// RunTool executes a tool by name with the given parameters
 func RunTool(ctx context.Context, state tooltypes.State, toolName string, parameters string) tooltypes.ToolResult {
 	tool, err := findTool(toolName, state)
 	if err != nil {

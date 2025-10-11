@@ -1,5 +1,209 @@
 # Kodelet
 
+## 0.1.11.beta (2025-10-11)
+
+Improved `llms.txt` with better recipe system documentation
+
+## 0.1.10.beta (2025-10-11)
+
+### Features
+
+**LLM-Friendly Documentation**: Added new `llms.txt` command for comprehensive LLM-optimized usage documentation
+
+- **CLI Command**: `kodelet llms.txt` displays complete guide optimized for LLM consumption
+- **Web Endpoint**: New `/llms.txt` endpoint serves documentation in markdown format with caching
+- **Comprehensive Coverage**: Includes quick start, core usage modes, configuration, providers, advanced features, security, and troubleshooting
+- **LLM Integration**: Designed for AI agents to quickly understand Kodelet's capabilities and usage patterns
+
+### Bug Fixes
+
+**OpenAI Configuration**: Updated default OpenAI model in setup configuration from `o3` to `gpt-5` for improved compatibility
+
+## 0.1.9.beta (2025-10-07)
+
+### Breaking Changes
+
+**Command Rename**: The `kodelet init` command has been renamed to `kodelet setup` for better clarity
+
+- **Migration**: Update scripts and documentation to use `kodelet setup` instead of `kodelet init`
+- **Reason**: Avoids confusion with the new `init` recipe that bootstraps repository-specific AGENTS.md files
+
+### Features
+
+**Repository Initialization Recipe**: New built-in `init` recipe for bootstrapping workspace context. You can run `kodelet run -r init` to analyze your repository and create/enhance AGENTS.md
+
+## 0.1.8.beta (2025-10-04)
+
+### Features
+
+**Fragment Default Values**: Added support for default values in fragments/recipes to reduce repetition
+
+- **YAML Defaults**: Define default values in fragment frontmatter for common arguments
+- **Template Defaults**: Use `{{default .variable "fallback"}}` function for optional values with inline fallbacks
+- **Smart Merging**: User-provided arguments override defaults, maintaining backward compatibility
+
+**Built-in Recipe Updates**: All built-in recipes now include sensible defaults (e.g., `github/pr` defaults to `target="main"` and `draft="false"`)
+
+## 0.1.7.beta (2025-10-02)
+
+### Internal Changes
+
+**Code Quality and Documentation**: Major refactoring focused on code organization, documentation, and linting standards
+
+- **Enhanced Linting**: Expanded `.golangci.yml` configuration with comprehensive linter suite including staticcheck, unparam, ineffassign, nilnil, and revive
+- **Stricter Formatting**: Switched from `go fmt` to `gofumpt` for more consistent code formatting across the codebase
+
+**Note**: This is a maintenance release with no user-facing changes. All changes are internal improvements to code quality and maintainability.
+
+## 0.1.6.beta (2025-10-02)
+
+### Features
+
+**IDE Integration**: Deep IDE integration enabling bidirectional context sharing between Kodelet and your editor
+
+- **Neovim Plugin Support**: Added `--ide` flag for `kodelet run` and `kodelet chat` commands to enable IDE integration mode with prominent conversation ID display
+- **Context Sharing**: Automatic sharing of open files, code selections, and LSP diagnostics from IDE to Kodelet via file-based communication (`~/.kodelet/ide/context-{conversation_id}.json`)
+
+**Usage Example**:
+```bash
+# Start Kodelet with IDE integration
+kodelet chat --ide
+
+# In Neovim, attach to the conversation
+:KodeletAttach <conversation-id>
+```
+
+## 0.1.5.beta (2025-10-01)
+
+### Features
+
+**Enhanced Chat UI**:
+
+- **Tokyo Night Theme**: Applied modern Tokyo Night color palette throughout the chat UI for better visual clarity and reduced eye strain
+- **Version Banner**: Added version information to chat welcome screen for better visibility of current release
+- **Model Info Display**: Status bar now shows active provider and model (e.g., "anthropic/claude-sonnet-4-5-20250929") for transparency
+- **Improved Help Text**: Redesigned keyboard shortcuts and command help with better formatting and clearer organization
+
+### Bug Fixes
+
+- **Conversation ID Generation**: Fixed conversation ID generation logic to ensure unique IDs are created for all chat sessions
+- **Log File Handling**: Corrected log file creation with proper octal permission notation (0o644, 0o755)
+
+### Internal Changes
+
+- **Code Organization**: Refactored TUI package into focused modules (`commands.go`, `messages.go`, `views.go`) for better maintainability
+- **Test Coverage**: Added comprehensive test suites for command parsing, message formatting, and view rendering utilities
+- **Code Cleanup**: Removed redundant code comments throughout TUI implementation
+
+## 0.1.4.beta (2025-09-30)
+
+### Features
+
+**Enhanced Custom Tool Generation**: Improved custom tool creation with global and local scope support
+
+- **Global Tools**: Added `--arg global=true` option to create tools available across all projects in `~/.kodelet/tools`
+- **Recipe Rename**: Renamed `custom-tools` recipe to `custom-tool` (singular) for consistency
+
+## 0.1.2.beta (2025-09-30)
+
+### Features
+
+**Conversation Fork Command**: Added ability to fork conversations for experimenting with different directions while preserving context
+
+- **New Command**: `kodelet conversation fork [conversationID]` creates a copy of an existing conversation with reset usage statistics (tokens and costs)
+- **Context Preservation**: Forked conversations retain all messages, tool results, file access history, and metadata from the source
+
+**Enhanced Conversation Listing**: Improved `kodelet conversation list` output with usage and context information
+
+- **Cost Display**: Shows total cost (input + output + caching) for each conversation in table format
+- **Context Window Tracking**: Displays current/max context window usage (e.g., "50000/200000") to monitor conversation capacity
+- **Cleaner Formatting**: Removed newlines from preview text to maintain clean table formatting
+
+## 0.1.1.beta (2025-09-29)
+
+### Features
+
+**Claude Sonnet 4.5 Support**: Added support for Anthropic's latest Claude Sonnet 4.5 model (20250929) with enhanced capabilities
+
+- **New Model Alias**: Added `sonnet-45` alias for `claude-sonnet-4-5-20250929` model
+- **Updated Defaults**: Changed default model from Claude Sonnet 4 to Claude Sonnet 4.5 across all configurations and profiles
+- **Pricing Integration**: Added pricing information for the new model with prompt caching support
+- **Thinking Support**: Full support for extended thinking capabilities in Claude Sonnet 4.5
+
+### Dependencies
+
+- Upgraded `anthropic-sdk-go` from v1.7.0 to v1.13.0 for Claude Sonnet 4.5 support
+- Upgraded `tidwall/match` from v1.1.1 to v1.2.0
+- Moved `google.golang.org/genai` from indirect to direct dependency
+
+### Internal Changes
+
+- Updated all configuration samples, templates, and documentation to reference Claude Sonnet 4.5
+- Updated GitHub Actions workflow templates with new default model
+- Refreshed test suites to use Claude Sonnet 4.5 model identifier
+
+## 0.1.0.beta (2025-09-26)
+
+### Features
+
+**Streamlined Multi-Provider Initialization**: Complete redesign of the `kodelet init` command with intelligent defaults and multi-provider support
+
+- **Simplified Setup Process**: Replaced interactive wizard with automatic configuration using sensible defaults, eliminating complex user prompts
+- **Multi-Provider Configuration**: Added comprehensive support for Anthropic Claude, OpenAI, Google GenAI, and xAI Grok models with provider-specific profiles
+- **Configuration Profiles**: Pre-configured profiles (`default`, `hybrid`, `openai`, `premium`, `google`, `xai`) for different use cases and provider preferences
+- **Intelligent API Key Detection**: Smart environment variable detection with clear messaging about API key requirements for each provider
+- **Configuration Backup**: Added `--override` flag with automatic backup of existing configuration files to prevent accidental data loss
+- **Enhanced Model Aliases**: Built-in model aliases (`sonnet-4`, `haiku-35`, `opus-41`, `gemini-pro`, `gemini-flash`) for easier model selection
+
+## 0.0.100.alpha (2025-09-25)
+
+### Features
+
+**Enhanced Image Analysis**: Improved image analysis prompt structure and guidance for more accurate and actionable responses
+
+## 0.0.99.alpha (2025-09-24)
+
+### Features
+
+**Google GenAI Integration**: Complete support for Google's Gemini and Vertex AI models as a third LLM provider option alongside Anthropic Claude and OpenAI
+- **Dual Backend Support**: Seamless integration with both Gemini API (developer-focused) and Vertex AI (enterprise-grade) with automatic backend detection
+- **Thinking Capability**: Native support for Google's thinking feature in compatible models (Gemini 2.5 Pro)
+- **Tiered Pricing Model**: Intelligent cost calculation supporting Google's complex tiered pricing structure for accurate usage tracking
+- **Model Selection**: Support for Gemini 2.5 Pro, Gemini 2.5 Flash, and Gemini 2.5 Flash Lite with appropriate default configurations
+- **Thread Interface Compliance**: Full implementation of kodelet's Thread interface including conversation persistence, auto-compaction, and subagent creation
+
+
+### CI/Build
+
+- **GCP Integration**: Added Google Cloud Workload Identity authentication to test workflow
+
+## 0.0.98.alpha (2025-09-23)
+
+### Features
+
+**Provider-Aware Prompt Rendering**: OpenAI provider now uses an embedded, OpenAI-optimized system and subagent prompt for better alignment and behavior.
+
+### Dependencies
+
+- Bumped `github.com/sashabaranov/go-openai` to v1.41.2.
+
+
+### Internal Changes
+
+- Removed redundant comments in sysprompt code and tests.
+- Added provider selection tests for system/subagent prompt rendering.
+
+
+## 0.0.97.alpha (2025-09-22)
+
+### Internal Code Quality
+
+**Precise Cost and Usage Reporting**: Enhanced cost calculation precision with standardized rounding to prevent floating-point inconsistencies
+
+- **Improved Precision**: Added rounding function for cost and usage metrics to ensure consistent 4-decimal place precision across all financial calculations
+- **Code Cleanup**: Removed unnecessary code comments throughout usage statistics package for improved maintainability
+- **Enhanced Testing**: Updated test suite to validate precise rounding behavior for financial calculations
+
 ## 0.0.96.alpha (2025-09-18)
 
 ### Internal Code Quality
@@ -1359,3 +1563,4 @@ The main feature in this release is the addition of conversation persistence, al
 ## 0.0.2.alpha1
 
 Initial release of the kodelet
+

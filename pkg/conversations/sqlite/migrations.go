@@ -154,7 +154,7 @@ var migrations = []Migration{
 
 			return nil
 		},
-		Down: func(tx *sql.Tx) error {
+		Down: func(_ *sql.Tx) error {
 			// Note: SQLite doesn't support dropping columns directly
 			// We would need to recreate the table to fully rollback
 			// For simplicity, we'll just leave the column (it won't hurt)
