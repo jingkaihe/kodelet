@@ -46,7 +46,7 @@ func TestNewThread(t *testing.T) {
 			config: llmtypes.Config{
 				Provider: "anthropic",
 			},
-			expectedModel: string(anthropic.ModelClaudeSonnet4_20250514),
+			expectedModel: string(anthropic.ModelClaudeSonnet4_5_20250929),
 			expectedMax:   8192,
 		},
 		{
@@ -164,7 +164,7 @@ func TestSendMessageAndGetText(t *testing.T) {
 		query,
 		llmtypes.Config{
 			Provider:  "anthropic",
-			Model:     string(anthropic.ModelClaude3_5Haiku20241022),
+			Model:     string(anthropic.ModelClaudeHaiku4_5_20251001),
 			MaxTokens: 100,
 		},
 		true,
@@ -223,7 +223,7 @@ func TestSendMessageRealClient(t *testing.T) {
 	// Create a real thread
 	thread, err := NewThread(llmtypes.Config{
 		Provider:  "anthropic",
-		Model:     string(anthropic.ModelClaude3_5Haiku20241022), // Using a real model
+		Model:     string(anthropic.ModelClaudeHaiku4_5_20251001), // Using a real model
 		MaxTokens: 100,
 	})
 	assert.NoError(t, err)
@@ -288,7 +288,7 @@ func TestSendMessageWithToolUse(t *testing.T) {
 	// Create thread
 	thread, err := NewThread(llmtypes.Config{
 		Provider:  "anthropic",
-		Model:     string(anthropic.ModelClaude3_5Haiku20241022),
+		Model:     string(anthropic.ModelClaudeHaiku4_5_20251001),
 		MaxTokens: 1000,
 	})
 	assert.NoError(t, err)
@@ -422,7 +422,7 @@ func TestCrossProviderSubagent(t *testing.T) {
 		// Create Claude main agent configuration
 		mainConfig := llmtypes.Config{
 			Provider:  "anthropic",
-			Model:     "claude-3-5-haiku-20241022", // Use faster model for tests
+			Model:     "claude-haiku-4-5-20251001", // Use faster model for tests
 			MaxTokens: 1024,
 			SubAgent: &llmtypes.SubAgentConfigSettings{
 				Provider:  "openai",
@@ -475,7 +475,7 @@ func TestCrossProviderSubagent(t *testing.T) {
 			ReasoningEffort: "low",
 			SubAgent: &llmtypes.SubAgentConfigSettings{
 				Provider:       "anthropic",
-				Model:          "claude-3-5-haiku-20241022",
+				Model:          "claude-haiku-4-5-20251001",
 				MaxTokens:      512,
 				ThinkingBudget: 256,
 			},
@@ -494,7 +494,7 @@ func TestCrossProviderSubagent(t *testing.T) {
 		config := mainThread.GetConfig()
 		assert.NotNil(t, config.SubAgent)
 		assert.Equal(t, "anthropic", config.SubAgent.Provider)
-		assert.Equal(t, "claude-3-5-haiku-20241022", config.SubAgent.Model)
+		assert.Equal(t, "claude-haiku-4-5-20251001", config.SubAgent.Model)
 
 		// Create a subagent context
 		subagentCtx := NewSubagentContext(ctx, mainThread, &llmtypes.StringCollectorHandler{Silent: true}, 0.8, false)
@@ -510,7 +510,7 @@ func TestCrossProviderSubagent(t *testing.T) {
 		// Verify the subagent has the correct configuration
 		subConfig := subagentConfig.Thread.GetConfig()
 		assert.Equal(t, "anthropic", subConfig.Provider)
-		assert.Equal(t, "claude-3-5-haiku-20241022", subConfig.Model)
+		assert.Equal(t, "claude-haiku-4-5-20251001", subConfig.Model)
 		assert.Equal(t, 512, subConfig.MaxTokens)
 		assert.Equal(t, 256, subConfig.ThinkingBudgetTokens)
 		assert.True(t, subConfig.IsSubAgent)
@@ -524,7 +524,7 @@ func TestCrossProviderSubagent(t *testing.T) {
 			Model:     "claude-sonnet-4-5-20250929",
 			MaxTokens: 2048,
 			SubAgent: &llmtypes.SubAgentConfigSettings{
-				Model:     "claude-3-5-haiku-20241022", // Faster model for subagent
+				Model:     "claude-haiku-4-5-20251001", // Faster model for subagent
 				MaxTokens: 1024,
 			},
 		}
@@ -551,7 +551,7 @@ func TestCrossProviderSubagent(t *testing.T) {
 		// Verify the subagent has the correct configuration
 		subConfig := subagentConfig.Thread.GetConfig()
 		assert.Equal(t, "anthropic", subConfig.Provider)
-		assert.Equal(t, "claude-3-5-haiku-20241022", subConfig.Model)
+		assert.Equal(t, "claude-haiku-4-5-20251001", subConfig.Model)
 		assert.Equal(t, 1024, subConfig.MaxTokens)
 		assert.True(t, subConfig.IsSubAgent)
 	})
@@ -561,7 +561,7 @@ func TestCrossProviderSubagent(t *testing.T) {
 		// Create configuration with invalid provider
 		mainConfig := llmtypes.Config{
 			Provider:  "anthropic",
-			Model:     "claude-3-5-haiku-20241022",
+			Model:     "claude-haiku-4-5-20251001",
 			MaxTokens: 1024,
 			SubAgent: &llmtypes.SubAgentConfigSettings{
 				Provider: "invalid-provider",
@@ -601,7 +601,7 @@ func TestCrossProviderWithOpenAICompatible(t *testing.T) {
 		// Create Claude main agent with xAI Grok subagent
 		mainConfig := llmtypes.Config{
 			Provider:  "anthropic",
-			Model:     "claude-3-5-haiku-20241022",
+			Model:     "claude-haiku-4-5-20251001",
 			MaxTokens: 1024,
 			SubAgent: &llmtypes.SubAgentConfigSettings{
 				Provider:  "openai",
@@ -648,7 +648,7 @@ func TestSubagentCompactConfigInheritance(t *testing.T) {
 	// Create a simple configuration
 	mainConfig := llmtypes.Config{
 		Provider:  "anthropic",
-		Model:     "claude-3-5-haiku-20241022",
+		Model:     "claude-haiku-4-5-20251001",
 		MaxTokens: 1024,
 	}
 

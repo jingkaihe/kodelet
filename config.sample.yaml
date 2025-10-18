@@ -22,7 +22,7 @@ max_tokens: 8192
 thinking_budget_tokens: 4048
 
 # Weak model to use for less complex tasks
-weak_model: "claude-3-5-haiku-20241022"
+weak_model: "claude-haiku-4-5-20251001"
 
 # Maximum tokens for weak model responses
 weak_model_max_tokens: 8192
@@ -31,7 +31,7 @@ weak_model_max_tokens: 8192
 # Allows using short names instead of full model identifiers
 aliases:
   sonnet-45: "claude-sonnet-4-5-20250929"
-  haiku-35: "claude-3-5-haiku-20241022"
+  haiku-45: "claude-haiku-4-5-20251001"
   opus-4: "claude-opus-4-20250514"
   gemini-pro: "gemini-2.5-pro"
   gemini-flash: "gemini-2.5-flash"
@@ -50,8 +50,8 @@ profiles:
     thinking_budget_tokens: 8000
 
   fast:
-    model: "haiku-35"
-    weak_model: "haiku-35"
+    model: "haiku-45"
+    weak_model: "haiku-45"
     max_tokens: 4096
     weak_model_max_tokens: 4096
     thinking_budget_tokens: 2000
@@ -83,7 +83,7 @@ profiles:
   mix-n-match:
     provider: "anthropic"
     model: "sonnet-45"
-    weak_model: "haiku-35"
+    weak_model: "haiku-45"
     max_tokens: 16000
 
     subagent:
@@ -337,14 +337,14 @@ subagent:
 # reasoning_effort: "high"
 # subagent:
 #   provider: "anthropic"
-#   model: "claude-3-5-haiku-20241022"
+#   model: "claude-haiku-4-5-20251001"
 #   max_tokens: 4096
 
 # Scenario 3: Same provider, different models for performance
 # provider: "anthropic"
 # model: "claude-opus-4-20250514"
 # subagent:
-#   model: "claude-3-5-haiku-20241022"  # Faster model for subagent tasks
+#   model: "claude-haiku-4-5-20251001"  # Faster model for subagent tasks
 #   max_tokens: 2048
 
 # Scenario 4: Google main agent with Claude subagents for specific tasks
@@ -353,7 +353,7 @@ subagent:
 # thinking_budget_tokens: 8000
 # subagent:
 #   provider: "anthropic"
-#   model: "claude-3-5-haiku-20241022"
+#   model: "claude-haiku-4-5-20251001"
 #   max_tokens: 4096
 
 # Scenario 5: Claude main agent with Google subagents for cost optimization

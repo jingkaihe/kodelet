@@ -1,5 +1,18 @@
 # Kodelet
 
+## 0.1.12.beta (2025-10-18)
+
+### Features
+
+* Introduced [Haiku 4.5](https://www.anthropic.com/news/claude-haiku-4-5) from Anthropic and use it as the new 'weak' model with improved capabilities.
+
+### Internal Changes
+
+**Dependency Upgrades**: Updated key dependencies for improved stability and compatibility
+
+- **Anthropic SDK**: Upgraded from v1.13.0 to v1.14.0 for latest API features and model support
+- **npm**: Updated from 10.9.2 to 11.6.2 across Docker builds and development environment
+
 ## 0.1.11.beta (2025-10-11)
 
 Improved `llms.txt` with better recipe system documentation
