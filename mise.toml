@@ -2,7 +2,7 @@
 # Core language and runtime tools
 go = "1.25.1"
 node = "22.17.0"
-npm = "10.9.2"
+npm = "11.6.2"
 
 
 # Development and build tools
@@ -28,7 +28,7 @@ VERSION_PKG = "github.com/jingkaihe/kodelet/pkg/version"
 
 # Node.js versions for Docker builds
 NODE_VERSION = "22.17.0"
-NPM_VERSION = "10.9.2"
+NPM_VERSION = "11.6.2"
 
 [tasks.build]
 description = "Build the application with embedded web UI"
