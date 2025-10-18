@@ -415,7 +415,7 @@ func TestCompactContextIntegration(t *testing.T) {
 
 	t.Run("real compact context with API call", func(t *testing.T) {
 		thread, err := NewAnthropicThread(llmtypes.Config{
-			Model:     "claude-3-5-haiku-20241022", // Use faster/cheaper model for testing
+			Model:     "claude-haiku-4-5-20251001", // Use faster/cheaper model for testing
 			MaxTokens: 1000,                        // Limit tokens for test
 		}, nil)
 		require.NoError(t, err)
@@ -484,7 +484,7 @@ func TestCompactContextIntegration(t *testing.T) {
 		}
 
 		thread, err := NewAnthropicThread(llmtypes.Config{
-			Model:     "claude-3-5-haiku-20241022",
+			Model:     "claude-haiku-4-5-20251001",
 			MaxTokens: 500,
 		}, nil)
 		require.NoError(t, err)

@@ -60,13 +60,13 @@ func TestGetConfigFromViperWithAliases(t *testing.T) {
 				"max_tokens": 8192,
 				"aliases": map[string]interface{}{
 					"sonnet-45": "claude-sonnet-4-5-20250929",
-					"haiku-35":  "claude-3-5-haiku-20241022",
+					"haiku-45":  "claude-haiku-4-5-20251001",
 					"gpt41":     "gpt-4.1",
 				},
 			},
 			expectedAliases: map[string]string{
 				"sonnet-45": "claude-sonnet-4-5-20250929",
-				"haiku-35":  "claude-3-5-haiku-20241022",
+				"haiku-45":  "claude-haiku-4-5-20251001",
 				"gpt41":     "gpt-4.1",
 			},
 			description: "should load aliases from config data",
@@ -128,7 +128,7 @@ func TestConfigAliasIntegrationWithNewThread(t *testing.T) {
 	viper.Set("max_tokens", 8192)
 	viper.Set("aliases", map[string]interface{}{
 		"sonnet-45": "claude-sonnet-4-5-20250929",
-		"haiku-35":  "claude-3-5-haiku-20241022",
+		"haiku-45":  "claude-haiku-4-5-20251001",
 	})
 
 	// Get config and create thread
