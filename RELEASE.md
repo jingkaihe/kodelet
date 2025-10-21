@@ -1,5 +1,12 @@
 # Kodelet
 
+## 0.1.14.beta (2025-10-21)
+
+### Internal Changes
+
+**Frontend Build Tool Upgrade**: Updated Vite from v6.3.6 to v6.4.1 for improved build performance and security patches
+
+
 ## 0.1.12.beta (2025-10-18)
 
 ### Features
