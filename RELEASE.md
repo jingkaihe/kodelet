@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.1.15.beta (2025-11-08)
+
+### Features
+
+**Improved PR Recipe**: Enhanced the built-in GitHub PR recipe with more reliable branch comparison
+
 ## 0.1.14.beta (2025-10-21)
 
 ### Internal Changes
@@ -1583,4 +1589,3 @@ The main feature in this release is the addition of conversation persistence, al
 ## 0.0.2.alpha1
 
 Initial release of the kodelet
-

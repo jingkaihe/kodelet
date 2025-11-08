@@ -12,22 +12,25 @@ Create a {{if eq .draft "true"}}**DRAFT** {{end}}pull request for the changes yo
 
 Please create a {{if eq .draft "true"}}draft {{end}}pull request following the steps below:
 
-1. Make sure that the branch is up to date with the target branch. Push the branch to the remote repository if it is not already up to date.
+1. Fetch the latest changes from the target branch to ensure accurate comparison:
+  - Run "git fetch origin {{.target}}" to update the remote tracking branch
 
-2. To understand the current state of the branch, use parallel tool calling to perform the following checks:
+2. Make sure that the branch is up to date with the target branch. Push the branch to the remote repository if it is not already up to date.
+
+3. To understand the current state of the branch, use parallel tool calling to perform the following checks:
   - Run "git status" to check the current status and any untracked files
   - Run "git diff" to check the changes to the working directory
   - Run "git diff --cached" to check the changes to the staging area
-  - Run "git diff {{.target}}...HEAD" to understand the changes to the target branch
-  - Run "git log --oneline {{.target}}...HEAD" to understand the commit history
+  - Run "git diff origin/{{.target}}...HEAD" to understand the changes compared to the remote target branch
+  - Run "git log --oneline origin/{{.target}}...HEAD" to understand the commit history compared to the remote target branch
 
-3. Thoroughly review and analyse the changes, and wrap up your thoughts into the following sections:
+4. Thoroughly review and analyse the changes, and wrap up your thoughts into the following sections:
 - The category of the changes (chore, feat, fix, refactor, perf, test, style, docs, build, ci, revert)
 - A summary of the changes as a title
 - A detailed description of the changes based on the changes impact on the project
 - Break down the changes into a few bullet points
 
-4. Create a pull request against the target branch {{.target}}:
+5. Create a pull request against the target branch {{.target}}:
 - **MUST USE** the 'mcp_create_pull_request' MCP tool if it is available in your tool list
 - The 'mcp_create_pull_request' tool requires: owner, repo, title, body, head (current branch), base (target branch){{if eq .draft "true"}}
 - **IMPORTANT**: Create this pull request as a DRAFT by setting the draft parameter to true when using the MCP tool{{end}}
