@@ -1,11 +1,10 @@
 # Kodelet
 
-## 0.1.14.beta (2025-10-21)
+## 0.1.14.beta (2025-11-08)
 
-### Internal Changes
+### Features
 
-**Frontend Build Tool Upgrade**: Updated Vite from v6.3.6 to v6.4.1 for improved build performance and security patches
-
+**Improved PR Recipe**: Enhanced the built-in GitHub PR recipe with more reliable branch comparison
 
 ## 0.1.12.beta (2025-10-18)
 
@@ -1583,4 +1582,3 @@ The main feature in this release is the addition of conversation persistence, al
 ## 0.0.2.alpha1
 
 Initial release of the kodelet
-
