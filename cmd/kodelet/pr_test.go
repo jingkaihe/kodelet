@@ -28,7 +28,7 @@ func TestPRFragmentContent(t *testing.T) {
 	// Test that the prompt contains expected elements for default format
 	assert.Contains(t, prompt, "Create a pull request", "Expected PR creation instruction")
 	assert.Contains(t, prompt, "git status", "Expected git status instruction")
-	assert.Contains(t, prompt, "git diff main...HEAD", "Expected target branch diff instruction")
+	assert.Contains(t, prompt, "git diff origin/main...HEAD", "Expected target branch diff instruction")
 	assert.Contains(t, prompt, "mcp_create_pull_request", "Expected MCP tool instruction")
 	assert.Contains(t, prompt, "## Description", "Expected default template")
 	assert.Contains(t, prompt, "## Changes", "Expected default template")
@@ -53,7 +53,7 @@ func TestPRFragmentWithCustomTemplate(t *testing.T) {
 	prompt := fragment.Content
 
 	// Test that the prompt contains expected elements for custom template
-	assert.Contains(t, prompt, "git diff develop...HEAD", "Expected custom target branch diff instruction")
+	assert.Contains(t, prompt, "git diff origin/develop...HEAD", "Expected custom target branch diff instruction")
 	assert.Contains(t, prompt, "/tmp/custom_template.md", "Expected template file path")
 	assert.NotContains(t, prompt, "## Description", "Should not contain default template when custom template is specified")
 }
