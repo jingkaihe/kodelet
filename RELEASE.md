@@ -1,10 +1,17 @@
 # Kodelet
 
-## 0.1.14.beta (2025-11-08)
+## 0.1.15.beta (2025-11-08)
 
 ### Features
 
 **Improved PR Recipe**: Enhanced the built-in GitHub PR recipe with more reliable branch comparison
+
+## 0.1.14.beta (2025-10-21)
+
+### Internal Changes
+
+**Frontend Build Tool Upgrade**: Updated Vite from v6.3.6 to v6.4.1 for improved build performance and security patches
+
 
 ## 0.1.12.beta (2025-10-18)
 
