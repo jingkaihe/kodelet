@@ -76,20 +76,26 @@ Instead of exposing MCP tools as direct function calls, present them as a code A
 
 ```
 pkg/
+├─ mcp/                         (NEW: MCP-specific functionality)
+│   ├─ codegen/                 (Code generation for MCP tools)
+│   │   ├─ generator.go         (Code generator implementation)
+│   │   ├─ generator_test.go
+│   │   └─ templates/           (TypeScript templates)
+│   │       ├─ client.ts.tmpl
+│   │       ├─ tool.ts.tmpl
+│   │       └─ example.ts.tmpl
+│   ├─ rpc/                     (RPC bridge for code execution)
+│   │   ├─ server.go            (MCP RPC server)
+│   │   └─ server_test.go
+│   └─ runtime/                 (Code execution runtime)
+│       ├─ deno.go              (Deno runtime wrapper)
+│       ├─ deno_test.go
+│       └─ sandbox.go           (Sandboxing configuration)
+│
 ├─ tools/
 │   ├─ code_execution.go        (NEW: Code execution tool)
 │   ├─ code_execution_test.go   (NEW)
-│   ├─ mcp.go                   (MODIFIED: Add code mode support)
-│   └─ mcp_code_generator.go    (NEW: Generate tool filesystem)
-│
-├─ runtime/                     (NEW: Code execution runtime)
-│   ├─ deno.go                  (Deno runtime wrapper)
-│   ├─ deno_test.go
-│   ├─ sandbox.go               (Sandboxing configuration)
-│   └─ templates/               (Code templates)
-│       ├─ client.ts.tmpl       (MCP client wrapper template)
-│       ├─ tool.ts.tmpl         (Individual tool template)
-│       └─ example.ts.tmpl      (Example usage script template)
+│   └─ mcp.go                   (EXISTING: MCP tool wrapper)
 │
 └─ types/
     └─ tools/
@@ -122,25 +128,28 @@ This phase provides value on its own - developers can manually write TypeScript 
 
 ### 1.1 Code Generator Implementation
 
-Create `pkg/tools/mcp_code_generator.go`:
+Create `pkg/mcp/codegen/generator.go`:
 
 ```go
-package tools
+package codegen
 
 import (
+    "context"
     "os"
     "path/filepath"
     "text/template"
+    
+    "github.com/jingkaihe/kodelet/pkg/tools"
 )
 
 type MCPCodeGenerator struct {
-    mcpManager  *MCPManager
+    mcpManager  *tools.MCPManager
     outputDir   string
     templates   *template.Template
 }
 
-func NewMCPCodeGenerator(manager *MCPManager, outputDir string) *MCPCodeGenerator {
-    // Load templates from pkg/runtime/templates/
+func NewMCPCodeGenerator(manager *tools.MCPManager, outputDir string) *MCPCodeGenerator {
+    // Load templates from pkg/mcp/codegen/templates/
     return &MCPCodeGenerator{
         mcpManager: manager,
         outputDir:  outputDir,
@@ -217,7 +226,7 @@ func (g *MCPCodeGenerator) generateToolFile(serverDir string, tool MCPTool) erro
 
 ### 1.2 Template Files
 
-Create `pkg/runtime/templates/tool.ts.tmpl`:
+Create `pkg/mcp/codegen/templates/tool.ts.tmpl`:
 
 ```typescript
 // {{.ToolName}}.ts - Generated MCP tool wrapper
@@ -245,7 +254,7 @@ export interface {{.ToolName}}Response {
 }
 ```
 
-Create `pkg/runtime/templates/client.ts.tmpl`:
+Create `pkg/mcp/codegen/templates/client.ts.tmpl`:
 
 ```typescript
 // client.ts - MCP client wrapper for code execution environment
@@ -326,6 +335,7 @@ package main
 
 import (
     "github.com/spf13/cobra"
+    "github.com/jingkaihe/kodelet/pkg/mcp/codegen"
     "github.com/jingkaihe/kodelet/pkg/tools"
     "github.com/jingkaihe/kodelet/pkg/presenter"
 )
@@ -362,7 +372,7 @@ This creates a filesystem representation of your MCP tools that can be:
         
         // Generate
         presenter.Info("Generating TypeScript API files...")
-        generator := tools.NewMCPCodeGenerator(mcpManager, outputDir)
+        generator := codegen.NewMCPCodeGenerator(mcpManager, outputDir)
         if serverFilter != "" {
             generator.SetServerFilter(serverFilter)
         }
@@ -405,7 +415,7 @@ func init() {
 
 The generator should also create an example script showing usage:
 
-Create `pkg/runtime/templates/example.ts.tmpl`:
+Create `pkg/mcp/codegen/templates/example.ts.tmpl`:
 
 ```typescript
 // example.ts - Example usage of generated MCP tools
@@ -720,10 +730,10 @@ func init() {
 
 ### 3.1 RPC Server
 
-Create `pkg/runtime/mcp_rpc_server.go`:
+Create `pkg/mcp/rpc/server.go`:
 
 ```go
-package runtime
+package rpc
 
 import (
     "context"
@@ -833,7 +843,7 @@ Alternative: goja (pure Go JavaScript engine)
 
 ### 4.2 Runtime Wrapper
 
-Create `pkg/runtime/deno.go`:
+Create `pkg/mcp/runtime/deno.go`:
 
 ```go
 package runtime
@@ -901,34 +911,9 @@ func (d *DenoRuntime) Execute(ctx context.Context, code string) (string, error) 
     return string(output), err
 }
 
-func (d *DenoRuntime) ExecuteFile(ctx context.Context, filePath string) (string, error) {
-    // Build deno command with permissions
-    args := []string{
-        "run",
-        "--no-prompt",
-    }
-    
-    // Add permissions (same as Execute)
-    for _, path := range d.permissions.AllowRead {
-        args = append(args, "--allow-read="+path)
-    }
-    for _, path := range d.permissions.AllowWrite {
-        args = append(args, "--allow-write="+path)
-    }
-    for _, host := range d.permissions.AllowNet {
-        args = append(args, "--allow-net="+host)
-    }
-    for _, env := range d.permissions.AllowEnv {
-        args = append(args, "--allow-env="+env)
-    }
-    
-    // Execute file
-    args = append(args, filePath)
-    cmd := exec.CommandContext(ctx, "deno", args...)
-    cmd.Dir = d.workspaceDir
-    
-    output, err := cmd.CombinedOutput()
-    return string(output), err
+// Name returns the name of the runtime
+func (d *DenoRuntime) Name() string {
+    return "deno"
 }
 ```
 
@@ -943,7 +928,7 @@ import (
     "context"
     "encoding/json"
     "github.com/invopop/jsonschema"
-    "github.com/jingkaihe/kodelet/pkg/runtime"
+    "github.com/jingkaihe/kodelet/pkg/mcp/runtime"
     tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
@@ -956,10 +941,12 @@ type CodeExecutionInput struct {
     Description string `json:"description,omitempty" jsonschema:"description=Brief description of what this code does"`
 }
 
+// CodeExecutionResult holds the result of code execution
 type CodeExecutionResult struct {
-    code   string
-    output string
-    err    string
+    code    string
+    output  string
+    err     string
+    runtime string // Runtime used (e.g., "deno") - useful for debugging, telemetry, and multi-runtime support
 }
 
 func (r *CodeExecutionResult) GetResult() string {
@@ -985,8 +972,9 @@ func (r *CodeExecutionResult) StructuredData() tooltypes.StructuredToolResult {
         Timestamp: time.Now(),
         Error:     r.err,
         Metadata: map[string]interface{}{
-            "code":   r.code,
-            "output": r.output,
+            "code":    r.code,
+            "output":  r.output,
+            "runtime": r.runtime,
         },
     }
 }
@@ -1099,7 +1087,8 @@ func (t *CodeExecutionTool) Execute(ctx context.Context, state tooltypes.State, 
     var input CodeExecutionInput
     if err := json.Unmarshal([]byte(parameters), &input); err != nil {
         return &CodeExecutionResult{
-            err: fmt.Sprintf("invalid parameters: %v", err),
+            err:     fmt.Sprintf("invalid parameters: %v", err),
+            runtime: t.runtime.Name(),
         }
     }
     
@@ -1107,15 +1096,17 @@ func (t *CodeExecutionTool) Execute(ctx context.Context, state tooltypes.State, 
     output, err := t.runtime.Execute(ctx, input.Code)
     if err != nil {
         return &CodeExecutionResult{
-            code:   input.Code,
-            output: output,
-            err:    fmt.Sprintf("execution failed: %v", err),
+            code:    input.Code,
+            output:  output,
+            err:     fmt.Sprintf("execution failed: %v", err),
+            runtime: t.runtime.Name(),
         }
     }
     
     return &CodeExecutionResult{
-        code:   input.Code,
-        output: output,
+        code:    input.Code,
+        output:  output,
+        runtime: t.runtime.Name(),
     }
 }
 ```
@@ -1165,6 +1156,14 @@ mcp:
 Update `cmd/kodelet/run.go`:
 
 ```go
+import (
+    "github.com/jingkaihe/kodelet/pkg/mcp/codegen"
+    "github.com/jingkaihe/kodelet/pkg/mcp/rpc"
+    "github.com/jingkaihe/kodelet/pkg/mcp/runtime"
+    "github.com/jingkaihe/kodelet/pkg/tools"
+    "github.com/jingkaihe/kodelet/pkg/presenter"
+)
+
 // Create MCP manager
 mcpManager, err := tools.CreateMCPManagerFromViper(ctx)
 if err != nil {
@@ -1181,7 +1180,7 @@ if executionMode == "code" {
     shouldGenerate := viper.GetBool("mcp.code_execution.regenerate_on_startup")
     if shouldGenerate || !fileExists(filepath.Join(workspaceDir, "client.ts")) {
         presenter.Info("Generating MCP tool filesystem...")
-        generator := tools.NewMCPCodeGenerator(mcpManager, workspaceDir)
+        generator := codegen.NewMCPCodeGenerator(mcpManager, workspaceDir)
         if err := generator.Generate(ctx); err != nil {
             return err
         }
@@ -1189,7 +1188,7 @@ if executionMode == "code" {
     
     // Start MCP RPC server
     socketPath := filepath.Join(".kodelet", "mcp.sock")
-    rpcServer, err := runtime.NewMCPRPCServer(mcpManager, socketPath)
+    rpcServer, err := rpc.NewMCPRPCServer(mcpManager, socketPath)
     if err != nil {
         return err
     }
@@ -1260,7 +1259,7 @@ Or disable code execution mode in config:
 ### 6.1 Unit Tests
 
 ```go
-// pkg/runtime/deno_test.go
+// pkg/mcp/runtime/deno_test.go
 func TestDenoExecution(t *testing.T) {
     runtime := NewDenoRuntime("/tmp/test", SandboxPermissions{})
     
