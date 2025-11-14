@@ -1,5 +1,12 @@
 # Kodelet
 
+## 0.1.16.beta (2025-11-14)
+
+### Internal Changes
+
+**Prompt Example Simplification**: Streamlined ShortSummaryPrompt examples by removing intermediate analysis blocks for cleaner documentation
+
+
 ## 0.1.15.beta (2025-11-08)
 
 ### Features
