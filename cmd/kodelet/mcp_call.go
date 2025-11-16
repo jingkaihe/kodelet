@@ -1,12 +1,10 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/jingkaihe/kodelet/pkg/tools"
@@ -42,29 +40,6 @@ Arguments should be provided as JSON using the --args flag.`,
 		if err != nil {
 			return errors.Wrap(err, "failed to create MCP manager")
 		}
-
-		// Ensure cleanup with timeout to prevent hanging
-		defer func() {
-			cleanupCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			defer cancel()
-
-			done := make(chan struct{})
-			go func() {
-				if closeErr := mcpManager.Close(cleanupCtx); closeErr != nil {
-					presenter.Warning(fmt.Sprintf("Failed to close MCP manager: %v", closeErr))
-				}
-				close(done)
-			}()
-
-			select {
-			case <-done:
-				// Cleanup completed successfully
-			case <-cleanupCtx.Done():
-				// Force exit if cleanup hangs - this is acceptable for CLI commands
-				presenter.Warning("MCP cleanup timed out, forcing exit")
-				os.Exit(0)
-			}
-		}()
 
 		// Get flags
 		argsJSON, _ := cmd.Flags().GetString("args")

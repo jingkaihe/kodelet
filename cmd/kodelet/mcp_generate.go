@@ -1,10 +1,8 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"os"
-	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/mcp/codegen"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
@@ -30,29 +28,6 @@ This creates a filesystem representation of your MCP tools that can be:
 		if err != nil {
 			return errors.Wrap(err, "failed to create MCP manager")
 		}
-
-		// Ensure cleanup with timeout to prevent hanging
-		defer func() {
-			cleanupCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			defer cancel()
-
-			done := make(chan struct{})
-			go func() {
-				if closeErr := mcpManager.Close(cleanupCtx); closeErr != nil {
-					presenter.Warning(fmt.Sprintf("Failed to close MCP manager: %v", closeErr))
-				}
-				close(done)
-			}()
-
-			select {
-			case <-done:
-				// Cleanup completed successfully
-			case <-cleanupCtx.Done():
-				// Force exit if cleanup hangs - this is acceptable for CLI commands
-				presenter.Warning("MCP cleanup timed out, forcing exit")
-				os.Exit(0)
-			}
-		}()
 
 		// Get flags
 		outputDir, _ := cmd.Flags().GetString("output")

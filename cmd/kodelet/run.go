@@ -190,18 +190,6 @@ var runCmd = &cobra.Command{
 			return
 		}
 
-		// Cleanup MCP manager on exit (will be overridden if using RPC server)
-		mcpCleanup := func() {
-			if mcpManager != nil {
-				cleanupCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-				defer cancel()
-				if err := mcpManager.Close(cleanupCtx); err != nil {
-					logger.G(ctx).WithError(err).Warn("Failed to close MCP manager")
-				}
-			}
-		}
-		defer func() { mcpCleanup() }()
-
 		customManager, err := tools.CreateCustomToolManagerFromViper(ctx)
 		if err != nil {
 			presenter.Error(err, "Failed to create custom tool manager")
@@ -274,24 +262,6 @@ var runCmd = &cobra.Command{
 							}
 						}()
 
-						// Override cleanup to shutdown RPC server
-						mcpCleanup = func() {
-							if rpcServer != nil {
-								shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-								defer cancel()
-								if err := rpcServer.Shutdown(shutdownCtx); err != nil {
-									logger.G(ctx).WithError(err).Warn("Failed to shutdown RPC server")
-								}
-							}
-							if mcpManager != nil {
-								cleanupCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-								defer cancel()
-								if err := mcpManager.Close(cleanupCtx); err != nil {
-									logger.G(ctx).WithError(err).Warn("Failed to close MCP manager")
-								}
-							}
-						}
-
 						// Check if Node.js is available
 						if err := runtime.CheckAvailability(ctx); err != nil {
 							presenter.Warning(fmt.Sprintf("%v - falling back to direct mode", err))
@@ -332,23 +302,6 @@ var runCmd = &cobra.Command{
 							logger.G(ctx).WithError(err).Error("MCP RPC server failed")
 						}
 					}()
-
-					mcpCleanup = func() {
-						if rpcServer != nil {
-							shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-							defer cancel()
-							if err := rpcServer.Shutdown(shutdownCtx); err != nil {
-								logger.G(ctx).WithError(err).Warn("Failed to shutdown RPC server")
-							}
-						}
-						if mcpManager != nil {
-							cleanupCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-							defer cancel()
-							if err := mcpManager.Close(cleanupCtx); err != nil {
-								logger.G(ctx).WithError(err).Warn("Failed to close MCP manager")
-							}
-						}
-					}
 
 					if err := runtime.CheckAvailability(ctx); err != nil {
 						presenter.Warning(fmt.Sprintf("%v - falling back to direct mode", err))
