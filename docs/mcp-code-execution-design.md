@@ -20,6 +20,7 @@ Instead of exposing MCP tools as direct function calls, present them as a code A
 - **Better control flow**: Use native code constructs (loops, conditionals, error handling)
 - **Privacy preservation**: Intermediate data stays in execution environment
 - **State persistence**: Save results to files for later use
+- **Type safety**: Leverage MCP output schemas (2025-06-18) for predictable, type-safe tool chaining
 
 ## Architecture
 
@@ -239,17 +240,84 @@ export async function {{.ToolName}}(input: {{.ToolName}}Input): Promise<{{.ToolN
   return callMCPTool<{{.ToolName}}Response>('{{.MCPToolName}}', input);
 }
 
-// Input type (generated from JSON schema)
+// Input type (generated from input schema)
 export interface {{.ToolName}}Input {
   {{range .InputSchema.Properties}}
+  {{if .Description}}
+  /**
+   * {{.Description}}
+   {{- if .Format}}
+   * @format {{.Format}}
+   {{- end}}
+   {{- if .Default}}
+   * @default {{.Default}}
+   {{- end}}
+   {{- if .Enum}}
+   * @enum {{.Enum}}
+   {{- end}}
+   {{- if .Minimum}}
+   * @minimum {{.Minimum}}
+   {{- end}}
+   {{- if .Maximum}}
+   * @maximum {{.Maximum}}
+   {{- end}}
+   {{- if .MinLength}}
+   * @minLength {{.MinLength}}
+   {{- end}}
+   {{- if .MaxLength}}
+   * @maxLength {{.MaxLength}}
+   {{- end}}
+   {{- if .Pattern}}
+   * @pattern {{.Pattern}}
+   {{- end}}
+   */
+  {{end}}
   {{.Name}}{{if not .Required}}?{{end}}: {{.TypeScriptType}};
   {{end}}
 }
 
-// Response type (generic for now)
+{{if .OutputSchema}}
+// Output type (generated from output schema - type-safe!)
+export interface {{.ToolName}}Response {
+  {{range .OutputSchema.Properties}}
+  {{if .Description}}
+  /**
+   * {{.Description}}
+   {{- if .Format}}
+   * @format {{.Format}}
+   {{- end}}
+   {{- if .Default}}
+   * @default {{.Default}}
+   {{- end}}
+   {{- if .Enum}}
+   * @enum {{.Enum}}
+   {{- end}}
+   {{- if .Minimum}}
+   * @minimum {{.Minimum}}
+   {{- end}}
+   {{- if .Maximum}}
+   * @maximum {{.Maximum}}
+   {{- end}}
+   {{- if .MinLength}}
+   * @minLength {{.MinLength}}
+   {{- end}}
+   {{- if .MaxLength}}
+   * @maxLength {{.MaxLength}}
+   {{- end}}
+   {{- if .Pattern}}
+   * @pattern {{.Pattern}}
+   {{- end}}
+   */
+  {{end}}
+  {{.Name}}{{if not .Required}}?{{end}}: {{.TypeScriptType}};
+  {{end}}
+}
+{{else}}
+// Output type (no schema provided - generic)
 export interface {{.ToolName}}Response {
   [key: string]: any;
 }
+{{end}}
 ```
 
 Create `pkg/mcp/codegen/templates/client.ts.tmpl`:
@@ -267,6 +335,7 @@ interface MCPRequest {
 
 interface MCPResponse {
   content: Array<{ type: string; text?: string }>;
+  structuredContent?: any;  // MCP 2025-06-18: structured output
   isError?: boolean;
 }
 
@@ -276,7 +345,7 @@ export async function callMCPTool<T>(toolName: string, args: Record<string, any>
     arguments: args,
   };
   
-  // Call MCP tool via RPC mechanism (Unix socket, HTTP, etc.)
+  // Call MCP tool via RPC mechanism (Unix socket)
   const response = await fetch(MCP_RPC_ENDPOINT, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -293,7 +362,12 @@ export async function callMCPTool<T>(toolName: string, args: Record<string, any>
     throw new Error(`MCP tool ${toolName} error: ${JSON.stringify(result.content)}`);
   }
   
-  // Extract text content and parse as JSON
+  // Prefer structured content if available (MCP 2025-06-18)
+  if (result.structuredContent !== undefined) {
+    return result.structuredContent as T;
+  }
+  
+  // Fallback: extract text content and parse as JSON
   const textContent = result.content
     .filter(c => c.type === "text")
     .map(c => c.text)
@@ -308,7 +382,365 @@ export async function callMCPTool<T>(toolName: string, args: Record<string, any>
 }
 ```
 
-### 1.3 CLI Command for Code Generation
+### 1.3 Leveraging MCP Output Schemas
+
+**MCP Specification (2025-06-18)** introduced output schemas for tools, enabling type-safe, predictable tool chaining.
+
+#### Benefits
+
+1. **LLM Code Generation**: Rich TSDoc comments help LLM understand how to use tools correctly
+2. **Constraint Awareness**: LLM can see and respect min/max, length, enum, pattern constraints
+3. **Type Safety**: Generated TypeScript types provide compile-time checks for LLM-generated code
+4. **Predictable Chaining**: Known output structure makes multi-tool workflows more reliable  
+5. **Self-Documenting**: LLM can read field descriptions, defaults, and formats without external docs
+6. **Structured Content**: Direct access to structured data without JSON parsing
+
+#### Example: Type-Safe Tool Chaining
+
+MCP tool with output schema:
+```json
+{
+  "name": "get_customer_data",
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "customerId": { "type": "string" },
+      "email": { "type": "string" },
+      "name": { "type": "string" },
+      "orderCount": { "type": "number" }
+    },
+    "required": ["customerId", "email", "name", "orderCount"]
+  }
+}
+```
+
+Generated TypeScript interface (basic example without metadata):
+```typescript
+export interface getCustomerDataResponse {
+  customerId: string;
+  email: string;
+  name: string;
+  orderCount: number;
+}
+```
+
+#### Enhanced Example with Field Metadata
+
+MCP tool with detailed schema including metadata:
+```json
+{
+  "name": "search_products",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "query": {
+        "type": "string",
+        "description": "Search query string",
+        "minLength": 1,
+        "maxLength": 200
+      },
+      "category": {
+        "type": "string",
+        "description": "Product category filter",
+        "enum": ["electronics", "clothing", "books", "all"],
+        "default": "all"
+      },
+      "maxResults": {
+        "type": "number",
+        "description": "Maximum number of results to return",
+        "minimum": 1,
+        "maximum": 100,
+        "default": 10
+      },
+      "sortBy": {
+        "type": "string",
+        "description": "Sort order for results",
+        "enum": ["relevance", "price_asc", "price_desc"],
+        "default": "relevance"
+      }
+    },
+    "required": ["query"]
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "products": {
+        "type": "array",
+        "description": "List of matching products"
+      },
+      "totalCount": {
+        "type": "number",
+        "description": "Total number of matches (may exceed returned results)",
+        "minimum": 0
+      },
+      "hasMore": {
+        "type": "boolean",
+        "description": "Whether there are more results available"
+      }
+    },
+    "required": ["products", "totalCount", "hasMore"]
+  }
+}
+```
+
+Generated TypeScript with metadata comments:
+```typescript
+// searchProducts.ts - Generated MCP tool wrapper
+import { callMCPTool } from "../../client.ts";
+
+/**
+ * Search for products in the catalog
+ */
+export async function searchProducts(input: searchProductsInput): Promise<searchProductsResponse> {
+  return callMCPTool<searchProductsResponse>('search_products', input);
+}
+
+// Input type (generated from input schema)
+export interface searchProductsInput {
+  /**
+   * Search query string
+   * @minLength 1
+   * @maxLength 200
+   */
+  query: string;
+  
+  /**
+   * Product category filter
+   * @enum ["electronics", "clothing", "books", "all"]
+   * @default "all"
+   */
+  category?: string;
+  
+  /**
+   * Maximum number of results to return
+   * @minimum 1
+   * @maximum 100
+   * @default 10
+   */
+  maxResults?: number;
+  
+  /**
+   * Sort order for results
+   * @enum ["relevance", "price_asc", "price_desc"]
+   * @default "relevance"
+   */
+  sortBy?: string;
+}
+
+// Output type (generated from output schema - type-safe!)
+export interface searchProductsResponse {
+  /**
+   * List of matching products
+   */
+  products: any[];
+  
+  /**
+   * Total number of matches (may exceed returned results)
+   * @minimum 0
+   */
+  totalCount: number;
+  
+  /**
+   * Whether there are more results available
+   */
+  hasMore: boolean;
+}
+```
+
+Now when the LLM generates code, it can read the constraints and use them correctly:
+```typescript
+// LLM sees: query: string (required)
+//   Search query string
+//   @minLength 1
+//   @maxLength 200
+// LLM knows: must provide query, length must be 1-200 chars
+
+const results = await searchProducts({
+  query: "laptop",
+  category: "electronics",  // LLM sees enum, knows valid values
+  maxResults: 50            // LLM sees @minimum 1 @maximum 100, validates range
+});
+
+// LLM sees totalCount is a number in comments
+// LLM sees hasMore is a boolean
+// LLM understands the response structure from TSDoc
+```
+
+Type-safe chaining in code execution:
+```typescript
+import * as crm from './servers/crm/index.ts';
+import * as email from './servers/email/index.ts';
+
+// Get customer data - output type is known and enforced
+const customer = await crm.getCustomerData({ customerId: '12345' });
+
+// LLM can read TSDoc comments to know customer.email, customer.name, customer.orderCount
+// TypeScript ensures type safety at runtime
+if (customer.orderCount > 10) {
+  await email.sendEmail({
+    to: customer.email,  // Type-safe: we know this is a string
+    subject: `Thanks ${customer.name}!`,
+    body: `You've made ${customer.orderCount} orders with us.`
+  });
+}
+
+console.log(`Sent email to ${customer.name} (${customer.email})`);
+```
+
+#### Code Generator Updates
+
+The generator should:
+
+1. **Extract output schemas** from MCP tool definitions
+2. **Generate TypeScript types** from output schemas using JSON Schema to TypeScript conversion
+3. **Extract field metadata** from JSON Schema properties (description, constraints, defaults)
+4. **Generate TSDoc comments** for each field with all available metadata
+5. **Provide fallback** for tools without output schemas (generic `any` type)
+
+#### JSON Schema Metadata Extraction
+
+**Why metadata matters for LLM code generation:**
+
+When the LLM generates TypeScript code to solve a task, it reads the generated `.ts` files to understand available tools. Rich TSDoc comments enable the LLM to:
+
+1. **Understand constraints** - See min/max values, length limits, patterns without trial and error
+2. **Choose correct values** - Know valid enum options, default values, expected formats
+3. **Validate inputs** - Generate code that respects constraints before execution
+4. **Chain tools effectively** - Understand output structure to pass data between tools
+5. **Reduce errors** - Avoid parameter mistakes by reading inline documentation
+
+The generator needs to extract these JSON Schema attributes for each property:
+
+| JSON Schema Field | TSDoc Annotation | Example |
+|------------------|-----------------|---------|
+| `description` | Main comment text | `// Search query string` |
+| `default` | `@default` | `@default "all"` |
+| `enum` | `@enum` | `@enum ["electronics", "clothing"]` |
+| `minimum` | `@minimum` | `@minimum 1` |
+| `maximum` | `@maximum` | `@maximum 100` |
+| `minLength` | `@minLength` | `@minLength 1` |
+| `maxLength` | `@maxLength` | `@maxLength 200` |
+| `pattern` | `@pattern` | `@pattern ^[a-z]+$` |
+| `format` | `@format` | `@format email` |
+| `required` | Field optionality | `field?: type` vs `field: type` |
+
+**Implementation approach:**
+
+All JSON Schema metadata fields should be extracted and made available to the template so they can be rendered as TSDoc comments. This gives the LLM maximum information when generating code.
+
+```go
+// Helper struct for template data
+type SchemaProperty struct {
+    Name           string
+    TypeScriptType string
+    Required       bool
+    Description    string
+    Default        interface{}
+    Enum           []interface{}
+    Minimum        *float64
+    Maximum        *float64
+    MinLength      *int
+    MaxLength      *int
+    Pattern        string
+    Format         string
+}
+
+func extractSchemaProperties(schema map[string]interface{}) []SchemaProperty {
+    properties := []SchemaProperty{}
+    
+    propsMap := schema["properties"].(map[string]interface{})
+    requiredFields := getRequiredFields(schema)
+    
+    for name, propData := range propsMap {
+        prop := propData.(map[string]interface{})
+        
+        schemaProps := SchemaProperty{
+            Name:           name,
+            TypeScriptType: jsonTypeToTS(prop["type"]),
+            Required:       contains(requiredFields, name),
+            Description:    getString(prop, "description"),
+            Default:        prop["default"],
+            Enum:           getArray(prop, "enum"),
+            Minimum:        getFloat(prop, "minimum"),
+            Maximum:        getFloat(prop, "maximum"),
+            MinLength:      getInt(prop, "minLength"),
+            MaxLength:      getInt(prop, "maxLength"),
+            Pattern:        getString(prop, "pattern"),
+            Format:         getString(prop, "format"),
+        }
+        
+        properties = append(properties, schemaProps)
+    }
+    
+    return properties
+}
+```
+
+**Note**: The existing `pkg/tools/mcp.go` MCPTool struct should be extended to include:
+```go
+type MCPTool struct {
+    client              *client.Client
+    mcpToolInputSchema  mcp.ToolInputSchema
+    mcpToolOutputSchema mcp.ToolOutputSchema  // NEW: store output schema
+    mcpToolName         string
+    mcpToolDescription  string
+}
+```
+
+Example generator logic:
+```go
+func (g *MCPCodeGenerator) generateToolFile(serverDir string, tool MCPTool) error {
+    data := struct {
+        ToolName     string
+        MCPToolName  string
+        Description  string
+        InputSchema  interface{}
+        OutputSchema interface{} // NEW: output schema
+    }{
+        ToolName:     sanitizeName(tool.mcpToolName),
+        MCPToolName:  tool.mcpToolName,
+        Description:  tool.Description(),
+        InputSchema:  tool.InputSchema,
+        OutputSchema: tool.OutputSchema,  // Extract from MCP tool
+    }
+    
+    filename := filepath.Join(serverDir, data.ToolName+".ts")
+    return g.templates.ExecuteTemplate(filename, "tool.ts.tmpl", data)
+}
+```
+
+#### RPC Server Updates
+
+The MCP RPC server should pass through structured content:
+
+```go
+func (s *MCPRPCServer) handleMCPCall(w http.ResponseWriter, r *http.Request) {
+    // ... execute tool ...
+    
+    result := targetTool.Execute(r.Context(), nil, string(params))
+    structuredData := result.StructuredData()
+    
+    // Return both content and structuredContent
+    response := map[string]interface{}{
+        "content": []map[string]interface{}{
+            {"type": "text", "text": result.GetResult()},
+        },
+    }
+    
+    // Include structured content if available
+    if metadata, ok := structuredData.Metadata.(*tooltypes.MCPToolMetadata); ok {
+        if len(metadata.Content) > 0 {
+            // Extract structured content from MCP response
+            response["structuredContent"] = extractStructuredContent(metadata.Content)
+        }
+    }
+    
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(response)
+}
+```
+
+### 1.4 CLI Command for Code Generation
 
 Add a CLI command to generate MCP tool files on demand:
 
@@ -954,10 +1386,11 @@ func (t *CodeExecutionTool) Description() string {
 
 ## Usage Pattern
 
-The execution environment has access to MCP tools via the generated filesystem API:
+The execution environment has access to MCP tools via the generated filesystem API.
+
+### Example 1: Simple Tool Chain
 
 \`\`\`typescript
-// Import and use MCP tools directly
 import * as googleDrive from './servers/google-drive/index.ts';
 import * as salesforce from './servers/salesforce/index.ts';
 
@@ -973,6 +1406,31 @@ await salesforce.updateRecord({
 console.log(\`Updated with \${summary.length} char summary\`);
 \`\`\`
 
+### Example 2: Type-Safe Chaining with Output Schemas
+
+When MCP tools provide output schemas, you get type-safe chaining:
+
+\`\`\`typescript
+import * as crm from './servers/crm/index.ts';
+import * as email from './servers/email/index.ts';
+
+// Type-safe: customer.email, customer.name, customer.orderCount are known types
+const customer = await crm.getCustomerData({ customerId: '12345' });
+
+// LLM can see the output structure from TSDoc comments
+// TypeScript compiler ensures correct property access
+if (customer.orderCount > 10) {
+  await email.sendEmail({
+    to: customer.email,      // Type-checked: string
+    subject: \`Thanks \${customer.name}!\`,
+    body: \`You've placed \${customer.orderCount} orders.\`
+  });
+  console.log(\`Sent to \${customer.email}\`);
+} else {
+  console.log(\`Customer \${customer.name} has only \${customer.orderCount} orders\`);
+}
+\`\`\`
+
 ## Tool Discovery
 
 To discover available MCP tools, use the grep_tool to search the generated code:
@@ -984,7 +1442,7 @@ To discover available MCP tools, use the grep_tool to search the generated code:
 
 1. **Use this tool when you need to:**
    - Call a single MCP tool with output filtering/processing
-   - Call multiple MCP tools in sequence
+   - Call multiple MCP tools in sequence (especially with output schemas for type safety)
    - Process large datasets before returning results
    - Implement complex control flow (loops, conditionals)
    - Filter/transform data between tool calls
