@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/presenter"
@@ -68,7 +67,7 @@ Use --detailed to see descriptions and --json for machine-readable output.`,
 		if serverFilter != "" {
 			filtered := []tools.MCPTool{}
 			for _, tool := range mcpTools {
-				if strings.HasPrefix(tool.Name(), "mcp_"+serverFilter+"_") {
+				if tool.ServerName() == serverFilter {
 					filtered = append(filtered, tool)
 				}
 			}
@@ -96,14 +95,14 @@ Use --detailed to see descriptions and --json for machine-readable output.`,
 			// Group by server
 			byServer := make(map[string][]tools.MCPTool)
 			for _, tool := range mcpTools {
-				serverName := extractServerNameFromTool(tool.Name())
+				serverName := tool.ServerName()
 				byServer[serverName] = append(byServer[serverName], tool)
 			}
 
 			for serverName, serverTools := range byServer {
 				fmt.Printf("\n%s (%d tools):\n", serverName, len(serverTools))
 				for _, tool := range serverTools {
-					toolName := extractToolNameFromFull(tool.Name())
+					toolName := tool.MCPToolName()
 					fmt.Printf("  • %s.%s\n", serverName, toolName)
 					if detailed {
 						fmt.Printf("    %s\n", tool.Description())
@@ -120,20 +119,4 @@ func init() {
 	mcpListCmd.Flags().String("server", "", "Filter by server name")
 	mcpListCmd.Flags().Bool("detailed", false, "Show detailed tool information")
 	mcpListCmd.Flags().Bool("json", false, "Output as JSON")
-}
-
-func extractServerNameFromTool(toolName string) string {
-	parts := strings.Split(toolName, "_")
-	if len(parts) >= 2 {
-		return parts[1]
-	}
-	return "unknown"
-}
-
-func extractToolNameFromFull(toolName string) string {
-	parts := strings.Split(toolName, "_")
-	if len(parts) >= 3 {
-		return strings.Join(parts[2:], "_")
-	}
-	return toolName
 }

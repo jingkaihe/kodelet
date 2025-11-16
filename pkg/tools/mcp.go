@@ -201,7 +201,7 @@ func (m *MCPManager) ListMCPTools(ctx context.Context) ([]MCPTool, error) {
 			} else {
 				mu.Lock()
 				for _, tool := range toolsResult {
-					tools = append(tools, *NewMCPTool(c, tool))
+					tools = append(tools, *NewMCPTool(c, tool, serverName))
 				}
 				mu.Unlock()
 			}
@@ -278,16 +278,28 @@ type MCPTool struct {
 	mcpToolInputSchema mcp.ToolInputSchema
 	mcpToolName        string
 	mcpToolDescription string
+	serverName         string
 }
 
 // NewMCPTool creates a new MCP tool wrapper
-func NewMCPTool(client *client.Client, tool mcp.Tool) *MCPTool {
+func NewMCPTool(client *client.Client, tool mcp.Tool, serverName string) *MCPTool {
 	return &MCPTool{
 		client:             client,
 		mcpToolInputSchema: tool.InputSchema,
 		mcpToolName:        tool.GetName(),
 		mcpToolDescription: tool.Description,
+		serverName:         serverName,
 	}
+}
+
+// ServerName returns the name of the MCP server this tool belongs to
+func (t *MCPTool) ServerName() string {
+	return t.serverName
+}
+
+// MCPToolName returns the original MCP tool name (without the "mcp_" prefix)
+func (t *MCPTool) MCPToolName() string {
+	return t.mcpToolName
 }
 
 // MCPToolResult represents the result of an MCP tool execution

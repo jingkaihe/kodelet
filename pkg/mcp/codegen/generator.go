@@ -149,7 +149,7 @@ func (g *MCPCodeGenerator) Generate(ctx context.Context) error {
 	// Group tools by server
 	toolsByServer := make(map[string][]tools.MCPTool)
 	for _, tool := range mcpTools {
-		serverName := extractServerName(tool.Name())
+		serverName := tool.ServerName()
 
 		// Apply server filter if set
 		if g.serverFilter != "" && serverName != g.serverFilter {
@@ -212,7 +212,8 @@ func (g *MCPCodeGenerator) generateClient() error {
 
 // generateToolFile generates a TypeScript file for a single tool
 func (g *MCPCodeGenerator) generateToolFile(serverDir string, tool tools.MCPTool) (ToolInfo, error) {
-	toolName := sanitizeName(extractToolName(tool.Name()))
+	mcpToolName := tool.MCPToolName()
+	toolName := sanitizeName(mcpToolName)
 
 	// Parse input schema
 	inputSchema, err := parseSchema(tool.GenerateSchema())
@@ -222,7 +223,7 @@ func (g *MCPCodeGenerator) generateToolFile(serverDir string, tool tools.MCPTool
 
 	data := ToolData{
 		ToolName:        toolName,
-		MCPToolName:     getOriginalMCPToolName(tool.Name()),
+		MCPToolName:     mcpToolName,
 		Description:     tool.Description(),
 		InputSchema:     inputSchema,
 		HasOutputSchema: false,
@@ -261,7 +262,7 @@ func (g *MCPCodeGenerator) generateServerIndex(serverDir string, serverTools []t
 
 	// Export all tool functions
 	for _, tool := range serverTools {
-		toolName := sanitizeName(extractToolName(tool.Name()))
+		toolName := sanitizeName(tool.MCPToolName())
 		fmt.Fprintf(f, "export { %s } from './%s.js';\n", toolName, toolName)
 	}
 
@@ -360,33 +361,6 @@ func extractSchemaProperties(schema map[string]interface{}) []SchemaProperty {
 }
 
 // Helper functions
-
-func extractServerName(toolName string) string {
-	// Tool names are in format "mcp_servername_toolname"
-	parts := strings.Split(toolName, "_")
-	if len(parts) >= 2 {
-		return parts[1]
-	}
-	return "unknown"
-}
-
-func extractToolName(toolName string) string {
-	// Tool names are in format "mcp_servername_toolname"
-	parts := strings.Split(toolName, "_")
-	if len(parts) >= 3 {
-		return strings.Join(parts[2:], "_")
-	}
-	return toolName
-}
-
-func getOriginalMCPToolName(toolName string) string {
-	// Remove "mcp_servername_" prefix to get original tool name
-	parts := strings.Split(toolName, "_")
-	if len(parts) >= 3 {
-		return strings.Join(parts[2:], "_")
-	}
-	return toolName
-}
 
 func sanitizeName(name string) string {
 	// Convert snake_case to camelCase

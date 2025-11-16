@@ -6,13 +6,13 @@
 import * as {{.Name}} from './servers/{{.Name}}/index.js';
 {{end}}
 
-{{range .Servers}}
-async function example{{.Name | title}}() {
-  console.log("=== {{.Name}} Examples ===");
+{{range $server := .Servers}}
+async function example{{$server.Name | title}}() {
+  console.log("=== {{$server.Name}} Examples ===");
   
-  {{range .Tools}}
+  {{range $server.Tools}}
   // {{.Description}}
-  // const result = await {{$.Name}}.{{.FunctionName}}({ /* params */ });
+  // const result = await {{$server.Name}}.{{.FunctionName}}({ /* params */ });
   // console.log(result);
   {{end}}
 }
