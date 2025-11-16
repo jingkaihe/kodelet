@@ -1,20 +1,57 @@
 Execute TypeScript/JavaScript code with access to MCP tools.
 
+## Workspace Structure
+
+The execution environment is a well-organized Node.js ES module workspace:
+
+```
+.kodelet/mcp/                   # Workspace root
+├── package.json                # ES module configuration
+├── client.ts                   # MCP RPC client (auto-generated)
+├── servers/                    # MCP tool wrappers by server
+│   ├── lsp/                    # Language Server tools
+│   │   ├── index.ts           # Exported functions
+│   │   ├── definition.ts      # Find symbol definitions
+│   │   ├── diagnostics.ts     # Get file diagnostics
+│   │   ├── hover.ts           # Get hover information
+│   │   ├── references.ts      # Find symbol references
+│   │   └── renameSymbol.ts    # Rename symbols
+│   └── [other-servers]/       # Other MCP servers
+└── .kodelet/mcp.sock          # Unix socket for RPC
+```
+
+## Import Conventions
+
+Always use relative ES module imports with `.js` extension:
+
+```typescript
+// CORRECT - Relative import with .js extension
+import * as lsp from './servers/lsp/index.js';
+
+// INCORRECT - Missing .js or absolute path
+import * as lsp from './servers/lsp/index';
+import * as lsp from './.kodelet/mcp/servers/lsp/index.js';
+```
+
+**Why**: The workspace uses ES modules (`"type": "module"` in package.json), which requires explicit file extensions for relative imports.
+
 ## Usage Pattern
 
 The execution environment has access to MCP tools via the generated filesystem API.
 
-### Example 1: Simple Tool Chain
+### Example 1: Simple Tool Call with Filtering
 
 ```typescript
-import * as lsp from './.kodelet/mcp/servers/lsp/index.js';
+import * as lsp from './servers/lsp/index.js';
 
-// Call MCP tool and process data locally
+// Call MCP tool and filter output
 const defs = await lsp.definition({ 
   symbolName: 'MyFunction'
 });
 
+// Only log relevant parts
 console.log(`Found definition at: ${defs.filePath}`);
+console.log(`Lines ${defs.range.start} - ${defs.range.end}`);
 ```
 
 ### Example 2: Type-Safe Chaining with Output Schemas
@@ -22,68 +59,158 @@ console.log(`Found definition at: ${defs.filePath}`);
 When MCP tools provide output schemas, you get type-safe chaining:
 
 ```typescript
-import * as lsp from './.kodelet/mcp/servers/lsp/index.js';
+import * as lsp from './servers/lsp/index.js';
 
 // Get diagnostics for a file
 const diags = await lsp.diagnostics({ 
   filePath: './main.go' 
 });
 
-// Process results
-if (diags.errors.length > 0) {
+// Process results with type safety
+if (diags.errors && diags.errors.length > 0) {
   console.log(`Found ${diags.errors.length} errors`);
-  for (const err of diags.errors) {
+  for (const err of diags.errors.slice(0, 5)) { // Limit output
     console.log(`  Line ${err.line}: ${err.message}`);
   }
 }
 ```
 
+### Example 3: Multi-Tool Workflow
+
+Chain multiple tools efficiently:
+
+```typescript
+import * as lsp from './servers/lsp/index.js';
+
+// Step 1: Find definition
+const def = await lsp.definition({ symbolName: 'processData' });
+console.log(`Found at: ${def.filePath}`);
+
+// Step 2: Get diagnostics for that file
+const diags = await lsp.diagnostics({ 
+  filePath: def.filePath 
+});
+
+// Step 3: Summarize issues
+const errorCount = diags.errors?.length || 0;
+const warningCount = diags.warnings?.length || 0;
+console.log(`${errorCount} errors, ${warningCount} warnings`);
+```
+
 ## Tool Discovery
 
 To discover available MCP tools:
-- Use grep_tool with pattern "export function" and path ".kodelet/mcp/servers" to list all available functions
-- Use file_read to examine generated tool files for details
-- Explore the .kodelet/mcp/servers/ directory structure
+
+```typescript
+// Method 1: List all available tool modules
+import { readdirSync } from 'fs';
+
+const servers = readdirSync('./servers');
+console.log('Available server modules:', servers);
+
+// Method 2: Check a specific server's exports
+import * as lsp from './servers/lsp/index.js';
+console.log('LSP tools:', Object.keys(lsp));
+```
+
+Or use other tools:
+- `grep_tool` with pattern "export function" and path ".kodelet/mcp/servers"
+- `file_read` to examine generated tool files
+- `glob_tool` with pattern "**/*.ts" in ".kodelet/mcp/servers/"
 
 ## Best Practices
 
-1. **Use this tool when you need to:**
-   - Call a single MCP tool with output filtering/processing
-   - Call multiple MCP tools in sequence (especially with output schemas for type safety)
-   - Process large datasets before returning results
-   - Implement complex control flow (loops, conditionals)
-   - Filter/transform data between tool calls
+### 1. When to use this tool
 
-2. **Managing output size:**
-   - **CRITICAL**: Always consider the expected output size before calling MCP tools
-   - For tools that may return large outputs (lists, file contents, query results):
-     * Apply filtering and limit the data BEFORE logging
-     * Use .slice(), .substring(), .filter() to reduce output
-     * Log only summaries or counts for large datasets
-   - Example for large outputs:
-     ```typescript
-     // BAD - may return huge output
-     const files = await filesystem.listFiles({ path: '/' });
-     console.log(files);  // Could be thousands of files!
-     
-     // GOOD - filter and limit first
-     const files = await filesystem.listFiles({ path: '/' });
-     const recentFiles = files.slice(0, 10);  // Only first 10
-     console.log(`Found ${files.length} files, showing first 10:`);
-     console.log(recentFiles.map(f => f.name).join('\n'));
-     ```
+Use code_execution when you need to:
+- Call a single MCP tool with complex output filtering/processing
+- Chain multiple MCP tools with data transformation between calls
+- Implement control flow (loops, conditionals) over MCP tool results
+- Process large datasets before returning summarized results
+- Build type-safe workflows using tool output schemas
 
-3. **Always use console.log() for outputs**
-   - Only console.log() output is returned to you
-   - Use it to report progress and results
+### 2. Managing Output Size (CRITICAL)
 
-4. **Keep code focused**
-   - Each code execution should accomplish a specific task
-   - Don't try to do too much in one execution
+**Always filter and limit output before logging:**
 
-5. **Handle errors gracefully**
-   - Use try/catch blocks
-   - Log errors with console.error()
+```typescript
+// BAD - May return massive output
+const files = await filesystem.listFiles({ path: '/' });
+console.log(files);  // Could be thousands of files!
+
+// GOOD - Filter first, then summarize
+const files = await filesystem.listFiles({ path: '/' });
+const goFiles = files.filter(f => f.name.endsWith('.go'));
+console.log(`Found ${files.length} files total, ${goFiles.length} Go files`);
+console.log('Sample Go files:', goFiles.slice(0, 5).map(f => f.name));
+```
+
+**Output size limits:**
+- Avoid logging full arrays with >100 items
+- For large strings, use `.slice()` or `.substring()`
+- Log summaries (counts, stats) instead of raw data
+- Use `JSON.stringify(data, null, 2)` for readability, but limit depth
+
+### 3. Always use console.log() for outputs
+
+```typescript
+// GOOD - Visible to you
+console.log('Processing complete:', result);
+console.error('Error occurred:', error);
+
+// BAD - Not returned
+return result;  // Only console output is returned
+```
+
+### 4. Error Handling
+
+Always use try/catch for robust execution:
+
+```typescript
+try {
+  const result = await lsp.definition({ symbolName: 'foo' });
+  console.log('Success:', result);
+} catch (error) {
+  console.error('Failed to find definition:', error.message);
+}
+```
+
+### 5. Keep Code Focused
+
+Each execution should accomplish one specific task:
+- GOOD: "Find all error diagnostics in main.go and summarize"
+- BAD: "Find diagnostics, fix them, run tests, and generate report"
+
+Break complex workflows into multiple code_execution calls.
+
+## Working with Generated Types
+
+The generated TypeScript files include JSDoc comments and type definitions:
+
+```typescript
+import * as lsp from './servers/lsp/index.js';
+
+// Input types are inferred from function signatures
+// Output types are defined if the tool provides output schema
+const result = await lsp.diagnostics({
+  filePath: './main.go',      // Type: string (required)
+  contextLines: true,         // Type: boolean (optional)
+  showLineNumbers: true       // Type: boolean (optional)
+});
+
+// Use TypeScript's intellisense for available properties
+if (result.errors) {
+  // Type-safe access to error properties
+}
+```
+
+## Workspace Conventions
+
+1. **Current working directory**: The code executes in the workspace directory (`.kodelet/mcp/`)
+2. **Module system**: ES modules only (no CommonJS require())
+3. **Runtime**: Node.js with tsx (TypeScript execution)
+4. **Network access**: Available for MCP RPC communication via Unix socket
+5. **File system access**: Full access to workspace directory
 
 ## Security Notes
 
@@ -91,3 +218,4 @@ To discover available MCP tools:
 - Executes in the workspace directory with full access
 - Use caution with untrusted code
 - Network access available for MCP RPC communication
+- No sandboxing - treat as trusted execution environment
