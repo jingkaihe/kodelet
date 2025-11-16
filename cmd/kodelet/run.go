@@ -251,6 +251,15 @@ var runCmd = &cobra.Command{
 					if socketPath == "" {
 						socketPath = ".kodelet/mcp.sock"
 					}
+					// Convert to absolute path for code execution
+					absSocketPath, err := filepath.Abs(socketPath)
+					if err != nil {
+						presenter.Warning(fmt.Sprintf("Failed to resolve socket path: %v", err))
+						// Fall back to direct mode
+						stateOpts = append(stateOpts, tools.WithMCPTools(mcpManager))
+					} else {
+						socketPath = absSocketPath
+					}
 
 					rpcServer, err = rpc.NewMCPRPCServer(mcpManager, socketPath)
 					if err != nil {
@@ -303,6 +312,14 @@ var runCmd = &cobra.Command{
 				socketPath := viper.GetString("mcp.code_execution.socket_path")
 				if socketPath == "" {
 					socketPath = ".kodelet/mcp.sock"
+				}
+				// Convert to absolute path for code execution
+				absSocketPath, err := filepath.Abs(socketPath)
+				if err != nil {
+					presenter.Warning(fmt.Sprintf("Failed to resolve socket path: %v", err))
+					stateOpts = append(stateOpts, tools.WithMCPTools(mcpManager))
+				} else {
+					socketPath = absSocketPath
 				}
 
 				rpcServer, err = rpc.NewMCPRPCServer(mcpManager, socketPath)

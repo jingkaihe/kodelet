@@ -3,6 +3,7 @@ package runtime
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"strings"
 
@@ -32,7 +33,7 @@ func (n *NodeRuntime) Execute(ctx context.Context, code string) (string, error) 
 	cmd.Stdin = strings.NewReader(code)
 
 	// Set environment variable for MCP RPC socket
-	cmd.Env = append(cmd.Env, "MCP_RPC_SOCKET="+n.socketPath)
+	cmd.Env = append(os.Environ(), "MCP_RPC_SOCKET="+n.socketPath)
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {

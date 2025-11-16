@@ -135,6 +135,11 @@ func (g *MCPCodeGenerator) Generate(ctx context.Context) error {
 		return errors.Wrap(err, "failed to create servers directory")
 	}
 
+	// Generate package.json for ES module support
+	if err := g.generatePackageJSON(); err != nil {
+		return errors.Wrap(err, "failed to generate package.json")
+	}
+
 	// Generate client wrapper
 	if err := g.generateClient(); err != nil {
 		return errors.Wrap(err, "failed to generate client")
@@ -196,6 +201,25 @@ func (g *MCPCodeGenerator) Generate(ctx context.Context) error {
 	logger.G(ctx).WithField("servers", g.stats.ServerCount).WithField("tools", g.stats.ToolCount).Info("MCP code generation completed")
 
 	return nil
+}
+
+// generatePackageJSON generates a package.json file for ES module support
+func (g *MCPCodeGenerator) generatePackageJSON() error {
+	packageJSONPath := filepath.Join(g.outputDir, "package.json")
+	packageJSON := map[string]interface{}{
+		"name":        "kodelet-mcp-workspace",
+		"version":     "1.0.0",
+		"type":        "module",
+		"description": "Kodelet MCP tool workspace for code execution",
+		"private":     true,
+	}
+
+	jsonData, err := json.MarshalIndent(packageJSON, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(packageJSONPath, jsonData, 0o644)
 }
 
 // generateClient generates the MCP client wrapper
