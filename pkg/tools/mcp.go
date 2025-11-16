@@ -274,21 +274,23 @@ func CreateMCPManagerFromViper(ctx context.Context) (*MCPManager, error) {
 
 // MCPTool wraps an MCP tool with its client
 type MCPTool struct {
-	client             *client.Client
-	mcpToolInputSchema mcp.ToolInputSchema
-	mcpToolName        string
-	mcpToolDescription string
-	serverName         string
+	client              *client.Client
+	mcpToolInputSchema  mcp.ToolInputSchema
+	mcpToolOutputSchema mcp.ToolOutputSchema
+	mcpToolName         string
+	mcpToolDescription  string
+	serverName          string
 }
 
 // NewMCPTool creates a new MCP tool wrapper
 func NewMCPTool(client *client.Client, tool mcp.Tool, serverName string) *MCPTool {
 	return &MCPTool{
-		client:             client,
-		mcpToolInputSchema: tool.InputSchema,
-		mcpToolName:        tool.GetName(),
-		mcpToolDescription: tool.Description,
-		serverName:         serverName,
+		client:              client,
+		mcpToolInputSchema:  tool.InputSchema,
+		mcpToolOutputSchema: tool.OutputSchema,
+		mcpToolName:         tool.GetName(),
+		mcpToolDescription:  tool.Description,
+		serverName:          serverName,
 	}
 }
 
@@ -372,7 +374,21 @@ func (t *MCPTool) Description() string {
 
 // GenerateSchema generates the JSON schema for the tool's input parameters
 func (t *MCPTool) GenerateSchema() *jsonschema.Schema {
-	b, err := t.mcpToolInputSchema.MarshalJSON()
+	b, err := json.Marshal(t.mcpToolInputSchema)
+	if err != nil {
+		return nil
+	}
+
+	var schema *jsonschema.Schema
+	err = json.Unmarshal(b, &schema)
+	if err != nil {
+		return nil
+	}
+	return schema
+}
+
+func (t *MCPTool) GenerateOutputSchema() *jsonschema.Schema {
+	b, err := json.Marshal(t.mcpToolOutputSchema)
 	if err != nil {
 		return nil
 	}

@@ -245,13 +245,20 @@ func (g *MCPCodeGenerator) generateToolFile(serverDir string, tool tools.MCPTool
 		return ToolInfo{}, errors.Wrap(err, "failed to parse input schema")
 	}
 
+	hasOutputSchema := true
+	outputSchema, err := parseSchema(tool.GenerateOutputSchema())
+	if err != nil {
+		hasOutputSchema = false
+		outputSchema = nil
+	}
+
 	data := ToolData{
 		ToolName:        toolName,
 		MCPToolName:     mcpToolName,
 		Description:     tool.Description(),
 		InputSchema:     inputSchema,
-		HasOutputSchema: false,
-		OutputSchema:    nil,
+		HasOutputSchema: hasOutputSchema,
+		OutputSchema:    outputSchema,
 	}
 
 	filename := filepath.Join(serverDir, toolName+".ts")
