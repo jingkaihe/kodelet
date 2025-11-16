@@ -1,0 +1,93 @@
+Execute TypeScript/JavaScript code with access to MCP tools.
+
+## Usage Pattern
+
+The execution environment has access to MCP tools via the generated filesystem API.
+
+### Example 1: Simple Tool Chain
+
+```typescript
+import * as lsp from './.kodelet/mcp/servers/lsp/index.js';
+
+// Call MCP tool and process data locally
+const defs = await lsp.definition({ 
+  symbolName: 'MyFunction'
+});
+
+console.log(`Found definition at: ${defs.filePath}`);
+```
+
+### Example 2: Type-Safe Chaining with Output Schemas
+
+When MCP tools provide output schemas, you get type-safe chaining:
+
+```typescript
+import * as lsp from './.kodelet/mcp/servers/lsp/index.js';
+
+// Get diagnostics for a file
+const diags = await lsp.diagnostics({ 
+  filePath: './main.go' 
+});
+
+// Process results
+if (diags.errors.length > 0) {
+  console.log(`Found ${diags.errors.length} errors`);
+  for (const err of diags.errors) {
+    console.log(`  Line ${err.line}: ${err.message}`);
+  }
+}
+```
+
+## Tool Discovery
+
+To discover available MCP tools:
+- Use grep_tool with pattern "export function" and path ".kodelet/mcp/servers" to list all available functions
+- Use file_read to examine generated tool files for details
+- Explore the .kodelet/mcp/servers/ directory structure
+
+## Best Practices
+
+1. **Use this tool when you need to:**
+   - Call a single MCP tool with output filtering/processing
+   - Call multiple MCP tools in sequence (especially with output schemas for type safety)
+   - Process large datasets before returning results
+   - Implement complex control flow (loops, conditionals)
+   - Filter/transform data between tool calls
+
+2. **Managing output size:**
+   - **CRITICAL**: Always consider the expected output size before calling MCP tools
+   - For tools that may return large outputs (lists, file contents, query results):
+     * Apply filtering and limit the data BEFORE logging
+     * Use .slice(), .substring(), .filter() to reduce output
+     * Log only summaries or counts for large datasets
+   - Example for large outputs:
+     ```typescript
+     // BAD - may return huge output
+     const files = await filesystem.listFiles({ path: '/' });
+     console.log(files);  // Could be thousands of files!
+     
+     // GOOD - filter and limit first
+     const files = await filesystem.listFiles({ path: '/' });
+     const recentFiles = files.slice(0, 10);  // Only first 10
+     console.log(`Found ${files.length} files, showing first 10:`);
+     console.log(recentFiles.map(f => f.name).join('\n'));
+     ```
+
+3. **Always use console.log() for outputs**
+   - Only console.log() output is returned to you
+   - Use it to report progress and results
+
+4. **Keep code focused**
+   - Each code execution should accomplish a specific task
+   - Don't try to do too much in one execution
+
+5. **Handle errors gracefully**
+   - Use try/catch blocks
+   - Log errors with console.error()
+
+## Security Notes
+
+- Code runs in Node.js environment using tsx
+- Executes in the workspace directory with full access
+- Use caution with untrusted code
+- Network access available for MCP RPC communication

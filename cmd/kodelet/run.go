@@ -7,6 +7,7 @@ import (
 	"maps"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -15,11 +16,16 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/mcp/codegen"
+	"github.com/jingkaihe/kodelet/pkg/mcp/rpc"
+	"github.com/jingkaihe/kodelet/pkg/mcp/runtime"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 type RunConfig struct {
@@ -184,6 +190,18 @@ var runCmd = &cobra.Command{
 			return
 		}
 
+		// Cleanup MCP manager on exit (will be overridden if using RPC server)
+		mcpCleanup := func() {
+			if mcpManager != nil {
+				cleanupCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				defer cancel()
+				if err := mcpManager.Close(cleanupCtx); err != nil {
+					logger.G(ctx).WithError(err).Warn("Failed to close MCP manager")
+				}
+			}
+		}
+		defer func() { mcpCleanup() }()
+
 		customManager, err := tools.CreateCustomToolManagerFromViper(ctx)
 		if err != nil {
 			presenter.Error(err, "Failed to create custom tool manager")
@@ -201,11 +219,138 @@ var runCmd = &cobra.Command{
 		applyFragmentRestrictions(&llmConfig, fragmentMetadata)
 
 		var stateOpts []tools.BasicStateOption
-
 		stateOpts = append(stateOpts, tools.WithLLMConfig(llmConfig))
-		stateOpts = append(stateOpts, tools.WithMCPTools(mcpManager))
 		stateOpts = append(stateOpts, tools.WithCustomTools(customManager))
 		stateOpts = append(stateOpts, tools.WithMainTools())
+
+		// Check if MCP code execution mode is enabled
+		executionMode := viper.GetString("mcp.execution_mode")
+		var rpcServer *rpc.MCPRPCServer
+
+		if executionMode == "code" && mcpManager != nil {
+			// Code execution mode - generate tools and start RPC server
+			workspaceDir := viper.GetString("mcp.code_execution.workspace_dir")
+			if workspaceDir == "" {
+				workspaceDir = ".kodelet/mcp"
+			}
+
+			regenerateOnStartup := viper.GetBool("mcp.code_execution.regenerate_on_startup")
+			clientTSPath := filepath.Join(workspaceDir, "client.ts")
+
+			// Generate MCP tool files if needed
+			if regenerateOnStartup || !fileExists(clientTSPath) {
+				logger.G(ctx).Info("Generating MCP tool TypeScript API...")
+				generator := codegen.NewMCPCodeGenerator(mcpManager, workspaceDir)
+				if err := generator.Generate(ctx); err != nil {
+					presenter.Warning(fmt.Sprintf("Failed to generate MCP tools: %v", err))
+					// Fall back to direct mode
+					stateOpts = append(stateOpts, tools.WithMCPTools(mcpManager))
+				} else {
+					// Start MCP RPC server
+					socketPath := viper.GetString("mcp.code_execution.socket_path")
+					if socketPath == "" {
+						socketPath = ".kodelet/mcp.sock"
+					}
+
+					rpcServer, err = rpc.NewMCPRPCServer(mcpManager, socketPath)
+					if err != nil {
+						presenter.Warning(fmt.Sprintf("Failed to create MCP RPC server: %v", err))
+						// Fall back to direct mode
+						stateOpts = append(stateOpts, tools.WithMCPTools(mcpManager))
+					} else {
+						// Start RPC server in background
+						go func() {
+							if err := rpcServer.Start(ctx); err != nil {
+								logger.G(ctx).WithError(err).Error("MCP RPC server failed")
+							}
+						}()
+
+						// Override cleanup to shutdown RPC server
+						mcpCleanup = func() {
+							if rpcServer != nil {
+								shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+								defer cancel()
+								if err := rpcServer.Shutdown(shutdownCtx); err != nil {
+									logger.G(ctx).WithError(err).Warn("Failed to shutdown RPC server")
+								}
+							}
+							if mcpManager != nil {
+								cleanupCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+								defer cancel()
+								if err := mcpManager.Close(cleanupCtx); err != nil {
+									logger.G(ctx).WithError(err).Warn("Failed to close MCP manager")
+								}
+							}
+						}
+
+						// Check if Node.js is available
+						if err := runtime.CheckAvailability(ctx); err != nil {
+							presenter.Warning(fmt.Sprintf("%v - falling back to direct mode", err))
+							stateOpts = append(stateOpts, tools.WithMCPTools(mcpManager))
+						} else {
+							// Create Node runtime and code_execution tool
+							nodeRuntime := runtime.NewNodeRuntime(workspaceDir, socketPath)
+							codeExecTool := tools.NewCodeExecutionTool(nodeRuntime)
+
+							// Add code_execution tool instead of MCP tools
+							stateOpts = append(stateOpts, tools.WithExtraMCPTools([]tooltypes.Tool{codeExecTool}))
+							logger.G(ctx).Info("MCP code execution mode enabled")
+						}
+					}
+				}
+			} else {
+				// Files exist, proceed with code mode setup
+				socketPath := viper.GetString("mcp.code_execution.socket_path")
+				if socketPath == "" {
+					socketPath = ".kodelet/mcp.sock"
+				}
+
+				rpcServer, err = rpc.NewMCPRPCServer(mcpManager, socketPath)
+				if err != nil {
+					presenter.Warning(fmt.Sprintf("Failed to create MCP RPC server: %v", err))
+					stateOpts = append(stateOpts, tools.WithMCPTools(mcpManager))
+				} else {
+					go func() {
+						if err := rpcServer.Start(ctx); err != nil {
+							logger.G(ctx).WithError(err).Error("MCP RPC server failed")
+						}
+					}()
+
+					mcpCleanup = func() {
+						if rpcServer != nil {
+							shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+							defer cancel()
+							if err := rpcServer.Shutdown(shutdownCtx); err != nil {
+								logger.G(ctx).WithError(err).Warn("Failed to shutdown RPC server")
+							}
+						}
+						if mcpManager != nil {
+							cleanupCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+							defer cancel()
+							if err := mcpManager.Close(cleanupCtx); err != nil {
+								logger.G(ctx).WithError(err).Warn("Failed to close MCP manager")
+							}
+						}
+					}
+
+					if err := runtime.CheckAvailability(ctx); err != nil {
+						presenter.Warning(fmt.Sprintf("%v - falling back to direct mode", err))
+						stateOpts = append(stateOpts, tools.WithMCPTools(mcpManager))
+					} else {
+						nodeRuntime := runtime.NewNodeRuntime(workspaceDir, socketPath)
+						codeExecTool := tools.NewCodeExecutionTool(nodeRuntime)
+						stateOpts = append(stateOpts, tools.WithExtraMCPTools([]tooltypes.Tool{codeExecTool}))
+						logger.G(ctx).Info("MCP code execution mode enabled")
+					}
+				}
+			}
+		} else {
+			// Direct mode - add MCP tools directly
+			if mcpManager != nil {
+				stateOpts = append(stateOpts, tools.WithMCPTools(mcpManager))
+			}
+		}
+
 		appState := tools.NewBasicState(ctx, stateOpts...)
 
 		if config.Headless {
@@ -413,4 +558,10 @@ func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
 	}
 
 	return config
+}
+
+// fileExists checks if a file exists
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
