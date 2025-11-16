@@ -56,6 +56,9 @@ type SchemaProperty struct {
 	MaxLength      *int
 	Pattern        string
 	Format         string
+	// For arrays with object items
+	ArrayItemProperties []SchemaProperty
+	IsArrayOfObjects    bool
 }
 
 // ToolData holds template data for generating a tool file
@@ -317,18 +320,37 @@ func extractSchemaProperties(schema map[string]interface{}) []SchemaProperty {
 		}
 
 		schemaProp := SchemaProperty{
-			Name:           name,
-			TypeScriptType: jsonTypeToTS(prop),
-			Required:       contains(requiredFields, name),
-			Description:    getString(prop, "description"),
-			Default:        prop["default"],
-			Enum:           getArray(prop, "enum"),
-			Minimum:        getFloat(prop, "minimum"),
-			Maximum:        getFloat(prop, "maximum"),
-			MinLength:      getInt(prop, "minLength"),
-			MaxLength:      getInt(prop, "maxLength"),
-			Pattern:        getString(prop, "pattern"),
-			Format:         getString(prop, "format"),
+			Name:        name,
+			Required:    contains(requiredFields, name),
+			Description: getString(prop, "description"),
+			Default:     prop["default"],
+			Enum:        getArray(prop, "enum"),
+			Minimum:     getFloat(prop, "minimum"),
+			Maximum:     getFloat(prop, "maximum"),
+			MinLength:   getInt(prop, "minLength"),
+			MaxLength:   getInt(prop, "maxLength"),
+			Pattern:     getString(prop, "pattern"),
+			Format:      getString(prop, "format"),
+		}
+
+		// Handle array types with object items
+		typeStr, _ := prop["type"].(string)
+		if typeStr == "array" {
+			if items, ok := prop["items"].(map[string]interface{}); ok {
+				itemType, _ := items["type"].(string)
+				if itemType == "object" {
+					// Extract nested properties from array items
+					schemaProp.IsArrayOfObjects = true
+					schemaProp.ArrayItemProperties = extractSchemaProperties(items)
+					schemaProp.TypeScriptType = "Array<object>" // Placeholder, template will handle this
+				} else {
+					schemaProp.TypeScriptType = jsonTypeToTS(prop)
+				}
+			} else {
+				schemaProp.TypeScriptType = jsonTypeToTS(prop)
+			}
+		} else {
+			schemaProp.TypeScriptType = jsonTypeToTS(prop)
 		}
 
 		properties = append(properties, schemaProp)

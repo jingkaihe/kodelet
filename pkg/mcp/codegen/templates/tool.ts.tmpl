@@ -12,8 +12,8 @@ export async function {{.ToolName}}(input: {{.ToolName}}Input): Promise<{{.ToolN
 
 // Input type (generated from input schema)
 export interface {{.ToolName}}Input {
-  {{range .InputSchema.Properties}}
-  {{if .Description}}
+  {{- range .InputSchema.Properties}}
+  {{- if .Description}}
   /**
    * {{.Description}}
    {{- if .Format}}
@@ -41,16 +41,31 @@ export interface {{.ToolName}}Input {
    * @pattern {{.Pattern}}
    {{- end}}
    */
-  {{end}}
-  {{.Name}}{{if not .Required}}?{{end}}: {{.TypeScriptType}};
-  {{end}}
+  {{- end}}
+  {{.Name}}{{if not .Required}}?{{end}}: {{if .IsArrayOfObjects}}Array<{
+    {{- range .ArrayItemProperties}}
+    {{- if .Description}}
+    /**
+     * {{.Description}}
+     {{- if .Format}}
+     * @format {{.Format}}
+     {{- end}}
+     {{- if .Default}}
+     * @default {{.Default}}
+     {{- end}}
+     */
+    {{- end}}
+    {{.Name}}{{if not .Required}}?{{end}}: {{.TypeScriptType}};
+    {{- end}}
+  }>{{else}}{{.TypeScriptType}}{{end}};
+  {{- end}}
 }
 
 {{if .HasOutputSchema}}
 // Output type (generated from output schema - type-safe!)
 export interface {{.ToolName}}Response {
-  {{range .OutputSchema.Properties}}
-  {{if .Description}}
+  {{- range .OutputSchema.Properties}}
+  {{- if .Description}}
   /**
    * {{.Description}}
    {{- if .Format}}
@@ -78,9 +93,24 @@ export interface {{.ToolName}}Response {
    * @pattern {{.Pattern}}
    {{- end}}
    */
-  {{end}}
-  {{.Name}}{{if not .Required}}?{{end}}: {{.TypeScriptType}};
-  {{end}}
+  {{- end}}
+  {{.Name}}{{if not .Required}}?{{end}}: {{if .IsArrayOfObjects}}Array<{
+    {{- range .ArrayItemProperties}}
+    {{- if .Description}}
+    /**
+     * {{.Description}}
+     {{- if .Format}}
+     * @format {{.Format}}
+     {{- end}}
+     {{- if .Default}}
+     * @default {{.Default}}
+     {{- end}}
+     */
+    {{- end}}
+    {{.Name}}{{if not .Required}}?{{end}}: {{.TypeScriptType}};
+    {{- end}}
+  }>{{else}}{{.TypeScriptType}}{{end}};
+  {{- end}}
 }
 {{else}}
 // Output type (no schema provided - generic)
