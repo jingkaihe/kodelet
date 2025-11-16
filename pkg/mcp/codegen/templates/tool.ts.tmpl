@@ -10,6 +10,33 @@ export async function {{.ToolName}}(input: {{.ToolName}}Input): Promise<{{.ToolN
   return callMCPTool<{{.ToolName}}Response>('{{.MCPToolName}}', input);
 }
 
+{{- define "renderProperty"}}
+{{- if .Description}}
+    /**
+     * {{.Description}}
+     {{- if .Format}}
+     * @format {{.Format}}
+     {{- end}}
+     {{- if .Default}}
+     * @default {{.Default}}
+     {{- end}}
+     */
+{{- end}}
+    {{.Name}}{{if not .Required}}?{{end}}: {{template "renderType" .}};
+{{- end}}
+
+{{- define "renderType"}}
+{{- if .IsArrayOfObjects -}}
+Array<{
+{{- range .ArrayItemProperties}}
+{{- template "renderProperty" .}}
+{{- end}}
+  }>
+{{- else -}}
+{{.TypeScriptType}}
+{{- end -}}
+{{- end}}
+
 // Input type (generated from input schema)
 export interface {{.ToolName}}Input {
   {{- range .InputSchema.Properties}}
@@ -42,22 +69,7 @@ export interface {{.ToolName}}Input {
    {{- end}}
    */
   {{- end}}
-  {{.Name}}{{if not .Required}}?{{end}}: {{if .IsArrayOfObjects}}Array<{
-    {{- range .ArrayItemProperties}}
-    {{- if .Description}}
-    /**
-     * {{.Description}}
-     {{- if .Format}}
-     * @format {{.Format}}
-     {{- end}}
-     {{- if .Default}}
-     * @default {{.Default}}
-     {{- end}}
-     */
-    {{- end}}
-    {{.Name}}{{if not .Required}}?{{end}}: {{.TypeScriptType}};
-    {{- end}}
-  }>{{else}}{{.TypeScriptType}}{{end}};
+  {{.Name}}{{if not .Required}}?{{end}}: {{template "renderType" .}};
   {{- end}}
 }
 
@@ -94,22 +106,7 @@ export interface {{.ToolName}}Response {
    {{- end}}
    */
   {{- end}}
-  {{.Name}}{{if not .Required}}?{{end}}: {{if .IsArrayOfObjects}}Array<{
-    {{- range .ArrayItemProperties}}
-    {{- if .Description}}
-    /**
-     * {{.Description}}
-     {{- if .Format}}
-     * @format {{.Format}}
-     {{- end}}
-     {{- if .Default}}
-     * @default {{.Default}}
-     {{- end}}
-     */
-    {{- end}}
-    {{.Name}}{{if not .Required}}?{{end}}: {{.TypeScriptType}};
-    {{- end}}
-  }>{{else}}{{.TypeScriptType}}{{end}};
+  {{.Name}}{{if not .Required}}?{{end}}: {{template "renderType" .}};
   {{- end}}
 }
 {{else}}

@@ -387,6 +387,7 @@ func (t *MCPTool) GenerateSchema() *jsonschema.Schema {
 	return schema
 }
 
+// GenerateOutputSchema generates a JSON schema for the tool's output type
 func (t *MCPTool) GenerateOutputSchema() *jsonschema.Schema {
 	b, err := json.Marshal(t.mcpToolOutputSchema)
 	if err != nil {

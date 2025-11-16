@@ -365,7 +365,10 @@ func extractSchemaProperties(schema map[string]interface{}) []SchemaProperty {
 			Format:      getString(prop, "format"),
 		}
 
-		// Handle array types with object items
+		// Build TypeScript type recursively
+		schemaProp.TypeScriptType = buildTypeScriptType(prop, requiredFields)
+
+		// Handle array types with object items (for template inline rendering)
 		typeStr, _ := prop["type"].(string)
 		if typeStr == "array" {
 			if items, ok := prop["items"].(map[string]interface{}); ok {
@@ -374,21 +377,93 @@ func extractSchemaProperties(schema map[string]interface{}) []SchemaProperty {
 					// Extract nested properties from array items
 					schemaProp.IsArrayOfObjects = true
 					schemaProp.ArrayItemProperties = extractSchemaProperties(items)
-					schemaProp.TypeScriptType = "Array<object>" // Placeholder, template will handle this
-				} else {
-					schemaProp.TypeScriptType = jsonTypeToTS(prop)
 				}
-			} else {
-				schemaProp.TypeScriptType = jsonTypeToTS(prop)
 			}
-		} else {
-			schemaProp.TypeScriptType = jsonTypeToTS(prop)
 		}
 
 		properties = append(properties, schemaProp)
 	}
 
 	return properties
+}
+
+// buildTypeScriptType recursively builds a TypeScript type string from a JSON schema property
+func buildTypeScriptType(prop map[string]interface{}, requiredFields []string) string {
+	typeVal, ok := prop["type"]
+	if !ok {
+		return "any"
+	}
+
+	typeStr, ok := typeVal.(string)
+	if !ok {
+		return "any"
+	}
+
+	switch typeStr {
+	case "string":
+		return "string"
+	case "number", "integer":
+		return "number"
+	case "boolean":
+		return "boolean"
+	case "array":
+		if items, ok := prop["items"].(map[string]interface{}); ok {
+			itemType, _ := items["type"].(string)
+			if itemType == "object" {
+				// Recursively build inline object type for array items
+				inlineType := buildInlineObjectType(items, requiredFields)
+				return fmt.Sprintf("Array<%s>", inlineType)
+			}
+			// For non-object items, recursively get the item type
+			itemTypeStr := buildTypeScriptType(items, requiredFields)
+			return fmt.Sprintf("Array<%s>", itemTypeStr)
+		}
+		return "Array<any>"
+	case "object":
+		// Build inline object type
+		return buildInlineObjectType(prop, requiredFields)
+	default:
+		return "any"
+	}
+}
+
+// buildInlineObjectType builds an inline TypeScript object type from a JSON schema
+func buildInlineObjectType(schema map[string]interface{}, parentRequiredFields []string) string {
+	propsMap, ok := schema["properties"].(map[string]interface{})
+	if !ok {
+		return "Record<string, any>"
+	}
+
+	requiredFields := getRequiredFields(schema)
+	if len(requiredFields) == 0 {
+		requiredFields = parentRequiredFields
+	}
+
+	var parts []string
+	for name, propData := range propsMap {
+		prop, ok := propData.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		// Build nested type recursively
+		tsType := buildTypeScriptType(prop, requiredFields)
+
+		// Add optional marker if not required
+		optional := ""
+		if !contains(requiredFields, name) {
+			optional = "?"
+		}
+
+		parts = append(parts, fmt.Sprintf("%s%s: %s", name, optional, tsType))
+	}
+
+	if len(parts) == 0 {
+		return "Record<string, any>"
+	}
+
+	// Format as inline object type
+	return fmt.Sprintf("{ %s }", strings.Join(parts, "; "))
 }
 
 // Helper functions
@@ -409,37 +484,6 @@ func sanitizeName(name string) string {
 	}
 
 	return result
-}
-
-func jsonTypeToTS(prop map[string]interface{}) string {
-	typeVal, ok := prop["type"]
-	if !ok {
-		return "any"
-	}
-
-	typeStr, ok := typeVal.(string)
-	if !ok {
-		return "any"
-	}
-
-	switch typeStr {
-	case "string":
-		return "string"
-	case "number", "integer":
-		return "number"
-	case "boolean":
-		return "boolean"
-	case "array":
-		itemsType := "any"
-		if items, ok := prop["items"].(map[string]interface{}); ok {
-			itemsType = jsonTypeToTS(items)
-		}
-		return fmt.Sprintf("%s[]", itemsType)
-	case "object":
-		return "Record<string, any>"
-	default:
-		return "any"
-	}
 }
 
 func getRequiredFields(schema map[string]interface{}) []string {
