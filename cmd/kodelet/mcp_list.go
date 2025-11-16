@@ -1,0 +1,139 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/jingkaihe/kodelet/pkg/presenter"
+	"github.com/jingkaihe/kodelet/pkg/tools"
+	"github.com/pkg/errors"
+	"github.com/spf13/cobra"
+)
+
+var mcpListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List available MCP tools",
+	Long: `List all available MCP tools from configured servers.
+
+This command shows which MCP tools are accessible based on your configuration.
+Use --detailed to see descriptions and --json for machine-readable output.`,
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		ctx := cmd.Context()
+
+		// Load MCP manager
+		mcpManager, err := tools.CreateMCPManagerFromViper(ctx)
+		if err != nil {
+			return errors.Wrap(err, "failed to create MCP manager")
+		}
+
+		// Ensure cleanup with timeout to prevent hanging
+		defer func() {
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+
+			done := make(chan struct{})
+			go func() {
+				if closeErr := mcpManager.Close(cleanupCtx); closeErr != nil {
+					presenter.Warning(fmt.Sprintf("Failed to close MCP manager: %v", closeErr))
+				}
+				close(done)
+			}()
+
+			select {
+			case <-done:
+				// Cleanup completed successfully
+			case <-cleanupCtx.Done():
+				// Force exit if cleanup hangs - this is acceptable for CLI commands
+				presenter.Warning("MCP cleanup timed out, forcing exit")
+				os.Exit(0)
+			}
+		}()
+
+		// Get flags
+		serverFilter, _ := cmd.Flags().GetString("server")
+		detailed, _ := cmd.Flags().GetBool("detailed")
+		jsonOutput, _ := cmd.Flags().GetBool("json")
+
+		// List tools
+		mcpTools, err := mcpManager.ListMCPTools(ctx)
+		if err != nil {
+			return errors.Wrap(err, "failed to list MCP tools")
+		}
+
+		// Filter by server if specified
+		if serverFilter != "" {
+			filtered := []tools.MCPTool{}
+			for _, tool := range mcpTools {
+				if strings.HasPrefix(tool.Name(), "mcp_"+serverFilter+"_") {
+					filtered = append(filtered, tool)
+				}
+			}
+			mcpTools = filtered
+		}
+
+		if jsonOutput {
+			// JSON output
+			data := make([]map[string]interface{}, len(mcpTools))
+			for i, tool := range mcpTools {
+				data[i] = map[string]interface{}{
+					"name":        tool.Name(),
+					"description": tool.Description(),
+				}
+				if detailed {
+					data[i]["schema"] = tool.GenerateSchema()
+				}
+			}
+			output, _ := json.MarshalIndent(data, "", "  ")
+			fmt.Println(string(output))
+		} else {
+			// Human-readable output
+			presenter.Section(fmt.Sprintf("Available MCP Tools (%d)", len(mcpTools)))
+
+			// Group by server
+			byServer := make(map[string][]tools.MCPTool)
+			for _, tool := range mcpTools {
+				serverName := extractServerNameFromTool(tool.Name())
+				byServer[serverName] = append(byServer[serverName], tool)
+			}
+
+			for serverName, serverTools := range byServer {
+				fmt.Printf("\n%s (%d tools):\n", serverName, len(serverTools))
+				for _, tool := range serverTools {
+					toolName := extractToolNameFromFull(tool.Name())
+					fmt.Printf("  • %s.%s\n", serverName, toolName)
+					if detailed {
+						fmt.Printf("    %s\n", tool.Description())
+					}
+				}
+			}
+		}
+
+		return nil
+	},
+}
+
+func init() {
+	mcpListCmd.Flags().String("server", "", "Filter by server name")
+	mcpListCmd.Flags().Bool("detailed", false, "Show detailed tool information")
+	mcpListCmd.Flags().Bool("json", false, "Output as JSON")
+}
+
+func extractServerNameFromTool(toolName string) string {
+	parts := strings.Split(toolName, "_")
+	if len(parts) >= 2 {
+		return parts[1]
+	}
+	return "unknown"
+}
+
+func extractToolNameFromFull(toolName string) string {
+	parts := strings.Split(toolName, "_")
+	if len(parts) >= 3 {
+		return strings.Join(parts[2:], "_")
+	}
+	return toolName
+}

@@ -1,0 +1,90 @@
+// {{.ToolName}}.ts - Generated MCP tool wrapper
+import { callMCPTool } from "../../client.js";
+
+{{if .Description}}
+/**
+ * {{.Description}}
+ */
+{{end}}
+export async function {{.ToolName}}(input: {{.ToolName}}Input): Promise<{{.ToolName}}Response> {
+  return callMCPTool<{{.ToolName}}Response>('{{.MCPToolName}}', input);
+}
+
+// Input type (generated from input schema)
+export interface {{.ToolName}}Input {
+  {{range .InputSchema.Properties}}
+  {{if .Description}}
+  /**
+   * {{.Description}}
+   {{- if .Format}}
+   * @format {{.Format}}
+   {{- end}}
+   {{- if .Default}}
+   * @default {{.Default}}
+   {{- end}}
+   {{- if .Enum}}
+   * @enum [{{range $i, $e := .Enum}}{{if $i}}, {{end}}"{{$e}}"{{end}}]
+   {{- end}}
+   {{- if .Minimum}}
+   * @minimum {{.Minimum}}
+   {{- end}}
+   {{- if .Maximum}}
+   * @maximum {{.Maximum}}
+   {{- end}}
+   {{- if .MinLength}}
+   * @minLength {{.MinLength}}
+   {{- end}}
+   {{- if .MaxLength}}
+   * @maxLength {{.MaxLength}}
+   {{- end}}
+   {{- if .Pattern}}
+   * @pattern {{.Pattern}}
+   {{- end}}
+   */
+  {{end}}
+  {{.Name}}{{if not .Required}}?{{end}}: {{.TypeScriptType}};
+  {{end}}
+}
+
+{{if .HasOutputSchema}}
+// Output type (generated from output schema - type-safe!)
+export interface {{.ToolName}}Response {
+  {{range .OutputSchema.Properties}}
+  {{if .Description}}
+  /**
+   * {{.Description}}
+   {{- if .Format}}
+   * @format {{.Format}}
+   {{- end}}
+   {{- if .Default}}
+   * @default {{.Default}}
+   {{- end}}
+   {{- if .Enum}}
+   * @enum [{{range $i, $e := .Enum}}{{if $i}}, {{end}}"{{$e}}"{{end}}]
+   {{- end}}
+   {{- if .Minimum}}
+   * @minimum {{.Minimum}}
+   {{- end}}
+   {{- if .Maximum}}
+   * @maximum {{.Maximum}}
+   {{- end}}
+   {{- if .MinLength}}
+   * @minLength {{.MinLength}}
+   {{- end}}
+   {{- if .MaxLength}}
+   * @maxLength {{.MaxLength}}
+   {{- end}}
+   {{- if .Pattern}}
+   * @pattern {{.Pattern}}
+   {{- end}}
+   */
+  {{end}}
+  {{.Name}}{{if not .Required}}?{{end}}: {{.TypeScriptType}};
+  {{end}}
+}
+{{else}}
+// Output type (no schema provided - generic)
+export interface {{.ToolName}}Response {
+  [key: string]: any;
+}
+{{end}}
