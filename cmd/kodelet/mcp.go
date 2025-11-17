@@ -17,5 +17,6 @@ func init() {
 	mcpCmd.AddCommand(mcpGenerateCmd)
 	mcpCmd.AddCommand(mcpListCmd)
 	mcpCmd.AddCommand(mcpCallCmd)
+	mcpCmd.AddCommand(mcpServeCmd)
 	rootCmd.AddCommand(mcpCmd)
 }
