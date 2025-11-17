@@ -32,6 +32,12 @@ When reading tool files, look for:
 - JSDoc comments explaining parameters
 - Return types (output schema)
 
+**Pay Attention to Output Types**
+
+Do not speculate the output schema. If the type is generic (`[key: string]: any`), sample it first:
+- **Arrays**: Show length + first item (truncated to 500 chars)
+- **Objects**: Show keys + value types + sizes in bytes
+
 ## Workspace Structure
 
 ```
@@ -102,6 +108,40 @@ const result = await lsp.diagnostics('./main.go');
 Never guess schemas. Always read generated files first to see exact function signatures.
 </reasoning>
 </bad-example>
+
+<bad-example>
+# After reading file: export interface myToolResponse { [key: string]: any; }
+const result = await tool.myTool({ param: "value" });
+// Directly access fields without sampling structure first
+console.log(result.field1, result.field2);
+<reasoning>
+Generic output types require sampling first to discover actual fields.
+</reasoning>
+</bad-example>
+
+<good-example>
+# After reading file: export interface myToolResponse { [key: string]: any; }
+# Sample tactically to discover structure
+const sample = await tool.myTool({ param: "value" });
+
+if (Array.isArray(sample)) {
+  console.log(`Array[${sample.length}], first item (500 chars):`,
+    JSON.stringify(sample[0], null, 2).substring(0, 500));
+} else {
+  Object.keys(sample).forEach(k => {
+    const size = JSON.stringify(sample[k]).length;
+    const type = Array.isArray(sample[k]) ? 'array' : typeof sample[k];
+    console.log(`${k}: ${type} (${size} bytes)`);
+  });
+}
+
+# Now use discovered fields
+const result = await tool.myTool({ param: "production" });
+console.log(`Status: ${result.status}, Count: ${result.count}`);
+<reasoning>
+Sample generic types tactically first, then use discovered fields.
+</reasoning>
+</good-example>
 
 <good-example>
 import * as lsp from './servers/lsp/index.js';
