@@ -34,6 +34,10 @@ type PromptContext struct {
 
 	BashBannedCommands  []string
 	BashAllowedCommands []string
+
+	// MCP tools information
+	MCPExecutionMode string
+	MCPServers       []string // List of available MCP server names
 }
 
 // NewPromptContext creates a new PromptContext with default values
@@ -76,7 +80,18 @@ func NewPromptContext(contexts map[string]string) *PromptContext {
 		Features:            features,
 		BashBannedCommands:  tools.BannedCommands,
 		BashAllowedCommands: []string{},
+		MCPExecutionMode:    "",
+		MCPServers:          []string{},
 	}
+}
+
+// WithMCPConfig adds MCP configuration to the prompt context
+func (ctx *PromptContext) WithMCPConfig(executionMode, workspaceDir string) *PromptContext {
+	ctx.MCPExecutionMode = executionMode
+	if executionMode == "code" && workspaceDir != "" {
+		ctx.MCPServers = loadMCPServers(workspaceDir)
+	}
+	return ctx
 }
 
 // getContextFileName returns the name of the context file to use
@@ -167,4 +182,66 @@ func getOSVersion() string {
 		}
 	}
 	return runtime.GOOS
+}
+
+// loadMCPServers reads the MCP servers directory and returns a list of server names
+func loadMCPServers(workspaceDir string) []string {
+	ctx := context.Background()
+	log := logger.G(ctx)
+
+	var servers []string
+
+	if workspaceDir == "" {
+		return servers
+	}
+
+	serversDir := filepath.Join(workspaceDir, "servers")
+
+	// Check if servers directory exists
+	if _, err := os.Stat(serversDir); os.IsNotExist(err) {
+		log.WithField("servers_dir", serversDir).Debug("MCP servers directory does not exist")
+		return servers
+	}
+
+	// Read server directories
+	entries, err := os.ReadDir(serversDir)
+	if err != nil {
+		log.WithError(err).WithField("servers_dir", serversDir).Warn("Failed to read MCP servers directory")
+		return servers
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		serverName := entry.Name()
+		indexFile := filepath.Join(serversDir, serverName, "index.ts")
+
+		// Check if index.ts exists
+		if _, err := os.Stat(indexFile); os.IsNotExist(err) {
+			continue
+		}
+
+		servers = append(servers, serverName)
+		log.WithField("server", serverName).Debug("Found MCP server")
+	}
+
+	return servers
+}
+
+// FormatMCPServers formats the MCP servers information into a string
+func (ctx *PromptContext) FormatMCPServers() string {
+	if ctx.MCPExecutionMode != "code" || len(ctx.MCPServers) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("\n# MCP Servers Available\n")
+	sb.WriteString("When using MCP tools in 'code' execution mode, the following MCP servers are available:\n\n")
+
+	sb.WriteString(strings.Join(ctx.MCPServers, ", "))
+	sb.WriteString("\n\nYou can import and use tools from these servers in your TypeScript code within the bash tool. Check the generated TypeScript API in .kodelet/mcp/servers/ for available functions.\n")
+
+	return sb.String()
 }

@@ -31,6 +31,8 @@ type Config struct {
 	UseCopilot           bool               `mapstructure:"use_copilot" json:"use_copilot" yaml:"use_copilot"`                                  // UseCopilot enables GitHub Copilot subscription for OpenAI requests
 	Aliases              map[string]string  `mapstructure:"aliases" json:"aliases,omitempty" yaml:"aliases,omitempty"`                          // Aliases maps short model names to full model names
 	Retry                RetryConfig        `mapstructure:"retry" json:"retry" yaml:"retry"`                                                    // Retry configuration for API calls
+	MCPExecutionMode     string             `mapstructure:"mcp_execution_mode" json:"mcp_execution_mode" yaml:"mcp_execution_mode"`             // MCP execution mode (code, direct, or empty)
+	MCPWorkspaceDir      string             `mapstructure:"mcp_workspace_dir" json:"mcp_workspace_dir" yaml:"mcp_workspace_dir"`                // MCP workspace directory for code execution mode
 
 	// Profile system configuration
 	Profile  string                   `mapstructure:"profile" json:"profile,omitempty" yaml:"profile,omitempty"`    // Active profile name

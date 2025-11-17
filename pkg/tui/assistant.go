@@ -7,6 +7,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	"github.com/spf13/viper"
 )
 
 // AssistantClient handles the interaction with the LLM thread
@@ -27,6 +28,15 @@ func NewAssistantClient(ctx context.Context, conversationID string, enablePersis
 	}
 
 	config.IDE = ideMode
+
+	// Set MCP configuration for system prompt
+	executionMode := viper.GetString("mcp.execution_mode")
+	workspaceDir := viper.GetString("mcp.code_execution.workspace_dir")
+	if workspaceDir == "" {
+		workspaceDir = ".kodelet/mcp"
+	}
+	config.MCPExecutionMode = executionMode
+	config.MCPWorkspaceDir = workspaceDir
 
 	thread, err := llm.NewThread(config)
 	if err != nil {
