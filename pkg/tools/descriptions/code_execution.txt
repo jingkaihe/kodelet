@@ -89,14 +89,22 @@ ls .kodelet/mcp/servers/
 
 # Step 2: Read exact schema
 file_read .kodelet/mcp/servers/lsp/diagnostics.ts
-# See: function diagnostics(args: { filePath: string; contextLines?: boolean })
+# See input: { filePath: string; contextLines?: boolean; showLineNumbers?: boolean }
+# See output: [key: string]: any  (GENERIC - must sample!)
 
-# Step 3: Write code with exact schema
+# Step 3: Sample the output structure first
 import * as lsp from './servers/lsp/index.js';
-const result = await lsp.diagnostics({ filePath: './main.go' });
-console.log(`Found ${result.errors?.length || 0} errors`);
+const sample = await lsp.diagnostics({ filePath: './main.go' });
+if (Array.isArray(sample)) {
+  console.log(`Array[${sample.length}], first:`, JSON.stringify(sample[0]).substring(0, 500));
+} else {
+  Object.keys(sample).forEach(k => {
+    const size = JSON.stringify(sample[k]).length;
+    console.log(`${k}: ${Array.isArray(sample[k]) ? 'array' : typeof sample[k]} (${size} bytes)`);
+  });
+}
 <reasoning>
-Read generated files first to discover exact schema, then use it.
+Read schema, notice generic output type, sample structure before using fields.
 </reasoning>
 </good-example>
 
@@ -140,30 +148,6 @@ const result = await tool.myTool({ param: "production" });
 console.log(`Status: ${result.status}, Count: ${result.count}`);
 <reasoning>
 Sample generic types tactically first, then use discovered fields.
-</reasoning>
-</good-example>
-
-<good-example>
-import * as lsp from './servers/lsp/index.js';
-
-try {
-  const def = await lsp.definition({ symbolName: 'processData' });
-  const diags = await lsp.diagnostics({ filePath: def.filePath });
-  
-  // Filter output - log summaries only
-  console.log(`Found at: ${def.filePath}`);
-  console.log(`${diags.errors?.length || 0} errors, ${diags.warnings?.length || 0} warnings`);
-  
-  if (diags.errors?.length > 0) {
-    diags.errors.slice(0, 5).forEach(err => 
-      console.log(`  Line ${err.line}: ${err.message}`)
-    );
-  }
-} catch (error) {
-  console.error('Failed:', error.message);
-}
-<reasoning>
-Chains tools, filters output to show summaries, uses try/catch, limits array output.
 </reasoning>
 </good-example>
 
