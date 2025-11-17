@@ -35,6 +35,7 @@ When reading tool files, look for:
 **Pay Attention to Output Types**
 
 Do not speculate the output schema. If the type is generic (`[key: string]: any`), sample it first:
+- **Primitives**: Show type and value (truncated to 500 chars)
 - **Arrays**: Show length + first item (truncated to 500 chars)
 - **Objects**: Show keys + value types + sizes in bytes
 
@@ -95,7 +96,9 @@ file_read .kodelet/mcp/servers/lsp/diagnostics.ts
 # Step 3: Sample the output structure first
 import * as lsp from './servers/lsp/index.js';
 const sample = await lsp.diagnostics({ filePath: './main.go' });
-if (Array.isArray(sample)) {
+if (typeof sample === 'string' || typeof sample === 'number' || typeof sample === 'boolean') {
+  console.log(`Primitive (${typeof sample}):`, JSON.stringify(sample).substring(0, 500));
+} else if (Array.isArray(sample)) {
   console.log(`Array[${sample.length}], first:`, JSON.stringify(sample[0]).substring(0, 500));
 } else {
   Object.keys(sample).forEach(k => {
@@ -129,19 +132,10 @@ Generic output types require sampling first to discover actual fields.
 
 <good-example>
 # After reading file: export interface myToolResponse { [key: string]: any; }
-# Sample tactically to discover structure
+# Sample tactically to discover structure (use sampling logic from Step 3 above)
 const sample = await tool.myTool({ param: "value" });
-
-if (Array.isArray(sample)) {
-  console.log(`Array[${sample.length}], first item (500 chars):`,
-    JSON.stringify(sample[0], null, 2).substring(0, 500));
-} else {
-  Object.keys(sample).forEach(k => {
-    const size = JSON.stringify(sample[k]).length;
-    const type = Array.isArray(sample[k]) ? 'array' : typeof sample[k];
-    console.log(`${k}: ${type} (${size} bytes)`);
-  });
-}
+// ... sample to discover structure (primitives/arrays/objects) ...
+# Output shows: status: string (15 bytes), count: number (3 bytes)
 
 # Now use discovered fields
 const result = await tool.myTool({ param: "production" });
