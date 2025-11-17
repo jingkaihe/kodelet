@@ -206,21 +206,26 @@ var runCmd = &cobra.Command{
 
 		applyFragmentRestrictions(&llmConfig, fragmentMetadata)
 
+		// Check if MCP code execution mode is enabled
+		executionMode := viper.GetString("mcp.execution_mode")
+		workspaceDir := viper.GetString("mcp.code_execution.workspace_dir")
+		if workspaceDir == "" {
+			workspaceDir = ".kodelet/mcp"
+		}
+
+		// Set MCP configuration in llmConfig for system prompt
+		llmConfig.MCPExecutionMode = executionMode
+		llmConfig.MCPWorkspaceDir = workspaceDir
+
 		var stateOpts []tools.BasicStateOption
 		stateOpts = append(stateOpts, tools.WithLLMConfig(llmConfig))
 		stateOpts = append(stateOpts, tools.WithCustomTools(customManager))
 		stateOpts = append(stateOpts, tools.WithMainTools())
 
-		// Check if MCP code execution mode is enabled
-		executionMode := viper.GetString("mcp.execution_mode")
 		var rpcServer *rpc.MCPRPCServer
 
 		if executionMode == "code" && mcpManager != nil {
 			// Code execution mode - generate tools and start RPC server
-			workspaceDir := viper.GetString("mcp.code_execution.workspace_dir")
-			if workspaceDir == "" {
-				workspaceDir = ".kodelet/mcp"
-			}
 
 			regenerateOnStartup := viper.GetBool("mcp.code_execution.regenerate_on_startup")
 			clientTSPath := filepath.Join(workspaceDir, "client.ts")

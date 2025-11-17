@@ -24,15 +24,15 @@ type MCPRPCServer struct {
 
 // MCPRPCRequest represents a request to call an MCP tool
 type MCPRPCRequest struct {
-	Tool      string                 `json:"tool"`
-	Arguments map[string]interface{} `json:"arguments"`
+	Tool      string         `json:"tool"`
+	Arguments map[string]any `json:"arguments"`
 }
 
 // MCPRPCResponse represents the response from an MCP tool call
 type MCPRPCResponse struct {
-	Content           []map[string]interface{} `json:"content"`
-	StructuredContent interface{}              `json:"structuredContent,omitempty"`
-	IsError           bool                     `json:"isError"`
+	Content           []map[string]any `json:"content"`
+	StructuredContent any              `json:"structuredContent,omitempty"`
+	IsError           bool             `json:"isError"`
 }
 
 // NewMCPRPCServer creates a new MCP RPC server
@@ -106,34 +106,11 @@ func (s *MCPRPCServer) handleMCPCall(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Execute the tool
-	params, err := json.Marshal(req.Arguments)
+	response, err := targetTool.CallMCPServer(ctx, req.Arguments)
 	if err != nil {
-		logger.G(ctx).WithError(err).Error("failed to marshal arguments")
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		logger.G(ctx).WithError(err).Error("failed to call MCP tool")
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
-	}
-
-	result := targetTool.Execute(ctx, nil, string(params))
-
-	// Build response
-	response := MCPRPCResponse{
-		IsError: result.IsError(),
-	}
-
-	if result.IsError() {
-		response.Content = []map[string]interface{}{
-			{
-				"type": "text",
-				"text": result.GetError(),
-			},
-		}
-	} else {
-		response.Content = []map[string]interface{}{
-			{
-				"type": "text",
-				"text": result.GetResult(),
-			},
-		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -141,7 +118,7 @@ func (s *MCPRPCServer) handleMCPCall(w http.ResponseWriter, r *http.Request) {
 		logger.G(ctx).WithError(err).Error("failed to encode response")
 	}
 
-	logger.G(ctx).WithField("tool", req.Tool).WithField("error", result.IsError()).Debug("MCP RPC call completed")
+	logger.G(ctx).WithField("tool", req.Tool).WithField("error", response.IsError).Debug("MCP RPC call completed")
 }
 
 // Start starts the RPC server

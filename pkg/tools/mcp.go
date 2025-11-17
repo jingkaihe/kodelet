@@ -412,6 +412,14 @@ func (t *MCPTool) ValidateInput(_ tooltypes.State, _ string) error {
 	return nil
 }
 
+// CallMCPServer calls the MCP server with the given input arguments
+func (t *MCPTool) CallMCPServer(ctx context.Context, input map[string]any) (*mcp.CallToolResult, error) {
+	req := mcp.CallToolRequest{}
+	req.Params.Arguments = input
+	req.Params.Name = t.mcpToolName
+	return t.client.CallTool(ctx, req)
+}
+
 // Execute runs the MCP tool and returns the result
 func (t *MCPTool) Execute(ctx context.Context, _ tooltypes.State, parameters string) tooltypes.ToolResult {
 	var input map[string]any
@@ -424,10 +432,7 @@ func (t *MCPTool) Execute(ctx context.Context, _ tooltypes.State, parameters str
 	}
 
 	startTime := time.Now()
-	req := mcp.CallToolRequest{}
-	req.Params.Arguments = input
-	req.Params.Name = t.mcpToolName
-	result, err := t.client.CallTool(ctx, req)
+	result, err := t.CallMCPServer(ctx, input)
 	executionTime := time.Since(startTime)
 
 	if err != nil {
