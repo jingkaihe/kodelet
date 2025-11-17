@@ -5,6 +5,8 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/invopop/jsonschema"
@@ -23,7 +25,7 @@ type CodeExecutionTool struct {
 
 // CodeExecutionInput represents the input parameters for code execution
 type CodeExecutionInput struct {
-	Code        string `json:"code" jsonschema:"required,description=TypeScript/JavaScript code to execute"`
+	CodePath    string `json:"code_path" jsonschema:"required,description=Path to the TypeScript/JavaScript file to execute (relative to .kodelet/mcp/)"`
 	Description string `json:"description,omitempty" jsonschema:"description=Brief description of what this code does"`
 }
 
@@ -115,11 +117,23 @@ func (t *CodeExecutionTool) Execute(ctx context.Context, _ tooltypes.State, para
 		}
 	}
 
-	// Execute code
-	output, err := t.runtime.Execute(ctx, input.Code)
+	// Read code from file
+	// CodePath is relative to .kodelet/mcp/ workspace
+	fullPath := filepath.Join(".kodelet", "mcp", input.CodePath)
+	codeBytes, err := os.ReadFile(fullPath)
 	if err != nil {
 		return &CodeExecutionResult{
-			code:    input.Code,
+			err:     fmt.Sprintf("failed to read file %s: %v", input.CodePath, err),
+			runtime: t.runtime.Name(),
+		}
+	}
+	code := string(codeBytes)
+
+	// Execute code
+	output, err := t.runtime.Execute(ctx, code)
+	if err != nil {
+		return &CodeExecutionResult{
+			code:    code,
 			output:  output,
 			err:     fmt.Sprintf("execution failed: %v", err),
 			runtime: t.runtime.Name(),
@@ -127,7 +141,7 @@ func (t *CodeExecutionTool) Execute(ctx context.Context, _ tooltypes.State, para
 	}
 
 	return &CodeExecutionResult{
-		code:    input.Code,
+		code:    code,
 		output:  output,
 		runtime: t.runtime.Name(),
 	}
