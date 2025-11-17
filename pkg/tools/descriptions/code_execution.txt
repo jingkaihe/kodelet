@@ -136,16 +136,6 @@ Uses file_write to create code, then executes by path. Modifications use file_ed
 </good-example>
 
 <bad-example>
-# Writing code directly in tool parameters
-code_execution {
-  "code": "import * as lsp from './servers/lsp/index.js';\nconst result = await lsp.diagnostics('./main.go');\nconsole.log(result);"
-}
-<reasoning>
-Wastes tokens by embedding code in parameters. Use file_write + code_path instead.
-</reasoning>
-</bad-example>
-
-<bad-example>
 import * as lsp from './servers/lsp/index.js';
 // Guess the schema without reading files
 const result = await lsp.diagnostics('./main.go');
@@ -220,19 +210,3 @@ import * as lsp from './servers/lsp';
 Missing .js extension. ES modules require explicit file extensions.
 </reasoning>
 </bad-example>
-
-<good-example>
-# Create reusable discovery script
-file_write .kodelet/mcp/discover_servers.ts
-```typescript
-import { readdirSync } from 'fs';
-const servers = readdirSync('./servers');
-console.log('Available servers:', servers);
-```
-
-# Execute multiple times without retransmitting code
-code_execution { "code_path": "discover_servers.ts" }
-<reasoning>
-Dynamic discovery of available MCP servers. File-based approach allows reuse without retransmission.
-</reasoning>
-</good-example>
