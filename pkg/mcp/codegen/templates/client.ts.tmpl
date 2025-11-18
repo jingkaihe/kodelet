@@ -6,6 +6,7 @@ import * as http from 'http';
 const MCP_RPC_SOCKET = process.env.MCP_RPC_SOCKET || "./.kodelet/mcp.sock";
 
 interface MCPRequest {
+  server: string;
   tool: string;
   arguments: Record<string, any>;
 }
@@ -16,8 +17,9 @@ interface MCPResponse {
   isError?: boolean;
 }
 
-export async function callMCPTool<T>(toolName: string, args: Record<string, any>): Promise<T> {
+export async function callMCPTool<T>(serverName: string, toolName: string, args: Record<string, any>): Promise<T> {
   const request: MCPRequest = {
+    server: serverName,
     tool: toolName,
     arguments: args,
   };

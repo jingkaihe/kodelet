@@ -277,6 +277,7 @@ func TestMCPRPCServer_HandleMCPCall_FullIntegration(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rpcReq := MCPRPCRequest{
+				Server:    "time",
 				Tool:      tt.toolName,
 				Arguments: tt.arguments,
 			}
@@ -344,7 +345,8 @@ func TestMCPRPCServer_HandleMCPCall_ResponseFormat(t *testing.T) {
 
 	// Make a real MCP call
 	rpcReq := MCPRPCRequest{
-		Tool: "list_directory",
+		Server: "filesystem",
+		Tool:   "list_directory",
 		Arguments: map[string]any{
 			"path": "/",
 		},

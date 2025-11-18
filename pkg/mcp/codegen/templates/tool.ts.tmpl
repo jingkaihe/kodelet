@@ -7,7 +7,7 @@ import { callMCPTool } from "../../client.js";
  */
 {{end}}
 export async function {{.ToolName}}(input: {{.ToolName}}Input): Promise<{{.ToolName}}Response> {
-  return callMCPTool<{{.ToolName}}Response>('{{.MCPToolName}}', input);
+  return callMCPTool<{{.ToolName}}Response>('{{.ServerName}}', '{{.MCPToolName}}', input);
 }
 
 {{- define "renderProperty"}}

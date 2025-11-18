@@ -26,6 +26,7 @@ type MCPRPCServer struct {
 
 // MCPRPCRequest represents a request to call an MCP tool
 type MCPRPCRequest struct {
+	Server    string         `json:"server"`
 	Tool      string         `json:"tool"`
 	Arguments map[string]any `json:"arguments"`
 }
@@ -83,7 +84,7 @@ func (s *MCPRPCServer) handleMCPCall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	logger.G(ctx).WithField("tool", req.Tool).Debug("handling MCP RPC call")
+	logger.G(ctx).WithField("server", req.Server).WithField("tool", req.Tool).Debug("handling MCP RPC call")
 
 	var (
 		targetTool mcp.Tool
@@ -91,6 +92,9 @@ func (s *MCPRPCServer) handleMCPCall(w http.ResponseWriter, r *http.Request) {
 		found      bool
 	)
 	s.mcpManager.ListMCPToolsIter(ctx, func(serverName string, client *client.Client, tools []mcp.Tool) {
+		if serverName != req.Server {
+			return
+		}
 		for _, tool := range tools {
 			if tool.GetName() == req.Tool {
 				targetTool = tool
@@ -102,7 +106,7 @@ func (s *MCPRPCServer) handleMCPCall(w http.ResponseWriter, r *http.Request) {
 	})
 
 	if !found {
-		logger.G(ctx).WithField("tool", req.Tool).Error("tool not found")
+		logger.G(ctx).WithField("server", req.Server).WithField("tool", req.Tool).Error("tool not found")
 		http.Error(w, "tool not found", http.StatusNotFound)
 		return
 	}

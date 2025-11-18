@@ -65,6 +65,7 @@ type SchemaProperty struct {
 type ToolData struct {
 	ToolName        string
 	MCPToolName     string
+	ServerName      string
 	Description     string
 	InputSchema     *SchemaData
 	HasOutputSchema bool
@@ -155,7 +156,7 @@ func (g *MCPCodeGenerator) Generate(ctx context.Context) error {
 		}
 
 		for _, tool := range tools {
-			toolInfo, err := g.generateToolFile(serverDir, tool)
+			toolInfo, err := g.generateToolFile(serverDir, serverName, tool)
 			if err != nil {
 				listToolsErr = errors.Wrapf(err, "failed to generate tool file for %s", tool.GetName())
 				return
@@ -209,7 +210,7 @@ func (g *MCPCodeGenerator) generateClient() error {
 }
 
 // generateToolFile generates a TypeScript file for a single tool
-func (g *MCPCodeGenerator) generateToolFile(serverDir string, tool mcp.Tool) (ToolInfo, error) {
+func (g *MCPCodeGenerator) generateToolFile(serverDir string, serverName string, tool mcp.Tool) (ToolInfo, error) {
 	mcpToolName := tool.GetName()
 	toolName := sanitizeName(mcpToolName)
 
@@ -229,6 +230,7 @@ func (g *MCPCodeGenerator) generateToolFile(serverDir string, tool mcp.Tool) (To
 	data := ToolData{
 		ToolName:        toolName,
 		MCPToolName:     mcpToolName,
+		ServerName:      serverName,
 		Description:     tool.Description,
 		InputSchema:     inputSchema,
 		HasOutputSchema: hasOutputSchema,
