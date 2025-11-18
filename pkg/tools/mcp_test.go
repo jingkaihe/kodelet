@@ -174,7 +174,7 @@ func TestMCPManager_ListMCPTools(t *testing.T) {
 			toolNames = append(toolNames, tool.Name())
 		}
 
-		assert.ElementsMatch(t, []string{"mcp_list_directory", "mcp_get_current_time", "mcp_convert_time"}, toolNames)
+		assert.ElementsMatch(t, []string{"mcp__filesystem_list_directory", "mcp__time_get_current_time", "mcp__time_convert_time"}, toolNames)
 	})
 }
 
@@ -229,7 +229,7 @@ func TestMCPTool_Execute(t *testing.T) {
 
 	var listTool tooltypes.Tool
 	for _, tool := range tools {
-		if tool.Name() == "mcp_list_directory" {
+		if tool.Name() == "mcp__filesystem_list_directory" {
 			listTool = &tool
 			break
 		}
