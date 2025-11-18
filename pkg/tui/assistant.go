@@ -52,17 +52,17 @@ func NewAssistantClient(ctx context.Context, conversationID string, enablePersis
 	stateOpts = append(stateOpts, tools.WithMainTools())
 
 	// Set up MCP execution mode
-	mcpSetup, err := mcp.SetupExecutionMode(ctx, mcpManager)
-	if err != nil && !errors.Is(err, mcp.ErrDirectMode) {
-		logger.G(ctx).WithError(err).Fatal("Failed to set up MCP execution mode")
-	}
+	if mcpManager != nil {
+		mcpSetup, err := mcp.SetupExecutionMode(ctx, mcpManager)
+		if err != nil && !errors.Is(err, mcp.ErrDirectMode) {
+			logger.G(ctx).WithError(err).Fatal("Failed to set up MCP execution mode")
+		}
 
-	if err == nil && mcpSetup != nil {
-		// Code execution mode
-		stateOpts = append(stateOpts, mcpSetup.StateOpts...)
-	} else {
-		// Direct mode - add MCP tools directly
-		if mcpManager != nil {
+		if err == nil && mcpSetup != nil {
+			// Code execution mode
+			stateOpts = append(stateOpts, mcpSetup.StateOpts...)
+		} else {
+			// Direct mode - add MCP tools directly
 			stateOpts = append(stateOpts, tools.WithMCPTools(mcpManager))
 		}
 	}

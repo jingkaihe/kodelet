@@ -44,7 +44,7 @@ var ErrDirectMode = errors.New("MCP configured for direct mode")
 // Returns ErrDirectMode if execution mode is not "code" or mcpManager is nil
 func SetupExecutionMode(ctx context.Context, mcpManager *tools.MCPManager) (*ExecutionSetup, error) {
 	executionMode := viper.GetString("mcp.execution_mode")
-	if executionMode != "code" || mcpManager == nil {
+	if executionMode != "code" {
 		return nil, ErrDirectMode
 	}
 

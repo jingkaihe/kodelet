@@ -11,8 +11,6 @@ import (
 	"syscall"
 	"time"
 
-	stderrors "errors"
-
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/llm"
@@ -221,18 +219,18 @@ var runCmd = &cobra.Command{
 		stateOpts = append(stateOpts, tools.WithMainTools())
 
 		// Set up MCP execution mode
-		mcpSetup, err := mcp.SetupExecutionMode(ctx, mcpManager)
-		if err != nil && !stderrors.Is(err, mcp.ErrDirectMode) {
-			presenter.Error(err, "Failed to set up MCP execution mode")
-			return
-		}
+		if mcpManager != nil {
+			mcpSetup, err := mcp.SetupExecutionMode(ctx, mcpManager)
+			if err != nil && !errors.Is(err, mcp.ErrDirectMode) {
+				presenter.Error(err, "Failed to set up MCP execution mode")
+				return
+			}
 
-		if err == nil && mcpSetup != nil {
-			// Code execution mode
-			stateOpts = append(stateOpts, mcpSetup.StateOpts...)
-		} else {
-			// Direct mode - add MCP tools directly
-			if mcpManager != nil {
+			if err == nil && mcpSetup != nil {
+				// Code execution mode
+				stateOpts = append(stateOpts, mcpSetup.StateOpts...)
+			} else {
+				// Direct mode - add MCP tools directly
 				stateOpts = append(stateOpts, tools.WithMCPTools(mcpManager))
 			}
 		}
