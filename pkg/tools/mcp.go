@@ -299,23 +299,21 @@ func CreateMCPManagerFromViper(ctx context.Context) (*MCPManager, error) {
 
 // MCPTool wraps an MCP tool with its client
 type MCPTool struct {
-	client              *client.Client
-	mcpToolInputSchema  mcp.ToolInputSchema
-	mcpToolOutputSchema mcp.ToolOutputSchema
-	mcpToolName         string
-	mcpToolDescription  string
-	serverName          string
+	client             *client.Client
+	mcpToolInputSchema mcp.ToolInputSchema
+	mcpToolName        string
+	mcpToolDescription string
+	serverName         string
 }
 
 // NewMCPTool creates a new MCP tool wrapper
 func NewMCPTool(client *client.Client, tool mcp.Tool, serverName string) *MCPTool {
 	return &MCPTool{
-		client:              client,
-		mcpToolInputSchema:  tool.InputSchema,
-		mcpToolOutputSchema: tool.OutputSchema,
-		mcpToolName:         tool.GetName(),
-		mcpToolDescription:  tool.Description,
-		serverName:          serverName,
+		client:             client,
+		mcpToolInputSchema: tool.InputSchema,
+		mcpToolName:        tool.GetName(),
+		mcpToolDescription: tool.Description,
+		serverName:         serverName,
 	}
 }
 
@@ -389,7 +387,7 @@ func (r *MCPToolResult) StructuredData() tooltypes.StructuredToolResult {
 
 // Name returns the name of the tool
 func (t *MCPTool) Name() string {
-	return fmt.Sprintf("mcp_%s", t.mcpToolName)
+	return fmt.Sprintf("mcp__%s_%s", t.serverName, t.mcpToolName)
 }
 
 // Description returns the description of the tool
@@ -412,21 +410,6 @@ func (t *MCPTool) GenerateSchema() *jsonschema.Schema {
 	return schema
 }
 
-// GenerateOutputSchema generates a JSON schema for the tool's output type
-func (t *MCPTool) GenerateOutputSchema() *jsonschema.Schema {
-	b, err := json.Marshal(t.mcpToolOutputSchema)
-	if err != nil {
-		return nil
-	}
-
-	var schema *jsonschema.Schema
-	err = json.Unmarshal(b, &schema)
-	if err != nil {
-		return nil
-	}
-	return schema
-}
-
 // TracingKVs returns tracing key-value pairs for observability
 func (t *MCPTool) TracingKVs(_ string) ([]attribute.KeyValue, error) {
 	return nil, nil
@@ -437,8 +420,8 @@ func (t *MCPTool) ValidateInput(_ tooltypes.State, _ string) error {
 	return nil
 }
 
-// CallMCPServer calls the MCP server with the given input arguments
-func (t *MCPTool) CallMCPServer(ctx context.Context, input map[string]any) (*mcp.CallToolResult, error) {
+// callMCPServer calls the MCP server with the given input arguments
+func (t *MCPTool) callMCPServer(ctx context.Context, input map[string]any) (*mcp.CallToolResult, error) {
 	req := mcp.CallToolRequest{}
 	req.Params.Arguments = input
 	req.Params.Name = t.mcpToolName
@@ -457,7 +440,7 @@ func (t *MCPTool) Execute(ctx context.Context, _ tooltypes.State, parameters str
 	}
 
 	startTime := time.Now()
-	result, err := t.CallMCPServer(ctx, input)
+	result, err := t.callMCPServer(ctx, input)
 	executionTime := time.Since(startTime)
 
 	if err != nil {
