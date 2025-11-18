@@ -7,22 +7,20 @@ import (
 	"maps"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
+
+	stderrors "errors"
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/logger"
-	"github.com/jingkaihe/kodelet/pkg/mcp/codegen"
-	"github.com/jingkaihe/kodelet/pkg/mcp/rpc"
-	"github.com/jingkaihe/kodelet/pkg/mcp/runtime"
+	"github.com/jingkaihe/kodelet/pkg/mcp"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
-	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -222,53 +220,16 @@ var runCmd = &cobra.Command{
 		stateOpts = append(stateOpts, tools.WithCustomTools(customManager))
 		stateOpts = append(stateOpts, tools.WithMainTools())
 
-		var rpcServer *rpc.MCPRPCServer
+		// Set up MCP execution mode
+		mcpSetup, err := mcp.SetupExecutionMode(ctx, mcpManager)
+		if err != nil && !stderrors.Is(err, mcp.ErrDirectMode) {
+			presenter.Error(err, "Failed to set up MCP execution mode")
+			return
+		}
 
-		if executionMode == "code" && mcpManager != nil {
-			// Code execution mode - generate tools and start RPC server
-			regenerateOnStartup := viper.GetBool("mcp.code_execution.regenerate_on_startup")
-			clientTSPath := filepath.Join(workspaceDir, "client.ts")
-
-			// Generate MCP tool files if needed
-			if regenerateOnStartup || !fileExists(clientTSPath) {
-				logger.G(ctx).Info("Generating MCP tool TypeScript API...")
-				generator := codegen.NewMCPCodeGenerator(mcpManager, workspaceDir)
-				if err := generator.Generate(ctx); err != nil {
-					presenter.Error(err, "Failed to generate MCP tool code")
-					return
-				}
-			}
-			// Start MCP RPC server
-			socketPath, err := getMCPSocketPath()
-			if err != nil {
-				presenter.Error(err, "Failed to resolve socket path")
-				return
-			}
-
-			rpcServer, err = rpc.NewMCPRPCServer(mcpManager, socketPath)
-			if err != nil {
-				presenter.Error(err, "Failed to create MCP RPC server")
-				return
-			}
-			// Start RPC server in background
-			go func() {
-				if err := rpcServer.Start(ctx); err != nil {
-					logger.G(ctx).WithError(err).Error("MCP RPC server failed")
-				}
-			}()
-
-			// Check if Node.js is available
-			if err := runtime.CheckAvailability(ctx); err != nil {
-				presenter.Error(err, "mcp runtime is not available")
-				return
-			}
-			// Create Node runtime and code_execution tool
-			nodeRuntime := runtime.NewNodeRuntime(workspaceDir, socketPath)
-			codeExecTool := tools.NewCodeExecutionTool(nodeRuntime)
-
-			// Add code_execution tool instead of MCP tools
-			stateOpts = append(stateOpts, tools.WithExtraMCPTools([]tooltypes.Tool{codeExecTool}))
-			logger.G(ctx).Info("MCP code execution mode enabled")
+		if err == nil && mcpSetup != nil {
+			// Code execution mode
+			stateOpts = append(stateOpts, mcpSetup.StateOpts...)
 		} else {
 			// Direct mode - add MCP tools directly
 			if mcpManager != nil {
@@ -483,18 +444,4 @@ func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
 	}
 
 	return config
-}
-
-// fileExists checks if a file exists
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
-}
-
-func getMCPSocketPath() (string, error) {
-	socketPath := viper.GetString("mcp.code_execution.socket_path")
-	if socketPath == "" {
-		socketPath = ".kodelet/mcp.sock"
-	}
-	return filepath.Abs(socketPath)
 }
