@@ -166,7 +166,11 @@ func (m *MCPManager) Close(ctx context.Context) error {
 	return nil
 }
 
-func (m *MCPManager) ListMCPToolsIter(ctx context.Context, iter func(serverName string, client *client.Client, tools []mcp.Tool)) {
+func (m *MCPManager) ListMCPToolsIter(
+	ctx context.Context,
+	iter func(serverName string, client *client.Client, tools []mcp.Tool),
+	errHandler ...func(err error),
+) {
 	listTools := func(c *client.Client, serverName string) ([]mcp.Tool, error) {
 		listToolResult, err := c.ListTools(ctx, mcp.ListToolsRequest{})
 		if err != nil {
@@ -184,6 +188,10 @@ func (m *MCPManager) ListMCPToolsIter(ctx context.Context, iter func(serverName 
 	for name, c := range m.clients {
 		tools, err := listTools(c, name)
 		if err != nil {
+			if len(errHandler) > 0 {
+				errHandler[0](err)
+				continue
+			}
 			logger.G(ctx).WithField("name", name).WithError(err).Error("failed to list mcp tools")
 		} else {
 			iter(name, c, tools)
@@ -195,44 +203,23 @@ func (m *MCPManager) ListMCPToolsIter(ctx context.Context, iter func(serverName 
 func (m *MCPManager) ListMCPTools(ctx context.Context) ([]MCPTool, error) {
 	now := time.Now()
 	logger.G(ctx).WithField("time", now).Debug("listing mcp tools")
-	listTools := func(c *client.Client, serverName string) ([]mcp.Tool, error) {
-		listToolResult, err := c.ListTools(ctx, mcp.ListToolsRequest{})
-		if err != nil {
-			return nil, err
-		}
-		tools := []mcp.Tool{}
-		for _, tool := range listToolResult.Tools {
-			if toolWhiteListed(tool, m.whiteList[serverName]) {
-				tools = append(tools, tool)
-			}
-		}
-		return tools, nil
-	}
+	defer func() {
+		logger.G(ctx).WithField("time", time.Since(now)).Debug("mcp tools listed")
+	}()
+
 	var (
-		wg       sync.WaitGroup
-		mu       sync.Mutex
 		multiErr error
 		tools    []MCPTool
 	)
-	wg.Add(len(m.clients))
-	for name, c := range m.clients {
-		go func(c *client.Client, serverName string) {
-			defer wg.Done()
-			toolsResult, err := listTools(c, serverName)
-			if err != nil {
-				mu.Lock()
-				multiErr = multierror.Append(multiErr, err)
-				mu.Unlock()
-			} else {
-				mu.Lock()
-				for _, tool := range toolsResult {
-					tools = append(tools, *NewMCPTool(c, tool, serverName))
-				}
-				mu.Unlock()
-			}
-		}(c, name)
-	}
-	wg.Wait()
+
+	m.ListMCPToolsIter(ctx, func(serverName string, c *client.Client, mcpTools []mcp.Tool) {
+		for _, tool := range mcpTools {
+			tools = append(tools, *NewMCPTool(c, tool, serverName))
+		}
+	}, func(err error) {
+		multiErr = multierror.Append(multiErr, err)
+	})
+
 	if multiErr != nil {
 		return nil, multiErr
 	}
