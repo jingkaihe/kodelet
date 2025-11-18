@@ -142,7 +142,7 @@ func (g *MCPCodeGenerator) Generate(ctx context.Context) error {
 	// // Get all MCP tools
 	toolInfos := []ToolInfo{}
 	var listToolsErr error
-	g.mcpManager.ListMCPToolsIter(ctx, func(serverName string, client *client.Client, tools []mcp.Tool) {
+	g.mcpManager.ListMCPToolsIter(ctx, func(serverName string, _ *client.Client, tools []mcp.Tool) {
 		if g.serverFilter != "" && serverName != g.serverFilter {
 			return
 		}

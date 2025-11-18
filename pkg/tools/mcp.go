@@ -166,6 +166,7 @@ func (m *MCPManager) Close(ctx context.Context) error {
 	return nil
 }
 
+// ListMCPToolsIter iterates over all MCP tools from all servers and calls the iter function for each server.
 func (m *MCPManager) ListMCPToolsIter(
 	ctx context.Context,
 	iter func(serverName string, client *client.Client, tools []mcp.Tool),
