@@ -59,18 +59,12 @@ This creates a filesystem representation of your MCP tools that can be:
 			stats.ToolCount, stats.ServerCount))
 		presenter.Info(fmt.Sprintf("Output directory: %s", outputDir))
 
-		// Show example usage
-		presenter.Section("Example Usage")
 		fmt.Printf(`
-You can now call MCP tools directly using Node.js:
-
-    npx tsx %s/example.ts
-
-Or explore the generated API:
+Explore the generated API:
 
     ls %s/servers/
     cat %s/servers/*/index.ts
-`, outputDir, outputDir, outputDir)
+`, outputDir, outputDir)
 
 		return nil
 	},

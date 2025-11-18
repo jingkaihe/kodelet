@@ -166,6 +166,31 @@ func (m *MCPManager) Close(ctx context.Context) error {
 	return nil
 }
 
+func (m *MCPManager) ListMCPToolsIter(ctx context.Context, iter func(serverName string, client *client.Client, tools []mcp.Tool)) {
+	listTools := func(c *client.Client, serverName string) ([]mcp.Tool, error) {
+		listToolResult, err := c.ListTools(ctx, mcp.ListToolsRequest{})
+		if err != nil {
+			return nil, err
+		}
+		tools := []mcp.Tool{}
+		for _, tool := range listToolResult.Tools {
+			if toolWhiteListed(tool, m.whiteList[serverName]) {
+				tools = append(tools, tool)
+			}
+		}
+		return tools, nil
+	}
+
+	for name, c := range m.clients {
+		tools, err := listTools(c, name)
+		if err != nil {
+			logger.G(ctx).WithField("name", name).WithError(err).Error("failed to list mcp tools")
+		} else {
+			iter(name, c, tools)
+		}
+	}
+}
+
 // ListMCPTools lists all available MCP tools from all clients
 func (m *MCPManager) ListMCPTools(ctx context.Context) ([]MCPTool, error) {
 	now := time.Now()

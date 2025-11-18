@@ -50,9 +50,9 @@ Use --detailed to see descriptions and --json for machine-readable output.`,
 
 		if jsonOutput {
 			// JSON output
-			data := make([]map[string]interface{}, len(mcpTools))
+			data := make([]map[string]any, len(mcpTools))
 			for i, tool := range mcpTools {
-				data[i] = map[string]interface{}{
+				data[i] = map[string]any{
 					"name":        tool.Name(),
 					"description": tool.Description(),
 				}

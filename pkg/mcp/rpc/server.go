@@ -11,6 +11,8 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/tools"
+	"github.com/mark3labs/mcp-go/client"
+	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/pkg/errors"
 )
 
@@ -83,30 +85,35 @@ func (s *MCPRPCServer) handleMCPCall(w http.ResponseWriter, r *http.Request) {
 
 	logger.G(ctx).WithField("tool", req.Tool).Debug("handling MCP RPC call")
 
-	// Find the tool
-	mcpTools, err := s.mcpManager.ListMCPTools(ctx)
-	if err != nil {
-		logger.G(ctx).WithError(err).Error("failed to list MCP tools")
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	var targetTool *tools.MCPTool
-	for i, tool := range mcpTools {
-		if tool.MCPToolName() == req.Tool {
-			targetTool = &mcpTools[i]
-			break
+	var (
+		targetTool mcp.Tool
+		mcpClient  *client.Client
+		found      bool
+	)
+	s.mcpManager.ListMCPToolsIter(ctx, func(serverName string, client *client.Client, tools []mcp.Tool) {
+		for _, tool := range tools {
+			if tool.GetName() == req.Tool {
+				targetTool = tool
+				mcpClient = client
+				found = true
+				return
+			}
 		}
-	}
+	})
 
-	if targetTool == nil {
+	if !found {
 		logger.G(ctx).WithField("tool", req.Tool).Error("tool not found")
 		http.Error(w, "tool not found", http.StatusNotFound)
 		return
 	}
 
 	// Execute the tool
-	response, err := targetTool.CallMCPServer(ctx, req.Arguments)
+	response, err := mcpClient.CallTool(ctx, mcp.CallToolRequest{
+		Params: mcp.CallToolParams{
+			Name:      targetTool.GetName(),
+			Arguments: req.Arguments,
+		},
+	})
 	if err != nil {
 		logger.G(ctx).WithError(err).Error("failed to call MCP tool")
 		http.Error(w, err.Error(), http.StatusInternalServerError)

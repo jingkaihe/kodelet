@@ -9,12 +9,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"text/template"
 	"unicode"
 
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/tools"
+	"github.com/mark3labs/mcp-go/client"
+	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/pkg/errors"
 )
 
@@ -23,9 +26,6 @@ var toolTemplate string
 
 //go:embed templates/client.ts.tmpl
 var clientTemplate string
-
-//go:embed templates/example.ts.tmpl
-var exampleTemplate string
 
 // MCPCodeGenerator generates TypeScript code from MCP tool definitions
 type MCPCodeGenerator struct {
@@ -48,8 +48,8 @@ type SchemaProperty struct {
 	TypeScriptType string
 	Required       bool
 	Description    string
-	Default        interface{}
-	Enum           []interface{}
+	Default        any
+	Enum           []any
 	Minimum        *float64
 	Maximum        *float64
 	MinLength      *int
@@ -76,12 +76,6 @@ type SchemaData struct {
 	Properties []SchemaProperty
 }
 
-// ServerData holds information about a server for example generation
-type ServerData struct {
-	Name  string
-	Tools []ToolInfo
-}
-
 // ToolInfo holds basic tool information for examples
 type ToolInfo struct {
 	FunctionName string
@@ -96,7 +90,6 @@ func NewMCPCodeGenerator(manager *tools.MCPManager, outputDir string) *MCPCodeGe
 
 	template.Must(tmpl.New("tool.ts.tmpl").Parse(toolTemplate))
 	template.Must(tmpl.New("client.ts.tmpl").Parse(clientTemplate))
-	template.Must(tmpl.New("example.ts.tmpl").Parse(exampleTemplate))
 
 	return &MCPCodeGenerator{
 		mcpManager: manager,
@@ -145,57 +138,42 @@ func (g *MCPCodeGenerator) Generate(ctx context.Context) error {
 		return errors.Wrap(err, "failed to generate client")
 	}
 
-	// Get all MCP tools
-	mcpTools, err := g.mcpManager.ListMCPTools(ctx)
-	if err != nil {
-		return errors.Wrap(err, "failed to list MCP tools")
-	}
-
-	// Group tools by server
-	toolsByServer := make(map[string][]tools.MCPTool)
-	for _, tool := range mcpTools {
-		serverName := tool.ServerName()
-
-		// Apply server filter if set
+	// // Get all MCP tools
+	// mcpTools, err := g.mcpManager.ListMCPTools(ctx)
+	// if err != nil {
+	// 	return errors.Wrap(err, "failed to list MCP tools")
+	// }
+	toolInfos := []ToolInfo{}
+	var listToolsErr error
+	g.mcpManager.ListMCPToolsIter(ctx, func(serverName string, client *client.Client, tools []mcp.Tool) {
 		if g.serverFilter != "" && serverName != g.serverFilter {
-			continue
+			return
 		}
+		g.stats.ServerCount++
+		g.stats.ToolCount += len(tools)
 
-		toolsByServer[serverName] = append(toolsByServer[serverName], tool)
-	}
-
-	// Generate files for each server
-	serverDataList := []ServerData{}
-	for serverName, serverTools := range toolsByServer {
 		serverDir := filepath.Join(serversDir, serverName)
 		if err := os.MkdirAll(serverDir, 0o755); err != nil {
-			return errors.Wrapf(err, "failed to create directory for server %s", serverName)
+			listToolsErr = errors.Wrapf(err, "failed to create directory for server %s", serverName)
+			return
 		}
 
-		toolInfos := []ToolInfo{}
-		for _, tool := range serverTools {
+		for _, tool := range tools {
 			toolInfo, err := g.generateToolFile(serverDir, tool)
 			if err != nil {
-				return errors.Wrapf(err, "failed to generate tool file for %s", tool.Name())
+				listToolsErr = errors.Wrapf(err, "failed to generate tool file for %s", tool.GetName())
+				return
 			}
 			toolInfos = append(toolInfos, toolInfo)
-			g.stats.ToolCount++
 		}
 
-		if err := g.generateServerIndex(serverDir, serverTools); err != nil {
-			return errors.Wrapf(err, "failed to generate index for server %s", serverName)
+		if err := g.generateServerIndex(serverDir, tools); err != nil {
+			listToolsErr = errors.Wrapf(err, "failed to generate index for server %s", serverName)
+			return
 		}
-
-		serverDataList = append(serverDataList, ServerData{
-			Name:  serverName,
-			Tools: toolInfos,
-		})
-		g.stats.ServerCount++
-	}
-
-	// Generate example script
-	if err := g.generateExample(serverDataList); err != nil {
-		return errors.Wrap(err, "failed to generate example")
+	})
+	if listToolsErr != nil {
+		return listToolsErr
 	}
 
 	logger.G(ctx).WithField("servers", g.stats.ServerCount).WithField("tools", g.stats.ToolCount).Info("MCP code generation completed")
@@ -206,7 +184,7 @@ func (g *MCPCodeGenerator) Generate(ctx context.Context) error {
 // generatePackageJSON generates a package.json file for ES module support
 func (g *MCPCodeGenerator) generatePackageJSON() error {
 	packageJSONPath := filepath.Join(g.outputDir, "package.json")
-	packageJSON := map[string]interface{}{
+	packageJSON := map[string]any{
 		"name":        "kodelet-mcp-workspace",
 		"version":     "1.0.0",
 		"type":        "module",
@@ -235,18 +213,18 @@ func (g *MCPCodeGenerator) generateClient() error {
 }
 
 // generateToolFile generates a TypeScript file for a single tool
-func (g *MCPCodeGenerator) generateToolFile(serverDir string, tool tools.MCPTool) (ToolInfo, error) {
-	mcpToolName := tool.MCPToolName()
+func (g *MCPCodeGenerator) generateToolFile(serverDir string, tool mcp.Tool) (ToolInfo, error) {
+	mcpToolName := tool.GetName()
 	toolName := sanitizeName(mcpToolName)
 
 	// Parse input schema
-	inputSchema, err := parseSchema(tool.GenerateSchema())
+	inputSchema, err := parseSchema(tool.InputSchema)
 	if err != nil {
 		return ToolInfo{}, errors.Wrap(err, "failed to parse input schema")
 	}
 
 	hasOutputSchema := true
-	outputSchema, err := parseSchema(tool.GenerateOutputSchema())
+	outputSchema, err := parseSchema(tool.OutputSchema)
 	if err != nil {
 		hasOutputSchema = false
 		outputSchema = nil
@@ -255,7 +233,7 @@ func (g *MCPCodeGenerator) generateToolFile(serverDir string, tool tools.MCPTool
 	data := ToolData{
 		ToolName:        toolName,
 		MCPToolName:     mcpToolName,
-		Description:     tool.Description(),
+		Description:     tool.Description,
 		InputSchema:     inputSchema,
 		HasOutputSchema: hasOutputSchema,
 		OutputSchema:    outputSchema,
@@ -274,12 +252,12 @@ func (g *MCPCodeGenerator) generateToolFile(serverDir string, tool tools.MCPTool
 
 	return ToolInfo{
 		FunctionName: toolName,
-		Description:  tool.Description(),
+		Description:  tool.Description,
 	}, nil
 }
 
 // generateServerIndex generates an index.ts file that exports all tools from a server
-func (g *MCPCodeGenerator) generateServerIndex(serverDir string, serverTools []tools.MCPTool) error {
+func (g *MCPCodeGenerator) generateServerIndex(serverDir string, serverTools []mcp.Tool) error {
 	indexPath := filepath.Join(serverDir, "index.ts")
 	f, err := os.Create(indexPath)
 	if err != nil {
@@ -293,39 +271,21 @@ func (g *MCPCodeGenerator) generateServerIndex(serverDir string, serverTools []t
 
 	// Export all tool functions
 	for _, tool := range serverTools {
-		toolName := sanitizeName(tool.MCPToolName())
+		toolName := sanitizeName(tool.GetName())
 		fmt.Fprintf(f, "export { %s } from './%s.js';\n", toolName, toolName)
 	}
 
 	return nil
 }
 
-// generateExample generates an example TypeScript file showing usage
-func (g *MCPCodeGenerator) generateExample(servers []ServerData) error {
-	examplePath := filepath.Join(g.outputDir, "example.ts")
-	f, err := os.Create(examplePath)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	return g.templates.ExecuteTemplate(f, "example.ts.tmpl", map[string]interface{}{
-		"Servers": servers,
-	})
-}
-
 // parseSchema parses a JSON schema into SchemaData
-func parseSchema(schemaInterface interface{}) (*SchemaData, error) {
-	if schemaInterface == nil {
-		return &SchemaData{Properties: []SchemaProperty{}}, nil
-	}
-
-	schemaJSON, err := json.Marshal(schemaInterface)
+func parseSchema(sch any) (*SchemaData, error) {
+	schemaJSON, err := json.Marshal(sch)
 	if err != nil {
 		return nil, err
 	}
 
-	var schema map[string]interface{}
+	var schema map[string]any
 	if err := json.Unmarshal(schemaJSON, &schema); err != nil {
 		return nil, err
 	}
@@ -335,10 +295,10 @@ func parseSchema(schemaInterface interface{}) (*SchemaData, error) {
 }
 
 // extractSchemaProperties extracts property information from a JSON schema
-func extractSchemaProperties(schema map[string]interface{}) []SchemaProperty {
+func extractSchemaProperties(schema map[string]any) []SchemaProperty {
 	properties := []SchemaProperty{}
 
-	propsMap, ok := schema["properties"].(map[string]interface{})
+	propsMap, ok := schema["properties"].(map[string]any)
 	if !ok {
 		return properties
 	}
@@ -346,7 +306,7 @@ func extractSchemaProperties(schema map[string]interface{}) []SchemaProperty {
 	requiredFields := getRequiredFields(schema)
 
 	for name, propData := range propsMap {
-		prop, ok := propData.(map[string]interface{})
+		prop, ok := propData.(map[string]any)
 		if !ok {
 			continue
 		}
@@ -371,7 +331,7 @@ func extractSchemaProperties(schema map[string]interface{}) []SchemaProperty {
 		// Handle array types with object items (for template inline rendering)
 		typeStr, _ := prop["type"].(string)
 		if typeStr == "array" {
-			if items, ok := prop["items"].(map[string]interface{}); ok {
+			if items, ok := prop["items"].(map[string]any); ok {
 				itemType, _ := items["type"].(string)
 				if itemType == "object" {
 					// Extract nested properties from array items
@@ -388,7 +348,7 @@ func extractSchemaProperties(schema map[string]interface{}) []SchemaProperty {
 }
 
 // buildTypeScriptType recursively builds a TypeScript type string from a JSON schema property
-func buildTypeScriptType(prop map[string]interface{}, requiredFields []string) string {
+func buildTypeScriptType(prop map[string]any, requiredFields []string) string {
 	typeVal, ok := prop["type"]
 	if !ok {
 		return "any"
@@ -407,7 +367,7 @@ func buildTypeScriptType(prop map[string]interface{}, requiredFields []string) s
 	case "boolean":
 		return "boolean"
 	case "array":
-		if items, ok := prop["items"].(map[string]interface{}); ok {
+		if items, ok := prop["items"].(map[string]any); ok {
 			itemType, _ := items["type"].(string)
 			if itemType == "object" {
 				// Recursively build inline object type for array items
@@ -428,8 +388,8 @@ func buildTypeScriptType(prop map[string]interface{}, requiredFields []string) s
 }
 
 // buildInlineObjectType builds an inline TypeScript object type from a JSON schema
-func buildInlineObjectType(schema map[string]interface{}, parentRequiredFields []string) string {
-	propsMap, ok := schema["properties"].(map[string]interface{})
+func buildInlineObjectType(schema map[string]any, parentRequiredFields []string) string {
+	propsMap, ok := schema["properties"].(map[string]any)
 	if !ok {
 		return "Record<string, any>"
 	}
@@ -441,7 +401,7 @@ func buildInlineObjectType(schema map[string]interface{}, parentRequiredFields [
 
 	var parts []string
 	for name, propData := range propsMap {
-		prop, ok := propData.(map[string]interface{})
+		prop, ok := propData.(map[string]any)
 		if !ok {
 			continue
 		}
@@ -486,10 +446,10 @@ func sanitizeName(name string) string {
 	return result
 }
 
-func getRequiredFields(schema map[string]interface{}) []string {
+func getRequiredFields(schema map[string]any) []string {
 	required := []string{}
 	if reqVal, ok := schema["required"]; ok {
-		if reqArr, ok := reqVal.([]interface{}); ok {
+		if reqArr, ok := reqVal.([]any); ok {
 			for _, r := range reqArr {
 				if rStr, ok := r.(string); ok {
 					required = append(required, rStr)
@@ -501,15 +461,10 @@ func getRequiredFields(schema map[string]interface{}) []string {
 }
 
 func contains(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(slice, item)
 }
 
-func getString(m map[string]interface{}, key string) string {
+func getString(m map[string]any, key string) string {
 	if val, ok := m[key]; ok {
 		if str, ok := val.(string); ok {
 			return str
@@ -518,16 +473,16 @@ func getString(m map[string]interface{}, key string) string {
 	return ""
 }
 
-func getArray(m map[string]interface{}, key string) []interface{} {
+func getArray(m map[string]any, key string) []any {
 	if val, ok := m[key]; ok {
-		if arr, ok := val.([]interface{}); ok {
+		if arr, ok := val.([]any); ok {
 			return arr
 		}
 	}
 	return nil
 }
 
-func getFloat(m map[string]interface{}, key string) *float64 {
+func getFloat(m map[string]any, key string) *float64 {
 	if val, ok := m[key]; ok {
 		switch v := val.(type) {
 		case float64:
@@ -540,7 +495,7 @@ func getFloat(m map[string]interface{}, key string) *float64 {
 	return nil
 }
 
-func getInt(m map[string]interface{}, key string) *int {
+func getInt(m map[string]any, key string) *int {
 	if val, ok := m[key]; ok {
 		switch v := val.(type) {
 		case int:
