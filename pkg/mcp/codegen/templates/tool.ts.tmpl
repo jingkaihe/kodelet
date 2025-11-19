@@ -3,7 +3,7 @@ import { callMCPTool } from "../../client.js";
 
 {{if .Description}}
 /**
- * {{.Description}}
+ * {{.Description | jsdocEscape}}
  */
 {{end}}
 export async function {{.ToolName}}(input: {{.ToolName}}Input): Promise<{{.ToolName}}Response> {
@@ -13,12 +13,12 @@ export async function {{.ToolName}}(input: {{.ToolName}}Input): Promise<{{.ToolN
 {{- define "renderProperty"}}
 {{- if .Description}}
     /**
-     * {{.Description}}
+     * {{.Description | jsdocEscape}}
      {{- if .Format}}
-     * @format {{.Format}}
+     * @format {{.Format | jsdocEscape}}
      {{- end}}
      {{- if .Default}}
-     * @default {{.Default}}
+     * @default {{.Default | jsdocEscapeAny}}
      {{- end}}
      */
 {{- end}}
@@ -42,12 +42,12 @@ export interface {{.ToolName}}Input {
   {{- range .InputSchema.Properties}}
   {{- if .Description}}
   /**
-   * {{.Description}}
+   * {{.Description | jsdocEscape}}
    {{- if .Format}}
-   * @format {{.Format}}
+   * @format {{.Format | jsdocEscape}}
    {{- end}}
    {{- if .Default}}
-   * @default {{.Default}}
+   * @default {{.Default | jsdocEscapeAny}}
    {{- end}}
    {{- if .Enum}}
    * @enum [{{range $i, $e := .Enum}}{{if $i}}, {{end}}"{{$e}}"{{end}}]
@@ -65,7 +65,7 @@ export interface {{.ToolName}}Input {
    * @maxLength {{.MaxLength}}
    {{- end}}
    {{- if .Pattern}}
-   * @pattern {{.Pattern}}
+   * @pattern {{.Pattern | jsdocEscape}}
    {{- end}}
    */
   {{- end}}
@@ -79,12 +79,12 @@ export interface {{.ToolName}}Response {
   {{- range .OutputSchema.Properties}}
   {{- if .Description}}
   /**
-   * {{.Description}}
+   * {{.Description | jsdocEscape}}
    {{- if .Format}}
-   * @format {{.Format}}
+   * @format {{.Format | jsdocEscape}}
    {{- end}}
    {{- if .Default}}
-   * @default {{.Default}}
+   * @default {{.Default | jsdocEscapeAny}}
    {{- end}}
    {{- if .Enum}}
    * @enum [{{range $i, $e := .Enum}}{{if $i}}, {{end}}"{{$e}}"{{end}}]
@@ -102,7 +102,7 @@ export interface {{.ToolName}}Response {
    * @maxLength {{.MaxLength}}
    {{- end}}
    {{- if .Pattern}}
-   * @pattern {{.Pattern}}
+   * @pattern {{.Pattern | jsdocEscape}}
    {{- end}}
    */
   {{- end}}

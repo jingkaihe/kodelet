@@ -87,6 +87,15 @@ type ToolInfo struct {
 func NewMCPCodeGenerator(manager *tools.MCPManager, outputDir string) *MCPCodeGenerator {
 	tmpl := template.New("mcp").Funcs(template.FuncMap{
 		"title": toTitle,
+		"jsdocEscape": func(s string) string {
+			// Escape */ to prevent breaking JSDoc comments
+			return strings.ReplaceAll(s, "*/", "*\\/")
+		},
+		"jsdocEscapeAny": func(v any) string {
+			// Escape */ in any type values for JSDoc comments
+			s := fmt.Sprintf("%v", v)
+			return strings.ReplaceAll(s, "*/", "*\\/")
+		},
 	})
 
 	template.Must(tmpl.New("tool.ts.tmpl").Parse(toolTemplate))
