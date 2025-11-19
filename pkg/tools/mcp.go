@@ -166,10 +166,12 @@ func (m *MCPManager) Close(ctx context.Context) error {
 	return nil
 }
 
-// ListMCPTools lists all available MCP tools from all clients
-func (m *MCPManager) ListMCPTools(ctx context.Context) ([]MCPTool, error) {
-	now := time.Now()
-	logger.G(ctx).WithField("time", now).Debug("listing mcp tools")
+// ListMCPToolsIter iterates over all MCP tools from all servers and calls the iter function for each server.
+func (m *MCPManager) ListMCPToolsIter(
+	ctx context.Context,
+	iter func(serverName string, client *client.Client, tools []mcp.Tool),
+	errHandler ...func(err error),
+) {
 	listTools := func(c *client.Client, serverName string) ([]mcp.Tool, error) {
 		listToolResult, err := c.ListTools(ctx, mcp.ListToolsRequest{})
 		if err != nil {
@@ -183,31 +185,42 @@ func (m *MCPManager) ListMCPTools(ctx context.Context) ([]MCPTool, error) {
 		}
 		return tools, nil
 	}
+
+	for name, c := range m.clients {
+		tools, err := listTools(c, name)
+		if err != nil {
+			if len(errHandler) > 0 {
+				errHandler[0](err)
+				continue
+			}
+			logger.G(ctx).WithField("name", name).WithError(err).Error("failed to list mcp tools")
+		} else {
+			iter(name, c, tools)
+		}
+	}
+}
+
+// ListMCPTools lists all available MCP tools from all clients
+func (m *MCPManager) ListMCPTools(ctx context.Context) ([]MCPTool, error) {
+	now := time.Now()
+	logger.G(ctx).WithField("time", now).Debug("listing mcp tools")
+	defer func() {
+		logger.G(ctx).WithField("time", time.Since(now)).Debug("mcp tools listed")
+	}()
+
 	var (
-		wg       sync.WaitGroup
-		mu       sync.Mutex
 		multiErr error
 		tools    []MCPTool
 	)
-	wg.Add(len(m.clients))
-	for name, c := range m.clients {
-		go func(c *client.Client, serverName string) {
-			defer wg.Done()
-			toolsResult, err := listTools(c, serverName)
-			if err != nil {
-				mu.Lock()
-				multiErr = multierror.Append(multiErr, err)
-				mu.Unlock()
-			} else {
-				mu.Lock()
-				for _, tool := range toolsResult {
-					tools = append(tools, *NewMCPTool(c, tool))
-				}
-				mu.Unlock()
-			}
-		}(c, name)
-	}
-	wg.Wait()
+
+	m.ListMCPToolsIter(ctx, func(serverName string, c *client.Client, mcpTools []mcp.Tool) {
+		for _, tool := range mcpTools {
+			tools = append(tools, *NewMCPTool(c, tool, serverName))
+		}
+	}, func(err error) {
+		multiErr = multierror.Append(multiErr, err)
+	})
+
 	if multiErr != nil {
 		return nil, multiErr
 	}
@@ -278,16 +291,28 @@ type MCPTool struct {
 	mcpToolInputSchema mcp.ToolInputSchema
 	mcpToolName        string
 	mcpToolDescription string
+	serverName         string
 }
 
 // NewMCPTool creates a new MCP tool wrapper
-func NewMCPTool(client *client.Client, tool mcp.Tool) *MCPTool {
+func NewMCPTool(client *client.Client, tool mcp.Tool, serverName string) *MCPTool {
 	return &MCPTool{
 		client:             client,
 		mcpToolInputSchema: tool.InputSchema,
 		mcpToolName:        tool.GetName(),
 		mcpToolDescription: tool.Description,
+		serverName:         serverName,
 	}
+}
+
+// ServerName returns the name of the MCP server this tool belongs to
+func (t *MCPTool) ServerName() string {
+	return t.serverName
+}
+
+// MCPToolName returns the original MCP tool name (without the "mcp_" prefix)
+func (t *MCPTool) MCPToolName() string {
+	return t.mcpToolName
 }
 
 // MCPToolResult represents the result of an MCP tool execution
@@ -350,7 +375,7 @@ func (r *MCPToolResult) StructuredData() tooltypes.StructuredToolResult {
 
 // Name returns the name of the tool
 func (t *MCPTool) Name() string {
-	return fmt.Sprintf("mcp_%s", t.mcpToolName)
+	return fmt.Sprintf("mcp__%s_%s", t.serverName, t.mcpToolName)
 }
 
 // Description returns the description of the tool
@@ -360,7 +385,7 @@ func (t *MCPTool) Description() string {
 
 // GenerateSchema generates the JSON schema for the tool's input parameters
 func (t *MCPTool) GenerateSchema() *jsonschema.Schema {
-	b, err := t.mcpToolInputSchema.MarshalJSON()
+	b, err := json.Marshal(t.mcpToolInputSchema)
 	if err != nil {
 		return nil
 	}
@@ -383,6 +408,14 @@ func (t *MCPTool) ValidateInput(_ tooltypes.State, _ string) error {
 	return nil
 }
 
+// callMCPServer calls the MCP server with the given input arguments
+func (t *MCPTool) callMCPServer(ctx context.Context, input map[string]any) (*mcp.CallToolResult, error) {
+	req := mcp.CallToolRequest{}
+	req.Params.Arguments = input
+	req.Params.Name = t.mcpToolName
+	return t.client.CallTool(ctx, req)
+}
+
 // Execute runs the MCP tool and returns the result
 func (t *MCPTool) Execute(ctx context.Context, _ tooltypes.State, parameters string) tooltypes.ToolResult {
 	var input map[string]any
@@ -395,10 +428,7 @@ func (t *MCPTool) Execute(ctx context.Context, _ tooltypes.State, parameters str
 	}
 
 	startTime := time.Now()
-	req := mcp.CallToolRequest{}
-	req.Params.Arguments = input
-	req.Params.Name = t.mcpToolName
-	result, err := t.client.CallTool(ctx, req)
+	result, err := t.callMCPServer(ctx, input)
 	executionTime := time.Since(startTime)
 
 	if err != nil {

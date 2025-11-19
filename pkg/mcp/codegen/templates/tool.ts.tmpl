@@ -1,0 +1,117 @@
+// {{.ToolName}}.ts - Generated MCP tool wrapper
+import { callMCPTool } from "../../client.js";
+
+{{if .Description}}
+/**
+ * {{.Description | jsdocEscape}}
+ */
+{{end}}
+export async function {{.ToolName}}(input: {{.ToolName}}Input): Promise<{{.ToolName}}Response> {
+  return callMCPTool<{{.ToolName}}Response>('{{.ServerName}}', '{{.MCPToolName}}', input);
+}
+
+{{- define "renderProperty"}}
+{{- if .Description}}
+    /**
+     * {{.Description | jsdocEscape}}
+     {{- if .Format}}
+     * @format {{.Format | jsdocEscape}}
+     {{- end}}
+     {{- if .Default}}
+     * @default {{.Default | jsdocEscapeAny}}
+     {{- end}}
+     */
+{{- end}}
+    {{.Name}}{{if not .Required}}?{{end}}: {{template "renderType" .}};
+{{- end}}
+
+{{- define "renderType"}}
+{{- if .IsArrayOfObjects -}}
+Array<{
+{{- range .ArrayItemProperties}}
+{{- template "renderProperty" .}}
+{{- end}}
+  }>
+{{- else -}}
+{{.TypeScriptType}}
+{{- end -}}
+{{- end}}
+
+// Input type (generated from input schema)
+export interface {{.ToolName}}Input {
+  {{- range .InputSchema.Properties}}
+  {{- if .Description}}
+  /**
+   * {{.Description | jsdocEscape}}
+   {{- if .Format}}
+   * @format {{.Format | jsdocEscape}}
+   {{- end}}
+   {{- if .Default}}
+   * @default {{.Default | jsdocEscapeAny}}
+   {{- end}}
+   {{- if .Enum}}
+   * @enum [{{range $i, $e := .Enum}}{{if $i}}, {{end}}"{{$e}}"{{end}}]
+   {{- end}}
+   {{- if .Minimum}}
+   * @minimum {{.Minimum}}
+   {{- end}}
+   {{- if .Maximum}}
+   * @maximum {{.Maximum}}
+   {{- end}}
+   {{- if .MinLength}}
+   * @minLength {{.MinLength}}
+   {{- end}}
+   {{- if .MaxLength}}
+   * @maxLength {{.MaxLength}}
+   {{- end}}
+   {{- if .Pattern}}
+   * @pattern {{.Pattern | jsdocEscape}}
+   {{- end}}
+   */
+  {{- end}}
+  {{.Name}}{{if not .Required}}?{{end}}: {{template "renderType" .}};
+  {{- end}}
+}
+
+{{if .HasOutputSchema}}
+// Output type (generated from output schema)
+export interface {{.ToolName}}Response {
+  {{- range .OutputSchema.Properties}}
+  {{- if .Description}}
+  /**
+   * {{.Description | jsdocEscape}}
+   {{- if .Format}}
+   * @format {{.Format | jsdocEscape}}
+   {{- end}}
+   {{- if .Default}}
+   * @default {{.Default | jsdocEscapeAny}}
+   {{- end}}
+   {{- if .Enum}}
+   * @enum [{{range $i, $e := .Enum}}{{if $i}}, {{end}}"{{$e}}"{{end}}]
+   {{- end}}
+   {{- if .Minimum}}
+   * @minimum {{.Minimum}}
+   {{- end}}
+   {{- if .Maximum}}
+   * @maximum {{.Maximum}}
+   {{- end}}
+   {{- if .MinLength}}
+   * @minLength {{.MinLength}}
+   {{- end}}
+   {{- if .MaxLength}}
+   * @maxLength {{.MaxLength}}
+   {{- end}}
+   {{- if .Pattern}}
+   * @pattern {{.Pattern | jsdocEscape}}
+   {{- end}}
+   */
+  {{- end}}
+  {{.Name}}{{if not .Required}}?{{end}}: {{template "renderType" .}};
+  {{- end}}
+}
+{{else}}
+// Output type (no schema provided - generic)
+export interface {{.ToolName}}Response {
+  [key: string]: any;
+}
+{{end}}

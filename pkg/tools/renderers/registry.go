@@ -44,6 +44,7 @@ func NewRendererRegistry() *RendererRegistry {
 	registry.Register("image_recognition", &ImageRecognitionRenderer{})
 	registry.Register("web_fetch", &WebFetchRenderer{})
 	registry.Register("view_background_processes", &ViewBackgroundProcessesRenderer{})
+	registry.Register("code_execution", &CodeExecutionRenderer{})
 
 	// Register MCP tools - pattern matches any tool prefixed with "mcp_"
 	registry.RegisterPattern("mcp_*", &MCPToolRenderer{})

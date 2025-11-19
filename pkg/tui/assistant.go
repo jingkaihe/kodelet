@@ -2,11 +2,14 @@ package tui
 
 import (
 	"context"
+	"errors"
 
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/mcp"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	"github.com/spf13/viper"
 )
 
 // AssistantClient handles the interaction with the LLM thread
@@ -28,6 +31,15 @@ func NewAssistantClient(ctx context.Context, conversationID string, enablePersis
 
 	config.IDE = ideMode
 
+	// Set MCP configuration for system prompt
+	executionMode := viper.GetString("mcp.execution_mode")
+	workspaceDir := viper.GetString("mcp.code_execution.workspace_dir")
+	if workspaceDir == "" {
+		workspaceDir = ".kodelet/mcp"
+	}
+	config.MCPExecutionMode = executionMode
+	config.MCPWorkspaceDir = workspaceDir
+
 	thread, err := llm.NewThread(config)
 	if err != nil {
 		logger.G(ctx).WithError(err).Fatal("Failed to create LLM thread during assistant client initialization")
@@ -36,9 +48,25 @@ func NewAssistantClient(ctx context.Context, conversationID string, enablePersis
 	// Create state with main tools
 	var stateOpts []tools.BasicStateOption
 	stateOpts = append(stateOpts, tools.WithLLMConfig(config))
-	stateOpts = append(stateOpts, tools.WithMCPTools(mcpManager))
 	stateOpts = append(stateOpts, tools.WithCustomTools(customManager))
 	stateOpts = append(stateOpts, tools.WithMainTools())
+
+	// Set up MCP execution mode
+	if mcpManager != nil {
+		mcpSetup, err := mcp.SetupExecutionMode(ctx, mcpManager)
+		if err != nil && !errors.Is(err, mcp.ErrDirectMode) {
+			logger.G(ctx).WithError(err).Fatal("Failed to set up MCP execution mode")
+		}
+
+		if err == nil && mcpSetup != nil {
+			// Code execution mode
+			stateOpts = append(stateOpts, mcpSetup.StateOpts...)
+		} else {
+			// Direct mode - add MCP tools directly
+			stateOpts = append(stateOpts, tools.WithMCPTools(mcpManager))
+		}
+	}
+
 	state := tools.NewBasicState(ctx, stateOpts...)
 	thread.SetState(state)
 

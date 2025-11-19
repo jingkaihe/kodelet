@@ -107,6 +107,7 @@ func (r *Renderer) RenderSystemPrompt(ctx *PromptContext) (string, error) {
 
 	prompt += ctx.FormatSystemInfo()
 	prompt += ctx.FormatContexts()
+	prompt += ctx.FormatMCPServers()
 
 	return prompt, nil
 }
@@ -120,6 +121,7 @@ func (r *Renderer) RenderSubagentPrompt(ctx *PromptContext) (string, error) {
 
 	prompt += ctx.FormatSystemInfo()
 	prompt += ctx.FormatContexts()
+	prompt += ctx.FormatMCPServers()
 
 	return prompt, nil
 }
@@ -133,6 +135,7 @@ func (r *Renderer) RenderOpenAIPrompt(ctx *PromptContext) (string, error) {
 
 	prompt += ctx.FormatSystemInfo()
 	prompt += ctx.FormatContexts()
+	prompt += ctx.FormatMCPServers()
 
 	return prompt, nil
 }

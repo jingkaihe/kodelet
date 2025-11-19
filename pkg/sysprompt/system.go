@@ -18,6 +18,9 @@ func SystemPrompt(model string, llmConfig llm.Config, contexts map[string]string
 	updateContextWithConfig(promptCtx, config)
 	promptCtx.BashAllowedCommands = llmConfig.AllowedCommands
 
+	// Add MCP configuration to the prompt context
+	promptCtx.WithMCPConfig(llmConfig.MCPExecutionMode, llmConfig.MCPWorkspaceDir)
+
 	var prompt string
 	var err error
 

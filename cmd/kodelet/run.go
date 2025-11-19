@@ -15,11 +15,13 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/mcp"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 type RunConfig struct {
@@ -200,12 +202,39 @@ var runCmd = &cobra.Command{
 
 		applyFragmentRestrictions(&llmConfig, fragmentMetadata)
 
-		var stateOpts []tools.BasicStateOption
+		// Check if MCP code execution mode is enabled
+		executionMode := viper.GetString("mcp.execution_mode")
+		workspaceDir := viper.GetString("mcp.code_execution.workspace_dir")
+		if workspaceDir == "" {
+			workspaceDir = ".kodelet/mcp"
+		}
 
+		// Set MCP configuration in llmConfig for system prompt
+		llmConfig.MCPExecutionMode = executionMode
+		llmConfig.MCPWorkspaceDir = workspaceDir
+
+		var stateOpts []tools.BasicStateOption
 		stateOpts = append(stateOpts, tools.WithLLMConfig(llmConfig))
-		stateOpts = append(stateOpts, tools.WithMCPTools(mcpManager))
 		stateOpts = append(stateOpts, tools.WithCustomTools(customManager))
 		stateOpts = append(stateOpts, tools.WithMainTools())
+
+		// Set up MCP execution mode
+		if mcpManager != nil {
+			mcpSetup, err := mcp.SetupExecutionMode(ctx, mcpManager)
+			if err != nil && !errors.Is(err, mcp.ErrDirectMode) {
+				presenter.Error(err, "Failed to set up MCP execution mode")
+				return
+			}
+
+			if err == nil && mcpSetup != nil {
+				// Code execution mode
+				stateOpts = append(stateOpts, mcpSetup.StateOpts...)
+			} else {
+				// Direct mode - add MCP tools directly
+				stateOpts = append(stateOpts, tools.WithMCPTools(mcpManager))
+			}
+		}
+
 		appState := tools.NewBasicState(ctx, stateOpts...)
 
 		if config.Headless {

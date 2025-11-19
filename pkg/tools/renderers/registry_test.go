@@ -31,6 +31,7 @@ func TestRendererRegistry_ExactMatches(t *testing.T) {
 		{"Subagent", "subagent", true, false},
 		{"Web Fetch", "web_fetch", true, false},
 		{"View Background Processes", "view_background_processes", true, false},
+		{"Code Execution", "code_execution", true, false},
 
 		{"Unknown Tool", "unknown_tool", true, false}, // Should fallback to default
 	}

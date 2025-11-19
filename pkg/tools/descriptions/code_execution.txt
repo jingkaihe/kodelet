@@ -1,0 +1,212 @@
+Execute TypeScript/JavaScript code with access to MCP tools.
+
+This tool takes two parameters:
+- code_path: Path to the TypeScript/JavaScript file to execute (relative to .kodelet/mcp/)
+- description: (optional) Brief description of what this code does
+
+# CRITICAL: Token-Efficient Workflow
+
+Always use `file_write`/`file_edit` to create/modify code files, then execute by path. This saves tokens by avoiding repeated code transmission in tool parameters.
+
+# CRITICAL: Never Speculate Schemas
+
+MCP tool files in `.kodelet/mcp/servers/` are auto-generated with varying schemas, parameters, and types. You **MUST** read the actual generated files before writing code.
+
+# Workspace Structure
+
+```
+.kodelet/mcp/                   # Workspace root (your working directory)
+├── package.json                # ES module configuration
+├── client.ts                   # MCP RPC client (auto-generated)
+├── servers/                    # MCP tool wrappers by server
+│   ├── lsp/                    # Example: Language Server tools
+│   │   ├── index.ts           # Exported functions
+│   │   ├── definition.ts      # Find symbol definitions
+│   │   └── diagnostics.ts     # Get file diagnostics
+│   └── [other-servers]/       # Other MCP servers
+└── .kodelet/mcp.sock          # Unix socket for RPC
+```
+
+Your TypeScript files are placed in the workspace root (`.kodelet/mcp/`) and referenced by relative paths (e.g., `"code_path": "analyze.ts"`).
+
+# Complete Workflow
+
+**Step 1: Discover available MCP servers**
+```bash
+ls .kodelet/mcp/servers/
+```
+
+**Step 2: Read exact schemas from generated files**
+
+Use `file_read` to examine:
+- Server's `index.ts` for exported functions
+- Individual tool files for exact function signatures and parameters
+
+```bash
+file_read .kodelet/mcp/servers/lsp/index.ts
+file_read .kodelet/mcp/servers/lsp/diagnostics.ts
+```
+
+Look for:
+- Function signatures (parameter names and types)
+- Required vs optional parameters (`param` vs `param?`)
+- JSDoc comments explaining parameters
+- Return types (output schema)
+
+**Step 3: Write TypeScript code to file using EXACT schemas**
+
+Use `file_write` to create script in `.kodelet/mcp/`:
+```bash
+file_write .kodelet/mcp/analyze.ts
+```
+
+Important conventions:
+- Use relative ES module imports with `.js` extension: `import * as lsp from './servers/lsp/index.js';`
+- Use `console.log()` for output (return statements are ignored)
+- Handle generic output types (`[key: string]: any`) by sampling first
+
+**Step 4: Execute via code_path parameter**
+
+```json
+{
+  "code_path": "analyze.ts",
+  "description": "Analyze diagnostics for main.go"
+}
+```
+
+**Step 5: Iterate efficiently with file_edit**
+
+For modifications:
+* Use `file_edit` to change only specific lines
+* Re-execute with same `code_path`
+* Avoids retransmitting entire code blocks (saves tokens!)
+
+# Handling Generic Output Types
+
+If tool returns generic type (`[key: string]: any`), sample structure first:
+* **Primitives**: Show type and value (truncated to 500 chars)
+* **Arrays**: Show length + first item (truncated to 500 chars)
+* **Objects**: Show keys + value types + sizes in bytes
+
+Then refine code with `file_edit` to use discovered fields.
+
+# Important
+
+* **Schema accuracy**: Never guess - always read generated tool files first
+* **Imports**: Use relative imports with `.js` extension (ES modules requirement)
+* **Output**: Use `console.log()` for output; filter and limit large datasets
+* **Error handling**: Use try/catch blocks
+* **Focus**: Keep each execution on one specific task
+* **Token efficiency**: Use `file_edit` for iterations, not `file_write` rewrites
+
+# Examples
+
+<good-example>
+# Step 1: Discover servers and read schema
+ls .kodelet/mcp/servers/
+file_read .kodelet/mcp/servers/lsp/diagnostics.ts
+
+# Step 2: Write code to file
+file_write .kodelet/mcp/check_diagnostics.ts
+```typescript
+import * as lsp from './servers/lsp/index.js';
+const sample = await lsp.diagnostics({ filePath: './main.go' });
+if (typeof sample === 'string' || typeof sample === 'number' || typeof sample === 'boolean') {
+  console.log(`Primitive (${typeof sample}):`, JSON.stringify(sample).substring(0, 500));
+} else if (Array.isArray(sample)) {
+  console.log(`Array[${sample.length}], first:`, JSON.stringify(sample[0]).substring(0, 500));
+} else {
+  Object.keys(sample).forEach(k => {
+    const size = JSON.stringify(sample[k]).length;
+    console.log(`${k}: ${Array.isArray(sample[k]) ? 'array' : typeof sample[k]} (${size} bytes)`);
+  });
+}
+```
+
+# Step 3: Execute by path
+code_execution { "code_path": "check_diagnostics.ts" }
+
+# Step 4: Modify and re-run (token-efficient!)
+file_edit .kodelet/mcp/check_diagnostics.ts
+# Change only the filePath parameter
+code_execution { "code_path": "check_diagnostics.ts" }
+<reasoning>
+Uses file_write to create code, then executes by path. Modifications use file_edit for token efficiency.
+</reasoning>
+</good-example>
+
+<bad-example>
+import * as lsp from './servers/lsp/index.js';
+// Guess the schema without reading files
+const result = await lsp.diagnostics('./main.go');
+<reasoning>
+Never guess schemas. Always read generated files first to see exact function signatures.
+</reasoning>
+</bad-example>
+
+<bad-example>
+# After reading file: export interface myToolResponse { [key: string]: any; }
+const result = await tool.myTool({ param: "value" });
+// Directly access fields without sampling structure first
+console.log(result.field1, result.field2);
+<reasoning>
+Generic output types require sampling first to discover actual fields.
+</reasoning>
+</bad-example>
+
+<good-example>
+# After reading file: export interface myToolResponse { [key: string]: any; }
+
+# Step 1: Write sampling script
+file_write .kodelet/mcp/sample_tool.ts
+```typescript
+const sample = await tool.myTool({ param: "value" });
+// Sample to discover structure
+```
+
+# Step 2: Execute and discover fields
+code_execution { "code_path": "sample_tool.ts" }
+# Output shows: status: string (15 bytes), count: number (3 bytes)
+
+# Step 3: Update script to use discovered fields
+file_edit .kodelet/mcp/sample_tool.ts
+# Modify to use result.status and result.count
+
+# Step 4: Re-execute
+code_execution { "code_path": "sample_tool.ts" }
+<reasoning>
+Sample generic types tactically first, then iteratively refine using file_edit for token efficiency.
+</reasoning>
+</good-example>
+
+<bad-example>
+const files = await filesystem.listFiles({ path: '/' });
+console.log(files);
+<reasoning>
+May return thousands of files. Always filter and summarize before logging.
+</reasoning>
+</bad-example>
+
+<good-example>
+# Write script to file
+file_write .kodelet/mcp/list_files.ts
+```typescript
+const files = await filesystem.listFiles({ path: '/' });
+console.log(`Found ${files.length} files total`);
+console.log(`Go files: ${files.filter(f => f.endsWith('.go')).length}`);
+console.log('Sample:', files.slice(0, 5));
+```
+
+# Execute by path
+code_execution { "code_path": "list_files.ts" }
+<reasoning>
+Filters and summarizes data before logging. Uses file-based approach for token efficiency.
+</reasoning>
+</good-example>
+
+<bad-example>
+import * as lsp from './servers/lsp';
+<reasoning>
+Missing .js extension. ES modules require explicit file extensions.
+</reasoning>
+</bad-example>
