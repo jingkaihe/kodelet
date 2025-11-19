@@ -1,5 +1,9 @@
 # Kodelet
 
+## 0.1.17.beta (2025-11-19)
+
+Introduced mcp-as-code for the purpose of context preservation.
+
 ## 0.1.16.beta (2025-11-14)
 
 ### Internal Changes
@@ -1596,3 +1600,4 @@ The main feature in this release is the addition of conversation persistence, al
 ## 0.0.2.alpha1
 
 Initial release of the kodelet
+
