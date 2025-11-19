@@ -74,7 +74,7 @@ export interface {{.ToolName}}Input {
 }
 
 {{if .HasOutputSchema}}
-// Output type (generated from output schema - type-safe!)
+// Output type (generated from output schema)
 export interface {{.ToolName}}Response {
   {{- range .OutputSchema.Properties}}
   {{- if .Description}}
