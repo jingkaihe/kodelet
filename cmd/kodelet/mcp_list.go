@@ -28,7 +28,7 @@ Use --detailed to see descriptions and --json for machine-readable output.`,
 
 		// Get flags
 		serverFilter, _ := cmd.Flags().GetString("server")
-		detailed, _ := cmd.Flags().GetBool("detailed")
+		verbose, _ := cmd.Flags().GetBool("verbose")
 		jsonOutput, _ := cmd.Flags().GetBool("json")
 
 		// List tools
@@ -56,11 +56,14 @@ Use --detailed to see descriptions and --json for machine-readable output.`,
 					"name":        tool.Name(),
 					"description": tool.Description(),
 				}
-				if detailed {
+				if verbose {
 					data[i]["schema"] = tool.GenerateSchema()
 				}
 			}
-			output, _ := json.MarshalIndent(data, "", "  ")
+			output, err := json.MarshalIndent(data, "", "  ")
+			if err != nil {
+				return errors.Wrap(err, "failed to marshal JSON output")
+			}
 			fmt.Println(string(output))
 		} else {
 			// Human-readable output
@@ -78,7 +81,7 @@ Use --detailed to see descriptions and --json for machine-readable output.`,
 				for _, tool := range serverTools {
 					toolName := tool.MCPToolName()
 					fmt.Printf("  • %s.%s\n", serverName, toolName)
-					if detailed {
+					if verbose {
 						fmt.Printf("    %s\n", tool.Description())
 					}
 				}
@@ -91,6 +94,6 @@ Use --detailed to see descriptions and --json for machine-readable output.`,
 
 func init() {
 	mcpListCmd.Flags().String("server", "", "Filter by server name")
-	mcpListCmd.Flags().Bool("detailed", false, "Show detailed tool information")
+	mcpListCmd.Flags().BoolP("verbose", "v", false, "Show detailed tool information")
 	mcpListCmd.Flags().Bool("json", false, "Output as JSON")
 }

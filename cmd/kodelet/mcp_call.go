@@ -74,7 +74,10 @@ Arguments should be provided as JSON using the --args flag.`,
 		}
 
 		// Execute
-		params, _ := json.Marshal(argsMap)
+		params, err := json.Marshal(argsMap)
+		if err != nil {
+			return errors.Wrap(err, "failed to marshal tool arguments")
+		}
 		result := targetTool.Execute(ctx, nil, string(params))
 
 		if result.IsError() {
