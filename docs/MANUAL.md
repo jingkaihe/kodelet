@@ -676,6 +676,7 @@ profiles:
 aliases:
     haiku-35: claude-3-5-haiku-20241022
     opus-41: claude-opus-4-1-20250805
+    opus-45: claude-opus-4-5-20251101
     sonnet-45: claude-sonnet-4-5-20250929
 ```
 
@@ -834,6 +835,7 @@ kodelet run --allowed-commands "ls *,pwd,echo *" "analyze this directory"
 Kodelet supports various Anthropic Claude models:
 - `claude-sonnet-4-5-20250929` (recommended for standard tasks)
 - `claude-3-5-haiku-20241022` (recommended for lightweight tasks)
+- `claude-opus-4-5-20251101` (most intelligent model for building agents and coding)
 - `claude-opus-4-1-20250805` (high-end model for complex tasks)
 
 Features:
