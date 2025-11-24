@@ -1,5 +1,9 @@
 # Kodelet
 
+## 0.1.18.beta (2025-11-24)
+
+**Claude Opus 4.5 Support**: Added support for Anthropic's latest Claude Opus 4.5 model (`claude-opus-4-5-20251101`)
+
 ## 0.1.17.beta (2025-11-19)
 
 Introduced mcp-as-code for the purpose of context preservation.
@@ -1600,4 +1604,3 @@ The main feature in this release is the addition of conversation persistence, al
 ## 0.0.2.alpha1
 
 Initial release of the kodelet
-
