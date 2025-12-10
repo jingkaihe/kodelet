@@ -418,7 +418,10 @@ func (t *Thread) processMessageExchange(
 	// Record start time for usage logging
 	apiStartTime := time.Now()
 
-	response, err := t.NewMessage(ctx, messageParams)
+	// Check if handler supports streaming for skipping post-stream calls
+	_, isStreamingHandler := handler.(llmtypes.StreamingMessageHandler)
+
+	response, err := t.NewMessage(ctx, messageParams, handler)
 	if err != nil {
 		if t.isPersisted && t.store != nil && !opt.NoSaveConversation {
 			t.SaveConversation(ctx, false)
@@ -442,10 +445,14 @@ func (t *Thread) processMessageExchange(
 	for _, block := range response.Content {
 		switch variant := block.AsAny().(type) {
 		case anthropic.TextBlock:
-			handler.HandleText(variant.Text)
+			if !isStreamingHandler {
+				handler.HandleText(variant.Text)
+			}
 			finalOutput = variant.Text
 		case anthropic.ThinkingBlock:
-			handler.HandleThinking(variant.Thinking)
+			if !isStreamingHandler {
+				handler.HandleThinking(variant.Thinking)
+			}
 		case anthropic.ToolUseBlock:
 			toolUseCount++
 			inputJSON, _ := json.Marshal(variant.JSON.Input.Raw())
@@ -610,8 +617,9 @@ func isThinkingModel(model anthropic.Model) bool {
 	return slices.Contains(thinkingModels, model)
 }
 
-// NewMessage sends a message to Anthropic with OTEL tracing
-func (t *Thread) NewMessage(ctx context.Context, params anthropic.MessageNewParams) (*anthropic.Message, error) {
+// NewMessage sends a message to Anthropic with OTEL tracing.
+// If handler implements StreamingMessageHandler, content will be streamed as it arrives.
+func (t *Thread) NewMessage(ctx context.Context, params anthropic.MessageNewParams, handler llmtypes.MessageHandler) (*anthropic.Message, error) {
 	tracer := telemetry.Tracer("kodelet.llm.anthropic")
 
 	// Create attributes for the span
@@ -686,6 +694,25 @@ func (t *Thread) NewMessage(ctx context.Context, params anthropic.MessageNewPara
 			telemetry.RecordError(ctx, stream.Err())
 			span.SetStatus(codes.Error, stream.Err().Error())
 			return nil, stream.Err()
+		}
+
+		if streamHandler, ok := handler.(llmtypes.StreamingMessageHandler); ok {
+			switch eventVariant := event.AsAny().(type) {
+			case anthropic.ContentBlockStartEvent:
+				switch eventVariant.ContentBlock.AsAny().(type) {
+				case anthropic.ThinkingBlock:
+					streamHandler.HandleThinkingStart()
+				}
+			case anthropic.ContentBlockDeltaEvent:
+				switch deltaVariant := eventVariant.Delta.AsAny().(type) {
+				case anthropic.TextDelta:
+					streamHandler.HandleTextDelta(deltaVariant.Text)
+				case anthropic.ThinkingDelta:
+					streamHandler.HandleThinkingDelta(deltaVariant.Thinking)
+				}
+			case anthropic.ContentBlockStopEvent:
+				streamHandler.HandleContentBlockEnd()
+			}
 		}
 	}
 

@@ -17,6 +17,16 @@ type MessageHandler interface {
 	HandleDone()
 }
 
+// StreamingMessageHandler extends MessageHandler with delta streaming support.
+// Handlers implementing this interface will receive content as it streams from the LLM.
+type StreamingMessageHandler interface {
+	MessageHandler
+	HandleTextDelta(delta string)     // Called for each text chunk as it streams
+	HandleThinkingStart()             // Called when a thinking block starts
+	HandleThinkingDelta(delta string) // Called for each thinking chunk as it streams
+	HandleContentBlockEnd()           // Called when any content block ends
+}
+
 // MessageEvent represents an event from processing a message
 type MessageEvent struct {
 	Type    string
@@ -72,6 +82,34 @@ func (h *ConsoleMessageHandler) HandleDone() {
 	// No action needed for console handler
 }
 
+// HandleTextDelta prints streamed text chunks to the console unless Silent is true
+func (h *ConsoleMessageHandler) HandleTextDelta(delta string) {
+	if !h.Silent {
+		fmt.Print(delta)
+	}
+}
+
+// HandleThinkingStart prints the thinking prefix to the console unless Silent is true
+func (h *ConsoleMessageHandler) HandleThinkingStart() {
+	if !h.Silent {
+		fmt.Print("💭 Thinking: ")
+	}
+}
+
+// HandleThinkingDelta prints streamed thinking chunks to the console unless Silent is true
+func (h *ConsoleMessageHandler) HandleThinkingDelta(delta string) {
+	if !h.Silent {
+		fmt.Print(delta)
+	}
+}
+
+// HandleContentBlockEnd prints a newline when a content block ends unless Silent is true
+func (h *ConsoleMessageHandler) HandleContentBlockEnd() {
+	if !h.Silent {
+		fmt.Println()
+	}
+}
+
 // ChannelMessageHandler sends messages through a channel (for TUI)
 type ChannelMessageHandler struct {
 	MessageCh chan MessageEvent
@@ -117,6 +155,35 @@ func (h *ChannelMessageHandler) HandleThinking(thinking string) {
 		Type:    EventTypeThinking,
 		Content: strings.TrimLeft(thinking, "\n"),
 	}
+}
+
+// HandleTextDelta sends streamed text chunks through the message channel
+func (h *ChannelMessageHandler) HandleTextDelta(delta string) {
+	h.MessageCh <- MessageEvent{
+		Type:    EventTypeText,
+		Content: delta,
+	}
+}
+
+// HandleThinkingStart sends a thinking start event through the message channel
+func (h *ChannelMessageHandler) HandleThinkingStart() {
+	h.MessageCh <- MessageEvent{
+		Type:    EventTypeThinking,
+		Content: "",
+	}
+}
+
+// HandleThinkingDelta sends streamed thinking chunks through the message channel
+func (h *ChannelMessageHandler) HandleThinkingDelta(delta string) {
+	h.MessageCh <- MessageEvent{
+		Type:    EventTypeThinking,
+		Content: delta,
+	}
+}
+
+// HandleContentBlockEnd is a no-op for channel handler as events are self-contained
+func (h *ChannelMessageHandler) HandleContentBlockEnd() {
+	// No action needed - channel events are self-contained
 }
 
 // StringCollectorHandler collects text responses into a string
@@ -166,4 +233,33 @@ func (h *StringCollectorHandler) HandleDone() {
 // CollectedText returns the accumulated text responses as a single string
 func (h *StringCollectorHandler) CollectedText() string {
 	return h.text.String()
+}
+
+// HandleTextDelta collects streamed text chunks and optionally prints to console
+func (h *StringCollectorHandler) HandleTextDelta(delta string) {
+	h.text.WriteString(delta)
+	if !h.Silent {
+		fmt.Print(delta)
+	}
+}
+
+// HandleThinkingStart optionally prints the thinking prefix to the console
+func (h *StringCollectorHandler) HandleThinkingStart() {
+	if !h.Silent {
+		fmt.Print("💭 Thinking: ")
+	}
+}
+
+// HandleThinkingDelta optionally prints streamed thinking chunks to the console
+func (h *StringCollectorHandler) HandleThinkingDelta(delta string) {
+	if !h.Silent {
+		fmt.Print(delta)
+	}
+}
+
+// HandleContentBlockEnd optionally prints a newline when a content block ends
+func (h *StringCollectorHandler) HandleContentBlockEnd() {
+	if !h.Silent {
+		fmt.Println()
+	}
 }
