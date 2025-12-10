@@ -41,6 +41,10 @@ type Model struct {
 	lastCtrlCPressTime time.Time
 	messageFormatter   *MessageFormatter
 
+	// Streaming state
+	isStreaming       bool // True when receiving streaming deltas
+	streamingMsgIndex int  // Index of the message being streamed to
+
 	// Command auto-completion
 	showCommandDropdown bool
 	availableCommands   []string
@@ -311,9 +315,56 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case llmtypes.MessageEvent:
 		if msg.Done {
 			m.SetProcessing(false)
+			m.isStreaming = false
 			return m, nil
 		}
-		m.AddMessage(FormatAssistantEvent(msg), false)
+
+		switch msg.Type {
+		case llmtypes.EventTypeThinkingStart:
+			// Start a new thinking message
+			m.messages = append(m.messages, llmtypes.Message{
+				Content: "💭 Thinking: ",
+				Role:    "assistant",
+			})
+			m.streamingMsgIndex = len(m.messages) - 1
+			m.isStreaming = true
+			m.updateViewportContent()
+			m.viewport.GotoBottom()
+
+		case llmtypes.EventTypeThinkingDelta, llmtypes.EventTypeTextDelta:
+			if m.isStreaming && m.streamingMsgIndex >= 0 && m.streamingMsgIndex < len(m.messages) {
+				// Append to existing streaming message
+				m.messages[m.streamingMsgIndex].Content += msg.Content
+				m.updateViewportContent()
+				m.viewport.GotoBottom()
+			} else {
+				// Start a new text message if not already streaming
+				m.messages = append(m.messages, llmtypes.Message{
+					Content: msg.Content,
+					Role:    "assistant",
+				})
+				m.streamingMsgIndex = len(m.messages) - 1
+				m.isStreaming = true
+				m.updateViewportContent()
+				m.viewport.GotoBottom()
+			}
+
+		case llmtypes.EventTypeContentBlockEnd:
+			// End the current streaming block
+			m.isStreaming = false
+			m.streamingMsgIndex = -1
+
+		case llmtypes.EventTypeText, llmtypes.EventTypeThinking:
+			// Non-streaming complete content (fallback for non-streaming handlers)
+			m.AddMessage(FormatAssistantEvent(msg), false)
+
+		case llmtypes.EventTypeToolUse, llmtypes.EventTypeToolResult:
+			// Tool events are not streamed, add as separate messages
+			m.isStreaming = false
+			m.streamingMsgIndex = -1
+			m.AddMessage(FormatAssistantEvent(msg), false)
+		}
+
 		return m, func() tea.Msg {
 			return <-m.messageCh
 		}

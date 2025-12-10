@@ -40,6 +40,12 @@ const (
 	EventTypeText       = "text"
 	EventTypeToolUse    = "tool_use"
 	EventTypeToolResult = "tool_result"
+
+	// Streaming event types
+	EventTypeTextDelta       = "text_delta"
+	EventTypeThinkingStart   = "thinking_start"
+	EventTypeThinkingDelta   = "thinking_delta"
+	EventTypeContentBlockEnd = "content_block_end"
 )
 
 // ConsoleMessageHandler prints messages to the console
@@ -160,7 +166,7 @@ func (h *ChannelMessageHandler) HandleThinking(thinking string) {
 // HandleTextDelta sends streamed text chunks through the message channel
 func (h *ChannelMessageHandler) HandleTextDelta(delta string) {
 	h.MessageCh <- MessageEvent{
-		Type:    EventTypeText,
+		Type:    EventTypeTextDelta,
 		Content: delta,
 	}
 }
@@ -168,7 +174,7 @@ func (h *ChannelMessageHandler) HandleTextDelta(delta string) {
 // HandleThinkingStart sends a thinking start event through the message channel
 func (h *ChannelMessageHandler) HandleThinkingStart() {
 	h.MessageCh <- MessageEvent{
-		Type:    EventTypeThinking,
+		Type:    EventTypeThinkingStart,
 		Content: "",
 	}
 }
@@ -176,14 +182,17 @@ func (h *ChannelMessageHandler) HandleThinkingStart() {
 // HandleThinkingDelta sends streamed thinking chunks through the message channel
 func (h *ChannelMessageHandler) HandleThinkingDelta(delta string) {
 	h.MessageCh <- MessageEvent{
-		Type:    EventTypeThinking,
+		Type:    EventTypeThinkingDelta,
 		Content: delta,
 	}
 }
 
-// HandleContentBlockEnd is a no-op for channel handler as events are self-contained
+// HandleContentBlockEnd sends a content block end event through the message channel
 func (h *ChannelMessageHandler) HandleContentBlockEnd() {
-	// No action needed - channel events are self-contained
+	h.MessageCh <- MessageEvent{
+		Type:    EventTypeContentBlockEnd,
+		Content: "",
+	}
 }
 
 // StringCollectorHandler collects text responses into a string
