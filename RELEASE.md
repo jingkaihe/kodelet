@@ -1,5 +1,14 @@
 # Kodelet
 
+## 0.1.19.beta (2025-12-10)
+
+### Features
+
+**Real-time Streaming**: Added streaming support for Anthropic Claude responses
+
+- **Live Output**: Text and thinking content now streams in real-time as the LLM generates it
+- **TUI Enhancement**: Interactive chat mode displays streaming responses character-by-character
+
 ## 0.1.18.beta (2025-11-24)
 
 **Claude Opus 4.5 Support**: Added support for Anthropic's latest Claude Opus 4.5 model (`claude-opus-4-5-20251101`)

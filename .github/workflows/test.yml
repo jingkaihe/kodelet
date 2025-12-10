@@ -61,20 +61,5 @@ jobs:
       - name: Verify build
         run: mise run build
 
-  cross-build:
-    name: Cross Build Verification
-    runs-on: kodelet-runner
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup mise
-        uses: jdx/mise-action@v2
-        with:
-          install: false
-          cache: true
-          experimental: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Test cross compilation
+      - name: Verify cross compilation
         run: mise run cross-build-docker
