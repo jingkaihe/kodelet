@@ -8,7 +8,6 @@
 
 - **Live Output**: Text and thinking content now streams in real-time as the LLM generates it
 - **TUI Enhancement**: Interactive chat mode displays streaming responses character-by-character
-- **New Handler Interface**: Introduced `StreamingMessageHandler` for delta-based content delivery
 
 ## 0.1.18.beta (2025-11-24)
 
