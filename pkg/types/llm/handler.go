@@ -4,9 +4,33 @@
 package llm
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 )
+
+// consoleMu protects console output from concurrent writes during parallel tool execution
+var consoleMu sync.Mutex
+
+// formatJSONInput formats a JSON string with indentation for better readability.
+// If the input is not valid JSON, it returns the original string.
+func formatJSONInput(input string) string {
+	var data any
+	if err := json.Unmarshal([]byte(input), &data); err != nil {
+		return input
+	}
+
+	var buf bytes.Buffer
+	encoder := json.NewEncoder(&buf)
+	encoder.SetEscapeHTML(false)
+	encoder.SetIndent("  ", "  ")
+	if err := encoder.Encode(data); err != nil {
+		return input
+	}
+	return strings.TrimSuffix(buf.String(), "\n")
+}
 
 // MessageHandler defines how message events should be processed
 type MessageHandler interface {
@@ -56,22 +80,28 @@ type ConsoleMessageHandler struct {
 // HandleText prints the text to the console unless Silent is true
 func (h *ConsoleMessageHandler) HandleText(text string) {
 	if !h.Silent {
+		consoleMu.Lock()
 		fmt.Println(text)
 		fmt.Println()
+		consoleMu.Unlock()
 	}
 }
 
 // HandleToolUse prints tool invocation details to the console unless Silent is true
 func (h *ConsoleMessageHandler) HandleToolUse(toolName string, input string) {
 	if !h.Silent {
-		fmt.Printf("🔧 Using tool: %s: %s\n\n", toolName, input)
+		consoleMu.Lock()
+		fmt.Printf("🔧 Using tool: %s\n  %s\n\n", toolName, formatJSONInput(input))
+		consoleMu.Unlock()
 	}
 }
 
 // HandleToolResult prints tool execution results to the console unless Silent is true
 func (h *ConsoleMessageHandler) HandleToolResult(_ string, result string) {
 	if !h.Silent {
+		consoleMu.Lock()
 		fmt.Printf("🔄 Tool result:\n%s\n\n", result)
+		consoleMu.Unlock()
 	}
 }
 
@@ -79,7 +109,9 @@ func (h *ConsoleMessageHandler) HandleToolResult(_ string, result string) {
 func (h *ConsoleMessageHandler) HandleThinking(thinking string) {
 	if !h.Silent {
 		thinking = strings.Trim(thinking, "\n")
+		consoleMu.Lock()
 		fmt.Printf("💭 Thinking: %s\n\n", thinking)
+		consoleMu.Unlock()
 	}
 }
 
@@ -91,28 +123,36 @@ func (h *ConsoleMessageHandler) HandleDone() {
 // HandleTextDelta prints streamed text chunks to the console unless Silent is true
 func (h *ConsoleMessageHandler) HandleTextDelta(delta string) {
 	if !h.Silent {
+		consoleMu.Lock()
 		fmt.Print(delta)
+		consoleMu.Unlock()
 	}
 }
 
 // HandleThinkingStart prints the thinking prefix to the console unless Silent is true
 func (h *ConsoleMessageHandler) HandleThinkingStart() {
 	if !h.Silent {
+		consoleMu.Lock()
 		fmt.Print("💭 Thinking: ")
+		consoleMu.Unlock()
 	}
 }
 
 // HandleThinkingDelta prints streamed thinking chunks to the console unless Silent is true
 func (h *ConsoleMessageHandler) HandleThinkingDelta(delta string) {
 	if !h.Silent {
+		consoleMu.Lock()
 		fmt.Print(delta)
+		consoleMu.Unlock()
 	}
 }
 
 // HandleContentBlockEnd prints a newline when a content block ends unless Silent is true
 func (h *ConsoleMessageHandler) HandleContentBlockEnd() {
 	if !h.Silent {
+		consoleMu.Lock()
 		fmt.Println()
+		consoleMu.Unlock()
 	}
 }
 
@@ -133,7 +173,7 @@ func (h *ChannelMessageHandler) HandleText(text string) {
 func (h *ChannelMessageHandler) HandleToolUse(toolName string, input string) {
 	h.MessageCh <- MessageEvent{
 		Type:    EventTypeToolUse,
-		Content: fmt.Sprintf("%s: %s", toolName, input),
+		Content: fmt.Sprintf("%s\n  %s", toolName, formatJSONInput(input)),
 	}
 }
 
@@ -199,30 +239,39 @@ func (h *ChannelMessageHandler) HandleContentBlockEnd() {
 type StringCollectorHandler struct {
 	Silent bool
 	text   strings.Builder
+	mu     sync.Mutex
 }
 
 // HandleText collects the text in a string builder and optionally prints to console
 func (h *StringCollectorHandler) HandleText(text string) {
+	h.mu.Lock()
 	h.text.WriteString(text)
 	h.text.WriteString("\n")
+	h.mu.Unlock()
 
 	if !h.Silent {
+		consoleMu.Lock()
 		fmt.Println(text)
 		fmt.Println()
+		consoleMu.Unlock()
 	}
 }
 
 // HandleToolUse optionally prints tool invocation details to the console (does not affect collection)
 func (h *StringCollectorHandler) HandleToolUse(toolName string, input string) {
 	if !h.Silent {
-		fmt.Printf("🔧 Using tool: %s: %s\n\n", toolName, input)
+		consoleMu.Lock()
+		fmt.Printf("🔧 Using tool: %s\n  %s\n\n", toolName, formatJSONInput(input))
+		consoleMu.Unlock()
 	}
 }
 
 // HandleToolResult optionally prints tool execution results to the console (does not affect collection)
 func (h *StringCollectorHandler) HandleToolResult(_ string, result string) {
 	if !h.Silent {
+		consoleMu.Lock()
 		fmt.Printf("🔄 Tool result: %s\n\n", result)
+		consoleMu.Unlock()
 	}
 }
 
@@ -230,7 +279,9 @@ func (h *StringCollectorHandler) HandleToolResult(_ string, result string) {
 func (h *StringCollectorHandler) HandleThinking(thinking string) {
 	thinking = strings.Trim(thinking, "\n")
 	if !h.Silent {
+		consoleMu.Lock()
 		fmt.Printf("💭 Thinking: %s\n\n", thinking)
+		consoleMu.Unlock()
 	}
 }
 
@@ -241,34 +292,47 @@ func (h *StringCollectorHandler) HandleDone() {
 
 // CollectedText returns the accumulated text responses as a single string
 func (h *StringCollectorHandler) CollectedText() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	return h.text.String()
 }
 
 // HandleTextDelta collects streamed text chunks and optionally prints to console
 func (h *StringCollectorHandler) HandleTextDelta(delta string) {
+	h.mu.Lock()
 	h.text.WriteString(delta)
+	h.mu.Unlock()
+
 	if !h.Silent {
+		consoleMu.Lock()
 		fmt.Print(delta)
+		consoleMu.Unlock()
 	}
 }
 
 // HandleThinkingStart optionally prints the thinking prefix to the console
 func (h *StringCollectorHandler) HandleThinkingStart() {
 	if !h.Silent {
+		consoleMu.Lock()
 		fmt.Print("💭 Thinking: ")
+		consoleMu.Unlock()
 	}
 }
 
 // HandleThinkingDelta optionally prints streamed thinking chunks to the console
 func (h *StringCollectorHandler) HandleThinkingDelta(delta string) {
 	if !h.Silent {
+		consoleMu.Lock()
 		fmt.Print(delta)
+		consoleMu.Unlock()
 	}
 }
 
 // HandleContentBlockEnd optionally prints a newline when a content block ends
 func (h *StringCollectorHandler) HandleContentBlockEnd() {
 	if !h.Silent {
+		consoleMu.Lock()
 		fmt.Println()
+		consoleMu.Unlock()
 	}
 }

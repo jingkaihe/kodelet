@@ -17,6 +17,8 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
+	"golang.org/x/sync/errgroup"
+
 	"github.com/jingkaihe/kodelet/pkg/auth"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/feedback"
@@ -363,6 +365,116 @@ func isMessageToolUse(msg anthropic.MessageParam) bool {
 	return false
 }
 
+// toolExecResult holds the result of a single tool execution
+type toolExecResult struct {
+	index          int
+	blockID        string
+	toolName       string
+	input          string
+	output         tooltypes.ToolResult
+	structuredData tooltypes.StructuredToolResult
+	renderedOutput string
+}
+
+// executeToolsParallel runs multiple tool calls concurrently and streams results as they complete.
+// It returns results in original order for consistent message building.
+func (t *Thread) executeToolsParallel(
+	ctx context.Context,
+	handler llmtypes.MessageHandler,
+	toolBlocks []struct {
+		block   anthropic.ContentBlockUnion
+		variant anthropic.ToolUseBlock
+	},
+	opt llmtypes.MessageOpt,
+) ([]toolExecResult, error) {
+	if len(toolBlocks) == 0 {
+		return nil, nil
+	}
+
+	// Show all tool invocations upfront so user knows what's about to run
+	for _, tb := range toolBlocks {
+		handler.HandleToolUse(tb.block.Name, tb.variant.JSON.Input.Raw())
+	}
+
+	results := make([]toolExecResult, len(toolBlocks))
+	resultCh := make(chan toolExecResult, len(toolBlocks))
+
+	g, gctx := errgroup.WithContext(ctx)
+
+	for i, tb := range toolBlocks {
+		i, tb := i, tb
+		g.Go(func() error {
+			if err := gctx.Err(); err != nil {
+				return err
+			}
+
+			telemetry.AddEvent(gctx, "tool_execution_start",
+				attribute.String("tool_name", tb.block.Name),
+				attribute.Int("tool_index", i),
+			)
+
+			// Use a per-goroutine silent handler to avoid race conditions on shared handler
+			// XXX: It's tricky to visualise agent streaming in the terminal therefore we disable it for now
+			parallelHandler := &llmtypes.StringCollectorHandler{Silent: true}
+			runToolCtx := t.subagentContextFactory(gctx, t, parallelHandler, opt.CompactRatio, opt.DisableAutoCompact)
+			output := tools.RunTool(runToolCtx, t.state, tb.block.Name, tb.variant.JSON.Input.Raw())
+
+			if err := gctx.Err(); err != nil {
+				return err
+			}
+
+			structuredResult := output.StructuredData()
+			registry := renderers.NewRendererRegistry()
+			renderedOutput := registry.Render(structuredResult)
+
+			telemetry.AddEvent(gctx, "tool_execution_complete",
+				attribute.String("tool_name", tb.block.Name),
+				attribute.Int("tool_index", i),
+				attribute.String("result", output.AssistantFacing()),
+			)
+
+			result := toolExecResult{
+				index:          i,
+				blockID:        tb.block.ID,
+				toolName:       tb.block.Name,
+				input:          tb.variant.JSON.Input.Raw(),
+				output:         output,
+				structuredData: structuredResult,
+				renderedOutput: renderedOutput,
+			}
+
+			select {
+			case resultCh <- result:
+			case <-gctx.Done():
+				return gctx.Err()
+			}
+
+			return nil
+		})
+	}
+
+	// Consumer goroutine: stream results as they complete
+	var consumerWg sync.WaitGroup
+	consumerWg.Add(1)
+	go func() {
+		defer consumerWg.Done()
+		for result := range resultCh {
+			handler.HandleToolResult(result.toolName, result.renderedOutput)
+			results[result.index] = result // preserve original order
+		}
+	}()
+
+	err := g.Wait()
+	close(resultCh)
+	consumerWg.Wait()
+
+	if err != nil {
+		return nil, err
+	}
+
+	return results, nil
+}
+
 // processMessageExchange handles a single message exchange with the LLM, including
 // preparing message parameters, making the API call, and processing the response
 func (t *Thread) processMessageExchange(
@@ -440,8 +552,12 @@ func (t *Thread) processMessageExchange(
 
 	t.updateUsage(response, model)
 
-	// Process the response content blocks
-	toolUseCount := 0
+	// Process the response content blocks - first pass: handle text/thinking, collect tool blocks
+	var toolBlocks []struct {
+		block   anthropic.ContentBlockUnion
+		variant anthropic.ToolUseBlock
+	}
+
 	for _, block := range response.Content {
 		switch variant := block.AsAny().(type) {
 		case anthropic.TextBlock:
@@ -454,44 +570,41 @@ func (t *Thread) processMessageExchange(
 				handler.HandleThinking(variant.Thinking)
 			}
 		case anthropic.ToolUseBlock:
-			toolUseCount++
-			inputJSON, _ := json.Marshal(variant.JSON.Input.Raw())
-			handler.HandleToolUse(block.Name, string(inputJSON))
-
-			// For tracing, add tool execution event
-			telemetry.AddEvent(ctx, "tool_execution_start",
-				attribute.String("tool_name", block.Name),
-			)
-
-			runToolCtx := t.subagentContextFactory(ctx, t, handler, opt.CompactRatio, opt.DisableAutoCompact)
-			output := tools.RunTool(runToolCtx, t.state, block.Name, variant.JSON.Input.Raw())
-
-			// Use CLI rendering for consistent output formatting
-			structuredResult := output.StructuredData()
-			registry := renderers.NewRendererRegistry()
-			renderedOutput := registry.Render(structuredResult)
-			handler.HandleToolResult(block.Name, renderedOutput)
-
-			// Store structured results
-			t.SetStructuredToolResult(block.ID, structuredResult)
-
-			// For tracing, add tool execution completion event
-			telemetry.AddEvent(ctx, "tool_execution_complete",
-				attribute.String("tool_name", block.Name),
-				attribute.String("result", output.AssistantFacing()),
-			)
-
-			// Add tool result to messages for next API call
-			logger.G(ctx).
-				WithField("tool_name", block.Name).
-				WithField("result", output.AssistantFacing()).
-				Debug("Adding tool result to messages")
-
-			t.messages = append(t.messages, anthropic.NewUserMessage(
-				anthropic.NewToolResultBlock(block.ID, output.AssistantFacing(), false),
-			))
+			toolBlocks = append(toolBlocks, struct {
+				block   anthropic.ContentBlockUnion
+				variant anthropic.ToolUseBlock
+			}{block, variant})
 		}
 	}
+
+	// Execute tools in parallel - handler calls (HandleToolUse/HandleToolResult) happen inside
+	// as each tool completes for real-time feedback
+	toolResults, err := t.executeToolsParallel(ctx, handler, toolBlocks, opt)
+	if err != nil {
+		return "", false, errors.Wrap(err, "failed to execute tools in parallel")
+	}
+
+	// Build tool result blocks for LLM message (in original order)
+	toolResultBlocks := make([]anthropic.ContentBlockParamUnion, 0, len(toolResults))
+	for _, result := range toolResults {
+		t.SetStructuredToolResult(result.blockID, result.structuredData)
+
+		logger.G(ctx).
+			WithField("tool_name", result.toolName).
+			WithField("result", result.output.AssistantFacing()).
+			Debug("Adding tool result to messages")
+
+		toolResultBlocks = append(toolResultBlocks,
+			anthropic.NewToolResultBlock(result.blockID, result.output.AssistantFacing(), false),
+		)
+	}
+
+	// Add all tool results as a single user message (required by Anthropic API)
+	if len(toolResultBlocks) > 0 {
+		t.messages = append(t.messages, anthropic.NewUserMessage(toolResultBlocks...))
+	}
+
+	toolUseCount := len(toolResults)
 
 	// Log structured LLM usage after all content processing is complete (main agent only)
 	if !t.config.IsSubAgent && !opt.DisableUsageLog {

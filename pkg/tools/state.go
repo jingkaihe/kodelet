@@ -169,8 +169,12 @@ func WithLLMConfig(config llmtypes.Config) BasicStateOption {
 
 // TodoFilePath returns the path to the todo file
 func (s *BasicState) TodoFilePath() (string, error) {
-	if s.todoFilePath != "" {
-		return s.todoFilePath, nil
+	s.mu.RLock()
+	todoPath := s.todoFilePath
+	s.mu.RUnlock()
+
+	if todoPath != "" {
+		return todoPath, nil
 	}
 	pwd, err := os.Getwd()
 	if err != nil {
@@ -183,6 +187,8 @@ func (s *BasicState) TodoFilePath() (string, error) {
 
 // SetTodoFilePath sets the path to the todo file
 func (s *BasicState) SetTodoFilePath(path string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.todoFilePath = path
 }
 
@@ -229,16 +235,22 @@ func (s *BasicState) ClearFileLastAccessed(path string) error {
 
 // BasicTools returns the list of basic tools
 func (s *BasicState) BasicTools() []tooltypes.Tool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.tools
 }
 
 // MCPTools returns the list of MCP tools
 func (s *BasicState) MCPTools() []tooltypes.Tool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.mcpTools
 }
 
 // Tools returns all available tools
 func (s *BasicState) Tools() []tooltypes.Tool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	tools := make([]tooltypes.Tool, 0, len(s.tools)+len(s.mcpTools)+len(s.customTools))
 	tools = append(tools, s.tools...)
 	tools = append(tools, s.mcpTools...)
