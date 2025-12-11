@@ -379,7 +379,6 @@ type toolExecResult struct {
 // executeToolsParallel runs multiple tool calls concurrently and returns results in order
 func (t *Thread) executeToolsParallel(
 	ctx context.Context,
-	handler llmtypes.MessageHandler,
 	toolBlocks []struct {
 		block   anthropic.ContentBlockUnion
 		variant anthropic.ToolUseBlock
@@ -403,7 +402,10 @@ func (t *Thread) executeToolsParallel(
 				attribute.Int("tool_index", i),
 			)
 
-			runToolCtx := t.subagentContextFactory(gctx, t, handler, opt.CompactRatio, opt.DisableAutoCompact)
+			// Use a per-goroutine silent handler to avoid race conditions on shared handler
+			// The actual results are captured in toolExecResult and displayed after parallel execution
+			parallelHandler := &llmtypes.StringCollectorHandler{Silent: false}
+			runToolCtx := t.subagentContextFactory(gctx, t, parallelHandler, opt.CompactRatio, opt.DisableAutoCompact)
 			output := tools.RunTool(runToolCtx, t.state, tb.block.Name, tb.variant.JSON.Input.Raw())
 
 			structuredResult := output.StructuredData()
@@ -542,7 +544,7 @@ func (t *Thread) processMessageExchange(
 	}
 
 	// Execute tools in parallel
-	toolResults, err := t.executeToolsParallel(ctx, handler, toolBlocks, opt)
+	toolResults, err := t.executeToolsParallel(ctx, toolBlocks, opt)
 	if err != nil {
 		return "", false, errors.Wrap(err, "failed to execute tools in parallel")
 	}
