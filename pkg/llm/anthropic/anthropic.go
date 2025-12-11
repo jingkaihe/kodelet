@@ -404,6 +404,11 @@ func (t *Thread) executeToolsParallel(
 	for i, tb := range toolBlocks {
 		i, tb := i, tb // capture loop variables
 		g.Go(func() error {
+			// Check for cancellation before starting expensive tool execution
+			if err := gctx.Err(); err != nil {
+				return err
+			}
+
 			telemetry.AddEvent(gctx, "tool_execution_start",
 				attribute.String("tool_name", tb.block.Name),
 				attribute.Int("tool_index", i),
@@ -413,6 +418,11 @@ func (t *Thread) executeToolsParallel(
 			parallelHandler := &llmtypes.StringCollectorHandler{Silent: false}
 			runToolCtx := t.subagentContextFactory(gctx, t, parallelHandler, opt.CompactRatio, opt.DisableAutoCompact)
 			output := tools.RunTool(runToolCtx, t.state, tb.block.Name, tb.variant.JSON.Input.Raw())
+
+			// Check for cancellation after tool execution before processing results
+			if err := gctx.Err(); err != nil {
+				return err
+			}
 
 			structuredResult := output.StructuredData()
 			registry := renderers.NewRendererRegistry()
@@ -434,8 +444,12 @@ func (t *Thread) executeToolsParallel(
 				renderedOutput: renderedOutput,
 			}
 
-			// Send result to channel immediately for streaming display
-			resultCh <- result
+			// Send result to channel, respecting context cancellation
+			select {
+			case resultCh <- result:
+			case <-gctx.Done():
+				return gctx.Err()
+			}
 
 			return nil
 		})
