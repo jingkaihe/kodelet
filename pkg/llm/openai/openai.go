@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"maps"
 	"net/http"
 	"os"
@@ -530,10 +531,10 @@ func (t *Thread) processMessageExchange(
 	apiStartTime := time.Now()
 
 	// Check if handler supports streaming
-	_, isStreamingHandler := handler.(llmtypes.StreamingMessageHandler)
+	streamHandler, isStreamingHandler := handler.(llmtypes.StreamingMessageHandler)
 
 	// Make the API request with retry logic (use streaming if handler supports it)
-	response, err := t.createChatCompletionWithRetry(ctx, requestParams, handler)
+	response, err := t.createChatCompletionWithRetry(ctx, requestParams, streamHandler, isStreamingHandler)
 	if err != nil {
 		return "", false, errors.Wrap(err, "error sending message to OpenAI")
 	}
@@ -700,7 +701,7 @@ func (t *Thread) processPendingFeedback(ctx context.Context, requestParams *open
 	return nil
 }
 
-func (t *Thread) createChatCompletionWithRetry(ctx context.Context, requestParams openai.ChatCompletionRequest, handler llmtypes.MessageHandler) (openai.ChatCompletionResponse, error) {
+func (t *Thread) createChatCompletionWithRetry(ctx context.Context, requestParams openai.ChatCompletionRequest, streamHandler llmtypes.StreamingMessageHandler, isStreamingHandler bool) (openai.ChatCompletionResponse, error) {
 	var response openai.ChatCompletionResponse
 	var originalErrors []error // Store all errors for better context
 
@@ -718,9 +719,6 @@ func (t *Thread) createChatCompletionWithRetry(ctx context.Context, requestParam
 	default:
 		delayType = retry.BackOffDelay
 	}
-
-	// Check if handler supports streaming
-	streamHandler, isStreamingHandler := handler.(llmtypes.StreamingMessageHandler)
 
 	err := retry.Do(
 		func() error {
@@ -788,7 +786,7 @@ func (t *Thread) createStreamingChatCompletion(ctx context.Context, requestParam
 		}
 		if err != nil {
 			// io.EOF indicates the stream has ended normally
-			if err.Error() == "EOF" {
+			if errors.Is(err, io.EOF) {
 				break
 			}
 			return openai.ChatCompletionResponse{}, err
@@ -834,23 +832,28 @@ func (t *Thread) createStreamingChatCompletion(ctx context.Context, requestParam
 			if len(delta.ToolCalls) > 0 {
 				for _, tc := range delta.ToolCalls {
 					// Find or create the tool call entry
-					if tc.Index != nil {
-						idx := *tc.Index
-						for len(toolCalls) <= idx {
-							toolCalls = append(toolCalls, openai.ToolCall{})
-						}
-						if tc.ID != "" {
-							toolCalls[idx].ID = tc.ID
-						}
-						if tc.Type != "" {
-							toolCalls[idx].Type = tc.Type
-						}
-						if tc.Function.Name != "" {
-							toolCalls[idx].Function.Name = tc.Function.Name
-						}
-						if tc.Function.Arguments != "" {
-							toolCalls[idx].Function.Arguments += tc.Function.Arguments
-						}
+					if tc.Index == nil {
+						logger.G(ctx).WithFields(map[string]any{
+							"tool_call_id":  tc.ID,
+							"function_name": tc.Function.Name,
+						}).Warn("received tool call delta with nil index, skipping")
+						continue
+					}
+					idx := *tc.Index
+					for len(toolCalls) <= idx {
+						toolCalls = append(toolCalls, openai.ToolCall{})
+					}
+					if tc.ID != "" {
+						toolCalls[idx].ID = tc.ID
+					}
+					if tc.Type != "" {
+						toolCalls[idx].Type = tc.Type
+					}
+					if tc.Function.Name != "" {
+						toolCalls[idx].Function.Name = tc.Function.Name
+					}
+					if tc.Function.Arguments != "" {
+						toolCalls[idx].Function.Arguments += tc.Function.Arguments
 					}
 				}
 			}
