@@ -414,7 +414,8 @@ func (t *Thread) executeToolsParallel(
 			)
 
 			// Use a per-goroutine silent handler to avoid race conditions on shared handler
-			parallelHandler := &llmtypes.StringCollectorHandler{Silent: false}
+			// XXX: It's tricky to visualise agent streaming in the terminal therefore we disable it for now
+			parallelHandler := &llmtypes.StringCollectorHandler{Silent: true}
 			runToolCtx := t.subagentContextFactory(gctx, t, parallelHandler, opt.CompactRatio, opt.DisableAutoCompact)
 			output := tools.RunTool(runToolCtx, t.state, tb.block.Name, tb.variant.JSON.Input.Raw())
 
