@@ -376,9 +376,11 @@ type toolExecResult struct {
 	renderedOutput string
 }
 
-// executeToolsParallel runs multiple tool calls concurrently and returns results in order
+// executeToolsParallel runs multiple tool calls concurrently and streams results as they complete.
+// It returns results in original order for consistent message building.
 func (t *Thread) executeToolsParallel(
 	ctx context.Context,
+	handler llmtypes.MessageHandler,
 	toolBlocks []struct {
 		block   anthropic.ContentBlockUnion
 		variant anthropic.ToolUseBlock
@@ -389,8 +391,13 @@ func (t *Thread) executeToolsParallel(
 		return nil, nil
 	}
 
+	// Show all tool invocations upfront so user knows what's about to run
+	for _, tb := range toolBlocks {
+		handler.HandleToolUse(tb.block.Name, tb.variant.JSON.Input.Raw())
+	}
+
 	results := make([]toolExecResult, len(toolBlocks))
-	var resultsMu sync.Mutex
+	resultCh := make(chan toolExecResult, len(toolBlocks))
 
 	g, gctx := errgroup.WithContext(ctx)
 
@@ -403,8 +410,7 @@ func (t *Thread) executeToolsParallel(
 			)
 
 			// Use a per-goroutine silent handler to avoid race conditions on shared handler
-			// The actual results are captured in toolExecResult and displayed after parallel execution
-			parallelHandler := &llmtypes.StringCollectorHandler{Silent: false}
+			parallelHandler := &llmtypes.StringCollectorHandler{Silent: true}
 			runToolCtx := t.subagentContextFactory(gctx, t, parallelHandler, opt.CompactRatio, opt.DisableAutoCompact)
 			output := tools.RunTool(runToolCtx, t.state, tb.block.Name, tb.variant.JSON.Input.Raw())
 
@@ -418,8 +424,7 @@ func (t *Thread) executeToolsParallel(
 				attribute.String("result", output.AssistantFacing()),
 			)
 
-			resultsMu.Lock()
-			results[i] = toolExecResult{
+			result := toolExecResult{
 				index:          i,
 				blockID:        tb.block.ID,
 				toolName:       tb.block.Name,
@@ -428,13 +433,35 @@ func (t *Thread) executeToolsParallel(
 				structuredData: structuredResult,
 				renderedOutput: renderedOutput,
 			}
-			resultsMu.Unlock()
+
+			// Send result to channel immediately for streaming display
+			resultCh <- result
 
 			return nil
 		})
 	}
 
-	if err := g.Wait(); err != nil {
+	// Consumer goroutine: stream results as they complete
+	var consumerWg sync.WaitGroup
+	consumerWg.Add(1)
+	go func() {
+		defer consumerWg.Done()
+		for result := range resultCh {
+			// Display result immediately as it completes
+			handler.HandleToolResult(result.toolName, result.renderedOutput)
+			// Store in correct position for ordered message building
+			results[result.index] = result
+		}
+	}()
+
+	// Wait for all tool executions to complete
+	err := g.Wait()
+	close(resultCh)
+
+	// Wait for consumer to finish processing all results
+	consumerWg.Wait()
+
+	if err != nil {
 		return nil, err
 	}
 
@@ -543,18 +570,16 @@ func (t *Thread) processMessageExchange(
 		}
 	}
 
-	// Execute tools in parallel
-	toolResults, err := t.executeToolsParallel(ctx, toolBlocks, opt)
+	// Execute tools in parallel - handler calls (HandleToolUse/HandleToolResult) happen inside
+	// as each tool completes for real-time feedback
+	toolResults, err := t.executeToolsParallel(ctx, handler, toolBlocks, opt)
 	if err != nil {
 		return "", false, errors.Wrap(err, "failed to execute tools in parallel")
 	}
 
-	// Process tool results in order for consistent handler output
+	// Build tool result blocks for LLM message (in original order)
 	toolResultBlocks := make([]anthropic.ContentBlockParamUnion, 0, len(toolResults))
 	for _, result := range toolResults {
-		handler.HandleToolUse(result.toolName, result.input)
-		handler.HandleToolResult(result.toolName, result.renderedOutput)
-
 		t.SetStructuredToolResult(result.blockID, result.structuredData)
 
 		logger.G(ctx).
