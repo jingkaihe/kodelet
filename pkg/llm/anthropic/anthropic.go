@@ -455,8 +455,7 @@ func (t *Thread) processMessageExchange(
 			}
 		case anthropic.ToolUseBlock:
 			toolUseCount++
-			inputJSON, _ := json.Marshal(variant.JSON.Input.Raw())
-			handler.HandleToolUse(block.Name, string(inputJSON))
+			handler.HandleToolUse(block.Name, variant.JSON.Input.Raw())
 
 			// For tracing, add tool execution event
 			telemetry.AddEvent(ctx, "tool_execution_start",

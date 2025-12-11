@@ -4,9 +4,29 @@
 package llm
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"strings"
 )
+
+// formatJSONInput formats a JSON string with indentation for better readability.
+// If the input is not valid JSON, it returns the original string.
+func formatJSONInput(input string) string {
+	var data any
+	if err := json.Unmarshal([]byte(input), &data); err != nil {
+		return input
+	}
+
+	var buf bytes.Buffer
+	encoder := json.NewEncoder(&buf)
+	encoder.SetEscapeHTML(false)
+	encoder.SetIndent("  ", "  ")
+	if err := encoder.Encode(data); err != nil {
+		return input
+	}
+	return strings.TrimSuffix(buf.String(), "\n")
+}
 
 // MessageHandler defines how message events should be processed
 type MessageHandler interface {
@@ -64,7 +84,7 @@ func (h *ConsoleMessageHandler) HandleText(text string) {
 // HandleToolUse prints tool invocation details to the console unless Silent is true
 func (h *ConsoleMessageHandler) HandleToolUse(toolName string, input string) {
 	if !h.Silent {
-		fmt.Printf("🔧 Using tool: %s: %s\n\n", toolName, input)
+		fmt.Printf("🔧 Using tool: %s\n  %s\n\n", toolName, formatJSONInput(input))
 	}
 }
 
@@ -133,7 +153,7 @@ func (h *ChannelMessageHandler) HandleText(text string) {
 func (h *ChannelMessageHandler) HandleToolUse(toolName string, input string) {
 	h.MessageCh <- MessageEvent{
 		Type:    EventTypeToolUse,
-		Content: fmt.Sprintf("%s: %s", toolName, input),
+		Content: fmt.Sprintf("%s\n  %s", toolName, formatJSONInput(input)),
 	}
 }
 
@@ -215,7 +235,7 @@ func (h *StringCollectorHandler) HandleText(text string) {
 // HandleToolUse optionally prints tool invocation details to the console (does not affect collection)
 func (h *StringCollectorHandler) HandleToolUse(toolName string, input string) {
 	if !h.Silent {
-		fmt.Printf("🔧 Using tool: %s: %s\n\n", toolName, input)
+		fmt.Printf("🔧 Using tool: %s\n  %s\n\n", toolName, formatJSONInput(input))
 	}
 }
 
