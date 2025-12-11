@@ -110,7 +110,7 @@ func TestChannelMessageHandler(t *testing.T) {
 
 	event = <-ch
 	assert.Equal(t, llmtypes.EventTypeToolUse, event.Type)
-	assert.Equal(t, "test-tool: test-input", event.Content)
+	assert.Equal(t, "test-tool\n  test-input", event.Content)
 	assert.False(t, event.Done)
 
 	event = <-ch
