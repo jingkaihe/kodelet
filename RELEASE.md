@@ -1,5 +1,21 @@
 # Kodelet
 
+## 0.1.21.beta (2025-12-11)
+
+### Features
+
+**Parallel Tool Execution**: Tool calls are now executed concurrently for Anthropic Claude models
+
+- **Faster Execution**: Multiple independent tool calls run in parallel, significantly reducing wait times
+- **Real-time Results**: Tool results stream as they complete rather than waiting for all tools to finish
+- **Improved Readability**: Tool use inputs are now pretty-printed with JSON formatting
+
+### Bug Fixes
+
+- **Concurrency Safety**: Added mutex protection for handler access during parallel tool execution
+- **Output Visibility**: Fixed tool output display in parallel execution mode
+- **Context Cancellation**: Proper cancellation handling prevents orphaned tool executions
+
 ## 0.1.20.beta (2025-12-11)
 
 ### Features
