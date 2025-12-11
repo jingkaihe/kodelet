@@ -1,5 +1,14 @@
 # Kodelet
 
+## 0.1.20.beta (2025-12-11)
+
+### Features
+
+**OpenAI Streaming Support**: Added streaming support for OpenAI and compatible API responses
+
+- **Live Output**: Text content now streams in real-time for OpenAI compatible models
+- **Reasoning Support**: Streams reasoning content for models with extended thinking
+
 ## 0.1.19.beta (2025-12-10)
 
 ### Features

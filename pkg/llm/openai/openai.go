@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"maps"
 	"net/http"
 	"os"
@@ -529,8 +530,11 @@ func (t *Thread) processMessageExchange(
 	// Record start time for usage logging
 	apiStartTime := time.Now()
 
-	// Make the API request with retry logic
-	response, err := t.createChatCompletionWithRetry(ctx, requestParams)
+	// Check if handler supports streaming
+	streamHandler, isStreamingHandler := handler.(llmtypes.StreamingMessageHandler)
+
+	// Make the API request with retry logic (use streaming if handler supports it)
+	response, err := t.createChatCompletionWithRetry(ctx, requestParams, streamHandler, isStreamingHandler)
 	if err != nil {
 		return "", false, errors.Wrap(err, "error sending message to OpenAI")
 	}
@@ -553,16 +557,21 @@ func (t *Thread) processMessageExchange(
 	assistantMessage := response.Choices[0].Message
 	t.messages = append(t.messages, assistantMessage)
 
-	// Extract text content
+	// Extract text content (skip if streaming handler already processed it)
 	content := assistantMessage.Content
 	if content != "" {
-		handler.HandleText(content)
+		if !isStreamingHandler {
+			handler.HandleText(content)
+		}
 		finalOutput = content
 	}
 
+	// Handle reasoning content (skip if streaming handler already processed it)
 	thinking := assistantMessage.ReasoningContent
 	if thinking != "" {
-		handler.HandleThinking(thinking)
+		if !isStreamingHandler {
+			handler.HandleThinking(thinking)
+		}
 	}
 
 	// Check for tool calls
@@ -692,7 +701,7 @@ func (t *Thread) processPendingFeedback(ctx context.Context, requestParams *open
 	return nil
 }
 
-func (t *Thread) createChatCompletionWithRetry(ctx context.Context, requestParams openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
+func (t *Thread) createChatCompletionWithRetry(ctx context.Context, requestParams openai.ChatCompletionRequest, streamHandler llmtypes.StreamingMessageHandler, isStreamingHandler bool) (openai.ChatCompletionResponse, error) {
 	var response openai.ChatCompletionResponse
 	var originalErrors []error // Store all errors for better context
 
@@ -714,7 +723,11 @@ func (t *Thread) createChatCompletionWithRetry(ctx context.Context, requestParam
 	err := retry.Do(
 		func() error {
 			var apiErr error
-			response, apiErr = t.client.CreateChatCompletion(ctx, requestParams)
+			if isStreamingHandler {
+				response, apiErr = t.createStreamingChatCompletion(ctx, requestParams, streamHandler)
+			} else {
+				response, apiErr = t.client.CreateChatCompletion(ctx, requestParams)
+			}
 			if apiErr != nil {
 				originalErrors = append(originalErrors, apiErr)
 			}
@@ -736,6 +749,147 @@ func (t *Thread) createChatCompletionWithRetry(ctx context.Context, requestParam
 	}
 
 	return response, err
+}
+
+// createStreamingChatCompletion handles streaming responses from OpenAI API.
+// It streams content to the handler as it arrives and reconstructs the full response.
+func (t *Thread) createStreamingChatCompletion(ctx context.Context, requestParams openai.ChatCompletionRequest, handler llmtypes.StreamingMessageHandler) (openai.ChatCompletionResponse, error) {
+	// Enable streaming and request usage info
+	requestParams.Stream = true
+	requestParams.StreamOptions = &openai.StreamOptions{
+		IncludeUsage: true,
+	}
+
+	stream, err := t.client.CreateChatCompletionStream(ctx, requestParams)
+	if err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
+	defer stream.Close()
+
+	// Accumulators for the full response
+	var contentBuilder strings.Builder
+	var reasoningBuilder strings.Builder
+	var toolCalls []openai.ToolCall
+	var usage openai.Usage
+	var responseID string
+	var model string
+	var finishReason openai.FinishReason
+
+	// Track if we've started text/thinking blocks
+	textStarted := false
+	reasoningStarted := false
+
+	for {
+		streamResponse, err := stream.Recv()
+		if errors.Is(err, context.Canceled) {
+			return openai.ChatCompletionResponse{}, err
+		}
+		if err != nil {
+			// io.EOF indicates the stream has ended normally
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return openai.ChatCompletionResponse{}, err
+		}
+
+		// Capture response metadata
+		if responseID == "" && streamResponse.ID != "" {
+			responseID = streamResponse.ID
+		}
+		if model == "" && streamResponse.Model != "" {
+			model = streamResponse.Model
+		}
+
+		// Handle usage from stream (sent at the end with StreamOptions.IncludeUsage)
+		if streamResponse.Usage != nil {
+			usage = *streamResponse.Usage
+		}
+
+		// Process each choice delta
+		for _, choice := range streamResponse.Choices {
+			delta := choice.Delta
+
+			// Handle text content delta
+			if delta.Content != "" {
+				if !textStarted {
+					textStarted = true
+				}
+				handler.HandleTextDelta(delta.Content)
+				contentBuilder.WriteString(delta.Content)
+			}
+
+			// Handle reasoning content delta (for o1/o3 models)
+			if delta.ReasoningContent != "" {
+				if !reasoningStarted {
+					reasoningStarted = true
+					handler.HandleThinkingStart()
+				}
+				handler.HandleThinkingDelta(delta.ReasoningContent)
+				reasoningBuilder.WriteString(delta.ReasoningContent)
+			}
+
+			// Handle tool calls - accumulate them
+			if len(delta.ToolCalls) > 0 {
+				for _, tc := range delta.ToolCalls {
+					// Find or create the tool call entry
+					if tc.Index == nil {
+						logger.G(ctx).WithFields(map[string]any{
+							"tool_call_id":  tc.ID,
+							"function_name": tc.Function.Name,
+						}).Warn("received tool call delta with nil index, skipping")
+						continue
+					}
+					idx := *tc.Index
+					for len(toolCalls) <= idx {
+						toolCalls = append(toolCalls, openai.ToolCall{})
+					}
+					if tc.ID != "" {
+						toolCalls[idx].ID = tc.ID
+					}
+					if tc.Type != "" {
+						toolCalls[idx].Type = tc.Type
+					}
+					if tc.Function.Name != "" {
+						toolCalls[idx].Function.Name = tc.Function.Name
+					}
+					if tc.Function.Arguments != "" {
+						toolCalls[idx].Function.Arguments += tc.Function.Arguments
+					}
+				}
+			}
+
+			// Capture finish reason
+			if choice.FinishReason != "" {
+				finishReason = choice.FinishReason
+			}
+		}
+	}
+
+	// Signal end of content blocks
+	if textStarted || reasoningStarted {
+		handler.HandleContentBlockEnd()
+	}
+
+	// Reconstruct the full response
+	response := openai.ChatCompletionResponse{
+		ID:    responseID,
+		Model: model,
+		Choices: []openai.ChatCompletionChoice{
+			{
+				Index: 0,
+				Message: openai.ChatCompletionMessage{
+					Role:             openai.ChatMessageRoleAssistant,
+					Content:          contentBuilder.String(),
+					ReasoningContent: reasoningBuilder.String(),
+					ToolCalls:        toolCalls,
+				},
+				FinishReason: finishReason,
+			},
+		},
+		Usage: usage,
+	}
+
+	return response, nil
 }
 
 func (t *Thread) tools(opt llmtypes.MessageOpt) []tooltypes.Tool {
