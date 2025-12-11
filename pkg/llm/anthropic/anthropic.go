@@ -402,9 +402,8 @@ func (t *Thread) executeToolsParallel(
 	g, gctx := errgroup.WithContext(ctx)
 
 	for i, tb := range toolBlocks {
-		i, tb := i, tb // capture loop variables
+		i, tb := i, tb
 		g.Go(func() error {
-			// Check for cancellation before starting expensive tool execution
 			if err := gctx.Err(); err != nil {
 				return err
 			}
@@ -419,7 +418,6 @@ func (t *Thread) executeToolsParallel(
 			runToolCtx := t.subagentContextFactory(gctx, t, parallelHandler, opt.CompactRatio, opt.DisableAutoCompact)
 			output := tools.RunTool(runToolCtx, t.state, tb.block.Name, tb.variant.JSON.Input.Raw())
 
-			// Check for cancellation after tool execution before processing results
 			if err := gctx.Err(); err != nil {
 				return err
 			}
@@ -444,7 +442,6 @@ func (t *Thread) executeToolsParallel(
 				renderedOutput: renderedOutput,
 			}
 
-			// Send result to channel, respecting context cancellation
 			select {
 			case resultCh <- result:
 			case <-gctx.Done():
@@ -461,18 +458,13 @@ func (t *Thread) executeToolsParallel(
 	go func() {
 		defer consumerWg.Done()
 		for result := range resultCh {
-			// Display result immediately as it completes
 			handler.HandleToolResult(result.toolName, result.renderedOutput)
-			// Store in correct position for ordered message building
-			results[result.index] = result
+			results[result.index] = result // preserve original order
 		}
 	}()
 
-	// Wait for all tool executions to complete
 	err := g.Wait()
 	close(resultCh)
-
-	// Wait for consumer to finish processing all results
 	consumerWg.Wait()
 
 	if err != nil {

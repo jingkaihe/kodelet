@@ -239,7 +239,7 @@ func (h *ChannelMessageHandler) HandleContentBlockEnd() {
 type StringCollectorHandler struct {
 	Silent bool
 	text   strings.Builder
-	mu     sync.Mutex // protects text builder for concurrent access
+	mu     sync.Mutex
 }
 
 // HandleText collects the text in a string builder and optionally prints to console
