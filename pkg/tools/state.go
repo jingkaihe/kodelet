@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/skills"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
@@ -167,6 +168,29 @@ func WithLLMConfig(config llmtypes.Config) BasicStateOption {
 	}
 }
 
+// WithSkillTool returns an option that configures the skill tool with discovered skills
+func WithSkillTool(discoveredSkills map[string]interface{}, enabled bool) BasicStateOption {
+	return func(_ context.Context, s *BasicState) error {
+		// Convert interface map to skills.Skill map
+		skillsMap := make(map[string]*skills.Skill)
+		for name, skill := range discoveredSkills {
+			if s, ok := skill.(*skills.Skill); ok {
+				skillsMap[name] = s
+			}
+		}
+
+		skillTool := NewSkillTool(skillsMap, enabled)
+		for i, tool := range s.tools {
+			if tool.Name() == "skill" {
+				s.tools[i] = skillTool
+				return nil
+			}
+		}
+		s.tools = append(s.tools, skillTool)
+		return nil
+	}
+}
+
 // TodoFilePath returns the path to the todo file
 func (s *BasicState) TodoFilePath() (string, error) {
 	s.mu.RLock()
@@ -303,6 +327,12 @@ func (s *BasicState) configureTools() {
 			s.tools[i] = NewBashTool(s.llmConfig.AllowedCommands)
 		case "web_fetch":
 			s.tools[i] = NewWebFetchTool(s.llmConfig.AllowedDomainsFile)
+		case "skill":
+			// Skill tool is configured via WithSkillTool option
+			// Keep existing if already configured, otherwise use disabled placeholder
+			if _, ok := tool.(*SkillTool); !ok {
+				s.tools[i] = NewSkillTool(nil, false)
+			}
 		}
 	}
 }

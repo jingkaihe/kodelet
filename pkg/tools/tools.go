@@ -44,6 +44,7 @@ var toolRegistry = map[string]tooltypes.Tool{
 	"web_fetch":                 &WebFetchTool{},
 	"image_recognition":         &ImageRecognitionTool{},
 	"view_background_processes": &ViewBackgroundProcessesTool{},
+	"skill":                     NewSkillTool(nil, false),
 }
 
 // metaTools are always enabled regardless of configuration
@@ -69,6 +70,7 @@ var defaultMainTools = []string{
 	"web_fetch",
 	"image_recognition",
 	"view_background_processes",
+	"skill",
 }
 
 // defaultSubAgentTools are the default tools for subagent

@@ -17,6 +17,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/mcp"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
+	"github.com/jingkaihe/kodelet/pkg/skills"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
@@ -38,6 +39,7 @@ type RunConfig struct {
 	FragmentDirs       []string          // Additional fragment directories
 	IncludeHistory     bool              // Include historical conversation data in headless streaming
 	IDE                bool              // Enable IDE integration mode (display conversation ID prominently)
+	NoSkills           bool              // Disable agentic skills
 }
 
 func NewRunConfig() *RunConfig {
@@ -55,6 +57,7 @@ func NewRunConfig() *RunConfig {
 		FragmentDirs:       []string{},
 		IncludeHistory:     false,
 		IDE:                false,
+		NoSkills:           false,
 	}
 }
 
@@ -143,6 +146,44 @@ func applyFragmentRestrictions(llmConfig *llmtypes.Config, fragmentMetadata *fra
 	}
 }
 
+// initializeSkills discovers and configures skills based on configuration
+func initializeSkills(ctx context.Context, llmConfig llmtypes.Config, noSkillsFlag bool) (map[string]interface{}, bool) {
+	enabled := true
+	if llmConfig.Skills != nil && !llmConfig.Skills.Enabled {
+		enabled = false
+	}
+	if noSkillsFlag {
+		enabled = false
+	}
+
+	if !enabled {
+		return nil, false
+	}
+
+	discovery, err := skills.NewDiscovery()
+	if err != nil {
+		logger.G(ctx).WithError(err).Debug("Failed to create skill discovery")
+		return nil, false
+	}
+
+	allSkills, err := discovery.DiscoverSkills()
+	if err != nil {
+		logger.G(ctx).WithError(err).Debug("Failed to discover skills")
+		return nil, false
+	}
+
+	if llmConfig.Skills != nil && len(llmConfig.Skills.Allowed) > 0 {
+		allSkills = skills.FilterByAllowlist(allSkills, llmConfig.Skills.Allowed)
+	}
+
+	result := make(map[string]interface{})
+	for name, skill := range allSkills {
+		result[name] = skill
+	}
+
+	return result, true
+}
+
 var runCmd = &cobra.Command{
 	Use:   "run [query]",
 	Short: "Execute a one-shot query with Kodelet",
@@ -217,6 +258,10 @@ var runCmd = &cobra.Command{
 		stateOpts = append(stateOpts, tools.WithLLMConfig(llmConfig))
 		stateOpts = append(stateOpts, tools.WithCustomTools(customManager))
 		stateOpts = append(stateOpts, tools.WithMainTools())
+
+		// Initialize skills
+		discoveredSkills, skillsEnabled := initializeSkills(ctx, llmConfig, config.NoSkills)
+		stateOpts = append(stateOpts, tools.WithSkillTool(discoveredSkills, skillsEnabled))
 
 		// Set up MCP execution mode
 		if mcpManager != nil {
@@ -369,6 +414,7 @@ func init() {
 	runCmd.Flags().StringSlice("fragment-dirs", defaults.FragmentDirs, "Additional fragment directories (e.g., --fragment-dirs ./project-fragments --fragment-dirs ./team-fragments)")
 	runCmd.Flags().Bool("include-history", defaults.IncludeHistory, "Include historical conversation data in headless streaming")
 	runCmd.Flags().Bool("ide", defaults.IDE, "Enable IDE integration mode (display conversation ID prominently)")
+	runCmd.Flags().Bool("no-skills", defaults.NoSkills, "Disable agentic skills")
 }
 
 func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
@@ -439,6 +485,10 @@ func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
 
 	if ide, err := cmd.Flags().GetBool("ide"); err == nil {
 		config.IDE = ide
+	}
+
+	if noSkills, err := cmd.Flags().GetBool("no-skills"); err == nil {
+		config.NoSkills = noSkills
 	}
 
 	return config
