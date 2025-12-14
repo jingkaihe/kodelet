@@ -32,7 +32,7 @@ export interface ToolResult {
   toolName: string;
   success: boolean;
   error?: string;
-  metadata?: FileMetadata | BashMetadata | GrepMetadata | GlobMetadata | WebFetchMetadata | ThinkingMetadata | TodoMetadata | SubagentMetadata | BatchMetadata | ImageRecognitionMetadata | BrowserMetadata | BackgroundProcessMetadata | Record<string, unknown>;
+  metadata?: FileMetadata | BashMetadata | GrepMetadata | GlobMetadata | WebFetchMetadata | ThinkingMetadata | TodoMetadata | SubagentMetadata | BatchMetadata | ImageRecognitionMetadata | BrowserMetadata | BackgroundProcessMetadata | SkillMetadata | Record<string, unknown>;
   timestamp?: string;
 }
 
@@ -240,6 +240,11 @@ export interface BackgroundProcess {
   status: 'running' | 'stopped';
   startTime?: string;
   logPath?: string;
+}
+
+export interface SkillMetadata {
+  skillName: string;
+  directory: string;
 }
 
 // Component props
