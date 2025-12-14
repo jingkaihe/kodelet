@@ -32,6 +32,7 @@ Kodelet is a lightweight CLI tool that helps with software engineering tasks. It
 │   ├── fragments/       # Fragment/recipe template system
 │   │   └── recipes/     # Built-in recipe templates
 │   │       └── github/  # GitHub-specific recipes
+│   ├── skills/          # Agentic skills system (model-invoked capabilities)
 │   ├── github/          # GitHub Actions templates and utilities
 │   │   └── templates/   # GitHub workflow templates
 │   ├── ide/             # IDE integration tools (for kodelet-tools)
@@ -329,6 +330,19 @@ if err != nil {
 }
 ```
 
+## Agentic Skills
+
+Kodelet supports model-invoked skills that package domain expertise into discoverable capabilities:
+
+- **Location**: `.kodelet/skills/<name>/SKILL.md` (repo) or `~/.kodelet/skills/<name>/SKILL.md` (global)
+- **Invocation**: Automatic - model decides when skills are relevant to the task
+- **Configuration**: `skills.enabled` and `skills.allowed` in config
+- **CLI**: `--no-skills` flag to disable skills for a session
+
+Skills differ from fragments/recipes: skills are model-invoked (automatic), while fragments are user-invoked (explicit).
+
+See [docs/SKILLS.md](docs/SKILLS.md) for creating custom skills.
+
 ## Resources
 
 - **Documentation**: See `docs/` directory for comprehensive guides
@@ -336,5 +350,6 @@ if err != nil {
 - **User Manual**: [docs/MANUAL.md](docs/MANUAL.md) for complete CLI reference
 - **Development Guide**: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for setup and workflows
 - **Fragments Guide**: [docs/FRAGMENTS.md](docs/FRAGMENTS.md) for template system
+- **Skills Guide**: [docs/SKILLS.md](docs/SKILLS.md) for agentic skills system
 - **MCP Tools**: [docs/mcp.md](docs/mcp.md) for Model Context Protocol integration
 
