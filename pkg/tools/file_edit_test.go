@@ -131,6 +131,7 @@ func TestFileEditTool_Execute(t *testing.T) {
 		require.NoError(t, err)
 
 		mockState := NewBasicState(context.TODO())
+		mockState.SetFileLastAccessed(tmpfile.Name(), time.Now())
 
 		input := FileEditInput{
 			FilePath: tmpfile.Name(),
@@ -160,7 +161,7 @@ func TestFileEditTool_Execute(t *testing.T) {
 		params, _ := json.Marshal(input)
 		result := tool.Execute(context.Background(), NewBasicState(context.TODO()), string(params))
 
-		assert.Contains(t, result.GetError(), "failed to read the file")
+		assert.Contains(t, result.GetError(), "failed to stat the file")
 		assert.Empty(t, result.GetResult())
 	})
 
@@ -186,6 +187,7 @@ func TestFileEditTool_MultipleEdits(t *testing.T) {
 
 	tool := &FileEditTool{}
 	mockState := NewBasicState(context.TODO())
+	mockState.SetFileLastAccessed(tmpfile.Name(), time.Now())
 
 	// First edit
 	firstInput := FileEditInput{
@@ -197,7 +199,7 @@ func TestFileEditTool_MultipleEdits(t *testing.T) {
 	firstResult := tool.Execute(context.Background(), mockState, string(firstParams))
 	assert.False(t, firstResult.IsError())
 
-	// Second edit
+	// Second edit (lastAccessed was updated by first edit)
 	secondInput := FileEditInput{
 		FilePath: tmpfile.Name(),
 		OldText:  "Fourth line X",
@@ -303,6 +305,7 @@ func TestFileEditTool_ExecuteOutputsFormattedEdit(t *testing.T) {
 
 	tool := &FileEditTool{}
 	mockState := NewBasicState(context.TODO())
+	mockState.SetFileLastAccessed(tmpfile.Name(), time.Now())
 
 	// Edit the file
 	input := FileEditInput{
@@ -347,6 +350,7 @@ func main() {
 
 	tool := &FileEditTool{}
 	mockState := NewBasicState(context.TODO())
+	mockState.SetFileLastAccessed(tmpfile.Name(), time.Now())
 
 	// Edit the file - replace the data processing loop
 	oldText := `	// Process data
@@ -406,6 +410,7 @@ func TestFileEditTool_ReplaceAll(t *testing.T) {
 		require.NoError(t, err)
 
 		mockState := NewBasicState(context.TODO())
+		mockState.SetFileLastAccessed(tmpfile.Name(), time.Now())
 
 		input := FileEditInput{
 			FilePath:   tmpfile.Name(),
@@ -454,6 +459,7 @@ func test() {
 		require.NoError(t, err)
 
 		mockState := NewBasicState(context.TODO())
+		mockState.SetFileLastAccessed(tmpfile.Name(), time.Now())
 
 		input := FileEditInput{
 			FilePath: tmpfile.Name(),
@@ -495,6 +501,7 @@ func test() {
 		require.NoError(t, err)
 
 		mockState := NewBasicState(context.TODO())
+		mockState.SetFileLastAccessed(tmpfile.Name(), time.Now())
 
 		input := FileEditInput{
 			FilePath:   tmpfile.Name(),
@@ -526,6 +533,7 @@ func test() {
 		require.NoError(t, err)
 
 		mockState := NewBasicState(context.TODO())
+		mockState.SetFileLastAccessed(tmpfile.Name(), time.Now())
 
 		input := FileEditInput{
 			FilePath:   tmpfile.Name(),
@@ -707,6 +715,9 @@ func TestFileEditTool_ConcurrentEdits(t *testing.T) {
 	require.NoError(t, err)
 	err = tmpfile.Close()
 	require.NoError(t, err)
+
+	// Simulate reading the file first
+	mockState.SetFileLastAccessed(tmpfile.Name(), time.Now())
 
 	done := make(chan bool, 4)
 	errors := make(chan error, 4)
