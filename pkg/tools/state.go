@@ -319,12 +319,6 @@ func (s *BasicState) configureTools() {
 			s.tools[i] = NewBashTool(s.llmConfig.AllowedCommands)
 		case "web_fetch":
 			s.tools[i] = NewWebFetchTool(s.llmConfig.AllowedDomainsFile)
-		case "skill":
-			// Skill tool is configured via WithSkillTool option
-			// Keep existing if already configured, otherwise use disabled placeholder
-			if _, ok := tool.(*SkillTool); !ok {
-				s.tools[i] = NewSkillTool(nil, false)
-			}
 		}
 	}
 }
