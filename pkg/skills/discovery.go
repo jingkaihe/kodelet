@@ -2,7 +2,6 @@ package skills
 
 import (
 	"bytes"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -209,28 +208,4 @@ func FilterByAllowlist(skills map[string]*Skill, allowed []string) map[string]*S
 		}
 	}
 	return filtered
-}
-
-// walkSkillDir walks a directory looking for skills
-func (d *Discovery) walkSkillDir(dir string, callback func(skill *Skill)) error {
-	return filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			return nil // Continue on errors
-		}
-
-		if !entry.IsDir() {
-			return nil
-		}
-
-		skillPath := filepath.Join(path, skillFileName)
-		skill, err := d.loadSkill(skillPath)
-		if err != nil {
-			return nil // Skip invalid skills
-		}
-
-		skill.Directory = path
-		callback(skill)
-
-		return filepath.SkipDir // Don't recurse into subdirectories
-	})
 }

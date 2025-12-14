@@ -114,8 +114,14 @@ type SubAgentConfigSettings struct {
 	Google          *GoogleConfig `mapstructure:"google" json:"google,omitempty" yaml:"google,omitempty"`           // Google GenAI-specific configuration
 }
 
-// SkillsConfig holds configuration for the agentic skills system
+// SkillsConfig holds configuration for the agentic skills system.
+// When this config is nil or omitted, skills are enabled by default.
+// To disable skills, explicitly set Enabled to false.
 type SkillsConfig struct {
-	Enabled bool     `mapstructure:"enabled" json:"enabled" yaml:"enabled"` // Global enable/disable (default: true)
-	Allowed []string `mapstructure:"allowed" json:"allowed" yaml:"allowed"` // Allowlist of skill names (empty = all)
+	// Enabled controls whether skills are active. When the SkillsConfig is nil
+	// (not specified in config), skills default to enabled. Set to false to disable.
+	Enabled bool `mapstructure:"enabled" json:"enabled" yaml:"enabled"`
+	// Allowed is an allowlist of skill names. When empty, all discovered skills are available.
+	// When specified, only the listed skills will be enabled.
+	Allowed []string `mapstructure:"allowed" json:"allowed" yaml:"allowed"`
 }

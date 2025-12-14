@@ -7,6 +7,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/mcp"
+	"github.com/jingkaihe/kodelet/pkg/skills"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/spf13/viper"
@@ -23,7 +24,7 @@ type AssistantClient struct {
 }
 
 // NewAssistantClient creates a new assistant client
-func NewAssistantClient(ctx context.Context, conversationID string, enablePersistence bool, mcpManager *tools.MCPManager, customManager *tools.CustomToolManager, maxTurns int, compactRatio float64, disableAutoCompact bool, ideMode bool) *AssistantClient {
+func NewAssistantClient(ctx context.Context, conversationID string, enablePersistence bool, mcpManager *tools.MCPManager, customManager *tools.CustomToolManager, maxTurns int, compactRatio float64, disableAutoCompact bool, ideMode bool, noSkills bool) *AssistantClient {
 	config, err := llm.GetConfigFromViper()
 	if err != nil {
 		logger.G(ctx).WithError(err).Fatal("Failed to load configuration during assistant client initialization")
@@ -50,6 +51,10 @@ func NewAssistantClient(ctx context.Context, conversationID string, enablePersis
 	stateOpts = append(stateOpts, tools.WithLLMConfig(config))
 	stateOpts = append(stateOpts, tools.WithCustomTools(customManager))
 	stateOpts = append(stateOpts, tools.WithMainTools())
+
+	// Initialize skills
+	discoveredSkills, skillsEnabled := initializeSkillsForChat(ctx, config, noSkills)
+	stateOpts = append(stateOpts, tools.WithSkillTool(discoveredSkills, skillsEnabled))
 
 	// Set up MCP execution mode
 	if mcpManager != nil {
@@ -144,4 +149,30 @@ func (a *AssistantClient) Close(ctx context.Context) error {
 		return a.mcpManager.Close(ctx)
 	}
 	return nil
+}
+
+// initializeSkillsForChat discovers and configures skills based on configuration
+func initializeSkillsForChat(ctx context.Context, llmConfig llmtypes.Config, noSkillsFlag bool) (map[string]*skills.Skill, bool) {
+	enabled := (llmConfig.Skills == nil || llmConfig.Skills.Enabled) && !noSkillsFlag
+	if !enabled {
+		return nil, false
+	}
+
+	discovery, err := skills.NewDiscovery()
+	if err != nil {
+		logger.G(ctx).WithError(err).Debug("Failed to create skill discovery")
+		return nil, false
+	}
+
+	allSkills, err := discovery.DiscoverSkills()
+	if err != nil {
+		logger.G(ctx).WithError(err).Debug("Failed to discover skills")
+		return nil, false
+	}
+
+	if llmConfig.Skills != nil && len(llmConfig.Skills.Allowed) > 0 {
+		allSkills = skills.FilterByAllowlist(allSkills, llmConfig.Skills.Allowed)
+	}
+
+	return allSkills, true
 }

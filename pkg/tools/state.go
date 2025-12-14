@@ -169,17 +169,9 @@ func WithLLMConfig(config llmtypes.Config) BasicStateOption {
 }
 
 // WithSkillTool returns an option that configures the skill tool with discovered skills
-func WithSkillTool(discoveredSkills map[string]interface{}, enabled bool) BasicStateOption {
+func WithSkillTool(discoveredSkills map[string]*skills.Skill, enabled bool) BasicStateOption {
 	return func(_ context.Context, s *BasicState) error {
-		// Convert interface map to skills.Skill map
-		skillsMap := make(map[string]*skills.Skill)
-		for name, skill := range discoveredSkills {
-			if s, ok := skill.(*skills.Skill); ok {
-				skillsMap[name] = s
-			}
-		}
-
-		skillTool := NewSkillTool(skillsMap, enabled)
+		skillTool := NewSkillTool(discoveredSkills, enabled)
 		for i, tool := range s.tools {
 			if tool.Name() == "skill" {
 				s.tools[i] = skillTool

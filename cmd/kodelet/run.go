@@ -147,15 +147,8 @@ func applyFragmentRestrictions(llmConfig *llmtypes.Config, fragmentMetadata *fra
 }
 
 // initializeSkills discovers and configures skills based on configuration
-func initializeSkills(ctx context.Context, llmConfig llmtypes.Config, noSkillsFlag bool) (map[string]interface{}, bool) {
-	enabled := true
-	if llmConfig.Skills != nil && !llmConfig.Skills.Enabled {
-		enabled = false
-	}
-	if noSkillsFlag {
-		enabled = false
-	}
-
+func initializeSkills(ctx context.Context, llmConfig llmtypes.Config, noSkillsFlag bool) (map[string]*skills.Skill, bool) {
+	enabled := (llmConfig.Skills == nil || llmConfig.Skills.Enabled) && !noSkillsFlag
 	if !enabled {
 		return nil, false
 	}
@@ -176,12 +169,7 @@ func initializeSkills(ctx context.Context, llmConfig llmtypes.Config, noSkillsFl
 		allSkills = skills.FilterByAllowlist(allSkills, llmConfig.Skills.Allowed)
 	}
 
-	result := make(map[string]interface{})
-	for name, skill := range allSkills {
-		result[name] = skill
-	}
-
-	return result, true
+	return allSkills, true
 }
 
 var runCmd = &cobra.Command{
