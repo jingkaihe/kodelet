@@ -1,7 +1,7 @@
 # ADR 020: Agentic Skills
 
 ## Status
-Proposed
+Accepted
 
 ## Context
 
@@ -695,36 +695,36 @@ func initializeSkills(config llmtypes.Config, noSkillsFlag bool) (map[string]*sk
 ## Implementation Phases
 
 ### Phase 1: Core Skill Infrastructure (Week 1)
-- [ ] Create `pkg/skills/` package with `Skill` type and `Metadata`
-- [ ] Implement skill discovery from `.kodelet/skills/` directories
-- [ ] Add YAML frontmatter parsing with goldmark-meta
-- [ ] Write unit tests for discovery and parsing
+- [x] Create `pkg/skills/` package with `Skill` type and `Metadata`
+- [x] Implement skill discovery from `.kodelet/skills/` directories
+- [x] Add YAML frontmatter parsing with goldmark-meta
+- [x] Write unit tests for discovery and parsing
 
 ### Phase 2: Skill Tool Implementation (Week 1-2)
-- [ ] Implement `SkillTool` with description and execution
-- [ ] Add `SkillToolResult` with proper `AssistantFacing()` output
-- [ ] Register tool in `toolRegistry` and `defaultMainTools`
-- [ ] Add `WithSkillTool` option to `BasicState`
-- [ ] Write unit tests for tool execution
+- [x] Implement `SkillTool` with description and execution
+- [x] Add `SkillToolResult` with proper `AssistantFacing()` output
+- [x] Register tool in `toolRegistry` and `defaultMainTools`
+- [x] Add `WithSkillTool` option to `BasicState`
+- [x] Write unit tests for tool execution
 
 ### Phase 3: Renderer and UI (Week 2)
-- [ ] Create `SkillRenderer` for CLI output
-- [ ] Add `SkillMetadata` type to structured tool results
-- [ ] Register renderer in `RendererRegistry`
-- [ ] Write renderer tests
+- [x] Create `SkillRenderer` for CLI output
+- [x] Add `SkillMetadata` type to structured tool results
+- [x] Register renderer in `RendererRegistry`
+- [x] Write renderer tests
 
 ### Phase 4: Configuration and CLI (Week 2)
-- [ ] Add `SkillsConfig` to LLM config
-- [ ] Implement `--no-skills` CLI flag
-- [ ] Add allowlist filtering logic
-- [ ] Write integration tests
+- [x] Add `SkillsConfig` to LLM config
+- [x] Implement `--no-skills` CLI flag
+- [x] Add allowlist filtering logic
+- [x] Write integration tests
 
 ### Phase 5: Documentation (Week 2-3)
-- [ ] Create `docs/SKILLS.md` with comprehensive skills documentation
-- [ ] Add skills configuration examples to `config.sample.yaml`
-- [ ] Update `docs/MANUAL.md` with skills CLI usage
-- [ ] Update `AGENTS.md` with skills system overview
-- [ ] Create example skills for common use cases
+- [x] Create `docs/SKILLS.md` with comprehensive skills documentation
+- [x] Add skills configuration examples to `config.sample.yaml`
+- [x] Update `docs/MANUAL.md` with skills CLI usage
+- [x] Update `AGENTS.md` with skills system overview
+- [x] Create example skills for common use cases
 
 ## Documentation
 
