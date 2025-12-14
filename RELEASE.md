@@ -1,5 +1,17 @@
 # Kodelet
 
+## 0.1.22.beta (2025-12-14)
+
+### Features
+
+**Agentic Skills System**: Introduced model-invoked capabilities that package domain expertise into discoverable units
+
+- **Automatic Invocation**: Skills are automatically invoked by Kodelet when relevant to your task - no explicit user action required
+- **Skill Discovery**: Skills are discovered from `.kodelet/skills/<name>/SKILL.md` in both repository-local and user-global directories
+- **Configuration Options**: Control skills via `skills.enabled` and `skills.allowed` in config, or disable with `--no-skills` CLI flag
+- **Supporting Files**: Skills can include reference docs, examples, scripts, and templates that Kodelet can read when needed
+- **Web UI Support**: New SkillRenderer component displays loaded skills in the web interface
+
 ## 0.1.21.beta (2025-12-11)
 
 ### Features
