@@ -430,6 +430,10 @@ func (t *FileEditTool) Execute(_ context.Context, state tooltypes.State, paramet
 		}
 	}
 
+	// Lock the file to prevent race conditions during read-modify-write
+	state.LockFile(input.FilePath)
+	defer state.UnlockFile(input.FilePath)
+
 	b, err := os.ReadFile(input.FilePath)
 	if err != nil {
 		return &FileEditToolResult{

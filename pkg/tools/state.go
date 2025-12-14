@@ -41,6 +41,10 @@ type BasicState struct {
 	// Context discovery fields
 	contextCache     map[string]*contextInfo
 	contextDiscovery *ContextDiscovery
+
+	// Per-file locking for atomic file operations
+	fileLocks   map[string]*sync.Mutex
+	fileLocksMu sync.Mutex
 }
 
 // ContextDiscovery tracks context discovery results
@@ -81,6 +85,7 @@ func NewBasicState(ctx context.Context, opts ...BasicStateOption) *BasicState {
 			homeDir:         kodeletHomeDir,
 			contextPatterns: []string{"AGENTS.md", "KODELET.md"},
 		},
+		fileLocks: make(map[string]*sync.Mutex),
 	}
 
 	for _, opt := range opts {
@@ -247,6 +252,29 @@ func (s *BasicState) ClearFileLastAccessed(path string) error {
 	defer s.mu.Unlock()
 	delete(s.lastAccessed, path)
 	return nil
+}
+
+// LockFile acquires an exclusive lock for the given file path.
+// This ensures atomic read-modify-write operations when editing files.
+func (s *BasicState) LockFile(path string) {
+	s.fileLocksMu.Lock()
+	lock, ok := s.fileLocks[path]
+	if !ok {
+		lock = &sync.Mutex{}
+		s.fileLocks[path] = lock
+	}
+	s.fileLocksMu.Unlock()
+	lock.Lock()
+}
+
+// UnlockFile releases the lock for the given file path.
+func (s *BasicState) UnlockFile(path string) {
+	s.fileLocksMu.Lock()
+	lock, ok := s.fileLocks[path]
+	s.fileLocksMu.Unlock()
+	if ok {
+		lock.Unlock()
+	}
 }
 
 // BasicTools returns the list of basic tools

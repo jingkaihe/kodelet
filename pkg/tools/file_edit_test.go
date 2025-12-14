@@ -693,3 +693,70 @@ func TestFindAllOccurrences(t *testing.T) {
 		})
 	}
 }
+
+func TestFileEditTool_ConcurrentEdits(t *testing.T) {
+	tool := &FileEditTool{}
+	mockState := NewBasicState(context.TODO())
+
+	tmpfile, err := os.CreateTemp("", "FileEditConcurrentTest")
+	require.NoError(t, err)
+	defer os.Remove(tmpfile.Name())
+
+	initialContent := "MARKER_A=value1\nMARKER_B=value2\nMARKER_C=value3\nMARKER_D=value4\n"
+	_, err = tmpfile.WriteString(initialContent)
+	require.NoError(t, err)
+	err = tmpfile.Close()
+	require.NoError(t, err)
+
+	done := make(chan bool, 4)
+	errors := make(chan error, 4)
+
+	edits := []struct {
+		oldText string
+		newText string
+	}{
+		{"MARKER_A=value1", "MARKER_A=new_value_A"},
+		{"MARKER_B=value2", "MARKER_B=new_value_B"},
+		{"MARKER_C=value3", "MARKER_C=new_value_C"},
+		{"MARKER_D=value4", "MARKER_D=new_value_D"},
+	}
+
+	for _, edit := range edits {
+		go func(oldText, newText string) {
+			input := FileEditInput{
+				FilePath: tmpfile.Name(),
+				OldText:  oldText,
+				NewText:  newText,
+			}
+			params, _ := json.Marshal(input)
+			result := tool.Execute(context.Background(), mockState, string(params))
+			if result.IsError() {
+				errors <- assert.AnError
+			}
+			done <- true
+		}(edit.oldText, edit.newText)
+	}
+
+	for i := 0; i < len(edits); i++ {
+		<-done
+	}
+	close(errors)
+
+	for err := range errors {
+		t.Errorf("concurrent edit failed: %v", err)
+	}
+
+	finalContent, err := os.ReadFile(tmpfile.Name())
+	require.NoError(t, err)
+
+	content := string(finalContent)
+	assert.Contains(t, content, "MARKER_A=new_value_A")
+	assert.Contains(t, content, "MARKER_B=new_value_B")
+	assert.Contains(t, content, "MARKER_C=new_value_C")
+	assert.Contains(t, content, "MARKER_D=new_value_D")
+
+	assert.NotContains(t, content, "MARKER_A=value1")
+	assert.NotContains(t, content, "MARKER_B=value2")
+	assert.NotContains(t, content, "MARKER_C=value3")
+	assert.NotContains(t, content, "MARKER_D=value4")
+}

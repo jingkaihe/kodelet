@@ -129,4 +129,11 @@ type State interface {
 
 	// LLM configuration access
 	GetLLMConfig() interface{} // Returns llmtypes.Config but using interface{} to avoid circular import
+
+	// File locking for atomic operations
+	// LockFile acquires an exclusive lock for the given file path to prevent race conditions
+	// during read-modify-write operations. Must be paired with UnlockFile.
+	LockFile(path string)
+	// UnlockFile releases the lock for the given file path
+	UnlockFile(path string)
 }
