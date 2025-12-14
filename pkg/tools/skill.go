@@ -60,7 +60,7 @@ func (t *SkillTool) Description() string {
 # Usage
 - Use this tool with the skill name only
 - Examples:
-  - "pdf" - invoke the pdf skill
+  - "kernel-dev" - invoke the kernel-dev skill
   - "xlsx" - invoke the xlsx skill
 
 ## Important
@@ -71,8 +71,8 @@ func (t *SkillTool) Description() string {
 - Do not invoke a skill that is already running
 - Each skill has a directory containing supporting files (references, examples, scripts, templates) that you can read using file_read or glob_tool
 - Do NOT modify any files in the skill directory - treat skill contents as read-only
-- If you need to modify a script from the skill directory, copy it to the working directory first using file_write, then use file_edit to update it
-- For Python scripts, use uv for managing dependencies - do NOT install packages using system pip
+- If you need to modify a script or template from the skill directory, copy it to the working directory first then read it using file_read, and update using file_edit tool
+- For Python scripts, use uv for managing dependencies, preferrably uv with inline metadata dependencies if the script to run is a single file - do NOT install packages using system pip
 
 ## Available Skills
 
