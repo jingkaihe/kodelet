@@ -52,6 +52,11 @@ Kodelet is a lightweight agentic SWE Agent that runs as an interactive CLI tool 
   - [Configuration](#custom-tools-configuration)
   - [Examples](#custom-tools-examples)
   - [Generate Custom Tool](#generate-custom-tool)
+- [Agentic Skills](#agentic-skills)
+  - [How Skills Work](#how-skills-work)
+  - [Creating Skills](#creating-skills)
+  - [Skills Configuration](#skills-configuration)
+  - [Disabling Skills](#disabling-skills)
 - [Key Features](#key-features)
 - [Security & Limitations](#security--limitations)
   - [Image Input Security](#image-input-security)
@@ -1161,6 +1166,80 @@ kodelet run -r custom-tool --arg task="implement a tool to fetch the weather bas
 # Generate a global tool available across all projects
 kodelet run -r custom-tool --arg task="format and validate JSON" --arg global=true
 ```
+
+## Agentic Skills
+
+Agentic Skills are model-invoked capabilities that package domain expertise into discoverable units. Unlike fragments/recipes (which require explicit user invocation), skills are automatically invoked by Kodelet when it determines they are relevant to your task.
+
+### How Skills Work
+
+1. **Discovery**: At startup, Kodelet discovers skills from configured directories
+2. **Description**: Each skill has a name and description that help Kodelet decide when to use it
+3. **Invocation**: When a task matches a skill's domain, Kodelet automatically invokes it
+4. **Context Loading**: The skill's instructions become available to guide Kodelet's work
+
+### Creating Skills
+
+Skills are directories containing a `SKILL.md` file with YAML frontmatter:
+
+**Directory Structure:**
+```
+~/.kodelet/skills/my-skill/
+├── SKILL.md          (required)
+├── reference.md      (optional)
+├── examples.md       (optional)
+└── scripts/
+    └── helper.py     (optional)
+```
+
+**SKILL.md Format:**
+```markdown
+---
+name: my-skill
+description: Brief description of what this skill does and when to use it
+---
+
+# My Skill
+
+## Instructions
+Step-by-step guidance for the agent...
+
+## Examples
+Concrete usage examples...
+```
+
+**Skill Locations:**
+- `./.kodelet/skills/<skill_name>/` - Repository-local (higher precedence)
+- `~/.kodelet/skills/<skill_name>/` - User-global
+
+Repository-local skills take precedence over user-global skills with the same name.
+
+### Skills Configuration
+
+Configure skills in `config.yaml` or `kodelet-config.yaml`:
+
+```yaml
+skills:
+  # Enable/disable skills globally (default: true)
+  enabled: true
+
+  # Allowlist of skill names (empty = all discovered skills enabled)
+  allowed:
+    - pdf
+    - xlsx
+    - kubernetes
+```
+
+### Disabling Skills
+
+To run without skills for a single session:
+
+```bash
+kodelet run --no-skills "your query"
+kodelet chat --no-skills
+```
+
+For detailed skill creation guide, see [docs/SKILLS.md](SKILLS.md).
 
 ## Key Features
 

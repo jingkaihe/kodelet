@@ -17,6 +17,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/mcp"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
+	"github.com/jingkaihe/kodelet/pkg/skills"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
@@ -38,6 +39,7 @@ type RunConfig struct {
 	FragmentDirs       []string          // Additional fragment directories
 	IncludeHistory     bool              // Include historical conversation data in headless streaming
 	IDE                bool              // Enable IDE integration mode (display conversation ID prominently)
+	NoSkills           bool              // Disable agentic skills
 }
 
 func NewRunConfig() *RunConfig {
@@ -55,6 +57,7 @@ func NewRunConfig() *RunConfig {
 		FragmentDirs:       []string{},
 		IncludeHistory:     false,
 		IDE:                false,
+		NoSkills:           false,
 	}
 }
 
@@ -217,6 +220,10 @@ var runCmd = &cobra.Command{
 		stateOpts = append(stateOpts, tools.WithLLMConfig(llmConfig))
 		stateOpts = append(stateOpts, tools.WithCustomTools(customManager))
 		stateOpts = append(stateOpts, tools.WithMainTools())
+
+		// Initialize skills
+		discoveredSkills, skillsEnabled := skills.Initialize(ctx, llmConfig)
+		stateOpts = append(stateOpts, tools.WithSkillTool(discoveredSkills, skillsEnabled))
 
 		// Set up MCP execution mode
 		if mcpManager != nil {

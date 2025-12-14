@@ -107,6 +107,41 @@ kodelet run -r my-recipe --arg project="Kodelet" --arg focus_area="security"
 kodelet run -r my-recipe "additional context or instructions"
 ```
 
+### Agentic Skills
+Model-invoked capabilities that package domain expertise. Unlike fragments (user-invoked), skills are automatically invoked when relevant to your task.
+
+**Skill locations:**
+- `./.kodelet/skills/<name>/SKILL.md` - Repository-local (higher precedence)
+- `~/.kodelet/skills/<name>/SKILL.md` - User-global
+
+**Creating a skill:**
+```markdown
+---
+name: my-skill
+description: Brief description for model decision-making
+---
+
+# My Skill
+
+## Instructions
+Step-by-step guidance for the agent...
+```
+
+**Configuration:**
+```yaml
+skills:
+  enabled: true      # Default: true
+  allowed:           # Empty = all skills enabled
+    - pdf
+    - xlsx
+```
+
+**Disabling skills:**
+```bash
+kodelet run --no-skills "query"
+kodelet chat --no-skills
+```
+
 ### Git Integration
 
 **AI Commit Messages:**
@@ -478,4 +513,3 @@ kodelet version                 # Show version and build info
 ---
 
 **Note:** This guide focuses on end-user usage. For development information, build processes, and contribution guidelines, see the project's GitHub repository and development documentation.
-

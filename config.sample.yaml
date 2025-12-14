@@ -398,6 +398,25 @@ custom_tools:
   #   - "my-custom-tool"
   #   - "another-tool"
 
+# Agentic Skills Configuration
+# Skills are model-invoked capabilities that package domain expertise
+# Unlike fragments/recipes (user-invoked), skills are automatically invoked by Kodelet
+# when relevant to the task. See docs/SKILLS.md for creating custom skills.
+skills:
+  # Enable/disable skills globally (default: true when not specified)
+  # Set to false to completely disable the skills system
+  enabled: true
+
+  # Allowlist of skill names (empty = all discovered skills are available)
+  # When specified, only these skills will be enabled
+  # Skills are discovered from:
+  #   - ./.kodelet/skills/<name>/SKILL.md (repository-local, higher precedence)
+  #   - ~/.kodelet/skills/<name>/SKILL.md (user-global)
+  # allowed:
+  #   - pdf
+  #   - xlsx
+  #   - kubernetes
+
 # Tracing Configuration
 tracing:
   # Enable OpenTelemetry tracing (default: false)

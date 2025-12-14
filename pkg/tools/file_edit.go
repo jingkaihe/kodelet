@@ -237,7 +237,7 @@ func (t *FileEditTool) ValidateInput(state tooltypes.State, parameters string) e
 	}
 
 	// check if the file exists
-	info, err := os.Stat(input.FilePath)
+	_, err := os.Stat(input.FilePath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return errors.Errorf("file %s does not exist, use the 'FileWrite' tool to create instead", input.FilePath)
@@ -245,17 +245,18 @@ func (t *FileEditTool) ValidateInput(state tooltypes.State, parameters string) e
 		return errors.Wrap(err, "failed to check the file status")
 	}
 
-	lastAccessed := info.ModTime()
-	lastRead, err := state.GetFileLastAccessed(input.FilePath)
+	// Check if file has been read before (required for editing)
+	_, err = state.GetFileLastAccessed(input.FilePath)
 	if err != nil {
 		return errors.Wrap(err, "failed to get the last access time of the file")
 	}
 
-	if lastAccessed.After(lastRead) {
-		return errors.Errorf("file %s has been modified since the last read either by another tool or by the user, please read the file again", input.FilePath)
-	}
+	// Note: The mtime check is performed inside Execute() within the locked section
+	// to support parallel file edits to the same file. This prevents race conditions
+	// where multiple edits are queued and would fail validation after the first edit
+	// updates the file's mtime.
 
-	// check if the old text is unique
+	// check if the old text exists (basic check, detailed check in Execute with lock)
 	content, err := os.ReadFile(input.FilePath)
 	if err != nil {
 		return errors.Wrap(err, "failed to read the file")
@@ -427,6 +428,34 @@ func (t *FileEditTool) Execute(_ context.Context, state tooltypes.State, paramet
 		return &FileEditToolResult{
 			filename: input.FilePath,
 			err:      fmt.Sprintf("invalid input: %s", err),
+		}
+	}
+
+	// Lock the file to prevent race conditions during read-modify-write
+	state.LockFile(input.FilePath)
+	defer state.UnlockFile(input.FilePath)
+
+	// Check if file has been modified since last read (inside lock for atomicity)
+	// This check is here instead of ValidateInput to support parallel file edits
+	info, err := os.Stat(input.FilePath)
+	if err != nil {
+		return &FileEditToolResult{
+			filename: input.FilePath,
+			err:      fmt.Sprintf("failed to stat the file: %s", err),
+		}
+	}
+	lastAccessed := info.ModTime()
+	lastRead, err := state.GetFileLastAccessed(input.FilePath)
+	if err != nil {
+		return &FileEditToolResult{
+			filename: input.FilePath,
+			err:      fmt.Sprintf("failed to get the last access time: %s", err),
+		}
+	}
+	if lastAccessed.After(lastRead) {
+		return &FileEditToolResult{
+			filename: input.FilePath,
+			err:      fmt.Sprintf("file %s has been modified since the last read either by another tool or by the user, please read the file again", input.FilePath),
 		}
 	}
 

@@ -241,6 +241,8 @@ func (m *mockState) GetBackgroundProcesses() []tooltypes.BackgroundProcess    { 
 func (m *mockState) RemoveBackgroundProcess(_ int) error                      { return nil }
 func (m *mockState) DiscoverContexts() map[string]string                      { return map[string]string{} }
 func (m *mockState) GetLLMConfig() interface{}                                { return nil }
+func (m *mockState) LockFile(_ string)                                        {}
+func (m *mockState) UnlockFile(_ string)                                      {}
 
 func TestOpenAIThread_PersistenceWithStructuredResults(t *testing.T) {
 	skipIfNoOpenAIAPIKey(t)

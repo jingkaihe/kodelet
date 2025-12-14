@@ -7,6 +7,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/mcp"
+	"github.com/jingkaihe/kodelet/pkg/skills"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/spf13/viper"
@@ -50,6 +51,10 @@ func NewAssistantClient(ctx context.Context, conversationID string, enablePersis
 	stateOpts = append(stateOpts, tools.WithLLMConfig(config))
 	stateOpts = append(stateOpts, tools.WithCustomTools(customManager))
 	stateOpts = append(stateOpts, tools.WithMainTools())
+
+	// Initialize skills
+	discoveredSkills, skillsEnabled := skills.Initialize(ctx, config)
+	stateOpts = append(stateOpts, tools.WithSkillTool(discoveredSkills, skillsEnabled))
 
 	// Set up MCP execution mode
 	if mcpManager != nil {

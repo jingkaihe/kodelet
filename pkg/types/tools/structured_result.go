@@ -71,6 +71,7 @@ var metadataTypeRegistry = map[string]reflect.Type{
 	"web_fetch":                 reflect.TypeOf(WebFetchMetadata{}),
 	"view_background_processes": reflect.TypeOf(ViewBackgroundProcessesMetadata{}),
 	"code_execution":            reflect.TypeOf(CodeExecutionMetadata{}),
+	"skill":                     reflect.TypeOf(SkillMetadata{}),
 }
 
 // UnmarshalJSON implements custom JSON unmarshaling for StructuredToolResult
@@ -410,3 +411,12 @@ type CodeExecutionMetadata struct {
 
 // ToolType returns the tool type identifier for code execution operations
 func (m CodeExecutionMetadata) ToolType() string { return "code_execution" }
+
+// SkillMetadata contains metadata about a skill invocation
+type SkillMetadata struct {
+	SkillName string `json:"skillName"`
+	Directory string `json:"directory"`
+}
+
+// ToolType returns the tool type identifier for skill operations
+func (m SkillMetadata) ToolType() string { return "skill" }
