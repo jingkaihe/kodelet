@@ -146,32 +146,6 @@ func applyFragmentRestrictions(llmConfig *llmtypes.Config, fragmentMetadata *fra
 	}
 }
 
-// initializeSkills discovers and configures skills based on configuration
-func initializeSkills(ctx context.Context, llmConfig llmtypes.Config, noSkillsFlag bool) (map[string]*skills.Skill, bool) {
-	enabled := (llmConfig.Skills == nil || llmConfig.Skills.Enabled) && !noSkillsFlag
-	if !enabled {
-		return nil, false
-	}
-
-	discovery, err := skills.NewDiscovery()
-	if err != nil {
-		logger.G(ctx).WithError(err).Debug("Failed to create skill discovery")
-		return nil, false
-	}
-
-	allSkills, err := discovery.DiscoverSkills()
-	if err != nil {
-		logger.G(ctx).WithError(err).Debug("Failed to discover skills")
-		return nil, false
-	}
-
-	if llmConfig.Skills != nil && len(llmConfig.Skills.Allowed) > 0 {
-		allSkills = skills.FilterByAllowlist(allSkills, llmConfig.Skills.Allowed)
-	}
-
-	return allSkills, true
-}
-
 var runCmd = &cobra.Command{
 	Use:   "run [query]",
 	Short: "Execute a one-shot query with Kodelet",
@@ -248,7 +222,7 @@ var runCmd = &cobra.Command{
 		stateOpts = append(stateOpts, tools.WithMainTools())
 
 		// Initialize skills
-		discoveredSkills, skillsEnabled := initializeSkills(ctx, llmConfig, config.NoSkills)
+		discoveredSkills, skillsEnabled := skills.Initialize(ctx, llmConfig)
 		stateOpts = append(stateOpts, tools.WithSkillTool(discoveredSkills, skillsEnabled))
 
 		// Set up MCP execution mode
@@ -402,7 +376,6 @@ func init() {
 	runCmd.Flags().StringSlice("fragment-dirs", defaults.FragmentDirs, "Additional fragment directories (e.g., --fragment-dirs ./project-fragments --fragment-dirs ./team-fragments)")
 	runCmd.Flags().Bool("include-history", defaults.IncludeHistory, "Include historical conversation data in headless streaming")
 	runCmd.Flags().Bool("ide", defaults.IDE, "Enable IDE integration mode (display conversation ID prominently)")
-	runCmd.Flags().Bool("no-skills", defaults.NoSkills, "Disable agentic skills")
 }
 
 func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
@@ -473,10 +446,6 @@ func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
 
 	if ide, err := cmd.Flags().GetBool("ide"); err == nil {
 		config.IDE = ide
-	}
-
-	if noSkills, err := cmd.Flags().GetBool("no-skills"); err == nil {
-		config.NoSkills = noSkills
 	}
 
 	return config
