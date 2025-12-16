@@ -98,6 +98,58 @@ func StringifyToolResult(result, err string) string {
 	return out
 }
 
+// BlockedToolResult represents a tool that was blocked by a lifecycle hook
+type BlockedToolResult struct {
+	Reason string `json:"reason"`
+}
+
+// NewBlockedToolResult creates a new BlockedToolResult with the given reason
+func NewBlockedToolResult(reason string) BlockedToolResult {
+	return BlockedToolResult{Reason: reason}
+}
+
+// AssistantFacing returns a formatted string representation of the blocked result for the LLM
+func (t BlockedToolResult) AssistantFacing() string {
+	return fmt.Sprintf(`<error>
+Tool execution was blocked by security hook: %s
+</error>
+`, t.Reason)
+}
+
+// IsError returns true as blocked tools are treated as errors
+func (t BlockedToolResult) IsError() bool {
+	return true
+}
+
+// GetError returns the blocked reason as an error message
+func (t BlockedToolResult) GetError() string {
+	return fmt.Sprintf("blocked by hook: %s", t.Reason)
+}
+
+// GetResult returns an empty string as blocked tools have no result
+func (t BlockedToolResult) GetResult() string {
+	return ""
+}
+
+// StructuredData returns a structured representation of the blocked tool result
+func (t BlockedToolResult) StructuredData() StructuredToolResult {
+	return StructuredToolResult{
+		ToolName:  "blocked",
+		Success:   false,
+		Error:     t.GetError(),
+		Timestamp: time.Now(),
+		Metadata:  BlockedMetadata(t),
+	}
+}
+
+// BlockedMetadata contains metadata about a blocked tool invocation
+type BlockedMetadata struct {
+	Reason string `json:"reason"`
+}
+
+// ToolType returns the tool type identifier for blocked tools
+func (m BlockedMetadata) ToolType() string { return "blocked" }
+
 // BackgroundProcess represents a process running in the background
 type BackgroundProcess struct {
 	PID       int         `json:"pid"`

@@ -25,6 +25,7 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/feedback"
+	"github.com/jingkaihe/kodelet/pkg/hooks"
 	"github.com/jingkaihe/kodelet/pkg/ide"
 	"github.com/jingkaihe/kodelet/pkg/llm/prompts"
 	"github.com/jingkaihe/kodelet/pkg/logger"
@@ -68,7 +69,8 @@ type Thread struct {
 	thinkingBudget         int32
 	toolResults            map[string]tooltypes.StructuredToolResult
 	subagentContextFactory llmtypes.SubagentContextFactory
-	ideStore               *ide.Store // IDE context store (nil if IDE mode disabled)
+	ideStore               *ide.Store        // IDE context store (nil if IDE mode disabled)
+	hookManager            hooks.HookManager // Hook manager for lifecycle hooks (empty = no-op)
 	mu                     sync.Mutex
 	conversationMu         sync.Mutex
 }
@@ -149,6 +151,17 @@ func NewGoogleThread(config llmtypes.Config, subagentContextFactory llmtypes.Sub
 		ideStore = store
 	}
 
+	// Initialize hook manager (empty if discovery fails - hooks disabled)
+	hookManager := hooks.HookManager{}
+	if !configCopy.IsSubAgent {
+		// Only main agent discovers hooks; subagents inherit from parent
+		var err error
+		hookManager, err = hooks.NewHookManager()
+		if err != nil {
+			logger.G(context.Background()).WithError(err).Warn("Failed to initialize hook manager, hooks disabled")
+		}
+	}
+
 	return &Thread{
 		client:                 client,
 		config:                 configCopy,
@@ -160,6 +173,7 @@ func NewGoogleThread(config llmtypes.Config, subagentContextFactory llmtypes.Sub
 		subagentContextFactory: subagentContextFactory,
 		thinkingBudget:         thinkingBudget,
 		ideStore:               ideStore,
+		hookManager:            hookManager,
 	}, nil
 }
 
@@ -335,6 +349,11 @@ func (t *Thread) SendMessage(
 		}
 	}
 
+	// Trigger user_message_send hook before adding user message
+	if blocked, reason := t.triggerUserMessageSend(ctx, message); blocked {
+		return "", errors.Errorf("message blocked by hook: %s", reason)
+	}
+
 	t.AddUserMessage(ctx, message, opt.Images...)
 
 	if !opt.DisableAutoCompact && t.shouldAutoCompact(opt.CompactRatio) {
@@ -395,6 +414,11 @@ OUTER:
 				break OUTER
 			}
 		}
+	}
+
+	// Trigger agent_stop hook after completing the interaction
+	if messages, err := t.GetMessages(); err == nil {
+		t.triggerAgentStop(ctx, messages)
 	}
 
 	// Save conversation state after completing the interaction
@@ -947,18 +971,34 @@ func (t *Thread) executeToolCalls(ctx context.Context, response *Response, handl
 			attribute.String("tool_name", toolCall.Name),
 		)
 
-		runToolCtx := t.subagentContextFactory(ctx, t, handler, opt.CompactRatio, opt.DisableAutoCompact)
-
 		argsJSON, err := json.Marshal(toolCall.Args)
 		if err != nil {
 			logger.G(ctx).WithError(err).Error("Failed to marshal tool arguments")
 			continue
 		}
 
-		output := tools.RunTool(runToolCtx, t.state, toolCall.Name, string(argsJSON))
+		// Trigger before_tool_call hook
+		toolInput := string(argsJSON)
+		blocked, reason, input := t.triggerBeforeToolCall(ctx, toolCall.Name, toolInput, toolCall.ID)
+
+		var output tooltypes.ToolResult
+		if blocked {
+			output = tooltypes.NewBlockedToolResult(reason)
+		} else {
+			// Use the potentially modified input from the hook
+			toolInput = input
+			runToolCtx := t.subagentContextFactory(ctx, t, handler, opt.CompactRatio, opt.DisableAutoCompact)
+			output = tools.RunTool(runToolCtx, t.state, toolCall.Name, toolInput)
+		}
 
 		// Use CLI rendering for consistent output formatting
 		structuredResult := output.StructuredData()
+
+		// Trigger after_tool_call hook
+		if modified := t.triggerAfterToolCall(ctx, toolCall.Name, toolInput, toolCall.ID, structuredResult); modified != nil {
+			structuredResult = *modified
+		}
+
 		registry := renderers.NewRendererRegistry()
 		renderedOutput := registry.Render(structuredResult)
 
@@ -1069,6 +1109,7 @@ func (t *Thread) NewSubAgent(_ context.Context, config llmtypes.Config) llmtypes
 		toolResults:            make(map[string]tooltypes.StructuredToolResult),
 		subagentContextFactory: t.subagentContextFactory, // Propagate the injected function
 		thinkingBudget:         t.thinkingBudget,         // Use same thinking budget
+		hookManager:            t.hookManager,            // Share parent's hook manager
 	}
 
 	subagentThread.SetState(t.state)

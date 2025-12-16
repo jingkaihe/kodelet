@@ -22,6 +22,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/auth"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/feedback"
+	"github.com/jingkaihe/kodelet/pkg/hooks"
 	"github.com/jingkaihe/kodelet/pkg/ide"
 	"github.com/jingkaihe/kodelet/pkg/llm/prompts"
 	"github.com/jingkaihe/kodelet/pkg/logger"
@@ -68,6 +69,7 @@ type Thread struct {
 	toolResults            map[string]tooltypes.StructuredToolResult // Maps tool_call_id to structured result
 	subagentContextFactory llmtypes.SubagentContextFactory           // Injected function for cross-provider subagent creation
 	ideStore               *ide.Store                                // IDE context store (nil if IDE mode disabled)
+	hookManager            hooks.HookManager                         // Hook manager for lifecycle hooks (empty = no-op)
 }
 
 // Provider returns the provider name for this thread
@@ -150,6 +152,17 @@ func NewAnthropicThread(config llmtypes.Config, subagentContextFactory llmtypes.
 		ideStore = store
 	}
 
+	// Initialize hook manager (empty if discovery fails - hooks disabled)
+	hookManager := hooks.HookManager{}
+	if !config.IsSubAgent {
+		// Only main agent discovers hooks; subagents inherit from parent
+		var err error
+		hookManager, err = hooks.NewHookManager()
+		if err != nil {
+			logger.WithError(err).Warn("Failed to initialize hook manager, hooks disabled")
+		}
+	}
+
 	return &Thread{
 		client:                 client,
 		config:                 config,
@@ -160,6 +173,7 @@ func NewAnthropicThread(config llmtypes.Config, subagentContextFactory llmtypes.
 		toolResults:            make(map[string]tooltypes.StructuredToolResult),
 		subagentContextFactory: subagentContextFactory,
 		ideStore:               ideStore,
+		hookManager:            hookManager,
 	}, nil
 }
 
@@ -246,6 +260,11 @@ func (t *Thread) SendMessage(
 		if err := t.processIDEContext(ctx, handler); err != nil {
 			return "", errors.Wrap(err, "failed to process IDE context")
 		}
+	}
+
+	// Trigger user_message_send hook before adding user message
+	if blocked, reason := t.triggerUserMessageSend(ctx, message); blocked {
+		return "", errors.Errorf("message blocked by hook: %s", reason)
 	}
 
 	t.AddUserMessage(ctx, message, opt.Images...)
@@ -336,6 +355,11 @@ OUTER:
 		}
 	}
 
+	// Trigger agent_stop hook after completing the interaction
+	if messages, err := t.GetMessages(); err == nil {
+		t.triggerAgentStop(ctx, messages)
+	}
+
 	if opt.NoSaveConversation {
 		t.messages = originalMessages
 	}
@@ -413,17 +437,35 @@ func (t *Thread) executeToolsParallel(
 				attribute.Int("tool_index", i),
 			)
 
-			// Use a per-goroutine silent handler to avoid race conditions on shared handler
-			// XXX: It's tricky to visualise agent streaming in the terminal therefore we disable it for now
-			parallelHandler := &llmtypes.StringCollectorHandler{Silent: true}
-			runToolCtx := t.subagentContextFactory(gctx, t, parallelHandler, opt.CompactRatio, opt.DisableAutoCompact)
-			output := tools.RunTool(runToolCtx, t.state, tb.block.Name, tb.variant.JSON.Input.Raw())
+			// Trigger before_tool_call hook
+			toolInput := tb.variant.JSON.Input.Raw()
+			blocked, reason, input := t.triggerBeforeToolCall(gctx, tb.block.Name, toolInput, tb.block.ID)
+
+			var output tooltypes.ToolResult
+			if blocked {
+				output = tooltypes.NewBlockedToolResult(reason)
+			} else {
+				// Use the potentially modified input from the hook
+				toolInput = input
+
+				// Use a per-goroutine silent handler to avoid race conditions on shared handler
+				// XXX: It's tricky to visualise agent streaming in the terminal therefore we disable it for now
+				parallelHandler := &llmtypes.StringCollectorHandler{Silent: true}
+				runToolCtx := t.subagentContextFactory(gctx, t, parallelHandler, opt.CompactRatio, opt.DisableAutoCompact)
+				output = tools.RunTool(runToolCtx, t.state, tb.block.Name, toolInput)
+			}
 
 			if err := gctx.Err(); err != nil {
 				return err
 			}
 
 			structuredResult := output.StructuredData()
+
+			// Trigger after_tool_call hook
+			if modified := t.triggerAfterToolCall(gctx, tb.block.Name, toolInput, tb.block.ID, structuredResult); modified != nil {
+				structuredResult = *modified
+			}
+
 			registry := renderers.NewRendererRegistry()
 			renderedOutput := registry.Render(structuredResult)
 
@@ -437,7 +479,7 @@ func (t *Thread) executeToolsParallel(
 				index:          i,
 				blockID:        tb.block.ID,
 				toolName:       tb.block.Name,
-				input:          tb.variant.JSON.Input.Raw(),
+				input:          toolInput,
 				output:         output,
 				structuredData: structuredResult,
 				renderedOutput: renderedOutput,
@@ -924,6 +966,7 @@ func (t *Thread) NewSubAgent(_ context.Context, config llmtypes.Config) llmtypes
 		isPersisted:            false,                    // subagent is not persisted
 		usage:                  t.usage,                  // Share usage tracking with parent
 		subagentContextFactory: t.subagentContextFactory, // Propagate the injected function
+		hookManager:            t.hookManager,            // Share parent's hook manager
 	}
 
 	return thread

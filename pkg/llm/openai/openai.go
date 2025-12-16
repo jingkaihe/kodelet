@@ -21,6 +21,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/auth"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/feedback"
+	"github.com/jingkaihe/kodelet/pkg/hooks"
 	"github.com/jingkaihe/kodelet/pkg/ide"
 	"github.com/jingkaihe/kodelet/pkg/llm/prompts"
 	"github.com/jingkaihe/kodelet/pkg/logger"
@@ -161,7 +162,8 @@ type Thread struct {
 	customPricing          llmtypes.CustomPricing
 	useCopilot             bool
 	subagentContextFactory llmtypes.SubagentContextFactory
-	ideStore               *ide.Store // IDE context store (nil if IDE mode disabled)
+	ideStore               *ide.Store        // IDE context store (nil if IDE mode disabled)
+	hookManager            hooks.HookManager // Hook manager for lifecycle hooks (empty = no-op)
 }
 
 // Provider returns the provider name for this thread.
@@ -275,6 +277,17 @@ func NewOpenAIThread(config llmtypes.Config, subagentContextFactory llmtypes.Sub
 		ideStore = store
 	}
 
+	// Initialize hook manager (empty if discovery fails - hooks disabled)
+	hookManager := hooks.HookManager{}
+	if !config.IsSubAgent {
+		// Only main agent discovers hooks; subagents inherit from parent
+		var err error
+		hookManager, err = hooks.NewHookManager()
+		if err != nil {
+			logger.WithError(err).Warn("Failed to initialize hook manager, hooks disabled")
+		}
+	}
+
 	return &Thread{
 		client:                 client,
 		config:                 config,
@@ -288,6 +301,7 @@ func NewOpenAIThread(config llmtypes.Config, subagentContextFactory llmtypes.Sub
 		useCopilot:             useCopilot,
 		subagentContextFactory: subagentContextFactory,
 		ideStore:               ideStore,
+		hookManager:            hookManager,
 	}, nil
 }
 
@@ -354,6 +368,11 @@ func (t *Thread) SendMessage(
 		if err := t.processIDEContext(ctx, handler); err != nil {
 			return "", errors.Wrap(err, "failed to process IDE context")
 		}
+	}
+
+	// Trigger user_message_send hook before adding user message
+	if blocked, reason := t.triggerUserMessageSend(ctx, message); blocked {
+		return "", errors.Errorf("message blocked by hook: %s", reason)
 	}
 
 	if len(opt.Images) > 0 {
@@ -457,6 +476,11 @@ OUTER:
 				break OUTER
 			}
 		}
+	}
+
+	// Trigger agent_stop hook after completing the interaction
+	if messages, err := t.GetMessages(); err == nil {
+		t.triggerAgentStop(ctx, messages)
 	}
 
 	if opt.NoSaveConversation {
@@ -593,11 +617,28 @@ func (t *Thread) processMessageExchange(
 			attribute.String("tool_name", toolCall.Function.Name),
 		)
 
-		runToolCtx := t.subagentContextFactory(ctx, t, handler, opt.CompactRatio, opt.DisableAutoCompact)
-		output := tools.RunTool(runToolCtx, t.state, toolCall.Function.Name, toolCall.Function.Arguments)
+		// Trigger before_tool_call hook
+		toolInput := toolCall.Function.Arguments
+		blocked, reason, input := t.triggerBeforeToolCall(ctx, toolCall.Function.Name, toolInput, toolCall.ID)
+
+		var output tooltypes.ToolResult
+		if blocked {
+			output = tooltypes.NewBlockedToolResult(reason)
+		} else {
+			// Use the potentially modified input from the hook
+			toolInput = input
+			runToolCtx := t.subagentContextFactory(ctx, t, handler, opt.CompactRatio, opt.DisableAutoCompact)
+			output = tools.RunTool(runToolCtx, t.state, toolCall.Function.Name, toolInput)
+		}
 
 		// Use CLI rendering for consistent output formatting
 		structuredResult := output.StructuredData()
+
+		// Trigger after_tool_call hook
+		if modified := t.triggerAfterToolCall(ctx, toolCall.Function.Name, toolInput, toolCall.ID, structuredResult); modified != nil {
+			structuredResult = *modified
+		}
+
 		registry := renderers.NewRendererRegistry()
 		renderedOutput := registry.Render(structuredResult)
 		handler.HandleToolResult(toolCall.Function.Name, renderedOutput)
@@ -1040,6 +1081,7 @@ func (t *Thread) NewSubAgent(_ context.Context, config llmtypes.Config) llmtypes
 		customPricing:          t.customPricing,          // Share custom pricing configuration
 		useCopilot:             t.useCopilot,             // Share Copilot usage with parent
 		subagentContextFactory: t.subagentContextFactory, // Propagate the injected function
+		hookManager:            t.hookManager,            // Share parent's hook manager
 	}
 
 	return thread

@@ -72,6 +72,7 @@ var metadataTypeRegistry = map[string]reflect.Type{
 	"view_background_processes": reflect.TypeOf(ViewBackgroundProcessesMetadata{}),
 	"code_execution":            reflect.TypeOf(CodeExecutionMetadata{}),
 	"skill":                     reflect.TypeOf(SkillMetadata{}),
+	"blocked":                   reflect.TypeOf(BlockedMetadata{}),
 }
 
 // UnmarshalJSON implements custom JSON unmarshaling for StructuredToolResult
