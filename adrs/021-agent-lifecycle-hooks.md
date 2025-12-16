@@ -222,6 +222,25 @@ type HookManager struct {
 
 // DefaultTimeout is the default execution timeout for hooks
 const DefaultTimeout = 30 * time.Second
+
+// NewHookManager creates a new HookManager with discovered hooks
+// Returns an empty manager (no-op) if discovery fails
+func NewHookManager(opts ...DiscoveryOption) (HookManager, error) {
+    discovery, err := NewDiscovery(opts...)
+    if err != nil {
+        return HookManager{}, err
+    }
+
+    hooks, err := discovery.DiscoverHooks()
+    if err != nil {
+        return HookManager{}, err
+    }
+
+    return HookManager{
+        hooks:   hooks,
+        timeout: DefaultTimeout,
+    }, nil
+}
 ```
 
 ### 2. Payload Types
@@ -446,26 +465,8 @@ import (
     "github.com/pkg/errors"
 )
 
-// NewHookManager creates a new HookManager with discovered hooks
-func NewHookManager(opts ...DiscoveryOption) (*HookManager, error) {
-    discovery, err := NewDiscovery(opts...)
-    if err != nil {
-        return nil, err
-    }
-
-    hooks, err := discovery.DiscoverHooks()
-    if err != nil {
-        return nil, err
-    }
-
-    return &HookManager{
-        hooks:   hooks,
-        timeout: DefaultTimeout,
-    }, nil
-}
-
 // Execute runs all hooks of a given type with the provided payload
-func (m *HookManager) Execute(ctx context.Context, hookType HookType, payload interface{}) ([]byte, error) {
+func (m HookManager) Execute(ctx context.Context, hookType HookType, payload interface{}) ([]byte, error) {
     hooks := m.hooks[hookType]
     if len(hooks) == 0 {
         return nil, nil
@@ -491,8 +492,13 @@ func (m *HookManager) Execute(ctx context.Context, hookType HookType, payload in
 }
 
 // executeHook runs a single hook with timeout enforcement
-func (m *HookManager) executeHook(ctx context.Context, hook *Hook, payload []byte) ([]byte, error) {
-    ctx, cancel := context.WithTimeout(ctx, m.timeout)
+func (m HookManager) executeHook(ctx context.Context, hook *Hook, payload []byte) ([]byte, error) {
+    timeout := m.timeout
+    if timeout == 0 {
+        timeout = DefaultTimeout
+    }
+
+    ctx, cancel := context.WithTimeout(ctx, timeout)
     defer cancel()
 
     cmd := exec.CommandContext(ctx, hook.Path, "run")
@@ -504,7 +510,7 @@ func (m *HookManager) executeHook(ctx context.Context, hook *Hook, payload []byt
 
     if err := cmd.Run(); err != nil {
         if ctx.Err() == context.DeadlineExceeded {
-            return nil, errors.Errorf("hook %s timed out after %s", hook.Name, m.timeout)
+            return nil, errors.Errorf("hook %s timed out after %s", hook.Name, timeout)
         }
         return nil, errors.Wrapf(err, "hook %s failed: %s", hook.Name, stderr.String())
     }
@@ -518,235 +524,231 @@ func (m *HookManager) SetTimeout(timeout time.Duration) {
 }
 ```
 
-### 5. Public API Functions
+### 5. Thread Integration
+
+The `HookManager` is a value field on each Thread implementation (not a pointer), so an empty manager simply does nothing:
 
 ```go
-// pkg/hooks/api.go
-package hooks
-
-import (
-    "context"
-    "encoding/json"
-    "os"
-    "sync"
-
-    "github.com/jingkaihe/kodelet/pkg/logger"
-    llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
-    tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
-)
-
-var (
-    globalManager     *HookManager
-    globalManagerOnce sync.Once
-    globalManagerErr  error
-)
-
-// GetManager returns the global hook manager, initializing it on first call
-func GetManager() (*HookManager, error) {
-    globalManagerOnce.Do(func() {
-        globalManager, globalManagerErr = NewHookManager()
-    })
-    return globalManager, globalManagerErr
+// In pkg/llm/anthropic/anthropic.go
+type Thread struct {
+    // ... existing fields ...
+    hookManager hooks.HookManager // Hook manager for lifecycle hooks (empty = no-op)
 }
 
-// getInvokedBy determines if this is a main agent or subagent from context/config
-func getInvokedBy(config llmtypes.Config) InvokedBy {
-    if config.IsSubAgent {
-        return InvokedBySubagent
+// NewAnthropicThread creates a new thread with Anthropic's Claude API
+func NewAnthropicThread(config llmtypes.Config, subagentContextFactory llmtypes.SubagentContextFactory) (*Thread, error) {
+    // ... existing initialization ...
+
+    // Initialize hook manager (empty if discovery fails - hooks disabled)
+    hookManager := hooks.HookManager{}
+    if !config.IsSubAgent {
+        // Only main agent discovers hooks; subagents inherit from parent
+        hookManager, _ = hooks.NewHookManager()
     }
-    return InvokedByMain
+
+    return &Thread{
+        // ... existing fields ...
+        hookManager: hookManager,
+    }, nil
 }
 
-// SendUserMessage triggers user_message_send hooks
-// Returns (blocked, reason) where blocked=true means the message should not be processed
-func SendUserMessage(ctx context.Context, thread llmtypes.Thread, message string) (bool, string) {
-    manager, err := GetManager()
-    if err != nil {
-        logger.G(ctx).WithError(err).Debug("failed to get hook manager")
-        return false, ""
+// NewSubAgent creates a new subagent thread that shares the parent's hook manager
+func (t *Thread) NewSubAgent(_ context.Context, config llmtypes.Config) llmtypes.Thread {
+    return &Thread{
+        // ... existing fields ...
+        hookManager: t.hookManager, // Share parent's hook manager
     }
+}
+```
 
-    config := thread.GetConfig()
+### 6. Hook Invocation Helpers
+
+Helper methods on Thread to invoke hooks - no nil checks needed since empty manager is a no-op:
+
+```go
+// pkg/llm/anthropic/hooks.go (or inline in anthropic.go)
+
+func (t *Thread) invokedBy() hooks.InvokedBy {
+    if t.config.IsSubAgent {
+        return hooks.InvokedBySubagent
+    }
+    return hooks.InvokedByMain
+}
+
+// triggerUserMessageSend invokes user_message_send hooks
+// Returns (blocked, reason)
+func (t *Thread) triggerUserMessageSend(ctx context.Context, message string) (bool, string) {
     cwd, _ := os.Getwd()
-
-    payload := UserMessageSendPayload{
-        BasePayload: BasePayload{
-            Event:     HookTypeUserMessageSend,
-            ConvID:    thread.GetConversationID(),
+    payload := hooks.UserMessageSendPayload{
+        BasePayload: hooks.BasePayload{
+            Event:     hooks.HookTypeUserMessageSend,
+            ConvID:    t.conversationID,
             CWD:       cwd,
-            InvokedBy: getInvokedBy(config),
+            InvokedBy: t.invokedBy(),
         },
         Message: message,
     }
 
-    resultBytes, err := manager.Execute(ctx, HookTypeUserMessageSend, payload)
+    result, err := t.hookManager.ExecuteUserMessageSend(ctx, payload)
     if err != nil {
-        logger.G(ctx).WithError(err).Debug("user_message_send hook execution failed")
+        logger.G(ctx).WithError(err).Debug("user_message_send hook failed")
         return false, ""
     }
-
-    if resultBytes == nil {
-        return false, ""
-    }
-
-    var result UserMessageSendResult
-    if err := json.Unmarshal(resultBytes, &result); err != nil {
-        logger.G(ctx).WithError(err).Debug("failed to unmarshal user_message_send result")
-        return false, ""
-    }
-
     return result.Blocked, result.Reason
 }
 
-// BeforeToolCall triggers before_tool_call hooks
-// Returns (blocked, reason, modifiedInput) where:
-// - blocked=true means the tool call should not execute
-// - modifiedInput (if non-empty) replaces the original input as JSON string
-func BeforeToolCall(ctx context.Context, thread llmtypes.Thread, toolName, toolInput, toolUserID string) (bool, string, string) {
-    manager, err := GetManager()
-    if err != nil {
-        logger.G(ctx).WithError(err).Debug("failed to get hook manager")
-        return false, "", toolInput
-    }
-
-    config := thread.GetConfig()
+// triggerBeforeToolCall invokes before_tool_call hooks
+// Returns (blocked, reason, input)
+func (t *Thread) triggerBeforeToolCall(ctx context.Context, toolName, toolInput, toolUserID string) (bool, string, string) {
     cwd, _ := os.Getwd()
-
-    payload := BeforeToolCallPayload{
-        BasePayload: BasePayload{
-            Event:     HookTypeBeforeToolCall,
-            ConvID:    thread.GetConversationID(),
+    payload := hooks.BeforeToolCallPayload{
+        BasePayload: hooks.BasePayload{
+            Event:     hooks.HookTypeBeforeToolCall,
+            ConvID:    t.conversationID,
             CWD:       cwd,
-            InvokedBy: getInvokedBy(config),
+            InvokedBy: t.invokedBy(),
         },
         ToolName:   toolName,
-        ToolInput:  json.RawMessage(toolInput), // toolInput is already JSON string from LLM
+        ToolInput:  json.RawMessage(toolInput),
         ToolUserID: toolUserID,
     }
 
-    resultBytes, err := manager.Execute(ctx, HookTypeBeforeToolCall, payload)
+    result, err := t.hookManager.ExecuteBeforeToolCall(ctx, payload)
     if err != nil {
-        logger.G(ctx).WithError(err).Debug("before_tool_call hook execution failed")
-        return false, "", toolInput
-    }
-
-    if resultBytes == nil {
-        return false, "", toolInput
-    }
-
-    var result BeforeToolCallResult
-    if err := json.Unmarshal(resultBytes, &result); err != nil {
-        logger.G(ctx).WithError(err).Debug("failed to unmarshal before_tool_call result")
+        logger.G(ctx).WithError(err).Debug("before_tool_call hook failed")
         return false, "", toolInput
     }
 
     if result.Blocked {
         return true, result.Reason, ""
     }
-
     if len(result.Input) > 0 {
         return false, "", string(result.Input)
     }
-
     return false, "", toolInput
 }
 
-// AfterToolCall triggers after_tool_call hooks
-// Returns modifiedOutput if the hook wants to replace the output
-func AfterToolCall(ctx context.Context, thread llmtypes.Thread, toolName, toolInput, toolUserID string, toolOutput tooltypes.StructuredToolResult) *tooltypes.StructuredToolResult {
-    manager, err := GetManager()
-    if err != nil {
-        logger.G(ctx).WithError(err).Debug("failed to get hook manager")
-        return nil
-    }
-
-    config := thread.GetConfig()
+// triggerAfterToolCall invokes after_tool_call hooks
+// Returns modified output or nil to use original
+func (t *Thread) triggerAfterToolCall(ctx context.Context, toolName, toolInput, toolUserID string, toolOutput tooltypes.StructuredToolResult) *tooltypes.StructuredToolResult {
     cwd, _ := os.Getwd()
-
-    payload := AfterToolCallPayload{
-        BasePayload: BasePayload{
-            Event:     HookTypeAfterToolCall,
-            ConvID:    thread.GetConversationID(),
+    payload := hooks.AfterToolCallPayload{
+        BasePayload: hooks.BasePayload{
+            Event:     hooks.HookTypeAfterToolCall,
+            ConvID:    t.conversationID,
             CWD:       cwd,
-            InvokedBy: getInvokedBy(config),
+            InvokedBy: t.invokedBy(),
         },
         ToolName:   toolName,
-        ToolInput:  json.RawMessage(toolInput), // toolInput is already JSON string from LLM
+        ToolInput:  json.RawMessage(toolInput),
         ToolOutput: toolOutput,
         ToolUserID: toolUserID,
     }
 
-    resultBytes, err := manager.Execute(ctx, HookTypeAfterToolCall, payload)
+    result, err := t.hookManager.ExecuteAfterToolCall(ctx, payload)
     if err != nil {
-        logger.G(ctx).WithError(err).Debug("after_tool_call hook execution failed")
+        logger.G(ctx).WithError(err).Debug("after_tool_call hook failed")
         return nil
     }
-
-    if resultBytes == nil {
-        return nil
-    }
-
-    var result AfterToolCallResult
-    if err := json.Unmarshal(resultBytes, &result); err != nil {
-        logger.G(ctx).WithError(err).Debug("failed to unmarshal after_tool_call result")
-        return nil
-    }
-
-    if result.Output != nil {
-        modifiedBytes, err := json.Marshal(result.Output)
-        if err != nil {
-            logger.G(ctx).WithError(err).Debug("failed to marshal output")
-            return nil
-        }
-        var modifiedResult tooltypes.StructuredToolResult
-        if err := json.Unmarshal(modifiedBytes, &modifiedResult); err != nil {
-            logger.G(ctx).WithError(err).Debug("failed to unmarshal output to StructuredToolResult")
-            return nil
-        }
-        return &modifiedResult
-    }
-
-    return nil
+    return result.Output
 }
 
-// AgentStop triggers agent_stop hooks
-func AgentStop(ctx context.Context, thread llmtypes.Thread, messages []llmtypes.Message) {
-    manager, err := GetManager()
-    if err != nil {
-        logger.G(ctx).WithError(err).Debug("failed to get hook manager")
-        return
-    }
-
-    config := thread.GetConfig()
+// triggerAgentStop invokes agent_stop hooks
+func (t *Thread) triggerAgentStop(ctx context.Context, messages []llmtypes.Message) {
     cwd, _ := os.Getwd()
-
-    payload := AgentStopPayload{
-        BasePayload: BasePayload{
-            Event:     HookTypeAgentStop,
-            ConvID:    thread.GetConversationID(),
+    payload := hooks.AgentStopPayload{
+        BasePayload: hooks.BasePayload{
+            Event:     hooks.HookTypeAgentStop,
+            ConvID:    t.conversationID,
             CWD:       cwd,
-            InvokedBy: getInvokedBy(config),
+            InvokedBy: t.invokedBy(),
         },
         Messages: messages,
     }
 
-    _, err = manager.Execute(ctx, HookTypeAgentStop, payload)
-    if err != nil {
-        logger.G(ctx).WithError(err).Debug("agent_stop hook execution failed")
+    if _, err := t.hookManager.ExecuteAgentStop(ctx, payload); err != nil {
+        logger.G(ctx).WithError(err).Debug("agent_stop hook failed")
     }
 }
 ```
 
-### 6. LLM Provider Integration
+### 7. Typed Executor Methods
 
-Integration points for each LLM provider, following the pattern shown in the git diff:
+Add typed executor methods to HookManager for better ergonomics:
+
+```go
+// pkg/hooks/executor.go (continued)
+
+// ExecuteUserMessageSend runs user_message_send hooks and returns typed result
+func (m HookManager) ExecuteUserMessageSend(ctx context.Context, payload UserMessageSendPayload) (*UserMessageSendResult, error) {
+    resultBytes, err := m.Execute(ctx, HookTypeUserMessageSend, payload)
+    if err != nil {
+        return nil, err
+    }
+    if resultBytes == nil {
+        return &UserMessageSendResult{}, nil
+    }
+
+    var result UserMessageSendResult
+    if err := json.Unmarshal(resultBytes, &result); err != nil {
+        return nil, errors.Wrap(err, "failed to unmarshal result")
+    }
+    return &result, nil
+}
+
+// ExecuteBeforeToolCall runs before_tool_call hooks and returns typed result
+func (m HookManager) ExecuteBeforeToolCall(ctx context.Context, payload BeforeToolCallPayload) (*BeforeToolCallResult, error) {
+    resultBytes, err := m.Execute(ctx, HookTypeBeforeToolCall, payload)
+    if err != nil {
+        return nil, err
+    }
+    if resultBytes == nil {
+        return &BeforeToolCallResult{}, nil
+    }
+
+    var result BeforeToolCallResult
+    if err := json.Unmarshal(resultBytes, &result); err != nil {
+        return nil, errors.Wrap(err, "failed to unmarshal result")
+    }
+    return &result, nil
+}
+
+// ExecuteAfterToolCall runs after_tool_call hooks and returns typed result
+func (m HookManager) ExecuteAfterToolCall(ctx context.Context, payload AfterToolCallPayload) (*AfterToolCallResult, error) {
+    resultBytes, err := m.Execute(ctx, HookTypeAfterToolCall, payload)
+    if err != nil {
+        return nil, err
+    }
+    if resultBytes == nil {
+        return &AfterToolCallResult{}, nil
+    }
+
+    var result AfterToolCallResult
+    if err := json.Unmarshal(resultBytes, &result); err != nil {
+        return nil, errors.Wrap(err, "failed to unmarshal result")
+    }
+    return &result, nil
+}
+
+// ExecuteAgentStop runs agent_stop hooks
+func (m HookManager) ExecuteAgentStop(ctx context.Context, payload AgentStopPayload) (*AgentStopResult, error) {
+    _, err := m.Execute(ctx, HookTypeAgentStop, payload)
+    if err != nil {
+        return nil, err
+    }
+    return &AgentStopResult{}, nil
+}
+```
+
+### 8. LLM Provider Integration
+
+Integration points for each LLM provider using the Thread helper methods:
 
 #### Anthropic (pkg/llm/anthropic/anthropic.go)
 
 ```go
 // In SendMessage, before AddUserMessage:
-blocked, reason := hooks.SendUserMessage(ctx, t, message)
-if blocked {
+if blocked, reason := t.triggerUserMessageSend(ctx, message); blocked {
     return "", errors.Errorf("message blocked by hook: %s", reason)
 }
 
@@ -754,19 +756,18 @@ t.AddUserMessage(ctx, message, opt.Images...)
 
 // In SendMessage, after the OUTER loop (before return):
 messages, _ := t.GetMessages()
-hooks.AgentStop(ctx, t, messages)
+t.triggerAgentStop(ctx, messages)
 
 // In executeToolsParallel, around RunTool:
-blocked, reason, modifiedInput := hooks.BeforeToolCall(runToolCtx, t, tb.block.Name, tb.variant.JSON.Input.Raw(), tb.block.ID)
+blocked, reason, input := t.triggerBeforeToolCall(runToolCtx, tb.block.Name, tb.variant.JSON.Input.Raw(), tb.block.ID)
 if blocked {
-    // Create a blocked result and continue
     output = tooltypes.NewBlockedToolResult(reason)
 } else {
-    output = tools.RunTool(runToolCtx, t.state, tb.block.Name, modifiedInput)
+    output = tools.RunTool(runToolCtx, t.state, tb.block.Name, input)
 }
 
 structuredResult := output.StructuredData()
-if modified := hooks.AfterToolCall(runToolCtx, t, tb.block.Name, modifiedInput, tb.block.ID, structuredResult); modified != nil {
+if modified := t.triggerAfterToolCall(runToolCtx, tb.block.Name, input, tb.block.ID, structuredResult); modified != nil {
     structuredResult = *modified
 }
 ```
@@ -775,25 +776,24 @@ if modified := hooks.AfterToolCall(runToolCtx, t, tb.block.Name, modifiedInput, 
 
 ```go
 // In SendMessage, before AddUserMessage:
-blocked, reason := hooks.SendUserMessage(ctx, t, message)
-if blocked {
+if blocked, reason := t.triggerUserMessageSend(ctx, message); blocked {
     return "", errors.Errorf("message blocked by hook: %s", reason)
 }
 
 // After handler.HandleDone():
 messages, _ := t.GetMessages()
-hooks.AgentStop(ctx, t, messages)
+t.triggerAgentStop(ctx, messages)
 
 // In processMessageExchange, around tools.RunTool:
-blocked, reason, modifiedInput := hooks.BeforeToolCall(runToolCtx, t, toolCall.Function.Name, toolCall.Function.Arguments, toolCall.ID)
+blocked, reason, input := t.triggerBeforeToolCall(runToolCtx, toolCall.Function.Name, toolCall.Function.Arguments, toolCall.ID)
 if blocked {
     output = tooltypes.NewBlockedToolResult(reason)
 } else {
-    output = tools.RunTool(runToolCtx, t.state, toolCall.Function.Name, modifiedInput)
+    output = tools.RunTool(runToolCtx, t.state, toolCall.Function.Name, input)
 }
 
 structuredResult := output.StructuredData()
-if modified := hooks.AfterToolCall(runToolCtx, t, toolCall.Function.Name, modifiedInput, toolCall.ID, structuredResult); modified != nil {
+if modified := t.triggerAfterToolCall(runToolCtx, toolCall.Function.Name, input, toolCall.ID, structuredResult); modified != nil {
     structuredResult = *modified
 }
 ```
@@ -802,25 +802,24 @@ if modified := hooks.AfterToolCall(runToolCtx, t, toolCall.Function.Name, modifi
 
 ```go
 // In SendMessage, before AddUserMessage:
-blocked, reason := hooks.SendUserMessage(ctx, t, message)
-if blocked {
+if blocked, reason := t.triggerUserMessageSend(ctx, message); blocked {
     return "", errors.Errorf("message blocked by hook: %s", reason)
 }
 
 // After handler.HandleDone():
 messages, _ := t.GetMessages()
-hooks.AgentStop(ctx, t, messages)
+t.triggerAgentStop(ctx, messages)
 
 // In executeToolCalls, around tools.RunTool:
-blocked, reason, modifiedInput := hooks.BeforeToolCall(runToolCtx, t, toolCall.Name, string(argsJSON), toolCall.ID)
+blocked, reason, input := t.triggerBeforeToolCall(runToolCtx, toolCall.Name, string(argsJSON), toolCall.ID)
 if blocked {
     output = tooltypes.NewBlockedToolResult(reason)
 } else {
-    output = tools.RunTool(runToolCtx, t.state, toolCall.Name, modifiedInput)
+    output = tools.RunTool(runToolCtx, t.state, toolCall.Name, input)
 }
 
 structuredResult := output.StructuredData()
-if modified := hooks.AfterToolCall(runToolCtx, t, toolCall.Name, modifiedInput, toolCall.ID, structuredResult); modified != nil {
+if modified := t.triggerAfterToolCall(runToolCtx, toolCall.Name, input, toolCall.ID, structuredResult); modified != nil {
     structuredResult = *modified
 }
 ```
@@ -981,47 +980,6 @@ func main() {
     os.Exit(1)
 }
 ```
-
-## Testing Strategy
-
-### Unit Tests
-1. **Discovery tests**: Verify hook discovery from multiple directories with precedence
-2. **Executor tests**: Test hook execution with timeout enforcement
-3. **Payload tests**: Verify JSON serialization/deserialization of payloads
-
-### Integration Tests
-1. **End-to-end tests**: Test hook invocation through actual LLM provider flows
-2. **Blocking tests**: Verify that blocked hooks prevent tool execution
-3. **Modification tests**: Verify that hooks can modify inputs/outputs
-
-### Test Fixtures
-Create test hook executables that:
-- Return specific hook types
-- Block specific tool calls
-- Modify inputs/outputs in predictable ways
-- Simulate timeouts and failures
-
-## Consequences
-
-### Positive
-1. **Extensibility**: Users can observe and control agent behavior without code changes
-2. **Language-agnostic**: Hooks can be written in any language
-3. **Security**: Security teams can implement guardrails around tool execution
-4. **Compliance**: Audit logging and policy enforcement become possible
-5. **Integration**: Easy integration with external systems (Slack, webhooks, etc.)
-
-### Negative
-1. **Performance overhead**: Each hook invocation adds latency (mitigated by timeout)
-2. **Complexity**: More moving parts to debug when things go wrong
-3. **Security risk**: Malicious hooks could intercept sensitive data (mitigated by directory permissions)
-
-### Risks & Mitigations
-| Risk | Mitigation |
-|------|------------|
-| Hook hangs indefinitely | Timeout enforcement (default 30s) |
-| Hook fails and blocks agent | Log errors, continue operation |
-| Malicious hook in repo | User must explicitly trust repo hooks |
-| Performance degradation | Optional hooks, async where possible |
 
 ## Documentation
 
