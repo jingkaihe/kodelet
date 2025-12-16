@@ -139,6 +139,7 @@ Note: `output` is the tool output to be used. Omit or set to `null` to use the o
 - Non-zero exit codes indicate hook execution failure
 - Hook failures are logged but do not halt agent operation
 - Timeout enforcement prevents hung hooks from blocking the agent
+- **Empty stdout with exit code 0** is treated as "no action" (not blocked, no modification) - useful for observation-only hooks like audit loggers
 
 ## Architecture Overview
 
@@ -679,14 +680,15 @@ Add typed executor methods to HookManager for better ergonomics:
 ```go
 // pkg/hooks/executor.go (continued)
 
-// ExecuteUserMessageSend runs user_message_send hooks and returns typed result
+// ExecuteUserMessageSend runs user_message_send hooks and returns typed result.
+// Empty or nil output with exit code 0 is treated as "no action" (not blocked).
 func (m HookManager) ExecuteUserMessageSend(ctx context.Context, payload UserMessageSendPayload) (*UserMessageSendResult, error) {
     resultBytes, err := m.Execute(ctx, HookTypeUserMessageSend, payload)
     if err != nil {
         return nil, err
     }
-    if resultBytes == nil {
-        return &UserMessageSendResult{}, nil
+    if len(resultBytes) == 0 {
+        return &UserMessageSendResult{}, nil // No output = not blocked
     }
 
     var result UserMessageSendResult
@@ -696,14 +698,15 @@ func (m HookManager) ExecuteUserMessageSend(ctx context.Context, payload UserMes
     return &result, nil
 }
 
-// ExecuteBeforeToolCall runs before_tool_call hooks and returns typed result
+// ExecuteBeforeToolCall runs before_tool_call hooks and returns typed result.
+// Empty or nil output with exit code 0 is treated as "no action" (not blocked, no modification).
 func (m HookManager) ExecuteBeforeToolCall(ctx context.Context, payload BeforeToolCallPayload) (*BeforeToolCallResult, error) {
     resultBytes, err := m.Execute(ctx, HookTypeBeforeToolCall, payload)
     if err != nil {
         return nil, err
     }
-    if resultBytes == nil {
-        return &BeforeToolCallResult{}, nil
+    if len(resultBytes) == 0 {
+        return &BeforeToolCallResult{}, nil // No output = not blocked, use original input
     }
 
     var result BeforeToolCallResult
@@ -713,14 +716,15 @@ func (m HookManager) ExecuteBeforeToolCall(ctx context.Context, payload BeforeTo
     return &result, nil
 }
 
-// ExecuteAfterToolCall runs after_tool_call hooks and returns typed result
+// ExecuteAfterToolCall runs after_tool_call hooks and returns typed result.
+// Empty or nil output with exit code 0 is treated as "no modification".
 func (m HookManager) ExecuteAfterToolCall(ctx context.Context, payload AfterToolCallPayload) (*AfterToolCallResult, error) {
     resultBytes, err := m.Execute(ctx, HookTypeAfterToolCall, payload)
     if err != nil {
         return nil, err
     }
-    if resultBytes == nil {
-        return &AfterToolCallResult{}, nil
+    if len(resultBytes) == 0 {
+        return &AfterToolCallResult{}, nil // No output = use original output
     }
 
     var result AfterToolCallResult
@@ -870,8 +874,7 @@ if [ "$1" == "run" ]; then
     # Extract fields and log to file
     echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) | $payload" >> ~/.kodelet/audit.log
     
-    # Return empty result (no modification)
-    echo '{}'
+    # No output needed - empty stdout with exit 0 means "no modification"
     exit 0
 fi
 
@@ -973,7 +976,7 @@ func main() {
         body, _ := json.Marshal(slackMsg)
         http.Post(webhookURL, "application/json", bytes.NewReader(body))
 
-        fmt.Println("{}")
+        // No output needed - empty stdout with exit 0 is valid for agent_stop
         os.Exit(0)
     }
 
