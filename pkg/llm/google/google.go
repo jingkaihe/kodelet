@@ -408,18 +408,25 @@ OUTER:
 			// Update finalOutput with the most recent output
 			finalOutput = exchangeOutput
 
-			// If no tools were used, we're done
+			// If no tools were used, check for hook follow-ups before stopping
 			if !toolsUsed {
-				logger.G(ctx).Debug("no tools used, ending interaction")
+				logger.G(ctx).Debug("no tools used, checking agent_stop hook")
+
+				// Trigger agent_stop hook to see if there are follow-up messages
+				if messages, err := t.GetMessages(); err == nil {
+					if followUps := t.triggerAgentStop(ctx, messages); len(followUps) > 0 {
+						logger.G(ctx).WithField("count", len(followUps)).Info("agent_stop hook returned follow-up messages, continuing conversation")
+						// Append follow-up messages as user messages and continue
+						for _, msg := range followUps {
+							t.AddUserMessage(ctx, msg)
+							handler.HandleText(fmt.Sprintf("\n📨 Hook follow-up: %s\n", msg))
+						}
+						continue OUTER
+					}
+				}
+
 				break OUTER
 			}
-		}
-	}
-
-	// Trigger agent_stop hook after completing the interaction
-	if messages, err := t.GetMessages(); err == nil {
-		if followUps := t.triggerAgentStop(ctx, messages); len(followUps) > 0 {
-			logger.G(ctx).WithField("count", len(followUps)).Debug("agent_stop hook returned follow-up messages")
 		}
 	}
 
