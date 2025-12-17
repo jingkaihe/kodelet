@@ -296,7 +296,7 @@ type AfterToolCallPayload struct {
 
 // AfterToolCallResult is returned by after_tool_call hooks
 type AfterToolCallResult struct {
-    Output interface{} `json:"output,omitempty"`
+    Output *tooltypes.StructuredToolResult `json:"output,omitempty"`
 }
 
 // UserMessageSendPayload is sent to user_message_send hooks
@@ -891,27 +891,27 @@ if modified := t.triggerAfterToolCall(runToolCtx, toolCall.Name, input, toolCall
 ## Implementation Phases
 
 ### Phase 1: Core Infrastructure (Week 1)
-- [ ] Create `pkg/hooks/` package with core types
-- [ ] Implement hook discovery from `.kodelet/hooks/` directories
-- [ ] Implement hook executor with timeout enforcement
-- [ ] Write unit tests for discovery and execution
+- [x] Create `pkg/hooks/` package with core types
+- [x] Implement hook discovery from `.kodelet/hooks/` directories
+- [x] Implement hook executor with timeout enforcement
+- [x] Write unit tests for discovery and execution
 
 ### Phase 2: LLM Provider Integration (Week 1-2)
-- [ ] Add `hooks.SendUserMessage` to all three providers
-- [ ] Add `hooks.BeforeToolCall` to all three providers
-- [ ] Add `hooks.AfterToolCall` to all three providers
-- [ ] Add `hooks.AgentStop` to all three providers
-- [ ] Add `NewBlockedToolResult` helper function
+- [x] Add `hooks.SendUserMessage` to all three providers
+- [x] Add `hooks.BeforeToolCall` to all three providers
+- [x] Add `hooks.AfterToolCall` to all three providers
+- [x] Add `hooks.AgentStop` to all three providers
+- [x] Add `NewBlockedToolResult` helper function
 
 ### Phase 3: Testing & Documentation (Week 2)
-- [ ] Write integration tests with sample hook executables
+- [x] Write integration tests with sample hook executables
 - [ ] Create example hooks (audit logger, slack notifier)
 - [ ] Add `docs/HOOKS.md` documentation
 - [ ] Update `AGENTS.md` with hooks overview
 - [ ] Add hook examples to `examples/hooks/` directory
 
 ### Phase 4: CLI (Week 2-3, Optional)
-- [ ] Add `--no-hooks` CLI flag to disable hooks
+- [x] Add `--no-hooks` CLI flag to disable hooks
 - [ ] Add `kodelet hooks list` command to show discovered hooks
 
 ## Example Hook Implementations
