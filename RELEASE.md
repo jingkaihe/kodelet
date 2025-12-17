@@ -1,5 +1,25 @@
 # Kodelet
 
+## 0.1.23.beta (2025-12-17)
+
+### Features
+
+**Agent Lifecycle Hooks**: Introduced extensibility mechanism for observing and controlling agent behavior
+
+- **Hook Types**: Four hook types covering the agent lifecycle - `before_tool_call`, `after_tool_call`, `user_message_send`, and `agent_stop`
+- **Security Controls**: Blocking hooks can prevent dangerous tool executions with deny-fast semantics
+- **Input/Output Modification**: Hooks can modify tool inputs before execution and outputs after completion
+- **Follow-up Messages**: `agent_stop` hooks can return follow-up messages to continue the conversation
+- **Language-Agnostic**: Hooks are any executable files that implement a simple JSON-based protocol
+- **Discovery Locations**: Hooks discovered from `.kodelet/hooks/` (repo-local) and `~/.kodelet/hooks/` (global)
+- **CLI Flag**: `--no-hooks` flag to disable hooks for a session
+
+### Internal Changes
+
+- Hooks automatically disabled for `kodelet commit` and `kodelet pr` commands
+- Added comprehensive hook documentation in `docs/HOOKS.md`
+- Added ADR 021 documenting the hooks architecture
+
 ## 0.1.22.beta (2025-12-14)
 
 ### Features

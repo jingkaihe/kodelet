@@ -22,6 +22,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/auth"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/feedback"
+	"github.com/jingkaihe/kodelet/pkg/hooks"
 	"github.com/jingkaihe/kodelet/pkg/ide"
 	"github.com/jingkaihe/kodelet/pkg/llm/prompts"
 	"github.com/jingkaihe/kodelet/pkg/logger"
@@ -68,6 +69,7 @@ type Thread struct {
 	toolResults            map[string]tooltypes.StructuredToolResult // Maps tool_call_id to structured result
 	subagentContextFactory llmtypes.SubagentContextFactory           // Injected function for cross-provider subagent creation
 	ideStore               *ide.Store                                // IDE context store (nil if IDE mode disabled)
+	hookTrigger            hooks.Trigger                             // Hook trigger for lifecycle hooks (zero-value = no-op)
 }
 
 // Provider returns the provider name for this thread
@@ -150,16 +152,31 @@ func NewAnthropicThread(config llmtypes.Config, subagentContextFactory llmtypes.
 		ideStore = store
 	}
 
+	// Initialize hook trigger (zero-value if discovery fails or disabled - hooks disabled)
+	var hookTrigger hooks.Trigger
+	conversationID := convtypes.GenerateID()
+	if !config.IsSubAgent && !config.NoHooks {
+		// Only main agent discovers hooks; subagents inherit from parent
+		// Hooks can be disabled via NoHooks config
+		hookManager, err := hooks.NewHookManager()
+		if err != nil {
+			logger.WithError(err).Warn("Failed to initialize hook manager, hooks disabled")
+		} else {
+			hookTrigger = hooks.NewTrigger(hookManager, conversationID, config.IsSubAgent)
+		}
+	}
+
 	return &Thread{
 		client:                 client,
 		config:                 config,
 		useSubscription:        useSubscription,
-		conversationID:         convtypes.GenerateID(),
+		conversationID:         conversationID,
 		isPersisted:            false,
 		usage:                  &llmtypes.Usage{},
 		toolResults:            make(map[string]tooltypes.StructuredToolResult),
 		subagentContextFactory: subagentContextFactory,
 		ideStore:               ideStore,
+		hookTrigger:            hookTrigger,
 	}, nil
 }
 
@@ -248,6 +265,11 @@ func (t *Thread) SendMessage(
 		}
 	}
 
+	// Trigger user_message_send hook before adding user message
+	if blocked, reason := t.hookTrigger.TriggerUserMessageSend(ctx, message); blocked {
+		return "", errors.Errorf("message blocked by hook: %s", reason)
+	}
+
 	t.AddUserMessage(ctx, message, opt.Images...)
 
 	model, maxTokens := t.getModelAndTokens(opt)
@@ -328,9 +350,23 @@ OUTER:
 			// Update finalOutput with the most recent output
 			finalOutput = exchangeOutput
 
-			// If no tools were used, we're done
+			// If no tools were used, check for hook follow-ups before stopping
 			if !toolsUsed {
-				logger.G(ctx).Debug("no tools used, ending interaction")
+				logger.G(ctx).Debug("no tools used, checking agent_stop hook")
+
+				// Trigger agent_stop hook to see if there are follow-up messages
+				if messages, err := t.GetMessages(); err == nil {
+					if followUps := t.hookTrigger.TriggerAgentStop(ctx, messages); len(followUps) > 0 {
+						logger.G(ctx).WithField("count", len(followUps)).Info("agent_stop hook returned follow-up messages, continuing conversation")
+						// Append follow-up messages as user messages and continue
+						for _, msg := range followUps {
+							t.AddUserMessage(ctx, msg)
+							handler.HandleText(fmt.Sprintf("\n📨 Hook follow-up: %s\n", msg))
+						}
+						continue OUTER
+					}
+				}
+
 				break OUTER
 			}
 		}
@@ -413,17 +449,32 @@ func (t *Thread) executeToolsParallel(
 				attribute.Int("tool_index", i),
 			)
 
-			// Use a per-goroutine silent handler to avoid race conditions on shared handler
-			// XXX: It's tricky to visualise agent streaming in the terminal therefore we disable it for now
-			parallelHandler := &llmtypes.StringCollectorHandler{Silent: true}
-			runToolCtx := t.subagentContextFactory(gctx, t, parallelHandler, opt.CompactRatio, opt.DisableAutoCompact)
-			output := tools.RunTool(runToolCtx, t.state, tb.block.Name, tb.variant.JSON.Input.Raw())
+			// Trigger before_tool_call hook
+			toolInput := tb.variant.JSON.Input.Raw()
+			blocked, reason, toolInput := t.hookTrigger.TriggerBeforeToolCall(gctx, tb.block.Name, toolInput, tb.block.ID)
+
+			var output tooltypes.ToolResult
+			if blocked {
+				output = tooltypes.NewBlockedToolResult(tb.block.Name, reason)
+			} else {
+				// Use a per-goroutine silent handler to avoid race conditions on shared handler
+				// XXX: It's tricky to visualise agent streaming in the terminal therefore we disable it for now
+				parallelHandler := &llmtypes.StringCollectorHandler{Silent: true}
+				runToolCtx := t.subagentContextFactory(gctx, t, parallelHandler, opt.CompactRatio, opt.DisableAutoCompact)
+				output = tools.RunTool(runToolCtx, t.state, tb.block.Name, toolInput)
+			}
 
 			if err := gctx.Err(); err != nil {
 				return err
 			}
 
 			structuredResult := output.StructuredData()
+
+			// Trigger after_tool_call hook
+			if modified := t.hookTrigger.TriggerAfterToolCall(gctx, tb.block.Name, toolInput, tb.block.ID, structuredResult); modified != nil {
+				structuredResult = *modified
+			}
+
 			registry := renderers.NewRendererRegistry()
 			renderedOutput := registry.Render(structuredResult)
 
@@ -437,7 +488,7 @@ func (t *Thread) executeToolsParallel(
 				index:          i,
 				blockID:        tb.block.ID,
 				toolName:       tb.block.Name,
-				input:          tb.variant.JSON.Input.Raw(),
+				input:          toolInput,
 				output:         output,
 				structuredData: structuredResult,
 				renderedOutput: renderedOutput,
@@ -915,15 +966,19 @@ func (t *Thread) updateUsage(response *anthropic.Message, model anthropic.Model)
 
 // NewSubAgent creates a new subagent thread that shares the parent's client and usage tracking
 func (t *Thread) NewSubAgent(_ context.Context, config llmtypes.Config) llmtypes.Thread {
+	conversationID := convtypes.GenerateID()
+
 	// Create subagent thread reusing the parent's client instead of creating a new one
 	thread := &Thread{
 		client:                 t.client, // Reuse parent's client
 		config:                 config,
 		useSubscription:        t.useSubscription, // Reuse parent's subscription status
-		conversationID:         convtypes.GenerateID(),
-		isPersisted:            false,                    // subagent is not persisted
-		usage:                  t.usage,                  // Share usage tracking with parent
-		subagentContextFactory: t.subagentContextFactory, // Propagate the injected function
+		conversationID:         conversationID,
+		isPersisted:            false,                                                         // subagent is not persisted
+		usage:                  t.usage,                                                       // Share usage tracking with parent
+		toolResults:            make(map[string]tooltypes.StructuredToolResult),               // Initialize tool results map
+		subagentContextFactory: t.subagentContextFactory,                                      // Propagate the injected function
+		hookTrigger:            hooks.NewTrigger(t.hookTrigger.Manager, conversationID, true), // Create new trigger with shared hook manager
 	}
 
 	return thread
@@ -1080,6 +1135,7 @@ func (t *Thread) GetConversationID() string {
 // SetConversationID sets the conversation ID
 func (t *Thread) SetConversationID(id string) {
 	t.conversationID = id
+	t.hookTrigger.SetConversationID(id)
 }
 
 // IsPersisted returns whether this thread is being persisted

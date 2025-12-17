@@ -40,6 +40,7 @@ type RunConfig struct {
 	IncludeHistory     bool              // Include historical conversation data in headless streaming
 	IDE                bool              // Enable IDE integration mode (display conversation ID prominently)
 	NoSkills           bool              // Disable agentic skills
+	NoHooks            bool              // Disable agent lifecycle hooks
 }
 
 func NewRunConfig() *RunConfig {
@@ -58,6 +59,7 @@ func NewRunConfig() *RunConfig {
 		IncludeHistory:     false,
 		IDE:                false,
 		NoSkills:           false,
+		NoHooks:            false,
 	}
 }
 
@@ -202,6 +204,7 @@ var runCmd = &cobra.Command{
 		}
 
 		llmConfig.IDE = config.IDE
+		llmConfig.NoHooks = config.NoHooks
 
 		applyFragmentRestrictions(&llmConfig, fragmentMetadata)
 
@@ -376,6 +379,7 @@ func init() {
 	runCmd.Flags().StringSlice("fragment-dirs", defaults.FragmentDirs, "Additional fragment directories (e.g., --fragment-dirs ./project-fragments --fragment-dirs ./team-fragments)")
 	runCmd.Flags().Bool("include-history", defaults.IncludeHistory, "Include historical conversation data in headless streaming")
 	runCmd.Flags().Bool("ide", defaults.IDE, "Enable IDE integration mode (display conversation ID prominently)")
+	runCmd.Flags().Bool("no-hooks", defaults.NoHooks, "Disable agent lifecycle hooks")
 }
 
 func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
@@ -446,6 +450,10 @@ func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
 
 	if ide, err := cmd.Flags().GetBool("ide"); err == nil {
 		config.IDE = ide
+	}
+
+	if noHooks, err := cmd.Flags().GetBool("no-hooks"); err == nil {
+		config.NoHooks = noHooks
 	}
 
 	return config

@@ -142,6 +142,43 @@ kodelet run --no-skills "query"
 kodelet chat --no-skills
 ```
 
+### Agent Lifecycle Hooks
+Hooks allow external scripts to observe and control agent behavior for audit logging, security controls, and monitoring.
+
+**Hook locations:**
+- `./.kodelet/hooks/` - Repository-local (higher precedence)
+- `~/.kodelet/hooks/` - User-global
+
+**Hook types:**
+| Type | Trigger | Can Block | Can Modify |
+|------|---------|-----------|------------|
+| `before_tool_call` | Before tool execution | Yes | Tool input |
+| `after_tool_call` | After tool execution | No | Tool output |
+| `user_message_send` | When user sends message | Yes | N/A |
+| `agent_stop` | When agent would stop | No | Follow-up messages |
+
+**Creating a hook:**
+```bash
+#!/bin/bash
+# ~/.kodelet/hooks/security_hook
+if [ "$1" == "hook" ]; then echo "before_tool_call"; exit 0; fi
+if [ "$1" == "run" ]; then
+    # Read JSON payload from stdin, return JSON result
+    echo '{"blocked":false}'
+    exit 0
+fi
+```
+
+**Hook protocol:**
+- `./hook hook` - Returns hook type
+- `echo '{"event":"before_tool_call",...}' | ./hook run` - Execute with JSON payload
+
+**Disabling hooks:**
+```bash
+kodelet run --no-hooks "query"
+kodelet chat --no-hooks
+```
+
 ### Git Integration
 
 **AI Commit Messages:**
