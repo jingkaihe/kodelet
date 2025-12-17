@@ -1103,36 +1103,26 @@ func (t *Thread) NewSubAgent(_ context.Context, config llmtypes.Config) llmtypes
 
 // ShortSummary generates a concise summary of the conversation using a faster model.
 func (t *Thread) ShortSummary(ctx context.Context) string {
-	// Temporarily disable persistence and hook triggers during summarization
-	t.isPersisted = false
-	oldHookTrigger := t.hookTrigger
-	t.hookTrigger = hooks.Trigger{}
-	defer func() {
-		t.hookTrigger = oldHookTrigger
-	}()
-	defer func() {
-		t.isPersisted = true
-	}()
+	summaryThread, err := NewOpenAIThread(t.GetConfig(), nil)
+	if err != nil {
+		logger.G(ctx).WithError(err).Error("failed to create summary thread")
+		return "Could not generate summary."
+	}
 
-	// Use a faster model for summarization as it's a simpler task
-	_, err := t.SendMessage(ctx, prompts.ShortSummaryPrompt, &llmtypes.StringCollectorHandler{Silent: true}, llmtypes.MessageOpt{
+	summaryThread.messages = t.messages
+	summaryThread.EnablePersistence(ctx, false)
+	summaryThread.hookTrigger = hooks.Trigger{} // disable hooks for summary
+
+	handler := &llmtypes.StringCollectorHandler{Silent: true}
+	summaryThread.SendMessage(ctx, prompts.ShortSummaryPrompt, handler, llmtypes.MessageOpt{
 		UseWeakModel:       true,
 		NoToolUse:          true,
-		DisableAutoCompact: true, // Prevent auto-compact during summarization
-		DisableUsageLog:    true, // Don't log usage for internal summary operations
-		// Note: Not using NoSaveConversation so we can access the assistant response
+		DisableAutoCompact: true,
+		DisableUsageLog:    true,
+		NoSaveConversation: true,
 	})
-	if err != nil {
-		return err.Error()
-	}
 
-	// Get the summary from the last assistant message
-	summary, err := t.getLastAssistantMessageText()
-	if err != nil {
-		return err.Error()
-	}
-
-	return summary
+	return handler.CollectedText()
 }
 
 // GetConfig returns the configuration of the thread
