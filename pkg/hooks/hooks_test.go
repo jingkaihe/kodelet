@@ -505,3 +505,370 @@ if [ "$1" == "run" ]; then echo '{"follow_up_messages":["message from hook 2","a
 	assert.Equal(t, "message from hook 2", result.FollowUpMessages[1])
 	assert.Equal(t, "another message", result.FollowUpMessages[2])
 }
+
+func TestIntegration_BeforeToolCall_BlocksWithReason(t *testing.T) {
+	tempDir := t.TempDir()
+	hookPath := filepath.Join(tempDir, "security_hook")
+
+	script := `#!/bin/bash
+if [ "$1" == "hook" ]; then echo "before_tool_call"; exit 0; fi
+if [ "$1" == "run" ]; then echo '{"blocked":true,"reason":"rm -rf is not allowed"}'; exit 0; fi
+`
+	require.NoError(t, os.WriteFile(hookPath, []byte(script), 0o755))
+
+	manager, err := NewHookManager(WithHookDirs(tempDir))
+	require.NoError(t, err)
+
+	payload := BeforeToolCallPayload{
+		BasePayload: BasePayload{
+			Event:     HookTypeBeforeToolCall,
+			ConvID:    "test-conv-123",
+			CWD:       "/home/user/project",
+			InvokedBy: InvokedByMain,
+		},
+		ToolName:   "bash",
+		ToolInput:  json.RawMessage(`{"command":"rm -rf /"}`),
+		ToolUserID: "tool-abc",
+	}
+
+	result, err := manager.ExecuteBeforeToolCall(context.Background(), payload)
+	require.NoError(t, err)
+
+	assert.True(t, result.Blocked)
+	assert.Equal(t, "rm -rf is not allowed", result.Reason)
+}
+
+func TestIntegration_BeforeToolCall_ModifiesInput(t *testing.T) {
+	tempDir := t.TempDir()
+	hookPath := filepath.Join(tempDir, "input_modifier")
+
+	script := `#!/bin/bash
+if [ "$1" == "hook" ]; then echo "before_tool_call"; exit 0; fi
+if [ "$1" == "run" ]; then echo '{"blocked":false,"input":{"command":"ls -la --safe"}}'; exit 0; fi
+`
+	require.NoError(t, os.WriteFile(hookPath, []byte(script), 0o755))
+
+	manager, err := NewHookManager(WithHookDirs(tempDir))
+	require.NoError(t, err)
+
+	payload := BeforeToolCallPayload{
+		BasePayload: BasePayload{
+			Event:  HookTypeBeforeToolCall,
+			ConvID: "test-conv",
+		},
+		ToolName:  "bash",
+		ToolInput: json.RawMessage(`{"command":"ls -la"}`),
+	}
+
+	result, err := manager.ExecuteBeforeToolCall(context.Background(), payload)
+	require.NoError(t, err)
+
+	assert.False(t, result.Blocked)
+	assert.NotNil(t, result.Input)
+	assert.JSONEq(t, `{"command":"ls -la --safe"}`, string(result.Input))
+}
+
+func TestIntegration_AfterToolCall_ModifiesOutput(t *testing.T) {
+	tempDir := t.TempDir()
+	hookPath := filepath.Join(tempDir, "output_modifier")
+
+	script := `#!/bin/bash
+if [ "$1" == "hook" ]; then echo "after_tool_call"; exit 0; fi
+if [ "$1" == "run" ]; then
+    echo '{"output":{"toolName":"bash","success":true,"error":"[REDACTED]","timestamp":"2025-01-01T00:00:00Z"}}'
+    exit 0
+fi
+`
+	require.NoError(t, os.WriteFile(hookPath, []byte(script), 0o755))
+
+	manager, err := NewHookManager(WithHookDirs(tempDir))
+	require.NoError(t, err)
+
+	payload := AfterToolCallPayload{
+		BasePayload: BasePayload{
+			Event:  HookTypeAfterToolCall,
+			ConvID: "test-conv",
+		},
+		ToolName:  "bash",
+		ToolInput: json.RawMessage(`{"command":"cat /etc/passwd"}`),
+	}
+
+	result, err := manager.ExecuteAfterToolCall(context.Background(), payload)
+	require.NoError(t, err)
+
+	assert.NotNil(t, result.Output)
+	assert.Equal(t, "bash", result.Output.ToolName)
+	assert.True(t, result.Output.Success)
+	assert.Equal(t, "[REDACTED]", result.Output.Error)
+}
+
+func TestIntegration_UserMessageSend_AllowsMessage(t *testing.T) {
+	tempDir := t.TempDir()
+	hookPath := filepath.Join(tempDir, "message_validator")
+
+	script := `#!/bin/bash
+if [ "$1" == "hook" ]; then echo "user_message_send"; exit 0; fi
+if [ "$1" == "run" ]; then echo '{"blocked":false}'; exit 0; fi
+`
+	require.NoError(t, os.WriteFile(hookPath, []byte(script), 0o755))
+
+	manager, err := NewHookManager(WithHookDirs(tempDir))
+	require.NoError(t, err)
+
+	payload := UserMessageSendPayload{
+		BasePayload: BasePayload{
+			Event:     HookTypeUserMessageSend,
+			ConvID:    "test-conv",
+			CWD:       "/home/user",
+			InvokedBy: InvokedByMain,
+		},
+		Message: "Hello, can you help me with this code?",
+	}
+
+	result, err := manager.ExecuteUserMessageSend(context.Background(), payload)
+	require.NoError(t, err)
+
+	assert.False(t, result.Blocked)
+}
+
+func TestIntegration_HookTimeout(t *testing.T) {
+	tempDir := t.TempDir()
+	hookPath := filepath.Join(tempDir, "slow_hook")
+
+	script := `#!/bin/bash
+if [ "$1" == "hook" ]; then echo "before_tool_call"; exit 0; fi
+if [ "$1" == "run" ]; then sleep 5; echo '{"blocked":false}'; exit 0; fi
+`
+	require.NoError(t, os.WriteFile(hookPath, []byte(script), 0o755))
+
+	manager, err := NewHookManager(WithHookDirs(tempDir))
+	require.NoError(t, err)
+	manager.SetTimeout(100 * time.Millisecond)
+
+	payload := BeforeToolCallPayload{
+		BasePayload: BasePayload{
+			Event:  HookTypeBeforeToolCall,
+			ConvID: "test-conv",
+		},
+		ToolName: "bash",
+	}
+
+	result, err := manager.ExecuteBeforeToolCall(context.Background(), payload)
+	require.NoError(t, err)
+	assert.False(t, result.Blocked)
+}
+
+func TestIntegration_HookNonZeroExitCode(t *testing.T) {
+	tempDir := t.TempDir()
+	hookPath := filepath.Join(tempDir, "failing_hook")
+
+	script := `#!/bin/bash
+if [ "$1" == "hook" ]; then echo "before_tool_call"; exit 0; fi
+if [ "$1" == "run" ]; then echo "error message" >&2; exit 1; fi
+`
+	require.NoError(t, os.WriteFile(hookPath, []byte(script), 0o755))
+
+	manager, err := NewHookManager(WithHookDirs(tempDir))
+	require.NoError(t, err)
+
+	payload := BeforeToolCallPayload{
+		BasePayload: BasePayload{
+			Event:  HookTypeBeforeToolCall,
+			ConvID: "test-conv",
+		},
+		ToolName: "bash",
+	}
+
+	result, err := manager.ExecuteBeforeToolCall(context.Background(), payload)
+	require.NoError(t, err)
+	assert.False(t, result.Blocked)
+}
+
+func TestIntegration_HookEmptyOutput_ObservationOnly(t *testing.T) {
+	tempDir := t.TempDir()
+	hookPath := filepath.Join(tempDir, "audit_logger")
+
+	script := `#!/bin/bash
+if [ "$1" == "hook" ]; then echo "after_tool_call"; exit 0; fi
+if [ "$1" == "run" ]; then
+    # Log to a file (observation only)
+    cat >> /dev/null
+    # No output - empty stdout with exit 0 means "no modification"
+    exit 0
+fi
+`
+	require.NoError(t, os.WriteFile(hookPath, []byte(script), 0o755))
+
+	manager, err := NewHookManager(WithHookDirs(tempDir))
+	require.NoError(t, err)
+
+	payload := AfterToolCallPayload{
+		BasePayload: BasePayload{
+			Event:  HookTypeAfterToolCall,
+			ConvID: "test-conv",
+		},
+		ToolName: "bash",
+	}
+
+	result, err := manager.ExecuteAfterToolCall(context.Background(), payload)
+	require.NoError(t, err)
+
+	assert.Nil(t, result.Output)
+}
+
+func TestIntegration_HookReceivesFullPayload(t *testing.T) {
+	tempDir := t.TempDir()
+	outputFile := filepath.Join(tempDir, "payload.json")
+	hookPath := filepath.Join(tempDir, "payload_recorder")
+
+	script := `#!/bin/bash
+if [ "$1" == "hook" ]; then echo "before_tool_call"; exit 0; fi
+if [ "$1" == "run" ]; then
+    # Save payload to file for inspection
+    cat > "` + outputFile + `"
+    echo '{"blocked":false}'
+    exit 0
+fi
+`
+	require.NoError(t, os.WriteFile(hookPath, []byte(script), 0o755))
+
+	manager, err := NewHookManager(WithHookDirs(tempDir))
+	require.NoError(t, err)
+
+	payload := BeforeToolCallPayload{
+		BasePayload: BasePayload{
+			Event:     HookTypeBeforeToolCall,
+			ConvID:    "conv-12345",
+			CWD:       "/home/test",
+			InvokedBy: InvokedBySubagent,
+		},
+		ToolName:   "file_read",
+		ToolInput:  json.RawMessage(`{"file_path":"/etc/hosts"}`),
+		ToolUserID: "tool-xyz",
+	}
+
+	_, err = manager.ExecuteBeforeToolCall(context.Background(), payload)
+	require.NoError(t, err)
+
+	savedPayload, err := os.ReadFile(outputFile)
+	require.NoError(t, err)
+
+	var decoded BeforeToolCallPayload
+	require.NoError(t, json.Unmarshal(savedPayload, &decoded))
+
+	assert.Equal(t, HookTypeBeforeToolCall, decoded.Event)
+	assert.Equal(t, "conv-12345", decoded.ConvID)
+	assert.Equal(t, "/home/test", decoded.CWD)
+	assert.Equal(t, InvokedBySubagent, decoded.InvokedBy)
+	assert.Equal(t, "file_read", decoded.ToolName)
+	assert.Equal(t, "tool-xyz", decoded.ToolUserID)
+	assert.JSONEq(t, `{"file_path":"/etc/hosts"}`, string(decoded.ToolInput))
+}
+
+func TestIntegration_AgentStop_NoFollowUp(t *testing.T) {
+	tempDir := t.TempDir()
+	hookPath := filepath.Join(tempDir, "notification_hook")
+
+	script := `#!/bin/bash
+if [ "$1" == "hook" ]; then echo "agent_stop"; exit 0; fi
+if [ "$1" == "run" ]; then
+    # Just observe the stop event, don't return follow-ups
+    exit 0
+fi
+`
+	require.NoError(t, os.WriteFile(hookPath, []byte(script), 0o755))
+
+	manager, err := NewHookManager(WithHookDirs(tempDir))
+	require.NoError(t, err)
+
+	payload := AgentStopPayload{
+		BasePayload: BasePayload{
+			Event:  HookTypeAgentStop,
+			ConvID: "test-conv",
+		},
+	}
+
+	result, err := manager.ExecuteAgentStop(context.Background(), payload)
+	require.NoError(t, err)
+
+	assert.Empty(t, result.FollowUpMessages)
+}
+
+func TestIntegration_InvalidHookType_Skipped(t *testing.T) {
+	tempDir := t.TempDir()
+	hookPath := filepath.Join(tempDir, "invalid_hook")
+
+	script := `#!/bin/bash
+if [ "$1" == "hook" ]; then echo "invalid_type"; exit 0; fi
+if [ "$1" == "run" ]; then echo '{"blocked":true}'; exit 0; fi
+`
+	require.NoError(t, os.WriteFile(hookPath, []byte(script), 0o755))
+
+	manager, err := NewHookManager(WithHookDirs(tempDir))
+	require.NoError(t, err)
+
+	assert.False(t, manager.HasHooks(HookTypeBeforeToolCall))
+	assert.False(t, manager.HasHooks(HookTypeAfterToolCall))
+	assert.False(t, manager.HasHooks(HookTypeUserMessageSend))
+	assert.False(t, manager.HasHooks(HookTypeAgentStop))
+}
+
+func TestIntegration_HookDiscoveryCommand_Fails(t *testing.T) {
+	tempDir := t.TempDir()
+	hookPath := filepath.Join(tempDir, "broken_hook")
+
+	script := `#!/bin/bash
+if [ "$1" == "hook" ]; then exit 1; fi
+if [ "$1" == "run" ]; then echo '{"blocked":true}'; exit 0; fi
+`
+	require.NoError(t, os.WriteFile(hookPath, []byte(script), 0o755))
+
+	manager, err := NewHookManager(WithHookDirs(tempDir))
+	require.NoError(t, err)
+
+	assert.False(t, manager.HasHooks(HookTypeBeforeToolCall))
+}
+
+func TestIntegration_MultipleHookTypes(t *testing.T) {
+	tempDir := t.TempDir()
+
+	beforeHook := filepath.Join(tempDir, "before_hook")
+	afterHook := filepath.Join(tempDir, "after_hook")
+	userMsgHook := filepath.Join(tempDir, "user_msg_hook")
+	stopHook := filepath.Join(tempDir, "stop_hook")
+
+	beforeScript := `#!/bin/bash
+if [ "$1" == "hook" ]; then echo "before_tool_call"; exit 0; fi
+if [ "$1" == "run" ]; then echo '{"blocked":false}'; exit 0; fi
+`
+	afterScript := `#!/bin/bash
+if [ "$1" == "hook" ]; then echo "after_tool_call"; exit 0; fi
+if [ "$1" == "run" ]; then exit 0; fi
+`
+	userMsgScript := `#!/bin/bash
+if [ "$1" == "hook" ]; then echo "user_message_send"; exit 0; fi
+if [ "$1" == "run" ]; then echo '{"blocked":false}'; exit 0; fi
+`
+	stopScript := `#!/bin/bash
+if [ "$1" == "hook" ]; then echo "agent_stop"; exit 0; fi
+if [ "$1" == "run" ]; then echo '{"follow_up_messages":["done"]}'; exit 0; fi
+`
+
+	require.NoError(t, os.WriteFile(beforeHook, []byte(beforeScript), 0o755))
+	require.NoError(t, os.WriteFile(afterHook, []byte(afterScript), 0o755))
+	require.NoError(t, os.WriteFile(userMsgHook, []byte(userMsgScript), 0o755))
+	require.NoError(t, os.WriteFile(stopHook, []byte(stopScript), 0o755))
+
+	manager, err := NewHookManager(WithHookDirs(tempDir))
+	require.NoError(t, err)
+
+	assert.True(t, manager.HasHooks(HookTypeBeforeToolCall))
+	assert.True(t, manager.HasHooks(HookTypeAfterToolCall))
+	assert.True(t, manager.HasHooks(HookTypeUserMessageSend))
+	assert.True(t, manager.HasHooks(HookTypeAgentStop))
+
+	assert.Len(t, manager.GetHooks(HookTypeBeforeToolCall), 1)
+	assert.Len(t, manager.GetHooks(HookTypeAfterToolCall), 1)
+	assert.Len(t, manager.GetHooks(HookTypeUserMessageSend), 1)
+	assert.Len(t, manager.GetHooks(HookTypeAgentStop), 1)
+}
