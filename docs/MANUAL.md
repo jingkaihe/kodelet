@@ -57,6 +57,11 @@ Kodelet is a lightweight agentic SWE Agent that runs as an interactive CLI tool 
   - [Creating Skills](#creating-skills)
   - [Skills Configuration](#skills-configuration)
   - [Disabling Skills](#disabling-skills)
+- [Agent Lifecycle Hooks](#agent-lifecycle-hooks)
+  - [Hook Types](#hook-types)
+  - [Creating Hooks](#creating-hooks)
+  - [Hook Protocol](#hook-protocol)
+  - [Disabling Hooks](#disabling-hooks)
 - [Key Features](#key-features)
 - [Security & Limitations](#security--limitations)
   - [Image Input Security](#image-input-security)
@@ -1240,6 +1245,143 @@ kodelet chat --no-skills
 ```
 
 For detailed skill creation guide, see [docs/SKILLS.md](SKILLS.md).
+
+## Agent Lifecycle Hooks
+
+Agent Lifecycle Hooks allow external scripts to observe and control agent behavior. Hooks are language-agnostic executables that receive JSON payloads and can block operations, modify inputs/outputs, or trigger follow-up actions.
+
+**Use Cases:**
+- **Audit logging**: Record all tool invocations and user interactions
+- **Security controls**: Block potentially harmful tool calls or inputs
+- **Monitoring & alerting**: Send notifications to external systems
+- **Compliance**: Enforce organizational policies on agent behavior
+
+### Hook Types
+
+| Hook Type | Trigger Point | Can Block | Can Modify |
+|-----------|--------------|-----------|------------|
+| `before_tool_call` | Before tool execution | Yes | Tool input |
+| `after_tool_call` | After tool execution | No | Tool output |
+| `user_message_send` | When user sends message | Yes | N/A |
+| `agent_stop` | When agent would stop | No | Follow-up messages |
+
+### Creating Hooks
+
+Hooks are executable files discovered from two directories:
+
+**Hook Locations:**
+- `./.kodelet/hooks/` - Repository-local (higher precedence)
+- `~/.kodelet/hooks/` - User-global
+
+**Example Security Hook (Bash):**
+
+```bash
+#!/bin/bash
+# File: .kodelet/hooks/security_guardrail
+
+case "$1" in
+  "hook")
+    echo "before_tool_call"
+    ;;
+  "run")
+    # Read JSON payload from stdin
+    payload=$(cat)
+    tool_name=$(echo "$payload" | jq -r '.tool_name')
+
+    # Block dangerous commands
+    if [ "$tool_name" == "bash" ]; then
+      command=$(echo "$payload" | jq -r '.tool_input.command // ""')
+      if [[ "$command" == *"rm -rf"* ]]; then
+        echo '{"blocked":true,"reason":"rm -rf commands are not allowed"}'
+        exit 0
+      fi
+    fi
+
+    echo '{"blocked":false}'
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+```
+
+**Example Audit Logger (Bash):**
+
+```bash
+#!/bin/bash
+# File: ~/.kodelet/hooks/audit_logger
+
+if [ "$1" == "hook" ]; then
+    echo "after_tool_call"
+    exit 0
+fi
+
+if [ "$1" == "run" ]; then
+    payload=$(cat)
+    echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) | $payload" >> ~/.kodelet/audit.log
+    # Empty output = no modification
+    exit 0
+fi
+
+exit 1
+```
+
+### Hook Protocol
+
+Hooks implement a simple two-command protocol:
+
+**Discovery Command:**
+```bash
+./my_hook hook
+# Output: hook type (e.g., "before_tool_call")
+```
+
+**Execution Command:**
+```bash
+echo '{"event":"before_tool_call","tool_name":"bash",...}' | ./my_hook run
+# Output: JSON result (or empty for no action)
+```
+
+**Payload Structure (before_tool_call):**
+```json
+{
+  "event": "before_tool_call",
+  "conv_id": "conversation-id",
+  "tool_name": "bash",
+  "tool_input": {"command": "ls -la"},
+  "tool_user_id": "tool-call-id",
+  "cwd": "/current/working/dir",
+  "invoked_by": "main"
+}
+```
+
+**Result Structure (before_tool_call):**
+```json
+{
+  "blocked": false,
+  "reason": "optional reason if blocked",
+  "input": {"modified": "input"}
+}
+```
+
+**Hook Behavior:**
+- Non-zero exit codes indicate hook failure (logged but doesn't halt agent)
+- Empty stdout with exit code 0 means "no action" (not blocked, no modification)
+- 30-second timeout prevents hung hooks from blocking the agent
+- Deny-fast semantics: if any hook blocks, execution stops immediately
+
+### Disabling Hooks
+
+To run without hooks for a single session:
+
+```bash
+kodelet run --no-hooks "your query"
+kodelet chat --no-hooks
+```
+
+Hooks are automatically disabled for `kodelet commit` and `kodelet pr` commands.
+
+For detailed hook creation guide, see [docs/HOOKS.md](HOOKS.md).
 
 ## Key Features
 
