@@ -346,3 +346,162 @@ func TestResultSerialization_AgentStopResult_Empty(t *testing.T) {
 
 	assert.Nil(t, decoded.FollowUpMessages)
 }
+
+func TestDenyFast_BeforeToolCall_FirstHookBlocks(t *testing.T) {
+	tempDir := t.TempDir()
+
+	// Create two hooks: first blocks, second allows
+	blockingHook := filepath.Join(tempDir, "01-blocking-hook")
+	allowingHook := filepath.Join(tempDir, "02-allowing-hook")
+
+	// Hook that reports as before_tool_call and blocks
+	blockingScript := `#!/bin/bash
+if [ "$1" == "hook" ]; then echo "before_tool_call"; exit 0; fi
+if [ "$1" == "run" ]; then echo '{"blocked":true,"reason":"blocked by first hook"}'; exit 0; fi
+`
+	// Hook that reports as before_tool_call and allows
+	allowingScript := `#!/bin/bash
+if [ "$1" == "hook" ]; then echo "before_tool_call"; exit 0; fi
+if [ "$1" == "run" ]; then echo '{"blocked":false}'; exit 0; fi
+`
+
+	require.NoError(t, os.WriteFile(blockingHook, []byte(blockingScript), 0o755))
+	require.NoError(t, os.WriteFile(allowingHook, []byte(allowingScript), 0o755))
+
+	manager, err := NewHookManager(WithHookDirs(tempDir))
+	require.NoError(t, err)
+
+	hooks := manager.GetHooks(HookTypeBeforeToolCall)
+	require.Len(t, hooks, 2, "should have 2 hooks")
+
+	payload := BeforeToolCallPayload{
+		BasePayload: BasePayload{
+			Event:  HookTypeBeforeToolCall,
+			ConvID: "test-conv",
+		},
+		ToolName: "bash",
+	}
+
+	result, err := manager.ExecuteBeforeToolCall(context.Background(), payload)
+	require.NoError(t, err)
+
+	// Deny-fast: first hook blocks, should return immediately without executing second
+	assert.True(t, result.Blocked)
+	assert.Equal(t, "blocked by first hook", result.Reason)
+}
+
+func TestDenyFast_UserMessageSend_FirstHookBlocks(t *testing.T) {
+	tempDir := t.TempDir()
+
+	// Create two hooks: first blocks, second allows
+	blockingHook := filepath.Join(tempDir, "01-blocking-hook")
+	allowingHook := filepath.Join(tempDir, "02-allowing-hook")
+
+	blockingScript := `#!/bin/bash
+if [ "$1" == "hook" ]; then echo "user_message_send"; exit 0; fi
+if [ "$1" == "run" ]; then echo '{"blocked":true,"reason":"blocked by first hook"}'; exit 0; fi
+`
+	allowingScript := `#!/bin/bash
+if [ "$1" == "hook" ]; then echo "user_message_send"; exit 0; fi
+if [ "$1" == "run" ]; then echo '{"blocked":false}'; exit 0; fi
+`
+
+	require.NoError(t, os.WriteFile(blockingHook, []byte(blockingScript), 0o755))
+	require.NoError(t, os.WriteFile(allowingHook, []byte(allowingScript), 0o755))
+
+	manager, err := NewHookManager(WithHookDirs(tempDir))
+	require.NoError(t, err)
+
+	hooks := manager.GetHooks(HookTypeUserMessageSend)
+	require.Len(t, hooks, 2, "should have 2 hooks")
+
+	payload := UserMessageSendPayload{
+		BasePayload: BasePayload{
+			Event:  HookTypeUserMessageSend,
+			ConvID: "test-conv",
+		},
+		Message: "test message",
+	}
+
+	result, err := manager.ExecuteUserMessageSend(context.Background(), payload)
+	require.NoError(t, err)
+
+	// Deny-fast: first hook blocks, should return immediately
+	assert.True(t, result.Blocked)
+	assert.Equal(t, "blocked by first hook", result.Reason)
+}
+
+func TestDenyFast_AllHooksAllow(t *testing.T) {
+	tempDir := t.TempDir()
+
+	// Create two hooks that both allow
+	hook1 := filepath.Join(tempDir, "01-allowing-hook")
+	hook2 := filepath.Join(tempDir, "02-allowing-hook")
+
+	allowingScript := `#!/bin/bash
+if [ "$1" == "hook" ]; then echo "before_tool_call"; exit 0; fi
+if [ "$1" == "run" ]; then echo '{"blocked":false}'; exit 0; fi
+`
+
+	require.NoError(t, os.WriteFile(hook1, []byte(allowingScript), 0o755))
+	require.NoError(t, os.WriteFile(hook2, []byte(allowingScript), 0o755))
+
+	manager, err := NewHookManager(WithHookDirs(tempDir))
+	require.NoError(t, err)
+
+	payload := BeforeToolCallPayload{
+		BasePayload: BasePayload{
+			Event:  HookTypeBeforeToolCall,
+			ConvID: "test-conv",
+		},
+		ToolName: "bash",
+	}
+
+	result, err := manager.ExecuteBeforeToolCall(context.Background(), payload)
+	require.NoError(t, err)
+
+	// All hooks allow, should not be blocked
+	assert.False(t, result.Blocked)
+}
+
+func TestAgentStop_AccumulatesFollowUpMessages(t *testing.T) {
+	tempDir := t.TempDir()
+
+	// Create two hooks that each return follow-up messages
+	hook1 := filepath.Join(tempDir, "01-hook")
+	hook2 := filepath.Join(tempDir, "02-hook")
+
+	hook1Script := `#!/bin/bash
+if [ "$1" == "hook" ]; then echo "agent_stop"; exit 0; fi
+if [ "$1" == "run" ]; then echo '{"follow_up_messages":["message from hook 1"]}'; exit 0; fi
+`
+	hook2Script := `#!/bin/bash
+if [ "$1" == "hook" ]; then echo "agent_stop"; exit 0; fi
+if [ "$1" == "run" ]; then echo '{"follow_up_messages":["message from hook 2","another message"]}'; exit 0; fi
+`
+
+	require.NoError(t, os.WriteFile(hook1, []byte(hook1Script), 0o755))
+	require.NoError(t, os.WriteFile(hook2, []byte(hook2Script), 0o755))
+
+	manager, err := NewHookManager(WithHookDirs(tempDir))
+	require.NoError(t, err)
+
+	hooks := manager.GetHooks(HookTypeAgentStop)
+	require.Len(t, hooks, 2, "should have 2 hooks")
+
+	payload := AgentStopPayload{
+		BasePayload: BasePayload{
+			Event:  HookTypeAgentStop,
+			ConvID: "test-conv",
+		},
+	}
+
+	result, err := manager.ExecuteAgentStop(context.Background(), payload)
+	require.NoError(t, err)
+
+	// Should accumulate messages from all hooks
+	require.Len(t, result.FollowUpMessages, 3)
+	assert.Equal(t, "message from hook 1", result.FollowUpMessages[0])
+	assert.Equal(t, "message from hook 2", result.FollowUpMessages[1])
+	assert.Equal(t, "another message", result.FollowUpMessages[2])
+}

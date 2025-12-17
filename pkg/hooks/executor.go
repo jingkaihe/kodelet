@@ -66,38 +66,90 @@ func (m HookManager) executeHook(ctx context.Context, hook *Hook, payload []byte
 
 // ExecuteUserMessageSend runs user_message_send hooks and returns typed result.
 // Empty or nil output with exit code 0 is treated as "no action" (not blocked).
+// Uses deny-fast semantics: if any hook blocks, execution stops immediately.
 func (m HookManager) ExecuteUserMessageSend(ctx context.Context, payload UserMessageSendPayload) (*UserMessageSendResult, error) {
-	resultBytes, err := m.Execute(ctx, HookTypeUserMessageSend, payload)
-	if err != nil {
-		return nil, err
-	}
-	if len(resultBytes) == 0 {
-		return &UserMessageSendResult{}, nil // No output = not blocked
+	hooks := m.hooks[HookTypeUserMessageSend]
+	if len(hooks) == 0 {
+		return &UserMessageSendResult{}, nil
 	}
 
-	var result UserMessageSendResult
-	if err := json.Unmarshal(resultBytes, &result); err != nil {
-		return nil, errors.Wrap(err, "failed to unmarshal result")
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to marshal payload")
 	}
-	return &result, nil
+
+	var lastResult *UserMessageSendResult
+	for _, hook := range hooks {
+		resultBytes, err := m.executeHook(ctx, hook, payloadBytes)
+		if err != nil {
+			logger.G(ctx).WithError(err).WithField("hook", hook.Name).Warn("hook execution failed")
+			continue
+		}
+		if len(resultBytes) == 0 {
+			continue
+		}
+
+		var result UserMessageSendResult
+		if err := json.Unmarshal(resultBytes, &result); err != nil {
+			logger.G(ctx).WithError(err).WithField("hook", hook.Name).Warn("failed to unmarshal hook result")
+			continue
+		}
+
+		// Deny-fast: if any hook blocks, return immediately
+		if result.Blocked {
+			return &result, nil
+		}
+		lastResult = &result
+	}
+
+	if lastResult != nil {
+		return lastResult, nil
+	}
+	return &UserMessageSendResult{}, nil
 }
 
 // ExecuteBeforeToolCall runs before_tool_call hooks and returns typed result.
 // Empty or nil output with exit code 0 is treated as "no action" (not blocked, no modification).
+// Uses deny-fast semantics: if any hook blocks, execution stops immediately.
 func (m HookManager) ExecuteBeforeToolCall(ctx context.Context, payload BeforeToolCallPayload) (*BeforeToolCallResult, error) {
-	resultBytes, err := m.Execute(ctx, HookTypeBeforeToolCall, payload)
-	if err != nil {
-		return nil, err
-	}
-	if len(resultBytes) == 0 {
-		return &BeforeToolCallResult{}, nil // No output = not blocked, use original input
+	hooks := m.hooks[HookTypeBeforeToolCall]
+	if len(hooks) == 0 {
+		return &BeforeToolCallResult{}, nil
 	}
 
-	var result BeforeToolCallResult
-	if err := json.Unmarshal(resultBytes, &result); err != nil {
-		return nil, errors.Wrap(err, "failed to unmarshal result")
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to marshal payload")
 	}
-	return &result, nil
+
+	var lastResult *BeforeToolCallResult
+	for _, hook := range hooks {
+		resultBytes, err := m.executeHook(ctx, hook, payloadBytes)
+		if err != nil {
+			logger.G(ctx).WithError(err).WithField("hook", hook.Name).Warn("hook execution failed")
+			continue
+		}
+		if len(resultBytes) == 0 {
+			continue
+		}
+
+		var result BeforeToolCallResult
+		if err := json.Unmarshal(resultBytes, &result); err != nil {
+			logger.G(ctx).WithError(err).WithField("hook", hook.Name).Warn("failed to unmarshal hook result")
+			continue
+		}
+
+		// Deny-fast: if any hook blocks, return immediately
+		if result.Blocked {
+			return &result, nil
+		}
+		lastResult = &result
+	}
+
+	if lastResult != nil {
+		return lastResult, nil
+	}
+	return &BeforeToolCallResult{}, nil
 }
 
 // ExecuteAfterToolCall runs after_tool_call hooks and returns typed result.
@@ -120,18 +172,38 @@ func (m HookManager) ExecuteAfterToolCall(ctx context.Context, payload AfterTool
 
 // ExecuteAgentStop runs agent_stop hooks and returns typed result.
 // Empty or nil output with exit code 0 is treated as "no follow-up".
+// Accumulates follow_up_messages from all hooks.
 func (m HookManager) ExecuteAgentStop(ctx context.Context, payload AgentStopPayload) (*AgentStopResult, error) {
-	resultBytes, err := m.Execute(ctx, HookTypeAgentStop, payload)
-	if err != nil {
-		return nil, err
-	}
-	if len(resultBytes) == 0 {
-		return &AgentStopResult{}, nil // No output = no follow-up messages
+	hooks := m.hooks[HookTypeAgentStop]
+	if len(hooks) == 0 {
+		return &AgentStopResult{}, nil
 	}
 
-	var result AgentStopResult
-	if err := json.Unmarshal(resultBytes, &result); err != nil {
-		return nil, errors.Wrap(err, "failed to unmarshal result")
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to marshal payload")
 	}
-	return &result, nil
+
+	var allFollowUpMessages []string
+	for _, hook := range hooks {
+		resultBytes, err := m.executeHook(ctx, hook, payloadBytes)
+		if err != nil {
+			logger.G(ctx).WithError(err).WithField("hook", hook.Name).Warn("hook execution failed")
+			continue
+		}
+		if len(resultBytes) == 0 {
+			continue
+		}
+
+		var result AgentStopResult
+		if err := json.Unmarshal(resultBytes, &result); err != nil {
+			logger.G(ctx).WithError(err).WithField("hook", hook.Name).Warn("failed to unmarshal hook result")
+			continue
+		}
+
+		// Accumulate follow-up messages from all hooks
+		allFollowUpMessages = append(allFollowUpMessages, result.FollowUpMessages...)
+	}
+
+	return &AgentStopResult{FollowUpMessages: allFollowUpMessages}, nil
 }
