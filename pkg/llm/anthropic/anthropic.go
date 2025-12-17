@@ -984,37 +984,6 @@ func (t *Thread) NewSubAgent(_ context.Context, config llmtypes.Config) llmtypes
 	return thread
 }
 
-// getLastAssistantMessageText extracts text content from the most recent assistant message
-func (t *Thread) getLastAssistantMessageText() (string, error) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	if len(t.messages) == 0 {
-		return "", errors.New("no messages found")
-	}
-
-	// Find the last assistant message
-	var messageText string
-	for i := len(t.messages) - 1; i >= 0; i-- {
-		msg := t.messages[i]
-		if msg.Role == anthropic.MessageParamRoleAssistant {
-			// Extract text from the assistant message content blocks
-			for _, block := range msg.Content {
-				if block.OfText != nil {
-					messageText += block.OfText.Text
-				}
-			}
-			break
-		}
-	}
-
-	if messageText == "" {
-		return "", errors.New("no text content found in assistant message")
-	}
-
-	return messageText, nil
-}
-
 // ShortSummary generates a short summary of the conversation using a weak model
 func (t *Thread) ShortSummary(ctx context.Context) string {
 	summaryThread, err := NewAnthropicThread(t.GetConfig(), nil)
@@ -1057,31 +1026,29 @@ func (t *Thread) shouldAutoCompact(compactRatio float64) bool {
 
 // CompactContext performs comprehensive context compacting by creating a detailed summary
 func (t *Thread) CompactContext(ctx context.Context) error {
-	// Temporarily disable persistence during compacting
-	wasPersistedOriginal := t.isPersisted
-	t.isPersisted = false
-	defer func() {
-		t.isPersisted = wasPersistedOriginal
-	}()
+	summaryThread, err := NewAnthropicThread(t.GetConfig(), nil)
+	if err != nil {
+		return errors.Wrap(err, "failed to create summary thread")
+	}
 
-	// Use the strong model for comprehensive compacting (opposite of ShortSummary)
-	_, err := t.SendMessage(ctx, prompts.CompactPrompt, &llmtypes.StringCollectorHandler{Silent: true}, llmtypes.MessageOpt{
-		UseWeakModel:       false, // Use strong model for comprehensive compacting
-		PromptCache:        false, // Don't cache the compacting prompt
+	summaryThread.messages = t.messages
+	summaryThread.EnablePersistence(ctx, false)
+	summaryThread.hookTrigger = hooks.Trigger{}
+
+	handler := &llmtypes.StringCollectorHandler{Silent: true}
+	_, err = summaryThread.SendMessage(ctx, prompts.CompactPrompt, handler, llmtypes.MessageOpt{
+		UseWeakModel:       false,
+		PromptCache:        false,
 		NoToolUse:          true,
-		DisableAutoCompact: true, // Prevent recursion
-		DisableUsageLog:    true, // Don't log usage for internal compact operations
-		// Note: Not using NoSaveConversation so we can access the assistant response
+		DisableAutoCompact: true,
+		DisableUsageLog:    true,
+		NoSaveConversation: true,
 	})
 	if err != nil {
 		return errors.Wrap(err, "failed to generate compact summary")
 	}
 
-	// Get the compact summary from the last assistant message
-	compactSummary, err := t.getLastAssistantMessageText()
-	if err != nil {
-		return errors.Wrap(err, "failed to get compact summary from assistant message")
-	}
+	compactSummary := handler.CollectedText()
 
 	// Replace the conversation history with the compact summary
 	t.mu.Lock()
