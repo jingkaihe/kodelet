@@ -110,9 +110,10 @@ func (t *Thread) triggerAfterToolCall(ctx context.Context, toolName, toolInput, 
 }
 
 // triggerAgentStop invokes agent_stop hooks
-func (t *Thread) triggerAgentStop(ctx context.Context, messages []llmtypes.Message) {
+// Returns follow-up messages that can be appended to the conversation
+func (t *Thread) triggerAgentStop(ctx context.Context, messages []llmtypes.Message) []string {
 	if !t.hookManager.HasHooks(hooks.HookTypeAgentStop) {
-		return
+		return nil
 	}
 
 	cwd, _ := os.Getwd()
@@ -126,7 +127,10 @@ func (t *Thread) triggerAgentStop(ctx context.Context, messages []llmtypes.Messa
 		Messages: messages,
 	}
 
-	if _, err := t.hookManager.ExecuteAgentStop(ctx, payload); err != nil {
+	result, err := t.hookManager.ExecuteAgentStop(ctx, payload)
+	if err != nil {
 		logger.G(ctx).WithError(err).Debug("agent_stop hook failed")
+		return nil
 	}
+	return result.FollowUpMessages
 }

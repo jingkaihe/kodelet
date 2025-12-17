@@ -480,7 +480,9 @@ OUTER:
 
 	// Trigger agent_stop hook after completing the interaction
 	if messages, err := t.GetMessages(); err == nil {
-		t.triggerAgentStop(ctx, messages)
+		if followUps := t.triggerAgentStop(ctx, messages); len(followUps) > 0 {
+			logger.G(ctx).WithField("count", len(followUps)).Debug("agent_stop hook returned follow-up messages")
+		}
 	}
 
 	if opt.NoSaveConversation {

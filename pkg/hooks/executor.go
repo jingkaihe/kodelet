@@ -118,11 +118,20 @@ func (m HookManager) ExecuteAfterToolCall(ctx context.Context, payload AfterTool
 	return &result, nil
 }
 
-// ExecuteAgentStop runs agent_stop hooks
+// ExecuteAgentStop runs agent_stop hooks and returns typed result.
+// Empty or nil output with exit code 0 is treated as "no follow-up".
 func (m HookManager) ExecuteAgentStop(ctx context.Context, payload AgentStopPayload) (*AgentStopResult, error) {
-	_, err := m.Execute(ctx, HookTypeAgentStop, payload)
+	resultBytes, err := m.Execute(ctx, HookTypeAgentStop, payload)
 	if err != nil {
 		return nil, err
 	}
-	return &AgentStopResult{}, nil
+	if len(resultBytes) == 0 {
+		return &AgentStopResult{}, nil // No output = no follow-up messages
+	}
+
+	var result AgentStopResult
+	if err := json.Unmarshal(resultBytes, &result); err != nil {
+		return nil, errors.Wrap(err, "failed to unmarshal result")
+	}
+	return &result, nil
 }

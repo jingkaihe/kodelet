@@ -316,3 +316,33 @@ func TestResultSerialization_UserMessageSendResult(t *testing.T) {
 	assert.Equal(t, result.Blocked, decoded.Blocked)
 	assert.Equal(t, result.Reason, decoded.Reason)
 }
+
+func TestResultSerialization_AgentStopResult(t *testing.T) {
+	result := AgentStopResult{
+		FollowUpMessages: []string{
+			"Please review the changes and confirm they look correct.",
+			"Should I run the tests now?",
+		},
+	}
+
+	data, err := json.Marshal(result)
+	require.NoError(t, err)
+
+	var decoded AgentStopResult
+	require.NoError(t, json.Unmarshal(data, &decoded))
+
+	assert.Equal(t, result.FollowUpMessages, decoded.FollowUpMessages)
+	assert.Len(t, decoded.FollowUpMessages, 2)
+}
+
+func TestResultSerialization_AgentStopResult_Empty(t *testing.T) {
+	result := AgentStopResult{}
+
+	data, err := json.Marshal(result)
+	require.NoError(t, err)
+
+	var decoded AgentStopResult
+	require.NoError(t, json.Unmarshal(data, &decoded))
+
+	assert.Nil(t, decoded.FollowUpMessages)
+}

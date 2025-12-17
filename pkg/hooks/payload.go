@@ -62,5 +62,10 @@ type AgentStopPayload struct {
 	Messages []llmtypes.Message `json:"messages"`
 }
 
-// AgentStopResult is returned by agent_stop hooks (empty for now)
-type AgentStopResult struct{}
+// AgentStopResult is returned by agent_stop hooks
+type AgentStopResult struct {
+	// FollowUpMessages contains optional messages to append to the conversation.
+	// This enables LLM-based hooks to provide feedback, ask clarifying questions,
+	// or request additional actions based on the agent's work.
+	FollowUpMessages []string `json:"follow_up_messages,omitempty"`
+}
