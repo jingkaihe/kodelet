@@ -1,7 +1,7 @@
 # ADR 021: Agent Lifecycle Hooks
 
 ## Status
-Proposed
+Accepted
 
 ## Context
 
@@ -39,7 +39,7 @@ Four hook types are defined based on agent lifecycle events:
 | `before_tool_call` | Before tool execution | Yes | Tool input |
 | `after_tool_call` | After tool execution | No | Tool output |
 | `user_message_send` | When user sends message | Yes | N/A |
-| `agent_stop` | When agent completes/stops | No | N/A |
+| `agent_stop` | When agent would stop (no tools used) | No | Can return follow-up messages |
 
 ### Hook Protocol
 
@@ -131,7 +131,12 @@ Note: `output` is the tool output to be used. Omit or set to `null` to use the o
 
 **AgentStop:**
 ```json
-{}
+{
+  "follow_up_messages": ["string", "..."]
+}
+```
+
+Note: `follow_up_messages` is optional. If provided, these messages are appended as user messages and the agent continues processing. This enables LLM-based hooks to analyze the conversation and request additional work or clarification. Empty array or omitted field means the agent stops normally.
 ```
 
 ### Error Handling
@@ -312,8 +317,12 @@ type AgentStopPayload struct {
     Messages []llmtypes.Message `json:"messages"`
 }
 
-// AgentStopResult is returned by agent_stop hooks (empty for now)
-type AgentStopResult struct{}
+// AgentStopResult is returned by agent_stop hooks
+type AgentStopResult struct {
+    // FollowUpMessages contains optional messages to append to the conversation.
+    // If provided, these are added as user messages and the agent continues.
+    FollowUpMessages []string `json:"follow_up_messages,omitempty"`
+}
 ```
 
 ### 3. Discovery
@@ -393,7 +402,7 @@ func (d *Discovery) DiscoverHooks() (map[HookType][]*Hook, error) {
             }
 
             hookPath := filepath.Join(dir, entry.Name())
-            
+
             // Check if executable
             info, err := entry.Info()
             if err != nil {
@@ -655,7 +664,8 @@ func (t *Thread) triggerAfterToolCall(ctx context.Context, toolName, toolInput, 
 }
 
 // triggerAgentStop invokes agent_stop hooks
-func (t *Thread) triggerAgentStop(ctx context.Context, messages []llmtypes.Message) {
+// Returns follow-up messages that can be appended to the conversation
+func (t *Thread) triggerAgentStop(ctx context.Context, messages []llmtypes.Message) []string {
     cwd, _ := os.Getwd()
     payload := hooks.AgentStopPayload{
         BasePayload: hooks.BasePayload{
@@ -667,9 +677,12 @@ func (t *Thread) triggerAgentStop(ctx context.Context, messages []llmtypes.Messa
         Messages: messages,
     }
 
-    if _, err := t.hookManager.ExecuteAgentStop(ctx, payload); err != nil {
+    result, err := t.hookManager.ExecuteAgentStop(ctx, payload)
+    if err != nil {
         logger.G(ctx).WithError(err).Debug("agent_stop hook failed")
+        return nil
     }
+    return result.FollowUpMessages
 }
 ```
 
@@ -734,13 +747,22 @@ func (m HookManager) ExecuteAfterToolCall(ctx context.Context, payload AfterTool
     return &result, nil
 }
 
-// ExecuteAgentStop runs agent_stop hooks
+// ExecuteAgentStop runs agent_stop hooks and returns typed result.
+// Empty or nil output with exit code 0 is treated as "no follow-up".
 func (m HookManager) ExecuteAgentStop(ctx context.Context, payload AgentStopPayload) (*AgentStopResult, error) {
-    _, err := m.Execute(ctx, HookTypeAgentStop, payload)
+    resultBytes, err := m.Execute(ctx, HookTypeAgentStop, payload)
     if err != nil {
         return nil, err
     }
-    return &AgentStopResult{}, nil
+    if len(resultBytes) == 0 {
+        return &AgentStopResult{}, nil // No output = no follow-up messages
+    }
+
+    var result AgentStopResult
+    if err := json.Unmarshal(resultBytes, &result); err != nil {
+        return nil, errors.Wrap(err, "failed to unmarshal result")
+    }
+    return &result, nil
 }
 ```
 
@@ -758,9 +780,25 @@ if blocked, reason := t.triggerUserMessageSend(ctx, message); blocked {
 
 t.AddUserMessage(ctx, message, opt.Images...)
 
-// In SendMessage, after the OUTER loop (before return):
-messages, _ := t.GetMessages()
-t.triggerAgentStop(ctx, messages)
+// In the OUTER loop, when no tools are used (instead of breaking immediately):
+if !toolsUsed {
+    logger.G(ctx).Debug("no tools used, checking agent_stop hook")
+
+    // Trigger agent_stop hook to see if there are follow-up messages
+    if messages, err := t.GetMessages(); err == nil {
+        if followUps := t.triggerAgentStop(ctx, messages); len(followUps) > 0 {
+            logger.G(ctx).WithField("count", len(followUps)).Info("agent_stop hook returned follow-up messages, continuing conversation")
+            // Append follow-up messages as user messages and continue
+            for _, msg := range followUps {
+                t.AddUserMessage(ctx, msg)
+                handler.HandleText(fmt.Sprintf("\n📨 Hook follow-up: %s\n", msg))
+            }
+            continue OUTER
+        }
+    }
+
+    break OUTER
+}
 
 // In executeToolsParallel, around RunTool:
 blocked, reason, input := t.triggerBeforeToolCall(runToolCtx, tb.block.Name, tb.variant.JSON.Input.Raw(), tb.block.ID)
@@ -784,9 +822,20 @@ if blocked, reason := t.triggerUserMessageSend(ctx, message); blocked {
     return "", errors.Errorf("message blocked by hook: %s", reason)
 }
 
-// After handler.HandleDone():
-messages, _ := t.GetMessages()
-t.triggerAgentStop(ctx, messages)
+// In the OUTER loop, when no tools are used:
+if !toolsUsed {
+    // Trigger agent_stop hook to see if there are follow-up messages
+    if messages, err := t.GetMessages(); err == nil {
+        if followUps := t.triggerAgentStop(ctx, messages); len(followUps) > 0 {
+            for _, msg := range followUps {
+                t.AddUserMessage(ctx, msg)
+                handler.HandleText(fmt.Sprintf("\n📨 Hook follow-up: %s\n", msg))
+            }
+            continue OUTER
+        }
+    }
+    break OUTER
+}
 
 // In processMessageExchange, around tools.RunTool:
 blocked, reason, input := t.triggerBeforeToolCall(runToolCtx, toolCall.Function.Name, toolCall.Function.Arguments, toolCall.ID)
@@ -810,9 +859,20 @@ if blocked, reason := t.triggerUserMessageSend(ctx, message); blocked {
     return "", errors.Errorf("message blocked by hook: %s", reason)
 }
 
-// After handler.HandleDone():
-messages, _ := t.GetMessages()
-t.triggerAgentStop(ctx, messages)
+// In the OUTER loop, when no tools are used:
+if !toolsUsed {
+    // Trigger agent_stop hook to see if there are follow-up messages
+    if messages, err := t.GetMessages(); err == nil {
+        if followUps := t.triggerAgentStop(ctx, messages); len(followUps) > 0 {
+            for _, msg := range followUps {
+                t.AddUserMessage(ctx, msg)
+                handler.HandleText(fmt.Sprintf("\n📨 Hook follow-up: %s\n", msg))
+            }
+            continue OUTER
+        }
+    }
+    break OUTER
+}
 
 // In executeToolCalls, around tools.RunTool:
 blocked, reason, input := t.triggerBeforeToolCall(runToolCtx, toolCall.Name, string(argsJSON), toolCall.ID)
@@ -870,10 +930,10 @@ fi
 if [ "$1" == "run" ]; then
     # Read JSON payload from stdin
     payload=$(cat)
-    
+
     # Extract fields and log to file
     echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) | $payload" >> ~/.kodelet/audit.log
-    
+
     # No output needed - empty stdout with exit 0 means "no modification"
     exit 0
 fi
@@ -901,12 +961,12 @@ if sys.argv[1] == "hook":
 
 if sys.argv[1] == "run":
     payload = json.load(sys.stdin)
-    
+
     if payload.get("tool_name") == "bash":
         # tool_input is already a parsed JSON object
         tool_input = payload.get("tool_input", {})
         command = tool_input.get("command", "")
-        
+
         for blocked in BLOCKED_COMMANDS:
             if blocked in command:
                 result = {
@@ -915,7 +975,7 @@ if sys.argv[1] == "run":
                 }
                 print(json.dumps(result))
                 sys.exit(0)
-    
+
     print(json.dumps({"blocked": False}))
     sys.exit(0)
 
@@ -982,6 +1042,32 @@ func main() {
 
     os.Exit(1)
 }
+```
+
+### Follow-up Messages Hook (Bash)
+
+This example demonstrates an `agent_stop` hook that returns follow-up messages to continue the conversation:
+
+```bash
+#!/bin/bash
+# .kodelet/hooks/foo-txt-remover
+# Asks the agent to remove foo.txt if it exists
+
+case "$1" in
+    hook)
+        echo "agent_stop"
+        ;;
+    run)
+        # Check if foo.txt exists in current directory
+        if [ -f "./foo.txt" ]; then
+            echo '{"follow_up_messages":["I noticed foo.txt exists. Please remove it."]}'
+        fi
+        # Empty output = no follow-up, agent stops normally
+        ;;
+    *)
+        exit 1
+        ;;
+esac
 ```
 
 ## Documentation
