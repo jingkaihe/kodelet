@@ -1103,8 +1103,13 @@ func (t *Thread) NewSubAgent(_ context.Context, config llmtypes.Config) llmtypes
 
 // ShortSummary generates a concise summary of the conversation using a faster model.
 func (t *Thread) ShortSummary(ctx context.Context) string {
-	// Temporarily disable persistence during summarization
+	// Temporarily disable persistence and hook triggers during summarization
 	t.isPersisted = false
+	oldHookTrigger := t.hookTrigger
+	t.hookTrigger = hooks.Trigger{}
+	defer func() {
+		t.hookTrigger = oldHookTrigger
+	}()
 	defer func() {
 		t.isPersisted = true
 	}()

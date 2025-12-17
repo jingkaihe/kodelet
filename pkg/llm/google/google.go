@@ -1266,8 +1266,13 @@ func (t *Thread) getLastAssistantMessageText() (string, error) {
 
 // ShortSummary generates a brief summary of the conversation
 func (t *Thread) ShortSummary(ctx context.Context) string {
-	// Temporarily disable persistence during summarization
+	// Temporarily disable persistence and hook triggers during summarization
 	t.isPersisted = false
+	oldHookTrigger := t.hookTrigger
+	t.hookTrigger = hooks.Trigger{}
+	defer func() {
+		t.hookTrigger = oldHookTrigger
+	}()
 	defer func() {
 		t.isPersisted = true
 	}()
