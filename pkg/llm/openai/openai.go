@@ -636,7 +636,7 @@ func (t *Thread) processMessageExchange(
 
 		var output tooltypes.ToolResult
 		if blocked {
-			output = tooltypes.NewBlockedToolResult(reason)
+			output = tooltypes.NewBlockedToolResult(toolCall.Function.Name, reason)
 		} else {
 			runToolCtx := t.subagentContextFactory(ctx, t, handler, opt.CompactRatio, opt.DisableAutoCompact)
 			output = tools.RunTool(runToolCtx, t.state, toolCall.Function.Name, toolInput)
@@ -1090,6 +1090,7 @@ func (t *Thread) NewSubAgent(_ context.Context, config llmtypes.Config) llmtypes
 		conversationID:         conversationID,
 		isPersisted:            false,                                                         // subagent is not persisted
 		usage:                  t.usage,                                                       // Share usage tracking with parent
+		toolResults:            make(map[string]tooltypes.StructuredToolResult),               // Initialize tool results map
 		customModels:           t.customModels,                                                // Share custom models configuration
 		customPricing:          t.customPricing,                                               // Share custom pricing configuration
 		useCopilot:             t.useCopilot,                                                  // Share Copilot usage with parent

@@ -996,7 +996,7 @@ func (t *Thread) executeToolCalls(ctx context.Context, response *Response, handl
 
 		var output tooltypes.ToolResult
 		if blocked {
-			output = tooltypes.NewBlockedToolResult(reason)
+			output = tooltypes.NewBlockedToolResult(toolCall.Name, reason)
 		} else {
 			runToolCtx := t.subagentContextFactory(ctx, t, handler, opt.CompactRatio, opt.DisableAutoCompact)
 			output = tools.RunTool(runToolCtx, t.state, toolCall.Name, toolInput)

@@ -65,7 +65,6 @@ func (t Trigger) TriggerUserMessageSend(ctx context.Context, message string) (bo
 
 	result, err := t.Manager.ExecuteUserMessageSend(ctx, payload)
 	if err != nil {
-		logger.G(ctx).WithError(err).Debug("user_message_send hook failed")
 		return false, ""
 	}
 	return result.Blocked, result.Reason
@@ -93,7 +92,6 @@ func (t Trigger) TriggerBeforeToolCall(ctx context.Context, toolName, toolInput,
 
 	result, err := t.Manager.ExecuteBeforeToolCall(ctx, payload)
 	if err != nil {
-		logger.G(ctx).WithError(err).Debug("before_tool_call hook failed")
 		return false, "", toolInput
 	}
 
@@ -129,7 +127,6 @@ func (t Trigger) TriggerAfterToolCall(ctx context.Context, toolName, toolInput, 
 
 	result, err := t.Manager.ExecuteAfterToolCall(ctx, payload)
 	if err != nil {
-		logger.G(ctx).WithError(err).Debug("after_tool_call hook failed")
 		return nil
 	}
 	return result.Output
@@ -155,7 +152,6 @@ func (t Trigger) TriggerAgentStop(ctx context.Context, messages []llmtypes.Messa
 
 	result, err := t.Manager.ExecuteAgentStop(ctx, payload)
 	if err != nil {
-		logger.G(ctx).WithError(err).Debug("agent_stop hook failed")
 		return nil
 	}
 	return result.FollowUpMessages

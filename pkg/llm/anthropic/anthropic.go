@@ -455,7 +455,7 @@ func (t *Thread) executeToolsParallel(
 
 			var output tooltypes.ToolResult
 			if blocked {
-				output = tooltypes.NewBlockedToolResult(reason)
+				output = tooltypes.NewBlockedToolResult(tb.block.Name, reason)
 			} else {
 				// Use a per-goroutine silent handler to avoid race conditions on shared handler
 				// XXX: It's tricky to visualise agent streaming in the terminal therefore we disable it for now
@@ -976,6 +976,7 @@ func (t *Thread) NewSubAgent(_ context.Context, config llmtypes.Config) llmtypes
 		conversationID:         conversationID,
 		isPersisted:            false,                                                         // subagent is not persisted
 		usage:                  t.usage,                                                       // Share usage tracking with parent
+		toolResults:            make(map[string]tooltypes.StructuredToolResult),               // Initialize tool results map
 		subagentContextFactory: t.subagentContextFactory,                                      // Propagate the injected function
 		hookTrigger:            hooks.NewTrigger(t.hookTrigger.Manager, conversationID, true), // Create new trigger with shared hook manager
 	}

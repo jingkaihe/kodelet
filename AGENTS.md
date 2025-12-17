@@ -343,6 +343,19 @@ Skills differ from fragments/recipes: skills are model-invoked (automatic), whil
 
 See [docs/SKILLS.md](docs/SKILLS.md) for creating custom skills.
 
+## Agent Lifecycle Hooks
+
+Kodelet supports lifecycle hooks that allow external scripts to observe and control agent behavior:
+
+- **Location**: `.kodelet/hooks/` (repo) or `~/.kodelet/hooks/` (global)
+- **Hook types**: `before_tool_call`, `after_tool_call`, `user_message_send`, `agent_stop`
+- **Protocol**: Executables responding to `hook` (type) and `run` (execution) commands
+- **CLI**: `--no-hooks` flag to disable hooks for a session
+
+Hooks differ from skills: hooks intercept agent operations (automatic), while skills provide domain expertise (model-invoked).
+
+See [docs/HOOKS.md](docs/HOOKS.md) for creating custom hooks.
+
 ## Resources
 
 - **Documentation**: See `docs/` directory for comprehensive guides
@@ -351,5 +364,6 @@ See [docs/SKILLS.md](docs/SKILLS.md) for creating custom skills.
 - **Development Guide**: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for setup and workflows
 - **Fragments Guide**: [docs/FRAGMENTS.md](docs/FRAGMENTS.md) for template system
 - **Skills Guide**: [docs/SKILLS.md](docs/SKILLS.md) for agentic skills system
+- **Hooks Guide**: [docs/HOOKS.md](docs/HOOKS.md) for agent lifecycle hooks system
 - **MCP Tools**: [docs/mcp.md](docs/mcp.md) for Model Context Protocol integration
 

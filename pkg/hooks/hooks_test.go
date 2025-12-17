@@ -10,6 +10,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
 func TestHookType_Constants(t *testing.T) {
@@ -871,4 +873,49 @@ if [ "$1" == "run" ]; then echo '{"follow_up_messages":["done"]}'; exit 0; fi
 	assert.Len(t, manager.GetHooks(HookTypeAfterToolCall), 1)
 	assert.Len(t, manager.GetHooks(HookTypeUserMessageSend), 1)
 	assert.Len(t, manager.GetHooks(HookTypeAgentStop), 1)
+}
+
+// Tests for Trigger zero-value safety
+
+func TestTrigger_ZeroValue_TriggerUserMessageSend(t *testing.T) {
+	var trigger Trigger
+	blocked, reason := trigger.TriggerUserMessageSend(context.Background(), "test message")
+	assert.False(t, blocked)
+	assert.Empty(t, reason)
+}
+
+func TestTrigger_ZeroValue_TriggerBeforeToolCall(t *testing.T) {
+	var trigger Trigger
+	blocked, reason, input := trigger.TriggerBeforeToolCall(context.Background(), "bash", `{"command":"ls"}`, "tool-123")
+	assert.False(t, blocked)
+	assert.Empty(t, reason)
+	assert.Equal(t, `{"command":"ls"}`, input)
+}
+
+func TestTrigger_ZeroValue_TriggerAfterToolCall(t *testing.T) {
+	var trigger Trigger
+	result := trigger.TriggerAfterToolCall(context.Background(), "bash", `{"command":"ls"}`, "tool-123", tooltypes.StructuredToolResult{})
+	assert.Nil(t, result)
+}
+
+func TestTrigger_ZeroValue_TriggerAgentStop(t *testing.T) {
+	var trigger Trigger
+	followUps := trigger.TriggerAgentStop(context.Background(), nil)
+	assert.Nil(t, followUps)
+}
+
+func TestTrigger_SetConversationID(t *testing.T) {
+	trigger := NewTrigger(HookManager{}, "initial-id", false)
+	assert.Equal(t, "initial-id", trigger.ConversationID)
+
+	trigger.SetConversationID("new-id")
+	assert.Equal(t, "new-id", trigger.ConversationID)
+}
+
+func TestTrigger_InvokedBy(t *testing.T) {
+	mainTrigger := NewTrigger(HookManager{}, "conv-id", false)
+	assert.Equal(t, InvokedByMain, mainTrigger.invokedBy())
+
+	subagentTrigger := NewTrigger(HookManager{}, "conv-id", true)
+	assert.Equal(t, InvokedBySubagent, subagentTrigger.invokedBy())
 }

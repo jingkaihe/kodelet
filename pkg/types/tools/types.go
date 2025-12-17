@@ -100,12 +100,13 @@ func StringifyToolResult(result, err string) string {
 
 // BlockedToolResult represents a tool that was blocked by a lifecycle hook
 type BlockedToolResult struct {
-	Reason string `json:"reason"`
+	ToolName string `json:"tool_name"`
+	Reason   string `json:"reason"`
 }
 
-// NewBlockedToolResult creates a new BlockedToolResult with the given reason
-func NewBlockedToolResult(reason string) BlockedToolResult {
-	return BlockedToolResult{Reason: reason}
+// NewBlockedToolResult creates a new BlockedToolResult with the given tool name and reason
+func NewBlockedToolResult(toolName, reason string) BlockedToolResult {
+	return BlockedToolResult{ToolName: toolName, Reason: reason}
 }
 
 // AssistantFacing returns a formatted string representation of the blocked result for the LLM
@@ -134,7 +135,7 @@ func (t BlockedToolResult) GetResult() string {
 // StructuredData returns a structured representation of the blocked tool result
 func (t BlockedToolResult) StructuredData() StructuredToolResult {
 	return StructuredToolResult{
-		ToolName:  "blocked",
+		ToolName:  t.ToolName,
 		Success:   false,
 		Error:     t.GetError(),
 		Timestamp: time.Now(),
@@ -144,7 +145,8 @@ func (t BlockedToolResult) StructuredData() StructuredToolResult {
 
 // BlockedMetadata contains metadata about a blocked tool invocation
 type BlockedMetadata struct {
-	Reason string `json:"reason"`
+	ToolName string `json:"tool_name"`
+	Reason   string `json:"reason"`
 }
 
 // ToolType returns the tool type identifier for blocked tools
