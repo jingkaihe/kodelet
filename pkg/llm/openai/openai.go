@@ -162,8 +162,8 @@ type Thread struct {
 	customPricing          llmtypes.CustomPricing
 	useCopilot             bool
 	subagentContextFactory llmtypes.SubagentContextFactory
-	ideStore               *ide.Store        // IDE context store (nil if IDE mode disabled)
-	hookManager            hooks.HookManager // Hook manager for lifecycle hooks (empty = no-op)
+	ideStore               *ide.Store    // IDE context store (nil if IDE mode disabled)
+	hookTrigger            hooks.Trigger // Hook trigger for lifecycle hooks (zero-value = no-op)
 }
 
 // Provider returns the provider name for this thread.
@@ -277,14 +277,16 @@ func NewOpenAIThread(config llmtypes.Config, subagentContextFactory llmtypes.Sub
 		ideStore = store
 	}
 
-	// Initialize hook manager (empty if discovery fails - hooks disabled)
-	hookManager := hooks.HookManager{}
+	// Initialize hook trigger (zero-value if discovery fails - hooks disabled)
+	var hookTrigger hooks.Trigger
+	conversationID := convtypes.GenerateID()
 	if !config.IsSubAgent {
 		// Only main agent discovers hooks; subagents inherit from parent
-		var err error
-		hookManager, err = hooks.NewHookManager()
+		hookManager, err := hooks.NewHookManager()
 		if err != nil {
 			logger.WithError(err).Warn("Failed to initialize hook manager, hooks disabled")
+		} else {
+			hookTrigger = hooks.NewTrigger(hookManager, conversationID, config.IsSubAgent)
 		}
 	}
 
@@ -292,7 +294,7 @@ func NewOpenAIThread(config llmtypes.Config, subagentContextFactory llmtypes.Sub
 		client:                 client,
 		config:                 config,
 		reasoningEffort:        reasoningEffort,
-		conversationID:         convtypes.GenerateID(),
+		conversationID:         conversationID,
 		isPersisted:            false,
 		usage:                  &llmtypes.Usage{},
 		toolResults:            make(map[string]tooltypes.StructuredToolResult),
@@ -301,7 +303,7 @@ func NewOpenAIThread(config llmtypes.Config, subagentContextFactory llmtypes.Sub
 		useCopilot:             useCopilot,
 		subagentContextFactory: subagentContextFactory,
 		ideStore:               ideStore,
-		hookManager:            hookManager,
+		hookTrigger:            hookTrigger,
 	}, nil
 }
 
@@ -371,7 +373,7 @@ func (t *Thread) SendMessage(
 	}
 
 	// Trigger user_message_send hook before adding user message
-	if blocked, reason := t.triggerUserMessageSend(ctx, message); blocked {
+	if blocked, reason := t.hookTrigger.TriggerUserMessageSend(ctx, message); blocked {
 		return "", errors.Errorf("message blocked by hook: %s", reason)
 	}
 
@@ -477,7 +479,7 @@ OUTER:
 
 				// Trigger agent_stop hook to see if there are follow-up messages
 				if messages, err := t.GetMessages(); err == nil {
-					if followUps := t.triggerAgentStop(ctx, messages); len(followUps) > 0 {
+					if followUps := t.hookTrigger.TriggerAgentStop(ctx, messages); len(followUps) > 0 {
 						logger.G(ctx).WithField("count", len(followUps)).Info("agent_stop hook returned follow-up messages, continuing conversation")
 						// Append follow-up messages as user messages and continue
 						for _, msg := range followUps {
@@ -629,14 +631,12 @@ func (t *Thread) processMessageExchange(
 
 		// Trigger before_tool_call hook
 		toolInput := toolCall.Function.Arguments
-		blocked, reason, input := t.triggerBeforeToolCall(ctx, toolCall.Function.Name, toolInput, toolCall.ID)
+		blocked, reason, toolInput := t.hookTrigger.TriggerBeforeToolCall(ctx, toolCall.Function.Name, toolInput, toolCall.ID)
 
 		var output tooltypes.ToolResult
 		if blocked {
 			output = tooltypes.NewBlockedToolResult(reason)
 		} else {
-			// Use the potentially modified input from the hook
-			toolInput = input
 			runToolCtx := t.subagentContextFactory(ctx, t, handler, opt.CompactRatio, opt.DisableAutoCompact)
 			output = tools.RunTool(runToolCtx, t.state, toolCall.Function.Name, toolInput)
 		}
@@ -645,7 +645,7 @@ func (t *Thread) processMessageExchange(
 		structuredResult := output.StructuredData()
 
 		// Trigger after_tool_call hook
-		if modified := t.triggerAfterToolCall(ctx, toolCall.Function.Name, toolInput, toolCall.ID, structuredResult); modified != nil {
+		if modified := t.hookTrigger.TriggerAfterToolCall(ctx, toolCall.Function.Name, toolInput, toolCall.ID, structuredResult); modified != nil {
 			structuredResult = *modified
 		}
 
@@ -1079,19 +1079,21 @@ func (t *Thread) GetUsage() llmtypes.Usage {
 
 // NewSubAgent creates a new subagent thread that shares the parent's client and configuration.
 func (t *Thread) NewSubAgent(_ context.Context, config llmtypes.Config) llmtypes.Thread {
+	conversationID := convtypes.GenerateID()
+
 	// Create subagent thread reusing the parent's client instead of creating a new one
 	thread := &Thread{
 		client:                 t.client, // Reuse parent's client
 		config:                 config,
 		reasoningEffort:        config.ReasoningEffort, // Use config's reasoning effort
-		conversationID:         convtypes.GenerateID(),
-		isPersisted:            false,                    // subagent is not persisted
-		usage:                  t.usage,                  // Share usage tracking with parent
-		customModels:           t.customModels,           // Share custom models configuration
-		customPricing:          t.customPricing,          // Share custom pricing configuration
-		useCopilot:             t.useCopilot,             // Share Copilot usage with parent
-		subagentContextFactory: t.subagentContextFactory, // Propagate the injected function
-		hookManager:            t.hookManager,            // Share parent's hook manager
+		conversationID:         conversationID,
+		isPersisted:            false,                                                         // subagent is not persisted
+		usage:                  t.usage,                                                       // Share usage tracking with parent
+		customModels:           t.customModels,                                                // Share custom models configuration
+		customPricing:          t.customPricing,                                               // Share custom pricing configuration
+		useCopilot:             t.useCopilot,                                                  // Share Copilot usage with parent
+		subagentContextFactory: t.subagentContextFactory,                                      // Propagate the injected function
+		hookTrigger:            hooks.NewTrigger(t.hookTrigger.Manager, conversationID, true), // Create new trigger with shared hook manager
 	}
 
 	return thread
@@ -1139,6 +1141,7 @@ func (t *Thread) GetConversationID() string {
 // SetConversationID sets the conversation ID
 func (t *Thread) SetConversationID(id string) {
 	t.conversationID = id
+	t.hookTrigger.SetConversationID(id)
 }
 
 // IsPersisted returns whether this thread is being persisted
