@@ -152,11 +152,12 @@ func NewAnthropicThread(config llmtypes.Config, subagentContextFactory llmtypes.
 		ideStore = store
 	}
 
-	// Initialize hook trigger (zero-value if discovery fails - hooks disabled)
+	// Initialize hook trigger (zero-value if discovery fails or disabled - hooks disabled)
 	var hookTrigger hooks.Trigger
 	conversationID := convtypes.GenerateID()
-	if !config.IsSubAgent {
+	if !config.IsSubAgent && !config.NoHooks {
 		// Only main agent discovers hooks; subagents inherit from parent
+		// Hooks can be disabled via NoHooks config
 		hookManager, err := hooks.NewHookManager()
 		if err != nil {
 			logger.WithError(err).Warn("Failed to initialize hook manager, hooks disabled")

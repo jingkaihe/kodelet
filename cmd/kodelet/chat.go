@@ -25,6 +25,7 @@ type ChatOptions struct {
 	compactRatio       float64
 	disableAutoCompact bool
 	ide                bool
+	noHooks            bool
 }
 
 var chatOptions = &ChatOptions{}
@@ -38,6 +39,7 @@ func init() {
 	chatCmd.Flags().Float64Var(&chatOptions.compactRatio, "compact-ratio", 0.80, "Context window utilization ratio to trigger auto-compact (0.0-1.0)")
 	chatCmd.Flags().BoolVar(&chatOptions.disableAutoCompact, "disable-auto-compact", false, "Disable automatic context compacting")
 	chatCmd.Flags().BoolVar(&chatOptions.ide, "ide", false, "Enable IDE integration mode (display conversation ID prominently)")
+	chatCmd.Flags().BoolVar(&chatOptions.noHooks, "no-hooks", false, "Disable agent lifecycle hooks")
 }
 
 // Prevents TUI interference by redirecting logs to file
@@ -123,7 +125,7 @@ var chatCmd = &cobra.Command{
 			}
 		}
 
-		tui.StartChatCmd(ctx, conversationID, !chatOptions.noSave, mcpManager, customManager, maxTurns, chatOptions.compactRatio, chatOptions.disableAutoCompact, chatOptions.ide)
+		tui.StartChatCmd(ctx, conversationID, !chatOptions.noSave, mcpManager, customManager, maxTurns, chatOptions.compactRatio, chatOptions.disableAutoCompact, chatOptions.ide, chatOptions.noHooks)
 
 		// Restore stderr logging after TUI exits and show log file location
 		if logFile != nil {

@@ -151,11 +151,12 @@ func NewGoogleThread(config llmtypes.Config, subagentContextFactory llmtypes.Sub
 		ideStore = store
 	}
 
-	// Initialize hook trigger (zero-value if discovery fails - hooks disabled)
+	// Initialize hook trigger (zero-value if discovery fails or disabled - hooks disabled)
 	var hookTrigger hooks.Trigger
 	conversationID := convtypes.GenerateID()
-	if !configCopy.IsSubAgent {
+	if !configCopy.IsSubAgent && !configCopy.NoHooks {
 		// Only main agent discovers hooks; subagents inherit from parent
+		// Hooks can be disabled via NoHooks config
 		hookManager, err := hooks.NewHookManager()
 		if err != nil {
 			logger.G(context.Background()).WithError(err).Warn("Failed to initialize hook manager, hooks disabled")

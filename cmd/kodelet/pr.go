@@ -84,6 +84,7 @@ Use the --draft flag to create a draft pull request that is not ready for review
 			presenter.Error(err, "Failed to load configuration")
 			return
 		}
+		llmConfig.NoHooks = true // Disable hooks by default for pr command
 		s := tools.NewBasicState(ctx, tools.WithLLMConfig(llmConfig), tools.WithMCPTools(mcpManager), tools.WithCustomTools(customManager))
 
 		config := getPRConfigFromFlags(cmd)

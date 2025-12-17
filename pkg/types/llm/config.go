@@ -45,6 +45,9 @@ type Config struct {
 
 	// Skills configuration
 	Skills *SkillsConfig `mapstructure:"skills" json:"skills,omitempty" yaml:"skills,omitempty"` // Skills configuration for agentic skills system
+
+	// Hooks configuration
+	NoHooks bool `mapstructure:"no_hooks" json:"no_hooks" yaml:"no_hooks"` // NoHooks disables agent lifecycle hooks
 }
 
 // OpenAIConfig holds OpenAI-specific configuration including support for compatible APIs

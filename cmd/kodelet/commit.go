@@ -51,6 +51,7 @@ You must stage your changes (using 'git add') before running this command.`,
 			presenter.Error(err, "Failed to load configuration")
 			return
 		}
+		llmConfig.NoHooks = true // Disable hooks by default for commit command
 		s := tools.NewBasicState(ctx, tools.WithLLMConfig(llmConfig))
 
 		config := getCommitConfigFromFlags(cmd)
