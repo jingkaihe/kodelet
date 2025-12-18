@@ -70,9 +70,61 @@ Only executable files are considered. Directories and non-executable files are s
 
 ## Payload Structures
 
+All hook payloads and results are defined as TypeScript interfaces below for clarity.
+
+### Common Types
+
+```typescript
+// Hook event types
+type HookType = "before_tool_call" | "after_tool_call" | "user_message_send" | "agent_stop";
+
+// Indicates whether the hook was triggered by main agent or subagent
+type InvokedBy = "main" | "subagent";
+
+// Base payload included in all hook events
+interface BasePayload {
+  event: HookType;
+  conv_id: string;
+  cwd: string;
+  invoked_by: InvokedBy;
+}
+
+// Conversation message structure
+interface Message {
+  role: "user" | "assistant";
+  content: string;
+}
+
+// Tool execution result (used in after_tool_call)
+interface StructuredToolResult {
+  toolName: string;
+  success: boolean;
+  error?: string;
+  metadata?: Record<string, unknown>;  // Tool-specific metadata
+  timestamp: string;  // ISO 8601 format
+}
+```
+
 ### before_tool_call
 
-**Input:**
+```typescript
+// Input payload
+interface BeforeToolCallPayload extends BasePayload {
+  event: "before_tool_call";
+  tool_name: string;
+  tool_input: Record<string, unknown>;  // Tool-specific input
+  tool_user_id: string;
+}
+
+// Output result
+interface BeforeToolCallResult {
+  blocked: boolean;
+  reason?: string;  // Required if blocked is true
+  input?: Record<string, unknown>;  // Modified input (omit to use original)
+}
+```
+
+**Example Input:**
 ```json
 {
   "event": "before_tool_call",
@@ -85,47 +137,55 @@ Only executable files are considered. Directories and non-executable files are s
 }
 ```
 
-**Output:**
-```json
-{
-  "blocked": false,
-  "reason": "optional reason if blocked",
-  "input": {"modified": "input"}
+### after_tool_call
+
+```typescript
+// Input payload
+interface AfterToolCallPayload extends BasePayload {
+  event: "after_tool_call";
+  tool_name: string;
+  tool_input: Record<string, unknown>;
+  tool_output: StructuredToolResult;
+  tool_user_id: string;
+}
+
+// Output result
+interface AfterToolCallResult {
+  output?: StructuredToolResult;  // Modified output (omit to use original)
 }
 ```
 
-- `blocked`: Set to `true` to prevent tool execution
-- `reason`: Explanation shown to the agent (required if blocked)
-- `input`: Modified tool input (omit or null to use original)
-
-### after_tool_call
-
-**Input:**
+**Example Input:**
 ```json
 {
   "event": "after_tool_call",
   "conv_id": "conversation-id",
   "tool_name": "bash",
   "tool_input": {"command": "ls -la"},
-  "tool_output": {"toolName": "bash", "success": true, ...},
+  "tool_output": {"toolName": "bash", "success": true, "timestamp": "2024-01-15T10:30:00Z"},
   "tool_user_id": "tool-call-id",
   "cwd": "/current/working/dir",
   "invoked_by": "main"
 }
 ```
 
-**Output:**
-```json
-{
-  "output": {"toolName": "bash", "success": true, "error": "[REDACTED]", ...}
+### user_message_send
+
+```typescript
+// Input payload
+interface UserMessageSendPayload extends BasePayload {
+  event: "user_message_send";
+  message: string;
+}
+
+// Output result
+interface UserMessageSendResult {
+  blocked: boolean;
+  reason?: string;  // Required if blocked is true
 }
 ```
 
-- `output`: Modified tool output (omit or null to use original)
-
-### user_message_send
-
-**Input:**
+**Example Input:**
 ```json
 {
   "event": "user_message_send",
@@ -136,35 +196,34 @@ Only executable files are considered. Directories and non-executable files are s
 }
 ```
 
-**Output:**
-```json
-{
-  "blocked": false,
-  "reason": "optional reason if blocked"
+### agent_stop
+
+```typescript
+// Input payload
+interface AgentStopPayload extends BasePayload {
+  event: "agent_stop";
+  messages: Message[];
+}
+
+// Output result
+interface AgentStopResult {
+  follow_up_messages?: string[];  // Optional messages to continue conversation
 }
 ```
 
-### agent_stop
-
-**Input:**
+**Example Input:**
 ```json
 {
   "event": "agent_stop",
   "conv_id": "conversation-id",
   "cwd": "/current/working/dir",
-  "messages": [...],
+  "messages": [
+    {"role": "user", "content": "Please fix the bug in main.go"},
+    {"role": "assistant", "content": "I've fixed the bug by..."}
+  ],
   "invoked_by": "main"
 }
 ```
-
-**Output:**
-```json
-{
-  "follow_up_messages": ["Please also run the tests.", "Check the documentation."]
-}
-```
-
-- `follow_up_messages`: Optional messages to continue the conversation
 
 ## Example Hooks
 
@@ -175,7 +234,8 @@ Only executable files are considered. Directories and non-executable files are s
 import sys
 import json
 
-BLOCKED_COMMANDS = ["rm -rf", "sudo", "curl | bash"]
+BLOCKED_COMMANDS = ["rm -rf", "sudo", ":(){:|:&};:"]
+BLOCKED_PATTERNS = ["| bash", "| sh"]  # Pipe to shell
 
 if len(sys.argv) < 2:
     sys.exit(1)
@@ -186,11 +246,11 @@ if sys.argv[1] == "hook":
 
 if sys.argv[1] == "run":
     payload = json.load(sys.stdin)
-    
+
     if payload.get("tool_name") == "bash":
         tool_input = payload.get("tool_input", {})
         command = tool_input.get("command", "")
-        
+
         for blocked in BLOCKED_COMMANDS:
             if blocked in command:
                 print(json.dumps({
@@ -198,7 +258,15 @@ if sys.argv[1] == "run":
                     "reason": f"Security policy: '{blocked}' is not allowed"
                 }))
                 sys.exit(0)
-    
+
+        for pattern in BLOCKED_PATTERNS:
+            if pattern in command:
+                print(json.dumps({
+                    "blocked": True,
+                    "reason": f"Security policy: piping to shell is not allowed"
+                }))
+                sys.exit(0)
+
     print(json.dumps({"blocked": False}))
     sys.exit(0)
 
@@ -235,6 +303,14 @@ case "$1" in
         echo "agent_stop"
         ;;
     run)
+        payload=$(cat)
+        invoked_by=$(echo "$payload" | jq -r '.invoked_by')
+
+        # Only act when invoked by the main agent
+        if [ "$invoked_by" != "main" ]; then
+            exit 0
+        fi
+
         if [ -f "./foo.txt" ]; then
             echo '{"follow_up_messages":["I noticed foo.txt exists. Please remove it."]}'
         fi

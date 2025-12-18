@@ -149,29 +149,81 @@ Hooks allow external scripts to observe and control agent behavior for audit log
 - `./.kodelet/hooks/` - Repository-local (higher precedence)
 - `~/.kodelet/hooks/` - User-global
 
-**Hook types:**
-| Type | Trigger | Can Block | Can Modify |
-|------|---------|-----------|------------|
-| `before_tool_call` | Before tool execution | Yes | Tool input |
-| `after_tool_call` | After tool execution | No | Tool output |
-| `user_message_send` | When user sends message | Yes | N/A |
-| `agent_stop` | When agent would stop | No | Follow-up messages |
+**Hook protocol:**
+1. `./hook hook` - Discovery: returns the event type string
+2. `echo '<json_payload>' | ./hook run` - Execution: receives JSON payload via stdin, returns JSON result
 
-**Creating a hook:**
+**Payload Types (TypeScript):**
+```typescript
+type HookType = "before_tool_call" | "after_tool_call" | "user_message_send" | "agent_stop";
+type InvokedBy = "main" | "subagent";
+
+interface BasePayload {
+  event: HookType;
+  conv_id: string;
+  cwd: string;
+  invoked_by: InvokedBy;
+}
+
+// before_tool_call: Can block or modify tool input
+interface BeforeToolCallPayload extends BasePayload {
+  event: "before_tool_call";
+  tool_name: string;
+  tool_input: Record<string, unknown>;
+  tool_user_id: string;
+}
+interface BeforeToolCallResult {
+  blocked: boolean;
+  reason?: string;
+  input?: Record<string, unknown>;
+}
+
+// after_tool_call: Can modify tool output
+interface AfterToolCallPayload extends BasePayload {
+  event: "after_tool_call";
+  tool_name: string;
+  tool_input: Record<string, unknown>;
+  tool_output: { toolName: string; success: boolean; error?: string; timestamp: string };
+  tool_user_id: string;
+}
+interface AfterToolCallResult {
+  output?: { toolName: string; success: boolean; error?: string; timestamp: string };
+}
+
+// user_message_send: Can block message
+interface UserMessageSendPayload extends BasePayload {
+  event: "user_message_send";
+  message: string;
+}
+interface UserMessageSendResult {
+  blocked: boolean;
+  reason?: string;
+}
+
+// agent_stop: Can return follow-up messages
+interface AgentStopPayload extends BasePayload {
+  event: "agent_stop";
+  messages: Array<{ role: "user" | "assistant"; content: string }>;
+}
+interface AgentStopResult {
+  follow_up_messages?: string[];
+}
+```
+
+**Example hook (only acts for main agent):**
 ```bash
 #!/bin/bash
-# ~/.kodelet/hooks/security_hook
-if [ "$1" == "hook" ]; then echo "before_tool_call"; exit 0; fi
+if [ "$1" == "hook" ]; then echo "agent_stop"; exit 0; fi
 if [ "$1" == "run" ]; then
-    # Read JSON payload from stdin, return JSON result
-    echo '{"blocked":false}'
+    payload=$(cat)
+    invoked_by=$(echo "$payload" | jq -r '.invoked_by')
+    if [ "$invoked_by" != "main" ]; then exit 0; fi
+    if [ -f "./cleanup-needed.txt" ]; then
+        echo '{"follow_up_messages":["Please clean up temporary files."]}'
+    fi
     exit 0
 fi
 ```
-
-**Hook protocol:**
-- `./hook hook` - Returns hook type
-- `echo '{"event":"before_tool_call",...}' | ./hook run` - Execute with JSON payload
 
 **Disabling hooks:**
 ```bash
