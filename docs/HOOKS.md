@@ -68,6 +68,23 @@ Hooks are discovered from two locations (earlier takes precedence):
 
 Only executable files are considered. Directories and non-executable files are skipped.
 
+### Disabling Hooks
+
+To temporarily disable a hook without deleting it, rename the file to end with `.disable`:
+
+```bash
+# Disable a hook
+mv .kodelet/hooks/audit-tool-call .kodelet/hooks/audit-tool-call.disable
+
+# Re-enable a hook
+mv .kodelet/hooks/audit-tool-call.disable .kodelet/hooks/audit-tool-call
+```
+
+Hooks with names ending in `.disable` are skipped during discovery. This is useful for:
+- Temporarily disabling a hook for debugging
+- Keeping hook configurations in version control while disabled
+- Testing behavior with specific hooks turned off
+
 ## Payload Structures
 
 All hook payloads and results are defined as TypeScript interfaces below for clarity.
