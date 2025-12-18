@@ -78,6 +78,11 @@ func (d *Discovery) DiscoverHooks() (map[HookType][]*Hook, error) {
 				continue // Skip directories
 			}
 
+			// Skip disabled hooks (names ending with .disable)
+			if strings.HasSuffix(entry.Name(), ".disable") {
+				continue
+			}
+
 			hookPath := filepath.Join(dir, entry.Name())
 
 			// Check if executable

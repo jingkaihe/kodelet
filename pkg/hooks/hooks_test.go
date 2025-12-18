@@ -919,3 +919,36 @@ func TestTrigger_InvokedBy(t *testing.T) {
 	subagentTrigger := NewTrigger(HookManager{}, "conv-id", true)
 	assert.Equal(t, InvokedBySubagent, subagentTrigger.invokedBy())
 }
+
+func TestDiscoverHooks_SkipsDisabledHooks(t *testing.T) {
+	tempDir := t.TempDir()
+	hooksDir := filepath.Join(tempDir, "hooks")
+	require.NoError(t, os.MkdirAll(hooksDir, 0o755))
+
+	// Create a valid hook
+	validHook := filepath.Join(hooksDir, "valid_hook")
+	validScript := `#!/bin/bash
+if [ "$1" == "hook" ]; then echo "before_tool_call"; exit 0; fi
+exit 0
+`
+	require.NoError(t, os.WriteFile(validHook, []byte(validScript), 0o755))
+
+	// Create a disabled hook (should be skipped)
+	disabledHook := filepath.Join(hooksDir, "audit-tool-call.disable")
+	disabledScript := `#!/bin/bash
+if [ "$1" == "hook" ]; then echo "before_tool_call"; exit 0; fi
+exit 0
+`
+	require.NoError(t, os.WriteFile(disabledHook, []byte(disabledScript), 0o755))
+
+	discovery, err := NewDiscovery(WithHookDirs(hooksDir))
+	require.NoError(t, err)
+
+	hooks, err := discovery.DiscoverHooks()
+	require.NoError(t, err)
+
+	// Only valid_hook should be discovered, disabled hook should be skipped
+	beforeToolCallHooks := hooks[HookTypeBeforeToolCall]
+	assert.Len(t, beforeToolCallHooks, 1)
+	assert.Equal(t, "valid_hook", beforeToolCallHooks[0].Name)
+}
