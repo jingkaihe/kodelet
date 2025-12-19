@@ -1381,7 +1381,7 @@ kodelet chat --no-hooks
 
 Hooks are automatically disabled for `kodelet commit` and `kodelet pr` commands.
 
-For detailed hook creation guide, see [docs/HOOKS.md](HOOKS.md).
+For detailed hook creation guide including payload structures, example implementations, and debugging tips, see [HOOKS.md](HOOKS.md).
 
 ## Key Features
 

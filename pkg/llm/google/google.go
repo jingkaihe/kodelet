@@ -1185,29 +1185,28 @@ func (t *Thread) shouldAutoCompact(compactRatio float64) bool {
 
 // CompactContext performs comprehensive context compacting by creating a detailed summary
 func (t *Thread) CompactContext(ctx context.Context) error {
-	// Temporarily disable persistence during compacting
-	wasPersistedOriginal := t.isPersisted
-	t.isPersisted = false
-	defer func() {
-		t.isPersisted = wasPersistedOriginal
-	}()
+	summaryThread, err := NewGoogleThread(t.GetConfig(), nil)
+	if err != nil {
+		return errors.Wrap(err, "failed to create summary thread")
+	}
 
-	// Use the strong model for comprehensive compacting
-	_, err := t.SendMessage(ctx, prompts.CompactPrompt, &llmtypes.StringCollectorHandler{Silent: true}, llmtypes.MessageOpt{
-		UseWeakModel:       false, // Use strong model for comprehensive compacting
+	summaryThread.messages = t.messages
+	summaryThread.EnablePersistence(ctx, false)
+	summaryThread.hookTrigger = hooks.Trigger{}
+
+	handler := &llmtypes.StringCollectorHandler{Silent: true}
+	_, err = summaryThread.SendMessage(ctx, prompts.CompactPrompt, handler, llmtypes.MessageOpt{
+		UseWeakModel:       false,
 		NoToolUse:          true,
-		DisableAutoCompact: true, // Prevent recursion
-		DisableUsageLog:    true, // Don't log usage for internal compact operations
+		DisableAutoCompact: true,
+		DisableUsageLog:    true,
+		NoSaveConversation: true,
 	})
 	if err != nil {
 		return errors.Wrap(err, "failed to generate compact summary")
 	}
 
-	// Get the compact summary from the last assistant message
-	compactSummary, err := t.getLastAssistantMessageText()
-	if err != nil {
-		return errors.Wrap(err, "failed to get compact summary from assistant message")
-	}
+	compactSummary := handler.CollectedText()
 
 	// Replace the conversation history with the compact summary
 	t.mu.Lock()
@@ -1233,63 +1232,28 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 	return nil
 }
 
-// getLastAssistantMessageText extracts text content from the most recent assistant message
-func (t *Thread) getLastAssistantMessageText() (string, error) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	if len(t.messages) == 0 {
-		return "", errors.New("no messages found")
-	}
-
-	// Find the last assistant message
-	var messageText string
-	for i := len(t.messages) - 1; i >= 0; i-- {
-		content := t.messages[i]
-		if content.Role == genai.RoleModel {
-			// Extract text from the assistant message parts
-			for _, part := range content.Parts {
-				if part.Text != "" && !part.Thought {
-					messageText += part.Text
-				}
-			}
-			break
-		}
-	}
-
-	if messageText == "" {
-		return "", errors.New("no text content found in assistant message")
-	}
-
-	return messageText, nil
-}
-
 // ShortSummary generates a brief summary of the conversation
 func (t *Thread) ShortSummary(ctx context.Context) string {
-	// Temporarily disable persistence during summarization
-	t.isPersisted = false
-	defer func() {
-		t.isPersisted = true
-	}()
+	summaryThread, err := NewGoogleThread(t.GetConfig(), nil)
+	if err != nil {
+		logger.G(ctx).WithError(err).Error("failed to create summary thread")
+		return "Could not generate summary."
+	}
 
-	// Use a faster model for summarization as it's a simpler task
-	_, err := t.SendMessage(ctx, prompts.ShortSummaryPrompt, &llmtypes.StringCollectorHandler{Silent: true}, llmtypes.MessageOpt{
+	summaryThread.messages = t.messages
+	summaryThread.EnablePersistence(ctx, false)
+	summaryThread.hookTrigger = hooks.Trigger{} // disable hooks for summary
+
+	handler := &llmtypes.StringCollectorHandler{Silent: true}
+	summaryThread.SendMessage(ctx, prompts.ShortSummaryPrompt, handler, llmtypes.MessageOpt{
 		UseWeakModel:       true,
 		NoToolUse:          true,
-		DisableAutoCompact: true, // Prevent auto-compact during summarization
-		DisableUsageLog:    true, // Don't log usage for internal summary operations
+		DisableAutoCompact: true,
+		DisableUsageLog:    true,
+		NoSaveConversation: true,
 	})
-	if err != nil {
-		return err.Error()
-	}
 
-	// Get the summary from the last assistant message
-	summary, err := t.getLastAssistantMessageText()
-	if err != nil {
-		return err.Error()
-	}
-
-	return summary
+	return handler.CollectedText()
 }
 
 // processPendingFeedback processes any pending feedback messages
