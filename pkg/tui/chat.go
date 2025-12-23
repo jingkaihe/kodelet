@@ -7,23 +7,12 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/jingkaihe/kodelet/pkg/tools"
 	"github.com/jingkaihe/kodelet/pkg/version"
 	"github.com/pkg/errors"
 )
 
 // StartChat starts the TUI chat interface
-func StartChat(ctx context.Context,
-	conversationID string,
-	enablePersistence bool,
-	mcpManager *tools.MCPManager,
-	customManager *tools.CustomToolManager,
-	maxTurns int,
-	compactRatio float64,
-	disableAutoCompact bool,
-	ideMode bool,
-	noHooks bool,
-) error {
+func StartChat(ctx context.Context, opts ChatOpts) error {
 	// Check terminal capabilities
 	var teaOptions []tea.ProgramOption
 
@@ -40,7 +29,7 @@ func StartChat(ctx context.Context,
 	var p *tea.Program
 
 	// Create model separately to add welcome messages
-	model := NewModel(ctx, conversationID, enablePersistence, mcpManager, customManager, maxTurns, compactRatio, disableAutoCompact, ideMode, noHooks)
+	model := NewModel(ctx, opts)
 
 	welcomeMsg := fmt.Sprintf(`
 Kodelet (%s)
@@ -58,19 +47,19 @@ Kodelet (%s)
 	}
 
 	// Add persistence status
-	if enablePersistence {
+	if opts.EnablePersistence {
 		fullWelcomeMsg += "\nConversation persistence is enabled."
 	} else {
 		fullWelcomeMsg += "\nConversation persistence is disabled (--no-save)."
 	}
 
-	if ideMode {
+	if opts.IDEMode {
 		idMsg := lipgloss.NewStyle().
 			Bold(true).
 			Foreground(lipgloss.AdaptiveColor{Light: "#9ece6a", Dark: "#9ece6a"}).
-			Render(fmt.Sprintf("\n📋 Conversation ID: %s", conversationID))
+			Render(fmt.Sprintf("\n📋 Conversation ID: %s", opts.ConversationID))
 		fullWelcomeMsg += idMsg
-		fullWelcomeMsg += "\n💡 Attach your IDE using: :KodeletAttach " + conversationID
+		fullWelcomeMsg += "\n💡 Attach your IDE using: :KodeletAttach " + opts.ConversationID
 	}
 
 	model.AddSystemMessage(fullWelcomeMsg)
@@ -124,8 +113,8 @@ func isTTY() bool {
 }
 
 // StartChatCmd is a wrapper that can be called from a command line
-func StartChatCmd(ctx context.Context, conversationID string, enablePersistence bool, mcpManager *tools.MCPManager, customManager *tools.CustomToolManager, maxTurns int, compactRatio float64, disableAutoCompact bool, ideMode bool, noHooks bool) {
-	if err := StartChat(ctx, conversationID, enablePersistence, mcpManager, customManager, maxTurns, compactRatio, disableAutoCompact, ideMode, noHooks); err != nil {
+func StartChatCmd(ctx context.Context, opts ChatOpts) {
+	if err := StartChat(ctx, opts); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
