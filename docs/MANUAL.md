@@ -115,6 +115,9 @@ kodelet run --follow "continue most recent"  # continue the most recent conversa
 kodelet run -f "quick follow-up"             # short form
 kodelet run --no-save "temporary query"      # don't save the conversation
 
+# Output only the final result (suppresses intermediate output and usage stats)
+kodelet run --result-only "what is 2+2"      # outputs just: 4
+
 # Headless mode for programmatic use
 kodelet run --headless "your query"          # outputs structured JSON stream
 kodelet run --headless --include-history "query"  # include historical data in stream
