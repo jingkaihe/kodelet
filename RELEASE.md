@@ -14,6 +14,26 @@
 
 - Updated CLI manual and LLM-friendly documentation with `--result-only` flag examples
 
+## 0.1.24.beta (2025-12-18)
+
+### Features
+
+**Hook Disable Support**: Added ability to temporarily disable hooks by renaming with `.disable` suffix
+
+- Hooks with filenames ending in `.disable` are skipped during discovery
+- Allows quick enable/disable without deleting hook files
+
+### Documentation
+
+- Added comprehensive TypeScript interfaces for all hook payload structures
+- Enhanced hook documentation with detailed examples and type definitions
+
+### Internal Changes
+
+- Hooks are now disabled during conversation summarization to prevent side effects
+- Refactored context compacting to use `StringCollectorHandler` instead of extracting text from message history
+- Simplified `ShortSummary` implementation using separate summary threads across all LLM providers (Anthropic, OpenAI, Google)
+
 ## 0.1.23.beta (2025-12-17)
 
 ### Features
