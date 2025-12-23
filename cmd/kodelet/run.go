@@ -199,7 +199,7 @@ var runCmd = &cobra.Command{
 			return
 		}
 
-		llmConfig, err := llm.GetConfigFromViper()
+		llmConfig, err := llm.GetConfigFromViperWithCmd(cmd)
 		if err != nil {
 			presenter.Error(err, "Failed to load configuration")
 			return

@@ -1,8 +1,11 @@
 package llm
 
 import (
-	"github.com/mitchellh/mapstructure"
+	"strings"
+
 	"github.com/pkg/errors"
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -11,6 +14,13 @@ import (
 // GetConfigFromViper loads the LLM configuration from Viper, applies the active profile if set,
 // and resolves any model aliases.
 func GetConfigFromViper() (llmtypes.Config, error) {
+	return GetConfigFromViperWithCmd(nil)
+}
+
+// GetConfigFromViperWithCmd loads the LLM configuration from Viper with command context.
+// When a cobra.Command is provided, CLI flags that were explicitly changed take priority
+// over profile settings.
+func GetConfigFromViperWithCmd(cmd *cobra.Command) (llmtypes.Config, error) {
 	config, err := loadViperConfig()
 	if err != nil {
 		return config, err
@@ -21,14 +31,23 @@ func GetConfigFromViper() (llmtypes.Config, error) {
 		delete(config.Profiles, "default")
 	}
 
-	// Apply active profile if set
+	// Apply active profile to viper if set
 	profileName := getActiveProfile()
 	if profileName != "" && config.Profiles != nil {
 		if profile, exists := config.Profiles[profileName]; exists {
-			if err := applyProfile(&config, profile); err != nil {
-				return config, err
-			}
+			applyProfileToViper(profile)
 		}
+	}
+
+	// Apply explicitly changed CLI flags to viper (highest priority)
+	if cmd != nil {
+		applyExplicitFlagsToViper(cmd)
+	}
+
+	// Re-load config with all overrides applied
+	config, err = loadViperConfig()
+	if err != nil {
+		return config, err
 	}
 
 	// Resolve model aliases
@@ -36,6 +55,27 @@ func GetConfigFromViper() (llmtypes.Config, error) {
 	config.WeakModel = resolveModelAlias(config.WeakModel, config.Aliases)
 
 	return config, nil
+}
+
+// applyExplicitFlagsToViper sets explicitly changed CLI flag values in viper
+func applyExplicitFlagsToViper(cmd *cobra.Command) {
+	cmd.Flags().VisitAll(func(flag *pflag.Flag) {
+		if flag.Changed {
+			viperKey := strings.ReplaceAll(flag.Name, "-", "_")
+			// Must use flag.Value directly, not viper.Get(), because
+			// profile settings use viper.Set() which has highest priority
+			viper.Set(viperKey, flag.Value.String())
+		}
+	})
+}
+
+// applyProfileToViper applies profile settings to viper
+func applyProfileToViper(profile llmtypes.ProfileConfig) {
+	for key, value := range profile {
+		if value != nil {
+			viper.Set(key, value)
+		}
+	}
 }
 
 func loadViperConfig() (llmtypes.Config, error) {
@@ -65,23 +105,4 @@ func getActiveProfile() string {
 		return ""
 	}
 	return profile
-}
-
-func applyProfile(config *llmtypes.Config, profile llmtypes.ProfileConfig) error {
-	// Use mapstructure to decode profile into config, merging values
-	decoder, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
-		Result:           config,
-		WeaklyTypedInput: true,
-		ZeroFields:       false, // Don't overwrite with zero values
-	})
-	if err != nil {
-		return errors.Wrap(err, "failed to create profile decoder")
-	}
-
-	// Apply profile settings on top of existing config
-	if err := decoder.Decode(profile); err != nil {
-		return errors.Wrap(err, "failed to apply profile configuration")
-	}
-
-	return nil
 }

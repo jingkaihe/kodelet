@@ -46,7 +46,7 @@ You must stage your changes (using 'git add') before running this command.`,
 	Run: func(cmd *cobra.Command, _ []string) {
 		ctx := cmd.Context()
 
-		llmConfig, err := llm.GetConfigFromViper()
+		llmConfig, err := llm.GetConfigFromViperWithCmd(cmd)
 		if err != nil {
 			presenter.Error(err, "Failed to load configuration")
 			return

@@ -82,7 +82,7 @@ Use the --draft flag to create a draft pull request that is not ready for review
 			os.Exit(1)
 		}
 
-		llmConfig, err := llm.GetConfigFromViper()
+		llmConfig, err := llm.GetConfigFromViperWithCmd(cmd)
 		if err != nil {
 			presenter.Error(err, "Failed to load configuration")
 			return
