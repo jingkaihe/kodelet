@@ -1,5 +1,19 @@
 # Kodelet
 
+## 0.1.26.beta (2025-12-23)
+
+### Features
+
+**Weak Model Support**: Added `--use-weak-model` flag to `run` and `chat` commands
+
+- Enables using a weaker/cheaper model for processing when full model capability isn't needed
+- Available in both interactive chat and one-shot run modes
+
+### Internal Changes
+
+- Refactored chat function parameters into `ChatOpts` struct for cleaner API
+- Consolidated TUI initialization with unified options pattern
+
 ## 0.1.25.beta (2025-12-23)
 
 ### Features

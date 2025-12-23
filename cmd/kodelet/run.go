@@ -42,6 +42,7 @@ type RunConfig struct {
 	NoSkills           bool              // Disable agentic skills
 	NoHooks            bool              // Disable agent lifecycle hooks
 	ResultOnly         bool              // Only print the final agent message, no intermediate output or usage stats
+	UseWeakModel       bool              // Use weak model for SendMessage
 }
 
 func NewRunConfig() *RunConfig {
@@ -62,6 +63,7 @@ func NewRunConfig() *RunConfig {
 		NoSkills:           false,
 		NoHooks:            false,
 		ResultOnly:         false,
+		UseWeakModel:       false,
 	}
 }
 
@@ -287,6 +289,7 @@ var runCmd = &cobra.Command{
 					MaxTurns:           config.MaxTurns,
 					CompactRatio:       config.CompactRatio,
 					DisableAutoCompact: config.DisableAutoCompact,
+					UseWeakModel:       config.UseWeakModel,
 				})
 				done <- err
 			}()
@@ -350,6 +353,7 @@ var runCmd = &cobra.Command{
 				MaxTurns:           config.MaxTurns,
 				CompactRatio:       config.CompactRatio,
 				DisableAutoCompact: config.DisableAutoCompact,
+				UseWeakModel:       config.UseWeakModel,
 			})
 			if err != nil {
 				presenter.Error(err, "Failed to process query")
@@ -395,6 +399,7 @@ func init() {
 	runCmd.Flags().Bool("ide", defaults.IDE, "Enable IDE integration mode (display conversation ID prominently)")
 	runCmd.Flags().Bool("no-hooks", defaults.NoHooks, "Disable agent lifecycle hooks")
 	runCmd.Flags().Bool("result-only", defaults.ResultOnly, "Only print the final agent message, suppressing all intermediate output and usage statistics")
+	runCmd.Flags().Bool("use-weak-model", defaults.UseWeakModel, "Use weak model for processing")
 }
 
 func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
@@ -473,6 +478,10 @@ func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
 
 	if resultOnly, err := cmd.Flags().GetBool("result-only"); err == nil {
 		config.ResultOnly = resultOnly
+	}
+
+	if useWeakModel, err := cmd.Flags().GetBool("use-weak-model"); err == nil {
+		config.UseWeakModel = useWeakModel
 	}
 
 	return config

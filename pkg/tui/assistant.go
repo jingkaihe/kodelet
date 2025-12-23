@@ -13,6 +13,20 @@ import (
 	"github.com/spf13/viper"
 )
 
+// ChatOpts contains options for starting a chat session
+type ChatOpts struct {
+	ConversationID     string
+	EnablePersistence  bool
+	MCPManager         *tools.MCPManager
+	CustomManager      *tools.CustomToolManager
+	MaxTurns           int
+	CompactRatio       float64
+	DisableAutoCompact bool
+	IDEMode            bool
+	NoHooks            bool
+	UseWeakModel       bool
+}
+
 // AssistantClient handles the interaction with the LLM thread
 type AssistantClient struct {
 	thread             llmtypes.Thread
@@ -21,17 +35,18 @@ type AssistantClient struct {
 	maxTurns           int
 	compactRatio       float64
 	disableAutoCompact bool
+	useWeakModel       bool
 }
 
 // NewAssistantClient creates a new assistant client
-func NewAssistantClient(ctx context.Context, conversationID string, enablePersistence bool, mcpManager *tools.MCPManager, customManager *tools.CustomToolManager, maxTurns int, compactRatio float64, disableAutoCompact bool, ideMode bool, noHooks bool) *AssistantClient {
+func NewAssistantClient(ctx context.Context, opts ChatOpts) *AssistantClient {
 	config, err := llm.GetConfigFromViper()
 	if err != nil {
 		logger.G(ctx).WithError(err).Fatal("Failed to load configuration during assistant client initialization")
 	}
 
-	config.IDE = ideMode
-	config.NoHooks = noHooks
+	config.IDE = opts.IDEMode
+	config.NoHooks = opts.NoHooks
 
 	// Set MCP configuration for system prompt
 	executionMode := viper.GetString("mcp.execution_mode")
@@ -50,7 +65,7 @@ func NewAssistantClient(ctx context.Context, conversationID string, enablePersis
 	// Create state with main tools
 	var stateOpts []tools.BasicStateOption
 	stateOpts = append(stateOpts, tools.WithLLMConfig(config))
-	stateOpts = append(stateOpts, tools.WithCustomTools(customManager))
+	stateOpts = append(stateOpts, tools.WithCustomTools(opts.CustomManager))
 	stateOpts = append(stateOpts, tools.WithMainTools())
 
 	// Initialize skills
@@ -58,8 +73,8 @@ func NewAssistantClient(ctx context.Context, conversationID string, enablePersis
 	stateOpts = append(stateOpts, tools.WithSkillTool(discoveredSkills, skillsEnabled))
 
 	// Set up MCP execution mode
-	if mcpManager != nil {
-		mcpSetup, err := mcp.SetupExecutionMode(ctx, mcpManager)
+	if opts.MCPManager != nil {
+		mcpSetup, err := mcp.SetupExecutionMode(ctx, opts.MCPManager)
 		if err != nil && !errors.Is(err, mcp.ErrDirectMode) {
 			logger.G(ctx).WithError(err).Fatal("Failed to set up MCP execution mode")
 		}
@@ -69,7 +84,7 @@ func NewAssistantClient(ctx context.Context, conversationID string, enablePersis
 			stateOpts = append(stateOpts, mcpSetup.StateOpts...)
 		} else {
 			// Direct mode - add MCP tools directly
-			stateOpts = append(stateOpts, tools.WithMCPTools(mcpManager))
+			stateOpts = append(stateOpts, tools.WithMCPTools(opts.MCPManager))
 		}
 	}
 
@@ -77,19 +92,20 @@ func NewAssistantClient(ctx context.Context, conversationID string, enablePersis
 	thread.SetState(state)
 
 	// Configure conversation persistence
-	if conversationID != "" {
-		thread.SetConversationID(conversationID)
+	if opts.ConversationID != "" {
+		thread.SetConversationID(opts.ConversationID)
 	}
 
-	thread.EnablePersistence(ctx, enablePersistence)
+	thread.EnablePersistence(ctx, opts.EnablePersistence)
 
 	return &AssistantClient{
 		thread:             thread,
-		mcpManager:         mcpManager,
-		customManager:      customManager,
-		maxTurns:           maxTurns,
-		compactRatio:       compactRatio,
-		disableAutoCompact: disableAutoCompact,
+		mcpManager:         opts.MCPManager,
+		customManager:      opts.CustomManager,
+		maxTurns:           opts.MaxTurns,
+		compactRatio:       opts.CompactRatio,
+		disableAutoCompact: opts.DisableAutoCompact,
+		useWeakModel:       opts.UseWeakModel,
 	}
 }
 
@@ -118,6 +134,7 @@ func (a *AssistantClient) SendMessage(ctx context.Context, message string, messa
 		MaxTurns:           a.maxTurns,
 		CompactRatio:       a.compactRatio,
 		DisableAutoCompact: a.disableAutoCompact,
+		UseWeakModel:       a.useWeakModel,
 	})
 
 	return err

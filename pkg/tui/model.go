@@ -16,7 +16,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
 
@@ -52,7 +51,7 @@ type Model struct {
 }
 
 // NewModel creates a new TUI model
-func NewModel(ctx context.Context, conversationID string, enablePersistence bool, mcpManager *tools.MCPManager, customManager *tools.CustomToolManager, maxTurns int, compactRatio float64, disableAutoCompact bool, ideMode bool, noHooks bool) Model {
+func NewModel(ctx context.Context, opts ChatOpts) Model {
 	ta := textarea.New()
 	ta.Placeholder = "Type your message..."
 	ta.Focus()
@@ -77,7 +76,7 @@ func NewModel(ctx context.Context, conversationID string, enablePersistence bool
 
 	statusMessage := "Ready"
 
-	assistant := NewAssistantClient(ctx, conversationID, enablePersistence, mcpManager, customManager, maxTurns, compactRatio, disableAutoCompact, ideMode, noHooks)
+	assistant := NewAssistantClient(ctx, opts)
 
 	ctx, cancel := context.WithCancel(ctx)
 
@@ -100,12 +99,12 @@ func NewModel(ctx context.Context, conversationID string, enablePersistence bool
 	}
 
 	// Populate messages from loaded conversation if it exists
-	if conversationID != "" && enablePersistence {
+	if opts.ConversationID != "" && opts.EnablePersistence {
 		if loadedMessages, err := assistant.GetThreadMessages(); err == nil && len(loadedMessages) > 0 {
 			model.messages = loadedMessages
 			model.updateViewportContent()
 			model.viewport.GotoBottom()
-			model.AddSystemMessage(fmt.Sprintf("Loaded conversation: %s", conversationID))
+			model.AddSystemMessage(fmt.Sprintf("Loaded conversation: %s", opts.ConversationID))
 		}
 	}
 
