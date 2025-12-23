@@ -32,6 +32,9 @@ kodelet run --resume CONVERSATION_ID "more questions"
 
 # Don't save conversation
 kodelet run --no-save "temporary query"
+
+# Output only the final result (no intermediate output or usage stats)
+kodelet run --result-only "what is 2+2"
 ```
 
 ## Key Features

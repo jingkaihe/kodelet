@@ -10,6 +10,7 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/llm"
+	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -23,6 +24,7 @@ type PRConfig struct {
 	TemplateFile string
 	Draft        bool
 	NoSave       bool
+	ResultOnly   bool
 }
 
 func NewPRConfig() *PRConfig {
@@ -32,6 +34,7 @@ func NewPRConfig() *PRConfig {
 		TemplateFile: "",
 		Draft:        false,
 		NoSave:       false,
+		ResultOnly:   false,
 	}
 }
 
@@ -79,7 +82,7 @@ Use the --draft flag to create a draft pull request that is not ready for review
 			os.Exit(1)
 		}
 
-		llmConfig, err := llm.GetConfigFromViper()
+		llmConfig, err := llm.GetConfigFromViperWithCmd(cmd)
 		if err != nil {
 			presenter.Error(err, "Failed to load configuration")
 			return
@@ -136,20 +139,27 @@ Use the --draft flag to create a draft pull request that is not ready for review
 
 		prompt := fragment.Content
 
-		presenter.Info("Analyzing branch changes and generating PR description...")
-		presenter.Separator()
+		if config.ResultOnly {
+			presenter.SetQuiet(true)
+			logger.SetLogLevel("error")
+		} else {
+			presenter.Info("Analyzing branch changes and generating PR description...")
+			presenter.Separator()
+		}
 
-		out, usage := llm.SendMessageAndGetTextWithUsage(ctx, s, prompt, llmConfig, false, llmtypes.MessageOpt{
+		out, usage := llm.SendMessageAndGetTextWithUsage(ctx, s, prompt, llmConfig, config.ResultOnly, llmtypes.MessageOpt{
 			PromptCache:        true,
 			NoSaveConversation: config.NoSave,
 		})
 
 		fmt.Println(out)
 
-		presenter.Separator()
+		if !config.ResultOnly {
+			presenter.Separator()
 
-		usageStats := presenter.ConvertUsageStats(&usage)
-		presenter.Stats(usageStats)
+			usageStats := presenter.ConvertUsageStats(&usage)
+			presenter.Stats(usageStats)
+		}
 	},
 }
 
@@ -160,6 +170,7 @@ func init() {
 	prCmd.Flags().String("template-file", defaults.TemplateFile, "The path to the template file for the pull request")
 	prCmd.Flags().BoolP("draft", "d", defaults.Draft, "Create the pull request as a draft")
 	prCmd.Flags().Bool("no-save", defaults.NoSave, "Disable conversation persistence")
+	prCmd.Flags().Bool("result-only", defaults.ResultOnly, "Only print the final agent message, suppressing all intermediate output and usage statistics")
 }
 
 func getPRConfigFromFlags(cmd *cobra.Command) *PRConfig {
@@ -179,6 +190,9 @@ func getPRConfigFromFlags(cmd *cobra.Command) *PRConfig {
 	}
 	if noSave, err := cmd.Flags().GetBool("no-save"); err == nil {
 		config.NoSave = noSave
+	}
+	if resultOnly, err := cmd.Flags().GetBool("result-only"); err == nil {
+		config.ResultOnly = resultOnly
 	}
 
 	return config

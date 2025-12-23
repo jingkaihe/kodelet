@@ -99,7 +99,7 @@ ignoring common directories like .git and node_modules.`,
 			return
 		}
 
-		llmConfig, err := llm.GetConfigFromViper()
+		llmConfig, err := llm.GetConfigFromViperWithCmd(cmd)
 		if err != nil {
 			presenter.Error(err, "Failed to load configuration")
 			return

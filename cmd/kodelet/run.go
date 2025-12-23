@@ -41,6 +41,7 @@ type RunConfig struct {
 	IDE                bool              // Enable IDE integration mode (display conversation ID prominently)
 	NoSkills           bool              // Disable agentic skills
 	NoHooks            bool              // Disable agent lifecycle hooks
+	ResultOnly         bool              // Only print the final agent message, no intermediate output or usage stats
 }
 
 func NewRunConfig() *RunConfig {
@@ -60,6 +61,7 @@ func NewRunConfig() *RunConfig {
 		IDE:                false,
 		NoSkills:           false,
 		NoHooks:            false,
+		ResultOnly:         false,
 	}
 }
 
@@ -197,7 +199,7 @@ var runCmd = &cobra.Command{
 			return
 		}
 
-		llmConfig, err := llm.GetConfigFromViper()
+		llmConfig, err := llm.GetConfigFromViperWithCmd(cmd)
 		if err != nil {
 			presenter.Error(err, "Failed to load configuration")
 			return
@@ -318,9 +320,14 @@ var runCmd = &cobra.Command{
 				}
 			}
 		} else {
-			presenter.Info(fmt.Sprintf("[User]: %s", query))
+			if config.ResultOnly {
+				presenter.SetQuiet(true)
+				logger.SetLogLevel("error")
+			} else {
+				presenter.Info(fmt.Sprintf("[User]: %s", query))
+			}
 
-			handler := &llmtypes.ConsoleMessageHandler{Silent: false}
+			handler := &llmtypes.ConsoleMessageHandler{Silent: config.ResultOnly}
 			thread, err := llm.NewThread(llmConfig)
 			if err != nil {
 				presenter.Error(err, "Failed to create LLM thread")
@@ -330,12 +337,14 @@ var runCmd = &cobra.Command{
 
 			if config.ResumeConvID != "" {
 				thread.SetConversationID(config.ResumeConvID)
-				presenter.Info(fmt.Sprintf("Resuming conversation: %s", config.ResumeConvID))
+				if !config.ResultOnly {
+					presenter.Info(fmt.Sprintf("Resuming conversation: %s", config.ResumeConvID))
+				}
 			}
 
 			thread.EnablePersistence(ctx, !config.NoSave)
 
-			_, err = thread.SendMessage(ctx, query, handler, llmtypes.MessageOpt{
+			finalOutput, err := thread.SendMessage(ctx, query, handler, llmtypes.MessageOpt{
 				PromptCache:        true,
 				Images:             config.Images,
 				MaxTurns:           config.MaxTurns,
@@ -344,6 +353,11 @@ var runCmd = &cobra.Command{
 			})
 			if err != nil {
 				presenter.Error(err, "Failed to process query")
+				return
+			}
+
+			if config.ResultOnly {
+				fmt.Println(finalOutput)
 				return
 			}
 
@@ -380,6 +394,7 @@ func init() {
 	runCmd.Flags().Bool("include-history", defaults.IncludeHistory, "Include historical conversation data in headless streaming")
 	runCmd.Flags().Bool("ide", defaults.IDE, "Enable IDE integration mode (display conversation ID prominently)")
 	runCmd.Flags().Bool("no-hooks", defaults.NoHooks, "Disable agent lifecycle hooks")
+	runCmd.Flags().Bool("result-only", defaults.ResultOnly, "Only print the final agent message, suppressing all intermediate output and usage statistics")
 }
 
 func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
@@ -454,6 +469,10 @@ func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
 
 	if noHooks, err := cmd.Flags().GetBool("no-hooks"); err == nil {
 		config.NoHooks = noHooks
+	}
+
+	if resultOnly, err := cmd.Flags().GetBool("result-only"); err == nil {
+		config.ResultOnly = resultOnly
 	}
 
 	return config
