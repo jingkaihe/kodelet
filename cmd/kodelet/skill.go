@@ -16,6 +16,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const skillFileName = "SKILL.md"
+
 type SkillAddConfig struct {
 	Global bool
 	Dir    string
@@ -182,9 +184,9 @@ func addSkillCmd(repo string, config *SkillAddConfig) {
 	var skillDirs []string
 	if config.Dir != "" {
 		targetPath := filepath.Join(tmpDir, config.Dir)
-		skillFile := filepath.Join(targetPath, "SKILL.md")
+		skillFile := filepath.Join(targetPath, skillFileName)
 		if _, err := os.Stat(skillFile); os.IsNotExist(err) {
-			presenter.Error(errors.Errorf("no SKILL.md found at %s", config.Dir), "Invalid skill path")
+			presenter.Error(errors.Errorf("no %s found at %s", skillFileName, config.Dir), "Invalid skill path")
 			os.Exit(1)
 		}
 		skillDirs = []string{targetPath}
@@ -244,7 +246,7 @@ func findSkillDirs(root string) ([]string, error) {
 			return filepath.SkipDir
 		}
 
-		if !info.IsDir() && info.Name() == "SKILL.md" {
+		if !info.IsDir() && info.Name() == skillFileName {
 			skillDirs = append(skillDirs, filepath.Dir(path))
 		}
 
@@ -345,7 +347,7 @@ func removeSkillCmd(name string, config *SkillRemoveConfig) {
 
 	skillDir := filepath.Join(skillsDir, name)
 
-	skillFile := filepath.Join(skillDir, "SKILL.md")
+	skillFile := filepath.Join(skillDir, skillFileName)
 	if _, err := os.Stat(skillFile); os.IsNotExist(err) {
 		location := "local"
 		if config.Global {
