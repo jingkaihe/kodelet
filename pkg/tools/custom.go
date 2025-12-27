@@ -83,7 +83,7 @@ func LoadCustomToolConfig() CustomToolConfig {
 	config := CustomToolConfig{
 		Enabled:       true,
 		GlobalDir:     "~/.kodelet/tools",
-		LocalDir:      "./kodelet-tools",
+		LocalDir:      "./.kodelet/tools",
 		Timeout:       30 * time.Second,
 		MaxOutputSize: 102400, // 100KB
 	}

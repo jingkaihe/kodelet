@@ -929,7 +929,7 @@ Custom tools are discovered from two directories:
 - Available across all projects
 - Good for general-purpose utilities
 
-**Local Tools**: `./kodelet-tools/`
+**Local Tools**: `./.kodelet/tools/`
 - Project-specific tools
 - Override global tools with the same name
 - Should be committed to your repository
@@ -946,8 +946,8 @@ custom_tools:
   # Global tools directory (default: ~/.kodelet/tools)
   global_dir: "~/.kodelet/tools"
 
-  # Local tools directory (default: ./kodelet-tools)
-  local_dir: "./kodelet-tools"
+  # Local tools directory (default: ./.kodelet/tools)
+  local_dir: "./.kodelet/tools"
 
   # Execution timeout (default: 30s)
   timeout: 30s
@@ -1027,7 +1027,7 @@ esac
 
 ```bash
 #!/bin/bash
-# File: ./kodelet-tools/git_info
+# File: ./.kodelet/tools/git_info
 
 case "$1" in
   "description")

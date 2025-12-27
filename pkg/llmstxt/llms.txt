@@ -294,7 +294,7 @@ Extend kodelet with executable tools in any language:
 
 **Directory structure:**
 - `~/.kodelet/tools/` - Global tools
-- `./kodelet-tools/` - Project-specific tools
+- `./.kodelet/tools/` - Project-specific tools
 
 **Generate custom tool:**
 ```bash
