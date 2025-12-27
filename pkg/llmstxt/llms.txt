@@ -117,6 +117,22 @@ Model-invoked capabilities that package domain expertise. Unlike fragments (user
 - `./.kodelet/skills/<name>/SKILL.md` - Repository-local (higher precedence)
 - `~/.kodelet/skills/<name>/SKILL.md` - User-global
 
+**Managing skills:**
+```bash
+# Add skills from GitHub repository
+kodelet skill add orgname/skills                        # Add all skills
+kodelet skill add orgname/skills --dir skills/my-skill  # Add specific skill
+kodelet skill add orgname/skills@v0.1.0                 # From specific version
+kodelet skill add orgname/skills -g                     # To global directory
+
+# List installed skills
+kodelet skill list
+
+# Remove skills
+kodelet skill remove skill-name                         # From local directory
+kodelet skill remove skill-name -g                      # From global directory
+```
+
 **Creating a skill:**
 ```markdown
 ---

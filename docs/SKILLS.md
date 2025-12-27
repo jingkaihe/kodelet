@@ -89,6 +89,61 @@ Skills are discovered from two locations with the following precedence:
 
 Repository-local skills take precedence over user-global skills with the same name, allowing project-specific customizations.
 
+## Managing Skills
+
+Kodelet provides CLI commands to add, list, and remove skills from GitHub repositories.
+
+### Adding Skills
+
+```bash
+# Add all skills from a GitHub repository (installs to ./.kodelet/skills/)
+kodelet skill add orgname/skills
+
+# Add a specific skill from a repository
+kodelet skill add orgname/skills --dir skills/specific-skill
+kodelet skill add orgname/skills -d skills/specific-skill
+
+# Add skills from a specific version, branch, or commit SHA
+kodelet skill add orgname/skills@v0.1.0
+kodelet skill add orgname/skills@main
+kodelet skill add orgname/skills@abc1234
+
+# Add skills to global directory (~/.kodelet/skills/)
+kodelet skill add orgname/skills -g
+kodelet skill add orgname/skills --global
+```
+
+**Requirements:**
+- GitHub CLI (`gh`) must be installed
+- Must be authenticated (`gh auth login`)
+
+### Listing Skills
+
+```bash
+# List all installed skills with their locations and descriptions
+kodelet skill list
+```
+
+Example output:
+```
+NAME              DIRECTORY                              DESCRIPTION
+----              ---------                              -----------
+pdf               ./.kodelet/skills/pdf                  Handle PDF file operations...
+xlsx              ~/.kodelet/skills/xlsx                 Work with Excel spreadsheets...
+kubernetes        ~/.kodelet/skills/kubernetes           Manage Kubernetes clusters...
+```
+
+### Removing Skills
+
+```bash
+# Remove a skill from local directory (./.kodelet/skills/)
+kodelet skill remove skill-name
+
+# Remove a skill from global directory (~/.kodelet/skills/)
+kodelet skill remove skill-name -g
+kodelet skill remove skill-name --global
+```
+
 ## Configuration
 
 ### Global Enable/Disable
