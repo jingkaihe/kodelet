@@ -487,7 +487,7 @@ mcp:
     regenerate_on_startup: false
 
     # Unix socket path for MCP RPC server
-    socket_path: ".kodelet/mcp.sock"
+    socket_path: ".kodelet/mcp/mcp.sock"
 
   # MCP servers configuration
   # Each server can be either stdio or SSE based
