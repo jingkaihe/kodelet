@@ -1081,8 +1081,9 @@ func TestBashTool_ProcessDetachment_LogFileOutput(t *testing.T) {
 	bgResult, ok := result.(*BackgroundBashToolResult)
 	require.True(t, ok, "Result should be BackgroundBashToolResult")
 
-	// Verify log file path is correct
-	expectedLogPath := filepath.Join(tempDir, ".kodelet", strconv.Itoa(bgResult.pid), "out.log")
+	// Verify log file path is correct (now stored in home directory)
+	homeDir, _ := os.UserHomeDir()
+	expectedLogPath := filepath.Join(homeDir, ".kodelet", "bgpids", strconv.Itoa(bgResult.pid), "out.log")
 	assert.Equal(t, expectedLogPath, bgResult.logPath)
 
 	// Wait for process to complete and output to be written

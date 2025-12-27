@@ -1,5 +1,28 @@
 # Kodelet
 
+## 0.1.28.beta (2025-12-27)
+
+### Features
+
+**Skill Management Commands**: Added CLI commands for managing skills from GitHub repositories
+
+- `kodelet skill add <repo>` - Install skills from GitHub (supports `@tag/branch` syntax and `--dir` for specific skills)
+- `kodelet skill list` - List all installed skills with descriptions
+- `kodelet skill remove <name>` - Remove installed skills
+- Use `-g/--global` flag to manage global vs local skills
+
+**Improved Code Execution Error Reporting**: Error output now includes stderr content for better debugging
+
+### Breaking Changes
+
+**Directory Structure Reorganization**: Several directories moved to consolidate state in home directory
+
+- Custom tools local directory: `./kodelet-tools` → `./.kodelet/tools`
+- Background process logs: `.kodelet/{PID}/out.log` → `~/.kodelet/bgpids/{PID}/out.log`
+- Todo files: `.kodelet/kodelet-todos-*.json` → `~/.kodelet/todos/*.json`
+- Web archives: `.kodelet/web-archives/` → `~/.kodelet/web-archives/`
+- MCP socket: `.kodelet/mcp.sock` → `.kodelet/mcp/mcp.sock`
+
 ## 0.1.26.beta (2025-12-23)
 
 ### Features

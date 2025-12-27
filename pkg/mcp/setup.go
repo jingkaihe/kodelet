@@ -26,7 +26,7 @@ type ExecutionSetup struct {
 func GetSocketPath() (string, error) {
 	socketPath := viper.GetString("mcp.code_execution.socket_path")
 	if socketPath == "" {
-		socketPath = ".kodelet/mcp.sock"
+		socketPath = ".kodelet/mcp/mcp.sock"
 	}
 	return filepath.Abs(socketPath)
 }

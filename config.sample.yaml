@@ -383,8 +383,8 @@ custom_tools:
   # Global custom tools directory (default: ~/.kodelet/tools)
   global_dir: "~/.kodelet/tools"
 
-  # Local custom tools directory (default: ./kodelet-tools)
-  local_dir: "./kodelet-tools"
+  # Local custom tools directory (default: ./.kodelet/tools)
+  local_dir: "./.kodelet/tools"
 
   # Execution timeout for custom tools (default: 30s)
   timeout: 30s
@@ -477,18 +477,18 @@ mcp:
   # - "direct": Traditional direct tool calling (default)
   # - "code": Code execution with filesystem API (more efficient for multi-tool workflows)
   execution_mode: "direct"
-  
+
   # Code execution settings (only used when execution_mode = "code")
   code_execution:
     # Directory where MCP tool TypeScript files are generated
     workspace_dir: ".kodelet/mcp"
-    
+
     # Whether to regenerate tool files on startup
     regenerate_on_startup: false
-    
+
     # Unix socket path for MCP RPC server
-    socket_path: ".kodelet/mcp.sock"
-  
+    socket_path: ".kodelet/mcp/mcp.sock"
+
   # MCP servers configuration
   # Each server can be either stdio or SSE based
   servers:
@@ -496,7 +496,7 @@ mcp:
     # filesystem:
     #   command: "npx"
     #   args: ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed/directory"]
-    
+
     # Example SSE server (uncomment to enable)
     # example-sse:
     #   server_type: "sse"
@@ -504,4 +504,3 @@ mcp:
     #   headers:
     #     Authorization: "Bearer ${MCP_TOKEN}"
     #   tool_white_list: ["tool1", "tool2"]
-

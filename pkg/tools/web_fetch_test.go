@@ -468,7 +468,7 @@ func TestWebFetchToolDescription(t *testing.T) {
 	// Check that description contains key information about new functionality
 	assert.Contains(t, description, "Scenario 1: Code/Text Content")
 	assert.Contains(t, description, "Scenario 2: HTML/Markdown Content")
-	assert.Contains(t, description, "./.kodelet/web-archives/")
+	assert.Contains(t, description, "~/.kodelet/web-archives/")
 	assert.Contains(t, description, "100KB")
 	assert.Contains(t, description, "prompt: (Optional)")
 	assert.Contains(t, description, "Without prompt")
@@ -1019,7 +1019,8 @@ func TestWebFetchToolDomainSpecificDirectories(t *testing.T) {
 				assert.NotEmpty(t, webFetchResult.filePath)
 
 				// Verify the file path contains the expected domain directory
-				expectedDir := fmt.Sprintf(".kodelet/web-archives/%s", tc.expectedDomain)
+				homeDir, _ := os.UserHomeDir()
+				expectedDir := filepath.Join(homeDir, ".kodelet", "web-archives", tc.expectedDomain)
 				assert.Contains(t, webFetchResult.filePath, expectedDir)
 
 				// Verify the directory structure exists
@@ -1032,7 +1033,7 @@ func TestWebFetchToolDomainSpecificDirectories(t *testing.T) {
 				assert.Equal(t, testContent, string(fileContent))
 
 				// Verify the domain directory was created
-				domainDir := filepath.Join(".kodelet/web-archives", tc.expectedDomain)
+				domainDir := filepath.Join(homeDir, ".kodelet", "web-archives", tc.expectedDomain)
 				_, err = os.Stat(domainDir)
 				assert.NoError(t, err)
 			})

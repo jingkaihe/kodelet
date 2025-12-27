@@ -74,7 +74,7 @@ The following commands are banned and cannot be used:
   - Any process you want to continue running while doing other work
 * When background=true:
   - The timeout must be 0 (no timeout)
-  - Process output is written to .kodelet/{PID}/out.log
+  - Process output is written to ~/.kodelet/bgpids/{PID}/out.log
   - The tool returns immediately with the PID and log file location
   - The process continues running after the tool returns
 
@@ -513,16 +513,16 @@ func (b *BashTool) executeForeground(ctx context.Context, input *BashInput) tool
 
 func (b *BashTool) executeBackground(state tooltypes.State, input *BashInput) tooltypes.ToolResult {
 	// Create kodelet directory if it doesn't exist
-	pwd, err := os.Getwd()
+	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return &BackgroundBashToolResult{
 			command:   input.Command,
 			startTime: time.Now(),
-			error:     fmt.Sprintf("Failed to get current directory: %v", err),
+			error:     fmt.Sprintf("Failed to get home directory: %v", err),
 		}
 	}
 
-	kodeletDir := filepath.Join(pwd, ".kodelet")
+	kodeletDir := filepath.Join(homeDir, ".kodelet")
 	if err := os.MkdirAll(kodeletDir, 0o755); err != nil {
 		return &BackgroundBashToolResult{
 			command:   input.Command,
@@ -569,7 +569,7 @@ func (b *BashTool) executeBackground(state tooltypes.State, input *BashInput) to
 	pid := cmd.Process.Pid
 
 	// Create PID directory
-	pidDir := filepath.Join(kodeletDir, fmt.Sprintf("%d", pid))
+	pidDir := filepath.Join(kodeletDir, "bgpids", fmt.Sprintf("%d", pid))
 	if err := os.MkdirAll(pidDir, 0o755); err != nil {
 		cmd.Process.Kill()
 		return &BackgroundBashToolResult{

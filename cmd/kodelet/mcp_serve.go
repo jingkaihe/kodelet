@@ -23,7 +23,7 @@ type MCPServeConfig struct {
 
 func NewMCPServeConfig() *MCPServeConfig {
 	return &MCPServeConfig{
-		SocketPath: ".kodelet/mcp.sock",
+		SocketPath: ".kodelet/mcp/mcp.sock",
 	}
 }
 

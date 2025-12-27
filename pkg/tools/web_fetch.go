@@ -112,7 +112,7 @@ func (t *WebFetchTool) Description() string {
 ## Behavior
 **Scenario 1: Code/Text Content**
 - If the URL contains code, plain text, JSON, XML, or other structured text:
-  - Saves the content to ./.kodelet/web-archives/{domain_name}/{filename}.{ext}
+  - Saves the content to ~/.kodelet/web-archives/{domain_name}/{filename}.{ext}
   - Returns the full content with line numbers if under 100KB
   - Returns first 100KB with line numbers and truncation notice if over 100KB
   - No AI processing is applied
@@ -133,7 +133,7 @@ func (t *WebFetchTool) Description() string {
 ## Important Notes
 1. Only public URLs that don't require authentication can be accessed
 2. For security reasons, redirects are only followed within the same domain
-3. Code/text files are saved to ./.kodelet/web-archives/{domain_name}/ directory for future reference
+3. Code/text files are saved to ~/.kodelet/web-archives/{domain_name}/ directory for future reference
 4. HTML/Markdown content is returned directly (with optional AI processing)
 5. Prompt parameter only affects HTML/Markdown content behavior
 
@@ -362,9 +362,19 @@ func (t *WebFetchTool) handleCodeTextContent(_ context.Context, input *WebFetchI
 		}
 	}
 
+	// Get home directory for web archives
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return &WebFetchToolResult{
+			url:    input.URL,
+			prompt: input.Prompt,
+			err:    fmt.Sprintf("Failed to get home directory: %s", err),
+		}
+	}
+
 	// Create domain-specific web-archives directory
 	domainName := parsedURL.Hostname()
-	archiveDir := filepath.Join("./.kodelet/web-archives", domainName)
+	archiveDir := filepath.Join(homeDir, ".kodelet", "web-archives", domainName)
 	if err := os.MkdirAll(archiveDir, 0o755); err != nil {
 		return &WebFetchToolResult{
 			url:    input.URL,

@@ -464,7 +464,7 @@ func TestLoadCustomToolConfig(t *testing.T) {
 	// Check defaults
 	assert.True(t, config.Enabled)
 	assert.Equal(t, "~/.kodelet/tools", config.GlobalDir)
-	assert.Equal(t, "./kodelet-tools", config.LocalDir)
+	assert.Equal(t, "./.kodelet/tools", config.LocalDir)
 	assert.Equal(t, 30*time.Second, config.Timeout)
 	assert.Equal(t, 102400, config.MaxOutputSize) // 100KB
 	assert.Empty(t, config.ToolWhiteList)         // Default should be empty (no whitelist)

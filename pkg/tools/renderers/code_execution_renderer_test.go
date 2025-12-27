@@ -149,7 +149,7 @@ Line 10`
 		assert.Contains(t, output, "Error: Test error", "Expected error message in output")
 	})
 
-	t.Run("Error handling", func(t *testing.T) {
+	t.Run("Error handling without metadata", func(t *testing.T) {
 		result := tools.StructuredToolResult{
 			ToolName:  "code_execution",
 			Success:   false,
@@ -160,6 +160,27 @@ Line 10`
 		output := renderer.RenderCLI(result)
 
 		assert.Contains(t, output, "Error: Code execution failed: syntax error", "Expected error message in output")
+	})
+
+	t.Run("Error handling with metadata shows stderr output", func(t *testing.T) {
+		result := tools.StructuredToolResult{
+			ToolName:  "code_execution",
+			Success:   false,
+			Error:     "execution failed: exit status 1",
+			Timestamp: time.Now(),
+			Metadata: &tools.CodeExecutionMetadata{
+				Runtime: "Node.js",
+				Code:    "const x: string = 123;",
+				Output:  "TypeError: Type 'number' is not assignable to type 'string'.\n    at file.ts:1:7",
+			},
+		}
+
+		output := renderer.RenderCLI(result)
+
+		assert.Contains(t, output, "Error: execution failed: exit status 1", "Expected error message in output")
+		assert.Contains(t, output, "Output:", "Expected output section header")
+		assert.Contains(t, output, "TypeError:", "Expected TypeScript error in output")
+		assert.Contains(t, output, "at file.ts:1:7", "Expected stack trace in output")
 	})
 
 	t.Run("Invalid metadata type", func(t *testing.T) {

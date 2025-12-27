@@ -929,7 +929,7 @@ Custom tools are discovered from two directories:
 - Available across all projects
 - Good for general-purpose utilities
 
-**Local Tools**: `./kodelet-tools/`
+**Local Tools**: `./.kodelet/tools/`
 - Project-specific tools
 - Override global tools with the same name
 - Should be committed to your repository
@@ -946,8 +946,8 @@ custom_tools:
   # Global tools directory (default: ~/.kodelet/tools)
   global_dir: "~/.kodelet/tools"
 
-  # Local tools directory (default: ./kodelet-tools)
-  local_dir: "./kodelet-tools"
+  # Local tools directory (default: ./.kodelet/tools)
+  local_dir: "./.kodelet/tools"
 
   # Execution timeout (default: 30s)
   timeout: 30s
@@ -1027,7 +1027,7 @@ esac
 
 ```bash
 #!/bin/bash
-# File: ./kodelet-tools/git_info
+# File: ./.kodelet/tools/git_info
 
 case "$1" in
   "description")
@@ -1237,6 +1237,38 @@ skills:
     - xlsx
     - kubernetes
 ```
+
+### Managing Skills
+
+Kodelet provides commands to manage skills from GitHub repositories:
+
+```bash
+# Add all skills from a GitHub repository
+kodelet skill add orgname/skills
+
+# Add a specific skill from a repository
+kodelet skill add orgname/skills --dir skills/specific-skill
+
+# Add skills from a specific version/branch/tag
+kodelet skill add orgname/skills@v0.1.0
+kodelet skill add orgname/skills@main
+
+# Add skills to global directory (~/.kodelet/skills)
+kodelet skill add orgname/skills -g
+
+# List all installed skills
+kodelet skill list
+
+# Remove a skill from local directory
+kodelet skill remove skill-name
+
+# Remove a skill from global directory
+kodelet skill remove skill-name -g
+```
+
+**Requirements:**
+- GitHub CLI (`gh`) must be installed and authenticated
+- Run `gh auth login` if not already authenticated
 
 ### Disabling Skills
 

@@ -197,12 +197,12 @@ func (s *BasicState) TodoFilePath() (string, error) {
 	if todoPath != "" {
 		return todoPath, nil
 	}
-	pwd, err := os.Getwd()
+	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
 
-	todoFilePath := path.Join(pwd, ".kodelet", fmt.Sprintf("kodelet-todos-%s.json", s.sessionID))
+	todoFilePath := path.Join(homeDir, ".kodelet", "todos", fmt.Sprintf("%s.json", s.sessionID))
 	return todoFilePath, nil
 }
 
