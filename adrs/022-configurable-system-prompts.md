@@ -377,36 +377,72 @@ Modify `pkg/sysprompt/system.go` to handle custom prompts internally:
 ```go
 // SystemPrompt generates a system prompt, using custom template if configured in config
 func SystemPrompt(ctx context.Context, model string, config *llmtypes.Config, contexts []types.AgentContext) (string, error) {
-    // If custom prompt is configured, use it
-    if config.CustomPrompt != nil && (config.CustomPrompt.TemplatePath != "" || config.CustomPrompt.RecipeName != "") {
-        promptConfig := NewPromptConfig(model)
-        promptCtx := NewPromptContext(config, contexts, promptConfig)
-        renderer := NewCustomPromptRenderer(getFragmentDirs())
-        return renderer.RenderCustomPrompt(ctx, config.CustomPrompt, promptCtx)
-    }
-    
-    // Default behavior - render from embedded templates
     promptConfig := NewPromptConfig(model)
     promptCtx := NewPromptContext(config, contexts, promptConfig)
-    return defaultRenderer.RenderPrompt("templates/system.tmpl", promptCtx)
+    
+    var basePrompt string
+    
+    // If custom prompt is configured, use it
+    if config.CustomPrompt != nil && (config.CustomPrompt.TemplatePath != "" || config.CustomPrompt.RecipeName != "") {
+        renderer := NewCustomPromptRenderer(getFragmentDirs())
+        rendered, err := renderer.RenderCustomPrompt(ctx, config.CustomPrompt, promptCtx)
+        if err != nil {
+            return "", err
+        }
+        basePrompt = rendered
+    } else {
+        // Default behavior - render from embedded templates
+        rendered, err := defaultRenderer.RenderPrompt("templates/system.tmpl", promptCtx)
+        if err != nil {
+            return "", err
+        }
+        basePrompt = rendered
+    }
+    
+    // Always append contexts and MCP servers - these are core to kodelet
+    basePrompt += promptCtx.FormatContexts()
+    basePrompt += promptCtx.FormatMCPServers()
+    
+    return basePrompt, nil
 }
 
 // SubAgentPrompt generates a subagent system prompt, using custom template if configured
 func SubAgentPrompt(ctx context.Context, model string, config *llmtypes.Config, contexts []types.AgentContext) (string, error) {
-    // If custom prompt is configured, use it (same template for subagent)
-    if config.CustomPrompt != nil && (config.CustomPrompt.TemplatePath != "" || config.CustomPrompt.RecipeName != "") {
-        promptConfig := NewPromptConfig(model)
-        promptCtx := NewPromptContext(config, contexts, promptConfig)
-        renderer := NewCustomPromptRenderer(getFragmentDirs())
-        return renderer.RenderCustomPrompt(ctx, config.CustomPrompt, promptCtx)
-    }
-    
-    // Default behavior - render subagent template
     promptConfig := NewPromptConfig(model)
     promptCtx := NewPromptContext(config, contexts, promptConfig)
-    return defaultRenderer.RenderPrompt("templates/subagent.tmpl", promptCtx)
+    
+    var basePrompt string
+    
+    // If custom prompt is configured, use it
+    if config.CustomPrompt != nil && (config.CustomPrompt.TemplatePath != "" || config.CustomPrompt.RecipeName != "") {
+        renderer := NewCustomPromptRenderer(getFragmentDirs())
+        rendered, err := renderer.RenderCustomPrompt(ctx, config.CustomPrompt, promptCtx)
+        if err != nil {
+            return "", err
+        }
+        basePrompt = rendered
+    } else {
+        // Default behavior - render subagent template
+        rendered, err := defaultRenderer.RenderPrompt("templates/subagent.tmpl", promptCtx)
+        if err != nil {
+            return "", err
+        }
+        basePrompt = rendered
+    }
+    
+    // Always append contexts and MCP servers - these are core to kodelet
+    basePrompt += promptCtx.FormatContexts()
+    basePrompt += promptCtx.FormatMCPServers()
+    
+    return basePrompt, nil
 }
 ```
+
+**Key point**: `FormatContexts()` and `FormatMCPServers()` are always appended regardless of whether a custom template is used. These provide:
+- **Contexts**: AGENTS.md, README.md, and other context files from the repository
+- **MCP Servers**: Available MCP tools and their configurations
+
+This ensures custom prompts still have access to repository context and tool information.
 
 The LLM clients remain unchanged - they just call `SystemPrompt` or `SubAgentPrompt`:
 
