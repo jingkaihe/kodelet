@@ -25,6 +25,7 @@ type ChatOpts struct {
 	IDEMode            bool
 	NoHooks            bool
 	UseWeakModel       bool
+	CustomPrompt       llmtypes.CustomPromptConfig
 }
 
 // AssistantClient handles the interaction with the LLM thread
@@ -47,6 +48,11 @@ func NewAssistantClient(ctx context.Context, opts ChatOpts) *AssistantClient {
 
 	config.IDE = opts.IDEMode
 	config.NoHooks = opts.NoHooks
+
+	// Set custom prompt configuration if configured
+	if opts.CustomPrompt.IsConfigured() {
+		config.CustomPrompt = opts.CustomPrompt
+	}
 
 	// Set MCP configuration for system prompt
 	executionMode := viper.GetString("mcp.execution_mode")

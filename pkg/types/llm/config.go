@@ -48,6 +48,21 @@ type Config struct {
 
 	// Hooks configuration
 	NoHooks bool `mapstructure:"no_hooks" json:"no_hooks" yaml:"no_hooks"` // NoHooks disables agent lifecycle hooks
+
+	// Custom system prompt configuration
+	CustomPrompt CustomPromptConfig `mapstructure:"custom_prompt" json:"custom_prompt,omitempty" yaml:"custom_prompt,omitempty"` // CustomPrompt configuration for custom system prompts
+}
+
+// CustomPromptConfig holds configuration for custom system prompts
+type CustomPromptConfig struct {
+	TemplatePath string            `mapstructure:"template_path" json:"template_path,omitempty" yaml:"template_path,omitempty"` // Path to custom template file
+	RecipeName   string            `mapstructure:"recipe_name" json:"recipe_name,omitempty" yaml:"recipe_name,omitempty"`       // Name of fragment/recipe to use as system prompt
+	Arguments    map[string]string `mapstructure:"arguments" json:"arguments,omitempty" yaml:"arguments,omitempty"`             // Custom arguments for template
+}
+
+// IsConfigured returns true if a custom prompt is configured (either template path or recipe name)
+func (c CustomPromptConfig) IsConfigured() bool {
+	return c.TemplatePath != "" || c.RecipeName != ""
 }
 
 // OpenAIConfig holds OpenAI-specific configuration including support for compatible APIs

@@ -433,9 +433,12 @@ OUTER:
 			}
 			var systemPrompt string
 			if t.config.IsSubAgent {
-				systemPrompt = sysprompt.SubAgentPrompt(model, t.config, contexts)
+				systemPrompt, err = sysprompt.SubAgentPrompt(ctx, model, t.config, contexts)
 			} else {
-				systemPrompt = sysprompt.SystemPrompt(model, t.config, contexts)
+				systemPrompt, err = sysprompt.SystemPrompt(ctx, model, t.config, contexts)
+			}
+			if err != nil {
+				return "", errors.Wrap(err, "failed to generate system prompt")
 			}
 
 			// Update system message content

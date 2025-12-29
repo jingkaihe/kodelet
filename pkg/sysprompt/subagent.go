@@ -4,12 +4,12 @@ import (
 	"context"
 	"strings"
 
-	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/types/llm"
+	"github.com/pkg/errors"
 )
 
 // SubAgentPrompt generates a subagent prompt for the given model
-func SubAgentPrompt(model string, llmConfig llm.Config, contexts map[string]string) string {
+func SubAgentPrompt(ctx context.Context, model string, llmConfig llm.Config, contexts map[string]string) (string, error) {
 	promptCtx := NewPromptContext(contexts)
 
 	renderer := NewRenderer(TemplateFS)
@@ -23,22 +23,39 @@ func SubAgentPrompt(model string, llmConfig llm.Config, contexts map[string]stri
 
 	promptCtx.BashAllowedCommands = llmConfig.AllowedCommands
 
-	var prompt string
+	var basePrompt string
 	var err error
 
-	provider := strings.ToLower(llmConfig.Provider)
-	switch provider {
-	case ProviderOpenAI:
-		prompt, err = renderer.RenderOpenAIPrompt(promptCtx)
-	default:
-		prompt, err = renderer.RenderSubagentPrompt(promptCtx)
+	// If custom prompt is configured, use it
+	if llmConfig.CustomPrompt.IsConfigured() {
+		customRenderer := NewCustomPromptRenderer(GetFragmentDirs())
+		basePrompt, err = customRenderer.RenderCustomPrompt(
+			ctx,
+			llmConfig.CustomPrompt.TemplatePath,
+			llmConfig.CustomPrompt.RecipeName,
+			llmConfig.CustomPrompt.Arguments,
+			promptCtx,
+		)
+		if err != nil {
+			return "", errors.Wrap(err, "failed to render custom subagent prompt")
+		}
+		// For custom prompts, append system info, contexts, and MCP servers
+		basePrompt += promptCtx.FormatSystemInfo()
+		basePrompt += promptCtx.FormatContexts()
+		basePrompt += promptCtx.FormatMCPServers()
+	} else {
+		// Default behavior - render from embedded templates
+		provider := strings.ToLower(llmConfig.Provider)
+		switch provider {
+		case ProviderOpenAI:
+			basePrompt, err = renderer.RenderOpenAIPrompt(promptCtx)
+		default:
+			basePrompt, err = renderer.RenderSubagentPrompt(promptCtx)
+		}
+		if err != nil {
+			return "", errors.Wrap(err, "failed to render subagent prompt")
+		}
 	}
 
-	if err != nil {
-		ctx := context.Background()
-		log := logger.G(ctx)
-		log.WithError(err).WithField("provider", provider).Fatal("Error rendering subagent prompt")
-	}
-
-	return prompt
+	return basePrompt, nil
 }

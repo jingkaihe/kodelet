@@ -1,6 +1,7 @@
 package sysprompt
 
 import (
+	"context"
 	"testing"
 
 	"github.com/jingkaihe/kodelet/pkg/tools"
@@ -11,7 +12,9 @@ import (
 
 // TestSystemPrompt verifies that key elements from templates appear in the generated system prompt
 func TestSystemPrompt(t *testing.T) {
-	prompt := SystemPrompt("claude-sonnet-4-5-20250929", llm.Config{}, map[string]string{})
+	ctx := context.Background()
+	prompt, err := SystemPrompt(ctx, "claude-sonnet-4-5-20250929", llm.Config{}, map[string]string{})
+	require.NoError(t, err)
 
 	expectedFragments := []string{
 		"You are an interactive CLI tool",
@@ -36,7 +39,9 @@ func TestSystemPrompt(t *testing.T) {
 
 // TestSystemPromptBashBannedCommands verifies that banned commands appear in the default system prompt
 func TestSystemPromptBashBannedCommands(t *testing.T) {
-	prompt := SystemPrompt("claude-sonnet-4-5-20250929", llm.Config{}, map[string]string{})
+	ctx := context.Background()
+	prompt, err := SystemPrompt(ctx, "claude-sonnet-4-5-20250929", llm.Config{}, map[string]string{})
+	require.NoError(t, err)
 
 	assert.Contains(t, prompt, "Bash Command Restrictions", "Expected system prompt to contain 'Bash Command Restrictions' section")
 	assert.Contains(t, prompt, "Banned Commands", "Expected system prompt to contain 'Banned Commands' section")
@@ -97,12 +102,14 @@ func TestSystemPromptBashEmptyAllowedCommands(t *testing.T) {
 
 // TestSystemPrompt_WithContexts verifies that provided contexts are properly included in system prompt
 func TestSystemPrompt_WithContexts(t *testing.T) {
+	ctx := context.Background()
 	contexts := map[string]string{
 		"/path/to/project/AGENTS.md":         "# Project Guidelines\nThis is the main project context.",
 		"/path/to/project/module/KODELET.md": "# Module Specific\nThis module handles authentication.",
 	}
 
-	prompt := SystemPrompt("claude-sonnet-4-5-20250929", llm.Config{}, contexts)
+	prompt, err := SystemPrompt(ctx, "claude-sonnet-4-5-20250929", llm.Config{}, contexts)
+	require.NoError(t, err)
 
 	assert.Contains(t, prompt, "Here are some useful context to help you solve the user's problem.", "Expected context introduction")
 
@@ -119,8 +126,10 @@ func TestSystemPrompt_WithContexts(t *testing.T) {
 
 // TestSystemPrompt_WithEmptyContexts verifies fallback behavior with empty contexts
 func TestSystemPrompt_WithEmptyContexts(t *testing.T) {
+	ctx := context.Background()
 	emptyContexts := map[string]string{}
-	prompt := SystemPrompt("claude-sonnet-4-5-20250929", llm.Config{}, emptyContexts)
+	prompt, err := SystemPrompt(ctx, "claude-sonnet-4-5-20250929", llm.Config{}, emptyContexts)
+	require.NoError(t, err)
 
 	assert.Contains(t, prompt, "You are an interactive CLI tool", "Expected basic kodelet introduction")
 	assert.Contains(t, prompt, "System Information", "Expected system information section")
@@ -129,7 +138,9 @@ func TestSystemPrompt_WithEmptyContexts(t *testing.T) {
 
 // TestSystemPrompt_WithNilContexts verifies fallback behavior with nil contexts
 func TestSystemPrompt_WithNilContexts(t *testing.T) {
-	prompt := SystemPrompt("claude-sonnet-4-5-20250929", llm.Config{}, nil)
+	ctx := context.Background()
+	prompt, err := SystemPrompt(ctx, "claude-sonnet-4-5-20250929", llm.Config{}, nil)
+	require.NoError(t, err)
 
 	assert.Contains(t, prompt, "You are an interactive CLI tool", "Expected basic kodelet introduction")
 	assert.Contains(t, prompt, "System Information", "Expected system information section")
@@ -139,12 +150,15 @@ func TestSystemPrompt_WithNilContexts(t *testing.T) {
 
 // TestSystemPrompt_ContextFormattingEdgeCases tests edge cases in context formatting
 func TestSystemPrompt_ContextFormattingEdgeCases(t *testing.T) {
+	ctx := context.Background()
+
 	t.Run("context_with_special_characters", func(t *testing.T) {
 		contexts := map[string]string{
 			"/path/with spaces/AGENTS.md": "Content with <tags> & special chars: quotes \"test\" and 'test'",
 		}
 
-		prompt := SystemPrompt("claude-sonnet-4-5-20250929", llm.Config{}, contexts)
+		prompt, err := SystemPrompt(ctx, "claude-sonnet-4-5-20250929", llm.Config{}, contexts)
+		require.NoError(t, err)
 
 		assert.Contains(t, prompt, `<context filename="/path/with spaces/AGENTS.md", dir="/path/with spaces">`, "Expected path with spaces")
 		assert.Contains(t, prompt, "Content with <tags> & special chars", "Expected content with special characters")
@@ -156,7 +170,8 @@ func TestSystemPrompt_ContextFormattingEdgeCases(t *testing.T) {
 			"/empty/AGENTS.md": "",
 		}
 
-		prompt := SystemPrompt("claude-sonnet-4-5-20250929", llm.Config{}, contexts)
+		prompt, err := SystemPrompt(ctx, "claude-sonnet-4-5-20250929", llm.Config{}, contexts)
+		require.NoError(t, err)
 
 		assert.Contains(t, prompt, `<context filename="/empty/AGENTS.md", dir="/empty">`, "Expected empty context file to be included")
 		assert.Contains(t, prompt, "</context>", "Expected context to be properly closed even when empty")
@@ -169,7 +184,8 @@ func TestSystemPrompt_ContextFormattingEdgeCases(t *testing.T) {
 			"/m/middle.md": "Middle content",
 		}
 
-		prompt := SystemPrompt("claude-sonnet-4-5-20250929", llm.Config{}, contexts)
+		prompt, err := SystemPrompt(ctx, "claude-sonnet-4-5-20250929", llm.Config{}, contexts)
+		require.NoError(t, err)
 
 		// All contexts should be included regardless of order
 		assert.Contains(t, prompt, "First content", "Expected first context")

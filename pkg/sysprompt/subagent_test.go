@@ -1,6 +1,7 @@
 package sysprompt
 
 import (
+	"context"
 	"testing"
 
 	"github.com/jingkaihe/kodelet/pkg/tools"
@@ -10,7 +11,9 @@ import (
 )
 
 func TestSubAgentPrompt(t *testing.T) {
-	prompt := SubAgentPrompt("claude-sonnet-4-5-20250929", llm.Config{}, map[string]string{})
+	ctx := context.Background()
+	prompt, err := SubAgentPrompt(ctx, "claude-sonnet-4-5-20250929", llm.Config{}, map[string]string{})
+	require.NoError(t, err)
 
 	expectedFragments := []string{
 		"You are an AI SWE Agent",
@@ -43,7 +46,9 @@ func TestSubAgentPrompt(t *testing.T) {
 }
 
 func TestSubAgentPromptBashBannedCommands(t *testing.T) {
-	prompt := SubAgentPrompt("claude-sonnet-4-5-20250929", llm.Config{}, map[string]string{})
+	ctx := context.Background()
+	prompt, err := SubAgentPrompt(ctx, "claude-sonnet-4-5-20250929", llm.Config{}, map[string]string{})
+	require.NoError(t, err)
 
 	assert.Contains(t, prompt, "Bash Command Restrictions", "Expected subagent prompt to contain 'Bash Command Restrictions' section")
 	assert.Contains(t, prompt, "Banned Commands", "Expected subagent prompt to contain 'Banned Commands' section")
@@ -112,12 +117,14 @@ func TestSubAgentPromptContextConsistency(t *testing.T) {
 }
 
 func TestSubAgentPrompt_WithContexts(t *testing.T) {
+	ctx := context.Background()
 	contexts := map[string]string{
 		"/path/to/project/AGENTS.md":    "# Project Context\nGeneral project guidelines and conventions.",
 		"/home/user/.kodelet/AGENTS.md": "# User Preferences\nPersonal coding style and preferences.",
 	}
 
-	prompt := SubAgentPrompt("claude-sonnet-4-5-20250929", llm.Config{}, contexts)
+	prompt, err := SubAgentPrompt(ctx, "claude-sonnet-4-5-20250929", llm.Config{}, contexts)
+	require.NoError(t, err)
 
 	assert.Contains(t, prompt, "You are an AI SWE Agent", "Expected subagent introduction")
 	assert.Contains(t, prompt, "Here are some useful context to help you solve the user's problem.", "Expected context introduction")
@@ -134,8 +141,10 @@ func TestSubAgentPrompt_WithContexts(t *testing.T) {
 }
 
 func TestSubAgentPrompt_WithEmptyContexts(t *testing.T) {
+	ctx := context.Background()
 	emptyContexts := map[string]string{}
-	prompt := SubAgentPrompt("claude-sonnet-4-5-20250929", llm.Config{}, emptyContexts)
+	prompt, err := SubAgentPrompt(ctx, "claude-sonnet-4-5-20250929", llm.Config{}, emptyContexts)
+	require.NoError(t, err)
 
 	assert.Contains(t, prompt, "You are an AI SWE Agent", "Expected subagent introduction")
 	assert.Contains(t, prompt, "System Information", "Expected system information section")
@@ -143,19 +152,24 @@ func TestSubAgentPrompt_WithEmptyContexts(t *testing.T) {
 }
 
 func TestSubAgentPrompt_WithNilContexts(t *testing.T) {
-	prompt := SubAgentPrompt("claude-sonnet-4-5-20250929", llm.Config{}, nil)
+	ctx := context.Background()
+	prompt, err := SubAgentPrompt(ctx, "claude-sonnet-4-5-20250929", llm.Config{}, nil)
+	require.NoError(t, err)
 
 	assert.Contains(t, prompt, "You are an AI SWE Agent", "Expected subagent introduction")
 	assert.Contains(t, prompt, "System Information", "Expected system information section")
 }
 
 func TestSubAgentPrompt_ContextFormattingConsistency(t *testing.T) {
+	ctx := context.Background()
+
 	t.Run("context_with_code_blocks", func(t *testing.T) {
 		contexts := map[string]string{
 			"/project/docs/CODING_STYLE.md": "# Coding Style\n\n```go\nfunc Example() {\n    fmt.Println(\"hello\")\n}\n```\n\nUse proper indentation.",
 		}
 
-		prompt := SubAgentPrompt("claude-sonnet-4-5-20250929", llm.Config{}, contexts)
+		prompt, err := SubAgentPrompt(ctx, "claude-sonnet-4-5-20250929", llm.Config{}, contexts)
+		require.NoError(t, err)
 
 		assert.Contains(t, prompt, `<context filename="/project/docs/CODING_STYLE.md", dir="/project/docs">`, "Expected context file with full path")
 		assert.Contains(t, prompt, "# Coding Style", "Expected markdown header")
@@ -171,7 +185,8 @@ func TestSubAgentPrompt_ContextFormattingConsistency(t *testing.T) {
 			"/project/modules/auth/KODELET.md": "# Auth Module\nAuthentication-specific guidelines for subagents.",
 		}
 
-		prompt := SubAgentPrompt("gpt-4", llm.Config{}, contexts)
+		prompt, err := SubAgentPrompt(ctx, "gpt-4", llm.Config{}, contexts)
+		require.NoError(t, err)
 
 		assert.Contains(t, prompt, "You are an AI SWE Agent", "Expected subagent introduction")
 		assert.Contains(t, prompt, "This is the main project context for subagents.", "Expected main project context")
@@ -182,14 +197,17 @@ func TestSubAgentPrompt_ContextFormattingConsistency(t *testing.T) {
 }
 
 func TestSubAgentPrompt_FeatureConsistency(t *testing.T) {
+	ctx := context.Background()
 	contexts := map[string]string{
 		"/shared/context.md": "# Shared Context\nThis content should appear in both system and subagent prompts.",
 	}
 
 	llmConfig := llm.Config{}
 
-	systemPrompt := SystemPrompt("claude-sonnet-4-5-20250929", llmConfig, contexts)
-	subagentPrompt := SubAgentPrompt("claude-sonnet-4-5-20250929", llmConfig, contexts)
+	systemPrompt, err := SystemPrompt(ctx, "claude-sonnet-4-5-20250929", llmConfig, contexts)
+	require.NoError(t, err)
+	subagentPrompt, err := SubAgentPrompt(ctx, "claude-sonnet-4-5-20250929", llmConfig, contexts)
+	require.NoError(t, err)
 
 	assert.Contains(t, systemPrompt, "# Shared Context", "Expected shared context in system prompt")
 	assert.Contains(t, subagentPrompt, "# Shared Context", "Expected shared context in subagent prompt")

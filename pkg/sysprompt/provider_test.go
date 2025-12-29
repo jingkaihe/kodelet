@@ -1,21 +1,26 @@
 package sysprompt
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	"github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSystemPrompt_ProviderSelection(t *testing.T) {
+	ctx := context.Background()
+
 	t.Run("Anthropic provider uses templates", func(t *testing.T) {
 		config := llm.Config{
 			Provider: ProviderAnthropic,
 		}
 		contexts := map[string]string{}
 
-		prompt := SystemPrompt("claude-sonnet-45", config, contexts)
+		prompt, err := SystemPrompt(ctx, "claude-sonnet-45", config, contexts)
+		require.NoError(t, err)
 		assert.NotEmpty(t, prompt)
 		assert.Contains(t, prompt, "interactive CLI tool")
 	})
@@ -26,20 +31,24 @@ func TestSystemPrompt_ProviderSelection(t *testing.T) {
 		}
 		contexts := map[string]string{}
 
-		prompt := SystemPrompt("some-model", config, contexts)
+		prompt, err := SystemPrompt(ctx, "some-model", config, contexts)
+		require.NoError(t, err)
 		assert.NotEmpty(t, prompt)
 		assert.Contains(t, prompt, "interactive CLI tool")
 	})
 }
 
 func TestSubAgentPrompt_ProviderSelection(t *testing.T) {
+	ctx := context.Background()
+
 	t.Run("Anthropic provider uses templates", func(t *testing.T) {
 		config := llm.Config{
 			Provider: ProviderAnthropic,
 		}
 		contexts := map[string]string{}
 
-		prompt := SubAgentPrompt("claude-sonnet-45", config, contexts)
+		prompt, err := SubAgentPrompt(ctx, "claude-sonnet-45", config, contexts)
+		require.NoError(t, err)
 		assert.NotEmpty(t, prompt)
 		assert.Contains(t, prompt, "AI SWE Agent")
 	})
@@ -50,7 +59,8 @@ func TestSubAgentPrompt_ProviderSelection(t *testing.T) {
 		}
 		contexts := map[string]string{}
 
-		prompt := SubAgentPrompt("some-model", config, contexts)
+		prompt, err := SubAgentPrompt(ctx, "some-model", config, contexts)
+		require.NoError(t, err)
 		assert.NotEmpty(t, prompt)
 		assert.Contains(t, prompt, "AI SWE Agent")
 	})
@@ -67,36 +77,43 @@ func TestOpenAIPromptLoading(t *testing.T) {
 	})
 
 	t.Run("OpenAI provider uses embedded OpenAI prompt", func(t *testing.T) {
+		ctx := context.Background()
 		config := llm.Config{
 			Provider: ProviderOpenAI,
 		}
 		contexts := map[string]string{}
 
-		prompt := SystemPrompt("gpt-4", config, contexts)
+		prompt, err := SystemPrompt(ctx, "gpt-4", config, contexts)
+		require.NoError(t, err)
 		assert.NotEmpty(t, prompt)
 		assert.Contains(t, prompt, "coding agent")
 	})
 
 	t.Run("OpenAI subagent prompt also uses embedded template", func(t *testing.T) {
+		ctx := context.Background()
 		config := llm.Config{
 			Provider: ProviderOpenAI,
 		}
 		contexts := map[string]string{}
 
-		prompt := SubAgentPrompt("gpt-4", config, contexts)
+		prompt, err := SubAgentPrompt(ctx, "gpt-4", config, contexts)
+		require.NoError(t, err)
 		assert.NotEmpty(t, prompt)
 		assert.Contains(t, prompt, "coding agent")
 	})
 }
 
 func TestOpenAIConditionalSections(t *testing.T) {
+	ctx := context.Background()
+
 	t.Run("Main agent OpenAI prompt includes Subagent Tool Usage section", func(t *testing.T) {
 		config := llm.Config{
 			Provider: ProviderOpenAI,
 		}
 		contexts := map[string]string{}
 
-		prompt := SystemPrompt("gpt-4", config, contexts)
+		prompt, err := SystemPrompt(ctx, "gpt-4", config, contexts)
+		require.NoError(t, err)
 		assert.NotEmpty(t, prompt)
 
 		// Should contain the main agent subagent usage section
@@ -116,7 +133,8 @@ func TestOpenAIConditionalSections(t *testing.T) {
 		}
 		contexts := map[string]string{}
 
-		prompt := SubAgentPrompt("gpt-4", config, contexts)
+		prompt, err := SubAgentPrompt(ctx, "gpt-4", config, contexts)
+		require.NoError(t, err)
 		assert.NotEmpty(t, prompt)
 
 		// Should contain the subagent response guidelines
@@ -137,7 +155,8 @@ func TestOpenAIConditionalSections(t *testing.T) {
 		}
 		contexts := map[string]string{}
 
-		prompt := SystemPrompt("gpt-4", config, contexts)
+		prompt, err := SystemPrompt(ctx, "gpt-4", config, contexts)
+		require.NoError(t, err)
 		assert.NotEmpty(t, prompt)
 
 		// Find positions of key sections
@@ -156,7 +175,8 @@ func TestOpenAIConditionalSections(t *testing.T) {
 		}
 		contexts := map[string]string{}
 
-		prompt := SystemPrompt("gpt-4", config, contexts)
+		prompt, err := SystemPrompt(ctx, "gpt-4", config, contexts)
+		require.NoError(t, err)
 		assert.NotEmpty(t, prompt)
 
 		// Should contain actual tool names, not template variables
@@ -179,12 +199,14 @@ func TestOpenAIConditionalSections(t *testing.T) {
 		contexts := map[string]string{}
 
 		// Test main agent (should have planning section)
-		mainPrompt := SystemPrompt("gpt-4", config, contexts)
+		mainPrompt, err := SystemPrompt(ctx, "gpt-4", config, contexts)
+		require.NoError(t, err)
 		assert.Contains(t, mainPrompt, "## Planning")
 		assert.Contains(t, mainPrompt, "You have access to an `todo_write` tool")
 
 		// Test subagent (should also have planning section since todoTools is enabled)
-		subagentPrompt := SubAgentPrompt("gpt-4", config, contexts)
+		subagentPrompt, err := SubAgentPrompt(ctx, "gpt-4", config, contexts)
+		require.NoError(t, err)
 		assert.Contains(t, subagentPrompt, "## Planning")
 		assert.Contains(t, subagentPrompt, "You have access to an `todo_write` tool")
 	})
@@ -195,7 +217,8 @@ func TestOpenAIConditionalSections(t *testing.T) {
 		}
 		contexts := map[string]string{}
 
-		prompt := SubAgentPrompt("gpt-4", config, contexts)
+		prompt, err := SubAgentPrompt(ctx, "gpt-4", config, contexts)
+		require.NoError(t, err)
 		assert.NotEmpty(t, prompt)
 
 		// Should contain markdown-formatted examples, not XML

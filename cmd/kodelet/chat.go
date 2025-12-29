@@ -12,6 +12,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	"github.com/jingkaihe/kodelet/pkg/tui"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
@@ -27,6 +28,9 @@ type ChatOptions struct {
 	ide                bool
 	noHooks            bool
 	useWeakModel       bool
+	systemPrompt       string
+	systemPromptRecipe string
+	systemPromptArgs   map[string]string
 }
 
 var chatOptions = &ChatOptions{}
@@ -42,6 +46,9 @@ func init() {
 	chatCmd.Flags().BoolVar(&chatOptions.ide, "ide", false, "Enable IDE integration mode (display conversation ID prominently)")
 	chatCmd.Flags().BoolVar(&chatOptions.noHooks, "no-hooks", false, "Disable agent lifecycle hooks")
 	chatCmd.Flags().BoolVar(&chatOptions.useWeakModel, "use-weak-model", false, "Use weak model for processing")
+	chatCmd.Flags().StringVarP(&chatOptions.systemPrompt, "system-prompt", "s", "", "Path to custom system prompt template")
+	chatCmd.Flags().StringVar(&chatOptions.systemPromptRecipe, "system-prompt-recipe", "", "Use fragment/recipe as system prompt")
+	chatCmd.Flags().StringToStringVar(&chatOptions.systemPromptArgs, "sp-arg", nil, "Arguments for system prompt template (e.g., --sp-arg project=myapp --sp-arg version=1.0)")
 }
 
 // Prevents TUI interference by redirecting logs to file
@@ -127,6 +134,16 @@ var chatCmd = &cobra.Command{
 			}
 		}
 
+		// Build custom prompt config if provided
+		var customPrompt llmtypes.CustomPromptConfig
+		if chatOptions.systemPrompt != "" || chatOptions.systemPromptRecipe != "" {
+			customPrompt = llmtypes.CustomPromptConfig{
+				TemplatePath: chatOptions.systemPrompt,
+				RecipeName:   chatOptions.systemPromptRecipe,
+				Arguments:    chatOptions.systemPromptArgs,
+			}
+		}
+
 		tui.StartChatCmd(ctx, tui.ChatOpts{
 			ConversationID:     conversationID,
 			EnablePersistence:  !chatOptions.noSave,
@@ -138,6 +155,7 @@ var chatCmd = &cobra.Command{
 			IDEMode:            chatOptions.ide,
 			NoHooks:            chatOptions.noHooks,
 			UseWeakModel:       chatOptions.useWeakModel,
+			CustomPrompt:       customPrompt,
 		})
 
 		// Restore stderr logging after TUI exits and show log file location

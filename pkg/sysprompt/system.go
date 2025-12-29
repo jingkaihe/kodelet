@@ -4,12 +4,12 @@ import (
 	"context"
 	"strings"
 
-	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/types/llm"
+	"github.com/pkg/errors"
 )
 
 // SystemPrompt generates a system prompt for the given model
-func SystemPrompt(model string, llmConfig llm.Config, contexts map[string]string) string {
+func SystemPrompt(ctx context.Context, model string, llmConfig llm.Config, contexts map[string]string) (string, error) {
 	promptCtx := NewPromptContext(contexts)
 
 	renderer := NewRenderer(TemplateFS)
@@ -21,22 +21,39 @@ func SystemPrompt(model string, llmConfig llm.Config, contexts map[string]string
 	// Add MCP configuration to the prompt context
 	promptCtx.WithMCPConfig(llmConfig.MCPExecutionMode, llmConfig.MCPWorkspaceDir)
 
-	var prompt string
+	var basePrompt string
 	var err error
 
-	provider := strings.ToLower(llmConfig.Provider)
-	switch provider {
-	case ProviderOpenAI:
-		prompt, err = renderer.RenderOpenAIPrompt(promptCtx)
-	default:
-		prompt, err = renderer.RenderSystemPrompt(promptCtx)
+	// If custom prompt is configured, use it
+	if llmConfig.CustomPrompt.IsConfigured() {
+		customRenderer := NewCustomPromptRenderer(GetFragmentDirs())
+		basePrompt, err = customRenderer.RenderCustomPrompt(
+			ctx,
+			llmConfig.CustomPrompt.TemplatePath,
+			llmConfig.CustomPrompt.RecipeName,
+			llmConfig.CustomPrompt.Arguments,
+			promptCtx,
+		)
+		if err != nil {
+			return "", errors.Wrap(err, "failed to render custom system prompt")
+		}
+		// For custom prompts, append system info, contexts, and MCP servers
+		basePrompt += promptCtx.FormatSystemInfo()
+		basePrompt += promptCtx.FormatContexts()
+		basePrompt += promptCtx.FormatMCPServers()
+	} else {
+		// Default behavior - render from embedded templates
+		provider := strings.ToLower(llmConfig.Provider)
+		switch provider {
+		case ProviderOpenAI:
+			basePrompt, err = renderer.RenderOpenAIPrompt(promptCtx)
+		default:
+			basePrompt, err = renderer.RenderSystemPrompt(promptCtx)
+		}
+		if err != nil {
+			return "", errors.Wrap(err, "failed to render system prompt")
+		}
 	}
 
-	if err != nil {
-		ctx := context.Background()
-		log := logger.G(ctx)
-		log.WithError(err).WithField("provider", provider).Fatal("Error rendering system prompt")
-	}
-
-	return prompt
+	return basePrompt, nil
 }

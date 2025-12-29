@@ -38,6 +38,9 @@ type PromptContext struct {
 	// MCP tools information
 	MCPExecutionMode string
 	MCPServers       []string // List of available MCP server names
+
+	// Custom system prompt arguments (via --sp-arg)
+	CustomArgs map[string]string
 }
 
 // NewPromptContext creates a new PromptContext with default values

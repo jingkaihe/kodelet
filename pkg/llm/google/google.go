@@ -459,10 +459,14 @@ func (t *Thread) processMessageExchange(
 		contexts = t.state.DiscoverContexts()
 	}
 	var systemPrompt string
+	var syspromptErr error
 	if t.config.IsSubAgent {
-		systemPrompt = sysprompt.SubAgentPrompt(t.config.Model, t.config, contexts)
+		systemPrompt, syspromptErr = sysprompt.SubAgentPrompt(ctx, t.config.Model, t.config, contexts)
 	} else {
-		systemPrompt = sysprompt.SystemPrompt(t.config.Model, t.config, contexts)
+		systemPrompt, syspromptErr = sysprompt.SystemPrompt(ctx, t.config.Model, t.config, contexts)
+	}
+	if syspromptErr != nil {
+		return "", false, errors.Wrap(syspromptErr, "failed to generate system prompt")
 	}
 
 	config := &genai.GenerateContentConfig{

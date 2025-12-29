@@ -43,6 +43,9 @@ type RunConfig struct {
 	NoHooks            bool              // Disable agent lifecycle hooks
 	ResultOnly         bool              // Only print the final agent message, no intermediate output or usage stats
 	UseWeakModel       bool              // Use weak model for SendMessage
+	SystemPrompt       string            // Path to custom system prompt template
+	SystemPromptRecipe string            // Use fragment/recipe as system prompt
+	SystemPromptArgs   map[string]string // Arguments for system prompt template
 }
 
 func NewRunConfig() *RunConfig {
@@ -64,6 +67,9 @@ func NewRunConfig() *RunConfig {
 		NoHooks:            false,
 		ResultOnly:         false,
 		UseWeakModel:       false,
+		SystemPrompt:       "",
+		SystemPromptRecipe: "",
+		SystemPromptArgs:   make(map[string]string),
 	}
 }
 
@@ -209,6 +215,15 @@ var runCmd = &cobra.Command{
 
 		llmConfig.IDE = config.IDE
 		llmConfig.NoHooks = config.NoHooks
+
+		// Apply custom system prompt configuration
+		if config.SystemPrompt != "" || config.SystemPromptRecipe != "" {
+			llmConfig.CustomPrompt = llmtypes.CustomPromptConfig{
+				TemplatePath: config.SystemPrompt,
+				RecipeName:   config.SystemPromptRecipe,
+				Arguments:    config.SystemPromptArgs,
+			}
+		}
 
 		applyFragmentRestrictions(&llmConfig, fragmentMetadata)
 
@@ -400,6 +415,9 @@ func init() {
 	runCmd.Flags().Bool("no-hooks", defaults.NoHooks, "Disable agent lifecycle hooks")
 	runCmd.Flags().Bool("result-only", defaults.ResultOnly, "Only print the final agent message, suppressing all intermediate output and usage statistics")
 	runCmd.Flags().Bool("use-weak-model", defaults.UseWeakModel, "Use weak model for processing")
+	runCmd.Flags().StringP("system-prompt", "s", defaults.SystemPrompt, "Path to custom system prompt template")
+	runCmd.Flags().String("system-prompt-recipe", defaults.SystemPromptRecipe, "Use fragment/recipe as system prompt")
+	runCmd.Flags().StringToString("sp-arg", defaults.SystemPromptArgs, "Arguments for system prompt template (e.g., --sp-arg project=myapp --sp-arg version=1.0)")
 }
 
 func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
@@ -482,6 +500,18 @@ func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
 
 	if useWeakModel, err := cmd.Flags().GetBool("use-weak-model"); err == nil {
 		config.UseWeakModel = useWeakModel
+	}
+
+	if systemPrompt, err := cmd.Flags().GetString("system-prompt"); err == nil {
+		config.SystemPrompt = systemPrompt
+	}
+
+	if systemPromptRecipe, err := cmd.Flags().GetString("system-prompt-recipe"); err == nil {
+		config.SystemPromptRecipe = systemPromptRecipe
+	}
+
+	if systemPromptArgs, err := cmd.Flags().GetStringToString("sp-arg"); err == nil {
+		config.SystemPromptArgs = systemPromptArgs
 	}
 
 	return config
