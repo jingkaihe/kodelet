@@ -399,8 +399,13 @@ func SystemPrompt(ctx context.Context, model string, config *llmtypes.Config, co
         basePrompt = rendered
     }
     
-    // Always append contexts and MCP servers - these are core to kodelet
+    // Always append core kodelet components:
+    // 1. Context instructions (explains how to use AGENTS.md etc.)
+    contextInstructions, _ := defaultRenderer.RenderPrompt("templates/components/context.tmpl", promptCtx)
+    basePrompt += "\n" + contextInstructions
+    // 2. Actual context files (AGENTS.md, README.md, etc.)
     basePrompt += promptCtx.FormatContexts()
+    // 3. MCP server information
     basePrompt += promptCtx.FormatMCPServers()
     
     return basePrompt, nil
@@ -430,19 +435,25 @@ func SubAgentPrompt(ctx context.Context, model string, config *llmtypes.Config, 
         basePrompt = rendered
     }
     
-    // Always append contexts and MCP servers - these are core to kodelet
+    // Always append core kodelet components:
+    // 1. Context instructions (explains how to use AGENTS.md etc.)
+    contextInstructions, _ := defaultRenderer.RenderPrompt("templates/components/context.tmpl", promptCtx)
+    basePrompt += "\n" + contextInstructions
+    // 2. Actual context files (AGENTS.md, README.md, etc.)
     basePrompt += promptCtx.FormatContexts()
+    // 3. MCP server information
     basePrompt += promptCtx.FormatMCPServers()
     
     return basePrompt, nil
 }
 ```
 
-**Key point**: `FormatContexts()` and `FormatMCPServers()` are always appended regardless of whether a custom template is used. These provide:
-- **Contexts**: AGENTS.md, README.md, and other context files from the repository
-- **MCP Servers**: Available MCP tools and their configurations
+**Key point**: The following are always appended regardless of whether a custom template is used:
+1. **Context instructions** (`context.tmpl`): Explains how to use AGENTS.md and when to update it
+2. **Context files** (`FormatContexts()`): Actual content of AGENTS.md, README.md, etc.
+3. **MCP Servers** (`FormatMCPServers()`): Available MCP tools and configurations
 
-This ensures custom prompts still have access to repository context and tool information.
+This ensures custom prompts still have the core kodelet functionality while allowing full customization of the agent's behavior and instructions.
 
 The LLM clients remain unchanged - they just call `SystemPrompt` or `SubAgentPrompt`:
 
