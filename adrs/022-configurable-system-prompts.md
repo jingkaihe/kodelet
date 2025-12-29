@@ -372,39 +372,63 @@ func extractBodyContent(content string) string {
 
 ### 3. Update System Prompt Generation
 
-Modify `pkg/sysprompt/system.go` to support custom prompts:
+Modify `pkg/sysprompt/system.go` to handle custom prompts internally:
 
 ```go
-// SystemPromptWithCustom generates a system prompt with optional custom template
-// Returns an error if custom prompt rendering fails - no silent fallback to default
-func SystemPromptWithCustom(ctx context.Context, model string, config *llmtypes.Config, contexts []types.AgentContext, customConfig *CustomPromptConfig) (string, error) {
-    promptConfig := NewPromptConfig(model)
-    promptCtx := NewPromptContext(config, contexts, promptConfig)
-    
-    // If custom prompt is configured, use it (fail on error, no fallback)
-    if customConfig != nil && (customConfig.TemplatePath != "" || customConfig.RecipeName != "") {
+// SystemPrompt generates a system prompt, using custom template if configured in config
+func SystemPrompt(ctx context.Context, model string, config *llmtypes.Config, contexts []types.AgentContext) (string, error) {
+    // If custom prompt is configured, use it
+    if config.CustomPrompt != nil && (config.CustomPrompt.TemplatePath != "" || config.CustomPrompt.RecipeName != "") {
+        promptConfig := NewPromptConfig(model)
+        promptCtx := NewPromptContext(config, contexts, promptConfig)
         renderer := NewCustomPromptRenderer(getFragmentDirs())
-        customPrompt, err := renderer.RenderCustomPrompt(ctx, customConfig, promptCtx)
-        if err != nil {
-            return "", errors.Wrap(err, "failed to render custom system prompt")
-        }
-        return customPrompt, nil
+        return renderer.RenderCustomPrompt(ctx, config.CustomPrompt, promptCtx)
     }
     
-    return SystemPrompt(model, config, contexts), nil
+    // Default behavior - render from embedded templates
+    promptConfig := NewPromptConfig(model)
+    promptCtx := NewPromptContext(config, contexts, promptConfig)
+    return defaultRenderer.RenderPrompt("templates/system.tmpl", promptCtx)
+}
+
+// SubAgentPrompt generates a subagent system prompt, using custom template if configured
+func SubAgentPrompt(ctx context.Context, model string, config *llmtypes.Config, contexts []types.AgentContext) (string, error) {
+    // If custom prompt is configured, use it (same template for subagent)
+    if config.CustomPrompt != nil && (config.CustomPrompt.TemplatePath != "" || config.CustomPrompt.RecipeName != "") {
+        promptConfig := NewPromptConfig(model)
+        promptCtx := NewPromptContext(config, contexts, promptConfig)
+        renderer := NewCustomPromptRenderer(getFragmentDirs())
+        return renderer.RenderCustomPrompt(ctx, config.CustomPrompt, promptCtx)
+    }
+    
+    // Default behavior - render subagent template
+    promptConfig := NewPromptConfig(model)
+    promptCtx := NewPromptContext(config, contexts, promptConfig)
+    return defaultRenderer.RenderPrompt("templates/subagent.tmpl", promptCtx)
 }
 ```
 
-The caller (LLM client initialization) should handle the error and abort startup:
+The LLM clients remain unchanged - they just call `SystemPrompt` or `SubAgentPrompt`:
 
 ```go
-// In cmd/kodelet/run.go or chat.go
-systemPrompt, err := sysprompt.SystemPromptWithCustom(ctx, model, config, contexts, customConfig)
-if err != nil {
-    presenter.Error(err, "Failed to load custom system prompt")
-    return err
+// In pkg/llm/anthropic/anthropic.go (and other clients)
+func (t *Thread) Run(ctx context.Context, input string, handler ...types.ResponseHandler) error {
+    // ...
+    var systemPrompt string
+    var err error
+    if t.config.IsSubAgent {
+        systemPrompt, err = sysprompt.SubAgentPrompt(ctx, string(model), t.config, contexts)
+    } else {
+        systemPrompt, err = sysprompt.SystemPrompt(ctx, string(model), t.config, contexts)
+    }
+    if err != nil {
+        return errors.Wrap(err, "failed to generate system prompt")
+    }
+    // ...
 }
 ```
+
+**Note**: This changes the function signatures to accept `context.Context` and return `error`. Existing callers will need to be updated.
 
 ### 4. CLI Integration
 
@@ -430,26 +454,6 @@ func parseSystemPromptArgs(args []string) map[string]string {
 }
 ```
 
-### 5. LLM Client Updates
-
-Update LLM clients to accept custom prompt configuration:
-
-```go
-// In pkg/llm/anthropic/anthropic.go, pkg/llm/openai/openai.go, pkg/llm/google/google.go
-func (t *Thread) Run(ctx context.Context, input string, handler ...types.ResponseHandler) error {
-    // ...
-    var systemPrompt string
-    if t.config.CustomPrompt != nil {
-        systemPrompt = sysprompt.SystemPromptWithCustom(ctx, string(model), t.config, contexts, t.config.CustomPrompt)
-    } else if t.config.IsSubAgent {
-        systemPrompt = sysprompt.SubAgentPrompt(string(model), t.config, contexts)
-    } else {
-        systemPrompt = sysprompt.SystemPrompt(string(model), t.config, contexts)
-    }
-    // ...
-}
-```
-
 ## Alternatives Considered
 
 ### Fragment Integration Only
@@ -471,23 +475,19 @@ func (t *Thread) Run(ctx context.Context, input string, handler ...types.Respons
 
 ### Phase 1: Core Template Infrastructure (Week 1)
 - [ ] Add `CustomArgs map[string]string` field to `PromptContext`
+- [ ] Add `CustomPrompt` field to `llmtypes.Config`
 - [ ] Create `CustomPromptRenderer` with template functions
-- [ ] Add `extractBodyContent` and frontmatter parsing
+- [ ] Update `SystemPrompt` and `SubAgentPrompt` signatures to accept `context.Context` and return `error`
 - [ ] Write unit tests for template rendering
 
-### Phase 2: CLI Integration (Week 1)
+### Phase 2: CLI Integration (Week 1-2)
 - [ ] Add `--system-prompt` and `--system-prompt-recipe` flags
 - [ ] Add `--sp-arg` flag for custom arguments
 - [ ] Update flag parsing in `run.go` and `chat.go`
-- [ ] Wire through to LLM config
-
-### Phase 3: LLM Client Integration (Week 2)
-- [ ] Add `CustomPrompt` field to `llmtypes.Config`
-- [ ] Update Anthropic, OpenAI, and Google clients
-- [ ] Add explicit error handling (fail fast, no fallback)
+- [ ] Update LLM client callers to handle error returns
 - [ ] Write integration tests
 
-### Phase 4: Documentation (Week 2)
+### Phase 3: Documentation (Week 2)
 - [ ] Create `docs/CUSTOM-PROMPTS.md` guide
 - [ ] Add examples to `config.sample.yaml`
 - [ ] Update `docs/MANUAL.md` with CLI usage
