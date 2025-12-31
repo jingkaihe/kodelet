@@ -79,6 +79,104 @@ func TestProcessImageURL(t *testing.T) {
 	}
 }
 
+func TestProcessImageDataURL(t *testing.T) {
+	thread, err := NewAnthropicThread(llmtypes.Config{}, nil)
+	require.NoError(t, err)
+
+	// A minimal valid 1x1 PNG image encoded in base64
+	validPNGBase64 := "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+
+	tests := []struct {
+		name     string
+		dataURL  string
+		hasError bool
+	}{
+		{"Valid PNG data URL", "data:image/png;base64," + validPNGBase64, false},
+		{"Valid JPEG data URL", "data:image/jpeg;base64," + validPNGBase64, false},
+		{"Valid GIF data URL", "data:image/gif;base64," + validPNGBase64, false},
+		{"Valid WebP data URL", "data:image/webp;base64," + validPNGBase64, false},
+		{"Missing data: prefix", "image/png;base64," + validPNGBase64, true},
+		{"Missing base64 separator", "data:image/png," + validPNGBase64, true},
+		{"Unsupported mime type", "data:image/bmp;base64," + validPNGBase64, true},
+		{"Unsupported mime type svg", "data:image/svg+xml;base64," + validPNGBase64, true},
+		{"Empty data URL", "", true},
+		// Note: Invalid base64 is not validated client-side by Anthropic SDK, validation happens server-side
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result, err := thread.processImageDataURL(test.dataURL)
+			if test.hasError {
+				assert.Error(t, err)
+				assert.Nil(t, result)
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, result)
+			}
+		})
+	}
+}
+
+func TestMimeTypeToAnthropicMediaType(t *testing.T) {
+	tests := []struct {
+		mimeType string
+		expected anthropic.Base64ImageSourceMediaType
+		hasError bool
+	}{
+		{"image/jpeg", anthropic.Base64ImageSourceMediaTypeImageJPEG, false},
+		{"image/png", anthropic.Base64ImageSourceMediaTypeImagePNG, false},
+		{"image/gif", anthropic.Base64ImageSourceMediaTypeImageGIF, false},
+		{"image/webp", anthropic.Base64ImageSourceMediaTypeImageWebP, false},
+		{"IMAGE/JPEG", anthropic.Base64ImageSourceMediaTypeImageJPEG, false}, // Case insensitive
+		{"IMAGE/PNG", anthropic.Base64ImageSourceMediaTypeImagePNG, false},
+		{"image/bmp", "", true},
+		{"image/svg+xml", "", true},
+		{"text/plain", "", true},
+		{"", "", true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.mimeType, func(t *testing.T) {
+			result, err := mimeTypeToAnthropicMediaType(test.mimeType)
+			if test.hasError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, test.expected, result)
+			}
+		})
+	}
+}
+
+func TestProcessImage_DataURLRouting(t *testing.T) {
+	thread, err := NewAnthropicThread(llmtypes.Config{}, nil)
+	require.NoError(t, err)
+
+	validPNGBase64 := "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+
+	tests := []struct {
+		name      string
+		imagePath string
+		hasError  bool
+	}{
+		{"Data URL is routed correctly", "data:image/png;base64," + validPNGBase64, false},
+		{"HTTPS URL is routed correctly", "https://example.com/image.jpg", false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result, err := thread.processImage(test.imagePath)
+			if test.hasError {
+				assert.Error(t, err)
+				assert.Nil(t, result)
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, result)
+			}
+		})
+	}
+}
+
 func TestProcessImageFile(t *testing.T) {
 	thread, err := NewAnthropicThread(llmtypes.Config{}, nil)
 	require.NoError(t, err)

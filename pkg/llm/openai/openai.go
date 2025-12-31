@@ -1177,6 +1177,10 @@ func (t *Thread) processImage(imagePath string) (*openai.ChatMessagePart, error)
 		// Explicitly reject HTTP URLs for security
 		return nil, fmt.Errorf("only HTTPS URLs are supported for security: %s", imagePath)
 	}
+	if strings.HasPrefix(imagePath, "data:") {
+		// Data URLs can be passed directly to OpenAI
+		return t.processImageDataURL(imagePath)
+	}
 	if filePath, ok := strings.CutPrefix(imagePath, "file://"); ok {
 		// Remove file:// prefix and process as file
 		return t.processImageFile(filePath)
@@ -1197,6 +1201,24 @@ func (t *Thread) processImageURL(url string) (*openai.ChatMessagePart, error) {
 		ImageURL: &openai.ChatMessageImageURL{
 			URL:    url,
 			Detail: openai.ImageURLDetailAuto, // Use auto detail as default
+		},
+	}
+	return part, nil
+}
+
+// processImageDataURL creates an image part from a data URL
+func (t *Thread) processImageDataURL(dataURL string) (*openai.ChatMessagePart, error) {
+	// Validate data URL format
+	if !strings.HasPrefix(dataURL, "data:") {
+		return nil, fmt.Errorf("invalid data URL: must start with 'data:'")
+	}
+
+	// OpenAI accepts data URLs directly in the URL field
+	part := &openai.ChatMessagePart{
+		Type: openai.ChatMessagePartTypeImageURL,
+		ImageURL: &openai.ChatMessageImageURL{
+			URL:    dataURL,
+			Detail: openai.ImageURLDetailAuto,
 		},
 	}
 	return part, nil

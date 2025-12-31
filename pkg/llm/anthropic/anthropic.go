@@ -1142,6 +1142,9 @@ func (t *Thread) processImage(imagePath string) (*anthropic.ContentBlockParamUni
 	if strings.HasPrefix(imagePath, "https://") {
 		return t.processImageURL(imagePath)
 	}
+	if strings.HasPrefix(imagePath, "data:") {
+		return t.processImageDataURL(imagePath)
+	}
 	if filePath, ok := strings.CutPrefix(imagePath, "file://"); ok {
 		// Remove file:// prefix and process as file
 		return t.processImageFile(filePath)
@@ -1160,6 +1163,54 @@ func (t *Thread) processImageURL(url string) (*anthropic.ContentBlockParamUnion,
 		URL:  url,
 	})
 	return &block, nil
+}
+
+func (t *Thread) processImageDataURL(dataURL string) (*anthropic.ContentBlockParamUnion, error) {
+	// Parse data URL format: data:<mediatype>;base64,<data>
+	if !strings.HasPrefix(dataURL, "data:") {
+		return nil, errors.New("invalid data URL: must start with 'data:'")
+	}
+
+	// Remove "data:" prefix
+	rest := strings.TrimPrefix(dataURL, "data:")
+
+	// Split by ";base64,"
+	parts := strings.SplitN(rest, ";base64,", 2)
+	if len(parts) != 2 {
+		return nil, errors.New("invalid data URL: must contain ';base64,' separator")
+	}
+
+	mimeType := parts[0]
+	base64Data := parts[1]
+
+	// Validate mime type is a supported image type
+	mediaType, err := mimeTypeToAnthropicMediaType(mimeType)
+	if err != nil {
+		return nil, errors.Wrapf(err, "unsupported image mime type: %s", mimeType)
+	}
+
+	block := anthropic.NewImageBlock(anthropic.Base64ImageSourceParam{
+		Type:      "base64",
+		MediaType: mediaType,
+		Data:      base64Data,
+	})
+	return &block, nil
+}
+
+// mimeTypeToAnthropicMediaType converts a MIME type string to Anthropic's Base64ImageSourceMediaType
+func mimeTypeToAnthropicMediaType(mimeType string) (anthropic.Base64ImageSourceMediaType, error) {
+	switch strings.ToLower(mimeType) {
+	case "image/jpeg":
+		return anthropic.Base64ImageSourceMediaTypeImageJPEG, nil
+	case "image/png":
+		return anthropic.Base64ImageSourceMediaTypeImagePNG, nil
+	case "image/gif":
+		return anthropic.Base64ImageSourceMediaTypeImageGIF, nil
+	case "image/webp":
+		return anthropic.Base64ImageSourceMediaTypeImageWebP, nil
+	default:
+		return "", errors.New("unsupported image type")
+	}
 }
 
 func (t *Thread) processImageFile(filePath string) (*anthropic.ContentBlockParamUnion, error) {

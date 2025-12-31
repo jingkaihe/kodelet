@@ -245,6 +245,118 @@ func TestProcessImageURL(t *testing.T) {
 	}
 }
 
+func TestProcessImageDataURL(t *testing.T) {
+	skipIfNoOpenAIAPIKey(t)
+
+	thread, err := NewOpenAIThread(llm.Config{}, nil)
+	require.NoError(t, err)
+
+	// A minimal valid 1x1 PNG image encoded in base64
+	validPNGBase64 := "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+
+	tests := []struct {
+		name        string
+		dataURL     string
+		expectError bool
+		errorMsg    string
+	}{
+		{
+			name:        "Valid PNG data URL",
+			dataURL:     "data:image/png;base64," + validPNGBase64,
+			expectError: false,
+		},
+		{
+			name:        "Valid JPEG data URL",
+			dataURL:     "data:image/jpeg;base64," + validPNGBase64,
+			expectError: false,
+		},
+		{
+			name:        "Valid GIF data URL",
+			dataURL:     "data:image/gif;base64," + validPNGBase64,
+			expectError: false,
+		},
+		{
+			name:        "Valid WebP data URL",
+			dataURL:     "data:image/webp;base64," + validPNGBase64,
+			expectError: false,
+		},
+		{
+			name:        "Missing data: prefix",
+			dataURL:     "image/png;base64," + validPNGBase64,
+			expectError: true,
+			errorMsg:    "invalid data URL",
+		},
+		{
+			name:        "Empty data URL",
+			dataURL:     "",
+			expectError: true,
+			errorMsg:    "invalid data URL",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			part, err := thread.processImageDataURL(test.dataURL)
+
+			if test.expectError {
+				assert.Error(t, err)
+				assert.Nil(t, part)
+				if test.errorMsg != "" {
+					assert.Contains(t, err.Error(), test.errorMsg)
+				}
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, part)
+				assert.Equal(t, openai.ChatMessagePartTypeImageURL, part.Type)
+				assert.NotNil(t, part.ImageURL)
+				assert.Equal(t, test.dataURL, part.ImageURL.URL)
+				assert.Equal(t, openai.ImageURLDetailAuto, part.ImageURL.Detail)
+			}
+		})
+	}
+}
+
+func TestProcessImage_DataURLRouting(t *testing.T) {
+	skipIfNoOpenAIAPIKey(t)
+
+	thread, err := NewOpenAIThread(llm.Config{}, nil)
+	require.NoError(t, err)
+
+	validPNGBase64 := "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+
+	tests := []struct {
+		name        string
+		imagePath   string
+		expectError bool
+	}{
+		{
+			name:        "Data URL is routed correctly",
+			imagePath:   "data:image/png;base64," + validPNGBase64,
+			expectError: false,
+		},
+		{
+			name:        "HTTPS URL is routed correctly",
+			imagePath:   "https://example.com/image.jpg",
+			expectError: false,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			part, err := thread.processImage(test.imagePath)
+
+			if test.expectError {
+				assert.Error(t, err)
+				assert.Nil(t, part)
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, part)
+				assert.Equal(t, openai.ChatMessagePartTypeImageURL, part.Type)
+			}
+		})
+	}
+}
+
 func TestProcessImageFile(t *testing.T) {
 	skipIfNoOpenAIAPIKey(t)
 

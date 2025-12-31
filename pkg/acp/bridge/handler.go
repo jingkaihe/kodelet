@@ -3,6 +3,7 @@
 package bridge
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/jingkaihe/kodelet/pkg/acp/acptypes"
+	"github.com/jingkaihe/kodelet/pkg/logger"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
@@ -328,6 +330,9 @@ func ContentBlocksToMessage(blocks []acptypes.ContentBlock) (string, []string) {
 	var textParts []string
 	var images []string
 
+	logger.G(context.TODO()).
+		WithField("blocks", blocks).
+		Info("converting content blocks to message")
 	for _, block := range blocks {
 		switch block.Type {
 		case acptypes.ContentTypeText:

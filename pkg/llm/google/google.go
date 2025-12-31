@@ -6,6 +6,7 @@ package google
 import (
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -668,7 +669,57 @@ func (t *Thread) processImage(ctx context.Context, imagePath string) (*genai.Par
 		return nil, errors.New("HTTP URLs are not supported for security reasons, use HTTPS only")
 	}
 
+	if strings.HasPrefix(imagePath, "data:") {
+		return t.processImageDataURL(imagePath)
+	}
+
 	return t.processImageFile(ctx, imagePath)
+}
+
+// processImageDataURL creates a Google GenAI part from a data URL
+func (t *Thread) processImageDataURL(dataURL string) (*genai.Part, error) {
+	// Parse data URL format: data:<mediatype>;base64,<data>
+	if !strings.HasPrefix(dataURL, "data:") {
+		return nil, errors.New("invalid data URL: must start with 'data:'")
+	}
+
+	// Remove "data:" prefix
+	rest := strings.TrimPrefix(dataURL, "data:")
+
+	// Split by ";base64,"
+	parts := strings.SplitN(rest, ";base64,", 2)
+	if len(parts) != 2 {
+		return nil, errors.New("invalid data URL: must contain ';base64,' separator")
+	}
+
+	mimeType := parts[0]
+	base64Data := parts[1]
+
+	// Validate mime type is a supported image type
+	supportedFormats := []string{"image/jpeg", "image/png", "image/gif", "image/webp"}
+	supported := false
+	for _, format := range supportedFormats {
+		if strings.EqualFold(mimeType, format) {
+			supported = true
+			break
+		}
+	}
+	if !supported {
+		return nil, errors.Errorf("unsupported image mime type: %s (supported: jpeg, png, gif, webp)", mimeType)
+	}
+
+	// Decode base64 data
+	imageData, err := base64.StdEncoding.DecodeString(base64Data)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to decode base64 image data")
+	}
+
+	// Check size limit
+	if len(imageData) > MaxImageFileSize {
+		return nil, errors.Errorf("image data too large (%d bytes), maximum is %d bytes", len(imageData), MaxImageFileSize)
+	}
+
+	return genai.NewPartFromBytes(imageData, mimeType), nil
 }
 
 // processImageURL fetches image from HTTPS URL and creates a Google GenAI part
