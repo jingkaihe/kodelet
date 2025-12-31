@@ -116,7 +116,7 @@ func (h *ACPMessageHandler) HandleToolResult(toolCallID string, _ string, result
 	})
 }
 
-// HandleThinking sends thought_chunk
+// HandleThinking sends agent_thought_chunk
 func (h *ACPMessageHandler) HandleThinking(thinking string) {
 	h.sender.SendUpdate(h.sessionID, map[string]any{
 		"sessionUpdate": acptypes.UpdateThoughtChunk,

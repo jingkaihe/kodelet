@@ -252,7 +252,7 @@ type ListSessionsResponse struct {
 const (
 	UpdateAgentMessageChunk = "agent_message_chunk"
 	UpdateUserMessageChunk  = "user_message_chunk"
-	UpdateThoughtChunk      = "thought_chunk"
+	UpdateThoughtChunk      = "agent_thought_chunk"
 	UpdateToolCall          = "tool_call"
 	UpdateToolCallUpdate    = "tool_call_update"
 	UpdatePlan              = "plan"
@@ -311,7 +311,7 @@ type AgentMessageChunk struct {
 	Content       ContentBlock `json:"content"`
 }
 
-// ThoughtChunk represents a thought_chunk session update
+// ThoughtChunk represents an agent_thought_chunk session update
 type ThoughtChunk struct {
 	SessionUpdate string       `json:"sessionUpdate"`
 	Content       ContentBlock `json:"content"`
