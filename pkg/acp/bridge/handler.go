@@ -98,20 +98,41 @@ func (h *ACPMessageHandler) HandleToolUse(toolCallID string, toolName string, in
 
 	title := h.titleGenerator.GenerateTitle(toolName, input)
 
-	h.sender.SendUpdate(h.sessionID, map[string]any{
+	toolCallUpdate := map[string]any{
 		"sessionUpdate": acptypes.UpdateToolCall,
 		"toolCallId":    toolCallID,
 		"title":         title,
 		"kind":          ToACPToolKind(toolName),
 		"status":        acptypes.ToolStatusPending,
 		"rawInput":      rawInput,
-	})
+	}
 
-	h.sender.SendUpdate(h.sessionID, map[string]any{
+	// Extract path/line from input for "follow the agent" feature
+	pathInfo := h.extractPathInfoFromInput(toolName, input)
+	if pathInfo != nil {
+		toolCallUpdate["path"] = pathInfo["path"]
+		if line, ok := pathInfo["line"]; ok {
+			toolCallUpdate["line"] = line
+		}
+	}
+
+	h.sender.SendUpdate(h.sessionID, toolCallUpdate)
+
+	inProgressUpdate := map[string]any{
 		"sessionUpdate": acptypes.UpdateToolCallUpdate,
 		"toolCallId":    toolCallID,
 		"status":        acptypes.ToolStatusInProgress,
-	})
+	}
+
+	// Include path/line in progress update as well
+	if pathInfo != nil {
+		inProgressUpdate["path"] = pathInfo["path"]
+		if line, ok := pathInfo["line"]; ok {
+			inProgressUpdate["line"] = line
+		}
+	}
+
+	h.sender.SendUpdate(h.sessionID, inProgressUpdate)
 }
 
 // HandleToolResult sends tool_call_update with rich, tool-specific content
@@ -179,6 +200,40 @@ func (h *ACPMessageHandler) extractPathInfo(result tooltypes.ToolResult) map[str
 		var meta tooltypes.BashMetadata
 		if tooltypes.ExtractMetadata(structured.Metadata, &meta) && meta.WorkingDir != "" {
 			return map[string]any{"path": meta.WorkingDir}
+		}
+	}
+
+	return nil
+}
+
+// extractPathInfoFromInput extracts path and line from tool input JSON for "follow-along" feature
+// This is called during HandleToolUse before the tool executes
+func (h *ACPMessageHandler) extractPathInfoFromInput(toolName string, input string) map[string]any {
+	if input == "" {
+		return nil
+	}
+
+	var params map[string]any
+	if err := json.Unmarshal([]byte(input), &params); err != nil {
+		return nil
+	}
+
+	switch toolName {
+	case "file_read":
+		if path, ok := params["file_path"].(string); ok && path != "" {
+			info := map[string]any{"path": path}
+			if offset, ok := params["offset"].(float64); ok && offset > 0 {
+				info["line"] = int(offset)
+			}
+			return info
+		}
+	case "file_write":
+		if path, ok := params["file_path"].(string); ok && path != "" {
+			return map[string]any{"path": path}
+		}
+	case "file_edit":
+		if path, ok := params["file_path"].(string); ok && path != "" {
+			return map[string]any{"path": path}
 		}
 	}
 

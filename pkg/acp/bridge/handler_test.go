@@ -288,3 +288,153 @@ func TestDefaultTitleGenerator_UnknownTool(t *testing.T) {
 	title := gen.GenerateTitle("unknown_tool", `{"some": "param"}`)
 	assert.Equal(t, "unknown_tool", title)
 }
+
+func TestACPMessageHandler_HandleToolUse_FollowTheAgent(t *testing.T) {
+	tests := []struct {
+		name         string
+		toolName     string
+		input        string
+		expectedPath string
+		expectedLine int
+	}{
+		{
+			name:         "file_read with path and offset",
+			toolName:     "file_read",
+			input:        `{"file_path": "/home/user/main.go", "offset": 42}`,
+			expectedPath: "/home/user/main.go",
+			expectedLine: 42,
+		},
+		{
+			name:         "file_read with path only",
+			toolName:     "file_read",
+			input:        `{"file_path": "/home/user/main.go"}`,
+			expectedPath: "/home/user/main.go",
+			expectedLine: 0,
+		},
+		{
+			name:         "file_write with path",
+			toolName:     "file_write",
+			input:        `{"file_path": "/home/user/new.txt", "text": "content"}`,
+			expectedPath: "/home/user/new.txt",
+			expectedLine: 0,
+		},
+		{
+			name:         "file_edit with path",
+			toolName:     "file_edit",
+			input:        `{"file_path": "/home/user/edit.go", "old_text": "old", "new_text": "new"}`,
+			expectedPath: "/home/user/edit.go",
+			expectedLine: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sender := &mockSender{}
+			handler := NewACPMessageHandler(sender, "test-session")
+
+			handler.HandleToolUse("call_1", tt.toolName, tt.input)
+
+			// First update is tool_call (pending)
+			toolCall := sender.updates[0].(map[string]any)
+			assert.Equal(t, acptypes.UpdateToolCall, toolCall["sessionUpdate"])
+			assert.Equal(t, tt.expectedPath, toolCall["path"])
+			if tt.expectedLine > 0 {
+				assert.Equal(t, tt.expectedLine, toolCall["line"])
+			}
+
+			// Second update is tool_call_update (in_progress)
+			toolCallUpdate := sender.updates[1].(map[string]any)
+			assert.Equal(t, acptypes.UpdateToolCallUpdate, toolCallUpdate["sessionUpdate"])
+			assert.Equal(t, tt.expectedPath, toolCallUpdate["path"])
+			if tt.expectedLine > 0 {
+				assert.Equal(t, tt.expectedLine, toolCallUpdate["line"])
+			}
+		})
+	}
+}
+
+func TestExtractPathInfoFromInput(t *testing.T) {
+	handler := NewACPMessageHandler(&mockSender{}, "test-session")
+
+	tests := []struct {
+		name         string
+		toolName     string
+		input        string
+		expectedPath string
+		expectedLine int
+		expectNil    bool
+	}{
+		{
+			name:         "file_read with offset",
+			toolName:     "file_read",
+			input:        `{"file_path": "/path/to/file.go", "offset": 100}`,
+			expectedPath: "/path/to/file.go",
+			expectedLine: 100,
+		},
+		{
+			name:         "file_read without offset",
+			toolName:     "file_read",
+			input:        `{"file_path": "/path/to/file.go"}`,
+			expectedPath: "/path/to/file.go",
+			expectedLine: 0,
+		},
+		{
+			name:         "file_write",
+			toolName:     "file_write",
+			input:        `{"file_path": "/path/to/new.txt", "text": "hello"}`,
+			expectedPath: "/path/to/new.txt",
+			expectedLine: 0,
+		},
+		{
+			name:         "file_edit",
+			toolName:     "file_edit",
+			input:        `{"file_path": "/path/to/edit.go", "old_text": "a", "new_text": "b"}`,
+			expectedPath: "/path/to/edit.go",
+			expectedLine: 0,
+		},
+		{
+			name:      "unknown tool",
+			toolName:  "bash",
+			input:     `{"command": "ls"}`,
+			expectNil: true,
+		},
+		{
+			name:      "empty input",
+			toolName:  "file_read",
+			input:     "",
+			expectNil: true,
+		},
+		{
+			name:      "invalid JSON",
+			toolName:  "file_read",
+			input:     "not json",
+			expectNil: true,
+		},
+		{
+			name:      "missing file_path",
+			toolName:  "file_read",
+			input:     `{"offset": 10}`,
+			expectNil: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := handler.extractPathInfoFromInput(tt.toolName, tt.input)
+
+			if tt.expectNil {
+				assert.Nil(t, result)
+				return
+			}
+
+			assert.NotNil(t, result)
+			assert.Equal(t, tt.expectedPath, result["path"])
+			if tt.expectedLine > 0 {
+				assert.Equal(t, tt.expectedLine, result["line"])
+			} else {
+				_, hasLine := result["line"]
+				assert.False(t, hasLine)
+			}
+		})
+	}
+}
