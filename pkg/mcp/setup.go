@@ -3,8 +3,10 @@ package mcp
 
 import (
 	"context"
+	"net"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/mcp/codegen"
@@ -35,6 +37,41 @@ func GetSocketPath() (string, error) {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+// CleanupStaleSocket removes the socket file if it exists but no server is listening
+// This handles cases where a previous process left a stale socket file
+func CleanupStaleSocket(ctx context.Context) error {
+	socketPath, err := GetSocketPath()
+	if err != nil {
+		return nil // Can't get socket path, nothing to clean up
+	}
+
+	if !fileExists(socketPath) {
+		return nil // Socket doesn't exist, nothing to clean up
+	}
+
+	if IsSocketAlive(socketPath) {
+		return nil // Socket is alive, don't remove it
+	}
+
+	// Socket exists but no server is listening - remove it
+	logger.G(ctx).WithField("socket", socketPath).Debug("Removing stale MCP socket")
+	if err := os.Remove(socketPath); err != nil && !os.IsNotExist(err) {
+		return errors.Wrap(err, "failed to remove stale socket")
+	}
+
+	return nil
+}
+
+// IsSocketAlive checks if a Unix socket has a server listening on it
+func IsSocketAlive(socketPath string) bool {
+	conn, err := net.DialTimeout("unix", socketPath, 100*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	return true
 }
 
 // ErrDirectMode is returned when MCP is configured for direct mode instead of code execution mode
@@ -95,7 +132,7 @@ func SetupExecutionMode(ctx context.Context, mcpManager *tools.MCPManager) (*Exe
 
 	// Add code_execution tool instead of MCP tools
 	stateOpts := []tools.BasicStateOption{tools.WithExtraMCPTools([]tooltypes.Tool{codeExecTool})}
-	logger.G(ctx).Info("MCP code execution mode enabled")
+	logger.G(ctx).Debug("MCP code execution mode enabled")
 
 	return &ExecutionSetup{
 		RPCServer: rpcServer,
