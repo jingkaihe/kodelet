@@ -26,7 +26,13 @@ type ExecutionSetup struct {
 // GetSocketPath returns the absolute path to the MCP socket file for a given session.
 // Each session gets its own socket to prevent conflicts when multiple kodelet instances
 // run concurrently.
+// The socket path can be explicitly overridden via mcp.code_execution.socket_path config.
 func GetSocketPath(sessionID string) (string, error) {
+	// Check for explicit socket path override first
+	if socketPath := viper.GetString("mcp.code_execution.socket_path"); socketPath != "" {
+		return filepath.Abs(socketPath)
+	}
+
 	workspaceDir := viper.GetString("mcp.code_execution.workspace_dir")
 	if workspaceDir == "" {
 		workspaceDir = ".kodelet/mcp"
