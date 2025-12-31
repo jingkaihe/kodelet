@@ -1021,24 +1021,24 @@ func (c *Connector) connect(server types.MCPServer) (*mcp.Client, error) {
 ## Implementation Phases
 
 ### Phase 1: Core Protocol Infrastructure (Week 1-2)
-- [ ] Create `pkg/acp/` package structure
-- [ ] Implement JSON-RPC message types and parsing
-- [ ] Implement stdio transport with newline-delimited messages
-- [ ] Create ACP server skeleton with handler registration
-- [ ] Add `kodelet acp` command
+- [x] Create `pkg/acp/` package structure
+- [x] Implement JSON-RPC message types and parsing
+- [x] Implement stdio transport with newline-delimited messages
+- [x] Create ACP server skeleton with handler registration
+- [x] Add `kodelet acp` command
 
 ### Phase 2: Initialization & Session Management (Week 2-3)
-- [ ] Implement `initialize` handler with capability negotiation
-- [ ] Implement `session/new` handler
-- [ ] Implement `session/load` handler with conversation replay
-- [ ] Implement `session/cancel` notification handler
-- [ ] Integrate with existing conversation persistence
+- [x] Implement `initialize` handler with capability negotiation
+- [x] Implement `session/new` handler
+- [x] Implement `session/load` handler with conversation replay
+- [x] Implement `session/cancel` notification handler
+- [x] Integrate with existing conversation persistence
 
 ### Phase 3: Prompt Turn Implementation (Week 3-4)
-- [ ] Implement `session/prompt` handler
-- [ ] Create bridge from kodelet tools to ACP tool calls
-- [ ] Implement `session/update` notification streaming
-- [ ] Handle tool call lifecycle (pending → in_progress → completed)
+- [x] Implement `session/prompt` handler
+- [x] Create bridge from kodelet tools to ACP tool calls
+- [x] Implement `session/update` notification streaming
+- [x] Handle tool call lifecycle (pending → in_progress → completed)
 - [ ] Implement `session/request_permission` for write operations
 
 ### Phase 4: Client Capabilities Integration (Week 4-5)
@@ -1054,10 +1054,10 @@ func (c *Connector) connect(server types.MCPServer) (*mcp.Client, error) {
 - [ ] Handle MCP server lifecycle management
 
 ### Phase 6: Testing & Documentation (Week 6-7)
-- [ ] Write unit tests for all handlers
+- [x] Write unit tests for all handlers
 - [ ] Write integration tests with mock client
 - [ ] Create end-to-end tests with sample interactions
-- [ ] Write documentation for IDE integration
+- [x] Write documentation for IDE integration
 - [ ] Update AGENTS.md and MANUAL.md
 
 ## Testing Strategy

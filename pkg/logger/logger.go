@@ -5,6 +5,7 @@ package logger
 
 import (
 	"context"
+	"io"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -98,4 +99,9 @@ func SetLogFormat(format string) {
 // SetLogFormatForLogger sets the log format for a specific logger
 func SetLogFormatForLogger(logger *logrus.Logger, format string) {
 	setLoggerFormat(logger, format)
+}
+
+// SetLogOutput sets the output destination for the global logger
+func SetLogOutput(w io.Writer) {
+	L.Logger.SetOutput(w)
 }

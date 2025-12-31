@@ -366,4 +366,5 @@ See [docs/HOOKS.md](docs/HOOKS.md) for creating custom hooks.
 - **Skills Guide**: [docs/SKILLS.md](docs/SKILLS.md) for agentic skills system
 - **Hooks Guide**: [docs/HOOKS.md](docs/HOOKS.md) for agent lifecycle hooks system
 - **MCP Tools**: [docs/mcp.md](docs/mcp.md) for Model Context Protocol integration
+- **ACP Integration**: [docs/ACP.md](docs/ACP.md) for Agent Client Protocol IDE integration
 
