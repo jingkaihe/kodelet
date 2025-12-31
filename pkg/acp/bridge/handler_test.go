@@ -337,23 +337,27 @@ func TestACPMessageHandler_HandleToolUse_FollowTheAgent(t *testing.T) {
 			// First update is tool_call (pending)
 			toolCall := sender.updates[0].(map[string]any)
 			assert.Equal(t, acptypes.UpdateToolCall, toolCall["sessionUpdate"])
-			assert.Equal(t, tt.expectedPath, toolCall["path"])
+			locations := toolCall["locations"].([]ToolCallLocation)
+			assert.Len(t, locations, 1)
+			assert.Equal(t, tt.expectedPath, locations[0].Path)
 			if tt.expectedLine > 0 {
-				assert.Equal(t, tt.expectedLine, toolCall["line"])
+				assert.Equal(t, tt.expectedLine, locations[0].Line)
 			}
 
 			// Second update is tool_call_update (in_progress)
 			toolCallUpdate := sender.updates[1].(map[string]any)
 			assert.Equal(t, acptypes.UpdateToolCallUpdate, toolCallUpdate["sessionUpdate"])
-			assert.Equal(t, tt.expectedPath, toolCallUpdate["path"])
+			locationsUpdate := toolCallUpdate["locations"].([]ToolCallLocation)
+			assert.Len(t, locationsUpdate, 1)
+			assert.Equal(t, tt.expectedPath, locationsUpdate[0].Path)
 			if tt.expectedLine > 0 {
-				assert.Equal(t, tt.expectedLine, toolCallUpdate["line"])
+				assert.Equal(t, tt.expectedLine, locationsUpdate[0].Line)
 			}
 		})
 	}
 }
 
-func TestExtractPathInfoFromInput(t *testing.T) {
+func TestExtractLocationsFromInput(t *testing.T) {
 	handler := NewACPMessageHandler(&mockSender{}, "test-session")
 
 	tests := []struct {
@@ -420,20 +424,19 @@ func TestExtractPathInfoFromInput(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := handler.extractPathInfoFromInput(tt.toolName, tt.input)
+			locations := handler.extractLocationsFromInput(tt.toolName, tt.input)
 
 			if tt.expectNil {
-				assert.Nil(t, result)
+				assert.Nil(t, locations)
 				return
 			}
 
-			assert.NotNil(t, result)
-			assert.Equal(t, tt.expectedPath, result["path"])
+			assert.Len(t, locations, 1)
+			assert.Equal(t, tt.expectedPath, locations[0].Path)
 			if tt.expectedLine > 0 {
-				assert.Equal(t, tt.expectedLine, result["line"])
+				assert.Equal(t, tt.expectedLine, locations[0].Line)
 			} else {
-				_, hasLine := result["line"]
-				assert.False(t, hasLine)
+				assert.Equal(t, 0, locations[0].Line)
 			}
 		})
 	}

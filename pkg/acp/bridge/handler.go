@@ -16,6 +16,12 @@ import (
 
 var _ llmtypes.StreamingMessageHandler = (*ACPMessageHandler)(nil)
 
+// ToolCallLocation represents a file location for the "follow the agent" feature
+type ToolCallLocation struct {
+	Path string `json:"path"`
+	Line int    `json:"line,omitempty"`
+}
+
 // TitleGenerator generates human-readable titles for tool calls
 type TitleGenerator interface {
 	GenerateTitle(toolName string, input string) string
@@ -107,13 +113,10 @@ func (h *ACPMessageHandler) HandleToolUse(toolCallID string, toolName string, in
 		"rawInput":      rawInput,
 	}
 
-	// Extract path/line from input for "follow the agent" feature
-	pathInfo := h.extractPathInfoFromInput(toolName, input)
-	if pathInfo != nil {
-		toolCallUpdate["path"] = pathInfo["path"]
-		if line, ok := pathInfo["line"]; ok {
-			toolCallUpdate["line"] = line
-		}
+	// Extract locations for "follow the agent" feature
+	locations := h.extractLocationsFromInput(toolName, input)
+	if len(locations) > 0 {
+		toolCallUpdate["locations"] = locations
 	}
 
 	h.sender.SendUpdate(h.sessionID, toolCallUpdate)
@@ -124,12 +127,9 @@ func (h *ACPMessageHandler) HandleToolUse(toolCallID string, toolName string, in
 		"status":        acptypes.ToolStatusInProgress,
 	}
 
-	// Include path/line in progress update as well
-	if pathInfo != nil {
-		inProgressUpdate["path"] = pathInfo["path"]
-		if line, ok := pathInfo["line"]; ok {
-			inProgressUpdate["line"] = line
-		}
+	// Include locations in progress update as well
+	if len(locations) > 0 {
+		inProgressUpdate["locations"] = locations
 	}
 
 	h.sender.SendUpdate(h.sessionID, inProgressUpdate)
@@ -157,58 +157,55 @@ func (h *ACPMessageHandler) HandleToolResult(toolCallID string, _ string, result
 		"content":       content,
 	}
 
-	pathInfo := h.extractPathInfo(result)
-	if pathInfo != nil {
-		update["path"] = pathInfo["path"]
-		if line, ok := pathInfo["line"]; ok {
-			update["line"] = line
-		}
+	locations := h.extractLocations(result)
+	if len(locations) > 0 {
+		update["locations"] = locations
 	}
 
 	h.sender.SendUpdate(h.sessionID, update)
 }
 
-// extractPathInfo extracts path and line information for "follow-along" feature
-func (h *ACPMessageHandler) extractPathInfo(result tooltypes.ToolResult) map[string]any {
+// extractLocations extracts file locations for "follow-along" feature from tool result
+func (h *ACPMessageHandler) extractLocations(result tooltypes.ToolResult) []ToolCallLocation {
 	structured := result.StructuredData()
 
 	switch structured.ToolName {
 	case "file_read":
 		var meta tooltypes.FileReadMetadata
 		if tooltypes.ExtractMetadata(structured.Metadata, &meta) {
-			info := map[string]any{"path": meta.FilePath}
+			loc := ToolCallLocation{Path: meta.FilePath}
 			if meta.Offset > 0 {
-				info["line"] = meta.Offset
+				loc.Line = meta.Offset
 			}
-			return info
+			return []ToolCallLocation{loc}
 		}
 	case "file_write":
 		var meta tooltypes.FileWriteMetadata
 		if tooltypes.ExtractMetadata(structured.Metadata, &meta) {
-			return map[string]any{"path": meta.FilePath}
+			return []ToolCallLocation{{Path: meta.FilePath}}
 		}
 	case "file_edit":
 		var meta tooltypes.FileEditMetadata
 		if tooltypes.ExtractMetadata(structured.Metadata, &meta) {
-			info := map[string]any{"path": meta.FilePath}
+			loc := ToolCallLocation{Path: meta.FilePath}
 			if len(meta.Edits) > 0 && meta.Edits[0].StartLine > 0 {
-				info["line"] = meta.Edits[0].StartLine
+				loc.Line = meta.Edits[0].StartLine
 			}
-			return info
+			return []ToolCallLocation{loc}
 		}
 	case "bash":
 		var meta tooltypes.BashMetadata
 		if tooltypes.ExtractMetadata(structured.Metadata, &meta) && meta.WorkingDir != "" {
-			return map[string]any{"path": meta.WorkingDir}
+			return []ToolCallLocation{{Path: meta.WorkingDir}}
 		}
 	}
 
 	return nil
 }
 
-// extractPathInfoFromInput extracts path and line from tool input JSON for "follow-along" feature
+// extractLocationsFromInput extracts file locations from tool input JSON for "follow-along" feature
 // This is called during HandleToolUse before the tool executes
-func (h *ACPMessageHandler) extractPathInfoFromInput(toolName string, input string) map[string]any {
+func (h *ACPMessageHandler) extractLocationsFromInput(toolName string, input string) []ToolCallLocation {
 	if input == "" {
 		return nil
 	}
@@ -221,19 +218,19 @@ func (h *ACPMessageHandler) extractPathInfoFromInput(toolName string, input stri
 	switch toolName {
 	case "file_read":
 		if path, ok := params["file_path"].(string); ok && path != "" {
-			info := map[string]any{"path": path}
+			loc := ToolCallLocation{Path: path}
 			if offset, ok := params["offset"].(float64); ok && offset > 0 {
-				info["line"] = int(offset)
+				loc.Line = int(offset)
 			}
-			return info
+			return []ToolCallLocation{loc}
 		}
 	case "file_write":
 		if path, ok := params["file_path"].(string); ok && path != "" {
-			return map[string]any{"path": path}
+			return []ToolCallLocation{{Path: path}}
 		}
 	case "file_edit":
 		if path, ok := params["file_path"].(string); ok && path != "" {
-			return map[string]any{"path": path}
+			return []ToolCallLocation{{Path: path}}
 		}
 	}
 
