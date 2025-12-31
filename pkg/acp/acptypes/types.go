@@ -228,26 +228,6 @@ type CancelRequest struct {
 	SessionID SessionID `json:"sessionId"`
 }
 
-// ListSessionsRequest requests a list of available sessions
-type ListSessionsRequest struct {
-	Meta map[string]any `json:"_meta,omitempty"`
-}
-
-// SessionSummary provides summary information about a session
-type SessionSummary struct {
-	SessionID    SessionID      `json:"sessionId"`
-	CreatedAt    string         `json:"createdAt,omitempty"`
-	Title        string         `json:"title,omitempty"`
-	MessageCount int            `json:"messageCount,omitempty"`
-	Meta         map[string]any `json:"_meta,omitempty"`
-}
-
-// ListSessionsResponse returns available sessions
-type ListSessionsResponse struct {
-	Sessions []SessionSummary `json:"sessions"`
-	Meta     map[string]any   `json:"_meta,omitempty"`
-}
-
 // SessionUpdateType constants for session/update notifications
 const (
 	UpdateAgentMessageChunk = "agent_message_chunk"

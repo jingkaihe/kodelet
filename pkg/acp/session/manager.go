@@ -15,7 +15,6 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/mcp"
 	"github.com/jingkaihe/kodelet/pkg/skills"
 	"github.com/jingkaihe/kodelet/pkg/tools"
-	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	pkgerrors "github.com/pkg/errors"
 	"github.com/spf13/viper"
@@ -383,46 +382,4 @@ func (m *Manager) Cancel(id acptypes.SessionID) error {
 	}
 	session.Cancel()
 	return nil
-}
-
-// ListSessions returns a summary of all available sessions.
-// This includes both active sessions in memory and persisted sessions from the store.
-func (m *Manager) ListSessions(ctx context.Context) []acptypes.SessionSummary {
-	var summaries []acptypes.SessionSummary
-
-	m.mu.RLock()
-	for id := range m.sessions {
-		summaries = append(summaries, acptypes.SessionSummary{
-			SessionID: id,
-		})
-	}
-	m.mu.RUnlock()
-
-	if m.store != nil {
-		queryOpts := convtypes.QueryOptions{
-			Limit:     100,
-			SortBy:    "updated_at",
-			SortOrder: "desc",
-		}
-		if result, err := m.store.Query(ctx, queryOpts); err == nil {
-			existingIDs := make(map[acptypes.SessionID]bool)
-			for _, s := range summaries {
-				existingIDs[s.SessionID] = true
-			}
-
-			for _, summary := range result.ConversationSummaries {
-				sessionID := acptypes.SessionID(summary.ID)
-				if !existingIDs[sessionID] {
-					summaries = append(summaries, acptypes.SessionSummary{
-						SessionID:    sessionID,
-						CreatedAt:    summary.CreatedAt.Format("2006-01-02T15:04:05Z"),
-						Title:        summary.Summary,
-						MessageCount: summary.MessageCount,
-					})
-				}
-			}
-		}
-	}
-
-	return summaries
 }

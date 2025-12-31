@@ -159,8 +159,6 @@ func (s *Server) handleRequest(data []byte) error {
 		return s.handleSessionPrompt(&req)
 	case "session/set_mode":
 		return s.handleSetMode(&req)
-	case "session/list":
-		return s.handleListSessions(&req)
 	default:
 		return s.sendError(req.ID, acptypes.ErrCodeMethodNotFound, "Method not found", nil)
 	}
@@ -326,19 +324,6 @@ func (s *Server) handleSessionPrompt(req *acptypes.Request) error {
 
 func (s *Server) handleSetMode(req *acptypes.Request) error {
 	return s.sendError(req.ID, acptypes.ErrCodeMethodNotFound, "session/set_mode not supported", nil)
-}
-
-func (s *Server) handleListSessions(req *acptypes.Request) error {
-	if !s.initialized {
-		return s.sendError(req.ID, acptypes.ErrCodeInternalError, "Not initialized", nil)
-	}
-
-	sessions := s.sessionManager.ListSessions(s.ctx)
-
-	result := acptypes.ListSessionsResponse{
-		Sessions: sessions,
-	}
-	return s.sendResult(req.ID, result)
 }
 
 // SendUpdate sends a session/update notification to the client
