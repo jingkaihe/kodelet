@@ -429,7 +429,7 @@ func (t *Thread) executeToolsParallel(
 
 	// Show all tool invocations upfront so user knows what's about to run
 	for _, tb := range toolBlocks {
-		handler.HandleToolUse(tb.block.Name, tb.variant.JSON.Input.Raw())
+		handler.HandleToolUse(tb.block.ID, tb.block.Name, tb.variant.JSON.Input.Raw())
 	}
 
 	results := make([]toolExecResult, len(toolBlocks))
@@ -510,7 +510,7 @@ func (t *Thread) executeToolsParallel(
 	go func() {
 		defer consumerWg.Done()
 		for result := range resultCh {
-			handler.HandleToolResult(result.toolName, result.renderedOutput)
+			handler.HandleToolResult(result.blockID, result.toolName, result.renderedOutput)
 			results[result.index] = result // preserve original order
 		}
 	}()

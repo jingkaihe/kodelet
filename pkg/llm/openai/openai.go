@@ -623,7 +623,7 @@ func (t *Thread) processMessageExchange(
 
 	// Process tool calls
 	for _, toolCall := range toolCalls {
-		handler.HandleToolUse(toolCall.Function.Name, toolCall.Function.Arguments)
+		handler.HandleToolUse(toolCall.ID, toolCall.Function.Name, toolCall.Function.Arguments)
 
 		// For tracing, add tool execution event
 		telemetry.AddEvent(ctx, "tool_execution_start",
@@ -652,7 +652,7 @@ func (t *Thread) processMessageExchange(
 
 		registry := renderers.NewRendererRegistry()
 		renderedOutput := registry.Render(structuredResult)
-		handler.HandleToolResult(toolCall.Function.Name, renderedOutput)
+		handler.HandleToolResult(toolCall.ID, toolCall.Function.Name, renderedOutput)
 
 		t.SetStructuredToolResult(toolCall.ID, structuredResult)
 

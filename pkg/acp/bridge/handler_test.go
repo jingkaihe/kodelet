@@ -54,7 +54,7 @@ func TestACPMessageHandler_HandleToolUse(t *testing.T) {
 	sender := &mockSender{}
 	handler := NewACPMessageHandler(sender, "test-session")
 
-	handler.HandleToolUse("file_read", `{"file_path": "/test.txt"}`)
+	handler.HandleToolUse("call_1", "file_read", `{"file_path": "/test.txt"}`)
 
 	assert.Len(t, sender.updates, 2)
 
@@ -75,8 +75,8 @@ func TestACPMessageHandler_HandleToolResult(t *testing.T) {
 	sender := &mockSender{}
 	handler := NewACPMessageHandler(sender, "test-session")
 
-	handler.HandleToolUse("file_read", `{}`)
-	handler.HandleToolResult("file_read", "file contents here")
+	handler.HandleToolUse("call_1", "file_read", `{}`)
+	handler.HandleToolResult("call_1", "file_read", "file contents here")
 
 	assert.Len(t, sender.updates, 3)
 
@@ -90,8 +90,8 @@ func TestACPMessageHandler_HandleToolResult_Error(t *testing.T) {
 	sender := &mockSender{}
 	handler := NewACPMessageHandler(sender, "test-session")
 
-	handler.HandleToolUse("bash", `{}`)
-	handler.HandleToolResult("bash", "Error: command not found")
+	handler.HandleToolUse("call_1", "bash", `{}`)
+	handler.HandleToolResult("call_1", "bash", "Error: command not found")
 
 	result := sender.updates[2].(map[string]any)
 	assert.Equal(t, acptypes.ToolStatusFailed, result["status"])

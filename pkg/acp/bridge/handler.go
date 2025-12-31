@@ -10,7 +10,6 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/acp/acptypes"
@@ -31,7 +30,6 @@ type ACPMessageHandler struct {
 
 	currentToolID   string
 	currentToolName string
-	toolIDCounter   int64
 	toolMu          sync.Mutex
 }
 
@@ -66,10 +64,9 @@ func (h *ACPMessageHandler) HandleTextDelta(delta string) {
 }
 
 // HandleToolUse creates a new tool_call update
-func (h *ACPMessageHandler) HandleToolUse(toolName string, input string) {
+func (h *ACPMessageHandler) HandleToolUse(toolCallID string, toolName string, input string) {
 	h.toolMu.Lock()
-	toolID := fmt.Sprintf("call_%d", atomic.AddInt64(&h.toolIDCounter, 1))
-	h.currentToolID = toolID
+	h.currentToolID = toolCallID
 	h.currentToolName = toolName
 	h.toolMu.Unlock()
 
@@ -82,7 +79,7 @@ func (h *ACPMessageHandler) HandleToolUse(toolName string, input string) {
 
 	h.sender.SendUpdate(h.sessionID, map[string]any{
 		"sessionUpdate": acptypes.UpdateToolCall,
-		"toolCallId":    toolID,
+		"toolCallId":    toolCallID,
 		"title":         title,
 		"kind":          ToACPToolKind(toolName),
 		"status":        acptypes.ToolStatusPending,
@@ -91,17 +88,13 @@ func (h *ACPMessageHandler) HandleToolUse(toolName string, input string) {
 
 	h.sender.SendUpdate(h.sessionID, map[string]any{
 		"sessionUpdate": acptypes.UpdateToolCallUpdate,
-		"toolCallId":    toolID,
+		"toolCallId":    toolCallID,
 		"status":        acptypes.ToolStatusInProgress,
 	})
 }
 
 // HandleToolResult sends tool_call_update with result
-func (h *ACPMessageHandler) HandleToolResult(_ string, result string) {
-	h.toolMu.Lock()
-	toolID := h.currentToolID
-	h.toolMu.Unlock()
-
+func (h *ACPMessageHandler) HandleToolResult(toolCallID string, _ string, result string) {
 	status := acptypes.ToolStatusCompleted
 	if strings.HasPrefix(result, "Error:") || strings.Contains(result, "error:") {
 		status = acptypes.ToolStatusFailed
@@ -109,7 +102,7 @@ func (h *ACPMessageHandler) HandleToolResult(_ string, result string) {
 
 	h.sender.SendUpdate(h.sessionID, map[string]any{
 		"sessionUpdate": acptypes.UpdateToolCallUpdate,
-		"toolCallId":    toolID,
+		"toolCallId":    toolCallID,
 		"status":        status,
 		"content": []map[string]any{
 			{

@@ -598,14 +598,14 @@ func (t *Thread) processPart(part *genai.Part, response *Response, handler llmty
 		if err != nil {
 			return errors.Wrap(err, "failed to marshal tool arguments")
 		}
-		handler.HandleToolUse(toolCall.Name, string(argsJSON))
+		handler.HandleToolUse(toolCall.ID, toolCall.Name, string(argsJSON))
 
 	case part.CodeExecutionResult != nil:
 		result := fmt.Sprintf("Code execution result:\n%s", part.CodeExecutionResult.Output)
 		if part.CodeExecutionResult.Outcome == genai.OutcomeUnspecified {
 			result += "\nOutcome: Unspecified"
 		}
-		handler.HandleToolResult("code_execution", result)
+		handler.HandleToolResult("", "code_execution", result)
 		response.Text += result
 
 	default:
@@ -1013,7 +1013,7 @@ func (t *Thread) executeToolCalls(ctx context.Context, response *Response, handl
 		registry := renderers.NewRendererRegistry()
 		renderedOutput := registry.Render(structuredResult)
 
-		handler.HandleToolResult(toolCall.Name, renderedOutput)
+		handler.HandleToolResult(toolCall.ID, toolCall.Name, renderedOutput)
 
 		// Store structured results
 		t.SetStructuredToolResult(toolCall.ID, structuredResult)
