@@ -6,6 +6,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/acp"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 var acpCmd = &cobra.Command{
@@ -43,7 +44,7 @@ func runACP(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
 
 	logger.SetLogOutput(os.Stderr)
-	logger.SetLogLevel("error")
+	logger.SetLogLevel(viper.GetString("log_level"))
 
 	provider, _ := cmd.Flags().GetString("provider")
 	model, _ := cmd.Flags().GetString("model")
