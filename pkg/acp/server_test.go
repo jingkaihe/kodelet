@@ -298,3 +298,272 @@ func TestServer_Shutdown(t *testing.T) {
 		t.Error("context should be cancelled after Shutdown")
 	}
 }
+
+func TestParseSlashCommand(t *testing.T) {
+	tests := []struct {
+		name        string
+		prompt      []acptypes.ContentBlock
+		wantCommand string
+		wantArgs    string
+		wantFound   bool
+	}{
+		{
+			name: "simple command",
+			prompt: []acptypes.ContentBlock{
+				{Type: acptypes.ContentTypeText, Text: "/test"},
+			},
+			wantCommand: "test",
+			wantArgs:    "",
+			wantFound:   true,
+		},
+		{
+			name: "command with args",
+			prompt: []acptypes.ContentBlock{
+				{Type: acptypes.ContentTypeText, Text: "/init fix the bug"},
+			},
+			wantCommand: "init",
+			wantArgs:    "fix the bug",
+			wantFound:   true,
+		},
+		{
+			name: "command with whitespace",
+			prompt: []acptypes.ContentBlock{
+				{Type: acptypes.ContentTypeText, Text: "  /commit  "},
+			},
+			wantCommand: "commit",
+			wantArgs:    "",
+			wantFound:   true,
+		},
+		{
+			name: "nested command path",
+			prompt: []acptypes.ContentBlock{
+				{Type: acptypes.ContentTypeText, Text: "/github/pr create a pr"},
+			},
+			wantCommand: "github/pr",
+			wantArgs:    "create a pr",
+			wantFound:   true,
+		},
+		{
+			name: "not a command",
+			prompt: []acptypes.ContentBlock{
+				{Type: acptypes.ContentTypeText, Text: "hello world"},
+			},
+			wantCommand: "",
+			wantArgs:    "",
+			wantFound:   false,
+		},
+		{
+			name: "empty prompt",
+			prompt: []acptypes.ContentBlock{
+				{Type: acptypes.ContentTypeText, Text: ""},
+			},
+			wantCommand: "",
+			wantArgs:    "",
+			wantFound:   false,
+		},
+		{
+			name: "image block ignored",
+			prompt: []acptypes.ContentBlock{
+				{Type: acptypes.ContentTypeImage, Data: "base64data"},
+				{Type: acptypes.ContentTypeText, Text: "/test"},
+			},
+			wantCommand: "test",
+			wantArgs:    "",
+			wantFound:   true,
+		},
+		{
+			name: "non-text blocks only",
+			prompt: []acptypes.ContentBlock{
+				{Type: acptypes.ContentTypeImage, Data: "base64data"},
+			},
+			wantCommand: "",
+			wantArgs:    "",
+			wantFound:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			command, args, found := parseSlashCommand(tt.prompt)
+			assert.Equal(t, tt.wantCommand, command)
+			assert.Equal(t, tt.wantArgs, args)
+			assert.Equal(t, tt.wantFound, found)
+		})
+	}
+}
+
+func TestServer_GetAvailableCommands(t *testing.T) {
+	input := bytes.NewBuffer(nil)
+	output := bytes.NewBuffer(nil)
+
+	server := NewServer(
+		WithInput(input),
+		WithOutput(output),
+		WithContext(context.Background()),
+	)
+
+	commands := server.getAvailableCommands()
+	assert.NotNil(t, commands)
+	assert.Greater(t, len(commands), 0)
+
+	for _, cmd := range commands {
+		assert.NotEmpty(t, cmd.Name)
+		assert.NotEmpty(t, cmd.Description)
+		assert.NotNil(t, cmd.Input)
+		assert.NotEmpty(t, cmd.Input.Hint)
+	}
+}
+
+func TestServer_SendAvailableCommands(t *testing.T) {
+	input := bytes.NewBuffer(nil)
+	output := bytes.NewBuffer(nil)
+
+	server := NewServer(
+		WithInput(input),
+		WithOutput(output),
+		WithContext(context.Background()),
+	)
+
+	sessionID := acptypes.SessionID("test-session")
+	err := server.sendAvailableCommands(sessionID)
+	require.NoError(t, err)
+
+	scanner := bufio.NewScanner(output)
+	require.True(t, scanner.Scan())
+
+	var notif map[string]any
+	err = json.Unmarshal(scanner.Bytes(), &notif)
+	require.NoError(t, err)
+
+	assert.Equal(t, "2.0", notif["jsonrpc"])
+	assert.Equal(t, "session/update", notif["method"])
+	assert.Nil(t, notif["id"])
+
+	params := notif["params"].(map[string]any)
+	assert.Equal(t, "test-session", params["sessionId"])
+
+	update := params["update"].(map[string]any)
+	assert.Equal(t, acptypes.UpdateAvailableCommands, update["sessionUpdate"])
+	assert.NotNil(t, update["availableCommands"])
+
+	availableCommands := update["availableCommands"].([]interface{})
+	assert.Greater(t, len(availableCommands), 0)
+}
+
+func TestParseSlashCommandArgs(t *testing.T) {
+	tests := []struct {
+		name           string
+		args           string
+		wantKVArgs     map[string]string
+		wantAdditional string
+	}{
+		{
+			name:           "empty args",
+			args:           "",
+			wantKVArgs:     map[string]string{},
+			wantAdditional: "",
+		},
+		{
+			name:           "only additional text",
+			args:           "fix the bug please",
+			wantKVArgs:     map[string]string{},
+			wantAdditional: "fix the bug please",
+		},
+		{
+			name:           "single key=value",
+			args:           "target=main",
+			wantKVArgs:     map[string]string{"target": "main"},
+			wantAdditional: "",
+		},
+		{
+			name:           "multiple key=value",
+			args:           "target=main draft=true",
+			wantKVArgs:     map[string]string{"target": "main", "draft": "true"},
+			wantAdditional: "",
+		},
+		{
+			name:           "key=value with additional text",
+			args:           "target=develop fix the authentication bug",
+			wantKVArgs:     map[string]string{"target": "develop"},
+			wantAdditional: "fix the authentication bug",
+		},
+		{
+			name:           "quoted value with spaces",
+			args:           `title="my feature branch" draft=false`,
+			wantKVArgs:     map[string]string{"title": "my feature branch", "draft": "false"},
+			wantAdditional: "",
+		},
+		{
+			name:           "mixed order",
+			args:           "target=main please review draft=true carefully",
+			wantKVArgs:     map[string]string{"target": "main", "draft": "true"},
+			wantAdditional: "please review carefully",
+		},
+		{
+			name:           "empty value",
+			args:           "key=",
+			wantKVArgs:     map[string]string{"key": ""},
+			wantAdditional: "",
+		},
+		{
+			name:           "multiple spaces",
+			args:           "  target=main   draft=true  ",
+			wantKVArgs:     map[string]string{"target": "main", "draft": "true"},
+			wantAdditional: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			kvArgs, additional := parseSlashCommandArgs(tt.args)
+			assert.Equal(t, tt.wantKVArgs, kvArgs)
+			assert.Equal(t, tt.wantAdditional, additional)
+		})
+	}
+}
+
+func TestBuildCommandHint(t *testing.T) {
+	tests := []struct {
+		name     string
+		defaults map[string]string
+		want     string
+	}{
+		{
+			name:     "no defaults",
+			defaults: nil,
+			want:     "additional instructions (optional)",
+		},
+		{
+			name:     "empty defaults",
+			defaults: map[string]string{},
+			want:     "additional instructions (optional)",
+		},
+		{
+			name:     "single default",
+			defaults: map[string]string{"target": "main"},
+			want:     "[target=main] additional instructions",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := buildCommandHint(tt.defaults)
+			if tt.name == "single default" {
+				assert.Equal(t, tt.want, got)
+			} else {
+				assert.Equal(t, tt.want, got)
+			}
+		})
+	}
+}
+
+func TestBuildCommandHint_MultipleDefaults(t *testing.T) {
+	defaults := map[string]string{"target": "main", "draft": "false"}
+	got := buildCommandHint(defaults)
+
+	assert.Contains(t, got, "target=main")
+	assert.Contains(t, got, "draft=false")
+	assert.Contains(t, got, "additional instructions")
+	assert.True(t, strings.HasPrefix(got, "["))
+	assert.Contains(t, got, "]")
+}

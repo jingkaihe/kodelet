@@ -10,10 +10,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/jingkaihe/kodelet/pkg/acp/acptypes"
 	"github.com/jingkaihe/kodelet/pkg/acp/session"
+	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/version"
 	"github.com/pkg/errors"
@@ -36,6 +38,8 @@ type Server struct {
 	pendingRequests map[string]chan json.RawMessage
 	pendingMu       sync.Mutex
 	nextRequestID   int64
+
+	fragmentProcessor *fragments.Processor
 }
 
 // ServerConfig holds configuration for the ACP server
@@ -90,6 +94,13 @@ func NewServer(opts ...Option) *Server {
 	}
 
 	s.sessionManager = session.NewManager(s.config.Provider, s.config.Model, s.config.MaxTokens, s.config.NoSkills, s.config.NoHooks)
+
+	fp, err := fragments.NewFragmentProcessor()
+	if err != nil {
+		logger.G(ctx).WithError(err).Warn("Failed to create fragment processor for slash commands")
+	}
+	s.fragmentProcessor = fp
+
 	return s
 }
 
@@ -270,7 +281,12 @@ func (s *Server) handleSessionNew(req *acptypes.Request) error {
 	result := acptypes.NewSessionResponse{
 		SessionID: sess.ID,
 	}
-	return s.sendResult(req.ID, result)
+
+	if err := s.sendResult(req.ID, result); err != nil {
+		return err
+	}
+
+	return s.sendAvailableCommands(sess.ID)
 }
 
 func (s *Server) handleSessionLoad(req *acptypes.Request) error {
@@ -289,7 +305,11 @@ func (s *Server) handleSessionLoad(req *acptypes.Request) error {
 	}
 
 	result := acptypes.LoadSessionResponse{}
-	return s.sendResult(req.ID, result)
+	if err := s.sendResult(req.ID, result); err != nil {
+		return err
+	}
+
+	return s.sendAvailableCommands(params.SessionID)
 }
 
 func (s *Server) handleSessionPrompt(req *acptypes.Request) error {
@@ -307,7 +327,17 @@ func (s *Server) handleSessionPrompt(req *acptypes.Request) error {
 		return s.sendError(req.ID, acptypes.ErrCodeInternalError, err.Error(), nil)
 	}
 
-	stopReason, err := sess.HandlePrompt(s.ctx, params.Prompt, s)
+	prompt := params.Prompt
+	if command, args, found := parseSlashCommand(params.Prompt); found && s.fragmentProcessor != nil {
+		transformedPrompt, err := s.transformSlashCommandPrompt(command, args, params.Prompt)
+		if err != nil {
+			logger.G(s.ctx).WithError(err).WithField("command", command).Debug("Failed to process slash command, using original prompt")
+		} else {
+			prompt = transformedPrompt
+		}
+	}
+
+	stopReason, err := sess.HandlePrompt(s.ctx, prompt, s)
 	if err != nil {
 		if sess.IsCancelled() {
 			stopReason = acptypes.StopReasonCancelled
@@ -320,6 +350,45 @@ func (s *Server) handleSessionPrompt(req *acptypes.Request) error {
 		StopReason: stopReason,
 	}
 	return s.sendResult(req.ID, result)
+}
+
+// transformSlashCommandPrompt transforms a slash command into a prompt with recipe content
+func (s *Server) transformSlashCommandPrompt(command, args string, originalPrompt []acptypes.ContentBlock) ([]acptypes.ContentBlock, error) {
+	kvArgs, additionalText := parseSlashCommandArgs(args)
+
+	config := &fragments.Config{
+		FragmentName: command,
+		Arguments:    kvArgs,
+	}
+
+	fragment, err := s.fragmentProcessor.LoadFragment(s.ctx, config)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to load recipe '%s'", command)
+	}
+
+	var promptBuilder strings.Builder
+	promptBuilder.WriteString(fragment.Content)
+
+	if additionalText != "" {
+		promptBuilder.WriteString("\n\n---\n\nAdditional instructions:\n")
+		promptBuilder.WriteString(additionalText)
+	}
+
+	var newPrompt []acptypes.ContentBlock
+
+	newPrompt = append(newPrompt, acptypes.ContentBlock{
+		Type: acptypes.ContentTypeText,
+		Text: promptBuilder.String(),
+	})
+
+	for _, block := range originalPrompt {
+		if block.Type == acptypes.ContentTypeText {
+			continue
+		}
+		newPrompt = append(newPrompt, block)
+	}
+
+	return newPrompt, nil
 }
 
 func (s *Server) handleSetMode(req *acptypes.Request) error {
@@ -430,6 +499,164 @@ func (s *Server) send(v any) error {
 
 	_, err = s.output.Write(append(data, '\n'))
 	return err
+}
+
+// getAvailableCommands returns available slash commands from the fragment/recipe system
+func (s *Server) getAvailableCommands() []acptypes.AvailableCommand {
+	if s.fragmentProcessor == nil {
+		return nil
+	}
+
+	frags, err := s.fragmentProcessor.ListFragmentsWithMetadata()
+	if err != nil {
+		logger.G(s.ctx).WithError(err).Warn("Failed to list fragments for slash commands")
+		return nil
+	}
+
+	var commands []acptypes.AvailableCommand
+	for _, frag := range frags {
+		name := frag.ID
+		description := frag.Metadata.Description
+		if description == "" {
+			description = "Run the " + frag.ID + " recipe"
+		}
+
+		cmd := acptypes.AvailableCommand{
+			Name:        name,
+			Description: description,
+			Input: &acptypes.AvailableCommandInput{
+				Hint: buildCommandHint(frag.Metadata.Defaults),
+			},
+		}
+		commands = append(commands, cmd)
+	}
+
+	return commands
+}
+
+// sendAvailableCommands sends the available_commands_update notification for a session
+func (s *Server) sendAvailableCommands(sessionID acptypes.SessionID) error {
+	commands := s.getAvailableCommands()
+	if len(commands) == 0 {
+		return nil
+	}
+
+	update := acptypes.AvailableCommandsUpdate{
+		SessionUpdate:     acptypes.UpdateAvailableCommands,
+		AvailableCommands: commands,
+	}
+
+	return s.SendUpdate(sessionID, update)
+}
+
+// parseSlashCommand parses a slash command from prompt content.
+// Returns the command name, any arguments after the command, and whether a command was found.
+func parseSlashCommand(prompt []acptypes.ContentBlock) (command string, args string, found bool) {
+	for _, block := range prompt {
+		if block.Type != acptypes.ContentTypeText {
+			continue
+		}
+
+		text := strings.TrimSpace(block.Text)
+		if !strings.HasPrefix(text, "/") {
+			continue
+		}
+
+		text = strings.TrimPrefix(text, "/")
+		parts := strings.SplitN(text, " ", 2)
+		command = parts[0]
+		if len(parts) > 1 {
+			args = parts[1]
+		}
+		return command, args, true
+	}
+
+	return "", "", false
+}
+
+// parseSlashCommandArgs parses key=value pairs and additional text from args string.
+// Format: "key1=value1 key2=value2 additional free text"
+// Values can be quoted: key="value with spaces"
+func parseSlashCommandArgs(args string) (kvArgs map[string]string, additionalText string) {
+	kvArgs = make(map[string]string)
+	if args == "" {
+		return kvArgs, ""
+	}
+
+	var textParts []string
+	i := 0
+	for i < len(args) {
+		// Skip leading whitespace
+		for i < len(args) && args[i] == ' ' {
+			i++
+		}
+		if i >= len(args) {
+			break
+		}
+
+		// Try to find key=value pattern
+		keyEnd := i
+		for keyEnd < len(args) && args[keyEnd] != '=' && args[keyEnd] != ' ' {
+			keyEnd++
+		}
+
+		if keyEnd < len(args) && args[keyEnd] == '=' {
+			key := args[i:keyEnd]
+			valueStart := keyEnd + 1
+
+			if valueStart >= len(args) {
+				kvArgs[key] = ""
+				i = valueStart
+				continue
+			}
+
+			var value string
+			if args[valueStart] == '"' {
+				// Quoted value
+				valueStart++
+				valueEnd := valueStart
+				for valueEnd < len(args) && args[valueEnd] != '"' {
+					valueEnd++
+				}
+				value = args[valueStart:valueEnd]
+				i = valueEnd + 1
+			} else {
+				// Unquoted value - read until space
+				valueEnd := valueStart
+				for valueEnd < len(args) && args[valueEnd] != ' ' {
+					valueEnd++
+				}
+				value = args[valueStart:valueEnd]
+				i = valueEnd
+			}
+			kvArgs[key] = value
+		} else {
+			// Not a key=value pair, collect as additional text
+			wordEnd := keyEnd
+			for wordEnd < len(args) && args[wordEnd] != ' ' {
+				wordEnd++
+			}
+			textParts = append(textParts, args[i:wordEnd])
+			i = wordEnd
+		}
+	}
+
+	additionalText = strings.Join(textParts, " ")
+	return kvArgs, additionalText
+}
+
+// buildCommandHint builds a hint string for a recipe based on its defaults
+func buildCommandHint(defaults map[string]string) string {
+	if len(defaults) == 0 {
+		return "additional instructions (optional)"
+	}
+
+	var parts []string
+	for key, defaultVal := range defaults {
+		parts = append(parts, fmt.Sprintf("%s=%s", key, defaultVal))
+	}
+
+	return fmt.Sprintf("[%s] additional instructions", strings.Join(parts, " "))
 }
 
 // Shutdown gracefully shuts down the server

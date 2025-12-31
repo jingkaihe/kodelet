@@ -236,7 +236,7 @@ const (
 	UpdateToolCall          = "tool_call"
 	UpdateToolCallUpdate    = "tool_call_update"
 	UpdatePlan              = "plan"
-	UpdateAvailableCommands = "available_commands"
+	UpdateAvailableCommands = "available_commands_update"
 	UpdateModeChange        = "mode_change"
 )
 
@@ -328,4 +328,22 @@ type PlanEntry struct {
 type PlanUpdate struct {
 	SessionUpdate string      `json:"sessionUpdate"`
 	Entries       []PlanEntry `json:"entries"`
+}
+
+// AvailableCommandInput represents input specification for a command
+type AvailableCommandInput struct {
+	Hint string `json:"hint,omitempty"`
+}
+
+// AvailableCommand represents a slash command advertised to the client
+type AvailableCommand struct {
+	Name        string                 `json:"name"`
+	Description string                 `json:"description"`
+	Input       *AvailableCommandInput `json:"input,omitempty"`
+}
+
+// AvailableCommandsUpdate represents an available_commands_update session update
+type AvailableCommandsUpdate struct {
+	SessionUpdate     string             `json:"sessionUpdate"`
+	AvailableCommands []AvailableCommand `json:"availableCommands"`
 }
