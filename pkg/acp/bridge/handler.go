@@ -310,8 +310,8 @@ func ToACPToolKind(toolName string) acptypes.ToolKind {
 		return acptypes.ToolKindRead
 	case "file_write", "file_edit":
 		return acptypes.ToolKindEdit
-	case "bash", "code_execution":
-		return acptypes.ToolKindExecute
+	// case "bash", "code_execution":
+	// 	return acptypes.ToolKindExecute
 	case "web_fetch":
 		return acptypes.ToolKindFetch
 	case "thinking":
@@ -381,10 +381,9 @@ func (g *DefaultTitleGenerator) GenerateTitle(toolName string, input string) str
 		}
 	case "bash":
 		if cmd, ok := params["command"].(string); ok {
-			if len(cmd) > 50 {
-				cmd = cmd[:50] + "..."
-			}
-			title = fmt.Sprintf("%s: %s", toolName, cmd)
+			// Escape backticks and wrap in backticks like claude-code-acp
+			escaped := strings.ReplaceAll(cmd, "`", "\\`")
+			title = "`" + escaped + "`"
 		}
 	case "grep_tool":
 		if pattern, ok := params["pattern"].(string); ok {

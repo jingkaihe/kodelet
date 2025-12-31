@@ -140,8 +140,8 @@ func TestToACPToolKind(t *testing.T) {
 		{"glob_tool", acptypes.ToolKindRead},
 		{"file_write", acptypes.ToolKindEdit},
 		{"file_edit", acptypes.ToolKindEdit},
-		{"bash", acptypes.ToolKindExecute},
-		{"code_execution", acptypes.ToolKindExecute},
+		{"bash", acptypes.ToolKindOther},           // Currently mapped to other
+		{"code_execution", acptypes.ToolKindOther}, // Currently mapped to other
 		{"web_fetch", acptypes.ToolKindFetch},
 		{"thinking", acptypes.ToolKindThink},
 		{"subagent", acptypes.ToolKindSearch},
@@ -259,14 +259,21 @@ func TestDefaultTitleGenerator_FileRead(t *testing.T) {
 func TestDefaultTitleGenerator_Bash(t *testing.T) {
 	gen := &DefaultTitleGenerator{}
 	title := gen.GenerateTitle("bash", `{"command": "ls -la"}`)
-	assert.Equal(t, "bash: ls -la", title)
+	assert.Equal(t, "`ls -la`", title)
+}
+
+func TestDefaultTitleGenerator_BashWithBackticks(t *testing.T) {
+	gen := &DefaultTitleGenerator{}
+	title := gen.GenerateTitle("bash", `{"command": "echo \u0060hello\u0060"}`)
+	// Backticks in command should be escaped
+	assert.Equal(t, "`echo \\`hello\\``", title)
 }
 
 func TestDefaultTitleGenerator_BashLongCommand(t *testing.T) {
 	gen := &DefaultTitleGenerator{}
 	longCmd := strings.Repeat("a", 100)
 	title := gen.GenerateTitle("bash", `{"command": "`+longCmd+`"}`)
-	assert.Contains(t, title, "bash: ")
+	assert.True(t, strings.HasPrefix(title, "`"))
 	assert.Contains(t, title, "...")
 	assert.LessOrEqual(t, len(title), 80)
 }

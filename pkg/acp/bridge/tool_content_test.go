@@ -27,6 +27,7 @@ func TestToolContentGenerator_GenerateBashContent(t *testing.T) {
 	gen := &ToolContentGenerator{}
 
 	t.Run("successful bash command", func(t *testing.T) {
+		// Output wrapped in code block to preserve newlines
 		result := &mockToolResult{
 			result: "hello world",
 			structuredData: tooltypes.StructuredToolResult{
@@ -44,20 +45,60 @@ func TestToolContentGenerator_GenerateBashContent(t *testing.T) {
 		}
 
 		content := gen.GenerateToolContent(result)
-		require.Len(t, content, 2)
+		require.Len(t, content, 1)
 
 		assert.Equal(t, ToolCallContentTypeContent, content[0]["type"])
-		cmdContent := content[0]["content"].(map[string]any)
-		assert.Equal(t, acptypes.ContentTypeText, cmdContent["type"])
-		assert.Equal(t, "$ echo hello", cmdContent["text"])
-
-		assert.Equal(t, ToolCallContentTypeContent, content[1]["type"])
-		outputContent := content[1]["content"].(map[string]any)
+		outputContent := content[0]["content"].(map[string]any)
 		assert.Equal(t, acptypes.ContentTypeText, outputContent["type"])
-		assert.Equal(t, "hello world", outputContent["text"])
+		// Output wrapped in code fences
+		assert.Equal(t, "```\nhello world\n```", outputContent["text"])
+	})
+
+	t.Run("bash command with multiline output", func(t *testing.T) {
+		result := &mockToolResult{
+			result: "line1\nline2\n",
+			structuredData: tooltypes.StructuredToolResult{
+				ToolName:  "bash",
+				Success:   true,
+				Timestamp: time.Now(),
+				Metadata: &tooltypes.BashMetadata{
+					Command:  "echo -e 'line1\\nline2'",
+					ExitCode: 0,
+					Output:   "line1\nline2\n",
+				},
+			},
+		}
+
+		content := gen.GenerateToolContent(result)
+		require.Len(t, content, 1)
+
+		outputContent := content[0]["content"].(map[string]any)
+		// Trailing newline preserved, no extra newline added
+		assert.Equal(t, "```\nline1\nline2\n```", outputContent["text"])
+	})
+
+	t.Run("successful bash command with no output", func(t *testing.T) {
+		result := &mockToolResult{
+			result: "",
+			structuredData: tooltypes.StructuredToolResult{
+				ToolName:  "bash",
+				Success:   true,
+				Timestamp: time.Now(),
+				Metadata: &tooltypes.BashMetadata{
+					Command:       "touch file.txt",
+					ExitCode:      0,
+					Output:        "",
+					ExecutionTime: time.Second,
+				},
+			},
+		}
+
+		content := gen.GenerateToolContent(result)
+		require.Len(t, content, 0)
 	})
 
 	t.Run("bash command with error", func(t *testing.T) {
+		// Errors also wrapped in code blocks
 		result := &mockToolResult{
 			err: "command failed",
 			structuredData: tooltypes.StructuredToolResult{
@@ -75,12 +116,12 @@ func TestToolContentGenerator_GenerateBashContent(t *testing.T) {
 		}
 
 		content := gen.GenerateToolContent(result)
-		require.Len(t, content, 3)
+		require.Len(t, content, 1)
 
-		assert.Equal(t, ToolCallContentTypeContent, content[2]["type"])
-		errContent := content[2]["content"].(map[string]any)
-		assert.Contains(t, errContent["text"], "Error: command failed")
-		assert.Contains(t, errContent["text"], "exit code: 1")
+		assert.Equal(t, ToolCallContentTypeContent, content[0]["type"])
+		errContent := content[0]["content"].(map[string]any)
+		assert.Equal(t, acptypes.ContentTypeText, errContent["type"])
+		assert.Equal(t, "```\ncommand failed\n```", errContent["text"])
 	})
 
 	t.Run("background bash process", func(t *testing.T) {
@@ -361,6 +402,46 @@ func TestLanguageToMimeType(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.lang, func(t *testing.T) {
 			assert.Equal(t, tt.expected, languageToMimeType(tt.lang))
+		})
+	}
+}
+
+func TestMarkdownEscape(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "simple text",
+			input:    "hello world",
+			expected: "```\nhello world\n```",
+		},
+		{
+			name:     "text with trailing newline",
+			input:    "hello\n",
+			expected: "```\nhello\n```",
+		},
+		{
+			name:     "multiline text",
+			input:    "line1\nline2",
+			expected: "```\nline1\nline2\n```",
+		},
+		{
+			name:     "text with code fence",
+			input:    "some ```code``` here",
+			expected: "````\nsome ```code``` here\n````",
+		},
+		{
+			name:     "text with longer fence",
+			input:    "````nested````",
+			expected: "`````\n````nested````\n`````",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, markdownEscape(tt.input))
 		})
 	}
 }

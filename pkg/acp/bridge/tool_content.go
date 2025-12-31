@@ -46,49 +46,36 @@ func (g *ToolContentGenerator) generateBashContent(structured tooltypes.Structur
 	var bgMeta tooltypes.BackgroundBashMetadata
 
 	if tooltypes.ExtractMetadata(structured.Metadata, &bashMeta) {
-		content := []map[string]any{}
-
-		if bashMeta.Command != "" {
-			content = append(content, map[string]any{
-				"type": ToolCallContentTypeContent,
-				"content": map[string]any{
-					"type": acptypes.ContentTypeText,
-					"text": fmt.Sprintf("$ %s", bashMeta.Command),
-				},
-			})
-		}
-
-		if bashMeta.Output != "" {
-			content = append(content, map[string]any{
-				"type": ToolCallContentTypeContent,
-				"content": map[string]any{
-					"type": acptypes.ContentTypeText,
-					"text": bashMeta.Output,
-				},
-			})
-		}
-
+		// Error case: wrap in code block
 		if structured.Error != "" {
-			content = append(content, map[string]any{
-				"type": ToolCallContentTypeContent,
-				"content": map[string]any{
-					"type": acptypes.ContentTypeText,
-					"text": fmt.Sprintf("Error: %s (exit code: %d)", structured.Error, bashMeta.ExitCode),
+			return []map[string]any{
+				{
+					"type": ToolCallContentTypeContent,
+					"content": map[string]any{
+						"type": acptypes.ContentTypeText,
+						"text": markdownEscape(structured.Error),
+					},
 				},
-			})
-		} else if bashMeta.ExitCode != 0 {
-			content = append(content, map[string]any{
-				"type": ToolCallContentTypeContent,
-				"content": map[string]any{
-					"type": acptypes.ContentTypeText,
-					"text": fmt.Sprintf("Exit code: %d", bashMeta.ExitCode),
-				},
-			})
+			}
 		}
 
-		return content
+		// Success case: wrap output in code block to preserve newlines
+		if bashMeta.Output != "" {
+			return []map[string]any{
+				{
+					"type": ToolCallContentTypeContent,
+					"content": map[string]any{
+						"type": acptypes.ContentTypeText,
+						"text": markdownEscape(bashMeta.Output),
+					},
+				},
+			}
+		}
+
+		return []map[string]any{}
 	}
 
+	// Background processes still show their info
 	if tooltypes.ExtractMetadata(structured.Metadata, &bgMeta) {
 		return []map[string]any{
 			{
@@ -102,6 +89,34 @@ func (g *ToolContentGenerator) generateBashContent(structured tooltypes.Structur
 	}
 
 	return g.generateTextContent(structured.Error)
+}
+
+// markdownEscape wraps text in code fences, handling nested backticks
+func markdownEscape(text string) string {
+	escape := "```"
+	// Find all code fence sequences and ensure our fence is longer
+	for i := 0; i < len(text); {
+		if text[i] == '`' {
+			j := i
+			for j < len(text) && text[j] == '`' {
+				j++
+			}
+			fenceLen := j - i
+			for fenceLen >= len(escape) {
+				escape += "`"
+			}
+			i = j
+		} else {
+			i++
+		}
+	}
+
+	result := escape + "\n" + text
+	if !strings.HasSuffix(text, "\n") {
+		result += "\n"
+	}
+	result += escape
+	return result
 }
 
 // generateFileReadContent generates content for file read results using resource type
