@@ -26,7 +26,6 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/feedback"
 	"github.com/jingkaihe/kodelet/pkg/hooks"
-	"github.com/jingkaihe/kodelet/pkg/ide"
 	"github.com/jingkaihe/kodelet/pkg/llm/prompts"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/osutil"
@@ -69,7 +68,6 @@ type Thread struct {
 	thinkingBudget         int32
 	toolResults            map[string]tooltypes.StructuredToolResult
 	subagentContextFactory llmtypes.SubagentContextFactory
-	ideStore               *ide.Store    // IDE context store (nil if IDE mode disabled)
 	hookTrigger            hooks.Trigger // Hook trigger for lifecycle hooks (zero-value = no-op)
 	mu                     sync.Mutex
 	conversationMu         sync.Mutex
@@ -142,15 +140,6 @@ func NewGoogleThread(config llmtypes.Config, subagentContextFactory llmtypes.Sub
 		thinkingBudget = configCopy.Google.ThinkingBudget
 	}
 
-	var ideStore *ide.Store
-	if configCopy.IDE && !configCopy.IsSubAgent {
-		store, err := ide.NewIDEStore()
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to create IDE store")
-		}
-		ideStore = store
-	}
-
 	// Initialize hook trigger (zero-value if discovery fails or disabled - hooks disabled)
 	var hookTrigger hooks.Trigger
 	conversationID := convtypes.GenerateID()
@@ -175,7 +164,6 @@ func NewGoogleThread(config llmtypes.Config, subagentContextFactory llmtypes.Sub
 		toolResults:            make(map[string]tooltypes.StructuredToolResult),
 		subagentContextFactory: subagentContextFactory,
 		thinkingBudget:         thinkingBudget,
-		ideStore:               ideStore,
 		hookTrigger:            hookTrigger,
 	}, nil
 }
@@ -344,12 +332,6 @@ func (t *Thread) SendMessage(
 	if !t.config.IsSubAgent {
 		if err := t.processPendingFeedback(ctx, handler); err != nil {
 			logger.G(ctx).WithError(err).Warn("failed to process pending feedback, continuing")
-		}
-	}
-
-	if !t.config.IsSubAgent && t.ideStore != nil {
-		if err := t.processIDEContext(ctx, handler); err != nil {
-			return "", errors.Wrap(err, "failed to process IDE context")
 		}
 	}
 
@@ -1291,36 +1273,6 @@ func (t *Thread) processPendingFeedback(ctx context.Context, handler llmtypes.Me
 			logger.G(ctx).WithError(err).Warn("failed to clear pending feedback, may be processed again")
 		} else {
 			logger.G(ctx).Debug("successfully cleared pending feedback")
-		}
-	}
-
-	return nil
-}
-
-func (t *Thread) processIDEContext(ctx context.Context, handler llmtypes.MessageHandler) error {
-	ideContext, err := t.ideStore.ReadContext(t.conversationID)
-	if err != nil && !errors.Is(err, ide.ErrContextNotFound) {
-		return errors.Wrap(err, "failed to read IDE context")
-	}
-
-	if ideContext != nil {
-		logger.G(ctx).WithFields(map[string]interface{}{
-			"open_files_count":  len(ideContext.OpenFiles),
-			"has_selection":     ideContext.Selection != nil,
-			"diagnostics_count": len(ideContext.Diagnostics),
-		}).Info("processing IDE context")
-
-		ideContextPrompt := ide.FormatContextPrompt(ideContext)
-		if ideContextPrompt != "" {
-			t.AddUserMessage(ctx, ideContextPrompt)
-			handler.HandleText(fmt.Sprintf("📋 IDE Context: %d files, %d diagnostics",
-				len(ideContext.OpenFiles), len(ideContext.Diagnostics)))
-		}
-
-		if err := t.ideStore.ClearContext(t.conversationID); err != nil {
-			logger.G(ctx).WithError(err).Warn("failed to clear IDE context, may be processed again")
-		} else {
-			logger.G(ctx).Debug("successfully cleared IDE context")
 		}
 	}
 

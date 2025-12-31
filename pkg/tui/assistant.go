@@ -22,7 +22,6 @@ type ChatOpts struct {
 	MaxTurns           int
 	CompactRatio       float64
 	DisableAutoCompact bool
-	IDEMode            bool
 	NoHooks            bool
 	UseWeakModel       bool
 }
@@ -45,7 +44,6 @@ func NewAssistantClient(ctx context.Context, opts ChatOpts) *AssistantClient {
 		logger.G(ctx).WithError(err).Fatal("Failed to load configuration during assistant client initialization")
 	}
 
-	config.IDE = opts.IDEMode
 	config.NoHooks = opts.NoHooks
 
 	// Set MCP configuration for system prompt

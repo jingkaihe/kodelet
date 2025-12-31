@@ -22,7 +22,6 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/feedback"
 	"github.com/jingkaihe/kodelet/pkg/hooks"
-	"github.com/jingkaihe/kodelet/pkg/ide"
 	"github.com/jingkaihe/kodelet/pkg/llm/prompts"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/sysprompt"
@@ -162,7 +161,6 @@ type Thread struct {
 	customPricing          llmtypes.CustomPricing
 	useCopilot             bool
 	subagentContextFactory llmtypes.SubagentContextFactory
-	ideStore               *ide.Store    // IDE context store (nil if IDE mode disabled)
 	hookTrigger            hooks.Trigger // Hook trigger for lifecycle hooks (zero-value = no-op)
 }
 
@@ -268,15 +266,6 @@ func NewOpenAIThread(config llmtypes.Config, subagentContextFactory llmtypes.Sub
 	// Load custom models and pricing if available
 	customModels, customPricing := loadCustomConfiguration(config)
 
-	var ideStore *ide.Store
-	if config.IDE && !config.IsSubAgent {
-		store, err := ide.NewIDEStore()
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to create IDE store")
-		}
-		ideStore = store
-	}
-
 	// Initialize hook trigger (zero-value if discovery fails or disabled - hooks disabled)
 	var hookTrigger hooks.Trigger
 	conversationID := convtypes.GenerateID()
@@ -303,7 +292,6 @@ func NewOpenAIThread(config llmtypes.Config, subagentContextFactory llmtypes.Sub
 		customPricing:          customPricing,
 		useCopilot:             useCopilot,
 		subagentContextFactory: subagentContextFactory,
-		ideStore:               ideStore,
 		hookTrigger:            hookTrigger,
 	}, nil
 }
@@ -365,12 +353,6 @@ func (t *Thread) SendMessage(
 	if opt.NoSaveConversation {
 		originalMessages = make([]openai.ChatCompletionMessage, len(t.messages))
 		copy(originalMessages, t.messages)
-	}
-
-	if !t.config.IsSubAgent && t.ideStore != nil {
-		if err := t.processIDEContext(ctx, handler); err != nil {
-			return "", errors.Wrap(err, "failed to process IDE context")
-		}
 	}
 
 	// Trigger user_message_send hook before adding user message
@@ -684,36 +666,6 @@ func (t *Thread) processMessageExchange(
 		t.SaveConversation(ctx, false)
 	}
 	return finalOutput, true, nil
-}
-
-func (t *Thread) processIDEContext(ctx context.Context, handler llmtypes.MessageHandler) error {
-	ideContext, err := t.ideStore.ReadContext(t.conversationID)
-	if err != nil && !errors.Is(err, ide.ErrContextNotFound) {
-		return errors.Wrap(err, "failed to read IDE context")
-	}
-
-	if ideContext != nil {
-		logger.G(ctx).WithFields(map[string]any{
-			"open_files_count":  len(ideContext.OpenFiles),
-			"has_selection":     ideContext.Selection != nil,
-			"diagnostics_count": len(ideContext.Diagnostics),
-		}).Info("processing IDE context")
-
-		ideContextPrompt := ide.FormatContextPrompt(ideContext)
-		if ideContextPrompt != "" {
-			t.AddUserMessage(ctx, ideContextPrompt)
-			handler.HandleText(fmt.Sprintf("📋 IDE Context: %d files, %d diagnostics",
-				len(ideContext.OpenFiles), len(ideContext.Diagnostics)))
-		}
-
-		if err := t.ideStore.ClearContext(t.conversationID); err != nil {
-			logger.G(ctx).WithError(err).Warn("failed to clear IDE context, may be processed again")
-		} else {
-			logger.G(ctx).Debug("successfully cleared IDE context")
-		}
-	}
-
-	return nil
 }
 
 func (t *Thread) processPendingFeedback(ctx context.Context, requestParams *openai.ChatCompletionRequest, handler llmtypes.MessageHandler) error {
