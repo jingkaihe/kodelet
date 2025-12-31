@@ -16,6 +16,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/osutil"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/jingkaihe/kodelet/pkg/tools"
+	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -88,7 +89,7 @@ ignoring common directories like .git and node_modules.`,
 
 		// Create the MCP manager from Viper configuration
 		mcpManager, err := tools.CreateMCPManagerFromViper(ctx)
-		if err != nil {
+		if err != nil && !errors.Is(err, tools.ErrMCPDisabled) {
 			presenter.Error(err, "Failed to create MCP manager")
 			return
 		}

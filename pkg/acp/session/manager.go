@@ -132,7 +132,9 @@ func (m *Manager) initMCP(ctx context.Context) {
 	m.mcpInitOnce.Do(func() {
 		mcpManager, err := tools.CreateMCPManagerFromViper(ctx)
 		if err != nil {
-			logger.G(ctx).WithError(err).Debug("No configured MCP servers")
+			if !errors.Is(err, tools.ErrMCPDisabled) {
+				logger.G(ctx).WithError(err).Debug("No configured MCP servers")
+			}
 			return
 		}
 

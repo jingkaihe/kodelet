@@ -41,6 +41,7 @@ type RunConfig struct {
 	IDE                bool              // Enable IDE integration mode (display conversation ID prominently)
 	NoSkills           bool              // Disable agentic skills
 	NoHooks            bool              // Disable agent lifecycle hooks
+	NoMCP              bool              // Disable MCP tools
 	ResultOnly         bool              // Only print the final agent message, no intermediate output or usage stats
 	UseWeakModel       bool              // Use weak model for SendMessage
 }
@@ -62,6 +63,7 @@ func NewRunConfig() *RunConfig {
 		IDE:                false,
 		NoSkills:           false,
 		NoHooks:            false,
+		NoMCP:              false,
 		ResultOnly:         false,
 		UseWeakModel:       false,
 	}
@@ -189,10 +191,13 @@ var runCmd = &cobra.Command{
 			}
 		}
 
-		mcpManager, err := tools.CreateMCPManagerFromViper(ctx)
-		if err != nil {
-			presenter.Error(err, "Failed to create MCP manager")
-			return
+		var mcpManager *tools.MCPManager
+		if !config.NoMCP {
+			mcpManager, err = tools.CreateMCPManagerFromViper(ctx)
+			if err != nil && !errors.Is(err, tools.ErrMCPDisabled) {
+				presenter.Error(err, "Failed to create MCP manager")
+				return
+			}
 		}
 
 		customManager, err := tools.CreateCustomToolManagerFromViper(ctx)
@@ -398,6 +403,7 @@ func init() {
 	runCmd.Flags().Bool("include-history", defaults.IncludeHistory, "Include historical conversation data in headless streaming")
 	runCmd.Flags().Bool("ide", defaults.IDE, "Enable IDE integration mode (display conversation ID prominently)")
 	runCmd.Flags().Bool("no-hooks", defaults.NoHooks, "Disable agent lifecycle hooks")
+	runCmd.Flags().Bool("no-mcp", defaults.NoMCP, "Disable MCP tools")
 	runCmd.Flags().Bool("result-only", defaults.ResultOnly, "Only print the final agent message, suppressing all intermediate output and usage statistics")
 	runCmd.Flags().Bool("use-weak-model", defaults.UseWeakModel, "Use weak model for processing")
 }
@@ -474,6 +480,10 @@ func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
 
 	if noHooks, err := cmd.Flags().GetBool("no-hooks"); err == nil {
 		config.NoHooks = noHooks
+	}
+
+	if noMCP, err := cmd.Flags().GetBool("no-mcp"); err == nil {
+		config.NoMCP = noMCP
 	}
 
 	if resultOnly, err := cmd.Flags().GetBool("result-only"); err == nil {

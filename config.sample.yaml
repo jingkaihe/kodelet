@@ -473,6 +473,10 @@ tracing:
 
 # MCP (Model Context Protocol) Configuration
 mcp:
+  # Enable/disable MCP tools globally (default: true when not specified)
+  # Set to false to completely disable MCP
+  enabled: true
+
   # Execution mode for MCP tools
   # - "direct": Traditional direct tool calling (default)
   # - "code": Code execution with filesystem API (more efficient for multi-tool workflows)

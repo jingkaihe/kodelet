@@ -71,7 +71,7 @@ Use the --draft flag to create a draft pull request that is not ready for review
 		}()
 
 		mcpManager, err := tools.CreateMCPManagerFromViper(ctx)
-		if err != nil {
+		if err != nil && !errors.Is(err, tools.ErrMCPDisabled) {
 			presenter.Error(err, "Failed to create MCP manager")
 			os.Exit(1)
 		}

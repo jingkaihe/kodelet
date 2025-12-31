@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -226,12 +227,20 @@ func GenerateToolTitle(toolName string, input string) string {
 
 	prompt := fmt.Sprintf("Summarize this tool call in under 10 words. Tool: %s. Input: %s", toolName, truncatedInput)
 
-	cmd := exec.CommandContext(ctx, "kodelet", "run",
+	// get executable itself
+	exe, err := os.Executable()
+	if err != nil {
+		return toolName
+	}
+
+	cmd := exec.CommandContext(ctx, exe,
+		"run",
 		"--no-save",
 		"--use-weak-model",
 		"--result-only",
 		"--no-hooks",
 		"--no-skills",
+		"--no-mcp",
 		prompt,
 	)
 

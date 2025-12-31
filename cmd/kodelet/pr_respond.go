@@ -101,7 +101,7 @@ Examples:
 		}()
 
 		mcpManager, err := tools.CreateMCPManagerFromViper(ctx)
-		if err != nil {
+		if err != nil && !errors.Is(err, tools.ErrMCPDisabled) {
 			presenter.Error(err, "Failed to create MCP manager")
 			return
 		}
