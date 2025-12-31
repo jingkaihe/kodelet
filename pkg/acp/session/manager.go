@@ -4,17 +4,25 @@ package session
 
 import (
 	"context"
+	"errors"
 	"sync"
 
 	"github.com/jingkaihe/kodelet/pkg/acp/acptypes"
 	"github.com/jingkaihe/kodelet/pkg/acp/bridge"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/llm"
+	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/mcp"
 	"github.com/jingkaihe/kodelet/pkg/skills"
 	"github.com/jingkaihe/kodelet/pkg/tools"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
-	"github.com/pkg/errors"
+	pkgerrors "github.com/pkg/errors"
+	"github.com/spf13/viper"
 )
+
+// ErrNoMCPServers is returned when there are no MCP servers to connect to
+var ErrNoMCPServers = errors.New("no MCP servers provided")
 
 // Session represents an ACP session wrapping a kodelet thread
 type Session struct {
@@ -136,7 +144,67 @@ func (m *Manager) buildLLMConfig() llmtypes.Config {
 		config.Skills.Enabled = false
 	}
 
+	executionMode := viper.GetString("mcp.execution_mode")
+	workspaceDir := viper.GetString("mcp.code_execution.workspace_dir")
+	if workspaceDir == "" {
+		workspaceDir = ".kodelet/mcp"
+	}
+	config.MCPExecutionMode = executionMode
+	config.MCPWorkspaceDir = workspaceDir
+
 	return config
+}
+
+// convertMCPServers converts ACP MCP server definitions to kodelet's MCPConfig
+func convertMCPServers(servers []acptypes.MCPServer) tools.MCPConfig {
+	config := tools.MCPConfig{
+		Servers: make(map[string]tools.MCPServerConfig),
+	}
+
+	for _, server := range servers {
+		serverConfig := tools.MCPServerConfig{
+			Command: server.Command,
+			Args:    server.Args,
+			Envs:    server.Env,
+		}
+
+		switch server.Type {
+		case "stdio", "":
+			serverConfig.ServerType = tools.MCPServerTypeStdio
+		case "sse", "http":
+			serverConfig.ServerType = tools.MCPServerTypeSSE
+			serverConfig.BaseURL = server.URL
+			if server.AuthHeader != "" {
+				serverConfig.Headers = map[string]string{
+					"Authorization": server.AuthHeader,
+				}
+			}
+		}
+
+		config.Servers[server.Name] = serverConfig
+	}
+
+	return config
+}
+
+// connectMCPServers creates an MCPManager from ACP MCP server definitions
+func (m *Manager) connectMCPServers(ctx context.Context, servers []acptypes.MCPServer) (*tools.MCPManager, error) {
+	if len(servers) == 0 {
+		return nil, ErrNoMCPServers
+	}
+
+	config := convertMCPServers(servers)
+
+	manager, err := tools.NewMCPManager(config)
+	if err != nil {
+		return nil, pkgerrors.Wrap(err, "failed to create MCP manager")
+	}
+
+	if err := manager.Initialize(ctx); err != nil {
+		return nil, pkgerrors.Wrap(err, "failed to initialize MCP servers")
+	}
+
+	return manager, nil
 }
 
 // NewSession creates a new session
@@ -145,7 +213,7 @@ func (m *Manager) NewSession(ctx context.Context, req acptypes.NewSessionRequest
 
 	thread, err := llm.NewThread(llmConfig)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to create LLM thread")
+		return nil, pkgerrors.Wrap(err, "failed to create LLM thread")
 	}
 
 	var stateOpts []tools.BasicStateOption
@@ -155,6 +223,33 @@ func (m *Manager) NewSession(ctx context.Context, req acptypes.NewSessionRequest
 	if !m.noSkills {
 		discoveredSkills, skillsEnabled := skills.Initialize(ctx, llmConfig)
 		stateOpts = append(stateOpts, tools.WithSkillTool(discoveredSkills, skillsEnabled))
+	}
+
+	kodeletMCPManager, err := tools.CreateMCPManagerFromViper(ctx)
+	if err != nil {
+		logger.G(ctx).WithError(err).Debug("No configured MCP servers")
+	}
+
+	if kodeletMCPManager != nil {
+		mcpSetup, err := mcp.SetupExecutionMode(ctx, kodeletMCPManager)
+		if err != nil && !errors.Is(err, mcp.ErrDirectMode) {
+			logger.G(ctx).WithError(err).Warn("Failed to set up MCP execution mode")
+		}
+
+		if err == nil && mcpSetup != nil {
+			stateOpts = append(stateOpts, mcpSetup.StateOpts...)
+		} else {
+			stateOpts = append(stateOpts, tools.WithMCPTools(kodeletMCPManager))
+		}
+	}
+
+	if len(req.MCPServers) > 0 {
+		mcpManager, err := m.connectMCPServers(ctx, req.MCPServers)
+		if err != nil && !errors.Is(err, ErrNoMCPServers) {
+			logger.G(ctx).WithError(err).Warn("Failed to connect to client MCP servers")
+		} else if mcpManager != nil {
+			stateOpts = append(stateOpts, tools.WithMCPTools(mcpManager))
+		}
 	}
 
 	state := tools.NewBasicState(ctx, stateOpts...)
@@ -179,19 +274,19 @@ func (m *Manager) NewSession(ctx context.Context, req acptypes.NewSessionRequest
 // LoadSession loads an existing session
 func (m *Manager) LoadSession(ctx context.Context, req acptypes.LoadSessionRequest) (*Session, error) {
 	if m.store == nil {
-		return nil, errors.New("conversation store not available")
+		return nil, pkgerrors.New("conversation store not available")
 	}
 
 	_, err := m.store.Load(ctx, string(req.SessionID))
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to load conversation")
+		return nil, pkgerrors.Wrap(err, "failed to load conversation")
 	}
 
 	llmConfig := m.buildLLMConfig()
 
 	thread, err := llm.NewThread(llmConfig)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to create LLM thread")
+		return nil, pkgerrors.Wrap(err, "failed to create LLM thread")
 	}
 
 	thread.SetConversationID(string(req.SessionID))
@@ -203,6 +298,33 @@ func (m *Manager) LoadSession(ctx context.Context, req acptypes.LoadSessionReque
 	if !m.noSkills {
 		discoveredSkills, skillsEnabled := skills.Initialize(ctx, llmConfig)
 		stateOpts = append(stateOpts, tools.WithSkillTool(discoveredSkills, skillsEnabled))
+	}
+
+	kodeletMCPManager, err := tools.CreateMCPManagerFromViper(ctx)
+	if err != nil {
+		logger.G(ctx).WithError(err).Debug("No configured MCP servers")
+	}
+
+	if kodeletMCPManager != nil {
+		mcpSetup, err := mcp.SetupExecutionMode(ctx, kodeletMCPManager)
+		if err != nil && !errors.Is(err, mcp.ErrDirectMode) {
+			logger.G(ctx).WithError(err).Warn("Failed to set up MCP execution mode")
+		}
+
+		if err == nil && mcpSetup != nil {
+			stateOpts = append(stateOpts, mcpSetup.StateOpts...)
+		} else {
+			stateOpts = append(stateOpts, tools.WithMCPTools(kodeletMCPManager))
+		}
+	}
+
+	if len(req.MCPServers) > 0 {
+		mcpManager, err := m.connectMCPServers(ctx, req.MCPServers)
+		if err != nil && !errors.Is(err, ErrNoMCPServers) {
+			logger.G(ctx).WithError(err).Warn("Failed to connect to client MCP servers")
+		} else if mcpManager != nil {
+			stateOpts = append(stateOpts, tools.WithMCPTools(mcpManager))
+		}
 	}
 
 	state := tools.NewBasicState(ctx, stateOpts...)
@@ -231,7 +353,7 @@ func (m *Manager) GetSession(id acptypes.SessionID) (*Session, error) {
 
 	session, ok := m.sessions[id]
 	if !ok {
-		return nil, errors.Errorf("session not found: %s", id)
+		return nil, pkgerrors.Errorf("session not found: %s", id)
 	}
 	return session, nil
 }
@@ -244,4 +366,46 @@ func (m *Manager) Cancel(id acptypes.SessionID) error {
 	}
 	session.Cancel()
 	return nil
+}
+
+// ListSessions returns a summary of all available sessions.
+// This includes both active sessions in memory and persisted sessions from the store.
+func (m *Manager) ListSessions(ctx context.Context) []acptypes.SessionSummary {
+	var summaries []acptypes.SessionSummary
+
+	m.mu.RLock()
+	for id := range m.sessions {
+		summaries = append(summaries, acptypes.SessionSummary{
+			SessionID: id,
+		})
+	}
+	m.mu.RUnlock()
+
+	if m.store != nil {
+		queryOpts := convtypes.QueryOptions{
+			Limit:     100,
+			SortBy:    "updated_at",
+			SortOrder: "desc",
+		}
+		if result, err := m.store.Query(ctx, queryOpts); err == nil {
+			existingIDs := make(map[acptypes.SessionID]bool)
+			for _, s := range summaries {
+				existingIDs[s.SessionID] = true
+			}
+
+			for _, summary := range result.ConversationSummaries {
+				sessionID := acptypes.SessionID(summary.ID)
+				if !existingIDs[sessionID] {
+					summaries = append(summaries, acptypes.SessionSummary{
+						SessionID:    sessionID,
+						CreatedAt:    summary.CreatedAt.Format("2006-01-02T15:04:05Z"),
+						Title:        summary.Summary,
+						MessageCount: summary.MessageCount,
+					})
+				}
+			}
+		}
+	}
+
+	return summaries
 }
