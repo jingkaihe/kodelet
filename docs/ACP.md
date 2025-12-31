@@ -154,6 +154,8 @@ During prompt processing, kodelet sends `session/update` notifications:
 
 ## Tools
 
+Kodelet uses its own built-in tools for all file and command operations, rather than delegating to client-side capabilities (`fs/*`, `terminal/*`). This ensures consistent behavior across all environments.
+
 All kodelet tools are exposed through ACP tool calls:
 
 | Tool | Kind | Description |

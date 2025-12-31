@@ -329,37 +329,3 @@ type PlanUpdate struct {
 	SessionUpdate string      `json:"sessionUpdate"`
 	Entries       []PlanEntry `json:"entries"`
 }
-
-// PermissionOption represents an option for permission requests
-type PermissionOption struct {
-	ID        string `json:"id"`
-	Label     string `json:"label"`
-	Shortcut  string `json:"shortcut,omitempty"`
-	IsDefault bool   `json:"isDefault,omitempty"`
-}
-
-// PermissionOutcome represents the outcome of a permission request
-type PermissionOutcome struct {
-	Outcome  string `json:"outcome"` // selected, dismissed, timeout
-	OptionID string `json:"optionId,omitempty"`
-}
-
-// ToolCallForPermission represents tool call info for permission requests
-type ToolCallForPermission struct {
-	ToolCallID string          `json:"toolCallId"`
-	ToolName   string          `json:"toolName"`
-	Input      json.RawMessage `json:"input,omitempty"`
-}
-
-// RequestPermissionParams for session/request_permission
-type RequestPermissionParams struct {
-	SessionID SessionID             `json:"sessionId"`
-	ToolCall  ToolCallForPermission `json:"toolCall"`
-	Message   string                `json:"message,omitempty"`
-	Options   []PermissionOption    `json:"options"`
-}
-
-// RequestPermissionResponse from session/request_permission
-type RequestPermissionResponse struct {
-	Outcome PermissionOutcome `json:"outcome"`
-}

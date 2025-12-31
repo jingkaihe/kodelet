@@ -32,6 +32,7 @@ Kodelet currently operates as a standalone CLI tool with its own interactive mod
 2. Building IDE-specific integrations beyond the ACP protocol
 3. Supporting deprecated SSE transport initially
 4. Implementing draft/unstable ACP features (e.g., `session/list`) until they are part of the stable protocol
+5. Using client-side capabilities (`fs/*`, `terminal/*`) - kodelet uses its own tools for file and command operations
 
 ## Decision
 
@@ -94,29 +95,13 @@ Kodelet will implement the **stdio transport**:
 ```
 pkg/acp/
 ├── server.go           # Main ACP server implementation
-├── transport.go        # Stdio transport handler
-├── handlers/
-│   ├── initialize.go   # Initialize method handler
-│   ├── authenticate.go # Authentication handler
-│   ├── session.go      # Session management (new, load, cancel)
-│   ├── prompt.go       # Prompt turn handler
-│   └── mode.go         # Session mode handler
-├── client/
-│   ├── interface.go    # Client interface for agent→client calls
-│   ├── permission.go   # Permission request handling
-│   ├── filesystem.go   # fs/read_text_file, fs/write_text_file
-│   └── terminal.go     # Terminal operations
-├── types/
-│   ├── messages.go     # JSON-RPC message types
-│   ├── session.go      # Session types
-│   ├── content.go      # Content block types
-│   └── capabilities.go # Capability definitions
+├── acptypes/
+│   └── types.go        # ACP protocol types and constants
 ├── session/
-│   ├── manager.go      # Session lifecycle management
-│   └── state.go        # Per-session state
+│   └── manager.go      # Session lifecycle management
 └── bridge/
-    ├── tools.go        # Bridge kodelet tools to ACP tool calls
-    └── updates.go      # Convert kodelet events to session/update
+    ├── handler.go      # Bridge kodelet streaming to ACP updates
+    └── tool_content.go # Convert kodelet tool results to ACP content
 ```
 
 ### Core Types
@@ -678,46 +663,6 @@ func (h *ACPStreamHandler) OnThinking(text string) error {
 }
 ```
 
-### Client Interface for Agent→Client Calls
-
-```go
-// pkg/acp/client/interface.go
-package client
-
-import (
-    "context"
-
-    "github.com/jingkaihe/kodelet/pkg/acp/types"
-)
-
-// Client interface for making calls from agent to client
-type Client interface {
-    // RequestPermission requests user permission for a tool call
-    RequestPermission(ctx context.Context, sessionID types.SessionID, toolCall types.ToolCall, options []types.PermissionOption) (*types.PermissionOutcome, error)
-    
-    // ReadTextFile reads a file via the client (if capability available)
-    ReadTextFile(ctx context.Context, sessionID types.SessionID, path string, line, limit *int) (string, error)
-    
-    // WriteTextFile writes a file via the client (if capability available)
-    WriteTextFile(ctx context.Context, sessionID types.SessionID, path, content string) error
-    
-    // CreateTerminal creates a terminal for command execution
-    CreateTerminal(ctx context.Context, sessionID types.SessionID, command string, args []string, cwd string, env map[string]string) (string, error)
-    
-    // TerminalOutput gets terminal output
-    TerminalOutput(ctx context.Context, sessionID types.SessionID, terminalID string) (*types.TerminalOutput, error)
-    
-    // WaitForTerminalExit waits for terminal to complete
-    WaitForTerminalExit(ctx context.Context, sessionID types.SessionID, terminalID string) (*types.TerminalExitStatus, error)
-    
-    // KillTerminal kills a running terminal
-    KillTerminal(ctx context.Context, sessionID types.SessionID, terminalID string) error
-    
-    // ReleaseTerminal releases terminal resources
-    ReleaseTerminal(ctx context.Context, sessionID types.SessionID, terminalID string) error
-}
-```
-
 ### Bridge: Kodelet Tools to ACP
 
 ```go
@@ -1043,10 +988,13 @@ func (c *Connector) connect(server types.MCPServer) (*mcp.Client, error) {
 - [ ] Implement `session/request_permission` for write operations
 
 ### Phase 4: Client Capabilities Integration (Week 4-5)
-- [ ] Implement client RPC call mechanism
-- [ ] Integrate `fs/read_text_file` and `fs/write_text_file` with kodelet tools
-- [ ] Implement `terminal/*` methods for bash tool integration
-- [ ] Add capability checks before using client features
+
+**Note**: Client-side file system (`fs/*`) and terminal (`terminal/*`) capabilities are out of scope. Kodelet operates exclusively in the agent space with its own tools (file_read, file_write, bash, etc.) rather than delegating to the client. This simplifies the implementation and maintains kodelet's self-contained architecture.
+
+- [x] ~~Implement client RPC call mechanism~~ (out of scope - agent uses own tools)
+- [x] ~~Integrate `fs/read_text_file` and `fs/write_text_file` with kodelet tools~~ (out of scope)
+- [x] ~~Implement `terminal/*` methods for bash tool integration~~ (out of scope)
+- [x] ~~Add capability checks before using client features~~ (out of scope)
 
 ### Phase 5: MCP Server Support (Week 5-6)
 - [x] Implement MCP server connection for stdio transport
