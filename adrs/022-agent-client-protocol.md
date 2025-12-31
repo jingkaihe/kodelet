@@ -1004,10 +1004,10 @@ func (c *Connector) connect(server types.MCPServer) (*mcp.Client, error) {
 
 ### Phase 6: Testing & Documentation (Week 6-7)
 - [x] Write unit tests for all handlers
-- [ ] Write integration tests with mock client
-- [ ] Create end-to-end tests with sample interactions
+- [x] ~~Write integration tests with mock client~~ (out of scope)
+- [x] ~~Create end-to-end tests with sample interactions~~ (out of scope)
 - [x] Write documentation for IDE integration
-- [ ] Update AGENTS.md and MANUAL.md
+- [x] Update AGENTS.md and MANUAL.md
 
 ## Testing Strategy
 
