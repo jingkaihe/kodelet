@@ -3,11 +3,15 @@
 package bridge
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"os/exec"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/acp/acptypes"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -74,10 +78,12 @@ func (h *ACPMessageHandler) HandleToolUse(toolName string, input string) {
 		rawInput = json.RawMessage(input)
 	}
 
+	title := GenerateToolTitle(toolName, input)
+
 	h.sender.SendUpdate(h.sessionID, map[string]any{
 		"sessionUpdate": acptypes.UpdateToolCall,
 		"toolCallId":    toolID,
-		"title":         toolName,
+		"title":         title,
 		"kind":          ToACPToolKind(toolName),
 		"status":        acptypes.ToolStatusPending,
 		"rawInput":      rawInput,
@@ -202,4 +208,55 @@ func ContentBlocksToMessage(blocks []acptypes.ContentBlock) (string, []string) {
 	}
 
 	return strings.Join(textParts, "\n\n"), images
+}
+
+// titleGenerationTimeout is the maximum time to wait for title generation
+const titleGenerationTimeout = 5 * time.Second
+
+// maxInputLength is the maximum length of input to send for summarization
+const maxInputLength = 500
+
+// GenerateToolTitle generates a human-readable title for a tool call.
+// It uses kodelet to summarize the input, with a fallback to the tool name.
+func GenerateToolTitle(toolName string, input string) string {
+	if input == "" {
+		return toolName
+	}
+
+	truncatedInput := input
+	if len(input) > maxInputLength {
+		truncatedInput = input[:maxInputLength] + "..."
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), titleGenerationTimeout)
+	defer cancel()
+
+	prompt := fmt.Sprintf("Summarize this tool call in under 10 words. Tool: %s. Input: %s", toolName, truncatedInput)
+
+	cmd := exec.CommandContext(ctx, "kodelet", "run",
+		"--no-save",
+		"--use-weak-model",
+		"--result-only",
+		"--no-hooks",
+		"--no-skills",
+		prompt,
+	)
+
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+
+	if err := cmd.Run(); err != nil {
+		return toolName
+	}
+
+	title := strings.TrimSpace(stdout.String())
+	if title == "" {
+		return toolName
+	}
+
+	if len(title) > 80 {
+		title = title[:77] + "..."
+	}
+
+	return title
 }

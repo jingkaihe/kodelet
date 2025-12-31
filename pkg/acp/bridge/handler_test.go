@@ -1,6 +1,7 @@
 package bridge
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/jingkaihe/kodelet/pkg/acp/acptypes"
@@ -59,7 +60,7 @@ func TestACPMessageHandler_HandleToolUse(t *testing.T) {
 
 	toolCall := sender.updates[0].(map[string]any)
 	assert.Equal(t, acptypes.UpdateToolCall, toolCall["sessionUpdate"])
-	assert.Equal(t, "file_read", toolCall["title"])
+	assert.NotEmpty(t, toolCall["title"])
 	assert.Equal(t, acptypes.ToolKindRead, toolCall["kind"])
 	assert.Equal(t, acptypes.ToolStatusPending, toolCall["status"])
 	assert.Equal(t, "call_1", toolCall["toolCallId"])
@@ -233,4 +234,20 @@ func TestContentBlocksToMessage_Empty(t *testing.T) {
 	message, images := ContentBlocksToMessage(blocks)
 	assert.Empty(t, message)
 	assert.Empty(t, images)
+}
+
+func TestGenerateToolTitle_EmptyInput(t *testing.T) {
+	title := GenerateToolTitle("file_read", "")
+	assert.Equal(t, "file_read", title)
+}
+
+func TestGenerateToolTitle_WithInput(t *testing.T) {
+	title := GenerateToolTitle("file_read", `{"file_path": "/test.txt"}`)
+	assert.NotEmpty(t, title)
+}
+
+func TestGenerateToolTitle_LongInput(t *testing.T) {
+	longInput := strings.Repeat("a", 1000)
+	title := GenerateToolTitle("bash", longInput)
+	assert.NotEmpty(t, title)
 }
