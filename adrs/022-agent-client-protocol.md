@@ -31,6 +31,7 @@ Kodelet currently operates as a standalone CLI tool with its own interactive mod
 1. Implementing an ACP client (Kodelet is an agent, not a client)
 2. Building IDE-specific integrations beyond the ACP protocol
 3. Supporting deprecated SSE transport initially
+4. Implementing draft/unstable ACP features (e.g., `session/list`) until they are part of the stable protocol
 
 ## Decision
 

@@ -51,6 +51,8 @@ kodelet acp [flags]
 
 ## Protocol Overview
 
+Kodelet implements **ACP protocol version 1** (stable). Draft/unstable features like `session/list` are not supported.
+
 ACP uses JSON-RPC 2.0 with two message types:
 - **Methods**: Request-response pairs expecting a result or error
 - **Notifications**: One-way messages without responses
