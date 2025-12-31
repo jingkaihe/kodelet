@@ -278,6 +278,12 @@ func TestDefaultTitleGenerator_BashLongCommand(t *testing.T) {
 	assert.LessOrEqual(t, len(title), 80)
 }
 
+func TestDefaultTitleGenerator_CodeExecution(t *testing.T) {
+	gen := &DefaultTitleGenerator{}
+	title := gen.GenerateTitle("code_execution", `{"code_path": "scripts/analyze.ts"}`)
+	assert.Equal(t, "Execute: analyze.ts", title)
+}
+
 func TestDefaultTitleGenerator_Grep(t *testing.T) {
 	gen := &DefaultTitleGenerator{}
 	title := gen.GenerateTitle("grep_tool", `{"pattern": "func main"}`)

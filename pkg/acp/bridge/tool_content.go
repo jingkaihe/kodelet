@@ -27,6 +27,8 @@ func (g *ToolContentGenerator) GenerateToolContent(result tooltypes.ToolResult) 
 	switch structured.ToolName {
 	case "bash", "bash_background":
 		return g.generateBashContent(structured)
+	case "code_execution":
+		return g.generateCodeExecutionContent(structured)
 	case "file_read":
 		return g.generateFileReadContent(structured)
 	case "file_write":
@@ -117,6 +119,43 @@ func markdownEscape(text string) string {
 	}
 	result += escape
 	return result
+}
+
+// generateCodeExecutionContent generates content for code execution results
+// Following the same pattern as bash: wrap output in code blocks to preserve formatting
+func (g *ToolContentGenerator) generateCodeExecutionContent(structured tooltypes.StructuredToolResult) []map[string]any {
+	var meta tooltypes.CodeExecutionMetadata
+	if !tooltypes.ExtractMetadata(structured.Metadata, &meta) {
+		return g.generateTextContent(structured.Error)
+	}
+
+	// Error case: wrap in code block
+	if structured.Error != "" {
+		return []map[string]any{
+			{
+				"type": ToolCallContentTypeContent,
+				"content": map[string]any{
+					"type": acptypes.ContentTypeText,
+					"text": markdownEscape(structured.Error),
+				},
+			},
+		}
+	}
+
+	// Success case: wrap output in code block to preserve newlines
+	if meta.Output != "" {
+		return []map[string]any{
+			{
+				"type": ToolCallContentTypeContent,
+				"content": map[string]any{
+					"type": acptypes.ContentTypeText,
+					"text": markdownEscape(meta.Output),
+				},
+			},
+		}
+	}
+
+	return []map[string]any{}
 }
 
 // generateFileReadContent generates content for file read results using resource type

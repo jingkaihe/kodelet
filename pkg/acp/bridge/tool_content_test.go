@@ -150,6 +150,76 @@ func TestToolContentGenerator_GenerateBashContent(t *testing.T) {
 	})
 }
 
+func TestToolContentGenerator_GenerateCodeExecutionContent(t *testing.T) {
+	gen := &ToolContentGenerator{}
+
+	t.Run("successful code execution", func(t *testing.T) {
+		result := &mockToolResult{
+			result: "execution output",
+			structuredData: tooltypes.StructuredToolResult{
+				ToolName:  "code_execution",
+				Success:   true,
+				Timestamp: time.Now(),
+				Metadata: &tooltypes.CodeExecutionMetadata{
+					Code:    "console.log('hello')",
+					Output:  "hello\nworld",
+					Runtime: "node",
+				},
+			},
+		}
+
+		content := gen.GenerateToolContent(result)
+		require.Len(t, content, 1)
+
+		assert.Equal(t, ToolCallContentTypeContent, content[0]["type"])
+		outputContent := content[0]["content"].(map[string]any)
+		assert.Equal(t, acptypes.ContentTypeText, outputContent["type"])
+		// Output wrapped in code fences
+		assert.Equal(t, "```\nhello\nworld\n```", outputContent["text"])
+	})
+
+	t.Run("code execution with no output", func(t *testing.T) {
+		result := &mockToolResult{
+			result: "",
+			structuredData: tooltypes.StructuredToolResult{
+				ToolName:  "code_execution",
+				Success:   true,
+				Timestamp: time.Now(),
+				Metadata: &tooltypes.CodeExecutionMetadata{
+					Code:    "// no output",
+					Output:  "",
+					Runtime: "node",
+				},
+			},
+		}
+
+		content := gen.GenerateToolContent(result)
+		require.Len(t, content, 0)
+	})
+
+	t.Run("code execution with error", func(t *testing.T) {
+		result := &mockToolResult{
+			err: "syntax error",
+			structuredData: tooltypes.StructuredToolResult{
+				ToolName:  "code_execution",
+				Success:   false,
+				Error:     "syntax error",
+				Timestamp: time.Now(),
+				Metadata: &tooltypes.CodeExecutionMetadata{
+					Code:    "invalid code",
+					Runtime: "node",
+				},
+			},
+		}
+
+		content := gen.GenerateToolContent(result)
+		require.Len(t, content, 1)
+
+		errContent := content[0]["content"].(map[string]any)
+		assert.Equal(t, "```\nsyntax error\n```", errContent["text"])
+	})
+}
+
 func TestToolContentGenerator_GenerateFileReadContent(t *testing.T) {
 	gen := &ToolContentGenerator{}
 
