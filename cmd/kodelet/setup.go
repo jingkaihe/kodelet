@@ -186,7 +186,6 @@ profiles:
 		presenter.Info("  kodelet chat                          # Start interactive chat (default profile)")
 		presenter.Info("  kodelet run \"your query\"              # Run one-shot query")
 		presenter.Info("  kodelet run --profile hybrid \"query\"  # Use hybrid profile (Claude + OpenAI subagent)")
-		presenter.Info("  kodelet watch                         # Monitor file changes")
 		presenter.Info("  kodelet serve                         # Start web UI server")
 		presenter.Info("  kodelet --help                        # Show all available commands")
 

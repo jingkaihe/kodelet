@@ -175,7 +175,6 @@ For comprehensive usage documentation and examples, see [./docs/MANUAL.md](./doc
 # Core commands
 kodelet run "query"                    # One-shot execution
 kodelet chat                           # Interactive mode
-kodelet watch                          # File watcher
 kodelet serve [--host HOST] [--port PORT]  # Web UI server (default: localhost:8080)
 
 # Fragment/Recipe system (see docs/FRAGMENTS.md)

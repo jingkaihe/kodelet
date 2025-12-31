@@ -142,6 +142,7 @@ func (h *ACPMessageHandler) HandleToolUse(toolCallID string, toolName string, in
 // - file_write: Diff with null oldText (new file)
 // - file_edit: Diff with oldText and newText
 // - subagent: Question and response as text content
+// - todo_read/todo_write: Also sends plan update via session/update
 func (h *ACPMessageHandler) HandleToolResult(toolCallID string, _ string, result tooltypes.ToolResult) {
 	status := acptypes.ToolStatusCompleted
 	if result.IsError() {
@@ -163,6 +164,37 @@ func (h *ACPMessageHandler) HandleToolResult(toolCallID string, _ string, result
 	}
 
 	h.sender.SendUpdate(h.sessionID, update)
+
+	// Send plan update for todo tools (ACP agent-plan protocol)
+	h.maybeSendPlanUpdate(result)
+}
+
+// maybeSendPlanUpdate sends a plan update if the tool result is from a todo tool
+func (h *ACPMessageHandler) maybeSendPlanUpdate(result tooltypes.ToolResult) {
+	structured := result.StructuredData()
+	if structured.ToolName != "todo_read" && structured.ToolName != "todo_write" {
+		return
+	}
+
+	var meta tooltypes.TodoMetadata
+	if !tooltypes.ExtractMetadata(structured.Metadata, &meta) {
+		return
+	}
+
+	// Convert TodoItems to ACP PlanEntries
+	entries := make([]acptypes.PlanEntry, 0, len(meta.TodoList))
+	for _, item := range meta.TodoList {
+		entries = append(entries, acptypes.PlanEntry{
+			Content:  item.Content,
+			Priority: acptypes.PlanEntryPriority(item.Priority),
+			Status:   acptypes.PlanEntryStatus(item.Status),
+		})
+	}
+
+	h.sender.SendUpdate(h.sessionID, acptypes.PlanUpdate{
+		SessionUpdate: acptypes.UpdatePlan,
+		Entries:       entries,
+	})
 }
 
 // extractLocations extracts file locations for "follow-along" feature from tool result

@@ -317,6 +317,39 @@ type ThoughtChunk struct {
 	Content       ContentBlock `json:"content"`
 }
 
+// PlanEntryPriority represents the priority of a plan entry
+type PlanEntryPriority string
+
+// PlanEntryPriority values
+const (
+	PlanPriorityHigh   PlanEntryPriority = "high"
+	PlanPriorityMedium PlanEntryPriority = "medium"
+	PlanPriorityLow    PlanEntryPriority = "low"
+)
+
+// PlanEntryStatus represents the status of a plan entry
+type PlanEntryStatus string
+
+// PlanEntryStatus values
+const (
+	PlanStatusPending    PlanEntryStatus = "pending"
+	PlanStatusInProgress PlanEntryStatus = "in_progress"
+	PlanStatusCompleted  PlanEntryStatus = "completed"
+)
+
+// PlanEntry represents a single entry in an agent plan
+type PlanEntry struct {
+	Content  string            `json:"content"`
+	Priority PlanEntryPriority `json:"priority"`
+	Status   PlanEntryStatus   `json:"status"`
+}
+
+// PlanUpdate represents a plan session update
+type PlanUpdate struct {
+	SessionUpdate string      `json:"sessionUpdate"`
+	Entries       []PlanEntry `json:"entries"`
+}
+
 // PermissionOption represents an option for permission requests
 type PermissionOption struct {
 	ID        string `json:"id"`

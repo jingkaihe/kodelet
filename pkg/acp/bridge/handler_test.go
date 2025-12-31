@@ -441,3 +441,124 @@ func TestExtractLocationsFromInput(t *testing.T) {
 		})
 	}
 }
+
+func TestACPMessageHandler_MaybeSendPlanUpdate(t *testing.T) {
+	t.Run("sends plan update for todo_write", func(t *testing.T) {
+		sender := &mockSender{}
+		handler := NewACPMessageHandler(sender, "test-session")
+
+		result := &mockTodoToolResult{
+			toolName: "todo_write",
+			todoItems: []tooltypes.TodoItem{
+				{ID: "1", Content: "First task", Status: "pending", Priority: "high"},
+				{ID: "2", Content: "Second task", Status: "in_progress", Priority: "medium"},
+				{ID: "3", Content: "Completed task", Status: "completed", Priority: "low"},
+			},
+		}
+
+		handler.maybeSendPlanUpdate(result)
+
+		assert.Len(t, sender.updates, 1)
+		update := sender.updates[0].(acptypes.PlanUpdate)
+		assert.Equal(t, acptypes.UpdatePlan, update.SessionUpdate)
+		assert.Len(t, update.Entries, 3)
+
+		assert.Equal(t, "First task", update.Entries[0].Content)
+		assert.Equal(t, acptypes.PlanPriorityHigh, update.Entries[0].Priority)
+		assert.Equal(t, acptypes.PlanStatusPending, update.Entries[0].Status)
+
+		assert.Equal(t, "Second task", update.Entries[1].Content)
+		assert.Equal(t, acptypes.PlanPriorityMedium, update.Entries[1].Priority)
+		assert.Equal(t, acptypes.PlanStatusInProgress, update.Entries[1].Status)
+
+		assert.Equal(t, "Completed task", update.Entries[2].Content)
+		assert.Equal(t, acptypes.PlanPriorityLow, update.Entries[2].Priority)
+		assert.Equal(t, acptypes.PlanStatusCompleted, update.Entries[2].Status)
+	})
+
+	t.Run("sends plan update for todo_read", func(t *testing.T) {
+		sender := &mockSender{}
+		handler := NewACPMessageHandler(sender, "test-session")
+
+		result := &mockTodoToolResult{
+			toolName: "todo_read",
+			todoItems: []tooltypes.TodoItem{
+				{ID: "1", Content: "Read task", Status: "pending", Priority: "medium"},
+			},
+		}
+
+		handler.maybeSendPlanUpdate(result)
+
+		assert.Len(t, sender.updates, 1)
+		update := sender.updates[0].(acptypes.PlanUpdate)
+		assert.Equal(t, acptypes.UpdatePlan, update.SessionUpdate)
+		assert.Len(t, update.Entries, 1)
+		assert.Equal(t, "Read task", update.Entries[0].Content)
+	})
+
+	t.Run("does not send plan update for other tools", func(t *testing.T) {
+		sender := &mockSender{}
+		handler := NewACPMessageHandler(sender, "test-session")
+
+		result := &mockNonTodoToolResult{
+			toolName: "file_read",
+		}
+
+		handler.maybeSendPlanUpdate(result)
+
+		assert.Len(t, sender.updates, 0)
+	})
+
+	t.Run("handles empty todo list", func(t *testing.T) {
+		sender := &mockSender{}
+		handler := NewACPMessageHandler(sender, "test-session")
+
+		result := &mockTodoToolResult{
+			toolName:  "todo_write",
+			todoItems: []tooltypes.TodoItem{},
+		}
+
+		handler.maybeSendPlanUpdate(result)
+
+		assert.Len(t, sender.updates, 1)
+		update := sender.updates[0].(acptypes.PlanUpdate)
+		assert.Len(t, update.Entries, 0)
+	})
+}
+
+// mockTodoToolResult is a mock tool result for todo tools
+type mockTodoToolResult struct {
+	toolName  string
+	todoItems []tooltypes.TodoItem
+}
+
+func (m *mockTodoToolResult) AssistantFacing() string { return "" }
+func (m *mockTodoToolResult) IsError() bool           { return false }
+func (m *mockTodoToolResult) GetError() string        { return "" }
+func (m *mockTodoToolResult) GetResult() string       { return "" }
+func (m *mockTodoToolResult) StructuredData() tooltypes.StructuredToolResult {
+	return tooltypes.StructuredToolResult{
+		ToolName: m.toolName,
+		Success:  true,
+		Metadata: &tooltypes.TodoMetadata{
+			Action:   "write",
+			TodoList: m.todoItems,
+		},
+	}
+}
+
+// mockNonTodoToolResult is a mock tool result for non-todo tools
+type mockNonTodoToolResult struct {
+	toolName string
+}
+
+func (m *mockNonTodoToolResult) AssistantFacing() string { return "" }
+func (m *mockNonTodoToolResult) IsError() bool           { return false }
+func (m *mockNonTodoToolResult) GetError() string        { return "" }
+func (m *mockNonTodoToolResult) GetResult() string       { return "" }
+func (m *mockNonTodoToolResult) StructuredData() tooltypes.StructuredToolResult {
+	return tooltypes.StructuredToolResult{
+		ToolName: m.toolName,
+		Success:  true,
+	}
+}
