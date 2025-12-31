@@ -3,21 +3,22 @@
 package bridge
 
 import (
-	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/acp/acptypes"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
 
 var _ llmtypes.StreamingMessageHandler = (*ACPMessageHandler)(nil)
+
+// TitleGenerator generates human-readable titles for tool calls
+type TitleGenerator interface {
+	GenerateTitle(toolName string, input string) string
+}
 
 // UpdateSender interface for sending session updates
 type UpdateSender interface {
@@ -26,20 +27,36 @@ type UpdateSender interface {
 
 // ACPMessageHandler bridges kodelet's MessageHandler to ACP session updates
 type ACPMessageHandler struct {
-	sender    UpdateSender
-	sessionID acptypes.SessionID
+	sender         UpdateSender
+	sessionID      acptypes.SessionID
+	titleGenerator TitleGenerator
 
 	currentToolID   string
 	currentToolName string
 	toolMu          sync.Mutex
 }
 
-// NewACPMessageHandler creates a new ACP message handler
-func NewACPMessageHandler(sender UpdateSender, sessionID acptypes.SessionID) *ACPMessageHandler {
-	return &ACPMessageHandler{
-		sender:    sender,
-		sessionID: sessionID,
+// HandlerOption is a functional option for configuring ACPMessageHandler
+type HandlerOption func(*ACPMessageHandler)
+
+// WithTitleGenerator sets a custom title generator
+func WithTitleGenerator(tg TitleGenerator) HandlerOption {
+	return func(h *ACPMessageHandler) {
+		h.titleGenerator = tg
 	}
+}
+
+// NewACPMessageHandler creates a new ACP message handler
+func NewACPMessageHandler(sender UpdateSender, sessionID acptypes.SessionID, opts ...HandlerOption) *ACPMessageHandler {
+	h := &ACPMessageHandler{
+		sender:         sender,
+		sessionID:      sessionID,
+		titleGenerator: &DefaultTitleGenerator{},
+	}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h
 }
 
 // HandleText sends complete text as agent_message_chunk
@@ -76,7 +93,7 @@ func (h *ACPMessageHandler) HandleToolUse(toolCallID string, toolName string, in
 		rawInput = json.RawMessage(input)
 	}
 
-	title := GenerateToolTitle(toolName, input)
+	title := h.titleGenerator.GenerateTitle(toolName, input)
 
 	h.sender.SendUpdate(h.sessionID, map[string]any{
 		"sessionUpdate": acptypes.UpdateToolCall,
@@ -204,60 +221,70 @@ func ContentBlocksToMessage(blocks []acptypes.ContentBlock) (string, []string) {
 	return strings.Join(textParts, "\n\n"), images
 }
 
-// titleGenerationTimeout is the maximum time to wait for title generation
-const titleGenerationTimeout = 5 * time.Second
+// maxTitleLength is the maximum length of a generated title
+const maxTitleLength = 80
 
-// maxInputLength is the maximum length of input to send for summarization
-const maxInputLength = 500
+// DefaultTitleGenerator generates titles using deterministic string formatting
+type DefaultTitleGenerator struct{}
 
-// GenerateToolTitle generates a human-readable title for a tool call.
-// It uses kodelet to summarize the input, with a fallback to the tool name.
-func GenerateToolTitle(toolName string, input string) string {
+// GenerateTitle generates a human-readable title for a tool call
+func (g *DefaultTitleGenerator) GenerateTitle(toolName string, input string) string {
 	if input == "" {
 		return toolName
 	}
 
-	truncatedInput := input
-	if len(input) > maxInputLength {
-		truncatedInput = input[:maxInputLength] + "..."
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), titleGenerationTimeout)
-	defer cancel()
-
-	prompt := fmt.Sprintf("Summarize this tool call in under 10 words. Tool: %s. Input: %s", toolName, truncatedInput)
-
-	// get executable itself
-	exe, err := os.Executable()
-	if err != nil {
+	var params map[string]any
+	if err := json.Unmarshal([]byte(input), &params); err != nil {
 		return toolName
 	}
 
-	cmd := exec.CommandContext(ctx, exe,
-		"run",
-		"--no-save",
-		"--use-weak-model",
-		"--result-only",
-		"--no-hooks",
-		"--no-skills",
-		"--no-mcp",
-		prompt,
-	)
-
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
-
-	if err := cmd.Run(); err != nil {
-		return toolName
+	var title string
+	switch toolName {
+	case "file_read", "file_write", "file_edit":
+		if path, ok := params["file_path"].(string); ok {
+			title = fmt.Sprintf("%s: %s", toolName, filepath.Base(path))
+		}
+	case "bash":
+		if cmd, ok := params["command"].(string); ok {
+			if len(cmd) > 50 {
+				cmd = cmd[:50] + "..."
+			}
+			title = fmt.Sprintf("%s: %s", toolName, cmd)
+		}
+	case "grep_tool":
+		if pattern, ok := params["pattern"].(string); ok {
+			title = fmt.Sprintf("grep: %s", pattern)
+		}
+	case "glob_tool":
+		if pattern, ok := params["pattern"].(string); ok {
+			title = fmt.Sprintf("glob: %s", pattern)
+		}
+	case "web_fetch":
+		if url, ok := params["url"].(string); ok {
+			if len(url) > 50 {
+				url = url[:50] + "..."
+			}
+			title = fmt.Sprintf("fetch: %s", url)
+		}
+	case "subagent":
+		if question, ok := params["question"].(string); ok {
+			if len(question) > 50 {
+				question = question[:50] + "..."
+			}
+			title = fmt.Sprintf("subagent: %s", question)
+		}
+	case "image_recognition":
+		if path, ok := params["image_path"].(string); ok {
+			title = fmt.Sprintf("image: %s", filepath.Base(path))
+		}
 	}
 
-	title := strings.TrimSpace(stdout.String())
 	if title == "" {
 		return toolName
 	}
 
-	if len(title) > 80 {
-		title = title[:77] + "..."
+	if len(title) > maxTitleLength {
+		title = title[:maxTitleLength-3] + "..."
 	}
 
 	return title

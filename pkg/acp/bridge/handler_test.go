@@ -17,6 +17,13 @@ func (m *mockSender) SendUpdate(_ acptypes.SessionID, update any) error {
 	return nil
 }
 
+// mockTitleGenerator is a simple mock for testing
+type mockTitleGenerator struct{}
+
+func (m *mockTitleGenerator) GenerateTitle(toolName string, _ string) string {
+	return toolName + "_title"
+}
+
 func TestACPMessageHandler_HandleText(t *testing.T) {
 	sender := &mockSender{}
 	handler := NewACPMessageHandler(sender, "test-session")
@@ -52,7 +59,7 @@ func TestACPMessageHandler_HandleTextDelta(t *testing.T) {
 
 func TestACPMessageHandler_HandleToolUse(t *testing.T) {
 	sender := &mockSender{}
-	handler := NewACPMessageHandler(sender, "test-session")
+	handler := NewACPMessageHandler(sender, "test-session", WithTitleGenerator(&mockTitleGenerator{}))
 
 	handler.HandleToolUse("call_1", "file_read", `{"file_path": "/test.txt"}`)
 
@@ -60,7 +67,7 @@ func TestACPMessageHandler_HandleToolUse(t *testing.T) {
 
 	toolCall := sender.updates[0].(map[string]any)
 	assert.Equal(t, acptypes.UpdateToolCall, toolCall["sessionUpdate"])
-	assert.NotEmpty(t, toolCall["title"])
+	assert.Equal(t, "file_read_title", toolCall["title"])
 	assert.Equal(t, acptypes.ToolKindRead, toolCall["kind"])
 	assert.Equal(t, acptypes.ToolStatusPending, toolCall["status"])
 	assert.Equal(t, "call_1", toolCall["toolCallId"])
@@ -73,7 +80,7 @@ func TestACPMessageHandler_HandleToolUse(t *testing.T) {
 
 func TestACPMessageHandler_HandleToolResult(t *testing.T) {
 	sender := &mockSender{}
-	handler := NewACPMessageHandler(sender, "test-session")
+	handler := NewACPMessageHandler(sender, "test-session", WithTitleGenerator(&mockTitleGenerator{}))
 
 	handler.HandleToolUse("call_1", "file_read", `{}`)
 	handler.HandleToolResult("call_1", "file_read", "file contents here")
@@ -88,7 +95,7 @@ func TestACPMessageHandler_HandleToolResult(t *testing.T) {
 
 func TestACPMessageHandler_HandleToolResult_Error(t *testing.T) {
 	sender := &mockSender{}
-	handler := NewACPMessageHandler(sender, "test-session")
+	handler := NewACPMessageHandler(sender, "test-session", WithTitleGenerator(&mockTitleGenerator{}))
 
 	handler.HandleToolUse("call_1", "bash", `{}`)
 	handler.HandleToolResult("call_1", "bash", "Error: command not found")
@@ -236,18 +243,47 @@ func TestContentBlocksToMessage_Empty(t *testing.T) {
 	assert.Empty(t, images)
 }
 
-func TestGenerateToolTitle_EmptyInput(t *testing.T) {
-	title := GenerateToolTitle("file_read", "")
+func TestDefaultTitleGenerator_EmptyInput(t *testing.T) {
+	gen := &DefaultTitleGenerator{}
+	title := gen.GenerateTitle("file_read", "")
 	assert.Equal(t, "file_read", title)
 }
 
-func TestGenerateToolTitle_WithInput(t *testing.T) {
-	title := GenerateToolTitle("file_read", `{"file_path": "/test.txt"}`)
-	assert.NotEmpty(t, title)
+func TestDefaultTitleGenerator_FileRead(t *testing.T) {
+	gen := &DefaultTitleGenerator{}
+	title := gen.GenerateTitle("file_read", `{"file_path": "/path/to/test.txt"}`)
+	assert.Equal(t, "file_read: test.txt", title)
 }
 
-func TestGenerateToolTitle_LongInput(t *testing.T) {
-	longInput := strings.Repeat("a", 1000)
-	title := GenerateToolTitle("bash", longInput)
-	assert.NotEmpty(t, title)
+func TestDefaultTitleGenerator_Bash(t *testing.T) {
+	gen := &DefaultTitleGenerator{}
+	title := gen.GenerateTitle("bash", `{"command": "ls -la"}`)
+	assert.Equal(t, "bash: ls -la", title)
+}
+
+func TestDefaultTitleGenerator_BashLongCommand(t *testing.T) {
+	gen := &DefaultTitleGenerator{}
+	longCmd := strings.Repeat("a", 100)
+	title := gen.GenerateTitle("bash", `{"command": "`+longCmd+`"}`)
+	assert.Contains(t, title, "bash: ")
+	assert.Contains(t, title, "...")
+	assert.LessOrEqual(t, len(title), 80)
+}
+
+func TestDefaultTitleGenerator_Grep(t *testing.T) {
+	gen := &DefaultTitleGenerator{}
+	title := gen.GenerateTitle("grep_tool", `{"pattern": "func main"}`)
+	assert.Equal(t, "grep: func main", title)
+}
+
+func TestDefaultTitleGenerator_InvalidJSON(t *testing.T) {
+	gen := &DefaultTitleGenerator{}
+	title := gen.GenerateTitle("file_read", "not json")
+	assert.Equal(t, "file_read", title)
+}
+
+func TestDefaultTitleGenerator_UnknownTool(t *testing.T) {
+	gen := &DefaultTitleGenerator{}
+	title := gen.GenerateTitle("unknown_tool", `{"some": "param"}`)
+	assert.Equal(t, "unknown_tool", title)
 }
