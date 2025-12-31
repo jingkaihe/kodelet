@@ -21,10 +21,10 @@ over stdio using JSON-RPC 2.0.
 Example:
   # Launch as subprocess from an IDE
   kodelet acp
-  
+
   # With custom model
   kodelet acp --model claude-sonnet-4-5-20250929
-  
+
   # Disable skills
   kodelet acp --no-skills`,
 	RunE: runACP,
