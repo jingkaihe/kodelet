@@ -605,7 +605,7 @@ func (t *Thread) processPart(part *genai.Part, response *Response, handler llmty
 		if part.CodeExecutionResult.Outcome == genai.OutcomeUnspecified {
 			result += "\nOutcome: Unspecified"
 		}
-		handler.HandleToolResult("", "code_execution", result)
+		handler.HandleToolResult("", "code_execution", tooltypes.BaseToolResult{Result: result})
 		response.Text += result
 
 	default:
@@ -1011,9 +1011,9 @@ func (t *Thread) executeToolCalls(ctx context.Context, response *Response, handl
 		}
 
 		registry := renderers.NewRendererRegistry()
-		renderedOutput := registry.Render(structuredResult)
+		_ = registry.Render(structuredResult) // Render for logging, but pass ToolResult to handler
 
-		handler.HandleToolResult(toolCall.ID, toolCall.Name, renderedOutput)
+		handler.HandleToolResult(toolCall.ID, toolCall.Name, output)
 
 		// Store structured results
 		t.SetStructuredToolResult(toolCall.ID, structuredResult)

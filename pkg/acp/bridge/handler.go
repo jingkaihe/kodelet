@@ -11,6 +11,7 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/acp/acptypes"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
 var _ llmtypes.StreamingMessageHandler = (*ACPMessageHandler)(nil)
@@ -27,9 +28,10 @@ type UpdateSender interface {
 
 // ACPMessageHandler bridges kodelet's MessageHandler to ACP session updates
 type ACPMessageHandler struct {
-	sender         UpdateSender
-	sessionID      acptypes.SessionID
-	titleGenerator TitleGenerator
+	sender           UpdateSender
+	sessionID        acptypes.SessionID
+	titleGenerator   TitleGenerator
+	contentGenerator *ToolContentGenerator
 
 	currentToolID   string
 	currentToolName string
@@ -49,9 +51,10 @@ func WithTitleGenerator(tg TitleGenerator) HandlerOption {
 // NewACPMessageHandler creates a new ACP message handler
 func NewACPMessageHandler(sender UpdateSender, sessionID acptypes.SessionID, opts ...HandlerOption) *ACPMessageHandler {
 	h := &ACPMessageHandler{
-		sender:         sender,
-		sessionID:      sessionID,
-		titleGenerator: &DefaultTitleGenerator{},
+		sender:           sender,
+		sessionID:        sessionID,
+		titleGenerator:   &DefaultTitleGenerator{},
+		contentGenerator: &ToolContentGenerator{},
 	}
 	for _, opt := range opts {
 		opt(h)
@@ -111,27 +114,75 @@ func (h *ACPMessageHandler) HandleToolUse(toolCallID string, toolName string, in
 	})
 }
 
-// HandleToolResult sends tool_call_update with result
-func (h *ACPMessageHandler) HandleToolResult(toolCallID string, _ string, result string) {
+// HandleToolResult sends tool_call_update with rich, tool-specific content
+// This method generates tailored ACP content based on the tool type:
+// - bash: Command and output as text content
+// - file_read: Resource content with file URI and mime type
+// - file_write: Diff with null oldText (new file)
+// - file_edit: Diff with oldText and newText
+// - subagent: Question and response as text content
+func (h *ACPMessageHandler) HandleToolResult(toolCallID string, _ string, result tooltypes.ToolResult) {
 	status := acptypes.ToolStatusCompleted
-	if strings.HasPrefix(result, "Error:") || strings.Contains(result, "error:") {
+	if result.IsError() {
 		status = acptypes.ToolStatusFailed
 	}
 
-	h.sender.SendUpdate(h.sessionID, map[string]any{
+	content := h.contentGenerator.GenerateToolContent(result)
+
+	update := map[string]any{
 		"sessionUpdate": acptypes.UpdateToolCallUpdate,
 		"toolCallId":    toolCallID,
 		"status":        status,
-		"content": []map[string]any{
-			{
-				"type": "content",
-				"content": map[string]any{
-					"type": acptypes.ContentTypeText,
-					"text": result,
-				},
-			},
-		},
-	})
+		"content":       content,
+	}
+
+	pathInfo := h.extractPathInfo(result)
+	if pathInfo != nil {
+		update["path"] = pathInfo["path"]
+		if line, ok := pathInfo["line"]; ok {
+			update["line"] = line
+		}
+	}
+
+	h.sender.SendUpdate(h.sessionID, update)
+}
+
+// extractPathInfo extracts path and line information for "follow-along" feature
+func (h *ACPMessageHandler) extractPathInfo(result tooltypes.ToolResult) map[string]any {
+	structured := result.StructuredData()
+
+	switch structured.ToolName {
+	case "file_read":
+		var meta tooltypes.FileReadMetadata
+		if tooltypes.ExtractMetadata(structured.Metadata, &meta) {
+			info := map[string]any{"path": meta.FilePath}
+			if meta.Offset > 0 {
+				info["line"] = meta.Offset
+			}
+			return info
+		}
+	case "file_write":
+		var meta tooltypes.FileWriteMetadata
+		if tooltypes.ExtractMetadata(structured.Metadata, &meta) {
+			return map[string]any{"path": meta.FilePath}
+		}
+	case "file_edit":
+		var meta tooltypes.FileEditMetadata
+		if tooltypes.ExtractMetadata(structured.Metadata, &meta) {
+			info := map[string]any{"path": meta.FilePath}
+			if len(meta.Edits) > 0 && meta.Edits[0].StartLine > 0 {
+				info["line"] = meta.Edits[0].StartLine
+			}
+			return info
+		}
+	case "bash":
+		var meta tooltypes.BashMetadata
+		if tooltypes.ExtractMetadata(structured.Metadata, &meta) && meta.WorkingDir != "" {
+			return map[string]any{"path": meta.WorkingDir}
+		}
+	}
+
+	return nil
 }
 
 // HandleThinking sends agent_thought_chunk

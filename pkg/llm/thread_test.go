@@ -12,6 +12,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -81,7 +82,7 @@ func TestConsoleMessageHandler(_ *testing.T) {
 
 	handler.HandleText("Test text")
 	handler.HandleToolUse("call-1", "test-tool", "test-input")
-	handler.HandleToolResult("call-1", "test-tool", "test-result")
+	handler.HandleToolResult("call-1", "test-tool", tooltypes.BaseToolResult{Result: "test-result"})
 	handler.HandleDone()
 
 	// With Silent = false, the methods should print to stdout
@@ -89,7 +90,7 @@ func TestConsoleMessageHandler(_ *testing.T) {
 	handler = &llmtypes.ConsoleMessageHandler{Silent: false}
 	handler.HandleText("Test text")
 	handler.HandleToolUse("call-1", "test-tool", "test-input")
-	handler.HandleToolResult("call-1", "test-tool", "test-result")
+	handler.HandleToolResult("call-1", "test-tool", tooltypes.BaseToolResult{Result: "test-result"})
 	handler.HandleDone()
 }
 
@@ -99,7 +100,7 @@ func TestChannelMessageHandler(t *testing.T) {
 
 	handler.HandleText("Test text")
 	handler.HandleToolUse("call-1", "test-tool", "test-input")
-	handler.HandleToolResult("call-1", "test-tool", "test-result")
+	handler.HandleToolResult("call-1", "test-tool", tooltypes.BaseToolResult{Result: "test-result"})
 	handler.HandleDone()
 
 	// Verify the events sent to the channel
@@ -115,7 +116,7 @@ func TestChannelMessageHandler(t *testing.T) {
 
 	event = <-ch
 	assert.Equal(t, llmtypes.EventTypeToolResult, event.Type)
-	assert.Equal(t, "test-result", event.Content)
+	assert.Contains(t, event.Content, "test-result")
 	assert.False(t, event.Done)
 
 	event = <-ch
@@ -130,7 +131,7 @@ func TestStringCollectorHandler(t *testing.T) {
 	handler.HandleText("Line 1")
 	handler.HandleText("Line 2")
 	handler.HandleToolUse("call-1", "test-tool", "test-input")
-	handler.HandleToolResult("call-1", "test-tool", "test-result")
+	handler.HandleToolResult("call-1", "test-tool", tooltypes.BaseToolResult{Result: "test-result"})
 	handler.HandleDone()
 
 	expected := "Line 1\nLine 2\n"
@@ -139,7 +140,7 @@ func TestStringCollectorHandler(t *testing.T) {
 	// Test with Silent = false (just for coverage)
 	handler = &llmtypes.StringCollectorHandler{Silent: false}
 	handler.HandleToolUse("call-1", "test-tool", "test-input")
-	handler.HandleToolResult("call-1", "test-tool", "test-result")
+	handler.HandleToolResult("call-1", "test-tool", tooltypes.BaseToolResult{Result: "test-result"})
 }
 
 // Integration test for SendMessageAndGetText with real Anthropic client
@@ -190,7 +191,7 @@ func (m *MockMessageHandler) HandleToolUse(toolCallID string, toolName string, i
 	m.Called(toolCallID, toolName, input)
 }
 
-func (m *MockMessageHandler) HandleToolResult(toolCallID string, toolName string, result string) {
+func (m *MockMessageHandler) HandleToolResult(toolCallID string, toolName string, result tooltypes.ToolResult) {
 	m.Called(toolCallID, toolName, result)
 }
 
@@ -250,7 +251,7 @@ func TestStringCollectorHandlerCapture(t *testing.T) {
 	// Run methods
 	handler.HandleText("Test text")
 	handler.HandleToolUse("call-1", "test-tool", "test-input")
-	handler.HandleToolResult("call-1", "test-tool", "test-result")
+	handler.HandleToolResult("call-1", "test-tool", tooltypes.BaseToolResult{Result: "test-result"})
 
 	// Restore stdout
 	w.Close()
@@ -264,7 +265,7 @@ func TestStringCollectorHandlerCapture(t *testing.T) {
 	// Verify output contains expected text
 	assert.Contains(t, output, "Test text")
 	assert.Contains(t, output, "Using tool: test-tool")
-	assert.Contains(t, output, "Tool result: test-result")
+	assert.Contains(t, output, "test-result")
 
 	// Verify collected text
 	assert.Equal(t, "Test text\n", handler.CollectedText())

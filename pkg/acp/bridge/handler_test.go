@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/jingkaihe/kodelet/pkg/acp/acptypes"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -83,7 +84,7 @@ func TestACPMessageHandler_HandleToolResult(t *testing.T) {
 	handler := NewACPMessageHandler(sender, "test-session", WithTitleGenerator(&mockTitleGenerator{}))
 
 	handler.HandleToolUse("call_1", "file_read", `{}`)
-	handler.HandleToolResult("call_1", "file_read", "file contents here")
+	handler.HandleToolResult("call_1", "file_read", tooltypes.BaseToolResult{Result: "file contents here"})
 
 	assert.Len(t, sender.updates, 3)
 
@@ -98,7 +99,7 @@ func TestACPMessageHandler_HandleToolResult_Error(t *testing.T) {
 	handler := NewACPMessageHandler(sender, "test-session", WithTitleGenerator(&mockTitleGenerator{}))
 
 	handler.HandleToolUse("call_1", "bash", `{}`)
-	handler.HandleToolResult("call_1", "bash", "Error: command not found")
+	handler.HandleToolResult("call_1", "bash", tooltypes.BaseToolResult{Error: "command not found"})
 
 	result := sender.updates[2].(map[string]any)
 	assert.Equal(t, acptypes.ToolStatusFailed, result["status"])

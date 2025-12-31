@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
 // consoleMu protects console output from concurrent writes during parallel tool execution
@@ -36,7 +38,7 @@ func formatJSONInput(input string) string {
 type MessageHandler interface {
 	HandleText(text string)
 	HandleToolUse(toolCallID string, toolName string, input string)
-	HandleToolResult(toolCallID string, toolName string, result string)
+	HandleToolResult(toolCallID string, toolName string, result tooltypes.ToolResult)
 	HandleThinking(thinking string)
 	HandleDone()
 }
@@ -97,10 +99,10 @@ func (h *ConsoleMessageHandler) HandleToolUse(_ string, toolName string, input s
 }
 
 // HandleToolResult prints tool execution results to the console unless Silent is true
-func (h *ConsoleMessageHandler) HandleToolResult(_, _ string, result string) {
+func (h *ConsoleMessageHandler) HandleToolResult(_, _ string, result tooltypes.ToolResult) {
 	if !h.Silent {
 		consoleMu.Lock()
-		fmt.Printf("🔄 Tool result:\n%s\n\n", result)
+		fmt.Printf("🔄 Tool result:\n%s\n\n", result.AssistantFacing())
 		consoleMu.Unlock()
 	}
 }
@@ -178,10 +180,10 @@ func (h *ChannelMessageHandler) HandleToolUse(_ string, toolName string, input s
 }
 
 // HandleToolResult sends tool execution results through the message channel as a tool result event
-func (h *ChannelMessageHandler) HandleToolResult(_, _ string, result string) {
+func (h *ChannelMessageHandler) HandleToolResult(_, _ string, result tooltypes.ToolResult) {
 	h.MessageCh <- MessageEvent{
 		Type:    EventTypeToolResult,
-		Content: result,
+		Content: result.AssistantFacing(),
 	}
 }
 
@@ -267,10 +269,10 @@ func (h *StringCollectorHandler) HandleToolUse(_ string, toolName string, input 
 }
 
 // HandleToolResult optionally prints tool execution results to the console (does not affect collection)
-func (h *StringCollectorHandler) HandleToolResult(_, _ string, result string) {
+func (h *StringCollectorHandler) HandleToolResult(_, _ string, result tooltypes.ToolResult) {
 	if !h.Silent {
 		consoleMu.Lock()
-		fmt.Printf("🔄 Tool result: %s\n\n", result)
+		fmt.Printf("🔄 Tool result: %s\n\n", result.AssistantFacing())
 		consoleMu.Unlock()
 	}
 }

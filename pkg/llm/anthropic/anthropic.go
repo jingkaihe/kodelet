@@ -510,7 +510,7 @@ func (t *Thread) executeToolsParallel(
 	go func() {
 		defer consumerWg.Done()
 		for result := range resultCh {
-			handler.HandleToolResult(result.blockID, result.toolName, result.renderedOutput)
+			handler.HandleToolResult(result.blockID, result.toolName, result.output)
 			results[result.index] = result // preserve original order
 		}
 	}()

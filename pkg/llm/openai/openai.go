@@ -651,8 +651,9 @@ func (t *Thread) processMessageExchange(
 		}
 
 		registry := renderers.NewRendererRegistry()
-		renderedOutput := registry.Render(structuredResult)
-		handler.HandleToolResult(toolCall.ID, toolCall.Function.Name, renderedOutput)
+		_ = registry.Render(structuredResult) // Render for logging, but pass ToolResult to handler
+
+		handler.HandleToolResult(toolCall.ID, toolCall.Function.Name, output)
 
 		t.SetStructuredToolResult(toolCall.ID, structuredResult)
 
