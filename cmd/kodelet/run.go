@@ -19,6 +19,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/jingkaihe/kodelet/pkg/skills"
 	"github.com/jingkaihe/kodelet/pkg/tools"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
@@ -234,9 +235,15 @@ var runCmd = &cobra.Command{
 		discoveredSkills, skillsEnabled := skills.Initialize(ctx, llmConfig)
 		stateOpts = append(stateOpts, tools.WithSkillTool(discoveredSkills, skillsEnabled))
 
+		// Generate session ID for MCP socket (use resume ID if available, otherwise new ID)
+		sessionID := config.ResumeConvID
+		if sessionID == "" {
+			sessionID = convtypes.GenerateID()
+		}
+
 		// Set up MCP execution mode
 		if mcpManager != nil {
-			mcpSetup, err := mcp.SetupExecutionMode(ctx, mcpManager)
+			mcpSetup, err := mcp.SetupExecutionMode(ctx, mcpManager, sessionID)
 			if err != nil && !errors.Is(err, mcp.ErrDirectMode) {
 				presenter.Error(err, "Failed to set up MCP execution mode")
 				return
@@ -266,11 +273,7 @@ var runCmd = &cobra.Command{
 				return
 			}
 			thread.SetState(appState)
-
-			if config.ResumeConvID != "" {
-				thread.SetConversationID(config.ResumeConvID)
-			}
-
+			thread.SetConversationID(sessionID)
 			thread.EnablePersistence(ctx, !config.NoSave)
 
 			streamer, closeFunc, err := llm.NewConversationStreamer(ctx)
@@ -339,12 +342,10 @@ var runCmd = &cobra.Command{
 				return
 			}
 			thread.SetState(appState)
+			thread.SetConversationID(sessionID)
 
-			if config.ResumeConvID != "" {
-				thread.SetConversationID(config.ResumeConvID)
-				if !config.ResultOnly {
-					presenter.Info(fmt.Sprintf("Resuming conversation: %s", config.ResumeConvID))
-				}
+			if config.ResumeConvID != "" && !config.ResultOnly {
+				presenter.Info(fmt.Sprintf("Resuming conversation: %s", config.ResumeConvID))
 			}
 
 			thread.EnablePersistence(ctx, !config.NoSave)

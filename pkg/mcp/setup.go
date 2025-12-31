@@ -3,6 +3,7 @@ package mcp
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -22,12 +23,15 @@ type ExecutionSetup struct {
 	StateOpts []tools.BasicStateOption
 }
 
-// GetSocketPath returns the absolute path to the MCP socket file
-func GetSocketPath() (string, error) {
-	socketPath := viper.GetString("mcp.code_execution.socket_path")
-	if socketPath == "" {
-		socketPath = ".kodelet/mcp/mcp.sock"
+// GetSocketPath returns the absolute path to the MCP socket file for a given session.
+// Each session gets its own socket to prevent conflicts when multiple kodelet instances
+// run concurrently.
+func GetSocketPath(sessionID string) (string, error) {
+	workspaceDir := viper.GetString("mcp.code_execution.workspace_dir")
+	if workspaceDir == "" {
+		workspaceDir = ".kodelet/mcp"
 	}
+	socketPath := filepath.Join(workspaceDir, fmt.Sprintf("mcp-%s.sock", sessionID))
 	return filepath.Abs(socketPath)
 }
 
@@ -40,9 +44,11 @@ func fileExists(path string) bool {
 // ErrDirectMode is returned when MCP is configured for direct mode instead of code execution mode
 var ErrDirectMode = errors.New("MCP configured for direct mode")
 
-// SetupExecutionMode sets up MCP code execution mode and returns the necessary components
-// Returns ErrDirectMode if execution mode is not "code" or mcpManager is nil
-func SetupExecutionMode(ctx context.Context, mcpManager *tools.MCPManager) (*ExecutionSetup, error) {
+// SetupExecutionMode sets up MCP code execution mode and returns the necessary components.
+// Returns ErrDirectMode if execution mode is not "code" or mcpManager is nil.
+// The sessionID is used to create a unique socket path for this session, preventing conflicts
+// when multiple kodelet instances run concurrently.
+func SetupExecutionMode(ctx context.Context, mcpManager *tools.MCPManager, sessionID string) (*ExecutionSetup, error) {
 	executionMode := viper.GetString("mcp.execution_mode")
 	if executionMode != "code" {
 		return nil, ErrDirectMode
@@ -65,8 +71,8 @@ func SetupExecutionMode(ctx context.Context, mcpManager *tools.MCPManager) (*Exe
 		}
 	}
 
-	// Get socket path
-	socketPath, err := GetSocketPath()
+	// Get socket path for this session
+	socketPath, err := GetSocketPath(sessionID)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to resolve socket path")
 	}

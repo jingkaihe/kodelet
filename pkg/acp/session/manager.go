@@ -15,6 +15,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/mcp"
 	"github.com/jingkaihe/kodelet/pkg/skills"
 	"github.com/jingkaihe/kodelet/pkg/tools"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	pkgerrors "github.com/pkg/errors"
 	"github.com/spf13/viper"
@@ -95,6 +96,7 @@ func (s *Session) HandlePrompt(ctx context.Context, prompt []acptypes.ContentBlo
 
 // Manager manages ACP sessions
 type Manager struct {
+	id        string // unique manager ID for MCP socket isolation
 	provider  string
 	model     string
 	maxTokens int
@@ -116,6 +118,7 @@ func NewManager(provider, model string, maxTokens int, noSkills, noHooks bool) *
 	store, _ := conversations.GetConversationStore(ctx)
 
 	return &Manager{
+		id:        convtypes.GenerateID(),
 		provider:  provider,
 		model:     model,
 		maxTokens: maxTokens,
@@ -139,7 +142,7 @@ func (m *Manager) initMCP(ctx context.Context) {
 
 		m.kodeletMCPManager = mcpManager
 
-		mcpSetup, err := mcp.SetupExecutionMode(ctx, mcpManager)
+		mcpSetup, err := mcp.SetupExecutionMode(ctx, mcpManager, m.id)
 		if err != nil && !errors.Is(err, mcp.ErrDirectMode) {
 			logger.G(ctx).WithError(err).Warn("Failed to set up MCP execution mode")
 			return

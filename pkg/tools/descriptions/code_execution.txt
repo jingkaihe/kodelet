@@ -24,7 +24,7 @@ MCP tool files in `.kodelet/mcp/servers/` are auto-generated with varying schema
 │   │   ├── definition.ts      # Find symbol definitions
 │   │   └── diagnostics.ts     # Get file diagnostics
 │   └── [other-servers]/       # Other MCP servers
-└── mcp.sock                   # Unix socket for RPC
+└── mcp-{session-id}.sock      # Unix socket for RPC (per-session)
 ```
 
 Your TypeScript files are placed in the workspace root (`.kodelet/mcp/`) and referenced by relative paths (e.g., `"code_path": "analyze.ts"`).
