@@ -116,7 +116,7 @@ func TestChannelMessageHandler(t *testing.T) {
 
 	event = <-ch
 	assert.Equal(t, llmtypes.EventTypeToolResult, event.Type)
-	assert.Contains(t, event.Content, "test-result")
+	assert.Contains(t, event.Content, "Success: true")
 	assert.False(t, event.Done)
 
 	event = <-ch
@@ -265,7 +265,7 @@ func TestStringCollectorHandlerCapture(t *testing.T) {
 	// Verify output contains expected text
 	assert.Contains(t, output, "Test text")
 	assert.Contains(t, output, "Using tool: test-tool")
-	assert.Contains(t, output, "test-result")
+	assert.Contains(t, output, "Success: true")
 
 	// Verify collected text
 	assert.Equal(t, "Test text\n", handler.CollectedText())

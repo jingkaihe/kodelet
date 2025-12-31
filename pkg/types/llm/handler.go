@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
@@ -101,8 +102,10 @@ func (h *ConsoleMessageHandler) HandleToolUse(_ string, toolName string, input s
 // HandleToolResult prints tool execution results to the console unless Silent is true
 func (h *ConsoleMessageHandler) HandleToolResult(_, _ string, result tooltypes.ToolResult) {
 	if !h.Silent {
+		registry := renderers.NewRendererRegistry()
+		rendered := registry.Render(result.StructuredData())
 		consoleMu.Lock()
-		fmt.Printf("🔄 Tool result:\n%s\n\n", result.AssistantFacing())
+		fmt.Printf("🔄 Tool result:\n%s\n\n", rendered)
 		consoleMu.Unlock()
 	}
 }
@@ -181,9 +184,11 @@ func (h *ChannelMessageHandler) HandleToolUse(_ string, toolName string, input s
 
 // HandleToolResult sends tool execution results through the message channel as a tool result event
 func (h *ChannelMessageHandler) HandleToolResult(_, _ string, result tooltypes.ToolResult) {
+	registry := renderers.NewRendererRegistry()
+	rendered := registry.Render(result.StructuredData())
 	h.MessageCh <- MessageEvent{
 		Type:    EventTypeToolResult,
-		Content: result.AssistantFacing(),
+		Content: rendered,
 	}
 }
 
@@ -271,8 +276,10 @@ func (h *StringCollectorHandler) HandleToolUse(_ string, toolName string, input 
 // HandleToolResult optionally prints tool execution results to the console (does not affect collection)
 func (h *StringCollectorHandler) HandleToolResult(_, _ string, result tooltypes.ToolResult) {
 	if !h.Silent {
+		registry := renderers.NewRendererRegistry()
+		rendered := registry.Render(result.StructuredData())
 		consoleMu.Lock()
-		fmt.Printf("🔄 Tool result: %s\n\n", result.AssistantFacing())
+		fmt.Printf("🔄 Tool result: %s\n\n", rendered)
 		consoleMu.Unlock()
 	}
 }
