@@ -1049,10 +1049,10 @@ func (c *Connector) connect(server types.MCPServer) (*mcp.Client, error) {
 - [ ] Add capability checks before using client features
 
 ### Phase 5: MCP Server Support (Week 5-6)
-- [ ] Implement MCP server connection for stdio transport
-- [ ] Implement MCP server connection for HTTP transport
-- [ ] Expose MCP tools through kodelet's tool system
-- [ ] Handle MCP server lifecycle management
+- [x] Implement MCP server connection for stdio transport
+- [x] Implement MCP server connection for HTTP transport
+- [x] Expose MCP tools through kodelet's tool system
+- [x] Handle MCP server lifecycle management
 
 ### Phase 6: Testing & Documentation (Week 6-7)
 - [x] Write unit tests for all handlers
