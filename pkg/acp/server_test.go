@@ -380,6 +380,24 @@ func TestParseSlashCommand(t *testing.T) {
 			wantArgs:    "",
 			wantFound:   false,
 		},
+		{
+			name: "just slash",
+			prompt: []acptypes.ContentBlock{
+				{Type: acptypes.ContentTypeText, Text: "/"},
+			},
+			wantCommand: "",
+			wantArgs:    "",
+			wantFound:   false,
+		},
+		{
+			name: "slash with space only",
+			prompt: []acptypes.ContentBlock{
+				{Type: acptypes.ContentTypeText, Text: "/ "},
+			},
+			wantCommand: "",
+			wantArgs:    "",
+			wantFound:   false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -548,11 +566,7 @@ func TestBuildCommandHint(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := buildCommandHint(tt.defaults)
-			if tt.name == "single default" {
-				assert.Equal(t, tt.want, got)
-			} else {
-				assert.Equal(t, tt.want, got)
-			}
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }
@@ -561,9 +575,80 @@ func TestBuildCommandHint_MultipleDefaults(t *testing.T) {
 	defaults := map[string]string{"target": "main", "draft": "false"}
 	got := buildCommandHint(defaults)
 
-	assert.Contains(t, got, "target=main")
-	assert.Contains(t, got, "draft=false")
-	assert.Contains(t, got, "additional instructions")
-	assert.True(t, strings.HasPrefix(got, "["))
-	assert.Contains(t, got, "]")
+	// With sorted keys, output should be deterministic
+	assert.Equal(t, "[draft=false target=main] additional instructions", got)
+}
+
+func TestServer_TransformSlashCommandPrompt(t *testing.T) {
+	input := bytes.NewBuffer(nil)
+	output := bytes.NewBuffer(nil)
+
+	server := NewServer(
+		WithInput(input),
+		WithOutput(output),
+		WithContext(context.Background()),
+	)
+
+	t.Run("transforms valid recipe command", func(t *testing.T) {
+		if server.fragmentProcessor == nil {
+			t.Skip("fragment processor not available")
+		}
+
+		originalPrompt := []acptypes.ContentBlock{
+			{Type: acptypes.ContentTypeText, Text: "/init"},
+		}
+
+		result, err := server.transformSlashCommandPrompt("init", "", originalPrompt)
+		require.NoError(t, err)
+		require.NotEmpty(t, result)
+		assert.Equal(t, acptypes.ContentTypeText, result[0].Type)
+		assert.NotEmpty(t, result[0].Text)
+	})
+
+	t.Run("includes additional text", func(t *testing.T) {
+		if server.fragmentProcessor == nil {
+			t.Skip("fragment processor not available")
+		}
+
+		originalPrompt := []acptypes.ContentBlock{
+			{Type: acptypes.ContentTypeText, Text: "/init please focus on tests"},
+		}
+
+		result, err := server.transformSlashCommandPrompt("init", "please focus on tests", originalPrompt)
+		require.NoError(t, err)
+		require.NotEmpty(t, result)
+		assert.Contains(t, result[0].Text, "Additional instructions:")
+		assert.Contains(t, result[0].Text, "please focus on tests")
+	})
+
+	t.Run("preserves non-text blocks", func(t *testing.T) {
+		if server.fragmentProcessor == nil {
+			t.Skip("fragment processor not available")
+		}
+
+		originalPrompt := []acptypes.ContentBlock{
+			{Type: acptypes.ContentTypeText, Text: "/init"},
+			{Type: acptypes.ContentTypeImage, Data: "base64imagedata", MimeType: "image/png"},
+		}
+
+		result, err := server.transformSlashCommandPrompt("init", "", originalPrompt)
+		require.NoError(t, err)
+		require.Len(t, result, 2)
+		assert.Equal(t, acptypes.ContentTypeText, result[0].Type)
+		assert.Equal(t, acptypes.ContentTypeImage, result[1].Type)
+		assert.Equal(t, "base64imagedata", result[1].Data)
+	})
+
+	t.Run("returns error for unknown recipe", func(t *testing.T) {
+		if server.fragmentProcessor == nil {
+			t.Skip("fragment processor not available")
+		}
+
+		originalPrompt := []acptypes.ContentBlock{
+			{Type: acptypes.ContentTypeText, Text: "/nonexistent-recipe-xyz"},
+		}
+
+		_, err := server.transformSlashCommandPrompt("nonexistent-recipe-xyz", "", originalPrompt)
+		assert.Error(t, err)
+	})
 }

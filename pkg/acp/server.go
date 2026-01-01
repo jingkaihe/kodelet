@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 
@@ -565,6 +566,9 @@ func parseSlashCommand(prompt []acptypes.ContentBlock) (command string, args str
 		text = strings.TrimPrefix(text, "/")
 		parts := strings.SplitN(text, " ", 2)
 		command = parts[0]
+		if command == "" {
+			continue
+		}
 		if len(parts) > 1 {
 			args = parts[1]
 		}
@@ -651,9 +655,15 @@ func buildCommandHint(defaults map[string]string) string {
 		return "additional instructions (optional)"
 	}
 
+	keys := make([]string, 0, len(defaults))
+	for k := range defaults {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
 	var parts []string
-	for key, defaultVal := range defaults {
-		parts = append(parts, fmt.Sprintf("%s=%s", key, defaultVal))
+	for _, key := range keys {
+		parts = append(parts, fmt.Sprintf("%s=%s", key, defaults[key]))
 	}
 
 	return fmt.Sprintf("[%s] additional instructions", strings.Join(parts, " "))
