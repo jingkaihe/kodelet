@@ -1,7 +1,8 @@
 # ADR 022: Agent Client Protocol (ACP) Integration
 
 ## Status
-Proposed
+
+Accepted
 
 ## Context
 

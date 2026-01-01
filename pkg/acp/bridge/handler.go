@@ -3,15 +3,12 @@
 package bridge
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
-	"sync"
 
 	"github.com/jingkaihe/kodelet/pkg/acp/acptypes"
-	"github.com/jingkaihe/kodelet/pkg/logger"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
@@ -40,10 +37,6 @@ type ACPMessageHandler struct {
 	sessionID        acptypes.SessionID
 	titleGenerator   TitleGenerator
 	contentGenerator *ToolContentGenerator
-
-	currentToolID   string
-	currentToolName string
-	toolMu          sync.Mutex
 }
 
 // HandlerOption is a functional option for configuring ACPMessageHandler
@@ -94,10 +87,6 @@ func (h *ACPMessageHandler) HandleTextDelta(delta string) {
 
 // HandleToolUse creates a new tool_call update
 func (h *ACPMessageHandler) HandleToolUse(toolCallID string, toolName string, input string) {
-	h.toolMu.Lock()
-	h.currentToolID = toolCallID
-	h.currentToolName = toolName
-	h.toolMu.Unlock()
 
 	var rawInput json.RawMessage
 	if input != "" {
@@ -312,8 +301,6 @@ func ToACPToolKind(toolName string) acptypes.ToolKind {
 		return acptypes.ToolKindRead
 	case "file_write", "file_edit":
 		return acptypes.ToolKindEdit
-	// case "bash", "code_execution":
-	// 	return acptypes.ToolKindExecute
 	case "web_fetch":
 		return acptypes.ToolKindFetch
 	case "thinking":
@@ -330,9 +317,6 @@ func ContentBlocksToMessage(blocks []acptypes.ContentBlock) (string, []string) {
 	var textParts []string
 	var images []string
 
-	logger.G(context.TODO()).
-		WithField("blocks", blocks).
-		Info("converting content blocks to message")
 	for _, block := range blocks {
 		switch block.Type {
 		case acptypes.ContentTypeText:
