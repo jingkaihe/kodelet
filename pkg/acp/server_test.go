@@ -70,9 +70,9 @@ func TestServer_Initialize(t *testing.T) {
 	assert.Equal(t, "kodelet", agentInfo["name"])
 	assert.Equal(t, "Kodelet", agentInfo["title"])
 
-	assert.True(t, server.initialized)
-	assert.NotNil(t, server.clientCaps)
-	assert.True(t, server.clientCaps.Terminal)
+	assert.True(t, server.initialized.Load())
+	assert.NotNil(t, server.GetClientCapabilities())
+	assert.True(t, server.GetClientCapabilities().Terminal)
 }
 
 func TestServer_SessionNew_NotInitialized(t *testing.T) {
@@ -297,6 +297,59 @@ func TestServer_Shutdown(t *testing.T) {
 	default:
 		t.Error("context should be cancelled after Shutdown")
 	}
+}
+
+func TestServer_ConcurrentPromptLimit(t *testing.T) {
+	input := bytes.NewBuffer(nil)
+	output := bytes.NewBuffer(nil)
+
+	server := NewServer(
+		WithInput(input),
+		WithOutput(output),
+		WithContext(context.Background()),
+	)
+
+	// Simulate an active prompt by adding a cancel func to activePrompts
+	sessionID := acptypes.SessionID("test-session")
+	server.activePromptsMu.Lock()
+	server.activePrompts[sessionID] = func() {}
+	server.activePromptsMu.Unlock()
+
+	// Mark server as initialized
+	server.initialized.Store(true)
+
+	// Try to start another prompt for the same session
+	promptReq := map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "session/prompt",
+		"params": map[string]any{
+			"sessionId": sessionID,
+			"prompt": []map[string]any{
+				{"type": "text", "text": "test prompt"},
+			},
+		},
+	}
+
+	reqData, err := json.Marshal(promptReq)
+	require.NoError(t, err)
+	reqData = append(reqData, '\n')
+
+	err = server.handleMessage(reqData)
+	require.NoError(t, err)
+
+	scanner := bufio.NewScanner(output)
+	require.True(t, scanner.Scan())
+
+	var resp map[string]any
+	err = json.Unmarshal(scanner.Bytes(), &resp)
+	require.NoError(t, err)
+
+	// Should get an error because a prompt is already active
+	assert.NotNil(t, resp["error"])
+	errObj := resp["error"].(map[string]any)
+	assert.Equal(t, float64(acptypes.ErrCodeInternalError), errObj["code"])
+	assert.Contains(t, errObj["message"], "prompt already in progress")
 }
 
 func TestParseSlashCommand(t *testing.T) {

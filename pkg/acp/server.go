@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/jingkaihe/kodelet/pkg/acp/acptypes"
 	"github.com/jingkaihe/kodelet/pkg/acp/session"
@@ -27,26 +28,39 @@ const (
 	additionalInstructionsHeader = "\n\n---\n\nAdditional instructions:\n"
 )
 
-// Server implements the ACP agent server
+// Server implements the ACP agent server.
+// The server handles JSON-RPC 2.0 messages concurrently - responses may arrive
+// out-of-order relative to requests (which is allowed by JSON-RPC spec).
 type Server struct {
 	input  io.Reader
 	output io.Writer
 
-	mu             sync.Mutex
-	initialized    bool
-	clientCaps     *acptypes.ClientCapabilities
-	sessionManager *session.Manager
-	config         *ServerConfig
+	// outputMu protects concurrent writes to output
+	outputMu sync.Mutex
+
+	// initialized is set after successful initialize handshake
+	initialized atomic.Bool
+
+	// clientCapsMu protects clientCaps
+	clientCapsMu sync.RWMutex
+	clientCaps   *acptypes.ClientCapabilities
+
+	sessionManager    *session.Manager
+	config            *ServerConfig
+	fragmentProcessor *fragments.Processor
 
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	pendingRequests   map[string]chan json.RawMessage
-	pendingMu         sync.Mutex
-	nextRequestID     int64
-	fragmentProcessor *fragments.Processor
+	// wg tracks in-flight request handlers for graceful shutdown
+	wg sync.WaitGroup
 
-	// activePrompts tracks in-flight prompt requests for async processing
+	pendingRequests map[string]chan json.RawMessage
+	pendingMu       sync.Mutex
+	nextRequestID   int64
+
+	// activePrompts tracks in-flight prompt requests for async processing.
+	// Only one prompt can be active per session at a time.
 	activePrompts   map[acptypes.SessionID]context.CancelFunc
 	activePromptsMu sync.Mutex
 }
@@ -114,7 +128,9 @@ func NewServer(opts ...Option) *Server {
 	return s
 }
 
-// Run starts the server event loop
+// Run starts the server event loop.
+// Requests are processed concurrently, so responses may arrive out-of-order.
+// The method blocks until the input stream is closed or the context is cancelled.
 func (s *Server) Run() error {
 	scanner := bufio.NewScanner(s.input)
 	scanner.Buffer(make([]byte, 64*1024), 10*1024*1024)
@@ -122,6 +138,8 @@ func (s *Server) Run() error {
 	for scanner.Scan() {
 		select {
 		case <-s.ctx.Done():
+			// Wait for in-flight requests before returning
+			s.wg.Wait()
 			return s.ctx.Err()
 		default:
 		}
@@ -131,11 +149,20 @@ func (s *Server) Run() error {
 			continue
 		}
 
-		if err := s.handleMessage(line); err != nil {
-			logger.G(s.ctx).WithError(err).Error("Failed to handle message")
-		}
+		// Copy buffer before spawning goroutine - scanner reuses the buffer
+		data := append([]byte(nil), line...)
+
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			if err := s.handleMessage(data); err != nil {
+				logger.G(s.ctx).WithError(err).Error("Failed to handle message")
+			}
+		}()
 	}
 
+	// Wait for in-flight requests before returning
+	s.wg.Wait()
 	return scanner.Err()
 }
 
@@ -243,7 +270,9 @@ func (s *Server) handleInitialize(req *acptypes.Request) error {
 		return s.sendError(req.ID, acptypes.ErrCodeInvalidParams, "Invalid params", nil)
 	}
 
+	s.clientCapsMu.Lock()
 	s.clientCaps = &params.ClientCapabilities
+	s.clientCapsMu.Unlock()
 
 	protocolVersion := acptypes.ProtocolVersion
 	if params.ProtocolVersion < protocolVersion {
@@ -275,7 +304,7 @@ func (s *Server) handleInitialize(req *acptypes.Request) error {
 		AuthMethods: []acptypes.AuthMethod{},
 	}
 
-	s.initialized = true
+	s.initialized.Store(true)
 	return s.sendResult(req.ID, result)
 }
 
@@ -284,7 +313,7 @@ func (s *Server) handleAuthenticate(req *acptypes.Request) error {
 }
 
 func (s *Server) handleSessionNew(req *acptypes.Request) error {
-	if !s.initialized {
+	if !s.initialized.Load() {
 		return s.sendError(req.ID, acptypes.ErrCodeInternalError, "Not initialized", nil)
 	}
 
@@ -310,7 +339,7 @@ func (s *Server) handleSessionNew(req *acptypes.Request) error {
 }
 
 func (s *Server) handleSessionLoad(req *acptypes.Request) error {
-	if !s.initialized {
+	if !s.initialized.Load() {
 		return s.sendError(req.ID, acptypes.ErrCodeInternalError, "Not initialized", nil)
 	}
 
@@ -333,7 +362,7 @@ func (s *Server) handleSessionLoad(req *acptypes.Request) error {
 }
 
 func (s *Server) handleSessionPrompt(req *acptypes.Request) error {
-	if !s.initialized {
+	if !s.initialized.Load() {
 		return s.sendError(req.ID, acptypes.ErrCodeInternalError, "Not initialized", nil)
 	}
 
@@ -341,6 +370,25 @@ func (s *Server) handleSessionPrompt(req *acptypes.Request) error {
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return s.sendError(req.ID, acptypes.ErrCodeInvalidParams, "Invalid params", nil)
 	}
+
+	// Create cancellable context and register atomically
+	promptCtx, promptCancel := context.WithCancel(s.ctx)
+
+	s.activePromptsMu.Lock()
+	if _, exists := s.activePrompts[params.SessionID]; exists {
+		s.activePromptsMu.Unlock()
+		promptCancel()
+		return s.sendError(req.ID, acptypes.ErrCodeInternalError, "prompt already in progress for this session", nil)
+	}
+	s.activePrompts[params.SessionID] = promptCancel
+	s.activePromptsMu.Unlock()
+
+	defer func() {
+		promptCancel()
+		s.activePromptsMu.Lock()
+		delete(s.activePrompts, params.SessionID)
+		s.activePromptsMu.Unlock()
+	}()
 
 	sess, err := s.sessionManager.GetSession(params.SessionID)
 	if err != nil {
@@ -356,41 +404,19 @@ func (s *Server) handleSessionPrompt(req *acptypes.Request) error {
 		prompt = transformedPrompt
 	}
 
-	// Create a cancellable context for this prompt
-	promptCtx, promptCancel := context.WithCancel(s.ctx)
-
-	// Track the cancel function so session/cancel can trigger it
-	s.activePromptsMu.Lock()
-	s.activePrompts[params.SessionID] = promptCancel
-	s.activePromptsMu.Unlock()
-
-	// Run the prompt asynchronously so we can continue reading messages (like cancel notifications)
-	go func() {
-		defer func() {
-			// Clean up the active prompt tracking
-			s.activePromptsMu.Lock()
-			delete(s.activePrompts, params.SessionID)
-			s.activePromptsMu.Unlock()
-			promptCancel() // Ensure context is cancelled when done
-		}()
-
-		stopReason, err := sess.HandlePrompt(promptCtx, prompt, s)
-		if err != nil {
-			if sess.IsCancelled() || errors.Is(err, context.Canceled) {
-				stopReason = acptypes.StopReasonCancelled
-			} else {
-				s.sendError(req.ID, acptypes.ErrCodeInternalError, err.Error(), nil)
-				return
-			}
+	stopReason, err := sess.HandlePrompt(promptCtx, prompt, s)
+	if err != nil {
+		if sess.IsCancelled() || errors.Is(err, context.Canceled) {
+			stopReason = acptypes.StopReasonCancelled
+		} else {
+			return s.sendError(req.ID, acptypes.ErrCodeInternalError, err.Error(), nil)
 		}
+	}
 
-		result := acptypes.PromptResponse{
-			StopReason: stopReason,
-		}
-		s.sendResult(req.ID, result)
-	}()
-
-	return nil
+	result := acptypes.PromptResponse{
+		StopReason: stopReason,
+	}
+	return s.sendResult(req.ID, result)
 }
 
 // transformSlashCommandPrompt transforms a slash command into a prompt with recipe content
@@ -478,6 +504,8 @@ func (s *Server) CallClient(ctx context.Context, method string, params any) (jso
 
 // GetClientCapabilities returns the client capabilities
 func (s *Server) GetClientCapabilities() *acptypes.ClientCapabilities {
+	s.clientCapsMu.RLock()
+	defer s.clientCapsMu.RUnlock()
 	return s.clientCaps
 }
 
@@ -530,15 +558,14 @@ func (s *Server) sendError(id json.RawMessage, code int, message string, _ any) 
 }
 
 func (s *Server) send(v any) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	data, err := json.Marshal(v)
 	if err != nil {
 		return pkgerrors.Wrap(err, "failed to marshal message")
 	}
 
+	s.outputMu.Lock()
 	_, err = s.output.Write(append(data, '\n'))
+	s.outputMu.Unlock()
 	return err
 }
 
@@ -752,7 +779,9 @@ func buildCommandHint(defaults map[string]string) string {
 	return fmt.Sprintf("[%s] additional instructions", strings.Join(parts, " "))
 }
 
-// Shutdown gracefully shuts down the server
+// Shutdown gracefully shuts down the server.
+// It cancels the context and waits for in-flight requests to complete.
 func (s *Server) Shutdown() {
 	s.cancel()
+	s.wg.Wait()
 }
