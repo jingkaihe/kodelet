@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"strings"
 	"testing"
 
 	"github.com/jingkaihe/kodelet/pkg/acp/acptypes"
@@ -272,9 +271,10 @@ func TestServer_Notification_Cancel(t *testing.T) {
 	require.NoError(t, err)
 	reqData = append(reqData, '\n')
 
+	// Cancellation is best-effort and doesn't return errors
+	// (session may not exist, which is fine for idempotent cancel)
 	err = server.handleMessage(reqData)
-	assert.Error(t, err)
-	assert.True(t, strings.Contains(err.Error(), "session not found"))
+	assert.NoError(t, err)
 }
 
 func TestServer_Shutdown(t *testing.T) {

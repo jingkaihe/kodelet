@@ -224,7 +224,11 @@ func (s *Server) handleNotification(method string, data []byte) error {
 			return err
 		}
 
-		// Cancel the active prompt context first (this triggers immediate context cancellation)
+		// Mark session as cancelled first (best-effort, ignore errors since
+		// cancellation is idempotent and the session may not exist yet)
+		_ = s.sessionManager.Cancel(params.SessionID)
+
+		// Then cancel the active prompt context (triggers immediate cancellation)
 		s.activePromptsMu.Lock()
 		if cancelFn, ok := s.activePrompts[params.SessionID]; ok {
 			cancelFn()
@@ -232,8 +236,7 @@ func (s *Server) handleNotification(method string, data []byte) error {
 		}
 		s.activePromptsMu.Unlock()
 
-		// Also mark the session as cancelled
-		return s.sessionManager.Cancel(params.SessionID)
+		return nil
 	default:
 		logger.G(s.ctx).WithField("method", method).Warn("Unknown notification")
 		return nil
@@ -493,6 +496,11 @@ func (s *Server) CallClient(ctx context.Context, method string, params any) (jso
 		s.pendingMu.Lock()
 		delete(s.pendingRequests, idStr)
 		s.pendingMu.Unlock()
+		// Drain channel in case handleResponse is concurrently sending
+		select {
+		case <-ch:
+		default:
+		}
 		return nil, ctx.Err()
 	case result := <-ch:
 		if result == nil {
