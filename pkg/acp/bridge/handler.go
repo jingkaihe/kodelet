@@ -87,7 +87,6 @@ func (h *ACPMessageHandler) HandleTextDelta(delta string) {
 
 // HandleToolUse creates a new tool_call update
 func (h *ACPMessageHandler) HandleToolUse(toolCallID string, toolName string, input string) {
-
 	var rawInput json.RawMessage
 	if input != "" {
 		rawInput = json.RawMessage(input)
