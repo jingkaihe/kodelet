@@ -485,6 +485,11 @@ func (t *Thread) processMessageExchange(
 	err := t.executeWithRetry(ctx, func() error {
 		response = &Response{}
 		for chunk, err := range t.client.Models.GenerateContentStream(ctx, modelName, prompt, config) {
+			// Check for context cancellation
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+
 			if err != nil {
 				return errors.Wrap(err, "streaming failed")
 			}

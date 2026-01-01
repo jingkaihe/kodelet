@@ -786,6 +786,12 @@ func (t *Thread) NewMessage(ctx context.Context, params anthropic.MessageNewPara
 
 	message := anthropic.Message{}
 	for stream.Next() {
+		// Check for context cancellation - Anthropic SDK may not propagate it properly
+		if ctx.Err() != nil {
+			log.WithError(ctx.Err()).Info("context cancelled during streaming")
+			return nil, ctx.Err()
+		}
+
 		event := stream.Current()
 		err := message.Accumulate(event)
 		if err != nil {
