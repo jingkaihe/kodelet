@@ -335,7 +335,7 @@ func TestParseSlashCommand(t *testing.T) {
 			wantFound:   true,
 		},
 		{
-			name: "nested command path",
+			name: "recipe name with slashes",
 			prompt: []acptypes.ContentBlock{
 				{Type: acptypes.ContentTypeText, Text: "/github/pr create a pr"},
 			},
@@ -572,11 +572,22 @@ func TestBuildCommandHint(t *testing.T) {
 }
 
 func TestBuildCommandHint_MultipleDefaults(t *testing.T) {
-	defaults := map[string]string{"target": "main", "draft": "false"}
-	got := buildCommandHint(defaults)
+	t.Run("two keys", func(t *testing.T) {
+		defaults := map[string]string{"target": "main", "draft": "false"}
+		got := buildCommandHint(defaults)
+		assert.Equal(t, "[draft=false target=main] additional instructions", got)
+	})
 
-	// With sorted keys, output should be deterministic
-	assert.Equal(t, "[draft=false target=main] additional instructions", got)
+	t.Run("three or more keys - deterministic ordering", func(t *testing.T) {
+		defaults := map[string]string{
+			"zebra":  "last",
+			"alpha":  "first",
+			"middle": "center",
+			"beta":   "second",
+		}
+		got := buildCommandHint(defaults)
+		assert.Equal(t, "[alpha=first beta=second middle=center zebra=last] additional instructions", got)
+	})
 }
 
 func TestServer_TransformSlashCommandPrompt(t *testing.T) {
@@ -639,7 +650,7 @@ func TestServer_TransformSlashCommandPrompt(t *testing.T) {
 		assert.Equal(t, "base64imagedata", result[1].Data)
 	})
 
-	t.Run("returns error for unknown recipe", func(t *testing.T) {
+	t.Run("returns error for unknown recipe with available recipes", func(t *testing.T) {
 		if server.fragmentProcessor == nil {
 			t.Skip("fragment processor not available")
 		}
@@ -649,6 +660,8 @@ func TestServer_TransformSlashCommandPrompt(t *testing.T) {
 		}
 
 		_, err := server.transformSlashCommandPrompt("nonexistent-recipe-xyz", "", originalPrompt)
-		assert.Error(t, err)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unknown recipe '/nonexistent-recipe-xyz'")
+		assert.Contains(t, err.Error(), "Available recipes:")
 	})
 }

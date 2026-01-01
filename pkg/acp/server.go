@@ -22,6 +22,10 @@ import (
 	"github.com/pkg/errors"
 )
 
+const (
+	additionalInstructionsHeader = "\n\n---\n\nAdditional instructions:\n"
+)
+
 // Server implements the ACP agent server
 type Server struct {
 	input  io.Reader
@@ -332,10 +336,9 @@ func (s *Server) handleSessionPrompt(req *acptypes.Request) error {
 	if command, args, found := parseSlashCommand(params.Prompt); found && s.fragmentProcessor != nil {
 		transformedPrompt, err := s.transformSlashCommandPrompt(command, args, params.Prompt)
 		if err != nil {
-			logger.G(s.ctx).WithError(err).WithField("command", command).Debug("Failed to process slash command, using original prompt")
-		} else {
-			prompt = transformedPrompt
+			return s.sendError(req.ID, acptypes.ErrCodeInvalidParams, err.Error(), nil)
 		}
+		prompt = transformedPrompt
 	}
 
 	stopReason, err := sess.HandlePrompt(s.ctx, prompt, s)
@@ -364,14 +367,14 @@ func (s *Server) transformSlashCommandPrompt(command, args string, originalPromp
 
 	fragment, err := s.fragmentProcessor.LoadFragment(s.ctx, config)
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to load recipe '%s'", command)
+		return nil, errors.Wrapf(err, "unknown recipe '/%s'. Available recipes: %s", command, s.getAvailableRecipeNames())
 	}
 
 	var promptBuilder strings.Builder
 	promptBuilder.WriteString(fragment.Content)
 
 	if additionalText != "" {
-		promptBuilder.WriteString("\n\n---\n\nAdditional instructions:\n")
+		promptBuilder.WriteString(additionalInstructionsHeader)
 		promptBuilder.WriteString(additionalText)
 	}
 
@@ -502,6 +505,20 @@ func (s *Server) send(v any) error {
 	return err
 }
 
+// getAvailableRecipeNames returns a comma-separated list of available recipe names for error messages
+func (s *Server) getAvailableRecipeNames() string {
+	commands := s.getAvailableCommands()
+	if len(commands) == 0 {
+		return "(none available)"
+	}
+
+	names := make([]string, len(commands))
+	for i, cmd := range commands {
+		names[i] = "/" + cmd.Name
+	}
+	return strings.Join(names, ", ")
+}
+
 // getAvailableCommands returns available slash commands from the fragment/recipe system
 func (s *Server) getAvailableCommands() []acptypes.AvailableCommand {
 	if s.fragmentProcessor == nil {
@@ -551,6 +568,8 @@ func (s *Server) sendAvailableCommands(sessionID acptypes.SessionID) error {
 }
 
 // parseSlashCommand parses a slash command from prompt content.
+// The command name is everything after the leading "/" up to the first space.
+// Recipe names may contain slashes (e.g., "github/pr" from "/github/pr").
 // Returns the command name, any arguments after the command, and whether a command was found.
 func parseSlashCommand(prompt []acptypes.ContentBlock) (command string, args string, found bool) {
 	for _, block := range prompt {
@@ -578,9 +597,23 @@ func parseSlashCommand(prompt []acptypes.ContentBlock) (command string, args str
 	return "", "", false
 }
 
-// parseSlashCommandArgs parses key=value pairs and additional text from args string.
-// Format: "key1=value1 key2=value2 additional free text"
-// Values can be quoted: key="value with spaces"
+// parseSlashCommandArgs parses key=value pairs and additional text from an arguments string.
+//
+// Grammar:
+//
+//	args           = *(key_value / word) [additional_text]
+//	key_value      = key "=" value
+//	key            = 1*non_space_non_eq
+//	value          = quoted_value / unquoted_value
+//	quoted_value   = DQUOTE *non_dquote DQUOTE
+//	unquoted_value = *non_space
+//	word           = 1*non_space (collected as additional_text)
+//
+// Examples:
+//
+//	"target=main"                    -> {"target": "main"}, ""
+//	"target=main fix the bug"        -> {"target": "main"}, "fix the bug"
+//	`title="my feature" draft=true`  -> {"title": "my feature", "draft": "true"}, ""
 func parseSlashCommandArgs(args string) (kvArgs map[string]string, additionalText string) {
 	kvArgs = make(map[string]string)
 	if args == "" {
@@ -590,63 +623,76 @@ func parseSlashCommandArgs(args string) (kvArgs map[string]string, additionalTex
 	var textParts []string
 	i := 0
 	for i < len(args) {
-		// Skip leading whitespace
-		for i < len(args) && args[i] == ' ' {
-			i++
-		}
+		i = skipSpaces(args, i)
 		if i >= len(args) {
 			break
 		}
 
-		// Try to find key=value pattern
-		keyEnd := i
-		for keyEnd < len(args) && args[keyEnd] != '=' && args[keyEnd] != ' ' {
-			keyEnd++
-		}
+		keyEnd := findKeyEnd(args, i)
 
 		if keyEnd < len(args) && args[keyEnd] == '=' {
 			key := args[i:keyEnd]
-			valueStart := keyEnd + 1
-
-			if valueStart >= len(args) {
-				kvArgs[key] = ""
-				i = valueStart
-				continue
-			}
-
-			var value string
-			if args[valueStart] == '"' {
-				// Quoted value
-				valueStart++
-				valueEnd := valueStart
-				for valueEnd < len(args) && args[valueEnd] != '"' {
-					valueEnd++
-				}
-				value = args[valueStart:valueEnd]
-				i = valueEnd + 1
-			} else {
-				// Unquoted value - read until space
-				valueEnd := valueStart
-				for valueEnd < len(args) && args[valueEnd] != ' ' {
-					valueEnd++
-				}
-				value = args[valueStart:valueEnd]
-				i = valueEnd
-			}
+			value, nextPos := parseValue(args, keyEnd+1)
 			kvArgs[key] = value
+			i = nextPos
 		} else {
-			// Not a key=value pair, collect as additional text
-			wordEnd := keyEnd
-			for wordEnd < len(args) && args[wordEnd] != ' ' {
-				wordEnd++
-			}
+			wordEnd := findWordEnd(args, i)
 			textParts = append(textParts, args[i:wordEnd])
 			i = wordEnd
 		}
 	}
 
-	additionalText = strings.Join(textParts, " ")
-	return kvArgs, additionalText
+	return kvArgs, strings.Join(textParts, " ")
+}
+
+func skipSpaces(s string, i int) int {
+	for i < len(s) && s[i] == ' ' {
+		i++
+	}
+	return i
+}
+
+func findKeyEnd(s string, start int) int {
+	i := start
+	for i < len(s) && s[i] != '=' && s[i] != ' ' {
+		i++
+	}
+	return i
+}
+
+func findWordEnd(s string, start int) int {
+	i := start
+	for i < len(s) && s[i] != ' ' {
+		i++
+	}
+	return i
+}
+
+func parseValue(s string, start int) (value string, nextPos int) {
+	if start >= len(s) {
+		return "", start
+	}
+
+	if s[start] == '"' {
+		return parseQuotedValue(s, start+1)
+	}
+	return parseUnquotedValue(s, start)
+}
+
+func parseQuotedValue(s string, start int) (value string, nextPos int) {
+	end := start
+	for end < len(s) && s[end] != '"' {
+		end++
+	}
+	if end < len(s) {
+		return s[start:end], end + 1
+	}
+	return s[start:end], end
+}
+
+func parseUnquotedValue(s string, start int) (value string, nextPos int) {
+	end := findWordEnd(s, start)
+	return s[start:end], end
 }
 
 // buildCommandHint builds a hint string for a recipe based on its defaults
