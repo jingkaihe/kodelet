@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -19,7 +20,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/version"
-	"github.com/pkg/errors"
+	pkgerrors "github.com/pkg/errors"
 )
 
 const (
@@ -44,6 +45,10 @@ type Server struct {
 	pendingMu         sync.Mutex
 	nextRequestID     int64
 	fragmentProcessor *fragments.Processor
+
+	// activePrompts tracks in-flight prompt requests for async processing
+	activePrompts   map[acptypes.SessionID]context.CancelFunc
+	activePromptsMu sync.Mutex
 }
 
 // ServerConfig holds configuration for the ACP server
@@ -90,6 +95,7 @@ func NewServer(opts ...Option) *Server {
 		ctx:             ctx,
 		cancel:          cancel,
 		pendingRequests: make(map[string]chan json.RawMessage),
+		activePrompts:   make(map[acptypes.SessionID]context.CancelFunc),
 		config:          &ServerConfig{},
 	}
 
@@ -190,6 +196,16 @@ func (s *Server) handleNotification(method string, data []byte) error {
 		if err := json.Unmarshal(notif.Params, &params); err != nil {
 			return err
 		}
+
+		// Cancel the active prompt context first (this triggers immediate context cancellation)
+		s.activePromptsMu.Lock()
+		if cancelFn, ok := s.activePrompts[params.SessionID]; ok {
+			cancelFn()
+			delete(s.activePrompts, params.SessionID)
+		}
+		s.activePromptsMu.Unlock()
+
+		// Also mark the session as cancelled
 		return s.sessionManager.Cancel(params.SessionID)
 	default:
 		logger.G(s.ctx).WithField("method", method).Warn("Unknown notification")
@@ -340,19 +356,41 @@ func (s *Server) handleSessionPrompt(req *acptypes.Request) error {
 		prompt = transformedPrompt
 	}
 
-	stopReason, err := sess.HandlePrompt(s.ctx, prompt, s)
-	if err != nil {
-		if sess.IsCancelled() {
-			stopReason = acptypes.StopReasonCancelled
-		} else {
-			return s.sendError(req.ID, acptypes.ErrCodeInternalError, err.Error(), nil)
-		}
-	}
+	// Create a cancellable context for this prompt
+	promptCtx, promptCancel := context.WithCancel(s.ctx)
 
-	result := acptypes.PromptResponse{
-		StopReason: stopReason,
-	}
-	return s.sendResult(req.ID, result)
+	// Track the cancel function so session/cancel can trigger it
+	s.activePromptsMu.Lock()
+	s.activePrompts[params.SessionID] = promptCancel
+	s.activePromptsMu.Unlock()
+
+	// Run the prompt asynchronously so we can continue reading messages (like cancel notifications)
+	go func() {
+		defer func() {
+			// Clean up the active prompt tracking
+			s.activePromptsMu.Lock()
+			delete(s.activePrompts, params.SessionID)
+			s.activePromptsMu.Unlock()
+			promptCancel() // Ensure context is cancelled when done
+		}()
+
+		stopReason, err := sess.HandlePrompt(promptCtx, prompt, s)
+		if err != nil {
+			if sess.IsCancelled() || errors.Is(err, context.Canceled) {
+				stopReason = acptypes.StopReasonCancelled
+			} else {
+				s.sendError(req.ID, acptypes.ErrCodeInternalError, err.Error(), nil)
+				return
+			}
+		}
+
+		result := acptypes.PromptResponse{
+			StopReason: stopReason,
+		}
+		s.sendResult(req.ID, result)
+	}()
+
+	return nil
 }
 
 // transformSlashCommandPrompt transforms a slash command into a prompt with recipe content
@@ -366,7 +404,7 @@ func (s *Server) transformSlashCommandPrompt(command, args string, originalPromp
 
 	fragment, err := s.fragmentProcessor.LoadFragment(s.ctx, config)
 	if err != nil {
-		return nil, errors.Wrapf(err, "unknown recipe '/%s'. Available recipes: %s", command, s.getAvailableRecipeNames())
+		return nil, pkgerrors.Wrapf(err, "unknown recipe '/%s'. Available recipes: %s", command, s.getAvailableRecipeNames())
 	}
 
 	var promptBuilder strings.Builder
@@ -432,7 +470,7 @@ func (s *Server) CallClient(ctx context.Context, method string, params any) (jso
 		return nil, ctx.Err()
 	case result := <-ch:
 		if result == nil {
-			return nil, errors.New("client returned error")
+			return nil, pkgerrors.New("client returned error")
 		}
 		return result, nil
 	}
@@ -497,7 +535,7 @@ func (s *Server) send(v any) error {
 
 	data, err := json.Marshal(v)
 	if err != nil {
-		return errors.Wrap(err, "failed to marshal message")
+		return pkgerrors.Wrap(err, "failed to marshal message")
 	}
 
 	_, err = s.output.Write(append(data, '\n'))
