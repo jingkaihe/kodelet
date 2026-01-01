@@ -6,6 +6,7 @@ package google
 import (
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -26,7 +27,6 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/feedback"
 	"github.com/jingkaihe/kodelet/pkg/hooks"
-	"github.com/jingkaihe/kodelet/pkg/ide"
 	"github.com/jingkaihe/kodelet/pkg/llm/prompts"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/osutil"
@@ -69,7 +69,6 @@ type Thread struct {
 	thinkingBudget         int32
 	toolResults            map[string]tooltypes.StructuredToolResult
 	subagentContextFactory llmtypes.SubagentContextFactory
-	ideStore               *ide.Store    // IDE context store (nil if IDE mode disabled)
 	hookTrigger            hooks.Trigger // Hook trigger for lifecycle hooks (zero-value = no-op)
 	mu                     sync.Mutex
 	conversationMu         sync.Mutex
@@ -142,15 +141,6 @@ func NewGoogleThread(config llmtypes.Config, subagentContextFactory llmtypes.Sub
 		thinkingBudget = configCopy.Google.ThinkingBudget
 	}
 
-	var ideStore *ide.Store
-	if configCopy.IDE && !configCopy.IsSubAgent {
-		store, err := ide.NewIDEStore()
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to create IDE store")
-		}
-		ideStore = store
-	}
-
 	// Initialize hook trigger (zero-value if discovery fails or disabled - hooks disabled)
 	var hookTrigger hooks.Trigger
 	conversationID := convtypes.GenerateID()
@@ -175,7 +165,6 @@ func NewGoogleThread(config llmtypes.Config, subagentContextFactory llmtypes.Sub
 		toolResults:            make(map[string]tooltypes.StructuredToolResult),
 		subagentContextFactory: subagentContextFactory,
 		thinkingBudget:         thinkingBudget,
-		ideStore:               ideStore,
 		hookTrigger:            hookTrigger,
 	}, nil
 }
@@ -347,12 +336,6 @@ func (t *Thread) SendMessage(
 		}
 	}
 
-	if !t.config.IsSubAgent && t.ideStore != nil {
-		if err := t.processIDEContext(ctx, handler); err != nil {
-			return "", errors.Wrap(err, "failed to process IDE context")
-		}
-	}
-
 	// Trigger user_message_send hook before adding user message
 	if blocked, reason := t.hookTrigger.TriggerUserMessageSend(ctx, message); blocked {
 		return "", errors.Errorf("message blocked by hook: %s", reason)
@@ -502,6 +485,11 @@ func (t *Thread) processMessageExchange(
 	err := t.executeWithRetry(ctx, func() error {
 		response = &Response{}
 		for chunk, err := range t.client.Models.GenerateContentStream(ctx, modelName, prompt, config) {
+			// Check for context cancellation
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+
 			if err != nil {
 				return errors.Wrap(err, "streaming failed")
 			}
@@ -598,14 +586,14 @@ func (t *Thread) processPart(part *genai.Part, response *Response, handler llmty
 		if err != nil {
 			return errors.Wrap(err, "failed to marshal tool arguments")
 		}
-		handler.HandleToolUse(toolCall.Name, string(argsJSON))
+		handler.HandleToolUse(toolCall.ID, toolCall.Name, string(argsJSON))
 
 	case part.CodeExecutionResult != nil:
 		result := fmt.Sprintf("Code execution result:\n%s", part.CodeExecutionResult.Output)
 		if part.CodeExecutionResult.Outcome == genai.OutcomeUnspecified {
 			result += "\nOutcome: Unspecified"
 		}
-		handler.HandleToolResult("code_execution", result)
+		handler.HandleToolResult("", "code_execution", tooltypes.BaseToolResult{Result: result})
 		response.Text += result
 
 	default:
@@ -686,7 +674,57 @@ func (t *Thread) processImage(ctx context.Context, imagePath string) (*genai.Par
 		return nil, errors.New("HTTP URLs are not supported for security reasons, use HTTPS only")
 	}
 
+	if strings.HasPrefix(imagePath, "data:") {
+		return t.processImageDataURL(imagePath)
+	}
+
 	return t.processImageFile(ctx, imagePath)
+}
+
+// processImageDataURL creates a Google GenAI part from a data URL
+func (t *Thread) processImageDataURL(dataURL string) (*genai.Part, error) {
+	// Parse data URL format: data:<mediatype>;base64,<data>
+	if !strings.HasPrefix(dataURL, "data:") {
+		return nil, errors.New("invalid data URL: must start with 'data:'")
+	}
+
+	// Remove "data:" prefix
+	rest := strings.TrimPrefix(dataURL, "data:")
+
+	// Split by ";base64,"
+	parts := strings.SplitN(rest, ";base64,", 2)
+	if len(parts) != 2 {
+		return nil, errors.New("invalid data URL: must contain ';base64,' separator")
+	}
+
+	mimeType := parts[0]
+	base64Data := parts[1]
+
+	// Validate mime type is a supported image type
+	supportedFormats := []string{"image/jpeg", "image/png", "image/gif", "image/webp"}
+	supported := false
+	for _, format := range supportedFormats {
+		if strings.EqualFold(mimeType, format) {
+			supported = true
+			break
+		}
+	}
+	if !supported {
+		return nil, errors.Errorf("unsupported image mime type: %s (supported: jpeg, png, gif, webp)", mimeType)
+	}
+
+	// Decode base64 data
+	imageData, err := base64.StdEncoding.DecodeString(base64Data)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to decode base64 image data")
+	}
+
+	// Check size limit
+	if len(imageData) > MaxImageFileSize {
+		return nil, errors.Errorf("image data too large (%d bytes), maximum is %d bytes", len(imageData), MaxImageFileSize)
+	}
+
+	return genai.NewPartFromBytes(imageData, mimeType), nil
 }
 
 // processImageURL fetches image from HTTPS URL and creates a Google GenAI part
@@ -1011,9 +1049,9 @@ func (t *Thread) executeToolCalls(ctx context.Context, response *Response, handl
 		}
 
 		registry := renderers.NewRendererRegistry()
-		renderedOutput := registry.Render(structuredResult)
+		_ = registry.Render(structuredResult) // Render for logging, but pass ToolResult to handler
 
-		handler.HandleToolResult(toolCall.Name, renderedOutput)
+		handler.HandleToolResult(toolCall.ID, toolCall.Name, output)
 
 		// Store structured results
 		t.SetStructuredToolResult(toolCall.ID, structuredResult)
@@ -1291,36 +1329,6 @@ func (t *Thread) processPendingFeedback(ctx context.Context, handler llmtypes.Me
 			logger.G(ctx).WithError(err).Warn("failed to clear pending feedback, may be processed again")
 		} else {
 			logger.G(ctx).Debug("successfully cleared pending feedback")
-		}
-	}
-
-	return nil
-}
-
-func (t *Thread) processIDEContext(ctx context.Context, handler llmtypes.MessageHandler) error {
-	ideContext, err := t.ideStore.ReadContext(t.conversationID)
-	if err != nil && !errors.Is(err, ide.ErrContextNotFound) {
-		return errors.Wrap(err, "failed to read IDE context")
-	}
-
-	if ideContext != nil {
-		logger.G(ctx).WithFields(map[string]interface{}{
-			"open_files_count":  len(ideContext.OpenFiles),
-			"has_selection":     ideContext.Selection != nil,
-			"diagnostics_count": len(ideContext.Diagnostics),
-		}).Info("processing IDE context")
-
-		ideContextPrompt := ide.FormatContextPrompt(ideContext)
-		if ideContextPrompt != "" {
-			t.AddUserMessage(ctx, ideContextPrompt)
-			handler.HandleText(fmt.Sprintf("📋 IDE Context: %d files, %d diagnostics",
-				len(ideContext.OpenFiles), len(ideContext.Diagnostics)))
-		}
-
-		if err := t.ideStore.ClearContext(t.conversationID); err != nil {
-			logger.G(ctx).WithError(err).Warn("failed to clear IDE context, may be processed again")
-		} else {
-			logger.G(ctx).Debug("successfully cleared IDE context")
 		}
 	}
 

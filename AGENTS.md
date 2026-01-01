@@ -175,7 +175,6 @@ For comprehensive usage documentation and examples, see [./docs/MANUAL.md](./doc
 # Core commands
 kodelet run "query"                    # One-shot execution
 kodelet chat                           # Interactive mode
-kodelet watch                          # File watcher
 kodelet serve [--host HOST] [--port PORT]  # Web UI server (default: localhost:8080)
 
 # Fragment/Recipe system (see docs/FRAGMENTS.md)
@@ -366,4 +365,5 @@ See [docs/HOOKS.md](docs/HOOKS.md) for creating custom hooks.
 - **Skills Guide**: [docs/SKILLS.md](docs/SKILLS.md) for agentic skills system
 - **Hooks Guide**: [docs/HOOKS.md](docs/HOOKS.md) for agent lifecycle hooks system
 - **MCP Tools**: [docs/mcp.md](docs/mcp.md) for Model Context Protocol integration
+- **ACP Integration**: [docs/ACP.md](docs/ACP.md) for Agent Client Protocol IDE integration
 

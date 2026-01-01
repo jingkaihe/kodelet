@@ -473,6 +473,10 @@ tracing:
 
 # MCP (Model Context Protocol) Configuration
 mcp:
+  # Enable/disable MCP tools globally (default: true when not specified)
+  # Set to false to completely disable MCP
+  enabled: true
+
   # Execution mode for MCP tools
   # - "direct": Traditional direct tool calling (default)
   # - "code": Code execution with filesystem API (more efficient for multi-tool workflows)
@@ -486,8 +490,8 @@ mcp:
     # Whether to regenerate tool files on startup
     regenerate_on_startup: false
 
-    # Unix socket path for MCP RPC server
-    socket_path: ".kodelet/mcp/mcp.sock"
+    # Note: Socket path is now automatically generated per-session as
+    # {workspace_dir}/mcp-{session-id}.sock to allow concurrent kodelet instances
 
   # MCP servers configuration
   # Each server can be either stdio or SSE based

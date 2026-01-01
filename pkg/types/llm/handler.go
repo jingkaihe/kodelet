@@ -9,6 +9,9 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+
+	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
 // consoleMu protects console output from concurrent writes during parallel tool execution
@@ -35,8 +38,8 @@ func formatJSONInput(input string) string {
 // MessageHandler defines how message events should be processed
 type MessageHandler interface {
 	HandleText(text string)
-	HandleToolUse(toolName string, input string)
-	HandleToolResult(toolName string, result string)
+	HandleToolUse(toolCallID string, toolName string, input string)
+	HandleToolResult(toolCallID string, toolName string, result tooltypes.ToolResult)
 	HandleThinking(thinking string)
 	HandleDone()
 }
@@ -88,7 +91,7 @@ func (h *ConsoleMessageHandler) HandleText(text string) {
 }
 
 // HandleToolUse prints tool invocation details to the console unless Silent is true
-func (h *ConsoleMessageHandler) HandleToolUse(toolName string, input string) {
+func (h *ConsoleMessageHandler) HandleToolUse(_ string, toolName string, input string) {
 	if !h.Silent {
 		consoleMu.Lock()
 		fmt.Printf("🔧 Using tool: %s\n  %s\n\n", toolName, formatJSONInput(input))
@@ -97,10 +100,12 @@ func (h *ConsoleMessageHandler) HandleToolUse(toolName string, input string) {
 }
 
 // HandleToolResult prints tool execution results to the console unless Silent is true
-func (h *ConsoleMessageHandler) HandleToolResult(_ string, result string) {
+func (h *ConsoleMessageHandler) HandleToolResult(_, _ string, result tooltypes.ToolResult) {
 	if !h.Silent {
+		registry := renderers.NewRendererRegistry()
+		rendered := registry.Render(result.StructuredData())
 		consoleMu.Lock()
-		fmt.Printf("🔄 Tool result:\n%s\n\n", result)
+		fmt.Printf("🔄 Tool result:\n%s\n\n", rendered)
 		consoleMu.Unlock()
 	}
 }
@@ -170,7 +175,7 @@ func (h *ChannelMessageHandler) HandleText(text string) {
 }
 
 // HandleToolUse sends tool invocation details through the message channel as a tool use event
-func (h *ChannelMessageHandler) HandleToolUse(toolName string, input string) {
+func (h *ChannelMessageHandler) HandleToolUse(_ string, toolName string, input string) {
 	h.MessageCh <- MessageEvent{
 		Type:    EventTypeToolUse,
 		Content: fmt.Sprintf("%s\n  %s", toolName, formatJSONInput(input)),
@@ -178,10 +183,12 @@ func (h *ChannelMessageHandler) HandleToolUse(toolName string, input string) {
 }
 
 // HandleToolResult sends tool execution results through the message channel as a tool result event
-func (h *ChannelMessageHandler) HandleToolResult(_ string, result string) {
+func (h *ChannelMessageHandler) HandleToolResult(_, _ string, result tooltypes.ToolResult) {
+	registry := renderers.NewRendererRegistry()
+	rendered := registry.Render(result.StructuredData())
 	h.MessageCh <- MessageEvent{
 		Type:    EventTypeToolResult,
-		Content: result,
+		Content: rendered,
 	}
 }
 
@@ -258,7 +265,7 @@ func (h *StringCollectorHandler) HandleText(text string) {
 }
 
 // HandleToolUse optionally prints tool invocation details to the console (does not affect collection)
-func (h *StringCollectorHandler) HandleToolUse(toolName string, input string) {
+func (h *StringCollectorHandler) HandleToolUse(_ string, toolName string, input string) {
 	if !h.Silent {
 		consoleMu.Lock()
 		fmt.Printf("🔧 Using tool: %s\n  %s\n\n", toolName, formatJSONInput(input))
@@ -267,10 +274,12 @@ func (h *StringCollectorHandler) HandleToolUse(toolName string, input string) {
 }
 
 // HandleToolResult optionally prints tool execution results to the console (does not affect collection)
-func (h *StringCollectorHandler) HandleToolResult(_ string, result string) {
+func (h *StringCollectorHandler) HandleToolResult(_, _ string, result tooltypes.ToolResult) {
 	if !h.Silent {
+		registry := renderers.NewRendererRegistry()
+		rendered := registry.Render(result.StructuredData())
 		consoleMu.Lock()
-		fmt.Printf("🔄 Tool result: %s\n\n", result)
+		fmt.Printf("🔄 Tool result: %s\n\n", rendered)
 		consoleMu.Unlock()
 	}
 }

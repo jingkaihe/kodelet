@@ -563,6 +563,120 @@ func TestProcessImageURL(t *testing.T) {
 	}
 }
 
+func TestProcessImageDataURL(t *testing.T) {
+	thread, err := NewGoogleThread(llmtypes.Config{}, nil)
+	require.NoError(t, err)
+
+	// A minimal valid 1x1 PNG image encoded in base64
+	validPNGBase64 := "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+
+	tests := []struct {
+		name     string
+		dataURL  string
+		hasError bool
+		errorMsg string
+	}{
+		{
+			name:     "Valid PNG data URL",
+			dataURL:  "data:image/png;base64," + validPNGBase64,
+			hasError: false,
+		},
+		{
+			name:     "Valid JPEG data URL",
+			dataURL:  "data:image/jpeg;base64," + validPNGBase64,
+			hasError: false,
+		},
+		{
+			name:     "Valid GIF data URL",
+			dataURL:  "data:image/gif;base64," + validPNGBase64,
+			hasError: false,
+		},
+		{
+			name:     "Valid WebP data URL",
+			dataURL:  "data:image/webp;base64," + validPNGBase64,
+			hasError: false,
+		},
+		{
+			name:     "Missing data: prefix",
+			dataURL:  "image/png;base64," + validPNGBase64,
+			hasError: true,
+			errorMsg: "invalid data URL",
+		},
+		{
+			name:     "Missing base64 separator",
+			dataURL:  "data:image/png," + validPNGBase64,
+			hasError: true,
+			errorMsg: "must contain ';base64,' separator",
+		},
+		{
+			name:     "Unsupported mime type",
+			dataURL:  "data:image/bmp;base64," + validPNGBase64,
+			hasError: true,
+			errorMsg: "unsupported image mime type",
+		},
+		{
+			name:     "Empty data URL",
+			dataURL:  "",
+			hasError: true,
+			errorMsg: "invalid data URL",
+		},
+		{
+			name:     "Invalid base64 data",
+			dataURL:  "data:image/png;base64,!!!invalid!!!",
+			hasError: true,
+			errorMsg: "failed to decode base64 image data",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result, err := thread.processImageDataURL(test.dataURL)
+			if test.hasError {
+				assert.Error(t, err)
+				assert.Nil(t, result)
+				if test.errorMsg != "" {
+					assert.Contains(t, err.Error(), test.errorMsg)
+				}
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, result)
+			}
+		})
+	}
+}
+
+func TestProcessImage_DataURLRouting(t *testing.T) {
+	thread, err := NewGoogleThread(llmtypes.Config{}, nil)
+	require.NoError(t, err)
+
+	validPNGBase64 := "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+
+	tests := []struct {
+		name      string
+		imagePath string
+		hasError  bool
+	}{
+		{
+			name:      "Data URL is routed correctly",
+			imagePath: "data:image/png;base64," + validPNGBase64,
+			hasError:  false,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result, err := thread.processImage(context.Background(), test.imagePath)
+			if test.hasError {
+				assert.Error(t, err)
+				assert.Nil(t, result)
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, result)
+			}
+		})
+	}
+}
+
 func TestGoogleThread_AddUserMessageComprehensive(t *testing.T) {
 	thread, err := NewGoogleThread(llmtypes.Config{}, nil)
 	require.NoError(t, err)

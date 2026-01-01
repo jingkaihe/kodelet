@@ -26,6 +26,9 @@ import (
 
 var _ tooltypes.Tool = &MCPTool{}
 
+// ErrMCPDisabled is returned when MCP is disabled via configuration
+var ErrMCPDisabled = errors.New("MCP is disabled via configuration")
+
 // MCPServerType represents the type of MCP server
 type MCPServerType string
 
@@ -264,7 +267,13 @@ func LoadMCPConfigFromViper() (MCPConfig, error) {
 }
 
 // CreateMCPManagerFromViper creates a new MCPManager from Viper configuration
+// Returns ErrMCPDisabled if MCP is disabled via configuration
 func CreateMCPManagerFromViper(ctx context.Context) (*MCPManager, error) {
+	// Check if MCP is disabled via config (mcp.enabled defaults to true)
+	if viper.IsSet("mcp.enabled") && !viper.GetBool("mcp.enabled") {
+		return nil, ErrMCPDisabled
+	}
+
 	// Load configuration from Viper
 	config, err := LoadMCPConfigFromViper()
 	if err != nil {

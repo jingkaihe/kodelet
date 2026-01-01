@@ -23,7 +23,6 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/feedback"
 	"github.com/jingkaihe/kodelet/pkg/hooks"
-	"github.com/jingkaihe/kodelet/pkg/ide"
 	"github.com/jingkaihe/kodelet/pkg/llm/prompts"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/sysprompt"
@@ -68,7 +67,6 @@ type Thread struct {
 	useSubscription        bool
 	toolResults            map[string]tooltypes.StructuredToolResult // Maps tool_call_id to structured result
 	subagentContextFactory llmtypes.SubagentContextFactory           // Injected function for cross-provider subagent creation
-	ideStore               *ide.Store                                // IDE context store (nil if IDE mode disabled)
 	hookTrigger            hooks.Trigger                             // Hook trigger for lifecycle hooks (zero-value = no-op)
 }
 
@@ -143,15 +141,6 @@ func NewAnthropicThread(config llmtypes.Config, subagentContextFactory llmtypes.
 		}
 	}
 
-	var ideStore *ide.Store
-	if config.IDE && !config.IsSubAgent {
-		store, err := ide.NewIDEStore()
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to create IDE store")
-		}
-		ideStore = store
-	}
-
 	// Initialize hook trigger (zero-value if discovery fails or disabled - hooks disabled)
 	var hookTrigger hooks.Trigger
 	conversationID := convtypes.GenerateID()
@@ -175,7 +164,6 @@ func NewAnthropicThread(config llmtypes.Config, subagentContextFactory llmtypes.
 		usage:                  &llmtypes.Usage{},
 		toolResults:            make(map[string]tooltypes.StructuredToolResult),
 		subagentContextFactory: subagentContextFactory,
-		ideStore:               ideStore,
 		hookTrigger:            hookTrigger,
 	}, nil
 }
@@ -257,12 +245,6 @@ func (t *Thread) SendMessage(
 	if opt.PromptCache {
 		originalMessages = make([]anthropic.MessageParam, len(t.messages))
 		copy(originalMessages, t.messages)
-	}
-
-	if !t.config.IsSubAgent && t.ideStore != nil {
-		if err := t.processIDEContext(ctx, handler); err != nil {
-			return "", errors.Wrap(err, "failed to process IDE context")
-		}
 	}
 
 	// Trigger user_message_send hook before adding user message
@@ -429,7 +411,7 @@ func (t *Thread) executeToolsParallel(
 
 	// Show all tool invocations upfront so user knows what's about to run
 	for _, tb := range toolBlocks {
-		handler.HandleToolUse(tb.block.Name, tb.variant.JSON.Input.Raw())
+		handler.HandleToolUse(tb.block.ID, tb.block.Name, tb.variant.JSON.Input.Raw())
 	}
 
 	results := make([]toolExecResult, len(toolBlocks))
@@ -510,7 +492,7 @@ func (t *Thread) executeToolsParallel(
 	go func() {
 		defer consumerWg.Done()
 		for result := range resultCh {
-			handler.HandleToolResult(result.toolName, result.renderedOutput)
+			handler.HandleToolResult(result.blockID, result.toolName, result.output)
 			results[result.index] = result // preserve original order
 		}
 	}()
@@ -670,36 +652,6 @@ func (t *Thread) processMessageExchange(
 	return finalOutput, toolUseCount > 0, nil
 }
 
-func (t *Thread) processIDEContext(ctx context.Context, handler llmtypes.MessageHandler) error {
-	ideContext, err := t.ideStore.ReadContext(t.conversationID)
-	if err != nil && !errors.Is(err, ide.ErrContextNotFound) {
-		return errors.Wrap(err, "failed to read IDE context")
-	}
-
-	if ideContext != nil {
-		logger.G(ctx).WithFields(map[string]any{
-			"open_files_count":  len(ideContext.OpenFiles),
-			"has_selection":     ideContext.Selection != nil,
-			"diagnostics_count": len(ideContext.Diagnostics),
-		}).Info("processing IDE context")
-
-		ideContextPrompt := ide.FormatContextPrompt(ideContext)
-		if ideContextPrompt != "" {
-			t.AddUserMessage(ctx, ideContextPrompt)
-			handler.HandleText(fmt.Sprintf("📋 IDE Context: %d files, %d diagnostics",
-				len(ideContext.OpenFiles), len(ideContext.Diagnostics)))
-		}
-
-		if err := t.ideStore.ClearContext(t.conversationID); err != nil {
-			logger.G(ctx).WithError(err).Warn("failed to clear IDE context, may be processed again")
-		} else {
-			logger.G(ctx).Debug("successfully cleared IDE context")
-		}
-	}
-
-	return nil
-}
-
 func (t *Thread) processPendingFeedback(ctx context.Context, messageParams *anthropic.MessageNewParams, handler llmtypes.MessageHandler) error {
 	feedbackStore, err := feedback.NewFeedbackStore()
 	if err != nil {
@@ -834,6 +786,12 @@ func (t *Thread) NewMessage(ctx context.Context, params anthropic.MessageNewPara
 
 	message := anthropic.Message{}
 	for stream.Next() {
+		// Check for context cancellation - Anthropic SDK may not propagate it properly
+		if ctx.Err() != nil {
+			log.WithError(ctx.Err()).Info("context cancelled during streaming")
+			return nil, ctx.Err()
+		}
+
 		event := stream.Current()
 		err := message.Accumulate(event)
 		if err != nil {
@@ -1190,6 +1148,9 @@ func (t *Thread) processImage(imagePath string) (*anthropic.ContentBlockParamUni
 	if strings.HasPrefix(imagePath, "https://") {
 		return t.processImageURL(imagePath)
 	}
+	if strings.HasPrefix(imagePath, "data:") {
+		return t.processImageDataURL(imagePath)
+	}
 	if filePath, ok := strings.CutPrefix(imagePath, "file://"); ok {
 		// Remove file:// prefix and process as file
 		return t.processImageFile(filePath)
@@ -1208,6 +1169,54 @@ func (t *Thread) processImageURL(url string) (*anthropic.ContentBlockParamUnion,
 		URL:  url,
 	})
 	return &block, nil
+}
+
+func (t *Thread) processImageDataURL(dataURL string) (*anthropic.ContentBlockParamUnion, error) {
+	// Parse data URL format: data:<mediatype>;base64,<data>
+	if !strings.HasPrefix(dataURL, "data:") {
+		return nil, errors.New("invalid data URL: must start with 'data:'")
+	}
+
+	// Remove "data:" prefix
+	rest := strings.TrimPrefix(dataURL, "data:")
+
+	// Split by ";base64,"
+	parts := strings.SplitN(rest, ";base64,", 2)
+	if len(parts) != 2 {
+		return nil, errors.New("invalid data URL: must contain ';base64,' separator")
+	}
+
+	mimeType := parts[0]
+	base64Data := parts[1]
+
+	// Validate mime type is a supported image type
+	mediaType, err := mimeTypeToAnthropicMediaType(mimeType)
+	if err != nil {
+		return nil, errors.Wrapf(err, "unsupported image mime type: %s", mimeType)
+	}
+
+	block := anthropic.NewImageBlock(anthropic.Base64ImageSourceParam{
+		Type:      "base64",
+		MediaType: mediaType,
+		Data:      base64Data,
+	})
+	return &block, nil
+}
+
+// mimeTypeToAnthropicMediaType converts a MIME type string to Anthropic's Base64ImageSourceMediaType
+func mimeTypeToAnthropicMediaType(mimeType string) (anthropic.Base64ImageSourceMediaType, error) {
+	switch strings.ToLower(mimeType) {
+	case "image/jpeg":
+		return anthropic.Base64ImageSourceMediaTypeImageJPEG, nil
+	case "image/png":
+		return anthropic.Base64ImageSourceMediaTypeImagePNG, nil
+	case "image/gif":
+		return anthropic.Base64ImageSourceMediaTypeImageGIF, nil
+	case "image/webp":
+		return anthropic.Base64ImageSourceMediaTypeImageWebP, nil
+	default:
+		return "", errors.New("unsupported image type")
+	}
 }
 
 func (t *Thread) processImageFile(filePath string) (*anthropic.ContentBlockParamUnion, error) {

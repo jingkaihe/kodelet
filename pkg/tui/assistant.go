@@ -9,6 +9,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/mcp"
 	"github.com/jingkaihe/kodelet/pkg/skills"
 	"github.com/jingkaihe/kodelet/pkg/tools"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/spf13/viper"
 )
@@ -22,7 +23,6 @@ type ChatOpts struct {
 	MaxTurns           int
 	CompactRatio       float64
 	DisableAutoCompact bool
-	IDEMode            bool
 	NoHooks            bool
 	UseWeakModel       bool
 }
@@ -45,7 +45,6 @@ func NewAssistantClient(ctx context.Context, opts ChatOpts) *AssistantClient {
 		logger.G(ctx).WithError(err).Fatal("Failed to load configuration during assistant client initialization")
 	}
 
-	config.IDE = opts.IDEMode
 	config.NoHooks = opts.NoHooks
 
 	// Set MCP configuration for system prompt
@@ -72,9 +71,15 @@ func NewAssistantClient(ctx context.Context, opts ChatOpts) *AssistantClient {
 	discoveredSkills, skillsEnabled := skills.Initialize(ctx, config)
 	stateOpts = append(stateOpts, tools.WithSkillTool(discoveredSkills, skillsEnabled))
 
+	// Generate session ID for MCP socket (use conversation ID if available, otherwise new ID)
+	sessionID := opts.ConversationID
+	if sessionID == "" {
+		sessionID = convtypes.GenerateID()
+	}
+
 	// Set up MCP execution mode
 	if opts.MCPManager != nil {
-		mcpSetup, err := mcp.SetupExecutionMode(ctx, opts.MCPManager)
+		mcpSetup, err := mcp.SetupExecutionMode(ctx, opts.MCPManager, sessionID)
 		if err != nil && !errors.Is(err, mcp.ErrDirectMode) {
 			logger.G(ctx).WithError(err).Fatal("Failed to set up MCP execution mode")
 		}
@@ -91,11 +96,8 @@ func NewAssistantClient(ctx context.Context, opts ChatOpts) *AssistantClient {
 	state := tools.NewBasicState(ctx, stateOpts...)
 	thread.SetState(state)
 
-	// Configure conversation persistence
-	if opts.ConversationID != "" {
-		thread.SetConversationID(opts.ConversationID)
-	}
-
+	// Configure conversation persistence with session ID
+	thread.SetConversationID(sessionID)
 	thread.EnablePersistence(ctx, opts.EnablePersistence)
 
 	return &AssistantClient{

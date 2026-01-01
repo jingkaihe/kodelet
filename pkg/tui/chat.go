@@ -53,15 +53,6 @@ Kodelet (%s)
 		fullWelcomeMsg += "\nConversation persistence is disabled (--no-save)."
 	}
 
-	if opts.IDEMode {
-		idMsg := lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.AdaptiveColor{Light: "#9ece6a", Dark: "#9ece6a"}).
-			Render(fmt.Sprintf("\n📋 Conversation ID: %s", opts.ConversationID))
-		fullWelcomeMsg += idMsg
-		fullWelcomeMsg += "\n💡 Attach your IDE using: :KodeletAttach " + opts.ConversationID
-	}
-
 	model.AddSystemMessage(fullWelcomeMsg)
 	model.AddSystemMessage("Press Ctrl+H for help with keyboard shortcuts.")
 

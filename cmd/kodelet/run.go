@@ -19,6 +19,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/jingkaihe/kodelet/pkg/skills"
 	"github.com/jingkaihe/kodelet/pkg/tools"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
@@ -38,9 +39,9 @@ type RunConfig struct {
 	FragmentArgs       map[string]string // Arguments to pass to fragment
 	FragmentDirs       []string          // Additional fragment directories
 	IncludeHistory     bool              // Include historical conversation data in headless streaming
-	IDE                bool              // Enable IDE integration mode (display conversation ID prominently)
 	NoSkills           bool              // Disable agentic skills
 	NoHooks            bool              // Disable agent lifecycle hooks
+	NoMCP              bool              // Disable MCP tools
 	ResultOnly         bool              // Only print the final agent message, no intermediate output or usage stats
 	UseWeakModel       bool              // Use weak model for SendMessage
 }
@@ -59,9 +60,9 @@ func NewRunConfig() *RunConfig {
 		FragmentArgs:       make(map[string]string),
 		FragmentDirs:       []string{},
 		IncludeHistory:     false,
-		IDE:                false,
 		NoSkills:           false,
 		NoHooks:            false,
+		NoMCP:              false,
 		ResultOnly:         false,
 		UseWeakModel:       false,
 	}
@@ -189,10 +190,13 @@ var runCmd = &cobra.Command{
 			}
 		}
 
-		mcpManager, err := tools.CreateMCPManagerFromViper(ctx)
-		if err != nil {
-			presenter.Error(err, "Failed to create MCP manager")
-			return
+		var mcpManager *tools.MCPManager
+		if !config.NoMCP {
+			mcpManager, err = tools.CreateMCPManagerFromViper(ctx)
+			if err != nil && !errors.Is(err, tools.ErrMCPDisabled) {
+				presenter.Error(err, "Failed to create MCP manager")
+				return
+			}
 		}
 
 		customManager, err := tools.CreateCustomToolManagerFromViper(ctx)
@@ -207,7 +211,6 @@ var runCmd = &cobra.Command{
 			return
 		}
 
-		llmConfig.IDE = config.IDE
 		llmConfig.NoHooks = config.NoHooks
 
 		applyFragmentRestrictions(&llmConfig, fragmentMetadata)
@@ -232,9 +235,15 @@ var runCmd = &cobra.Command{
 		discoveredSkills, skillsEnabled := skills.Initialize(ctx, llmConfig)
 		stateOpts = append(stateOpts, tools.WithSkillTool(discoveredSkills, skillsEnabled))
 
+		// Generate session ID for MCP socket (use resume ID if available, otherwise new ID)
+		sessionID := config.ResumeConvID
+		if sessionID == "" {
+			sessionID = convtypes.GenerateID()
+		}
+
 		// Set up MCP execution mode
 		if mcpManager != nil {
-			mcpSetup, err := mcp.SetupExecutionMode(ctx, mcpManager)
+			mcpSetup, err := mcp.SetupExecutionMode(ctx, mcpManager, sessionID)
 			if err != nil && !errors.Is(err, mcp.ErrDirectMode) {
 				presenter.Error(err, "Failed to set up MCP execution mode")
 				return
@@ -264,11 +273,7 @@ var runCmd = &cobra.Command{
 				return
 			}
 			thread.SetState(appState)
-
-			if config.ResumeConvID != "" {
-				thread.SetConversationID(config.ResumeConvID)
-			}
-
+			thread.SetConversationID(sessionID)
 			thread.EnablePersistence(ctx, !config.NoSave)
 
 			streamer, closeFunc, err := llm.NewConversationStreamer(ctx)
@@ -337,12 +342,10 @@ var runCmd = &cobra.Command{
 				return
 			}
 			thread.SetState(appState)
+			thread.SetConversationID(sessionID)
 
-			if config.ResumeConvID != "" {
-				thread.SetConversationID(config.ResumeConvID)
-				if !config.ResultOnly {
-					presenter.Info(fmt.Sprintf("Resuming conversation: %s", config.ResumeConvID))
-				}
+			if config.ResumeConvID != "" && !config.ResultOnly {
+				presenter.Info(fmt.Sprintf("Resuming conversation: %s", config.ResumeConvID))
 			}
 
 			thread.EnablePersistence(ctx, !config.NoSave)
@@ -372,9 +375,6 @@ var runCmd = &cobra.Command{
 			if thread.IsPersisted() {
 				presenter.Section("Conversation Information")
 				presenter.Info(fmt.Sprintf("ID: %s", thread.GetConversationID()))
-				if config.IDE {
-					presenter.Success(fmt.Sprintf("💡 Attach your IDE using: :KodeletAttach %s", thread.GetConversationID()))
-				}
 				presenter.Info(fmt.Sprintf("To resume this conversation: kodelet run --resume %s", thread.GetConversationID()))
 				presenter.Info(fmt.Sprintf("To delete this conversation: kodelet conversation delete %s", thread.GetConversationID()))
 			}
@@ -396,8 +396,8 @@ func init() {
 	runCmd.Flags().StringToString("arg", defaults.FragmentArgs, "Arguments to pass to fragment (e.g., --arg name=John --arg occupation=Engineer)")
 	runCmd.Flags().StringSlice("fragment-dirs", defaults.FragmentDirs, "Additional fragment directories (e.g., --fragment-dirs ./project-fragments --fragment-dirs ./team-fragments)")
 	runCmd.Flags().Bool("include-history", defaults.IncludeHistory, "Include historical conversation data in headless streaming")
-	runCmd.Flags().Bool("ide", defaults.IDE, "Enable IDE integration mode (display conversation ID prominently)")
 	runCmd.Flags().Bool("no-hooks", defaults.NoHooks, "Disable agent lifecycle hooks")
+	runCmd.Flags().Bool("no-mcp", defaults.NoMCP, "Disable MCP tools")
 	runCmd.Flags().Bool("result-only", defaults.ResultOnly, "Only print the final agent message, suppressing all intermediate output and usage statistics")
 	runCmd.Flags().Bool("use-weak-model", defaults.UseWeakModel, "Use weak model for processing")
 }
@@ -468,12 +468,12 @@ func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
 		config.IncludeHistory = includeHistory
 	}
 
-	if ide, err := cmd.Flags().GetBool("ide"); err == nil {
-		config.IDE = ide
-	}
-
 	if noHooks, err := cmd.Flags().GetBool("no-hooks"); err == nil {
 		config.NoHooks = noHooks
+	}
+
+	if noMCP, err := cmd.Flags().GetBool("no-mcp"); err == nil {
+		config.NoMCP = noMCP
 	}
 
 	if resultOnly, err := cmd.Flags().GetBool("result-only"); err == nil {

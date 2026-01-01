@@ -134,7 +134,7 @@ func (s *MCPRPCServer) handleMCPCall(w http.ResponseWriter, r *http.Request) {
 
 // Start starts the RPC server
 func (s *MCPRPCServer) Start(ctx context.Context) error {
-	logger.G(ctx).WithField("socket", s.socketPath).Info("Starting MCP RPC server")
+	logger.G(ctx).WithField("socket", s.socketPath).Debug("Starting MCP RPC server")
 	if err := s.server.Serve(s.listener); err != nil && err != http.ErrServerClosed {
 		return errors.Wrap(err, "RPC server failed")
 	}
@@ -143,7 +143,7 @@ func (s *MCPRPCServer) Start(ctx context.Context) error {
 
 // Shutdown gracefully shuts down the RPC server
 func (s *MCPRPCServer) Shutdown(ctx context.Context) error {
-	logger.G(ctx).Info("Shutting down MCP RPC server")
+	logger.G(ctx).Debug("Shutting down MCP RPC server")
 	if err := s.server.Shutdown(ctx); err != nil {
 		return errors.Wrap(err, "failed to shutdown RPC server")
 	}

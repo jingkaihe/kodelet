@@ -11,7 +11,7 @@ Kodelet is a lightweight agentic SWE Agent that runs as an interactive CLI tool 
 - [Usage Modes](#usage-modes)
   - [One-shot Mode](#one-shot-mode)
   - [Interactive Chat Mode](#interactive-chat-mode)
-  - [Watch Mode](#watch-mode)
+
   - [Git Integration](#git-integration)
   - [GitHub Actions Background Agent](#github-actions-background-agent)
   - [Image Input Support](#image-input-support)
@@ -134,20 +134,6 @@ kodelet chat --follow              # resume most recent conversation
 kodelet chat -f                    # short form
 kodelet chat --resume CONV_ID      # resume specific conversation
 ```
-
-### Watch Mode
-
-Monitor file changes and automatically process files with special "@kodelet" comments:
-
-```bash
-kodelet watch [--include "*.go"] [--ignore ".git,node_modules"] [--verbosity level] [--debounce ms]
-```
-
-Options:
-- `--ignore` or `-i`: Directories to ignore (default: `.git,node_modules`)
-- `--include` or `-p`: File pattern to include (e.g., `*.go`, `*.{js,ts}`)
-- `--verbosity` or `-v`: Verbosity level (`quiet`, `normal`, `verbose`)
-- `--debounce` or `-d`: Debounce time in milliseconds (default: 500)
 
 ### Git Integration
 

@@ -1,5 +1,36 @@
 # Kodelet
 
+## 0.1.29.beta (2026-01-01)
+
+### Features
+
+**Agent Client Protocol (ACP) Integration**: Added `kodelet acp` command for seamless IDE integration
+
+- **IDE Embedding**: Run kodelet as a subprocess in ACP-compatible clients like Zed and JetBrains IDEs
+- **JSON-RPC 2.0**: Communication over stdio with full session management, prompt handling, and streaming updates
+- **Slash Commands**: Recipe/fragment invocation via slash commands (e.g., `/init`, `/custom-tool`) with argument support
+- **Session Persistence**: ACP sessions integrate with existing conversation persistence for resumable workflows
+
+**Data URL Image Support**: Added support for base64-encoded images across all LLM providers (Anthropic, OpenAI, Google)
+
+**MCP Improvements**:
+- `--no-mcp` flag to disable MCP tools for `run` and `chat` commands
+- `mcp.enabled` config option to disable MCP globally
+- Per-session MCP socket isolation for concurrent kodelet instances
+- Configurable socket path override via `mcp.code_execution.socket_path`
+
+### Breaking Changes
+
+**Removed `kodelet watch` command**: The file watching feature has been removed. Use `kodelet acp` for IDE integration instead.
+**Removed `--ide` flag**: The IDE integration mode flag has been replaced by the ACP protocol. Use `kodelet acp` for IDE integration.
+
+**MCP Socket Path Change**: Socket path is now per-session (`mcp-{session-id}.sock`) to allow concurrent instances. Existing hardcoded socket paths in automation may need updates.
+
+### Documentation
+
+- Added comprehensive ACP documentation in `docs/ACP.md`
+- Added ADR 022 documenting the ACP integration architecture
+
 ## 0.1.28.beta (2025-12-27)
 
 ### Features

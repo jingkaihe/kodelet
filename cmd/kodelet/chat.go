@@ -24,8 +24,8 @@ type ChatOptions struct {
 	maxTurns           int
 	compactRatio       float64
 	disableAutoCompact bool
-	ide                bool
 	noHooks            bool
+	noMCP              bool
 	useWeakModel       bool
 }
 
@@ -39,8 +39,8 @@ func init() {
 	chatCmd.Flags().IntVar(&chatOptions.maxTurns, "max-turns", 50, "Maximum number of turns within a single message exchange (0 for no limit)")
 	chatCmd.Flags().Float64Var(&chatOptions.compactRatio, "compact-ratio", 0.80, "Context window utilization ratio to trigger auto-compact (0.0-1.0)")
 	chatCmd.Flags().BoolVar(&chatOptions.disableAutoCompact, "disable-auto-compact", false, "Disable automatic context compacting")
-	chatCmd.Flags().BoolVar(&chatOptions.ide, "ide", false, "Enable IDE integration mode (display conversation ID prominently)")
 	chatCmd.Flags().BoolVar(&chatOptions.noHooks, "no-hooks", false, "Disable agent lifecycle hooks")
+	chatCmd.Flags().BoolVar(&chatOptions.noMCP, "no-mcp", false, "Disable MCP tools")
 	chatCmd.Flags().BoolVar(&chatOptions.useWeakModel, "use-weak-model", false, "Use weak model for processing")
 }
 
@@ -94,10 +94,14 @@ var chatCmd = &cobra.Command{
 				presenter.Warning("No conversations found, starting a new conversation")
 			}
 		}
-		mcpManager, err := tools.CreateMCPManagerFromViper(ctx)
-		if err != nil {
-			presenter.Error(err, "Failed to create MCP manager")
-			os.Exit(1)
+		var mcpManager *tools.MCPManager
+		var err error
+		if !chatOptions.noMCP {
+			mcpManager, err = tools.CreateMCPManagerFromViper(ctx)
+			if err != nil && !errors.Is(err, tools.ErrMCPDisabled) {
+				presenter.Error(err, "Failed to create MCP manager")
+				os.Exit(1)
+			}
 		}
 
 		customManager, err := tools.CreateCustomToolManagerFromViper(ctx)
@@ -135,7 +139,6 @@ var chatCmd = &cobra.Command{
 			MaxTurns:           maxTurns,
 			CompactRatio:       chatOptions.compactRatio,
 			DisableAutoCompact: chatOptions.disableAutoCompact,
-			IDEMode:            chatOptions.ide,
 			NoHooks:            chatOptions.noHooks,
 			UseWeakModel:       chatOptions.useWeakModel,
 		})

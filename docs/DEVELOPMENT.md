@@ -195,7 +195,6 @@ mise run frontend-test-coverage
 3. Run specific functionality:
    ```bash
    ./bin/kodelet chat
-   ./bin/kodelet watch
    ```
 
 ## Project Structure
