@@ -40,10 +40,9 @@ type Server struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	pendingRequests map[string]chan json.RawMessage
-	pendingMu       sync.Mutex
-	nextRequestID   int64
-
+	pendingRequests   map[string]chan json.RawMessage
+	pendingMu         sync.Mutex
+	nextRequestID     int64
 	fragmentProcessor *fragments.Processor
 }
 

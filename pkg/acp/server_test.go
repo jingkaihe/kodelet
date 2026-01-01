@@ -529,6 +529,12 @@ func TestParseSlashCommandArgs(t *testing.T) {
 			wantKVArgs:     map[string]string{"target": "main", "draft": "true"},
 			wantAdditional: "",
 		},
+		{
+			name:           "unclosed quote takes rest of string",
+			args:           `title="unclosed value`,
+			wantKVArgs:     map[string]string{"title": "unclosed value"},
+			wantAdditional: "",
+		},
 	}
 
 	for _, tt := range tests {
