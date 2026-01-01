@@ -202,29 +202,30 @@ To cancel an in-progress prompt, send a `session/cancel` notification:
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        ACP Client (IDE)                         │
-└──────────────────────────┬──────────────────────────────────────┘
-                           │ stdio (JSON-RPC 2.0)
-                           ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    Kodelet ACP Agent                            │
-│   ┌─────────────────────────────────────────────────────────┐  │
-│   │                    ACP Server                           │  │
-│   │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  │  │
-│   │  │  Initialize  │  │   Session    │  │   Prompt     │  │  │
-│   │  │   Handler    │  │   Manager    │  │   Handler    │  │  │
-│   │  └──────────────┘  └──────────────┘  └──────────────┘  │  │
-│   └─────────────────────────────────────────────────────────┘  │
-│   ┌─────────────────────────────────────────────────────────┐  │
-│   │                  Existing Kodelet Core                  │  │
-│   │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌────────┐  │  │
-│   │  │   LLM    │  │  Tools   │  │  Skills  │  │Convers-│  │  │
-│   │  │  Thread  │  │  System  │  │  System  │  │ations  │  │  │
-│   │  └──────────┘  └──────────┘  └──────────┘  └────────┘  │  │
-│   └─────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph IDE["ACP Client (IDE)"]
+        client[IDE Interface]
+    end
+
+    client <-->|"stdio (JSON-RPC 2.0)"| agent
+
+    subgraph agent["Kodelet ACP Agent"]
+        subgraph server["ACP Server"]
+            init[Initialize Handler]
+            session[Session Manager]
+            prompt[Prompt Handler]
+        end
+
+        subgraph core["Existing Kodelet Core"]
+            llm[LLM Thread]
+            tools[Tools System]
+            skills[Skills System]
+            conv[Conversations]
+        end
+
+        server --> core
+    end
 ```
 
 ## Security Considerations

@@ -544,6 +544,8 @@ kodelet acp                     # Start ACP agent mode (stdin/stdout JSON-RPC)
 - Full access to kodelet's built-in tools
 - Embedded file context support
 
+For detailed protocol documentation, see [docs/ACP.md](https://github.com/jingkaihe/kodelet/blob/main/docs/ACP.md).
+
 ### Feedback System
 Send feedback to conversations:
 
