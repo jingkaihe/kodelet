@@ -521,6 +521,29 @@ kodelet serve --host 0.0.0.0 --port 3000
 
 Access at `http://localhost:8080` for conversation management and chat interface.
 
+### IDE Integration (ACP)
+Kodelet implements the Agent Client Protocol (ACP) for integration with compatible IDEs like Zed and JetBrains:
+
+```bash
+kodelet acp                     # Start ACP agent mode (stdin/stdout JSON-RPC)
+```
+
+**Zed configuration** (settings.json):
+```json
+{
+  "agent": {
+    "command": "kodelet",
+    "args": ["acp"]
+  }
+}
+```
+
+**Features:**
+- Session persistence (conversations can be resumed)
+- Image input support
+- Full access to kodelet's built-in tools
+- Embedded file context support
+
 ### Feedback System
 Send feedback to conversations:
 
