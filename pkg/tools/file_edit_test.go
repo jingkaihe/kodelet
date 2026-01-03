@@ -609,6 +609,57 @@ func TestFileEditTool_ValidateInputReplaceAll(t *testing.T) {
 		err := tool.ValidateInput(mockState, string(inputJSON))
 		assert.NoError(t, err)
 	})
+
+	t.Run("replaceAll=false without prior read - should fail validation", func(t *testing.T) {
+		// Create a fresh file that hasn't been read
+		freshFile, err := os.CreateTemp("", "FileEditNoPriorReadTest")
+		require.NoError(t, err)
+		defer os.Remove(freshFile.Name())
+
+		_, err = freshFile.WriteString("some content\n")
+		require.NoError(t, err)
+		err = freshFile.Close()
+		require.NoError(t, err)
+
+		freshState := NewBasicState(context.TODO())
+		// Don't set any last accessed time
+
+		input := FileEditInput{
+			FilePath:   freshFile.Name(),
+			OldText:    "some",
+			NewText:    "new",
+			ReplaceAll: false,
+		}
+		inputJSON, _ := json.Marshal(input)
+		err = tool.ValidateInput(freshState, string(inputJSON))
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "last access time")
+	})
+
+	t.Run("replaceAll=true without prior read - should pass validation", func(t *testing.T) {
+		// Create a fresh file that hasn't been read
+		freshFile, err := os.CreateTemp("", "FileEditNoPriorReadReplaceAllTest")
+		require.NoError(t, err)
+		defer os.Remove(freshFile.Name())
+
+		_, err = freshFile.WriteString("foo bar foo\n")
+		require.NoError(t, err)
+		err = freshFile.Close()
+		require.NoError(t, err)
+
+		freshState := NewBasicState(context.TODO())
+		// Don't set any last accessed time
+
+		input := FileEditInput{
+			FilePath:   freshFile.Name(),
+			OldText:    "foo",
+			NewText:    "qux",
+			ReplaceAll: true,
+		}
+		inputJSON, _ := json.Marshal(input)
+		err = tool.ValidateInput(freshState, string(inputJSON))
+		assert.NoError(t, err)
+	})
 }
 
 func TestFileEditTool_StructuredDataReplaceAll(t *testing.T) {

@@ -245,10 +245,13 @@ func (t *FileEditTool) ValidateInput(state tooltypes.State, parameters string) e
 		return errors.Wrap(err, "failed to check the file status")
 	}
 
-	// Check if file has been read before (required for editing)
-	_, err = state.GetFileLastAccessed(input.FilePath)
-	if err != nil {
-		return errors.Wrap(err, "failed to get the last access time of the file")
+	// Check if file has been read before (required for single edits, not for replaceAll)
+	// replaceAll is a declarative global replacement that doesn't depend on prior context
+	if !input.ReplaceAll {
+		_, err = state.GetFileLastAccessed(input.FilePath)
+		if err != nil {
+			return errors.Wrap(err, "failed to get the last access time of the file")
+		}
 	}
 
 	// Note: The mtime check is performed inside Execute() within the locked section
