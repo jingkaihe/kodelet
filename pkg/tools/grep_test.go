@@ -377,10 +377,10 @@ func TestGrepGitignoreRespected(t *testing.T) {
 
 	// Create test files
 	testFiles := map[string]string{
-		"visible.go":            "func TestVisibleFunc() {}\n",
+		"visible.go":             "func TestVisibleFunc() {}\n",
 		"ignored_dir/ignored.go": "func TestIgnoredFunc() {}\n",
-		"test.log":              "func TestLogFunc() {}\n",
-		"subdir/test.go":        "func TestSubdirFunc() {}\n",
+		"test.log":               "func TestLogFunc() {}\n",
+		"subdir/test.go":         "func TestSubdirFunc() {}\n",
 	}
 
 	for filename, content := range testFiles {
@@ -809,7 +809,7 @@ func TestSearchDirectoryRipgrep(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			results, err := searchDirectoryRipgrep(ctx, tempDir, tt.pattern, tt.includePattern, false, false)
+			results, err := searchDirectory(ctx, tempDir, tt.pattern, tt.includePattern, false, false)
 			require.NoError(t, err)
 
 			// Check expected files are found

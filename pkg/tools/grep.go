@@ -285,8 +285,8 @@ type rgJSONSubmatchText struct {
 	Text string `json:"text"`
 }
 
-// searchDirectoryRipgrep searches for pattern using ripgrep
-func searchDirectoryRipgrep(ctx context.Context, root, pattern, includePattern string, ignoreCase, fixedStrings bool) ([]SearchResult, error) {
+// searchDirectory searches for pattern using ripgrep
+func searchDirectory(ctx context.Context, root, pattern, includePattern string, ignoreCase, fixedStrings bool) ([]SearchResult, error) {
 	rgPath := getRipgrepPath()
 	if rgPath == "" {
 		return nil, errors.New("ripgrep not found")
@@ -420,7 +420,7 @@ func (t *GrepTool) Execute(ctx context.Context, _ tooltypes.State, parameters st
 	}
 
 	// Search using ripgrep
-	results, err := searchDirectoryRipgrep(ctx, path, input.Pattern, input.Include, input.IgnoreCase, input.FixedStrings)
+	results, err := searchDirectory(ctx, path, input.Pattern, input.Include, input.IgnoreCase, input.FixedStrings)
 	if err != nil {
 		return &GrepToolResult{
 			pattern: input.Pattern,
