@@ -809,7 +809,7 @@ func TestSearchDirectoryRipgrep(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			results, err := searchDirectoryRipgrep(ctx, tempDir, tt.pattern, tt.includePattern)
+			results, err := searchDirectoryRipgrep(ctx, tempDir, tt.pattern, tt.includePattern, false, false)
 			require.NoError(t, err)
 
 			// Check expected files are found
@@ -867,4 +867,83 @@ func TestRipgrepBasicSearch(t *testing.T) {
 	// Should find the match
 	assert.False(t, result.IsError())
 	assert.Contains(t, result.GetResult(), "BasicTest")
+}
+
+func TestGrepIgnoreCase(t *testing.T) {
+	if getRipgrepPath() == "" {
+		t.Skip("ripgrep not available, skipping test")
+	}
+
+	tool := &GrepTool{}
+	ctx := context.Background()
+	state := NewBasicState(context.TODO())
+
+	tempDir, err := os.MkdirTemp("", "grep_ignore_case_test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	testFile := filepath.Join(tempDir, "test.go")
+	require.NoError(t, os.WriteFile(testFile, []byte("func HelloWorld() {}\n"), 0o644))
+
+	// Without ignore_case, uppercase pattern should not match lowercase (smart-case applies)
+	inputWithoutIgnoreCase := CodeSearchInput{
+		Pattern:    "HELLOWORLD",
+		Path:       tempDir,
+		IgnoreCase: false,
+	}
+	inputJSON, _ := json.Marshal(inputWithoutIgnoreCase)
+	result := tool.Execute(ctx, state, string(inputJSON))
+	assert.False(t, result.IsError())
+	assert.NotContains(t, result.GetResult(), "HelloWorld")
+
+	// With ignore_case, uppercase pattern should match
+	inputWithIgnoreCase := CodeSearchInput{
+		Pattern:    "HELLOWORLD",
+		Path:       tempDir,
+		IgnoreCase: true,
+	}
+	inputJSON, _ = json.Marshal(inputWithIgnoreCase)
+	result = tool.Execute(ctx, state, string(inputJSON))
+	assert.False(t, result.IsError())
+	assert.Contains(t, result.GetResult(), "HelloWorld")
+}
+
+func TestGrepFixedStrings(t *testing.T) {
+	if getRipgrepPath() == "" {
+		t.Skip("ripgrep not available, skipping test")
+	}
+
+	tool := &GrepTool{}
+	ctx := context.Background()
+	state := NewBasicState(context.TODO())
+
+	tempDir, err := os.MkdirTemp("", "grep_fixed_strings_test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	testFile := filepath.Join(tempDir, "test.go")
+	require.NoError(t, os.WriteFile(testFile, []byte("func foo.bar() {}\nfunc fooXbar() {}\n"), 0o644))
+
+	// Without fixed_strings, "foo.bar" is treated as regex (. matches any char)
+	inputWithoutFixed := CodeSearchInput{
+		Pattern:      "foo.bar",
+		Path:         tempDir,
+		FixedStrings: false,
+	}
+	inputJSON, _ := json.Marshal(inputWithoutFixed)
+	result := tool.Execute(ctx, state, string(inputJSON))
+	assert.False(t, result.IsError())
+	assert.Contains(t, result.GetResult(), "fooXbar") // regex . matches X
+
+	// With fixed_strings, "foo.bar" matches only literal "foo.bar"
+	inputWithFixed := CodeSearchInput{
+		Pattern:      "foo.bar",
+		Path:         tempDir,
+		FixedStrings: true,
+	}
+	inputJSON, _ = json.Marshal(inputWithFixed)
+	result = tool.Execute(ctx, state, string(inputJSON))
+	assert.False(t, result.IsError())
+	assert.Contains(t, result.GetResult(), "foo.bar")
+	assert.NotContains(t, result.GetResult(), "fooXbar")
 }

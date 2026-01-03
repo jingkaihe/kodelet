@@ -110,9 +110,11 @@ type GrepTool struct{}
 
 // CodeSearchInput defines the input parameters for the grep_tool
 type CodeSearchInput struct {
-	Pattern string `json:"pattern" jsonschema:"description=The regex pattern to search for"`
-	Path    string `json:"path" jsonschema:"description=The absolute path to search for the pattern default using the current directory"`
-	Include string `json:"include" jsonschema:"description=The optional include path to search for the pattern for example: '*.go' '*.{go,py}'"`
+	Pattern      string `json:"pattern" jsonschema:"description=The pattern to search for (regex by default or literal string if fixed_strings is true)"`
+	Path         string `json:"path" jsonschema:"description=The absolute path to search for the pattern default using the current directory"`
+	Include      string `json:"include" jsonschema:"description=The optional include path to search for the pattern for example: '*.go' '*.{go,py}'"`
+	IgnoreCase   bool   `json:"ignore_case" jsonschema:"description=If true use case-insensitive search. Default is false (smart-case: case-insensitive if pattern is all lowercase)"`
+	FixedStrings bool   `json:"fixed_strings" jsonschema:"description=If true treat pattern as literal string instead of regex. Default is false"`
 }
 
 // Name returns the name of the tool
@@ -137,6 +139,8 @@ func (t *GrepTool) TracingKVs(parameters string) ([]attribute.KeyValue, error) {
 		attribute.String("pattern", input.Pattern),
 		attribute.String("path", input.Path),
 		attribute.String("include", input.Include),
+		attribute.Bool("ignore_case", input.IgnoreCase),
+		attribute.Bool("fixed_strings", input.FixedStrings),
 	}, nil
 }
 
@@ -152,15 +156,11 @@ func (t *GrepTool) Description() string {
 * To get the best result, you should use the ${glob_tool} to narrow down the files to search in, and then use this tool for a more targeted search.
 
 ## Input
-- pattern: The regex pattern to search for. For example: "func TestFoo_(.*) {", "type Foo struct {"
+- pattern: The pattern to search for (regex by default, or literal string if fixed_strings is true). For example: "func TestFoo_(.*) {", "type Foo struct {"
 - path: The absolute path to search for the pattern default using the current directory
 - include: The optional include path to search for the pattern for example: '*.go' '*.{go,py}'. Leave it empty if you are not sure about the file name pattern or extension.
-
-- pattern: The glob pattern to match files. For example:
-  * "*.go" - Find all Go files in the current directory
-  * "**/*.go" - Find all Go files recursively
-  * "*.{json,yaml}" - Find all JSON and YAML files
-  * "cmd/*.go" - Find all Go files in the cmd directory
+- ignore_case: If true, use case-insensitive search. Default is false (smart-case: case-insensitive if pattern is all lowercase).
+- fixed_strings: If true, treat pattern as a literal string instead of regex. Useful when searching for strings containing special characters like "foo.bar()" or "[test]".
 
 If you need to do multi-turn search using grep_tool and glob_tool, use subagentTool instead.
 `
@@ -286,7 +286,7 @@ type rgJSONSubmatchText struct {
 }
 
 // searchDirectoryRipgrep searches for pattern using ripgrep
-func searchDirectoryRipgrep(ctx context.Context, root, pattern, includePattern string) ([]SearchResult, error) {
+func searchDirectoryRipgrep(ctx context.Context, root, pattern, includePattern string, ignoreCase, fixedStrings bool) ([]SearchResult, error) {
 	rgPath := getRipgrepPath()
 	if rgPath == "" {
 		return nil, errors.New("ripgrep not found")
@@ -297,6 +297,14 @@ func searchDirectoryRipgrep(ctx context.Context, root, pattern, includePattern s
 		"--sortr=modified", // Sort by modification time, newest first
 		"--no-heading",
 		"--no-messages", // Suppress error messages for unreadable files
+	}
+
+	if ignoreCase {
+		args = append(args, "-i")
+	}
+
+	if fixedStrings {
+		args = append(args, "-F")
 	}
 
 	// Add glob pattern if specified
@@ -412,7 +420,7 @@ func (t *GrepTool) Execute(ctx context.Context, _ tooltypes.State, parameters st
 	}
 
 	// Search using ripgrep
-	results, err := searchDirectoryRipgrep(ctx, path, input.Pattern, input.Include)
+	results, err := searchDirectoryRipgrep(ctx, path, input.Pattern, input.Include, input.IgnoreCase, input.FixedStrings)
 	if err != nil {
 		return &GrepToolResult{
 			pattern: input.Pattern,
