@@ -70,10 +70,10 @@ func (r *GrepToolResult) StructuredData() tooltypes.StructuredToolResult {
 	metadataResults := make([]tooltypes.SearchResult, 0, len(r.results))
 	for _, res := range r.results {
 		matches := make([]tooltypes.SearchMatch, 0, len(res.MatchedLines))
-		for _, match := range res.MatchedLines {
+		for lineNum, content := range res.MatchedLines {
 			matches = append(matches, tooltypes.SearchMatch{
-				LineNumber: match.LineNumber,
-				Content:    match.LineContent,
+				LineNumber: lineNum,
+				Content:    content,
 				MatchStart: 0, // TODO: Calculate actual match positions
 				MatchEnd:   0,
 			})
@@ -110,11 +110,12 @@ type GrepTool struct{}
 
 // CodeSearchInput defines the input parameters for the grep_tool
 type CodeSearchInput struct {
-	Pattern      string `json:"pattern" jsonschema:"description=The pattern to search for (regex by default or literal string if fixed_strings is true)"`
-	Path         string `json:"path" jsonschema:"description=The absolute path to search for the pattern default using the current directory"`
-	Include      string `json:"include" jsonschema:"description=The optional include path to search for the pattern for example: '*.go' '*.{go,py}'"`
-	IgnoreCase   bool   `json:"ignore_case" jsonschema:"description=If true use case-insensitive search. Default is false (smart-case: case-insensitive if pattern is all lowercase)"`
-	FixedStrings bool   `json:"fixed_strings" jsonschema:"description=If true treat pattern as literal string instead of regex. Default is false"`
+	Pattern       string `json:"pattern" jsonschema:"description=The pattern to search for (regex by default or literal string if fixed_strings is true)"`
+	Path          string `json:"path" jsonschema:"description=The absolute path to search for the pattern default using the current directory"`
+	Include       string `json:"include" jsonschema:"description=The optional include path to search for the pattern for example: '*.go' '*.{go,py}'"`
+	IgnoreCase    bool   `json:"ignore_case" jsonschema:"description=If true use case-insensitive search. Default is false (smart-case: case-insensitive if pattern is all lowercase)"`
+	FixedStrings  bool   `json:"fixed_strings" jsonschema:"description=If true treat pattern as literal string instead of regex. Default is false"`
+	SurroundLines int    `json:"surround_lines" jsonschema:"description=Number of lines to show before and after each match. Default is 0 (no context lines)"`
 }
 
 // Name returns the name of the tool
@@ -141,6 +142,7 @@ func (t *GrepTool) TracingKVs(parameters string) ([]attribute.KeyValue, error) {
 		attribute.String("include", input.Include),
 		attribute.Bool("ignore_case", input.IgnoreCase),
 		attribute.Bool("fixed_strings", input.FixedStrings),
+		attribute.Int("surround_lines", input.SurroundLines),
 	}, nil
 }
 
@@ -161,6 +163,7 @@ func (t *GrepTool) Description() string {
 - include: The optional include path to search for the pattern for example: '*.go' '*.{go,py}'. Leave it empty if you are not sure about the file name pattern or extension.
 - ignore_case: If true, use case-insensitive search. Default is false (smart-case: case-insensitive if pattern is all lowercase).
 - fixed_strings: If true, treat pattern as a literal string instead of regex. Useful when searching for strings containing special characters like "foo.bar()" or "[test]".
+- surround_lines: Number of lines to show before and after each match for context. Default is 0 (no context lines).
 
 If you need to do multi-turn search using grep_tool and glob_tool, use subagentTool instead.
 `
@@ -187,15 +190,9 @@ func (t *GrepTool) ValidateInput(_ tooltypes.State, parameters string) error {
 // SearchResult represents a search result from a file
 type SearchResult struct {
 	Filename     string
-	MatchedLines []MatchLine
-	ContextLines map[int]string // Line number -> content
+	MatchedLines map[int]string // Line number -> content (matched lines)
+	ContextLines map[int]string // Line number -> content (context lines)
 	LineNumbers  []int          // All line numbers in order
-}
-
-// MatchLine represents a single matched line
-type MatchLine struct {
-	LineNumber  int
-	LineContent string
 }
 
 // FormatSearchResults formats the search results for output
@@ -214,23 +211,11 @@ func FormatSearchResults(pattern string, results []SearchResult) string {
 
 		output.WriteString(fmt.Sprintf("\nPattern found in file %s:\n\n", result.Filename))
 
-		// Get all the line numbers in proper order
 		for _, lineNum := range result.LineNumbers {
-			// Check if this is a matched line
-			isMatch := false
-			for _, match := range result.MatchedLines {
-				if match.LineNumber == lineNum {
-					output.WriteString(fmt.Sprintf("%d:%s\n", lineNum, match.LineContent))
-					isMatch = true
-					break
-				}
-			}
-
-			// If not a match, check if it's a context line
-			if !isMatch {
-				if content, exists := result.ContextLines[lineNum]; exists {
-					output.WriteString(fmt.Sprintf("%d-%s\n", lineNum, content))
-				}
+			if content, isMatch := result.MatchedLines[lineNum]; isMatch {
+				output.WriteString(fmt.Sprintf("%d:%s\n", lineNum, content))
+			} else if content, exists := result.ContextLines[lineNum]; exists {
+				output.WriteString(fmt.Sprintf("%d-%s\n", lineNum, content))
 			}
 		}
 	}
@@ -286,7 +271,7 @@ type rgJSONSubmatchText struct {
 }
 
 // searchDirectory searches for pattern using ripgrep
-func searchDirectory(ctx context.Context, root, pattern, includePattern string, ignoreCase, fixedStrings bool) ([]SearchResult, error) {
+func searchDirectory(ctx context.Context, root, pattern, includePattern string, ignoreCase, fixedStrings bool, surroundLines int) ([]SearchResult, error) {
 	rgPath := getRipgrepPath()
 	if rgPath == "" {
 		return nil, errors.New("ripgrep not found")
@@ -305,6 +290,10 @@ func searchDirectory(ctx context.Context, root, pattern, includePattern string, 
 
 	if fixedStrings {
 		args = append(args, "-F")
+	}
+
+	if surroundLines > 0 {
+		args = append(args, "-C", fmt.Sprintf("%d", surroundLines))
 	}
 
 	// Add glob pattern if specified
@@ -353,7 +342,7 @@ func parseRipgrepJSON(output []byte, root string) ([]SearchResult, error) {
 			continue // Skip malformed lines
 		}
 
-		if msg.Type != "match" {
+		if msg.Type != "match" && msg.Type != "context" {
 			continue
 		}
 
@@ -367,7 +356,7 @@ func parseRipgrepJSON(output []byte, root string) ([]SearchResult, error) {
 		if _, exists := resultsMap[filename]; !exists {
 			resultsMap[filename] = &SearchResult{
 				Filename:     filename,
-				MatchedLines: []MatchLine{},
+				MatchedLines: make(map[int]string),
 				ContextLines: make(map[int]string),
 				LineNumbers:  []int{},
 			}
@@ -375,10 +364,11 @@ func parseRipgrepJSON(output []byte, root string) ([]SearchResult, error) {
 		}
 
 		result := resultsMap[filename]
-		result.MatchedLines = append(result.MatchedLines, MatchLine{
-			LineNumber:  msg.Data.LineNumber,
-			LineContent: lineContent,
-		})
+		if msg.Type == "match" {
+			result.MatchedLines[msg.Data.LineNumber] = lineContent
+		} else {
+			result.ContextLines[msg.Data.LineNumber] = lineContent
+		}
 		result.LineNumbers = append(result.LineNumbers, msg.Data.LineNumber)
 	}
 
@@ -420,7 +410,7 @@ func (t *GrepTool) Execute(ctx context.Context, _ tooltypes.State, parameters st
 	}
 
 	// Search using ripgrep
-	results, err := searchDirectory(ctx, path, input.Pattern, input.Include, input.IgnoreCase, input.FixedStrings)
+	results, err := searchDirectory(ctx, path, input.Pattern, input.Include, input.IgnoreCase, input.FixedStrings, input.SurroundLines)
 	if err != nil {
 		return &GrepToolResult{
 			pattern: input.Pattern,

@@ -733,7 +733,8 @@ func TestParseRipgrepJSON(t *testing.T) {
 
 			if tt.expectedFiles > 0 && tt.checkFirstFile != "" {
 				assert.Equal(t, tt.checkFirstFile, results[0].Filename)
-				assert.Equal(t, tt.checkLineNum, results[0].MatchedLines[0].LineNumber)
+				_, exists := results[0].MatchedLines[tt.checkLineNum]
+				assert.True(t, exists, "expected line %d to exist in MatchedLines", tt.checkLineNum)
 			}
 		})
 	}
@@ -809,7 +810,7 @@ func TestSearchDirectoryRipgrep(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			results, err := searchDirectory(ctx, tempDir, tt.pattern, tt.includePattern, false, false)
+			results, err := searchDirectory(ctx, tempDir, tt.pattern, tt.includePattern, false, false, 0)
 			require.NoError(t, err)
 
 			// Check expected files are found
