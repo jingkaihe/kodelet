@@ -9,10 +9,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/invopop/jsonschema"
+	"github.com/jingkaihe/kodelet/pkg/binaries"
 	"github.com/jingkaihe/kodelet/pkg/osutil"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"go.opentelemetry.io/otel/attribute"
@@ -235,20 +235,9 @@ func FormatSearchResults(pattern string, results []SearchResult) string {
 	return output.String()
 }
 
-// ripgrep availability check (cached)
-var (
-	ripgrepPath     string
-	ripgrepPathOnce sync.Once
-)
-
+// getRipgrepPath returns the path to the managed ripgrep binary
 func getRipgrepPath() string {
-	ripgrepPathOnce.Do(func() {
-		path, err := exec.LookPath("rg")
-		if err == nil {
-			ripgrepPath = path
-		}
-	})
-	return ripgrepPath
+	return binaries.GetRipgrepPath()
 }
 
 // rgJSONMatch represents a match in ripgrep's JSON output

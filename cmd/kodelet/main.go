@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/jingkaihe/kodelet/pkg/binaries"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	"github.com/spf13/cobra"
@@ -171,6 +172,11 @@ func main() {
 				}
 			}
 		}()
+	}
+
+	// Ensure required external binaries are installed
+	if _, err := binaries.EnsureRipgrep(ctx); err != nil {
+		logger.G(ctx).WithError(err).Warn("Failed to ensure ripgrep is installed, grep_tool may not work")
 	}
 
 	rootCmd = withTracing(rootCmd)
