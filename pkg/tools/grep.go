@@ -1,19 +1,17 @@
 package tools
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
+	"sync"
 	"time"
 
-	"github.com/bmatcuk/doublestar/v4"
 	"github.com/invopop/jsonschema"
 	"github.com/jingkaihe/kodelet/pkg/osutil"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -185,11 +183,6 @@ func (t *GrepTool) ValidateInput(_ tooltypes.State, parameters string) error {
 	return nil
 }
 
-const (
-	// CodeSearchSurroundingLines = 3
-	CodeSearchSurroundingLines = 0
-)
-
 // SearchResult represents a search result from a file
 type SearchResult struct {
 	Filename     string
@@ -244,189 +237,150 @@ func FormatSearchResults(pattern string, results []SearchResult) string {
 	return output.String()
 }
 
-// isFileIncluded checks if a file should be included based on the pattern
-func isFileIncluded(filename, includePattern string) bool {
-	if includePattern == "" {
-		return true
-	}
+// ripgrep availability check (cached)
+var (
+	ripgrepPath     string
+	ripgrepPathOnce sync.Once
+)
 
-	matched, err := doublestar.PathMatch(includePattern, filename)
-	if err != nil {
-		return false
-	}
-
-	return matched
-}
-
-// searchFile searches for the pattern in a single file
-func searchFile(filename, pattern string, surroundingLines int) (SearchResult, error) {
-	result := SearchResult{
-		Filename:     filename,
-		MatchedLines: []MatchLine{},
-		ContextLines: make(map[int]string),
-		LineNumbers:  []int{},
-	}
-
-	// Compile the regex
-	re, err := regexp.Compile(pattern)
-	if err != nil {
-		return result, err
-	}
-
-	// Open the file
-	file, err := os.Open(filename)
-	if err != nil {
-		return result, err
-	}
-	defer file.Close()
-
-	// Prepare a scanner to read the file line by line
-	scanner := bufio.NewScanner(file)
-	lineNumber := 0
-
-	// Read the whole file first to get all matches
-	var lines []string
-	for scanner.Scan() {
-		lines = append(lines, scanner.Text())
-	}
-
-	if err := scanner.Err(); err != nil {
-		return result, err
-	}
-
-	// Process lines to find matches and context
-	lineSet := make(map[int]bool)
-	for i, line := range lines {
-		lineNumber = i + 1 // 1-indexed line numbers
-
-		if re.MatchString(line) {
-			// Found a match
-			result.MatchedLines = append(result.MatchedLines, MatchLine{
-				LineNumber:  lineNumber,
-				LineContent: line,
-			})
-
-			// Add the match line to the line set
-			lineSet[lineNumber] = true
-
-			// Add surrounding lines to the context
-			for j := lineNumber - surroundingLines; j <= lineNumber+surroundingLines; j++ {
-				if j > 0 && j <= len(lines) && j != lineNumber {
-					// Add to context if not already a match
-					if !lineSet[j] {
-						result.ContextLines[j] = lines[j-1]
-						lineSet[j] = true
-					}
-				}
-			}
-		}
-	}
-
-	// Build the sorted list of line numbers
-	for ln := range lineSet {
-		result.LineNumbers = append(result.LineNumbers, ln)
-	}
-
-	// Sort the line numbers
-	for i := 0; i < len(result.LineNumbers); i++ {
-		for j := i + 1; j < len(result.LineNumbers); j++ {
-			if result.LineNumbers[i] > result.LineNumbers[j] {
-				result.LineNumbers[i], result.LineNumbers[j] = result.LineNumbers[j], result.LineNumbers[i]
-			}
-		}
-	}
-
-	return result, nil
-}
-
-// searchDirectory recursively searches files in a directory
-func searchDirectory(ctx context.Context, root, pattern, includePattern string, surroundingLines int) ([]SearchResult, error) {
-	var results []SearchResult
-
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		// Check for context cancellation
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-
-		if err != nil {
-			return err
-		}
-
-		// Skip hidden files and directories (starting with .)
-		baseName := filepath.Base(path)
-		if strings.HasPrefix(baseName, ".") {
-			if d.IsDir() {
-				return fs.SkipDir
-			}
-			return nil
-		}
-
-		if d.IsDir() {
-			return nil
-		}
-
-		pathForMatch, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-
-		// match if the relative path or the base name is included
-		// e.g. *.go matches pkg/foo/bar.go and foo.go
-		if !isFileIncluded(pathForMatch, includePattern) && !isFileIncluded(baseName, includePattern) {
-			return nil
-		}
-
-		// Skip binary files (improved detection)
-		if osutil.IsBinaryFile(path) {
-			return nil
-		}
-
-		// Search the file
-		result, err := searchFile(path, pattern, surroundingLines)
-		if err != nil {
-			// Skip files we can't read
-			return nil
-		}
-
-		// Add to results if there are matches
-		if len(result.MatchedLines) > 0 {
-			results = append(results, result)
-		}
-
-		return nil
-	})
-
-	return results, err
-}
-
-// sortSearchResultsByModTime sorts search results by file modification time (newest first)
-func sortSearchResultsByModTime(results []SearchResult) {
-	if len(results) <= 1 {
-		return
-	}
-
-	// Get file modification times
-	fileTimes := make(map[string]time.Time)
-	for _, result := range results {
-		info, err := os.Stat(result.Filename)
+func getRipgrepPath() string {
+	ripgrepPathOnce.Do(func() {
+		path, err := exec.LookPath("rg")
 		if err == nil {
-			fileTimes[result.Filename] = info.ModTime()
+			ripgrepPath = path
 		}
+	})
+	return ripgrepPath
+}
+
+// rgJSONMatch represents a match in ripgrep's JSON output
+type rgJSONMatch struct {
+	Type string          `json:"type"`
+	Data rgJSONMatchData `json:"data"`
+}
+
+type rgJSONMatchData struct {
+	Path       rgJSONPath       `json:"path"`
+	Lines      rgJSONLines      `json:"lines"`
+	LineNumber int              `json:"line_number"`
+	Submatches []rgJSONSubmatch `json:"submatches"`
+}
+
+type rgJSONPath struct {
+	Text string `json:"text"`
+}
+
+type rgJSONLines struct {
+	Text string `json:"text"`
+}
+
+type rgJSONSubmatch struct {
+	Match rgJSONSubmatchText `json:"match"`
+	Start int                `json:"start"`
+	End   int                `json:"end"`
+}
+
+type rgJSONSubmatchText struct {
+	Text string `json:"text"`
+}
+
+// searchDirectoryRipgrep searches for pattern using ripgrep
+func searchDirectoryRipgrep(ctx context.Context, root, pattern, includePattern string) ([]SearchResult, error) {
+	rgPath := getRipgrepPath()
+	if rgPath == "" {
+		return nil, errors.New("ripgrep not found")
 	}
 
-	// Sort results by modification time (newest first)
-	for i := 0; i < len(results); i++ {
-		for j := i + 1; j < len(results); j++ {
-			timeI := fileTimes[results[i].Filename]
-			timeJ := fileTimes[results[j].Filename]
-			if timeI.Before(timeJ) {
-				results[i], results[j] = results[j], results[i]
-			}
-		}
+	args := []string{
+		"--json",
+		"--sortr=modified", // Sort by modification time, newest first
+		"--no-heading",
+		"--no-ignore",   // Don't respect .gitignore (match current behavior)
+		"--no-messages", // Suppress error messages for unreadable files
 	}
+
+	// Add glob pattern if specified
+	if includePattern != "" {
+		args = append(args, "-g", includePattern)
+	}
+
+	// Exclude hidden files and directories (must come after include pattern)
+	args = append(args, "-g", "!.*")
+
+	// Add the pattern and search current directory (we'll set the working directory)
+	args = append(args, pattern, ".")
+
+	cmd := exec.CommandContext(ctx, rgPath, args...)
+	cmd.Dir = root // Run from the search root for proper relative path matching
+	output, err := cmd.Output()
+	// ripgrep returns exit code 1 if no matches found, which is not an error
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			if exitErr.ExitCode() == 1 {
+				// No matches found
+				return []SearchResult{}, nil
+			}
+			// Exit code 2 means error
+			return nil, fmt.Errorf("ripgrep error: %s", string(exitErr.Stderr))
+		}
+		return nil, err
+	}
+
+	return parseRipgrepJSON(output, root)
+}
+
+// parseRipgrepJSON parses ripgrep's JSON output into SearchResult slice
+func parseRipgrepJSON(output []byte, root string) ([]SearchResult, error) {
+	resultsMap := make(map[string]*SearchResult)
+	var orderedFiles []string
+
+	lines := strings.Split(string(output), "\n")
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+
+		var msg rgJSONMatch
+		if err := json.Unmarshal([]byte(line), &msg); err != nil {
+			continue // Skip malformed lines
+		}
+
+		if msg.Type != "match" {
+			continue
+		}
+
+		// Convert relative path to absolute path
+		filename := msg.Data.Path.Text
+		if !filepath.IsAbs(filename) {
+			filename = filepath.Join(root, filename)
+		}
+		lineContent := strings.TrimSuffix(msg.Data.Lines.Text, "\n")
+
+		if _, exists := resultsMap[filename]; !exists {
+			resultsMap[filename] = &SearchResult{
+				Filename:     filename,
+				MatchedLines: []MatchLine{},
+				ContextLines: make(map[int]string),
+				LineNumbers:  []int{},
+			}
+			orderedFiles = append(orderedFiles, filename)
+		}
+
+		result := resultsMap[filename]
+		result.MatchedLines = append(result.MatchedLines, MatchLine{
+			LineNumber:  msg.Data.LineNumber,
+			LineContent: lineContent,
+		})
+		result.LineNumbers = append(result.LineNumbers, msg.Data.LineNumber)
+	}
+
+	// Build results in the order files were encountered (which is mod time order from ripgrep)
+	results := make([]SearchResult, 0, len(orderedFiles))
+	for _, filename := range orderedFiles {
+		results = append(results, *resultsMap[filename])
+	}
+
+	return results, nil
 }
 
 // MaxSearchResults is the limit for maximum search results returned by the grep tool.
@@ -457,8 +411,8 @@ func (t *GrepTool) Execute(ctx context.Context, _ tooltypes.State, parameters st
 		path = input.Path
 	}
 
-	// Search for the pattern in the specified directory
-	results, err := searchDirectory(ctx, path, input.Pattern, input.Include, CodeSearchSurroundingLines)
+	// Search using ripgrep
+	results, err := searchDirectoryRipgrep(ctx, path, input.Pattern, input.Include)
 	if err != nil {
 		return &GrepToolResult{
 			pattern: input.Pattern,
@@ -467,9 +421,6 @@ func (t *GrepTool) Execute(ctx context.Context, _ tooltypes.State, parameters st
 			err:     fmt.Sprintf("search failed: %s", err),
 		}
 	}
-
-	// Sort results by file modification time (newest first)
-	sortSearchResultsByModTime(results)
 
 	// Check if results need to be truncated
 	isResultsTruncated := false
