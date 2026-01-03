@@ -702,6 +702,106 @@ func TestFindAllOccurrences(t *testing.T) {
 	}
 }
 
+func TestFileEditTool_ModifiedSinceLastRead(t *testing.T) {
+	tool := &FileEditTool{}
+
+	t.Run("replaceAll=false should fail when file modified since last read", func(t *testing.T) {
+		content := []byte("Hello world\nHello everyone\n")
+		tmpfile, err := os.CreateTemp("", "FileEditModifiedTest")
+		require.NoError(t, err)
+		defer os.Remove(tmpfile.Name())
+
+		_, err = tmpfile.Write(content)
+		require.NoError(t, err)
+		err = tmpfile.Close()
+		require.NoError(t, err)
+
+		mockState := NewBasicState(context.TODO())
+		// Set last accessed time to 1 hour ago to simulate stale read
+		mockState.SetFileLastAccessed(tmpfile.Name(), time.Now().Add(-time.Hour))
+
+		input := FileEditInput{
+			FilePath:   tmpfile.Name(),
+			OldText:    "Hello world",
+			NewText:    "Hi world",
+			ReplaceAll: false,
+		}
+		params, _ := json.Marshal(input)
+		result := tool.Execute(context.Background(), mockState, string(params))
+
+		assert.True(t, result.IsError())
+		assert.Contains(t, result.GetError(), "has been modified since the last read")
+	})
+
+	t.Run("replaceAll=true should succeed even when file modified since last read", func(t *testing.T) {
+		content := []byte("Hello world\nHello everyone\n")
+		tmpfile, err := os.CreateTemp("", "FileEditModifiedReplaceAllTest")
+		require.NoError(t, err)
+		defer os.Remove(tmpfile.Name())
+
+		_, err = tmpfile.Write(content)
+		require.NoError(t, err)
+		err = tmpfile.Close()
+		require.NoError(t, err)
+
+		mockState := NewBasicState(context.TODO())
+		// Set last accessed time to 1 hour ago to simulate stale read
+		mockState.SetFileLastAccessed(tmpfile.Name(), time.Now().Add(-time.Hour))
+
+		input := FileEditInput{
+			FilePath:   tmpfile.Name(),
+			OldText:    "Hello",
+			NewText:    "Hi",
+			ReplaceAll: true,
+		}
+		params, _ := json.Marshal(input)
+		result := tool.Execute(context.Background(), mockState, string(params))
+
+		// Should succeed despite stale last access time
+		assert.False(t, result.IsError())
+		assert.Contains(t, result.GetResult(), "Replaced 2 occurrences")
+
+		// Verify the file was edited correctly
+		updatedContent, err := os.ReadFile(tmpfile.Name())
+		assert.NoError(t, err)
+		assert.Contains(t, string(updatedContent), "Hi world")
+		assert.Contains(t, string(updatedContent), "Hi everyone")
+		assert.NotContains(t, string(updatedContent), "Hello")
+	})
+
+	t.Run("replaceAll=true should work without any prior file read", func(t *testing.T) {
+		content := []byte("foo bar foo baz foo\n")
+		tmpfile, err := os.CreateTemp("", "FileEditNoReadTest")
+		require.NoError(t, err)
+		defer os.Remove(tmpfile.Name())
+
+		_, err = tmpfile.Write(content)
+		require.NoError(t, err)
+		err = tmpfile.Close()
+		require.NoError(t, err)
+
+		mockState := NewBasicState(context.TODO())
+		// Don't set any last accessed time - simulating no prior read
+
+		input := FileEditInput{
+			FilePath:   tmpfile.Name(),
+			OldText:    "foo",
+			NewText:    "qux",
+			ReplaceAll: true,
+		}
+		params, _ := json.Marshal(input)
+		result := tool.Execute(context.Background(), mockState, string(params))
+
+		// Should succeed even without prior read
+		assert.False(t, result.IsError())
+		assert.Contains(t, result.GetResult(), "Replaced 3 occurrences")
+
+		updatedContent, err := os.ReadFile(tmpfile.Name())
+		assert.NoError(t, err)
+		assert.Equal(t, "qux bar qux baz qux\n", string(updatedContent))
+	})
+}
+
 func TestFileEditTool_ConcurrentEdits(t *testing.T) {
 	tool := &FileEditTool{}
 	mockState := NewBasicState(context.TODO())

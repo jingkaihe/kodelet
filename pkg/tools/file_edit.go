@@ -445,17 +445,21 @@ func (t *FileEditTool) Execute(_ context.Context, state tooltypes.State, paramet
 		}
 	}
 	lastAccessed := info.ModTime()
-	lastRead, err := state.GetFileLastAccessed(input.FilePath)
-	if err != nil {
-		return &FileEditToolResult{
-			filename: input.FilePath,
-			err:      fmt.Sprintf("failed to get the last access time: %s", err),
+	// Skip last access check for replaceAll since it's a declarative global replacement
+	// that doesn't depend on positional context
+	if !input.ReplaceAll {
+		lastRead, err := state.GetFileLastAccessed(input.FilePath)
+		if err != nil {
+			return &FileEditToolResult{
+				filename: input.FilePath,
+				err:      fmt.Sprintf("failed to get the last access time: %s", err),
+			}
 		}
-	}
-	if lastAccessed.After(lastRead) {
-		return &FileEditToolResult{
-			filename: input.FilePath,
-			err:      fmt.Sprintf("file %s has been modified since the last read either by another tool or by the user, please read the file again", input.FilePath),
+		if lastAccessed.After(lastRead) {
+			return &FileEditToolResult{
+				filename: input.FilePath,
+				err:      fmt.Sprintf("file %s has been modified since the last read either by another tool or by the user, please read the file again", input.FilePath),
+			}
 		}
 	}
 
