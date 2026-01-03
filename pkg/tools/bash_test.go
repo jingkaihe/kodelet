@@ -906,8 +906,8 @@ func TestBashToolResult_StructuredDataFields(t *testing.T) {
 	t.Run("timeout has execution time and working dir", func(t *testing.T) {
 		input := BashInput{
 			Description: "Test timeout command",
-			Command:     "sleep 20", // Will timeout with 10s limit
-			Timeout:     10,
+			Command:     "sleep 5", // Will timeout with 1s limit
+			Timeout:     1,
 		}
 
 		inputJSON, _ := json.Marshal(input)
@@ -925,7 +925,7 @@ func TestBashToolResult_StructuredDataFields(t *testing.T) {
 		assert.NotEmpty(t, bashResult.workingDir)
 
 		// Verify timeout error message
-		assert.Contains(t, bashResult.error, "Command timed out after 10 seconds")
+		assert.Contains(t, bashResult.error, "Command timed out after 1 seconds")
 	})
 }
 

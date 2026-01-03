@@ -141,7 +141,7 @@ func TestCustomToolManager_ValidateTool_Timeout(t *testing.T) {
 
 	toolScript := `#!/bin/bash
 if [ "$1" = "description" ]; then
-    sleep 10  # Sleep longer than timeout
+    sleep 5  # Sleep longer than timeout
     echo '{"name": "slow_tool", "description": "A slow tool"}'
 fi
 `
@@ -151,7 +151,7 @@ fi
 
 	manager := &CustomToolManager{
 		config: CustomToolConfig{
-			Timeout: 1 * time.Second, // Short timeout
+			Timeout: 500 * time.Millisecond, // Short timeout
 		},
 	}
 
@@ -240,7 +240,7 @@ func TestCustomTool_Execute_Timeout(t *testing.T) {
 if [ "$1" = "description" ]; then
     echo '{"name": "slow_tool", "description": "Takes too long", "input_schema": {"type": "object"}}'
 elif [ "$1" = "run" ]; then
-    sleep 10  # Sleep longer than timeout
+    sleep 5  # Sleep longer than timeout
     echo "Done"
 fi
 `
@@ -252,8 +252,8 @@ fi
 		execPath:    toolPath,
 		name:        "slow_tool",
 		description: "Takes too long",
-		timeout:     1 * time.Second, // Short timeout
-		maxOutput:   1024 * 100,      // 100KB
+		timeout:     500 * time.Millisecond, // Short timeout
+		maxOutput:   1024 * 100,             // 100KB
 	}
 
 	ctx := context.Background()
