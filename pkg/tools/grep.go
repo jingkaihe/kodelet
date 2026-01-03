@@ -146,6 +146,7 @@ func (t *GrepTool) Description() string {
 
 ## Important Notes
 * You should prioritise using this tool over search via grep, egrep, or other grep-like UNIX commands.
+* Files matching .gitignore patterns are automatically excluded.
 * Binary files and hidden files/directories (starting with .) are skipped by default.
 * The result returns at maximum 100 files sorted by modification time (newest first). Pay attention to the truncation notice and refine your search pattern to narrow down the results.
 * To get the best result, you should use the ${glob_tool} to narrow down the files to search in, and then use this tool for a more targeted search.
@@ -295,7 +296,6 @@ func searchDirectoryRipgrep(ctx context.Context, root, pattern, includePattern s
 		"--json",
 		"--sortr=modified", // Sort by modification time, newest first
 		"--no-heading",
-		"--no-ignore",   // Don't respect .gitignore (match current behavior)
 		"--no-messages", // Suppress error messages for unreadable files
 	}
 

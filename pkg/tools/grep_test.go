@@ -352,6 +352,61 @@ func TestGrepHiddenFilesIgnored(t *testing.T) {
 	assert.NotContains(t, result.GetResult(), "TestHiddenDirFunc")
 }
 
+// TestGrepGitignoreRespected tests that files matching .gitignore patterns are excluded
+func TestGrepGitignoreRespected(t *testing.T) {
+	// Skip if ripgrep is not available
+	if getRipgrepPath() == "" {
+		t.Skip("ripgrep not available, skipping test")
+	}
+
+	tool := &GrepTool{}
+	ctx := context.Background()
+	state := NewBasicState(context.TODO())
+
+	// Create a temporary directory for test files
+	tempDir, err := os.MkdirTemp("", "grep_gitignore_test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	// Initialize a git repo (required for .gitignore to be respected)
+	require.NoError(t, os.MkdirAll(filepath.Join(tempDir, ".git"), 0o755))
+
+	// Create .gitignore
+	gitignoreContent := "ignored_dir/\n*.log\n"
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, ".gitignore"), []byte(gitignoreContent), 0o644))
+
+	// Create test files
+	testFiles := map[string]string{
+		"visible.go":            "func TestVisibleFunc() {}\n",
+		"ignored_dir/ignored.go": "func TestIgnoredFunc() {}\n",
+		"test.log":              "func TestLogFunc() {}\n",
+		"subdir/test.go":        "func TestSubdirFunc() {}\n",
+	}
+
+	for filename, content := range testFiles {
+		filePath := filepath.Join(tempDir, filename)
+		dir := filepath.Dir(filePath)
+		require.NoError(t, os.MkdirAll(dir, 0o755))
+		require.NoError(t, os.WriteFile(filePath, []byte(content), 0o644))
+	}
+
+	// Search for the pattern
+	input := CodeSearchInput{
+		Pattern: "func Test",
+		Path:    tempDir,
+	}
+
+	inputJSON, _ := json.Marshal(input)
+	result := tool.Execute(ctx, state, string(inputJSON))
+
+	// Should find visible files but not gitignored ones
+	assert.False(t, result.IsError())
+	assert.Contains(t, result.GetResult(), "TestVisibleFunc")
+	assert.Contains(t, result.GetResult(), "TestSubdirFunc")
+	assert.NotContains(t, result.GetResult(), "TestIgnoredFunc")
+	assert.NotContains(t, result.GetResult(), "TestLogFunc")
+}
+
 // TestGrepResultLimitAndTruncation tests the limit of 100 results with truncation message
 func TestGrepResultLimitAndTruncation(t *testing.T) {
 	tool := &GrepTool{}
