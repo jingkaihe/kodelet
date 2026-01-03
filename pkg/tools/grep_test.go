@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -947,4 +948,192 @@ func TestGrepFixedStrings(t *testing.T) {
 	assert.False(t, result.IsError())
 	assert.Contains(t, result.GetResult(), "foo.bar")
 	assert.NotContains(t, result.GetResult(), "fooXbar")
+}
+
+func TestParseRipgrepJSON_MatchPositions(t *testing.T) {
+	tests := []struct {
+		name              string
+		input             string
+		expectedPositions map[int][]MatchPosition
+	}{
+		{
+			name:  "single match with position",
+			input: `{"type":"match","data":{"path":{"text":"test.go"},"lines":{"text":"func TestFunc() {\n"},"line_number":10,"submatches":[{"match":{"text":"TestFunc"},"start":5,"end":13}]}}`,
+			expectedPositions: map[int][]MatchPosition{
+				10: {{Start: 5, End: 13}},
+			},
+		},
+		{
+			name:  "multiple submatches on same line",
+			input: `{"type":"match","data":{"path":{"text":"test.go"},"lines":{"text":"foo bar foo baz\n"},"line_number":1,"submatches":[{"match":{"text":"foo"},"start":0,"end":3},{"match":{"text":"foo"},"start":8,"end":11}]}}`,
+			expectedPositions: map[int][]MatchPosition{
+				1: {{Start: 0, End: 3}, {Start: 8, End: 11}},
+			},
+		},
+		{
+			name: "matches on different lines",
+			input: `{"type":"match","data":{"path":{"text":"test.go"},"lines":{"text":"first match\n"},"line_number":5,"submatches":[{"match":{"text":"match"},"start":6,"end":11}]}}
+{"type":"match","data":{"path":{"text":"test.go"},"lines":{"text":"second match\n"},"line_number":10,"submatches":[{"match":{"text":"match"},"start":7,"end":12}]}}`,
+			expectedPositions: map[int][]MatchPosition{
+				5:  {{Start: 6, End: 11}},
+				10: {{Start: 7, End: 12}},
+			},
+		},
+		{
+			name: "context lines have no positions",
+			input: `{"type":"context","data":{"path":{"text":"test.go"},"lines":{"text":"context line\n"},"line_number":9,"submatches":[]}}
+{"type":"match","data":{"path":{"text":"test.go"},"lines":{"text":"match line\n"},"line_number":10,"submatches":[{"match":{"text":"match"},"start":0,"end":5}]}}`,
+			expectedPositions: map[int][]MatchPosition{
+				10: {{Start: 0, End: 5}},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			results, err := parseRipgrepJSON([]byte(tt.input), "/tmp")
+			require.NoError(t, err)
+			require.Len(t, results, 1)
+
+			result := results[0]
+			for lineNum, expectedPos := range tt.expectedPositions {
+				actualPos, exists := result.MatchPositions[lineNum]
+				require.True(t, exists, "expected match positions for line %d", lineNum)
+				assert.Equal(t, expectedPos, actualPos, "match positions for line %d", lineNum)
+			}
+
+			// Verify context lines don't have positions
+			for lineNum := range result.ContextLines {
+				_, exists := result.MatchPositions[lineNum]
+				assert.False(t, exists, "context line %d should not have match positions", lineNum)
+			}
+		})
+	}
+}
+
+func TestGrepToolResult_StructuredData_MatchPositions(t *testing.T) {
+	tests := []struct {
+		name          string
+		results       []SearchResult
+		expectedStart int
+		expectedEnd   int
+		lineNum       int
+	}{
+		{
+			name: "single match position",
+			results: []SearchResult{
+				{
+					Filename:     "/tmp/test.go",
+					MatchedLines: map[int]string{10: "func TestFunc() {}"},
+					MatchPositions: map[int][]MatchPosition{
+						10: {{Start: 5, End: 13}},
+					},
+					ContextLines: map[int]string{},
+					LineNumbers:  []int{10},
+				},
+			},
+			lineNum:       10,
+			expectedStart: 5,
+			expectedEnd:   13,
+		},
+		{
+			name: "multiple positions uses first",
+			results: []SearchResult{
+				{
+					Filename:     "/tmp/test.go",
+					MatchedLines: map[int]string{1: "foo bar foo baz"},
+					MatchPositions: map[int][]MatchPosition{
+						1: {{Start: 0, End: 3}, {Start: 8, End: 11}},
+					},
+					ContextLines: map[int]string{},
+					LineNumbers:  []int{1},
+				},
+			},
+			lineNum:       1,
+			expectedStart: 0,
+			expectedEnd:   3,
+		},
+		{
+			name: "no positions defaults to zero",
+			results: []SearchResult{
+				{
+					Filename:       "/tmp/test.go",
+					MatchedLines:   map[int]string{5: "some content"},
+					MatchPositions: map[int][]MatchPosition{},
+					ContextLines:   map[int]string{},
+					LineNumbers:    []int{5},
+				},
+			},
+			lineNum:       5,
+			expectedStart: 0,
+			expectedEnd:   0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := &GrepToolResult{
+				pattern: "test",
+				path:    "/tmp",
+				results: tt.results,
+			}
+
+			structured := result.StructuredData()
+			require.NotNil(t, structured.Metadata)
+
+			metadata, ok := structured.Metadata.(*tooltypes.GrepMetadata)
+			require.True(t, ok)
+			require.Len(t, metadata.Results, 1)
+
+			var foundMatch *tooltypes.SearchMatch
+			for _, match := range metadata.Results[0].Matches {
+				if match.LineNumber == tt.lineNum {
+					foundMatch = &match
+					break
+				}
+			}
+
+			require.NotNil(t, foundMatch, "expected to find match for line %d", tt.lineNum)
+			assert.Equal(t, tt.expectedStart, foundMatch.MatchStart, "MatchStart")
+			assert.Equal(t, tt.expectedEnd, foundMatch.MatchEnd, "MatchEnd")
+		})
+	}
+}
+
+func TestGrepMatchPositions_Integration(t *testing.T) {
+	if getRipgrepPath() == "" {
+		t.Skip("ripgrep not available, skipping test")
+	}
+
+	tool := &GrepTool{}
+	ctx := context.Background()
+	state := NewBasicState(context.TODO())
+
+	tempDir, err := os.MkdirTemp("", "grep_match_pos_test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	testFile := filepath.Join(tempDir, "test.go")
+	require.NoError(t, os.WriteFile(testFile, []byte("func HelloWorld() {}\n"), 0o644))
+
+	input := CodeSearchInput{
+		Pattern: "HelloWorld",
+		Path:    tempDir,
+	}
+
+	inputJSON, _ := json.Marshal(input)
+	result := tool.Execute(ctx, state, string(inputJSON))
+
+	assert.False(t, result.IsError())
+
+	structured := result.StructuredData()
+	metadata, ok := structured.Metadata.(*tooltypes.GrepMetadata)
+	require.True(t, ok)
+	require.Len(t, metadata.Results, 1)
+	require.Len(t, metadata.Results[0].Matches, 1)
+
+	match := metadata.Results[0].Matches[0]
+	assert.Equal(t, 1, match.LineNumber)
+	assert.Equal(t, 5, match.MatchStart, "HelloWorld starts at position 5 (after 'func ')")
+	assert.Equal(t, 15, match.MatchEnd, "HelloWorld ends at position 15")
 }

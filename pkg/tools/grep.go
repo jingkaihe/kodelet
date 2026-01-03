@@ -71,11 +71,16 @@ func (r *GrepToolResult) StructuredData() tooltypes.StructuredToolResult {
 	for _, res := range r.results {
 		matches := make([]tooltypes.SearchMatch, 0, len(res.MatchedLines))
 		for lineNum, content := range res.MatchedLines {
+			matchStart, matchEnd := 0, 0
+			if positions, ok := res.MatchPositions[lineNum]; ok && len(positions) > 0 {
+				matchStart = positions[0].Start
+				matchEnd = positions[0].End
+			}
 			matches = append(matches, tooltypes.SearchMatch{
 				LineNumber: lineNum,
 				Content:    content,
-				MatchStart: 0, // TODO: Calculate actual match positions
-				MatchEnd:   0,
+				MatchStart: matchStart,
+				MatchEnd:   matchEnd,
 			})
 		}
 
@@ -187,12 +192,19 @@ func (t *GrepTool) ValidateInput(_ tooltypes.State, parameters string) error {
 	return nil
 }
 
+// MatchPosition represents the start and end position of a match within a line
+type MatchPosition struct {
+	Start int
+	End   int
+}
+
 // SearchResult represents a search result from a file
 type SearchResult struct {
-	Filename     string
-	MatchedLines map[int]string // Line number -> content (matched lines)
-	ContextLines map[int]string // Line number -> content (context lines)
-	LineNumbers  []int          // All line numbers in order
+	Filename       string
+	MatchedLines   map[int]string          // Line number -> content (matched lines)
+	MatchPositions map[int][]MatchPosition // Line number -> match positions within the line
+	ContextLines   map[int]string          // Line number -> content (context lines)
+	LineNumbers    []int                   // All line numbers in order
 }
 
 // FormatSearchResults formats the search results for output
@@ -355,10 +367,11 @@ func parseRipgrepJSON(output []byte, root string) ([]SearchResult, error) {
 
 		if _, exists := resultsMap[filename]; !exists {
 			resultsMap[filename] = &SearchResult{
-				Filename:     filename,
-				MatchedLines: make(map[int]string),
-				ContextLines: make(map[int]string),
-				LineNumbers:  []int{},
+				Filename:       filename,
+				MatchedLines:   make(map[int]string),
+				MatchPositions: make(map[int][]MatchPosition),
+				ContextLines:   make(map[int]string),
+				LineNumbers:    []int{},
 			}
 			orderedFiles = append(orderedFiles, filename)
 		}
@@ -366,6 +379,14 @@ func parseRipgrepJSON(output []byte, root string) ([]SearchResult, error) {
 		result := resultsMap[filename]
 		if msg.Type == "match" {
 			result.MatchedLines[msg.Data.LineNumber] = lineContent
+			positions := make([]MatchPosition, 0, len(msg.Data.Submatches))
+			for _, submatch := range msg.Data.Submatches {
+				positions = append(positions, MatchPosition{
+					Start: submatch.Start,
+					End:   submatch.End,
+				})
+			}
+			result.MatchPositions[msg.Data.LineNumber] = positions
 		} else {
 			result.ContextLines[msg.Data.LineNumber] = lineContent
 		}
