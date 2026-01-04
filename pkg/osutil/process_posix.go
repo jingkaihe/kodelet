@@ -5,7 +5,11 @@ package osutil
 import (
 	"os/exec"
 	"syscall"
+	"time"
 )
+
+// GracefulShutdownDelay is the time to wait for graceful shutdown before sending SIGKILL
+const GracefulShutdownDelay = 500 * time.Millisecond
 
 // DetachSysProcAttr provides syscall attributes for detaching processes on Unix systems
 var DetachSysProcAttr = syscall.SysProcAttr{
@@ -19,10 +23,29 @@ func SetProcessGroup(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 }
 
-// SetProcessGroupKill sets up a cancel function that kills the entire process group.
-// Must be called after SetProcessGroup and before cmd.Start().
+// SetProcessGroupKill sets up a cancel function that gracefully terminates
+// the entire process group. It first sends SIGTERM to allow cleanup, waits
+// briefly, then sends SIGKILL if processes are still running.
 func SetProcessGroupKill(cmd *exec.Cmd) {
 	cmd.Cancel = func() error {
-		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		pgid := -cmd.Process.Pid
+
+		// Try graceful shutdown first with SIGTERM
+		if err := syscall.Kill(pgid, syscall.SIGTERM); err != nil {
+			// Process group might already be dead, that's fine
+			return nil
+		}
+
+		// Give processes time to cleanup
+		time.Sleep(GracefulShutdownDelay)
+
+		// Check if any process in the group is still running (signal 0 = check only)
+		if err := syscall.Kill(pgid, 0); err != nil {
+			// All processes terminated gracefully
+			return nil
+		}
+
+		// Processes still running, force kill with SIGKILL
+		return syscall.Kill(pgid, syscall.SIGKILL)
 	}
 }
