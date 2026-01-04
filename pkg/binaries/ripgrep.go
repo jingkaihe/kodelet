@@ -3,8 +3,10 @@ package binaries
 import (
 	"context"
 	"fmt"
+	"os/exec"
 	"sync"
 
+	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/pkg/errors"
 )
 
@@ -33,12 +35,30 @@ func RipgrepSpec() BinarySpec {
 }
 
 // EnsureRipgrep ensures ripgrep is installed and returns its path.
+// It first tries to use the managed binary, then falls back to system ripgrep.
 // This is cached after the first successful call.
 func EnsureRipgrep(ctx context.Context) (string, error) {
 	ripgrepPathOnce.Do(func() {
-		ripgrepPath, ripgrepPathErr = EnsureBinary(ctx, RipgrepSpec())
+		ripgrepPath, ripgrepPathErr = ensureRipgrepWithFallback(ctx)
 	})
 	return ripgrepPath, ripgrepPathErr
+}
+
+func ensureRipgrepWithFallback(ctx context.Context) (string, error) {
+	path, err := EnsureBinary(ctx, RipgrepSpec())
+	if err == nil {
+		return path, nil
+	}
+
+	logger.G(ctx).WithError(err).Debug("Failed to ensure managed ripgrep, falling back to system ripgrep")
+
+	systemPath, lookErr := exec.LookPath("rg")
+	if lookErr == nil {
+		logger.G(ctx).WithField("path", systemPath).Info("Using system-installed ripgrep")
+		return systemPath, nil
+	}
+
+	return "", errors.Wrap(err, "failed to ensure ripgrep (managed download failed and no system ripgrep found)")
 }
 
 // GetRipgrepPath returns the cached ripgrep path without ensuring installation.
