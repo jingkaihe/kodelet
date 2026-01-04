@@ -471,6 +471,8 @@ func (b *BashTool) executeForeground(ctx context.Context, input *BashInput) tool
 	workingDir, _ := os.Getwd()
 
 	cmd := exec.CommandContext(ctx, "bash", "-c", input.Command)
+	osutil.SetProcessGroup(cmd)
+	osutil.SetProcessGroupKill(cmd)
 
 	output, err := cmd.CombinedOutput()
 	executionTime := time.Since(startTime)

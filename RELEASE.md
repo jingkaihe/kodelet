@@ -1,5 +1,47 @@
 # Kodelet
 
+## 0.1.31.beta (2026-01-04)
+
+### Features
+
+**External Binary Management**: Kodelet now manages external binary dependencies (ripgrep, fd) automatically
+
+- Binaries are downloaded from GitHub releases to `~/.kodelet/bin/`
+- SHA256 checksum verification for security
+- Automatic fallback to system-installed binaries if download fails (air-gapped/corporate networks)
+- Runtime version detection replaces version files
+
+**Enhanced grep_tool (ripgrep-powered)**:
+
+- Migrated from pure Go regex to ripgrep for significantly improved search performance
+- Added `ignore_case` option for case-insensitive search
+- Added `fixed_strings` option to treat patterns as literal strings (useful for special characters)
+- Added `surround_lines` parameter to show context lines around matches
+- Match positions now exposed in structured results
+- Respects `.gitignore` patterns by default
+
+**Enhanced glob_tool (fd-powered)**:
+
+- Replaced with fd-based implementation for faster file finding
+- Added `ignore_gitignore` option (respects `.gitignore` by default)
+- Hidden files/directories excluded by default for cleaner results
+
+**Improved file_edit**:
+
+- `replaceAll` operations no longer require prior file read, enabling declarative bulk replacements
+
+**Graceful Process Termination**:
+
+- Foreground bash commands now receive SIGTERM before SIGKILL on timeout
+- 2-second grace period allows processes to flush buffers and cleanup
+- Entire process group is terminated, including child processes
+
+### Internal Changes
+
+- Consolidated process group handling in `pkg/osutil` with platform-specific implementations
+- Added comprehensive tests for process lifecycle management
+- Updated frontend GrepRenderer to support context lines styling
+
 ## 0.1.29.beta (2026-01-01)
 
 ### Features

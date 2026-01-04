@@ -186,6 +186,7 @@ type SearchMatch struct {
 	Content    string `json:"content"`
 	MatchStart int    `json:"matchStart"`
 	MatchEnd   int    `json:"matchEnd"`
+	IsContext  bool   `json:"isContext,omitempty"`
 }
 
 // ToolType returns the tool type identifier for grep operations

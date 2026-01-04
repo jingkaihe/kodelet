@@ -140,20 +140,16 @@ export interface GrepMetadata {
 }
 
 export interface GrepResult {
-  file: string;
-  filename?: string;
+  filePath: string;
   matches?: GrepMatch[];
   lineNumber?: number;
-  line_number?: number;
   content?: string;
-  line?: string;
 }
 
 export interface GrepMatch {
   lineNumber: number;
-  line_number?: number;
   content: string;
-  line?: string;
+  isContext?: boolean;
 }
 
 export interface GlobMetadata {

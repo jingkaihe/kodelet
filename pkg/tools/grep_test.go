@@ -10,12 +10,10 @@ import (
 	"testing"
 	"time"
 
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-// Ensure we're using the same constant defined in grep.go
-var surroundingLinesCount = CodeSearchSurroundingLines
 
 func TestGrepTool_GenerateSchema(t *testing.T) {
 	tool := &GrepTool{}
@@ -137,18 +135,10 @@ func TestGrepTool_Execute(t *testing.T) {
 		"test.txt": "This is a test file\nwith multiple lines\nand some test patterns\n",
 	}
 
-	// Create a file with enough lines to test surrounding lines feature
+	// Create a file with a target line for testing
 	var multilineContent strings.Builder
 	multilineContent.WriteString("package main\n\n")
-
-	// Add numbered lines (enough before and after the target line)
-	for i := 1; i <= surroundingLinesCount*2+1; i++ {
-		if i == surroundingLinesCount+1 {
-			multilineContent.WriteString("// Target Line - This is the line we'll search for\n")
-		} else {
-			multilineContent.WriteString(fmt.Sprintf("// Line %d - Context line\n", i))
-		}
-	}
+	multilineContent.WriteString("// Target Line - This is the line we'll search for\n")
 
 	testFiles["multiline.go"] = multilineContent.String()
 
@@ -363,6 +353,61 @@ func TestGrepHiddenFilesIgnored(t *testing.T) {
 	assert.NotContains(t, result.GetResult(), "TestHiddenDirFunc")
 }
 
+// TestGrepGitignoreRespected tests that files matching .gitignore patterns are excluded
+func TestGrepGitignoreRespected(t *testing.T) {
+	// Skip if ripgrep is not available
+	if getRipgrepPath() == "" {
+		t.Skip("ripgrep not available, skipping test")
+	}
+
+	tool := &GrepTool{}
+	ctx := context.Background()
+	state := NewBasicState(context.TODO())
+
+	// Create a temporary directory for test files
+	tempDir, err := os.MkdirTemp("", "grep_gitignore_test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	// Initialize a git repo (required for .gitignore to be respected)
+	require.NoError(t, os.MkdirAll(filepath.Join(tempDir, ".git"), 0o755))
+
+	// Create .gitignore
+	gitignoreContent := "ignored_dir/\n*.log\n"
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, ".gitignore"), []byte(gitignoreContent), 0o644))
+
+	// Create test files
+	testFiles := map[string]string{
+		"visible.go":             "func TestVisibleFunc() {}\n",
+		"ignored_dir/ignored.go": "func TestIgnoredFunc() {}\n",
+		"test.log":               "func TestLogFunc() {}\n",
+		"subdir/test.go":         "func TestSubdirFunc() {}\n",
+	}
+
+	for filename, content := range testFiles {
+		filePath := filepath.Join(tempDir, filename)
+		dir := filepath.Dir(filePath)
+		require.NoError(t, os.MkdirAll(dir, 0o755))
+		require.NoError(t, os.WriteFile(filePath, []byte(content), 0o644))
+	}
+
+	// Search for the pattern
+	input := CodeSearchInput{
+		Pattern: "func Test",
+		Path:    tempDir,
+	}
+
+	inputJSON, _ := json.Marshal(input)
+	result := tool.Execute(ctx, state, string(inputJSON))
+
+	// Should find visible files but not gitignored ones
+	assert.False(t, result.IsError())
+	assert.Contains(t, result.GetResult(), "TestVisibleFunc")
+	assert.Contains(t, result.GetResult(), "TestSubdirFunc")
+	assert.NotContains(t, result.GetResult(), "TestIgnoredFunc")
+	assert.NotContains(t, result.GetResult(), "TestLogFunc")
+}
+
 // TestGrepResultLimitAndTruncation tests the limit of 100 results with truncation message
 func TestGrepResultLimitAndTruncation(t *testing.T) {
 	tool := &GrepTool{}
@@ -408,116 +453,6 @@ func TestGrepResultLimitAndTruncation(t *testing.T) {
 
 	// Should contain truncation notice
 	assert.Contains(t, result.GetResult(), "[TRUNCATED DUE TO MAXIMUM 100 RESULT LIMIT]")
-}
-
-// TestSortSearchResultsByModTime tests the dedicated sorting function
-func TestSortSearchResultsByModTime(t *testing.T) {
-	// Create temporary files with different timestamps
-	tempDir, err := os.MkdirTemp("", "grep_sort_func_test")
-	require.NoError(t, err)
-	defer os.RemoveAll(tempDir)
-
-	// Create test files with specific content and timestamps
-	fileNames := []string{"file1.txt", "file2.txt", "file3.txt"}
-	fileTimes := []time.Time{
-		time.Now().Add(-2 * time.Hour),
-		time.Now().Add(-1 * time.Hour),
-		time.Now(),
-	}
-
-	// Create files and set mod times
-	for i, name := range fileNames {
-		path := filepath.Join(tempDir, name)
-		require.NoError(t, os.WriteFile(path, []byte("test content"), 0o644))
-		require.NoError(t, os.Chtimes(path, fileTimes[i], fileTimes[i]))
-	}
-
-	// Create search results in reverse order (oldest first)
-	results := []SearchResult{
-		{Filename: filepath.Join(tempDir, fileNames[0])},
-		{Filename: filepath.Join(tempDir, fileNames[1])},
-		{Filename: filepath.Join(tempDir, fileNames[2])},
-	}
-
-	// Sort the results
-	sortSearchResultsByModTime(results)
-
-	// Check the order is newest first
-	assert.Equal(t, filepath.Join(tempDir, fileNames[2]), results[0].Filename, "Newest file should be first")
-	assert.Equal(t, filepath.Join(tempDir, fileNames[1]), results[1].Filename, "Second newest file should be second")
-	assert.Equal(t, filepath.Join(tempDir, fileNames[0]), results[2].Filename, "Oldest file should be last")
-}
-
-// TestFileIncludedWithDoublestar tests the isFileIncluded function with the doublestar library
-func TestFileIncludedWithDoublestar(t *testing.T) {
-	tests := []struct {
-		name           string
-		filename       string
-		includePattern string
-		expected       bool
-	}{
-		{
-			name:           "simple pattern match",
-			filename:       "test.go",
-			includePattern: "*.go",
-			expected:       true,
-		},
-		{
-			name:           "simple pattern no match",
-			filename:       "test.go",
-			includePattern: "*.py",
-			expected:       false,
-		},
-		{
-			name:           "extended pattern match with braces",
-			filename:       "test.go",
-			includePattern: "*.{go,py}",
-			expected:       true,
-		},
-		{
-			name:           "extended pattern match with braces another extension",
-			filename:       "test.py",
-			includePattern: "*.{go,py}",
-			expected:       true,
-		},
-		{
-			name:           "extended pattern with braces no match",
-			filename:       "test.js",
-			includePattern: "*.{go,py}",
-			expected:       false,
-		},
-		{
-			name:           "recursive match",
-			filename:       "path/to/test.go",
-			includePattern: "**/*.go",
-			expected:       true,
-		},
-		{
-			name:           "recursive match with brace pattern",
-			filename:       "path/to/deep/test.py",
-			includePattern: "**/*.{go,py}",
-			expected:       true,
-		},
-		{
-			name:           "empty pattern always matches",
-			filename:       "anything.txt",
-			includePattern: "",
-			expected:       true,
-		},
-		{
-			name:           "invalid pattern",
-			filename:       "test.go",
-			includePattern: "**/*.[", // Invalid pattern
-			expected:       false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := isFileIncluded(tt.filename, tt.includePattern)
-			assert.Equal(t, tt.expected, result, "isFileIncluded() result mismatch")
-		})
-	}
 }
 
 // TestDefaultPathIsAbsolute tests that the default path is an absolute path
@@ -726,4 +661,479 @@ func TestGrepFileMatchingByRelativePathOrBaseName(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestParseRipgrepJSON tests the ripgrep JSON output parser
+func TestParseRipgrepJSON(t *testing.T) {
+	tests := []struct {
+		name           string
+		input          string
+		expectedFiles  int
+		expectedError  bool
+		checkFirstFile string
+		checkLineNum   int
+	}{
+		{
+			name: "single match",
+			input: `{"type":"begin","data":{"path":{"text":"/tmp/test.go"}}}
+{"type":"match","data":{"path":{"text":"/tmp/test.go"},"lines":{"text":"func TestFunc() {\n"},"line_number":10,"submatches":[{"match":{"text":"func TestFunc"},"start":0,"end":13}]}}
+{"type":"end","data":{"path":{"text":"/tmp/test.go"}}}
+{"type":"summary","data":{}}`,
+			expectedFiles:  1,
+			expectedError:  false,
+			checkFirstFile: "/tmp/test.go",
+			checkLineNum:   10,
+		},
+		{
+			name: "multiple files",
+			input: `{"type":"match","data":{"path":{"text":"/tmp/file1.go"},"lines":{"text":"func One() {}\n"},"line_number":5,"submatches":[]}}
+{"type":"match","data":{"path":{"text":"/tmp/file2.go"},"lines":{"text":"func Two() {}\n"},"line_number":3,"submatches":[]}}`,
+			expectedFiles:  2,
+			expectedError:  false,
+			checkFirstFile: "/tmp/file1.go",
+			checkLineNum:   5,
+		},
+		{
+			name: "multiple matches in same file",
+			input: `{"type":"match","data":{"path":{"text":"/tmp/multi.go"},"lines":{"text":"func A() {}\n"},"line_number":1,"submatches":[]}}
+{"type":"match","data":{"path":{"text":"/tmp/multi.go"},"lines":{"text":"func B() {}\n"},"line_number":5,"submatches":[]}}`,
+			expectedFiles:  1,
+			expectedError:  false,
+			checkFirstFile: "/tmp/multi.go",
+			checkLineNum:   1,
+		},
+		{
+			name:           "empty output",
+			input:          "",
+			expectedFiles:  0,
+			expectedError:  false,
+			checkFirstFile: "",
+			checkLineNum:   0,
+		},
+		{
+			name:           "no matches (only summary)",
+			input:          `{"type":"summary","data":{"stats":{"matches":0}}}`,
+			expectedFiles:  0,
+			expectedError:  false,
+			checkFirstFile: "",
+			checkLineNum:   0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			results, err := parseRipgrepJSON([]byte(tt.input), "/tmp")
+
+			if tt.expectedError {
+				assert.Error(t, err)
+				return
+			}
+
+			assert.NoError(t, err)
+			assert.Len(t, results, tt.expectedFiles)
+
+			if tt.expectedFiles > 0 && tt.checkFirstFile != "" {
+				assert.Equal(t, tt.checkFirstFile, results[0].Filename)
+				_, exists := results[0].MatchedLines[tt.checkLineNum]
+				assert.True(t, exists, "expected line %d to exist in MatchedLines", tt.checkLineNum)
+			}
+		})
+	}
+}
+
+// TestSearchDirectoryRipgrep tests the ripgrep search function directly
+func TestSearchDirectoryRipgrep(t *testing.T) {
+	// Skip if ripgrep is not available
+	if getRipgrepPath() == "" {
+		t.Skip("ripgrep not available, skipping test")
+	}
+
+	ctx := context.Background()
+
+	// Create a temporary directory for test files
+	tempDir, err := os.MkdirTemp("", "grep_ripgrep_test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	// Create test files
+	testFiles := map[string]string{
+		"main.go":       "package main\n\nfunc main() {\n\tfmt.Println(\"hello\")\n}\n",
+		"util.go":       "package main\n\nfunc helper() {\n\treturn\n}\n",
+		"test.txt":      "This is a text file\nwith some content\n",
+		".hidden.go":    "package hidden\n\nfunc secret() {}\n",
+		".git/config":   "[core]\nrepositoryformatversion = 0\n",
+		"sub/nested.go": "package sub\n\nfunc nested() {}\n",
+	}
+
+	for filename, content := range testFiles {
+		filePath := filepath.Join(tempDir, filename)
+		dir := filepath.Dir(filePath)
+		require.NoError(t, os.MkdirAll(dir, 0o755))
+		require.NoError(t, os.WriteFile(filePath, []byte(content), 0o644))
+	}
+
+	tests := []struct {
+		name            string
+		pattern         string
+		includePattern  string
+		expectedFiles   []string
+		unexpectedFiles []string
+	}{
+		{
+			name:            "search all go files",
+			pattern:         "func",
+			includePattern:  "*.go",
+			expectedFiles:   []string{"main.go", "util.go", "nested.go"},
+			unexpectedFiles: []string{"test.txt", ".hidden.go"},
+		},
+		{
+			name:            "search without include pattern",
+			pattern:         "package",
+			includePattern:  "",
+			expectedFiles:   []string{"main.go", "util.go", "nested.go"},
+			unexpectedFiles: []string{},
+		},
+		{
+			name:            "search specific pattern",
+			pattern:         "helper",
+			includePattern:  "",
+			expectedFiles:   []string{"util.go"},
+			unexpectedFiles: []string{"main.go"},
+		},
+		{
+			name:            "no matches",
+			pattern:         "NONEXISTENT_PATTERN_XYZ",
+			includePattern:  "",
+			expectedFiles:   []string{},
+			unexpectedFiles: []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			results, err := searchDirectory(ctx, tempDir, tt.pattern, tt.includePattern, false, false, 0)
+			require.NoError(t, err)
+
+			// Check expected files are found
+			for _, expectedFile := range tt.expectedFiles {
+				found := false
+				for _, result := range results {
+					if strings.Contains(result.Filename, expectedFile) {
+						found = true
+						break
+					}
+				}
+				assert.True(t, found, "Expected to find matches in %s", expectedFile)
+			}
+
+			// Check unexpected files are not found
+			for _, unexpectedFile := range tt.unexpectedFiles {
+				for _, result := range results {
+					assert.NotContains(t, result.Filename, unexpectedFile,
+						"Should not find matches in %s", unexpectedFile)
+				}
+			}
+		})
+	}
+}
+
+// TestRipgrepBasicSearch tests basic search functionality with ripgrep
+func TestRipgrepBasicSearch(t *testing.T) {
+	// Skip if ripgrep is not available
+	if getRipgrepPath() == "" {
+		t.Skip("ripgrep not available, skipping test")
+	}
+
+	tool := &GrepTool{}
+	ctx := context.Background()
+	state := NewBasicState(context.TODO())
+
+	// Create a temporary directory for test files
+	tempDir, err := os.MkdirTemp("", "grep_basic_test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	// Create a test file
+	testFile := filepath.Join(tempDir, "test.go")
+	require.NoError(t, os.WriteFile(testFile, []byte("func BasicTest() {}\n"), 0o644))
+
+	// Search for the pattern
+	input := CodeSearchInput{
+		Pattern: "BasicTest",
+		Path:    tempDir,
+	}
+
+	inputJSON, _ := json.Marshal(input)
+	result := tool.Execute(ctx, state, string(inputJSON))
+
+	// Should find the match
+	assert.False(t, result.IsError())
+	assert.Contains(t, result.GetResult(), "BasicTest")
+}
+
+func TestGrepIgnoreCase(t *testing.T) {
+	if getRipgrepPath() == "" {
+		t.Skip("ripgrep not available, skipping test")
+	}
+
+	tool := &GrepTool{}
+	ctx := context.Background()
+	state := NewBasicState(context.TODO())
+
+	tempDir, err := os.MkdirTemp("", "grep_ignore_case_test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	testFile := filepath.Join(tempDir, "test.go")
+	require.NoError(t, os.WriteFile(testFile, []byte("func HelloWorld() {}\n"), 0o644))
+
+	// Without ignore_case, uppercase pattern should not match lowercase (smart-case applies)
+	inputWithoutIgnoreCase := CodeSearchInput{
+		Pattern:    "HELLOWORLD",
+		Path:       tempDir,
+		IgnoreCase: false,
+	}
+	inputJSON, _ := json.Marshal(inputWithoutIgnoreCase)
+	result := tool.Execute(ctx, state, string(inputJSON))
+	assert.False(t, result.IsError())
+	assert.NotContains(t, result.GetResult(), "HelloWorld")
+
+	// With ignore_case, uppercase pattern should match
+	inputWithIgnoreCase := CodeSearchInput{
+		Pattern:    "HELLOWORLD",
+		Path:       tempDir,
+		IgnoreCase: true,
+	}
+	inputJSON, _ = json.Marshal(inputWithIgnoreCase)
+	result = tool.Execute(ctx, state, string(inputJSON))
+	assert.False(t, result.IsError())
+	assert.Contains(t, result.GetResult(), "HelloWorld")
+}
+
+func TestGrepFixedStrings(t *testing.T) {
+	if getRipgrepPath() == "" {
+		t.Skip("ripgrep not available, skipping test")
+	}
+
+	tool := &GrepTool{}
+	ctx := context.Background()
+	state := NewBasicState(context.TODO())
+
+	tempDir, err := os.MkdirTemp("", "grep_fixed_strings_test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	testFile := filepath.Join(tempDir, "test.go")
+	require.NoError(t, os.WriteFile(testFile, []byte("func foo.bar() {}\nfunc fooXbar() {}\n"), 0o644))
+
+	// Without fixed_strings, "foo.bar" is treated as regex (. matches any char)
+	inputWithoutFixed := CodeSearchInput{
+		Pattern:      "foo.bar",
+		Path:         tempDir,
+		FixedStrings: false,
+	}
+	inputJSON, _ := json.Marshal(inputWithoutFixed)
+	result := tool.Execute(ctx, state, string(inputJSON))
+	assert.False(t, result.IsError())
+	assert.Contains(t, result.GetResult(), "fooXbar") // regex . matches X
+
+	// With fixed_strings, "foo.bar" matches only literal "foo.bar"
+	inputWithFixed := CodeSearchInput{
+		Pattern:      "foo.bar",
+		Path:         tempDir,
+		FixedStrings: true,
+	}
+	inputJSON, _ = json.Marshal(inputWithFixed)
+	result = tool.Execute(ctx, state, string(inputJSON))
+	assert.False(t, result.IsError())
+	assert.Contains(t, result.GetResult(), "foo.bar")
+	assert.NotContains(t, result.GetResult(), "fooXbar")
+}
+
+func TestParseRipgrepJSON_MatchPositions(t *testing.T) {
+	tests := []struct {
+		name              string
+		input             string
+		expectedPositions map[int][]MatchPosition
+	}{
+		{
+			name:  "single match with position",
+			input: `{"type":"match","data":{"path":{"text":"test.go"},"lines":{"text":"func TestFunc() {\n"},"line_number":10,"submatches":[{"match":{"text":"TestFunc"},"start":5,"end":13}]}}`,
+			expectedPositions: map[int][]MatchPosition{
+				10: {{Start: 5, End: 13}},
+			},
+		},
+		{
+			name:  "multiple submatches on same line",
+			input: `{"type":"match","data":{"path":{"text":"test.go"},"lines":{"text":"foo bar foo baz\n"},"line_number":1,"submatches":[{"match":{"text":"foo"},"start":0,"end":3},{"match":{"text":"foo"},"start":8,"end":11}]}}`,
+			expectedPositions: map[int][]MatchPosition{
+				1: {{Start: 0, End: 3}, {Start: 8, End: 11}},
+			},
+		},
+		{
+			name: "matches on different lines",
+			input: `{"type":"match","data":{"path":{"text":"test.go"},"lines":{"text":"first match\n"},"line_number":5,"submatches":[{"match":{"text":"match"},"start":6,"end":11}]}}
+{"type":"match","data":{"path":{"text":"test.go"},"lines":{"text":"second match\n"},"line_number":10,"submatches":[{"match":{"text":"match"},"start":7,"end":12}]}}`,
+			expectedPositions: map[int][]MatchPosition{
+				5:  {{Start: 6, End: 11}},
+				10: {{Start: 7, End: 12}},
+			},
+		},
+		{
+			name: "context lines have no positions",
+			input: `{"type":"context","data":{"path":{"text":"test.go"},"lines":{"text":"context line\n"},"line_number":9,"submatches":[]}}
+{"type":"match","data":{"path":{"text":"test.go"},"lines":{"text":"match line\n"},"line_number":10,"submatches":[{"match":{"text":"match"},"start":0,"end":5}]}}`,
+			expectedPositions: map[int][]MatchPosition{
+				10: {{Start: 0, End: 5}},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			results, err := parseRipgrepJSON([]byte(tt.input), "/tmp")
+			require.NoError(t, err)
+			require.Len(t, results, 1)
+
+			result := results[0]
+			for lineNum, expectedPos := range tt.expectedPositions {
+				actualPos, exists := result.MatchPositions[lineNum]
+				require.True(t, exists, "expected match positions for line %d", lineNum)
+				assert.Equal(t, expectedPos, actualPos, "match positions for line %d", lineNum)
+			}
+
+			// Verify context lines don't have positions
+			for lineNum := range result.ContextLines {
+				_, exists := result.MatchPositions[lineNum]
+				assert.False(t, exists, "context line %d should not have match positions", lineNum)
+			}
+		})
+	}
+}
+
+func TestGrepToolResult_StructuredData_MatchPositions(t *testing.T) {
+	tests := []struct {
+		name          string
+		results       []SearchResult
+		expectedStart int
+		expectedEnd   int
+		lineNum       int
+	}{
+		{
+			name: "single match position",
+			results: []SearchResult{
+				{
+					Filename:     "/tmp/test.go",
+					MatchedLines: map[int]string{10: "func TestFunc() {}"},
+					MatchPositions: map[int][]MatchPosition{
+						10: {{Start: 5, End: 13}},
+					},
+					ContextLines: map[int]string{},
+					LineNumbers:  []int{10},
+				},
+			},
+			lineNum:       10,
+			expectedStart: 5,
+			expectedEnd:   13,
+		},
+		{
+			name: "multiple positions uses first",
+			results: []SearchResult{
+				{
+					Filename:     "/tmp/test.go",
+					MatchedLines: map[int]string{1: "foo bar foo baz"},
+					MatchPositions: map[int][]MatchPosition{
+						1: {{Start: 0, End: 3}, {Start: 8, End: 11}},
+					},
+					ContextLines: map[int]string{},
+					LineNumbers:  []int{1},
+				},
+			},
+			lineNum:       1,
+			expectedStart: 0,
+			expectedEnd:   3,
+		},
+		{
+			name: "no positions defaults to zero",
+			results: []SearchResult{
+				{
+					Filename:       "/tmp/test.go",
+					MatchedLines:   map[int]string{5: "some content"},
+					MatchPositions: map[int][]MatchPosition{},
+					ContextLines:   map[int]string{},
+					LineNumbers:    []int{5},
+				},
+			},
+			lineNum:       5,
+			expectedStart: 0,
+			expectedEnd:   0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := &GrepToolResult{
+				pattern: "test",
+				path:    "/tmp",
+				results: tt.results,
+			}
+
+			structured := result.StructuredData()
+			require.NotNil(t, structured.Metadata)
+
+			metadata, ok := structured.Metadata.(*tooltypes.GrepMetadata)
+			require.True(t, ok)
+			require.Len(t, metadata.Results, 1)
+
+			var foundMatch *tooltypes.SearchMatch
+			for _, match := range metadata.Results[0].Matches {
+				if match.LineNumber == tt.lineNum {
+					foundMatch = &match
+					break
+				}
+			}
+
+			require.NotNil(t, foundMatch, "expected to find match for line %d", tt.lineNum)
+			assert.Equal(t, tt.expectedStart, foundMatch.MatchStart, "MatchStart")
+			assert.Equal(t, tt.expectedEnd, foundMatch.MatchEnd, "MatchEnd")
+		})
+	}
+}
+
+func TestGrepMatchPositions_Integration(t *testing.T) {
+	if getRipgrepPath() == "" {
+		t.Skip("ripgrep not available, skipping test")
+	}
+
+	tool := &GrepTool{}
+	ctx := context.Background()
+	state := NewBasicState(context.TODO())
+
+	tempDir, err := os.MkdirTemp("", "grep_match_pos_test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	testFile := filepath.Join(tempDir, "test.go")
+	require.NoError(t, os.WriteFile(testFile, []byte("func HelloWorld() {}\n"), 0o644))
+
+	input := CodeSearchInput{
+		Pattern: "HelloWorld",
+		Path:    tempDir,
+	}
+
+	inputJSON, _ := json.Marshal(input)
+	result := tool.Execute(ctx, state, string(inputJSON))
+
+	assert.False(t, result.IsError())
+
+	structured := result.StructuredData()
+	metadata, ok := structured.Metadata.(*tooltypes.GrepMetadata)
+	require.True(t, ok)
+	require.Len(t, metadata.Results, 1)
+	require.Len(t, metadata.Results[0].Matches, 1)
+
+	match := metadata.Results[0].Matches[0]
+	assert.Equal(t, 1, match.LineNumber)
+	assert.Equal(t, 5, match.MatchStart, "HelloWorld starts at position 5 (after 'func ')")
+	assert.Equal(t, 15, match.MatchEnd, "HelloWorld ends at position 15")
 }

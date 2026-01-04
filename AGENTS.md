@@ -23,6 +23,7 @@ Kodelet is a lightweight CLI tool that helps with software engineering tasks. It
 ├── mise.toml            # Tool management and task automation
 ├── pkg/                 # Core packages
 │   ├── auth/            # Authentication and login management
+│   ├── binaries/        # External binary management (ripgrep, etc.)
 │   ├── conversations/   # Conversation storage and management
 │   │   ├── sqlite/      # SQLite storage implementation (pure Go)
 │   │   ├── service.go   # Main conversation service
@@ -354,6 +355,35 @@ Kodelet supports lifecycle hooks that allow external scripts to observe and cont
 Hooks differ from skills: hooks intercept agent operations (automatic), while skills provide domain expertise (model-invoked).
 
 See [docs/HOOKS.md](docs/HOOKS.md) for creating custom hooks.
+
+## External Binary Management
+
+Kodelet manages external binary dependencies (like ripgrep and fd) through the `pkg/binaries` package:
+
+- **Location**: Binaries are installed to `~/.kodelet/bin/`
+- **Version tracking**: Each binary has a `.version` file to track installed versions
+- **Automatic download**: On startup, kodelet downloads required binaries from GitHub releases
+- **Checksum verification**: All downloads are verified using SHA256 checksums
+- **Fallback behavior**: If download fails (no network, firewall), falls back to system-installed binaries
+
+### Currently Managed Binaries
+
+| Binary | Version | Platforms | Usage |
+|--------|---------|-----------|-------|
+| ripgrep (`rg`) | 15.1.0 | darwin/linux/windows (amd64, arm64) | `grep_tool` for code search |
+| fd (`fd`) | 10.3.0 | darwin/linux/windows (amd64, arm64) | `glob_tool` for file finding |
+
+### Fallback Behavior
+
+1. Check if managed binary exists with correct version in `~/.kodelet/bin/`
+2. If not, attempt to download from GitHub releases
+3. If download fails, fall back to system-installed binary (e.g., `rg` in PATH)
+4. If neither available, the dependent tool reports an error
+
+This ensures kodelet works in:
+- **Normal environments**: Downloads and uses managed binary
+- **Air-gapped/corporate networks**: Uses pre-installed system binary
+- **CI environments**: Works with pre-installed tools
 
 ## Resources
 

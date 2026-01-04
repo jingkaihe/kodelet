@@ -88,8 +88,8 @@ describe('GrepRenderer', () => {
     const toolResult = createToolResult({
       pattern: 'test',
       results: [
-        { file: 'file1.js', lineNumber: 1, content: 'test line' },
-        { file: 'file2.js', lineNumber: 5, content: 'another test' },
+        { filePath: 'file1.js', lineNumber: 1, content: 'test line' },
+        { filePath: 'file2.js', lineNumber: 5, content: 'another test' },
       ],
     });
 
@@ -101,7 +101,7 @@ describe('GrepRenderer', () => {
   it('shows truncated badge when truncated', () => {
     const toolResult = createToolResult({
       pattern: 'test',
-      results: [{ file: 'file.js', lineNumber: 1, content: 'test' }],
+      results: [{ filePath: 'file.js', lineNumber: 1, content: 'test' }],
       truncated: true,
     });
 
@@ -141,8 +141,8 @@ describe('GrepRenderer', () => {
     const toolResult = createToolResult({
       pattern: 'error',
       results: [
-        { file: 'app.js', lineNumber: 10, content: 'console.error("failed")' },
-        { file: 'test.js', lineNumber: 25, content: 'throw new Error()' },
+        { filePath: 'app.js', lineNumber: 10, content: 'console.error("failed")' },
+        { filePath: 'test.js', lineNumber: 25, content: 'throw new Error()' },
       ],
     });
 
@@ -159,7 +159,7 @@ describe('GrepRenderer', () => {
       pattern: 'log',
       results: [
         {
-          file: 'debug.js',
+          filePath: 'debug.js',
           matches: [
             { lineNumber: 1, content: 'console.log("start")' },
             { lineNumber: 5, content: 'console.log("middle")' },
@@ -183,7 +183,7 @@ describe('GrepRenderer', () => {
       pattern: 'test',
       results: [
         {
-          file: 'large.js',
+          filePath: 'large.js',
           matches: Array(6).fill(null).map((_, i) => ({
             lineNumber: i + 1,
             content: `test ${i}`,
@@ -203,7 +203,7 @@ describe('GrepRenderer', () => {
       pattern: 'test',
       results: [
         {
-          file: 'small.js',
+          filePath: 'small.js',
           matches: Array(5).fill(null).map((_, i) => ({
             lineNumber: i + 1,
             content: `test ${i}`,
@@ -222,7 +222,7 @@ describe('GrepRenderer', () => {
     const toolResult = createToolResult({
       pattern: 'error',
       results: [
-        { file: 'app.js', lineNumber: 1, content: 'An error occurred' },
+        { filePath: 'app.js', lineNumber: 1, content: 'An error occurred' },
       ],
     });
 
@@ -238,7 +238,7 @@ describe('GrepRenderer', () => {
     const toolResult = createToolResult({
       pattern: 'test',
       results: [
-        { file: 'file.js', content: 'test content' },
+        { filePath: 'file.js', content: 'test content' },
       ],
     });
 
@@ -247,37 +247,11 @@ describe('GrepRenderer', () => {
     expect(screen.getByText('?:')).toBeInTheDocument();
   });
 
-  it('handles alternative property names', () => {
+  it('handles missing filePath gracefully', () => {
     const toolResult = createToolResult({
       pattern: 'test',
       results: [
-        { 
-          file: 'alt.js',     // required file property
-          filename: 'alt.js', // alternative to 'file'
-          line_number: 42,    // alternative to 'lineNumber'
-          line: 'test line'   // alternative to 'content'
-        },
-      ],
-    });
-
-    const { container } = render(<GrepRenderer toolResult={toolResult} />);
-
-    expect(screen.getByText('📄 alt.js')).toBeInTheDocument();
-    expect(screen.getByText('42:')).toBeInTheDocument();
-    
-    // The content is rendered with dangerouslySetInnerHTML for highlighting
-    const contentElements = container.querySelectorAll('.text-sm.font-mono.flex-1');
-    const hasTestLine = Array.from(contentElements).some(el => 
-      el.innerHTML.includes('test') && el.innerHTML.includes('line')
-    );
-    expect(hasTestLine).toBe(true);
-  });
-
-  it('handles unknown file names', () => {
-    const toolResult = createToolResult({
-      pattern: 'test',
-      results: [
-        { file: 'Unknown', lineNumber: 1, content: 'test' }, // file property is required
+        { filePath: '', lineNumber: 1, content: 'test' },
       ],
     });
 
@@ -290,7 +264,7 @@ describe('GrepRenderer', () => {
     const toolResult = createToolResult({
       pattern: 'test[0-9]+',
       results: [
-        { file: 'regex.js', lineNumber: 1, content: 'test[0-9]+ pattern' },
+        { filePath: 'regex.js', lineNumber: 1, content: 'test[0-9]+ pattern' },
       ],
     });
 
@@ -302,7 +276,7 @@ describe('GrepRenderer', () => {
     const toolResult = createToolResult({
       pattern: '',
       results: [
-        { file: 'file.js', lineNumber: 1, content: 'some content' },
+        { filePath: 'file.js', lineNumber: 1, content: 'some content' },
       ],
     });
 
@@ -316,9 +290,9 @@ describe('GrepRenderer', () => {
     const toolResult = createToolResult({
       pattern: 'import',
       results: [
-        { file: 'index.js', lineNumber: 1, content: 'import React' },
-        { file: 'index.js', lineNumber: 2, content: 'import { useState }' },
-        { file: 'app.js', lineNumber: 1, content: 'import styles' },
+        { filePath: 'index.js', lineNumber: 1, content: 'import React' },
+        { filePath: 'index.js', lineNumber: 2, content: 'import { useState }' },
+        { filePath: 'app.js', lineNumber: 1, content: 'import styles' },
       ],
     });
 
@@ -332,5 +306,56 @@ describe('GrepRenderer', () => {
     const badges = screen.getAllByText(/matches/);
     expect(badges.some(b => b.textContent === '2 matches')).toBe(true);
     expect(badges.some(b => b.textContent === '1 matches')).toBe(true);
+  });
+
+  it('renders context lines with different styling', () => {
+    const toolResult = createToolResult({
+      pattern: 'error',
+      results: [
+        {
+          filePath: 'app.js',
+          matches: [
+            { lineNumber: 9, content: 'function handleError() {', isContext: true },
+            { lineNumber: 10, content: '  console.error("failed")', isContext: false },
+            { lineNumber: 11, content: '}', isContext: true },
+          ],
+        },
+      ],
+    });
+
+    const { container } = render(<GrepRenderer toolResult={toolResult} />);
+
+    // Context lines should show '-' separator
+    expect(screen.getByText('9-')).toBeInTheDocument();
+    expect(screen.getByText('11-')).toBeInTheDocument();
+    
+    // Match line should show ':' separator
+    expect(screen.getByText('10:')).toBeInTheDocument();
+    
+    // Context lines should have opacity-60 class
+    const contextLines = container.querySelectorAll('.opacity-60');
+    expect(contextLines).toHaveLength(2);
+  });
+
+  it('does not highlight pattern in context lines', () => {
+    const toolResult = createToolResult({
+      pattern: 'error',
+      results: [
+        {
+          filePath: 'app.js',
+          matches: [
+            { lineNumber: 9, content: 'error handling code', isContext: true },
+            { lineNumber: 10, content: 'console.error("failed")', isContext: false },
+          ],
+        },
+      ],
+    });
+
+    const { container } = render(<GrepRenderer toolResult={toolResult} />);
+
+    // Only the match line should have highlighting
+    const highlightedMarks = container.querySelectorAll('mark');
+    expect(highlightedMarks).toHaveLength(1);
+    expect(highlightedMarks[0].textContent).toBe('error');
   });
 });

@@ -37,7 +37,11 @@ func (r *GrepRenderer) RenderCLI(result tools.StructuredToolResult) string {
 	for _, result := range meta.Results {
 		output.WriteString(fmt.Sprintf("\n%s:\n", result.FilePath))
 		for _, match := range result.Matches {
-			output.WriteString(fmt.Sprintf("  %d: %s\n", match.LineNumber, match.Content))
+			if match.IsContext {
+				output.WriteString(fmt.Sprintf("  %d- %s\n", match.LineNumber, match.Content))
+			} else {
+				output.WriteString(fmt.Sprintf("  %d: %s\n", match.LineNumber, match.Content))
+			}
 		}
 	}
 

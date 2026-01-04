@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/jingkaihe/kodelet/pkg/binaries"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	"github.com/spf13/cobra"
@@ -172,6 +173,9 @@ func main() {
 			}
 		}()
 	}
+
+	// Ensure required external binaries are installed
+	binaries.EnsureDepsInstalled(ctx)
 
 	rootCmd = withTracing(rootCmd)
 	runCmd = withTracing(runCmd)

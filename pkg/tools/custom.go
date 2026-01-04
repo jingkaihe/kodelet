@@ -16,6 +16,7 @@ import (
 
 	"github.com/invopop/jsonschema"
 	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/osutil"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
 	"github.com/spf13/viper"
@@ -193,10 +194,16 @@ func (m *CustomToolManager) discoverToolsInDir(ctx context.Context, dir string, 
 
 // validateTool validates a tool by calling its description command
 func (m *CustomToolManager) validateTool(ctx context.Context, execPath string) (*CustomTool, error) {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	timeout := m.config.Timeout
+	if timeout == 0 {
+		timeout = 5 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, execPath, "description")
+	osutil.SetProcessGroup(cmd)
+	osutil.SetProcessGroupKill(cmd)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -306,6 +313,8 @@ func (t *CustomTool) Execute(ctx context.Context, _ tooltypes.State, parameters 
 	defer cancel()
 
 	cmd := exec.CommandContext(execCtx, t.execPath, "run")
+	osutil.SetProcessGroup(cmd)
+	osutil.SetProcessGroupKill(cmd)
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
