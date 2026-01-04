@@ -20,7 +20,7 @@ const GrepRenderer: React.FC<GrepRendererProps> = ({ toolResult }) => {
   const groupResultsByFile = (results: GrepResult[]) => {
     const grouped: Record<string, GrepMatch[]> = {};
     results.forEach(result => {
-      const file = result.file || result.filename || 'Unknown';
+      const file = result.filePath || 'Unknown';
       if (!grouped[file]) {
         grouped[file] = [];
       }
@@ -29,10 +29,10 @@ const GrepRenderer: React.FC<GrepRendererProps> = ({ toolResult }) => {
         // Multiple matches per file
         grouped[file].push(...result.matches);
       } else {
-        // Single match
+        // Single match (legacy format)
         grouped[file].push({
-          lineNumber: result.lineNumber || result.line_number || 0,
-          content: result.content || result.line || ''
+          lineNumber: result.lineNumber || 0,
+          content: result.content || ''
         });
       }
     });
