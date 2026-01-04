@@ -56,11 +56,12 @@ const GrepRenderer: React.FC<GrepRendererProps> = ({ toolResult }) => {
     return Object.entries(fileGroups).map(([file, matches]) => {
       const matchCount = matches.length;
       const fileContent = matches.map((match, index) => {
-        const highlightedContent = highlightPattern(match.content, pattern);
+        const highlightedContent = match.isContext ? match.content : highlightPattern(match.content, pattern);
+        const isContext = match.isContext;
         return (
-          <div key={index} className="flex items-start gap-2 py-1 hover:bg-base-100 rounded px-2">
+          <div key={index} className={`flex items-start gap-2 py-1 hover:bg-base-100 rounded px-2 ${isContext ? 'opacity-60' : ''}`}>
             <span className="text-xs text-base-content/50 font-mono min-w-[3rem]">
-              {match.lineNumber || '?'}:
+              {match.lineNumber || '?'}{isContext ? '-' : ':'}
             </span>
             <span 
               className="text-sm font-mono flex-1" 

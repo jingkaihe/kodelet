@@ -154,6 +154,7 @@ export interface GrepMatch {
   line_number?: number;
   content: string;
   line?: string;
+  isContext?: boolean;
 }
 
 export interface GlobMetadata {

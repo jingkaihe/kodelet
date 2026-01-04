@@ -333,4 +333,55 @@ describe('GrepRenderer', () => {
     expect(badges.some(b => b.textContent === '2 matches')).toBe(true);
     expect(badges.some(b => b.textContent === '1 matches')).toBe(true);
   });
+
+  it('renders context lines with different styling', () => {
+    const toolResult = createToolResult({
+      pattern: 'error',
+      results: [
+        {
+          file: 'app.js',
+          matches: [
+            { lineNumber: 9, content: 'function handleError() {', isContext: true },
+            { lineNumber: 10, content: '  console.error("failed")', isContext: false },
+            { lineNumber: 11, content: '}', isContext: true },
+          ],
+        },
+      ],
+    });
+
+    const { container } = render(<GrepRenderer toolResult={toolResult} />);
+
+    // Context lines should show '-' separator
+    expect(screen.getByText('9-')).toBeInTheDocument();
+    expect(screen.getByText('11-')).toBeInTheDocument();
+    
+    // Match line should show ':' separator
+    expect(screen.getByText('10:')).toBeInTheDocument();
+    
+    // Context lines should have opacity-60 class
+    const contextLines = container.querySelectorAll('.opacity-60');
+    expect(contextLines).toHaveLength(2);
+  });
+
+  it('does not highlight pattern in context lines', () => {
+    const toolResult = createToolResult({
+      pattern: 'error',
+      results: [
+        {
+          file: 'app.js',
+          matches: [
+            { lineNumber: 9, content: 'error handling code', isContext: true },
+            { lineNumber: 10, content: 'console.error("failed")', isContext: false },
+          ],
+        },
+      ],
+    });
+
+    const { container } = render(<GrepRenderer toolResult={toolResult} />);
+
+    // Only the match line should have highlighting
+    const highlightedMarks = container.querySelectorAll('mark');
+    expect(highlightedMarks).toHaveLength(1);
+    expect(highlightedMarks[0].textContent).toBe('error');
+  });
 });
