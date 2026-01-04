@@ -113,7 +113,7 @@ func TestGetRipgrepArchiveEntry(t *testing.T) {
 	assert.Equal(t, "rg.exe", getRipgrepArchiveEntry(RipgrepVersion, "windows", "amd64"))
 }
 
-func TestGetRipgrepPlatform(t *testing.T) {
+func TestGetPlatformString(t *testing.T) {
 	tests := []struct {
 		goos     string
 		goarch   string
@@ -134,7 +134,7 @@ func TestGetRipgrepPlatform(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.goos+"/"+tt.goarch, func(t *testing.T) {
-			platform, err := getRipgrepPlatform(tt.goos, tt.goarch)
+			platform, err := GetPlatformString(tt.goos, tt.goarch)
 			if tt.wantErr {
 				assert.Error(t, err)
 				return

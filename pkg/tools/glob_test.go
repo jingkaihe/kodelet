@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jingkaihe/kodelet/pkg/binaries"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -82,12 +81,6 @@ func TestGlobTool_ValidateInput(t *testing.T) {
 }
 
 func TestGlobTool_Execute(t *testing.T) {
-	ctx := context.Background()
-	_, err := binaries.EnsureFd(ctx)
-	if err != nil {
-		t.Skip("fd not available, skipping glob tests")
-	}
-
 	tmpDir, err := os.MkdirTemp("", "glob-test-*")
 	require.NoError(t, err)
 	defer os.RemoveAll(tmpDir)
@@ -118,7 +111,8 @@ func TestGlobTool_Execute(t *testing.T) {
 	require.NoError(t, err)
 
 	tool := &GlobTool{}
-	state := NewBasicState(context.TODO())
+	ctx := context.Background()
+	state := NewBasicState(ctx)
 
 	testCases := []struct {
 		name           string
@@ -215,12 +209,6 @@ func TestGlobTool_Execute(t *testing.T) {
 }
 
 func TestGlobTool_GitignoreRespected(t *testing.T) {
-	ctx := context.Background()
-	_, err := binaries.EnsureFd(ctx)
-	if err != nil {
-		t.Skip("fd not available, skipping glob tests")
-	}
-
 	tmpDir, err := os.MkdirTemp("", "glob-gitignore-test-*")
 	require.NoError(t, err)
 	defer os.RemoveAll(tmpDir)
@@ -252,7 +240,8 @@ func TestGlobTool_GitignoreRespected(t *testing.T) {
 	}
 
 	tool := &GlobTool{}
-	state := NewBasicState(context.TODO())
+	ctx := context.Background()
+	state := NewBasicState(ctx)
 
 	t.Run("Respects gitignore by default", func(t *testing.T) {
 		input := GlobInput{
@@ -286,12 +275,6 @@ func TestGlobTool_GitignoreRespected(t *testing.T) {
 }
 
 func TestGlobTool_HiddenFiles(t *testing.T) {
-	ctx := context.Background()
-	_, err := binaries.EnsureFd(ctx)
-	if err != nil {
-		t.Skip("fd not available, skipping glob tests")
-	}
-
 	tmpDir, err := os.MkdirTemp("", "glob-hidden-test-*")
 	require.NoError(t, err)
 	defer os.RemoveAll(tmpDir)
@@ -311,7 +294,8 @@ func TestGlobTool_HiddenFiles(t *testing.T) {
 	}
 
 	tool := &GlobTool{}
-	state := NewBasicState(context.TODO())
+	ctx := context.Background()
+	state := NewBasicState(ctx)
 
 	t.Run("Excludes hidden files by default", func(t *testing.T) {
 		input := GlobInput{

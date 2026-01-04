@@ -175,12 +175,7 @@ func main() {
 	}
 
 	// Ensure required external binaries are installed
-	if _, err := binaries.EnsureRipgrep(ctx); err != nil {
-		logger.G(ctx).WithError(err).Warn("Failed to ensure ripgrep is installed, grep_tool may not work")
-	}
-	if _, err := binaries.EnsureFd(ctx); err != nil {
-		logger.G(ctx).WithError(err).Warn("Failed to ensure fd is installed, glob_tool may not work")
-	}
+	binaries.EnsureDepsInstalled(ctx)
 
 	rootCmd = withTracing(rootCmd)
 	runCmd = withTracing(runCmd)

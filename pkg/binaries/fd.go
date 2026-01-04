@@ -3,10 +3,7 @@ package binaries
 import (
 	"context"
 	"fmt"
-	"os/exec"
-	"sync"
 
-	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/pkg/errors"
 )
 
@@ -25,11 +22,7 @@ var fdChecksums = map[string]string{
 	"windows/arm64": "bf9b1e31bcac71c1e95d49c56f0d872f525b95d03854e94b1d4dd6786f825cc5",
 }
 
-var (
-	fdPath     string
-	fdPathOnce sync.Once
-	fdPathErr  error
-)
+var fdCache BinaryPathCache
 
 // FdSpec returns the BinarySpec for fd
 func FdSpec() BinarySpec {
@@ -47,37 +40,19 @@ func FdSpec() BinarySpec {
 // It first tries to use the managed binary, then falls back to system fd.
 // This is cached after the first successful call.
 func EnsureFd(ctx context.Context) (string, error) {
-	fdPathOnce.Do(func() {
-		fdPath, fdPathErr = ensureFdWithFallback(ctx)
+	return fdCache.Get(func() (string, error) {
+		return EnsureBinaryWithFallback(ctx, FdSpec())
 	})
-	return fdPath, fdPathErr
-}
-
-func ensureFdWithFallback(ctx context.Context) (string, error) {
-	path, err := EnsureBinary(ctx, FdSpec())
-	if err == nil {
-		return path, nil
-	}
-
-	logger.G(ctx).WithError(err).Debug("Failed to ensure managed fd, falling back to system fd")
-
-	systemPath, lookErr := exec.LookPath("fd")
-	if lookErr == nil {
-		logger.G(ctx).WithField("path", systemPath).Info("Using system-installed fd")
-		return systemPath, nil
-	}
-
-	return "", errors.Wrap(err, "failed to ensure fd (managed download failed and no system fd found)")
 }
 
 // GetFdPath returns the cached fd path without ensuring installation.
 // Returns empty string if fd hasn't been ensured yet.
 func GetFdPath() string {
-	return fdPath
+	return fdCache.path
 }
 
 func getFdDownloadURL(version, goos, goarch string) (string, error) {
-	platform, err := getFdPlatform(goos, goarch)
+	platform, err := GetPlatformString(goos, goarch)
 	if err != nil {
 		return "", err
 	}
@@ -104,31 +79,4 @@ func getFdArchiveEntry(_, goos, _ string) string {
 		return "fd.exe"
 	}
 	return "fd"
-}
-
-func getFdPlatform(goos, goarch string) (string, error) {
-	switch goos {
-	case "darwin":
-		switch goarch {
-		case "amd64":
-			return "x86_64-apple-darwin", nil
-		case "arm64":
-			return "aarch64-apple-darwin", nil
-		}
-	case "linux":
-		switch goarch {
-		case "amd64":
-			return "x86_64-unknown-linux-musl", nil
-		case "arm64":
-			return "aarch64-unknown-linux-gnu", nil
-		}
-	case "windows":
-		switch goarch {
-		case "amd64":
-			return "x86_64-pc-windows-msvc", nil
-		case "arm64":
-			return "aarch64-pc-windows-msvc", nil
-		}
-	}
-	return "", errors.Errorf("unsupported platform: %s/%s", goos, goarch)
 }

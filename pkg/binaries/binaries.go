@@ -14,9 +14,11 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/logger"
@@ -39,6 +41,77 @@ type BinarySpec struct {
 	GetChecksumURL  func(version, goos, goarch string) (string, error) // Optional if GetChecksum is provided
 	GetChecksum     func(version, goos, goarch string) (string, error) // Optional: returns embedded checksum
 	GetArchiveEntry func(version, goos, goarch string) string
+}
+
+// EnsureDepsInstalled ensures all required binaries are installed
+func EnsureDepsInstalled(ctx context.Context) {
+	if _, err := EnsureRipgrep(ctx); err != nil {
+		logger.G(ctx).WithError(err).Warn("Failed to ensure ripgrep is installed, grep_tool may not work")
+	}
+	if _, err := EnsureFd(ctx); err != nil {
+		logger.G(ctx).WithError(err).Warn("Failed to ensure fd is installed, glob_tool may not work")
+	}
+}
+
+// BinaryPathCache provides thread-safe caching for binary paths
+type BinaryPathCache struct {
+	path string
+	err  error
+	once sync.Once
+}
+
+// Get returns the cached path, computing it once via the provided function
+func (c *BinaryPathCache) Get(fn func() (string, error)) (string, error) {
+	c.once.Do(func() {
+		c.path, c.err = fn()
+	})
+	return c.path, c.err
+}
+
+// EnsureBinaryWithFallback ensures a binary is installed, falling back to system binary if needed
+func EnsureBinaryWithFallback(ctx context.Context, spec BinarySpec) (string, error) {
+	path, err := EnsureBinary(ctx, spec)
+	if err == nil {
+		return path, nil
+	}
+
+	logger.G(ctx).WithError(err).Debugf("Failed to ensure managed %s, falling back to system %s", spec.Name, spec.BinaryName)
+
+	systemPath, lookErr := exec.LookPath(spec.BinaryName)
+	if lookErr == nil {
+		logger.G(ctx).WithField("path", systemPath).Infof("Using system-installed %s", spec.BinaryName)
+		return systemPath, nil
+	}
+
+	return "", errors.Wrapf(err, "failed to ensure %s (managed download failed and no system %s found)", spec.Name, spec.BinaryName)
+}
+
+// GetPlatformString returns the platform-specific string for common rust-style releases
+func GetPlatformString(goos, goarch string) (string, error) {
+	switch goos {
+	case "darwin":
+		switch goarch {
+		case "amd64":
+			return "x86_64-apple-darwin", nil
+		case "arm64":
+			return "aarch64-apple-darwin", nil
+		}
+	case "linux":
+		switch goarch {
+		case "amd64":
+			return "x86_64-unknown-linux-musl", nil
+		case "arm64":
+			return "aarch64-unknown-linux-gnu", nil
+		}
+	case "windows":
+		switch goarch {
+		case "amd64":
+			return "x86_64-pc-windows-msvc", nil
+		case "arm64":
+			return "aarch64-pc-windows-msvc", nil
+		}
+	}
+	return "", errors.Errorf("unsupported platform: %s/%s", goos, goarch)
 }
 
 // GetBinDir returns the path to the kodelet bin directory
