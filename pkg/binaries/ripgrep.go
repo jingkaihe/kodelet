@@ -3,6 +3,7 @@ package binaries
 import (
 	"context"
 	"fmt"
+	"strings"
 )
 
 const (
@@ -22,6 +23,7 @@ func RipgrepSpec() BinarySpec {
 		GetDownloadURL:  getRipgrepDownloadURL,
 		GetChecksumURL:  getRipgrepChecksumURL,
 		GetArchiveEntry: getRipgrepArchiveEntry,
+		GetVersionCmd:   getRipgrepVersionCmd,
 	}
 }
 
@@ -67,4 +69,20 @@ func getRipgrepArchiveEntry(_, goos, _ string) string {
 		return "rg.exe"
 	}
 	return "rg"
+}
+
+func getRipgrepVersionCmd(binaryPath string) ([]string, func(string) string) {
+	return []string{binaryPath, "--version"}, parseRipgrepVersion
+}
+
+func parseRipgrepVersion(output string) string {
+	lines := strings.Split(output, "\n")
+	if len(lines) == 0 {
+		return ""
+	}
+	parts := strings.Fields(lines[0])
+	if len(parts) >= 2 && parts[0] == "ripgrep" {
+		return parts[1]
+	}
+	return ""
 }

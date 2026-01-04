@@ -40,19 +40,6 @@ func TestGetBinaryPath(t *testing.T) {
 	assert.Equal(t, expected, path)
 }
 
-func TestReadWriteVersionFile(t *testing.T) {
-	tmpDir := t.TempDir()
-	versionPath := filepath.Join(tmpDir, "test.version")
-
-	assert.Empty(t, readVersionFile(versionPath))
-
-	err := writeVersionFile(versionPath, "1.2.3")
-	require.NoError(t, err)
-
-	version := readVersionFile(versionPath)
-	assert.Equal(t, "1.2.3", version)
-}
-
 func TestFileExists(t *testing.T) {
 	tmpDir := t.TempDir()
 
@@ -318,4 +305,99 @@ func TestExtractFromZipWithSimilarSuffixFiles(t *testing.T) {
 	extracted, err := os.ReadFile(destPath)
 	require.NoError(t, err)
 	assert.Equal(t, binaryContent, extracted, "should extract the actual binary, not the completion file ending with _rg.exe")
+}
+
+func TestParseRipgrepVersion(t *testing.T) {
+	tests := []struct {
+		name     string
+		output   string
+		expected string
+	}{
+		{
+			name:     "standard output",
+			output:   "ripgrep 15.1.0\n-SIMD -AVX (compiled)\n+SIMD +AVX (runtime)\n",
+			expected: "15.1.0",
+		},
+		{
+			name:     "single line",
+			output:   "ripgrep 14.0.0",
+			expected: "14.0.0",
+		},
+		{
+			name:     "empty output",
+			output:   "",
+			expected: "",
+		},
+		{
+			name:     "malformed output",
+			output:   "something else",
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parseRipgrepVersion(tt.output)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestParseFdVersion(t *testing.T) {
+	tests := []struct {
+		name     string
+		output   string
+		expected string
+	}{
+		{
+			name:     "standard output",
+			output:   "fd 10.3.0\n",
+			expected: "10.3.0",
+		},
+		{
+			name:     "single line no newline",
+			output:   "fd 9.0.0",
+			expected: "9.0.0",
+		},
+		{
+			name:     "empty output",
+			output:   "",
+			expected: "",
+		},
+		{
+			name:     "malformed output",
+			output:   "something else",
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parseFdVersion(tt.output)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestGetInstalledVersion(t *testing.T) {
+	tmpDir := t.TempDir()
+	binaryPath := filepath.Join(tmpDir, "test-binary")
+
+	spec := BinarySpec{
+		Name:       "test",
+		Version:    "1.0.0",
+		BinaryName: "test-binary",
+	}
+
+	assert.Empty(t, getInstalledVersion(binaryPath, spec), "should return empty for non-existent binary")
+
+	err := os.WriteFile(binaryPath, []byte("test"), 0o755)
+	require.NoError(t, err)
+
+	assert.Empty(t, getInstalledVersion(binaryPath, spec), "should return empty when GetVersionCmd is nil")
+
+	spec.GetVersionCmd = func(_ string) ([]string, func(string) string) {
+		return []string{}, func(_ string) string { return "1.0.0" }
+	}
+	assert.Empty(t, getInstalledVersion(binaryPath, spec), "should return empty when args are empty")
 }

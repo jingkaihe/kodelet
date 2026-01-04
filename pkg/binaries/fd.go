@@ -3,6 +3,7 @@ package binaries
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/pkg/errors"
 )
@@ -33,6 +34,7 @@ func FdSpec() BinarySpec {
 		GetDownloadURL:  getFdDownloadURL,
 		GetChecksum:     getFdChecksum,
 		GetArchiveEntry: getFdArchiveEntry,
+		GetVersionCmd:   getFdVersionCmd,
 	}
 }
 
@@ -79,4 +81,20 @@ func getFdArchiveEntry(_, goos, _ string) string {
 		return "fd.exe"
 	}
 	return "fd"
+}
+
+func getFdVersionCmd(binaryPath string) ([]string, func(string) string) {
+	return []string{binaryPath, "--version"}, parseFdVersion
+}
+
+func parseFdVersion(output string) string {
+	lines := strings.Split(output, "\n")
+	if len(lines) == 0 {
+		return ""
+	}
+	parts := strings.Fields(lines[0])
+	if len(parts) >= 2 && parts[0] == "fd" {
+		return parts[1]
+	}
+	return ""
 }

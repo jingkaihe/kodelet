@@ -10,7 +10,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -27,7 +26,6 @@ import (
 
 const (
 	binDir           = ".kodelet/bin"
-	versionFile      = ".version"
 	downloadTimeout  = 5 * time.Minute
 	httpClientTimout = 30 * time.Second
 )
@@ -41,6 +39,7 @@ type BinarySpec struct {
 	GetChecksumURL  func(version, goos, goarch string) (string, error) // Optional if GetChecksum is provided
 	GetChecksum     func(version, goos, goarch string) (string, error) // Optional: returns embedded checksum
 	GetArchiveEntry func(version, goos, goarch string) string
+	GetVersionCmd   func(binaryPath string) (args []string, parseVersion func(output string) string) // Returns command args and version parser
 }
 
 // EnsureDepsInstalled ensures all required binaries are installed
@@ -153,10 +152,9 @@ func EnsureBinary(ctx context.Context, spec BinarySpec) (string, error) {
 		binaryName = spec.BinaryName + ".exe"
 	}
 	binaryPath := filepath.Join(binDir, binaryName)
-	versionPath := filepath.Join(binDir, fmt.Sprintf("%s%s", spec.Name, versionFile))
 
-	installedVersion := readVersionFile(versionPath)
-	if installedVersion == spec.Version && fileExists(binaryPath) {
+	installedVersion := getInstalledVersion(binaryPath, spec)
+	if installedVersion == spec.Version {
 		logger.G(ctx).WithField("binary", spec.Name).WithField("version", spec.Version).Debug("Binary already installed")
 		return binaryPath, nil
 	}
@@ -212,24 +210,31 @@ func EnsureBinary(ctx context.Context, spec BinarySpec) (string, error) {
 		return "", errors.Wrap(err, "failed to set binary permissions")
 	}
 
-	if err := writeVersionFile(versionPath, spec.Version); err != nil {
-		logger.G(ctx).WithError(err).Warn("Failed to write version file")
-	}
-
 	logger.G(ctx).WithField("binary", spec.Name).WithField("version", spec.Version).Info("Binary installed successfully")
 	return binaryPath, nil
 }
 
-func readVersionFile(path string) string {
-	data, err := os.ReadFile(path)
+func getInstalledVersion(binaryPath string, spec BinarySpec) string {
+	if !fileExists(binaryPath) {
+		return ""
+	}
+
+	if spec.GetVersionCmd == nil {
+		return ""
+	}
+
+	args, parseVersion := spec.GetVersionCmd(binaryPath)
+	if len(args) == 0 {
+		return ""
+	}
+
+	cmd := exec.Command(args[0], args[1:]...)
+	output, err := cmd.Output()
 	if err != nil {
 		return ""
 	}
-	return strings.TrimSpace(string(data))
-}
 
-func writeVersionFile(path, version string) error {
-	return os.WriteFile(path, []byte(version), 0o644)
+	return parseVersion(string(output))
 }
 
 func fileExists(path string) bool {
