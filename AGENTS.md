@@ -358,7 +358,7 @@ See [docs/HOOKS.md](docs/HOOKS.md) for creating custom hooks.
 
 ## External Binary Management
 
-Kodelet manages external binary dependencies (like ripgrep) through the `pkg/binaries` package:
+Kodelet manages external binary dependencies (like ripgrep and fd) through the `pkg/binaries` package:
 
 - **Location**: Binaries are installed to `~/.kodelet/bin/`
 - **Version tracking**: Each binary has a `.version` file to track installed versions
@@ -371,6 +371,7 @@ Kodelet manages external binary dependencies (like ripgrep) through the `pkg/bin
 | Binary | Version | Platforms | Usage |
 |--------|---------|-----------|-------|
 | ripgrep (`rg`) | 15.1.0 | darwin/linux/windows (amd64, arm64) | `grep_tool` for code search |
+| fd (`fd`) | 10.3.0 | darwin/linux/windows (amd64, arm64) | `glob_tool` for file finding |
 
 ### Fallback Behavior
 

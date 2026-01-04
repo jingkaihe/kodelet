@@ -146,6 +146,38 @@ func TestGrepRenderer(t *testing.T) {
 
 		assert.Contains(t, output, "Error: Invalid metadata type for grep_tool")
 	})
+
+	t.Run("Grep with context lines", func(t *testing.T) {
+		result := tools.StructuredToolResult{
+			ToolName:  "grep",
+			Success:   true,
+			Timestamp: time.Now(),
+			Metadata: &tools.GrepMetadata{
+				Pattern: "targetFunc",
+				Path:    "/home/user/project",
+				Results: []tools.SearchResult{
+					{
+						FilePath: "/home/user/project/main.go",
+						Matches: []tools.SearchMatch{
+							{LineNumber: 8, Content: "// context before", IsContext: true},
+							{LineNumber: 9, Content: "// more context", IsContext: true},
+							{LineNumber: 10, Content: "func targetFunc() {", IsContext: false},
+							{LineNumber: 11, Content: "    return nil", IsContext: true},
+							{LineNumber: 12, Content: "}", IsContext: true},
+						},
+					},
+				},
+			},
+		}
+
+		output := renderer.RenderCLI(result)
+
+		assert.Contains(t, output, "8- // context before")
+		assert.Contains(t, output, "9- // more context")
+		assert.Contains(t, output, "10: func targetFunc() {")
+		assert.Contains(t, output, "11- ")
+		assert.Contains(t, output, "12- }")
+	})
 }
 
 func TestGlobRenderer(t *testing.T) {

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/binaries"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -32,99 +33,26 @@ func TestGlobTool_GenerateSchema(t *testing.T) {
 func TestGlobTool_TracingKVs(t *testing.T) {
 	tool := &GlobTool{}
 
-	// Test valid input
 	input := GlobInput{
-		Pattern: "*.go",
-		Path:    "./testdata",
+		Pattern:         "*.go",
+		Path:            "./testdata",
+		IgnoreGitignore: true,
 	}
 	inputBytes, _ := json.Marshal(input)
 
 	kvs, err := tool.TracingKVs(string(inputBytes))
 	assert.NoError(t, err)
-	assert.Len(t, kvs, 2)
+	assert.Len(t, kvs, 3)
 
-	// Test invalid input
 	kvs, err = tool.TracingKVs("invalid json")
 	assert.Error(t, err)
 	assert.Nil(t, kvs)
-}
-
-func TestShouldExcludePath(t *testing.T) {
-	testCases := []struct {
-		name              string
-		path              string
-		includeHighVolume bool
-		expectExclude     bool
-	}{
-		{
-			name:              "Exclude node_modules by default",
-			path:              "node_modules/package/index.js",
-			includeHighVolume: false,
-			expectExclude:     true,
-		},
-		{
-			name:              "Include node_modules when flag is set",
-			path:              "node_modules/package/index.js",
-			includeHighVolume: true,
-			expectExclude:     false,
-		},
-		{
-			name:              "Exclude .git directory",
-			path:              ".git/objects/abc123",
-			includeHighVolume: false,
-			expectExclude:     true,
-		},
-		{
-			name:              "Exclude build directory",
-			path:              "src/build/output.js",
-			includeHighVolume: false,
-			expectExclude:     true,
-		},
-		{
-			name:              "Allow normal paths",
-			path:              "src/components/App.js",
-			includeHighVolume: false,
-			expectExclude:     false,
-		},
-		{
-			name:              "Allow .github directory",
-			path:              ".github/workflows/test.yml",
-			includeHighVolume: false,
-			expectExclude:     false,
-		},
-		{
-			name:              "Allow .vscode directory",
-			path:              ".vscode/settings.json",
-			includeHighVolume: false,
-			expectExclude:     false,
-		},
-		{
-			name:              "Exclude vendor directory",
-			path:              "vendor/github.com/pkg/errors",
-			includeHighVolume: false,
-			expectExclude:     true,
-		},
-		{
-			name:              "Exclude dist directory",
-			path:              "dist/bundle.js",
-			includeHighVolume: false,
-			expectExclude:     true,
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			shouldExclude := shouldExcludePath(tc.path, tc.includeHighVolume)
-			assert.Equal(t, tc.expectExclude, shouldExclude, "shouldExclude mismatch")
-		})
-	}
 }
 
 func TestGlobTool_ValidateInput(t *testing.T) {
 	tool := &GlobTool{}
 	state := NewBasicState(context.TODO())
 
-	// Valid input
 	validInput := GlobInput{
 		Pattern: "*.go",
 	}
@@ -132,11 +60,9 @@ func TestGlobTool_ValidateInput(t *testing.T) {
 	err := tool.ValidateInput(state, string(validBytes))
 	assert.NoError(t, err)
 
-	// Invalid JSON
 	err = tool.ValidateInput(state, "invalid json")
 	assert.Error(t, err)
 
-	// Missing pattern
 	invalidInput := GlobInput{
 		Path: "./testdata",
 	}
@@ -145,7 +71,6 @@ func TestGlobTool_ValidateInput(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "pattern is required")
 
-	// Invalid path
 	invalidInput = GlobInput{
 		Pattern: "*.go",
 		Path:    "./testdata/subdir",
@@ -157,12 +82,16 @@ func TestGlobTool_ValidateInput(t *testing.T) {
 }
 
 func TestGlobTool_Execute(t *testing.T) {
-	// Create a temporary directory structure for testing
+	ctx := context.Background()
+	_, err := binaries.EnsureFd(ctx)
+	if err != nil {
+		t.Skip("fd not available, skipping glob tests")
+	}
+
 	tmpDir, err := os.MkdirTemp("", "glob-test-*")
 	require.NoError(t, err)
 	defer os.RemoveAll(tmpDir)
 
-	// Create test directory structure
 	testFiles := map[string]string{
 		"file1.go":           "content",
 		"file2.go":           "content",
@@ -182,8 +111,6 @@ func TestGlobTool_Execute(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	// Modify file modification times to ensure consistent sorting
-	// Make file2.go newer than file1.go
 	now := time.Now()
 	err = os.Chtimes(filepath.Join(tmpDir, "file1.go"), now.Add(-2*time.Hour), now.Add(-2*time.Hour))
 	require.NoError(t, err)
@@ -191,10 +118,8 @@ func TestGlobTool_Execute(t *testing.T) {
 	require.NoError(t, err)
 
 	tool := &GlobTool{}
-	ctx := context.Background()
 	state := NewBasicState(context.TODO())
 
-	// Test cases
 	testCases := []struct {
 		name           string
 		input          GlobInput
@@ -239,102 +164,7 @@ func TestGlobTool_Execute(t *testing.T) {
 			expectedFiles: []string{"subdir/file4.txt"},
 			notExpected:   []string{"file1.go", "subdir/file3.go"},
 		},
-		{
-			name: "Allows .github directory while still working",
-			input: GlobInput{
-				Pattern: "**/*.yml",
-				Path:    tmpDir,
-			},
-			expectedFiles: []string{".github/workflows/test.yml"},
-			notExpected:   []string{},
-		},
-		{
-			name: "Excludes node_modules by default",
-			input: GlobInput{
-				Pattern: "**/*.js",
-				Path:    tmpDir,
-			},
-			expectedFiles: []string{},
-			notExpected:   []string{"node_modules/package/index.js"},
-		},
-		{
-			name: "Include node_modules with include_high_volume flag",
-			input: GlobInput{
-				Pattern:           "**/*.js",
-				Path:              tmpDir,
-				IncludeHighVolume: true,
-			},
-			expectedFiles: []string{"node_modules/package/index.js"},
-			notExpected:   []string{},
-		},
-		{
-			name: "Excludes .git directory by default",
-			input: GlobInput{
-				Pattern: "**/*",
-				Path:    tmpDir,
-			},
-			notExpected: []string{".git/objects/abc123"},
-		},
-		{
-			name: "Allows .vscode directory",
-			input: GlobInput{
-				Pattern: "**/*.json",
-				Path:    tmpDir,
-			},
-			expectedFiles: []string{".vscode/settings.json"},
-			notExpected:   []string{},
-		},
-		{
-			name: "Excludes build directory by default",
-			input: GlobInput{
-				Pattern: "**/*.js",
-				Path:    tmpDir,
-			},
-			notExpected: []string{"build/bundle.js", "dist/main.js"},
-		},
 	}
-
-	// Create test directories and files
-	// .github/workflows directory
-	githubDir := filepath.Join(tmpDir, ".github", "workflows")
-	err = os.MkdirAll(githubDir, 0o755)
-	require.NoError(t, err)
-	err = os.WriteFile(filepath.Join(githubDir, "test.yml"), []byte("name: test"), 0o644)
-	require.NoError(t, err)
-
-	// node_modules directory (excluded by default)
-	nodeModulesDir := filepath.Join(tmpDir, "node_modules", "package")
-	err = os.MkdirAll(nodeModulesDir, 0o755)
-	require.NoError(t, err)
-	err = os.WriteFile(filepath.Join(nodeModulesDir, "index.js"), []byte("module.exports = {}"), 0o644)
-	require.NoError(t, err)
-
-	// .git directory (excluded by default)
-	gitDir := filepath.Join(tmpDir, ".git", "objects")
-	err = os.MkdirAll(gitDir, 0o755)
-	require.NoError(t, err)
-	err = os.WriteFile(filepath.Join(gitDir, "abc123"), []byte("git object"), 0o644)
-	require.NoError(t, err)
-
-	// .vscode directory (allowed)
-	vscodeDir := filepath.Join(tmpDir, ".vscode")
-	err = os.MkdirAll(vscodeDir, 0o755)
-	require.NoError(t, err)
-	err = os.WriteFile(filepath.Join(vscodeDir, "settings.json"), []byte("{}"), 0o644)
-	require.NoError(t, err)
-
-	// build and dist directories (excluded by default)
-	buildDir := filepath.Join(tmpDir, "build")
-	err = os.MkdirAll(buildDir, 0o755)
-	require.NoError(t, err)
-	err = os.WriteFile(filepath.Join(buildDir, "bundle.js"), []byte("// bundle"), 0o644)
-	require.NoError(t, err)
-
-	distDir := filepath.Join(tmpDir, "dist")
-	err = os.MkdirAll(distDir, 0o755)
-	require.NoError(t, err)
-	err = os.WriteFile(filepath.Join(distDir, "main.js"), []byte("// main"), 0o644)
-	require.NoError(t, err)
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -342,25 +172,22 @@ func TestGlobTool_Execute(t *testing.T) {
 			result := tool.Execute(ctx, state, string(inputBytes))
 
 			if tc.expectError {
-				assert.False(t, result.IsError())
+				assert.True(t, result.IsError())
 				return
 			}
 
-			assert.False(t, result.IsError())
+			assert.False(t, result.IsError(), "Unexpected error: %s", result.GetError())
 
-			// Check for expected files
 			for _, expectedFile := range tc.expectedFiles {
-				expectedPath := filepath.ToSlash(filepath.Join(tmpDir, expectedFile))
-				assert.Contains(t, result.GetResult(), expectedPath)
+				expectedPath := filepath.Join(tmpDir, expectedFile)
+				assert.Contains(t, result.GetResult(), expectedPath, "Expected file not found: %s", expectedFile)
 			}
 
-			// Check that unexpected files are not included
 			for _, unexpectedFile := range tc.notExpected {
-				unexpectedPath := filepath.ToSlash(filepath.Join(tmpDir, unexpectedFile))
-				assert.NotContains(t, result.GetResult(), unexpectedPath)
+				unexpectedPath := filepath.Join(tmpDir, unexpectedFile)
+				assert.NotContains(t, result.GetResult(), unexpectedPath, "Unexpected file found: %s", unexpectedFile)
 			}
 
-			// Check that files are sorted by modification time (newest first)
 			if len(tc.expectedFiles) >= 2 && tc.expectedFiles[0] == "file2.go" && tc.expectedFiles[1] == "file1.go" {
 				resultLines := strings.Split(strings.TrimSpace(result.GetResult()), "\n")
 				file2Index := -1
@@ -380,10 +207,138 @@ func TestGlobTool_Execute(t *testing.T) {
 				}
 			}
 
-			// Check truncation message if needed
 			if tc.checkTruncated {
 				assert.Contains(t, result.GetResult(), "Results truncated to 100 files")
 			}
 		})
 	}
+}
+
+func TestGlobTool_GitignoreRespected(t *testing.T) {
+	ctx := context.Background()
+	_, err := binaries.EnsureFd(ctx)
+	if err != nil {
+		t.Skip("fd not available, skipping glob tests")
+	}
+
+	tmpDir, err := os.MkdirTemp("", "glob-gitignore-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(tmpDir)
+
+	// Initialize a git repo - fd only respects .gitignore in git repositories
+	gitDir := filepath.Join(tmpDir, ".git")
+	err = os.MkdirAll(gitDir, 0o755)
+	require.NoError(t, err)
+	err = os.WriteFile(filepath.Join(gitDir, "config"), []byte("[core]\n\trepositoryformatversion = 0\n"), 0o644)
+	require.NoError(t, err)
+
+	err = os.WriteFile(filepath.Join(tmpDir, ".gitignore"), []byte("ignored/\n*.ignored\n"), 0o644)
+	require.NoError(t, err)
+
+	testFiles := map[string]string{
+		"included.go":         "content",
+		"ignored/file.go":     "content",
+		"test.ignored":        "content",
+		"subdir/included.go":  "content",
+		"subdir/test.ignored": "content",
+	}
+
+	for path, content := range testFiles {
+		fullPath := filepath.Join(tmpDir, path)
+		err := os.MkdirAll(filepath.Dir(fullPath), 0o755)
+		require.NoError(t, err)
+		err = os.WriteFile(fullPath, []byte(content), 0o644)
+		require.NoError(t, err)
+	}
+
+	tool := &GlobTool{}
+	state := NewBasicState(context.TODO())
+
+	t.Run("Respects gitignore by default", func(t *testing.T) {
+		input := GlobInput{
+			Pattern: "**/*",
+			Path:    tmpDir,
+		}
+		inputBytes, _ := json.Marshal(input)
+		result := tool.Execute(ctx, state, string(inputBytes))
+
+		assert.False(t, result.IsError())
+		assert.Contains(t, result.GetResult(), "included.go")
+		assert.Contains(t, result.GetResult(), "subdir/included.go")
+		assert.NotContains(t, result.GetResult(), "ignored/file.go")
+		assert.NotContains(t, result.GetResult(), "test.ignored")
+	})
+
+	t.Run("Ignores gitignore when flag is set", func(t *testing.T) {
+		input := GlobInput{
+			Pattern:         "**/*",
+			Path:            tmpDir,
+			IgnoreGitignore: true,
+		}
+		inputBytes, _ := json.Marshal(input)
+		result := tool.Execute(ctx, state, string(inputBytes))
+
+		assert.False(t, result.IsError())
+		assert.Contains(t, result.GetResult(), "included.go")
+		assert.Contains(t, result.GetResult(), "ignored/file.go")
+		assert.Contains(t, result.GetResult(), "test.ignored")
+	})
+}
+
+func TestGlobTool_HiddenFiles(t *testing.T) {
+	ctx := context.Background()
+	_, err := binaries.EnsureFd(ctx)
+	if err != nil {
+		t.Skip("fd not available, skipping glob tests")
+	}
+
+	tmpDir, err := os.MkdirTemp("", "glob-hidden-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(tmpDir)
+
+	testFiles := map[string]string{
+		"visible.go":          "content",
+		".hidden.go":          "content",
+		".hidden_dir/file.go": "content",
+	}
+
+	for path, content := range testFiles {
+		fullPath := filepath.Join(tmpDir, path)
+		err := os.MkdirAll(filepath.Dir(fullPath), 0o755)
+		require.NoError(t, err)
+		err = os.WriteFile(fullPath, []byte(content), 0o644)
+		require.NoError(t, err)
+	}
+
+	tool := &GlobTool{}
+	state := NewBasicState(context.TODO())
+
+	t.Run("Excludes hidden files by default", func(t *testing.T) {
+		input := GlobInput{
+			Pattern: "**/*.go",
+			Path:    tmpDir,
+		}
+		inputBytes, _ := json.Marshal(input)
+		result := tool.Execute(ctx, state, string(inputBytes))
+
+		assert.False(t, result.IsError())
+		assert.Contains(t, result.GetResult(), "visible.go")
+		assert.NotContains(t, result.GetResult(), ".hidden.go")
+		assert.NotContains(t, result.GetResult(), ".hidden_dir/file.go")
+	})
+
+	t.Run("Includes hidden files when ignore_gitignore is set", func(t *testing.T) {
+		input := GlobInput{
+			Pattern:         "**/*.go",
+			Path:            tmpDir,
+			IgnoreGitignore: true,
+		}
+		inputBytes, _ := json.Marshal(input)
+		result := tool.Execute(ctx, state, string(inputBytes))
+
+		assert.False(t, result.IsError())
+		assert.Contains(t, result.GetResult(), "visible.go")
+		assert.Contains(t, result.GetResult(), ".hidden.go")
+		assert.Contains(t, result.GetResult(), ".hidden_dir/file.go")
+	})
 }

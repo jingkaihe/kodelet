@@ -36,7 +36,8 @@ type BinarySpec struct {
 	Version         string
 	BinaryName      string
 	GetDownloadURL  func(version, goos, goarch string) (string, error)
-	GetChecksumURL  func(version, goos, goarch string) (string, error)
+	GetChecksumURL  func(version, goos, goarch string) (string, error) // Optional if GetChecksum is provided
+	GetChecksum     func(version, goos, goarch string) (string, error) // Optional: returns embedded checksum
 	GetArchiveEntry func(version, goos, goarch string) string
 }
 
@@ -94,14 +95,23 @@ func EnsureBinary(ctx context.Context, spec BinarySpec) (string, error) {
 		return "", errors.Wrap(err, "failed to get download URL")
 	}
 
-	checksumURL, err := spec.GetChecksumURL(spec.Version, runtime.GOOS, runtime.GOARCH)
-	if err != nil {
-		return "", errors.Wrap(err, "failed to get checksum URL")
-	}
-
-	expectedChecksum, err := fetchChecksum(ctx, checksumURL)
-	if err != nil {
-		return "", errors.Wrap(err, "failed to fetch checksum")
+	var expectedChecksum string
+	if spec.GetChecksum != nil {
+		expectedChecksum, err = spec.GetChecksum(spec.Version, runtime.GOOS, runtime.GOARCH)
+		if err != nil {
+			return "", errors.Wrap(err, "failed to get embedded checksum")
+		}
+	} else if spec.GetChecksumURL != nil {
+		checksumURL, err := spec.GetChecksumURL(spec.Version, runtime.GOOS, runtime.GOARCH)
+		if err != nil {
+			return "", errors.Wrap(err, "failed to get checksum URL")
+		}
+		expectedChecksum, err = fetchChecksum(ctx, checksumURL)
+		if err != nil {
+			return "", errors.Wrap(err, "failed to fetch checksum")
+		}
+	} else {
+		return "", errors.New("no checksum method provided")
 	}
 
 	archivePath := filepath.Join(binDir, filepath.Base(downloadURL))

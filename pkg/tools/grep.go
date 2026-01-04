@@ -69,19 +69,27 @@ func (r *GrepToolResult) StructuredData() tooltypes.StructuredToolResult {
 	// Convert internal SearchResult to metadata format
 	metadataResults := make([]tooltypes.SearchResult, 0, len(r.results))
 	for _, res := range r.results {
-		matches := make([]tooltypes.SearchMatch, 0, len(res.MatchedLines))
-		for lineNum, content := range res.MatchedLines {
-			matchStart, matchEnd := 0, 0
-			if positions, ok := res.MatchPositions[lineNum]; ok && len(positions) > 0 {
-				matchStart = positions[0].Start
-				matchEnd = positions[0].End
+		matches := make([]tooltypes.SearchMatch, 0, len(res.LineNumbers))
+		for _, lineNum := range res.LineNumbers {
+			if content, isMatch := res.MatchedLines[lineNum]; isMatch {
+				matchStart, matchEnd := 0, 0
+				if positions, ok := res.MatchPositions[lineNum]; ok && len(positions) > 0 {
+					matchStart = positions[0].Start
+					matchEnd = positions[0].End
+				}
+				matches = append(matches, tooltypes.SearchMatch{
+					LineNumber: lineNum,
+					Content:    content,
+					MatchStart: matchStart,
+					MatchEnd:   matchEnd,
+				})
+			} else if content, exists := res.ContextLines[lineNum]; exists {
+				matches = append(matches, tooltypes.SearchMatch{
+					LineNumber: lineNum,
+					Content:    content,
+					IsContext:  true,
+				})
 			}
-			matches = append(matches, tooltypes.SearchMatch{
-				LineNumber: lineNum,
-				Content:    content,
-				MatchStart: matchStart,
-				MatchEnd:   matchEnd,
-			})
 		}
 
 		// Detect language from file extension

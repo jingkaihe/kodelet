@@ -5,47 +5,19 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
-	"github.com/bmatcuk/doublestar/v4"
 	"github.com/invopop/jsonschema"
+	"github.com/jingkaihe/kodelet/pkg/binaries"
 	"github.com/jingkaihe/kodelet/pkg/osutil"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"go.opentelemetry.io/otel/attribute"
 )
-
-// excludedHighVolumeDirs contains directories that are typically very large
-// and would flood the glob results with thousands of irrelevant files.
-// These are skipped by default for performance reasons.
-var excludedHighVolumeDirs = map[string]bool{
-	".git":             true, // Git objects, refs, hooks - thousands of files
-	"node_modules":     true, // NPM packages - can be 10,000+ files
-	".next":            true, // Next.js build output
-	".nuxt":            true, // Nuxt.js build output
-	"dist":             true, // Build outputs
-	"build":            true, // Build outputs
-	".cache":           true, // Various tool caches
-	".parcel-cache":    true, // Parcel bundler cache
-	"coverage":         true, // Test coverage reports
-	".nyc_output":      true, // NYC coverage data
-	".pytest_cache":    true, // Pytest cache
-	"__pycache__":      true, // Python bytecode cache
-	".venv":            true, // Python virtual environments
-	"venv":             true, // Python virtual environments
-	".tox":             true, // Tox test environments
-	"vendor":           true, // Go vendor directory
-	".terraform":       true, // Terraform providers and modules
-	".serverless":      true, // Serverless framework
-	"target":           true, // Rust/Maven build output
-	".turbo":           true, // Turborepo cache
-	".yarn":            true, // Yarn cache
-	"bower_components": true, // Bower packages
-}
 
 // GlobToolResult represents the result of a glob pattern search
 type GlobToolResult struct {
@@ -103,7 +75,6 @@ func (r *GlobToolResult) StructuredData() tooltypes.StructuredToolResult {
 		return result
 	}
 
-	// Convert file paths to FileInfo structures
 	fileInfos := make([]tooltypes.FileInfo, 0, len(r.files))
 	for _, file := range r.files {
 		info, err := os.Stat(file)
@@ -119,7 +90,6 @@ func (r *GlobToolResult) StructuredData() tooltypes.StructuredToolResult {
 			modTime = info.ModTime()
 		}
 
-		// Detect language from file extension
 		language := ""
 		if fileType == "file" {
 			language = osutil.DetectLanguageFromPath(file)
@@ -149,9 +119,9 @@ type GlobTool struct{}
 
 // GlobInput defines the input parameters for the glob_tool
 type GlobInput struct {
-	Pattern           string `json:"pattern" jsonschema:"description=The glob pattern"`
-	Path              string `json:"path" jsonschema:"description=The optional path to search in, defaults to current directory, MUST NOT be a relative path"`
-	IncludeHighVolume bool   `json:"include_high_volume,omitempty" jsonschema:"description=Include high-volume directories like .git and node_modules (default: false)"`
+	Pattern         string `json:"pattern" jsonschema:"description=The glob pattern"`
+	Path            string `json:"path" jsonschema:"description=The optional path to search in, defaults to current directory, MUST NOT be a relative path"`
+	IgnoreGitignore bool   `json:"ignore_gitignore,omitempty" jsonschema:"description=If true, do not respect .gitignore rules (default: false, meaning .gitignore is respected)"`
 }
 
 // Name returns the name of the tool
@@ -175,6 +145,7 @@ func (t *GlobTool) TracingKVs(parameters string) ([]attribute.KeyValue, error) {
 	return []attribute.KeyValue{
 		attribute.String("pattern", input.Pattern),
 		attribute.String("path", input.Path),
+		attribute.Bool("ignore_gitignore", input.IgnoreGitignore),
 	}, nil
 }
 
@@ -183,7 +154,8 @@ func (t *GlobTool) Description() string {
 	return `Find files matching a glob pattern in the filesystem.
 
 ## Important Notes
-* High-volume directories (node_modules, .git, build outputs, etc.) are skipped by default for performance.
+* By default, .gitignore patterns are respected and matching files are excluded.
+* Hidden files/directories (starting with .) are excluded by default.
 * The result returns at maximum 100 files sorted by modification time (newest first). Pay attention to the truncation notice and refine your pattern to narrow down the results.
 * This tool only supports glob pattern matching, not regex.
 * This tool only matches filenames. For file content matching, use the ${grep_tool}.
@@ -195,7 +167,7 @@ func (t *GlobTool) Description() string {
   * "*.{json,yaml}" - Find all JSON and YAML files
   * "cmd/*.go" - Find all Go files in the cmd directory
 - path: The optional path to search in, defaults to the current directory. If specified, it must be an absolute path.
-- include_high_volume: (optional) Include high-volume directories like .git and node_modules. Default is false.
+- ignore_gitignore: (optional) If true, do not respect .gitignore rules. Default is false (respects .gitignore).
 
 If you need to do multi-turn search using grep_tool and glob_tool, use subagentTool instead.
 
@@ -219,25 +191,103 @@ func (t *GlobTool) ValidateInput(_ tooltypes.State, parameters string) error {
 	return nil
 }
 
-// shouldExcludePath checks if a path should be excluded based on high-volume directories
-func shouldExcludePath(path string, includeHighVolume bool) bool {
-	if includeHighVolume {
-		return false
-	}
+func getFdPath() string {
+	return binaries.GetFdPath()
+}
 
-	// Check all path segments for excluded directories
-	pathParts := strings.Split(path, string(filepath.Separator))
-	for _, part := range pathParts {
-		if excludedHighVolumeDirs[part] {
-			return true
+type fileInfo struct {
+	path    string
+	modTime time.Time
+}
+
+// parseGlobPattern extracts the directory prefix, file pattern, and whether it's recursive
+// Examples:
+//   - "*.go" -> dir="", pattern="*.go", recursive=false
+//   - "**/*.go" -> dir="", pattern="*.go", recursive=true
+//   - "subdir/*.go" -> dir="subdir", pattern="*.go", recursive=false
+//   - "subdir/**/*.go" -> dir="subdir", pattern="*.go", recursive=true
+func parseGlobPattern(pattern string) (dir, filePattern string, recursive bool) {
+	parts := strings.Split(pattern, "/")
+
+	var dirParts []string
+	var patternParts []string
+	foundGlob := false
+
+	for _, part := range parts {
+		if part == "**" {
+			recursive = true
+			foundGlob = true
+		} else if strings.ContainsAny(part, "*?[]{}") {
+			patternParts = append(patternParts, part)
+			foundGlob = true
+		} else if !foundGlob {
+			dirParts = append(dirParts, part)
+		} else {
+			patternParts = append(patternParts, part)
 		}
 	}
 
-	return false
+	dir = strings.Join(dirParts, "/")
+	if len(patternParts) > 0 {
+		filePattern = strings.Join(patternParts, "/")
+	} else {
+		filePattern = "*"
+	}
+
+	return dir, filePattern, recursive
+}
+
+func searchWithFd(ctx context.Context, searchPath, pattern string, ignoreGitignore bool) ([]string, error) {
+	fdPath := getFdPath()
+	if fdPath == "" {
+		return nil, errors.New("fd not found")
+	}
+
+	dir, filePattern, recursive := parseGlobPattern(pattern)
+
+	effectiveSearchPath := searchPath
+	if dir != "" {
+		effectiveSearchPath = filepath.Join(searchPath, dir)
+	}
+
+	args := []string{
+		"--glob",
+		"--type", "f",
+		"--absolute-path",
+	}
+
+	if !recursive {
+		args = append(args, "--max-depth", "1")
+	}
+
+	if ignoreGitignore {
+		args = append(args, "--no-ignore", "--hidden")
+	}
+
+	args = append(args, filePattern, effectiveSearchPath)
+
+	cmd := exec.CommandContext(ctx, fdPath, args...)
+	output, err := cmd.Output()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			if exitErr.ExitCode() == 1 {
+				return []string{}, nil
+			}
+			return nil, fmt.Errorf("fd error: %s", string(exitErr.Stderr))
+		}
+		return nil, err
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	if len(lines) == 1 && lines[0] == "" {
+		return []string{}, nil
+	}
+
+	return lines, nil
 }
 
 // Execute searches for files matching the glob pattern
-func (t *GlobTool) Execute(_ context.Context, _ tooltypes.State, parameters string) tooltypes.ToolResult {
+func (t *GlobTool) Execute(ctx context.Context, _ tooltypes.State, parameters string) tooltypes.ToolResult {
 	var input GlobInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
 		return &GlobToolResult{
@@ -247,7 +297,6 @@ func (t *GlobTool) Execute(_ context.Context, _ tooltypes.State, parameters stri
 		}
 	}
 
-	// Default to current directory if path is empty
 	searchPath := input.Path
 	var err error
 	if searchPath == "" {
@@ -261,74 +310,46 @@ func (t *GlobTool) Execute(_ context.Context, _ tooltypes.State, parameters stri
 		}
 	}
 
-	// Holds file information for sorting
-	type fileInfo struct {
-		path    string
-		modTime time.Time
-	}
-
-	var fileInfos []fileInfo
-	truncated := false
-
-	// Walk the file tree
-	err = doublestar.GlobWalk(os.DirFS(searchPath), input.Pattern, func(path string, d fs.DirEntry) error {
-		// Check if this path should be excluded
-		if shouldExcludePath(path, input.IncludeHighVolume) {
-			if d.IsDir() {
-				// Skip entire directory tree for performance
-				return filepath.SkipDir
-			}
-			// Skip this individual file
-			return nil
-		}
-
-		// Skip directories in the result list, but continue walking
-		if d.IsDir() {
-			return nil
-		}
-
-		absPath := filepath.Join(searchPath, path)
-		info, err := os.Stat(absPath)
-		if err != nil {
-			return nil // simply skip the file
-		}
-
-		fileInfos = append(fileInfos, fileInfo{
-			path:    absPath,
-			modTime: info.ModTime(),
-		})
-
-		return nil
-	})
+	files, err := searchWithFd(ctx, searchPath, input.Pattern, input.IgnoreGitignore)
 	if err != nil {
 		return &GlobToolResult{
 			pattern: input.Pattern,
 			path:    searchPath,
-			err:     fmt.Sprintf("Error walking the path: %v", err),
+			err:     fmt.Sprintf("Error searching files: %v", err),
 		}
 	}
 
-	// Sort files by modification time (newest first)
+	var fileInfos []fileInfo
+	for _, file := range files {
+		info, err := os.Stat(file)
+		if err != nil {
+			continue
+		}
+		fileInfos = append(fileInfos, fileInfo{
+			path:    file,
+			modTime: info.ModTime(),
+		})
+	}
+
 	sort.Slice(fileInfos, func(i, j int) bool {
 		return fileInfos[i].modTime.After(fileInfos[j].modTime)
 	})
 
-	// Limit results to 100 files
+	truncated := false
 	if len(fileInfos) > 100 {
 		fileInfos = fileInfos[:100]
 		truncated = true
 	}
 
-	// Extract file paths
-	var files []string
-	for _, fileInfo := range fileInfos {
-		files = append(files, fileInfo.path)
+	var resultFiles []string
+	for _, fi := range fileInfos {
+		resultFiles = append(resultFiles, fi.path)
 	}
 
 	return &GlobToolResult{
 		pattern:   input.Pattern,
 		path:      searchPath,
-		files:     files,
+		files:     resultFiles,
 		truncated: truncated,
 	}
 }
