@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -36,7 +37,11 @@ func TestGetBinaryPath(t *testing.T) {
 	homeDir, err := os.UserHomeDir()
 	require.NoError(t, err)
 
-	expected := filepath.Join(homeDir, ".kodelet", "bin", "rg")
+	binaryName := "rg"
+	if runtime.GOOS == "windows" {
+		binaryName = "rg.exe"
+	}
+	expected := filepath.Join(homeDir, ".kodelet", "bin", binaryName)
 	assert.Equal(t, expected, path)
 }
 
