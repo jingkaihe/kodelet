@@ -16,6 +16,7 @@ import (
 
 	"github.com/invopop/jsonschema"
 	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/osutil"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
 	"github.com/spf13/viper"
@@ -201,8 +202,8 @@ func (m *CustomToolManager) validateTool(ctx context.Context, execPath string) (
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, execPath, "description")
-	setSysProcAttr(cmd)
-	setCancelFunc(cmd)
+	osutil.SetProcessGroup(cmd)
+	osutil.SetProcessGroupKill(cmd)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -312,8 +313,8 @@ func (t *CustomTool) Execute(ctx context.Context, _ tooltypes.State, parameters 
 	defer cancel()
 
 	cmd := exec.CommandContext(execCtx, t.execPath, "run")
-	setSysProcAttr(cmd)
-	setCancelFunc(cmd)
+	osutil.SetProcessGroup(cmd)
+	osutil.SetProcessGroupKill(cmd)
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
