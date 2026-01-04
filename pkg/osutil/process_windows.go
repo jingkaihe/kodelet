@@ -12,7 +12,7 @@ import (
 // GracefulShutdownDelay is the time to wait for graceful shutdown before force killing.
 // On Windows, this is defined for API consistency but not used since Windows
 // doesn't have the same signal semantics as Unix.
-const GracefulShutdownDelay = 500 * time.Millisecond
+const GracefulShutdownDelay = 2 * time.Second
 
 var DetachSysProcAttr = syscall.SysProcAttr{
 	CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP,

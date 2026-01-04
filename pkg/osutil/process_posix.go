@@ -8,8 +8,10 @@ import (
 	"time"
 )
 
-// GracefulShutdownDelay is the time to wait for graceful shutdown before sending SIGKILL
-const GracefulShutdownDelay = 500 * time.Millisecond
+// GracefulShutdownDelay is the time to wait for graceful shutdown before sending SIGKILL.
+// 2 seconds provides enough time for most processes to flush buffers, close connections,
+// and perform cleanup, while not adding excessive delay after a timeout.
+const GracefulShutdownDelay = 2 * time.Second
 
 // DetachSysProcAttr provides syscall attributes for detaching processes on Unix systems
 var DetachSysProcAttr = syscall.SysProcAttr{
