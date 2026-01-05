@@ -1,5 +1,14 @@
 # Kodelet
 
+## 0.1.32.beta (2026-01-05)
+
+### Features
+
+**Improved Tool Input Validation**: `grep_tool` and `glob_tool` now validate that the `path` parameter is a directory
+
+- Clear error messages when accidentally passing a file path (e.g., `path "/etc/passwd" is not a directory - grep_tool searches directories, not individual files`)
+- Invalid paths are caught early in the validation phase before tool execution
+
 ## 0.1.31.beta (2026-01-04)
 
 ### Features
