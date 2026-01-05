@@ -124,7 +124,7 @@ type GrepTool struct{}
 // CodeSearchInput defines the input parameters for the grep_tool
 type CodeSearchInput struct {
 	Pattern       string `json:"pattern" jsonschema:"description=The pattern to search for (regex by default or literal string if fixed_strings is true)"`
-	Path          string `json:"path" jsonschema:"description=The absolute path to search for the pattern default using the current directory"`
+	Path          string `json:"path" jsonschema:"description=The absolute path to a DIRECTORY to search in (not a file path). Defaults to current working directory if not specified"`
 	Include       string `json:"include" jsonschema:"description=The optional include path to search for the pattern for example: '*.go' '*.{go,py}'"`
 	IgnoreCase    bool   `json:"ignore_case" jsonschema:"description=If true use case-insensitive search. Default is false (smart-case: case-insensitive if pattern is all lowercase)"`
 	FixedStrings  bool   `json:"fixed_strings" jsonschema:"description=If true treat pattern as literal string instead of regex. Default is false"`
@@ -172,7 +172,7 @@ func (t *GrepTool) Description() string {
 
 ## Input
 - pattern: The pattern to search for (regex by default, or literal string if fixed_strings is true). For example: "func TestFoo_(.*) {", "type Foo struct {"
-- path: The absolute path to search for the pattern default using the current directory
+- path: The absolute path to a DIRECTORY to search in (not a file path). Defaults to current working directory if not specified.
 - include: The optional include path to search for the pattern for example: '*.go' '*.{go,py}'. Leave it empty if you are not sure about the file name pattern or extension.
 - ignore_case: If true, use case-insensitive search. Default is false (smart-case: case-insensitive if pattern is all lowercase).
 - fixed_strings: If true, treat pattern as a literal string instead of regex. Useful when searching for strings containing special characters like "foo.bar()" or "[test]".

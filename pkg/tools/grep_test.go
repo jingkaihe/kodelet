@@ -49,6 +49,13 @@ func TestGrepTool_ValidateInput(t *testing.T) {
 	tool := &GrepTool{}
 	state := NewBasicState(context.TODO())
 
+	// Create a temp file for testing "path is a file" validation
+	tempFile, err := os.CreateTemp("", "grep_test_file")
+	require.NoError(t, err)
+	tempFilePath := tempFile.Name()
+	tempFile.Close()
+	defer os.Remove(tempFilePath)
+
 	tests := []struct {
 		name        string
 		input       CodeSearchInput
@@ -104,7 +111,7 @@ func TestGrepTool_ValidateInput(t *testing.T) {
 			name: "path is a file not a directory",
 			input: CodeSearchInput{
 				Pattern: "func Test",
-				Path:    "/etc/passwd",
+				Path:    tempFilePath,
 				Include: "*.go",
 			},
 			expectError: true,
