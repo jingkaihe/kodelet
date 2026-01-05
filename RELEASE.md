@@ -4,10 +4,17 @@
 
 ### Features
 
-**Improved Tool Input Validation**: `grep_tool` and `glob_tool` now validate that the `path` parameter is a directory
+**grep_tool now supports searching individual files**: The `path` parameter can now be a file or a directory
 
-- Clear error messages when accidentally passing a file path (e.g., `path "/etc/passwd" is not a directory - grep_tool searches directories, not individual files`)
-- Invalid paths are caught early in the validation phase before tool execution
+- When a file path is provided, searches that specific file for the pattern
+- When a directory path is provided, searches all files recursively (existing behavior)
+- The `include` glob pattern only applies when searching directories
+
+**Improved Tool Input Validation**: `grep_tool` and `glob_tool` now validate the `path` parameter
+
+- `grep_tool`: validates path exists (file or directory)
+- `glob_tool`: validates path is a directory (since globbing within a file doesn't make sense)
+- Clear error messages for invalid paths caught early in validation phase
 
 ## 0.1.31.beta (2026-01-04)
 
