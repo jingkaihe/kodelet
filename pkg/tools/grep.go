@@ -197,6 +197,17 @@ func (t *GrepTool) ValidateInput(_ tooltypes.State, parameters string) error {
 		return errors.New("pattern is required")
 	}
 
+	// Validate that path is a directory if provided
+	if input.Path != "" {
+		info, err := os.Stat(input.Path)
+		if err != nil {
+			return fmt.Errorf("invalid path %q: %w", input.Path, err)
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("path %q is not a directory - grep_tool searches directories, not individual files", input.Path)
+		}
+	}
+
 	return nil
 }
 

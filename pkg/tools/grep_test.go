@@ -100,6 +100,26 @@ func TestGrepTool_ValidateInput(t *testing.T) {
 			expectError: true,
 			errorMsg:    "pattern is required",
 		},
+		{
+			name: "path is a file not a directory",
+			input: CodeSearchInput{
+				Pattern: "func Test",
+				Path:    "/etc/passwd",
+				Include: "*.go",
+			},
+			expectError: true,
+			errorMsg:    "is not a directory",
+		},
+		{
+			name: "path does not exist",
+			input: CodeSearchInput{
+				Pattern: "func Test",
+				Path:    "/nonexistent/path/that/does/not/exist",
+				Include: "*.go",
+			},
+			expectError: true,
+			errorMsg:    "invalid path",
+		},
 	}
 
 	for _, tt := range tests {
