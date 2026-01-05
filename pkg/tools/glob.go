@@ -120,7 +120,7 @@ type GlobTool struct{}
 // GlobInput defines the input parameters for the glob_tool
 type GlobInput struct {
 	Pattern         string `json:"pattern" jsonschema:"description=The glob pattern"`
-	Path            string `json:"path" jsonschema:"description=The optional path to search in, defaults to current directory, MUST NOT be a relative path"`
+	Path            string `json:"path" jsonschema:"description=The absolute path to a DIRECTORY to search in (not a file path). Defaults to current working directory if not specified"`
 	IgnoreGitignore bool   `json:"ignore_gitignore,omitempty" jsonschema:"description=If true, do not respect .gitignore rules (default: false, meaning .gitignore is respected)"`
 }
 
@@ -166,7 +166,7 @@ func (t *GlobTool) Description() string {
   * "**/*.go" - Find all Go files recursively
   * "*.{json,yaml}" - Find all JSON and YAML files
   * "cmd/*.go" - Find all Go files in the cmd directory
-- path: The optional path to search in, defaults to the current directory. If specified, it must be an absolute path.
+- path: The absolute path to a DIRECTORY to search in (not a file path). Defaults to current working directory if not specified.
 - ignore_gitignore: (optional) If true, do not respect .gitignore rules. Default is false (respects .gitignore).
 
 If you need to do multi-turn search using grep_tool and glob_tool, use subagentTool instead.
@@ -186,6 +186,17 @@ func (t *GlobTool) ValidateInput(_ tooltypes.State, parameters string) error {
 
 	if input.Path != "" && !filepath.IsAbs(input.Path) {
 		return errors.New("path must be an absolute path")
+	}
+
+	// Validate that path is a directory if provided
+	if input.Path != "" {
+		info, err := os.Stat(input.Path)
+		if err != nil {
+			return fmt.Errorf("invalid path %q: %w", input.Path, err)
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("path %q is not a directory - glob_tool searches directories, not individual files", input.Path)
+		}
 	}
 
 	return nil
