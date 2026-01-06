@@ -1,6 +1,6 @@
 ---
 name: Ralph PRD Generator
-description: Analyze a repository and generate a PRD (Product Requirements Document) for autonomous development
+description: Generate a PRD (Product Requirements Document) based on discussion and design docs for autonomous development
 defaults:
   prd: "prd.json"
   progress: "progress.txt"
@@ -8,7 +8,9 @@ defaults:
 
 {{/* Template variables: .prd .progress */}}
 
-Analyze this repository and create a PRD (Product Requirements Document) file at {{.prd}}.
+Based on our previous discussion and any design documents provided, create a PRD (Product Requirements Document) file at {{.prd}}.
+
+If no prior discussion or design doc was provided, analyze the repository to understand the project and identify features to implement.
 
 ## PRD Structure
 
@@ -34,14 +36,17 @@ The PRD should be a JSON file with the following structure:
 }
 ```
 
-## Analysis Guidelines
+## Guidelines
 
-1. **Understand the Project**
-   - Read README, AGENTS.md, and other documentation
+1. **Understand the Context**
+   - Review any design documents or specifications provided in the conversation
+   - Consider requirements discussed previously
+   - Read README, AGENTS.md, and other project documentation
    - Analyze the project structure and architecture
    - Identify the tech stack and frameworks used
 
 2. **Identify Features to Implement**
+   - Extract features from design docs and discussion
    - Look for TODOs, FIXMEs, and incomplete implementations
    - Check for missing tests or low coverage areas
    - Identify potential improvements or optimizations
@@ -85,4 +90,4 @@ Focus on actionable, specific features rather than vague improvements. Each feat
 - Specific steps to verify completion
 - Appropriate priority based on impact and dependencies
 
-Now analyze the repository and create the PRD file.
+Now create the PRD file based on the discussion, design docs, and/or repository analysis.
