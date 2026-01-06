@@ -157,18 +157,24 @@ Examples:
 }
 
 var ralphInitCmd = &cobra.Command{
-	Use:   "init",
+	Use:   "init [extra instructions]",
 	Short: "Initialize a new PRD file from project analysis",
 	Long: `Analyze the current project and generate a PRD (Product Requirements Document)
 with features to implement. This creates a starting point for the ralph loop.
 
+You can provide extra instructions as arguments to guide the PRD generation:
+  kodelet ralph init "take a look at the design doc in ./design.md"
+  kodelet ralph init "focus on authentication and API features"
+
 Can also be invoked as a standalone recipe:
-  kodelet run -r ralph-init --arg prd=features.json`,
-	Run: func(cmd *cobra.Command, _ []string) {
+  kodelet run -r ralph-init --arg prd=features.json "check ./specs/feature-spec.md"`,
+	Run: func(cmd *cobra.Command, args []string) {
 		ctx := cmd.Context()
 
 		prdFile, _ := cmd.Flags().GetString("prd")
 		progressFile, _ := cmd.Flags().GetString("progress")
+
+		extraInstructions := strings.Join(args, " ")
 
 		if _, err := os.Stat(prdFile); err == nil {
 			presenter.Warning(fmt.Sprintf("PRD file already exists: %s", prdFile))
@@ -216,10 +222,15 @@ Can also be invoked as a standalone recipe:
 			return
 		}
 
+		prompt := fragment.Content
+		if extraInstructions != "" {
+			prompt = fmt.Sprintf("%s\n\n## Instructions\n\n%s", prompt, extraInstructions)
+		}
+
 		presenter.Info("Analyzing repository and generating PRD...")
 		presenter.Separator()
 
-		out, usage := llm.SendMessageAndGetTextWithUsage(ctx, s, fragment.Content,
+		out, usage := llm.SendMessageAndGetTextWithUsage(ctx, s, prompt,
 			llmConfig, false, llmtypes.MessageOpt{
 				PromptCache: true,
 			})

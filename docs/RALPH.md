@@ -146,11 +146,26 @@ Flags:
 Initialize a new PRD by analyzing the current repository.
 
 ```bash
-kodelet ralph init [flags]
+kodelet ralph init [extra instructions] [flags]
 
 Flags:
   --prd string        Path for PRD file to create (default "prd.json")
   --progress string   Path for progress file to create (default "progress.txt")
+```
+
+Examples:
+```bash
+# Basic initialization
+kodelet ralph init
+
+# With extra instructions pointing to design docs
+kodelet ralph init "take a look at the design doc in ./design.md"
+
+# Focus on specific areas
+kodelet ralph init "focus on authentication and API features"
+
+# Combine with custom PRD path
+kodelet ralph init --prd features.json "see specs in ./docs/requirements.md"
 ```
 
 ## Shell Script Alternative

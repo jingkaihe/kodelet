@@ -8,9 +8,9 @@ defaults:
 
 {{/* Template variables: .prd .progress */}}
 
-Based on our previous discussion and any design documents provided, create a PRD (Product Requirements Document) file at {{.prd}}.
+Based on our previous discussion and/or any design documents provided, create a PRD (Product Requirements Document) file at {{.prd}}.
 
-If no prior discussion or design doc was provided, analyze the repository to understand the project and identify features to implement.
+Make sure that you have analyzed the codebase and identify features to implement.
 
 ## PRD Structure
 
