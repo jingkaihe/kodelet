@@ -156,6 +156,7 @@ func main() {
 	rootCmd.AddCommand(recipeCmd)
 	rootCmd.AddCommand(profileCmd)
 	rootCmd.AddCommand(llmstxtCmd)
+	rootCmd.AddCommand(ralphCmd)
 
 	// Initialize telemetry with tracing
 	tracingShutdown, err := initTracing(ctx)
@@ -198,6 +199,7 @@ func main() {
 	serveCmd = withTracing(serveCmd)
 	feedbackCmd = withTracing(feedbackCmd)
 	recipeCmd = withTracing(recipeCmd)
+	ralphCmd = withTracing(ralphCmd)
 
 	// Set the root command context to include the tracing context
 	rootCmd.SetContext(ctx)
