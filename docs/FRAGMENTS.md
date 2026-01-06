@@ -34,6 +34,8 @@ Kodelet includes several built-in recipes for common tasks:
 - **`init`** - Bootstrap `AGENTS.md` file with workspace context and conventions
 - **`commit`** - Generate git commit messages from staged changes
 - **`custom-tool`** - Create custom tools for Kodelet
+- **`ralph`** - Autonomous feature development loop (used by `kodelet ralph`)
+- **`ralph-init`** - Generate PRD from project analysis (used by `kodelet ralph init`)
 - **`github/pr`** - Generate pull request descriptions
 - **`github/issue-resolve`** - Resolve GitHub issues
 - **`github/pr-respond`** - Respond to pull request comments

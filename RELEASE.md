@@ -1,5 +1,26 @@
 # Kodelet
 
+## 0.1.33.beta (2026-01-06)
+
+### Features
+
+**Ralph - Autonomous Development Loop**: New `kodelet ralph` command for autonomous feature implementation
+
+- Iteratively implements features from a PRD (Product Requirements Document)
+- Tracks progress between iterations in a dedicated progress file
+- Makes git commits after each completed feature
+- Runs type checking and tests to verify each feature
+- Configurable iteration count, completion signal, and file paths
+- Graceful cancellation support (Ctrl+C stops after current iteration)
+
+**PRD Generation**: New `kodelet ralph init` command to bootstrap a PRD
+
+- Analyzes repository structure and generates a PRD JSON file
+- Supports extra instructions to guide PRD generation (e.g., `kodelet ralph init "check ./design.md"`)
+- Prioritizes discussion and design docs over repository analysis
+- Also available as standalone recipe: `kodelet run -r ralph-init`
+
+See [docs/RALPH.md](docs/RALPH.md) for complete documentation.
 ## 0.1.32.beta (2026-01-05)
 
 ### Features
