@@ -49,6 +49,13 @@ func TestGrepTool_ValidateInput(t *testing.T) {
 	tool := &GrepTool{}
 	state := NewBasicState(context.TODO())
 
+	// Create a temp file for testing "path is a file" validation
+	tempFile, err := os.CreateTemp("", "grep_test_file")
+	require.NoError(t, err)
+	tempFilePath := tempFile.Name()
+	tempFile.Close()
+	defer os.Remove(tempFilePath)
+
 	tests := []struct {
 		name        string
 		input       CodeSearchInput
@@ -99,6 +106,24 @@ func TestGrepTool_ValidateInput(t *testing.T) {
 			},
 			expectError: true,
 			errorMsg:    "pattern is required",
+		},
+		{
+			name: "path is a file",
+			input: CodeSearchInput{
+				Pattern: "test",
+				Path:    tempFilePath,
+			},
+			expectError: false,
+		},
+		{
+			name: "path does not exist",
+			input: CodeSearchInput{
+				Pattern: "func Test",
+				Path:    "/nonexistent/path/that/does/not/exist",
+				Include: "*.go",
+			},
+			expectError: true,
+			errorMsg:    "invalid path",
 		},
 	}
 
@@ -213,6 +238,15 @@ func TestGrepTool_Execute(t *testing.T) {
 			},
 			expectError:     false,
 			expectedResults: []string{"Pattern found in file", "linenumber_test.go", "5:func LineNumberTest"},
+		},
+		{
+			name: "search single file",
+			input: CodeSearchInput{
+				Pattern: "multiple lines",
+				Path:    filepath.Join(tempDir, "test.txt"),
+			},
+			expectError:     false,
+			expectedResults: []string{"Pattern found in file", "test.txt", "multiple lines"},
 		},
 	}
 
@@ -811,7 +845,7 @@ func TestSearchDirectoryRipgrep(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			results, err := searchDirectory(ctx, tempDir, tt.pattern, tt.includePattern, false, false, 0)
+			results, err := searchPath(ctx, tempDir, tt.pattern, tt.includePattern, false, false, 0)
 			require.NoError(t, err)
 
 			// Check expected files are found

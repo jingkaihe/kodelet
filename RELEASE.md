@@ -1,6 +1,6 @@
 # Kodelet
 
-## 0.1.32.beta (2026-01-06)
+## 0.1.33.beta (2026-01-06)
 
 ### Features
 
@@ -21,6 +21,21 @@
 - Also available as standalone recipe: `kodelet run -r ralph-init`
 
 See [docs/RALPH.md](docs/RALPH.md) for complete documentation.
+## 0.1.32.beta (2026-01-05)
+
+### Features
+
+**grep_tool now supports searching individual files**: The `path` parameter can now be a file or a directory
+
+- When a file path is provided, searches that specific file for the pattern
+- When a directory path is provided, searches all files recursively (existing behavior)
+- The `include` glob pattern only applies when searching directories
+
+**Improved Tool Input Validation**: `grep_tool` and `glob_tool` now validate the `path` parameter
+
+- `grep_tool`: validates path exists (file or directory)
+- `glob_tool`: validates path is a directory (since globbing within a file doesn't make sense)
+- Clear error messages for invalid paths caught early in validation phase
 
 ## 0.1.31.beta (2026-01-04)
 
