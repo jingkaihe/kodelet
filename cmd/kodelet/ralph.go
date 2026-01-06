@@ -158,9 +158,9 @@ Examples:
 
 var ralphInitCmd = &cobra.Command{
 	Use:   "init [extra instructions]",
-	Short: "Initialize a new PRD file from project analysis",
-	Long: `Analyze the current project and generate a PRD (Product Requirements Document)
-with features to implement. This creates a starting point for the ralph loop.
+	Short: "Bootstrap a new product development cycle",
+	Long: `Bootstrap a new product development cycle by generating a PRD (Product Requirements Document)
+from the codebase, design docs, and/or conversation context.
 
 You can provide extra instructions as arguments to guide the PRD generation:
   kodelet ralph init "take a look at the design doc in ./design.md"

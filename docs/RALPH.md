@@ -14,8 +14,11 @@ The Ralph pattern solves a fundamental challenge with long-running AI agents: th
 ## Quick Start
 
 ```bash
-# Initialize a new project with PRD and progress files
+# Bootstrap a new product development cycle
 kodelet ralph init
+
+# Bootstrap with extra instructions (e.g., pointing to design docs)
+kodelet ralph init "see the design doc in ./docs/design.md"
 
 # Or use the standalone recipe
 kodelet run -r ralph-init --arg prd=features.json
@@ -143,7 +146,7 @@ Flags:
 
 ### `kodelet ralph init`
 
-Initialize a new PRD by analyzing the current repository.
+Bootstrap a new product development cycle by generating a PRD from the codebase, design docs, and/or conversation context.
 
 ```bash
 kodelet ralph init [extra instructions] [flags]
@@ -155,7 +158,7 @@ Flags:
 
 Examples:
 ```bash
-# Basic initialization
+# Basic - analyzes the codebase
 kodelet ralph init
 
 # With extra instructions pointing to design docs
@@ -222,10 +225,11 @@ Usage:
 
 ### Running Effectively
 
-1. **Start with `ralph init`** - Let the agent analyze your project first
-2. **Review the generated PRD** - Edit priorities and descriptions as needed
-3. **Monitor early iterations** - Verify the agent understands your project
-4. **Use signals to stop** - Ctrl+C gracefully stops after current iteration
+1. **Start with `ralph init`** - Bootstrap your development cycle first
+2. **Provide context** - Point to design docs: `kodelet ralph init "see ./design.md"`
+3. **Review the generated PRD** - Edit priorities and descriptions as needed
+4. **Monitor early iterations** - Verify the agent understands your project
+5. **Use signals to stop** - Ctrl+C gracefully stops after current iteration
 
 ## References
 
