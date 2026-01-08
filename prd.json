@@ -31,7 +31,7 @@
         "Add GetUsage() llmtypes.Usage method with mutex lock",
         "Run 'go test ./pkg/llm/base/...' to verify tests pass"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "base-thread-tool-results",

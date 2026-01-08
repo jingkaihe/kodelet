@@ -31,3 +31,38 @@ This file tracks progress across Ralph iterations.
 
 ---
 
+## 2026-01-08 - Iteration 2
+
+### Feature Completed: base-thread-getters-setters
+
+**What was implemented:**
+- Added getter/setter methods to the Thread struct (renamed from BaseThread to avoid stutter):
+  - `SetState(s tooltypes.State)` - sets the tool execution state
+  - `GetState() tooltypes.State` - returns the current state
+  - `GetConfig() llmtypes.Config` - returns the LLM configuration
+  - `GetConversationID() string` - returns the conversation ID
+  - `SetConversationID(id string)` - sets conversation ID and updates hook trigger
+  - `IsPersisted() bool` - returns whether thread is being persisted
+  - `GetUsage() llmtypes.Usage` - returns usage with mutex lock for thread safety
+- Added comprehensive unit tests for all getter/setter methods including:
+  - Basic functionality tests for each method
+  - Nil safety test for GetUsage
+  - Concurrent access test for GetUsage with race detection
+- Created mockState implementation for testing
+
+**Naming changes (linter compliance):**
+- Renamed `BaseThread` to `Thread` to avoid type stutter (base.BaseThread -> base.Thread)
+- Renamed `IsPersisted_` field to `Persisted` (avoid underscores in Go names)
+- Renamed `NewBaseThread()` to `NewThread()`
+
+**Verification:**
+- All tests pass: `go test ./pkg/llm/base/...`
+- Race detector passes: `go test -race ./pkg/llm/base/...`
+- Linter passes: `mise run lint`
+
+**Notes for next iteration:**
+- Next feature to implement: `base-thread-tool-results` - Move structured tool result management methods
+- The Thread struct now uses `Persisted` field instead of `IsPersisted_`
+
+---
+
