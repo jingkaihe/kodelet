@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"time"
@@ -11,6 +12,8 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/spf13/cobra"
 )
+
+var usageJSONOutput bool
 
 var anthropicAccountsUsageCmd = &cobra.Command{
 	Use:   "usage [alias]",
@@ -26,29 +29,49 @@ This command makes a minimal API request to retrieve the rate limit headers.
 
 Examples:
   kodelet anthropic accounts usage           # Show usage for default account
-  kodelet anthropic accounts usage work      # Show usage for 'work' account`,
+  kodelet anthropic accounts usage work      # Show usage for 'work' account
+  kodelet anthropic accounts usage --json    # Output in JSON format`,
 	Args: cobra.MaximumNArgs(1),
 	Run: func(_ *cobra.Command, args []string) {
 		var alias string
 		if len(args) > 0 {
 			alias = args[0]
 		}
-		showAccountUsageCmd(alias)
+		showAccountUsageCmd(alias, usageJSONOutput)
 	},
 }
 
 func init() {
+	anthropicAccountsUsageCmd.Flags().BoolVar(&usageJSONOutput, "json", false, "Output in JSON format")
 	anthropicAccountsCmd.AddCommand(anthropicAccountsUsageCmd)
 }
 
-func showAccountUsageCmd(alias string) {
+type usageOutput struct {
+	Account  string          `json:"account"`
+	Email    string          `json:"email"`
+	Window5h usageWindowJSON `json:"window_5h"`
+	Window7d usageWindowJSON `json:"window_7d"`
+}
+
+type usageWindowJSON struct {
+	Status      string  `json:"status"`
+	Utilization float64 `json:"utilization"`
+	ResetTime   string  `json:"reset_time"`
+	ResetUnix   int64   `json:"reset_unix"`
+}
+
+func showAccountUsageCmd(alias string, jsonOutput bool) {
 	// Resolve the account alias if not provided
 	accountName := alias
 	if accountName == "" {
 		defaultAlias, err := auth.GetDefaultAnthropicAccount()
 		if err != nil {
-			presenter.Error(err, "No default account found")
-			presenter.Info("Use 'kodelet anthropic login' to add an account or specify an account alias.")
+			if jsonOutput {
+				outputJSONError("No default account found")
+			} else {
+				presenter.Error(err, "No default account found")
+				presenter.Info("Use 'kodelet anthropic login' to add an account or specify an account alias.")
+			}
 			os.Exit(1)
 		}
 		accountName = defaultAlias
@@ -57,7 +80,11 @@ func showAccountUsageCmd(alias string) {
 	// Verify account exists
 	accounts, err := auth.ListAnthropicAccounts()
 	if err != nil {
-		presenter.Error(err, "Failed to list accounts")
+		if jsonOutput {
+			outputJSONError(fmt.Sprintf("Failed to list accounts: %v", err))
+		} else {
+			presenter.Error(err, "Failed to list accounts")
+		}
 		os.Exit(1)
 	}
 
@@ -72,18 +99,51 @@ func showAccountUsageCmd(alias string) {
 	}
 
 	if !accountExists {
-		presenter.Error(fmt.Errorf("account '%s' not found", accountName), "Invalid account")
-		presenter.Info("Use 'kodelet anthropic accounts list' to see available accounts.")
+		if jsonOutput {
+			outputJSONError(fmt.Sprintf("account '%s' not found", accountName))
+		} else {
+			presenter.Error(fmt.Errorf("account '%s' not found", accountName), "Invalid account")
+			presenter.Info("Use 'kodelet anthropic accounts list' to see available accounts.")
+		}
 		os.Exit(1)
 	}
 
-	presenter.Info(fmt.Sprintf("Fetching usage for account: %s (%s)...", accountName, accountEmail))
+	if !jsonOutput {
+		presenter.Info(fmt.Sprintf("Fetching usage for account: %s (%s)...", accountName, accountEmail))
+	}
 
 	ctx := context.Background()
 	stats, err := anthropic.GetRateLimitStats(ctx, accountName)
 	if err != nil {
-		presenter.Error(err, "Failed to fetch rate limit stats")
+		if jsonOutput {
+			outputJSONError(fmt.Sprintf("Failed to fetch rate limit stats: %v", err))
+		} else {
+			presenter.Error(err, "Failed to fetch rate limit stats")
+		}
 		os.Exit(1)
+	}
+
+	if jsonOutput {
+		output := usageOutput{
+			Account: accountName,
+			Email:   accountEmail,
+			Window5h: usageWindowJSON{
+				Status:      stats.Status5h,
+				Utilization: stats.Utilization5h,
+				ResetTime:   stats.Reset5h.Format(time.RFC3339),
+				ResetUnix:   stats.Reset5h.Unix(),
+			},
+			Window7d: usageWindowJSON{
+				Status:      stats.Status7d,
+				Utilization: stats.Utilization7d,
+				ResetTime:   stats.Reset7d.Format(time.RFC3339),
+				ResetUnix:   stats.Reset7d.Unix(),
+			},
+		}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		enc.Encode(output)
+		return
 	}
 
 	fmt.Println()
@@ -97,6 +157,13 @@ func showAccountUsageCmd(alias string) {
 	fmt.Printf("  Status:      %s\n", formatStatus(stats.Status7d))
 	fmt.Printf("  Utilization: %.2f%%\n", stats.Utilization7d*100)
 	fmt.Printf("  Resets:      %s\n", formatResetTime(stats.Reset7d))
+}
+
+func outputJSONError(message string) {
+	output := map[string]string{"error": message}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	enc.Encode(output)
 }
 
 func formatStatus(status string) string {

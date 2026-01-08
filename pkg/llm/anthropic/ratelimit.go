@@ -65,7 +65,6 @@ func GetRateLimitStats(ctx context.Context, accountAlias string) (*RateLimitStat
 		return nil, errors.Wrap(err, "failed to make API request")
 	}
 
-
 	stats.Status5h = capturedHeaders.Get("Anthropic-Ratelimit-Unified-5h-Status")
 	stats.Status7d = capturedHeaders.Get("Anthropic-Ratelimit-Unified-7d-Status")
 
