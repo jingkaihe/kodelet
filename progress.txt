@@ -467,3 +467,32 @@ This file tracks progress across Ralph iterations.
 
 ---
 
+## 2026-01-08 - Iteration 13
+
+### Feature Completed: cleanup-unused-code
+
+**What was implemented:**
+- Ran goimports to clean up imports in pkg/llm/ (no changes needed, imports already clean)
+- Ran linter with `mise run lint` - 0 issues (go vet, golangci-lint, staticcheck all pass)
+- Checked for commented-out old code - none found
+- Verified LOC reduction:
+  - Base package: 270 LOC (base.go) provides shared functionality
+  - Git diff shows 965 lines deleted from providers across the refactoring
+  - ~322 LOC reduction per provider (965/3), matching the target of ~300 lines
+
+**LOC statistics:**
+- pkg/llm/base/base.go: 270 lines (shared implementation)
+- pkg/llm/base/doc.go: 105 lines (documentation)
+- pkg/llm/base/base_test.go: 1087 lines (comprehensive tests)
+- Total diff: 14 files changed, 1938 insertions, 965 deletions
+
+**Verification:**
+- All LLM tests pass: `go test ./pkg/llm/...`
+- Linter passes: `mise run lint` (0 issues)
+- No commented-out code or TODO markers for removal found
+
+**PRD Status:**
+All 13 features are now complete. The LLM Thread Implementation Unification is finished.
+
+---
+

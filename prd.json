@@ -194,7 +194,7 @@
         "Remove any commented-out old code",
         "Verify total LOC reduction is approximately 300 lines per provider"
       ],
-      "passes": false
+      "passes": true
     }
   ]
 }
