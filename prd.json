@@ -39,7 +39,7 @@
         "Default account is marked with asterisk (*)",
         "Empty state message when no accounts exist"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "accounts-remove-command",

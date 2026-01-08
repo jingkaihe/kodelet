@@ -83,3 +83,44 @@ Extended `anthropic-login` command to accept `--alias` flag for naming accounts.
 
 ---
 
+## 2026-01-08 16:21:24 - accounts-list-command
+
+### Feature Implemented
+Added `kodelet accounts list` command to display all logged-in Anthropic accounts.
+
+### Changes Made
+1. **New Command File** (`cmd/kodelet/accounts.go`):
+   - Parent `accountsCmd` for managing Anthropic subscription accounts
+   - `accountsListCmd` subcommand for listing accounts
+   - `accountTokenStatus()` function to determine token status (valid, needs refresh, expired)
+   - `listAccountsCmd()` function to display accounts in a formatted table
+
+2. **Table Output**:
+   - Columns: ALIAS, EMAIL, STATUS
+   - Default account marked with asterisk (*) prefix
+   - Accounts sorted alphabetically by alias
+   - Footer note explaining the asterisk indicator
+
+3. **Token Status Logic**:
+   - "valid" - token expires in more than 10 minutes
+   - "needs refresh" - token expires within 10 minutes but not expired
+   - "expired" - token has already expired
+
+4. **Empty State**:
+   - Displays helpful message when no accounts found
+   - Suggests using `kodelet anthropic-login` to add an account
+
+5. **Integration** (`cmd/kodelet/main.go`):
+   - Registered `accountsCmd` with root command
+   - Added tracing support with `withTracing(accountsCmd)`
+
+### Issues Encountered
+- None. The implementation leveraged the existing `auth.ListAnthropicAccounts()` infrastructure.
+
+### Notes for Next Iteration
+- The `accounts-remove-command` and `accounts-default-command` (medium priority) can be added to this file
+- The `runtime-account-selection` feature (high priority) requires adding `--account` flag to run/chat commands
+- The `token-retrieval-refactor` is mostly complete, just needs integration points
+
+---
+
