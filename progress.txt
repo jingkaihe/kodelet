@@ -235,3 +235,44 @@ Added `--account` flag to `run` and `chat` commands for runtime Anthropic accoun
 
 ---
 
+## 2026-01-08 16:42:07 - token-retrieval-refactor
+
+### Feature Implemented
+Refactored `AnthropicAccessToken()` and `AnthropicHeader()` to accept account alias parameters.
+
+### Changes Made
+1. **Refactored `AnthropicAccessToken`** (`pkg/auth/anthropic.go`):
+   - Changed signature from `AnthropicAccessToken(ctx context.Context)` to `AnthropicAccessToken(ctx context.Context, alias string)`
+   - Empty alias uses default account from credentials file
+   - Token refresh works correctly for specified account
+   - Made `AnthropicAccessTokenForAlias` a deprecated alias that calls `AnthropicAccessToken`
+
+2. **Refactored `AnthropicHeader`** (`pkg/auth/anthropic.go`):
+   - Changed signature from `AnthropicHeader(accessToken string)` to `AnthropicHeader(ctx context.Context, alias string)`
+   - Now fetches access token internally using `AnthropicAccessToken`
+   - Returns `([]option.RequestOption, error)` to handle token retrieval errors
+   - Added new `AnthropicHeaderWithToken(accessToken string)` for cases where token is already available
+
+3. **Updated Callers** (`pkg/llm/anthropic/anthropic.go`):
+   - Updated `NewAnthropicThread` to use new `AnthropicHeader(ctx, alias)` signature
+   - Simplified code by removing separate token retrieval calls
+   - Works for both subscription mode and auto mode authentication
+
+4. **Updated Tests** (`pkg/auth/anthropic_test.go`):
+   - Updated `TestAnthropicAccessToken` to use new signature with alias parameter
+   - Added tests for getting token for specific alias
+   - Added tests for empty alias returning default
+   - Updated `TestAnthropicHeader` to test new context+alias signature
+   - Added `TestAnthropicHeaderWithToken` for the backward-compatible helper
+   - Added error test cases for non-existent accounts
+
+### Issues Encountered
+- None. The refactoring was straightforward as the core logic was already in `AnthropicAccessTokenForAlias`.
+
+### Notes for Next Iteration
+- The `unit-tests-auth` feature (medium priority) should add more comprehensive tests for the multi-account system
+- The `documentation-update` feature (low priority) is the remaining work item
+- All high-priority features are now complete
+
+---
+

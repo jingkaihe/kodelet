@@ -192,7 +192,7 @@ func TestAnthropicAccessToken(t *testing.T) {
 	os.Setenv("HOME", tempDir)
 
 	t.Run("no accounts exist", func(t *testing.T) {
-		_, err := AnthropicAccessToken(ctx)
+		_, err := AnthropicAccessToken(ctx, "")
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "no Anthropic accounts found")
 	})
@@ -205,7 +205,7 @@ func TestAnthropicAccessToken(t *testing.T) {
 		credsFile := filepath.Join(credsDir, "anthropic-credentials.json")
 		require.NoError(t, os.WriteFile(credsFile, []byte("invalid json"), 0o644))
 
-		_, err := AnthropicAccessToken(ctx)
+		_, err := AnthropicAccessToken(ctx, "")
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to decode credentials file")
 
@@ -235,15 +235,129 @@ func TestAnthropicAccessToken(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, os.WriteFile(filePath, data, 0o644))
 
-		token, err := AnthropicAccessToken(ctx)
+		token, err := AnthropicAccessToken(ctx, "")
 		assert.NoError(t, err)
 		assert.Equal(t, "valid_access_token", token)
+	})
+
+	t.Run("get token for specific alias", func(t *testing.T) {
+		credsFile := &AnthropicCredentialsFile{
+			DefaultAccount: "default",
+			Accounts: map[string]AnthropicCredentials{
+				"default": {
+					Email:        "default@example.com",
+					AccessToken:  "default_token",
+					RefreshToken: "refresh_token",
+					ExpiresAt:    time.Now().Add(time.Hour).Unix(),
+				},
+				"work": {
+					Email:        "work@company.com",
+					AccessToken:  "work_token",
+					RefreshToken: "refresh_token",
+					ExpiresAt:    time.Now().Add(time.Hour).Unix(),
+				},
+			},
+		}
+
+		credsDir := filepath.Join(tempDir, ".kodelet")
+		require.NoError(t, os.MkdirAll(credsDir, 0o755))
+
+		filePath := filepath.Join(credsDir, "anthropic-credentials.json")
+		data, err := json.Marshal(credsFile)
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(filePath, data, 0o644))
+
+		// Get token for specific alias
+		token, err := AnthropicAccessToken(ctx, "work")
+		assert.NoError(t, err)
+		assert.Equal(t, "work_token", token)
+
+		// Empty alias should return default
+		token, err = AnthropicAccessToken(ctx, "")
+		assert.NoError(t, err)
+		assert.Equal(t, "default_token", token)
 	})
 }
 
 func TestAnthropicHeader(t *testing.T) {
+	ctx := context.Background()
+
+	// Create a temporary directory for testing
+	tempDir := t.TempDir()
+	originalHome := os.Getenv("HOME")
+	defer os.Setenv("HOME", originalHome)
+	os.Setenv("HOME", tempDir)
+
+	t.Run("returns headers for valid account", func(t *testing.T) {
+		credsFile := &AnthropicCredentialsFile{
+			DefaultAccount: "test",
+			Accounts: map[string]AnthropicCredentials{
+				"test": {
+					Email:        "test@example.com",
+					AccessToken:  "test_access_token_123",
+					RefreshToken: "refresh_token",
+					ExpiresAt:    time.Now().Add(time.Hour).Unix(),
+				},
+			},
+		}
+
+		credsDir := filepath.Join(tempDir, ".kodelet")
+		require.NoError(t, os.MkdirAll(credsDir, 0o755))
+
+		filePath := filepath.Join(credsDir, "anthropic-credentials.json")
+		data, err := json.Marshal(credsFile)
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(filePath, data, 0o644))
+
+		headers, err := AnthropicHeader(ctx, "")
+		require.NoError(t, err)
+		require.NotNil(t, headers)
+		require.Len(t, headers, 4, "should return 4 request options")
+	})
+
+	t.Run("returns headers for specific alias", func(t *testing.T) {
+		credsFile := &AnthropicCredentialsFile{
+			DefaultAccount: "default",
+			Accounts: map[string]AnthropicCredentials{
+				"default": {
+					Email:        "default@example.com",
+					AccessToken:  "default_token",
+					RefreshToken: "refresh_token",
+					ExpiresAt:    time.Now().Add(time.Hour).Unix(),
+				},
+				"work": {
+					Email:        "work@company.com",
+					AccessToken:  "work_token",
+					RefreshToken: "refresh_token",
+					ExpiresAt:    time.Now().Add(time.Hour).Unix(),
+				},
+			},
+		}
+
+		credsDir := filepath.Join(tempDir, ".kodelet")
+		require.NoError(t, os.MkdirAll(credsDir, 0o755))
+
+		filePath := filepath.Join(credsDir, "anthropic-credentials.json")
+		data, err := json.Marshal(credsFile)
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(filePath, data, 0o644))
+
+		headers, err := AnthropicHeader(ctx, "work")
+		require.NoError(t, err)
+		require.NotNil(t, headers)
+		require.Len(t, headers, 4, "should return 4 request options")
+	})
+
+	t.Run("error for non-existent account", func(t *testing.T) {
+		_, err := AnthropicHeader(ctx, "nonexistent")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "not found")
+	})
+}
+
+func TestAnthropicHeaderWithToken(t *testing.T) {
 	accessToken := "test_access_token_123"
-	headers := AnthropicHeader(accessToken)
+	headers := AnthropicHeaderWithToken(accessToken)
 
 	// Verify the function returns request options
 	require.NotNil(t, headers)
@@ -289,7 +403,7 @@ func TestAnthropicAccessToken_ExpiredToken(t *testing.T) {
 
 	// This will fail because we can't mock the refresh endpoint,
 	// but it tests that the expiration logic is working
-	_, err = AnthropicAccessToken(ctx)
+	_, err = AnthropicAccessToken(ctx, "")
 	assert.Error(t, err)
 	// The error should be related to the refresh attempt, not file reading
 	assert.Contains(t, err.Error(), "refresh token")
@@ -687,8 +801,9 @@ func TestAnthropicAccessTokenForAlias(t *testing.T) {
 		assert.Equal(t, "work_access_token", token)
 	})
 
-	t.Run("backward compatible AnthropicAccessToken", func(t *testing.T) {
-		token, err := AnthropicAccessToken(ctx)
+	t.Run("backward compatible - AnthropicAccessTokenForAlias calls AnthropicAccessToken", func(t *testing.T) {
+		// AnthropicAccessTokenForAlias is now just an alias for AnthropicAccessToken
+		token, err := AnthropicAccessToken(ctx, "")
 		require.NoError(t, err)
 		assert.Equal(t, "work_access_token", token)
 	})

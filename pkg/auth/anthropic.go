@@ -546,16 +546,10 @@ func refreshAnthropicTokenForAlias(ctx context.Context, alias string, creds *Ant
 	return refreshed, nil
 }
 
-// AnthropicAccessToken retrieves a valid Anthropic access token for the default account, refreshing it if necessary.
-// It automatically handles token refresh when the token is within 10 minutes of expiration.
-func AnthropicAccessToken(ctx context.Context) (string, error) {
-	return AnthropicAccessTokenForAlias(ctx, "")
-}
-
-// AnthropicAccessTokenForAlias retrieves a valid Anthropic access token for the specified account alias.
+// AnthropicAccessToken retrieves a valid Anthropic access token for the specified account alias.
 // If alias is empty, uses the default account.
 // It automatically handles token refresh when the token is within 10 minutes of expiration.
-func AnthropicAccessTokenForAlias(ctx context.Context, alias string) (string, error) {
+func AnthropicAccessToken(ctx context.Context, alias string) (string, error) {
 	creds, err := GetAnthropicCredentialsByAlias(alias)
 	if err != nil {
 		return "", err
@@ -581,8 +575,31 @@ func AnthropicAccessTokenForAlias(ctx context.Context, alias string) (string, er
 	return refreshed.AccessToken, nil
 }
 
-// AnthropicHeader returns the HTTP request options for Anthropic API calls with the given access token.
-func AnthropicHeader(accessToken string) []option.RequestOption {
+// AnthropicAccessTokenForAlias is an alias for AnthropicAccessToken for backward compatibility.
+// Deprecated: Use AnthropicAccessToken directly.
+func AnthropicAccessTokenForAlias(ctx context.Context, alias string) (string, error) {
+	return AnthropicAccessToken(ctx, alias)
+}
+
+// AnthropicHeader retrieves an access token for the specified account alias and returns
+// the HTTP request options for Anthropic API calls.
+// If alias is empty, uses the default account.
+func AnthropicHeader(ctx context.Context, alias string) ([]option.RequestOption, error) {
+	accessToken, err := AnthropicAccessToken(ctx, alias)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get access token for Anthropic header")
+	}
+	return []option.RequestOption{
+		option.WithHeader("User-Agent", "claude-cli/1.0.30 (external, cli)"),
+		option.WithAuthToken(accessToken),
+		option.WithHeaderAdd("anthropic-beta", "oauth-2025-04-20"),
+		option.WithHeaderDel("X-Api-Key"),
+	}, nil
+}
+
+// AnthropicHeaderWithToken returns the HTTP request options for Anthropic API calls with a pre-fetched access token.
+// This is useful when you already have the token and want to avoid another lookup.
+func AnthropicHeaderWithToken(accessToken string) []option.RequestOption {
 	return []option.RequestOption{
 		option.WithHeader("User-Agent", "claude-cli/1.0.30 (external, cli)"),
 		option.WithAuthToken(accessToken),

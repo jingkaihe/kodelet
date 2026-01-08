@@ -89,7 +89,7 @@
         "Token refresh works correctly for specified account",
         "AnthropicHeader(alias string) returns headers for specified account"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "unit-tests-auth",
