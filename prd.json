@@ -104,7 +104,7 @@
         "Update NewAnthropicThread() to initialize BaseThread",
         "Run 'go test ./pkg/llm/anthropic/...' to verify all tests pass"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "openai-embed-base-thread",

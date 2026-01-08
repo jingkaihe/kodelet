@@ -180,8 +180,8 @@ func TestSaveAndLoadConversationWithFileLastAccess(t *testing.T) {
 	thread.SetState(state)
 
 	// Manually set the store instead of using EnablePersistence
-	thread.store = store
-	thread.isPersisted = true
+	thread.Store = store
+	thread.Persisted = true
 
 	// Set file access times
 	now := time.Now()
@@ -207,8 +207,8 @@ func TestSaveAndLoadConversationWithFileLastAccess(t *testing.T) {
 	newThread.SetState(newState)
 
 	// Manually set the store and enable persistence
-	newThread.store = store
-	newThread.isPersisted = true
+	newThread.Store = store
+	newThread.Persisted = true
 
 	// Load the conversation
 	newThread.loadConversation(context.Background())
