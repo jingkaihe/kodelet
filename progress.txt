@@ -131,3 +131,42 @@ This file tracks progress across Ralph iterations.
 
 ---
 
+## 2026-01-08 - Iteration 5
+
+### Feature Completed: base-thread-tracing
+
+**What was implemented:**
+- Added `CreateMessageSpan(ctx, tracer, message, opt, extraAttributes...)` method to `pkg/llm/base/base.go`
+  - Returns (context.Context, trace.Span) for tracing LLM message processing
+  - Includes common attributes: model, max_tokens, weak_model_max_tokens, use_weak_model, is_sub_agent, conversation_id, is_persisted, message_length
+  - Accepts variadic extraAttributes for provider-specific attributes (e.g., thinking_budget_tokens, prompt_cache for Anthropic; reasoning_effort, use_copilot for OpenAI; backend for Google)
+- Added `FinalizeMessageSpan(span, err, extraAttributes...)` method
+  - Records usage metrics: tokens.input, tokens.output, cost.total, context_window.current, context_window.max
+  - Accepts variadic extraAttributes for provider-specific cache metrics
+  - Handles error case (sets status to Error, records error) and success case (sets status to Ok, adds completion event)
+- Added new imports: context, go.opentelemetry.io/otel/attribute, go.opentelemetry.io/otel/codes, go.opentelemetry.io/otel/trace
+- Added comprehensive unit tests:
+  - TestCreateMessageSpan - basic functionality
+  - TestCreateMessageSpan_WithExtraAttributes - provider-specific attributes
+  - TestCreateMessageSpan_EmptyMessage - edge case
+  - TestFinalizeMessageSpan_Success - success path
+  - TestFinalizeMessageSpan_WithError - error path
+  - TestFinalizeMessageSpan_WithExtraAttributes - cache metrics
+  - TestFinalizeMessageSpan_NilUsage - nil safety
+  - TestCreateAndFinalizeMessageSpan_Integration - end-to-end test
+  - TestTracingMethods_ConcurrentAccess - race condition test
+  - TestTracingMethods_VariableReuseAcrossSpans - multiple span lifecycle test
+  - TestCreateMessageSpan_VerifySpanInterface - context modification test
+
+**Verification:**
+- All tests pass: `go test ./pkg/llm/base/...` (35 tests)
+- Race detector passes: `go test -race ./pkg/llm/base/...`
+- Linter passes: `mise run lint`
+
+**Notes for next iteration:**
+- Next feature to implement: `base-thread-persistence` - Move EnablePersistence() method
+- Provider implementations can now use CreateMessageSpan/FinalizeMessageSpan instead of their local methods
+- The variadic extraAttributes pattern allows providers to add their specific tracing attributes without modifying the base package
+
+---
+

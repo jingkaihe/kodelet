@@ -4,6 +4,7 @@
 package base
 
 import (
+	"context"
 	"maps"
 	"sync"
 
@@ -11,6 +12,9 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/hooks"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Constants for image processing (shared across all providers)
@@ -155,4 +159,72 @@ func (t *Thread) ShouldAutoCompact(compactRatio float64) bool {
 
 	utilizationRatio := float64(usage.CurrentContextWindow) / float64(usage.MaxContextWindow)
 	return utilizationRatio >= compactRatio
+}
+
+// CreateMessageSpan creates a new tracing span for LLM message processing.
+// It includes common attributes shared across all providers and allows for additional
+// provider-specific attributes to be passed in.
+//
+// Common attributes included:
+//   - model, max_tokens, weak_model_max_tokens, is_sub_agent
+//   - conversation_id, is_persisted, message_length, use_weak_model
+//
+// Provider-specific attributes (passed via extraAttributes):
+//   - Anthropic: thinking_budget_tokens, prompt_cache
+//   - OpenAI: reasoning_effort, use_copilot
+//   - Google: backend
+func (t *Thread) CreateMessageSpan(
+	ctx context.Context,
+	tracer trace.Tracer,
+	message string,
+	opt llmtypes.MessageOpt,
+	extraAttributes ...attribute.KeyValue,
+) (context.Context, trace.Span) {
+	attributes := []attribute.KeyValue{
+		attribute.String("model", t.Config.Model),
+		attribute.Int("max_tokens", t.Config.MaxTokens),
+		attribute.Int("weak_model_max_tokens", t.Config.WeakModelMaxTokens),
+		attribute.Bool("use_weak_model", opt.UseWeakModel),
+		attribute.Bool("is_sub_agent", t.Config.IsSubAgent),
+		attribute.String("conversation_id", t.ConversationID),
+		attribute.Bool("is_persisted", t.Persisted),
+		attribute.Int("message_length", len(message)),
+	}
+
+	attributes = append(attributes, extraAttributes...)
+
+	return tracer.Start(ctx, "llm.send_message", trace.WithAttributes(attributes...))
+}
+
+// FinalizeMessageSpan records final metrics and status to the span before ending it.
+// It includes common usage attributes and allows for additional provider-specific attributes.
+//
+// Common attributes included:
+//   - tokens.input, tokens.output, cost.total
+//   - context_window.current, context_window.max
+//
+// Provider-specific attributes (passed via extraAttributes):
+//   - Anthropic: tokens.cache_creation, tokens.cache_read
+//   - Google: tokens.cache_read
+func (t *Thread) FinalizeMessageSpan(span trace.Span, err error, extraAttributes ...attribute.KeyValue) {
+	usage := t.GetUsage()
+	attributes := []attribute.KeyValue{
+		attribute.Int("tokens.input", usage.InputTokens),
+		attribute.Int("tokens.output", usage.OutputTokens),
+		attribute.Float64("cost.total", usage.TotalCost()),
+		attribute.Int("context_window.current", usage.CurrentContextWindow),
+		attribute.Int("context_window.max", usage.MaxContextWindow),
+	}
+
+	attributes = append(attributes, extraAttributes...)
+	span.SetAttributes(attributes...)
+
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		span.RecordError(err)
+	} else {
+		span.SetStatus(codes.Ok, "")
+		span.AddEvent("message_processing_completed")
+	}
+	span.End()
 }

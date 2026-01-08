@@ -72,7 +72,7 @@
         "Add unit tests for span creation and finalization",
         "Run 'go test ./pkg/llm/base/...' to verify tests pass"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "base-thread-persistence",

@@ -1,6 +1,7 @@
 package base
 
 import (
+	"context"
 	"sync"
 	"testing"
 	"time"
@@ -8,8 +9,11 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/hooks"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace/noop"
 )
 
 // mockState is a minimal mock implementation of tooltypes.State for testing
@@ -420,4 +424,221 @@ func TestShouldAutoCompact_ConcurrentAccess(_ *testing.T) {
 	}
 
 	wg.Wait()
+}
+
+func TestCreateMessageSpan(t *testing.T) {
+	config := llmtypes.Config{
+		Model:              "claude-sonnet-4-5",
+		MaxTokens:          4096,
+		WeakModelMaxTokens: 2048,
+		IsSubAgent:         false,
+	}
+	bt := NewThread(config, "test-conv-123", nil, hooks.Trigger{})
+	bt.Persisted = true
+
+	tracer := noop.NewTracerProvider().Tracer("test")
+	ctx := context.Background()
+	opt := llmtypes.MessageOpt{
+		UseWeakModel: true,
+	}
+	message := "test message content"
+
+	newCtx, span := bt.CreateMessageSpan(ctx, tracer, message, opt)
+
+	require.NotNil(t, newCtx)
+	require.NotNil(t, span)
+	span.End()
+}
+
+func TestCreateMessageSpan_WithExtraAttributes(t *testing.T) {
+	config := llmtypes.Config{
+		Model:                "claude-sonnet-4-5",
+		MaxTokens:            4096,
+		ThinkingBudgetTokens: 1000,
+	}
+	bt := NewThread(config, "test-conv-456", nil, hooks.Trigger{})
+
+	tracer := noop.NewTracerProvider().Tracer("test")
+	ctx := context.Background()
+	opt := llmtypes.MessageOpt{
+		PromptCache: true,
+	}
+
+	extraAttrs := []attribute.KeyValue{
+		attribute.Int("thinking_budget_tokens", config.ThinkingBudgetTokens),
+		attribute.Bool("prompt_cache", opt.PromptCache),
+	}
+
+	newCtx, span := bt.CreateMessageSpan(ctx, tracer, "test", opt, extraAttrs...)
+
+	require.NotNil(t, newCtx)
+	require.NotNil(t, span)
+	span.End()
+}
+
+func TestCreateMessageSpan_EmptyMessage(t *testing.T) {
+	bt := NewThread(llmtypes.Config{Model: "test"}, "", nil, hooks.Trigger{})
+	tracer := noop.NewTracerProvider().Tracer("test")
+	ctx := context.Background()
+
+	newCtx, span := bt.CreateMessageSpan(ctx, tracer, "", llmtypes.MessageOpt{})
+
+	require.NotNil(t, newCtx)
+	require.NotNil(t, span)
+	span.End()
+}
+
+func TestFinalizeMessageSpan_Success(_ *testing.T) {
+	bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+	bt.Usage.InputTokens = 100
+	bt.Usage.OutputTokens = 50
+	bt.Usage.InputCost = 0.01
+	bt.Usage.OutputCost = 0.005
+	bt.Usage.CurrentContextWindow = 1000
+	bt.Usage.MaxContextWindow = 200000
+
+	tracer := noop.NewTracerProvider().Tracer("test")
+	_, span := tracer.Start(context.Background(), "test-span")
+
+	bt.FinalizeMessageSpan(span, nil)
+}
+
+func TestFinalizeMessageSpan_WithError(_ *testing.T) {
+	bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+	bt.Usage.InputTokens = 50
+	bt.Usage.OutputTokens = 0
+
+	tracer := noop.NewTracerProvider().Tracer("test")
+	_, span := tracer.Start(context.Background(), "test-span")
+
+	testErr := errors.New("API rate limit exceeded")
+	bt.FinalizeMessageSpan(span, testErr)
+}
+
+func TestFinalizeMessageSpan_WithExtraAttributes(_ *testing.T) {
+	bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+	bt.Usage.InputTokens = 100
+	bt.Usage.OutputTokens = 50
+	bt.Usage.CacheCreationInputTokens = 500
+	bt.Usage.CacheReadInputTokens = 200
+
+	tracer := noop.NewTracerProvider().Tracer("test")
+	_, span := tracer.Start(context.Background(), "test-span")
+
+	extraAttrs := []attribute.KeyValue{
+		attribute.Int("tokens.cache_creation", bt.Usage.CacheCreationInputTokens),
+		attribute.Int("tokens.cache_read", bt.Usage.CacheReadInputTokens),
+	}
+
+	bt.FinalizeMessageSpan(span, nil, extraAttrs...)
+}
+
+func TestFinalizeMessageSpan_NilUsage(_ *testing.T) {
+	bt := &Thread{
+		Usage: nil,
+	}
+
+	tracer := noop.NewTracerProvider().Tracer("test")
+	_, span := tracer.Start(context.Background(), "test-span")
+
+	bt.FinalizeMessageSpan(span, nil)
+}
+
+func TestCreateAndFinalizeMessageSpan_Integration(t *testing.T) {
+	config := llmtypes.Config{
+		Model:     "gpt-4.1",
+		MaxTokens: 8192,
+	}
+	bt := NewThread(config, "integration-conv-123", nil, hooks.Trigger{})
+	bt.Persisted = true
+
+	bt.Usage.InputTokens = 500
+	bt.Usage.OutputTokens = 200
+	bt.Usage.CurrentContextWindow = 700
+	bt.Usage.MaxContextWindow = 128000
+	bt.Usage.InputCost = 0.05
+	bt.Usage.OutputCost = 0.02
+
+	tracer := noop.NewTracerProvider().Tracer("test")
+	ctx := context.Background()
+	opt := llmtypes.MessageOpt{
+		UseWeakModel: false,
+	}
+
+	ctx, span := bt.CreateMessageSpan(ctx, tracer, "Hello, world!", opt)
+	require.NotNil(t, ctx)
+	require.NotNil(t, span)
+
+	bt.FinalizeMessageSpan(span, nil)
+}
+
+func TestTracingMethods_ConcurrentAccess(_ *testing.T) {
+	bt := NewThread(llmtypes.Config{Model: "test-model"}, "conv-123", nil, hooks.Trigger{})
+	bt.Usage.InputTokens = 100
+	bt.Usage.OutputTokens = 50
+	bt.Usage.MaxContextWindow = 100000
+
+	tracer := noop.NewTracerProvider().Tracer("test")
+
+	var wg sync.WaitGroup
+	const numGoroutines = 50
+
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(2)
+
+		go func(val int) {
+			defer wg.Done()
+			bt.Mu.Lock()
+			bt.Usage.InputTokens = val * 10
+			bt.Usage.OutputTokens = val * 5
+			bt.Mu.Unlock()
+		}(i)
+
+		go func() {
+			defer wg.Done()
+			ctx, span := bt.CreateMessageSpan(
+				context.Background(),
+				tracer,
+				"concurrent test message",
+				llmtypes.MessageOpt{},
+			)
+			require.NotNil(&testing.T{}, ctx)
+			bt.FinalizeMessageSpan(span, nil)
+		}()
+	}
+
+	wg.Wait()
+}
+
+func TestTracingMethods_VariableReuseAcrossSpans(t *testing.T) {
+	bt := NewThread(llmtypes.Config{Model: "test-model", MaxTokens: 4096}, "conv-reuse", nil, hooks.Trigger{})
+	tracer := noop.NewTracerProvider().Tracer("test")
+
+	for i := 0; i < 5; i++ {
+		bt.Usage.InputTokens = i * 100
+		bt.Usage.OutputTokens = i * 50
+
+		ctx, span := bt.CreateMessageSpan(
+			context.Background(),
+			tracer,
+			"message "+string(rune('A'+i)),
+			llmtypes.MessageOpt{},
+		)
+		assert.NotNil(t, ctx)
+		bt.FinalizeMessageSpan(span, nil)
+	}
+}
+
+func TestCreateMessageSpan_VerifySpanInterface(t *testing.T) {
+	bt := NewThread(llmtypes.Config{Model: "test"}, "conv-123", nil, hooks.Trigger{})
+	tracer := noop.NewTracerProvider().Tracer("test")
+	ctx := context.Background()
+
+	newCtx, span := bt.CreateMessageSpan(ctx, tracer, "test", llmtypes.MessageOpt{})
+
+	require.NotNil(t, newCtx)
+	require.NotNil(t, span)
+	assert.NotEqual(t, ctx, newCtx, "CreateMessageSpan should return a new context with span")
+
+	span.End()
 }
