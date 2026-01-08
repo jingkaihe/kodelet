@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/hooks"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
@@ -641,4 +642,175 @@ func TestCreateMessageSpan_VerifySpanInterface(t *testing.T) {
 	assert.NotEqual(t, ctx, newCtx, "CreateMessageSpan should return a new context with span")
 
 	span.End()
+}
+
+// mockConversationStore is a minimal mock implementation for testing EnablePersistence
+type mockConversationStore struct {
+	saveFunc   func(ctx context.Context, record convtypes.ConversationRecord) error
+	loadFunc   func(ctx context.Context, id string) (convtypes.ConversationRecord, error)
+	deleteFunc func(ctx context.Context, id string) error
+	queryFunc  func(ctx context.Context, options convtypes.QueryOptions) (convtypes.QueryResult, error)
+	closeFunc  func() error
+}
+
+func (m *mockConversationStore) Save(ctx context.Context, record convtypes.ConversationRecord) error {
+	if m.saveFunc != nil {
+		return m.saveFunc(ctx, record)
+	}
+	return nil
+}
+
+func (m *mockConversationStore) Load(ctx context.Context, id string) (convtypes.ConversationRecord, error) {
+	if m.loadFunc != nil {
+		return m.loadFunc(ctx, id)
+	}
+	return convtypes.ConversationRecord{}, nil
+}
+
+func (m *mockConversationStore) Delete(ctx context.Context, id string) error {
+	if m.deleteFunc != nil {
+		return m.deleteFunc(ctx, id)
+	}
+	return nil
+}
+
+func (m *mockConversationStore) Query(ctx context.Context, options convtypes.QueryOptions) (convtypes.QueryResult, error) {
+	if m.queryFunc != nil {
+		return m.queryFunc(ctx, options)
+	}
+	return convtypes.QueryResult{}, nil
+}
+
+func (m *mockConversationStore) Close() error {
+	if m.closeFunc != nil {
+		return m.closeFunc()
+	}
+	return nil
+}
+
+func TestEnablePersistence_DisablePersistence(t *testing.T) {
+	bt := NewThread(llmtypes.Config{}, "conv-123", nil, hooks.Trigger{})
+	bt.Persisted = true // Start with persistence enabled
+
+	bt.EnablePersistence(context.Background(), false)
+
+	assert.False(t, bt.Persisted)
+}
+
+func TestEnablePersistence_WithExistingStore(t *testing.T) {
+	bt := NewThread(llmtypes.Config{}, "conv-123", nil, hooks.Trigger{})
+	mockStore := &mockConversationStore{}
+	bt.Store = mockStore
+
+	loadCalled := false
+	bt.LoadConversation = func(_ context.Context) {
+		loadCalled = true
+	}
+
+	bt.EnablePersistence(context.Background(), true)
+
+	assert.True(t, bt.Persisted)
+	assert.True(t, loadCalled, "LoadConversation callback should be called")
+	assert.Equal(t, mockStore, bt.Store, "Store should remain the same")
+}
+
+func TestEnablePersistence_WithExistingStore_NoCallback(t *testing.T) {
+	bt := NewThread(llmtypes.Config{}, "conv-123", nil, hooks.Trigger{})
+	mockStore := &mockConversationStore{}
+	bt.Store = mockStore
+	bt.LoadConversation = nil // Explicitly no callback
+
+	bt.EnablePersistence(context.Background(), true)
+
+	assert.True(t, bt.Persisted)
+	assert.Equal(t, mockStore, bt.Store)
+}
+
+func TestEnablePersistence_DisableDoesNotCallLoadConversation(t *testing.T) {
+	bt := NewThread(llmtypes.Config{}, "conv-123", nil, hooks.Trigger{})
+	mockStore := &mockConversationStore{}
+	bt.Store = mockStore
+
+	loadCalled := false
+	bt.LoadConversation = func(_ context.Context) {
+		loadCalled = true
+	}
+
+	bt.EnablePersistence(context.Background(), false)
+
+	assert.False(t, bt.Persisted)
+	assert.False(t, loadCalled, "LoadConversation callback should NOT be called when disabling")
+}
+
+func TestEnablePersistence_MultipleEnableCallsDoNotReinitializeStore(t *testing.T) {
+	bt := NewThread(llmtypes.Config{}, "conv-123", nil, hooks.Trigger{})
+	mockStore := &mockConversationStore{}
+	bt.Store = mockStore
+
+	loadCallCount := 0
+	bt.LoadConversation = func(_ context.Context) {
+		loadCallCount++
+	}
+
+	bt.EnablePersistence(context.Background(), true)
+	bt.EnablePersistence(context.Background(), true)
+
+	assert.Equal(t, 2, loadCallCount, "LoadConversation should be called each time persistence is enabled")
+	assert.Same(t, mockStore, bt.Store, "Store should not be reinitialized")
+}
+
+// contextKey is a custom type for context keys to avoid using basic types
+type contextKey string
+
+func TestEnablePersistence_LoadConversationCallback(t *testing.T) {
+	bt := NewThread(llmtypes.Config{}, "test-conv-id", nil, hooks.Trigger{})
+	mockStore := &mockConversationStore{}
+	bt.Store = mockStore
+
+	var receivedCtx context.Context
+	bt.LoadConversation = func(ctx context.Context) {
+		receivedCtx = ctx
+	}
+
+	testCtx := context.WithValue(context.Background(), contextKey("test-key"), "test-value")
+	bt.EnablePersistence(testCtx, true)
+
+	assert.Equal(t, testCtx, receivedCtx, "LoadConversation should receive the correct context")
+}
+
+func TestEnablePersistence_EnableThenDisable(t *testing.T) {
+	bt := NewThread(llmtypes.Config{}, "conv-123", nil, hooks.Trigger{})
+	mockStore := &mockConversationStore{}
+	bt.Store = mockStore
+	bt.LoadConversation = func(_ context.Context) {}
+
+	bt.EnablePersistence(context.Background(), true)
+	assert.True(t, bt.Persisted)
+
+	bt.EnablePersistence(context.Background(), false)
+	assert.False(t, bt.Persisted)
+
+	// Store should still be present even after disabling
+	assert.NotNil(t, bt.Store)
+}
+
+func TestEnablePersistence_ConcurrentAccess(_ *testing.T) {
+	bt := NewThread(llmtypes.Config{}, "conv-123", nil, hooks.Trigger{})
+	mockStore := &mockConversationStore{}
+	bt.Store = mockStore
+	bt.LoadConversation = func(_ context.Context) {}
+
+	var wg sync.WaitGroup
+	const numGoroutines = 50
+
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func(enable bool) {
+			defer wg.Done()
+			bt.EnablePersistence(context.Background(), enable)
+		}(i%2 == 0)
+	}
+
+	wg.Wait()
+	// Just verify no panic occurs during concurrent access
 }

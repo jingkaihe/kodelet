@@ -10,6 +10,7 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/hooks"
+	"github.com/jingkaihe/kodelet/pkg/logger"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"go.opentelemetry.io/otel/attribute"
@@ -27,6 +28,10 @@ const (
 // to avoid direct dependency on the conversations package in provider implementations.
 type ConversationStore = conversations.ConversationStore
 
+// LoadConversationFunc is a callback function type for provider-specific conversation loading.
+// This is called by EnablePersistence when persistence is enabled and a store is available.
+type LoadConversationFunc func(ctx context.Context)
+
 // Thread contains shared fields that are common across all LLM provider implementations.
 // Provider-specific Thread structs should embed this struct to inherit common functionality.
 type Thread struct {
@@ -39,6 +44,7 @@ type Thread struct {
 	ToolResults            map[string]tooltypes.StructuredToolResult // Maps tool_call_id to structured result
 	SubagentContextFactory llmtypes.SubagentContextFactory           // Factory for creating subagent contexts
 	HookTrigger            hooks.Trigger                             // Hook trigger for lifecycle hooks
+	LoadConversation       LoadConversationFunc                      // Provider-specific callback for loading conversations
 
 	Mu             sync.Mutex // Mutex for thread-safe operations on usage and tool results
 	ConversationMu sync.Mutex // Mutex for conversation-related operations
@@ -92,6 +98,40 @@ func (t *Thread) SetConversationID(id string) {
 // IsPersisted returns whether this thread is being persisted
 func (t *Thread) IsPersisted() bool {
 	return t.Persisted
+}
+
+// EnablePersistence enables or disables conversation persistence.
+// When enabling persistence:
+//   - Initializes the conversation store if not already initialized
+//   - Calls the LoadConversation callback to load any existing conversation
+//
+// If store initialization fails, persistence is disabled and the error is logged.
+// The LoadConversation callback must be set by the provider before calling this method
+// if provider-specific conversation loading is needed.
+// This method is thread-safe and uses mutex locking.
+func (t *Thread) EnablePersistence(ctx context.Context, enabled bool) {
+	t.ConversationMu.Lock()
+	defer t.ConversationMu.Unlock()
+
+	t.Persisted = enabled
+
+	// Initialize the store if enabling persistence and it's not already initialized
+	if enabled && t.Store == nil {
+		store, err := conversations.GetConversationStore(ctx)
+		if err != nil {
+			// Log the error but continue without persistence
+			logger.G(ctx).WithError(err).Error("Error initializing conversation store")
+			t.Persisted = false
+			return
+		}
+		t.Store = store
+	}
+
+	// If enabling persistence and there's an existing conversation ID,
+	// try to load it from the store using the provider-specific callback
+	if enabled && t.Store != nil && t.LoadConversation != nil {
+		t.LoadConversation(ctx)
+	}
 }
 
 // GetUsage returns the current token usage for the thread.

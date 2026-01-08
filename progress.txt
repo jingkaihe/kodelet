@@ -170,3 +170,42 @@ This file tracks progress across Ralph iterations.
 
 ---
 
+## 2026-01-08 - Iteration 6
+
+### Feature Completed: base-thread-persistence
+
+**What was implemented:**
+- Added `LoadConversationFunc` callback type to `pkg/llm/base/base.go`
+  - Signature: `func(ctx context.Context)`
+  - Allows provider-specific conversation loading without coupling to base package
+- Added `LoadConversation` field to Thread struct for provider-specific callback
+- Added `EnablePersistence(ctx context.Context, enabled bool)` method
+  - Sets the `Persisted` flag
+  - Initializes conversation store if not already initialized using `conversations.GetConversationStore()`
+  - Logs error and disables persistence if store initialization fails
+  - Calls `LoadConversation` callback if set and persistence is enabled
+  - Method is thread-safe using `ConversationMu` mutex
+- Added import for `github.com/jingkaihe/kodelet/pkg/logger` for proper structured logging
+- Added comprehensive unit tests:
+  - TestEnablePersistence_DisablePersistence - disabling persistence
+  - TestEnablePersistence_WithExistingStore - enabling with pre-existing store
+  - TestEnablePersistence_WithExistingStore_NoCallback - without LoadConversation callback
+  - TestEnablePersistence_DisableDoesNotCallLoadConversation - verify callback not called when disabling
+  - TestEnablePersistence_MultipleEnableCallsDoNotReinitializeStore - verify store not reinitialized
+  - TestEnablePersistence_LoadConversationCallback - verify context passed correctly
+  - TestEnablePersistence_EnableThenDisable - toggle behavior
+  - TestEnablePersistence_ConcurrentAccess - race condition test
+- Added mockConversationStore for testing with proper interface implementation
+
+**Verification:**
+- All tests pass: `go test ./pkg/llm/base/...` (44 tests)
+- Race detector passes: `go test -race ./pkg/llm/base/...`
+- Linter passes: `mise run lint`
+
+**Notes for next iteration:**
+- Next features to implement: `anthropic-embed-base-thread`, `openai-embed-base-thread`, or `google-embed-base-thread` (all high priority)
+- Provider implementations will need to set the `LoadConversation` callback to their specific `loadConversation()` method
+- The base package now provides all shared methods needed for embedding: GetState, SetState, GetConfig, GetConversationID, SetConversationID, IsPersisted, GetUsage, SetStructuredToolResult, GetStructuredToolResults, SetStructuredToolResults, ShouldAutoCompact, CreateMessageSpan, FinalizeMessageSpan, EnablePersistence
+
+---
+

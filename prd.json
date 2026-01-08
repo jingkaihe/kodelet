@@ -86,7 +86,7 @@
         "Add unit tests for persistence enabling/disabling",
         "Run 'go test ./pkg/llm/base/...' to verify tests pass"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "anthropic-embed-base-thread",
