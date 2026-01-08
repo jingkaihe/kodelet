@@ -58,7 +58,7 @@
         "Add unit tests covering edge cases (ratio <= 0, ratio > 1, MaxContextWindow = 0)",
         "Run 'go test ./pkg/llm/base/...' to verify tests pass"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "base-thread-tracing",

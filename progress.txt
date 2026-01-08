@@ -96,3 +96,38 @@ This file tracks progress across Ralph iterations.
 
 ---
 
+## 2026-01-08 - Iteration 4
+
+### Feature Completed: base-thread-auto-compact
+
+**What was implemented:**
+- Added `ShouldAutoCompact(compactRatio float64) bool` method to `pkg/llm/base/base.go`
+- Implementation checks if context window utilization ratio exceeds the specified compactRatio
+- Returns false for invalid ratios (ratio <= 0 or ratio > 1) or when MaxContextWindow is 0
+- Method is thread-safe (calls GetUsage() which uses mutex locking)
+- Added comprehensive unit tests using table-driven tests covering:
+  - Utilization exceeds ratio → returns true
+  - Utilization equals ratio exactly → returns true
+  - Utilization below ratio → returns false
+  - Ratio is zero → returns false
+  - Ratio is negative → returns false
+  - Ratio exceeds 1.0 → returns false
+  - Ratio exactly 1.0 and fully utilized → returns true
+  - MaxContextWindow is zero → returns false
+  - CurrentContextWindow is zero → returns false
+  - Small ratio with some usage → returns true
+- Added nil usage safety test
+- Added concurrent access test with race detection
+
+**Verification:**
+- All tests pass: `go test ./pkg/llm/base/...`
+- Race detector passes: `go test -race ./pkg/llm/base/...`
+- Linter passes: `mise run lint`
+
+**Notes for next iteration:**
+- Next feature to implement: `base-thread-tracing` - Move createMessageSpan() and finalizeMessageSpan() methods
+- The method is exported (ShouldAutoCompact) so it can be called from provider implementations
+- Provider implementations will eventually call this method instead of their local shouldAutoCompact()
+
+---
+

@@ -294,3 +294,130 @@ func TestStructuredToolResults_ConcurrentAccess(_ *testing.T) {
 
 	wg.Wait()
 }
+
+func TestShouldAutoCompact(t *testing.T) {
+	tests := []struct {
+		name                 string
+		compactRatio         float64
+		currentContextWindow int
+		maxContextWindow     int
+		expected             bool
+	}{
+		{
+			name:                 "should return true when utilization exceeds ratio",
+			compactRatio:         0.8,
+			currentContextWindow: 90000,
+			maxContextWindow:     100000,
+			expected:             true,
+		},
+		{
+			name:                 "should return true when utilization equals ratio exactly",
+			compactRatio:         0.8,
+			currentContextWindow: 80000,
+			maxContextWindow:     100000,
+			expected:             true,
+		},
+		{
+			name:                 "should return false when utilization is below ratio",
+			compactRatio:         0.8,
+			currentContextWindow: 70000,
+			maxContextWindow:     100000,
+			expected:             false,
+		},
+		{
+			name:                 "should return false when ratio is zero",
+			compactRatio:         0.0,
+			currentContextWindow: 90000,
+			maxContextWindow:     100000,
+			expected:             false,
+		},
+		{
+			name:                 "should return false when ratio is negative",
+			compactRatio:         -0.5,
+			currentContextWindow: 90000,
+			maxContextWindow:     100000,
+			expected:             false,
+		},
+		{
+			name:                 "should return false when ratio exceeds 1.0",
+			compactRatio:         1.5,
+			currentContextWindow: 90000,
+			maxContextWindow:     100000,
+			expected:             false,
+		},
+		{
+			name:                 "should return true when ratio is exactly 1.0 and fully utilized",
+			compactRatio:         1.0,
+			currentContextWindow: 100000,
+			maxContextWindow:     100000,
+			expected:             true,
+		},
+		{
+			name:                 "should return false when MaxContextWindow is zero",
+			compactRatio:         0.8,
+			currentContextWindow: 90000,
+			maxContextWindow:     0,
+			expected:             false,
+		},
+		{
+			name:                 "should return false when CurrentContextWindow is zero",
+			compactRatio:         0.8,
+			currentContextWindow: 0,
+			maxContextWindow:     100000,
+			expected:             false,
+		},
+		{
+			name:                 "should return true with small ratio and some usage",
+			compactRatio:         0.1,
+			currentContextWindow: 15000,
+			maxContextWindow:     100000,
+			expected:             true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+			bt.Usage.CurrentContextWindow = tt.currentContextWindow
+			bt.Usage.MaxContextWindow = tt.maxContextWindow
+
+			result := bt.ShouldAutoCompact(tt.compactRatio)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestShouldAutoCompact_NilUsage(t *testing.T) {
+	bt := &Thread{
+		Usage: nil,
+	}
+
+	result := bt.ShouldAutoCompact(0.8)
+	assert.False(t, result)
+}
+
+func TestShouldAutoCompact_ConcurrentAccess(_ *testing.T) {
+	bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+	bt.Usage.CurrentContextWindow = 90000
+	bt.Usage.MaxContextWindow = 100000
+
+	var wg sync.WaitGroup
+	const numGoroutines = 100
+
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(2)
+		go func(val int) {
+			defer wg.Done()
+			bt.Mu.Lock()
+			bt.Usage.CurrentContextWindow = val * 1000
+			bt.Mu.Unlock()
+		}(i)
+
+		go func() {
+			defer wg.Done()
+			_ = bt.ShouldAutoCompact(0.8)
+		}()
+	}
+
+	wg.Wait()
+}

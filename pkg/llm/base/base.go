@@ -139,3 +139,20 @@ func (t *Thread) SetStructuredToolResults(results map[string]tooltypes.Structure
 		maps.Copy(t.ToolResults, results)
 	}
 }
+
+// ShouldAutoCompact checks if auto-compact should be triggered based on context window utilization.
+// Returns true if the current context window utilization ratio >= compactRatio.
+// Returns false if compactRatio is invalid (<= 0 or > 1) or MaxContextWindow is 0.
+func (t *Thread) ShouldAutoCompact(compactRatio float64) bool {
+	if compactRatio <= 0.0 || compactRatio > 1.0 {
+		return false
+	}
+
+	usage := t.GetUsage()
+	if usage.MaxContextWindow == 0 {
+		return false
+	}
+
+	utilizationRatio := float64(usage.CurrentContextWindow) / float64(usage.MaxContextWindow)
+	return utilizationRatio >= compactRatio
+}
