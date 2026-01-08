@@ -286,16 +286,6 @@ Kodelet uses a `Thread` abstraction for all interactions with LLM providers (Ant
 
 The architecture provides a unified approach for both interactive and one-shot uses with comprehensive observability through OpenTelemetry tracing.
 
-### Base Thread Package
-
-The `pkg/llm/base` package provides shared functionality for all LLM provider implementations using Go's struct embedding pattern. Provider-specific Thread structs (Anthropic, OpenAI, Google) embed `*base.Thread` to inherit common behavior:
-
-- **Shared fields**: Config, State, Usage, ConversationID, Store, ToolResults, HookTrigger, SubagentContextFactory
-- **Shared methods**: GetState/SetState, GetConfig, GetUsage, EnablePersistence, ShouldAutoCompact, CreateMessageSpan/FinalizeMessageSpan
-- **Shared constants**: MaxImageFileSize (5MB), MaxImageCount (10)
-
-This composition-based approach reduces code duplication (~300 lines per provider) while preserving provider-specific behaviors. See `pkg/llm/base/doc.go` for comprehensive documentation and ADR 023 for the architectural decision record.
-
 ## Error Handling
 
 **Always prefer pkg/errors over fmt.Errorf** for error wrapping:
@@ -423,4 +413,3 @@ This ensures kodelet works in:
 - **Hooks Guide**: [docs/HOOKS.md](docs/HOOKS.md) for agent lifecycle hooks system
 - **MCP Tools**: [docs/mcp.md](docs/mcp.md) for Model Context Protocol integration
 - **ACP Integration**: [docs/ACP.md](docs/ACP.md) for Agent Client Protocol IDE integration
-
