@@ -187,10 +187,13 @@ func migrateFromLegacyCredentials(legacyPath string) (*AnthropicCredentialsFile,
 	return credsFile, nil
 }
 
-// GenerateAliasFromEmail returns the email address as the alias.
+// GenerateAliasFromEmail extracts the prefix (part before @) from an email address to use as an alias.
 func GenerateAliasFromEmail(email string) string {
 	if email == "" {
 		return "default"
+	}
+	if idx := strings.Index(email, "@"); idx > 0 {
+		return email[:idx]
 	}
 	return email
 }

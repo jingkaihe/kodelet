@@ -416,10 +416,10 @@ func TestGenerateAliasFromEmail(t *testing.T) {
 		email    string
 		expected string
 	}{
-		{"test@example.com", "test@example.com"},
-		{"john.doe@company.org", "john.doe@company.org"},
+		{"test@example.com", "test"},
+		{"john.doe@company.org", "john.doe"},
 		{"", "default"},
-		{"@nodomain.com", "@nodomain.com"},
+		{"@nodomain.com", "@nodomain.com"}, // @ at position 0, no valid prefix
 		{"simple", "simple"},
 	}
 
@@ -475,7 +475,7 @@ func TestSaveAnthropicCredentialsWithAlias(t *testing.T) {
 		assert.Equal(t, "work", defaultAlias)
 	})
 
-	t.Run("save without alias uses full email", func(t *testing.T) {
+	t.Run("save without alias uses email prefix", func(t *testing.T) {
 		creds := &AnthropicCredentials{
 			Email:        "auto@domain.com",
 			Scope:        "user:inference user:profile",
@@ -487,8 +487,8 @@ func TestSaveAnthropicCredentialsWithAlias(t *testing.T) {
 		_, err := SaveAnthropicCredentialsWithAlias("", creds)
 		require.NoError(t, err)
 
-		// Should be retrievable by full email
-		retrieved, err := GetAnthropicCredentialsByAlias("auto@domain.com")
+		// Should be retrievable by email prefix
+		retrieved, err := GetAnthropicCredentialsByAlias("auto")
 		require.NoError(t, err)
 		assert.Equal(t, "auto@domain.com", retrieved.Email)
 	})
@@ -1178,7 +1178,7 @@ func TestEmptyAliasGeneratesFromEmail(t *testing.T) {
 	defer os.Setenv("HOME", originalHome)
 	os.Setenv("HOME", tempDir)
 
-	// Save with empty alias - should use full email as alias
+	// Save with empty alias - should use email prefix as alias
 	creds := &AnthropicCredentials{
 		Email:        "generated.alias@company.com",
 		AccessToken:  "token",
@@ -1188,18 +1188,18 @@ func TestEmptyAliasGeneratesFromEmail(t *testing.T) {
 	_, err := SaveAnthropicCredentialsWithAlias("", creds)
 	require.NoError(t, err)
 
-	// Should be retrievable by full email
-	retrieved, err := GetAnthropicCredentialsByAlias("generated.alias@company.com")
+	// Should be retrievable by email prefix
+	retrieved, err := GetAnthropicCredentialsByAlias("generated.alias")
 	require.NoError(t, err)
 	assert.Equal(t, "generated.alias@company.com", retrieved.Email)
 
 	// Should be the default
 	defaultAlias, err := GetDefaultAnthropicAccount()
 	require.NoError(t, err)
-	assert.Equal(t, "generated.alias@company.com", defaultAlias)
+	assert.Equal(t, "generated.alias", defaultAlias)
 
-	// Account should exist under full email alias
-	exists, err := AccountExists("generated.alias@company.com")
+	// Account should exist under email prefix alias
+	exists, err := AccountExists("generated.alias")
 	require.NoError(t, err)
 	assert.True(t, exists)
 }
