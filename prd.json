@@ -45,7 +45,7 @@
         "Add unit tests for all three methods",
         "Run 'go test ./pkg/llm/base/...' to verify tests pass"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "base-thread-auto-compact",

@@ -148,3 +148,149 @@ func TestGetUsage_ConcurrentAccess(_ *testing.T) {
 
 	wg.Wait()
 }
+
+func TestSetStructuredToolResult(t *testing.T) {
+	bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+
+	result := tooltypes.StructuredToolResult{
+		ToolName: "test-tool",
+		Success:  true,
+	}
+	bt.SetStructuredToolResult("tool-call-1", result)
+
+	assert.Len(t, bt.ToolResults, 1)
+	assert.Equal(t, result, bt.ToolResults["tool-call-1"])
+}
+
+func TestSetStructuredToolResult_NilMap(t *testing.T) {
+	bt := &Thread{
+		ToolResults: nil,
+	}
+
+	result := tooltypes.StructuredToolResult{
+		ToolName: "test-tool",
+		Success:  true,
+	}
+	bt.SetStructuredToolResult("tool-call-1", result)
+
+	require.NotNil(t, bt.ToolResults)
+	assert.Equal(t, result, bt.ToolResults["tool-call-1"])
+}
+
+func TestSetStructuredToolResult_MultipleResults(t *testing.T) {
+	bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+
+	result1 := tooltypes.StructuredToolResult{ToolName: "tool-1", Success: true}
+	result2 := tooltypes.StructuredToolResult{ToolName: "tool-2", Success: false}
+
+	bt.SetStructuredToolResult("tool-1", result1)
+	bt.SetStructuredToolResult("tool-2", result2)
+
+	assert.Len(t, bt.ToolResults, 2)
+	assert.Equal(t, result1, bt.ToolResults["tool-1"])
+	assert.Equal(t, result2, bt.ToolResults["tool-2"])
+}
+
+func TestGetStructuredToolResults(t *testing.T) {
+	bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+
+	result := tooltypes.StructuredToolResult{
+		ToolName: "test-tool",
+		Success:  true,
+	}
+	bt.ToolResults["tool-call-1"] = result
+
+	results := bt.GetStructuredToolResults()
+
+	assert.Len(t, results, 1)
+	assert.Equal(t, result, results["tool-call-1"])
+}
+
+func TestGetStructuredToolResults_NilMap(t *testing.T) {
+	bt := &Thread{
+		ToolResults: nil,
+	}
+
+	results := bt.GetStructuredToolResults()
+
+	require.NotNil(t, results)
+	assert.Len(t, results, 0)
+}
+
+func TestGetStructuredToolResults_ReturnsCopy(t *testing.T) {
+	bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+
+	result := tooltypes.StructuredToolResult{ToolName: "original-tool", Success: true}
+	bt.ToolResults["tool-1"] = result
+
+	results := bt.GetStructuredToolResults()
+	results["tool-1"] = tooltypes.StructuredToolResult{ToolName: "modified-tool", Success: false}
+
+	assert.Equal(t, "original-tool", bt.ToolResults["tool-1"].ToolName)
+}
+
+func TestSetStructuredToolResults(t *testing.T) {
+	bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+
+	results := map[string]tooltypes.StructuredToolResult{
+		"tool-1": {ToolName: "tool-1", Success: true},
+		"tool-2": {ToolName: "tool-2", Success: false},
+	}
+
+	bt.SetStructuredToolResults(results)
+
+	assert.Len(t, bt.ToolResults, 2)
+	assert.Equal(t, "tool-1", bt.ToolResults["tool-1"].ToolName)
+	assert.Equal(t, "tool-2", bt.ToolResults["tool-2"].ToolName)
+}
+
+func TestSetStructuredToolResults_NilInput(t *testing.T) {
+	bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+
+	bt.ToolResults["existing"] = tooltypes.StructuredToolResult{ToolName: "existing"}
+
+	bt.SetStructuredToolResults(nil)
+
+	require.NotNil(t, bt.ToolResults)
+	assert.Len(t, bt.ToolResults, 0)
+}
+
+func TestSetStructuredToolResults_MakesCopy(t *testing.T) {
+	bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+
+	results := map[string]tooltypes.StructuredToolResult{
+		"tool-1": {ToolName: "original-tool", Success: true},
+	}
+
+	bt.SetStructuredToolResults(results)
+
+	results["tool-1"] = tooltypes.StructuredToolResult{ToolName: "modified-tool", Success: false}
+
+	assert.Equal(t, "original-tool", bt.ToolResults["tool-1"].ToolName)
+}
+
+func TestStructuredToolResults_ConcurrentAccess(_ *testing.T) {
+	bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+
+	var wg sync.WaitGroup
+	const numGoroutines = 100
+
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(2)
+		go func(val int) {
+			defer wg.Done()
+			toolID := "tool-" + string(rune('a'+val%26))
+			bt.SetStructuredToolResult(toolID, tooltypes.StructuredToolResult{
+				ToolName: toolID,
+				Success:  true,
+			})
+		}(i)
+
+		go func() {
+			defer wg.Done()
+			_ = bt.GetStructuredToolResults()
+		}()
+	}
+
+	wg.Wait()
+}

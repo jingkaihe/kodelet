@@ -66,3 +66,33 @@ This file tracks progress across Ralph iterations.
 
 ---
 
+## 2026-01-08 - Iteration 3
+
+### Feature Completed: base-thread-tool-results
+
+**What was implemented:**
+- Added three structured tool result management methods to `pkg/llm/base/base.go`:
+  - `SetStructuredToolResult(toolCallID string, result tooltypes.StructuredToolResult)` - stores a result for a tool call
+  - `GetStructuredToolResults() map[string]tooltypes.StructuredToolResult` - returns a copy of all results
+  - `SetStructuredToolResults(results map[string]tooltypes.StructuredToolResult)` - replaces all results
+- All methods are thread-safe using mutex locking
+- GetStructuredToolResults returns a copy using `maps.Copy()` to avoid race conditions
+- SetStructuredToolResults makes a copy of the input map to avoid external modifications
+- Added comprehensive unit tests covering:
+  - Basic functionality for each method
+  - Nil map handling
+  - Multiple results
+  - Copy semantics (ensuring modifications don't affect original)
+  - Concurrent access tests
+
+**Verification:**
+- All tests pass: `go test ./pkg/llm/base/...`
+- Race detector passes: `go test -race ./pkg/llm/base/...`
+- Linter passes: `mise run lint`
+
+**Notes for next iteration:**
+- Next feature to implement: `base-thread-auto-compact` - Move shouldAutoCompact() method
+- The methods use `maps.Copy()` from Go standard library for consistency
+
+---
+

@@ -4,6 +4,7 @@
 package base
 
 import (
+	"maps"
 	"sync"
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
@@ -98,4 +99,43 @@ func (t *Thread) GetUsage() llmtypes.Usage {
 		return llmtypes.Usage{}
 	}
 	return *t.Usage
+}
+
+// SetStructuredToolResult stores the structured result for a tool call.
+// This method is thread-safe and uses mutex locking.
+func (t *Thread) SetStructuredToolResult(toolCallID string, result tooltypes.StructuredToolResult) {
+	t.Mu.Lock()
+	defer t.Mu.Unlock()
+	if t.ToolResults == nil {
+		t.ToolResults = make(map[string]tooltypes.StructuredToolResult)
+	}
+	t.ToolResults[toolCallID] = result
+}
+
+// GetStructuredToolResults returns a copy of all structured tool results.
+// This method is thread-safe and uses mutex locking.
+// A copy is returned to avoid race conditions.
+func (t *Thread) GetStructuredToolResults() map[string]tooltypes.StructuredToolResult {
+	t.Mu.Lock()
+	defer t.Mu.Unlock()
+	if t.ToolResults == nil {
+		return make(map[string]tooltypes.StructuredToolResult)
+	}
+	result := make(map[string]tooltypes.StructuredToolResult)
+	maps.Copy(result, t.ToolResults)
+	return result
+}
+
+// SetStructuredToolResults replaces all structured tool results with the provided map.
+// This method is thread-safe and uses mutex locking.
+// A copy of the input map is made to avoid external modifications.
+func (t *Thread) SetStructuredToolResults(results map[string]tooltypes.StructuredToolResult) {
+	t.Mu.Lock()
+	defer t.Mu.Unlock()
+	if results == nil {
+		t.ToolResults = make(map[string]tooltypes.StructuredToolResult)
+	} else {
+		t.ToolResults = make(map[string]tooltypes.StructuredToolResult)
+		maps.Copy(t.ToolResults, results)
+	}
 }
