@@ -140,7 +140,7 @@
         "Update NewGoogleThread() to initialize BaseThread",
         "Run 'go test ./pkg/llm/google/...' to verify all tests pass"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "base-thread-unit-tests",

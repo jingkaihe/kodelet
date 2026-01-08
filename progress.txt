@@ -300,3 +300,59 @@ This file tracks progress across Ralph iterations.
 
 ---
 
+## 2026-01-08 - Iteration 9
+
+### Feature Completed: google-embed-base-thread
+
+**What was implemented:**
+- Updated the Google Thread struct to embed `*base.Thread` for shared functionality
+- Removed duplicated fields that are now in base.Thread:
+  - config → Config (via base.Thread)
+  - state → State (via base.Thread)
+  - usage → Usage (via base.Thread)
+  - conversationID → ConversationID (via base.Thread)
+  - isPersisted → Persisted (via base.Thread)
+  - store → Store (via base.Thread)
+  - mu → Mu (via base.Thread)
+  - conversationMu → ConversationMu (via base.Thread)
+  - toolResults → ToolResults (via base.Thread)
+  - subagentContextFactory → SubagentContextFactory (via base.Thread)
+  - hookTrigger → HookTrigger (via base.Thread)
+- Kept Google-specific fields: client, backend, messages, summary, thinkingBudget
+- Removed duplicated constants (MaxImageFileSize, MaxImageCount) - now using base.MaxImageFileSize, base.MaxImageCount
+- Removed duplicated methods (now using base.Thread methods):
+  - GetState, SetState
+  - GetConfig
+  - GetConversationID, SetConversationID
+  - IsPersisted
+  - GetUsage
+  - shouldAutoCompact → ShouldAutoCompact
+  - createMessageSpan, finalizeMessageSpan → CreateMessageSpan, FinalizeMessageSpan
+  - SetStructuredToolResult, GetStructuredToolResults, SetStructuredToolResults
+  - EnablePersistence (now using base.EnablePersistence with LoadConversation callback)
+- Updated NewGoogleThread() to:
+  - Create base.Thread using base.NewThread()
+  - Set LoadConversation callback for provider-specific conversation loading
+- Updated all field references throughout google.go and persistence.go
+- Updated loadConversation() method to work as a callback for base.EnablePersistence
+- Renamed LoadConversation(ctx, id) to LoadConversationByID(ctx, id) to avoid conflict with callback
+- Updated tests in google_test.go to use new field names and base.MaxImageCount/MaxImageFileSize
+
+**Files modified:**
+- pkg/llm/google/google.go - Major refactoring
+- pkg/llm/google/persistence.go - Updated field references
+- pkg/llm/google/google_test.go - Updated tests
+
+**Verification:**
+- All tests pass: `go test ./pkg/llm/google/...` (30+ tests)
+- Race detector passes: `go test -race ./pkg/llm/google/...`
+- All LLM tests pass: `go test ./pkg/llm/...`
+- Linter passes: `mise run lint`
+
+**Notes for next iteration:**
+- All three providers now embed base.Thread (Anthropic, OpenAI, Google)
+- Next features to implement: `base-thread-unit-tests` or `integration-tests` (both medium priority)
+- Google-specific tracing attribute (backend) is passed via extraAttributes to CreateMessageSpan
+
+---
+
