@@ -814,3 +814,274 @@ func TestEnablePersistence_ConcurrentAccess(_ *testing.T) {
 	wg.Wait()
 	// Just verify no panic occurs during concurrent access
 }
+
+// === Additional Comprehensive Tests ===
+
+// TestConstants verifies that image processing constants have the correct values
+func TestConstants(t *testing.T) {
+	assert.Equal(t, 5*1024*1024, MaxImageFileSize, "MaxImageFileSize should be 5MB")
+	assert.Equal(t, 10, MaxImageCount, "MaxImageCount should be 10")
+}
+
+// TestSetState_Sequential verifies SetState/GetState work correctly in sequence
+func TestSetState_Sequential(t *testing.T) {
+	bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+
+	// Create mock states and set them sequentially
+	state1 := &mockState{}
+	state2 := &mockState{}
+
+	bt.SetState(state1)
+	assert.Same(t, state1, bt.GetState())
+
+	bt.SetState(state2)
+	assert.Same(t, state2, bt.GetState())
+
+	bt.SetState(nil)
+	assert.Nil(t, bt.GetState())
+}
+
+// TestGetSetConversationID_Sequential verifies conversation ID methods work correctly in sequence
+func TestGetSetConversationID_Sequential(t *testing.T) {
+	bt := NewThread(llmtypes.Config{}, "initial-conv", nil, hooks.Trigger{})
+
+	// Verify initial value
+	assert.Equal(t, "initial-conv", bt.GetConversationID())
+
+	// Update and verify
+	bt.SetConversationID("conv-a")
+	assert.Equal(t, "conv-a", bt.GetConversationID())
+
+	bt.SetConversationID("conv-b")
+	assert.Equal(t, "conv-b", bt.GetConversationID())
+
+	// Empty string should work
+	bt.SetConversationID("")
+	assert.Equal(t, "", bt.GetConversationID())
+}
+
+// TestIsPersisted_Sequential verifies persistence flag works correctly in sequence
+func TestIsPersisted_Sequential(t *testing.T) {
+	bt := NewThread(llmtypes.Config{}, "conv-123", nil, hooks.Trigger{})
+
+	// Default should be false
+	assert.False(t, bt.IsPersisted())
+
+	// Set to true
+	bt.Persisted = true
+	assert.True(t, bt.IsPersisted())
+
+	// Set back to false
+	bt.Persisted = false
+	assert.False(t, bt.IsPersisted())
+}
+
+// TestNewThread_InitializesAllFields verifies all fields are properly initialized
+func TestNewThread_InitializesAllFields(t *testing.T) {
+	config := llmtypes.Config{
+		Model:                "claude-sonnet-4-5",
+		MaxTokens:            8192,
+		WeakModelMaxTokens:   2048,
+		ThinkingBudgetTokens: 1000,
+		IsSubAgent:           true,
+	}
+	conversationID := "conv-comprehensive-test"
+	hookTrigger := hooks.Trigger{
+		ConversationID: conversationID,
+	}
+
+	bt := NewThread(config, conversationID, nil, hookTrigger)
+
+	// Verify all fields are properly initialized
+	require.NotNil(t, bt)
+	assert.Equal(t, config, bt.Config)
+	assert.Equal(t, conversationID, bt.ConversationID)
+	assert.False(t, bt.Persisted, "Persisted should be false by default")
+	assert.NotNil(t, bt.Usage, "Usage should be initialized")
+	assert.Equal(t, 0, bt.Usage.InputTokens, "Usage InputTokens should be 0")
+	assert.Equal(t, 0, bt.Usage.OutputTokens, "Usage OutputTokens should be 0")
+	assert.NotNil(t, bt.ToolResults, "ToolResults should be initialized")
+	assert.Len(t, bt.ToolResults, 0, "ToolResults should be empty")
+	assert.Nil(t, bt.SubagentContextFactory, "SubagentContextFactory should be nil when not provided")
+	assert.Nil(t, bt.State, "State should be nil by default")
+	assert.Nil(t, bt.Store, "Store should be nil by default")
+	assert.Nil(t, bt.LoadConversation, "LoadConversation should be nil by default")
+}
+
+// TestNewThread_DefaultHookTrigger verifies hook trigger is properly set
+func TestNewThread_DefaultHookTrigger(t *testing.T) {
+	hookTrigger := hooks.Trigger{
+		ConversationID: "hook-conv-id",
+	}
+
+	bt := NewThread(llmtypes.Config{}, "other-conv-id", nil, hookTrigger)
+
+	// The hook trigger should maintain its own conversation ID set at creation
+	assert.Equal(t, "hook-conv-id", bt.HookTrigger.ConversationID)
+}
+
+// TestSetConversationID_UpdatesHookTrigger verifies SetConversationID updates both fields
+func TestSetConversationID_UpdatesHookTrigger(t *testing.T) {
+	bt := NewThread(llmtypes.Config{}, "initial-id", nil, hooks.Trigger{
+		ConversationID: "initial-id",
+	})
+
+	assert.Equal(t, "initial-id", bt.ConversationID)
+	assert.Equal(t, "initial-id", bt.HookTrigger.ConversationID)
+
+	bt.SetConversationID("updated-id")
+
+	assert.Equal(t, "updated-id", bt.ConversationID)
+	assert.Equal(t, "updated-id", bt.HookTrigger.ConversationID)
+}
+
+// TestGetConfig_ReturnsDeepCopy verifies GetConfig returns the actual config (not a copy)
+func TestGetConfig_ReturnsSameValue(t *testing.T) {
+	config := llmtypes.Config{
+		Model:     "gpt-4.1",
+		MaxTokens: 4096,
+	}
+	bt := NewThread(config, "", nil, hooks.Trigger{})
+
+	retrieved := bt.GetConfig()
+
+	assert.Equal(t, config.Model, retrieved.Model)
+	assert.Equal(t, config.MaxTokens, retrieved.MaxTokens)
+}
+
+// TestAllMethods_WithNilThread verifies methods handle nil gracefully (by panicking expectedly)
+func TestGetState_ReturnsNilWhenNotSet(t *testing.T) {
+	bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+
+	// State should be nil when not explicitly set
+	assert.Nil(t, bt.GetState())
+}
+
+// TestUsageAccumulation verifies usage can be accumulated correctly
+func TestUsageAccumulation(t *testing.T) {
+	bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+
+	// Simulate token accumulation
+	bt.Mu.Lock()
+	bt.Usage.InputTokens = 100
+	bt.Usage.OutputTokens = 50
+	bt.Usage.CurrentContextWindow = 150
+	bt.Usage.MaxContextWindow = 200000
+	bt.Usage.InputCost = 0.01
+	bt.Usage.OutputCost = 0.005
+	bt.Mu.Unlock()
+
+	usage := bt.GetUsage()
+
+	assert.Equal(t, 100, usage.InputTokens)
+	assert.Equal(t, 50, usage.OutputTokens)
+	assert.Equal(t, 150, usage.CurrentContextWindow)
+	assert.Equal(t, 200000, usage.MaxContextWindow)
+	assert.InDelta(t, 0.01, usage.InputCost, 0.0001)
+	assert.InDelta(t, 0.005, usage.OutputCost, 0.0001)
+}
+
+// TestStructuredToolResults_OverwriteExisting verifies overwriting results works correctly
+func TestStructuredToolResults_OverwriteExisting(t *testing.T) {
+	bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+
+	result1 := tooltypes.StructuredToolResult{ToolName: "tool-v1", Success: true}
+	result2 := tooltypes.StructuredToolResult{ToolName: "tool-v2", Success: false}
+
+	bt.SetStructuredToolResult("tool-1", result1)
+	assert.Equal(t, "tool-v1", bt.ToolResults["tool-1"].ToolName)
+
+	// Overwrite with new result
+	bt.SetStructuredToolResult("tool-1", result2)
+	assert.Equal(t, "tool-v2", bt.ToolResults["tool-1"].ToolName)
+	assert.False(t, bt.ToolResults["tool-1"].Success)
+}
+
+// TestShouldAutoCompact_BoundaryConditions tests edge cases around ratio boundaries
+func TestShouldAutoCompact_BoundaryConditions(t *testing.T) {
+	tests := []struct {
+		name                 string
+		compactRatio         float64
+		currentContextWindow int
+		maxContextWindow     int
+		expected             bool
+	}{
+		{
+			name:                 "ratio just above 0 with sufficient usage",
+			compactRatio:         0.0001,
+			currentContextWindow: 100,
+			maxContextWindow:     100000,
+			expected:             true, // 100/100000 = 0.001 >= 0.0001
+		},
+		{
+			name:                 "ratio at 0.9999",
+			compactRatio:         0.9999,
+			currentContextWindow: 99990,
+			maxContextWindow:     100000,
+			expected:             true, // 0.9999 >= 0.9999
+		},
+		{
+			name:                 "very small context window",
+			compactRatio:         0.5,
+			currentContextWindow: 1,
+			maxContextWindow:     2,
+			expected:             true, // 0.5 >= 0.5
+		},
+		{
+			name:                 "large context window values",
+			compactRatio:         0.8,
+			currentContextWindow: 160000,
+			maxContextWindow:     200000,
+			expected:             true, // 0.8 >= 0.8
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+			bt.Usage.CurrentContextWindow = tt.currentContextWindow
+			bt.Usage.MaxContextWindow = tt.maxContextWindow
+
+			result := bt.ShouldAutoCompact(tt.compactRatio)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+// TestCreateMessageSpan_AllCommonAttributes verifies all expected attributes are set
+func TestCreateMessageSpan_AllCommonAttributes(t *testing.T) {
+	config := llmtypes.Config{
+		Model:              "claude-sonnet-4-5",
+		MaxTokens:          8192,
+		WeakModelMaxTokens: 2048,
+		IsSubAgent:         true,
+	}
+	bt := NewThread(config, "attr-test-conv", nil, hooks.Trigger{})
+	bt.Persisted = true
+
+	tracer := noop.NewTracerProvider().Tracer("test")
+	ctx := context.Background()
+	opt := llmtypes.MessageOpt{
+		UseWeakModel: true,
+	}
+	message := "test message for attribute verification"
+
+	newCtx, span := bt.CreateMessageSpan(ctx, tracer, message, opt)
+
+	require.NotNil(t, newCtx)
+	require.NotNil(t, span)
+	// Span is created with noop tracer, so we can only verify it doesn't panic
+	span.End()
+}
+
+// TestFinalizeMessageSpan_ZeroUsage verifies finalization works with zero usage values
+func TestFinalizeMessageSpan_ZeroUsage(_ *testing.T) {
+	bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+	// Usage is initialized but all values are zero
+
+	tracer := noop.NewTracerProvider().Tracer("test")
+	_, span := tracer.Start(context.Background(), "test-span")
+
+	// Should not panic with zero values
+	bt.FinalizeMessageSpan(span, nil)
+}

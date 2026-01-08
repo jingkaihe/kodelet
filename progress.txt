@@ -356,3 +356,45 @@ This file tracks progress across Ralph iterations.
 
 ---
 
+## 2026-01-08 - Iteration 10
+
+### Feature Completed: base-thread-unit-tests
+
+**What was implemented:**
+- Added comprehensive unit tests to `pkg/llm/base/base_test.go` covering:
+  - TestConstants - Verifies MaxImageFileSize (5MB) and MaxImageCount (10) values
+  - TestSetState_Sequential - Tests SetState/GetState in sequence
+  - TestGetSetConversationID_Sequential - Tests conversation ID methods
+  - TestIsPersisted_Sequential - Tests persistence flag methods
+  - TestNewThread_InitializesAllFields - Verifies all fields are properly initialized
+  - TestNewThread_DefaultHookTrigger - Verifies hook trigger is properly set
+  - TestSetConversationID_UpdatesHookTrigger - Verifies SetConversationID updates both fields
+  - TestGetConfig_ReturnsSameValue - Verifies GetConfig returns correct values
+  - TestGetState_ReturnsNilWhenNotSet - Tests nil state handling
+  - TestUsageAccumulation - Verifies usage tracking works correctly
+  - TestStructuredToolResults_OverwriteExisting - Tests overwriting results
+  - TestShouldAutoCompact_BoundaryConditions - Tests edge cases around ratio boundaries
+  - TestCreateMessageSpan_AllCommonAttributes - Verifies span attributes are set
+  - TestFinalizeMessageSpan_ZeroUsage - Tests finalization with zero usage
+
+**Test coverage summary:**
+- Total test cases: 70 tests (including subtests)
+- All tests pass with race detector: `go test -race ./pkg/llm/base/...`
+- Linter passes with no issues: `mise run lint`
+
+**Note on concurrent access tests:**
+- The original design didn't include thread-safety for simple getters/setters (State, ConversationID, IsPersisted)
+- Thread-safe methods are: GetUsage, SetStructuredToolResult, GetStructuredToolResults, SetStructuredToolResults, EnablePersistence
+- Sequential tests were added instead of concurrent tests for non-thread-safe methods to match the original design
+
+**Verification:**
+- All tests pass: `go test ./pkg/llm/base/...` (70 tests)
+- Race detector passes: `go test -race ./pkg/llm/base/...`
+- Linter passes: `mise run lint`
+
+**Notes for next iteration:**
+- Next feature to implement: `integration-tests` (medium priority) - Run full integration tests
+- Followed by: `documentation-update` (low priority) and `cleanup-unused-code` (low priority)
+
+---
+

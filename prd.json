@@ -155,7 +155,7 @@
         "Add tests for EnablePersistence with mock store",
         "Run 'go test -race ./pkg/llm/base/...' to verify no race conditions"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "integration-tests",
