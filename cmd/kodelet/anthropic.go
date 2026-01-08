@@ -8,8 +8,8 @@ var anthropicCmd = &cobra.Command{
 	Use:   "anthropic",
 	Short: "Manage Anthropic authentication and accounts",
 	Long:  `Commands for managing Anthropic OAuth authentication and subscription accounts.`,
-	Run: func(cmd *cobra.Command, _ []string) {
-		cmd.Help()
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		return cmd.Help()
 	},
 }
 

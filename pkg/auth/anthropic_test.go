@@ -431,6 +431,105 @@ func TestGenerateAliasFromEmail(t *testing.T) {
 	}
 }
 
+func TestValidateAlias(t *testing.T) {
+	tests := []struct {
+		name    string
+		alias   string
+		wantErr bool
+		errMsg  string
+	}{
+		{"valid alias", "work", false, ""},
+		{"valid with dots", "john.doe", false, ""},
+		{"valid with hyphen", "work-account", false, ""},
+		{"valid with underscore", "work_account", false, ""},
+		{"empty alias", "", true, "cannot be empty"},
+		{"space in alias", "work account", true, "whitespace"},
+		{"tab in alias", "work\taccount", true, "whitespace"},
+		{"newline in alias", "work\naccount", true, "whitespace"},
+		{"forward slash", "work/account", true, "path separators"},
+		{"backslash", "work\\account", true, "path separators"},
+		{"too long", string(make([]byte, 65)), true, "longer than 64"},
+		{"max length", string(make([]byte, 64)), false, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateAlias(tt.alias)
+			if tt.wantErr {
+				assert.Error(t, err)
+				if tt.errMsg != "" {
+					assert.Contains(t, err.Error(), tt.errMsg)
+				}
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestSaveAnthropicCredentialsWithAliasValidation(t *testing.T) {
+	// Create a temporary directory for testing
+	tempDir := t.TempDir()
+	originalHome := os.Getenv("HOME")
+	defer os.Setenv("HOME", originalHome)
+	os.Setenv("HOME", tempDir)
+
+	creds := &AnthropicCredentials{
+		Email:        "test@example.com",
+		AccessToken:  "token",
+		RefreshToken: "refresh",
+		ExpiresAt:    time.Now().Add(time.Hour).Unix(),
+	}
+
+	t.Run("reject invalid alias with space", func(t *testing.T) {
+		_, err := SaveAnthropicCredentialsWithAlias("invalid alias", creds)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid alias")
+	})
+
+	t.Run("reject invalid alias with path separator", func(t *testing.T) {
+		_, err := SaveAnthropicCredentialsWithAlias("invalid/alias", creds)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid alias")
+	})
+}
+
+func TestRenameAnthropicAccountValidation(t *testing.T) {
+	// Create a temporary directory for testing
+	tempDir := t.TempDir()
+	originalHome := os.Getenv("HOME")
+	defer os.Setenv("HOME", originalHome)
+	os.Setenv("HOME", tempDir)
+
+	// Set up an account first
+	credsFile := &AnthropicCredentialsFile{
+		DefaultAccount: "work",
+		Accounts: map[string]AnthropicCredentials{
+			"work": {Email: "work@company.com"},
+		},
+	}
+
+	credsDir := filepath.Join(tempDir, ".kodelet")
+	require.NoError(t, os.MkdirAll(credsDir, 0o755))
+
+	filePath := filepath.Join(credsDir, "anthropic-credentials.json")
+	data, err := json.Marshal(credsFile)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filePath, data, 0o644))
+
+	t.Run("reject invalid new alias with space", func(t *testing.T) {
+		err := RenameAnthropicAccount("work", "invalid alias")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid new alias")
+	})
+
+	t.Run("reject invalid new alias with path separator", func(t *testing.T) {
+		err := RenameAnthropicAccount("work", "invalid/alias")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid new alias")
+	})
+}
+
 func TestSaveAnthropicCredentialsWithAlias(t *testing.T) {
 	// Create a temporary directory for testing
 	tempDir := t.TempDir()

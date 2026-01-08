@@ -63,7 +63,25 @@ const (
 	anthropicAuthEndpoint  = "https://claude.ai/oauth/authorize"
 	anthropicRedirectURI   = "https://console.anthropic.com/oauth/code/callback"
 	anthropicTokenEndpoint = "https://console.anthropic.com/v1/oauth/token"
+
+	// tokenRefreshThreshold is the duration before token expiry when we should refresh
+	tokenRefreshThreshold = 10 * time.Minute
 )
+
+// ValidateAlias checks if an alias is valid for use as an account identifier.
+// Valid aliases cannot contain whitespace, path separators, or be empty.
+func ValidateAlias(alias string) error {
+	if alias == "" {
+		return errors.New("alias cannot be empty")
+	}
+	if strings.ContainsAny(alias, " \t\n\r/\\") {
+		return errors.New("alias cannot contain whitespace or path separators")
+	}
+	if len(alias) > 64 {
+		return errors.New("alias cannot be longer than 64 characters")
+	}
+	return nil
+}
 
 // anthropicCredentialsFilePath returns the path to the multi-account credentials file.
 func anthropicCredentialsFilePath() (string, error) {
@@ -130,29 +148,66 @@ func readAnthropicCredentialsFile() (*AnthropicCredentialsFile, error) {
 }
 
 // writeAnthropicCredentialsFile writes the multi-account credentials file.
+// Uses atomic write pattern (write to temp file, then rename) to prevent corruption.
 func writeAnthropicCredentialsFile(credsFile *AnthropicCredentialsFile) error {
+	if credsFile == nil {
+		return errors.New("credentials file cannot be nil")
+	}
+
+	// Ensure Accounts map is initialized
+	if credsFile.Accounts == nil {
+		credsFile.Accounts = make(map[string]AnthropicCredentials)
+	}
+
 	filePath, err := anthropicCredentialsFilePath()
 	if err != nil {
 		return err
 	}
 
 	// Ensure the directory exists
-	if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
+	dir := filepath.Dir(filePath)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return errors.Wrap(err, "failed to create credentials directory")
 	}
 
-	f, err := os.Create(filePath)
+	// Write to a temporary file first for atomic operation
+	tempFile, err := os.CreateTemp(dir, "anthropic-credentials-*.tmp")
 	if err != nil {
-		return errors.Wrap(err, "failed to create credentials file")
+		return errors.Wrap(err, "failed to create temporary credentials file")
 	}
-	defer f.Close()
+	tempPath := tempFile.Name()
 
-	encoder := json.NewEncoder(f)
+	// Clean up temp file on error
+	success := false
+	defer func() {
+		if !success {
+			os.Remove(tempPath)
+		}
+	}()
+
+	encoder := json.NewEncoder(tempFile)
 	encoder.SetIndent("", "  ")
 	if err := encoder.Encode(credsFile); err != nil {
+		tempFile.Close()
 		return errors.Wrap(err, "failed to write credentials")
 	}
 
+	// Ensure data is flushed to disk
+	if err := tempFile.Sync(); err != nil {
+		tempFile.Close()
+		return errors.Wrap(err, "failed to sync credentials file")
+	}
+
+	if err := tempFile.Close(); err != nil {
+		return errors.Wrap(err, "failed to close temporary credentials file")
+	}
+
+	// Atomic rename
+	if err := os.Rename(tempPath, filePath); err != nil {
+		return errors.Wrap(err, "failed to save credentials file")
+	}
+
+	success = true
 	return nil
 }
 
@@ -210,6 +265,11 @@ func SaveAnthropicCredentialsWithAlias(alias string, creds *AnthropicCredentials
 	// If no alias specified, generate from email
 	if alias == "" {
 		alias = GenerateAliasFromEmail(creds.Email)
+	}
+
+	// Validate the alias
+	if err := ValidateAlias(alias); err != nil {
+		return "", errors.Wrap(err, "invalid alias")
 	}
 
 	// Save the account
@@ -351,6 +411,11 @@ func RemoveAnthropicAccount(alias string) error {
 func RenameAnthropicAccount(oldAlias, newAlias string) error {
 	if oldAlias == newAlias {
 		return errors.New("old and new alias are the same")
+	}
+
+	// Validate the new alias
+	if err := ValidateAlias(newAlias); err != nil {
+		return errors.Wrap(err, "invalid new alias")
 	}
 
 	credsFile, err := readAnthropicCredentialsFile()
@@ -602,8 +667,8 @@ func AnthropicAccessToken(ctx context.Context, alias string) (string, error) {
 		actualAlias, _ = GetDefaultAnthropicAccount()
 	}
 
-	// Refresh token 10 minutes before expiration
-	refreshThreshold := time.Now().Add(10 * time.Minute).Unix()
+	// Refresh token before expiration using configured threshold
+	refreshThreshold := time.Now().Add(tokenRefreshThreshold).Unix()
 	if creds.ExpiresAt > refreshThreshold {
 		return creds.AccessToken, nil
 	}

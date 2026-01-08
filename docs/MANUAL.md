@@ -866,10 +866,10 @@ Kodelet supports multiple Anthropic subscription accounts, allowing you to manag
 
 ```bash
 # Login with an alias
-kodelet anthropic-login --alias work
+kodelet anthropic login --alias work
 
 # Login without alias (uses email prefix as alias)
-kodelet anthropic-login
+kodelet anthropic login
 ```
 
 The first account logged in automatically becomes the default account.
@@ -878,7 +878,7 @@ The first account logged in automatically becomes the default account.
 
 **List all accounts:**
 ```bash
-kodelet accounts list
+kodelet anthropic accounts list
 ```
 
 Output shows all logged-in accounts with their status:
@@ -893,15 +893,15 @@ The asterisk (*) indicates the default account.
 **Set default account:**
 ```bash
 # Show current default
-kodelet accounts default
+kodelet anthropic accounts default
 
 # Set a new default
-kodelet accounts default personal
+kodelet anthropic accounts default personal
 ```
 
 **Remove an account:**
 ```bash
-kodelet accounts remove work
+kodelet anthropic accounts remove work
 ```
 
 If you remove the default account, another account will automatically become the new default (if available).
@@ -923,12 +923,12 @@ Without the `--account` flag, Kodelet uses the default account.
 
 ### Account Status
 
-The `accounts list` command shows token status:
+The `kodelet anthropic accounts list` command shows token status:
 - **valid**: Token is valid and ready to use
 - **needs refresh**: Token will be refreshed on next use
 - **expired**: Token has expired and needs re-authentication
 
-If a token is expired, run `kodelet anthropic-login --alias <alias>` to re-authenticate.
+If a token is expired, run `kodelet anthropic login --alias <alias>` to re-authenticate.
 
 ## Custom Tools
 

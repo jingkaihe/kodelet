@@ -16,8 +16,8 @@ var anthropicAccountsCmd = &cobra.Command{
 	Use:   "accounts",
 	Short: "Manage Anthropic subscription accounts",
 	Long:  `List, manage, and switch between multiple Anthropic subscription accounts.`,
-	Run: func(cmd *cobra.Command, _ []string) {
-		cmd.Help()
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		return cmd.Help()
 	},
 }
 
@@ -86,10 +86,13 @@ func init() {
 	anthropicAccountsCmd.AddCommand(anthropicAccountsRenameCmd)
 }
 
+// tokenRefreshThreshold matches the threshold used in pkg/auth for token refresh decisions.
+const tokenRefreshThreshold = 10 * time.Minute
+
 // accountTokenStatus returns the status of an account's token based on expiration time.
 func accountTokenStatus(expiresAt int64) string {
 	now := time.Now().Unix()
-	refreshThreshold := time.Now().Add(10 * time.Minute).Unix()
+	refreshThreshold := time.Now().Add(tokenRefreshThreshold).Unix()
 
 	if expiresAt > refreshThreshold {
 		return "valid"
