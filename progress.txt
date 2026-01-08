@@ -4,3 +4,30 @@ This file tracks progress across Ralph iterations.
 
 ---
 
+## 2026-01-08 - Iteration 1
+
+### Feature Completed: base-thread-package
+
+**What was implemented:**
+- Created `pkg/llm/base/base.go` with the BaseThread struct
+- Defined shared fields with appropriate types:
+  - Config (llmtypes.Config)
+  - State (tooltypes.State)
+  - Usage (*llmtypes.Usage)
+  - ConversationID (string)
+  - IsPersisted_ (bool)
+  - Store (ConversationStore)
+  - ToolResults (map[string]tooltypes.StructuredToolResult)
+  - SubagentContextFactory (llmtypes.SubagentContextFactory)
+  - HookTrigger (hooks.Trigger)
+  - Mu, ConversationMu (sync.Mutex)
+- Added image constants: MaxImageFileSize (5MB), MaxImageCount (10)
+- Added NewBaseThread() constructor for initializing common fields
+- Verified compilation with `go build ./pkg/llm/base/...`
+
+**Notes for next iteration:**
+- Next feature to implement: `base-thread-getters-setters` - Add getter/setter methods to BaseThread
+- The IsPersisted_ field uses an underscore suffix to avoid conflict with the IsPersisted() method
+
+---
+

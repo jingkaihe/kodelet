@@ -14,7 +14,7 @@
         "Add constructor NewBaseThread() that initializes common fields",
         "Run 'go build ./pkg/llm/base/...' to verify compilation"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "base-thread-getters-setters",
