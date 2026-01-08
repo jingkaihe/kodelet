@@ -1,5 +1,22 @@
 # Kodelet
 
+## 0.1.35.beta (2026-01-08)
+
+### Features
+
+**Anthropic Rate Limit Usage Display**: New `kodelet anthropic accounts usage` command to monitor API rate limits
+
+- View current rate limit utilization for 5-hour and 7-day windows
+- Shows status (allowed/limited), utilization percentage, and reset time
+- Supports JSON output with `--json` flag for scripting and automation
+- Works with any configured account alias (defaults to current account)
+
+```bash
+kodelet anthropic accounts usage           # Show usage for default account
+kodelet anthropic accounts usage work      # Show usage for specific account
+kodelet anthropic accounts usage --json    # Output in JSON format
+```
+
 ## 0.1.34.beta (2026-01-08)
 
 ### Features
