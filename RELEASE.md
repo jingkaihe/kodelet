@@ -1,5 +1,19 @@
 # Kodelet
 
+## 0.1.36.beta (2026-01-08)
+
+### Internal Changes
+
+**Unified LLM Thread Base Package**: Refactored all LLM provider implementations to share common functionality through a new `pkg/llm/base` package.
+
+- Created shared `Thread` struct with common fields (Config, State, Usage, ConversationID, ToolResults, etc.)
+- All providers (Anthropic, OpenAI, Google) now embed `*base.Thread` using Go's struct composition pattern
+- Shared methods: `GetState`, `SetState`, `GetConfig`, `GetUsage`, `EnablePersistence`, `ShouldAutoCompact`, `CreateMessageSpan`, `FinalizeMessageSpan`
+- Shared constants: `MaxImageFileSize` (5MB), `MaxImageCount` (10)
+- Reduces ~300 lines of duplicated code per provider
+- Added comprehensive unit tests for the base package
+- See ADR 023 for architectural decision details
+
 ## 0.1.35.beta (2026-01-08)
 
 ### Features
