@@ -27,6 +27,7 @@ type Config struct {
 	AllowedDomainsFile   string             `mapstructure:"allowed_domains_file" json:"allowed_domains_file" yaml:"allowed_domains_file"`       // AllowedDomainsFile is the path to the file containing allowed domains for web_fetch tool
 	AllowedTools         []string           `mapstructure:"allowed_tools" json:"allowed_tools" yaml:"allowed_tools"`                            // AllowedTools is a list of allowed tools for the main agent (empty means use defaults)
 	AnthropicAPIAccess   AnthropicAPIAccess `mapstructure:"anthropic_api_access" json:"anthropic_api_access" yaml:"anthropic_api_access"`       // AnthropicAPIAccess controls how to authenticate with Anthropic API
+	AnthropicAccount     string             `mapstructure:"anthropic_account" json:"anthropic_account" yaml:"anthropic_account"`                // AnthropicAccount specifies which Anthropic subscription account to use
 	UseCopilot           bool               `mapstructure:"use_copilot" json:"use_copilot" yaml:"use_copilot"`                                  // UseCopilot enables GitHub Copilot subscription for OpenAI requests
 	Aliases              map[string]string  `mapstructure:"aliases" json:"aliases,omitempty" yaml:"aliases,omitempty"`                          // Aliases maps short model names to full model names
 	Retry                RetryConfig        `mapstructure:"retry" json:"retry" yaml:"retry"`                                                    // Retry configuration for API calls

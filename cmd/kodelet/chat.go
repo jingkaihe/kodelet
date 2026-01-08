@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/jingkaihe/kodelet/pkg/auth"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
@@ -27,6 +28,7 @@ type ChatOptions struct {
 	noHooks            bool
 	noMCP              bool
 	useWeakModel       bool
+	account            string
 }
 
 var chatOptions = &ChatOptions{}
@@ -42,6 +44,7 @@ func init() {
 	chatCmd.Flags().BoolVar(&chatOptions.noHooks, "no-hooks", false, "Disable agent lifecycle hooks")
 	chatCmd.Flags().BoolVar(&chatOptions.noMCP, "no-mcp", false, "Disable MCP tools")
 	chatCmd.Flags().BoolVar(&chatOptions.useWeakModel, "use-weak-model", false, "Use weak model for processing")
+	chatCmd.Flags().StringVar(&chatOptions.account, "account", "", "Anthropic subscription account alias to use (see 'kodelet accounts list')")
 }
 
 // Prevents TUI interference by redirecting logs to file
@@ -109,6 +112,15 @@ var chatCmd = &cobra.Command{
 			presenter.Error(err, "Failed to create custom tool manager")
 			os.Exit(1)
 		}
+
+		// Validate Anthropic account if specified
+		if chatOptions.account != "" {
+			if _, err := auth.GetAnthropicCredentialsByAlias(chatOptions.account); err != nil {
+				presenter.Error(err, fmt.Sprintf("Account '%s' not found. Run 'kodelet accounts list' to see available accounts", chatOptions.account))
+				os.Exit(1)
+			}
+		}
+
 		// Ensure non-negative values (treat negative as 0/no limit)
 		maxTurns := max(chatOptions.maxTurns, 0)
 
@@ -141,6 +153,7 @@ var chatCmd = &cobra.Command{
 			DisableAutoCompact: chatOptions.disableAutoCompact,
 			NoHooks:            chatOptions.noHooks,
 			UseWeakModel:       chatOptions.useWeakModel,
+			Account:            chatOptions.account,
 		})
 
 		// Restore stderr logging after TUI exits and show log file location

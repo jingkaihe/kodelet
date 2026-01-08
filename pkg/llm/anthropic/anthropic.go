@@ -108,11 +108,15 @@ func NewAnthropicThread(config llmtypes.Config, subagentContextFactory llmtypes.
 		if !antCredsExists {
 			return nil, errors.New("subscription authentication forced but no credentials found")
 		}
-		accessToken, err := auth.AnthropicAccessToken(context.Background())
+		accessToken, err := auth.AnthropicAccessTokenForAlias(context.Background(), config.AnthropicAccount)
 		if err != nil {
 			return nil, errors.Wrap(err, "subscription authentication forced but failed to get access token")
 		}
-		logger.Debug("using anthropic access token (forced by configuration)")
+		if config.AnthropicAccount != "" {
+			logger.WithField("account", config.AnthropicAccount).Debug("using anthropic access token for specified account")
+		} else {
+			logger.Debug("using anthropic access token (forced by configuration)")
+		}
 		opts = append(opts, auth.AnthropicHeader(accessToken)...)
 		client = anthropic.NewClient(opts...)
 		useSubscription = true
@@ -123,13 +127,17 @@ func NewAnthropicThread(config llmtypes.Config, subagentContextFactory llmtypes.
 		// Auto mode: try subscription first, then fall back to API key
 		antCredsExists, _ := auth.GetAnthropicCredentialsExists()
 		if antCredsExists {
-			accessToken, err := auth.AnthropicAccessToken(context.Background())
+			accessToken, err := auth.AnthropicAccessTokenForAlias(context.Background(), config.AnthropicAccount)
 			if err != nil {
 				logger.WithError(err).Error("failed to get anthropic access token, falling back to use API key")
 				client = anthropic.NewClient()
 				useSubscription = false
 			} else {
-				logger.Debug("using anthropic access token")
+				if config.AnthropicAccount != "" {
+					logger.WithField("account", config.AnthropicAccount).Debug("using anthropic access token for specified account")
+				} else {
+					logger.Debug("using anthropic access token")
+				}
 				opts = append(opts, auth.AnthropicHeader(accessToken)...)
 				client = anthropic.NewClient(opts...)
 				useSubscription = true

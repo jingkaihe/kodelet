@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/auth"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/llm"
@@ -44,6 +45,7 @@ type RunConfig struct {
 	NoMCP              bool              // Disable MCP tools
 	ResultOnly         bool              // Only print the final agent message, no intermediate output or usage stats
 	UseWeakModel       bool              // Use weak model for SendMessage
+	Account            string            // Anthropic subscription account alias to use
 }
 
 func NewRunConfig() *RunConfig {
@@ -65,6 +67,7 @@ func NewRunConfig() *RunConfig {
 		NoMCP:              false,
 		ResultOnly:         false,
 		UseWeakModel:       false,
+		Account:            "",
 	}
 }
 
@@ -212,6 +215,16 @@ var runCmd = &cobra.Command{
 		}
 
 		llmConfig.NoHooks = config.NoHooks
+
+		// Set Anthropic account if specified
+		if config.Account != "" {
+			// Validate the account exists
+			if _, err := auth.GetAnthropicCredentialsByAlias(config.Account); err != nil {
+				presenter.Error(err, fmt.Sprintf("Account '%s' not found. Run 'kodelet accounts list' to see available accounts", config.Account))
+				return
+			}
+			llmConfig.AnthropicAccount = config.Account
+		}
 
 		applyFragmentRestrictions(&llmConfig, fragmentMetadata)
 
@@ -400,6 +413,7 @@ func init() {
 	runCmd.Flags().Bool("no-mcp", defaults.NoMCP, "Disable MCP tools")
 	runCmd.Flags().Bool("result-only", defaults.ResultOnly, "Only print the final agent message, suppressing all intermediate output and usage statistics")
 	runCmd.Flags().Bool("use-weak-model", defaults.UseWeakModel, "Use weak model for processing")
+	runCmd.Flags().String("account", defaults.Account, "Anthropic subscription account alias to use (see 'kodelet accounts list')")
 }
 
 func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
@@ -482,6 +496,10 @@ func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
 
 	if useWeakModel, err := cmd.Flags().GetBool("use-weak-model"); err == nil {
 		config.UseWeakModel = useWeakModel
+	}
+
+	if account, err := cmd.Flags().GetString("account"); err == nil {
+		config.Account = account
 	}
 
 	return config

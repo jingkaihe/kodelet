@@ -76,7 +76,7 @@
         "Without --account flag, uses default account",
         "Error message if specified account doesn't exist"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "token-retrieval-refactor",

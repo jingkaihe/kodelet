@@ -194,3 +194,44 @@ Added `kodelet accounts default [alias]` command to show or set the default Anth
 
 ---
 
+## 2026-01-08 16:35:55 - runtime-account-selection
+
+### Feature Implemented
+Added `--account` flag to `run` and `chat` commands for runtime Anthropic account selection.
+
+### Changes Made
+1. **Config Changes** (`pkg/types/llm/config.go`):
+   - Added `AnthropicAccount` field to `Config` struct to pass account alias through the LLM config
+
+2. **Anthropic Thread Updates** (`pkg/llm/anthropic/anthropic.go`):
+   - Updated `NewAnthropicThread` to use `AnthropicAccessTokenForAlias` with the config's account alias
+   - Works for both subscription mode and auto mode authentication
+   - Added debug logging to show which account is being used
+
+3. **Run Command** (`cmd/kodelet/run.go`):
+   - Added `Account` field to `RunConfig` struct
+   - Added `--account` flag: "Anthropic subscription account alias to use"
+   - Validates account exists before starting run
+   - Passes account to `llmConfig.AnthropicAccount`
+   - Shows helpful error message if account not found
+
+4. **Chat Command** (`cmd/kodelet/chat.go`):
+   - Added `account` field to `ChatOptions` struct
+   - Added `--account` flag with same help text
+   - Validates account exists before starting chat
+   - Passes account to TUI through `ChatOpts`
+
+5. **TUI Updates** (`pkg/tui/assistant.go`):
+   - Added `Account` field to `ChatOpts` struct
+   - `NewAssistantClient` sets `config.AnthropicAccount` from opts
+
+### Issues Encountered
+- None. The `AnthropicAccessTokenForAlias` function was already implemented in the first iteration.
+
+### Notes for Next Iteration
+- The `token-retrieval-refactor` feature is actually complete already - `AnthropicAccessTokenForAlias` handles everything
+- The `unit-tests-auth` feature should verify the new account selection flow end-to-end
+- The `documentation-update` should include examples for `--account` flag usage
+
+---
+
