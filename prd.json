@@ -63,7 +63,7 @@
         "kodelet accounts default (no args) shows current default",
         "Error if specified alias doesn't exist"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "runtime-account-selection",

@@ -160,3 +160,37 @@ Added `kodelet accounts remove <alias>` command to remove a specific Anthropic a
 
 ---
 
+## 2026-01-08 16:27:46 - accounts-default-command
+
+### Feature Implemented
+Added `kodelet accounts default [alias]` command to show or set the default Anthropic account.
+
+### Changes Made
+1. **New Subcommand** (`cmd/kodelet/accounts.go`):
+   - `accountsDefaultCmd` with `cobra.MaximumNArgs(1)` for optional alias argument
+   - Help text with examples showing both use cases
+
+2. **Show Default Function** (`showDefaultAccountCmd`):
+   - Retrieves default account using `auth.GetDefaultAnthropicAccount()`
+   - Shows account alias and email: "Default account: work (user@example.com)"
+   - Friendly message when no default is set
+
+3. **Set Default Function** (`setDefaultAccountCmd`):
+   - Pre-checks if account exists before attempting to set
+   - Calls `auth.SetDefaultAnthropicAccount(alias)` to persist the change
+   - Shows success message when default is changed
+   - Helpful error message with suggestion to run `kodelet accounts list` if alias not found
+
+4. **Registration**:
+   - Added `accountsDefaultCmd` to `accountsCmd` in `init()`
+
+### Issues Encountered
+- None. The infrastructure functions were already implemented in previous iterations.
+
+### Notes for Next Iteration
+- The `runtime-account-selection` feature (high priority) requires adding `--account` flag to run/chat commands
+- The `token-retrieval-refactor` feature is mostly complete with `AnthropicAccessTokenForAlias`
+- These two features are dependencies that need to be completed together for full account selection at runtime
+
+---
+

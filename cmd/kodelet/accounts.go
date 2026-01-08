@@ -43,9 +43,29 @@ set as the new default (if any accounts remain).`,
 	},
 }
 
+var accountsDefaultCmd = &cobra.Command{
+	Use:   "default [alias]",
+	Short: "Show or set the default Anthropic account",
+	Long: `Show the current default account when called without arguments,
+or set a new default account when an alias is provided.
+
+Examples:
+  kodelet accounts default           # Show current default account
+  kodelet accounts default work      # Set 'work' as the default account`,
+	Args: cobra.MaximumNArgs(1),
+	Run: func(_ *cobra.Command, args []string) {
+		if len(args) == 0 {
+			showDefaultAccountCmd()
+		} else {
+			setDefaultAccountCmd(args[0])
+		}
+	},
+}
+
 func init() {
 	accountsCmd.AddCommand(accountsListCmd)
 	accountsCmd.AddCommand(accountsRemoveCmd)
+	accountsCmd.AddCommand(accountsDefaultCmd)
 }
 
 // accountTokenStatus returns the status of an account's token based on expiration time.
@@ -141,4 +161,59 @@ func removeAccountCmd(alias string) {
 			presenter.Info(fmt.Sprintf("Default account changed to '%s'", newDefault))
 		}
 	}
+}
+
+func showDefaultAccountCmd() {
+	defaultAlias, err := auth.GetDefaultAnthropicAccount()
+	if err != nil {
+		presenter.Info("No default account set. Use 'kodelet anthropic-login' to add an account.")
+		return
+	}
+
+	// Get the account details to show email
+	accounts, err := auth.ListAnthropicAccounts()
+	if err != nil {
+		presenter.Error(err, "Failed to list accounts")
+		os.Exit(1)
+	}
+
+	for _, account := range accounts {
+		if account.Alias == defaultAlias {
+			presenter.Info(fmt.Sprintf("Default account: %s (%s)", account.Alias, account.Email))
+			return
+		}
+	}
+
+	// Account not found (shouldn't happen normally)
+	presenter.Info(fmt.Sprintf("Default account: %s", defaultAlias))
+}
+
+func setDefaultAccountCmd(alias string) {
+	// First verify the account exists to provide a good error message
+	accounts, err := auth.ListAnthropicAccounts()
+	if err != nil {
+		presenter.Error(err, "Failed to list accounts")
+		os.Exit(1)
+	}
+
+	var accountExists bool
+	for _, account := range accounts {
+		if account.Alias == alias {
+			accountExists = true
+			break
+		}
+	}
+
+	if !accountExists {
+		presenter.Error(fmt.Errorf("account '%s' not found", alias), "Failed to set default account")
+		presenter.Info("Use 'kodelet accounts list' to see available accounts.")
+		os.Exit(1)
+	}
+
+	if err := auth.SetDefaultAnthropicAccount(alias); err != nil {
+		presenter.Error(err, "Failed to set default account")
+		os.Exit(1)
+	}
+
+	presenter.Success(fmt.Sprintf("Default account set to '%s'", alias))
 }
