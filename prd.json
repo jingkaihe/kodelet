@@ -1,0 +1,120 @@
+{
+  "name": "Multi-Account Anthropic Authentication",
+  "description": "Add support for multiple Anthropic subscription accounts with CLI account selection",
+  "features": [
+    {
+      "id": "multi-account-credential-storage",
+      "category": "infrastructure",
+      "priority": "high",
+      "description": "Refactor credential storage to support multiple accounts in a single ~/.kodelet/anthropic-credentials.json file. Structure: {default: 'alias', accounts: {alias: {email, tokens...}}}",
+      "steps": [
+        "AnthropicCredentialsFile struct contains DefaultAccount string and Accounts map[string]AnthropicCredentials",
+        "SaveAnthropicCredentials(alias, credentials) saves/updates account by alias",
+        "GetAnthropicCredentials(alias) retrieves specific account credentials",
+        "ListAnthropicAccounts() returns all account aliases and emails"
+      ],
+      "passes": false
+    },
+    {
+      "id": "login-with-alias",
+      "category": "functional",
+      "priority": "high",
+      "description": "Extend anthropic-login command to accept --alias flag for naming the account. First account automatically becomes default",
+      "steps": [
+        "kodelet anthropic-login --alias work saves credentials with 'work' alias",
+        "kodelet anthropic-login without --alias uses email prefix as alias",
+        "First login sets that account as default automatically",
+        "Success message shows the alias that was created"
+      ],
+      "passes": false
+    },
+    {
+      "id": "accounts-list-command",
+      "category": "functional",
+      "priority": "high",
+      "description": "Add 'kodelet accounts list' command to show all logged-in Anthropic accounts with their aliases, emails, and token status",
+      "steps": [
+        "kodelet accounts list shows table with alias, email, and status columns",
+        "Status shows 'valid', 'expired', or 'needs refresh'",
+        "Default account is marked with asterisk (*)",
+        "Empty state message when no accounts exist"
+      ],
+      "passes": false
+    },
+    {
+      "id": "accounts-remove-command",
+      "category": "functional",
+      "priority": "medium",
+      "description": "Add 'kodelet accounts remove <alias>' command to remove a specific account's credentials",
+      "steps": [
+        "kodelet accounts remove work removes the 'work' account",
+        "Error message if alias doesn't exist",
+        "If removing default account, clear default (or set to another account if available)"
+      ],
+      "passes": false
+    },
+    {
+      "id": "accounts-default-command",
+      "category": "functional",
+      "priority": "medium",
+      "description": "Add 'kodelet accounts default <alias>' command to set the default account",
+      "steps": [
+        "kodelet accounts default work sets 'work' as default account",
+        "kodelet accounts default (no args) shows current default",
+        "Error if specified alias doesn't exist"
+      ],
+      "passes": false
+    },
+    {
+      "id": "runtime-account-selection",
+      "category": "functional",
+      "priority": "high",
+      "description": "Add --account flag to run and chat commands to specify which Anthropic account to use",
+      "steps": [
+        "kodelet run --account work 'query' uses the 'work' account",
+        "kodelet chat --account personal starts chat with 'personal' account",
+        "Without --account flag, uses default account",
+        "Error message if specified account doesn't exist"
+      ],
+      "passes": false
+    },
+    {
+      "id": "token-retrieval-refactor",
+      "category": "infrastructure",
+      "priority": "high",
+      "description": "Refactor AnthropicAccessToken() and AnthropicHeader() to accept an account alias parameter",
+      "steps": [
+        "AnthropicAccessToken(alias string) retrieves token for specific account",
+        "Empty alias uses default account from credentials file",
+        "Token refresh works correctly for specified account",
+        "AnthropicHeader(alias string) returns headers for specified account"
+      ],
+      "passes": false
+    },
+    {
+      "id": "unit-tests-auth",
+      "category": "testing",
+      "priority": "medium",
+      "description": "Add unit tests for the multi-account authentication system",
+      "steps": [
+        "Test credential storage and retrieval for multiple accounts",
+        "Test default account selection logic",
+        "Test account removal (including default account edge cases)",
+        "Test error cases (missing account, invalid alias)"
+      ],
+      "passes": false
+    },
+    {
+      "id": "documentation-update",
+      "category": "documentation",
+      "priority": "low",
+      "description": "Update documentation to cover multi-account authentication",
+      "steps": [
+        "Update docs/MANUAL.md with accounts commands",
+        "Add examples for multi-account workflows in AGENTS.md",
+        "Document --account flag for run/chat commands"
+      ],
+      "passes": false
+    }
+  ]
+}
