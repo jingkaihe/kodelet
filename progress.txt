@@ -124,3 +124,39 @@ Added `kodelet accounts list` command to display all logged-in Anthropic account
 
 ---
 
+## 2026-01-08 16:24:37 - accounts-remove-command
+
+### Feature Implemented
+Added `kodelet accounts remove <alias>` command to remove a specific Anthropic account.
+
+### Changes Made
+1. **New Subcommand** (`cmd/kodelet/accounts.go`):
+   - `accountsRemoveCmd` with `cobra.ExactArgs(1)` for alias argument
+   - Help text explaining automatic default reassignment behavior
+
+2. **Remove Function** (`removeAccountCmd`):
+   - Pre-checks if account exists before attempting removal
+   - Tracks if removed account was the default
+   - Calls `auth.RemoveAnthropicAccount(alias)` to perform removal
+   - Shows success message with removed alias
+   - If default was removed, shows new default or "no accounts remaining" message
+
+3. **Error Handling**:
+   - Clear error message if alias doesn't exist
+   - Proper error handling for removal failures
+
+4. **User Feedback**:
+   - Success message when account removed
+   - Informative message about new default account
+   - Suggestion to use `anthropic-login` when no accounts remain
+
+### Issues Encountered
+- None. The infrastructure (`auth.RemoveAnthropicAccount`) was already implemented and tested.
+
+### Notes for Next Iteration
+- The `accounts-default-command` (medium priority) is the next accounts management feature
+- The `runtime-account-selection` feature (high priority) requires adding `--account` flag to run/chat commands
+- The `token-retrieval-refactor` is essentially complete with `AnthropicAccessTokenForAlias`
+
+---
+

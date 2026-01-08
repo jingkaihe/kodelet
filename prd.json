@@ -51,7 +51,7 @@
         "Error message if alias doesn't exist",
         "If removing default account, clear default (or set to another account if available)"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "accounts-default-command",

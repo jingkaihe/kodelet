@@ -30,8 +30,22 @@ var accountsListCmd = &cobra.Command{
 	},
 }
 
+var accountsRemoveCmd = &cobra.Command{
+	Use:   "remove <alias>",
+	Short: "Remove an Anthropic account",
+	Long: `Remove a specific Anthropic subscription account by its alias.
+
+If the removed account was the default, another account will be automatically
+set as the new default (if any accounts remain).`,
+	Args: cobra.ExactArgs(1),
+	Run: func(_ *cobra.Command, args []string) {
+		removeAccountCmd(args[0])
+	},
+}
+
 func init() {
 	accountsCmd.AddCommand(accountsListCmd)
+	accountsCmd.AddCommand(accountsRemoveCmd)
 }
 
 // accountTokenStatus returns the status of an account's token based on expiration time.
@@ -85,4 +99,46 @@ func listAccountsCmd() {
 	tw.Flush()
 
 	presenter.Info("\n* indicates the default account")
+}
+
+func removeAccountCmd(alias string) {
+	// Check if the account exists first to provide a better error message
+	accounts, err := auth.ListAnthropicAccounts()
+	if err != nil {
+		presenter.Error(err, "Failed to list accounts")
+		os.Exit(1)
+	}
+
+	var accountExists bool
+	var wasDefault bool
+	for _, account := range accounts {
+		if account.Alias == alias {
+			accountExists = true
+			wasDefault = account.IsDefault
+			break
+		}
+	}
+
+	if !accountExists {
+		presenter.Error(fmt.Errorf("account '%s' not found", alias), "Failed to remove account")
+		os.Exit(1)
+	}
+
+	// Remove the account
+	if err := auth.RemoveAnthropicAccount(alias); err != nil {
+		presenter.Error(err, "Failed to remove account")
+		os.Exit(1)
+	}
+
+	presenter.Success(fmt.Sprintf("Account '%s' removed successfully", alias))
+
+	// Check if there's a new default set
+	if wasDefault {
+		newDefault, err := auth.GetDefaultAnthropicAccount()
+		if err != nil {
+			presenter.Info("No accounts remaining. Use 'kodelet anthropic-login' to add a new account.")
+		} else {
+			presenter.Info(fmt.Sprintf("Default account changed to '%s'", newDefault))
+		}
+	}
 }
