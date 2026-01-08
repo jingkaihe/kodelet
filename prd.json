@@ -13,7 +13,7 @@
         "GetAnthropicCredentials(alias) retrieves specific account credentials",
         "ListAnthropicAccounts() returns all account aliases and emails"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "login-with-alias",

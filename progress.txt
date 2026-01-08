@@ -4,3 +4,47 @@ This file tracks progress across Ralph iterations.
 
 ---
 
+## 2026-01-08 16:15:14 - multi-account-credential-storage
+
+### Feature Implemented
+Multi-account credential storage infrastructure for Anthropic authentication.
+
+### Changes Made
+1. **New Data Structures** (`pkg/auth/anthropic.go`):
+   - `AnthropicCredentialsFile` struct with `DefaultAccount` string and `Accounts` map
+   - `AnthropicAccountInfo` struct for listing account summaries
+
+2. **New Functions**:
+   - `SaveAnthropicCredentialsWithAlias(alias, creds)` - saves credentials with specified alias
+   - `GetAnthropicCredentialsByAlias(alias)` - retrieves credentials by alias (empty = default)
+   - `ListAnthropicAccounts()` - returns all account info with default marker
+   - `SetDefaultAnthropicAccount(alias)` - sets the default account
+   - `GetDefaultAnthropicAccount()` - gets current default alias
+   - `RemoveAnthropicAccount(alias)` - removes an account
+   - `AnthropicAccessTokenForAlias(ctx, alias)` - gets token for specific account
+
+3. **Migration Support**:
+   - Automatic migration from legacy `anthropic-subscription.json` to new `anthropic-credentials.json`
+   - Email prefix used as alias during migration
+   - First account automatically becomes default
+
+4. **Backward Compatibility**:
+   - `SaveAnthropicCredentials(creds)` now uses multi-account storage internally
+   - `AnthropicAccessToken(ctx)` returns default account token
+   - `GetAnthropicCredentialsExists()` checks both new and legacy files
+
+5. **Comprehensive Tests** (`pkg/auth/anthropic_test.go`):
+   - Tests for all new functions
+   - Migration tests
+   - Edge case handling (empty alias, non-existent accounts)
+
+### Issues Encountered
+- None significant. The implementation went smoothly.
+
+### Notes for Next Iteration
+- The `login-with-alias` feature can now be implemented using `SaveAnthropicCredentialsWithAlias`
+- The `accounts-list-command` can use `ListAnthropicAccounts()`
+- The `token-retrieval-refactor` is already partially done with `AnthropicAccessTokenForAlias`
+
+---
+
