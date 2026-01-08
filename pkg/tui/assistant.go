@@ -25,6 +25,7 @@ type ChatOpts struct {
 	DisableAutoCompact bool
 	NoHooks            bool
 	UseWeakModel       bool
+	Account            string // Anthropic subscription account alias to use
 }
 
 // AssistantClient handles the interaction with the LLM thread
@@ -46,6 +47,11 @@ func NewAssistantClient(ctx context.Context, opts ChatOpts) *AssistantClient {
 	}
 
 	config.NoHooks = opts.NoHooks
+
+	// Set Anthropic account if specified
+	if opts.Account != "" {
+		config.AnthropicAccount = opts.Account
+	}
 
 	// Set MCP configuration for system prompt
 	executionMode := viper.GetString("mcp.execution_mode")

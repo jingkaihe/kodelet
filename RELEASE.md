@@ -1,5 +1,32 @@
 # Kodelet
 
+## 0.1.34.beta (2026-01-08)
+
+### Features
+
+**Multi-Account Anthropic Authentication**: Manage multiple Anthropic subscription accounts for different contexts (work, personal, etc.)
+
+- **Account Aliases**: Login with `--alias` flag to name accounts (e.g., `kodelet anthropic login --alias work`)
+- **Account Management**: New `kodelet anthropic accounts` commands for listing, switching, and removing accounts
+  - `accounts list` - Display all accounts with status (valid, needs refresh, expired)
+  - `accounts default [alias]` - Show or set the default account
+  - `accounts remove <alias>` - Remove an account
+  - `accounts rename <old> <new>` - Rename an account alias
+- **Runtime Selection**: Use `--account` flag with `run` and `chat` commands to select which account to use
+- **Automatic Migration**: Existing single-account credentials are automatically migrated to the new multi-account format
+
+### Breaking Changes
+
+**Anthropic Command Restructure**: Authentication commands moved under unified `anthropic` parent command
+
+- `kodelet anthropic-login` → `kodelet anthropic login`
+- `kodelet anthropic-logout` → `kodelet anthropic logout`
+
+### Internal Changes
+
+- Comprehensive unit test coverage for multi-account credential storage
+- Refactored credential storage from single-account to multi-account JSON format
+
 ## 0.1.33.beta (2026-01-06)
 
 ### Features
