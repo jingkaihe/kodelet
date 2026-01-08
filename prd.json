@@ -1,0 +1,200 @@
+{
+  "name": "LLM Thread Implementation Unification",
+  "description": "Refactor the Anthropic, OpenAI, and Google thread implementations to reduce code duplication by extracting shared functionality into a common base package while preserving provider-specific behaviors.",
+  "features": [
+    {
+      "id": "base-thread-package",
+      "category": "infrastructure",
+      "priority": "high",
+      "description": "Create a new pkg/llm/base package with a BaseThread struct containing shared fields (config, state, conversationID, isPersisted, store, usage, toolResults, hookTrigger, mu, conversationMu, subagentContextFactory) and image constants (MaxImageFileSize, MaxImageCount).",
+      "steps": [
+        "Create pkg/llm/base/base.go with BaseThread struct",
+        "Define shared fields with appropriate types and mutex",
+        "Add image constants (MaxImageFileSize = 5MB, MaxImageCount = 10)",
+        "Add constructor NewBaseThread() that initializes common fields",
+        "Run 'go build ./pkg/llm/base/...' to verify compilation"
+      ],
+      "passes": false
+    },
+    {
+      "id": "base-thread-getters-setters",
+      "category": "functional",
+      "priority": "high",
+      "description": "Add getter and setter methods to BaseThread for state, config, conversationID, isPersisted, and usage fields that are identical across all three providers.",
+      "steps": [
+        "Add SetState(s tooltypes.State) method",
+        "Add GetState() tooltypes.State method",
+        "Add GetConfig() llmtypes.Config method",
+        "Add GetConversationID() string method",
+        "Add SetConversationID(id string) method with hookTrigger update",
+        "Add IsPersisted() bool method",
+        "Add GetUsage() llmtypes.Usage method with mutex lock",
+        "Run 'go test ./pkg/llm/base/...' to verify tests pass"
+      ],
+      "passes": false
+    },
+    {
+      "id": "base-thread-tool-results",
+      "category": "functional",
+      "priority": "high",
+      "description": "Move the structured tool result management methods (SetStructuredToolResult, GetStructuredToolResults, SetStructuredToolResults) to BaseThread as they are nearly identical across all providers.",
+      "steps": [
+        "Add SetStructuredToolResult(id string, result tooltypes.StructuredToolResult) method",
+        "Add GetStructuredToolResults() map[string]tooltypes.StructuredToolResult method with mutex",
+        "Add SetStructuredToolResults(results map[string]tooltypes.StructuredToolResult) method",
+        "Add unit tests for all three methods",
+        "Run 'go test ./pkg/llm/base/...' to verify tests pass"
+      ],
+      "passes": false
+    },
+    {
+      "id": "base-thread-auto-compact",
+      "category": "functional",
+      "priority": "high",
+      "description": "Move the shouldAutoCompact() method to BaseThread as it is 100% identical across all three providers.",
+      "steps": [
+        "Add ShouldAutoCompact(compactRatio float64) bool method to BaseThread",
+        "Implement the context window utilization ratio check",
+        "Add unit tests covering edge cases (ratio <= 0, ratio > 1, MaxContextWindow = 0)",
+        "Run 'go test ./pkg/llm/base/...' to verify tests pass"
+      ],
+      "passes": false
+    },
+    {
+      "id": "base-thread-tracing",
+      "category": "functional",
+      "priority": "high",
+      "description": "Move the createMessageSpan() and finalizeMessageSpan() tracing methods to BaseThread as they are identical across providers (except minor attribute differences).",
+      "steps": [
+        "Add CreateMessageSpan(ctx, tracer, message, opt) method returning (context.Context, trace.Span)",
+        "Add FinalizeMessageSpan(span, err) method that records usage metrics and status",
+        "Include common attributes: model, max_tokens, conversation_id, is_persisted, message_length",
+        "Add unit tests for span creation and finalization",
+        "Run 'go test ./pkg/llm/base/...' to verify tests pass"
+      ],
+      "passes": false
+    },
+    {
+      "id": "base-thread-persistence",
+      "category": "functional",
+      "priority": "medium",
+      "description": "Move the EnablePersistence() method to BaseThread as the logic is identical across all providers. The loadConversation() method remains provider-specific due to message format differences.",
+      "steps": [
+        "Add EnablePersistence(ctx, enabled bool) method to BaseThread",
+        "Implement store initialization logic with error handling",
+        "Add a LoadConversation callback field for provider-specific loading",
+        "Add unit tests for persistence enabling/disabling",
+        "Run 'go test ./pkg/llm/base/...' to verify tests pass"
+      ],
+      "passes": false
+    },
+    {
+      "id": "anthropic-embed-base-thread",
+      "category": "functional",
+      "priority": "high",
+      "description": "Update the Anthropic Thread struct to embed BaseThread and use its shared methods, removing duplicated code.",
+      "steps": [
+        "Import pkg/llm/base package in anthropic.go",
+        "Embed base.BaseThread in the Thread struct",
+        "Remove duplicated fields that are now in BaseThread",
+        "Remove shouldAutoCompact() method (use BaseThread.ShouldAutoCompact)",
+        "Remove createMessageSpan() and finalizeMessageSpan() (use BaseThread methods)",
+        "Remove SetStructuredToolResult/Get/Set methods (use BaseThread methods)",
+        "Remove GetState, SetState, GetConfig, GetConversationID, SetConversationID, IsPersisted, GetUsage methods",
+        "Update NewAnthropicThread() to initialize BaseThread",
+        "Run 'go test ./pkg/llm/anthropic/...' to verify all tests pass"
+      ],
+      "passes": false
+    },
+    {
+      "id": "openai-embed-base-thread",
+      "category": "functional",
+      "priority": "high",
+      "description": "Update the OpenAI Thread struct to embed BaseThread and use its shared methods, removing duplicated code.",
+      "steps": [
+        "Import pkg/llm/base package in openai.go",
+        "Embed base.BaseThread in the Thread struct",
+        "Remove duplicated fields that are now in BaseThread",
+        "Remove shouldAutoCompact() method (use BaseThread.ShouldAutoCompact)",
+        "Remove createMessageSpan() and finalizeMessageSpan() (use BaseThread methods)",
+        "Remove SetStructuredToolResult/Get/Set methods (use BaseThread methods)",
+        "Remove GetState, SetState, GetConfig, GetConversationID, SetConversationID, IsPersisted, GetUsage methods",
+        "Update NewOpenAIThread() to initialize BaseThread",
+        "Run 'go test ./pkg/llm/openai/...' to verify all tests pass"
+      ],
+      "passes": false
+    },
+    {
+      "id": "google-embed-base-thread",
+      "category": "functional",
+      "priority": "high",
+      "description": "Update the Google Thread struct to embed BaseThread and use its shared methods, removing duplicated code.",
+      "steps": [
+        "Import pkg/llm/base package in google.go",
+        "Embed base.BaseThread in the Thread struct",
+        "Remove duplicated fields that are now in BaseThread",
+        "Remove shouldAutoCompact() method (use BaseThread.ShouldAutoCompact)",
+        "Remove createMessageSpan() and finalizeMessageSpan() (use BaseThread methods)",
+        "Remove SetStructuredToolResult/Get/Set methods (use BaseThread methods)",
+        "Remove GetState, SetState, GetConfig, GetConversationID, SetConversationID, IsPersisted, GetUsage methods",
+        "Update NewGoogleThread() to initialize BaseThread",
+        "Run 'go test ./pkg/llm/google/...' to verify all tests pass"
+      ],
+      "passes": false
+    },
+    {
+      "id": "base-thread-unit-tests",
+      "category": "testing",
+      "priority": "medium",
+      "description": "Create comprehensive unit tests for the BaseThread package covering all shared methods and edge cases.",
+      "steps": [
+        "Create pkg/llm/base/base_test.go",
+        "Add tests for ShouldAutoCompact with various ratios and usage values",
+        "Add tests for tool result management methods",
+        "Add tests for getter/setter methods with concurrent access",
+        "Add tests for EnablePersistence with mock store",
+        "Run 'go test -race ./pkg/llm/base/...' to verify no race conditions"
+      ],
+      "passes": false
+    },
+    {
+      "id": "integration-tests",
+      "category": "testing",
+      "priority": "medium",
+      "description": "Run full integration tests to ensure the refactored thread implementations work correctly end-to-end.",
+      "steps": [
+        "Run 'mise run test' to execute all unit tests",
+        "Run 'mise run lint' to verify code quality",
+        "Verify no regressions in existing functionality",
+        "Check that all providers still satisfy the llmtypes.Thread interface"
+      ],
+      "passes": false
+    },
+    {
+      "id": "documentation-update",
+      "category": "documentation",
+      "priority": "low",
+      "description": "Update AGENTS.md and add inline documentation for the new base package explaining the composition pattern.",
+      "steps": [
+        "Add doc.go to pkg/llm/base with package documentation",
+        "Document the BaseThread struct and its purpose",
+        "Update AGENTS.md LLM Architecture section to mention the base package",
+        "Add ADR documenting the decision to unify thread implementations"
+      ],
+      "passes": false
+    },
+    {
+      "id": "cleanup-unused-code",
+      "category": "infrastructure",
+      "priority": "low",
+      "description": "Final cleanup pass to remove any remaining duplicated code, unused imports, and ensure consistent formatting.",
+      "steps": [
+        "Run 'goimports -w ./pkg/llm/...' to clean up imports",
+        "Run 'mise run lint' to verify no linting errors",
+        "Remove any commented-out old code",
+        "Verify total LOC reduction is approximately 300 lines per provider"
+      ],
+      "passes": false
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+# Progress Log
+
+This file tracks progress across Ralph iterations.
+
+---
+
