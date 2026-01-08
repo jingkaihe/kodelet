@@ -187,16 +187,12 @@ func migrateFromLegacyCredentials(legacyPath string) (*AnthropicCredentialsFile,
 	return credsFile, nil
 }
 
-// GenerateAliasFromEmail extracts a suitable alias from an email address.
+// GenerateAliasFromEmail returns the email address as the alias.
 func GenerateAliasFromEmail(email string) string {
 	if email == "" {
 		return "default"
 	}
-	parts := strings.Split(email, "@")
-	if len(parts) == 0 || parts[0] == "" {
-		return "default"
-	}
-	return parts[0]
+	return email
 }
 
 // SaveAnthropicCredentialsWithAlias saves credentials for a specific account alias.
@@ -242,7 +238,7 @@ func GetAnthropicCredentialsByAlias(alias string) (*AnthropicCredentials, error)
 	}
 
 	if len(credsFile.Accounts) == 0 {
-		return nil, errors.New("no Anthropic accounts found, please login first with 'kodelet anthropic-login'")
+		return nil, errors.New("no Anthropic accounts found, please login first with 'kodelet anthropic login'")
 	}
 
 	// If no alias specified, use default
@@ -342,6 +338,37 @@ func RemoveAnthropicAccount(alias string) error {
 			credsFile.DefaultAccount = newAlias
 			break
 		}
+	}
+
+	return writeAnthropicCredentialsFile(credsFile)
+}
+
+// RenameAnthropicAccount renames an account from oldAlias to newAlias.
+// If the account being renamed is the default, updates the default to the new alias.
+func RenameAnthropicAccount(oldAlias, newAlias string) error {
+	if oldAlias == newAlias {
+		return errors.New("old and new alias are the same")
+	}
+
+	credsFile, err := readAnthropicCredentialsFile()
+	if err != nil {
+		return err
+	}
+
+	creds, exists := credsFile.Accounts[oldAlias]
+	if !exists {
+		return errors.Errorf("account '%s' not found", oldAlias)
+	}
+
+	if _, exists := credsFile.Accounts[newAlias]; exists {
+		return errors.Errorf("account '%s' already exists", newAlias)
+	}
+
+	delete(credsFile.Accounts, oldAlias)
+	credsFile.Accounts[newAlias] = creds
+
+	if credsFile.DefaultAccount == oldAlias {
+		credsFile.DefaultAccount = newAlias
 	}
 
 	return writeAnthropicCredentialsFile(credsFile)

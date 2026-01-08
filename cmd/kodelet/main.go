@@ -147,8 +147,7 @@ func main() {
 	rootCmd.AddCommand(issueResolveCmd)
 	rootCmd.AddCommand(resolveCmd)
 	rootCmd.AddCommand(ghaAgentOnboardCmd)
-	rootCmd.AddCommand(anthropicLoginCmd)
-	rootCmd.AddCommand(anthropicLogoutCmd)
+	rootCmd.AddCommand(anthropicCmd)
 	rootCmd.AddCommand(copilotLoginCmd)
 	rootCmd.AddCommand(copilotLogoutCmd)
 	rootCmd.AddCommand(serveCmd)
@@ -157,7 +156,6 @@ func main() {
 	rootCmd.AddCommand(profileCmd)
 	rootCmd.AddCommand(llmstxtCmd)
 	rootCmd.AddCommand(ralphCmd)
-	rootCmd.AddCommand(accountsCmd)
 
 	// Initialize telemetry with tracing
 	tracingShutdown, err := initTracing(ctx)
@@ -193,15 +191,13 @@ func main() {
 	issueResolveCmd = withTracing(issueResolveCmd)
 	resolveCmd = withTracing(resolveCmd)
 	ghaAgentOnboardCmd = withTracing(ghaAgentOnboardCmd)
-	anthropicLoginCmd = withTracing(anthropicLoginCmd)
-	anthropicLogoutCmd = withTracing(anthropicLogoutCmd)
+	anthropicCmd = withTracing(anthropicCmd)
 	copilotLoginCmd = withTracing(copilotLoginCmd)
 	copilotLogoutCmd = withTracing(copilotLogoutCmd)
 	serveCmd = withTracing(serveCmd)
 	feedbackCmd = withTracing(feedbackCmd)
 	recipeCmd = withTracing(recipeCmd)
 	ralphCmd = withTracing(ralphCmd)
-	accountsCmd = withTracing(accountsCmd)
 
 	// Set the root command context to include the tracing context
 	rootCmd.SetContext(ctx)

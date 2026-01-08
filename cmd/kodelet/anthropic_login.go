@@ -17,7 +17,7 @@ import (
 var anthropicLoginAlias string
 
 var anthropicLoginCmd = &cobra.Command{
-	Use:   "anthropic-login",
+	Use:   "login",
 	Short: "Login to Anthropic via OAuth to access subscription-based models",
 	Long: `Login to Anthropic via OAuth to access subscription-based models.
 

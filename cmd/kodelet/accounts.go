@@ -12,7 +12,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var accountsCmd = &cobra.Command{
+var anthropicAccountsCmd = &cobra.Command{
 	Use:   "accounts",
 	Short: "Manage Anthropic subscription accounts",
 	Long:  `List, manage, and switch between multiple Anthropic subscription accounts.`,
@@ -21,7 +21,7 @@ var accountsCmd = &cobra.Command{
 	},
 }
 
-var accountsListCmd = &cobra.Command{
+var anthropicAccountsListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all logged-in Anthropic accounts",
 	Long:  `Display all Anthropic subscription accounts with their aliases, emails, and token status.`,
@@ -30,7 +30,7 @@ var accountsListCmd = &cobra.Command{
 	},
 }
 
-var accountsRemoveCmd = &cobra.Command{
+var anthropicAccountsRemoveCmd = &cobra.Command{
 	Use:   "remove <alias>",
 	Short: "Remove an Anthropic account",
 	Long: `Remove a specific Anthropic subscription account by its alias.
@@ -43,15 +43,15 @@ set as the new default (if any accounts remain).`,
 	},
 }
 
-var accountsDefaultCmd = &cobra.Command{
+var anthropicAccountsDefaultCmd = &cobra.Command{
 	Use:   "default [alias]",
 	Short: "Show or set the default Anthropic account",
 	Long: `Show the current default account when called without arguments,
 or set a new default account when an alias is provided.
 
 Examples:
-  kodelet accounts default           # Show current default account
-  kodelet accounts default work      # Set 'work' as the default account`,
+  kodelet anthropic accounts default           # Show current default account
+  kodelet anthropic accounts default work      # Set 'work' as the default account`,
 	Args: cobra.MaximumNArgs(1),
 	Run: func(_ *cobra.Command, args []string) {
 		if len(args) == 0 {
@@ -62,10 +62,28 @@ Examples:
 	},
 }
 
+var anthropicAccountsRenameCmd = &cobra.Command{
+	Use:   "rename <old-alias> <new-alias>",
+	Short: "Rename an Anthropic account alias",
+	Long: `Rename an existing Anthropic account to a new alias.
+
+If the account being renamed is the default, the default will be updated
+to use the new alias.
+
+Examples:
+  kodelet anthropic accounts rename user@example.com work
+  kodelet anthropic accounts rename old-alias new-alias`,
+	Args: cobra.ExactArgs(2),
+	Run: func(_ *cobra.Command, args []string) {
+		renameAccountCmd(args[0], args[1])
+	},
+}
+
 func init() {
-	accountsCmd.AddCommand(accountsListCmd)
-	accountsCmd.AddCommand(accountsRemoveCmd)
-	accountsCmd.AddCommand(accountsDefaultCmd)
+	anthropicAccountsCmd.AddCommand(anthropicAccountsListCmd)
+	anthropicAccountsCmd.AddCommand(anthropicAccountsRemoveCmd)
+	anthropicAccountsCmd.AddCommand(anthropicAccountsDefaultCmd)
+	anthropicAccountsCmd.AddCommand(anthropicAccountsRenameCmd)
 }
 
 // accountTokenStatus returns the status of an account's token based on expiration time.
@@ -89,7 +107,7 @@ func listAccountsCmd() {
 	}
 
 	if len(accounts) == 0 {
-		presenter.Info("No Anthropic accounts found. Use 'kodelet anthropic-login' to add an account.")
+		presenter.Info("No Anthropic accounts found. Use 'kodelet anthropic login' to add an account.")
 		return
 	}
 
@@ -156,7 +174,7 @@ func removeAccountCmd(alias string) {
 	if wasDefault {
 		newDefault, err := auth.GetDefaultAnthropicAccount()
 		if err != nil {
-			presenter.Info("No accounts remaining. Use 'kodelet anthropic-login' to add a new account.")
+			presenter.Info("No accounts remaining. Use 'kodelet anthropic login' to add a new account.")
 		} else {
 			presenter.Info(fmt.Sprintf("Default account changed to '%s'", newDefault))
 		}
@@ -166,7 +184,7 @@ func removeAccountCmd(alias string) {
 func showDefaultAccountCmd() {
 	defaultAlias, err := auth.GetDefaultAnthropicAccount()
 	if err != nil {
-		presenter.Info("No default account set. Use 'kodelet anthropic-login' to add an account.")
+		presenter.Info("No default account set. Use 'kodelet anthropic login' to add an account.")
 		return
 	}
 
@@ -206,7 +224,7 @@ func setDefaultAccountCmd(alias string) {
 
 	if !accountExists {
 		presenter.Error(fmt.Errorf("account '%s' not found", alias), "Failed to set default account")
-		presenter.Info("Use 'kodelet accounts list' to see available accounts.")
+		presenter.Info("Use 'kodelet anthropic accounts list' to see available accounts.")
 		os.Exit(1)
 	}
 
@@ -216,4 +234,13 @@ func setDefaultAccountCmd(alias string) {
 	}
 
 	presenter.Success(fmt.Sprintf("Default account set to '%s'", alias))
+}
+
+func renameAccountCmd(oldAlias, newAlias string) {
+	if err := auth.RenameAnthropicAccount(oldAlias, newAlias); err != nil {
+		presenter.Error(err, "Failed to rename account")
+		os.Exit(1)
+	}
+
+	presenter.Success(fmt.Sprintf("Account '%s' renamed to '%s'", oldAlias, newAlias))
 }

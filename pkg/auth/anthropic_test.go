@@ -416,10 +416,10 @@ func TestGenerateAliasFromEmail(t *testing.T) {
 		email    string
 		expected string
 	}{
-		{"test@example.com", "test"},
-		{"john.doe@company.org", "john.doe"},
+		{"test@example.com", "test@example.com"},
+		{"john.doe@company.org", "john.doe@company.org"},
 		{"", "default"},
-		{"@nodomain.com", "default"},
+		{"@nodomain.com", "@nodomain.com"},
 		{"simple", "simple"},
 	}
 
@@ -475,7 +475,7 @@ func TestSaveAnthropicCredentialsWithAlias(t *testing.T) {
 		assert.Equal(t, "work", defaultAlias)
 	})
 
-	t.Run("save without alias uses email prefix", func(t *testing.T) {
+	t.Run("save without alias uses full email", func(t *testing.T) {
 		creds := &AnthropicCredentials{
 			Email:        "auto@domain.com",
 			Scope:        "user:inference user:profile",
@@ -487,8 +487,8 @@ func TestSaveAnthropicCredentialsWithAlias(t *testing.T) {
 		_, err := SaveAnthropicCredentialsWithAlias("", creds)
 		require.NoError(t, err)
 
-		// Should be retrievable by email prefix
-		retrieved, err := GetAnthropicCredentialsByAlias("auto")
+		// Should be retrievable by full email
+		retrieved, err := GetAnthropicCredentialsByAlias("auto@domain.com")
 		require.NoError(t, err)
 		assert.Equal(t, "auto@domain.com", retrieved.Email)
 	})
@@ -709,6 +709,110 @@ func TestRemoveAnthropicAccount(t *testing.T) {
 		err := RemoveAnthropicAccount("nonexistent")
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "not found")
+	})
+}
+
+func TestRenameAnthropicAccount(t *testing.T) {
+	// Create a temporary directory for testing
+	tempDir := t.TempDir()
+	originalHome := os.Getenv("HOME")
+	defer os.Setenv("HOME", originalHome)
+	os.Setenv("HOME", tempDir)
+
+	t.Run("rename non-default account", func(t *testing.T) {
+		credsFile := &AnthropicCredentialsFile{
+			DefaultAccount: "work",
+			Accounts: map[string]AnthropicCredentials{
+				"work":     {Email: "work@company.com"},
+				"personal": {Email: "personal@gmail.com"},
+			},
+		}
+
+		credsDir := filepath.Join(tempDir, ".kodelet")
+		require.NoError(t, os.MkdirAll(credsDir, 0o755))
+
+		filePath := filepath.Join(credsDir, "anthropic-credentials.json")
+		data, err := json.Marshal(credsFile)
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(filePath, data, 0o644))
+
+		err = RenameAnthropicAccount("personal", "home")
+		require.NoError(t, err)
+
+		// Old alias should not exist
+		_, err = GetAnthropicCredentialsByAlias("personal")
+		assert.Error(t, err)
+
+		// New alias should work
+		creds, err := GetAnthropicCredentialsByAlias("home")
+		require.NoError(t, err)
+		assert.Equal(t, "personal@gmail.com", creds.Email)
+
+		// Default should still be work
+		defaultAlias, err := GetDefaultAnthropicAccount()
+		require.NoError(t, err)
+		assert.Equal(t, "work", defaultAlias)
+	})
+
+	t.Run("rename default account updates default", func(t *testing.T) {
+		credsFile := &AnthropicCredentialsFile{
+			DefaultAccount: "work",
+			Accounts: map[string]AnthropicCredentials{
+				"work":     {Email: "work@company.com"},
+				"personal": {Email: "personal@gmail.com"},
+			},
+		}
+
+		credsDir := filepath.Join(tempDir, ".kodelet")
+		filePath := filepath.Join(credsDir, "anthropic-credentials.json")
+		data, err := json.Marshal(credsFile)
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(filePath, data, 0o644))
+
+		err = RenameAnthropicAccount("work", "office")
+		require.NoError(t, err)
+
+		// Default should now be "office"
+		defaultAlias, err := GetDefaultAnthropicAccount()
+		require.NoError(t, err)
+		assert.Equal(t, "office", defaultAlias)
+
+		// New alias should work
+		creds, err := GetAnthropicCredentialsByAlias("office")
+		require.NoError(t, err)
+		assert.Equal(t, "work@company.com", creds.Email)
+	})
+
+	t.Run("error on non-existent alias", func(t *testing.T) {
+		err := RenameAnthropicAccount("nonexistent", "newname")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "not found")
+	})
+
+	t.Run("error when new alias already exists", func(t *testing.T) {
+		credsFile := &AnthropicCredentialsFile{
+			DefaultAccount: "work",
+			Accounts: map[string]AnthropicCredentials{
+				"work":     {Email: "work@company.com"},
+				"personal": {Email: "personal@gmail.com"},
+			},
+		}
+
+		credsDir := filepath.Join(tempDir, ".kodelet")
+		filePath := filepath.Join(credsDir, "anthropic-credentials.json")
+		data, err := json.Marshal(credsFile)
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(filePath, data, 0o644))
+
+		err = RenameAnthropicAccount("work", "personal")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "already exists")
+	})
+
+	t.Run("error when old and new alias are the same", func(t *testing.T) {
+		err := RenameAnthropicAccount("work", "work")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "same")
 	})
 }
 
@@ -1074,7 +1178,7 @@ func TestEmptyAliasGeneratesFromEmail(t *testing.T) {
 	defer os.Setenv("HOME", originalHome)
 	os.Setenv("HOME", tempDir)
 
-	// Save with empty alias - should generate from email
+	// Save with empty alias - should use full email as alias
 	creds := &AnthropicCredentials{
 		Email:        "generated.alias@company.com",
 		AccessToken:  "token",
@@ -1084,18 +1188,18 @@ func TestEmptyAliasGeneratesFromEmail(t *testing.T) {
 	_, err := SaveAnthropicCredentialsWithAlias("", creds)
 	require.NoError(t, err)
 
-	// Should be retrievable by generated alias
-	retrieved, err := GetAnthropicCredentialsByAlias("generated.alias")
+	// Should be retrievable by full email
+	retrieved, err := GetAnthropicCredentialsByAlias("generated.alias@company.com")
 	require.NoError(t, err)
 	assert.Equal(t, "generated.alias@company.com", retrieved.Email)
 
 	// Should be the default
 	defaultAlias, err := GetDefaultAnthropicAccount()
 	require.NoError(t, err)
-	assert.Equal(t, "generated.alias", defaultAlias)
+	assert.Equal(t, "generated.alias@company.com", defaultAlias)
 
-	// Account should exist under generated alias
-	exists, err := AccountExists("generated.alias")
+	// Account should exist under full email alias
+	exists, err := AccountExists("generated.alias@company.com")
 	require.NoError(t, err)
 	assert.True(t, exists)
 }
