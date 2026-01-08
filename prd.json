@@ -168,7 +168,7 @@
         "Verify no regressions in existing functionality",
         "Check that all providers still satisfy the llmtypes.Thread interface"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "documentation-update",
