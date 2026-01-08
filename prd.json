@@ -181,7 +181,7 @@
         "Update AGENTS.md LLM Architecture section to mention the base package",
         "Add ADR documenting the decision to unify thread implementations"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "cleanup-unused-code",

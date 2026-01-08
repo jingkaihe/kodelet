@@ -428,3 +428,42 @@ This file tracks progress across Ralph iterations.
 
 ---
 
+## 2026-01-08 - Iteration 12
+
+### Feature Completed: documentation-update
+
+**What was implemented:**
+- Created `pkg/llm/base/doc.go` with comprehensive package documentation:
+  - Explained the composition-based architecture using Go's struct embedding
+  - Documented all shared components (fields, methods, constants)
+  - Provided usage examples for provider implementations
+  - Documented thread safety characteristics
+  - Explained tracing integration with extraAttributes pattern
+  - Referenced ADR 023 for architectural context
+- Created `adrs/023-unified-thread-base-package.md` documenting the architectural decision:
+  - Described the context and problem (code duplication across 3 providers)
+  - Explained the decision to use struct embedding
+  - Detailed the design principles (composition, flexibility, thread safety, minimal coupling)
+  - Documented shared components and provider-specific customization patterns
+  - Listed consequences (benefits, trade-offs, risks mitigated)
+  - Documented alternatives considered
+- Updated `AGENTS.md` LLM Architecture section:
+  - Added new "Base Thread Package" subsection
+  - Documented shared fields, methods, and constants
+  - Referenced doc.go and ADR 023
+
+**Files created/modified:**
+- pkg/llm/base/doc.go (new file)
+- adrs/023-unified-thread-base-package.md (new file)
+- AGENTS.md (updated LLM Architecture section)
+
+**Verification:**
+- All tests pass: `go test ./pkg/llm/base/...`
+- Linter passes: `mise run lint` (0 issues)
+
+**Notes for next iteration:**
+- Next feature to implement: `cleanup-unused-code` (low priority) - Final cleanup pass
+- This is the last remaining feature in the PRD
+
+---
+
