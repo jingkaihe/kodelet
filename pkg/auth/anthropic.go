@@ -310,6 +310,17 @@ func GetDefaultAnthropicAccount() (string, error) {
 	return credsFile.DefaultAccount, nil
 }
 
+// AccountExists checks if an account with the given alias exists.
+func AccountExists(alias string) (bool, error) {
+	credsFile, err := readAnthropicCredentialsFile()
+	if err != nil {
+		return false, err
+	}
+
+	_, exists := credsFile.Accounts[alias]
+	return exists, nil
+}
+
 // RemoveAnthropicAccount removes an account by alias.
 // If removing the default account, clears the default (or sets to another account if available).
 func RemoveAnthropicAccount(alias string) error {

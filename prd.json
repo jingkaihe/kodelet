@@ -102,7 +102,7 @@
         "Test account removal (including default account edge cases)",
         "Test error cases (missing account, invalid alias)"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "documentation-update",

@@ -808,3 +808,410 @@ func TestAnthropicAccessTokenForAlias(t *testing.T) {
 		assert.Equal(t, "work_access_token", token)
 	})
 }
+
+// Additional unit tests for comprehensive multi-account authentication coverage
+
+func TestAccountExists(t *testing.T) {
+	// Create a temporary directory for testing
+	tempDir := t.TempDir()
+	originalHome := os.Getenv("HOME")
+	defer os.Setenv("HOME", originalHome)
+	os.Setenv("HOME", tempDir)
+
+	t.Run("no accounts exist", func(t *testing.T) {
+		exists, err := AccountExists("work")
+		require.NoError(t, err)
+		assert.False(t, exists)
+	})
+
+	t.Run("account exists", func(t *testing.T) {
+		credsFile := &AnthropicCredentialsFile{
+			DefaultAccount: "work",
+			Accounts: map[string]AnthropicCredentials{
+				"work":     {Email: "work@company.com"},
+				"personal": {Email: "personal@gmail.com"},
+			},
+		}
+
+		credsDir := filepath.Join(tempDir, ".kodelet")
+		require.NoError(t, os.MkdirAll(credsDir, 0o755))
+
+		filePath := filepath.Join(credsDir, "anthropic-credentials.json")
+		data, err := json.Marshal(credsFile)
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(filePath, data, 0o644))
+
+		exists, err := AccountExists("work")
+		require.NoError(t, err)
+		assert.True(t, exists)
+
+		exists, err = AccountExists("personal")
+		require.NoError(t, err)
+		assert.True(t, exists)
+	})
+
+	t.Run("account does not exist", func(t *testing.T) {
+		exists, err := AccountExists("nonexistent")
+		require.NoError(t, err)
+		assert.False(t, exists)
+	})
+}
+
+func TestOverwriteExistingAccount(t *testing.T) {
+	// Create a temporary directory for testing
+	tempDir := t.TempDir()
+	originalHome := os.Getenv("HOME")
+	defer os.Setenv("HOME", originalHome)
+	os.Setenv("HOME", tempDir)
+
+	// Save initial account
+	initialCreds := &AnthropicCredentials{
+		Email:        "old@company.com",
+		Scope:        "user:inference user:profile",
+		AccessToken:  "old_access_token",
+		RefreshToken: "old_refresh_token",
+		ExpiresAt:    time.Now().Add(time.Hour).Unix(),
+	}
+
+	_, err := SaveAnthropicCredentialsWithAlias("work", initialCreds)
+	require.NoError(t, err)
+
+	// Verify initial state
+	retrieved, err := GetAnthropicCredentialsByAlias("work")
+	require.NoError(t, err)
+	assert.Equal(t, "old@company.com", retrieved.Email)
+	assert.Equal(t, "old_access_token", retrieved.AccessToken)
+
+	// Overwrite with new credentials
+	newCreds := &AnthropicCredentials{
+		Email:        "new@company.com",
+		Scope:        "user:inference user:profile",
+		AccessToken:  "new_access_token",
+		RefreshToken: "new_refresh_token",
+		ExpiresAt:    time.Now().Add(2 * time.Hour).Unix(),
+	}
+
+	_, err = SaveAnthropicCredentialsWithAlias("work", newCreds)
+	require.NoError(t, err)
+
+	// Verify the overwrite
+	retrieved, err = GetAnthropicCredentialsByAlias("work")
+	require.NoError(t, err)
+	assert.Equal(t, "new@company.com", retrieved.Email)
+	assert.Equal(t, "new_access_token", retrieved.AccessToken)
+
+	// Ensure still only one account
+	accounts, err := ListAnthropicAccounts()
+	require.NoError(t, err)
+	assert.Len(t, accounts, 1)
+}
+
+func TestNoDefaultButAccountsExist(t *testing.T) {
+	// Create a temporary directory for testing
+	tempDir := t.TempDir()
+	originalHome := os.Getenv("HOME")
+	defer os.Setenv("HOME", originalHome)
+	os.Setenv("HOME", tempDir)
+
+	// Create credentials file with accounts but no default
+	credsFile := &AnthropicCredentialsFile{
+		DefaultAccount: "", // No default set
+		Accounts: map[string]AnthropicCredentials{
+			"work": {
+				Email:        "work@company.com",
+				AccessToken:  "work_token",
+				RefreshToken: "refresh",
+				ExpiresAt:    time.Now().Add(time.Hour).Unix(),
+			},
+		},
+	}
+
+	credsDir := filepath.Join(tempDir, ".kodelet")
+	require.NoError(t, os.MkdirAll(credsDir, 0o755))
+
+	filePath := filepath.Join(credsDir, "anthropic-credentials.json")
+	data, err := json.Marshal(credsFile)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filePath, data, 0o644))
+
+	// Getting credentials with empty alias should fail (no default)
+	_, err = GetAnthropicCredentialsByAlias("")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "no default account set")
+
+	// Getting credentials with explicit alias should work
+	creds, err := GetAnthropicCredentialsByAlias("work")
+	require.NoError(t, err)
+	assert.Equal(t, "work@company.com", creds.Email)
+
+	// GetDefaultAnthropicAccount should return error
+	_, err = GetDefaultAnthropicAccount()
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "no default account set")
+}
+
+func TestRemoveLastAccount(t *testing.T) {
+	// Create a temporary directory for testing
+	tempDir := t.TempDir()
+	originalHome := os.Getenv("HOME")
+	defer os.Setenv("HOME", originalHome)
+	os.Setenv("HOME", tempDir)
+
+	// Set up single account
+	credsFile := &AnthropicCredentialsFile{
+		DefaultAccount: "work",
+		Accounts: map[string]AnthropicCredentials{
+			"work": {Email: "work@company.com"},
+		},
+	}
+
+	credsDir := filepath.Join(tempDir, ".kodelet")
+	require.NoError(t, os.MkdirAll(credsDir, 0o755))
+
+	filePath := filepath.Join(credsDir, "anthropic-credentials.json")
+	data, err := json.Marshal(credsFile)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filePath, data, 0o644))
+
+	// Remove the only account
+	err = RemoveAnthropicAccount("work")
+	require.NoError(t, err)
+
+	// Should have no accounts left
+	accounts, err := ListAnthropicAccounts()
+	require.NoError(t, err)
+	assert.Empty(t, accounts)
+
+	// Default should be cleared
+	_, err = GetDefaultAnthropicAccount()
+	assert.Error(t, err)
+
+	// Getting any credentials should fail
+	_, err = GetAnthropicCredentialsByAlias("")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "no Anthropic accounts found")
+}
+
+func TestMultipleAccountsDefaultSelection(t *testing.T) {
+	// Create a temporary directory for testing
+	tempDir := t.TempDir()
+	originalHome := os.Getenv("HOME")
+	defer os.Setenv("HOME", originalHome)
+	os.Setenv("HOME", tempDir)
+
+	// Add first account - should become default
+	creds1 := &AnthropicCredentials{
+		Email:        "first@example.com",
+		AccessToken:  "first_token",
+		RefreshToken: "refresh",
+		ExpiresAt:    time.Now().Add(time.Hour).Unix(),
+	}
+	_, err := SaveAnthropicCredentialsWithAlias("first", creds1)
+	require.NoError(t, err)
+
+	defaultAlias, err := GetDefaultAnthropicAccount()
+	require.NoError(t, err)
+	assert.Equal(t, "first", defaultAlias)
+
+	// Add second account - should not change default
+	creds2 := &AnthropicCredentials{
+		Email:        "second@example.com",
+		AccessToken:  "second_token",
+		RefreshToken: "refresh",
+		ExpiresAt:    time.Now().Add(time.Hour).Unix(),
+	}
+	_, err = SaveAnthropicCredentialsWithAlias("second", creds2)
+	require.NoError(t, err)
+
+	defaultAlias, err = GetDefaultAnthropicAccount()
+	require.NoError(t, err)
+	assert.Equal(t, "first", defaultAlias)
+
+	// Add third account - should not change default
+	creds3 := &AnthropicCredentials{
+		Email:        "third@example.com",
+		AccessToken:  "third_token",
+		RefreshToken: "refresh",
+		ExpiresAt:    time.Now().Add(time.Hour).Unix(),
+	}
+	_, err = SaveAnthropicCredentialsWithAlias("third", creds3)
+	require.NoError(t, err)
+
+	defaultAlias, err = GetDefaultAnthropicAccount()
+	require.NoError(t, err)
+	assert.Equal(t, "first", defaultAlias)
+
+	// Verify all accounts exist
+	accounts, err := ListAnthropicAccounts()
+	require.NoError(t, err)
+	assert.Len(t, accounts, 3)
+
+	// Change default and verify
+	err = SetDefaultAnthropicAccount("second")
+	require.NoError(t, err)
+
+	defaultAlias, err = GetDefaultAnthropicAccount()
+	require.NoError(t, err)
+	assert.Equal(t, "second", defaultAlias)
+
+	// Verify only one is marked as default in the list
+	accounts, err = ListAnthropicAccounts()
+	require.NoError(t, err)
+	defaultCount := 0
+	for _, acc := range accounts {
+		if acc.IsDefault {
+			defaultCount++
+			assert.Equal(t, "second", acc.Alias)
+		}
+	}
+	assert.Equal(t, 1, defaultCount)
+}
+
+func TestEmptyAliasGeneratesFromEmail(t *testing.T) {
+	// Create a temporary directory for testing
+	tempDir := t.TempDir()
+	originalHome := os.Getenv("HOME")
+	defer os.Setenv("HOME", originalHome)
+	os.Setenv("HOME", tempDir)
+
+	// Save with empty alias - should generate from email
+	creds := &AnthropicCredentials{
+		Email:        "generated.alias@company.com",
+		AccessToken:  "token",
+		RefreshToken: "refresh",
+		ExpiresAt:    time.Now().Add(time.Hour).Unix(),
+	}
+	_, err := SaveAnthropicCredentialsWithAlias("", creds)
+	require.NoError(t, err)
+
+	// Should be retrievable by generated alias
+	retrieved, err := GetAnthropicCredentialsByAlias("generated.alias")
+	require.NoError(t, err)
+	assert.Equal(t, "generated.alias@company.com", retrieved.Email)
+
+	// Should be the default
+	defaultAlias, err := GetDefaultAnthropicAccount()
+	require.NoError(t, err)
+	assert.Equal(t, "generated.alias", defaultAlias)
+
+	// Account should exist under generated alias
+	exists, err := AccountExists("generated.alias")
+	require.NoError(t, err)
+	assert.True(t, exists)
+}
+
+func TestErrorCasesComprehensive(t *testing.T) {
+	// Create a temporary directory for testing
+	tempDir := t.TempDir()
+	originalHome := os.Getenv("HOME")
+	defer os.Setenv("HOME", originalHome)
+	os.Setenv("HOME", tempDir)
+
+	ctx := context.Background()
+
+	t.Run("get credentials from non-existent account", func(t *testing.T) {
+		// Setup accounts first
+		credsFile := &AnthropicCredentialsFile{
+			DefaultAccount: "work",
+			Accounts: map[string]AnthropicCredentials{
+				"work": {
+					Email:        "work@company.com",
+					AccessToken:  "token",
+					RefreshToken: "refresh",
+					ExpiresAt:    time.Now().Add(time.Hour).Unix(),
+				},
+			},
+		}
+
+		credsDir := filepath.Join(tempDir, ".kodelet")
+		require.NoError(t, os.MkdirAll(credsDir, 0o755))
+
+		filePath := filepath.Join(credsDir, "anthropic-credentials.json")
+		data, err := json.Marshal(credsFile)
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(filePath, data, 0o644))
+
+		_, err = GetAnthropicCredentialsByAlias("nonexistent")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "not found")
+	})
+
+	t.Run("set default to non-existent account", func(t *testing.T) {
+		err := SetDefaultAnthropicAccount("nonexistent")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "not found")
+	})
+
+	t.Run("remove non-existent account", func(t *testing.T) {
+		err := RemoveAnthropicAccount("nonexistent")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "not found")
+	})
+
+	t.Run("get access token for non-existent account", func(t *testing.T) {
+		_, err := AnthropicAccessToken(ctx, "nonexistent")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "not found")
+	})
+
+	t.Run("get header for non-existent account", func(t *testing.T) {
+		_, err := AnthropicHeader(ctx, "nonexistent")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "not found")
+	})
+}
+
+func TestAccountInfoFields(t *testing.T) {
+	// Create a temporary directory for testing
+	tempDir := t.TempDir()
+	originalHome := os.Getenv("HOME")
+	defer os.Setenv("HOME", originalHome)
+	os.Setenv("HOME", tempDir)
+
+	expiresAt := time.Now().Add(time.Hour).Unix()
+	credsFile := &AnthropicCredentialsFile{
+		DefaultAccount: "work",
+		Accounts: map[string]AnthropicCredentials{
+			"work": {
+				Email:        "work@company.com",
+				AccessToken:  "token1",
+				RefreshToken: "refresh1",
+				ExpiresAt:    expiresAt,
+			},
+			"personal": {
+				Email:        "personal@gmail.com",
+				AccessToken:  "token2",
+				RefreshToken: "refresh2",
+				ExpiresAt:    expiresAt + 3600, // Different expiry
+			},
+		},
+	}
+
+	credsDir := filepath.Join(tempDir, ".kodelet")
+	require.NoError(t, os.MkdirAll(credsDir, 0o755))
+
+	filePath := filepath.Join(credsDir, "anthropic-credentials.json")
+	data, err := json.Marshal(credsFile)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filePath, data, 0o644))
+
+	accounts, err := ListAnthropicAccounts()
+	require.NoError(t, err)
+	assert.Len(t, accounts, 2)
+
+	// Verify account info fields
+	for _, acc := range accounts {
+		switch acc.Alias {
+		case "work":
+			assert.Equal(t, "work@company.com", acc.Email)
+			assert.Equal(t, expiresAt, acc.ExpiresAt)
+			assert.True(t, acc.IsDefault)
+		case "personal":
+			assert.Equal(t, "personal@gmail.com", acc.Email)
+			assert.Equal(t, expiresAt+3600, acc.ExpiresAt)
+			assert.False(t, acc.IsDefault)
+		default:
+			t.Errorf("unexpected alias: %s", acc.Alias)
+		}
+	}
+}

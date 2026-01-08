@@ -276,3 +276,40 @@ Refactored `AnthropicAccessToken()` and `AnthropicHeader()` to accept account al
 
 ---
 
+## 2026-01-08 19:25:11 - unit-tests-auth
+
+### Feature Implemented
+Added comprehensive unit tests for the multi-account authentication system.
+
+### Changes Made
+1. **New Helper Function** (`pkg/auth/anthropic.go`):
+   - Added `AccountExists(alias string) (bool, error)` for checking if an account exists
+   - Useful for CLI validation before operations
+
+2. **New Test Cases** (`pkg/auth/anthropic_test.go`):
+   - `TestAccountExists`: Tests for account existence checking (no accounts, account exists, account doesn't exist)
+   - `TestOverwriteExistingAccount`: Tests that overwriting an account works correctly
+   - `TestNoDefaultButAccountsExist`: Tests edge case where accounts exist but no default is set
+   - `TestRemoveLastAccount`: Tests removing the final account clears default properly
+   - `TestMultipleAccountsDefaultSelection`: Tests default selection logic with 3+ accounts
+   - `TestEmptyAliasGeneratesFromEmail`: Tests automatic alias generation from email
+   - `TestErrorCasesComprehensive`: Consolidated error case tests (non-existent account for all operations)
+   - `TestAccountInfoFields`: Tests that `AnthropicAccountInfo` fields are correctly populated
+
+3. **Test Coverage**:
+   - Credential storage and retrieval for multiple accounts ✓
+   - Default account selection logic ✓
+   - Account removal (including default account edge cases) ✓
+   - Error cases (missing account, invalid alias) ✓
+   - Account overwriting behavior ✓
+   - Edge cases for empty default with accounts ✓
+
+### Issues Encountered
+- None. The existing test infrastructure made it straightforward to add comprehensive tests.
+
+### Notes for Next Iteration
+- The `documentation-update` feature (low priority) is the only remaining work item
+- All high and medium priority features are now complete
+
+---
+
