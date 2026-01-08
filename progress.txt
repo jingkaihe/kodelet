@@ -313,3 +313,33 @@ Added comprehensive unit tests for the multi-account authentication system.
 
 ---
 
+
+## 2026-01-08 19:45:00 - documentation-update
+
+### Feature Implemented
+Updated documentation to cover multi-account Anthropic authentication.
+
+### Changes Made
+1. **Updated docs/MANUAL.md**:
+   - Added new "Anthropic Multi-Account Authentication" section after LLM Providers
+   - Documented `kodelet anthropic-login --alias` command
+   - Documented `kodelet accounts list` command with example output
+   - Documented `kodelet accounts default` command (show and set)
+   - Documented `kodelet accounts remove` command
+   - Documented `--account` flag for `run` and `chat` commands
+   - Explained token status meanings (valid, needs refresh, expired)
+   - Updated Table of Contents with new section links
+
+2. **Updated AGENTS.md**:
+   - Added "Anthropic multi-account management" section to Key Commands
+   - Listed all accounts-related commands with brief descriptions
+   - Documented `--account` flag usage for run and chat commands
+
+### Issues Encountered
+- None. Straightforward documentation update.
+
+### Notes for Next Iteration
+- All features in the PRD are now complete!
+- The multi-account authentication feature is fully documented and ready for use.
+
+---

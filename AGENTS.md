@@ -200,6 +200,15 @@ kodelet commit [--no-confirm|--short]  # AI commit messages
 kodelet pr [--target main]             # Generate PRs
 kodelet issue-resolve --issue-url URL        # Resolve GitHub issues
 
+# Anthropic multi-account management
+kodelet anthropic-login --alias work   # Login with account alias
+kodelet accounts list                  # List all accounts (default marked with *)
+kodelet accounts default               # Show current default account
+kodelet accounts default <alias>       # Set default account
+kodelet accounts remove <alias>        # Remove an account
+kodelet run --account work "query"     # Use specific account for run
+kodelet chat --account work            # Use specific account for chat
+
 # PR management
 kodelet pr-respond --pr-url URL                           # Respond to latest @kodelet mention
 kodelet pr-respond --pr-url URL --review-id ID    # Respond to review comment

@@ -45,6 +45,11 @@ Kodelet is a lightweight agentic SWE Agent that runs as an interactive CLI tool 
 - [LLM Providers](#llm-providers)
   - [Anthropic Claude](#anthropic-claude)
   - [OpenAI](#openai)
+- [Anthropic Multi-Account Authentication](#anthropic-multi-account-authentication)
+  - [Logging In with Multiple Accounts](#logging-in-with-multiple-accounts)
+  - [Managing Accounts](#managing-accounts)
+  - [Using Accounts at Runtime](#using-accounts-at-runtime)
+  - [Account Status](#account-status)
 - [Custom Tools](#custom-tools)
   - [Creating Custom Tools](#creating-custom-tools)
   - [Tool Protocol](#tool-protocol)
@@ -852,6 +857,78 @@ Features:
 - Reasoning effort control (low, medium, high)
 - Function calling capabilities
 - Vision support (planned)
+
+## Anthropic Multi-Account Authentication
+
+Kodelet supports multiple Anthropic subscription accounts, allowing you to manage different accounts (e.g., work and personal) and switch between them at runtime.
+
+### Logging In with Multiple Accounts
+
+```bash
+# Login with an alias
+kodelet anthropic-login --alias work
+
+# Login without alias (uses email prefix as alias)
+kodelet anthropic-login
+```
+
+The first account logged in automatically becomes the default account.
+
+### Managing Accounts
+
+**List all accounts:**
+```bash
+kodelet accounts list
+```
+
+Output shows all logged-in accounts with their status:
+```
+ALIAS      EMAIL                    STATUS
+*work      user@company.com         valid
+personal   user@personal.com        needs refresh
+```
+
+The asterisk (*) indicates the default account.
+
+**Set default account:**
+```bash
+# Show current default
+kodelet accounts default
+
+# Set a new default
+kodelet accounts default personal
+```
+
+**Remove an account:**
+```bash
+kodelet accounts remove work
+```
+
+If you remove the default account, another account will automatically become the new default (if available).
+
+### Using Accounts at Runtime
+
+Specify which account to use with the `--account` flag:
+
+```bash
+# Use a specific account for one-shot queries
+kodelet run --account work "analyze this code"
+kodelet run --account personal "help with my side project"
+
+# Use a specific account in chat mode
+kodelet chat --account work
+```
+
+Without the `--account` flag, Kodelet uses the default account.
+
+### Account Status
+
+The `accounts list` command shows token status:
+- **valid**: Token is valid and ready to use
+- **needs refresh**: Token will be refreshed on next use
+- **expired**: Token has expired and needs re-authentication
+
+If a token is expired, run `kodelet anthropic-login --alias <alias>` to re-authenticate.
 
 ## Custom Tools
 
