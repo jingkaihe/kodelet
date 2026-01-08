@@ -48,3 +48,38 @@ Multi-account credential storage infrastructure for Anthropic authentication.
 
 ---
 
+## 2026-01-08 16:18:15 - login-with-alias
+
+### Feature Implemented
+Extended `anthropic-login` command to accept `--alias` flag for naming accounts.
+
+### Changes Made
+1. **Added `--alias` flag** (`cmd/kodelet/anthropic_login.go`):
+   - New `anthropicLoginAlias` variable for the flag
+   - Updated `runAnthropicLogin` to accept alias parameter
+   - Uses `auth.SaveAnthropicCredentialsWithAlias` instead of `SaveAnthropicCredentials`
+   - If no alias provided, uses email prefix via `auth.GenerateAliasFromEmail`
+
+2. **Enhanced success message**:
+   - Shows the account alias that was created
+   - Shows whether this account became the default
+   - For non-default accounts, shows hint for using `--account` flag
+
+3. **Updated help text**:
+   - Documents the `--alias` flag and its behavior
+   - Mentions first account automatically becomes default
+
+4. **Exported `GenerateAliasFromEmail`** (`pkg/auth/anthropic.go`):
+   - Renamed from `generateAliasFromEmail` to allow use from CLI
+   - Updated all internal references
+
+### Issues Encountered
+- None. The infrastructure from the previous iteration made this straightforward.
+
+### Notes for Next Iteration
+- The `accounts-list-command` feature should be next (high priority)
+- It can use `auth.ListAnthropicAccounts()` which is already implemented
+- The `token-retrieval-refactor` is mostly complete with `AnthropicAccessTokenForAlias`
+
+---
+

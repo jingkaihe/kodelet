@@ -26,7 +26,7 @@
         "First login sets that account as default automatically",
         "Success message shows the alias that was created"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "accounts-list-command",

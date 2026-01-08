@@ -170,7 +170,7 @@ func migrateFromLegacyCredentials(legacyPath string) (*AnthropicCredentialsFile,
 	}
 
 	// Generate alias from email prefix
-	alias := generateAliasFromEmail(creds.Email)
+	alias := GenerateAliasFromEmail(creds.Email)
 
 	credsFile := &AnthropicCredentialsFile{
 		DefaultAccount: alias,
@@ -187,8 +187,8 @@ func migrateFromLegacyCredentials(legacyPath string) (*AnthropicCredentialsFile,
 	return credsFile, nil
 }
 
-// generateAliasFromEmail extracts a suitable alias from an email address.
-func generateAliasFromEmail(email string) string {
+// GenerateAliasFromEmail extracts a suitable alias from an email address.
+func GenerateAliasFromEmail(email string) string {
 	if email == "" {
 		return "default"
 	}
@@ -210,7 +210,7 @@ func SaveAnthropicCredentialsWithAlias(alias string, creds *AnthropicCredentials
 
 	// If no alias specified, generate from email
 	if alias == "" {
-		alias = generateAliasFromEmail(creds.Email)
+		alias = GenerateAliasFromEmail(creds.Email)
 	}
 
 	// Save the account
@@ -536,7 +536,7 @@ func refreshAnthropicTokenForAlias(ctx context.Context, alias string, creds *Ant
 	// Use the provided alias for saving, or generate from email if empty
 	saveAlias := alias
 	if saveAlias == "" {
-		saveAlias = generateAliasFromEmail(creds.Email)
+		saveAlias = GenerateAliasFromEmail(creds.Email)
 	}
 
 	if _, err := SaveAnthropicCredentialsWithAlias(saveAlias, refreshed); err != nil {
