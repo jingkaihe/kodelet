@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/sashabaranov/go-openai"
@@ -30,8 +31,8 @@ func TestNewOpenAIThread(t *testing.T) {
 	thread, err := NewOpenAIThread(config, nil)
 	require.NoError(t, err)
 
-	assert.Equal(t, "gpt-4.1", thread.config.Model)
-	assert.Equal(t, 8192, thread.config.MaxTokens)
+	assert.Equal(t, "gpt-4.1", thread.Config.Model)
+	assert.Equal(t, 8192, thread.Config.MaxTokens)
 	assert.Equal(t, "medium", thread.reasoningEffort)
 
 	// Test with custom values
@@ -43,8 +44,8 @@ func TestNewOpenAIThread(t *testing.T) {
 	thread, err = NewOpenAIThread(config, nil)
 	require.NoError(t, err)
 
-	assert.Equal(t, "gpt-4o", thread.config.Model)
-	assert.Equal(t, 4096, thread.config.MaxTokens)
+	assert.Equal(t, "gpt-4o", thread.Config.Model)
+	assert.Equal(t, 4096, thread.Config.MaxTokens)
 	assert.Equal(t, "high", thread.reasoningEffort)
 }
 
@@ -376,8 +377,8 @@ func TestProcessImageFile(t *testing.T) {
 	err = os.WriteFile(smallImagePath, smallImageData, 0o644)
 	require.NoError(t, err)
 
-	// Create a large file (exceeding MaxImageFileSize)
-	largeImageData := make([]byte, MaxImageFileSize+1)
+	// Create a large file (exceeding base.MaxImageFileSize)
+	largeImageData := make([]byte, base.MaxImageFileSize+1)
 	err = os.WriteFile(largeImagePath, largeImageData, 0o644)
 	require.NoError(t, err)
 
@@ -626,7 +627,7 @@ func TestAddUserMessageWithTooManyImages(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create more image paths than the maximum allowed
-	imagePaths := make([]string, MaxImageCount+5)
+	imagePaths := make([]string, base.MaxImageCount+5)
 	for i := 0; i < len(imagePaths); i++ {
 		imagePaths[i] = "https://example.com/image" + string(rune('0'+i)) + ".jpg"
 	}
@@ -640,8 +641,8 @@ func TestAddUserMessageWithTooManyImages(t *testing.T) {
 	// Get the last message
 	lastMessage := thread.messages[len(thread.messages)-1]
 
-	// Should have text + MaxImageCount images
-	expectedPartCount := 1 + MaxImageCount
+	// Should have text + base.MaxImageCount images
+	expectedPartCount := 1 + base.MaxImageCount
 	assert.Equal(t, expectedPartCount, len(lastMessage.MultiContent))
 
 	// Last part should be text
@@ -656,9 +657,9 @@ func TestAddUserMessageWithTooManyImages(t *testing.T) {
 }
 
 func TestConstants(t *testing.T) {
-	// Test that constants are set to expected values
-	assert.Equal(t, 5*1024*1024, MaxImageFileSize)
-	assert.Equal(t, 10, MaxImageCount)
+	// Test that constants are set to expected values (now in base package)
+	assert.Equal(t, 5*1024*1024, base.MaxImageFileSize)
+	assert.Equal(t, 10, base.MaxImageCount)
 }
 
 func TestShouldAutoCompactOpenAI(t *testing.T) {
@@ -735,10 +736,10 @@ func TestShouldAutoCompactOpenAI(t *testing.T) {
 			require.NoError(t, err)
 
 			// Mock the usage stats
-			thread.usage.CurrentContextWindow = test.currentContextWindow
-			thread.usage.MaxContextWindow = test.maxContextWindow
+			thread.Usage.CurrentContextWindow = test.currentContextWindow
+			thread.Usage.MaxContextWindow = test.maxContextWindow
 
-			result := thread.shouldAutoCompact(test.compactRatio)
+			result := thread.ShouldAutoCompact(test.compactRatio)
 			assert.Equal(t, test.expectedResult, result)
 		})
 	}
@@ -770,14 +771,14 @@ func TestCompactContextIntegrationOpenAI(t *testing.T) {
 		})
 
 		// Add some tool results to verify they get cleared
-		thread.toolResults = map[string]tooltypes.StructuredToolResult{
+		thread.ToolResults = map[string]tooltypes.StructuredToolResult{
 			"tool1": {ToolName: "test_tool", Success: true, Timestamp: time.Now()},
 			"tool2": {ToolName: "another_tool", Success: false, Error: "test error", Timestamp: time.Now()},
 		}
 
 		// Record initial state
 		initialMessageCount := len(thread.messages)
-		initialToolResultCount := len(thread.toolResults)
+		initialToolResultCount := len(thread.ToolResults)
 
 		// Verify we have multiple messages and tool results
 		assert.Greater(t, initialMessageCount, 2, "Should have multiple messages for meaningful test")
@@ -789,7 +790,7 @@ func TestCompactContextIntegrationOpenAI(t *testing.T) {
 
 		// Verify the compacting worked
 		assert.Equal(t, 1, len(thread.messages), "Should be compacted to single user message")
-		assert.Equal(t, 0, len(thread.toolResults), "Tool results should be cleared")
+		assert.Equal(t, 0, len(thread.ToolResults), "Tool results should be cleared")
 
 		// Verify the single remaining message is a user message containing a summary
 		if len(thread.messages) > 0 {

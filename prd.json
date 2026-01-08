@@ -122,7 +122,7 @@
         "Update NewOpenAIThread() to initialize BaseThread",
         "Run 'go test ./pkg/llm/openai/...' to verify all tests pass"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "google-embed-base-thread",

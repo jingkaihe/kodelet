@@ -43,10 +43,10 @@ func (t *Thread) cleanupOrphanedMessages() {
 
 // SaveConversation saves the current thread to the conversation store
 func (t *Thread) SaveConversation(ctx context.Context, summarize bool) error {
-	t.conversationMu.Lock()
-	defer t.conversationMu.Unlock()
+	t.ConversationMu.Lock()
+	defer t.ConversationMu.Unlock()
 
-	if !t.isPersisted || t.store == nil {
+	if !t.Persisted || t.Store == nil {
 		return nil
 	}
 
@@ -66,61 +66,60 @@ func (t *Thread) SaveConversation(ctx context.Context, summarize bool) error {
 
 	// Build the conversation record
 	record := convtypes.ConversationRecord{
-		ID:                  t.conversationID,
+		ID:                  t.ConversationID,
 		RawMessages:         messagesJSON,
 		Provider:            "openai",
-		Usage:               *t.usage,
-		Metadata:            map[string]interface{}{"model": t.config.Model},
+		Usage:               *t.Usage,
+		Metadata:            map[string]interface{}{"model": t.Config.Model},
 		Summary:             t.summary,
 		CreatedAt:           time.Now(),
 		UpdatedAt:           time.Now(),
-		FileLastAccess:      t.state.FileLastAccess(),
+		FileLastAccess:      t.State.FileLastAccess(),
 		ToolResults:         t.GetStructuredToolResults(),
-		BackgroundProcesses: t.state.GetBackgroundProcesses(),
+		BackgroundProcesses: t.State.GetBackgroundProcesses(),
 	}
 
 	// Save to the store
-	return t.store.Save(ctx, record)
+	return t.Store.Save(ctx, record)
 }
 
-// loadConversation loads a conversation from the store
-func (t *Thread) loadConversation(ctx context.Context) error {
-	t.conversationMu.Lock()
-	defer t.conversationMu.Unlock()
+// loadConversation loads a conversation from the store.
+// This method is called by the base.Thread.EnablePersistence via the LoadConversation callback.
+func (t *Thread) loadConversation(ctx context.Context) {
+	t.ConversationMu.Lock()
+	defer t.ConversationMu.Unlock()
 
-	if !t.isPersisted || t.store == nil {
-		return nil
+	if !t.Persisted || t.Store == nil {
+		return
 	}
 
 	// Try to load the conversation
-	record, err := t.store.Load(ctx, t.conversationID)
+	record, err := t.Store.Load(ctx, t.ConversationID)
 	if err != nil {
-		return errors.Wrap(err, "failed to load conversation")
+		return
 	}
 
 	// Check if this is an OpenAI model conversation
 	if record.Provider != "" && record.Provider != "openai" {
-		return errors.Errorf("incompatible model type: %s", record.Provider)
+		return
 	}
 
 	// Deserialize the messages
 	var messages []openai.ChatCompletionMessage
 	if err := json.Unmarshal(record.RawMessages, &messages); err != nil {
-		return errors.Wrap(err, "error unmarshaling messages")
+		return
 	}
 
 	t.cleanupOrphanedMessages()
 
 	t.messages = messages
-	t.usage = &record.Usage
+	t.Usage = &record.Usage
 	t.summary = record.Summary
-	t.state.SetFileLastAccess(record.FileLastAccess)
+	t.State.SetFileLastAccess(record.FileLastAccess)
 	// Restore structured tool results
 	t.SetStructuredToolResults(record.ToolResults)
 	// Restore background processes
 	t.restoreBackgroundProcesses(record.BackgroundProcesses)
-
-	return nil
 }
 
 // restoreBackgroundProcesses restores background processes from the conversation record
@@ -130,7 +129,7 @@ func (t *Thread) restoreBackgroundProcesses(processes []tooltypes.BackgroundProc
 		if osutil.IsProcessAlive(process.PID) {
 			// Reattach to the process
 			if restoredProcess, err := osutil.ReattachProcess(process); err == nil {
-				t.state.AddBackgroundProcess(restoredProcess)
+				t.State.AddBackgroundProcess(restoredProcess)
 			}
 		}
 	}
