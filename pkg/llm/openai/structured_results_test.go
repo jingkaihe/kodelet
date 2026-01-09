@@ -256,12 +256,12 @@ func TestOpenAIThread_PersistenceWithStructuredResults(t *testing.T) {
 
 	// Set up mock store
 	mockStore := &mockConversationStore{}
-	thread.store = mockStore
-	thread.isPersisted = true
+	thread.Store = mockStore
+	thread.Persisted = true
 
 	// Initialize state to avoid nil pointer dereference
 	state := &mockState{}
-	thread.state = state
+	thread.State = state
 
 	// Add some structured results
 	result1 := tooltypes.StructuredToolResult{
@@ -309,15 +309,14 @@ func TestOpenAIThread_PersistenceWithStructuredResults(t *testing.T) {
 	// Test loading
 	thread2, err := NewOpenAIThread(config, nil)
 	require.NoError(t, err)
-	thread2.store = &mockConversationStore{
+	thread2.Store = &mockConversationStore{
 		loaded: &mockStore.saved,
 	}
-	thread2.isPersisted = true
-	thread2.conversationID = mockStore.saved.ID
-	thread2.state = &mockState{}
+	thread2.Persisted = true
+	thread2.ConversationID = mockStore.saved.ID
+	thread2.State = &mockState{}
 
-	err = thread2.loadConversation(context.Background())
-	require.NoError(t, err)
+	thread2.loadConversation(context.Background())
 
 	// Verify loaded structured results
 	loadedResults := thread2.GetStructuredToolResults()

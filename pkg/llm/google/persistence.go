@@ -18,10 +18,10 @@ import (
 
 // SaveConversation persists the current conversation state to the conversation store
 func (t *Thread) SaveConversation(ctx context.Context, summarise bool) error {
-	t.conversationMu.Lock()
-	defer t.conversationMu.Unlock()
+	t.ConversationMu.Lock()
+	defer t.ConversationMu.Unlock()
 
-	if !t.isPersisted || t.store == nil {
+	if !t.Persisted || t.Store == nil {
 		return nil
 	}
 
@@ -38,17 +38,17 @@ func (t *Thread) SaveConversation(ctx context.Context, summarise bool) error {
 	var fileLastAccess map[string]time.Time
 	var backgroundProcesses []tooltypes.BackgroundProcess
 
-	if t.state != nil {
-		fileLastAccess = t.state.FileLastAccess()
-		backgroundProcesses = t.state.GetBackgroundProcesses()
+	if t.State != nil {
+		fileLastAccess = t.State.FileLastAccess()
+		backgroundProcesses = t.State.GetBackgroundProcesses()
 	}
 
 	record := convtypes.ConversationRecord{
-		ID:                  t.conversationID,
+		ID:                  t.ConversationID,
 		RawMessages:         rawMessages,
 		Provider:            "google",
-		Usage:               *t.usage,
-		Metadata:            map[string]interface{}{"model": t.config.Model, "backend": t.backend},
+		Usage:               *t.Usage,
+		Metadata:            map[string]interface{}{"model": t.Config.Model, "backend": t.backend},
 		Summary:             summary,
 		CreatedAt:           time.Now(),
 		UpdatedAt:           time.Now(),
@@ -57,19 +57,20 @@ func (t *Thread) SaveConversation(ctx context.Context, summarise bool) error {
 		BackgroundProcesses: backgroundProcesses,
 	}
 
-	return t.store.Save(ctx, record)
+	return t.Store.Save(ctx, record)
 }
 
-// LoadConversation loads a conversation from the conversation store by ID
-func (t *Thread) LoadConversation(ctx context.Context, conversationID string) error {
-	t.conversationMu.Lock()
-	defer t.conversationMu.Unlock()
+// LoadConversationByID loads a conversation from the conversation store by ID.
+// This is different from the loadConversation callback which loads the current conversation.
+func (t *Thread) LoadConversationByID(ctx context.Context, conversationID string) error {
+	t.ConversationMu.Lock()
+	defer t.ConversationMu.Unlock()
 
-	if t.store == nil {
+	if t.Store == nil {
 		return errors.New("conversation store not initialized")
 	}
 
-	record, err := t.store.Load(ctx, conversationID)
+	record, err := t.Store.Load(ctx, conversationID)
 	if err != nil {
 		return errors.Wrap(err, "failed to load conversation")
 	}
@@ -77,15 +78,12 @@ func (t *Thread) LoadConversation(ctx context.Context, conversationID string) er
 	if err := json.Unmarshal(record.RawMessages, &t.messages); err != nil {
 		return errors.Wrap(err, "failed to deserialize messages")
 	}
-	t.conversationID = record.ID
-	t.usage = &record.Usage
-	t.toolResults = record.ToolResults
-	if t.toolResults == nil {
-		t.toolResults = make(map[string]tooltypes.StructuredToolResult)
-	}
+	t.ConversationID = record.ID
+	t.Usage = &record.Usage
+	t.SetStructuredToolResults(record.ToolResults)
 
-	if t.state != nil {
-		t.state.SetFileLastAccess(record.FileLastAccess)
+	if t.State != nil {
+		t.State.SetFileLastAccess(record.FileLastAccess)
 		t.restoreBackgroundProcesses(record.BackgroundProcesses)
 	}
 
@@ -104,21 +102,21 @@ func (t *Thread) generateSummary(ctx context.Context) string {
 		summaryPrompt += fmt.Sprintf("\n%s: %s", msg.Role, msg.Content)
 	}
 
-	weakModelConfig := t.config
-	if t.config.WeakModel != "" {
-		weakModelConfig.Model = t.config.WeakModel
+	weakModelConfig := t.Config
+	if t.Config.WeakModel != "" {
+		weakModelConfig.Model = t.Config.WeakModel
 	} else {
 		weakModelConfig.Model = "gemini-2.5-flash"
 	}
 
-	summaryThread, err := NewGoogleThread(weakModelConfig, t.subagentContextFactory)
+	summaryThread, err := NewGoogleThread(weakModelConfig, t.SubagentContextFactory)
 	if err != nil {
 		logger.G(ctx).WithError(err).Error("Failed to create summary thread")
 		return ""
 	}
 
 	// Set the state so tools are available
-	summaryThread.SetState(t.state)
+	summaryThread.SetState(t.State)
 
 	handler := &llmtypes.StringCollectorHandler{Silent: true}
 	_, err = summaryThread.SendMessage(ctx, summaryPrompt, handler, llmtypes.MessageOpt{

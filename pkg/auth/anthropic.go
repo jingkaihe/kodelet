@@ -469,6 +469,7 @@ func GenerateAnthropicAuthURL() (authURL string, verifier string, err error) {
 	scopes := []string{
 		"user:inference",
 		"user:profile",
+		"user:sessions:claude_code",
 	}
 
 	query := url.Values{
@@ -696,7 +697,7 @@ func AnthropicHeader(ctx context.Context, alias string) ([]option.RequestOption,
 		return nil, errors.Wrap(err, "failed to get access token for Anthropic header")
 	}
 	return []option.RequestOption{
-		option.WithHeader("User-Agent", "claude-cli/1.0.30 (external, cli)"),
+		option.WithHeader("User-Agent", "claude-cli/2.1.2 (external, cli)"),
 		option.WithAuthToken(accessToken),
 		option.WithHeaderAdd("anthropic-beta", "oauth-2025-04-20"),
 		option.WithHeaderDel("X-Api-Key"),
@@ -707,7 +708,7 @@ func AnthropicHeader(ctx context.Context, alias string) ([]option.RequestOption,
 // This is useful when you already have the token and want to avoid another lookup.
 func AnthropicHeaderWithToken(accessToken string) []option.RequestOption {
 	return []option.RequestOption{
-		option.WithHeader("User-Agent", "claude-cli/1.0.30 (external, cli)"),
+		option.WithHeader("User-Agent", "claude-cli/2.1.2 (external, cli)"),
 		option.WithAuthToken(accessToken),
 		option.WithHeaderAdd("anthropic-beta", "oauth-2025-04-20"),
 		option.WithHeaderDel("X-Api-Key"),

@@ -8,20 +8,18 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/avast/retry-go/v4"
 	"github.com/jingkaihe/kodelet/pkg/auth"
-	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/feedback"
 	"github.com/jingkaihe/kodelet/pkg/hooks"
+	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/llm/prompts"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/sysprompt"
@@ -33,8 +31,6 @@ import (
 	"github.com/pkg/errors"
 	"github.com/sashabaranov/go-openai"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/codes"
-	"go.opentelemetry.io/otel/trace"
 
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -73,12 +69,6 @@ var (
 		"gpt-image-1",
 		"codex-mini-latest",
 	}
-)
-
-// Constants for image processing
-const (
-	MaxImageFileSize = 5 * 1024 * 1024 // 5MB limit
-	MaxImageCount    = 10              // Maximum 10 images per message
 )
 
 // IsReasoningModel checks if the given model supports reasoning capabilities.
@@ -138,30 +128,17 @@ func (t *Thread) getPricing(model string) (llmtypes.ModelPricing, bool) {
 	return llmtypes.ModelPricing{}, false
 }
 
-// ConversationStore is an alias for the conversations.ConversationStore interface
-// to avoid direct dependency on the conversations package
-type ConversationStore = conversations.ConversationStore
-
-// Thread implements the Thread interface using OpenAI's API
+// Thread implements the Thread interface using OpenAI's API.
+// It embeds base.Thread to inherit common functionality.
 type Thread struct {
-	client                 *openai.Client
-	config                 llmtypes.Config
-	reasoningEffort        string
-	state                  tooltypes.State
-	messages               []openai.ChatCompletionMessage
-	usage                  *llmtypes.Usage
-	conversationID         string
-	summary                string
-	isPersisted            bool
-	store                  ConversationStore
-	mu                     sync.Mutex
-	conversationMu         sync.Mutex
-	toolResults            map[string]tooltypes.StructuredToolResult
-	customModels           *llmtypes.CustomModels
-	customPricing          llmtypes.CustomPricing
-	useCopilot             bool
-	subagentContextFactory llmtypes.SubagentContextFactory
-	hookTrigger            hooks.Trigger // Hook trigger for lifecycle hooks (zero-value = no-op)
+	*base.Thread                                   // Embedded base thread for shared functionality
+	client          *openai.Client                 // OpenAI API client
+	messages        []openai.ChatCompletionMessage // OpenAI-specific message format
+	summary         string                         // Conversation summary
+	reasoningEffort string                         // Reasoning effort for o1/o3 models
+	customModels    *llmtypes.CustomModels         // Custom model configuration
+	customPricing   llmtypes.CustomPricing         // Custom pricing configuration
+	useCopilot      bool                           // Whether using GitHub Copilot
 }
 
 // Provider returns the provider name for this thread.
@@ -195,14 +172,14 @@ func NewOpenAIThread(config llmtypes.Config, subagentContextFactory llmtypes.Sub
 	var clientConfig openai.ClientConfig
 	var useCopilot bool
 	ctx := context.Background()
-	logger := logger.G(ctx)
+	log := logger.G(ctx)
 
 	// Check if Copilot usage is requested via flag
 	if config.UseCopilot {
 		// Verify Copilot credentials exist
 		copilotCredsExists, _ := auth.GetCopilotCredentialsExists()
 		if !copilotCredsExists {
-			logger.Error("use-copilot flag set but no GitHub Copilot credentials found, run 'kodelet copilot-login'")
+			log.Error("use-copilot flag set but no GitHub Copilot credentials found, run 'kodelet copilot-login'")
 			// Fall back to OpenAI API key
 			apiKeyEnvVar := GetAPIKeyEnvVar(config)
 			apiKey := os.Getenv(apiKeyEnvVar)
@@ -211,14 +188,14 @@ func NewOpenAIThread(config llmtypes.Config, subagentContextFactory llmtypes.Sub
 		} else {
 			copilotToken, err := auth.CopilotAccessToken(ctx)
 			if err != nil {
-				logger.WithError(err).Error("failed to get copilot access token despite credentials existing")
+				log.WithError(err).Error("failed to get copilot access token despite credentials existing")
 				// Fall back to OpenAI API key
 				apiKeyEnvVar := GetAPIKeyEnvVar(config)
 				apiKey := os.Getenv(apiKeyEnvVar)
 				clientConfig = openai.DefaultConfig(apiKey)
 				useCopilot = false
 			} else {
-				logger.Debug("using GitHub Copilot token")
+				log.Debug("using GitHub Copilot token")
 				// Create custom HTTP client with Copilot transport
 				copilotTransport := auth.NewCopilotTransport(copilotToken)
 				clientConfig = openai.DefaultConfig("") // No API key needed
@@ -231,7 +208,7 @@ func NewOpenAIThread(config llmtypes.Config, subagentContextFactory llmtypes.Sub
 	} else {
 		// Use OpenAI API key
 		apiKeyEnvVar := GetAPIKeyEnvVar(config)
-		logger.WithField("api_key_env_var", apiKeyEnvVar).Debug("using OpenAI API key")
+		log.WithField("api_key_env_var", apiKeyEnvVar).Debug("using OpenAI API key")
 
 		// Validate API key early
 		if os.Getenv(apiKeyEnvVar) == "" {
@@ -274,36 +251,28 @@ func NewOpenAIThread(config llmtypes.Config, subagentContextFactory llmtypes.Sub
 		// Hooks can be disabled via NoHooks config
 		hookManager, err := hooks.NewHookManager()
 		if err != nil {
-			logger.WithError(err).Warn("Failed to initialize hook manager, hooks disabled")
+			log.WithError(err).Warn("Failed to initialize hook manager, hooks disabled")
 		} else {
 			hookTrigger = hooks.NewTrigger(hookManager, conversationID, config.IsSubAgent)
 		}
 	}
 
-	return &Thread{
-		client:                 client,
-		config:                 config,
-		reasoningEffort:        reasoningEffort,
-		conversationID:         conversationID,
-		isPersisted:            false,
-		usage:                  &llmtypes.Usage{},
-		toolResults:            make(map[string]tooltypes.StructuredToolResult),
-		customModels:           customModels,
-		customPricing:          customPricing,
-		useCopilot:             useCopilot,
-		subagentContextFactory: subagentContextFactory,
-		hookTrigger:            hookTrigger,
-	}, nil
-}
+	// Create the base thread with shared functionality
+	baseThread := base.NewThread(config, conversationID, subagentContextFactory, hookTrigger)
 
-// SetState sets the state for the thread
-func (t *Thread) SetState(s tooltypes.State) {
-	t.state = s
-}
+	thread := &Thread{
+		Thread:          baseThread,
+		client:          client,
+		reasoningEffort: reasoningEffort,
+		customModels:    customModels,
+		customPricing:   customPricing,
+		useCopilot:      useCopilot,
+	}
 
-// GetState returns the current state of the thread
-func (t *Thread) GetState() tooltypes.State {
-	return t.state
+	// Set the LoadConversation callback for provider-specific loading
+	baseThread.LoadConversation = thread.loadConversation
+
+	return thread, nil
 }
 
 // AddUserMessage adds a user message with optional images to the thread
@@ -311,9 +280,9 @@ func (t *Thread) AddUserMessage(ctx context.Context, message string, imagePaths 
 	contentParts := []openai.ChatMessagePart{}
 
 	// Validate image count
-	if len(imagePaths) > MaxImageCount {
-		logger.G(ctx).Warnf("Too many images provided (%d), maximum is %d. Only processing first %d images", len(imagePaths), MaxImageCount, MaxImageCount)
-		imagePaths = imagePaths[:MaxImageCount]
+	if len(imagePaths) > base.MaxImageCount {
+		logger.G(ctx).Warnf("Too many images provided (%d), maximum is %d. Only processing first %d images", len(imagePaths), base.MaxImageCount, base.MaxImageCount)
+		imagePaths = imagePaths[:base.MaxImageCount]
 	}
 
 	// Process images and add them as content parts
@@ -346,8 +315,14 @@ func (t *Thread) SendMessage(
 	// Check if tracing is enabled and wrap the handler
 	tracer := telemetry.Tracer("kodelet.llm")
 
-	ctx, span := t.createMessageSpan(ctx, tracer, message, opt)
-	defer t.finalizeMessageSpan(span, err)
+	// Create span with OpenAI-specific attributes
+	ctx, span := t.CreateMessageSpan(ctx, tracer, message, opt,
+		attribute.String("reasoning_effort", t.reasoningEffort),
+		attribute.Bool("use_copilot", t.useCopilot),
+	)
+	defer func() {
+		t.FinalizeMessageSpan(span, err)
+	}()
 
 	var originalMessages []openai.ChatCompletionMessage
 	if opt.NoSaveConversation {
@@ -356,7 +331,7 @@ func (t *Thread) SendMessage(
 	}
 
 	// Trigger user_message_send hook before adding user message
-	if blocked, reason := t.hookTrigger.TriggerUserMessageSend(ctx, message); blocked {
+	if blocked, reason := t.HookTrigger.TriggerUserMessageSend(ctx, message); blocked {
 		return "", errors.Errorf("message blocked by hook: %s", reason)
 	}
 
@@ -367,12 +342,12 @@ func (t *Thread) SendMessage(
 	}
 
 	// Determine which model to use
-	model := t.config.Model
-	maxTokens := t.config.MaxTokens
-	if opt.UseWeakModel && t.config.WeakModel != "" {
-		model = t.config.WeakModel
-		if t.config.WeakModelMaxTokens > 0 {
-			maxTokens = t.config.WeakModelMaxTokens
+	model := t.Config.Model
+	maxTokens := t.Config.MaxTokens
+	if opt.UseWeakModel && t.Config.WeakModel != "" {
+		model = t.Config.WeakModel
+		if t.Config.WeakModelMaxTokens > 0 {
+			maxTokens = t.Config.WeakModelMaxTokens
 		}
 	}
 
@@ -410,14 +385,14 @@ OUTER:
 
 			// Get relevant contexts from state and regenerate system prompt
 			var contexts map[string]string
-			if t.state != nil {
-				contexts = t.state.DiscoverContexts()
+			if t.State != nil {
+				contexts = t.State.DiscoverContexts()
 			}
 			var systemPrompt string
-			if t.config.IsSubAgent {
-				systemPrompt = sysprompt.SubAgentPrompt(model, t.config, contexts)
+			if t.Config.IsSubAgent {
+				systemPrompt = sysprompt.SubAgentPrompt(model, t.Config, contexts)
 			} else {
-				systemPrompt = sysprompt.SystemPrompt(model, t.config, contexts)
+				systemPrompt = sysprompt.SystemPrompt(model, t.Config, contexts)
 			}
 
 			// Update system message content
@@ -426,7 +401,7 @@ OUTER:
 			}
 
 			// Check if auto-compact should be triggered before each exchange
-			if !opt.DisableAutoCompact && t.shouldAutoCompact(opt.CompactRatio) {
+			if !opt.DisableAutoCompact && t.ShouldAutoCompact(opt.CompactRatio) {
 				logger.G(ctx).WithField("context_utilization", float64(t.GetUsage().CurrentContextWindow)/float64(t.GetUsage().MaxContextWindow)).Info("triggering auto-compact")
 				err := t.CompactContext(ctx)
 				if err != nil {
@@ -462,7 +437,7 @@ OUTER:
 
 				// Trigger agent_stop hook to see if there are follow-up messages
 				if messages, err := t.GetMessages(); err == nil {
-					if followUps := t.hookTrigger.TriggerAgentStop(ctx, messages); len(followUps) > 0 {
+					if followUps := t.HookTrigger.TriggerAgentStop(ctx, messages); len(followUps) > 0 {
 						logger.G(ctx).WithField("count", len(followUps)).Info("agent_stop hook returned follow-up messages, continuing conversation")
 						// Append follow-up messages as user messages and continue
 						for _, msg := range followUps {
@@ -483,12 +458,12 @@ OUTER:
 	}
 
 	// Save conversation state after completing the interaction
-	if t.isPersisted && t.store != nil && !opt.NoSaveConversation {
+	if t.Persisted && t.Store != nil && !opt.NoSaveConversation {
 		saveCtx := context.Background() // use new context to avoid cancellation
 		t.SaveConversation(saveCtx, true)
 	}
 
-	if !t.config.IsSubAgent {
+	if !t.Config.IsSubAgent {
 		// only main agent can signal done
 		handler.HandleDone()
 	}
@@ -534,7 +509,7 @@ func (t *Thread) processMessageExchange(
 		}
 	}
 
-	if !t.config.IsSubAgent {
+	if !t.Config.IsSubAgent {
 		if err := t.processPendingFeedback(ctx, &requestParams, handler); err != nil {
 			return "", false, errors.Wrap(err, "failed to process pending feedback")
 		}
@@ -597,7 +572,7 @@ func (t *Thread) processMessageExchange(
 	toolCalls := assistantMessage.ToolCalls
 	if len(toolCalls) == 0 {
 		// Log structured LLM usage when no tool calls are made (main agent only)
-		if !t.config.IsSubAgent && !opt.DisableUsageLog {
+		if !t.Config.IsSubAgent && !opt.DisableUsageLog {
 			usage.LogLLMUsage(ctx, t.GetUsage(), model, apiStartTime, response.Usage.CompletionTokens)
 		}
 		return finalOutput, false, nil
@@ -614,21 +589,21 @@ func (t *Thread) processMessageExchange(
 
 		// Trigger before_tool_call hook
 		toolInput := toolCall.Function.Arguments
-		blocked, reason, toolInput := t.hookTrigger.TriggerBeforeToolCall(ctx, toolCall.Function.Name, toolInput, toolCall.ID)
+		blocked, reason, toolInput := t.HookTrigger.TriggerBeforeToolCall(ctx, toolCall.Function.Name, toolInput, toolCall.ID)
 
 		var output tooltypes.ToolResult
 		if blocked {
 			output = tooltypes.NewBlockedToolResult(toolCall.Function.Name, reason)
 		} else {
-			runToolCtx := t.subagentContextFactory(ctx, t, handler, opt.CompactRatio, opt.DisableAutoCompact)
-			output = tools.RunTool(runToolCtx, t.state, toolCall.Function.Name, toolInput)
+			runToolCtx := t.SubagentContextFactory(ctx, t, handler, opt.CompactRatio, opt.DisableAutoCompact)
+			output = tools.RunTool(runToolCtx, t.State, toolCall.Function.Name, toolInput)
 		}
 
 		// Use CLI rendering for consistent output formatting
 		structuredResult := output.StructuredData()
 
 		// Trigger after_tool_call hook
-		if modified := t.hookTrigger.TriggerAfterToolCall(ctx, toolCall.Function.Name, toolInput, toolCall.ID, structuredResult); modified != nil {
+		if modified := t.HookTrigger.TriggerAfterToolCall(ctx, toolCall.Function.Name, toolInput, toolCall.ID, structuredResult); modified != nil {
 			structuredResult = *modified
 		}
 
@@ -658,11 +633,11 @@ func (t *Thread) processMessageExchange(
 	}
 
 	// Log structured LLM usage after all content processing is complete (main agent only)
-	if !t.config.IsSubAgent && !opt.DisableUsageLog {
+	if !t.Config.IsSubAgent && !opt.DisableUsageLog {
 		usage.LogLLMUsage(ctx, t.GetUsage(), model, apiStartTime, response.Usage.CompletionTokens)
 	}
 
-	if t.isPersisted && t.store != nil && !opt.NoSaveConversation {
+	if t.Persisted && t.Store != nil && !opt.NoSaveConversation {
 		t.SaveConversation(ctx, false)
 	}
 	return finalOutput, true, nil
@@ -674,7 +649,7 @@ func (t *Thread) processPendingFeedback(ctx context.Context, requestParams *open
 		return errors.Wrap(err, "failed to create feedback store")
 	}
 
-	pendingFeedback, err := feedbackStore.ReadPendingFeedback(t.conversationID)
+	pendingFeedback, err := feedbackStore.ReadPendingFeedback(t.ConversationID)
 	if err != nil {
 		return errors.Wrap(err, "failed to read pending feedback")
 	}
@@ -696,7 +671,7 @@ func (t *Thread) processPendingFeedback(ctx context.Context, requestParams *open
 			handler.HandleText(fmt.Sprintf("🗣️ User feedback: %s", fbMsg.Content))
 		}
 
-		if err := feedbackStore.ClearPendingFeedback(t.conversationID); err != nil {
+		if err := feedbackStore.ClearPendingFeedback(t.ConversationID); err != nil {
 			logger.G(ctx).WithError(err).Warn("failed to clear pending feedback, may be processed again")
 		} else {
 			logger.G(ctx).Debug("successfully cleared pending feedback")
@@ -710,7 +685,7 @@ func (t *Thread) createChatCompletionWithRetry(ctx context.Context, requestParam
 	var response openai.ChatCompletionResponse
 	var originalErrors []error // Store all errors for better context
 
-	retryConfig := t.config.Retry
+	retryConfig := t.Config.Retry
 
 	initialDelay := time.Duration(retryConfig.InitialDelay) * time.Millisecond
 	maxDelay := time.Duration(retryConfig.MaxDelay) * time.Millisecond
@@ -901,16 +876,16 @@ func (t *Thread) tools(opt llmtypes.MessageOpt) []tooltypes.Tool {
 	if opt.NoToolUse {
 		return []tooltypes.Tool{}
 	}
-	return t.state.Tools()
+	return t.State.Tools()
 }
 
 func (t *Thread) updateUsage(usage openai.Usage, model string) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
+	t.Mu.Lock()
+	defer t.Mu.Unlock()
 
 	// Track usage statistics
-	t.usage.InputTokens += usage.PromptTokens
-	t.usage.OutputTokens += usage.CompletionTokens
+	t.Usage.InputTokens += usage.PromptTokens
+	t.Usage.OutputTokens += usage.CompletionTokens
 
 	// Calculate costs based on model pricing (use dynamic pricing method)
 	pricing, found := t.getPricing(model)
@@ -924,26 +899,11 @@ func (t *Thread) updateUsage(usage openai.Usage, model string) {
 	}
 
 	// Calculate individual costs
-	t.usage.InputCost += float64(usage.PromptTokens) * pricing.Input
-	t.usage.OutputCost += float64(usage.CompletionTokens) * pricing.Output
+	t.Usage.InputCost += float64(usage.PromptTokens) * pricing.Input
+	t.Usage.OutputCost += float64(usage.CompletionTokens) * pricing.Output
 
-	t.usage.CurrentContextWindow = usage.PromptTokens + usage.CompletionTokens
-	t.usage.MaxContextWindow = pricing.ContextWindow
-}
-
-// shouldAutoCompact checks if auto-compact should be triggered based on context window utilization
-func (t *Thread) shouldAutoCompact(compactRatio float64) bool {
-	if compactRatio <= 0.0 || compactRatio > 1.0 {
-		return false
-	}
-
-	usage := t.GetUsage()
-	if usage.MaxContextWindow == 0 {
-		return false
-	}
-
-	utilizationRatio := float64(usage.CurrentContextWindow) / float64(usage.MaxContextWindow)
-	return utilizationRatio >= compactRatio
+	t.Usage.CurrentContextWindow = usage.PromptTokens + usage.CompletionTokens
+	t.Usage.MaxContextWindow = pricing.ContextWindow
 }
 
 // CompactContext performs comprehensive context compacting by creating a detailed summary
@@ -955,7 +915,7 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 
 	summaryThread.messages = t.messages
 	summaryThread.EnablePersistence(ctx, false)
-	summaryThread.hookTrigger = hooks.Trigger{}
+	summaryThread.HookTrigger = hooks.Trigger{}
 
 	handler := &llmtypes.StringCollectorHandler{Silent: true}
 	_, err = summaryThread.SendMessage(ctx, prompts.CompactPrompt, handler, llmtypes.MessageOpt{
@@ -972,8 +932,8 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 	compactSummary := handler.CollectedText()
 
 	// Replace the conversation history with the compact summary
-	t.mu.Lock()
-	defer t.mu.Unlock()
+	t.Mu.Lock()
+	defer t.Mu.Unlock()
 
 	t.messages = []openai.ChatCompletionMessage{
 		{
@@ -983,10 +943,10 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 	}
 
 	// Clear stale tool results - they reference tool calls that no longer exist
-	t.toolResults = make(map[string]tooltypes.StructuredToolResult)
+	t.ToolResults = make(map[string]tooltypes.StructuredToolResult)
 
 	// Get state reference while under mutex protection
-	state := t.state
+	state := t.State
 
 	// Clear file access tracking to start fresh with context retrieval
 	if state != nil {
@@ -996,31 +956,30 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 	return nil
 }
 
-// GetUsage returns the current token usage for the thread
-func (t *Thread) GetUsage() llmtypes.Usage {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return *t.usage
-}
-
 // NewSubAgent creates a new subagent thread that shares the parent's client and configuration.
 func (t *Thread) NewSubAgent(_ context.Context, config llmtypes.Config) llmtypes.Thread {
 	conversationID := convtypes.GenerateID()
 
+	// Create subagent base thread with shared usage tracking
+	subagentHookTrigger := hooks.NewTrigger(t.HookTrigger.Manager, conversationID, true)
+	baseThread := &base.Thread{
+		Config:                 config,
+		ConversationID:         conversationID,
+		Persisted:              false,   // subagent is not persisted
+		Usage:                  t.Usage, // Share usage tracking with parent
+		ToolResults:            make(map[string]tooltypes.StructuredToolResult),
+		SubagentContextFactory: t.SubagentContextFactory,
+		HookTrigger:            subagentHookTrigger,
+	}
+
 	// Create subagent thread reusing the parent's client instead of creating a new one
 	thread := &Thread{
-		client:                 t.client, // Reuse parent's client
-		config:                 config,
-		reasoningEffort:        config.ReasoningEffort, // Use config's reasoning effort
-		conversationID:         conversationID,
-		isPersisted:            false,                                                         // subagent is not persisted
-		usage:                  t.usage,                                                       // Share usage tracking with parent
-		toolResults:            make(map[string]tooltypes.StructuredToolResult),               // Initialize tool results map
-		customModels:           t.customModels,                                                // Share custom models configuration
-		customPricing:          t.customPricing,                                               // Share custom pricing configuration
-		useCopilot:             t.useCopilot,                                                  // Share Copilot usage with parent
-		subagentContextFactory: t.subagentContextFactory,                                      // Propagate the injected function
-		hookTrigger:            hooks.NewTrigger(t.hookTrigger.Manager, conversationID, true), // Create new trigger with shared hook manager
+		Thread:          baseThread,
+		client:          t.client, // Reuse parent's client
+		reasoningEffort: config.ReasoningEffort,
+		customModels:    t.customModels,  // Share custom models configuration
+		customPricing:   t.customPricing, // Share custom pricing configuration
+		useCopilot:      t.useCopilot,    // Share Copilot usage with parent
 	}
 
 	return thread
@@ -1036,7 +995,7 @@ func (t *Thread) ShortSummary(ctx context.Context) string {
 
 	summaryThread.messages = t.messages
 	summaryThread.EnablePersistence(ctx, false)
-	summaryThread.hookTrigger = hooks.Trigger{} // disable hooks for summary
+	summaryThread.HookTrigger = hooks.Trigger{} // disable hooks for summary
 
 	handler := &llmtypes.StringCollectorHandler{Silent: true}
 	summaryThread.SendMessage(ctx, prompts.ShortSummaryPrompt, handler, llmtypes.MessageOpt{
@@ -1048,27 +1007,6 @@ func (t *Thread) ShortSummary(ctx context.Context) string {
 	})
 
 	return handler.CollectedText()
-}
-
-// GetConfig returns the configuration of the thread
-func (t *Thread) GetConfig() llmtypes.Config {
-	return t.config
-}
-
-// GetConversationID returns the current conversation ID
-func (t *Thread) GetConversationID() string {
-	return t.conversationID
-}
-
-// SetConversationID sets the conversation ID
-func (t *Thread) SetConversationID(id string) {
-	t.conversationID = id
-	t.hookTrigger.SetConversationID(id)
-}
-
-// IsPersisted returns whether this thread is being persisted
-func (t *Thread) IsPersisted() bool {
-	return t.isPersisted
 }
 
 // GetMessages returns the current messages in the thread
@@ -1097,74 +1035,6 @@ func (t *Thread) GetMessages() ([]llmtypes.Message, error) {
 	}
 
 	return result, nil
-}
-
-// EnablePersistence enables conversation persistence for this thread
-func (t *Thread) EnablePersistence(ctx context.Context, enabled bool) {
-	t.isPersisted = enabled
-
-	// Initialize the store if enabling persistence and it's not already initialized
-	if enabled && t.store == nil {
-		store, err := conversations.GetConversationStore(ctx)
-		if err != nil {
-			// Log the error but continue without persistence
-			fmt.Printf("Error initializing conversation store: %v\n", err)
-			t.isPersisted = false
-			return
-		}
-		t.store = store
-	}
-
-	// If enabling persistence and there's an existing conversation ID,
-	// try to load it from the store
-	if enabled && t.store != nil {
-		t.loadConversation(ctx)
-	}
-}
-
-// createMessageSpan creates and configures a tracing span for message handling
-func (t *Thread) createMessageSpan(
-	ctx context.Context,
-	tracer trace.Tracer,
-	message string,
-	opt llmtypes.MessageOpt,
-) (context.Context, trace.Span) {
-	attributes := []attribute.KeyValue{
-		attribute.String("model", t.config.Model),
-		attribute.Int("max_tokens", t.config.MaxTokens),
-		attribute.Int("weak_model_max_tokens", t.config.WeakModelMaxTokens),
-		attribute.Bool("use_weak_model", opt.UseWeakModel),
-		attribute.Bool("is_sub_agent", t.config.IsSubAgent),
-		attribute.String("conversation_id", t.conversationID),
-		attribute.Bool("is_persisted", t.isPersisted),
-		attribute.Int("message_length", len(message)),
-		attribute.String("reasoning_effort", t.reasoningEffort),
-		attribute.Bool("use_copilot", t.useCopilot),
-	}
-
-	return tracer.Start(ctx, "llm.send_message", trace.WithAttributes(attributes...))
-}
-
-// finalizeMessageSpan records final metrics and status to the span before ending it
-func (t *Thread) finalizeMessageSpan(span trace.Span, err error) {
-	// Record usage metrics after completion
-	usage := t.GetUsage()
-	span.SetAttributes(
-		attribute.Int("tokens.input", usage.InputTokens),
-		attribute.Int("tokens.output", usage.OutputTokens),
-		attribute.Float64("cost.total", usage.TotalCost()),
-		attribute.Int("context_window.current", usage.CurrentContextWindow),
-		attribute.Int("context_window.max", usage.MaxContextWindow),
-	)
-
-	if err != nil {
-		span.SetStatus(codes.Error, err.Error())
-		span.RecordError(err)
-	} else {
-		span.SetStatus(codes.Ok, "")
-		span.AddEvent("message_processing_completed")
-	}
-	span.End()
 }
 
 // processImage converts an image path/URL to an OpenAI ChatMessagePart
@@ -1242,8 +1112,8 @@ func (t *Thread) processImageFile(filePath string) (*openai.ChatMessagePart, err
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get file info")
 	}
-	if fileInfo.Size() > MaxImageFileSize {
-		return nil, fmt.Errorf("image file too large: %d bytes (max: %d bytes)", fileInfo.Size(), MaxImageFileSize)
+	if fileInfo.Size() > base.MaxImageFileSize {
+		return nil, fmt.Errorf("image file too large: %d bytes (max: %d bytes)", fileInfo.Size(), base.MaxImageFileSize)
 	}
 
 	// Read and encode the file
@@ -1281,39 +1151,5 @@ func getImageMediaType(ext string) (string, error) {
 		return "image/webp", nil
 	default:
 		return "", errors.New("unsupported format")
-	}
-}
-
-// SetStructuredToolResult stores the structured result for a tool call
-func (t *Thread) SetStructuredToolResult(toolCallID string, result tooltypes.StructuredToolResult) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if t.toolResults == nil {
-		t.toolResults = make(map[string]tooltypes.StructuredToolResult)
-	}
-	t.toolResults[toolCallID] = result
-}
-
-// GetStructuredToolResults returns all structured tool results
-func (t *Thread) GetStructuredToolResults() map[string]tooltypes.StructuredToolResult {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if t.toolResults == nil {
-		return make(map[string]tooltypes.StructuredToolResult)
-	}
-	result := make(map[string]tooltypes.StructuredToolResult)
-	maps.Copy(result, t.toolResults)
-	return result
-}
-
-// SetStructuredToolResults replaces all structured tool results with the provided map.
-func (t *Thread) SetStructuredToolResults(results map[string]tooltypes.StructuredToolResult) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if results == nil {
-		t.toolResults = make(map[string]tooltypes.StructuredToolResult)
-	} else {
-		t.toolResults = make(map[string]tooltypes.StructuredToolResult)
-		maps.Copy(t.toolResults, results)
 	}
 }

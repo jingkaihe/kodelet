@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
@@ -201,9 +202,9 @@ func TestProcessImageFile(t *testing.T) {
 	err = os.WriteFile(testImagePath, pngData, 0o644)
 	require.NoError(t, err)
 
-	// Create a large test file (exceeds MaxImageFileSize)
+	// Create a large test file (exceeds base.MaxImageFileSize)
 	largeFilePath := filepath.Join(tempDir, "large.png")
-	largeData := make([]byte, MaxImageFileSize+1)
+	largeData := make([]byte, base.MaxImageFileSize+1)
 	err = os.WriteFile(largeFilePath, largeData, 0o644)
 	require.NoError(t, err)
 
@@ -271,7 +272,7 @@ func TestAddUserMessage(t *testing.T) {
 		{"Text with valid image", "Analyze this image", []string{testImagePath}, 2},
 		{"Text with HTTPS URL", "Check this URL", []string{"https://example.com/image.jpg"}, 2},
 		{"Text with mixed valid/invalid images", "Mixed test", []string{testImagePath, "invalid-path.png"}, 2}, // Only valid image should be added
-		{"Too many images", "Many images", make([]string, MaxImageCount+5), 1 + MaxImageCount},                 // Should cap at MaxImageCount
+		{"Too many images", "Many images", make([]string, base.MaxImageCount+5), 1 + base.MaxImageCount},       // Should cap at base.MaxImageCount
 	}
 
 	for _, test := range tests {
@@ -377,10 +378,10 @@ func TestShouldAutoCompact(t *testing.T) {
 			require.NoError(t, err)
 
 			// Mock the usage stats
-			thread.usage.CurrentContextWindow = test.currentContextWindow
-			thread.usage.MaxContextWindow = test.maxContextWindow
+			thread.Usage.CurrentContextWindow = test.currentContextWindow
+			thread.Usage.MaxContextWindow = test.maxContextWindow
 
-			result := thread.shouldAutoCompact(test.compactRatio)
+			result := thread.ShouldAutoCompact(test.compactRatio)
 			assert.Equal(t, test.expectedResult, result)
 		})
 	}
@@ -416,14 +417,14 @@ func TestCompactContextIntegration(t *testing.T) {
 		})
 
 		// Add some tool results to verify they get cleared
-		thread.toolResults = map[string]tooltypes.StructuredToolResult{
+		thread.ToolResults = map[string]tooltypes.StructuredToolResult{
 			"tool1": {ToolName: "test_tool", Success: true, Timestamp: time.Now()},
 			"tool2": {ToolName: "another_tool", Success: false, Error: "test error", Timestamp: time.Now()},
 		}
 
 		// Record initial state
 		initialMessageCount := len(thread.messages)
-		initialToolResultCount := len(thread.toolResults)
+		initialToolResultCount := len(thread.ToolResults)
 
 		// Verify we have multiple messages and tool results
 		assert.Greater(t, initialMessageCount, 2, "Should have multiple messages for meaningful test")
@@ -437,7 +438,7 @@ func TestCompactContextIntegration(t *testing.T) {
 
 		// Verify the compacting worked
 		assert.Equal(t, 1, len(thread.messages), "Should be compacted to single user message")
-		assert.Equal(t, 0, len(thread.toolResults), "Tool results should be cleared")
+		assert.Equal(t, 0, len(thread.ToolResults), "Tool results should be cleared")
 
 		// Verify the single remaining message is a user message containing a summary
 		if len(thread.messages) > 0 {
@@ -498,11 +499,11 @@ func TestAutoCompactTriggerLogic(t *testing.T) {
 		require.NoError(t, err)
 
 		// Set up context window to trigger auto-compact
-		thread.usage.CurrentContextWindow = 85 // 85% utilization
-		thread.usage.MaxContextWindow = 100
+		thread.Usage.CurrentContextWindow = 85 // 85% utilization
+		thread.Usage.MaxContextWindow = 100
 
-		// Verify shouldAutoCompact returns true for ratio 0.8
-		assert.True(t, thread.shouldAutoCompact(0.8),
+		// Verify ShouldAutoCompact returns true for ratio 0.8
+		assert.True(t, thread.ShouldAutoCompact(0.8),
 			"Should trigger auto-compact when ratio (0.85) exceeds threshold (0.8)")
 	})
 
@@ -511,11 +512,11 @@ func TestAutoCompactTriggerLogic(t *testing.T) {
 		require.NoError(t, err)
 
 		// Set up context window below auto-compact threshold
-		thread.usage.CurrentContextWindow = 75 // 75% utilization
-		thread.usage.MaxContextWindow = 100
+		thread.Usage.CurrentContextWindow = 75 // 75% utilization
+		thread.Usage.MaxContextWindow = 100
 
-		// Verify shouldAutoCompact returns false for ratio 0.8
-		assert.False(t, thread.shouldAutoCompact(0.8),
+		// Verify ShouldAutoCompact returns false for ratio 0.8
+		assert.False(t, thread.ShouldAutoCompact(0.8),
 			"Should not trigger auto-compact when ratio (0.75) below threshold (0.8)")
 	})
 
@@ -524,15 +525,15 @@ func TestAutoCompactTriggerLogic(t *testing.T) {
 		require.NoError(t, err)
 
 		// Set up context window to trigger auto-compact
-		thread.usage.CurrentContextWindow = 90 // 90% utilization
-		thread.usage.MaxContextWindow = 100
+		thread.Usage.CurrentContextWindow = 90 // 90% utilization
+		thread.Usage.MaxContextWindow = 100
 
-		// Even though context is high, shouldAutoCompact should be bypassed
+		// Even though context is high, ShouldAutoCompact should be bypassed
 		// when DisableAutoCompact is true (this is handled in SendMessage logic)
 		disableAutoCompact := true
 
 		// Simulate the logic from SendMessage
-		shouldTrigger := !disableAutoCompact && thread.shouldAutoCompact(0.8)
+		shouldTrigger := !disableAutoCompact && thread.ShouldAutoCompact(0.8)
 		assert.False(t, shouldTrigger,
 			"Should not trigger auto-compact when DisableAutoCompact is true")
 	})
@@ -576,14 +577,83 @@ func TestAutoCompactTriggerLogic(t *testing.T) {
 				require.NoError(t, err)
 
 				// Set up context window
-				thread.usage.CurrentContextWindow = test.utilization
-				thread.usage.MaxContextWindow = 100
+				thread.Usage.CurrentContextWindow = test.utilization
+				thread.Usage.MaxContextWindow = 100
 
-				result := thread.shouldAutoCompact(test.ratio)
+				result := thread.ShouldAutoCompact(test.ratio)
 				assert.Equal(t, test.shouldTrigger, result,
 					"Compact ratio %f with %d%% utilization should trigger: %v",
 					test.ratio, test.utilization, test.shouldTrigger)
 			})
 		}
 	})
+}
+
+func TestStripToolNamePrefix(t *testing.T) {
+	tests := []struct {
+		name            string
+		useSubscription bool
+		toolName        string
+		expected        string
+	}{
+		{
+			name:            "subscription mode strips prefix",
+			useSubscription: true,
+			toolName:        "oc_file_read",
+			expected:        "file_read",
+		},
+		{
+			name:            "subscription mode with no prefix",
+			useSubscription: true,
+			toolName:        "file_read",
+			expected:        "file_read",
+		},
+		{
+			name:            "non-subscription mode keeps prefix",
+			useSubscription: false,
+			toolName:        "oc_file_read",
+			expected:        "oc_file_read",
+		},
+		{
+			name:            "non-subscription mode normal name",
+			useSubscription: false,
+			toolName:        "file_read",
+			expected:        "file_read",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			thread := &Thread{useSubscription: tt.useSubscription}
+			result := thread.stripToolNamePrefix(tt.toolName)
+			require.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestToolNamePrefix(t *testing.T) {
+	tests := []struct {
+		name            string
+		useSubscription bool
+		expected        string
+	}{
+		{
+			name:            "subscription mode returns prefix",
+			useSubscription: true,
+			expected:        "oc_",
+		},
+		{
+			name:            "non-subscription mode returns empty",
+			useSubscription: false,
+			expected:        "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			thread := &Thread{useSubscription: tt.useSubscription}
+			result := thread.toolNamePrefix()
+			require.Equal(t, tt.expected, result)
+		})
+	}
 }

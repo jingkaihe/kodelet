@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/genai"
 
+	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
@@ -252,15 +253,15 @@ func TestGoogleThread_ShouldAutoCompact(t *testing.T) {
 	require.NoError(t, err)
 
 	// Test with no context window set
-	assert.False(t, thread.shouldAutoCompact(0.8))
+	assert.False(t, thread.ShouldAutoCompact(0.8))
 
 	// Test with context window set
-	thread.usage.MaxContextWindow = 1000
-	thread.usage.CurrentContextWindow = 500
-	assert.False(t, thread.shouldAutoCompact(0.8)) // 50% < 80%
+	thread.Usage.MaxContextWindow = 1000
+	thread.Usage.CurrentContextWindow = 500
+	assert.False(t, thread.ShouldAutoCompact(0.8)) // 50% < 80%
 
-	thread.usage.CurrentContextWindow = 850
-	assert.True(t, thread.shouldAutoCompact(0.8)) // 85% > 80%
+	thread.Usage.CurrentContextWindow = 850
+	assert.True(t, thread.ShouldAutoCompact(0.8)) // 85% > 80%
 }
 
 func TestCalculateCost(t *testing.T) {
@@ -486,9 +487,9 @@ func TestProcessImageFile(t *testing.T) {
 	err = os.WriteFile(testImagePath, pngData, 0o644)
 	require.NoError(t, err)
 
-	// Create a large test file (exceeds MaxImageFileSize)
+	// Create a large test file (exceeds base.MaxImageFileSize)
 	largeFilePath := filepath.Join(tempDir, "large.png")
-	largeData := make([]byte, MaxImageFileSize+1)
+	largeData := make([]byte, base.MaxImageFileSize+1)
 	err = os.WriteFile(largeFilePath, largeData, 0o644)
 	require.NoError(t, err)
 
@@ -711,7 +712,7 @@ func TestGoogleThread_AddUserMessageComprehensive(t *testing.T) {
 		{"Text with valid image", "Analyze this image", []string{testImagePath}, 2},
 		{"Text with invalid image", "Check this", []string{"invalid-path.png"}, 1},                             // Only text should be added
 		{"Text with mixed valid/invalid images", "Mixed test", []string{testImagePath, "invalid-path.png"}, 2}, // Only text + valid image
-		{"Too many images", "Many images", make([]string, MaxImageCount+5), 1 + MaxImageCount},                 // Should cap at MaxImageCount
+		{"Too many images", "Many images", make([]string, base.MaxImageCount+5), 1 + base.MaxImageCount},       // Should cap at MaxImageCount
 	}
 
 	for _, test := range tests {
@@ -812,10 +813,10 @@ func TestGoogleThread_ShouldAutoCompactComprehensive(t *testing.T) {
 			require.NoError(t, err)
 
 			// Mock the usage stats
-			thread.usage.CurrentContextWindow = test.currentContextWindow
-			thread.usage.MaxContextWindow = test.maxContextWindow
+			thread.Usage.CurrentContextWindow = test.currentContextWindow
+			thread.Usage.MaxContextWindow = test.maxContextWindow
 
-			result := thread.shouldAutoCompact(test.compactRatio)
+			result := thread.ShouldAutoCompact(test.compactRatio)
 			assert.Equal(t, test.expectedResult, result)
 		})
 	}
@@ -852,11 +853,11 @@ func TestGoogleThread_AutoCompactTriggerLogic(t *testing.T) {
 		require.NoError(t, err)
 
 		// Set up context window to trigger auto-compact
-		thread.usage.CurrentContextWindow = 85 // 85% utilization
-		thread.usage.MaxContextWindow = 100
+		thread.Usage.CurrentContextWindow = 85 // 85% utilization
+		thread.Usage.MaxContextWindow = 100
 
-		// Verify shouldAutoCompact returns true for ratio 0.8
-		assert.True(t, thread.shouldAutoCompact(0.8),
+		// Verify ShouldAutoCompact returns true for ratio 0.8
+		assert.True(t, thread.ShouldAutoCompact(0.8),
 			"Should trigger auto-compact when ratio (0.85) exceeds threshold (0.8)")
 	})
 
@@ -865,11 +866,11 @@ func TestGoogleThread_AutoCompactTriggerLogic(t *testing.T) {
 		require.NoError(t, err)
 
 		// Set up context window below auto-compact threshold
-		thread.usage.CurrentContextWindow = 75 // 75% utilization
-		thread.usage.MaxContextWindow = 100
+		thread.Usage.CurrentContextWindow = 75 // 75% utilization
+		thread.Usage.MaxContextWindow = 100
 
-		// Verify shouldAutoCompact returns false for ratio 0.8
-		assert.False(t, thread.shouldAutoCompact(0.8),
+		// Verify ShouldAutoCompact returns false for ratio 0.8
+		assert.False(t, thread.ShouldAutoCompact(0.8),
 			"Should not trigger auto-compact when ratio (0.75) below threshold (0.8)")
 	})
 
@@ -878,15 +879,15 @@ func TestGoogleThread_AutoCompactTriggerLogic(t *testing.T) {
 		require.NoError(t, err)
 
 		// Set up context window to trigger auto-compact
-		thread.usage.CurrentContextWindow = 90 // 90% utilization
-		thread.usage.MaxContextWindow = 100
+		thread.Usage.CurrentContextWindow = 90 // 90% utilization
+		thread.Usage.MaxContextWindow = 100
 
-		// Even though context is high, shouldAutoCompact should be bypassed
+		// Even though context is high, ShouldAutoCompact should be bypassed
 		// when DisableAutoCompact is true (this is handled in SendMessage logic)
 		disableAutoCompact := true
 
 		// Simulate the logic from SendMessage
-		shouldTrigger := !disableAutoCompact && thread.shouldAutoCompact(0.8)
+		shouldTrigger := !disableAutoCompact && thread.ShouldAutoCompact(0.8)
 		assert.False(t, shouldTrigger,
 			"Should not trigger auto-compact when DisableAutoCompact is true")
 	})
@@ -930,10 +931,10 @@ func TestGoogleThread_AutoCompactTriggerLogic(t *testing.T) {
 				require.NoError(t, err)
 
 				// Set up context window
-				thread.usage.CurrentContextWindow = test.utilization
-				thread.usage.MaxContextWindow = 100
+				thread.Usage.CurrentContextWindow = test.utilization
+				thread.Usage.MaxContextWindow = 100
 
-				result := thread.shouldAutoCompact(test.ratio)
+				result := thread.ShouldAutoCompact(test.ratio)
 				assert.Equal(t, test.shouldTrigger, result,
 					"Compact ratio %f with %d%% utilization should trigger: %v",
 					test.ratio, test.utilization, test.shouldTrigger)
@@ -976,6 +977,6 @@ func TestGoogleThread_NewSubAgent(t *testing.T) {
 	// Verify shared resources
 	assert.Equal(t, parentThread.client, googleSubagent.client)
 	assert.Equal(t, parentThread.backend, googleSubagent.backend)
-	assert.Equal(t, parentThread.usage, googleSubagent.usage) // Shared usage tracking
-	assert.Equal(t, parentThread.state, googleSubagent.state) // Shared state
+	assert.Equal(t, parentThread.Usage, googleSubagent.Usage) // Shared usage tracking
+	assert.Equal(t, parentThread.State, googleSubagent.State) // Shared state
 }

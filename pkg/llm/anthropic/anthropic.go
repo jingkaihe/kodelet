@@ -7,7 +7,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -20,9 +19,9 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/jingkaihe/kodelet/pkg/auth"
-	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/feedback"
 	"github.com/jingkaihe/kodelet/pkg/hooks"
+	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/llm/prompts"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/sysprompt"
@@ -41,34 +40,18 @@ import (
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
-// ConversationStore is an alias for the conversations.ConversationStore interface
-// to avoid direct dependency on the conversations package
-type ConversationStore = conversations.ConversationStore
-
-// Constants for image processing
-const (
-	MaxImageFileSize = 5 * 1024 * 1024 // 5MB limit
-	MaxImageCount    = 10              // Maximum 10 images per message
-)
-
 // Thread implements the Thread interface using Anthropic's Claude API
+// It embeds base.Thread to inherit common functionality.
 type Thread struct {
-	client                 anthropic.Client
-	config                 llmtypes.Config
-	state                  tooltypes.State
-	messages               []anthropic.MessageParam
-	usage                  *llmtypes.Usage
-	conversationID         string
-	summary                string
-	isPersisted            bool
-	store                  ConversationStore
-	mu                     sync.Mutex
-	conversationMu         sync.Mutex
-	useSubscription        bool
-	toolResults            map[string]tooltypes.StructuredToolResult // Maps tool_call_id to structured result
-	subagentContextFactory llmtypes.SubagentContextFactory           // Injected function for cross-provider subagent creation
-	hookTrigger            hooks.Trigger                             // Hook trigger for lifecycle hooks (zero-value = no-op)
+	*base.Thread                     // Embedded base thread for shared functionality
+	client          anthropic.Client // Anthropic API client
+	messages        []anthropic.MessageParam
+	summary         string // Conversation summary
+	useSubscription bool   // Whether using Anthropic subscription vs API key
 }
+
+// subscriptionToolNamePrefix is the prefix required for tool names when using Anthropic subscription accounts.
+const subscriptionToolNamePrefix = "oc_"
 
 // Provider returns the provider name for this thread
 func (t *Thread) Provider() string {
@@ -163,27 +146,19 @@ func NewAnthropicThread(config llmtypes.Config, subagentContextFactory llmtypes.
 		}
 	}
 
-	return &Thread{
-		client:                 client,
-		config:                 config,
-		useSubscription:        useSubscription,
-		conversationID:         conversationID,
-		isPersisted:            false,
-		usage:                  &llmtypes.Usage{},
-		toolResults:            make(map[string]tooltypes.StructuredToolResult),
-		subagentContextFactory: subagentContextFactory,
-		hookTrigger:            hookTrigger,
-	}, nil
-}
+	// Create the base thread with shared functionality
+	baseThread := base.NewThread(config, conversationID, subagentContextFactory, hookTrigger)
 
-// SetState sets the state for the thread
-func (t *Thread) SetState(s tooltypes.State) {
-	t.state = s
-}
+	thread := &Thread{
+		Thread:          baseThread,
+		client:          client,
+		useSubscription: useSubscription,
+	}
 
-// GetState returns the current state of the thread
-func (t *Thread) GetState() tooltypes.State {
-	return t.state
+	// Set the LoadConversation callback for provider-specific loading
+	baseThread.LoadConversation = thread.loadConversation
+
+	return thread, nil
 }
 
 // AddUserMessage adds a user message with optional images to the thread
@@ -191,9 +166,9 @@ func (t *Thread) AddUserMessage(ctx context.Context, message string, imagePaths 
 	contentBlocks := []anthropic.ContentBlockParamUnion{}
 
 	// Validate image count
-	if len(imagePaths) > MaxImageCount {
-		logger.G(ctx).Warnf("Too many images provided (%d), maximum is %d. Only processing first %d images", len(imagePaths), MaxImageCount, MaxImageCount)
-		imagePaths = imagePaths[:MaxImageCount]
+	if len(imagePaths) > base.MaxImageCount {
+		logger.G(ctx).Warnf("Too many images provided (%d), maximum is %d. Only processing first %d images", len(imagePaths), base.MaxImageCount, base.MaxImageCount)
+		imagePaths = imagePaths[:base.MaxImageCount]
 	}
 
 	// Process images and add them as content blocks
@@ -242,8 +217,21 @@ func (t *Thread) SendMessage(
 	// Check if tracing is enabled and wrap the handler
 	tracer := telemetry.Tracer("kodelet.llm")
 
-	ctx, span := t.createMessageSpan(ctx, tracer, message, opt)
-	defer t.finalizeMessageSpan(span, err)
+	// Anthropic-specific attributes for tracing
+	extraSpanAttrs := []attribute.KeyValue{
+		attribute.Int("thinking_budget_tokens", t.Config.ThinkingBudgetTokens),
+		attribute.Bool("prompt_cache", opt.PromptCache),
+	}
+	ctx, span := t.CreateMessageSpan(ctx, tracer, message, opt, extraSpanAttrs...)
+	defer func() {
+		// Anthropic-specific cache attributes for finalization
+		usage := t.GetUsage()
+		extraFinalizeAttrs := []attribute.KeyValue{
+			attribute.Int("tokens.cache_creation", usage.CacheCreationInputTokens),
+			attribute.Int("tokens.cache_read", usage.CacheReadInputTokens),
+		}
+		t.FinalizeMessageSpan(span, err, extraFinalizeAttrs...)
+	}()
 
 	if opt.PromptCache {
 		t.cacheMessages()
@@ -256,7 +244,7 @@ func (t *Thread) SendMessage(
 	}
 
 	// Trigger user_message_send hook before adding user message
-	if blocked, reason := t.hookTrigger.TriggerUserMessageSend(ctx, message); blocked {
+	if blocked, reason := t.HookTrigger.TriggerUserMessageSend(ctx, message); blocked {
 		return "", errors.Errorf("message blocked by hook: %s", reason)
 	}
 
@@ -267,7 +255,7 @@ func (t *Thread) SendMessage(
 	turnCount := 0
 	maxTurns := max(opt.MaxTurns, 0)
 
-	cacheEvery := t.config.CacheEvery
+	cacheEvery := t.Config.CacheEvery
 
 OUTER:
 	for {
@@ -293,7 +281,7 @@ OUTER:
 			}
 
 			// Check if auto-compact should be triggered before each exchange
-			if !opt.DisableAutoCompact && t.shouldAutoCompact(opt.CompactRatio) {
+			if !opt.DisableAutoCompact && t.ShouldAutoCompact(opt.CompactRatio) {
 				logger.G(ctx).WithField("context_utilization", float64(t.GetUsage().CurrentContextWindow)/float64(t.GetUsage().MaxContextWindow)).Info("triggering auto-compact")
 				err := t.CompactContext(ctx)
 				if err != nil {
@@ -305,14 +293,14 @@ OUTER:
 
 			// Get relevant contexts from state and regenerate system prompt
 			var contexts map[string]string
-			if t.state != nil {
-				contexts = t.state.DiscoverContexts()
+			if t.State != nil {
+				contexts = t.State.DiscoverContexts()
 			}
 			var systemPrompt string
-			if t.config.IsSubAgent {
-				systemPrompt = sysprompt.SubAgentPrompt(string(model), t.config, contexts)
+			if t.Config.IsSubAgent {
+				systemPrompt = sysprompt.SubAgentPrompt(string(model), t.Config, contexts)
 			} else {
-				systemPrompt = sysprompt.SystemPrompt(string(model), t.config, contexts)
+				systemPrompt = sysprompt.SystemPrompt(string(model), t.Config, contexts)
 			}
 
 			var exchangeOutput string
@@ -346,7 +334,7 @@ OUTER:
 
 				// Trigger agent_stop hook to see if there are follow-up messages
 				if messages, err := t.GetMessages(); err == nil {
-					if followUps := t.hookTrigger.TriggerAgentStop(ctx, messages); len(followUps) > 0 {
+					if followUps := t.HookTrigger.TriggerAgentStop(ctx, messages); len(followUps) > 0 {
 						logger.G(ctx).WithField("count", len(followUps)).Info("agent_stop hook returned follow-up messages, continuing conversation")
 						// Append follow-up messages as user messages and continue
 						for _, msg := range followUps {
@@ -367,12 +355,12 @@ OUTER:
 	}
 
 	// Save conversation state after completing the interaction
-	if t.isPersisted && t.store != nil && !opt.NoSaveConversation {
+	if t.Persisted && t.Store != nil && !opt.NoSaveConversation {
 		saveCtx := context.Background() // use new context to avoid cancellation
 		t.SaveConversation(saveCtx, true)
 	}
 
-	if !t.config.IsSubAgent {
+	if !t.Config.IsSubAgent {
 		// only main agaent can signal done
 		handler.HandleDone()
 	}
@@ -402,6 +390,15 @@ type toolExecResult struct {
 	renderedOutput string
 }
 
+// stripToolNamePrefix removes the subscription prefix from a tool name if present.
+// This is used to get the actual tool name when using subscription mode.
+func (t *Thread) stripToolNamePrefix(name string) string {
+	if t.useSubscription {
+		return strings.TrimPrefix(name, subscriptionToolNamePrefix)
+	}
+	return name
+}
+
 // executeToolsParallel runs multiple tool calls concurrently and streams results as they complete.
 // It returns results in original order for consistent message building.
 func (t *Thread) executeToolsParallel(
@@ -419,7 +416,8 @@ func (t *Thread) executeToolsParallel(
 
 	// Show all tool invocations upfront so user knows what's about to run
 	for _, tb := range toolBlocks {
-		handler.HandleToolUse(tb.block.ID, tb.block.Name, tb.variant.JSON.Input.Raw())
+		toolName := t.stripToolNamePrefix(tb.block.Name)
+		handler.HandleToolUse(tb.block.ID, toolName, tb.variant.JSON.Input.Raw())
 	}
 
 	results := make([]toolExecResult, len(toolBlocks))
@@ -428,30 +426,32 @@ func (t *Thread) executeToolsParallel(
 	g, gctx := errgroup.WithContext(ctx)
 
 	for i, tb := range toolBlocks {
-		i, tb := i, tb
 		g.Go(func() error {
 			if err := gctx.Err(); err != nil {
 				return err
 			}
 
+			// Strip subscription prefix from tool name for internal use
+			toolName := t.stripToolNamePrefix(tb.block.Name)
+
 			telemetry.AddEvent(gctx, "tool_execution_start",
-				attribute.String("tool_name", tb.block.Name),
+				attribute.String("tool_name", toolName),
 				attribute.Int("tool_index", i),
 			)
 
 			// Trigger before_tool_call hook
 			toolInput := tb.variant.JSON.Input.Raw()
-			blocked, reason, toolInput := t.hookTrigger.TriggerBeforeToolCall(gctx, tb.block.Name, toolInput, tb.block.ID)
+			blocked, reason, toolInput := t.HookTrigger.TriggerBeforeToolCall(gctx, toolName, toolInput, tb.block.ID)
 
 			var output tooltypes.ToolResult
 			if blocked {
-				output = tooltypes.NewBlockedToolResult(tb.block.Name, reason)
+				output = tooltypes.NewBlockedToolResult(toolName, reason)
 			} else {
 				// Use a per-goroutine silent handler to avoid race conditions on shared handler
 				// XXX: It's tricky to visualise agent streaming in the terminal therefore we disable it for now
 				parallelHandler := &llmtypes.StringCollectorHandler{Silent: true}
-				runToolCtx := t.subagentContextFactory(gctx, t, parallelHandler, opt.CompactRatio, opt.DisableAutoCompact)
-				output = tools.RunTool(runToolCtx, t.state, tb.block.Name, toolInput)
+				runToolCtx := t.SubagentContextFactory(gctx, t, parallelHandler, opt.CompactRatio, opt.DisableAutoCompact)
+				output = tools.RunTool(runToolCtx, t.State, toolName, toolInput)
 			}
 
 			if err := gctx.Err(); err != nil {
@@ -461,7 +461,7 @@ func (t *Thread) executeToolsParallel(
 			structuredResult := output.StructuredData()
 
 			// Trigger after_tool_call hook
-			if modified := t.hookTrigger.TriggerAfterToolCall(gctx, tb.block.Name, toolInput, tb.block.ID, structuredResult); modified != nil {
+			if modified := t.HookTrigger.TriggerAfterToolCall(gctx, toolName, toolInput, tb.block.ID, structuredResult); modified != nil {
 				structuredResult = *modified
 			}
 
@@ -469,7 +469,7 @@ func (t *Thread) executeToolsParallel(
 			renderedOutput := registry.Render(structuredResult)
 
 			telemetry.AddEvent(gctx, "tool_execution_complete",
-				attribute.String("tool_name", tb.block.Name),
+				attribute.String("tool_name", toolName),
 				attribute.Int("tool_index", i),
 				attribute.String("result", output.AssistantFacing()),
 			)
@@ -477,7 +477,7 @@ func (t *Thread) executeToolsParallel(
 			result := toolExecResult{
 				index:          i,
 				blockID:        tb.block.ID,
-				toolName:       tb.block.Name,
+				toolName:       toolName,
 				input:          toolInput,
 				output:         output,
 				structuredData: structuredResult,
@@ -545,18 +545,18 @@ func (t *Thread) processMessageExchange(
 		System:    systemPromptBlocks,
 		Messages:  t.messages,
 		Model:     model,
-		Tools:     tools.ToAnthropicTools(t.tools(opt)),
+		Tools:     tools.ToAnthropicTools(t.tools(opt), t.toolNamePrefix()),
 	}
 	if t.shouldUtiliseThinking(model) {
 		messageParams.Thinking = anthropic.ThinkingConfigParamUnion{
 			OfEnabled: &anthropic.ThinkingConfigEnabledParam{
 				Type:         "enabled",
-				BudgetTokens: int64(t.config.ThinkingBudgetTokens),
+				BudgetTokens: int64(t.Config.ThinkingBudgetTokens),
 			},
 		}
 	}
 
-	if !t.config.IsSubAgent {
+	if !t.Config.IsSubAgent {
 		if err := t.processPendingFeedback(ctx, &messageParams, handler); err != nil {
 			return "", false, errors.Wrap(err, "failed to process pending feedback")
 		}
@@ -576,7 +576,7 @@ func (t *Thread) processMessageExchange(
 
 	response, err := t.NewMessage(ctx, messageParams, handler)
 	if err != nil {
-		if t.isPersisted && t.store != nil && !opt.NoSaveConversation {
+		if t.Persisted && t.Store != nil && !opt.NoSaveConversation {
 			t.SaveConversation(ctx, false)
 		}
 		return "", false, err
@@ -648,11 +648,11 @@ func (t *Thread) processMessageExchange(
 	toolUseCount := len(toolResults)
 
 	// Log structured LLM usage after all content processing is complete (main agent only)
-	if !t.config.IsSubAgent && !opt.DisableUsageLog {
+	if !t.Config.IsSubAgent && !opt.DisableUsageLog {
 		usage.LogLLMUsage(ctx, t.GetUsage(), string(model), apiStartTime, int(response.Usage.OutputTokens))
 	}
 
-	if t.isPersisted && t.store != nil && !opt.NoSaveConversation {
+	if t.Persisted && t.Store != nil && !opt.NoSaveConversation {
 		t.SaveConversation(ctx, false)
 	}
 
@@ -666,7 +666,7 @@ func (t *Thread) processPendingFeedback(ctx context.Context, messageParams *anth
 		return errors.Wrap(err, "failed to create feedback store")
 	}
 
-	pendingFeedback, err := feedbackStore.ReadPendingFeedback(t.conversationID)
+	pendingFeedback, err := feedbackStore.ReadPendingFeedback(t.ConversationID)
 	if err != nil {
 		return errors.Wrap(err, "failed to read pending feedback")
 	}
@@ -687,7 +687,7 @@ func (t *Thread) processPendingFeedback(ctx context.Context, messageParams *anth
 			handler.HandleText(fmt.Sprintf("🗣️ User feedback: %s", fbMsg.Content))
 		}
 
-		if err := feedbackStore.ClearPendingFeedback(t.conversationID); err != nil {
+		if err := feedbackStore.ClearPendingFeedback(t.ConversationID); err != nil {
 			logger.G(ctx).WithError(err).Warn("failed to clear pending feedback, may be processed again")
 		} else {
 			logger.G(ctx).Debug("successfully cleared pending feedback")
@@ -698,13 +698,13 @@ func (t *Thread) processPendingFeedback(ctx context.Context, messageParams *anth
 }
 
 func (t *Thread) getModelAndTokens(opt llmtypes.MessageOpt) (anthropic.Model, int) {
-	model := t.config.Model
-	maxTokens := t.config.MaxTokens
+	model := t.Config.Model
+	maxTokens := t.Config.MaxTokens
 
-	if opt.UseWeakModel && t.config.WeakModel != "" {
-		model = t.config.WeakModel
-		if t.config.WeakModelMaxTokens > 0 {
-			maxTokens = t.config.WeakModelMaxTokens
+	if opt.UseWeakModel && t.Config.WeakModel != "" {
+		model = t.Config.WeakModel
+		if t.Config.WeakModelMaxTokens > 0 {
+			maxTokens = t.Config.WeakModelMaxTokens
 		}
 	}
 
@@ -715,7 +715,7 @@ func (t *Thread) shouldUtiliseThinking(model anthropic.Model) bool {
 	if !isThinkingModel(model) {
 		return false
 	}
-	if t.config.ThinkingBudgetTokens == 0 {
+	if t.Config.ThinkingBudgetTokens == 0 {
 		return false
 	}
 	return true
@@ -780,7 +780,7 @@ func (t *Thread) NewMessage(ctx context.Context, params anthropic.MessageNewPara
 	ctx, span := tracer.Start(ctx, "llm.anthropic.new_message", trace.WithAttributes(spanAttrs...))
 	defer span.End()
 
-	retryAttempts := t.config.Retry.Attempts
+	retryAttempts := t.Config.Retry.Attempts
 
 	stream := t.client.Messages.NewStreaming(ctx, params, option.WithMaxRetries(retryAttempts))
 	defer stream.Close()
@@ -897,17 +897,24 @@ func (t *Thread) tools(opt llmtypes.MessageOpt) []tooltypes.Tool {
 	if opt.NoToolUse {
 		return []tooltypes.Tool{}
 	}
-	return t.state.Tools()
+	return t.State.Tools()
+}
+
+func (t *Thread) toolNamePrefix() string {
+	if t.useSubscription {
+		return subscriptionToolNamePrefix
+	}
+	return ""
 }
 
 func (t *Thread) updateUsage(response *anthropic.Message, model anthropic.Model) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
+	t.Mu.Lock()
+	defer t.Mu.Unlock()
 	// Track usage statistics
-	t.usage.InputTokens += int(response.Usage.InputTokens)
-	t.usage.OutputTokens += int(response.Usage.OutputTokens)
-	t.usage.CacheCreationInputTokens += int(response.Usage.CacheCreationInputTokens)
-	t.usage.CacheReadInputTokens += int(response.Usage.CacheReadInputTokens)
+	t.Usage.InputTokens += int(response.Usage.InputTokens)
+	t.Usage.OutputTokens += int(response.Usage.OutputTokens)
+	t.Usage.CacheCreationInputTokens += int(response.Usage.CacheCreationInputTokens)
+	t.Usage.CacheReadInputTokens += int(response.Usage.CacheReadInputTokens)
 
 	// Calculate costs based on model pricing
 	pricing := getModelPricing(model)
@@ -921,30 +928,38 @@ func (t *Thread) updateUsage(response *anthropic.Message, model anthropic.Model)
 	)
 
 	// Calculate individual costs
-	t.usage.InputCost += float64(response.Usage.InputTokens) * inputPricing
-	t.usage.OutputCost += float64(response.Usage.OutputTokens) * outputPricing
-	t.usage.CacheCreationCost += float64(response.Usage.CacheCreationInputTokens) * cacheCreationPricing
-	t.usage.CacheReadCost += float64(response.Usage.CacheReadInputTokens) * cacheReadPricing
+	t.Usage.InputCost += float64(response.Usage.InputTokens) * inputPricing
+	t.Usage.OutputCost += float64(response.Usage.OutputTokens) * outputPricing
+	t.Usage.CacheCreationCost += float64(response.Usage.CacheCreationInputTokens) * cacheCreationPricing
+	t.Usage.CacheReadCost += float64(response.Usage.CacheReadInputTokens) * cacheReadPricing
 
-	t.usage.CurrentContextWindow = int(response.Usage.InputTokens) + int(response.Usage.OutputTokens) + int(response.Usage.CacheCreationInputTokens) + int(response.Usage.CacheReadInputTokens)
-	t.usage.MaxContextWindow = pricing.ContextWindow
+	t.Usage.CurrentContextWindow = int(response.Usage.InputTokens) + int(response.Usage.OutputTokens) + int(response.Usage.CacheCreationInputTokens) + int(response.Usage.CacheReadInputTokens)
+	t.Usage.MaxContextWindow = pricing.ContextWindow
 }
 
 // NewSubAgent creates a new subagent thread that shares the parent's client and usage tracking
 func (t *Thread) NewSubAgent(_ context.Context, config llmtypes.Config) llmtypes.Thread {
 	conversationID := convtypes.GenerateID()
 
+	// Create subagent hook trigger using parent's manager
+	hookTrigger := hooks.NewTrigger(t.HookTrigger.Manager, conversationID, true)
+
+	// Create subagent's base thread sharing parent's usage tracking
+	baseThread := &base.Thread{
+		Config:                 config,
+		ConversationID:         conversationID,
+		Persisted:              false,                                           // subagent is not persisted
+		Usage:                  t.Usage,                                         // Share usage tracking with parent
+		ToolResults:            make(map[string]tooltypes.StructuredToolResult), // Initialize tool results map
+		SubagentContextFactory: t.SubagentContextFactory,                        // Propagate the injected function
+		HookTrigger:            hookTrigger,
+	}
+
 	// Create subagent thread reusing the parent's client instead of creating a new one
 	thread := &Thread{
-		client:                 t.client, // Reuse parent's client
-		config:                 config,
-		useSubscription:        t.useSubscription, // Reuse parent's subscription status
-		conversationID:         conversationID,
-		isPersisted:            false,                                                         // subagent is not persisted
-		usage:                  t.usage,                                                       // Share usage tracking with parent
-		toolResults:            make(map[string]tooltypes.StructuredToolResult),               // Initialize tool results map
-		subagentContextFactory: t.subagentContextFactory,                                      // Propagate the injected function
-		hookTrigger:            hooks.NewTrigger(t.hookTrigger.Manager, conversationID, true), // Create new trigger with shared hook manager
+		Thread:          baseThread,
+		client:          t.client,          // Reuse parent's client
+		useSubscription: t.useSubscription, // Reuse parent's subscription status
 	}
 
 	return thread
@@ -960,7 +975,7 @@ func (t *Thread) ShortSummary(ctx context.Context) string {
 
 	summaryThread.messages = t.messages
 	summaryThread.EnablePersistence(ctx, false)
-	summaryThread.hookTrigger = hooks.Trigger{} // disable hooks for summary
+	summaryThread.HookTrigger = hooks.Trigger{} // disable hooks for summary
 
 	handler := &llmtypes.StringCollectorHandler{Silent: true}
 	summaryThread.SendMessage(ctx, prompts.ShortSummaryPrompt, handler, llmtypes.MessageOpt{
@@ -975,21 +990,6 @@ func (t *Thread) ShortSummary(ctx context.Context) string {
 	return handler.CollectedText()
 }
 
-// shouldAutoCompact checks if auto-compact should be triggered based on context window utilization
-func (t *Thread) shouldAutoCompact(compactRatio float64) bool {
-	if compactRatio <= 0.0 || compactRatio > 1.0 {
-		return false
-	}
-
-	usage := t.GetUsage()
-	if usage.MaxContextWindow == 0 {
-		return false
-	}
-
-	utilizationRatio := float64(usage.CurrentContextWindow) / float64(usage.MaxContextWindow)
-	return utilizationRatio >= compactRatio
-}
-
 // CompactContext performs comprehensive context compacting by creating a detailed summary
 func (t *Thread) CompactContext(ctx context.Context) error {
 	summaryThread, err := NewAnthropicThread(t.GetConfig(), nil)
@@ -999,7 +999,7 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 
 	summaryThread.messages = t.messages
 	summaryThread.EnablePersistence(ctx, false)
-	summaryThread.hookTrigger = hooks.Trigger{}
+	summaryThread.HookTrigger = hooks.Trigger{}
 
 	handler := &llmtypes.StringCollectorHandler{Silent: true}
 	_, err = summaryThread.SendMessage(ctx, prompts.CompactPrompt, handler, llmtypes.MessageOpt{
@@ -1017,8 +1017,8 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 	compactSummary := handler.CollectedText()
 
 	// Replace the conversation history with the compact summary
-	t.mu.Lock()
-	defer t.mu.Unlock()
+	t.Mu.Lock()
+	defer t.Mu.Unlock()
 
 	t.messages = []anthropic.MessageParam{
 		{
@@ -1030,10 +1030,10 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 	}
 
 	// Clear stale tool results - they reference tool calls that no longer exist
-	t.toolResults = make(map[string]tooltypes.StructuredToolResult)
+	t.ToolResults = make(map[string]tooltypes.StructuredToolResult)
 
 	// Get state reference while under mutex protection
-	state := t.state
+	state := t.State
 
 	// Clear file access tracking to start fresh with context retrieval
 	if state != nil {
@@ -1043,34 +1043,6 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 	return nil
 }
 
-// GetUsage returns the current token usage for the thread
-func (t *Thread) GetUsage() llmtypes.Usage {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return *t.usage
-}
-
-// GetConfig returns the configuration of the thread
-func (t *Thread) GetConfig() llmtypes.Config {
-	return t.config
-}
-
-// GetConversationID returns the current conversation ID
-func (t *Thread) GetConversationID() string {
-	return t.conversationID
-}
-
-// SetConversationID sets the conversation ID
-func (t *Thread) SetConversationID(id string) {
-	t.conversationID = id
-	t.hookTrigger.SetConversationID(id)
-}
-
-// IsPersisted returns whether this thread is being persisted
-func (t *Thread) IsPersisted() bool {
-	return t.isPersisted
-}
-
 // GetMessages returns the current messages in the thread
 func (t *Thread) GetMessages() ([]llmtypes.Message, error) {
 	b, err := json.Marshal(t.messages)
@@ -1078,76 +1050,6 @@ func (t *Thread) GetMessages() ([]llmtypes.Message, error) {
 		return nil, err
 	}
 	return ExtractMessages(b, t.GetStructuredToolResults())
-}
-
-// EnablePersistence enables conversation persistence for this thread
-func (t *Thread) EnablePersistence(ctx context.Context, enabled bool) {
-	t.isPersisted = enabled
-
-	// Initialize the store if enabling persistence and it's not already initialized
-	if enabled && t.store == nil {
-		store, err := conversations.GetConversationStore(ctx)
-		if err != nil {
-			// Log the error but continue without persistence
-			fmt.Printf("Error initializing conversation store: %v\n", err)
-			t.isPersisted = false
-			return
-		}
-		t.store = store
-	}
-
-	// If enabling persistence and there's an existing conversation ID,
-	// try to load it from the store
-	if enabled && t.store != nil {
-		t.loadConversation(ctx)
-	}
-}
-
-// createMessageSpan creates and configures a tracing span for message handling
-func (t *Thread) createMessageSpan(
-	ctx context.Context,
-	tracer trace.Tracer,
-	message string,
-	opt llmtypes.MessageOpt,
-) (context.Context, trace.Span) {
-	attributes := []attribute.KeyValue{
-		attribute.String("model", t.config.Model),
-		attribute.Int("max_tokens", t.config.MaxTokens),
-		attribute.Int("weak_model_max_tokens", t.config.WeakModelMaxTokens),
-		attribute.Int("thinking_budget_tokens", t.config.ThinkingBudgetTokens),
-		attribute.Bool("prompt_cache", opt.PromptCache),
-		attribute.Bool("use_weak_model", opt.UseWeakModel),
-		attribute.Bool("is_sub_agent", t.config.IsSubAgent),
-		attribute.String("conversation_id", t.conversationID),
-		attribute.Bool("is_persisted", t.isPersisted),
-		attribute.Int("message_length", len(message)),
-	}
-
-	return tracer.Start(ctx, "llm.send_message", trace.WithAttributes(attributes...))
-}
-
-// finalizeMessageSpan records final metrics and status to the span before ending it
-func (t *Thread) finalizeMessageSpan(span trace.Span, err error) {
-	// Record usage metrics after completion
-	usage := t.GetUsage()
-	span.SetAttributes(
-		attribute.Int("tokens.input", usage.InputTokens),
-		attribute.Int("tokens.output", usage.OutputTokens),
-		attribute.Int("tokens.cache_creation", usage.CacheCreationInputTokens),
-		attribute.Int("tokens.cache_read", usage.CacheReadInputTokens),
-		attribute.Float64("cost.total", usage.TotalCost()),
-		attribute.Int("context_window.current", usage.CurrentContextWindow),
-		attribute.Int("context_window.max", usage.MaxContextWindow),
-	)
-
-	if err != nil {
-		span.SetStatus(codes.Error, err.Error())
-		span.RecordError(err)
-	} else {
-		span.SetStatus(codes.Ok, "")
-		span.AddEvent("message_processing_completed")
-	}
-	span.End()
 }
 
 // processImage converts an image path/URL to an Anthropic image content block
@@ -1243,8 +1145,8 @@ func (t *Thread) processImageFile(filePath string) (*anthropic.ContentBlockParam
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get file info")
 	}
-	if fileInfo.Size() > MaxImageFileSize {
-		return nil, errors.Errorf("image file too large: %d bytes (max: %d bytes)", fileInfo.Size(), MaxImageFileSize)
+	if fileInfo.Size() > base.MaxImageFileSize {
+		return nil, errors.Errorf("image file too large: %d bytes (max: %d bytes)", fileInfo.Size(), base.MaxImageFileSize)
 	}
 
 	// Read and encode the file
@@ -1277,40 +1179,5 @@ func getMediaTypeFromExtension(ext string) (anthropic.Base64ImageSourceMediaType
 		return anthropic.Base64ImageSourceMediaTypeImageWebP, nil
 	default:
 		return "", errors.New("unsupported format")
-	}
-}
-
-// SetStructuredToolResult stores the structured result for a tool call
-func (t *Thread) SetStructuredToolResult(toolCallID string, result tooltypes.StructuredToolResult) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if t.toolResults == nil {
-		t.toolResults = make(map[string]tooltypes.StructuredToolResult)
-	}
-	t.toolResults[toolCallID] = result
-}
-
-// GetStructuredToolResults returns all structured tool results
-func (t *Thread) GetStructuredToolResults() map[string]tooltypes.StructuredToolResult {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if t.toolResults == nil {
-		return make(map[string]tooltypes.StructuredToolResult)
-	}
-	// Return a copy to avoid race conditions
-	result := make(map[string]tooltypes.StructuredToolResult)
-	maps.Copy(result, t.toolResults)
-	return result
-}
-
-// SetStructuredToolResults sets all structured tool results (for loading from conversation)
-func (t *Thread) SetStructuredToolResults(results map[string]tooltypes.StructuredToolResult) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if results == nil {
-		t.toolResults = make(map[string]tooltypes.StructuredToolResult)
-	} else {
-		t.toolResults = make(map[string]tooltypes.StructuredToolResult)
-		maps.Copy(t.toolResults, results)
 	}
 }
