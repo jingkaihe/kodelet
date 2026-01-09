@@ -50,9 +50,6 @@ type Thread struct {
 	useSubscription bool   // Whether using Anthropic subscription vs API key
 }
 
-// subscriptionToolNamePrefix is the prefix required for tool names when using Anthropic subscription accounts.
-const subscriptionToolNamePrefix = "oc_"
-
 // Provider returns the provider name for this thread
 func (t *Thread) Provider() string {
 	return "anthropic"
@@ -390,13 +387,26 @@ type toolExecResult struct {
 	renderedOutput string
 }
 
-// stripToolNamePrefix removes the subscription prefix from a tool name if present.
-// This is used to get the actual tool name when using subscription mode.
-func (t *Thread) stripToolNamePrefix(name string) string {
+// normalizeToolName maps subscription tool names to internal tool names.
+func (t *Thread) normalizeToolName(name string) string {
 	if t.useSubscription {
-		return strings.TrimPrefix(name, subscriptionToolNamePrefix)
+		return decapitalizeToolName(name)
 	}
 	return name
+}
+
+func capitalizeToolName(name string) string {
+	if name == "" {
+		return ""
+	}
+	return strings.ToUpper(name[:1]) + name[1:]
+}
+
+func decapitalizeToolName(name string) string {
+	if name == "" {
+		return ""
+	}
+	return strings.ToLower(name[:1]) + name[1:]
 }
 
 // executeToolsParallel runs multiple tool calls concurrently and streams results as they complete.
@@ -416,7 +426,7 @@ func (t *Thread) executeToolsParallel(
 
 	// Show all tool invocations upfront so user knows what's about to run
 	for _, tb := range toolBlocks {
-		toolName := t.stripToolNamePrefix(tb.block.Name)
+		toolName := t.normalizeToolName(tb.block.Name)
 		handler.HandleToolUse(tb.block.ID, toolName, tb.variant.JSON.Input.Raw())
 	}
 
@@ -432,7 +442,7 @@ func (t *Thread) executeToolsParallel(
 			}
 
 			// Strip subscription prefix from tool name for internal use
-			toolName := t.stripToolNamePrefix(tb.block.Name)
+			toolName := t.normalizeToolName(tb.block.Name)
 
 			telemetry.AddEvent(gctx, "tool_execution_start",
 				attribute.String("tool_name", toolName),
@@ -545,7 +555,7 @@ func (t *Thread) processMessageExchange(
 		System:    systemPromptBlocks,
 		Messages:  t.messages,
 		Model:     model,
-		Tools:     tools.ToAnthropicTools(t.tools(opt), t.toolNamePrefix()),
+		Tools:     toAnthropicTools(t.tools(opt), t.useSubscription),
 	}
 	if t.shouldUtiliseThinking(model) {
 		messageParams.Thinking = anthropic.ThinkingConfigParamUnion{
@@ -898,13 +908,6 @@ func (t *Thread) tools(opt llmtypes.MessageOpt) []tooltypes.Tool {
 		return []tooltypes.Tool{}
 	}
 	return t.State.Tools()
-}
-
-func (t *Thread) toolNamePrefix() string {
-	if t.useSubscription {
-		return subscriptionToolNamePrefix
-	}
-	return ""
 }
 
 func (t *Thread) updateUsage(response *anthropic.Message, model anthropic.Model) {

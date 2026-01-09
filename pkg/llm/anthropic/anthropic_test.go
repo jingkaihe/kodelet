@@ -8,8 +8,10 @@ import (
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/invopop/jsonschema"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -589,7 +591,7 @@ func TestAutoCompactTriggerLogic(t *testing.T) {
 	})
 }
 
-func TestStripToolNamePrefix(t *testing.T) {
+func TestNormalizeToolName(t *testing.T) {
 	tests := []struct {
 		name            string
 		useSubscription bool
@@ -597,22 +599,10 @@ func TestStripToolNamePrefix(t *testing.T) {
 		expected        string
 	}{
 		{
-			name:            "subscription mode strips prefix",
+			name:            "subscription mode decapitalizes",
 			useSubscription: true,
-			toolName:        "oc_file_read",
+			toolName:        "File_read",
 			expected:        "file_read",
-		},
-		{
-			name:            "subscription mode with no prefix",
-			useSubscription: true,
-			toolName:        "file_read",
-			expected:        "file_read",
-		},
-		{
-			name:            "non-subscription mode keeps prefix",
-			useSubscription: false,
-			toolName:        "oc_file_read",
-			expected:        "oc_file_read",
 		},
 		{
 			name:            "non-subscription mode normal name",
@@ -625,35 +615,50 @@ func TestStripToolNamePrefix(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			thread := &Thread{useSubscription: tt.useSubscription}
-			result := thread.stripToolNamePrefix(tt.toolName)
+			result := thread.normalizeToolName(tt.toolName)
 			require.Equal(t, tt.expected, result)
 		})
 	}
 }
 
-func TestToolNamePrefix(t *testing.T) {
-	tests := []struct {
-		name            string
-		useSubscription bool
-		expected        string
-	}{
-		{
-			name:            "subscription mode returns prefix",
-			useSubscription: true,
-			expected:        "oc_",
-		},
-		{
-			name:            "non-subscription mode returns empty",
-			useSubscription: false,
-			expected:        "",
-		},
-	}
+func TestToAnthropicTools(t *testing.T) {
+	tool := testTool{name: "file_read"}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			thread := &Thread{useSubscription: tt.useSubscription}
-			result := thread.toolNamePrefix()
-			require.Equal(t, tt.expected, result)
-		})
-	}
+	toolsWithSubscription := toAnthropicTools([]tooltypes.Tool{tool}, true)
+	require.Len(t, toolsWithSubscription, 1)
+	require.NotNil(t, toolsWithSubscription[0].OfTool)
+	require.Equal(t, "File_read", toolsWithSubscription[0].OfTool.Name)
+
+	toolsWithoutSubscription := toAnthropicTools([]tooltypes.Tool{tool}, false)
+	require.Len(t, toolsWithoutSubscription, 1)
+	require.NotNil(t, toolsWithoutSubscription[0].OfTool)
+	require.Equal(t, "file_read", toolsWithoutSubscription[0].OfTool.Name)
+}
+
+type testTool struct {
+	name string
+}
+
+func (t testTool) GenerateSchema() *jsonschema.Schema {
+	return &jsonschema.Schema{}
+}
+
+func (t testTool) Name() string {
+	return t.name
+}
+
+func (t testTool) Description() string {
+	return "test"
+}
+
+func (t testTool) ValidateInput(_ tooltypes.State, _ string) error {
+	return nil
+}
+
+func (t testTool) Execute(_ context.Context, _ tooltypes.State, _ string) tooltypes.ToolResult {
+	return tooltypes.BaseToolResult{}
+}
+
+func (t testTool) TracingKVs(_ string) ([]attribute.KeyValue, error) {
+	return nil, nil
 }

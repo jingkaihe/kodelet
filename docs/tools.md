@@ -229,12 +229,16 @@ Common examples include code navigation, symbol analysis, diagnostics, and exter
 
 #### Anthropic Integration
 ```go
-func ToAnthropicTools(tools []tooltypes.Tool) []anthropic.ToolUnionParam {
+func toAnthropicTools(tools []tooltypes.Tool, useSubscription bool) []anthropic.ToolUnionParam {
     anthropicTools := make([]anthropic.ToolUnionParam, len(tools))
     for i, tool := range tools {
+        name := tool.Name()
+        if useSubscription {
+            name = strings.ToUpper(name[:1]) + name[1:]
+        }
         anthropicTools[i] = anthropic.ToolUnionParam{
             OfTool: &anthropic.ToolParam{
-                Name:        tool.Name(),
+                Name:        name,
                 Description: tool.Description(),
                 InputSchema: tool.GenerateSchema().Properties,
             },
