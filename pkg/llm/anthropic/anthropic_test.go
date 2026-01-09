@@ -588,3 +588,72 @@ func TestAutoCompactTriggerLogic(t *testing.T) {
 		}
 	})
 }
+
+func TestStripToolNamePrefix(t *testing.T) {
+	tests := []struct {
+		name            string
+		useSubscription bool
+		toolName        string
+		expected        string
+	}{
+		{
+			name:            "subscription mode strips prefix",
+			useSubscription: true,
+			toolName:        "oc_file_read",
+			expected:        "file_read",
+		},
+		{
+			name:            "subscription mode with no prefix",
+			useSubscription: true,
+			toolName:        "file_read",
+			expected:        "file_read",
+		},
+		{
+			name:            "non-subscription mode keeps prefix",
+			useSubscription: false,
+			toolName:        "oc_file_read",
+			expected:        "oc_file_read",
+		},
+		{
+			name:            "non-subscription mode normal name",
+			useSubscription: false,
+			toolName:        "file_read",
+			expected:        "file_read",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			thread := &Thread{useSubscription: tt.useSubscription}
+			result := thread.stripToolNamePrefix(tt.toolName)
+			require.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestToolNamePrefix(t *testing.T) {
+	tests := []struct {
+		name            string
+		useSubscription bool
+		expected        string
+	}{
+		{
+			name:            "subscription mode returns prefix",
+			useSubscription: true,
+			expected:        "oc_",
+		},
+		{
+			name:            "non-subscription mode returns empty",
+			useSubscription: false,
+			expected:        "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			thread := &Thread{useSubscription: tt.useSubscription}
+			result := thread.toolNamePrefix()
+			require.Equal(t, tt.expected, result)
+		})
+	}
+}

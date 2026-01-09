@@ -50,6 +50,9 @@ type Thread struct {
 	useSubscription bool   // Whether using Anthropic subscription vs API key
 }
 
+// subscriptionToolNamePrefix is the prefix required for tool names when using Anthropic subscription accounts.
+const subscriptionToolNamePrefix = "oc_"
+
 // Provider returns the provider name for this thread
 func (t *Thread) Provider() string {
 	return "anthropic"
@@ -98,7 +101,6 @@ func NewAnthropicThread(config llmtypes.Config, subagentContextFactory llmtypes.
 			logger.Debug("using anthropic access token (forced by configuration)")
 		}
 		opts = append(opts, headerOpts...)
-		opts = append(opts, option.WithMiddleware(toolNamePrefixMiddleware()))
 		client = anthropic.NewClient(opts...)
 		useSubscription = true
 
@@ -120,7 +122,6 @@ func NewAnthropicThread(config llmtypes.Config, subagentContextFactory llmtypes.
 					logger.Debug("using anthropic access token")
 				}
 				opts = append(opts, headerOpts...)
-				opts = append(opts, option.WithMiddleware(toolNamePrefixMiddleware()))
 				client = anthropic.NewClient(opts...)
 				useSubscription = true
 			}
@@ -425,7 +426,6 @@ func (t *Thread) executeToolsParallel(
 	g, gctx := errgroup.WithContext(ctx)
 
 	for i, tb := range toolBlocks {
-		i, tb := i, tb
 		g.Go(func() error {
 			if err := gctx.Err(); err != nil {
 				return err
@@ -545,7 +545,7 @@ func (t *Thread) processMessageExchange(
 		System:    systemPromptBlocks,
 		Messages:  t.messages,
 		Model:     model,
-		Tools:     tools.ToAnthropicTools(t.tools(opt)),
+		Tools:     tools.ToAnthropicTools(t.tools(opt), t.toolNamePrefix()),
 	}
 	if t.shouldUtiliseThinking(model) {
 		messageParams.Thinking = anthropic.ThinkingConfigParamUnion{
@@ -898,6 +898,13 @@ func (t *Thread) tools(opt llmtypes.MessageOpt) []tooltypes.Tool {
 		return []tooltypes.Tool{}
 	}
 	return t.State.Tools()
+}
+
+func (t *Thread) toolNamePrefix() string {
+	if t.useSubscription {
+		return subscriptionToolNamePrefix
+	}
+	return ""
 }
 
 func (t *Thread) updateUsage(response *anthropic.Message, model anthropic.Model) {

@@ -223,13 +223,14 @@ func GetSubAgentTools(ctx context.Context, allowedTools []string) []tooltypes.To
 	return GetToolsFromNames(allowedTools)
 }
 
-// ToAnthropicTools converts tools to Anthropic tool parameters
-func ToAnthropicTools(tools []tooltypes.Tool) []anthropic.ToolUnionParam {
+// ToAnthropicTools converts tools to Anthropic tool parameters.
+// The prefix parameter is used to add a prefix to tool names (required for subscription accounts).
+func ToAnthropicTools(tools []tooltypes.Tool, prefix string) []anthropic.ToolUnionParam {
 	anthropicTools := make([]anthropic.ToolUnionParam, len(tools))
 	for i, tool := range tools {
 		anthropicTools[i] = anthropic.ToolUnionParam{
 			OfTool: &anthropic.ToolParam{
-				Name:        tool.Name(),
+				Name:        prefix + tool.Name(),
 				Description: anthropic.String(tool.Description()),
 				InputSchema: anthropic.ToolInputSchemaParam{
 					Properties: tool.GenerateSchema().Properties,
