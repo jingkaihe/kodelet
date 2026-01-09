@@ -228,25 +228,8 @@ Common examples include code navigation, symbol analysis, diagnostics, and exter
 ### LLM Provider Integration
 
 #### Anthropic Integration
-```go
-func toAnthropicTools(tools []tooltypes.Tool, useSubscription bool) []anthropic.ToolUnionParam {
-    anthropicTools := make([]anthropic.ToolUnionParam, len(tools))
-    for i, tool := range tools {
-        name := tool.Name()
-        if useSubscription {
-            name = strings.ToUpper(name[:1]) + name[1:]
-        }
-        anthropicTools[i] = anthropic.ToolUnionParam{
-            OfTool: &anthropic.ToolParam{
-                Name:        name,
-                Description: tool.Description(),
-                InputSchema: tool.GenerateSchema().Properties,
-            },
-        }
-    }
-    return anthropicTools
-}
-```
+
+Tool conversion for Anthropic is handled in `pkg/llm/anthropic/tools.go`. For subscription accounts, tool names are capitalized using Unicode-safe rune handling.
 
 #### OpenAI Integration
 ```go

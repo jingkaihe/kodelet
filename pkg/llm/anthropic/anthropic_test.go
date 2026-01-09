@@ -605,10 +605,34 @@ func TestNormalizeToolName(t *testing.T) {
 			expected:        "file_read",
 		},
 		{
+			name:            "subscription mode already lowercase",
+			useSubscription: true,
+			toolName:        "file_read",
+			expected:        "file_read",
+		},
+		{
+			name:            "subscription mode empty string",
+			useSubscription: true,
+			toolName:        "",
+			expected:        "",
+		},
+		{
 			name:            "non-subscription mode normal name",
 			useSubscription: false,
 			toolName:        "file_read",
 			expected:        "file_read",
+		},
+		{
+			name:            "non-subscription mode capitalized input preserved",
+			useSubscription: false,
+			toolName:        "File_read",
+			expected:        "File_read",
+		},
+		{
+			name:            "non-subscription mode empty string",
+			useSubscription: false,
+			toolName:        "",
+			expected:        "",
 		},
 	}
 
@@ -616,23 +640,147 @@ func TestNormalizeToolName(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			thread := &Thread{useSubscription: tt.useSubscription}
 			result := thread.normalizeToolName(tt.toolName)
-			require.Equal(t, tt.expected, result)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestCapitalizeToolName(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "lowercase first letter",
+			input:    "file_read",
+			expected: "File_read",
+		},
+		{
+			name:     "already capitalized",
+			input:    "File_read",
+			expected: "File_read",
+		},
+		{
+			name:     "empty string",
+			input:    "",
+			expected: "",
+		},
+		{
+			name:     "single character",
+			input:    "a",
+			expected: "A",
+		},
+		{
+			name:     "single uppercase character",
+			input:    "A",
+			expected: "A",
+		},
+		{
+			name:     "underscore first",
+			input:    "_test",
+			expected: "_test",
+		},
+		{
+			name:     "unicode character",
+			input:    "über_tool",
+			expected: "Über_tool",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := capitalizeToolName(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestDecapitalizeToolName(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "uppercase first letter",
+			input:    "File_read",
+			expected: "file_read",
+		},
+		{
+			name:     "already lowercase",
+			input:    "file_read",
+			expected: "file_read",
+		},
+		{
+			name:     "empty string",
+			input:    "",
+			expected: "",
+		},
+		{
+			name:     "single character",
+			input:    "A",
+			expected: "a",
+		},
+		{
+			name:     "single lowercase character",
+			input:    "a",
+			expected: "a",
+		},
+		{
+			name:     "underscore first",
+			input:    "_Test",
+			expected: "_Test",
+		},
+		{
+			name:     "unicode character",
+			input:    "Über_tool",
+			expected: "über_tool",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := decapitalizeToolName(tt.input)
+			assert.Equal(t, tt.expected, result)
 		})
 	}
 }
 
 func TestToAnthropicTools(t *testing.T) {
-	tool := testTool{name: "file_read"}
+	t.Run("with subscription", func(t *testing.T) {
+		tool := testTool{name: "file_read"}
+		tools := toAnthropicTools([]tooltypes.Tool{tool}, true)
+		require.Len(t, tools, 1)
+		require.NotNil(t, tools[0].OfTool)
+		assert.Equal(t, "File_read", tools[0].OfTool.Name)
+	})
 
-	toolsWithSubscription := toAnthropicTools([]tooltypes.Tool{tool}, true)
-	require.Len(t, toolsWithSubscription, 1)
-	require.NotNil(t, toolsWithSubscription[0].OfTool)
-	require.Equal(t, "File_read", toolsWithSubscription[0].OfTool.Name)
+	t.Run("without subscription", func(t *testing.T) {
+		tool := testTool{name: "file_read"}
+		tools := toAnthropicTools([]tooltypes.Tool{tool}, false)
+		require.Len(t, tools, 1)
+		require.NotNil(t, tools[0].OfTool)
+		assert.Equal(t, "file_read", tools[0].OfTool.Name)
+	})
 
-	toolsWithoutSubscription := toAnthropicTools([]tooltypes.Tool{tool}, false)
-	require.Len(t, toolsWithoutSubscription, 1)
-	require.NotNil(t, toolsWithoutSubscription[0].OfTool)
-	require.Equal(t, "file_read", toolsWithoutSubscription[0].OfTool.Name)
+	t.Run("empty tools slice", func(t *testing.T) {
+		tools := toAnthropicTools([]tooltypes.Tool{}, true)
+		require.Len(t, tools, 0)
+	})
+
+	t.Run("multiple tools", func(t *testing.T) {
+		toolList := []tooltypes.Tool{
+			testTool{name: "file_read"},
+			testTool{name: "bash"},
+			testTool{name: "grep_tool"},
+		}
+		tools := toAnthropicTools(toolList, true)
+		require.Len(t, tools, 3)
+		assert.Equal(t, "File_read", tools[0].OfTool.Name)
+		assert.Equal(t, "Bash", tools[1].OfTool.Name)
+		assert.Equal(t, "Grep_tool", tools[2].OfTool.Name)
+	})
 }
 
 type testTool struct {

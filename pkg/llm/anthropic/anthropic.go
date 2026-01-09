@@ -395,20 +395,6 @@ func (t *Thread) normalizeToolName(name string) string {
 	return name
 }
 
-func capitalizeToolName(name string) string {
-	if name == "" {
-		return ""
-	}
-	return strings.ToUpper(name[:1]) + name[1:]
-}
-
-func decapitalizeToolName(name string) string {
-	if name == "" {
-		return ""
-	}
-	return strings.ToLower(name[:1]) + name[1:]
-}
-
 // executeToolsParallel runs multiple tool calls concurrently and streams results as they complete.
 // It returns results in original order for consistent message building.
 func (t *Thread) executeToolsParallel(
