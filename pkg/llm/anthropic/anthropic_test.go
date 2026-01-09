@@ -8,8 +8,10 @@ import (
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/invopop/jsonschema"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -589,7 +591,7 @@ func TestAutoCompactTriggerLogic(t *testing.T) {
 	})
 }
 
-func TestStripToolNamePrefix(t *testing.T) {
+func TestNormalizeToolName(t *testing.T) {
 	tests := []struct {
 		name            string
 		useSubscription bool
@@ -597,22 +599,22 @@ func TestStripToolNamePrefix(t *testing.T) {
 		expected        string
 	}{
 		{
-			name:            "subscription mode strips prefix",
+			name:            "subscription mode decapitalizes",
 			useSubscription: true,
-			toolName:        "oc_file_read",
+			toolName:        "File_read",
 			expected:        "file_read",
 		},
 		{
-			name:            "subscription mode with no prefix",
+			name:            "subscription mode already lowercase",
 			useSubscription: true,
 			toolName:        "file_read",
 			expected:        "file_read",
 		},
 		{
-			name:            "non-subscription mode keeps prefix",
-			useSubscription: false,
-			toolName:        "oc_file_read",
-			expected:        "oc_file_read",
+			name:            "subscription mode empty string",
+			useSubscription: true,
+			toolName:        "",
+			expected:        "",
 		},
 		{
 			name:            "non-subscription mode normal name",
@@ -620,31 +622,16 @@ func TestStripToolNamePrefix(t *testing.T) {
 			toolName:        "file_read",
 			expected:        "file_read",
 		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			thread := &Thread{useSubscription: tt.useSubscription}
-			result := thread.stripToolNamePrefix(tt.toolName)
-			require.Equal(t, tt.expected, result)
-		})
-	}
-}
-
-func TestToolNamePrefix(t *testing.T) {
-	tests := []struct {
-		name            string
-		useSubscription bool
-		expected        string
-	}{
 		{
-			name:            "subscription mode returns prefix",
-			useSubscription: true,
-			expected:        "oc_",
+			name:            "non-subscription mode capitalized input preserved",
+			useSubscription: false,
+			toolName:        "File_read",
+			expected:        "File_read",
 		},
 		{
-			name:            "non-subscription mode returns empty",
+			name:            "non-subscription mode empty string",
 			useSubscription: false,
+			toolName:        "",
 			expected:        "",
 		},
 	}
@@ -652,8 +639,174 @@ func TestToolNamePrefix(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			thread := &Thread{useSubscription: tt.useSubscription}
-			result := thread.toolNamePrefix()
-			require.Equal(t, tt.expected, result)
+			result := thread.normalizeToolName(tt.toolName)
+			assert.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+func TestCapitalizeToolName(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "lowercase first letter",
+			input:    "file_read",
+			expected: "File_read",
+		},
+		{
+			name:     "already capitalized",
+			input:    "File_read",
+			expected: "File_read",
+		},
+		{
+			name:     "empty string",
+			input:    "",
+			expected: "",
+		},
+		{
+			name:     "single character",
+			input:    "a",
+			expected: "A",
+		},
+		{
+			name:     "single uppercase character",
+			input:    "A",
+			expected: "A",
+		},
+		{
+			name:     "underscore first",
+			input:    "_test",
+			expected: "_test",
+		},
+		{
+			name:     "unicode character",
+			input:    "über_tool",
+			expected: "Über_tool",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := capitalizeToolName(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestDecapitalizeToolName(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "uppercase first letter",
+			input:    "File_read",
+			expected: "file_read",
+		},
+		{
+			name:     "already lowercase",
+			input:    "file_read",
+			expected: "file_read",
+		},
+		{
+			name:     "empty string",
+			input:    "",
+			expected: "",
+		},
+		{
+			name:     "single character",
+			input:    "A",
+			expected: "a",
+		},
+		{
+			name:     "single lowercase character",
+			input:    "a",
+			expected: "a",
+		},
+		{
+			name:     "underscore first",
+			input:    "_Test",
+			expected: "_Test",
+		},
+		{
+			name:     "unicode character",
+			input:    "Über_tool",
+			expected: "über_tool",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := decapitalizeToolName(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestToAnthropicTools(t *testing.T) {
+	t.Run("with subscription", func(t *testing.T) {
+		tool := testTool{name: "file_read"}
+		tools := toAnthropicTools([]tooltypes.Tool{tool}, true)
+		require.Len(t, tools, 1)
+		require.NotNil(t, tools[0].OfTool)
+		assert.Equal(t, "File_read", tools[0].OfTool.Name)
+	})
+
+	t.Run("without subscription", func(t *testing.T) {
+		tool := testTool{name: "file_read"}
+		tools := toAnthropicTools([]tooltypes.Tool{tool}, false)
+		require.Len(t, tools, 1)
+		require.NotNil(t, tools[0].OfTool)
+		assert.Equal(t, "file_read", tools[0].OfTool.Name)
+	})
+
+	t.Run("empty tools slice", func(t *testing.T) {
+		tools := toAnthropicTools([]tooltypes.Tool{}, true)
+		require.Len(t, tools, 0)
+	})
+
+	t.Run("multiple tools", func(t *testing.T) {
+		toolList := []tooltypes.Tool{
+			testTool{name: "file_read"},
+			testTool{name: "bash"},
+			testTool{name: "grep_tool"},
+		}
+		tools := toAnthropicTools(toolList, true)
+		require.Len(t, tools, 3)
+		assert.Equal(t, "File_read", tools[0].OfTool.Name)
+		assert.Equal(t, "Bash", tools[1].OfTool.Name)
+		assert.Equal(t, "Grep_tool", tools[2].OfTool.Name)
+	})
+}
+
+type testTool struct {
+	name string
+}
+
+func (t testTool) GenerateSchema() *jsonschema.Schema {
+	return &jsonschema.Schema{}
+}
+
+func (t testTool) Name() string {
+	return t.name
+}
+
+func (t testTool) Description() string {
+	return "test"
+}
+
+func (t testTool) ValidateInput(_ tooltypes.State, _ string) error {
+	return nil
+}
+
+func (t testTool) Execute(_ context.Context, _ tooltypes.State, _ string) tooltypes.ToolResult {
+	return tooltypes.BaseToolResult{}
+}
+
+func (t testTool) TracingKVs(_ string) ([]attribute.KeyValue, error) {
+	return nil, nil
 }

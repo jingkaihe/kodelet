@@ -1,5 +1,17 @@
 # Kodelet
 
+## 0.1.37.beta (2026-01-09)
+
+### Internal Changes
+
+**Refactored Anthropic Tool Name Handling**: Simplified how tool names are transformed for Anthropic subscription accounts.
+
+- Changed from `oc_` prefix to capitalization-based naming (e.g., `file_read` → `File_read`)
+- Moved `ToAnthropicTools` from shared package to Anthropic-specific implementation
+- Renamed `stripToolNamePrefix` to `normalizeToolName` for clarity
+- Added `capitalizeToolName` and `decapitalizeToolName` helper functions
+- Improved test coverage with mock tool implementation
+
 ## 0.1.36.beta (2026-01-08)
 
 ### Internal Changes
