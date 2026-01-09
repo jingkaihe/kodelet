@@ -98,6 +98,7 @@ func NewAnthropicThread(config llmtypes.Config, subagentContextFactory llmtypes.
 			logger.Debug("using anthropic access token (forced by configuration)")
 		}
 		opts = append(opts, headerOpts...)
+		opts = append(opts, option.WithMiddleware(toolNamePrefixMiddleware()))
 		client = anthropic.NewClient(opts...)
 		useSubscription = true
 
@@ -119,6 +120,7 @@ func NewAnthropicThread(config llmtypes.Config, subagentContextFactory llmtypes.
 					logger.Debug("using anthropic access token")
 				}
 				opts = append(opts, headerOpts...)
+				opts = append(opts, option.WithMiddleware(toolNamePrefixMiddleware()))
 				client = anthropic.NewClient(opts...)
 				useSubscription = true
 			}
@@ -387,6 +389,15 @@ type toolExecResult struct {
 	renderedOutput string
 }
 
+// stripToolNamePrefix removes the subscription prefix from a tool name if present.
+// This is used to get the actual tool name when using subscription mode.
+func (t *Thread) stripToolNamePrefix(name string) string {
+	if t.useSubscription {
+		return strings.TrimPrefix(name, subscriptionToolNamePrefix)
+	}
+	return name
+}
+
 // executeToolsParallel runs multiple tool calls concurrently and streams results as they complete.
 // It returns results in original order for consistent message building.
 func (t *Thread) executeToolsParallel(
@@ -404,7 +415,8 @@ func (t *Thread) executeToolsParallel(
 
 	// Show all tool invocations upfront so user knows what's about to run
 	for _, tb := range toolBlocks {
-		handler.HandleToolUse(tb.block.ID, tb.block.Name, tb.variant.JSON.Input.Raw())
+		toolName := t.stripToolNamePrefix(tb.block.Name)
+		handler.HandleToolUse(tb.block.ID, toolName, tb.variant.JSON.Input.Raw())
 	}
 
 	results := make([]toolExecResult, len(toolBlocks))
@@ -419,24 +431,27 @@ func (t *Thread) executeToolsParallel(
 				return err
 			}
 
+			// Strip subscription prefix from tool name for internal use
+			toolName := t.stripToolNamePrefix(tb.block.Name)
+
 			telemetry.AddEvent(gctx, "tool_execution_start",
-				attribute.String("tool_name", tb.block.Name),
+				attribute.String("tool_name", toolName),
 				attribute.Int("tool_index", i),
 			)
 
 			// Trigger before_tool_call hook
 			toolInput := tb.variant.JSON.Input.Raw()
-			blocked, reason, toolInput := t.HookTrigger.TriggerBeforeToolCall(gctx, tb.block.Name, toolInput, tb.block.ID)
+			blocked, reason, toolInput := t.HookTrigger.TriggerBeforeToolCall(gctx, toolName, toolInput, tb.block.ID)
 
 			var output tooltypes.ToolResult
 			if blocked {
-				output = tooltypes.NewBlockedToolResult(tb.block.Name, reason)
+				output = tooltypes.NewBlockedToolResult(toolName, reason)
 			} else {
 				// Use a per-goroutine silent handler to avoid race conditions on shared handler
 				// XXX: It's tricky to visualise agent streaming in the terminal therefore we disable it for now
 				parallelHandler := &llmtypes.StringCollectorHandler{Silent: true}
 				runToolCtx := t.SubagentContextFactory(gctx, t, parallelHandler, opt.CompactRatio, opt.DisableAutoCompact)
-				output = tools.RunTool(runToolCtx, t.State, tb.block.Name, toolInput)
+				output = tools.RunTool(runToolCtx, t.State, toolName, toolInput)
 			}
 
 			if err := gctx.Err(); err != nil {
@@ -446,7 +461,7 @@ func (t *Thread) executeToolsParallel(
 			structuredResult := output.StructuredData()
 
 			// Trigger after_tool_call hook
-			if modified := t.HookTrigger.TriggerAfterToolCall(gctx, tb.block.Name, toolInput, tb.block.ID, structuredResult); modified != nil {
+			if modified := t.HookTrigger.TriggerAfterToolCall(gctx, toolName, toolInput, tb.block.ID, structuredResult); modified != nil {
 				structuredResult = *modified
 			}
 
@@ -454,7 +469,7 @@ func (t *Thread) executeToolsParallel(
 			renderedOutput := registry.Render(structuredResult)
 
 			telemetry.AddEvent(gctx, "tool_execution_complete",
-				attribute.String("tool_name", tb.block.Name),
+				attribute.String("tool_name", toolName),
 				attribute.Int("tool_index", i),
 				attribute.String("result", output.AssistantFacing()),
 			)
@@ -462,7 +477,7 @@ func (t *Thread) executeToolsParallel(
 			result := toolExecResult{
 				index:          i,
 				blockID:        tb.block.ID,
-				toolName:       tb.block.Name,
+				toolName:       toolName,
 				input:          toolInput,
 				output:         output,
 				structuredData: structuredResult,
