@@ -78,7 +78,7 @@ func TestGenerateAnthropicAuthURL(t *testing.T) {
 	assert.Equal(t, "code", query.Get("response_type"))
 	assert.Equal(t, "true", query.Get("code"))
 	assert.Equal(t, "S256", query.Get("code_challenge_method"))
-	assert.Equal(t, "user:inference user:profile", query.Get("scope"))
+	assert.Equal(t, "user:inference user:profile user:sessions:claude_code", query.Get("scope"))
 	assert.NotEmpty(t, query.Get("code_challenge"))
 	assert.Equal(t, query.Get("state"), verifier)
 }
