@@ -10,6 +10,7 @@ var Models = llm.CustomModels{
 		"gpt-5-mini",
 		"gpt-5-nano",
 		"gpt-5-chat-latest",
+		"gpt-5.1-codex",
 		"o1",
 		"o1-pro",
 		"o1-mini",
@@ -61,6 +62,12 @@ var Pricing = llm.CustomPricing{
 		ContextWindow: 400_000,
 	},
 	"gpt-5-chat-latest": llm.ModelPricing{
+		Input:         0.00000125,  // $1.25 per million tokens
+		CachedInput:   0.000000125, // $0.125 per million tokens
+		Output:        0.00001,     // $10.00 per million tokens
+		ContextWindow: 400_000,
+	},
+	"gpt-5.1-codex": llm.ModelPricing{
 		Input:         0.00000125,  // $1.25 per million tokens
 		CachedInput:   0.000000125, // $0.125 per million tokens
 		Output:        0.00001,     // $10.00 per million tokens
