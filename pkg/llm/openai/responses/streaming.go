@@ -128,7 +128,9 @@ func (t *Thread) processStream(
 				funcCall := item.AsFunctionCall()
 				handler.HandleToolUse(funcCall.CallID, funcCall.Name, funcCall.Arguments)
 
-				// Add the function call to input items
+				// Add the function call to inputItems for our local history/persistence
+				// Note: We do NOT add to pendingItems because when using previous_response_id,
+				// the function call is already part of the server's response state
 				t.inputItems = append(t.inputItems, responses.ResponseInputItemUnionParam{
 					OfFunctionCall: &responses.ResponseFunctionToolCallParam{
 						CallID:    funcCall.CallID,
@@ -143,15 +145,20 @@ func (t *Thread) processStream(
 				// Get the string representation for API response
 				resultStr := result.AssistantFacing()
 
-				// Add the tool result to input items
-				t.inputItems = append(t.inputItems, responses.ResponseInputItemUnionParam{
+				// Create tool result item
+				toolResultItem := responses.ResponseInputItemUnionParam{
 					OfFunctionCallOutput: &responses.ResponseInputItemFunctionCallOutputParam{
 						CallID: funcCall.CallID,
 						Output: responses.ResponseInputItemFunctionCallOutputOutputUnionParam{
 							OfString: param.NewOpt(resultStr),
 						},
 					},
-				})
+				}
+
+				// Add the tool result to both inputItems (full history) and pendingItems
+				// (for next API call with previous_response_id)
+				t.inputItems = append(t.inputItems, toolResultItem)
+				t.pendingItems = append(t.pendingItems, toolResultItem)
 
 				handler.HandleToolResult(funcCall.CallID, funcCall.Name, result)
 

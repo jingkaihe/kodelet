@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
@@ -43,8 +44,13 @@ type Thread struct {
 	// client is the OpenAI client for making API calls
 	client *openai.Client
 
-	// inputItems holds the conversation history as Responses API input items
+	// inputItems holds the complete conversation history as Responses API input items
+	// This is used for persistence and display purposes
 	inputItems []responses.ResponseInputItemUnionParam
+
+	// pendingItems holds items that need to be sent in the next API call
+	// When using previous_response_id, only these items are sent instead of full history
+	pendingItems []responses.ResponseInputItemUnionParam
 
 	// reasoningEffort controls the reasoning depth for o-series models
 	reasoningEffort shared.ReasoningEffort
@@ -56,6 +62,7 @@ type Thread struct {
 	customPricing map[string]llmtypes.ModelPricing
 
 	// lastResponseID stores the ID of the last response for multi-turn conversations
+	// Used with previous_response_id parameter for server-side conversation state
 	lastResponseID string
 
 	// summary stores a short summary of the conversation for persistence
@@ -127,6 +134,7 @@ func NewThread(
 		Thread:          baseThread,
 		client:          &client,
 		inputItems:      make([]responses.ResponseInputItemUnionParam, 0),
+		pendingItems:    make([]responses.ResponseInputItemUnionParam, 0),
 		reasoningEffort: reasoningEffort,
 		customModels:    customModels,
 		customPricing:   customPricing,
@@ -153,6 +161,8 @@ func (t *Thread) AddUserMessage(ctx context.Context, message string, imagePaths 
 		imagePaths = imagePaths[:base.MaxImageCount]
 	}
 
+	var inputItem responses.ResponseInputItemUnionParam
+
 	// Build content parts if we have images
 	if len(imagePaths) > 0 {
 		contentParts := responses.ResponseInputMessageContentListParam{}
@@ -175,21 +185,25 @@ func (t *Thread) AddUserMessage(ctx context.Context, message string, imagePaths 
 		})
 
 		// Create user message input item with content list
-		t.inputItems = append(t.inputItems, responses.ResponseInputItemUnionParam{
+		inputItem = responses.ResponseInputItemUnionParam{
 			OfMessage: &responses.EasyInputMessageParam{
 				Role:    responses.EasyInputMessageRoleUser,
 				Content: responses.EasyInputMessageContentUnionParam{OfInputItemContentList: contentParts},
 			},
-		})
+		}
 	} else {
 		// Simple text message
-		t.inputItems = append(t.inputItems, responses.ResponseInputItemUnionParam{
+		inputItem = responses.ResponseInputItemUnionParam{
 			OfMessage: &responses.EasyInputMessageParam{
 				Role:    responses.EasyInputMessageRoleUser,
 				Content: responses.EasyInputMessageContentUnionParam{OfString: param.NewOpt(message)},
 			},
-		})
+		}
 	}
+
+	// Add to both inputItems (full history) and pendingItems (for next API call)
+	t.inputItems = append(t.inputItems, inputItem)
+	t.pendingItems = append(t.pendingItems, inputItem)
 }
 
 // SendMessage sends a message to the LLM and processes the response.
@@ -211,9 +225,14 @@ func (t *Thread) SendMessage(
 	}()
 
 	var originalInputItems []responses.ResponseInputItemUnionParam
+	var originalPendingItems []responses.ResponseInputItemUnionParam
+	var originalLastResponseID string
 	if opt.NoSaveConversation {
 		originalInputItems = make([]responses.ResponseInputItemUnionParam, len(t.inputItems))
 		copy(originalInputItems, t.inputItems)
+		originalPendingItems = make([]responses.ResponseInputItemUnionParam, len(t.pendingItems))
+		copy(originalPendingItems, t.pendingItems)
+		originalLastResponseID = t.lastResponseID
 	}
 
 	// Trigger user_message_send hook before adding user message
@@ -309,6 +328,9 @@ OUTER:
 					}
 				}
 
+				// Turn completed successfully, clear pending items
+				// The server now has the full conversation state via previous_response_id
+				t.pendingItems = nil
 				break OUTER
 			}
 		}
@@ -316,6 +338,8 @@ OUTER:
 
 	if opt.NoSaveConversation {
 		t.inputItems = originalInputItems
+		t.pendingItems = originalPendingItems
+		t.lastResponseID = originalLastResponseID
 	}
 
 	// Save conversation state
@@ -347,12 +371,35 @@ func (t *Thread) processMessageExchange(
 	tools := buildTools(t.State, opt.NoToolUse)
 	log.WithField("tool_count", len(tools)).Debug("built tools for request")
 
+	// Determine which input items to send:
+	// - If we have a previous response ID, only send pending items (server has history)
+	// - Otherwise, send full input items (fresh conversation or fallback)
+	var inputToSend []responses.ResponseInputItemUnionParam
+	usePreviousResponseID := t.lastResponseID != "" && len(t.pendingItems) > 0
+
+	if usePreviousResponseID {
+		inputToSend = t.pendingItems
+		log.WithField("pending_items", len(t.pendingItems)).
+			WithField("previous_response_id", t.lastResponseID).
+			Debug("using previous_response_id with pending items")
+	} else {
+		inputToSend = t.inputItems
+		log.WithField("input_items", len(t.inputItems)).
+			Debug("sending full input items (no previous_response_id)")
+	}
+
 	// Build request parameters
 	params := responses.ResponseNewParams{
 		Model:        model,
-		Input:        responses.ResponseNewParamsInputUnion{OfInputItemList: t.inputItems},
+		Input:        responses.ResponseNewParamsInputUnion{OfInputItemList: inputToSend},
 		Instructions: param.NewOpt(systemPrompt),
 		Tools:        tools,
+		Store:        param.NewOpt(true), // Enable server-side conversation state storage
+	}
+
+	// Set previous_response_id for multi-turn conversations
+	if usePreviousResponseID {
+		params.PreviousResponseID = param.NewOpt(t.lastResponseID)
 	}
 
 	// Set max output tokens if specified
@@ -371,6 +418,7 @@ func (t *Thread) processMessageExchange(
 		WithField("max_tokens", maxTokens).
 		WithField("is_reasoning", t.isReasoningModelDynamic(model)).
 		WithField("reasoning_effort", string(t.reasoningEffort)).
+		WithField("use_previous_response_id", usePreviousResponseID).
 		Debug("sending request to OpenAI Responses API")
 
 	// Use streaming API
@@ -380,7 +428,28 @@ func (t *Thread) processMessageExchange(
 	// Process stream events
 	toolsUsed, err := t.processStream(ctx, stream, handler)
 	if err != nil {
-		return "", false, err
+		// Check if the error is related to invalid previous_response_id
+		// If so, fall back to sending full input items
+		if usePreviousResponseID && isInvalidPreviousResponseIDError(err) {
+			log.WithError(err).Warn("previous_response_id invalid, falling back to full input items")
+
+			// Clear the invalid response ID and retry with full history
+			t.lastResponseID = ""
+			t.pendingItems = nil
+
+			// Rebuild params with full input items
+			params.Input = responses.ResponseNewParamsInputUnion{OfInputItemList: t.inputItems}
+			params.PreviousResponseID = param.Opt[string]{} // Clear the param
+
+			// Retry the request
+			stream = t.client.Responses.NewStreaming(ctx, params)
+			toolsUsed, err = t.processStream(ctx, stream, handler)
+			if err != nil {
+				return "", false, err
+			}
+		} else {
+			return "", false, err
+		}
 	}
 
 	// Extract final text output from the last response
@@ -912,4 +981,31 @@ func (t *Thread) EnablePersistence(ctx context.Context, enabled bool) {
 	if enabled && t.Store != nil && t.LoadConversation != nil {
 		t.LoadConversation(ctx)
 	}
+}
+
+// isInvalidPreviousResponseIDError checks if an error is related to an invalid previous_response_id.
+// This can happen when the server-side conversation state has expired or been deleted.
+func isInvalidPreviousResponseIDError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	errStr := err.Error()
+
+	// Check for common error messages related to invalid previous_response_id
+	invalidResponseIDPatterns := []string{
+		"previous_response_id",
+		"response not found",
+		"invalid response id",
+		"response id not found",
+		"no response found",
+	}
+
+	for _, pattern := range invalidResponseIDPatterns {
+		if strings.Contains(strings.ToLower(errStr), pattern) {
+			return true
+		}
+	}
+
+	return false
 }

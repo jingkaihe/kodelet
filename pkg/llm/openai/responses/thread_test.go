@@ -1,12 +1,14 @@
 package responses
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"testing"
 
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -243,4 +245,112 @@ func TestLoadCustomConfigurationDefaultPreset(t *testing.T) {
 	// Verify pricing is loaded
 	_, hasGPT4o := customPricing["gpt-4o"]
 	assert.True(t, hasGPT4o, "gpt-4o pricing should be present")
+}
+
+func TestIsInvalidPreviousResponseIDError(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		expected bool
+	}{
+		{
+			name:     "nil error",
+			err:      nil,
+			expected: false,
+		},
+		{
+			name:     "generic error",
+			err:      assert.AnError,
+			expected: false,
+		},
+		{
+			name:     "previous_response_id error",
+			err:      errors.New("invalid previous_response_id: response not found"),
+			expected: true,
+		},
+		{
+			name:     "response not found error",
+			err:      errors.New("response not found for the given ID"),
+			expected: true,
+		},
+		{
+			name:     "invalid response id error",
+			err:      errors.New("invalid response id provided"),
+			expected: true,
+		},
+		{
+			name:     "no response found error",
+			err:      errors.New("no response found"),
+			expected: true,
+		},
+		{
+			name:     "case insensitive match",
+			err:      errors.New("PREVIOUS_RESPONSE_ID is invalid"),
+			expected: true,
+		},
+		{
+			name:     "unrelated 404 error",
+			err:      errors.New("resource not found"),
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isInvalidPreviousResponseIDError(tt.err)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestAddUserMessageUpdatesPendingItems(t *testing.T) {
+	os.Setenv("OPENAI_API_KEY", "test-key")
+	defer os.Unsetenv("OPENAI_API_KEY")
+
+	config := llmtypes.Config{
+		Provider: "openai",
+		Model:    "gpt-4.1",
+	}
+
+	thread, err := NewThread(config, nil)
+	require.NoError(t, err)
+
+	// Initially, both slices should be empty
+	assert.Empty(t, thread.inputItems)
+	assert.Empty(t, thread.pendingItems)
+
+	// Add a user message
+	ctx := context.Background()
+	thread.AddUserMessage(ctx, "Hello, world!")
+
+	// Both slices should now have one item
+	assert.Len(t, thread.inputItems, 1)
+	assert.Len(t, thread.pendingItems, 1)
+
+	// Add another message
+	thread.AddUserMessage(ctx, "How are you?")
+
+	// Both slices should now have two items
+	assert.Len(t, thread.inputItems, 2)
+	assert.Len(t, thread.pendingItems, 2)
+}
+
+func TestThreadPendingItemsInitialization(t *testing.T) {
+	os.Setenv("OPENAI_API_KEY", "test-key")
+	defer os.Unsetenv("OPENAI_API_KEY")
+
+	config := llmtypes.Config{
+		Provider: "openai",
+		Model:    "gpt-4.1",
+	}
+
+	thread, err := NewThread(config, nil)
+	require.NoError(t, err)
+
+	// Verify pendingItems is initialized (not nil)
+	assert.NotNil(t, thread.pendingItems)
+	assert.NotNil(t, thread.inputItems)
+
+	// Verify lastResponseID is initially empty
+	assert.Empty(t, thread.lastResponseID)
 }
