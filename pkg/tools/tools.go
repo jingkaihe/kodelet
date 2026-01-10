@@ -34,7 +34,6 @@ var toolRegistry = map[string]tooltypes.Tool{
 	"file_read":                 &FileReadTool{},
 	"file_write":                &FileWriteTool{},
 	"file_edit":                 &FileEditTool{},
-	"thinking":                  &ThinkingTool{},
 	"subagent":                  &SubAgentTool{},
 	"grep_tool":                 &GrepTool{},
 	"glob_tool":                 &GlobTool{},
@@ -51,7 +50,6 @@ var metaTools = []string{
 	"file_read",
 	"grep_tool",
 	"glob_tool",
-	"thinking",
 }
 
 // defaultMainTools are the default tools for main agent
@@ -60,7 +58,6 @@ var defaultMainTools = []string{
 	"file_read",
 	"file_write",
 	"file_edit",
-	"thinking",
 	"subagent",
 	"grep_tool",
 	"glob_tool",
@@ -80,7 +77,6 @@ var defaultSubAgentTools = []string{
 	"file_edit",
 	"grep_tool",
 	"glob_tool",
-	"thinking",
 	"todo_read",
 	"todo_write",
 	"web_fetch",
