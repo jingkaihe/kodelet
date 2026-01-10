@@ -16,7 +16,6 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/hooks"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	openaipreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/openai"
-	"github.com/jingkaihe/kodelet/pkg/llm/openai/preset/xai"
 	"github.com/jingkaihe/kodelet/pkg/llm/prompts"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/osutil"
@@ -806,8 +805,6 @@ func loadPreset(presetName string) (map[string]string, map[string]llmtypes.Model
 	switch presetName {
 	case "openai":
 		return loadOpenAIPreset()
-	case "xai":
-		return loadXAIGrokPreset()
 	default:
 		return nil, nil
 	}
@@ -829,33 +826,6 @@ func loadOpenAIPreset() (map[string]string, map[string]llmtypes.ModelPricing) {
 
 	// Load pricing
 	for model, p := range openaipreset.Pricing {
-		pricing[model] = llmtypes.ModelPricing{
-			Input:         p.Input,
-			CachedInput:   p.CachedInput,
-			Output:        p.Output,
-			ContextWindow: p.ContextWindow,
-		}
-	}
-
-	return models, pricing
-}
-
-// loadXAIGrokPreset loads the complete xAI Grok configuration.
-func loadXAIGrokPreset() (map[string]string, map[string]llmtypes.ModelPricing) {
-	models := make(map[string]string)
-	pricing := make(map[string]llmtypes.ModelPricing)
-
-	// Map reasoning models
-	for _, model := range xai.Models.Reasoning {
-		models[model] = "reasoning"
-	}
-	// Map non-reasoning models
-	for _, model := range xai.Models.NonReasoning {
-		models[model] = "non-reasoning"
-	}
-
-	// Load pricing
-	for model, p := range xai.Pricing {
 		pricing[model] = llmtypes.ModelPricing{
 			Input:         p.Input,
 			CachedInput:   p.CachedInput,
