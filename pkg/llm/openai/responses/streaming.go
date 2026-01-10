@@ -118,7 +118,13 @@ func (t *Thread) processStream(
 				// Complete function call
 				toolsUsed = true
 
-				// Signal end of content block before first tool use (adds line break)
+				// Signal end of thinking block before first tool use (adds line break)
+				if isStreaming && thinkingStarted {
+					streamHandler.HandleContentBlockEnd()
+					thinkingStarted = false
+				}
+
+				// Signal end of text content block before first tool use (adds line break)
 				if isStreaming && !contentBlockEnded && currentText.Len() > 0 {
 					streamHandler.HandleContentBlockEnd()
 					contentBlockEnded = true
@@ -127,24 +133,29 @@ func (t *Thread) processStream(
 				funcCall := item.AsFunctionCall()
 				handler.HandleToolUse(funcCall.CallID, funcCall.Name, funcCall.Arguments)
 
-				// Flush pending reasoning before adding function call
+				// Flush pending reasoning to storedItems before adding function call
 				if t.pendingReasoning.Len() > 0 {
-					t.reasoningItems = append(t.reasoningItems, ReasoningItem{
-						BeforeIndex: len(t.inputItems),
-						Content:     t.pendingReasoning.String(),
+					t.storedItems = append(t.storedItems, StoredInputItem{
+						Type:    "reasoning",
+						Role:    "assistant",
+						Content: t.pendingReasoning.String(),
 					})
 					t.pendingReasoning.Reset()
 				}
 
-				// Add the function call to inputItems for our local history/persistence
-				// Note: We do NOT add to pendingItems because when using previous_response_id,
-				// the function call is already part of the server's response state
+				// Add to inputItems (for API) and storedItems (for persistence)
 				t.inputItems = append(t.inputItems, responses.ResponseInputItemUnionParam{
 					OfFunctionCall: &responses.ResponseFunctionToolCallParam{
 						CallID:    funcCall.CallID,
 						Name:      funcCall.Name,
 						Arguments: funcCall.Arguments,
 					},
+				})
+				t.storedItems = append(t.storedItems, StoredInputItem{
+					Type:      "function_call",
+					CallID:    funcCall.CallID,
+					Name:      funcCall.Name,
+					Arguments: funcCall.Arguments,
 				})
 
 				// Execute the tool
@@ -163,9 +174,13 @@ func (t *Thread) processStream(
 					},
 				}
 
-				// Add the tool result to both inputItems (full history) and pendingItems
-				// (for next API call with previous_response_id)
+				// Add the tool result to inputItems, storedItems, and pendingItems
 				t.inputItems = append(t.inputItems, toolResultItem)
+				t.storedItems = append(t.storedItems, StoredInputItem{
+					Type:   "function_call_output",
+					CallID: funcCall.CallID,
+					Output: resultStr,
+				})
 				t.pendingItems = append(t.pendingItems, toolResultItem)
 
 				handler.HandleToolResult(funcCall.CallID, funcCall.Name, result)
@@ -183,11 +198,12 @@ func (t *Thread) processStream(
 						}
 					}
 					if textContent != "" {
-						// Flush pending reasoning before adding message
+						// Flush pending reasoning to storedItems before adding message
 						if t.pendingReasoning.Len() > 0 {
-							t.reasoningItems = append(t.reasoningItems, ReasoningItem{
-								BeforeIndex: len(t.inputItems),
-								Content:     t.pendingReasoning.String(),
+							t.storedItems = append(t.storedItems, StoredInputItem{
+								Type:    "reasoning",
+								Role:    "assistant",
+								Content: t.pendingReasoning.String(),
 							})
 							t.pendingReasoning.Reset()
 						}
@@ -197,6 +213,11 @@ func (t *Thread) processStream(
 								Role:    responses.EasyInputMessageRoleAssistant,
 								Content: responses.EasyInputMessageContentUnionParam{OfString: param.NewOpt(textContent)},
 							},
+						})
+						t.storedItems = append(t.storedItems, StoredInputItem{
+							Type:    "message",
+							Role:    "assistant",
+							Content: textContent,
 						})
 					}
 				}
@@ -210,7 +231,13 @@ func (t *Thread) processStream(
 				attribute.String("status", string(event.Response.Status)),
 			)
 
-			// Signal end of content block for streaming handlers (if not already done)
+			// Signal end of thinking block for streaming handlers (if not already done)
+			if isStreaming && thinkingStarted {
+				streamHandler.HandleContentBlockEnd()
+				thinkingStarted = false
+			}
+
+			// Signal end of text content block for streaming handlers (if not already done)
 			if isStreaming && !contentBlockEnded && currentText.Len() > 0 {
 				streamHandler.HandleContentBlockEnd()
 				contentBlockEnded = true

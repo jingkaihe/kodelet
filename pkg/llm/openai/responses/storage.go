@@ -11,6 +11,15 @@ import (
 // StoredInputItem represents a conversation item in a format suitable for JSON storage.
 // This is used instead of the SDK's ResponseInputItemUnionParam which uses discriminated
 // unions that don't serialize/deserialize reliably.
+//
+// Items are stored in order as they occur during the conversation:
+// - User messages
+// - Assistant reasoning (thinking)
+// - Function calls
+// - Function call outputs
+// - Assistant messages
+//
+// This mirrors Anthropic's approach where thinking blocks are stored inline with messages.
 type StoredInputItem struct {
 	Type string `json:"type"` // "message", "function_call", "function_call_output", "reasoning"
 
@@ -27,114 +36,21 @@ type StoredInputItem struct {
 	Output string `json:"output,omitempty"`
 
 	// Reasoning fields (when Type == "reasoning")
-	// Reasoning string is stored in Content field
+	// Reasoning string is stored in Content field with Role == "assistant"
 }
 
-// toStoredItems converts SDK input items to storage format.
-// The reasoningItems slice contains reasoning items with their insertion indices.
-func toStoredItems(items []responses.ResponseInputItemUnionParam, reasoningItems []ReasoningItem) []StoredInputItem {
-	result := make([]StoredInputItem, 0, len(items)+len(reasoningItems))
-
-	// Build a map of reasoning items by index for efficient lookup
-	reasoningByIndex := make(map[int]string)
-	for _, r := range reasoningItems {
-		reasoningByIndex[r.BeforeIndex] = r.Content
-	}
-
-	for i, item := range items {
-		// Insert reasoning item before this item if it exists
-		if reasoning, ok := reasoningByIndex[i]; ok {
-			result = append(result, StoredInputItem{
-				Type:    "reasoning",
-				Role:    "assistant",
-				Content: reasoning,
-			})
-		}
-
-		if item.OfMessage != nil {
-			msg := item.OfMessage
-			content := ""
-			if msg.Content.OfString.Valid() {
-				content = msg.Content.OfString.Value
-			} else if len(msg.Content.OfInputItemContentList) > 0 {
-				for _, part := range msg.Content.OfInputItemContentList {
-					if part.OfInputText != nil {
-						content += part.OfInputText.Text
-					}
-				}
-			}
-			result = append(result, StoredInputItem{
-				Type:    "message",
-				Role:    string(msg.Role),
-				Content: content,
-			})
-		}
-
-		if item.OfFunctionCall != nil {
-			call := item.OfFunctionCall
-			result = append(result, StoredInputItem{
-				Type:      "function_call",
-				CallID:    call.CallID,
-				Name:      call.Name,
-				Arguments: call.Arguments,
-			})
-		}
-
-		if item.OfFunctionCallOutput != nil {
-			output := item.OfFunctionCallOutput
-			outputStr := ""
-			if output.Output.OfString.Valid() {
-				outputStr = output.Output.OfString.Value
-			}
-			result = append(result, StoredInputItem{
-				Type:   "function_call_output",
-				CallID: output.CallID,
-				Output: outputStr,
-			})
-		}
-	}
-
-	// Handle reasoning at the end (for the final message)
-	if reasoning, ok := reasoningByIndex[len(items)]; ok {
-		result = append(result, StoredInputItem{
-			Type:    "reasoning",
-			Role:    "assistant",
-			Content: reasoning,
-		})
-	}
-
-	return result
-}
-
-// ReasoningItem represents a reasoning block and its position in the conversation.
-type ReasoningItem struct {
-	BeforeIndex int    // Index in inputItems where this reasoning should appear before
-	Content     string // The reasoning text
-}
-
-// fromStoredItems converts storage format back to SDK input items.
-// Returns the input items and reasoning items with their positions.
-func fromStoredItems(items []StoredInputItem) ([]responses.ResponseInputItemUnionParam, []ReasoningItem) {
+// fromStoredItems converts storage format back to SDK input items for API calls.
+// Reasoning items are skipped as they're only for display, not sent to the API.
+func fromStoredItems(items []StoredInputItem) []responses.ResponseInputItemUnionParam {
 	result := make([]responses.ResponseInputItemUnionParam, 0, len(items))
-	reasoningItems := make([]ReasoningItem, 0)
-	var pendingReasoning string
 
 	for _, item := range items {
 		switch item.Type {
 		case "reasoning":
-			// Store reasoning to be associated with the next item
-			pendingReasoning = item.Content
+			// Reasoning is for display only, skip for API calls
+			continue
 
 		case "message":
-			// If there was pending reasoning, associate it with this item
-			if pendingReasoning != "" {
-				reasoningItems = append(reasoningItems, ReasoningItem{
-					BeforeIndex: len(result),
-					Content:     pendingReasoning,
-				})
-				pendingReasoning = ""
-			}
-
 			role := responses.EasyInputMessageRole(item.Role)
 			result = append(result, responses.ResponseInputItemUnionParam{
 				OfMessage: &responses.EasyInputMessageParam{
@@ -144,15 +60,6 @@ func fromStoredItems(items []StoredInputItem) ([]responses.ResponseInputItemUnio
 			})
 
 		case "function_call":
-			// If there was pending reasoning, associate it with this item
-			if pendingReasoning != "" {
-				reasoningItems = append(reasoningItems, ReasoningItem{
-					BeforeIndex: len(result),
-					Content:     pendingReasoning,
-				})
-				pendingReasoning = ""
-			}
-
 			result = append(result, responses.ResponseInputItemUnionParam{
 				OfFunctionCall: &responses.ResponseFunctionToolCallParam{
 					CallID:    item.CallID,
@@ -173,13 +80,5 @@ func fromStoredItems(items []StoredInputItem) ([]responses.ResponseInputItemUnio
 		}
 	}
 
-	// Handle any trailing reasoning
-	if pendingReasoning != "" {
-		reasoningItems = append(reasoningItems, ReasoningItem{
-			BeforeIndex: len(result),
-			Content:     pendingReasoning,
-		})
-	}
-
-	return result, reasoningItems
+	return result
 }

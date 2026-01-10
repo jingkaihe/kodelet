@@ -8,7 +8,6 @@ import (
 
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
-	"github.com/openai/openai-go/v3/packages/param"
 	openairesponses "github.com/openai/openai-go/v3/responses"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
@@ -271,50 +270,44 @@ func TestStreamMessagesWithReasoning(t *testing.T) {
 }
 
 func TestStorageRoundTripWithReasoning(t *testing.T) {
-	// Create SDK input items
-	inputItems := []openairesponses.ResponseInputItemUnionParam{
+	// Create stored items directly (simulating what happens during streaming)
+	// Items are stored in order: user message -> reasoning -> assistant message
+	storedItems := []StoredInputItem{
 		{
-			OfMessage: &openairesponses.EasyInputMessageParam{
-				Role:    openairesponses.EasyInputMessageRoleUser,
-				Content: openairesponses.EasyInputMessageContentUnionParam{OfString: param.NewOpt("What is 2+2?")},
-			},
+			Type:    "message",
+			Role:    "user",
+			Content: "What is 2+2?",
 		},
 		{
-			OfMessage: &openairesponses.EasyInputMessageParam{
-				Role:    openairesponses.EasyInputMessageRoleAssistant,
-				Content: openairesponses.EasyInputMessageContentUnionParam{OfString: param.NewOpt("The answer is 4.")},
-			},
+			Type:    "reasoning",
+			Role:    "assistant",
+			Content: "I need to add 2 and 2 together. 2+2=4.",
 		},
-	}
-
-	// Create reasoning items - reasoning appears before the assistant message at index 1
-	reasoningItems := []ReasoningItem{
 		{
-			BeforeIndex: 1,
-			Content:     "I need to add 2 and 2 together. 2+2=4.",
+			Type:    "message",
+			Role:    "assistant",
+			Content: "The answer is 4.",
 		},
 	}
 
-	// Convert to stored format
-	storedItems := toStoredItems(inputItems, reasoningItems)
-
-	// Verify stored format has reasoning as a separate item (user + reasoning + assistant)
+	// Verify stored format has reasoning as a separate item
 	require.Len(t, storedItems, 3)
 	assert.Equal(t, "message", storedItems[0].Type)
 	assert.Equal(t, "reasoning", storedItems[1].Type)
 	assert.Equal(t, "I need to add 2 and 2 together. 2+2=4.", storedItems[1].Content)
 	assert.Equal(t, "message", storedItems[2].Type)
 
-	// Convert back
-	restoredItems, restoredReasoning := fromStoredItems(storedItems)
+	// Convert to SDK format - reasoning is skipped (only for display)
+	restoredItems := fromStoredItems(storedItems)
 
-	// Verify restored items (2 SDK items, reasoning is stored separately)
+	// Verify restored items (2 SDK items, reasoning is skipped for API calls)
 	require.Len(t, restoredItems, 2)
-	require.Len(t, restoredReasoning, 1)
-	assert.Equal(t, 1, restoredReasoning[0].BeforeIndex)
-	assert.Equal(t, "I need to add 2 and 2 together. 2+2=4.", restoredReasoning[0].Content)
+	assert.NotNil(t, restoredItems[0].OfMessage)
+	assert.Equal(t, openairesponses.EasyInputMessageRoleUser, restoredItems[0].OfMessage.Role)
+	assert.NotNil(t, restoredItems[1].OfMessage)
+	assert.Equal(t, openairesponses.EasyInputMessageRoleAssistant, restoredItems[1].OfMessage.Role)
 
-	// Verify JSON round-trip
+	// Verify JSON round-trip preserves reasoning for display
 	jsonData, err := json.Marshal(storedItems)
 	require.NoError(t, err)
 

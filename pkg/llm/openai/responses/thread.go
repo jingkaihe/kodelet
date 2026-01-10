@@ -52,9 +52,10 @@ type Thread struct {
 	// When using previous_response_id, only these items are sent instead of full history
 	pendingItems []responses.ResponseInputItemUnionParam
 
-	// reasoningItems stores reasoning blocks with their positions in the conversation
-	// This is used to persist reasoning content from reasoning models
-	reasoningItems []ReasoningItem
+	// storedItems is the canonical conversation history for persistence
+	// It includes all items (messages, function calls, reasoning) in order
+	// This mirrors how Anthropic stores thinking blocks inline with messages
+	storedItems []StoredInputItem
 
 	// pendingReasoning accumulates reasoning content during streaming
 	// It's stored here (not locally in processStream) to persist across API calls
@@ -143,7 +144,7 @@ func NewThread(
 		client:          &client,
 		inputItems:      make([]responses.ResponseInputItemUnionParam, 0),
 		pendingItems:    make([]responses.ResponseInputItemUnionParam, 0),
-		reasoningItems:  make([]ReasoningItem, 0),
+		storedItems:     make([]StoredInputItem, 0),
 		reasoningEffort: reasoningEffort,
 		customModels:    customModels,
 		customPricing:   customPricing,
@@ -210,9 +211,14 @@ func (t *Thread) AddUserMessage(ctx context.Context, message string, imagePaths 
 		}
 	}
 
-	// Add to both inputItems (full history) and pendingItems (for next API call)
+	// Add to inputItems (for API calls), pendingItems (for next API call), and storedItems (for persistence)
 	t.inputItems = append(t.inputItems, inputItem)
 	t.pendingItems = append(t.pendingItems, inputItem)
+	t.storedItems = append(t.storedItems, StoredInputItem{
+		Type:    "message",
+		Role:    "user",
+		Content: message,
+	})
 }
 
 // SendMessage sends a message to the LLM and processes the response.
@@ -659,9 +665,8 @@ func (t *Thread) SaveConversation(ctx context.Context, summarize bool) error {
 		t.summary = t.ShortSummary(ctx)
 	}
 
-	// Convert to storage format and serialize
-	storedItems := toStoredItems(t.inputItems, t.reasoningItems)
-	inputItemsJSON, err := json.Marshal(storedItems)
+	// Serialize stored items directly (already built inline during streaming)
+	inputItemsJSON, err := json.Marshal(t.storedItems)
 	if err != nil {
 		return errors.Wrap(err, "error marshaling input items")
 	}
@@ -707,8 +712,9 @@ func (t *Thread) loadConversation(ctx context.Context) {
 		return
 	}
 
-	// Convert to SDK format
-	t.inputItems, t.reasoningItems = fromStoredItems(storedItems)
+	// Store the loaded items directly and convert to SDK format for API calls
+	t.storedItems = storedItems
+	t.inputItems = fromStoredItems(storedItems)
 	t.cleanupOrphanedItems()
 	t.Usage = &record.Usage
 	t.summary = record.Summary
