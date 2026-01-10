@@ -6,11 +6,15 @@ import "github.com/jingkaihe/kodelet/pkg/types/llm"
 // Models defines the OpenAI model categorization for reasoning and non-reasoning models
 var Models = llm.CustomModels{
 	Reasoning: []string{
+		"gpt-5.2",
+		"gpt-5.2-pro",
 		"gpt-5",
 		"gpt-5-mini",
 		"gpt-5-nano",
 		"gpt-5-chat-latest",
 		"gpt-5.1-codex",
+		"gpt-5.1-codex-max",
+		"gpt-5.1-codex-mini",
 		"o1",
 		"o1-pro",
 		"o1-mini",
@@ -43,6 +47,17 @@ var Models = llm.CustomModels{
 
 // Pricing defines the pricing information for all OpenAI models
 var Pricing = llm.CustomPricing{
+	"gpt-5.2": llm.ModelPricing{
+		Input:         0.00000175,  // $1.75 per million tokens
+		CachedInput:   0.000000175, // $0.175 per million tokens
+		Output:        0.000014,    // $14.00 per million tokens
+		ContextWindow: 400_000,
+	},
+	"gpt-5.2-pro": llm.ModelPricing{
+		Input:         0.000021, // $21.00 per million tokens
+		Output:        0.000168, // $168.00 per million tokens
+		ContextWindow: 400_000,
+	},
 	"gpt-5": llm.ModelPricing{
 		Input:         0.00000125,  // $1.25 per million tokens
 		CachedInput:   0.000000125, // $0.125 per million tokens
@@ -71,6 +86,18 @@ var Pricing = llm.CustomPricing{
 		Input:         0.00000125,  // $1.25 per million tokens
 		CachedInput:   0.000000125, // $0.125 per million tokens
 		Output:        0.00001,     // $10.00 per million tokens
+		ContextWindow: 400_000,
+	},
+	"gpt-5.1-codex-max": llm.ModelPricing{
+		Input:         0.00000125,  // $1.25 per million tokens
+		CachedInput:   0.000000125, // $0.125 per million tokens
+		Output:        0.00001,     // $10.00 per million tokens
+		ContextWindow: 400_000,
+	},
+	"gpt-5.1-codex-mini": llm.ModelPricing{
+		Input:         0.00000025,  // $0.25 per million tokens
+		CachedInput:   0.000000025, // $0.025 per million tokens
+		Output:        0.000002,    // $2.00 per million tokens
 		ContextWindow: 400_000,
 	},
 	"gpt-4.1": llm.ModelPricing{

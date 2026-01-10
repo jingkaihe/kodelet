@@ -411,7 +411,8 @@ func (t *Thread) processMessageExchange(
 	// Add reasoning configuration for reasoning models (o-series, gpt-5, etc.)
 	if t.isReasoningModelDynamic(model) && t.reasoningEffort != "" {
 		params.Reasoning = shared.ReasoningParam{
-			Effort: t.reasoningEffort,
+			Effort:  t.reasoningEffort,
+			Summary: shared.ReasoningSummaryAuto,
 		}
 	}
 

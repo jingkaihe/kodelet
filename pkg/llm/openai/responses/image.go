@@ -13,10 +13,19 @@ import (
 )
 
 // processImage processes an image path and returns a content part for the Responses API.
-// Supports both local files and URLs.
+// Supports local files, URLs, and data URLs.
 func processImage(imagePath string) (responses.ResponseInputContentUnionParam, error) {
 	// Check if it's a URL
 	if strings.HasPrefix(imagePath, "http://") || strings.HasPrefix(imagePath, "https://") {
+		return responses.ResponseInputContentUnionParam{
+			OfInputImage: &responses.ResponseInputImageParam{
+				ImageURL: param.NewOpt(imagePath),
+			},
+		}, nil
+	}
+
+	// Check if it's already a data URL (e.g., from ACP)
+	if strings.HasPrefix(imagePath, "data:") {
 		return responses.ResponseInputContentUnionParam{
 			OfInputImage: &responses.ResponseInputImageParam{
 				ImageURL: param.NewOpt(imagePath),
