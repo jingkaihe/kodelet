@@ -18,6 +18,7 @@ require (
 	github.com/invopop/jsonschema v0.13.0
 	github.com/jmoiron/sqlx v1.4.0
 	github.com/mark3labs/mcp-go v0.43.0
+	github.com/openai/openai-go/v3 v3.15.0
 	github.com/pkg/errors v0.9.1
 	github.com/rogpeppe/go-internal v1.14.1
 	github.com/sashabaranov/go-openai v1.41.2

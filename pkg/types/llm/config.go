@@ -52,11 +52,12 @@ type Config struct {
 
 // OpenAIConfig holds OpenAI-specific configuration including support for compatible APIs
 type OpenAIConfig struct {
-	Preset       string                  `mapstructure:"preset" json:"preset" yaml:"preset"`                            // Built-in preset for popular providers (e.g., "xai")
-	BaseURL      string                  `mapstructure:"base_url" json:"base_url" yaml:"base_url"`                      // Custom API base URL (overrides preset)
-	APIKeyEnvVar string                  `mapstructure:"api_key_env_var" json:"api_key_env_var" yaml:"api_key_env_var"` // Environment variable name for API key (defaults to OPENAI_API_KEY)
-	Models       *CustomModels           `mapstructure:"models" json:"models,omitempty" yaml:"models,omitempty"`        // Custom model configuration
-	Pricing      map[string]ModelPricing `mapstructure:"pricing" json:"pricing,omitempty" yaml:"pricing,omitempty"`     // Custom pricing configuration
+	Preset          string                  `mapstructure:"preset" json:"preset" yaml:"preset"`                                  // Built-in preset for popular providers (e.g., "xai")
+	BaseURL         string                  `mapstructure:"base_url" json:"base_url" yaml:"base_url"`                            // Custom API base URL (overrides preset)
+	APIKeyEnvVar    string                  `mapstructure:"api_key_env_var" json:"api_key_env_var" yaml:"api_key_env_var"`       // Environment variable name for API key (defaults to OPENAI_API_KEY)
+	UseResponsesAPI bool                    `mapstructure:"use_responses_api" json:"use_responses_api" yaml:"use_responses_api"` // Use the Responses API instead of Chat Completions API
+	Models          *CustomModels           `mapstructure:"models" json:"models,omitempty" yaml:"models,omitempty"`              // Custom model configuration
+	Pricing         map[string]ModelPricing `mapstructure:"pricing" json:"pricing,omitempty" yaml:"pricing,omitempty"`           // Custom pricing configuration
 }
 
 // CustomModels holds model categorization for custom configurations

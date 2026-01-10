@@ -45,7 +45,7 @@ func NewThread(config llmtypes.Config) (llmtypes.Thread, error) {
 	// Create thread based on provider
 	switch strings.ToLower(config.Provider) {
 	case "openai":
-		return openai.NewOpenAIThread(config, NewSubagentContext)
+		return openai.NewThread(config, NewSubagentContext)
 	case "anthropic":
 		return anthropic.NewAnthropicThread(config, NewSubagentContext)
 	case "google":
@@ -178,6 +178,8 @@ func ExtractMessages(provider string, rawMessages []byte, toolResults map[string
 		return anthropic.ExtractMessages(rawMessages, toolResults)
 	case "openai":
 		return openai.ExtractMessages(rawMessages, toolResults)
+	case "openai-responses":
+		return openai.ExtractResponsesMessages(rawMessages, toolResults)
 	case "google":
 		return google.ExtractMessages(rawMessages, toolResults)
 	default:
