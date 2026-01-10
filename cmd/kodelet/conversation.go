@@ -398,7 +398,7 @@ func NewConversationListOutput(summaries []convtypes.ConversationSummary, format
 		switch summary.Provider {
 		case "anthropic":
 			provider = "Anthropic"
-		case "openai":
+		case "openai", "openai-responses":
 			provider = "OpenAI"
 		case "google":
 			provider = "Google"
@@ -761,8 +761,8 @@ func validateConversationRecord(data []byte) (*convtypes.ConversationRecord, err
 		return nil, errors.New("model type is required")
 	}
 
-	if record.Provider != "anthropic" && record.Provider != "openai" {
-		return nil, errors.Errorf("unsupported model type: %s (supported: anthropic, openai)", record.Provider)
+	if record.Provider != "anthropic" && record.Provider != "openai" && record.Provider != "openai-responses" && record.Provider != "google" {
+		return nil, errors.Errorf("unsupported model type: %s (supported: anthropic, openai, openai-responses, google)", record.Provider)
 	}
 
 	if len(record.RawMessages) == 0 {

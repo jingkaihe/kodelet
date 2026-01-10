@@ -87,6 +87,28 @@ func TestOpenAIPromptLoading(t *testing.T) {
 		assert.NotEmpty(t, prompt)
 		assert.Contains(t, prompt, "coding agent")
 	})
+
+	t.Run("OpenAI Responses API provider uses embedded OpenAI prompt", func(t *testing.T) {
+		config := llm.Config{
+			Provider: ProviderOpenAIResponses,
+		}
+		contexts := map[string]string{}
+
+		prompt := SystemPrompt("gpt-4", config, contexts)
+		assert.NotEmpty(t, prompt)
+		assert.Contains(t, prompt, "coding agent")
+	})
+
+	t.Run("OpenAI Responses API subagent prompt also uses embedded template", func(t *testing.T) {
+		config := llm.Config{
+			Provider: ProviderOpenAIResponses,
+		}
+		contexts := map[string]string{}
+
+		prompt := SubAgentPrompt("gpt-4", config, contexts)
+		assert.NotEmpty(t, prompt)
+		assert.Contains(t, prompt, "coding agent")
+	})
 }
 
 func TestOpenAIConditionalSections(t *testing.T) {

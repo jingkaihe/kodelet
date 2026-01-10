@@ -26,7 +26,7 @@ func SystemPrompt(model string, llmConfig llm.Config, contexts map[string]string
 
 	provider := strings.ToLower(llmConfig.Provider)
 	switch provider {
-	case ProviderOpenAI:
+	case ProviderOpenAI, ProviderOpenAIResponses:
 		prompt, err = renderer.RenderOpenAIPrompt(promptCtx)
 	default:
 		prompt, err = renderer.RenderSystemPrompt(promptCtx)
