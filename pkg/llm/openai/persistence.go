@@ -85,10 +85,8 @@ func (t *Thread) SaveConversation(ctx context.Context, summarize bool) error {
 
 // loadConversation loads a conversation from the store.
 // This method is called by the base.Thread.EnablePersistence via the LoadConversation callback.
+// NOTE: This function expects the caller to hold ConversationMu lock.
 func (t *Thread) loadConversation(ctx context.Context) {
-	t.ConversationMu.Lock()
-	defer t.ConversationMu.Unlock()
-
 	if !t.Persisted || t.Store == nil {
 		return
 	}

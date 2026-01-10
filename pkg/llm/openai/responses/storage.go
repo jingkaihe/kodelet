@@ -1,0 +1,84 @@
+// Package responses implements storage types for the OpenAI Responses API.
+// These types provide a stable serialization format that doesn't depend on
+// the SDK's discriminated union types which don't roundtrip through JSON well.
+package responses
+
+import (
+	"github.com/openai/openai-go/v3/packages/param"
+	"github.com/openai/openai-go/v3/responses"
+)
+
+// StoredInputItem represents a conversation item in a format suitable for JSON storage.
+// This is used instead of the SDK's ResponseInputItemUnionParam which uses discriminated
+// unions that don't serialize/deserialize reliably.
+//
+// Items are stored in order as they occur during the conversation:
+// - User messages
+// - Assistant reasoning (thinking)
+// - Function calls
+// - Function call outputs
+// - Assistant messages
+//
+// This mirrors Anthropic's approach where thinking blocks are stored inline with messages.
+type StoredInputItem struct {
+	Type string `json:"type"` // "message", "function_call", "function_call_output", "reasoning"
+
+	// Message fields (when Type == "message")
+	Role    string `json:"role,omitempty"`    // "user", "assistant", "system", "developer"
+	Content string `json:"content,omitempty"` // Text content
+
+	// Function call fields (when Type == "function_call")
+	CallID    string `json:"call_id,omitempty"`
+	Name      string `json:"name,omitempty"`
+	Arguments string `json:"arguments,omitempty"`
+
+	// Function call output fields (when Type == "function_call_output")
+	Output string `json:"output,omitempty"`
+
+	// Reasoning fields (when Type == "reasoning")
+	// Reasoning string is stored in Content field with Role == "assistant"
+}
+
+// fromStoredItems converts storage format back to SDK input items for API calls.
+// Reasoning items are skipped as they're only for display, not sent to the API.
+func fromStoredItems(items []StoredInputItem) []responses.ResponseInputItemUnionParam {
+	result := make([]responses.ResponseInputItemUnionParam, 0, len(items))
+
+	for _, item := range items {
+		switch item.Type {
+		case "reasoning":
+			// Reasoning is for display only, skip for API calls
+			continue
+
+		case "message":
+			role := responses.EasyInputMessageRole(item.Role)
+			result = append(result, responses.ResponseInputItemUnionParam{
+				OfMessage: &responses.EasyInputMessageParam{
+					Role:    role,
+					Content: responses.EasyInputMessageContentUnionParam{OfString: param.NewOpt(item.Content)},
+				},
+			})
+
+		case "function_call":
+			result = append(result, responses.ResponseInputItemUnionParam{
+				OfFunctionCall: &responses.ResponseFunctionToolCallParam{
+					CallID:    item.CallID,
+					Name:      item.Name,
+					Arguments: item.Arguments,
+				},
+			})
+
+		case "function_call_output":
+			result = append(result, responses.ResponseInputItemUnionParam{
+				OfFunctionCallOutput: &responses.ResponseInputItemFunctionCallOutputParam{
+					CallID: item.CallID,
+					Output: responses.ResponseInputItemFunctionCallOutputOutputUnionParam{
+						OfString: param.NewOpt(item.Output),
+					},
+				},
+			})
+		}
+	}
+
+	return result
+}

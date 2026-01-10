@@ -36,7 +36,7 @@ func TestGetAvailableSubAgentToolNames(t *testing.T) {
 }
 
 func TestValidateTools_ValidTools(t *testing.T) {
-	validTools := []string{"bash", "file_read", "thinking"}
+	validTools := []string{"bash", "file_read", "file_write"}
 	err := ValidateTools(validTools)
 	assert.NoError(t, err)
 }
@@ -80,7 +80,7 @@ func TestValidateTools_MixedValidAndInvalidTools(t *testing.T) {
 }
 
 func TestValidateSubAgentTools_ValidTools(t *testing.T) {
-	validTools := []string{"bash", "file_read", "thinking"}
+	validTools := []string{"bash", "file_read", "file_write"}
 	err := ValidateSubAgentTools(validTools)
 	assert.NoError(t, err)
 }
@@ -218,7 +218,7 @@ func TestGetSubAgentTools_FallsBackOnValidationErrors(t *testing.T) {
 
 func TestGetMainTools_UsesValidTools(t *testing.T) {
 	// Test with valid tools
-	validTools := []string{"bash", "file_read", "thinking"}
+	validTools := []string{"bash", "file_read", "file_write"}
 	tools := GetMainTools(context.Background(), validTools)
 
 	// Should use the requested tools (plus meta tools)

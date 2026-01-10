@@ -64,7 +64,6 @@ var metadataTypeRegistry = map[string]reflect.Type{
 	"mcp_tool":        reflect.TypeOf(MCPToolMetadata{}),
 	"custom_tool":     reflect.TypeOf(CustomToolMetadata{}),
 	"todo":            reflect.TypeOf(TodoMetadata{}),
-	"thinking":        reflect.TypeOf(ThinkingMetadata{}),
 
 	"image_recognition":         reflect.TypeOf(ImageRecognitionMetadata{}),
 	"subagent":                  reflect.TypeOf(SubAgentMetadata{}),
@@ -302,15 +301,6 @@ type TodoStats struct {
 
 // ToolType returns the tool type identifier for todo operations
 func (m TodoMetadata) ToolType() string { return "todo" }
-
-// ThinkingMetadata contains metadata about a thinking operation
-type ThinkingMetadata struct {
-	Thought  string `json:"thought"`
-	Category string `json:"category,omitempty"`
-}
-
-// ToolType returns the tool type identifier for thinking operations
-func (m ThinkingMetadata) ToolType() string { return "thinking" }
 
 // Additional tool metadata structures
 

@@ -596,7 +596,6 @@ func TestExtractMetadata_AllTypes(t *testing.T) {
 		{"GrepMetadata", GrepMetadata{Pattern: "test"}, &GrepMetadata{}},
 		{"GlobMetadata", GlobMetadata{Pattern: "*.go"}, &GlobMetadata{}},
 		{"TodoMetadata", TodoMetadata{Action: "read"}, &TodoMetadata{}},
-		{"ThinkingMetadata", ThinkingMetadata{Thought: "test"}, &ThinkingMetadata{}},
 		{"SubAgentMetadata", SubAgentMetadata{Question: "test"}, &SubAgentMetadata{}},
 		{"ImageRecognitionMetadata", ImageRecognitionMetadata{ImagePath: "/test.png"}, &ImageRecognitionMetadata{}},
 		{"WebFetchMetadata", WebFetchMetadata{URL: "https://test"}, &WebFetchMetadata{}},

@@ -316,7 +316,10 @@ func TestOpenAIThread_PersistenceWithStructuredResults(t *testing.T) {
 	thread2.ConversationID = mockStore.saved.ID
 	thread2.State = &mockState{}
 
+	// loadConversation expects the caller to hold ConversationMu lock
+	thread2.ConversationMu.Lock()
 	thread2.loadConversation(context.Background())
+	thread2.ConversationMu.Unlock()
 
 	// Verify loaded structured results
 	loadedResults := thread2.GetStructuredToolResults()
