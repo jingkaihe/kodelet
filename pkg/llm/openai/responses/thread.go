@@ -412,7 +412,7 @@ func (t *Thread) processMessageExchange(
 	if t.isReasoningModelDynamic(model) && t.reasoningEffort != "" {
 		params.Reasoning = shared.ReasoningParam{
 			Effort:  t.reasoningEffort,
-			Summary: shared.ReasoningSummaryAuto,
+			Summary: shared.ReasoningSummaryDetailed,
 		}
 	}
 
