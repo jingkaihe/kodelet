@@ -13,8 +13,32 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/tools"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
+
+// mockConversationStore is a minimal mock implementation for testing EnablePersistence
+type mockConversationStore struct{}
+
+func (m *mockConversationStore) Save(_ context.Context, _ convtypes.ConversationRecord) error {
+	return nil
+}
+
+func (m *mockConversationStore) Load(_ context.Context, _ string) (convtypes.ConversationRecord, error) {
+	return convtypes.ConversationRecord{}, nil
+}
+
+func (m *mockConversationStore) Delete(_ context.Context, _ string) error {
+	return nil
+}
+
+func (m *mockConversationStore) Query(_ context.Context, _ convtypes.QueryOptions) (convtypes.QueryResult, error) {
+	return convtypes.QueryResult{}, nil
+}
+
+func (m *mockConversationStore) Close() error {
+	return nil
+}
 
 func TestNewGoogleThread(t *testing.T) {
 	tests := []struct {
@@ -118,6 +142,8 @@ func TestGoogleThread_InterfaceCompliance(t *testing.T) {
 
 	// Test persistence
 	assert.False(t, thread.IsPersisted())
+	// Inject a mock store to avoid database locking issues in parallel tests
+	thread.Store = &mockConversationStore{}
 	thread.EnablePersistence(context.Background(), true)
 	assert.True(t, thread.IsPersisted())
 
