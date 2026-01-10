@@ -354,3 +354,201 @@ func TestThreadPendingItemsInitialization(t *testing.T) {
 	// Verify lastResponseID is initially empty
 	assert.Empty(t, thread.lastResponseID)
 }
+
+// Integration tests that use the real OpenAI API
+// These tests are skipped if OPENAI_API_KEY is not set to a valid key
+
+func skipIfNoAPIKey(t *testing.T) {
+	apiKey := os.Getenv("OPENAI_API_KEY")
+	if apiKey == "" || apiKey == "test-key" {
+		t.Skip("Skipping integration test: OPENAI_API_KEY not set or is test-key")
+	}
+}
+
+func TestIntegration_ShortSummary(t *testing.T) {
+	skipIfNoAPIKey(t)
+
+	ctx := context.Background()
+
+	// Use a cheap model for testing
+	config := llmtypes.Config{
+		Provider:  "openai",
+		Model:     "gpt-4.1-mini",
+		WeakModel: "gpt-4.1-mini",
+		MaxTokens: 1024,
+	}
+
+	thread, err := NewThread(config, nil)
+	require.NoError(t, err)
+
+	// Add some conversation history
+	thread.AddUserMessage(ctx, "I want to refactor the authentication module in my Go application.")
+	thread.AddUserMessage(ctx, "The current implementation uses JWT tokens but I want to switch to OAuth2.")
+	thread.AddUserMessage(ctx, "Can you help me plan this migration?")
+
+	// Generate a short summary
+	summary := thread.ShortSummary(ctx)
+
+	t.Logf("Generated summary: %s", summary)
+
+	// Verify the summary is not empty and is reasonably short
+	assert.NotEmpty(t, summary)
+	assert.NotEqual(t, "Could not generate summary.", summary)
+
+	// Summary should be concise (the prompt asks for <= 12 words)
+	words := len(splitWords(summary))
+	assert.LessOrEqual(t, words, 20, "Summary should be concise, got %d words: %s", words, summary)
+}
+
+func TestIntegration_CompactContext(t *testing.T) {
+	skipIfNoAPIKey(t)
+
+	ctx := context.Background()
+
+	// Use a cheap model for testing
+	config := llmtypes.Config{
+		Provider:  "openai",
+		Model:     "gpt-4.1-mini",
+		WeakModel: "gpt-4.1-mini",
+		MaxTokens: 1024,
+	}
+
+	thread, err := NewThread(config, nil)
+	require.NoError(t, err)
+
+	// Add conversation history to compact
+	thread.AddUserMessage(ctx, "Hello, I'm working on a project that involves building a REST API.")
+	thread.AddUserMessage(ctx, "The API needs to handle user authentication, data validation, and rate limiting.")
+	thread.AddUserMessage(ctx, "I'm using Go with the Gin framework.")
+	thread.AddUserMessage(ctx, "Can you suggest a good project structure?")
+
+	// Store the original input items count
+	originalItemCount := len(thread.inputItems)
+	t.Logf("Original input items count: %d", originalItemCount)
+
+	// Set a fake lastResponseID to verify it gets cleared
+	thread.lastResponseID = "fake-response-id"
+
+	// Add some fake pending items
+	thread.pendingItems = thread.inputItems
+
+	// Compact the context
+	err = thread.CompactContext(ctx)
+	require.NoError(t, err)
+
+	t.Logf("Compacted input items count: %d", len(thread.inputItems))
+
+	// Verify the compaction worked
+	assert.NotEmpty(t, thread.inputItems, "Compacted items should not be empty")
+
+	// The compacted output should have fewer or equal items
+	// (user messages + one compaction item)
+	assert.LessOrEqual(t, len(thread.inputItems), originalItemCount+1,
+		"Compacted items should be fewer or equal to original")
+
+	// Verify that lastResponseID was cleared
+	assert.Empty(t, thread.lastResponseID, "lastResponseID should be cleared after compaction")
+
+	// Verify that pendingItems was cleared
+	assert.Nil(t, thread.pendingItems, "pendingItems should be cleared after compaction")
+
+	// Verify that tool results were cleared
+	assert.Empty(t, thread.ToolResults, "ToolResults should be cleared after compaction")
+
+	// Check that we have at least one compaction item
+	hasCompactionItem := false
+	for _, item := range thread.inputItems {
+		if item.OfCompaction != nil {
+			hasCompactionItem = true
+			assert.NotEmpty(t, item.OfCompaction.EncryptedContent,
+				"Compaction item should have encrypted content")
+			break
+		}
+	}
+	assert.True(t, hasCompactionItem, "Should have at least one compaction item after compacting")
+}
+
+func TestIntegration_SendMessageAndCompact(t *testing.T) {
+	skipIfNoAPIKey(t)
+
+	ctx := context.Background()
+
+	// Use a cheap model for testing
+	config := llmtypes.Config{
+		Provider:  "openai",
+		Model:     "gpt-4.1-mini",
+		WeakModel: "gpt-4.1-mini",
+		MaxTokens: 256,
+	}
+
+	thread, err := NewThread(config, nil)
+	require.NoError(t, err)
+
+	// Create a simple handler that collects text
+	handler := &llmtypes.StringCollectorHandler{Silent: true}
+
+	// Send a message and get a response
+	// Note: We don't use NoSaveConversation here because we want to test the full flow
+	// including lastResponseID being set (NoSaveConversation restores original state)
+	_, err = thread.SendMessage(ctx, "What is 2 + 2? Reply with just the number.", handler, llmtypes.MessageOpt{
+		NoToolUse: true,
+		MaxTurns:  1,
+	})
+	require.NoError(t, err)
+
+	response := handler.CollectedText()
+	t.Logf("Response: %s", response)
+	assert.NotEmpty(t, response)
+
+	// Verify we have a lastResponseID from the interaction
+	assert.NotEmpty(t, thread.lastResponseID, "Should have lastResponseID after SendMessage")
+	t.Logf("lastResponseID after first message: %s", thread.lastResponseID)
+
+	// Store the count before compacting
+	itemCountBeforeCompact := len(thread.inputItems)
+	t.Logf("Input items before compact: %d", itemCountBeforeCompact)
+
+	// Now compact the context
+	err = thread.CompactContext(ctx)
+	require.NoError(t, err)
+
+	t.Logf("Input items after compact: %d", len(thread.inputItems))
+
+	// Verify lastResponseID was cleared
+	assert.Empty(t, thread.lastResponseID, "lastResponseID should be cleared after compaction")
+
+	// Verify we can still continue the conversation after compaction
+	handler2 := &llmtypes.StringCollectorHandler{Silent: true}
+	_, err = thread.SendMessage(ctx, "What is 3 + 3? Reply with just the number.", handler2, llmtypes.MessageOpt{
+		NoToolUse: true,
+		MaxTurns:  1,
+	})
+	require.NoError(t, err)
+
+	response2 := handler2.CollectedText()
+	t.Logf("Response after compact: %s", response2)
+	assert.NotEmpty(t, response2)
+
+	// Verify a new lastResponseID was set after the second message
+	assert.NotEmpty(t, thread.lastResponseID, "Should have new lastResponseID after second SendMessage")
+}
+
+// splitWords is a simple helper to count words in a string
+func splitWords(s string) []string {
+	var words []string
+	var current []rune
+	for _, r := range s {
+		if r == ' ' || r == '\t' || r == '\n' {
+			if len(current) > 0 {
+				words = append(words, string(current))
+				current = nil
+			}
+		} else {
+			current = append(current, r)
+		}
+	}
+	if len(current) > 0 {
+		words = append(words, string(current))
+	}
+	return words
+}

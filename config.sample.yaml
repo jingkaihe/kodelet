@@ -73,6 +73,15 @@ profiles:
     openai:
       preset: "xai"
 
+  openai-responses:
+    provider: "openai"
+    model: "gpt-4.1"
+    weak_model: "gpt-4.1-mini"
+    max_tokens: 16000
+    reasoning_effort: "medium"
+    openai:
+      use_responses_api: true
+
   google-pro:
     provider: "google"
     model: "gemini-pro"
@@ -204,6 +213,11 @@ openai:
   # Option 2: Custom configuration (overrides preset if both are specified)
   # base_url: "https://api.x.ai/v1"  # Custom API endpoint
   # api_key_env_var: "XAI_API_KEY"   # Environment variable name for API key (defaults to OPENAI_API_KEY)
+
+  # Use the Responses API instead of Chat Completions API (default: false)
+  # The Responses API offers multi-turn conversations via previous_response_id,
+  # native compaction support, and richer streaming events.
+  # use_responses_api: true
   # models:
   #   # Models that support reasoning capabilities (o1, o3, grok reasoning models, etc.)
   #   reasoning:
@@ -452,6 +466,7 @@ tracing:
 # - KODELET_COMMIT_COAUTHOR_ENABLED: Enable/disable coauthor attribution in commits
 # - KODELET_COMMIT_COAUTHOR_NAME: Name for coauthor attribution
 # - KODELET_COMMIT_COAUTHOR_EMAIL: Email for coauthor attribution
+# - KODELET_OPENAI_USE_RESPONSES_API: Use OpenAI Responses API instead of Chat Completions
 #
 # API Keys:
 # - ANTHROPIC_API_KEY: Required when using the Anthropic provider
