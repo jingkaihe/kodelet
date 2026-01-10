@@ -1,5 +1,29 @@
 # Kodelet
 
+## 0.1.40.beta (2026-01-10)
+
+### Breaking Changes
+
+**Removed `thinking` tool**: The thinking tool, renderer, and metadata were removed from the default toolset. Workflows using `thinking` must migrate to other tools or rely on model-native reasoning.
+
+### Features
+
+**OpenAI Responses API (opt-in)**: New `openai.use_responses_api` config flag and `KODELET_OPENAI_USE_RESPONSES_API` env var enable the official Responses API with richer streaming events, `previous_response_id` multi-turn state, prompt caching controls, and conversation persistence. Added `openai-responses` profile and conversation streaming parser.
+
+**New OpenAI model presets**: Added `gpt-5.2`, `gpt-5.2-pro`, and the `gpt-5.1-codex` family with pricing updates. Image inputs now support data URLs (including ACP) and local files for OpenAI requests.
+
+**Improved OpenAI streaming and reasoning controls**: Dynamic model detection, config-driven reasoning effort, and a factory that routes between Chat Completions and Responses APIs for better streaming coverage.
+
+### Bug Fixes
+
+**Conversation stability**: Fixed OpenAI compaction flow and LLM summaries, improved handling of pending items and invalid `previous_response_id`, and enforced detailed reasoning summaries for dynamic models.
+
+### Internal Changes
+
+- Documented Responses API architecture in ADR 024.
+- Updated PR recipe wording for initial tool calls.
+- Added OpenAI thread factory, streamer parser, and extensive unit/integration coverage for Responses API paths.
+
 ## 0.1.37.beta (2026-01-09)
 
 ### Internal Changes
