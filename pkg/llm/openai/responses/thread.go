@@ -52,6 +52,14 @@ type Thread struct {
 	// When using previous_response_id, only these items are sent instead of full history
 	pendingItems []responses.ResponseInputItemUnionParam
 
+	// reasoningItems stores reasoning blocks with their positions in the conversation
+	// This is used to persist reasoning content from reasoning models
+	reasoningItems []ReasoningItem
+
+	// pendingReasoning accumulates reasoning content during streaming
+	// It's stored here (not locally in processStream) to persist across API calls
+	pendingReasoning strings.Builder
+
 	// reasoningEffort controls the reasoning depth for o-series models
 	reasoningEffort shared.ReasoningEffort
 
@@ -135,6 +143,7 @@ func NewThread(
 		client:          &client,
 		inputItems:      make([]responses.ResponseInputItemUnionParam, 0),
 		pendingItems:    make([]responses.ResponseInputItemUnionParam, 0),
+		reasoningItems:  make([]ReasoningItem, 0),
 		reasoningEffort: reasoningEffort,
 		customModels:    customModels,
 		customPricing:   customPricing,
@@ -651,7 +660,7 @@ func (t *Thread) SaveConversation(ctx context.Context, summarize bool) error {
 	}
 
 	// Convert to storage format and serialize
-	storedItems := toStoredItems(t.inputItems)
+	storedItems := toStoredItems(t.inputItems, t.reasoningItems)
 	inputItemsJSON, err := json.Marshal(storedItems)
 	if err != nil {
 		return errors.Wrap(err, "error marshaling input items")
@@ -699,7 +708,7 @@ func (t *Thread) loadConversation(ctx context.Context) {
 	}
 
 	// Convert to SDK format
-	t.inputItems = fromStoredItems(storedItems)
+	t.inputItems, t.reasoningItems = fromStoredItems(storedItems)
 	t.cleanupOrphanedItems()
 	t.Usage = &record.Usage
 	t.summary = record.Summary
@@ -886,6 +895,14 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 
 	for _, item := range items {
 		switch item.Type {
+		case "reasoning":
+			// Add thinking message
+			streamable = append(streamable, StreamableMessage{
+				Kind:    "thinking",
+				Role:    "assistant",
+				Content: item.Content,
+			})
+
 		case "message":
 			// Skip system/developer messages
 			if item.Role == "system" || item.Role == "developer" {
@@ -943,6 +960,13 @@ func ExtractMessages(data []byte, toolResults map[string]tooltypes.StructuredToo
 
 	for _, item := range items {
 		switch item.Type {
+		case "reasoning":
+			// Add thinking message
+			result = append(result, llmtypes.Message{
+				Role:    "assistant",
+				Content: fmt.Sprintf("💭 Thinking:\n%s", item.Content),
+			})
+
 		case "message":
 			// Skip system/developer messages
 			if item.Role == "system" || item.Role == "developer" {

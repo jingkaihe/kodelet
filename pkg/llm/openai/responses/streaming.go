@@ -35,7 +35,6 @@ func (t *Thread) processStream(
 
 	// Track current state
 	var currentText strings.Builder
-	var currentReasoning strings.Builder
 	var toolsUsed bool
 	var contentBlockEnded bool // Track if we've signaled end of content block
 	var thinkingStarted bool   // Track if thinking block has started
@@ -72,9 +71,9 @@ func (t *Thread) processStream(
 			}
 
 		case "response.reasoning_text.delta", "response.reasoning_summary_text.delta":
-			// Reasoning content delta (for o-series models)
+			// Reasoning content delta - stored in thread to persist across API calls
 			if event.Delta != "" {
-				currentReasoning.WriteString(event.Delta)
+				t.pendingReasoning.WriteString(event.Delta)
 				if isStreaming {
 					// Signal start of thinking block before first delta
 					if !thinkingStarted {
@@ -128,6 +127,15 @@ func (t *Thread) processStream(
 				funcCall := item.AsFunctionCall()
 				handler.HandleToolUse(funcCall.CallID, funcCall.Name, funcCall.Arguments)
 
+				// Flush pending reasoning before adding function call
+				if t.pendingReasoning.Len() > 0 {
+					t.reasoningItems = append(t.reasoningItems, ReasoningItem{
+						BeforeIndex: len(t.inputItems),
+						Content:     t.pendingReasoning.String(),
+					})
+					t.pendingReasoning.Reset()
+				}
+
 				// Add the function call to inputItems for our local history/persistence
 				// Note: We do NOT add to pendingItems because when using previous_response_id,
 				// the function call is already part of the server's response state
@@ -175,6 +183,15 @@ func (t *Thread) processStream(
 						}
 					}
 					if textContent != "" {
+						// Flush pending reasoning before adding message
+						if t.pendingReasoning.Len() > 0 {
+							t.reasoningItems = append(t.reasoningItems, ReasoningItem{
+								BeforeIndex: len(t.inputItems),
+								Content:     t.pendingReasoning.String(),
+							})
+							t.pendingReasoning.Reset()
+						}
+
 						t.inputItems = append(t.inputItems, responses.ResponseInputItemUnionParam{
 							OfMessage: &responses.EasyInputMessageParam{
 								Role:    responses.EasyInputMessageRoleAssistant,

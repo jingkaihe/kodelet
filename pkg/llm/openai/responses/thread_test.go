@@ -8,6 +8,8 @@ import (
 
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/openai/openai-go/v3/packages/param"
+	openairesponses "github.com/openai/openai-go/v3/responses"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -195,6 +197,134 @@ func TestStreamMessages(t *testing.T) {
 	assert.Equal(t, "test_tool", streamable[1].ToolName)
 
 	assert.Equal(t, "tool-result", streamable[2].Kind)
+}
+
+func TestExtractMessagesWithReasoning(t *testing.T) {
+	// Create sample input items with reasoning as a separate item
+	inputItems := `[
+		{
+			"type": "message",
+			"role": "user",
+			"content": "What is 2+2?"
+		},
+		{
+			"type": "reasoning",
+			"role": "assistant",
+			"content": "I need to add 2 and 2 together. 2+2=4."
+		},
+		{
+			"type": "message",
+			"role": "assistant",
+			"content": "The answer is 4."
+		}
+	]`
+
+	messages, err := ExtractMessages([]byte(inputItems), nil)
+	require.NoError(t, err)
+	require.Len(t, messages, 3) // user + thinking + assistant
+
+	assert.Equal(t, "user", messages[0].Role)
+	assert.Equal(t, "What is 2+2?", messages[0].Content)
+
+	// Thinking message should come before the assistant message
+	assert.Equal(t, "assistant", messages[1].Role)
+	assert.Contains(t, messages[1].Content, "Thinking")
+	assert.Contains(t, messages[1].Content, "I need to add 2 and 2 together")
+
+	assert.Equal(t, "assistant", messages[2].Role)
+	assert.Equal(t, "The answer is 4.", messages[2].Content)
+}
+
+func TestStreamMessagesWithReasoning(t *testing.T) {
+	inputItems := `[
+		{
+			"type": "message",
+			"role": "user",
+			"content": "Hello"
+		},
+		{
+			"type": "reasoning",
+			"role": "assistant",
+			"content": "The user greeted me, I should respond politely."
+		},
+		{
+			"type": "message",
+			"role": "assistant",
+			"content": "Hi there!"
+		}
+	]`
+
+	streamable, err := StreamMessages(json.RawMessage(inputItems), nil)
+	require.NoError(t, err)
+	require.Len(t, streamable, 3) // user + thinking + text
+
+	assert.Equal(t, "text", streamable[0].Kind)
+	assert.Equal(t, "user", streamable[0].Role)
+
+	assert.Equal(t, "thinking", streamable[1].Kind)
+	assert.Equal(t, "assistant", streamable[1].Role)
+	assert.Equal(t, "The user greeted me, I should respond politely.", streamable[1].Content)
+
+	assert.Equal(t, "text", streamable[2].Kind)
+	assert.Equal(t, "assistant", streamable[2].Role)
+	assert.Equal(t, "Hi there!", streamable[2].Content)
+}
+
+func TestStorageRoundTripWithReasoning(t *testing.T) {
+	// Create SDK input items
+	inputItems := []openairesponses.ResponseInputItemUnionParam{
+		{
+			OfMessage: &openairesponses.EasyInputMessageParam{
+				Role:    openairesponses.EasyInputMessageRoleUser,
+				Content: openairesponses.EasyInputMessageContentUnionParam{OfString: param.NewOpt("What is 2+2?")},
+			},
+		},
+		{
+			OfMessage: &openairesponses.EasyInputMessageParam{
+				Role:    openairesponses.EasyInputMessageRoleAssistant,
+				Content: openairesponses.EasyInputMessageContentUnionParam{OfString: param.NewOpt("The answer is 4.")},
+			},
+		},
+	}
+
+	// Create reasoning items - reasoning appears before the assistant message at index 1
+	reasoningItems := []ReasoningItem{
+		{
+			BeforeIndex: 1,
+			Content:     "I need to add 2 and 2 together. 2+2=4.",
+		},
+	}
+
+	// Convert to stored format
+	storedItems := toStoredItems(inputItems, reasoningItems)
+
+	// Verify stored format has reasoning as a separate item (user + reasoning + assistant)
+	require.Len(t, storedItems, 3)
+	assert.Equal(t, "message", storedItems[0].Type)
+	assert.Equal(t, "reasoning", storedItems[1].Type)
+	assert.Equal(t, "I need to add 2 and 2 together. 2+2=4.", storedItems[1].Content)
+	assert.Equal(t, "message", storedItems[2].Type)
+
+	// Convert back
+	restoredItems, restoredReasoning := fromStoredItems(storedItems)
+
+	// Verify restored items (2 SDK items, reasoning is stored separately)
+	require.Len(t, restoredItems, 2)
+	require.Len(t, restoredReasoning, 1)
+	assert.Equal(t, 1, restoredReasoning[0].BeforeIndex)
+	assert.Equal(t, "I need to add 2 and 2 together. 2+2=4.", restoredReasoning[0].Content)
+
+	// Verify JSON round-trip
+	jsonData, err := json.Marshal(storedItems)
+	require.NoError(t, err)
+
+	var parsedItems []StoredInputItem
+	err = json.Unmarshal(jsonData, &parsedItems)
+	require.NoError(t, err)
+
+	require.Len(t, parsedItems, 3)
+	assert.Equal(t, "reasoning", parsedItems[1].Type)
+	assert.Equal(t, "I need to add 2 and 2 together. 2+2=4.", parsedItems[1].Content)
 }
 
 func TestLoadCustomConfiguration(t *testing.T) {
