@@ -17,6 +17,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	openaipreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/openai"
 	"github.com/jingkaihe/kodelet/pkg/llm/openai/preset/xai"
+	"github.com/jingkaihe/kodelet/pkg/llm/prompts"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/osutil"
 	"github.com/jingkaihe/kodelet/pkg/sysprompt"
@@ -520,6 +521,8 @@ func (t *Thread) NewSubAgent(ctx context.Context, config llmtypes.Config) llmtyp
 }
 
 // CompactContext compacts the conversation history using the Responses API compact endpoint.
+// The Compact API returns user messages plus a single compaction item containing encrypted
+// conversation state, which can be used to continue the conversation efficiently.
 func (t *Thread) CompactContext(ctx context.Context) error {
 	if len(t.inputItems) == 0 {
 		return nil
@@ -541,51 +544,93 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 	t.Usage.OutputTokens += int(resp.Usage.OutputTokens)
 	t.Mu.Unlock()
 
-	// Replace input items with compacted output
-	t.inputItems = make([]responses.ResponseInputItemUnionParam, 0)
+	// Convert output items to input items
+	// The Compact API returns: user messages + a single compaction item
+	newInputItems := make([]responses.ResponseInputItemUnionParam, 0, len(resp.Output))
 	for _, output := range resp.Output {
-		// Convert output items back to input items
-		outputJSON, err := json.Marshal(output)
-		if err != nil {
-			continue
+		switch output.Type {
+		case "message":
+			// Convert output message to input message
+			msg := output.AsMessage()
+			if msg.Role == "user" {
+				// Extract text content from the message
+				var textContent string
+				for _, content := range msg.Content {
+					if content.Type == "output_text" {
+						textPart := content.AsOutputText()
+						textContent += textPart.Text
+					}
+				}
+				if textContent != "" {
+					newInputItems = append(newInputItems, responses.ResponseInputItemUnionParam{
+						OfMessage: &responses.EasyInputMessageParam{
+							Role:    responses.EasyInputMessageRoleUser,
+							Content: responses.EasyInputMessageContentUnionParam{OfString: param.NewOpt(textContent)},
+						},
+					})
+				}
+			}
+
+		case "compaction":
+			// Convert compaction item using the SDK helper
+			compaction := output.AsCompaction()
+			newInputItems = append(newInputItems, responses.ResponseInputItemParamOfCompaction(compaction.EncryptedContent))
 		}
-		var inputItem responses.ResponseInputItemUnionParam
-		if err := json.Unmarshal(outputJSON, &inputItem); err != nil {
-			continue
-		}
-		t.inputItems = append(t.inputItems, inputItem)
+	}
+
+	// Replace input items with compacted output
+	t.inputItems = newInputItems
+
+	// Clear pending items - next request will use the new compacted input
+	t.pendingItems = nil
+
+	// Clear the previous response ID - the server-side conversation state is now
+	// represented by the compaction item, not the response chain
+	t.lastResponseID = ""
+
+	// Clear stale tool results - they reference tool calls that no longer exist
+	t.ToolResults = make(map[string]tooltypes.StructuredToolResult)
+
+	// Clear file access tracking to start fresh with context retrieval
+	if t.State != nil {
+		t.State.SetFileLastAccess(make(map[string]time.Time))
 	}
 
 	return nil
 }
 
-// ShortSummary generates a short summary of the conversation.
-func (t *Thread) ShortSummary(_ context.Context) string {
+// ShortSummary generates a short summary of the conversation using an LLM.
+func (t *Thread) ShortSummary(ctx context.Context) string {
 	if len(t.inputItems) == 0 {
 		return ""
 	}
 
-	// Use first user message as summary
-	for _, item := range t.inputItems {
-		if item.OfMessage != nil && item.OfMessage.Role == responses.EasyInputMessageRoleUser {
-			content := ""
-			if item.OfMessage.Content.OfString.Valid() {
-				content = item.OfMessage.Content.OfString.Value
-			} else if len(item.OfMessage.Content.OfInputItemContentList) > 0 {
-				for _, part := range item.OfMessage.Content.OfInputItemContentList {
-					if part.OfInputText != nil {
-						content += part.OfInputText.Text
-					}
-				}
-			}
-			if len(content) > 100 {
-				return content[:100] + "..."
-			}
-			return content
-		}
+	// Create a new summary thread
+	summaryThread, err := NewThread(t.Config, nil)
+	if err != nil {
+		logger.G(ctx).WithError(err).Error("failed to create summary thread")
+		return "Could not generate summary."
 	}
 
-	return ""
+	// Copy input items to the summary thread
+	summaryThread.inputItems = t.inputItems
+	summaryThread.EnablePersistence(ctx, false)
+	summaryThread.HookTrigger = hooks.Trigger{} // disable hooks for summary
+
+	handler := &llmtypes.StringCollectorHandler{Silent: true}
+	_, err = summaryThread.SendMessage(ctx, prompts.ShortSummaryPrompt, handler, llmtypes.MessageOpt{
+		UseWeakModel:       true,
+		NoToolUse:          true,
+		DisableAutoCompact: true,
+		DisableUsageLog:    true,
+		NoSaveConversation: true,
+	})
+	if err != nil {
+		logger.G(ctx).WithError(err).Error("failed to generate summary")
+		return "Could not generate summary."
+	}
+
+	return handler.CollectedText()
 }
 
 // SaveConversation saves the current thread to the conversation store.
