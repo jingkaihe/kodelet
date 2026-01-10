@@ -37,6 +37,8 @@ func (t *Thread) processStream(
 	var currentText strings.Builder
 	var currentReasoning strings.Builder
 	var toolsUsed bool
+	var contentBlockEnded bool // Track if we've signaled end of content block
+	var thinkingStarted bool   // Track if thinking block has started
 
 	// Track pending tool calls
 	pendingToolCalls := make(map[string]*toolCallState)
@@ -74,6 +76,11 @@ func (t *Thread) processStream(
 			if event.Delta != "" {
 				currentReasoning.WriteString(event.Delta)
 				if isStreaming {
+					// Signal start of thinking block before first delta
+					if !thinkingStarted {
+						streamHandler.HandleThinkingStart()
+						thinkingStarted = true
+					}
 					streamHandler.HandleThinkingDelta(event.Delta)
 				}
 			}
@@ -111,6 +118,13 @@ func (t *Thread) processStream(
 			case "function_call":
 				// Complete function call
 				toolsUsed = true
+
+				// Signal end of content block before first tool use (adds line break)
+				if isStreaming && !contentBlockEnded && currentText.Len() > 0 {
+					streamHandler.HandleContentBlockEnd()
+					contentBlockEnded = true
+				}
+
 				funcCall := item.AsFunctionCall()
 				handler.HandleToolUse(funcCall.CallID, funcCall.Name, funcCall.Arguments)
 
@@ -172,9 +186,10 @@ func (t *Thread) processStream(
 				attribute.String("status", string(event.Response.Status)),
 			)
 
-			// Signal end of content block for streaming handlers
-			if isStreaming && currentText.Len() > 0 {
+			// Signal end of content block for streaming handlers (if not already done)
+			if isStreaming && !contentBlockEnded && currentText.Len() > 0 {
 				streamHandler.HandleContentBlockEnd()
+				contentBlockEnded = true
 			}
 
 			// For non-streaming handlers, send the complete text

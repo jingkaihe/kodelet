@@ -114,10 +114,10 @@ func NewThread(
 	// Create the OpenAI client
 	client := openai.NewClient(opts...)
 
-	// Determine reasoning effort from environment or default
-	reasoningEffort := shared.ReasoningEffortMedium
-	if effort := os.Getenv("OPENAI_REASONING_EFFORT"); effort != "" {
-		reasoningEffort = shared.ReasoningEffort(effort)
+	// Determine reasoning effort from config or default
+	reasoningEffort := shared.ReasoningEffort(config.ReasoningEffort)
+	if reasoningEffort == "" {
+		reasoningEffort = shared.ReasoningEffortMedium
 	}
 
 	// Load custom models and pricing
@@ -360,8 +360,8 @@ func (t *Thread) processMessageExchange(
 		params.MaxOutputTokens = param.NewOpt(int64(maxTokens))
 	}
 
-	// Add reasoning configuration for o-series models
-	if isReasoningModel(model) && t.reasoningEffort != "" {
+	// Add reasoning configuration for reasoning models (o-series, gpt-5, etc.)
+	if t.isReasoningModelDynamic(model) && t.reasoningEffort != "" {
 		params.Reasoning = shared.ReasoningParam{
 			Effort: t.reasoningEffort,
 		}
@@ -369,7 +369,8 @@ func (t *Thread) processMessageExchange(
 
 	log.WithField("model", model).
 		WithField("max_tokens", maxTokens).
-		WithField("is_reasoning", isReasoningModel(model)).
+		WithField("is_reasoning", t.isReasoningModelDynamic(model)).
+		WithField("reasoning_effort", string(t.reasoningEffort)).
 		Debug("sending request to OpenAI Responses API")
 
 	// Use streaming API
@@ -769,11 +770,12 @@ func (t *Thread) getPricing(model string) llmtypes.ModelPricing {
 	}
 }
 
-// isReasoningModel checks if the model is an o-series reasoning model.
-func isReasoningModel(model string) bool {
-	// Check for o-series models (o1, o3, o4, etc.)
-	if len(model) >= 2 && model[0] == 'o' && model[1] >= '0' && model[1] <= '9' {
-		return true
+// isReasoningModelDynamic checks if a model supports reasoning using the preset configuration.
+func (t *Thread) isReasoningModelDynamic(model string) bool {
+	if t.customModels != nil {
+		if category, ok := t.customModels[model]; ok {
+			return category == "reasoning"
+		}
 	}
 	return false
 }

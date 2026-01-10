@@ -56,7 +56,21 @@ func TestNewThreadWithoutAPIKey(t *testing.T) {
 	assert.Contains(t, err.Error(), "OPENAI_API_KEY")
 }
 
-func TestIsReasoningModel(t *testing.T) {
+func TestIsReasoningModelDynamic(t *testing.T) {
+	// Create a thread with the default OpenAI preset loaded
+	thread := &Thread{
+		customModels: map[string]string{
+			"o1":      "reasoning",
+			"o1-mini": "reasoning",
+			"o3":      "reasoning",
+			"o3-mini": "reasoning",
+			"o4-mini": "reasoning",
+			"gpt-5":   "reasoning",
+			"gpt-4.1": "non-reasoning",
+			"gpt-4o":  "non-reasoning",
+		},
+	}
+
 	tests := []struct {
 		model    string
 		expected bool
@@ -66,14 +80,15 @@ func TestIsReasoningModel(t *testing.T) {
 		{"o3", true},
 		{"o3-mini", true},
 		{"o4-mini", true},
+		{"gpt-5", true},
 		{"gpt-4.1", false},
 		{"gpt-4o", false},
-		{"claude-3", false},
+		{"claude-3", false}, // Not in preset, returns false
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.model, func(t *testing.T) {
-			assert.Equal(t, tt.expected, isReasoningModel(tt.model))
+			assert.Equal(t, tt.expected, thread.isReasoningModelDynamic(tt.model))
 		})
 	}
 }
