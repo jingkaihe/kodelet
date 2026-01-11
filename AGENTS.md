@@ -5,8 +5,13 @@ Kodelet is a lightweight CLI tool that helps with software engineering tasks. It
 
 ## Project Structure
 ```
+├── .air.toml            # Air live-reload configuration
+├── .dockerignore        # Docker ignore patterns
+├── .gitignore           # Git ignore patterns
+├── .golangci.yml        # GolangCI-Lint configuration
 ├── .github/             # GitHub configuration
 │   └── workflows/       # CI/CD workflows (release, tests, Docker builds)
+├── .kodelet/            # Repo-local Kodelet data (hooks/skills)
 ├── adrs/                # Architecture Decision Records (18 ADRs documenting key decisions)
 ├── bin/                 # Compiled binaries
 ├── cmd/                 # Application entry point
@@ -15,10 +20,13 @@ Kodelet is a lightweight CLI tool that helps with software engineering tasks. It
 ├── docs/                # Documentation files
 ├── Dockerfile           # Docker runtime image configuration
 ├── Dockerfile.cross-build # Docker cross-compilation environment
-├── .dockerignore        # Docker ignore patterns
 ├── install.sh           # Installation script
 ├── AGENTS.md            # Project documentation (this file)
-├── kodelet-config.yaml  # Repository-specific MCP tools configuration
+├── CLAUDE.md            # Claude-specific project notes
+├── go.mod               # Go module definition
+├── go.sum               # Go module checksums
+├── google.test          # Auxiliary test asset
+├── kodelet-config.sample.yaml  # Sample repo MCP tools configuration
 ├── LICENSE              # License file
 ├── mise.toml            # Tool management and task automation
 ├── pkg/                 # Core packages

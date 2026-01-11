@@ -5,16 +5,21 @@
 package responses
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/auth"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/hooks"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
+	codexpreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/codex"
 	openaipreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/openai"
 	"github.com/jingkaihe/kodelet/pkg/llm/prompts"
 	"github.com/jingkaihe/kodelet/pkg/logger"
@@ -26,6 +31,7 @@ import (
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
 	"go.opentelemetry.io/otel/attribute"
 
 	openai "github.com/openai/openai-go/v3"
@@ -76,6 +82,10 @@ type Thread struct {
 
 	// summary stores a short summary of the conversation for persistence
 	summary string
+
+	// isCodex indicates if this thread is using Codex authentication
+	// Some API parameters may not be supported by the Codex API
+	isCodex bool
 }
 
 // NewThread creates a new Responses API thread with the given configuration.
@@ -102,29 +112,10 @@ func NewThread(
 	// Create the base thread with shared functionality
 	baseThread := base.NewThread(config, conversationID, subagentContextFactory, hookTrigger)
 
-	// Determine API key
-	apiKeyEnvVar := "OPENAI_API_KEY"
-	if config.OpenAI != nil && config.OpenAI.APIKeyEnvVar != "" {
-		apiKeyEnvVar = config.OpenAI.APIKeyEnvVar
-	}
-
-	apiKey := os.Getenv(apiKeyEnvVar)
-	if apiKey == "" {
-		return nil, errors.Errorf("%s environment variable is required", apiKeyEnvVar)
-	}
-
-	log.WithField("api_key_env_var", apiKeyEnvVar).Debug("using OpenAI API key for Responses API")
-
-	// Build client options
-	opts := []option.RequestOption{
-		option.WithAPIKey(apiKey),
-	}
-
-	// Check for custom base URL
-	if baseURL := os.Getenv("OPENAI_API_BASE"); baseURL != "" {
-		opts = append(opts, option.WithBaseURL(baseURL))
-	} else if config.OpenAI != nil && config.OpenAI.BaseURL != "" {
-		opts = append(opts, option.WithBaseURL(config.OpenAI.BaseURL))
+	// Build client options based on authentication mode
+	opts, useCodex, err := buildClientOptions(config, log)
+	if err != nil {
+		return nil, err
 	}
 
 	// Create the OpenAI client
@@ -148,6 +139,7 @@ func NewThread(
 		reasoningEffort: reasoningEffort,
 		customModels:    customModels,
 		customPricing:   customPricing,
+		isCodex:         useCodex,
 	}
 
 	// Set the LoadConversation callback for provider-specific loading
@@ -370,6 +362,43 @@ OUTER:
 	return finalOutput, nil
 }
 
+// applyCodexRestrictions modifies request parameters for Codex API compatibility.
+// The Codex API doesn't support: store=true, previous_response_id, max_output_tokens.
+// This method centralizes all Codex-specific parameter restrictions in one place.
+func (t *Thread) applyCodexRestrictions(params *responses.ResponseNewParams) {
+	if !t.isCodex {
+		return
+	}
+	// Codex API requires store=false (no server-side conversation state)
+	params.Store = param.NewOpt(false)
+	// Clear unsupported parameters
+	params.PreviousResponseID = param.Opt[string]{}
+	params.MaxOutputTokens = param.Opt[int64]{}
+
+	if t.State != nil {
+		contexts := t.State.DiscoverContexts()
+
+		promptCtx := sysprompt.NewPromptContext(contexts)
+		devMessages := []string{
+			promptCtx.FormatSystemInfo(),
+			promptCtx.FormatContexts(),
+			promptCtx.FormatMCPServers(),
+		}
+
+		// prepend dev messages to params' input
+		for i := len(devMessages) - 1; i >= 0; i-- {
+			params.Input.OfInputItemList = append([]responses.ResponseInputItemUnionParam{
+				{
+					OfMessage: &responses.EasyInputMessageParam{
+						Role:    responses.EasyInputMessageRoleDeveloper,
+						Content: responses.EasyInputMessageContentUnionParam{OfString: param.NewOpt(devMessages[i])},
+					},
+				},
+			}, params.Input.OfInputItemList...)
+		}
+	}
+}
+
 // processMessageExchange handles a single message exchange with the Responses API.
 func (t *Thread) processMessageExchange(
 	ctx context.Context,
@@ -387,23 +416,18 @@ func (t *Thread) processMessageExchange(
 	log.WithField("tool_count", len(tools)).Debug("built tools for request")
 
 	// Determine which input items to send:
-	// - If we have a previous response ID, only send pending items (server has history)
-	// - Otherwise, send full input items (fresh conversation or fallback)
+	// - If we have a previous response ID (and not Codex), only send pending items (server has history)
+	// - For Codex or fresh conversations, send full input items (no server-side state)
 	var inputToSend []responses.ResponseInputItemUnionParam
-	usePreviousResponseID := t.lastResponseID != "" && len(t.pendingItems) > 0
+	usePreviousResponseID := t.lastResponseID != "" && len(t.pendingItems) > 0 && !t.isCodex
 
 	if usePreviousResponseID {
 		inputToSend = t.pendingItems
-		log.WithField("pending_items", len(t.pendingItems)).
-			WithField("previous_response_id", t.lastResponseID).
-			Debug("using previous_response_id with pending items")
 	} else {
 		inputToSend = t.inputItems
-		log.WithField("input_items", len(t.inputItems)).
-			Debug("sending full input items (no previous_response_id)")
 	}
 
-	// Build request parameters
+	// Build request parameters with standard settings
 	params := responses.ResponseNewParams{
 		Model:        model,
 		Input:        responses.ResponseNewParamsInputUnion{OfInputItemList: inputToSend},
@@ -424,18 +448,24 @@ func (t *Thread) processMessageExchange(
 
 	// Add reasoning configuration for reasoning models (o-series, gpt-5, etc.)
 	if t.isReasoningModelDynamic(model) && t.reasoningEffort != "" {
+		reasoningEffort := t.reasoningEffort
+		if opt.UseWeakModel {
+			reasoningEffort = shared.ReasoningEffortMedium
+		}
 		params.Reasoning = shared.ReasoningParam{
-			Effort:  t.reasoningEffort,
+			Effort:  reasoningEffort,
 			Summary: shared.ReasoningSummaryDetailed,
 		}
 	}
 
+	// Apply Codex-specific restrictions (overrides unsupported params)
+	t.applyCodexRestrictions(&params)
+
 	log.WithField("model", model).
-		WithField("max_tokens", maxTokens).
-		WithField("is_reasoning", t.isReasoningModelDynamic(model)).
-		WithField("reasoning_effort", string(t.reasoningEffort)).
-		WithField("use_previous_response_id", usePreviousResponseID).
-		Debug("sending request to OpenAI Responses API")
+		WithField("input_items", len(inputToSend)).
+		WithField("tool_count", len(tools)).
+		WithField("is_codex", t.isCodex).
+		Debug("sending request to Responses API")
 
 	// Use streaming API
 	stream := t.client.Responses.NewStreaming(ctx, params)
@@ -444,6 +474,13 @@ func (t *Thread) processMessageExchange(
 	// Process stream events
 	toolsUsed, err := t.processStream(ctx, stream, handler)
 	if err != nil {
+		// Log detailed error information for debugging
+		log.WithError(err).
+			WithField("model", model).
+			WithField("tool_count", len(tools)).
+			WithField("input_items", len(inputToSend)).
+			Error("API request failed")
+
 		// Check if the error is related to invalid previous_response_id
 		// If so, fall back to sending full input items
 		if usePreviousResponseID && isInvalidPreviousResponseIDError(err) {
@@ -815,32 +852,124 @@ func loadCustomConfiguration(config llmtypes.Config) (map[string]string, map[str
 	return customModels, customPricing
 }
 
+// buildClientOptions constructs the OpenAI client options based on authentication mode.
+// Returns the options, whether Codex auth is being used, and any error.
+func buildClientOptions(config llmtypes.Config, log *logrus.Entry) ([]option.RequestOption, bool, error) {
+	useCodex := config.OpenAI != nil && config.OpenAI.Preset == "codex"
+
+	var opts []option.RequestOption
+	var err error
+
+	if useCodex {
+		opts, err = buildCodexAuthOptions(log)
+	} else {
+		opts, err = buildAPIKeyAuthOptions(config, log)
+	}
+	if err != nil {
+		return nil, useCodex, err
+	}
+
+	// Add error logging middleware
+	opts = append(opts, errorLoggingMiddleware(log))
+
+	return opts, useCodex, nil
+}
+
+// buildCodexAuthOptions returns client options for Codex CLI authentication.
+func buildCodexAuthOptions(log *logrus.Entry) ([]option.RequestOption, error) {
+	log.Debug("using Codex authentication for Responses API")
+	opts, err := auth.CodexHeader()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get Codex credentials")
+	}
+	return opts, nil
+}
+
+// buildAPIKeyAuthOptions returns client options for standard API key authentication.
+func buildAPIKeyAuthOptions(config llmtypes.Config, log *logrus.Entry) ([]option.RequestOption, error) {
+	apiKeyEnvVar := "OPENAI_API_KEY"
+	if config.OpenAI != nil && config.OpenAI.APIKeyEnvVar != "" {
+		apiKeyEnvVar = config.OpenAI.APIKeyEnvVar
+	}
+
+	apiKey := os.Getenv(apiKeyEnvVar)
+	if apiKey == "" {
+		return nil, errors.Errorf("%s environment variable is required", apiKeyEnvVar)
+	}
+
+	log.WithField("api_key_env_var", apiKeyEnvVar).Debug("using OpenAI API key for Responses API")
+
+	opts := []option.RequestOption{
+		option.WithAPIKey(apiKey),
+	}
+
+	// Add base URL if configured
+	if baseURL := os.Getenv("OPENAI_API_BASE"); baseURL != "" {
+		opts = append(opts, option.WithBaseURL(baseURL))
+	} else if config.OpenAI != nil && config.OpenAI.BaseURL != "" {
+		opts = append(opts, option.WithBaseURL(config.OpenAI.BaseURL))
+	}
+
+	return opts, nil
+}
+
+// errorLoggingMiddleware returns a middleware that logs error response bodies for debugging.
+func errorLoggingMiddleware(log *logrus.Entry) option.RequestOption {
+	return option.WithMiddleware(func(req *http.Request, next option.MiddlewareNext) (*http.Response, error) {
+		resp, err := next(req)
+		if err != nil {
+			return resp, err
+		}
+
+		// Log response body for non-2xx status codes
+		if resp != nil && resp.StatusCode >= 400 {
+			body, readErr := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if readErr != nil {
+				log.WithError(readErr).Debug("failed to read error response body")
+				return resp, err
+			}
+
+			log.WithField("status_code", resp.StatusCode).
+				WithField("response_body", string(body)).
+				Debug("API error response")
+
+			// Restore the body so the SDK can still read it
+			resp.Body = io.NopCloser(bytes.NewReader(body))
+		}
+
+		return resp, err
+	})
+}
+
 // loadPreset loads a built-in preset configuration for popular providers.
 func loadPreset(presetName string) (map[string]string, map[string]llmtypes.ModelPricing) {
 	switch presetName {
 	case "openai":
-		return loadOpenAIPreset()
+		return loadPresetFromConfig(openaipreset.Models, openaipreset.Pricing)
+	case "codex":
+		return loadPresetFromConfig(codexpreset.Models, codexpreset.Pricing)
 	default:
 		return nil, nil
 	}
 }
 
-// loadOpenAIPreset loads the complete OpenAI configuration.
-func loadOpenAIPreset() (map[string]string, map[string]llmtypes.ModelPricing) {
+// loadPresetFromConfig converts preset model and pricing configurations into the internal format.
+func loadPresetFromConfig(presetModels llmtypes.CustomModels, presetPricing llmtypes.CustomPricing) (map[string]string, map[string]llmtypes.ModelPricing) {
 	models := make(map[string]string)
 	pricing := make(map[string]llmtypes.ModelPricing)
 
 	// Map reasoning models
-	for _, model := range openaipreset.Models.Reasoning {
+	for _, model := range presetModels.Reasoning {
 		models[model] = "reasoning"
 	}
 	// Map non-reasoning models
-	for _, model := range openaipreset.Models.NonReasoning {
+	for _, model := range presetModels.NonReasoning {
 		models[model] = "non-reasoning"
 	}
 
 	// Load pricing
-	for model, p := range openaipreset.Pricing {
+	for model, p := range presetPricing {
 		pricing[model] = llmtypes.ModelPricing{
 			Input:         p.Input,
 			CachedInput:   p.CachedInput,

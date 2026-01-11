@@ -15,6 +15,7 @@ import (
 	"github.com/pkg/errors"
 	"go.opentelemetry.io/otel/attribute"
 
+	openai "github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/packages/ssestream"
 	"github.com/openai/openai-go/v3/responses"
@@ -82,6 +83,13 @@ func (t *Thread) processStream(
 					}
 					streamHandler.HandleThinkingDelta(event.Delta)
 				}
+			}
+
+		case "response.reasoning_text.done", "response.reasoning_summary_text.done":
+			// Reasoning content complete - end thinking block for streaming handlers
+			if isStreaming && thinkingStarted {
+				streamHandler.HandleContentBlockEnd()
+				thinkingStarted = false
 			}
 
 		case "response.function_call_arguments.delta":
@@ -264,6 +272,17 @@ func (t *Thread) processStream(
 
 	// Check for stream errors
 	if err := stream.Err(); err != nil {
+		// Log detailed error information for debugging API failures
+		var apiErr *openai.Error
+		if errors.As(err, &apiErr) {
+			log.WithField("status_code", apiErr.StatusCode).
+				WithField("error_code", apiErr.Code).
+				WithField("error_message", apiErr.Message).
+				WithField("error_type", apiErr.Type).
+				WithField("error_param", apiErr.Param).
+				WithField("raw_json", apiErr.RawJSON()).
+				Debug("API error details")
+		}
 		return toolsUsed, errors.Wrap(err, "stream error")
 	}
 

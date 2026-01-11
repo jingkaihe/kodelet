@@ -27,8 +27,15 @@ func SubAgentPrompt(model string, llmConfig llm.Config, contexts map[string]stri
 	var err error
 
 	provider := strings.ToLower(llmConfig.Provider)
-	switch provider {
-	case ProviderOpenAI, ProviderOpenAIResponses:
+	preset := ""
+	if llmConfig.OpenAI != nil {
+		preset = strings.ToLower(llmConfig.OpenAI.Preset)
+	}
+
+	switch {
+	case preset == PresetCodex:
+		prompt, err = renderer.RenderCodexPrompt(promptCtx, model)
+	case provider == ProviderOpenAI || provider == ProviderOpenAIResponses:
 		prompt, err = renderer.RenderOpenAIPrompt(promptCtx)
 	default:
 		prompt, err = renderer.RenderSubagentPrompt(promptCtx)
