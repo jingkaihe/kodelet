@@ -28,6 +28,7 @@ import (
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
 	"go.opentelemetry.io/otel/attribute"
 
 	openai "github.com/openai/openai-go/v3"
@@ -109,41 +110,9 @@ func NewThread(
 	baseThread := base.NewThread(config, conversationID, subagentContextFactory, hookTrigger)
 
 	// Build client options based on authentication mode
-	var opts []option.RequestOption
-	useCodex := config.OpenAI != nil && config.OpenAI.Preset == "codex"
-
-	if useCodex {
-		// Use Codex CLI authentication
-		log.Debug("using Codex authentication for Responses API")
-		codexOpts, err := auth.CodexHeader()
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to get Codex credentials")
-		}
-		opts = codexOpts
-	} else {
-		// Use standard API key authentication
-		apiKeyEnvVar := "OPENAI_API_KEY"
-		if config.OpenAI != nil && config.OpenAI.APIKeyEnvVar != "" {
-			apiKeyEnvVar = config.OpenAI.APIKeyEnvVar
-		}
-
-		apiKey := os.Getenv(apiKeyEnvVar)
-		if apiKey == "" {
-			return nil, errors.Errorf("%s environment variable is required", apiKeyEnvVar)
-		}
-
-		log.WithField("api_key_env_var", apiKeyEnvVar).Debug("using OpenAI API key for Responses API")
-
-		opts = []option.RequestOption{
-			option.WithAPIKey(apiKey),
-		}
-
-		// Check for custom base URL (only for non-Codex mode)
-		if baseURL := os.Getenv("OPENAI_API_BASE"); baseURL != "" {
-			opts = append(opts, option.WithBaseURL(baseURL))
-		} else if config.OpenAI != nil && config.OpenAI.BaseURL != "" {
-			opts = append(opts, option.WithBaseURL(config.OpenAI.BaseURL))
-		}
+	opts, useCodex, err := buildClientOptions(config, log)
+	if err != nil {
+		return nil, err
 	}
 
 	// Create the OpenAI client
@@ -390,6 +359,20 @@ OUTER:
 	return finalOutput, nil
 }
 
+// applyCodexRestrictions modifies request parameters for Codex API compatibility.
+// The Codex API doesn't support: store=true, previous_response_id, max_output_tokens.
+// This method centralizes all Codex-specific parameter restrictions in one place.
+func (t *Thread) applyCodexRestrictions(params *responses.ResponseNewParams) {
+	if !t.isCodex {
+		return
+	}
+	// Codex API requires store=false (no server-side conversation state)
+	params.Store = param.NewOpt(false)
+	// Clear unsupported parameters
+	params.PreviousResponseID = param.Opt[string]{}
+	params.MaxOutputTokens = param.Opt[int64]{}
+}
+
 // processMessageExchange handles a single message exchange with the Responses API.
 func (t *Thread) processMessageExchange(
 	ctx context.Context,
@@ -407,7 +390,7 @@ func (t *Thread) processMessageExchange(
 	log.WithField("tool_count", len(tools)).Debug("built tools for request")
 
 	// Determine which input items to send:
-	// - If we have a previous response ID and not using Codex, only send pending items (server has history)
+	// - If we have a previous response ID (and not Codex), only send pending items (server has history)
 	// - For Codex or fresh conversations, send full input items (no server-side state)
 	var inputToSend []responses.ResponseInputItemUnionParam
 	usePreviousResponseID := t.lastResponseID != "" && len(t.pendingItems) > 0 && !t.isCodex
@@ -418,29 +401,22 @@ func (t *Thread) processMessageExchange(
 		inputToSend = t.inputItems
 	}
 
-	// Build request parameters
+	// Build request parameters with standard settings
 	params := responses.ResponseNewParams{
 		Model:        model,
 		Input:        responses.ResponseNewParamsInputUnion{OfInputItemList: inputToSend},
 		Instructions: param.NewOpt(systemPrompt),
 		Tools:        tools,
+		Store:        param.NewOpt(true), // Enable server-side conversation state storage
 	}
 
-	// Enable server-side conversation state storage
-	// Codex API requires store=false explicitly
-	if t.isCodex {
-		params.Store = param.NewOpt(false)
-	} else {
-		params.Store = param.NewOpt(true)
-	}
-
-	// Set previous_response_id for multi-turn conversations (not supported by Codex API)
-	if usePreviousResponseID && !t.isCodex {
+	// Set previous_response_id for multi-turn conversations
+	if usePreviousResponseID {
 		params.PreviousResponseID = param.NewOpt(t.lastResponseID)
 	}
 
-	// Set max output tokens if specified (not supported by Codex API)
-	if maxTokens > 0 && !t.isCodex {
+	// Set max output tokens if specified
+	if maxTokens > 0 {
 		params.MaxOutputTokens = param.NewOpt(int64(maxTokens))
 	}
 
@@ -451,6 +427,9 @@ func (t *Thread) processMessageExchange(
 			Summary: shared.ReasoningSummaryDetailed,
 		}
 	}
+
+	// Apply Codex-specific restrictions (overrides unsupported params)
+	t.applyCodexRestrictions(&params)
 
 	log.WithField("model", model).
 		WithField("input_items", len(inputToSend)).
@@ -843,61 +822,83 @@ func loadCustomConfiguration(config llmtypes.Config) (map[string]string, map[str
 	return customModels, customPricing
 }
 
+// buildClientOptions constructs the OpenAI client options based on authentication mode.
+// Returns the options, whether Codex auth is being used, and any error.
+func buildClientOptions(config llmtypes.Config, log *logrus.Entry) ([]option.RequestOption, bool, error) {
+	useCodex := config.OpenAI != nil && config.OpenAI.Preset == "codex"
+
+	if useCodex {
+		return buildCodexAuthOptions(log)
+	}
+	return buildAPIKeyAuthOptions(config, log)
+}
+
+// buildCodexAuthOptions returns client options for Codex CLI authentication.
+func buildCodexAuthOptions(log *logrus.Entry) ([]option.RequestOption, bool, error) {
+	log.Debug("using Codex authentication for Responses API")
+	opts, err := auth.CodexHeader()
+	if err != nil {
+		return nil, true, errors.Wrap(err, "failed to get Codex credentials")
+	}
+	return opts, true, nil
+}
+
+// buildAPIKeyAuthOptions returns client options for standard API key authentication.
+func buildAPIKeyAuthOptions(config llmtypes.Config, log *logrus.Entry) ([]option.RequestOption, bool, error) {
+	apiKeyEnvVar := "OPENAI_API_KEY"
+	if config.OpenAI != nil && config.OpenAI.APIKeyEnvVar != "" {
+		apiKeyEnvVar = config.OpenAI.APIKeyEnvVar
+	}
+
+	apiKey := os.Getenv(apiKeyEnvVar)
+	if apiKey == "" {
+		return nil, false, errors.Errorf("%s environment variable is required", apiKeyEnvVar)
+	}
+
+	log.WithField("api_key_env_var", apiKeyEnvVar).Debug("using OpenAI API key for Responses API")
+
+	opts := []option.RequestOption{
+		option.WithAPIKey(apiKey),
+	}
+
+	// Add base URL if configured
+	if baseURL := os.Getenv("OPENAI_API_BASE"); baseURL != "" {
+		opts = append(opts, option.WithBaseURL(baseURL))
+	} else if config.OpenAI != nil && config.OpenAI.BaseURL != "" {
+		opts = append(opts, option.WithBaseURL(config.OpenAI.BaseURL))
+	}
+
+	return opts, false, nil
+}
+
 // loadPreset loads a built-in preset configuration for popular providers.
 func loadPreset(presetName string) (map[string]string, map[string]llmtypes.ModelPricing) {
 	switch presetName {
 	case "openai":
-		return loadOpenAIPreset()
+		return loadPresetFromConfig(openaipreset.Models, openaipreset.Pricing)
 	case "codex":
-		return loadCodexPreset()
+		return loadPresetFromConfig(codexpreset.Models, codexpreset.Pricing)
 	default:
 		return nil, nil
 	}
 }
 
-// loadOpenAIPreset loads the complete OpenAI configuration.
-func loadOpenAIPreset() (map[string]string, map[string]llmtypes.ModelPricing) {
+// loadPresetFromConfig converts preset model and pricing configurations into the internal format.
+func loadPresetFromConfig(presetModels llmtypes.CustomModels, presetPricing llmtypes.CustomPricing) (map[string]string, map[string]llmtypes.ModelPricing) {
 	models := make(map[string]string)
 	pricing := make(map[string]llmtypes.ModelPricing)
 
 	// Map reasoning models
-	for _, model := range openaipreset.Models.Reasoning {
+	for _, model := range presetModels.Reasoning {
 		models[model] = "reasoning"
 	}
 	// Map non-reasoning models
-	for _, model := range openaipreset.Models.NonReasoning {
+	for _, model := range presetModels.NonReasoning {
 		models[model] = "non-reasoning"
 	}
 
 	// Load pricing
-	for model, p := range openaipreset.Pricing {
-		pricing[model] = llmtypes.ModelPricing{
-			Input:         p.Input,
-			CachedInput:   p.CachedInput,
-			Output:        p.Output,
-			ContextWindow: p.ContextWindow,
-		}
-	}
-
-	return models, pricing
-}
-
-// loadCodexPreset loads the Codex preset configuration.
-func loadCodexPreset() (map[string]string, map[string]llmtypes.ModelPricing) {
-	models := make(map[string]string)
-	pricing := make(map[string]llmtypes.ModelPricing)
-
-	// Map reasoning models from Codex preset
-	for _, model := range codexpreset.Models.Reasoning {
-		models[model] = "reasoning"
-	}
-	// Map non-reasoning models
-	for _, model := range codexpreset.Models.NonReasoning {
-		models[model] = "non-reasoning"
-	}
-
-	// Load pricing from Codex preset
-	for model, p := range codexpreset.Pricing {
+	for model, p := range presetPricing {
 		pricing[model] = llmtypes.ModelPricing{
 			Input:         p.Input,
 			CachedInput:   p.CachedInput,
