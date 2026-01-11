@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/auth"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
@@ -12,10 +13,10 @@ import (
 var codexStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show Codex authentication status",
-	Long: `Show the current Codex CLI authentication status.
+	Long: `Show the current OpenAI Codex authentication status.
 
-This command checks if valid Codex CLI credentials are available at ~/.codex/auth.json.
-These credentials are created by running 'codex login' from the official Codex CLI.
+This command checks if valid Codex credentials are available at ~/.codex/auth.json.
+These credentials are created by running 'kodelet codex login'.
 
 If credentials are found, you can use Kodelet with the Codex provider to access
 ChatGPT-backed models like gpt-5.1-codex-max, gpt-5.2-codex, etc.`,
@@ -35,9 +36,8 @@ func runCodexStatus() {
 		presenter.Warning("Codex credentials not found")
 		fmt.Println()
 		presenter.Info("To enable Codex authentication:")
-		fmt.Println("1. Install the Codex CLI: https://github.com/openai/codex")
-		fmt.Println("2. Run 'codex login' to authenticate with your ChatGPT account")
-		fmt.Println("3. Run 'kodelet codex status' again to verify")
+		fmt.Println("1. Run 'kodelet codex login' to authenticate with your ChatGPT account")
+		fmt.Println("2. Run 'kodelet codex status' again to verify")
 		fmt.Println()
 		presenter.Info("Once authenticated, use:")
 		fmt.Println("  kodelet run --provider=codex \"your query\"")
@@ -57,6 +57,26 @@ func runCodexStatus() {
 	if auth.IsCodexOAuthEnabled(creds) {
 		presenter.Info("Authentication type: OAuth (ChatGPT account)")
 		fmt.Printf("Account ID: %s\n", maskString(creds.AccountID))
+
+		if creds.ExpiresAt > 0 {
+			expiresAt := time.Unix(creds.ExpiresAt, 0)
+			now := time.Now()
+			if expiresAt.After(now) {
+				remaining := expiresAt.Sub(now).Round(time.Minute)
+				fmt.Printf("Token expires: %s (in %s)\n", expiresAt.Format(time.RFC3339), remaining)
+			} else {
+				presenter.Warning("Token has expired")
+				if creds.RefreshToken != "" {
+					presenter.Info("Token will be automatically refreshed on next use")
+				} else {
+					presenter.Info("Please run 'kodelet codex login' to re-authenticate")
+				}
+			}
+		}
+
+		if creds.RefreshToken != "" {
+			fmt.Println("Refresh token: available")
+		}
 	} else if creds.APIKey != "" {
 		presenter.Info("Authentication type: API Key")
 		fmt.Printf("API Key: %s\n", maskString(creds.APIKey))
