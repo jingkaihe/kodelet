@@ -449,7 +449,7 @@ func (t *Thread) processMessageExchange(
 	// Add reasoning configuration for reasoning models (o-series, gpt-5, etc.)
 	if t.isReasoningModelDynamic(model) && t.reasoningEffort != "" {
 		reasoningEffort := t.reasoningEffort
-		if opt.UseWeakModel == true {
+		if opt.UseWeakModel {
 			reasoningEffort = shared.ReasoningEffortMedium
 		}
 		params.Reasoning = shared.ReasoningParam{
