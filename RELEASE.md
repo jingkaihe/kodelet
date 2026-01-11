@@ -1,5 +1,20 @@
 # Kodelet
 
+## 0.1.41.beta (2026-01-11)
+
+### Features
+
+**Codex OAuth CLI**: New `kodelet codex login/logout/status` commands handle ChatGPT-backed Codex OAuth, start a local callback server, and store credentials in `~/.kodelet/codex-credentials.json` for use with `openai.preset: codex`.
+
+**Codex preset for Responses API**: Added Codex preset that auto-uses the OpenAI Responses API, embeds the Codex system prompt, and sends required ChatGPT headers for GPT-5.x Codex models.
+
+### Bug Fixes
+
+**Reasoning stream completion**: Thinking blocks now end when reasoning summaries finish so streaming output stays aligned.
+
+**Reasoning effort selection**: Weak models now downgrade to medium reasoning effort to avoid over-aggressive settings.
+
+
 ## 0.1.40.beta (2026-01-10)
 
 ### Breaking Changes
