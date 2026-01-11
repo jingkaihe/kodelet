@@ -46,6 +46,17 @@ func NewThread(config llmtypes.Config) (llmtypes.Thread, error) {
 	switch strings.ToLower(config.Provider) {
 	case "openai":
 		return openai.NewThread(config, NewSubagentContext)
+	case "codex":
+		// Codex provider uses OpenAI Responses API with Codex CLI auth
+		if config.OpenAI == nil {
+			config.OpenAI = &llmtypes.OpenAIConfig{}
+		}
+		config.OpenAI.Preset = "codex"
+		// Use default Codex model if no model specified or if model is not Codex-compatible
+		if config.Model == "" || !isCodexModel(config.Model) {
+			config.Model = "gpt-5.1-codex-max"
+		}
+		return openai.NewThread(config, NewSubagentContext)
 	case "anthropic":
 		return anthropic.NewAnthropicThread(config, NewSubagentContext)
 	case "google":
@@ -185,4 +196,20 @@ func ExtractMessages(provider string, rawMessages []byte, toolResults map[string
 	default:
 		return nil, errors.Errorf("unsupported provider: %s", provider)
 	}
+}
+
+// isCodexModel checks if a model name is a valid Codex model.
+func isCodexModel(model string) bool {
+	codexModels := []string{
+		"gpt-5.2-codex",
+		"gpt-5.2",
+		"gpt-5.1-codex-max",
+		"gpt-5.1-codex-mini",
+	}
+	for _, m := range codexModels {
+		if strings.EqualFold(model, m) {
+			return true
+		}
+	}
+	return false
 }

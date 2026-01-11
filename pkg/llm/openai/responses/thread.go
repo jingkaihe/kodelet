@@ -12,9 +12,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/auth"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/hooks"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
+	codexpreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/codex"
 	openaipreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/openai"
 	"github.com/jingkaihe/kodelet/pkg/llm/prompts"
 	"github.com/jingkaihe/kodelet/pkg/logger"
@@ -102,29 +104,42 @@ func NewThread(
 	// Create the base thread with shared functionality
 	baseThread := base.NewThread(config, conversationID, subagentContextFactory, hookTrigger)
 
-	// Determine API key
-	apiKeyEnvVar := "OPENAI_API_KEY"
-	if config.OpenAI != nil && config.OpenAI.APIKeyEnvVar != "" {
-		apiKeyEnvVar = config.OpenAI.APIKeyEnvVar
-	}
+	// Build client options based on authentication mode
+	var opts []option.RequestOption
+	useCodex := config.OpenAI != nil && config.OpenAI.Preset == "codex"
 
-	apiKey := os.Getenv(apiKeyEnvVar)
-	if apiKey == "" {
-		return nil, errors.Errorf("%s environment variable is required", apiKeyEnvVar)
-	}
+	if useCodex {
+		// Use Codex CLI authentication
+		log.Debug("using Codex authentication for Responses API")
+		codexOpts, err := auth.CodexHeader()
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to get Codex credentials")
+		}
+		opts = codexOpts
+	} else {
+		// Use standard API key authentication
+		apiKeyEnvVar := "OPENAI_API_KEY"
+		if config.OpenAI != nil && config.OpenAI.APIKeyEnvVar != "" {
+			apiKeyEnvVar = config.OpenAI.APIKeyEnvVar
+		}
 
-	log.WithField("api_key_env_var", apiKeyEnvVar).Debug("using OpenAI API key for Responses API")
+		apiKey := os.Getenv(apiKeyEnvVar)
+		if apiKey == "" {
+			return nil, errors.Errorf("%s environment variable is required", apiKeyEnvVar)
+		}
 
-	// Build client options
-	opts := []option.RequestOption{
-		option.WithAPIKey(apiKey),
-	}
+		log.WithField("api_key_env_var", apiKeyEnvVar).Debug("using OpenAI API key for Responses API")
 
-	// Check for custom base URL
-	if baseURL := os.Getenv("OPENAI_API_BASE"); baseURL != "" {
-		opts = append(opts, option.WithBaseURL(baseURL))
-	} else if config.OpenAI != nil && config.OpenAI.BaseURL != "" {
-		opts = append(opts, option.WithBaseURL(config.OpenAI.BaseURL))
+		opts = []option.RequestOption{
+			option.WithAPIKey(apiKey),
+		}
+
+		// Check for custom base URL (only for non-Codex mode)
+		if baseURL := os.Getenv("OPENAI_API_BASE"); baseURL != "" {
+			opts = append(opts, option.WithBaseURL(baseURL))
+		} else if config.OpenAI != nil && config.OpenAI.BaseURL != "" {
+			opts = append(opts, option.WithBaseURL(config.OpenAI.BaseURL))
+		}
 	}
 
 	// Create the OpenAI client
@@ -820,6 +835,8 @@ func loadPreset(presetName string) (map[string]string, map[string]llmtypes.Model
 	switch presetName {
 	case "openai":
 		return loadOpenAIPreset()
+	case "codex":
+		return loadCodexPreset()
 	default:
 		return nil, nil
 	}
@@ -841,6 +858,33 @@ func loadOpenAIPreset() (map[string]string, map[string]llmtypes.ModelPricing) {
 
 	// Load pricing
 	for model, p := range openaipreset.Pricing {
+		pricing[model] = llmtypes.ModelPricing{
+			Input:         p.Input,
+			CachedInput:   p.CachedInput,
+			Output:        p.Output,
+			ContextWindow: p.ContextWindow,
+		}
+	}
+
+	return models, pricing
+}
+
+// loadCodexPreset loads the Codex preset configuration.
+func loadCodexPreset() (map[string]string, map[string]llmtypes.ModelPricing) {
+	models := make(map[string]string)
+	pricing := make(map[string]llmtypes.ModelPricing)
+
+	// Map reasoning models from Codex preset
+	for _, model := range codexpreset.Models.Reasoning {
+		models[model] = "reasoning"
+	}
+	// Map non-reasoning models
+	for _, model := range codexpreset.Models.NonReasoning {
+		models[model] = "non-reasoning"
+	}
+
+	// Load pricing from Codex preset
+	for model, p := range codexpreset.Pricing {
 		pricing[model] = llmtypes.ModelPricing{
 			Input:         p.Input,
 			CachedInput:   p.CachedInput,

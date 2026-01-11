@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	codexpreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/codex"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/types/llm"
 )
@@ -26,6 +27,9 @@ func SystemPrompt(model string, llmConfig llm.Config, contexts map[string]string
 
 	provider := strings.ToLower(llmConfig.Provider)
 	switch provider {
+	case ProviderCodex:
+		// Use Codex-specific system prompt from embedded files
+		prompt, err = codexpreset.GetSystemPromptForModel(model)
 	case ProviderOpenAI, ProviderOpenAIResponses:
 		prompt, err = renderer.RenderOpenAIPrompt(promptCtx)
 	default:

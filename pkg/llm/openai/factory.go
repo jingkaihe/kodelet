@@ -51,6 +51,10 @@ func shouldUseResponsesAPI(config llmtypes.Config) bool {
 
 	// Check config setting
 	if config.OpenAI != nil {
+		// Codex preset always uses Responses API
+		if config.OpenAI.Preset == "codex" {
+			return true
+		}
 		return config.OpenAI.UseResponsesAPI
 	}
 
