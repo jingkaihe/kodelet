@@ -28,7 +28,6 @@ import (
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
-	"github.com/sirupsen/logrus"
 	"go.opentelemetry.io/otel/attribute"
 
 	openai "github.com/openai/openai-go/v3"
@@ -446,22 +445,18 @@ func (t *Thread) processMessageExchange(
 	}
 
 	// Add reasoning configuration for reasoning models (o-series, gpt-5, etc.)
-	// Note: Codex API may handle reasoning differently
-	if t.isReasoningModelDynamic(model) && t.reasoningEffort != "" && !t.isCodex {
+	if t.isReasoningModelDynamic(model) && t.reasoningEffort != "" {
 		params.Reasoning = shared.ReasoningParam{
 			Effort:  t.reasoningEffort,
 			Summary: shared.ReasoningSummaryDetailed,
 		}
 	}
 
-	// Log request details for debugging
-	if log.Logger.IsLevelEnabled(logrus.DebugLevel) {
-		log.WithField("model", model).
-			WithField("input_items", len(inputToSend)).
-			WithField("tool_count", len(tools)).
-			WithField("is_codex", t.isCodex).
-			Debug("sending request to Responses API")
-	}
+	log.WithField("model", model).
+		WithField("input_items", len(inputToSend)).
+		WithField("tool_count", len(tools)).
+		WithField("is_codex", t.isCodex).
+		Debug("sending request to Responses API")
 
 	// Use streaming API
 	stream := t.client.Responses.NewStreaming(ctx, params)

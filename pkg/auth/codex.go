@@ -37,7 +37,7 @@ const (
 
 	// CodexOriginator identifies the client making requests.
 	// Using the official Codex CLI originator for compatibility.
-	CodexOriginator = "codex_cli_rs"
+	CodexOriginator = "kodelet"
 )
 
 // codexAuthFilePath returns the path to the Codex auth file.
