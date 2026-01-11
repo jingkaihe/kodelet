@@ -28,6 +28,7 @@ import (
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
 	"go.opentelemetry.io/otel/attribute"
 
 	openai "github.com/openai/openai-go/v3"
@@ -78,6 +79,10 @@ type Thread struct {
 
 	// summary stores a short summary of the conversation for persistence
 	summary string
+
+	// isCodex indicates if this thread is using Codex authentication
+	// Some API parameters may not be supported by the Codex API
+	isCodex bool
 }
 
 // NewThread creates a new Responses API thread with the given configuration.
@@ -163,6 +168,7 @@ func NewThread(
 		reasoningEffort: reasoningEffort,
 		customModels:    customModels,
 		customPricing:   customPricing,
+		isCodex:         useCodex,
 	}
 
 	// Set the LoadConversation callback for provider-specific loading
@@ -402,20 +408,15 @@ func (t *Thread) processMessageExchange(
 	log.WithField("tool_count", len(tools)).Debug("built tools for request")
 
 	// Determine which input items to send:
-	// - If we have a previous response ID, only send pending items (server has history)
-	// - Otherwise, send full input items (fresh conversation or fallback)
+	// - If we have a previous response ID and not using Codex, only send pending items (server has history)
+	// - For Codex or fresh conversations, send full input items (no server-side state)
 	var inputToSend []responses.ResponseInputItemUnionParam
-	usePreviousResponseID := t.lastResponseID != "" && len(t.pendingItems) > 0
+	usePreviousResponseID := t.lastResponseID != "" && len(t.pendingItems) > 0 && !t.isCodex
 
 	if usePreviousResponseID {
 		inputToSend = t.pendingItems
-		log.WithField("pending_items", len(t.pendingItems)).
-			WithField("previous_response_id", t.lastResponseID).
-			Debug("using previous_response_id with pending items")
 	} else {
 		inputToSend = t.inputItems
-		log.WithField("input_items", len(t.inputItems)).
-			Debug("sending full input items (no previous_response_id)")
 	}
 
 	// Build request parameters
@@ -424,33 +425,43 @@ func (t *Thread) processMessageExchange(
 		Input:        responses.ResponseNewParamsInputUnion{OfInputItemList: inputToSend},
 		Instructions: param.NewOpt(systemPrompt),
 		Tools:        tools,
-		Store:        param.NewOpt(true), // Enable server-side conversation state storage
 	}
 
-	// Set previous_response_id for multi-turn conversations
-	if usePreviousResponseID {
+	// Enable server-side conversation state storage
+	// Codex API requires store=false explicitly
+	if t.isCodex {
+		params.Store = param.NewOpt(false)
+	} else {
+		params.Store = param.NewOpt(true)
+	}
+
+	// Set previous_response_id for multi-turn conversations (not supported by Codex API)
+	if usePreviousResponseID && !t.isCodex {
 		params.PreviousResponseID = param.NewOpt(t.lastResponseID)
 	}
 
-	// Set max output tokens if specified
-	if maxTokens > 0 {
+	// Set max output tokens if specified (not supported by Codex API)
+	if maxTokens > 0 && !t.isCodex {
 		params.MaxOutputTokens = param.NewOpt(int64(maxTokens))
 	}
 
 	// Add reasoning configuration for reasoning models (o-series, gpt-5, etc.)
-	if t.isReasoningModelDynamic(model) && t.reasoningEffort != "" {
+	// Note: Codex API may handle reasoning differently
+	if t.isReasoningModelDynamic(model) && t.reasoningEffort != "" && !t.isCodex {
 		params.Reasoning = shared.ReasoningParam{
 			Effort:  t.reasoningEffort,
 			Summary: shared.ReasoningSummaryDetailed,
 		}
 	}
 
-	log.WithField("model", model).
-		WithField("max_tokens", maxTokens).
-		WithField("is_reasoning", t.isReasoningModelDynamic(model)).
-		WithField("reasoning_effort", string(t.reasoningEffort)).
-		WithField("use_previous_response_id", usePreviousResponseID).
-		Debug("sending request to OpenAI Responses API")
+	// Log request details for debugging
+	if log.Logger.IsLevelEnabled(logrus.DebugLevel) {
+		log.WithField("model", model).
+			WithField("input_items", len(inputToSend)).
+			WithField("tool_count", len(tools)).
+			WithField("is_codex", t.isCodex).
+			Debug("sending request to Responses API")
+	}
 
 	// Use streaming API
 	stream := t.client.Responses.NewStreaming(ctx, params)
@@ -459,6 +470,13 @@ func (t *Thread) processMessageExchange(
 	// Process stream events
 	toolsUsed, err := t.processStream(ctx, stream, handler)
 	if err != nil {
+		// Log detailed error information for debugging
+		log.WithError(err).
+			WithField("model", model).
+			WithField("tool_count", len(tools)).
+			WithField("input_items", len(inputToSend)).
+			Error("API request failed")
+
 		// Check if the error is related to invalid previous_response_id
 		// If so, fall back to sending full input items
 		if usePreviousResponseID && isInvalidPreviousResponseIDError(err) {
