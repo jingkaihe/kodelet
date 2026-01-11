@@ -18,7 +18,7 @@ var codexLogoutCmd = &cobra.Command{
 	Long: `Logout from OpenAI Codex and remove stored credentials.
 
 This command will:
-1. Remove the stored authentication credentials from ~/.codex/auth.json
+1. Remove the stored authentication credentials from ~/.kodelet/codex-credentials.json
 2. You will need to run 'kodelet codex login' again to access ChatGPT-backed models
 
 After running this command, you will no longer have access to ChatGPT-backed
@@ -60,7 +60,7 @@ func runCodexLogout(_ context.Context, noConfirm bool) error {
 
 	presenter.Section("Codex Logout")
 	presenter.Success("Successfully logged out from OpenAI Codex.")
-	presenter.Info("Removed credentials file: ~/.codex/auth.json")
+	presenter.Info("Removed credentials file: ~/.kodelet/codex-credentials.json")
 	presenter.Info("You no longer have access to ChatGPT-backed Codex models.")
 	presenter.Info("Run 'kodelet codex login' to authenticate again.")
 

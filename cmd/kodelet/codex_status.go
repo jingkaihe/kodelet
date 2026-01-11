@@ -15,7 +15,7 @@ var codexStatusCmd = &cobra.Command{
 	Short: "Show Codex authentication status",
 	Long: `Show the current OpenAI Codex authentication status.
 
-This command checks if valid Codex credentials are available at ~/.codex/auth.json.
+This command checks if valid Codex credentials are available at ~/.kodelet/codex-credentials.json.
 These credentials are created by running 'kodelet codex login'.
 
 If credentials are found, you can use Kodelet with the Codex provider to access

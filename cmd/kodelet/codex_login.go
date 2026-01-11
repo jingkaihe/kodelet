@@ -21,7 +21,7 @@ var codexLoginCmd = &cobra.Command{
 This command will:
 1. Start a local OAuth callback server
 2. Open your browser to authenticate with OpenAI
-3. Save the authentication credentials to ~/.codex/auth.json
+3. Save the authentication credentials to ~/.kodelet/codex-credentials.json
 
 The saved credentials will allow you to use ChatGPT-backed Codex models
 that are available through the ChatGPT subscription.`,

@@ -28,7 +28,7 @@ type CodexTokens struct {
 }
 
 // CodexAuthFile represents the authentication file created by the Codex CLI.
-// This file is located at ~/.codex/auth.json and is created by running `codex login`.
+// This file is located at ~/.kodelet/codex-credentials.json and is created by running `kodelet codex login`.
 type CodexAuthFile struct {
 	Tokens       CodexTokens `json:"tokens"`
 	OpenAIAPIKey string      `json:"OPENAI_API_KEY,omitempty"`
@@ -69,7 +69,7 @@ func codexAuthFilePath() (string, error) {
 	if err != nil {
 		return "", errors.Wrap(err, "failed to get user home directory")
 	}
-	return filepath.Join(home, ".codex", "auth.json"), nil
+	return filepath.Join(home, ".kodelet", "codex-credentials.json"), nil
 }
 
 // GetCodexCredentialsExists checks if the Codex auth file exists.

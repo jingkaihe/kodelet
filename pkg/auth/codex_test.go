@@ -18,8 +18,8 @@ func TestCodexAuthFilePath(t *testing.T) {
 	defer os.Setenv("HOME", originalHome)
 	os.Setenv("HOME", tempDir)
 
-	// The path should be under ~/.codex/auth.json
-	expectedPath := filepath.Join(tempDir, ".codex", "auth.json")
+	// The path should be under ~/.kodelet/codex-credentials.json
+	expectedPath := filepath.Join(tempDir, ".kodelet", "codex-credentials.json")
 
 	// Create the auth file
 	require.NoError(t, os.MkdirAll(filepath.Dir(expectedPath), 0o755))
@@ -46,10 +46,10 @@ func TestGetCodexCredentialsExists(t *testing.T) {
 
 	t.Run("credentials exist", func(t *testing.T) {
 		// Create the credentials directory and file
-		codexDir := filepath.Join(tempDir, ".codex")
-		require.NoError(t, os.MkdirAll(codexDir, 0o755))
+		kodeletDir := filepath.Join(tempDir, ".kodelet")
+		require.NoError(t, os.MkdirAll(kodeletDir, 0o755))
 
-		authFile := filepath.Join(codexDir, "auth.json")
+		authFile := filepath.Join(kodeletDir, "codex-credentials.json")
 		require.NoError(t, os.WriteFile(authFile, []byte("{}"), 0o644))
 
 		exists, err := GetCodexCredentialsExists()
@@ -72,10 +72,10 @@ func TestGetCodexCredentials(t *testing.T) {
 	})
 
 	t.Run("invalid JSON", func(t *testing.T) {
-		codexDir := filepath.Join(tempDir, ".codex")
-		require.NoError(t, os.MkdirAll(codexDir, 0o755))
+		kodeletDir := filepath.Join(tempDir, ".kodelet")
+		require.NoError(t, os.MkdirAll(kodeletDir, 0o755))
 
-		authFile := filepath.Join(codexDir, "auth.json")
+		authFile := filepath.Join(kodeletDir, "codex-credentials.json")
 		require.NoError(t, os.WriteFile(authFile, []byte("invalid json"), 0o644))
 
 		_, err := GetCodexCredentials()
@@ -94,10 +94,10 @@ func TestGetCodexCredentials(t *testing.T) {
 			},
 		}
 
-		codexDir := filepath.Join(tempDir, ".codex")
-		require.NoError(t, os.MkdirAll(codexDir, 0o755))
+		kodeletDir := filepath.Join(tempDir, ".kodelet")
+		require.NoError(t, os.MkdirAll(kodeletDir, 0o755))
 
-		authFile := filepath.Join(codexDir, "auth.json")
+		authFile := filepath.Join(kodeletDir, "codex-credentials.json")
 		data, err := json.Marshal(authData)
 		require.NoError(t, err)
 		require.NoError(t, os.WriteFile(authFile, data, 0o644))
@@ -117,10 +117,10 @@ func TestGetCodexCredentials(t *testing.T) {
 			OpenAIAPIKey: "sk-test-api-key",
 		}
 
-		codexDir := filepath.Join(tempDir, ".codex")
-		require.NoError(t, os.MkdirAll(codexDir, 0o755))
+		kodeletDir := filepath.Join(tempDir, ".kodelet")
+		require.NoError(t, os.MkdirAll(kodeletDir, 0o755))
 
-		authFile := filepath.Join(codexDir, "auth.json")
+		authFile := filepath.Join(kodeletDir, "codex-credentials.json")
 		data, err := json.Marshal(authData)
 		require.NoError(t, err)
 		require.NoError(t, os.WriteFile(authFile, data, 0o644))
@@ -144,10 +144,10 @@ func TestGetCodexCredentials(t *testing.T) {
 			OpenAIAPIKey: "sk-fallback-key",
 		}
 
-		codexDir := filepath.Join(tempDir, ".codex")
-		require.NoError(t, os.MkdirAll(codexDir, 0o755))
+		kodeletDir := filepath.Join(tempDir, ".kodelet")
+		require.NoError(t, os.MkdirAll(kodeletDir, 0o755))
 
-		authFile := filepath.Join(codexDir, "auth.json")
+		authFile := filepath.Join(kodeletDir, "codex-credentials.json")
 		data, err := json.Marshal(authData)
 		require.NoError(t, err)
 		require.NoError(t, os.WriteFile(authFile, data, 0o644))
@@ -167,10 +167,10 @@ func TestGetCodexCredentials(t *testing.T) {
 			// Empty - no tokens and no API key
 		}
 
-		codexDir := filepath.Join(tempDir, ".codex")
-		require.NoError(t, os.MkdirAll(codexDir, 0o755))
+		kodeletDir := filepath.Join(tempDir, ".kodelet")
+		require.NoError(t, os.MkdirAll(kodeletDir, 0o755))
 
-		authFile := filepath.Join(codexDir, "auth.json")
+		authFile := filepath.Join(kodeletDir, "codex-credentials.json")
 		data, err := json.Marshal(authData)
 		require.NoError(t, err)
 		require.NoError(t, os.WriteFile(authFile, data, 0o644))
@@ -191,10 +191,10 @@ func TestGetCodexCredentials(t *testing.T) {
 			},
 		}
 
-		codexDir := filepath.Join(tempDir, ".codex")
-		require.NoError(t, os.MkdirAll(codexDir, 0o755))
+		kodeletDir := filepath.Join(tempDir, ".kodelet")
+		require.NoError(t, os.MkdirAll(kodeletDir, 0o755))
 
-		authFile := filepath.Join(codexDir, "auth.json")
+		authFile := filepath.Join(kodeletDir, "codex-credentials.json")
 		data, err := json.Marshal(authData)
 		require.NoError(t, err)
 		require.NoError(t, os.WriteFile(authFile, data, 0o644))
@@ -215,10 +215,10 @@ func TestGetCodexCredentials(t *testing.T) {
 			},
 		}
 
-		codexDir := filepath.Join(tempDir, ".codex")
-		require.NoError(t, os.MkdirAll(codexDir, 0o755))
+		kodeletDir := filepath.Join(tempDir, ".kodelet")
+		require.NoError(t, os.MkdirAll(kodeletDir, 0o755))
 
-		authFile := filepath.Join(codexDir, "auth.json")
+		authFile := filepath.Join(kodeletDir, "codex-credentials.json")
 		data, err := json.Marshal(authData)
 		require.NoError(t, err)
 		require.NoError(t, os.WriteFile(authFile, data, 0o644))
@@ -244,10 +244,10 @@ func TestCodexHeader(t *testing.T) {
 			},
 		}
 
-		codexDir := filepath.Join(tempDir, ".codex")
-		require.NoError(t, os.MkdirAll(codexDir, 0o755))
+		kodeletDir := filepath.Join(tempDir, ".kodelet")
+		require.NoError(t, os.MkdirAll(kodeletDir, 0o755))
 
-		authFile := filepath.Join(codexDir, "auth.json")
+		authFile := filepath.Join(kodeletDir, "codex-credentials.json")
 		data, err := json.Marshal(authData)
 		require.NoError(t, err)
 		require.NoError(t, os.WriteFile(authFile, data, 0o644))
@@ -266,10 +266,10 @@ func TestCodexHeader(t *testing.T) {
 			OpenAIAPIKey: "sk-test-api-key",
 		}
 
-		codexDir := filepath.Join(tempDir, ".codex")
-		require.NoError(t, os.MkdirAll(codexDir, 0o755))
+		kodeletDir := filepath.Join(tempDir, ".kodelet")
+		require.NoError(t, os.MkdirAll(kodeletDir, 0o755))
 
-		authFile := filepath.Join(codexDir, "auth.json")
+		authFile := filepath.Join(kodeletDir, "codex-credentials.json")
 		data, err := json.Marshal(authData)
 		require.NoError(t, err)
 		require.NoError(t, os.WriteFile(authFile, data, 0o644))
@@ -285,8 +285,8 @@ func TestCodexHeader(t *testing.T) {
 
 	t.Run("error when no credentials", func(t *testing.T) {
 		// Ensure no credentials file exists
-		codexDir := filepath.Join(tempDir, ".codex")
-		os.RemoveAll(codexDir)
+		kodeletDir := filepath.Join(tempDir, ".kodelet")
+		os.RemoveAll(kodeletDir)
 
 		_, err := CodexHeader()
 		assert.Error(t, err)
@@ -481,10 +481,10 @@ func TestCodexCredentialsFilePermissions(t *testing.T) {
 			},
 		}
 
-		codexDir := filepath.Join(tempDir, ".codex")
-		require.NoError(t, os.MkdirAll(codexDir, 0o700))
+		kodeletDir := filepath.Join(tempDir, ".kodelet")
+		require.NoError(t, os.MkdirAll(kodeletDir, 0o700))
 
-		authFile := filepath.Join(codexDir, "auth.json")
+		authFile := filepath.Join(kodeletDir, "codex-credentials.json")
 		data, err := json.Marshal(authData)
 		require.NoError(t, err)
 		// Write with restricted permissions (600)
