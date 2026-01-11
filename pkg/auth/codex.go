@@ -116,8 +116,12 @@ func CodexHeader() ([]option.RequestOption, error) {
 }
 
 // CodexHeaderWithCredentials returns the HTTP request options for Codex API calls
-// using the provided credentials.
+// using the provided credentials. Returns nil if credentials are nil or empty.
 func CodexHeaderWithCredentials(creds *CodexCredentials) []option.RequestOption {
+	if creds == nil {
+		return nil
+	}
+
 	if creds.AccessToken != "" && creds.AccountID != "" {
 		// Use OAuth tokens - set Authorization header with Bearer token
 		return []option.RequestOption{
