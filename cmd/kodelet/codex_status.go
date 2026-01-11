@@ -39,9 +39,10 @@ func runCodexStatus() {
 		fmt.Println("1. Run 'kodelet codex login' to authenticate with your ChatGPT account")
 		fmt.Println("2. Run 'kodelet codex status' again to verify")
 		fmt.Println()
-		presenter.Info("Once authenticated, use:")
-		fmt.Println("  kodelet run --provider=codex \"your query\"")
-		fmt.Println("  # or set KODELET_PROVIDER=codex in your environment")
+		presenter.Info("Once authenticated, add to your config:")
+		fmt.Println("  provider: openai")
+		fmt.Println("  openai:")
+		fmt.Println("    preset: codex")
 		return
 	}
 
@@ -83,9 +84,10 @@ func runCodexStatus() {
 	}
 
 	fmt.Println()
-	presenter.Info("You can now use Kodelet with Codex models:")
-	fmt.Println("  kodelet run --provider=codex \"your query\"")
-	fmt.Println("  # or set KODELET_PROVIDER=codex in your environment")
+	presenter.Info("You can now use Kodelet with Codex models. Add to your config:")
+	fmt.Println("  provider: openai")
+	fmt.Println("  openai:")
+	fmt.Println("    preset: codex")
 	fmt.Println()
 	presenter.Info("Available Codex models:")
 	fmt.Println("  - gpt-5.1-codex-max (default)")

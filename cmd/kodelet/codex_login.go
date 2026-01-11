@@ -87,9 +87,10 @@ func runCodexLogin(ctx context.Context) error {
 	fmt.Printf("Account ID: %s\n", maskString(creds.AccountID))
 	fmt.Printf("Credentials saved to: %s\n", credentialsPath)
 	fmt.Println()
-	presenter.Info("You can now use Kodelet with Codex models:")
-	fmt.Println("  kodelet run --provider=codex \"your query\"")
-	fmt.Println("  # or set KODELET_PROVIDER=codex in your environment")
+	presenter.Info("You can now use Kodelet with Codex models. Add to your config:")
+	fmt.Println("  provider: openai")
+	fmt.Println("  openai:")
+	fmt.Println("    preset: codex")
 
 	return nil
 }

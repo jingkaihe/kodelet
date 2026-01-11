@@ -13,7 +13,6 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/llm/anthropic"
 	"github.com/jingkaihe/kodelet/pkg/llm/google"
 	"github.com/jingkaihe/kodelet/pkg/llm/openai"
-	codexpreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/codex"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -46,17 +45,6 @@ func NewThread(config llmtypes.Config) (llmtypes.Thread, error) {
 	// Create thread based on provider
 	switch strings.ToLower(config.Provider) {
 	case "openai":
-		return openai.NewThread(config, NewSubagentContext)
-	case "codex":
-		// Codex provider uses OpenAI Responses API with Codex CLI auth
-		if config.OpenAI == nil {
-			config.OpenAI = &llmtypes.OpenAIConfig{}
-		}
-		config.OpenAI.Preset = "codex"
-		// Use default Codex model if no model specified or if model is not Codex-compatible
-		if config.Model == "" || !isCodexModel(config.Model) {
-			config.Model = codexpreset.DefaultModel
-		}
 		return openai.NewThread(config, NewSubagentContext)
 	case "anthropic":
 		return anthropic.NewAnthropicThread(config, NewSubagentContext)
@@ -197,22 +185,4 @@ func ExtractMessages(provider string, rawMessages []byte, toolResults map[string
 	default:
 		return nil, errors.Errorf("unsupported provider: %s", provider)
 	}
-}
-
-// isCodexModel checks if a model name is a valid Codex model.
-// Uses the model list from the codex preset package to avoid duplication.
-func isCodexModel(model string) bool {
-	// Check reasoning models from the preset
-	for _, m := range codexpreset.Models.Reasoning {
-		if strings.EqualFold(model, m) {
-			return true
-		}
-	}
-	// Check non-reasoning models from the preset
-	for _, m := range codexpreset.Models.NonReasoning {
-		if strings.EqualFold(model, m) {
-			return true
-		}
-	}
-	return false
 }
