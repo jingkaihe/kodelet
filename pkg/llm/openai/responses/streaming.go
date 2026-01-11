@@ -85,6 +85,13 @@ func (t *Thread) processStream(
 				}
 			}
 
+		case "response.reasoning_text.done", "response.reasoning_summary_text.done":
+			// Reasoning content complete - end thinking block for streaming handlers
+			if isStreaming && thinkingStarted {
+				streamHandler.HandleContentBlockEnd()
+				thinkingStarted = false
+			}
+
 		case "response.function_call_arguments.delta":
 			// Function call arguments delta
 			callID := event.ItemID
