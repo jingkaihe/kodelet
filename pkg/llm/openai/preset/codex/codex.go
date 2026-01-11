@@ -37,36 +37,14 @@ func GetPrompt(name string) (string, error) {
 	return prompt, nil
 }
 
-// GetBasePrompt returns the base Codex prompt.
-func GetBasePrompt() (string, error) {
-	return GetPrompt("prompt")
-}
-
-// GetGPT52Prompt returns the GPT-5.2 specific prompt.
-func GetGPT52Prompt() (string, error) {
-	return GetPrompt("gpt_5_2_prompt")
-}
-
-// GetGPT51CodexMaxPrompt returns the GPT-5.1 Codex Max specific prompt.
-func GetGPT51CodexMaxPrompt() (string, error) {
-	return GetPrompt("gpt_5_1_codex_max_prompt")
-}
-
-// GetHierarchicalAgentsMessage returns the hierarchical agents message.
-func GetHierarchicalAgentsMessage() (string, error) {
-	return GetPrompt("hierarchical_agents_message")
+// GetCodexPrompt returns the GPT-5.2 specific prompt.
+func GetCodexPrompt() (string, error) {
+	return GetPrompt("codex.md")
 }
 
 // GetSystemPromptForModel returns the appropriate system prompt for a model.
-func GetSystemPromptForModel(modelSlug string) (string, error) {
-	switch {
-	case strings.Contains(modelSlug, "gpt-5.2"):
-		return GetGPT52Prompt()
-	case strings.Contains(modelSlug, "gpt-5.1-codex-max"):
-		return GetGPT51CodexMaxPrompt()
-	default:
-		return GetBasePrompt()
-	}
+func GetSystemPromptForModel(_ string) (string, error) {
+	return GetCodexPrompt()
 }
 
 // Models defines the Codex model categorization for reasoning and non-reasoning models.

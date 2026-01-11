@@ -5,9 +5,12 @@
 package responses
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -371,6 +374,29 @@ func (t *Thread) applyCodexRestrictions(params *responses.ResponseNewParams) {
 	// Clear unsupported parameters
 	params.PreviousResponseID = param.Opt[string]{}
 	params.MaxOutputTokens = param.Opt[int64]{}
+
+	if t.State != nil {
+		contexts := t.State.DiscoverContexts()
+
+		promptCtx := sysprompt.NewPromptContext(contexts)
+		devMessages := []string{
+			promptCtx.FormatSystemInfo(),
+			promptCtx.FormatContexts(),
+			promptCtx.FormatMCPServers(),
+		}
+
+		// prepend dev messages to params' input
+		for i := len(devMessages) - 1; i >= 0; i-- {
+			params.Input.OfInputItemList = append([]responses.ResponseInputItemUnionParam{
+				{
+					OfMessage: &responses.EasyInputMessageParam{
+						Role:    responses.EasyInputMessageRoleDeveloper,
+						Content: responses.EasyInputMessageContentUnionParam{OfString: param.NewOpt(devMessages[i])},
+					},
+				},
+			}, params.Input.OfInputItemList...)
+		}
+	}
 }
 
 // processMessageExchange handles a single message exchange with the Responses API.
@@ -827,24 +853,36 @@ func loadCustomConfiguration(config llmtypes.Config) (map[string]string, map[str
 func buildClientOptions(config llmtypes.Config, log *logrus.Entry) ([]option.RequestOption, bool, error) {
 	useCodex := config.OpenAI != nil && config.OpenAI.Preset == "codex"
 
+	var opts []option.RequestOption
+	var err error
+
 	if useCodex {
-		return buildCodexAuthOptions(log)
+		opts, err = buildCodexAuthOptions(log)
+	} else {
+		opts, err = buildAPIKeyAuthOptions(config, log)
 	}
-	return buildAPIKeyAuthOptions(config, log)
+	if err != nil {
+		return nil, useCodex, err
+	}
+
+	// Add error logging middleware
+	opts = append(opts, errorLoggingMiddleware(log))
+
+	return opts, useCodex, nil
 }
 
 // buildCodexAuthOptions returns client options for Codex CLI authentication.
-func buildCodexAuthOptions(log *logrus.Entry) ([]option.RequestOption, bool, error) {
+func buildCodexAuthOptions(log *logrus.Entry) ([]option.RequestOption, error) {
 	log.Debug("using Codex authentication for Responses API")
 	opts, err := auth.CodexHeader()
 	if err != nil {
-		return nil, true, errors.Wrap(err, "failed to get Codex credentials")
+		return nil, errors.Wrap(err, "failed to get Codex credentials")
 	}
-	return opts, true, nil
+	return opts, nil
 }
 
 // buildAPIKeyAuthOptions returns client options for standard API key authentication.
-func buildAPIKeyAuthOptions(config llmtypes.Config, log *logrus.Entry) ([]option.RequestOption, bool, error) {
+func buildAPIKeyAuthOptions(config llmtypes.Config, log *logrus.Entry) ([]option.RequestOption, error) {
 	apiKeyEnvVar := "OPENAI_API_KEY"
 	if config.OpenAI != nil && config.OpenAI.APIKeyEnvVar != "" {
 		apiKeyEnvVar = config.OpenAI.APIKeyEnvVar
@@ -852,7 +890,7 @@ func buildAPIKeyAuthOptions(config llmtypes.Config, log *logrus.Entry) ([]option
 
 	apiKey := os.Getenv(apiKeyEnvVar)
 	if apiKey == "" {
-		return nil, false, errors.Errorf("%s environment variable is required", apiKeyEnvVar)
+		return nil, errors.Errorf("%s environment variable is required", apiKeyEnvVar)
 	}
 
 	log.WithField("api_key_env_var", apiKeyEnvVar).Debug("using OpenAI API key for Responses API")
@@ -868,7 +906,36 @@ func buildAPIKeyAuthOptions(config llmtypes.Config, log *logrus.Entry) ([]option
 		opts = append(opts, option.WithBaseURL(config.OpenAI.BaseURL))
 	}
 
-	return opts, false, nil
+	return opts, nil
+}
+
+// errorLoggingMiddleware returns a middleware that logs error response bodies for debugging.
+func errorLoggingMiddleware(log *logrus.Entry) option.RequestOption {
+	return option.WithMiddleware(func(req *http.Request, next option.MiddlewareNext) (*http.Response, error) {
+		resp, err := next(req)
+		if err != nil {
+			return resp, err
+		}
+
+		// Log response body for non-2xx status codes
+		if resp != nil && resp.StatusCode >= 400 {
+			body, readErr := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if readErr != nil {
+				log.WithError(readErr).Debug("failed to read error response body")
+				return resp, err
+			}
+
+			log.WithField("status_code", resp.StatusCode).
+				WithField("response_body", string(body)).
+				Debug("API error response")
+
+			// Restore the body so the SDK can still read it
+			resp.Body = io.NopCloser(bytes.NewReader(body))
+		}
+
+		return resp, err
+	})
 }
 
 // loadPreset loads a built-in preset configuration for popular providers.
