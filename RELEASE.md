@@ -1,5 +1,15 @@
 # Kodelet
 
+## 0.1.42.beta (2026-01-14)
+
+### Bug Fixes
+
+**Thinking block termination**: Streaming output now ends thinking blocks separately from content across Anthropic/OpenAI/Responses streams to keep reasoning separators aligned.
+
+### Internal Changes
+
+**OpenAI reasoning summaries**: Responses threads now default to `auto` reasoning summaries.
+
 ## 0.1.41.beta (2026-01-11)
 
 ### Features
