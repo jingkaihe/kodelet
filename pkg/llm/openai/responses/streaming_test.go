@@ -73,6 +73,10 @@ func (h *captureStreamHandler) HandleThinkingDelta(delta string) {
 	h.events = append(h.events, "thinking_delta:"+delta)
 }
 
+func (h *captureStreamHandler) HandleThinkingBlockEnd() {
+	h.events = append(h.events, "thinking_block_end")
+}
+
 func (h *captureStreamHandler) HandleContentBlockEnd() {
 	h.events = append(h.events, "content_block_end")
 }
@@ -126,7 +130,7 @@ func TestProcessStreamThinkingEndsBeforeText(t *testing.T) {
 	assert.Equal(t, []string{
 		"thinking_start",
 		"thinking_delta:Thought",
-		"content_block_end",
+		"thinking_block_end",
 		"text_delta:Answer",
 		"content_block_end",
 	}, handler.events)

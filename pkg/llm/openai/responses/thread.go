@@ -454,7 +454,7 @@ func (t *Thread) processMessageExchange(
 		}
 		params.Reasoning = shared.ReasoningParam{
 			Effort:  reasoningEffort,
-			Summary: shared.ReasoningSummaryDetailed,
+			Summary: shared.ReasoningSummaryAuto,
 		}
 	}
 
