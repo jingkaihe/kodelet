@@ -285,6 +285,10 @@ func (h *ACPMessageHandler) HandleThinkingDelta(delta string) {
 	})
 }
 
+// HandleThinkingBlockEnd is called when a thinking block ends
+func (h *ACPMessageHandler) HandleThinkingBlockEnd() {
+}
+
 // HandleContentBlockEnd is called when a content block ends
 func (h *ACPMessageHandler) HandleContentBlockEnd() {
 }

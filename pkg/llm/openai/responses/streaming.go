@@ -88,7 +88,7 @@ func (t *Thread) processStream(
 		case "response.reasoning_text.done", "response.reasoning_summary_text.done":
 			// Reasoning content complete - end thinking block for streaming handlers
 			if isStreaming && thinkingStarted {
-				streamHandler.HandleContentBlockEnd()
+				streamHandler.HandleThinkingBlockEnd()
 				thinkingStarted = false
 			}
 
@@ -128,7 +128,7 @@ func (t *Thread) processStream(
 
 				// Signal end of thinking block before first tool use (adds line break)
 				if isStreaming && thinkingStarted {
-					streamHandler.HandleContentBlockEnd()
+					streamHandler.HandleThinkingBlockEnd()
 					thinkingStarted = false
 				}
 
@@ -241,7 +241,7 @@ func (t *Thread) processStream(
 
 			// Signal end of thinking block for streaming handlers (if not already done)
 			if isStreaming && thinkingStarted {
-				streamHandler.HandleContentBlockEnd()
+				streamHandler.HandleThinkingBlockEnd()
 				thinkingStarted = false
 			}
 

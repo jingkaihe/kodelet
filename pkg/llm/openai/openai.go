@@ -846,7 +846,10 @@ func (t *Thread) createStreamingChatCompletion(ctx context.Context, requestParam
 	}
 
 	// Signal end of content blocks
-	if textStarted || reasoningStarted {
+	if reasoningStarted {
+		handler.HandleThinkingBlockEnd()
+	}
+	if textStarted {
 		handler.HandleContentBlockEnd()
 	}
 

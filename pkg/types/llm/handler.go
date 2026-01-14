@@ -51,6 +51,7 @@ type StreamingMessageHandler interface {
 	HandleTextDelta(delta string)     // Called for each text chunk as it streams
 	HandleThinkingStart()             // Called when a thinking block starts
 	HandleThinkingDelta(delta string) // Called for each thinking chunk as it streams
+	HandleThinkingBlockEnd()          // Called when a thinking block ends (for visual separation)
 	HandleContentBlockEnd()           // Called when any content block ends
 }
 
@@ -69,10 +70,11 @@ const (
 	EventTypeToolResult = "tool_result"
 
 	// Streaming event types
-	EventTypeTextDelta       = "text_delta"
-	EventTypeThinkingStart   = "thinking_start"
-	EventTypeThinkingDelta   = "thinking_delta"
-	EventTypeContentBlockEnd = "content_block_end"
+	EventTypeTextDelta        = "text_delta"
+	EventTypeThinkingStart    = "thinking_start"
+	EventTypeThinkingDelta    = "thinking_delta"
+	EventTypeThinkingBlockEnd = "thinking_block_end"
+	EventTypeContentBlockEnd  = "content_block_end"
 )
 
 // ConsoleMessageHandler prints messages to the console
@@ -148,6 +150,15 @@ func (h *ConsoleMessageHandler) HandleThinkingDelta(delta string) {
 	if !h.Silent {
 		consoleMu.Lock()
 		fmt.Print(delta)
+		consoleMu.Unlock()
+	}
+}
+
+// HandleThinkingBlockEnd prints a separator when a thinking block ends unless Silent is true
+func (h *ConsoleMessageHandler) HandleThinkingBlockEnd() {
+	if !h.Silent {
+		consoleMu.Lock()
+		fmt.Println("\n----")
 		consoleMu.Unlock()
 	}
 }
@@ -231,6 +242,14 @@ func (h *ChannelMessageHandler) HandleThinkingDelta(delta string) {
 	h.MessageCh <- MessageEvent{
 		Type:    EventTypeThinkingDelta,
 		Content: delta,
+	}
+}
+
+// HandleThinkingBlockEnd sends a thinking block end event through the message channel
+func (h *ChannelMessageHandler) HandleThinkingBlockEnd() {
+	h.MessageCh <- MessageEvent{
+		Type:    EventTypeThinkingBlockEnd,
+		Content: "",
 	}
 }
 
@@ -333,6 +352,15 @@ func (h *StringCollectorHandler) HandleThinkingDelta(delta string) {
 	if !h.Silent {
 		consoleMu.Lock()
 		fmt.Print(delta)
+		consoleMu.Unlock()
+	}
+}
+
+// HandleThinkingBlockEnd optionally prints a separator when a thinking block ends
+func (h *StringCollectorHandler) HandleThinkingBlockEnd() {
+	if !h.Silent {
+		consoleMu.Lock()
+		fmt.Println("\n----")
 		consoleMu.Unlock()
 	}
 }

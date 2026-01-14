@@ -789,6 +789,7 @@ func (t *Thread) NewMessage(ctx context.Context, params anthropic.MessageNewPara
 	}
 
 	message := anthropic.Message{}
+	inThinkingBlock := false
 	for stream.Next() {
 		// Check for context cancellation - Anthropic SDK may not propagate it properly
 		if ctx.Err() != nil {
@@ -827,6 +828,7 @@ func (t *Thread) NewMessage(ctx context.Context, params anthropic.MessageNewPara
 			case anthropic.ContentBlockStartEvent:
 				switch eventVariant.ContentBlock.AsAny().(type) {
 				case anthropic.ThinkingBlock:
+					inThinkingBlock = true
 					streamHandler.HandleThinkingStart()
 				}
 			case anthropic.ContentBlockDeltaEvent:
@@ -837,7 +839,12 @@ func (t *Thread) NewMessage(ctx context.Context, params anthropic.MessageNewPara
 					streamHandler.HandleThinkingDelta(deltaVariant.Thinking)
 				}
 			case anthropic.ContentBlockStopEvent:
-				streamHandler.HandleContentBlockEnd()
+				if inThinkingBlock {
+					streamHandler.HandleThinkingBlockEnd()
+					inThinkingBlock = false
+				} else {
+					streamHandler.HandleContentBlockEnd()
+				}
 			}
 		}
 	}
