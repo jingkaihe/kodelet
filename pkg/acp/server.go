@@ -399,15 +399,17 @@ func (s *Server) handleSessionPrompt(req *acptypes.Request) error {
 	}
 
 	prompt := params.Prompt
+	var invokedRecipe string
 	if command, args, found := parseSlashCommand(params.Prompt); found && s.fragmentProcessor != nil {
 		transformedPrompt, err := s.transformSlashCommandPrompt(command, args, params.Prompt)
 		if err != nil {
 			return s.sendError(req.ID, acptypes.ErrCodeInvalidParams, err.Error(), nil)
 		}
 		prompt = transformedPrompt
+		invokedRecipe = command
 	}
 
-	stopReason, err := sess.HandlePrompt(promptCtx, prompt, s)
+	stopReason, err := sess.HandlePrompt(promptCtx, prompt, s, session.HandlePromptOpts{InvokedRecipe: invokedRecipe})
 	if err != nil {
 		if sess.IsCancelled() || errors.Is(err, context.Canceled) {
 			stopReason = acptypes.StopReasonCancelled

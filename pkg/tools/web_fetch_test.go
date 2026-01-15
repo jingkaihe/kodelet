@@ -578,6 +578,8 @@ func (m *MockThread) NewSubAgent(_ context.Context, _ llm.Config) llm.Thread {
 
 func (m *MockThread) AggregateSubagentUsage(_ llm.Usage) {}
 
+func (m *MockThread) SetInvokedRecipe(_ string) {}
+
 func (m *MockThread) Reset() {
 	m.called = false
 	m.lastPrompt = ""

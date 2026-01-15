@@ -59,8 +59,14 @@ type UpdateSender interface {
 	SendUpdate(sessionID acptypes.SessionID, update any) error
 }
 
+// HandlePromptOpts contains optional parameters for HandlePrompt
+type HandlePromptOpts struct {
+	// InvokedRecipe is the recipe name if a slash command was used
+	InvokedRecipe string
+}
+
 // HandlePrompt processes a prompt and returns the stop reason
-func (s *Session) HandlePrompt(ctx context.Context, prompt []acptypes.ContentBlock, sender UpdateSender) (acptypes.StopReason, error) {
+func (s *Session) HandlePrompt(ctx context.Context, prompt []acptypes.ContentBlock, sender UpdateSender, opts ...HandlePromptOpts) (acptypes.StopReason, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	s.mu.Lock()
 	s.cancelFunc = cancel
@@ -72,6 +78,11 @@ func (s *Session) HandlePrompt(ctx context.Context, prompt []acptypes.ContentBlo
 		s.cancelFunc = nil
 		s.mu.Unlock()
 	}()
+
+	// Set invoked recipe if provided
+	if len(opts) > 0 && opts[0].InvokedRecipe != "" {
+		s.Thread.SetInvokedRecipe(opts[0].InvokedRecipe)
+	}
 
 	message, images := bridge.ContentBlocksToMessage(prompt)
 

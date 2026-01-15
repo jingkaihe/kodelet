@@ -86,4 +86,6 @@ type Thread interface {
 	// AggregateSubagentUsage aggregates usage from a subagent into this thread's usage
 	// This aggregates token counts and costs but NOT context window (which should remain isolated)
 	AggregateSubagentUsage(usage Usage)
+	// SetInvokedRecipe sets the recipe name that invoked this session for hook coordination
+	SetInvokedRecipe(recipe string)
 }

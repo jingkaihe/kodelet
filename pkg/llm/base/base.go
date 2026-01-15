@@ -317,6 +317,12 @@ func (t *Thread) ApplyMutationToConversation(ctx context.Context, convID string,
 	return nil
 }
 
+// SetInvokedRecipe sets the recipe name that invoked this session for hook coordination.
+// This updates the HookTrigger to include the recipe context in agent_stop payloads.
+func (t *Thread) SetInvokedRecipe(recipe string) {
+	t.HookTrigger.InvokedRecipe = recipe
+}
+
 // CreateMessageSpan creates a new tracing span for LLM message processing.
 // It includes common attributes shared across all providers and allows for additional
 // provider-specific attributes to be passed in.

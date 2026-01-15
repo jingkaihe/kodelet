@@ -228,6 +228,11 @@ var runCmd = &cobra.Command{
 
 		applyFragmentRestrictions(&llmConfig, fragmentMetadata)
 
+		// Set InvokedRecipe if a fragment/recipe was used
+		if config.FragmentName != "" {
+			llmConfig.InvokedRecipe = config.FragmentName
+		}
+
 		// Check if MCP code execution mode is enabled
 		executionMode := viper.GetString("mcp.execution_mode")
 		workspaceDir := viper.GetString("mcp.code_execution.workspace_dir")
