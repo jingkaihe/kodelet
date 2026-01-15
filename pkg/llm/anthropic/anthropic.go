@@ -940,16 +940,7 @@ func (t *Thread) NewSubAgent(_ context.Context, config llmtypes.Config) llmtypes
 	// Create subagent hook trigger using parent's manager
 	hookTrigger := hooks.NewTrigger(t.HookTrigger.Manager, conversationID, true)
 
-	// Create subagent's base thread sharing parent's usage tracking
-	baseThread := &base.Thread{
-		Config:                 config,
-		ConversationID:         conversationID,
-		Persisted:              false,                                           // subagent is not persisted
-		Usage:                  t.Usage,                                         // Share usage tracking with parent
-		ToolResults:            make(map[string]tooltypes.StructuredToolResult), // Initialize tool results map
-		SubagentContextFactory: t.SubagentContextFactory,                        // Propagate the injected function
-		HookTrigger:            hookTrigger,
-	}
+	baseThread := base.NewThread(config, conversationID, t.SubagentContextFactory, hookTrigger)
 
 	// Create subagent thread reusing the parent's client instead of creating a new one
 	thread := &Thread{

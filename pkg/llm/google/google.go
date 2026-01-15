@@ -1085,9 +1085,6 @@ func (t *Thread) NewSubAgent(_ context.Context, config llmtypes.Config) llmtypes
 		thinkingBudget: t.thinkingBudget,
 	}
 
-	// Share usage tracking with parent
-	subagentThread.Usage = t.Usage
-
 	subagentThread.SetState(t.State)
 	return subagentThread
 }
