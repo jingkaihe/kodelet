@@ -10,6 +10,8 @@ import (
 
 	"github.com/pkg/errors"
 
+	"github.com/jingkaihe/kodelet/pkg/fragments"
+	"github.com/jingkaihe/kodelet/pkg/hooks"
 	"github.com/jingkaihe/kodelet/pkg/llm/anthropic"
 	"github.com/jingkaihe/kodelet/pkg/llm/google"
 	"github.com/jingkaihe/kodelet/pkg/llm/openai"
@@ -43,16 +45,52 @@ func NewThread(config llmtypes.Config) (llmtypes.Thread, error) {
 	config.Model = resolveModelAlias(config.Model, config.Aliases)
 
 	// Create thread based on provider
+	var thread llmtypes.Thread
+	var err error
+
 	switch strings.ToLower(config.Provider) {
 	case "openai":
-		return openai.NewThread(config, NewSubagentContext)
+		thread, err = openai.NewThread(config, NewSubagentContext)
 	case "anthropic":
-		return anthropic.NewAnthropicThread(config, NewSubagentContext)
+		thread, err = anthropic.NewAnthropicThread(config, NewSubagentContext)
 	case "google":
-		return google.NewGoogleThread(config, NewSubagentContext)
+		thread, err = google.NewGoogleThread(config, NewSubagentContext)
 	default:
 		return nil, errors.Errorf("unsupported provider: %s", config.Provider)
 	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	// Set up callback registry for recipe-based hooks (e.g., compact)
+	// Skip for subagents as they don't need callback capabilities
+	if !config.IsSubAgent {
+		setupCallbackRegistry(thread, config)
+	}
+
+	return thread, nil
+}
+
+// setupCallbackRegistry creates a CallbackRegistry and sets it on the thread.
+// This enables recipe-based callbacks (e.g., compact) to be invoked from hooks.
+func setupCallbackRegistry(thread llmtypes.Thread, config llmtypes.Config) {
+	// Create a fragment processor for loading recipes
+	fp, err := fragments.NewFragmentProcessor()
+	if err != nil {
+		// Non-fatal: hooks just won't be able to invoke recipe callbacks
+		logger.G(context.Background()).WithError(err).Debug("failed to create fragment processor for callbacks")
+		return
+	}
+
+	// Create thread factory for callback execution
+	threadFactory := func(_ context.Context, cfg llmtypes.Config) (llmtypes.Thread, error) {
+		return NewThread(cfg)
+	}
+
+	// Create and set the callback registry
+	registry := hooks.NewCallbackRegistry(fp, threadFactory, config)
+	thread.SetCallbackRegistry(registry)
 }
 
 // NewSubagentThread creates a new subagent thread based on the parent thread's configuration

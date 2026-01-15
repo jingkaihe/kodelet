@@ -42,6 +42,7 @@ func (m *subagentMockThread) NewSubAgent(_ context.Context, _ llmtypes.Config) l
 }
 func (m *subagentMockThread) AggregateSubagentUsage(_ llmtypes.Usage) {}
 func (m *subagentMockThread) SetInvokedRecipe(_ string)               {}
+func (m *subagentMockThread) SetCallbackRegistry(_ interface{})       {}
 
 func TestSubAgentTool_BasicMethods(t *testing.T) {
 	tool := &SubAgentTool{}

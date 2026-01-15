@@ -88,4 +88,7 @@ type Thread interface {
 	AggregateSubagentUsage(usage Usage)
 	// SetInvokedRecipe sets the recipe name that invoked this session for hook coordination
 	SetInvokedRecipe(recipe string)
+	// SetCallbackRegistry sets the callback registry for recipe execution during hooks
+	// The registry parameter should be *hooks.CallbackRegistry (uses interface{} to avoid circular import)
+	SetCallbackRegistry(registry interface{})
 }

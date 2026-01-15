@@ -232,6 +232,7 @@ func (m *mockThread) GetConfig() llm.Config                                   { 
 func (m *mockThread) NewSubAgent(_ context.Context, _ llm.Config) llm.Thread  { return m }
 func (m *mockThread) AggregateSubagentUsage(_ llm.Usage)                      {}
 func (m *mockThread) SetInvokedRecipe(_ string)                               {}
+func (m *mockThread) SetCallbackRegistry(_ interface{})                       {}
 
 func TestImageRecognitionTool_Execute(t *testing.T) {
 	tool := &ImageRecognitionTool{}

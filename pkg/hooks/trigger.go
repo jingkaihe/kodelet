@@ -142,7 +142,7 @@ func (t Trigger) TriggerAfterToolCall(ctx context.Context, toolName, toolInput, 
 // TriggerAfterTurn invokes after_turn hooks after each LLM response.
 // This enables hooks to monitor context usage and trigger compaction mid-session.
 // A zero-value Trigger returns an empty result.
-func (t Trigger) TriggerAfterTurn(ctx context.Context, turnNumber int, toolsUsed bool, usage llmtypes.Usage) *AfterTurnResult {
+func (t Trigger) TriggerAfterTurn(ctx context.Context, turnNumber int, toolsUsed bool, usage llmtypes.Usage, lastAssistantContent string) *AfterTurnResult {
 	if !t.Manager.HasHooks(HookTypeAfterTurn) {
 		return &AfterTurnResult{}
 	}
@@ -164,6 +164,8 @@ func (t Trigger) TriggerAfterTurn(ctx context.Context, turnNumber int, toolsUsed
 			CurrentContextWindow: usage.CurrentContextWindow,
 			MaxContextWindow:     usage.MaxContextWindow,
 		},
+		InvokedRecipe:        t.InvokedRecipe,
+		LastAssistantContent: lastAssistantContent,
 	}
 
 	result, err := t.Manager.ExecuteAfterTurn(ctx, payload)

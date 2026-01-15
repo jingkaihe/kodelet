@@ -429,7 +429,7 @@ OUTER:
 			finalOutput = exchangeOutput
 
 			// Trigger after_turn hook on every turn to enable mid-session actions like compaction
-			afterTurnResult := t.HookTrigger.TriggerAfterTurn(ctx, turnCount, toolsUsed, t.GetUsage())
+			afterTurnResult := t.HookTrigger.TriggerAfterTurn(ctx, turnCount, toolsUsed, t.GetUsage(), finalOutput)
 			if err := t.ProcessAfterTurnResult(ctx, afterTurnResult, t.replaceMessages, t.saveConversationCallback(opt)); err != nil {
 				logger.G(ctx).WithError(err).Error("failed to process after_turn hook result")
 			}

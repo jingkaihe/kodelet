@@ -5,6 +5,7 @@ package builtin
 
 import (
 	"github.com/jingkaihe/kodelet/pkg/hooks"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
 
 // AfterTurnCompactHook checks context threshold after each turn and triggers compact.
@@ -30,9 +31,22 @@ func (h *AfterTurnCompactHook) Type() hooks.HookType {
 	return hooks.HookTypeAfterTurn
 }
 
-// Execute checks context threshold and triggers compact callback if needed
+// Execute checks context threshold and triggers compact callback if needed.
+// Also handles manual compact recipe completion by returning a mutation.
 func (h *AfterTurnCompactHook) Execute(payload *hooks.AfterTurnPayload) (*hooks.AfterTurnResult, error) {
-	// Only trigger if auto-compact is enabled and we have usage info
+	// Handle manual compact recipe completion
+	// When user runs "kodelet run -r compact --follow", the compact recipe generates a summary
+	// We detect this by checking InvokedRecipe == "compact" and no tools were used (final response)
+	if payload.InvokedRecipe == "compact" && !payload.ToolsUsed && payload.LastAssistantContent != "" {
+		return &hooks.AfterTurnResult{
+			Result: hooks.HookResultMutate,
+			Messages: []llmtypes.Message{
+				{Role: "user", Content: payload.LastAssistantContent},
+			},
+		}, nil
+	}
+
+	// Auto-compact: trigger callback when context threshold is reached
 	if !payload.AutoCompactEnabled || payload.Usage.MaxContextWindow == 0 {
 		return &hooks.AfterTurnResult{}, nil
 	}

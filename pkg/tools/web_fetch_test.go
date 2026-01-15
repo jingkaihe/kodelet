@@ -580,6 +580,8 @@ func (m *MockThread) AggregateSubagentUsage(_ llm.Usage) {}
 
 func (m *MockThread) SetInvokedRecipe(_ string) {}
 
+func (m *MockThread) SetCallbackRegistry(_ interface{}) {}
+
 func (m *MockThread) Reset() {
 	m.called = false
 	m.lastPrompt = ""

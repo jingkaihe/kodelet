@@ -74,6 +74,14 @@ type AfterTurnPayload struct {
 
 	// AutoCompactThreshold is the threshold ratio (e.g., 0.80)
 	AutoCompactThreshold float64 `json:"auto_compact_threshold,omitempty"`
+
+	// InvokedRecipe is the recipe that triggered this agent session (if any)
+	// Empty string if no recipe was used (e.g., direct query)
+	InvokedRecipe string `json:"invoked_recipe,omitempty"`
+
+	// LastAssistantContent is the content of the last assistant message
+	// Used for recipe completion detection (e.g., compact summary)
+	LastAssistantContent string `json:"last_assistant_content,omitempty"`
 }
 
 // AfterTurnResult is returned by after_turn hooks

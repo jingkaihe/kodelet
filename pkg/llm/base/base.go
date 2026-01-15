@@ -296,6 +296,14 @@ func (t *Thread) SetInvokedRecipe(recipe string) {
 	t.HookTrigger.InvokedRecipe = recipe
 }
 
+// SetCallbackRegistry sets the callback registry for recipe execution during hooks.
+// The registry parameter should be *hooks.CallbackRegistry.
+func (t *Thread) SetCallbackRegistry(registry interface{}) {
+	if r, ok := registry.(*hooks.CallbackRegistry); ok {
+		t.CallbackRegistry = r
+	}
+}
+
 // ProcessAfterTurnResult handles the result from an after_turn hook.
 // Returns error if processing failed.
 //
