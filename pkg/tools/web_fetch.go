@@ -510,6 +510,12 @@ IMPORTANT: Make sure that you preserve all the links in the content including hy
 			NoToolUse:    true,
 		},
 	)
+
+	// Aggregate subagent usage into parent thread for accurate cost tracking
+	if subAgentConfig.ParentThread != nil {
+		subAgentConfig.ParentThread.AggregateSubagentUsage(subAgentConfig.Thread.GetUsage())
+	}
+
 	if err != nil {
 		return &WebFetchToolResult{
 			url:    input.URL,

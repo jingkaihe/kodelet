@@ -145,6 +145,28 @@ func (t *Thread) GetUsage() llmtypes.Usage {
 	return *t.Usage
 }
 
+// AggregateSubagentUsage aggregates usage from a subagent into this thread's usage.
+// This aggregates token counts and costs but NOT context window metrics
+// (CurrentContextWindow and MaxContextWindow remain unchanged to avoid premature auto-compact).
+// This method is thread-safe and uses mutex locking.
+func (t *Thread) AggregateSubagentUsage(usage llmtypes.Usage) {
+	t.Mu.Lock()
+	defer t.Mu.Unlock()
+	if t.Usage == nil {
+		t.Usage = &llmtypes.Usage{}
+	}
+	t.Usage.InputTokens += usage.InputTokens
+	t.Usage.OutputTokens += usage.OutputTokens
+	t.Usage.CacheCreationInputTokens += usage.CacheCreationInputTokens
+	t.Usage.CacheReadInputTokens += usage.CacheReadInputTokens
+	t.Usage.InputCost += usage.InputCost
+	t.Usage.OutputCost += usage.OutputCost
+	t.Usage.CacheCreationCost += usage.CacheCreationCost
+	t.Usage.CacheReadCost += usage.CacheReadCost
+	// Note: CurrentContextWindow and MaxContextWindow are intentionally NOT aggregated
+	// to keep context window tracking isolated per thread for accurate auto-compact decisions
+}
+
 // SetStructuredToolResult stores the structured result for a tool call.
 // This method is thread-safe and uses mutex locking.
 func (t *Thread) SetStructuredToolResult(toolCallID string, result tooltypes.StructuredToolResult) {

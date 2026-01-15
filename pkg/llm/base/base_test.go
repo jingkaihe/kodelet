@@ -154,6 +154,93 @@ func TestGetUsage_ConcurrentAccess(_ *testing.T) {
 	wg.Wait()
 }
 
+func TestAggregateSubagentUsage(t *testing.T) {
+	bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+
+	// Set initial values
+	bt.Usage.InputTokens = 100
+	bt.Usage.OutputTokens = 50
+	bt.Usage.CacheCreationInputTokens = 10
+	bt.Usage.CacheReadInputTokens = 5
+	bt.Usage.InputCost = 0.01
+	bt.Usage.OutputCost = 0.005
+	bt.Usage.CacheCreationCost = 0.001
+	bt.Usage.CacheReadCost = 0.0005
+	bt.Usage.CurrentContextWindow = 1000
+	bt.Usage.MaxContextWindow = 200000
+
+	// Subagent usage to aggregate
+	subagentUsage := llmtypes.Usage{
+		InputTokens:              200,
+		OutputTokens:             100,
+		CacheCreationInputTokens: 20,
+		CacheReadInputTokens:     10,
+		InputCost:                0.02,
+		OutputCost:               0.01,
+		CacheCreationCost:        0.002,
+		CacheReadCost:            0.001,
+		CurrentContextWindow:     500,    // Should NOT be aggregated
+		MaxContextWindow:         100000, // Should NOT be aggregated
+	}
+
+	bt.AggregateSubagentUsage(subagentUsage)
+
+	// Verify token counts are aggregated
+	assert.Equal(t, 300, bt.Usage.InputTokens)
+	assert.Equal(t, 150, bt.Usage.OutputTokens)
+	assert.Equal(t, 30, bt.Usage.CacheCreationInputTokens)
+	assert.Equal(t, 15, bt.Usage.CacheReadInputTokens)
+
+	// Verify costs are aggregated
+	assert.InDelta(t, 0.03, bt.Usage.InputCost, 0.0001)
+	assert.InDelta(t, 0.015, bt.Usage.OutputCost, 0.0001)
+	assert.InDelta(t, 0.003, bt.Usage.CacheCreationCost, 0.0001)
+	assert.InDelta(t, 0.0015, bt.Usage.CacheReadCost, 0.0001)
+
+	// Verify context window is NOT aggregated (stays at original values)
+	assert.Equal(t, 1000, bt.Usage.CurrentContextWindow)
+	assert.Equal(t, 200000, bt.Usage.MaxContextWindow)
+}
+
+func TestAggregateSubagentUsage_NilUsage(t *testing.T) {
+	bt := &Thread{
+		Usage: nil,
+	}
+
+	subagentUsage := llmtypes.Usage{
+		InputTokens:  100,
+		OutputTokens: 50,
+	}
+
+	bt.AggregateSubagentUsage(subagentUsage)
+
+	assert.NotNil(t, bt.Usage)
+	assert.Equal(t, 100, bt.Usage.InputTokens)
+	assert.Equal(t, 50, bt.Usage.OutputTokens)
+}
+
+func TestAggregateSubagentUsage_ConcurrentAccess(t *testing.T) {
+	bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+
+	var wg sync.WaitGroup
+	const numGoroutines = 100
+
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func(val int) {
+			defer wg.Done()
+			bt.AggregateSubagentUsage(llmtypes.Usage{
+				InputTokens:  val,
+				OutputTokens: val * 2,
+			})
+		}(i)
+	}
+
+	wg.Wait()
+	// Just verify no race conditions - exact values depend on goroutine ordering
+	assert.GreaterOrEqual(t, bt.Usage.InputTokens, 0)
+}
+
 func TestSetStructuredToolResult(t *testing.T) {
 	bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
 

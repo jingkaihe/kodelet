@@ -244,6 +244,12 @@ Organize your response to be clear and actionable.`,
 			NoSaveConversation: true,
 		},
 	)
+
+	// Aggregate subagent usage into parent thread for accurate cost tracking
+	if subAgentConfig.ParentThread != nil {
+		subAgentConfig.ParentThread.AggregateSubagentUsage(subAgentConfig.Thread.GetUsage())
+	}
+
 	if err != nil {
 		return &ImageRecognitionToolResult{
 			imagePath: input.ImagePath,

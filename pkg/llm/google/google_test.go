@@ -1003,6 +1003,5 @@ func TestGoogleThread_NewSubAgent(t *testing.T) {
 	// Verify shared resources
 	assert.Equal(t, parentThread.client, googleSubagent.client)
 	assert.Equal(t, parentThread.backend, googleSubagent.backend)
-	assert.Equal(t, parentThread.Usage, googleSubagent.Usage) // Shared usage tracking
 	assert.Equal(t, parentThread.State, googleSubagent.State) // Shared state
 }

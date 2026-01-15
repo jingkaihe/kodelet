@@ -141,6 +141,7 @@ func NewSubagentContext(
 	subAgent := NewSubagentThread(ctx, parentThread, state)
 	ctx = context.WithValue(ctx, llmtypes.SubAgentConfigKey, llmtypes.SubAgentConfig{
 		Thread:             subAgent,
+		ParentThread:       parentThread,
 		MessageHandler:     handler,
 		CompactRatio:       compactRatio,
 		DisableAutoCompact: disableAutoCompact,

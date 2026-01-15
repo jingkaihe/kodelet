@@ -230,6 +230,7 @@ func (m *mockThread) Provider() string                                        { 
 func (m *mockThread) GetMessages() ([]llm.Message, error)                     { return nil, nil }
 func (m *mockThread) GetConfig() llm.Config                                   { return llm.Config{} }
 func (m *mockThread) NewSubAgent(_ context.Context, _ llm.Config) llm.Thread  { return m }
+func (m *mockThread) AggregateSubagentUsage(_ llm.Usage)                      {}
 
 func TestImageRecognitionTool_Execute(t *testing.T) {
 	tool := &ImageRecognitionTool{}

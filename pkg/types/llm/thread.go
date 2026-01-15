@@ -44,6 +44,7 @@ var SubAgentConfigKey = subAgentConfigKey{}
 // SubAgentConfig holds the configuration for a subagent in the context
 type SubAgentConfig struct {
 	Thread             Thread         // Thread used by the sub-agent
+	ParentThread       Thread         // Parent thread for usage aggregation
 	MessageHandler     MessageHandler // Message handler for the sub-agent
 	CompactRatio       float64        // CompactRatio from parent agent
 	DisableAutoCompact bool           // DisableAutoCompact from parent agent
@@ -82,4 +83,7 @@ type Thread interface {
 	GetConfig() Config
 	// NewSubAgent creates a new subagent thread with the given configuration
 	NewSubAgent(ctx context.Context, config Config) Thread
+	// AggregateSubagentUsage aggregates usage from a subagent into this thread's usage
+	// This aggregates token counts and costs but NOT context window (which should remain isolated)
+	AggregateSubagentUsage(usage Usage)
 }

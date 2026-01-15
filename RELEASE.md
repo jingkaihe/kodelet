@@ -1,5 +1,15 @@
 # Kodelet
 
+## 0.1.43.beta (2026-01-15)
+
+### Bug fixes
+
+**Subagent usage aggregation**: Subagent current context window is not longer captured in parent thread usage statistics.
+
+### Internal Changes
+
+**Simplified subagent thread creation**: Refactored Anthropic and OpenAI providers to use the shared `base.NewThread` constructor for subagent creation, reducing code duplication.
+
 ## 0.1.42.beta (2026-01-14)
 
 ### Bug Fixes

@@ -963,17 +963,9 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 func (t *Thread) NewSubAgent(_ context.Context, config llmtypes.Config) llmtypes.Thread {
 	conversationID := convtypes.GenerateID()
 
-	// Create subagent base thread with shared usage tracking
-	subagentHookTrigger := hooks.NewTrigger(t.HookTrigger.Manager, conversationID, true)
-	baseThread := &base.Thread{
-		Config:                 config,
-		ConversationID:         conversationID,
-		Persisted:              false,   // subagent is not persisted
-		Usage:                  t.Usage, // Share usage tracking with parent
-		ToolResults:            make(map[string]tooltypes.StructuredToolResult),
-		SubagentContextFactory: t.SubagentContextFactory,
-		HookTrigger:            subagentHookTrigger,
-	}
+	// Create subagent base thread
+	hookTrigger := hooks.NewTrigger(t.HookTrigger.Manager, conversationID, true)
+	baseThread := base.NewThread(config, conversationID, t.SubagentContextFactory, hookTrigger)
 
 	// Create subagent thread reusing the parent's client instead of creating a new one
 	thread := &Thread{
