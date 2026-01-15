@@ -5,6 +5,7 @@ package base
 
 import (
 	"context"
+	"encoding/json"
 	"maps"
 	"sync"
 
@@ -45,6 +46,7 @@ type Thread struct {
 	SubagentContextFactory llmtypes.SubagentContextFactory           // Factory for creating subagent contexts
 	HookTrigger            hooks.Trigger                             // Hook trigger for lifecycle hooks
 	LoadConversation       LoadConversationFunc                      // Provider-specific callback for loading conversations
+	CallbackRegistry       *hooks.CallbackRegistry                   // Registry for recipe callbacks
 
 	Mu             sync.Mutex // Mutex for thread-safe operations on usage and tool results
 	ConversationMu sync.Mutex // Mutex for conversation-related operations
@@ -221,6 +223,98 @@ func (t *Thread) ShouldAutoCompact(compactRatio float64) bool {
 
 	utilizationRatio := float64(usage.CurrentContextWindow) / float64(usage.MaxContextWindow)
 	return utilizationRatio >= compactRatio
+}
+
+// ProcessHookResult handles the result from an agent_stop hook.
+// Returns (shouldContinue, followUpMessages, error).
+// - shouldContinue: true if the agent should continue processing (e.g., for continue/callback results)
+// - followUpMessages: messages to add to the conversation if continuing
+// - error: any error that occurred during processing
+//
+// The replaceMessages callback is called for mutate results to allow provider-specific message replacement.
+func (t *Thread) ProcessHookResult(
+	ctx context.Context,
+	result *hooks.AgentStopResult,
+	replaceMessages func(ctx context.Context, messages []llmtypes.Message),
+) (bool, []string, error) {
+	if result == nil {
+		return false, nil, nil
+	}
+
+	switch result.Result {
+	case hooks.HookResultCallback:
+		if t.CallbackRegistry == nil {
+			logger.G(ctx).Warn("hook requested callback but no callback registry configured")
+			return false, nil, nil
+		}
+
+		logger.G(ctx).WithField("callback", result.Callback).Info("hook requested recipe callback")
+
+		callbackResult, err := t.CallbackRegistry.Execute(ctx, result.Callback, result.CallbackArgs)
+		if err != nil {
+			return false, nil, err
+		}
+
+		// The callback executed a recipe which will trigger its own agent_stop hook
+		// That hook will handle applying the mutation
+		return callbackResult.Continue, nil, nil
+
+	case hooks.HookResultMutate:
+		logger.G(ctx).Info("hook requested message mutation")
+		if len(result.Messages) > 0 {
+			// Apply to target conversation if specified
+			if result.TargetConversationID != "" && result.TargetConversationID != t.ConversationID {
+				return false, nil, t.ApplyMutationToConversation(ctx, result.TargetConversationID, result.Messages)
+			}
+			if replaceMessages != nil {
+				replaceMessages(ctx, result.Messages)
+			}
+		}
+		return false, nil, nil
+
+	case hooks.HookResultContinue:
+		// Return follow-up messages for the caller to process
+		return true, result.FollowUpMessages, nil
+
+	default:
+		// Legacy behavior: return follow-up messages
+		if len(result.FollowUpMessages) > 0 {
+			return true, result.FollowUpMessages, nil
+		}
+		return false, nil, nil
+	}
+}
+
+// ApplyMutationToConversation applies a mutation to a different conversation in storage.
+func (t *Thread) ApplyMutationToConversation(ctx context.Context, convID string, messages []llmtypes.Message) error {
+	if t.Store == nil {
+		return nil // No store configured, skip mutation
+	}
+
+	// Load the conversation from storage
+	conv, err := t.Store.Load(ctx, convID)
+	if err != nil {
+		return err
+	}
+
+	// Encode messages as RawMessages
+	rawMessages, err := json.Marshal(messages)
+	if err != nil {
+		return err
+	}
+
+	// Replace raw messages
+	conv.RawMessages = rawMessages
+	conv.ToolResults = nil
+
+	// Save back
+	if err := t.Store.Save(ctx, conv); err != nil {
+		return err
+	}
+
+	logger.G(ctx).WithField("conversation_id", convID).WithField("message_count", len(messages)).Info("applied mutation to conversation")
+
+	return nil
 }
 
 // CreateMessageSpan creates a new tracing span for LLM message processing.

@@ -41,7 +41,7 @@ Kodelet supports lifecycle hooks that allow external scripts to observe and cont
 | `before_tool_call` | Before tool execution | Yes | Tool input |
 | `after_tool_call` | After tool execution | No | Tool output |
 | `user_message_send` | When user sends message | Yes | N/A |
-| `agent_stop` | When agent would stop | No | Can return follow-up messages |
+| `agent_stop` | When agent would stop | No | Messages (mutate), recipe callbacks, follow-up messages |
 
 ## Hook Protocol
 
@@ -215,16 +215,42 @@ interface UserMessageSendResult {
 
 ### agent_stop
 
+The `agent_stop` hook is the most powerful hook type, supporting multiple result types for different use cases:
+- **Continue**: Add follow-up messages to continue the conversation
+- **Mutate**: Replace the entire conversation history with new messages
+- **Callback**: Invoke a recipe/fragment to generate content
+
 ```typescript
+// Token usage statistics
+interface UsageInfo {
+  input_tokens: number;
+  output_tokens: number;
+  current_context_window: number;
+  max_context_window: number;
+}
+
 // Input payload
 interface AgentStopPayload extends BasePayload {
   event: "agent_stop";
   messages: Message[];
+  usage: UsageInfo;
+  invoked_recipe?: string;           // Recipe that triggered this session (if any)
+  auto_compact_enabled: boolean;     // Whether auto-compact is enabled
+  auto_compact_threshold?: number;   // Threshold ratio (e.g., 0.80)
+  callback_args?: Record<string, string>;  // Args passed when triggered by callback
 }
+
+// Hook result types
+type HookResult = "" | "continue" | "mutate" | "callback";
 
 // Output result
 interface AgentStopResult {
-  follow_up_messages?: string[];  // Optional messages to continue conversation
+  result?: HookResult;               // Action to take
+  follow_up_messages?: string[];     // Messages to continue conversation (result="" or "continue")
+  messages?: Message[];              // Messages for mutation (result="mutate")
+  callback?: string;                 // Recipe to invoke (result="callback")
+  callback_args?: Record<string, string>;  // Arguments for callback
+  target_conversation_id?: string;   // Target conversation for mutation
 }
 ```
 
@@ -238,8 +264,94 @@ interface AgentStopResult {
     {"role": "user", "content": "Please fix the bug in main.go"},
     {"role": "assistant", "content": "I've fixed the bug by..."}
   ],
+  "usage": {
+    "input_tokens": 50000,
+    "output_tokens": 5000,
+    "current_context_window": 55000,
+    "max_context_window": 128000
+  },
+  "invoked_recipe": "",
+  "auto_compact_enabled": true,
+  "auto_compact_threshold": 0.80,
   "invoked_by": "main"
 }
+```
+
+**Result Types:**
+
+1. **Continue** (default/empty): Add follow-up messages
+   ```json
+   {"follow_up_messages": ["Please also run the linter"]}
+   ```
+   
+2. **Mutate**: Replace conversation history
+   ```json
+   {
+     "result": "mutate",
+     "messages": [{"role": "user", "content": "## Summary\n\nProject context..."}],
+     "target_conversation_id": "original-conv-id"
+   }
+   ```
+
+3. **Callback**: Invoke a recipe
+   ```json
+   {
+     "result": "callback",
+     "callback": "compact",
+     "callback_args": {"target_conversation_id": "abc123"}
+   }
+   ```
+
+## Built-in Hooks
+
+Kodelet includes built-in hooks for common functionality:
+
+### Compact Hook
+
+The built-in compact hook coordinates context compaction when using the `compact` recipe. It automatically:
+
+1. **Handles compact recipe completion**: When the `compact` recipe finishes, the hook extracts the summary from the assistant's response and applies it as a mutation to the target conversation.
+
+2. **Recipe-aware coordination**: The hook checks `invoked_recipe` to know when it's processing a compact recipe result.
+
+**Manual Compaction:**
+```bash
+# Compact the most recent conversation
+kodelet run -r compact --follow
+
+# Compact a specific conversation
+kodelet run -r compact --resume <conversation-id>
+```
+
+**Hook-Triggered Compaction (Custom Hook):**
+```bash
+#!/bin/bash
+# Custom hook to trigger compaction at 70% context utilization
+
+case "$1" in
+    hook)
+        echo "agent_stop"
+        ;;
+    run)
+        payload=$(cat)
+        
+        # Skip if this is the compact recipe finishing
+        invoked_recipe=$(echo "$payload" | jq -r '.invoked_recipe // ""')
+        if [ "$invoked_recipe" = "compact" ]; then
+            exit 0
+        fi
+        
+        current=$(echo "$payload" | jq '.usage.current_context_window')
+        max=$(echo "$payload" | jq '.usage.max_context_window')
+        conv_id=$(echo "$payload" | jq -r '.conv_id')
+        
+        # Trigger compact at 70% utilization
+        ratio=$(echo "scale=2; $current / $max" | bc)
+        if (( $(echo "$ratio > 0.70" | bc -l) )); then
+            echo "{\"result\": \"callback\", \"callback\": \"compact\", \"callback_args\": {\"target_conversation_id\": \"$conv_id\"}}"
+        fi
+        ;;
+esac
 ```
 
 ## Example Hooks
@@ -393,5 +505,7 @@ kodelet chat --no-hooks
 
 ## Related Documentation
 
-- [ADR 021: Agent Lifecycle Hooks](../adrs/021-agent-lifecycle-hooks.md) - Architecture decision record
+- [ADR 021: Agent Lifecycle Hooks](../adrs/021-agent-lifecycle-hooks.md) - Original hook system design
+- [ADR 025: Enhanced Hook System](../adrs/025-enhanced-hook-system.md) - Enhanced hooks with message mutation and callbacks
+- [Fragments Guide](./FRAGMENTS.md) - Recipe/fragment template system
 - [Tools Reference](./tools.md) - Available tools that can be hooked

@@ -34,10 +34,18 @@ type Hook struct {
 	HookType HookType // Type returned by "hook" command
 }
 
+// BuiltinHookExecutor is an interface for hooks that can be executed programmatically
+type BuiltinHookExecutor interface {
+	Name() string
+	Type() HookType
+	Execute(payload *AgentStopPayload) (*AgentStopResult, error)
+}
+
 // HookManager manages hook discovery and execution
 type HookManager struct {
-	hooks   map[HookType][]*Hook
-	timeout time.Duration
+	hooks        map[HookType][]*Hook
+	builtinHooks map[HookType][]BuiltinHookExecutor
+	timeout      time.Duration
 }
 
 // DefaultTimeout is the default execution timeout for hooks
@@ -56,10 +64,32 @@ func NewHookManager(opts ...DiscoveryOption) (HookManager, error) {
 		return HookManager{}, err
 	}
 
-	return HookManager{
-		hooks:   hooks,
-		timeout: DefaultTimeout,
-	}, nil
+	manager := HookManager{
+		hooks:        hooks,
+		builtinHooks: make(map[HookType][]BuiltinHookExecutor),
+		timeout:      DefaultTimeout,
+	}
+
+	// Register default built-in hooks
+	manager.registerDefaultBuiltinHooks()
+
+	return manager, nil
+}
+
+// registerDefaultBuiltinHooks registers the default built-in hooks
+// This is called automatically by NewHookManager
+func (m *HookManager) registerDefaultBuiltinHooks() {
+	// Built-in hooks are registered here
+	// The compact hook is registered to handle compact recipe coordination
+	// Additional built-in hooks can be added here in the future
+}
+
+// RegisterBuiltinHook registers a built-in hook executor
+func (m *HookManager) RegisterBuiltinHook(hook BuiltinHookExecutor) {
+	if m.builtinHooks == nil {
+		m.builtinHooks = make(map[HookType][]BuiltinHookExecutor)
+	}
+	m.builtinHooks[hook.Type()] = append(m.builtinHooks[hook.Type()], hook)
 }
 
 // SetTimeout sets the execution timeout for hooks
@@ -69,7 +99,7 @@ func (m *HookManager) SetTimeout(timeout time.Duration) {
 
 // HasHooks returns true if there are any hooks registered for the given type
 func (m HookManager) HasHooks(hookType HookType) bool {
-	return len(m.hooks[hookType]) > 0
+	return len(m.hooks[hookType]) > 0 || len(m.builtinHooks[hookType]) > 0
 }
 
 // GetHooks returns all hooks registered for the given type

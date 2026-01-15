@@ -7,6 +7,7 @@ import (
 	"os/exec"
 
 	"github.com/jingkaihe/kodelet/pkg/logger"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
 )
 
@@ -170,40 +171,124 @@ func (m HookManager) ExecuteAfterToolCall(ctx context.Context, payload AfterTool
 	return &result, nil
 }
 
-// ExecuteAgentStop runs agent_stop hooks and returns typed result.
-// Empty or nil output with exit code 0 is treated as "no follow-up".
-// Accumulates follow_up_messages from all hooks.
+// ExecuteAgentStop runs agent_stop hooks (both external and built-in) and returns typed result.
+// Empty or nil output with exit code 0 is treated as "no action".
+// The first hook that returns a non-empty Result wins for mutate/callback.
+// For continue result, follow_up_messages are accumulated from all hooks.
+// Built-in hooks are executed first, followed by external hooks.
 func (m HookManager) ExecuteAgentStop(ctx context.Context, payload AgentStopPayload) (*AgentStopResult, error) {
-	hooks := m.hooks[HookTypeAgentStop]
-	if len(hooks) == 0 {
+	externalHooks := m.hooks[HookTypeAgentStop]
+	builtinHooks := m.builtinHooks[HookTypeAgentStop]
+
+	if len(externalHooks) == 0 && len(builtinHooks) == 0 {
 		return &AgentStopResult{}, nil
 	}
 
-	payloadBytes, err := json.Marshal(payload)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to marshal payload")
-	}
-
 	var allFollowUpMessages []string
-	for _, hook := range hooks {
-		resultBytes, err := m.executeHook(ctx, hook, payloadBytes)
+	var allMessages []llmtypes.Message
+	var finalResult *AgentStopResult
+
+	// Execute built-in hooks first
+	for _, hook := range builtinHooks {
+		result, err := hook.Execute(&payload)
 		if err != nil {
-			logger.G(ctx).WithError(err).WithField("hook", hook.Name).Warn("hook execution failed")
+			logger.G(ctx).WithError(err).WithField("hook", hook.Name()).Warn("builtin hook execution failed")
 			continue
 		}
-		if len(resultBytes) == 0 {
-			continue
-		}
-
-		var result AgentStopResult
-		if err := json.Unmarshal(resultBytes, &result); err != nil {
-			logger.G(ctx).WithError(err).WithField("hook", hook.Name).Warn("failed to unmarshal hook result")
+		if result == nil {
 			continue
 		}
 
-		// Accumulate follow-up messages from all hooks
-		allFollowUpMessages = append(allFollowUpMessages, result.FollowUpMessages...)
+		// Handle different result types
+		switch result.Result {
+		case HookResultMutate:
+			if finalResult == nil || finalResult.Result == HookResultNone || finalResult.Result == HookResultContinue {
+				logger.G(ctx).WithField("hook", hook.Name()).Debug("builtin hook requested message mutation")
+				finalResult = result
+			} else {
+				logger.G(ctx).WithField("hook", hook.Name()).Warn("ignoring duplicate mutate result")
+			}
+		case HookResultCallback:
+			if finalResult == nil || finalResult.Result == HookResultNone || finalResult.Result == HookResultContinue {
+				logger.G(ctx).WithField("hook", hook.Name()).WithField("callback", result.Callback).Debug("builtin hook requested recipe callback")
+				finalResult = result
+			} else {
+				logger.G(ctx).WithField("hook", hook.Name()).Warn("ignoring duplicate callback result")
+			}
+		case HookResultContinue:
+			allFollowUpMessages = append(allFollowUpMessages, result.FollowUpMessages...)
+			allMessages = append(allMessages, result.Messages...)
+		default:
+			allFollowUpMessages = append(allFollowUpMessages, result.FollowUpMessages...)
+		}
 	}
 
-	return &AgentStopResult{FollowUpMessages: allFollowUpMessages}, nil
+	// If we got a mutate or callback result from builtin hooks, return it
+	if finalResult != nil && (finalResult.Result == HookResultMutate || finalResult.Result == HookResultCallback) {
+		return finalResult, nil
+	}
+
+	// Execute external hooks
+	if len(externalHooks) > 0 {
+		payloadBytes, err := json.Marshal(payload)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to marshal payload")
+		}
+
+		for _, hook := range externalHooks {
+			resultBytes, err := m.executeHook(ctx, hook, payloadBytes)
+			if err != nil {
+				logger.G(ctx).WithError(err).WithField("hook", hook.Name).Warn("hook execution failed")
+				continue
+			}
+			if len(resultBytes) == 0 {
+				continue
+			}
+
+			var result AgentStopResult
+			if err := json.Unmarshal(resultBytes, &result); err != nil {
+				logger.G(ctx).WithError(err).WithField("hook", hook.Name).Warn("failed to unmarshal hook result")
+				continue
+			}
+
+			// Handle different result types
+			switch result.Result {
+			case HookResultMutate:
+				if finalResult == nil || finalResult.Result == HookResultNone || finalResult.Result == HookResultContinue {
+					logger.G(ctx).WithField("hook", hook.Name).Debug("hook requested message mutation")
+					finalResult = &result
+				} else {
+					logger.G(ctx).WithField("hook", hook.Name).Warn("ignoring duplicate mutate result")
+				}
+			case HookResultCallback:
+				if finalResult == nil || finalResult.Result == HookResultNone || finalResult.Result == HookResultContinue {
+					logger.G(ctx).WithField("hook", hook.Name).WithField("callback", result.Callback).Debug("hook requested recipe callback")
+					finalResult = &result
+				} else {
+					logger.G(ctx).WithField("hook", hook.Name).Warn("ignoring duplicate callback result")
+				}
+			case HookResultContinue:
+				allFollowUpMessages = append(allFollowUpMessages, result.FollowUpMessages...)
+				allMessages = append(allMessages, result.Messages...)
+			default:
+				allFollowUpMessages = append(allFollowUpMessages, result.FollowUpMessages...)
+			}
+		}
+	}
+
+	// If we got a mutate or callback result, return it
+	if finalResult != nil && (finalResult.Result == HookResultMutate || finalResult.Result == HookResultCallback) {
+		return finalResult, nil
+	}
+
+	// Otherwise, return accumulated continue/follow-up messages
+	if len(allFollowUpMessages) > 0 || len(allMessages) > 0 {
+		return &AgentStopResult{
+			Result:           HookResultContinue,
+			FollowUpMessages: allFollowUpMessages,
+			Messages:         allMessages,
+		}, nil
+	}
+
+	return &AgentStopResult{}, nil
 }

@@ -1,7 +1,7 @@
 # ADR 025: Enhanced Hook System with Runtime Protocol and Message Mutation
 
 ## Status
-Proposed
+Implemented (Phases 1-4)
 
 ## Context
 
@@ -672,33 +672,33 @@ This allows users to:
 
 ## Implementation Phases
 
-### Phase 1: Recipe and Hook Infrastructure (Week 1)
-- [ ] Create `recipes/compact.md` with the summarization prompt
-- [ ] Add `InvokedRecipe` field to thread configuration
-- [ ] Extend `AgentStopPayload` with `invoked_recipe`, `auto_compact_enabled`, `auto_compact_threshold`
-- [ ] Add `HookResult` type with `continue`, `mutate`, `callback` values
-- [ ] Implement `CallbackRegistry` that invokes recipes via `FragmentProcessor`
+### Phase 1: Recipe and Hook Infrastructure ✅
+- [x] Create `recipes/compact.md` with the summarization prompt
+- [x] Add `InvokedRecipe` field to thread configuration
+- [x] Extend `AgentStopPayload` with `invoked_recipe`, `auto_compact_enabled`, `auto_compact_threshold`
+- [x] Add `HookResult` type with `continue`, `mutate`, `callback` values
+- [x] Implement `CallbackRegistry` that invokes recipes via `FragmentProcessor`
 
-### Phase 2: Message Mutation and Callbacks (Week 1-2)
-- [ ] Implement `replaceMessages()` in all providers (Anthropic, OpenAI, Google)
-- [ ] Implement `applyMutationToConversation()` for cross-conversation mutations
-- [ ] Add `TargetConversationID` field to `AgentStopResult`
-- [ ] Implement `processHookResult()` with callback, mutate, continue handling
-- [ ] Write integration tests for mutation scenarios
+### Phase 2: Message Mutation and Callbacks ✅
+- [x] Implement `replaceMessages()` in all providers (Anthropic, OpenAI, Google)
+- [x] Implement `applyMutationToConversation()` for cross-conversation mutations
+- [x] Add `TargetConversationID` field to `AgentStopResult`
+- [x] Implement `processHookResult()` with callback, mutate, continue handling
+- [ ] Write integration tests for mutation scenarios (deferred)
 
-### Phase 3: Built-in Compact Hook (Week 2)
-- [ ] Implement `pkg/hooks/builtin/compact.go`
-- [ ] Register as default hook in hook manager
-- [ ] Handle compact recipe completion → mutation flow
-- [ ] Handle threshold detection → callback flow
-- [ ] Remove old `CompactContext()` from providers
-- [ ] Update documentation
+### Phase 3: Built-in Compact Hook ✅
+- [x] Implement `pkg/hooks/builtin/compact.go`
+- [x] Register as default hook in hook manager
+- [x] Handle compact recipe completion → mutation flow
+- [x] Handle threshold detection → callback flow
+- [x] Remove old `CompactContext()` from providers
+- [x] Update documentation
 
-### Phase 4: CLI Integration (Week 2-3)
-- [ ] Update `kodelet run -r compact --follow` to work with new system
-- [ ] Ensure `--follow` correctly passes target conversation ID
-- [ ] Add user feedback for compaction operations
-- [ ] Update help text and MANUAL.md
+### Phase 4: CLI Integration ✅
+- [x] Update `kodelet run -r compact --follow` to work with new system
+- [x] Ensure `--follow` correctly passes target conversation ID
+- [x] Add user feedback for compaction operations
+- [x] Update help text and MANUAL.md
 
 ### Future Phases
 - [ ] Runtime hook protocol (Go plugins for hooks with service access)

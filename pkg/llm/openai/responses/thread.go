@@ -18,6 +18,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/auth"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/hooks"
+	"github.com/jingkaihe/kodelet/pkg/hooks/builtin"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	codexpreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/codex"
 	openaipreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/openai"
@@ -105,7 +106,14 @@ func NewThread(
 		if err != nil {
 			log.WithError(err).Warn("Failed to initialize hook manager, hooks disabled")
 		} else {
+			// Register built-in hooks for compact coordination etc.
+			builtin.RegisterBuiltinHooks(&hookManager)
+
 			hookTrigger = hooks.NewTrigger(hookManager, conversationID, config.IsSubAgent)
+			// Set recipe context from config
+			hookTrigger.InvokedRecipe = config.InvokedRecipe
+			hookTrigger.AutoCompactEnabled = config.CompactRatio > 0
+			hookTrigger.AutoCompactThreshold = config.CompactRatio
 		}
 	}
 
@@ -294,18 +302,6 @@ OUTER:
 				systemPrompt = sysprompt.SystemPrompt(model, t.Config, contexts)
 			}
 
-			// Check if auto-compact should be triggered
-			if !opt.DisableAutoCompact && t.ShouldAutoCompact(opt.CompactRatio) {
-				logger.G(ctx).WithField("context_utilization",
-					float64(t.GetUsage().CurrentContextWindow)/float64(t.GetUsage().MaxContextWindow)).
-					Info("triggering auto-compact")
-				if err := t.CompactContext(ctx); err != nil {
-					logger.G(ctx).WithError(err).Error("failed to auto-compact context")
-				} else {
-					logger.G(ctx).Info("auto-compact completed successfully")
-				}
-			}
-
 			logger.G(ctx).WithField("model", model).Debug("starting message exchange")
 			exchangeOutput, toolsUsed, err := t.processMessageExchange(ctx, handler, model, maxTokens, systemPrompt, opt)
 			if err != nil {
@@ -319,12 +315,17 @@ OUTER:
 			turnCount++
 			finalOutput = exchangeOutput
 
-			// If no tools were used, check for hook follow-ups before stopping
+			// If no tools were used, check for hook results before stopping
 			if !toolsUsed {
 				logger.G(ctx).Debug("no tools used, checking agent_stop hook")
 
 				if messages, err := t.GetMessages(); err == nil {
-					if followUps := t.HookTrigger.TriggerAgentStop(ctx, messages); len(followUps) > 0 {
+					result := t.HookTrigger.TriggerAgentStopWithResult(ctx, messages, t.GetUsage())
+					shouldContinue, followUps, hookErr := t.ProcessHookResult(ctx, result, t.replaceMessages)
+					if hookErr != nil {
+						logger.G(ctx).WithError(hookErr).Error("failed to process hook result")
+					}
+					if shouldContinue && len(followUps) > 0 {
 						logger.G(ctx).WithField("count", len(followUps)).
 							Info("agent_stop hook returned follow-up messages, continuing conversation")
 						for _, msg := range followUps {
@@ -572,72 +573,36 @@ func (t *Thread) NewSubAgent(ctx context.Context, config llmtypes.Config) llmtyp
 	return newThread
 }
 
-// CompactContext compacts the conversation history using the Responses API compact endpoint.
-// The Compact API returns user messages plus a single compaction item containing encrypted
-// conversation state, which can be used to continue the conversation efficiently.
-func (t *Thread) CompactContext(ctx context.Context) error {
-	if len(t.inputItems) == 0 {
-		return nil
-	}
-
-	resp, err := t.client.Responses.Compact(ctx, responses.ResponseCompactParams{
-		Input: responses.ResponseCompactParamsInputUnion{
-			OfResponseInputItemArray: t.inputItems,
-		},
-		Model: responses.ResponseCompactParamsModel(t.Config.Model),
-	})
-	if err != nil {
-		return errors.Wrap(err, "failed to compact context")
-	}
-
-	// Update usage metrics
+// replaceMessages replaces the entire conversation history with the provided messages.
+// This is used by hooks to apply message mutations.
+// Note: For the Responses API, this resets the conversation state and starts fresh.
+func (t *Thread) replaceMessages(ctx context.Context, messages []llmtypes.Message) {
 	t.Mu.Lock()
-	t.Usage.InputTokens += int(resp.Usage.InputTokens)
-	t.Usage.OutputTokens += int(resp.Usage.OutputTokens)
-	t.Mu.Unlock()
+	defer t.Mu.Unlock()
 
-	// Convert output items to input items
-	// The Compact API returns: user messages + a single compaction item
-	newInputItems := make([]responses.ResponseInputItemUnionParam, 0, len(resp.Output))
-	for _, output := range resp.Output {
-		switch output.Type {
-		case "message":
-			// Convert output message to input message
-			msg := output.AsMessage()
-			if msg.Role == "user" {
-				// Extract text content from the message
-				var textContent string
-				for _, content := range msg.Content {
-					if content.Type == "output_text" {
-						textPart := content.AsOutputText()
-						textContent += textPart.Text
-					}
-				}
-				if textContent != "" {
-					newInputItems = append(newInputItems, responses.ResponseInputItemUnionParam{
-						OfMessage: &responses.EasyInputMessageParam{
-							Role:    responses.EasyInputMessageRoleUser,
-							Content: responses.EasyInputMessageContentUnionParam{OfString: param.NewOpt(textContent)},
-						},
-					})
-				}
-			}
-
-		case "compaction":
-			// Convert compaction item using the SDK helper
-			compaction := output.AsCompaction()
-			newInputItems = append(newInputItems, responses.ResponseInputItemParamOfCompaction(compaction.EncryptedContent))
+	// Reset input items with the new messages
+	t.inputItems = make([]responses.ResponseInputItemUnionParam, 0, len(messages))
+	for _, msg := range messages {
+		switch msg.Role {
+		case "user":
+			t.inputItems = append(t.inputItems, responses.ResponseInputItemUnionParam{
+				OfMessage: &responses.EasyInputMessageParam{
+					Role:    responses.EasyInputMessageRoleUser,
+					Content: responses.EasyInputMessageContentUnionParam{OfString: param.NewOpt(msg.Content)},
+				},
+			})
+		case "assistant":
+			t.inputItems = append(t.inputItems, responses.ResponseInputItemUnionParam{
+				OfMessage: &responses.EasyInputMessageParam{
+					Role:    responses.EasyInputMessageRoleAssistant,
+					Content: responses.EasyInputMessageContentUnionParam{OfString: param.NewOpt(msg.Content)},
+				},
+			})
 		}
 	}
 
-	// Replace input items with compacted output
-	t.inputItems = newInputItems
-
-	// Clear pending items - next request will use the new compacted input
+	// Clear pending items and response chain - starting fresh
 	t.pendingItems = nil
-
-	// Clear the previous response ID - the server-side conversation state is now
-	// represented by the compaction item, not the response chain
 	t.lastResponseID = ""
 
 	// Clear stale tool results - they reference tool calls that no longer exist
@@ -648,7 +613,7 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 		t.State.SetFileLastAccess(make(map[string]time.Time))
 	}
 
-	return nil
+	logger.G(ctx).WithField("message_count", len(messages)).Info("conversation messages replaced via hook")
 }
 
 // ShortSummary generates a short summary of the conversation using an LLM.

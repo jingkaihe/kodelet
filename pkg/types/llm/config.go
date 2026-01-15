@@ -48,6 +48,12 @@ type Config struct {
 
 	// Hooks configuration
 	NoHooks bool `mapstructure:"no_hooks" json:"no_hooks" yaml:"no_hooks"` // NoHooks disables agent lifecycle hooks
+
+	// Recipe context for hook coordination
+	InvokedRecipe string `mapstructure:"-" json:"-" yaml:"-"` // InvokedRecipe is the recipe that triggered this session (if any)
+
+	// CompactRatio is the default ratio for auto-compact (0.0-1.0)
+	CompactRatio float64 `mapstructure:"compact_ratio" json:"compact_ratio" yaml:"compact_ratio"`
 }
 
 // OpenAIConfig holds OpenAI-specific configuration including support for compatible APIs

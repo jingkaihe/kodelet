@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/invopop/jsonschema"
@@ -387,112 +386,6 @@ func TestShouldAutoCompact(t *testing.T) {
 			assert.Equal(t, test.expectedResult, result)
 		})
 	}
-}
-
-func TestCompactContextIntegration(t *testing.T) {
-	// Skip if no API key is available
-	if os.Getenv("ANTHROPIC_API_KEY") == "" {
-		t.Skip("ANTHROPIC_API_KEY not set, skipping integration test")
-	}
-
-	t.Run("real compact context with API call", func(t *testing.T) {
-		thread, err := NewAnthropicThread(llmtypes.Config{
-			Model:     "claude-haiku-4-5-20251001", // Use faster/cheaper model for testing
-			MaxTokens: 1000,                        // Limit tokens for test
-		}, nil)
-		require.NoError(t, err)
-
-		// Set up some realistic conversation history
-		thread.AddUserMessage(context.Background(), "Help me debug this Python function", []string{}...)
-		thread.messages = append(thread.messages, anthropic.MessageParam{
-			Role: anthropic.MessageParamRoleAssistant,
-			Content: []anthropic.ContentBlockParamUnion{
-				anthropic.NewTextBlock("I'd be happy to help you debug your Python function. Could you please share the code?"),
-			},
-		})
-		thread.AddUserMessage(context.Background(), "Here's the function: def add(a, b): return a + b", []string{}...)
-		thread.messages = append(thread.messages, anthropic.MessageParam{
-			Role: anthropic.MessageParamRoleAssistant,
-			Content: []anthropic.ContentBlockParamUnion{
-				anthropic.NewTextBlock("Your function looks correct. It's a simple addition function that takes two parameters and returns their sum."),
-			},
-		})
-
-		// Add some tool results to verify they get cleared
-		thread.ToolResults = map[string]tooltypes.StructuredToolResult{
-			"tool1": {ToolName: "test_tool", Success: true, Timestamp: time.Now()},
-			"tool2": {ToolName: "another_tool", Success: false, Error: "test error", Timestamp: time.Now()},
-		}
-
-		// Record initial state
-		initialMessageCount := len(thread.messages)
-		initialToolResultCount := len(thread.ToolResults)
-
-		// Verify we have multiple messages and tool results
-		assert.Greater(t, initialMessageCount, 2, "Should have multiple messages for meaningful test")
-		assert.Greater(t, initialToolResultCount, 0, "Should have tool results to verify clearing")
-
-		// Call the real CompactContext method with timeout
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		err = thread.CompactContext(ctx)
-		require.NoError(t, err, "CompactContext should succeed with real API")
-
-		// Verify the compacting worked
-		assert.Equal(t, 1, len(thread.messages), "Should be compacted to single user message")
-		assert.Equal(t, 0, len(thread.ToolResults), "Tool results should be cleared")
-
-		// Verify the single remaining message is a user message containing a summary
-		if len(thread.messages) > 0 {
-			assert.Equal(t, anthropic.MessageParamRoleUser, thread.messages[0].Role)
-			assert.Greater(t, len(thread.messages[0].Content), 0, "Compact message should have content")
-
-			// Extract text content and verify it's a reasonable summary
-			var messageText string
-			for _, block := range thread.messages[0].Content {
-				if block.OfText != nil {
-					messageText += block.OfText.Text
-				}
-			}
-			assert.Greater(t, len(messageText), 50, "Compact summary should be substantial")
-			assert.Contains(t, messageText, "Python", "Summary should mention the context discussed")
-		}
-	})
-
-	t.Run("compact context preserves thread functionality", func(t *testing.T) {
-		// Skip if no API key is available
-		if os.Getenv("ANTHROPIC_API_KEY") == "" {
-			t.Skip("ANTHROPIC_API_KEY not set, skipping integration test")
-		}
-
-		thread, err := NewAnthropicThread(llmtypes.Config{
-			Model:     "claude-haiku-4-5-20251001",
-			MaxTokens: 500,
-		}, nil)
-		require.NoError(t, err)
-
-		// Add some conversation history
-		thread.AddUserMessage(context.Background(), "What is 2+2?", []string{}...)
-		thread.messages = append(thread.messages, anthropic.MessageParam{
-			Role: anthropic.MessageParamRoleAssistant,
-			Content: []anthropic.ContentBlockParamUnion{
-				anthropic.NewTextBlock("2+2 equals 4."),
-			},
-		})
-
-		// Compact the context with timeout
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		err = thread.CompactContext(ctx)
-		require.NoError(t, err)
-
-		// Verify thread is still functional by sending a new message
-		thread.AddUserMessage(context.Background(), "What about 3+3?", []string{}...)
-
-		// Should now have 2 messages: the compact summary + new user message
-		assert.Equal(t, 2, len(thread.messages))
-		assert.Equal(t, anthropic.MessageParamRoleUser, thread.messages[1].Role)
-	})
 }
 
 func TestAutoCompactTriggerLogic(t *testing.T) {

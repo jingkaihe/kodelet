@@ -25,6 +25,7 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/feedback"
 	"github.com/jingkaihe/kodelet/pkg/hooks"
+	"github.com/jingkaihe/kodelet/pkg/hooks/builtin"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/llm/prompts"
 	"github.com/jingkaihe/kodelet/pkg/logger"
@@ -129,7 +130,14 @@ func NewGoogleThread(config llmtypes.Config, subagentContextFactory llmtypes.Sub
 		if err != nil {
 			logger.G(context.Background()).WithError(err).Warn("Failed to initialize hook manager, hooks disabled")
 		} else {
+			// Register built-in hooks for compact coordination etc.
+			builtin.RegisterBuiltinHooks(&hookManager)
+
 			hookTrigger = hooks.NewTrigger(hookManager, conversationID, configCopy.IsSubAgent)
+			// Set recipe context from config
+			hookTrigger.InvokedRecipe = configCopy.InvokedRecipe
+			hookTrigger.AutoCompactEnabled = configCopy.CompactRatio > 0
+			hookTrigger.AutoCompactThreshold = configCopy.CompactRatio
 		}
 	}
 
@@ -268,16 +276,6 @@ func (t *Thread) SendMessage(
 
 	t.AddUserMessage(ctx, message, opt.Images...)
 
-	if !opt.DisableAutoCompact && t.ShouldAutoCompact(opt.CompactRatio) {
-		logger.G(ctx).WithField("context_utilization", float64(t.GetUsage().CurrentContextWindow)/float64(t.GetUsage().MaxContextWindow)).Info("triggering auto-compact")
-		err := t.CompactContext(ctx)
-		if err != nil {
-			logger.G(ctx).WithError(err).Error("failed to auto-compact context")
-		} else {
-			logger.G(ctx).Info("auto-compact completed successfully")
-		}
-	}
-
 	// Main interaction loop for handling tool calls
 	turnCount := 0
 	maxTurns := opt.MaxTurns
@@ -320,13 +318,18 @@ OUTER:
 			// Update finalOutput with the most recent output
 			finalOutput = exchangeOutput
 
-			// If no tools were used, check for hook follow-ups before stopping
+			// If no tools were used, check for hook results before stopping
 			if !toolsUsed {
 				logger.G(ctx).Debug("no tools used, checking agent_stop hook")
 
-				// Trigger agent_stop hook to see if there are follow-up messages
+				// Trigger agent_stop hook to see if there are follow-up messages or other actions
 				if messages, err := t.GetMessages(); err == nil {
-					if followUps := t.HookTrigger.TriggerAgentStop(ctx, messages); len(followUps) > 0 {
+					result := t.HookTrigger.TriggerAgentStopWithResult(ctx, messages, t.GetUsage())
+					shouldContinue, followUps, hookErr := t.ProcessHookResult(ctx, result, t.replaceMessages)
+					if hookErr != nil {
+						logger.G(ctx).WithError(hookErr).Error("failed to process hook result")
+					}
+					if shouldContinue && len(followUps) > 0 {
 						logger.G(ctx).WithField("count", len(followUps)).Info("agent_stop hook returned follow-up messages, continuing conversation")
 						// Append follow-up messages as user messages and continue
 						for _, msg := range followUps {
@@ -1092,53 +1095,34 @@ func (t *Thread) NewSubAgent(_ context.Context, config llmtypes.Config) llmtypes
 // Note: SetStructuredToolResult, GetStructuredToolResults, SetStructuredToolResults,
 // and ShouldAutoCompact methods are inherited from embedded base.Thread
 
-// CompactContext performs comprehensive context compacting by creating a detailed summary
-func (t *Thread) CompactContext(ctx context.Context) error {
-	summaryThread, err := NewGoogleThread(t.GetConfig(), nil)
-	if err != nil {
-		return errors.Wrap(err, "failed to create summary thread")
-	}
-
-	summaryThread.messages = t.messages
-	summaryThread.EnablePersistence(ctx, false)
-	summaryThread.HookTrigger = hooks.Trigger{}
-
-	handler := &llmtypes.StringCollectorHandler{Silent: true}
-	_, err = summaryThread.SendMessage(ctx, prompts.CompactPrompt, handler, llmtypes.MessageOpt{
-		UseWeakModel:       false,
-		NoToolUse:          true,
-		DisableAutoCompact: true,
-		DisableUsageLog:    true,
-		NoSaveConversation: true,
-	})
-	if err != nil {
-		return errors.Wrap(err, "failed to generate compact summary")
-	}
-
-	compactSummary := handler.CollectedText()
-
-	// Replace the conversation history with the compact summary
+// replaceMessages replaces the entire conversation history with the provided messages.
+// This is used by hooks to apply message mutations.
+func (t *Thread) replaceMessages(ctx context.Context, messages []llmtypes.Message) {
 	t.Mu.Lock()
 	defer t.Mu.Unlock()
 
-	t.messages = []*genai.Content{
-		genai.NewContentFromParts([]*genai.Part{
-			genai.NewPartFromText(compactSummary),
-		}, genai.RoleUser),
+	t.messages = make([]*genai.Content, 0, len(messages))
+	for _, msg := range messages {
+		var role genai.Role
+		if msg.Role == "assistant" {
+			role = genai.RoleModel
+		} else {
+			role = genai.RoleUser
+		}
+		t.messages = append(t.messages, genai.NewContentFromParts([]*genai.Part{
+			genai.NewPartFromText(msg.Content),
+		}, role))
 	}
 
 	// Clear stale tool results - they reference tool calls that no longer exist
 	t.ToolResults = make(map[string]tooltypes.StructuredToolResult)
 
-	// Get state reference while under mutex protection
-	state := t.State
-
 	// Clear file access tracking to start fresh with context retrieval
-	if state != nil {
-		state.SetFileLastAccess(make(map[string]time.Time))
+	if t.State != nil {
+		t.State.SetFileLastAccess(make(map[string]time.Time))
 	}
 
-	return nil
+	logger.G(ctx).WithField("message_count", len(messages)).Info("conversation messages replaced via hook")
 }
 
 // ShortSummary generates a brief summary of the conversation

@@ -17,6 +17,15 @@ type Trigger struct {
 	Manager        HookManager
 	ConversationID string
 	IsSubAgent     bool
+
+	// InvokedRecipe is the recipe that triggered this session (if any)
+	InvokedRecipe string
+	// AutoCompactEnabled indicates if auto-compact is enabled
+	AutoCompactEnabled bool
+	// AutoCompactThreshold is the threshold ratio for auto-compact
+	AutoCompactThreshold float64
+	// CallbackArgs contains arguments passed when this session was triggered by a callback
+	CallbackArgs map[string]string
 }
 
 // NewTrigger creates a new hook trigger with the given parameters.
@@ -135,9 +144,21 @@ func (t Trigger) TriggerAfterToolCall(ctx context.Context, toolName, toolInput, 
 // TriggerAgentStop invokes agent_stop hooks.
 // Returns follow-up messages that can be appended to the conversation.
 // A zero-value Trigger returns nil.
+// Deprecated: Use TriggerAgentStopWithResult for full hook result handling.
 func (t Trigger) TriggerAgentStop(ctx context.Context, messages []llmtypes.Message) []string {
-	if !t.Manager.HasHooks(HookTypeAgentStop) {
+	result := t.TriggerAgentStopWithResult(ctx, messages, llmtypes.Usage{})
+	if result == nil {
 		return nil
+	}
+	return result.FollowUpMessages
+}
+
+// TriggerAgentStopWithResult invokes agent_stop hooks and returns the full result.
+// This enables hooks to request message mutation, recipe callbacks, or follow-up messages.
+// A zero-value Trigger returns an empty result.
+func (t Trigger) TriggerAgentStopWithResult(ctx context.Context, messages []llmtypes.Message, usage llmtypes.Usage) *AgentStopResult {
+	if !t.Manager.HasHooks(HookTypeAgentStop) {
+		return &AgentStopResult{}
 	}
 
 	payload := AgentStopPayload{
@@ -147,14 +168,25 @@ func (t Trigger) TriggerAgentStop(ctx context.Context, messages []llmtypes.Messa
 			CWD:       t.getCwd(ctx),
 			InvokedBy: t.invokedBy(),
 		},
-		Messages: messages,
+		Messages:             messages,
+		InvokedRecipe:        t.InvokedRecipe,
+		AutoCompactEnabled:   t.AutoCompactEnabled,
+		AutoCompactThreshold: t.AutoCompactThreshold,
+		CallbackArgs:         t.CallbackArgs,
+		Usage: UsageInfo{
+			InputTokens:          usage.InputTokens,
+			OutputTokens:         usage.OutputTokens,
+			CurrentContextWindow: usage.CurrentContextWindow,
+			MaxContextWindow:     usage.MaxContextWindow,
+		},
 	}
 
 	result, err := t.Manager.ExecuteAgentStop(ctx, payload)
 	if err != nil {
-		return nil
+		logger.G(ctx).WithError(err).Warn("failed to execute agent_stop hooks")
+		return &AgentStopResult{}
 	}
-	return result.FollowUpMessages
+	return result
 }
 
 // SetConversationID updates the conversation ID for the trigger.
