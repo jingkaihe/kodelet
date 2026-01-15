@@ -145,6 +145,13 @@ func (t *SubAgentTool) Execute(ctx context.Context, _ tooltypes.State, parameter
 		CompactRatio:       subAgentConfig.CompactRatio,
 		DisableAutoCompact: subAgentConfig.DisableAutoCompact,
 	})
+
+	// Aggregate subagent usage into parent thread for accurate cost tracking
+	// This must be done regardless of error to capture all API costs
+	if subAgentConfig.ParentThread != nil {
+		subAgentConfig.ParentThread.AggregateSubagentUsage(subAgentConfig.Thread.GetUsage())
+	}
+
 	if err != nil {
 		return &SubAgentToolResult{
 			err:      err.Error(),

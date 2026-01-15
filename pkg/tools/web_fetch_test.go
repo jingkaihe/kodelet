@@ -576,6 +576,8 @@ func (m *MockThread) NewSubAgent(_ context.Context, _ llm.Config) llm.Thread {
 	return m
 }
 
+func (m *MockThread) AggregateSubagentUsage(_ llm.Usage) {}
+
 func (m *MockThread) Reset() {
 	m.called = false
 	m.lastPrompt = ""
