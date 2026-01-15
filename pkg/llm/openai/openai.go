@@ -428,6 +428,12 @@ OUTER:
 			// Update finalOutput with the most recent output
 			finalOutput = exchangeOutput
 
+			// Trigger after_turn hook on every turn to enable mid-session actions like compaction
+			afterTurnResult := t.HookTrigger.TriggerAfterTurn(ctx, turnCount, toolsUsed, t.GetUsage())
+			if err := t.ProcessAfterTurnResult(ctx, afterTurnResult, t.replaceMessages, t.saveConversationCallback(opt)); err != nil {
+				logger.G(ctx).WithError(err).Error("failed to process after_turn hook result")
+			}
+
 			// If no tools were used, check for hook results before stopping
 			if !toolsUsed {
 				logger.G(ctx).Debug("no tools used, checking agent_stop hook")
@@ -435,7 +441,7 @@ OUTER:
 				// Trigger agent_stop hook to see if there are follow-up messages or other actions
 				if messages, err := t.GetMessages(); err == nil {
 					result := t.HookTrigger.TriggerAgentStopWithResult(ctx, messages, t.GetUsage())
-					shouldContinue, followUps, hookErr := t.ProcessHookResult(ctx, result, t.replaceMessages)
+					shouldContinue, followUps, hookErr := t.ProcessHookResult(ctx, result, t.replaceMessages, t.saveConversationCallback(opt))
 					if hookErr != nil {
 						logger.G(ctx).WithError(hookErr).Error("failed to process hook result")
 					}
@@ -934,6 +940,18 @@ func (t *Thread) replaceMessages(ctx context.Context, messages []llmtypes.Messag
 	}
 
 	logger.G(ctx).WithField("message_count", len(messages)).Info("conversation messages replaced via hook")
+}
+
+// saveConversationCallback returns a callback function for saving the conversation after mutation.
+// It respects the NoSaveConversation option from MessageOpt.
+func (t *Thread) saveConversationCallback(opt llmtypes.MessageOpt) func(ctx context.Context) {
+	return func(ctx context.Context) {
+		if t.Persisted && t.Store != nil && !opt.NoSaveConversation {
+			if err := t.SaveConversation(ctx, false); err != nil {
+				logger.G(ctx).WithError(err).Error("failed to save conversation after mutation")
+			}
+		}
+	}
 }
 
 // NewSubAgent creates a new subagent thread that shares the parent's client and configuration.

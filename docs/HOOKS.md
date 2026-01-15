@@ -41,6 +41,7 @@ Kodelet supports lifecycle hooks that allow external scripts to observe and cont
 | `before_tool_call` | Before tool execution | Yes | Tool input |
 | `after_tool_call` | After tool execution | No | Tool output |
 | `user_message_send` | When user sends message | Yes | N/A |
+| `after_turn` | After each LLM response | No | Messages (mutate), recipe callbacks |
 | `agent_stop` | When agent would stop | No | Messages (mutate), recipe callbacks, follow-up messages |
 
 ## Hook Protocol
@@ -93,7 +94,7 @@ All hook payloads and results are defined as TypeScript interfaces below for cla
 
 ```typescript
 // Hook event types
-type HookType = "before_tool_call" | "after_tool_call" | "user_message_send" | "agent_stop";
+type HookType = "before_tool_call" | "after_tool_call" | "user_message_send" | "after_turn" | "agent_stop";
 
 // Indicates whether the hook was triggered by main agent or subagent
 type InvokedBy = "main" | "subagent";
@@ -213,6 +214,81 @@ interface UserMessageSendResult {
 }
 ```
 
+### after_turn
+
+The `after_turn` hook fires after every LLM response, regardless of whether tools were used. This enables:
+- **Mid-session context compaction**: Detect high context usage and trigger compaction before it becomes critical
+- **Per-turn logging**: Log each LLM turn for debugging or analytics
+- **Turn-based rate limiting**: Implement custom turn limits or guardrails
+
+```typescript
+// Input payload
+interface AfterTurnPayload extends BasePayload {
+  event: "after_turn";
+  turn_number: number;               // Current turn number (1-indexed)
+  tools_used: boolean;               // Whether tools were used in this turn
+  usage: UsageInfo;                  // Token usage statistics
+  auto_compact_enabled: boolean;     // Whether auto-compact is enabled
+  auto_compact_threshold?: number;   // Threshold ratio (e.g., 0.80)
+}
+
+// Output result
+interface AfterTurnResult {
+  result?: HookResult;               // Action to take ("mutate" or "callback")
+  messages?: Message[];              // Messages for mutation (result="mutate")
+  callback?: string;                 // Recipe to invoke (result="callback")
+  callback_args?: Record<string, string>;  // Arguments for callback
+}
+```
+
+**Example Input:**
+```json
+{
+  "event": "after_turn",
+  "conv_id": "conversation-id",
+  "cwd": "/current/working/dir",
+  "turn_number": 5,
+  "tools_used": true,
+  "usage": {
+    "input_tokens": 80000,
+    "output_tokens": 8000,
+    "current_context_window": 88000,
+    "max_context_window": 128000
+  },
+  "auto_compact_enabled": true,
+  "auto_compact_threshold": 0.80,
+  "invoked_by": "main"
+}
+```
+
+**Result Types:**
+
+1. **No action** (empty result): Continue normally
+   ```json
+   {}
+   ```
+
+2. **Mutate**: Replace conversation history in the current thread
+   ```json
+   {
+     "result": "mutate",
+     "messages": [{"role": "user", "content": "## Summary\n\nCompacted context..."}]
+   }
+   ```
+
+3. **Callback**: Invoke a recipe (e.g., compact)
+   ```json
+   {
+     "result": "callback",
+     "callback": "compact"
+   }
+   ```
+
+**Key Difference from agent_stop:**
+- `after_turn` fires on **every turn** (including turns with tool use)
+- `agent_stop` only fires when the agent is **completely done** (no more tool calls)
+- Both apply mutations to the **current running thread** immediately
+
 ### agent_stop
 
 The `agent_stop` hook is the most powerful hook type, supporting multiple result types for different use cases:
@@ -237,7 +313,6 @@ interface AgentStopPayload extends BasePayload {
   invoked_recipe?: string;           // Recipe that triggered this session (if any)
   auto_compact_enabled: boolean;     // Whether auto-compact is enabled
   auto_compact_threshold?: number;   // Threshold ratio (e.g., 0.80)
-  callback_args?: Record<string, string>;  // Args passed when triggered by callback
 }
 
 // Hook result types
@@ -250,7 +325,6 @@ interface AgentStopResult {
   messages?: Message[];              // Messages for mutation (result="mutate")
   callback?: string;                 // Recipe to invoke (result="callback")
   callback_args?: Record<string, string>;  // Arguments for callback
-  target_conversation_id?: string;   // Target conversation for mutation
 }
 ```
 
@@ -288,8 +362,7 @@ interface AgentStopResult {
    ```json
    {
      "result": "mutate",
-     "messages": [{"role": "user", "content": "## Summary\n\nProject context..."}],
-     "target_conversation_id": "original-conv-id"
+     "messages": [{"role": "user", "content": "## Summary\n\nProject context..."}]
    }
    ```
 
@@ -297,8 +370,7 @@ interface AgentStopResult {
    ```json
    {
      "result": "callback",
-     "callback": "compact",
-     "callback_args": {"target_conversation_id": "abc123"}
+     "callback": "compact"
    }
    ```
 
@@ -306,13 +378,16 @@ interface AgentStopResult {
 
 Kodelet includes built-in hooks for common functionality:
 
-### Compact Hook
+### Compact Hook (`builtin:compact-trigger`)
 
-The built-in compact hook coordinates context compaction when using the `compact` recipe. It automatically:
+The built-in compact hook runs on `after_turn` events to detect when context threshold is reached and trigger compaction mid-session:
 
-1. **Handles compact recipe completion**: When the `compact` recipe finishes, the hook extracts the summary from the assistant's response and applies it as a mutation to the target conversation.
+- Checks `usage.current_context_window / usage.max_context_window` against `auto_compact_threshold`
+- When threshold is exceeded, returns `callback: "compact"` to invoke the compact recipe
+- The compact recipe generates a summary, which is then applied to the current thread immediately
+- The conversation is saved after mutation to persist the compacted context
 
-2. **Recipe-aware coordination**: The hook checks `invoked_recipe` to know when it's processing a compact recipe result.
+This enables **proactive compaction** during long multi-turn sessions, preventing context from growing too large.
 
 **Manual Compaction:**
 ```bash
@@ -327,28 +402,24 @@ kodelet run -r compact --resume <conversation-id>
 ```bash
 #!/bin/bash
 # Custom hook to trigger compaction at 70% context utilization
+# Note: The built-in after_turn hook already handles this, but you can customize the threshold
 
 case "$1" in
     hook)
-        echo "agent_stop"
+        echo "after_turn"
         ;;
     run)
         payload=$(cat)
-        
-        # Skip if this is the compact recipe finishing
-        invoked_recipe=$(echo "$payload" | jq -r '.invoked_recipe // ""')
-        if [ "$invoked_recipe" = "compact" ]; then
-            exit 0
-        fi
-        
+
         current=$(echo "$payload" | jq '.usage.current_context_window')
         max=$(echo "$payload" | jq '.usage.max_context_window')
-        conv_id=$(echo "$payload" | jq -r '.conv_id')
-        
-        # Trigger compact at 70% utilization
-        ratio=$(echo "scale=2; $current / $max" | bc)
-        if (( $(echo "$ratio > 0.70" | bc -l) )); then
-            echo "{\"result\": \"callback\", \"callback\": \"compact\", \"callback_args\": {\"target_conversation_id\": \"$conv_id\"}}"
+
+        # Trigger compact at 70% utilization (before the default 80%)
+        if [ "$max" -gt 0 ]; then
+            ratio=$(echo "scale=2; $current / $max" | bc)
+            if (( $(echo "$ratio > 0.70" | bc -l) )); then
+                echo '{"result": "callback", "callback": "compact"}'
+            fi
         fi
         ;;
 esac
@@ -442,6 +513,65 @@ case "$1" in
 
         if [ -f "./foo.txt" ]; then
             echo '{"follow_up_messages":["I noticed foo.txt exists. Please remove it."]}'
+        fi
+        ;;
+    *)
+        exit 1
+        ;;
+esac
+```
+
+### Turn Logger Hook (Bash)
+
+```bash
+#!/bin/bash
+# Logs context utilization after each turn
+
+case "$1" in
+    hook)
+        echo "after_turn"
+        ;;
+    run)
+        payload=$(cat)
+        turn=$(echo "$payload" | jq '.turn_number')
+        current=$(echo "$payload" | jq '.usage.current_context_window')
+        max=$(echo "$payload" | jq '.usage.max_context_window')
+        tools_used=$(echo "$payload" | jq '.tools_used')
+
+        ratio=$(echo "scale=2; $current * 100 / $max" | bc)
+        echo "Turn $turn: context ${ratio}% (tools_used: $tools_used)" >&2
+
+        # No action needed
+        exit 0
+        ;;
+    *)
+        exit 1
+        ;;
+esac
+```
+
+### Custom Compaction Threshold Hook (Bash)
+
+```bash
+#!/bin/bash
+# Triggers compact at a custom threshold (e.g., 70%) before the default 80%
+
+case "$1" in
+    hook)
+        echo "after_turn"
+        ;;
+    run)
+        payload=$(cat)
+
+        current=$(echo "$payload" | jq '.usage.current_context_window')
+        max=$(echo "$payload" | jq '.usage.max_context_window')
+
+        # Trigger compact at 70% utilization
+        if [ "$max" -gt 0 ]; then
+            ratio=$(echo "scale=2; $current / $max" | bc)
+            if (( $(echo "$ratio > 0.70" | bc -l) )); then
+                echo '{"result": "callback", "callback": "compact"}'
+            fi
         fi
         ;;
     *)

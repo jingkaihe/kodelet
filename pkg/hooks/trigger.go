@@ -24,8 +24,6 @@ type Trigger struct {
 	AutoCompactEnabled bool
 	// AutoCompactThreshold is the threshold ratio for auto-compact
 	AutoCompactThreshold float64
-	// CallbackArgs contains arguments passed when this session was triggered by a callback
-	CallbackArgs map[string]string
 }
 
 // NewTrigger creates a new hook trigger with the given parameters.
@@ -141,6 +139,41 @@ func (t Trigger) TriggerAfterToolCall(ctx context.Context, toolName, toolInput, 
 	return result.Output
 }
 
+// TriggerAfterTurn invokes after_turn hooks after each LLM response.
+// This enables hooks to monitor context usage and trigger compaction mid-session.
+// A zero-value Trigger returns an empty result.
+func (t Trigger) TriggerAfterTurn(ctx context.Context, turnNumber int, toolsUsed bool, usage llmtypes.Usage) *AfterTurnResult {
+	if !t.Manager.HasHooks(HookTypeAfterTurn) {
+		return &AfterTurnResult{}
+	}
+
+	payload := AfterTurnPayload{
+		BasePayload: BasePayload{
+			Event:     HookTypeAfterTurn,
+			ConvID:    t.ConversationID,
+			CWD:       t.getCwd(ctx),
+			InvokedBy: t.invokedBy(),
+		},
+		TurnNumber:           turnNumber,
+		ToolsUsed:            toolsUsed,
+		AutoCompactEnabled:   t.AutoCompactEnabled,
+		AutoCompactThreshold: t.AutoCompactThreshold,
+		Usage: UsageInfo{
+			InputTokens:          usage.InputTokens,
+			OutputTokens:         usage.OutputTokens,
+			CurrentContextWindow: usage.CurrentContextWindow,
+			MaxContextWindow:     usage.MaxContextWindow,
+		},
+	}
+
+	result, err := t.Manager.ExecuteAfterTurn(ctx, payload)
+	if err != nil {
+		logger.G(ctx).WithError(err).Warn("failed to execute after_turn hooks")
+		return &AfterTurnResult{}
+	}
+	return result
+}
+
 // TriggerAgentStop invokes agent_stop hooks.
 // Returns follow-up messages that can be appended to the conversation.
 // A zero-value Trigger returns nil.
@@ -172,7 +205,6 @@ func (t Trigger) TriggerAgentStopWithResult(ctx context.Context, messages []llmt
 		InvokedRecipe:        t.InvokedRecipe,
 		AutoCompactEnabled:   t.AutoCompactEnabled,
 		AutoCompactThreshold: t.AutoCompactThreshold,
-		CallbackArgs:         t.CallbackArgs,
 		Usage: UsageInfo{
 			InputTokens:          usage.InputTokens,
 			OutputTokens:         usage.OutputTokens,

@@ -171,6 +171,95 @@ func (m HookManager) ExecuteAfterToolCall(ctx context.Context, payload AfterTool
 	return &result, nil
 }
 
+// ExecuteAfterTurn runs after_turn hooks (both external and built-in) and returns typed result.
+// Empty or nil output with exit code 0 is treated as "no action".
+// The first hook that returns a non-empty Result wins for mutate/callback.
+// Built-in hooks are executed first, followed by external hooks.
+func (m HookManager) ExecuteAfterTurn(ctx context.Context, payload AfterTurnPayload) (*AfterTurnResult, error) {
+	externalHooks := m.hooks[HookTypeAfterTurn]
+	builtinHooks := m.afterTurnBuiltins
+
+	if len(externalHooks) == 0 && len(builtinHooks) == 0 {
+		return &AfterTurnResult{}, nil
+	}
+
+	var finalResult *AfterTurnResult
+
+	// Execute built-in hooks first
+	for _, hook := range builtinHooks {
+		result, err := hook.Execute(&payload)
+		if err != nil {
+			logger.G(ctx).WithError(err).WithField("hook", hook.Name()).Warn("builtin after_turn hook execution failed")
+			continue
+		}
+		if result == nil || result.Result == HookResultNone {
+			continue
+		}
+
+		// First non-empty result wins
+		switch result.Result {
+		case HookResultMutate, HookResultCallback:
+			if finalResult == nil {
+				logger.G(ctx).WithField("hook", hook.Name()).WithField("result", result.Result).Debug("builtin after_turn hook returned action")
+				finalResult = result
+			} else {
+				logger.G(ctx).WithField("hook", hook.Name()).Warn("ignoring duplicate after_turn result")
+			}
+		}
+	}
+
+	// If we got a mutate or callback result from builtin hooks, return it
+	if finalResult != nil {
+		return finalResult, nil
+	}
+
+	// Execute external hooks
+	if len(externalHooks) > 0 {
+		payloadBytes, err := json.Marshal(payload)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to marshal payload")
+		}
+
+		for _, hook := range externalHooks {
+			resultBytes, err := m.executeHook(ctx, hook, payloadBytes)
+			if err != nil {
+				logger.G(ctx).WithError(err).WithField("hook", hook.Name).Warn("after_turn hook execution failed")
+				continue
+			}
+			if len(resultBytes) == 0 {
+				continue
+			}
+
+			var result AfterTurnResult
+			if err := json.Unmarshal(resultBytes, &result); err != nil {
+				logger.G(ctx).WithError(err).WithField("hook", hook.Name).Warn("failed to unmarshal after_turn hook result")
+				continue
+			}
+
+			if result.Result == HookResultNone {
+				continue
+			}
+
+			// First non-empty result wins
+			switch result.Result {
+			case HookResultMutate, HookResultCallback:
+				if finalResult == nil {
+					logger.G(ctx).WithField("hook", hook.Name).WithField("result", result.Result).Debug("after_turn hook returned action")
+					finalResult = &result
+				} else {
+					logger.G(ctx).WithField("hook", hook.Name).Warn("ignoring duplicate after_turn result")
+				}
+			}
+		}
+	}
+
+	if finalResult != nil {
+		return finalResult, nil
+	}
+
+	return &AfterTurnResult{}, nil
+}
+
 // ExecuteAgentStop runs agent_stop hooks (both external and built-in) and returns typed result.
 // Empty or nil output with exit code 0 is treated as "no action".
 // The first hook that returns a non-empty Result wins for mutate/callback.

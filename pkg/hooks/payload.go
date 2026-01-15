@@ -56,6 +56,42 @@ type UserMessageSendResult struct {
 	Reason  string `json:"reason,omitempty"`
 }
 
+// AfterTurnPayload is sent to after_turn hooks after each LLM response
+type AfterTurnPayload struct {
+	BasePayload
+
+	// TurnNumber is the current turn number (1-indexed)
+	TurnNumber int `json:"turn_number"`
+
+	// ToolsUsed indicates if tools were used in this turn
+	ToolsUsed bool `json:"tools_used"`
+
+	// Usage provides token usage statistics
+	Usage UsageInfo `json:"usage"`
+
+	// AutoCompactEnabled indicates if auto-compact is enabled for this session
+	AutoCompactEnabled bool `json:"auto_compact_enabled"`
+
+	// AutoCompactThreshold is the threshold ratio (e.g., 0.80)
+	AutoCompactThreshold float64 `json:"auto_compact_threshold,omitempty"`
+}
+
+// AfterTurnResult is returned by after_turn hooks
+type AfterTurnResult struct {
+	// Result specifies the outcome (mutate or callback)
+	Result HookResult `json:"result,omitempty"`
+
+	// Messages for mutation (when Result="mutate")
+	// Replaces conversation in the CURRENT running thread
+	Messages []llmtypes.Message `json:"messages,omitempty"`
+
+	// Callback specifies which recipe to invoke (when Result="callback")
+	Callback string `json:"callback,omitempty"`
+
+	// CallbackArgs provides arguments to pass to the recipe
+	CallbackArgs map[string]string `json:"callback_args,omitempty"`
+}
+
 // UsageInfo provides token usage statistics for hook payloads
 type UsageInfo struct {
 	InputTokens          int `json:"input_tokens"`
@@ -79,9 +115,6 @@ type AgentStopPayload struct {
 
 	// AutoCompactThreshold is the threshold ratio (e.g., 0.80)
 	AutoCompactThreshold float64 `json:"auto_compact_threshold,omitempty"`
-
-	// CallbackArgs contains arguments passed when this session was triggered by a callback
-	CallbackArgs map[string]string `json:"callback_args,omitempty"`
 }
 
 // HookResult represents the outcome of an agent_stop hook
@@ -109,16 +142,13 @@ type AgentStopResult struct {
 	// Messages has different meanings based on Result:
 	// - Result="continue": Follow-up messages to append (agent continues processing)
 	// - Result="mutate": Replacement messages for the entire conversation history
+	// - Result="callback": After callback execution, these are the resulting messages
 	Messages []llmtypes.Message `json:"messages,omitempty"`
 
 	// Callback specifies which recipe to invoke via callback
 	// Only used when Result="callback"
 	Callback string `json:"callback,omitempty"`
 
-	// CallbackArgs provides arguments to pass to the recipe
+	// CallbackArgs provides arguments to pass to the recipe (used as template vars)
 	CallbackArgs map[string]string `json:"callback_args,omitempty"`
-
-	// TargetConversationID specifies which conversation to apply mutations to
-	// Defaults to current conversation if empty
-	TargetConversationID string `json:"target_conversation_id,omitempty"`
 }

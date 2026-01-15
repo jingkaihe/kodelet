@@ -1,7 +1,7 @@
 # ADR 025: Enhanced Hook System with Runtime Protocol and Message Mutation
 
 ## Status
-Implemented (Phases 1-4)
+Implemented (Simplified)
 
 ## Context
 
@@ -39,14 +39,14 @@ Context compaction currently runs automatically when the context window reaches 
 **Desired State:**
 
 1. Manual compaction via `kodelet run -r compact --follow`
-2. Hook-triggered compaction (e.g., on `agent_stop` when certain conditions are met)
+2. Hook-triggered compaction (e.g., on `after_turn` when threshold is reached)
 3. Recipe-based compaction logic (single source of truth)
 4. Hook awareness of invoked recipe to coordinate behavior
 
 ### Goals
 
 1. **Recipe-Based Operations**: Complex operations like compaction are defined as recipes, invokable manually or via callbacks
-2. **Message Mutation Support**: Enable `agent_stop` hooks to replace/modify conversation history
+2. **Message Mutation Support**: Enable hooks to replace/modify conversation history
 3. **Recipe-Aware Hooks**: Hooks receive context about which recipe invoked the session
 4. **Callback System**: Hooks can request recipe execution via callbacks
 5. **Runtime Hook Protocol**: Support for Go-based hooks with access to Kodelet services (future phase)
@@ -65,37 +65,28 @@ Introduce an **Enhanced Hook System** with recipe integration:
 ```mermaid
 flowchart TB
     subgraph Triggers["Compaction Triggers"]
-        T1["Auto-compact<br/>(threshold ≥ 80%)"]
+        T1["after_turn hook<br/>(threshold >= 80%)"]
         T2["Manual: kodelet run -r compact --follow"]
-        T3["Hook callback:<br/>result: callback, callback: compact"]
     end
 
     subgraph Recipe["recipes/compact.md"]
-        R["Compact Recipe<br/>- Loads target conversation<br/>- Instructs LLM to summarize<br/>- Outputs structured summary"]
+        R["Compact Recipe<br/>- Instructs LLM to summarize<br/>- Outputs structured summary"]
     end
 
-    subgraph AgentLoop["Agent Loop"]
-        AL["SendMessage loop<br/>executes recipe prompt"]
+    subgraph CallbackExec["Callback Execution"]
+        CE["executeRecipe()<br/>- Runs recipe in temp thread<br/>- Captures handler output<br/>- Returns messages"]
     end
 
-    subgraph Hook["agent_stop Hook"]
-        H["Receives payload with:<br/>- invoked_recipe: 'compact'<br/>- messages (including summary)<br/>- usage stats"]
+    subgraph Apply["Apply Mutation"]
+        A1["replaceMessages()<br/>Update in-memory messages"]
+        A2["saveConversation()<br/>Persist to storage"]
     end
 
-    subgraph Results["Hook Results"]
-        R1["result: mutate<br/>Apply summary as new context"]
-        R2["result: callback<br/>Trigger another recipe"]
-        R3["result: continue<br/>Add follow-up messages"]
-    end
-
-    T1 --> Recipe
+    T1 -->|"callback: compact"| CE
     T2 --> Recipe
-    T3 --> Recipe
-    Recipe --> AgentLoop
-    AgentLoop --> Hook
-    Hook --> Results
-    R1 --> Apply["Replace conversation history"]
-    R2 --> Recipe
+    Recipe --> CE
+    CE --> Apply
+    A1 --> A2
 ```
 
 ## Detailed Design
@@ -111,7 +102,7 @@ name: compact
 description: Compact conversation context into a structured summary
 allowed_tools: []
 ---
-You are a conversation summarizer. Analyze the conversation history and produce 
+You are a conversation summarizer. Analyze the conversation history and produce
 a structured summary that preserves essential context for continuing the work.
 
 ## Output Format
@@ -149,14 +140,14 @@ type AgentStopPayload struct {
     BasePayload
     Messages []llmtypes.Message `json:"messages"`
     Usage    UsageInfo          `json:"usage"`
-    
+
     // InvokedRecipe is the recipe that triggered this agent session (if any)
     // Empty string if no recipe was used (e.g., direct query)
     InvokedRecipe string `json:"invoked_recipe,omitempty"`
-    
+
     // AutoCompactEnabled indicates if auto-compact is enabled for this session
     AutoCompactEnabled bool `json:"auto_compact_enabled"`
-    
+
     // AutoCompactThreshold is the threshold ratio (e.g., 0.80)
     AutoCompactThreshold float64 `json:"auto_compact_threshold,omitempty"`
 }
@@ -170,56 +161,12 @@ type UsageInfo struct {
 }
 ```
 
-#### Example Payload (compact recipe invoked)
-
-```json
-{
-  "event": "agent_stop",
-  "conv_id": "abc123",
-  "cwd": "/home/user/project",
-  "invoked_recipe": "compact",
-  "auto_compact_enabled": true,
-  "auto_compact_threshold": 0.80,
-  "messages": [
-    {"role": "user", "content": "You are a conversation summarizer..."},
-    {"role": "assistant", "content": "## Summary\n\n### Primary Objective\n..."}
-  ],
-  "usage": {
-    "current_context_window": 2000,
-    "max_context_window": 128000
-  },
-  "invoked_by": "main"
-}
-```
-
-#### Example Payload (regular session, no recipe)
-
-```json
-{
-  "event": "agent_stop",
-  "conv_id": "abc123",
-  "cwd": "/home/user/project",
-  "invoked_recipe": "",
-  "auto_compact_enabled": true,
-  "auto_compact_threshold": 0.80,
-  "messages": [
-    {"role": "user", "content": "Fix the bug in auth.go"},
-    {"role": "assistant", "content": "I've fixed the bug..."}
-  ],
-  "usage": {
-    "current_context_window": 95000,
-    "max_context_window": 128000
-  },
-  "invoked_by": "main"
-}
-```
-
 ### 3. Hook Results
 
 ```go
 // pkg/hooks/payload.go
 
-// HookResult represents the outcome of an agent_stop hook
+// HookResult represents the outcome of a hook
 type HookResult string
 
 const (
@@ -234,45 +181,47 @@ type AgentStopResult struct {
     // Result specifies the outcome of the hook
     Result HookResult `json:"result,omitempty"`
 
-    // Messages has different meanings based on Result:
-    // - Result="continue": Follow-up messages to append (agent continues processing)
-    // - Result="mutate": Replacement messages for the entire conversation history
+    // FollowUpMessages for backward compatibility
+    FollowUpMessages []string `json:"follow_up_messages,omitempty"`
+
+    // Messages for mutation (when Result="mutate")
+    // Or after callback execution (when Result="callback")
     Messages []llmtypes.Message `json:"messages,omitempty"`
 
     // Callback specifies which recipe to invoke via callback
     // Only used when Result="callback"
     Callback string `json:"callback,omitempty"`
 
-    // CallbackArgs provides arguments to pass to the recipe
+    // CallbackArgs provides arguments to pass to the recipe (used as template vars)
     CallbackArgs map[string]string `json:"callback_args,omitempty"`
-    
-    // TargetConversationID specifies which conversation to apply mutations to
-    // Defaults to current conversation if empty
-    TargetConversationID string `json:"target_conversation_id,omitempty"`
+}
+
+// AfterTurnResult is returned by after_turn hooks
+type AfterTurnResult struct {
+    Result       HookResult         `json:"result,omitempty"`
+    Messages     []llmtypes.Message `json:"messages,omitempty"`
+    Callback     string             `json:"callback,omitempty"`
+    CallbackArgs map[string]string  `json:"callback_args,omitempty"`
 }
 ```
 
 #### Hook Response Examples
 
-**When compact recipe finishes - apply summary as mutation:**
+**Trigger compact recipe (from after_turn):**
+```json
+{
+  "result": "callback",
+  "callback": "compact"
+}
+```
+
+**Direct message mutation (from external hook):**
 ```json
 {
   "result": "mutate",
   "messages": [
     {"role": "user", "content": "## Summary\n\n### Primary Objective\n..."}
-  ],
-  "target_conversation_id": "original-conv-123"
-}
-```
-
-**When context threshold reached - trigger compact recipe:**
-```json
-{
-  "result": "callback",
-  "callback": "compact",
-  "callback_args": {
-    "target_conversation_id": "abc123"
-  }
+  ]
 }
 ```
 
@@ -280,15 +229,8 @@ type AgentStopResult struct {
 ```json
 {
   "result": "continue",
-  "messages": [
-    {"role": "user", "content": "Please also run the linter"}
-  ]
+  "follow_up_messages": ["Please also run the linter"]
 }
-```
-
-**No action (agent stops normally):**
-```json
-{}
 ```
 
 ### 4. Callback Registry
@@ -301,21 +243,8 @@ Callbacks invoke recipes and return results for processing:
 // CallbackRegistry manages recipe-based callbacks
 type CallbackRegistry struct {
     fragmentProcessor *fragments.Processor
-    threadFactory     func(ctx context.Context, config llmtypes.Config) (llmtypes.Thread, error)
+    threadFactory     ThreadFactory
     config            llmtypes.Config
-}
-
-// NewCallbackRegistry creates a registry with access to recipes
-func NewCallbackRegistry(
-    fp *fragments.Processor,
-    tf func(ctx context.Context, config llmtypes.Config) (llmtypes.Thread, error),
-    config llmtypes.Config,
-) *CallbackRegistry {
-    return &CallbackRegistry{
-        fragmentProcessor: fp,
-        threadFactory:     tf,
-        config:            config,
-    }
 }
 
 // Execute invokes a recipe by name and returns the result
@@ -325,32 +254,21 @@ func (r *CallbackRegistry) Execute(ctx context.Context, recipeName string, args 
         FragmentName: recipeName,
         Arguments:    args,
     })
-    if err != nil {
-        return nil, errors.Wrapf(err, "failed to load recipe %s", recipeName)
-    }
-    
+
     // Create a thread to execute the recipe
-    // Mark it with the recipe name so the hook knows the context
     config := r.config
     config.InvokedRecipe = recipeName
-    
     thread, err := r.threadFactory(ctx, config)
-    if err != nil {
-        return nil, errors.Wrap(err, "failed to create thread for callback")
-    }
-    
+
     // Execute the recipe
     handler := &llmtypes.StringCollectorHandler{Silent: true}
     _, err = thread.SendMessage(ctx, fragment.Content, handler, llmtypes.MessageOpt{
         DisableAutoCompact: true,  // Prevent infinite loop
         NoSaveConversation: true,
     })
-    if err != nil {
-        return nil, errors.Wrap(err, "failed to execute recipe")
-    }
-    
+
     output := handler.CollectedText()
-    
+
     return &CallbackResult{
         RecipeOutput: output,
         Messages: []llmtypes.Message{
@@ -359,202 +277,92 @@ func (r *CallbackRegistry) Execute(ctx context.Context, recipeName string, args 
         Continue: false,
     }, nil
 }
-
-// CallbackResult contains the result of a callback execution
-type CallbackResult struct {
-    RecipeOutput string             `json:"recipe_output,omitempty"`
-    Messages     []llmtypes.Message `json:"messages,omitempty"`
-    Continue     bool               `json:"continue"`
-}
 ```
 
-### 5. Built-in Compact Hook
+### 5. Built-in AfterTurnCompactHook
 
-A built-in hook that coordinates the compact recipe flow:
+A single built-in hook detects when context threshold is reached and triggers the compact callback:
 
 ```go
 // pkg/hooks/builtin/compact.go
 
-// CompactHook handles the compact recipe coordination
-// This hook is automatically registered and handles two scenarios:
-// 1. When compact recipe finishes: extract summary and apply as mutation
-// 2. When context threshold reached: trigger compact recipe
+// AfterTurnCompactHook checks context threshold after each turn and triggers compact.
+// This enables proactive compaction during long multi-turn sessions.
+//
+// When the threshold is reached, it returns a callback result to trigger the
+// "compact" recipe. The recipe runs, produces a summary, and executeRecipe
+// returns the summary as messages which are then applied to the main thread.
+type AfterTurnCompactHook struct{}
 
-func (h *CompactHook) Execute(payload *hooks.AgentStopPayload) (*hooks.AgentStopResult, error) {
-    // Case 1: Compact recipe just finished - apply its output as mutation
-    if payload.InvokedRecipe == "compact" {
-        // Extract the assistant's summary from the last message
-        var summary string
-        for i := len(payload.Messages) - 1; i >= 0; i-- {
-            if payload.Messages[i].Role == "assistant" {
-                summary = payload.Messages[i].Content
-                break
-            }
-        }
-        
-        if summary != "" {
-            return &hooks.AgentStopResult{
-                Result: hooks.HookResultMutate,
-                Messages: []llmtypes.Message{
-                    {Role: "user", Content: summary},
-                },
-                // Apply to the original conversation, not the compact session
-                TargetConversationID: payload.CallbackArgs["target_conversation_id"],
-            }, nil
-        }
-        return &hooks.AgentStopResult{}, nil
+func (h *AfterTurnCompactHook) Name() string { return "builtin:compact-trigger" }
+func (h *AfterTurnCompactHook) Type() hooks.HookType { return hooks.HookTypeAfterTurn }
+
+func (h *AfterTurnCompactHook) Execute(payload *hooks.AfterTurnPayload) (*hooks.AfterTurnResult, error) {
+    // Only trigger if auto-compact is enabled and we have usage info
+    if !payload.AutoCompactEnabled || payload.Usage.MaxContextWindow == 0 {
+        return &hooks.AfterTurnResult{}, nil
     }
-    
-    // Case 2: Regular session - check if auto-compact should trigger
-    if payload.AutoCompactEnabled && payload.Usage.MaxContextWindow > 0 {
-        ratio := float64(payload.Usage.CurrentContextWindow) / float64(payload.Usage.MaxContextWindow)
-        if ratio >= payload.AutoCompactThreshold {
-            return &hooks.AgentStopResult{
-                Result:   hooks.HookResultCallback,
-                Callback: "compact",
-                CallbackArgs: map[string]string{
-                    "target_conversation_id": payload.ConvID,
-                },
-            }, nil
-        }
+
+    ratio := float64(payload.Usage.CurrentContextWindow) / float64(payload.Usage.MaxContextWindow)
+    if ratio >= payload.AutoCompactThreshold {
+        return &hooks.AfterTurnResult{
+            Result:   hooks.HookResultCallback,
+            Callback: "compact",
+        }, nil
     }
-    
-    // No action needed
-    return &hooks.AgentStopResult{}, nil
+
+    return &hooks.AfterTurnResult{}, nil
 }
 ```
 
-### 6. Provider Integration
+**Note**: There is no separate `CompactHook` for `agent_stop`. The callback execution flow handles everything:
 
-Each LLM provider tracks recipe context and implements message mutation:
+1. `AfterTurnCompactHook` detects threshold and returns `{Callback: "compact"}`
+2. `ProcessAfterTurnResult` calls `CallbackRegistry.Execute("compact", ...)`
+3. `executeRecipe` runs the compact recipe, captures output via handler
+4. Returns `{Messages: [summary from handler]}`
+5. `ProcessAfterTurnResult` applies messages via `replaceMessages` and `saveConversation`
+
+### 6. Hook Result Processing
+
+Both `ProcessHookResult` (agent_stop) and `ProcessAfterTurnResult` (after_turn) handle results uniformly:
 
 ```go
-// pkg/llm/anthropic/anthropic.go
+// pkg/llm/base/base.go
 
-type Thread struct {
-    // ... existing fields ...
-    
-    invokedRecipe    string                  // Recipe that started this session
-    callbackRegistry *hooks.CallbackRegistry // For executing recipe callbacks
-}
-
-// SetInvokedRecipe sets the recipe context for hook payloads
-func (t *Thread) SetInvokedRecipe(recipe string) {
-    t.invokedRecipe = recipe
-}
-
-// replaceMessages replaces the entire conversation history
-func (t *Thread) replaceMessages(ctx context.Context, messages []llmtypes.Message) {
-    t.Mu.Lock()
-    defer t.Mu.Unlock()
-    
-    t.messages = make([]anthropic.MessageParam, 0, len(messages))
-    for _, msg := range messages {
-        t.messages = append(t.messages, anthropic.MessageParam{
-            Role: anthropic.MessageParamRole(msg.Role),
-            Content: []anthropic.ContentBlockParamUnion{
-                anthropic.NewTextBlock(msg.Content),
-            },
-        })
-    }
-    
-    t.ToolResults = make(map[string]tooltypes.StructuredToolResult)
-    logger.G(ctx).WithField("message_count", len(messages)).Info("conversation messages replaced")
-}
-
-// processAgentStopHook processes the agent_stop hook with recipe context
-func (t *Thread) processAgentStopHook(ctx context.Context) (bool, error) {
-    messages, _ := t.GetMessages()
-    usage := t.GetUsage()
-    
-    payload := hooks.AgentStopPayload{
-        BasePayload: hooks.BasePayload{
-            Event:     hooks.HookTypeAgentStop,
-            ConvID:    t.conversationID,
-            CWD:       t.cwd,
-            InvokedBy: t.invokedBy(),
-        },
-        Messages:             messages,
-        InvokedRecipe:        t.invokedRecipe,
-        AutoCompactEnabled:   t.config.CompactRatio > 0,
-        AutoCompactThreshold: t.config.CompactRatio,
-        Usage: hooks.UsageInfo{
-            InputTokens:          usage.InputTokens,
-            OutputTokens:         usage.OutputTokens,
-            CurrentContextWindow: usage.CurrentContextWindow,
-            MaxContextWindow:     usage.MaxContextWindow,
-        },
-    }
-    
-    result, err := t.hookManager.ExecuteAgentStop(ctx, payload)
-    if err != nil {
-        return false, err
-    }
-    
-    return t.processHookResult(ctx, result)
-}
-
-func (t *Thread) processHookResult(ctx context.Context, result *hooks.AgentStopResult) (bool, error) {
+func (t *Thread) ProcessAfterTurnResult(
+    ctx context.Context,
+    result *hooks.AfterTurnResult,
+    replaceMessages func(ctx context.Context, messages []llmtypes.Message),
+    saveConversation func(ctx context.Context),
+) error {
     switch result.Result {
-    case hooks.HookResultCallback:
-        logger.G(ctx).WithField("callback", result.Callback).Info("hook requested recipe callback")
-        
-        callbackResult, err := t.callbackRegistry.Execute(ctx, result.Callback, result.CallbackArgs)
-        if err != nil {
-            return false, errors.Wrapf(err, "callback %s failed", result.Callback)
-        }
-        
-        // The callback executed a recipe, which will trigger its own agent_stop hook
-        // That hook will handle applying the mutation
-        return callbackResult.Continue, nil
-
     case hooks.HookResultMutate:
-        logger.G(ctx).Info("hook requested message mutation")
-        if len(result.Messages) > 0 {
-            // Apply to target conversation if specified
-            if result.TargetConversationID != "" && result.TargetConversationID != t.conversationID {
-                return false, t.applyMutationToConversation(ctx, result.TargetConversationID, result.Messages)
+        // External hook provides messages directly
+        if len(result.Messages) > 0 && replaceMessages != nil {
+            replaceMessages(ctx, result.Messages)
+            if saveConversation != nil {
+                saveConversation(ctx)
             }
-            t.replaceMessages(ctx, result.Messages)
         }
-        return false, nil
+        return nil
 
-    case hooks.HookResultContinue:
-        if len(result.Messages) > 0 {
-            for _, msg := range result.Messages {
-                t.AddUserMessage(ctx, msg.Content)
+    case hooks.HookResultCallback:
+        // Execute callback (e.g., compact) and apply its result
+        callbackResult, err := t.CallbackRegistry.Execute(ctx, result.Callback, result.CallbackArgs)
+        if err != nil {
+            return err
+        }
+
+        // Apply callback's messages to current thread and save
+        if len(callbackResult.Messages) > 0 && replaceMessages != nil {
+            replaceMessages(ctx, callbackResult.Messages)
+            if saveConversation != nil {
+                saveConversation(ctx)
             }
-            return true, nil
         }
-        return false, nil
-
-    default:
-        return false, nil
+        return nil
     }
-}
-
-// applyMutationToConversation applies a mutation to a different conversation
-func (t *Thread) applyMutationToConversation(ctx context.Context, convID string, messages []llmtypes.Message) error {
-    // Load the conversation from storage
-    conv, err := t.conversationStore.Load(ctx, convID)
-    if err != nil {
-        return errors.Wrapf(err, "failed to load conversation %s", convID)
-    }
-    
-    // Replace messages
-    conv.Messages = messages
-    conv.ToolResults = nil
-    
-    // Save back
-    if err := t.conversationStore.Save(ctx, conv); err != nil {
-        return errors.Wrapf(err, "failed to save conversation %s", convID)
-    }
-    
-    logger.G(ctx).WithFields(logrus.Fields{
-        "conversation_id": convID,
-        "message_count":   len(messages),
-    }).Info("applied mutation to conversation")
-    
     return nil
 }
 ```
@@ -563,43 +371,36 @@ func (t *Thread) applyMutationToConversation(ctx context.Context, convID string,
 
 ```mermaid
 flowchart TD
-    subgraph Trigger["Trigger"]
-        T1["User: kodelet run -r compact --follow"]
-        T2["Hook: result=callback, callback=compact"]
-        T3["Auto-compact threshold reached"]
+    subgraph MainLoop["Main Thread Loop"]
+        A[User message] --> B[LLM API call]
+        B --> C[after_turn hook]
+        C --> D{Threshold reached?}
+        D -->|Yes| E[Return callback:compact]
+        D -->|No| F{Tools used?}
     end
 
-    subgraph RecipeExec["Recipe Execution"]
-        R1["Load recipes/compact.md"]
-        R2["Create thread with invoked_recipe='compact'"]
-        R3["Execute recipe prompt"]
-        R4["LLM generates summary"]
+    subgraph Callback["Callback Execution"]
+        E --> G[executeRecipe]
+        G --> H[Load compact recipe]
+        H --> I[Create temp thread]
+        I --> J[Run recipe - LLM summarizes]
+        J --> K[Capture handler output]
+        K --> L[Return messages]
     end
 
-    subgraph HookPhase["agent_stop Hook"]
-        H1["Hook receives payload"]
-        H2{invoked_recipe?}
-        H2 -->|"'compact'"| H3["Extract summary from assistant message"]
-        H3 --> H4["Return: result=mutate, messages=[summary]"]
-        H2 -->|"''"| H5{Check threshold}
-        H5 -->|">= threshold"| H6["Return: result=callback, callback=compact"]
-        H5 -->|"< threshold"| H7["Return: no action"]
+    subgraph Apply["Apply to Main Thread"]
+        L --> M[replaceMessages]
+        M --> N[saveConversation]
+        N --> F
     end
 
-    subgraph Apply["Apply Mutation"]
-        A1["Load target conversation"]
-        A2["Replace messages with summary"]
-        A3["Clear tool results"]
-        A4["Save conversation"]
-    end
+    F -->|Yes| O[Execute tools]
+    O --> B
+    F -->|No| P[agent_stop hook]
+    P --> Q[Agent stops]
 
-    T1 --> R1
-    T2 --> R1
-    T3 --> R1
-    R1 --> R2 --> R3 --> R4
-    R4 --> H1 --> H2
-    H4 --> A1 --> A2 --> A3 --> A4
-    H6 --> R1
+    style C fill:#9f9,stroke:#333
+    style P fill:#9ff,stroke:#333
 ```
 
 ### 8. Manual Invocation Flow
@@ -613,7 +414,6 @@ sequenceDiagram
     participant FragmentProcessor
     participant Thread
     participant LLM
-    participant Hook
     participant ConversationStore
 
     User->>CLI: kodelet run -r compact --follow
@@ -624,51 +424,22 @@ sequenceDiagram
     Thread->>Thread: Inject conversation as context
     Thread->>LLM: Send compact prompt
     LLM-->>Thread: Summary response
-    Thread->>Hook: agent_stop (invoked_recipe="compact")
-    Hook->>Hook: Extract summary from response
-    Hook-->>Thread: result=mutate, target=original_conv
-    Thread->>ConversationStore: Replace messages in original conversation
-    ConversationStore-->>CLI: Success
+    Thread->>Thread: replaceMessages with summary
+    Thread->>ConversationStore: saveConversation
     CLI-->>User: Compacted conversation abc123
 ```
 
+### 9. after_turn vs agent_stop Hooks
 
-### 9. Auto-Compact vs Hook-Triggered Compact
+| Hook Type | When it Fires | Purpose |
+|-----------|--------------|---------|
+| `after_turn` | After every LLM response | Threshold detection, mid-session compaction |
+| `agent_stop` | When agent completes (no tool calls) | Follow-up messages, final processing |
 
-Auto-compact (threshold-based) runs *before* each LLM call, while hook-triggered compact runs *after* the agent stops. They can coexist:
-
-```mermaid
-flowchart TD
-    A[User message] --> B{Auto-compact check}
-    B -->|"ratio > 0.80"| C[Invoke compact recipe]
-    C --> D[LLM API call]
-    B -->|"ratio ≤ 0.80"| D
-    D --> E[Tool execution<br/>if any]
-    E --> F{No tools used?}
-    F -->|No| D
-    F -->|Yes| G[agent_stop hook]
-    G -->|"Can use different threshold<br/>(e.g., 0.70) or custom logic"| H{Hook result?}
-    H -->|"callback:compact"| I1[Invoke compact recipe]
-    H -->|"mutate"| I2[Apply hook's messages]
-    H -->|"continue"| K[Continue with messages]
-    H -->|empty| J[Agent stops]
-    I1 --> J
-    I2 --> J
-    K --> D
-
-    style B fill:#f9f,stroke:#333
-    style G fill:#9ff,stroke:#333
-```
-
-**Timing summary:**
-- **Auto-compact** (pink): Runs *before* LLM call, threshold-based safety net (default 80%)
-- **Hook-triggered** (cyan): Runs *after* agent completes, supports callbacks or direct mutation
-
-This allows users to:
-- Keep auto-compact as a safety net (high threshold like 80%)
-- Use hooks for proactive compaction (lower threshold like 70%)
-- Implement custom logic (e.g., compact after specific operations, time-based, etc.)
-- Perform direct message mutation without needing LLM access
+**Key insight**: Compaction is triggered by `after_turn` and handled entirely through the callback mechanism. No `agent_stop` hook is needed for compaction because:
+- `executeRecipe` captures the recipe output via handler
+- Returns messages directly to the caller
+- Caller applies mutation and saves
 
 ## Implementation Phases
 
@@ -681,16 +452,13 @@ This allows users to:
 
 ### Phase 2: Message Mutation and Callbacks ✅
 - [x] Implement `replaceMessages()` in all providers (Anthropic, OpenAI, Google)
-- [x] Implement `applyMutationToConversation()` for cross-conversation mutations
-- [x] Add `TargetConversationID` field to `AgentStopResult`
+- [x] Add `saveConversation` callback to hook result processors
 - [x] Implement `processHookResult()` with callback, mutate, continue handling
 - [ ] Write integration tests for mutation scenarios (deferred)
 
 ### Phase 3: Built-in Compact Hook ✅
-- [x] Implement `pkg/hooks/builtin/compact.go`
+- [x] Implement `pkg/hooks/builtin/compact.go` with `AfterTurnCompactHook`
 - [x] Register as default hook in hook manager
-- [x] Handle compact recipe completion → mutation flow
-- [x] Handle threshold detection → callback flow
 - [x] Remove old `CompactContext()` from providers
 - [x] Update documentation
 
@@ -699,6 +467,13 @@ This allows users to:
 - [x] Ensure `--follow` correctly passes target conversation ID
 - [x] Add user feedback for compaction operations
 - [x] Update help text and MANUAL.md
+
+### Phase 5: Simplification ✅
+- [x] Remove `TargetConversationID` from results (thread already knows its conversation ID)
+- [x] Remove unused `CallbackArgs` from payload/trigger (was never set)
+- [x] Remove redundant `CompactHook` (executeRecipe already captures output)
+- [x] Remove `ApplyMutationToConversation` (no longer needed)
+- [x] Add `saveConversation` callback to ensure mutations are persisted
 
 ### Future Phases
 - [ ] Runtime hook protocol (Go plugins for hooks with service access)
@@ -717,13 +492,14 @@ This allows users to:
 - **Clean API**: Simple result-based response format with clear semantics (`continue`, `mutate`, `callback`)
 - **Better Observability**: Usage info and recipe context in payloads enable context-aware decisions
 - **Decoupled Providers**: Remove `CompactContext()` from providers, compaction handled entirely through recipe + hook coordination
+- **Simplified Architecture**: Callback execution returns messages directly, no need for agent_stop hook coordination
 
 ### Negative
 
-- **Increased Complexity**: More moving parts (recipes, callbacks, result types, cross-conversation mutations)
+- **Increased Complexity**: More moving parts (recipes, callbacks, result types)
 - **Migration Effort**: Providers need updating to support `replaceMessages()` and callback registry
-- **Documentation Burden**: New concepts (results, callbacks, mutation, recipe-aware hooks) to explain to users
-- **Testing Surface**: More code paths to test (callback execution, message mutation, cross-conversation scenarios)
+- **Documentation Burden**: New concepts (results, callbacks, mutation) to explain to users
+- **Testing Surface**: More code paths to test (callback execution, message mutation)
 
 ### Risks
 
@@ -736,19 +512,18 @@ This allows users to:
 3. **Circular Callbacks**: Callback triggering another callback indefinitely
    - *Mitigation*: `DisableAutoCompact: true` flag prevents compact recipe from triggering its own compaction
 
-4. **Cross-Conversation Mutation**: Wrong conversation ID could corrupt unrelated conversations
-   - *Mitigation*: Validate conversation exists and is owned by current session before mutation
-
 ## Alternatives Considered
 
-### 1. Action-Based Design (No Message Mutation)
+### 1. Separate agent_stop Hook for Recipe Completion
 
-Use `action: compact` instead of `result: callback` with separate mutation support.
+Originally implemented a `CompactHook` on `agent_stop` to handle compact recipe completion and apply mutations.
 
-**Pros**: Simpler response format
-**Cons**: Hooks cannot perform their own summarization, must always use built-in callbacks
+**Problems discovered:**
+- `executeRecipe` already captures handler output, making the hook redundant
+- Recipe thread's `agent_stop` mutation was applied to the wrong thread
+- Cross-conversation mutation via `TargetConversationID` was broken (never set)
 
-**Decision**: Rejected. The `result`-based design with both `mutate` and `callback` options provides more flexibility - hooks can either perform direct mutation or delegate to recipe-based callbacks.
+**Decision**: Removed. The callback execution flow handles everything - `executeRecipe` returns messages, caller applies them directly.
 
 ### 2. CompactService (Hardcoded Service)
 
@@ -759,32 +534,16 @@ Create a dedicated `pkg/compact` service with the compaction prompt hardcoded in
 
 **Decision**: Rejected. Using the existing recipe system provides a single pattern for defining LLM prompts, and allows users to customize the compact prompt.
 
-### 3. Embedded Scripting (JavaScript/Lua)
+### 3. Cross-Conversation Mutation via TargetConversationID
 
-Use an embedded interpreter for runtime hooks instead of Go plugins.
+Allow hooks to specify a `target_conversation_id` to apply mutations to a different conversation.
 
-**Pros**: Sandboxed, easier to write
-**Cons**: Performance overhead, limited service access, another runtime to maintain
+**Problems:**
+- Added complexity without clear use case
+- The mechanism was broken (callback args were never passed to recipe threads)
+- Thread already knows its own conversation ID
 
-**Decision**: Deferred for future consideration. Binary hooks + recipe callbacks provide sufficient flexibility for now.
-
-### 4. Webhook-Based Hooks
-
-Make hooks HTTP endpoints instead of executables.
-
-**Pros**: Language-agnostic, can run remotely
-**Cons**: Requires running services, latency, complexity for simple use cases
-
-**Decision**: Could be added as another protocol option but doesn't replace local hooks.
-
-### 5. Compaction as Standalone CLI Command Only
-
-Add `kodelet compact` command without hook integration.
-
-**Pros**: Simpler implementation
-**Cons**: Can't be triggered by hooks, no automatic compaction on threshold
-
-**Decision**: Rejected. Recipe-based approach with hook coordination enables both manual and automatic invocation through a unified system.
+**Decision**: Removed. Mutations apply to the current thread, which already has the correct conversation ID.
 
 ## Example Usage
 
@@ -795,7 +554,7 @@ Add `kodelet compact` command without hook integration.
 kodelet run -r compact --follow
 
 # Compact a specific conversation
-kodelet run -r compact --follow --conversation-id abc123
+kodelet run -r compact --resume abc123
 ```
 
 ### Hook-Triggered Compaction (Using Callback)
@@ -807,31 +566,24 @@ kodelet run -r compact --follow --conversation-id abc123
 
 case "$1" in
     hook)
-        echo "agent_stop"
+        echo "after_turn"
         ;;
     run)
         payload=$(cat)
-        
-        # Skip if this is the compact recipe finishing
-        invoked_recipe=$(echo "$payload" | jq -r '.invoked_recipe // ""')
-        if [ "$invoked_recipe" = "compact" ]; then
-            exit 0
-        fi
-        
+
         current=$(echo "$payload" | jq '.usage.current_context_window')
         max=$(echo "$payload" | jq '.usage.max_context_window')
-        conv_id=$(echo "$payload" | jq -r '.conv_id')
 
         # Invoke compact recipe if over 70% utilization
         ratio=$(echo "scale=2; $current / $max" | bc)
         if (( $(echo "$ratio > 0.70" | bc -l) )); then
-            echo "{\"result\": \"callback\", \"callback\": \"compact\", \"callback_args\": {\"target_conversation_id\": \"$conv_id\"}}"
+            echo '{"result": "callback", "callback": "compact"}'
         fi
         ;;
 esac
 ```
 
-### Hook-Triggered Compaction (Direct Mutation)
+### Hook-Triggered Direct Mutation
 
 ```bash
 #!/bin/bash
@@ -840,17 +592,11 @@ esac
 
 case "$1" in
     hook)
-        echo "agent_stop"
+        echo "after_turn"
         ;;
     run)
         payload=$(cat)
-        
-        # Skip if this is the compact recipe finishing
-        invoked_recipe=$(echo "$payload" | jq -r '.invoked_recipe // ""')
-        if [ "$invoked_recipe" = "compact" ]; then
-            exit 0
-        fi
-        
+
         current=$(echo "$payload" | jq '.usage.current_context_window')
         max=$(echo "$payload" | jq '.usage.max_context_window')
 
@@ -860,35 +606,6 @@ case "$1" in
             # Extract key info and create summary (simplified example)
             summary=$(echo "$payload" | jq -r '.messages | map(select(.role == "user")) | .[0].content')
             echo "{\"result\": \"mutate\", \"messages\": [{\"role\": \"user\", \"content\": \"Previous context summary: $summary\"}]}"
-        fi
-        ;;
-esac
-```
-
-### Compact Recipe Completion Hook (Built-in)
-
-```bash
-#!/bin/bash
-# This logic is built into kodelet but shown here for illustration
-# When compact recipe finishes, apply its output as mutation to original conversation
-
-case "$1" in
-    hook)
-        echo "agent_stop"
-        ;;
-    run)
-        payload=$(cat)
-        invoked_recipe=$(echo "$payload" | jq -r '.invoked_recipe // ""')
-        
-        # Only handle compact recipe completion
-        if [ "$invoked_recipe" = "compact" ]; then
-            # Extract summary from assistant's last message
-            summary=$(echo "$payload" | jq -r '[.messages[] | select(.role == "assistant")] | last | .content')
-            target_conv=$(echo "$payload" | jq -r '.callback_args.target_conversation_id // ""')
-            
-            if [ -n "$summary" ] && [ -n "$target_conv" ]; then
-                echo "{\"result\": \"mutate\", \"messages\": [{\"role\": \"user\", \"content\": $summary}], \"target_conversation_id\": \"$target_conv\"}"
-            fi
         fi
         ;;
 esac
@@ -909,32 +626,12 @@ case "$1" in
         payload=$(cat)
         # Check if any file_edit or file_write tools were used
         has_edits=$(echo "$payload" | jq '[.messages[].content // "" | contains("file_edit") or contains("file_write")] | any')
-        
+
         if [ "$has_edits" = "true" ]; then
-            echo '{"result": "continue", "messages": [{"role": "user", "content": "Please run the linter to check for any issues."}]}'
+            echo '{"result": "continue", "follow_up_messages": ["Please run the linter to check for any issues."]}'
         fi
         ;;
 esac
-```
-
-### Registering Custom Recipe Callbacks
-
-```go
-// Register a custom recipe as a callback
-// The recipe must exist in recipes/ directory or ~/.kodelet/recipes/
-registry := hooks.NewCallbackRegistry(fragmentProcessor, threadFactory, config)
-
-// Hook can invoke any recipe via:
-// {"result": "callback", "callback": "my-custom-recipe", "callback_args": {"key": "value"}}
-
-// For non-recipe callbacks, register a function:
-registry.RegisterFunc("redact-pii", func(ctx context.Context, args map[string]string) (*hooks.CallbackResult, error) {
-    // Custom logic that doesn't need LLM
-    return &hooks.CallbackResult{
-        Messages: redactedMessages,
-        Continue: false,
-    }, nil
-})
 ```
 
 ## Related ADRs
