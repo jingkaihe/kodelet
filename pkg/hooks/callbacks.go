@@ -5,6 +5,7 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
 )
@@ -85,10 +86,19 @@ func (r *CallbackRegistry) executeRecipe(ctx context.Context, recipeName string,
 	config := r.config
 	config.InvokedRecipe = recipeName
 
+	// Apply fragment's allowed_tools restriction to config
+	if len(fragment.Metadata.AllowedTools) > 0 {
+		config.AllowedTools = fragment.Metadata.AllowedTools
+	}
+
 	thread, err := r.threadFactory(ctx, config)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create thread for callback")
 	}
+
+	// Set up state for the thread with the config's tool restrictions
+	state := tools.NewBasicState(ctx, tools.WithLLMConfig(config))
+	thread.SetState(state)
 
 	// Execute the recipe
 	handler := &llmtypes.StringCollectorHandler{Silent: true}
