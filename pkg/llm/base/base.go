@@ -146,6 +146,29 @@ func (t *Thread) GetUsage() llmtypes.Usage {
 	return *t.Usage
 }
 
+// EstimateContextWindowFromMessages estimates the context window size based on message content.
+// This is useful after compaction to provide an approximate context size before the next API call.
+// Uses a rough estimate of ~4 characters per token.
+// This method is thread-safe and uses mutex locking.
+func (t *Thread) EstimateContextWindowFromMessages(messages []llmtypes.Message) {
+	t.Mu.Lock()
+	defer t.Mu.Unlock()
+	if t.Usage == nil {
+		return
+	}
+
+	// Estimate tokens from message content (rough: ~4 chars per token)
+	totalChars := 0
+	for _, msg := range messages {
+		totalChars += len(msg.Content)
+	}
+	// Minimum 100 tokens as a reasonable baseline estimate
+	estimatedTokens := max(totalChars/4, 100)
+
+	t.Usage.CurrentContextWindow = estimatedTokens
+	// MaxContextWindow remains unchanged
+}
+
 // AggregateSubagentUsage aggregates usage from a subagent into this thread's usage.
 // This aggregates token counts and costs but NOT context window metrics
 // (CurrentContextWindow and MaxContextWindow remain unchanged to avoid premature auto-compact).
@@ -230,11 +253,13 @@ func (t *Thread) ShouldAutoCompact(compactRatio float64) bool {
 // - followUpMessages: messages to add to the conversation if continuing
 // - error: any error that occurred during processing
 //
+// The getMessages callback retrieves the current thread's messages for callback execution.
 // The replaceMessages callback is called for mutate results to allow provider-specific message replacement.
 // The saveConversation callback is called after mutation to persist changes.
 func (t *Thread) ProcessHookResult(
 	ctx context.Context,
 	result *hooks.AgentStopResult,
+	getMessages func() ([]llmtypes.Message, error),
 	replaceMessages func(ctx context.Context, messages []llmtypes.Message),
 	saveConversation func(ctx context.Context),
 ) (bool, []string, error) {
@@ -251,7 +276,18 @@ func (t *Thread) ProcessHookResult(
 
 		logger.G(ctx).WithField("callback", result.Callback).Info("hook requested recipe callback")
 
-		callbackResult, err := t.CallbackRegistry.Execute(ctx, result.Callback, result.CallbackArgs)
+		// Get current messages to pass to the callback
+		var currentMessages []llmtypes.Message
+		if getMessages != nil {
+			msgs, err := getMessages()
+			if err != nil {
+				logger.G(ctx).WithError(err).Warn("failed to get messages for callback")
+			} else {
+				currentMessages = msgs
+			}
+		}
+
+		callbackResult, err := t.CallbackRegistry.Execute(ctx, result.Callback, result.CallbackArgs, currentMessages)
 		if err != nil {
 			return false, nil, err
 		}
@@ -259,6 +295,8 @@ func (t *Thread) ProcessHookResult(
 		// Apply callback's messages to current thread (consistent with after_turn handling)
 		if len(callbackResult.Messages) > 0 && replaceMessages != nil {
 			replaceMessages(ctx, callbackResult.Messages)
+			// Update context window estimate after compaction
+			t.EstimateContextWindowFromMessages(callbackResult.Messages)
 			if saveConversation != nil {
 				saveConversation(ctx)
 			}
@@ -271,6 +309,8 @@ func (t *Thread) ProcessHookResult(
 		logger.G(ctx).Info("hook requested message mutation")
 		if len(result.Messages) > 0 && replaceMessages != nil {
 			replaceMessages(ctx, result.Messages)
+			// Update context window estimate after compaction
+			t.EstimateContextWindowFromMessages(result.Messages)
 			if saveConversation != nil {
 				saveConversation(ctx)
 			}
@@ -307,12 +347,14 @@ func (t *Thread) SetCallbackRegistry(registry interface{}) {
 // ProcessAfterTurnResult handles the result from an after_turn hook.
 // Returns error if processing failed.
 //
+// The getMessages callback retrieves the current thread's messages for callback execution.
 // The replaceMessages callback is called for mutate results or after callback execution
 // to allow provider-specific message replacement.
 // The saveConversation callback is called after mutation to persist changes.
 func (t *Thread) ProcessAfterTurnResult(
 	ctx context.Context,
 	result *hooks.AfterTurnResult,
+	getMessages func() ([]llmtypes.Message, error),
 	replaceMessages func(ctx context.Context, messages []llmtypes.Message),
 	saveConversation func(ctx context.Context),
 ) error {
@@ -326,6 +368,8 @@ func (t *Thread) ProcessAfterTurnResult(
 		logger.G(ctx).Info("after_turn hook requested message mutation")
 		if len(result.Messages) > 0 && replaceMessages != nil {
 			replaceMessages(ctx, result.Messages)
+			// Update context window estimate after compaction
+			t.EstimateContextWindowFromMessages(result.Messages)
 			if saveConversation != nil {
 				saveConversation(ctx)
 			}
@@ -341,7 +385,18 @@ func (t *Thread) ProcessAfterTurnResult(
 
 		logger.G(ctx).WithField("callback", result.Callback).Info("after_turn hook requested recipe callback")
 
-		callbackResult, err := t.CallbackRegistry.Execute(ctx, result.Callback, result.CallbackArgs)
+		// Get current messages to pass to the callback (e.g., for compact to summarize)
+		var currentMessages []llmtypes.Message
+		if getMessages != nil {
+			msgs, err := getMessages()
+			if err != nil {
+				logger.G(ctx).WithError(err).Warn("failed to get messages for callback")
+			} else {
+				currentMessages = msgs
+			}
+		}
+
+		callbackResult, err := t.CallbackRegistry.Execute(ctx, result.Callback, result.CallbackArgs, currentMessages)
 		if err != nil {
 			return err
 		}
@@ -349,6 +404,8 @@ func (t *Thread) ProcessAfterTurnResult(
 		// Apply callback's mutation to current thread and save
 		if len(callbackResult.Messages) > 0 && replaceMessages != nil {
 			replaceMessages(ctx, callbackResult.Messages)
+			// Update context window estimate after compaction
+			t.EstimateContextWindowFromMessages(callbackResult.Messages)
 			if saveConversation != nil {
 				saveConversation(ctx)
 			}

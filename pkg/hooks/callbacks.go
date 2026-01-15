@@ -2,6 +2,8 @@ package hooks
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/logger"
@@ -50,8 +52,9 @@ func (r *CallbackRegistry) RegisterFunc(name string, fn CallbackFunc) {
 	r.customCallbacks[name] = fn
 }
 
-// Execute invokes a recipe or custom callback by name and returns the result
-func (r *CallbackRegistry) Execute(ctx context.Context, recipeName string, args map[string]string) (*CallbackResult, error) {
+// Execute invokes a recipe or custom callback by name and returns the result.
+// The messages parameter provides the current conversation context for recipes that need it (e.g., compact).
+func (r *CallbackRegistry) Execute(ctx context.Context, recipeName string, args map[string]string, messages []llmtypes.Message) (*CallbackResult, error) {
 	// Check for custom callback first
 	if fn, ok := r.customCallbacks[recipeName]; ok {
 		logger.G(ctx).WithField("callback", recipeName).Debug("executing custom callback")
@@ -59,11 +62,12 @@ func (r *CallbackRegistry) Execute(ctx context.Context, recipeName string, args 
 	}
 
 	// Fall back to recipe-based callback
-	return r.executeRecipe(ctx, recipeName, args)
+	return r.executeRecipe(ctx, recipeName, args, messages)
 }
 
-// executeRecipe loads and executes a recipe, returning the result
-func (r *CallbackRegistry) executeRecipe(ctx context.Context, recipeName string, args map[string]string) (*CallbackResult, error) {
+// executeRecipe loads and executes a recipe, returning the result.
+// The messages parameter provides the current conversation context for recipes that need it (e.g., compact).
+func (r *CallbackRegistry) executeRecipe(ctx context.Context, recipeName string, args map[string]string, messages []llmtypes.Message) (*CallbackResult, error) {
 	if r.fragmentProcessor == nil {
 		return nil, errors.New("fragment processor not configured")
 	}
@@ -100,9 +104,16 @@ func (r *CallbackRegistry) executeRecipe(ctx context.Context, recipeName string,
 	state := tools.NewBasicState(ctx, tools.WithLLMConfig(config))
 	thread.SetState(state)
 
+	// Build the prompt: if messages are provided, prepend them as conversation history
+	prompt := fragment.Content
+	if len(messages) > 0 {
+		conversationHistory := formatMessagesAsHistory(messages)
+		prompt = conversationHistory + "\n\n---\n\n" + fragment.Content
+	}
+
 	// Execute the recipe
 	handler := &llmtypes.StringCollectorHandler{Silent: true}
-	_, err = thread.SendMessage(ctx, fragment.Content, handler, llmtypes.MessageOpt{
+	_, err = thread.SendMessage(ctx, prompt, handler, llmtypes.MessageOpt{
 		DisableAutoCompact: true, // Prevent infinite loop
 		NoSaveConversation: true,
 	})
@@ -121,6 +132,35 @@ func (r *CallbackRegistry) executeRecipe(ctx context.Context, recipeName string,
 		},
 		Continue: false,
 	}, nil
+}
+
+// formatMessagesAsHistory formats messages into a readable conversation history
+func formatMessagesAsHistory(messages []llmtypes.Message) string {
+	var sb strings.Builder
+	sb.WriteString("# Conversation History to Summarize\n\n")
+	sb.WriteString("Below is the conversation history that needs to be summarized:\n\n")
+
+	for i, msg := range messages {
+		role := msg.Role
+		switch role {
+		case "user":
+			sb.WriteString("## User Message ")
+		case "assistant":
+			sb.WriteString("## Assistant Message ")
+		default:
+			sb.WriteString("## Message ")
+		}
+		fmt.Fprintf(&sb, "%d\n\n", i+1)
+
+		// Write the content
+		content := msg.Content
+		if content != "" {
+			sb.WriteString(content)
+			sb.WriteString("\n\n")
+		}
+	}
+
+	return sb.String()
 }
 
 // HasCallback returns true if a callback or recipe with the given name exists
