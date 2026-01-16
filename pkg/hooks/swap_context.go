@@ -15,8 +15,11 @@ type ContextSwapper interface {
 	SwapContext(ctx context.Context, summary string) error
 }
 
-// SwapContextHandler replaces thread messages with the provided summary
-type SwapContextHandler struct{}
+// SwapContextHandler replaces thread messages with the provided summary.
+// It embeds BaseBuiltinHandler to get nil implementations for unused hooks.
+type SwapContextHandler struct {
+	BaseBuiltinHandler
+}
 
 // Name returns the handler identifier used in recipe metadata
 func (h *SwapContextHandler) Name() string {
@@ -24,11 +27,14 @@ func (h *SwapContextHandler) Name() string {
 }
 
 // HandleTurnEnd is called when turn_end event fires to swap the conversation context
-func (h *SwapContextHandler) HandleTurnEnd(ctx context.Context, thread llmtypes.Thread, response string) error {
+func (h *SwapContextHandler) HandleTurnEnd(ctx context.Context, thread llmtypes.Thread, payload TurnEndPayload) (*TurnEndResult, error) {
 	swapper, ok := thread.(ContextSwapper)
 	if !ok {
-		return errors.New("thread does not support context swapping")
+		return nil, errors.New("thread does not support context swapping")
 	}
 
-	return swapper.SwapContext(ctx, response)
+	if err := swapper.SwapContext(ctx, payload.Response); err != nil {
+		return nil, err
+	}
+	return &TurnEndResult{}, nil
 }

@@ -162,18 +162,19 @@ func (t Trigger) TriggerAgentStop(ctx context.Context, messages []llmtypes.Messa
 // The thread parameter is passed to built-in handlers that need to modify thread state.
 // A zero-value Trigger is a no-op.
 func (t Trigger) TriggerTurnEnd(ctx context.Context, thread llmtypes.Thread, response string, turnNumber int, recipeHooks map[string]llmtypes.HookConfig) {
+	payload := TurnEndPayload{
+		BasePayload: BasePayload{
+			Event:     HookTypeTurnEnd,
+			ConvID:    t.ConversationID,
+			CWD:       t.getCwd(ctx),
+			InvokedBy: t.invokedBy(),
+		},
+		Response:   response,
+		TurnNumber: turnNumber,
+	}
+
 	// First, execute external hooks (if any)
 	if t.Manager.HasHooks(HookTypeTurnEnd) {
-		payload := TurnEndPayload{
-			BasePayload: BasePayload{
-				Event:     HookTypeTurnEnd,
-				ConvID:    t.ConversationID,
-				CWD:       t.getCwd(ctx),
-				InvokedBy: t.invokedBy(),
-			},
-			Response:   response,
-			TurnNumber: turnNumber,
-		}
 		t.Manager.ExecuteTurnEnd(ctx, payload)
 	}
 
@@ -186,7 +187,7 @@ func (t Trigger) TriggerTurnEnd(ctx context.Context, thread llmtypes.Thread, res
 
 		registry := DefaultBuiltinRegistry()
 		if handler, exists := registry.Get(hookConfig.Handler); exists {
-			if err := handler.HandleTurnEnd(ctx, thread, response); err != nil {
+			if _, err := handler.HandleTurnEnd(ctx, thread, payload); err != nil {
 				logger.G(ctx).WithError(err).WithField("handler", hookConfig.Handler).Error("built-in handler failed")
 			}
 		}

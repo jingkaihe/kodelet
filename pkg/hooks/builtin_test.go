@@ -23,6 +23,54 @@ func TestBuiltinRegistry_DefaultRegistry(t *testing.T) {
 	assert.Equal(t, "swap_context", handler.Name())
 }
 
+func TestBaseBuiltinHandler_AllMethodsReturnNil(t *testing.T) {
+	handler := &BaseBuiltinHandler{}
+	ctx := context.Background()
+
+	// Test all hook methods return nil
+	beforeResult, err := handler.HandleBeforeToolCall(ctx, nil, BeforeToolCallPayload{})
+	assert.NoError(t, err)
+	assert.Nil(t, beforeResult)
+
+	afterResult, err := handler.HandleAfterToolCall(ctx, nil, AfterToolCallPayload{})
+	assert.NoError(t, err)
+	assert.Nil(t, afterResult)
+
+	userMsgResult, err := handler.HandleUserMessageSend(ctx, nil, UserMessageSendPayload{})
+	assert.NoError(t, err)
+	assert.Nil(t, userMsgResult)
+
+	agentStopResult, err := handler.HandleAgentStop(ctx, nil, AgentStopPayload{})
+	assert.NoError(t, err)
+	assert.Nil(t, agentStopResult)
+
+	turnEndResult, err := handler.HandleTurnEnd(ctx, nil, TurnEndPayload{})
+	assert.NoError(t, err)
+	assert.Nil(t, turnEndResult)
+}
+
+func TestSwapContextHandler_InheritsBaseBuiltinHandler(t *testing.T) {
+	handler := &SwapContextHandler{}
+	ctx := context.Background()
+
+	// SwapContextHandler should return nil for hooks it doesn't implement
+	beforeResult, err := handler.HandleBeforeToolCall(ctx, nil, BeforeToolCallPayload{})
+	assert.NoError(t, err)
+	assert.Nil(t, beforeResult)
+
+	afterResult, err := handler.HandleAfterToolCall(ctx, nil, AfterToolCallPayload{})
+	assert.NoError(t, err)
+	assert.Nil(t, afterResult)
+
+	userMsgResult, err := handler.HandleUserMessageSend(ctx, nil, UserMessageSendPayload{})
+	assert.NoError(t, err)
+	assert.Nil(t, userMsgResult)
+
+	agentStopResult, err := handler.HandleAgentStop(ctx, nil, AgentStopPayload{})
+	assert.NoError(t, err)
+	assert.Nil(t, agentStopResult)
+}
+
 // mockContextSwapper implements ContextSwapper and Thread for testing
 type mockContextSwapper struct {
 	swapCalled bool
@@ -87,8 +135,13 @@ func TestSwapContextHandler_HandleTurnEnd_Success(t *testing.T) {
 	handler := &SwapContextHandler{}
 	mock := &mockContextSwapper{}
 
-	err := handler.HandleTurnEnd(context.Background(), mock, "test summary")
+	payload := TurnEndPayload{
+		Response:   "test summary",
+		TurnNumber: 1,
+	}
+	result, err := handler.HandleTurnEnd(context.Background(), mock, payload)
 	require.NoError(t, err)
+	require.NotNil(t, result)
 	assert.True(t, mock.swapCalled)
 	assert.Equal(t, "test summary", mock.summary)
 }
@@ -97,8 +150,13 @@ func TestSwapContextHandler_HandleTurnEnd_NotContextSwapper(t *testing.T) {
 	handler := &SwapContextHandler{}
 	nonSwapper := &nonSwappingThread{}
 
-	err := handler.HandleTurnEnd(context.Background(), nonSwapper, "test summary")
+	payload := TurnEndPayload{
+		Response:   "test summary",
+		TurnNumber: 1,
+	}
+	result, err := handler.HandleTurnEnd(context.Background(), nonSwapper, payload)
 	require.Error(t, err)
+	assert.Nil(t, result)
 	assert.Contains(t, err.Error(), "thread does not support context swapping")
 }
 
@@ -228,8 +286,13 @@ func TestSwapContextHandler_HandleTurnEnd_Error(t *testing.T) {
 		swapError: expectedErr,
 	}
 
-	err := handler.HandleTurnEnd(context.Background(), mock, "test summary")
+	payload := TurnEndPayload{
+		Response:   "test summary",
+		TurnNumber: 1,
+	}
+	result, err := handler.HandleTurnEnd(context.Background(), mock, payload)
 	require.Error(t, err)
+	assert.Nil(t, result)
 	assert.True(t, mock.swapCalled)
 	assert.Contains(t, err.Error(), "swap context failed")
 }
