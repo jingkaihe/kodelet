@@ -349,8 +349,6 @@ var runCmd = &cobra.Command{
 			if config.ResultOnly {
 				presenter.SetQuiet(true)
 				logger.SetLogLevel("error")
-			} else {
-				presenter.Info(fmt.Sprintf("[User]: %s", query))
 			}
 
 			handler := &llmtypes.ConsoleMessageHandler{Silent: config.ResultOnly}
