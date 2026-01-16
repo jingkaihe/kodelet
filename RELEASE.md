@@ -1,5 +1,21 @@
 # Kodelet
 
+## 0.1.44.beta (2026-01-16)
+
+### Features
+
+**Manual context compaction**: Added the `compact` recipe (and `/compact` slash command) to summarize and swap conversation history for long sessions.
+
+**Recipe hook handlers**: Recipes can now declare `turn_end` hooks with built-in handlers like `swap_context` to mutate thread state after responses.
+
+### Bug Fixes
+
+**OpenAI reasoning stream sequencing**: Thinking blocks now close before text output in streaming chat completions.
+
+**Result-only output cleanup**: Result-only mode no longer echoes the original user query.
+
+**Responses compaction persistence**: Stored responses now keep compaction items so context resumes correctly.
+
 ## 0.1.43.beta (2026-01-15)
 
 ### Bug fixes
