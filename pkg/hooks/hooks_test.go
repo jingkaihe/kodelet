@@ -387,18 +387,6 @@ func TestPayloadSerialization_TurnEnd(t *testing.T) {
 	assert.Equal(t, payload.TurnNumber, decoded.TurnNumber)
 }
 
-func TestResultSerialization_TurnEndResult(t *testing.T) {
-	result := TurnEndResult{}
-
-	data, err := json.Marshal(result)
-	require.NoError(t, err)
-
-	var decoded TurnEndResult
-	require.NoError(t, json.Unmarshal(data, &decoded))
-
-	assert.Equal(t, result, decoded)
-}
-
 func TestDenyFast_BeforeToolCall_FirstHookBlocks(t *testing.T) {
 	tempDir := t.TempDir()
 

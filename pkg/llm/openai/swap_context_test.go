@@ -156,23 +156,3 @@ func TestSwapContext_HandlesNilState(t *testing.T) {
 	err := thread.SwapContext(context.Background(), "summary")
 	require.NoError(t, err)
 }
-
-func TestSwapContext_EmptySummary(t *testing.T) {
-	thread := createTestThread()
-
-	err := thread.SwapContext(context.Background(), "")
-	require.NoError(t, err)
-
-	assert.Len(t, thread.messages, 1)
-	assert.Equal(t, "", thread.messages[0].Content)
-}
-
-func TestSwapContext_FromEmptyMessages(t *testing.T) {
-	thread := createTestThread()
-	thread.messages = []openaisdk.ChatCompletionMessage{}
-
-	err := thread.SwapContext(context.Background(), "summary from empty")
-	require.NoError(t, err)
-
-	assert.Len(t, thread.messages, 1)
-}

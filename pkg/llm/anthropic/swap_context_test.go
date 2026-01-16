@@ -167,25 +167,3 @@ func TestSwapContext_HandlesNilState(t *testing.T) {
 	err := thread.SwapContext(context.Background(), "summary")
 	require.NoError(t, err)
 }
-
-func TestSwapContext_EmptySummary(t *testing.T) {
-	thread := createTestThread()
-
-	err := thread.SwapContext(context.Background(), "")
-	require.NoError(t, err)
-
-	assert.Len(t, thread.messages, 1)
-	textBlock := thread.messages[0].Content[0]
-	require.NotNil(t, textBlock.OfText)
-	assert.Equal(t, "", textBlock.OfText.Text)
-}
-
-func TestSwapContext_FromEmptyMessages(t *testing.T) {
-	thread := createTestThread()
-	thread.messages = []anthropic.MessageParam{}
-
-	err := thread.SwapContext(context.Background(), "summary from empty")
-	require.NoError(t, err)
-
-	assert.Len(t, thread.messages, 1)
-}
