@@ -798,6 +798,10 @@ func (t *Thread) createStreamingChatCompletion(ctx context.Context, requestParam
 			// Handle text content delta
 			if delta.Content != "" {
 				if !textStarted {
+					// If reasoning was in progress, end it before starting text
+					if reasoningStarted {
+						handler.HandleThinkingBlockEnd()
+					}
 					textStarted = true
 				}
 				handler.HandleTextDelta(delta.Content)
@@ -852,7 +856,8 @@ func (t *Thread) createStreamingChatCompletion(ctx context.Context, requestParam
 	}
 
 	// Signal end of content blocks
-	if reasoningStarted {
+	// Only end thinking block if text didn't start (which would have already ended it)
+	if reasoningStarted && !textStarted {
 		handler.HandleThinkingBlockEnd()
 	}
 	if textStarted {
