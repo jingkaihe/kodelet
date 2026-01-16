@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -212,4 +213,171 @@ func TestTriggerTurnEnd_UnknownHandler(t *testing.T) {
 
 	// Handler not found, so should not be called
 	assert.False(t, mock.swapCalled)
+}
+
+// mockFailingContextSwapper implements ContextSwapper that returns an error
+type mockFailingContextSwapper struct {
+	swapCalled bool
+	swapError  error
+}
+
+func (m *mockFailingContextSwapper) SwapContext(_ context.Context, _ string) error {
+	m.swapCalled = true
+	return m.swapError
+}
+
+// Implement Thread interface methods
+func (m *mockFailingContextSwapper) SetState(_ tooltypes.State)                              {}
+func (m *mockFailingContextSwapper) GetState() tooltypes.State                               { return nil }
+func (m *mockFailingContextSwapper) AddUserMessage(_ context.Context, _ string, _ ...string) {}
+func (m *mockFailingContextSwapper) SendMessage(_ context.Context, _ string, _ llmtypes.MessageHandler, _ llmtypes.MessageOpt) (string, error) {
+	return "", nil
+}
+func (m *mockFailingContextSwapper) GetUsage() llmtypes.Usage                         { return llmtypes.Usage{} }
+func (m *mockFailingContextSwapper) GetConversationID() string                        { return "" }
+func (m *mockFailingContextSwapper) SetConversationID(_ string)                       {}
+func (m *mockFailingContextSwapper) SaveConversation(_ context.Context, _ bool) error { return nil }
+func (m *mockFailingContextSwapper) IsPersisted() bool                                { return false }
+func (m *mockFailingContextSwapper) EnablePersistence(_ context.Context, _ bool)      {}
+func (m *mockFailingContextSwapper) Provider() string                                 { return "mock" }
+func (m *mockFailingContextSwapper) GetMessages() ([]llmtypes.Message, error)         { return nil, nil }
+func (m *mockFailingContextSwapper) GetConfig() llmtypes.Config                       { return llmtypes.Config{} }
+func (m *mockFailingContextSwapper) NewSubAgent(_ context.Context, _ llmtypes.Config) llmtypes.Thread {
+	return nil
+}
+func (m *mockFailingContextSwapper) AggregateSubagentUsage(_ llmtypes.Usage)         {}
+func (m *mockFailingContextSwapper) SetRecipeHooks(_ map[string]llmtypes.HookConfig) {}
+func (m *mockFailingContextSwapper) GetRecipeHooks() map[string]llmtypes.HookConfig  { return nil }
+
+func TestSwapContextHandler_HandleTurnEnd_Error(t *testing.T) {
+	handler := &SwapContextHandler{}
+	expectedErr := errors.New("swap context failed")
+	mock := &mockFailingContextSwapper{
+		swapError: expectedErr,
+	}
+
+	err := handler.HandleTurnEnd(context.Background(), mock, "test summary")
+	require.Error(t, err)
+	assert.True(t, mock.swapCalled)
+	assert.Contains(t, err.Error(), "swap context failed")
+}
+
+func TestTriggerTurnEnd_HandlerReturnsError(t *testing.T) {
+	manager := HookManager{
+		hooks: make(map[HookType][]*Hook),
+	}
+
+	mock := &mockFailingContextSwapper{
+		swapError: errors.New("context swap failed"),
+	}
+	trigger := NewTrigger(manager, "test-conv", false)
+
+	recipeHooks := map[string]llmtypes.HookConfig{
+		"turn_end": {
+			Handler: "swap_context",
+			Once:    false,
+		},
+	}
+
+	// Should not panic even when handler returns error
+	trigger.TriggerTurnEnd(context.Background(), mock, "test response", 1, recipeHooks)
+
+	// Handler should still have been called
+	assert.True(t, mock.swapCalled)
+}
+
+func TestTriggerTurnEnd_EmptyHandlerName(t *testing.T) {
+	manager := HookManager{
+		hooks: make(map[HookType][]*Hook),
+	}
+
+	mock := &mockContextSwapper{}
+	trigger := NewTrigger(manager, "test-conv", false)
+
+	recipeHooks := map[string]llmtypes.HookConfig{
+		"turn_end": {
+			Handler: "", // Empty handler name
+			Once:    false,
+		},
+	}
+
+	// Should not panic with empty handler name
+	trigger.TriggerTurnEnd(context.Background(), mock, "test response", 1, recipeHooks)
+
+	// Handler not found (empty name), so should not be called
+	assert.False(t, mock.swapCalled)
+}
+
+func TestTriggerTurnEnd_NilRecipeHooks(t *testing.T) {
+	manager := HookManager{
+		hooks: make(map[HookType][]*Hook),
+	}
+
+	mock := &mockContextSwapper{}
+	trigger := NewTrigger(manager, "test-conv", false)
+
+	// Should not panic with nil hooks
+	trigger.TriggerTurnEnd(context.Background(), mock, "test response", 1, nil)
+
+	assert.False(t, mock.swapCalled)
+}
+
+func TestTriggerTurnEnd_TurnNumberZero(t *testing.T) {
+	manager := HookManager{
+		hooks: make(map[HookType][]*Hook),
+	}
+
+	mock := &mockContextSwapper{}
+	trigger := NewTrigger(manager, "test-conv", false)
+
+	recipeHooks := map[string]llmtypes.HookConfig{
+		"turn_end": {
+			Handler: "swap_context",
+			Once:    true,
+		},
+	}
+
+	trigger.TriggerTurnEnd(context.Background(), mock, "test response", 0, recipeHooks)
+
+	// Turn 0 is treated like first turn (0 > 1 is false), so handler IS called
+	assert.True(t, mock.swapCalled)
+}
+
+func TestTriggerTurnEnd_MultipleTurns(t *testing.T) {
+	manager := HookManager{
+		hooks: make(map[HookType][]*Hook),
+	}
+
+	mock := &mockContextSwapper{}
+	trigger := NewTrigger(manager, "test-conv", false)
+
+	recipeHooks := map[string]llmtypes.HookConfig{
+		"turn_end": {
+			Handler: "swap_context",
+			Once:    false, // Should trigger every turn
+		},
+	}
+
+	// First turn
+	trigger.TriggerTurnEnd(context.Background(), mock, "response 1", 1, recipeHooks)
+	assert.True(t, mock.swapCalled)
+	assert.Equal(t, "response 1", mock.summary)
+
+	// Reset mock
+	mock.swapCalled = false
+	mock.summary = ""
+
+	// Second turn
+	trigger.TriggerTurnEnd(context.Background(), mock, "response 2", 2, recipeHooks)
+	assert.True(t, mock.swapCalled)
+	assert.Equal(t, "response 2", mock.summary)
+
+	// Reset mock
+	mock.swapCalled = false
+	mock.summary = ""
+
+	// Third turn
+	trigger.TriggerTurnEnd(context.Background(), mock, "response 3", 3, recipeHooks)
+	assert.True(t, mock.swapCalled)
+	assert.Equal(t, "response 3", mock.summary)
 }

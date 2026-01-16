@@ -987,5 +987,161 @@ func TestLoadCompactPrompt(t *testing.T) {
 	prompt, err := LoadCompactPrompt(ctx)
 	require.NoError(t, err)
 	assert.NotEmpty(t, prompt)
+
+	// Verify the prompt contains key sections from compact.md
 	assert.Contains(t, prompt, "summary")
+	assert.Contains(t, prompt, "Objective")
+	assert.Contains(t, prompt, "Explicit Request and Intention")
+	assert.Contains(t, prompt, "Key Technical Concepts")
+	assert.Contains(t, prompt, "Files and Code Snippets Examined")
+	assert.Contains(t, prompt, "Errors and Fixes Applied")
+	assert.Contains(t, prompt, "Pending Tasks")
+	assert.Contains(t, prompt, "Current Work in Progress")
+}
+
+func TestFragmentProcessor_ParseHooksMetadata_EmptyHandler(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "kodelet-fragments-empty-handler-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	fragmentContent := `---
+name: Empty Handler Recipe
+description: Recipe with empty handler name
+hooks:
+  turn_end:
+    handler: ""
+    once: true
+---
+
+Content here.`
+
+	fragmentPath := filepath.Join(tempDir, "empty-handler.md")
+	err = os.WriteFile(fragmentPath, []byte(fragmentContent), 0o644)
+	require.NoError(t, err)
+
+	processor, err := NewFragmentProcessor(WithFragmentDirs(tempDir))
+	require.NoError(t, err)
+
+	config := &Config{
+		FragmentName: "empty-handler",
+		Arguments:    map[string]string{},
+	}
+
+	result, err := processor.LoadFragment(context.Background(), config)
+	require.NoError(t, err)
+
+	require.Contains(t, result.Metadata.Hooks, "turn_end")
+	hookConfig := result.Metadata.Hooks["turn_end"]
+	assert.Equal(t, "", hookConfig.Handler)
+	assert.True(t, hookConfig.Once)
+}
+
+func TestFragmentProcessor_ParseHooksMetadata_OnlyHandlerField(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "kodelet-fragments-only-handler-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	// Test with only handler field specified (once defaults to false)
+	fragmentContent := `---
+name: Handler Only Recipe
+description: Recipe with only handler specified
+hooks:
+  turn_end:
+    handler: swap_context
+---
+
+Content here.`
+
+	fragmentPath := filepath.Join(tempDir, "handler-only.md")
+	err = os.WriteFile(fragmentPath, []byte(fragmentContent), 0o644)
+	require.NoError(t, err)
+
+	processor, err := NewFragmentProcessor(WithFragmentDirs(tempDir))
+	require.NoError(t, err)
+
+	config := &Config{
+		FragmentName: "handler-only",
+		Arguments:    map[string]string{},
+	}
+
+	result, err := processor.LoadFragment(context.Background(), config)
+	require.NoError(t, err)
+
+	require.Contains(t, result.Metadata.Hooks, "turn_end")
+	hookConfig := result.Metadata.Hooks["turn_end"]
+	assert.Equal(t, "swap_context", hookConfig.Handler)
+	assert.False(t, hookConfig.Once) // Default value
+}
+
+func TestFragmentProcessor_ParseHooksMetadata_InvalidHookType(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "kodelet-fragments-invalid-hook-type-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	// Test with a hook type that doesn't exist in the system
+	fragmentContent := `---
+name: Invalid Hook Type Recipe
+description: Recipe with invalid hook type
+hooks:
+  nonexistent_hook:
+    handler: swap_context
+    once: true
+---
+
+Content here.`
+
+	fragmentPath := filepath.Join(tempDir, "invalid-hook-type.md")
+	err = os.WriteFile(fragmentPath, []byte(fragmentContent), 0o644)
+	require.NoError(t, err)
+
+	processor, err := NewFragmentProcessor(WithFragmentDirs(tempDir))
+	require.NoError(t, err)
+
+	config := &Config{
+		FragmentName: "invalid-hook-type",
+		Arguments:    map[string]string{},
+	}
+
+	result, err := processor.LoadFragment(context.Background(), config)
+	require.NoError(t, err)
+
+	// The parser should still parse it - validation happens at execution time
+	require.Contains(t, result.Metadata.Hooks, "nonexistent_hook")
+	hookConfig := result.Metadata.Hooks["nonexistent_hook"]
+	assert.Equal(t, "swap_context", hookConfig.Handler)
+	assert.True(t, hookConfig.Once)
+}
+
+func TestFragmentProcessor_ParseHooksMetadata_EmptyHooksMap(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "kodelet-fragments-empty-hooks-map-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	// Test with explicit empty hooks map
+	fragmentContent := `---
+name: Empty Hooks Map Recipe
+description: Recipe with empty hooks map
+hooks: {}
+---
+
+Content here.`
+
+	fragmentPath := filepath.Join(tempDir, "empty-hooks-map.md")
+	err = os.WriteFile(fragmentPath, []byte(fragmentContent), 0o644)
+	require.NoError(t, err)
+
+	processor, err := NewFragmentProcessor(WithFragmentDirs(tempDir))
+	require.NoError(t, err)
+
+	config := &Config{
+		FragmentName: "empty-hooks-map",
+		Arguments:    map[string]string{},
+	}
+
+	result, err := processor.LoadFragment(context.Background(), config)
+	require.NoError(t, err)
+
+	// Should have empty hooks map, not nil
+	assert.NotNil(t, result.Metadata.Hooks)
+	assert.Len(t, result.Metadata.Hooks, 0)
 }

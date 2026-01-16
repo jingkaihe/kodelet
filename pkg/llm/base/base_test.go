@@ -1290,3 +1290,83 @@ func TestEstimateContextWindowFromMessage_EmptyMessage(t *testing.T) {
 	// 0 chars / 4 = 0, max(0, 100) = 100
 	assert.Equal(t, 100, bt.Usage.CurrentContextWindow)
 }
+
+func TestRecipeHooks_ConcurrentAccess(_ *testing.T) {
+	bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+
+	var wg sync.WaitGroup
+	const numGoroutines = 100
+
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(2)
+		go func(val int) {
+			defer wg.Done()
+			bt.SetRecipeHooks(map[string]llmtypes.HookConfig{
+				"turn_end": {
+					Handler: "swap_context",
+					Once:    val%2 == 0,
+				},
+			})
+		}(i)
+
+		go func() {
+			defer wg.Done()
+			_ = bt.GetRecipeHooks()
+		}()
+	}
+
+	wg.Wait()
+	// Just verify no race conditions - exact values depend on goroutine ordering
+}
+
+func TestSetRecipeHooks_Overwrite(t *testing.T) {
+	bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+
+	// Set initial hooks
+	bt.SetRecipeHooks(map[string]llmtypes.HookConfig{
+		"turn_end": {Handler: "handler1"},
+	})
+
+	require.NotNil(t, bt.RecipeHooks)
+	assert.Equal(t, "handler1", bt.RecipeHooks["turn_end"].Handler)
+
+	// Overwrite with new hooks
+	bt.SetRecipeHooks(map[string]llmtypes.HookConfig{
+		"turn_end": {Handler: "handler2"},
+	})
+
+	assert.Equal(t, "handler2", bt.RecipeHooks["turn_end"].Handler)
+}
+
+func TestSetRecipeHooks_EmptyMap(t *testing.T) {
+	bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+
+	// Set hooks first
+	bt.SetRecipeHooks(map[string]llmtypes.HookConfig{
+		"turn_end": {Handler: "handler1"},
+	})
+	require.NotNil(t, bt.RecipeHooks)
+
+	// Set to empty map (not nil)
+	bt.SetRecipeHooks(map[string]llmtypes.HookConfig{})
+
+	assert.NotNil(t, bt.RecipeHooks)
+	assert.Len(t, bt.RecipeHooks, 0)
+}
+
+func TestGetRecipeHooks_ReturnsReference(t *testing.T) {
+	bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+
+	originalHooks := map[string]llmtypes.HookConfig{
+		"turn_end": {Handler: "original"},
+	}
+	bt.RecipeHooks = originalHooks
+
+	// GetRecipeHooks returns the actual reference (same map)
+	retrieved := bt.GetRecipeHooks()
+	assert.Equal(t, originalHooks, retrieved)
+
+	// Modifying retrieved affects the original
+	retrieved["new_hook"] = llmtypes.HookConfig{Handler: "new"}
+	assert.Contains(t, bt.RecipeHooks, "new_hook")
+}
