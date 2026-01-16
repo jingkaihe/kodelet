@@ -37,7 +37,8 @@ Extend the **Recipe Metadata** to support **built-in hook handlers** that execut
 2. **Hook declaration in recipe metadata**: Recipes declare hooks via YAML frontmatter field `hooks`
 3. **Built-in handlers complement external hooks**: Internal handlers (like `swap_context`) run alongside external hook scripts
 4. **Handler receives assistant response**: The built-in handler receives the final assistant message as input
-5. **Same mechanism for CLI and ACP**: Both `kodelet run -r compact` and `/compact` use the same hook system
+5. **`once` parameter**: Hooks can be configured to execute only on the first turn, preventing repeated execution in follow-up conversations
+6. **Same mechanism for CLI and ACP**: Both `kodelet run -r compact` and `/compact` use the same hook system
 
 ### Why `turn_end` Instead of `agent_stop`
 
@@ -109,7 +110,7 @@ type TurnEndResult struct {
 
 ### Recipe Metadata Extension
 
-Extend `fragments.Metadata` to support hooks:
+Extend `fragments.Metadata` to support hooks with configuration:
 
 ```go
 // pkg/fragments/fragments.go
@@ -119,7 +120,13 @@ type Metadata struct {
     AllowedTools    []string          `yaml:"allowed_tools,omitempty"`
     AllowedCommands []string          `yaml:"allowed_commands,omitempty"`
     Defaults        map[string]string `yaml:"defaults,omitempty"`
-    Hooks           map[string]string `yaml:"hooks,omitempty"` // NEW: Lifecycle hooks -> built-in handlers
+    Hooks           map[string]HookConfig `yaml:"hooks,omitempty"` // NEW: Lifecycle hooks -> handler config
+}
+
+// HookConfig defines configuration for a recipe hook
+type HookConfig struct {
+    Handler string `yaml:"handler"`          // Built-in handler name (e.g., "swap_context")
+    Once    bool   `yaml:"once,omitempty"`   // If true, only execute on the first turn
 }
 ```
 
@@ -132,7 +139,9 @@ Create a built-in `compact` recipe at `pkg/fragments/recipes/compact.md`:
 name: compact
 description: Compact the conversation context into a comprehensive summary
 hooks:
-  turn_end: swap_context
+  turn_end:
+    handler: swap_context
+    once: true
 allowed_tools: []
 ---
 Create a comprehensive summary of the conversation history that preserves all essential context for continued development work.
@@ -148,7 +157,9 @@ Please create a conversation summary following the steps below:
 [... rest of CompactPrompt ...]
 ```
 
-**Note**: `allowed_tools: []` ensures the model generates the summary in a single turn without tool calls, so `turn_end` fires exactly once with the complete summary.
+**Notes**:
+- `once: true` ensures the handler only executes on the first turn, not on subsequent turns in the follow-up conversation
+- `allowed_tools: []` ensures the model generates the summary in a single turn without tool calls
 
 ### Built-in Hook Handler Interface
 
@@ -289,6 +300,8 @@ if finalOutput != "" {
 }
 ```
 
+The provider tracks `turnNumber` and increments it after each assistant response. The `RecipeHooks` field stores the hooks configuration set via `SetRecipeHooks()`.
+
 The `Trigger` method handles both external hooks and built-in handlers:
 
 ```go
@@ -300,7 +313,7 @@ func (t Trigger) TriggerTurnEnd(
     thread llmtypes.Thread,
     response string,
     turnNumber int,
-    recipeHooks map[string]string,
+    recipeHooks map[string]fragments.HookConfig,
 ) {
     // First, execute external hooks (if any)
     if t.Manager.HasHooks(HookTypeTurnEnd) {
@@ -318,9 +331,14 @@ func (t Trigger) TriggerTurnEnd(
     }
     
     // Then, execute built-in handler if specified in recipe
-    if handlerName, ok := recipeHooks["turn_end"]; ok {
+    if hookConfig, ok := recipeHooks["turn_end"]; ok {
+        // Skip if once=true and not the first turn
+        if hookConfig.Once && turnNumber > 1 {
+            return
+        }
+        
         registry := DefaultBuiltinRegistry()
-        if handler, exists := registry.Get(handlerName); exists {
+        if handler, exists := registry.Get(hookConfig.Handler); exists {
             if err := handler.HandleTurnEnd(ctx, thread, response); err != nil {
                 logger.G(ctx).WithError(err).Error("built-in handler failed")
             }
@@ -337,7 +355,7 @@ Recipe hooks metadata is passed to the thread so providers can trigger built-in 
 // pkg/types/llm/thread.go - extend Thread interface or base struct
 type Thread interface {
     // ... existing methods ...
-    SetRecipeHooks(hooks map[string]string)
+    SetRecipeHooks(hooks map[string]fragments.HookConfig)
 }
 
 // Set by run/chat/ACP before SendMessage
@@ -421,13 +439,15 @@ This ensures:
 - [ ] Add `HookTypeTurnEnd` constant to `pkg/hooks/hooks.go`
 - [ ] Add `TurnEndPayload` and `TurnEndResult` to `pkg/hooks/payload.go`
 - [ ] Add `ExecuteTurnEnd()` to `HookManager`
-- [ ] Add `TriggerTurnEnd()` to `hooks.Trigger`
+- [ ] Add `TriggerTurnEnd()` to `hooks.Trigger` with `once` support
 - [ ] Add `turn_end` trigger call inside each provider's `SendMessage` loop
+- [ ] Track `turnNumber` in providers for `once` functionality
 - [ ] Update `docs/HOOKS.md` with new hook type documentation
 
 ### Phase 2: Core Infrastructure
 - [ ] Add `ContextSwapper` interface to `pkg/hooks/`
-- [ ] Add `SetRecipeHooks()` to Thread interface for passing recipe hooks to providers
+- [ ] Add `SetRecipeHooks(map[string]HookConfig)` to Thread interface
+- [ ] Add `RecipeHooks` field to base thread struct
 - [ ] Implement `SwapContext()` for all providers (Anthropic, OpenAI, Google)
 - [ ] Refactor `CompactContext()` to use `SwapContext()`
 - [ ] Add `BuiltinHandler` interface and `BuiltinRegistry` to `pkg/hooks/`
@@ -435,8 +455,9 @@ This ensures:
 - [ ] Add unit tests for swap context and built-in handlers
 
 ### Phase 3: Recipe Integration
-- [ ] Extend `fragments.Metadata` with `Hooks` field (`map[string]string`)
-- [ ] Update frontmatter parsing in `pkg/fragments/fragments.go`
+- [ ] Add `HookConfig` struct to `pkg/fragments/fragments.go`
+- [ ] Extend `fragments.Metadata` with `Hooks` field (`map[string]HookConfig`)
+- [ ] Update frontmatter parsing to handle nested hook config
 - [ ] Create built-in `compact` recipe in `pkg/fragments/recipes/`
 - [ ] Add `LoadCompactPrompt()` helper function to fragments package
 - [ ] Remove `CompactPrompt` from `pkg/llm/prompts/` (now in recipe)
@@ -490,7 +511,9 @@ Users can create custom compact recipes with different summarization strategies:
 name: compact-brief
 description: Brief context compaction for quick summaries
 hooks:
-  turn_end: swap_context
+  turn_end:
+    handler: swap_context
+    once: true
 allowed_tools: []
 ---
 Create a brief summary of this conversation in 3-5 bullet points:
@@ -520,22 +543,27 @@ Future enhancement could support handlers for other lifecycle events:
 
 ```yaml
 hooks:
-  before_tool_call: log_tool_usage
-  after_tool_call: validate_tool_output
-  turn_end: swap_context
+  before_tool_call:
+    handler: log_tool_usage
+  after_tool_call:
+    handler: validate_tool_output
+  turn_end:
+    handler: swap_context
+    once: true
 ```
 
 ### Handler Parameters
 
-Handlers could accept parameters from recipe metadata:
+Handlers could accept additional parameters from recipe metadata:
 
 ```yaml
 hooks:
-  turn_end: swap_context
-hook_params:
-  swap_context:
-    preserve_system_prompt: true
-    max_summary_tokens: 4000
+  turn_end:
+    handler: swap_context
+    once: true
+    params:
+      preserve_system_prompt: true
+      max_summary_tokens: 4000
 ```
 
 ### External + Built-in Hook Composition
@@ -545,9 +573,10 @@ The current design runs external hooks first, then built-in handlers. Future enh
 ```yaml
 hooks:
   turn_end:
-    - external  # Run external hooks first
-    - swap_context  # Then built-in handler
-    - external  # Then any remaining external hooks
+    handlers:
+      - external  # Run external hooks first
+      - swap_context  # Then built-in handler
+    once: true
 ```
 
 ## Testing Strategy
@@ -556,8 +585,9 @@ hooks:
 1. **TurnEnd hook type**: Payload serialization, execution flow
 2. **BuiltinRegistry**: Register, retrieve, unknown handler handling
 3. **SwapContext**: Message replacement, tool result clearing, state cleanup
-4. **Metadata parsing**: Hooks field extraction from frontmatter
+4. **HookConfig parsing**: Handler and once field extraction from frontmatter
 5. **TriggerTurnEnd**: External hooks + built-in handler execution order
+6. **Once parameter**: Handler skipped on turn > 1 when once=true
 
 ### Integration Tests
 1. **Recipe with hooks**: End-to-end compact recipe execution
@@ -565,6 +595,7 @@ hooks:
 3. **ACP hook flow**: `/compact` slash command handling
 4. **External + built-in combination**: Both hook types work together
 5. **Conversation continuation**: After compact, subsequent messages work correctly
+6. **Once behavior**: Hook only fires on first turn, not subsequent turns
 
 ### Acceptance Tests
 1. **Manual compact preserves intent**: After compact, model can continue coherently
