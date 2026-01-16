@@ -1,7 +1,7 @@
 # ADR 025: Recipe Hooks for Context Compaction
 
 ## Status
-Proposed
+Accepted
 
 ## Context
 
