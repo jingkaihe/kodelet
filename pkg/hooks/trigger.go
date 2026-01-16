@@ -35,6 +35,19 @@ func NewTrigger(manager HookManager, conversationID string, isSubAgent bool) Tri
 	}
 }
 
+// WithMessageOpt returns a trigger adjusted for per-message settings.
+func (t Trigger) WithMessageOpt(opt llmtypes.MessageOpt) Trigger {
+	adjusted := t
+	if opt.DisableAutoCompact {
+		adjusted.AutoCompactEnabled = false
+		return adjusted
+	}
+	if opt.CompactRatio > 0 {
+		adjusted.AutoCompactThreshold = opt.CompactRatio
+	}
+	return adjusted
+}
+
 // invokedBy returns whether this is a main agent or subagent
 func (t Trigger) invokedBy() InvokedBy {
 	if t.IsSubAgent {

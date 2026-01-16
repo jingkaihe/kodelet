@@ -94,6 +94,9 @@ func (r *CallbackRegistry) executeRecipe(ctx context.Context, recipeName string,
 	if len(fragment.Metadata.AllowedTools) > 0 {
 		config.AllowedTools = fragment.Metadata.AllowedTools
 	}
+	if len(fragment.Metadata.AllowedCommands) > 0 {
+		config.AllowedCommands = fragment.Metadata.AllowedCommands
+	}
 
 	thread, err := r.threadFactory(ctx, config)
 	if err != nil {

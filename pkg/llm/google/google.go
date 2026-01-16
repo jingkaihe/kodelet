@@ -319,7 +319,8 @@ OUTER:
 			finalOutput = exchangeOutput
 
 			// Trigger after_turn hook on every turn to enable mid-session actions like compaction
-			afterTurnResult := t.HookTrigger.TriggerAfterTurn(ctx, turnCount, toolsUsed, t.GetUsage(), finalOutput)
+			hookTrigger := t.HookTrigger.WithMessageOpt(opt)
+			afterTurnResult := hookTrigger.TriggerAfterTurn(ctx, turnCount, toolsUsed, t.GetUsage(), finalOutput)
 			if err := t.ProcessAfterTurnResult(ctx, afterTurnResult, t.GetMessages, t.replaceMessages, t.saveConversationCallback(opt)); err != nil {
 				logger.G(ctx).WithError(err).Error("failed to process after_turn hook result")
 			}
@@ -330,7 +331,7 @@ OUTER:
 
 				// Trigger agent_stop hook to see if there are follow-up messages or other actions
 				if messages, err := t.GetMessages(); err == nil {
-					result := t.HookTrigger.TriggerAgentStopWithResult(ctx, messages, t.GetUsage())
+					result := hookTrigger.TriggerAgentStopWithResult(ctx, messages, t.GetUsage())
 					shouldContinue, followUps, hookErr := t.ProcessHookResult(ctx, result, t.GetMessages, t.replaceMessages, t.saveConversationCallback(opt))
 					if hookErr != nil {
 						logger.G(ctx).WithError(hookErr).Error("failed to process hook result")
