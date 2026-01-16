@@ -235,7 +235,7 @@ func (t *Thread) ShouldAutoCompact(compactRatio float64) bool {
 	return utilizationRatio >= compactRatio
 }
 
-// EstimateContextWindowFromMessages estimates the context window size based on message content.
+// EstimateContextWindowFromMessage estimates the context window size based on message content.
 // This is useful after compaction to provide an approximate context size before the next API call.
 // Uses a rough estimate of ~4 characters per token.
 // This method is thread-safe and uses mutex locking.

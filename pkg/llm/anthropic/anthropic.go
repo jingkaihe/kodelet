@@ -20,6 +20,7 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/auth"
 	"github.com/jingkaihe/kodelet/pkg/feedback"
+	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/hooks"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/llm/prompts"
@@ -1016,6 +1017,11 @@ func (t *Thread) SwapContext(_ context.Context, summary string) error {
 
 // CompactContext performs comprehensive context compacting by creating a detailed summary
 func (t *Thread) CompactContext(ctx context.Context) error {
+	compactPrompt, err := fragments.LoadCompactPrompt(ctx)
+	if err != nil {
+		return errors.Wrap(err, "failed to load compact prompt")
+	}
+
 	summaryThread, err := NewAnthropicThread(t.GetConfig(), nil)
 	if err != nil {
 		return errors.Wrap(err, "failed to create summary thread")
@@ -1026,7 +1032,7 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 	summaryThread.HookTrigger = hooks.Trigger{}
 
 	handler := &llmtypes.StringCollectorHandler{Silent: true}
-	_, err = summaryThread.SendMessage(ctx, prompts.CompactPrompt, handler, llmtypes.MessageOpt{
+	_, err = summaryThread.SendMessage(ctx, compactPrompt, handler, llmtypes.MessageOpt{
 		UseWeakModel:       false,
 		PromptCache:        false,
 		NoToolUse:          true,
