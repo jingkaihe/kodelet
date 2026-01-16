@@ -40,7 +40,9 @@ func (m *subagentMockThread) GetConfig() llmtypes.Config                       {
 func (m *subagentMockThread) NewSubAgent(_ context.Context, _ llmtypes.Config) llmtypes.Thread {
 	return m
 }
-func (m *subagentMockThread) AggregateSubagentUsage(_ llmtypes.Usage) {}
+func (m *subagentMockThread) AggregateSubagentUsage(_ llmtypes.Usage)         {}
+func (m *subagentMockThread) SetRecipeHooks(_ map[string]llmtypes.HookConfig) {}
+func (m *subagentMockThread) GetRecipeHooks() map[string]llmtypes.HookConfig  { return nil }
 
 func TestSubAgentTool_BasicMethods(t *testing.T) {
 	tool := &SubAgentTool{}

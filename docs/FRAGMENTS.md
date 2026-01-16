@@ -15,6 +15,7 @@ Kodelet's fragments (also called "recipes") system allows you to create reusable
 - [Command Line Usage](#command-line-usage)
 - [Example Fragments](#example-fragments)
 - [Advanced Usage](#advanced-usage)
+- [Recipe Hooks](#recipe-hooks)
 - [Best Practices](#best-practices)
 
 ## Overview
@@ -33,6 +34,7 @@ Kodelet includes several built-in recipes for common tasks:
 
 - **`init`** - Bootstrap `AGENTS.md` file with workspace context and conventions
 - **`commit`** - Generate git commit messages from staged changes
+- **`compact`** - Compact conversation context into a comprehensive summary (uses recipe hooks)
 - **`custom-tool`** - Create custom tools for Kodelet
 - **`ralph`** - Autonomous feature development loop (used by `kodelet ralph`)
 - **`ralph-init`** - Generate PRD from project analysis (used by `kodelet ralph init`)
@@ -451,6 +453,101 @@ Node version: {{bash "node" "--version"}}  <!-- Will show error if Node.js not i
 ```
 
 If a command fails, you'll see: `[ERROR executing command 'node --version': executable not found]`
+
+## Recipe Hooks
+
+Recipes can declare lifecycle hooks that execute built-in handlers at specific points during conversation processing. This enables advanced features like context compaction.
+
+### Hook Configuration
+
+Hooks are declared in the recipe's YAML frontmatter:
+
+```yaml
+---
+name: my-recipe
+description: Recipe with hooks
+hooks:
+  turn_end:
+    handler: swap_context
+    once: true
+allowed_tools: []
+---
+```
+
+### Hook Configuration Options
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `handler` | string | Name of the built-in handler to invoke |
+| `once` | boolean | If true, handler only executes on the first turn (default: false) |
+
+### Available Hook Events
+
+| Event | Description |
+|-------|-------------|
+| `turn_end` | Fires after each assistant response, before the next user message |
+
+### Built-in Handlers
+
+| Handler | Event | Description |
+|---------|-------|-------------|
+| `swap_context` | `turn_end` | Replaces conversation history with the assistant's response |
+
+### Example: Context Compaction
+
+The built-in `compact` recipe demonstrates recipe hooks:
+
+```markdown
+---
+name: compact
+description: Compact the conversation context into a comprehensive summary
+hooks:
+  turn_end:
+    handler: swap_context
+    once: true
+allowed_tools: []
+---
+Create a comprehensive summary of the conversation history...
+```
+
+When used:
+1. The recipe prompt asks the LLM to generate a summary
+2. After the LLM responds, the `turn_end` hook fires
+3. The `swap_context` handler replaces the conversation history with the summary
+4. The conversation continues with the compacted context
+
+Usage:
+```bash
+# Compact the current conversation
+kodelet run -r compact --follow
+
+# Continue with the compacted context
+kodelet run --follow "Now implement the next feature"
+```
+
+### Creating Custom Compaction Recipes
+
+You can create custom compact recipes with different summarization strategies:
+
+```markdown
+---
+name: compact-brief
+description: Brief context compaction for quick summaries
+hooks:
+  turn_end:
+    handler: swap_context
+    once: true
+allowed_tools: []
+---
+Create a brief summary of this conversation in 3-5 bullet points:
+- What was the user's main goal?
+- What key actions were taken?
+- What is the current state?
+
+Keep it concise and actionable.
+```
+
+For more details on hook types and payloads, see [Agent Lifecycle Hooks](./HOOKS.md).
 
 ## Best Practices
 

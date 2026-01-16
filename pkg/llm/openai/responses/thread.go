@@ -243,7 +243,7 @@ func (t *Thread) SendMessage(
 	}
 
 	// Trigger user_message_send hook before adding user message
-	if blocked, reason := t.HookTrigger.TriggerUserMessageSend(ctx, message); blocked {
+	if blocked, reason := t.HookTrigger.TriggerUserMessageSend(ctx, t, message, t.GetRecipeHooks()); blocked {
 		return "", errors.Errorf("message blocked by hook: %s", reason)
 	}
 
@@ -319,12 +319,17 @@ OUTER:
 			turnCount++
 			finalOutput = exchangeOutput
 
+			// Trigger turn_end hook after assistant response is complete
+			if finalOutput != "" {
+				t.HookTrigger.TriggerTurnEnd(ctx, t, finalOutput, turnCount, t.GetRecipeHooks())
+			}
+
 			// If no tools were used, check for hook follow-ups before stopping
 			if !toolsUsed {
 				logger.G(ctx).Debug("no tools used, checking agent_stop hook")
 
 				if messages, err := t.GetMessages(); err == nil {
-					if followUps := t.HookTrigger.TriggerAgentStop(ctx, messages); len(followUps) > 0 {
+					if followUps := t.HookTrigger.TriggerAgentStop(ctx, t, messages, t.GetRecipeHooks()); len(followUps) > 0 {
 						logger.G(ctx).WithField("count", len(followUps)).
 							Info("agent_stop hook returned follow-up messages, continuing conversation")
 						for _, msg := range followUps {
@@ -572,6 +577,50 @@ func (t *Thread) NewSubAgent(ctx context.Context, config llmtypes.Config) llmtyp
 	return newThread
 }
 
+// SwapContext replaces the conversation history with a summary message.
+// This implements the hooks.ContextSwapper interface.
+func (t *Thread) SwapContext(_ context.Context, summary string) error {
+	t.Mu.Lock()
+	defer t.Mu.Unlock()
+
+	t.inputItems = []responses.ResponseInputItemUnionParam{
+		{
+			OfMessage: &responses.EasyInputMessageParam{
+				Role:    responses.EasyInputMessageRoleUser,
+				Content: responses.EasyInputMessageContentUnionParam{OfString: param.NewOpt(summary)},
+			},
+		},
+	}
+
+	// Update storedItems for persistence
+	t.storedItems = []StoredInputItem{
+		{
+			Type:    "message",
+			Role:    "user",
+			Content: summary,
+		},
+	}
+
+	// Clear pending items - next request will use the new input
+	t.pendingItems = nil
+
+	// Clear the previous response ID
+	t.lastResponseID = ""
+
+	// heuristic estimation of context window size based on summary length
+	t.EstimateContextWindowFromMessage(summary)
+
+	// Clear stale tool results - they reference tool calls that no longer exist
+	t.ToolResults = make(map[string]tooltypes.StructuredToolResult)
+
+	// Clear file access tracking to start fresh with context retrieval
+	if t.State != nil {
+		t.State.SetFileLastAccess(make(map[string]time.Time))
+	}
+
+	return nil
+}
+
 // CompactContext compacts the conversation history using the Responses API compact endpoint.
 // The Compact API returns user messages plus a single compaction item containing encrypted
 // conversation state, which can be used to continue the conversation efficiently.
@@ -596,9 +645,11 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 	t.Usage.OutputTokens += int(resp.Usage.OutputTokens)
 	t.Mu.Unlock()
 
-	// Convert output items to input items
+	// Convert output items to input items and storedItems simultaneously
 	// The Compact API returns: user messages + a single compaction item
 	newInputItems := make([]responses.ResponseInputItemUnionParam, 0, len(resp.Output))
+	newStoredItems := make([]StoredInputItem, 0, len(resp.Output))
+
 	for _, output := range resp.Output {
 		switch output.Type {
 		case "message":
@@ -620,6 +671,11 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 							Content: responses.EasyInputMessageContentUnionParam{OfString: param.NewOpt(textContent)},
 						},
 					})
+					newStoredItems = append(newStoredItems, StoredInputItem{
+						Type:    "message",
+						Role:    "user",
+						Content: textContent,
+					})
 				}
 			}
 
@@ -627,11 +683,16 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 			// Convert compaction item using the SDK helper
 			compaction := output.AsCompaction()
 			newInputItems = append(newInputItems, responses.ResponseInputItemParamOfCompaction(compaction.EncryptedContent))
+			newStoredItems = append(newStoredItems, StoredInputItem{
+				Type:             "compaction",
+				EncryptedContent: compaction.EncryptedContent,
+			})
 		}
 	}
 
 	// Replace input items with compacted output
 	t.inputItems = newInputItems
+	t.storedItems = newStoredItems
 
 	// Clear pending items - next request will use the new compacted input
 	t.pendingItems = nil

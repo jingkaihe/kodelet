@@ -1172,3 +1172,64 @@ func TestFinalizeMessageSpan_ZeroUsage(_ *testing.T) {
 	// Should not panic with zero values
 	bt.FinalizeMessageSpan(span, nil)
 }
+
+func TestSetRecipeHooks(t *testing.T) {
+	bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+
+	hooks := map[string]llmtypes.HookConfig{
+		"turn_end": {
+			Handler: "swap_context",
+			Once:    true,
+		},
+		"before_tool_call": {
+			Handler: "audit_logger",
+			Once:    false,
+		},
+	}
+
+	bt.SetRecipeHooks(hooks)
+
+	require.NotNil(t, bt.RecipeHooks)
+	assert.Len(t, bt.RecipeHooks, 2)
+	assert.Equal(t, "swap_context", bt.RecipeHooks["turn_end"].Handler)
+	assert.True(t, bt.RecipeHooks["turn_end"].Once)
+	assert.Equal(t, "audit_logger", bt.RecipeHooks["before_tool_call"].Handler)
+}
+
+func TestGetRecipeHooks(t *testing.T) {
+	bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+
+	expectedHooks := map[string]llmtypes.HookConfig{
+		"turn_end": {
+			Handler: "swap_context",
+			Once:    true,
+		},
+	}
+	bt.RecipeHooks = expectedHooks
+
+	result := bt.GetRecipeHooks()
+
+	assert.Equal(t, expectedHooks, result)
+}
+
+func TestEstimateContextWindowFromMessage(t *testing.T) {
+	bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+	bt.Usage.CurrentContextWindow = 50000
+
+	// Message with about 800 characters = roughly 200 tokens (above the 100 minimum)
+	message := "This is a test message that should help estimate the context window size after compaction. " +
+		"It contains several sentences and should provide a rough estimate based on character count. " +
+		"The estimation uses approximately 4 characters per token as a heuristic. " +
+		"This message should update the current context window value to a smaller estimated size. " +
+		"We add more text to ensure the message exceeds 400 characters so the result is above 100 tokens. " +
+		"This additional text brings the total character count well above the threshold for the minimum. " +
+		"Now we have enough content to properly test the token estimation logic without hitting the minimum. " +
+		"The final character count should be around 800 characters which gives us about 200 tokens."
+
+	bt.EstimateContextWindowFromMessage(message)
+
+	// Should be len/4, and since we're above 100, no minimum applies
+	expectedTokens := max(len(message)/4, 100)
+	assert.Equal(t, expectedTokens, bt.Usage.CurrentContextWindow)
+	assert.Greater(t, bt.Usage.CurrentContextWindow, 100, "Should be above minimum with this message length")
+}

@@ -16,6 +16,7 @@ Kodelet is a lightweight agentic SWE Agent that runs as an interactive CLI tool 
   - [GitHub Actions Background Agent](#github-actions-background-agent)
   - [Image Input Support](#image-input-support)
   - [Conversation Continuation](#conversation-continuation)
+  - [Context Compaction](#context-compaction)
   - [Conversation Management](#conversation-management)
 - [Streaming and Programmatic Access](#streaming-and-programmatic-access)
   - [Headless Mode](#headless-mode)
@@ -257,6 +258,29 @@ kodelet chat --resume CONVERSATION_ID
 ```
 
 **Note**: The `--follow` and `--resume` flags cannot be used together. If no conversations exist when using `--follow`, a new conversation will be started with a warning message.
+
+### Context Compaction
+
+As conversations grow longer, they may approach the context window limit. Kodelet automatically compacts context when utilization exceeds a threshold (default 80%), but you can also manually compact the context using the built-in `compact` recipe:
+
+```bash
+# Manually compact the current conversation
+kodelet run -r compact --follow
+
+# Continue working with the compacted context
+kodelet run --follow "now implement the next feature"
+```
+
+The `compact` recipe generates a comprehensive summary of the conversation history, then replaces the conversation with that summary. This preserves all essential context while significantly reducing token usage.
+
+**When to use manual compaction:**
+- Before starting a new phase of work on a long-running task
+- When you notice responses slowing down due to large context
+- To create a checkpoint before major changes
+
+**Creating custom compaction recipes:**
+
+You can create custom compact recipes with different summarization strategies. See [Fragments/Recipes Documentation](./FRAGMENTS.md#recipe-hooks) for details.
 
 ### Conversation Management
 

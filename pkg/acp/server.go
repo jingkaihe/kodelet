@@ -399,15 +399,25 @@ func (s *Server) handleSessionPrompt(req *acptypes.Request) error {
 	}
 
 	prompt := params.Prompt
+	var sessionHooks map[string]session.HookConfig
 	if command, args, found := parseSlashCommand(params.Prompt); found && s.fragmentProcessor != nil {
-		transformedPrompt, err := s.transformSlashCommandPrompt(command, args, params.Prompt)
+		transformedPrompt, fragment, err := s.transformSlashCommandPrompt(command, args, params.Prompt)
 		if err != nil {
 			return s.sendError(req.ID, acptypes.ErrCodeInvalidParams, err.Error(), nil)
 		}
 		prompt = transformedPrompt
+		if fragment != nil && len(fragment.Metadata.Hooks) > 0 {
+			sessionHooks = make(map[string]session.HookConfig, len(fragment.Metadata.Hooks))
+			for k, v := range fragment.Metadata.Hooks {
+				sessionHooks[k] = session.HookConfig{
+					Handler: v.Handler,
+					Once:    v.Once,
+				}
+			}
+		}
 	}
 
-	stopReason, err := sess.HandlePrompt(promptCtx, prompt, s)
+	stopReason, err := sess.HandlePrompt(promptCtx, prompt, s, sessionHooks)
 	if err != nil {
 		if sess.IsCancelled() || errors.Is(err, context.Canceled) {
 			stopReason = acptypes.StopReasonCancelled
@@ -423,7 +433,8 @@ func (s *Server) handleSessionPrompt(req *acptypes.Request) error {
 }
 
 // transformSlashCommandPrompt transforms a slash command into a prompt with recipe content
-func (s *Server) transformSlashCommandPrompt(command, args string, originalPrompt []acptypes.ContentBlock) ([]acptypes.ContentBlock, error) {
+// Returns the transformed prompt and the fragment for hook configuration
+func (s *Server) transformSlashCommandPrompt(command, args string, originalPrompt []acptypes.ContentBlock) ([]acptypes.ContentBlock, *fragments.Fragment, error) {
 	kvArgs, additionalText := parseSlashCommandArgs(args)
 
 	config := &fragments.Config{
@@ -433,7 +444,7 @@ func (s *Server) transformSlashCommandPrompt(command, args string, originalPromp
 
 	fragment, err := s.fragmentProcessor.LoadFragment(s.ctx, config)
 	if err != nil {
-		return nil, pkgerrors.Wrapf(err, "unknown recipe '/%s'. Available recipes: %s", command, s.getAvailableRecipeNames())
+		return nil, nil, pkgerrors.Wrapf(err, "unknown recipe '/%s'. Available recipes: %s", command, s.getAvailableRecipeNames())
 	}
 
 	var promptBuilder strings.Builder
@@ -458,7 +469,7 @@ func (s *Server) transformSlashCommandPrompt(command, args string, originalPromp
 		newPrompt = append(newPrompt, block)
 	}
 
-	return newPrompt, nil
+	return newPrompt, fragment, nil
 }
 
 func (s *Server) handleSetMode(req *acptypes.Request) error {

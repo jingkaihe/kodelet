@@ -42,6 +42,7 @@ Kodelet supports lifecycle hooks that allow external scripts to observe and cont
 | `after_tool_call` | After tool execution | No | Tool output |
 | `user_message_send` | When user sends message | Yes | N/A |
 | `agent_stop` | When agent would stop | No | Can return follow-up messages |
+| `turn_end` | After each assistant response | No | Thread state (via built-in handlers) |
 
 ## Hook Protocol
 
@@ -93,7 +94,7 @@ All hook payloads and results are defined as TypeScript interfaces below for cla
 
 ```typescript
 // Hook event types
-type HookType = "before_tool_call" | "after_tool_call" | "user_message_send" | "agent_stop";
+type HookType = "before_tool_call" | "after_tool_call" | "user_message_send" | "agent_stop" | "turn_end";
 
 // Indicates whether the hook was triggered by main agent or subagent
 type InvokedBy = "main" | "subagent";
@@ -241,6 +242,67 @@ interface AgentStopResult {
   "invoked_by": "main"
 }
 ```
+
+### turn_end
+
+The `turn_end` hook fires after each assistant response, before the next user message. This hook is particularly useful for post-turn operations like context compaction.
+
+```typescript
+// Input payload
+interface TurnEndPayload extends BasePayload {
+  event: "turn_end";
+  response: string;      // The assistant's response text
+  turn_number: number;   // Which turn in the conversation (1-indexed)
+}
+
+// Output result
+interface TurnEndResult {
+  // Currently no output fields; reserved for future extensions
+}
+```
+
+**Example Input:**
+```json
+{
+  "event": "turn_end",
+  "conv_id": "conversation-id",
+  "cwd": "/current/working/dir",
+  "response": "I've completed the analysis...",
+  "turn_number": 1,
+  "invoked_by": "main"
+}
+```
+
+## Built-in Hook Handlers
+
+In addition to external hook scripts, Kodelet supports built-in handlers that can be invoked via recipe metadata. These handlers have direct access to the LLM thread state.
+
+### Available Built-in Handlers
+
+| Handler | Hook Event | Description |
+|---------|-----------|-------------|
+| `swap_context` | `turn_end` | Replaces the conversation history with the assistant's response (used for context compaction) |
+
+### Using Built-in Handlers in Recipes
+
+Built-in handlers are declared in recipe YAML frontmatter:
+
+```markdown
+---
+name: compact
+description: Compact the conversation context
+hooks:
+  turn_end:
+    handler: swap_context
+    once: true
+allowed_tools: []
+---
+Your prompt content here...
+```
+
+The `once: true` option ensures the handler only executes on the first turn, preventing repeated execution in follow-up conversations.
+
+See [Fragments/Recipes Documentation](./FRAGMENTS.md#recipe-hooks) for more details on recipe hooks.
 
 ## Example Hooks
 

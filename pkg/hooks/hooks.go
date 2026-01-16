@@ -16,6 +16,7 @@ const (
 	HookTypeAfterToolCall   HookType = "after_tool_call"
 	HookTypeUserMessageSend HookType = "user_message_send"
 	HookTypeAgentStop       HookType = "agent_stop"
+	HookTypeTurnEnd         HookType = "turn_end"
 )
 
 // InvokedBy indicates whether the hook was triggered by main agent or subagent

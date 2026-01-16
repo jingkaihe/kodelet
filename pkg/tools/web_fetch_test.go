@@ -578,6 +578,10 @@ func (m *MockThread) NewSubAgent(_ context.Context, _ llm.Config) llm.Thread {
 
 func (m *MockThread) AggregateSubagentUsage(_ llm.Usage) {}
 
+func (m *MockThread) SetRecipeHooks(_ map[string]llm.HookConfig) {}
+
+func (m *MockThread) GetRecipeHooks() map[string]llm.HookConfig { return nil }
+
 func (m *MockThread) Reset() {
 	m.called = false
 	m.lastPrompt = ""

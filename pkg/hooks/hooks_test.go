@@ -19,6 +19,7 @@ func TestHookType_Constants(t *testing.T) {
 	assert.Equal(t, HookType("after_tool_call"), HookTypeAfterToolCall)
 	assert.Equal(t, HookType("user_message_send"), HookTypeUserMessageSend)
 	assert.Equal(t, HookType("agent_stop"), HookTypeAgentStop)
+	assert.Equal(t, HookType("turn_end"), HookTypeTurnEnd)
 }
 
 func TestInvokedBy_Constants(t *testing.T) {
@@ -237,6 +238,17 @@ func TestExecuteAgentStop_EmptyResult(t *testing.T) {
 	assert.NotNil(t, result)
 }
 
+func TestExecuteTurnEnd_EmptyResult(t *testing.T) {
+	manager := HookManager{
+		hooks: make(map[HookType][]*Hook),
+	}
+
+	ctx := context.Background()
+	result, err := manager.ExecuteTurnEnd(ctx, TurnEndPayload{})
+	require.NoError(t, err)
+	assert.NotNil(t, result)
+}
+
 func TestPayloadSerialization_UserMessageSend(t *testing.T) {
 	payload := UserMessageSendPayload{
 		BasePayload: BasePayload{
@@ -347,6 +359,32 @@ func TestResultSerialization_AgentStopResult_Empty(t *testing.T) {
 	require.NoError(t, json.Unmarshal(data, &decoded))
 
 	assert.Nil(t, decoded.FollowUpMessages)
+}
+
+func TestPayloadSerialization_TurnEnd(t *testing.T) {
+	payload := TurnEndPayload{
+		BasePayload: BasePayload{
+			Event:     HookTypeTurnEnd,
+			ConvID:    "test-conv-789",
+			CWD:       "/test/cwd",
+			InvokedBy: InvokedByMain,
+		},
+		Response:   "This is the assistant response",
+		TurnNumber: 3,
+	}
+
+	data, err := json.Marshal(payload)
+	require.NoError(t, err)
+
+	var decoded TurnEndPayload
+	require.NoError(t, json.Unmarshal(data, &decoded))
+
+	assert.Equal(t, payload.Event, decoded.Event)
+	assert.Equal(t, payload.ConvID, decoded.ConvID)
+	assert.Equal(t, payload.CWD, decoded.CWD)
+	assert.Equal(t, payload.InvokedBy, decoded.InvokedBy)
+	assert.Equal(t, payload.Response, decoded.Response)
+	assert.Equal(t, payload.TurnNumber, decoded.TurnNumber)
 }
 
 func TestDenyFast_BeforeToolCall_FirstHookBlocks(t *testing.T) {
@@ -879,14 +917,14 @@ if [ "$1" == "run" ]; then echo '{"follow_up_messages":["done"]}'; exit 0; fi
 
 func TestTrigger_ZeroValue_TriggerUserMessageSend(t *testing.T) {
 	var trigger Trigger
-	blocked, reason := trigger.TriggerUserMessageSend(context.Background(), "test message")
+	blocked, reason := trigger.TriggerUserMessageSend(context.Background(), nil, "test message", nil)
 	assert.False(t, blocked)
 	assert.Empty(t, reason)
 }
 
 func TestTrigger_ZeroValue_TriggerBeforeToolCall(t *testing.T) {
 	var trigger Trigger
-	blocked, reason, input := trigger.TriggerBeforeToolCall(context.Background(), "bash", `{"command":"ls"}`, "tool-123")
+	blocked, reason, input := trigger.TriggerBeforeToolCall(context.Background(), nil, "bash", `{"command":"ls"}`, "tool-123", nil)
 	assert.False(t, blocked)
 	assert.Empty(t, reason)
 	assert.Equal(t, `{"command":"ls"}`, input)
@@ -894,14 +932,20 @@ func TestTrigger_ZeroValue_TriggerBeforeToolCall(t *testing.T) {
 
 func TestTrigger_ZeroValue_TriggerAfterToolCall(t *testing.T) {
 	var trigger Trigger
-	result := trigger.TriggerAfterToolCall(context.Background(), "bash", `{"command":"ls"}`, "tool-123", tooltypes.StructuredToolResult{})
+	result := trigger.TriggerAfterToolCall(context.Background(), nil, "bash", `{"command":"ls"}`, "tool-123", tooltypes.StructuredToolResult{}, nil)
 	assert.Nil(t, result)
 }
 
 func TestTrigger_ZeroValue_TriggerAgentStop(t *testing.T) {
 	var trigger Trigger
-	followUps := trigger.TriggerAgentStop(context.Background(), nil)
+	followUps := trigger.TriggerAgentStop(context.Background(), nil, nil, nil)
 	assert.Nil(t, followUps)
+}
+
+func TestTrigger_ZeroValue_TriggerTurnEnd(_ *testing.T) {
+	var trigger Trigger
+	// Should not panic with zero-value trigger
+	trigger.TriggerTurnEnd(context.Background(), nil, "response", 1, nil)
 }
 
 func TestTrigger_SetConversationID(t *testing.T) {

@@ -24,6 +24,7 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/jingkaihe/kodelet/pkg/feedback"
+	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/hooks"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/llm/prompts"
@@ -262,7 +263,7 @@ func (t *Thread) SendMessage(
 	}
 
 	// Trigger user_message_send hook before adding user message
-	if blocked, reason := t.HookTrigger.TriggerUserMessageSend(ctx, message); blocked {
+	if blocked, reason := t.HookTrigger.TriggerUserMessageSend(ctx, t, message, t.GetRecipeHooks()); blocked {
 		return "", errors.Errorf("message blocked by hook: %s", reason)
 	}
 
@@ -320,13 +321,18 @@ OUTER:
 			// Update finalOutput with the most recent output
 			finalOutput = exchangeOutput
 
+			// Trigger turn_end hook after assistant response is complete
+			if finalOutput != "" {
+				t.HookTrigger.TriggerTurnEnd(ctx, t, finalOutput, turnCount, t.GetRecipeHooks())
+			}
+
 			// If no tools were used, check for hook follow-ups before stopping
 			if !toolsUsed {
 				logger.G(ctx).Debug("no tools used, checking agent_stop hook")
 
 				// Trigger agent_stop hook to see if there are follow-up messages
 				if messages, err := t.GetMessages(); err == nil {
-					if followUps := t.HookTrigger.TriggerAgentStop(ctx, messages); len(followUps) > 0 {
+					if followUps := t.HookTrigger.TriggerAgentStop(ctx, t, messages, t.GetRecipeHooks()); len(followUps) > 0 {
 						logger.G(ctx).WithField("count", len(followUps)).Info("agent_stop hook returned follow-up messages, continuing conversation")
 						// Append follow-up messages as user messages and continue
 						for _, msg := range followUps {
@@ -955,7 +961,7 @@ func (t *Thread) executeToolCalls(ctx context.Context, response *Response, handl
 
 		// Trigger before_tool_call hook
 		toolInput := string(argsJSON)
-		blocked, reason, toolInput := t.HookTrigger.TriggerBeforeToolCall(ctx, toolCall.Name, toolInput, toolCall.ID)
+		blocked, reason, toolInput := t.HookTrigger.TriggerBeforeToolCall(ctx, t, toolCall.Name, toolInput, toolCall.ID, t.GetRecipeHooks())
 
 		var output tooltypes.ToolResult
 		if blocked {
@@ -969,7 +975,7 @@ func (t *Thread) executeToolCalls(ctx context.Context, response *Response, handl
 		structuredResult := output.StructuredData()
 
 		// Trigger after_tool_call hook
-		if modified := t.HookTrigger.TriggerAfterToolCall(ctx, toolCall.Name, toolInput, toolCall.ID, structuredResult); modified != nil {
+		if modified := t.HookTrigger.TriggerAfterToolCall(ctx, t, toolCall.Name, toolInput, toolCall.ID, structuredResult, t.GetRecipeHooks()); modified != nil {
 			structuredResult = *modified
 		}
 
@@ -1092,8 +1098,42 @@ func (t *Thread) NewSubAgent(_ context.Context, config llmtypes.Config) llmtypes
 // Note: SetStructuredToolResult, GetStructuredToolResults, SetStructuredToolResults,
 // and ShouldAutoCompact methods are inherited from embedded base.Thread
 
+// SwapContext replaces the conversation history with a summary message.
+// This implements the hooks.ContextSwapper interface.
+func (t *Thread) SwapContext(_ context.Context, summary string) error {
+	t.Mu.Lock()
+	defer t.Mu.Unlock()
+
+	t.messages = []*genai.Content{
+		genai.NewContentFromParts([]*genai.Part{
+			genai.NewPartFromText(summary),
+		}, genai.RoleUser),
+	}
+
+	// Clear stale tool results - they reference tool calls that no longer exist
+	t.ToolResults = make(map[string]tooltypes.StructuredToolResult)
+
+	// Get state reference while under mutex protection
+	state := t.State
+
+	// heuristic estimation of context window size based on summary length
+	t.EstimateContextWindowFromMessage(summary)
+
+	// Clear file access tracking to start fresh with context retrieval
+	if state != nil {
+		state.SetFileLastAccess(make(map[string]time.Time))
+	}
+
+	return nil
+}
+
 // CompactContext performs comprehensive context compacting by creating a detailed summary
 func (t *Thread) CompactContext(ctx context.Context) error {
+	compactPrompt, err := fragments.LoadCompactPrompt(ctx)
+	if err != nil {
+		return errors.Wrap(err, "failed to load compact prompt")
+	}
+
 	summaryThread, err := NewGoogleThread(t.GetConfig(), nil)
 	if err != nil {
 		return errors.Wrap(err, "failed to create summary thread")
@@ -1104,7 +1144,7 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 	summaryThread.HookTrigger = hooks.Trigger{}
 
 	handler := &llmtypes.StringCollectorHandler{Silent: true}
-	_, err = summaryThread.SendMessage(ctx, prompts.CompactPrompt, handler, llmtypes.MessageOpt{
+	_, err = summaryThread.SendMessage(ctx, compactPrompt, handler, llmtypes.MessageOpt{
 		UseWeakModel:       false,
 		NoToolUse:          true,
 		DisableAutoCompact: true,
@@ -1115,30 +1155,7 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 		return errors.Wrap(err, "failed to generate compact summary")
 	}
 
-	compactSummary := handler.CollectedText()
-
-	// Replace the conversation history with the compact summary
-	t.Mu.Lock()
-	defer t.Mu.Unlock()
-
-	t.messages = []*genai.Content{
-		genai.NewContentFromParts([]*genai.Part{
-			genai.NewPartFromText(compactSummary),
-		}, genai.RoleUser),
-	}
-
-	// Clear stale tool results - they reference tool calls that no longer exist
-	t.ToolResults = make(map[string]tooltypes.StructuredToolResult)
-
-	// Get state reference while under mutex protection
-	state := t.State
-
-	// Clear file access tracking to start fresh with context retrieval
-	if state != nil {
-		state.SetFileLastAccess(make(map[string]time.Time))
-	}
-
-	return nil
+	return t.SwapContext(ctx, handler.CollectedText())
 }
 
 // ShortSummary generates a brief summary of the conversation

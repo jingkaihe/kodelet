@@ -45,6 +45,7 @@ type Thread struct {
 	SubagentContextFactory llmtypes.SubagentContextFactory           // Factory for creating subagent contexts
 	HookTrigger            hooks.Trigger                             // Hook trigger for lifecycle hooks
 	LoadConversation       LoadConversationFunc                      // Provider-specific callback for loading conversations
+	RecipeHooks            map[string]llmtypes.HookConfig            // Recipe hook configurations
 
 	Mu             sync.Mutex // Mutex for thread-safe operations on usage and tool results
 	ConversationMu sync.Mutex // Mutex for conversation-related operations
@@ -206,6 +207,17 @@ func (t *Thread) SetStructuredToolResults(results map[string]tooltypes.Structure
 	}
 }
 
+// SetRecipeHooks sets the recipe hook configurations for the thread.
+// These hooks are triggered at specific lifecycle events (e.g., turn_end).
+func (t *Thread) SetRecipeHooks(h map[string]llmtypes.HookConfig) {
+	t.RecipeHooks = h
+}
+
+// GetRecipeHooks returns the recipe hook configurations for the thread.
+func (t *Thread) GetRecipeHooks() map[string]llmtypes.HookConfig {
+	return t.RecipeHooks
+}
+
 // ShouldAutoCompact checks if auto-compact should be triggered based on context window utilization.
 // Returns true if the current context window utilization ratio >= compactRatio.
 // Returns false if compactRatio is invalid (<= 0 or > 1) or MaxContextWindow is 0.
@@ -221,6 +233,20 @@ func (t *Thread) ShouldAutoCompact(compactRatio float64) bool {
 
 	utilizationRatio := float64(usage.CurrentContextWindow) / float64(usage.MaxContextWindow)
 	return utilizationRatio >= compactRatio
+}
+
+// EstimateContextWindowFromMessage estimates the context window size based on message content.
+// This is useful after compaction to provide an approximate context size before the next API call.
+// Uses a rough estimate of ~4 characters per token.
+// This method is thread-safe and uses mutex locking.
+func (t *Thread) EstimateContextWindowFromMessage(msg string) {
+	if t.Usage == nil {
+		return
+	}
+	// Estimate tokens from message content (rough: ~4 chars per token)
+	estimatedTokens := max(len(msg)/4, 100)
+
+	t.Usage.CurrentContextWindow = estimatedTokens
 }
 
 // CreateMessageSpan creates a new tracing span for LLM message processing.
