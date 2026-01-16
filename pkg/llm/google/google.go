@@ -263,7 +263,7 @@ func (t *Thread) SendMessage(
 	}
 
 	// Trigger user_message_send hook before adding user message
-	if blocked, reason := t.HookTrigger.TriggerUserMessageSend(ctx, message); blocked {
+	if blocked, reason := t.HookTrigger.TriggerUserMessageSend(ctx, t, message, t.GetRecipeHooks()); blocked {
 		return "", errors.Errorf("message blocked by hook: %s", reason)
 	}
 
@@ -332,7 +332,7 @@ OUTER:
 
 				// Trigger agent_stop hook to see if there are follow-up messages
 				if messages, err := t.GetMessages(); err == nil {
-					if followUps := t.HookTrigger.TriggerAgentStop(ctx, messages); len(followUps) > 0 {
+					if followUps := t.HookTrigger.TriggerAgentStop(ctx, t, messages, t.GetRecipeHooks()); len(followUps) > 0 {
 						logger.G(ctx).WithField("count", len(followUps)).Info("agent_stop hook returned follow-up messages, continuing conversation")
 						// Append follow-up messages as user messages and continue
 						for _, msg := range followUps {
@@ -961,7 +961,7 @@ func (t *Thread) executeToolCalls(ctx context.Context, response *Response, handl
 
 		// Trigger before_tool_call hook
 		toolInput := string(argsJSON)
-		blocked, reason, toolInput := t.HookTrigger.TriggerBeforeToolCall(ctx, toolCall.Name, toolInput, toolCall.ID)
+		blocked, reason, toolInput := t.HookTrigger.TriggerBeforeToolCall(ctx, t, toolCall.Name, toolInput, toolCall.ID, t.GetRecipeHooks())
 
 		var output tooltypes.ToolResult
 		if blocked {
@@ -975,7 +975,7 @@ func (t *Thread) executeToolCalls(ctx context.Context, response *Response, handl
 		structuredResult := output.StructuredData()
 
 		// Trigger after_tool_call hook
-		if modified := t.HookTrigger.TriggerAfterToolCall(ctx, toolCall.Name, toolInput, toolCall.ID, structuredResult); modified != nil {
+		if modified := t.HookTrigger.TriggerAfterToolCall(ctx, t, toolCall.Name, toolInput, toolCall.ID, structuredResult, t.GetRecipeHooks()); modified != nil {
 			structuredResult = *modified
 		}
 

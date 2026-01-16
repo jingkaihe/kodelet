@@ -243,7 +243,7 @@ func (t *Thread) SendMessage(
 	}
 
 	// Trigger user_message_send hook before adding user message
-	if blocked, reason := t.HookTrigger.TriggerUserMessageSend(ctx, message); blocked {
+	if blocked, reason := t.HookTrigger.TriggerUserMessageSend(ctx, t, message, t.GetRecipeHooks()); blocked {
 		return "", errors.Errorf("message blocked by hook: %s", reason)
 	}
 
@@ -329,7 +329,7 @@ OUTER:
 				logger.G(ctx).Debug("no tools used, checking agent_stop hook")
 
 				if messages, err := t.GetMessages(); err == nil {
-					if followUps := t.HookTrigger.TriggerAgentStop(ctx, messages); len(followUps) > 0 {
+					if followUps := t.HookTrigger.TriggerAgentStop(ctx, t, messages, t.GetRecipeHooks()); len(followUps) > 0 {
 						logger.G(ctx).WithField("count", len(followUps)).
 							Info("agent_stop hook returned follow-up messages, continuing conversation")
 						for _, msg := range followUps {

@@ -315,7 +315,7 @@ func (t *Thread) executeToolCall(
 	handler llmtypes.MessageHandler,
 ) tooltypes.ToolResult {
 	// Trigger before_tool_call hook
-	blocked, reason, modifiedArgs := t.HookTrigger.TriggerBeforeToolCall(ctx, name, arguments, callID)
+	blocked, reason, modifiedArgs := t.HookTrigger.TriggerBeforeToolCall(ctx, t, name, arguments, callID, t.GetRecipeHooks())
 	if blocked {
 		return tooltypes.NewBlockedToolResult(name, reason)
 	}
@@ -335,7 +335,7 @@ func (t *Thread) executeToolCall(
 	structuredData := result.StructuredData()
 
 	// Trigger after_tool_call hook
-	if modified := t.HookTrigger.TriggerAfterToolCall(ctx, name, arguments, callID, structuredData); modified != nil {
+	if modified := t.HookTrigger.TriggerAfterToolCall(ctx, t, name, arguments, callID, structuredData, t.GetRecipeHooks()); modified != nil {
 		structuredData = *modified
 	}
 
