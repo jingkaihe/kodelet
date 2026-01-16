@@ -866,3 +866,126 @@ Regular PR instructions here.
 	assert.Contains(t, result3.Content, "Target branch: develop")
 	assert.NotContains(t, result3.Content, "DRAFT")
 }
+
+func TestFragmentProcessor_ParseHooksMetadata(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "kodelet-fragments-hooks-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	fragmentContent := `---
+name: Compaction Recipe
+description: Recipe with turn_end hook
+hooks:
+  turn_end:
+    handler: swap_context
+    once: true
+---
+
+Summarize the conversation.`
+
+	fragmentPath := filepath.Join(tempDir, "compact-test.md")
+	err = os.WriteFile(fragmentPath, []byte(fragmentContent), 0o644)
+	require.NoError(t, err)
+
+	processor, err := NewFragmentProcessor(WithFragmentDirs(tempDir))
+	require.NoError(t, err)
+
+	config := &Config{
+		FragmentName: "compact-test",
+		Arguments:    map[string]string{},
+	}
+
+	result, err := processor.LoadFragment(context.Background(), config)
+	require.NoError(t, err)
+
+	assert.Equal(t, "Compaction Recipe", result.Metadata.Name)
+	assert.Equal(t, "Recipe with turn_end hook", result.Metadata.Description)
+	require.NotNil(t, result.Metadata.Hooks)
+	require.Contains(t, result.Metadata.Hooks, "turn_end")
+
+	hookConfig := result.Metadata.Hooks["turn_end"]
+	assert.Equal(t, "swap_context", hookConfig.Handler)
+	assert.True(t, hookConfig.Once)
+}
+
+func TestFragmentProcessor_ParseHooksMetadata_MultipleHooks(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "kodelet-fragments-multi-hooks-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	fragmentContent := `---
+name: Multi-hook Recipe
+description: Recipe with multiple hooks
+hooks:
+  turn_end:
+    handler: swap_context
+    once: false
+  before_tool_call:
+    handler: audit_logger
+---
+
+Content here.`
+
+	fragmentPath := filepath.Join(tempDir, "multi-hook.md")
+	err = os.WriteFile(fragmentPath, []byte(fragmentContent), 0o644)
+	require.NoError(t, err)
+
+	processor, err := NewFragmentProcessor(WithFragmentDirs(tempDir))
+	require.NoError(t, err)
+
+	config := &Config{
+		FragmentName: "multi-hook",
+		Arguments:    map[string]string{},
+	}
+
+	result, err := processor.LoadFragment(context.Background(), config)
+	require.NoError(t, err)
+
+	require.Len(t, result.Metadata.Hooks, 2)
+
+	turnEndHook := result.Metadata.Hooks["turn_end"]
+	assert.Equal(t, "swap_context", turnEndHook.Handler)
+	assert.False(t, turnEndHook.Once)
+
+	beforeToolCallHook := result.Metadata.Hooks["before_tool_call"]
+	assert.Equal(t, "audit_logger", beforeToolCallHook.Handler)
+}
+
+func TestFragmentProcessor_ParseHooksMetadata_NoHooks(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "kodelet-fragments-no-hooks-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	fragmentContent := `---
+name: Simple Recipe
+description: Recipe without hooks
+---
+
+Content here.`
+
+	fragmentPath := filepath.Join(tempDir, "simple.md")
+	err = os.WriteFile(fragmentPath, []byte(fragmentContent), 0o644)
+	require.NoError(t, err)
+
+	processor, err := NewFragmentProcessor(WithFragmentDirs(tempDir))
+	require.NoError(t, err)
+
+	config := &Config{
+		FragmentName: "simple",
+		Arguments:    map[string]string{},
+	}
+
+	result, err := processor.LoadFragment(context.Background(), config)
+	require.NoError(t, err)
+
+	assert.Nil(t, result.Metadata.Hooks)
+}
+
+func TestLoadCompactPrompt(t *testing.T) {
+	ctx := context.Background()
+
+	prompt, err := LoadCompactPrompt(ctx)
+	require.NoError(t, err)
+	assert.NotEmpty(t, prompt)
+	assert.Contains(t, prompt, "summary")
+}
