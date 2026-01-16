@@ -247,7 +247,7 @@ func (t *Thread) ShouldAutoCompact(compactRatio float64) bool {
 	return utilizationRatio >= compactRatio
 }
 
-// ProcessHookResult handles the result from an agent_stop hook.
+// ProcessAgentStopHookResult handles the result from an agent_stop hook.
 // Returns (shouldContinue, followUpMessages, error).
 // - shouldContinue: true if the agent should continue processing (e.g., for continue/callback results)
 // - followUpMessages: messages to add to the conversation if continuing
@@ -256,7 +256,7 @@ func (t *Thread) ShouldAutoCompact(compactRatio float64) bool {
 // The getMessages callback retrieves the current thread's messages for callback execution.
 // The replaceMessages callback is called for mutate results to allow provider-specific message replacement.
 // The saveConversation callback is called after mutation to persist changes.
-func (t *Thread) ProcessHookResult(
+func (t *Thread) ProcessAgentStopHookResult(
 	ctx context.Context,
 	result *hooks.AgentStopResult,
 	getMessages func() ([]llmtypes.Message, error),

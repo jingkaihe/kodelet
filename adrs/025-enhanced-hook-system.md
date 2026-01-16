@@ -325,7 +325,7 @@ func (h *AfterTurnCompactHook) Execute(payload *hooks.AfterTurnPayload) (*hooks.
 
 ### 6. Hook Result Processing
 
-Both `ProcessHookResult` (agent_stop) and `ProcessAfterTurnResult` (after_turn) handle results uniformly:
+Both `ProcessAgentStopHookResult` (agent_stop) and `ProcessAfterTurnResult` (after_turn) handle results uniformly:
 
 ```go
 // pkg/llm/base/base.go

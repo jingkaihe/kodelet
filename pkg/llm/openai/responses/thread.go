@@ -328,7 +328,7 @@ OUTER:
 
 				if messages, err := t.GetMessages(); err == nil {
 					result := hookTrigger.TriggerAgentStopWithResult(ctx, messages, t.GetUsage())
-					shouldContinue, followUps, hookErr := t.ProcessHookResult(ctx, result, t.GetMessages, t.replaceMessages, t.saveConversationCallback(opt))
+					shouldContinue, followUps, hookErr := t.ProcessAgentStopHookResult(ctx, result, t.GetMessages, t.replaceMessages, t.saveConversationCallback(opt))
 					if hookErr != nil {
 						logger.G(ctx).WithError(hookErr).Error("failed to process hook result")
 					}
