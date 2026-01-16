@@ -207,3 +207,36 @@ func (m HookManager) ExecuteAgentStop(ctx context.Context, payload AgentStopPayl
 
 	return &AgentStopResult{FollowUpMessages: allFollowUpMessages}, nil
 }
+
+// ExecuteTurnEnd runs turn_end hooks.
+// Empty or nil output with exit code 0 is treated as "no action".
+func (m HookManager) ExecuteTurnEnd(ctx context.Context, payload TurnEndPayload) (*TurnEndResult, error) {
+	hooks := m.hooks[HookTypeTurnEnd]
+	if len(hooks) == 0 {
+		return &TurnEndResult{}, nil
+	}
+
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to marshal payload")
+	}
+
+	for _, hook := range hooks {
+		resultBytes, err := m.executeHook(ctx, hook, payloadBytes)
+		if err != nil {
+			logger.G(ctx).WithError(err).WithField("hook", hook.Name).Warn("hook execution failed")
+			continue
+		}
+		if len(resultBytes) == 0 {
+			continue
+		}
+
+		var result TurnEndResult
+		if err := json.Unmarshal(resultBytes, &result); err != nil {
+			logger.G(ctx).WithError(err).WithField("hook", hook.Name).Warn("failed to unmarshal hook result")
+			continue
+		}
+	}
+
+	return &TurnEndResult{}, nil
+}

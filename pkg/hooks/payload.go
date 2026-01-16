@@ -69,3 +69,15 @@ type AgentStopResult struct {
 	// or request additional actions based on the agent's work.
 	FollowUpMessages []string `json:"follow_up_messages,omitempty"`
 }
+
+// TurnEndPayload is sent when an assistant turn completes
+type TurnEndPayload struct {
+	BasePayload
+	Response   string `json:"response"`    // The assistant's response text
+	TurnNumber int    `json:"turn_number"` // Which turn in the conversation (1-indexed)
+}
+
+// TurnEndResult is returned by turn_end hooks
+type TurnEndResult struct {
+	// Future: could support response modification, turn cancellation, etc.
+}

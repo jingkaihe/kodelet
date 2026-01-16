@@ -320,6 +320,11 @@ OUTER:
 			// Update finalOutput with the most recent output
 			finalOutput = exchangeOutput
 
+			// Trigger turn_end hook after assistant response is complete
+			if finalOutput != "" {
+				t.HookTrigger.TriggerTurnEnd(ctx, t, finalOutput, turnCount, t.GetRecipeHooks())
+			}
+
 			// If no tools were used, check for hook follow-ups before stopping
 			if !toolsUsed {
 				logger.G(ctx).Debug("no tools used, checking agent_stop hook")
@@ -1092,6 +1097,32 @@ func (t *Thread) NewSubAgent(_ context.Context, config llmtypes.Config) llmtypes
 // Note: SetStructuredToolResult, GetStructuredToolResults, SetStructuredToolResults,
 // and ShouldAutoCompact methods are inherited from embedded base.Thread
 
+// SwapContext replaces the conversation history with a summary message.
+// This implements the hooks.ContextSwapper interface.
+func (t *Thread) SwapContext(_ context.Context, summary string) error {
+	t.Mu.Lock()
+	defer t.Mu.Unlock()
+
+	t.messages = []*genai.Content{
+		genai.NewContentFromParts([]*genai.Part{
+			genai.NewPartFromText(summary),
+		}, genai.RoleUser),
+	}
+
+	// Clear stale tool results - they reference tool calls that no longer exist
+	t.ToolResults = make(map[string]tooltypes.StructuredToolResult)
+
+	// Get state reference while under mutex protection
+	state := t.State
+
+	// Clear file access tracking to start fresh with context retrieval
+	if state != nil {
+		state.SetFileLastAccess(make(map[string]time.Time))
+	}
+
+	return nil
+}
+
 // CompactContext performs comprehensive context compacting by creating a detailed summary
 func (t *Thread) CompactContext(ctx context.Context) error {
 	summaryThread, err := NewGoogleThread(t.GetConfig(), nil)
@@ -1115,30 +1146,7 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 		return errors.Wrap(err, "failed to generate compact summary")
 	}
 
-	compactSummary := handler.CollectedText()
-
-	// Replace the conversation history with the compact summary
-	t.Mu.Lock()
-	defer t.Mu.Unlock()
-
-	t.messages = []*genai.Content{
-		genai.NewContentFromParts([]*genai.Part{
-			genai.NewPartFromText(compactSummary),
-		}, genai.RoleUser),
-	}
-
-	// Clear stale tool results - they reference tool calls that no longer exist
-	t.ToolResults = make(map[string]tooltypes.StructuredToolResult)
-
-	// Get state reference while under mutex protection
-	state := t.State
-
-	// Clear file access tracking to start fresh with context retrieval
-	if state != nil {
-		state.SetFileLastAccess(make(map[string]time.Time))
-	}
-
-	return nil
+	return t.SwapContext(ctx, handler.CollectedText())
 }
 
 // ShortSummary generates a brief summary of the conversation

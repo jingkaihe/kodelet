@@ -319,6 +319,11 @@ OUTER:
 			turnCount++
 			finalOutput = exchangeOutput
 
+			// Trigger turn_end hook after assistant response is complete
+			if finalOutput != "" {
+				t.HookTrigger.TriggerTurnEnd(ctx, t, finalOutput, turnCount, t.GetRecipeHooks())
+			}
+
 			// If no tools were used, check for hook follow-ups before stopping
 			if !toolsUsed {
 				logger.G(ctx).Debug("no tools used, checking agent_stop hook")
@@ -570,6 +575,38 @@ func (t *Thread) NewSubAgent(ctx context.Context, config llmtypes.Config) llmtyp
 	newThread.customPricing = t.customPricing
 
 	return newThread
+}
+
+// SwapContext replaces the conversation history with a summary message.
+// This implements the hooks.ContextSwapper interface.
+func (t *Thread) SwapContext(_ context.Context, summary string) error {
+	t.Mu.Lock()
+	defer t.Mu.Unlock()
+
+	t.inputItems = []responses.ResponseInputItemUnionParam{
+		{
+			OfMessage: &responses.EasyInputMessageParam{
+				Role:    responses.EasyInputMessageRoleUser,
+				Content: responses.EasyInputMessageContentUnionParam{OfString: param.NewOpt(summary)},
+			},
+		},
+	}
+
+	// Clear pending items - next request will use the new input
+	t.pendingItems = nil
+
+	// Clear the previous response ID
+	t.lastResponseID = ""
+
+	// Clear stale tool results - they reference tool calls that no longer exist
+	t.ToolResults = make(map[string]tooltypes.StructuredToolResult)
+
+	// Clear file access tracking to start fresh with context retrieval
+	if t.State != nil {
+		t.State.SetFileLastAccess(make(map[string]time.Time))
+	}
+
+	return nil
 }
 
 // CompactContext compacts the conversation history using the Responses API compact endpoint.

@@ -53,6 +53,13 @@ type SubAgentConfig struct {
 // SubagentContextFactory is a function type for creating subagent contexts
 type SubagentContextFactory func(ctx context.Context, parentThread Thread, handler MessageHandler, compactRatio float64, disableAutoCompact bool) context.Context
 
+// HookConfig is a forward declaration of hooks.HookConfig to avoid circular imports.
+// The actual type is defined in pkg/hooks/builtin.go.
+type HookConfig struct {
+	Handler string // Built-in handler name (e.g., "swap_context")
+	Once    bool   // If true, only execute on the first turn
+}
+
 // Thread represents a conversation thread with an LLM
 type Thread interface {
 	// SetState sets the state for the thread
@@ -86,4 +93,8 @@ type Thread interface {
 	// AggregateSubagentUsage aggregates usage from a subagent into this thread's usage
 	// This aggregates token counts and costs but NOT context window (which should remain isolated)
 	AggregateSubagentUsage(usage Usage)
+	// SetRecipeHooks sets the recipe hook configurations for the thread
+	SetRecipeHooks(hooks map[string]HookConfig)
+	// GetRecipeHooks returns the recipe hook configurations for the thread
+	GetRecipeHooks() map[string]HookConfig
 }

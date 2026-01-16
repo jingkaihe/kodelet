@@ -289,6 +289,11 @@ var runCmd = &cobra.Command{
 			thread.SetConversationID(sessionID)
 			thread.EnablePersistence(ctx, !config.NoSave)
 
+			// Set recipe hooks if fragment was loaded
+			if fragmentMetadata != nil && len(fragmentMetadata.Hooks) > 0 {
+				thread.SetRecipeHooks(convertFragmentHooks(fragmentMetadata.Hooks))
+			}
+
 			streamer, closeFunc, err := llm.NewConversationStreamer(ctx)
 			if err != nil {
 				presenter.Error(err, "Failed to create conversation streamer")
@@ -362,6 +367,11 @@ var runCmd = &cobra.Command{
 			}
 
 			thread.EnablePersistence(ctx, !config.NoSave)
+
+			// Set recipe hooks if fragment was loaded
+			if fragmentMetadata != nil && len(fragmentMetadata.Hooks) > 0 {
+				thread.SetRecipeHooks(convertFragmentHooks(fragmentMetadata.Hooks))
+			}
 
 			finalOutput, err := thread.SendMessage(ctx, query, handler, llmtypes.MessageOpt{
 				PromptCache:        true,
@@ -503,4 +513,16 @@ func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
 	}
 
 	return config
+}
+
+// convertFragmentHooks converts fragment hook configurations to LLM thread hook configurations
+func convertFragmentHooks(fragmentHooks map[string]fragments.HookConfig) map[string]llmtypes.HookConfig {
+	result := make(map[string]llmtypes.HookConfig, len(fragmentHooks))
+	for k, v := range fragmentHooks {
+		result[k] = llmtypes.HookConfig{
+			Handler: v.Handler,
+			Once:    v.Once,
+		}
+	}
+	return result
 }

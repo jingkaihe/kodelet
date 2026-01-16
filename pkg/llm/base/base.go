@@ -45,6 +45,7 @@ type Thread struct {
 	SubagentContextFactory llmtypes.SubagentContextFactory           // Factory for creating subagent contexts
 	HookTrigger            hooks.Trigger                             // Hook trigger for lifecycle hooks
 	LoadConversation       LoadConversationFunc                      // Provider-specific callback for loading conversations
+	RecipeHooks            map[string]llmtypes.HookConfig            // Recipe hook configurations
 
 	Mu             sync.Mutex // Mutex for thread-safe operations on usage and tool results
 	ConversationMu sync.Mutex // Mutex for conversation-related operations
@@ -204,6 +205,17 @@ func (t *Thread) SetStructuredToolResults(results map[string]tooltypes.Structure
 		t.ToolResults = make(map[string]tooltypes.StructuredToolResult)
 		maps.Copy(t.ToolResults, results)
 	}
+}
+
+// SetRecipeHooks sets the recipe hook configurations for the thread.
+// These hooks are triggered at specific lifecycle events (e.g., turn_end).
+func (t *Thread) SetRecipeHooks(h map[string]llmtypes.HookConfig) {
+	t.RecipeHooks = h
+}
+
+// GetRecipeHooks returns the recipe hook configurations for the thread.
+func (t *Thread) GetRecipeHooks() map[string]llmtypes.HookConfig {
+	return t.RecipeHooks
 }
 
 // ShouldAutoCompact checks if auto-compact should be triggered based on context window utilization.

@@ -157,6 +157,42 @@ func (t Trigger) TriggerAgentStop(ctx context.Context, messages []llmtypes.Messa
 	return result.FollowUpMessages
 }
 
+// TriggerTurnEnd invokes turn_end hooks including built-in handlers.
+// The recipeHooks parameter contains hook configurations from recipe metadata.
+// The thread parameter is passed to built-in handlers that need to modify thread state.
+// A zero-value Trigger is a no-op.
+func (t Trigger) TriggerTurnEnd(ctx context.Context, thread llmtypes.Thread, response string, turnNumber int, recipeHooks map[string]llmtypes.HookConfig) {
+	// First, execute external hooks (if any)
+	if t.Manager.HasHooks(HookTypeTurnEnd) {
+		payload := TurnEndPayload{
+			BasePayload: BasePayload{
+				Event:     HookTypeTurnEnd,
+				ConvID:    t.ConversationID,
+				CWD:       t.getCwd(ctx),
+				InvokedBy: t.invokedBy(),
+			},
+			Response:   response,
+			TurnNumber: turnNumber,
+		}
+		t.Manager.ExecuteTurnEnd(ctx, payload)
+	}
+
+	// Then, execute built-in handler if specified in recipe
+	if hookConfig, ok := recipeHooks["turn_end"]; ok {
+		// Skip if once=true and not the first turn
+		if hookConfig.Once && turnNumber > 1 {
+			return
+		}
+
+		registry := DefaultBuiltinRegistry()
+		if handler, exists := registry.Get(hookConfig.Handler); exists {
+			if err := handler.HandleTurnEnd(ctx, thread, response); err != nil {
+				logger.G(ctx).WithError(err).WithField("handler", hookConfig.Handler).Error("built-in handler failed")
+			}
+		}
+	}
+}
+
 // SetConversationID updates the conversation ID for the trigger.
 // This is useful when the conversation ID is set after thread creation.
 func (t *Trigger) SetConversationID(id string) {
