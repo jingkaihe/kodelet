@@ -21,7 +21,7 @@ import (
 //
 // This mirrors Anthropic's approach where thinking blocks are stored inline with messages.
 type StoredInputItem struct {
-	Type string `json:"type"` // "message", "function_call", "function_call_output", "reasoning"
+	Type string `json:"type"` // "message", "function_call", "function_call_output", "reasoning", "compaction"
 
 	// Message fields (when Type == "message")
 	Role    string `json:"role,omitempty"`    // "user", "assistant", "system", "developer"
@@ -34,6 +34,9 @@ type StoredInputItem struct {
 
 	// Function call output fields (when Type == "function_call_output")
 	Output string `json:"output,omitempty"`
+
+	// Compaction fields (when Type == "compaction")
+	EncryptedContent string `json:"encrypted_content,omitempty"`
 
 	// Reasoning fields (when Type == "reasoning")
 	// Reasoning string is stored in Content field with Role == "assistant"
@@ -77,6 +80,9 @@ func fromStoredItems(items []StoredInputItem) []responses.ResponseInputItemUnion
 					},
 				},
 			})
+
+		case "compaction":
+			result = append(result, responses.ResponseInputItemParamOfCompaction(item.EncryptedContent))
 		}
 	}
 

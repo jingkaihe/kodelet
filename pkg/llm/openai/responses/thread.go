@@ -592,6 +592,15 @@ func (t *Thread) SwapContext(_ context.Context, summary string) error {
 		},
 	}
 
+	// Update storedItems for persistence
+	t.storedItems = []StoredInputItem{
+		{
+			Type:    "message",
+			Role:    "user",
+			Content: summary,
+		},
+	}
+
 	// Clear pending items - next request will use the new input
 	t.pendingItems = nil
 
@@ -636,9 +645,11 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 	t.Usage.OutputTokens += int(resp.Usage.OutputTokens)
 	t.Mu.Unlock()
 
-	// Convert output items to input items
+	// Convert output items to input items and storedItems simultaneously
 	// The Compact API returns: user messages + a single compaction item
 	newInputItems := make([]responses.ResponseInputItemUnionParam, 0, len(resp.Output))
+	newStoredItems := make([]StoredInputItem, 0, len(resp.Output))
+
 	for _, output := range resp.Output {
 		switch output.Type {
 		case "message":
@@ -660,6 +671,11 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 							Content: responses.EasyInputMessageContentUnionParam{OfString: param.NewOpt(textContent)},
 						},
 					})
+					newStoredItems = append(newStoredItems, StoredInputItem{
+						Type:    "message",
+						Role:    "user",
+						Content: textContent,
+					})
 				}
 			}
 
@@ -667,11 +683,16 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 			// Convert compaction item using the SDK helper
 			compaction := output.AsCompaction()
 			newInputItems = append(newInputItems, responses.ResponseInputItemParamOfCompaction(compaction.EncryptedContent))
+			newStoredItems = append(newStoredItems, StoredInputItem{
+				Type:             "compaction",
+				EncryptedContent: compaction.EncryptedContent,
+			})
 		}
 	}
 
 	// Replace input items with compacted output
 	t.inputItems = newInputItems
+	t.storedItems = newStoredItems
 
 	// Clear pending items - next request will use the new compacted input
 	t.pendingItems = nil
