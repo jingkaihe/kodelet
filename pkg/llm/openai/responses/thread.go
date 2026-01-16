@@ -598,6 +598,9 @@ func (t *Thread) SwapContext(_ context.Context, summary string) error {
 	// Clear the previous response ID
 	t.lastResponseID = ""
 
+	// heuristic estimation of context window size based on summary length
+	t.EstimateContextWindowFromMessage(summary)
+
 	// Clear stale tool results - they reference tool calls that no longer exist
 	t.ToolResults = make(map[string]tooltypes.StructuredToolResult)
 

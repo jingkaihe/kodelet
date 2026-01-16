@@ -235,6 +235,20 @@ func (t *Thread) ShouldAutoCompact(compactRatio float64) bool {
 	return utilizationRatio >= compactRatio
 }
 
+// EstimateContextWindowFromMessages estimates the context window size based on message content.
+// This is useful after compaction to provide an approximate context size before the next API call.
+// Uses a rough estimate of ~4 characters per token.
+// This method is thread-safe and uses mutex locking.
+func (t *Thread) EstimateContextWindowFromMessage(msg string) {
+	if t.Usage == nil {
+		return
+	}
+	// Estimate tokens from message content (rough: ~4 chars per token)
+	estimatedTokens := max(len(msg)/4, 100)
+
+	t.Usage.CurrentContextWindow = estimatedTokens
+}
+
 // CreateMessageSpan creates a new tracing span for LLM message processing.
 // It includes common attributes shared across all providers and allows for additional
 // provider-specific attributes to be passed in.

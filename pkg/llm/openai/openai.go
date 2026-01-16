@@ -933,6 +933,9 @@ func (t *Thread) SwapContext(_ context.Context, summary string) error {
 	// Get state reference while under mutex protection
 	state := t.State
 
+	// heuristic estimation of context window size based on summary length
+	t.EstimateContextWindowFromMessage(summary)
+
 	// Clear file access tracking to start fresh with context retrieval
 	if state != nil {
 		state.SetFileLastAccess(make(map[string]time.Time))
