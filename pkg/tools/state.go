@@ -83,13 +83,18 @@ func NewBasicState(ctx context.Context, opts ...BasicStateOption) *BasicState {
 		contextDiscovery: &ContextDiscovery{
 			workingDir:      workingDir,
 			homeDir:         kodeletHomeDir,
-			contextPatterns: []string{"AGENTS.md"},
+			contextPatterns: llmtypes.DefaultContextPatterns(),
 		},
 		fileLocks: make(map[string]*sync.Mutex),
 	}
 
 	for _, opt := range opts {
 		opt(ctx, state)
+	}
+
+	// Update context patterns from config if specified
+	if state.llmConfig.Context != nil && len(state.llmConfig.Context.Patterns) > 0 {
+		state.contextDiscovery.contextPatterns = state.llmConfig.Context.Patterns
 	}
 
 	if len(state.tools) == 0 {
@@ -358,22 +363,17 @@ func (s *BasicState) DiscoverContexts() map[string]string {
 
 	contexts := make(map[string]string)
 
-	// 1. Add working directory context
+	// 1. Add working directory context (uses configured patterns)
 	if ctx := s.loadContextFromPatterns(s.contextDiscovery.workingDir); ctx != nil {
 		contexts[ctx.Path] = ctx.Content
 	}
 
-	// 2. Add README.md from home directory
-	if ctx := s.loadContextFile(filepath.Join(s.contextDiscovery.workingDir, "README.md")); ctx != nil {
-		contexts[ctx.Path] = ctx.Content
-	}
-
-	// 3. Add home directory context
+	// 2. Add home directory context (~/.kodelet/)
 	if ctx := s.loadContextFromPatterns(s.contextDiscovery.homeDir); ctx != nil {
 		contexts[ctx.Path] = ctx.Content
 	}
 
-	// 4. Add access-based contexts
+	// 3. Add access-based contexts (discovers context files in subdirectories of accessed files)
 	for _, ctx := range s.discoverAccessBasedContexts() {
 		contexts[ctx.Path] = ctx.Content
 	}

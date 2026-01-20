@@ -431,6 +431,20 @@ skills:
   #   - xlsx
   #   - kubernetes
 
+# Context File Discovery Configuration
+# Controls which files are loaded as context for the agent.
+# Context files provide project-specific instructions, coding conventions, and guidelines.
+context:
+  # List of filenames to search for in each directory (default: ["AGENTS.md"])
+  # Files are searched in order; first match wins per directory.
+  # Common options: AGENTS.md, CLAUDE.md, CODING.md, README.md
+  patterns:
+    - "AGENTS.md"
+  # To also include README.md (not recommended for large READMEs):
+  # patterns:
+  #   - "AGENTS.md"
+  #   - "README.md"
+
 # Tracing Configuration
 tracing:
   # Enable OpenTelemetry tracing (default: false)
@@ -459,6 +473,7 @@ tracing:
 # - KODELET_RETRY_BACKOFF_TYPE: Overrides the retry.backoff_type setting (fixed, exponential)
 # - KODELET_ALLOWED_COMMANDS: Comma-separated list of allowed command patterns
 # - KODELET_ALLOWED_TOOLS: Comma-separated list of allowed tools for main agent
+# - KODELET_CONTEXT_PATTERNS: Comma-separated list of context file patterns (e.g., "AGENTS.md,README.md")
 # - KODELET_TRACING_ENABLED: Enables/disables tracing
 # - KODELET_TRACING_SAMPLER: Sets the sampling strategy
 # - KODELET_TRACING_RATIO: Sets the sampling ratio
