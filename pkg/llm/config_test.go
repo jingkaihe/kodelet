@@ -3,6 +3,7 @@ package llm
 import (
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -34,6 +35,37 @@ func TestGetConfigFromViperDefaults(t *testing.T) {
 	// Verify
 	assert.Empty(t, config.Model)
 	assert.Zero(t, config.MaxTokens)
+}
+
+func TestGetConfigFromViperWithCmd_ExplicitContextPatternsOverrideProfile(t *testing.T) {
+	originalConfig := viper.AllSettings()
+	defer func() {
+		viper.Reset()
+		for key, value := range originalConfig {
+			viper.Set(key, value)
+		}
+	}()
+
+	viper.Reset()
+	viper.Set("profile", "work")
+	viper.Set("profiles", map[string]interface{}{
+		"work": map[string]interface{}{
+			"context": map[string]interface{}{
+				"patterns": []string{"README.md"},
+			},
+		},
+	})
+
+	cmd := &cobra.Command{Use: "test"}
+	cmd.Flags().StringSlice("context-patterns", []string{"AGENTS.md"}, "Context file patterns")
+	err := cmd.Flags().Set("context-patterns", "CODING.md,README.md")
+	require.NoError(t, err)
+
+	config, err := GetConfigFromViperWithCmd(cmd)
+	require.NoError(t, err)
+
+	require.NotNil(t, config.Context)
+	assert.Equal(t, []string{"CODING.md", "README.md"}, config.Context.Patterns)
 }
 
 func TestGetConfigFromViperWithAliases(t *testing.T) {

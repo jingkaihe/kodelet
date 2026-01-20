@@ -61,12 +61,30 @@ func GetConfigFromViperWithCmd(cmd *cobra.Command) (llmtypes.Config, error) {
 func applyExplicitFlagsToViper(cmd *cobra.Command) {
 	cmd.Flags().VisitAll(func(flag *pflag.Flag) {
 		if flag.Changed {
-			viperKey := strings.ReplaceAll(flag.Name, "-", "_")
+			viperKey := explicitFlagViperKey(flag.Name)
 			// Must use flag.Value directly, not viper.Get(), because
 			// profile settings use viper.Set() which has highest priority
+			if sliceValue, ok := flag.Value.(pflag.SliceValue); ok {
+				viper.Set(viperKey, sliceValue.GetSlice())
+				return
+			}
 			viper.Set(viperKey, flag.Value.String())
 		}
 	})
+}
+
+func explicitFlagViperKey(flagName string) string {
+	if viperKey, ok := explicitFlagKeyOverrides[flagName]; ok {
+		return viperKey
+	}
+	return strings.ReplaceAll(flagName, "-", "_")
+}
+
+var explicitFlagKeyOverrides = map[string]string{
+	"context-patterns": "context.patterns",
+	"tracing-enabled":  "tracing.enabled",
+	"tracing-sampler":  "tracing.sampler",
+	"tracing-ratio":    "tracing.ratio",
 }
 
 // applyProfileToViper applies profile settings to viper

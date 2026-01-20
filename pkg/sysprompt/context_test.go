@@ -2,6 +2,7 @@ package sysprompt
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -65,5 +66,44 @@ func TestPromptContextActiveContextFile(t *testing.T) {
 
 		ctx := NewPromptContext(nil)
 		assert.Equal(t, AgentsMd, ctx.ActiveContextFile, "Expected ActiveContextFile to default to AGENTS.md")
+	})
+}
+
+func TestResolveActiveContextFile(t *testing.T) {
+	t.Run("prefers working directory match", func(t *testing.T) {
+		workingDir := t.TempDir()
+		contexts := map[string]string{
+			filepath.Join(workingDir, "README.md"): "# README",
+		}
+		patterns := []string{"AGENTS.md", "README.md"}
+
+		active := ResolveActiveContextFile(workingDir, contexts, patterns)
+
+		assert.Equal(t, "README.md", active)
+	})
+
+	t.Run("falls back to loaded context base name", func(t *testing.T) {
+		contexts := map[string]string{
+			"/var/tmp/CODING.md": "# Coding",
+		}
+		patterns := []string{"CODING.md", "README.md"}
+
+		active := ResolveActiveContextFile("", contexts, patterns)
+
+		assert.Equal(t, "CODING.md", active)
+	})
+
+	t.Run("falls back to first pattern when no contexts", func(t *testing.T) {
+		patterns := []string{"README.md", "AGENTS.md"}
+
+		active := ResolveActiveContextFile("", nil, patterns)
+
+		assert.Equal(t, "README.md", active)
+	})
+
+	t.Run("defaults to AGENTS.md when no patterns", func(t *testing.T) {
+		active := ResolveActiveContextFile("", nil, nil)
+
+		assert.Equal(t, AgentsMd, active)
 	})
 }

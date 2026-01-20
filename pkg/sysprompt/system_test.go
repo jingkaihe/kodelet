@@ -181,3 +181,19 @@ func TestSystemPrompt_ContextFormattingEdgeCases(t *testing.T) {
 		assert.Contains(t, prompt, `<context filename="/z/last.md", dir="/z">`, "Expected last context file")
 	})
 }
+
+func TestSystemPrompt_UsesConfiguredContextPatterns(t *testing.T) {
+	contexts := map[string]string{
+		"/path/to/project/README.md": "# README\nProject overview.",
+	}
+	llmConfig := llm.Config{
+		Context: &llm.ContextConfig{
+			Patterns: []string{"README.md", "AGENTS.md"},
+		},
+	}
+
+	prompt := SystemPrompt("claude-sonnet-4-5-20250929", llmConfig, contexts)
+
+	assert.Contains(t, prompt, "If the current working directory contains a `README.md` file")
+	assert.NotContains(t, prompt, "If the current working directory contains a `AGENTS.md` file")
+}

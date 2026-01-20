@@ -11,6 +11,11 @@ import (
 // SystemPrompt generates a system prompt for the given model
 func SystemPrompt(model string, llmConfig llm.Config, contexts map[string]string) string {
 	promptCtx := NewPromptContext(contexts)
+	patterns := llm.DefaultContextPatterns()
+	if llmConfig.Context != nil && len(llmConfig.Context.Patterns) > 0 {
+		patterns = llmConfig.Context.Patterns
+	}
+	promptCtx.ActiveContextFile = ResolveActiveContextFile(promptCtx.WorkingDirectory, contexts, patterns)
 
 	renderer := NewRenderer(TemplateFS)
 	config := NewDefaultConfig().WithModel(model)

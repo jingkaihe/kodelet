@@ -27,7 +27,7 @@ type PromptContext struct {
 	// Content contexts (README, AGENTS.md)
 	ContextFiles map[string]string
 
-	// Active context file name (AGENTS.md or empty)
+	// Active context file name (resolved from configured patterns)
 	ActiveContextFile string
 
 	Features map[string]bool
@@ -118,6 +118,36 @@ Note that the contexts in $HOME/.kodelet/ are universally applicable.
 
 	logger.G(context.Background()).WithField("context_files", ctxFiles).Debug("loaded context files")
 	return prompt
+}
+
+// ResolveActiveContextFile selects the best context file name based on configured patterns
+// and the contexts that were actually loaded.
+func ResolveActiveContextFile(workingDir string, contexts map[string]string, patterns []string) string {
+	if len(patterns) == 0 {
+		return AgentsMd
+	}
+
+	if workingDir != "" && len(contexts) > 0 {
+		for _, pattern := range patterns {
+			if _, ok := contexts[filepath.Join(workingDir, pattern)]; ok {
+				return pattern
+			}
+		}
+	}
+
+	if len(contexts) > 0 {
+		loaded := make(map[string]struct{}, len(contexts))
+		for path := range contexts {
+			loaded[filepath.Base(path)] = struct{}{}
+		}
+		for _, pattern := range patterns {
+			if _, ok := loaded[pattern]; ok {
+				return pattern
+			}
+		}
+	}
+
+	return patterns[0]
 }
 
 // FormatSystemInfo formats the system information into a string
