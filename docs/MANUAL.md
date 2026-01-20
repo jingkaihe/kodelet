@@ -420,6 +420,21 @@ Make sure that you sanity check the generated `AGENTS.md` file, and update it as
 
 Kodelet automatically detects and loads `AGENTS.md` context files from the current working directory and accessed subdirectories.
 
+You can configure custom context file patterns via:
+- CLI flag: `--context-patterns "AGENTS.md,README.md"`
+- Config file: `context.patterns: ["AGENTS.md", "README.md"]`
+- Environment variable: `KODELET_CONTEXT_PATTERNS="AGENTS.md,README.md"`
+
+Files are searched in order; the first match wins per directory.
+
+**Migration from KODELET.md:**
+
+If you have an existing `KODELET.md` file from an older version of Kodelet, rename it to `AGENTS.md`:
+
+```bash
+mv KODELET.md AGENTS.md
+```
+
 ### Best Practices
 
 **What to include in your context file:**
