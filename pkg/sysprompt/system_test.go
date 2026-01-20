@@ -98,8 +98,8 @@ func TestSystemPromptBashEmptyAllowedCommands(t *testing.T) {
 // TestSystemPrompt_WithContexts verifies that provided contexts are properly included in system prompt
 func TestSystemPrompt_WithContexts(t *testing.T) {
 	contexts := map[string]string{
-		"/path/to/project/AGENTS.md":         "# Project Guidelines\nThis is the main project context.",
-		"/path/to/project/module/KODELET.md": "# Module Specific\nThis module handles authentication.",
+		"/path/to/project/AGENTS.md":        "# Project Guidelines\nThis is the main project context.",
+		"/path/to/project/module/AGENTS.md": "# Module Specific\nThis module handles authentication.",
 	}
 
 	prompt := SystemPrompt("claude-sonnet-4-5-20250929", llm.Config{}, contexts)
@@ -110,9 +110,9 @@ func TestSystemPrompt_WithContexts(t *testing.T) {
 	assert.Contains(t, prompt, "# Project Guidelines", "Expected AGENTS.md content")
 	assert.Contains(t, prompt, "This is the main project context.", "Expected AGENTS.md content")
 
-	assert.Contains(t, prompt, `<context filename="/path/to/project/module/KODELET.md", dir="/path/to/project/module">`, "Expected KODELET.md context with filename")
-	assert.Contains(t, prompt, "# Module Specific", "Expected KODELET.md content")
-	assert.Contains(t, prompt, "This module handles authentication.", "Expected KODELET.md content")
+	assert.Contains(t, prompt, `<context filename="/path/to/project/module/AGENTS.md", dir="/path/to/project/module">`, "Expected module AGENTS.md context with filename")
+	assert.Contains(t, prompt, "# Module Specific", "Expected module AGENTS.md content")
+	assert.Contains(t, prompt, "This module handles authentication.", "Expected module AGENTS.md content")
 
 	assert.Contains(t, prompt, "</context>", "Expected context closing tags")
 }

@@ -167,8 +167,8 @@ func TestSubAgentPrompt_ContextFormattingConsistency(t *testing.T) {
 
 	t.Run("multiple_contexts_in_subagent", func(t *testing.T) {
 		contexts := map[string]string{
-			"/project/AGENTS.md":               "# Main Project\nThis is the main project context for subagents.",
-			"/project/modules/auth/KODELET.md": "# Auth Module\nAuthentication-specific guidelines for subagents.",
+			"/project/AGENTS.md":              "# Main Project\nThis is the main project context for subagents.",
+			"/project/modules/auth/AGENTS.md": "# Auth Module\nAuthentication-specific guidelines for subagents.",
 		}
 
 		prompt := SubAgentPrompt("gpt-4", llm.Config{}, contexts)
@@ -177,7 +177,7 @@ func TestSubAgentPrompt_ContextFormattingConsistency(t *testing.T) {
 		assert.Contains(t, prompt, "This is the main project context for subagents.", "Expected main project context")
 		assert.Contains(t, prompt, "Authentication-specific guidelines for subagents.", "Expected auth module context")
 		assert.Contains(t, prompt, `<context filename="/project/AGENTS.md", dir="/project">`, "Expected main project context file")
-		assert.Contains(t, prompt, `<context filename="/project/modules/auth/KODELET.md", dir="/project/modules/auth">`, "Expected auth module context file")
+		assert.Contains(t, prompt, `<context filename="/project/modules/auth/AGENTS.md", dir="/project/modules/auth">`, "Expected auth module context file")
 	})
 }
 

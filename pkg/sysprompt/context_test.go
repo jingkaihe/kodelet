@@ -8,65 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestGetContextFileName tests the context file name resolution logic
-func TestGetContextFileName(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "sysprompt-test-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
-
-	// Save the current working directory
-	originalDir, err := os.Getwd()
-	require.NoError(t, err)
-	defer os.Chdir(originalDir)
-
-	err = os.Chdir(tmpDir)
-	require.NoError(t, err)
-
-	t.Run("No context files", func(t *testing.T) {
-		// Ensure no context files exist
-		os.Remove(AgentsMd)
-		os.Remove(KodeletMd)
-
-		result := getContextFileName()
-		assert.Equal(t, AgentsMd, result, "Expected AGENTS.md when no context files exist (default)")
-	})
-
-	t.Run("Only KODELET.md exists", func(t *testing.T) {
-		os.Remove(AgentsMd)
-
-		err := os.WriteFile(KodeletMd, []byte("# KODELET Context"), 0o644)
-		require.NoError(t, err)
-		defer os.Remove(KodeletMd)
-
-		result := getContextFileName()
-		assert.Equal(t, KodeletMd, result, "Expected KODELET.md when only KODELET.md exists")
-	})
-
-	t.Run("Only AGENTS.md exists", func(t *testing.T) {
-		os.Remove(KodeletMd)
-
-		err := os.WriteFile(AgentsMd, []byte("# AGENTS Context"), 0o644)
-		require.NoError(t, err)
-		defer os.Remove(AgentsMd)
-
-		result := getContextFileName()
-		assert.Equal(t, AgentsMd, result, "Expected AGENTS.md when only AGENTS.md exists")
-	})
-
-	t.Run("Both AGENTS.md and KODELET.md exist", func(t *testing.T) {
-		err := os.WriteFile(AgentsMd, []byte("# AGENTS Context"), 0o644)
-		require.NoError(t, err)
-		defer os.Remove(AgentsMd)
-
-		err = os.WriteFile(KodeletMd, []byte("# KODELET Context"), 0o644)
-		require.NoError(t, err)
-		defer os.Remove(KodeletMd)
-
-		result := getContextFileName()
-		assert.Equal(t, AgentsMd, result, "Expected AGENTS.md to take precedence when both files exist")
-	})
-}
-
 // TestFormatContexts tests the context formatting logic
 func TestFormatContexts(t *testing.T) {
 	t.Run("Format with contexts", func(t *testing.T) {
@@ -111,8 +52,6 @@ func TestPromptContextActiveContextFile(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Run("ActiveContextFile is AGENTS.md when AGENTS.md exists", func(t *testing.T) {
-		os.Remove(KodeletMd)
-
 		err := os.WriteFile(AgentsMd, []byte("# AGENTS Context"), 0o644)
 		require.NoError(t, err)
 		defer os.Remove(AgentsMd)
@@ -121,35 +60,10 @@ func TestPromptContextActiveContextFile(t *testing.T) {
 		assert.Equal(t, AgentsMd, ctx.ActiveContextFile, "Expected ActiveContextFile to be AGENTS.md")
 	})
 
-	t.Run("ActiveContextFile is KODELET.md when only KODELET.md exists", func(t *testing.T) {
+	t.Run("ActiveContextFile defaults to AGENTS.md when no file exists", func(t *testing.T) {
 		os.Remove(AgentsMd)
-
-		err := os.WriteFile(KodeletMd, []byte("# KODELET Context"), 0o644)
-		require.NoError(t, err)
-		defer os.Remove(KodeletMd)
-
-		ctx := NewPromptContext(nil)
-		assert.Equal(t, KodeletMd, ctx.ActiveContextFile, "Expected ActiveContextFile to be KODELET.md")
-	})
-
-	t.Run("ActiveContextFile defaults to AGENTS.md when neither file exists", func(t *testing.T) {
-		os.Remove(AgentsMd)
-		os.Remove(KodeletMd)
 
 		ctx := NewPromptContext(nil)
 		assert.Equal(t, AgentsMd, ctx.ActiveContextFile, "Expected ActiveContextFile to default to AGENTS.md")
-	})
-
-	t.Run("ActiveContextFile prefers AGENTS.md when both files exist", func(t *testing.T) {
-		err := os.WriteFile(AgentsMd, []byte("# AGENTS Context"), 0o644)
-		require.NoError(t, err)
-		defer os.Remove(AgentsMd)
-
-		err = os.WriteFile(KodeletMd, []byte("# KODELET Context"), 0o644)
-		require.NoError(t, err)
-		defer os.Remove(KodeletMd)
-
-		ctx := NewPromptContext(nil)
-		assert.Equal(t, AgentsMd, ctx.ActiveContextFile, "Expected ActiveContextFile to prefer AGENTS.md")
 	})
 }

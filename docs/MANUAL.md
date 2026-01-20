@@ -418,14 +418,7 @@ Make sure that you sanity check the generated `AGENTS.md` file, and update it as
 
 ### Context File Priority
 
-Kodelet automatically detects and loads context files with the following priority:
-
-1. **`AGENTS.md`** - Used if present (recommended)
-2. **`KODELET.md`** - Used only if `AGENTS.md` doesn't exist (fallback)
-
-**Migration from KODELET.md:**
-
-If you have an existing `KODELET.md` file, you can rename it via `mv KODELET.md AGENTS.md`
+Kodelet automatically detects and loads `AGENTS.md` context files from the current working directory and accessed subdirectories.
 
 ### Best Practices
 
@@ -1510,7 +1503,7 @@ For detailed hook creation guide including payload structures, example implement
 - **Intelligent Engineering Assistant**: Automates software engineering tasks and production operations with agentic capabilities.
 - **Interactive Architecture Design**: Collaboratively design and refine system architectures through natural dialogue.
 - **Continuous Code Intelligence**: Analyzes, understands, and improves your codebase while answering technical questions in context.
-- **Agent Context Files**: Automatic loading of project-specific context from `AGENTS.md` or `KODELET.md` files for enhanced project understanding.
+- **Agent Context Files**: Automatic loading of project-specific context from `AGENTS.md` files for enhanced project understanding.
 - **Custom Tools**: Extend Kodelet with your own executable tools written in any programming language using a simple JSON protocol.
 - **Vision Capabilities**: Support for image inputs including screenshots, diagrams, and mockups (Anthropic Claude models).
 - **Multiple LLM Providers**: Supports both Anthropic Claude and OpenAI models, giving you flexibility in choosing the best model for your needs.
@@ -1559,7 +1552,7 @@ For detailed hook creation guide including payload structures, example implement
    - Use `--allowed-commands` flag to override configuration for testing
 
 6. **Context Files Not Loading**
-   - Ensure the context file (`AGENTS.md` or `KODELET.md`) is in the current working directory
+   - Ensure the context file (`AGENTS.md`) is in the current working directory
    - Verify file permissions are readable
    - Use `KODELET_LOG_LEVEL=debug` to see which context file is being loaded
    - Check file syntax if content seems to be ignored

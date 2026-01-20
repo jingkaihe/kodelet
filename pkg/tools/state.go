@@ -51,7 +51,7 @@ type BasicState struct {
 type ContextDiscovery struct {
 	workingDir      string
 	homeDir         string
-	contextPatterns []string // ["AGENTS.md", "KODELET.md"]
+	contextPatterns []string // ["AGENTS.md"]
 }
 
 // BasicStateOption is a function that configures a BasicState
@@ -83,7 +83,7 @@ func NewBasicState(ctx context.Context, opts ...BasicStateOption) *BasicState {
 		contextDiscovery: &ContextDiscovery{
 			workingDir:      workingDir,
 			homeDir:         kodeletHomeDir,
-			contextPatterns: []string{"AGENTS.md", "KODELET.md"},
+			contextPatterns: []string{"AGENTS.md"},
 		},
 		fileLocks: make(map[string]*sync.Mutex),
 	}

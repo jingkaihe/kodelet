@@ -24,10 +24,10 @@ type PromptContext struct {
 
 	ToolNames map[string]string
 
-	// Content contexts (README, AGENTS.md/KODELET.md)
+	// Content contexts (README, AGENTS.md)
 	ContextFiles map[string]string
 
-	// Active context file name (AGENTS.md, KODELET.md, or empty)
+	// Active context file name (AGENTS.md or empty)
 	ActiveContextFile string
 
 	Features map[string]bool
@@ -76,7 +76,7 @@ func NewPromptContext(contexts map[string]string) *PromptContext {
 		Date:                date,
 		ToolNames:           toolNames,
 		ContextFiles:        contextFiles,
-		ActiveContextFile:   getContextFileName(),
+		ActiveContextFile:   AgentsMd,
 		Features:            features,
 		BashBannedCommands:  tools.BannedCommands,
 		BashAllowedCommands: []string{},
@@ -92,25 +92,6 @@ func (ctx *PromptContext) WithMCPConfig(executionMode, workspaceDir string) *Pro
 		ctx.MCPServers = loadMCPServers(workspaceDir)
 	}
 	return ctx
-}
-
-// getContextFileName returns the name of the context file to use
-func getContextFileName() string {
-	ctx := context.Background()
-	log := logger.G(ctx)
-
-	if _, err := os.Stat(AgentsMd); err == nil {
-		log.WithField("context_file", AgentsMd).Debug("Using AGENTS.md as context file")
-		return AgentsMd
-	}
-
-	if _, err := os.Stat(KodeletMd); err == nil {
-		log.WithField("context_file", KodeletMd).Debug("Using KODELET.md as context file (fallback)")
-		return KodeletMd
-	}
-
-	log.WithField("context_file", AgentsMd).Debug("No context file found, defaulting to AGENTS.md")
-	return AgentsMd
 }
 
 // FormatContexts formats the loaded contexts into a string
