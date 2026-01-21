@@ -215,8 +215,8 @@ func TestBasicState_DiscoverContexts(t *testing.T) {
 	rootAgents := filepath.Join(tmpDir, "AGENTS.md")
 	require.NoError(t, os.WriteFile(rootAgents, []byte("# Root project context"), 0o644))
 
-	subKodelet := filepath.Join(subDir, "KODELET.md")
-	require.NoError(t, os.WriteFile(subKodelet, []byte("# Submodule context"), 0o644))
+	subAgents := filepath.Join(subDir, "AGENTS.md")
+	require.NoError(t, os.WriteFile(subAgents, []byte("# Submodule context"), 0o644))
 
 	oldWd, _ := os.Getwd()
 	defer os.Chdir(oldWd)
@@ -241,9 +241,9 @@ func TestBasicState_DiscoverContexts(t *testing.T) {
 
 		assert.Len(t, contexts, 2)
 		assert.Contains(t, contexts, rootAgents)
-		assert.Contains(t, contexts, subKodelet)
+		assert.Contains(t, contexts, subAgents)
 		assert.Equal(t, "# Root project context", contexts[rootAgents])
-		assert.Equal(t, "# Submodule context", contexts[subKodelet])
+		assert.Equal(t, "# Submodule context", contexts[subAgents])
 	})
 
 	t.Run("deep_nested_access", func(t *testing.T) {
@@ -252,8 +252,8 @@ func TestBasicState_DiscoverContexts(t *testing.T) {
 
 		contexts := state.DiscoverContexts()
 
-		assert.Contains(t, contexts, subKodelet)
-		assert.Equal(t, "# Submodule context", contexts[subKodelet])
+		assert.Contains(t, contexts, subAgents)
+		assert.Equal(t, "# Submodule context", contexts[subAgents])
 	})
 }
 
@@ -261,9 +261,7 @@ func TestBasicState_ContextFilePreference(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	agentsFile := filepath.Join(tmpDir, "AGENTS.md")
-	kodeletFile := filepath.Join(tmpDir, "KODELET.md")
 	require.NoError(t, os.WriteFile(agentsFile, []byte("# Agents context"), 0o644))
-	require.NoError(t, os.WriteFile(kodeletFile, []byte("# Kodelet context"), 0o644))
 
 	oldWd, _ := os.Getwd()
 	defer os.Chdir(oldWd)
@@ -338,7 +336,7 @@ func TestBasicState_HomeDirectoryContext(t *testing.T) {
 	})
 
 	t.Run("multiple_context_sources", func(t *testing.T) {
-		workContext := filepath.Join(tmpWork, "KODELET.md")
+		workContext := filepath.Join(tmpWork, "AGENTS.md")
 		require.NoError(t, os.WriteFile(workContext, []byte("# Work context"), 0o644))
 
 		contexts := state.DiscoverContexts()
@@ -383,7 +381,7 @@ func TestBasicState_ContextDiscoveryEdgeCases(t *testing.T) {
 		otherDir := filepath.Join(tmpDir, "other")
 		require.NoError(t, os.MkdirAll(otherDir, 0o755))
 
-		otherContext := filepath.Join(otherDir, "KODELET.md")
+		otherContext := filepath.Join(otherDir, "AGENTS.md")
 		require.NoError(t, os.WriteFile(otherContext, []byte("# Other context"), 0o644))
 
 		workDir := filepath.Join(tmpDir, "work")
@@ -516,31 +514,15 @@ func TestBasicState_ContextTraversalAndDeduplication(t *testing.T) {
 
 		require.NoError(t, os.WriteFile(barAgents, []byte("# Bar context"), 0o644))
 	})
-
-	t.Run("context_file_precedence_during_traversal", func(t *testing.T) {
-		barKodelet := filepath.Join(barDir, "KODELET.md")
-		require.NoError(t, os.WriteFile(barKodelet, []byte("# Bar Kodelet context"), 0o644))
-
-		state = NewBasicState(ctx)
-		bazFile := filepath.Join(bazDir, "precedence.go")
-		state.SetFileLastAccessed(bazFile, time.Now())
-
-		contexts := state.DiscoverContexts()
-
-		// Should find AGENTS.md (higher precedence) in bar directory, not KODELET.md
-		assert.Contains(t, contexts, barAgents, "Should find AGENTS.md (higher precedence)")
-		assert.NotContains(t, contexts, barKodelet, "Should not find KODELET.md (lower precedence)")
-		assert.Equal(t, "# Bar context", contexts[barAgents])
-
-		os.Remove(barKodelet)
-	})
 }
 
-func TestBasicState_ReadmeBasicAndCaching(t *testing.T) {
+func TestBasicState_ConfigurableContextPatterns(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("no_readme_file", func(t *testing.T) {
+	t.Run("readme_not_loaded_by_default", func(t *testing.T) {
 		tmpDir := t.TempDir()
+		readmePath := filepath.Join(tmpDir, "README.md")
+		require.NoError(t, os.WriteFile(readmePath, []byte("# Project README"), 0o644))
 
 		oldWd, _ := os.Getwd()
 		defer os.Chdir(oldWd)
@@ -549,11 +531,10 @@ func TestBasicState_ReadmeBasicAndCaching(t *testing.T) {
 		state := NewBasicState(ctx)
 		contexts := state.DiscoverContexts()
 
-		readmePath := filepath.Join(tmpDir, "README.md")
-		assert.NotContains(t, contexts, readmePath)
+		assert.NotContains(t, contexts, readmePath, "README.md should not be loaded by default")
 	})
 
-	t.Run("readme_only", func(t *testing.T) {
+	t.Run("readme_loaded_when_configured", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		readmePath := filepath.Join(tmpDir, "README.md")
 		require.NoError(t, os.WriteFile(readmePath, []byte("# Project README\n\nProject documentation"), 0o644))
@@ -562,7 +543,12 @@ func TestBasicState_ReadmeBasicAndCaching(t *testing.T) {
 		defer os.Chdir(oldWd)
 		require.NoError(t, os.Chdir(tmpDir))
 
-		state := NewBasicState(ctx)
+		config := llmtypes.Config{
+			Context: &llmtypes.ContextConfig{
+				Patterns: []string{"README.md"},
+			},
+		}
+		state := NewBasicState(ctx, WithLLMConfig(config))
 		contexts := state.DiscoverContexts()
 
 		assert.Len(t, contexts, 1)
@@ -570,7 +556,53 @@ func TestBasicState_ReadmeBasicAndCaching(t *testing.T) {
 		assert.Equal(t, "# Project README\n\nProject documentation", contexts[readmePath])
 	})
 
-	t.Run("readme_caching", func(t *testing.T) {
+	t.Run("multiple_patterns_first_match_wins", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		agentsPath := filepath.Join(tmpDir, "AGENTS.md")
+		readmePath := filepath.Join(tmpDir, "README.md")
+		require.NoError(t, os.WriteFile(agentsPath, []byte("# Agents Context"), 0o644))
+		require.NoError(t, os.WriteFile(readmePath, []byte("# Project README"), 0o644))
+
+		oldWd, _ := os.Getwd()
+		defer os.Chdir(oldWd)
+		require.NoError(t, os.Chdir(tmpDir))
+
+		config := llmtypes.Config{
+			Context: &llmtypes.ContextConfig{
+				Patterns: []string{"AGENTS.md", "README.md"},
+			},
+		}
+		state := NewBasicState(ctx, WithLLMConfig(config))
+		contexts := state.DiscoverContexts()
+
+		assert.Len(t, contexts, 1, "Only first matching pattern should be loaded per directory")
+		assert.Contains(t, contexts, agentsPath)
+		assert.NotContains(t, contexts, readmePath)
+	})
+
+	t.Run("custom_pattern", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		customPath := filepath.Join(tmpDir, "CODING.md")
+		require.NoError(t, os.WriteFile(customPath, []byte("# Coding Guidelines"), 0o644))
+
+		oldWd, _ := os.Getwd()
+		defer os.Chdir(oldWd)
+		require.NoError(t, os.Chdir(tmpDir))
+
+		config := llmtypes.Config{
+			Context: &llmtypes.ContextConfig{
+				Patterns: []string{"CODING.md"},
+			},
+		}
+		state := NewBasicState(ctx, WithLLMConfig(config))
+		contexts := state.DiscoverContexts()
+
+		assert.Len(t, contexts, 1)
+		assert.Contains(t, contexts, customPath)
+		assert.Equal(t, "# Coding Guidelines", contexts[customPath])
+	})
+
+	t.Run("context_caching_with_configured_patterns", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		readmePath := filepath.Join(tmpDir, "README.md")
 
@@ -578,21 +610,23 @@ func TestBasicState_ReadmeBasicAndCaching(t *testing.T) {
 		defer os.Chdir(oldWd)
 		require.NoError(t, os.Chdir(tmpDir))
 
-		state := NewBasicState(ctx)
+		config := llmtypes.Config{
+			Context: &llmtypes.ContextConfig{
+				Patterns: []string{"README.md"},
+			},
+		}
+		state := NewBasicState(ctx, WithLLMConfig(config))
 
 		initialContent := "# Initial README"
 		require.NoError(t, os.WriteFile(readmePath, []byte(initialContent), 0o644))
 
-		// Initial load
 		contexts := state.DiscoverContexts()
 		assert.Len(t, contexts, 1)
 		assert.Equal(t, initialContent, contexts[readmePath])
 
-		// Cached content
 		contexts = state.DiscoverContexts()
 		assert.Equal(t, initialContent, contexts[readmePath])
 
-		// Cache invalidation
 		newContent := "# Updated README\n\nNew documentation"
 		time.Sleep(10 * time.Millisecond)
 		require.NoError(t, os.WriteFile(readmePath, []byte(newContent), 0o644))

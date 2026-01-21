@@ -1,5 +1,24 @@
 # Kodelet
 
+## 0.1.45.beta (2026-01-20)
+
+### Breaking Changes
+
+**Removed KODELET.md fallback**: Kodelet no longer automatically loads `KODELET.md` files. If you have existing `KODELET.md` files, rename them to `AGENTS.md`:
+
+```bash
+mv KODELET.md AGENTS.md
+```
+
+### Features
+
+**Configurable context file patterns**: You can now configure which files are loaded as context for the agent. Configure via:
+- CLI flag: `--context-patterns "AGENTS.md,README.md"`
+- Config file: `context.patterns: ["AGENTS.md", "README.md"]`
+- Environment variable: `KODELET_CONTEXT_PATTERNS="AGENTS.md,README.md"`
+
+Files are searched in order; the first match wins per directory. Default remains `["AGENTS.md"]`.
+
 ## 0.1.44.beta (2026-01-16)
 
 ### Features

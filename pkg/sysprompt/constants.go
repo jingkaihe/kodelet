@@ -28,8 +28,6 @@ const (
 
 	// AgentsMd is the filename for agent-specific documentation.
 	AgentsMd = "AGENTS.md"
-	// KodeletMd is the filename for kodelet-specific documentation.
-	KodeletMd = "KODELET.md"
 	// ReadmeMd is the filename for README documentation.
 	ReadmeMd = "README.md"
 

@@ -46,6 +46,9 @@ type Config struct {
 	// Skills configuration
 	Skills *SkillsConfig `mapstructure:"skills" json:"skills,omitempty" yaml:"skills,omitempty"` // Skills configuration for agentic skills system
 
+	// Context configuration
+	Context *ContextConfig `mapstructure:"context" json:"context,omitempty" yaml:"context,omitempty"` // Context configuration for context file discovery
+
 	// Hooks configuration
 	NoHooks bool `mapstructure:"no_hooks" json:"no_hooks" yaml:"no_hooks"` // NoHooks disables agent lifecycle hooks
 }
@@ -128,4 +131,17 @@ type SkillsConfig struct {
 	// Allowed is an allowlist of skill names. When empty, all discovered skills are available.
 	// When specified, only the listed skills will be enabled.
 	Allowed []string `mapstructure:"allowed" json:"allowed" yaml:"allowed"`
+}
+
+// ContextConfig holds configuration for context file discovery.
+// Context files provide project-specific instructions and guidelines to the agent.
+type ContextConfig struct {
+	// Patterns is a list of filenames to search for in each directory.
+	// Default is ["AGENTS.md"]. Files are searched in order; first match wins per directory.
+	Patterns []string `mapstructure:"patterns" json:"patterns" yaml:"patterns"`
+}
+
+// DefaultContextPatterns returns the default context file patterns.
+func DefaultContextPatterns() []string {
+	return []string{"AGENTS.md"}
 }

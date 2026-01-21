@@ -2,70 +2,12 @@ package sysprompt
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-// TestGetContextFileName tests the context file name resolution logic
-func TestGetContextFileName(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "sysprompt-test-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
-
-	// Save the current working directory
-	originalDir, err := os.Getwd()
-	require.NoError(t, err)
-	defer os.Chdir(originalDir)
-
-	err = os.Chdir(tmpDir)
-	require.NoError(t, err)
-
-	t.Run("No context files", func(t *testing.T) {
-		// Ensure no context files exist
-		os.Remove(AgentsMd)
-		os.Remove(KodeletMd)
-
-		result := getContextFileName()
-		assert.Equal(t, AgentsMd, result, "Expected AGENTS.md when no context files exist (default)")
-	})
-
-	t.Run("Only KODELET.md exists", func(t *testing.T) {
-		os.Remove(AgentsMd)
-
-		err := os.WriteFile(KodeletMd, []byte("# KODELET Context"), 0o644)
-		require.NoError(t, err)
-		defer os.Remove(KodeletMd)
-
-		result := getContextFileName()
-		assert.Equal(t, KodeletMd, result, "Expected KODELET.md when only KODELET.md exists")
-	})
-
-	t.Run("Only AGENTS.md exists", func(t *testing.T) {
-		os.Remove(KodeletMd)
-
-		err := os.WriteFile(AgentsMd, []byte("# AGENTS Context"), 0o644)
-		require.NoError(t, err)
-		defer os.Remove(AgentsMd)
-
-		result := getContextFileName()
-		assert.Equal(t, AgentsMd, result, "Expected AGENTS.md when only AGENTS.md exists")
-	})
-
-	t.Run("Both AGENTS.md and KODELET.md exist", func(t *testing.T) {
-		err := os.WriteFile(AgentsMd, []byte("# AGENTS Context"), 0o644)
-		require.NoError(t, err)
-		defer os.Remove(AgentsMd)
-
-		err = os.WriteFile(KodeletMd, []byte("# KODELET Context"), 0o644)
-		require.NoError(t, err)
-		defer os.Remove(KodeletMd)
-
-		result := getContextFileName()
-		assert.Equal(t, AgentsMd, result, "Expected AGENTS.md to take precedence when both files exist")
-	})
-}
 
 // TestFormatContexts tests the context formatting logic
 func TestFormatContexts(t *testing.T) {
@@ -111,8 +53,6 @@ func TestPromptContextActiveContextFile(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Run("ActiveContextFile is AGENTS.md when AGENTS.md exists", func(t *testing.T) {
-		os.Remove(KodeletMd)
-
 		err := os.WriteFile(AgentsMd, []byte("# AGENTS Context"), 0o644)
 		require.NoError(t, err)
 		defer os.Remove(AgentsMd)
@@ -121,35 +61,49 @@ func TestPromptContextActiveContextFile(t *testing.T) {
 		assert.Equal(t, AgentsMd, ctx.ActiveContextFile, "Expected ActiveContextFile to be AGENTS.md")
 	})
 
-	t.Run("ActiveContextFile is KODELET.md when only KODELET.md exists", func(t *testing.T) {
+	t.Run("ActiveContextFile defaults to AGENTS.md when no file exists", func(t *testing.T) {
 		os.Remove(AgentsMd)
-
-		err := os.WriteFile(KodeletMd, []byte("# KODELET Context"), 0o644)
-		require.NoError(t, err)
-		defer os.Remove(KodeletMd)
-
-		ctx := NewPromptContext(nil)
-		assert.Equal(t, KodeletMd, ctx.ActiveContextFile, "Expected ActiveContextFile to be KODELET.md")
-	})
-
-	t.Run("ActiveContextFile defaults to AGENTS.md when neither file exists", func(t *testing.T) {
-		os.Remove(AgentsMd)
-		os.Remove(KodeletMd)
 
 		ctx := NewPromptContext(nil)
 		assert.Equal(t, AgentsMd, ctx.ActiveContextFile, "Expected ActiveContextFile to default to AGENTS.md")
 	})
+}
 
-	t.Run("ActiveContextFile prefers AGENTS.md when both files exist", func(t *testing.T) {
-		err := os.WriteFile(AgentsMd, []byte("# AGENTS Context"), 0o644)
-		require.NoError(t, err)
-		defer os.Remove(AgentsMd)
+func TestResolveActiveContextFile(t *testing.T) {
+	t.Run("prefers working directory match", func(t *testing.T) {
+		workingDir := t.TempDir()
+		contexts := map[string]string{
+			filepath.Join(workingDir, "README.md"): "# README",
+		}
+		patterns := []string{"AGENTS.md", "README.md"}
 
-		err = os.WriteFile(KodeletMd, []byte("# KODELET Context"), 0o644)
-		require.NoError(t, err)
-		defer os.Remove(KodeletMd)
+		active := ResolveActiveContextFile(workingDir, contexts, patterns)
 
-		ctx := NewPromptContext(nil)
-		assert.Equal(t, AgentsMd, ctx.ActiveContextFile, "Expected ActiveContextFile to prefer AGENTS.md")
+		assert.Equal(t, "README.md", active)
+	})
+
+	t.Run("falls back to loaded context base name", func(t *testing.T) {
+		contexts := map[string]string{
+			"/var/tmp/CODING.md": "# Coding",
+		}
+		patterns := []string{"CODING.md", "README.md"}
+
+		active := ResolveActiveContextFile("", contexts, patterns)
+
+		assert.Equal(t, "CODING.md", active)
+	})
+
+	t.Run("falls back to first pattern when no contexts", func(t *testing.T) {
+		patterns := []string{"README.md", "AGENTS.md"}
+
+		active := ResolveActiveContextFile("", nil, patterns)
+
+		assert.Equal(t, "README.md", active)
+	})
+
+	t.Run("defaults to AGENTS.md when no patterns", func(t *testing.T) {
+		active := ResolveActiveContextFile("", nil, nil)
+
+		assert.Equal(t, AgentsMd, active)
 	})
 }

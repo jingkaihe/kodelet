@@ -11,6 +11,11 @@ import (
 // SubAgentPrompt generates a subagent prompt for the given model
 func SubAgentPrompt(model string, llmConfig llm.Config, contexts map[string]string) string {
 	promptCtx := NewPromptContext(contexts)
+	patterns := llm.DefaultContextPatterns()
+	if llmConfig.Context != nil && len(llmConfig.Context.Patterns) > 0 {
+		patterns = llmConfig.Context.Patterns
+	}
+	promptCtx.ActiveContextFile = ResolveActiveContextFile(promptCtx.WorkingDirectory, contexts, patterns)
 
 	renderer := NewRenderer(TemplateFS)
 
