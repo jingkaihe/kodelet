@@ -1,4 +1,4 @@
-FROM golang:1.25-bookworm AS cross-builder
+FROM golang:1.25.6-bookworm AS cross-builder
 
 # Add build arguments for version and git commit
 ARG VERSION=dev
