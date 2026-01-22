@@ -1,5 +1,10 @@
 # Kodelet
 
+## 0.1.46.beta (2026-01-22)
+
+**Removed `cache_every` configuration**: The `--cache-every` CLI flag and `cache_every` config option have been removed. Prompt caching for Anthropic now happens automatically on every exchange when enabled, eliminating the need for manual tuning.
+**Simplified prompt caching**: Anthropic prompt caching now consistently caches the last content block before each API call, improving cache hit rates and reducing configuration complexity.
+
 ## 0.1.45.beta (2026-01-20)
 
 ### Breaking Changes

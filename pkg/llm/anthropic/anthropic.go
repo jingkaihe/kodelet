@@ -184,23 +184,40 @@ func (t *Thread) AddUserMessage(ctx context.Context, message string, imagePaths 
 }
 
 func (t *Thread) cacheMessages() {
-	// remove cache control from the messages
+	cacheControl := anthropic.CacheControlEphemeralParam{Type: "ephemeral"}
+	noCacheControl := anthropic.CacheControlEphemeralParam{}
+
+	// Clear all existing cache controls from user messages
 	for msgIdx, msg := range t.messages {
 		for blkIdx, block := range msg.Content {
-			if block.OfText != nil {
-				block.OfText.CacheControl = anthropic.CacheControlEphemeralParam{}
-				t.messages[msgIdx].Content[blkIdx] = block
+			switch {
+			case block.OfText != nil:
+				block.OfText.CacheControl = noCacheControl
+			case block.OfImage != nil:
+				block.OfImage.CacheControl = noCacheControl
+			case block.OfToolResult != nil:
+				block.OfToolResult.CacheControl = noCacheControl
 			}
+			t.messages[msgIdx].Content[blkIdx] = block
 		}
 	}
+
+	// Set cache control on the last content block of the last user message
 	if len(t.messages) > 0 {
-		lastMsg := t.messages[len(t.messages)-1]
+		lastMsgIdx := len(t.messages) - 1
+		lastMsg := t.messages[lastMsgIdx]
 		if len(lastMsg.Content) > 0 {
-			lastBlock := lastMsg.Content[len(lastMsg.Content)-1]
-			if lastBlock.OfText != nil {
-				lastBlock.OfText.CacheControl = anthropic.CacheControlEphemeralParam{}
-				t.messages[len(t.messages)-1].Content[len(lastMsg.Content)-1] = lastBlock
+			lastBlkIdx := len(lastMsg.Content) - 1
+			lastBlock := lastMsg.Content[lastBlkIdx]
+			switch {
+			case lastBlock.OfText != nil:
+				lastBlock.OfText.CacheControl = cacheControl
+			case lastBlock.OfImage != nil:
+				lastBlock.OfImage.CacheControl = cacheControl
+			case lastBlock.OfToolResult != nil:
+				lastBlock.OfToolResult.CacheControl = cacheControl
 			}
+			t.messages[lastMsgIdx].Content[lastBlkIdx] = lastBlock
 		}
 	}
 }
@@ -231,10 +248,6 @@ func (t *Thread) SendMessage(
 		t.FinalizeMessageSpan(span, err, extraFinalizeAttrs...)
 	}()
 
-	if opt.PromptCache {
-		t.cacheMessages()
-	}
-
 	var originalMessages []anthropic.MessageParam
 	if opt.PromptCache {
 		originalMessages = make([]anthropic.MessageParam, len(t.messages))
@@ -252,8 +265,6 @@ func (t *Thread) SendMessage(
 
 	turnCount := 0
 	maxTurns := max(opt.MaxTurns, 0)
-
-	cacheEvery := t.Config.CacheEvery
 
 OUTER:
 	for {
@@ -273,8 +284,8 @@ OUTER:
 				break OUTER
 			}
 
-			if opt.PromptCache && turnCount > 0 && cacheEvery > 0 && turnCount%cacheEvery == 0 {
-				logger.G(ctx).WithField("turn_count", turnCount).WithField("cache_every", cacheEvery).Debug("caching messages")
+			// Cache messages before each exchange (if enabled)
+			if opt.PromptCache {
 				t.cacheMessages()
 			}
 

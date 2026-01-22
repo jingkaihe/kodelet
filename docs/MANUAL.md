@@ -588,7 +588,6 @@ model: "claude-sonnet-4-5-20250929"
 max_tokens: 8192
 weak_model: "claude-3-5-haiku-20241022"
 weak_model_max_tokens: 8192
-cache_every: 10  # Cache messages every N interactions (0 to disable)
 
 # Alternative OpenAI configuration
 # provider: "openai"
@@ -636,7 +635,7 @@ Override configuration for specific commands:
 kodelet run --log-level debug "query"
 
 # Anthropic example
-kodelet run --provider "anthropic" --model "claude-opus-4-1-20250805" --max-tokens 4096 --weak-model-max-tokens 2048 --cache-every 3 "query"
+kodelet run --provider "anthropic" --model "claude-opus-4-1-20250805" --max-tokens 4096 --weak-model-max-tokens 2048 "query"
 
 # OpenAI example
 kodelet run --provider "openai" --model "gpt-4.1" --max-tokens 4096 --reasoning-effort "high" "query"
