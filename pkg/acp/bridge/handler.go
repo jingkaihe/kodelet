@@ -5,7 +5,6 @@ package bridge
 import (
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	"github.com/jingkaihe/kodelet/pkg/acp/acptypes"
@@ -348,9 +347,6 @@ func ContentBlocksToMessage(blocks []acptypes.ContentBlock) (string, []string) {
 	return strings.Join(textParts, "\n\n"), images
 }
 
-// maxTitleLength is the maximum length of a generated title
-const maxTitleLength = 80
-
 // DefaultTitleGenerator generates titles using deterministic string formatting
 type DefaultTitleGenerator struct{}
 
@@ -367,54 +363,51 @@ func (g *DefaultTitleGenerator) GenerateTitle(toolName string, input string) str
 
 	var title string
 	switch toolName {
-	case "file_read", "file_write", "file_edit":
+	case "file_read":
 		if path, ok := params["file_path"].(string); ok {
-			title = fmt.Sprintf("%s: %s", toolName, filepath.Base(path))
+			title = fmt.Sprintf("Read: %s", path)
+		}
+	case "file_write":
+		if path, ok := params["file_path"].(string); ok {
+			title = fmt.Sprintf("Write: %s", path)
+		}
+	case "file_edit":
+		if path, ok := params["file_path"].(string); ok {
+			title = fmt.Sprintf("Edit: %s", path)
 		}
 	case "bash":
 		if cmd, ok := params["command"].(string); ok {
-			// Escape backticks and wrap in backticks like claude-code-acp
 			escaped := strings.ReplaceAll(cmd, "`", "\\`")
 			title = "`" + escaped + "`"
 		}
 	case "code_execution":
 		if codePath, ok := params["code_path"].(string); ok {
-			title = fmt.Sprintf("Execute: %s", filepath.Base(codePath))
+			title = fmt.Sprintf("Execute: %s", codePath)
 		}
 	case "grep_tool":
 		if pattern, ok := params["pattern"].(string); ok {
-			title = fmt.Sprintf("grep: %s", pattern)
+			title = fmt.Sprintf("Grep: %s", pattern)
 		}
 	case "glob_tool":
 		if pattern, ok := params["pattern"].(string); ok {
-			title = fmt.Sprintf("glob: %s", pattern)
+			title = fmt.Sprintf("Glob: %s", pattern)
 		}
 	case "web_fetch":
 		if url, ok := params["url"].(string); ok {
-			if len(url) > 50 {
-				url = url[:50] + "..."
-			}
-			title = fmt.Sprintf("fetch: %s", url)
+			title = fmt.Sprintf("Fetch: %s", url)
 		}
 	case "subagent":
 		if question, ok := params["question"].(string); ok {
-			if len(question) > 50 {
-				question = question[:50] + "..."
-			}
-			title = fmt.Sprintf("subagent: %s", question)
+			title = fmt.Sprintf("Subagent: %s", question)
 		}
 	case "image_recognition":
 		if path, ok := params["image_path"].(string); ok {
-			title = fmt.Sprintf("image: %s", filepath.Base(path))
+			title = fmt.Sprintf("Image: %s", path)
 		}
 	}
 
 	if title == "" {
 		return toolName
-	}
-
-	if len(title) > maxTitleLength {
-		title = title[:maxTitleLength-3] + "..."
 	}
 
 	return title

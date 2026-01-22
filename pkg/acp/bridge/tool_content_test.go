@@ -411,6 +411,66 @@ func TestToolContentGenerator_GenerateSubAgentContent(t *testing.T) {
 	})
 }
 
+func TestToolContentGenerator_GenerateCodeBlockContent(t *testing.T) {
+	gen := &ToolContentGenerator{}
+
+	for _, toolName := range []string{"grep_tool", "glob_tool"} {
+		t.Run(toolName+" with output", func(t *testing.T) {
+			result := &mockToolResult{
+				result: "file.go:10:func main()\nfile.go:15:func helper()",
+				structuredData: tooltypes.StructuredToolResult{
+					ToolName:  toolName,
+					Success:   true,
+					Timestamp: time.Now(),
+				},
+			}
+
+			content := gen.GenerateToolContent(result)
+			require.Len(t, content, 1)
+
+			assert.Equal(t, ToolCallContentTypeContent, content[0]["type"])
+			textContent := content[0]["content"].(map[string]any)
+			assert.Equal(t, acptypes.ContentTypeText, textContent["type"])
+			assert.Contains(t, textContent["text"], "```")
+			assert.Contains(t, textContent["text"], "func main()")
+		})
+
+		t.Run(toolName+" with no output", func(t *testing.T) {
+			result := &mockToolResult{
+				result: "",
+				structuredData: tooltypes.StructuredToolResult{
+					ToolName:  toolName,
+					Success:   true,
+					Timestamp: time.Now(),
+				},
+			}
+
+			content := gen.GenerateToolContent(result)
+			require.Len(t, content, 0)
+		})
+
+		t.Run(toolName+" with error", func(t *testing.T) {
+			result := &mockToolResult{
+				err: "operation failed",
+				structuredData: tooltypes.StructuredToolResult{
+					ToolName:  toolName,
+					Success:   false,
+					Error:     "operation failed",
+					Timestamp: time.Now(),
+				},
+			}
+
+			content := gen.GenerateToolContent(result)
+			require.Len(t, content, 1)
+
+			assert.Equal(t, ToolCallContentTypeContent, content[0]["type"])
+			textContent := content[0]["content"].(map[string]any)
+			assert.Contains(t, textContent["text"], "```")
+			assert.Contains(t, textContent["text"], "operation failed")
+		})
+	}
+}
+
 func TestToolContentGenerator_GenerateDefaultContent(t *testing.T) {
 	gen := &ToolContentGenerator{}
 

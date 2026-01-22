@@ -37,6 +37,8 @@ func (g *ToolContentGenerator) GenerateToolContent(result tooltypes.ToolResult) 
 		return g.generateFileEditContent(structured)
 	case "subagent":
 		return g.generateSubAgentContent(structured)
+	case "grep_tool", "glob_tool":
+		return g.generateCodeBlockContent(structured, result)
 	default:
 		return g.generateDefaultContent(result)
 	}
@@ -296,6 +298,37 @@ func (g *ToolContentGenerator) generateSubAgentContent(structured tooltypes.Stru
 	}
 
 	return content
+}
+
+// generateCodeBlockContent generates content wrapped in code blocks
+// Used for tools like grep and glob where output should preserve formatting
+func (g *ToolContentGenerator) generateCodeBlockContent(structured tooltypes.StructuredToolResult, result tooltypes.ToolResult) []map[string]any {
+	if structured.Error != "" {
+		return []map[string]any{
+			{
+				"type": ToolCallContentTypeContent,
+				"content": map[string]any{
+					"type": acptypes.ContentTypeText,
+					"text": markdownEscape(structured.Error),
+				},
+			},
+		}
+	}
+
+	output := result.GetResult()
+	if output != "" {
+		return []map[string]any{
+			{
+				"type": ToolCallContentTypeContent,
+				"content": map[string]any{
+					"type": acptypes.ContentTypeText,
+					"text": markdownEscape(output),
+				},
+			},
+		}
+	}
+
+	return []map[string]any{}
 }
 
 // generateDefaultContent generates default text content for unhandled tools

@@ -1,5 +1,18 @@
 # Kodelet
 
+## 0.1.47.beta (2026-01-22)
+
+### Features
+
+**ACP code block output**: Grep and glob tool results in ACP now render inside code blocks for better formatting preservation.
+**ACP title generation improvements**: Tool titles now display full file paths instead of basenames and no longer truncate long commands.
+
+### Internal Changes
+
+**Go 1.25.6**: Upgraded Go from 1.25.1 to 1.25.6.
+**npm 11.8.0**: Upgraded npm from 11.6.2 to 11.8.0.
+**lodash 4.17.23**: Upgraded lodash from 4.17.21 to 4.17.23.
+
 ## 0.1.46.beta (2026-01-22)
 
 **Removed `cache_every` configuration**: The `--cache-every` CLI flag and `cache_every` config option have been removed. Prompt caching for Anthropic now happens automatically on every exchange when enabled, eliminating the need for manual tuning.
