@@ -253,7 +253,7 @@ func TestDefaultTitleGenerator_EmptyInput(t *testing.T) {
 func TestDefaultTitleGenerator_FileRead(t *testing.T) {
 	gen := &DefaultTitleGenerator{}
 	title := gen.GenerateTitle("file_read", `{"file_path": "/path/to/test.txt"}`)
-	assert.Equal(t, "file_read: test.txt", title)
+	assert.Equal(t, "Read: /path/to/test.txt", title)
 }
 
 func TestDefaultTitleGenerator_Bash(t *testing.T) {
@@ -274,20 +274,20 @@ func TestDefaultTitleGenerator_BashLongCommand(t *testing.T) {
 	longCmd := strings.Repeat("a", 100)
 	title := gen.GenerateTitle("bash", `{"command": "`+longCmd+`"}`)
 	assert.True(t, strings.HasPrefix(title, "`"))
-	assert.Contains(t, title, "...")
-	assert.LessOrEqual(t, len(title), 80)
+	assert.True(t, strings.HasSuffix(title, "`"))
+	assert.Equal(t, "`"+longCmd+"`", title)
 }
 
 func TestDefaultTitleGenerator_CodeExecution(t *testing.T) {
 	gen := &DefaultTitleGenerator{}
 	title := gen.GenerateTitle("code_execution", `{"code_path": "scripts/analyze.ts"}`)
-	assert.Equal(t, "Execute: analyze.ts", title)
+	assert.Equal(t, "Execute: scripts/analyze.ts", title)
 }
 
 func TestDefaultTitleGenerator_Grep(t *testing.T) {
 	gen := &DefaultTitleGenerator{}
 	title := gen.GenerateTitle("grep_tool", `{"pattern": "func main"}`)
-	assert.Equal(t, "grep: func main", title)
+	assert.Equal(t, "Grep: func main", title)
 }
 
 func TestDefaultTitleGenerator_InvalidJSON(t *testing.T) {
