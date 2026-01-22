@@ -7,7 +7,7 @@ ARG BUILD_TIME=unknown
 
 # Add Node.js and npm version arguments with defaults
 ARG NODE_VERSION=22.17.0
-ARG NPM_VERSION=11.6.2
+ARG NPM_VERSION=11.8.0
 
 # Install curl and setup nvm for exact Node.js/npm versions
 RUN apt-get update && apt-get install -y curl && \

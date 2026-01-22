@@ -13,7 +13,7 @@ For user documentation, see the [User Manual](MANUAL.md).
 ### Automatically Managed by mise
 - Go 1.24.2 (exact version automatically installed)
 - Node.js 22.17.0 (exact version automatically installed)
-- npm 11.6.2 (exact version automatically installed)
+- npm 11.8.0 (exact version automatically installed)
 - golangci-lint (latest version)
 - air (for development auto-reload)
 - gh CLI (for GitHub releases)
