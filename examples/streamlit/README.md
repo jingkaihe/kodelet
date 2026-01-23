@@ -1,14 +1,6 @@
 # Kodelet Streamlit Chatbot
 
-A Streamlit chatbot interface that wraps kodelet's CLI with real-time streaming output, styled with Kodelet's brand colors.
-
-## Features
-
-- Real-time streaming text output
-- Conversation continuity (follow-up messages retain context via `--resume`)
-- Thinking process visualization (expandable)
-- Tool call inspection with inputs and results
-- Kodelet brand styling (Poppins/Lora fonts, orange/blue/green accents)
+A Streamlit chatbot interface that wraps kodelet's CLI with real-time streaming output.
 
 ## Usage
 
@@ -39,13 +31,3 @@ The chatbot shells out to `kodelet run --headless --stream-deltas` for each mess
 For follow-up messages, it uses `--resume CONVERSATION_ID` to maintain context.
 
 When loading from URL (`?c=<id>`), it uses `kodelet conversation stream <id> --history-only` to fetch history.
-
-## Brand Colors
-
-The UI uses Kodelet's official color palette:
-
-- **Primary**: `#d97757` (orange)
-- **Secondary**: `#6a9bcc` (blue)
-- **Accent**: `#788c5d` (green)
-- **Background**: `#faf9f5` (light)
-- **Text**: `#141413` (dark)
