@@ -125,10 +125,12 @@ profiles:
         weak_model_max_tokens: 8192
     openai:
         max_tokens: 16000
-        model: gpt-5
+        model: gpt-5.2-codex
+        openai:
+            use_responses_api: true
         provider: openai
-        reasoning_effort: medium
-        weak_model: gpt-5
+        reasoning_effort: high
+        weak_model: gpt-5.1-codex-mini
     premium:
         max_tokens: 16000
         model: opus-45

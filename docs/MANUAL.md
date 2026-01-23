@@ -668,7 +668,6 @@ profile: "premium"  # Optional: specify the active profile
 # Profile definitions
 profiles:
   premium:
-    model: "opus-41" # alias to "claude-opus-4-1-20250805"
     weak_model: "sonnet-45" # alias to "claude-sonnet-4-5-20250929"
     max_tokens: 16000
     weak_model_max_tokens: 8192
@@ -708,7 +707,6 @@ profiles:
 # Model aliases work across all profiles
 aliases:
     haiku-35: claude-3-5-haiku-20241022
-    opus-41: claude-opus-4-1-20250805
     opus-45: claude-opus-4-5-20251101
     sonnet-45: claude-sonnet-4-5-20250929
 ```
