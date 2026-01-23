@@ -1,3 +1,8 @@
+---
+name: kodelet-usage
+description: Kodelet CLI usage guide, commands, configuration, and workflows. Use when users ask about kodelet features, commands, configuration options, or how to accomplish tasks with kodelet.
+---
+
 # Kodelet - LLM-Friendly Guide
 
 > **Kodelet** is a lightweight agentic SWE Agent that runs as an interactive CLI tool. It performs software engineering and production operations tasks using AI assistance.

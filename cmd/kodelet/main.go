@@ -153,7 +153,6 @@ func main() {
 	rootCmd.AddCommand(feedbackCmd)
 	rootCmd.AddCommand(recipeCmd)
 	rootCmd.AddCommand(profileCmd)
-	rootCmd.AddCommand(llmstxtCmd)
 	rootCmd.AddCommand(ralphCmd)
 
 	// Initialize telemetry with tracing
