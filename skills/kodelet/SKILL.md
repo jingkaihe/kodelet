@@ -367,6 +367,8 @@ kodelet conversation show <id> --no-header         # Messages only, no header
 
 # Stream conversation (real-time)
 kodelet conversation stream <id>
+kodelet conversation stream <id> --include-history  # Show history, then stream new
+kodelet conversation stream <id> --history-only     # Show history and exit
 
 # Delete conversation
 kodelet conversation delete <id>

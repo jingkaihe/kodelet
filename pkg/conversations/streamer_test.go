@@ -369,3 +369,37 @@ func TestStreamLiveUpdates_NewConversation(t *testing.T) {
 	assert.Error(t, err)
 	assert.Equal(t, context.DeadlineExceeded, err)
 }
+
+func TestStreamLiveUpdates_HistoryOnly(t *testing.T) {
+	rawMessages := json.RawMessage(`[{"role": "user", "content": "Hello"}, {"role": "assistant", "content": "Hi there"}]`)
+	toolResults := make(map[string]tools.StructuredToolResult)
+
+	service := &mockConversationService{
+		conversation: &GetConversationResponse{
+			ID:          "test-conv-history",
+			Provider:    "test-provider",
+			RawMessages: rawMessages,
+			ToolResults: toolResults,
+			UpdatedAt:   time.Now(),
+		},
+	}
+
+	streamer := NewConversationStreamer(service)
+	streamer.RegisterMessageParser("test-provider", func(_ json.RawMessage, _ map[string]tools.StructuredToolResult) ([]StreamableMessage, error) {
+		return []StreamableMessage{
+			{Kind: "text", Role: "user", Content: "Hello"},
+			{Kind: "text", Role: "assistant", Content: "Hi there"},
+		}, nil
+	})
+
+	ctx := context.Background()
+
+	streamOpts := StreamOpts{
+		Interval:    50 * time.Millisecond,
+		HistoryOnly: true,
+	}
+
+	err := streamer.StreamLiveUpdates(ctx, "test-conv-history", streamOpts)
+
+	assert.NoError(t, err)
+}
