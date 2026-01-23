@@ -17,6 +17,8 @@ Usage:
 
 import json
 import subprocess
+import tempfile
+import os
 from pathlib import Path
 
 import streamlit as st
@@ -107,22 +109,110 @@ def find_kodelet_binary() -> str:
     st.stop()
 
 
-def stream_kodelet_response(query: str, placeholder):
+def load_conversation_history(conversation_id: str) -> list:
+    """Load conversation history from kodelet using streaming format."""
+    messages = []
+    try:
+        kodelet_path = find_kodelet_binary()
+        result = subprocess.run(
+            [kodelet_path, "conversation", "stream", conversation_id, "--history-only"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode == 0:
+            entries = []
+            for line in result.stdout.strip().split("\n"):
+                if not line:
+                    continue
+                try:
+                    entries.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+            
+            current_role = None
+            current_msg = None
+            
+            for entry in entries:
+                kind = entry.get("kind", "")
+                role = entry.get("role", "")
+                
+                # tool-result has role "user" but belongs to the assistant turn
+                if kind == "tool-result":
+                    if current_msg and current_msg["tools"]:
+                        tool_call_id = entry.get("tool_call_id", "")
+                        for tc in current_msg["tools"]:
+                            if tc.get("call_id") == tool_call_id:
+                                tc["result"] = entry.get("result", "")
+                                break
+                    continue
+                
+                if role != current_role:
+                    if current_msg:
+                        messages.append(current_msg)
+                    current_msg = {
+                        "role": role,
+                        "content": "",
+                        "thinking": "",
+                        "tools": [],
+                    }
+                    current_role = role
+                
+                if kind == "text":
+                    current_msg["content"] += entry.get("content", "")
+                elif kind == "thinking":
+                    current_msg["thinking"] += entry.get("content", "")
+                elif kind == "tool-use":
+                    current_msg["tools"].append({
+                        "name": entry.get("tool_name", "unknown"),
+                        "input": entry.get("input", "{}"),
+                        "call_id": entry.get("tool_call_id", ""),
+                    })
+            
+            if current_msg:
+                messages.append(current_msg)
+    except Exception:
+        pass
+    return messages
+
+
+def get_conversation_summary(conversation_id: str) -> str:
+    """Fetch conversation summary from kodelet."""
+    try:
+        kodelet_path = find_kodelet_binary()
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            tmp_path = f.name
+        result = subprocess.run(
+            [kodelet_path, "conversation", "export", conversation_id, tmp_path],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            with open(tmp_path) as f:
+                data = json.loads(f.read())
+            os.unlink(tmp_path)
+            return data.get("summary", "")
+        os.unlink(tmp_path)
+    except Exception:
+        pass
+    return ""
+
+
+def stream_kodelet_response(query: str, placeholder, conversation_id: str = None):
     """Stream kodelet response and update the placeholder in real-time."""
     kodelet_path = find_kodelet_binary()
 
-    cmd = [
-        kodelet_path,
-        "run",
-        "--headless",
-        "--stream-deltas",
-        query,
-    ]
+    cmd = [kodelet_path, "run", "--headless", "--stream-deltas"]
+    if conversation_id:
+        cmd.extend(["--resume", conversation_id])
+    cmd.append(query)
 
     full_text = ""
     thinking_text = ""
     in_thinking = False
     tool_calls = []
+    conv_id = conversation_id
 
     try:
         process = subprocess.Popen(
@@ -145,6 +235,9 @@ def stream_kodelet_response(query: str, placeholder):
 
             kind = event.get("kind", "")
 
+            if not conv_id and "conversation_id" in event:
+                conv_id = event["conversation_id"]
+
             if kind == "thinking-start":
                 in_thinking = True
                 thinking_text = ""
@@ -166,15 +259,20 @@ def stream_kodelet_response(query: str, placeholder):
             elif kind == "tool-use":
                 tool_name = event.get("tool_name", "unknown")
                 tool_input = event.get("input", "{}")
-                tool_calls.append({"name": tool_name, "input": tool_input})
+                tool_call_id = event.get("tool_call_id", "")
+                tool_calls.append({
+                    "name": tool_name,
+                    "input": tool_input,
+                    "call_id": tool_call_id,
+                })
                 _render_response(
                     placeholder, full_text, thinking_text, in_thinking, tool_calls
                 )
             elif kind == "tool-result":
-                tool_name = event.get("tool_name", "unknown")
+                tool_call_id = event.get("tool_call_id", "")
                 result = event.get("result", "")
                 for tc in reversed(tool_calls):
-                    if tc["name"] == tool_name and "result" not in tc:
+                    if tc.get("call_id") == tool_call_id and "result" not in tc:
                         tc["result"] = result
                         break
                 _render_response(
@@ -193,7 +291,7 @@ def stream_kodelet_response(query: str, placeholder):
     except Exception as e:
         st.error(f"Error running kodelet: {e}")
 
-    return full_text, thinking_text, tool_calls
+    return full_text, thinking_text, tool_calls, conv_id
 
 
 def _render_response(
@@ -209,7 +307,7 @@ def _render_response(
         if tools:
             with st.expander(f"Tools ({len(tools)})", expanded=False):
                 for i, tc in enumerate(tools):
-                    st.write(f"**{i + 1}. {tc['name']}**")
+                    st.write(f"**{i+1}. {tc['name']}**")
                     try:
                         input_data = json.loads(tc["input"])
                         st.code(json.dumps(input_data, indent=2), language="json")
@@ -239,6 +337,21 @@ def main():
 
     if "messages" not in st.session_state:
         st.session_state.messages = []
+    if "conversation_id" not in st.session_state:
+        st.session_state.conversation_id = None
+
+    url_conv_id = st.query_params.get("c")
+    if url_conv_id and st.session_state.conversation_id != url_conv_id:
+        st.session_state.conversation_id = url_conv_id
+        st.session_state.messages = load_conversation_history(url_conv_id)
+
+    if st.session_state.conversation_id and not url_conv_id:
+        st.query_params["c"] = st.session_state.conversation_id
+
+    if st.session_state.conversation_id:
+        summary = get_conversation_summary(st.session_state.conversation_id)
+        if summary:
+            st.caption(f"Summary: {summary}")
 
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
@@ -249,7 +362,7 @@ def main():
                 if msg.get("tools"):
                     with st.expander(f"Tools ({len(msg['tools'])})", expanded=False):
                         for i, tc in enumerate(msg["tools"]):
-                            st.write(f"**{i + 1}. {tc['name']}**")
+                            st.write(f"**{i+1}. {tc['name']}**")
                             if "result" in tc:
                                 st.code(tc["result"])
             st.markdown(msg["content"])
@@ -262,9 +375,15 @@ def main():
 
         with st.chat_message("assistant"):
             placeholder = st.empty()
-            text, thinking, tools = stream_kodelet_response(prompt, placeholder)
+            text, thinking, tools, conv_id = stream_kodelet_response(
+                prompt, placeholder, st.session_state.conversation_id
+            )
 
             _render_response(placeholder, text, thinking, False, tools)
+
+            if conv_id:
+                st.session_state.conversation_id = conv_id
+                st.query_params["c"] = conv_id
 
             st.session_state.messages.append(
                 {
@@ -281,28 +400,34 @@ def main():
             """
             A Streamlit interface for [kodelet](https://github.com/jingkaihe/kodelet).
 
-            Each message is processed independently (stateless mode).
+            Follow-up messages continue the same conversation context.
 
             **Features**
             - Real-time streaming output
+            - Conversation continuity
             - Thinking visualization
             - Tool call inspection
             """
         )
 
-        if st.button("Clear Chat"):
+        if st.button("New Chat"):
             st.session_state.messages = []
+            st.session_state.conversation_id = None
+            st.query_params.clear()
             st.rerun()
 
         st.divider()
+        if st.session_state.conversation_id:
+            summary = get_conversation_summary(st.session_state.conversation_id)
+            if summary:
+                st.caption(f"Summary: {summary}")
+            st.caption(f"ID: `{st.session_state.conversation_id}`")
         st.caption(f"Binary: `{find_kodelet_binary()}`")
 
 
 if __name__ == "__main__":
     from streamlit.web import cli as stcli
     import sys
-
-    from streamlit.web import cli as stcli
     if st.runtime.exists():
         main()
     else:
