@@ -15,7 +15,7 @@ Kodelet is a lightweight CLI tool that helps with software engineering tasks. It
 ├── adrs/                # Architecture Decision Records (18 ADRs documenting key decisions)
 ├── bin/                 # Compiled binaries
 ├── cmd/                 # Application entry point
-│   └── kodelet/         # Main application command (30 command files)
+│   └── kodelet/         # Main application command (28 command files)
 ├── config.sample.yaml   # Sample configuration file
 ├── docs/                # Documentation files
 ├── Dockerfile           # Docker runtime image configuration
@@ -63,7 +63,6 @@ Kodelet is a lightweight CLI tool that helps with software engineering tasks. It
 │   ├── telemetry/       # Telemetry and tracing components (OpenTelemetry)
 │   ├── tools/           # Tool implementations (31 tool files)
 │   │   └── renderers/   # Tool output renderers
-│   ├── tui/             # Terminal UI components (Bubble Tea)
 │   ├── types/           # Common types
 │   │   ├── conversations/ # Conversation related types
 │   │   ├── llm/         # LLM related types
@@ -77,6 +76,8 @@ Kodelet is a lightweight CLI tool that helps with software engineering tasks. It
 ├── README.md            # Project overview
 ├── recipes/             # Sample fragment/recipe templates
 ├── RELEASE.md           # Release notes
+├── skills/              # Built-in skills directory
+│   └── kodelet/         # Kodelet CLI usage skill
 ├── scripts/             # Build and utility scripts
 ├── tests/               # Test files
 │   └── acceptance/      # Acceptance tests
@@ -94,7 +95,6 @@ The codebase follows a modular structure with separation of concerns between LLM
 - **MCP v0.29.0** - Model Context Protocol for AI tool integration
 - **SQLite (modernc.org/sqlite)** - Pure Go database implementation
 - **Logrus** - Structured logging library
-- **Charm libraries** - TUI components (Bubble Tea, Lipgloss, Bubbles)
 - **Cobra & Viper** - CLI commands and configuration
 - **React 18 & TypeScript** - Web UI frontend
 - **Vite** - Frontend build tool
@@ -353,10 +353,14 @@ if err != nil {
 
 Kodelet supports model-invoked skills that package domain expertise into discoverable capabilities:
 
-- **Location**: `.kodelet/skills/<name>/SKILL.md` (repo) or `~/.kodelet/skills/<name>/SKILL.md` (global)
+- **Location**: `.kodelet/skills/<name>/SKILL.md` (repo), `~/.kodelet/skills/<name>/SKILL.md` (global), or `skills/<name>/SKILL.md` (built-in)
 - **Invocation**: Automatic - model decides when skills are relevant to the task
 - **Configuration**: `skills.enabled` and `skills.allowed` in config
 - **CLI**: `--no-skills` flag to disable skills for a session
+- **Symlink support**: Skills can be symlinked directories for easier management and sharing
+
+**Built-in skills**:
+- `kodelet` - Comprehensive CLI usage guide including commands, configuration, and workflows (formerly llms.txt content)
 
 Skills differ from fragments/recipes: skills are model-invoked (automatic), while fragments are user-invoked (explicit).
 
