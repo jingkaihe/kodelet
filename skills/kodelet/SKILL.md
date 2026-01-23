@@ -42,6 +42,19 @@ kodelet run --no-save "temporary query"
 kodelet run --result-only "what is 2+2"
 ```
 
+### Interactive Chat Mode (ACP)
+For extended conversations and complex tasks, use the Agent Client Protocol (ACP) with a compatible client like `toad`:
+
+```bash
+toad acp 'kodelet acp'             # Start interactive chat via ACP
+```
+
+The ACP mode provides a rich interactive experience with features like:
+- Real-time streaming responses
+- Tool execution visualization
+- Conversation persistence
+- Multi-turn conversations
+
 ## Key Features
 
 ### Agent Context Files
@@ -163,7 +176,6 @@ skills:
 **Disabling skills:**
 ```bash
 kodelet run --no-skills "query"
-kodelet chat --no-skills
 ```
 
 ### Agent Lifecycle Hooks
@@ -252,7 +264,6 @@ fi
 **Disabling hooks:**
 ```bash
 kodelet run --no-hooks "query"
-kodelet chat --no-hooks
 ```
 
 ### Git Integration

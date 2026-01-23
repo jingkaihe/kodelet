@@ -133,7 +133,6 @@ func main() {
 	viper.BindPFlag("no_skills", rootCmd.PersistentFlags().Lookup("no-skills"))
 	viper.BindPFlag("context.patterns", rootCmd.PersistentFlags().Lookup("context-patterns"))
 
-	rootCmd.AddCommand(chatCmd)
 	rootCmd.AddCommand(runCmd)
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(commitCmd)
@@ -177,7 +176,6 @@ func main() {
 
 	rootCmd = withTracing(rootCmd)
 	runCmd = withTracing(runCmd)
-	chatCmd = withTracing(chatCmd)
 	versionCmd = withTracing(versionCmd)
 	commitCmd = withTracing(commitCmd)
 	updateCmd = withTracing(updateCmd)

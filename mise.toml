@@ -54,11 +54,6 @@ run = [
 description = "Generate frontend assets"
 run = ["go generate ./pkg/webui"]
 
-[tasks.chat]
-description = "Build and run in interactive chat mode"
-depends = ["build"]
-run = ["./bin/kodelet chat"]
-
 [tasks.dev-server]
 description = "Run development server with auto-reload"
 run = ["echo 'Starting development server with auto-reload...'", "air"]

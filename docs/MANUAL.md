@@ -10,8 +10,7 @@ Kodelet is a lightweight agentic SWE Agent that runs as an interactive CLI tool 
 - [Updating](#updating)
 - [Usage Modes](#usage-modes)
   - [One-shot Mode](#one-shot-mode)
-  - [Interactive Chat Mode](#interactive-chat-mode)
-
+  - [Interactive Chat Mode (ACP)](#interactive-chat-mode-acp)
   - [Git Integration](#git-integration)
   - [GitHub Actions Background Agent](#github-actions-background-agent)
   - [Image Input Support](#image-input-support)
@@ -129,17 +128,19 @@ kodelet run --headless "your query"          # outputs structured JSON stream
 kodelet run --headless --include-history "query"  # include historical data in stream
 ```
 
-### Interactive Chat Mode
+### Interactive Chat Mode (ACP)
 
-For extended conversations and complex tasks:
+For extended conversations and complex tasks, use the Agent Client Protocol (ACP) with a compatible client like `toad`:
 
 ```bash
-kodelet chat
-kodelet chat --plain
-kodelet chat --follow              # resume most recent conversation
-kodelet chat -f                    # short form
-kodelet chat --resume CONV_ID      # resume specific conversation
+toad acp 'kodelet acp'             # Start interactive chat via ACP
 ```
+
+The ACP mode provides a rich interactive experience with features like:
+- Real-time streaming responses
+- Tool execution visualization
+- Conversation persistence
+- Multi-turn conversations
 
 ### Git Integration
 
@@ -246,15 +247,12 @@ kodelet run --image ./architecture.png "Review this system architecture and sugg
 Continue previous conversations seamlessly:
 
 ```bash
-# Continue the most recent conversation (both run and chat)
+# Continue the most recent conversation
 kodelet run --follow "continue working on the feature"
 kodelet run -f "what's the status?"
-kodelet chat --follow
-kodelet chat -f
 
 # Continue a specific conversation by ID
 kodelet run --resume CONVERSATION_ID "more questions"
-kodelet chat --resume CONVERSATION_ID
 ```
 
 **Note**: The `--follow` and `--resume` flags cannot be used together. If no conversations exist when using `--follow`, a new conversation will be started with a warning message.
@@ -762,7 +760,6 @@ kodelet profile use default
 ```bash
 # Use a specific profile for a single command without changing config
 kodelet run --profile premium "explain this architecture"
-kodelet chat --profile openai
 kodelet commit --profile premium
 kodelet run --profile openai "what does this function do?"
 
@@ -945,9 +942,6 @@ Specify which account to use with the `--account` flag:
 # Use a specific account for one-shot queries
 kodelet run --account work "analyze this code"
 kodelet run --account personal "help with my side project"
-
-# Use a specific account in chat mode
-kodelet chat --account work
 ```
 
 Without the `--account` flag, Kodelet uses the default account.
@@ -1370,7 +1364,6 @@ To run without skills for a single session:
 
 ```bash
 kodelet run --no-skills "your query"
-kodelet chat --no-skills
 ```
 
 For detailed skill creation guide, see [docs/SKILLS.md](SKILLS.md).
@@ -1505,7 +1498,6 @@ To run without hooks for a single session:
 
 ```bash
 kodelet run --no-hooks "your query"
-kodelet chat --no-hooks
 ```
 
 Hooks are automatically disabled for `kodelet commit` and `kodelet pr` commands.

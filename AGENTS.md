@@ -182,8 +182,8 @@ For comprehensive usage documentation and examples, see [./docs/MANUAL.md](./doc
 ```bash
 # Core commands
 kodelet run "query"                    # One-shot execution
-kodelet chat                           # Interactive mode
 kodelet serve [--host HOST] [--port PORT]  # Web UI server (default: localhost:8080)
+toad acp 'kodelet acp'                 # Interactive chat via ACP
 
 # Fragment/Recipe system (see docs/FRAGMENTS.md)
 kodelet run -r init                    # Bootstrap AGENTS.md for repository
@@ -197,7 +197,6 @@ kodelet conversation list|show|delete  # Manage conversations
 kodelet conversation edit [--editor editor] [--edit-args "args"] ID  # Edit conversation JSON
 kodelet run --resume ID "more"         # Continue specific conversation
 kodelet run --follow "continue"        # Continue most recent conversation
-kodelet chat --follow                  # Resume most recent in chat mode
 
 # Feedback system
 kodelet feedback --conversation-id ID "message"  # Send feedback to specific conversation
@@ -217,7 +216,6 @@ kodelet anthropic accounts default <alias>  # Set default account
 kodelet anthropic accounts rename <old> <new>  # Rename an account alias
 kodelet anthropic accounts remove <alias>   # Remove an account
 kodelet run --account work "query"     # Use specific account for run
-kodelet chat --account work            # Use specific account for chat
 
 # PR management
 kodelet pr-respond --pr-url URL                           # Respond to latest @kodelet mention
