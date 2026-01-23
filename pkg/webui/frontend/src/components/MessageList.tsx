@@ -23,7 +23,7 @@ const MessageList: React.FC<MessageListProps> = ({ messages, toolResults }) => {
     });
     return allToolCallIds;
   });
-  
+
   const [expandedThinking, setExpandedThinking] = useState<string[]>(() => {
     const allMessageIndices: string[] = [];
     messages.forEach((message, index) => {
@@ -128,24 +128,26 @@ const MessageList: React.FC<MessageListProps> = ({ messages, toolResults }) => {
         return (
           <div
             key={index}
-            className={`card shadow-lg ${
-              isUser ? 'bg-primary/10 ml-4' : 'bg-base-100 mr-4'
+            className={`card shadow-sm ${
+              isUser ? 'message-user' : 'message-assistant'
             }`}
           >
-            <div className="card-body">
+            <div className="card-body p-4">
               {/* Message Header */}
-              <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
                   <div className="avatar placeholder">
-                    <div className="bg-neutral text-neutral-content rounded-full w-8 h-8">
-                      <span className="text-xs">{isUser ? 'U' : 'A'}</span>
+                    <div className={`rounded-full w-8 h-8 ${
+                      isUser ? 'bg-kodelet-blue text-white' : 'bg-kodelet-dark text-white'
+                    }`}>
+                      <span className="text-xs font-heading font-semibold">{isUser ? 'U' : 'A'}</span>
                     </div>
                   </div>
                   <div>
-                    <h3 className="font-semibold capitalize">
+                    <h3 className="font-heading font-semibold capitalize text-kodelet-dark">
                       {isUser ? 'You' : 'Assistant'}
                     </h3>
-                    <div className="text-xs text-base-content/60">
+                    <div className="text-xs text-kodelet-mid-gray font-body">
                       Message {index + 1}
                     </div>
                   </div>
@@ -179,10 +181,10 @@ const MessageList: React.FC<MessageListProps> = ({ messages, toolResults }) => {
 
               {/* Thinking Block */}
               {message.thinkingText && (
-                <div className="mb-4">
+                <div className="mb-3">
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-2">
-                      <div className="badge badge-outline badge-secondary">
+                      <div className="px-2 py-0.5 rounded text-xs font-heading font-medium bg-kodelet-blue/10 text-kodelet-blue border border-kodelet-blue/20">
                         💭 Thinking
                       </div>
                     </div>
@@ -211,8 +213,8 @@ const MessageList: React.FC<MessageListProps> = ({ messages, toolResults }) => {
                     </button>
                   </div>
                   {expandedThinking.includes(index.toString()) && (
-                    <div className="bg-gray-50 border border-gray-200 p-3 rounded-lg">
-                      <pre className="whitespace-pre-wrap text-sm text-gray-700 bg-transparent font-mono">{message.thinkingText.trim()}</pre>
+                    <div className="bg-kodelet-light-gray/30 border border-kodelet-mid-gray/20 p-3 rounded">
+                      <pre className="whitespace-pre-wrap text-sm text-kodelet-dark bg-transparent font-mono">{message.thinkingText.trim()}</pre>
                     </div>
                   )}
                 </div>
@@ -228,17 +230,17 @@ const MessageList: React.FC<MessageListProps> = ({ messages, toolResults }) => {
 
               {/* Tool Calls */}
               {toolCalls.length > 0 && (
-                <div className="mt-4">
-                  <h4 className="font-semibold mb-2">Tool Calls:</h4>
+                <div className="mt-3">
+                  <h4 className="font-heading font-semibold mb-2 text-sm text-kodelet-dark">Tool Calls:</h4>
                   <div className="space-y-2">
                     {toolCalls.map((toolCall, toolIndex) => (
-                      <div key={toolCall.id || toolIndex} className="bg-base-200 p-3 rounded-lg">
+                      <div key={toolCall.id || toolIndex} className="bg-kodelet-light-gray/20 border border-kodelet-mid-gray/20 p-3 rounded">
                         <div className="flex items-center justify-between mb-2">
                           <div className="flex items-center gap-2">
-                            <div className="badge badge-outline">
+                            <div className="px-2 py-0.5 rounded text-xs font-heading font-medium bg-kodelet-green/10 text-kodelet-green border border-kodelet-green/20">
                               {toolCall.function?.name || 'Unknown'}
                             </div>
-                            <div className="text-xs text-base-content/60">
+                            <div className="text-xs text-kodelet-mid-gray font-mono">
                               {toolCall.id}
                             </div>
                           </div>
@@ -270,10 +272,10 @@ const MessageList: React.FC<MessageListProps> = ({ messages, toolResults }) => {
                         {expandedToolCalls.includes(toolCall.id) && (
                           <div className="mt-2">
                             {/* Arguments Section */}
-                            <div className="mb-3">
-                              <div className="flex items-center justify-between mb-2">
+                            <div className="mb-2">
+                              <div className="flex items-center justify-between mb-1.5">
                                 <div className="flex items-center gap-2">
-                                  <div className="badge badge-outline badge-sm">
+                                  <div className="text-xs font-heading font-medium text-kodelet-mid-gray">
                                     Arguments
                                   </div>
                                 </div>
@@ -302,8 +304,8 @@ const MessageList: React.FC<MessageListProps> = ({ messages, toolResults }) => {
                                 </button>
                               </div>
                               {expandedArguments.includes(toolCall.id) && (
-                                <pre className="bg-base-100 p-2 rounded text-xs overflow-x-auto">
-                                  <code>
+                                <pre className="bg-kodelet-light p-2 rounded text-xs overflow-x-auto border border-kodelet-mid-gray/20">
+                                  <code className="text-kodelet-dark">
                                     {JSON.stringify(
                                       JSON.parse(toolCall.function?.arguments || '{}'),
                                       null,
@@ -316,10 +318,10 @@ const MessageList: React.FC<MessageListProps> = ({ messages, toolResults }) => {
 
                             {/* Tool Result Section */}
                             {toolResults[toolCall.id] && (
-                              <div className="mt-3">
-                                <div className="flex items-center justify-between mb-2">
+                              <div className="mt-2">
+                                <div className="flex items-center justify-between mb-1.5">
                                   <div className="flex items-center gap-2">
-                                    <div className="badge badge-outline badge-sm">
+                                    <div className="text-xs font-heading font-medium text-kodelet-mid-gray">
                                       Result
                                     </div>
                                   </div>

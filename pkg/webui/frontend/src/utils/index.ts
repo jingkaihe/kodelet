@@ -6,16 +6,16 @@ import { Usage } from '../types';
 // Date formatting utility
 export const formatDate = (dateString: string | null | undefined): string => {
   if (!dateString) return 'N/A';
-  
+
   const date = new Date(dateString);
   const now = new Date();
   const diff = now.getTime() - date.getTime();
-  
+
   // If less than a day, show relative time
   if (diff < 24 * 60 * 60 * 1000) {
     return formatDistanceToNow(date, { addSuffix: true });
   }
-  
+
   // Otherwise show formatted date
   return format(date, 'MMM d, yyyy h:mm a');
 };
@@ -23,10 +23,10 @@ export const formatDate = (dateString: string | null | undefined): string => {
 // Cost formatting utility
 export const formatCost = (usage: Usage | null | undefined): string => {
   if (!usage) return '$0.00';
-  
-  const total = (usage.inputCost || 0) + (usage.outputCost || 0) + 
+
+  const total = (usage.inputCost || 0) + (usage.outputCost || 0) +
                 (usage.cacheCreationCost || 0) + (usage.cacheReadCost || 0);
-  
+
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: 'USD',
@@ -54,9 +54,9 @@ export const showToast = (message: string, type: 'info' | 'success' | 'error' = 
       <span>${escapeHtml(message)}</span>
     </div>
   `;
-  
+
   document.body.appendChild(toast);
-  
+
   setTimeout(() => {
     toast.remove();
   }, 3000);
@@ -191,7 +191,7 @@ export const cn = (...inputs: (string | undefined | null | boolean)[]): string =
 // Highlight search terms in text
 export const highlightSearchTerm = (text: string, searchTerm: string): string => {
   if (!searchTerm || !text) return escapeHtml(text);
-  
+
   try {
     const escaped = escapeHtml(text);
     const regex = new RegExp(`(${searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');

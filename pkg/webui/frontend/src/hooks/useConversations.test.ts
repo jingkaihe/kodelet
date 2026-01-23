@@ -63,12 +63,12 @@ describe('useConversations (simplified)', () => {
 
   it('provides initial state', async () => {
     const { result } = renderHook(() => useConversations({ filters: mockFilters }));
-    
+
     // Check initial state
     expect(result.current.conversations).toEqual([]);
     expect(result.current.stats).toBe(null);
     expect(result.current.error).toBe(null);
-    
+
     // Wait for async effects to complete
     await waitFor(() => {
       expect(apiService.getConversations).toHaveBeenCalled();
@@ -77,12 +77,12 @@ describe('useConversations (simplified)', () => {
 
   it('loads data eventually', async () => {
     const { result } = renderHook(() => useConversations({ filters: mockFilters }));
-    
+
     // Wait for data to load
     await waitFor(() => {
       expect(apiService.getConversations).toHaveBeenCalled();
     }, { timeout: 5000 });
-    
+
     // Eventually conversations should be loaded
     await waitFor(() => {
       expect(result.current.conversations.length).toBeGreaterThan(0);
@@ -96,19 +96,19 @@ describe('useConversations (simplified)', () => {
       (props) => useConversations({ filters: props.filters }),
       { initialProps: { filters: initialFilters } }
     );
-    
+
     // Wait for the initial load to complete
     await waitFor(() => {
       expect(apiService.getConversations).toHaveBeenCalled();
     });
-    
+
     // Clear the mock to check the next call
     vi.clearAllMocks();
     vi.mocked(apiService.getConversations).mockResolvedValue(mockConversations);
-    
+
     const updatedFilters = { ...mockFilters, searchTerm: 'test' };
     rerender({ filters: updatedFilters });
-    
+
     // Wait for the effect triggered by filter change
     await waitFor(() => {
       expect(apiService.getConversations).toHaveBeenCalledWith(

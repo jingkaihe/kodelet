@@ -103,23 +103,23 @@ describe('ConversationListPage', () => {
 
   it('renders page title and description', () => {
     render(<ConversationListPage />);
-    
+
     expect(screen.getByText('Conversations')).toBeInTheDocument();
-    expect(screen.getByText('Browse and search your conversation history')).toBeInTheDocument();
+    expect(screen.getByText('Explore your conversation history with elegant clarity')).toBeInTheDocument();
   });
 
   it('renders conversation list when conversations exist', () => {
     render(<ConversationListPage />);
-    
+
     expect(screen.getByText('Test preview 1')).toBeInTheDocument();
     expect(screen.getByText('Test preview 2')).toBeInTheDocument();
   });
 
   it('renders stats card when stats are available', () => {
     render(<ConversationListPage />);
-    
+
     // StatsCard should be rendered with the stats
-    // Since we don't know exactly how StatsCard renders the stats, 
+    // Since we don't know exactly how StatsCard renders the stats,
     // let's check that the StatsCard component receives the stats prop
     // We can verify this by checking if the stats values are present somewhere in the document
     const { container } = render(<ConversationListPage />);
@@ -134,7 +134,7 @@ describe('ConversationListPage', () => {
     });
 
     render(<ConversationListPage />);
-    
+
     expect(screen.getByText('Loading conversations...')).toBeInTheDocument();
   });
 
@@ -146,7 +146,7 @@ describe('ConversationListPage', () => {
     });
 
     render(<ConversationListPage />);
-    
+
     expect(screen.getByText('No conversations found')).toBeInTheDocument();
     expect(screen.getByText('Try adjusting your search criteria or filters')).toBeInTheDocument();
   });
@@ -160,13 +160,13 @@ describe('ConversationListPage', () => {
     });
 
     render(<ConversationListPage />);
-    
+
     expect(screen.getByText('Failed to load conversations')).toBeInTheDocument();
-    
+
     // Click retry button
     const retryButton = screen.getByRole('button', { name: /retry/i });
     fireEvent.click(retryButton);
-    
+
     expect(mockRefresh).toHaveBeenCalled();
   });
 
@@ -178,12 +178,12 @@ describe('ConversationListPage', () => {
     });
 
     render(<ConversationListPage />);
-    
+
     // Find search input
     const searchInput = screen.getByPlaceholderText(/search/i);
     fireEvent.change(searchInput, { target: { value: 'test search' } });
     fireEvent.submit(searchInput.closest('form')!);
-    
+
     expect(mockUpdateFilters).toHaveBeenCalledWith({
       searchTerm: 'test search',
     });
@@ -201,11 +201,11 @@ describe('ConversationListPage', () => {
     });
 
     render(<ConversationListPage />);
-    
+
     // Click clear filters button
     const clearButton = screen.getByRole('button', { name: /clear/i });
     fireEvent.click(clearButton);
-    
+
     expect(mockClearFilters).toHaveBeenCalled();
   });
 
@@ -217,17 +217,17 @@ describe('ConversationListPage', () => {
     });
 
     render(<ConversationListPage />);
-    
+
     // Open dropdown menu for first conversation
     const dropdownButtons = screen.getAllByRole('button', { name: /conversation actions/i });
     fireEvent.click(dropdownButtons[0]);
-    
+
     // Click delete button
     const deleteButton = screen.getAllByText('Delete')[0];
     fireEvent.click(deleteButton);
-    
+
     expect(global.confirm).toHaveBeenCalledWith('Are you sure you want to delete this conversation?');
-    
+
     await waitFor(() => {
       expect(mockDeleteConversation).toHaveBeenCalledWith('conv-1');
       expect(utils.showToast).toHaveBeenCalledWith('Conversation deleted successfully', 'success');
@@ -243,13 +243,13 @@ describe('ConversationListPage', () => {
     });
 
     render(<ConversationListPage />);
-    
+
     // Open dropdown and click delete
     const dropdownButtons = screen.getAllByRole('button', { name: /conversation actions/i });
     fireEvent.click(dropdownButtons[0]);
     const deleteButton = screen.getAllByText('Delete')[0];
     fireEvent.click(deleteButton);
-    
+
     expect(mockDeleteConversation).not.toHaveBeenCalled();
   });
 
@@ -262,13 +262,13 @@ describe('ConversationListPage', () => {
     });
 
     render(<ConversationListPage />);
-    
+
     // Open dropdown and click delete
     const dropdownButtons = screen.getAllByRole('button', { name: /conversation actions/i });
     fireEvent.click(dropdownButtons[0]);
     const deleteButton = screen.getAllByText('Delete')[0];
     fireEvent.click(deleteButton);
-    
+
     await waitFor(() => {
       expect(utils.showToast).toHaveBeenCalledWith(
         'Failed to delete conversation: Delete failed',
@@ -290,10 +290,10 @@ describe('ConversationListPage', () => {
     });
 
     render(<ConversationListPage />);
-    
+
     const nextButton = screen.getByRole('button', { name: /next/i });
     fireEvent.click(nextButton);
-    
+
     expect(mockGoToPage).toHaveBeenCalledWith(2);
   });
 
@@ -305,14 +305,14 @@ describe('ConversationListPage', () => {
       limit: 50,
       offset: 0,
     };
-    
+
     vi.mocked(useUrlFilters).mockReturnValue({
       ...defaultMockUrlFilters,
       filters: customFilters,
     });
 
     render(<ConversationListPage />);
-    
+
     // Verify search term is displayed in search input
     const searchInput = screen.getByPlaceholderText(/search/i) as HTMLInputElement;
     expect(searchInput.value).toBe('test search');

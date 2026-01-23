@@ -48,7 +48,8 @@ export default [
       '@typescript-eslint/no-explicit-any': 'warn',
       'react-hooks/exhaustive-deps': 'warn',
       // Disable React in scope rule for modern React (JSX Transform)
-      'react/react-in-jsx-scope': 'off'
+      'react/react-in-jsx-scope': 'off',
+      'no-trailing-spaces': 'error'
     }
   },
   // Configuration for test files

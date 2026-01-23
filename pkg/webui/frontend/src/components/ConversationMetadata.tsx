@@ -28,31 +28,33 @@ const ConversationMetadata: React.FC<ConversationMetadataProps> = ({ conversatio
   };
 
   return (
-    <div className="card bg-base-200 shadow-xl mb-6">
-      <div className="card-body">
-        <h2 className="card-title mb-4">Statistics</h2>
+    <div className="card mb-4 animate-slide-up stagger-1">
+      <div className="card-body p-4">
+        <h2 className="font-heading text-lg font-semibold mb-3 text-kodelet-dark flex items-center gap-2">
+          <span className="text-kodelet-orange">●</span> Statistics
+        </h2>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-4 gap-3">
           {/* Basic Stats */}
-          <div className="stat">
-            <div className="stat-title">Messages</div>
-            <div className="text-lg font-semibold">{formatNumber(conversation.messageCount || 0)}</div>
+          <div className="space-y-0.5">
+            <div className="text-xs font-body text-kodelet-mid-gray uppercase tracking-wide">Messages</div>
+            <div className="text-lg font-heading font-semibold text-kodelet-dark">{formatNumber(conversation.messageCount || 0)}</div>
           </div>
-          <div className="stat">
-            <div className="stat-title">Model</div>
-            <div className="text-lg font-semibold">
+          <div className="space-y-0.5">
+            <div className="text-xs font-body text-kodelet-mid-gray uppercase tracking-wide">Model</div>
+            <div className="text-lg font-heading font-semibold text-kodelet-dark">
               {conversation.provider || 'Unknown'}
             </div>
           </div>
-          <div className="stat">
-            <div className="stat-title">Created</div>
-            <div className="text-lg font-semibold">
+          <div className="space-y-0.5">
+            <div className="text-xs font-body text-kodelet-mid-gray uppercase tracking-wide">Created</div>
+            <div className="text-sm font-heading font-semibold text-kodelet-dark">
               {formatDate(conversation.createdAt)}
             </div>
           </div>
-          <div className="stat">
-            <div className="stat-title">Updated</div>
-            <div className="text-lg font-semibold">
+          <div className="space-y-0.5">
+            <div className="text-xs font-body text-kodelet-mid-gray uppercase tracking-wide">Updated</div>
+            <div className="text-sm font-heading font-semibold text-kodelet-dark">
               {formatDate(conversation.updatedAt)}
             </div>
           </div>
@@ -60,51 +62,41 @@ const ConversationMetadata: React.FC<ConversationMetadataProps> = ({ conversatio
           {/* Usage Statistics */}
           {hasUsage && (
             <>
-              <div className="stat">
-                <div className="stat-title">Context Usage</div>
-                <div className="text-lg font-semibold">{calculateContextUsage()}</div>
-                <div className="stat-desc">
+              <div className="space-y-0.5 border-l-2 border-kodelet-green pl-3">
+                <div className="text-xs font-body text-kodelet-mid-gray uppercase tracking-wide">Context Usage</div>
+                <div className="text-lg font-heading font-semibold text-kodelet-dark">{calculateContextUsage()}</div>
+                <div className="text-xs font-body text-kodelet-mid-gray">
                   {conversation.usage?.currentContextWindow ?
                     `${formatNumber(conversation.usage.currentContextWindow)} / ${formatNumber(conversation.usage?.maxContextWindow || 0)}` :
-                    'Context info unavailable'
+                    'N/A'
                   }
                 </div>
               </div>
-              <div className="stat">
-                <div className="stat-title">Total Cost</div>
-                <div className="text-lg font-semibold">{conversation.usage ? formatCost(conversation.usage) : '$0.0000'}</div>
+              <div className="space-y-0.5">
+                <div className="text-xs font-body text-kodelet-mid-gray uppercase tracking-wide">Total Cost</div>
+                <div className="text-lg font-heading font-semibold text-kodelet-orange">{conversation.usage ? formatCost(conversation.usage) : '$0.0000'}</div>
               </div>
-              <div className="stat">
-                <div className="stat-title">Input Tokens</div>
-                <div className="text-lg font-semibold">{formatNumber(conversation.usage?.inputTokens || 0)}</div>
+              <div className="space-y-0.5 border-l-2 border-kodelet-blue pl-3">
+                <div className="text-xs font-body text-kodelet-mid-gray uppercase tracking-wide">Input Tokens</div>
+                <div className="text-lg font-heading font-semibold text-kodelet-dark">{formatNumber(conversation.usage?.inputTokens || 0)}</div>
               </div>
-              <div className="stat">
-                <div className="stat-title">Output Tokens</div>
-                <div className="text-lg font-semibold">{formatNumber(conversation.usage?.outputTokens || 0)}</div>
+              <div className="space-y-0.5 border-l-2 border-kodelet-orange pl-3">
+                <div className="text-xs font-body text-kodelet-mid-gray uppercase tracking-wide">Output Tokens</div>
+                <div className="text-lg font-heading font-semibold text-kodelet-dark">{formatNumber(conversation.usage?.outputTokens || 0)}</div>
               </div>
-              <div className="stat">
-                <div className="stat-title">Cache Read Tokens</div>
-                <div className="text-lg font-semibold">{formatNumber(conversation.usage?.cacheReadInputTokens || 0)}</div>
+              <div className="space-y-0.5 border-l-2 border-kodelet-green pl-3">
+                <div className="text-xs font-body text-kodelet-mid-gray uppercase tracking-wide">Cache Read Tokens</div>
+                <div className="text-lg font-heading font-semibold text-kodelet-dark">{formatNumber(conversation.usage?.cacheReadInputTokens || 0)}</div>
               </div>
               {conversation.usage?.cacheCreationInputTokens && (
-                <div className="stat">
-                  <div className="stat-title">Cache Creation Tokens</div>
-                  <div className="text-lg font-semibold">{formatNumber(conversation.usage.cacheCreationInputTokens)}</div>
+                <div className="space-y-0.5 border-l-2 border-kodelet-blue pl-3">
+                  <div className="text-xs font-body text-kodelet-mid-gray uppercase tracking-wide">Cache Creation Tokens</div>
+                  <div className="text-lg font-heading font-semibold text-kodelet-dark">{formatNumber(conversation.usage.cacheCreationInputTokens)}</div>
                 </div>
               )}
             </>
           )}
         </div>
-
-        {/* Additional Metadata */}
-        {conversation.summary && (
-          <div className="mt-4">
-            <h3 className="font-semibold mb-2">Summary</h3>
-            <p className="text-sm text-base-content/70 bg-base-100 p-3 rounded">
-              {conversation.summary}
-            </p>
-          </div>
-        )}
       </div>
     </div>
   );

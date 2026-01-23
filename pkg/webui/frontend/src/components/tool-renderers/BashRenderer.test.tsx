@@ -1,53 +1,24 @@
-import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import BashRenderer from './BashRenderer';
 import { ToolResult, BashMetadata } from '../../types';
 
 // Mock shared components
-interface MockToolCardProps {
-  title: string;
-  badge?: { text: string; className: string };
-  actions?: React.ReactNode;
-  children: React.ReactNode;
-}
-
 interface MockCopyButtonProps {
   content: string;
 }
 
-interface MockMetadataRowProps {
-  label: string;
-  value: string | number;
-}
-
-interface MockCollapsibleProps {
-  title: string;
-  children: React.ReactNode;
+interface MockStatusBadgeProps {
+  text: string;
+  variant?: string;
 }
 
 vi.mock('./shared', () => ({
-  ToolCard: ({ title, badge, actions, children }: MockToolCardProps) => (
-    <div data-testid="tool-card">
-      <h3>{title}</h3>
-      {badge && <span className={badge.className}>{badge.text}</span>}
-      {actions && <div data-testid="actions">{actions}</div>}
-      {children}
-    </div>
-  ),
   CopyButton: ({ content }: MockCopyButtonProps) => (
     <button data-testid="copy-button" data-content={content}>Copy</button>
   ),
-  MetadataRow: ({ label, value }: MockMetadataRowProps) => (
-    <div data-testid="metadata-row">
-      {label}: {value}
-    </div>
-  ),
-  Collapsible: ({ title, children }: MockCollapsibleProps) => (
-    <div data-testid="collapsible">
-      <h4>{title}</h4>
-      {children}
-    </div>
+  StatusBadge: ({ text, variant }: MockStatusBadgeProps) => (
+    <span data-testid="status-badge" data-variant={variant}>{text}</span>
   ),
 }));
 
@@ -68,7 +39,7 @@ describe('BashRenderer', () => {
   it('returns null when metadata is missing', () => {
     const toolResult = createToolResult({});
     const { container } = render(<BashRenderer toolResult={{ ...toolResult, metadata: undefined }} />);
-    
+
     expect(container.firstChild).toBeNull();
   });
 
@@ -78,30 +49,24 @@ describe('BashRenderer', () => {
         pid: 12345,
         command: 'npm run dev',
         logPath: '/var/log/app.log',
-        startTime: '2023-01-01T00:00:00Z',
       });
 
       render(<BashRenderer toolResult={toolResult} />);
 
-      expect(screen.getByText('🔄 Background Process')).toBeInTheDocument();
+      expect(screen.getByText('npm run dev')).toBeInTheDocument();
       expect(screen.getByText('PID: 12345')).toBeInTheDocument();
-      const badge = screen.getByText('PID: 12345');
-      expect(badge.className).toContain('badge-info');
     });
 
-    it('renders background process metadata', () => {
+    it('renders log file path', () => {
       const toolResult = createToolResult({
         pid: 12345,
         command: 'npm run dev',
         logPath: '/var/log/app.log',
-        startTime: '2023-01-01T00:00:00Z',
       });
 
       render(<BashRenderer toolResult={toolResult} />);
 
-      expect(screen.getByText(/Command:.*npm run dev/)).toBeInTheDocument();
-      expect(screen.getByText(/Log File:.*\/var\/log\/app.log/)).toBeInTheDocument();
-      expect(screen.getByText(/Started:/)).toBeInTheDocument();
+      expect(screen.getByText(/Log:.*\/var\/log\/app.log/)).toBeInTheDocument();
     });
 
     it('handles missing log path', () => {
@@ -112,41 +77,38 @@ describe('BashRenderer', () => {
 
       render(<BashRenderer toolResult={toolResult} />);
 
-      expect(screen.getByText(/Log File:.*N\/A/)).toBeInTheDocument();
-    });
-
-    it('uses logFile as fallback for log path', () => {
-      const toolResult = createToolResult({
-        pid: 12345,
-        command: 'npm run dev',
-        logFile: '/tmp/output.log',
-      });
-
-      render(<BashRenderer toolResult={toolResult} />);
-
-      expect(screen.getByText(/Log File:.*\/tmp\/output.log/)).toBeInTheDocument();
+      expect(screen.getByText(/Log:.*N\/A/)).toBeInTheDocument();
     });
   });
 
   describe('Command Execution', () => {
-    it('renders successful command execution', () => {
+    it('renders command with exit code', () => {
       const toolResult = createToolResult({
         command: 'ls -la',
         exitCode: 0,
         output: 'file1.txt\nfile2.txt',
-        workingDir: '/home/user',
-        executionTime: 150,
       });
 
       render(<BashRenderer toolResult={toolResult} />);
 
-      expect(screen.getByText('🖥️ Command Execution')).toBeInTheDocument();
-      expect(screen.getByText('Exit Code: 0')).toBeInTheDocument();
-      const badge = screen.getByText('Exit Code: 0');
-      expect(badge.className).toContain('badge-success');
+      expect(screen.getByText('ls -la')).toBeInTheDocument();
+      expect(screen.getByText('Exit 0')).toBeInTheDocument();
     });
 
-    it('renders failed command execution', () => {
+    it('shows success variant for exit code 0', () => {
+      const toolResult = createToolResult({
+        command: 'ls',
+        exitCode: 0,
+        output: 'file.txt',
+      });
+
+      render(<BashRenderer toolResult={toolResult} />);
+
+      const badge = screen.getByTestId('status-badge');
+      expect(badge).toHaveAttribute('data-variant', 'success');
+    });
+
+    it('shows error variant for non-zero exit code', () => {
       const toolResult = createToolResult({
         command: 'invalid-command',
         exitCode: 127,
@@ -155,24 +117,20 @@ describe('BashRenderer', () => {
 
       render(<BashRenderer toolResult={toolResult} />);
 
-      expect(screen.getByText('Exit Code: 127')).toBeInTheDocument();
-      const badge = screen.getByText('Exit Code: 127');
-      expect(badge.className).toContain('badge-error');
+      const badge = screen.getByTestId('status-badge');
+      expect(badge).toHaveAttribute('data-variant', 'error');
     });
 
-    it('renders command metadata', () => {
+    it('shows duration when provided', () => {
       const toolResult = createToolResult({
         command: 'echo "test"',
-        workingDir: '/home/user/project',
         executionTime: 250,
         output: 'test',
       });
 
       render(<BashRenderer toolResult={toolResult} />);
 
-      expect(screen.getByText(/Command:.*echo "test"/)).toBeInTheDocument();
-      expect(screen.getByText(/Directory:.*\/home\/user\/project/)).toBeInTheDocument();
-      expect(screen.getByText(/Duration:.*250ms/)).toBeInTheDocument();
+      expect(screen.getByText('250ms')).toBeInTheDocument();
     });
 
     it('shows copy button for output', () => {
@@ -200,18 +158,17 @@ describe('BashRenderer', () => {
       expect(screen.queryByTestId('copy-button')).not.toBeInTheDocument();
     });
 
-    it('renders command output in collapsible', () => {
+    it('renders terminal output', () => {
       const toolResult = createToolResult({
         command: 'ls',
         output: 'file1.txt\nfile2.txt\nfile3.txt',
         exitCode: 0,
       });
 
-      render(<BashRenderer toolResult={toolResult} />);
+      const { container } = render(<BashRenderer toolResult={toolResult} />);
 
-      const collapsible = screen.getByTestId('collapsible');
-      expect(collapsible).toBeInTheDocument();
-      expect(screen.getByText('Command Output')).toBeInTheDocument();
+      const terminalOutput = container.querySelector('.bg-kodelet-dark');
+      expect(terminalOutput).toBeInTheDocument();
     });
 
     it('shows "No output" when output is empty', () => {
@@ -238,20 +195,6 @@ describe('BashRenderer', () => {
       expect(screen.getByText('No output')).toBeInTheDocument();
     });
 
-    it('renders terminal output with proper formatting', () => {
-      const toolResult = createToolResult({
-        command: 'ls',
-        output: 'test output with\nmultiple lines',
-        exitCode: 0,
-      });
-
-      const { container } = render(<BashRenderer toolResult={toolResult} />);
-
-      const terminalOutput = container.querySelector('.mockup-code');
-      expect(terminalOutput).toBeInTheDocument();
-      expect(terminalOutput).toHaveClass('bg-gray-900', 'text-green-400');
-    });
-
     it('escapes HTML in output', () => {
       const toolResult = createToolResult({
         command: 'echo',
@@ -261,9 +204,8 @@ describe('BashRenderer', () => {
 
       render(<BashRenderer toolResult={toolResult} />);
 
-      // The HTML should be escaped
       expect(screen.queryByText('alert("xss")')).not.toBeInTheDocument();
-      const pre = screen.getByTestId('collapsible').querySelector('pre');
+      const pre = document.querySelector('pre');
       expect(pre?.innerHTML).toContain('&lt;script&gt;');
     });
 
@@ -289,9 +231,7 @@ describe('BashRenderer', () => {
 
       render(<BashRenderer toolResult={toolResult} />);
 
-      expect(screen.getByText('Exit Code: 0')).toBeInTheDocument();
-      const badge = screen.getByText('Exit Code: 0');
-      expect(badge.className).toContain('badge-success');
+      expect(screen.getByText('Exit 0')).toBeInTheDocument();
     });
   });
 });

@@ -1,7 +1,6 @@
 import React from 'react';
 import { ToolResult, BackgroundProcessMetadata, BackgroundProcess } from '../../types';
-import { ToolCard, Collapsible } from './shared';
-import { escapeHtml } from './utils';
+import { StatusBadge } from './shared';
 
 interface BackgroundProcessesRendererProps {
   toolResult: ToolResult;
@@ -12,53 +11,32 @@ const BackgroundProcessesRenderer: React.FC<BackgroundProcessesRendererProps> = 
   if (!meta) return null;
 
   const processes = meta.processes || [];
-  const processCount = meta.processCount || processes.length;
-
-  const renderProcessList = (processes: BackgroundProcess[]) => {
-    const processContent = processes.map((process, index) => {
-      const statusIcon = process.status === 'running' ? '🟢' : '🔴';
-      const statusClass = process.status === 'running' ? 'text-green-600' : 'text-red-600';
-
-      return (
-        <div key={index} className="flex items-center justify-between p-2 hover:bg-base-100 rounded">
-          <div className="flex items-center gap-3">
-            <span aria-label={process.status}>{statusIcon}</span>
-            <div>
-              <div className="text-sm font-mono">
-                {escapeHtml(process.command || 'Unknown')}
-              </div>
-              <div className="text-xs text-base-content/60">
-                PID: {process.pid || 'Unknown'}
-              </div>
-            </div>
-          </div>
-          <div className={`text-xs ${statusClass}`}>{process.status || 'Unknown'}</div>
-        </div>
-      );
-    });
-
-    return (
-      <Collapsible
-        title="Processes"
-        collapsed={false}
-        badge={{ text: `${processes.length} processes`, className: 'badge-info' }}
-      >
-        <div>{processContent}</div>
-      </Collapsible>
-    );
-  };
 
   return (
-    <ToolCard
-      title="⚙️ Background Processes"
-      badge={{ text: `${processCount} processes`, className: 'badge-info' }}
-    >
+    <div className="space-y-2">
+      <div className="flex items-center gap-2 text-xs">
+        <StatusBadge text={`${processes.length} processes`} variant="info" />
+      </div>
+
       {processes.length > 0 ? (
-        renderProcessList(processes)
+        <div className="space-y-1 text-xs">
+          {processes.map((process: BackgroundProcess, index: number) => (
+            <div key={index} className="flex items-center justify-between">
+              <div className="flex items-center gap-2 font-mono">
+                <span className="text-kodelet-mid-gray">PID {process.pid}</span>
+                <span className="text-kodelet-dark">{process.command || 'Unknown'}</span>
+              </div>
+              <StatusBadge
+                text={process.status || 'unknown'}
+                variant={process.status === 'running' ? 'success' : 'warning'}
+              />
+            </div>
+          ))}
+        </div>
       ) : (
-        <div className="text-sm text-base-content/60">No background processes</div>
+        <div className="text-xs text-kodelet-mid-gray">No background processes</div>
       )}
-    </ToolCard>
+    </div>
   );
 };
 

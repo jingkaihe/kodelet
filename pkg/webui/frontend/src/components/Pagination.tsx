@@ -18,15 +18,15 @@ const Pagination: React.FC<PaginationProps> = ({
   const getPageNumbers = () => {
     const pages = [];
     const maxVisiblePages = 5;
-    
+
     let startPage = Math.max(1, currentPage - Math.floor(maxVisiblePages / 2));
     const endPage = Math.min(totalPages, startPage + maxVisiblePages - 1);
-    
+
     // Adjust start page if we're near the end
     if (endPage - startPage + 1 < maxVisiblePages) {
       startPage = Math.max(1, endPage - maxVisiblePages + 1);
     }
-    
+
     // Add first page and ellipsis if needed
     if (startPage > 1) {
       pages.push(1);
@@ -34,12 +34,12 @@ const Pagination: React.FC<PaginationProps> = ({
         pages.push('...');
       }
     }
-    
+
     // Add visible pages
     for (let i = startPage; i <= endPage; i++) {
       pages.push(i);
     }
-    
+
     // Add ellipsis and last page if needed
     if (endPage < totalPages) {
       if (endPage < totalPages - 1) {
@@ -47,7 +47,7 @@ const Pagination: React.FC<PaginationProps> = ({
       }
       pages.push(totalPages);
     }
-    
+
     return pages;
   };
 
@@ -124,7 +124,7 @@ const Pagination: React.FC<PaginationProps> = ({
           </svg>
         </button>
       </div>
-      
+
       {/* Page Info */}
       <div className="text-sm text-base-content/60 ml-4">
         Page {currentPage} of {totalPages}

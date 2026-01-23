@@ -39,7 +39,7 @@ describe('formatDate', () => {
   it('shows relative time for dates less than 24 hours ago', () => {
     const now = new Date('2023-01-02T12:00:00Z');
     vi.setSystemTime(now);
-    
+
     const twoHoursAgo = '2023-01-02T10:00:00Z';
     expect(formatDate(twoHoursAgo)).toMatch(/ago$/); // Should end with 'ago'
   });
@@ -47,7 +47,7 @@ describe('formatDate', () => {
   it('shows formatted date for dates more than 24 hours ago', () => {
     const now = new Date('2023-01-10T12:00:00Z');
     vi.setSystemTime(now);
-    
+
     const pastDate = '2023-01-02T10:00:00Z';
     expect(formatDate(pastDate)).toMatch(/Jan 2, 2023/);
   });
@@ -89,9 +89,9 @@ describe('copyToClipboard', () => {
 
   it('calls clipboard writeText with provided text', async () => {
     const writeTextMock = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
-    
+
     await copyToClipboard('test text');
-    
+
     expect(writeTextMock).toHaveBeenCalledWith('test text');
   });
 
@@ -100,7 +100,7 @@ describe('copyToClipboard', () => {
     const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     await copyToClipboard('test text');
-    
+
     expect(consoleErrorSpy).toHaveBeenCalled();
     consoleErrorSpy.mockRestore();
   });
@@ -111,26 +111,26 @@ describe('showToast', () => {
     // Clear any existing toasts before each test
     document.body.innerHTML = '';
   });
-  
+
   afterEach(() => {
     document.body.innerHTML = '';
   });
 
   it('creates and removes toast element', () => {
     vi.useFakeTimers();
-    
+
     showToast('Test message', 'success');
-    
+
     const toast = document.querySelector('.toast');
     expect(toast).toBeTruthy();
     expect(toast?.innerHTML).toContain('alert-success');
     // Check for the actual text content, not innerHTML
     expect(toast?.textContent).toContain('Test message');
-    
+
     vi.advanceTimersByTime(3000);
-    
+
     expect(document.querySelector('.toast')).toBeFalsy();
-    
+
     vi.useRealTimers();
   });
 });

@@ -79,7 +79,7 @@ describe('ConversationViewPage', () => {
     });
 
     render(<ConversationViewPage />);
-    
+
     expect(screen.getByText('Loading conversation...')).toBeInTheDocument();
   });
 
@@ -93,13 +93,13 @@ describe('ConversationViewPage', () => {
     });
 
     render(<ConversationViewPage />);
-    
+
     expect(screen.getByText('Failed to load conversation')).toBeInTheDocument();
     expect(screen.getByText('← Back to Conversations')).toBeInTheDocument();
-    
+
     const retryButton = screen.getByRole('button', { name: /retry/i });
     fireEvent.click(retryButton);
-    
+
     expect(mockRefresh).toHaveBeenCalled();
   });
 
@@ -111,7 +111,7 @@ describe('ConversationViewPage', () => {
     });
 
     render(<ConversationViewPage />);
-    
+
     expect(screen.getByText('Conversation not found')).toBeInTheDocument();
     expect(screen.getByText("The conversation you're looking for doesn't exist or has been deleted")).toBeInTheDocument();
     expect(screen.getByText('← Back to Conversations')).toBeInTheDocument();
@@ -119,11 +119,11 @@ describe('ConversationViewPage', () => {
 
   it('renders conversation with messages', () => {
     render(<ConversationViewPage />);
-    
+
     // Check breadcrumb
     expect(screen.getByText('Conversations')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'conv-123' })).toBeInTheDocument();
-    
+
     // Check messages are rendered
     expect(screen.getByText('Hello')).toBeInTheDocument();
     expect(screen.getByText('Hi there!')).toBeInTheDocument();
@@ -139,7 +139,7 @@ describe('ConversationViewPage', () => {
     });
 
     render(<ConversationViewPage />);
-    
+
     expect(screen.getByText('No messages found')).toBeInTheDocument();
     expect(screen.getByText('This conversation appears to be empty')).toBeInTheDocument();
   });
@@ -152,11 +152,11 @@ describe('ConversationViewPage', () => {
     });
 
     render(<ConversationViewPage />);
-    
+
     // Find and click export button (in ConversationHeader)
     const exportButton = screen.getByRole('button', { name: /export/i });
     fireEvent.click(exportButton);
-    
+
     expect(mockExport).toHaveBeenCalled();
   });
 
@@ -168,13 +168,13 @@ describe('ConversationViewPage', () => {
     });
 
     render(<ConversationViewPage />);
-    
+
     // Find and click delete button (in ConversationHeader)
     const deleteButton = screen.getByRole('button', { name: /delete/i });
     fireEvent.click(deleteButton);
-    
+
     expect(global.confirm).toHaveBeenCalledWith('Are you sure you want to delete this conversation?');
-    
+
     await waitFor(() => {
       expect(mockDelete).toHaveBeenCalled();
       expect(utils.showToast).toHaveBeenCalledWith('Conversation deleted successfully', 'success');
@@ -190,10 +190,10 @@ describe('ConversationViewPage', () => {
     });
 
     render(<ConversationViewPage />);
-    
+
     const deleteButton = screen.getByRole('button', { name: /delete/i });
     fireEvent.click(deleteButton);
-    
+
     expect(mockDelete).not.toHaveBeenCalled();
   });
 
@@ -206,10 +206,10 @@ describe('ConversationViewPage', () => {
     });
 
     render(<ConversationViewPage />);
-    
+
     const deleteButton = screen.getByRole('button', { name: /delete/i });
     fireEvent.click(deleteButton);
-    
+
     await waitFor(() => {
       expect(utils.showToast).toHaveBeenCalledWith(
         'Failed to delete conversation: Delete failed',
@@ -220,19 +220,19 @@ describe('ConversationViewPage', () => {
 
   it('uses empty string when id param is undefined', () => {
     vi.mocked(useParams).mockReturnValue({});
-    
+
     render(<ConversationViewPage />);
-    
+
     expect(useConversation).toHaveBeenCalledWith('');
   });
 
   it('passes conversation to child components', () => {
     render(<ConversationViewPage />);
-    
+
     // ConversationHeader should receive the conversation
     // ConversationMetadata should receive the conversation
     // MessageList should receive messages and toolResults
-    
+
     // Verify that components are rendered (they will use the conversation data)
     expect(screen.getByRole('button', { name: /export/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /delete/i })).toBeInTheDocument();
@@ -249,7 +249,7 @@ describe('ConversationViewPage', () => {
     });
 
     render(<ConversationViewPage />);
-    
+
     // Should show empty state
     expect(screen.getByText('No messages found')).toBeInTheDocument();
   });

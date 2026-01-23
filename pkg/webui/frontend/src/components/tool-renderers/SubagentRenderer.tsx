@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { ToolResult, SubagentMetadata } from '../../types';
-import { ToolCard } from './shared';
+import { StatusBadge } from './shared';
 import { marked } from 'marked';
 
 interface SubagentRendererProps {
@@ -9,54 +9,50 @@ interface SubagentRendererProps {
 
 const SubagentRenderer: React.FC<SubagentRendererProps> = ({ toolResult }) => {
   const meta = toolResult.metadata as SubagentMetadata;
+  const [showDetails, setShowDetails] = useState(false);
   if (!meta) return null;
 
   const formatMarkdown = (text: string): string => {
     if (!text) return '';
-    // Configure marked for better code rendering
-    marked.setOptions({
-      breaks: true,
-      gfm: true,
-    });
+    marked.setOptions({ breaks: true, gfm: true });
     return marked.parse(text);
   };
 
   return (
-    <ToolCard
-      title="🤖 Sub-agent"
-    >
-      <div className="space-y-4">
-        <div>
-          <div className="text-xs text-base-content/60 mb-2">
-            <strong>Question:</strong>
-          </div>
-          <div className="bg-primary/10 p-3 rounded-lg border border-primary/20">
-            <div 
-              className="prose-enhanced subagent-response text-sm"
-              dangerouslySetInnerHTML={{
-                __html: formatMarkdown(meta.question)
-              }}
-            />
-          </div>
-        </div>
-
-        {meta.response && (
-          <div>
-            <div className="text-xs text-base-content/60 mb-2">
-              <strong>Response:</strong>
-            </div>
-            <div className="bg-base-200 p-4 rounded-lg border">
-              <div 
-                className="prose-enhanced subagent-response"
-                dangerouslySetInnerHTML={{
-                  __html: formatMarkdown(meta.response)
-                }}
-              />
-            </div>
-          </div>
+    <div className="space-y-2">
+      <div className="flex items-center gap-2 text-xs">
+        <StatusBadge text="Delegated" variant="info" />
+        {!showDetails && (
+          <button
+            onClick={() => setShowDetails(true)}
+            className="text-kodelet-blue hover:underline"
+          >
+            Show details
+          </button>
         )}
       </div>
-    </ToolCard>
+
+      {showDetails && (
+        <div className="space-y-2 text-xs">
+          <div>
+            <div className="font-medium text-kodelet-mid-gray mb-1">Question:</div>
+            <div
+              className="bg-kodelet-blue/5 p-2 rounded border border-kodelet-blue/20 prose-enhanced text-sm"
+              dangerouslySetInnerHTML={{ __html: formatMarkdown(meta.question) }}
+            />
+          </div>
+          {meta.response && (
+            <div>
+              <div className="font-medium text-kodelet-mid-gray mb-1">Response:</div>
+              <div
+                className="bg-kodelet-light-gray/30 p-2 rounded border border-kodelet-mid-gray/20 prose-enhanced text-sm max-h-64 overflow-y-auto"
+                dangerouslySetInnerHTML={{ __html: formatMarkdown(meta.response) }}
+              />
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 };
 

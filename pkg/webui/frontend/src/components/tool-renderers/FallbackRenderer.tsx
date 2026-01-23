@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { ToolResult } from '../../types';
-import { ToolCard, Collapsible } from './shared';
+import { StatusBadge } from './shared';
 
 interface FallbackRendererProps {
   toolResult: ToolResult;
@@ -20,21 +20,27 @@ const safeStringify = (obj: unknown): string => {
 };
 
 const FallbackRenderer: React.FC<FallbackRendererProps> = ({ toolResult }) => {
+  const [showRaw, setShowRaw] = useState(false);
+
   return (
-    <ToolCard
-      title={`🔧 ${toolResult.toolName}`}
-      badge={{ text: 'Unknown Tool', className: 'badge-info' }}
-    >
-      <Collapsible
-        title="Raw Metadata"
-        collapsed={true}
-        badge={{ text: 'Debug Info', className: 'badge-warning' }}
-      >
-        <pre className="text-xs overflow-x-auto bg-base-100 p-2 rounded">
+    <div className="space-y-2">
+      <div className="flex items-center gap-2 text-xs">
+        <StatusBadge text="Completed" variant="neutral" />
+      </div>
+
+      {!showRaw ? (
+        <button
+          onClick={() => setShowRaw(true)}
+          className="text-xs text-kodelet-blue hover:underline"
+        >
+          Show raw data
+        </button>
+      ) : (
+        <pre className="text-xs overflow-x-auto bg-kodelet-light p-2 rounded border border-kodelet-light-gray font-mono text-kodelet-dark max-h-48 overflow-y-auto">
           <code>{safeStringify(toolResult.metadata)}</code>
         </pre>
-      </Collapsible>
-    </ToolCard>
+      )}
+    </div>
   );
 };
 

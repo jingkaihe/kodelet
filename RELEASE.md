@@ -1,5 +1,15 @@
 # Kodelet
 
+## 0.1.50.beta (2026-01-23)
+
+### Features
+
+**Web UI visual refresh**: Redesigned conversation explorer with a refined visual language featuring custom color palette, editorial typography (Poppins headings, Lora body text), and subtle micro-interactions. Cards now feature gradient accent bars and refined shadows.
+
+**Streamlined tool renderers**: Tool results now display with a compact, information-dense layout using new StatusBadge components. Long content (diffs, file contents, terminal output) is collapsed by default with "Show" buttons for on-demand expansion, reducing visual noise while preserving access to full details.
+
+**Improved message styling**: User and assistant messages have distinct visual treatments with colored left borders and subtle gradient backgrounds for better conversation flow visualization.
+
 ## 0.1.49.beta (2026-01-23)
 
 ### Breaking Changes

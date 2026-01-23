@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { ToolResult } from '../../types';
-import { ToolCard, MetadataRow, Collapsible } from './shared';
+import { StatusBadge } from './shared';
 
 interface FileEditMetadata {
   filePath: string;
@@ -8,7 +8,6 @@ interface FileEditMetadata {
   language?: string;
   replaceAll?: boolean;
   replacedCount?: number;
-  // Legacy fields for backward compatibility
   actualReplaced?: number;
   occurrence?: number;
 }
@@ -26,209 +25,96 @@ interface FileEditRendererProps {
 
 const FileEditRenderer: React.FC<FileEditRendererProps> = ({ toolResult }) => {
   const meta = toolResult.metadata as FileEditMetadata;
+  const [showDiff, setShowDiff] = useState(false);
   if (!meta) return null;
 
   const edits = meta.edits || [];
   const replaceAll = meta.replaceAll || false;
   const replacedCount = meta.replacedCount || meta.actualReplaced || 0;
 
+  const createUnifiedDiff = (oldText: string, newText: string) => {
+    const oldLines = oldText ? oldText.split('\n') : [];
+    const newLines = newText ? newText.split('\n') : [];
+    const diffLines: Array<{ type: 'context' | 'removed' | 'added', content: string }> = [];
 
-  const renderEdits = (edits: FileEdit[]) => {
-    return edits.map((edit: FileEdit, index: number) => {
-      const oldContent = edit.oldContent || '';
-      const newContent = edit.newContent || '';
-      const filePath = meta.filePath || '';
+    let oldIndex = 0;
+    let newIndex = 0;
 
-      // Create unified diff with improved algorithm
-      const createUnifiedDiff = (oldText: string, newText: string) => {
-        const oldLines = oldText ? oldText.split('\n') : [];
-        const newLines = newText ? newText.split('\n') : [];
-        const diffLines: Array<{ type: 'context' | 'removed' | 'added', content: string }> = [];
+    while (oldIndex < oldLines.length || newIndex < newLines.length) {
+      if (oldIndex >= oldLines.length) {
+        diffLines.push({ type: 'added', content: newLines[newIndex] });
+        newIndex++;
+      } else if (newIndex >= newLines.length) {
+        diffLines.push({ type: 'removed', content: oldLines[oldIndex] });
+        oldIndex++;
+      } else if (oldLines[oldIndex] === newLines[newIndex]) {
+        diffLines.push({ type: 'context', content: oldLines[oldIndex] });
+        oldIndex++;
+        newIndex++;
+      } else {
+        diffLines.push({ type: 'removed', content: oldLines[oldIndex] });
+        diffLines.push({ type: 'added', content: newLines[newIndex] });
+        oldIndex++;
+        newIndex++;
+      }
+    }
+    return diffLines;
+  };
 
-        // Simple diff algorithm that can handle line insertions/deletions
-        let oldIndex = 0;
-        let newIndex = 0;
+  const badgeText = replaceAll
+    ? `${replacedCount} replacement${replacedCount !== 1 ? 's' : ''}`
+    : `${edits.length} edit${edits.length !== 1 ? 's' : ''}`;
 
-        while (oldIndex < oldLines.length || newIndex < newLines.length) {
-          if (oldIndex >= oldLines.length) {
-            // Only new lines remaining
-            diffLines.push({ type: 'added', content: newLines[newIndex] });
-            newIndex++;
-          } else if (newIndex >= newLines.length) {
-            // Only old lines remaining
-            diffLines.push({ type: 'removed', content: oldLines[oldIndex] });
-            oldIndex++;
-          } else if (oldLines[oldIndex] === newLines[newIndex]) {
-            // Lines match - context
-            diffLines.push({ type: 'context', content: oldLines[oldIndex] });
-            oldIndex++;
-            newIndex++;
-          } else {
-            // Lines differ - look ahead to see if we can find matches
-            let foundMatch = false;
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2 flex-wrap text-xs font-mono text-kodelet-dark/80">
+        <span className="font-medium">{meta.filePath}</span>
+        <StatusBadge text={badgeText} variant="info" />
+        {replaceAll && <span className="text-kodelet-mid-gray">(replace all)</span>}
+      </div>
 
-            // Look for the current old line in upcoming new lines (deletion)
-            for (let i = newIndex + 1; i < Math.min(newIndex + 3, newLines.length); i++) {
-              if (oldLines[oldIndex] === newLines[i]) {
-                // Found the old line later in new lines, so current new lines are insertions
-                for (let j = newIndex; j < i; j++) {
-                  diffLines.push({ type: 'added', content: newLines[j] });
-                }
-                diffLines.push({ type: 'context', content: oldLines[oldIndex] });
-                newIndex = i + 1;
-                oldIndex++;
-                foundMatch = true;
-                break;
-              }
-            }
-
-            if (!foundMatch) {
-              // Look for the current new line in upcoming old lines (insertion)
-              for (let i = oldIndex + 1; i < Math.min(oldIndex + 3, oldLines.length); i++) {
-                if (newLines[newIndex] === oldLines[i]) {
-                  // Found the new line later in old lines, so current old lines are deletions
-                  for (let j = oldIndex; j < i; j++) {
-                    diffLines.push({ type: 'removed', content: oldLines[j] });
-                  }
-                  diffLines.push({ type: 'context', content: newLines[newIndex] });
-                  oldIndex = i + 1;
-                  newIndex++;
-                  foundMatch = true;
-                  break;
-                }
-              }
-            }
-
-            if (!foundMatch) {
-              // No match found, treat as substitution
-              diffLines.push({ type: 'removed', content: oldLines[oldIndex] });
-              diffLines.push({ type: 'added', content: newLines[newIndex] });
-              oldIndex++;
-              newIndex++;
-            }
-          }
-        }
-
-        return diffLines;
-      };
-
-      const diffLines = createUnifiedDiff(oldContent, newContent);
-      const oldLineCount = oldContent ? oldContent.split('\n').length : 0;
-      const newLineCount = newContent ? newContent.split('\n').length : 0;
-
-      return (
-        <div key={index} className="mb-4">
-          <h5 className="text-sm font-medium mb-2">Edit {index + 1}: Lines {edit.startLine}-{edit.endLine}</h5>
-          <div className="bg-gray-50 border border-gray-200 rounded-lg overflow-hidden font-mono text-sm">
-            {/* Git diff header */}
-            <div className="bg-gray-100 px-4 py-2 text-gray-600 border-b border-gray-200">
-              <div>--- a/{filePath.split('/').pop()}</div>
-              <div>+++ b/{filePath.split('/').pop()}</div>
-            </div>
-
-            {/* Hunk header */}
-            <div className="bg-cyan-50 px-4 py-1 text-cyan-700 border-b border-gray-200">
-              @@ -{edit.startLine},{oldLineCount} +{edit.startLine},{newLineCount} @@
-            </div>
-
-            {/* Unified diff content */}
-            <div>
-              {diffLines.map((line, i) => {
-                const bgColor = line.type === 'removed' ? 'bg-red-50' :
-                  line.type === 'added' ? 'bg-green-50' : 'bg-white';
-                const textColor = line.type === 'removed' ? 'text-red-800' :
-                  line.type === 'added' ? 'text-green-800' : 'text-gray-800';
-                const prefix = line.type === 'removed' ? '-' :
-                  line.type === 'added' ? '+' : ' ';
-                const prefixColor = line.type === 'removed' ? 'text-red-500' :
-                  line.type === 'added' ? 'text-green-500' : 'text-gray-400';
-
+      {edits.length > 0 && (
+        <>
+          {!showDiff ? (
+            <button
+              onClick={() => setShowDiff(true)}
+              className="text-xs text-kodelet-blue hover:underline"
+            >
+              Show diff
+            </button>
+          ) : (
+            <div className="space-y-2" style={{ maxHeight: '400px', overflowY: 'auto' }}>
+              {edits.map((edit, index) => {
+                const diffLines = createUnifiedDiff(edit.oldContent || '', edit.newContent || '');
                 return (
-                  <div key={i} className={`px-4 py-1 flex items-start ${bgColor}`}>
-                    <span className={`mr-3 select-none ${prefixColor}`}>{prefix}</span>
-                    <span className={`flex-1 whitespace-pre ${textColor}`}>{line.content}</span>
+                  <div key={index} className="text-xs font-mono border border-kodelet-light-gray rounded overflow-hidden">
+                    <div className="bg-kodelet-light-gray/50 px-2 py-1 text-kodelet-dark/70">
+                      Lines {edit.startLine}-{edit.endLine}
+                    </div>
+                    <div>
+                      {diffLines.map((line, i) => (
+                        <div
+                          key={i}
+                          className={`px-2 py-0.5 flex ${
+                            line.type === 'removed' ? 'bg-red-50 text-red-700' :
+                            line.type === 'added' ? 'bg-green-50 text-green-700' : ''
+                          }`}
+                        >
+                          <span className="w-4 select-none">
+                            {line.type === 'removed' ? '-' : line.type === 'added' ? '+' : ' '}
+                          </span>
+                          <span className="whitespace-pre">{line.content}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 );
               })}
             </div>
-          </div>
-        </div>
-      );
-    });
-  };
-
-
-
-  // Determine title and badge based on ReplaceAll
-  const getTitle = () => {
-    if (replaceAll && replacedCount > 1) {
-      return "🔄 File Edit (Replace All)";
-    }
-    return "✏️ File Edit";
-  };
-
-  const getBadge = () => {
-    if (replaceAll) {
-      return {
-        text: `${replacedCount} replacement${replacedCount !== 1 ? 's' : ''}`,
-        className: 'badge-info'
-      };
-    }
-    return {
-      text: `${edits.length} edit${edits.length !== 1 ? 's' : ''}`,
-      className: 'badge-info'
-    };
-  };
-
-  const getCollapsibleTitle = () => {
-    if (replaceAll && edits.length > 1) {
-      return "View All Changes";
-    }
-    return "View Changes";
-  };
-
-  const getCollapsibleBadge = () => {
-    if (replaceAll && replacedCount > 0) {
-      return {
-        text: `${edits.length} locations`,
-        className: 'badge-info'
-      };
-    }
-    return {
-      text: `${edits.length} changes`,
-      className: 'badge-info'
-    };
-  };
-
-  return (
-    <ToolCard
-      title={getTitle()}
-      badge={getBadge()}
-    >
-      <div className="text-xs text-base-content/60 mb-3 font-mono">
-        <MetadataRow label="Path" value={meta.filePath} monospace />
-        {replaceAll && (
-          <MetadataRow label="Mode" value="Replace All" />
-        )}
-      </div>
-
-      {edits.length > 0 && (
-        <Collapsible
-          title={getCollapsibleTitle()}
-          collapsed={false}
-          badge={getCollapsibleBadge()}
-        >
-          <div>
-            {replaceAll && edits.length > 3 && (
-              <div className="text-xs text-base-content/60 mb-2">
-                Showing all {edits.length} replacement locations:
-              </div>
-            )}
-            {renderEdits(edits)}
-          </div>
-        </Collapsible>
+          )}
+        </>
       )}
-    </ToolCard>
+    </div>
   );
 };
 

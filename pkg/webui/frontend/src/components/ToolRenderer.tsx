@@ -23,11 +23,11 @@ const ToolRenderer: React.FC<ToolRendererProps> = ({ toolResult }) => {
   const renderTool = () => {
     if (!toolResult.success) {
       return (
-        <div className="alert alert-error" role="alert">
-          <div className="flex items-center gap-2">
+        <div className="bg-kodelet-orange/5 border-l-4 border-kodelet-orange p-3 rounded" role="alert">
+          <div className="flex items-center gap-2 mb-2">
             <svg
               xmlns="http://www.w3.org/2000/svg"
-              className="h-5 w-5"
+              className="h-5 w-5 text-kodelet-orange"
               fill="none"
               viewBox="0 0 24 24"
               stroke="currentColor"
@@ -40,9 +40,9 @@ const ToolRenderer: React.FC<ToolRendererProps> = ({ toolResult }) => {
                 d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
               />
             </svg>
-            <strong>Error ({toolResult.toolName}):</strong>
+            <strong className="font-heading font-semibold text-sm text-kodelet-orange">Error ({toolResult.toolName}):</strong>
           </div>
-          <div className="mt-2 text-sm">{toolResult.error || 'Unknown error'}</div>
+          <div className="text-sm font-body text-kodelet-dark">{toolResult.error || 'Unknown error'}</div>
         </div>
       );
     }
@@ -86,9 +86,9 @@ const ToolRenderer: React.FC<ToolRendererProps> = ({ toolResult }) => {
   } catch (error) {
     console.error('Error rendering tool result:', error, toolResult);
     return (
-      <div className="alert alert-error">
-        <strong>Renderer Error ({toolResult.toolName}):</strong>
-        <div className="text-sm">Failed to render tool result</div>
+      <div className="bg-kodelet-orange/5 border-l-4 border-kodelet-orange p-3 rounded">
+        <strong className="font-heading font-semibold text-sm text-kodelet-orange">Renderer Error ({toolResult.toolName}):</strong>
+        <div className="text-sm font-body text-kodelet-dark mt-1">Failed to render tool result</div>
       </div>
     );
   }
