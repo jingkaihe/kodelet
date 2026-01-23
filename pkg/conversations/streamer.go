@@ -31,6 +31,7 @@ type StreamEntry struct {
 type StreamOpts struct {
 	Interval       time.Duration
 	IncludeHistory bool
+	HistoryOnly    bool // If true, stream history and exit without waiting for updates
 	New            bool
 }
 
@@ -75,15 +76,21 @@ func (cs *ConversationStreamer) StreamLiveUpdates(
 	conversationID string,
 	streamOpts StreamOpts,
 ) error {
-	logger.G(ctx).WithField("conversationID", conversationID).WithField("interval", streamOpts.Interval).WithField("includeHistory", streamOpts.IncludeHistory).Debug("Starting stream for conversation")
+	logger.G(ctx).WithField("conversationID", conversationID).WithField("interval", streamOpts.Interval).WithField("includeHistory", streamOpts.IncludeHistory).WithField("historyOnly", streamOpts.HistoryOnly).Debug("Starting stream for conversation")
 
-	ticker := time.NewTicker(streamOpts.Interval)
-	defer ticker.Stop()
+	includeHistory := streamOpts.IncludeHistory || streamOpts.HistoryOnly
 
-	state, err := cs.initializeStream(ctx, conversationID, streamOpts.IncludeHistory, streamOpts.New)
+	state, err := cs.initializeStream(ctx, conversationID, includeHistory, streamOpts.New)
 	if err != nil {
 		return err
 	}
+
+	if streamOpts.HistoryOnly {
+		return nil
+	}
+
+	ticker := time.NewTicker(streamOpts.Interval)
+	defer ticker.Stop()
 
 	for {
 		select {

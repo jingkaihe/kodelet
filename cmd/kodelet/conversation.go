@@ -187,11 +187,13 @@ var conversationEditCmd = &cobra.Command{
 
 type ConversationStreamConfig struct {
 	IncludeHistory bool
+	HistoryOnly    bool
 }
 
 func NewConversationStreamConfig() *ConversationStreamConfig {
 	return &ConversationStreamConfig{
 		IncludeHistory: false,
+		HistoryOnly:    false,
 	}
 }
 
@@ -253,6 +255,7 @@ func init() {
 
 	streamDefaults := NewConversationStreamConfig()
 	conversationStreamCmd.Flags().Bool("include-history", streamDefaults.IncludeHistory, "Include historical conversation data before streaming new entries")
+	conversationStreamCmd.Flags().Bool("history-only", streamDefaults.HistoryOnly, "Output historical conversation data and exit (no live streaming)")
 
 	conversationCmd.AddCommand(conversationListCmd)
 	conversationCmd.AddCommand(conversationDeleteCmd)
@@ -347,6 +350,9 @@ func getConversationStreamConfigFromFlags(cmd *cobra.Command) *ConversationStrea
 
 	if includeHistory, err := cmd.Flags().GetBool("include-history"); err == nil {
 		config.IncludeHistory = includeHistory
+	}
+	if historyOnly, err := cmd.Flags().GetBool("history-only"); err == nil {
+		config.HistoryOnly = historyOnly
 	}
 
 	return config
@@ -922,6 +928,7 @@ func streamConversationCmd(ctx context.Context, conversationID string, config *C
 	streamOpts := conversations.StreamOpts{
 		Interval:       liveUpdateInterval,
 		IncludeHistory: config.IncludeHistory,
+		HistoryOnly:    config.HistoryOnly,
 	}
 	err = streamer.StreamLiveUpdates(ctx, conversationID, streamOpts)
 	if err != nil {

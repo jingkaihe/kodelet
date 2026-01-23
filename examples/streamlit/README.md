@@ -38,6 +38,8 @@ The chatbot shells out to `kodelet run --headless --stream-deltas` for each mess
 
 For follow-up messages, it uses `--resume CONVERSATION_ID` to maintain context.
 
+When loading from URL (`?c=<id>`), it uses `kodelet conversation stream <id> --history-only` to fetch history.
+
 ## Brand Colors
 
 The UI uses Kodelet's official color palette:
