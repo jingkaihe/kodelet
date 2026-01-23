@@ -31,7 +31,7 @@ type StreamEntry struct {
 type StreamOpts struct {
 	Interval       time.Duration
 	IncludeHistory bool
-	HistoryOnly    bool // If true, stream history and exit without waiting for updates
+	HistoryOnly    bool
 	New            bool
 }
 

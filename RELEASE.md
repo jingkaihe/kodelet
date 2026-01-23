@@ -1,5 +1,38 @@
 # Kodelet
 
+## 0.2.0.beta (2026-01-23)
+
+### Features
+
+**Partial message streaming in headless mode**: Added `--stream-deltas` flag that enables real-time token streaming in headless mode. Text and thinking content are now output as they're generated, enabling ChatGPT-style streaming experiences in third-party UIs:
+
+```bash
+kodelet run --headless --stream-deltas "explain recursion"
+```
+
+Delta events (`text-delta`, `thinking-delta`, `thinking-start`, `thinking-end`, `content-end`) are interleaved with complete message events, allowing clients to show progressive output while still receiving full content for persistence.
+
+**Enhanced `conversation show` command**: The command now displays conversation metadata and usage statistics by default:
+
+```bash
+kodelet conversation show <id>              # Shows header + messages (new default)
+kodelet conversation show <id> --no-header  # Messages only (previous behavior)
+kodelet conversation show <id> --stats-only # Header/stats only, no messages
+```
+
+Output formats:
+- `--format text` (default): Human-readable output with header and messages
+- `--format json`: Structured JSON with id, provider, summary, timestamps, usage, and messages
+- `--format raw`: Full `ConversationRecord` dump as JSON (includes rawMessages, toolResults, metadata)
+
+**History-only streaming for conversations**: Added `--history-only` flag to `conversation stream` that outputs historical conversation data and exits immediately without live streaming:
+
+```bash
+kodelet conversation stream <id> --history-only  # Output history and exit
+```
+
+This is mutually exclusive with `--include-history` (which shows history then continues streaming).
+
 ## 0.1.50.beta (2026-01-23)
 
 ### Features
