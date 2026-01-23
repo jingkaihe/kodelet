@@ -17,8 +17,7 @@ Usage:
 
 import json
 import subprocess
-import tempfile
-import os
+from datetime import datetime
 from pathlib import Path
 
 import streamlit as st
@@ -56,6 +55,16 @@ h1, h2, h3 {
     background-color: white;
     border: 1px solid var(--kodelet-light-gray);
     border-radius: 8px;
+    padding: 1rem !important;
+}
+
+[data-testid="stChatMessage"] * {
+    border-color: transparent !important;
+}
+
+[data-testid="stChatMessage"] [data-testid="stExpander"] {
+    border-color: var(--kodelet-light-gray) !important;
+    border-radius: 6px !important;
 }
 
 code, pre {
@@ -180,20 +189,15 @@ def get_conversation_summary(conversation_id: str) -> str:
     """Fetch conversation summary from kodelet."""
     try:
         kodelet_path = find_kodelet_binary()
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
-            tmp_path = f.name
         result = subprocess.run(
-            [kodelet_path, "conversation", "export", conversation_id, tmp_path],
+            [kodelet_path, "conversation", "show", conversation_id, "--format", "json", "--stats-only"],
             capture_output=True,
             text=True,
             timeout=5,
         )
         if result.returncode == 0:
-            with open(tmp_path) as f:
-                data = json.loads(f.read())
-            os.unlink(tmp_path)
+            data = json.loads(result.stdout)
             return data.get("summary", "")
-        os.unlink(tmp_path)
     except Exception:
         pass
     return ""
@@ -332,9 +336,6 @@ def main():
 
     st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
-    st.title("Kodelet Chat")
-    st.caption("A Streamlit interface for kodelet, the lightweight agentic SWE agent")
-
     if "messages" not in st.session_state:
         st.session_state.messages = []
     if "conversation_id" not in st.session_state:
@@ -348,10 +349,21 @@ def main():
     if st.session_state.conversation_id and not url_conv_id:
         st.query_params["c"] = st.session_state.conversation_id
 
+    summary = ""
     if st.session_state.conversation_id:
         summary = get_conversation_summary(st.session_state.conversation_id)
-        if summary:
-            st.caption(f"Summary: {summary}")
+
+    if summary:
+        st.header(summary)
+    else:
+        hour = datetime.now().hour
+        if hour < 12:
+            greeting = "Good Morning"
+        elif hour < 18:
+            greeting = "Good Afternoon"
+        else:
+            greeting = "Good Evening"
+        st.title(greeting)
 
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
@@ -418,9 +430,6 @@ def main():
 
         st.divider()
         if st.session_state.conversation_id:
-            summary = get_conversation_summary(st.session_state.conversation_id)
-            if summary:
-                st.caption(f"Summary: {summary}")
             st.caption(f"ID: `{st.session_state.conversation_id}`")
         st.caption(f"Binary: `{find_kodelet_binary()}`")
 
