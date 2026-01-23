@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.1.48.beta (2026-01-23)
+
+### Internal Changes
+
+**Simplified LLM usage logging**: Streamlined turn completion logs to include only essential fields (model, input/output tokens, total cost, max context window) and reduced decimal precision from 4 to 3 places for cleaner output.
+
 ## 0.1.47.beta (2026-01-22)
 
 ### Features
