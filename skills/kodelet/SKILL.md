@@ -509,7 +509,45 @@ kodelet conversation stream CONVERSATION_ID
 kodelet conversation stream CONVERSATION_ID --include-history
 ```
 
-**StreamEntry JSON format:**
+**Partial Message Streaming (`--stream-deltas`):**
+Enables real-time token streaming in headless mode, outputting text as it's generated:
+
+```bash
+# Stream partial text deltas
+kodelet run --headless --stream-deltas "explain how TCP works"
+
+# Show only text deltas in real-time
+kodelet run --headless --stream-deltas "write a poem" | \
+    jq -r 'select(.kind == "text-delta") | .delta' | tr -d '\n'
+
+# Show thinking in real-time
+kodelet run --headless --stream-deltas "solve this puzzle" | \
+    jq -r 'select(.kind == "thinking-delta") | .delta' | tr -d '\n'
+```
+
+**Delta Event Types:**
+| Kind | Description |
+|------|-------------|
+| `text-delta` | Partial text content chunk |
+| `thinking-delta` | Partial thinking content chunk |
+| `thinking-start` | Thinking block begins |
+| `thinking-end` | Thinking block ends |
+| `content-end` | Content block ends |
+
+**Example Delta Output:**
+```jsonl
+{"kind":"thinking-start","conversation_id":"abc123","role":"assistant"}
+{"kind":"thinking-delta","delta":"Let me analyze...","conversation_id":"abc123","role":"assistant"}
+{"kind":"thinking-end","conversation_id":"abc123","role":"assistant"}
+{"kind":"text-delta","delta":"The answer","conversation_id":"abc123","role":"assistant"}
+{"kind":"text-delta","delta":" is 42.","conversation_id":"abc123","role":"assistant"}
+{"kind":"content-end","conversation_id":"abc123","role":"assistant"}
+{"kind":"text","content":"The answer is 42.","conversation_id":"abc123","role":"assistant"}
+```
+
+Note: Complete messages are still emitted after delta streams for clients that ignore deltas.
+
+**StreamEntry JSON format (complete messages):**
 ```json
 {"kind":"text","role":"user","content":"What files are here?","conversation_id":"conv_123"}
 {"kind":"thinking","role":"assistant","content":"User wants to see files..."}

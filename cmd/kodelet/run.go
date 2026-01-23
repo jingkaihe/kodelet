@@ -32,6 +32,7 @@ type RunConfig struct {
 	Follow             bool
 	NoSave             bool
 	Headless           bool              // Use structured JSON output instead of console formatting
+	StreamDeltas       bool              // Stream partial text deltas in headless mode
 	Images             []string          // Image paths or URLs to include with the message
 	MaxTurns           int               // Maximum number of turns within a single SendMessage call
 	CompactRatio       float64           // Ratio of context window at which to trigger auto-compact (0.0-1.0)
@@ -305,7 +306,12 @@ var runCmd = &cobra.Command{
 			done := make(chan error, 1)
 
 			go func() {
-				handler := &llmtypes.ConsoleMessageHandler{Silent: true}
+				var handler llmtypes.MessageHandler
+				if config.StreamDeltas {
+					handler = llmtypes.NewHeadlessStreamHandler(conversationID)
+				} else {
+					handler = &llmtypes.ConsoleMessageHandler{Silent: true}
+				}
 				_, err := thread.SendMessage(ctx, query, handler, llmtypes.MessageOpt{
 					PromptCache:        true,
 					Images:             config.Images,
@@ -409,6 +415,7 @@ func init() {
 	runCmd.Flags().BoolP("follow", "f", defaults.Follow, "Follow the most recent conversation")
 	runCmd.Flags().Bool("no-save", defaults.NoSave, "Disable conversation persistence")
 	runCmd.Flags().Bool("headless", defaults.Headless, "Output structured JSON instead of console formatting")
+	runCmd.Flags().Bool("stream-deltas", defaults.StreamDeltas, "Stream partial text deltas in headless mode (requires --headless)")
 	runCmd.Flags().StringSliceP("image", "I", defaults.Images, "Add image input (can be used multiple times)")
 	runCmd.Flags().Int("max-turns", defaults.MaxTurns, "Maximum number of turns within a single message exchange (0 for no limit)")
 	runCmd.Flags().Float64("compact-ratio", defaults.CompactRatio, "Context window utilization ratio to trigger auto-compact (0.0-1.0)")
@@ -454,6 +461,13 @@ func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
 
 	if config.NoSave && config.Headless {
 		presenter.Error(errors.New("conflicting flags"), "--no-save and --headless cannot be used together (headless mode requires conversation storage)")
+		os.Exit(1)
+	}
+	if streamDeltas, err := cmd.Flags().GetBool("stream-deltas"); err == nil {
+		config.StreamDeltas = streamDeltas
+	}
+	if config.StreamDeltas && !config.Headless {
+		presenter.Error(errors.New("invalid flags"), "--stream-deltas requires --headless mode")
 		os.Exit(1)
 	}
 	if images, err := cmd.Flags().GetStringSlice("image"); err == nil {

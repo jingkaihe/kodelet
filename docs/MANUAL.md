@@ -19,6 +19,7 @@ Kodelet is a lightweight agentic SWE Agent that runs as an interactive CLI tool 
   - [Conversation Management](#conversation-management)
 - [Streaming and Programmatic Access](#streaming-and-programmatic-access)
   - [Headless Mode](#headless-mode)
+  - [Partial Message Streaming](#partial-message-streaming)
   - [Conversation Stream Command](#conversation-stream-command)
   - [StreamEntry JSON Schema](#streamentry-json-schema)
   - [Example Stream Output](#example-stream-output)
@@ -325,6 +326,78 @@ kodelet run --headless --resume CONVERSATION_ID "more questions"
 - CI/CD pipeline integration
 - Custom web interfaces
 - Monitoring and logging systems
+
+### Partial Message Streaming
+
+The `--stream-deltas` flag enables real-time token streaming in headless mode, outputting text as it's generated rather than waiting for complete messages. This creates a more responsive user experience similar to ChatGPT or Claude.io:
+
+```bash
+# Stream partial text deltas with headless output
+kodelet run --headless --stream-deltas "explain how TCP works"
+
+# Show only text deltas (real-time text streaming)
+kodelet run --headless --stream-deltas "write a poem" | \
+    jq -r 'select(.kind == "text-delta") | .delta' | tr -d '\n'
+
+# Show thinking in real-time
+kodelet run --headless --stream-deltas "solve this puzzle" | \
+    jq -r 'select(.kind == "thinking-delta") | .delta' | tr -d '\n'
+```
+
+**Delta Event Types:**
+
+| Kind | Description | Fields |
+|------|-------------|--------|
+| `text-delta` | Partial text content | `delta`, `conversation_id`, `role` |
+| `thinking-delta` | Partial thinking content | `delta`, `conversation_id`, `role` |
+| `thinking-start` | Thinking block begins | `conversation_id`, `role` |
+| `thinking-end` | Thinking block ends | `conversation_id`, `role` |
+| `content-end` | Content block ends | `conversation_id`, `role` |
+
+**Example Output:**
+
+```jsonl
+{"kind":"thinking-start","conversation_id":"abc123","role":"assistant"}
+{"kind":"thinking-delta","delta":"Let me","conversation_id":"abc123","role":"assistant"}
+{"kind":"thinking-delta","delta":" analyze this","conversation_id":"abc123","role":"assistant"}
+{"kind":"thinking-end","conversation_id":"abc123","role":"assistant"}
+{"kind":"text-delta","delta":"The","conversation_id":"abc123","role":"assistant"}
+{"kind":"text-delta","delta":" answer","conversation_id":"abc123","role":"assistant"}
+{"kind":"text-delta","delta":" is 42.","conversation_id":"abc123","role":"assistant"}
+{"kind":"content-end","conversation_id":"abc123","role":"assistant"}
+{"kind":"text","content":"The answer is 42.","conversation_id":"abc123","role":"assistant"}
+```
+
+Note: Complete messages (`text`, `thinking`, `tool-use`, `tool-result`) are still emitted after their delta streams, ensuring clients that ignore deltas still receive full content.
+
+**Third-Party UI Integration (Python):**
+
+```python
+import subprocess
+import json
+
+process = subprocess.Popen(
+    ["kodelet", "run", "--headless", "--stream-deltas", "explain recursion"],
+    stdout=subprocess.PIPE,
+    text=True
+)
+
+current_text = ""
+for line in process.stdout:
+    event = json.loads(line)
+    
+    if event["kind"] == "text-delta":
+        current_text += event["delta"]
+        update_ui(current_text)
+    elif event["kind"] == "thinking-start":
+        show_thinking_indicator()
+    elif event["kind"] == "thinking-delta":
+        update_thinking_panel(event["delta"])
+    elif event["kind"] == "thinking-end":
+        hide_thinking_indicator()
+    elif event["kind"] == "tool-use":
+        show_tool_execution(event["tool_name"], event["input"])
+```
 
 ### Conversation Stream Command
 
