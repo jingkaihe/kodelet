@@ -16,9 +16,12 @@ Usage:
 """
 
 import json
+import os
 import subprocess
 from datetime import datetime
 from pathlib import Path
+
+os.environ["STREAMLIT_THEME_BASE"] = "light"
 
 import streamlit as st
 
