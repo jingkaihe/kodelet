@@ -362,6 +362,8 @@ kodelet conversation list --search "keyword"
 # View conversation
 kodelet conversation show <id>
 kodelet conversation show <id> --format json
+kodelet conversation show <id> --stats-only        # Header/stats only, no messages
+kodelet conversation show <id> --no-header         # Messages only, no header
 
 # Stream conversation (real-time)
 kodelet conversation stream <id>
@@ -375,6 +377,18 @@ kodelet conversation delete <id>
 # 3. If it doesn't work: git reset --hard and continue with original
 kodelet conversation fork <id>
 ```
+
+**Output formats for `conversation show`:**
+
+| Format | Description |
+|--------|-------------|
+| `--format text` | Human-readable output (default) |
+| `--format json` | Structured JSON with id, provider, summary, usage, messages |
+| `--format raw` | Full `ConversationRecord` dump as JSON (includes rawMessages, toolResults, metadata, etc.) |
+
+**Flags:**
+- `--stats-only`: Show header/stats without messages
+- `--no-header`: Show messages only (for `text`/`json` formats)
 
 ## Configuration
 
