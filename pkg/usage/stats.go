@@ -202,8 +202,8 @@ func FormatCost(cost float64) string {
 	return fmt.Sprintf("$%.4f", cost)
 }
 
-func roundToFourDecimalPlaces(value float64) float64 {
-	return math.Round(value*10000) / 10000
+func roundToThreeDecimalPlaces(value float64) float64 {
+	return math.Round(value*1000) / 1000
 }
 
 // CalculateProviderBreakdownStats calculates usage statistics broken down by provider (accumulated totals)
@@ -360,32 +360,24 @@ func CalculateDailyProviderBreakdownStats(summaries []ConversationSummary, start
 // LogLLMUsage logs detailed LLM usage statistics including tokens, costs, and performance metrics
 func LogLLMUsage(ctx context.Context, usage llmtypes.Usage, model string, startTime time.Time, requestOutputTokens int) {
 	fields := map[string]any{
-		"model":                       model,
-		"input_tokens":                usage.InputTokens,
-		"output_tokens":               usage.OutputTokens,
-		"cache_creation_input_tokens": usage.CacheCreationInputTokens,
-		"cache_read_input_tokens":     usage.CacheReadInputTokens,
-		"input_cost":                  roundToFourDecimalPlaces(usage.InputCost),
-		"output_cost":                 roundToFourDecimalPlaces(usage.OutputCost),
-		"cache_creation_cost":         roundToFourDecimalPlaces(usage.CacheCreationCost),
-		"cache_read_cost":             roundToFourDecimalPlaces(usage.CacheReadCost),
-		"total_cost":                  roundToFourDecimalPlaces(usage.TotalCost()),
-		"total_tokens":                usage.TotalTokens(),
-		"current_context_window":      usage.CurrentContextWindow,
-		"max_context_window":          usage.MaxContextWindow,
+		"model":              model,
+		"input_tokens":       usage.InputTokens,
+		"output_tokens":      usage.OutputTokens,
+		"max_context_window": usage.MaxContextWindow,
+		"total_cost":         roundToThreeDecimalPlaces(usage.TotalCost()),
 	}
 
 	if usage.MaxContextWindow != 0 {
 		ratio := float64(usage.CurrentContextWindow) / float64(usage.MaxContextWindow)
-		fields["context_window_usage_ratio"] = roundToFourDecimalPlaces(ratio)
+		fields["context_window_usage_ratio"] = roundToThreeDecimalPlaces(ratio)
 	}
 
 	// Calculate output tokens per second using per-request tokens
 	duration := time.Since(startTime)
 	if duration > 0 && requestOutputTokens > 0 {
 		tokensPerSecond := float64(requestOutputTokens) / duration.Seconds()
-		fields["output_tokens/s"] = roundToFourDecimalPlaces(tokensPerSecond)
+		fields["output_tokens/s"] = roundToThreeDecimalPlaces(tokensPerSecond)
 	}
 
-	logger.G(ctx).WithFields(fields).Info("LLM usage completed")
+	logger.G(ctx).WithFields(fields).Info("Turn completed")
 }

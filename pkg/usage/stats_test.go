@@ -47,7 +47,7 @@ func (ts *testSetup) parseLogEntry(t *testing.T) map[string]any {
 }
 
 func (ts *testSetup) assertLogMessage(t *testing.T, logEntry map[string]any) {
-	assert.Equal(t, "LLM usage completed", logEntry["msg"])
+	assert.Equal(t, "Turn completed", logEntry["msg"])
 	assert.Equal(t, "info", logEntry["level"])
 }
 
@@ -79,15 +79,7 @@ func TestLogLLMUsage_NormalCase(t *testing.T) {
 	assert.Equal(t, model, logEntry["model"])
 	assert.Equal(t, float64(1000), logEntry["input_tokens"])
 	assert.Equal(t, float64(500), logEntry["output_tokens"])
-	assert.Equal(t, float64(200), logEntry["cache_creation_input_tokens"])
-	assert.Equal(t, float64(300), logEntry["cache_read_input_tokens"])
-	assert.Equal(t, 0.001, logEntry["input_cost"])
-	assert.Equal(t, 0.002, logEntry["output_cost"])
-	assert.Equal(t, 0.0001, logEntry["cache_creation_cost"])
-	assert.Equal(t, 0.0002, logEntry["cache_read_cost"])
-	assert.Equal(t, 0.0033, logEntry["total_cost"])          // 0.001 + 0.002 + 0.0001 + 0.0002
-	assert.Equal(t, float64(2000), logEntry["total_tokens"]) // 1000 + 500 + 200 + 300
-	assert.Equal(t, float64(2000), logEntry["current_context_window"])
+	assert.Equal(t, 0.003, logEntry["total_cost"]) // 0.001 + 0.002 + 0.0001 + 0.0002 rounded to 3 decimals
 	assert.Equal(t, float64(8000), logEntry["max_context_window"])
 
 	assert.Equal(t, 0.25, logEntry["context_window_usage_ratio"]) // 2000/8000 = 0.25
@@ -117,7 +109,6 @@ func TestLogLLMUsage_ZeroMaxContextWindow(t *testing.T) {
 	_, exists := logEntry["context_window_usage_ratio"]
 	assert.False(t, exists, "context_window_usage_ratio should not be calculated when max_context_window is 0")
 
-	assert.Equal(t, float64(150), logEntry["current_context_window"])
 	assert.Equal(t, float64(0), logEntry["max_context_window"])
 }
 
@@ -202,18 +193,15 @@ func TestLogLLMUsage_AllFieldsPresent(t *testing.T) {
 	logEntry := ts.parseLogEntry(t)
 
 	requiredFields := []string{
-		"model", "input_tokens", "output_tokens", "cache_creation_input_tokens",
-		"cache_read_input_tokens", "input_cost", "output_cost", "cache_creation_cost",
-		"cache_read_cost", "total_cost", "total_tokens", "current_context_window",
-		"max_context_window", "context_window_usage_ratio", "output_tokens/s",
+		"model", "input_tokens", "output_tokens",
+		"total_cost", "max_context_window", "context_window_usage_ratio", "output_tokens/s",
 	}
 
 	for _, field := range requiredFields {
 		assert.Contains(t, logEntry, field, "Field %s should be present in log entry", field)
 	}
 
-	assert.Equal(t, 0.0033, logEntry["total_cost"])                // Sum of all costs
-	assert.Equal(t, float64(185), logEntry["total_tokens"])        // Sum of all tokens
+	assert.Equal(t, 0.003, logEntry["total_cost"])                 // Sum of all costs rounded to 3 decimals
 	assert.Equal(t, 0.185, logEntry["context_window_usage_ratio"]) // 185/1000
 }
 
@@ -267,14 +255,14 @@ func TestLogLLMUsage_PrecisionValidation(t *testing.T) {
 
 	logEntry := ts.parseLogEntry(t)
 
-	// Verify total cost calculation (rounded to 4 decimal places)
+	// Verify total cost calculation (rounded to 3 decimal places)
 	// Original: 0.0012345 + 0.0067890 + 0.0001111 + 0.0002222 = 0.0083568
-	expectedRoundedTotalCost := 0.0084 // rounded to 4 decimal places
+	expectedRoundedTotalCost := 0.008 // rounded to 3 decimal places
 	assert.Equal(t, expectedRoundedTotalCost, logEntry["total_cost"])
 
-	// Verify context window ratio (rounded to 4 decimal places)
+	// Verify context window ratio (rounded to 3 decimal places)
 	// Original: 250/3000 = 0.08333333333333333
-	expectedRoundedRatio := 0.0833 // rounded to 4 decimal places
+	expectedRoundedRatio := 0.083 // rounded to 3 decimal places
 	assert.Equal(t, expectedRoundedRatio, logEntry["context_window_usage_ratio"])
 
 	// Verify tokens per second (75 tokens in 0.5 seconds = 150 tokens/s)
