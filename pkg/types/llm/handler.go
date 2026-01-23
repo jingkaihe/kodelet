@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 
@@ -284,3 +285,96 @@ func (h *StringCollectorHandler) HandleContentBlockEnd() {
 		consoleMu.Unlock()
 	}
 }
+
+// HeadlessStreamHandler outputs streaming events as JSON to stdout
+// for headless mode with --stream-deltas enabled.
+type HeadlessStreamHandler struct {
+	conversationID string
+	mu             sync.Mutex
+}
+
+// DeltaEntry represents a streaming delta event for headless mode output
+type DeltaEntry struct {
+	Kind           string `json:"kind"`
+	Delta          string `json:"delta,omitempty"`
+	Content        string `json:"content,omitempty"`
+	ConversationID string `json:"conversation_id"`
+	Role           string `json:"role"`
+}
+
+// NewHeadlessStreamHandler creates a new HeadlessStreamHandler with the given conversation ID
+func NewHeadlessStreamHandler(conversationID string) *HeadlessStreamHandler {
+	return &HeadlessStreamHandler{
+		conversationID: conversationID,
+	}
+}
+
+func (h *HeadlessStreamHandler) output(entry DeltaEntry) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	data, _ := json.Marshal(entry)
+	fmt.Fprintf(os.Stdout, "%s\n", data)
+}
+
+// HandleTextDelta outputs text delta events
+func (h *HeadlessStreamHandler) HandleTextDelta(delta string) {
+	h.output(DeltaEntry{
+		Kind:           "text-delta",
+		Delta:          delta,
+		ConversationID: h.conversationID,
+		Role:           "assistant",
+	})
+}
+
+// HandleThinkingStart outputs thinking block start event
+func (h *HeadlessStreamHandler) HandleThinkingStart() {
+	h.output(DeltaEntry{
+		Kind:           "thinking-start",
+		ConversationID: h.conversationID,
+		Role:           "assistant",
+	})
+}
+
+// HandleThinkingDelta outputs thinking delta events
+func (h *HeadlessStreamHandler) HandleThinkingDelta(delta string) {
+	h.output(DeltaEntry{
+		Kind:           "thinking-delta",
+		Delta:          delta,
+		ConversationID: h.conversationID,
+		Role:           "assistant",
+	})
+}
+
+// HandleThinkingBlockEnd outputs thinking block end event
+func (h *HeadlessStreamHandler) HandleThinkingBlockEnd() {
+	h.output(DeltaEntry{
+		Kind:           "thinking-end",
+		ConversationID: h.conversationID,
+		Role:           "assistant",
+	})
+}
+
+// HandleContentBlockEnd outputs content block end event
+func (h *HeadlessStreamHandler) HandleContentBlockEnd() {
+	h.output(DeltaEntry{
+		Kind:           "content-end",
+		ConversationID: h.conversationID,
+		Role:           "assistant",
+	})
+}
+
+// HandleText is a no-op as complete text is handled by ConversationStreamer
+func (h *HeadlessStreamHandler) HandleText(_ string) {}
+
+// HandleToolUse is a no-op as tool calls are handled by ConversationStreamer
+func (h *HeadlessStreamHandler) HandleToolUse(_, _, _ string) {}
+
+// HandleToolResult is a no-op as tool results are handled by ConversationStreamer
+func (h *HeadlessStreamHandler) HandleToolResult(_, _ string, _ tooltypes.ToolResult) {}
+
+// HandleThinking is a no-op as complete thinking is handled by ConversationStreamer
+func (h *HeadlessStreamHandler) HandleThinking(_ string) {}
+
+// HandleDone is called when message processing is complete
+func (h *HeadlessStreamHandler) HandleDone() {}

@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"maps"
+	"os"
 	"testing"
 	"time"
 
@@ -184,4 +187,176 @@ func TestConversationFork(t *testing.T) {
 	// Assert that timestamps are different (forked should be newer)
 	assert.True(t, loadedForked.CreatedAt.After(loadedSource.CreatedAt) || loadedForked.CreatedAt.Equal(loadedSource.CreatedAt))
 	assert.True(t, loadedForked.UpdatedAt.After(loadedSource.UpdatedAt) || loadedForked.UpdatedAt.Equal(loadedSource.UpdatedAt))
+}
+
+func TestConversationShowConfigDefaults(t *testing.T) {
+	config := NewConversationShowConfig()
+
+	assert.Equal(t, "text", config.Format)
+	assert.False(t, config.NoHeader)
+	assert.False(t, config.StatsOnly)
+}
+
+func TestDisplayConversationHeader(t *testing.T) {
+	record := convtypes.ConversationRecord{
+		ID:        "test-conv-123",
+		Provider:  "anthropic",
+		Summary:   "Test conversation about Go testing",
+		CreatedAt: time.Date(2026, 1, 23, 10, 0, 0, 0, time.UTC),
+		UpdatedAt: time.Date(2026, 1, 23, 10, 30, 0, 0, time.UTC),
+		Usage: llmtypes.Usage{
+			InputTokens:              1000,
+			OutputTokens:             500,
+			CacheReadInputTokens:     200,
+			CacheCreationInputTokens: 100,
+			InputCost:                0.01,
+			OutputCost:               0.005,
+			CacheReadCost:            0.001,
+			CacheCreationCost:        0.002,
+			CurrentContextWindow:     5000,
+			MaxContextWindow:         200000,
+		},
+	}
+
+	output := captureStdout(t, func() {
+		displayConversationHeader(record)
+	})
+
+	assert.Contains(t, output, "test-conv-123")
+	assert.Contains(t, output, "anthropic")
+	assert.Contains(t, output, "Test conversation about Go testing")
+	assert.Contains(t, output, "2026-01-23T10:00:00Z")
+	assert.Contains(t, output, "2026-01-23T10:30:00Z")
+	assert.Contains(t, output, "1000")
+	assert.Contains(t, output, "500")
+	assert.Contains(t, output, "200")
+	assert.Contains(t, output, "100")
+	assert.Contains(t, output, "$0.0180")
+	assert.Contains(t, output, "5000 / 200000")
+}
+
+func TestDisplayConversationHeaderWithoutCache(t *testing.T) {
+	record := convtypes.ConversationRecord{
+		ID:        "test-conv-456",
+		Provider:  "openai",
+		CreatedAt: time.Date(2026, 1, 23, 10, 0, 0, 0, time.UTC),
+		UpdatedAt: time.Date(2026, 1, 23, 10, 30, 0, 0, time.UTC),
+		Usage: llmtypes.Usage{
+			InputTokens:  500,
+			OutputTokens: 250,
+			InputCost:    0.005,
+			OutputCost:   0.0025,
+		},
+	}
+
+	output := captureStdout(t, func() {
+		displayConversationHeader(record)
+	})
+
+	assert.Contains(t, output, "test-conv-456")
+	assert.Contains(t, output, "openai")
+	assert.Contains(t, output, "500")
+	assert.Contains(t, output, "250")
+	assert.NotContains(t, output, "Cache Read")
+	assert.NotContains(t, output, "Cache Creation")
+	assert.NotContains(t, output, "Context Window")
+}
+
+func TestDisplayConversationHeaderWithoutSummary(t *testing.T) {
+	record := convtypes.ConversationRecord{
+		ID:        "test-conv-789",
+		Provider:  "google",
+		CreatedAt: time.Date(2026, 1, 23, 10, 0, 0, 0, time.UTC),
+		UpdatedAt: time.Date(2026, 1, 23, 10, 30, 0, 0, time.UTC),
+		Usage: llmtypes.Usage{
+			InputTokens:  100,
+			OutputTokens: 50,
+		},
+	}
+
+	output := captureStdout(t, func() {
+		displayConversationHeader(record)
+	})
+
+	assert.Contains(t, output, "test-conv-789")
+	assert.Contains(t, output, "google")
+	assert.NotContains(t, output, "Summary:")
+}
+
+func TestConversationShowOutputJSON(t *testing.T) {
+	output := ConversationShowOutput{
+		ID:        "test-conv-json",
+		Provider:  "anthropic",
+		Summary:   "Test summary",
+		CreatedAt: time.Date(2026, 1, 23, 10, 0, 0, 0, time.UTC),
+		UpdatedAt: time.Date(2026, 1, 23, 10, 30, 0, 0, time.UTC),
+		Usage: llmtypes.Usage{
+			InputTokens:          1000,
+			OutputTokens:         500,
+			InputCost:            0.01,
+			OutputCost:           0.005,
+			CurrentContextWindow: 5000,
+			MaxContextWindow:     200000,
+		},
+		Messages: []llmtypes.Message{
+			{Role: "user", Content: "Hello"},
+			{Role: "assistant", Content: "Hi there!"},
+		},
+	}
+
+	jsonBytes, err := json.MarshalIndent(output, "", "  ")
+	require.NoError(t, err)
+
+	jsonStr := string(jsonBytes)
+	assert.Contains(t, jsonStr, `"id": "test-conv-json"`)
+	assert.Contains(t, jsonStr, `"provider": "anthropic"`)
+	assert.Contains(t, jsonStr, `"summary": "Test summary"`)
+	assert.Contains(t, jsonStr, `"inputTokens": 1000`)
+	assert.Contains(t, jsonStr, `"outputTokens": 500`)
+	assert.Contains(t, jsonStr, `"messages"`)
+	assert.Contains(t, jsonStr, `"role": "user"`)
+	assert.Contains(t, jsonStr, `"content": "Hello"`)
+}
+
+func TestConversationShowOutputJSONStatsOnly(t *testing.T) {
+	output := ConversationShowOutput{
+		ID:        "test-conv-stats",
+		Provider:  "openai",
+		CreatedAt: time.Date(2026, 1, 23, 10, 0, 0, 0, time.UTC),
+		UpdatedAt: time.Date(2026, 1, 23, 10, 30, 0, 0, time.UTC),
+		Usage: llmtypes.Usage{
+			InputTokens:  500,
+			OutputTokens: 250,
+		},
+	}
+
+	jsonBytes, err := json.MarshalIndent(output, "", "  ")
+	require.NoError(t, err)
+
+	jsonStr := string(jsonBytes)
+	assert.Contains(t, jsonStr, `"id": "test-conv-stats"`)
+	assert.Contains(t, jsonStr, `"provider": "openai"`)
+	assert.NotContains(t, jsonStr, `"messages"`)
+	assert.NotContains(t, jsonStr, `"summary"`)
+}
+
+func captureStdout(t *testing.T, f func()) string {
+	t.Helper()
+
+	oldStdout := os.Stdout
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+
+	os.Stdout = w
+
+	f()
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	_, err = io.Copy(&buf, r)
+	require.NoError(t, err)
+
+	return buf.String()
 }

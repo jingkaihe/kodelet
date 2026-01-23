@@ -61,12 +61,16 @@ func NewConversationDeleteConfig() *ConversationDeleteConfig {
 }
 
 type ConversationShowConfig struct {
-	Format string
+	Format    string
+	NoHeader  bool
+	StatsOnly bool
 }
 
 func NewConversationShowConfig() *ConversationShowConfig {
 	return &ConversationShowConfig{
-		Format: "text",
+		Format:    "text",
+		NoHeader:  false,
+		StatsOnly: false,
 	}
 }
 
@@ -187,11 +191,13 @@ var conversationEditCmd = &cobra.Command{
 
 type ConversationStreamConfig struct {
 	IncludeHistory bool
+	HistoryOnly    bool
 }
 
 func NewConversationStreamConfig() *ConversationStreamConfig {
 	return &ConversationStreamConfig{
 		IncludeHistory: false,
+		HistoryOnly:    false,
 	}
 }
 
@@ -239,6 +245,8 @@ func init() {
 
 	showDefaults := NewConversationShowConfig()
 	conversationShowCmd.Flags().String("format", showDefaults.Format, "Output format: raw, json, or text")
+	conversationShowCmd.Flags().Bool("no-header", showDefaults.NoHeader, "Skip header (stats/summary), show only messages")
+	conversationShowCmd.Flags().Bool("stats-only", showDefaults.StatsOnly, "Show only stats/summary without messages")
 
 	importDefaults := NewConversationImportConfig()
 	conversationImportCmd.Flags().Bool("force", importDefaults.Force, "Force overwrite existing conversation")
@@ -253,6 +261,8 @@ func init() {
 
 	streamDefaults := NewConversationStreamConfig()
 	conversationStreamCmd.Flags().Bool("include-history", streamDefaults.IncludeHistory, "Include historical conversation data before streaming new entries")
+	conversationStreamCmd.Flags().Bool("history-only", streamDefaults.HistoryOnly, "Output historical conversation data and exit (no live streaming)")
+	conversationStreamCmd.MarkFlagsMutuallyExclusive("include-history", "history-only")
 
 	conversationCmd.AddCommand(conversationListCmd)
 	conversationCmd.AddCommand(conversationDeleteCmd)
@@ -314,6 +324,12 @@ func getConversationShowConfigFromFlags(cmd *cobra.Command) *ConversationShowCon
 	if format, err := cmd.Flags().GetString("format"); err == nil {
 		config.Format = format
 	}
+	if noHeader, err := cmd.Flags().GetBool("no-header"); err == nil {
+		config.NoHeader = noHeader
+	}
+	if statsOnly, err := cmd.Flags().GetBool("stats-only"); err == nil {
+		config.StatsOnly = statsOnly
+	}
 
 	return config
 }
@@ -347,6 +363,9 @@ func getConversationStreamConfigFromFlags(cmd *cobra.Command) *ConversationStrea
 
 	if includeHistory, err := cmd.Flags().GetBool("include-history"); err == nil {
 		config.IncludeHistory = includeHistory
+	}
+	if historyOnly, err := cmd.Flags().GetBool("history-only"); err == nil {
+		config.HistoryOnly = historyOnly
 	}
 
 	return config
@@ -584,6 +603,16 @@ func deleteConversationCmd(ctx context.Context, id string, config *ConversationD
 	presenter.Success(fmt.Sprintf("Conversation %s deleted successfully", id))
 }
 
+type ConversationShowOutput struct {
+	ID        string             `json:"id"`
+	Provider  string             `json:"provider"`
+	Summary   string             `json:"summary,omitempty"`
+	CreatedAt time.Time          `json:"created_at"`
+	UpdatedAt time.Time          `json:"updated_at"`
+	Usage     llmtypes.Usage     `json:"usage"`
+	Messages  []llmtypes.Message `json:"messages,omitempty"`
+}
+
 func showConversationCmd(ctx context.Context, id string, config *ConversationShowConfig) {
 	store, err := conversations.GetConversationStore(ctx)
 	if err != nil {
@@ -598,26 +627,92 @@ func showConversationCmd(ctx context.Context, id string, config *ConversationSho
 		os.Exit(1)
 	}
 
-	messages, err := llm.ExtractMessages(record.Provider, record.RawMessages, record.ToolResults)
-	if err != nil {
-		presenter.Error(err, "Failed to parse conversation messages")
-		os.Exit(1)
-	}
 	switch config.Format {
 	case "raw":
-		fmt.Println(string(record.RawMessages))
-	case "json":
-		outputJSON, err := json.MarshalIndent(messages, "", "  ")
+		outputJSON, err := json.MarshalIndent(record, "", "  ")
 		if err != nil {
 			presenter.Error(err, "Failed to generate JSON output")
 			os.Exit(1)
 		}
 		fmt.Println(string(outputJSON))
+	case "json":
+		output := ConversationShowOutput{
+			ID:        record.ID,
+			Provider:  record.Provider,
+			Summary:   record.Summary,
+			CreatedAt: record.CreatedAt,
+			UpdatedAt: record.UpdatedAt,
+			Usage:     record.Usage,
+		}
+		if !config.StatsOnly {
+			messages, err := llm.ExtractMessages(record.Provider, record.RawMessages, record.ToolResults)
+			if err != nil {
+				presenter.Error(err, "Failed to parse conversation messages")
+				os.Exit(1)
+			}
+			output.Messages = messages
+		}
+		if config.NoHeader {
+			outputJSON, err := json.MarshalIndent(output.Messages, "", "  ")
+			if err != nil {
+				presenter.Error(err, "Failed to generate JSON output")
+				os.Exit(1)
+			}
+			fmt.Println(string(outputJSON))
+		} else {
+			outputJSON, err := json.MarshalIndent(output, "", "  ")
+			if err != nil {
+				presenter.Error(err, "Failed to generate JSON output")
+				os.Exit(1)
+			}
+			fmt.Println(string(outputJSON))
+		}
 	case "text":
-		displayConversation(messages)
+		showHeader := !config.NoHeader
+		showMessages := !config.StatsOnly
+		if showHeader {
+			displayConversationHeader(record)
+			if showMessages {
+				fmt.Println()
+			}
+		}
+		if showMessages {
+			messages, err := llm.ExtractMessages(record.Provider, record.RawMessages, record.ToolResults)
+			if err != nil {
+				presenter.Error(err, "Failed to parse conversation messages")
+				os.Exit(1)
+			}
+			displayConversation(messages)
+		}
 	default:
 		presenter.Error(errors.Errorf("unsupported format: %s", config.Format), "Unknown format. Supported formats are raw, json, and text")
 		os.Exit(1)
+	}
+}
+
+func displayConversationHeader(record convtypes.ConversationRecord) {
+	presenter.Section("Conversation Info")
+	fmt.Printf("ID:        %s\n", record.ID)
+	fmt.Printf("Provider:  %s\n", record.Provider)
+	fmt.Printf("Created:   %s\n", record.CreatedAt.Format(time.RFC3339))
+	fmt.Printf("Updated:   %s\n", record.UpdatedAt.Format(time.RFC3339))
+
+	if record.Summary != "" {
+		fmt.Printf("Summary:   %s\n", record.Summary)
+	}
+
+	usage := record.Usage
+	fmt.Println()
+	presenter.Section("Usage Stats")
+	fmt.Printf("Input Tokens:   %d\n", usage.InputTokens)
+	fmt.Printf("Output Tokens:  %d\n", usage.OutputTokens)
+	if usage.CacheReadInputTokens > 0 || usage.CacheCreationInputTokens > 0 {
+		fmt.Printf("Cache Read:     %d\n", usage.CacheReadInputTokens)
+		fmt.Printf("Cache Creation: %d\n", usage.CacheCreationInputTokens)
+	}
+	fmt.Printf("Total Cost:     $%.4f\n", usage.TotalCost())
+	if usage.MaxContextWindow > 0 {
+		fmt.Printf("Context Window: %d / %d\n", usage.CurrentContextWindow, usage.MaxContextWindow)
 	}
 }
 
@@ -922,6 +1017,7 @@ func streamConversationCmd(ctx context.Context, conversationID string, config *C
 	streamOpts := conversations.StreamOpts{
 		Interval:       liveUpdateInterval,
 		IncludeHistory: config.IncludeHistory,
+		HistoryOnly:    config.HistoryOnly,
 	}
 	err = streamer.StreamLiveUpdates(ctx, conversationID, streamOpts)
 	if err != nil {
