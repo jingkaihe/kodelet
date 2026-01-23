@@ -15,7 +15,7 @@ Kodelet is a lightweight CLI tool that helps with software engineering tasks. It
 ├── adrs/                # Architecture Decision Records (18 ADRs documenting key decisions)
 ├── bin/                 # Compiled binaries
 ├── cmd/                 # Application entry point
-│   └── kodelet/         # Main application command (30 command files)
+│   └── kodelet/         # Main application command (28 command files)
 ├── config.sample.yaml   # Sample configuration file
 ├── docs/                # Documentation files
 ├── Dockerfile           # Docker runtime image configuration
@@ -53,7 +53,6 @@ Kodelet is a lightweight CLI tool that helps with software engineering tasks. It
 │   │   │       ├── openai/  # OpenAI model presets
 │   │   │       └── xai/     # X.AI (Grok) model presets
 │   │   └── prompts/     # Common LLM prompts
-│   ├── llmstxt/         # LLM-friendly documentation (llms.txt)
 │   ├── logger/          # Context-aware structured logging
 │   ├── osutil/          # OS utilities and process management
 │   ├── presenter/       # User-facing output and formatting
@@ -64,7 +63,6 @@ Kodelet is a lightweight CLI tool that helps with software engineering tasks. It
 │   ├── telemetry/       # Telemetry and tracing components (OpenTelemetry)
 │   ├── tools/           # Tool implementations (31 tool files)
 │   │   └── renderers/   # Tool output renderers
-│   ├── tui/             # Terminal UI components (Bubble Tea)
 │   ├── types/           # Common types
 │   │   ├── conversations/ # Conversation related types
 │   │   ├── llm/         # LLM related types
@@ -78,6 +76,8 @@ Kodelet is a lightweight CLI tool that helps with software engineering tasks. It
 ├── README.md            # Project overview
 ├── recipes/             # Sample fragment/recipe templates
 ├── RELEASE.md           # Release notes
+├── skills/              # Built-in skills directory
+│   └── kodelet/         # Kodelet CLI usage skill
 ├── scripts/             # Build and utility scripts
 ├── tests/               # Test files
 │   └── acceptance/      # Acceptance tests
@@ -95,7 +95,6 @@ The codebase follows a modular structure with separation of concerns between LLM
 - **MCP v0.29.0** - Model Context Protocol for AI tool integration
 - **SQLite (modernc.org/sqlite)** - Pure Go database implementation
 - **Logrus** - Structured logging library
-- **Charm libraries** - TUI components (Bubble Tea, Lipgloss, Bubbles)
 - **Cobra & Viper** - CLI commands and configuration
 - **React 18 & TypeScript** - Web UI frontend
 - **Vite** - Frontend build tool
@@ -183,8 +182,8 @@ For comprehensive usage documentation and examples, see [./docs/MANUAL.md](./doc
 ```bash
 # Core commands
 kodelet run "query"                    # One-shot execution
-kodelet chat                           # Interactive mode
 kodelet serve [--host HOST] [--port PORT]  # Web UI server (default: localhost:8080)
+toad acp 'kodelet acp'                 # Interactive chat via ACP
 
 # Fragment/Recipe system (see docs/FRAGMENTS.md)
 kodelet run -r init                    # Bootstrap AGENTS.md for repository
@@ -198,7 +197,6 @@ kodelet conversation list|show|delete  # Manage conversations
 kodelet conversation edit [--editor editor] [--edit-args "args"] ID  # Edit conversation JSON
 kodelet run --resume ID "more"         # Continue specific conversation
 kodelet run --follow "continue"        # Continue most recent conversation
-kodelet chat --follow                  # Resume most recent in chat mode
 
 # Feedback system
 kodelet feedback --conversation-id ID "message"  # Send feedback to specific conversation
@@ -218,7 +216,6 @@ kodelet anthropic accounts default <alias>  # Set default account
 kodelet anthropic accounts rename <old> <new>  # Rename an account alias
 kodelet anthropic accounts remove <alias>   # Remove an account
 kodelet run --account work "query"     # Use specific account for run
-kodelet chat --account work            # Use specific account for chat
 
 # PR management
 kodelet pr-respond --pr-url URL                           # Respond to latest @kodelet mention
@@ -234,10 +231,6 @@ kodelet ralph --iterations 50          # Run for more iterations
 # Image support
 kodelet run --image path.png "query"   # Single/multiple images
 kodelet run --image file1.png --image file2.png "compare these"
-
-# LLM-friendly documentation
-kodelet llms.txt                       # Display LLM-friendly usage guide
-# Web endpoint: http://localhost:8080/llms.txt (when running kodelet serve)
 
 # Development
 mise run build|test|lint|format|release    # Standard dev commands
@@ -360,10 +353,14 @@ if err != nil {
 
 Kodelet supports model-invoked skills that package domain expertise into discoverable capabilities:
 
-- **Location**: `.kodelet/skills/<name>/SKILL.md` (repo) or `~/.kodelet/skills/<name>/SKILL.md` (global)
+- **Location**: `.kodelet/skills/<name>/SKILL.md` (repo), `~/.kodelet/skills/<name>/SKILL.md` (global), or `skills/<name>/SKILL.md` (built-in)
 - **Invocation**: Automatic - model decides when skills are relevant to the task
 - **Configuration**: `skills.enabled` and `skills.allowed` in config
 - **CLI**: `--no-skills` flag to disable skills for a session
+- **Symlink support**: Skills can be symlinked directories for easier management and sharing
+
+**Built-in skills**:
+- `kodelet` - Comprehensive CLI usage guide including commands, configuration, and workflows (formerly llms.txt content)
 
 Skills differ from fragments/recipes: skills are model-invoked (automatic), while fragments are user-invoked (explicit).
 

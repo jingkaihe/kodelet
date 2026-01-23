@@ -1,5 +1,21 @@
 # Kodelet
 
+## 0.1.49.beta (2026-01-23)
+
+### Breaking Changes
+
+**Removed `kodelet chat` command**: The interactive chat mode has been removed in favor of ACP (Agent Client Protocol) based interaction. Users should now use `toad acp 'kodelet acp'` for interactive sessions. The TUI implementation and all Charm library dependencies (Bubble Tea, Lipgloss, Bubbles) have been removed.
+
+**Removed `/llms.txt` web endpoint**: The llms.txt content is no longer served as a web endpoint. This functionality has been migrated to the built-in kodelet skill.
+
+### Features
+
+**Built-in kodelet skill**: Migrated llms.txt documentation to a built-in skill at `skills/kodelet/SKILL.md`. The skill provides comprehensive CLI usage guide including commands, configuration, and workflows. The model will automatically discover and use this skill when users ask about kodelet features.
+
+**Symlink support for skills**: Skills directories now properly support symbolic links. The skill discovery system follows symlinks to skill directories while gracefully handling broken symlinks and symlinks to files.
+
+**Updated model configurations**: Added support for newer GPT models including `gpt-5.2-codex` and `gpt-5.1-codex-mini` in default configuration profiles. Updated OpenAI profile to use `use_responses_api: true` and `reasoning_effort: high`.
+
 ## 0.1.48.beta (2026-01-23)
 
 ### Internal Changes

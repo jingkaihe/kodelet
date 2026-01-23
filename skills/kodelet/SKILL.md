@@ -1,3 +1,8 @@
+---
+name: kodelet
+description: Kodelet CLI usage guide, commands, configuration, and workflows. Use when users ask about kodelet features, commands, configuration options, or how to accomplish tasks with kodelet.
+---
+
 # Kodelet - LLM-Friendly Guide
 
 > **Kodelet** is a lightweight agentic SWE Agent that runs as an interactive CLI tool. It performs software engineering and production operations tasks using AI assistance.
@@ -36,6 +41,19 @@ kodelet run --no-save "temporary query"
 # Output only the final result (no intermediate output or usage stats)
 kodelet run --result-only "what is 2+2"
 ```
+
+### Interactive Chat Mode (ACP)
+For extended conversations and complex tasks, use the Agent Client Protocol (ACP) with a compatible client like `toad`:
+
+```bash
+toad acp 'kodelet acp'             # Start interactive chat via ACP
+```
+
+The ACP mode provides a rich interactive experience with features like:
+- Real-time streaming responses
+- Tool execution visualization
+- Conversation persistence
+- Multi-turn conversations
 
 ## Key Features
 
@@ -158,7 +176,6 @@ skills:
 **Disabling skills:**
 ```bash
 kodelet run --no-skills "query"
-kodelet chat --no-skills
 ```
 
 ### Agent Lifecycle Hooks
@@ -247,7 +264,6 @@ fi
 **Disabling hooks:**
 ```bash
 kodelet run --no-hooks "query"
-kodelet chat --no-hooks
 ```
 
 ### Git Integration
@@ -372,7 +388,7 @@ aliases:
     gemini-flash: gemini-2.5-flash
     gemini-pro: gemini-2.5-pro
     haiku-35: claude-3-5-haiku-20241022
-    opus-41: claude-opus-4-1-20250805
+    opus-45: claude-opus-4-5-20251101
     sonnet-45: claude-sonnet-4-5-20250929
 max_tokens: 16000
 model: sonnet-45
@@ -403,7 +419,7 @@ profiles:
         weak_model: gpt-5
     premium:
         max_tokens: 16000
-        model: opus-41
+        opus-45: claude-opus-4-5-20251101
         thinking_budget_tokens: 8000
         weak_model: sonnet-45
         weak_model_max_tokens: 8192

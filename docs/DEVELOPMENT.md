@@ -192,11 +192,6 @@ mise run frontend-test-coverage
    ./bin/kodelet run "test query"
    ```
 
-3. Run specific functionality:
-   ```bash
-   ./bin/kodelet chat
-   ```
-
 ## Project Structure
 
 ```

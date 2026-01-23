@@ -170,7 +170,6 @@ Disable skills for a single session:
 
 ```bash
 kodelet run --no-skills "your query"
-kodelet chat --no-skills
 ```
 
 ## Working with Skills

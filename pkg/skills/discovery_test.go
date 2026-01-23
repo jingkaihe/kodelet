@@ -76,6 +76,102 @@ Some content here.
 	assert.Equal(t, "Another test skill", anotherSkill.Description)
 }
 
+func TestDiscoverSkillsWithSymlinks(t *testing.T) {
+	tmpDir := t.TempDir()
+	skillsDir := filepath.Join(tmpDir, "skills")
+	require.NoError(t, os.MkdirAll(skillsDir, 0o755))
+
+	// Create actual skill directory outside the skills search path
+	actualSkillDir := filepath.Join(tmpDir, "actual-skills", "symlinked-skill")
+	require.NoError(t, os.MkdirAll(actualSkillDir, 0o755))
+	skillContent := `---
+name: symlinked-skill
+description: A skill accessed via symlink
+---
+
+# Symlinked Skill
+
+This skill is accessed through a symbolic link.
+`
+	require.NoError(t, os.WriteFile(filepath.Join(actualSkillDir, "SKILL.md"), []byte(skillContent), 0o644))
+
+	// Create symlink in the skills directory pointing to actual skill
+	symlinkPath := filepath.Join(skillsDir, "symlinked-skill")
+	require.NoError(t, os.Symlink(actualSkillDir, symlinkPath))
+
+	// Also create a regular skill to verify both work together
+	regularSkillDir := filepath.Join(skillsDir, "regular-skill")
+	require.NoError(t, os.MkdirAll(regularSkillDir, 0o755))
+	regularContent := `---
+name: regular-skill
+description: A regular skill directory
+---
+
+# Regular Skill
+
+This is a regular skill directory.
+`
+	require.NoError(t, os.WriteFile(filepath.Join(regularSkillDir, "SKILL.md"), []byte(regularContent), 0o644))
+
+	discovery, err := NewDiscovery(WithSkillDirs(skillsDir))
+	require.NoError(t, err)
+
+	skills, err := discovery.DiscoverSkills()
+	require.NoError(t, err)
+	assert.Len(t, skills, 2)
+
+	// Verify symlinked skill is discovered
+	symlinkedSkill, exists := skills["symlinked-skill"]
+	require.True(t, exists, "symlinked skill should be discovered")
+	assert.Equal(t, "symlinked-skill", symlinkedSkill.Name)
+	assert.Equal(t, "A skill accessed via symlink", symlinkedSkill.Description)
+	assert.Equal(t, symlinkPath, symlinkedSkill.Directory)
+	assert.Contains(t, symlinkedSkill.Content, "accessed through a symbolic link")
+
+	// Verify regular skill is still discovered
+	regularSkill, exists := skills["regular-skill"]
+	require.True(t, exists, "regular skill should be discovered")
+	assert.Equal(t, "regular-skill", regularSkill.Name)
+}
+
+func TestDiscoverSkillsIgnoresSymlinkToFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	skillsDir := filepath.Join(tmpDir, "skills")
+	require.NoError(t, os.MkdirAll(skillsDir, 0o755))
+
+	// Create a file to symlink to (not a directory)
+	targetFile := filepath.Join(tmpDir, "somefile.txt")
+	require.NoError(t, os.WriteFile(targetFile, []byte("just a file"), 0o644))
+
+	// Create symlink to file in skills directory
+	symlinkPath := filepath.Join(skillsDir, "file-symlink")
+	require.NoError(t, os.Symlink(targetFile, symlinkPath))
+
+	discovery, err := NewDiscovery(WithSkillDirs(skillsDir))
+	require.NoError(t, err)
+
+	skills, err := discovery.DiscoverSkills()
+	require.NoError(t, err)
+	assert.Empty(t, skills, "symlink to file should be ignored")
+}
+
+func TestDiscoverSkillsIgnoresBrokenSymlink(t *testing.T) {
+	tmpDir := t.TempDir()
+	skillsDir := filepath.Join(tmpDir, "skills")
+	require.NoError(t, os.MkdirAll(skillsDir, 0o755))
+
+	// Create symlink to non-existent target
+	symlinkPath := filepath.Join(skillsDir, "broken-symlink")
+	require.NoError(t, os.Symlink("/non/existent/path", symlinkPath))
+
+	discovery, err := NewDiscovery(WithSkillDirs(skillsDir))
+	require.NoError(t, err)
+
+	skills, err := discovery.DiscoverSkills()
+	require.NoError(t, err)
+	assert.Empty(t, skills, "broken symlink should be ignored")
+}
+
 func TestDiscoveryPrecedence(t *testing.T) {
 	tmpDir1 := t.TempDir()
 	tmpDir2 := t.TempDir()

@@ -428,7 +428,6 @@ For `agent_stop` hooks:
 
 ```bash
 kodelet run --no-hooks "your query"
-kodelet chat --no-hooks
 ```
 
 ## Debugging Hooks

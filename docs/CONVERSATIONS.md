@@ -52,30 +52,21 @@ kodelet conversation delete --no-confirm <conversation-id>
 
 ## Resuming Conversations
 
-You can resume a conversation either in interactive chat mode or one-shot mode:
+You can resume a conversation in one-shot mode:
 
 ```bash
-# Resume in chat mode
-kodelet chat --resume <conversation-id>
-
 # Resume in one-shot mode
 kodelet run --resume <conversation-id> "new message"
 ```
 
 ## Storage
 
-Conversation data is stored locally and can be configured to use either JSON files (default) or SQLite:
-
-```bash
-# Specify storage type
-kodelet chat --storage sqlite
-```
+Conversation data is stored locally using SQLite by default.
 
 ## Disabling Persistence
 
 You can disable conversation persistence for any session:
 
 ```bash
-kodelet chat --no-save
 kodelet run --no-save "query"
 ```

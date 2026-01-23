@@ -17,7 +17,6 @@ import (
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/gorilla/mux"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
-	"github.com/jingkaihe/kodelet/pkg/llmstxt"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/pkg/errors"
@@ -100,9 +99,6 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/conversations/{id}/tools/{toolCallId}", s.handleGetToolResult).Methods("GET")
 	api.HandleFunc("/conversations/{id}", s.handleDeleteConversation).Methods("DELETE")
 
-	// LLM-friendly documentation
-	s.router.HandleFunc("/llms.txt", s.handleLlmsTxt).Methods("GET")
-
 	// Static assets from the React build
 	s.router.PathPrefix("/assets/").Handler(s.staticFileHandler())
 
@@ -132,14 +128,6 @@ func (s *Server) handleReactSPA(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	w.Write(indexContent)
-}
-
-// handleLlmsTxt serves the embedded llms.txt content as markdown
-func (s *Server) handleLlmsTxt(w http.ResponseWriter, _ *http.Request) {
-	content := llmstxt.GetContent()
-	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
-	w.Header().Set("Cache-Control", "public, max-age=3600") // Cache for 1 hour
-	w.Write([]byte(content))
 }
 
 // loggingMiddleware logs HTTP requests

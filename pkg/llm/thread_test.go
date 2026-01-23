@@ -94,37 +94,6 @@ func TestConsoleMessageHandler(_ *testing.T) {
 	handler.HandleDone()
 }
 
-func TestChannelMessageHandler(t *testing.T) {
-	ch := make(chan llmtypes.MessageEvent, 4)
-	handler := &llmtypes.ChannelMessageHandler{MessageCh: ch}
-
-	handler.HandleText("Test text")
-	handler.HandleToolUse("call-1", "test-tool", "test-input")
-	handler.HandleToolResult("call-1", "test-tool", tooltypes.BaseToolResult{Result: "test-result"})
-	handler.HandleDone()
-
-	// Verify the events sent to the channel
-	event := <-ch
-	assert.Equal(t, llmtypes.EventTypeText, event.Type)
-	assert.Equal(t, "Test text", event.Content)
-	assert.False(t, event.Done)
-
-	event = <-ch
-	assert.Equal(t, llmtypes.EventTypeToolUse, event.Type)
-	assert.Equal(t, "test-tool\n  test-input", event.Content)
-	assert.False(t, event.Done)
-
-	event = <-ch
-	assert.Equal(t, llmtypes.EventTypeToolResult, event.Type)
-	assert.Contains(t, event.Content, "Success: true")
-	assert.False(t, event.Done)
-
-	event = <-ch
-	assert.Equal(t, llmtypes.EventTypeText, event.Type)
-	assert.Equal(t, "Done", event.Content)
-	assert.True(t, event.Done)
-}
-
 func TestStringCollectorHandler(t *testing.T) {
 	handler := &llmtypes.StringCollectorHandler{Silent: true}
 
