@@ -366,25 +366,6 @@ if config.Headless {
 }
 ```
 
-## Implementation Phases
-
-### Phase 1: Core Implementation (1-2 days)
-- [ ] Add `HeadlessStreamHandler` to `pkg/types/llm/handler.go`
-- [ ] Add `--stream-deltas` flag to `cmd/kodelet/run.go`
-- [ ] Wire up handler selection in headless mode
-- [ ] Add flag validation (requires `--headless`)
-
-### Phase 2: Testing (1 day)
-- [ ] Unit tests for `HeadlessStreamHandler`
-- [ ] Integration test verifying delta output format
-- [ ] Test interleaving of deltas and complete messages
-- [ ] Test with thinking-enabled models
-
-### Phase 3: Documentation (0.5 days)
-- [ ] Update `docs/MANUAL.md` with `--stream-deltas` documentation
-- [ ] Add usage examples for third-party UI integration
-- [ ] Update `AGENTS.md` if applicable
-
 ## Testing Strategy
 
 ### Unit Tests
