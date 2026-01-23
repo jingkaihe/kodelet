@@ -31,11 +31,11 @@ describe('ConversationHeader', () => {
       />
     );
     
-    expect(screen.getByText('conv-1234567890')).toBeInTheDocument();
     expect(screen.getByText('This is a test conversation summary')).toBeInTheDocument();
+    expect(screen.getByText('conv-1234567890')).toBeInTheDocument();
   });
 
-  it('shows placeholder when conversation has no summary', () => {
+  it('shows ID as heading when no summary is available', () => {
     const conversationWithoutSummary = {
       ...mockConversation,
       summary: undefined,
@@ -49,7 +49,7 @@ describe('ConversationHeader', () => {
       />
     );
     
-    expect(screen.getByText('No summary available')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'conv-1234567890' })).toBeInTheDocument();
   });
 
   it('allows user to export conversation', () => {
@@ -82,6 +82,7 @@ describe('ConversationHeader', () => {
     const loadingConversation = {
       ...mockConversation,
       id: '',
+      summary: undefined,
     };
     
     render(
@@ -92,7 +93,7 @@ describe('ConversationHeader', () => {
       />
     );
     
-    expect(screen.getByText('Loading...')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Loading...' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /export/i })).toBeDisabled();
     expect(screen.getByRole('button', { name: /delete/i })).toBeDisabled();
   });

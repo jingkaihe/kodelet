@@ -83,10 +83,10 @@ describe('BashRenderer', () => {
 
       render(<BashRenderer toolResult={toolResult} />);
 
-      expect(screen.getByText('🔄 Background Process')).toBeInTheDocument();
+      expect(screen.getByText('Background Process')).toBeInTheDocument();
       expect(screen.getByText('PID: 12345')).toBeInTheDocument();
       const badge = screen.getByText('PID: 12345');
-      expect(badge.className).toContain('badge-info');
+      expect(badge.className).toContain('font-heading');
     });
 
     it('renders background process metadata', () => {
@@ -140,10 +140,10 @@ describe('BashRenderer', () => {
 
       render(<BashRenderer toolResult={toolResult} />);
 
-      expect(screen.getByText('🖥️ Command Execution')).toBeInTheDocument();
-      expect(screen.getByText('Exit Code: 0')).toBeInTheDocument();
-      const badge = screen.getByText('Exit Code: 0');
-      expect(badge.className).toContain('badge-success');
+      expect(screen.getByText('Command Execution')).toBeInTheDocument();
+      expect(screen.getByText('Exit 0')).toBeInTheDocument();
+      const badge = screen.getByText('Exit 0');
+      expect(badge.className).toContain('font-heading');
     });
 
     it('renders failed command execution', () => {
@@ -155,9 +155,9 @@ describe('BashRenderer', () => {
 
       render(<BashRenderer toolResult={toolResult} />);
 
-      expect(screen.getByText('Exit Code: 127')).toBeInTheDocument();
-      const badge = screen.getByText('Exit Code: 127');
-      expect(badge.className).toContain('badge-error');
+      expect(screen.getByText('Exit 127')).toBeInTheDocument();
+      const badge = screen.getByText('Exit 127');
+      expect(badge.className).toContain('font-heading');
     });
 
     it('renders command metadata', () => {
@@ -211,7 +211,7 @@ describe('BashRenderer', () => {
 
       const collapsible = screen.getByTestId('collapsible');
       expect(collapsible).toBeInTheDocument();
-      expect(screen.getByText('Command Output')).toBeInTheDocument();
+      expect(screen.getByText('Output')).toBeInTheDocument();
     });
 
     it('shows "No output" when output is empty', () => {
@@ -247,9 +247,9 @@ describe('BashRenderer', () => {
 
       const { container } = render(<BashRenderer toolResult={toolResult} />);
 
-      const terminalOutput = container.querySelector('.mockup-code');
+      const terminalOutput = container.querySelector('.bg-kodelet-dark');
       expect(terminalOutput).toBeInTheDocument();
-      expect(terminalOutput).toHaveClass('bg-gray-900', 'text-green-400');
+      expect(terminalOutput).toHaveClass('bg-kodelet-dark', 'text-kodelet-green');
     });
 
     it('escapes HTML in output', () => {
@@ -289,9 +289,9 @@ describe('BashRenderer', () => {
 
       render(<BashRenderer toolResult={toolResult} />);
 
-      expect(screen.getByText('Exit Code: 0')).toBeInTheDocument();
-      const badge = screen.getByText('Exit Code: 0');
-      expect(badge.className).toContain('badge-success');
+      expect(screen.getByText('Exit 0')).toBeInTheDocument();
+      const badge = screen.getByText('Exit 0');
+      expect(badge.className).toContain('font-heading');
     });
   });
 });

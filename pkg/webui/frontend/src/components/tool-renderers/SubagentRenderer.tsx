@@ -23,16 +23,17 @@ const SubagentRenderer: React.FC<SubagentRendererProps> = ({ toolResult }) => {
 
   return (
     <ToolCard
-      title="🤖 Sub-agent"
+      title="Sub-agent"
+      badge={{ text: 'Delegated', className: 'bg-kodelet-blue/10 text-kodelet-blue border border-kodelet-blue/20' }}
     >
-      <div className="space-y-4">
+      <div className="space-y-3">
         <div>
-          <div className="text-xs text-base-content/60 mb-2">
-            <strong>Question:</strong>
+          <div className="text-xs font-heading font-medium text-kodelet-mid-gray mb-2">
+            Question:
           </div>
-          <div className="bg-primary/10 p-3 rounded-lg border border-primary/20">
+          <div className="bg-kodelet-blue/5 p-3 rounded border border-kodelet-blue/20">
             <div 
-              className="prose-enhanced subagent-response text-sm"
+              className="prose-enhanced subagent-response text-sm text-kodelet-dark"
               dangerouslySetInnerHTML={{
                 __html: formatMarkdown(meta.question)
               }}
@@ -42,12 +43,12 @@ const SubagentRenderer: React.FC<SubagentRendererProps> = ({ toolResult }) => {
 
         {meta.response && (
           <div>
-            <div className="text-xs text-base-content/60 mb-2">
-              <strong>Response:</strong>
+            <div className="text-xs font-heading font-medium text-kodelet-mid-gray mb-2">
+              Response:
             </div>
-            <div className="bg-base-200 p-4 rounded-lg border">
+            <div className="bg-kodelet-light-gray/30 p-3 rounded border border-kodelet-mid-gray/20">
               <div 
-                className="prose-enhanced subagent-response"
+                className="prose-enhanced subagent-response text-kodelet-dark"
                 dangerouslySetInnerHTML={{
                   __html: formatMarkdown(meta.response)
                 }}

@@ -21,21 +21,21 @@ const ThinkingRenderer: React.FC<ThinkingRendererProps> = ({ toolResult }) => {
   };
 
   return (
-    <div className="card bg-secondary/10 border border-secondary/20">
-      <div className="card-body">
-        <div className="flex items-center gap-2 mb-3">
-          <h4 className="font-semibold text-secondary">🧠 Thinking</h4>
-          <div className="badge badge-secondary badge-sm">Internal Process</div>
+    <div className="bg-kodelet-blue/5 border border-kodelet-blue/20 rounded p-3">
+      <div className="flex items-center gap-2 mb-3">
+        <h4 className="font-heading font-semibold text-sm text-kodelet-blue">Thinking</h4>
+        <div className="px-2 py-0.5 rounded text-xs font-heading font-medium bg-kodelet-blue/10 text-kodelet-blue border border-kodelet-blue/20">
+          Internal Process
         </div>
+      </div>
 
-        <div className="bg-base-200 p-4 rounded-lg border">
-          <div 
-            className="prose-enhanced text-sm italic leading-relaxed"
-            dangerouslySetInnerHTML={{
-              __html: formatThoughtContent(meta.thought)
-            }}
-          />
-        </div>
+      <div className="bg-kodelet-light-gray/30 p-3 rounded border border-kodelet-mid-gray/20">
+        <div 
+          className="prose-enhanced text-sm italic leading-relaxed text-kodelet-dark"
+          dangerouslySetInnerHTML={{
+            __html: formatThoughtContent(meta.thought)
+          }}
+        />
       </div>
     </div>
   );

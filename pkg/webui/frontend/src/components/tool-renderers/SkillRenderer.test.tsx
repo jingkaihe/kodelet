@@ -36,7 +36,7 @@ describe('SkillRenderer', () => {
     
     const badge = screen.getByText('kubernetes');
     expect(badge).toBeInTheDocument();
-    expect(badge.className).toContain('badge');
+    expect(badge.className).toContain('font-heading');
   });
 
   it('returns null when metadata is null', () => {

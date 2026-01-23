@@ -69,7 +69,7 @@ describe('GrepRenderer', () => {
 
     render(<GrepRenderer toolResult={toolResult} />);
 
-    expect(screen.getByText('🔍 Search Results')).toBeInTheDocument();
+    expect(screen.getByText('Search Results')).toBeInTheDocument();
     expect(screen.getByText('Pattern: TODO')).toBeInTheDocument();
   });
 
@@ -95,7 +95,7 @@ describe('GrepRenderer', () => {
 
     render(<GrepRenderer toolResult={toolResult} />);
 
-    expect(screen.getByText('2 matches in 2 files')).toBeInTheDocument();
+    expect(screen.getByText('2 in 2 files')).toBeInTheDocument();
   });
 
   it('shows truncated badge when truncated', () => {
@@ -107,10 +107,8 @@ describe('GrepRenderer', () => {
 
     render(<GrepRenderer toolResult={toolResult} />);
 
-    // Similar to GlobRenderer, GrepRenderer only shows the first badge
-    expect(screen.getByText('1 matches in 1 files')).toBeInTheDocument();
-    
-    // The component only passes badges[0] to ToolCard
+    // When truncated, the component shows "Truncated" badge
+    expect(screen.getByText('Truncated')).toBeInTheDocument();
   });
 
   it('shows path when provided', () => {
@@ -148,8 +146,8 @@ describe('GrepRenderer', () => {
 
     render(<GrepRenderer toolResult={toolResult} />);
 
-    expect(screen.getByText('📄 app.js')).toBeInTheDocument();
-    expect(screen.getByText('📄 test.js')).toBeInTheDocument();
+    expect(screen.getByText('app.js')).toBeInTheDocument();
+    expect(screen.getByText('test.js')).toBeInTheDocument();
     expect(screen.getByText('10:')).toBeInTheDocument();
     expect(screen.getByText('25:')).toBeInTheDocument();
   });
@@ -171,7 +169,7 @@ describe('GrepRenderer', () => {
 
     render(<GrepRenderer toolResult={toolResult} />);
 
-    expect(screen.getByText('📄 debug.js')).toBeInTheDocument();
+    expect(screen.getByText('debug.js')).toBeInTheDocument();
     expect(screen.getByText('3 matches')).toBeInTheDocument();
     expect(screen.getByText('1:')).toBeInTheDocument();
     expect(screen.getByText('5:')).toBeInTheDocument();
@@ -230,7 +228,8 @@ describe('GrepRenderer', () => {
 
     const highlightedText = container.querySelector('mark');
     expect(highlightedText).toBeInTheDocument();
-    expect(highlightedText).toHaveClass('bg-yellow-200', 'text-black');
+    expect(highlightedText?.className).toContain('bg-kodelet-orange');
+    expect(highlightedText?.className).toContain('text-kodelet-dark');
     expect(highlightedText?.textContent).toBe('error');
   });
 
@@ -257,7 +256,7 @@ describe('GrepRenderer', () => {
 
     render(<GrepRenderer toolResult={toolResult} />);
 
-    expect(screen.getByText('📄 Unknown')).toBeInTheDocument();
+    expect(screen.getByText('Unknown')).toBeInTheDocument();
   });
 
   it('escapes regex special characters in pattern', () => {

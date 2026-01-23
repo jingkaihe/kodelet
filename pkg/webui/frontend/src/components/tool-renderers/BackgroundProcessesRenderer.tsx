@@ -16,23 +16,23 @@ const BackgroundProcessesRenderer: React.FC<BackgroundProcessesRendererProps> = 
 
   const renderProcessList = (processes: BackgroundProcess[]) => {
     const processContent = processes.map((process, index) => {
-      const statusIcon = process.status === 'running' ? '🟢' : '🔴';
-      const statusClass = process.status === 'running' ? 'text-green-600' : 'text-red-600';
+      const statusBadgeClass = process.status === 'running' 
+        ? 'bg-kodelet-green/10 text-kodelet-green border-kodelet-green/20'
+        : 'bg-kodelet-orange/10 text-kodelet-orange border-kodelet-orange/20';
 
       return (
-        <div key={index} className="flex items-center justify-between p-2 hover:bg-base-100 rounded">
-          <div className="flex items-center gap-3">
-            <span aria-label={process.status}>{statusIcon}</span>
-            <div>
-              <div className="text-sm font-mono">
-                {escapeHtml(process.command || 'Unknown')}
-              </div>
-              <div className="text-xs text-base-content/60">
-                PID: {process.pid || 'Unknown'}
-              </div>
+        <div key={index} className="flex items-center justify-between p-2 hover:bg-kodelet-light-gray/20 rounded">
+          <div className="flex-1">
+            <div className="text-sm font-mono text-kodelet-dark">
+              {escapeHtml(process.command || 'Unknown')}
+            </div>
+            <div className="text-xs text-kodelet-mid-gray font-body">
+              PID: {process.pid || 'Unknown'}
             </div>
           </div>
-          <div className={`text-xs ${statusClass}`}>{process.status || 'Unknown'}</div>
+          <div className={`px-1.5 py-0.5 rounded text-xs font-heading font-medium border ${statusBadgeClass}`}>
+            {process.status || 'Unknown'}
+          </div>
         </div>
       );
     });
@@ -41,7 +41,7 @@ const BackgroundProcessesRenderer: React.FC<BackgroundProcessesRendererProps> = 
       <Collapsible
         title="Processes"
         collapsed={false}
-        badge={{ text: `${processes.length} processes`, className: 'badge-info' }}
+        badge={{ text: `${processes.length} processes`, className: 'bg-kodelet-blue/10 text-kodelet-blue border border-kodelet-blue/20' }}
       >
         <div>{processContent}</div>
       </Collapsible>
@@ -50,13 +50,13 @@ const BackgroundProcessesRenderer: React.FC<BackgroundProcessesRendererProps> = 
 
   return (
     <ToolCard
-      title="⚙️ Background Processes"
-      badge={{ text: `${processCount} processes`, className: 'badge-info' }}
+      title="Background Processes"
+      badge={{ text: `${processCount} processes`, className: 'bg-kodelet-blue/10 text-kodelet-blue border border-kodelet-blue/20' }}
     >
       {processes.length > 0 ? (
         renderProcessList(processes)
       ) : (
-        <div className="text-sm text-base-content/60">No background processes</div>
+        <div className="text-sm font-body text-kodelet-mid-gray">No background processes</div>
       )}
     </ToolCard>
   );

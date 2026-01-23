@@ -74,7 +74,7 @@ describe('FileReadRenderer', () => {
 
     render(<FileReadRenderer toolResult={toolResult} />);
 
-    expect(screen.getByText('📄 File Read')).toBeInTheDocument();
+    expect(screen.getByText('File Read')).toBeInTheDocument();
     expect(screen.getByText('Path: /home/user/test.js')).toBeInTheDocument();
   });
 
@@ -128,7 +128,7 @@ describe('FileReadRenderer', () => {
 
     expect(screen.getByText('Truncated')).toBeInTheDocument();
     const badge = screen.getByText('Truncated');
-    expect(badge.className).toContain('badge-warning');
+    expect(badge.className).toContain('font-heading');
   });
 
   it('detects language from file path when not provided', () => {
@@ -248,7 +248,7 @@ describe('FileReadRenderer', () => {
 
     const { container } = render(<FileReadRenderer toolResult={toolResult} />);
 
-    const codeContainer = container.querySelector('.bg-base-300');
+    const codeContainer = container.querySelector('.bg-kodelet-light');
     expect(codeContainer).toHaveClass('text-sm', 'font-mono', 'rounded-lg');
     expect(codeContainer).toHaveStyle({ maxHeight: '600px', overflowY: 'auto' });
   });
@@ -304,7 +304,7 @@ describe('FileReadRenderer', () => {
 
     render(<FileReadRenderer toolResult={toolResult} />);
 
-    expect(screen.getByText('💡 Use offset=12 to continue reading')).toBeInTheDocument();
+    expect(screen.getByText('Use offset=12 to continue reading')).toBeInTheDocument();
   });
 
   it('shows improved badge for remaining lines', () => {
@@ -317,9 +317,9 @@ describe('FileReadRenderer', () => {
 
     render(<FileReadRenderer toolResult={toolResult} />);
 
-    expect(screen.getByText('100 more lines')).toBeInTheDocument();
-    const badge = screen.getByText('100 more lines');
-    expect(badge.className).toContain('badge-info');
+    expect(screen.getByText('100 more')).toBeInTheDocument();
+    const badge = screen.getByText('100 more');
+    expect(badge.className).toContain('font-heading');
   });
 
   it('preserves truncation messages in display', () => {
@@ -351,6 +351,6 @@ describe('FileReadRenderer', () => {
 
     expect(screen.getByText('Truncated')).toBeInTheDocument();
     const badge = screen.getByText('Truncated');
-    expect(badge.className).toContain('badge-warning');
+    expect(badge.className).toContain('font-heading');
   });
 });

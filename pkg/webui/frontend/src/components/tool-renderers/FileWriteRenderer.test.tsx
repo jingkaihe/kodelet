@@ -108,10 +108,10 @@ describe('FileWriteRenderer', () => {
 
     render(<FileWriteRenderer toolResult={toolResult} />);
 
-    expect(screen.getByText('📝 File Written')).toBeInTheDocument();
+    expect(screen.getByText('File Written')).toBeInTheDocument();
     expect(screen.getByText('Success')).toBeInTheDocument();
     const badge = screen.getByText('Success');
-    expect(badge.className).toContain('badge-success');
+    expect(badge.className).toContain('font-heading');
     expect(screen.getByText('Path: /home/user/output.txt')).toBeInTheDocument();
   });
 
@@ -179,8 +179,8 @@ describe('FileWriteRenderer', () => {
 
     const collapsible = screen.getByTestId('collapsible');
     expect(collapsible).toBeInTheDocument();
-    const viewContentElements = screen.getAllByText('View Content');
-    expect(viewContentElements).toHaveLength(2); // Title and badge
+    expect(screen.getByText('Content')).toBeInTheDocument();
+    expect(screen.getByText('Preview')).toBeInTheDocument();
   });
 
   it('passes correct props to CodeBlock', () => {

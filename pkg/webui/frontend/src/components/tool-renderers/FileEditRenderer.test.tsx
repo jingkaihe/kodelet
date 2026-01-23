@@ -70,7 +70,7 @@ describe('FileEditRenderer', () => {
 
       render(<FileEditRenderer toolResult={toolResult} />);
 
-      expect(screen.getByText('✏️ File Edit')).toBeInTheDocument();
+      expect(screen.getByText('File Edit')).toBeInTheDocument();
       expect(screen.getByText('Path: /src/app.js')).toBeInTheDocument();
     });
 
@@ -87,7 +87,7 @@ describe('FileEditRenderer', () => {
 
       expect(screen.getByText('2 edits')).toBeInTheDocument();
       const badge = screen.getByText('2 edits');
-      expect(badge.className).toContain('badge-info');
+      expect(badge.className).toContain('font-heading');
     });
 
     it('shows singular edit for single edit', () => {
@@ -119,7 +119,7 @@ describe('FileEditRenderer', () => {
       render(<FileEditRenderer toolResult={toolResult} />);
 
       expect(screen.getByText('Edit 1: Lines 10-12')).toBeInTheDocument();
-      expect(screen.getByText('View Changes')).toBeInTheDocument();
+      expect(screen.getByText('Changes')).toBeInTheDocument();
     });
 
     it('shows collapsible uncollapsed by default', () => {
@@ -307,7 +307,7 @@ describe('FileEditRenderer', () => {
 
       render(<FileEditRenderer toolResult={toolResult} />);
 
-      expect(screen.queryByText('View Changes')).not.toBeInTheDocument();
+      expect(screen.queryByText('Changes')).not.toBeInTheDocument();
     });
 
     it('applies correct diff colors', () => {
@@ -325,10 +325,9 @@ describe('FileEditRenderer', () => {
 
       const { container } = render(<FileEditRenderer toolResult={toolResult} />);
 
-      // Check for background colors
-      expect(container.querySelector('.bg-red-50')).toBeInTheDocument();
-      expect(container.querySelector('.bg-green-50')).toBeInTheDocument();
-      expect(container.querySelector('.bg-white')).toBeInTheDocument();
+      // Check for background colors (with opacity classes)
+      expect(container.querySelector('[class*="bg-kodelet-orange"]')).toBeInTheDocument();
+      expect(container.querySelector('[class*="bg-kodelet-green"]')).toBeInTheDocument();
     });
   });
 
@@ -347,10 +346,10 @@ describe('FileEditRenderer', () => {
 
       render(<FileEditRenderer toolResult={toolResult} />);
 
-      expect(screen.getByText('🔄 File Edit (Replace All)')).toBeInTheDocument();
+      expect(screen.getByText('File Edit (Replace All)')).toBeInTheDocument();
       expect(screen.getByText('3 replacements')).toBeInTheDocument();
       expect(screen.getByText('Mode: Replace All')).toBeInTheDocument();
-      expect(screen.getByText('View All Changes')).toBeInTheDocument();
+      expect(screen.getByText('All Changes')).toBeInTheDocument();
       expect(screen.getByText('3 locations')).toBeInTheDocument();
     });
 
@@ -366,7 +365,7 @@ describe('FileEditRenderer', () => {
 
       render(<FileEditRenderer toolResult={toolResult} />);
 
-      expect(screen.getByText('✏️ File Edit')).toBeInTheDocument();
+      expect(screen.getByText('File Edit')).toBeInTheDocument();
       expect(screen.getByText('1 replacement')).toBeInTheDocument();
       expect(screen.getByText('Mode: Replace All')).toBeInTheDocument();
     });
@@ -381,7 +380,7 @@ describe('FileEditRenderer', () => {
 
       render(<FileEditRenderer toolResult={toolResult} />);
 
-      expect(screen.getByText('✏️ File Edit')).toBeInTheDocument();
+      expect(screen.getByText('File Edit')).toBeInTheDocument();
       expect(screen.getByText('0 replacements')).toBeInTheDocument();
       expect(screen.getByText('Mode: Replace All')).toBeInTheDocument();
     });
@@ -421,7 +420,7 @@ describe('FileEditRenderer', () => {
 
       render(<FileEditRenderer toolResult={toolResult} />);
 
-      expect(screen.getByText('🔄 File Edit (Replace All)')).toBeInTheDocument();
+      expect(screen.getByText('File Edit (Replace All)')).toBeInTheDocument();
       expect(screen.getByText('2 replacements')).toBeInTheDocument();
     });
 
@@ -437,7 +436,7 @@ describe('FileEditRenderer', () => {
 
       render(<FileEditRenderer toolResult={toolResult} />);
 
-      expect(screen.getByText('✏️ File Edit')).toBeInTheDocument();
+      expect(screen.getByText('File Edit')).toBeInTheDocument();
       expect(screen.getByText('1 edit')).toBeInTheDocument();
       expect(screen.queryByText('Mode: Replace All')).not.toBeInTheDocument();
     });

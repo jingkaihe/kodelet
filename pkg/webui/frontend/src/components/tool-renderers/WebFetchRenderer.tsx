@@ -30,7 +30,7 @@ const WebFetchRenderer: React.FC<WebFetchRendererProps> = ({ toolResult }) => {
       return safeUrl !== '#' ? (
         <img src={safeUrl} alt="Fetched image" className="max-w-full h-auto rounded" />
       ) : (
-        <div className="text-sm text-base-content/60">Invalid image URL</div>
+        <div className="text-sm font-body text-kodelet-mid-gray">Invalid image URL</div>
       );
     }
 
@@ -39,13 +39,13 @@ const WebFetchRenderer: React.FC<WebFetchRendererProps> = ({ toolResult }) => {
       return <CodeBlock code={meta.content} language={language} showLineNumbers={true} maxHeight={400} />;
     }
 
-    return <div className="text-sm text-base-content/60">Content preview not available</div>;
+    return <div className="text-sm font-body text-kodelet-mid-gray">Content preview not available</div>;
   };
 
   return (
     <ToolCard
-      title="🌐 Web Fetch"
-      badge={{ text: 'Success', className: 'badge-success' }}
+      title="Web Fetch"
+      badge={{ text: 'Success', className: 'bg-kodelet-green/10 text-kodelet-green border border-kodelet-green/20' }}
       actions={
         safeUrl !== '#' ? (
           <ExternalLink href={safeUrl} className="btn btn-ghost btn-xs">
@@ -68,7 +68,7 @@ const WebFetchRenderer: React.FC<WebFetchRendererProps> = ({ toolResult }) => {
         ) : undefined
       }
     >
-      <div className="text-xs text-base-content/60 mb-3 font-mono">
+      <div className="mb-3">
         <div className="space-y-1">
           <MetadataRow label="URL" value={meta.url} monospace />
           {meta.contentType && <MetadataRow label="Content Type" value={meta.contentType} />}
@@ -81,7 +81,7 @@ const WebFetchRenderer: React.FC<WebFetchRendererProps> = ({ toolResult }) => {
         <Collapsible
           title="Fetched Content"
           collapsed={true}
-          badge={{ text: 'View Content', className: 'badge-info' }}
+          badge={{ text: 'View Content', className: 'bg-kodelet-blue/10 text-kodelet-blue border border-kodelet-blue/20' }}
         >
           {renderWebContent(meta)}
         </Collapsible>

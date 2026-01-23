@@ -16,10 +16,10 @@ const ImageRecognitionRenderer: React.FC<ImageRecognitionRendererProps> = ({ too
 
   return (
     <ToolCard
-      title="👁️ Image Recognition"
-      badge={{ text: 'Analyzed', className: 'badge-success' }}
+      title="Image Recognition"
+      badge={{ text: 'Analyzed', className: 'bg-kodelet-green/10 text-kodelet-green border border-kodelet-green/20' }}
     >
-      <div className="text-xs text-base-content/60 mb-3 font-mono">
+      <div className="mb-3">
         <div className="space-y-1">
           {imagePath && <MetadataRow label="Image" value={imagePath} monospace />}
           {meta.prompt && <MetadataRow label="Prompt" value={meta.prompt} />}
@@ -27,8 +27,8 @@ const ImageRecognitionRenderer: React.FC<ImageRecognitionRendererProps> = ({ too
       </div>
 
       {analysis && (
-        <div className="bg-base-100 p-3 rounded">
-          <div className="text-sm">{escapeHtml(analysis)}</div>
+        <div className="bg-kodelet-light p-3 rounded border border-kodelet-mid-gray/20">
+          <div className="text-sm font-body text-kodelet-dark">{escapeHtml(analysis)}</div>
         </div>
       )}
     </ToolCard>

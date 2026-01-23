@@ -48,16 +48,16 @@ describe('FallbackRenderer', () => {
     const toolResult = createToolResult('custom-tool', { key: 'value' });
     render(<FallbackRenderer toolResult={toolResult} />);
     
-    expect(screen.getByText('🔧 custom-tool')).toBeInTheDocument();
+    expect(screen.getByText('custom-tool')).toBeInTheDocument();
   });
 
-  it('shows Unknown Tool badge', () => {
+  it('shows Unknown badge', () => {
     const toolResult = createToolResult('mystery-tool', {});
     render(<FallbackRenderer toolResult={toolResult} />);
     
-    expect(screen.getByText('Unknown Tool')).toBeInTheDocument();
-    const badge = screen.getByText('Unknown Tool');
-    expect(badge.className).toContain('badge-info');
+    expect(screen.getByText('Unknown')).toBeInTheDocument();
+    const badge = screen.getByText('Unknown');
+    expect(badge.className).toContain('font-heading');
   });
 
   it('renders collapsible with debug info', () => {
@@ -66,10 +66,10 @@ describe('FallbackRenderer', () => {
     
     const collapsible = screen.getByTestId('collapsible');
     expect(collapsible).toBeInTheDocument();
-    expect(screen.getByText('Raw Metadata')).toBeInTheDocument();
-    expect(screen.getByText('Debug Info')).toBeInTheDocument();
-    const debugBadge = screen.getByText('Debug Info');
-    expect(debugBadge.className).toContain('badge-warning');
+    expect(screen.getByText('Raw Data')).toBeInTheDocument();
+    expect(screen.getByText('Debug')).toBeInTheDocument();
+    const debugBadge = screen.getByText('Debug');
+    expect(debugBadge.className).toContain('font-heading');
   });
 
   it('renders collapsible as collapsed by default', () => {
@@ -97,7 +97,7 @@ describe('FallbackRenderer', () => {
     
     const pre = container.querySelector('pre');
     expect(pre).toBeInTheDocument();
-    expect(pre).toHaveClass('text-xs', 'overflow-x-auto', 'bg-base-100', 'p-2', 'rounded');
+    expect(pre).toHaveClass('text-xs', 'overflow-x-auto', 'bg-kodelet-light', 'p-3', 'rounded-lg');
     
     const code = pre?.querySelector('code');
     expect(code?.textContent).toBe(JSON.stringify(metadata, null, 2));
@@ -145,7 +145,7 @@ describe('FallbackRenderer', () => {
     const toolResult = createToolResult(longName, {});
     render(<FallbackRenderer toolResult={toolResult} />);
     
-    expect(screen.getByText(`🔧 ${longName}`)).toBeInTheDocument();
+    expect(screen.getByText(`${longName}`)).toBeInTheDocument();
   });
 
   it('handles special characters in tool name', () => {
@@ -153,6 +153,6 @@ describe('FallbackRenderer', () => {
     const toolResult = createToolResult(specialName, {});
     render(<FallbackRenderer toolResult={toolResult} />);
     
-    expect(screen.getByText(`🔧 ${specialName}`)).toBeInTheDocument();
+    expect(screen.getByText(`${specialName}`)).toBeInTheDocument();
   });
 });

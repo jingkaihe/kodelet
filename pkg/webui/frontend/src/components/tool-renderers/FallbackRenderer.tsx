@@ -22,15 +22,15 @@ const safeStringify = (obj: unknown): string => {
 const FallbackRenderer: React.FC<FallbackRendererProps> = ({ toolResult }) => {
   return (
     <ToolCard
-      title={`🔧 ${toolResult.toolName}`}
-      badge={{ text: 'Unknown Tool', className: 'badge-info' }}
+      title={toolResult.toolName}
+      badge={{ text: 'Unknown', className: 'px-2 py-0.5 rounded text-xs font-heading font-medium bg-kodelet-mid-gray/20 text-kodelet-mid-gray border border-kodelet-mid-gray/30' }}
     >
       <Collapsible
-        title="Raw Metadata"
+        title="Raw Data"
         collapsed={true}
-        badge={{ text: 'Debug Info', className: 'badge-warning' }}
+        badge={{ text: 'Debug', className: 'px-2 py-0.5 rounded text-xs font-heading font-medium bg-kodelet-orange/10 text-kodelet-orange border border-kodelet-orange/20' }}
       >
-        <pre className="text-xs overflow-x-auto bg-base-100 p-2 rounded">
+        <pre className="text-xs overflow-x-auto bg-kodelet-light p-3 rounded-lg border border-kodelet-light-gray font-mono text-kodelet-dark">
           <code>{safeStringify(toolResult.metadata)}</code>
         </pre>
       </Collapsible>

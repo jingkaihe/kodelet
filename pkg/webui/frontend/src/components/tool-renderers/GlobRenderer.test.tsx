@@ -53,10 +53,10 @@ vi.mock('./utils', () => ({
     return `${(size / (1024 * 1024)).toFixed(1)} MB`;
   }),
   getFileIcon: vi.fn((path: string) => {
-    if (path.endsWith('.js')) return '📜';
-    if (path.endsWith('.png')) return '🖼️';
-    if (path.endsWith('.md')) return '📄';
-    return '📄';
+    if (path.endsWith('.js')) return 'script';
+    if (path.endsWith('.png')) return 'image';
+    if (path.endsWith('.md')) return 'file';
+    return 'file';
   }),
 }));
 
@@ -84,7 +84,7 @@ describe('GlobRenderer', () => {
 
     render(<GlobRenderer toolResult={toolResult} />);
 
-    expect(screen.getByText('📁 File Listing')).toBeInTheDocument();
+    expect(screen.getByText('File Listing')).toBeInTheDocument();
     expect(screen.getByText('Pattern: *.js')).toBeInTheDocument();
   });
 
@@ -125,13 +125,8 @@ describe('GlobRenderer', () => {
 
     render(<GlobRenderer toolResult={toolResult} />);
 
-    // The component only shows the first badge (file count), not the truncated badge
-    // This appears to be a limitation of the component implementation
-    const badges = screen.getAllByText('1 files');
-    expect(badges).toHaveLength(2); // One in ToolCard, one in Collapsible
-    
-    // We can't test for the truncated badge because the component only passes badges[0]
-    // to ToolCard, which is the file count badge
+    // When truncated, the component shows "Truncated" badge instead of file count
+    expect(screen.getByText('Truncated')).toBeInTheDocument();
   });
 
   it('shows path when provided', () => {
@@ -186,9 +181,10 @@ describe('GlobRenderer', () => {
 
     render(<GlobRenderer toolResult={toolResult} />);
 
-    expect(screen.getByText('📜')).toBeInTheDocument();
-    expect(screen.getByText('🖼️')).toBeInTheDocument();
-    expect(screen.getAllByText('📄')).toHaveLength(1);
+    // Files are displayed without emoji icons
+    expect(screen.getByText('script.js')).toBeInTheDocument();
+    expect(screen.getByText('image.png')).toBeInTheDocument();
+    expect(screen.getByText('readme.md')).toBeInTheDocument();
   });
 
   it('renders file sizes', () => {

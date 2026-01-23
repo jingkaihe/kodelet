@@ -57,7 +57,7 @@ const ConversationViewPage: React.FC = () => {
           <Link to="/" className="link link-hover">← Back to Conversations</Link>
         </div>
         <EmptyState
-          icon="💭"
+          iconType="conversation"
           title="Conversation not found"
           description="The conversation you're looking for doesn't exist or has been deleted"
         />
@@ -66,14 +66,22 @@ const ConversationViewPage: React.FC = () => {
   }
 
   return (
-    <div className="container mx-auto px-4 py-8">
-      {/* Breadcrumb */}
-      <div className="breadcrumbs text-sm mb-6">
-        <ul>
-          <li><Link to="/" className="link link-hover">Conversations</Link></li>
-          <li className="text-base-content/70">{conversation.id}</li>
-        </ul>
-      </div>
+    <div className="container mx-auto px-4 py-6 relative z-10">
+      {/* Refined Breadcrumb */}
+      <nav className="mb-4 animate-fade-in" aria-label="Breadcrumb">
+        <ol className="flex items-center gap-2 text-sm font-body">
+          <li>
+            <Link 
+              to="/" 
+              className="text-kodelet-blue hover:text-kodelet-orange transition-colors duration-200 font-medium"
+            >
+              Conversations
+            </Link>
+          </li>
+          <li className="text-kodelet-mid-gray">/</li>
+          <li className="text-kodelet-mid-gray truncate max-w-xs">{conversation.id}</li>
+        </ol>
+      </nav>
 
       {/* Header */}
       <ConversationHeader
@@ -94,7 +102,7 @@ const ConversationViewPage: React.FC = () => {
       {/* Empty State for no messages */}
       {(!conversation.messages || conversation.messages.length === 0) && (
         <EmptyState
-          icon="💬"
+          iconType="message"
           title="No messages found"
           description="This conversation appears to be empty"
         />

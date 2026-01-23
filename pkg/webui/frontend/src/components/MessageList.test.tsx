@@ -301,11 +301,11 @@ describe('MessageList', () => {
     
     const messageCards = container.querySelectorAll('.card');
     
-    // User message should have primary styling
-    expect(messageCards[0]).toHaveClass('bg-primary/10', 'ml-4');
+    // User message should have message-user styling
+    expect(messageCards[0]).toHaveClass('message-user');
     
-    // Assistant message should have base styling
-    expect(messageCards[1]).toHaveClass('bg-base-100', 'mr-4');
+    // Assistant message should have message-assistant styling
+    expect(messageCards[1]).toHaveClass('message-assistant');
   });
 
   it('handles content blocks with image_url format', () => {

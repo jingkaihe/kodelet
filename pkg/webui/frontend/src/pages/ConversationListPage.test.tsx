@@ -105,7 +105,7 @@ describe('ConversationListPage', () => {
     render(<ConversationListPage />);
     
     expect(screen.getByText('Conversations')).toBeInTheDocument();
-    expect(screen.getByText('Browse and search your conversation history')).toBeInTheDocument();
+    expect(screen.getByText('Explore your conversation history with elegant clarity')).toBeInTheDocument();
   });
 
   it('renders conversation list when conversations exist', () => {

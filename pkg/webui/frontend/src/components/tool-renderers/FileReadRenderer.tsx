@@ -18,21 +18,17 @@ const FileReadRenderer: React.FC<FileReadRendererProps> = ({ toolResult }) => {
   const remainingLines = meta.remainingLines || 0;
   const totalLines = meta.totalLines || lines.length || 0;
   
-  // Remove trailing empty lines, but exclude truncation messages
   let lastNonEmptyIndex = lines.length - 1;
   const isTruncationMessage = (line: string) => 
     line.includes('lines remaining') || line.includes('truncated due to');
   
-  // If the last line is a truncation message, keep it
   if (lastNonEmptyIndex >= 0 && isTruncationMessage(lines[lastNonEmptyIndex])) {
-    // Keep the truncation message, but remove empty lines before it
     let searchIndex = lastNonEmptyIndex - 1;
     while (searchIndex >= 0 && lines[searchIndex] === '') {
       searchIndex--;
     }
     lastNonEmptyIndex = Math.max(searchIndex + 1, lastNonEmptyIndex);
   } else {
-    // Remove trailing empty lines normally
     while (lastNonEmptyIndex >= 0 && lines[lastNonEmptyIndex] === '') {
       lastNonEmptyIndex--;
     }
@@ -44,22 +40,32 @@ const FileReadRenderer: React.FC<FileReadRendererProps> = ({ toolResult }) => {
   const maxLineNumber = startLine + displayLines.length - 1;
   const lineNumberWidth = Math.max(4, maxLineNumber.toString().length);
   
-  const badges = [];
-  if (meta.truncated) {
-    if (remainingLines > 0) {
-      badges.push({ text: `${remainingLines} more lines`, className: 'badge-info' });
-    } else {
-      badges.push({ text: 'Truncated', className: 'badge-warning' });
+  const getBadge = () => {
+    if (meta.truncated) {
+      if (remainingLines > 0) {
+        return { 
+          text: `${remainingLines} more`, 
+          className: 'px-2 py-0.5 rounded text-xs font-heading font-medium bg-kodelet-blue/10 text-kodelet-blue border border-kodelet-blue/20' 
+        };
+      }
+      return { 
+        text: 'Truncated', 
+        className: 'px-2 py-0.5 rounded text-xs font-heading font-medium bg-kodelet-orange/10 text-kodelet-orange border border-kodelet-orange/20' 
+      };
     }
-  }
+    return { 
+      text: 'Read', 
+      className: 'px-2 py-0.5 rounded text-xs font-heading font-medium bg-kodelet-green/10 text-kodelet-green border border-kodelet-green/20' 
+    };
+  };
 
   return (
     <ToolCard
-      title="📄 File Read"
-      badge={badges[0]}
+      title="File Read"
+      badge={getBadge()}
       actions={<CopyButton content={fileContent} />}
     >
-      <div className="text-xs text-base-content/60 mb-3 font-mono">
+      <div className="text-xs text-kodelet-dark/60 mb-3 font-mono">
         <div className="flex items-center gap-4 flex-wrap">
           <MetadataRow label="Path" value={meta.filePath} monospace />
           {startLine > 1 && <MetadataRow label="Starting at line" value={startLine} />}
@@ -77,19 +83,18 @@ const FileReadRenderer: React.FC<FileReadRendererProps> = ({ toolResult }) => {
           {language && <MetadataRow label="Language" value={language} />}
         </div>
         {remainingLines > 0 && (
-          <div className="mt-2 text-xs text-info">
-            💡 Use offset={startLine + (lineLimit || displayLines.length)} to continue reading
+          <div className="mt-2 text-xs text-kodelet-blue font-body">
+            Use offset={startLine + (lineLimit || displayLines.length)} to continue reading
           </div>
         )}
       </div>
 
       <div 
-        className="bg-base-300 text-sm font-mono rounded-lg" 
+        className="bg-kodelet-light text-sm font-mono rounded-lg border border-kodelet-light-gray" 
         style={{ maxHeight: '600px', overflowY: 'auto' }}
       >
         <div className="flex p-4">
-          {/* Line Numbers */}
-          <div className="text-base-content/50 flex-shrink-0 whitespace-pre select-none">
+          <div className="text-kodelet-mid-gray flex-shrink-0 whitespace-pre select-none">
             {displayLines.map((_, index) => {
               const lineNumber = (startLine + index).toString().padStart(lineNumberWidth, ' ');
               return (
@@ -100,8 +105,7 @@ const FileReadRenderer: React.FC<FileReadRendererProps> = ({ toolResult }) => {
             })}
           </div>
           
-          {/* Code Content */}
-          <div className="flex-grow overflow-x-auto whitespace-pre">
+          <div className="flex-grow overflow-x-auto whitespace-pre text-kodelet-dark">
             {displayLines.map((line, index) => (
               <div key={index} className="min-h-[1.2em]">
                 {line === '' ? '\u00A0' : line}
