@@ -107,22 +107,45 @@ def find_kodelet_binary() -> str:
     st.stop()
 
 
-def stream_kodelet_response(query: str, placeholder):
+def get_conversation_summary(conversation_id: str) -> str:
+    """Fetch conversation summary from kodelet."""
+    import tempfile
+    import os
+    try:
+        kodelet_path = find_kodelet_binary()
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            tmp_path = f.name
+        result = subprocess.run(
+            [kodelet_path, "conversation", "export", conversation_id, tmp_path],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            with open(tmp_path) as f:
+                data = json.loads(f.read())
+            os.unlink(tmp_path)
+            return data.get("summary", "")
+        os.unlink(tmp_path)
+    except Exception:
+        pass
+    return ""
+
+
+def stream_kodelet_response(query: str, placeholder, conversation_id: str = None):
     """Stream kodelet response and update the placeholder in real-time."""
     kodelet_path = find_kodelet_binary()
 
-    cmd = [
-        kodelet_path,
-        "run",
-        "--headless",
-        "--stream-deltas",
-        query,
-    ]
+    cmd = [kodelet_path, "run", "--headless", "--stream-deltas"]
+    if conversation_id:
+        cmd.extend(["--resume", conversation_id])
+    cmd.append(query)
 
     full_text = ""
     thinking_text = ""
     in_thinking = False
     tool_calls = []
+    conv_id = conversation_id
 
     try:
         process = subprocess.Popen(
@@ -144,6 +167,9 @@ def stream_kodelet_response(query: str, placeholder):
                 continue
 
             kind = event.get("kind", "")
+
+            if not conv_id and "conversation_id" in event:
+                conv_id = event["conversation_id"]
 
             if kind == "thinking-start":
                 in_thinking = True
@@ -193,7 +219,7 @@ def stream_kodelet_response(query: str, placeholder):
     except Exception as e:
         st.error(f"Error running kodelet: {e}")
 
-    return full_text, thinking_text, tool_calls
+    return full_text, thinking_text, tool_calls, conv_id
 
 
 def _render_response(
@@ -239,6 +265,8 @@ def main():
 
     if "messages" not in st.session_state:
         st.session_state.messages = []
+    if "conversation_id" not in st.session_state:
+        st.session_state.conversation_id = None
 
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
@@ -262,9 +290,14 @@ def main():
 
         with st.chat_message("assistant"):
             placeholder = st.empty()
-            text, thinking, tools = stream_kodelet_response(prompt, placeholder)
+            text, thinking, tools, conv_id = stream_kodelet_response(
+                prompt, placeholder, st.session_state.conversation_id
+            )
 
             _render_response(placeholder, text, thinking, False, tools)
+
+            if conv_id:
+                st.session_state.conversation_id = conv_id
 
             st.session_state.messages.append(
                 {
@@ -281,20 +314,27 @@ def main():
             """
             A Streamlit interface for [kodelet](https://github.com/jingkaihe/kodelet).
 
-            Each message is processed independently (stateless mode).
+            Follow-up messages continue the same conversation context.
 
             **Features**
             - Real-time streaming output
+            - Conversation continuity
             - Thinking visualization
             - Tool call inspection
             """
         )
 
-        if st.button("Clear Chat"):
+        if st.button("New Chat"):
             st.session_state.messages = []
+            st.session_state.conversation_id = None
             st.rerun()
 
         st.divider()
+        if st.session_state.conversation_id:
+            summary = get_conversation_summary(st.session_state.conversation_id)
+            if summary:
+                st.caption(f"Summary: {summary}")
+            st.caption(f"ID: `{st.session_state.conversation_id}`")
         st.caption(f"Binary: `{find_kodelet_binary()}`")
 
 

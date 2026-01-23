@@ -5,10 +5,10 @@ A Streamlit chatbot interface that wraps kodelet's CLI with real-time streaming 
 ## Features
 
 - Real-time streaming text output
+- Conversation continuity (follow-up messages retain context via `--resume`)
 - Thinking process visualization (expandable)
 - Tool call inspection with inputs and results
 - Kodelet brand styling (Poppins/Lora fonts, orange/blue/green accents)
-- Chat history within session (stateless between messages)
 
 ## Usage
 
@@ -27,7 +27,7 @@ The script auto-launches Streamlit when run directly.
 
 ## How It Works
 
-The chatbot shells out to `kodelet run --headless --stream-deltas --no-save` for each message, parsing the JSON stream events:
+The chatbot shells out to `kodelet run --headless --stream-deltas` for each message, parsing the JSON stream events:
 
 | Event | Description |
 |-------|-------------|
@@ -35,6 +35,8 @@ The chatbot shells out to `kodelet run --headless --stream-deltas --no-save` for
 | `thinking-delta` | Shows model thinking (if enabled) |
 | `tool-use` | Displays tool invocations |
 | `tool-result` | Shows tool execution results |
+
+For follow-up messages, it uses `--resume CONVERSATION_ID` to maintain context.
 
 ## Brand Colors
 
