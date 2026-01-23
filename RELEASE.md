@@ -1,5 +1,17 @@
 # Kodelet
 
+## 0.2.0.beta (2026-01-23)
+
+### Features
+
+**Partial message streaming in headless mode**: Added `--stream-deltas` flag that enables real-time token streaming in headless mode. Text and thinking content are now output as they're generated, enabling ChatGPT-style streaming experiences in third-party UIs:
+
+```bash
+kodelet run --headless --stream-deltas "explain recursion"
+```
+
+Delta events (`text-delta`, `thinking-delta`, `thinking-start`, `thinking-end`, `content-end`) are interleaved with complete message events, allowing clients to show progressive output while still receiving full content for persistence.
+
 ## 0.1.50.beta (2026-01-23)
 
 ### Features
