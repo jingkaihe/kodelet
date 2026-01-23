@@ -38,7 +38,7 @@ const StatsCard: React.FC<StatsCardProps> = ({ stats }) => {
             <div className="text-xs font-body text-kodelet-mid-gray uppercase tracking-wide">Total Cost</div>
             <div className="text-xl font-heading font-bold text-kodelet-orange">{formatCost(stats.totalCost || 0)}</div>
           </div>
-          
+
           {/* Token Breakdown */}
           <div className="space-y-0.5 border-l-2 border-kodelet-blue pl-3">
             <div className="text-xs font-body text-kodelet-mid-gray uppercase tracking-wide">Input Tokens</div>

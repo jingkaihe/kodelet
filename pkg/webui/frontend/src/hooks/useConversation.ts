@@ -24,7 +24,7 @@ export const useConversation = (conversationId: string): UseConversationResult =
 
     try {
       const data = await apiService.getConversation(conversationId);
-      
+
       // Ensure all messages have proper structure
       if (data.messages) {
         data.messages = data.messages.map(message => ({

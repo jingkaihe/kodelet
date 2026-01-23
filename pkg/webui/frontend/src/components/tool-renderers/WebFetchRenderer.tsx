@@ -31,14 +31,14 @@ const WebFetchRenderer: React.FC<WebFetchRendererProps> = ({ toolResult }) => {
       {meta.content && (
         <>
           {!showContent ? (
-            <button 
+            <button
               onClick={() => setShowContent(true)}
               className="text-xs text-kodelet-blue hover:underline"
             >
               Show content
             </button>
           ) : (
-            <div 
+            <div
               className="bg-kodelet-light text-xs font-mono p-2 rounded border border-kodelet-light-gray max-h-64 overflow-auto"
             >
               <pre className="whitespace-pre-wrap">{meta.content}</pre>

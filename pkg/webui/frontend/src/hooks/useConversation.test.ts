@@ -170,7 +170,7 @@ describe('useConversation', () => {
     const clickSpy = vi.fn();
     mockAnchor.click = clickSpy;
     const originalCreateElement = document.createElement.bind(document);
-    
+
     vi.spyOn(document, 'createElement').mockImplementation((tagName: string) => {
       if (tagName === 'a') {
         return mockAnchor;

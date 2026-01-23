@@ -61,9 +61,9 @@ const GrepRenderer: React.FC<GrepRendererProps> = ({ toolResult }) => {
     <div className="space-y-2">
       <div className="flex items-center gap-2 flex-wrap text-xs font-mono text-kodelet-dark/80">
         <code className="font-medium">{meta.pattern}</code>
-        <StatusBadge 
-          text={`${totalMatches} in ${results.length} files`} 
-          variant={meta.truncated ? 'warning' : 'success'} 
+        <StatusBadge
+          text={`${totalMatches} in ${results.length} files`}
+          variant={meta.truncated ? 'warning' : 'success'}
         />
         {meta.path && <span className="text-kodelet-mid-gray">in {meta.path}</span>}
       </div>
@@ -73,7 +73,7 @@ const GrepRenderer: React.FC<GrepRendererProps> = ({ toolResult }) => {
           {Object.entries(fileGroups).map(([file, matches]) => {
             const isExpanded = expandedFiles.has(file) || matches.length <= 3;
             const displayMatches = isExpanded ? matches : matches.slice(0, 2);
-            
+
             return (
               <div key={file} className="text-xs">
                 <div className="font-mono text-kodelet-dark/70 font-medium">{file}</div>
@@ -81,14 +81,14 @@ const GrepRenderer: React.FC<GrepRendererProps> = ({ toolResult }) => {
                   {displayMatches.map((match, index) => (
                     <div key={index} className={`flex gap-2 py-0.5 ${match.isContext ? 'opacity-50' : ''}`}>
                       <span className="text-kodelet-mid-gray min-w-[3rem] text-right">{match.lineNumber}</span>
-                      <span 
-                        className="font-mono text-kodelet-dark" 
+                      <span
+                        className="font-mono text-kodelet-dark"
                         dangerouslySetInnerHTML={{ __html: match.isContext ? match.content : highlightPattern(match.content, meta.pattern) }}
                       />
                     </div>
                   ))}
                   {matches.length > 3 && !isExpanded && (
-                    <button 
+                    <button
                       onClick={() => toggleFile(file)}
                       className="text-kodelet-blue hover:underline"
                     >

@@ -58,18 +58,18 @@ export const useUrlFilters = () => {
       };
 
       const updatedFilters = { ...currentFilters, ...newFilters };
-      
+
       // Reset offset when other filters change (except when explicitly setting offset)
-      if (newFilters.offset === undefined && 
-          (newFilters.searchTerm !== undefined || 
-           newFilters.sortBy !== undefined || 
-           newFilters.sortOrder !== undefined || 
+      if (newFilters.offset === undefined &&
+          (newFilters.searchTerm !== undefined ||
+           newFilters.sortBy !== undefined ||
+           newFilters.sortOrder !== undefined ||
            newFilters.limit !== undefined)) {
         updatedFilters.offset = 0;
       }
 
       const newSearchParams = new URLSearchParams();
-      
+
       // Only add non-default values to keep URLs clean
       if (updatedFilters.searchTerm && updatedFilters.searchTerm !== defaultFilters.searchTerm) {
         newSearchParams.set('search', updatedFilters.searchTerm);
@@ -101,14 +101,14 @@ export const useUrlFilters = () => {
     setSearchParams((prevParams) => {
       const currentLimit = parseInt(prevParams.get('limit') || '25', 10) || defaultFilters.limit;
       const newOffset = (page - 1) * currentLimit;
-      
+
       const newSearchParams = new URLSearchParams(prevParams);
       if (newOffset > 0) {
         newSearchParams.set('offset', newOffset.toString());
       } else {
         newSearchParams.delete('offset');
       }
-      
+
       return newSearchParams;
     }, { replace: true });
   }, [setSearchParams]); // Include setSearchParams dependency

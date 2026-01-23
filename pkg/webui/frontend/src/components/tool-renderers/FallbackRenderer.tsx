@@ -21,15 +21,15 @@ const safeStringify = (obj: unknown): string => {
 
 const FallbackRenderer: React.FC<FallbackRendererProps> = ({ toolResult }) => {
   const [showRaw, setShowRaw] = useState(false);
-  
+
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2 text-xs">
         <StatusBadge text="Completed" variant="neutral" />
       </div>
-      
+
       {!showRaw ? (
-        <button 
+        <button
           onClick={() => setShowRaw(true)}
           className="text-xs text-kodelet-blue hover:underline"
         >

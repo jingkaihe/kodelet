@@ -18,9 +18,9 @@ const GlobRenderer: React.FC<GlobRendererProps> = ({ toolResult }) => {
     <div className="space-y-2">
       <div className="flex items-center gap-2 flex-wrap text-xs font-mono text-kodelet-dark/80">
         <code className="font-medium">{meta.pattern}</code>
-        <StatusBadge 
-          text={`${files.length} files`} 
-          variant={meta.truncated ? 'warning' : 'success'} 
+        <StatusBadge
+          text={`${files.length} files`}
+          variant={meta.truncated ? 'warning' : 'success'}
         />
         {meta.path && <span className="text-kodelet-mid-gray">in {meta.path}</span>}
       </div>
@@ -31,7 +31,7 @@ const GlobRenderer: React.FC<GlobRendererProps> = ({ toolResult }) => {
             <div key={index} className="text-kodelet-dark/80">{file.path || file.name}</div>
           ))}
           {files.length > 10 && !showAll && (
-            <button 
+            <button
               onClick={() => setShowAll(true)}
               className="text-kodelet-blue hover:underline"
             >

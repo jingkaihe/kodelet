@@ -26,7 +26,7 @@ export const useConversations = (options: UseConversationsOptions): UseConversat
   const [error, setError] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
-  
+
   // Use refs to track the latest values without causing re-renders
   const loadingRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -42,7 +42,7 @@ export const useConversations = (options: UseConversationsOptions): UseConversat
   const loadConversations = useCallback(async () => {
     // Create a stable filter key
     const filterKey = `${searchTerm}-${sortBy}-${sortOrder}-${limit}-${offset}`;
-    
+
     // Prevent duplicate requests with the same filters
     if (loadingRef.current || lastFiltersRef.current === filterKey) {
       return;
@@ -56,7 +56,7 @@ export const useConversations = (options: UseConversationsOptions): UseConversat
     // Create new abort controller for this request
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
-    
+
     loadingRef.current = true;
     lastFiltersRef.current = filterKey;
     setLoading(true);
@@ -70,29 +70,29 @@ export const useConversations = (options: UseConversationsOptions): UseConversat
         limit,
         offset,
       });
-      
+
       // Check if request was aborted
       if (abortController.signal.aborted) {
         return;
       }
-      
+
       // Ensure conversations is always an array
       setConversations(Array.isArray(response.conversations) ? response.conversations : []);
-      
+
       // Update stats from the response
       if (response.stats) {
         setStats(response.stats);
       }
-      
+
       // Calculate pagination
       const totalItems = response.total || response.conversations.length;
       const calculatedTotalPages = Math.ceil(totalItems / limit);
       setTotalPages(calculatedTotalPages);
-      
+
       // Update current page based on offset
       const calculatedCurrentPage = Math.floor(offset / limit) + 1;
       setCurrentPage(calculatedCurrentPage);
-      
+
     } catch (err) {
       // Don't set error if request was aborted
       if (!abortController.signal.aborted) {
@@ -126,7 +126,7 @@ export const useConversations = (options: UseConversationsOptions): UseConversat
   // Load conversations when filters change (with minimal dependencies)
   useEffect(() => {
     loadConversations();
-    
+
     // Cleanup function to cancel any pending requests
     return () => {
       if (abortControllerRef.current) {

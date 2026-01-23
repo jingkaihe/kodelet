@@ -23,7 +23,7 @@ const SubagentRenderer: React.FC<SubagentRendererProps> = ({ toolResult }) => {
       <div className="flex items-center gap-2 text-xs">
         <StatusBadge text="Delegated" variant="info" />
         {!showDetails && (
-          <button 
+          <button
             onClick={() => setShowDetails(true)}
             className="text-kodelet-blue hover:underline"
           >
@@ -36,7 +36,7 @@ const SubagentRenderer: React.FC<SubagentRendererProps> = ({ toolResult }) => {
         <div className="space-y-2 text-xs">
           <div>
             <div className="font-medium text-kodelet-mid-gray mb-1">Question:</div>
-            <div 
+            <div
               className="bg-kodelet-blue/5 p-2 rounded border border-kodelet-blue/20 prose-enhanced text-sm"
               dangerouslySetInnerHTML={{ __html: formatMarkdown(meta.question) }}
             />
@@ -44,7 +44,7 @@ const SubagentRenderer: React.FC<SubagentRendererProps> = ({ toolResult }) => {
           {meta.response && (
             <div>
               <div className="font-medium text-kodelet-mid-gray mb-1">Response:</div>
-              <div 
+              <div
                 className="bg-kodelet-light-gray/30 p-2 rounded border border-kodelet-mid-gray/20 prose-enhanced text-sm max-h-64 overflow-y-auto"
                 dangerouslySetInnerHTML={{ __html: formatMarkdown(meta.response) }}
               />

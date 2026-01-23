@@ -36,7 +36,7 @@ vi.mock('./hooks/useConversation', () => ({
 describe('App', () => {
   it('renders without crashing', async () => {
     const { container } = render(<App />);
-    
+
     await waitFor(() => {
       expect(container.querySelector('.min-h-screen')).toBeInTheDocument();
     });
@@ -44,7 +44,7 @@ describe('App', () => {
 
   it('provides base application structure', async () => {
     const { container } = render(<App />);
-    
+
     await waitFor(() => {
       const wrapper = container.firstElementChild;
       expect(wrapper).toHaveClass('min-h-screen', 'bg-base-100');

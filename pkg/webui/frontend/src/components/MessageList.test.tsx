@@ -65,48 +65,48 @@ describe('MessageList', () => {
 
   it('renders messages correctly', () => {
     render(<MessageList messages={mockMessages} toolResults={{}} />);
-    
+
     expect(screen.getByText('Hello world')).toBeInTheDocument();
     expect(screen.getByText('Hi there! How can I help you?')).toBeInTheDocument();
   });
 
   it('displays user and assistant labels correctly', () => {
     render(<MessageList messages={mockMessages} toolResults={{}} />);
-    
+
     expect(screen.getByText('You')).toBeInTheDocument();
     expect(screen.getByText('Assistant')).toBeInTheDocument();
   });
 
   it('shows message numbers', () => {
     render(<MessageList messages={mockMessages} toolResults={{}} />);
-    
+
     expect(screen.getByText('Message 1')).toBeInTheDocument();
     expect(screen.getByText('Message 2')).toBeInTheDocument();
   });
 
   it('handles copy message functionality', () => {
     render(<MessageList messages={mockMessages} toolResults={{}} />);
-    
+
     const copyButtons = screen.getAllByRole('button', { name: /copy message/i });
     fireEvent.click(copyButtons[0]);
-    
+
     expect(utils.copyToClipboard).toHaveBeenCalledWith('Hello world');
   });
 
   it('renders thinking text with toggle', () => {
     render(<MessageList messages={mockMessages} toolResults={{}} />);
-    
+
     // Thinking block should be visible by default
     expect(screen.getByText('💭 Thinking')).toBeInTheDocument();
     expect(screen.getByText('Let me think about this...')).toBeInTheDocument();
-    
+
     // Toggle to hide
     const toggleButton = screen.getByRole('button', { name: /toggle thinking block/i });
     fireEvent.click(toggleButton);
-    
+
     // Thinking text should be hidden
     expect(screen.queryByText('Let me think about this...')).not.toBeInTheDocument();
-    
+
     // Toggle to show again
     fireEvent.click(toggleButton);
     expect(screen.getByText('Let me think about this...')).toBeInTheDocument();
@@ -121,7 +121,7 @@ describe('MessageList', () => {
     };
 
     render(<MessageList messages={[messageWithWhitespace]} toolResults={{}} />);
-    
+
     // Should display trimmed text
     expect(screen.getByText('This has leading and trailing whitespace')).toBeInTheDocument();
     // Should not display the original text with whitespace
@@ -137,11 +137,11 @@ describe('MessageList', () => {
     };
 
     render(<MessageList messages={[messageWithNewlines]} toolResults={{}} />);
-    
+
     // Should display trimmed text (leading/trailing newlines removed, internal preserved)
     // Check that the text starts with the expected content without leading newlines
     expect(screen.getByText(/^I need to analyze this carefully\./)).toBeInTheDocument();
-    
+
     // Check that it contains the list items
     expect(screen.getByText(/1\. First step/)).toBeInTheDocument();
     expect(screen.getByText(/2\. Second step/)).toBeInTheDocument();
@@ -156,12 +156,12 @@ describe('MessageList', () => {
     };
 
     render(<MessageList messages={[messageWithOnlyWhitespace]} toolResults={{}} />);
-    
+
     // Should display empty string after trimming in the pre element
     const preElement = screen.getByText((content, element) => {
       return element?.tagName.toLowerCase() === 'pre' && content === '';
     });
-    
+
     expect(preElement).toBeInTheDocument();
   });
 
@@ -174,19 +174,19 @@ describe('MessageList', () => {
     };
 
     render(<MessageList messages={[messageWithoutWhitespace]} toolResults={{}} />);
-    
+
     // Should display the original text unchanged
     expect(screen.getByText('Clean thinking text with no whitespace')).toBeInTheDocument();
   });
 
   it('renders tool calls with toggle', () => {
     render(<MessageList messages={mockMessages} toolResults={mockToolResults} />);
-    
+
     // Tool calls section should be visible
     expect(screen.getByText('Tool Calls:')).toBeInTheDocument();
     expect(screen.getByText('search')).toBeInTheDocument();
     expect(screen.getByText('tool-1')).toBeInTheDocument();
-    
+
     // Tool call details should be expanded by default
     expect(screen.getByText('Arguments')).toBeInTheDocument();
     expect(screen.getByText('Result')).toBeInTheDocument();
@@ -194,16 +194,16 @@ describe('MessageList', () => {
 
   it('toggles tool call details', () => {
     render(<MessageList messages={mockMessages} toolResults={mockToolResults} />);
-    
+
     const toggleButton = screen.getByRole('button', { name: /toggle tool call details/i });
-    
+
     // Initially expanded
     expect(screen.getByText('Arguments')).toBeInTheDocument();
-    
+
     // Toggle to collapse
     fireEvent.click(toggleButton);
     expect(screen.queryByText('Arguments')).not.toBeInTheDocument();
-    
+
     // Toggle to expand
     fireEvent.click(toggleButton);
     expect(screen.getByText('Arguments')).toBeInTheDocument();
@@ -211,12 +211,12 @@ describe('MessageList', () => {
 
   it('toggles arguments visibility', () => {
     render(<MessageList messages={mockMessages} toolResults={mockToolResults} />);
-    
+
     const toggleButton = screen.getByRole('button', { name: /toggle arguments/i });
-    
+
     // Arguments should be hidden by default
     expect(screen.queryByText('"query": "test"')).not.toBeInTheDocument();
-    
+
     // Toggle to show
     fireEvent.click(toggleButton);
     expect(screen.getByText(/query.*test/)).toBeInTheDocument();
@@ -224,13 +224,13 @@ describe('MessageList', () => {
 
   it('toggles results visibility', () => {
     render(<MessageList messages={mockMessages} toolResults={mockToolResults} />);
-    
+
     // Results should be expanded by default
     const toolRendererContent = screen.getByTestId('tool-renderer');
     expect(toolRendererContent).toBeInTheDocument();
-    
+
     const toggleButton = screen.getByRole('button', { name: /toggle results/i });
-    
+
     // Toggle to hide
     fireEvent.click(toggleButton);
     expect(screen.queryByTestId('tool-renderer')).not.toBeInTheDocument();
@@ -247,14 +247,14 @@ describe('MessageList', () => {
     };
 
     render(<MessageList messages={[multimodalMessage]} toolResults={{}} />);
-    
+
     expect(screen.getByText('Check this image:')).toBeInTheDocument();
     expect(screen.getByRole('img')).toHaveAttribute('src', 'data:image/png;base64,test');
   });
 
   it('handles empty messages array', () => {
     render(<MessageList messages={[]} toolResults={{}} />);
-    
+
     // Should render without errors
     expect(screen.queryByText('You')).not.toBeInTheDocument();
   });
@@ -272,7 +272,7 @@ describe('MessageList', () => {
     };
 
     render(<MessageList messages={[messageWithBadToolCall]} toolResults={{}} />);
-    
+
     expect(screen.getByText('Unknown')).toBeInTheDocument();
   });
 
@@ -292,18 +292,18 @@ describe('MessageList', () => {
     };
 
     render(<MessageList messages={[messageWithLegacyToolCalls]} toolResults={{}} />);
-    
+
     expect(screen.getByText('legacy_tool')).toBeInTheDocument();
   });
 
   it('applies correct styling for user and assistant messages', () => {
     const { container } = render(<MessageList messages={mockMessages} toolResults={{}} />);
-    
+
     const messageCards = container.querySelectorAll('.card');
-    
+
     // User message should have message-user styling
     expect(messageCards[0]).toHaveClass('message-user');
-    
+
     // Assistant message should have message-assistant styling
     expect(messageCards[1]).toHaveClass('message-assistant');
   });
@@ -319,7 +319,7 @@ describe('MessageList', () => {
     };
 
     render(<MessageList messages={[imageMessage]} toolResults={{}} />);
-    
+
     const img = screen.getByRole('img');
     expect(img).toHaveAttribute('src', 'https://example.com/image.png');
   });
@@ -334,10 +334,10 @@ describe('MessageList', () => {
     };
 
     render(<MessageList messages={[arrayContentMessage]} toolResults={{}} />);
-    
+
     const copyButton = screen.getByRole('button', { name: /copy message/i });
     fireEvent.click(copyButton);
-    
+
     expect(utils.copyToClipboard).toHaveBeenCalledWith(
       JSON.stringify(arrayContentMessage.content, null, 2)
     );
@@ -360,7 +360,7 @@ describe('MessageList', () => {
     };
 
     render(<MessageList messages={[messageWithMultipleTools]} toolResults={{}} />);
-    
+
     // Both tool calls should be expanded by default
     const badges = screen.getAllByText(/tool_[ab]/);
     expect(badges).toHaveLength(2);

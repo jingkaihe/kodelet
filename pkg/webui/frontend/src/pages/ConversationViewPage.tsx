@@ -71,8 +71,8 @@ const ConversationViewPage: React.FC = () => {
       <nav className="mb-4 animate-fade-in" aria-label="Breadcrumb">
         <ol className="flex items-center gap-2 text-sm font-body">
           <li>
-            <Link 
-              to="/" 
+            <Link
+              to="/"
               className="text-kodelet-blue hover:text-kodelet-orange transition-colors duration-200 font-medium"
             >
               Conversations
@@ -94,7 +94,7 @@ const ConversationViewPage: React.FC = () => {
       <ConversationMetadata conversation={conversation} />
 
       {/* Messages */}
-      <MessageList 
+      <MessageList
         messages={conversation.messages || []}
         toolResults={conversation.toolResults || {}}
       />

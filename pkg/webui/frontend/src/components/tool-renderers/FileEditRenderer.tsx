@@ -61,7 +61,7 @@ const FileEditRenderer: React.FC<FileEditRendererProps> = ({ toolResult }) => {
     return diffLines;
   };
 
-  const badgeText = replaceAll 
+  const badgeText = replaceAll
     ? `${replacedCount} replacement${replacedCount !== 1 ? 's' : ''}`
     : `${edits.length} edit${edits.length !== 1 ? 's' : ''}`;
 
@@ -76,7 +76,7 @@ const FileEditRenderer: React.FC<FileEditRendererProps> = ({ toolResult }) => {
       {edits.length > 0 && (
         <>
           {!showDiff ? (
-            <button 
+            <button
               onClick={() => setShowDiff(true)}
               className="text-xs text-kodelet-blue hover:underline"
             >
@@ -93,8 +93,8 @@ const FileEditRenderer: React.FC<FileEditRendererProps> = ({ toolResult }) => {
                     </div>
                     <div>
                       {diffLines.map((line, i) => (
-                        <div 
-                          key={i} 
+                        <div
+                          key={i}
                           className={`px-2 py-0.5 flex ${
                             line.type === 'removed' ? 'bg-red-50 text-red-700' :
                             line.type === 'added' ? 'bg-green-50 text-green-700' : ''

@@ -39,9 +39,9 @@ describe('FallbackRenderer', () => {
     const metadata = { key: 'value', number: 42 };
     const toolResult = createToolResult('test-tool', metadata);
     render(<FallbackRenderer toolResult={toolResult} />);
-    
+
     fireEvent.click(screen.getByText('Show raw data'));
-    
+
     const pre = document.querySelector('pre');
     expect(pre?.textContent).toBe(JSON.stringify(metadata, null, 2));
   });
@@ -49,9 +49,9 @@ describe('FallbackRenderer', () => {
   it('handles null metadata', () => {
     const toolResult = createToolResult('null-tool', null);
     render(<FallbackRenderer toolResult={toolResult} />);
-    
+
     fireEvent.click(screen.getByText('Show raw data'));
-    
+
     const pre = document.querySelector('pre code');
     expect(pre?.textContent).toBe('null');
   });
@@ -59,9 +59,9 @@ describe('FallbackRenderer', () => {
   it('handles empty object metadata', () => {
     const toolResult = createToolResult('empty-tool', {});
     render(<FallbackRenderer toolResult={toolResult} />);
-    
+
     fireEvent.click(screen.getByText('Show raw data'));
-    
+
     const pre = document.querySelector('pre code');
     expect(pre?.textContent).toBe('{}');
   });
@@ -69,10 +69,10 @@ describe('FallbackRenderer', () => {
   it('handles circular reference gracefully', () => {
     const metadata: Record<string, unknown> = { key: 'value' };
     metadata.circular = metadata;
-    
+
     const toolResult = createToolResult('circular-tool', metadata);
     render(<FallbackRenderer toolResult={toolResult} />);
-    
+
     fireEvent.click(screen.getByText('Show raw data'));
     expect(screen.getByText(/\[Circular\]/)).toBeInTheDocument();
   });

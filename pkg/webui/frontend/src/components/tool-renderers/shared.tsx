@@ -216,7 +216,7 @@ interface ExternalLinkProps {
 
 export const ExternalLink: React.FC<ExternalLinkProps> = ({ href, children, className = '' }) => {
   const safeUrl = escapeUrl(href);
-  
+
   if (safeUrl === '#') {
     return <span className="text-base-content/60">Invalid URL</span>;
   }

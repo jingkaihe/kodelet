@@ -8,10 +8,10 @@ interface EmptyStateProps {
   iconType?: 'conversation' | 'search' | 'message' | 'default';
 }
 
-const EmptyState: React.FC<EmptyStateProps> = ({ 
-  icon, 
-  title, 
-  description, 
+const EmptyState: React.FC<EmptyStateProps> = ({
+  icon,
+  title,
+  description,
   action,
   iconType = 'default'
 }) => {
@@ -21,7 +21,7 @@ const EmptyState: React.FC<EmptyStateProps> = ({
     }
 
     const iconClasses = "w-20 h-20 text-kodelet-mid-gray animate-float";
-    
+
     switch (iconType) {
       case 'conversation':
         return (

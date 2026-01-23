@@ -35,15 +35,15 @@ const FileWriteRenderer: React.FC<FileWriteRendererProps> = ({ toolResult }) => 
       {meta.content && (
         <>
           {!showContent ? (
-            <button 
+            <button
               onClick={() => setShowContent(true)}
               className="text-xs text-kodelet-blue hover:underline"
             >
               Show content ({lines.length} lines)
             </button>
           ) : (
-            <div 
-              className="bg-kodelet-light text-xs font-mono rounded border border-kodelet-light-gray" 
+            <div
+              className="bg-kodelet-light text-xs font-mono rounded border border-kodelet-light-gray"
               style={{ maxHeight: '300px', overflowY: 'auto' }}
             >
               <div className="p-3">

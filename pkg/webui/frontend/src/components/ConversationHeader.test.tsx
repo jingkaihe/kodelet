@@ -30,7 +30,7 @@ describe('ConversationHeader', () => {
         onDelete={mockOnDelete}
       />
     );
-    
+
     expect(screen.getByText('This is a test conversation summary')).toBeInTheDocument();
     expect(screen.getByText('conv-1234567890')).toBeInTheDocument();
   });
@@ -40,7 +40,7 @@ describe('ConversationHeader', () => {
       ...mockConversation,
       summary: undefined,
     };
-    
+
     render(
       <ConversationHeader
         conversation={conversationWithoutSummary}
@@ -48,7 +48,7 @@ describe('ConversationHeader', () => {
         onDelete={mockOnDelete}
       />
     );
-    
+
     expect(screen.getByRole('heading', { name: 'conv-1234567890' })).toBeInTheDocument();
   });
 
@@ -60,7 +60,7 @@ describe('ConversationHeader', () => {
         onDelete={mockOnDelete}
       />
     );
-    
+
     fireEvent.click(screen.getByRole('button', { name: /export/i }));
     expect(mockOnExport).toHaveBeenCalledTimes(1);
   });
@@ -73,7 +73,7 @@ describe('ConversationHeader', () => {
         onDelete={mockOnDelete}
       />
     );
-    
+
     fireEvent.click(screen.getByRole('button', { name: /delete/i }));
     expect(mockOnDelete).toHaveBeenCalledTimes(1);
   });
@@ -84,7 +84,7 @@ describe('ConversationHeader', () => {
       id: '',
       summary: undefined,
     };
-    
+
     render(
       <ConversationHeader
         conversation={loadingConversation}
@@ -92,7 +92,7 @@ describe('ConversationHeader', () => {
         onDelete={mockOnDelete}
       />
     );
-    
+
     expect(screen.getByRole('heading', { name: 'Loading...' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /export/i })).toBeDisabled();
     expect(screen.getByRole('button', { name: /delete/i })).toBeDisabled();

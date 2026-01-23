@@ -16,11 +16,11 @@ const FileReadRenderer: React.FC<FileReadRendererProps> = ({ toolResult }) => {
   const startLine = meta.offset || 1;
   const lineLimit = meta.lineLimit;
   const remainingLines = meta.remainingLines || 0;
-  
+
   let lastNonEmptyIndex = lines.length - 1;
-  const isTruncationMessage = (line: string) => 
+  const isTruncationMessage = (line: string) =>
     line.includes('lines remaining') || line.includes('truncated due to');
-  
+
   if (lastNonEmptyIndex >= 0 && isTruncationMessage(lines[lastNonEmptyIndex])) {
     let searchIndex = lastNonEmptyIndex - 1;
     while (searchIndex >= 0 && lines[searchIndex] === '') {
@@ -32,7 +32,7 @@ const FileReadRenderer: React.FC<FileReadRendererProps> = ({ toolResult }) => {
       lastNonEmptyIndex--;
     }
   }
-  
+
   const displayLines = lines.slice(0, lastNonEmptyIndex + 1);
   const fileContent = displayLines.join('\n');
   const maxLineNumber = startLine + displayLines.length - 1;
@@ -43,9 +43,9 @@ const FileReadRenderer: React.FC<FileReadRendererProps> = ({ toolResult }) => {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 flex-wrap text-xs font-mono text-kodelet-dark/80">
           <span className="font-medium">{meta.filePath}</span>
-          <StatusBadge 
-            text={`${displayLines.length} lines`} 
-            variant={meta.truncated ? 'warning' : 'success'} 
+          <StatusBadge
+            text={`${displayLines.length} lines`}
+            variant={meta.truncated ? 'warning' : 'success'}
           />
           {remainingLines > 0 && <StatusBadge text={`${remainingLines} more`} variant="info" />}
           {language && <span className="text-kodelet-mid-gray">{language}</span>}
@@ -59,8 +59,8 @@ const FileReadRenderer: React.FC<FileReadRendererProps> = ({ toolResult }) => {
         </div>
       )}
 
-      <div 
-        className="bg-kodelet-light text-sm font-mono rounded border border-kodelet-light-gray" 
+      <div
+        className="bg-kodelet-light text-sm font-mono rounded border border-kodelet-light-gray"
         style={{ maxHeight: '400px', overflowY: 'auto' }}
       >
         <div className="flex p-3">

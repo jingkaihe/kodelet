@@ -23,7 +23,7 @@ const ThinkingRenderer: React.FC<ThinkingRendererProps> = ({ toolResult }) => {
       <div className="flex items-center gap-2 text-xs">
         <StatusBadge text="Internal" variant="info" />
         {!showThought && (
-          <button 
+          <button
             onClick={() => setShowThought(true)}
             className="text-kodelet-blue hover:underline"
           >
@@ -33,7 +33,7 @@ const ThinkingRenderer: React.FC<ThinkingRendererProps> = ({ toolResult }) => {
       </div>
 
       {showThought && (
-        <div 
+        <div
           className="bg-kodelet-light-gray/30 p-2 rounded border border-kodelet-mid-gray/20 prose-enhanced text-sm italic max-h-64 overflow-y-auto"
           dangerouslySetInnerHTML={{ __html: formatThoughtContent(meta.thought) }}
         />

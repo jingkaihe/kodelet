@@ -11,7 +11,7 @@ describe('EmptyState', () => {
         description="Start a new conversation to get started"
       />
     );
-    
+
     expect(screen.getByText('No conversations yet')).toBeInTheDocument();
     expect(screen.getByText('Start a new conversation to get started')).toBeInTheDocument();
   });
@@ -25,7 +25,7 @@ describe('EmptyState', () => {
         action={<button>Clear filters</button>}
       />
     );
-    
+
     expect(screen.getByRole('button', { name: 'Clear filters' })).toBeInTheDocument();
   });
 });

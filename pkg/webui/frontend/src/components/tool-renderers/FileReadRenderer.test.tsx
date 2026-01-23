@@ -44,7 +44,7 @@ describe('FileReadRenderer', () => {
   it('returns null when metadata is missing', () => {
     const toolResult = createToolResult({});
     const { container } = render(<FileReadRenderer toolResult={{ ...toolResult, metadata: undefined }} />);
-    
+
     expect(container.firstChild).toBeNull();
   });
 

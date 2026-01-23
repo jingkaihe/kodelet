@@ -99,7 +99,7 @@ describe('FileEditRenderer', () => {
 
     render(<FileEditRenderer toolResult={toolResult} />);
     fireEvent.click(screen.getByText('Show diff'));
-    
+
     const { container } = render(<FileEditRenderer toolResult={toolResult} />);
     fireEvent.click(screen.getAllByText('Show diff')[0]);
     expect(container.querySelector('.bg-red-50')).toBeInTheDocument();

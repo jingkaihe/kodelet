@@ -23,7 +23,7 @@ const MessageList: React.FC<MessageListProps> = ({ messages, toolResults }) => {
     });
     return allToolCallIds;
   });
-  
+
   const [expandedThinking, setExpandedThinking] = useState<string[]>(() => {
     const allMessageIndices: string[] = [];
     messages.forEach((message, index) => {

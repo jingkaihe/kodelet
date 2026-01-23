@@ -27,7 +27,7 @@ describe('GrepRenderer', () => {
   it('returns null when metadata is missing', () => {
     const toolResult = createToolResult({});
     const { container } = render(<GrepRenderer toolResult={{ ...toolResult, metadata: undefined }} />);
-    
+
     expect(container.firstChild).toBeNull();
   });
 

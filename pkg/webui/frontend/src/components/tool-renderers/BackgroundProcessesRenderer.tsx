@@ -26,9 +26,9 @@ const BackgroundProcessesRenderer: React.FC<BackgroundProcessesRendererProps> = 
                 <span className="text-kodelet-mid-gray">PID {process.pid}</span>
                 <span className="text-kodelet-dark">{process.command || 'Unknown'}</span>
               </div>
-              <StatusBadge 
-                text={process.status || 'unknown'} 
-                variant={process.status === 'running' ? 'success' : 'warning'} 
+              <StatusBadge
+                text={process.status || 'unknown'}
+                variant={process.status === 'running' ? 'success' : 'warning'}
               />
             </div>
           ))}

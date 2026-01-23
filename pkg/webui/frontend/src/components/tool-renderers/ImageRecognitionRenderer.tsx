@@ -29,7 +29,7 @@ const ImageRecognitionRenderer: React.FC<ImageRecognitionRendererProps> = ({ too
       {analysis && (
         <>
           {!showAnalysis ? (
-            <button 
+            <button
               onClick={() => setShowAnalysis(true)}
               className="text-xs text-kodelet-blue hover:underline"
             >

@@ -28,9 +28,9 @@ describe('SkillRenderer', () => {
       skillName: 'pdf',
       directory: '/home/user/.kodelet/skills/pdf',
     };
-    
+
     render(<SkillRenderer toolResult={createToolResult(metadata)} />);
-    
+
     expect(screen.getByText('pdf')).toBeInTheDocument();
     expect(screen.getByText('loaded')).toBeInTheDocument();
   });
@@ -40,9 +40,9 @@ describe('SkillRenderer', () => {
       skillName: 'kubernetes',
       directory: '~/.kodelet/skills/kubernetes',
     };
-    
+
     render(<SkillRenderer toolResult={createToolResult(metadata)} />);
-    
+
     expect(screen.getByText('~/.kodelet/skills/kubernetes')).toBeInTheDocument();
   });
 
@@ -51,9 +51,9 @@ describe('SkillRenderer', () => {
       skillName: 'test',
       directory: '/test',
     };
-    
+
     render(<SkillRenderer toolResult={createToolResult(metadata)} />);
-    
+
     const badge = screen.getByTestId('status-badge');
     expect(badge).toHaveAttribute('data-variant', 'success');
   });
@@ -73,9 +73,9 @@ describe('SkillRenderer', () => {
       skillName: 'very-long-skill-name-for-testing',
       directory: '/some/directory/path',
     };
-    
+
     render(<SkillRenderer toolResult={createToolResult(metadata)} />);
-    
+
     expect(screen.getByText('very-long-skill-name-for-testing')).toBeInTheDocument();
   });
 
@@ -84,9 +84,9 @@ describe('SkillRenderer', () => {
       skillName: 'test-skill',
       directory: '/home/user/very/long/path/to/kodelet/skills/test-skill',
     };
-    
+
     render(<SkillRenderer toolResult={createToolResult(metadata)} />);
-    
+
     expect(screen.getByText('/home/user/very/long/path/to/kodelet/skills/test-skill')).toBeInTheDocument();
   });
 });
