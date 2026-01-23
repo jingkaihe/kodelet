@@ -1,5 +1,5 @@
 ---
-name: kodelet-usage
+name: kodelet
 description: Kodelet CLI usage guide, commands, configuration, and workflows. Use when users ask about kodelet features, commands, configuration options, or how to accomplish tasks with kodelet.
 ---
 

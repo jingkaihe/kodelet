@@ -78,11 +78,15 @@ func (d *Discovery) DiscoverSkills() (map[string]*Skill, error) {
 		}
 
 		for _, entry := range entries {
-			if !entry.IsDir() {
+			entryPath := filepath.Join(dir, entry.Name())
+
+			// Check if entry is a directory (following symlinks)
+			info, err := os.Stat(entryPath)
+			if err != nil || !info.IsDir() {
 				continue
 			}
 
-			skillPath := filepath.Join(dir, entry.Name(), skillFileName)
+			skillPath := filepath.Join(entryPath, skillFileName)
 			skill, err := d.loadSkill(skillPath)
 			if err != nil {
 				continue // Skip invalid skills
@@ -90,7 +94,7 @@ func (d *Discovery) DiscoverSkills() (map[string]*Skill, error) {
 
 			// Only add if not already present (earlier directories have precedence)
 			if _, exists := skills[skill.Name]; !exists {
-				skill.Directory = filepath.Join(dir, entry.Name())
+				skill.Directory = entryPath
 				skills[skill.Name] = skill
 			}
 		}
