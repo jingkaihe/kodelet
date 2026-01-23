@@ -1,7 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { ToolResult, ImageRecognitionMetadata } from '../../types';
-import { ToolCard, MetadataRow } from './shared';
-import { getMetadataAny, escapeHtml } from './utils';
+import { StatusBadge } from './shared';
+import { getMetadataAny } from './utils';
 
 interface ImageRecognitionRendererProps {
   toolResult: ToolResult;
@@ -9,29 +9,40 @@ interface ImageRecognitionRendererProps {
 
 const ImageRecognitionRenderer: React.FC<ImageRecognitionRendererProps> = ({ toolResult }) => {
   const meta = toolResult.metadata as ImageRecognitionMetadata;
+  const [showAnalysis, setShowAnalysis] = useState(false);
   if (!meta) return null;
 
   const imagePath = getMetadataAny(toolResult, ['imagePath', 'image_path', 'path']) as string;
   const analysis = meta.analysis || meta.result;
 
   return (
-    <ToolCard
-      title="Image Recognition"
-      badge={{ text: 'Analyzed', className: 'bg-kodelet-green/10 text-kodelet-green border border-kodelet-green/20' }}
-    >
-      <div className="mb-3">
-        <div className="space-y-1">
-          {imagePath && <MetadataRow label="Image" value={imagePath} monospace />}
-          {meta.prompt && <MetadataRow label="Prompt" value={meta.prompt} />}
-        </div>
+    <div className="space-y-2">
+      <div className="flex items-center gap-2 text-xs">
+        <StatusBadge text="Analyzed" variant="success" />
+        {imagePath && <span className="font-mono text-kodelet-dark/70">{imagePath}</span>}
       </div>
 
-      {analysis && (
-        <div className="bg-kodelet-light p-3 rounded border border-kodelet-mid-gray/20">
-          <div className="text-sm font-body text-kodelet-dark">{escapeHtml(analysis)}</div>
-        </div>
+      {meta.prompt && (
+        <div className="text-xs text-kodelet-mid-gray">Prompt: {meta.prompt}</div>
       )}
-    </ToolCard>
+
+      {analysis && (
+        <>
+          {!showAnalysis ? (
+            <button 
+              onClick={() => setShowAnalysis(true)}
+              className="text-xs text-kodelet-blue hover:underline"
+            >
+              Show analysis
+            </button>
+          ) : (
+            <div className="bg-kodelet-light p-2 rounded border border-kodelet-mid-gray/20 text-sm max-h-64 overflow-y-auto">
+              {analysis}
+            </div>
+          )}
+        </>
+      )}
+    </div>
   );
 };
 

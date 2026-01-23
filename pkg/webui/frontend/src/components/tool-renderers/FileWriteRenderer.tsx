@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { ToolResult, FileMetadata } from '../../types';
-import { ToolCard, CopyButton, MetadataRow, Collapsible, CodeBlock } from './shared';
+import { CopyButton, StatusBadge } from './shared';
 import { detectLanguageFromPath, formatFileSize } from './utils';
 
 interface FileWriteMetadata extends FileMetadata {
@@ -13,40 +13,55 @@ interface FileWriteRendererProps {
 
 const FileWriteRenderer: React.FC<FileWriteRendererProps> = ({ toolResult }) => {
   const meta = toolResult.metadata as FileWriteMetadata;
+  const [showContent, setShowContent] = useState(false);
   if (!meta) return null;
 
   const language = meta.language || detectLanguageFromPath(meta.filePath);
   const sizeText = meta.size ? formatFileSize(meta.size) : '';
+  const lines = meta.content?.split('\n') || [];
 
   return (
-    <ToolCard
-      title="File Written"
-      badge={{ text: 'Success', className: 'px-2 py-0.5 rounded text-xs font-heading font-medium bg-kodelet-green/10 text-kodelet-green border border-kodelet-green/20' }}
-      actions={meta.content ? <CopyButton content={meta.content} /> : undefined}
-    >
-      <div className="text-xs text-kodelet-dark/60 mb-3 font-mono">
-        <div className="flex items-center gap-4">
-          <MetadataRow label="Path" value={meta.filePath} monospace />
-          {sizeText && <MetadataRow label="Size" value={sizeText} />}
-          {language && <MetadataRow label="Language" value={language} />}
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2 flex-wrap text-xs font-mono text-kodelet-dark/80">
+          <span className="font-medium">{meta.filePath}</span>
+          <StatusBadge text="Written" variant="success" />
+          {sizeText && <span className="text-kodelet-mid-gray">{sizeText}</span>}
+          {language && <span className="text-kodelet-mid-gray">{language}</span>}
         </div>
+        {meta.content && <CopyButton content={meta.content} />}
       </div>
 
       {meta.content && (
-        <Collapsible
-          title="Content"
-          collapsed={true}
-          badge={{ text: 'Preview', className: 'px-2 py-0.5 rounded text-xs font-heading font-medium bg-kodelet-blue/10 text-kodelet-blue border border-kodelet-blue/20' }}
-        >
-          <CodeBlock 
-            code={meta.content} 
-            language={language} 
-            showLineNumbers={true} 
-            maxHeight={300} 
-          />
-        </Collapsible>
+        <>
+          {!showContent ? (
+            <button 
+              onClick={() => setShowContent(true)}
+              className="text-xs text-kodelet-blue hover:underline"
+            >
+              Show content ({lines.length} lines)
+            </button>
+          ) : (
+            <div 
+              className="bg-kodelet-light text-xs font-mono rounded border border-kodelet-light-gray" 
+              style={{ maxHeight: '300px', overflowY: 'auto' }}
+            >
+              <div className="p-3">
+                {lines.slice(0, 50).map((line, index) => (
+                  <div key={index} className="flex">
+                    <span className="text-kodelet-mid-gray min-w-[3rem] text-right pr-2 select-none">{index + 1}</span>
+                    <span className="text-kodelet-dark">{line || '\u00A0'}</span>
+                  </div>
+                ))}
+                {lines.length > 50 && (
+                  <div className="text-kodelet-mid-gray mt-2">... and {lines.length - 50} more lines</div>
+                )}
+              </div>
+            </div>
+          )}
+        </>
       )}
-    </ToolCard>
+    </div>
   );
 };
 

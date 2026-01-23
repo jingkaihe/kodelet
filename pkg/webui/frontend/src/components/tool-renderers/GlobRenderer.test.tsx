@@ -1,63 +1,17 @@
-import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import GlobRenderer from './GlobRenderer';
 import { ToolResult, GlobMetadata } from '../../types';
 
-// Mock shared components
-interface MockToolCardProps {
-  title: string;
-  badge?: { text: string; className: string };
-  children: React.ReactNode;
-}
-
-interface MockMetadataRowProps {
-  label: string;
-  value: string | number;
-}
-
-interface MockCollapsibleProps {
-  title: string;
-  badge?: { text: string; className: string };
-  children: React.ReactNode;
-  collapsed?: boolean;
+interface MockStatusBadgeProps {
+  text: string;
+  variant?: string;
 }
 
 vi.mock('./shared', () => ({
-  ToolCard: ({ title, badge, children }: MockToolCardProps) => (
-    <div data-testid="tool-card">
-      <h3>{title}</h3>
-      {badge && <span className={badge.className}>{badge.text}</span>}
-      {children}
-    </div>
+  StatusBadge: ({ text, variant }: MockStatusBadgeProps) => (
+    <span data-testid="status-badge" data-variant={variant}>{text}</span>
   ),
-  MetadataRow: ({ label, value }: MockMetadataRowProps) => (
-    <div data-testid="metadata-row">
-      {label}: {value}
-    </div>
-  ),
-  Collapsible: ({ title, badge, children, collapsed }: MockCollapsibleProps) => (
-    <div data-testid="collapsible" data-collapsed={collapsed}>
-      <h4>{title}</h4>
-      {badge && <span className={badge.className}>{badge.text}</span>}
-      {children}
-    </div>
-  ),
-}));
-
-// Mock utils
-vi.mock('./utils', () => ({
-  formatFileSize: vi.fn((size: number) => {
-    if (size < 1024) return `${size} B`;
-    if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
-    return `${(size / (1024 * 1024)).toFixed(1)} MB`;
-  }),
-  getFileIcon: vi.fn((path: string) => {
-    if (path.endsWith('.js')) return 'script';
-    if (path.endsWith('.png')) return 'image';
-    if (path.endsWith('.md')) return 'file';
-    return 'file';
-  }),
 }));
 
 describe('GlobRenderer', () => {
@@ -72,20 +26,17 @@ describe('GlobRenderer', () => {
   it('returns null when metadata is missing', () => {
     const toolResult = createToolResult({});
     const { container } = render(<GlobRenderer toolResult={{ ...toolResult, metadata: undefined }} />);
-    
     expect(container.firstChild).toBeNull();
   });
 
-  it('renders file listing with basic information', () => {
+  it('renders pattern', () => {
     const toolResult = createToolResult({
       pattern: '*.js',
       files: [],
     });
 
     render(<GlobRenderer toolResult={toolResult} />);
-
-    expect(screen.getByText('File Listing')).toBeInTheDocument();
-    expect(screen.getByText('Pattern: *.js')).toBeInTheDocument();
+    expect(screen.getByText('*.js')).toBeInTheDocument();
   });
 
   it('shows no files message when files are empty', () => {
@@ -95,7 +46,6 @@ describe('GlobRenderer', () => {
     });
 
     render(<GlobRenderer toolResult={toolResult} />);
-
     expect(screen.getByText('No files found')).toBeInTheDocument();
   });
 
@@ -103,20 +53,17 @@ describe('GlobRenderer', () => {
     const toolResult = createToolResult({
       pattern: '*',
       files: [
-        { path: 'file1.js', size: 100 },
-        { path: 'file2.js', size: 200 },
-        { path: 'file3.js', size: 300 },
+        { path: 'file1.js' },
+        { path: 'file2.js' },
+        { path: 'file3.js' },
       ],
     });
 
     render(<GlobRenderer toolResult={toolResult} />);
-
-    // There are two badges with '3 files' - one in ToolCard and one in Collapsible
-    const badges = screen.getAllByText('3 files');
-    expect(badges).toHaveLength(2);
+    expect(screen.getByText('3 files')).toBeInTheDocument();
   });
 
-  it('shows truncated badge when truncated', () => {
+  it('shows warning variant when truncated', () => {
     const toolResult = createToolResult({
       pattern: '*',
       files: [{ path: 'file.js' }],
@@ -124,9 +71,8 @@ describe('GlobRenderer', () => {
     });
 
     render(<GlobRenderer toolResult={toolResult} />);
-
-    // When truncated, the component shows "Truncated" badge instead of file count
-    expect(screen.getByText('Truncated')).toBeInTheDocument();
+    const badge = screen.getByTestId('status-badge');
+    expect(badge).toHaveAttribute('data-variant', 'warning');
   });
 
   it('shows path when provided', () => {
@@ -137,39 +83,10 @@ describe('GlobRenderer', () => {
     });
 
     render(<GlobRenderer toolResult={toolResult} />);
-
-    expect(screen.getByText('Path: /src')).toBeInTheDocument();
+    expect(screen.getByText('in /src')).toBeInTheDocument();
   });
 
-  it('shows total size when files have size', () => {
-    const toolResult = createToolResult({
-      pattern: '*',
-      files: [
-        { path: 'file1.js', size: 1024 },
-        { path: 'file2.js', size: 2048 },
-      ],
-    });
-
-    render(<GlobRenderer toolResult={toolResult} />);
-
-    expect(screen.getByText('Total Size: 3.0 KB')).toBeInTheDocument();
-  });
-
-  it('does not show total size when files have no size', () => {
-    const toolResult = createToolResult({
-      pattern: '*',
-      files: [
-        { path: 'file1.js' },
-        { path: 'file2.js' },
-      ],
-    });
-
-    render(<GlobRenderer toolResult={toolResult} />);
-
-    expect(screen.queryByText(/Total Size:/)).not.toBeInTheDocument();
-  });
-
-  it('renders file list with icons', () => {
+  it('renders file names', () => {
     const toolResult = createToolResult({
       pattern: '*',
       files: [
@@ -180,125 +97,39 @@ describe('GlobRenderer', () => {
     });
 
     render(<GlobRenderer toolResult={toolResult} />);
-
-    // Files are displayed without emoji icons
     expect(screen.getByText('script.js')).toBeInTheDocument();
     expect(screen.getByText('image.png')).toBeInTheDocument();
     expect(screen.getByText('readme.md')).toBeInTheDocument();
   });
 
-  it('renders file sizes', () => {
-    const toolResult = createToolResult({
-      pattern: '*',
-      files: [
-        { path: 'small.js', size: 512 },
-        { path: 'large.js', size: 1024 * 1024 * 2 },
-      ],
-    });
+  it('shows expand button for more than 10 files', () => {
+    const files = Array(15).fill(null).map((_, i) => ({ path: `file${i}.js` }));
+    const toolResult = createToolResult({ pattern: '*', files });
 
     render(<GlobRenderer toolResult={toolResult} />);
-
-    expect(screen.getByText('512 B')).toBeInTheDocument();
-    expect(screen.getByText('2.0 MB')).toBeInTheDocument();
+    expect(screen.getByText('+7 more files')).toBeInTheDocument();
   });
 
-  it('renders modification times', () => {
-    const toolResult = createToolResult({
-      pattern: '*',
-      files: [
-        { path: 'file1.js', modTime: '2023-01-01T12:00:00Z' },
-        { path: 'file2.js', modified: '2023-02-01T12:00:00Z' }, // alternative property
-      ],
-    });
+  it('expands to show all files when button clicked', () => {
+    const files = Array(15).fill(null).map((_, i) => ({ path: `file${i}.js` }));
+    const toolResult = createToolResult({ pattern: '*', files });
 
     render(<GlobRenderer toolResult={toolResult} />);
-
-    // Dates will be formatted according to locale
-    expect(screen.getByText(/1\/1\/2023|01\/01\/2023/)).toBeInTheDocument();
-    expect(screen.getByText(/2\/1\/2023|01\/02\/2023/)).toBeInTheDocument();
-  });
-
-  it('collapses file list when more than 10 files', () => {
-    const files = Array(11).fill(null).map((_, i) => ({
-      path: `file${i}.js`,
-    }));
-
-    const toolResult = createToolResult({
-      pattern: '*',
-      files,
-    });
-
-    render(<GlobRenderer toolResult={toolResult} />);
-
-    const collapsible = screen.getByTestId('collapsible');
-    expect(collapsible).toHaveAttribute('data-collapsed', 'true');
-  });
-
-  it('does not collapse file list with 10 or fewer files', () => {
-    const files = Array(10).fill(null).map((_, i) => ({
-      path: `file${i}.js`,
-    }));
-
-    const toolResult = createToolResult({
-      pattern: '*',
-      files,
-    });
-
-    render(<GlobRenderer toolResult={toolResult} />);
-
-    const collapsible = screen.getByTestId('collapsible');
-    expect(collapsible).toHaveAttribute('data-collapsed', 'false');
+    fireEvent.click(screen.getByText('+7 more files'));
+    expect(screen.getByText('file14.js')).toBeInTheDocument();
   });
 
   it('handles files with name property instead of path', () => {
     const toolResult = createToolResult({
       pattern: '*',
       files: [
-        { path: 'file1.js', name: 'file1.js', size: 100 },
-        { path: 'file2.js', name: 'file2.js', size: 200 },
+        { path: '', name: 'file1.js' },
+        { path: '', name: 'file2.js' },
       ],
     });
 
     render(<GlobRenderer toolResult={toolResult} />);
-
     expect(screen.getByText('file1.js')).toBeInTheDocument();
     expect(screen.getByText('file2.js')).toBeInTheDocument();
-  });
-
-  it('handles files without size gracefully', () => {
-    const toolResult = createToolResult({
-      pattern: '*',
-      files: [
-        { path: 'file1.js' },
-        { path: 'file2.js', size: 0 },
-        { path: 'file3.js', size: 1024 },
-      ],
-    });
-
-    render(<GlobRenderer toolResult={toolResult} />);
-
-    // Only file3.js should show size
-    const sizeElements = screen.getAllByText(/KB|B|MB/);
-    expect(sizeElements).toHaveLength(2); // Total size and file3.js size
-  });
-
-  it('displays collapsible with correct badge', () => {
-    const toolResult = createToolResult({
-      pattern: '*',
-      files: [
-        { path: 'file1.js' },
-        { path: 'file2.js' },
-      ],
-    });
-
-    render(<GlobRenderer toolResult={toolResult} />);
-
-    const collapsible = screen.getByTestId('collapsible');
-    expect(collapsible).toBeInTheDocument();
-    expect(screen.getByText('Files')).toBeInTheDocument();
-    
-    // Check for the badge within collapsible
-    const badges = screen.getAllByText('2 files');
-    expect(badges).toHaveLength(2); // One in ToolCard, one in Collapsible
   });
 });

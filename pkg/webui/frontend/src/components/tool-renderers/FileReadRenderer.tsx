@@ -1,6 +1,6 @@
 import React from 'react';
 import { ToolResult, FileMetadata } from '../../types';
-import { ToolCard, CopyButton, MetadataRow } from './shared';
+import { CopyButton, StatusBadge } from './shared';
 import { detectLanguageFromPath } from './utils';
 
 interface FileReadRendererProps {
@@ -16,7 +16,6 @@ const FileReadRenderer: React.FC<FileReadRendererProps> = ({ toolResult }) => {
   const startLine = meta.offset || 1;
   const lineLimit = meta.lineLimit;
   const remainingLines = meta.remainingLines || 0;
-  const totalLines = meta.totalLines || lines.length || 0;
   
   let lastNonEmptyIndex = lines.length - 1;
   const isTruncationMessage = (line: string) => 
@@ -35,66 +34,37 @@ const FileReadRenderer: React.FC<FileReadRendererProps> = ({ toolResult }) => {
   }
   
   const displayLines = lines.slice(0, lastNonEmptyIndex + 1);
-  
   const fileContent = displayLines.join('\n');
   const maxLineNumber = startLine + displayLines.length - 1;
   const lineNumberWidth = Math.max(4, maxLineNumber.toString().length);
-  
-  const getBadge = () => {
-    if (meta.truncated) {
-      if (remainingLines > 0) {
-        return { 
-          text: `${remainingLines} more`, 
-          className: 'px-2 py-0.5 rounded text-xs font-heading font-medium bg-kodelet-blue/10 text-kodelet-blue border border-kodelet-blue/20' 
-        };
-      }
-      return { 
-        text: 'Truncated', 
-        className: 'px-2 py-0.5 rounded text-xs font-heading font-medium bg-kodelet-orange/10 text-kodelet-orange border border-kodelet-orange/20' 
-      };
-    }
-    return { 
-      text: 'Read', 
-      className: 'px-2 py-0.5 rounded text-xs font-heading font-medium bg-kodelet-green/10 text-kodelet-green border border-kodelet-green/20' 
-    };
-  };
 
   return (
-    <ToolCard
-      title="File Read"
-      badge={getBadge()}
-      actions={<CopyButton content={fileContent} />}
-    >
-      <div className="text-xs text-kodelet-dark/60 mb-3 font-mono">
-        <div className="flex items-center gap-4 flex-wrap">
-          <MetadataRow label="Path" value={meta.filePath} monospace />
-          {startLine > 1 && <MetadataRow label="Starting at line" value={startLine} />}
-          <MetadataRow 
-            label="Lines shown" 
-            value={`${displayLines.length}${totalLines > 0 && totalLines > displayLines.length ? ` of ${totalLines}` : ''}`} 
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2 flex-wrap text-xs font-mono text-kodelet-dark/80">
+          <span className="font-medium">{meta.filePath}</span>
+          <StatusBadge 
+            text={`${displayLines.length} lines`} 
+            variant={meta.truncated ? 'warning' : 'success'} 
           />
-          {lineLimit && lineLimit !== 2000 && <MetadataRow label="Line limit" value={lineLimit} />}
-          {remainingLines > 0 && (
-            <MetadataRow 
-              label="Remaining" 
-              value={`${remainingLines} lines`} 
-            />
-          )}
-          {language && <MetadataRow label="Language" value={language} />}
+          {remainingLines > 0 && <StatusBadge text={`${remainingLines} more`} variant="info" />}
+          {language && <span className="text-kodelet-mid-gray">{language}</span>}
         </div>
-        {remainingLines > 0 && (
-          <div className="mt-2 text-xs text-kodelet-blue font-body">
-            Use offset={startLine + (lineLimit || displayLines.length)} to continue reading
-          </div>
-        )}
+        <CopyButton content={fileContent} />
       </div>
 
+      {remainingLines > 0 && (
+        <div className="text-xs text-kodelet-blue font-body">
+          Use offset={startLine + (lineLimit || displayLines.length)} to continue reading
+        </div>
+      )}
+
       <div 
-        className="bg-kodelet-light text-sm font-mono rounded-lg border border-kodelet-light-gray" 
-        style={{ maxHeight: '600px', overflowY: 'auto' }}
+        className="bg-kodelet-light text-sm font-mono rounded border border-kodelet-light-gray" 
+        style={{ maxHeight: '400px', overflowY: 'auto' }}
       >
-        <div className="flex p-4">
-          <div className="text-kodelet-mid-gray flex-shrink-0 whitespace-pre select-none">
+        <div className="flex p-3">
+          <div className="text-kodelet-mid-gray flex-shrink-0 whitespace-pre select-none text-xs">
             {displayLines.map((_, index) => {
               const lineNumber = (startLine + index).toString().padStart(lineNumberWidth, ' ');
               return (
@@ -104,8 +74,7 @@ const FileReadRenderer: React.FC<FileReadRendererProps> = ({ toolResult }) => {
               );
             })}
           </div>
-          
-          <div className="flex-grow overflow-x-auto whitespace-pre text-kodelet-dark">
+          <div className="flex-grow overflow-x-auto whitespace-pre text-kodelet-dark text-xs">
             {displayLines.map((line, index) => (
               <div key={index} className="min-h-[1.2em]">
                 {line === '' ? '\u00A0' : line}
@@ -114,7 +83,7 @@ const FileReadRenderer: React.FC<FileReadRendererProps> = ({ toolResult }) => {
           </div>
         </div>
       </div>
-    </ToolCard>
+    </div>
   );
 };
 

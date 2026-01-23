@@ -1,37 +1,16 @@
-import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import FallbackRenderer from './FallbackRenderer';
 import { ToolResult } from '../../types';
 
-// Mock shared components
-interface MockToolCardProps {
-  title: string;
-  badge?: { text: string; className: string };
-  children: React.ReactNode;
-}
-
-interface MockCollapsibleProps {
-  title: string;
-  badge?: { text: string; className: string };
-  children: React.ReactNode;
-  collapsed?: boolean;
+interface MockStatusBadgeProps {
+  text: string;
+  variant?: string;
 }
 
 vi.mock('./shared', () => ({
-  ToolCard: ({ title, badge, children }: MockToolCardProps) => (
-    <div data-testid="tool-card">
-      <h3>{title}</h3>
-      {badge && <span className={badge.className}>{badge.text}</span>}
-      {children}
-    </div>
-  ),
-  Collapsible: ({ title, badge, children, collapsed }: MockCollapsibleProps) => (
-    <div data-testid="collapsible" data-collapsed={collapsed}>
-      <h4>{title}</h4>
-      {badge && <span className={badge.className}>{badge.text}</span>}
-      {children}
-    </div>
+  StatusBadge: ({ text, variant }: MockStatusBadgeProps) => (
+    <span data-testid="status-badge" data-variant={variant}>{text}</span>
   ),
 }));
 
@@ -44,115 +23,57 @@ describe('FallbackRenderer', () => {
     metadata: metadata as Record<string, unknown> | undefined,
   });
 
-  it('renders with tool name', () => {
+  it('shows Completed badge', () => {
     const toolResult = createToolResult('custom-tool', { key: 'value' });
     render(<FallbackRenderer toolResult={toolResult} />);
-    
-    expect(screen.getByText('custom-tool')).toBeInTheDocument();
+    expect(screen.getByText('Completed')).toBeInTheDocument();
   });
 
-  it('shows Unknown badge', () => {
-    const toolResult = createToolResult('mystery-tool', {});
-    render(<FallbackRenderer toolResult={toolResult} />);
-    
-    expect(screen.getByText('Unknown')).toBeInTheDocument();
-    const badge = screen.getByText('Unknown');
-    expect(badge.className).toContain('font-heading');
-  });
-
-  it('renders collapsible with debug info', () => {
+  it('shows "Show raw data" button', () => {
     const toolResult = createToolResult('test-tool', {});
     render(<FallbackRenderer toolResult={toolResult} />);
-    
-    const collapsible = screen.getByTestId('collapsible');
-    expect(collapsible).toBeInTheDocument();
-    expect(screen.getByText('Raw Data')).toBeInTheDocument();
-    expect(screen.getByText('Debug')).toBeInTheDocument();
-    const debugBadge = screen.getByText('Debug');
-    expect(debugBadge.className).toContain('font-heading');
+    expect(screen.getByText('Show raw data')).toBeInTheDocument();
   });
 
-  it('renders collapsible as collapsed by default', () => {
-    const toolResult = createToolResult('test-tool', {});
+  it('reveals raw JSON when button is clicked', () => {
+    const metadata = { key: 'value', number: 42 };
+    const toolResult = createToolResult('test-tool', metadata);
     render(<FallbackRenderer toolResult={toolResult} />);
     
-    const collapsible = screen.getByTestId('collapsible');
-    expect(collapsible).toHaveAttribute('data-collapsed', 'true');
-  });
-
-  it('displays metadata as formatted JSON', () => {
-    const metadata = {
-      stringValue: 'test',
-      numberValue: 42,
-      booleanValue: true,
-      nestedObject: {
-        key1: 'value1',
-        key2: 'value2',
-      },
-      arrayValue: ['item1', 'item2'],
-    };
+    fireEvent.click(screen.getByText('Show raw data'));
     
-    const toolResult = createToolResult('complex-tool', metadata);
-    const { container } = render(<FallbackRenderer toolResult={toolResult} />);
-    
-    const pre = container.querySelector('pre');
-    expect(pre).toBeInTheDocument();
-    expect(pre).toHaveClass('text-xs', 'overflow-x-auto', 'bg-kodelet-light', 'p-3', 'rounded-lg');
-    
-    const code = pre?.querySelector('code');
-    expect(code?.textContent).toBe(JSON.stringify(metadata, null, 2));
+    const pre = document.querySelector('pre');
+    expect(pre?.textContent).toBe(JSON.stringify(metadata, null, 2));
   });
 
   it('handles null metadata', () => {
     const toolResult = createToolResult('null-tool', null);
-    const { container } = render(<FallbackRenderer toolResult={toolResult} />);
+    render(<FallbackRenderer toolResult={toolResult} />);
     
-    const code = container.querySelector('pre code');
-    expect(code?.textContent).toBe('null');
-  });
-
-  it('handles undefined metadata', () => {
-    const toolResult = createToolResult('undefined-tool', undefined);
-    const { container } = render(<FallbackRenderer toolResult={toolResult} />);
+    fireEvent.click(screen.getByText('Show raw data'));
     
-    const code = container.querySelector('pre code');
-    expect(code?.textContent).toBe('');
+    const pre = document.querySelector('pre code');
+    expect(pre?.textContent).toBe('null');
   });
 
   it('handles empty object metadata', () => {
     const toolResult = createToolResult('empty-tool', {});
-    const { container } = render(<FallbackRenderer toolResult={toolResult} />);
+    render(<FallbackRenderer toolResult={toolResult} />);
     
-    const code = container.querySelector('pre code');
-    expect(code?.textContent).toBe('{}');
+    fireEvent.click(screen.getByText('Show raw data'));
+    
+    const pre = document.querySelector('pre code');
+    expect(pre?.textContent).toBe('{}');
   });
 
-  it('handles circular reference in metadata gracefully', () => {
+  it('handles circular reference gracefully', () => {
     const metadata: Record<string, unknown> = { key: 'value' };
-    metadata.circular = metadata; // Create circular reference
+    metadata.circular = metadata;
     
     const toolResult = createToolResult('circular-tool', metadata);
-    
-    // Component should handle circular references gracefully by showing [Circular]
     render(<FallbackRenderer toolResult={toolResult} />);
     
-    // Should show [Circular] instead of throwing an error
+    fireEvent.click(screen.getByText('Show raw data'));
     expect(screen.getByText(/\[Circular\]/)).toBeInTheDocument();
-  });
-
-  it('handles very long tool names', () => {
-    const longName = 'very-long-tool-name-that-might-overflow-the-ui-boundaries';
-    const toolResult = createToolResult(longName, {});
-    render(<FallbackRenderer toolResult={toolResult} />);
-    
-    expect(screen.getByText(`${longName}`)).toBeInTheDocument();
-  });
-
-  it('handles special characters in tool name', () => {
-    const specialName = 'tool-with-<special>&"characters"';
-    const toolResult = createToolResult(specialName, {});
-    render(<FallbackRenderer toolResult={toolResult} />);
-    
-    expect(screen.getByText(`${specialName}`)).toBeInTheDocument();
   });
 });

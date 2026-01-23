@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { ToolResult, GrepMetadata, GrepResult, GrepMatch } from '../../types';
-import { ToolCard, MetadataRow, Collapsible } from './shared';
+import { StatusBadge } from './shared';
 
 interface GrepRendererProps {
   toolResult: ToolResult;
@@ -8,23 +8,11 @@ interface GrepRendererProps {
 
 const GrepRenderer: React.FC<GrepRendererProps> = ({ toolResult }) => {
   const meta = toolResult.metadata as GrepMetadata;
+  const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set());
   if (!meta) return null;
 
   const results = meta.results || [];
   const totalMatches = results.reduce((sum, result) => sum + (result.matches ? result.matches.length : 1), 0);
-
-  const getBadge = () => {
-    if (meta.truncated) {
-      return { 
-        text: 'Truncated', 
-        className: 'px-2 py-0.5 rounded text-xs font-heading font-medium bg-kodelet-orange/10 text-kodelet-orange border border-kodelet-orange/20' 
-      };
-    }
-    return { 
-      text: `${totalMatches} in ${results.length} files`, 
-      className: 'px-2 py-0.5 rounded text-xs font-heading font-medium bg-kodelet-green/10 text-kodelet-green border border-kodelet-green/20' 
-    };
-  };
 
   const groupResultsByFile = (results: GrepResult[]) => {
     const grouped: Record<string, GrepMatch[]> = {};
@@ -33,7 +21,6 @@ const GrepRenderer: React.FC<GrepRendererProps> = ({ toolResult }) => {
       if (!grouped[file]) {
         grouped[file] = [];
       }
-
       if (result.matches) {
         grouped[file].push(...result.matches);
       } else {
@@ -48,7 +35,6 @@ const GrepRenderer: React.FC<GrepRendererProps> = ({ toolResult }) => {
 
   const highlightPattern = (text: string, pattern: string): string => {
     if (!pattern || !text) return text;
-
     try {
       const regex = new RegExp(`(${pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
       return text.replace(regex, '<mark class="bg-kodelet-orange/30 text-kodelet-dark px-0.5 rounded">$1</mark>');
@@ -57,59 +43,67 @@ const GrepRenderer: React.FC<GrepRendererProps> = ({ toolResult }) => {
     }
   };
 
-  const renderSearchResults = (results: GrepResult[], pattern: string) => {
-    const fileGroups = groupResultsByFile(results);
-
-    return Object.entries(fileGroups).map(([file, matches]) => {
-      const matchCount = matches.length;
-      const fileContent = matches.map((match, index) => {
-        const highlightedContent = match.isContext ? match.content : highlightPattern(match.content, pattern);
-        const isContext = match.isContext;
-        return (
-          <div key={index} className={`flex items-start gap-2 py-1 hover:bg-kodelet-light-gray/30 rounded px-2 ${isContext ? 'opacity-60' : ''}`}>
-            <span className="text-xs text-kodelet-mid-gray font-mono min-w-[3rem]">
-              {match.lineNumber || '?'}{isContext ? '-' : ':'}
-            </span>
-            <span 
-              className="text-sm font-mono flex-1 text-kodelet-dark" 
-              dangerouslySetInnerHTML={{ __html: highlightedContent }}
-            />
-          </div>
-        );
-      });
-
-      return (
-        <Collapsible
-          key={file}
-          title={file}
-          collapsed={matchCount > 5}
-          badge={{ text: `${matchCount} matches`, className: 'px-2 py-0.5 rounded text-xs font-heading font-medium bg-kodelet-blue/10 text-kodelet-blue border border-kodelet-blue/20' }}
-        >
-          <div>{fileContent}</div>
-        </Collapsible>
-      );
+  const toggleFile = (file: string) => {
+    setExpandedFiles(prev => {
+      const next = new Set(prev);
+      if (next.has(file)) {
+        next.delete(file);
+      } else {
+        next.add(file);
+      }
+      return next;
     });
   };
 
+  const fileGroups = groupResultsByFile(results);
+
   return (
-    <ToolCard
-      title="Search Results"
-      badge={getBadge()}
-    >
-      <div className="text-xs text-kodelet-dark/60 mb-3 font-mono">
-        <div className="flex items-center gap-4 flex-wrap">
-          <MetadataRow label="Pattern" value={meta.pattern} monospace />
-          {meta.path && <MetadataRow label="Path" value={meta.path} monospace />}
-          {meta.include && <MetadataRow label="Include" value={meta.include} monospace />}
-        </div>
+    <div className="space-y-2">
+      <div className="flex items-center gap-2 flex-wrap text-xs font-mono text-kodelet-dark/80">
+        <code className="font-medium">{meta.pattern}</code>
+        <StatusBadge 
+          text={`${totalMatches} in ${results.length} files`} 
+          variant={meta.truncated ? 'warning' : 'success'} 
+        />
+        {meta.path && <span className="text-kodelet-mid-gray">in {meta.path}</span>}
       </div>
 
       {results.length > 0 ? (
-        <div>{renderSearchResults(results, meta.pattern)}</div>
+        <div className="space-y-1">
+          {Object.entries(fileGroups).map(([file, matches]) => {
+            const isExpanded = expandedFiles.has(file) || matches.length <= 3;
+            const displayMatches = isExpanded ? matches : matches.slice(0, 2);
+            
+            return (
+              <div key={file} className="text-xs">
+                <div className="font-mono text-kodelet-dark/70 font-medium">{file}</div>
+                <div className="ml-2 border-l border-kodelet-light-gray pl-2">
+                  {displayMatches.map((match, index) => (
+                    <div key={index} className={`flex gap-2 py-0.5 ${match.isContext ? 'opacity-50' : ''}`}>
+                      <span className="text-kodelet-mid-gray min-w-[3rem] text-right">{match.lineNumber}</span>
+                      <span 
+                        className="font-mono text-kodelet-dark" 
+                        dangerouslySetInnerHTML={{ __html: match.isContext ? match.content : highlightPattern(match.content, meta.pattern) }}
+                      />
+                    </div>
+                  ))}
+                  {matches.length > 3 && !isExpanded && (
+                    <button 
+                      onClick={() => toggleFile(file)}
+                      className="text-kodelet-blue hover:underline"
+                    >
+                      +{matches.length - 2} more
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
       ) : (
-        <div className="text-sm text-kodelet-dark/50 font-body">No matches found</div>
+        <div className="text-xs text-kodelet-mid-gray">No matches found</div>
       )}
-    </ToolCard>
+    </div>
   );
 };
 

@@ -1,47 +1,17 @@
-import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import GrepRenderer from './GrepRenderer';
 import { ToolResult, GrepMetadata } from '../../types';
 
 // Mock shared components
-interface MockToolCardProps {
-  title: string;
-  badge?: { text: string; className: string };
-  children: React.ReactNode;
-}
-
-interface MockMetadataRowProps {
-  label: string;
-  value: string | number;
-}
-
-interface MockCollapsibleProps {
-  title: string;
-  badge?: { text: string; className: string };
-  children: React.ReactNode;
-  collapsed?: boolean;
+interface MockStatusBadgeProps {
+  text: string;
+  variant?: string;
 }
 
 vi.mock('./shared', () => ({
-  ToolCard: ({ title, badge, children }: MockToolCardProps) => (
-    <div data-testid="tool-card">
-      <h3>{title}</h3>
-      {badge && <span className={badge.className}>{badge.text}</span>}
-      {children}
-    </div>
-  ),
-  MetadataRow: ({ label, value }: MockMetadataRowProps) => (
-    <div data-testid="metadata-row">
-      {label}: {value}
-    </div>
-  ),
-  Collapsible: ({ title, badge, children, collapsed }: MockCollapsibleProps) => (
-    <div data-testid="collapsible" data-collapsed={collapsed}>
-      <h4>{title}</h4>
-      {badge && <span className={badge.className}>{badge.text}</span>}
-      {children}
-    </div>
+  StatusBadge: ({ text, variant }: MockStatusBadgeProps) => (
+    <span data-testid="status-badge" data-variant={variant}>{text}</span>
   ),
 }));
 
@@ -61,7 +31,7 @@ describe('GrepRenderer', () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it('renders search results with basic information', () => {
+  it('renders pattern', () => {
     const toolResult = createToolResult({
       pattern: 'TODO',
       results: [],
@@ -69,8 +39,7 @@ describe('GrepRenderer', () => {
 
     render(<GrepRenderer toolResult={toolResult} />);
 
-    expect(screen.getByText('Search Results')).toBeInTheDocument();
-    expect(screen.getByText('Pattern: TODO')).toBeInTheDocument();
+    expect(screen.getByText('TODO')).toBeInTheDocument();
   });
 
   it('shows no matches message when results are empty', () => {
@@ -84,7 +53,7 @@ describe('GrepRenderer', () => {
     expect(screen.getByText('No matches found')).toBeInTheDocument();
   });
 
-  it('shows match count in badge', () => {
+  it('shows match count', () => {
     const toolResult = createToolResult({
       pattern: 'test',
       results: [
@@ -98,7 +67,7 @@ describe('GrepRenderer', () => {
     expect(screen.getByText('2 in 2 files')).toBeInTheDocument();
   });
 
-  it('shows truncated badge when truncated', () => {
+  it('shows warning variant when truncated', () => {
     const toolResult = createToolResult({
       pattern: 'test',
       results: [{ filePath: 'file.js', lineNumber: 1, content: 'test' }],
@@ -107,8 +76,8 @@ describe('GrepRenderer', () => {
 
     render(<GrepRenderer toolResult={toolResult} />);
 
-    // When truncated, the component shows "Truncated" badge
-    expect(screen.getByText('Truncated')).toBeInTheDocument();
+    const badge = screen.getByTestId('status-badge');
+    expect(badge).toHaveAttribute('data-variant', 'warning');
   });
 
   it('shows path when provided', () => {
@@ -120,22 +89,10 @@ describe('GrepRenderer', () => {
 
     render(<GrepRenderer toolResult={toolResult} />);
 
-    expect(screen.getByText('Path: /src')).toBeInTheDocument();
+    expect(screen.getByText('in /src')).toBeInTheDocument();
   });
 
-  it('shows include pattern when provided', () => {
-    const toolResult = createToolResult({
-      pattern: 'test',
-      include: '*.js',
-      results: [],
-    });
-
-    render(<GrepRenderer toolResult={toolResult} />);
-
-    expect(screen.getByText('Include: *.js')).toBeInTheDocument();
-  });
-
-  it('renders single match per file', () => {
+  it('renders file names', () => {
     const toolResult = createToolResult({
       pattern: 'error',
       results: [
@@ -148,8 +105,19 @@ describe('GrepRenderer', () => {
 
     expect(screen.getByText('app.js')).toBeInTheDocument();
     expect(screen.getByText('test.js')).toBeInTheDocument();
-    expect(screen.getByText('10:')).toBeInTheDocument();
-    expect(screen.getByText('25:')).toBeInTheDocument();
+  });
+
+  it('renders line numbers', () => {
+    const toolResult = createToolResult({
+      pattern: 'error',
+      results: [
+        { filePath: 'app.js', lineNumber: 10, content: 'console.error("failed")' },
+      ],
+    });
+
+    render(<GrepRenderer toolResult={toolResult} />);
+
+    expect(screen.getByText('10')).toBeInTheDocument();
   });
 
   it('renders multiple matches per file', () => {
@@ -170,38 +138,17 @@ describe('GrepRenderer', () => {
     render(<GrepRenderer toolResult={toolResult} />);
 
     expect(screen.getByText('debug.js')).toBeInTheDocument();
-    expect(screen.getByText('3 matches')).toBeInTheDocument();
-    expect(screen.getByText('1:')).toBeInTheDocument();
-    expect(screen.getByText('5:')).toBeInTheDocument();
-    expect(screen.getByText('10:')).toBeInTheDocument();
+    expect(screen.getByText('1')).toBeInTheDocument();
+    expect(screen.getByText('5')).toBeInTheDocument();
+    expect(screen.getByText('10')).toBeInTheDocument();
   });
 
-  it('collapses files with more than 5 matches', () => {
+  it('shows expand button for files with more than 3 matches', () => {
     const toolResult = createToolResult({
       pattern: 'test',
       results: [
         {
           filePath: 'large.js',
-          matches: Array(6).fill(null).map((_, i) => ({
-            lineNumber: i + 1,
-            content: `test ${i}`,
-          })),
-        },
-      ],
-    });
-
-    render(<GrepRenderer toolResult={toolResult} />);
-
-    const collapsible = screen.getByTestId('collapsible');
-    expect(collapsible).toHaveAttribute('data-collapsed', 'true');
-  });
-
-  it('does not collapse files with 5 or fewer matches', () => {
-    const toolResult = createToolResult({
-      pattern: 'test',
-      results: [
-        {
-          filePath: 'small.js',
           matches: Array(5).fill(null).map((_, i) => ({
             lineNumber: i + 1,
             content: `test ${i}`,
@@ -212,8 +159,29 @@ describe('GrepRenderer', () => {
 
     render(<GrepRenderer toolResult={toolResult} />);
 
-    const collapsible = screen.getByTestId('collapsible');
-    expect(collapsible).toHaveAttribute('data-collapsed', 'false');
+    expect(screen.getByText('+3 more')).toBeInTheDocument();
+  });
+
+  it('expands to show all matches when button clicked', () => {
+    const toolResult = createToolResult({
+      pattern: 'test',
+      results: [
+        {
+          filePath: 'large.js',
+          matches: Array(5).fill(null).map((_, i) => ({
+            lineNumber: i + 1,
+            content: `test ${i}`,
+          })),
+        },
+      ],
+    });
+
+    render(<GrepRenderer toolResult={toolResult} />);
+
+    fireEvent.click(screen.getByText('+3 more'));
+
+    // All line numbers should be visible
+    expect(screen.getByText('5')).toBeInTheDocument();
   });
 
   it('highlights pattern in content', () => {
@@ -228,22 +196,7 @@ describe('GrepRenderer', () => {
 
     const highlightedText = container.querySelector('mark');
     expect(highlightedText).toBeInTheDocument();
-    expect(highlightedText?.className).toContain('bg-kodelet-orange');
-    expect(highlightedText?.className).toContain('text-kodelet-dark');
     expect(highlightedText?.textContent).toBe('error');
-  });
-
-  it('handles missing line numbers', () => {
-    const toolResult = createToolResult({
-      pattern: 'test',
-      results: [
-        { filePath: 'file.js', content: 'test content' },
-      ],
-    });
-
-    render(<GrepRenderer toolResult={toolResult} />);
-
-    expect(screen.getByText('?:')).toBeInTheDocument();
   });
 
   it('handles missing filePath gracefully', () => {
@@ -267,22 +220,7 @@ describe('GrepRenderer', () => {
       ],
     });
 
-    // Should not throw an error
     expect(() => render(<GrepRenderer toolResult={toolResult} />)).not.toThrow();
-  });
-
-  it('handles empty pattern gracefully', () => {
-    const toolResult = createToolResult({
-      pattern: '',
-      results: [
-        { filePath: 'file.js', lineNumber: 1, content: 'some content' },
-      ],
-    });
-
-    render(<GrepRenderer toolResult={toolResult} />);
-
-    // Should render without highlighting
-    expect(screen.getByText(/some content/)).toBeInTheDocument();
   });
 
   it('groups multiple results by file', () => {
@@ -297,14 +235,10 @@ describe('GrepRenderer', () => {
 
     render(<GrepRenderer toolResult={toolResult} />);
 
-    // Should show 2 collapsibles (one for each file)
-    const collapsibles = screen.getAllByTestId('collapsible');
-    expect(collapsibles).toHaveLength(2);
-    
-    // Check match counts - there should be badges showing match counts
-    const badges = screen.getAllByText(/matches/);
-    expect(badges.some(b => b.textContent === '2 matches')).toBe(true);
-    expect(badges.some(b => b.textContent === '1 matches')).toBe(true);
+    // Should show file headers
+    const indexHeaders = screen.getAllByText('index.js');
+    expect(indexHeaders).toHaveLength(1);
+    expect(screen.getByText('app.js')).toBeInTheDocument();
   });
 
   it('renders context lines with different styling', () => {
@@ -324,15 +258,8 @@ describe('GrepRenderer', () => {
 
     const { container } = render(<GrepRenderer toolResult={toolResult} />);
 
-    // Context lines should show '-' separator
-    expect(screen.getByText('9-')).toBeInTheDocument();
-    expect(screen.getByText('11-')).toBeInTheDocument();
-    
-    // Match line should show ':' separator
-    expect(screen.getByText('10:')).toBeInTheDocument();
-    
-    // Context lines should have opacity-60 class
-    const contextLines = container.querySelectorAll('.opacity-60');
+    // Context lines should have opacity-50 class
+    const contextLines = container.querySelectorAll('.opacity-50');
     expect(contextLines).toHaveLength(2);
   });
 

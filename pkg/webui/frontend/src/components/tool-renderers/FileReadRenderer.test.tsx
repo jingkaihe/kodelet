@@ -1,42 +1,24 @@
-import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import FileReadRenderer from './FileReadRenderer';
 import { ToolResult, FileMetadata } from '../../types';
 
 // Mock shared components
-interface MockToolCardProps {
-  title: string;
-  badge?: { text: string; className: string };
-  actions?: React.ReactNode;
-  children: React.ReactNode;
-}
-
 interface MockCopyButtonProps {
   content: string;
 }
 
-interface MockMetadataRowProps {
-  label: string;
-  value: string | number;
+interface MockStatusBadgeProps {
+  text: string;
+  variant?: string;
 }
 
 vi.mock('./shared', () => ({
-  ToolCard: ({ title, badge, actions, children }: MockToolCardProps) => (
-    <div data-testid="tool-card">
-      <h3>{title}</h3>
-      {badge && <span className={badge.className}>{badge.text}</span>}
-      {actions && <div data-testid="actions">{actions}</div>}
-      {children}
-    </div>
-  ),
   CopyButton: ({ content }: MockCopyButtonProps) => (
     <button data-testid="copy-button" data-content={content}>Copy</button>
   ),
-  MetadataRow: ({ label, value }: MockMetadataRowProps) => (
-    <div data-testid="metadata-row">
-      {label}: {value}
-    </div>
+  StatusBadge: ({ text, variant }: MockStatusBadgeProps) => (
+    <span data-testid="status-badge" data-variant={variant}>{text}</span>
   ),
 }));
 
@@ -66,7 +48,7 @@ describe('FileReadRenderer', () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it('renders file read with basic information', () => {
+  it('renders file path', () => {
     const toolResult = createToolResult({
       filePath: '/home/user/test.js',
       lines: ['const x = 1;', 'const y = 2;'],
@@ -74,8 +56,7 @@ describe('FileReadRenderer', () => {
 
     render(<FileReadRenderer toolResult={toolResult} />);
 
-    expect(screen.getByText('File Read')).toBeInTheDocument();
-    expect(screen.getByText('Path: /home/user/test.js')).toBeInTheDocument();
+    expect(screen.getByText('/home/user/test.js')).toBeInTheDocument();
   });
 
   it('shows copy button with file content', () => {
@@ -114,10 +95,9 @@ describe('FileReadRenderer', () => {
 
     expect(screen.getByText(/^\s*50\s*$/)).toBeInTheDocument();
     expect(screen.getByText(/^\s*51\s*$/)).toBeInTheDocument();
-    expect(screen.getByText('Starting at line: 50')).toBeInTheDocument();
   });
 
-  it('shows truncated badge when file is truncated', () => {
+  it('shows warning variant when file is truncated', () => {
     const toolResult = createToolResult({
       filePath: '/large-file.txt',
       lines: ['line 1', 'line 2'],
@@ -126,12 +106,22 @@ describe('FileReadRenderer', () => {
 
     render(<FileReadRenderer toolResult={toolResult} />);
 
-    expect(screen.getByText('Truncated')).toBeInTheDocument();
-    const badge = screen.getByText('Truncated');
-    expect(badge.className).toContain('font-heading');
+    const badge = screen.getAllByTestId('status-badge')[0];
+    expect(badge).toHaveAttribute('data-variant', 'warning');
   });
 
-  it('detects language from file path when not provided', () => {
+  it('shows line count badge', () => {
+    const toolResult = createToolResult({
+      filePath: '/test.txt',
+      lines: ['line 1', 'line 2', 'line 3'],
+    });
+
+    render(<FileReadRenderer toolResult={toolResult} />);
+
+    expect(screen.getByText('3 lines')).toBeInTheDocument();
+  });
+
+  it('detects language from file path', () => {
     const toolResult = createToolResult({
       filePath: '/src/main.js',
       lines: ['const x = 1;'],
@@ -139,31 +129,7 @@ describe('FileReadRenderer', () => {
 
     render(<FileReadRenderer toolResult={toolResult} />);
 
-    expect(screen.getByText('Language: javascript')).toBeInTheDocument();
-  });
-
-  it('uses provided language over detected language', () => {
-    const toolResult = createToolResult({
-      filePath: '/src/config.json',
-      lines: ['{"key": "value"}'],
-      language: 'json',
-    });
-
-    render(<FileReadRenderer toolResult={toolResult} />);
-
-    expect(screen.getByText('Language: json')).toBeInTheDocument();
-  });
-
-  it('shows total lines when available', () => {
-    const toolResult = createToolResult({
-      filePath: '/test.txt',
-      lines: ['line 1', 'line 2'],
-      totalLines: 100,
-    });
-
-    render(<FileReadRenderer toolResult={toolResult} />);
-
-    expect(screen.getByText('Lines shown: 2 of 100')).toBeInTheDocument();
+    expect(screen.getByText('javascript')).toBeInTheDocument();
   });
 
   it('removes trailing empty lines', () => {
@@ -198,101 +164,24 @@ describe('FileReadRenderer', () => {
 
     render(<FileReadRenderer toolResult={toolResult} />);
 
-    expect(screen.getByText('Path: /empty.txt')).toBeInTheDocument();
-    expect(screen.getByText('Lines shown: 0')).toBeInTheDocument();
+    expect(screen.getByText('/empty.txt')).toBeInTheDocument();
+    expect(screen.getByText('0 lines')).toBeInTheDocument();
   });
 
-  it('handles file with only empty lines', () => {
-    const toolResult = createToolResult({
-      filePath: '/whitespace.txt',
-      lines: ['', '', ''],
-    });
-
-    render(<FileReadRenderer toolResult={toolResult} />);
-
-    const copyButton = screen.getByTestId('copy-button');
-    expect(copyButton).toHaveAttribute('data-content', '');
-  });
-
-  it('adjusts line number width for large files', () => {
-    const toolResult = createToolResult({
-      filePath: '/large.txt',
-      lines: ['content'],
-      offset: 9999,
-    });
-
-    render(<FileReadRenderer toolResult={toolResult} />);
-
-    // Should display line 9999 with proper padding
-    expect(screen.getByText(/^\s*9999\s*$/)).toBeInTheDocument();
-  });
-
-  it('renders empty lines as non-breaking spaces', () => {
-    const toolResult = createToolResult({
-      filePath: '/test.txt',
-      lines: ['line 1', '', 'line 3'],
-    });
-
-    const { container } = render(<FileReadRenderer toolResult={toolResult} />);
-
-    const codeLines = container.querySelectorAll('.flex-grow.overflow-x-auto.whitespace-pre > div');
-    expect(codeLines).toHaveLength(3);
-    expect(codeLines[1].textContent).toBe('\u00A0'); // Non-breaking space
-  });
-
-  it('applies correct styling to code display', () => {
-    const toolResult = createToolResult({
-      filePath: '/test.txt',
-      lines: ['test content'],
-    });
-
-    const { container } = render(<FileReadRenderer toolResult={toolResult} />);
-
-    const codeContainer = container.querySelector('.bg-kodelet-light');
-    expect(codeContainer).toHaveClass('text-sm', 'font-mono', 'rounded-lg');
-    expect(codeContainer).toHaveStyle({ maxHeight: '600px', overflowY: 'auto' });
-  });
-
-  it('shows line limit when not default value', () => {
+  it('shows remaining lines info when present', () => {
     const toolResult = createToolResult({
       filePath: '/test.txt',
       lines: ['line 1', 'line 2'],
-      lineLimit: 500,
-    });
-
-    render(<FileReadRenderer toolResult={toolResult} />);
-
-    expect(screen.getByText('Line limit: 500')).toBeInTheDocument();
-  });
-
-  it('does not show line limit when default value', () => {
-    const toolResult = createToolResult({
-      filePath: '/test.txt',
-      lines: ['line 1', 'line 2'],
-      lineLimit: 2000,
-    });
-
-    render(<FileReadRenderer toolResult={toolResult} />);
-
-    expect(screen.queryByText('Line limit: 2000')).not.toBeInTheDocument();
-  });
-
-  it('shows remaining lines information', () => {
-    const toolResult = createToolResult({
-      filePath: '/test.txt',
-      lines: ['line 1', 'line 2', '... [50 lines remaining - use offset=3 to continue reading]'],
-      offset: 1,
-      lineLimit: 2,
       remainingLines: 50,
       truncated: true,
     });
 
     render(<FileReadRenderer toolResult={toolResult} />);
 
-    expect(screen.getByText('Remaining: 50 lines')).toBeInTheDocument();
+    expect(screen.getByText('50 more')).toBeInTheDocument();
   });
 
-  it('shows helpful continuation tip when there are remaining lines', () => {
+  it('shows continuation tip when there are remaining lines', () => {
     const toolResult = createToolResult({
       filePath: '/test.txt',
       lines: ['line 1', 'line 2'],
@@ -307,50 +196,16 @@ describe('FileReadRenderer', () => {
     expect(screen.getByText('Use offset=12 to continue reading')).toBeInTheDocument();
   });
 
-  it('shows improved badge for remaining lines', () => {
+  it('applies correct styling to code display', () => {
     const toolResult = createToolResult({
       filePath: '/test.txt',
-      lines: ['line 1', 'line 2'],
-      remainingLines: 100,
-      truncated: true,
+      lines: ['test content'],
     });
 
-    render(<FileReadRenderer toolResult={toolResult} />);
+    const { container } = render(<FileReadRenderer toolResult={toolResult} />);
 
-    expect(screen.getByText('100 more')).toBeInTheDocument();
-    const badge = screen.getByText('100 more');
-    expect(badge.className).toContain('font-heading');
-  });
-
-  it('preserves truncation messages in display', () => {
-    const toolResult = createToolResult({
-      filePath: '/test.txt',
-      lines: [
-        'line 1',
-        'line 2',
-        '... [50 lines remaining - use offset=3 to continue reading]'
-      ],
-      remainingLines: 50,
-      truncated: true,
-    });
-
-    render(<FileReadRenderer toolResult={toolResult} />);
-
-    expect(screen.getByText('... [50 lines remaining - use offset=3 to continue reading]')).toBeInTheDocument();
-  });
-
-  it('falls back to generic truncated badge when no remaining lines info', () => {
-    const toolResult = createToolResult({
-      filePath: '/test.txt',
-      lines: ['line 1', '... [truncated due to max output bytes limit of 100000]'],
-      truncated: true,
-      remainingLines: 0,
-    });
-
-    render(<FileReadRenderer toolResult={toolResult} />);
-
-    expect(screen.getByText('Truncated')).toBeInTheDocument();
-    const badge = screen.getByText('Truncated');
-    expect(badge.className).toContain('font-heading');
+    const codeContainer = container.querySelector('.bg-kodelet-light');
+    expect(codeContainer).toHaveClass('font-mono', 'rounded');
+    expect(codeContainer).toHaveStyle({ maxHeight: '400px', overflowY: 'auto' });
   });
 });

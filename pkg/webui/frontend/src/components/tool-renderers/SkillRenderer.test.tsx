@@ -1,7 +1,18 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import SkillRenderer from './SkillRenderer';
 import { ToolResult, SkillMetadata } from '../../types';
+
+interface MockStatusBadgeProps {
+  text: string;
+  variant?: string;
+}
+
+vi.mock('./shared', () => ({
+  StatusBadge: ({ text, variant }: MockStatusBadgeProps) => (
+    <span data-testid="status-badge" data-variant={variant}>{text}</span>
+  ),
+}));
 
 describe('SkillRenderer', () => {
   const createToolResult = (metadata: SkillMetadata | null | undefined): ToolResult => ({
@@ -12,7 +23,7 @@ describe('SkillRenderer', () => {
     metadata: metadata as SkillMetadata | undefined,
   });
 
-  it('renders skill information correctly', () => {
+  it('renders skill name in badge', () => {
     const metadata: SkillMetadata = {
       skillName: 'pdf',
       directory: '/home/user/.kodelet/skills/pdf',
@@ -20,13 +31,11 @@ describe('SkillRenderer', () => {
     
     render(<SkillRenderer toolResult={createToolResult(metadata)} />);
     
-    expect(screen.getByText('⚡ Skill Loaded')).toBeInTheDocument();
     expect(screen.getByText('pdf')).toBeInTheDocument();
-    expect(screen.getByText('Directory:')).toBeInTheDocument();
-    expect(screen.getByText('/home/user/.kodelet/skills/pdf')).toBeInTheDocument();
+    expect(screen.getByText('loaded')).toBeInTheDocument();
   });
 
-  it('renders badge with skill name', () => {
+  it('renders directory path', () => {
     const metadata: SkillMetadata = {
       skillName: 'kubernetes',
       directory: '~/.kodelet/skills/kubernetes',
@@ -34,9 +43,19 @@ describe('SkillRenderer', () => {
     
     render(<SkillRenderer toolResult={createToolResult(metadata)} />);
     
-    const badge = screen.getByText('kubernetes');
-    expect(badge).toBeInTheDocument();
-    expect(badge.className).toContain('font-heading');
+    expect(screen.getByText('~/.kodelet/skills/kubernetes')).toBeInTheDocument();
+  });
+
+  it('shows success variant badge', () => {
+    const metadata: SkillMetadata = {
+      skillName: 'test',
+      directory: '/test',
+    };
+    
+    render(<SkillRenderer toolResult={createToolResult(metadata)} />);
+    
+    const badge = screen.getByTestId('status-badge');
+    expect(badge).toHaveAttribute('data-variant', 'success');
   });
 
   it('returns null when metadata is null', () => {
@@ -69,18 +88,5 @@ describe('SkillRenderer', () => {
     render(<SkillRenderer toolResult={createToolResult(metadata)} />);
     
     expect(screen.getByText('/home/user/very/long/path/to/kodelet/skills/test-skill')).toBeInTheDocument();
-  });
-
-  it('renders directory in code block', () => {
-    const metadata: SkillMetadata = {
-      skillName: 'xlsx',
-      directory: '/skills/xlsx',
-    };
-    
-    const { container } = render(<SkillRenderer toolResult={createToolResult(metadata)} />);
-    
-    const codeElement = container.querySelector('code');
-    expect(codeElement).toBeInTheDocument();
-    expect(codeElement?.textContent).toBe('/skills/xlsx');
   });
 });

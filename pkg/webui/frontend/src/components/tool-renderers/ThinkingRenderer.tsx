@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { ToolResult, ThinkingMetadata } from '../../types';
+import { StatusBadge } from './shared';
 import { marked } from 'marked';
 
 interface ThinkingRendererProps {
@@ -8,35 +9,35 @@ interface ThinkingRendererProps {
 
 const ThinkingRenderer: React.FC<ThinkingRendererProps> = ({ toolResult }) => {
   const meta = toolResult.metadata as ThinkingMetadata;
+  const [showThought, setShowThought] = useState(false);
   if (!meta) return null;
 
   const formatThoughtContent = (thought: string): string => {
     if (!thought) return '';
-    // Configure marked for better code rendering
-    marked.setOptions({
-      breaks: true,
-      gfm: true,
-    });
+    marked.setOptions({ breaks: true, gfm: true });
     return marked.parse(thought);
   };
 
   return (
-    <div className="bg-kodelet-blue/5 border border-kodelet-blue/20 rounded p-3">
-      <div className="flex items-center gap-2 mb-3">
-        <h4 className="font-heading font-semibold text-sm text-kodelet-blue">Thinking</h4>
-        <div className="px-2 py-0.5 rounded text-xs font-heading font-medium bg-kodelet-blue/10 text-kodelet-blue border border-kodelet-blue/20">
-          Internal Process
-        </div>
+    <div className="space-y-2">
+      <div className="flex items-center gap-2 text-xs">
+        <StatusBadge text="Internal" variant="info" />
+        {!showThought && (
+          <button 
+            onClick={() => setShowThought(true)}
+            className="text-kodelet-blue hover:underline"
+          >
+            Show thinking
+          </button>
+        )}
       </div>
 
-      <div className="bg-kodelet-light-gray/30 p-3 rounded border border-kodelet-mid-gray/20">
+      {showThought && (
         <div 
-          className="prose-enhanced text-sm italic leading-relaxed text-kodelet-dark"
-          dangerouslySetInnerHTML={{
-            __html: formatThoughtContent(meta.thought)
-          }}
+          className="bg-kodelet-light-gray/30 p-2 rounded border border-kodelet-mid-gray/20 prose-enhanced text-sm italic max-h-64 overflow-y-auto"
+          dangerouslySetInnerHTML={{ __html: formatThoughtContent(meta.thought) }}
         />
-      </div>
+      )}
     </div>
   );
 };

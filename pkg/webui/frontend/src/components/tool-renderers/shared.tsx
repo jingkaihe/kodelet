@@ -187,6 +187,27 @@ export const MetadataRow: React.FC<MetadataRowProps> = ({ label, value, monospac
   );
 };
 
+interface StatusBadgeProps {
+  text: string;
+  variant?: 'success' | 'warning' | 'info' | 'error' | 'neutral';
+}
+
+export const StatusBadge: React.FC<StatusBadgeProps> = ({ text, variant = 'neutral' }) => {
+  const variantClasses = {
+    success: 'bg-kodelet-green/10 text-kodelet-green border-kodelet-green/20',
+    warning: 'bg-kodelet-orange/10 text-kodelet-orange border-kodelet-orange/20',
+    info: 'bg-kodelet-blue/10 text-kodelet-blue border-kodelet-blue/20',
+    error: 'bg-red-500/10 text-red-600 border-red-500/20',
+    neutral: 'bg-kodelet-mid-gray/10 text-kodelet-mid-gray border-kodelet-mid-gray/20',
+  };
+
+  return (
+    <span className={`px-1.5 py-0.5 rounded text-xs font-medium border ${variantClasses[variant]}`}>
+      {text}
+    </span>
+  );
+};
+
 interface ExternalLinkProps {
   href: string;
   children: React.ReactNode;
