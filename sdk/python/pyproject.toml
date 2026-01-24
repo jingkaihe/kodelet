@@ -1,0 +1,65 @@
+[project]
+name = "kodelet-sdk"
+version = "0.1.0"
+description = "Python SDK for Kodelet - AI-assisted software engineering CLI"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.12"
+authors = [
+    { name = "Kodelet Contributors" }
+]
+keywords = ["kodelet", "ai", "llm", "cli", "sdk", "agent"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
+]
+
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=4.0",
+    "mypy>=1.8",
+    "ruff>=0.3",
+]
+
+[project.urls]
+Homepage = "https://github.com/jingkaihe/kodelet"
+Documentation = "https://github.com/jingkaihe/kodelet/tree/main/sdk/python"
+Repository = "https://github.com/jingkaihe/kodelet"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/kodelet"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+addopts = "-m 'not integration'"
+markers = [
+    "integration: marks tests as integration tests (run with '-m integration')",
+]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["src/kodelet"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B", "C4", "SIM"]
