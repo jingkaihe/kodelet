@@ -67,11 +67,13 @@ type Server struct {
 
 // ServerConfig holds configuration for the ACP server
 type ServerConfig struct {
-	Provider  string
-	Model     string
-	MaxTokens int
-	NoSkills  bool
-	NoHooks   bool
+	Provider           string
+	Model              string
+	MaxTokens          int
+	NoSkills           bool
+	NoHooks            bool
+	CompactRatio       float64
+	DisableAutoCompact bool
 }
 
 // Option configures the server
@@ -117,7 +119,7 @@ func NewServer(opts ...Option) *Server {
 		opt(s)
 	}
 
-	s.sessionManager = session.NewManager(s.config.Provider, s.config.Model, s.config.MaxTokens, s.config.NoSkills, s.config.NoHooks)
+	s.sessionManager = session.NewManager(s.config.Provider, s.config.Model, s.config.MaxTokens, s.config.NoSkills, s.config.NoHooks, s.config.CompactRatio, s.config.DisableAutoCompact)
 
 	fp, err := fragments.NewFragmentProcessor()
 	if err != nil {
@@ -270,7 +272,7 @@ func (s *Server) handleResponse(id json.RawMessage, result json.RawMessage, rpcE
 func (s *Server) handleInitialize(req *acptypes.Request) error {
 	var params acptypes.InitializeRequest
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return s.sendError(req.ID, acptypes.ErrCodeInvalidParams, "Invalid params", nil)
+		return s.sendError(req.ID, acptypes.ErrCodeInvalidParams, "Invalid params", err.Error())
 	}
 
 	s.clientCapsMu.Lock()
@@ -322,7 +324,7 @@ func (s *Server) handleSessionNew(req *acptypes.Request) error {
 
 	var params acptypes.NewSessionRequest
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return s.sendError(req.ID, acptypes.ErrCodeInvalidParams, "Invalid params", nil)
+		return s.sendError(req.ID, acptypes.ErrCodeInvalidParams, "Invalid params", err.Error())
 	}
 
 	sess, err := s.sessionManager.NewSession(s.ctx, params)
@@ -348,7 +350,7 @@ func (s *Server) handleSessionLoad(req *acptypes.Request) error {
 
 	var params acptypes.LoadSessionRequest
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return s.sendError(req.ID, acptypes.ErrCodeInvalidParams, "Invalid params", nil)
+		return s.sendError(req.ID, acptypes.ErrCodeInvalidParams, "Invalid params", err.Error())
 	}
 
 	_, err := s.sessionManager.LoadSession(s.ctx, params)
@@ -371,7 +373,7 @@ func (s *Server) handleSessionPrompt(req *acptypes.Request) error {
 
 	var params acptypes.PromptRequest
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return s.sendError(req.ID, acptypes.ErrCodeInvalidParams, "Invalid params", nil)
+		return s.sendError(req.ID, acptypes.ErrCodeInvalidParams, "Invalid params", err.Error())
 	}
 
 	// Create cancellable context and register atomically
@@ -560,10 +562,13 @@ func (s *Server) sendResult(id json.RawMessage, result any) error {
 	return s.send(resp)
 }
 
-func (s *Server) sendError(id json.RawMessage, code int, message string, _ any) error {
+func (s *Server) sendError(id json.RawMessage, code int, message string, data any) error {
 	errObj := map[string]any{
 		"code":    code,
 		"message": message,
+	}
+	if data != nil {
+		errObj["data"] = data
 	}
 
 	resp := map[string]any{
