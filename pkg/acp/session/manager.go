@@ -13,6 +13,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/mcp"
+	"github.com/jingkaihe/kodelet/pkg/mcp/codegen"
 	"github.com/jingkaihe/kodelet/pkg/skills"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
@@ -284,6 +285,56 @@ func (m *Manager) connectMCPServers(ctx context.Context, servers []acptypes.MCPS
 	return manager, nil
 }
 
+// setupClientMCP sets up client-provided MCP servers with code generation
+func (m *Manager) setupClientMCP(ctx context.Context, servers []acptypes.MCPServer) []tools.BasicStateOption {
+	if len(servers) == 0 {
+		return nil
+	}
+
+	clientMCPManager, err := m.connectMCPServers(ctx, servers)
+	if err != nil {
+		if !errors.Is(err, ErrNoMCPServers) {
+			logger.G(ctx).WithError(err).Warn("Failed to connect to client MCP servers")
+		}
+		return nil
+	}
+
+	// If kodelet's MCP already has code execution mode set up, merge client MCP into it
+	// and regenerate TypeScript code to include the new tools
+	if m.mcpSetup != nil && m.kodeletMCPManager != nil {
+		m.kodeletMCPManager.Merge(clientMCPManager)
+
+		workspaceDir := viper.GetString("mcp.code_execution.workspace_dir")
+		if workspaceDir == "" {
+			workspaceDir = ".kodelet/mcp"
+		}
+
+		logger.G(ctx).Info("Regenerating MCP tool TypeScript API with client servers...")
+		generator := codegen.NewMCPCodeGenerator(m.kodeletMCPManager, workspaceDir)
+		if err := generator.Generate(ctx); err != nil {
+			logger.G(ctx).WithError(err).Warn("Failed to regenerate MCP tool code, using direct mode")
+			return []tools.BasicStateOption{tools.WithMCPTools(clientMCPManager)}
+		}
+
+		logger.G(ctx).Info("Client MCP servers merged into code execution mode")
+		return nil // No additional state opts needed, existing Code_execution tool will work
+	}
+
+	// No kodelet MCP or not in code execution mode - set up code execution for client MCP
+	mcpSetup, err := mcp.SetupExecutionMode(ctx, clientMCPManager, m.id)
+	if err != nil && !errors.Is(err, mcp.ErrDirectMode) {
+		logger.G(ctx).WithError(err).Warn("Failed to set up MCP execution mode for client servers")
+		return []tools.BasicStateOption{tools.WithMCPTools(clientMCPManager)}
+	}
+
+	if err == nil && mcpSetup != nil {
+		logger.G(ctx).Info("MCP code execution mode initialized for client servers")
+		return mcpSetup.StateOpts
+	}
+
+	return []tools.BasicStateOption{tools.WithMCPTools(clientMCPManager)}
+}
+
 // NewSession creates a new session
 func (m *Manager) NewSession(ctx context.Context, req acptypes.NewSessionRequest) (*Session, error) {
 	m.initMCP(ctx)
@@ -308,13 +359,8 @@ func (m *Manager) NewSession(ctx context.Context, req acptypes.NewSessionRequest
 		stateOpts = append(stateOpts, mcpOpts...)
 	}
 
-	if len(req.MCPServers) > 0 {
-		mcpManager, err := m.connectMCPServers(ctx, req.MCPServers)
-		if err != nil && !errors.Is(err, ErrNoMCPServers) {
-			logger.G(ctx).WithError(err).Warn("Failed to connect to client MCP servers")
-		} else if mcpManager != nil {
-			stateOpts = append(stateOpts, tools.WithMCPTools(mcpManager))
-		}
+	if clientMCPOpts := m.setupClientMCP(ctx, req.MCPServers); clientMCPOpts != nil {
+		stateOpts = append(stateOpts, clientMCPOpts...)
 	}
 
 	state := tools.NewBasicState(ctx, stateOpts...)
@@ -373,13 +419,8 @@ func (m *Manager) LoadSession(ctx context.Context, req acptypes.LoadSessionReque
 		stateOpts = append(stateOpts, mcpOpts...)
 	}
 
-	if len(req.MCPServers) > 0 {
-		mcpManager, err := m.connectMCPServers(ctx, req.MCPServers)
-		if err != nil && !errors.Is(err, ErrNoMCPServers) {
-			logger.G(ctx).WithError(err).Warn("Failed to connect to client MCP servers")
-		} else if mcpManager != nil {
-			stateOpts = append(stateOpts, tools.WithMCPTools(mcpManager))
-		}
+	if clientMCPOpts := m.setupClientMCP(ctx, req.MCPServers); clientMCPOpts != nil {
+		stateOpts = append(stateOpts, clientMCPOpts...)
 	}
 
 	state := tools.NewBasicState(ctx, stateOpts...)

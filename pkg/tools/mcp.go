@@ -169,6 +169,20 @@ func (m *MCPManager) Close(ctx context.Context) error {
 	return nil
 }
 
+// Merge adds all clients from another MCPManager into this one.
+// If a client with the same name already exists, it is skipped.
+func (m *MCPManager) Merge(other *MCPManager) {
+	if other == nil {
+		return
+	}
+	for name, client := range other.clients {
+		if _, exists := m.clients[name]; !exists {
+			m.clients[name] = client
+			m.whiteList[name] = other.whiteList[name]
+		}
+	}
+}
+
 // ListMCPToolsIter iterates over all MCP tools from all servers and calls the iter function for each server.
 func (m *MCPManager) ListMCPToolsIter(
 	ctx context.Context,
