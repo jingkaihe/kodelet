@@ -32,6 +32,9 @@ type Session struct {
 	CWD        string
 	MCPServers []acptypes.MCPServer
 
+	compactRatio       float64
+	disableAutoCompact bool
+
 	mu         sync.Mutex
 	cancelFunc context.CancelFunc
 	cancelled  bool
@@ -97,9 +100,11 @@ func (s *Session) HandlePrompt(ctx context.Context, prompt []acptypes.ContentBlo
 	}
 
 	_, err := s.Thread.SendMessage(ctx, message, handler, llmtypes.MessageOpt{
-		PromptCache: true,
-		Images:      images,
-		MaxTurns:    50,
+		PromptCache:        true,
+		Images:             images,
+		MaxTurns:           50,
+		CompactRatio:       s.compactRatio,
+		DisableAutoCompact: s.disableAutoCompact,
 	})
 
 	// Clear recipe hooks after the prompt is processed
@@ -127,6 +132,9 @@ type Manager struct {
 	noSkills  bool
 	noHooks   bool
 
+	compactRatio       float64
+	disableAutoCompact bool
+
 	sessions map[acptypes.SessionID]*Session
 	store    conversations.ConversationStore
 	mu       sync.RWMutex
@@ -137,19 +145,21 @@ type Manager struct {
 }
 
 // NewManager creates a new session manager
-func NewManager(provider, model string, maxTokens int, noSkills, noHooks bool) *Manager {
+func NewManager(provider, model string, maxTokens int, noSkills, noHooks bool, compactRatio float64, disableAutoCompact bool) *Manager {
 	ctx := context.Background()
 	store, _ := conversations.GetConversationStore(ctx)
 
 	return &Manager{
-		id:        convtypes.GenerateID(),
-		provider:  provider,
-		model:     model,
-		maxTokens: maxTokens,
-		noSkills:  noSkills,
-		noHooks:   noHooks,
-		sessions:  make(map[acptypes.SessionID]*Session),
-		store:     store,
+		id:                 convtypes.GenerateID(),
+		provider:           provider,
+		model:              model,
+		maxTokens:          maxTokens,
+		noSkills:           noSkills,
+		noHooks:            noHooks,
+		compactRatio:       compactRatio,
+		disableAutoCompact: disableAutoCompact,
+		sessions:           make(map[acptypes.SessionID]*Session),
+		store:              store,
 	}
 }
 
@@ -312,11 +322,13 @@ func (m *Manager) NewSession(ctx context.Context, req acptypes.NewSessionRequest
 	thread.EnablePersistence(ctx, true)
 
 	session := &Session{
-		ID:         acptypes.SessionID(thread.GetConversationID()),
-		Thread:     thread,
-		State:      state,
-		CWD:        req.CWD,
-		MCPServers: req.MCPServers,
+		ID:                 acptypes.SessionID(thread.GetConversationID()),
+		Thread:             thread,
+		State:              state,
+		CWD:                req.CWD,
+		MCPServers:         req.MCPServers,
+		compactRatio:       m.compactRatio,
+		disableAutoCompact: m.disableAutoCompact,
 	}
 
 	m.mu.Lock()
@@ -375,11 +387,13 @@ func (m *Manager) LoadSession(ctx context.Context, req acptypes.LoadSessionReque
 	thread.EnablePersistence(ctx, true)
 
 	session := &Session{
-		ID:         req.SessionID,
-		Thread:     thread,
-		State:      state,
-		CWD:        req.CWD,
-		MCPServers: req.MCPServers,
+		ID:                 req.SessionID,
+		Thread:             thread,
+		State:              state,
+		CWD:                req.CWD,
+		MCPServers:         req.MCPServers,
+		compactRatio:       m.compactRatio,
+		disableAutoCompact: m.disableAutoCompact,
 	}
 
 	m.mu.Lock()

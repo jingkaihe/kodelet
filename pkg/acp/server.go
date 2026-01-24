@@ -67,11 +67,13 @@ type Server struct {
 
 // ServerConfig holds configuration for the ACP server
 type ServerConfig struct {
-	Provider  string
-	Model     string
-	MaxTokens int
-	NoSkills  bool
-	NoHooks   bool
+	Provider           string
+	Model              string
+	MaxTokens          int
+	NoSkills           bool
+	NoHooks            bool
+	CompactRatio       float64
+	DisableAutoCompact bool
 }
 
 // Option configures the server
@@ -117,7 +119,7 @@ func NewServer(opts ...Option) *Server {
 		opt(s)
 	}
 
-	s.sessionManager = session.NewManager(s.config.Provider, s.config.Model, s.config.MaxTokens, s.config.NoSkills, s.config.NoHooks)
+	s.sessionManager = session.NewManager(s.config.Provider, s.config.Model, s.config.MaxTokens, s.config.NoSkills, s.config.NoHooks, s.config.CompactRatio, s.config.DisableAutoCompact)
 
 	fp, err := fragments.NewFragmentProcessor()
 	if err != nil {
