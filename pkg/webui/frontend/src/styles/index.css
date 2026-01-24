@@ -363,27 +363,10 @@ code[class*="language-"] {
   @apply bg-gray-50 text-gray-600;
 }
 
-/* Dark mode adjustments */
-@media (prefers-color-scheme: dark) {
-  .prose pre {
-    @apply bg-gray-900;
-  }
-
-  .prose code {
-    @apply bg-gray-900;
-  }
-
-  .diff-line-added {
-    @apply bg-green-900 text-green-200;
-  }
-
-  .diff-line-removed {
-    @apply bg-red-900 text-red-200;
-  }
-
-  .diff-line-context {
-    @apply bg-gray-800 text-gray-400;
-  }
+/* Force light color scheme - kodelet uses a fixed light theme */
+/* This prevents system dark mode from affecting the UI */
+:root {
+  color-scheme: light;
 }
 
 /* Responsive adjustments */
