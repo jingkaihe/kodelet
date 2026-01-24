@@ -1,5 +1,22 @@
 # Kodelet
 
+## 0.2.1.beta (2026-01-24)
+
+### Features
+
+**ACP auto-compact configuration**: Added CLI flags to control automatic context compaction in ACP sessions:
+
+```bash
+kodelet acp --compact-ratio 0.8          # Trigger compaction at 80% context usage (default)
+kodelet acp --disable-auto-compact       # Disable auto-compaction entirely
+```
+
+**Streamlit chatbot example**: Added a new example at `examples/streamlit/` demonstrating how to build a chat interface using kodelet's CLI with real-time streaming. Features include conversation persistence, thinking visualization, and tool call inspection.
+
+### Bug Fixes
+
+**Web UI dark mode fix**: Fixed code blocks appearing black on Linux when system appearance is set to dark mode. The web UI now enforces light color scheme regardless of system preferences.
+
 ## 0.2.0.beta (2026-01-23)
 
 ### Features
