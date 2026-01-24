@@ -5,7 +5,6 @@ import contextlib
 import json
 import os
 import shutil
-import tempfile
 from collections.abc import AsyncGenerator
 from pathlib import Path
 
@@ -263,15 +262,17 @@ class Kodelet:
         cwd = self.config.cwd or Path.cwd()
         env = os.environ.copy()
 
-        # Create temp config file for MCP servers if needed
+        # Create kodelet-config.yaml for MCP servers if needed
         config_file_path: Path | None = None
+        backup_path: Path | None = None
         if self._mcp_servers:
             mcp_config = self._generate_mcp_config()
-            fd, config_file_name = tempfile.mkstemp(suffix=".yaml", text=True)
-            config_file_path = Path(config_file_name)
-            with os.fdopen(fd, "w") as f:
-                f.write(mcp_config)
-            env["KODELET_CONFIG"] = str(config_file_path)
+            config_file_path = cwd / "kodelet-config.yaml"
+            # Check if file already exists and back it up
+            if config_file_path.exists():
+                backup_path = cwd / "kodelet-config.yaml.pysdk_backup"
+                backup_path.write_text(config_file_path.read_text())
+            config_file_path.write_text(mcp_config)
 
         # Set up hook scripts
         hook_scripts = self._setup_hooks(cwd)
@@ -319,9 +320,13 @@ class Kodelet:
                 await process.wait()
                 raise
         finally:
-            # Clean up temp config file
-            if config_file_path:
-                config_file_path.unlink(missing_ok=True)
+            # Restore or clean up config file
+            if config_file_path and self._mcp_servers:
+                if backup_path and backup_path.exists():
+                    config_file_path.write_text(backup_path.read_text())
+                    backup_path.unlink(missing_ok=True)
+                else:
+                    config_file_path.unlink(missing_ok=True)
 
             # Clean up hook scripts
             self._cleanup_hooks(hook_scripts)

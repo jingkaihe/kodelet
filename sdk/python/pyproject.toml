@@ -29,6 +29,7 @@ dev = [
     "pytest-cov>=4.0",
     "mypy>=1.8",
     "ruff>=0.3",
+    "mcp>=1.25.0",
 ]
 
 [project.urls]

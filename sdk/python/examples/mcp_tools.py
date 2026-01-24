@@ -1,92 +1,71 @@
 #!/usr/bin/env python3
 """MCP tools example for Kodelet SDK.
 
-This example demonstrates how to configure MCP servers for custom tools.
+This example demonstrates how to use MCP servers with the Kodelet SDK.
+
+Prerequisites:
+    1. Install the mcp package: pip install mcp
+    2. The calculator_server.py in this directory
 
 Usage:
     python mcp_tools.py
 """
 
 import asyncio
+import sys
+from pathlib import Path
 
-from kodelet.mcp import SSEServer, StdioServer
+from kodelet import Kodelet, KodeletConfig
+from kodelet.mcp import StdioServer
 
 
 async def main():
-    # Example: Configure a filesystem MCP server (Docker-based)
-    # This assumes you have the mcp/filesystem Docker image
-    filesystem_server = StdioServer(
-        name="filesystem",
-        command="docker",
-        args=["run", "-i", "--rm", "-v", "/tmp:/workspace", "mcp/filesystem", "/workspace"],
-        tool_whitelist=["list_directory", "read_file", "write_file"],
+    # Get the path to the calculator server
+    examples_dir = Path(__file__).parent
+    calculator_server_path = examples_dir / "calculator_server.py"
+
+    if not calculator_server_path.exists():
+        print(f"Error: {calculator_server_path} not found")
+        sys.exit(1)
+
+    # Configure the MCP calculator server
+    calculator = StdioServer(
+        name="calculator",
+        command=sys.executable,  # Use current Python interpreter
+        args=[str(calculator_server_path)],
     )
 
-    # Example: Configure an SSE-based MCP server
-    # This is for HTTP-based MCP servers
-    api_server = SSEServer(
-        name="my_api",
-        base_url="http://localhost:8080",
-        headers={"Authorization": "Bearer your-token"},
-        tool_whitelist=["get_data", "post_data"],
+    print("MCP Calculator Example")
+    print("=" * 50)
+    print(f"Using calculator server: {calculator_server_path}")
+    print()
+
+    # Create agent with MCP server
+    config = KodeletConfig(
+        no_skills=True,
+        no_hooks=True,
     )
+    agent = Kodelet(config=config, mcp_servers=[calculator])
 
-    # Create agent with MCP servers
-    # Note: This will fail if the MCP servers aren't actually running
-    # This is just to demonstrate the configuration
-    print("MCP Configuration Example")
-    print("=" * 50)
-    print("\nFilesystem Server config:")
-    print("\n".join(f"  {line}" for line in filesystem_server.to_yaml_lines(indent=0)))
-    print("\nAPI Server config:")
-    print("\n".join(f"  {line}" for line in api_server.to_yaml_lines(indent=0)))
+    # Ask a question that requires calculation
+    query = "What is the square root of 144 plus 5 times 3? Use the calculate tool."
+    print(f"Query: {query}\n")
 
-    # To actually use MCP servers, uncomment below:
-    # agent = Kodelet(mcp_servers=[filesystem_server])
-    # async for event in agent.query("List files in /workspace"):
-    #     if event.kind == "text-delta":
-    #         print(event.delta, end="", flush=True)
+    async for event in agent.query(query):
+        match event.kind:
+            case "text-delta":
+                print(event.delta, end="", flush=True)
+            case "thinking-start":
+                print("\n[Thinking...]", flush=True)
+            case "thinking-end":
+                print("[Done thinking]", flush=True)
+            case "tool-use":
+                print(f"\n[Using tool: {event.tool_name}]", flush=True)
+            case "tool-result":
+                print(f"[Tool result: {event.result}]", flush=True)
 
-
-async def custom_mcp_server_example():
-    """Example of creating a custom MCP server with the mcp Python package.
-
-    First, create your MCP server (my_tools_server.py):
-
-    ```python
-    from mcp.server import Server
-
-    server = Server("my-tools")
-
-    @server.tool()
-    async def calculator(expression: str) -> str:
-        '''Evaluate mathematical expressions'''
-        return str(eval(expression, {"__builtins__": {}}, {}))
-
-    if __name__ == "__main__":
-        import asyncio
-        asyncio.run(server.run_stdio())
-    ```
-
-    Then use it with the SDK:
-    """
-    # Configure the MCP server
-    my_tools = StdioServer(
-        name="my_tools",
-        command="python",
-        args=["my_tools_server.py"],
-    )
-
-    # Print the configuration for the custom server
-    print("\nCustom MCP Server Example")
-    print("=" * 50)
-    print("Custom server config:")
-    print("\n".join(f"  {line}" for line in my_tools.to_yaml_lines(indent=0)))
-    print("=" * 50)
-    print("See the docstring for how to create a custom MCP server")
-    print("using the 'mcp' Python package.")
+    print(f"\n\nConversation ID: {agent.conversation_id}")
 
 
 if __name__ == "__main__":
     asyncio.run(main())
-    asyncio.run(custom_mcp_server_example())
