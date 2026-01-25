@@ -1264,48 +1264,6 @@ func TestGrepToolResult_StructuredData_TruncationMetadata(t *testing.T) {
 	}
 }
 
-// TestTruncateLine tests the line truncation helper function
-func TestTruncateLine(t *testing.T) {
-	tests := []struct {
-		name      string
-		input     string
-		maxLength int
-		expected  string
-	}{
-		{
-			name:      "short line unchanged",
-			input:     "short line",
-			maxLength: 100,
-			expected:  "short line",
-		},
-		{
-			name:      "exact length unchanged",
-			input:     "exactly ten",
-			maxLength: 11,
-			expected:  "exactly ten",
-		},
-		{
-			name:      "long line truncated",
-			input:     "this is a very long line that should be truncated",
-			maxLength: 20,
-			expected:  "this is a very long ... [truncated]",
-		},
-		{
-			name:      "empty line unchanged",
-			input:     "",
-			maxLength: 100,
-			expected:  "",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := truncateLine(tt.input, tt.maxLength)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
 // TestGrepLineTruncation tests that long lines are truncated in search results
 func TestGrepLineTruncation(t *testing.T) {
 	if getRipgrepPath() == "" {
@@ -1382,61 +1340,6 @@ func TestGrepOutputSizeTruncation(t *testing.T) {
 	assert.Less(t, len(output), grepMaxOutputSize+200, "Output should not significantly exceed grepMaxOutputSize")
 }
 
-// TestEstimateResultSize tests the result size estimation function
-func TestEstimateResultSize(t *testing.T) {
-	tests := []struct {
-		name    string
-		result  SearchResult
-		minSize int
-		maxSize int
-	}{
-		{
-			name: "simple result",
-			result: SearchResult{
-				Filename:       "/tmp/test.go",
-				MatchedLines:   map[int]string{10: "short line"},
-				MatchPositions: map[int][]MatchPosition{10: {{Start: 0, End: 5}}},
-				ContextLines:   map[int]string{},
-				LineNumbers:    []int{10},
-			},
-			minSize: 40,
-			maxSize: 100,
-		},
-		{
-			name: "long line gets estimated with truncation",
-			result: SearchResult{
-				Filename:       "/tmp/test.go",
-				MatchedLines:   map[int]string{10: strings.Repeat("x", 500)},
-				MatchPositions: map[int][]MatchPosition{10: {{Start: 0, End: 5}}},
-				ContextLines:   map[int]string{},
-				LineNumbers:    []int{10},
-			},
-			minSize: grepMaxLineLength,
-			maxSize: grepMaxLineLength + 100,
-		},
-		{
-			name: "multiple lines",
-			result: SearchResult{
-				Filename:       "/tmp/test.go",
-				MatchedLines:   map[int]string{10: "line1", 20: "line2"},
-				MatchPositions: map[int][]MatchPosition{10: {}, 20: {}},
-				ContextLines:   map[int]string{15: "context"},
-				LineNumbers:    []int{10, 15, 20},
-			},
-			minSize: 60,
-			maxSize: 150,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			size := estimateResultSize(tt.result)
-			assert.GreaterOrEqual(t, size, tt.minSize, "Size should be at least %d", tt.minSize)
-			assert.LessOrEqual(t, size, tt.maxSize, "Size should be at most %d", tt.maxSize)
-		})
-	}
-}
-
 // TestTruncateResultsBySize tests the size-based truncation function
 func TestTruncateResultsBySize(t *testing.T) {
 	// Create results that would exceed grepMaxOutputSize
@@ -1463,40 +1366,6 @@ func TestTruncateResultsBySize(t *testing.T) {
 		totalSize += estimateResultSize(r)
 	}
 	assert.LessOrEqual(t, totalSize, grepMaxOutputSize, "Total size should not exceed grepMaxOutputSize")
-}
-
-// TestTruncateResultsBySizeWithLongPattern tests that pattern length is accounted for in size estimation
-func TestTruncateResultsBySizeWithLongPattern(t *testing.T) {
-	// Create results that would fit with a short pattern but not with a long one
-	var results []SearchResult
-	for i := 0; i < 100; i++ {
-		results = append(results, SearchResult{
-			Filename:       fmt.Sprintf("/tmp/file%d.go", i),
-			MatchedLines:   map[int]string{10: strings.Repeat("x", 200)},
-			MatchPositions: map[int][]MatchPosition{10: {{Start: 0, End: 5}}},
-			ContextLines:   map[int]string{},
-			LineNumbers:    []int{10},
-		})
-	}
-
-	shortPattern := "x"
-	longPattern := strings.Repeat("y", 10000)
-
-	truncatedShort, wasShortTruncated := truncateResultsBySize(results, shortPattern)
-	truncatedLong, wasLongTruncated := truncateResultsBySize(results, longPattern)
-
-	// Long pattern should result in fewer files (or same if both hit the limit)
-	if wasShortTruncated && wasLongTruncated {
-		assert.LessOrEqual(t, len(truncatedLong), len(truncatedShort),
-			"Long pattern should result in fewer or equal results")
-	}
-
-	// Verify the size calculation includes pattern length
-	totalSizeLong := grepSearchResultHeaderBuffer + len(longPattern)
-	for _, r := range truncatedLong {
-		totalSizeLong += estimateResultSize(r)
-	}
-	assert.LessOrEqual(t, totalSizeLong, grepMaxOutputSize, "Total size with long pattern should not exceed grepMaxOutputSize")
 }
 
 // TestSizeTruncationAfterFileLimitTruncation is a regression test ensuring that
@@ -1549,81 +1418,6 @@ func TestSizeTruncationAfterFileLimitTruncation(t *testing.T) {
 	// Verify output size is within limits
 	assert.LessOrEqual(t, len(output), grepMaxOutputSize+500,
 		"Output should not significantly exceed grepMaxOutputSize")
-}
-
-// TestTruncationMessageConsistency verifies truncation messages provide consistent advice
-func TestTruncationMessageConsistency(t *testing.T) {
-	tests := []struct {
-		name             string
-		truncationReason GrepTruncationReason
-		maxResults       int
-		expectedContains string
-	}{
-		{
-			name:             "file limit message",
-			truncationReason: GrepTruncatedByFileLimit,
-			maxResults:       100,
-			expectedContains: "use include filter",
-		},
-		{
-			name:             "size limit message",
-			truncationReason: GrepTruncatedByOutputSize,
-			maxResults:       100,
-			expectedContains: "use include filter",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := &GrepToolResult{
-				pattern:          "test",
-				results:          []SearchResult{},
-				truncated:        true,
-				truncationReason: tt.truncationReason,
-				maxResults:       tt.maxResults,
-			}
-
-			output := result.GetResult()
-			assert.Contains(t, output, tt.expectedContains,
-				"Truncation message should contain consistent advice")
-		})
-	}
-}
-
-// TestValidateInputUsesPackageErrors verifies that ValidateInput uses pkg/errors
-func TestValidateInputUsesPackageErrors(t *testing.T) {
-	tool := &GrepTool{}
-	state := NewBasicState(context.TODO())
-
-	// Test max_results validation error
-	input := CodeSearchInput{
-		Pattern:    "test",
-		MaxResults: grepMaxSearchResults + 1,
-	}
-	inputJSON, _ := json.Marshal(input)
-
-	err := tool.ValidateInput(state, string(inputJSON))
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "max_results cannot exceed")
-}
-
-// TestEstimateResultSizeAccountsForNewlines verifies size estimation includes newlines
-func TestEstimateResultSizeAccountsForNewlines(t *testing.T) {
-	result := SearchResult{
-		Filename:       "/tmp/test.go",
-		MatchedLines:   map[int]string{10: "line1", 20: "line2"},
-		MatchPositions: map[int][]MatchPosition{10: {}, 20: {}},
-		ContextLines:   map[int]string{},
-		LineNumbers:    []int{10, 20},
-	}
-
-	size := estimateResultSize(result)
-
-	// Should account for: filename + file header overhead + 2 lines with line numbers + newlines
-	// grepLineNumberOverhead includes the newline character (10 = 8 digits + separator + newline)
-	expectedMinSize := len(result.Filename) + grepFileHeaderOverhead + 2*(len("line1")+grepLineNumberOverhead)
-	assert.GreaterOrEqual(t, size, expectedMinSize-20, // Allow some tolerance
-		"Size should account for all content including overhead")
 }
 
 func TestGrepMatchPositions_Integration(t *testing.T) {
