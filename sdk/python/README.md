@@ -261,28 +261,7 @@ except KodeletError as e:
 
 ## Development
 
-```bash
-# Install with dev dependencies
-uv sync --all-extras
-
-# Run tests (unit tests only)
-uv run pytest
-
-# Run tests with coverage
-uv run pytest --cov=kodelet
-
-# Run integration tests (requires kodelet binary and API keys)
-uv run pytest -m integration
-
-# Run all tests
-uv run pytest -m ""
-
-# Type checking
-uv run mypy src/kodelet
-
-# Linting
-uv run ruff check src/kodelet
-```
+See [AGENTS.md](./AGENTS.md) for development setup, testing, and contribution guidelines.
 
 ## License
 
