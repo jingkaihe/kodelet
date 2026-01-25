@@ -38,6 +38,8 @@ func init() {
 	acpCmd.Flags().Int("max-tokens", 0, "Maximum tokens for LLM responses")
 	acpCmd.Flags().Bool("no-skills", false, "Disable agentic skills")
 	acpCmd.Flags().Bool("no-hooks", false, "Disable lifecycle hooks")
+	acpCmd.Flags().Float64("compact-ratio", 0.8, "Context window utilization ratio to trigger auto-compact (0.0-1.0)")
+	acpCmd.Flags().Bool("disable-auto-compact", false, "Disable auto-compact functionality")
 }
 
 func runACP(cmd *cobra.Command, _ []string) error {
@@ -51,13 +53,17 @@ func runACP(cmd *cobra.Command, _ []string) error {
 	maxTokens, _ := cmd.Flags().GetInt("max-tokens")
 	noSkills, _ := cmd.Flags().GetBool("no-skills")
 	noHooks, _ := cmd.Flags().GetBool("no-hooks")
+	compactRatio, _ := cmd.Flags().GetFloat64("compact-ratio")
+	disableAutoCompact, _ := cmd.Flags().GetBool("disable-auto-compact")
 
 	config := &acp.ServerConfig{
-		Provider:  provider,
-		Model:     model,
-		MaxTokens: maxTokens,
-		NoSkills:  noSkills,
-		NoHooks:   noHooks,
+		Provider:           provider,
+		Model:              model,
+		MaxTokens:          maxTokens,
+		NoSkills:           noSkills,
+		NoHooks:            noHooks,
+		CompactRatio:       compactRatio,
+		DisableAutoCompact: disableAutoCompact,
 	}
 
 	server := acp.NewServer(

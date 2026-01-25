@@ -117,15 +117,45 @@ type AuthMethod struct {
 	Type string `json:"type"`
 }
 
+// EnvMap is a custom type that can unmarshal from both map and array formats.
+// It accepts either {"KEY": "VALUE"} or [{"name": "KEY", "value": "VALUE"}].
+type EnvMap map[string]string
+
+// UnmarshalJSON implements custom unmarshaling for EnvMap.
+func (e *EnvMap) UnmarshalJSON(data []byte) error {
+	// Try map format first: {"KEY": "VALUE"}
+	var mapFormat map[string]string
+	if err := json.Unmarshal(data, &mapFormat); err == nil {
+		*e = mapFormat
+		return nil
+	}
+
+	// Try array format: [{"name": "KEY", "value": "VALUE"}]
+	var arrayFormat []struct {
+		Name  string `json:"name"`
+		Value string `json:"value"`
+	}
+	if err := json.Unmarshal(data, &arrayFormat); err != nil {
+		return err
+	}
+
+	result := make(map[string]string)
+	for _, item := range arrayFormat {
+		result[item.Name] = item.Value
+	}
+	*e = result
+	return nil
+}
+
 // MCPServer describes an MCP server provided by the client
 type MCPServer struct {
-	Name       string            `json:"name"`
-	Type       string            `json:"type,omitempty"` // stdio, http
-	Command    string            `json:"command,omitempty"`
-	Args       []string          `json:"args,omitempty"`
-	Env        map[string]string `json:"env,omitempty"`
-	URL        string            `json:"url,omitempty"`
-	AuthHeader string            `json:"authHeader,omitempty"`
+	Name       string   `json:"name"`
+	Type       string   `json:"type,omitempty"` // stdio, http
+	Command    string   `json:"command,omitempty"`
+	Args       []string `json:"args,omitempty"`
+	Env        EnvMap   `json:"env,omitempty"`
+	URL        string   `json:"url,omitempty"`
+	AuthHeader string   `json:"authHeader,omitempty"`
 }
 
 // NewSessionRequest creates a new session
