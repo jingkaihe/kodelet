@@ -3,8 +3,11 @@
 These correspond to the JSON events emitted by `kodelet run --headless --stream-deltas`.
 """
 
+import json
 from dataclasses import dataclass
 from typing import Any
+
+from .tool_results import ToolResult, UnknownToolResult, decode_tool_result
 
 
 @dataclass
@@ -75,6 +78,39 @@ class ToolResultEvent(Event):
     tool_name: str = ""
     tool_call_id: str = ""
     result: str = ""
+
+    def decode_result(self) -> ToolResult:
+        """Decode the tool result into a typed dataclass.
+
+        Attempts to parse the result as JSON and decode it into the appropriate
+        tool result type. If the result is not valid JSON or is in an unexpected
+        format, returns an UnknownToolResult.
+
+        Returns:
+            A typed tool result dataclass (BashResult, FileReadResult, etc.)
+
+        Example:
+            ```python
+            async for event in agent.query("list files"):
+                if isinstance(event, ToolResultEvent):
+                    result = event.decode_result()
+                    if isinstance(result, BashResult):
+                        print(f"Exit code: {result.exit_code}")
+            ```
+        """
+        try:
+            data = json.loads(self.result)
+            if isinstance(data, dict) and "toolName" in data:
+                return decode_tool_result(data)
+        except (json.JSONDecodeError, TypeError, KeyError):
+            pass
+
+        return UnknownToolResult(
+            tool_name=self.tool_name,
+            success=True,
+            error="",
+            raw_metadata={},
+        )
 
 
 @dataclass
