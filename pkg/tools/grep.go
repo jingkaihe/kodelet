@@ -3,11 +3,11 @@ package tools
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,17 +15,57 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/binaries"
 	"github.com/jingkaihe/kodelet/pkg/osutil"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/pkg/errors"
 	"go.opentelemetry.io/otel/attribute"
+)
+
+const (
+	// grepMaxSearchResults is the limit for maximum search results returned by the grep tool.
+	grepMaxSearchResults = 100
+
+	// grepMaxLineLength limits the length of matched lines to prevent long lines from consuming context.
+	grepMaxLineLength = 300
+
+	// grepMaxOutputSize limits the total output size in bytes to prevent context overflow.
+	grepMaxOutputSize = 50 * 1024 // 50KB
+
+	// Format strings for search result output
+	grepSearchResultHeaderFmt = "Search results for pattern '%s':\n"
+	grepFileHeaderFmt         = "\nPattern found in file %s:\n\n"
+	grepTruncationIndicator   = "... [truncated]"
+	// grepMaxLineNumberDigits is used to calculate grepLineNumberOverhead.
+	// Each output line has: line number (8 digits max) + separator (:/-) + newline = 10 chars
+	grepMaxLineNumberDigits = "12345678:N"
+)
+
+// Size estimation constants for output truncation, calculated from format strings
+var (
+	grepSearchResultHeaderBuffer = len(grepSearchResultHeaderFmt)
+	grepFileHeaderOverhead       = len(grepFileHeaderFmt)
+	grepTruncationIndicatorLen   = len(grepTruncationIndicator)
+	grepLineNumberOverhead       = len(grepMaxLineNumberDigits)
+)
+
+// GrepTruncationReason indicates why results were truncated
+type GrepTruncationReason string
+
+// Truncation reason constants
+const (
+	GrepNotTruncated          GrepTruncationReason = ""
+	GrepTruncatedByFileLimit  GrepTruncationReason = "file_limit"
+	GrepTruncatedByOutputSize GrepTruncationReason = "output_size"
 )
 
 // GrepToolResult represents the result of a grep/search operation
 type GrepToolResult struct {
-	pattern   string
-	path      string
-	include   string
-	results   []SearchResult
-	truncated bool
-	err       string
+	pattern          string
+	path             string
+	include          string
+	results          []SearchResult
+	truncated        bool
+	truncationReason GrepTruncationReason
+	maxResults       int
+	err              string
 }
 
 // GetResult returns the formatted search results
@@ -33,7 +73,14 @@ func (r *GrepToolResult) GetResult() string {
 	result := FormatSearchResults(r.pattern, r.results)
 
 	if r.truncated {
-		result += "\n\n[TRUNCATED DUE TO MAXIMUM 100 RESULT LIMIT]"
+		switch r.truncationReason {
+		case GrepTruncatedByFileLimit:
+			result += fmt.Sprintf("\n\n[TRUNCATED DUE TO MAXIMUM %d FILE LIMIT - refine your search pattern or use include filter]", r.maxResults)
+		case GrepTruncatedByOutputSize:
+			result += "\n\n[TRUNCATED DUE TO OUTPUT SIZE LIMIT (50KB) - refine your search pattern or use include filter]"
+		default:
+			result += fmt.Sprintf("\n\n[TRUNCATED DUE TO MAXIMUM %d RESULT LIMIT - refine your search pattern or use include filter]", r.maxResults)
+		}
 	}
 
 	return result
@@ -104,11 +151,13 @@ func (r *GrepToolResult) StructuredData() tooltypes.StructuredToolResult {
 
 	// Always populate metadata, even for errors
 	result.Metadata = &tooltypes.GrepMetadata{
-		Pattern:   r.pattern,
-		Path:      r.path,
-		Include:   r.include,
-		Results:   metadataResults,
-		Truncated: r.truncated,
+		Pattern:          r.pattern,
+		Path:             r.path,
+		Include:          r.include,
+		Results:          metadataResults,
+		Truncated:        r.truncated,
+		TruncationReason: string(r.truncationReason),
+		MaxResults:       r.maxResults,
 	}
 
 	if r.IsError() {
@@ -129,6 +178,7 @@ type CodeSearchInput struct {
 	IgnoreCase    bool   `json:"ignore_case" jsonschema:"description=If true use case-insensitive search. Default is false (smart-case: case-insensitive if pattern is all lowercase)"`
 	FixedStrings  bool   `json:"fixed_strings" jsonschema:"description=If true treat pattern as literal string instead of regex. Default is false"`
 	SurroundLines int    `json:"surround_lines" jsonschema:"description=Number of lines to show before and after each match. Default is 0 (no context lines)"`
+	MaxResults    int    `json:"max_results" jsonschema:"description=Maximum number of files to return results from. Default is 100. Use a smaller value to reduce output size"`
 }
 
 // Name returns the name of the tool
@@ -156,18 +206,19 @@ func (t *GrepTool) TracingKVs(parameters string) ([]attribute.KeyValue, error) {
 		attribute.Bool("ignore_case", input.IgnoreCase),
 		attribute.Bool("fixed_strings", input.FixedStrings),
 		attribute.Int("surround_lines", input.SurroundLines),
+		attribute.Int("max_results", input.MaxResults),
 	}, nil
 }
 
 // Description returns the description of the tool
 func (t *GrepTool) Description() string {
-	return `Search for a pattern in the codebase using regex.
+	return fmt.Sprintf(`Search for a pattern in the codebase using regex.
 
 ## Important Notes
 * You should prioritise using this tool over search via grep, egrep, or other grep-like UNIX commands.
 * Files matching .gitignore patterns are automatically excluded.
 * Binary files and hidden files/directories (starting with .) are skipped by default.
-* The result returns at maximum 100 files sorted by modification time (newest first). Pay attention to the truncation notice and refine your search pattern to narrow down the results.
+* Results are sorted by modification time (newest first), returning at most %d files by default. Pay attention to the truncation notice and refine your search pattern to narrow down the results.
 * To get the best result, you should use the ${glob_tool} to narrow down the files to search in, and then use this tool for a more targeted search.
 
 ## Input
@@ -177,9 +228,10 @@ func (t *GrepTool) Description() string {
 - ignore_case: If true, use case-insensitive search. Default is false (smart-case: case-insensitive if pattern is all lowercase).
 - fixed_strings: If true, treat pattern as a literal string instead of regex. Useful when searching for strings containing special characters like "foo.bar()" or "[test]".
 - surround_lines: Number of lines to show before and after each match for context. Default is 0 (no context lines).
+- max_results: Number of files to return results from (1-%d). Default and maximum is %d. Use a smaller value to reduce output size when searching large codebases.
 
 If you need to do multi-turn search using grep_tool and glob_tool, use subagentTool instead.
-`
+`, grepMaxSearchResults, grepMaxSearchResults, grepMaxSearchResults)
 }
 
 // ValidateInput validates the input parameters for the tool
@@ -200,8 +252,13 @@ func (t *GrepTool) ValidateInput(_ tooltypes.State, parameters string) error {
 	// Validate that path exists if provided
 	if input.Path != "" {
 		if _, err := os.Stat(input.Path); err != nil {
-			return fmt.Errorf("invalid path %q: %w", input.Path, err)
+			return errors.Wrapf(err, "invalid path %q", input.Path)
 		}
+	}
+
+	// Validate max_results doesn't exceed the limit
+	if input.MaxResults > grepMaxSearchResults {
+		return errors.Errorf("max_results cannot exceed %d", grepMaxSearchResults)
 	}
 
 	return nil
@@ -222,27 +279,35 @@ type SearchResult struct {
 	LineNumbers    []int                   // All line numbers in order
 }
 
+// truncateLine truncates a line if it exceeds maxLength, adding an ellipsis indicator
+func truncateLine(line string, maxLength int) string {
+	if len(line) <= maxLength {
+		return line
+	}
+	return line[:maxLength] + grepTruncationIndicator
+}
+
 // FormatSearchResults formats the search results for output
 func FormatSearchResults(pattern string, results []SearchResult) string {
 	if len(results) == 0 {
-		return fmt.Sprintf("No matches found for pattern '%s'", pattern)
+		return "No matches found for pattern '" + pattern + "'"
 	}
 
 	var output strings.Builder
-	output.WriteString(fmt.Sprintf("Search results for pattern '%s':\n", pattern))
+	fmt.Fprintf(&output, grepSearchResultHeaderFmt, pattern)
 
 	for _, result := range results {
 		if len(result.MatchedLines) == 0 {
 			continue
 		}
 
-		output.WriteString(fmt.Sprintf("\nPattern found in file %s:\n\n", result.Filename))
+		fmt.Fprintf(&output, grepFileHeaderFmt, result.Filename)
 
 		for _, lineNum := range result.LineNumbers {
 			if content, isMatch := result.MatchedLines[lineNum]; isMatch {
-				output.WriteString(fmt.Sprintf("%d:%s\n", lineNum, content))
+				fmt.Fprintf(&output, "%d:%s\n", lineNum, truncateLine(content, grepMaxLineLength))
 			} else if content, exists := result.ContextLines[lineNum]; exists {
-				output.WriteString(fmt.Sprintf("%d-%s\n", lineNum, content))
+				fmt.Fprintf(&output, "%d-%s\n", lineNum, truncateLine(content, grepMaxLineLength))
 			}
 		}
 	}
@@ -320,7 +385,7 @@ func searchPath(ctx context.Context, searchPath, pattern, includePattern string,
 	}
 
 	if surroundLines > 0 {
-		args = append(args, "-C", fmt.Sprintf("%d", surroundLines))
+		args = append(args, "-C", strconv.Itoa(surroundLines))
 	}
 
 	// Add glob pattern if specified (only makes sense for directory searches)
@@ -430,8 +495,45 @@ func parseRipgrepJSON(output []byte, root string) ([]SearchResult, error) {
 	return results, nil
 }
 
-// MaxSearchResults is the limit for maximum search results returned by the grep tool.
-const MaxSearchResults = 100
+// estimateResultSize estimates the output size in bytes for a single SearchResult
+func estimateResultSize(result SearchResult) int {
+	size := len(result.Filename) + grepFileHeaderOverhead
+	for _, lineNum := range result.LineNumbers {
+		if content, isMatch := result.MatchedLines[lineNum]; isMatch {
+			lineLen := len(content)
+			if lineLen > grepMaxLineLength {
+				lineLen = grepMaxLineLength + grepTruncationIndicatorLen
+			}
+			size += lineLen + grepLineNumberOverhead
+		} else if content, exists := result.ContextLines[lineNum]; exists {
+			lineLen := len(content)
+			if lineLen > grepMaxLineLength {
+				lineLen = grepMaxLineLength + grepTruncationIndicatorLen
+			}
+			size += lineLen + grepLineNumberOverhead
+		}
+	}
+	return size
+}
+
+// truncateResultsBySize truncates results to fit within grepMaxOutputSize
+// The pattern parameter is used to accurately estimate the header size
+func truncateResultsBySize(results []SearchResult, pattern string) ([]SearchResult, bool) {
+	// Account for header size: format string overhead + pattern length
+	totalSize := grepSearchResultHeaderBuffer + len(pattern)
+	var truncatedResults []SearchResult
+
+	for _, result := range results {
+		resultSize := estimateResultSize(result)
+		if totalSize+resultSize > grepMaxOutputSize {
+			return truncatedResults, true
+		}
+		totalSize += resultSize
+		truncatedResults = append(truncatedResults, result)
+	}
+
+	return truncatedResults, false
+}
 
 // Execute searches for the pattern in files and returns the results
 func (t *GrepTool) Execute(ctx context.Context, _ tooltypes.State, parameters string) tooltypes.ToolResult {
@@ -469,19 +571,36 @@ func (t *GrepTool) Execute(ctx context.Context, _ tooltypes.State, parameters st
 		}
 	}
 
-	// Check if results need to be truncated
-	isResultsTruncated := false
-	if len(results) > MaxSearchResults {
-		isResultsTruncated = true
-		results = results[:MaxSearchResults]
+	// Use default max results if not specified
+	maxResults := input.MaxResults
+	if maxResults <= 0 {
+		maxResults = grepMaxSearchResults
+	}
+
+	// Check if results need to be truncated by file count
+	truncationReason := GrepNotTruncated
+	if len(results) > maxResults {
+		truncationReason = GrepTruncatedByFileLimit
+		results = results[:maxResults]
+	}
+
+	// Always check size truncation, even after file limit truncation
+	// This ensures output never exceeds grepMaxOutputSize
+	var sizeTruncated bool
+	results, sizeTruncated = truncateResultsBySize(results, input.Pattern)
+	if sizeTruncated {
+		// Size limit takes precedence for user messaging since it's the actual constraint
+		truncationReason = GrepTruncatedByOutputSize
 	}
 
 	// Return the results
 	return &GrepToolResult{
-		pattern:   input.Pattern,
-		path:      path,
-		include:   input.Include,
-		results:   results,
-		truncated: isResultsTruncated,
+		pattern:          input.Pattern,
+		path:             path,
+		include:          input.Include,
+		results:          results,
+		truncated:        truncationReason != GrepNotTruncated,
+		truncationReason: truncationReason,
+		maxResults:       maxResults,
 	}
 }

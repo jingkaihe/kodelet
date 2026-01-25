@@ -76,8 +76,9 @@ describe('GrepRenderer', () => {
 
     render(<GrepRenderer toolResult={toolResult} />);
 
-    const badge = screen.getByTestId('status-badge');
-    expect(badge).toHaveAttribute('data-variant', 'warning');
+    // When truncated, there are two badges: match count and truncation message
+    const badges = screen.getAllByTestId('status-badge');
+    expect(badges[0]).toHaveAttribute('data-variant', 'warning');
   });
 
   it('shows path when provided', () => {
@@ -283,5 +284,105 @@ describe('GrepRenderer', () => {
     const highlightedMarks = container.querySelectorAll('mark');
     expect(highlightedMarks).toHaveLength(1);
     expect(highlightedMarks[0].textContent).toBe('error');
+  });
+
+  describe('truncation messages', () => {
+    it('shows file limit truncation message', () => {
+      const toolResult = createToolResult({
+        pattern: 'test',
+        results: [{ filePath: 'file.js', lineNumber: 1, content: 'test' }],
+        truncated: true,
+        truncationReason: 'file_limit',
+        maxResults: 100,
+      });
+
+      render(<GrepRenderer toolResult={toolResult} />);
+
+      expect(screen.getByText('Truncated: max 100 files')).toBeInTheDocument();
+    });
+
+    it('shows output size truncation message', () => {
+      const toolResult = createToolResult({
+        pattern: 'test',
+        results: [{ filePath: 'file.js', lineNumber: 1, content: 'test' }],
+        truncated: true,
+        truncationReason: 'output_size',
+        maxResults: 50,
+      });
+
+      render(<GrepRenderer toolResult={toolResult} />);
+
+      expect(screen.getByText('Truncated: output size limit (50KB)')).toBeInTheDocument();
+    });
+
+    it('shows custom max_results in file limit message', () => {
+      const toolResult = createToolResult({
+        pattern: 'test',
+        results: [{ filePath: 'file.js', lineNumber: 1, content: 'test' }],
+        truncated: true,
+        truncationReason: 'file_limit',
+        maxResults: 25,
+      });
+
+      render(<GrepRenderer toolResult={toolResult} />);
+
+      expect(screen.getByText('Truncated: max 25 files')).toBeInTheDocument();
+    });
+
+    it('shows default max_results when not provided', () => {
+      const toolResult = createToolResult({
+        pattern: 'test',
+        results: [{ filePath: 'file.js', lineNumber: 1, content: 'test' }],
+        truncated: true,
+        truncationReason: 'file_limit',
+      });
+
+      render(<GrepRenderer toolResult={toolResult} />);
+
+      expect(screen.getByText('Truncated: max 100 files')).toBeInTheDocument();
+    });
+
+    it('shows generic truncation message for unknown reason', () => {
+      const toolResult = createToolResult({
+        pattern: 'test',
+        results: [{ filePath: 'file.js', lineNumber: 1, content: 'test' }],
+        truncated: true,
+        truncationReason: '' as const,
+      });
+
+      render(<GrepRenderer toolResult={toolResult} />);
+
+      expect(screen.getByText('Results truncated')).toBeInTheDocument();
+    });
+
+    it('does not show truncation message when not truncated', () => {
+      const toolResult = createToolResult({
+        pattern: 'test',
+        results: [{ filePath: 'file.js', lineNumber: 1, content: 'test' }],
+        truncated: false,
+      });
+
+      render(<GrepRenderer toolResult={toolResult} />);
+
+      expect(screen.queryByText(/Truncated/)).not.toBeInTheDocument();
+    });
+
+    it('renders truncation badge with warning variant', () => {
+      const toolResult = createToolResult({
+        pattern: 'test',
+        results: [{ filePath: 'file.js', lineNumber: 1, content: 'test' }],
+        truncated: true,
+        truncationReason: 'file_limit',
+        maxResults: 100,
+      });
+
+      render(<GrepRenderer toolResult={toolResult} />);
+
+      // Should have 2 badges: match count and truncation message
+      const badges = screen.getAllByTestId('status-badge');
+      expect(badges).toHaveLength(2);
+      expect(badges[1]).toHaveAttribute('data-variant', 'warning');
+      expect(badges[1]).toHaveTextContent('Truncated: max 100 files');
+    });
   });
 });

@@ -55,7 +55,20 @@ const GrepRenderer: React.FC<GrepRendererProps> = ({ toolResult }) => {
     });
   };
 
+  const getTruncationMessage = (): string | null => {
+    if (!meta.truncated) return null;
+    switch (meta.truncationReason) {
+      case 'file_limit':
+        return `Truncated: max ${meta.maxResults || 100} files`;
+      case 'output_size':
+        return 'Truncated: output size limit (50KB)';
+      default:
+        return 'Results truncated';
+    }
+  };
+
   const fileGroups = groupResultsByFile(results);
+  const truncationMessage = getTruncationMessage();
 
   return (
     <div className="space-y-2">
@@ -66,6 +79,9 @@ const GrepRenderer: React.FC<GrepRendererProps> = ({ toolResult }) => {
           variant={meta.truncated ? 'warning' : 'success'}
         />
         {meta.path && <span className="text-kodelet-mid-gray">in {meta.path}</span>}
+        {truncationMessage && (
+          <StatusBadge text={truncationMessage} variant="warning" />
+        )}
       </div>
 
       {results.length > 0 ? (

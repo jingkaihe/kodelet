@@ -23,30 +23,41 @@ func (r *GrepRenderer) RenderCLI(result tools.StructuredToolResult) string {
 	}
 
 	var output strings.Builder
-	output.WriteString(fmt.Sprintf("Pattern: %s\n", meta.Pattern))
+	fmt.Fprintf(&output, "Pattern: %s\n", meta.Pattern)
 
 	if meta.Path != "" {
-		output.WriteString(fmt.Sprintf("Path: %s\n", meta.Path))
+		fmt.Fprintf(&output, "Path: %s\n", meta.Path)
 	}
 	if meta.Include != "" {
-		output.WriteString(fmt.Sprintf("Include: %s\n", meta.Include))
+		fmt.Fprintf(&output, "Include: %s\n", meta.Include)
 	}
 
-	output.WriteString(fmt.Sprintf("\nFound %d files with matches:\n", len(meta.Results)))
+	fmt.Fprintf(&output, "\nFound %d files with matches:\n", len(meta.Results))
 
-	for _, result := range meta.Results {
-		output.WriteString(fmt.Sprintf("\n%s:\n", result.FilePath))
-		for _, match := range result.Matches {
+	for _, res := range meta.Results {
+		fmt.Fprintf(&output, "\n%s:\n", res.FilePath)
+		for _, match := range res.Matches {
 			if match.IsContext {
-				output.WriteString(fmt.Sprintf("  %d- %s\n", match.LineNumber, match.Content))
+				fmt.Fprintf(&output, "  %d- %s\n", match.LineNumber, match.Content)
 			} else {
-				output.WriteString(fmt.Sprintf("  %d: %s\n", match.LineNumber, match.Content))
+				fmt.Fprintf(&output, "  %d: %s\n", match.LineNumber, match.Content)
 			}
 		}
 	}
 
 	if meta.Truncated {
-		output.WriteString("\n... [results truncated]")
+		switch meta.TruncationReason {
+		case tools.GrepTruncatedByFileLimit:
+			maxResults := meta.MaxResults
+			if maxResults == 0 {
+				maxResults = 100
+			}
+			fmt.Fprintf(&output, "\n... [truncated: max %d files]", maxResults)
+		case tools.GrepTruncatedByOutputSize:
+			output.WriteString("\n... [truncated: output size limit (50KB)]")
+		default:
+			output.WriteString("\n... [results truncated]")
+		}
 	}
 
 	return output.String()
@@ -68,20 +79,20 @@ func (r *GlobRenderer) RenderCLI(result tools.StructuredToolResult) string {
 	}
 
 	var output strings.Builder
-	output.WriteString(fmt.Sprintf("Pattern: %s\n", meta.Pattern))
+	fmt.Fprintf(&output, "Pattern: %s\n", meta.Pattern)
 
 	if meta.Path != "" {
-		output.WriteString(fmt.Sprintf("Path: %s\n", meta.Path))
+		fmt.Fprintf(&output, "Path: %s\n", meta.Path)
 	}
 
-	output.WriteString(fmt.Sprintf("\nFound %d files:\n", len(meta.Files)))
+	fmt.Fprintf(&output, "\nFound %d files:\n", len(meta.Files))
 
 	for _, file := range meta.Files {
 		typeIndicator := ""
 		if file.Type == "directory" {
 			typeIndicator = "/"
 		}
-		output.WriteString(fmt.Sprintf("  %s%s (%d bytes)\n", file.Path, typeIndicator, file.Size))
+		fmt.Fprintf(&output, "  %s%s (%d bytes)\n", file.Path, typeIndicator, file.Size)
 	}
 
 	if meta.Truncated {

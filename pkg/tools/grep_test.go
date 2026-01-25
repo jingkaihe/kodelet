@@ -38,8 +38,9 @@ func TestGrepTool_Description(t *testing.T) {
 
 	// New features description tests
 	assert.Contains(t, desc, "Binary files and hidden files/directories (starting with .) are skipped by default")
-	assert.Contains(t, desc, "maximum 100 files sorted by modification time")
+	assert.Contains(t, desc, "sorted by modification time")
 	assert.Contains(t, desc, "truncation notice")
+	assert.Contains(t, desc, "max_results")
 
 	// Verify description mentions absolute path
 	assert.Contains(t, desc, "absolute path")
@@ -124,6 +125,23 @@ func TestGrepTool_ValidateInput(t *testing.T) {
 			},
 			expectError: true,
 			errorMsg:    "invalid path",
+		},
+		{
+			name: "max_results exceeds limit",
+			input: CodeSearchInput{
+				Pattern:    "func Test",
+				MaxResults: grepMaxSearchResults + 1,
+			},
+			expectError: true,
+			errorMsg:    "max_results cannot exceed",
+		},
+		{
+			name: "max_results at limit is valid",
+			input: CodeSearchInput{
+				Pattern:    "func Test",
+				MaxResults: grepMaxSearchResults,
+			},
+			expectError: false,
 		},
 	}
 
@@ -485,8 +503,47 @@ func TestGrepResultLimitAndTruncation(t *testing.T) {
 	// We should have exactly 100 results
 	assert.Equal(t, 100, count, "Should return exactly 100 results")
 
-	// Should contain truncation notice
-	assert.Contains(t, result.GetResult(), "[TRUNCATED DUE TO MAXIMUM 100 RESULT LIMIT]")
+	// Should contain truncation notice (file limit message)
+	assert.Contains(t, result.GetResult(), "[TRUNCATED DUE TO MAXIMUM 100 FILE LIMIT")
+}
+
+// TestGrepMaxResultsParameter tests the max_results parameter
+func TestGrepMaxResultsParameter(t *testing.T) {
+	tool := &GrepTool{}
+	ctx := context.Background()
+	state := NewBasicState(context.TODO())
+
+	tempDir, err := os.MkdirTemp("", "grep_max_results_param_test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	tempDirAbs, err := filepath.Abs(tempDir)
+	require.NoError(t, err)
+
+	// Create 20 files with the same pattern
+	for i := 0; i < 20; i++ {
+		filename := filepath.Join(tempDir, fmt.Sprintf("file%d.txt", i))
+		require.NoError(t, os.WriteFile(filename, []byte("MAXTEST pattern here\n"), 0o644))
+	}
+
+	// Test with max_results = 5
+	input := CodeSearchInput{
+		Pattern:    "MAXTEST",
+		Path:       tempDirAbs,
+		MaxResults: 5,
+	}
+
+	inputJSON, _ := json.Marshal(input)
+	result := tool.Execute(ctx, state, string(inputJSON))
+
+	assert.False(t, result.IsError())
+
+	// Count results - should be exactly 5
+	count := strings.Count(result.GetResult(), "Pattern found in file")
+	assert.Equal(t, 5, count, "Should return exactly 5 results when max_results=5")
+
+	// Should contain truncation notice with the correct limit
+	assert.Contains(t, result.GetResult(), "[TRUNCATED DUE TO MAXIMUM 5 FILE LIMIT")
 }
 
 // TestDefaultPathIsAbsolute tests that the default path is an absolute path
@@ -1132,6 +1189,235 @@ func TestGrepToolResult_StructuredData_MatchPositions(t *testing.T) {
 			assert.Equal(t, tt.expectedEnd, foundMatch.MatchEnd, "MatchEnd")
 		})
 	}
+}
+
+// TestGrepToolResult_StructuredData_TruncationMetadata tests that truncation metadata is properly populated
+func TestGrepToolResult_StructuredData_TruncationMetadata(t *testing.T) {
+	tests := []struct {
+		name                     string
+		truncated                bool
+		truncationReason         GrepTruncationReason
+		maxResults               int
+		expectedTruncated        bool
+		expectedTruncationReason string
+		expectedMaxResults       int
+	}{
+		{
+			name:                     "not truncated",
+			truncated:                false,
+			truncationReason:         GrepNotTruncated,
+			maxResults:               100,
+			expectedTruncated:        false,
+			expectedTruncationReason: "",
+			expectedMaxResults:       100,
+		},
+		{
+			name:                     "truncated by file limit",
+			truncated:                true,
+			truncationReason:         GrepTruncatedByFileLimit,
+			maxResults:               100,
+			expectedTruncated:        true,
+			expectedTruncationReason: "file_limit",
+			expectedMaxResults:       100,
+		},
+		{
+			name:                     "truncated by output size",
+			truncated:                true,
+			truncationReason:         GrepTruncatedByOutputSize,
+			maxResults:               50,
+			expectedTruncated:        true,
+			expectedTruncationReason: "output_size",
+			expectedMaxResults:       50,
+		},
+		{
+			name:                     "custom max_results with file limit truncation",
+			truncated:                true,
+			truncationReason:         GrepTruncatedByFileLimit,
+			maxResults:               25,
+			expectedTruncated:        true,
+			expectedTruncationReason: "file_limit",
+			expectedMaxResults:       25,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := &GrepToolResult{
+				pattern:          "test",
+				path:             "/tmp",
+				results:          []SearchResult{},
+				truncated:        tt.truncated,
+				truncationReason: tt.truncationReason,
+				maxResults:       tt.maxResults,
+			}
+
+			structured := result.StructuredData()
+			require.NotNil(t, structured.Metadata)
+
+			metadata, ok := structured.Metadata.(*tooltypes.GrepMetadata)
+			require.True(t, ok)
+
+			assert.Equal(t, tt.expectedTruncated, metadata.Truncated, "Truncated")
+			assert.Equal(t, tt.expectedTruncationReason, metadata.TruncationReason, "TruncationReason")
+			assert.Equal(t, tt.expectedMaxResults, metadata.MaxResults, "MaxResults")
+		})
+	}
+}
+
+// TestGrepLineTruncation tests that long lines are truncated in search results
+func TestGrepLineTruncation(t *testing.T) {
+	if getRipgrepPath() == "" {
+		t.Skip("ripgrep not available, skipping test")
+	}
+
+	tool := &GrepTool{}
+	ctx := context.Background()
+	state := NewBasicState(context.TODO())
+
+	tempDir, err := os.MkdirTemp("", "grep_line_truncation_test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	// Create a file with a very long line (simulating decompiled/minified code)
+	longLine := "FINDME" + strings.Repeat("x", 500) + "END"
+	testFile := filepath.Join(tempDir, "long_line.txt")
+	require.NoError(t, os.WriteFile(testFile, []byte(longLine+"\n"), 0o644))
+
+	input := CodeSearchInput{
+		Pattern: "FINDME",
+		Path:    tempDir,
+	}
+
+	inputJSON, _ := json.Marshal(input)
+	result := tool.Execute(ctx, state, string(inputJSON))
+
+	assert.False(t, result.IsError())
+	assert.Contains(t, result.GetResult(), "FINDME")
+	assert.Contains(t, result.GetResult(), "... [truncated]")
+	// Should NOT contain the full long line
+	assert.NotContains(t, result.GetResult(), "END")
+}
+
+// TestGrepOutputSizeTruncation tests that output is truncated when exceeding size limit
+func TestGrepOutputSizeTruncation(t *testing.T) {
+	if getRipgrepPath() == "" {
+		t.Skip("ripgrep not available, skipping test")
+	}
+
+	tool := &GrepTool{}
+	ctx := context.Background()
+	state := NewBasicState(context.TODO())
+
+	tempDir, err := os.MkdirTemp("", "grep_output_size_test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	// Create many files with medium-length content to exceed output size limit
+	for i := 0; i < 200; i++ {
+		content := fmt.Sprintf("SIZETEST line with content %s", strings.Repeat("x", 200))
+		filename := filepath.Join(tempDir, fmt.Sprintf("file%d.txt", i))
+		require.NoError(t, os.WriteFile(filename, []byte(content+"\n"), 0o644))
+	}
+
+	input := CodeSearchInput{
+		Pattern: "SIZETEST",
+		Path:    tempDir,
+	}
+
+	inputJSON, _ := json.Marshal(input)
+	result := tool.Execute(ctx, state, string(inputJSON))
+
+	assert.False(t, result.IsError())
+
+	// Output should be truncated by either file limit or size limit
+	output := result.GetResult()
+	assert.True(t,
+		strings.Contains(output, "[TRUNCATED DUE TO MAXIMUM 100 FILE LIMIT") ||
+			strings.Contains(output, "[TRUNCATED DUE TO OUTPUT SIZE LIMIT"),
+		"Output should contain truncation notice")
+
+	// Output size should not exceed grepMaxOutputSize + truncation message overhead
+	assert.Less(t, len(output), grepMaxOutputSize+200, "Output should not significantly exceed grepMaxOutputSize")
+}
+
+// TestTruncateResultsBySize tests the size-based truncation function
+func TestTruncateResultsBySize(t *testing.T) {
+	// Create results that would exceed grepMaxOutputSize
+	var results []SearchResult
+	for i := 0; i < 1000; i++ {
+		results = append(results, SearchResult{
+			Filename:       fmt.Sprintf("/tmp/file%d.go", i),
+			MatchedLines:   map[int]string{10: strings.Repeat("x", 200)},
+			MatchPositions: map[int][]MatchPosition{10: {{Start: 0, End: 5}}},
+			ContextLines:   map[int]string{},
+			LineNumbers:    []int{10},
+		})
+	}
+
+	pattern := "testpattern"
+	truncated, wasTruncated := truncateResultsBySize(results, pattern)
+
+	assert.True(t, wasTruncated, "Results should be truncated")
+	assert.Less(t, len(truncated), len(results), "Truncated results should be fewer than original")
+
+	// Verify the truncated results fit within the size limit
+	totalSize := grepSearchResultHeaderBuffer + len(pattern)
+	for _, r := range truncated {
+		totalSize += estimateResultSize(r)
+	}
+	assert.LessOrEqual(t, totalSize, grepMaxOutputSize, "Total size should not exceed grepMaxOutputSize")
+}
+
+// TestSizeTruncationAfterFileLimitTruncation is a regression test ensuring that
+// size truncation is applied even when file limit truncation has already occurred.
+// This prevents output from exceeding grepMaxOutputSize when many large files match.
+func TestSizeTruncationAfterFileLimitTruncation(t *testing.T) {
+	if getRipgrepPath() == "" {
+		t.Skip("ripgrep not available, skipping test")
+	}
+
+	tool := &GrepTool{}
+	ctx := context.Background()
+	state := NewBasicState(context.TODO())
+
+	tempDir, err := os.MkdirTemp("", "grep_size_after_file_limit_test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	tempDirAbs, err := filepath.Abs(tempDir)
+	require.NoError(t, err)
+
+	// Create 150 files with multiple matching lines per file to exceed 50KB with 100 files
+	// Each file has 3 matching lines of 280 chars each (under grepMaxLineLength to avoid truncation)
+	// Per file: ~70 (header) + 3 * (280 + 10) = ~940 bytes
+	// 100 files * 940 bytes = ~94KB > 50KB limit
+	for i := 0; i < 150; i++ {
+		var content strings.Builder
+		for j := 0; j < 3; j++ {
+			content.WriteString("SIZEAFTERFILELIMIT " + strings.Repeat("x", 260) + "\n")
+		}
+		filename := filepath.Join(tempDir, fmt.Sprintf("file%03d.txt", i))
+		require.NoError(t, os.WriteFile(filename, []byte(content.String()), 0o644))
+	}
+
+	input := CodeSearchInput{
+		Pattern: "SIZEAFTERFILELIMIT",
+		Path:    tempDirAbs,
+	}
+
+	inputJSON, _ := json.Marshal(input)
+	result := tool.Execute(ctx, state, string(inputJSON))
+
+	assert.False(t, result.IsError())
+	output := result.GetResult()
+
+	// Should be truncated by size limit (since 100 files would exceed 50KB)
+	assert.Contains(t, output, "[TRUNCATED DUE TO OUTPUT SIZE LIMIT",
+		"Should be truncated by size limit, not just file limit")
+
+	// Verify output size is within limits
+	assert.LessOrEqual(t, len(output), grepMaxOutputSize+500,
+		"Output should not significantly exceed grepMaxOutputSize")
 }
 
 func TestGrepMatchPositions_Integration(t *testing.T) {
