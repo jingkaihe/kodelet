@@ -1,5 +1,17 @@
 # Kodelet
 
+## 0.2.2.beta (2026-01-25)
+
+### Features
+
+**Skill add `--force` flag**: Added `--force` (`-f`) flag to `kodelet skill add` command to overwrite existing skills during installation:
+
+```bash
+kodelet skill add orgname/skills --force  # Overwrite existing skills
+```
+
+Previously, attempting to install a skill that already exists would skip it with a warning. Now you can use `--force` to remove and reinstall skills, useful for updating skills to newer versions.
+
 ## 0.2.1.beta (2026-01-24)
 
 ### Features
