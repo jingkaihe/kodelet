@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -251,24 +252,24 @@ func truncateLine(line string, maxLength int) string {
 // FormatSearchResults formats the search results for output
 func FormatSearchResults(pattern string, results []SearchResult) string {
 	if len(results) == 0 {
-		return fmt.Sprintf("No matches found for pattern '%s'", pattern)
+		return "No matches found for pattern '" + pattern + "'"
 	}
 
 	var output strings.Builder
-	output.WriteString(fmt.Sprintf("Search results for pattern '%s':\n", pattern))
+	fmt.Fprintf(&output, "Search results for pattern '%s':\n", pattern)
 
 	for _, result := range results {
 		if len(result.MatchedLines) == 0 {
 			continue
 		}
 
-		output.WriteString(fmt.Sprintf("\nPattern found in file %s:\n\n", result.Filename))
+		fmt.Fprintf(&output, "\nPattern found in file %s:\n\n", result.Filename)
 
 		for _, lineNum := range result.LineNumbers {
 			if content, isMatch := result.MatchedLines[lineNum]; isMatch {
-				output.WriteString(fmt.Sprintf("%d:%s\n", lineNum, truncateLine(content, MaxLineLength)))
+				fmt.Fprintf(&output, "%d:%s\n", lineNum, truncateLine(content, MaxLineLength))
 			} else if content, exists := result.ContextLines[lineNum]; exists {
-				output.WriteString(fmt.Sprintf("%d-%s\n", lineNum, truncateLine(content, MaxLineLength)))
+				fmt.Fprintf(&output, "%d-%s\n", lineNum, truncateLine(content, MaxLineLength))
 			}
 		}
 	}
@@ -346,7 +347,7 @@ func searchPath(ctx context.Context, searchPath, pattern, includePattern string,
 	}
 
 	if surroundLines > 0 {
-		args = append(args, "-C", fmt.Sprintf("%d", surroundLines))
+		args = append(args, "-C", strconv.Itoa(surroundLines))
 	}
 
 	// Add glob pattern if specified (only makes sense for directory searches)
