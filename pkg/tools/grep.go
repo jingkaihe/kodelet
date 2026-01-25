@@ -3,7 +3,6 @@ package tools
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -16,6 +15,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/binaries"
 	"github.com/jingkaihe/kodelet/pkg/osutil"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/pkg/errors"
 	"go.opentelemetry.io/otel/attribute"
 )
 
@@ -33,7 +33,9 @@ const (
 	searchResultHeaderFmt = "Search results for pattern '%s':\n"
 	fileHeaderFmt         = "\nPattern found in file %s:\n\n"
 	truncationIndicator   = "... [truncated]"
-	maxLineNumberDigits   = "12345678" // assumes max 8-digit line numbers
+	// maxLineNumberDigits is used to calculate lineNumberOverhead.
+	// Each output line has: line number (8 digits max) + separator (:/-) + newline = 10 chars
+	maxLineNumberDigits = "12345678:N"
 )
 
 // Size estimation constants for output truncation, calculated from format strings
@@ -73,11 +75,11 @@ func (r *GrepToolResult) GetResult() string {
 	if r.truncated {
 		switch r.truncationReason {
 		case TruncatedByFileLimit:
-			result += fmt.Sprintf("\n\n[TRUNCATED DUE TO MAXIMUM %d FILE LIMIT - refine your search pattern or use max_results parameter]", r.maxResults)
+			result += fmt.Sprintf("\n\n[TRUNCATED DUE TO MAXIMUM %d FILE LIMIT - refine your search pattern or use include filter]", r.maxResults)
 		case TruncatedByOutputSize:
 			result += "\n\n[TRUNCATED DUE TO OUTPUT SIZE LIMIT (50KB) - refine your search pattern or use include filter]"
 		default:
-			result += fmt.Sprintf("\n\n[TRUNCATED DUE TO MAXIMUM %d RESULT LIMIT]", r.maxResults)
+			result += fmt.Sprintf("\n\n[TRUNCATED DUE TO MAXIMUM %d RESULT LIMIT - refine your search pattern or use include filter]", r.maxResults)
 		}
 	}
 
@@ -248,13 +250,13 @@ func (t *GrepTool) ValidateInput(_ tooltypes.State, parameters string) error {
 	// Validate that path exists if provided
 	if input.Path != "" {
 		if _, err := os.Stat(input.Path); err != nil {
-			return fmt.Errorf("invalid path %q: %w", input.Path, err)
+			return errors.Wrapf(err, "invalid path %q", input.Path)
 		}
 	}
 
 	// Validate max_results doesn't exceed the limit
 	if input.MaxResults > MaxSearchResults {
-		return fmt.Errorf("max_results cannot exceed %d", MaxSearchResults)
+		return errors.Errorf("max_results cannot exceed %d", MaxSearchResults)
 	}
 
 	return nil
@@ -513,9 +515,11 @@ func estimateResultSize(result SearchResult) int {
 }
 
 // truncateResultsBySize truncates results to fit within MaxOutputSize
-func truncateResultsBySize(results []SearchResult) ([]SearchResult, bool) {
-	totalSize := searchResultHeaderBuffer
-	truncatedResults := make([]SearchResult, 0, len(results))
+// The pattern parameter is used to accurately estimate the header size
+func truncateResultsBySize(results []SearchResult, pattern string) ([]SearchResult, bool) {
+	// Account for header size: format string overhead + pattern length
+	totalSize := searchResultHeaderBuffer + len(pattern)
+	var truncatedResults []SearchResult
 
 	for _, result := range results {
 		resultSize := estimateResultSize(result)
@@ -578,13 +582,13 @@ func (t *GrepTool) Execute(ctx context.Context, _ tooltypes.State, parameters st
 		results = results[:maxResults]
 	}
 
-	// Check if results need to be truncated by output size
-	if truncationReason == NotTruncated {
-		var sizeTruncated bool
-		results, sizeTruncated = truncateResultsBySize(results)
-		if sizeTruncated {
-			truncationReason = TruncatedByOutputSize
-		}
+	// Always check size truncation, even after file limit truncation
+	// This ensures output never exceeds MaxOutputSize
+	var sizeTruncated bool
+	results, sizeTruncated = truncateResultsBySize(results, input.Pattern)
+	if sizeTruncated {
+		// Size limit takes precedence for user messaging since it's the actual constraint
+		truncationReason = TruncatedByOutputSize
 	}
 
 	// Return the results
