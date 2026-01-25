@@ -38,8 +38,9 @@ func TestGrepTool_Description(t *testing.T) {
 
 	// New features description tests
 	assert.Contains(t, desc, "Binary files and hidden files/directories (starting with .) are skipped by default")
-	assert.Contains(t, desc, "maximum 100 files sorted by modification time")
+	assert.Contains(t, desc, "sorted by modification time")
 	assert.Contains(t, desc, "truncation notice")
+	assert.Contains(t, desc, "max_results")
 
 	// Verify description mentions absolute path
 	assert.Contains(t, desc, "absolute path")
@@ -124,6 +125,23 @@ func TestGrepTool_ValidateInput(t *testing.T) {
 			},
 			expectError: true,
 			errorMsg:    "invalid path",
+		},
+		{
+			name: "max_results exceeds limit",
+			input: CodeSearchInput{
+				Pattern:    "func Test",
+				MaxResults: MaxSearchResults + 1,
+			},
+			expectError: true,
+			errorMsg:    "max_results cannot exceed",
+		},
+		{
+			name: "max_results at limit is valid",
+			input: CodeSearchInput{
+				Pattern:    "func Test",
+				MaxResults: MaxSearchResults,
+			},
+			expectError: false,
 		},
 	}
 
@@ -487,6 +505,45 @@ func TestGrepResultLimitAndTruncation(t *testing.T) {
 
 	// Should contain truncation notice (file limit message)
 	assert.Contains(t, result.GetResult(), "[TRUNCATED DUE TO MAXIMUM 100 FILE LIMIT")
+}
+
+// TestGrepMaxResultsParameter tests the max_results parameter
+func TestGrepMaxResultsParameter(t *testing.T) {
+	tool := &GrepTool{}
+	ctx := context.Background()
+	state := NewBasicState(context.TODO())
+
+	tempDir, err := os.MkdirTemp("", "grep_max_results_param_test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	tempDirAbs, err := filepath.Abs(tempDir)
+	require.NoError(t, err)
+
+	// Create 20 files with the same pattern
+	for i := 0; i < 20; i++ {
+		filename := filepath.Join(tempDir, fmt.Sprintf("file%d.txt", i))
+		require.NoError(t, os.WriteFile(filename, []byte("MAXTEST pattern here\n"), 0o644))
+	}
+
+	// Test with max_results = 5
+	input := CodeSearchInput{
+		Pattern:    "MAXTEST",
+		Path:       tempDirAbs,
+		MaxResults: 5,
+	}
+
+	inputJSON, _ := json.Marshal(input)
+	result := tool.Execute(ctx, state, string(inputJSON))
+
+	assert.False(t, result.IsError())
+
+	// Count results - should be exactly 5
+	count := strings.Count(result.GetResult(), "Pattern found in file")
+	assert.Equal(t, 5, count, "Should return exactly 5 results when max_results=5")
+
+	// Should contain truncation notice with the correct limit
+	assert.Contains(t, result.GetResult(), "[TRUNCATED DUE TO MAXIMUM 5 FILE LIMIT")
 }
 
 // TestDefaultPathIsAbsolute tests that the default path is an absolute path
@@ -1327,7 +1384,7 @@ func TestTruncateResultsBySize(t *testing.T) {
 	assert.Less(t, len(truncated), len(results), "Truncated results should be fewer than original")
 
 	// Verify the truncated results fit within the size limit
-	totalSize := 50
+	totalSize := searchResultHeaderBuffer
 	for _, r := range truncated {
 		totalSize += estimateResultSize(r)
 	}
