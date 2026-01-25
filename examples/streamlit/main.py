@@ -1,31 +1,37 @@
 #!/usr/bin/env -S uv run --script
 # /// script
-# requires-python = ">=3.11"
+# requires-python = ">=3.12"
 # dependencies = [
 #     "streamlit>=1.45.0",
 # ]
+# [tool.uv.sources]
+# kodelet = { path = "../../sdk/python" }
 # ///
 """
 Kodelet Streamlit Chatbot
 
-A chatbot interface that replicates kodelet's interactive functionality
-by shelling out to the kodelet CLI with streaming output.
+A chatbot interface that uses the kodelet Python SDK for streaming responses.
 
 Usage:
     uv run streamlit run main.py
 """
 
+import asyncio
 import json
 import os
-import subprocess
+import sys
 from datetime import datetime
-from pathlib import Path
 
 os.environ["STREAMLIT_THEME_BASE"] = "light"
 
+# Add SDK to path for development
+sys.path.insert(0, str(__file__.rsplit("/", 3)[0] + "/sdk/python/src"))
+
 import streamlit as st
 
-KODELET_BIN = Path(__file__).parent.parent.parent / "bin" / "kodelet"
+from kodelet import Kodelet, KodeletConfig
+from kodelet.conversation import ConversationManager
+from kodelet.exceptions import BinaryNotFoundError
 
 CUSTOM_CSS = """
 <style>
@@ -101,119 +107,93 @@ code, pre {
 """
 
 
-def find_kodelet_binary() -> str:
-    """Find the kodelet binary, checking multiple locations."""
-    if KODELET_BIN.exists():
-        return str(KODELET_BIN)
-
-    from shutil import which
-
-    system_kodelet = which("kodelet")
-    if system_kodelet:
-        return system_kodelet
-
-    st.error(
-        f"Could not find kodelet binary. Tried:\n"
-        f"- {KODELET_BIN}\n"
-        f"- System PATH\n\n"
-        f"Please build kodelet with `mise run build` or install it."
-    )
-    st.stop()
+def get_kodelet_client(conversation_id: str | None = None) -> Kodelet:
+    """Create a Kodelet client, optionally resuming a conversation."""
+    config = KodeletConfig(stream_deltas=True)
+    return Kodelet(config=config, resume=conversation_id)
 
 
-def load_conversation_history(conversation_id: str) -> list:
-    """Load conversation history from kodelet using streaming format."""
-    messages = []
+def get_conversation_manager() -> ConversationManager:
+    """Get a ConversationManager instance."""
     try:
-        kodelet_path = find_kodelet_binary()
-        result = subprocess.run(
-            [kodelet_path, "conversation", "stream", conversation_id, "--history-only"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        if result.returncode == 0:
-            entries = []
-            for line in result.stdout.strip().split("\n"):
-                if not line:
-                    continue
-                try:
-                    entries.append(json.loads(line))
-                except json.JSONDecodeError:
-                    continue
-            
-            current_role = None
-            current_msg = None
-            
-            for entry in entries:
-                kind = entry.get("kind", "")
-                role = entry.get("role", "")
-                
-                # tool-result has role "user" but belongs to the assistant turn
-                if kind == "tool-result":
-                    if current_msg and current_msg["tools"]:
-                        tool_call_id = entry.get("tool_call_id", "")
-                        for tc in current_msg["tools"]:
-                            if tc.get("call_id") == tool_call_id:
-                                tc["result"] = entry.get("result", "")
-                                break
-                    continue
-                
-                if role != current_role:
-                    if current_msg:
-                        messages.append(current_msg)
-                    current_msg = {
-                        "role": role,
-                        "content": "",
-                        "thinking": "",
-                        "tools": [],
-                    }
-                    current_role = role
-                
-                if kind == "text":
-                    current_msg["content"] += entry.get("content", "")
-                elif kind == "thinking":
-                    current_msg["thinking"] += entry.get("content", "")
-                elif kind == "tool-use":
-                    current_msg["tools"].append({
-                        "name": entry.get("tool_name", "unknown"),
-                        "input": entry.get("input", "{}"),
-                        "call_id": entry.get("tool_call_id", ""),
-                    })
-            
+        client = Kodelet()
+        return client.conversations
+    except BinaryNotFoundError as e:
+        st.error(str(e))
+        st.stop()
+
+
+def parse_history_events(events: list[dict]) -> list[dict]:
+    """Parse streaming history events into message format for display."""
+    messages = []
+    current_role = None
+    current_msg = None
+
+    for entry in events:
+        kind = entry.get("kind", "")
+        role = entry.get("role", "")
+
+        if kind == "tool-result":
+            if current_msg and current_msg["tools"]:
+                tool_call_id = entry.get("tool_call_id", "")
+                for tc in current_msg["tools"]:
+                    if tc.get("call_id") == tool_call_id:
+                        tc["result"] = entry.get("result", "")
+                        break
+            continue
+
+        if role != current_role:
             if current_msg:
                 messages.append(current_msg)
-    except Exception:
-        pass
+            current_msg = {
+                "role": role,
+                "content": "",
+                "thinking": "",
+                "tools": [],
+            }
+            current_role = role
+
+        if kind == "text":
+            current_msg["content"] += entry.get("content", "")
+        elif kind == "thinking":
+            current_msg["thinking"] += entry.get("content", "")
+        elif kind == "tool-use":
+            current_msg["tools"].append({
+                "name": entry.get("tool_name", "unknown"),
+                "input": entry.get("input", "{}"),
+                "call_id": entry.get("tool_call_id", ""),
+            })
+
+    if current_msg:
+        messages.append(current_msg)
+
     return messages
 
 
-def get_conversation_summary(conversation_id: str) -> str:
-    """Fetch conversation summary from kodelet."""
+def load_conversation_history(conversation_id: str) -> list[dict]:
+    """Load conversation history using the SDK."""
     try:
-        kodelet_path = find_kodelet_binary()
-        result = subprocess.run(
-            [kodelet_path, "conversation", "show", conversation_id, "--format", "json", "--stats-only"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode == 0:
-            data = json.loads(result.stdout)
-            return data.get("summary", "")
+        manager = get_conversation_manager()
+        events = asyncio.run(manager.stream_history(conversation_id))
+        return parse_history_events(events)
     except Exception:
-        pass
-    return ""
+        return []
 
 
-def stream_kodelet_response(query: str, placeholder, conversation_id: str = None):
-    """Stream kodelet response and update the placeholder in real-time."""
-    kodelet_path = find_kodelet_binary()
+def get_conversation_summary(conversation_id: str) -> str:
+    """Fetch conversation summary using the SDK."""
+    try:
+        manager = get_conversation_manager()
+        return asyncio.run(manager.get_summary(conversation_id))
+    except Exception:
+        return ""
 
-    cmd = [kodelet_path, "run", "--headless", "--stream-deltas"]
-    if conversation_id:
-        cmd.extend(["--resume", conversation_id])
-    cmd.append(query)
+
+async def stream_response_async(
+    query: str, placeholder, conversation_id: str | None = None
+) -> tuple[str, str, list[dict], str | None]:
+    """Stream kodelet response using the SDK."""
+    client = get_kodelet_client(conversation_id)
 
     full_text = ""
     thinking_text = ""
@@ -222,83 +202,60 @@ def stream_kodelet_response(query: str, placeholder, conversation_id: str = None
     conv_id = conversation_id
 
     try:
-        process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,
-        )
+        async for event in client.query(query):
+            if not conv_id and event.conversation_id:
+                conv_id = event.conversation_id
 
-        for line in process.stdout:
-            line = line.strip()
-            if not line:
-                continue
+            match event.kind:
+                case "thinking-start":
+                    in_thinking = True
+                    thinking_text = ""
+                case "thinking-delta":
+                    thinking_text += event.delta
+                    _render_response(
+                        placeholder, full_text, thinking_text, in_thinking, tool_calls
+                    )
+                case "thinking-end":
+                    in_thinking = False
+                    _render_response(
+                        placeholder, full_text, thinking_text, in_thinking, tool_calls
+                    )
+                case "text-delta":
+                    full_text += event.delta
+                    _render_response(
+                        placeholder, full_text, thinking_text, in_thinking, tool_calls
+                    )
+                case "tool-use":
+                    tool_calls.append({
+                        "name": event.tool_name,
+                        "input": event.input,
+                        "call_id": event.tool_call_id,
+                    })
+                    _render_response(
+                        placeholder, full_text, thinking_text, in_thinking, tool_calls
+                    )
+                case "tool-result":
+                    for tc in reversed(tool_calls):
+                        if tc.get("call_id") == event.tool_call_id and "result" not in tc:
+                            tc["result"] = event.result
+                            break
+                    _render_response(
+                        placeholder, full_text, thinking_text, in_thinking, tool_calls
+                    )
 
-            try:
-                event = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-
-            kind = event.get("kind", "")
-
-            if not conv_id and "conversation_id" in event:
-                conv_id = event["conversation_id"]
-
-            if kind == "thinking-start":
-                in_thinking = True
-                thinking_text = ""
-            elif kind == "thinking-delta":
-                thinking_text += event.get("delta", "")
-                _render_response(
-                    placeholder, full_text, thinking_text, in_thinking, tool_calls
-                )
-            elif kind == "thinking-end":
-                in_thinking = False
-                _render_response(
-                    placeholder, full_text, thinking_text, in_thinking, tool_calls
-                )
-            elif kind == "text-delta":
-                full_text += event.get("delta", "")
-                _render_response(
-                    placeholder, full_text, thinking_text, in_thinking, tool_calls
-                )
-            elif kind == "tool-use":
-                tool_name = event.get("tool_name", "unknown")
-                tool_input = event.get("input", "{}")
-                tool_call_id = event.get("tool_call_id", "")
-                tool_calls.append({
-                    "name": tool_name,
-                    "input": tool_input,
-                    "call_id": tool_call_id,
-                })
-                _render_response(
-                    placeholder, full_text, thinking_text, in_thinking, tool_calls
-                )
-            elif kind == "tool-result":
-                tool_call_id = event.get("tool_call_id", "")
-                result = event.get("result", "")
-                for tc in reversed(tool_calls):
-                    if tc.get("call_id") == tool_call_id and "result" not in tc:
-                        tc["result"] = result
-                        break
-                _render_response(
-                    placeholder, full_text, thinking_text, in_thinking, tool_calls
-                )
-
-        process.wait()
-
-        if process.returncode != 0:
-            stderr = process.stderr.read()
-            if stderr:
-                st.error(f"Kodelet error: {stderr}")
-
-    except FileNotFoundError:
-        st.error(f"Could not execute kodelet at: {kodelet_path}")
+    except BinaryNotFoundError as e:
+        st.error(str(e))
     except Exception as e:
         st.error(f"Error running kodelet: {e}")
 
     return full_text, thinking_text, tool_calls, conv_id
+
+
+def stream_kodelet_response(
+    query: str, placeholder, conversation_id: str | None = None
+) -> tuple[str, str, list[dict], str | None]:
+    """Stream kodelet response (sync wrapper for async)."""
+    return asyncio.run(stream_response_async(query, placeholder, conversation_id))
 
 
 def _render_response(
@@ -434,12 +391,11 @@ def main():
         st.divider()
         if st.session_state.conversation_id:
             st.caption(f"ID: `{st.session_state.conversation_id}`")
-        st.caption(f"Binary: `{find_kodelet_binary()}`")
+        st.caption("Using: kodelet Python SDK")
 
 
 if __name__ == "__main__":
     from streamlit.web import cli as stcli
-    import sys
     if st.runtime.exists():
         main()
     else:
