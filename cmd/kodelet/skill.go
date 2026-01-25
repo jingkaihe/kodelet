@@ -21,12 +21,14 @@ const skillFileName = "SKILL.md"
 type SkillAddConfig struct {
 	Global bool
 	Dir    string
+	Force  bool
 }
 
 func NewSkillAddConfig() *SkillAddConfig {
 	return &SkillAddConfig{
 		Global: false,
 		Dir:    "",
+		Force:  false,
 	}
 }
 
@@ -58,12 +60,14 @@ with SKILL.md files. You can specify:
   - A repo: orgname/skills (adds all skills)
   - A repo with specific skill: orgname/skills --dir skills/specific-skill
   - A repo with version: orgname/skills@v0.1.0 (adds from specific tag/branch/sha)
+  - Use --force to overwrite existing skills
 
 Examples:
   kodelet skill add orgname/skills
   kodelet skill add orgname/skills --dir skills/specific-skill
   kodelet skill add orgname/skills@main
-  kodelet skill add orgname/skills -g`,
+  kodelet skill add orgname/skills -g
+  kodelet skill add orgname/skills --force`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		config := getSkillAddConfigFromFlags(cmd)
@@ -99,6 +103,7 @@ func init() {
 	addDefaults := NewSkillAddConfig()
 	skillAddCmd.Flags().BoolP("global", "g", addDefaults.Global, "Install to global ~/.kodelet/skills directory instead of local ./.kodelet/skills")
 	skillAddCmd.Flags().StringP("dir", "d", addDefaults.Dir, "Path to a specific skill directory within the repository")
+	skillAddCmd.Flags().BoolP("force", "f", addDefaults.Force, "Overwrite existing skills")
 
 	removeDefaults := NewSkillRemoveConfig()
 	skillRemoveCmd.Flags().BoolP("global", "g", removeDefaults.Global, "Remove from global ~/.kodelet/skills directory instead of local ./.kodelet/skills")
@@ -116,6 +121,9 @@ func getSkillAddConfigFromFlags(cmd *cobra.Command) *SkillAddConfig {
 	}
 	if dir, err := cmd.Flags().GetString("dir"); err == nil {
 		config.Dir = dir
+	}
+	if force, err := cmd.Flags().GetBool("force"); err == nil {
+		config.Force = force
 	}
 	return config
 }
@@ -209,8 +217,15 @@ func addSkillCmd(repo string, config *SkillAddConfig) {
 		destDir := filepath.Join(skillsDir, skillName)
 
 		if _, err := os.Stat(destDir); err == nil {
-			presenter.Warning(fmt.Sprintf("Skill '%s' already exists, skipping", skillName))
-			continue
+			if !config.Force {
+				presenter.Warning(fmt.Sprintf("Skill '%s' already exists, skipping (use --force to overwrite)", skillName))
+				continue
+			}
+			if err := os.RemoveAll(destDir); err != nil {
+				presenter.Error(err, fmt.Sprintf("Failed to remove existing skill '%s'", skillName))
+				continue
+			}
+			presenter.Info(fmt.Sprintf("Removing existing skill '%s' for update", skillName))
 		}
 
 		if err := copyDir(dir, destDir); err != nil {
