@@ -165,12 +165,20 @@ func (m FileEditMetadata) ToolType() string { return "file_edit" }
 
 // GrepMetadata contains metadata about a grep search operation
 type GrepMetadata struct {
-	Pattern   string         `json:"pattern"`
-	Path      string         `json:"path,omitempty"`
-	Include   string         `json:"include,omitempty"`
-	Results   []SearchResult `json:"results"`
-	Truncated bool           `json:"truncated"`
+	Pattern          string         `json:"pattern"`
+	Path             string         `json:"path,omitempty"`
+	Include          string         `json:"include,omitempty"`
+	Results          []SearchResult `json:"results"`
+	Truncated        bool           `json:"truncated"`
+	TruncationReason string         `json:"truncationReason,omitempty"`
+	MaxResults       int            `json:"maxResults,omitempty"`
 }
+
+// GrepTruncationReason constants for truncation messaging
+const (
+	GrepTruncatedByFileLimit  = "file_limit"
+	GrepTruncatedByOutputSize = "output_size"
+)
 
 // SearchResult represents the search results for a single file
 type SearchResult struct {

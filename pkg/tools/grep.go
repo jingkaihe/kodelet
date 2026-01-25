@@ -151,11 +151,13 @@ func (r *GrepToolResult) StructuredData() tooltypes.StructuredToolResult {
 
 	// Always populate metadata, even for errors
 	result.Metadata = &tooltypes.GrepMetadata{
-		Pattern:   r.pattern,
-		Path:      r.path,
-		Include:   r.include,
-		Results:   metadataResults,
-		Truncated: r.truncated,
+		Pattern:          r.pattern,
+		Path:             r.path,
+		Include:          r.include,
+		Results:          metadataResults,
+		Truncated:        r.truncated,
+		TruncationReason: string(r.truncationReason),
+		MaxResults:       r.maxResults,
 	}
 
 	if r.IsError() {

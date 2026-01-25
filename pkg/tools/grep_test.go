@@ -1191,6 +1191,79 @@ func TestGrepToolResult_StructuredData_MatchPositions(t *testing.T) {
 	}
 }
 
+// TestGrepToolResult_StructuredData_TruncationMetadata tests that truncation metadata is properly populated
+func TestGrepToolResult_StructuredData_TruncationMetadata(t *testing.T) {
+	tests := []struct {
+		name                     string
+		truncated                bool
+		truncationReason         GrepTruncationReason
+		maxResults               int
+		expectedTruncated        bool
+		expectedTruncationReason string
+		expectedMaxResults       int
+	}{
+		{
+			name:                     "not truncated",
+			truncated:                false,
+			truncationReason:         GrepNotTruncated,
+			maxResults:               100,
+			expectedTruncated:        false,
+			expectedTruncationReason: "",
+			expectedMaxResults:       100,
+		},
+		{
+			name:                     "truncated by file limit",
+			truncated:                true,
+			truncationReason:         GrepTruncatedByFileLimit,
+			maxResults:               100,
+			expectedTruncated:        true,
+			expectedTruncationReason: "file_limit",
+			expectedMaxResults:       100,
+		},
+		{
+			name:                     "truncated by output size",
+			truncated:                true,
+			truncationReason:         GrepTruncatedByOutputSize,
+			maxResults:               50,
+			expectedTruncated:        true,
+			expectedTruncationReason: "output_size",
+			expectedMaxResults:       50,
+		},
+		{
+			name:                     "custom max_results with file limit truncation",
+			truncated:                true,
+			truncationReason:         GrepTruncatedByFileLimit,
+			maxResults:               25,
+			expectedTruncated:        true,
+			expectedTruncationReason: "file_limit",
+			expectedMaxResults:       25,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := &GrepToolResult{
+				pattern:          "test",
+				path:             "/tmp",
+				results:          []SearchResult{},
+				truncated:        tt.truncated,
+				truncationReason: tt.truncationReason,
+				maxResults:       tt.maxResults,
+			}
+
+			structured := result.StructuredData()
+			require.NotNil(t, structured.Metadata)
+
+			metadata, ok := structured.Metadata.(*tooltypes.GrepMetadata)
+			require.True(t, ok)
+
+			assert.Equal(t, tt.expectedTruncated, metadata.Truncated, "Truncated")
+			assert.Equal(t, tt.expectedTruncationReason, metadata.TruncationReason, "TruncationReason")
+			assert.Equal(t, tt.expectedMaxResults, metadata.MaxResults, "MaxResults")
+		})
+	}
+}
+
 // TestTruncateLine tests the line truncation helper function
 func TestTruncateLine(t *testing.T) {
 	tests := []struct {

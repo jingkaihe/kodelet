@@ -137,6 +137,8 @@ export interface GrepMetadata {
   include?: string;
   results: GrepResult[];
   truncated?: boolean;
+  truncationReason?: 'file_limit' | 'output_size' | '';
+  maxResults?: number;
 }
 
 export interface GrepResult {

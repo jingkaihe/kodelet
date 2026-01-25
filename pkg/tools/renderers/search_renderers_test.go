@@ -52,7 +52,7 @@ func TestGrepRenderer(t *testing.T) {
 		assert.NotContains(t, output, "truncated")
 	})
 
-	t.Run("Grep with truncated results", func(t *testing.T) {
+	t.Run("Grep with truncated results (generic)", func(t *testing.T) {
 		result := tools.StructuredToolResult{
 			ToolName:  "grep",
 			Success:   true,
@@ -76,6 +76,114 @@ func TestGrepRenderer(t *testing.T) {
 
 		assert.Contains(t, output, "Pattern: TODO")
 		assert.Contains(t, output, "... [results truncated]")
+	})
+
+	t.Run("Grep truncated by file limit", func(t *testing.T) {
+		result := tools.StructuredToolResult{
+			ToolName:  "grep",
+			Success:   true,
+			Timestamp: time.Now(),
+			Metadata: &tools.GrepMetadata{
+				Pattern: "func",
+				Path:    "/project",
+				Results: []tools.SearchResult{
+					{
+						FilePath: "/project/main.go",
+						Matches: []tools.SearchMatch{
+							{LineNumber: 1, Content: "func main()"},
+						},
+					},
+				},
+				Truncated:        true,
+				TruncationReason: tools.GrepTruncatedByFileLimit,
+				MaxResults:       100,
+			},
+		}
+
+		output := renderer.RenderCLI(result)
+
+		assert.Contains(t, output, "... [truncated: max 100 files]")
+	})
+
+	t.Run("Grep truncated by file limit with custom max_results", func(t *testing.T) {
+		result := tools.StructuredToolResult{
+			ToolName:  "grep",
+			Success:   true,
+			Timestamp: time.Now(),
+			Metadata: &tools.GrepMetadata{
+				Pattern: "func",
+				Path:    "/project",
+				Results: []tools.SearchResult{
+					{
+						FilePath: "/project/main.go",
+						Matches: []tools.SearchMatch{
+							{LineNumber: 1, Content: "func main()"},
+						},
+					},
+				},
+				Truncated:        true,
+				TruncationReason: tools.GrepTruncatedByFileLimit,
+				MaxResults:       25,
+			},
+		}
+
+		output := renderer.RenderCLI(result)
+
+		assert.Contains(t, output, "... [truncated: max 25 files]")
+	})
+
+	t.Run("Grep truncated by output size", func(t *testing.T) {
+		result := tools.StructuredToolResult{
+			ToolName:  "grep",
+			Success:   true,
+			Timestamp: time.Now(),
+			Metadata: &tools.GrepMetadata{
+				Pattern: "func",
+				Path:    "/project",
+				Results: []tools.SearchResult{
+					{
+						FilePath: "/project/main.go",
+						Matches: []tools.SearchMatch{
+							{LineNumber: 1, Content: "func main()"},
+						},
+					},
+				},
+				Truncated:        true,
+				TruncationReason: tools.GrepTruncatedByOutputSize,
+				MaxResults:       50,
+			},
+		}
+
+		output := renderer.RenderCLI(result)
+
+		assert.Contains(t, output, "... [truncated: output size limit (50KB)]")
+	})
+
+	t.Run("Grep truncated by file limit with zero max_results defaults to 100", func(t *testing.T) {
+		result := tools.StructuredToolResult{
+			ToolName:  "grep",
+			Success:   true,
+			Timestamp: time.Now(),
+			Metadata: &tools.GrepMetadata{
+				Pattern: "func",
+				Path:    "/project",
+				Results: []tools.SearchResult{
+					{
+						FilePath: "/project/main.go",
+						Matches: []tools.SearchMatch{
+							{LineNumber: 1, Content: "func main()"},
+						},
+					},
+				},
+				Truncated:        true,
+				TruncationReason: tools.GrepTruncatedByFileLimit,
+				MaxResults:       0,
+			},
+		}
+
+		output := renderer.RenderCLI(result)
+
+		assert.Contains(t, output, "... [truncated: max 100 files]")
 	})
 
 	t.Run("Grep with no results", func(t *testing.T) {
