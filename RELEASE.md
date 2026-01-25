@@ -10,17 +10,6 @@
 - **Line length limit (300 chars)**: Individual lines longer than 300 characters are truncated with `... [truncated]` indicator
 - **Configurable `max_results` parameter**: Limit the number of files returned (1-100, default 100) to reduce output size when searching large codebases
 
-```bash
-# Example: Limit to 10 files for faster, smaller results
-kodelet run "search for 'TODO' with max_results=10"
-```
-
-Truncation messages now clearly indicate the reason (file limit vs output size limit) and suggest refinement strategies.
-
-### Internal Changes
-
-**Improved error handling**: Grep tool now uses `pkg/errors` for better error context and stack traces.
-
 ## 0.2.2.beta (2026-01-25)
 
 ### Features

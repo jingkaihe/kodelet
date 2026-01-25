@@ -130,7 +130,7 @@ func TestGrepTool_ValidateInput(t *testing.T) {
 			name: "max_results exceeds limit",
 			input: CodeSearchInput{
 				Pattern:    "func Test",
-				MaxResults: MaxSearchResults + 1,
+				MaxResults: grepMaxSearchResults + 1,
 			},
 			expectError: true,
 			errorMsg:    "max_results cannot exceed",
@@ -139,7 +139,7 @@ func TestGrepTool_ValidateInput(t *testing.T) {
 			name: "max_results at limit is valid",
 			input: CodeSearchInput{
 				Pattern:    "func Test",
-				MaxResults: MaxSearchResults,
+				MaxResults: grepMaxSearchResults,
 			},
 			expectError: false,
 		},
@@ -1305,8 +1305,8 @@ func TestGrepOutputSizeTruncation(t *testing.T) {
 			strings.Contains(output, "[TRUNCATED DUE TO OUTPUT SIZE LIMIT"),
 		"Output should contain truncation notice")
 
-	// Output size should not exceed MaxOutputSize + truncation message overhead
-	assert.Less(t, len(output), MaxOutputSize+200, "Output should not significantly exceed MaxOutputSize")
+	// Output size should not exceed grepMaxOutputSize + truncation message overhead
+	assert.Less(t, len(output), grepMaxOutputSize+200, "Output should not significantly exceed grepMaxOutputSize")
 }
 
 // TestEstimateResultSize tests the result size estimation function
@@ -1338,8 +1338,8 @@ func TestEstimateResultSize(t *testing.T) {
 				ContextLines:   map[int]string{},
 				LineNumbers:    []int{10},
 			},
-			minSize: MaxLineLength,
-			maxSize: MaxLineLength + 100,
+			minSize: grepMaxLineLength,
+			maxSize: grepMaxLineLength + 100,
 		},
 		{
 			name: "multiple lines",
@@ -1366,7 +1366,7 @@ func TestEstimateResultSize(t *testing.T) {
 
 // TestTruncateResultsBySize tests the size-based truncation function
 func TestTruncateResultsBySize(t *testing.T) {
-	// Create results that would exceed MaxOutputSize
+	// Create results that would exceed grepMaxOutputSize
 	var results []SearchResult
 	for i := 0; i < 1000; i++ {
 		results = append(results, SearchResult{
@@ -1385,11 +1385,11 @@ func TestTruncateResultsBySize(t *testing.T) {
 	assert.Less(t, len(truncated), len(results), "Truncated results should be fewer than original")
 
 	// Verify the truncated results fit within the size limit
-	totalSize := searchResultHeaderBuffer + len(pattern)
+	totalSize := grepSearchResultHeaderBuffer + len(pattern)
 	for _, r := range truncated {
 		totalSize += estimateResultSize(r)
 	}
-	assert.LessOrEqual(t, totalSize, MaxOutputSize, "Total size should not exceed MaxOutputSize")
+	assert.LessOrEqual(t, totalSize, grepMaxOutputSize, "Total size should not exceed grepMaxOutputSize")
 }
 
 // TestTruncateResultsBySizeWithLongPattern tests that pattern length is accounted for in size estimation
@@ -1419,16 +1419,16 @@ func TestTruncateResultsBySizeWithLongPattern(t *testing.T) {
 	}
 
 	// Verify the size calculation includes pattern length
-	totalSizeLong := searchResultHeaderBuffer + len(longPattern)
+	totalSizeLong := grepSearchResultHeaderBuffer + len(longPattern)
 	for _, r := range truncatedLong {
 		totalSizeLong += estimateResultSize(r)
 	}
-	assert.LessOrEqual(t, totalSizeLong, MaxOutputSize, "Total size with long pattern should not exceed MaxOutputSize")
+	assert.LessOrEqual(t, totalSizeLong, grepMaxOutputSize, "Total size with long pattern should not exceed grepMaxOutputSize")
 }
 
 // TestSizeTruncationAfterFileLimitTruncation is a regression test ensuring that
 // size truncation is applied even when file limit truncation has already occurred.
-// This prevents output from exceeding MaxOutputSize when many large files match.
+// This prevents output from exceeding grepMaxOutputSize when many large files match.
 func TestSizeTruncationAfterFileLimitTruncation(t *testing.T) {
 	if getRipgrepPath() == "" {
 		t.Skip("ripgrep not available, skipping test")
@@ -1446,7 +1446,7 @@ func TestSizeTruncationAfterFileLimitTruncation(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create 150 files with multiple matching lines per file to exceed 50KB with 100 files
-	// Each file has 3 matching lines of 280 chars each (under MaxLineLength to avoid truncation)
+	// Each file has 3 matching lines of 280 chars each (under grepMaxLineLength to avoid truncation)
 	// Per file: ~70 (header) + 3 * (280 + 10) = ~940 bytes
 	// 100 files * 940 bytes = ~94KB > 50KB limit
 	for i := 0; i < 150; i++ {
@@ -1474,27 +1474,27 @@ func TestSizeTruncationAfterFileLimitTruncation(t *testing.T) {
 		"Should be truncated by size limit, not just file limit")
 
 	// Verify output size is within limits
-	assert.LessOrEqual(t, len(output), MaxOutputSize+500,
-		"Output should not significantly exceed MaxOutputSize")
+	assert.LessOrEqual(t, len(output), grepMaxOutputSize+500,
+		"Output should not significantly exceed grepMaxOutputSize")
 }
 
 // TestTruncationMessageConsistency verifies truncation messages provide consistent advice
 func TestTruncationMessageConsistency(t *testing.T) {
 	tests := []struct {
 		name             string
-		truncationReason TruncationReason
+		truncationReason GrepTruncationReason
 		maxResults       int
 		expectedContains string
 	}{
 		{
 			name:             "file limit message",
-			truncationReason: TruncatedByFileLimit,
+			truncationReason: GrepTruncatedByFileLimit,
 			maxResults:       100,
 			expectedContains: "use include filter",
 		},
 		{
 			name:             "size limit message",
-			truncationReason: TruncatedByOutputSize,
+			truncationReason: GrepTruncatedByOutputSize,
 			maxResults:       100,
 			expectedContains: "use include filter",
 		},
@@ -1525,7 +1525,7 @@ func TestValidateInputUsesPackageErrors(t *testing.T) {
 	// Test max_results validation error
 	input := CodeSearchInput{
 		Pattern:    "test",
-		MaxResults: MaxSearchResults + 1,
+		MaxResults: grepMaxSearchResults + 1,
 	}
 	inputJSON, _ := json.Marshal(input)
 
@@ -1547,8 +1547,8 @@ func TestEstimateResultSizeAccountsForNewlines(t *testing.T) {
 	size := estimateResultSize(result)
 
 	// Should account for: filename + file header overhead + 2 lines with line numbers + newlines
-	// lineNumberOverhead includes the newline character (10 = 8 digits + separator + newline)
-	expectedMinSize := len(result.Filename) + fileHeaderOverhead + 2*(len("line1")+lineNumberOverhead)
+	// grepLineNumberOverhead includes the newline character (10 = 8 digits + separator + newline)
+	expectedMinSize := len(result.Filename) + grepFileHeaderOverhead + 2*(len("line1")+grepLineNumberOverhead)
 	assert.GreaterOrEqual(t, size, expectedMinSize-20, // Allow some tolerance
 		"Size should account for all content including overhead")
 }

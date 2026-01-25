@@ -20,40 +20,40 @@ import (
 )
 
 const (
-	// MaxSearchResults is the limit for maximum search results returned by the grep tool.
-	MaxSearchResults = 100
+	// grepMaxSearchResults is the limit for maximum search results returned by the grep tool.
+	grepMaxSearchResults = 100
 
-	// MaxLineLength limits the length of matched lines to prevent long lines from consuming context.
-	MaxLineLength = 300
+	// grepMaxLineLength limits the length of matched lines to prevent long lines from consuming context.
+	grepMaxLineLength = 300
 
-	// MaxOutputSize limits the total output size in bytes to prevent context overflow.
-	MaxOutputSize = 50 * 1024 // 50KB
+	// grepMaxOutputSize limits the total output size in bytes to prevent context overflow.
+	grepMaxOutputSize = 50 * 1024 // 50KB
 
 	// Format strings for search result output
-	searchResultHeaderFmt = "Search results for pattern '%s':\n"
-	fileHeaderFmt         = "\nPattern found in file %s:\n\n"
-	truncationIndicator   = "... [truncated]"
-	// maxLineNumberDigits is used to calculate lineNumberOverhead.
+	grepSearchResultHeaderFmt = "Search results for pattern '%s':\n"
+	grepFileHeaderFmt         = "\nPattern found in file %s:\n\n"
+	grepTruncationIndicator   = "... [truncated]"
+	// grepMaxLineNumberDigits is used to calculate grepLineNumberOverhead.
 	// Each output line has: line number (8 digits max) + separator (:/-) + newline = 10 chars
-	maxLineNumberDigits = "12345678:N"
+	grepMaxLineNumberDigits = "12345678:N"
 )
 
 // Size estimation constants for output truncation, calculated from format strings
 var (
-	searchResultHeaderBuffer = len(searchResultHeaderFmt)
-	fileHeaderOverhead       = len(fileHeaderFmt)
-	truncationIndicatorLen   = len(truncationIndicator)
-	lineNumberOverhead       = len(maxLineNumberDigits)
+	grepSearchResultHeaderBuffer = len(grepSearchResultHeaderFmt)
+	grepFileHeaderOverhead       = len(grepFileHeaderFmt)
+	grepTruncationIndicatorLen   = len(grepTruncationIndicator)
+	grepLineNumberOverhead       = len(grepMaxLineNumberDigits)
 )
 
-// TruncationReason indicates why results were truncated
-type TruncationReason string
+// GrepTruncationReason indicates why results were truncated
+type GrepTruncationReason string
 
 // Truncation reason constants
 const (
-	NotTruncated          TruncationReason = ""
-	TruncatedByFileLimit  TruncationReason = "file_limit"
-	TruncatedByOutputSize TruncationReason = "output_size"
+	GrepNotTruncated          GrepTruncationReason = ""
+	GrepTruncatedByFileLimit  GrepTruncationReason = "file_limit"
+	GrepTruncatedByOutputSize GrepTruncationReason = "output_size"
 )
 
 // GrepToolResult represents the result of a grep/search operation
@@ -63,7 +63,7 @@ type GrepToolResult struct {
 	include          string
 	results          []SearchResult
 	truncated        bool
-	truncationReason TruncationReason
+	truncationReason GrepTruncationReason
 	maxResults       int
 	err              string
 }
@@ -74,9 +74,9 @@ func (r *GrepToolResult) GetResult() string {
 
 	if r.truncated {
 		switch r.truncationReason {
-		case TruncatedByFileLimit:
+		case GrepTruncatedByFileLimit:
 			result += fmt.Sprintf("\n\n[TRUNCATED DUE TO MAXIMUM %d FILE LIMIT - refine your search pattern or use include filter]", r.maxResults)
-		case TruncatedByOutputSize:
+		case GrepTruncatedByOutputSize:
 			result += "\n\n[TRUNCATED DUE TO OUTPUT SIZE LIMIT (50KB) - refine your search pattern or use include filter]"
 		default:
 			result += fmt.Sprintf("\n\n[TRUNCATED DUE TO MAXIMUM %d RESULT LIMIT - refine your search pattern or use include filter]", r.maxResults)
@@ -229,7 +229,7 @@ func (t *GrepTool) Description() string {
 - max_results: Number of files to return results from (1-%d). Default and maximum is %d. Use a smaller value to reduce output size when searching large codebases.
 
 If you need to do multi-turn search using grep_tool and glob_tool, use subagentTool instead.
-`, MaxSearchResults, MaxSearchResults, MaxSearchResults)
+`, grepMaxSearchResults, grepMaxSearchResults, grepMaxSearchResults)
 }
 
 // ValidateInput validates the input parameters for the tool
@@ -255,8 +255,8 @@ func (t *GrepTool) ValidateInput(_ tooltypes.State, parameters string) error {
 	}
 
 	// Validate max_results doesn't exceed the limit
-	if input.MaxResults > MaxSearchResults {
-		return errors.Errorf("max_results cannot exceed %d", MaxSearchResults)
+	if input.MaxResults > grepMaxSearchResults {
+		return errors.Errorf("max_results cannot exceed %d", grepMaxSearchResults)
 	}
 
 	return nil
@@ -282,7 +282,7 @@ func truncateLine(line string, maxLength int) string {
 	if len(line) <= maxLength {
 		return line
 	}
-	return line[:maxLength] + truncationIndicator
+	return line[:maxLength] + grepTruncationIndicator
 }
 
 // FormatSearchResults formats the search results for output
@@ -292,20 +292,20 @@ func FormatSearchResults(pattern string, results []SearchResult) string {
 	}
 
 	var output strings.Builder
-	fmt.Fprintf(&output, searchResultHeaderFmt, pattern)
+	fmt.Fprintf(&output, grepSearchResultHeaderFmt, pattern)
 
 	for _, result := range results {
 		if len(result.MatchedLines) == 0 {
 			continue
 		}
 
-		fmt.Fprintf(&output, fileHeaderFmt, result.Filename)
+		fmt.Fprintf(&output, grepFileHeaderFmt, result.Filename)
 
 		for _, lineNum := range result.LineNumbers {
 			if content, isMatch := result.MatchedLines[lineNum]; isMatch {
-				fmt.Fprintf(&output, "%d:%s\n", lineNum, truncateLine(content, MaxLineLength))
+				fmt.Fprintf(&output, "%d:%s\n", lineNum, truncateLine(content, grepMaxLineLength))
 			} else if content, exists := result.ContextLines[lineNum]; exists {
-				fmt.Fprintf(&output, "%d-%s\n", lineNum, truncateLine(content, MaxLineLength))
+				fmt.Fprintf(&output, "%d-%s\n", lineNum, truncateLine(content, grepMaxLineLength))
 			}
 		}
 	}
@@ -495,35 +495,35 @@ func parseRipgrepJSON(output []byte, root string) ([]SearchResult, error) {
 
 // estimateResultSize estimates the output size in bytes for a single SearchResult
 func estimateResultSize(result SearchResult) int {
-	size := len(result.Filename) + fileHeaderOverhead
+	size := len(result.Filename) + grepFileHeaderOverhead
 	for _, lineNum := range result.LineNumbers {
 		if content, isMatch := result.MatchedLines[lineNum]; isMatch {
 			lineLen := len(content)
-			if lineLen > MaxLineLength {
-				lineLen = MaxLineLength + truncationIndicatorLen
+			if lineLen > grepMaxLineLength {
+				lineLen = grepMaxLineLength + grepTruncationIndicatorLen
 			}
-			size += lineLen + lineNumberOverhead
+			size += lineLen + grepLineNumberOverhead
 		} else if content, exists := result.ContextLines[lineNum]; exists {
 			lineLen := len(content)
-			if lineLen > MaxLineLength {
-				lineLen = MaxLineLength + truncationIndicatorLen
+			if lineLen > grepMaxLineLength {
+				lineLen = grepMaxLineLength + grepTruncationIndicatorLen
 			}
-			size += lineLen + lineNumberOverhead
+			size += lineLen + grepLineNumberOverhead
 		}
 	}
 	return size
 }
 
-// truncateResultsBySize truncates results to fit within MaxOutputSize
+// truncateResultsBySize truncates results to fit within grepMaxOutputSize
 // The pattern parameter is used to accurately estimate the header size
 func truncateResultsBySize(results []SearchResult, pattern string) ([]SearchResult, bool) {
 	// Account for header size: format string overhead + pattern length
-	totalSize := searchResultHeaderBuffer + len(pattern)
+	totalSize := grepSearchResultHeaderBuffer + len(pattern)
 	var truncatedResults []SearchResult
 
 	for _, result := range results {
 		resultSize := estimateResultSize(result)
-		if totalSize+resultSize > MaxOutputSize {
+		if totalSize+resultSize > grepMaxOutputSize {
 			return truncatedResults, true
 		}
 		totalSize += resultSize
@@ -572,23 +572,23 @@ func (t *GrepTool) Execute(ctx context.Context, _ tooltypes.State, parameters st
 	// Use default max results if not specified
 	maxResults := input.MaxResults
 	if maxResults <= 0 {
-		maxResults = MaxSearchResults
+		maxResults = grepMaxSearchResults
 	}
 
 	// Check if results need to be truncated by file count
-	truncationReason := NotTruncated
+	truncationReason := GrepNotTruncated
 	if len(results) > maxResults {
-		truncationReason = TruncatedByFileLimit
+		truncationReason = GrepTruncatedByFileLimit
 		results = results[:maxResults]
 	}
 
 	// Always check size truncation, even after file limit truncation
-	// This ensures output never exceeds MaxOutputSize
+	// This ensures output never exceeds grepMaxOutputSize
 	var sizeTruncated bool
 	results, sizeTruncated = truncateResultsBySize(results, input.Pattern)
 	if sizeTruncated {
 		// Size limit takes precedence for user messaging since it's the actual constraint
-		truncationReason = TruncatedByOutputSize
+		truncationReason = GrepTruncatedByOutputSize
 	}
 
 	// Return the results
@@ -597,7 +597,7 @@ func (t *GrepTool) Execute(ctx context.Context, _ tooltypes.State, parameters st
 		path:             path,
 		include:          input.Include,
 		results:          results,
-		truncated:        truncationReason != NotTruncated,
+		truncated:        truncationReason != GrepNotTruncated,
 		truncationReason: truncationReason,
 		maxResults:       maxResults,
 	}
