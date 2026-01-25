@@ -1,17 +1,53 @@
 """Structured tool result types for Kodelet SDK.
 
-These dataclasses represent the structured metadata returned by kodelet's builtin tools.
-Use `ToolResultEvent.decode_result()` to parse tool results into typed objects.
+This module provides typed dataclasses for decoding structured tool results returned
+by kodelet's builtin tools. The kodelet CLI serializes tool execution metadata as JSON
+which can be parsed into these typed objects for easier programmatic access.
+
+Tool results are returned as `ToolResultEvent` instances during streaming. Use the
+`decode_result()` method to parse the JSON string into a typed dataclass.
+
+Supported Tool Types:
+    - BashResult: Shell command execution
+    - BackgroundBashResult: Background process spawning
+    - FileReadResult: File content reading with line numbers
+    - FileWriteResult: File creation/overwrite
+    - FileEditResult: In-place file modification with diffs
+    - GrepResult: Regex pattern search across files
+    - GlobResult: File pattern matching
+    - TodoResult: Task list management
+    - ImageRecognitionResult: Image analysis with vision models
+    - SubAgentResult: Delegated sub-agent queries
+    - WebFetchResult: HTTP content fetching
+    - ViewBackgroundProcessesResult: Background process listing
+    - CodeExecutionResult: TypeScript/JavaScript code execution via MCP
+    - SkillResult: Skill invocation
+    - MCPToolResult: Generic MCP tool execution
+    - CustomToolResult: Custom tool execution
+    - BlockedResult: Blocked tool due to security hooks
+    - UnknownToolResult: Fallback for unrecognized tool types
 
 Example:
     ```python
-    async for event in agent.query("list files"):
+    async for event in client.query("list files in current directory"):
         if isinstance(event, ToolResultEvent):
             result = event.decode_result()
-            if isinstance(result, BashResult):
-                print(f"Command: {result.command}")
-                print(f"Exit code: {result.exit_code}")
+            match result:
+                case BashResult():
+                    print(f"Command: {result.command}")
+                    print(f"Exit code: {result.exit_code}")
+                    print(f"Output: {result.output}")
+                case GlobResult():
+                    for f in result.files:
+                        print(f"{f.path} ({f.size} bytes)")
+                case _:
+                    print(f"Other tool: {type(result).__name__}")
     ```
+
+Note:
+    The JSON structure matches the Go `StructuredToolResult` type from
+    `pkg/types/tools/structured_result.go`. Field names are converted from
+    camelCase (JSON) to snake_case (Python).
 """
 
 from dataclasses import dataclass, field
@@ -21,7 +57,14 @@ from typing import Any
 
 @dataclass
 class Edit:
-    """A single text replacement in a file edit operation."""
+    """A single text replacement in a file edit operation.
+
+    Attributes:
+        start_line: The 1-indexed starting line number of the edit.
+        end_line: The 1-indexed ending line number of the edit (inclusive).
+        old_content: The original text that was replaced.
+        new_content: The new text that replaced the original.
+    """
 
     start_line: int
     end_line: int
@@ -31,7 +74,15 @@ class Edit:
 
 @dataclass
 class SearchMatch:
-    """A single match in a search result."""
+    """A single match in a search result.
+
+    Attributes:
+        line_number: The 1-indexed line number where the match was found.
+        content: The full line content containing the match.
+        match_start: Character offset where the match begins in content.
+        match_end: Character offset where the match ends in content.
+        is_context: True if this is a context line (not the actual match).
+    """
 
     line_number: int
     content: str
@@ -42,7 +93,13 @@ class SearchMatch:
 
 @dataclass
 class SearchResult:
-    """Search results for a single file."""
+    """Search results for a single file.
+
+    Attributes:
+        file_path: Absolute or relative path to the file.
+        matches: List of individual matches found in the file.
+        language: Detected programming language (e.g., "python", "go").
+    """
 
     file_path: str
     matches: list[SearchMatch] = field(default_factory=list)
@@ -51,18 +108,35 @@ class SearchResult:
 
 @dataclass
 class FileInfo:
-    """Information about a matched file."""
+    """Information about a matched file or directory.
+
+    Attributes:
+        path: Absolute or relative path to the file/directory.
+        size: Size in bytes (0 for directories).
+        mod_time: Last modification timestamp, or None if unavailable.
+        type: Either "file" or "directory".
+        language: Detected programming language for files.
+    """
 
     path: str
     size: int
     mod_time: datetime | None
-    type: str  # "file" or "directory"
+    type: str
     language: str = ""
 
 
 @dataclass
 class TodoItem:
-    """A single todo list item."""
+    """A single todo list item.
+
+    Attributes:
+        id: Unique identifier for the todo item.
+        content: The task description text.
+        status: One of "pending", "in_progress", "completed", or "canceled".
+        priority: One of "low", "medium", or "high".
+        created_at: When the item was created.
+        updated_at: When the item was last modified.
+    """
 
     id: str
     content: str
@@ -74,7 +148,14 @@ class TodoItem:
 
 @dataclass
 class TodoStats:
-    """Statistics about the todo list."""
+    """Statistics about the todo list.
+
+    Attributes:
+        total: Total number of todo items.
+        completed: Number of items with status "completed".
+        in_progress: Number of items with status "in_progress".
+        pending: Number of items with status "pending".
+    """
 
     total: int = 0
     completed: int = 0
@@ -84,7 +165,12 @@ class TodoStats:
 
 @dataclass
 class ImageDimensions:
-    """Dimensions of an image."""
+    """Dimensions of an image in pixels.
+
+    Attributes:
+        width: Image width in pixels.
+        height: Image height in pixels.
+    """
 
     width: int
     height: int
@@ -92,18 +178,37 @@ class ImageDimensions:
 
 @dataclass
 class BackgroundProcessInfo:
-    """Information about a single background process."""
+    """Information about a single background process.
+
+    Attributes:
+        pid: Process ID of the background process.
+        command: The command that was executed.
+        log_path: Path to the log file capturing stdout/stderr.
+        start_time: When the process was started.
+        status: Either "running" or "stopped".
+    """
 
     pid: int
     command: str
     log_path: str
     start_time: datetime | None
-    status: str  # "running" or "stopped"
+    status: str
 
 
 @dataclass
 class MCPContent:
-    """A content block returned by an MCP tool."""
+    """A content block returned by an MCP tool.
+
+    MCP tools can return multiple content blocks of different types.
+
+    Attributes:
+        type: Content type (e.g., "text", "image", "resource").
+        text: Text content for text-type blocks.
+        data: Base64-encoded data for binary content.
+        mime_type: MIME type of the content.
+        uri: Resource URI for resource-type blocks.
+        metadata: Additional metadata from the MCP server.
+    """
 
     type: str
     text: str = ""
@@ -118,7 +223,27 @@ class MCPContent:
 
 @dataclass
 class BashResult:
-    """Result of a bash command execution."""
+    """Result of a bash command execution.
+
+    Represents the output of running a shell command via the Bash tool.
+
+    Attributes:
+        command: The shell command that was executed.
+        exit_code: The command's exit code (0 indicates success).
+        output: Combined stdout and stderr output from the command.
+        execution_time_ns: Execution time in nanoseconds.
+        working_dir: Directory where the command was executed.
+
+    Example:
+        ```python
+        if isinstance(result, BashResult):
+            if result.exit_code == 0:
+                print(f"Success: {result.output}")
+            else:
+                print(f"Failed with exit code {result.exit_code}")
+            print(f"Took {result.execution_time_seconds:.2f}s")
+        ```
+    """
 
     command: str
     exit_code: int
@@ -134,7 +259,16 @@ class BashResult:
 
 @dataclass
 class BackgroundBashResult:
-    """Result of a background bash command execution."""
+    """Result of spawning a background bash process.
+
+    Background processes run independently and their output is captured to a log file.
+
+    Attributes:
+        command: The shell command that was started.
+        pid: Process ID of the spawned background process.
+        log_path: Path to the log file capturing stdout/stderr.
+        start_time: When the process was started.
+    """
 
     command: str
     pid: int
@@ -144,7 +278,19 @@ class BackgroundBashResult:
 
 @dataclass
 class FileReadResult:
-    """Result of a file read operation."""
+    """Result of a file read operation.
+
+    Contains the file content with optional line-based pagination.
+
+    Attributes:
+        file_path: Absolute path to the file that was read.
+        offset: The 1-indexed line number where reading started.
+        line_limit: Maximum number of lines that were requested.
+        lines: The actual lines read from the file.
+        language: Detected programming language (e.g., "python", "go").
+        truncated: True if the file was too large and reading was truncated.
+        remaining_lines: Number of lines not read due to truncation.
+    """
 
     file_path: str
     offset: int
@@ -157,7 +303,16 @@ class FileReadResult:
 
 @dataclass
 class FileWriteResult:
-    """Result of a file write operation."""
+    """Result of a file write operation.
+
+    Indicates that a file was created or overwritten successfully.
+
+    Attributes:
+        file_path: Absolute path to the file that was written.
+        content: The content that was written to the file.
+        size: Size of the written content in bytes.
+        language: Detected programming language based on file extension.
+    """
 
     file_path: str
     content: str
@@ -167,7 +322,17 @@ class FileWriteResult:
 
 @dataclass
 class FileEditResult:
-    """Result of a file edit operation."""
+    """Result of an in-place file edit operation.
+
+    Contains the diffs showing what was changed in the file.
+
+    Attributes:
+        file_path: Absolute path to the file that was edited.
+        edits: List of Edit objects describing each change made.
+        language: Detected programming language.
+        replace_all: True if all occurrences were replaced.
+        replaced_count: Number of replacements made (when replace_all=True).
+    """
 
     file_path: str
     edits: list[Edit] = field(default_factory=list)
@@ -178,7 +343,17 @@ class FileEditResult:
 
 @dataclass
 class GrepResult:
-    """Result of a grep search operation."""
+    """Result of a regex search operation.
+
+    Contains matches found across multiple files.
+
+    Attributes:
+        pattern: The regex pattern that was searched for.
+        results: List of SearchResult objects, one per file with matches.
+        path: The directory or file path that was searched.
+        include: Glob pattern used to filter files (e.g., "*.py").
+        truncated: True if results were truncated due to too many matches.
+    """
 
     pattern: str
     results: list[SearchResult] = field(default_factory=list)
@@ -189,7 +364,16 @@ class GrepResult:
 
 @dataclass
 class GlobResult:
-    """Result of a glob pattern match operation."""
+    """Result of a file glob pattern match operation.
+
+    Lists files and directories matching a glob pattern.
+
+    Attributes:
+        pattern: The glob pattern that was matched (e.g., "**/*.py").
+        files: List of FileInfo objects for matching files/directories.
+        path: The base directory where the search was performed.
+        truncated: True if results were truncated due to too many matches.
+    """
 
     pattern: str
     files: list[FileInfo] = field(default_factory=list)
@@ -199,19 +383,35 @@ class GlobResult:
 
 @dataclass
 class TodoResult:
-    """Result of a todo list operation."""
+    """Result of a todo list operation.
 
-    action: str  # "read" or "write"
+    The todo tool is used for task tracking during agent execution.
+
+    Attributes:
+        action: Either "read" (list todos) or "write" (create/update todos).
+        todo_list: Current list of TodoItem objects.
+        statistics: Summary statistics about the todo list.
+    """
+
+    action: str
     todo_list: list[TodoItem] = field(default_factory=list)
     statistics: TodoStats | None = None
 
 
 @dataclass
 class ImageRecognitionResult:
-    """Result of an image recognition operation."""
+    """Result of an image analysis operation using vision models.
+
+    Attributes:
+        image_path: Path or URL to the analyzed image.
+        image_type: Either "local" for file paths or "remote" for URLs.
+        prompt: The question/instruction given for image analysis.
+        analysis: The model's analysis/description of the image.
+        image_size: Dimensions of the image, if available.
+    """
 
     image_path: str
-    image_type: str  # "local" or "remote"
+    image_type: str
     prompt: str
     analysis: str
     image_size: ImageDimensions | None = None
@@ -219,7 +419,14 @@ class ImageRecognitionResult:
 
 @dataclass
 class SubAgentResult:
-    """Result of a sub-agent invocation."""
+    """Result of delegating a query to a sub-agent.
+
+    Sub-agents are used for complex, multi-step code searches and analysis.
+
+    Attributes:
+        question: The question that was delegated to the sub-agent.
+        response: The sub-agent's response text.
+    """
 
     question: str
     response: str
@@ -227,20 +434,38 @@ class SubAgentResult:
 
 @dataclass
 class WebFetchResult:
-    """Result of a web fetch operation."""
+    """Result of fetching content from a URL.
+
+    Supports HTML-to-markdown conversion and AI-based content extraction.
+
+    Attributes:
+        url: The URL that was fetched.
+        content_type: HTTP Content-Type header value.
+        size: Size of the fetched content in bytes.
+        content: The fetched content (may be converted to markdown).
+        processed_type: How the content was processed: "saved" (raw),
+            "markdown" (converted), or "ai_extracted" (AI summarized).
+        saved_path: Local path if content was saved to disk.
+        prompt: AI extraction prompt if processed_type is "ai_extracted".
+    """
 
     url: str
     content_type: str
     size: int
     content: str
-    processed_type: str  # "saved", "markdown", "ai_extracted"
+    processed_type: str
     saved_path: str = ""
     prompt: str = ""
 
 
 @dataclass
 class ViewBackgroundProcessesResult:
-    """Result of viewing background processes."""
+    """Result of listing background processes.
+
+    Attributes:
+        processes: List of BackgroundProcessInfo for each tracked process.
+        count: Total number of background processes.
+    """
 
     processes: list[BackgroundProcessInfo] = field(default_factory=list)
     count: int = 0
@@ -248,7 +473,15 @@ class ViewBackgroundProcessesResult:
 
 @dataclass
 class CodeExecutionResult:
-    """Result of a code execution operation."""
+    """Result of executing TypeScript/JavaScript code via MCP.
+
+    Used for running code that interacts with MCP tools.
+
+    Attributes:
+        code: The TypeScript/JavaScript code that was executed.
+        output: The console output from the execution.
+        runtime: The runtime used (e.g., "tsx", "node").
+    """
 
     code: str
     output: str
@@ -257,7 +490,14 @@ class CodeExecutionResult:
 
 @dataclass
 class SkillResult:
-    """Result of a skill invocation."""
+    """Result of invoking an agentic skill.
+
+    Skills provide domain-specific expertise that the model can invoke.
+
+    Attributes:
+        skill_name: Name of the skill that was invoked.
+        directory: Path to the skill's directory containing SKILL.md.
+    """
 
     skill_name: str
     directory: str
@@ -265,7 +505,26 @@ class SkillResult:
 
 @dataclass
 class MCPToolResult:
-    """Result of an MCP tool execution."""
+    """Result of executing an MCP (Model Context Protocol) tool.
+
+    MCP tools are external capabilities provided by MCP servers.
+
+    Attributes:
+        mcp_tool_name: Name of the MCP tool that was called.
+        content_text: Combined text content from all content blocks.
+        content: List of MCPContent blocks returned by the tool.
+        server_name: Name of the MCP server that provided the tool.
+        parameters: The parameters passed to the tool.
+        execution_time_ns: Execution time in nanoseconds.
+
+    Example:
+        ```python
+        if isinstance(result, MCPToolResult):
+            print(f"MCP tool: {result.mcp_tool_name}")
+            print(f"Server: {result.server_name}")
+            print(f"Took {result.execution_time_seconds:.2f}s")
+        ```
+    """
 
     mcp_tool_name: str
     content_text: str
@@ -282,7 +541,14 @@ class MCPToolResult:
 
 @dataclass
 class CustomToolResult:
-    """Result of a custom tool execution."""
+    """Result of executing a custom tool.
+
+    Custom tools are user-defined tools registered in configuration.
+
+    Attributes:
+        output: The output produced by the custom tool.
+        execution_time_ns: Execution time in nanoseconds.
+    """
 
     output: str
     execution_time_ns: int = 0
@@ -295,7 +561,14 @@ class CustomToolResult:
 
 @dataclass
 class BlockedResult:
-    """Result when a tool was blocked by a security hook."""
+    """Result when a tool execution was blocked by a security hook.
+
+    Agent lifecycle hooks can intercept and block tool calls for security.
+
+    Attributes:
+        tool_name: Name of the tool that was blocked.
+        reason: Explanation of why the tool was blocked.
+    """
 
     tool_name: str
     reason: str
@@ -303,7 +576,16 @@ class BlockedResult:
 
 @dataclass
 class UnknownToolResult:
-    """Result for unknown or unrecognized tool types."""
+    """Fallback result for unrecognized tool types.
+
+    Used when the metadata type doesn't match any known tool.
+
+    Attributes:
+        tool_name: Name of the tool as reported in the result.
+        success: Whether the tool execution was marked as successful.
+        error: Error message if the tool failed.
+        raw_metadata: The unparsed metadata dictionary for inspection.
+    """
 
     tool_name: str
     success: bool

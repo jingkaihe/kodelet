@@ -10,13 +10,16 @@
 """
 Kodelet Streamlit Chatbot
 
-A chatbot interface that uses the kodelet Python SDK for streaming responses.
+A chatbot interface that uses the kodelet Python SDK for streaming responses
+with rich tool result visualizations.
 
 Usage:
     uv run streamlit run main.py
 """
 
 import asyncio
+import difflib
+import html
 import json
 import os
 import sys
@@ -32,6 +35,57 @@ import streamlit as st
 from kodelet import Kodelet, KodeletConfig
 from kodelet.conversation import ConversationManager
 from kodelet.exceptions import BinaryNotFoundError
+from kodelet.tool_results import (
+    BackgroundBashResult,
+    BashResult,
+    BlockedResult,
+    CodeExecutionResult,
+    CustomToolResult,
+    FileEditResult,
+    FileReadResult,
+    FileWriteResult,
+    GlobResult,
+    GrepResult,
+    ImageRecognitionResult,
+    MCPToolResult,
+    SkillResult,
+    SubAgentResult,
+    TodoResult,
+    UnknownToolResult,
+    ViewBackgroundProcessesResult,
+    WebFetchResult,
+    decode_tool_result,
+)
+
+# Language to Streamlit code language mapping
+LANGUAGE_MAP = {
+    "python": "python",
+    "javascript": "javascript",
+    "typescript": "typescript",
+    "go": "go",
+    "rust": "rust",
+    "java": "java",
+    "c": "c",
+    "cpp": "cpp",
+    "csharp": "csharp",
+    "ruby": "ruby",
+    "php": "php",
+    "swift": "swift",
+    "kotlin": "kotlin",
+    "scala": "scala",
+    "shell": "bash",
+    "bash": "bash",
+    "sql": "sql",
+    "html": "html",
+    "css": "css",
+    "json": "json",
+    "yaml": "yaml",
+    "xml": "xml",
+    "markdown": "markdown",
+    "dockerfile": "dockerfile",
+    "makefile": "makefile",
+    "toml": "toml",
+}
 
 CUSTOM_CSS = """
 <style>
@@ -103,8 +157,749 @@ code, pre {
     padding-bottom: 8px;
     margin-bottom: 16px;
 }
+
+/* Tool Result Cards */
+.tool-card {
+    background-color: white;
+    border: 1px solid var(--kodelet-light-gray);
+    border-radius: 6px;
+    padding: 12px 16px;
+    margin: 8px 0;
+    border-left: 3px solid var(--kodelet-mid-gray);
+}
+
+.tool-card.bash { border-left-color: var(--kodelet-green); }
+.tool-card.file { border-left-color: var(--kodelet-blue); }
+.tool-card.search { border-left-color: var(--kodelet-orange); }
+.tool-card.error { border-left-color: #c44; }
+
+.tool-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    font-family: 'Poppins', Arial, sans-serif;
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--kodelet-dark);
+}
+
+.tool-meta {
+    margin-left: auto;
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.75rem;
+    color: var(--kodelet-mid-gray);
+}
+
+.exit-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.exit-badge.success {
+    background-color: rgba(120, 140, 93, 0.15);
+    color: var(--kodelet-green);
+}
+
+.exit-badge.error {
+    background-color: rgba(204, 68, 68, 0.15);
+    color: #c44;
+}
+
+.file-path {
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.85rem;
+    color: var(--kodelet-blue);
+    background-color: rgba(106, 155, 204, 0.1);
+    padding: 4px 8px;
+    border-radius: 4px;
+    display: inline-block;
+    margin-top: 4px;
+}
+
+.terminal-output {
+    background-color: var(--kodelet-dark);
+    color: var(--kodelet-light);
+    border-radius: 4px;
+    padding: 12px;
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.85rem;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 300px;
+    overflow-y: auto;
+    margin-top: 8px;
+}
+
+.match-item {
+    display: flex;
+    gap: 12px;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--kodelet-light-gray);
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.85rem;
+}
+
+.match-item:last-child {
+    border-bottom: none;
+}
+
+.line-num {
+    color: var(--kodelet-mid-gray);
+    min-width: 40px;
+    text-align: right;
+}
+
+.match-text {
+    color: var(--kodelet-dark);
+    flex: 1;
+}
+
+.match-highlight {
+    background-color: rgba(217, 119, 87, 0.25);
+    color: var(--kodelet-orange);
+    padding: 0 2px;
+    border-radius: 2px;
+}
+
+.file-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    background-color: var(--kodelet-light);
+    border-radius: 4px;
+    margin: 4px 0;
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.85rem;
+}
+
+.file-item-name {
+    flex: 1;
+    color: var(--kodelet-dark);
+}
+
+.file-item-meta {
+    color: var(--kodelet-mid-gray);
+    font-size: 0.75rem;
+}
+
+.todo-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 8px 12px;
+    background-color: var(--kodelet-light);
+    border-radius: 4px;
+    margin: 4px 0;
+}
+
+.todo-content {
+    flex: 1;
+    font-family: 'Lora', Georgia, serif;
+    color: var(--kodelet-dark);
+}
+
+.todo-priority {
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.7rem;
+    padding: 2px 6px;
+    border-radius: 3px;
+    text-transform: uppercase;
+}
+
+.todo-priority.high {
+    background-color: rgba(204, 68, 68, 0.15);
+    color: #c44;
+}
+
+.todo-priority.medium {
+    background-color: rgba(217, 119, 87, 0.15);
+    color: var(--kodelet-orange);
+}
+
+.todo-priority.low {
+    background-color: rgba(120, 140, 93, 0.15);
+    color: var(--kodelet-green);
+}
+
+.stats-row {
+    display: flex;
+    gap: 16px;
+    margin: 8px 0;
+}
+
+.stat-box {
+    text-align: center;
+    padding: 8px 16px;
+    background-color: var(--kodelet-light);
+    border-radius: 4px;
+}
+
+.stat-value {
+    font-family: 'Poppins', Arial, sans-serif;
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--kodelet-orange);
+}
+
+.stat-label {
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.7rem;
+    color: var(--kodelet-mid-gray);
+    text-transform: uppercase;
+}
+
+.blocked-banner {
+    background-color: rgba(204, 68, 68, 0.1);
+    border: 1px solid #c44;
+    border-radius: 6px;
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    color: #c44;
+    font-family: 'Poppins', Arial, sans-serif;
+}
 </style>
 """
+
+
+def format_file_size(size: int) -> str:
+    """Format file size in human readable format."""
+    for unit in ["B", "KB", "MB", "GB"]:
+        if size < 1024:
+            return f"{size:.1f} {unit}" if unit != "B" else f"{size} {unit}"
+        size /= 1024
+    return f"{size:.1f} TB"
+
+
+def get_file_icon(file_type: str, language: str = "") -> str:
+    """Get appropriate icon for file type."""
+    if file_type == "directory":
+        return "[dir]"
+    return "[file]"
+
+
+def render_bash_result(result: BashResult) -> None:
+    """Render bash command result."""
+    exit_class = "success" if result.exit_code == 0 else "error"
+
+    st.markdown(
+        f"""
+        <div class="tool-card bash">
+            <div class="tool-header">
+                <span>Terminal</span>
+                <span class="exit-badge {exit_class}">Exit {result.exit_code}</span>
+                <span class="tool-meta">{result.execution_time_seconds:.2f}s</span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.code(f"$ {result.command}", language="bash")
+
+    if result.output.strip():
+        st.markdown(
+            f'<div class="terminal-output">{html.escape(result.output)}</div>',
+            unsafe_allow_html=True,
+        )
+
+
+def render_background_bash_result(result: BackgroundBashResult) -> None:
+    """Render background process result."""
+    st.markdown(
+        f"""
+        <div class="tool-card bash">
+            <div class="tool-header">
+                <span>Background Process</span>
+                <span class="tool-meta">PID: {result.pid}</span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.code(f"$ {result.command}", language="bash")
+    st.caption(f"Log: `{result.log_path}`")
+
+
+def render_file_read_result(result: FileReadResult) -> None:
+    """Render file read result with syntax highlighting."""
+    lang = LANGUAGE_MAP.get(result.language, "text")
+    truncated = " (truncated)" if result.truncated else ""
+    icon = get_file_icon("file", result.language)
+
+    st.markdown(
+        f"""
+        <div class="tool-card file">
+            <div class="tool-header">
+                <span>{icon} File Read{truncated}</span>
+            </div>
+            <div class="file-path">{result.file_path}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    if result.lines:
+        content = "\n".join(result.lines)
+        st.code(content, language=lang, line_numbers=True)
+
+    if result.remaining_lines > 0:
+        st.caption(f"{result.remaining_lines} more lines remaining")
+
+
+def render_file_write_result(result: FileWriteResult) -> None:
+    """Render file write result."""
+    icon = get_file_icon("file", result.language)
+
+    st.markdown(
+        f"""
+        <div class="tool-card file">
+            <div class="tool-header">
+                <span>{icon} File Written</span>
+                <span class="tool-meta">{format_file_size(result.size)}</span>
+            </div>
+            <div class="file-path">{result.file_path}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    lang = LANGUAGE_MAP.get(result.language, "text")
+    with st.expander("View Content", expanded=False):
+        st.code(result.content, language=lang, line_numbers=True)
+
+
+def render_file_edit_result(result: FileEditResult) -> None:
+    """Render file edit result with unified diff view."""
+    edit_count = len(result.edits)
+    badge = f"{result.replaced_count} replacements" if result.replace_all else f"{edit_count} edit(s)"
+    icon = get_file_icon("file", result.language)
+
+    st.markdown(
+        f"""
+        <div class="tool-card file">
+            <div class="tool-header">
+                <span>{icon} File Edited</span>
+                <span class="tool-meta">{badge}</span>
+            </div>
+            <div class="file-path">{result.file_path}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    for i, edit in enumerate(result.edits):
+        with st.expander(f"Edit {i + 1}: Lines {edit.start_line}-{edit.end_line}", expanded=i == 0):
+            old_lines = edit.old_content.splitlines(keepends=True)
+            new_lines = edit.new_content.splitlines(keepends=True)
+            diff = difflib.unified_diff(
+                old_lines,
+                new_lines,
+                fromfile="before",
+                tofile="after",
+                lineterm="",
+            )
+            diff_text = "".join(diff)
+            if diff_text:
+                st.code(diff_text, language="diff")
+            else:
+                st.caption("No changes")
+
+
+def render_grep_result(result: GrepResult) -> None:
+    """Render grep search results."""
+    total_matches = sum(len(r.matches) for r in result.results)
+    file_count = len(result.results)
+
+    st.markdown(
+        f"""
+        <div class="tool-card search">
+            <div class="tool-header">
+                <span>Search Results</span>
+                <span class="tool-meta">{total_matches} matches in {file_count} files</span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.code(result.pattern, language="text")
+
+    for file_result in result.results[:10]:
+        with st.expander(f"{file_result.file_path} ({len(file_result.matches)} matches)"):
+            for match in file_result.matches[:20]:
+                content = html.escape(match.content)
+                if match.match_start < match.match_end:
+                    before = html.escape(match.content[: match.match_start])
+                    highlighted = html.escape(match.content[match.match_start : match.match_end])
+                    after = html.escape(match.content[match.match_end :])
+                    content = f"{before}<span class='match-highlight'>{highlighted}</span>{after}"
+
+                st.markdown(
+                    f"""
+                    <div class="match-item">
+                        <span class="line-num">{match.line_number}</span>
+                        <span class="match-text">{content}</span>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+    if result.truncated:
+        st.caption("Results truncated")
+
+
+def render_glob_result(result: GlobResult) -> None:
+    """Render glob file list results."""
+    st.markdown(
+        f"""
+        <div class="tool-card search">
+            <div class="tool-header">
+                <span>Files Found</span>
+                <span class="tool-meta">{len(result.files)} items</span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.code(result.pattern, language="text")
+
+    for file_info in result.files[:50]:
+        icon = get_file_icon(file_info.type, file_info.language)
+        size = format_file_size(file_info.size) if file_info.type == "file" else ""
+        st.markdown(
+            f"""
+            <div class="file-item">
+                <span>{icon}</span>
+                <span class="file-item-name">{file_info.path}</span>
+                <span class="file-item-meta">{size}</span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    if result.truncated:
+        st.caption("Results truncated")
+
+
+def render_todo_result(result: TodoResult) -> None:
+    """Render todo list with status indicators."""
+    st.markdown(
+        f"""
+        <div class="tool-card">
+            <div class="tool-header">
+                <span>Todo List</span>
+                <span class="tool-meta">{result.action}</span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    if result.statistics:
+        stats = result.statistics
+        st.markdown(
+            f"""
+            <div class="stats-row">
+                <div class="stat-box">
+                    <div class="stat-value">{stats.completed}</div>
+                    <div class="stat-label">Completed</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value">{stats.in_progress}</div>
+                    <div class="stat-label">In Progress</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value">{stats.pending}</div>
+                    <div class="stat-label">Pending</div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    status_labels = {
+        "completed": "[done]",
+        "in_progress": "[...]",
+        "pending": "[   ]",
+        "canceled": "[x]",
+    }
+
+    for todo in result.todo_list:
+        label = status_labels.get(todo.status, "[?]")
+        priority_class = todo.priority.lower() if todo.priority else "low"
+        st.markdown(
+            f"""
+            <div class="todo-item">
+                <span class="tool-meta">{label}</span>
+                <span class="todo-content">{html.escape(todo.content)}</span>
+                <span class="todo-priority {priority_class}">{todo.priority}</span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+
+def render_web_fetch_result(result: WebFetchResult) -> None:
+    """Render web fetch result."""
+    st.markdown(
+        f"""
+        <div class="tool-card">
+            <div class="tool-header">
+                <span>Web Fetch</span>
+                <span class="tool-meta">{format_file_size(result.size)}</span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(f"**URL:** [{result.url}]({result.url})")
+    st.caption(f"Content-Type: `{result.content_type}` | Mode: `{result.processed_type}`")
+
+    if result.content:
+        with st.expander("View Content", expanded=False):
+            if "json" in result.content_type:
+                st.code(result.content[:5000], language="json")
+            elif "html" in result.content_type or "markdown" in result.processed_type:
+                st.markdown(result.content[:3000])
+            else:
+                st.code(result.content[:3000])
+
+
+def render_image_recognition_result(result: ImageRecognitionResult) -> None:
+    """Render image recognition result."""
+    st.markdown(
+        f"""
+        <div class="tool-card">
+            <div class="tool-header">
+                <span>Image Analysis</span>
+                <span class="tool-meta">{result.image_type}</span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.caption(f"**Image:** `{result.image_path}`")
+    if result.image_size:
+        st.caption(f"**Dimensions:** {result.image_size.width} × {result.image_size.height}")
+
+    st.markdown(f"**Prompt:** {result.prompt}")
+    st.markdown(result.analysis)
+
+
+def render_subagent_result(result: SubAgentResult) -> None:
+    """Render subagent result."""
+    st.markdown(
+        """
+        <div class="tool-card">
+            <div class="tool-header">
+                <span>Sub-Agent</span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(f"**Question:** {result.question}")
+    with st.expander("Response", expanded=True):
+        st.markdown(result.response)
+
+
+def render_code_execution_result(result: CodeExecutionResult) -> None:
+    """Render code execution result."""
+    st.markdown(
+        f"""
+        <div class="tool-card bash">
+            <div class="tool-header">
+                <span>Code Execution</span>
+                <span class="tool-meta">{result.runtime}</span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    with st.expander("Code", expanded=False):
+        st.code(result.code, language="typescript")
+
+    if result.output:
+        st.markdown(
+            f'<div class="terminal-output">{html.escape(result.output)}</div>',
+            unsafe_allow_html=True,
+        )
+
+
+def render_skill_result(result: SkillResult) -> None:
+    """Render skill invocation result."""
+    st.markdown(
+        f"""
+        <div class="tool-card">
+            <div class="tool-header">
+                <span>Skill: {result.skill_name}</span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.caption(f"Directory: `{result.directory}`")
+
+
+def render_mcp_tool_result(result: MCPToolResult) -> None:
+    """Render MCP tool result."""
+    st.markdown(
+        f"""
+        <div class="tool-card">
+            <div class="tool-header">
+                <span>MCP: {result.mcp_tool_name}</span>
+                <span class="tool-meta">{result.execution_time_seconds:.2f}s</span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    if result.server_name:
+        st.caption(f"Server: `{result.server_name}`")
+
+    if result.content_text:
+        st.markdown(result.content_text)
+
+
+def render_view_background_processes_result(result: ViewBackgroundProcessesResult) -> None:
+    """Render background processes list."""
+    st.markdown(
+        f"""
+        <div class="tool-card bash">
+            <div class="tool-header">
+                <span>Background Processes</span>
+                <span class="tool-meta">{result.count} running</span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    for proc in result.processes:
+        status_label = "[running]" if proc.status == "running" else "[stopped]"
+        st.markdown(
+            f"""
+            <div class="file-item">
+                <span class="tool-meta">{status_label}</span>
+                <span class="file-item-name"><code>{html.escape(proc.command)}</code></span>
+                <span class="file-item-meta">PID: {proc.pid}</span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+
+def render_blocked_result(result: BlockedResult) -> None:
+    """Render blocked tool result."""
+    st.markdown(
+        f"""
+        <div class="blocked-banner">
+            <div>
+                <strong>Tool Blocked:</strong> {result.tool_name}<br/>
+                <small>{html.escape(result.reason)}</small>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_custom_tool_result(result: CustomToolResult) -> None:
+    """Render custom tool result."""
+    st.markdown(
+        f"""
+        <div class="tool-card">
+            <div class="tool-header">
+                <span>Custom Tool</span>
+                <span class="tool-meta">{result.execution_time_seconds:.2f}s</span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.code(result.output)
+
+
+def render_unknown_result(result: UnknownToolResult, raw_result: str) -> None:
+    """Render unknown tool result."""
+    st.markdown(
+        f"""
+        <div class="tool-card">
+            <div class="tool-header">
+                <span>{result.tool_name}</span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.code(raw_result)
+
+
+def render_tool_result(tool_name: str, raw_result: str) -> None:
+    """Decode and render a tool result with appropriate visualization."""
+    try:
+        data = json.loads(raw_result)
+        if isinstance(data, dict) and "toolName" in data:
+            decoded = decode_tool_result(data)
+
+            match decoded:
+                case BashResult():
+                    render_bash_result(decoded)
+                case BackgroundBashResult():
+                    render_background_bash_result(decoded)
+                case FileReadResult():
+                    render_file_read_result(decoded)
+                case FileWriteResult():
+                    render_file_write_result(decoded)
+                case FileEditResult():
+                    render_file_edit_result(decoded)
+                case GrepResult():
+                    render_grep_result(decoded)
+                case GlobResult():
+                    render_glob_result(decoded)
+                case TodoResult():
+                    render_todo_result(decoded)
+                case WebFetchResult():
+                    render_web_fetch_result(decoded)
+                case ImageRecognitionResult():
+                    render_image_recognition_result(decoded)
+                case SubAgentResult():
+                    render_subagent_result(decoded)
+                case CodeExecutionResult():
+                    render_code_execution_result(decoded)
+                case SkillResult():
+                    render_skill_result(decoded)
+                case MCPToolResult():
+                    render_mcp_tool_result(decoded)
+                case ViewBackgroundProcessesResult():
+                    render_view_background_processes_result(decoded)
+                case BlockedResult():
+                    render_blocked_result(decoded)
+                case CustomToolResult():
+                    render_custom_tool_result(decoded)
+                case UnknownToolResult():
+                    render_unknown_result(decoded, raw_result)
+                case _:
+                    st.code(raw_result)
+        else:
+            st.code(raw_result)
+    except (json.JSONDecodeError, TypeError):
+        st.code(raw_result)
 
 
 def get_kodelet_client(conversation_id: str | None = None) -> Kodelet:
@@ -278,8 +1073,7 @@ def _render_response(
                     except json.JSONDecodeError:
                         st.code(tc["input"])
                     if "result" in tc:
-                        st.caption("Result:")
-                        st.code(tc["result"])
+                        render_tool_result(tc["name"], tc["result"])
 
         if text:
             st.markdown(text)
@@ -336,7 +1130,7 @@ def main():
                         for i, tc in enumerate(msg["tools"]):
                             st.write(f"**{i+1}. {tc['name']}**")
                             if "result" in tc:
-                                st.code(tc["result"])
+                                render_tool_result(tc["name"], tc["result"])
             st.markdown(msg["content"])
 
     if prompt := st.chat_input("Ask kodelet anything..."):
@@ -378,7 +1172,7 @@ def main():
             - Real-time streaming output
             - Conversation continuity
             - Thinking visualization
-            - Tool call inspection
+            - Rich tool result display
             """
         )
 
