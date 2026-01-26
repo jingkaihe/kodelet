@@ -58,6 +58,7 @@ func convertAnthropicStreamableMessages(msgs []anthropic.StreamableMessage) []co
 			ToolName:   msg.ToolName,
 			ToolCallID: msg.ToolCallID,
 			Input:      msg.Input,
+			Turn:       msg.Turn,
 		}
 	}
 	return result
@@ -73,6 +74,7 @@ func convertOpenAIStreamableMessages(msgs []openai.StreamableMessage) []conversa
 			ToolName:   msg.ToolName,
 			ToolCallID: msg.ToolCallID,
 			Input:      msg.Input,
+			Turn:       msg.Turn,
 		}
 	}
 	return result
@@ -88,6 +90,7 @@ func convertResponsesStreamableMessages(msgs []responses.StreamableMessage) []co
 			ToolName:   msg.ToolName,
 			ToolCallID: msg.ToolCallID,
 			Input:      msg.Input,
+			Turn:       msg.Turn,
 		}
 	}
 	return result

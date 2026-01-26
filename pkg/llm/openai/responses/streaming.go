@@ -49,6 +49,11 @@ func (t *Thread) processStream(
 	// Check if handler supports streaming
 	streamHandler, isStreaming := handler.(llmtypes.StreamingMessageHandler)
 
+	// Increment turn counter for headless streaming
+	if headlessHandler, ok := handler.(*llmtypes.HeadlessStreamHandler); ok {
+		headlessHandler.StartNewTurn()
+	}
+
 	// Process stream events
 	log.Debug("waiting for stream events")
 	for stream.Next() {

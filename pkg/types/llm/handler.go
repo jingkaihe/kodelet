@@ -291,6 +291,8 @@ func (h *StringCollectorHandler) HandleContentBlockEnd() {
 type HeadlessStreamHandler struct {
 	conversationID string
 	mu             sync.Mutex
+	turn           int  // Current turn number (1-indexed)
+	turnStarted    bool // Whether we've started outputting for the current turn
 }
 
 // DeltaEntry represents a streaming delta event for headless mode output
@@ -300,19 +302,39 @@ type DeltaEntry struct {
 	Content        string `json:"content,omitempty"`
 	ConversationID string `json:"conversation_id"`
 	Role           string `json:"role"`
+	Turn           int    `json:"turn,omitempty"` // Assistant turn number (1-indexed)
 }
 
 // NewHeadlessStreamHandler creates a new HeadlessStreamHandler with the given conversation ID
 func NewHeadlessStreamHandler(conversationID string) *HeadlessStreamHandler {
 	return &HeadlessStreamHandler{
 		conversationID: conversationID,
+		turn:           0,
+		turnStarted:    false,
 	}
+}
+
+// StartNewTurn increments the turn counter and marks a new turn as started.
+// This should be called when a new assistant response cycle begins.
+func (h *HeadlessStreamHandler) StartNewTurn() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.turn++
+	h.turnStarted = true
+}
+
+// CurrentTurn returns the current turn number
+func (h *HeadlessStreamHandler) CurrentTurn() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.turn
 }
 
 func (h *HeadlessStreamHandler) output(entry DeltaEntry) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
+	entry.Turn = h.turn
 	data, _ := json.Marshal(entry)
 	fmt.Fprintf(os.Stdout, "%s\n", data)
 }

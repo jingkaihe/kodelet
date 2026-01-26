@@ -1078,6 +1078,7 @@ type StreamableMessage struct {
 	ToolName   string // For tool use/result
 	ToolCallID string // For matching tool results
 	Input      string // For tool use (JSON string)
+	Turn       int    // Assistant turn number (1-indexed)
 }
 
 // StreamMessages parses raw messages into streamable format for conversation streaming.
@@ -1088,15 +1089,37 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 	}
 
 	var streamable []StreamableMessage
+	turn := 0
+	lastWasAssistant := false
 
 	for _, item := range items {
+		// Determine if this is assistant content
+		isAssistantContent := item.Type == "reasoning" ||
+			item.Type == "function_call" ||
+			(item.Type == "message" && item.Role == "assistant")
+
+		// Increment turn when transitioning to assistant content
+		if isAssistantContent && !lastWasAssistant {
+			turn++
+		}
+
+		// Track assistant state (function_call_output is part of the assistant turn)
+		if isAssistantContent {
+			lastWasAssistant = true
+		} else if item.Type == "message" && item.Role == "user" {
+			lastWasAssistant = false
+		}
+		// function_call_output doesn't change lastWasAssistant - it belongs to current turn
+
+		currentTurn := turn
+
 		switch item.Type {
 		case "reasoning":
-			// Add thinking message
 			streamable = append(streamable, StreamableMessage{
 				Kind:    "thinking",
 				Role:    "assistant",
 				Content: item.Content,
+				Turn:    currentTurn,
 			})
 
 		case "message":
@@ -1110,6 +1133,7 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 					Kind:    "text",
 					Role:    item.Role,
 					Content: item.Content,
+					Turn:    currentTurn,
 				})
 			}
 
@@ -1120,6 +1144,7 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 				ToolName:   item.Name,
 				ToolCallID: item.CallID,
 				Input:      item.Arguments,
+				Turn:       currentTurn,
 			})
 
 		case "function_call_output":
@@ -1137,6 +1162,7 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 				ToolName:   toolName,
 				ToolCallID: item.CallID,
 				Content:    resultStr,
+				Turn:       currentTurn,
 			})
 		}
 	}

@@ -765,6 +765,11 @@ func (t *Thread) createStreamingChatCompletion(ctx context.Context, requestParam
 	textStarted := false
 	reasoningStarted := false
 
+	// Increment turn counter for headless streaming
+	if headlessHandler, ok := handler.(*llmtypes.HeadlessStreamHandler); ok {
+		headlessHandler.StartNewTurn()
+	}
+
 	for {
 		streamResponse, err := stream.Recv()
 		if errors.Is(err, context.Canceled) {

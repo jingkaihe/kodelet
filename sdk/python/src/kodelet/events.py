@@ -17,6 +17,7 @@ class Event:
     kind: str
     conversation_id: str
     role: str = "assistant"
+    turn: int = 0  # Assistant turn number (1-indexed)
     raw: dict[str, Any] | None = None
 
 
@@ -132,11 +133,13 @@ def parse_event(data: dict[str, Any]) -> Event:
     kind = data.get("kind", "")
     conversation_id = data.get("conversation_id", "")
     role = data.get("role", "assistant")
+    turn = data.get("turn", 0)
 
     base_kwargs = {
         "kind": kind,
         "conversation_id": conversation_id,
         "role": role,
+        "turn": turn,
         "raw": data,
     }
 

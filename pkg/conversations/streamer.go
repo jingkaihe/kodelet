@@ -25,6 +25,7 @@ type StreamEntry struct {
 	Role           string `json:"role"`                      // "user", "assistant", "system"
 	ToolCallID     string `json:"tool_call_id,omitempty"`    // For matching tool calls to results
 	ConversationID string `json:"conversation_id,omitempty"` // ID of the conversation this entry belongs to
+	Turn           int    `json:"turn,omitempty"`            // Assistant turn number (1-indexed, increments per assistant response)
 }
 
 // StreamOpts contains options for streaming conversation data
@@ -43,6 +44,7 @@ type StreamableMessage struct {
 	ToolName   string // For tool use/result
 	ToolCallID string // For matching tool results
 	Input      string // For tool use (JSON string)
+	Turn       int    // Assistant turn number (1-indexed)
 }
 
 // ConversationStreamer handles streaming conversation data in structured JSON format
@@ -208,6 +210,7 @@ func (cs *ConversationStreamer) convertToStreamEntry(msg StreamableMessage, conv
 		Kind:           msg.Kind,
 		Role:           msg.Role,
 		ConversationID: conversationID,
+		Turn:           msg.Turn,
 	}
 
 	switch msg.Kind {

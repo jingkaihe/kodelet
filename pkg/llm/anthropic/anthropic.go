@@ -807,6 +807,12 @@ func (t *Thread) NewMessage(ctx context.Context, params anthropic.MessageNewPara
 
 	message := anthropic.Message{}
 	inThinkingBlock := false
+
+	// Increment turn counter for headless streaming
+	if headlessHandler, ok := handler.(*llmtypes.HeadlessStreamHandler); ok {
+		headlessHandler.StartNewTurn()
+	}
+
 	for stream.Next() {
 		// Check for context cancellation - Anthropic SDK may not propagate it properly
 		if ctx.Err() != nil {

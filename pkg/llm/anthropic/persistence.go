@@ -173,6 +173,7 @@ type StreamableMessage struct {
 	ToolName   string // For tool use/result
 	ToolCallID string // For matching tool results
 	Input      string // For tool use (JSON string)
+	Turn       int    // Assistant turn number (1-indexed)
 }
 
 // StreamMessages parses raw messages into streamable format for conversation streaming
@@ -183,14 +184,29 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 	}
 
 	var streamable []StreamableMessage
+	turn := 0
 
 	for _, msg := range messages {
+		// Increment turn for each assistant message
+		if msg.Role == anthropic.MessageParamRoleAssistant {
+			turn++
+		}
+
+		// Tool results belong to the previous assistant turn
+		currentTurn := turn
+		if msg.Role == anthropic.MessageParamRoleUser {
+			// User messages with tool results use the current turn (which was set by the previous assistant)
+			// Regular user messages don't have a turn number (they're between turns)
+			currentTurn = turn
+		}
+
 		for _, contentBlock := range msg.Content {
 			if textBlock := contentBlock.OfText; textBlock != nil && textBlock.Text != "" {
 				streamable = append(streamable, StreamableMessage{
 					Kind:    "text",
 					Role:    string(msg.Role),
 					Content: textBlock.Text,
+					Turn:    currentTurn,
 				})
 			}
 
@@ -202,6 +218,7 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 					ToolName:   toolUseBlock.Name,
 					ToolCallID: toolUseBlock.ID,
 					Input:      string(inputJSON),
+					Turn:       currentTurn,
 				})
 			}
 
@@ -229,6 +246,7 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 					ToolName:   toolName,
 					ToolCallID: toolResultBlock.ToolUseID,
 					Content:    result,
+					Turn:       currentTurn,
 				})
 			}
 
@@ -237,6 +255,7 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 					Kind:    "thinking",
 					Role:    string(msg.Role),
 					Content: thinkingBlock.Thinking,
+					Turn:    currentTurn,
 				})
 			}
 		}

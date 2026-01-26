@@ -24,6 +24,7 @@ import json
 import os
 import sys
 from datetime import datetime
+from pathlib import Path
 
 os.environ["STREAMLIT_THEME_BASE"] = "light"
 
@@ -31,7 +32,6 @@ os.environ["STREAMLIT_THEME_BASE"] = "light"
 sys.path.insert(0, str(__file__.rsplit("/", 3)[0] + "/sdk/python/src"))
 
 import streamlit as st
-
 from kodelet import Kodelet, KodeletConfig
 from kodelet.conversation import ConversationManager
 from kodelet.exceptions import BinaryNotFoundError
@@ -480,7 +480,11 @@ def render_file_write_result(result: FileWriteResult) -> None:
 def render_file_edit_result(result: FileEditResult) -> None:
     """Render file edit result with unified diff view."""
     edit_count = len(result.edits)
-    badge = f"{result.replaced_count} replacements" if result.replace_all else f"{edit_count} edit(s)"
+    badge = (
+        f"{result.replaced_count} replacements"
+        if result.replace_all
+        else f"{edit_count} edit(s)"
+    )
     icon = get_file_icon("file", result.language)
 
     st.markdown(
@@ -497,7 +501,9 @@ def render_file_edit_result(result: FileEditResult) -> None:
     )
 
     for i, edit in enumerate(result.edits):
-        with st.expander(f"Edit {i + 1}: Lines {edit.start_line}-{edit.end_line}", expanded=i == 0):
+        with st.expander(
+            f"Edit {i + 1}: Lines {edit.start_line}-{edit.end_line}", expanded=i == 0
+        ):
             old_lines = edit.old_content.splitlines(keepends=True)
             new_lines = edit.new_content.splitlines(keepends=True)
             diff = difflib.unified_diff(
@@ -534,12 +540,16 @@ def render_grep_result(result: GrepResult) -> None:
     st.code(result.pattern, language="text")
 
     for file_result in result.results[:10]:
-        with st.expander(f"{file_result.file_path} ({len(file_result.matches)} matches)"):
+        with st.expander(
+            f"{file_result.file_path} ({len(file_result.matches)} matches)"
+        ):
             for match in file_result.matches[:20]:
                 content = html.escape(match.content)
                 if match.match_start < match.match_end:
                     before = html.escape(match.content[: match.match_start])
-                    highlighted = html.escape(match.content[match.match_start : match.match_end])
+                    highlighted = html.escape(
+                        match.content[match.match_start : match.match_end]
+                    )
                     after = html.escape(match.content[match.match_end :])
                     content = f"{before}<span class='match-highlight'>{highlighted}</span>{after}"
 
@@ -664,7 +674,9 @@ def render_web_fetch_result(result: WebFetchResult) -> None:
     )
 
     st.markdown(f"**URL:** [{result.url}]({result.url})")
-    st.caption(f"Content-Type: `{result.content_type}` | Mode: `{result.processed_type}`")
+    st.caption(
+        f"Content-Type: `{result.content_type}` | Mode: `{result.processed_type}`"
+    )
 
     if result.content:
         with st.expander("View Content", expanded=False):
@@ -692,7 +704,9 @@ def render_image_recognition_result(result: ImageRecognitionResult) -> None:
 
     st.caption(f"**Image:** `{result.image_path}`")
     if result.image_size:
-        st.caption(f"**Dimensions:** {result.image_size.width} × {result.image_size.height}")
+        st.caption(
+            f"**Dimensions:** {result.image_size.width} × {result.image_size.height}"
+        )
 
     st.markdown(f"**Prompt:** {result.prompt}")
     st.markdown(result.analysis)
@@ -776,7 +790,9 @@ def render_mcp_tool_result(result: MCPToolResult) -> None:
         st.markdown(result.content_text)
 
 
-def render_view_background_processes_result(result: ViewBackgroundProcessesResult) -> None:
+def render_view_background_processes_result(
+    result: ViewBackgroundProcessesResult,
+) -> None:
     """Render background processes list."""
     st.markdown(
         f"""
@@ -902,16 +918,30 @@ def render_tool_result(tool_name: str, raw_result: str) -> None:
         st.code(raw_result)
 
 
+def _get_local_binary_path() -> Path | None:
+    """Get path to local kodelet binary if it exists."""
+    # Try ../../bin/kodelet relative to this script
+    script_dir = Path(__file__).parent
+    local_binary = script_dir / ".." / ".." / "bin" / "kodelet"
+    if local_binary.exists():
+        return local_binary.resolve()
+    return None
+
+
 def get_kodelet_client(conversation_id: str | None = None) -> Kodelet:
     """Create a Kodelet client, optionally resuming a conversation."""
-    config = KodeletConfig(stream_deltas=True)
+    config = KodeletConfig(
+        stream_deltas=True,
+        kodelet_path=_get_local_binary_path(),
+    )
     return Kodelet(config=config, resume=conversation_id)
 
 
 def get_conversation_manager() -> ConversationManager:
     """Get a ConversationManager instance."""
     try:
-        client = Kodelet()
+        config = KodeletConfig(kodelet_path=_get_local_binary_path())
+        client = Kodelet(config=config)
         return client.conversations
     except BinaryNotFoundError as e:
         st.error(str(e))
@@ -919,25 +949,54 @@ def get_conversation_manager() -> ConversationManager:
 
 
 def parse_history_events(events: list[dict]) -> list[dict]:
-    """Parse streaming history events into message format for display."""
-    messages = []
-    current_role = None
-    current_msg = None
+    """Parse streaming history events into message format for display.
 
+    Groups events by role AND turn number, so multiple assistant turns
+    become separate message blocks.
+    """
+    messages = []
+    current_key = None  # (role, turn) tuple for grouping
+    current_msg = None
+    # Track tool results to match with tool calls
+    tool_results = {}
+
+    # First pass: collect all tool results by call_id
+    for entry in events:
+        if entry.get("kind") == "tool-result":
+            call_id = entry.get("tool_call_id", "")
+            if call_id:
+                tool_results[call_id] = entry.get("result", "")
+
+    # Second pass: build messages grouped by (role, turn)
     for entry in events:
         kind = entry.get("kind", "")
         role = entry.get("role", "")
+        turn = entry.get("turn", 0)
 
+        # Skip tool-result (handled separately)
         if kind == "tool-result":
-            if current_msg and current_msg["tools"]:
-                tool_call_id = entry.get("tool_call_id", "")
-                for tc in current_msg["tools"]:
-                    if tc.get("call_id") == tool_call_id:
-                        tc["result"] = entry.get("result", "")
-                        break
             continue
 
-        if role != current_role:
+        # For user messages, turn is 0 - use a unique key per user message
+        if role == "user":
+            # User messages don't have turns, group by role only
+            # But start a new message for each user text
+            if kind == "text":
+                if current_msg:
+                    messages.append(current_msg)
+                current_msg = {
+                    "role": role,
+                    "content": entry.get("content", ""),
+                    "thinking": "",
+                    "tools": [],
+                }
+                current_key = (role, id(entry))  # Unique key per user message
+            continue
+
+        # For assistant messages, group by turn
+        msg_key = (role, turn)
+
+        if msg_key != current_key:
             if current_msg:
                 messages.append(current_msg)
             current_msg = {
@@ -946,18 +1005,26 @@ def parse_history_events(events: list[dict]) -> list[dict]:
                 "thinking": "",
                 "tools": [],
             }
-            current_role = role
+            current_key = msg_key
 
         if kind == "text":
             current_msg["content"] += entry.get("content", "")
         elif kind == "thinking":
             current_msg["thinking"] += entry.get("content", "")
         elif kind == "tool-use":
-            current_msg["tools"].append({
-                "name": entry.get("tool_name", "unknown"),
-                "input": entry.get("input", "{}"),
-                "call_id": entry.get("tool_call_id", ""),
-            })
+            call_id = entry.get("tool_call_id", "")
+            # Avoid duplicate tool entries
+            existing_ids = {tc.get("call_id") for tc in current_msg["tools"]}
+            if call_id not in existing_ids:
+                tool_entry = {
+                    "name": entry.get("tool_name", "unknown"),
+                    "input": entry.get("input", "{}"),
+                    "call_id": call_id,
+                }
+                # Attach result if we have it
+                if call_id in tool_results:
+                    tool_entry["result"] = tool_results[call_id]
+                current_msg["tools"].append(tool_entry)
 
     if current_msg:
         messages.append(current_msg)
@@ -987,63 +1054,109 @@ def get_conversation_summary(conversation_id: str) -> str:
 async def stream_response_async(
     query: str, placeholder, conversation_id: str | None = None
 ) -> tuple[str, str, list[dict], str | None]:
-    """Stream kodelet response using the SDK."""
+    """Stream kodelet response using the SDK.
+
+    Tracks multiple turns using turn numbers from events.
+    Each turn can have thinking, tool calls, and text.
+    """
     client = get_kodelet_client(conversation_id)
 
-    full_text = ""
-    thinking_text = ""
-    in_thinking = False
-    tool_calls = []
+    # Turns indexed by turn number (1-indexed from backend)
+    turns: dict[int, dict] = {}
+    current_turn_num = 0
     conv_id = conversation_id
+
+    def get_or_create_turn(turn_num: int) -> dict:
+        """Get or create a turn dict for the given turn number."""
+        if turn_num not in turns:
+            turns[turn_num] = {
+                "thinking": "",
+                "tools": [],
+                "text": "",
+                "in_thinking": False,
+            }
+        return turns[turn_num]
+
+    def get_turns_list() -> list[dict]:
+        """Get turns as a sorted list for rendering."""
+        if not turns:
+            return []
+        return [turns[k] for k in sorted(turns.keys())]
 
     try:
         async for event in client.query(query):
             if not conv_id and event.conversation_id:
                 conv_id = event.conversation_id
 
+            # Get turn number from event (default to 1 if not set)
+            event_turn = getattr(event, "turn", 0)
+            turn_num = event_turn if event_turn > 0 else max(current_turn_num, 1)
+
             match event.kind:
                 case "thinking-start":
-                    in_thinking = True
-                    thinking_text = ""
+                    turn = get_or_create_turn(turn_num)
+                    turn["in_thinking"] = True
+                    current_turn_num = turn_num
                 case "thinking-delta":
-                    thinking_text += event.delta
-                    _render_response(
-                        placeholder, full_text, thinking_text, in_thinking, tool_calls
-                    )
+                    turn = get_or_create_turn(turn_num)
+                    turn["thinking"] += event.delta
+                    _render_response(placeholder, get_turns_list(), current_turn_num)
                 case "thinking-end":
-                    in_thinking = False
-                    _render_response(
-                        placeholder, full_text, thinking_text, in_thinking, tool_calls
-                    )
+                    turn = get_or_create_turn(turn_num)
+                    turn["in_thinking"] = False
+                    _render_response(placeholder, get_turns_list(), current_turn_num)
                 case "text-delta":
-                    full_text += event.delta
-                    _render_response(
-                        placeholder, full_text, thinking_text, in_thinking, tool_calls
-                    )
+                    turn = get_or_create_turn(turn_num)
+                    turn["text"] += event.delta
+                    _render_response(placeholder, get_turns_list(), current_turn_num)
                 case "tool-use":
-                    tool_calls.append({
-                        "name": event.tool_name,
-                        "input": event.input,
-                        "call_id": event.tool_call_id,
-                    })
-                    _render_response(
-                        placeholder, full_text, thinking_text, in_thinking, tool_calls
-                    )
+                    turn = get_or_create_turn(turn_num)
+                    # Avoid duplicate tool entries
+                    existing_ids = {tc.get("call_id") for tc in turn["tools"]}
+                    if event.tool_call_id not in existing_ids:
+                        turn["tools"].append(
+                            {
+                                "name": event.tool_name,
+                                "input": event.input,
+                                "call_id": event.tool_call_id,
+                            }
+                        )
+                        _render_response(
+                            placeholder, get_turns_list(), current_turn_num
+                        )
                 case "tool-result":
-                    for tc in reversed(tool_calls):
-                        if tc.get("call_id") == event.tool_call_id and "result" not in tc:
-                            tc["result"] = event.result
-                            break
-                    _render_response(
-                        placeholder, full_text, thinking_text, in_thinking, tool_calls
-                    )
+                    # Find tool by call_id across all turns and attach result
+                    for t in turns.values():
+                        for tc in t["tools"]:
+                            if (
+                                tc.get("call_id") == event.tool_call_id
+                                and "result" not in tc
+                            ):
+                                tc["result"] = event.result
+                                _render_response(
+                                    placeholder, get_turns_list(), current_turn_num
+                                )
+                                break
+                        else:
+                            continue
+                        break  # Exit outer loop when found
 
     except BinaryNotFoundError as e:
         st.error(str(e))
     except Exception as e:
         st.error(f"Error running kodelet: {e}")
 
-    return full_text, thinking_text, tool_calls, conv_id
+    # Collect final results for return value compatibility
+    all_tools = []
+    all_thinking = ""
+    all_text = ""
+    for turn in get_turns_list():
+        if turn["thinking"]:
+            all_thinking += turn["thinking"] + "\n"
+        all_tools.extend(turn["tools"])
+        all_text += turn["text"]
+
+    return all_text, all_thinking.strip(), all_tools, conv_id
 
 
 def stream_kodelet_response(
@@ -1053,32 +1166,133 @@ def stream_kodelet_response(
     return asyncio.run(stream_response_async(query, placeholder, conversation_id))
 
 
-def _render_response(
-    placeholder, text: str, thinking: str, in_thinking: bool, tools: list
-):
-    """Render the current response state to the placeholder."""
-    with placeholder.container():
-        if thinking:
-            label = "Thinking..." if in_thinking else "Thinking"
-            with st.expander(label, expanded=in_thinking):
-                st.text(thinking)
+def _get_thinking_preview(thinking: str, max_len: int = 80) -> str:
+    """Get a short preview of thinking content."""
+    first_line = thinking.strip().split("\n")[0]
+    if len(first_line) > max_len:
+        return first_line[:max_len] + "..."
+    return first_line
 
-        if tools:
-            with st.expander(f"Tools ({len(tools)})", expanded=False):
-                for i, tc in enumerate(tools):
-                    st.write(f"**{i+1}. {tc['name']}**")
+
+def _get_tools_summary(tools: list[dict]) -> str:
+    """Get a summary of tool names used."""
+    if not tools:
+        return ""
+    names = [tc.get("name", "unknown") for tc in tools]
+    # Deduplicate while preserving order
+    seen = set()
+    unique_names = [n for n in names if not (n in seen or seen.add(n))]
+    if len(unique_names) <= 3:
+        return ", ".join(unique_names)
+    return f"{', '.join(unique_names[:3])} +{len(unique_names) - 3} more"
+
+
+def _get_tool_input_summary(
+    tool_name: str, input_json: str, has_result: bool = False
+) -> str | None:
+    """Extract the most relevant info from a tool's input.
+
+    Returns a concise summary string, None to show full JSON, or "" to skip input display.
+    When has_result is True, returns "" for tools whose result already shows the key info.
+    """
+    try:
+        data = json.loads(input_json)
+    except json.JSONDecodeError:
+        return None
+
+    match tool_name:
+        # These tools' results already display command/path/pattern - skip input
+        case (
+            "Bash"
+            | "File_read"
+            | "File_write"
+            | "File_edit"
+            | "Grep_tool"
+            | "Glob_tool"
+        ):
+            return "" if has_result else None
+        case "Subagent":
+            # Result shows the response, but question is useful context
+            question = data.get("question", "")
+            if len(question) > 200:
+                return question[:200] + "..."
+            return question
+        case "Web_fetch":
+            return "" if has_result else None
+        case "Image_recognition":
+            return "" if has_result else None
+        case "Todo_read":
+            return "" if has_result else "(read current todos)"
+        case "Todo_write":
+            return "" if has_result else f"({len(data.get('todos', []))} items)"
+        case "Skill":
+            return "" if has_result else data.get("skill_name", "")
+        case "View_background_processes":
+            return "" if has_result else "(list processes)"
+        case _:
+            return None  # Show full JSON for unknown tools
+
+
+def _render_turn(turn: dict, turn_idx: int | None = None):
+    """Render a single turn's thinking, tools, and text."""
+    suffix = f" (Turn {turn_idx})" if turn_idx is not None else ""
+
+    # Render thinking with preview in header
+    if turn["thinking"]:
+        is_active = turn.get("in_thinking", False)
+        if is_active:
+            label = "Thinking..."
+        else:
+            preview = _get_thinking_preview(turn["thinking"])
+            label = f"Thinking: {preview}"
+        with st.expander(label + suffix, expanded=is_active):
+            st.text(turn["thinking"])
+
+    # Render tools with summary in header
+    if turn["tools"]:
+        summary = _get_tools_summary(turn["tools"])
+        label = f"Tools: {summary}" if summary else f"Tools ({len(turn['tools'])})"
+        with st.expander(label + suffix, expanded=False):
+            for i, tc in enumerate(turn["tools"]):
+                has_result = "result" in tc
+                st.write(f"**{i + 1}. {tc['name']}**")
+                # Show concise input summary when possible (skip if result shows same info)
+                input_summary = _get_tool_input_summary(
+                    tc["name"], tc.get("input", "{}"), has_result
+                )
+                if input_summary:  # Non-empty string
+                    st.code(
+                        input_summary,
+                        language="bash" if tc["name"] == "Bash" else "text",
+                    )
+                elif input_summary is None:  # None = show full JSON
                     try:
                         input_data = json.loads(tc["input"])
                         st.code(json.dumps(input_data, indent=2), language="json")
                     except json.JSONDecodeError:
                         st.code(tc["input"])
-                    if "result" in tc:
-                        render_tool_result(tc["name"], tc["result"])
+                # Empty string = skip input display entirely
+                if has_result:
+                    render_tool_result(tc["name"], tc["result"])
 
-        if text:
-            st.markdown(text)
-        elif not thinking and not tools:
+    # Render text output inline (always visible)
+    if turn["text"]:
+        st.markdown(turn["text"])
+
+
+def _render_response(placeholder, turns: list[dict], current_turn_num: int):
+    """Render all turns to the placeholder."""
+    with placeholder.container():
+        if not turns:
             st.empty()
+            return
+
+        # Show turn numbers only if there are multiple turns
+        show_turn_numbers = len(turns) > 1
+
+        for i, turn in enumerate(turns):
+            turn_idx = (i + 1) if show_turn_numbers else None
+            _render_turn(turn, turn_idx)
 
 
 def main():
@@ -1122,16 +1336,16 @@ def main():
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             if msg["role"] == "assistant":
-                if msg.get("thinking"):
-                    with st.expander("Thinking", expanded=False):
-                        st.text(msg["thinking"])
-                if msg.get("tools"):
-                    with st.expander(f"Tools ({len(msg['tools'])})", expanded=False):
-                        for i, tc in enumerate(msg["tools"]):
-                            st.write(f"**{i+1}. {tc['name']}**")
-                            if "result" in tc:
-                                render_tool_result(tc["name"], tc["result"])
-            st.markdown(msg["content"])
+                # Render as a turn for consistent UX
+                turn_data = {
+                    "thinking": msg.get("thinking", ""),
+                    "tools": msg.get("tools", []),
+                    "text": msg.get("content", ""),
+                    "in_thinking": False,
+                }
+                _render_turn(turn_data)
+            else:
+                st.markdown(msg.get("content", ""))
 
     if prompt := st.chat_input("Ask kodelet anything..."):
         st.session_state.messages.append({"role": "user", "content": prompt})
@@ -1145,7 +1359,9 @@ def main():
                 prompt, placeholder, st.session_state.conversation_id
             )
 
-            _render_response(placeholder, text, thinking, False, tools)
+            # Final render is handled by streaming - just ensure we have content
+            if not text and not thinking and not tools:
+                placeholder.markdown("No response received.")
 
             if conv_id:
                 st.session_state.conversation_id = conv_id
@@ -1190,6 +1406,7 @@ def main():
 
 if __name__ == "__main__":
     from streamlit.web import cli as stcli
+
     if st.runtime.exists():
         main()
     else:

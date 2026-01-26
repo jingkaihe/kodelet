@@ -141,6 +141,7 @@ type StreamableMessage struct {
 	ToolName   string // For tool use/result
 	ToolCallID string // For matching tool results
 	Input      string // For tool use (JSON string)
+	Turn       int    // Assistant turn number (1-indexed)
 }
 
 // StreamMessages parses raw messages into streamable format for conversation streaming
@@ -151,12 +152,21 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 	}
 
 	var streamable []StreamableMessage
+	turn := 0
 
 	for _, msg := range messages {
 		// Skip system messages as they are implementation details
 		if msg.Role == openai.ChatMessageRoleSystem {
 			continue
 		}
+
+		// Increment turn for each assistant message
+		if msg.Role == openai.ChatMessageRoleAssistant {
+			turn++
+		}
+
+		// Tool results belong to the current turn (set by the previous assistant message)
+		currentTurn := turn
 
 		if msg.Role == openai.ChatMessageRoleTool {
 			result := msg.Content
@@ -173,6 +183,7 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 				ToolName:   toolName,
 				ToolCallID: msg.ToolCallID,
 				Content:    result,
+				Turn:       currentTurn,
 			})
 			continue
 		}
@@ -183,6 +194,7 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 				Kind:    "text",
 				Role:    msg.Role,
 				Content: msg.Content,
+				Turn:    currentTurn,
 			})
 		}
 
@@ -192,6 +204,7 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 					Kind:    "text",
 					Role:    msg.Role,
 					Content: contentBlock.Text,
+					Turn:    currentTurn,
 				})
 			}
 		}
@@ -205,6 +218,7 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 					ToolName:   toolCall.Function.Name,
 					ToolCallID: toolCall.ID,
 					Input:      string(inputJSON),
+					Turn:       currentTurn,
 				})
 			}
 		}
