@@ -35,6 +35,4 @@ For detailed development instructions, including prerequisites, running locally,
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-Copyright (c) 2025 Jingkai He.
-
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details..

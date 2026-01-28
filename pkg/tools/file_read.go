@@ -99,8 +99,8 @@ type FileReadTool struct{}
 // FileReadInput defines the input parameters for the file_read tool
 type FileReadInput struct {
 	FilePath  string `json:"file_path" jsonschema:"description=The absolute path of the file to read"`
-	Offset    int    `json:"offset" jsonschema:"description=The 1-indexed line number to start reading from,default=1,minimum=1"`
-	LineLimit int    `json:"line_limit" jsonschema:"description=The maximum number of lines to read from the offset,default=2000,minimum=1,maximum=2000"`
+	Offset    int    `json:"offset" jsonschema:"description=The 1-indexed line number to start reading from. Default: 1"`
+	LineLimit int    `json:"line_limit" jsonschema:"description=The maximum number of lines to read from the offset. Default: 2000. Max: 2000"`
 }
 
 // GenerateSchema generates the JSON schema for the tool's input parameters

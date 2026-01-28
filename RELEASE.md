@@ -1,5 +1,10 @@
 # Kodelet
 
+## 0.2.4.beta (2026-01-28)
+
+* Remove default and constraint annotations from JSON schema for tool params
+* Updated copyright year: Updated copyright year to 2026 in LICENSE and fixed formatting in README.md.
+
 ## 0.2.3.beta (2026-01-25)
 
 ### Features
