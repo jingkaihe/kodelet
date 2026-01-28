@@ -205,8 +205,8 @@ func (b *BashTool) MatchesCommand(command string) bool {
 type BashInput struct {
 	Description string `json:"description" jsonschema:"description=A description of the command to run"`
 	Command     string `json:"command" jsonschema:"description=The bash command to run"`
-	Timeout     int    `json:"timeout" jsonschema:"description=The timeout for the command in seconds,default=10"`
-	Background  bool   `json:"background" jsonschema:"description=Whether to run the command in the background,default=false"`
+	Timeout     int    `json:"timeout" jsonschema:"description=The timeout for the command in seconds"`
+	Background  bool   `json:"background" jsonschema:"description=Whether to run the command in the background"`
 }
 
 // GenerateSchema generates the JSON schema for the tool's input parameters
