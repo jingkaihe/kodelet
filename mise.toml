@@ -144,18 +144,6 @@ run = [
   "ls -la ./bin/kodelet-*",
 ]
 
-[tasks.docker-build]
-description = "Build Docker image"
-run = [
-  "docker build --build-arg VERSION=\"$VERSION\" --build-arg GIT_COMMIT=\"$GIT_COMMIT\" --build-arg BUILD_TIME=\"$BUILD_TIME\" --build-arg NODE_VERSION=\"$NODE_VERSION\" --build-arg NPM_VERSION=\"$NPM_VERSION\" -t kodelet .",
-]
-
-[tasks.docker-run]
-description = "Run with Docker"
-run = [
-  "docker run -e ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY} kodelet \"${query:-}\"",
-]
-
 [tasks.e2e-test-docker]
 description = "Run end-to-end tests in Docker"
 run = [
