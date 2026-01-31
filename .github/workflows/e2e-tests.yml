@@ -24,7 +24,7 @@ jobs:
         uses: jdx/mise-action@v2
         with:
           install: true
-          cache: true
+          cache: false # Tools cached on PVC at /home/runner/.local/share/mise
           experimental: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
