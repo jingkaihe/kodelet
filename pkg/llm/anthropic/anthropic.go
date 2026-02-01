@@ -948,9 +948,8 @@ func (t *Thread) updateUsage(response *anthropic.Message, model anthropic.Model)
 	t.Usage.MaxContextWindow = pricing.ContextWindow
 }
 
-// NewSubAgent creates a new subagent thread that shares the parent's client and usage tracking
-// Deprecated: Subagents now use shell-out pattern via the subagent tool.
-// This method is kept for backwards compatibility but should not be used.
+// NewSubAgent creates a subagent thread reusing the parent's client.
+// Deprecated: Use shell-out via `kodelet run --as-subagent` instead (ADR 027).
 func (t *Thread) NewSubAgent(_ context.Context, config llmtypes.Config) llmtypes.Thread {
 	conversationID := convtypes.GenerateID()
 

@@ -380,9 +380,4 @@ func TestNewThreadWithAliases(t *testing.T) {
 	}
 }
 
-// Note: Cross-provider subagent tests and NewSubagentContext tests have been removed
-// as part of ADR 027: Subagent Shell-Out Simplification.
-// The subagent functionality now uses shell-out pattern via exec.CommandContext
-// rather than in-process thread creation. Cross-provider functionality is now
-// configured via config.subagent_args or CLI flags.
-// Integration/acceptance tests cover the shell-out behavior.
+// Subagent tests removed per ADR 027 - shell-out pattern tested at integration level

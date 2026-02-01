@@ -980,9 +980,8 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 	return t.SwapContext(ctx, handler.CollectedText())
 }
 
-// NewSubAgent creates a new subagent thread that shares the parent's client and configuration.
-// Deprecated: Subagent functionality now uses shell-out pattern via `kodelet run --as-subagent`.
-// This method is kept for backward compatibility but should not be used for new code.
+// NewSubAgent creates a subagent thread reusing the parent's client.
+// Deprecated: Use shell-out via `kodelet run --as-subagent` instead (ADR 027).
 func (t *Thread) NewSubAgent(_ context.Context, config llmtypes.Config) llmtypes.Thread {
 	conversationID := convtypes.GenerateID()
 

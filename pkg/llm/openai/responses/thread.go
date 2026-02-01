@@ -557,9 +557,8 @@ func (t *Thread) GetMessages() ([]llmtypes.Message, error) {
 	return result, nil
 }
 
-// NewSubAgent creates a new subagent thread with the given configuration.
-// Deprecated: Subagent functionality now uses shell-out pattern via `kodelet run --as-subagent`.
-// This method is kept for backward compatibility but should not be used for new code.
+// NewSubAgent creates a subagent thread reusing the parent's client.
+// Deprecated: Use shell-out via `kodelet run --as-subagent` instead (ADR 027).
 func (t *Thread) NewSubAgent(ctx context.Context, config llmtypes.Config) llmtypes.Thread {
 	config.IsSubAgent = true
 

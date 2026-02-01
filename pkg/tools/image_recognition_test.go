@@ -196,8 +196,4 @@ func TestImageRecognitionTool_TracingKVs(t *testing.T) {
 	})
 }
 
-// Note: Execute method tests are not included because the image_recognition tool
-// uses shell-out pattern via exec.CommandContext. Testing the Execute method
-// would require integration tests with actual kodelet binary or mocking the
-// exec.Command, which is beyond unit test scope.
-// The shell-out pattern is tested at the integration/acceptance level.
+// Execute tests require integration testing (shell-out via exec.CommandContext)

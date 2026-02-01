@@ -239,9 +239,7 @@ func TestWebFetchToolHTMLContentWithPrompt(t *testing.T) {
 		assert.NoError(t, err, "Validation should pass")
 	})
 
-	// Note: AI extraction with prompt test is not included because handleHTMLMarkdownWithPrompt
-	// uses shell-out pattern via exec.CommandContext. Testing would require integration tests
-	// with actual kodelet binary. The shell-out pattern is tested at integration/acceptance level.
+	// AI extraction tests require integration testing (shell-out via exec.CommandContext)
 
 	// Test HTML content without prompt - should return markdown directly
 	t.Run("HTML content without prompt returns markdown directly", func(t *testing.T) {

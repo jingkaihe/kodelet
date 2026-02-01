@@ -1076,8 +1076,7 @@ func (t *Thread) convertToStandardMessages() []llmtypes.Message {
 }
 
 // NewSubAgent creates a subagent thread reusing the parent's client.
-// Deprecated: Subagent functionality now uses shell-out pattern via `kodelet run --as-subagent`.
-// This method is kept for backward compatibility but should not be used for new code.
+// Deprecated: Use shell-out via `kodelet run --as-subagent` instead (ADR 027).
 func (t *Thread) NewSubAgent(_ context.Context, config llmtypes.Config) llmtypes.Thread {
 	conversationID := convtypes.GenerateID()
 

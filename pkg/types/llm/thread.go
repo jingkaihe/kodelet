@@ -6,9 +6,7 @@ import (
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
-// Note: SubAgentConfig, SubAgentConfigKey, and SubagentContextFactory have been removed
-// as part of the subagent shell-out simplification (ADR 027).
-// Subagent functionality now uses `kodelet run --result-only --as-subagent` via exec.Command.
+// SubAgentConfig removed per ADR 027 - subagents now use shell-out via exec.Command
 
 // Message represents a chat message
 type Message struct {
