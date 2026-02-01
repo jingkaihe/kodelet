@@ -38,9 +38,8 @@ type Config struct {
 	Profiles map[string]ProfileConfig `mapstructure:"profiles" json:"profiles,omitempty" yaml:"profiles,omitempty"` // Named configuration profiles
 
 	// Provider-specific configurations
-	OpenAI   *OpenAIConfig           `mapstructure:"openai" json:"openai,omitempty" yaml:"openai,omitempty"`       // OpenAI-specific configuration including compatible providers
-	Google   *GoogleConfig           `mapstructure:"google" json:"google,omitempty" yaml:"google,omitempty"`       // Google GenAI-specific configuration
-	SubAgent *SubAgentConfigSettings `mapstructure:"subagent" json:"subagent,omitempty" yaml:"subagent,omitempty"` // SubAgent configuration for different models/providers (deprecated, use SubagentArgs)
+	OpenAI *OpenAIConfig `mapstructure:"openai" json:"openai,omitempty" yaml:"openai,omitempty"` // OpenAI-specific configuration including compatible providers
+	Google *GoogleConfig `mapstructure:"google" json:"google,omitempty" yaml:"google,omitempty"` // Google GenAI-specific configuration
 
 	// SubagentArgs is CLI arguments to pass when spawning subagents via shell-out
 	// Example: "--profile cheap" or "--use-weak-model"
@@ -110,18 +109,6 @@ var DefaultRetryConfig = RetryConfig{
 	InitialDelay: 1000,  // 1 second
 	MaxDelay:     10000, // 10 seconds
 	BackoffType:  "exponential",
-}
-
-// SubAgentConfigSettings holds the configuration for subagent behavior
-type SubAgentConfigSettings struct {
-	Provider        string        `mapstructure:"provider" json:"provider" yaml:"provider"`                         // Provider for subagent (anthropic, openai, google)
-	Model           string        `mapstructure:"model" json:"model" yaml:"model"`                                  // Model for subagent
-	MaxTokens       int           `mapstructure:"max_tokens" json:"max_tokens" yaml:"max_tokens"`                   // Maximum tokens for subagent
-	ReasoningEffort string        `mapstructure:"reasoning_effort" json:"reasoning_effort" yaml:"reasoning_effort"` // OpenAI specific reasoning effort
-	ThinkingBudget  int           `mapstructure:"thinking_budget" json:"thinking_budget" yaml:"thinking_budget"`    // Anthropic/Google specific thinking budget
-	AllowedTools    []string      `mapstructure:"allowed_tools" json:"allowed_tools" yaml:"allowed_tools"`          // AllowedTools is a list of allowed tools for the subagent (empty means use defaults)
-	OpenAI          *OpenAIConfig `mapstructure:"openai" json:"openai,omitempty" yaml:"openai,omitempty"`           // OpenAI-compatible provider configuration
-	Google          *GoogleConfig `mapstructure:"google" json:"google,omitempty" yaml:"google,omitempty"`           // Google GenAI-specific configuration
 }
 
 // SkillsConfig holds configuration for the agentic skills system.

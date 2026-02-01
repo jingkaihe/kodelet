@@ -303,13 +303,6 @@ subagent_args: ""
 #
 # subagent_args: "--profile openai-subagent"
 
-# DEPRECATED: The 'subagent:' block is deprecated in favor of 'subagent_args'.
-# For cross-provider subagents, define a profile and use:
-#   subagent_args: "--profile <profile-name>"
-# subagent:
-#   provider: "openai"
-#   model: "gpt-4o-mini"
-
 # Example configurations for common scenarios:
 
 # Scenario 1: Use weak model for subagents (same provider, cost optimization)
