@@ -134,7 +134,7 @@ func (t *SubAgentTool) Execute(ctx context.Context, state tooltypes.State, param
 	}
 
 	// Build command with subagent_args from config
-	args := []string{"run", "--result-only", "--as-subagent", "--no-save"}
+	args := []string{"run", "--result-only", "--as-subagent"}
 
 	// Append user-configured subagent args (e.g., "--profile openai --use-weak-model")
 	if llmConfig, ok := state.GetLLMConfig().(llmtypes.Config); ok && llmConfig.SubagentArgs != "" {

@@ -501,7 +501,7 @@ IMPORTANT: Make sure that you preserve all the links in the content including hy
 		input.URL, processedContent, input.Prompt)
 
 	// Build command arguments
-	args := []string{"run", "--result-only", "--as-subagent", "--no-save"}
+	args := []string{"run", "--result-only", "--as-subagent"}
 
 	// Add subagent args from config if available
 	if llmConfig, ok := state.GetLLMConfig().(llmtypes.Config); ok && llmConfig.SubagentArgs != "" {

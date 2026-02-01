@@ -231,7 +231,7 @@ Organize your response to be clear and actionable.`,
 		input.Prompt)
 
 	// Build command arguments
-	args := []string{"run", "--result-only", "--as-subagent", "--no-save", "--image", input.ImagePath}
+	args := []string{"run", "--result-only", "--as-subagent", "--image", input.ImagePath}
 
 	// Add subagent args from config if available
 	if llmConfig, ok := state.GetLLMConfig().(llmtypes.Config); ok && llmConfig.SubagentArgs != "" {
