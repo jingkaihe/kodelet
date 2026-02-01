@@ -138,49 +138,28 @@ func (t *SubAgentTool) Execute(ctx context.Context, state tooltypes.State, param
         return &SubAgentToolResult{err: err.Error(), question: input.Question}
     }
     
-    var result SubAgentOutput
-    if err := json.Unmarshal(output, &result); err != nil {
-        return &SubAgentToolResult{err: errors.Wrap(err, "failed to parse subagent output").Error(), question: input.Question}
-    }
-    
     return &SubAgentToolResult{
-        result:   result.Text,
+        result:   string(output),
         question: input.Question,
-        usage:    result.Usage,
     }
-}
-```
-
-### Structured Output
-
-With `--result-only`, output JSON to stdout:
-```json
-{
-  "text": "The analysis shows...",
-  "usage": {
-    "input_tokens": 1234,
-    "output_tokens": 567,
-    "cache_read_tokens": 0,
-    "cache_write_tokens": 0
-  }
 }
 ```
 
 ## Implementation
 
-### Phase 1: Add CLI Support (~50 lines)
+### Phase 1: Add CLI Support (~20 lines)
 
 1. Add `--as-subagent` flag to `run` command that:
    - Disables the `subagent` tool (prevents recursion)
    - Sets `config.IsSubAgent = true`
-2. Update `--result-only` to output JSON with usage stats (currently outputs plain text)
-3. Add stdin support for reading context (for `web_fetch` use case)
 
-### Phase 2: Simplify SubAgentTool (~50 lines)
+Note: Stdin support already exists via `getQueryFromStdinOrArgs()` - content piped to stdin is combined with the query args.
+
+### Phase 2: Simplify SubAgentTool (~40 lines)
 
 1. Replace context-based thread retrieval with `exec.Command`
 2. Parse `subagent_args` config and append to command args
-3. Parse JSON output for result and usage tracking
+3. Return stdout as result (subagent logs its own usage separately)
 
 ### Phase 3: Consolidate System Prompts
 
@@ -250,7 +229,7 @@ func (t *ImageRecognitionTool) Execute(ctx context.Context, state tooltypes.Stat
     cmd.Env = os.Environ()
     
     output, err := cmd.Output()
-    // ... parse JSON result ...
+    // ... return string(output) as result ...
 }
 ```
 
@@ -279,7 +258,7 @@ func (t *WebFetchTool) handleHTMLMarkdownWithPrompt(ctx context.Context, state t
     cmd.Stdin = strings.NewReader(processedContent)
     
     output, err := cmd.Output()
-    // ... parse JSON result ...
+    // ... return string(output) as result ...
 }
 ```
 
