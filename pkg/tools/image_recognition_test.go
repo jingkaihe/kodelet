@@ -1,13 +1,10 @@
 package tools
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"testing"
 
-	"github.com/jingkaihe/kodelet/pkg/types/llm"
-	"github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -199,88 +196,8 @@ func TestImageRecognitionTool_TracingKVs(t *testing.T) {
 	})
 }
 
-// Mock implementation for testing the Execute method
-type mockState struct {
-	tools.State
-}
-
-func (m *mockState) Tools() []tools.Tool {
-	return []tools.Tool{}
-}
-
-type mockThread struct {
-	sendMessageResult string
-	sendMessageError  error
-}
-
-func (m *mockThread) SendMessage(_ context.Context, _ string, _ llm.MessageHandler, _ llm.MessageOpt) (string, error) {
-	return m.sendMessageResult, m.sendMessageError
-}
-
-func (m *mockThread) SetState(_ tools.State)                                  {}
-func (m *mockThread) GetState() tools.State                                   { return nil }
-func (m *mockThread) AddUserMessage(_ context.Context, _ string, _ ...string) {}
-func (m *mockThread) GetUsage() llm.Usage                                     { return llm.Usage{} }
-func (m *mockThread) GetConversationID() string                               { return "" }
-func (m *mockThread) SetConversationID(_ string)                              {}
-func (m *mockThread) SaveConversation(_ context.Context, _ bool) error        { return nil }
-func (m *mockThread) IsPersisted() bool                                       { return false }
-func (m *mockThread) EnablePersistence(_ context.Context, _ bool)             {}
-func (m *mockThread) Provider() string                                        { return "mock" }
-func (m *mockThread) GetMessages() ([]llm.Message, error)                     { return nil, nil }
-func (m *mockThread) GetConfig() llm.Config                                   { return llm.Config{} }
-func (m *mockThread) NewSubAgent(_ context.Context, _ llm.Config) llm.Thread  { return m }
-func (m *mockThread) AggregateSubagentUsage(_ llm.Usage)                      {}
-func (m *mockThread) SetRecipeHooks(_ map[string]llm.HookConfig)              {}
-func (m *mockThread) GetRecipeHooks() map[string]llm.HookConfig               { return nil }
-
-func TestImageRecognitionTool_Execute(t *testing.T) {
-	tool := &ImageRecognitionTool{}
-
-	// Create a test image file
-	tempDir := t.TempDir()
-	imagePath := filepath.Join(tempDir, "test.png")
-	err := os.WriteFile(imagePath, []byte("fake png content"), 0o644)
-	require.NoError(t, err)
-
-	t.Run("missing sub-agent config", func(t *testing.T) {
-		ctx := context.Background()
-		state := &mockState{}
-		parameters := `{"image_path": "` + imagePath + `", "prompt": "What is this?"}`
-
-		result := tool.Execute(ctx, state, parameters)
-		assert.True(t, result.IsError())
-		assert.Contains(t, result.GetError(), "sub-agent config not found")
-	})
-
-	t.Run("successful execution", func(t *testing.T) {
-		mockThread := &mockThread{
-			sendMessageResult: "This is a test image analysis result",
-			sendMessageError:  nil,
-		}
-
-		subAgentConfig := llm.SubAgentConfig{
-			Thread: mockThread,
-			MessageHandler: &llm.ConsoleMessageHandler{
-				Silent: true,
-			},
-		}
-
-		ctx := context.WithValue(context.Background(), llm.SubAgentConfigKey, subAgentConfig)
-		state := &mockState{}
-		parameters := `{"image_path": "` + imagePath + `", "prompt": "What is this?"}`
-
-		result := tool.Execute(ctx, state, parameters)
-		assert.False(t, result.IsError())
-		assert.Equal(t, "This is a test image analysis result", result.GetResult())
-	})
-
-	t.Run("invalid parameters", func(t *testing.T) {
-		ctx := context.Background()
-		state := &mockState{}
-		parameters := `invalid json`
-
-		result := tool.Execute(ctx, state, parameters)
-		assert.True(t, result.IsError())
-	})
-}
+// Note: Execute method tests are not included because the image_recognition tool
+// uses shell-out pattern via exec.CommandContext. Testing the Execute method
+// would require integration tests with actual kodelet binary or mocking the
+// exec.Command, which is beyond unit test scope.
+// The shell-out pattern is tested at the integration/acceptance level.

@@ -148,7 +148,7 @@ func (t *Thread) Provider() string {
 }
 
 // NewOpenAIThread creates a new thread with OpenAI's API
-func NewOpenAIThread(config llmtypes.Config, subagentContextFactory llmtypes.SubagentContextFactory) (*Thread, error) {
+func NewOpenAIThread(config llmtypes.Config) (*Thread, error) {
 	// Apply defaults if not provided
 	if config.Model == "" {
 		config.Model = "gpt-4.1" // Default to GPT-4.1
@@ -259,7 +259,7 @@ func NewOpenAIThread(config llmtypes.Config, subagentContextFactory llmtypes.Sub
 	}
 
 	// Create the base thread with shared functionality
-	baseThread := base.NewThread(config, conversationID, subagentContextFactory, hookTrigger)
+	baseThread := base.NewThread(config, conversationID, hookTrigger)
 
 	thread := &Thread{
 		Thread:          baseThread,
@@ -601,8 +601,7 @@ func (t *Thread) processMessageExchange(
 		if blocked {
 			output = tooltypes.NewBlockedToolResult(toolCall.Function.Name, reason)
 		} else {
-			runToolCtx := t.SubagentContextFactory(ctx, t, handler, opt.CompactRatio, opt.DisableAutoCompact)
-			output = tools.RunTool(runToolCtx, t.State, toolCall.Function.Name, toolInput)
+			output = tools.RunTool(ctx, t.State, toolCall.Function.Name, toolInput)
 		}
 
 		// Use CLI rendering for consistent output formatting
@@ -957,7 +956,7 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 		return errors.Wrap(err, "failed to load compact prompt")
 	}
 
-	summaryThread, err := NewOpenAIThread(t.GetConfig(), nil)
+	summaryThread, err := NewOpenAIThread(t.GetConfig())
 	if err != nil {
 		return errors.Wrap(err, "failed to create summary thread")
 	}
@@ -982,12 +981,14 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 }
 
 // NewSubAgent creates a new subagent thread that shares the parent's client and configuration.
+// Deprecated: Subagent functionality now uses shell-out pattern via `kodelet run --as-subagent`.
+// This method is kept for backward compatibility but should not be used for new code.
 func (t *Thread) NewSubAgent(_ context.Context, config llmtypes.Config) llmtypes.Thread {
 	conversationID := convtypes.GenerateID()
 
 	// Create subagent base thread
 	hookTrigger := hooks.NewTrigger(t.HookTrigger.Manager, conversationID, true)
-	baseThread := base.NewThread(config, conversationID, t.SubagentContextFactory, hookTrigger)
+	baseThread := base.NewThread(config, conversationID, hookTrigger)
 
 	// Create subagent thread reusing the parent's client instead of creating a new one
 	thread := &Thread{
@@ -1004,7 +1005,7 @@ func (t *Thread) NewSubAgent(_ context.Context, config llmtypes.Config) llmtypes
 
 // ShortSummary generates a concise summary of the conversation using a faster model.
 func (t *Thread) ShortSummary(ctx context.Context) string {
-	summaryThread, err := NewOpenAIThread(t.GetConfig(), nil)
+	summaryThread, err := NewOpenAIThread(t.GetConfig())
 	if err != nil {
 		logger.G(ctx).WithError(err).Error("failed to create summary thread")
 		return "Could not generate summary."

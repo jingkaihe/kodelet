@@ -94,12 +94,15 @@ profiles:
     model: "sonnet-45"
     weak_model: "haiku-45"
     max_tokens: 16000
+    # Use OpenAI subagent profile for cross-provider support
+    subagent_args: "--profile openai-subagent"
 
-    subagent:
-      provider: "openai"
-      model: "o3"
-      reasoning_effort: "high"
-      allowed_tools: ["file_read", "glob_tool", "grep_tool", "thinking"]
+  # Subagent profile for mix-n-match (cross-provider example)
+  openai-subagent:
+    provider: "openai"
+    model: "o3"
+    reasoning_effort: "high"
+    allowed_tools: ["file_read", "glob_tool", "grep_tool", "thinking"]
 
 # OpenAI specific settings
 # Reasoning effort for OpenAI models (low, medium, high)
@@ -275,110 +278,53 @@ google:
   #     context_window: 1048576   # 1M tokens
 
 # Subagent Configuration
-# Configure how subagents behave, including provider mix-and-match capabilities
-# This allows main agent and subagents to use different providers/models
-subagent:
-  # Provider for subagents (can be different from main agent)
-  # Example: Use GPT for subagents while main agent uses Claude
-  # provider: "openai"
+# Subagents are spawned as separate processes using shell-out pattern.
+# Configure subagent behavior using CLI arguments passed to the subprocess.
+#
+# subagent_args: CLI arguments to pass when spawning subagents
+# Common patterns:
+#   - "--use-weak-model"           # Use weak model (same provider as parent)
+#   - "--profile cheap"            # Use a different profile
+#   - "--profile openai-subagent"  # Use cross-provider profile
+#
+# Empty value means subagent uses default config (same as parent)
+subagent_args: ""
 
-  # Model for subagents (typically a lighter/faster model)
-  # model: "gpt-4o-mini"
+# Example: Use weak model for subagents (cost optimization)
+# subagent_args: "--use-weak-model"
 
-  # Maximum tokens for subagent responses
-  # max_tokens: 2048
+# Example: Use a different profile for subagents (cross-provider)
+# First define the profile, then reference it:
+# profiles:
+#   openai-subagent:
+#     provider: "openai"
+#     model: "gpt-4o-mini"
+#     max_tokens: 2048
+#
+# subagent_args: "--profile openai-subagent"
 
-  # OpenAI-specific: Reasoning effort for subagent (low, medium, high)
-  # reasoning_effort: "low"
-
-  # Anthropic-specific: Thinking budget for subagent
-  # thinking_budget: 1024
-
-  # Google-specific: Thinking budget for subagent
-  # thinking_budget: 2048
-
-  # Tools allowed for subagent (empty means use defaults)
-  # Note: subagent tool is automatically excluded to prevent infinite recursion
-  # Meta tools (file_read, grep_tool, glob_tool, thinking) are always enabled
-  # allowed_tools:
-  #   - "bash"
-  #   - "file_read"      # Always enabled (meta tool)
-  #   - "file_write"
-  #   - "file_edit"
-  #   - "grep_tool"      # Always enabled (meta tool)
-  #   - "glob_tool"      # Always enabled (meta tool)
-  #   - "thinking"       # Always enabled (meta tool)
-  #   - "todo_read"
-  #   - "todo_write"
-  #   - "web_fetch"
-
-  # OpenAI configuration for subagent (when using different provider)
-  # openai:
-  #   preset: "openai"
-  #   # Or custom configuration:
-  #   # base_url: "https://api.openai.com/v1"
-  #   # pricing:
-  #   #   gpt-4o-mini:
-  #   #     input: 0.00015    # $0.15 per million tokens
-  #   #     output: 0.0006    # $0.60 per million tokens
-  #   #     context_window: 128000
-
-  # Google configuration for subagent (when using different provider)
-  # google:
-  #   backend: "gemini"
-  #   thinking_budget: 2048
-  #   # Or custom configuration:
-  #   # api_key: "your-google-api-key"
-  #   # pricing:
-  #   #   gemini-2.5-flash:
-  #   #     input: 0.0003     # $0.30 per million tokens
-  #   #     output: 0.0025    # $2.50 per million tokens
-  #   #     context_window: 1048576
-
-# Example configurations for common scenarios:
-
-# Scenario 1: Claude main agent with GPT subagents for cost optimization
-# provider: "anthropic"
-# model: "claude-sonnet-4-5-20250929"
+# DEPRECATED: The 'subagent:' block is deprecated in favor of 'subagent_args'.
+# For cross-provider subagents, define a profile and use:
+#   subagent_args: "--profile <profile-name>"
 # subagent:
 #   provider: "openai"
 #   model: "gpt-4o-mini"
-#   max_tokens: 2048
 
-# Scenario 2: GPT main agent with Claude subagents for specific tasks
-# provider: "openai"
-# model: "gpt-4.1"
-# reasoning_effort: "high"
-# subagent:
-#   provider: "anthropic"
-#   model: "claude-haiku-4-5-20251001"
-#   max_tokens: 4096
+# Example configurations for common scenarios:
 
-# Scenario 3: Same provider, different models for performance
-# provider: "anthropic"
-# model: "claude-opus-4-20250514"
-# subagent:
-#   model: "claude-haiku-4-5-20251001"  # Faster model for subagent tasks
-#   max_tokens: 2048
+# Scenario 1: Use weak model for subagents (same provider, cost optimization)
+# subagent_args: "--use-weak-model"
 
-# Scenario 4: Google main agent with Claude subagents for specific tasks
-# provider: "google"
-# model: "gemini-2.5-pro"
-# thinking_budget_tokens: 8000
-# subagent:
-#   provider: "anthropic"
-#   model: "claude-haiku-4-5-20251001"
-#   max_tokens: 4096
+# Scenario 2: Cross-provider subagents via profiles
+# profiles:
+#   cheap-openai:
+#     provider: "openai"
+#     model: "gpt-4o-mini"
+#     max_tokens: 2048
+#
+# subagent_args: "--profile cheap-openai"
 
-# Scenario 5: Claude main agent with Google subagents for cost optimization
-# provider: "anthropic"
-# model: "claude-sonnet-4-5-20250929"
-# subagent:
-#   provider: "google"
-#   model: "gemini-2.5-flash"
-#   max_tokens: 2048
-
-# Scenario 6: Google Vertex AI for enterprise with thinking capability
+# Scenario 3: Google Vertex AI for enterprise with thinking capability
 # provider: "google"
 # model: "gemini-2.5-pro"
 # thinking_budget_tokens: 8000

@@ -40,7 +40,11 @@ type Config struct {
 	// Provider-specific configurations
 	OpenAI   *OpenAIConfig           `mapstructure:"openai" json:"openai,omitempty" yaml:"openai,omitempty"`       // OpenAI-specific configuration including compatible providers
 	Google   *GoogleConfig           `mapstructure:"google" json:"google,omitempty" yaml:"google,omitempty"`       // Google GenAI-specific configuration
-	SubAgent *SubAgentConfigSettings `mapstructure:"subagent" json:"subagent,omitempty" yaml:"subagent,omitempty"` // SubAgent configuration for different models/providers
+	SubAgent *SubAgentConfigSettings `mapstructure:"subagent" json:"subagent,omitempty" yaml:"subagent,omitempty"` // SubAgent configuration for different models/providers (deprecated, use SubagentArgs)
+
+	// SubagentArgs is CLI arguments to pass when spawning subagents via shell-out
+	// Example: "--profile cheap" or "--use-weak-model"
+	SubagentArgs string `mapstructure:"subagent_args" json:"subagent_args,omitempty" yaml:"subagent_args,omitempty"`
 
 	// Skills configuration
 	Skills *SkillsConfig `mapstructure:"skills" json:"skills,omitempty" yaml:"skills,omitempty"` // Skills configuration for agentic skills system

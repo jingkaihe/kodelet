@@ -33,8 +33,6 @@ const (
 
 	// SystemTemplate is the path to the main system prompt template.
 	SystemTemplate = "templates/system.tmpl"
-	// SubagentTemplate is the path to the subagent prompt template.
-	SubagentTemplate = "templates/subagent.tmpl"
 	// OpenAITemplate is the path to the OpenAI-specific prompt template.
 	OpenAITemplate = "templates/openai_system.tmpl"
 

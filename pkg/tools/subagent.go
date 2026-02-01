@@ -3,13 +3,15 @@ package tools
 import (
 	"context"
 	"encoding/json"
-	"errors"
+	"os"
+	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/invopop/jsonschema"
+	"github.com/pkg/errors"
 	"go.opentelemetry.io/otel/attribute"
 
-	"github.com/jingkaihe/kodelet/pkg/logger"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
@@ -113,8 +115,8 @@ func (t *SubAgentTool) TracingKVs(parameters string) ([]attribute.KeyValue, erro
 	}, nil
 }
 
-// Execute runs the sub-agent and returns the result
-func (t *SubAgentTool) Execute(ctx context.Context, _ tooltypes.State, parameters string) tooltypes.ToolResult {
+// Execute runs the sub-agent via shell-out and returns the result
+func (t *SubAgentTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
 	input := &SubAgentInput{}
 	err := json.Unmarshal([]byte(parameters), input)
 	if err != nil {
@@ -123,36 +125,37 @@ func (t *SubAgentTool) Execute(ctx context.Context, _ tooltypes.State, parameter
 		}
 	}
 
-	// get type.Thread from context
-	subAgentConfig, ok := ctx.Value(llmtypes.SubAgentConfigKey).(llmtypes.SubAgentConfig)
-	if !ok {
+	exe, err := os.Executable()
+	if err != nil {
 		return &SubAgentToolResult{
-			err:      "sub-agent config not found in context",
+			err:      errors.Wrap(err, "failed to get executable path").Error(),
 			question: input.Question,
 		}
 	}
 
-	handler := subAgentConfig.MessageHandler
-	if handler == nil {
-		logger.G(ctx).Warn("no message handler found in context, using console handler")
-		handler = &llmtypes.ConsoleMessageHandler{}
+	// Build command with subagent_args from config
+	args := []string{"run", "--result-only", "--as-subagent", "--no-save"}
+
+	// Append user-configured subagent args (e.g., "--profile openai --use-weak-model")
+	if llmConfig, ok := state.GetLLMConfig().(llmtypes.Config); ok && llmConfig.SubagentArgs != "" {
+		parsedArgs := strings.Fields(llmConfig.SubagentArgs)
+		args = append(args, parsedArgs...)
 	}
 
-	text, err := subAgentConfig.Thread.SendMessage(ctx, input.Question, handler, llmtypes.MessageOpt{
-		PromptCache:        true,
-		UseWeakModel:       false, // explicitly set to false for clarity
-		NoSaveConversation: true,
-		CompactRatio:       subAgentConfig.CompactRatio,
-		DisableAutoCompact: subAgentConfig.DisableAutoCompact,
-	})
+	args = append(args, input.Question)
 
-	// Aggregate subagent usage into parent thread for accurate cost tracking
-	// This must be done regardless of error to capture all API costs
-	if subAgentConfig.ParentThread != nil {
-		subAgentConfig.ParentThread.AggregateSubagentUsage(subAgentConfig.Thread.GetUsage())
-	}
+	cmd := exec.CommandContext(ctx, exe, args...)
+	cmd.Env = os.Environ()
 
+	output, err := cmd.Output()
 	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return &SubAgentToolResult{
+				err:      string(exitErr.Stderr),
+				question: input.Question,
+			}
+		}
 		return &SubAgentToolResult{
 			err:      err.Error(),
 			question: input.Question,
@@ -160,7 +163,7 @@ func (t *SubAgentTool) Execute(ctx context.Context, _ tooltypes.State, parameter
 	}
 
 	return &SubAgentToolResult{
-		result:   text,
+		result:   strings.TrimSpace(string(output)),
 		question: input.Question,
 	}
 }

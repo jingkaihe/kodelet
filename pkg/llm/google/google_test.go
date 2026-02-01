@@ -89,7 +89,7 @@ func TestNewGoogleThread(t *testing.T) {
 				return
 			}
 
-			thread, err := NewGoogleThread(tt.config, nil)
+			thread, err := NewGoogleThread(tt.config)
 
 			if tt.expectErr {
 				assert.Error(t, err)
@@ -124,7 +124,7 @@ func TestGoogleThread_InterfaceCompliance(t *testing.T) {
 		Model:    "gemini-2.5-pro",
 	}
 
-	thread, err := NewGoogleThread(config, nil)
+	thread, err := NewGoogleThread(config)
 	require.NoError(t, err)
 
 	// Test all interface methods exist and work
@@ -255,7 +255,7 @@ func TestGoogleThread_AddUserMessage(t *testing.T) {
 		Model:    "gemini-2.5-pro",
 	}
 
-	thread, err := NewGoogleThread(config, nil)
+	thread, err := NewGoogleThread(config)
 	require.NoError(t, err)
 
 	// Test adding a simple text message
@@ -275,7 +275,7 @@ func TestGoogleThread_ShouldAutoCompact(t *testing.T) {
 		Model:    "gemini-2.5-pro",
 	}
 
-	thread, err := NewGoogleThread(config, nil)
+	thread, err := NewGoogleThread(config)
 	require.NoError(t, err)
 
 	// Test with no context window set
@@ -490,7 +490,7 @@ func TestGetMimeTypeFromExtension(t *testing.T) {
 }
 
 func TestProcessImageFile(t *testing.T) {
-	thread, err := NewGoogleThread(llmtypes.Config{}, nil)
+	thread, err := NewGoogleThread(llmtypes.Config{})
 	require.NoError(t, err)
 
 	// Create a temporary directory for test files
@@ -550,7 +550,7 @@ func TestProcessImageFile(t *testing.T) {
 }
 
 func TestProcessImageURL(t *testing.T) {
-	thread, err := NewGoogleThread(llmtypes.Config{}, nil)
+	thread, err := NewGoogleThread(llmtypes.Config{})
 	require.NoError(t, err)
 
 	tests := []struct {
@@ -591,7 +591,7 @@ func TestProcessImageURL(t *testing.T) {
 }
 
 func TestProcessImageDataURL(t *testing.T) {
-	thread, err := NewGoogleThread(llmtypes.Config{}, nil)
+	thread, err := NewGoogleThread(llmtypes.Config{})
 	require.NoError(t, err)
 
 	// A minimal valid 1x1 PNG image encoded in base64
@@ -673,7 +673,7 @@ func TestProcessImageDataURL(t *testing.T) {
 }
 
 func TestProcessImage_DataURLRouting(t *testing.T) {
-	thread, err := NewGoogleThread(llmtypes.Config{}, nil)
+	thread, err := NewGoogleThread(llmtypes.Config{})
 	require.NoError(t, err)
 
 	validPNGBase64 := "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
@@ -705,7 +705,7 @@ func TestProcessImage_DataURLRouting(t *testing.T) {
 }
 
 func TestGoogleThread_AddUserMessageComprehensive(t *testing.T) {
-	thread, err := NewGoogleThread(llmtypes.Config{}, nil)
+	thread, err := NewGoogleThread(llmtypes.Config{})
 	require.NoError(t, err)
 
 	// Create a temporary directory for test files
@@ -835,7 +835,7 @@ func TestGoogleThread_ShouldAutoCompactComprehensive(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			thread, err := NewGoogleThread(llmtypes.Config{}, nil)
+			thread, err := NewGoogleThread(llmtypes.Config{})
 			require.NoError(t, err)
 
 			// Mock the usage stats
@@ -849,7 +849,7 @@ func TestGoogleThread_ShouldAutoCompactComprehensive(t *testing.T) {
 }
 
 func TestGoogleThread_ToolsMethod(t *testing.T) {
-	thread, err := NewGoogleThread(llmtypes.Config{}, nil)
+	thread, err := NewGoogleThread(llmtypes.Config{})
 	require.NoError(t, err)
 
 	// Test with nil state
@@ -875,7 +875,7 @@ func TestGoogleThread_ToolsMethod(t *testing.T) {
 
 func TestGoogleThread_AutoCompactTriggerLogic(t *testing.T) {
 	t.Run("auto-compact triggers when ratio exceeded", func(t *testing.T) {
-		thread, err := NewGoogleThread(llmtypes.Config{}, nil)
+		thread, err := NewGoogleThread(llmtypes.Config{})
 		require.NoError(t, err)
 
 		// Set up context window to trigger auto-compact
@@ -888,7 +888,7 @@ func TestGoogleThread_AutoCompactTriggerLogic(t *testing.T) {
 	})
 
 	t.Run("auto-compact does not trigger when ratio not exceeded", func(t *testing.T) {
-		thread, err := NewGoogleThread(llmtypes.Config{}, nil)
+		thread, err := NewGoogleThread(llmtypes.Config{})
 		require.NoError(t, err)
 
 		// Set up context window below auto-compact threshold
@@ -901,7 +901,7 @@ func TestGoogleThread_AutoCompactTriggerLogic(t *testing.T) {
 	})
 
 	t.Run("auto-compact disabled when DisableAutoCompact is true", func(t *testing.T) {
-		thread, err := NewGoogleThread(llmtypes.Config{}, nil)
+		thread, err := NewGoogleThread(llmtypes.Config{})
 		require.NoError(t, err)
 
 		// Set up context window to trigger auto-compact
@@ -953,7 +953,7 @@ func TestGoogleThread_AutoCompactTriggerLogic(t *testing.T) {
 
 		for _, test := range tests {
 			t.Run(test.name, func(t *testing.T) {
-				thread, err := NewGoogleThread(llmtypes.Config{}, nil)
+				thread, err := NewGoogleThread(llmtypes.Config{})
 				require.NoError(t, err)
 
 				// Set up context window
@@ -973,7 +973,7 @@ func TestGoogleThread_NewSubAgent(t *testing.T) {
 	parentThread, err := NewGoogleThread(llmtypes.Config{
 		Model:     "gemini-2.5-pro",
 		MaxTokens: 8192,
-	}, nil)
+	})
 	require.NoError(t, err)
 
 	// Set up parent thread state

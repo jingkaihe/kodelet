@@ -6,6 +6,10 @@ import (
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
+// Note: SubAgentConfig, SubAgentConfigKey, and SubagentContextFactory have been removed
+// as part of the subagent shell-out simplification (ADR 027).
+// Subagent functionality now uses `kodelet run --result-only --as-subagent` via exec.Command.
+
 // Message represents a chat message
 type Message struct {
 	Role    string `json:"role"`
@@ -34,24 +38,6 @@ type MessageOpt struct {
 	// DisableUsageLog disables LLM usage logging for this message
 	DisableUsageLog bool
 }
-
-// subAgentConfigKey is a dedicated context key type to avoid collisions
-type subAgentConfigKey struct{}
-
-// SubAgentConfigKey is the context key for SubAgentConfig
-var SubAgentConfigKey = subAgentConfigKey{}
-
-// SubAgentConfig holds the configuration for a subagent in the context
-type SubAgentConfig struct {
-	Thread             Thread         // Thread used by the sub-agent
-	ParentThread       Thread         // Parent thread for usage aggregation
-	MessageHandler     MessageHandler // Message handler for the sub-agent
-	CompactRatio       float64        // CompactRatio from parent agent
-	DisableAutoCompact bool           // DisableAutoCompact from parent agent
-}
-
-// SubagentContextFactory is a function type for creating subagent contexts
-type SubagentContextFactory func(ctx context.Context, parentThread Thread, handler MessageHandler, compactRatio float64, disableAutoCompact bool) context.Context
 
 // HookConfig is a forward declaration of hooks.HookConfig to avoid circular imports.
 // The actual type is defined in pkg/hooks/builtin.go.

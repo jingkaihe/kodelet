@@ -12,9 +12,10 @@ import (
 func TestSubAgentPrompt(t *testing.T) {
 	prompt := SubAgentPrompt("claude-sonnet-4-5-20250929", llm.Config{}, map[string]string{})
 
+	// SubAgentPrompt now uses SystemPrompt with IsSubAgent=true
+	// It should contain the main system prompt content
 	expectedFragments := []string{
-		"You are an AI SWE Agent",
-		"open ended code search, architecture analysis",
+		"You are an interactive CLI tool",
 		"Tone and Style",
 		"Be concise, direct and to the point",
 		"Tool Usage",
@@ -31,10 +32,9 @@ func TestSubAgentPrompt(t *testing.T) {
 		assert.Contains(t, prompt, fragment, "Expected subagent prompt to contain: %q", fragment)
 	}
 
+	// Subagent prompts should NOT contain subagent tool usage examples (to prevent recursion)
 	unexpectedFragments := []string{
 		"## Subagent tool usage examples",
-		"- **ALWAYS prioritize",
-		"for open-ended code search",
 	}
 
 	for _, fragment := range unexpectedFragments {
@@ -55,19 +55,13 @@ func TestSubAgentPromptBashBannedCommands(t *testing.T) {
 }
 
 func TestSubAgentPromptBashAllowedCommands(t *testing.T) {
-	promptCtx := NewPromptContext(nil)
-	config := NewDefaultConfig().WithModel("claude-sonnet-4-5-20250929")
 	allowedCommands := []string{"find *", "grep *", "cat *", "head *", "tail *"}
-	llmConfig := &llm.Config{
+	llmConfig := llm.Config{
 		AllowedCommands: allowedCommands,
+		IsSubAgent:      true,
 	}
 
-	updateContextWithConfig(promptCtx, config)
-	promptCtx.BashAllowedCommands = llmConfig.AllowedCommands
-
-	renderer := NewRenderer(TemplateFS)
-	prompt, err := renderer.RenderSubagentPrompt(promptCtx)
-	require.NoError(t, err, "Failed to render subagent prompt")
+	prompt := SubAgentPrompt("claude-sonnet-4-5-20250929", llmConfig, nil)
 
 	assert.Contains(t, prompt, "Bash Command Restrictions", "Expected subagent prompt to contain 'Bash Command Restrictions' section")
 	assert.Contains(t, prompt, "Allowed Commands", "Expected subagent prompt to contain 'Allowed Commands' section")
@@ -84,7 +78,7 @@ func TestSubAgentPromptContextConsistency(t *testing.T) {
 	promptCtx := NewPromptContext(nil)
 	config := NewDefaultConfig().WithModel("claude-sonnet-4-5-20250929")
 	allowedCommands := []string{"test *", "verify *"}
-	llmConfig := &llm.Config{
+	llmConfig := llm.Config{
 		AllowedCommands: allowedCommands,
 	}
 
@@ -96,8 +90,8 @@ func TestSubAgentPromptContextConsistency(t *testing.T) {
 	systemPrompt, err := renderer.RenderSystemPrompt(promptCtx)
 	require.NoError(t, err, "Failed to render system prompt")
 
-	subagentPrompt, err := renderer.RenderSubagentPrompt(promptCtx)
-	require.NoError(t, err, "Failed to render subagent prompt")
+	// Subagent prompt is now just SystemPrompt with IsSubAgent=true
+	subagentPrompt := SubAgentPrompt("claude-sonnet-4-5-20250929", llmConfig, nil)
 
 	for _, allowedCmd := range allowedCommands {
 		assert.Contains(t, systemPrompt, allowedCmd, "Expected system prompt to contain allowed command: %q", allowedCmd)
@@ -119,7 +113,7 @@ func TestSubAgentPrompt_WithContexts(t *testing.T) {
 
 	prompt := SubAgentPrompt("claude-sonnet-4-5-20250929", llm.Config{}, contexts)
 
-	assert.Contains(t, prompt, "You are an AI SWE Agent", "Expected subagent introduction")
+	assert.Contains(t, prompt, "You are an interactive CLI tool", "Expected subagent introduction")
 	assert.Contains(t, prompt, "Here are some useful context to help you solve the user's problem.", "Expected context introduction")
 
 	assert.Contains(t, prompt, `<context filename="/path/to/project/AGENTS.md", dir="/path/to/project">`, "Expected project AGENTS.md context with filename")
@@ -137,7 +131,7 @@ func TestSubAgentPrompt_WithEmptyContexts(t *testing.T) {
 	emptyContexts := map[string]string{}
 	prompt := SubAgentPrompt("claude-sonnet-4-5-20250929", llm.Config{}, emptyContexts)
 
-	assert.Contains(t, prompt, "You are an AI SWE Agent", "Expected subagent introduction")
+	assert.Contains(t, prompt, "You are an interactive CLI tool", "Expected subagent introduction")
 	assert.Contains(t, prompt, "System Information", "Expected system information section")
 	assert.NotContains(t, prompt, "Here are some useful context to help you solve the user's problem:", "Should not have context intro when no contexts")
 }
@@ -145,7 +139,7 @@ func TestSubAgentPrompt_WithEmptyContexts(t *testing.T) {
 func TestSubAgentPrompt_WithNilContexts(t *testing.T) {
 	prompt := SubAgentPrompt("claude-sonnet-4-5-20250929", llm.Config{}, nil)
 
-	assert.Contains(t, prompt, "You are an AI SWE Agent", "Expected subagent introduction")
+	assert.Contains(t, prompt, "You are an interactive CLI tool", "Expected subagent introduction")
 	assert.Contains(t, prompt, "System Information", "Expected system information section")
 }
 
@@ -173,7 +167,7 @@ func TestSubAgentPrompt_ContextFormattingConsistency(t *testing.T) {
 
 		prompt := SubAgentPrompt("gpt-4", llm.Config{}, contexts)
 
-		assert.Contains(t, prompt, "You are an AI SWE Agent", "Expected subagent introduction")
+		assert.Contains(t, prompt, "You are an interactive CLI tool", "Expected subagent introduction")
 		assert.Contains(t, prompt, "This is the main project context for subagents.", "Expected main project context")
 		assert.Contains(t, prompt, "Authentication-specific guidelines for subagents.", "Expected auth module context")
 		assert.Contains(t, prompt, `<context filename="/project/AGENTS.md", dir="/project">`, "Expected main project context file")
@@ -201,4 +195,16 @@ func TestSubAgentPrompt_FeatureConsistency(t *testing.T) {
 
 	assert.Contains(t, systemPrompt, "</context>", "Expected context closing tags in system prompt")
 	assert.Contains(t, subagentPrompt, "</context>", "Expected context closing tags in subagent prompt")
+}
+
+func TestSubAgentPrompt_NoSubagentExamples(t *testing.T) {
+	// Verify that subagent prompts don't include subagent tool usage examples (to prevent recursion)
+	systemPrompt := SystemPrompt("claude-sonnet-4-5-20250929", llm.Config{}, nil)
+	subagentPrompt := SubAgentPrompt("claude-sonnet-4-5-20250929", llm.Config{}, nil)
+
+	// System prompt (not subagent) SHOULD have subagent examples
+	assert.Contains(t, systemPrompt, "## Subagent tool usage examples", "Expected system prompt to contain subagent examples")
+
+	// Subagent prompt should NOT have subagent examples
+	assert.NotContains(t, subagentPrompt, "## Subagent tool usage examples", "Expected subagent prompt to NOT contain subagent examples")
 }

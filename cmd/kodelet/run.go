@@ -47,6 +47,7 @@ type RunConfig struct {
 	ResultOnly         bool              // Only print the final agent message, no intermediate output or usage stats
 	UseWeakModel       bool              // Use weak model for SendMessage
 	Account            string            // Anthropic subscription account alias to use
+	AsSubagent         bool              // Run as subagent (disables subagent tool to prevent recursion)
 }
 
 func NewRunConfig() *RunConfig {
@@ -69,6 +70,7 @@ func NewRunConfig() *RunConfig {
 		ResultOnly:         false,
 		UseWeakModel:       false,
 		Account:            "",
+		AsSubagent:         false,
 	}
 }
 
@@ -216,6 +218,7 @@ var runCmd = &cobra.Command{
 		}
 
 		llmConfig.NoHooks = config.NoHooks
+		llmConfig.IsSubAgent = config.AsSubagent
 
 		// Set Anthropic account if specified
 		if config.Account != "" {
@@ -243,7 +246,13 @@ var runCmd = &cobra.Command{
 		var stateOpts []tools.BasicStateOption
 		stateOpts = append(stateOpts, tools.WithLLMConfig(llmConfig))
 		stateOpts = append(stateOpts, tools.WithCustomTools(customManager))
-		stateOpts = append(stateOpts, tools.WithMainTools())
+
+		// When running as subagent, use subagent tools (excludes subagent tool to prevent recursion)
+		if config.AsSubagent {
+			stateOpts = append(stateOpts, tools.WithSubAgentToolsFromConfig())
+		} else {
+			stateOpts = append(stateOpts, tools.WithMainTools())
+		}
 
 		// Initialize skills
 		discoveredSkills, skillsEnabled := skills.Initialize(ctx, llmConfig)
@@ -429,6 +438,7 @@ func init() {
 	runCmd.Flags().Bool("result-only", defaults.ResultOnly, "Only print the final agent message, suppressing all intermediate output and usage statistics")
 	runCmd.Flags().Bool("use-weak-model", defaults.UseWeakModel, "Use weak model for processing")
 	runCmd.Flags().String("account", defaults.Account, "Anthropic subscription account alias to use (see 'kodelet accounts list')")
+	runCmd.Flags().Bool("as-subagent", defaults.AsSubagent, "Run as subagent (disables subagent tool to prevent recursion)")
 }
 
 func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
@@ -522,6 +532,10 @@ func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
 
 	if account, err := cmd.Flags().GetString("account"); err == nil {
 		config.Account = account
+	}
+
+	if asSubagent, err := cmd.Flags().GetBool("as-subagent"); err == nil {
+		config.AsSubagent = asSubagent
 	}
 
 	return config

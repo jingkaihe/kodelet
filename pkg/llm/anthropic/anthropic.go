@@ -57,7 +57,7 @@ func (t *Thread) Provider() string {
 }
 
 // NewAnthropicThread creates a new thread with Anthropic's Claude API
-func NewAnthropicThread(config llmtypes.Config, subagentContextFactory llmtypes.SubagentContextFactory) (*Thread, error) {
+func NewAnthropicThread(config llmtypes.Config) (*Thread, error) {
 	// Apply defaults if not provided
 	if config.Model == "" {
 		config.Model = string(anthropic.ModelClaudeSonnet4_20250514)
@@ -145,7 +145,7 @@ func NewAnthropicThread(config llmtypes.Config, subagentContextFactory llmtypes.
 	}
 
 	// Create the base thread with shared functionality
-	baseThread := base.NewThread(config, conversationID, subagentContextFactory, hookTrigger)
+	baseThread := base.NewThread(config, conversationID, hookTrigger)
 
 	thread := &Thread{
 		Thread:          baseThread,
@@ -421,7 +421,7 @@ func (t *Thread) executeToolsParallel(
 		block   anthropic.ContentBlockUnion
 		variant anthropic.ToolUseBlock
 	},
-	opt llmtypes.MessageOpt,
+	_ llmtypes.MessageOpt,
 ) ([]toolExecResult, error) {
 	if len(toolBlocks) == 0 {
 		return nil, nil
@@ -460,11 +460,9 @@ func (t *Thread) executeToolsParallel(
 			if blocked {
 				output = tooltypes.NewBlockedToolResult(toolName, reason)
 			} else {
-				// Use a per-goroutine silent handler to avoid race conditions on shared handler
-				// XXX: It's tricky to visualise agent streaming in the terminal therefore we disable it for now
-				parallelHandler := &llmtypes.StringCollectorHandler{Silent: true}
-				runToolCtx := t.SubagentContextFactory(gctx, t, parallelHandler, opt.CompactRatio, opt.DisableAutoCompact)
-				output = tools.RunTool(runToolCtx, t.State, toolName, toolInput)
+				// Tools that need LLM (subagent, image_recognition, web_fetch) now use shell-out
+				// so no subagent context is needed
+				output = tools.RunTool(gctx, t.State, toolName, toolInput)
 			}
 
 			if err := gctx.Err(); err != nil {
@@ -951,13 +949,15 @@ func (t *Thread) updateUsage(response *anthropic.Message, model anthropic.Model)
 }
 
 // NewSubAgent creates a new subagent thread that shares the parent's client and usage tracking
+// Deprecated: Subagents now use shell-out pattern via the subagent tool.
+// This method is kept for backwards compatibility but should not be used.
 func (t *Thread) NewSubAgent(_ context.Context, config llmtypes.Config) llmtypes.Thread {
 	conversationID := convtypes.GenerateID()
 
 	// Create subagent hook trigger using parent's manager
 	hookTrigger := hooks.NewTrigger(t.HookTrigger.Manager, conversationID, true)
 
-	baseThread := base.NewThread(config, conversationID, t.SubagentContextFactory, hookTrigger)
+	baseThread := base.NewThread(config, conversationID, hookTrigger)
 
 	// Create subagent thread reusing the parent's client instead of creating a new one
 	thread := &Thread{
@@ -971,7 +971,7 @@ func (t *Thread) NewSubAgent(_ context.Context, config llmtypes.Config) llmtypes
 
 // ShortSummary generates a short summary of the conversation using a weak model
 func (t *Thread) ShortSummary(ctx context.Context) string {
-	summaryThread, err := NewAnthropicThread(t.GetConfig(), nil)
+	summaryThread, err := NewAnthropicThread(t.GetConfig())
 	if err != nil {
 		logger.G(ctx).WithError(err).Error("failed to create summary thread")
 		return "Could not generate summary."
@@ -1033,7 +1033,7 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 		return errors.Wrap(err, "failed to load compact prompt")
 	}
 
-	summaryThread, err := NewAnthropicThread(t.GetConfig(), nil)
+	summaryThread, err := NewAnthropicThread(t.GetConfig())
 	if err != nil {
 		return errors.Wrap(err, "failed to create summary thread")
 	}

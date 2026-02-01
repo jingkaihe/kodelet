@@ -23,7 +23,7 @@ func TestNewThread(t *testing.T) {
 		Model:    "gpt-4.1",
 	}
 
-	thread, err := NewThread(config, nil)
+	thread, err := NewThread(config)
 	require.NoError(t, err)
 	require.NotNil(t, thread)
 	assert.Equal(t, "openai-responses", thread.Provider())
@@ -41,7 +41,7 @@ func TestNewThreadWithCustomAPIKey(t *testing.T) {
 		},
 	}
 
-	thread, err := NewThread(config, nil)
+	thread, err := NewThread(config)
 	require.NoError(t, err)
 	require.NotNil(t, thread)
 }
@@ -54,7 +54,7 @@ func TestNewThreadWithoutAPIKey(t *testing.T) {
 		Model:    "gpt-4.1",
 	}
 
-	_, err := NewThread(config, nil)
+	_, err := NewThread(config)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "OPENAI_API_KEY")
 }
@@ -435,7 +435,7 @@ func TestAddUserMessageUpdatesPendingItems(t *testing.T) {
 		Model:    "gpt-4.1",
 	}
 
-	thread, err := NewThread(config, nil)
+	thread, err := NewThread(config)
 	require.NoError(t, err)
 
 	// Initially, both slices should be empty
@@ -467,7 +467,7 @@ func TestThreadPendingItemsInitialization(t *testing.T) {
 		Model:    "gpt-4.1",
 	}
 
-	thread, err := NewThread(config, nil)
+	thread, err := NewThread(config)
 	require.NoError(t, err)
 
 	// Verify pendingItems is initialized (not nil)
@@ -501,7 +501,7 @@ func TestIntegration_ShortSummary(t *testing.T) {
 		MaxTokens: 1024,
 	}
 
-	thread, err := NewThread(config, nil)
+	thread, err := NewThread(config)
 	require.NoError(t, err)
 
 	// Add some conversation history
@@ -536,7 +536,7 @@ func TestIntegration_CompactContext(t *testing.T) {
 		MaxTokens: 1024,
 	}
 
-	thread, err := NewThread(config, nil)
+	thread, err := NewThread(config)
 	require.NoError(t, err)
 
 	// Add conversation history to compact
@@ -604,7 +604,7 @@ func TestIntegration_SendMessageAndCompact(t *testing.T) {
 		MaxTokens: 256,
 	}
 
-	thread, err := NewThread(config, nil)
+	thread, err := NewThread(config)
 	require.NoError(t, err)
 
 	// Create a simple handler that collects text

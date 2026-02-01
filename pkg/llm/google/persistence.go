@@ -109,7 +109,7 @@ func (t *Thread) generateSummary(ctx context.Context) string {
 		weakModelConfig.Model = "gemini-2.5-flash"
 	}
 
-	summaryThread, err := NewGoogleThread(weakModelConfig, t.SubagentContextFactory)
+	summaryThread, err := NewGoogleThread(weakModelConfig)
 	if err != nil {
 		logger.G(ctx).WithError(err).Error("Failed to create summary thread")
 		return ""

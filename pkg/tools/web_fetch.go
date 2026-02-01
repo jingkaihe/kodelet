@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"strings"
@@ -21,7 +22,7 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/osutil"
-	"github.com/jingkaihe/kodelet/pkg/types/llm"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
@@ -230,7 +231,7 @@ func (t *WebFetchTool) ValidateInput(_ tooltypes.State, parameters string) error
 }
 
 // Execute executes the web_fetch tool.
-func (t *WebFetchTool) Execute(ctx context.Context, _ tooltypes.State, parameters string) tooltypes.ToolResult {
+func (t *WebFetchTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
 	input := &WebFetchInput{}
 	err := json.Unmarshal([]byte(parameters), input)
 	if err != nil {
@@ -267,7 +268,7 @@ func (t *WebFetchTool) Execute(ctx context.Context, _ tooltypes.State, parameter
 		return t.handleHTMLMarkdownContent(ctx, input, content, contentType)
 	}
 	// With prompt: use AI extraction
-	return t.handleHTMLMarkdownWithPrompt(ctx, input, content, contentType)
+	return t.handleHTMLMarkdownWithPrompt(ctx, state, input, content, contentType)
 }
 
 // TracingKVs returns tracing key-value pairs for observability.
@@ -460,8 +461,9 @@ func (t *WebFetchTool) handleHTMLMarkdownContent(ctx context.Context, input *Web
 	}
 }
 
-// handleHTMLMarkdownWithPrompt processes HTML/Markdown content with AI extraction
-func (t *WebFetchTool) handleHTMLMarkdownWithPrompt(ctx context.Context, input *WebFetchInput, content, contentType string) tooltypes.ToolResult {
+// handleHTMLMarkdownWithPrompt processes HTML/Markdown content with AI extraction using shell-out pattern.
+// This spawns a subagent process via `kodelet run --as-subagent` for content extraction.
+func (t *WebFetchTool) handleHTMLMarkdownWithPrompt(ctx context.Context, state tooltypes.State, input *WebFetchInput, content, contentType string) tooltypes.ToolResult {
 	// Convert HTML to Markdown if needed
 	var processedContent string
 	if strings.Contains(contentType, "text/html") {
@@ -470,13 +472,13 @@ func (t *WebFetchTool) handleHTMLMarkdownWithPrompt(ctx context.Context, input *
 		processedContent = content
 	}
 
-	// Use AI to extract the requested information
-	subAgentConfig, ok := ctx.Value(llm.SubAgentConfigKey).(llm.SubAgentConfig)
-	if !ok {
+	// Get the current executable path
+	exe, err := os.Executable()
+	if err != nil {
 		return &WebFetchToolResult{
 			url:    input.URL,
 			prompt: input.Prompt,
-			err:    "sub-agent config not found in context",
+			err:    fmt.Sprintf("Failed to get executable path: %s", err),
 		}
 	}
 
@@ -498,25 +500,30 @@ IMPORTANT: Make sure that you preserve all the links in the content including hy
 `,
 		input.URL, processedContent, input.Prompt)
 
-	// Use weak model for extraction
-	extractedInfo, err := subAgentConfig.Thread.SendMessage(ctx,
-		extractionPrompt,
-		&llm.ConsoleMessageHandler{
-			Silent: true,
-		},
-		llm.MessageOpt{
-			UseWeakModel: true,
-			PromptCache:  false,
-			NoToolUse:    true,
-		},
-	)
+	// Build command arguments
+	args := []string{"run", "--result-only", "--as-subagent", "--no-save"}
 
-	// Aggregate subagent usage into parent thread for accurate cost tracking
-	if subAgentConfig.ParentThread != nil {
-		subAgentConfig.ParentThread.AggregateSubagentUsage(subAgentConfig.Thread.GetUsage())
+	// Add subagent args from config if available
+	if llmConfig, ok := state.GetLLMConfig().(llmtypes.Config); ok && llmConfig.SubagentArgs != "" {
+		parsedArgs := strings.Fields(llmConfig.SubagentArgs)
+		args = append(args, parsedArgs...)
 	}
 
+	// Add the extraction prompt as the query
+	args = append(args, extractionPrompt)
+
+	// Execute the subagent
+	cmd := exec.CommandContext(ctx, exe, args...)
+	output, err := cmd.Output()
 	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return &WebFetchToolResult{
+				url:    input.URL,
+				prompt: input.Prompt,
+				err:    fmt.Sprintf("Failed to extract information: %s\nstderr: %s", err, string(exitErr.Stderr)),
+			}
+		}
 		return &WebFetchToolResult{
 			url:    input.URL,
 			prompt: input.Prompt,
@@ -527,7 +534,7 @@ IMPORTANT: Make sure that you preserve all the links in the content including hy
 	return &WebFetchToolResult{
 		url:    input.URL,
 		prompt: input.Prompt,
-		result: extractedInfo,
+		result: strings.TrimSpace(string(output)),
 	}
 }
 

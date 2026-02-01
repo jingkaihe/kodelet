@@ -58,7 +58,7 @@ func createTestThread() *Thread {
 		MaxTokens: 8192,
 	}
 
-	baseThread := base.NewThread(config, "test-conv-id", nil, hooks.Trigger{})
+	baseThread := base.NewThread(config, "test-conv-id", hooks.Trigger{})
 
 	thread := &Thread{
 		Thread: baseThread,

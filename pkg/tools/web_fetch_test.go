@@ -12,9 +12,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/jingkaihe/kodelet/pkg/types/llm"
-	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
 func TestWebFetchToolValidation(t *testing.T) {
@@ -242,29 +239,9 @@ func TestWebFetchToolHTMLContentWithPrompt(t *testing.T) {
 		assert.NoError(t, err, "Validation should pass")
 	})
 
-	// Test AI extraction logic with mock
-	t.Run("AI extraction logic works with mock", func(t *testing.T) {
-		mockThread := &MockThread{
-			response: "The main heading is: Welcome to Example.com",
-		}
-
-		ctx := context.WithValue(context.Background(), llm.SubAgentConfigKey, llm.SubAgentConfig{
-			Thread: mockThread,
-		})
-
-		// Test the handleHTMLMarkdownWithPrompt function directly
-		input := &WebFetchInput{
-			URL:    "https://example.com/page.html",
-			Prompt: "What is the main heading?",
-		}
-
-		htmlContent := `<html><body><h1>Welcome to Example.com</h1></body></html>`
-		result := tool.handleHTMLMarkdownWithPrompt(ctx, input, htmlContent, "text/html")
-
-		assert.False(t, result.IsError())
-		assert.Equal(t, "The main heading is: Welcome to Example.com", result.GetResult())
-		assert.True(t, mockThread.called)
-	})
+	// Note: AI extraction with prompt test is not included because handleHTMLMarkdownWithPrompt
+	// uses shell-out pattern via exec.CommandContext. Testing would require integration tests
+	// with actual kodelet binary. The shell-out pattern is tested at integration/acceptance level.
 
 	// Test HTML content without prompt - should return markdown directly
 	t.Run("HTML content without prompt returns markdown directly", func(t *testing.T) {
@@ -507,86 +484,6 @@ func TestWebFetchToolTracingKVs(t *testing.T) {
 		_, err := tool.TracingKVs(`{"url": invalid}`)
 		assert.Error(t, err)
 	})
-}
-
-// MockThread implements a mock LLM thread for testing
-type MockThread struct {
-	called     bool
-	lastPrompt string
-	response   string
-	err        error
-	state      tooltypes.State
-}
-
-func (m *MockThread) SetState(s tooltypes.State) {
-	m.state = s
-}
-
-func (m *MockThread) GetState() tooltypes.State {
-	return m.state
-}
-
-func (m *MockThread) AddUserMessage(_ context.Context, _ string, _ ...string) {
-	// Mock implementation - do nothing
-}
-
-func (m *MockThread) SendMessage(_ context.Context, prompt string, _ llm.MessageHandler, _ llm.MessageOpt) (string, error) {
-	m.called = true
-	m.lastPrompt = prompt
-	return m.response, m.err
-}
-
-func (m *MockThread) GetUsage() llm.Usage {
-	return llm.Usage{}
-}
-
-func (m *MockThread) GetConversationID() string {
-	return "test-conversation-id"
-}
-
-func (m *MockThread) SetConversationID(_ string) {
-	// Mock implementation - do nothing
-}
-
-func (m *MockThread) SaveConversation(_ context.Context, _ bool) error {
-	return nil
-}
-
-func (m *MockThread) IsPersisted() bool {
-	return false
-}
-
-func (m *MockThread) EnablePersistence(_ context.Context, _ bool) {
-	// Mock implementation - do nothing
-}
-
-func (m *MockThread) Provider() string {
-	return "mock"
-}
-
-func (m *MockThread) GetMessages() ([]llm.Message, error) {
-	return []llm.Message{}, nil
-}
-
-func (m *MockThread) GetConfig() llm.Config {
-	return llm.Config{}
-}
-
-func (m *MockThread) NewSubAgent(_ context.Context, _ llm.Config) llm.Thread {
-	return m
-}
-
-func (m *MockThread) AggregateSubagentUsage(_ llm.Usage) {}
-
-func (m *MockThread) SetRecipeHooks(_ map[string]llm.HookConfig) {}
-
-func (m *MockThread) GetRecipeHooks() map[string]llm.HookConfig { return nil }
-
-func (m *MockThread) Reset() {
-	m.called = false
-	m.lastPrompt = ""
-	m.response = ""
-	m.err = nil
 }
 
 func TestWebFetchToolCodeContentTruncation(t *testing.T) {

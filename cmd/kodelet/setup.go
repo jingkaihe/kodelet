@@ -112,17 +112,20 @@ profiles:
     hybrid:
         max_tokens: 16000
         model: sonnet-45
-        subagent:
-            allowed_tools:
-                - file_read
-                - glob_tool
-                - grep_tool
-            model: gpt-5
-            provider: openai
-            reasoning_effort: high
+        subagent_args: "--profile openai-subagent"
         thinking_budget_tokens: 8000
         weak_model: haiku-45
         weak_model_max_tokens: 8192
+    openai-subagent:
+        allowed_tools:
+            - file_read
+            - glob_tool
+            - grep_tool
+        model: gpt-5.2-codex
+        openai:
+            use_responses_api: true
+        provider: openai
+        reasoning_effort: high
     openai:
         max_tokens: 16000
         model: gpt-5.2-codex

@@ -37,8 +37,8 @@ func TestBasicState(t *testing.T) {
 		assert.Equal(t, mainTools[i].Name(), tool.Name())
 	}
 
-	basicConfig := llmtypes.Config{}
-	subAgentTools := NewBasicState(context.TODO(), WithSubAgentTools(basicConfig))
+	// Test subagent tools configuration via WithSubAgentToolsFromConfig
+	subAgentTools := NewBasicState(context.TODO(), WithSubAgentToolsFromConfig())
 	expectedSubAgentTools := GetSubAgentTools(context.Background(), []string{})
 	assert.Equal(t, len(expectedSubAgentTools), len(subAgentTools.Tools()))
 	for i, tool := range subAgentTools.Tools() {
@@ -162,9 +162,10 @@ func TestBasicState_ConfigureBashTool_WithSubAgentTools(t *testing.T) {
 	allowedCommands := []string{"npm *", "yarn *"}
 	config := llmtypes.Config{
 		AllowedCommands: allowedCommands,
+		IsSubAgent:      true,
 	}
 
-	s := NewBasicState(context.TODO(), WithLLMConfig(config), WithSubAgentTools(config))
+	s := NewBasicState(context.TODO(), WithLLMConfig(config), WithSubAgentToolsFromConfig())
 
 	tools := s.BasicTools()
 	var bashTool *BashTool

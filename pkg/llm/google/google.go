@@ -74,7 +74,7 @@ func (t *Thread) Provider() string {
 }
 
 // NewGoogleThread creates a new thread with Google's GenAI API
-func NewGoogleThread(config llmtypes.Config, subagentContextFactory llmtypes.SubagentContextFactory) (*Thread, error) {
+func NewGoogleThread(config llmtypes.Config) (*Thread, error) {
 	// Create a copy of the config to avoid modifying the original
 	configCopy := config
 
@@ -136,7 +136,7 @@ func NewGoogleThread(config llmtypes.Config, subagentContextFactory llmtypes.Sub
 
 	// Create the thread with embedded base.Thread
 	t := &Thread{
-		Thread:         base.NewThread(configCopy, conversationID, subagentContextFactory, hookTrigger),
+		Thread:         base.NewThread(configCopy, conversationID, hookTrigger),
 		client:         client,
 		backend:        backend,
 		thinkingBudget: thinkingBudget,
@@ -942,7 +942,7 @@ func generateToolCallID() string {
 }
 
 // executeToolCalls executes tool calls and adds results to the conversation
-func (t *Thread) executeToolCalls(ctx context.Context, response *Response, handler llmtypes.MessageHandler, opt llmtypes.MessageOpt) {
+func (t *Thread) executeToolCalls(ctx context.Context, response *Response, handler llmtypes.MessageHandler, _ llmtypes.MessageOpt) {
 	var toolResultParts []*genai.Part
 
 	for _, toolCall := range response.ToolCalls {
@@ -967,8 +967,7 @@ func (t *Thread) executeToolCalls(ctx context.Context, response *Response, handl
 		if blocked {
 			output = tooltypes.NewBlockedToolResult(toolCall.Name, reason)
 		} else {
-			runToolCtx := t.SubagentContextFactory(ctx, t, handler, opt.CompactRatio, opt.DisableAutoCompact)
-			output = tools.RunTool(runToolCtx, t.State, toolCall.Name, toolInput)
+			output = tools.RunTool(ctx, t.State, toolCall.Name, toolInput)
 		}
 
 		// Use CLI rendering for consistent output formatting
@@ -1076,7 +1075,9 @@ func (t *Thread) convertToStandardMessages() []llmtypes.Message {
 	return messages
 }
 
-// NewSubAgent creates a subagent thread reusing the parent's client
+// NewSubAgent creates a subagent thread reusing the parent's client.
+// Deprecated: Subagent functionality now uses shell-out pattern via `kodelet run --as-subagent`.
+// This method is kept for backward compatibility but should not be used for new code.
 func (t *Thread) NewSubAgent(_ context.Context, config llmtypes.Config) llmtypes.Thread {
 	conversationID := convtypes.GenerateID()
 
@@ -1085,7 +1086,7 @@ func (t *Thread) NewSubAgent(_ context.Context, config llmtypes.Config) llmtypes
 
 	// Create subagent thread reusing the parent's client instead of creating a new one
 	subagentThread := &Thread{
-		Thread:         base.NewThread(config, conversationID, t.SubagentContextFactory, hookTrigger),
+		Thread:         base.NewThread(config, conversationID, hookTrigger),
 		client:         t.client,  // Reuse parent's client
 		backend:        t.backend, // Reuse parent's backend
 		thinkingBudget: t.thinkingBudget,
@@ -1134,7 +1135,7 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 		return errors.Wrap(err, "failed to load compact prompt")
 	}
 
-	summaryThread, err := NewGoogleThread(t.GetConfig(), nil)
+	summaryThread, err := NewGoogleThread(t.GetConfig())
 	if err != nil {
 		return errors.Wrap(err, "failed to create summary thread")
 	}
@@ -1160,7 +1161,7 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 
 // ShortSummary generates a brief summary of the conversation
 func (t *Thread) ShortSummary(ctx context.Context) string {
-	summaryThread, err := NewGoogleThread(t.GetConfig(), nil)
+	summaryThread, err := NewGoogleThread(t.GetConfig())
 	if err != nil {
 		logger.G(ctx).WithError(err).Error("failed to create summary thread")
 		return "Could not generate summary."

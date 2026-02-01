@@ -116,7 +116,7 @@ func TestProcessStreamThinkingEndsBeforeText(t *testing.T) {
 	stream := ssestream.NewStream[responses.ResponseStreamEventUnion](decoder, nil)
 
 	thread := &Thread{
-		Thread:       base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-4.1"}, "test", nil, hooks.Trigger{}),
+		Thread:       base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-4.1"}, "test", hooks.Trigger{}),
 		storedItems:  make([]StoredInputItem, 0),
 		inputItems:   make([]responses.ResponseInputItemUnionParam, 0),
 		pendingItems: make([]responses.ResponseInputItemUnionParam, 0),

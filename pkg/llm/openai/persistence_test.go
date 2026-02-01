@@ -320,7 +320,7 @@ func TestSaveConversationMessageCleanup(t *testing.T) {
 			// Create a thread without persistence to avoid store issues
 			thread, err := NewOpenAIThread(llmtypes.Config{
 				Model: "gpt-4.1",
-			}, nil)
+			})
 			require.NoError(t, err)
 
 			// Set up state

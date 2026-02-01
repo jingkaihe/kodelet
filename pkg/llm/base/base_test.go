@@ -48,7 +48,7 @@ func TestNewThread(t *testing.T) {
 	conversationID := "test-conv-123"
 	hookTrigger := hooks.Trigger{}
 
-	bt := NewThread(config, conversationID, nil, hookTrigger)
+	bt := NewThread(config, conversationID, hookTrigger)
 
 	require.NotNil(t, bt)
 	assert.Equal(t, config, bt.Config)
@@ -60,7 +60,7 @@ func TestNewThread(t *testing.T) {
 }
 
 func TestSetState(t *testing.T) {
-	bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+	bt := NewThread(llmtypes.Config{}, "", hooks.Trigger{})
 
 	state := &mockState{}
 	bt.SetState(state)
@@ -69,7 +69,7 @@ func TestSetState(t *testing.T) {
 }
 
 func TestGetState(t *testing.T) {
-	bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+	bt := NewThread(llmtypes.Config{}, "", hooks.Trigger{})
 
 	expectedState := &mockState{}
 	bt.State = expectedState
@@ -82,20 +82,20 @@ func TestGetConfig(t *testing.T) {
 		Model:     "claude-3-sonnet",
 		MaxTokens: 4096,
 	}
-	bt := NewThread(config, "", nil, hooks.Trigger{})
+	bt := NewThread(config, "", hooks.Trigger{})
 
 	assert.Equal(t, config, bt.GetConfig())
 }
 
 func TestGetConversationID(t *testing.T) {
 	conversationID := "conv-abc-123"
-	bt := NewThread(llmtypes.Config{}, conversationID, nil, hooks.Trigger{})
+	bt := NewThread(llmtypes.Config{}, conversationID, hooks.Trigger{})
 
 	assert.Equal(t, conversationID, bt.GetConversationID())
 }
 
 func TestSetConversationID(t *testing.T) {
-	bt := NewThread(llmtypes.Config{}, "initial-id", nil, hooks.Trigger{})
+	bt := NewThread(llmtypes.Config{}, "initial-id", hooks.Trigger{})
 
 	newID := "new-conversation-id"
 	bt.SetConversationID(newID)
@@ -105,7 +105,7 @@ func TestSetConversationID(t *testing.T) {
 }
 
 func TestIsPersisted(t *testing.T) {
-	bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+	bt := NewThread(llmtypes.Config{}, "", hooks.Trigger{})
 
 	assert.False(t, bt.IsPersisted())
 
@@ -114,7 +114,7 @@ func TestIsPersisted(t *testing.T) {
 }
 
 func TestGetUsage(t *testing.T) {
-	bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+	bt := NewThread(llmtypes.Config{}, "", hooks.Trigger{})
 
 	bt.Usage.InputTokens = 100
 	bt.Usage.OutputTokens = 50
@@ -134,7 +134,7 @@ func TestGetUsage_NilUsage(t *testing.T) {
 }
 
 func TestGetUsage_ConcurrentAccess(_ *testing.T) {
-	bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+	bt := NewThread(llmtypes.Config{}, "", hooks.Trigger{})
 
 	var wg sync.WaitGroup
 	const numGoroutines = 100
@@ -155,7 +155,7 @@ func TestGetUsage_ConcurrentAccess(_ *testing.T) {
 }
 
 func TestAggregateSubagentUsage(t *testing.T) {
-	bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+	bt := NewThread(llmtypes.Config{}, "", hooks.Trigger{})
 
 	// Set initial values
 	bt.Usage.InputTokens = 100
@@ -220,7 +220,7 @@ func TestAggregateSubagentUsage_NilUsage(t *testing.T) {
 }
 
 func TestAggregateSubagentUsage_ConcurrentAccess(t *testing.T) {
-	bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+	bt := NewThread(llmtypes.Config{}, "", hooks.Trigger{})
 
 	var wg sync.WaitGroup
 	const numGoroutines = 100
@@ -242,7 +242,7 @@ func TestAggregateSubagentUsage_ConcurrentAccess(t *testing.T) {
 }
 
 func TestSetStructuredToolResult(t *testing.T) {
-	bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+	bt := NewThread(llmtypes.Config{}, "", hooks.Trigger{})
 
 	result := tooltypes.StructuredToolResult{
 		ToolName: "test-tool",
@@ -270,7 +270,7 @@ func TestSetStructuredToolResult_NilMap(t *testing.T) {
 }
 
 func TestSetStructuredToolResult_MultipleResults(t *testing.T) {
-	bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+	bt := NewThread(llmtypes.Config{}, "", hooks.Trigger{})
 
 	result1 := tooltypes.StructuredToolResult{ToolName: "tool-1", Success: true}
 	result2 := tooltypes.StructuredToolResult{ToolName: "tool-2", Success: false}
@@ -284,7 +284,7 @@ func TestSetStructuredToolResult_MultipleResults(t *testing.T) {
 }
 
 func TestGetStructuredToolResults(t *testing.T) {
-	bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+	bt := NewThread(llmtypes.Config{}, "", hooks.Trigger{})
 
 	result := tooltypes.StructuredToolResult{
 		ToolName: "test-tool",
@@ -310,7 +310,7 @@ func TestGetStructuredToolResults_NilMap(t *testing.T) {
 }
 
 func TestGetStructuredToolResults_ReturnsCopy(t *testing.T) {
-	bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+	bt := NewThread(llmtypes.Config{}, "", hooks.Trigger{})
 
 	result := tooltypes.StructuredToolResult{ToolName: "original-tool", Success: true}
 	bt.ToolResults["tool-1"] = result
@@ -322,7 +322,7 @@ func TestGetStructuredToolResults_ReturnsCopy(t *testing.T) {
 }
 
 func TestSetStructuredToolResults(t *testing.T) {
-	bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+	bt := NewThread(llmtypes.Config{}, "", hooks.Trigger{})
 
 	results := map[string]tooltypes.StructuredToolResult{
 		"tool-1": {ToolName: "tool-1", Success: true},
@@ -337,7 +337,7 @@ func TestSetStructuredToolResults(t *testing.T) {
 }
 
 func TestSetStructuredToolResults_NilInput(t *testing.T) {
-	bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+	bt := NewThread(llmtypes.Config{}, "", hooks.Trigger{})
 
 	bt.ToolResults["existing"] = tooltypes.StructuredToolResult{ToolName: "existing"}
 
@@ -348,7 +348,7 @@ func TestSetStructuredToolResults_NilInput(t *testing.T) {
 }
 
 func TestSetStructuredToolResults_MakesCopy(t *testing.T) {
-	bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+	bt := NewThread(llmtypes.Config{}, "", hooks.Trigger{})
 
 	results := map[string]tooltypes.StructuredToolResult{
 		"tool-1": {ToolName: "original-tool", Success: true},
@@ -362,7 +362,7 @@ func TestSetStructuredToolResults_MakesCopy(t *testing.T) {
 }
 
 func TestStructuredToolResults_ConcurrentAccess(_ *testing.T) {
-	bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+	bt := NewThread(llmtypes.Config{}, "", hooks.Trigger{})
 
 	var wg sync.WaitGroup
 	const numGoroutines = 100
@@ -469,7 +469,7 @@ func TestShouldAutoCompact(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+			bt := NewThread(llmtypes.Config{}, "", hooks.Trigger{})
 			bt.Usage.CurrentContextWindow = tt.currentContextWindow
 			bt.Usage.MaxContextWindow = tt.maxContextWindow
 
@@ -489,7 +489,7 @@ func TestShouldAutoCompact_NilUsage(t *testing.T) {
 }
 
 func TestShouldAutoCompact_ConcurrentAccess(_ *testing.T) {
-	bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+	bt := NewThread(llmtypes.Config{}, "", hooks.Trigger{})
 	bt.Usage.CurrentContextWindow = 90000
 	bt.Usage.MaxContextWindow = 100000
 
@@ -521,7 +521,7 @@ func TestCreateMessageSpan(t *testing.T) {
 		WeakModelMaxTokens: 2048,
 		IsSubAgent:         false,
 	}
-	bt := NewThread(config, "test-conv-123", nil, hooks.Trigger{})
+	bt := NewThread(config, "test-conv-123", hooks.Trigger{})
 	bt.Persisted = true
 
 	tracer := noop.NewTracerProvider().Tracer("test")
@@ -544,7 +544,7 @@ func TestCreateMessageSpan_WithExtraAttributes(t *testing.T) {
 		MaxTokens:            4096,
 		ThinkingBudgetTokens: 1000,
 	}
-	bt := NewThread(config, "test-conv-456", nil, hooks.Trigger{})
+	bt := NewThread(config, "test-conv-456", hooks.Trigger{})
 
 	tracer := noop.NewTracerProvider().Tracer("test")
 	ctx := context.Background()
@@ -565,7 +565,7 @@ func TestCreateMessageSpan_WithExtraAttributes(t *testing.T) {
 }
 
 func TestCreateMessageSpan_EmptyMessage(t *testing.T) {
-	bt := NewThread(llmtypes.Config{Model: "test"}, "", nil, hooks.Trigger{})
+	bt := NewThread(llmtypes.Config{Model: "test"}, "", hooks.Trigger{})
 	tracer := noop.NewTracerProvider().Tracer("test")
 	ctx := context.Background()
 
@@ -577,7 +577,7 @@ func TestCreateMessageSpan_EmptyMessage(t *testing.T) {
 }
 
 func TestFinalizeMessageSpan_Success(_ *testing.T) {
-	bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+	bt := NewThread(llmtypes.Config{}, "", hooks.Trigger{})
 	bt.Usage.InputTokens = 100
 	bt.Usage.OutputTokens = 50
 	bt.Usage.InputCost = 0.01
@@ -592,7 +592,7 @@ func TestFinalizeMessageSpan_Success(_ *testing.T) {
 }
 
 func TestFinalizeMessageSpan_WithError(_ *testing.T) {
-	bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+	bt := NewThread(llmtypes.Config{}, "", hooks.Trigger{})
 	bt.Usage.InputTokens = 50
 	bt.Usage.OutputTokens = 0
 
@@ -604,7 +604,7 @@ func TestFinalizeMessageSpan_WithError(_ *testing.T) {
 }
 
 func TestFinalizeMessageSpan_WithExtraAttributes(_ *testing.T) {
-	bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+	bt := NewThread(llmtypes.Config{}, "", hooks.Trigger{})
 	bt.Usage.InputTokens = 100
 	bt.Usage.OutputTokens = 50
 	bt.Usage.CacheCreationInputTokens = 500
@@ -637,7 +637,7 @@ func TestCreateAndFinalizeMessageSpan_Integration(t *testing.T) {
 		Model:     "gpt-4.1",
 		MaxTokens: 8192,
 	}
-	bt := NewThread(config, "integration-conv-123", nil, hooks.Trigger{})
+	bt := NewThread(config, "integration-conv-123", hooks.Trigger{})
 	bt.Persisted = true
 
 	bt.Usage.InputTokens = 500
@@ -661,7 +661,7 @@ func TestCreateAndFinalizeMessageSpan_Integration(t *testing.T) {
 }
 
 func TestTracingMethods_ConcurrentAccess(_ *testing.T) {
-	bt := NewThread(llmtypes.Config{Model: "test-model"}, "conv-123", nil, hooks.Trigger{})
+	bt := NewThread(llmtypes.Config{Model: "test-model"}, "conv-123", hooks.Trigger{})
 	bt.Usage.InputTokens = 100
 	bt.Usage.OutputTokens = 50
 	bt.Usage.MaxContextWindow = 100000
@@ -699,7 +699,7 @@ func TestTracingMethods_ConcurrentAccess(_ *testing.T) {
 }
 
 func TestTracingMethods_VariableReuseAcrossSpans(t *testing.T) {
-	bt := NewThread(llmtypes.Config{Model: "test-model", MaxTokens: 4096}, "conv-reuse", nil, hooks.Trigger{})
+	bt := NewThread(llmtypes.Config{Model: "test-model", MaxTokens: 4096}, "conv-reuse", hooks.Trigger{})
 	tracer := noop.NewTracerProvider().Tracer("test")
 
 	for i := 0; i < 5; i++ {
@@ -718,7 +718,7 @@ func TestTracingMethods_VariableReuseAcrossSpans(t *testing.T) {
 }
 
 func TestCreateMessageSpan_VerifySpanInterface(t *testing.T) {
-	bt := NewThread(llmtypes.Config{Model: "test"}, "conv-123", nil, hooks.Trigger{})
+	bt := NewThread(llmtypes.Config{Model: "test"}, "conv-123", hooks.Trigger{})
 	tracer := noop.NewTracerProvider().Tracer("test")
 	ctx := context.Background()
 
@@ -776,7 +776,7 @@ func (m *mockConversationStore) Close() error {
 }
 
 func TestEnablePersistence_DisablePersistence(t *testing.T) {
-	bt := NewThread(llmtypes.Config{}, "conv-123", nil, hooks.Trigger{})
+	bt := NewThread(llmtypes.Config{}, "conv-123", hooks.Trigger{})
 	bt.Persisted = true // Start with persistence enabled
 
 	bt.EnablePersistence(context.Background(), false)
@@ -785,7 +785,7 @@ func TestEnablePersistence_DisablePersistence(t *testing.T) {
 }
 
 func TestEnablePersistence_WithExistingStore(t *testing.T) {
-	bt := NewThread(llmtypes.Config{}, "conv-123", nil, hooks.Trigger{})
+	bt := NewThread(llmtypes.Config{}, "conv-123", hooks.Trigger{})
 	mockStore := &mockConversationStore{}
 	bt.Store = mockStore
 
@@ -802,7 +802,7 @@ func TestEnablePersistence_WithExistingStore(t *testing.T) {
 }
 
 func TestEnablePersistence_WithExistingStore_NoCallback(t *testing.T) {
-	bt := NewThread(llmtypes.Config{}, "conv-123", nil, hooks.Trigger{})
+	bt := NewThread(llmtypes.Config{}, "conv-123", hooks.Trigger{})
 	mockStore := &mockConversationStore{}
 	bt.Store = mockStore
 	bt.LoadConversation = nil // Explicitly no callback
@@ -814,7 +814,7 @@ func TestEnablePersistence_WithExistingStore_NoCallback(t *testing.T) {
 }
 
 func TestEnablePersistence_DisableDoesNotCallLoadConversation(t *testing.T) {
-	bt := NewThread(llmtypes.Config{}, "conv-123", nil, hooks.Trigger{})
+	bt := NewThread(llmtypes.Config{}, "conv-123", hooks.Trigger{})
 	mockStore := &mockConversationStore{}
 	bt.Store = mockStore
 
@@ -830,7 +830,7 @@ func TestEnablePersistence_DisableDoesNotCallLoadConversation(t *testing.T) {
 }
 
 func TestEnablePersistence_MultipleEnableCallsDoNotReinitializeStore(t *testing.T) {
-	bt := NewThread(llmtypes.Config{}, "conv-123", nil, hooks.Trigger{})
+	bt := NewThread(llmtypes.Config{}, "conv-123", hooks.Trigger{})
 	mockStore := &mockConversationStore{}
 	bt.Store = mockStore
 
@@ -850,7 +850,7 @@ func TestEnablePersistence_MultipleEnableCallsDoNotReinitializeStore(t *testing.
 type contextKey string
 
 func TestEnablePersistence_LoadConversationCallback(t *testing.T) {
-	bt := NewThread(llmtypes.Config{}, "test-conv-id", nil, hooks.Trigger{})
+	bt := NewThread(llmtypes.Config{}, "test-conv-id", hooks.Trigger{})
 	mockStore := &mockConversationStore{}
 	bt.Store = mockStore
 
@@ -866,7 +866,7 @@ func TestEnablePersistence_LoadConversationCallback(t *testing.T) {
 }
 
 func TestEnablePersistence_EnableThenDisable(t *testing.T) {
-	bt := NewThread(llmtypes.Config{}, "conv-123", nil, hooks.Trigger{})
+	bt := NewThread(llmtypes.Config{}, "conv-123", hooks.Trigger{})
 	mockStore := &mockConversationStore{}
 	bt.Store = mockStore
 	bt.LoadConversation = func(_ context.Context) {}
@@ -882,7 +882,7 @@ func TestEnablePersistence_EnableThenDisable(t *testing.T) {
 }
 
 func TestEnablePersistence_ConcurrentAccess(_ *testing.T) {
-	bt := NewThread(llmtypes.Config{}, "conv-123", nil, hooks.Trigger{})
+	bt := NewThread(llmtypes.Config{}, "conv-123", hooks.Trigger{})
 	mockStore := &mockConversationStore{}
 	bt.Store = mockStore
 	bt.LoadConversation = func(_ context.Context) {}
@@ -912,7 +912,7 @@ func TestConstants(t *testing.T) {
 
 // TestSetState_Sequential verifies SetState/GetState work correctly in sequence
 func TestSetState_Sequential(t *testing.T) {
-	bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+	bt := NewThread(llmtypes.Config{}, "", hooks.Trigger{})
 
 	// Create mock states and set them sequentially
 	state1 := &mockState{}
@@ -930,7 +930,7 @@ func TestSetState_Sequential(t *testing.T) {
 
 // TestGetSetConversationID_Sequential verifies conversation ID methods work correctly in sequence
 func TestGetSetConversationID_Sequential(t *testing.T) {
-	bt := NewThread(llmtypes.Config{}, "initial-conv", nil, hooks.Trigger{})
+	bt := NewThread(llmtypes.Config{}, "initial-conv", hooks.Trigger{})
 
 	// Verify initial value
 	assert.Equal(t, "initial-conv", bt.GetConversationID())
@@ -949,7 +949,7 @@ func TestGetSetConversationID_Sequential(t *testing.T) {
 
 // TestIsPersisted_Sequential verifies persistence flag works correctly in sequence
 func TestIsPersisted_Sequential(t *testing.T) {
-	bt := NewThread(llmtypes.Config{}, "conv-123", nil, hooks.Trigger{})
+	bt := NewThread(llmtypes.Config{}, "conv-123", hooks.Trigger{})
 
 	// Default should be false
 	assert.False(t, bt.IsPersisted())
@@ -977,7 +977,7 @@ func TestNewThread_InitializesAllFields(t *testing.T) {
 		ConversationID: conversationID,
 	}
 
-	bt := NewThread(config, conversationID, nil, hookTrigger)
+	bt := NewThread(config, conversationID, hookTrigger)
 
 	// Verify all fields are properly initialized
 	require.NotNil(t, bt)
@@ -989,7 +989,6 @@ func TestNewThread_InitializesAllFields(t *testing.T) {
 	assert.Equal(t, 0, bt.Usage.OutputTokens, "Usage OutputTokens should be 0")
 	assert.NotNil(t, bt.ToolResults, "ToolResults should be initialized")
 	assert.Len(t, bt.ToolResults, 0, "ToolResults should be empty")
-	assert.Nil(t, bt.SubagentContextFactory, "SubagentContextFactory should be nil when not provided")
 	assert.Nil(t, bt.State, "State should be nil by default")
 	assert.Nil(t, bt.Store, "Store should be nil by default")
 	assert.Nil(t, bt.LoadConversation, "LoadConversation should be nil by default")
@@ -1001,7 +1000,7 @@ func TestNewThread_DefaultHookTrigger(t *testing.T) {
 		ConversationID: "hook-conv-id",
 	}
 
-	bt := NewThread(llmtypes.Config{}, "other-conv-id", nil, hookTrigger)
+	bt := NewThread(llmtypes.Config{}, "other-conv-id", hookTrigger)
 
 	// The hook trigger should maintain its own conversation ID set at creation
 	assert.Equal(t, "hook-conv-id", bt.HookTrigger.ConversationID)
@@ -1009,7 +1008,7 @@ func TestNewThread_DefaultHookTrigger(t *testing.T) {
 
 // TestSetConversationID_UpdatesHookTrigger verifies SetConversationID updates both fields
 func TestSetConversationID_UpdatesHookTrigger(t *testing.T) {
-	bt := NewThread(llmtypes.Config{}, "initial-id", nil, hooks.Trigger{
+	bt := NewThread(llmtypes.Config{}, "initial-id", hooks.Trigger{
 		ConversationID: "initial-id",
 	})
 
@@ -1028,7 +1027,7 @@ func TestGetConfig_ReturnsSameValue(t *testing.T) {
 		Model:     "gpt-4.1",
 		MaxTokens: 4096,
 	}
-	bt := NewThread(config, "", nil, hooks.Trigger{})
+	bt := NewThread(config, "", hooks.Trigger{})
 
 	retrieved := bt.GetConfig()
 
@@ -1038,7 +1037,7 @@ func TestGetConfig_ReturnsSameValue(t *testing.T) {
 
 // TestAllMethods_WithNilThread verifies methods handle nil gracefully (by panicking expectedly)
 func TestGetState_ReturnsNilWhenNotSet(t *testing.T) {
-	bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+	bt := NewThread(llmtypes.Config{}, "", hooks.Trigger{})
 
 	// State should be nil when not explicitly set
 	assert.Nil(t, bt.GetState())
@@ -1046,7 +1045,7 @@ func TestGetState_ReturnsNilWhenNotSet(t *testing.T) {
 
 // TestUsageAccumulation verifies usage can be accumulated correctly
 func TestUsageAccumulation(t *testing.T) {
-	bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+	bt := NewThread(llmtypes.Config{}, "", hooks.Trigger{})
 
 	// Simulate token accumulation
 	bt.Mu.Lock()
@@ -1070,7 +1069,7 @@ func TestUsageAccumulation(t *testing.T) {
 
 // TestStructuredToolResults_OverwriteExisting verifies overwriting results works correctly
 func TestStructuredToolResults_OverwriteExisting(t *testing.T) {
-	bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+	bt := NewThread(llmtypes.Config{}, "", hooks.Trigger{})
 
 	result1 := tooltypes.StructuredToolResult{ToolName: "tool-v1", Success: true}
 	result2 := tooltypes.StructuredToolResult{ToolName: "tool-v2", Success: false}
@@ -1125,7 +1124,7 @@ func TestShouldAutoCompact_BoundaryConditions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+			bt := NewThread(llmtypes.Config{}, "", hooks.Trigger{})
 			bt.Usage.CurrentContextWindow = tt.currentContextWindow
 			bt.Usage.MaxContextWindow = tt.maxContextWindow
 
@@ -1143,7 +1142,7 @@ func TestCreateMessageSpan_AllCommonAttributes(t *testing.T) {
 		WeakModelMaxTokens: 2048,
 		IsSubAgent:         true,
 	}
-	bt := NewThread(config, "attr-test-conv", nil, hooks.Trigger{})
+	bt := NewThread(config, "attr-test-conv", hooks.Trigger{})
 	bt.Persisted = true
 
 	tracer := noop.NewTracerProvider().Tracer("test")
@@ -1163,7 +1162,7 @@ func TestCreateMessageSpan_AllCommonAttributes(t *testing.T) {
 
 // TestFinalizeMessageSpan_ZeroUsage verifies finalization works with zero usage values
 func TestFinalizeMessageSpan_ZeroUsage(_ *testing.T) {
-	bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+	bt := NewThread(llmtypes.Config{}, "", hooks.Trigger{})
 	// Usage is initialized but all values are zero
 
 	tracer := noop.NewTracerProvider().Tracer("test")
@@ -1174,7 +1173,7 @@ func TestFinalizeMessageSpan_ZeroUsage(_ *testing.T) {
 }
 
 func TestSetRecipeHooks(t *testing.T) {
-	bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+	bt := NewThread(llmtypes.Config{}, "", hooks.Trigger{})
 
 	hooks := map[string]llmtypes.HookConfig{
 		"turn_end": {
@@ -1197,7 +1196,7 @@ func TestSetRecipeHooks(t *testing.T) {
 }
 
 func TestGetRecipeHooks(t *testing.T) {
-	bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+	bt := NewThread(llmtypes.Config{}, "", hooks.Trigger{})
 
 	expectedHooks := map[string]llmtypes.HookConfig{
 		"turn_end": {
@@ -1213,7 +1212,7 @@ func TestGetRecipeHooks(t *testing.T) {
 }
 
 func TestEstimateContextWindowFromMessage(t *testing.T) {
-	bt := NewThread(llmtypes.Config{}, "", nil, hooks.Trigger{})
+	bt := NewThread(llmtypes.Config{}, "", hooks.Trigger{})
 	bt.Usage.CurrentContextWindow = 50000
 
 	// Message with about 800 characters = roughly 200 tokens (above the 100 minimum)
