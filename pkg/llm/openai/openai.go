@@ -980,28 +980,6 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 	return t.SwapContext(ctx, handler.CollectedText())
 }
 
-// NewSubAgent creates a subagent thread reusing the parent's client.
-// Deprecated: Use shell-out via `kodelet run --as-subagent` instead (ADR 027).
-func (t *Thread) NewSubAgent(_ context.Context, config llmtypes.Config) llmtypes.Thread {
-	conversationID := convtypes.GenerateID()
-
-	// Create subagent base thread
-	hookTrigger := hooks.NewTrigger(t.HookTrigger.Manager, conversationID, true)
-	baseThread := base.NewThread(config, conversationID, hookTrigger)
-
-	// Create subagent thread reusing the parent's client instead of creating a new one
-	thread := &Thread{
-		Thread:          baseThread,
-		client:          t.client, // Reuse parent's client
-		reasoningEffort: config.ReasoningEffort,
-		customModels:    t.customModels,  // Share custom models configuration
-		customPricing:   t.customPricing, // Share custom pricing configuration
-		useCopilot:      t.useCopilot,    // Share Copilot usage with parent
-	}
-
-	return thread
-}
-
 // ShortSummary generates a concise summary of the conversation using a faster model.
 func (t *Thread) ShortSummary(ctx context.Context) string {
 	summaryThread, err := NewOpenAIThread(t.GetConfig())

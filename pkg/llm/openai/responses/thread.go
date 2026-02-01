@@ -557,24 +557,6 @@ func (t *Thread) GetMessages() ([]llmtypes.Message, error) {
 	return result, nil
 }
 
-// NewSubAgent creates a subagent thread reusing the parent's client.
-// Deprecated: Use shell-out via `kodelet run --as-subagent` instead (ADR 027).
-func (t *Thread) NewSubAgent(ctx context.Context, config llmtypes.Config) llmtypes.Thread {
-	config.IsSubAgent = true
-
-	newThread, err := NewThread(config)
-	if err != nil {
-		logger.G(ctx).WithError(err).Error("failed to create subagent thread")
-		return nil
-	}
-
-	// Copy custom models and pricing from parent
-	newThread.customModels = t.customModels
-	newThread.customPricing = t.customPricing
-
-	return newThread
-}
-
 // SwapContext replaces the conversation history with a summary message.
 // This implements the hooks.ContextSwapper interface.
 func (t *Thread) SwapContext(_ context.Context, summary string) error {

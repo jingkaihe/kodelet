@@ -948,26 +948,6 @@ func (t *Thread) updateUsage(response *anthropic.Message, model anthropic.Model)
 	t.Usage.MaxContextWindow = pricing.ContextWindow
 }
 
-// NewSubAgent creates a subagent thread reusing the parent's client.
-// Deprecated: Use shell-out via `kodelet run --as-subagent` instead (ADR 027).
-func (t *Thread) NewSubAgent(_ context.Context, config llmtypes.Config) llmtypes.Thread {
-	conversationID := convtypes.GenerateID()
-
-	// Create subagent hook trigger using parent's manager
-	hookTrigger := hooks.NewTrigger(t.HookTrigger.Manager, conversationID, true)
-
-	baseThread := base.NewThread(config, conversationID, hookTrigger)
-
-	// Create subagent thread reusing the parent's client instead of creating a new one
-	thread := &Thread{
-		Thread:          baseThread,
-		client:          t.client,          // Reuse parent's client
-		useSubscription: t.useSubscription, // Reuse parent's subscription status
-	}
-
-	return thread
-}
-
 // ShortSummary generates a short summary of the conversation using a weak model
 func (t *Thread) ShortSummary(ctx context.Context) string {
 	summaryThread, err := NewAnthropicThread(t.GetConfig())

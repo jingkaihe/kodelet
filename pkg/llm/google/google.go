@@ -1075,26 +1075,6 @@ func (t *Thread) convertToStandardMessages() []llmtypes.Message {
 	return messages
 }
 
-// NewSubAgent creates a subagent thread reusing the parent's client.
-// Deprecated: Use shell-out via `kodelet run --as-subagent` instead (ADR 027).
-func (t *Thread) NewSubAgent(_ context.Context, config llmtypes.Config) llmtypes.Thread {
-	conversationID := convtypes.GenerateID()
-
-	// Create new hook trigger for subagent with shared hook manager
-	hookTrigger := hooks.NewTrigger(t.HookTrigger.Manager, conversationID, true)
-
-	// Create subagent thread reusing the parent's client instead of creating a new one
-	subagentThread := &Thread{
-		Thread:         base.NewThread(config, conversationID, hookTrigger),
-		client:         t.client,  // Reuse parent's client
-		backend:        t.backend, // Reuse parent's backend
-		thinkingBudget: t.thinkingBudget,
-	}
-
-	subagentThread.SetState(t.State)
-	return subagentThread
-}
-
 // Note: SetStructuredToolResult, GetStructuredToolResults, SetStructuredToolResults,
 // and ShouldAutoCompact methods are inherited from embedded base.Thread
 

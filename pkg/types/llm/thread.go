@@ -72,8 +72,6 @@ type Thread interface {
 	GetMessages() ([]Message, error)
 	// GetConfig returns the configuration of the thread
 	GetConfig() Config
-	// NewSubAgent creates a new subagent thread with the given configuration
-	NewSubAgent(ctx context.Context, config Config) Thread
 	// AggregateSubagentUsage aggregates usage from a subagent into this thread's usage
 	// This aggregates token counts and costs but NOT context window (which should remain isolated)
 	AggregateSubagentUsage(usage Usage)
