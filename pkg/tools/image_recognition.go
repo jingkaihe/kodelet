@@ -230,8 +230,8 @@ Focus on directly relevant information for the request above. When describing th
 Organize your response to be clear and actionable.`,
 		input.Prompt)
 
-	// Build command arguments
-	args := []string{"run", "--result-only", "--as-subagent", "--image", input.ImagePath}
+	// Build command arguments - no tools needed for image analysis
+	args := []string{"run", "--result-only", "--as-subagent", "--no-tools", "--image", input.ImagePath}
 
 	// Add subagent args from config if available
 	if llmConfig, ok := state.GetLLMConfig().(llmtypes.Config); ok && llmConfig.SubagentArgs != "" {

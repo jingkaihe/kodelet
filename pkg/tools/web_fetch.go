@@ -500,8 +500,8 @@ IMPORTANT: Make sure that you preserve all the links in the content including hy
 `,
 		input.URL, processedContent, input.Prompt)
 
-	// Build command arguments
-	args := []string{"run", "--result-only", "--as-subagent"}
+	// Build command arguments - use weak model and no tools for content extraction
+	args := []string{"run", "--result-only", "--as-subagent", "--use-weak-model", "--no-tools"}
 
 	// Add subagent args from config if available
 	if llmConfig, ok := state.GetLLMConfig().(llmtypes.Config); ok && llmConfig.SubagentArgs != "" {

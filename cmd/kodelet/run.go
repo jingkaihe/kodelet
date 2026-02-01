@@ -44,6 +44,7 @@ type RunConfig struct {
 	NoSkills           bool              // Disable agentic skills
 	NoHooks            bool              // Disable agent lifecycle hooks
 	NoMCP              bool              // Disable MCP tools
+	NoTools            bool              // Disable all tools (for simple query-response usage)
 	ResultOnly         bool              // Only print the final agent message, no intermediate output or usage stats
 	UseWeakModel       bool              // Use weak model for SendMessage
 	Account            string            // Anthropic subscription account alias to use
@@ -67,6 +68,7 @@ func NewRunConfig() *RunConfig {
 		NoSkills:           false,
 		NoHooks:            false,
 		NoMCP:              false,
+		NoTools:            false,
 		ResultOnly:         false,
 		UseWeakModel:       false,
 		Account:            "",
@@ -219,6 +221,11 @@ var runCmd = &cobra.Command{
 
 		llmConfig.NoHooks = config.NoHooks
 		llmConfig.IsSubAgent = config.AsSubagent
+
+		// Disable all tools if requested
+		if config.NoTools {
+			llmConfig.AllowedTools = []string{tools.NoToolsMarker}
+		}
 
 		// Set Anthropic account if specified
 		if config.Account != "" {
@@ -435,6 +442,7 @@ func init() {
 	runCmd.Flags().Bool("include-history", defaults.IncludeHistory, "Include historical conversation data in headless streaming")
 	runCmd.Flags().Bool("no-hooks", defaults.NoHooks, "Disable agent lifecycle hooks")
 	runCmd.Flags().Bool("no-mcp", defaults.NoMCP, "Disable MCP tools")
+	runCmd.Flags().Bool("no-tools", defaults.NoTools, "Disable all tools (for simple query-response usage)")
 	runCmd.Flags().Bool("result-only", defaults.ResultOnly, "Only print the final agent message, suppressing all intermediate output and usage statistics")
 	runCmd.Flags().Bool("use-weak-model", defaults.UseWeakModel, "Use weak model for processing")
 	runCmd.Flags().String("account", defaults.Account, "Anthropic subscription account alias to use (see 'kodelet accounts list')")
@@ -520,6 +528,10 @@ func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
 
 	if noMCP, err := cmd.Flags().GetBool("no-mcp"); err == nil {
 		config.NoMCP = noMCP
+	}
+
+	if noTools, err := cmd.Flags().GetBool("no-tools"); err == nil {
+		config.NoTools = noTools
 	}
 
 	if resultOnly, err := cmd.Flags().GetBool("result-only"); err == nil {
