@@ -354,7 +354,8 @@ OUTER:
 	// Save conversation state
 	if t.Persisted && t.Store != nil && !opt.NoSaveConversation {
 		saveCtx := context.Background()
-		t.SaveConversation(saveCtx, true)
+		// Skip LLM-based summary generation for subagent runs to avoid unnecessary API calls
+		t.SaveConversation(saveCtx, !t.Config.IsSubAgent)
 	}
 
 	if !t.Config.IsSubAgent {
