@@ -1,8 +1,12 @@
 ---
 name: Custom Tool Generator
 description: Creates a custom tool for Kodelet, implementing the Kodelet custom tool protocol
-defaults:
-  global: "false"
+arguments:
+  task:
+    description: Description of what the custom tool should do
+  global:
+    description: Whether to save the tool globally (true) or locally (false)
+    default: "false"
 ---
 
 {{/* Template variables: .task, .global */}}

@@ -10,6 +10,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/acp/acptypes"
 	"github.com/jingkaihe/kodelet/pkg/acp/bridge"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/mcp"
@@ -355,6 +356,10 @@ func (m *Manager) NewSession(ctx context.Context, req acptypes.NewSessionRequest
 		stateOpts = append(stateOpts, tools.WithSkillTool(discoveredSkills, skillsEnabled))
 	}
 
+	// Initialize workflows for subagent
+	discoveredWorkflows := discoverWorkflows(ctx)
+	stateOpts = append(stateOpts, tools.WithSubAgentTool(discoveredWorkflows, len(discoveredWorkflows) > 0))
+
 	if mcpOpts := m.getMCPStateOpts(); mcpOpts != nil {
 		stateOpts = append(stateOpts, mcpOpts...)
 	}
@@ -415,6 +420,10 @@ func (m *Manager) LoadSession(ctx context.Context, req acptypes.LoadSessionReque
 		stateOpts = append(stateOpts, tools.WithSkillTool(discoveredSkills, skillsEnabled))
 	}
 
+	// Initialize workflows for subagent
+	discoveredWorkflows := discoverWorkflows(ctx)
+	stateOpts = append(stateOpts, tools.WithSubAgentTool(discoveredWorkflows, len(discoveredWorkflows) > 0))
+
 	if mcpOpts := m.getMCPStateOpts(); mcpOpts != nil {
 		stateOpts = append(stateOpts, mcpOpts...)
 	}
@@ -464,4 +473,30 @@ func (m *Manager) Cancel(id acptypes.SessionID) error {
 	}
 	session.Cancel()
 	return nil
+}
+
+// discoverWorkflows discovers available workflow fragments for the subagent tool
+func discoverWorkflows(ctx context.Context) map[string]*fragments.Fragment {
+	processor, err := fragments.NewFragmentProcessor()
+	if err != nil {
+		logger.G(ctx).WithError(err).Debug("Failed to create fragment processor for workflow discovery")
+		return nil
+	}
+
+	frags, err := processor.ListFragmentsWithMetadata()
+	if err != nil {
+		logger.G(ctx).WithError(err).Debug("Failed to list fragments for workflow discovery")
+		return nil
+	}
+
+	workflows := make(map[string]*fragments.Fragment)
+	for _, frag := range frags {
+		// Only include fragments that have a description (considered as workflows)
+		if frag.Metadata.Description != "" {
+			workflows[frag.ID] = frag
+		}
+	}
+
+	logger.G(ctx).WithField("count", len(workflows)).Debug("Discovered workflows for subagent")
+	return workflows
 }

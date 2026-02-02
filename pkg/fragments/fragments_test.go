@@ -644,14 +644,22 @@ func TestFragmentProcessor_MetadataDefaults(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(tempDir)
 
-	// Recipe with metadata defaults
+	// Recipe with metadata arguments (with defaults)
 	fragmentContent := `---
 name: Deployment Recipe
 description: Deploy with sensible defaults
-defaults:
-  branch: main
-  env: development
-  target: production
+arguments:
+  branch:
+    description: Branch to deploy
+    default: main
+  env:
+    description: Environment to deploy to
+    default: development
+  target:
+    description: Target region
+    default: production
+  extra:
+    description: Extra information
 ---
 
 Deploying branch: {{.branch}}
@@ -719,13 +727,17 @@ func TestFragmentProcessor_HybridDefaults(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(tempDir)
 
-	// Recipe combining YAML metadata defaults AND template default function
+	// Recipe combining YAML metadata arguments AND template default function
 	fragmentContent := `---
 name: Hybrid Recipe
 description: Uses both YAML and template defaults
-defaults:
-  branch: main
-  env: development
+arguments:
+  branch:
+    description: Branch to deploy
+    default: main
+  env:
+    description: Environment
+    default: development
 ---
 
 Branch: {{.branch}}
@@ -799,13 +811,17 @@ func TestFragmentProcessor_DefaultsWithConditionals(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(tempDir)
 
-	// Recipe with defaults and conditional logic (like github/pr.md draft feature)
+	// Recipe with arguments and conditional logic (like github/pr.md draft feature)
 	fragmentContent := `---
 name: PR Generator Test
 description: Tests conditional rendering with defaults
-defaults:
-  draft: "false"
-  target: "main"
+arguments:
+  draft:
+    description: Whether to create a draft PR
+    default: "false"
+  target:
+    description: Target branch
+    default: "main"
 ---
 
 Create a {{if eq .draft "true"}}**DRAFT** {{end}}pull request.

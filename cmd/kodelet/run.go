@@ -265,6 +265,12 @@ var runCmd = &cobra.Command{
 		discoveredSkills, skillsEnabled := skills.Initialize(ctx, llmConfig)
 		stateOpts = append(stateOpts, tools.WithSkillTool(discoveredSkills, skillsEnabled))
 
+		// Initialize workflows for subagent (only for main agent, not subagent)
+		if !config.AsSubagent {
+			discoveredWorkflows := discoverWorkflows(ctx)
+			stateOpts = append(stateOpts, tools.WithSubAgentTool(discoveredWorkflows, len(discoveredWorkflows) > 0))
+		}
+
 		// Generate session ID for MCP socket (use resume ID if available, otherwise new ID)
 		sessionID := config.ResumeConvID
 		if sessionID == "" {
@@ -563,4 +569,30 @@ func convertFragmentHooks(fragmentHooks map[string]fragments.HookConfig) map[str
 		}
 	}
 	return result
+}
+
+// discoverWorkflows discovers available workflow fragments for the subagent tool
+func discoverWorkflows(ctx context.Context) map[string]*fragments.Fragment {
+	processor, err := fragments.NewFragmentProcessor()
+	if err != nil {
+		logger.G(ctx).WithError(err).Debug("Failed to create fragment processor for workflow discovery")
+		return nil
+	}
+
+	frags, err := processor.ListFragmentsWithMetadata()
+	if err != nil {
+		logger.G(ctx).WithError(err).Debug("Failed to list fragments for workflow discovery")
+		return nil
+	}
+
+	workflows := make(map[string]*fragments.Fragment)
+	for _, frag := range frags {
+		// Only include fragments that have a description (considered as workflows)
+		if frag.Metadata.Description != "" {
+			workflows[frag.ID] = frag
+		}
+	}
+
+	logger.G(ctx).WithField("count", len(workflows)).Debug("Discovered workflows for subagent")
+	return workflows
 }

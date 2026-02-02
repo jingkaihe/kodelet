@@ -1,10 +1,22 @@
 ---
 name: GitHub PR Comment Responder
 description: Intelligently responds to PR comments based on their type (code changes, questions, or code reviews)
-defaults:
-  bin: "kodelet"
-  review_id: ""
-  issue_comment_id: ""
+arguments:
+  pr_url:
+    description: The GitHub PR URL to respond to
+  owner:
+    description: The repository owner
+  repo:
+    description: The repository name
+  pr_number:
+    description: The PR number
+  review_id:
+    description: The review ID to respond to (for review comments)
+  issue_comment_id:
+    description: The issue comment ID to respond to (for issue comments)
+  bin:
+    description: The kodelet binary name to use for subcommands
+    default: "kodelet"
 ---
 
 {{/* Template variables: .pr_url .owner .repo .pr_number .review_id .issue_comment_id .bin */}}

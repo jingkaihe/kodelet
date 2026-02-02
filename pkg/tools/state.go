@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/skills"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -186,6 +187,21 @@ func WithSkillTool(discoveredSkills map[string]*skills.Skill, enabled bool) Basi
 			}
 		}
 		s.tools = append(s.tools, skillTool)
+		return nil
+	}
+}
+
+// WithSubAgentTool returns an option that configures the subagent tool with discovered workflows
+func WithSubAgentTool(discoveredWorkflows map[string]*fragments.Fragment, enabled bool) BasicStateOption {
+	return func(_ context.Context, s *BasicState) error {
+		subagentTool := NewSubAgentTool(discoveredWorkflows, enabled)
+		for i, tool := range s.tools {
+			if tool.Name() == "subagent" {
+				s.tools[i] = subagentTool
+				return nil
+			}
+		}
+		s.tools = append(s.tools, subagentTool)
 		return nil
 	}
 }

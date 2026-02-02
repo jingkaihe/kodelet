@@ -32,14 +32,20 @@ type HookConfig struct {
 	Once    bool   `yaml:"once,omitempty"` // If true, only execute on the first turn
 }
 
+// ArgumentMeta defines metadata for a fragment argument
+type ArgumentMeta struct {
+	Description string `yaml:"description,omitempty"`
+	Default     string `yaml:"default,omitempty"`
+}
+
 // Metadata represents YAML frontmatter in fragment files
 type Metadata struct {
-	Name            string                `yaml:"name,omitempty"`
-	Description     string                `yaml:"description,omitempty"`
-	AllowedTools    []string              `yaml:"allowed_tools,omitempty"`
-	AllowedCommands []string              `yaml:"allowed_commands,omitempty"`
-	Defaults        map[string]string     `yaml:"defaults,omitempty"`
-	Hooks           map[string]HookConfig `yaml:"hooks,omitempty"` // Lifecycle hooks -> handler config
+	Name            string                  `yaml:"name,omitempty"`
+	Description     string                  `yaml:"description,omitempty"`
+	AllowedTools    []string                `yaml:"allowed_tools,omitempty"`
+	AllowedCommands []string                `yaml:"allowed_commands,omitempty"`
+	Arguments       map[string]ArgumentMeta `yaml:"arguments,omitempty"` // Argument definitions with descriptions
+	Hooks           map[string]HookConfig   `yaml:"hooks,omitempty"`     // Lifecycle hooks -> handler config
 }
 
 // Fragment represents a fragment with its metadata and content
@@ -227,15 +233,22 @@ func (fp *Processor) parseFrontmatter(content string) (Metadata, string, error) 
 			metadata.AllowedCommands = fp.parseStringArrayField(allowedCommands)
 		}
 
-		// Parse defaults (map of key-value pairs)
-		if defaults := metaData["defaults"]; defaults != nil {
-			if defaultsMap, ok := defaults.(map[any]any); ok {
-				metadata.Defaults = make(map[string]string)
-				for k, v := range defaultsMap {
-					if keyStr, ok := k.(string); ok {
-						if valStr, ok := v.(string); ok {
-							metadata.Defaults[keyStr] = valStr
+		// Parse arguments (map of argument name -> argument meta with description and default)
+		if argsData := metaData["arguments"]; argsData != nil {
+			if argsMap, ok := argsData.(map[any]any); ok {
+				metadata.Arguments = make(map[string]ArgumentMeta)
+				for k, v := range argsMap {
+					if argName, ok := k.(string); ok {
+						argMeta := ArgumentMeta{}
+						if argConfigMap, ok := v.(map[any]any); ok {
+							if desc, ok := argConfigMap["description"].(string); ok {
+								argMeta.Description = desc
+							}
+							if def, ok := argConfigMap["default"].(string); ok {
+								argMeta.Default = def
+							}
 						}
+						metadata.Arguments[argName] = argMeta
 					}
 				}
 			}
@@ -346,8 +359,10 @@ func (fp *Processor) LoadFragment(ctx context.Context, config *Config) (*Fragmen
 	// Merge defaults from metadata with provided arguments
 	// User-provided arguments take precedence over defaults
 	mergedArgs := make(map[string]string)
-	for k, v := range metadata.Defaults {
-		mergedArgs[k] = v
+	for k, v := range metadata.Arguments {
+		if v.Default != "" {
+			mergedArgs[k] = v.Default
+		}
 	}
 	for k, v := range config.Arguments {
 		mergedArgs[k] = v

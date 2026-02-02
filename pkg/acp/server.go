@@ -631,7 +631,7 @@ func (s *Server) getAvailableCommands() []acptypes.AvailableCommand {
 			Name:        name,
 			Description: description,
 			Input: &acptypes.AvailableCommandInput{
-				Hint: buildCommandHint(frag.Metadata.Defaults),
+				Hint: buildCommandHint(frag.Metadata.Arguments),
 			},
 		}
 		commands = append(commands, cmd)
@@ -783,21 +783,26 @@ func parseUnquotedValue(s string, start int) (value string, nextPos int) {
 	return s[start:end], end
 }
 
-// buildCommandHint builds a hint string for a recipe based on its defaults
-func buildCommandHint(defaults map[string]string) string {
-	if len(defaults) == 0 {
+// buildCommandHint builds a hint string for a recipe based on its arguments
+func buildCommandHint(arguments map[string]fragments.ArgumentMeta) string {
+	if len(arguments) == 0 {
 		return "additional instructions (optional)"
 	}
 
-	keys := make([]string, 0, len(defaults))
-	for k := range defaults {
+	keys := make([]string, 0, len(arguments))
+	for k := range arguments {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
 
 	var parts []string
 	for _, key := range keys {
-		parts = append(parts, fmt.Sprintf("%s=%s", key, defaults[key]))
+		argMeta := arguments[key]
+		if argMeta.Default != "" {
+			parts = append(parts, fmt.Sprintf("%s=%s", key, argMeta.Default))
+		} else {
+			parts = append(parts, fmt.Sprintf("%s=<value>", key))
+		}
 	}
 
 	return fmt.Sprintf("[%s] additional instructions", strings.Join(parts, " "))

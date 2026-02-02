@@ -1,9 +1,15 @@
 ---
 name: GitHub Pull Request Generator
 description: Creates pull requests with AI-generated title and description based on branch changes
-defaults:
-  target: "main"
-  draft: "false"
+arguments:
+  target:
+    description: Target branch to merge into
+    default: "main"
+  draft:
+    description: Whether to create as a draft pull request
+    default: "false"
+  template_file:
+    description: Path to a custom PR template file
 ---
 
 {{/* Template variables: .target .template_file .draft */}}

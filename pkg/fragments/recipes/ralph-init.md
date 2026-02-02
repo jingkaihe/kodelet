@@ -1,9 +1,13 @@
 ---
 name: Ralph PRD Generator
 description: Generate a PRD (Product Requirements Document) based on discussion and design docs for autonomous development
-defaults:
-  prd: "prd.json"
-  progress: "progress.txt"
+arguments:
+  prd:
+    description: Path to output the PRD (Product Requirements Document) JSON file
+    default: "prd.json"
+  progress:
+    description: Path to output the progress log file
+    default: "progress.txt"
 ---
 
 {{/* Template variables: .prd .progress */}}

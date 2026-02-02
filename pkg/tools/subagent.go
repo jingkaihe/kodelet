@@ -1,12 +1,15 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
+	"text/template"
 	"time"
 
 	"github.com/google/shlex"
@@ -14,6 +17,7 @@ import (
 	"github.com/pkg/errors"
 	"go.opentelemetry.io/otel/attribute"
 
+	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -47,11 +51,24 @@ func (r *SubAgentToolResult) AssistantFacing() string {
 }
 
 // SubAgentTool provides functionality to spawn sub-agents for complex tasks
-type SubAgentTool struct{}
+type SubAgentTool struct {
+	workflows       map[string]*fragments.Fragment
+	workflowEnabled bool
+}
+
+// NewSubAgentTool creates a new sub-agent tool with discovered workflows
+func NewSubAgentTool(discoveredWorkflows map[string]*fragments.Fragment, workflowEnabled bool) *SubAgentTool {
+	return &SubAgentTool{
+		workflows:       discoveredWorkflows,
+		workflowEnabled: workflowEnabled,
+	}
+}
 
 // SubAgentInput defines the input parameters for the sub-agent tool
 type SubAgentInput struct {
-	Question string `json:"question" jsonschema:"description=The question to ask"`
+	Question string            `json:"question" jsonschema:"description=The question to ask"`
+	Workflow string            `json:"workflow,omitempty" jsonschema:"description=Optional workflow name to use for specialized tasks"`
+	Args     map[string]string `json:"args,omitempty" jsonschema:"description=Optional arguments for the workflow as key-value pairs"`
 }
 
 // Name returns the name of the tool
@@ -64,13 +81,30 @@ func (t *SubAgentTool) GenerateSchema() *jsonschema.Schema {
 	return GenerateSchema[SubAgentInput]()
 }
 
-// Description returns the description of the tool
-func (t *SubAgentTool) Description() string {
-	return `Use this tool to delegate tasks to a sub-agent.
+// workflowTemplateData holds the data for rendering workflow descriptions
+type workflowTemplateData struct {
+	Workflows []workflowData
+}
+
+type workflowData struct {
+	Name        string
+	Description string
+	Arguments   []workflowArgumentData
+}
+
+type workflowArgumentData struct {
+	Name        string
+	Description string
+	Default     string
+}
+
+const subagentDescriptionTemplate = `Use this tool to delegate tasks to a sub-agent.
 This tool is ideal for tasks that involves code searching, architecture analysis, codebase understanding and troubleshooting.
 
 ## Input
 - question: A description of the question to ask the subagent.
+- workflow: (Optional) A workflow name to use for specialized tasks. See available workflows below.
+- args: (Optional) Arguments for the workflow as key-value pairs.
 
 ## Common Use Cases
 * If you want to do multi-turn search using grep_tool and file_read, and you don't know exactly what keywords to use. You should use this subagent tool.
@@ -87,7 +121,74 @@ This tool is ideal for tasks that involves code searching, architecture analysis
    - state the format of the output in detail.
 2. The agent returns a text response back to you, and you have no access to the subagent's internal messages.
 3. The agent's response is not visible to the user. To show user the result you must send the result from the subagent back to the user.
-`
+
+## Available Workflows
+
+{{if eq (len .Workflows) 0 -}}
+<no_workflows_available />
+{{else -}}
+<workflows>
+{{range .Workflows -}}
+<workflow name="{{.Name}}">
+{{if .Description}}  <description>{{.Description}}</description>
+{{end -}}
+{{if .Arguments}}  <arguments>
+{{range .Arguments}}    <argument name="{{.Name}}"{{if .Default}} default="{{.Default}}"{{end}}>{{.Description}}</argument>
+{{end}}  </arguments>
+{{end -}}
+</workflow>
+{{end -}}
+</workflows>
+{{end}}`
+
+// Description returns the description of the tool
+func (t *SubAgentTool) Description() string {
+	data := workflowTemplateData{}
+
+	if t.workflowEnabled && len(t.workflows) > 0 {
+		// Build sorted workflow data
+		names := make([]string, 0, len(t.workflows))
+		for name := range t.workflows {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+
+		for _, name := range names {
+			workflow := t.workflows[name]
+			wf := workflowData{
+				Name:        name,
+				Description: workflow.Metadata.Description,
+			}
+
+			// Sort arguments
+			argNames := make([]string, 0, len(workflow.Metadata.Arguments))
+			for argName := range workflow.Metadata.Arguments {
+				argNames = append(argNames, argName)
+			}
+			sort.Strings(argNames)
+
+			for _, argName := range argNames {
+				argMeta := workflow.Metadata.Arguments[argName]
+				wf.Arguments = append(wf.Arguments, workflowArgumentData{
+					Name:        argName,
+					Description: argMeta.Description,
+					Default:     argMeta.Default,
+				})
+			}
+			data.Workflows = append(data.Workflows, wf)
+		}
+	}
+
+	return renderSubagentDescription(data)
+}
+
+func renderSubagentDescription(data workflowTemplateData) string {
+	tmpl := template.Must(template.New("subagent").Parse(subagentDescriptionTemplate))
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return "Error rendering description: " + err.Error()
+	}
+	return buf.String()
 }
 
 // ValidateInput validates the input parameters for the tool
@@ -102,6 +203,18 @@ func (t *SubAgentTool) ValidateInput(_ tooltypes.State, parameters string) error
 		return errors.New("question is required")
 	}
 
+	if input.Workflow != "" && t.workflowEnabled {
+		if _, exists := t.workflows[input.Workflow]; !exists {
+			available := make([]string, 0, len(t.workflows))
+			for name := range t.workflows {
+				available = append(available, name)
+			}
+			sort.Strings(available)
+			return errors.Errorf("unknown workflow '%s'. Available workflows: %s",
+				input.Workflow, strings.Join(available, ", "))
+		}
+	}
+
 	return nil
 }
 
@@ -113,15 +226,20 @@ func (t *SubAgentTool) TracingKVs(parameters string) ([]attribute.KeyValue, erro
 		return nil, err
 	}
 
-	return []attribute.KeyValue{
+	kvs := []attribute.KeyValue{
 		attribute.String("question", input.Question),
-	}, nil
+	}
+	if input.Workflow != "" {
+		kvs = append(kvs, attribute.String("workflow", input.Workflow))
+	}
+
+	return kvs, nil
 }
 
 // BuildSubagentArgs builds the command-line arguments for spawning a subagent process.
 // This is extracted as a separate function for testability.
 // Returns the complete argument list including the base args, subagent_args from config, and the question.
-func BuildSubagentArgs(ctx context.Context, subagentArgs string, question string) []string {
+func BuildSubagentArgs(ctx context.Context, subagentArgs string, input *SubAgentInput) []string {
 	// Base arguments for subagent execution
 	args := []string{"run", "--result-only", "--as-subagent"}
 
@@ -135,8 +253,18 @@ func BuildSubagentArgs(ctx context.Context, subagentArgs string, question string
 		}
 	}
 
+	// Add workflow if specified
+	if input.Workflow != "" {
+		args = append(args, "-r", input.Workflow)
+
+		// Add workflow arguments
+		for k, v := range input.Args {
+			args = append(args, "--arg", fmt.Sprintf("%s=%s", k, v))
+		}
+	}
+
 	// Append the question as the final argument
-	args = append(args, question)
+	args = append(args, input.Question)
 
 	return args
 }
@@ -164,7 +292,7 @@ func (t *SubAgentTool) Execute(ctx context.Context, state tooltypes.State, param
 	if llmConfig, ok := state.GetLLMConfig().(llmtypes.Config); ok {
 		subagentArgs = llmConfig.SubagentArgs
 	}
-	args := BuildSubagentArgs(ctx, subagentArgs, input.Question)
+	args := BuildSubagentArgs(ctx, subagentArgs, input)
 
 	cmd := exec.CommandContext(ctx, exe, args...)
 
@@ -208,4 +336,14 @@ func (r *SubAgentToolResult) StructuredData() tooltypes.StructuredToolResult {
 	}
 
 	return result
+}
+
+// GetWorkflows returns the discovered workflows
+func (t *SubAgentTool) GetWorkflows() map[string]*fragments.Fragment {
+	return t.workflows
+}
+
+// IsWorkflowEnabled returns whether workflows are enabled
+func (t *SubAgentTool) IsWorkflowEnabled() bool {
+	return t.workflowEnabled
 }

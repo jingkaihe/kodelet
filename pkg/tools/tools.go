@@ -34,7 +34,7 @@ var toolRegistry = map[string]tooltypes.Tool{
 	"file_read":                 &FileReadTool{},
 	"file_write":                &FileWriteTool{},
 	"file_edit":                 &FileEditTool{},
-	"subagent":                  &SubAgentTool{},
+	"subagent":                  NewSubAgentTool(nil, false),
 	"grep_tool":                 &GrepTool{},
 	"glob_tool":                 &GlobTool{},
 	"todo_read":                 &TodoReadTool{},
