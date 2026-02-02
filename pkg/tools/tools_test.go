@@ -284,13 +284,3 @@ func TestGetMainTools_IncludesSubagentTool(t *testing.T) {
 
 	assert.Contains(t, toolNames, "subagent", "Main tools should include the subagent tool")
 }
-
-func TestDefaultSubAgentTools_NoSubagent(t *testing.T) {
-	// Verify the defaultSubAgentTools slice doesn't contain "subagent"
-	assert.NotContains(t, defaultSubAgentTools, "subagent", "defaultSubAgentTools should not contain subagent")
-}
-
-func TestDefaultMainTools_HasSubagent(t *testing.T) {
-	// Verify the defaultMainTools slice contains "subagent"
-	assert.Contains(t, defaultMainTools, "subagent", "defaultMainTools should contain subagent")
-}

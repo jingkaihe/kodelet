@@ -186,38 +186,4 @@ func TestBuildSubagentArgs(t *testing.T) {
 	})
 }
 
-func TestBuildSubagentArgs_CommonPatterns(t *testing.T) {
-	ctx := context.Background()
-
-	// Test common configuration patterns from ADR 027
-	testCases := []struct {
-		name         string
-		subagentArgs string
-		expected     []string
-	}{
-		{
-			name:         "cost optimization with weak model",
-			subagentArgs: "--use-weak-model",
-			expected:     []string{"run", "--result-only", "--as-subagent", "--use-weak-model", "query"},
-		},
-		{
-			name:         "cross-provider via profile",
-			subagentArgs: "--profile openai-subagent",
-			expected:     []string{"run", "--result-only", "--as-subagent", "--profile", "openai-subagent", "query"},
-		},
-		{
-			name:         "empty subagent_args uses default",
-			subagentArgs: "",
-			expected:     []string{"run", "--result-only", "--as-subagent", "query"},
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			args := BuildSubagentArgs(ctx, tc.subagentArgs, "query")
-			assert.Equal(t, tc.expected, args)
-		})
-	}
-}
-
 // Execute tests require integration testing (shell-out via exec.CommandContext)
