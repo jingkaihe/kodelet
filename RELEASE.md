@@ -43,6 +43,13 @@ arguments:
 
 The `kodelet recipe show` command now displays argument descriptions alongside defaults.
 
+**`--no-workflows` flag**: Added flag to disable subagent workflows for security or debugging:
+
+```bash
+kodelet run --no-workflows "query"    # Disable workflows for run command
+kodelet acp --no-workflows            # Disable workflows for ACP mode
+```
+
 ## 0.2.5.beta (2026-02-01)
 
 ### Breaking Changes

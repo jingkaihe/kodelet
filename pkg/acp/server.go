@@ -71,6 +71,7 @@ type ServerConfig struct {
 	Model              string
 	MaxTokens          int
 	NoSkills           bool
+	NoWorkflows        bool
 	NoHooks            bool
 	CompactRatio       float64
 	DisableAutoCompact bool
@@ -119,7 +120,7 @@ func NewServer(opts ...Option) *Server {
 		opt(s)
 	}
 
-	s.sessionManager = session.NewManager(s.config.Provider, s.config.Model, s.config.MaxTokens, s.config.NoSkills, s.config.NoHooks, s.config.CompactRatio, s.config.DisableAutoCompact)
+	s.sessionManager = session.NewManager(s.config.Provider, s.config.Model, s.config.MaxTokens, s.config.NoSkills, s.config.NoWorkflows, s.config.NoHooks, s.config.CompactRatio, s.config.DisableAutoCompact)
 
 	fp, err := fragments.NewFragmentProcessor()
 	if err != nil {

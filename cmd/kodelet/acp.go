@@ -26,7 +26,10 @@ Example:
   kodelet acp --model claude-sonnet-4-5-20250929
 
   # Disable skills
-  kodelet acp --no-skills`,
+  kodelet acp --no-skills
+
+  # Disable workflows
+  kodelet acp --no-workflows`,
 	RunE: runACP,
 }
 
@@ -37,6 +40,7 @@ func init() {
 	acpCmd.Flags().String("provider", "", "LLM provider (anthropic, openai, google)")
 	acpCmd.Flags().Int("max-tokens", 0, "Maximum tokens for LLM responses")
 	acpCmd.Flags().Bool("no-skills", false, "Disable agentic skills")
+	acpCmd.Flags().Bool("no-workflows", false, "Disable subagent workflows")
 	acpCmd.Flags().Bool("no-hooks", false, "Disable lifecycle hooks")
 	acpCmd.Flags().Float64("compact-ratio", 0.8, "Context window utilization ratio to trigger auto-compact (0.0-1.0)")
 	acpCmd.Flags().Bool("disable-auto-compact", false, "Disable auto-compact functionality")
@@ -52,6 +56,7 @@ func runACP(cmd *cobra.Command, _ []string) error {
 	model, _ := cmd.Flags().GetString("model")
 	maxTokens, _ := cmd.Flags().GetInt("max-tokens")
 	noSkills, _ := cmd.Flags().GetBool("no-skills")
+	noWorkflows, _ := cmd.Flags().GetBool("no-workflows")
 	noHooks, _ := cmd.Flags().GetBool("no-hooks")
 	compactRatio, _ := cmd.Flags().GetFloat64("compact-ratio")
 	disableAutoCompact, _ := cmd.Flags().GetBool("disable-auto-compact")
@@ -61,6 +66,7 @@ func runACP(cmd *cobra.Command, _ []string) error {
 		Model:              model,
 		MaxTokens:          maxTokens,
 		NoSkills:           noSkills,
+		NoWorkflows:        noWorkflows,
 		NoHooks:            noHooks,
 		CompactRatio:       compactRatio,
 		DisableAutoCompact: disableAutoCompact,

@@ -263,8 +263,8 @@ var runCmd = &cobra.Command{
 		// Initialize skills (discovery happens inside WithSkillTool)
 		stateOpts = append(stateOpts, tools.WithSkillTool())
 
-		// Initialize workflows for subagent (only for main agent, not subagent)
-		if !config.AsSubagent {
+		// Initialize workflows for subagent (only for main agent, not subagent, and if not disabled)
+		if !config.AsSubagent && !viper.GetBool("no_workflows") {
 			stateOpts = append(stateOpts, tools.WithSubAgentTool())
 		}
 

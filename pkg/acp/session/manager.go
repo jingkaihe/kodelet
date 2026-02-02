@@ -125,12 +125,13 @@ func (s *Session) HandlePrompt(ctx context.Context, prompt []acptypes.ContentBlo
 
 // Manager manages ACP sessions
 type Manager struct {
-	id        string // unique manager ID for MCP socket isolation
-	provider  string
-	model     string
-	maxTokens int
-	noSkills  bool
-	noHooks   bool
+	id          string // unique manager ID for MCP socket isolation
+	provider    string
+	model       string
+	maxTokens   int
+	noSkills    bool
+	noWorkflows bool
+	noHooks     bool
 
 	compactRatio       float64
 	disableAutoCompact bool
@@ -145,7 +146,7 @@ type Manager struct {
 }
 
 // NewManager creates a new session manager
-func NewManager(provider, model string, maxTokens int, noSkills, noHooks bool, compactRatio float64, disableAutoCompact bool) *Manager {
+func NewManager(provider, model string, maxTokens int, noSkills, noWorkflows, noHooks bool, compactRatio float64, disableAutoCompact bool) *Manager {
 	ctx := context.Background()
 	store, _ := conversations.GetConversationStore(ctx)
 
@@ -155,6 +156,7 @@ func NewManager(provider, model string, maxTokens int, noSkills, noHooks bool, c
 		model:              model,
 		maxTokens:          maxTokens,
 		noSkills:           noSkills,
+		noWorkflows:        noWorkflows,
 		noHooks:            noHooks,
 		compactRatio:       compactRatio,
 		disableAutoCompact: disableAutoCompact,
@@ -353,8 +355,10 @@ func (m *Manager) NewSession(ctx context.Context, req acptypes.NewSessionRequest
 		stateOpts = append(stateOpts, tools.WithSkillTool())
 	}
 
-	// Initialize workflows for subagent
-	stateOpts = append(stateOpts, tools.WithSubAgentTool())
+	// Initialize workflows for subagent (if not disabled)
+	if !m.noWorkflows {
+		stateOpts = append(stateOpts, tools.WithSubAgentTool())
+	}
 
 	if mcpOpts := m.getMCPStateOpts(); mcpOpts != nil {
 		stateOpts = append(stateOpts, mcpOpts...)
@@ -415,8 +419,10 @@ func (m *Manager) LoadSession(ctx context.Context, req acptypes.LoadSessionReque
 		stateOpts = append(stateOpts, tools.WithSkillTool())
 	}
 
-	// Initialize workflows for subagent
-	stateOpts = append(stateOpts, tools.WithSubAgentTool())
+	// Initialize workflows for subagent (if not disabled)
+	if !m.noWorkflows {
+		stateOpts = append(stateOpts, tools.WithSubAgentTool())
+	}
 
 	if mcpOpts := m.getMCPStateOpts(); mcpOpts != nil {
 		stateOpts = append(stateOpts, mcpOpts...)
