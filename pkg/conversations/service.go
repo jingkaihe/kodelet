@@ -37,14 +37,30 @@ type ConversationServiceInterface interface {
 
 // ConversationService provides high-level conversation operations
 type ConversationService struct {
-	store ConversationStore
+	store    ConversationStore
+	onDelete func(id string) // Optional callback when a conversation is deleted
+}
+
+// ServiceOption configures a ConversationService
+type ServiceOption func(*ConversationService)
+
+// WithOnDelete sets a callback to be invoked when a conversation is deleted.
+// This allows cleaning up associated resources (e.g., ACP session files).
+func WithOnDelete(fn func(id string)) ServiceOption {
+	return func(s *ConversationService) {
+		s.onDelete = fn
+	}
 }
 
 // NewConversationService creates a new conversation service
-func NewConversationService(store ConversationStore) *ConversationService {
-	return &ConversationService{
+func NewConversationService(store ConversationStore, opts ...ServiceOption) *ConversationService {
+	s := &ConversationService{
 		store: store,
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // GetDefaultConversationService returns a service with the default store
@@ -229,13 +245,17 @@ func (s *ConversationService) GetToolResult(ctx context.Context, conversationID,
 	return response, nil
 }
 
-// DeleteConversation deletes a conversation
+// DeleteConversation deletes a conversation and invokes the onDelete callback if set
 func (s *ConversationService) DeleteConversation(ctx context.Context, id string) error {
 	logger.G(ctx).WithField("id", id).Debug("Deleting conversation")
 
 	err := s.store.Delete(ctx, id)
 	if err != nil {
 		return errors.Wrap(err, "failed to delete conversation")
+	}
+
+	if s.onDelete != nil {
+		s.onDelete(id)
 	}
 
 	logger.G(ctx).WithField("id", id).Info("Deleted conversation")

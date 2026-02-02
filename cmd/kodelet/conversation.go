@@ -14,6 +14,8 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/acp/acptypes"
+	"github.com/jingkaihe/kodelet/pkg/acp/session"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
@@ -598,6 +600,12 @@ func deleteConversationCmd(ctx context.Context, id string, config *ConversationD
 	if err != nil {
 		presenter.Error(err, "Failed to delete conversation")
 		os.Exit(1)
+	}
+
+	// Also clean up ACP session JSONL file if it exists
+	if storage, err := session.NewStorage(); err == nil {
+		_ = storage.Delete(acptypes.SessionID(id))
+		storage.Close()
 	}
 
 	presenter.Success(fmt.Sprintf("Conversation %s deleted successfully", id))
