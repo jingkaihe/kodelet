@@ -192,9 +192,10 @@ func WithSkillTool(discoveredSkills map[string]*skills.Skill, enabled bool) Basi
 }
 
 // WithSubAgentTool returns an option that configures the subagent tool with discovered workflows
-func WithSubAgentTool(discoveredWorkflows map[string]*fragments.Fragment, enabled bool) BasicStateOption {
-	return func(_ context.Context, s *BasicState) error {
-		subagentTool := NewSubAgentTool(discoveredWorkflows, enabled)
+func WithSubAgentTool() BasicStateOption {
+	return func(ctx context.Context, s *BasicState) error {
+		discoveredWorkflows := discoverWorkflows(ctx)
+		subagentTool := NewSubAgentTool(discoveredWorkflows, len(discoveredWorkflows) > 0)
 		for i, tool := range s.tools {
 			if tool.Name() == "subagent" {
 				s.tools[i] = subagentTool
@@ -204,6 +205,32 @@ func WithSubAgentTool(discoveredWorkflows map[string]*fragments.Fragment, enable
 		s.tools = append(s.tools, subagentTool)
 		return nil
 	}
+}
+
+// discoverWorkflows discovers available workflow fragments for the subagent tool
+func discoverWorkflows(ctx context.Context) map[string]*fragments.Fragment {
+	processor, err := fragments.NewFragmentProcessor()
+	if err != nil {
+		logger.G(ctx).WithError(err).Debug("Failed to create fragment processor for workflow discovery")
+		return nil
+	}
+
+	frags, err := processor.ListFragmentsWithMetadata()
+	if err != nil {
+		logger.G(ctx).WithError(err).Debug("Failed to list fragments for workflow discovery")
+		return nil
+	}
+
+	workflows := make(map[string]*fragments.Fragment)
+	for _, frag := range frags {
+		// Only include fragments that have a description (considered as workflows)
+		if frag.Metadata.Description != "" {
+			workflows[frag.ID] = frag
+		}
+	}
+
+	logger.G(ctx).WithField("count", len(workflows)).Debug("Discovered workflows for subagent")
+	return workflows
 }
 
 // TodoFilePath returns the path to the todo file
