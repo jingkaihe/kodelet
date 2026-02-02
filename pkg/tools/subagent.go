@@ -117,6 +117,27 @@ func (t *SubAgentTool) TracingKVs(parameters string) ([]attribute.KeyValue, erro
 	}, nil
 }
 
+// BuildSubagentArgs builds the command-line arguments for spawning a subagent process.
+// This is extracted as a separate function for testability.
+// Returns the complete argument list including the base args, subagent_args from config, and the question.
+func BuildSubagentArgs(subagentArgs string, question string) []string {
+	// Base arguments for subagent execution
+	args := []string{"run", "--result-only", "--as-subagent"}
+
+	// Append user-configured subagent args (e.g., "--profile openai --use-weak-model")
+	if subagentArgs != "" {
+		parsedArgs, err := shlex.Split(subagentArgs)
+		if err == nil {
+			args = append(args, parsedArgs...)
+		}
+	}
+
+	// Append the question as the final argument
+	args = append(args, question)
+
+	return args
+}
+
 // Execute runs the sub-agent via shell-out and returns the result
 func (t *SubAgentTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
 	input := &SubAgentInput{}
@@ -135,18 +156,12 @@ func (t *SubAgentTool) Execute(ctx context.Context, state tooltypes.State, param
 		}
 	}
 
-	// Build command with subagent_args from config
-	args := []string{"run", "--result-only", "--as-subagent"}
-
-	// Append user-configured subagent args (e.g., "--profile openai --use-weak-model")
-	if llmConfig, ok := state.GetLLMConfig().(llmtypes.Config); ok && llmConfig.SubagentArgs != "" {
-		parsedArgs, err := shlex.Split(llmConfig.SubagentArgs)
-		if err == nil {
-			args = append(args, parsedArgs...)
-		}
+	// Build command arguments
+	var subagentArgs string
+	if llmConfig, ok := state.GetLLMConfig().(llmtypes.Config); ok {
+		subagentArgs = llmConfig.SubagentArgs
 	}
-
-	args = append(args, input.Question)
+	args := BuildSubagentArgs(subagentArgs, input.Question)
 
 	cmd := exec.CommandContext(ctx, exe, args...)
 	cmd.Env = os.Environ()

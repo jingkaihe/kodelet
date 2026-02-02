@@ -50,7 +50,7 @@ type dbConversationRecord struct {
 	Summary             *string                                          `db:"summary"` // NULL in database
 	CreatedAt           time.Time                                        `db:"created_at"`
 	UpdatedAt           time.Time                                        `db:"updated_at"`
-	Metadata            JSONField[map[string]any]                `db:"metadata"`
+	Metadata            JSONField[map[string]any]                        `db:"metadata"`
 	ToolResults         JSONField[map[string]tools.StructuredToolResult] `db:"tool_results"`
 	BackgroundProcesses JSONField[[]tools.BackgroundProcess]             `db:"background_processes"`
 }

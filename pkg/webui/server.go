@@ -237,9 +237,9 @@ type WebConversationResponse struct {
 	UpdatedAt    time.Time    `json:"updatedAt"`
 	Provider     string       `json:"provider"`
 	Summary      string       `json:"summary,omitempty"`
-	Usage        any  `json:"usage"`
+	Usage        any          `json:"usage"`
 	Messages     []WebMessage `json:"messages"`
-	ToolResults  any  `json:"toolResults,omitempty"`
+	ToolResults  any          `json:"toolResults,omitempty"`
 	MessageCount int          `json:"messageCount"`
 }
 

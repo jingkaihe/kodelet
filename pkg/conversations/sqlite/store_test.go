@@ -669,7 +669,7 @@ func TestStore_NullHandling(t *testing.T) {
 		Summary:             "",                     // Empty string (should become NULL)
 		CreatedAt:           now,
 		UpdatedAt:           now,
-		Metadata:            map[string]any{},                // Empty map
+		Metadata:            map[string]any{},                        // Empty map
 		ToolResults:         map[string]tools.StructuredToolResult{}, // Empty map
 		BackgroundProcesses: []tools.BackgroundProcess{},             // Empty slice
 	}

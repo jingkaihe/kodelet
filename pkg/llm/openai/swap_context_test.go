@@ -48,7 +48,7 @@ func (m *swapContextMockState) AddBackgroundProcess(_ tooltypes.BackgroundProces
 func (m *swapContextMockState) GetBackgroundProcesses() []tooltypes.BackgroundProcess { return nil }
 func (m *swapContextMockState) RemoveBackgroundProcess(_ int) error                   { return nil }
 func (m *swapContextMockState) DiscoverContexts() map[string]string                   { return nil }
-func (m *swapContextMockState) GetLLMConfig() any                             { return nil }
+func (m *swapContextMockState) GetLLMConfig() any                                     { return nil }
 func (m *swapContextMockState) LockFile(_ string)                                     {}
 func (m *swapContextMockState) UnlockFile(_ string)                                   {}
 

@@ -34,7 +34,7 @@ type ConversationRecord struct {
 	Summary             string                                `json:"summary,omitempty"`
 	CreatedAt           time.Time                             `json:"createdAt"`
 	UpdatedAt           time.Time                             `json:"updatedAt"`
-	Metadata            map[string]any                `json:"metadata,omitempty"`
+	Metadata            map[string]any                        `json:"metadata,omitempty"`
 	ToolResults         map[string]tools.StructuredToolResult `json:"toolResults,omitempty"`         // Maps tool_call_id to structured result
 	BackgroundProcesses []tools.BackgroundProcess             `json:"backgroundProcesses,omitempty"` // Persistent background processes
 }

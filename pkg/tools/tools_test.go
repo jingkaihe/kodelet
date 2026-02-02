@@ -234,3 +234,63 @@ func TestGetMainTools_UsesValidTools(t *testing.T) {
 		assert.Contains(t, toolNames, requestedTool, "Should contain requested tool: %s", requestedTool)
 	}
 }
+
+func TestGetMainTools_NoToolsMarker(t *testing.T) {
+	// Test that NoToolsMarker returns nil (no tools)
+	tools := GetMainTools(context.Background(), []string{NoToolsMarker})
+
+	assert.Nil(t, tools, "NoToolsMarker should return nil tools")
+	assert.Len(t, tools, 0, "NoToolsMarker should return zero tools")
+}
+
+func TestGetSubAgentTools_NoToolsMarker(t *testing.T) {
+	// Test that NoToolsMarker returns nil (no tools)
+	tools := GetSubAgentTools(context.Background(), []string{NoToolsMarker})
+
+	assert.Nil(t, tools, "NoToolsMarker should return nil tools")
+	assert.Len(t, tools, 0, "NoToolsMarker should return zero tools")
+}
+
+func TestNoToolsMarker_Constant(t *testing.T) {
+	// Ensure the constant value is correct
+	assert.Equal(t, "none", NoToolsMarker, "NoToolsMarker should be 'none'")
+}
+
+func TestGetSubAgentTools_ExcludesSubagentTool(t *testing.T) {
+	// Verify that default subagent tools don't include the subagent tool
+	tools := GetSubAgentTools(context.Background(), []string{})
+
+	toolNames := make([]string, len(tools))
+	for i, tool := range tools {
+		toolNames[i] = tool.Name()
+	}
+
+	assert.NotContains(t, toolNames, "subagent", "Subagent tools should not include the subagent tool to prevent recursion")
+
+	// Verify some expected tools ARE included
+	assert.Contains(t, toolNames, "bash", "Should include bash tool")
+	assert.Contains(t, toolNames, "file_read", "Should include file_read tool")
+	assert.Contains(t, toolNames, "grep_tool", "Should include grep_tool")
+}
+
+func TestGetMainTools_IncludesSubagentTool(t *testing.T) {
+	// Verify that main tools DO include the subagent tool
+	tools := GetMainTools(context.Background(), []string{})
+
+	toolNames := make([]string, len(tools))
+	for i, tool := range tools {
+		toolNames[i] = tool.Name()
+	}
+
+	assert.Contains(t, toolNames, "subagent", "Main tools should include the subagent tool")
+}
+
+func TestDefaultSubAgentTools_NoSubagent(t *testing.T) {
+	// Verify the defaultSubAgentTools slice doesn't contain "subagent"
+	assert.NotContains(t, defaultSubAgentTools, "subagent", "defaultSubAgentTools should not contain subagent")
+}
+
+func TestDefaultMainTools_HasSubagent(t *testing.T) {
+	// Verify the defaultMainTools slice contains "subagent"
+	assert.Contains(t, defaultMainTools, "subagent", "defaultMainTools should contain subagent")
+}
