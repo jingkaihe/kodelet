@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/skills"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -176,9 +177,10 @@ func WithLLMConfig(config llmtypes.Config) BasicStateOption {
 }
 
 // WithSkillTool returns an option that configures the skill tool with discovered skills
-func WithSkillTool(discoveredSkills map[string]*skills.Skill, enabled bool) BasicStateOption {
-	return func(_ context.Context, s *BasicState) error {
-		skillTool := NewSkillTool(discoveredSkills, enabled)
+func WithSkillTool() BasicStateOption {
+	return func(ctx context.Context, s *BasicState) error {
+		discoveredSkills := discoverSkills(ctx, s.llmConfig)
+		skillTool := NewSkillTool(discoveredSkills, len(discoveredSkills) > 0)
 		for i, tool := range s.tools {
 			if tool.Name() == "skill" {
 				s.tools[i] = skillTool
@@ -188,6 +190,75 @@ func WithSkillTool(discoveredSkills map[string]*skills.Skill, enabled bool) Basi
 		s.tools = append(s.tools, skillTool)
 		return nil
 	}
+}
+
+// discoverSkills discovers available skills based on configuration
+func discoverSkills(ctx context.Context, llmConfig llmtypes.Config) map[string]*skills.Skill {
+	// Check if skills are disabled via config
+	if llmConfig.Skills != nil && !llmConfig.Skills.Enabled {
+		return nil
+	}
+
+	discovery, err := skills.NewDiscovery()
+	if err != nil {
+		logger.G(ctx).WithError(err).Debug("Failed to create skill discovery")
+		return nil
+	}
+
+	allSkills, err := discovery.DiscoverSkills()
+	if err != nil {
+		logger.G(ctx).WithError(err).Debug("Failed to discover skills")
+		return nil
+	}
+
+	if llmConfig.Skills != nil && len(llmConfig.Skills.Allowed) > 0 {
+		allSkills = skills.FilterByAllowlist(allSkills, llmConfig.Skills.Allowed)
+	}
+
+	logger.G(ctx).WithField("count", len(allSkills)).Debug("Discovered skills")
+	return allSkills
+}
+
+// WithSubAgentTool returns an option that configures the subagent tool with discovered workflows
+func WithSubAgentTool() BasicStateOption {
+	return func(ctx context.Context, s *BasicState) error {
+		discoveredWorkflows := discoverWorkflows(ctx)
+		subagentTool := NewSubAgentTool(discoveredWorkflows, len(discoveredWorkflows) > 0)
+		for i, tool := range s.tools {
+			if tool.Name() == "subagent" {
+				s.tools[i] = subagentTool
+				return nil
+			}
+		}
+		s.tools = append(s.tools, subagentTool)
+		return nil
+	}
+}
+
+// discoverWorkflows discovers available workflow fragments for the subagent tool
+func discoverWorkflows(ctx context.Context) map[string]*fragments.Fragment {
+	processor, err := fragments.NewFragmentProcessor()
+	if err != nil {
+		logger.G(ctx).WithError(err).Debug("Failed to create fragment processor for workflow discovery")
+		return nil
+	}
+
+	frags, err := processor.ListFragmentsWithMetadata()
+	if err != nil {
+		logger.G(ctx).WithError(err).Debug("Failed to list fragments for workflow discovery")
+		return nil
+	}
+
+	workflows := make(map[string]*fragments.Fragment)
+	for _, frag := range frags {
+		// Only include fragments explicitly marked as workflows
+		if frag.Metadata.Workflow {
+			workflows[frag.ID] = frag
+		}
+	}
+
+	logger.G(ctx).WithField("count", len(workflows)).Debug("Discovered workflows for subagent")
+	return workflows
 }
 
 // TodoFilePath returns the path to the todo file

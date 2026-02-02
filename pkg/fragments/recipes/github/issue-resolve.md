@@ -1,9 +1,15 @@
 ---
 name: GitHub Issue Resolver
 description: Intelligently resolves GitHub issues choosing between implementation workflow and Q&A
-defaults:
-  bot_mention: "@kodelet"
-  bin: "kodelet"
+arguments:
+  issue_url:
+    description: The GitHub issue URL to resolve
+  bot_mention:
+    description: The bot mention to look for in comments
+    default: "@kodelet"
+  bin:
+    description: The kodelet binary name to use for subcommands
+    default: "kodelet"
 ---
 
 {{/* Template variables: .issue_url  .bot_mention .bin */}}

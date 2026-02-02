@@ -257,11 +257,21 @@ func runRecipeShow(ctx context.Context, recipeName string, config *RecipeShowCon
 
 		fmt.Printf("Path: %s\n", fragment.Path)
 
-		if len(fragment.Metadata.Defaults) > 0 {
+		if len(fragment.Metadata.Arguments) > 0 {
 			fmt.Println()
-			presenter.Section("Default Arguments")
-			for key, value := range fragment.Metadata.Defaults {
-				fmt.Printf("  %s: %s\n", key, value)
+			presenter.Section("Arguments")
+			for key, argMeta := range fragment.Metadata.Arguments {
+				if argMeta.Description != "" {
+					if argMeta.Default != "" {
+						fmt.Printf("  %s: %s (default: %s)\n", key, argMeta.Description, argMeta.Default)
+					} else {
+						fmt.Printf("  %s: %s\n", key, argMeta.Description)
+					}
+				} else if argMeta.Default != "" {
+					fmt.Printf("  %s: (default: %s)\n", key, argMeta.Default)
+				} else {
+					fmt.Printf("  %s\n", key)
+				}
 			}
 		}
 

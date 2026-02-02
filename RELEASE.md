@@ -1,5 +1,55 @@
 # Kodelet
 
+## 0.2.6.beta (2026-02-02)
+
+### Breaking Changes
+
+**Fragment metadata `defaults` replaced by `arguments`**: The `defaults` field in fragment/recipe YAML frontmatter has been replaced with a more expressive `arguments` structure. Existing recipes using `defaults` must be migrated:
+
+```yaml
+# Old format (no longer supported)
+defaults:
+  target: "main"
+  draft: "false"
+
+# New format
+arguments:
+  target:
+    description: Target branch to merge into
+    default: "main"
+  draft:
+    description: Whether to create as a draft pull request
+    default: "false"
+```
+
+### Features
+
+**Subagent workflow support**: The subagent tool can now execute workflows (recipes/fragments) directly, enabling the model to delegate specialized tasks like PR creation or issue resolution:
+
+```json
+{"workflow": "github/pr", "args": {"target": "develop", "draft": "true"}}
+```
+
+The `question` parameter is now optional when a workflow is specified.
+
+**Structured fragment arguments**: Fragment/recipe metadata now supports argument descriptions and defaults in a structured format:
+
+```yaml
+arguments:
+  target:
+    description: Target branch to merge into
+    default: "main"
+```
+
+The `kodelet recipe show` command now displays argument descriptions alongside defaults.
+
+**`--no-workflows` flag**: Added flag to disable subagent workflows for security or debugging:
+
+```bash
+kodelet run --no-workflows "query"    # Disable workflows for run command
+kodelet acp --no-workflows            # Disable workflows for ACP mode
+```
+
 ## 0.2.5.beta (2026-02-01)
 
 ### Breaking Changes

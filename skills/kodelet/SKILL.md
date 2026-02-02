@@ -95,9 +95,10 @@ kodelet run -r custom-tool --arg task="validate JSON" --arg global=true
 **Recipe capabilities:**
 - Variable substitution: `{{.variable_name}}`
 - Bash command execution: `{{bash "git" "branch" "--show-current"}}`
-- Default values: Define fallbacks in recipe frontmatter
+- Argument definitions with descriptions and defaults in frontmatter
 - Tool restrictions: Limit available tools with `allowed_tools`
 - Command restrictions: Limit bash commands with `allowed_commands`
+- Workflow flag: Mark recipes as subagent workflows with `workflow: true`
 
 **Custom recipes:**
 Create templates in `./recipes/` or `~/.kodelet/recipes/`:
@@ -106,8 +107,12 @@ Create templates in `./recipes/` or `~/.kodelet/recipes/`:
 ---
 name: My Custom Recipe
 description: Brief description
-defaults:
-  project: "default-value"
+arguments:
+  project:
+    description: The project name to analyze
+    default: "default-value"
+  focus_area:
+    description: Area to focus the analysis on
 allowed_tools:
   - file_read
   - grep_tool
@@ -179,6 +184,37 @@ skills:
 **Disabling skills:**
 ```bash
 kodelet run --no-skills "query"
+```
+
+### Subagent Workflows
+Recipes marked with `workflow: true` can be invoked by the subagent tool, enabling the model to delegate specialized tasks like PR creation or issue resolution.
+
+**Built-in workflows:**
+- `github/pr` - Create pull requests with AI-generated descriptions
+- `init` - Bootstrap AGENTS.md for repository
+- `custom-tool` - Generate custom tools
+- `commit` - Generate commit message
+- `ralph` / `ralph-init` - Autonomous feature development
+
+**Workflow recipe example:**
+```markdown
+---
+name: My Workflow
+description: A workflow that can be invoked by the subagent
+workflow: true
+arguments:
+  target:
+    description: Target branch
+    default: "main"
+---
+
+Instructions for the workflow...
+```
+
+**Disabling workflows:**
+```bash
+kodelet run --no-workflows "query"
+kodelet acp --no-workflows
 ```
 
 ### Agent Lifecycle Hooks

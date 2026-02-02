@@ -1,10 +1,17 @@
 ---
 name: Ralph - Autonomous Feature Development Loop
 description: Iteratively work through a feature list, implementing one feature at a time with progress tracking
-defaults:
-  prd: "prd.json"
-  progress: "progress.txt"
-  signal: "COMPLETE"
+workflow: true
+arguments:
+  prd:
+    description: Path to the PRD (Product Requirements Document) JSON file
+    default: "prd.json"
+  progress:
+    description: Path to the progress log file
+    default: "progress.txt"
+  signal:
+    description: Signal word to indicate completion
+    default: "COMPLETE"
 ---
 
 {{/* Template variables: .prd .progress .signal */}}
