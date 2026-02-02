@@ -464,6 +464,8 @@ func (t *WebFetchTool) handleHTMLMarkdownContent(ctx context.Context, input *Web
 
 // handleHTMLMarkdownWithPrompt processes HTML/Markdown content with AI extraction using shell-out pattern.
 // This spawns a subagent process via `kodelet run --as-subagent` for content extraction.
+// The full prompt (including content) is passed via stdin to avoid command-line argument length limits
+// (especially on Windows ~32KB).
 func (t *WebFetchTool) handleHTMLMarkdownWithPrompt(ctx context.Context, state tooltypes.State, input *WebFetchInput, content, contentType string) tooltypes.ToolResult {
 	// Convert HTML to Markdown if needed
 	var processedContent string
@@ -483,7 +485,8 @@ func (t *WebFetchTool) handleHTMLMarkdownWithPrompt(ctx context.Context, state t
 		}
 	}
 
-	// Create a prompt for information extraction
+	// Create a prompt for information extraction with content embedded
+	// The full prompt is passed via stdin to avoid CLI argument length limits
 	extractionPrompt := fmt.Sprintf(`
 Here is the content from %s:
 
@@ -502,6 +505,7 @@ IMPORTANT: Make sure that you preserve all the links in the content including hy
 		input.URL, processedContent, input.Prompt)
 
 	// Build command arguments - use weak model and no tools for content extraction
+	// Note: query is passed via stdin, not as an argument, to avoid CLI length limits
 	args := []string{"run", "--result-only", "--as-subagent", "--use-weak-model", "--no-tools"}
 
 	// Add subagent args from config if available
@@ -514,11 +518,9 @@ IMPORTANT: Make sure that you preserve all the links in the content including hy
 		}
 	}
 
-	// Add the extraction prompt as the query
-	args = append(args, extractionPrompt)
-
-	// Execute the subagent
+	// Execute the subagent with full prompt passed via stdin
 	cmd := exec.CommandContext(ctx, exe, args...)
+	cmd.Stdin = strings.NewReader(extractionPrompt)
 
 	output, err := cmd.Output()
 	if err != nil {
