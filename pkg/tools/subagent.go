@@ -205,6 +205,11 @@ func (t *SubAgentTool) ValidateInput(_ tooltypes.State, parameters string) error
 		return errors.New("question is required when workflow is not specified")
 	}
 
+	// Args can only be used with a workflow
+	if len(input.Args) > 0 && input.Workflow == "" {
+		return errors.New("args can only be used with a workflow")
+	}
+
 	if input.Workflow != "" && t.workflowEnabled {
 		if _, exists := t.workflows[input.Workflow]; !exists {
 			available := make([]string, 0, len(t.workflows))
@@ -260,9 +265,14 @@ func BuildSubagentArgs(ctx context.Context, subagentArgs string, input *SubAgent
 	if input.Workflow != "" {
 		args = append(args, "-r", input.Workflow)
 
-		// Add workflow arguments
-		for k, v := range input.Args {
-			args = append(args, "--arg", fmt.Sprintf("%s=%s", k, v))
+		// Add workflow arguments in sorted order for deterministic output
+		argKeys := make([]string, 0, len(input.Args))
+		for k := range input.Args {
+			argKeys = append(argKeys, k)
+		}
+		sort.Strings(argKeys)
+		for _, k := range argKeys {
+			args = append(args, "--arg", fmt.Sprintf("%s=%s", k, input.Args[k]))
 		}
 	}
 

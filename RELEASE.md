@@ -2,6 +2,26 @@
 
 ## 0.2.6.beta (2026-02-02)
 
+### Breaking Changes
+
+**Fragment metadata `defaults` replaced by `arguments`**: The `defaults` field in fragment/recipe YAML frontmatter has been replaced with a more expressive `arguments` structure. Existing recipes using `defaults` must be migrated:
+
+```yaml
+# Old format (no longer supported)
+defaults:
+  target: "main"
+  draft: "false"
+
+# New format
+arguments:
+  target:
+    description: Target branch to merge into
+    default: "main"
+  draft:
+    description: Whether to create as a draft pull request
+    default: "false"
+```
+
 ### Features
 
 **Subagent workflow support**: The subagent tool can now execute workflows (recipes/fragments) directly, enabling the model to delegate specialized tasks like PR creation or issue resolution:

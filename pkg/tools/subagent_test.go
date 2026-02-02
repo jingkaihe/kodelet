@@ -77,6 +77,11 @@ func TestSubAgentTool_ValidateInput(t *testing.T) {
 	err = tool.ValidateInput(state, `{"question": ""}`)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "question is required when workflow is not specified")
+
+	// Invalid inputs - args without workflow
+	err = tool.ValidateInput(state, `{"question": "test", "args": {"key": "value"}}`)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "args can only be used with a workflow")
 }
 
 func TestSubAgentTool_ValidateInputWithWorkflows(t *testing.T) {
@@ -329,25 +334,14 @@ func TestBuildSubagentArgs(t *testing.T) {
 		}
 		args := BuildSubagentArgs(ctx, "", input)
 
-		// Check base args
-		assert.Contains(t, args, "run")
-		assert.Contains(t, args, "--result-only")
-		assert.Contains(t, args, "--as-subagent")
-		assert.Contains(t, args, "-r")
-		assert.Contains(t, args, "github/pr")
-		assert.Contains(t, args, "Create a PR")
-
-		// Check that --arg flags are present (order may vary due to map iteration)
-		argCount := 0
-		for i, arg := range args {
-			if arg == "--arg" {
-				argCount++
-				nextArg := args[i+1]
-				assert.True(t, nextArg == "target=develop" || nextArg == "draft=true",
-					"unexpected --arg value: %s", nextArg)
-			}
-		}
-		assert.Equal(t, 2, argCount, "expected 2 --arg flags")
+		// Args are now sorted alphabetically for deterministic output
+		assert.Equal(t, []string{
+			"run", "--result-only", "--as-subagent",
+			"-r", "github/pr",
+			"--arg", "draft=true",
+			"--arg", "target=develop",
+			"Create a PR",
+		}, args)
 	})
 
 	t.Run("with workflow and subagent_args", func(t *testing.T) {
