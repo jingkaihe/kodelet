@@ -271,7 +271,7 @@ func getGlobalProfiles() map[string]llmtypes.ProfileConfig {
 			continue
 		}
 
-		if profileMap, ok := profileData.(map[string]interface{}); ok {
+		if profileMap, ok := profileData.(map[string]any); ok {
 			profiles[name] = llmtypes.ProfileConfig(profileMap)
 		}
 	}
@@ -301,7 +301,7 @@ func getRepoProfiles() map[string]llmtypes.ProfileConfig {
 			continue
 		}
 
-		if profileMap, ok := profileData.(map[string]interface{}); ok {
+		if profileMap, ok := profileData.(map[string]any); ok {
 			profiles[name] = llmtypes.ProfileConfig(profileMap)
 		}
 	}
@@ -365,7 +365,7 @@ func updateProfileInConfig(global bool, profileName string) error {
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			newConfig := map[string]interface{}{
+			newConfig := map[string]any{
 				"profile": profileName,
 			}
 			return writeYAMLConfig(configPath, newConfig)
@@ -373,13 +373,13 @@ func updateProfileInConfig(global bool, profileName string) error {
 		return errors.Wrap(err, "failed to read config file")
 	}
 
-	var config map[string]interface{}
+	var config map[string]any
 	if err := yaml.Unmarshal(data, &config); err != nil {
 		return errors.Wrap(err, "failed to parse config file")
 	}
 
 	if config == nil {
-		config = make(map[string]interface{})
+		config = make(map[string]any)
 	}
 
 	config["profile"] = profileName
@@ -387,7 +387,7 @@ func updateProfileInConfig(global bool, profileName string) error {
 	return writeYAMLConfig(configPath, config)
 }
 
-func writeYAMLConfig(configPath string, config map[string]interface{}) error {
+func writeYAMLConfig(configPath string, config map[string]any) error {
 	dir := filepath.Dir(configPath)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return errors.Wrap(err, "failed to create config directory")

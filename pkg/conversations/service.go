@@ -182,7 +182,7 @@ func (s *ConversationService) GetConversation(ctx context.Context, id string) (*
 	// Calculate message count by parsing the raw messages
 	messageCount := 0
 	if len(record.RawMessages) > 0 {
-		var messages []interface{}
+		var messages []any
 		if err := json.Unmarshal(record.RawMessages, &messages); err == nil {
 			messageCount = len(messages)
 		}

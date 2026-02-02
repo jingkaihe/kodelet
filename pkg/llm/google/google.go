@@ -65,7 +65,7 @@ type Response struct {
 type ToolCall struct {
 	ID   string
 	Name string
-	Args map[string]interface{}
+	Args map[string]any
 }
 
 // Provider returns the name of the LLM provider for this thread
@@ -74,7 +74,7 @@ func (t *Thread) Provider() string {
 }
 
 // NewGoogleThread creates a new thread with Google's GenAI API
-func NewGoogleThread(config llmtypes.Config, subagentContextFactory llmtypes.SubagentContextFactory) (*Thread, error) {
+func NewGoogleThread(config llmtypes.Config) (*Thread, error) {
 	// Create a copy of the config to avoid modifying the original
 	configCopy := config
 
@@ -136,7 +136,7 @@ func NewGoogleThread(config llmtypes.Config, subagentContextFactory llmtypes.Sub
 
 	// Create the thread with embedded base.Thread
 	t := &Thread{
-		Thread:         base.NewThread(configCopy, conversationID, subagentContextFactory, hookTrigger),
+		Thread:         base.NewThread(configCopy, conversationID, hookTrigger),
 		client:         client,
 		backend:        backend,
 		thinkingBudget: thinkingBudget,
@@ -351,7 +351,8 @@ OUTER:
 	// Save conversation state after completing the interaction
 	if t.Persisted && t.Store != nil && !opt.NoSaveConversation {
 		saveCtx := context.Background() // use new context to avoid cancellation
-		t.SaveConversation(saveCtx, true)
+		// Skip LLM-based summary generation for subagent runs to avoid unnecessary API calls
+		t.SaveConversation(saveCtx, !t.Config.IsSubAgent)
 	}
 
 	if !t.Config.IsSubAgent {
@@ -942,7 +943,7 @@ func generateToolCallID() string {
 }
 
 // executeToolCalls executes tool calls and adds results to the conversation
-func (t *Thread) executeToolCalls(ctx context.Context, response *Response, handler llmtypes.MessageHandler, opt llmtypes.MessageOpt) {
+func (t *Thread) executeToolCalls(ctx context.Context, response *Response, handler llmtypes.MessageHandler, _ llmtypes.MessageOpt) {
 	var toolResultParts []*genai.Part
 
 	for _, toolCall := range response.ToolCalls {
@@ -967,8 +968,7 @@ func (t *Thread) executeToolCalls(ctx context.Context, response *Response, handl
 		if blocked {
 			output = tooltypes.NewBlockedToolResult(toolCall.Name, reason)
 		} else {
-			runToolCtx := t.SubagentContextFactory(ctx, t, handler, opt.CompactRatio, opt.DisableAutoCompact)
-			output = tools.RunTool(runToolCtx, t.State, toolCall.Name, toolInput)
+			output = tools.RunTool(ctx, t.State, toolCall.Name, toolInput)
 		}
 
 		// Use CLI rendering for consistent output formatting
@@ -996,7 +996,7 @@ func (t *Thread) executeToolCalls(ctx context.Context, response *Response, handl
 		resultPart := &genai.Part{
 			FunctionResponse: &genai.FunctionResponse{
 				Name: toolCall.Name,
-				Response: map[string]interface{}{
+				Response: map[string]any{
 					"call_id": toolCall.ID,
 					"result":  output.AssistantFacing(),
 					"error":   output.IsError(),
@@ -1076,25 +1076,6 @@ func (t *Thread) convertToStandardMessages() []llmtypes.Message {
 	return messages
 }
 
-// NewSubAgent creates a subagent thread reusing the parent's client
-func (t *Thread) NewSubAgent(_ context.Context, config llmtypes.Config) llmtypes.Thread {
-	conversationID := convtypes.GenerateID()
-
-	// Create new hook trigger for subagent with shared hook manager
-	hookTrigger := hooks.NewTrigger(t.HookTrigger.Manager, conversationID, true)
-
-	// Create subagent thread reusing the parent's client instead of creating a new one
-	subagentThread := &Thread{
-		Thread:         base.NewThread(config, conversationID, t.SubagentContextFactory, hookTrigger),
-		client:         t.client,  // Reuse parent's client
-		backend:        t.backend, // Reuse parent's backend
-		thinkingBudget: t.thinkingBudget,
-	}
-
-	subagentThread.SetState(t.State)
-	return subagentThread
-}
-
 // Note: SetStructuredToolResult, GetStructuredToolResults, SetStructuredToolResults,
 // and ShouldAutoCompact methods are inherited from embedded base.Thread
 
@@ -1134,7 +1115,7 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 		return errors.Wrap(err, "failed to load compact prompt")
 	}
 
-	summaryThread, err := NewGoogleThread(t.GetConfig(), nil)
+	summaryThread, err := NewGoogleThread(t.GetConfig())
 	if err != nil {
 		return errors.Wrap(err, "failed to create summary thread")
 	}
@@ -1160,7 +1141,7 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 
 // ShortSummary generates a brief summary of the conversation
 func (t *Thread) ShortSummary(ctx context.Context) string {
-	summaryThread, err := NewGoogleThread(t.GetConfig(), nil)
+	summaryThread, err := NewGoogleThread(t.GetConfig())
 	if err != nil {
 		logger.G(ctx).WithError(err).Error("failed to create summary thread")
 		return "Could not generate summary."

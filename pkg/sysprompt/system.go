@@ -20,6 +20,11 @@ func SystemPrompt(model string, llmConfig llm.Config, contexts map[string]string
 	renderer := NewRenderer(TemplateFS)
 	config := NewDefaultConfig().WithModel(model)
 
+	// Add isSubagent feature when running as subagent to exclude subagent tool usage examples
+	if llmConfig.IsSubAgent {
+		config.EnabledFeatures = append(config.EnabledFeatures, "isSubagent")
+	}
+
 	updateContextWithConfig(promptCtx, config)
 	promptCtx.BashAllowedCommands = llmConfig.AllowedCommands
 

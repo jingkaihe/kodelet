@@ -9,6 +9,7 @@ require (
 	github.com/aymanbagabas/go-udiff v0.2.0
 	github.com/fatih/color v1.18.0
 	github.com/gobwas/glob v0.2.3
+	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/mux v1.8.1
 	github.com/hashicorp/go-multierror v1.1.1

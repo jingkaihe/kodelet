@@ -48,7 +48,7 @@ func (m *swapContextMockState) AddBackgroundProcess(_ tooltypes.BackgroundProces
 func (m *swapContextMockState) GetBackgroundProcesses() []tooltypes.BackgroundProcess { return nil }
 func (m *swapContextMockState) RemoveBackgroundProcess(_ int) error                   { return nil }
 func (m *swapContextMockState) DiscoverContexts() map[string]string                   { return nil }
-func (m *swapContextMockState) GetLLMConfig() interface{}                             { return nil }
+func (m *swapContextMockState) GetLLMConfig() any                                     { return nil }
 func (m *swapContextMockState) LockFile(_ string)                                     {}
 func (m *swapContextMockState) UnlockFile(_ string)                                   {}
 
@@ -58,7 +58,7 @@ func createTestThread() *Thread {
 		MaxTokens: 8192,
 	}
 
-	baseThread := base.NewThread(config, "test-conv-id", nil, hooks.Trigger{})
+	baseThread := base.NewThread(config, "test-conv-id", hooks.Trigger{})
 
 	thread := &Thread{
 		Thread: baseThread,

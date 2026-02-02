@@ -312,7 +312,7 @@ func (t *Thread) executeToolCall(
 	callID string,
 	name string,
 	arguments string,
-	handler llmtypes.MessageHandler,
+	_ llmtypes.MessageHandler,
 ) tooltypes.ToolResult {
 	// Trigger before_tool_call hook
 	blocked, reason, modifiedArgs := t.HookTrigger.TriggerBeforeToolCall(ctx, t, name, arguments, callID, t.GetRecipeHooks())
@@ -325,11 +325,8 @@ func (t *Thread) executeToolCall(
 		arguments = modifiedArgs
 	}
 
-	// Create subagent context for tool execution
-	runToolCtx := t.SubagentContextFactory(ctx, t, handler, 0.8, false) // default compact settings
-
 	// Execute the tool using the standard tool runner
-	result := tools.RunTool(runToolCtx, t.State, name, arguments)
+	result := tools.RunTool(ctx, t.State, name, arguments)
 
 	// Get structured data for hook processing
 	structuredData := result.StructuredData()

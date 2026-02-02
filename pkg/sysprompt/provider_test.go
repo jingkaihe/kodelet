@@ -41,7 +41,8 @@ func TestSubAgentPrompt_ProviderSelection(t *testing.T) {
 
 		prompt := SubAgentPrompt("claude-sonnet-45", config, contexts)
 		assert.NotEmpty(t, prompt)
-		assert.Contains(t, prompt, "AI SWE Agent")
+		// SubAgentPrompt now delegates to SystemPrompt with IsSubAgent=true
+		assert.Contains(t, prompt, "interactive CLI tool")
 	})
 
 	t.Run("Unknown provider defaults to Anthropic templates", func(t *testing.T) {
@@ -52,7 +53,8 @@ func TestSubAgentPrompt_ProviderSelection(t *testing.T) {
 
 		prompt := SubAgentPrompt("some-model", config, contexts)
 		assert.NotEmpty(t, prompt)
-		assert.Contains(t, prompt, "AI SWE Agent")
+		// SubAgentPrompt now delegates to SystemPrompt with IsSubAgent=true
+		assert.Contains(t, prompt, "interactive CLI tool")
 	})
 }
 

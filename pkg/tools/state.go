@@ -109,16 +109,13 @@ func NewBasicState(ctx context.Context, opts ...BasicStateOption) *BasicState {
 	return state
 }
 
-// WithSubAgentTools returns an option that configures sub-agent tools
-func WithSubAgentTools(config interface{}) BasicStateOption {
+// WithSubAgentToolsFromConfig returns an option that configures sub-agent tools using the state's llmConfig
+// This is used when running kodelet with --as-subagent flag
+func WithSubAgentToolsFromConfig() BasicStateOption {
 	return func(ctx context.Context, s *BasicState) error {
-		config, ok := config.(llmtypes.Config)
-		if !ok {
-			return errors.New("invalid config type")
-		}
 		var allowedTools []string
-		if config.SubAgent != nil && config.SubAgent.AllowedTools != nil {
-			allowedTools = config.SubAgent.AllowedTools
+		if s.llmConfig.AllowedTools != nil {
+			allowedTools = s.llmConfig.AllowedTools
 		}
 		s.tools = GetSubAgentTools(ctx, allowedTools)
 		s.configureTools()
@@ -339,7 +336,7 @@ func (s *BasicState) RemoveBackgroundProcess(pid int) error {
 }
 
 // GetLLMConfig returns the LLM configuration
-func (s *BasicState) GetLLMConfig() interface{} {
+func (s *BasicState) GetLLMConfig() any {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.llmConfig

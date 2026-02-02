@@ -92,7 +92,7 @@ func runServeCommand(ctx context.Context, config *ServeConfig) {
 		os.Exit(1)
 	}
 
-	logger.G(ctx).WithFields(map[string]interface{}{
+	logger.G(ctx).WithFields(map[string]any{
 		"host": config.Host,
 		"port": config.Port,
 	}).Info("Starting web UI server")

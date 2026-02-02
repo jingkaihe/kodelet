@@ -35,17 +35,16 @@ type LoadConversationFunc func(ctx context.Context)
 // Thread contains shared fields that are common across all LLM provider implementations.
 // Provider-specific Thread structs should embed this struct to inherit common functionality.
 type Thread struct {
-	Config                 llmtypes.Config                           // LLM configuration
-	State                  tooltypes.State                           // Tool execution state
-	Usage                  *llmtypes.Usage                           // Token usage tracking
-	ConversationID         string                                    // Unique conversation identifier
-	Persisted              bool                                      // Whether conversation is being persisted
-	Store                  ConversationStore                         // Conversation persistence store
-	ToolResults            map[string]tooltypes.StructuredToolResult // Maps tool_call_id to structured result
-	SubagentContextFactory llmtypes.SubagentContextFactory           // Factory for creating subagent contexts
-	HookTrigger            hooks.Trigger                             // Hook trigger for lifecycle hooks
-	LoadConversation       LoadConversationFunc                      // Provider-specific callback for loading conversations
-	RecipeHooks            map[string]llmtypes.HookConfig            // Recipe hook configurations
+	Config           llmtypes.Config                           // LLM configuration
+	State            tooltypes.State                           // Tool execution state
+	Usage            *llmtypes.Usage                           // Token usage tracking
+	ConversationID   string                                    // Unique conversation identifier
+	Persisted        bool                                      // Whether conversation is being persisted
+	Store            ConversationStore                         // Conversation persistence store
+	ToolResults      map[string]tooltypes.StructuredToolResult // Maps tool_call_id to structured result
+	HookTrigger      hooks.Trigger                             // Hook trigger for lifecycle hooks
+	LoadConversation LoadConversationFunc                      // Provider-specific callback for loading conversations
+	RecipeHooks      map[string]llmtypes.HookConfig            // Recipe hook configurations
 
 	Mu             sync.Mutex // Mutex for thread-safe operations on usage and tool results
 	ConversationMu sync.Mutex // Mutex for conversation-related operations
@@ -56,17 +55,15 @@ type Thread struct {
 func NewThread(
 	config llmtypes.Config,
 	conversationID string,
-	subagentContextFactory llmtypes.SubagentContextFactory,
 	hookTrigger hooks.Trigger,
 ) *Thread {
 	return &Thread{
-		Config:                 config,
-		ConversationID:         conversationID,
-		Persisted:              false,
-		Usage:                  &llmtypes.Usage{},
-		ToolResults:            make(map[string]tooltypes.StructuredToolResult),
-		SubagentContextFactory: subagentContextFactory,
-		HookTrigger:            hookTrigger,
+		Config:         config,
+		ConversationID: conversationID,
+		Persisted:      false,
+		Usage:          &llmtypes.Usage{},
+		ToolResults:    make(map[string]tooltypes.StructuredToolResult),
+		HookTrigger:    hookTrigger,
 	}
 }
 

@@ -7,16 +7,18 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/google/shlex"
 	"github.com/invopop/jsonschema"
 	"github.com/pkg/errors"
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/jingkaihe/kodelet/pkg/logger"
-	"github.com/jingkaihe/kodelet/pkg/types/llm"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
@@ -178,9 +180,9 @@ func (t *ImageRecognitionTool) validateLocalImageFile(filePath string) error {
 	return nil
 }
 
-// Execute executes the image_recognition tool.
-// Execute performs the image recognition operation
-func (t *ImageRecognitionTool) Execute(ctx context.Context, _ tooltypes.State, parameters string) tooltypes.ToolResult {
+// Execute executes the image_recognition tool using shell-out pattern.
+// This spawns a subagent process via `kodelet run --as-subagent --image` for image analysis.
+func (t *ImageRecognitionTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
 	input := &ImageRecognitionInput{}
 	err := json.Unmarshal([]byte(parameters), input)
 	if err != nil {
@@ -202,13 +204,13 @@ func (t *ImageRecognitionTool) Execute(ctx context.Context, _ tooltypes.State, p
 		}
 	}
 
-	// Get sub-agent config from context for LLM interaction
-	subAgentConfig, ok := ctx.Value(llm.SubAgentConfigKey).(llm.SubAgentConfig)
-	if !ok {
+	// Get the current executable path
+	exe, err := os.Executable()
+	if err != nil {
 		return &ImageRecognitionToolResult{
 			imagePath: input.ImagePath,
 			prompt:    input.Prompt,
-			err:       "sub-agent config not found in context",
+			err:       fmt.Sprintf("Failed to get executable path: %s", err),
 		}
 	}
 
@@ -229,28 +231,35 @@ Focus on directly relevant information for the request above. When describing th
 Organize your response to be clear and actionable.`,
 		input.Prompt)
 
-	// Prepare image paths for the LLM
-	imagePaths := []string{input.ImagePath}
+	// Build command arguments - no tools needed for image analysis
+	args := []string{"run", "--result-only", "--as-subagent", "--no-tools", "--image", input.ImagePath}
 
-	// Use the LLM to analyze the image
-	analysisResult, err := subAgentConfig.Thread.SendMessage(ctx,
-		analysisPrompt,
-		&llm.ConsoleMessageHandler{
-			Silent: true,
-		},
-		llm.MessageOpt{
-			PromptCache:        true,
-			Images:             imagePaths,
-			NoSaveConversation: true,
-		},
-	)
-
-	// Aggregate subagent usage into parent thread for accurate cost tracking
-	if subAgentConfig.ParentThread != nil {
-		subAgentConfig.ParentThread.AggregateSubagentUsage(subAgentConfig.Thread.GetUsage())
+	// Add subagent args from config if available
+	if llmConfig, ok := state.GetLLMConfig().(llmtypes.Config); ok && llmConfig.SubagentArgs != "" {
+		parsedArgs, err := shlex.Split(llmConfig.SubagentArgs)
+		if err != nil {
+			logger.G(ctx).WithError(err).Warn("failed to parse subagent_args, ignoring")
+		} else {
+			args = append(args, parsedArgs...)
+		}
 	}
 
+	// Add the analysis prompt as the query
+	args = append(args, analysisPrompt)
+
+	// Execute the subagent
+	cmd := exec.CommandContext(ctx, exe, args...)
+
+	output, err := cmd.Output()
 	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return &ImageRecognitionToolResult{
+				imagePath: input.ImagePath,
+				prompt:    input.Prompt,
+				err:       fmt.Sprintf("Failed to analyze image: %s\nstderr: %s", err, string(exitErr.Stderr)),
+			}
+		}
 		return &ImageRecognitionToolResult{
 			imagePath: input.ImagePath,
 			prompt:    input.Prompt,
@@ -261,7 +270,7 @@ Organize your response to be clear and actionable.`,
 	return &ImageRecognitionToolResult{
 		imagePath: input.ImagePath,
 		prompt:    input.Prompt,
-		result:    analysisResult,
+		result:    strings.TrimSpace(string(output)),
 	}
 }
 

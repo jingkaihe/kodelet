@@ -70,7 +70,7 @@ func (t *Thread) SaveConversation(ctx context.Context, summarize bool) error {
 		RawMessages:         messagesJSON,
 		Provider:            "openai",
 		Usage:               *t.Usage,
-		Metadata:            map[string]interface{}{"model": t.Config.Model},
+		Metadata:            map[string]any{"model": t.Config.Model},
 		Summary:             t.summary,
 		CreatedAt:           time.Now(),
 		UpdatedAt:           time.Now(),

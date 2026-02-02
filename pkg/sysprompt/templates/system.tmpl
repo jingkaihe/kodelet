@@ -12,7 +12,7 @@ You are an interactive CLI tool that helps with software engineering and product
 
 {{include "templates/components/tools.tmpl" .}}
 
-{{include "templates/components/examples/subagent_tool_usage.tmpl" .}}
+{{if not .Features.isSubagent}}{{include "templates/components/examples/subagent_tool_usage.tmpl" .}}{{end}}
 
 {{include "templates/components/task_management.tmpl" .}}
 

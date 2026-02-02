@@ -47,7 +47,7 @@ Arguments should be provided as JSON using the --args flag.`,
 		outputFile, _ := cmd.Flags().GetString("output")
 
 		// Parse arguments
-		var argsMap map[string]interface{}
+		var argsMap map[string]any
 		if err := json.Unmarshal([]byte(argsJSON), &argsMap); err != nil {
 			return errors.Wrap(err, "invalid JSON arguments")
 		}

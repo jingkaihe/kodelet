@@ -3,10 +3,15 @@ package tools
 import (
 	"context"
 	"encoding/json"
-	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"strings"
 	"time"
 
+	"github.com/google/shlex"
 	"github.com/invopop/jsonschema"
+	"github.com/pkg/errors"
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/jingkaihe/kodelet/pkg/logger"
@@ -113,8 +118,31 @@ func (t *SubAgentTool) TracingKVs(parameters string) ([]attribute.KeyValue, erro
 	}, nil
 }
 
-// Execute runs the sub-agent and returns the result
-func (t *SubAgentTool) Execute(ctx context.Context, _ tooltypes.State, parameters string) tooltypes.ToolResult {
+// BuildSubagentArgs builds the command-line arguments for spawning a subagent process.
+// This is extracted as a separate function for testability.
+// Returns the complete argument list including the base args, subagent_args from config, and the question.
+func BuildSubagentArgs(ctx context.Context, subagentArgs string, question string) []string {
+	// Base arguments for subagent execution
+	args := []string{"run", "--result-only", "--as-subagent"}
+
+	// Append user-configured subagent args (e.g., "--profile openai --use-weak-model")
+	if subagentArgs != "" {
+		parsedArgs, err := shlex.Split(subagentArgs)
+		if err != nil {
+			logger.G(ctx).WithError(err).Warn("failed to parse subagent_args, ignoring")
+		} else {
+			args = append(args, parsedArgs...)
+		}
+	}
+
+	// Append the question as the final argument
+	args = append(args, question)
+
+	return args
+}
+
+// Execute runs the sub-agent via shell-out and returns the result
+func (t *SubAgentTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
 	input := &SubAgentInput{}
 	err := json.Unmarshal([]byte(parameters), input)
 	if err != nil {
@@ -123,44 +151,40 @@ func (t *SubAgentTool) Execute(ctx context.Context, _ tooltypes.State, parameter
 		}
 	}
 
-	// get type.Thread from context
-	subAgentConfig, ok := ctx.Value(llmtypes.SubAgentConfigKey).(llmtypes.SubAgentConfig)
-	if !ok {
+	exe, err := os.Executable()
+	if err != nil {
 		return &SubAgentToolResult{
-			err:      "sub-agent config not found in context",
+			err:      errors.Wrap(err, "failed to get executable path").Error(),
 			question: input.Question,
 		}
 	}
 
-	handler := subAgentConfig.MessageHandler
-	if handler == nil {
-		logger.G(ctx).Warn("no message handler found in context, using console handler")
-		handler = &llmtypes.ConsoleMessageHandler{}
+	// Build command arguments
+	var subagentArgs string
+	if llmConfig, ok := state.GetLLMConfig().(llmtypes.Config); ok {
+		subagentArgs = llmConfig.SubagentArgs
 	}
+	args := BuildSubagentArgs(ctx, subagentArgs, input.Question)
 
-	text, err := subAgentConfig.Thread.SendMessage(ctx, input.Question, handler, llmtypes.MessageOpt{
-		PromptCache:        true,
-		UseWeakModel:       false, // explicitly set to false for clarity
-		NoSaveConversation: true,
-		CompactRatio:       subAgentConfig.CompactRatio,
-		DisableAutoCompact: subAgentConfig.DisableAutoCompact,
-	})
+	cmd := exec.CommandContext(ctx, exe, args...)
 
-	// Aggregate subagent usage into parent thread for accurate cost tracking
-	// This must be done regardless of error to capture all API costs
-	if subAgentConfig.ParentThread != nil {
-		subAgentConfig.ParentThread.AggregateSubagentUsage(subAgentConfig.Thread.GetUsage())
-	}
-
+	output, err := cmd.Output()
 	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return &SubAgentToolResult{
+				err:      fmt.Sprintf("Subagent execution failed: %s\nstderr: %s", err, string(exitErr.Stderr)),
+				question: input.Question,
+			}
+		}
 		return &SubAgentToolResult{
-			err:      err.Error(),
+			err:      fmt.Sprintf("Subagent execution failed: %s", err),
 			question: input.Question,
 		}
 	}
 
 	return &SubAgentToolResult{
-		result:   text,
+		result:   strings.TrimSpace(string(output)),
 		question: input.Question,
 	}
 }

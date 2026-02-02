@@ -1,5 +1,48 @@
 # Kodelet
 
+## 0.2.5.beta (2026-02-01)
+
+### Breaking Changes
+
+**Subagent configuration simplified**: The nested `subagent:` configuration block has been replaced with a simpler `subagent_args` string. This is a breaking change - users with existing `subagent:` configs must migrate:
+
+```yaml
+# Old (no longer supported)
+subagent:
+  provider: openai
+  model: gpt-4.1
+  reasoning_effort: high
+
+# New - create a profile and reference it
+profiles:
+  openai-subagent:
+    provider: openai
+    model: gpt-4.1
+    reasoning_effort: high
+
+subagent_args: "--profile openai-subagent"
+```
+
+Common patterns:
+- `subagent_args: "--use-weak-model"` - Use weak model (same provider)
+- `subagent_args: "--profile cheap"` - Use a different profile
+
+### Features
+
+**`--no-tools` flag**: New flag to disable all tools for simple query-response usage:
+
+```bash
+kodelet run --no-tools "What is the capital of France?"
+```
+
+### Internal Changes
+
+- Subagent, image recognition, and web fetch tools now use shell-out pattern via `kodelet run --as-subagent` (ADR 027)
+- Removed `NewSubAgent()` method from all LLM providers
+- Removed separate subagent prompt template (`pkg/sysprompt/templates/subagent.tmpl`) - subagent now uses main system prompt with `isSubagent` feature flag
+- Removed Docker build workflow and Dockerfile
+- CI workflows now use PVC-based tool caching instead of mise cache
+
 ## 0.2.4.beta (2026-01-28)
 
 * Remove default and constraint annotations from JSON schema for tool params

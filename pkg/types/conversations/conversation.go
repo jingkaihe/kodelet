@@ -34,7 +34,7 @@ type ConversationRecord struct {
 	Summary             string                                `json:"summary,omitempty"`
 	CreatedAt           time.Time                             `json:"createdAt"`
 	UpdatedAt           time.Time                             `json:"updatedAt"`
-	Metadata            map[string]interface{}                `json:"metadata,omitempty"`
+	Metadata            map[string]any                        `json:"metadata,omitempty"`
 	ToolResults         map[string]tools.StructuredToolResult `json:"toolResults,omitempty"`         // Maps tool_call_id to structured result
 	BackgroundProcesses []tools.BackgroundProcess             `json:"backgroundProcesses,omitempty"` // Persistent background processes
 }
@@ -72,7 +72,7 @@ func NewConversationRecord(id string) ConversationRecord {
 		RawMessages:         json.RawMessage("[]"),
 		CreatedAt:           now,
 		UpdatedAt:           now,
-		Metadata:            make(map[string]interface{}),
+		Metadata:            make(map[string]any),
 		FileLastAccess:      make(map[string]time.Time),
 		ToolResults:         make(map[string]tools.StructuredToolResult),
 		BackgroundProcesses: make([]tools.BackgroundProcess, 0),
@@ -84,13 +84,13 @@ func (cr *ConversationRecord) ToSummary() ConversationSummary {
 	// Extract first message by parsing the raw messages
 	firstMessage := ""
 	if len(cr.RawMessages) > 0 {
-		var messages []map[string]interface{}
+		var messages []map[string]any
 		if err := json.Unmarshal(cr.RawMessages, &messages); err == nil && len(messages) > 0 {
 			// Find first user message
 			for _, msg := range messages {
 				if role, ok := msg["role"].(string); ok && role == "user" {
-					if content, ok := msg["content"].([]interface{}); ok && len(content) > 0 {
-						if block, ok := content[0].(map[string]interface{}); ok {
+					if content, ok := msg["content"].([]any); ok && len(content) > 0 {
+						if block, ok := content[0].(map[string]any); ok {
 							if text, ok := block["text"].(string); ok {
 								firstMessage = text
 								// Truncate if too long

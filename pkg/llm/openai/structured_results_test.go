@@ -22,7 +22,7 @@ func TestOpenAIThread_StructuredToolResults(t *testing.T) {
 		Model:     "gpt-4.1",
 		MaxTokens: 1000,
 	}
-	thread, err := NewOpenAIThread(config, nil)
+	thread, err := NewOpenAIThread(config)
 	require.NoError(t, err)
 
 	// Test initial state
@@ -78,7 +78,7 @@ func TestOpenAIThread_SetStructuredToolResults(t *testing.T) {
 		Model:     "gpt-4.1",
 		MaxTokens: 1000,
 	}
-	thread, err := NewOpenAIThread(config, nil)
+	thread, err := NewOpenAIThread(config)
 	require.NoError(t, err)
 
 	// Create bulk results
@@ -133,7 +133,7 @@ func TestOpenAIThread_StructuredResultsConcurrency(t *testing.T) {
 		Model:     "gpt-4.1",
 		MaxTokens: 1000,
 	}
-	thread, err := NewOpenAIThread(config, nil)
+	thread, err := NewOpenAIThread(config)
 	require.NoError(t, err)
 
 	var wg sync.WaitGroup
@@ -240,7 +240,7 @@ func (m *mockState) AddBackgroundProcess(_ tooltypes.BackgroundProcess) error { 
 func (m *mockState) GetBackgroundProcesses() []tooltypes.BackgroundProcess    { return nil }
 func (m *mockState) RemoveBackgroundProcess(_ int) error                      { return nil }
 func (m *mockState) DiscoverContexts() map[string]string                      { return map[string]string{} }
-func (m *mockState) GetLLMConfig() interface{}                                { return nil }
+func (m *mockState) GetLLMConfig() any                                        { return nil }
 func (m *mockState) LockFile(_ string)                                        {}
 func (m *mockState) UnlockFile(_ string)                                      {}
 
@@ -251,7 +251,7 @@ func TestOpenAIThread_PersistenceWithStructuredResults(t *testing.T) {
 		Model:     "gpt-4.1",
 		MaxTokens: 1000,
 	}
-	thread, err := NewOpenAIThread(config, nil)
+	thread, err := NewOpenAIThread(config)
 	require.NoError(t, err)
 
 	// Set up mock store
@@ -307,7 +307,7 @@ func TestOpenAIThread_PersistenceWithStructuredResults(t *testing.T) {
 	assert.Equal(t, "file_read", savedResult1.ToolName)
 
 	// Test loading
-	thread2, err := NewOpenAIThread(config, nil)
+	thread2, err := NewOpenAIThread(config)
 	require.NoError(t, err)
 	thread2.Store = &mockConversationStore{
 		loaded: &mockStore.saved,

@@ -161,7 +161,7 @@ func TestStructuredToolResult_JSONMarshaling(t *testing.T) {
 			t.Logf("Marshaled JSON: %s", string(data))
 
 			// Verify metadataType field is included
-			var jsonMap map[string]interface{}
+			var jsonMap map[string]any
 			json.Unmarshal(data, &jsonMap)
 			if tt.result.Metadata != nil {
 				_, hasType := jsonMap["metadataType"]
@@ -483,9 +483,9 @@ func TestExtractMetadata(t *testing.T) {
 	tests := []struct {
 		name     string
 		metadata ToolMetadata
-		target   interface{}
+		target   any
 		want     bool
-		validate func(t *testing.T, target interface{})
+		validate func(t *testing.T, target any)
 	}{
 		{
 			name:     "nil metadata returns false",
@@ -514,7 +514,7 @@ func TestExtractMetadata(t *testing.T) {
 			},
 			target: &FileReadMetadata{},
 			want:   true,
-			validate: func(t *testing.T, target interface{}) {
+			validate: func(t *testing.T, target any) {
 				result := target.(*FileReadMetadata)
 				assert.Equal(t, "/test.go", result.FilePath, "FilePath mismatch")
 				assert.Equal(t, 2, len(result.Lines), "Lines length mismatch")
@@ -530,7 +530,7 @@ func TestExtractMetadata(t *testing.T) {
 			},
 			target: &WebFetchMetadata{},
 			want:   true,
-			validate: func(t *testing.T, target interface{}) {
+			validate: func(t *testing.T, target any) {
 				result := target.(*WebFetchMetadata)
 				assert.Equal(t, "https://example.com", result.URL, "URL mismatch")
 				assert.Equal(t, "test content", result.Content, "Content mismatch")
@@ -559,7 +559,7 @@ func TestExtractMetadata(t *testing.T) {
 			},
 			target: &MCPToolMetadata{},
 			want:   true,
-			validate: func(t *testing.T, target interface{}) {
+			validate: func(t *testing.T, target any) {
 				result := target.(*MCPToolMetadata)
 				assert.Equal(t, "test_tool", result.MCPToolName, "MCPToolName mismatch")
 				assert.Equal(t, 2, len(result.Parameters), "Parameters length mismatch")
@@ -585,7 +585,7 @@ func TestExtractMetadata_AllTypes(t *testing.T) {
 	metadataTypes := []struct {
 		name     string
 		metadata ToolMetadata
-		target   interface{}
+		target   any
 	}{
 		{"FileReadMetadata", FileReadMetadata{FilePath: "/test"}, &FileReadMetadata{}},
 		{"FileWriteMetadata", FileWriteMetadata{FilePath: "/test"}, &FileWriteMetadata{}},

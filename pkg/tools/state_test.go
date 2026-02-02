@@ -37,8 +37,8 @@ func TestBasicState(t *testing.T) {
 		assert.Equal(t, mainTools[i].Name(), tool.Name())
 	}
 
-	basicConfig := llmtypes.Config{}
-	subAgentTools := NewBasicState(context.TODO(), WithSubAgentTools(basicConfig))
+	// Test subagent tools configuration via WithSubAgentToolsFromConfig
+	subAgentTools := NewBasicState(context.TODO(), WithSubAgentToolsFromConfig())
 	expectedSubAgentTools := GetSubAgentTools(context.Background(), []string{})
 	assert.Equal(t, len(expectedSubAgentTools), len(subAgentTools.Tools()))
 	for i, tool := range subAgentTools.Tools() {
@@ -162,9 +162,10 @@ func TestBasicState_ConfigureBashTool_WithSubAgentTools(t *testing.T) {
 	allowedCommands := []string{"npm *", "yarn *"}
 	config := llmtypes.Config{
 		AllowedCommands: allowedCommands,
+		IsSubAgent:      true,
 	}
 
-	s := NewBasicState(context.TODO(), WithLLMConfig(config), WithSubAgentTools(config))
+	s := NewBasicState(context.TODO(), WithLLMConfig(config), WithSubAgentToolsFromConfig())
 
 	tools := s.BasicTools()
 	var bashTool *BashTool
@@ -670,5 +671,124 @@ func TestNewBasicState_ErrorHandling(t *testing.T) {
 		assert.Len(t, contexts, 1)
 		assert.Contains(t, contexts, contextFile)
 		assert.Equal(t, "# Test context", contexts[contextFile])
+	})
+}
+
+func TestWithSubAgentToolsFromConfig(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("excludes subagent tool", func(t *testing.T) {
+		state := NewBasicState(ctx, WithSubAgentToolsFromConfig())
+
+		toolNames := make([]string, len(state.Tools()))
+		for i, tool := range state.Tools() {
+			toolNames[i] = tool.Name()
+		}
+
+		assert.NotContains(t, toolNames, "subagent", "Subagent tools should not contain subagent to prevent recursion")
+	})
+
+	t.Run("includes expected tools", func(t *testing.T) {
+		state := NewBasicState(ctx, WithSubAgentToolsFromConfig())
+
+		toolNames := make([]string, len(state.Tools()))
+		for i, tool := range state.Tools() {
+			toolNames[i] = tool.Name()
+		}
+
+		// Should include basic tools
+		assert.Contains(t, toolNames, "bash")
+		assert.Contains(t, toolNames, "file_read")
+		assert.Contains(t, toolNames, "grep_tool")
+		assert.Contains(t, toolNames, "glob_tool")
+	})
+
+	t.Run("respects allowed_tools from config", func(t *testing.T) {
+		config := llmtypes.Config{
+			AllowedTools: []string{"file_read", "grep_tool"},
+		}
+		state := NewBasicState(ctx, WithLLMConfig(config), WithSubAgentToolsFromConfig())
+
+		toolNames := make([]string, len(state.Tools()))
+		for i, tool := range state.Tools() {
+			toolNames[i] = tool.Name()
+		}
+
+		// Should include requested tools plus meta tools
+		assert.Contains(t, toolNames, "file_read")
+		assert.Contains(t, toolNames, "grep_tool")
+		assert.Contains(t, toolNames, "glob_tool") // meta tool always included
+	})
+
+	t.Run("no_tools with NoToolsMarker", func(t *testing.T) {
+		config := llmtypes.Config{
+			AllowedTools: []string{NoToolsMarker},
+		}
+		state := NewBasicState(ctx, WithLLMConfig(config), WithSubAgentToolsFromConfig())
+
+		assert.Empty(t, state.Tools(), "NoToolsMarker should result in no tools")
+	})
+}
+
+func TestWithMainTools(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("includes subagent tool", func(t *testing.T) {
+		state := NewBasicState(ctx, WithMainTools())
+
+		toolNames := make([]string, len(state.Tools()))
+		for i, tool := range state.Tools() {
+			toolNames[i] = tool.Name()
+		}
+
+		assert.Contains(t, toolNames, "subagent", "Main tools should include subagent")
+	})
+
+	t.Run("respects allowed_tools from config", func(t *testing.T) {
+		config := llmtypes.Config{
+			AllowedTools: []string{"bash", "file_read", "subagent"},
+		}
+		state := NewBasicState(ctx, WithLLMConfig(config), WithMainTools())
+
+		toolNames := make([]string, len(state.Tools()))
+		for i, tool := range state.Tools() {
+			toolNames[i] = tool.Name()
+		}
+
+		assert.Contains(t, toolNames, "bash")
+		assert.Contains(t, toolNames, "file_read")
+		assert.Contains(t, toolNames, "subagent")
+	})
+
+	t.Run("no_tools with NoToolsMarker", func(t *testing.T) {
+		config := llmtypes.Config{
+			AllowedTools: []string{NoToolsMarker},
+		}
+		state := NewBasicState(ctx, WithLLMConfig(config), WithMainTools())
+
+		assert.Empty(t, state.Tools(), "NoToolsMarker should result in no tools")
+	})
+}
+
+func TestGetLLMConfig_ReturnsSubagentArgs(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("returns config with subagent_args", func(t *testing.T) {
+		config := llmtypes.Config{
+			SubagentArgs: "--profile cheap --use-weak-model",
+		}
+		state := NewBasicState(ctx, WithLLMConfig(config))
+
+		retrievedConfig, ok := state.GetLLMConfig().(llmtypes.Config)
+		assert.True(t, ok, "GetLLMConfig should return llmtypes.Config")
+		assert.Equal(t, "--profile cheap --use-weak-model", retrievedConfig.SubagentArgs)
+	})
+
+	t.Run("returns empty subagent_args by default", func(t *testing.T) {
+		state := NewBasicState(ctx)
+
+		retrievedConfig, ok := state.GetLLMConfig().(llmtypes.Config)
+		assert.True(t, ok, "GetLLMConfig should return llmtypes.Config")
+		assert.Empty(t, retrievedConfig.SubagentArgs)
 	})
 }

@@ -89,10 +89,7 @@ type Thread struct {
 }
 
 // NewThread creates a new Responses API thread with the given configuration.
-func NewThread(
-	config llmtypes.Config,
-	subagentContextFactory llmtypes.SubagentContextFactory,
-) (*Thread, error) {
+func NewThread(config llmtypes.Config) (*Thread, error) {
 	log := logger.G(context.Background())
 
 	log.WithField("model", config.Model).Debug("creating OpenAI Responses API thread")
@@ -110,7 +107,7 @@ func NewThread(
 	}
 
 	// Create the base thread with shared functionality
-	baseThread := base.NewThread(config, conversationID, subagentContextFactory, hookTrigger)
+	baseThread := base.NewThread(config, conversationID, hookTrigger)
 
 	// Build client options based on authentication mode
 	opts, useCodex, err := buildClientOptions(config, log)
@@ -357,7 +354,8 @@ OUTER:
 	// Save conversation state
 	if t.Persisted && t.Store != nil && !opt.NoSaveConversation {
 		saveCtx := context.Background()
-		t.SaveConversation(saveCtx, true)
+		// Skip LLM-based summary generation for subagent runs to avoid unnecessary API calls
+		t.SaveConversation(saveCtx, !t.Config.IsSubAgent)
 	}
 
 	if !t.Config.IsSubAgent {
@@ -560,23 +558,6 @@ func (t *Thread) GetMessages() ([]llmtypes.Message, error) {
 	return result, nil
 }
 
-// NewSubAgent creates a new subagent thread with the given configuration.
-func (t *Thread) NewSubAgent(ctx context.Context, config llmtypes.Config) llmtypes.Thread {
-	config.IsSubAgent = true
-
-	newThread, err := NewThread(config, t.SubagentContextFactory)
-	if err != nil {
-		logger.G(ctx).WithError(err).Error("failed to create subagent thread")
-		return nil
-	}
-
-	// Copy custom models and pricing from parent
-	newThread.customModels = t.customModels
-	newThread.customPricing = t.customPricing
-
-	return newThread
-}
-
 // SwapContext replaces the conversation history with a summary message.
 // This implements the hooks.ContextSwapper interface.
 func (t *Thread) SwapContext(_ context.Context, summary string) error {
@@ -719,7 +700,7 @@ func (t *Thread) ShortSummary(ctx context.Context) string {
 	}
 
 	// Create a new summary thread
-	summaryThread, err := NewThread(t.Config, nil)
+	summaryThread, err := NewThread(t.Config)
 	if err != nil {
 		logger.G(ctx).WithError(err).Error("failed to create summary thread")
 		return "Could not generate summary."
@@ -775,7 +756,7 @@ func (t *Thread) SaveConversation(ctx context.Context, summarize bool) error {
 		RawMessages:         inputItemsJSON,
 		Provider:            "openai-responses",
 		Usage:               *t.Usage,
-		Metadata:            map[string]interface{}{"model": t.Config.Model, "lastResponseID": t.lastResponseID},
+		Metadata:            map[string]any{"model": t.Config.Model, "lastResponseID": t.lastResponseID},
 		Summary:             t.summary,
 		CreatedAt:           time.Now(),
 		UpdatedAt:           time.Now(),
