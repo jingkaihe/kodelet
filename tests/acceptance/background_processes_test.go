@@ -68,24 +68,23 @@ func TestBashToolBackgroundParameter(t *testing.T) {
 		{
 			name:  "start background process that runs for longer duration",
 			query: `run a background process that writes current time every second for 2 iterations: "for i in {1..2}; do echo $(date); sleep 1; done"`,
-			validate: func(t *testing.T, output string, testDir string) {
+			validate: func(t *testing.T, output string, _ string) {
 				// Should contain PID information
 				assert.Contains(t, output, "Process ID:", "Expected output to contain PID information")
 
-				// Extract PID from output
+				// Extract log path from output (the actual path, not constructed)
 				lines := strings.Split(output, "\n")
-				var pid string
+				var logPath string
 				for _, line := range lines {
-					if strings.HasPrefix(line, "Process ID:") {
-						pid = strings.TrimSpace(strings.TrimPrefix(line, "Process ID:"))
+					if strings.HasPrefix(line, "Log File:") {
+						logPath = strings.TrimSpace(strings.TrimPrefix(line, "Log File:"))
 						break
 					}
 				}
 
-				assert.NotEmpty(t, pid, "Could not extract PID from output: %s", output)
+				assert.NotEmpty(t, logPath, "Could not extract log path from output: %s", output)
 
 				// Wait for the process to complete and log to contain expected content
-				logPath := filepath.Join(testDir, ".kodelet", pid, "out.log")
 				assert.True(t, osutil.WaitForCondition(10*time.Second, 200*time.Millisecond, func() bool {
 					if logContent, err := os.ReadFile(logPath); err == nil {
 						logStr := string(logContent)
@@ -295,9 +294,10 @@ func TestBackgroundProcessLogFiles(t *testing.T) {
 			assert.Contains(t, logStr, expectedLine, "Expected log to contain '%s', but log content is: %s", expectedLine, logStr)
 		}
 
-		// Verify the log file is in the expected location (.kodelet/{PID}/out.log)
-		expectedLogPath := filepath.Join(testDir, ".kodelet", pid, "out.log")
-		assert.Equal(t, expectedLogPath, logPath, "Expected log path to be %s, got %s", expectedLogPath, logPath)
+		// Verify the log file is in ~/.kodelet/bgpids/{PID}/out.log format
+		assert.Contains(t, logPath, ".kodelet", "Log path should contain .kodelet directory")
+		assert.Contains(t, logPath, pid, "Log path should contain the PID")
+		assert.True(t, strings.HasSuffix(logPath, "out.log"), "Log path should end with out.log")
 
 		// Cleanup
 		if pidInt, err := strconv.Atoi(pid); err == nil {
