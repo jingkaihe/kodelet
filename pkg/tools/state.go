@@ -177,9 +177,10 @@ func WithLLMConfig(config llmtypes.Config) BasicStateOption {
 }
 
 // WithSkillTool returns an option that configures the skill tool with discovered skills
-func WithSkillTool(discoveredSkills map[string]*skills.Skill, enabled bool) BasicStateOption {
-	return func(_ context.Context, s *BasicState) error {
-		skillTool := NewSkillTool(discoveredSkills, enabled)
+func WithSkillTool() BasicStateOption {
+	return func(ctx context.Context, s *BasicState) error {
+		discoveredSkills := discoverSkills(ctx, s.llmConfig)
+		skillTool := NewSkillTool(discoveredSkills, len(discoveredSkills) > 0)
 		for i, tool := range s.tools {
 			if tool.Name() == "skill" {
 				s.tools[i] = skillTool
@@ -189,6 +190,33 @@ func WithSkillTool(discoveredSkills map[string]*skills.Skill, enabled bool) Basi
 		s.tools = append(s.tools, skillTool)
 		return nil
 	}
+}
+
+// discoverSkills discovers available skills based on configuration
+func discoverSkills(ctx context.Context, llmConfig llmtypes.Config) map[string]*skills.Skill {
+	// Check if skills are disabled via config
+	if llmConfig.Skills != nil && !llmConfig.Skills.Enabled {
+		return nil
+	}
+
+	discovery, err := skills.NewDiscovery()
+	if err != nil {
+		logger.G(ctx).WithError(err).Debug("Failed to create skill discovery")
+		return nil
+	}
+
+	allSkills, err := discovery.DiscoverSkills()
+	if err != nil {
+		logger.G(ctx).WithError(err).Debug("Failed to discover skills")
+		return nil
+	}
+
+	if llmConfig.Skills != nil && len(llmConfig.Skills.Allowed) > 0 {
+		allSkills = skills.FilterByAllowlist(allSkills, llmConfig.Skills.Allowed)
+	}
+
+	logger.G(ctx).WithField("count", len(allSkills)).Debug("Discovered skills")
+	return allSkills
 }
 
 // WithSubAgentTool returns an option that configures the subagent tool with discovered workflows

@@ -18,7 +18,6 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/mcp"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
-	"github.com/jingkaihe/kodelet/pkg/skills"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -261,9 +260,8 @@ var runCmd = &cobra.Command{
 			stateOpts = append(stateOpts, tools.WithMainTools())
 		}
 
-		// Initialize skills
-		discoveredSkills, skillsEnabled := skills.Initialize(ctx, llmConfig)
-		stateOpts = append(stateOpts, tools.WithSkillTool(discoveredSkills, skillsEnabled))
+		// Initialize skills (discovery happens inside WithSkillTool)
+		stateOpts = append(stateOpts, tools.WithSkillTool())
 
 		// Initialize workflows for subagent (only for main agent, not subagent)
 		if !config.AsSubagent {

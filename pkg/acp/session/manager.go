@@ -14,7 +14,6 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/mcp"
 	"github.com/jingkaihe/kodelet/pkg/mcp/codegen"
-	"github.com/jingkaihe/kodelet/pkg/skills"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -351,8 +350,7 @@ func (m *Manager) NewSession(ctx context.Context, req acptypes.NewSessionRequest
 	stateOpts = append(stateOpts, tools.WithMainTools())
 
 	if !m.noSkills {
-		discoveredSkills, skillsEnabled := skills.Initialize(ctx, llmConfig)
-		stateOpts = append(stateOpts, tools.WithSkillTool(discoveredSkills, skillsEnabled))
+		stateOpts = append(stateOpts, tools.WithSkillTool())
 	}
 
 	// Initialize workflows for subagent
@@ -414,8 +412,7 @@ func (m *Manager) LoadSession(ctx context.Context, req acptypes.LoadSessionReque
 	stateOpts = append(stateOpts, tools.WithMainTools())
 
 	if !m.noSkills {
-		discoveredSkills, skillsEnabled := skills.Initialize(ctx, llmConfig)
-		stateOpts = append(stateOpts, tools.WithSkillTool(discoveredSkills, skillsEnabled))
+		stateOpts = append(stateOpts, tools.WithSkillTool())
 	}
 
 	// Initialize workflows for subagent
