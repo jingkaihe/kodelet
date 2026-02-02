@@ -3,11 +3,13 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
 	"time"
 
+	"github.com/google/shlex"
 	"github.com/invopop/jsonschema"
 	"github.com/pkg/errors"
 	"go.opentelemetry.io/otel/attribute"
@@ -138,8 +140,10 @@ func (t *SubAgentTool) Execute(ctx context.Context, state tooltypes.State, param
 
 	// Append user-configured subagent args (e.g., "--profile openai --use-weak-model")
 	if llmConfig, ok := state.GetLLMConfig().(llmtypes.Config); ok && llmConfig.SubagentArgs != "" {
-		parsedArgs := strings.Fields(llmConfig.SubagentArgs)
-		args = append(args, parsedArgs...)
+		parsedArgs, err := shlex.Split(llmConfig.SubagentArgs)
+		if err == nil {
+			args = append(args, parsedArgs...)
+		}
 	}
 
 	args = append(args, input.Question)
@@ -152,12 +156,12 @@ func (t *SubAgentTool) Execute(ctx context.Context, state tooltypes.State, param
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
 			return &SubAgentToolResult{
-				err:      string(exitErr.Stderr),
+				err:      fmt.Sprintf("Subagent execution failed: %s\nstderr: %s", err, string(exitErr.Stderr)),
 				question: input.Question,
 			}
 		}
 		return &SubAgentToolResult{
-			err:      err.Error(),
+			err:      fmt.Sprintf("Subagent execution failed: %s", err),
 			question: input.Question,
 		}
 	}

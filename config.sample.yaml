@@ -59,10 +59,12 @@ profiles:
   openai:
     provider: "openai"
     use_copilot: true
-    model: "gpt-4.1"
-    weak_model: "gpt-4.1-mini"
+    model: "gpt-5.2-codex"
+    weak_model: "gpt-5.2-codex-mini"
     max_tokens: 16000
     reasoning_effort: "medium"
+    openai:
+      use_responses_api: true
 
   xai:
     provider: "openai"
@@ -75,8 +77,8 @@ profiles:
 
   openai-responses:
     provider: "openai"
-    model: "gpt-4.1"
-    weak_model: "gpt-4.1-mini"
+    model: "gpt-5.2-codex"
+    weak_model: "gpt-5.2-codex-mini"
     max_tokens: 16000
     reasoning_effort: "medium"
     openai:

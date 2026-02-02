@@ -39,6 +39,7 @@ kodelet run --no-tools "What is the capital of France?"
 
 - Subagent, image recognition, and web fetch tools now use shell-out pattern via `kodelet run --as-subagent` (ADR 027)
 - Removed `NewSubAgent()` method from all LLM providers
+- Removed separate subagent prompt template (`pkg/sysprompt/templates/subagent.tmpl`) - subagent now uses main system prompt with `isSubagent` feature flag
 - Removed Docker build workflow and Dockerfile
 - CI workflows now use PVC-based tool caching instead of mise cache
 

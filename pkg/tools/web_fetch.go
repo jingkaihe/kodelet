@@ -16,6 +16,7 @@ import (
 	"time"
 
 	md "github.com/JohannesKaufmann/html-to-markdown"
+	"github.com/google/shlex"
 	"github.com/invopop/jsonschema"
 	"github.com/pkg/errors"
 	"go.opentelemetry.io/otel/attribute"
@@ -505,8 +506,10 @@ IMPORTANT: Make sure that you preserve all the links in the content including hy
 
 	// Add subagent args from config if available
 	if llmConfig, ok := state.GetLLMConfig().(llmtypes.Config); ok && llmConfig.SubagentArgs != "" {
-		parsedArgs := strings.Fields(llmConfig.SubagentArgs)
-		args = append(args, parsedArgs...)
+		parsedArgs, err := shlex.Split(llmConfig.SubagentArgs)
+		if err == nil {
+			args = append(args, parsedArgs...)
+		}
 	}
 
 	// Add the extraction prompt as the query
