@@ -389,4 +389,145 @@ func TestSubAgentTool_GetWorkflowsAndIsWorkflowEnabled(t *testing.T) {
 	})
 }
 
+func TestSubAgentTool_WorkflowFiltering(t *testing.T) {
+	// Create a mix of workflow and non-workflow fragments
+	allFragments := map[string]*fragments.Fragment{
+		"github/pr": {
+			ID: "github/pr",
+			Metadata: fragments.Metadata{
+				Name:        "PR Generator",
+				Description: "Creates PRs",
+				Workflow:    true,
+			},
+		},
+		"init": {
+			ID: "init",
+			Metadata: fragments.Metadata{
+				Name:        "Init",
+				Description: "Bootstrap AGENTS.md",
+				Workflow:    true,
+			},
+		},
+		"commit": {
+			ID: "commit",
+			Metadata: fragments.Metadata{
+				Name:        "Commit Generator",
+				Description: "Creates commit messages",
+				Workflow:    false, // Not a workflow
+			},
+		},
+		"compact": {
+			ID: "compact",
+			Metadata: fragments.Metadata{
+				Name:        "Compact",
+				Description: "Compacts context",
+				// Workflow not set (defaults to false)
+			},
+		},
+	}
+
+	// Simulate filtering logic that should be applied by discoverWorkflows
+	filteredWorkflows := make(map[string]*fragments.Fragment)
+	for id, frag := range allFragments {
+		if frag.Metadata.Workflow {
+			filteredWorkflows[id] = frag
+		}
+	}
+
+	t.Run("only workflow fragments are included", func(t *testing.T) {
+		assert.Len(t, filteredWorkflows, 2)
+		assert.Contains(t, filteredWorkflows, "github/pr")
+		assert.Contains(t, filteredWorkflows, "init")
+		assert.NotContains(t, filteredWorkflows, "commit")
+		assert.NotContains(t, filteredWorkflows, "compact")
+	})
+
+	t.Run("subagent tool shows only workflows in description", func(t *testing.T) {
+		tool := NewSubAgentTool(filteredWorkflows, true)
+		desc := tool.Description()
+
+		// Should contain workflow fragments
+		assert.Contains(t, desc, `<workflow name="github/pr">`)
+		assert.Contains(t, desc, `<workflow name="init">`)
+
+		// Should NOT contain non-workflow fragments
+		assert.NotContains(t, desc, `<workflow name="commit">`)
+		assert.NotContains(t, desc, `<workflow name="compact">`)
+	})
+
+	t.Run("subagent validates only known workflows", func(t *testing.T) {
+		tool := NewSubAgentTool(filteredWorkflows, true)
+		state := NewBasicState(context.TODO())
+
+		// Valid workflow should pass
+		err := tool.ValidateInput(state, `{"workflow": "github/pr"}`)
+		assert.NoError(t, err)
+
+		// Invalid workflow should fail
+		err = tool.ValidateInput(state, `{"workflow": "commit"}`)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "unknown workflow 'commit'")
+
+		// Non-existent workflow should fail
+		err = tool.ValidateInput(state, `{"workflow": "nonexistent"}`)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "unknown workflow 'nonexistent'")
+	})
+}
+
+func TestSubAgentTool_DescriptionWithWorkflowField(t *testing.T) {
+	// Test that only fragments with Workflow: true appear in description
+	workflows := map[string]*fragments.Fragment{
+		"custom-tool": {
+			ID: "custom-tool",
+			Metadata: fragments.Metadata{
+				Name:        "Custom Tool Generator",
+				Description: "Creates custom tools",
+				Workflow:    true,
+				Arguments: map[string]fragments.ArgumentMeta{
+					"task": {
+						Description: "Description of what the tool should do",
+					},
+					"global": {
+						Description: "Whether to save globally",
+						Default:     "false",
+					},
+				},
+			},
+		},
+		"ralph": {
+			ID: "ralph",
+			Metadata: fragments.Metadata{
+				Name:        "Ralph",
+				Description: "Autonomous development loop",
+				Workflow:    true,
+				Arguments: map[string]fragments.ArgumentMeta{
+					"prd": {
+						Description: "Path to PRD file",
+						Default:     "prd.json",
+					},
+				},
+			},
+		},
+	}
+
+	tool := NewSubAgentTool(workflows, true)
+	desc := tool.Description()
+
+	// Verify workflows section structure
+	assert.Contains(t, desc, "<workflows>")
+	assert.Contains(t, desc, "</workflows>")
+
+	// Verify custom-tool workflow
+	assert.Contains(t, desc, `<workflow name="custom-tool">`)
+	assert.Contains(t, desc, "<description>Creates custom tools</description>")
+	assert.Contains(t, desc, `<argument name="global" default="false">Whether to save globally</argument>`)
+	assert.Contains(t, desc, `<argument name="task">Description of what the tool should do</argument>`)
+
+	// Verify ralph workflow
+	assert.Contains(t, desc, `<workflow name="ralph">`)
+	assert.Contains(t, desc, "<description>Autonomous development loop</description>")
+	assert.Contains(t, desc, `<argument name="prd" default="prd.json">Path to PRD file</argument>`)
+}
+
 // Execute tests require integration testing (shell-out via exec.CommandContext)

@@ -1,6 +1,7 @@
 ---
 name: Ralph PRD Generator
 description: Generate a PRD (Product Requirements Document) based on discussion and design docs for autonomous development
+workflow: true
 arguments:
   prd:
     description: Path to output the PRD (Product Requirements Document) JSON file

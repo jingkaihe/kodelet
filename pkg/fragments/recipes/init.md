@@ -1,6 +1,7 @@
 ---
 name: Repository Initialization
 description: Bootstrap AGENTS.md file with workspace context and conventions
+workflow: true
 ---
 
 Please thoroughly analyze this workspace and create an AGENTS.md file, which will provide kodelet the context to operate effectively in this workspace.

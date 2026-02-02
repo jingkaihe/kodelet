@@ -1,6 +1,7 @@
 ---
 name: Ralph - Autonomous Feature Development Loop
 description: Iteratively work through a feature list, implementing one feature at a time with progress tracking
+workflow: true
 arguments:
   prd:
     description: Path to the PRD (Product Requirements Document) JSON file

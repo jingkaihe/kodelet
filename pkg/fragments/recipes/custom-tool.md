@@ -1,6 +1,7 @@
 ---
 name: Custom Tool Generator
 description: Creates a custom tool for Kodelet, implementing the Kodelet custom tool protocol
+workflow: true
 arguments:
   task:
     description: Description of what the custom tool should do

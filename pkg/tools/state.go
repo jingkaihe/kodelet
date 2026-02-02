@@ -251,8 +251,8 @@ func discoverWorkflows(ctx context.Context) map[string]*fragments.Fragment {
 
 	workflows := make(map[string]*fragments.Fragment)
 	for _, frag := range frags {
-		// Only include fragments that have a description (considered as workflows)
-		if frag.Metadata.Description != "" {
+		// Only include fragments explicitly marked as workflows
+		if frag.Metadata.Workflow {
 			workflows[frag.ID] = frag
 		}
 	}

@@ -997,6 +997,177 @@ Content here.`
 	assert.Nil(t, result.Metadata.Hooks)
 }
 
+func TestFragmentProcessor_ParseWorkflowMetadata(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "kodelet-fragments-workflow-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	fragmentContent := `---
+name: PR Generator
+description: Creates pull requests
+workflow: true
+---
+
+Create a pull request.`
+
+	fragmentPath := filepath.Join(tempDir, "pr.md")
+	err = os.WriteFile(fragmentPath, []byte(fragmentContent), 0o644)
+	require.NoError(t, err)
+
+	processor, err := NewFragmentProcessor(WithFragmentDirs(tempDir))
+	require.NoError(t, err)
+
+	config := &Config{
+		FragmentName: "pr",
+		Arguments:    map[string]string{},
+	}
+
+	result, err := processor.LoadFragment(context.Background(), config)
+	require.NoError(t, err)
+
+	assert.Equal(t, "PR Generator", result.Metadata.Name)
+	assert.Equal(t, "Creates pull requests", result.Metadata.Description)
+	assert.True(t, result.Metadata.Workflow)
+}
+
+func TestFragmentProcessor_ParseWorkflowMetadata_False(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "kodelet-fragments-workflow-false-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	fragmentContent := `---
+name: Commit Generator
+description: Creates commit messages
+workflow: false
+---
+
+Generate a commit message.`
+
+	fragmentPath := filepath.Join(tempDir, "commit.md")
+	err = os.WriteFile(fragmentPath, []byte(fragmentContent), 0o644)
+	require.NoError(t, err)
+
+	processor, err := NewFragmentProcessor(WithFragmentDirs(tempDir))
+	require.NoError(t, err)
+
+	config := &Config{
+		FragmentName: "commit",
+		Arguments:    map[string]string{},
+	}
+
+	result, err := processor.LoadFragment(context.Background(), config)
+	require.NoError(t, err)
+
+	assert.Equal(t, "Commit Generator", result.Metadata.Name)
+	assert.False(t, result.Metadata.Workflow)
+}
+
+func TestFragmentProcessor_ParseWorkflowMetadata_NotSpecified(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "kodelet-fragments-workflow-unset-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	fragmentContent := `---
+name: Simple Recipe
+description: A simple recipe without workflow field
+---
+
+Do something.`
+
+	fragmentPath := filepath.Join(tempDir, "simple.md")
+	err = os.WriteFile(fragmentPath, []byte(fragmentContent), 0o644)
+	require.NoError(t, err)
+
+	processor, err := NewFragmentProcessor(WithFragmentDirs(tempDir))
+	require.NoError(t, err)
+
+	config := &Config{
+		FragmentName: "simple",
+		Arguments:    map[string]string{},
+	}
+
+	result, err := processor.LoadFragment(context.Background(), config)
+	require.NoError(t, err)
+
+	assert.Equal(t, "Simple Recipe", result.Metadata.Name)
+	assert.False(t, result.Metadata.Workflow) // Default should be false
+}
+
+func TestFragmentProcessor_ListFragmentsWithMetadata_WorkflowFiltering(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "kodelet-fragments-workflow-list-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	// Create a workflow fragment
+	workflowContent := `---
+name: PR Workflow
+description: Creates PRs
+workflow: true
+---
+Content.`
+	err = os.WriteFile(filepath.Join(tempDir, "pr-workflow.md"), []byte(workflowContent), 0o644)
+	require.NoError(t, err)
+
+	// Create a non-workflow fragment
+	nonWorkflowContent := `---
+name: Simple Fragment
+description: Not a workflow
+---
+Content.`
+	err = os.WriteFile(filepath.Join(tempDir, "simple.md"), []byte(nonWorkflowContent), 0o644)
+	require.NoError(t, err)
+
+	// Create another workflow fragment
+	workflow2Content := `---
+name: Init Workflow
+description: Initializes repo
+workflow: true
+---
+Content.`
+	err = os.WriteFile(filepath.Join(tempDir, "init.md"), []byte(workflow2Content), 0o644)
+	require.NoError(t, err)
+
+	processor, err := NewFragmentProcessor(WithFragmentDirs(tempDir))
+	require.NoError(t, err)
+
+	fragments, err := processor.ListFragmentsWithMetadata()
+	require.NoError(t, err)
+
+	// Count workflows
+	workflowCount := 0
+	nonWorkflowCount := 0
+	for _, frag := range fragments {
+		if frag.Metadata.Workflow {
+			workflowCount++
+		} else {
+			nonWorkflowCount++
+		}
+	}
+
+	// We created 2 workflows and 1 non-workflow (plus built-in recipes)
+	assert.GreaterOrEqual(t, workflowCount, 2)
+	assert.GreaterOrEqual(t, nonWorkflowCount, 1)
+
+	// Verify specific fragments
+	var prWorkflow, simpleFragment *Fragment
+	for _, frag := range fragments {
+		if frag.ID == "pr-workflow" {
+			prWorkflow = frag
+		}
+		if frag.ID == "simple" {
+			simpleFragment = frag
+		}
+	}
+
+	require.NotNil(t, prWorkflow)
+	assert.True(t, prWorkflow.Metadata.Workflow)
+	assert.Equal(t, "PR Workflow", prWorkflow.Metadata.Name)
+
+	require.NotNil(t, simpleFragment)
+	assert.False(t, simpleFragment.Metadata.Workflow)
+	assert.Equal(t, "Simple Fragment", simpleFragment.Metadata.Name)
+}
+
 func TestLoadCompactPrompt(t *testing.T) {
 	ctx := context.Background()
 
