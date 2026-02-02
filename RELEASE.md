@@ -1,5 +1,17 @@
 # Kodelet
 
+## 0.2.7.beta (2026-02-02)
+
+### Features
+
+**ACP session persistence and replay**: ACP sessions are now persisted to JSONL files (`~/.kodelet/acp/sessions/`) and automatically replayed when a session is loaded. This enables IDE integrations to restore conversation history across restarts. Consecutive text chunks are merged during storage for efficient replay.
+
+**Conversation cleanup integration**: Deleting a conversation via `kodelet conversation delete` now also removes the associated ACP session file if it exists.
+
+### Internal Changes
+
+- Improved error handling in ACP session storage
+
 ## 0.2.6.beta (2026-02-02)
 
 ### Breaking Changes
