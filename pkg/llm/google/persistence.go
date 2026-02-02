@@ -48,7 +48,7 @@ func (t *Thread) SaveConversation(ctx context.Context, summarise bool) error {
 		RawMessages:         rawMessages,
 		Provider:            "google",
 		Usage:               *t.Usage,
-		Metadata:            map[string]interface{}{"model": t.Config.Model, "backend": t.backend},
+		Metadata:            map[string]any{"model": t.Config.Model, "backend": t.backend},
 		Summary:             summary,
 		CreatedAt:           time.Now(),
 		UpdatedAt:           time.Now(),

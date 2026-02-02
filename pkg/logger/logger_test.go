@@ -118,7 +118,7 @@ func TestLoggerOutput(t *testing.T) {
 	retrievedLogger.Info("test message")
 
 	// Parse the JSON output
-	var logEntry map[string]interface{}
+	var logEntry map[string]any
 	err := json.Unmarshal(buf.Bytes(), &logEntry)
 	require.NoError(t, err)
 
@@ -274,7 +274,7 @@ func TestLogLevels(t *testing.T) {
 			continue
 		}
 
-		var logEntry map[string]interface{}
+		var logEntry map[string]any
 		err := json.Unmarshal([]byte(line), &logEntry)
 		require.NoError(t, err)
 

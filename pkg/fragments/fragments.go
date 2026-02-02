@@ -229,7 +229,7 @@ func (fp *Processor) parseFrontmatter(content string) (Metadata, string, error) 
 
 		// Parse defaults (map of key-value pairs)
 		if defaults := metaData["defaults"]; defaults != nil {
-			if defaultsMap, ok := defaults.(map[interface{}]interface{}); ok {
+			if defaultsMap, ok := defaults.(map[any]any); ok {
 				metadata.Defaults = make(map[string]string)
 				for k, v := range defaultsMap {
 					if keyStr, ok := k.(string); ok {
@@ -243,11 +243,11 @@ func (fp *Processor) parseFrontmatter(content string) (Metadata, string, error) 
 
 		// Parse hooks (map of hook type -> hook config)
 		if hooksData := metaData["hooks"]; hooksData != nil {
-			if hooksMap, ok := hooksData.(map[interface{}]interface{}); ok {
+			if hooksMap, ok := hooksData.(map[any]any); ok {
 				metadata.Hooks = make(map[string]HookConfig)
 				for k, v := range hooksMap {
 					if hookType, ok := k.(string); ok {
-						if hookConfigMap, ok := v.(map[interface{}]interface{}); ok {
+						if hookConfigMap, ok := v.(map[any]any); ok {
 							hookConfig := HookConfig{}
 							if handler, ok := hookConfigMap["handler"].(string); ok {
 								hookConfig.Handler = handler
@@ -268,10 +268,10 @@ func (fp *Processor) parseFrontmatter(content string) (Metadata, string, error) 
 	return metadata, bodyContent, nil
 }
 
-// parseStringArrayField handles both []interface{} (YAML array) and string (comma-separated) formats
-func (fp *Processor) parseStringArrayField(field interface{}) []string {
+// parseStringArrayField handles both []any (YAML array) and string (comma-separated) formats
+func (fp *Processor) parseStringArrayField(field any) []string {
 	switch v := field.(type) {
-	case []interface{}:
+	case []any:
 		// YAML array format: ["tool1", "tool2"]
 		var result []string
 		for _, item := range v {
@@ -432,7 +432,7 @@ func (fp *Processor) createBashFunc(ctx context.Context) func(...string) string 
 		command := args[0]
 		cmdArgs := args[1:]
 
-		logger.G(ctx).WithFields(map[string]interface{}{
+		logger.G(ctx).WithFields(map[string]any{
 			"command": command,
 			"args":    cmdArgs,
 		}).Debug("Executing bash command")
@@ -444,7 +444,7 @@ func (fp *Processor) createBashFunc(ctx context.Context) func(...string) string 
 		cmd := exec.CommandContext(cmdCtx, command, cmdArgs...)
 		output, err := cmd.CombinedOutput()
 		if err != nil {
-			logger.G(ctx).WithFields(map[string]interface{}{
+			logger.G(ctx).WithFields(map[string]any{
 				"command": command,
 				"args":    cmdArgs,
 			}).WithError(err).Warn("Bash command failed")
@@ -458,8 +458,8 @@ func (fp *Processor) createBashFunc(ctx context.Context) func(...string) string 
 }
 
 // createDefaultFunc returns a function that provides default values for missing template variables
-func (fp *Processor) createDefaultFunc() func(interface{}, string) string {
-	return func(value interface{}, defaultValue string) string {
+func (fp *Processor) createDefaultFunc() func(any, string) string {
+	return func(value any, defaultValue string) string {
 		// Handle nil values
 		if value == nil {
 			return defaultValue

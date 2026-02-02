@@ -336,7 +336,7 @@ func (s *BasicState) RemoveBackgroundProcess(pid int) error {
 }
 
 // GetLLMConfig returns the LLM configuration
-func (s *BasicState) GetLLMConfig() interface{} {
+func (s *BasicState) GetLLMConfig() any {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.llmConfig

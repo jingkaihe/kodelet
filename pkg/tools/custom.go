@@ -29,7 +29,7 @@ var _ tooltypes.Tool = &CustomTool{}
 type CustomToolDescription struct {
 	Name        string                 `json:"name"`
 	Description string                 `json:"description"`
-	InputSchema map[string]interface{} `json:"input_schema"`
+	InputSchema map[string]any `json:"input_schema"`
 }
 
 // CustomToolConfig represents the configuration for custom tools
@@ -297,7 +297,7 @@ func (t *CustomTool) TracingKVs(_ string) ([]attribute.KeyValue, error) {
 
 // ValidateInput validates the input parameters for the tool
 func (t *CustomTool) ValidateInput(_ tooltypes.State, parameters string) error {
-	var input map[string]interface{}
+	var input map[string]any
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
 		return errors.Wrap(err, "invalid JSON input")
 	}
@@ -360,7 +360,7 @@ func (t *CustomTool) Execute(ctx context.Context, _ tooltypes.State, parameters 
 	}
 
 	// Check if output is a JSON error response
-	var jsonError map[string]interface{}
+	var jsonError map[string]any
 	if err := json.Unmarshal([]byte(outputStr), &jsonError); err == nil {
 		if errMsg, ok := jsonError["error"].(string); ok {
 			return &CustomToolResult{

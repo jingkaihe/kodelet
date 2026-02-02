@@ -140,7 +140,7 @@ func TestDeserializeMessages(t *testing.T) {
 	assert.Equal(t, "toolu_01Nc9gURS9CrZjCcruQNCcna", thread.messages[1].Content[1].OfToolUse.ID)
 	assert.Equal(t, "bash", thread.messages[1].Content[1].OfToolUse.Name)
 
-	input := thread.messages[1].Content[1].OfToolUse.Input.(map[string]interface{})
+	input := thread.messages[1].Content[1].OfToolUse.Input.(map[string]any)
 	assert.Equal(t, "ls -la", input["command"])
 	assert.Equal(t, "List all files with detailed information", input["description"])
 	assert.Equal(t, float64(10), input["timeout"])
@@ -1304,7 +1304,7 @@ func TestStreamMessages_ToolUseMessage(t *testing.T) {
 		{
 			Role: anthropic.MessageParamRoleAssistant,
 			Content: []anthropic.ContentBlockParamUnion{
-				anthropic.NewToolUseBlock("call-123", map[string]interface{}{
+				anthropic.NewToolUseBlock("call-123", map[string]any{
 					"command":     "ls -la",
 					"description": "List all files in current directory",
 					"timeout":     10,
@@ -1381,7 +1381,7 @@ func TestStreamMessages_ComplexConversation(t *testing.T) {
 			Content: []anthropic.ContentBlockParamUnion{
 				anthropic.NewThinkingBlock("thinking", "The user wants me to run a command to check the date. I should use the bash tool."),
 				anthropic.NewTextBlock("I'll check the current date for you."),
-				anthropic.NewToolUseBlock("call-456", map[string]interface{}{
+				anthropic.NewToolUseBlock("call-456", map[string]any{
 					"command": "date",
 					"timeout": 10,
 				}, "bash"),

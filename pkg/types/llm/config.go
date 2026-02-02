@@ -92,7 +92,7 @@ type GoogleConfig struct {
 }
 
 // ProfileConfig holds the configuration values for a named profile
-type ProfileConfig map[string]interface{}
+type ProfileConfig map[string]any
 
 // RetryConfig holds the retry configuration for API calls
 // Note: Anthropic only uses Attempts (relies on SDK retry), OpenAI uses all fields

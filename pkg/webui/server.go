@@ -141,7 +141,7 @@ func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 		next.ServeHTTP(rw, r)
 
 		duration := time.Since(start)
-		logger.G(r.Context()).WithFields(map[string]interface{}{
+		logger.G(r.Context()).WithFields(map[string]any{
 			"method":      r.Method,
 			"path":        r.URL.Path,
 			"status":      rw.statusCode,
@@ -237,9 +237,9 @@ type WebConversationResponse struct {
 	UpdatedAt    time.Time    `json:"updatedAt"`
 	Provider     string       `json:"provider"`
 	Summary      string       `json:"summary,omitempty"`
-	Usage        interface{}  `json:"usage"`
+	Usage        any  `json:"usage"`
 	Messages     []WebMessage `json:"messages"`
-	ToolResults  interface{}  `json:"toolResults,omitempty"`
+	ToolResults  any  `json:"toolResults,omitempty"`
 	MessageCount int          `json:"messageCount"`
 }
 
@@ -310,7 +310,7 @@ func (s *Server) convertToWebMessages(rawMessages json.RawMessage, provider stri
 	}
 
 	for _, rawMsg := range rawMsgs {
-		var baseMsg map[string]interface{}
+		var baseMsg map[string]any
 		if err := json.Unmarshal(rawMsg, &baseMsg); err != nil {
 			continue
 		}
@@ -510,7 +510,7 @@ func (s *Server) handleDeleteConversation(w http.ResponseWriter, r *http.Request
 // Utility methods
 
 // writeJSONResponse writes a JSON response
-func (s *Server) writeJSONResponse(w http.ResponseWriter, data interface{}) {
+func (s *Server) writeJSONResponse(w http.ResponseWriter, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(data); err != nil {
 		logger.G(context.TODO()).WithError(err).Error("failed to encode JSON response")
@@ -527,7 +527,7 @@ func (s *Server) writeErrorResponse(w http.ResponseWriter, statusCode int, messa
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
 
-	response := map[string]interface{}{
+	response := map[string]any{
 		"error":   message,
 		"status":  statusCode,
 		"success": false,

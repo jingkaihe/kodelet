@@ -163,7 +163,7 @@ func TestImageRecognitionTool_TracingKVs(t *testing.T) {
 		assert.NotEmpty(t, kvs)
 
 		// Check that we have the expected attributes
-		attrs := make(map[string]interface{})
+		attrs := make(map[string]any)
 		for _, kv := range kvs {
 			attrs[string(kv.Key)] = kv.Value.AsInterface()
 		}
@@ -179,7 +179,7 @@ func TestImageRecognitionTool_TracingKVs(t *testing.T) {
 		kvs, err := tool.TracingKVs(parameters)
 		assert.NoError(t, err)
 
-		attrs := make(map[string]interface{})
+		attrs := make(map[string]any)
 		for _, kv := range kvs {
 			attrs[string(kv.Key)] = kv.Value.AsInterface()
 		}

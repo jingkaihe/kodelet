@@ -517,7 +517,7 @@ func TestServer_SendAvailableCommands(t *testing.T) {
 	assert.Equal(t, acptypes.UpdateAvailableCommands, update["sessionUpdate"])
 	assert.NotNil(t, update["availableCommands"])
 
-	availableCommands := update["availableCommands"].([]interface{})
+	availableCommands := update["availableCommands"].([]any)
 	assert.Greater(t, len(availableCommands), 0)
 }
 

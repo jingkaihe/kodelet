@@ -401,12 +401,12 @@ func extractCodexAccountID(accessToken string) string {
 		}
 	}
 
-	var claims map[string]interface{}
+	var claims map[string]any
 	if err := json.Unmarshal(decoded, &claims); err != nil {
 		return ""
 	}
 
-	authClaims, ok := claims[codexJWTClaimPath].(map[string]interface{})
+	authClaims, ok := claims[codexJWTClaimPath].(map[string]any)
 	if !ok {
 		return ""
 	}

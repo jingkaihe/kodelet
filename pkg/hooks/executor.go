@@ -12,7 +12,7 @@ import (
 
 // Execute runs all hooks of a given type with the provided payload.
 // Returns the result bytes from the last successful hook execution.
-func (m HookManager) Execute(ctx context.Context, hookType HookType, payload interface{}) ([]byte, error) {
+func (m HookManager) Execute(ctx context.Context, hookType HookType, payload any) ([]byte, error) {
 	hooks := m.hooks[hookType]
 	if len(hooks) == 0 {
 		return nil, nil

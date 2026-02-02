@@ -65,7 +65,7 @@ type Response struct {
 type ToolCall struct {
 	ID   string
 	Name string
-	Args map[string]interface{}
+	Args map[string]any
 }
 
 // Provider returns the name of the LLM provider for this thread
@@ -996,7 +996,7 @@ func (t *Thread) executeToolCalls(ctx context.Context, response *Response, handl
 		resultPart := &genai.Part{
 			FunctionResponse: &genai.FunctionResponse{
 				Name: toolCall.Name,
-				Response: map[string]interface{}{
+				Response: map[string]any{
 					"call_id": toolCall.ID,
 					"result":  output.AssistantFacing(),
 					"error":   output.IsError(),

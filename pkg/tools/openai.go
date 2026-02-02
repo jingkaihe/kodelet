@@ -16,7 +16,7 @@ func ToOpenAITools(tools []tooltypes.Tool) []openai.Tool {
 
 		// Convert to JSON
 		schemaBytes, _ := json.Marshal(schema)
-		var jsonSchema map[string]interface{}
+		var jsonSchema map[string]any
 		json.Unmarshal(schemaBytes, &jsonSchema)
 
 		openaiTools[i] = openai.Tool{

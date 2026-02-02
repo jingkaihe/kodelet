@@ -91,7 +91,7 @@ func (t *Thread) SaveConversation(ctx context.Context, summarise bool) error {
 		RawMessages:         rawMessages,
 		Provider:            "anthropic",
 		Usage:               *t.Usage,
-		Metadata:            map[string]interface{}{"model": t.Config.Model},
+		Metadata:            map[string]any{"model": t.Config.Model},
 		Summary:             t.summary,
 		CreatedAt:           time.Now(),
 		UpdatedAt:           time.Now(),

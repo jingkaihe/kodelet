@@ -18,7 +18,7 @@ type JSONField[T any] struct {
 }
 
 // Scan implements the sql.Scanner interface for reading from database
-func (j *JSONField[T]) Scan(value interface{}) error {
+func (j *JSONField[T]) Scan(value any) error {
 	if value == nil {
 		return nil
 	}
@@ -50,7 +50,7 @@ type dbConversationRecord struct {
 	Summary             *string                                          `db:"summary"` // NULL in database
 	CreatedAt           time.Time                                        `db:"created_at"`
 	UpdatedAt           time.Time                                        `db:"updated_at"`
-	Metadata            JSONField[map[string]interface{}]                `db:"metadata"`
+	Metadata            JSONField[map[string]any]                `db:"metadata"`
 	ToolResults         JSONField[map[string]tools.StructuredToolResult] `db:"tool_results"`
 	BackgroundProcesses JSONField[[]tools.BackgroundProcess]             `db:"background_processes"`
 }
@@ -124,7 +124,7 @@ func fromConversationRecord(record conversations.ConversationRecord) *dbConversa
 		Usage:               JSONField[llmtypes.Usage]{Data: record.Usage},
 		CreatedAt:           record.CreatedAt,
 		UpdatedAt:           record.UpdatedAt,
-		Metadata:            JSONField[map[string]interface{}]{Data: record.Metadata},
+		Metadata:            JSONField[map[string]any]{Data: record.Metadata},
 		ToolResults:         JSONField[map[string]tools.StructuredToolResult]{Data: record.ToolResults},
 		BackgroundProcesses: JSONField[[]tools.BackgroundProcess]{Data: record.BackgroundProcesses},
 	}

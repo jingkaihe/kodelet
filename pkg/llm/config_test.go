@@ -48,9 +48,9 @@ func TestGetConfigFromViperWithCmd_ExplicitContextPatternsOverrideProfile(t *tes
 
 	viper.Reset()
 	viper.Set("profile", "work")
-	viper.Set("profiles", map[string]interface{}{
-		"work": map[string]interface{}{
-			"context": map[string]interface{}{
+	viper.Set("profiles", map[string]any{
+		"work": map[string]any{
+			"context": map[string]any{
 				"patterns": []string{"README.md"},
 			},
 		},
@@ -80,17 +80,17 @@ func TestGetConfigFromViperWithAliases(t *testing.T) {
 
 	tests := []struct {
 		name            string
-		configData      map[string]interface{}
+		configData      map[string]any
 		expectedAliases map[string]string
 		description     string
 	}{
 		{
 			name: "loads aliases from config",
-			configData: map[string]interface{}{
+			configData: map[string]any{
 				"provider":   "anthropic",
 				"model":      "claude-sonnet-4-5-20250929",
 				"max_tokens": 8192,
-				"aliases": map[string]interface{}{
+				"aliases": map[string]any{
 					"sonnet-45": "claude-sonnet-4-5-20250929",
 					"haiku-45":  "claude-haiku-4-5-20251001",
 					"gpt41":     "gpt-4.1",
@@ -105,7 +105,7 @@ func TestGetConfigFromViperWithAliases(t *testing.T) {
 		},
 		{
 			name: "handles missing aliases config",
-			configData: map[string]interface{}{
+			configData: map[string]any{
 				"provider":   "anthropic",
 				"model":      "claude-sonnet-4-5-20250929",
 				"max_tokens": 8192,
@@ -158,7 +158,7 @@ func TestConfigAliasIntegrationWithNewThread(t *testing.T) {
 	viper.Set("provider", "anthropic")
 	viper.Set("model", "sonnet-45") // This is an alias
 	viper.Set("max_tokens", 8192)
-	viper.Set("aliases", map[string]interface{}{
+	viper.Set("aliases", map[string]any{
 		"sonnet-45": "claude-sonnet-4-5-20250929",
 		"haiku-45":  "claude-haiku-4-5-20251001",
 	})
@@ -252,14 +252,14 @@ func TestGetConfigFromViperOpenAIPricingConfig(t *testing.T) {
 	viper.Set("provider", "openai")
 
 	// Create complex pricing configuration
-	pricingConfig := map[string]interface{}{
-		"gpt-4": map[string]interface{}{
+	pricingConfig := map[string]any{
+		"gpt-4": map[string]any{
 			"input":          0.00003,
 			"cached_input":   0.000015,
 			"output":         0.00006,
 			"context_window": 128000,
 		},
-		"o1-preview": map[string]interface{}{
+		"o1-preview": map[string]any{
 			"input":          0.000015,
 			"output":         0.00006,
 			"context_window": 32768,
@@ -299,8 +299,8 @@ func TestGetConfigFromViperOpenAIPricingPartialConfig(t *testing.T) {
 	viper.Set("provider", "openai")
 
 	// Create pricing configuration with only some fields
-	pricingConfig := map[string]interface{}{
-		"gpt-4": map[string]interface{}{
+	pricingConfig := map[string]any{
+		"gpt-4": map[string]any{
 			"input":  0.00003,
 			"output": 0.00006,
 			// Missing cached_input and context_window
@@ -330,8 +330,8 @@ func TestGetConfigFromViperOpenAIPricingInvalidTypes(t *testing.T) {
 	viper.Set("provider", "openai")
 
 	// Create pricing configuration with invalid types
-	pricingConfig := map[string]interface{}{
-		"gpt-4": map[string]interface{}{
+	pricingConfig := map[string]any{
+		"gpt-4": map[string]any{
 			"input":          "invalid", // Should be float64
 			"cached_input":   0.000015,
 			"output":         0.00006,
@@ -362,14 +362,14 @@ func TestGetConfigFromViperOpenAIFullConfig(t *testing.T) {
 	viper.Set("openai.models.reasoning", []string{"o1-preview", "o1-mini"})
 	viper.Set("openai.models.non_reasoning", []string{"gpt-4", "gpt-3.5-turbo"})
 
-	pricingConfig := map[string]interface{}{
-		"gpt-4": map[string]interface{}{
+	pricingConfig := map[string]any{
+		"gpt-4": map[string]any{
 			"input":          0.00003,
 			"cached_input":   0.000015,
 			"output":         0.00006,
 			"context_window": 128000,
 		},
-		"o1-preview": map[string]interface{}{
+		"o1-preview": map[string]any{
 			"input":          0.000015,
 			"output":         0.00006,
 			"context_window": 32768,

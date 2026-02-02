@@ -16,30 +16,30 @@ import (
 func TestJSONField_Scan_Success(t *testing.T) {
 	tests := []struct {
 		name     string
-		field    JSONField[map[string]interface{}]
-		input    interface{}
-		expected map[string]interface{}
+		field    JSONField[map[string]any]
+		input    any
+		expected map[string]any
 	}{
 		{
 			name:  "scan from byte slice",
-			field: JSONField[map[string]interface{}]{},
+			field: JSONField[map[string]any]{},
 			input: []byte(`{"key": "value", "number": 42}`),
-			expected: map[string]interface{}{
+			expected: map[string]any{
 				"key":    "value",
 				"number": float64(42), // JSON numbers become float64
 			},
 		},
 		{
 			name:  "scan from string",
-			field: JSONField[map[string]interface{}]{},
+			field: JSONField[map[string]any]{},
 			input: `{"test": true}`,
-			expected: map[string]interface{}{
+			expected: map[string]any{
 				"test": true,
 			},
 		},
 		{
 			name:     "scan nil value",
-			field:    JSONField[map[string]interface{}]{},
+			field:    JSONField[map[string]any]{},
 			input:    nil,
 			expected: nil,
 		},
@@ -57,22 +57,22 @@ func TestJSONField_Scan_Success(t *testing.T) {
 func TestJSONField_Scan_Error(t *testing.T) {
 	tests := []struct {
 		name  string
-		field JSONField[map[string]interface{}]
-		input interface{}
+		field JSONField[map[string]any]
+		input any
 	}{
 		{
 			name:  "invalid type",
-			field: JSONField[map[string]interface{}]{},
+			field: JSONField[map[string]any]{},
 			input: 123,
 		},
 		{
 			name:  "invalid JSON bytes",
-			field: JSONField[map[string]interface{}]{},
+			field: JSONField[map[string]any]{},
 			input: []byte(`{"invalid": json}`),
 		},
 		{
 			name:  "invalid JSON string",
-			field: JSONField[map[string]interface{}]{},
+			field: JSONField[map[string]any]{},
 			input: `{"incomplete":`,
 		},
 	}
@@ -88,13 +88,13 @@ func TestJSONField_Scan_Error(t *testing.T) {
 func TestJSONField_Value_Success(t *testing.T) {
 	tests := []struct {
 		name     string
-		field    JSONField[map[string]interface{}]
+		field    JSONField[map[string]any]
 		expected string
 	}{
 		{
 			name: "marshal simple map",
-			field: JSONField[map[string]interface{}]{
-				Data: map[string]interface{}{
+			field: JSONField[map[string]any]{
+				Data: map[string]any{
 					"key":    "value",
 					"number": 42,
 				},
@@ -103,14 +103,14 @@ func TestJSONField_Value_Success(t *testing.T) {
 		},
 		{
 			name: "marshal empty map",
-			field: JSONField[map[string]interface{}]{
-				Data: map[string]interface{}{},
+			field: JSONField[map[string]any]{
+				Data: map[string]any{},
 			},
 			expected: `{}`,
 		},
 		{
 			name: "marshal nil map",
-			field: JSONField[map[string]interface{}]{
+			field: JSONField[map[string]any]{
 				Data: nil,
 			},
 			expected: `null`,
@@ -208,8 +208,8 @@ func TestConversationRecord_ToConversations(t *testing.T) {
 		Summary:   &summary,
 		CreatedAt: now,
 		UpdatedAt: now.Add(time.Hour),
-		Metadata: JSONField[map[string]interface{}]{
-			Data: map[string]interface{}{"key": "value"},
+		Metadata: JSONField[map[string]any]{
+			Data: map[string]any{"key": "value"},
 		},
 		ToolResults: JSONField[map[string]tools.StructuredToolResult]{
 			Data: map[string]tools.StructuredToolResult{
@@ -230,7 +230,7 @@ func TestConversationRecord_ToConversations(t *testing.T) {
 	assert.Equal(t, "Test summary", record.Summary)
 	assert.Equal(t, now, record.CreatedAt)
 	assert.Equal(t, now.Add(time.Hour), record.UpdatedAt)
-	assert.Equal(t, map[string]interface{}{"key": "value"}, record.Metadata)
+	assert.Equal(t, map[string]any{"key": "value"}, record.Metadata)
 	assert.Contains(t, record.FileLastAccess, "file.txt")
 	assert.Equal(t, 100, record.Usage.InputTokens)
 	assert.Equal(t, 50, record.Usage.OutputTokens)
@@ -253,8 +253,8 @@ func TestDb_ConversationRecord_ToConversationRecord_NullSummary(t *testing.T) {
 		Summary:   nil, // NULL in database
 		CreatedAt: now,
 		UpdatedAt: now,
-		Metadata: JSONField[map[string]interface{}]{
-			Data: map[string]interface{}{},
+		Metadata: JSONField[map[string]any]{
+			Data: map[string]any{},
 		},
 		ToolResults: JSONField[map[string]tools.StructuredToolResult]{
 			Data: map[string]tools.StructuredToolResult{},
@@ -311,7 +311,7 @@ func TestFromConversationRecord(t *testing.T) {
 		Summary:   "Test summary",
 		CreatedAt: now,
 		UpdatedAt: now.Add(time.Hour),
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"key": "value",
 		},
 		ToolResults: map[string]tools.StructuredToolResult{
@@ -341,7 +341,7 @@ func TestFromConversationRecord(t *testing.T) {
 	assert.Equal(t, now.Add(time.Hour), dbRecord.UpdatedAt)
 	assert.Equal(t, map[string]time.Time{"file.txt": now}, dbRecord.FileLastAccess.Data)
 	assert.Equal(t, llmtypes.Usage{InputTokens: 100, OutputTokens: 50}, dbRecord.Usage.Data)
-	assert.Equal(t, map[string]interface{}{"key": "value"}, dbRecord.Metadata.Data)
+	assert.Equal(t, map[string]any{"key": "value"}, dbRecord.Metadata.Data)
 	assert.Contains(t, dbRecord.ToolResults.Data, "call1")
 	assert.Len(t, dbRecord.BackgroundProcesses.Data, 1)
 	assert.Equal(t, 123, dbRecord.BackgroundProcesses.Data[0].PID)
@@ -359,7 +359,7 @@ func TestFromConversationRecord_EmptySummary(t *testing.T) {
 		Summary:             "", // Empty summary
 		CreatedAt:           now,
 		UpdatedAt:           now,
-		Metadata:            map[string]interface{}{},
+		Metadata:            map[string]any{},
 		ToolResults:         map[string]tools.StructuredToolResult{},
 		BackgroundProcesses: []tools.BackgroundProcess{},
 	}
@@ -439,10 +439,10 @@ func TestRoundTripConversion(t *testing.T) {
 		Summary:   "Conversation about greetings",
 		CreatedAt: now,
 		UpdatedAt: now.Add(time.Hour),
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"source":   "test",
 			"priority": float64(1),
-			"tags":     []interface{}{"greeting", "test"},
+			"tags":     []any{"greeting", "test"},
 		},
 		ToolResults: map[string]tools.StructuredToolResult{
 			"call1": {
@@ -537,8 +537,8 @@ func TestBackgroundProcesses_DefaultToEmptySlice(t *testing.T) {
 		},
 		CreatedAt: now,
 		UpdatedAt: now,
-		Metadata: JSONField[map[string]interface{}]{
-			Data: map[string]interface{}{},
+		Metadata: JSONField[map[string]any]{
+			Data: map[string]any{},
 		},
 		ToolResults: JSONField[map[string]tools.StructuredToolResult]{
 			Data: map[string]tools.StructuredToolResult{},
