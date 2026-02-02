@@ -360,6 +360,8 @@ func TestStorage_ConcurrentWritesSameSession(t *testing.T) {
 		go func(goroutineNum int) {
 			defer wg.Done()
 			for j := 0; j < updatesPerGoroutine; j++ {
+				// Using non-mergeable updates (no "sessionUpdate" field with text content)
+				// to ensure each update is written separately and we can verify count
 				update := map[string]any{"goroutine": goroutineNum, "update": j}
 				err := storage.AppendUpdate(sessionID, update)
 				assert.NoError(t, err)

@@ -275,7 +275,10 @@ func (s *Storage) Delete(sessionID acptypes.SessionID) error {
 	// Close file handle if open (no need to flush - we're deleting anyway)
 	if sf, ok := s.files[sessionID]; ok {
 		sf.mu.Lock()
-		sf.file.Close()
+		if err := sf.file.Close(); err != nil {
+			sf.mu.Unlock()
+			return errors.Wrap(err, "failed to close session file before delete")
+		}
 		sf.mu.Unlock()
 		delete(s.files, sessionID)
 	}

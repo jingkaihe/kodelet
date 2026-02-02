@@ -18,6 +18,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/acp/session"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/llm"
+	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -604,7 +605,9 @@ func deleteConversationCmd(ctx context.Context, id string, config *ConversationD
 
 	// Also clean up ACP session JSONL file if it exists
 	if storage, err := session.NewStorage(); err == nil {
-		_ = storage.Delete(acptypes.SessionID(id))
+		if err := storage.Delete(acptypes.SessionID(id)); err != nil {
+			logger.G(ctx).WithError(err).Warn("Failed to delete ACP session file")
+		}
 		storage.Close()
 	}
 
