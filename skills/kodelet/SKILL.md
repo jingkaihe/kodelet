@@ -193,6 +193,7 @@ Recipes marked with `workflow: true` can be invoked by the subagent tool, enabli
 - `github/pr` - Create pull requests with AI-generated descriptions
 - `init` - Bootstrap AGENTS.md for repository
 - `custom-tool` - Generate custom tools
+- `commit` - Generate commit message
 - `ralph` / `ralph-init` - Autonomous feature development
 
 **Workflow recipe example:**
