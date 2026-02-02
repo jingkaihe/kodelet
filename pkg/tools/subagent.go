@@ -66,7 +66,7 @@ func NewSubAgentTool(discoveredWorkflows map[string]*fragments.Fragment, workflo
 
 // SubAgentInput defines the input parameters for the sub-agent tool
 type SubAgentInput struct {
-	Question string            `json:"question" jsonschema:"description=The question to ask"`
+	Question string            `json:"question,omitempty" jsonschema:"description=The question to ask (required unless workflow is specified)"`
 	Workflow string            `json:"workflow,omitempty" jsonschema:"description=Optional workflow name to use for specialized tasks"`
 	Args     map[string]string `json:"args,omitempty" jsonschema:"description=Optional arguments for the workflow as key-value pairs"`
 }
@@ -102,7 +102,7 @@ const subagentDescriptionTemplate = `Use this tool to delegate tasks to a sub-ag
 This tool is ideal for tasks that involves code searching, architecture analysis, codebase understanding and troubleshooting.
 
 ## Input
-- question: A description of the question to ask the subagent.
+- question: A description of the question to ask the subagent (required unless workflow is specified).
 - workflow: (Optional) A workflow name to use for specialized tasks. See available workflows below.
 - args: (Optional) Arguments for the workflow as key-value pairs.
 
@@ -121,6 +121,7 @@ This tool is ideal for tasks that involves code searching, architecture analysis
    - state the format of the output in detail.
 2. The agent returns a text response back to you, and you have no access to the subagent's internal messages.
 3. The agent's response is not visible to the user. To show user the result you must send the result from the subagent back to the user.
+4. When using a workflow, the question is optional - the workflow will execute with its predefined instructions.
 
 ## Available Workflows
 
@@ -199,8 +200,9 @@ func (t *SubAgentTool) ValidateInput(_ tooltypes.State, parameters string) error
 		return err
 	}
 
-	if input.Question == "" {
-		return errors.New("question is required")
+	// Question is required unless a workflow is specified
+	if input.Question == "" && input.Workflow == "" {
+		return errors.New("question is required when workflow is not specified")
 	}
 
 	if input.Workflow != "" && t.workflowEnabled {
@@ -226,8 +228,9 @@ func (t *SubAgentTool) TracingKVs(parameters string) ([]attribute.KeyValue, erro
 		return nil, err
 	}
 
-	kvs := []attribute.KeyValue{
-		attribute.String("question", input.Question),
+	var kvs []attribute.KeyValue
+	if input.Question != "" {
+		kvs = append(kvs, attribute.String("question", input.Question))
 	}
 	if input.Workflow != "" {
 		kvs = append(kvs, attribute.String("workflow", input.Workflow))
@@ -263,8 +266,10 @@ func BuildSubagentArgs(ctx context.Context, subagentArgs string, input *SubAgent
 		}
 	}
 
-	// Append the question as the final argument
-	args = append(args, input.Question)
+	// Append the question as the final argument (only if non-empty)
+	if input.Question != "" {
+		args = append(args, input.Question)
+	}
 
 	return args
 }

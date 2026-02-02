@@ -73,10 +73,10 @@ func TestSubAgentTool_ValidateInput(t *testing.T) {
 	err := tool.ValidateInput(state, `{"question": "test"}`)
 	assert.NoError(t, err)
 
-	// Invalid inputs
+	// Invalid inputs - empty question without workflow
 	err = tool.ValidateInput(state, `{"question": ""}`)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "question is required")
+	assert.Contains(t, err.Error(), "question is required when workflow is not specified")
 }
 
 func TestSubAgentTool_ValidateInputWithWorkflows(t *testing.T) {
@@ -92,8 +92,13 @@ func TestSubAgentTool_ValidateInputWithWorkflows(t *testing.T) {
 	tool := NewSubAgentTool(workflows, true)
 	state := NewBasicState(context.TODO())
 
-	t.Run("valid workflow", func(t *testing.T) {
+	t.Run("valid workflow with question", func(t *testing.T) {
 		err := tool.ValidateInput(state, `{"question": "test", "workflow": "valid-workflow"}`)
+		assert.NoError(t, err)
+	})
+
+	t.Run("valid workflow without question", func(t *testing.T) {
+		err := tool.ValidateInput(state, `{"workflow": "valid-workflow"}`)
 		assert.NoError(t, err)
 	})
 
@@ -112,7 +117,7 @@ func TestSubAgentTool_ValidateInputWithWorkflows(t *testing.T) {
 func TestSubAgentTool_TracingKVs(t *testing.T) {
 	tool := NewSubAgentTool(nil, false)
 
-	t.Run("without workflow", func(t *testing.T) {
+	t.Run("with question only", func(t *testing.T) {
 		kvs, err := tool.TracingKVs(`{"question": "test question"}`)
 		assert.NoError(t, err)
 		expected := []attribute.KeyValue{
@@ -121,11 +126,20 @@ func TestSubAgentTool_TracingKVs(t *testing.T) {
 		assert.Equal(t, expected, kvs)
 	})
 
-	t.Run("with workflow", func(t *testing.T) {
+	t.Run("with question and workflow", func(t *testing.T) {
 		kvs, err := tool.TracingKVs(`{"question": "test question", "workflow": "test-workflow"}`)
 		assert.NoError(t, err)
 		expected := []attribute.KeyValue{
 			attribute.String("question", "test question"),
+			attribute.String("workflow", "test-workflow"),
+		}
+		assert.Equal(t, expected, kvs)
+	})
+
+	t.Run("with workflow only", func(t *testing.T) {
+		kvs, err := tool.TracingKVs(`{"workflow": "test-workflow"}`)
+		assert.NoError(t, err)
+		expected := []attribute.KeyValue{
 			attribute.String("workflow", "test-workflow"),
 		}
 		assert.Equal(t, expected, kvs)
@@ -268,14 +282,25 @@ func TestBuildSubagentArgs(t *testing.T) {
 		}, args)
 	})
 
-	t.Run("empty question", func(t *testing.T) {
+	t.Run("empty question not appended", func(t *testing.T) {
 		input := &SubAgentInput{Question: ""}
 		args := BuildSubagentArgs(ctx, "--use-weak-model", input)
 
 		assert.Equal(t, []string{
 			"run", "--result-only", "--as-subagent",
 			"--use-weak-model",
-			"",
+		}, args)
+	})
+
+	t.Run("workflow only without question", func(t *testing.T) {
+		input := &SubAgentInput{
+			Workflow: "github/pr",
+		}
+		args := BuildSubagentArgs(ctx, "", input)
+
+		assert.Equal(t, []string{
+			"run", "--result-only", "--as-subagent",
+			"-r", "github/pr",
 		}, args)
 	})
 
