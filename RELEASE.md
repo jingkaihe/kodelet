@@ -1,5 +1,28 @@
 # Kodelet
 
+## 0.2.6.beta (2026-02-02)
+
+### Features
+
+**Subagent workflow support**: The subagent tool can now execute workflows (recipes/fragments) directly, enabling the model to delegate specialized tasks like PR creation or issue resolution:
+
+```json
+{"workflow": "github/pr", "args": {"target": "develop", "draft": "true"}}
+```
+
+The `question` parameter is now optional when a workflow is specified.
+
+**Structured fragment arguments**: Fragment/recipe metadata now supports argument descriptions and defaults in a structured format:
+
+```yaml
+arguments:
+  target:
+    description: Target branch to merge into
+    default: "main"
+```
+
+The `kodelet recipe show` command now displays argument descriptions alongside defaults.
+
 ## 0.2.5.beta (2026-02-01)
 
 ### Breaking Changes
