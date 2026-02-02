@@ -507,7 +507,9 @@ IMPORTANT: Make sure that you preserve all the links in the content including hy
 	// Add subagent args from config if available
 	if llmConfig, ok := state.GetLLMConfig().(llmtypes.Config); ok && llmConfig.SubagentArgs != "" {
 		parsedArgs, err := shlex.Split(llmConfig.SubagentArgs)
-		if err == nil {
+		if err != nil {
+			logger.G(ctx).WithError(err).Warn("failed to parse subagent_args, ignoring")
+		} else {
 			args = append(args, parsedArgs...)
 		}
 	}
@@ -517,6 +519,7 @@ IMPORTANT: Make sure that you preserve all the links in the content including hy
 
 	// Execute the subagent
 	cmd := exec.CommandContext(ctx, exe, args...)
+
 	output, err := cmd.Output()
 	if err != nil {
 		var exitErr *exec.ExitError

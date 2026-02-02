@@ -101,8 +101,10 @@ func TestSubAgentToolResult_StructuredData(t *testing.T) {
 }
 
 func TestBuildSubagentArgs(t *testing.T) {
+	ctx := context.Background()
+
 	t.Run("basic args without subagent_args", func(t *testing.T) {
-		args := BuildSubagentArgs("", "What is foo?")
+		args := BuildSubagentArgs(ctx, "", "What is foo?")
 
 		assert.Equal(t, []string{
 			"run", "--result-only", "--as-subagent",
@@ -111,7 +113,7 @@ func TestBuildSubagentArgs(t *testing.T) {
 	})
 
 	t.Run("with --use-weak-model", func(t *testing.T) {
-		args := BuildSubagentArgs("--use-weak-model", "What is foo?")
+		args := BuildSubagentArgs(ctx, "--use-weak-model", "What is foo?")
 
 		assert.Equal(t, []string{
 			"run", "--result-only", "--as-subagent",
@@ -121,7 +123,7 @@ func TestBuildSubagentArgs(t *testing.T) {
 	})
 
 	t.Run("with --profile flag", func(t *testing.T) {
-		args := BuildSubagentArgs("--profile cheap", "What is foo?")
+		args := BuildSubagentArgs(ctx, "--profile cheap", "What is foo?")
 
 		assert.Equal(t, []string{
 			"run", "--result-only", "--as-subagent",
@@ -131,7 +133,7 @@ func TestBuildSubagentArgs(t *testing.T) {
 	})
 
 	t.Run("with multiple flags", func(t *testing.T) {
-		args := BuildSubagentArgs("--profile openai-subagent --use-weak-model", "What is foo?")
+		args := BuildSubagentArgs(ctx, "--profile openai-subagent --use-weak-model", "What is foo?")
 
 		assert.Equal(t, []string{
 			"run", "--result-only", "--as-subagent",
@@ -143,7 +145,7 @@ func TestBuildSubagentArgs(t *testing.T) {
 
 	t.Run("with quoted argument in subagent_args", func(t *testing.T) {
 		// shlex should handle quoted strings correctly
-		args := BuildSubagentArgs(`--profile "my profile"`, "What is foo?")
+		args := BuildSubagentArgs(ctx, `--profile "my profile"`, "What is foo?")
 
 		assert.Equal(t, []string{
 			"run", "--result-only", "--as-subagent",
@@ -154,7 +156,7 @@ func TestBuildSubagentArgs(t *testing.T) {
 
 	t.Run("preserves question with special characters", func(t *testing.T) {
 		question := `Where is the "foo()" function defined?`
-		args := BuildSubagentArgs("", question)
+		args := BuildSubagentArgs(ctx, "", question)
 
 		assert.Equal(t, []string{
 			"run", "--result-only", "--as-subagent",
@@ -163,8 +165,8 @@ func TestBuildSubagentArgs(t *testing.T) {
 	})
 
 	t.Run("invalid shlex syntax falls back gracefully", func(t *testing.T) {
-		// Unclosed quote - shlex.Split returns error, so subagentArgs is ignored
-		args := BuildSubagentArgs(`--profile "unclosed`, "What is foo?")
+		// Unclosed quote - shlex.Split returns error, so subagentArgs is ignored (with warning log)
+		args := BuildSubagentArgs(ctx, `--profile "unclosed`, "What is foo?")
 
 		// Should still have base args and question, just skip the invalid subagent_args
 		assert.Equal(t, []string{
@@ -174,7 +176,7 @@ func TestBuildSubagentArgs(t *testing.T) {
 	})
 
 	t.Run("empty question", func(t *testing.T) {
-		args := BuildSubagentArgs("--use-weak-model", "")
+		args := BuildSubagentArgs(ctx, "--use-weak-model", "")
 
 		assert.Equal(t, []string{
 			"run", "--result-only", "--as-subagent",
@@ -185,6 +187,8 @@ func TestBuildSubagentArgs(t *testing.T) {
 }
 
 func TestBuildSubagentArgs_CommonPatterns(t *testing.T) {
+	ctx := context.Background()
+
 	// Test common configuration patterns from ADR 027
 	testCases := []struct {
 		name         string
@@ -210,7 +214,7 @@ func TestBuildSubagentArgs_CommonPatterns(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			args := BuildSubagentArgs(tc.subagentArgs, "query")
+			args := BuildSubagentArgs(ctx, tc.subagentArgs, "query")
 			assert.Equal(t, tc.expected, args)
 		})
 	}

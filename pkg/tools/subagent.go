@@ -14,6 +14,7 @@ import (
 	"github.com/pkg/errors"
 	"go.opentelemetry.io/otel/attribute"
 
+	"github.com/jingkaihe/kodelet/pkg/logger"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
@@ -120,14 +121,16 @@ func (t *SubAgentTool) TracingKVs(parameters string) ([]attribute.KeyValue, erro
 // BuildSubagentArgs builds the command-line arguments for spawning a subagent process.
 // This is extracted as a separate function for testability.
 // Returns the complete argument list including the base args, subagent_args from config, and the question.
-func BuildSubagentArgs(subagentArgs string, question string) []string {
+func BuildSubagentArgs(ctx context.Context, subagentArgs string, question string) []string {
 	// Base arguments for subagent execution
 	args := []string{"run", "--result-only", "--as-subagent"}
 
 	// Append user-configured subagent args (e.g., "--profile openai --use-weak-model")
 	if subagentArgs != "" {
 		parsedArgs, err := shlex.Split(subagentArgs)
-		if err == nil {
+		if err != nil {
+			logger.G(ctx).WithError(err).Warn("failed to parse subagent_args, ignoring")
+		} else {
 			args = append(args, parsedArgs...)
 		}
 	}
@@ -161,10 +164,9 @@ func (t *SubAgentTool) Execute(ctx context.Context, state tooltypes.State, param
 	if llmConfig, ok := state.GetLLMConfig().(llmtypes.Config); ok {
 		subagentArgs = llmConfig.SubagentArgs
 	}
-	args := BuildSubagentArgs(subagentArgs, input.Question)
+	args := BuildSubagentArgs(ctx, subagentArgs, input.Question)
 
 	cmd := exec.CommandContext(ctx, exe, args...)
-	cmd.Env = os.Environ()
 
 	output, err := cmd.Output()
 	if err != nil {
