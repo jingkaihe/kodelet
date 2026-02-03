@@ -1,5 +1,22 @@
 # Kodelet
 
+## 0.2.8.beta (2026-02-03)
+
+### Features
+
+**New code recipes**: Added three new built-in recipes for code analysis and review workflows:
+
+- **`code/architect`** - Analyzes codebase patterns and designs architectural solutions with ADR-style implementation blueprints
+- **`code/explorer`** - Explores and explains how a codebase works, creating guided learning journeys with file references
+- **`code/reviewer`** - Performs comprehensive code reviews with configurable scope (staged, working directory, or branch comparison)
+
+Usage examples:
+```bash
+kodelet run -r code/reviewer --arg scope=staged        # Review staged changes
+kodelet run -r code/explorer --arg focus="auth flow"   # Understand authentication
+kodelet run -r code/architect --arg focus="add caching" # Design a caching layer
+```
+
 ## 0.2.7.beta (2026-02-02)
 
 ### Features

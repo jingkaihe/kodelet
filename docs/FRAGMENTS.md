@@ -39,6 +39,9 @@ Kodelet includes several built-in recipes for common tasks:
 - **`custom-tool`** - Create custom tools for Kodelet
 - **`ralph`** - Autonomous feature development loop (used by `kodelet ralph`)
 - **`ralph-init`** - Generate PRD from project analysis (used by `kodelet ralph init`)
+- **`code/architect`** - Analyze codebase patterns and design architectural solutions
+- **`code/explorer`** - Explore and explain how a codebase works
+- **`code/reviewer`** - Perform comprehensive code reviews
 - **`github/pr`** - Generate pull request descriptions
 - **`github/issue-resolve`** - Resolve GitHub issues
 - **`github/pr-respond`** - Respond to pull request comments
