@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/plugins"
 	"github.com/pkg/errors"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark-meta"
@@ -66,14 +67,8 @@ type Config struct {
 // Processor handles fragment loading and rendering
 type Processor struct {
 	fragmentDirs     []string
-	pluginDirs       []pluginDirConfig
+	pluginDirs       []plugins.PluginDirConfig
 	builtinRecipesFS fs.FS
-}
-
-// pluginDirConfig represents a plugin directory with its prefix
-type pluginDirConfig struct {
-	dir    string
-	prefix string
 }
 
 // Option is a function that configures a FragmentProcessor
@@ -124,7 +119,7 @@ func WithDefaultDirs() Option {
 			filepath.Join(homeDir, ".kodelet", "recipes"), // User-global standalone
 		}
 
-		fp.pluginDirs = []pluginDirConfig{}
+		fp.pluginDirs = []plugins.PluginDirConfig{}
 		fp.addPluginDirs("./.kodelet/plugins")
 		fp.addPluginDirs(filepath.Join(homeDir, ".kodelet", "plugins"))
 
@@ -151,9 +146,9 @@ func (fp *Processor) addPluginDirs(pluginsDir string) {
 		}
 
 		pluginName := filepath.ToSlash(relPath)
-		fp.pluginDirs = append(fp.pluginDirs, pluginDirConfig{
-			dir:    recipesDir,
-			prefix: pluginName + "/",
+		fp.pluginDirs = append(fp.pluginDirs, plugins.PluginDirConfig{
+			Dir:    recipesDir,
+			Prefix: pluginName + "/",
 		})
 
 		return filepath.SkipDir
@@ -229,10 +224,10 @@ func (fp *Processor) findFragmentFile(fragmentName string) (string, error) {
 	}
 
 	for _, pluginDir := range fp.pluginDirs {
-		if strings.HasPrefix(fragmentName, pluginDir.prefix) {
-			relName := strings.TrimPrefix(fragmentName, pluginDir.prefix)
+		if strings.HasPrefix(fragmentName, pluginDir.Prefix) {
+			relName := strings.TrimPrefix(fragmentName, pluginDir.Prefix)
 			for _, suffix := range []string{".md", ""} {
-				fullPath := filepath.Join(pluginDir.dir, filepath.FromSlash(relName+suffix))
+				fullPath := filepath.Join(pluginDir.Dir, filepath.FromSlash(relName+suffix))
 				if _, err := os.Stat(fullPath); err == nil {
 					return fullPath, nil
 				}
@@ -637,9 +632,9 @@ func (fp *Processor) ListFragmentsWithMetadata() ([]*Fragment, error) {
 	}
 
 	for _, pluginDir := range fp.pluginDirs {
-		dirFS := os.DirFS(pluginDir.dir)
-		fp.processFragmentsFromFSWithPrefix(dirFS, pluginDir.prefix, func(name string) string {
-			return filepath.Join(pluginDir.dir, name)
+		dirFS := os.DirFS(pluginDir.Dir)
+		fp.processFragmentsFromFSWithPrefix(dirFS, pluginDir.Prefix, func(name string) string {
+			return filepath.Join(pluginDir.Dir, name)
 		}, &fragments, seen)
 	}
 

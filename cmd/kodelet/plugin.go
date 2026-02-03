@@ -53,6 +53,13 @@ Examples:
 		}
 
 		for _, arg := range args {
+			// Check for context cancellation between iterations
+			select {
+			case <-cmd.Context().Done():
+				return cmd.Context().Err()
+			default:
+			}
+
 			repo, ref := parseRepoRef(arg)
 			presenter.Info(fmt.Sprintf("Installing plugins from %s...", repo))
 
@@ -88,6 +95,7 @@ type PluginListOutput struct {
 type PluginInfo struct {
 	Name     string       `json:"name"`
 	Location string       `json:"location"`
+	Path     string       `json:"path,omitempty"`
 	Skills   []SkillInfo  `json:"skills"`
 	Recipes  []RecipeInfo `json:"recipes"`
 }
@@ -202,6 +210,7 @@ func outputPluginsJSON(discovery *plugins.Discovery, allPlugins []pluginEntry) e
 		info := PluginInfo{
 			Name:     plugins.PluginNameToUserFacing(p.Name),
 			Location: entry.location,
+			Path:     p.Path,
 			Skills:   make([]SkillInfo, 0, len(p.Skills)),
 			Recipes:  make([]RecipeInfo, 0, len(p.Recipes)),
 		}
@@ -378,6 +387,7 @@ func outputPluginShowJSON(discovery *plugins.Discovery, p *plugins.InstalledPlug
 	info := PluginInfo{
 		Name:     plugins.PluginNameToUserFacing(p.Name),
 		Location: location,
+		Path:     p.Path,
 		Skills:   make([]SkillInfo, 0, len(p.Skills)),
 		Recipes:  make([]RecipeInfo, 0, len(p.Recipes)),
 	}

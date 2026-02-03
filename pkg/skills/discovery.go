@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/jingkaihe/kodelet/pkg/plugins"
 	"github.com/pkg/errors"
 	"github.com/yuin/goldmark"
 	meta "github.com/yuin/goldmark-meta"
@@ -17,13 +18,7 @@ const skillFileName = "SKILL.md"
 // Discovery handles skill discovery from configured directories
 type Discovery struct {
 	skillDirs  []string
-	pluginDirs []pluginDirConfig
-}
-
-// pluginDirConfig represents a plugin directory with its prefix
-type pluginDirConfig struct {
-	dir    string
-	prefix string
+	pluginDirs []plugins.PluginDirConfig
 }
 
 // Option is a function that configures a Discovery
@@ -49,7 +44,7 @@ func WithDefaultDirs() Option {
 			filepath.Join(homeDir, ".kodelet", "skills"), // User-global standalone
 		}
 
-		d.pluginDirs = []pluginDirConfig{}
+		d.pluginDirs = []plugins.PluginDirConfig{}
 		d.addPluginDirs("./.kodelet/plugins")
 		d.addPluginDirs(filepath.Join(homeDir, ".kodelet", "plugins"))
 
@@ -76,9 +71,9 @@ func (d *Discovery) addPluginDirs(pluginsDir string) {
 		}
 
 		pluginName := filepath.ToSlash(relPath)
-		d.pluginDirs = append(d.pluginDirs, pluginDirConfig{
-			dir:    skillsDir,
-			prefix: pluginName + "/",
+		d.pluginDirs = append(d.pluginDirs, plugins.PluginDirConfig{
+			Dir:    skillsDir,
+			Prefix: pluginName + "/",
 		})
 
 		return filepath.SkipDir
@@ -113,7 +108,7 @@ func (d *Discovery) DiscoverSkills() (map[string]*Skill, error) {
 	}
 
 	for _, pluginDir := range d.pluginDirs {
-		d.discoverSkillsFromDir(pluginDir.dir, pluginDir.prefix, skills)
+		d.discoverSkillsFromDir(pluginDir.Dir, pluginDir.Prefix, skills)
 	}
 
 	return skills, nil

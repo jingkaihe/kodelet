@@ -89,3 +89,10 @@ type InstalledPlugin struct {
 	Skills  []string // List of skill names contained in this plugin
 	Recipes []string // List of recipe names contained in this plugin
 }
+
+// PluginDirConfig represents a plugin directory with its prefix for discovery.
+// Used by skills and fragments packages for plugin-based discovery.
+type PluginDirConfig struct {
+	Dir    string // Directory path containing skills or recipes
+	Prefix string // Prefix to prepend to discovered item names (e.g., "org/repo/")
+}
