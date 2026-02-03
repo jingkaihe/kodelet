@@ -220,6 +220,7 @@ var runCmd = &cobra.Command{
 
 		llmConfig.NoHooks = config.NoHooks
 		llmConfig.IsSubAgent = config.AsSubagent
+		llmConfig.RecipeName = config.FragmentName
 
 		// Disable all tools if requested
 		if config.NoTools {

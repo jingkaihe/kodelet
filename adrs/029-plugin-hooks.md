@@ -597,31 +597,31 @@ elif sys.argv[1] == "run":
 ## Implementation Phases
 
 ### Phase 1: Core Infrastructure
-- [ ] Update `pkg/plugins/types.go` with Hooks field
-- [ ] Update `pkg/plugins/scanner.go` to scan hooks directories
-- [ ] Update `pkg/plugins/installer.go` to report hooks
-- [ ] Write tests for new functionality
+- [x] Update `pkg/plugins/types.go` with Hooks field
+- [x] Update `pkg/plugins/discovery.go` to scan hooks directories
+- [x] Update `pkg/plugins/installer.go` to report hooks
+- [x] Write tests for new functionality
 
 ### Phase 2: Hook Manager Integration
-- [ ] Update `pkg/hooks/manager.go` to scan plugin directories
-- [ ] Implement prefix-based naming for plugin hooks
-- [ ] Implement `GetHookByName()` for hook lookup
-- [ ] Update hook discovery precedence logic
-- [ ] Write integration tests
+- [x] Update `pkg/hooks/discovery.go` to scan plugin directories
+- [x] Implement prefix-based naming for plugin hooks
+- [x] Implement `GetHookByName()` for hook lookup
+- [x] Update hook discovery precedence logic
+- [x] Write integration tests
 
 ### Phase 3: Recipe Context in Payloads
-- [ ] Add `RecipeName` field to `Trigger` struct in `pkg/hooks/trigger.go`
-- [ ] Add `RecipeName` field to `BasePayload` struct in `pkg/hooks/payload.go`
-- [ ] Update `NewTrigger()` to accept recipe name parameter
-- [ ] Update all `Trigger*` methods to set `RecipeName` in payload
-- [ ] Update call sites (run.go, etc.) to pass recipe name to `NewTrigger()`
-- [ ] Update hook documentation with recipe filtering examples
-- [ ] Write tests for recipe-aware hooks
+- [x] Add `RecipeName` field to `Trigger` struct in `pkg/hooks/trigger.go`
+- [x] Add `RecipeName` field to `BasePayload` struct in `pkg/hooks/payload.go`
+- [x] Update `NewTrigger()` to accept recipe name parameter
+- [x] Update all `Trigger*` methods to set `RecipeName` in payload
+- [x] Update call sites (run.go, etc.) to pass recipe name to `NewTrigger()`
+- [x] Add example hook demonstrating recipe filtering (`.kodelet/hooks/intro-logger`)
+- [x] Write tests for recipe-aware hooks
 
 ### Phase 4: CLI Updates
-- [ ] Update `kodelet plugin list` output format
-- [ ] Update `kodelet plugin add` output to show hooks
-- [ ] Update documentation
+- [x] Update `kodelet plugin list` output format
+- [x] Update `kodelet plugin add` output to show hooks
+- [ ] Update documentation (docs/HOOKS.md)
 
 ## Consequences
 
