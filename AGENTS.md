@@ -223,12 +223,6 @@ kodelet pr-respond --pr-url URL                           # Respond to latest @k
 kodelet pr-respond --pr-url URL --review-id ID    # Respond to review comment
 kodelet pr-respond --pr-url URL --issue-comment-id ID     # Respond to issue comment
 
-# Ralph - Autonomous development loop (see docs/RALPH.md)
-kodelet ralph                          # Run autonomous feature development loop
-kodelet ralph init                     # Initialize PRD from project analysis
-kodelet ralph --prd features.json      # Use custom PRD file
-kodelet ralph --iterations 50          # Run for more iterations
-
 # Image support
 kodelet run --image path.png "query"   # Single/multiple images
 kodelet run --image file1.png --image file2.png "compare these"

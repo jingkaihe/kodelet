@@ -16,12 +16,27 @@ kodelet steer --follow "focus on error handling"
 kodelet steer --conversation-id ID "message"
 ```
 
+**`kodelet ralph` command removed**: The ralph autonomous development loop has been removed. Use the `jingkaihe@skills/ralph` plugin instead:
+
+```bash
+# Old (no longer supported)
+kodelet ralph init
+kodelet ralph
+
+# New - install the plugin and use subagent workflows
+kodelet plugin add jingkaihe@skills
+# Then use via subagent workflows: jingkaihe@skills/ralph/init, jingkaihe@skills/ralph/iterate
+```
+
 ### Internal Changes
 
 - Renamed `pkg/feedback` package to `pkg/steer`
 - Updated all LLM providers (Anthropic, OpenAI, Google) to use new steering terminology
 - Steer files now stored in `~/.kodelet/steer/` instead of `~/.kodelet/feedback/`
 - Removed built-in `code/architect`, `code/explorer`, and `code/reviewer` recipes (now available as skills via `jingkaihe@skills` plugin)
+- Removed `ralph` and `ralph-init` built-in recipes
+- Removed `cmd/kodelet/ralph.go` command implementation
+- Removed `docs/RALPH.md` documentation
 
 ## 0.2.9.beta (2026-02-03)
 
