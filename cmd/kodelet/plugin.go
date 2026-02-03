@@ -14,6 +14,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const (
+	// maxDescriptionDisplayLength is the maximum length for descriptions in table output
+	maxDescriptionDisplayLength = 60
+	// truncatedDescriptionLength is the length to truncate to (leaving room for "...")
+	truncatedDescriptionLength = 57
+)
+
 var pluginCmd = &cobra.Command{
 	Use:   "plugin",
 	Short: "Manage kodelet plugins (skills and recipes)",
@@ -38,11 +45,13 @@ Examples:
   kodelet plugin add user/repo@v1.0.0       # Install from specific tag
   kodelet plugin add user/repo -g           # Install globally
   kodelet plugin add user/repo --force      # Overwrite existing plugins
+  kodelet plugin add repo1 repo2 --continue-on-error  # Continue even if one fails
 `,
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		global, _ := cmd.Flags().GetBool("global")
 		force, _ := cmd.Flags().GetBool("force")
+		continueOnError, _ := cmd.Flags().GetBool("continue-on-error")
 
 		installer, err := plugins.NewInstaller(
 			plugins.WithGlobal(global),
@@ -52,6 +61,7 @@ Examples:
 			return err
 		}
 
+		var installErrors []error
 		for _, arg := range args {
 			// Check for context cancellation between iterations
 			select {
@@ -65,6 +75,11 @@ Examples:
 
 			result, err := installer.Install(cmd.Context(), repo, ref)
 			if err != nil {
+				if continueOnError {
+					presenter.Error(err, fmt.Sprintf("Failed to install from %s", repo))
+					installErrors = append(installErrors, errors.Wrapf(err, "failed to install from %s", repo))
+					continue
+				}
 				return errors.Wrapf(err, "failed to install from %s", repo)
 			}
 
@@ -80,6 +95,10 @@ Examples:
 				location = "global (~/.kodelet/plugins/)"
 			}
 			presenter.Info(fmt.Sprintf("Plugin '%s' installed to %s", result.PluginName, location))
+		}
+
+		if len(installErrors) > 0 {
+			return errors.Errorf("%d plugin(s) failed to install", len(installErrors))
 		}
 
 		return nil
@@ -338,8 +357,8 @@ func outputPluginShowTable(discovery *plugins.Discovery, p *plugins.InstalledPlu
 			}
 			if desc != "" {
 				// Truncate long descriptions
-				if len(desc) > 60 {
-					desc = desc[:57] + "..."
+				if len(desc) > maxDescriptionDisplayLength {
+					desc = desc[:truncatedDescriptionLength] + "..."
 				}
 				fmt.Printf("  • %s - %s\n", skillName, desc)
 			} else {
@@ -358,8 +377,8 @@ func outputPluginShowTable(discovery *plugins.Discovery, p *plugins.InstalledPlu
 				desc = recipe.Description()
 			}
 			if desc != "" {
-				if len(desc) > 60 {
-					desc = desc[:57] + "..."
+				if len(desc) > maxDescriptionDisplayLength {
+					desc = desc[:truncatedDescriptionLength] + "..."
 				}
 				fmt.Printf("  • %s - %s\n", recipeName, desc)
 			} else {
@@ -457,6 +476,7 @@ func parseRepoRef(arg string) (repo, ref string) {
 func init() {
 	pluginAddCmd.Flags().BoolP("global", "g", false, "Install to global directory (~/.kodelet/)")
 	pluginAddCmd.Flags().Bool("force", false, "Overwrite existing plugins")
+	pluginAddCmd.Flags().Bool("continue-on-error", false, "Continue installing other plugins if one fails")
 
 	pluginListCmd.Flags().Bool("json", false, "Output as JSON with skill/recipe descriptions")
 

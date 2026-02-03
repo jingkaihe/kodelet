@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
 	"github.com/yuin/goldmark"
 	meta "github.com/yuin/goldmark-meta"
 	"github.com/yuin/goldmark/parser"
@@ -146,7 +147,11 @@ func (d *Discovery) DiscoverAll() ([]Plugin, error) {
 	var plugins []Plugin
 	seen := make(map[string]bool)
 
-	skills, _ := d.discoverSkillsFromDir(filepath.Join(d.baseDir, skillsSubdir), "")
+	skillsDir := filepath.Join(d.baseDir, skillsSubdir)
+	skills, err := d.discoverSkillsFromDir(skillsDir, "")
+	if err != nil {
+		logrus.WithError(err).WithField("dir", skillsDir).Debug("failed to discover skills")
+	}
 	for _, s := range skills {
 		if !seen[s.Name()] {
 			plugins = append(plugins, s)
@@ -154,7 +159,11 @@ func (d *Discovery) DiscoverAll() ([]Plugin, error) {
 		}
 	}
 
-	recipes, _ := d.discoverRecipesFromDir(filepath.Join(d.baseDir, recipesSubdir), "")
+	recipesDir := filepath.Join(d.baseDir, recipesSubdir)
+	recipes, err := d.discoverRecipesFromDir(recipesDir, "")
+	if err != nil {
+		logrus.WithError(err).WithField("dir", recipesDir).Debug("failed to discover recipes")
+	}
 	for _, r := range recipes {
 		if !seen[r.Name()] {
 			plugins = append(plugins, r)
@@ -164,7 +173,11 @@ func (d *Discovery) DiscoverAll() ([]Plugin, error) {
 
 	d.discoverFromPluginsDir(filepath.Join(d.baseDir, pluginsSubdir), &plugins, seen)
 
-	skills, _ = d.discoverSkillsFromDir(filepath.Join(d.homeDir, kodeletDir, skillsSubdir), "")
+	globalSkillsDir := filepath.Join(d.homeDir, kodeletDir, skillsSubdir)
+	skills, err = d.discoverSkillsFromDir(globalSkillsDir, "")
+	if err != nil {
+		logrus.WithError(err).WithField("dir", globalSkillsDir).Debug("failed to discover global skills")
+	}
 	for _, s := range skills {
 		if !seen[s.Name()] {
 			plugins = append(plugins, s)
@@ -172,7 +185,11 @@ func (d *Discovery) DiscoverAll() ([]Plugin, error) {
 		}
 	}
 
-	recipes, _ = d.discoverRecipesFromDir(filepath.Join(d.homeDir, kodeletDir, recipesSubdir), "")
+	globalRecipesDir := filepath.Join(d.homeDir, kodeletDir, recipesSubdir)
+	recipes, err = d.discoverRecipesFromDir(globalRecipesDir, "")
+	if err != nil {
+		logrus.WithError(err).WithField("dir", globalRecipesDir).Debug("failed to discover global recipes")
+	}
 	for _, r := range recipes {
 		if !seen[r.Name()] {
 			plugins = append(plugins, r)
@@ -189,7 +206,11 @@ func (d *Discovery) DiscoverAll() ([]Plugin, error) {
 func (d *Discovery) DiscoverSkills() (map[string]Plugin, error) {
 	skills := make(map[string]Plugin)
 
-	standaloneSkills, _ := d.discoverSkillsFromDir(filepath.Join(d.baseDir, skillsSubdir), "")
+	skillsDir := filepath.Join(d.baseDir, skillsSubdir)
+	standaloneSkills, err := d.discoverSkillsFromDir(skillsDir, "")
+	if err != nil {
+		logrus.WithError(err).WithField("dir", skillsDir).Debug("failed to discover standalone skills")
+	}
 	for _, s := range standaloneSkills {
 		if _, exists := skills[s.Name()]; !exists {
 			skills[s.Name()] = s
@@ -198,7 +219,11 @@ func (d *Discovery) DiscoverSkills() (map[string]Plugin, error) {
 
 	d.discoverSkillsFromPluginsDir(filepath.Join(d.baseDir, pluginsSubdir), skills)
 
-	globalSkills, _ := d.discoverSkillsFromDir(filepath.Join(d.homeDir, kodeletDir, skillsSubdir), "")
+	globalSkillsDir := filepath.Join(d.homeDir, kodeletDir, skillsSubdir)
+	globalSkills, err := d.discoverSkillsFromDir(globalSkillsDir, "")
+	if err != nil {
+		logrus.WithError(err).WithField("dir", globalSkillsDir).Debug("failed to discover global skills")
+	}
 	for _, s := range globalSkills {
 		if _, exists := skills[s.Name()]; !exists {
 			skills[s.Name()] = s
@@ -214,7 +239,11 @@ func (d *Discovery) DiscoverSkills() (map[string]Plugin, error) {
 func (d *Discovery) DiscoverRecipes() (map[string]Plugin, error) {
 	recipes := make(map[string]Plugin)
 
-	standaloneRecipes, _ := d.discoverRecipesFromDir(filepath.Join(d.baseDir, recipesSubdir), "")
+	recipesDir := filepath.Join(d.baseDir, recipesSubdir)
+	standaloneRecipes, err := d.discoverRecipesFromDir(recipesDir, "")
+	if err != nil {
+		logrus.WithError(err).WithField("dir", recipesDir).Debug("failed to discover standalone recipes")
+	}
 	for _, r := range standaloneRecipes {
 		if _, exists := recipes[r.Name()]; !exists {
 			recipes[r.Name()] = r
@@ -223,7 +252,11 @@ func (d *Discovery) DiscoverRecipes() (map[string]Plugin, error) {
 
 	d.discoverRecipesFromPluginsDir(filepath.Join(d.baseDir, pluginsSubdir), recipes)
 
-	globalRecipes, _ := d.discoverRecipesFromDir(filepath.Join(d.homeDir, kodeletDir, recipesSubdir), "")
+	globalRecipesDir := filepath.Join(d.homeDir, kodeletDir, recipesSubdir)
+	globalRecipes, err := d.discoverRecipesFromDir(globalRecipesDir, "")
+	if err != nil {
+		logrus.WithError(err).WithField("dir", globalRecipesDir).Debug("failed to discover global recipes")
+	}
 	for _, r := range globalRecipes {
 		if _, exists := recipes[r.Name()]; !exists {
 			recipes[r.Name()] = r
@@ -240,6 +273,7 @@ func (d *Discovery) DiscoverRecipes() (map[string]Plugin, error) {
 func (d *Discovery) discoverFromPluginsDir(pluginsDir string, plugins *[]Plugin, seen map[string]bool) {
 	entries, err := os.ReadDir(pluginsDir)
 	if err != nil {
+		logrus.WithError(err).WithField("dir", pluginsDir).Debug("failed to read plugins directory")
 		return
 	}
 
@@ -252,7 +286,10 @@ func (d *Discovery) discoverFromPluginsDir(pluginsDir string, plugins *[]Plugin,
 		prefix := pluginNameToPrefix(pluginName)
 
 		skillsDir := filepath.Join(pluginsDir, pluginName, skillsSubdir)
-		skills, _ := d.discoverSkillsFromDir(skillsDir, prefix)
+		skills, err := d.discoverSkillsFromDir(skillsDir, prefix)
+		if err != nil {
+			logrus.WithError(err).WithField("dir", skillsDir).Debug("failed to discover plugin skills")
+		}
 		for _, s := range skills {
 			if !seen[s.Name()] {
 				*plugins = append(*plugins, s)
@@ -261,7 +298,10 @@ func (d *Discovery) discoverFromPluginsDir(pluginsDir string, plugins *[]Plugin,
 		}
 
 		recipesDir := filepath.Join(pluginsDir, pluginName, recipesSubdir)
-		recipes, _ := d.discoverRecipesFromDir(recipesDir, prefix)
+		recipes, err := d.discoverRecipesFromDir(recipesDir, prefix)
+		if err != nil {
+			logrus.WithError(err).WithField("dir", recipesDir).Debug("failed to discover plugin recipes")
+		}
 		for _, r := range recipes {
 			if !seen[r.Name()] {
 				*plugins = append(*plugins, r)
@@ -276,6 +316,7 @@ func (d *Discovery) discoverFromPluginsDir(pluginsDir string, plugins *[]Plugin,
 func (d *Discovery) discoverSkillsFromPluginsDir(pluginsDir string, skills map[string]Plugin) {
 	entries, err := os.ReadDir(pluginsDir)
 	if err != nil {
+		logrus.WithError(err).WithField("dir", pluginsDir).Debug("failed to read plugins directory")
 		return
 	}
 
@@ -287,7 +328,10 @@ func (d *Discovery) discoverSkillsFromPluginsDir(pluginsDir string, skills map[s
 		prefix := pluginNameToPrefix(pluginName)
 
 		skillsDir := filepath.Join(pluginsDir, pluginName, skillsSubdir)
-		pluginSkills, _ := d.discoverSkillsFromDir(skillsDir, prefix)
+		pluginSkills, err := d.discoverSkillsFromDir(skillsDir, prefix)
+		if err != nil {
+			logrus.WithError(err).WithField("dir", skillsDir).Debug("failed to discover plugin skills")
+		}
 		for _, s := range pluginSkills {
 			if _, exists := skills[s.Name()]; !exists {
 				skills[s.Name()] = s
@@ -301,6 +345,7 @@ func (d *Discovery) discoverSkillsFromPluginsDir(pluginsDir string, skills map[s
 func (d *Discovery) discoverRecipesFromPluginsDir(pluginsDir string, recipes map[string]Plugin) {
 	entries, err := os.ReadDir(pluginsDir)
 	if err != nil {
+		logrus.WithError(err).WithField("dir", pluginsDir).Debug("failed to read plugins directory")
 		return
 	}
 
@@ -312,7 +357,10 @@ func (d *Discovery) discoverRecipesFromPluginsDir(pluginsDir string, recipes map
 		prefix := pluginNameToPrefix(pluginName)
 
 		recipesDir := filepath.Join(pluginsDir, pluginName, recipesSubdir)
-		pluginRecipes, _ := d.discoverRecipesFromDir(recipesDir, prefix)
+		pluginRecipes, err := d.discoverRecipesFromDir(recipesDir, prefix)
+		if err != nil {
+			logrus.WithError(err).WithField("dir", recipesDir).Debug("failed to discover plugin recipes")
+		}
 		for _, r := range pluginRecipes {
 			if _, exists := recipes[r.Name()]; !exists {
 				recipes[r.Name()] = r

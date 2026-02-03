@@ -280,3 +280,189 @@ func TestInstallerInstallRecipe(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "# Deploy", string(content))
 }
+
+func TestValidateRepoName(t *testing.T) {
+	tests := []struct {
+		name    string
+		repo    string
+		wantErr bool
+		errMsg  string
+	}{
+		{
+			name:    "valid repo",
+			repo:    "owner/repo",
+			wantErr: false,
+		},
+		{
+			name:    "valid repo with dashes",
+			repo:    "my-org/my-repo",
+			wantErr: false,
+		},
+		{
+			name:    "valid repo with underscores",
+			repo:    "my_org/my_repo",
+			wantErr: false,
+		},
+		{
+			name:    "empty string",
+			repo:    "",
+			wantErr: true,
+			errMsg:  "cannot be empty",
+		},
+		{
+			name:    "no slash",
+			repo:    "justrepo",
+			wantErr: true,
+			errMsg:  "expected 'owner/repo'",
+		},
+		{
+			name:    "empty owner",
+			repo:    "/repo",
+			wantErr: true,
+			errMsg:  "owner and repo cannot be empty",
+		},
+		{
+			name:    "empty repo name",
+			repo:    "owner/",
+			wantErr: true,
+			errMsg:  "owner and repo cannot be empty",
+		},
+		{
+			name:    "just slash",
+			repo:    "/",
+			wantErr: true,
+			errMsg:  "owner and repo cannot be empty",
+		},
+		{
+			name:    "multiple slashes preserved",
+			repo:    "owner/repo/extra",
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateRepoName(tt.repo)
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errMsg)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestRepoToPluginName(t *testing.T) {
+	tests := []struct {
+		name     string
+		repo     string
+		expected string
+	}{
+		{
+			name:     "standard repo",
+			repo:     "owner/repo",
+			expected: "owner@repo",
+		},
+		{
+			name:     "repo with dashes",
+			repo:     "my-org/my-repo",
+			expected: "my-org@my-repo",
+		},
+		{
+			name:     "no slash returns unchanged",
+			repo:     "justrepo",
+			expected: "justrepo",
+		},
+		{
+			name:     "empty string",
+			repo:     "",
+			expected: "",
+		},
+		{
+			name:     "multiple slashes only replaces first",
+			repo:     "owner/repo/extra",
+			expected: "owner@repo/extra",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := repoToPluginName(tt.repo)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestInstallerFindRecipesDeepNesting(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	recipesDir := filepath.Join(tmpDir, "recipes")
+	// Create deeply nested recipes
+	deepPath := filepath.Join(recipesDir, "workflows", "ci", "github", "actions")
+	require.NoError(t, os.MkdirAll(deepPath, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(deepPath, "deploy.md"), []byte("test"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(recipesDir, "root.md"), []byte("test"), 0o644))
+
+	installer := &Installer{}
+	recipes, err := installer.findRecipes(recipesDir)
+	require.NoError(t, err)
+	assert.Len(t, recipes, 2)
+}
+
+func TestScanPluginSubdirs(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create plugins with skills subdirectory
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "org1@repo1", "skills"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "org2@repo2", "skills"), 0o755))
+	// Create a plugin without the target subdir (should be ignored)
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "org3@repo3", "other"), 0o755))
+	// Create a file (should be ignored)
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "file.txt"), []byte("test"), 0o644))
+
+	dirs := ScanPluginSubdirs(tmpDir, "skills")
+	assert.Len(t, dirs, 2)
+
+	// Verify prefixes are set correctly
+	prefixes := make(map[string]bool)
+	for _, d := range dirs {
+		prefixes[d.Prefix] = true
+	}
+	assert.True(t, prefixes["org1@repo1/"])
+	assert.True(t, prefixes["org2@repo2/"])
+}
+
+func TestScanPluginSubdirsNonExistentDir(t *testing.T) {
+	dirs := ScanPluginSubdirs("/nonexistent/path", "skills")
+	assert.Empty(t, dirs)
+}
+
+func TestPluginDirConfigPrefixedName(t *testing.T) {
+	tests := []struct {
+		name     string
+		config   PluginDirConfig
+		input    string
+		expected string
+	}{
+		{
+			name:     "with prefix",
+			config:   PluginDirConfig{Dir: "/some/dir", Prefix: "org/repo/"},
+			input:    "skill-name",
+			expected: "org/repo/skill-name",
+		},
+		{
+			name:     "empty prefix",
+			config:   PluginDirConfig{Dir: "/some/dir", Prefix: ""},
+			input:    "skill-name",
+			expected: "skill-name",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.config.PrefixedName(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}

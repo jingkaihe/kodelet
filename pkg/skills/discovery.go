@@ -45,39 +45,11 @@ func WithDefaultDirs() Option {
 		}
 
 		d.pluginDirs = []plugins.PluginDirConfig{}
-		d.addPluginDirs("./.kodelet/plugins")
-		d.addPluginDirs(filepath.Join(homeDir, ".kodelet", "plugins"))
+		d.pluginDirs = append(d.pluginDirs, plugins.ScanPluginSubdirs("./.kodelet/plugins", "skills")...)
+		d.pluginDirs = append(d.pluginDirs, plugins.ScanPluginSubdirs(filepath.Join(homeDir, ".kodelet", "plugins"), "skills")...)
 
 		return nil
 	}
-}
-
-// addPluginDirs scans a plugins directory and adds all plugin skill directories
-// Supports nested org/repo directory structure
-func (d *Discovery) addPluginDirs(pluginsDir string) {
-	_ = filepath.Walk(pluginsDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || !info.IsDir() {
-			return nil
-		}
-
-		skillsDir := filepath.Join(path, "skills")
-		if _, err := os.Stat(skillsDir); err != nil {
-			return nil
-		}
-
-		relPath, err := filepath.Rel(pluginsDir, path)
-		if err != nil {
-			return nil
-		}
-
-		pluginName := filepath.ToSlash(relPath)
-		d.pluginDirs = append(d.pluginDirs, plugins.PluginDirConfig{
-			Dir:    skillsDir,
-			Prefix: pluginName + "/",
-		})
-
-		return filepath.SkipDir
-	})
 }
 
 // NewDiscovery creates a new skill discovery instance

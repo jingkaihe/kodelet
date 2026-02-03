@@ -13,11 +13,31 @@ import (
 	"github.com/pkg/errors"
 )
 
+// ValidateRepoName validates a GitHub repository name format.
+// Expected format: "owner/repo" (e.g., "jingkaihe/skills").
+// Returns an error if the format is invalid.
+func ValidateRepoName(repo string) error {
+	if repo == "" {
+		return errors.New("repository name cannot be empty")
+	}
+	if !strings.Contains(repo, "/") {
+		return errors.Errorf("invalid repository format %q: expected 'owner/repo'", repo)
+	}
+	parts := strings.SplitN(repo, "/", 2)
+	if parts[0] == "" || parts[1] == "" {
+		return errors.Errorf("invalid repository format %q: owner and repo cannot be empty", repo)
+	}
+	return nil
+}
+
 // repoToPluginName converts a GitHub repo path to a plugin name.
 // Expected format: "owner/repo" (e.g., "jingkaihe/skills" -> "jingkaihe@skills").
 // If the input doesn't contain a slash, it returns the input unchanged.
 // Only the first slash is replaced to handle nested paths correctly.
 func repoToPluginName(repo string) string {
+	if !strings.Contains(repo, "/") {
+		return repo
+	}
 	return strings.Replace(repo, "/", "@", 1)
 }
 
@@ -85,6 +105,10 @@ type InstallResult struct {
 
 // Install installs plugins from a GitHub repository
 func (i *Installer) Install(ctx context.Context, repo string, ref string) (*InstallResult, error) {
+	if err := ValidateRepoName(repo); err != nil {
+		return nil, err
+	}
+
 	if err := i.validateGHCLI(); err != nil {
 		return nil, err
 	}

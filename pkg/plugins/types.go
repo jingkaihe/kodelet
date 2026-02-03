@@ -3,6 +3,11 @@
 // discovery, installation, and removal of plugins from GitHub repositories.
 package plugins
 
+import (
+	"os"
+	"path/filepath"
+)
+
 // PluginType represents the type of plugin
 type PluginType string
 
@@ -95,4 +100,47 @@ type InstalledPlugin struct {
 type PluginDirConfig struct {
 	Dir    string // Directory path containing skills or recipes
 	Prefix string // Prefix to prepend to discovered item names (e.g., "org/repo/")
+}
+
+// PrefixedName returns the name with the prefix prepended.
+// If prefix is empty, returns the name unchanged.
+func (c PluginDirConfig) PrefixedName(name string) string {
+	if c.Prefix == "" {
+		return name
+	}
+	return c.Prefix + name
+}
+
+// ScanPluginSubdirs scans a plugins directory and returns all plugin subdirectories
+// that contain the specified subdir (e.g., "skills" or "recipes").
+// Each returned PluginDirConfig has the full path to the subdir and a prefix
+// derived from the plugin's directory name (e.g., "org@repo" -> "org@repo/").
+func ScanPluginSubdirs(pluginsDir, subdir string) []PluginDirConfig {
+	var dirs []PluginDirConfig
+
+	_ = filepath.Walk(pluginsDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || !info.IsDir() {
+			return nil
+		}
+
+		targetDir := filepath.Join(path, subdir)
+		if _, err := os.Stat(targetDir); err != nil {
+			return nil
+		}
+
+		relPath, err := filepath.Rel(pluginsDir, path)
+		if err != nil {
+			return nil
+		}
+
+		pluginName := filepath.ToSlash(relPath)
+		dirs = append(dirs, PluginDirConfig{
+			Dir:    targetDir,
+			Prefix: pluginName + "/",
+		})
+
+		return filepath.SkipDir
+	})
+
+	return dirs
 }

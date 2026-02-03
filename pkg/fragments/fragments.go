@@ -120,39 +120,11 @@ func WithDefaultDirs() Option {
 		}
 
 		fp.pluginDirs = []plugins.PluginDirConfig{}
-		fp.addPluginDirs("./.kodelet/plugins")
-		fp.addPluginDirs(filepath.Join(homeDir, ".kodelet", "plugins"))
+		fp.pluginDirs = append(fp.pluginDirs, plugins.ScanPluginSubdirs("./.kodelet/plugins", "recipes")...)
+		fp.pluginDirs = append(fp.pluginDirs, plugins.ScanPluginSubdirs(filepath.Join(homeDir, ".kodelet", "plugins"), "recipes")...)
 
 		return nil
 	}
-}
-
-// addPluginDirs scans a plugins directory and adds all plugin recipe directories
-// Supports nested org/repo directory structure
-func (fp *Processor) addPluginDirs(pluginsDir string) {
-	_ = filepath.Walk(pluginsDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || !info.IsDir() {
-			return nil
-		}
-
-		recipesDir := filepath.Join(path, "recipes")
-		if _, err := os.Stat(recipesDir); err != nil {
-			return nil
-		}
-
-		relPath, err := filepath.Rel(pluginsDir, path)
-		if err != nil {
-			return nil
-		}
-
-		pluginName := filepath.ToSlash(relPath)
-		fp.pluginDirs = append(fp.pluginDirs, plugins.PluginDirConfig{
-			Dir:    recipesDir,
-			Prefix: pluginName + "/",
-		})
-
-		return filepath.SkipDir
-	})
 }
 
 // NewFragmentProcessor creates a new fragment processor with optional configuration
