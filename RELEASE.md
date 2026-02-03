@@ -1,5 +1,53 @@
 # Kodelet
 
+## 0.2.9.beta (2026-02-03)
+
+### Breaking Changes
+
+**`kodelet skill` commands replaced by `kodelet plugin`**: The `kodelet skill add/list/remove` commands have been removed and replaced with a unified plugin system. Migrate your workflows:
+
+```bash
+# Old (no longer supported)
+kodelet skill add user/repo
+kodelet skill list
+kodelet skill remove my-skill
+
+# New
+kodelet plugin add user/repo
+kodelet plugin list
+kodelet plugin remove user/repo
+```
+
+**Recipe directory moved**: Repo-local recipes have moved from `./recipes/` to `./.kodelet/recipes/`. Move your existing recipes to the new location.
+
+### Features
+
+**Unified plugin system**: A new `kodelet plugin` command manages both skills and recipes from GitHub repositories:
+
+```bash
+kodelet plugin add user/repo              # Install skills and recipes from repo
+kodelet plugin add user/repo@v1.0.0       # Install specific version
+kodelet plugin add user/repo -g           # Install globally
+kodelet plugin list                       # List all installed plugins
+kodelet plugin show user/repo             # Show plugin details
+kodelet plugin remove user/repo           # Remove a plugin
+```
+
+Plugins use `org@repo` directory naming to avoid collisions. Skills and recipes from plugins are prefixed with `org/repo/` (e.g., `jingkaihe/skills/pdf`).
+
+**JSON output for plugin commands**: Use `--json` flag for machine-readable output with skill/recipe descriptions:
+
+```bash
+kodelet plugin list --json
+kodelet plugin show user/repo --json
+```
+
+### Internal Changes
+
+- New `pkg/plugins` package for unified plugin discovery, installation, and removal
+- Skills and recipes now support plugin-based discovery with proper precedence
+- Removed `docs/mcp.md` and `docs/tools.md` documentation files
+
 ## 0.2.8.beta (2026-02-03)
 
 ### Features
