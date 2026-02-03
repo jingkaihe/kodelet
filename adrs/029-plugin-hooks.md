@@ -344,15 +344,15 @@ func scanHookNames(dir string) []string {
 
 ### 5. Update CLI Output
 
-Update `kodelet plugin list` to show hooks:
+Update `kodelet plugin list` to show hook counts (consistent with skills/recipes - counts only, use `--json` for details):
 
 ```bash
 $ kodelet plugin list
-NAME                LOCATION  SKILLS         RECIPES           HOOKS
-----                --------  ------         -------           -----
-anthropic/recipes   global    0              pr, commit, init  0
-jingkaihe/skills    local     pdf, xlsx      0                 validate-output, log-calls
-my-hooks            local     0              0                 pre-commit, post-run
+NAME                LOCATION  SKILLS  RECIPES  HOOKS
+----                --------  ------  -------  -----
+anthropic/recipes   global    0       3        0
+jingkaihe/skills    local     2       0        2
+my-hooks            local     0       0        3
 ```
 
 Update `kodelet plugin add` output:
@@ -362,8 +362,183 @@ $ kodelet plugin add jingkaihe/hooks-collection
 Installed jingkaihe/hooks-collection:
   Skills:  0
   Recipes: 0
-  Hooks:   3 (validate-output, log-tool-calls, audit-trail)
+  Hooks:   3
 ```
+
+For detailed information, use `--json`:
+
+```bash
+$ kodelet plugin list --json
+[
+  {
+    "name": "jingkaihe/skills",
+    "location": "local",
+    "path": "/home/user/project/.kodelet/plugins/jingkaihe@skills",
+    "skills": ["pdf", "xlsx"],
+    "recipes": [],
+    "hooks": ["validate-output", "log-calls"]
+  }
+]
+```
+
+## Recipe Integration
+
+### Design Approach
+
+Rather than complex recipe-scoped hook binding, use a simple **payload-based filtering** approach:
+
+1. All hooks receive `recipe_name` in their payload
+2. Hooks decide whether to act based on the recipe context
+3. No special syntax or separate directories needed
+
+This keeps the hook system simple while enabling recipe-aware behavior.
+
+### Hook Payload Context
+
+The recipe name flows through the existing `Trigger` struct which already carries conversation context:
+
+**1. Add `RecipeName` to `Trigger` struct** in `pkg/hooks/trigger.go`:
+
+```go
+// Trigger provides methods to invoke lifecycle hooks.
+type Trigger struct {
+    Manager        HookManager
+    ConversationID string
+    IsSubAgent     bool
+    RecipeName     string  // NEW: Active recipe name, empty if none
+}
+
+// NewTrigger creates a new hook trigger with the given parameters.
+func NewTrigger(manager HookManager, conversationID string, isSubAgent bool, recipeName string) Trigger {
+    return Trigger{
+        Manager:        manager,
+        ConversationID: conversationID,
+        IsSubAgent:     isSubAgent,
+        RecipeName:     recipeName,
+    }
+}
+```
+
+**2. Add `RecipeName` to `BasePayload`** in `pkg/hooks/payload.go`:
+
+```go
+// BasePayload contains fields common to all hook payloads
+type BasePayload struct {
+    Event      HookType  `json:"event"`
+    ConvID     string    `json:"conv_id"`
+    CWD        string    `json:"cwd"`
+    InvokedBy  InvokedBy `json:"invoked_by"`
+    RecipeName string    `json:"recipe_name,omitempty"`  // NEW
+}
+```
+
+**3. Set `RecipeName` in payload construction** (already in trigger methods):
+
+```go
+func (t Trigger) TriggerBeforeToolCall(...) (bool, string, string) {
+    payload := BeforeToolCallPayload{
+        BasePayload: BasePayload{
+            Event:      HookTypeBeforeToolCall,
+            ConvID:     t.ConversationID,
+            CWD:        t.getCwd(ctx),
+            InvokedBy:  t.invokedBy(),
+            RecipeName: t.RecipeName,  // NEW: automatically included
+        },
+        // ...
+    }
+    // ...
+}
+```
+
+**4. Set recipe name when creating thread** - the recipe name is already known at thread creation time (from `-r` flag or fragment resolution):
+
+```go
+// In cmd/kodelet/run.go or similar
+trigger := hooks.NewTrigger(hookManager, convID, false, fragmentName)
+```
+
+This means **no changes to hook execution flow** - the recipe name is simply carried through existing infrastructure.
+
+### Example: Recipe-Aware Hook
+
+A hook that only validates for the `code-review` recipe:
+
+```python
+#!/usr/bin/env python3
+import sys, json
+
+if sys.argv[1] == "hook":
+    print("before_tool_call")
+elif sys.argv[1] == "run":
+    payload = json.load(sys.stdin)
+    recipe = payload.get("recipe_name", "")
+    
+    # Only act for code-review recipe
+    if recipe != "code-review":
+        print(json.dumps({"blocked": false}))
+        sys.exit(0)
+    
+    # Validation logic for code-review recipe...
+    tool = payload.get("tool_name", "")
+    if tool == "file_edit":
+        # Validate the edit...
+        pass
+    
+    print(json.dumps({"blocked": false}))
+```
+
+### Example: Multi-Recipe Hook
+
+A hook that behaves differently for different recipes:
+
+```python
+#!/usr/bin/env python3
+import sys, json
+
+if sys.argv[1] == "hook":
+    print("turn_end")
+elif sys.argv[1] == "run":
+    payload = json.load(sys.stdin)
+    recipe = payload.get("recipe_name", "")
+    
+    if recipe == "code-review":
+        # Post review summary to Slack
+        post_to_slack(payload)
+    elif recipe == "deploy":
+        # Notify ops channel
+        notify_ops(payload)
+    elif recipe == "":
+        # No recipe - skip or do default behavior
+        pass
+    
+    print(json.dumps({"success": true}))
+```
+
+### Plugin Structure (Simplified)
+
+No need for separate `recipe-hooks/` directory - all hooks live in `hooks/`:
+
+```
+my-plugin/
+├── hooks/
+│   ├── audit-log           # Logs all operations (ignores recipe_name)
+│   ├── review-validator    # Only acts when recipe_name == "code-review"
+│   └── deploy-notifier     # Only acts when recipe_name == "deploy"
+├── recipes/
+│   ├── code-review.md
+│   └── deploy.md
+└── skills/
+    └── ...
+```
+
+### Benefits
+
+| Aspect | Payload Filtering | Recipe-Scoped Binding |
+|--------|-------------------|----------------------|
+| Complexity | Simple - one mechanism | Complex - special syntax, directories |
+| Flexibility | Hook can handle multiple recipes | One hook per recipe binding |
+| Discoverability | All hooks visible in `hooks/` | Split across `hooks/` and `recipe-hooks/` |
+| Explicit behavior | Clear in hook code | Hidden in recipe frontmatter |
 
 ## Example Plugin with Hooks
 
@@ -430,10 +605,20 @@ elif sys.argv[1] == "run":
 ### Phase 2: Hook Manager Integration
 - [ ] Update `pkg/hooks/manager.go` to scan plugin directories
 - [ ] Implement prefix-based naming for plugin hooks
+- [ ] Implement `GetHookByName()` for hook lookup
 - [ ] Update hook discovery precedence logic
 - [ ] Write integration tests
 
-### Phase 3: CLI Updates
+### Phase 3: Recipe Context in Payloads
+- [ ] Add `RecipeName` field to `Trigger` struct in `pkg/hooks/trigger.go`
+- [ ] Add `RecipeName` field to `BasePayload` struct in `pkg/hooks/payload.go`
+- [ ] Update `NewTrigger()` to accept recipe name parameter
+- [ ] Update all `Trigger*` methods to set `RecipeName` in payload
+- [ ] Update call sites (run.go, etc.) to pass recipe name to `NewTrigger()`
+- [ ] Update hook documentation with recipe filtering examples
+- [ ] Write tests for recipe-aware hooks
+
+### Phase 4: CLI Updates
 - [ ] Update `kodelet plugin list` output format
 - [ ] Update `kodelet plugin add` output to show hooks
 - [ ] Update documentation
@@ -443,14 +628,17 @@ elif sys.argv[1] == "run":
 ### Positive
 - Hooks can be distributed alongside skills and recipes in plugins
 - Recipe authors can bundle workflow-specific hooks
+- Simple payload-based filtering - hooks check `recipe_name` to decide behavior
+- One hook can serve multiple recipes with different logic
 - Clear provenance via naming convention (`org/repo/hook-name`)
 - No changes to existing hook protocol or runtime
 - Standalone hooks continue to work unchanged
-- Simple implementation leveraging existing plugin infrastructure
+- All hooks discoverable in one place (`hooks/` directory)
 
 ### Negative
 - Additional complexity in hook discovery (multiple directories)
 - Plugin hooks require explicit `org/repo/` prefix when referenced by name
+- Hooks must implement their own recipe filtering logic
 
 ### Neutral
 - Script-based hooks (bash, Python) remain the primary use case
@@ -459,9 +647,10 @@ elif sys.argv[1] == "run":
 
 ## Future Considerations
 
-1. **Hook Dependencies**: Recipes could declare required hooks in frontmatter
-2. **Hook Versioning**: Track hook versions for compatibility
-3. **Binary Hooks**: If needed, add `hooks/*.spec` files for downloading pre-built binaries (similar to `pkg/binaries/` pattern)
+1. **Hook Versioning**: Track hook versions for compatibility
+2. **Binary Hooks**: If needed, add `hooks/*.spec` files for downloading pre-built binaries (similar to `pkg/binaries/` pattern)
+3. **Recipe-Declared Hooks**: If payload filtering proves insufficient, add `external:` field to recipe `HookConfig` for explicit binding
+4. **Hook Templates**: Provide starter templates for common hook patterns (recipe filtering, logging, etc.)
 
 ## References
 
