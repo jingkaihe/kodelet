@@ -151,7 +151,7 @@ func main() {
 	rootCmd.AddCommand(copilotLoginCmd)
 	rootCmd.AddCommand(copilotLogoutCmd)
 	rootCmd.AddCommand(serveCmd)
-	rootCmd.AddCommand(feedbackCmd)
+	rootCmd.AddCommand(steerCmd)
 	rootCmd.AddCommand(recipeCmd)
 	rootCmd.AddCommand(profileCmd)
 	rootCmd.AddCommand(ralphCmd)
@@ -193,7 +193,7 @@ func main() {
 	copilotLoginCmd = withTracing(copilotLoginCmd)
 	copilotLogoutCmd = withTracing(copilotLogoutCmd)
 	serveCmd = withTracing(serveCmd)
-	feedbackCmd = withTracing(feedbackCmd)
+	steerCmd = withTracing(steerCmd)
 	recipeCmd = withTracing(recipeCmd)
 	ralphCmd = withTracing(ralphCmd)
 
