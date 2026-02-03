@@ -130,7 +130,7 @@ func NewGoogleThread(config llmtypes.Config) (*Thread, error) {
 		if err != nil {
 			logger.G(context.Background()).WithError(err).Warn("Failed to initialize hook manager, hooks disabled")
 		} else {
-			hookTrigger = hooks.NewTrigger(hookManager, conversationID, configCopy.IsSubAgent)
+			hookTrigger = hooks.NewTrigger(hookManager, conversationID, configCopy.IsSubAgent, configCopy.RecipeName)
 		}
 	}
 

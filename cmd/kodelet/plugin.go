@@ -89,6 +89,9 @@ Examples:
 			if len(result.Recipes) > 0 {
 				presenter.Success(fmt.Sprintf("Installed recipes: %s", strings.Join(result.Recipes, ", ")))
 			}
+			if len(result.Hooks) > 0 {
+				presenter.Success(fmt.Sprintf("Installed hooks: %s", strings.Join(result.Hooks, ", ")))
+			}
 
 			location := "local (.kodelet/plugins/)"
 			if global {
@@ -117,6 +120,7 @@ type PluginInfo struct {
 	Path     string       `json:"path,omitempty"`
 	Skills   []SkillInfo  `json:"skills"`
 	Recipes  []RecipeInfo `json:"recipes"`
+	Hooks    []HookInfo   `json:"hooks"`
 }
 
 // SkillInfo represents a skill in the JSON output
@@ -129,6 +133,11 @@ type SkillInfo struct {
 type RecipeInfo struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
+}
+
+// HookInfo represents a hook in the JSON output
+type HookInfo struct {
+	Name string `json:"name"`
 }
 
 // pluginEntry associates a plugin with its location (local or global)
@@ -196,12 +205,12 @@ Examples:
 		}
 
 		tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(tw, "NAME\tLOCATION\tSKILLS\tRECIPES")
-		fmt.Fprintln(tw, "----\t--------\t------\t-------")
+		fmt.Fprintln(tw, "NAME\tLOCATION\tSKILLS\tRECIPES\tHOOKS")
+		fmt.Fprintln(tw, "----\t--------\t------\t-------\t-----")
 
 		for _, entry := range allPlugins {
 			p := entry.plugin
-			fmt.Fprintf(tw, "%s\t%s\t%d\t%d\n", p.Name, entry.location, len(p.Skills), len(p.Recipes))
+			fmt.Fprintf(tw, "%s\t%s\t%d\t%d\t%d\n", p.Name, entry.location, len(p.Skills), len(p.Recipes), len(p.Hooks))
 		}
 		tw.Flush()
 
@@ -232,6 +241,7 @@ func outputPluginsJSON(discovery *plugins.Discovery, allPlugins []pluginEntry) e
 			Path:     p.Path,
 			Skills:   make([]SkillInfo, 0, len(p.Skills)),
 			Recipes:  make([]RecipeInfo, 0, len(p.Recipes)),
+			Hooks:    make([]HookInfo, 0, len(p.Hooks)),
 		}
 
 		for _, skillName := range p.Skills {
@@ -250,6 +260,10 @@ func outputPluginsJSON(discovery *plugins.Discovery, allPlugins []pluginEntry) e
 				recipeInfo.Description = recipe.Description()
 			}
 			info.Recipes = append(info.Recipes, recipeInfo)
+		}
+
+		for _, hookName := range p.Hooks {
+			info.Hooks = append(info.Hooks, HookInfo{Name: hookName})
 		}
 
 		output.Plugins = append(output.Plugins, info)
@@ -385,6 +399,14 @@ func outputPluginShowTable(discovery *plugins.Discovery, p *plugins.InstalledPlu
 				fmt.Printf("  • %s\n", recipeName)
 			}
 		}
+		fmt.Println()
+	}
+
+	if len(p.Hooks) > 0 {
+		fmt.Printf("Hooks (%d):\n", len(p.Hooks))
+		for _, hookName := range p.Hooks {
+			fmt.Printf("  • %s\n", hookName)
+		}
 	}
 
 	return nil
@@ -409,6 +431,7 @@ func outputPluginShowJSON(discovery *plugins.Discovery, p *plugins.InstalledPlug
 		Path:     p.Path,
 		Skills:   make([]SkillInfo, 0, len(p.Skills)),
 		Recipes:  make([]RecipeInfo, 0, len(p.Recipes)),
+		Hooks:    make([]HookInfo, 0, len(p.Hooks)),
 	}
 
 	for _, skillName := range p.Skills {
@@ -427,6 +450,10 @@ func outputPluginShowJSON(discovery *plugins.Discovery, p *plugins.InstalledPlug
 			recipeInfo.Description = recipe.Description()
 		}
 		info.Recipes = append(info.Recipes, recipeInfo)
+	}
+
+	for _, hookName := range p.Hooks {
+		info.Hooks = append(info.Hooks, HookInfo{Name: hookName})
 	}
 
 	enc := json.NewEncoder(os.Stdout)

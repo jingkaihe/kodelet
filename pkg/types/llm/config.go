@@ -52,7 +52,8 @@ type Config struct {
 	Context *ContextConfig `mapstructure:"context" json:"context,omitempty" yaml:"context,omitempty"` // Context configuration for context file discovery
 
 	// Hooks configuration
-	NoHooks bool `mapstructure:"no_hooks" json:"no_hooks" yaml:"no_hooks"` // NoHooks disables agent lifecycle hooks
+	NoHooks    bool   `mapstructure:"no_hooks" json:"no_hooks" yaml:"no_hooks"`          // NoHooks disables agent lifecycle hooks
+	RecipeName string `mapstructure:"recipe_name" json:"recipe_name" yaml:"recipe_name"` // RecipeName is the active recipe/fragment name for hooks
 }
 
 // OpenAIConfig holds OpenAI-specific configuration including support for compatible APIs

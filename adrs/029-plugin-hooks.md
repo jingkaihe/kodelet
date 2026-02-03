@@ -1,7 +1,7 @@
 # ADR 029: Plugin Hooks
 
 ## Status
-Proposed
+Accepted (Implemented)
 
 ## Context
 
