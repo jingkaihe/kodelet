@@ -1,5 +1,27 @@
 # Kodelet
 
+## 0.2.10.beta (2026-02-03)
+
+### Breaking Changes
+
+**`kodelet feedback` renamed to `kodelet steer`**: The feedback command has been renamed to better reflect its purpose of steering autonomous conversations:
+
+```bash
+# Old (no longer supported)
+kodelet feedback --follow "focus on error handling"
+kodelet feedback --conversation-id ID "message"
+
+# New
+kodelet steer --follow "focus on error handling"
+kodelet steer --conversation-id ID "message"
+```
+
+### Internal Changes
+
+- Renamed `pkg/feedback` package to `pkg/steer`
+- Updated all LLM providers (Anthropic, OpenAI, Google) to use new steering terminology
+- Steer files now stored in `~/.kodelet/steer/` instead of `~/.kodelet/feedback/`
+
 ## 0.2.9.beta (2026-02-03)
 
 ### Breaking Changes
