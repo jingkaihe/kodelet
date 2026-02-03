@@ -23,6 +23,19 @@ const (
 	kodeletDir    = ".kodelet"
 )
 
+// IsExecutableFile checks if a file entry is executable (has any execute bit set).
+// This is used for hook discovery across both installation and listing.
+func IsExecutableFile(entry fs.DirEntry) bool {
+	if entry.IsDir() {
+		return false
+	}
+	info, err := entry.Info()
+	if err != nil {
+		return false
+	}
+	return info.Mode()&0o111 != 0
+}
+
 // Discovery handles plugin discovery from configured directories
 type Discovery struct {
 	baseDir string // ".kodelet" or absolute path for repo-local
@@ -656,14 +669,7 @@ func (d *Discovery) ListInstalledPlugins(global bool) ([]InstalledPlugin, error)
 		if hasHooks {
 			if hookEntries, err := os.ReadDir(hooksDir); err == nil {
 				for _, hookEntry := range hookEntries {
-					if hookEntry.IsDir() {
-						continue
-					}
-					info, err := hookEntry.Info()
-					if err != nil {
-						continue
-					}
-					if info.Mode()&0o111 != 0 {
+					if IsExecutableFile(hookEntry) {
 						plugin.Hooks = append(plugin.Hooks, hookEntry.Name())
 					}
 				}

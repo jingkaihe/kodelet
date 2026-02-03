@@ -219,9 +219,13 @@ kodelet acp --no-workflows
 ### Agent Lifecycle Hooks
 Hooks allow external scripts to observe and control agent behavior for audit logging, security controls, and monitoring.
 
-**Hook locations:**
-- `./.kodelet/hooks/` - Repository-local (higher precedence)
-- `~/.kodelet/hooks/` - User-global
+**Hook locations (in precedence order):**
+- `.kodelet/hooks/` - Repository-local standalone (highest precedence)
+- `.kodelet/plugins/<org@repo>/hooks/` - Repository-local plugin hooks
+- `~/.kodelet/hooks/` - User-global standalone
+- `~/.kodelet/plugins/<org@repo>/hooks/` - User-global plugin hooks (lowest precedence)
+
+Plugin hooks are prefixed with `org/repo/` (e.g., `jingkaihe/hooks/audit-logger`).
 
 **Hook protocol:**
 1. `./hook hook` - Discovery: returns the event type string
@@ -237,6 +241,7 @@ interface BasePayload {
   conv_id: string;
   cwd: string;
   invoked_by: InvokedBy;
+  recipe_name?: string;  // Present when invoked via a recipe
 }
 
 // before_tool_call: Can block or modify tool input

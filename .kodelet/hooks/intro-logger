@@ -28,4 +28,7 @@ case "$1" in
         # Output success (turn_end hooks don't need to return anything specific)
         exit 0
         ;;
+    *)
+        exit 1
+        ;;
 esac

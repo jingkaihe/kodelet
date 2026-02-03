@@ -260,16 +260,8 @@ func (i *Installer) findHooks(dir string) ([]string, error) {
 
 	var hooks []string
 	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		hookPath := filepath.Join(dir, entry.Name())
-		info, err := entry.Info()
-		if err != nil {
-			continue
-		}
-		if info.Mode()&0o111 != 0 {
-			hooks = append(hooks, hookPath)
+		if IsExecutableFile(entry) {
+			hooks = append(hooks, filepath.Join(dir, entry.Name()))
 		}
 	}
 	return hooks, nil
