@@ -133,7 +133,7 @@ description = "Cross-compile for multiple platforms using Docker"
 run = [
   "mkdir -p bin",
   "echo 'Cross-compiling for multiple platforms using Docker...'",
-  "docker build --build-arg VERSION=\"$VERSION\" --build-arg GIT_COMMIT=\"$GIT_COMMIT\" --build-arg BUILD_TIME=\"$BUILD_TIME\" -f Dockerfile.cross-build -t kodelet-cross-build .",
+  "docker build --build-arg VERSION=\"$VERSION\" --build-arg GIT_COMMIT=\"$GIT_COMMIT\" --build-arg BUILD_TIME=\"$BUILD_TIME\" --build-arg GITHUB_TOKEN=\"${GITHUB_TOKEN:-$(gh auth token 2>/dev/null || true)}\" -f Dockerfile.cross-build -t kodelet-cross-build .",
   "echo 'Extracting binaries from Docker container...'",
   "docker run --rm -v $(pwd)/bin:/output kodelet-cross-build cp /bin/kodelet-linux-amd64 /bin/kodelet-linux-arm64 /bin/kodelet-darwin-amd64 /bin/kodelet-darwin-arm64 /bin/kodelet-windows-amd64.exe /output/",
   "echo 'Cross-build complete. Binaries available in ./bin/'",

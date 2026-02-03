@@ -3,6 +3,7 @@ FROM debian:bookworm-slim AS cross-builder
 ARG VERSION=dev
 ARG GIT_COMMIT=unknown
 ARG BUILD_TIME=unknown
+ARG GITHUB_TOKEN
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends curl git ca-certificates && \
@@ -11,6 +12,7 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 ENV PATH="/root/.local/bin:${PATH}"
+ENV GITHUB_TOKEN=${GITHUB_TOKEN}
 WORKDIR /app
 
 COPY VERSION.txt mise.toml go.mod go.sum ./
