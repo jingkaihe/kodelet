@@ -17,14 +17,16 @@ type Trigger struct {
 	Manager        HookManager
 	ConversationID string
 	IsSubAgent     bool
+	RecipeName     string // Active recipe name, empty if none
 }
 
 // NewTrigger creates a new hook trigger with the given parameters.
-func NewTrigger(manager HookManager, conversationID string, isSubAgent bool) Trigger {
+func NewTrigger(manager HookManager, conversationID string, isSubAgent bool, recipeName string) Trigger {
 	return Trigger{
 		Manager:        manager,
 		ConversationID: conversationID,
 		IsSubAgent:     isSubAgent,
+		RecipeName:     recipeName,
 	}
 }
 
@@ -53,10 +55,11 @@ func (t Trigger) getCwd(ctx context.Context) string {
 func (t Trigger) TriggerUserMessageSend(ctx context.Context, thread llmtypes.Thread, message string, recipeHooks map[string]llmtypes.HookConfig) (bool, string) {
 	payload := UserMessageSendPayload{
 		BasePayload: BasePayload{
-			Event:     HookTypeUserMessageSend,
-			ConvID:    t.ConversationID,
-			CWD:       t.getCwd(ctx),
-			InvokedBy: t.invokedBy(),
+			Event:      HookTypeUserMessageSend,
+			ConvID:     t.ConversationID,
+			CWD:        t.getCwd(ctx),
+			InvokedBy:  t.invokedBy(),
+			RecipeName: t.RecipeName,
 		},
 		Message: message,
 	}
@@ -93,10 +96,11 @@ func (t Trigger) TriggerUserMessageSend(ctx context.Context, thread llmtypes.Thr
 func (t Trigger) TriggerBeforeToolCall(ctx context.Context, thread llmtypes.Thread, toolName, toolInput, toolUserID string, recipeHooks map[string]llmtypes.HookConfig) (bool, string, string) {
 	payload := BeforeToolCallPayload{
 		BasePayload: BasePayload{
-			Event:     HookTypeBeforeToolCall,
-			ConvID:    t.ConversationID,
-			CWD:       t.getCwd(ctx),
-			InvokedBy: t.invokedBy(),
+			Event:      HookTypeBeforeToolCall,
+			ConvID:     t.ConversationID,
+			CWD:        t.getCwd(ctx),
+			InvokedBy:  t.invokedBy(),
+			RecipeName: t.RecipeName,
 		},
 		ToolName:   toolName,
 		ToolInput:  json.RawMessage(toolInput),
@@ -147,10 +151,11 @@ func (t Trigger) TriggerBeforeToolCall(ctx context.Context, thread llmtypes.Thre
 func (t Trigger) TriggerAfterToolCall(ctx context.Context, thread llmtypes.Thread, toolName, toolInput, toolUserID string, toolOutput tooltypes.StructuredToolResult, recipeHooks map[string]llmtypes.HookConfig) *tooltypes.StructuredToolResult {
 	payload := AfterToolCallPayload{
 		BasePayload: BasePayload{
-			Event:     HookTypeAfterToolCall,
-			ConvID:    t.ConversationID,
-			CWD:       t.getCwd(ctx),
-			InvokedBy: t.invokedBy(),
+			Event:      HookTypeAfterToolCall,
+			ConvID:     t.ConversationID,
+			CWD:        t.getCwd(ctx),
+			InvokedBy:  t.invokedBy(),
+			RecipeName: t.RecipeName,
 		},
 		ToolName:   toolName,
 		ToolInput:  json.RawMessage(toolInput),
@@ -192,10 +197,11 @@ func (t Trigger) TriggerAfterToolCall(ctx context.Context, thread llmtypes.Threa
 func (t Trigger) TriggerAgentStop(ctx context.Context, thread llmtypes.Thread, messages []llmtypes.Message, recipeHooks map[string]llmtypes.HookConfig) []string {
 	payload := AgentStopPayload{
 		BasePayload: BasePayload{
-			Event:     HookTypeAgentStop,
-			ConvID:    t.ConversationID,
-			CWD:       t.getCwd(ctx),
-			InvokedBy: t.invokedBy(),
+			Event:      HookTypeAgentStop,
+			ConvID:     t.ConversationID,
+			CWD:        t.getCwd(ctx),
+			InvokedBy:  t.invokedBy(),
+			RecipeName: t.RecipeName,
 		},
 		Messages: messages,
 	}
@@ -233,10 +239,11 @@ func (t Trigger) TriggerAgentStop(ctx context.Context, thread llmtypes.Thread, m
 func (t Trigger) TriggerTurnEnd(ctx context.Context, thread llmtypes.Thread, response string, turnNumber int, recipeHooks map[string]llmtypes.HookConfig) {
 	payload := TurnEndPayload{
 		BasePayload: BasePayload{
-			Event:     HookTypeTurnEnd,
-			ConvID:    t.ConversationID,
-			CWD:       t.getCwd(ctx),
-			InvokedBy: t.invokedBy(),
+			Event:      HookTypeTurnEnd,
+			ConvID:     t.ConversationID,
+			CWD:        t.getCwd(ctx),
+			InvokedBy:  t.invokedBy(),
+			RecipeName: t.RecipeName,
 		},
 		Response:   response,
 		TurnNumber: turnNumber,

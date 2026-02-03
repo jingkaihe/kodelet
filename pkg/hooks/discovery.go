@@ -6,36 +6,61 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/jingkaihe/kodelet/pkg/plugins"
 	"github.com/pkg/errors"
 )
 
+// HookDirConfig represents a directory to scan for hooks with optional prefix
+type HookDirConfig struct {
+	Dir    string // Directory path
+	Prefix string // Prefix for hook names (e.g., "org/repo/" for plugins)
+}
+
 // Discovery handles hook discovery from configured directories
 type Discovery struct {
-	hookDirs []string
+	hookDirs []HookDirConfig
 }
 
 // DiscoveryOption is a function that configures a Discovery
 type DiscoveryOption func(*Discovery) error
 
-// WithDefaultDirs initializes with default hook directories
+// WithDefaultDirs initializes with default hook directories including plugin directories.
+// This provides the full precedence order: repo-local standalone > repo-local plugins > global standalone > global plugins
 func WithDefaultDirs() DiscoveryOption {
 	return func(d *Discovery) error {
-		homeDir, err := os.UserHomeDir()
+		discovery, err := plugins.NewDiscovery()
 		if err != nil {
-			return errors.Wrap(err, "failed to get user home directory")
+			return errors.Wrap(err, "failed to create plugins discovery")
 		}
-		d.hookDirs = []string{
-			"./.kodelet/hooks",                          // Repo-local (higher precedence)
-			filepath.Join(homeDir, ".kodelet", "hooks"), // User-global
+
+		pluginHookDirs := discovery.HookDirs()
+		d.hookDirs = make([]HookDirConfig, len(pluginHookDirs))
+		for i, dir := range pluginHookDirs {
+			d.hookDirs[i] = HookDirConfig{
+				Dir:    dir.Dir,
+				Prefix: dir.Prefix,
+			}
 		}
 		return nil
 	}
 }
 
-// WithHookDirs sets custom hook directories
+// WithHookDirs sets custom hook directories (for testing).
+// All directories are treated as standalone (no prefix).
 func WithHookDirs(dirs ...string) DiscoveryOption {
 	return func(d *Discovery) error {
-		d.hookDirs = dirs
+		d.hookDirs = make([]HookDirConfig, len(dirs))
+		for i, dir := range dirs {
+			d.hookDirs[i] = HookDirConfig{Dir: dir, Prefix: ""}
+		}
+		return nil
+	}
+}
+
+// WithHookDirConfigs sets custom hook directories with prefix support (for testing).
+func WithHookDirConfigs(configs ...HookDirConfig) DiscoveryOption {
+	return func(d *Discovery) error {
+		d.hookDirs = configs
 		return nil
 	}
 }
@@ -59,18 +84,20 @@ func NewDiscovery(opts ...DiscoveryOption) (*Discovery, error) {
 	return d, nil
 }
 
-// DiscoverHooks finds all available hooks from configured directories
+// DiscoverHooks finds all available hooks from configured directories.
+// Hooks from plugin directories are prefixed with "org/repo/" format.
+// Hooks are discovered in precedence order, with higher precedence hooks shadowing lower ones.
 func (d *Discovery) DiscoverHooks() (map[HookType][]*Hook, error) {
 	hooks := make(map[HookType][]*Hook)
 	seen := make(map[string]bool) // Track seen hook names to maintain precedence
 
-	for _, dir := range d.hookDirs {
-		entries, err := os.ReadDir(dir)
+	for _, dirConfig := range d.hookDirs {
+		entries, err := os.ReadDir(dirConfig.Dir)
 		if err != nil {
 			if os.IsNotExist(err) {
 				continue // Skip non-existent directories
 			}
-			return nil, errors.Wrapf(err, "failed to read hook directory %s", dir)
+			return nil, errors.Wrapf(err, "failed to read hook directory %s", dirConfig.Dir)
 		}
 
 		for _, entry := range entries {
@@ -83,7 +110,7 @@ func (d *Discovery) DiscoverHooks() (map[HookType][]*Hook, error) {
 				continue
 			}
 
-			hookPath := filepath.Join(dir, entry.Name())
+			hookPath := filepath.Join(dirConfig.Dir, entry.Name())
 
 			// Check if executable
 			info, err := entry.Info()
@@ -94,11 +121,17 @@ func (d *Discovery) DiscoverHooks() (map[HookType][]*Hook, error) {
 				continue // Not executable
 			}
 
+			// Build hook name with prefix (for plugin hooks)
+			hookName := entry.Name()
+			if dirConfig.Prefix != "" {
+				hookName = dirConfig.Prefix + entry.Name()
+			}
+
 			// Skip if already discovered (earlier directories have precedence)
-			if seen[entry.Name()] {
+			if seen[hookName] {
 				continue
 			}
-			seen[entry.Name()] = true
+			seen[hookName] = true
 
 			// Query hook type
 			hookType, err := queryHookType(hookPath)
@@ -107,7 +140,7 @@ func (d *Discovery) DiscoverHooks() (map[HookType][]*Hook, error) {
 			}
 
 			hook := &Hook{
-				Name:     entry.Name(),
+				Name:     hookName,
 				Path:     hookPath,
 				HookType: hookType,
 			}
@@ -132,7 +165,7 @@ func queryHookType(hookPath string) (HookType, error) {
 
 	// Validate hook type
 	switch hookType {
-	case HookTypeBeforeToolCall, HookTypeAfterToolCall, HookTypeUserMessageSend, HookTypeAgentStop:
+	case HookTypeBeforeToolCall, HookTypeAfterToolCall, HookTypeUserMessageSend, HookTypeAgentStop, HookTypeTurnEnd:
 		return hookType, nil
 	default:
 		return "", errors.Errorf("invalid hook type: %s", hookTypeStr)

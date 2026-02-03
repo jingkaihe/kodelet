@@ -1465,11 +1465,15 @@ Agent Lifecycle Hooks allow external scripts to observe and control agent behavi
 
 ### Creating Hooks
 
-Hooks are executable files discovered from two directories:
+Hooks are executable files discovered from four directories (in precedence order):
 
 **Hook Locations:**
-- `./.kodelet/hooks/` - Repository-local (higher precedence)
-- `~/.kodelet/hooks/` - User-global
+- `.kodelet/hooks/` - Repository-local standalone (highest precedence)
+- `.kodelet/plugins/<org@repo>/hooks/` - Repository-local plugin hooks
+- `~/.kodelet/hooks/` - User-global standalone
+- `~/.kodelet/plugins/<org@repo>/hooks/` - User-global plugin hooks (lowest precedence)
+
+Plugin hooks are prefixed with `org/repo/` (e.g., `jingkaihe/hooks/audit-logger`).
 
 **Example Security Hook (Bash):**
 

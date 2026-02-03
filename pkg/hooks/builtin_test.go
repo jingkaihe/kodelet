@@ -178,7 +178,7 @@ func TestTriggerTurnEnd_OnceFlag(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mock := &mockThread{}
-			trigger := NewTrigger(HookManager{hooks: make(map[HookType][]*Hook)}, "test-conv", false)
+			trigger := NewTrigger(HookManager{hooks: make(map[HookType][]*Hook)}, "test-conv", false, "")
 			recipeHooks := map[string]llmtypes.HookConfig{
 				"turn_end": {Handler: "swap_context", Once: tt.once},
 			}
@@ -192,7 +192,7 @@ func TestTriggerTurnEnd_OnceFlag(t *testing.T) {
 
 func TestTriggerTurnEnd_UnknownHandler(t *testing.T) {
 	mock := &mockThread{}
-	trigger := NewTrigger(HookManager{hooks: make(map[HookType][]*Hook)}, "test-conv", false)
+	trigger := NewTrigger(HookManager{hooks: make(map[HookType][]*Hook)}, "test-conv", false, "")
 	recipeHooks := map[string]llmtypes.HookConfig{
 		"turn_end": {Handler: "unknown_handler"},
 	}
@@ -203,7 +203,7 @@ func TestTriggerTurnEnd_UnknownHandler(t *testing.T) {
 }
 
 func TestTriggerMethods_NoHooksConfigured(t *testing.T) {
-	trigger := NewTrigger(HookManager{hooks: make(map[HookType][]*Hook)}, "test-conv", false)
+	trigger := NewTrigger(HookManager{hooks: make(map[HookType][]*Hook)}, "test-conv", false, "")
 	mock := &mockThread{}
 	ctx := context.Background()
 

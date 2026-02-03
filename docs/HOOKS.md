@@ -62,12 +62,22 @@ echo '{"event":"before_tool_call",...}' | ./my_hook run
 
 ## Hook Discovery
 
-Hooks are discovered from two locations (earlier takes precedence):
+Hooks are discovered from four locations (earlier takes precedence):
 
-1. `./.kodelet/hooks/` - Repository-local hooks (higher precedence)
-2. `~/.kodelet/hooks/` - User-global hooks
+1. `.kodelet/hooks/` - Repository-local standalone hooks (highest precedence)
+2. `.kodelet/plugins/<org@repo>/hooks/` - Repository-local plugin hooks
+3. `~/.kodelet/hooks/` - User-global standalone hooks
+4. `~/.kodelet/plugins/<org@repo>/hooks/` - User-global plugin hooks (lowest precedence)
 
 Only executable files are considered. Directories and non-executable files are skipped.
+
+### Plugin-based Hook Naming
+
+Hooks from plugins are prefixed with `org/repo/` to avoid naming collisions:
+- Standalone hook: `audit-logger`
+- Plugin hook: `jingkaihe/hooks/audit-logger`
+
+This naming convention is consistent with skills and recipes from plugins.
 
 ### Disabling Hooks
 
@@ -105,6 +115,7 @@ interface BasePayload {
   conv_id: string;
   cwd: string;
   invoked_by: InvokedBy;
+  recipe_name?: string;  // Present when invoked via a recipe (e.g., "compact", "jingkaihe/recipes/init")
 }
 
 // Conversation message structure
@@ -400,6 +411,40 @@ case "$1" in
 esac
 ```
 
+### Recipe-Aware Hook (Bash)
+
+```bash
+#!/bin/bash
+# Hook that only triggers for a specific recipe
+# Demonstrates recipe-aware hook filtering using the recipe_name field
+
+case "$1" in
+    hook)
+        echo "turn_end"
+        ;;
+    run)
+        payload=$(cat)
+        recipe_name=$(echo "$payload" | jq -r '.recipe_name // ""')
+
+        # Only act for the "intro" recipe
+        if [ "$recipe_name" != "intro" ]; then
+            exit 0
+        fi
+
+        # Extract info from payload
+        turn_number=$(echo "$payload" | jq -r '.turn_number // 0')
+        conv_id=$(echo "$payload" | jq -r '.conv_id // "unknown"')
+
+        # Log to a file
+        echo "[$(date -Iseconds)] Recipe: $recipe_name | Turn: $turn_number | ConvID: $conv_id" >> /tmp/intro-hook.log
+        exit 0
+        ;;
+    *)
+        exit 1
+        ;;
+esac
+```
+
 ## Hook Behavior
 
 ### Error Handling
@@ -454,5 +499,6 @@ kodelet run --no-hooks "your query"
 
 ## Related Documentation
 
-- [ADR 021: Agent Lifecycle Hooks](../adrs/021-agent-lifecycle-hooks.md) - Architecture decision record
+- [ADR 021: Agent Lifecycle Hooks](../adrs/021-agent-lifecycle-hooks.md) - Architecture decision record for core hook system
+- [ADR 029: Plugin Hooks](../adrs/029-plugin-hooks.md) - Architecture decision record for plugin-based hooks
 - [Tools Reference](./tools.md) - Available tools that can be hooked

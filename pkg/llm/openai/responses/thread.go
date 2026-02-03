@@ -102,7 +102,7 @@ func NewThread(config llmtypes.Config) (*Thread, error) {
 		if err != nil {
 			log.WithError(err).Warn("Failed to initialize hook manager, hooks disabled")
 		} else {
-			hookTrigger = hooks.NewTrigger(hookManager, conversationID, config.IsSubAgent)
+			hookTrigger = hooks.NewTrigger(hookManager, conversationID, config.IsSubAgent, config.RecipeName)
 		}
 	}
 

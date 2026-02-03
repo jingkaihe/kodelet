@@ -1,0 +1,34 @@
+#!/bin/bash
+# Hook that only triggers for the "intro" recipe
+# Demonstrates recipe-aware hook filtering
+
+case "$1" in
+    hook)
+        echo "turn_end"
+        ;;
+    run)
+        # Read payload from stdin
+        payload=$(cat)
+        recipe_name=$(echo "$payload" | jq -r '.recipe_name // ""')
+
+        # Only act for the "intro" recipe
+        if [ "$recipe_name" != "intro" ]; then
+            # Not intro recipe - exit silently
+            exit 0
+        fi
+
+        # Extract info from payload
+        turn_number=$(echo "$payload" | jq -r '.turn_number // 0')
+        conv_id=$(echo "$payload" | jq -r '.conv_id // "unknown"')
+
+        # Log to a file (for testing purposes)
+        log_file="/tmp/intro-recipe-hook.log"
+        echo "[$(date -Iseconds)] Recipe: $recipe_name | Turn: $turn_number | ConvID: $conv_id" >> "$log_file"
+
+        # Output success (turn_end hooks don't need to return anything specific)
+        exit 0
+        ;;
+    *)
+        exit 1
+        ;;
+esac
