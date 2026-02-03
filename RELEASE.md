@@ -1,5 +1,38 @@
 # Kodelet
 
+## 0.2.11.beta (2026-02-03)
+
+### Features
+
+**Plugin hooks support**: Hooks can now be distributed via the plugin system alongside skills and recipes:
+
+```bash
+kodelet plugin add user/repo   # Now installs skills, recipes, AND hooks
+kodelet plugin list            # Shows hook counts per plugin
+```
+
+Plugin hooks are discovered from `<plugin>/hooks/` directories and prefixed with `org/repo/` (e.g., `jingkaihe/hooks/audit-logger`).
+
+**Recipe-aware hooks**: All hook payloads now include `recipe_name` field, enabling hooks to filter or behave differently based on the active recipe:
+
+```bash
+# Hook payload now includes:
+{
+  "event": "turn_end",
+  "recipe_name": "code-review",  // Present when invoked via -r flag
+  ...
+}
+```
+
+Hooks can check this field to act only for specific recipes (see `.kodelet/hooks/intro-logger` for an example).
+
+### Internal Changes
+
+- Hook discovery now scans four locations in precedence order: repo-local standalone → repo-local plugins → global standalone → global plugins
+- Added `GetHookByName()` and `AllHooks()` methods to HookManager
+- Condensed AGENTS.md documentation for improved readability
+- Added ADR 029 documenting plugin hooks design
+
 ## 0.2.10.beta (2026-02-03)
 
 ### Breaking Changes
