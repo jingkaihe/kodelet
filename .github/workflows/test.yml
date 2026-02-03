@@ -63,3 +63,5 @@ jobs:
 
       - name: Verify cross compilation
         run: mise run cross-build-docker
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

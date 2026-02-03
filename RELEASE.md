@@ -1,5 +1,14 @@
 # Kodelet
 
+## 0.2.12.beta (2026-02-03)
+
+### Internal Changes
+
+- Simplified Docker cross-build to use mise instead of nvm for consistent toolchain management
+- Reduced Dockerfile complexity by ~60% (from 59 to 25 lines)
+- Added `-s -w` ldflags to strip debug symbols, producing smaller release binaries
+- Removed hardcoded NODE_VERSION/NPM_VERSION build args (now managed by mise.toml)
+
 ## 0.2.11.beta (2026-02-03)
 
 ### Features
