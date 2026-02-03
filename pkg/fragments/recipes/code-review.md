@@ -10,7 +10,7 @@ arguments:
     description: Scope of review - 'staged' for staged changes, 'working' for working directory, 'branch' for branch comparison
     default: "staged"
   focus:
-    description: Optional focus area for the review (e.g., correctness, security, architecture, performance, testing)
+    description: Optional focus area for the review (e.g., correctness, security, architecture, performance, testing, simplification)
 ---
 
 {{/* Template variables: .target .scope .focus */}}
@@ -22,6 +22,7 @@ Perform a comprehensive code review of the changes.
 {{if eq .scope "staged"}}Review the staged changes:
 - Run "git diff --cached" to get the staged changes
 - Run "git diff --cached --stat" to understand the scope of changes{{else if eq .scope "working"}}Review the working directory changes:
+- Run "git status" to see modified and untracked files
 - Run "git diff" to get the uncommitted changes
 - Run "git diff --stat" to understand the scope of changes
 - Run "git diff --cached" to also check staged changes{{else}}Review the branch changes compared to {{.target}}:
@@ -110,7 +111,7 @@ Highlight any particularly good patterns or improvements noticed.
 {{if .focus}}
 ## Focus Area
 
-Focus this review primarily:
+Focus this review primarily on:
 
 {{.focus}}
 
