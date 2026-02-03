@@ -1,5 +1,5 @@
 ---
-name: reviewer
+name: Code Reviewer
 description: Performs a comprehensive code review of changes with focus on quality, security, and best practices
 workflow: true
 arguments:
@@ -12,8 +12,6 @@ arguments:
   focus:
     description: Optional focus area for the review (e.g., correctness, security, architecture, performance, testing, simplification)
 ---
-
-{{/* Template variables: .target .scope .focus */}}
 
 Perform a comprehensive code review of the changes.
 
@@ -109,6 +107,7 @@ Highlight any particularly good patterns or improvements noticed.
 - Focus on the most impactful issues first
 - If no issues are found in a category, you can skip that category
 {{if .focus}}
+
 ## Focus Area
 
 Focus this review primarily on:

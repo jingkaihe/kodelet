@@ -1,5 +1,5 @@
 ---
-name: explorer
+name: Code Explorer
 description: Explores and explains a codebase to help understand how it works
 workflow: true
 arguments:
@@ -9,7 +9,7 @@ arguments:
     description: What to understand (e.g., "authentication flow", "data model", "API structure", "error handling")
 ---
 
-{{/* Template variables: .path .focus */}}
+Explore and explain the codebase.
 
 ## Step 1: Discovery
 
@@ -74,6 +74,6 @@ Non-obvious details or potential pitfalls.
 - Include relevant code snippets
 - Explain the "why" not just the "what"
 
----
+## Focus Area
 
-Explore and explain: **{{.focus}}**
+Focus the exploration on: **{{.focus}}**

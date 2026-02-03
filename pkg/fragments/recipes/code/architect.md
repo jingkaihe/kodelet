@@ -1,5 +1,5 @@
 ---
-name: architect
+name: Code Architect
 description: Analyzes codebase patterns and designs architectural solutions with implementation blueprints
 workflow: true
 arguments:
@@ -9,9 +9,7 @@ arguments:
     description: What to design or improve (e.g., "add caching layer", "refactor authentication", "implement event sourcing")
 ---
 
-{{/* Template variables: .path .focus */}}
-
-Design an architectural solution for: **{{.focus}}**
+Design an architectural solution for the codebase.
 
 ## Phase 1: Pattern and Codebase Analysis
 
@@ -63,3 +61,7 @@ Concrete steps, file changes, and code outlines to execute the decision.
 - Follow existing patterns unless there's compelling reason not to
 - Be specific with file paths, function names, and code snippets
 - Propose incremental changes over big-bang rewrites
+
+## Focus Area
+
+Focus the architectural design on: **{{.focus}}**
