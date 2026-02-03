@@ -1,5 +1,5 @@
 ---
-name: Code Architect
+name: architect
 description: Analyzes codebase patterns and designs architectural solutions with implementation blueprints
 workflow: true
 arguments:

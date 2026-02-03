@@ -1,5 +1,5 @@
 ---
-name: Code Explorer
+name: explorer
 description: Explores and explains a codebase to help understand how it works
 workflow: true
 arguments:

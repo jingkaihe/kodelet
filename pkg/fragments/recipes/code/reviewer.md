@@ -1,5 +1,5 @@
 ---
-name: Code Review
+name: reviewer
 description: Performs a comprehensive code review of changes with focus on quality, security, and best practices
 workflow: true
 arguments:
