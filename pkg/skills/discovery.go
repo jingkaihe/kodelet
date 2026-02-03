@@ -16,7 +16,14 @@ const skillFileName = "SKILL.md"
 
 // Discovery handles skill discovery from configured directories
 type Discovery struct {
-	skillDirs []string
+	skillDirs  []string
+	pluginDirs []pluginDirConfig
+}
+
+// pluginDirConfig represents a plugin directory with its prefix
+type pluginDirConfig struct {
+	dir    string
+	prefix string
 }
 
 // Option is a function that configures a Discovery
@@ -38,11 +45,44 @@ func WithDefaultDirs() Option {
 			return errors.Wrap(err, "failed to get user home directory")
 		}
 		d.skillDirs = []string{
-			"./.kodelet/skills",                          // Repo-local (higher precedence)
-			filepath.Join(homeDir, ".kodelet", "skills"), // User-global
+			"./.kodelet/skills",                          // Repo-local standalone (highest precedence)
+			filepath.Join(homeDir, ".kodelet", "skills"), // User-global standalone
 		}
+
+		d.pluginDirs = []pluginDirConfig{}
+		d.addPluginDirs("./.kodelet/plugins")
+		d.addPluginDirs(filepath.Join(homeDir, ".kodelet", "plugins"))
+
 		return nil
 	}
+}
+
+// addPluginDirs scans a plugins directory and adds all plugin skill directories
+// Supports nested org/repo directory structure
+func (d *Discovery) addPluginDirs(pluginsDir string) {
+	_ = filepath.Walk(pluginsDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || !info.IsDir() {
+			return nil
+		}
+
+		skillsDir := filepath.Join(path, "skills")
+		if _, err := os.Stat(skillsDir); err != nil {
+			return nil
+		}
+
+		relPath, err := filepath.Rel(pluginsDir, path)
+		if err != nil {
+			return nil
+		}
+
+		pluginName := filepath.ToSlash(relPath)
+		d.pluginDirs = append(d.pluginDirs, pluginDirConfig{
+			dir:    skillsDir,
+			prefix: pluginName + "/",
+		})
+
+		return filepath.SkipDir
+	})
 }
 
 // NewDiscovery creates a new skill discovery instance
@@ -69,38 +109,48 @@ func (d *Discovery) DiscoverSkills() (map[string]*Skill, error) {
 	skills := make(map[string]*Skill)
 
 	for _, dir := range d.skillDirs {
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			if os.IsNotExist(err) {
-				continue // Skip non-existent directories
-			}
-			return nil, errors.Wrapf(err, "failed to read skill directory %s", dir)
-		}
+		d.discoverSkillsFromDir(dir, "", skills)
+	}
 
-		for _, entry := range entries {
-			entryPath := filepath.Join(dir, entry.Name())
-
-			// Check if entry is a directory (following symlinks)
-			info, err := os.Stat(entryPath)
-			if err != nil || !info.IsDir() {
-				continue
-			}
-
-			skillPath := filepath.Join(entryPath, skillFileName)
-			skill, err := d.loadSkill(skillPath)
-			if err != nil {
-				continue // Skip invalid skills
-			}
-
-			// Only add if not already present (earlier directories have precedence)
-			if _, exists := skills[skill.Name]; !exists {
-				skill.Directory = entryPath
-				skills[skill.Name] = skill
-			}
-		}
+	for _, pluginDir := range d.pluginDirs {
+		d.discoverSkillsFromDir(pluginDir.dir, pluginDir.prefix, skills)
 	}
 
 	return skills, nil
+}
+
+// discoverSkillsFromDir discovers skills from a directory with optional name prefix
+func (d *Discovery) discoverSkillsFromDir(dir, prefix string, skills map[string]*Skill) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+
+	for _, entry := range entries {
+		entryPath := filepath.Join(dir, entry.Name())
+
+		info, err := os.Stat(entryPath)
+		if err != nil || !info.IsDir() {
+			continue
+		}
+
+		skillPath := filepath.Join(entryPath, skillFileName)
+		skill, err := d.loadSkill(skillPath)
+		if err != nil {
+			continue
+		}
+
+		skillName := skill.Name
+		if prefix != "" {
+			skillName = prefix + skill.Name
+		}
+
+		if _, exists := skills[skillName]; !exists {
+			skill.Name = skillName
+			skill.Directory = entryPath
+			skills[skillName] = skill
+		}
+	}
 }
 
 // GetSkill returns a specific skill by name

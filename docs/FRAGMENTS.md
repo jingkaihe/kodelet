@@ -63,10 +63,10 @@ kodelet recipe show init
 Create a directory for fragments and add your first template:
 
 ```bash
-mkdir -p ./recipes
+mkdir -p ./.kodelet/recipes
 ```
 
-Create `./recipes/commit.md`:
+Create `./.kodelet/recipes/commit.md`:
 ```markdown
 ## Context:
 
@@ -322,10 +322,13 @@ Keep as a regular recipe when:
 
 ## Directory Structure
 
-Fragments are discovered in two locations with precedence order:
+Fragments are discovered from multiple locations with precedence order:
 
-1. **`./recipes/`** - Repository-specific fragments (higher precedence)
-2. **`~/.kodelet/recipes/`** - User-global fragments
+1. **`./.kodelet/recipes/`** - Repository-local standalone recipes (highest precedence)
+2. **`./.kodelet/plugins/<org@repo>/recipes/`** - Repository-local plugin recipes
+3. **`~/.kodelet/recipes/`** - User-global standalone recipes
+4. **`~/.kodelet/plugins/<org@repo>/recipes/`** - User-global plugin recipes
+5. **Built-in recipes** - Embedded in the binary (lowest precedence)
 
 ### File Naming
 
@@ -341,10 +344,39 @@ kodelet run -r my-fragment  # Finds my-fragment.md or my-fragment
 ### Precedence Example
 
 If you have:
-- `./recipes/commit.md`
+- `./.kodelet/recipes/commit.md`
 - `~/.kodelet/recipes/commit.md`
 
-The local repository version (`./recipes/commit.md`) will be used.
+The local repository version (`./.kodelet/recipes/commit.md`) will be used.
+
+### Plugin-based Recipes
+
+Recipes installed via plugins are prefixed with `org/repo/` to avoid naming conflicts:
+- `jingkaihe/recipes/deploy` - Deploy recipe from the `jingkaihe/recipes` plugin
+- `anthropic/tools/analyze` - Analyze recipe from the `anthropic/tools` plugin
+
+Standalone recipes use simple names without prefix:
+- `my-recipe` - Standalone recipe at `.kodelet/recipes/my-recipe.md`
+
+### Managing Recipes with Plugins
+
+Use the unified plugin system to install recipes from GitHub repositories:
+
+```bash
+# Install all skills/recipes from a GitHub repository
+kodelet plugin add orgname/repo
+
+# Install to global directory
+kodelet plugin add orgname/repo -g
+
+# List all installed plugins
+kodelet plugin list
+
+# Remove a plugin
+kodelet plugin remove org/repo
+```
+
+See [docs/SKILLS.md](./SKILLS.md) for more details on the plugin system.
 
 ## Command Line Usage
 
@@ -387,7 +419,7 @@ kodelet run -r commit "Focus on the breaking changes"
 
 ## Example Fragments
 
-### Git Commit Assistant (`./recipes/commit.md`)
+### Git Commit Assistant (`./.kodelet/recipes/commit.md`)
 
 ```markdown
 ## Context:
@@ -406,7 +438,7 @@ Please review the above git status and diff, and create a git commit message tha
 
 Usage: `kodelet run -r commit`
 
-### Personal Introduction (`./recipes/intro.md`)
+### Personal Introduction (`./.kodelet/recipes/intro.md`)
 
 ```markdown
 What is your name?
@@ -419,7 +451,7 @@ Write a short introduction about me.
 
 Usage: `kodelet run -r intro --arg name="Alice Smith" --arg occupation="Software Engineer"`
 
-### Code Review Template (`./recipes/code-review.md`)
+### Code Review Template (`./.kodelet/recipes/code-review.md`)
 
 ```markdown
 ## Code Review Request
@@ -449,7 +481,7 @@ Please review the above changes focusing on:
 
 Usage: `kodelet run -r code-review --arg specific_concerns="Check the error handling in the new functions"`
 
-### Project Analysis (`./recipes/analyze.md`)
+### Project Analysis (`./.kodelet/recipes/analyze.md`)
 
 ```markdown
 ## {{.project_name}} Project Analysis
@@ -633,14 +665,14 @@ For more details on hook types and payloads, see [Agent Lifecycle Hooks](./HOOKS
 
 ```bash
 # Good
-./recipes/git-commit-analyzer.md
-./recipes/code-review-golang.md
-./recipes/deploy-checklist.md
+./.kodelet/recipes/git-commit-analyzer.md
+./.kodelet/recipes/code-review-golang.md
+./.kodelet/recipes/deploy-checklist.md
 
 # Avoid
-./recipes/script.md
-./recipes/temp.md
-./recipes/x.md
+./.kodelet/recipes/script.md
+./.kodelet/recipes/temp.md
+./.kodelet/recipes/x.md
 ```
 
 ### 2. Document Your Fragments
@@ -663,10 +695,10 @@ Keep your fragments in version control:
 
 ```bash
 # Repository-specific fragments
-./recipes/           # Committed with the project
+./.kodelet/recipes/   # Committed with the project
 
 # Global fragments (optional)
-~/.kodelet/recipes/  # Personal collection
+~/.kodelet/recipes/   # Personal collection
 ```
 
 ### 4. Validate Arguments

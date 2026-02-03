@@ -41,6 +41,7 @@ Kodelet is a lightweight CLI tool that helps with software engineering tasks. It
 │   ├── fragments/       # Fragment/recipe template system
 │   │   └── recipes/     # Built-in recipe templates
 │   │       └── github/  # GitHub-specific recipes
+│   ├── plugins/         # Unified plugin system for skills and recipes
 │   ├── skills/          # Agentic skills system (model-invoked capabilities)
 │   ├── github/          # GitHub Actions templates and utilities
 │   │   └── templates/   # GitHub workflow templates
@@ -353,7 +354,8 @@ if err != nil {
 
 Kodelet supports model-invoked skills that package domain expertise into discoverable capabilities:
 
-- **Location**: `.kodelet/skills/<name>/SKILL.md` (repo), `~/.kodelet/skills/<name>/SKILL.md` (global), or `skills/<name>/SKILL.md` (built-in)
+- **Standalone locations**: `.kodelet/skills/<name>/SKILL.md` (repo), `~/.kodelet/skills/<name>/SKILL.md` (global), or `skills/<name>/SKILL.md` (built-in)
+- **Plugin locations**: `.kodelet/plugins/<org@repo>/skills/<name>/SKILL.md` (repo), `~/.kodelet/plugins/<org@repo>/skills/<name>/SKILL.md` (global)
 - **Invocation**: Automatic - model decides when skills are relevant to the task
 - **Configuration**: `skills.enabled` and `skills.allowed` in config
 - **CLI**: `--no-skills` flag to disable skills for a session
@@ -365,6 +367,31 @@ Kodelet supports model-invoked skills that package domain expertise into discove
 Skills differ from fragments/recipes: skills are model-invoked (automatic), while fragments are user-invoked (explicit).
 
 See [docs/SKILLS.md](docs/SKILLS.md) for creating custom skills.
+
+## Unified Plugin System
+
+Kodelet provides a unified plugin system for managing skills and recipes from GitHub repositories:
+
+```bash
+# Install plugins from GitHub
+kodelet plugin add user/repo              # Install to local .kodelet/plugins/
+kodelet plugin add user/repo -g           # Install to global ~/.kodelet/plugins/
+kodelet plugin add user/repo@v1.0.0       # Install specific version/tag
+kodelet plugin add user/repo --force      # Overwrite existing
+
+# List all installed plugins (shows both local and global)
+kodelet plugin list
+
+# Remove plugins
+kodelet plugin remove user/repo           # Remove from local
+kodelet plugin remove user/repo -g        # Remove from global
+```
+
+**Plugin directory naming**: Plugins are stored using `org@repo` format to avoid collisions (e.g., `.kodelet/plugins/jingkaihe@skills/`).
+
+**Plugin-based naming**: Skills/recipes from plugins are prefixed with `org/repo/` (e.g., `jingkaihe/skills/pdf`).
+
+See [ADR 028](adrs/028-unified-plugin-system.md) for design details.
 
 ## Agent Lifecycle Hooks
 
