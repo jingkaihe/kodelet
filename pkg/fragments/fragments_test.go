@@ -364,7 +364,7 @@ Unique content`
 	fragments, err := processor.ListFragmentsWithMetadata()
 	require.NoError(t, err)
 
-	assert.Len(t, fragments, 12) // 11 original + 1 recipe (compact)
+	assert.Len(t, fragments, 10)
 
 	var withMeta, withoutMeta, unique *Fragment
 	for _, f := range fragments {
