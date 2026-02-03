@@ -9,11 +9,14 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/jingkaihe/kodelet/pkg/osutil"
 	"github.com/pkg/errors"
 )
 
-// repoToPluginName converts a GitHub repo path to a plugin name
-// e.g., "jingkaihe/skills" -> "jingkaihe@skills"
+// repoToPluginName converts a GitHub repo path to a plugin name.
+// Expected format: "owner/repo" (e.g., "jingkaihe/skills" -> "jingkaihe@skills").
+// If the input doesn't contain a slash, it returns the input unchanged.
+// Only the first slash is replaced to handle nested paths correctly.
 func repoToPluginName(repo string) string {
 	return strings.Replace(repo, "/", "@", 1)
 }
@@ -146,15 +149,7 @@ func (i *Installer) Install(ctx context.Context, repo string, ref string) (*Inst
 }
 
 func (i *Installer) validateGHCLI() error {
-	if _, err := exec.LookPath("gh"); err != nil {
-		return errors.New("GitHub CLI (gh) is not installed. Please install it first: https://cli.github.com")
-	}
-
-	cmd := exec.Command("gh", "auth", "status")
-	if err := cmd.Run(); err != nil {
-		return errors.New("GitHub CLI (gh) is not authenticated. Please run 'gh auth login' first")
-	}
-	return nil
+	return osutil.ValidateGHCLI()
 }
 
 func (i *Installer) cloneRepo(ctx context.Context, repo, ref string) (string, error) {

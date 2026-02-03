@@ -4,13 +4,13 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"os/signal"
 	"syscall"
 
 	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/osutil"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -199,13 +199,9 @@ func getPRConfigFromFlags(cmd *cobra.Command) *PRConfig {
 }
 
 func isGhCliInstalled() bool {
-	cmd := exec.Command("gh", "--version")
-	err := cmd.Run()
-	return err == nil
+	return osutil.IsGHCLIInstalled()
 }
 
 func isGhAuthenticated() bool {
-	cmd := exec.Command("gh", "auth", "status")
-	err := cmd.Run()
-	return err == nil
+	return osutil.IsGHCLIAuthenticated()
 }

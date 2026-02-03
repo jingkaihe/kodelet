@@ -104,6 +104,12 @@ type RecipeInfo struct {
 	Description string `json:"description,omitempty"`
 }
 
+// pluginEntry associates a plugin with its location (local or global)
+type pluginEntry struct {
+	plugin   plugins.InstalledPlugin
+	location string
+}
+
 var pluginListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all installed plugins",
@@ -144,23 +150,14 @@ Examples:
 			return nil
 		}
 
-		allPlugins := make([]struct {
-			plugin   plugins.InstalledPlugin
-			location string
-		}, 0)
+		allPlugins := make([]pluginEntry, 0)
 
 		for _, p := range localPlugins {
-			allPlugins = append(allPlugins, struct {
-				plugin   plugins.InstalledPlugin
-				location string
-			}{p, "local"})
+			allPlugins = append(allPlugins, pluginEntry{p, "local"})
 		}
 
 		for _, p := range globalPlugins {
-			allPlugins = append(allPlugins, struct {
-				plugin   plugins.InstalledPlugin
-				location string
-			}{p, "global"})
+			allPlugins = append(allPlugins, pluginEntry{p, "global"})
 		}
 
 		sort.Slice(allPlugins, func(i, j int) bool {
@@ -185,11 +182,7 @@ Examples:
 	},
 }
 
-func outputPluginsJSON(discovery *plugins.Discovery, allPlugins []struct {
-	plugin   plugins.InstalledPlugin
-	location string
-},
-) error {
+func outputPluginsJSON(discovery *plugins.Discovery, allPlugins []pluginEntry) error {
 	skills, err := discovery.DiscoverSkills()
 	if err != nil {
 		return errors.Wrap(err, "failed to discover skills")

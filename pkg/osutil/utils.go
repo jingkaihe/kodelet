@@ -83,3 +83,27 @@ func OpenBrowser(url string) error {
 
 	return exec.Command(cmd, args...).Start()
 }
+
+// IsGHCLIInstalled checks if GitHub CLI (gh) is installed
+func IsGHCLIInstalled() bool {
+	_, err := exec.LookPath("gh")
+	return err == nil
+}
+
+// IsGHCLIAuthenticated checks if GitHub CLI (gh) is authenticated
+func IsGHCLIAuthenticated() bool {
+	cmd := exec.Command("gh", "auth", "status")
+	return cmd.Run() == nil
+}
+
+// ValidateGHCLI validates that GitHub CLI is installed and authenticated
+func ValidateGHCLI() error {
+	if !IsGHCLIInstalled() {
+		return errors.New("GitHub CLI (gh) is not installed. Please install it first: https://cli.github.com")
+	}
+
+	if !IsGHCLIAuthenticated() {
+		return errors.New("GitHub CLI (gh) is not authenticated. Please run 'gh auth login' first")
+	}
+	return nil
+}
