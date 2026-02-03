@@ -1,59 +1,25 @@
-FROM golang:1.25.6-bookworm AS cross-builder
+FROM debian:bookworm-slim AS cross-builder
 
-# Add build arguments for version and git commit
 ARG VERSION=dev
 ARG GIT_COMMIT=unknown
 ARG BUILD_TIME=unknown
 
-# Add Node.js and npm version arguments with defaults
-ARG NODE_VERSION=22.17.0
-ARG NPM_VERSION=11.8.0
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends curl git ca-certificates && \
+    curl https://mise.run | sh && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
-# Install curl and setup nvm for exact Node.js/npm versions
-RUN apt-get update && apt-get install -y curl && \
-    curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash && \
-    export NVM_DIR="/root/.nvm" && \
-    [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh" && \
-    nvm install ${NODE_VERSION} && \
-    nvm use ${NODE_VERSION} && \
-    npm install -g npm@${NPM_VERSION} && \
-    nvm alias default ${NODE_VERSION} && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
-
+ENV PATH="/root/.local/bin:${PATH}"
 WORKDIR /app
 
-# Copy go modules and download dependencies
-COPY go.mod go.sum ./
-RUN go mod download
+COPY VERSION.txt mise.toml go.mod go.sum ./
+RUN mise trust && mise exec -- go mod download
 
-# Copy source code
 COPY cmd/ ./cmd/
 COPY pkg/ ./pkg/
-COPY VERSION.txt ./
+RUN VERSION="${VERSION}" GIT_COMMIT="${GIT_COMMIT}" BUILD_TIME="${BUILD_TIME}" \
+    mise exec -- mise run cross-build
 
-# Generate frontend assets first (this is the expensive part)
-RUN bash -c 'export NVM_DIR="/root/.nvm" && \
-    [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh" && \
-    nvm use ${NODE_VERSION} && \
-    go generate ./pkg/webui'
-
-# Cross-compile for multiple platforms
-RUN mkdir -p bin && \
-    VERSION_PKG="github.com/jingkaihe/kodelet/pkg/version" && \
-    LDFLAGS="-X '${VERSION_PKG}.Version=${VERSION}' -X '${VERSION_PKG}.GitCommit=${GIT_COMMIT}' -X '${VERSION_PKG}.BuildTime=${BUILD_TIME}'" && \
-    echo "Building for linux/amd64..." && \
-    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o ./bin/kodelet-linux-amd64 ./cmd/kodelet/ && \
-    echo "Building for linux/arm64..." && \
-    CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="${LDFLAGS}" -o ./bin/kodelet-linux-arm64 ./cmd/kodelet/ && \
-    echo "Building for darwin/amd64..." && \
-    CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o ./bin/kodelet-darwin-amd64 ./cmd/kodelet/ && \
-    echo "Building for darwin/arm64..." && \
-    CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="${LDFLAGS}" -o ./bin/kodelet-darwin-arm64 ./cmd/kodelet/ && \
-    echo "Building for windows/amd64..." && \
-    CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o ./bin/kodelet-windows-amd64.exe ./cmd/kodelet/ && \
-    echo "Cross-build completed successfully!" && \
-    ls -la ./bin/
-
-# Use busybox for final stage to provide basic shell commands
 FROM busybox
 COPY --from=cross-builder /app/bin/ /bin/
