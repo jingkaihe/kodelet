@@ -8,19 +8,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestFeedbackConfigFromFlags tests the feedback configuration flag parsing
-func TestFeedbackConfigFromFlags(t *testing.T) {
+// TestSteerConfigFromFlags tests the steer configuration flag parsing
+func TestSteerConfigFromFlags(t *testing.T) {
 	tests := []struct {
 		name           string
 		args           []string
 		setupMock      func()
-		expectedConfig *FeedbackConfig
+		expectedConfig *SteerConfig
 		expectError    bool
 	}{
 		{
 			name: "conversation-id flag",
 			args: []string{"--conversation-id", "test-conv-id"},
-			expectedConfig: &FeedbackConfig{
+			expectedConfig: &SteerConfig{
 				ConversationID: "test-conv-id",
 				Follow:         false,
 			},
@@ -29,7 +29,7 @@ func TestFeedbackConfigFromFlags(t *testing.T) {
 		{
 			name: "follow flag short form",
 			args: []string{"-f"},
-			expectedConfig: &FeedbackConfig{
+			expectedConfig: &SteerConfig{
 				ConversationID: "mock-recent-id",
 				Follow:         true,
 			},
@@ -38,7 +38,7 @@ func TestFeedbackConfigFromFlags(t *testing.T) {
 		{
 			name: "follow flag long form",
 			args: []string{"--follow"},
-			expectedConfig: &FeedbackConfig{
+			expectedConfig: &SteerConfig{
 				ConversationID: "mock-recent-id",
 				Follow:         true,
 			},
@@ -52,7 +52,7 @@ func TestFeedbackConfigFromFlags(t *testing.T) {
 		{
 			name: "no flags",
 			args: []string{},
-			expectedConfig: &FeedbackConfig{
+			expectedConfig: &SteerConfig{
 				ConversationID: "",
 				Follow:         false,
 			},
@@ -62,16 +62,16 @@ func TestFeedbackConfigFromFlags(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create a mock command with the feedback flags
+			// Create a mock command with the steer flags
 			cmd := &cobra.Command{
 				Use: "test",
 				Run: func(_ *cobra.Command, _ []string) {},
 			}
 
-			// Add the same flags as feedback command
-			feedbackDefaults := NewFeedbackConfig()
-			cmd.Flags().StringVar(&feedbackDefaults.ConversationID, "conversation-id", feedbackDefaults.ConversationID, "ID of the conversation to send feedback to")
-			cmd.Flags().BoolP("follow", "f", feedbackDefaults.Follow, "Send feedback to the most recent conversation")
+			// Add the same flags as steer command
+			steerDefaults := NewSteerConfig()
+			cmd.Flags().StringVar(&steerDefaults.ConversationID, "conversation-id", steerDefaults.ConversationID, "ID of the conversation to steer")
+			cmd.Flags().BoolP("follow", "f", steerDefaults.Follow, "Steer the most recent conversation")
 
 			// Parse the test args
 			err := cmd.ParseFlags(tt.args)
@@ -99,7 +99,7 @@ func TestFeedbackConfigFromFlags(t *testing.T) {
 			}
 
 			// Test the config creation (without the conversation lookup)
-			config := NewFeedbackConfig()
+			config := NewSteerConfig()
 			if conversationID, err := cmd.Flags().GetString("conversation-id"); err == nil {
 				config.ConversationID = conversationID
 			}
@@ -117,17 +117,17 @@ func TestFeedbackConfigFromFlags(t *testing.T) {
 	}
 }
 
-// TestNewFeedbackConfig tests the feedback configuration initialization
-func TestNewFeedbackConfig(t *testing.T) {
-	config := NewFeedbackConfig()
+// TestNewSteerConfig tests the steer configuration initialization
+func TestNewSteerConfig(t *testing.T) {
+	config := NewSteerConfig()
 
 	assert.Equal(t, "", config.ConversationID)
 	assert.False(t, config.Follow)
 }
 
-// TestFeedbackConfigDefaults tests the default feedback configuration values
-func TestFeedbackConfigDefaults(t *testing.T) {
-	defaults := NewFeedbackConfig()
+// TestSteerConfigDefaults tests the default steer configuration values
+func TestSteerConfigDefaults(t *testing.T) {
+	defaults := NewSteerConfig()
 
 	// Test that defaults are properly set
 	assert.Equal(t, "", defaults.ConversationID, "Default conversation ID should be empty")

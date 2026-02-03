@@ -194,7 +194,6 @@ Recipes marked with `workflow: true` can be invoked by the subagent tool, enabli
 - `init` - Bootstrap AGENTS.md for repository
 - `custom-tool` - Generate custom tools
 - `commit` - Generate commit message
-- `ralph` / `ralph-init` - Autonomous feature development
 
 **Workflow recipe example:**
 ```markdown
@@ -658,12 +657,12 @@ kodelet acp                     # Start ACP agent mode (stdin/stdout JSON-RPC)
 
 For detailed protocol documentation, see [docs/ACP.md](https://github.com/jingkaihe/kodelet/blob/main/docs/ACP.md).
 
-### Feedback System
-Send feedback to conversations:
+### Steering System
+Steer autonomous conversations:
 
 ```bash
-kodelet feedback --follow "great job, but please add tests"
-kodelet feedback --conversation-id ID "needs improvement on error handling"
+kodelet steer --follow "great job, but please add tests"
+kodelet steer --conversation-id ID "needs improvement on error handling"
 ```
 
 ### Shell Completion

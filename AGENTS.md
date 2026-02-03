@@ -37,7 +37,7 @@ Kodelet is a lightweight CLI tool that helps with software engineering tasks. It
 │   │   ├── service.go   # Main conversation service
 │   │   ├── factory.go   # Store factory for different backends
 │   │   └── store.go     # Store interface definitions
-│   ├── feedback/        # Feedback system for autonomous conversations
+│   ├── steer/           # Steering system for autonomous conversations
 │   ├── fragments/       # Fragment/recipe template system
 │   │   └── recipes/     # Built-in recipe templates
 │   │       └── github/  # GitHub-specific recipes
@@ -199,9 +199,9 @@ kodelet conversation edit [--editor editor] [--edit-args "args"] ID  # Edit conv
 kodelet run --resume ID "more"         # Continue specific conversation
 kodelet run --follow "continue"        # Continue most recent conversation
 
-# Feedback system
-kodelet feedback --conversation-id ID "message"  # Send feedback to specific conversation
-kodelet feedback --follow "message"             # Send feedback to most recent conversation
+# Steering system
+kodelet steer --conversation-id ID "message"  # Steer a specific conversation
+kodelet steer --follow "message"              # Steer the most recent conversation
 
 # Git integration
 kodelet commit [--no-confirm|--short]  # AI commit messages
@@ -222,12 +222,6 @@ kodelet run --account work "query"     # Use specific account for run
 kodelet pr-respond --pr-url URL                           # Respond to latest @kodelet mention
 kodelet pr-respond --pr-url URL --review-id ID    # Respond to review comment
 kodelet pr-respond --pr-url URL --issue-comment-id ID     # Respond to issue comment
-
-# Ralph - Autonomous development loop (see docs/RALPH.md)
-kodelet ralph                          # Run autonomous feature development loop
-kodelet ralph init                     # Initialize PRD from project analysis
-kodelet ralph --prd features.json      # Use custom PRD file
-kodelet ralph --iterations 50          # Run for more iterations
 
 # Image support
 kodelet run --image path.png "query"   # Single/multiple images

@@ -19,12 +19,12 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/jingkaihe/kodelet/pkg/auth"
-	"github.com/jingkaihe/kodelet/pkg/feedback"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/hooks"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/llm/prompts"
 	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/steer"
 	"github.com/jingkaihe/kodelet/pkg/sysprompt"
 	"github.com/jingkaihe/kodelet/pkg/telemetry"
 	"github.com/jingkaihe/kodelet/pkg/tools"
@@ -569,8 +569,8 @@ func (t *Thread) processMessageExchange(
 	}
 
 	if !t.Config.IsSubAgent {
-		if err := t.processPendingFeedback(ctx, &messageParams, handler); err != nil {
-			return "", false, errors.Wrap(err, "failed to process pending feedback")
+		if err := t.processPendingSteer(ctx, &messageParams, handler); err != nil {
+			return "", false, errors.Wrap(err, "failed to process pending steer")
 		}
 	}
 
@@ -672,37 +672,37 @@ func (t *Thread) processMessageExchange(
 	return finalOutput, toolUseCount > 0, nil
 }
 
-func (t *Thread) processPendingFeedback(ctx context.Context, messageParams *anthropic.MessageNewParams, handler llmtypes.MessageHandler) error {
-	feedbackStore, err := feedback.NewFeedbackStore()
+func (t *Thread) processPendingSteer(ctx context.Context, messageParams *anthropic.MessageNewParams, handler llmtypes.MessageHandler) error {
+	steerStore, err := steer.NewSteerStore()
 	if err != nil {
-		return errors.Wrap(err, "failed to create feedback store")
+		return errors.Wrap(err, "failed to create steer store")
 	}
 
-	pendingFeedback, err := feedbackStore.ReadPendingFeedback(t.ConversationID)
+	pendingSteer, err := steerStore.ReadPendingSteer(t.ConversationID)
 	if err != nil {
-		return errors.Wrap(err, "failed to read pending feedback")
+		return errors.Wrap(err, "failed to read pending steer")
 	}
 
-	if len(pendingFeedback) > 0 {
-		logger.G(ctx).WithField("feedback_count", len(pendingFeedback)).Info("processing pending feedback messages")
+	if len(pendingSteer) > 0 {
+		logger.G(ctx).WithField("steer_count", len(pendingSteer)).Info("processing pending steer messages")
 
-		for i, fbMsg := range pendingFeedback {
-			if fbMsg.Content == "" {
-				logger.G(ctx).WithField("message_index", i).Warn("skipping empty feedback message")
+		for i, steerMsg := range pendingSteer {
+			if steerMsg.Content == "" {
+				logger.G(ctx).WithField("message_index", i).Warn("skipping empty steer message")
 				continue
 			}
 
 			userMessage := anthropic.NewUserMessage(
-				anthropic.NewTextBlock(fbMsg.Content),
+				anthropic.NewTextBlock(steerMsg.Content),
 			)
 			messageParams.Messages = append(messageParams.Messages, userMessage)
-			handler.HandleText(fmt.Sprintf("🗣️ User feedback: %s", fbMsg.Content))
+			handler.HandleText(fmt.Sprintf("🗣️ User steering: %s", steerMsg.Content))
 		}
 
-		if err := feedbackStore.ClearPendingFeedback(t.ConversationID); err != nil {
-			logger.G(ctx).WithError(err).Warn("failed to clear pending feedback, may be processed again")
+		if err := steerStore.ClearPendingSteer(t.ConversationID); err != nil {
+			logger.G(ctx).WithError(err).Warn("failed to clear pending steer, may be processed again")
 		} else {
-			logger.G(ctx).Debug("successfully cleared pending feedback")
+			logger.G(ctx).Debug("successfully cleared pending steer")
 		}
 	}
 

@@ -151,10 +151,9 @@ func main() {
 	rootCmd.AddCommand(copilotLoginCmd)
 	rootCmd.AddCommand(copilotLogoutCmd)
 	rootCmd.AddCommand(serveCmd)
-	rootCmd.AddCommand(feedbackCmd)
+	rootCmd.AddCommand(steerCmd)
 	rootCmd.AddCommand(recipeCmd)
 	rootCmd.AddCommand(profileCmd)
-	rootCmd.AddCommand(ralphCmd)
 
 	// Initialize telemetry with tracing
 	tracingShutdown, err := initTracing(ctx)
@@ -193,9 +192,8 @@ func main() {
 	copilotLoginCmd = withTracing(copilotLoginCmd)
 	copilotLogoutCmd = withTracing(copilotLogoutCmd)
 	serveCmd = withTracing(serveCmd)
-	feedbackCmd = withTracing(feedbackCmd)
+	steerCmd = withTracing(steerCmd)
 	recipeCmd = withTracing(recipeCmd)
-	ralphCmd = withTracing(ralphCmd)
 
 	// Set the root command context to include the tracing context
 	rootCmd.SetContext(ctx)

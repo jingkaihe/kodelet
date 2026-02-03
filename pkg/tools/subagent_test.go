@@ -489,20 +489,6 @@ func TestSubAgentTool_DescriptionWithWorkflowField(t *testing.T) {
 				},
 			},
 		},
-		"ralph": {
-			ID: "ralph",
-			Metadata: fragments.Metadata{
-				Name:        "Ralph",
-				Description: "Autonomous development loop",
-				Workflow:    true,
-				Arguments: map[string]fragments.ArgumentMeta{
-					"prd": {
-						Description: "Path to PRD file",
-						Default:     "prd.json",
-					},
-				},
-			},
-		},
 	}
 
 	tool := NewSubAgentTool(workflows, true)
@@ -517,11 +503,6 @@ func TestSubAgentTool_DescriptionWithWorkflowField(t *testing.T) {
 	assert.Contains(t, desc, "<description>Creates custom tools</description>")
 	assert.Contains(t, desc, `<argument name="global" default="false">Whether to save globally</argument>`)
 	assert.Contains(t, desc, `<argument name="task">Description of what the tool should do</argument>`)
-
-	// Verify ralph workflow
-	assert.Contains(t, desc, `<workflow name="ralph">`)
-	assert.Contains(t, desc, "<description>Autonomous development loop</description>")
-	assert.Contains(t, desc, `<argument name="prd" default="prd.json">Path to PRD file</argument>`)
 }
 
 // Execute tests require integration testing (shell-out via exec.CommandContext)
