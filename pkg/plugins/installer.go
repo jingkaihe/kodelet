@@ -355,8 +355,8 @@ func (r *Remover) Remove(name string) error {
 	return nil
 }
 
-// pluginNameToRepo converts "org@repo" directory format to "org/repo" user-facing format.
-func pluginNameToRepo(pluginName string) string {
+// PluginNameToUserFacing converts "org@repo" directory format to "org/repo" user-facing format.
+func PluginNameToUserFacing(pluginName string) string {
 	return strings.Replace(pluginName, "@", "/", 1)
 }
 
@@ -392,7 +392,7 @@ func (r *Remover) ListPlugins() ([]string, error) {
 
 		if hasSkills || hasRecipes {
 			// Convert org@repo to org/repo for user-facing output
-			plugins = append(plugins, pluginNameToRepo(entry.Name()))
+			plugins = append(plugins, PluginNameToUserFacing(entry.Name()))
 		}
 	}
 

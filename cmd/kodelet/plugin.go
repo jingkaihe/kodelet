@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
@@ -78,6 +79,31 @@ Examples:
 	},
 }
 
+// PluginListOutput represents the JSON output structure for plugin list
+type PluginListOutput struct {
+	Plugins []PluginInfo `json:"plugins"`
+}
+
+// PluginInfo represents a single plugin in the JSON output
+type PluginInfo struct {
+	Name     string       `json:"name"`
+	Location string       `json:"location"`
+	Skills   []SkillInfo  `json:"skills"`
+	Recipes  []RecipeInfo `json:"recipes"`
+}
+
+// SkillInfo represents a skill in the JSON output
+type SkillInfo struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+}
+
+// RecipeInfo represents a recipe in the JSON output
+type RecipeInfo struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+}
+
 var pluginListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all installed plugins",
@@ -87,8 +113,11 @@ Shows both local (.kodelet/plugins/) and global (~/.kodelet/plugins/) plugins.
 
 Examples:
   kodelet plugin list                       # List all plugins
+  kodelet plugin list --json                # Output as JSON with descriptions
 `,
-	RunE: func(_ *cobra.Command, _ []string) error {
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		jsonOutput, _ := cmd.Flags().GetBool("json")
+
 		discovery, err := plugins.NewDiscovery()
 		if err != nil {
 			return err
@@ -105,13 +134,15 @@ Examples:
 		}
 
 		if len(localPlugins) == 0 && len(globalPlugins) == 0 {
+			if jsonOutput {
+				output := PluginListOutput{Plugins: []PluginInfo{}}
+				enc := json.NewEncoder(os.Stdout)
+				enc.SetIndent("", "  ")
+				return enc.Encode(output)
+			}
 			presenter.Info("No plugins installed")
 			return nil
 		}
-
-		tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(tw, "NAME\tLOCATION\tSKILLS\tRECIPES")
-		fmt.Fprintln(tw, "----\t--------\t------\t-------")
 
 		allPlugins := make([]struct {
 			plugin   plugins.InstalledPlugin
@@ -136,27 +167,249 @@ Examples:
 			return allPlugins[i].plugin.Name < allPlugins[j].plugin.Name
 		})
 
+		if jsonOutput {
+			return outputPluginsJSON(discovery, allPlugins)
+		}
+
+		tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		fmt.Fprintln(tw, "NAME\tLOCATION\tSKILLS\tRECIPES")
+		fmt.Fprintln(tw, "----\t--------\t------\t-------")
+
 		for _, entry := range allPlugins {
 			p := entry.plugin
-			skillCount := len(p.Skills)
-			recipeCount := len(p.Recipes)
-
-			skillsStr := fmt.Sprintf("%d", skillCount)
-			if skillCount > 0 && skillCount <= 3 {
-				skillsStr = strings.Join(p.Skills, ", ")
-			}
-
-			recipesStr := fmt.Sprintf("%d", recipeCount)
-			if recipeCount > 0 && recipeCount <= 3 {
-				recipesStr = strings.Join(p.Recipes, ", ")
-			}
-
-			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", p.Name, entry.location, skillsStr, recipesStr)
+			fmt.Fprintf(tw, "%s\t%s\t%d\t%d\n", p.Name, entry.location, len(p.Skills), len(p.Recipes))
 		}
 		tw.Flush()
 
 		return nil
 	},
+}
+
+func outputPluginsJSON(discovery *plugins.Discovery, allPlugins []struct {
+	plugin   plugins.InstalledPlugin
+	location string
+},
+) error {
+	skills, err := discovery.DiscoverSkills()
+	if err != nil {
+		return errors.Wrap(err, "failed to discover skills")
+	}
+
+	recipes, err := discovery.DiscoverRecipes()
+	if err != nil {
+		return errors.Wrap(err, "failed to discover recipes")
+	}
+
+	output := PluginListOutput{Plugins: make([]PluginInfo, 0, len(allPlugins))}
+
+	for _, entry := range allPlugins {
+		p := entry.plugin
+		pluginPrefix := plugins.PluginNameToUserFacing(p.Name) + "/"
+
+		info := PluginInfo{
+			Name:     plugins.PluginNameToUserFacing(p.Name),
+			Location: entry.location,
+			Skills:   make([]SkillInfo, 0, len(p.Skills)),
+			Recipes:  make([]RecipeInfo, 0, len(p.Recipes)),
+		}
+
+		for _, skillName := range p.Skills {
+			fullName := pluginPrefix + skillName
+			skillInfo := SkillInfo{Name: skillName}
+			if skill, ok := skills[fullName]; ok {
+				skillInfo.Description = skill.Description()
+			}
+			info.Skills = append(info.Skills, skillInfo)
+		}
+
+		for _, recipeName := range p.Recipes {
+			fullName := pluginPrefix + recipeName
+			recipeInfo := RecipeInfo{Name: recipeName}
+			if recipe, ok := recipes[fullName]; ok {
+				recipeInfo.Description = recipe.Description()
+			}
+			info.Recipes = append(info.Recipes, recipeInfo)
+		}
+
+		output.Plugins = append(output.Plugins, info)
+	}
+
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(output)
+}
+
+var pluginShowCmd = &cobra.Command{
+	Use:   "show <name>",
+	Short: "Show details of a specific plugin",
+	Long: `Show detailed information about an installed plugin including its skills and recipes.
+
+Examples:
+  kodelet plugin show user/repo            # Show plugin details
+  kodelet plugin show user/repo --json     # Output as JSON
+`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		jsonOutput, _ := cmd.Flags().GetBool("json")
+		name := args[0]
+
+		discovery, err := plugins.NewDiscovery()
+		if err != nil {
+			return err
+		}
+
+		// Search in both local and global
+		var found *plugins.InstalledPlugin
+		var location string
+
+		localPlugins, err := discovery.ListInstalledPlugins(false)
+		if err != nil {
+			return errors.Wrap(err, "failed to list local plugins")
+		}
+
+		globalPlugins, err := discovery.ListInstalledPlugins(true)
+		if err != nil {
+			return errors.Wrap(err, "failed to list global plugins")
+		}
+
+		// Normalize input name (support both org/repo and org@repo)
+		searchName := name
+		if strings.Contains(name, "/") {
+			searchName = strings.Replace(name, "/", "@", 1)
+		}
+
+		for i := range localPlugins {
+			if localPlugins[i].Name == searchName {
+				found = &localPlugins[i]
+				location = "local"
+				break
+			}
+		}
+
+		if found == nil {
+			for i := range globalPlugins {
+				if globalPlugins[i].Name == searchName {
+					found = &globalPlugins[i]
+					location = "global"
+					break
+				}
+			}
+		}
+
+		if found == nil {
+			return errors.Errorf("plugin '%s' not found", name)
+		}
+
+		if jsonOutput {
+			return outputPluginShowJSON(discovery, found, location)
+		}
+
+		return outputPluginShowTable(discovery, found, location)
+	},
+}
+
+func outputPluginShowTable(discovery *plugins.Discovery, p *plugins.InstalledPlugin, location string) error {
+	skills, err := discovery.DiscoverSkills()
+	if err != nil {
+		return errors.Wrap(err, "failed to discover skills")
+	}
+
+	recipes, err := discovery.DiscoverRecipes()
+	if err != nil {
+		return errors.Wrap(err, "failed to discover recipes")
+	}
+
+	pluginPrefix := plugins.PluginNameToUserFacing(p.Name) + "/"
+
+	fmt.Printf("Name:     %s\n", plugins.PluginNameToUserFacing(p.Name))
+	fmt.Printf("Location: %s\n", location)
+	fmt.Printf("Path:     %s\n", p.Path)
+	fmt.Println()
+
+	if len(p.Skills) > 0 {
+		fmt.Printf("Skills (%d):\n", len(p.Skills))
+		for _, skillName := range p.Skills {
+			fullName := pluginPrefix + skillName
+			desc := ""
+			if skill, ok := skills[fullName]; ok {
+				desc = skill.Description()
+			}
+			if desc != "" {
+				// Truncate long descriptions
+				if len(desc) > 60 {
+					desc = desc[:57] + "..."
+				}
+				fmt.Printf("  • %s - %s\n", skillName, desc)
+			} else {
+				fmt.Printf("  • %s\n", skillName)
+			}
+		}
+		fmt.Println()
+	}
+
+	if len(p.Recipes) > 0 {
+		fmt.Printf("Recipes (%d):\n", len(p.Recipes))
+		for _, recipeName := range p.Recipes {
+			fullName := pluginPrefix + recipeName
+			desc := ""
+			if recipe, ok := recipes[fullName]; ok {
+				desc = recipe.Description()
+			}
+			if desc != "" {
+				if len(desc) > 60 {
+					desc = desc[:57] + "..."
+				}
+				fmt.Printf("  • %s - %s\n", recipeName, desc)
+			} else {
+				fmt.Printf("  • %s\n", recipeName)
+			}
+		}
+	}
+
+	return nil
+}
+
+func outputPluginShowJSON(discovery *plugins.Discovery, p *plugins.InstalledPlugin, location string) error {
+	skills, err := discovery.DiscoverSkills()
+	if err != nil {
+		return errors.Wrap(err, "failed to discover skills")
+	}
+
+	recipes, err := discovery.DiscoverRecipes()
+	if err != nil {
+		return errors.Wrap(err, "failed to discover recipes")
+	}
+
+	pluginPrefix := plugins.PluginNameToUserFacing(p.Name) + "/"
+
+	info := PluginInfo{
+		Name:     plugins.PluginNameToUserFacing(p.Name),
+		Location: location,
+		Skills:   make([]SkillInfo, 0, len(p.Skills)),
+		Recipes:  make([]RecipeInfo, 0, len(p.Recipes)),
+	}
+
+	for _, skillName := range p.Skills {
+		fullName := pluginPrefix + skillName
+		skillInfo := SkillInfo{Name: skillName}
+		if skill, ok := skills[fullName]; ok {
+			skillInfo.Description = skill.Description()
+		}
+		info.Skills = append(info.Skills, skillInfo)
+	}
+
+	for _, recipeName := range p.Recipes {
+		fullName := pluginPrefix + recipeName
+		recipeInfo := RecipeInfo{Name: recipeName}
+		if recipe, ok := recipes[fullName]; ok {
+			recipeInfo.Description = recipe.Description()
+		}
+		info.Recipes = append(info.Recipes, recipeInfo)
+	}
+
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(info)
 }
 
 var pluginRemoveCmd = &cobra.Command{
@@ -202,10 +455,15 @@ func init() {
 	pluginAddCmd.Flags().BoolP("global", "g", false, "Install to global directory (~/.kodelet/)")
 	pluginAddCmd.Flags().Bool("force", false, "Overwrite existing plugins")
 
+	pluginListCmd.Flags().Bool("json", false, "Output as JSON with skill/recipe descriptions")
+
+	pluginShowCmd.Flags().Bool("json", false, "Output as JSON with full descriptions")
+
 	pluginRemoveCmd.Flags().BoolP("global", "g", false, "Remove from global directory")
 
 	pluginCmd.AddCommand(pluginAddCmd)
 	pluginCmd.AddCommand(pluginListCmd)
+	pluginCmd.AddCommand(pluginShowCmd)
 	pluginCmd.AddCommand(pluginRemoveCmd)
 
 	rootCmd.AddCommand(pluginCmd)
