@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/plugins"
 	"github.com/pkg/errors"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark-meta"
@@ -66,6 +67,7 @@ type Config struct {
 // Processor handles fragment loading and rendering
 type Processor struct {
 	fragmentDirs     []string
+	pluginDirs       []plugins.PluginDirConfig
 	builtinRecipesFS fs.FS
 }
 
@@ -113,9 +115,14 @@ func WithDefaultDirs() Option {
 			return errors.Wrap(err, "failed to get user home directory")
 		}
 		fp.fragmentDirs = []string{
-			"./recipes", // Repo-specific (higher precedence)
-			filepath.Join(homeDir, ".kodelet/recipes"), // User home directory
+			"./.kodelet/recipes",                          // Repo-local standalone (highest precedence)
+			filepath.Join(homeDir, ".kodelet", "recipes"), // User-global standalone
 		}
+
+		fp.pluginDirs = []plugins.PluginDirConfig{}
+		fp.pluginDirs = append(fp.pluginDirs, plugins.ScanPluginSubdirs("./.kodelet/plugins", "recipes")...)
+		fp.pluginDirs = append(fp.pluginDirs, plugins.ScanPluginSubdirs(filepath.Join(homeDir, ".kodelet", "plugins"), "recipes")...)
+
 		return nil
 	}
 }
@@ -184,6 +191,18 @@ func (fp *Processor) findFragmentFile(fragmentName string) (string, error) {
 			fullPath := filepath.Join(dir, filepath.FromSlash(name))
 			if _, err := os.Stat(fullPath); err == nil {
 				return fullPath, nil
+			}
+		}
+	}
+
+	for _, pluginDir := range fp.pluginDirs {
+		if strings.HasPrefix(fragmentName, pluginDir.Prefix) {
+			relName := strings.TrimPrefix(fragmentName, pluginDir.Prefix)
+			for _, suffix := range []string{".md", ""} {
+				fullPath := filepath.Join(pluginDir.Dir, filepath.FromSlash(relName+suffix))
+				if _, err := os.Stat(fullPath); err == nil {
+					return fullPath, nil
+				}
 			}
 		}
 	}
@@ -584,10 +603,77 @@ func (fp *Processor) ListFragmentsWithMetadata() ([]*Fragment, error) {
 		}, &fragments, seen)
 	}
 
+	for _, pluginDir := range fp.pluginDirs {
+		dirFS := os.DirFS(pluginDir.Dir)
+		fp.processFragmentsFromFSWithPrefix(dirFS, pluginDir.Prefix, func(name string) string {
+			return filepath.Join(pluginDir.Dir, name)
+		}, &fragments, seen)
+	}
+
 	fp.processFragmentsFromFS(fp.builtinRecipesFS, func(name string) string {
 		fragmentName := strings.TrimSuffix(name, ".md")
 		return "builtin:" + fragmentName + ".md"
 	}, &fragments, seen)
 
 	return fragments, nil
+}
+
+// processFragmentsFromFSWithPrefix processes fragments from a filesystem with a name prefix
+func (fp *Processor) processFragmentsFromFSWithPrefix(fragmentsFS fs.FS, prefix string, pathConstructor func(string) string, fragments *[]*Fragment, seen map[string]bool) {
+	fp.walkFragmentsDirWithPrefix(fragmentsFS, ".", prefix, pathConstructor, fragments, seen)
+}
+
+// walkFragmentsDirWithPrefix walks a directory and processes fragments with a name prefix
+func (fp *Processor) walkFragmentsDirWithPrefix(fragmentsFS fs.FS, dir, prefix string, pathConstructor func(string) string, fragments *[]*Fragment, seen map[string]bool) {
+	entries, err := fs.ReadDir(fragmentsFS, dir)
+	if err != nil {
+		return
+	}
+
+	for _, entry := range entries {
+		entryPath := filepath.Join(dir, entry.Name())
+
+		if entry.IsDir() {
+			fp.walkFragmentsDirWithPrefix(fragmentsFS, entryPath, prefix, pathConstructor, fragments, seen)
+			continue
+		}
+
+		content, err := fs.ReadFile(fragmentsFS, entryPath)
+		if err != nil {
+			continue
+		}
+
+		displayPath := pathConstructor(entryPath)
+		if fragment := fp.processFragmentEntryWithPrefix(entryPath, displayPath, prefix, content, seen); fragment != nil {
+			*fragments = append(*fragments, fragment)
+		}
+	}
+}
+
+// processFragmentEntryWithPrefix processes a single fragment entry with a name prefix
+func (fp *Processor) processFragmentEntryWithPrefix(name, path, prefix string, content []byte, seen map[string]bool) *Fragment {
+	fragmentName := strings.TrimSuffix(name, ".md")
+	fragmentName = filepath.ToSlash(fragmentName)
+	fragmentName = prefix + fragmentName
+
+	if seen[fragmentName] {
+		return nil
+	}
+
+	metadata, bodyContent, err := fp.parseFrontmatter(string(content))
+	if err != nil {
+		return nil
+	}
+
+	if metadata.Name == "" {
+		metadata.Name = filepath.Base(fragmentName)
+	}
+
+	seen[fragmentName] = true
+	return &Fragment{
+		ID:       fragmentName,
+		Metadata: metadata,
+		Content:  bodyContent,
+		Path:     path,
+	}
 }
