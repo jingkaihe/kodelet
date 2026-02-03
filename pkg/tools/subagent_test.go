@@ -503,7 +503,6 @@ func TestSubAgentTool_DescriptionWithWorkflowField(t *testing.T) {
 	assert.Contains(t, desc, "<description>Creates custom tools</description>")
 	assert.Contains(t, desc, `<argument name="global" default="false">Whether to save globally</argument>`)
 	assert.Contains(t, desc, `<argument name="task">Description of what the tool should do</argument>`)
-
 }
 
 // Execute tests require integration testing (shell-out via exec.CommandContext)
