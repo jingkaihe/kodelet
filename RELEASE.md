@@ -21,6 +21,7 @@ kodelet steer --conversation-id ID "message"
 - Renamed `pkg/feedback` package to `pkg/steer`
 - Updated all LLM providers (Anthropic, OpenAI, Google) to use new steering terminology
 - Steer files now stored in `~/.kodelet/steer/` instead of `~/.kodelet/feedback/`
+- Removed built-in `code/architect`, `code/explorer`, and `code/reviewer` recipes (now available as skills via `jingkaihe@skills` plugin)
 
 ## 0.2.9.beta (2026-02-03)
 
