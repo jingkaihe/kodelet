@@ -28,7 +28,7 @@ func TestNewOpenAIThread(t *testing.T) {
 
 	// Test with default values
 	config := llm.Config{}
-	thread, err := NewOpenAIThread(config, nil)
+	thread, err := NewOpenAIThread(config)
 	require.NoError(t, err)
 
 	assert.Equal(t, "gpt-4.1", thread.Config.Model)
@@ -41,7 +41,7 @@ func TestNewOpenAIThread(t *testing.T) {
 		MaxTokens:       4096,
 		ReasoningEffort: "high",
 	}
-	thread, err = NewOpenAIThread(config, nil)
+	thread, err = NewOpenAIThread(config)
 	require.NoError(t, err)
 
 	assert.Equal(t, "gpt-4o", thread.Config.Model)
@@ -185,7 +185,7 @@ func TestGetImageMediaType(t *testing.T) {
 func TestProcessImageURL(t *testing.T) {
 	skipIfNoOpenAIAPIKey(t)
 
-	thread, err := NewOpenAIThread(llm.Config{}, nil)
+	thread, err := NewOpenAIThread(llm.Config{})
 	require.NoError(t, err)
 
 	tests := []struct {
@@ -249,7 +249,7 @@ func TestProcessImageURL(t *testing.T) {
 func TestProcessImageDataURL(t *testing.T) {
 	skipIfNoOpenAIAPIKey(t)
 
-	thread, err := NewOpenAIThread(llm.Config{}, nil)
+	thread, err := NewOpenAIThread(llm.Config{})
 	require.NoError(t, err)
 
 	// A minimal valid 1x1 PNG image encoded in base64
@@ -320,7 +320,7 @@ func TestProcessImageDataURL(t *testing.T) {
 func TestProcessImage_DataURLRouting(t *testing.T) {
 	skipIfNoOpenAIAPIKey(t)
 
-	thread, err := NewOpenAIThread(llm.Config{}, nil)
+	thread, err := NewOpenAIThread(llm.Config{})
 	require.NoError(t, err)
 
 	validPNGBase64 := "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
@@ -361,7 +361,7 @@ func TestProcessImage_DataURLRouting(t *testing.T) {
 func TestProcessImageFile(t *testing.T) {
 	skipIfNoOpenAIAPIKey(t)
 
-	thread, err := NewOpenAIThread(llm.Config{}, nil)
+	thread, err := NewOpenAIThread(llm.Config{})
 	require.NoError(t, err)
 
 	// Create temporary test directory
@@ -443,7 +443,7 @@ func TestProcessImageFile(t *testing.T) {
 func TestProcessImage(t *testing.T) {
 	skipIfNoOpenAIAPIKey(t)
 
-	thread, err := NewOpenAIThread(llm.Config{}, nil)
+	thread, err := NewOpenAIThread(llm.Config{})
 	require.NoError(t, err)
 
 	// Create temporary test file
@@ -511,7 +511,7 @@ func TestProcessImage(t *testing.T) {
 func TestAddUserMessageWithImages(t *testing.T) {
 	skipIfNoOpenAIAPIKey(t)
 
-	thread, err := NewOpenAIThread(llm.Config{}, nil)
+	thread, err := NewOpenAIThread(llm.Config{})
 	require.NoError(t, err)
 
 	// Create temporary test files
@@ -623,7 +623,7 @@ func TestAddUserMessageWithImages(t *testing.T) {
 func TestAddUserMessageWithTooManyImages(t *testing.T) {
 	skipIfNoOpenAIAPIKey(t)
 
-	thread, err := NewOpenAIThread(llm.Config{}, nil)
+	thread, err := NewOpenAIThread(llm.Config{})
 	require.NoError(t, err)
 
 	// Create more image paths than the maximum allowed
@@ -732,7 +732,7 @@ func TestShouldAutoCompactOpenAI(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			skipIfNoOpenAIAPIKey(t)
 
-			thread, err := NewOpenAIThread(llm.Config{}, nil)
+			thread, err := NewOpenAIThread(llm.Config{})
 			require.NoError(t, err)
 
 			// Mock the usage stats
@@ -755,7 +755,7 @@ func TestCompactContextIntegrationOpenAI(t *testing.T) {
 		thread, err := NewOpenAIThread(llm.Config{
 			Model:     "gpt-4o-mini", // Use faster/cheaper model for testing
 			MaxTokens: 1000,          // Limit tokens for test
-		}, nil)
+		})
 		require.NoError(t, err)
 
 		// Set up some realistic conversation history
@@ -809,7 +809,7 @@ func TestCompactContextIntegrationOpenAI(t *testing.T) {
 		thread, err := NewOpenAIThread(llm.Config{
 			Model:     "gpt-4o-mini",
 			MaxTokens: 500,
-		}, nil)
+		})
 		require.NoError(t, err)
 
 		// Add some conversation history

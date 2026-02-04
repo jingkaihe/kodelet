@@ -34,19 +34,18 @@ func (m *mockThread) AddUserMessage(_ context.Context, _ string, _ ...string) {}
 func (m *mockThread) SendMessage(_ context.Context, _ string, _ llmtypes.MessageHandler, _ llmtypes.MessageOpt) (string, error) {
 	return "", nil
 }
-func (m *mockThread) GetUsage() llmtypes.Usage                                         { return llmtypes.Usage{} }
-func (m *mockThread) GetConversationID() string                                        { return "" }
-func (m *mockThread) SetConversationID(_ string)                                       {}
-func (m *mockThread) SaveConversation(_ context.Context, _ bool) error                 { return nil }
-func (m *mockThread) IsPersisted() bool                                                { return false }
-func (m *mockThread) EnablePersistence(_ context.Context, _ bool)                      {}
-func (m *mockThread) Provider() string                                                 { return "mock" }
-func (m *mockThread) GetMessages() ([]llmtypes.Message, error)                         { return nil, nil }
-func (m *mockThread) GetConfig() llmtypes.Config                                       { return llmtypes.Config{} }
-func (m *mockThread) NewSubAgent(_ context.Context, _ llmtypes.Config) llmtypes.Thread { return nil }
-func (m *mockThread) AggregateSubagentUsage(_ llmtypes.Usage)                          {}
-func (m *mockThread) SetRecipeHooks(_ map[string]llmtypes.HookConfig)                  {}
-func (m *mockThread) GetRecipeHooks() map[string]llmtypes.HookConfig                   { return nil }
+func (m *mockThread) GetUsage() llmtypes.Usage                         { return llmtypes.Usage{} }
+func (m *mockThread) GetConversationID() string                        { return "" }
+func (m *mockThread) SetConversationID(_ string)                       {}
+func (m *mockThread) SaveConversation(_ context.Context, _ bool) error { return nil }
+func (m *mockThread) IsPersisted() bool                                { return false }
+func (m *mockThread) EnablePersistence(_ context.Context, _ bool)      {}
+func (m *mockThread) Provider() string                                 { return "mock" }
+func (m *mockThread) GetMessages() ([]llmtypes.Message, error)         { return nil, nil }
+func (m *mockThread) GetConfig() llmtypes.Config                       { return llmtypes.Config{} }
+func (m *mockThread) AggregateSubagentUsage(_ llmtypes.Usage)          {}
+func (m *mockThread) SetRecipeHooks(_ map[string]llmtypes.HookConfig)  {}
+func (m *mockThread) GetRecipeHooks() map[string]llmtypes.HookConfig   { return nil }
 
 // nonSwappingThread implements Thread but NOT ContextSwapper
 type nonSwappingThread struct{}
@@ -66,12 +65,9 @@ func (n *nonSwappingThread) EnablePersistence(_ context.Context, _ bool)      {}
 func (n *nonSwappingThread) Provider() string                                 { return "mock" }
 func (n *nonSwappingThread) GetMessages() ([]llmtypes.Message, error)         { return nil, nil }
 func (n *nonSwappingThread) GetConfig() llmtypes.Config                       { return llmtypes.Config{} }
-func (n *nonSwappingThread) NewSubAgent(_ context.Context, _ llmtypes.Config) llmtypes.Thread {
-	return nil
-}
-func (n *nonSwappingThread) AggregateSubagentUsage(_ llmtypes.Usage)         {}
-func (n *nonSwappingThread) SetRecipeHooks(_ map[string]llmtypes.HookConfig) {}
-func (n *nonSwappingThread) GetRecipeHooks() map[string]llmtypes.HookConfig  { return nil }
+func (n *nonSwappingThread) AggregateSubagentUsage(_ llmtypes.Usage)          {}
+func (n *nonSwappingThread) SetRecipeHooks(_ map[string]llmtypes.HookConfig)  {}
+func (n *nonSwappingThread) GetRecipeHooks() map[string]llmtypes.HookConfig   { return nil }
 
 // Verify interface compliance
 var (
@@ -182,7 +178,7 @@ func TestTriggerTurnEnd_OnceFlag(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mock := &mockThread{}
-			trigger := NewTrigger(HookManager{hooks: make(map[HookType][]*Hook)}, "test-conv", false)
+			trigger := NewTrigger(HookManager{hooks: make(map[HookType][]*Hook)}, "test-conv", false, "")
 			recipeHooks := map[string]llmtypes.HookConfig{
 				"turn_end": {Handler: "swap_context", Once: tt.once},
 			}
@@ -196,7 +192,7 @@ func TestTriggerTurnEnd_OnceFlag(t *testing.T) {
 
 func TestTriggerTurnEnd_UnknownHandler(t *testing.T) {
 	mock := &mockThread{}
-	trigger := NewTrigger(HookManager{hooks: make(map[HookType][]*Hook)}, "test-conv", false)
+	trigger := NewTrigger(HookManager{hooks: make(map[HookType][]*Hook)}, "test-conv", false, "")
 	recipeHooks := map[string]llmtypes.HookConfig{
 		"turn_end": {Handler: "unknown_handler"},
 	}
@@ -207,7 +203,7 @@ func TestTriggerTurnEnd_UnknownHandler(t *testing.T) {
 }
 
 func TestTriggerMethods_NoHooksConfigured(t *testing.T) {
-	trigger := NewTrigger(HookManager{hooks: make(map[HookType][]*Hook)}, "test-conv", false)
+	trigger := NewTrigger(HookManager{hooks: make(map[HookType][]*Hook)}, "test-conv", false, "")
 	mock := &mockThread{}
 	ctx := context.Background()
 

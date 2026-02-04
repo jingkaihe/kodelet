@@ -6,52 +6,52 @@ import (
 	"os"
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
-	"github.com/jingkaihe/kodelet/pkg/feedback"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
+	"github.com/jingkaihe/kodelet/pkg/steer"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
 
-type FeedbackConfig struct {
+type SteerConfig struct {
 	ConversationID string
 	Follow         bool
 }
 
-func NewFeedbackConfig() *FeedbackConfig {
-	return &FeedbackConfig{
+func NewSteerConfig() *SteerConfig {
+	return &SteerConfig{
 		ConversationID: "",
 		Follow:         false,
 	}
 }
 
-var feedbackCmd = &cobra.Command{
-	Use:   "feedback [message]",
-	Short: "Send feedback to a running conversation",
-	Long: `Send feedback to a running conversation by conversation ID.
-This allows you to provide input to a conversation that is currently running
+var steerCmd = &cobra.Command{
+	Use:   "steer [message]",
+	Short: "Steer a running conversation",
+	Long: `Steer a running conversation by conversation ID.
+This allows you to provide guidance to a conversation that is currently running
 in autonomous mode via 'kodelet run'.
 
 Example:
-  kodelet feedback --conversation-id 20231201T120000-a1b2c3d4e5f67890 "Please focus on error handling"
-  kodelet feedback --conversation-id 20231201T120000-a1b2c3d4e5f67890 "That approach looks good, continue"
-  kodelet feedback -f "Please focus on error handling"
-  kodelet feedback --follow "That approach looks good, continue"`,
+  kodelet steer --conversation-id 20231201T120000-a1b2c3d4e5f67890 "Please focus on error handling"
+  kodelet steer --conversation-id 20231201T120000-a1b2c3d4e5f67890 "That approach looks good, continue"
+  kodelet steer -f "Please focus on error handling"
+  kodelet steer --follow "That approach looks good, continue"`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx := cmd.Context()
-		config := getFeedbackConfigFromFlags(ctx, cmd)
-		sendFeedbackCmd(ctx, config.ConversationID, args[0], config.Follow)
+		config := getSteerConfigFromFlags(ctx, cmd)
+		sendSteerCmd(ctx, config.ConversationID, args[0], config.Follow)
 	},
 }
 
 func init() {
-	feedbackDefaults := NewFeedbackConfig()
-	feedbackCmd.Flags().StringVar(&feedbackDefaults.ConversationID, "conversation-id", feedbackDefaults.ConversationID, "ID of the conversation to send feedback to")
-	feedbackCmd.Flags().BoolP("follow", "f", feedbackDefaults.Follow, "Send feedback to the most recent conversation")
+	steerDefaults := NewSteerConfig()
+	steerCmd.Flags().StringVar(&steerDefaults.ConversationID, "conversation-id", steerDefaults.ConversationID, "ID of the conversation to steer")
+	steerCmd.Flags().BoolP("follow", "f", steerDefaults.Follow, "Steer the most recent conversation")
 }
 
-func getFeedbackConfigFromFlags(ctx context.Context, cmd *cobra.Command) *FeedbackConfig {
-	config := NewFeedbackConfig()
+func getSteerConfigFromFlags(ctx context.Context, cmd *cobra.Command) *SteerConfig {
+	config := NewSteerConfig()
 
 	if conversationID, err := cmd.Flags().GetString("conversation-id"); err == nil {
 		config.ConversationID = conversationID
@@ -77,19 +77,19 @@ func getFeedbackConfigFromFlags(ctx context.Context, cmd *cobra.Command) *Feedba
 	return config
 }
 
-func sendFeedbackCmd(ctx context.Context, conversationID, message string, isFollow bool) {
+func sendSteerCmd(ctx context.Context, conversationID, message string, isFollow bool) {
 	if conversationID == "" {
 		presenter.Error(errors.New("conversation ID is required"), "Please provide a conversation ID using --conversation-id or use -f to target the most recent conversation")
 		os.Exit(1)
 	}
 
 	if message == "" {
-		presenter.Error(errors.New("message is required"), "Please provide a feedback message")
+		presenter.Error(errors.New("message is required"), "Please provide a steering message")
 		os.Exit(1)
 	}
 
 	if len(message) > 10000 {
-		presenter.Error(errors.New("message too long"), "Feedback message must be less than 10,000 characters")
+		presenter.Error(errors.New("message too long"), "Steering message must be less than 10,000 characters")
 		os.Exit(1)
 	}
 
@@ -112,30 +112,30 @@ func sendFeedbackCmd(ctx context.Context, conversationID, message string, isFoll
 		os.Exit(1)
 	}
 
-	feedbackStore, err := feedback.NewFeedbackStore()
+	steerStore, err := steer.NewSteerStore()
 	if err != nil {
-		presenter.Error(err, "Failed to initialize feedback store")
+		presenter.Error(err, "Failed to initialize steer store")
 		os.Exit(1)
 	}
 
-	if feedbackStore.HasPendingFeedback(conversationID) {
-		presenter.Warning("There is already pending feedback for this conversation. The new message will be queued.")
+	if steerStore.HasPendingSteer(conversationID) {
+		presenter.Warning("There is already pending steering for this conversation. The new message will be queued.")
 	}
 
-	err = feedbackStore.WriteFeedback(conversationID, message)
+	err = steerStore.WriteSteer(conversationID, message)
 	if err != nil {
-		presenter.Error(err, "Failed to write feedback")
+		presenter.Error(err, "Failed to write steering message")
 		os.Exit(1)
 	}
 
 	if isFollow {
-		presenter.Success(fmt.Sprintf("Feedback sent to most recent conversation: %s", conversationID))
+		presenter.Success(fmt.Sprintf("Steering sent to most recent conversation: %s", conversationID))
 	} else {
-		presenter.Success(fmt.Sprintf("Feedback sent to conversation %s", conversationID))
+		presenter.Success(fmt.Sprintf("Steering sent to conversation %s", conversationID))
 	}
 	presenter.Info(fmt.Sprintf("Message: %s", message))
 
-	presenter.Info("The feedback will be processed when the conversation makes its next API call.")
+	presenter.Info("The steering will be processed when the conversation makes its next API call.")
 	presenter.Info("If the conversation is not currently running, start it with:")
 	presenter.Info(fmt.Sprintf("  kodelet run --resume %s \"continue\"", conversationID))
 }

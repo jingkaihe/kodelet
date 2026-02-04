@@ -17,12 +17,12 @@ import (
 
 	"github.com/avast/retry-go/v4"
 	"github.com/jingkaihe/kodelet/pkg/auth"
-	"github.com/jingkaihe/kodelet/pkg/feedback"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/hooks"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/llm/prompts"
 	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/steer"
 	"github.com/jingkaihe/kodelet/pkg/sysprompt"
 	"github.com/jingkaihe/kodelet/pkg/telemetry"
 	"github.com/jingkaihe/kodelet/pkg/tools"
@@ -148,7 +148,7 @@ func (t *Thread) Provider() string {
 }
 
 // NewOpenAIThread creates a new thread with OpenAI's API
-func NewOpenAIThread(config llmtypes.Config, subagentContextFactory llmtypes.SubagentContextFactory) (*Thread, error) {
+func NewOpenAIThread(config llmtypes.Config) (*Thread, error) {
 	// Apply defaults if not provided
 	if config.Model == "" {
 		config.Model = "gpt-4.1" // Default to GPT-4.1
@@ -254,12 +254,12 @@ func NewOpenAIThread(config llmtypes.Config, subagentContextFactory llmtypes.Sub
 		if err != nil {
 			log.WithError(err).Warn("Failed to initialize hook manager, hooks disabled")
 		} else {
-			hookTrigger = hooks.NewTrigger(hookManager, conversationID, config.IsSubAgent)
+			hookTrigger = hooks.NewTrigger(hookManager, conversationID, config.IsSubAgent, config.RecipeName)
 		}
 	}
 
 	// Create the base thread with shared functionality
-	baseThread := base.NewThread(config, conversationID, subagentContextFactory, hookTrigger)
+	baseThread := base.NewThread(config, conversationID, hookTrigger)
 
 	thread := &Thread{
 		Thread:          baseThread,
@@ -466,7 +466,8 @@ OUTER:
 	// Save conversation state after completing the interaction
 	if t.Persisted && t.Store != nil && !opt.NoSaveConversation {
 		saveCtx := context.Background() // use new context to avoid cancellation
-		t.SaveConversation(saveCtx, true)
+		// Skip LLM-based summary generation for subagent runs to avoid unnecessary API calls
+		t.SaveConversation(saveCtx, !t.Config.IsSubAgent)
 	}
 
 	if !t.Config.IsSubAgent {
@@ -516,8 +517,8 @@ func (t *Thread) processMessageExchange(
 	}
 
 	if !t.Config.IsSubAgent {
-		if err := t.processPendingFeedback(ctx, &requestParams, handler); err != nil {
-			return "", false, errors.Wrap(err, "failed to process pending feedback")
+		if err := t.processPendingSteer(ctx, &requestParams, handler); err != nil {
+			return "", false, errors.Wrap(err, "failed to process pending steer")
 		}
 	}
 
@@ -601,8 +602,7 @@ func (t *Thread) processMessageExchange(
 		if blocked {
 			output = tooltypes.NewBlockedToolResult(toolCall.Function.Name, reason)
 		} else {
-			runToolCtx := t.SubagentContextFactory(ctx, t, handler, opt.CompactRatio, opt.DisableAutoCompact)
-			output = tools.RunTool(runToolCtx, t.State, toolCall.Function.Name, toolInput)
+			output = tools.RunTool(ctx, t.State, toolCall.Function.Name, toolInput)
 		}
 
 		// Use CLI rendering for consistent output formatting
@@ -649,38 +649,38 @@ func (t *Thread) processMessageExchange(
 	return finalOutput, true, nil
 }
 
-func (t *Thread) processPendingFeedback(ctx context.Context, requestParams *openai.ChatCompletionRequest, handler llmtypes.MessageHandler) error {
-	feedbackStore, err := feedback.NewFeedbackStore()
+func (t *Thread) processPendingSteer(ctx context.Context, requestParams *openai.ChatCompletionRequest, handler llmtypes.MessageHandler) error {
+	steerStore, err := steer.NewSteerStore()
 	if err != nil {
-		return errors.Wrap(err, "failed to create feedback store")
+		return errors.Wrap(err, "failed to create steer store")
 	}
 
-	pendingFeedback, err := feedbackStore.ReadPendingFeedback(t.ConversationID)
+	pendingSteer, err := steerStore.ReadPendingSteer(t.ConversationID)
 	if err != nil {
-		return errors.Wrap(err, "failed to read pending feedback")
+		return errors.Wrap(err, "failed to read pending steer")
 	}
 
-	if len(pendingFeedback) > 0 {
-		logger.G(ctx).WithField("feedback_count", len(pendingFeedback)).Info("processing pending feedback messages")
+	if len(pendingSteer) > 0 {
+		logger.G(ctx).WithField("steer_count", len(pendingSteer)).Info("processing pending steer messages")
 
-		for i, fbMsg := range pendingFeedback {
-			if fbMsg.Content == "" {
-				logger.G(ctx).WithField("message_index", i).Warn("skipping empty feedback message")
+		for i, steerMsg := range pendingSteer {
+			if steerMsg.Content == "" {
+				logger.G(ctx).WithField("message_index", i).Warn("skipping empty steer message")
 				continue
 			}
 
 			userMessage := openai.ChatCompletionMessage{
 				Role:    openai.ChatMessageRoleUser,
-				Content: fbMsg.Content,
+				Content: steerMsg.Content,
 			}
 			requestParams.Messages = append(requestParams.Messages, userMessage)
-			handler.HandleText(fmt.Sprintf("🗣️ User feedback: %s", fbMsg.Content))
+			handler.HandleText(fmt.Sprintf("🗣️ User steering: %s", steerMsg.Content))
 		}
 
-		if err := feedbackStore.ClearPendingFeedback(t.ConversationID); err != nil {
-			logger.G(ctx).WithError(err).Warn("failed to clear pending feedback, may be processed again")
+		if err := steerStore.ClearPendingSteer(t.ConversationID); err != nil {
+			logger.G(ctx).WithError(err).Warn("failed to clear pending steer, may be processed again")
 		} else {
-			logger.G(ctx).Debug("successfully cleared pending feedback")
+			logger.G(ctx).Debug("successfully cleared pending steer")
 		}
 	}
 
@@ -957,7 +957,7 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 		return errors.Wrap(err, "failed to load compact prompt")
 	}
 
-	summaryThread, err := NewOpenAIThread(t.GetConfig(), nil)
+	summaryThread, err := NewOpenAIThread(t.GetConfig())
 	if err != nil {
 		return errors.Wrap(err, "failed to create summary thread")
 	}
@@ -981,30 +981,9 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 	return t.SwapContext(ctx, handler.CollectedText())
 }
 
-// NewSubAgent creates a new subagent thread that shares the parent's client and configuration.
-func (t *Thread) NewSubAgent(_ context.Context, config llmtypes.Config) llmtypes.Thread {
-	conversationID := convtypes.GenerateID()
-
-	// Create subagent base thread
-	hookTrigger := hooks.NewTrigger(t.HookTrigger.Manager, conversationID, true)
-	baseThread := base.NewThread(config, conversationID, t.SubagentContextFactory, hookTrigger)
-
-	// Create subagent thread reusing the parent's client instead of creating a new one
-	thread := &Thread{
-		Thread:          baseThread,
-		client:          t.client, // Reuse parent's client
-		reasoningEffort: config.ReasoningEffort,
-		customModels:    t.customModels,  // Share custom models configuration
-		customPricing:   t.customPricing, // Share custom pricing configuration
-		useCopilot:      t.useCopilot,    // Share Copilot usage with parent
-	}
-
-	return thread
-}
-
 // ShortSummary generates a concise summary of the conversation using a faster model.
 func (t *Thread) ShortSummary(ctx context.Context) string {
-	summaryThread, err := NewOpenAIThread(t.GetConfig(), nil)
+	summaryThread, err := NewOpenAIThread(t.GetConfig())
 	if err != nil {
 		logger.G(ctx).WithError(err).Error("failed to create summary thread")
 		return "Could not generate summary."

@@ -124,6 +124,9 @@ kodelet run --no-save "temporary query"      # don't save the conversation
 # Output only the final result (suppresses intermediate output and usage stats)
 kodelet run --result-only "what is 2+2"      # outputs just: 4
 
+# Disable all tools (for simple query-response usage)
+kodelet run --no-tools "what is the capital of France?"
+
 # Headless mode for programmatic use
 kodelet run --headless "your query"          # outputs structured JSON stream
 kodelet run --headless --include-history "query"  # include historical data in stream
@@ -769,13 +772,15 @@ profiles:
     model: "claude-sonnet-4-5-20250929"
     weak_model: "claude-3-5-haiku-20241022"
     max_tokens: 16000
+    # Subagent uses OpenAI profile for cross-provider support
+    subagent_args: "--profile openai-subagent"
 
-    # Subagent uses OpenAI for complex reasoning
-    subagent:
-      provider: "openai"
-      model: "o3"
-      reasoning_effort: "high"
-      allowed_tools: ["file_read", "glob_tool", "grep_tool", "thinking"]
+  # Subagent profile for mix-n-match (cross-provider example)
+  openai-subagent:
+    provider: "openai"
+    model: "o3"
+    reasoning_effort: "high"
+    allowed_tools: ["file_read", "glob_tool", "grep_tool", "thinking"]
 
 # Model aliases work across all profiles
 aliases:
@@ -1460,11 +1465,15 @@ Agent Lifecycle Hooks allow external scripts to observe and control agent behavi
 
 ### Creating Hooks
 
-Hooks are executable files discovered from two directories:
+Hooks are executable files discovered from four directories (in precedence order):
 
 **Hook Locations:**
-- `./.kodelet/hooks/` - Repository-local (higher precedence)
-- `~/.kodelet/hooks/` - User-global
+- `.kodelet/hooks/` - Repository-local standalone (highest precedence)
+- `.kodelet/plugins/<org@repo>/hooks/` - Repository-local plugin hooks
+- `~/.kodelet/hooks/` - User-global standalone
+- `~/.kodelet/plugins/<org@repo>/hooks/` - User-global plugin hooks (lowest precedence)
+
+Plugin hooks are prefixed with `org/repo/` (e.g., `jingkaihe/hooks/audit-logger`).
 
 **Example Security Hook (Bash):**
 

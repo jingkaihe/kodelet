@@ -76,3 +76,26 @@ func TestContentWithLineNumberAlignment(t *testing.T) {
 		assert.Equal(t, expectedPrefixes[i], prefix)
 	}
 }
+
+func TestIsGHCLIInstalled(t *testing.T) {
+	// This test verifies the function doesn't panic and returns a boolean.
+	// The actual result depends on whether gh is installed.
+	result := IsGHCLIInstalled()
+	assert.IsType(t, true, result)
+}
+
+func TestIsGHCLIAuthenticated(t *testing.T) {
+	// This test verifies the function doesn't panic and returns a boolean.
+	// The actual result depends on whether gh is authenticated.
+	result := IsGHCLIAuthenticated()
+	assert.IsType(t, true, result)
+}
+
+func TestValidateGHCLI(t *testing.T) {
+	err := ValidateGHCLI()
+	// We can't make strong assertions here since the result
+	// depends on the environment. Just verify error messages are sensible.
+	if err != nil {
+		assert.Contains(t, err.Error(), "GitHub CLI")
+	}
+}

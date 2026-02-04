@@ -112,6 +112,7 @@ func main() {
 	rootCmd.PersistentFlags().String("anthropic-api-access", "auto", "Anthropic API access mode (auto, subscription, api-key)")
 	rootCmd.PersistentFlags().String("profile", "", "Configuration profile to use (overrides config file)")
 	rootCmd.PersistentFlags().Bool("no-skills", false, "Disable agentic skills")
+	rootCmd.PersistentFlags().Bool("no-workflows", false, "Disable subagent workflows")
 	rootCmd.PersistentFlags().StringSlice("context-patterns", []string{"AGENTS.md"}, "Context file patterns to load (e.g. 'AGENTS.md,README.md')")
 
 	viper.BindPFlag("provider", rootCmd.PersistentFlags().Lookup("provider"))
@@ -131,6 +132,7 @@ func main() {
 	viper.BindPFlag("anthropic_api_access", rootCmd.PersistentFlags().Lookup("anthropic-api-access"))
 	viper.BindPFlag("profile", rootCmd.PersistentFlags().Lookup("profile"))
 	viper.BindPFlag("no_skills", rootCmd.PersistentFlags().Lookup("no-skills"))
+	viper.BindPFlag("no_workflows", rootCmd.PersistentFlags().Lookup("no-workflows"))
 	viper.BindPFlag("context.patterns", rootCmd.PersistentFlags().Lookup("context-patterns"))
 
 	rootCmd.AddCommand(runCmd)
@@ -149,10 +151,9 @@ func main() {
 	rootCmd.AddCommand(copilotLoginCmd)
 	rootCmd.AddCommand(copilotLogoutCmd)
 	rootCmd.AddCommand(serveCmd)
-	rootCmd.AddCommand(feedbackCmd)
+	rootCmd.AddCommand(steerCmd)
 	rootCmd.AddCommand(recipeCmd)
 	rootCmd.AddCommand(profileCmd)
-	rootCmd.AddCommand(ralphCmd)
 
 	// Initialize telemetry with tracing
 	tracingShutdown, err := initTracing(ctx)
@@ -191,9 +192,8 @@ func main() {
 	copilotLoginCmd = withTracing(copilotLoginCmd)
 	copilotLogoutCmd = withTracing(copilotLogoutCmd)
 	serveCmd = withTracing(serveCmd)
-	feedbackCmd = withTracing(feedbackCmd)
+	steerCmd = withTracing(steerCmd)
 	recipeCmd = withTracing(recipeCmd)
-	ralphCmd = withTracing(ralphCmd)
 
 	// Set the root command context to include the tracing context
 	rootCmd.SetContext(ctx)

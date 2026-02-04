@@ -54,7 +54,7 @@ func TestGetMediaTypeFromExtension(t *testing.T) {
 }
 
 func TestProcessImageURL(t *testing.T) {
-	thread, err := NewAnthropicThread(llmtypes.Config{}, nil)
+	thread, err := NewAnthropicThread(llmtypes.Config{})
 	require.NoError(t, err)
 
 	tests := []struct {
@@ -83,7 +83,7 @@ func TestProcessImageURL(t *testing.T) {
 }
 
 func TestProcessImageDataURL(t *testing.T) {
-	thread, err := NewAnthropicThread(llmtypes.Config{}, nil)
+	thread, err := NewAnthropicThread(llmtypes.Config{})
 	require.NoError(t, err)
 
 	// A minimal valid 1x1 PNG image encoded in base64
@@ -152,7 +152,7 @@ func TestMimeTypeToAnthropicMediaType(t *testing.T) {
 }
 
 func TestProcessImage_DataURLRouting(t *testing.T) {
-	thread, err := NewAnthropicThread(llmtypes.Config{}, nil)
+	thread, err := NewAnthropicThread(llmtypes.Config{})
 	require.NoError(t, err)
 
 	validPNGBase64 := "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
@@ -181,7 +181,7 @@ func TestProcessImage_DataURLRouting(t *testing.T) {
 }
 
 func TestProcessImageFile(t *testing.T) {
-	thread, err := NewAnthropicThread(llmtypes.Config{}, nil)
+	thread, err := NewAnthropicThread(llmtypes.Config{})
 	require.NoError(t, err)
 
 	// Create a temporary directory for test files
@@ -241,7 +241,7 @@ func TestProcessImageFile(t *testing.T) {
 }
 
 func TestAddUserMessage(t *testing.T) {
-	thread, err := NewAnthropicThread(llmtypes.Config{}, nil)
+	thread, err := NewAnthropicThread(llmtypes.Config{})
 	require.NoError(t, err)
 
 	// Create a temporary directory for test files
@@ -376,7 +376,7 @@ func TestShouldAutoCompact(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			thread, err := NewAnthropicThread(llmtypes.Config{}, nil)
+			thread, err := NewAnthropicThread(llmtypes.Config{})
 			require.NoError(t, err)
 
 			// Mock the usage stats
@@ -399,7 +399,7 @@ func TestCompactContextIntegration(t *testing.T) {
 		thread, err := NewAnthropicThread(llmtypes.Config{
 			Model:     "claude-haiku-4-5-20251001", // Use faster/cheaper model for testing
 			MaxTokens: 1000,                        // Limit tokens for test
-		}, nil)
+		})
 		require.NoError(t, err)
 
 		// Set up some realistic conversation history
@@ -468,7 +468,7 @@ func TestCompactContextIntegration(t *testing.T) {
 		thread, err := NewAnthropicThread(llmtypes.Config{
 			Model:     "claude-haiku-4-5-20251001",
 			MaxTokens: 500,
-		}, nil)
+		})
 		require.NoError(t, err)
 
 		// Add some conversation history
@@ -497,7 +497,7 @@ func TestCompactContextIntegration(t *testing.T) {
 
 func TestAutoCompactTriggerLogic(t *testing.T) {
 	t.Run("auto-compact triggers when ratio exceeded", func(t *testing.T) {
-		thread, err := NewAnthropicThread(llmtypes.Config{}, nil)
+		thread, err := NewAnthropicThread(llmtypes.Config{})
 		require.NoError(t, err)
 
 		// Set up context window to trigger auto-compact
@@ -510,7 +510,7 @@ func TestAutoCompactTriggerLogic(t *testing.T) {
 	})
 
 	t.Run("auto-compact does not trigger when ratio not exceeded", func(t *testing.T) {
-		thread, err := NewAnthropicThread(llmtypes.Config{}, nil)
+		thread, err := NewAnthropicThread(llmtypes.Config{})
 		require.NoError(t, err)
 
 		// Set up context window below auto-compact threshold
@@ -523,7 +523,7 @@ func TestAutoCompactTriggerLogic(t *testing.T) {
 	})
 
 	t.Run("auto-compact disabled when DisableAutoCompact is true", func(t *testing.T) {
-		thread, err := NewAnthropicThread(llmtypes.Config{}, nil)
+		thread, err := NewAnthropicThread(llmtypes.Config{})
 		require.NoError(t, err)
 
 		// Set up context window to trigger auto-compact
@@ -575,7 +575,7 @@ func TestAutoCompactTriggerLogic(t *testing.T) {
 
 		for _, test := range tests {
 			t.Run(test.name, func(t *testing.T) {
-				thread, err := NewAnthropicThread(llmtypes.Config{}, nil)
+				thread, err := NewAnthropicThread(llmtypes.Config{})
 				require.NoError(t, err)
 
 				// Set up context window

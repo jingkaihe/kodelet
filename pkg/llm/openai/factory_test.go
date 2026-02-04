@@ -118,7 +118,7 @@ func TestNewThreadDispatchesToChatCompletions(t *testing.T) {
 		},
 	}
 
-	thread, err := NewThread(config, nil)
+	thread, err := NewThread(config)
 	require.NoError(t, err)
 	require.NotNil(t, thread)
 
@@ -140,7 +140,7 @@ func TestNewThreadDispatchesToResponsesAPI(t *testing.T) {
 		},
 	}
 
-	thread, err := NewThread(config, nil)
+	thread, err := NewThread(config)
 	require.NoError(t, err)
 	require.NotNil(t, thread)
 
@@ -166,7 +166,7 @@ func TestNewThreadDispatchesToResponsesAPIViaEnvVar(t *testing.T) {
 		},
 	}
 
-	thread, err := NewThread(config, nil)
+	thread, err := NewThread(config)
 	require.NoError(t, err)
 	require.NotNil(t, thread)
 

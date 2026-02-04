@@ -38,9 +38,12 @@ type Config struct {
 	Profiles map[string]ProfileConfig `mapstructure:"profiles" json:"profiles,omitempty" yaml:"profiles,omitempty"` // Named configuration profiles
 
 	// Provider-specific configurations
-	OpenAI   *OpenAIConfig           `mapstructure:"openai" json:"openai,omitempty" yaml:"openai,omitempty"`       // OpenAI-specific configuration including compatible providers
-	Google   *GoogleConfig           `mapstructure:"google" json:"google,omitempty" yaml:"google,omitempty"`       // Google GenAI-specific configuration
-	SubAgent *SubAgentConfigSettings `mapstructure:"subagent" json:"subagent,omitempty" yaml:"subagent,omitempty"` // SubAgent configuration for different models/providers
+	OpenAI *OpenAIConfig `mapstructure:"openai" json:"openai,omitempty" yaml:"openai,omitempty"` // OpenAI-specific configuration including compatible providers
+	Google *GoogleConfig `mapstructure:"google" json:"google,omitempty" yaml:"google,omitempty"` // Google GenAI-specific configuration
+
+	// SubagentArgs is CLI arguments to pass when spawning subagents via shell-out
+	// Example: "--profile cheap" or "--use-weak-model"
+	SubagentArgs string `mapstructure:"subagent_args" json:"subagent_args,omitempty" yaml:"subagent_args,omitempty"`
 
 	// Skills configuration
 	Skills *SkillsConfig `mapstructure:"skills" json:"skills,omitempty" yaml:"skills,omitempty"` // Skills configuration for agentic skills system
@@ -49,7 +52,8 @@ type Config struct {
 	Context *ContextConfig `mapstructure:"context" json:"context,omitempty" yaml:"context,omitempty"` // Context configuration for context file discovery
 
 	// Hooks configuration
-	NoHooks bool `mapstructure:"no_hooks" json:"no_hooks" yaml:"no_hooks"` // NoHooks disables agent lifecycle hooks
+	NoHooks    bool   `mapstructure:"no_hooks" json:"no_hooks" yaml:"no_hooks"`          // NoHooks disables agent lifecycle hooks
+	RecipeName string `mapstructure:"recipe_name" json:"recipe_name" yaml:"recipe_name"` // RecipeName is the active recipe/fragment name for hooks
 }
 
 // OpenAIConfig holds OpenAI-specific configuration including support for compatible APIs
@@ -89,7 +93,7 @@ type GoogleConfig struct {
 }
 
 // ProfileConfig holds the configuration values for a named profile
-type ProfileConfig map[string]interface{}
+type ProfileConfig map[string]any
 
 // RetryConfig holds the retry configuration for API calls
 // Note: Anthropic only uses Attempts (relies on SDK retry), OpenAI uses all fields
@@ -106,18 +110,6 @@ var DefaultRetryConfig = RetryConfig{
 	InitialDelay: 1000,  // 1 second
 	MaxDelay:     10000, // 10 seconds
 	BackoffType:  "exponential",
-}
-
-// SubAgentConfigSettings holds the configuration for subagent behavior
-type SubAgentConfigSettings struct {
-	Provider        string        `mapstructure:"provider" json:"provider" yaml:"provider"`                         // Provider for subagent (anthropic, openai, google)
-	Model           string        `mapstructure:"model" json:"model" yaml:"model"`                                  // Model for subagent
-	MaxTokens       int           `mapstructure:"max_tokens" json:"max_tokens" yaml:"max_tokens"`                   // Maximum tokens for subagent
-	ReasoningEffort string        `mapstructure:"reasoning_effort" json:"reasoning_effort" yaml:"reasoning_effort"` // OpenAI specific reasoning effort
-	ThinkingBudget  int           `mapstructure:"thinking_budget" json:"thinking_budget" yaml:"thinking_budget"`    // Anthropic/Google specific thinking budget
-	AllowedTools    []string      `mapstructure:"allowed_tools" json:"allowed_tools" yaml:"allowed_tools"`          // AllowedTools is a list of allowed tools for the subagent (empty means use defaults)
-	OpenAI          *OpenAIConfig `mapstructure:"openai" json:"openai,omitempty" yaml:"openai,omitempty"`           // OpenAI-compatible provider configuration
-	Google          *GoogleConfig `mapstructure:"google" json:"google,omitempty" yaml:"google,omitempty"`           // Google GenAI-specific configuration
 }
 
 // SkillsConfig holds configuration for the agentic skills system.

@@ -1,5 +1,241 @@
 # Kodelet
 
+## 0.2.12.beta (2026-02-03)
+
+### Internal Changes
+
+- Simplified Docker cross-build to use mise instead of nvm for consistent toolchain management
+- Reduced Dockerfile complexity by ~60% (from 59 to 25 lines)
+- Added `-s -w` ldflags to strip debug symbols, producing smaller release binaries
+- Removed hardcoded NODE_VERSION/NPM_VERSION build args (now managed by mise.toml)
+
+## 0.2.11.beta (2026-02-03)
+
+### Features
+
+**Plugin hooks support**: Hooks can now be distributed via the plugin system alongside skills and recipes:
+
+```bash
+kodelet plugin add user/repo   # Now installs skills, recipes, AND hooks
+kodelet plugin list            # Shows hook counts per plugin
+```
+
+Plugin hooks are discovered from `<plugin>/hooks/` directories and prefixed with `org/repo/` (e.g., `jingkaihe/hooks/audit-logger`).
+
+**Recipe-aware hooks**: All hook payloads now include `recipe_name` field, enabling hooks to filter or behave differently based on the active recipe:
+
+```bash
+# Hook payload now includes:
+{
+  "event": "turn_end",
+  "recipe_name": "code-review",  // Present when invoked via -r flag
+  ...
+}
+```
+
+Hooks can check this field to act only for specific recipes (see `.kodelet/hooks/intro-logger` for an example).
+
+### Internal Changes
+
+- Hook discovery now scans four locations in precedence order: repo-local standalone → repo-local plugins → global standalone → global plugins
+- Added `GetHookByName()` and `AllHooks()` methods to HookManager
+- Condensed AGENTS.md documentation for improved readability
+- Added ADR 029 documenting plugin hooks design
+
+## 0.2.10.beta (2026-02-03)
+
+### Breaking Changes
+
+**`kodelet feedback` renamed to `kodelet steer`**: The feedback command has been renamed to better reflect its purpose of steering autonomous conversations:
+
+```bash
+# Old (no longer supported)
+kodelet feedback --follow "focus on error handling"
+kodelet feedback --conversation-id ID "message"
+
+# New
+kodelet steer --follow "focus on error handling"
+kodelet steer --conversation-id ID "message"
+```
+
+`kodelet ralph` command removed: The ralph autonomous development loop has been removed. Use the `jingkaihe/skills` plugin instead.
+Removed built-in `code/architect`, `code/explorer`, and `code/reviewer` recipes (now available as skills via `jingkaihe/skills` plugin).
+
+## 0.2.9.beta (2026-02-03)
+
+### Breaking Changes
+
+**`kodelet skill` commands replaced by `kodelet plugin`**: The `kodelet skill add/list/remove` commands have been removed and replaced with a unified plugin system. Migrate your workflows:
+
+```bash
+# Old (no longer supported)
+kodelet skill add user/repo
+kodelet skill list
+kodelet skill remove my-skill
+
+# New
+kodelet plugin add user/repo
+kodelet plugin list
+kodelet plugin remove user/repo
+```
+
+**Recipe directory moved**: Repo-local recipes have moved from `./recipes/` to `./.kodelet/recipes/`. Move your existing recipes to the new location.
+
+### Features
+
+**Unified plugin system**: A new `kodelet plugin` command manages both skills and recipes from GitHub repositories:
+
+```bash
+kodelet plugin add user/repo              # Install skills and recipes from repo
+kodelet plugin add user/repo@v1.0.0       # Install specific version
+kodelet plugin add user/repo -g           # Install globally
+kodelet plugin list                       # List all installed plugins
+kodelet plugin show user/repo             # Show plugin details
+kodelet plugin remove user/repo           # Remove a plugin
+```
+
+Plugins use `org@repo` directory naming to avoid collisions. Skills and recipes from plugins are prefixed with `org/repo/` (e.g., `jingkaihe/skills/pdf`).
+
+**JSON output for plugin commands**: Use `--json` flag for machine-readable output with skill/recipe descriptions:
+
+```bash
+kodelet plugin list --json
+kodelet plugin show user/repo --json
+```
+
+### Internal Changes
+
+- New `pkg/plugins` package for unified plugin discovery, installation, and removal
+- Skills and recipes now support plugin-based discovery with proper precedence
+- Removed `docs/mcp.md` and `docs/tools.md` documentation files
+
+## 0.2.8.beta (2026-02-03)
+
+### Features
+
+**New code recipes**: Added three new built-in recipes for code analysis and review workflows:
+
+- **`code/architect`** - Analyzes codebase patterns and designs architectural solutions with ADR-style implementation blueprints
+- **`code/explorer`** - Explores and explains how a codebase works, creating guided learning journeys with file references
+- **`code/reviewer`** - Performs comprehensive code reviews with configurable scope (staged, working directory, or branch comparison)
+
+Usage examples:
+```bash
+kodelet run -r code/reviewer --arg scope=staged        # Review staged changes
+kodelet run -r code/explorer --arg focus="auth flow"   # Understand authentication
+kodelet run -r code/architect --arg focus="add caching" # Design a caching layer
+```
+
+## 0.2.7.beta (2026-02-02)
+
+### Features
+
+**ACP session persistence and replay**: ACP sessions are now persisted to JSONL files (`~/.kodelet/acp/sessions/`) and automatically replayed when a session is loaded. This enables IDE integrations to restore conversation history across restarts. Consecutive text chunks are merged during storage for efficient replay.
+
+**Conversation cleanup integration**: Deleting a conversation via `kodelet conversation delete` now also removes the associated ACP session file if it exists.
+
+### Internal Changes
+
+- Improved error handling in ACP session storage
+
+## 0.2.6.beta (2026-02-02)
+
+### Breaking Changes
+
+**Fragment metadata `defaults` replaced by `arguments`**: The `defaults` field in fragment/recipe YAML frontmatter has been replaced with a more expressive `arguments` structure. Existing recipes using `defaults` must be migrated:
+
+```yaml
+# Old format (no longer supported)
+defaults:
+  target: "main"
+  draft: "false"
+
+# New format
+arguments:
+  target:
+    description: Target branch to merge into
+    default: "main"
+  draft:
+    description: Whether to create as a draft pull request
+    default: "false"
+```
+
+### Features
+
+**Subagent workflow support**: The subagent tool can now execute workflows (recipes/fragments) directly, enabling the model to delegate specialized tasks like PR creation or issue resolution:
+
+```json
+{"workflow": "github/pr", "args": {"target": "develop", "draft": "true"}}
+```
+
+The `question` parameter is now optional when a workflow is specified.
+
+**Structured fragment arguments**: Fragment/recipe metadata now supports argument descriptions and defaults in a structured format:
+
+```yaml
+arguments:
+  target:
+    description: Target branch to merge into
+    default: "main"
+```
+
+The `kodelet recipe show` command now displays argument descriptions alongside defaults.
+
+**`--no-workflows` flag**: Added flag to disable subagent workflows for security or debugging:
+
+```bash
+kodelet run --no-workflows "query"    # Disable workflows for run command
+kodelet acp --no-workflows            # Disable workflows for ACP mode
+```
+
+## 0.2.5.beta (2026-02-01)
+
+### Breaking Changes
+
+**Subagent configuration simplified**: The nested `subagent:` configuration block has been replaced with a simpler `subagent_args` string. This is a breaking change - users with existing `subagent:` configs must migrate:
+
+```yaml
+# Old (no longer supported)
+subagent:
+  provider: openai
+  model: gpt-4.1
+  reasoning_effort: high
+
+# New - create a profile and reference it
+profiles:
+  openai-subagent:
+    provider: openai
+    model: gpt-4.1
+    reasoning_effort: high
+
+subagent_args: "--profile openai-subagent"
+```
+
+Common patterns:
+- `subagent_args: "--use-weak-model"` - Use weak model (same provider)
+- `subagent_args: "--profile cheap"` - Use a different profile
+
+### Features
+
+**`--no-tools` flag**: New flag to disable all tools for simple query-response usage:
+
+```bash
+kodelet run --no-tools "What is the capital of France?"
+```
+
+### Internal Changes
+
+- Subagent, image recognition, and web fetch tools now use shell-out pattern via `kodelet run --as-subagent` (ADR 027)
+- Removed `NewSubAgent()` method from all LLM providers
+- Removed separate subagent prompt template (`pkg/sysprompt/templates/subagent.tmpl`) - subagent now uses main system prompt with `isSubagent` feature flag
+- Removed Docker build workflow and Dockerfile
+- CI workflows now use PVC-based tool caching instead of mise cache
+
+## 0.2.4.beta (2026-01-28)
+
+* Remove default and constraint annotations from JSON schema for tool params
+* Updated copyright year: Updated copyright year to 2026 in LICENSE and fixed formatting in README.md.
+
 ## 0.2.3.beta (2026-01-25)
 
 ### Features

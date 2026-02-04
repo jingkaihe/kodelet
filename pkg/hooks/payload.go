@@ -9,10 +9,11 @@ import (
 
 // BasePayload contains fields common to all hook payloads
 type BasePayload struct {
-	Event     HookType  `json:"event"`
-	ConvID    string    `json:"conv_id"`
-	CWD       string    `json:"cwd"`
-	InvokedBy InvokedBy `json:"invoked_by"`
+	Event      HookType  `json:"event"`
+	ConvID     string    `json:"conv_id"`
+	CWD        string    `json:"cwd"`
+	InvokedBy  InvokedBy `json:"invoked_by"`
+	RecipeName string    `json:"recipe_name,omitempty"` // Active recipe name, empty if none
 }
 
 // BeforeToolCallPayload is sent to before_tool_call hooks

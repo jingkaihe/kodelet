@@ -22,7 +22,7 @@ import (
 // 1. KODELET_OPENAI_USE_RESPONSES_API environment variable (if set)
 // 2. config.OpenAI.UseResponsesAPI configuration setting
 // 3. Default: Chat Completions API
-func NewThread(config llmtypes.Config, subagentContextFactory llmtypes.SubagentContextFactory) (llmtypes.Thread, error) {
+func NewThread(config llmtypes.Config) (llmtypes.Thread, error) {
 	log := logger.G(context.Background())
 
 	// Check if we should use the Responses API
@@ -34,12 +34,12 @@ func NewThread(config llmtypes.Config, subagentContextFactory llmtypes.SubagentC
 
 	if useResponsesAPI {
 		log.Debug("using OpenAI Responses API")
-		return responses.NewThread(config, subagentContextFactory)
+		return responses.NewThread(config)
 	}
 
 	// Default to Chat Completions API
 	log.Debug("using OpenAI Chat Completions API")
-	return NewOpenAIThread(config, subagentContextFactory)
+	return NewOpenAIThread(config)
 }
 
 // shouldUseResponsesAPI determines whether to use the Responses API based on configuration.

@@ -40,6 +40,9 @@ kodelet run --no-save "temporary query"
 
 # Output only the final result (no intermediate output or usage stats)
 kodelet run --result-only "what is 2+2"
+
+# Disable all tools (for simple query-response usage)
+kodelet run --no-tools "what is the capital of France?"
 ```
 
 ### Interactive Chat Mode (ACP)
@@ -92,9 +95,10 @@ kodelet run -r custom-tool --arg task="validate JSON" --arg global=true
 **Recipe capabilities:**
 - Variable substitution: `{{.variable_name}}`
 - Bash command execution: `{{bash "git" "branch" "--show-current"}}`
-- Default values: Define fallbacks in recipe frontmatter
+- Argument definitions with descriptions and defaults in frontmatter
 - Tool restrictions: Limit available tools with `allowed_tools`
 - Command restrictions: Limit bash commands with `allowed_commands`
+- Workflow flag: Mark recipes as subagent workflows with `workflow: true`
 
 **Custom recipes:**
 Create templates in `./recipes/` or `~/.kodelet/recipes/`:
@@ -103,8 +107,12 @@ Create templates in `./recipes/` or `~/.kodelet/recipes/`:
 ---
 name: My Custom Recipe
 description: Brief description
-defaults:
-  project: "default-value"
+arguments:
+  project:
+    description: The project name to analyze
+    default: "default-value"
+  focus_area:
+    description: Area to focus the analysis on
 allowed_tools:
   - file_read
   - grep_tool
@@ -178,12 +186,46 @@ skills:
 kodelet run --no-skills "query"
 ```
 
+### Subagent Workflows
+Recipes marked with `workflow: true` can be invoked by the subagent tool, enabling the model to delegate specialized tasks like PR creation or issue resolution.
+
+**Built-in workflows:**
+- `github/pr` - Create pull requests with AI-generated descriptions
+- `init` - Bootstrap AGENTS.md for repository
+- `custom-tool` - Generate custom tools
+- `commit` - Generate commit message
+
+**Workflow recipe example:**
+```markdown
+---
+name: My Workflow
+description: A workflow that can be invoked by the subagent
+workflow: true
+arguments:
+  target:
+    description: Target branch
+    default: "main"
+---
+
+Instructions for the workflow...
+```
+
+**Disabling workflows:**
+```bash
+kodelet run --no-workflows "query"
+kodelet acp --no-workflows
+```
+
 ### Agent Lifecycle Hooks
 Hooks allow external scripts to observe and control agent behavior for audit logging, security controls, and monitoring.
 
-**Hook locations:**
-- `./.kodelet/hooks/` - Repository-local (higher precedence)
-- `~/.kodelet/hooks/` - User-global
+**Hook locations (in precedence order):**
+- `.kodelet/hooks/` - Repository-local standalone (highest precedence)
+- `.kodelet/plugins/<org@repo>/hooks/` - Repository-local plugin hooks
+- `~/.kodelet/hooks/` - User-global standalone
+- `~/.kodelet/plugins/<org@repo>/hooks/` - User-global plugin hooks (lowest precedence)
+
+Plugin hooks are prefixed with `org/repo/` (e.g., `jingkaihe/hooks/audit-logger`).
 
 **Hook protocol:**
 1. `./hook hook` - Discovery: returns the event type string
@@ -199,6 +241,7 @@ interface BasePayload {
   conv_id: string;
   cwd: string;
   invoked_by: InvokedBy;
+  recipe_name?: string;  // Present when invoked via a recipe
 }
 
 // before_tool_call: Can block or modify tool input
@@ -416,17 +459,20 @@ profiles:
     hybrid:
         max_tokens: 16000
         model: sonnet-45
-        subagent:
-            allowed_tools:
-                - file_read
-                - glob_tool
-                - grep_tool
-            model: gpt-5
-            provider: openai
-            reasoning_effort: high
+        subagent_args: "--profile openai-subagent"
         thinking_budget_tokens: 8000
         weak_model: haiku-35
         weak_model_max_tokens: 8192
+    openai-subagent:
+        allowed_tools:
+            - file_read
+            - glob_tool
+            - grep_tool
+        model: gpt-5.2-codex
+        openai:
+            use_responses_api: true
+        provider: openai
+        reasoning_effort: high
     openai:
         max_tokens: 16000
         model: gpt-5
@@ -616,12 +662,12 @@ kodelet acp                     # Start ACP agent mode (stdin/stdout JSON-RPC)
 
 For detailed protocol documentation, see [docs/ACP.md](https://github.com/jingkaihe/kodelet/blob/main/docs/ACP.md).
 
-### Feedback System
-Send feedback to conversations:
+### Steering System
+Steer autonomous conversations:
 
 ```bash
-kodelet feedback --follow "great job, but please add tests"
-kodelet feedback --conversation-id ID "needs improvement on error handling"
+kodelet steer --follow "great job, but please add tests"
+kodelet steer --conversation-id ID "needs improvement on error handling"
 ```
 
 ### Shell Completion

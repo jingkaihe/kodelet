@@ -11,6 +11,7 @@ Kodelet's fragments (also called "recipes") system allows you to create reusable
   - [Bash Command Execution](#bash-command-execution)
   - [Combining Variables and Commands](#combining-variables-and-commands)
   - [Default Values](#default-values)
+- [Subagent Workflows](#subagent-workflows)
 - [Directory Structure](#directory-structure)
 - [Command Line Usage](#command-line-usage)
 - [Example Fragments](#example-fragments)
@@ -36,8 +37,6 @@ Kodelet includes several built-in recipes for common tasks:
 - **`commit`** - Generate git commit messages from staged changes
 - **`compact`** - Compact conversation context into a comprehensive summary (uses recipe hooks)
 - **`custom-tool`** - Create custom tools for Kodelet
-- **`ralph`** - Autonomous feature development loop (used by `kodelet ralph`)
-- **`ralph-init`** - Generate PRD from project analysis (used by `kodelet ralph init`)
 - **`github/pr`** - Generate pull request descriptions
 - **`github/issue-resolve`** - Resolve GitHub issues
 - **`github/pr-respond`** - Respond to pull request comments
@@ -59,10 +58,10 @@ kodelet recipe show init
 Create a directory for fragments and add your first template:
 
 ```bash
-mkdir -p ./recipes
+mkdir -p ./.kodelet/recipes
 ```
 
-Create `./recipes/commit.md`:
+Create `./.kodelet/recipes/commit.md`:
 ```markdown
 ## Context:
 
@@ -154,19 +153,29 @@ Please analyze the {{.project_name}} codebase focusing on {{.focus_area}}.
 
 Kodelet supports two complementary approaches for providing default values to fragment arguments:
 
-#### 1. YAML Metadata Defaults (Recommended for Common Arguments)
+#### 1. YAML Metadata Arguments (Recommended for Common Arguments)
 
-Define default values in the fragment's YAML frontmatter for expected arguments:
+Define arguments with descriptions and default values in the fragment's YAML frontmatter:
 
 ```markdown
 ---
 name: Docker Build Recipe
 description: Build and tag a Docker image
-defaults:
-  tag: latest
-  platform: linux/amd64
-  context: .
-  dockerfile: Dockerfile
+arguments:
+  image:
+    description: The Docker image name (required)
+  tag:
+    description: Image tag to use
+    default: latest
+  platform:
+    description: Target platform for the build
+    default: linux/amd64
+  context:
+    description: Build context directory
+    default: .
+  dockerfile:
+    description: Path to the Dockerfile
+    default: Dockerfile
 ---
 
 Building Docker image:
@@ -186,9 +195,9 @@ kodelet run -r docker-build --arg image=myapp
 kodelet run -r docker-build --arg image=myapp --arg tag=v1.2.3 --arg platform=linux/arm64
 ```
 
-**When to use YAML defaults:**
+**When to use YAML arguments:**
 - For expected arguments that users commonly customize
-- To make your fragment's interface self-documenting
+- To make your fragment's interface self-documenting with descriptions
 - When you want defaults to be discoverable via `kodelet recipe show`
 
 #### 2. Template `default` Function (For Optional Values)
@@ -223,9 +232,13 @@ Combine both approaches for maximum flexibility:
 ---
 name: Deployment Recipe
 description: Deploy application with sensible defaults
-defaults:
-  branch: main
-  env: development
+arguments:
+  branch:
+    description: Branch to deploy
+    default: main
+  env:
+    description: Target environment
+    default: development
 ---
 
 Deploying {{.branch}} to {{.env}}
@@ -238,16 +251,79 @@ Notifications enabled: {{.notify}}
 ```
 
 This gives you:
-- **YAML defaults** for expected arguments (branch, env)
+- **YAML arguments** for expected arguments with descriptions (branch, env)
 - **Template defaults** for truly optional fields (message, build_args, notify)
 - **Clean, self-documenting** fragment interface
 
+### Subagent Workflows
+
+Recipes can be marked as **workflows**, which allows them to be invoked by the subagent tool. This enables the model to delegate specialized tasks like PR creation, issue resolution, or autonomous development loops.
+
+#### Marking a Recipe as a Workflow
+
+Add `workflow: true` to the recipe's YAML frontmatter:
+
+```markdown
+---
+name: My Custom Workflow
+description: A workflow that can be delegated to a subagent
+workflow: true
+arguments:
+  target:
+    description: Target branch to operate on
+    default: main
+  mode:
+    description: Operation mode (fast or thorough)
+    default: thorough
+---
+
+Instructions for the workflow...
+```
+
+#### How Workflows Work
+
+When workflows are enabled, the subagent tool's description includes available workflows. The model can then invoke workflows like:
+
+```json
+{"workflow": "github/pr", "args": {"target": "develop", "draft": "true"}}
+```
+
+The `question` parameter becomes optional when a workflow is specified - the workflow's predefined instructions are used instead.
+
+#### Disabling Workflows
+
+You can disable workflow support for security or debugging:
+
+```bash
+# Disable workflows for run command
+kodelet run --no-workflows "query"
+
+# Disable workflows for ACP mode
+kodelet acp --no-workflows
+```
+
+#### When to Create a Workflow
+
+Create a workflow when:
+- The task is self-contained and doesn't require back-and-forth with the user
+- The task has well-defined inputs and outputs
+- You want the model to be able to delegate this task autonomously
+- Examples: PR creation, code generation, documentation generation
+
+Keep as a regular recipe when:
+- The task requires user interaction or confirmation
+- The task is exploratory and benefits from user guidance
+- You only want explicit user invocation via `-r` flag
+
 ## Directory Structure
 
-Fragments are discovered in two locations with precedence order:
+Fragments are discovered from multiple locations with precedence order:
 
-1. **`./recipes/`** - Repository-specific fragments (higher precedence)
-2. **`~/.kodelet/recipes/`** - User-global fragments
+1. **`./.kodelet/recipes/`** - Repository-local standalone recipes (highest precedence)
+2. **`./.kodelet/plugins/<org@repo>/recipes/`** - Repository-local plugin recipes
+3. **`~/.kodelet/recipes/`** - User-global standalone recipes
+4. **`~/.kodelet/plugins/<org@repo>/recipes/`** - User-global plugin recipes
+5. **Built-in recipes** - Embedded in the binary (lowest precedence)
 
 ### File Naming
 
@@ -263,10 +339,39 @@ kodelet run -r my-fragment  # Finds my-fragment.md or my-fragment
 ### Precedence Example
 
 If you have:
-- `./recipes/commit.md`
+- `./.kodelet/recipes/commit.md`
 - `~/.kodelet/recipes/commit.md`
 
-The local repository version (`./recipes/commit.md`) will be used.
+The local repository version (`./.kodelet/recipes/commit.md`) will be used.
+
+### Plugin-based Recipes
+
+Recipes installed via plugins are prefixed with `org/repo/` to avoid naming conflicts:
+- `jingkaihe/recipes/deploy` - Deploy recipe from the `jingkaihe/recipes` plugin
+- `anthropic/tools/analyze` - Analyze recipe from the `anthropic/tools` plugin
+
+Standalone recipes use simple names without prefix:
+- `my-recipe` - Standalone recipe at `.kodelet/recipes/my-recipe.md`
+
+### Managing Recipes with Plugins
+
+Use the unified plugin system to install recipes from GitHub repositories:
+
+```bash
+# Install all skills/recipes from a GitHub repository
+kodelet plugin add orgname/repo
+
+# Install to global directory
+kodelet plugin add orgname/repo -g
+
+# List all installed plugins
+kodelet plugin list
+
+# Remove a plugin
+kodelet plugin remove org/repo
+```
+
+See [docs/SKILLS.md](./SKILLS.md) for more details on the plugin system.
 
 ## Command Line Usage
 
@@ -309,7 +414,7 @@ kodelet run -r commit "Focus on the breaking changes"
 
 ## Example Fragments
 
-### Git Commit Assistant (`./recipes/commit.md`)
+### Git Commit Assistant (`./.kodelet/recipes/commit.md`)
 
 ```markdown
 ## Context:
@@ -328,7 +433,7 @@ Please review the above git status and diff, and create a git commit message tha
 
 Usage: `kodelet run -r commit`
 
-### Personal Introduction (`./recipes/intro.md`)
+### Personal Introduction (`./.kodelet/recipes/intro.md`)
 
 ```markdown
 What is your name?
@@ -341,7 +446,7 @@ Write a short introduction about me.
 
 Usage: `kodelet run -r intro --arg name="Alice Smith" --arg occupation="Software Engineer"`
 
-### Code Review Template (`./recipes/code-review.md`)
+### Code Review Template (`./.kodelet/recipes/code-review.md`)
 
 ```markdown
 ## Code Review Request
@@ -371,7 +476,7 @@ Please review the above changes focusing on:
 
 Usage: `kodelet run -r code-review --arg specific_concerns="Check the error handling in the new functions"`
 
-### Project Analysis (`./recipes/analyze.md`)
+### Project Analysis (`./.kodelet/recipes/analyze.md`)
 
 ```markdown
 ## {{.project_name}} Project Analysis
@@ -555,14 +660,14 @@ For more details on hook types and payloads, see [Agent Lifecycle Hooks](./HOOKS
 
 ```bash
 # Good
-./recipes/git-commit-analyzer.md
-./recipes/code-review-golang.md
-./recipes/deploy-checklist.md
+./.kodelet/recipes/git-commit-analyzer.md
+./.kodelet/recipes/code-review-golang.md
+./.kodelet/recipes/deploy-checklist.md
 
 # Avoid
-./recipes/script.md
-./recipes/temp.md
-./recipes/x.md
+./.kodelet/recipes/script.md
+./.kodelet/recipes/temp.md
+./.kodelet/recipes/x.md
 ```
 
 ### 2. Document Your Fragments
@@ -585,10 +690,10 @@ Keep your fragments in version control:
 
 ```bash
 # Repository-specific fragments
-./recipes/           # Committed with the project
+./.kodelet/recipes/   # Committed with the project
 
 # Global fragments (optional)
-~/.kodelet/recipes/  # Personal collection
+~/.kodelet/recipes/   # Personal collection
 ```
 
 ### 4. Validate Arguments

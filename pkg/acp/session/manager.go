@@ -14,7 +14,6 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/mcp"
 	"github.com/jingkaihe/kodelet/pkg/mcp/codegen"
-	"github.com/jingkaihe/kodelet/pkg/skills"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -126,12 +125,13 @@ func (s *Session) HandlePrompt(ctx context.Context, prompt []acptypes.ContentBlo
 
 // Manager manages ACP sessions
 type Manager struct {
-	id        string // unique manager ID for MCP socket isolation
-	provider  string
-	model     string
-	maxTokens int
-	noSkills  bool
-	noHooks   bool
+	id          string // unique manager ID for MCP socket isolation
+	provider    string
+	model       string
+	maxTokens   int
+	noSkills    bool
+	noWorkflows bool
+	noHooks     bool
 
 	compactRatio       float64
 	disableAutoCompact bool
@@ -146,7 +146,7 @@ type Manager struct {
 }
 
 // NewManager creates a new session manager
-func NewManager(provider, model string, maxTokens int, noSkills, noHooks bool, compactRatio float64, disableAutoCompact bool) *Manager {
+func NewManager(provider, model string, maxTokens int, noSkills, noWorkflows, noHooks bool, compactRatio float64, disableAutoCompact bool) *Manager {
 	ctx := context.Background()
 	store, _ := conversations.GetConversationStore(ctx)
 
@@ -156,6 +156,7 @@ func NewManager(provider, model string, maxTokens int, noSkills, noHooks bool, c
 		model:              model,
 		maxTokens:          maxTokens,
 		noSkills:           noSkills,
+		noWorkflows:        noWorkflows,
 		noHooks:            noHooks,
 		compactRatio:       compactRatio,
 		disableAutoCompact: disableAutoCompact,
@@ -351,8 +352,12 @@ func (m *Manager) NewSession(ctx context.Context, req acptypes.NewSessionRequest
 	stateOpts = append(stateOpts, tools.WithMainTools())
 
 	if !m.noSkills {
-		discoveredSkills, skillsEnabled := skills.Initialize(ctx, llmConfig)
-		stateOpts = append(stateOpts, tools.WithSkillTool(discoveredSkills, skillsEnabled))
+		stateOpts = append(stateOpts, tools.WithSkillTool())
+	}
+
+	// Initialize workflows for subagent (if not disabled)
+	if !m.noWorkflows {
+		stateOpts = append(stateOpts, tools.WithSubAgentTool())
 	}
 
 	if mcpOpts := m.getMCPStateOpts(); mcpOpts != nil {
@@ -411,8 +416,12 @@ func (m *Manager) LoadSession(ctx context.Context, req acptypes.LoadSessionReque
 	stateOpts = append(stateOpts, tools.WithMainTools())
 
 	if !m.noSkills {
-		discoveredSkills, skillsEnabled := skills.Initialize(ctx, llmConfig)
-		stateOpts = append(stateOpts, tools.WithSkillTool(discoveredSkills, skillsEnabled))
+		stateOpts = append(stateOpts, tools.WithSkillTool())
+	}
+
+	// Initialize workflows for subagent (if not disabled)
+	if !m.noWorkflows {
+		stateOpts = append(stateOpts, tools.WithSubAgentTool())
 	}
 
 	if mcpOpts := m.getMCPStateOpts(); mcpOpts != nil {

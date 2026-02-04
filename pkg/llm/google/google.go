@@ -23,13 +23,13 @@ import (
 	"github.com/pkg/errors"
 	"google.golang.org/genai"
 
-	"github.com/jingkaihe/kodelet/pkg/feedback"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/hooks"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/llm/prompts"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/osutil"
+	"github.com/jingkaihe/kodelet/pkg/steer"
 	"github.com/jingkaihe/kodelet/pkg/sysprompt"
 	"github.com/jingkaihe/kodelet/pkg/telemetry"
 	"github.com/jingkaihe/kodelet/pkg/tools"
@@ -65,7 +65,7 @@ type Response struct {
 type ToolCall struct {
 	ID   string
 	Name string
-	Args map[string]interface{}
+	Args map[string]any
 }
 
 // Provider returns the name of the LLM provider for this thread
@@ -74,7 +74,7 @@ func (t *Thread) Provider() string {
 }
 
 // NewGoogleThread creates a new thread with Google's GenAI API
-func NewGoogleThread(config llmtypes.Config, subagentContextFactory llmtypes.SubagentContextFactory) (*Thread, error) {
+func NewGoogleThread(config llmtypes.Config) (*Thread, error) {
 	// Create a copy of the config to avoid modifying the original
 	configCopy := config
 
@@ -130,13 +130,13 @@ func NewGoogleThread(config llmtypes.Config, subagentContextFactory llmtypes.Sub
 		if err != nil {
 			logger.G(context.Background()).WithError(err).Warn("Failed to initialize hook manager, hooks disabled")
 		} else {
-			hookTrigger = hooks.NewTrigger(hookManager, conversationID, configCopy.IsSubAgent)
+			hookTrigger = hooks.NewTrigger(hookManager, conversationID, configCopy.IsSubAgent, configCopy.RecipeName)
 		}
 	}
 
 	// Create the thread with embedded base.Thread
 	t := &Thread{
-		Thread:         base.NewThread(configCopy, conversationID, subagentContextFactory, hookTrigger),
+		Thread:         base.NewThread(configCopy, conversationID, hookTrigger),
 		client:         client,
 		backend:        backend,
 		thinkingBudget: thinkingBudget,
@@ -255,10 +255,10 @@ func (t *Thread) SendMessage(
 			attribute.Int("tokens.cache_read", t.GetUsage().CacheReadInputTokens))
 	}()
 
-	// Process pending feedback messages if this is not a subagent
+	// Process pending steer messages if this is not a subagent
 	if !t.Config.IsSubAgent {
-		if err := t.processPendingFeedback(ctx, handler); err != nil {
-			logger.G(ctx).WithError(err).Warn("failed to process pending feedback, continuing")
+		if err := t.processPendingSteer(ctx, handler); err != nil {
+			logger.G(ctx).WithError(err).Warn("failed to process pending steer, continuing")
 		}
 	}
 
@@ -351,7 +351,8 @@ OUTER:
 	// Save conversation state after completing the interaction
 	if t.Persisted && t.Store != nil && !opt.NoSaveConversation {
 		saveCtx := context.Background() // use new context to avoid cancellation
-		t.SaveConversation(saveCtx, true)
+		// Skip LLM-based summary generation for subagent runs to avoid unnecessary API calls
+		t.SaveConversation(saveCtx, !t.Config.IsSubAgent)
 	}
 
 	if !t.Config.IsSubAgent {
@@ -942,7 +943,7 @@ func generateToolCallID() string {
 }
 
 // executeToolCalls executes tool calls and adds results to the conversation
-func (t *Thread) executeToolCalls(ctx context.Context, response *Response, handler llmtypes.MessageHandler, opt llmtypes.MessageOpt) {
+func (t *Thread) executeToolCalls(ctx context.Context, response *Response, handler llmtypes.MessageHandler, _ llmtypes.MessageOpt) {
 	var toolResultParts []*genai.Part
 
 	for _, toolCall := range response.ToolCalls {
@@ -967,8 +968,7 @@ func (t *Thread) executeToolCalls(ctx context.Context, response *Response, handl
 		if blocked {
 			output = tooltypes.NewBlockedToolResult(toolCall.Name, reason)
 		} else {
-			runToolCtx := t.SubagentContextFactory(ctx, t, handler, opt.CompactRatio, opt.DisableAutoCompact)
-			output = tools.RunTool(runToolCtx, t.State, toolCall.Name, toolInput)
+			output = tools.RunTool(ctx, t.State, toolCall.Name, toolInput)
 		}
 
 		// Use CLI rendering for consistent output formatting
@@ -996,7 +996,7 @@ func (t *Thread) executeToolCalls(ctx context.Context, response *Response, handl
 		resultPart := &genai.Part{
 			FunctionResponse: &genai.FunctionResponse{
 				Name: toolCall.Name,
-				Response: map[string]interface{}{
+				Response: map[string]any{
 					"call_id": toolCall.ID,
 					"result":  output.AssistantFacing(),
 					"error":   output.IsError(),
@@ -1076,25 +1076,6 @@ func (t *Thread) convertToStandardMessages() []llmtypes.Message {
 	return messages
 }
 
-// NewSubAgent creates a subagent thread reusing the parent's client
-func (t *Thread) NewSubAgent(_ context.Context, config llmtypes.Config) llmtypes.Thread {
-	conversationID := convtypes.GenerateID()
-
-	// Create new hook trigger for subagent with shared hook manager
-	hookTrigger := hooks.NewTrigger(t.HookTrigger.Manager, conversationID, true)
-
-	// Create subagent thread reusing the parent's client instead of creating a new one
-	subagentThread := &Thread{
-		Thread:         base.NewThread(config, conversationID, t.SubagentContextFactory, hookTrigger),
-		client:         t.client,  // Reuse parent's client
-		backend:        t.backend, // Reuse parent's backend
-		thinkingBudget: t.thinkingBudget,
-	}
-
-	subagentThread.SetState(t.State)
-	return subagentThread
-}
-
 // Note: SetStructuredToolResult, GetStructuredToolResults, SetStructuredToolResults,
 // and ShouldAutoCompact methods are inherited from embedded base.Thread
 
@@ -1134,7 +1115,7 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 		return errors.Wrap(err, "failed to load compact prompt")
 	}
 
-	summaryThread, err := NewGoogleThread(t.GetConfig(), nil)
+	summaryThread, err := NewGoogleThread(t.GetConfig())
 	if err != nil {
 		return errors.Wrap(err, "failed to create summary thread")
 	}
@@ -1160,7 +1141,7 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 
 // ShortSummary generates a brief summary of the conversation
 func (t *Thread) ShortSummary(ctx context.Context) string {
-	summaryThread, err := NewGoogleThread(t.GetConfig(), nil)
+	summaryThread, err := NewGoogleThread(t.GetConfig())
 	if err != nil {
 		logger.G(ctx).WithError(err).Error("failed to create summary thread")
 		return "Could not generate summary."
@@ -1182,41 +1163,41 @@ func (t *Thread) ShortSummary(ctx context.Context) string {
 	return handler.CollectedText()
 }
 
-// processPendingFeedback processes any pending feedback messages
-func (t *Thread) processPendingFeedback(ctx context.Context, handler llmtypes.MessageHandler) error {
-	feedbackStore, err := feedback.NewFeedbackStore()
+// processPendingSteer processes any pending steering messages
+func (t *Thread) processPendingSteer(ctx context.Context, handler llmtypes.MessageHandler) error {
+	steerStore, err := steer.NewSteerStore()
 	if err != nil {
-		return errors.Wrap(err, "failed to create feedback store")
+		return errors.Wrap(err, "failed to create steer store")
 	}
 
-	pendingFeedback, err := feedbackStore.ReadPendingFeedback(t.ConversationID)
+	pendingSteer, err := steerStore.ReadPendingSteer(t.ConversationID)
 	if err != nil {
-		return errors.Wrap(err, "failed to read pending feedback")
+		return errors.Wrap(err, "failed to read pending steer")
 	}
 
-	if len(pendingFeedback) > 0 {
-		logger.G(ctx).WithField("feedback_count", len(pendingFeedback)).Info("processing pending feedback messages")
+	if len(pendingSteer) > 0 {
+		logger.G(ctx).WithField("steer_count", len(pendingSteer)).Info("processing pending steer messages")
 
-		// Convert feedback messages to Google GenAI messages
-		for i, fbMsg := range pendingFeedback {
+		// Convert steer messages to Google GenAI messages
+		for i, steerMsg := range pendingSteer {
 			// Add some basic validation
-			if fbMsg.Content == "" {
-				logger.G(ctx).WithField("message_index", i).Warn("skipping empty feedback message")
+			if steerMsg.Content == "" {
+				logger.G(ctx).WithField("message_index", i).Warn("skipping empty steer message")
 				continue
 			}
 
 			userContent := genai.NewContentFromParts([]*genai.Part{
-				genai.NewPartFromText(fbMsg.Content),
+				genai.NewPartFromText(steerMsg.Content),
 			}, genai.RoleUser)
 			t.messages = append(t.messages, userContent)
-			handler.HandleText(fmt.Sprintf("🗣️ User feedback: %s", fbMsg.Content))
+			handler.HandleText(fmt.Sprintf("🗣️ User steering: %s", steerMsg.Content))
 		}
 
-		// Clear the feedback now that we've processed it
-		if err := feedbackStore.ClearPendingFeedback(t.ConversationID); err != nil {
-			logger.G(ctx).WithError(err).Warn("failed to clear pending feedback, may be processed again")
+		// Clear the steer now that we've processed it
+		if err := steerStore.ClearPendingSteer(t.ConversationID); err != nil {
+			logger.G(ctx).WithError(err).Warn("failed to clear pending steer, may be processed again")
 		} else {
-			logger.G(ctx).Debug("successfully cleared pending feedback")
+			logger.G(ctx).Debug("successfully cleared pending steer")
 		}
 	}
 

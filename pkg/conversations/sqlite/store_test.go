@@ -44,7 +44,7 @@ func TestStore_BasicOperations(t *testing.T) {
 		Summary:   "Test conversation",
 		CreatedAt: now,
 		UpdatedAt: now,
-		Metadata:  map[string]interface{}{"test": "value"},
+		Metadata:  map[string]any{"test": "value"},
 		ToolResults: map[string]tools.StructuredToolResult{
 			"test_call": {
 				ToolName:  "test_tool",
@@ -118,7 +118,7 @@ func TestStore_Query(t *testing.T) {
 			Summary:     "First conversation",
 			CreatedAt:   now.Add(-2 * time.Hour),
 			UpdatedAt:   now.Add(-2 * time.Hour),
-			Metadata:    map[string]interface{}{},
+			Metadata:    map[string]any{},
 			ToolResults: map[string]tools.StructuredToolResult{},
 		},
 		{
@@ -129,7 +129,7 @@ func TestStore_Query(t *testing.T) {
 			Summary:     "Second conversation",
 			CreatedAt:   now.Add(-1 * time.Hour),
 			UpdatedAt:   now.Add(-1 * time.Hour),
-			Metadata:    map[string]interface{}{},
+			Metadata:    map[string]any{},
 			ToolResults: map[string]tools.StructuredToolResult{},
 		},
 		{
@@ -140,7 +140,7 @@ func TestStore_Query(t *testing.T) {
 			Summary:     "Third conversation",
 			CreatedAt:   now,
 			UpdatedAt:   now,
-			Metadata:    map[string]interface{}{},
+			Metadata:    map[string]any{},
 			ToolResults: map[string]tools.StructuredToolResult{},
 		},
 	}
@@ -237,7 +237,7 @@ func TestStore_DefaultSorting(t *testing.T) {
 			Summary:     "Oldest conversation",
 			CreatedAt:   now.Add(-3 * time.Hour),
 			UpdatedAt:   now.Add(-3 * time.Hour),
-			Metadata:    map[string]interface{}{},
+			Metadata:    map[string]any{},
 			ToolResults: map[string]tools.StructuredToolResult{},
 		},
 		{
@@ -248,7 +248,7 @@ func TestStore_DefaultSorting(t *testing.T) {
 			Summary:     "Middle conversation",
 			CreatedAt:   now.Add(-2 * time.Hour),
 			UpdatedAt:   now.Add(-1 * time.Hour), // Updated more recently
-			Metadata:    map[string]interface{}{},
+			Metadata:    map[string]any{},
 			ToolResults: map[string]tools.StructuredToolResult{},
 		},
 		{
@@ -259,7 +259,7 @@ func TestStore_DefaultSorting(t *testing.T) {
 			Summary:     "Newest conversation",
 			CreatedAt:   now.Add(-1 * time.Hour),
 			UpdatedAt:   now.Add(-1 * time.Hour),
-			Metadata:    map[string]interface{}{},
+			Metadata:    map[string]any{},
 			ToolResults: map[string]tools.StructuredToolResult{},
 		},
 	}
@@ -498,7 +498,7 @@ func TestStore_WALMode(t *testing.T) {
 		Usage:       llmtypes.Usage{InputTokens: 10, OutputTokens: 5},
 		CreatedAt:   now,
 		UpdatedAt:   now,
-		Metadata:    map[string]interface{}{},
+		Metadata:    map[string]any{},
 		ToolResults: map[string]tools.StructuredToolResult{},
 	}
 
@@ -554,15 +554,15 @@ func TestStore_DatabaseIntegration(t *testing.T) {
 		Summary:   "Test with unicode characters: éñ中文🌟",
 		CreatedAt: now,
 		UpdatedAt: now.Add(30 * time.Minute),
-		Metadata: map[string]interface{}{
-			"nested": map[string]interface{}{
-				"level2": map[string]interface{}{
+		Metadata: map[string]any{
+			"nested": map[string]any{
+				"level2": map[string]any{
 					"level3": "deep value",
-					"array":  []interface{}{1, 2, "three", true},
+					"array":  []any{1, 2, "three", true},
 				},
 			},
 			"unicode": "测试文本 🎯",
-			"numbers": []interface{}{1.5, 2.7, 3.14159},
+			"numbers": []any{1.5, 2.7, 3.14159},
 			"boolean": true,
 			"null":    nil,
 		},
@@ -610,13 +610,13 @@ func TestStore_DatabaseIntegration(t *testing.T) {
 	assert.Equal(t, record.Summary, loaded.Summary)
 
 	// Verify nested metadata
-	nestedValue := loaded.Metadata["nested"].(map[string]interface{})
-	level2 := nestedValue["level2"].(map[string]interface{})
+	nestedValue := loaded.Metadata["nested"].(map[string]any)
+	level2 := nestedValue["level2"].(map[string]any)
 	assert.Equal(t, "deep value", level2["level3"])
 	assert.Equal(t, record.Metadata["unicode"], loaded.Metadata["unicode"])
 
 	// Verify arrays in metadata
-	numbersArray := loaded.Metadata["numbers"].([]interface{})
+	numbersArray := loaded.Metadata["numbers"].([]any)
 	assert.Len(t, numbersArray, 3)
 	assert.Equal(t, 1.5, numbersArray[0])
 
@@ -669,7 +669,7 @@ func TestStore_NullHandling(t *testing.T) {
 		Summary:             "",                     // Empty string (should become NULL)
 		CreatedAt:           now,
 		UpdatedAt:           now,
-		Metadata:            map[string]interface{}{},                // Empty map
+		Metadata:            map[string]any{},                        // Empty map
 		ToolResults:         map[string]tools.StructuredToolResult{}, // Empty map
 		BackgroundProcesses: []tools.BackgroundProcess{},             // Empty slice
 	}
@@ -734,7 +734,7 @@ func TestStore_ConcurrentAccess(t *testing.T) {
 					Summary:   fmt.Sprintf("Summary from routine %d", routineID),
 					CreatedAt: now,
 					UpdatedAt: now,
-					Metadata: map[string]interface{}{
+					Metadata: map[string]any{
 						"routineID": routineID,
 						"recordID":  j,
 					},
@@ -838,8 +838,8 @@ func TestStore_DirectDatabaseAccess(t *testing.T) {
 		Summary:   nil, // NULL
 		CreatedAt: now,
 		UpdatedAt: now,
-		Metadata: JSONField[map[string]interface{}]{
-			Data: map[string]interface{}{"direct": true},
+		Metadata: JSONField[map[string]any]{
+			Data: map[string]any{"direct": true},
 		},
 		ToolResults: JSONField[map[string]tools.StructuredToolResult]{
 			Data: map[string]tools.StructuredToolResult{},
@@ -933,7 +933,7 @@ func TestStore_TimestampBehavior(t *testing.T) {
 		Summary:             "Initial summary",
 		CreatedAt:           originalCreatedAt,
 		UpdatedAt:           originalUpdatedAt,
-		Metadata:            map[string]interface{}{"version": 1},
+		Metadata:            map[string]any{"version": 1},
 		ToolResults:         map[string]tools.StructuredToolResult{},
 		BackgroundProcesses: []tools.BackgroundProcess{},
 	}
@@ -1036,7 +1036,7 @@ func TestStore_BackgroundProcesses_Migration(t *testing.T) {
 		},
 		CreatedAt:   now,
 		UpdatedAt:   now,
-		Metadata:    map[string]interface{}{},
+		Metadata:    map[string]any{},
 		ToolResults: map[string]tools.StructuredToolResult{},
 		BackgroundProcesses: []tools.BackgroundProcess{
 			{
@@ -1072,7 +1072,7 @@ func TestStore_BackgroundProcesses_Migration(t *testing.T) {
 		Usage:               llmtypes.Usage{},
 		CreatedAt:           now,
 		UpdatedAt:           now,
-		Metadata:            map[string]interface{}{},
+		Metadata:            map[string]any{},
 		ToolResults:         map[string]tools.StructuredToolResult{},
 		BackgroundProcesses: []tools.BackgroundProcess{}, // Empty slice
 	}

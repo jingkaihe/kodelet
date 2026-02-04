@@ -34,7 +34,7 @@ var toolRegistry = map[string]tooltypes.Tool{
 	"file_read":                 &FileReadTool{},
 	"file_write":                &FileWriteTool{},
 	"file_edit":                 &FileEditTool{},
-	"subagent":                  &SubAgentTool{},
+	"subagent":                  NewSubAgentTool(nil, false),
 	"grep_tool":                 &GrepTool{},
 	"glob_tool":                 &GlobTool{},
 	"todo_read":                 &TodoReadTool{},
@@ -44,6 +44,9 @@ var toolRegistry = map[string]tooltypes.Tool{
 	"view_background_processes": &ViewBackgroundProcessesTool{},
 	"skill":                     NewSkillTool(nil, false),
 }
+
+// NoToolsMarker is a special value indicating no tools should be enabled
+const NoToolsMarker = "none"
 
 // metaTools are always enabled regardless of configuration
 var metaTools = []string{
@@ -192,6 +195,11 @@ func GetToolsFromNames(toolNames []string) []tooltypes.Tool {
 
 // GetMainTools returns the main tools available for the agent
 func GetMainTools(ctx context.Context, allowedTools []string) []tooltypes.Tool {
+	// Special case: "none" means no tools
+	if len(allowedTools) == 1 && allowedTools[0] == NoToolsMarker {
+		return nil
+	}
+
 	if len(allowedTools) == 0 {
 		allowedTools = defaultMainTools
 	}
@@ -206,6 +214,11 @@ func GetMainTools(ctx context.Context, allowedTools []string) []tooltypes.Tool {
 
 // GetSubAgentTools returns the tools available for sub-agents
 func GetSubAgentTools(ctx context.Context, allowedTools []string) []tooltypes.Tool {
+	// Special case: "none" means no tools
+	if len(allowedTools) == 1 && allowedTools[0] == NoToolsMarker {
+		return nil
+	}
+
 	if len(allowedTools) == 0 {
 		allowedTools = defaultSubAgentTools
 	}

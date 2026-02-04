@@ -77,3 +77,25 @@ func (m HookManager) HasHooks(hookType HookType) bool {
 func (m HookManager) GetHooks(hookType HookType) []*Hook {
 	return m.hooks[hookType]
 }
+
+// GetHookByName returns a hook by its name, searching across all hook types.
+// Returns nil if the hook is not found.
+func (m HookManager) GetHookByName(name string) *Hook {
+	for _, hooks := range m.hooks {
+		for _, hook := range hooks {
+			if hook.Name == name {
+				return hook
+			}
+		}
+	}
+	return nil
+}
+
+// AllHooks returns all discovered hooks regardless of type.
+func (m HookManager) AllHooks() []*Hook {
+	var all []*Hook
+	for _, hooks := range m.hooks {
+		all = append(all, hooks...)
+	}
+	return all
+}

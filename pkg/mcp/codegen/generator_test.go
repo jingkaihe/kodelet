@@ -8,36 +8,36 @@ import (
 
 func TestBuildTypeScriptType_NestedArrayOfObjects(t *testing.T) {
 	// Simulate the Grafana Selector schema with nested LabelMatcher array
-	labelMatcherSchema := map[string]interface{}{
+	labelMatcherSchema := map[string]any{
 		"type": "object",
-		"properties": map[string]interface{}{
-			"name": map[string]interface{}{
+		"properties": map[string]any{
+			"name": map[string]any{
 				"type":        "string",
 				"description": "The name of the label to match against",
 			},
-			"value": map[string]interface{}{
+			"value": map[string]any{
 				"type":        "string",
 				"description": "The value to match against",
 			},
-			"type": map[string]interface{}{
+			"type": map[string]any{
 				"type":        "string",
 				"description": "One of the '=' or '!=' or '=~' or '!~'",
 			},
 		},
-		"required": []interface{}{"name", "value", "type"},
+		"required": []any{"name", "value", "type"},
 	}
 
-	selectorSchema := map[string]interface{}{
+	selectorSchema := map[string]any{
 		"type": "object",
-		"properties": map[string]interface{}{
-			"filters": map[string]interface{}{
+		"properties": map[string]any{
+			"filters": map[string]any{
 				"type":  "array",
 				"items": labelMatcherSchema,
 			},
 		},
 	}
 
-	matchesProperty := map[string]interface{}{
+	matchesProperty := map[string]any{
 		"type":  "array",
 		"items": selectorSchema,
 	}
@@ -61,42 +61,42 @@ func TestBuildTypeScriptType_NestedArrayOfObjects(t *testing.T) {
 func TestBuildTypeScriptType_SimpleTypes(t *testing.T) {
 	tests := []struct {
 		name     string
-		prop     map[string]interface{}
+		prop     map[string]any
 		expected string
 	}{
 		{
 			name:     "string",
-			prop:     map[string]interface{}{"type": "string"},
+			prop:     map[string]any{"type": "string"},
 			expected: "string",
 		},
 		{
 			name:     "number",
-			prop:     map[string]interface{}{"type": "number"},
+			prop:     map[string]any{"type": "number"},
 			expected: "number",
 		},
 		{
 			name:     "integer",
-			prop:     map[string]interface{}{"type": "integer"},
+			prop:     map[string]any{"type": "integer"},
 			expected: "number",
 		},
 		{
 			name:     "boolean",
-			prop:     map[string]interface{}{"type": "boolean"},
+			prop:     map[string]any{"type": "boolean"},
 			expected: "boolean",
 		},
 		{
 			name: "array of strings",
-			prop: map[string]interface{}{
+			prop: map[string]any{
 				"type":  "array",
-				"items": map[string]interface{}{"type": "string"},
+				"items": map[string]any{"type": "string"},
 			},
 			expected: "Array<string>",
 		},
 		{
 			name: "array of numbers",
-			prop: map[string]interface{}{
+			prop: map[string]any{
 				"type":  "array",
-				"items": map[string]interface{}{"type": "number"},
+				"items": map[string]any{"type": "number"},
 			},
 			expected: "Array<number>",
 		},
@@ -111,17 +111,17 @@ func TestBuildTypeScriptType_SimpleTypes(t *testing.T) {
 }
 
 func TestBuildInlineObjectType(t *testing.T) {
-	schema := map[string]interface{}{
+	schema := map[string]any{
 		"type": "object",
-		"properties": map[string]interface{}{
-			"requiredField": map[string]interface{}{
+		"properties": map[string]any{
+			"requiredField": map[string]any{
 				"type": "string",
 			},
-			"optionalField": map[string]interface{}{
+			"optionalField": map[string]any{
 				"type": "number",
 			},
 		},
-		"required": []interface{}{"requiredField"},
+		"required": []any{"requiredField"},
 	}
 
 	result := buildInlineObjectType(schema, []string{})
@@ -135,25 +135,25 @@ func TestBuildInlineObjectType(t *testing.T) {
 
 func TestExtractSchemaProperties_NestedArrays(t *testing.T) {
 	// Test the full schema extraction with nested arrays
-	labelMatcherSchema := map[string]interface{}{
+	labelMatcherSchema := map[string]any{
 		"type": "object",
-		"properties": map[string]interface{}{
-			"name": map[string]interface{}{
+		"properties": map[string]any{
+			"name": map[string]any{
 				"type":        "string",
 				"description": "The name of the label",
 			},
-			"value": map[string]interface{}{
+			"value": map[string]any{
 				"type":        "string",
 				"description": "The value",
 			},
 		},
-		"required": []interface{}{"name", "value"},
+		"required": []any{"name", "value"},
 	}
 
-	selectorSchema := map[string]interface{}{
+	selectorSchema := map[string]any{
 		"type": "object",
-		"properties": map[string]interface{}{
-			"filters": map[string]interface{}{
+		"properties": map[string]any{
+			"filters": map[string]any{
 				"type":        "array",
 				"items":       labelMatcherSchema,
 				"description": "List of filters",
@@ -161,10 +161,10 @@ func TestExtractSchemaProperties_NestedArrays(t *testing.T) {
 		},
 	}
 
-	schema := map[string]interface{}{
+	schema := map[string]any{
 		"type": "object",
-		"properties": map[string]interface{}{
-			"matches": map[string]interface{}{
+		"properties": map[string]any{
+			"matches": map[string]any{
 				"type":        "array",
 				"items":       selectorSchema,
 				"description": "List of selectors",

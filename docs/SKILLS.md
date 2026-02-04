@@ -82,67 +82,102 @@ List common mistakes and how to avoid them.
 
 ## Skill Locations
 
-Skills are discovered from two locations with the following precedence:
+Skills are discovered from multiple locations with the following precedence:
 
-1. **Repository-local** (higher precedence): `./.kodelet/skills/<skill_name>/SKILL.md`
-2. **User-global**: `~/.kodelet/skills/<skill_name>/SKILL.md`
+1. **Repository-local standalone** (highest): `./.kodelet/skills/<skill_name>/SKILL.md`
+2. **Repository-local plugins**: `./.kodelet/plugins/<org@repo>/skills/<skill_name>/SKILL.md`
+3. **User-global standalone**: `~/.kodelet/skills/<skill_name>/SKILL.md`
+4. **User-global plugins**: `~/.kodelet/plugins/<org@repo>/skills/<skill_name>/SKILL.md`
+5. **Built-in**: `skills/<skill_name>/SKILL.md` (embedded in binary)
 
 Repository-local skills take precedence over user-global skills with the same name, allowing project-specific customizations.
 
-## Managing Skills
+### Plugin-based Skills
 
-Kodelet provides CLI commands to add, list, and remove skills from GitHub repositories.
+Skills installed via plugins are prefixed with `org/repo/` to avoid naming conflicts:
+- `jingkaihe/skills/pdf` - PDF skill from the `jingkaihe/skills` plugin
+- `anthropic/tools/search` - Search skill from the `anthropic/tools` plugin
 
-### Adding Skills
+Standalone skills use simple names without prefix:
+- `my-skill` - Standalone skill at `.kodelet/skills/my-skill/`
+
+## Managing Skills with Plugins
+
+Kodelet provides a unified plugin system to manage both skills and recipes from GitHub repositories.
+
+### Installing Plugins
 
 ```bash
-# Add all skills from a GitHub repository (installs to ./.kodelet/skills/)
-kodelet skill add orgname/skills
+# Install all skills/recipes from a GitHub repository (installs to ./.kodelet/plugins/)
+kodelet plugin add orgname/repo
 
-# Add a specific skill from a repository
-kodelet skill add orgname/skills --dir skills/specific-skill
-kodelet skill add orgname/skills -d skills/specific-skill
+# Install from a specific version, branch, or commit SHA
+kodelet plugin add orgname/repo@v1.0.0
+kodelet plugin add orgname/repo@main
+kodelet plugin add orgname/repo@abc1234
 
-# Add skills from a specific version, branch, or commit SHA
-kodelet skill add orgname/skills@v0.1.0
-kodelet skill add orgname/skills@main
-kodelet skill add orgname/skills@abc1234
+# Install to global directory (~/.kodelet/plugins/)
+kodelet plugin add orgname/repo -g
+kodelet plugin add orgname/repo --global
 
-# Add skills to global directory (~/.kodelet/skills/)
-kodelet skill add orgname/skills -g
-kodelet skill add orgname/skills --global
+# Force overwrite existing plugins
+kodelet plugin add orgname/repo --force
 ```
 
 **Requirements:**
 - GitHub CLI (`gh`) must be installed
 - Must be authenticated (`gh auth login`)
 
-### Listing Skills
+### Listing Plugins
 
 ```bash
-# List all installed skills with their locations and descriptions
-kodelet skill list
+# List all installed plugins (both local and global)
+kodelet plugin list
 ```
 
 Example output:
 ```
-NAME              DIRECTORY                              DESCRIPTION
-----              ---------                              -----------
-pdf               ./.kodelet/skills/pdf                  Handle PDF file operations...
-xlsx              ~/.kodelet/skills/xlsx                 Work with Excel spreadsheets...
-kubernetes        ~/.kodelet/skills/kubernetes           Manage Kubernetes clusters...
+NAME                LOCATION  SKILLS              RECIPES
+----                --------  ------              -------
+anthropic/recipes   global    0                   pr, commit, init
+jingkaihe/skills    local     pdf, xlsx, docx     0
 ```
 
-### Removing Skills
+### Removing Plugins
 
 ```bash
-# Remove a skill from local directory (./.kodelet/skills/)
-kodelet skill remove skill-name
+# Remove a plugin from local directory (./.kodelet/plugins/)
+kodelet plugin remove org/repo
 
-# Remove a skill from global directory (~/.kodelet/skills/)
-kodelet skill remove skill-name -g
-kodelet skill remove skill-name --global
+# Remove a plugin from global directory (~/.kodelet/plugins/)
+kodelet plugin remove org/repo -g
+kodelet plugin remove org/repo --global
 ```
+
+### GitHub Repository Structure for Plugins
+
+Plugin authors structure their repositories with `skills/` and/or `recipes/` directories at the root:
+
+```
+my-plugin-repo/
+├── skills/
+│   └── my-skill/
+│       └── SKILL.md
+└── recipes/
+    └── my-recipe.md
+```
+
+When installed via `kodelet plugin add user/my-plugin-repo`:
+```
+.kodelet/plugins/user@my-plugin-repo/
+├── skills/
+│   └── my-skill/
+│       └── SKILL.md
+└── recipes/
+    └── my-recipe.md
+```
+
+The skills become available as `user/my-plugin-repo/my-skill`.
 
 ## Configuration
 
@@ -161,7 +196,7 @@ skills:
   allowed:
     - pdf
     - xlsx
-    - kubernetes
+    - jingkaihe/skills/kubernetes
 ```
 
 ### CLI Flags
@@ -289,7 +324,8 @@ When working with Kubernetes...
 
 1. **Repository-local for project-specific**: Use `.kodelet/skills/` for skills specific to a project
 2. **Global for personal workflows**: Use `~/.kodelet/skills/` for skills you use across projects
-3. **Share via version control**: Commit repository-local skills to share with your team
+3. **Share via plugins**: Create a GitHub repo with your skills and share via `kodelet plugin add`
+4. **Share via version control**: Commit repository-local skills to share with your team
 
 ### Security Considerations
 

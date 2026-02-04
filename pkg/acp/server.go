@@ -46,6 +46,7 @@ type Server struct {
 	clientCaps   *acptypes.ClientCapabilities
 
 	sessionManager    *session.Manager
+	sessionStorage    *session.Storage
 	config            *ServerConfig
 	fragmentProcessor *fragments.Processor
 
@@ -71,6 +72,7 @@ type ServerConfig struct {
 	Model              string
 	MaxTokens          int
 	NoSkills           bool
+	NoWorkflows        bool
 	NoHooks            bool
 	CompactRatio       float64
 	DisableAutoCompact bool
@@ -119,13 +121,19 @@ func NewServer(opts ...Option) *Server {
 		opt(s)
 	}
 
-	s.sessionManager = session.NewManager(s.config.Provider, s.config.Model, s.config.MaxTokens, s.config.NoSkills, s.config.NoHooks, s.config.CompactRatio, s.config.DisableAutoCompact)
+	s.sessionManager = session.NewManager(s.config.Provider, s.config.Model, s.config.MaxTokens, s.config.NoSkills, s.config.NoWorkflows, s.config.NoHooks, s.config.CompactRatio, s.config.DisableAutoCompact)
 
 	fp, err := fragments.NewFragmentProcessor()
 	if err != nil {
 		logger.G(ctx).WithError(err).Warn("Failed to create fragment processor for slash commands")
 	}
 	s.fragmentProcessor = fp
+
+	storage, err := session.NewStorage()
+	if err != nil {
+		logger.G(ctx).WithError(err).Warn("Failed to create session storage for replay")
+	}
+	s.sessionStorage = storage
 
 	return s
 }
@@ -358,12 +366,48 @@ func (s *Server) handleSessionLoad(req *acptypes.Request) error {
 		return s.sendError(req.ID, acptypes.ErrCodeInternalError, err.Error(), nil)
 	}
 
+	// Replay stored session updates before sending result (per ACP spec)
+	if err := s.replaySessionUpdates(params.SessionID); err != nil {
+		logger.G(s.ctx).WithError(err).Warn("Failed to replay session updates")
+	}
+
 	result := acptypes.LoadSessionResponse{}
 	if err := s.sendResult(req.ID, result); err != nil {
 		return err
 	}
 
 	return s.sendAvailableCommands(params.SessionID)
+}
+
+// replaySessionUpdates reads stored updates from JSONL and sends them to the client
+func (s *Server) replaySessionUpdates(sessionID acptypes.SessionID) error {
+	if s.sessionStorage == nil {
+		return nil
+	}
+
+	updates, err := s.sessionStorage.ReadUpdates(sessionID)
+	if err != nil {
+		return err
+	}
+
+	for _, stored := range updates {
+		// Unmarshal the stored update to send as notification
+		var update any
+		if err := json.Unmarshal(stored.Update, &update); err != nil {
+			logger.G(s.ctx).WithError(err).Warn("Failed to unmarshal stored update")
+			continue
+		}
+
+		params := map[string]any{
+			"sessionId": sessionID,
+			"update":    update,
+		}
+		if err := s.sendNotification("session/update", params); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (s *Server) handleSessionPrompt(req *acptypes.Request) error {
@@ -400,6 +444,14 @@ func (s *Server) handleSessionPrompt(req *acptypes.Request) error {
 		return s.sendError(req.ID, acptypes.ErrCodeInternalError, err.Error(), nil)
 	}
 
+	// Store user_message_chunk for replay (don't send - client already displays it)
+	for _, block := range params.Prompt {
+		s.storeUpdate(params.SessionID, map[string]any{
+			"sessionUpdate": acptypes.UpdateUserMessageChunk,
+			"content":       block,
+		})
+	}
+
 	prompt := params.Prompt
 	var sessionHooks map[string]session.HookConfig
 	if command, args, found := parseSlashCommand(params.Prompt); found && s.fragmentProcessor != nil {
@@ -425,6 +477,13 @@ func (s *Server) handleSessionPrompt(req *acptypes.Request) error {
 			stopReason = acptypes.StopReasonCancelled
 		} else {
 			return s.sendError(req.ID, acptypes.ErrCodeInternalError, err.Error(), nil)
+		}
+	}
+
+	// Flush any pending updates at turn boundary (merges accumulated text chunks)
+	if s.sessionStorage != nil {
+		if err := s.sessionStorage.Flush(params.SessionID); err != nil {
+			logger.G(s.ctx).WithError(err).Warn("Failed to flush session storage")
 		}
 	}
 
@@ -478,13 +537,30 @@ func (s *Server) handleSetMode(req *acptypes.Request) error {
 	return s.sendError(req.ID, acptypes.ErrCodeMethodNotFound, "session/set_mode not supported", nil)
 }
 
-// SendUpdate sends a session/update notification to the client
+// SendUpdate sends a session/update notification to the client and persists it for replay
 func (s *Server) SendUpdate(sessionID acptypes.SessionID, update any) error {
+	// Persist update for replay
+	if s.sessionStorage != nil {
+		if err := s.sessionStorage.AppendUpdate(sessionID, update); err != nil {
+			logger.G(s.ctx).WithError(err).Warn("Failed to persist session update")
+		}
+	}
+
 	params := map[string]any{
 		"sessionId": sessionID,
 		"update":    update,
 	}
 	return s.sendNotification("session/update", params)
+}
+
+// storeUpdate persists an update for replay without sending it to the client.
+// Used for user messages which the client already displays.
+func (s *Server) storeUpdate(sessionID acptypes.SessionID, update any) {
+	if s.sessionStorage != nil {
+		if err := s.sessionStorage.AppendUpdate(sessionID, update); err != nil {
+			logger.G(s.ctx).WithError(err).Warn("Failed to persist session update")
+		}
+	}
 }
 
 // CallClient makes an RPC call to the client and waits for response
@@ -631,7 +707,7 @@ func (s *Server) getAvailableCommands() []acptypes.AvailableCommand {
 			Name:        name,
 			Description: description,
 			Input: &acptypes.AvailableCommandInput{
-				Hint: buildCommandHint(frag.Metadata.Defaults),
+				Hint: buildCommandHint(frag.Metadata.Arguments),
 			},
 		}
 		commands = append(commands, cmd)
@@ -783,21 +859,26 @@ func parseUnquotedValue(s string, start int) (value string, nextPos int) {
 	return s[start:end], end
 }
 
-// buildCommandHint builds a hint string for a recipe based on its defaults
-func buildCommandHint(defaults map[string]string) string {
-	if len(defaults) == 0 {
+// buildCommandHint builds a hint string for a recipe based on its arguments
+func buildCommandHint(arguments map[string]fragments.ArgumentMeta) string {
+	if len(arguments) == 0 {
 		return "additional instructions (optional)"
 	}
 
-	keys := make([]string, 0, len(defaults))
-	for k := range defaults {
+	keys := make([]string, 0, len(arguments))
+	for k := range arguments {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
 
 	var parts []string
 	for _, key := range keys {
-		parts = append(parts, fmt.Sprintf("%s=%s", key, defaults[key]))
+		argMeta := arguments[key]
+		if argMeta.Default != "" {
+			parts = append(parts, fmt.Sprintf("%s=%s", key, argMeta.Default))
+		} else {
+			parts = append(parts, fmt.Sprintf("%s=<value>", key))
+		}
 	}
 
 	return fmt.Sprintf("[%s] additional instructions", strings.Join(parts, " "))
@@ -808,4 +889,8 @@ func buildCommandHint(defaults map[string]string) string {
 func (s *Server) Shutdown() {
 	s.cancel()
 	s.wg.Wait()
+
+	if s.sessionStorage != nil {
+		s.sessionStorage.Close()
+	}
 }

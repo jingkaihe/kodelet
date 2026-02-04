@@ -374,7 +374,7 @@ func (m ViewBackgroundProcessesMetadata) ToolType() string { return "view_backgr
 // ExtractMetadata is a helper that handles both pointer and value type assertions
 // This is necessary because JSON unmarshaling creates value types, while
 // direct creation uses pointer types
-func ExtractMetadata(metadata ToolMetadata, target interface{}) bool {
+func ExtractMetadata(metadata ToolMetadata, target any) bool {
 	if metadata == nil {
 		return false
 	}

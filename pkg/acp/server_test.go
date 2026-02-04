@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/jingkaihe/kodelet/pkg/acp/acptypes"
+	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -517,7 +518,7 @@ func TestServer_SendAvailableCommands(t *testing.T) {
 	assert.Equal(t, acptypes.UpdateAvailableCommands, update["sessionUpdate"])
 	assert.NotNil(t, update["availableCommands"])
 
-	availableCommands := update["availableCommands"].([]interface{})
+	availableCommands := update["availableCommands"].([]any)
 	assert.Greater(t, len(availableCommands), 0)
 }
 
@@ -601,50 +602,71 @@ func TestParseSlashCommandArgs(t *testing.T) {
 
 func TestBuildCommandHint(t *testing.T) {
 	tests := []struct {
-		name     string
-		defaults map[string]string
-		want     string
+		name      string
+		arguments map[string]fragments.ArgumentMeta
+		want      string
 	}{
 		{
-			name:     "no defaults",
-			defaults: nil,
-			want:     "additional instructions (optional)",
+			name:      "no arguments",
+			arguments: nil,
+			want:      "additional instructions (optional)",
 		},
 		{
-			name:     "empty defaults",
-			defaults: map[string]string{},
-			want:     "additional instructions (optional)",
+			name:      "empty arguments",
+			arguments: map[string]fragments.ArgumentMeta{},
+			want:      "additional instructions (optional)",
 		},
 		{
-			name:     "single default",
-			defaults: map[string]string{"target": "main"},
-			want:     "[target=main] additional instructions",
+			name: "single argument with default",
+			arguments: map[string]fragments.ArgumentMeta{
+				"target": {Default: "main"},
+			},
+			want: "[target=main] additional instructions",
+		},
+		{
+			name: "single argument without default",
+			arguments: map[string]fragments.ArgumentMeta{
+				"target": {Description: "Target branch"},
+			},
+			want: "[target=<value>] additional instructions",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := buildCommandHint(tt.defaults)
+			got := buildCommandHint(tt.arguments)
 			assert.Equal(t, tt.want, got)
 		})
 	}
 }
 
-func TestBuildCommandHint_MultipleDefaults(t *testing.T) {
-	t.Run("two keys", func(t *testing.T) {
-		defaults := map[string]string{"target": "main", "draft": "false"}
-		got := buildCommandHint(defaults)
+func TestBuildCommandHint_MultipleArguments(t *testing.T) {
+	t.Run("two keys with defaults", func(t *testing.T) {
+		arguments := map[string]fragments.ArgumentMeta{
+			"target": {Default: "main"},
+			"draft":  {Default: "false"},
+		}
+		got := buildCommandHint(arguments)
 		assert.Equal(t, "[draft=false target=main] additional instructions", got)
 	})
 
-	t.Run("three or more keys - deterministic ordering", func(t *testing.T) {
-		defaults := map[string]string{
-			"zebra":  "last",
-			"alpha":  "first",
-			"middle": "center",
-			"beta":   "second",
+	t.Run("mixed with and without defaults", func(t *testing.T) {
+		arguments := map[string]fragments.ArgumentMeta{
+			"target":    {Default: "main"},
+			"issue_url": {Description: "The issue URL"},
 		}
-		got := buildCommandHint(defaults)
+		got := buildCommandHint(arguments)
+		assert.Equal(t, "[issue_url=<value> target=main] additional instructions", got)
+	})
+
+	t.Run("three or more keys - deterministic ordering", func(t *testing.T) {
+		arguments := map[string]fragments.ArgumentMeta{
+			"zebra":  {Default: "last"},
+			"alpha":  {Default: "first"},
+			"middle": {Default: "center"},
+			"beta":   {Default: "second"},
+		}
+		got := buildCommandHint(arguments)
 		assert.Equal(t, "[alpha=first beta=second middle=center zebra=last] additional instructions", got)
 	})
 }

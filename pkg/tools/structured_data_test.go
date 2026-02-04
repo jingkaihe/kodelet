@@ -130,7 +130,7 @@ func TestStructuredToolResult_JSONSerialization(t *testing.T) {
 		Timestamp: time.Now().Round(time.Second), // Round to avoid precision issues
 	}
 
-	// Test JSON serialization of basic fields (metadata is complex due to interface{})
+	// Test JSON serialization of basic fields (metadata is complex due to any)
 	data, err := json.Marshal(original)
 	require.NoError(t, err, "Failed to marshal StructuredToolResult")
 

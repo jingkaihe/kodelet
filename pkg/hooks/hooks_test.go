@@ -50,15 +50,34 @@ func TestDiscovery_WithDefaultDirs(t *testing.T) {
 	discovery, err := NewDiscovery(WithDefaultDirs())
 	require.NoError(t, err)
 	assert.NotNil(t, discovery)
-	assert.Len(t, discovery.hookDirs, 2)
-	assert.Equal(t, "./.kodelet/hooks", discovery.hookDirs[0])
+	// At minimum: repo-local standalone and global standalone directories
+	assert.GreaterOrEqual(t, len(discovery.hookDirs), 2)
+	// First dir is always repo-local standalone
+	assert.Equal(t, ".kodelet/hooks", discovery.hookDirs[0].Dir)
+	assert.Equal(t, "", discovery.hookDirs[0].Prefix) // Standalone hooks have no prefix
 }
 
 func TestDiscovery_WithHookDirs(t *testing.T) {
 	dirs := []string{"/tmp/dir1", "/tmp/dir2"}
 	discovery, err := NewDiscovery(WithHookDirs(dirs...))
 	require.NoError(t, err)
-	assert.Equal(t, dirs, discovery.hookDirs)
+	assert.Len(t, discovery.hookDirs, 2)
+	assert.Equal(t, "/tmp/dir1", discovery.hookDirs[0].Dir)
+	assert.Equal(t, "", discovery.hookDirs[0].Prefix)
+	assert.Equal(t, "/tmp/dir2", discovery.hookDirs[1].Dir)
+	assert.Equal(t, "", discovery.hookDirs[1].Prefix)
+}
+
+func TestDiscovery_WithHookDirConfigs(t *testing.T) {
+	configs := []HookDirConfig{
+		{Dir: "/tmp/plugin1/hooks", Prefix: "org/repo/"},
+		{Dir: "/tmp/standalone", Prefix: ""},
+	}
+	discovery, err := NewDiscovery(WithHookDirConfigs(configs...))
+	require.NoError(t, err)
+	assert.Len(t, discovery.hookDirs, 2)
+	assert.Equal(t, "/tmp/plugin1/hooks", discovery.hookDirs[0].Dir)
+	assert.Equal(t, "org/repo/", discovery.hookDirs[0].Prefix)
 }
 
 func TestHookManager_SetTimeout(t *testing.T) {
@@ -949,7 +968,7 @@ func TestTrigger_ZeroValue_TriggerTurnEnd(_ *testing.T) {
 }
 
 func TestTrigger_SetConversationID(t *testing.T) {
-	trigger := NewTrigger(HookManager{}, "initial-id", false)
+	trigger := NewTrigger(HookManager{}, "initial-id", false, "")
 	assert.Equal(t, "initial-id", trigger.ConversationID)
 
 	trigger.SetConversationID("new-id")
@@ -957,11 +976,19 @@ func TestTrigger_SetConversationID(t *testing.T) {
 }
 
 func TestTrigger_InvokedBy(t *testing.T) {
-	mainTrigger := NewTrigger(HookManager{}, "conv-id", false)
+	mainTrigger := NewTrigger(HookManager{}, "conv-id", false, "")
 	assert.Equal(t, InvokedByMain, mainTrigger.invokedBy())
 
-	subagentTrigger := NewTrigger(HookManager{}, "conv-id", true)
+	subagentTrigger := NewTrigger(HookManager{}, "conv-id", true, "")
 	assert.Equal(t, InvokedBySubagent, subagentTrigger.invokedBy())
+}
+
+func TestTrigger_RecipeName(t *testing.T) {
+	trigger := NewTrigger(HookManager{}, "conv-id", false, "code-review")
+	assert.Equal(t, "code-review", trigger.RecipeName)
+
+	triggerNoRecipe := NewTrigger(HookManager{}, "conv-id", false, "")
+	assert.Equal(t, "", triggerNoRecipe.RecipeName)
 }
 
 func TestDiscoverHooks_SkipsDisabledHooks(t *testing.T) {
@@ -995,4 +1022,129 @@ exit 0
 	beforeToolCallHooks := hooks[HookTypeBeforeToolCall]
 	assert.Len(t, beforeToolCallHooks, 1)
 	assert.Equal(t, "valid_hook", beforeToolCallHooks[0].Name)
+}
+
+func TestDiscoverHooks_PluginPrefixNaming(t *testing.T) {
+	tempDir := t.TempDir()
+	pluginHooksDir := filepath.Join(tempDir, "plugins", "org@repo", "hooks")
+	require.NoError(t, os.MkdirAll(pluginHooksDir, 0o755))
+
+	// Create a plugin hook
+	pluginHook := filepath.Join(pluginHooksDir, "validate-output")
+	hookScript := `#!/bin/bash
+if [ "$1" == "hook" ]; then echo "before_tool_call"; exit 0; fi
+exit 0
+`
+	require.NoError(t, os.WriteFile(pluginHook, []byte(hookScript), 0o755))
+
+	// Create discovery with plugin prefix
+	configs := []HookDirConfig{
+		{Dir: pluginHooksDir, Prefix: "org/repo/"},
+	}
+	discovery, err := NewDiscovery(WithHookDirConfigs(configs...))
+	require.NoError(t, err)
+
+	hooks, err := discovery.DiscoverHooks()
+	require.NoError(t, err)
+
+	// Hook should have plugin prefix in name
+	beforeToolCallHooks := hooks[HookTypeBeforeToolCall]
+	require.Len(t, beforeToolCallHooks, 1)
+	assert.Equal(t, "org/repo/validate-output", beforeToolCallHooks[0].Name)
+	assert.Equal(t, pluginHook, beforeToolCallHooks[0].Path)
+}
+
+func TestHookManager_GetHookByName(t *testing.T) {
+	manager := HookManager{
+		hooks: map[HookType][]*Hook{
+			HookTypeBeforeToolCall: {
+				{Name: "standalone-hook", Path: "/path/1"},
+				{Name: "org/repo/plugin-hook", Path: "/path/2"},
+			},
+			HookTypeAfterToolCall: {
+				{Name: "after-hook", Path: "/path/3"},
+			},
+		},
+	}
+
+	// Find standalone hook
+	hook := manager.GetHookByName("standalone-hook")
+	require.NotNil(t, hook)
+	assert.Equal(t, "standalone-hook", hook.Name)
+
+	// Find plugin hook with prefix
+	hook = manager.GetHookByName("org/repo/plugin-hook")
+	require.NotNil(t, hook)
+	assert.Equal(t, "org/repo/plugin-hook", hook.Name)
+
+	// Find hook from different type
+	hook = manager.GetHookByName("after-hook")
+	require.NotNil(t, hook)
+	assert.Equal(t, "after-hook", hook.Name)
+
+	// Non-existent hook
+	hook = manager.GetHookByName("non-existent")
+	assert.Nil(t, hook)
+}
+
+func TestHookManager_AllHooks(t *testing.T) {
+	manager := HookManager{
+		hooks: map[HookType][]*Hook{
+			HookTypeBeforeToolCall: {
+				{Name: "hook1", Path: "/path/1"},
+				{Name: "hook2", Path: "/path/2"},
+			},
+			HookTypeAfterToolCall: {
+				{Name: "hook3", Path: "/path/3"},
+			},
+		},
+	}
+
+	all := manager.AllHooks()
+	assert.Len(t, all, 3)
+}
+
+func TestPayloadSerialization_WithRecipeName(t *testing.T) {
+	payload := BeforeToolCallPayload{
+		BasePayload: BasePayload{
+			Event:      HookTypeBeforeToolCall,
+			ConvID:     "test-conv",
+			CWD:        "/test/cwd",
+			InvokedBy:  InvokedByMain,
+			RecipeName: "code-review",
+		},
+		ToolName:  "bash",
+		ToolInput: json.RawMessage(`{"command":"ls"}`),
+	}
+
+	data, err := json.Marshal(payload)
+	require.NoError(t, err)
+
+	var decoded BeforeToolCallPayload
+	require.NoError(t, json.Unmarshal(data, &decoded))
+
+	assert.Equal(t, "code-review", decoded.RecipeName)
+}
+
+func TestPayloadSerialization_WithoutRecipeName(t *testing.T) {
+	payload := BeforeToolCallPayload{
+		BasePayload: BasePayload{
+			Event:     HookTypeBeforeToolCall,
+			ConvID:    "test-conv",
+			CWD:       "/test/cwd",
+			InvokedBy: InvokedByMain,
+		},
+		ToolName:  "bash",
+		ToolInput: json.RawMessage(`{"command":"ls"}`),
+	}
+
+	data, err := json.Marshal(payload)
+	require.NoError(t, err)
+
+	// Verify recipe_name is omitted when empty
+	assert.NotContains(t, string(data), "recipe_name")
+
+	var decoded BeforeToolCallPayload
+	require.NoError(t, json.Unmarshal(data, &decoded))
+	assert.Equal(t, "", decoded.RecipeName)
 }

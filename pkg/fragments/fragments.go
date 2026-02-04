@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/plugins"
 	"github.com/pkg/errors"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark-meta"
@@ -32,14 +33,21 @@ type HookConfig struct {
 	Once    bool   `yaml:"once,omitempty"` // If true, only execute on the first turn
 }
 
+// ArgumentMeta defines metadata for a fragment argument
+type ArgumentMeta struct {
+	Description string `yaml:"description,omitempty"`
+	Default     string `yaml:"default,omitempty"`
+}
+
 // Metadata represents YAML frontmatter in fragment files
 type Metadata struct {
-	Name            string                `yaml:"name,omitempty"`
-	Description     string                `yaml:"description,omitempty"`
-	AllowedTools    []string              `yaml:"allowed_tools,omitempty"`
-	AllowedCommands []string              `yaml:"allowed_commands,omitempty"`
-	Defaults        map[string]string     `yaml:"defaults,omitempty"`
-	Hooks           map[string]HookConfig `yaml:"hooks,omitempty"` // Lifecycle hooks -> handler config
+	Name            string                  `yaml:"name,omitempty"`
+	Description     string                  `yaml:"description,omitempty"`
+	AllowedTools    []string                `yaml:"allowed_tools,omitempty"`
+	AllowedCommands []string                `yaml:"allowed_commands,omitempty"`
+	Arguments       map[string]ArgumentMeta `yaml:"arguments,omitempty"` // Argument definitions with descriptions
+	Hooks           map[string]HookConfig   `yaml:"hooks,omitempty"`     // Lifecycle hooks -> handler config
+	Workflow        bool                    `yaml:"workflow,omitempty"`  // If true, this fragment can be used as a subagent workflow
 }
 
 // Fragment represents a fragment with its metadata and content
@@ -59,6 +67,7 @@ type Config struct {
 // Processor handles fragment loading and rendering
 type Processor struct {
 	fragmentDirs     []string
+	pluginDirs       []plugins.PluginDirConfig
 	builtinRecipesFS fs.FS
 }
 
@@ -106,9 +115,14 @@ func WithDefaultDirs() Option {
 			return errors.Wrap(err, "failed to get user home directory")
 		}
 		fp.fragmentDirs = []string{
-			"./recipes", // Repo-specific (higher precedence)
-			filepath.Join(homeDir, ".kodelet/recipes"), // User home directory
+			"./.kodelet/recipes",                          // Repo-local standalone (highest precedence)
+			filepath.Join(homeDir, ".kodelet", "recipes"), // User-global standalone
 		}
+
+		fp.pluginDirs = []plugins.PluginDirConfig{}
+		fp.pluginDirs = append(fp.pluginDirs, plugins.ScanPluginSubdirs("./.kodelet/plugins", "recipes")...)
+		fp.pluginDirs = append(fp.pluginDirs, plugins.ScanPluginSubdirs(filepath.Join(homeDir, ".kodelet", "plugins"), "recipes")...)
+
 		return nil
 	}
 }
@@ -181,6 +195,18 @@ func (fp *Processor) findFragmentFile(fragmentName string) (string, error) {
 		}
 	}
 
+	for _, pluginDir := range fp.pluginDirs {
+		if strings.HasPrefix(fragmentName, pluginDir.Prefix) {
+			relName := strings.TrimPrefix(fragmentName, pluginDir.Prefix)
+			for _, suffix := range []string{".md", ""} {
+				fullPath := filepath.Join(pluginDir.Dir, filepath.FromSlash(relName+suffix))
+				if _, err := os.Stat(fullPath); err == nil {
+					return fullPath, nil
+				}
+			}
+		}
+	}
+
 	for _, name := range possibleNames {
 		if _, err := fs.Stat(fp.builtinRecipesFS, name); err == nil {
 			return "embed:" + name, nil
@@ -227,15 +253,22 @@ func (fp *Processor) parseFrontmatter(content string) (Metadata, string, error) 
 			metadata.AllowedCommands = fp.parseStringArrayField(allowedCommands)
 		}
 
-		// Parse defaults (map of key-value pairs)
-		if defaults := metaData["defaults"]; defaults != nil {
-			if defaultsMap, ok := defaults.(map[interface{}]interface{}); ok {
-				metadata.Defaults = make(map[string]string)
-				for k, v := range defaultsMap {
-					if keyStr, ok := k.(string); ok {
-						if valStr, ok := v.(string); ok {
-							metadata.Defaults[keyStr] = valStr
+		// Parse arguments (map of argument name -> argument meta with description and default)
+		if argsData := metaData["arguments"]; argsData != nil {
+			if argsMap, ok := argsData.(map[any]any); ok {
+				metadata.Arguments = make(map[string]ArgumentMeta)
+				for k, v := range argsMap {
+					if argName, ok := k.(string); ok {
+						argMeta := ArgumentMeta{}
+						if argConfigMap, ok := v.(map[any]any); ok {
+							if desc, ok := argConfigMap["description"].(string); ok {
+								argMeta.Description = desc
+							}
+							if def, ok := argConfigMap["default"].(string); ok {
+								argMeta.Default = def
+							}
 						}
+						metadata.Arguments[argName] = argMeta
 					}
 				}
 			}
@@ -243,11 +276,11 @@ func (fp *Processor) parseFrontmatter(content string) (Metadata, string, error) 
 
 		// Parse hooks (map of hook type -> hook config)
 		if hooksData := metaData["hooks"]; hooksData != nil {
-			if hooksMap, ok := hooksData.(map[interface{}]interface{}); ok {
+			if hooksMap, ok := hooksData.(map[any]any); ok {
 				metadata.Hooks = make(map[string]HookConfig)
 				for k, v := range hooksMap {
 					if hookType, ok := k.(string); ok {
-						if hookConfigMap, ok := v.(map[interface{}]interface{}); ok {
+						if hookConfigMap, ok := v.(map[any]any); ok {
 							hookConfig := HookConfig{}
 							if handler, ok := hookConfigMap["handler"].(string); ok {
 								hookConfig.Handler = handler
@@ -261,6 +294,11 @@ func (fp *Processor) parseFrontmatter(content string) (Metadata, string, error) 
 				}
 			}
 		}
+
+		// Parse workflow flag
+		if workflow, ok := metaData["workflow"].(bool); ok {
+			metadata.Workflow = workflow
+		}
 	}
 
 	bodyContent := fp.extractBodyContent(content)
@@ -268,10 +306,10 @@ func (fp *Processor) parseFrontmatter(content string) (Metadata, string, error) 
 	return metadata, bodyContent, nil
 }
 
-// parseStringArrayField handles both []interface{} (YAML array) and string (comma-separated) formats
-func (fp *Processor) parseStringArrayField(field interface{}) []string {
+// parseStringArrayField handles both []any (YAML array) and string (comma-separated) formats
+func (fp *Processor) parseStringArrayField(field any) []string {
 	switch v := field.(type) {
-	case []interface{}:
+	case []any:
 		// YAML array format: ["tool1", "tool2"]
 		var result []string
 		for _, item := range v {
@@ -346,8 +384,10 @@ func (fp *Processor) LoadFragment(ctx context.Context, config *Config) (*Fragmen
 	// Merge defaults from metadata with provided arguments
 	// User-provided arguments take precedence over defaults
 	mergedArgs := make(map[string]string)
-	for k, v := range metadata.Defaults {
-		mergedArgs[k] = v
+	for k, v := range metadata.Arguments {
+		if v.Default != "" {
+			mergedArgs[k] = v.Default
+		}
 	}
 	for k, v := range config.Arguments {
 		mergedArgs[k] = v
@@ -432,7 +472,7 @@ func (fp *Processor) createBashFunc(ctx context.Context) func(...string) string 
 		command := args[0]
 		cmdArgs := args[1:]
 
-		logger.G(ctx).WithFields(map[string]interface{}{
+		logger.G(ctx).WithFields(map[string]any{
 			"command": command,
 			"args":    cmdArgs,
 		}).Debug("Executing bash command")
@@ -444,7 +484,7 @@ func (fp *Processor) createBashFunc(ctx context.Context) func(...string) string 
 		cmd := exec.CommandContext(cmdCtx, command, cmdArgs...)
 		output, err := cmd.CombinedOutput()
 		if err != nil {
-			logger.G(ctx).WithFields(map[string]interface{}{
+			logger.G(ctx).WithFields(map[string]any{
 				"command": command,
 				"args":    cmdArgs,
 			}).WithError(err).Warn("Bash command failed")
@@ -458,8 +498,8 @@ func (fp *Processor) createBashFunc(ctx context.Context) func(...string) string 
 }
 
 // createDefaultFunc returns a function that provides default values for missing template variables
-func (fp *Processor) createDefaultFunc() func(interface{}, string) string {
-	return func(value interface{}, defaultValue string) string {
+func (fp *Processor) createDefaultFunc() func(any, string) string {
+	return func(value any, defaultValue string) string {
 		// Handle nil values
 		if value == nil {
 			return defaultValue
@@ -563,10 +603,77 @@ func (fp *Processor) ListFragmentsWithMetadata() ([]*Fragment, error) {
 		}, &fragments, seen)
 	}
 
+	for _, pluginDir := range fp.pluginDirs {
+		dirFS := os.DirFS(pluginDir.Dir)
+		fp.processFragmentsFromFSWithPrefix(dirFS, pluginDir.Prefix, func(name string) string {
+			return filepath.Join(pluginDir.Dir, name)
+		}, &fragments, seen)
+	}
+
 	fp.processFragmentsFromFS(fp.builtinRecipesFS, func(name string) string {
 		fragmentName := strings.TrimSuffix(name, ".md")
 		return "builtin:" + fragmentName + ".md"
 	}, &fragments, seen)
 
 	return fragments, nil
+}
+
+// processFragmentsFromFSWithPrefix processes fragments from a filesystem with a name prefix
+func (fp *Processor) processFragmentsFromFSWithPrefix(fragmentsFS fs.FS, prefix string, pathConstructor func(string) string, fragments *[]*Fragment, seen map[string]bool) {
+	fp.walkFragmentsDirWithPrefix(fragmentsFS, ".", prefix, pathConstructor, fragments, seen)
+}
+
+// walkFragmentsDirWithPrefix walks a directory and processes fragments with a name prefix
+func (fp *Processor) walkFragmentsDirWithPrefix(fragmentsFS fs.FS, dir, prefix string, pathConstructor func(string) string, fragments *[]*Fragment, seen map[string]bool) {
+	entries, err := fs.ReadDir(fragmentsFS, dir)
+	if err != nil {
+		return
+	}
+
+	for _, entry := range entries {
+		entryPath := filepath.Join(dir, entry.Name())
+
+		if entry.IsDir() {
+			fp.walkFragmentsDirWithPrefix(fragmentsFS, entryPath, prefix, pathConstructor, fragments, seen)
+			continue
+		}
+
+		content, err := fs.ReadFile(fragmentsFS, entryPath)
+		if err != nil {
+			continue
+		}
+
+		displayPath := pathConstructor(entryPath)
+		if fragment := fp.processFragmentEntryWithPrefix(entryPath, displayPath, prefix, content, seen); fragment != nil {
+			*fragments = append(*fragments, fragment)
+		}
+	}
+}
+
+// processFragmentEntryWithPrefix processes a single fragment entry with a name prefix
+func (fp *Processor) processFragmentEntryWithPrefix(name, path, prefix string, content []byte, seen map[string]bool) *Fragment {
+	fragmentName := strings.TrimSuffix(name, ".md")
+	fragmentName = filepath.ToSlash(fragmentName)
+	fragmentName = prefix + fragmentName
+
+	if seen[fragmentName] {
+		return nil
+	}
+
+	metadata, bodyContent, err := fp.parseFrontmatter(string(content))
+	if err != nil {
+		return nil
+	}
+
+	if metadata.Name == "" {
+		metadata.Name = filepath.Base(fragmentName)
+	}
+
+	seen[fragmentName] = true
+	return &Fragment{
+		ID:       fragmentName,
+		Metadata: metadata,
+		Content:  bodyContent,
+		Path:     path,
+	}
 }

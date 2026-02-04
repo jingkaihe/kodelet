@@ -247,7 +247,7 @@ func (s *Store) Delete(ctx context.Context, id string) error {
 func (s *Store) Query(ctx context.Context, options conversations.QueryOptions) (conversations.QueryResult, error) {
 	// Build WHERE conditions
 	conditions := []string{}
-	args := map[string]interface{}{}
+	args := map[string]any{}
 
 	if options.StartDate != nil {
 		conditions = append(conditions, "created_at >= :start_date")
@@ -331,7 +331,7 @@ func (s *Store) Query(ctx context.Context, options conversations.QueryOptions) (
 	}
 
 	// Remove pagination args for count query
-	countArgs := make(map[string]interface{})
+	countArgs := make(map[string]any)
 	for k, v := range args {
 		if k != "limit" && k != "offset" {
 			countArgs[k] = v

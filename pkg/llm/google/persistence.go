@@ -48,7 +48,7 @@ func (t *Thread) SaveConversation(ctx context.Context, summarise bool) error {
 		RawMessages:         rawMessages,
 		Provider:            "google",
 		Usage:               *t.Usage,
-		Metadata:            map[string]interface{}{"model": t.Config.Model, "backend": t.backend},
+		Metadata:            map[string]any{"model": t.Config.Model, "backend": t.backend},
 		Summary:             summary,
 		CreatedAt:           time.Now(),
 		UpdatedAt:           time.Now(),
@@ -109,7 +109,7 @@ func (t *Thread) generateSummary(ctx context.Context) string {
 		weakModelConfig.Model = "gemini-2.5-flash"
 	}
 
-	summaryThread, err := NewGoogleThread(weakModelConfig, t.SubagentContextFactory)
+	summaryThread, err := NewGoogleThread(weakModelConfig)
 	if err != nil {
 		logger.G(ctx).WithError(err).Error("Failed to create summary thread")
 		return ""

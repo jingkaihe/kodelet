@@ -2,242 +2,153 @@ package tools
 
 import (
 	"context"
-	"errors"
 	"testing"
 
+	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"go.opentelemetry.io/otel/attribute"
 
-	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
-// Simple mock that only implements what we need for testing
-type subagentMockThread struct {
-	mock.Mock
-}
-
-func (m *subagentMockThread) SendMessage(ctx context.Context, message string, handler llmtypes.MessageHandler, opt llmtypes.MessageOpt) (string, error) {
-	args := m.Called(ctx, message, handler, opt)
-	return args.String(0), args.Error(1)
-}
-
-// Stub implementations for unused methods
-func (m *subagentMockThread) SetState(_ tooltypes.State) {}
-func (m *subagentMockThread) GetState() tooltypes.State  { return nil }
-func (m *subagentMockThread) AddUserMessage(_ context.Context, _ string, _ ...string) {
-}
-func (m *subagentMockThread) GetUsage() llmtypes.Usage                         { return llmtypes.Usage{} }
-func (m *subagentMockThread) GetConversationID() string                        { return "" }
-func (m *subagentMockThread) SetConversationID(_ string)                       {}
-func (m *subagentMockThread) SaveConversation(_ context.Context, _ bool) error { return nil }
-func (m *subagentMockThread) IsPersisted() bool                                { return false }
-func (m *subagentMockThread) EnablePersistence(_ context.Context, _ bool)      {}
-func (m *subagentMockThread) Provider() string                                 { return "" }
-func (m *subagentMockThread) GetMessages() ([]llmtypes.Message, error)         { return nil, nil }
-func (m *subagentMockThread) GetConfig() llmtypes.Config                       { return llmtypes.Config{} }
-func (m *subagentMockThread) NewSubAgent(_ context.Context, _ llmtypes.Config) llmtypes.Thread {
-	return m
-}
-func (m *subagentMockThread) AggregateSubagentUsage(_ llmtypes.Usage)         {}
-func (m *subagentMockThread) SetRecipeHooks(_ map[string]llmtypes.HookConfig) {}
-func (m *subagentMockThread) GetRecipeHooks() map[string]llmtypes.HookConfig  { return nil }
-
 func TestSubAgentTool_BasicMethods(t *testing.T) {
-	tool := &SubAgentTool{}
+	tool := NewSubAgentTool(nil, false)
 
 	assert.Equal(t, "subagent", tool.Name())
 	assert.NotNil(t, tool.GenerateSchema())
 	assert.Contains(t, tool.Description(), "delegate tasks to a sub-agent")
 }
 
+func TestSubAgentTool_DescriptionWithWorkflows(t *testing.T) {
+	workflows := map[string]*fragments.Fragment{
+		"test-workflow": {
+			ID: "test-workflow",
+			Metadata: fragments.Metadata{
+				Name:        "Test Workflow",
+				Description: "A test workflow for testing",
+				Arguments: map[string]fragments.ArgumentMeta{
+					"arg1": {
+						Description: "First argument",
+						Default:     "default1",
+					},
+					"arg2": {
+						Description: "Second argument",
+					},
+				},
+			},
+		},
+	}
+
+	t.Run("workflows disabled", func(t *testing.T) {
+		tool := NewSubAgentTool(workflows, false)
+		desc := tool.Description()
+		assert.Contains(t, desc, "<no_workflows_available />")
+		assert.NotContains(t, desc, "test-workflow")
+	})
+
+	t.Run("workflows enabled", func(t *testing.T) {
+		tool := NewSubAgentTool(workflows, true)
+		desc := tool.Description()
+		assert.Contains(t, desc, "<workflows>")
+		assert.Contains(t, desc, `<workflow name="test-workflow">`)
+		assert.Contains(t, desc, "<description>A test workflow for testing</description>")
+		assert.Contains(t, desc, `<argument name="arg1" default="default1">First argument</argument>`)
+		assert.Contains(t, desc, `<argument name="arg2">Second argument</argument>`)
+		assert.Contains(t, desc, "</workflow>")
+		assert.Contains(t, desc, "</workflows>")
+	})
+
+	t.Run("no workflows", func(t *testing.T) {
+		tool := NewSubAgentTool(nil, true)
+		desc := tool.Description()
+		assert.Contains(t, desc, "<no_workflows_available />")
+	})
+}
+
 func TestSubAgentTool_ValidateInput(t *testing.T) {
-	tool := &SubAgentTool{}
+	tool := NewSubAgentTool(nil, false)
 	state := NewBasicState(context.TODO())
 
 	// Valid inputs
 	err := tool.ValidateInput(state, `{"question": "test"}`)
 	assert.NoError(t, err)
 
-	// Invalid inputs
+	// Invalid inputs - empty question without workflow
 	err = tool.ValidateInput(state, `{"question": ""}`)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "question is required")
+	assert.Contains(t, err.Error(), "question is required when workflow is not specified")
+
+	// Invalid inputs - args without workflow
+	err = tool.ValidateInput(state, `{"question": "test", "args": {"key": "value"}}`)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "args can only be used with a workflow")
+}
+
+func TestSubAgentTool_ValidateInputWithWorkflows(t *testing.T) {
+	workflows := map[string]*fragments.Fragment{
+		"valid-workflow": {
+			ID: "valid-workflow",
+			Metadata: fragments.Metadata{
+				Name:        "Valid Workflow",
+				Description: "A valid workflow",
+			},
+		},
+	}
+	tool := NewSubAgentTool(workflows, true)
+	state := NewBasicState(context.TODO())
+
+	t.Run("valid workflow with question", func(t *testing.T) {
+		err := tool.ValidateInput(state, `{"question": "test", "workflow": "valid-workflow"}`)
+		assert.NoError(t, err)
+	})
+
+	t.Run("valid workflow without question", func(t *testing.T) {
+		err := tool.ValidateInput(state, `{"workflow": "valid-workflow"}`)
+		assert.NoError(t, err)
+	})
+
+	t.Run("invalid workflow", func(t *testing.T) {
+		err := tool.ValidateInput(state, `{"question": "test", "workflow": "invalid-workflow"}`)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "unknown workflow 'invalid-workflow'")
+	})
+
+	t.Run("no workflow specified", func(t *testing.T) {
+		err := tool.ValidateInput(state, `{"question": "test"}`)
+		assert.NoError(t, err)
+	})
 }
 
 func TestSubAgentTool_TracingKVs(t *testing.T) {
-	tool := &SubAgentTool{}
+	tool := NewSubAgentTool(nil, false)
 
-	kvs, err := tool.TracingKVs(`{"question": "test question"}`)
-	assert.NoError(t, err)
-	expected := []attribute.KeyValue{
-		attribute.String("question", "test question"),
-	}
-	assert.Equal(t, expected, kvs)
-}
-
-func TestSubAgentTool_Execute_Success(t *testing.T) {
-	tool := &SubAgentTool{}
-	mockThread := new(subagentMockThread)
-
-	mockThread.On("SendMessage", mock.Anything, "test question", mock.Anything, llmtypes.MessageOpt{
-		PromptCache:        true,
-		UseWeakModel:       false,
-		NoSaveConversation: true,
-		CompactRatio:       0.0,
-		DisableAutoCompact: false,
-	}).Return("test response", nil)
-
-	ctx := context.WithValue(context.Background(), llmtypes.SubAgentConfigKey, llmtypes.SubAgentConfig{
-		Thread:             mockThread,
-		MessageHandler:     &llmtypes.StringCollectorHandler{Silent: true},
-		CompactRatio:       0.0,
-		DisableAutoCompact: false,
+	t.Run("with question only", func(t *testing.T) {
+		kvs, err := tool.TracingKVs(`{"question": "test question"}`)
+		assert.NoError(t, err)
+		expected := []attribute.KeyValue{
+			attribute.String("question", "test question"),
+		}
+		assert.Equal(t, expected, kvs)
 	})
 
-	result := tool.Execute(ctx, NewBasicState(ctx), `{"question": "test question"}`)
-
-	assert.False(t, result.IsError())
-	assert.Equal(t, "test response", result.GetResult())
-
-	// Test structured data - this is the key functionality we're testing
-	structuredData := result.StructuredData()
-	assert.Equal(t, "subagent", structuredData.ToolName)
-	assert.True(t, structuredData.Success)
-
-	var metadata tooltypes.SubAgentMetadata
-	assert.True(t, tooltypes.ExtractMetadata(structuredData.Metadata, &metadata))
-	assert.Equal(t, "test question", metadata.Question)
-	assert.Equal(t, "test response", metadata.Response)
-
-	mockThread.AssertExpectations(t)
-}
-
-func TestSubAgentTool_Execute_InheritsCompactConfig(t *testing.T) {
-	tool := &SubAgentTool{}
-	mockThread := new(subagentMockThread)
-
-	// Test that subagent inherits parent's compact configuration
-	mockThread.On("SendMessage", mock.Anything, "test question", mock.Anything, llmtypes.MessageOpt{
-		PromptCache:        true,
-		UseWeakModel:       false,
-		NoSaveConversation: true,
-		CompactRatio:       0.8,
-		DisableAutoCompact: true,
-	}).Return("test response", nil)
-
-	ctx := context.WithValue(context.Background(), llmtypes.SubAgentConfigKey, llmtypes.SubAgentConfig{
-		Thread:             mockThread,
-		MessageHandler:     &llmtypes.StringCollectorHandler{Silent: true},
-		CompactRatio:       0.8,
-		DisableAutoCompact: true,
+	t.Run("with question and workflow", func(t *testing.T) {
+		kvs, err := tool.TracingKVs(`{"question": "test question", "workflow": "test-workflow"}`)
+		assert.NoError(t, err)
+		expected := []attribute.KeyValue{
+			attribute.String("question", "test question"),
+			attribute.String("workflow", "test-workflow"),
+		}
+		assert.Equal(t, expected, kvs)
 	})
 
-	result := tool.Execute(ctx, NewBasicState(ctx), `{"question": "test question"}`)
-
-	assert.False(t, result.IsError())
-	assert.Equal(t, "test response", result.GetResult())
-
-	mockThread.AssertExpectations(t)
-}
-
-func TestSubAgentTool_Execute_InheritsVariousCompactConfigs(t *testing.T) {
-	tool := &SubAgentTool{}
-
-	testCases := []struct {
-		name               string
-		compactRatio       float64
-		disableAutoCompact bool
-	}{
-		{
-			name:               "Default values",
-			compactRatio:       0.0,
-			disableAutoCompact: false,
-		},
-		{
-			name:               "High compact ratio enabled",
-			compactRatio:       0.9,
-			disableAutoCompact: false,
-		},
-		{
-			name:               "Low compact ratio enabled",
-			compactRatio:       0.3,
-			disableAutoCompact: false,
-		},
-		{
-			name:               "Compact disabled",
-			compactRatio:       0.8,
-			disableAutoCompact: true,
-		},
-		{
-			name:               "Edge case: ratio 1.0 with compaction disabled",
-			compactRatio:       1.0,
-			disableAutoCompact: true,
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			mockThread := new(subagentMockThread)
-
-			expectedOpt := llmtypes.MessageOpt{
-				PromptCache:        true,
-				UseWeakModel:       false,
-				NoSaveConversation: true,
-				CompactRatio:       tc.compactRatio,
-				DisableAutoCompact: tc.disableAutoCompact,
-			}
-
-			mockThread.On("SendMessage", mock.Anything, "test question", mock.Anything, expectedOpt).Return("test response", nil)
-
-			ctx := context.WithValue(context.Background(), llmtypes.SubAgentConfigKey, llmtypes.SubAgentConfig{
-				Thread:             mockThread,
-				MessageHandler:     &llmtypes.StringCollectorHandler{Silent: true},
-				CompactRatio:       tc.compactRatio,
-				DisableAutoCompact: tc.disableAutoCompact,
-			})
-
-			result := tool.Execute(ctx, NewBasicState(ctx), `{"question": "test question"}`)
-
-			assert.False(t, result.IsError())
-			assert.Equal(t, "test response", result.GetResult())
-
-			mockThread.AssertExpectations(t)
-		})
-	}
-}
-
-func TestSubAgentTool_Execute_Errors(t *testing.T) {
-	tool := &SubAgentTool{}
-
-	// Test missing context
-	result := tool.Execute(context.Background(), NewBasicState(context.TODO()), `{"question": "test"}`)
-	assert.True(t, result.IsError())
-	assert.Contains(t, result.GetError(), "sub-agent config not found")
-
-	// Test thread error
-	mockThread := new(subagentMockThread)
-	mockThread.On("SendMessage", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return("", errors.New("thread error"))
-
-	ctx := context.WithValue(context.Background(), llmtypes.SubAgentConfigKey, llmtypes.SubAgentConfig{
-		Thread:             mockThread,
-		MessageHandler:     &llmtypes.StringCollectorHandler{Silent: true},
-		CompactRatio:       0.0,
-		DisableAutoCompact: false,
+	t.Run("with workflow only", func(t *testing.T) {
+		kvs, err := tool.TracingKVs(`{"workflow": "test-workflow"}`)
+		assert.NoError(t, err)
+		expected := []attribute.KeyValue{
+			attribute.String("workflow", "test-workflow"),
+		}
+		assert.Equal(t, expected, kvs)
 	})
-
-	result = tool.Execute(ctx, NewBasicState(ctx), `{"question": "test"}`)
-	assert.True(t, result.IsError())
-	assert.Contains(t, result.GetError(), "thread error")
-
-	// Even in error case, metadata should be preserved
-	var metadata tooltypes.SubAgentMetadata
-	assert.True(t, tooltypes.ExtractMetadata(result.StructuredData().Metadata, &metadata))
-	assert.Equal(t, "test", metadata.Question)
-	assert.Empty(t, metadata.Response)
-
-	mockThread.AssertExpectations(t)
 }
 
 func TestSubAgentToolResult_Methods(t *testing.T) {
@@ -263,3 +174,335 @@ func TestSubAgentToolResult_Methods(t *testing.T) {
 	assert.True(t, errorResult.IsError())
 	assert.Contains(t, errorResult.AssistantFacing(), "error")
 }
+
+func TestSubAgentToolResult_StructuredData(t *testing.T) {
+	// Test successful result structured data
+	result := &SubAgentToolResult{
+		result:   "test response",
+		question: "test question",
+	}
+
+	structuredData := result.StructuredData()
+	assert.Equal(t, "subagent", structuredData.ToolName)
+	assert.True(t, structuredData.Success)
+
+	var metadata tooltypes.SubAgentMetadata
+	assert.True(t, tooltypes.ExtractMetadata(structuredData.Metadata, &metadata))
+	assert.Equal(t, "test question", metadata.Question)
+	assert.Equal(t, "test response", metadata.Response)
+
+	// Test error result structured data
+	errorResult := &SubAgentToolResult{
+		err:      "some error",
+		question: "test question",
+	}
+
+	errorStructuredData := errorResult.StructuredData()
+	assert.Equal(t, "subagent", errorStructuredData.ToolName)
+	assert.False(t, errorStructuredData.Success)
+	assert.Equal(t, "some error", errorStructuredData.Error)
+
+	var errorMetadata tooltypes.SubAgentMetadata
+	assert.True(t, tooltypes.ExtractMetadata(errorStructuredData.Metadata, &errorMetadata))
+	assert.Equal(t, "test question", errorMetadata.Question)
+	assert.Empty(t, errorMetadata.Response)
+}
+
+func TestBuildSubagentArgs(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("basic args without subagent_args", func(t *testing.T) {
+		input := &SubAgentInput{Question: "What is foo?"}
+		args := BuildSubagentArgs(ctx, "", input)
+
+		assert.Equal(t, []string{
+			"run", "--result-only", "--as-subagent",
+			"What is foo?",
+		}, args)
+	})
+
+	t.Run("with --use-weak-model", func(t *testing.T) {
+		input := &SubAgentInput{Question: "What is foo?"}
+		args := BuildSubagentArgs(ctx, "--use-weak-model", input)
+
+		assert.Equal(t, []string{
+			"run", "--result-only", "--as-subagent",
+			"--use-weak-model",
+			"What is foo?",
+		}, args)
+	})
+
+	t.Run("with --profile flag", func(t *testing.T) {
+		input := &SubAgentInput{Question: "What is foo?"}
+		args := BuildSubagentArgs(ctx, "--profile cheap", input)
+
+		assert.Equal(t, []string{
+			"run", "--result-only", "--as-subagent",
+			"--profile", "cheap",
+			"What is foo?",
+		}, args)
+	})
+
+	t.Run("with multiple flags", func(t *testing.T) {
+		input := &SubAgentInput{Question: "What is foo?"}
+		args := BuildSubagentArgs(ctx, "--profile openai-subagent --use-weak-model", input)
+
+		assert.Equal(t, []string{
+			"run", "--result-only", "--as-subagent",
+			"--profile", "openai-subagent",
+			"--use-weak-model",
+			"What is foo?",
+		}, args)
+	})
+
+	t.Run("with quoted argument in subagent_args", func(t *testing.T) {
+		input := &SubAgentInput{Question: "What is foo?"}
+		args := BuildSubagentArgs(ctx, `--profile "my profile"`, input)
+
+		assert.Equal(t, []string{
+			"run", "--result-only", "--as-subagent",
+			"--profile", "my profile",
+			"What is foo?",
+		}, args)
+	})
+
+	t.Run("preserves question with special characters", func(t *testing.T) {
+		question := `Where is the "foo()" function defined?`
+		input := &SubAgentInput{Question: question}
+		args := BuildSubagentArgs(ctx, "", input)
+
+		assert.Equal(t, []string{
+			"run", "--result-only", "--as-subagent",
+			question,
+		}, args)
+	})
+
+	t.Run("invalid shlex syntax falls back gracefully", func(t *testing.T) {
+		input := &SubAgentInput{Question: "What is foo?"}
+		args := BuildSubagentArgs(ctx, `--profile "unclosed`, input)
+
+		assert.Equal(t, []string{
+			"run", "--result-only", "--as-subagent",
+			"What is foo?",
+		}, args)
+	})
+
+	t.Run("empty question not appended", func(t *testing.T) {
+		input := &SubAgentInput{Question: ""}
+		args := BuildSubagentArgs(ctx, "--use-weak-model", input)
+
+		assert.Equal(t, []string{
+			"run", "--result-only", "--as-subagent",
+			"--use-weak-model",
+		}, args)
+	})
+
+	t.Run("workflow only without question", func(t *testing.T) {
+		input := &SubAgentInput{
+			Workflow: "github/pr",
+		}
+		args := BuildSubagentArgs(ctx, "", input)
+
+		assert.Equal(t, []string{
+			"run", "--result-only", "--as-subagent",
+			"-r", "github/pr",
+		}, args)
+	})
+
+	t.Run("with workflow", func(t *testing.T) {
+		input := &SubAgentInput{
+			Question: "Create a PR",
+			Workflow: "github/pr",
+		}
+		args := BuildSubagentArgs(ctx, "", input)
+
+		assert.Equal(t, []string{
+			"run", "--result-only", "--as-subagent",
+			"-r", "github/pr",
+			"Create a PR",
+		}, args)
+	})
+
+	t.Run("with workflow and args", func(t *testing.T) {
+		input := &SubAgentInput{
+			Question: "Create a PR",
+			Workflow: "github/pr",
+			Args: map[string]string{
+				"target": "develop",
+				"draft":  "true",
+			},
+		}
+		args := BuildSubagentArgs(ctx, "", input)
+
+		// Args are now sorted alphabetically for deterministic output
+		assert.Equal(t, []string{
+			"run", "--result-only", "--as-subagent",
+			"-r", "github/pr",
+			"--arg", "draft=true",
+			"--arg", "target=develop",
+			"Create a PR",
+		}, args)
+	})
+
+	t.Run("with workflow and subagent_args", func(t *testing.T) {
+		input := &SubAgentInput{
+			Question: "Create a PR",
+			Workflow: "github/pr",
+		}
+		args := BuildSubagentArgs(ctx, "--use-weak-model", input)
+
+		assert.Equal(t, []string{
+			"run", "--result-only", "--as-subagent",
+			"--use-weak-model",
+			"-r", "github/pr",
+			"Create a PR",
+		}, args)
+	})
+}
+
+func TestSubAgentTool_GetWorkflowsAndIsWorkflowEnabled(t *testing.T) {
+	workflows := map[string]*fragments.Fragment{
+		"test": {ID: "test"},
+	}
+
+	t.Run("enabled with workflows", func(t *testing.T) {
+		tool := NewSubAgentTool(workflows, true)
+		assert.True(t, tool.IsWorkflowEnabled())
+		assert.Equal(t, workflows, tool.GetWorkflows())
+	})
+
+	t.Run("disabled", func(t *testing.T) {
+		tool := NewSubAgentTool(workflows, false)
+		assert.False(t, tool.IsWorkflowEnabled())
+	})
+
+	t.Run("nil workflows", func(t *testing.T) {
+		tool := NewSubAgentTool(nil, true)
+		assert.True(t, tool.IsWorkflowEnabled())
+		assert.Nil(t, tool.GetWorkflows())
+	})
+}
+
+func TestSubAgentTool_WorkflowFiltering(t *testing.T) {
+	// Create a mix of workflow and non-workflow fragments
+	allFragments := map[string]*fragments.Fragment{
+		"github/pr": {
+			ID: "github/pr",
+			Metadata: fragments.Metadata{
+				Name:        "PR Generator",
+				Description: "Creates PRs",
+				Workflow:    true,
+			},
+		},
+		"init": {
+			ID: "init",
+			Metadata: fragments.Metadata{
+				Name:        "Init",
+				Description: "Bootstrap AGENTS.md",
+				Workflow:    true,
+			},
+		},
+		"commit": {
+			ID: "commit",
+			Metadata: fragments.Metadata{
+				Name:        "Commit Generator",
+				Description: "Creates commit messages",
+				Workflow:    false, // Not a workflow
+			},
+		},
+		"compact": {
+			ID: "compact",
+			Metadata: fragments.Metadata{
+				Name:        "Compact",
+				Description: "Compacts context",
+				// Workflow not set (defaults to false)
+			},
+		},
+	}
+
+	// Simulate filtering logic that should be applied by discoverWorkflows
+	filteredWorkflows := make(map[string]*fragments.Fragment)
+	for id, frag := range allFragments {
+		if frag.Metadata.Workflow {
+			filteredWorkflows[id] = frag
+		}
+	}
+
+	t.Run("only workflow fragments are included", func(t *testing.T) {
+		assert.Len(t, filteredWorkflows, 2)
+		assert.Contains(t, filteredWorkflows, "github/pr")
+		assert.Contains(t, filteredWorkflows, "init")
+		assert.NotContains(t, filteredWorkflows, "commit")
+		assert.NotContains(t, filteredWorkflows, "compact")
+	})
+
+	t.Run("subagent tool shows only workflows in description", func(t *testing.T) {
+		tool := NewSubAgentTool(filteredWorkflows, true)
+		desc := tool.Description()
+
+		// Should contain workflow fragments
+		assert.Contains(t, desc, `<workflow name="github/pr">`)
+		assert.Contains(t, desc, `<workflow name="init">`)
+
+		// Should NOT contain non-workflow fragments
+		assert.NotContains(t, desc, `<workflow name="commit">`)
+		assert.NotContains(t, desc, `<workflow name="compact">`)
+	})
+
+	t.Run("subagent validates only known workflows", func(t *testing.T) {
+		tool := NewSubAgentTool(filteredWorkflows, true)
+		state := NewBasicState(context.TODO())
+
+		// Valid workflow should pass
+		err := tool.ValidateInput(state, `{"workflow": "github/pr"}`)
+		assert.NoError(t, err)
+
+		// Invalid workflow should fail
+		err = tool.ValidateInput(state, `{"workflow": "commit"}`)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "unknown workflow 'commit'")
+
+		// Non-existent workflow should fail
+		err = tool.ValidateInput(state, `{"workflow": "nonexistent"}`)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "unknown workflow 'nonexistent'")
+	})
+}
+
+func TestSubAgentTool_DescriptionWithWorkflowField(t *testing.T) {
+	// Test that only fragments with Workflow: true appear in description
+	workflows := map[string]*fragments.Fragment{
+		"custom-tool": {
+			ID: "custom-tool",
+			Metadata: fragments.Metadata{
+				Name:        "Custom Tool Generator",
+				Description: "Creates custom tools",
+				Workflow:    true,
+				Arguments: map[string]fragments.ArgumentMeta{
+					"task": {
+						Description: "Description of what the tool should do",
+					},
+					"global": {
+						Description: "Whether to save globally",
+						Default:     "false",
+					},
+				},
+			},
+		},
+	}
+
+	tool := NewSubAgentTool(workflows, true)
+	desc := tool.Description()
+
+	// Verify workflows section structure
+	assert.Contains(t, desc, "<workflows>")
+	assert.Contains(t, desc, "</workflows>")
+
+	// Verify custom-tool workflow
+	assert.Contains(t, desc, `<workflow name="custom-tool">`)
+	assert.Contains(t, desc, "<description>Creates custom tools</description>")
+	assert.Contains(t, desc, `<argument name="global" default="false">Whether to save globally</argument>`)
+	assert.Contains(t, desc, `<argument name="task">Description of what the tool should do</argument>`)
+}
+
+// Execute tests require integration testing (shell-out via exec.CommandContext)
