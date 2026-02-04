@@ -16,6 +16,7 @@ Usage:
 """
 
 import asyncio
+import base64
 import json
 import os
 import subprocess
@@ -30,6 +31,7 @@ from acp import (  # type: ignore[import-not-found]
     PROTOCOL_VERSION,
     Client,
     RequestError,
+    image_block,
     spawn_agent_process,
     text_block,
 )
@@ -379,7 +381,7 @@ async def load_session_history(session_id: str) -> bool:
         return False
 
 
-async def run_acp_prompt(query: str, container: Any, session_id: str | None = None) -> ResponseState:
+async def run_acp_prompt(query: str, container: Any, session_id: str | None = None, images: list[Any] | None = None) -> ResponseState:
     """Run a prompt via ACP and stream results."""
     kodelet_path = find_kodelet_binary()
     state = ResponseState(container=container)
@@ -402,7 +404,17 @@ async def run_acp_prompt(query: str, container: Any, session_id: str | None = No
 
             _finalize_assistant(state)
             state.mode = "live"
-            await conn.prompt(session_id=state.session_id, prompt=[text_block(query)])
+
+            # Build prompt content blocks
+            prompt_blocks: list[Any] = []
+            if images:
+                for img in images:
+                    img_data = base64.b64encode(img.read()).decode("utf-8")
+                    prompt_blocks.append(image_block(img_data, img.type))
+            if query:
+                prompt_blocks.append(text_block(query))
+
+            await conn.prompt(session_id=state.session_id, prompt=prompt_blocks)
 
     except Exception as e:
         st.error(f"ACP error: {e}")
@@ -459,22 +471,38 @@ def main():
             if msg["role"] == "assistant":
                 render_history_message(msg)
             else:
-                st.markdown(msg["content"])
+                # User message - show images if any
+                if msg.get("images"):
+                    for img in msg["images"]:
+                        st.image(base64.b64decode(img["data"]))
+                if msg.get("content"):
+                    st.markdown(msg["content"])
 
     # Handle new input
-    if prompt := st.chat_input("Ask kodelet anything..."):
+    if prompt := st.chat_input("Ask kodelet anything...", accept_file="multiple", file_type=["png", "jpg", "jpeg", "gif", "webp"]):
+        # Extract text and files from prompt
+        text = prompt.text if hasattr(prompt, "text") else str(prompt)
+        files = prompt.files if hasattr(prompt, "files") else []
+
         with st.chat_message("user"):
-            st.markdown(prompt)
+            for f in files:
+                st.image(f)
+            if text:
+                st.markdown(text)
 
         with st.chat_message("assistant"):
             container = st.container()
-            state = asyncio.run(run_acp_prompt(prompt, container, st.session_state.session_id))
+            state = asyncio.run(run_acp_prompt(text, container, st.session_state.session_id, images=files if files else None))
 
         if state.session_id:
             st.session_state.session_id = state.session_id
             st.query_params["c"] = state.session_id
 
-        st.session_state.messages.append({"role": "user", "content": prompt})
+        # Store user message with images as base64 for history
+        user_msg: dict[str, Any] = {"role": "user", "content": text}
+        if files:
+            user_msg["images"] = [{"data": base64.b64encode(f.getvalue()).decode("utf-8"), "type": f.type} for f in files]
+        st.session_state.messages.append(user_msg)
         st.session_state.messages.append({
             "role": "assistant",
             "content": state.message or "No response received.",
