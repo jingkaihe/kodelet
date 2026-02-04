@@ -419,10 +419,8 @@ async def load_history_via_acp(session_id: str) -> list[dict]:
     try:
         async with spawn_agent_process(HistoryClient(), kodelet_path, "acp", transport_kwargs={"limit": ACP_BUFFER_LIMIT}) as (conn, _):
             await conn.initialize(protocol_version=PROTOCOL_VERSION, client_capabilities=None)
-            resp = await conn.load_session(session_id=session_id, cwd=os.getcwd(), mcp_servers=[])
-            if resp is None:
-                return []
-            # Append final message
+            await conn.load_session(session_id=session_id, cwd=os.getcwd(), mcp_servers=[])
+            await asyncio.sleep(0)  # Yield to ensure all callbacks complete
             if current_msg:
                 messages.append(current_msg)
     except Exception:
@@ -444,7 +442,7 @@ def main():
     url_session_id = st.query_params.get("c")
     if url_session_id and st.session_state.session_id != url_session_id:
         st.session_state.session_id = url_session_id
-        st.session_state.messages = load_history_via_cli(url_session_id)
+        st.session_state.messages = asyncio.run(load_history_via_acp(url_session_id))
     if st.session_state.session_id and not url_session_id:
         st.query_params["c"] = st.session_state.session_id
 
