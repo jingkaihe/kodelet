@@ -48,6 +48,7 @@ type Metadata struct {
 	Arguments       map[string]ArgumentMeta `yaml:"arguments,omitempty"` // Argument definitions with descriptions
 	Hooks           map[string]HookConfig   `yaml:"hooks,omitempty"`     // Lifecycle hooks -> handler config
 	Workflow        bool                    `yaml:"workflow,omitempty"`  // If true, this fragment can be used as a subagent workflow
+	Profile         string                  `yaml:"profile,omitempty"`   // Profile name to use for workflow execution
 }
 
 // Fragment represents a fragment with its metadata and content
@@ -298,6 +299,11 @@ func (fp *Processor) parseFrontmatter(content string) (Metadata, string, error) 
 		// Parse workflow flag
 		if workflow, ok := metaData["workflow"].(bool); ok {
 			metadata.Workflow = workflow
+		}
+
+		// Parse profile for workflow execution
+		if profile, ok := metaData["profile"].(string); ok {
+			metadata.Profile = profile
 		}
 	}
 
