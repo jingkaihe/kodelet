@@ -306,6 +306,21 @@ kodelet conversation delete <conversation-id>
 kodelet conversation delete --no-confirm <conversation-id>
 ```
 
+### Database Management
+
+Manage the kodelet database and migrations:
+
+```bash
+# Show migration status
+kodelet db status
+
+# Rollback the last migration (with confirmation prompt)
+kodelet db rollback
+
+# Rollback without confirmation (use with caution)
+kodelet db rollback --no-confirm
+```
+
 ## Streaming and Programmatic Access
 
 Kodelet provides structured JSON streaming capabilities for programmatic integration, enabling you to build custom UIs, monitoring tools, and automation pipelines.

@@ -46,7 +46,7 @@ type Server struct {
 	clientCaps   *acptypes.ClientCapabilities
 
 	sessionManager    *session.Manager
-	sessionStorage    *session.Storage
+	sessionStorage    session.SessionStorage
 	config            *ServerConfig
 	fragmentProcessor *fragments.Processor
 
@@ -129,7 +129,7 @@ func NewServer(opts ...Option) *Server {
 	}
 	s.fragmentProcessor = fp
 
-	storage, err := session.NewStorage()
+	storage, err := session.GetDefaultStorage(ctx)
 	if err != nil {
 		logger.G(ctx).WithError(err).Warn("Failed to create session storage for replay")
 	}

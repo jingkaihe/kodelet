@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/db"
+	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	conversations "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -16,12 +18,25 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// setupTestDB creates a test database with migrations applied
+func setupTestDB(t *testing.T, dbPath string) {
+	t.Helper()
+	ctx := context.Background()
+	sqlDB, err := db.Open(ctx, dbPath)
+	require.NoError(t, err)
+	defer sqlDB.Close()
+
+	runner := db.NewMigrationRunner(sqlDB)
+	require.NoError(t, runner.Run(ctx, migrations.All()))
+}
+
 func TestStore_BasicOperations(t *testing.T) {
 	ctx := context.Background()
 
 	// Create temporary database file
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test_conversations.db")
+	setupTestDB(t, dbPath)
 
 	// Create store
 	store, err := NewStore(ctx, dbPath)
@@ -101,6 +116,7 @@ func TestStore_Query(t *testing.T) {
 	// Create temporary database file
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test_conversations.db")
+	setupTestDB(t, dbPath)
 
 	// Create store
 	store, err := NewStore(ctx, dbPath)
@@ -220,6 +236,7 @@ func TestStore_DefaultSorting(t *testing.T) {
 	// Create temporary database file
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test_default_sorting.db")
+	setupTestDB(t, dbPath)
 
 	// Create store
 	store, err := NewStore(ctx, dbPath)
@@ -407,6 +424,7 @@ func TestStore_SchemaValidation(t *testing.T) {
 	// Create temporary database file
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test_conversations.db")
+	setupTestDB(t, dbPath)
 
 	// Create store
 	store, err := NewStore(ctx, dbPath)
@@ -417,10 +435,10 @@ func TestStore_SchemaValidation(t *testing.T) {
 	err = store.validateSchema()
 	require.NoError(t, err)
 
-	// Test schema version
-	version, err := store.getCurrentSchemaVersion()
+	// Test migration count matches expected
+	count, err := store.getAppliedMigrationCount(ctx)
 	require.NoError(t, err)
-	assert.Equal(t, CurrentSchemaVersion, version)
+	assert.Equal(t, len(migrations.All()), count)
 }
 
 func TestStore_Migrations(t *testing.T) {
@@ -429,19 +447,20 @@ func TestStore_Migrations(t *testing.T) {
 	// Create temporary database file
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test_conversations.db")
+	setupTestDB(t, dbPath)
 
 	// Create store - this should run migrations
 	store, err := NewStore(ctx, dbPath)
 	require.NoError(t, err)
 	defer store.Close()
 
-	// Check that schema version is current
-	version, err := store.getCurrentSchemaVersion()
+	// Check that all migrations are applied
+	count, err := store.getAppliedMigrationCount(ctx)
 	require.NoError(t, err)
-	assert.Equal(t, CurrentSchemaVersion, version)
+	assert.Equal(t, len(migrations.All()), count)
 
 	// Verify all tables exist
-	tables := []string{"schema_version", "conversations", "conversation_summaries"}
+	tables := []string{"schema_migrations", "conversations", "conversation_summaries", "acp_session_updates"}
 	for _, table := range tables {
 		var exists bool
 		err = store.db.QueryRow(`
@@ -460,6 +479,7 @@ func TestStore_WALMode(t *testing.T) {
 	// Create temporary database file
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test_wal.db")
+	setupTestDB(t, dbPath)
 
 	// Create store
 	store, err := NewStore(ctx, dbPath)
@@ -512,7 +532,7 @@ func TestStore_WALMode(t *testing.T) {
 	assert.Equal(t, "wal-test", loaded.ID)
 
 	// Verify database configuration using the helper function
-	err = verifyDatabaseConfiguration(store.db)
+	err = db.VerifyConfiguration(store.db)
 	require.NoError(t, err)
 }
 
@@ -522,6 +542,7 @@ func TestStore_DatabaseIntegration(t *testing.T) {
 	// Create temporary database file
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test_integration.db")
+	setupTestDB(t, dbPath)
 
 	// Create store
 	store, err := NewStore(ctx, dbPath)
@@ -652,6 +673,7 @@ func TestStore_NullHandling(t *testing.T) {
 	// Create temporary database file
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test_null.db")
+	setupTestDB(t, dbPath)
 
 	// Create store
 	store, err := NewStore(ctx, dbPath)
@@ -700,6 +722,7 @@ func TestStore_ConcurrentAccess(t *testing.T) {
 	// Create temporary database file
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test_concurrent.db")
+	setupTestDB(t, dbPath)
 
 	// Create store
 	store, err := NewStore(ctx, dbPath)
@@ -815,6 +838,7 @@ func TestStore_DirectDatabaseAccess(t *testing.T) {
 	// Create temporary database file
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test_direct.db")
+	setupTestDB(t, dbPath)
 
 	// Create store
 	store, err := NewStore(ctx, dbPath)
@@ -909,6 +933,7 @@ func TestStore_TimestampBehavior(t *testing.T) {
 	// Create temporary database file
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test_timestamps.db")
+	setupTestDB(t, dbPath)
 
 	// Create store
 	store, err := NewStore(ctx, dbPath)
@@ -1016,6 +1041,7 @@ func TestStore_BackgroundProcesses_Migration(t *testing.T) {
 	// Create temporary database file
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test_bg_migration.db")
+	setupTestDB(t, dbPath)
 
 	store, err := NewStore(ctx, dbPath)
 	require.NoError(t, err)
@@ -1118,6 +1144,7 @@ func TestStore_ErrorScenarios(t *testing.T) {
 	// Test with valid store for other error scenarios
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test_errors.db")
+	setupTestDB(t, dbPath)
 
 	store, err := NewStore(ctx, dbPath)
 	require.NoError(t, err)

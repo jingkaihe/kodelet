@@ -5,16 +5,13 @@ package sqlite
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/jmoiron/sqlx"
 	"github.com/pkg/errors"
-	// modernc.org/sqlite is a pure Go SQLite driver that requires blank import for database/sql registration
-	_ "modernc.org/sqlite"
 
+	"github.com/jingkaihe/kodelet/pkg/db"
 	"github.com/jingkaihe/kodelet/pkg/types/conversations"
 )
 
@@ -24,120 +21,18 @@ type Store struct {
 	db     *sqlx.DB
 }
 
-// NewStore creates a new SQLite-based conversation store
+// NewStore creates a new SQLite-based conversation store.
+// Note: Migrations should be run via db.RunMigrations() at CLI startup before calling this.
 func NewStore(ctx context.Context, dbPath string) (*Store, error) {
-	// Create directory if needed
-	dir := filepath.Dir(dbPath)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return nil, errors.Wrap(err, "failed to create database directory")
-	}
-
-	// Open SQLite database
-	db, err := sqlx.Open("sqlite", dbPath)
+	sqlDB, err := db.Open(ctx, dbPath)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to open database")
+		return nil, err
 	}
 
-	// Test the connection
-	if err := db.Ping(); err != nil {
-		db.Close()
-		return nil, errors.Wrap(err, "failed to ping database")
-	}
-
-	// Configure database for optimal WAL mode performance
-	if err := configureDatabase(ctx, db); err != nil {
-		db.Close()
-		return nil, errors.Wrap(err, "failed to configure database")
-	}
-
-	store := &Store{
+	return &Store{
 		dbPath: dbPath,
-		db:     db,
-	}
-
-	// Initialize schema and run migrations
-	if err := store.initializeSchema(); err != nil {
-		db.Close()
-		return nil, errors.Wrap(err, "failed to initialize schema")
-	}
-
-	return store, nil
-}
-
-// configureDatabase sets up SQLite pragmas for optimal WAL mode performance
-func configureDatabase(ctx context.Context, db *sqlx.DB) error {
-	// Configure database for optimal WAL mode performance
-	pragmas := []string{
-		"PRAGMA journal_mode=WAL",
-		"PRAGMA synchronous=NORMAL",
-		"PRAGMA cache_size=1000",
-		"PRAGMA temp_store=memory",
-		"PRAGMA busy_timeout=5000",
-		"PRAGMA foreign_keys=ON",
-	}
-
-	for _, pragma := range pragmas {
-		_, err := db.ExecContext(ctx, pragma)
-		if err != nil {
-			return errors.Wrapf(err, "failed to execute pragma: %s", pragma)
-		}
-	}
-	db.SetMaxIdleConns(1)
-	db.SetMaxOpenConns(1)
-	// Verify WAL mode is enabled
-	var journalMode string
-	err := db.QueryRowContext(ctx, "PRAGMA journal_mode").Scan(&journalMode)
-	if err != nil {
-		return errors.Wrap(err, "failed to query journal mode")
-	}
-
-	if strings.ToLower(journalMode) != "wal" {
-		return errors.Errorf("WAL mode not enabled. Current mode: %s", journalMode)
-	}
-
-	return nil
-}
-
-// verifyDatabaseConfiguration checks if the database is properly configured
-func verifyDatabaseConfiguration(db *sqlx.DB) error {
-	// Check journal mode
-	var journalMode string
-	if err := db.Get(&journalMode, "PRAGMA journal_mode"); err != nil {
-		return errors.Wrap(err, "failed to query journal mode")
-	}
-	if strings.ToLower(journalMode) != "wal" {
-		return errors.Errorf("expected WAL mode, got %s", journalMode)
-	}
-
-	// Check synchronous mode
-	var synchronous string
-	if err := db.Get(&synchronous, "PRAGMA synchronous"); err != nil {
-		return errors.Wrap(err, "failed to query synchronous mode")
-	}
-	if synchronous != "1" { // NORMAL = 1
-		return errors.Errorf("expected NORMAL synchronous mode, got %s", synchronous)
-	}
-
-	// Check foreign keys
-	var foreignKeys string
-	if err := db.Get(&foreignKeys, "PRAGMA foreign_keys"); err != nil {
-		return errors.Wrap(err, "failed to query foreign keys")
-	}
-	if foreignKeys != "1" { // ON = 1
-		return errors.Errorf("expected foreign keys ON, got %s", foreignKeys)
-	}
-
-	return nil
-}
-
-// initializeSchema creates the database schema and runs migrations
-func (s *Store) initializeSchema() error {
-	// Run migrations
-	if err := s.runMigrations(); err != nil {
-		return errors.Wrap(err, "failed to run migrations")
-	}
-
-	return nil
+		db:     sqlDB,
+	}, nil
 }
 
 // Save persists a conversation record to the database using UPSERT to preserve created_at timestamps

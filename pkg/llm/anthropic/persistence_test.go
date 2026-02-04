@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -12,6 +13,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	conversations "github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/db"
+	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -158,9 +161,19 @@ func TestDeserializeMessages(t *testing.T) {
 func TestSaveAndLoadConversationWithFileLastAccess(t *testing.T) {
 	// Create a unique temporary directory for this test
 	tempDir := t.TempDir()
+	// NewConversationStore creates storage.db in BasePath
+	dbPath := filepath.Join(tempDir, "storage.db")
+
+	// Run migrations before creating the store
+	ctx := context.Background()
+	sqlDB, err := db.Open(ctx, dbPath)
+	require.NoError(t, err)
+	runner := db.NewMigrationRunner(sqlDB)
+	require.NoError(t, runner.Run(ctx, migrations.All()))
+	sqlDB.Close()
 
 	// Create a conversation store directly with a unique database path
-	store, err := conversations.NewConversationStore(context.Background(), &conversations.Config{
+	store, err := conversations.NewConversationStore(ctx, &conversations.Config{
 		StoreType: "sqlite",
 		BasePath:  tempDir,
 	})

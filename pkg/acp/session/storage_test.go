@@ -1,27 +1,41 @@
 package session
 
 import (
-	"os"
+	"context"
 	"path/filepath"
 	"sync"
 	"testing"
 
 	"github.com/jingkaihe/kodelet/pkg/acp/acptypes"
+	"github.com/jingkaihe/kodelet/pkg/db"
+	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
+// setupTestDB creates a test database with migrations applied
+func setupTestDB(t *testing.T, dbPath string) {
+	t.Helper()
+	ctx := context.Background()
+	sqlDB, err := db.Open(ctx, dbPath)
+	require.NoError(t, err)
+	defer sqlDB.Close()
+
+	runner := db.NewMigrationRunner(sqlDB)
+	require.NoError(t, runner.Run(ctx, migrations.All()))
+}
+
 func TestStorage_AppendAndRead(t *testing.T) {
 	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "sessions.db")
+	setupTestDB(t, dbPath)
 
-	storage := &Storage{
-		basePath: tmpDir,
-		files:    make(map[acptypes.SessionID]*sessionFile),
-	}
+	storage, err := NewStorage(context.Background(), WithDBPath(dbPath))
+	require.NoError(t, err)
+	defer storage.Close()
 
 	sessionID := acptypes.SessionID("test-session-123")
 
-	// Consecutive same-type text chunks should be merged
 	update1 := map[string]any{
 		"sessionUpdate": "agent_message_chunk",
 		"content":       map[string]any{"type": "text", "text": "Hello"},
@@ -31,7 +45,7 @@ func TestStorage_AppendAndRead(t *testing.T) {
 		"content":       map[string]any{"type": "text", "text": "World"},
 	}
 
-	err := storage.AppendUpdate(sessionID, update1)
+	err = storage.AppendUpdate(sessionID, update1)
 	require.NoError(t, err)
 
 	err = storage.AppendUpdate(sessionID, update2)
@@ -42,7 +56,6 @@ func TestStorage_AppendAndRead(t *testing.T) {
 
 	updates, err := storage.ReadUpdates(sessionID)
 	require.NoError(t, err)
-	// Merged into single update
 	require.Len(t, updates, 1)
 
 	assert.Equal(t, sessionID, updates[0].SessionID)
@@ -51,15 +64,15 @@ func TestStorage_AppendAndRead(t *testing.T) {
 
 func TestStorage_MergeConsecutiveChunks(t *testing.T) {
 	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "sessions.db")
+	setupTestDB(t, dbPath)
 
-	storage := &Storage{
-		basePath: tmpDir,
-		files:    make(map[acptypes.SessionID]*sessionFile),
-	}
+	storage, err := NewStorage(context.Background(), WithDBPath(dbPath))
+	require.NoError(t, err)
+	defer storage.Close()
 
 	sessionID := acptypes.SessionID("test-merge")
 
-	// User message chunk
 	require.NoError(t, storage.AppendUpdate(sessionID, map[string]any{
 		"sessionUpdate": "user_message_chunk",
 		"content":       map[string]any{"type": "text", "text": "Hello "},
@@ -69,13 +82,11 @@ func TestStorage_MergeConsecutiveChunks(t *testing.T) {
 		"content":       map[string]any{"type": "text", "text": "user!"},
 	}))
 
-	// Agent thought chunk (different type - should flush user_message_chunk)
 	require.NoError(t, storage.AppendUpdate(sessionID, map[string]any{
 		"sessionUpdate": "agent_thought_chunk",
 		"content":       map[string]any{"type": "text", "text": "Thinking..."},
 	}))
 
-	// Agent message chunks
 	require.NoError(t, storage.AppendUpdate(sessionID, map[string]any{
 		"sessionUpdate": "agent_message_chunk",
 		"content":       map[string]any{"type": "text", "text": "Hello "},
@@ -85,13 +96,11 @@ func TestStorage_MergeConsecutiveChunks(t *testing.T) {
 		"content":       map[string]any{"type": "text", "text": "World!"},
 	}))
 
-	// Non-mergeable update (tool_call)
 	require.NoError(t, storage.AppendUpdate(sessionID, map[string]any{
 		"sessionUpdate": "tool_call",
 		"toolCall":      map[string]any{"id": "123", "name": "test"},
 	}))
 
-	// More agent chunks after tool
 	require.NoError(t, storage.AppendUpdate(sessionID, map[string]any{
 		"sessionUpdate": "agent_message_chunk",
 		"content":       map[string]any{"type": "text", "text": "Done!"},
@@ -101,10 +110,8 @@ func TestStorage_MergeConsecutiveChunks(t *testing.T) {
 
 	updates, err := storage.ReadUpdates(sessionID)
 	require.NoError(t, err)
-	// Expect: merged user (1) + merged thought (1) + merged agent (1) + tool_call (1) + merged agent (1) = 5
 	require.Len(t, updates, 5)
 
-	// Verify merged content
 	assert.Contains(t, string(updates[0].Update), "Hello user!")
 	assert.Contains(t, string(updates[1].Update), "Thinking...")
 	assert.Contains(t, string(updates[2].Update), "Hello World!")
@@ -114,15 +121,15 @@ func TestStorage_MergeConsecutiveChunks(t *testing.T) {
 
 func TestStorage_NonMergeableContent(t *testing.T) {
 	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "sessions.db")
+	setupTestDB(t, dbPath)
 
-	storage := &Storage{
-		basePath: tmpDir,
-		files:    make(map[acptypes.SessionID]*sessionFile),
-	}
+	storage, err := NewStorage(context.Background(), WithDBPath(dbPath))
+	require.NoError(t, err)
+	defer storage.Close()
 
 	sessionID := acptypes.SessionID("test-non-mergeable")
 
-	// Non-text content (image) should not be merged
 	require.NoError(t, storage.AppendUpdate(sessionID, map[string]any{
 		"sessionUpdate": "user_message_chunk",
 		"content":       map[string]any{"type": "image", "data": "base64..."},
@@ -136,17 +143,17 @@ func TestStorage_NonMergeableContent(t *testing.T) {
 
 	updates, err := storage.ReadUpdates(sessionID)
 	require.NoError(t, err)
-	// Image is not mergeable, text is separate
 	require.Len(t, updates, 2)
 }
 
 func TestStorage_FlushExplicit(t *testing.T) {
 	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "sessions.db")
+	setupTestDB(t, dbPath)
 
-	storage := &Storage{
-		basePath: tmpDir,
-		files:    make(map[acptypes.SessionID]*sessionFile),
-	}
+	storage, err := NewStorage(context.Background(), WithDBPath(dbPath))
+	require.NoError(t, err)
+	defer storage.Close()
 
 	sessionID := acptypes.SessionID("test-flush")
 
@@ -159,10 +166,8 @@ func TestStorage_FlushExplicit(t *testing.T) {
 		"content":       map[string]any{"type": "text", "text": "Part 2"},
 	}))
 
-	// Explicit flush at turn boundary
 	require.NoError(t, storage.Flush(sessionID))
 
-	// More updates after flush
 	require.NoError(t, storage.AppendUpdate(sessionID, map[string]any{
 		"sessionUpdate": "agent_message_chunk",
 		"content":       map[string]any{"type": "text", "text": "Part 3"},
@@ -172,7 +177,6 @@ func TestStorage_FlushExplicit(t *testing.T) {
 
 	updates, err := storage.ReadUpdates(sessionID)
 	require.NoError(t, err)
-	// First two merged and flushed (1), then third flushed on close (1) = 2
 	require.Len(t, updates, 2)
 
 	assert.Contains(t, string(updates[0].Update), "Part 1Part 2")
@@ -181,11 +185,12 @@ func TestStorage_FlushExplicit(t *testing.T) {
 
 func TestStorage_ReadNonExistent(t *testing.T) {
 	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "sessions.db")
+	setupTestDB(t, dbPath)
 
-	storage := &Storage{
-		basePath: tmpDir,
-		files:    make(map[acptypes.SessionID]*sessionFile),
-	}
+	storage, err := NewStorage(context.Background(), WithDBPath(dbPath))
+	require.NoError(t, err)
+	defer storage.Close()
 
 	updates, err := storage.ReadUpdates("non-existent")
 	require.NoError(t, err)
@@ -194,16 +199,17 @@ func TestStorage_ReadNonExistent(t *testing.T) {
 
 func TestStorage_Delete(t *testing.T) {
 	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "sessions.db")
+	setupTestDB(t, dbPath)
 
-	storage := &Storage{
-		basePath: tmpDir,
-		files:    make(map[acptypes.SessionID]*sessionFile),
-	}
+	storage, err := NewStorage(context.Background(), WithDBPath(dbPath))
+	require.NoError(t, err)
+	defer storage.Close()
 
 	sessionID := acptypes.SessionID("test-session-456")
 
 	update := map[string]any{"test": "data"}
-	err := storage.AppendUpdate(sessionID, update)
+	err = storage.AppendUpdate(sessionID, update)
 	require.NoError(t, err)
 
 	assert.True(t, storage.Exists(sessionID))
@@ -216,18 +222,19 @@ func TestStorage_Delete(t *testing.T) {
 
 func TestStorage_Exists(t *testing.T) {
 	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "sessions.db")
+	setupTestDB(t, dbPath)
 
-	storage := &Storage{
-		basePath: tmpDir,
-		files:    make(map[acptypes.SessionID]*sessionFile),
-	}
+	storage, err := NewStorage(context.Background(), WithDBPath(dbPath))
+	require.NoError(t, err)
+	defer storage.Close()
 
 	sessionID := acptypes.SessionID("test-session-789")
 
 	assert.False(t, storage.Exists(sessionID))
 
 	update := map[string]any{"test": "data"}
-	err := storage.AppendUpdate(sessionID, update)
+	err = storage.AppendUpdate(sessionID, update)
 	require.NoError(t, err)
 
 	assert.True(t, storage.Exists(sessionID))
@@ -235,11 +242,11 @@ func TestStorage_Exists(t *testing.T) {
 
 func TestStorage_Close(t *testing.T) {
 	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "sessions.db")
+	setupTestDB(t, dbPath)
 
-	storage := &Storage{
-		basePath: tmpDir,
-		files:    make(map[acptypes.SessionID]*sessionFile),
-	}
+	storage, err := NewStorage(context.Background(), WithDBPath(dbPath))
+	require.NoError(t, err)
 
 	for i := 0; i < 3; i++ {
 		sessionID := acptypes.SessionID("session-" + string(rune('a'+i)))
@@ -247,21 +254,22 @@ func TestStorage_Close(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	assert.Len(t, storage.files, 3)
+	assert.Len(t, storage.sessions, 3)
 
-	err := storage.Close()
+	err = storage.Close()
 	require.NoError(t, err)
 
-	assert.Len(t, storage.files, 0)
+	assert.Len(t, storage.sessions, 0)
 }
 
 func TestStorage_LargeUpdate(t *testing.T) {
 	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "sessions.db")
+	setupTestDB(t, dbPath)
 
-	storage := &Storage{
-		basePath: tmpDir,
-		files:    make(map[acptypes.SessionID]*sessionFile),
-	}
+	storage, err := NewStorage(context.Background(), WithDBPath(dbPath))
+	require.NoError(t, err)
+	defer storage.Close()
 
 	sessionID := acptypes.SessionID("large-session")
 
@@ -275,7 +283,7 @@ func TestStorage_LargeUpdate(t *testing.T) {
 		"content":       map[string]any{"type": "text", "text": string(largeText)},
 	}
 
-	err := storage.AppendUpdate(sessionID, update)
+	err = storage.AppendUpdate(sessionID, update)
 	require.NoError(t, err)
 
 	err = storage.CloseSession(sessionID)
@@ -286,30 +294,14 @@ func TestStorage_LargeUpdate(t *testing.T) {
 	require.Len(t, updates, 1)
 }
 
-func TestNewStorage(t *testing.T) {
-	origHome := os.Getenv("HOME")
-	tmpDir := t.TempDir()
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", origHome)
-
-	storage, err := NewStorage()
-	require.NoError(t, err)
-	require.NotNil(t, storage)
-
-	expectedPath := filepath.Join(tmpDir, ".kodelet", "acp", "sessions")
-	_, err = os.Stat(expectedPath)
-	require.NoError(t, err)
-
-	storage.Close()
-}
-
 func TestStorage_ConcurrentWritesDifferentSessions(t *testing.T) {
 	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "sessions.db")
+	setupTestDB(t, dbPath)
 
-	storage := &Storage{
-		basePath: tmpDir,
-		files:    make(map[acptypes.SessionID]*sessionFile),
-	}
+	storage, err := NewStorage(context.Background(), WithDBPath(dbPath))
+	require.NoError(t, err)
+	defer storage.Close()
 
 	var wg sync.WaitGroup
 	numSessions := 10
@@ -330,9 +322,11 @@ func TestStorage_ConcurrentWritesDifferentSessions(t *testing.T) {
 
 	wg.Wait()
 
-	// Verify all sessions have correct number of updates
-	err := storage.Close()
-	require.NoError(t, err)
+	for i := 0; i < numSessions; i++ {
+		sessionID := acptypes.SessionID("session-" + string(rune('a'+i)))
+		err := storage.CloseSession(sessionID)
+		require.NoError(t, err)
+	}
 
 	for i := 0; i < numSessions; i++ {
 		sessionID := acptypes.SessionID("session-" + string(rune('a'+i)))
@@ -344,11 +338,12 @@ func TestStorage_ConcurrentWritesDifferentSessions(t *testing.T) {
 
 func TestStorage_ConcurrentWritesSameSession(t *testing.T) {
 	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "sessions.db")
+	setupTestDB(t, dbPath)
 
-	storage := &Storage{
-		basePath: tmpDir,
-		files:    make(map[acptypes.SessionID]*sessionFile),
-	}
+	storage, err := NewStorage(context.Background(), WithDBPath(dbPath))
+	require.NoError(t, err)
+	defer storage.Close()
 
 	sessionID := acptypes.SessionID("shared-session")
 	var wg sync.WaitGroup
@@ -360,8 +355,6 @@ func TestStorage_ConcurrentWritesSameSession(t *testing.T) {
 		go func(goroutineNum int) {
 			defer wg.Done()
 			for j := 0; j < updatesPerGoroutine; j++ {
-				// Using non-mergeable updates (no "sessionUpdate" field with text content)
-				// to ensure each update is written separately and we can verify count
 				update := map[string]any{"goroutine": goroutineNum, "update": j}
 				err := storage.AppendUpdate(sessionID, update)
 				assert.NoError(t, err)
@@ -371,10 +364,65 @@ func TestStorage_ConcurrentWritesSameSession(t *testing.T) {
 
 	wg.Wait()
 
-	err := storage.CloseSession(sessionID)
+	err = storage.CloseSession(sessionID)
 	require.NoError(t, err)
 
 	updates, err := storage.ReadUpdates(sessionID)
 	require.NoError(t, err)
 	assert.Len(t, updates, numGoroutines*updatesPerGoroutine)
+}
+
+func TestStorage_Persistence(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "sessions.db")
+	setupTestDB(t, dbPath)
+
+	storage1, err := NewStorage(context.Background(), WithDBPath(dbPath))
+	require.NoError(t, err)
+
+	sessionID := acptypes.SessionID("persist-test")
+	err = storage1.AppendUpdate(sessionID, map[string]any{
+		"sessionUpdate": "agent_message_chunk",
+		"content":       map[string]any{"type": "text", "text": "Persisted message"},
+	})
+	require.NoError(t, err)
+	require.NoError(t, storage1.CloseSession(sessionID))
+	require.NoError(t, storage1.Close())
+
+	storage2, err := NewStorage(context.Background(), WithDBPath(dbPath))
+	require.NoError(t, err)
+	defer storage2.Close()
+
+	updates, err := storage2.ReadUpdates(sessionID)
+	require.NoError(t, err)
+	require.Len(t, updates, 1)
+	assert.Contains(t, string(updates[0].Update), "Persisted message")
+}
+
+func TestStorage_MultipleSessions(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "sessions.db")
+	setupTestDB(t, dbPath)
+
+	storage, err := NewStorage(context.Background(), WithDBPath(dbPath))
+	require.NoError(t, err)
+	defer storage.Close()
+
+	session1 := acptypes.SessionID("session-1")
+	session2 := acptypes.SessionID("session-2")
+
+	require.NoError(t, storage.AppendUpdate(session1, map[string]any{"msg": "session1-update1"}))
+	require.NoError(t, storage.AppendUpdate(session2, map[string]any{"msg": "session2-update1"}))
+	require.NoError(t, storage.AppendUpdate(session1, map[string]any{"msg": "session1-update2"}))
+
+	require.NoError(t, storage.CloseSession(session1))
+	require.NoError(t, storage.CloseSession(session2))
+
+	updates1, err := storage.ReadUpdates(session1)
+	require.NoError(t, err)
+	require.Len(t, updates1, 2)
+
+	updates2, err := storage.ReadUpdates(session2)
+	require.NoError(t, err)
+	require.Len(t, updates2, 1)
 }
