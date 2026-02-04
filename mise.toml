@@ -22,9 +22,9 @@ experimental = true
 
 [env]
 # Version-related environment variables
-VERSION = "{{exec(command='cat VERSION.txt')}}"
-GIT_COMMIT = "{{exec(command='git rev-parse --short HEAD 2>/dev/null || echo unknown')}}"
-BUILD_TIME = "{{exec(command='date -u \"+%a %b %d %I:%M:%S %p UTC %Y\"')}}"
+VERSION = "{{exec(command='echo ${VERSION:-$(cat VERSION.txt)}')}}"
+GIT_COMMIT = "{{exec(command='echo ${GIT_COMMIT:-$(git rev-parse --short HEAD 2>/dev/null || echo unknown)}')}}"
+BUILD_TIME = "{{exec(command='echo ${BUILD_TIME:-$(date -u \"+%a %b %d %H:%M:%S UTC %Y\")}')}}"
 
 # Version package path for ldflags
 VERSION_PKG = "github.com/jingkaihe/kodelet/pkg/version"
