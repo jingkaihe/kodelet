@@ -21,7 +21,6 @@ import os
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime
-from pathlib import Path
 from shutil import which
 from typing import Any
 
@@ -39,19 +38,15 @@ from acp.schema import (
     AgentMessageChunk,
     AgentPlanUpdate,
     AgentThoughtChunk,
-    AudioContentBlock,
     AvailableCommandsUpdate,
     CreateTerminalResponse,
     CurrentModeUpdate,
-    EmbeddedResourceContentBlock,
     EnvVariable,
-    ImageContentBlock,
     KillTerminalCommandResponse,
     PermissionOption,
     ReadTextFileResponse,
     ReleaseTerminalResponse,
     RequestPermissionResponse,
-    ResourceContentBlock,
     SessionInfoUpdate,
     TerminalOutputResponse,
     TextContentBlock,
@@ -63,8 +58,6 @@ from acp.schema import (
     WriteTextFileResponse,
 )
 
-KODELET_BIN = Path(__file__).parent.parent.parent / "bin" / "kodelet"
-
 CUSTOM_CSS = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600&family=Poppins:wght@400;500;600;700&display=swap');
@@ -75,22 +68,11 @@ CUSTOM_CSS = """
     --kodelet-mid-gray: #b0aea5;
     --kodelet-light-gray: #e8e6dc;
     --kodelet-orange: #d97757;
-    --kodelet-blue: #6a9bcc;
-    --kodelet-green: #788c5d;
 }
 
-.stApp {
-    background-color: var(--kodelet-light);
-}
-
-h1, h2, h3 {
-    font-family: 'Poppins', Arial, sans-serif !important;
-    color: var(--kodelet-dark) !important;
-}
-
-.stMarkdown p, .stMarkdown li {
-    font-family: 'Lora', Georgia, serif;
-}
+.stApp { background-color: var(--kodelet-light); }
+h1, h2, h3 { font-family: 'Poppins', Arial, sans-serif !important; color: var(--kodelet-dark) !important; }
+.stMarkdown p, .stMarkdown li { font-family: 'Lora', Georgia, serif; }
 
 [data-testid="stChatMessage"] {
     background-color: white;
@@ -98,19 +80,13 @@ h1, h2, h3 {
     border-radius: 8px;
     padding: 1rem !important;
 }
-
-[data-testid="stChatMessage"] * {
-    border-color: transparent !important;
-}
-
+[data-testid="stChatMessage"] * { border-color: transparent !important; }
 [data-testid="stChatMessage"] [data-testid="stExpander"] {
     border-color: var(--kodelet-light-gray) !important;
     border-radius: 6px !important;
 }
 
-code, pre {
-    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace !important;
-}
+code, pre { font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace !important; }
 
 .stButton > button {
     background-color: var(--kodelet-orange) !important;
@@ -118,15 +94,9 @@ code, pre {
     border: none !important;
     font-weight: 500 !important;
 }
+.stButton > button:hover { background-color: #c4644a !important; }
 
-.stButton > button:hover {
-    background-color: #c4644a !important;
-}
-
-[data-testid="stSidebar"] {
-    background-color: var(--kodelet-light-gray) !important;
-}
-
+[data-testid="stSidebar"] { background-color: var(--kodelet-light-gray) !important; }
 .sidebar-header {
     color: var(--kodelet-dark);
     font-family: 'Poppins', Arial, sans-serif;
@@ -140,34 +110,31 @@ code, pre {
 
 
 def find_kodelet_binary() -> str:
-    """Find the kodelet binary, checking multiple locations."""
-    if KODELET_BIN.exists():
-        return str(KODELET_BIN)
-
-    system_kodelet = which("kodelet")
-    if system_kodelet:
-        return system_kodelet
-
-    st.error(
-        f"Could not find kodelet binary. Tried:\n"
-        f"- {KODELET_BIN}\n"
-        f"- System PATH\n\n"
-        f"Please build kodelet with `mise run build` or install it."
-    )
+    """Find the kodelet binary in PATH."""
+    if path := which("kodelet"):
+        return path
+    st.error("Could not find `kodelet` in PATH. Please install it first.")
     st.stop()
 
 
 @dataclass
 class ResponseState:
-    """State for the current response - each field is independent."""
+    """State for tracking the current response."""
 
     thinking: str = ""
     tool_calls: list[dict] = field(default_factory=list)
     message: str = ""
     session_id: str | None = None
-    recording: bool = False
 
-    # UI placeholders - created lazily
+    # Mode: "off" (ignore), "history" (record to session_state), "live" (render to UI)
+    mode: str = "off"
+
+    # For history reconstruction - accumulates current assistant message
+    _current_assistant: dict = field(
+        default_factory=lambda: {"role": "assistant", "content": "", "thinking": "", "tools": []}
+    )
+
+    # UI placeholders - created lazily in live mode
     thinking_placeholder: Any = None
     tools_placeholder: Any = None
     message_placeholder: Any = None
@@ -175,36 +142,22 @@ class ResponseState:
 
 
 class StreamlitACPClient(Client):
-    """ACP Client implementation for Streamlit UI updates."""
+    """ACP Client that routes updates based on mode: history vs live."""
 
     def __init__(self, state: ResponseState):
         self.state = state
 
-    async def request_permission(
-        self, options: list[PermissionOption], session_id: str, tool_call: ToolCall, **kwargs: Any
-    ) -> RequestPermissionResponse:
+    # Required ACP client methods (not implemented for this example)
+    async def request_permission(self, options: list[PermissionOption], session_id: str, tool_call: ToolCall, **kwargs: Any) -> RequestPermissionResponse:
         raise RequestError.method_not_found("session/request_permission")
 
-    async def write_text_file(
-        self, content: str, path: str, session_id: str, **kwargs: Any
-    ) -> WriteTextFileResponse | None:
+    async def write_text_file(self, content: str, path: str, session_id: str, **kwargs: Any) -> WriteTextFileResponse | None:
         raise RequestError.method_not_found("fs/write_text_file")
 
-    async def read_text_file(
-        self, path: str, session_id: str, limit: int | None = None, line: int | None = None, **kwargs: Any
-    ) -> ReadTextFileResponse:
+    async def read_text_file(self, path: str, session_id: str, limit: int | None = None, line: int | None = None, **kwargs: Any) -> ReadTextFileResponse:
         raise RequestError.method_not_found("fs/read_text_file")
 
-    async def create_terminal(
-        self,
-        command: str,
-        session_id: str,
-        args: list[str] | None = None,
-        cwd: str | None = None,
-        env: list[EnvVariable] | None = None,
-        output_byte_limit: int | None = None,
-        **kwargs: Any,
-    ) -> CreateTerminalResponse:
+    async def create_terminal(self, command: str, session_id: str, args: list[str] | None = None, cwd: str | None = None, env: list[EnvVariable] | None = None, output_byte_limit: int | None = None, **kwargs: Any) -> CreateTerminalResponse:
         raise RequestError.method_not_found("terminal/create")
 
     async def terminal_output(self, session_id: str, terminal_id: str, **kwargs: Any) -> TerminalOutputResponse:
@@ -213,31 +166,72 @@ class StreamlitACPClient(Client):
     async def release_terminal(self, session_id: str, terminal_id: str, **kwargs: Any) -> ReleaseTerminalResponse | None:
         raise RequestError.method_not_found("terminal/release")
 
-    async def wait_for_terminal_exit(
-        self, session_id: str, terminal_id: str, **kwargs: Any
-    ) -> WaitForTerminalExitResponse:
+    async def wait_for_terminal_exit(self, session_id: str, terminal_id: str, **kwargs: Any) -> WaitForTerminalExitResponse:
         raise RequestError.method_not_found("terminal/wait_for_exit")
 
     async def kill_terminal(self, session_id: str, terminal_id: str, **kwargs: Any) -> KillTerminalCommandResponse | None:
         raise RequestError.method_not_found("terminal/kill")
 
+    async def ext_method(self, method: str, params: dict) -> dict:
+        raise RequestError.method_not_found(method)
+
+    async def ext_notification(self, method: str, params: dict) -> None:
+        pass
+
+    def on_connect(self, conn: Any) -> None:
+        pass
+
     async def session_update(
         self,
         session_id: str,
-        update: UserMessageChunk
-        | AgentMessageChunk
-        | AgentThoughtChunk
-        | ToolCallStart
-        | ToolCallProgress
-        | AgentPlanUpdate
-        | AvailableCommandsUpdate
-        | CurrentModeUpdate
-        | SessionInfoUpdate,
+        update: UserMessageChunk | AgentMessageChunk | AgentThoughtChunk | ToolCallStart | ToolCallProgress | AgentPlanUpdate | AvailableCommandsUpdate | CurrentModeUpdate | SessionInfoUpdate,
         **kwargs: Any,
     ) -> None:
-        if not self.state.recording:
+        if self.state.mode == "off":
             return
+        if self.state.mode == "history":
+            self._record_history(update)
+            return
+        # Live mode - render to UI
+        self._render_live(update)
 
+    def _record_history(self, update):
+        """Record events during load_session to st.session_state.messages."""
+        if isinstance(update, UserMessageChunk):
+            # New user message = new turn, save previous assistant if any
+            if self.state._current_assistant["content"] or self.state._current_assistant["thinking"]:
+                st.session_state.messages.append(self.state._current_assistant)
+                self.state._current_assistant = {"role": "assistant", "content": "", "thinking": "", "tools": []}
+            content = update.content
+            if isinstance(content, TextContentBlock):
+                st.session_state.messages.append({"role": "user", "content": content.text})
+
+        elif isinstance(update, AgentThoughtChunk):
+            content = update.content
+            if isinstance(content, TextContentBlock):
+                self.state._current_assistant["thinking"] += content.text
+
+        elif isinstance(update, AgentMessageChunk):
+            content = update.content
+            if isinstance(content, TextContentBlock):
+                self.state._current_assistant["content"] += content.text
+
+        elif isinstance(update, ToolCallStart):
+            self.state._current_assistant["tools"].append({
+                "id": update.tool_call_id,
+                "title": update.title,
+                "status": "completed",
+                "output": update.raw_output,
+            })
+
+        elif isinstance(update, ToolCallProgress):
+            for tc in self.state._current_assistant["tools"]:
+                if tc["id"] == update.tool_call_id and update.raw_output:
+                    tc["output"] = update.raw_output
+                    break
+
+    def _render_live(self, update):
+        """Render updates to UI placeholders during prompt."""
         if isinstance(update, AgentThoughtChunk):
             content = update.content
             if isinstance(content, TextContentBlock):
@@ -294,27 +288,37 @@ class StreamlitACPClient(Client):
                     if tc.get("output"):
                         st.caption("Result:")
                         output = tc["output"]
-                        if isinstance(output, str):
-                            st.code(output)
-                        else:
-                            try:
-                                st.code(json.dumps(output, indent=2), language="json")
-                            except (TypeError, ValueError):
-                                st.code(str(output))
+                        st.code(json.dumps(output, indent=2) if isinstance(output, dict) else str(output))
 
     def _render_message(self):
         if self.state.message_placeholder is None:
             self.state.message_placeholder = self.state.container.empty()
         self.state.message_placeholder.markdown(self.state.message)
 
-    async def ext_method(self, method: str, params: dict) -> dict:
-        raise RequestError.method_not_found(method)
 
-    async def ext_notification(self, method: str, params: dict) -> None:
-        pass
+def _finalize_assistant(state: ResponseState):
+    """Append any pending assistant message to session state."""
+    if state._current_assistant["content"] or state._current_assistant["thinking"]:
+        st.session_state.messages.append(state._current_assistant)
+        state._current_assistant = {"role": "assistant", "content": "", "thinking": "", "tools": []}
 
-    def on_connect(self, conn: Any) -> None:
-        pass
+
+async def load_session_history(session_id: str) -> bool:
+    """Load session history on page load. Returns True if successful."""
+    kodelet_path = find_kodelet_binary()
+    state = ResponseState(mode="history")
+    client = StreamlitACPClient(state)
+
+    try:
+        async with spawn_agent_process(client, kodelet_path, "acp") as (conn, _):
+            await conn.initialize(protocol_version=PROTOCOL_VERSION, client_capabilities=None)
+            resp = await conn.load_session(session_id=session_id, cwd=os.getcwd(), mcp_servers=[])
+            if resp is None:
+                return False
+            _finalize_assistant(state)
+            return True
+    except Exception:
+        return False
 
 
 async def run_acp_prompt(query: str, container: Any, session_id: str | None = None) -> ResponseState:
@@ -324,21 +328,22 @@ async def run_acp_prompt(query: str, container: Any, session_id: str | None = No
     client = StreamlitACPClient(state)
 
     try:
-        async with spawn_agent_process(client, kodelet_path, "acp") as (conn, process):
+        async with spawn_agent_process(client, kodelet_path, "acp") as (conn, _):
             await conn.initialize(protocol_version=PROTOCOL_VERSION, client_capabilities=None)
 
             if session_id:
-                await conn.load_session(session_id=session_id, cwd=os.getcwd(), mcp_servers=[])
-                state.session_id = session_id
+                state.mode = "history"
+                resp = await conn.load_session(session_id=session_id, cwd=os.getcwd(), mcp_servers=[])
+                state.session_id = session_id if resp else None
+                if resp is None:
+                    session = await conn.new_session(cwd=os.getcwd(), mcp_servers=[])
+                    state.session_id = session.session_id
             else:
                 session = await conn.new_session(cwd=os.getcwd(), mcp_servers=[])
                 state.session_id = session.session_id
 
-            # Drain any pending events from load_session
-            await asyncio.sleep(0)
-
-            # Now start recording for the new prompt
-            state.recording = True
+            _finalize_assistant(state)
+            state.mode = "live"
             await conn.prompt(session_id=state.session_id, prompt=[text_block(query)])
 
     except Exception as e:
@@ -358,13 +363,7 @@ def render_history_message(msg: dict):
                 st.write(f"**{i + 1}. ✓ {tc['title']}**")
                 if tc.get("output"):
                     output = tc["output"]
-                    if isinstance(output, str):
-                        st.code(output)
-                    else:
-                        try:
-                            st.code(json.dumps(output, indent=2), language="json")
-                        except (TypeError, ValueError):
-                            st.code(str(output))
+                    st.code(json.dumps(output, indent=2) if isinstance(output, dict) else str(output))
     st.markdown(msg["content"])
 
 
@@ -377,18 +376,26 @@ def main():
     if "session_id" not in st.session_state:
         st.session_state.session_id = None
 
-    # Sync session_id with URL parameter
+    # Sync session_id with URL parameter ?c=...
     url_session_id = st.query_params.get("c")
     if url_session_id and st.session_state.session_id != url_session_id:
         st.session_state.session_id = url_session_id
     if st.session_state.session_id and not url_session_id:
         st.query_params["c"] = st.session_state.session_id
 
+    # Load history on page refresh with ?c=session_id
+    if st.session_state.session_id and not st.session_state.messages:
+        with st.spinner("Loading conversation history..."):
+            if not asyncio.run(load_session_history(st.session_state.session_id)):
+                st.session_state.session_id = None
+                st.query_params.clear()
+
+    # Greeting
     hour = datetime.now().hour
     greeting = "Good Morning" if hour < 12 else "Good Afternoon" if hour < 18 else "Good Evening"
     st.title(greeting)
 
-    # Render history
+    # Render message history
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             if msg["role"] == "assistant":
@@ -398,7 +405,6 @@ def main():
 
     # Handle new input
     if prompt := st.chat_input("Ask kodelet anything..."):
-        st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
 
@@ -406,11 +412,11 @@ def main():
             container = st.container()
             state = asyncio.run(run_acp_prompt(prompt, container, st.session_state.session_id))
 
-        # Save session and message
         if state.session_id:
             st.session_state.session_id = state.session_id
             st.query_params["c"] = state.session_id
 
+        st.session_state.messages.append({"role": "user", "content": prompt})
         st.session_state.messages.append({
             "role": "assistant",
             "content": state.message or "No response received.",
@@ -427,7 +433,7 @@ A Streamlit interface for [kodelet](https://github.com/jingkaihe/kodelet)
 using the **Agent Client Protocol (ACP)**.
 
 **Features**
-- Session continuity
+- Session continuity via `?c=session_id`
 - Real-time streaming
 - Thinking visualization
 - Tool call inspection
