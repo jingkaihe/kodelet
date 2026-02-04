@@ -30,6 +30,8 @@ type SubAgentToolResult struct {
 	result   string
 	err      string
 	question string
+	workflow string
+	cwd      string
 }
 
 // GetResult returns the sub-agent output
@@ -352,6 +354,8 @@ func (t *SubAgentTool) Execute(ctx context.Context, state tooltypes.State, param
 		return &SubAgentToolResult{
 			err:      errors.Wrap(err, "failed to get executable path").Error(),
 			question: input.Question,
+			workflow: input.Workflow,
+			cwd:      input.Cwd,
 		}
 	}
 
@@ -382,17 +386,23 @@ func (t *SubAgentTool) Execute(ctx context.Context, state tooltypes.State, param
 			return &SubAgentToolResult{
 				err:      fmt.Sprintf("Subagent execution failed: %s\nstderr: %s", err, string(exitErr.Stderr)),
 				question: input.Question,
+				workflow: input.Workflow,
+				cwd:      input.Cwd,
 			}
 		}
 		return &SubAgentToolResult{
 			err:      fmt.Sprintf("Subagent execution failed: %s", err),
 			question: input.Question,
+			workflow: input.Workflow,
+			cwd:      input.Cwd,
 		}
 	}
 
 	return &SubAgentToolResult{
 		result:   strings.TrimSpace(string(output)),
 		question: input.Question,
+		workflow: input.Workflow,
+		cwd:      input.Cwd,
 	}
 }
 
@@ -408,6 +418,8 @@ func (r *SubAgentToolResult) StructuredData() tooltypes.StructuredToolResult {
 	result.Metadata = &tooltypes.SubAgentMetadata{
 		Question: r.question,
 		Response: r.result,
+		Workflow: r.workflow,
+		Cwd:      r.cwd,
 	}
 
 	if r.IsError() {

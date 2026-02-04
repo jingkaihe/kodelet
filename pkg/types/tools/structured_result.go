@@ -334,6 +334,8 @@ func (m ImageRecognitionMetadata) ToolType() string { return "image_recognition"
 type SubAgentMetadata struct {
 	Question string `json:"question"`
 	Response string `json:"response"`
+	Workflow string `json:"workflow,omitempty"`
+	Cwd      string `json:"cwd,omitempty"`
 }
 
 // ToolType returns the tool type identifier for sub-agent operations
