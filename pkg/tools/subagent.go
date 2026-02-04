@@ -233,11 +233,16 @@ func (t *SubAgentTool) ValidateInput(_ tooltypes.State, parameters string) error
 		if !filepath.IsAbs(input.Cwd) {
 			return errors.Errorf("cwd must be an absolute path, got: %s", input.Cwd)
 		}
-		stat, err := os.Stat(input.Cwd)
+		// Resolve symlinks to prevent symlink attacks
+		resolvedPath, err := filepath.EvalSymlinks(input.Cwd)
 		if err != nil {
 			if os.IsNotExist(err) {
 				return errors.Errorf("cwd directory does not exist: %s", input.Cwd)
 			}
+			return errors.Wrapf(err, "failed to resolve cwd path: %s", input.Cwd)
+		}
+		stat, err := os.Stat(resolvedPath)
+		if err != nil {
 			return errors.Wrapf(err, "failed to access cwd: %s", input.Cwd)
 		}
 		if !stat.IsDir() {
@@ -379,19 +384,10 @@ func (t *SubAgentTool) Execute(ctx context.Context, state tooltypes.State, param
 		cmd.Dir = input.Cwd
 	}
 
-	output, err := cmd.Output()
+	output, err := cmd.CombinedOutput()
 	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			return &SubAgentToolResult{
-				err:      fmt.Sprintf("Subagent execution failed: %s\nstderr: %s", err, string(exitErr.Stderr)),
-				question: input.Question,
-				workflow: input.Workflow,
-				cwd:      input.Cwd,
-			}
-		}
 		return &SubAgentToolResult{
-			err:      fmt.Sprintf("Subagent execution failed: %s", err),
+			err:      fmt.Sprintf("Subagent execution failed: %s\noutput: %s", err, string(output)),
 			question: input.Question,
 			workflow: input.Workflow,
 			cwd:      input.Cwd,
