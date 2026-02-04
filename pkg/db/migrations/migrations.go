@@ -10,12 +10,10 @@ import (
 // New migrations should be added to this list.
 func All() []db.Migration {
 	return []db.Migration{
-		// Conversations migrations (originally versions 1-4)
-		Migration20240101000001CreateConversations(),
-		Migration20240101000002AddPerformanceIndexes(),
-		Migration20240101000003AddProviderToSummaries(),
-		Migration20240101000004AddBackgroundProcesses(),
-		// ACP migrations
-		Migration20240204000001CreateACPSessionUpdates(),
+		Migration20260204163000CreateConversations(),
+		Migration20260204163001AddPerformanceIndexes(),
+		Migration20260204163002AddProviderToSummaries(),
+		Migration20260204163003AddBackgroundProcesses(),
+		Migration20260204163004CreateACPSessionUpdates(),
 	}
 }

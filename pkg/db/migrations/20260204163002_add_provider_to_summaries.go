@@ -7,9 +7,9 @@ import (
 	"github.com/pkg/errors"
 )
 
-func Migration20240101000003AddProviderToSummaries() db.Migration {
+func Migration20260204163002AddProviderToSummaries() db.Migration {
 	return db.Migration{
-		Version:     20240101000003,
+		Version:     20260204163002,
 		Description: "Add provider column to conversation_summaries table",
 		Up: func(tx *sql.Tx) error {
 			// Check if column already exists (for idempotency)

@@ -7,9 +7,9 @@ import (
 	"github.com/pkg/errors"
 )
 
-func Migration20240204000001CreateACPSessionUpdates() db.Migration {
+func Migration20260204163004CreateACPSessionUpdates() db.Migration {
 	return db.Migration{
-		Version:     20240204000001,
+		Version:     20260204163004,
 		Description: "Create acp_session_updates table",
 		Up: func(tx *sql.Tx) error {
 			if _, err := tx.Exec(`

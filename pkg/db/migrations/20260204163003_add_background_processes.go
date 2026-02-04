@@ -7,9 +7,9 @@ import (
 	"github.com/pkg/errors"
 )
 
-func Migration20240101000004AddBackgroundProcesses() db.Migration {
+func Migration20260204163003AddBackgroundProcesses() db.Migration {
 	return db.Migration{
-		Version:     20240101000004,
+		Version:     20260204163003,
 		Description: "Add background_processes column to conversations table",
 		Up: func(tx *sql.Tx) error {
 			// Check if column already exists (for idempotency)

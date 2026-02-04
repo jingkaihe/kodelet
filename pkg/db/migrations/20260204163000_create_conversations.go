@@ -7,9 +7,9 @@ import (
 	"github.com/pkg/errors"
 )
 
-func Migration20240101000001CreateConversations() db.Migration {
+func Migration20260204163000CreateConversations() db.Migration {
 	return db.Migration{
-		Version:     20240101000001,
+		Version:     20260204163000,
 		Description: "Create conversations and conversation_summaries tables",
 		Up: func(tx *sql.Tx) error {
 			if _, err := tx.Exec(`

@@ -7,9 +7,9 @@ import (
 	"github.com/pkg/errors"
 )
 
-func Migration20240101000002AddPerformanceIndexes() db.Migration {
+func Migration20260204163001AddPerformanceIndexes() db.Migration {
 	return db.Migration{
-		Version:     20240101000002,
+		Version:     20260204163001,
 		Description: "Add performance indexes for conversations and summaries",
 		Up: func(tx *sql.Tx) error {
 			indexes := []string{
