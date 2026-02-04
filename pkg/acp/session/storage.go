@@ -255,8 +255,14 @@ func (s *Storage) Flush(sessionID acptypes.SessionID) error {
 // Delete removes all session updates from storage.
 func (s *Storage) Delete(sessionID acptypes.SessionID) error {
 	s.sessionsMu.Lock()
-	delete(s.sessions, sessionID)
-	s.sessionsMu.Unlock()
+	defer s.sessionsMu.Unlock()
+
+	if ss, ok := s.sessions[sessionID]; ok {
+		ss.mu.Lock()
+		ss.pending = nil
+		ss.mu.Unlock()
+		delete(s.sessions, sessionID)
+	}
 
 	_, err := s.db.Exec("DELETE FROM acp_session_updates WHERE session_id = ?", string(sessionID))
 	if err != nil {
@@ -281,27 +287,32 @@ func (s *Storage) CloseSession(sessionID acptypes.SessionID) error {
 
 // Exists checks if a session has any stored updates.
 func (s *Storage) Exists(sessionID acptypes.SessionID) bool {
-	var count int
-	err := s.db.Get(&count, "SELECT COUNT(*) FROM acp_session_updates WHERE session_id = ? LIMIT 1", string(sessionID))
+	var exists bool
+	err := s.db.Get(&exists, "SELECT EXISTS(SELECT 1 FROM acp_session_updates WHERE session_id = ?)", string(sessionID))
 	if err != nil {
 		return false
 	}
-	return count > 0
+	return exists
 }
 
 // Close flushes all pending updates and closes the database connection.
 func (s *Storage) Close() error {
 	s.sessionsMu.Lock()
+	var flushErr error
 	for sessionID, ss := range s.sessions {
 		ss.mu.Lock()
-		s.flushPendingLocked(sessionID, ss)
+		if err := s.flushPendingLocked(sessionID, ss); err != nil && flushErr == nil {
+			flushErr = err
+		}
 		ss.mu.Unlock()
 	}
 	s.sessions = make(map[acptypes.SessionID]*sessionState)
 	s.sessionsMu.Unlock()
 
 	if s.db != nil {
-		return s.db.Close()
+		if err := s.db.Close(); err != nil {
+			return err
+		}
 	}
-	return nil
+	return flushErr
 }

@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
+	"os"
+	"strings"
 
 	"github.com/jingkaihe/kodelet/pkg/db"
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
@@ -61,7 +64,6 @@ var dbRollbackCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		ctx := cmd.Context()
 
-		// Show current status first
 		applied, err := db.GetMigrationStatus(ctx)
 		if err != nil {
 			return fmt.Errorf("failed to get migration status: %w", err)
@@ -74,12 +76,21 @@ var dbRollbackCmd = &cobra.Command{
 
 		lastVersion := applied[len(applied)-1]
 
-		// Find the migration description
 		var description string
 		for _, m := range migrations.All() {
 			if m.Version == lastVersion {
 				description = m.Description
 				break
+			}
+		}
+
+		noConfirm, _ := cmd.Flags().GetBool("no-confirm")
+		if !noConfirm {
+			presenter.Warning(fmt.Sprintf("About to rollback migration %d: %s", lastVersion, description))
+			presenter.Warning("This may cause data loss. Use --no-confirm to skip this confirmation.")
+			if !confirmRollback() {
+				presenter.Info("Rollback cancelled")
+				return nil
 			}
 		}
 
@@ -95,6 +106,14 @@ var dbRollbackCmd = &cobra.Command{
 	},
 }
 
+func confirmRollback() bool {
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Print("Are you sure you want to rollback this migration? (y/N): ")
+	response, _ := reader.ReadString('\n')
+	response = strings.ToLower(strings.TrimSpace(response))
+	return response == "y" || response == "yes"
+}
+
 func getDatabasePath() string {
 	path, err := db.DefaultDBPath()
 	if err != nil {
@@ -106,4 +125,5 @@ func getDatabasePath() string {
 func init() {
 	dbCmd.AddCommand(dbStatusCmd)
 	dbCmd.AddCommand(dbRollbackCmd)
+	dbRollbackCmd.Flags().Bool("no-confirm", false, "Skip confirmation prompt")
 }
