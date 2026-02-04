@@ -119,6 +119,52 @@ func TestSubAgentTool_ValidateInputWithWorkflows(t *testing.T) {
 	})
 }
 
+func TestSubAgentTool_ValidateInputCwd(t *testing.T) {
+	tool := NewSubAgentTool(nil, false)
+	state := NewBasicState(context.TODO())
+
+	t.Run("valid absolute cwd", func(t *testing.T) {
+		// Use /tmp which exists on all Unix systems
+		err := tool.ValidateInput(state, `{"question": "test", "cwd": "/tmp"}`)
+		assert.NoError(t, err)
+	})
+
+	t.Run("invalid relative cwd", func(t *testing.T) {
+		err := tool.ValidateInput(state, `{"question": "test", "cwd": "relative/path"}`)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "cwd must be an absolute path")
+	})
+
+	t.Run("invalid cwd with dot prefix", func(t *testing.T) {
+		err := tool.ValidateInput(state, `{"question": "test", "cwd": "./relative/path"}`)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "cwd must be an absolute path")
+	})
+
+	t.Run("empty cwd is allowed", func(t *testing.T) {
+		err := tool.ValidateInput(state, `{"question": "test", "cwd": ""}`)
+		assert.NoError(t, err)
+	})
+
+	t.Run("no cwd is allowed", func(t *testing.T) {
+		err := tool.ValidateInput(state, `{"question": "test"}`)
+		assert.NoError(t, err)
+	})
+
+	t.Run("non-existent cwd directory", func(t *testing.T) {
+		err := tool.ValidateInput(state, `{"question": "test", "cwd": "/nonexistent/path/that/does/not/exist"}`)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "cwd directory does not exist")
+	})
+
+	t.Run("cwd is a file not a directory", func(t *testing.T) {
+		// /etc/hosts is a file that exists on all Unix systems
+		err := tool.ValidateInput(state, `{"question": "test", "cwd": "/etc/hosts"}`)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "cwd is not a directory")
+	})
+}
+
 func TestSubAgentTool_TracingKVs(t *testing.T) {
 	tool := NewSubAgentTool(nil, false)
 
@@ -149,6 +195,16 @@ func TestSubAgentTool_TracingKVs(t *testing.T) {
 		}
 		assert.Equal(t, expected, kvs)
 	})
+
+	t.Run("with cwd", func(t *testing.T) {
+		kvs, err := tool.TracingKVs(`{"question": "test", "cwd": "/tmp/project"}`)
+		assert.NoError(t, err)
+		expected := []attribute.KeyValue{
+			attribute.String("question", "test"),
+			attribute.String("cwd", "/tmp/project"),
+		}
+		assert.Equal(t, expected, kvs)
+	})
 }
 
 func TestSubAgentToolResult_Methods(t *testing.T) {
@@ -176,36 +232,64 @@ func TestSubAgentToolResult_Methods(t *testing.T) {
 }
 
 func TestSubAgentToolResult_StructuredData(t *testing.T) {
-	// Test successful result structured data
-	result := &SubAgentToolResult{
-		result:   "test response",
-		question: "test question",
-	}
+	t.Run("successful result with all fields", func(t *testing.T) {
+		result := &SubAgentToolResult{
+			result:   "test response",
+			question: "test question",
+			workflow: "github/pr",
+			cwd:      "/home/user/project",
+		}
 
-	structuredData := result.StructuredData()
-	assert.Equal(t, "subagent", structuredData.ToolName)
-	assert.True(t, structuredData.Success)
+		structuredData := result.StructuredData()
+		assert.Equal(t, "subagent", structuredData.ToolName)
+		assert.True(t, structuredData.Success)
 
-	var metadata tooltypes.SubAgentMetadata
-	assert.True(t, tooltypes.ExtractMetadata(structuredData.Metadata, &metadata))
-	assert.Equal(t, "test question", metadata.Question)
-	assert.Equal(t, "test response", metadata.Response)
+		var metadata tooltypes.SubAgentMetadata
+		assert.True(t, tooltypes.ExtractMetadata(structuredData.Metadata, &metadata))
+		assert.Equal(t, "test question", metadata.Question)
+		assert.Equal(t, "test response", metadata.Response)
+		assert.Equal(t, "github/pr", metadata.Workflow)
+		assert.Equal(t, "/home/user/project", metadata.Cwd)
+	})
 
-	// Test error result structured data
-	errorResult := &SubAgentToolResult{
-		err:      "some error",
-		question: "test question",
-	}
+	t.Run("successful result without workflow and cwd", func(t *testing.T) {
+		result := &SubAgentToolResult{
+			result:   "test response",
+			question: "test question",
+		}
 
-	errorStructuredData := errorResult.StructuredData()
-	assert.Equal(t, "subagent", errorStructuredData.ToolName)
-	assert.False(t, errorStructuredData.Success)
-	assert.Equal(t, "some error", errorStructuredData.Error)
+		structuredData := result.StructuredData()
+		assert.Equal(t, "subagent", structuredData.ToolName)
+		assert.True(t, structuredData.Success)
 
-	var errorMetadata tooltypes.SubAgentMetadata
-	assert.True(t, tooltypes.ExtractMetadata(errorStructuredData.Metadata, &errorMetadata))
-	assert.Equal(t, "test question", errorMetadata.Question)
-	assert.Empty(t, errorMetadata.Response)
+		var metadata tooltypes.SubAgentMetadata
+		assert.True(t, tooltypes.ExtractMetadata(structuredData.Metadata, &metadata))
+		assert.Equal(t, "test question", metadata.Question)
+		assert.Equal(t, "test response", metadata.Response)
+		assert.Empty(t, metadata.Workflow)
+		assert.Empty(t, metadata.Cwd)
+	})
+
+	t.Run("error result includes workflow and cwd", func(t *testing.T) {
+		errorResult := &SubAgentToolResult{
+			err:      "some error",
+			question: "test question",
+			workflow: "commit",
+			cwd:      "/tmp/project",
+		}
+
+		errorStructuredData := errorResult.StructuredData()
+		assert.Equal(t, "subagent", errorStructuredData.ToolName)
+		assert.False(t, errorStructuredData.Success)
+		assert.Equal(t, "some error", errorStructuredData.Error)
+
+		var errorMetadata tooltypes.SubAgentMetadata
+		assert.True(t, tooltypes.ExtractMetadata(errorStructuredData.Metadata, &errorMetadata))
+		assert.Equal(t, "test question", errorMetadata.Question)
+		assert.Empty(t, errorMetadata.Response)
+		assert.Equal(t, "commit", errorMetadata.Workflow)
+		assert.Equal(t, "/tmp/project", errorMetadata.Cwd)
+	})
 }
 
 func TestBuildSubagentArgs(t *testing.T) {
@@ -213,7 +297,7 @@ func TestBuildSubagentArgs(t *testing.T) {
 
 	t.Run("basic args without subagent_args", func(t *testing.T) {
 		input := &SubAgentInput{Question: "What is foo?"}
-		args := BuildSubagentArgs(ctx, "", input)
+		args := BuildSubagentArgs(ctx, "", input, nil)
 
 		assert.Equal(t, []string{
 			"run", "--result-only", "--as-subagent",
@@ -223,7 +307,7 @@ func TestBuildSubagentArgs(t *testing.T) {
 
 	t.Run("with --use-weak-model", func(t *testing.T) {
 		input := &SubAgentInput{Question: "What is foo?"}
-		args := BuildSubagentArgs(ctx, "--use-weak-model", input)
+		args := BuildSubagentArgs(ctx, "--use-weak-model", input, nil)
 
 		assert.Equal(t, []string{
 			"run", "--result-only", "--as-subagent",
@@ -234,7 +318,7 @@ func TestBuildSubagentArgs(t *testing.T) {
 
 	t.Run("with --profile flag", func(t *testing.T) {
 		input := &SubAgentInput{Question: "What is foo?"}
-		args := BuildSubagentArgs(ctx, "--profile cheap", input)
+		args := BuildSubagentArgs(ctx, "--profile cheap", input, nil)
 
 		assert.Equal(t, []string{
 			"run", "--result-only", "--as-subagent",
@@ -245,7 +329,7 @@ func TestBuildSubagentArgs(t *testing.T) {
 
 	t.Run("with multiple flags", func(t *testing.T) {
 		input := &SubAgentInput{Question: "What is foo?"}
-		args := BuildSubagentArgs(ctx, "--profile openai-subagent --use-weak-model", input)
+		args := BuildSubagentArgs(ctx, "--profile openai-subagent --use-weak-model", input, nil)
 
 		assert.Equal(t, []string{
 			"run", "--result-only", "--as-subagent",
@@ -257,7 +341,7 @@ func TestBuildSubagentArgs(t *testing.T) {
 
 	t.Run("with quoted argument in subagent_args", func(t *testing.T) {
 		input := &SubAgentInput{Question: "What is foo?"}
-		args := BuildSubagentArgs(ctx, `--profile "my profile"`, input)
+		args := BuildSubagentArgs(ctx, `--profile "my profile"`, input, nil)
 
 		assert.Equal(t, []string{
 			"run", "--result-only", "--as-subagent",
@@ -269,7 +353,7 @@ func TestBuildSubagentArgs(t *testing.T) {
 	t.Run("preserves question with special characters", func(t *testing.T) {
 		question := `Where is the "foo()" function defined?`
 		input := &SubAgentInput{Question: question}
-		args := BuildSubagentArgs(ctx, "", input)
+		args := BuildSubagentArgs(ctx, "", input, nil)
 
 		assert.Equal(t, []string{
 			"run", "--result-only", "--as-subagent",
@@ -279,7 +363,7 @@ func TestBuildSubagentArgs(t *testing.T) {
 
 	t.Run("invalid shlex syntax falls back gracefully", func(t *testing.T) {
 		input := &SubAgentInput{Question: "What is foo?"}
-		args := BuildSubagentArgs(ctx, `--profile "unclosed`, input)
+		args := BuildSubagentArgs(ctx, `--profile "unclosed`, input, nil)
 
 		assert.Equal(t, []string{
 			"run", "--result-only", "--as-subagent",
@@ -289,7 +373,7 @@ func TestBuildSubagentArgs(t *testing.T) {
 
 	t.Run("empty question not appended", func(t *testing.T) {
 		input := &SubAgentInput{Question: ""}
-		args := BuildSubagentArgs(ctx, "--use-weak-model", input)
+		args := BuildSubagentArgs(ctx, "--use-weak-model", input, nil)
 
 		assert.Equal(t, []string{
 			"run", "--result-only", "--as-subagent",
@@ -301,7 +385,7 @@ func TestBuildSubagentArgs(t *testing.T) {
 		input := &SubAgentInput{
 			Workflow: "github/pr",
 		}
-		args := BuildSubagentArgs(ctx, "", input)
+		args := BuildSubagentArgs(ctx, "", input, nil)
 
 		assert.Equal(t, []string{
 			"run", "--result-only", "--as-subagent",
@@ -314,7 +398,7 @@ func TestBuildSubagentArgs(t *testing.T) {
 			Question: "Create a PR",
 			Workflow: "github/pr",
 		}
-		args := BuildSubagentArgs(ctx, "", input)
+		args := BuildSubagentArgs(ctx, "", input, nil)
 
 		assert.Equal(t, []string{
 			"run", "--result-only", "--as-subagent",
@@ -332,7 +416,7 @@ func TestBuildSubagentArgs(t *testing.T) {
 				"draft":  "true",
 			},
 		}
-		args := BuildSubagentArgs(ctx, "", input)
+		args := BuildSubagentArgs(ctx, "", input, nil)
 
 		// Args are now sorted alphabetically for deterministic output
 		assert.Equal(t, []string{
@@ -349,7 +433,7 @@ func TestBuildSubagentArgs(t *testing.T) {
 			Question: "Create a PR",
 			Workflow: "github/pr",
 		}
-		args := BuildSubagentArgs(ctx, "--use-weak-model", input)
+		args := BuildSubagentArgs(ctx, "--use-weak-model", input, nil)
 
 		assert.Equal(t, []string{
 			"run", "--result-only", "--as-subagent",
@@ -357,6 +441,112 @@ func TestBuildSubagentArgs(t *testing.T) {
 			"-r", "github/pr",
 			"Create a PR",
 		}, args)
+	})
+
+	t.Run("with workflow metadata profile", func(t *testing.T) {
+		input := &SubAgentInput{
+			Question: "Create a PR",
+			Workflow: "github/pr",
+		}
+		workflow := &fragments.Fragment{
+			ID: "github/pr",
+			Metadata: fragments.Metadata{
+				Profile: "cheap",
+			},
+		}
+		args := BuildSubagentArgs(ctx, "", input, workflow)
+
+		assert.Equal(t, []string{
+			"run", "--result-only", "--as-subagent",
+			"--profile", "cheap",
+			"-r", "github/pr",
+			"Create a PR",
+		}, args)
+	})
+
+	t.Run("workflow profile takes precedence over subagent_args", func(t *testing.T) {
+		input := &SubAgentInput{
+			Question: "Create a PR",
+			Workflow: "github/pr",
+		}
+		workflow := &fragments.Fragment{
+			ID: "github/pr",
+			Metadata: fragments.Metadata{
+				Profile: "expensive",
+			},
+		}
+		// subagent_args has --profile cheap, but workflow metadata has profile: expensive
+		// The --profile from subagent_args is stripped, workflow profile is used
+		args := BuildSubagentArgs(ctx, "--profile cheap --use-weak-model", input, workflow)
+
+		assert.Equal(t, []string{
+			"run", "--result-only", "--as-subagent",
+			"--use-weak-model",
+			"--profile", "expensive",
+			"-r", "github/pr",
+			"Create a PR",
+		}, args)
+	})
+}
+
+func TestStripProfileFlag(t *testing.T) {
+	t.Run("removes --profile and its value", func(t *testing.T) {
+		args := []string{"--use-weak-model", "--profile", "cheap", "--timeout", "30"}
+		result := stripProfileFlag(args)
+		assert.Equal(t, []string{"--use-weak-model", "--timeout", "30"}, result)
+	})
+
+	t.Run("no --profile flag", func(t *testing.T) {
+		args := []string{"--use-weak-model", "--timeout", "30"}
+		result := stripProfileFlag(args)
+		assert.Equal(t, []string{"--use-weak-model", "--timeout", "30"}, result)
+	})
+
+	t.Run("--profile at end without value", func(t *testing.T) {
+		args := []string{"--use-weak-model", "--profile"}
+		result := stripProfileFlag(args)
+		assert.Equal(t, []string{"--use-weak-model", "--profile"}, result) // unchanged, no value to strip
+	})
+
+	t.Run("--profile only", func(t *testing.T) {
+		args := []string{"--profile", "cheap"}
+		result := stripProfileFlag(args)
+		assert.Equal(t, []string{}, result)
+	})
+
+	t.Run("empty args", func(t *testing.T) {
+		result := stripProfileFlag([]string{})
+		assert.Equal(t, []string{}, result)
+	})
+
+	t.Run("--profile=value format", func(t *testing.T) {
+		args := []string{"--use-weak-model", "--profile=cheap", "--timeout", "30"}
+		result := stripProfileFlag(args)
+		assert.Equal(t, []string{"--use-weak-model", "--timeout", "30"}, result)
+	})
+
+	t.Run("--profile=value only", func(t *testing.T) {
+		args := []string{"--profile=cheap"}
+		result := stripProfileFlag(args)
+		assert.Equal(t, []string{}, result)
+	})
+
+	t.Run("multiple --profile flags", func(t *testing.T) {
+		args := []string{"--profile", "cheap", "--use-weak-model", "--profile", "expensive"}
+		result := stripProfileFlag(args)
+		assert.Equal(t, []string{"--use-weak-model"}, result)
+	})
+
+	t.Run("multiple --profile=value flags", func(t *testing.T) {
+		args := []string{"--profile=cheap", "--use-weak-model", "--profile=expensive"}
+		result := stripProfileFlag(args)
+		assert.Equal(t, []string{"--use-weak-model"}, result)
+	})
+
+	t.Run("mixed --profile formats", func(t *testing.T) {
+		args := []string{"--profile", "cheap", "--profile=expensive", "--use-weak-model"}
+		result := stripProfileFlag(args)
+		assert.Equal(t, []string{"--use-weak-model"}, result)
 	})
 }
 

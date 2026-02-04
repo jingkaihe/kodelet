@@ -1054,6 +1054,71 @@ Do something.`
 	assert.False(t, result.Metadata.Workflow) // Default should be false
 }
 
+func TestFragmentProcessor_ParseProfileMetadata(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "kodelet-fragments-profile-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	fragmentContent := `---
+name: Cheap Workflow
+description: Uses a cheap profile
+workflow: true
+profile: cheap
+---
+
+Do something cheaply.`
+
+	fragmentPath := filepath.Join(tempDir, "cheap-workflow.md")
+	err = os.WriteFile(fragmentPath, []byte(fragmentContent), 0o644)
+	require.NoError(t, err)
+
+	processor, err := NewFragmentProcessor(WithFragmentDirs(tempDir))
+	require.NoError(t, err)
+
+	config := &Config{
+		FragmentName: "cheap-workflow",
+		Arguments:    map[string]string{},
+	}
+
+	result, err := processor.LoadFragment(context.Background(), config)
+	require.NoError(t, err)
+
+	assert.Equal(t, "Cheap Workflow", result.Metadata.Name)
+	assert.True(t, result.Metadata.Workflow)
+	assert.Equal(t, "cheap", result.Metadata.Profile)
+}
+
+func TestFragmentProcessor_ParseProfileMetadata_NotSpecified(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "kodelet-fragments-profile-unset-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	fragmentContent := `---
+name: No Profile Workflow
+workflow: true
+---
+
+Do something.`
+
+	fragmentPath := filepath.Join(tempDir, "no-profile.md")
+	err = os.WriteFile(fragmentPath, []byte(fragmentContent), 0o644)
+	require.NoError(t, err)
+
+	processor, err := NewFragmentProcessor(WithFragmentDirs(tempDir))
+	require.NoError(t, err)
+
+	config := &Config{
+		FragmentName: "no-profile",
+		Arguments:    map[string]string{},
+	}
+
+	result, err := processor.LoadFragment(context.Background(), config)
+	require.NoError(t, err)
+
+	assert.True(t, result.Metadata.Workflow)
+	assert.Empty(t, result.Metadata.Profile) // Default should be empty string
+}
+
 func TestFragmentProcessor_ListFragmentsWithMetadata_WorkflowFiltering(t *testing.T) {
 	tempDir, err := os.MkdirTemp("", "kodelet-fragments-workflow-list-test")
 	require.NoError(t, err)

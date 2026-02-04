@@ -277,6 +277,26 @@ func (g *ToolContentGenerator) generateSubAgentContent(structured tooltypes.Stru
 
 	content := []map[string]any{}
 
+	if meta.Workflow != "" {
+		content = append(content, map[string]any{
+			"type": ToolCallContentTypeContent,
+			"content": map[string]any{
+				"type": acptypes.ContentTypeText,
+				"text": fmt.Sprintf("Workflow: %s", meta.Workflow),
+			},
+		})
+	}
+
+	if meta.Cwd != "" {
+		content = append(content, map[string]any{
+			"type": ToolCallContentTypeContent,
+			"content": map[string]any{
+				"type": acptypes.ContentTypeText,
+				"text": fmt.Sprintf("Directory: %s", meta.Cwd),
+			},
+		})
+	}
+
 	if meta.Question != "" {
 		content = append(content, map[string]any{
 			"type": ToolCallContentTypeContent,

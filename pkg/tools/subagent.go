@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"text/template"
@@ -28,6 +30,8 @@ type SubAgentToolResult struct {
 	result   string
 	err      string
 	question string
+	workflow string
+	cwd      string
 }
 
 // GetResult returns the sub-agent output
@@ -69,6 +73,7 @@ type SubAgentInput struct {
 	Question string            `json:"question,omitempty" jsonschema:"description=The question to ask (required unless workflow is specified)"`
 	Workflow string            `json:"workflow,omitempty" jsonschema:"description=Optional workflow name to use for specialized tasks"`
 	Args     map[string]string `json:"args,omitempty" jsonschema:"description=Optional arguments for the workflow as key-value pairs"`
+	Cwd      string            `json:"cwd,omitempty" jsonschema:"description=Working directory for subagent (absolute path)"`
 }
 
 // Name returns the name of the tool
@@ -105,6 +110,7 @@ This tool is ideal for tasks that involves code searching, architecture analysis
 - question: A description of the question to ask the subagent (required unless workflow is specified).
 - workflow: (Optional) A workflow name to use for specialized tasks. See available workflows below.
 - args: (Optional) Arguments for the workflow as key-value pairs.
+- cwd: (Optional) Specify when you want the subagent to work in a directory other than the current working directory. Must be an absolute path.
 
 ## Common Use Cases
 * If you want to do multi-turn search using grep_tool and file_read, and you don't know exactly what keywords to use. You should use this subagent tool.
@@ -222,6 +228,28 @@ func (t *SubAgentTool) ValidateInput(_ tooltypes.State, parameters string) error
 		}
 	}
 
+	// Validate cwd is an absolute path, exists, and is a directory
+	if input.Cwd != "" {
+		if !filepath.IsAbs(input.Cwd) {
+			return errors.Errorf("cwd must be an absolute path, got: %s", input.Cwd)
+		}
+		// Resolve symlinks to prevent symlink attacks
+		resolvedPath, err := filepath.EvalSymlinks(input.Cwd)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return errors.Errorf("cwd directory does not exist: %s", input.Cwd)
+			}
+			return errors.Wrapf(err, "failed to resolve cwd path: %s", input.Cwd)
+		}
+		stat, err := os.Stat(resolvedPath)
+		if err != nil {
+			return errors.Wrapf(err, "failed to access cwd: %s", input.Cwd)
+		}
+		if !stat.IsDir() {
+			return errors.Errorf("cwd is not a directory: %s", input.Cwd)
+		}
+	}
+
 	return nil
 }
 
@@ -240,14 +268,37 @@ func (t *SubAgentTool) TracingKVs(parameters string) ([]attribute.KeyValue, erro
 	if input.Workflow != "" {
 		kvs = append(kvs, attribute.String("workflow", input.Workflow))
 	}
+	if input.Cwd != "" {
+		kvs = append(kvs, attribute.String("cwd", input.Cwd))
+	}
 
 	return kvs, nil
+}
+
+// stripProfileFlag removes all --profile flags and their values from args slice
+// Handles both "--profile value" and "--profile=value" formats
+func stripProfileFlag(args []string) []string {
+	result := slices.Clone(args)
+	// Handle "--profile value" format - remove all occurrences
+	for {
+		if i := slices.Index(result, "--profile"); i >= 0 && i+1 < len(result) {
+			result = slices.Delete(result, i, i+2)
+		} else {
+			break
+		}
+	}
+	// Handle "--profile=value" format - remove all occurrences
+	result = slices.DeleteFunc(result, func(s string) bool {
+		return strings.HasPrefix(s, "--profile=")
+	})
+	return result
 }
 
 // BuildSubagentArgs builds the command-line arguments for spawning a subagent process.
 // This is extracted as a separate function for testability.
 // Returns the complete argument list including the base args, subagent_args from config, and the question.
-func BuildSubagentArgs(ctx context.Context, subagentArgs string, input *SubAgentInput) []string {
+// The workflow parameter is optional and provides workflow metadata (profile).
+func BuildSubagentArgs(ctx context.Context, subagentArgs string, input *SubAgentInput, workflow *fragments.Fragment) []string {
 	// Base arguments for subagent execution
 	args := []string{"run", "--result-only", "--as-subagent"}
 
@@ -257,8 +308,17 @@ func BuildSubagentArgs(ctx context.Context, subagentArgs string, input *SubAgent
 		if err != nil {
 			logger.G(ctx).WithError(err).Warn("failed to parse subagent_args, ignoring")
 		} else {
+			// If workflow has a profile, strip --profile from subagent_args to avoid conflicts
+			if workflow != nil && workflow.Metadata.Profile != "" {
+				parsedArgs = stripProfileFlag(parsedArgs)
+			}
 			args = append(args, parsedArgs...)
 		}
+	}
+
+	// Add profile from workflow metadata
+	if workflow != nil && workflow.Metadata.Profile != "" {
+		args = append(args, "--profile", workflow.Metadata.Profile)
 	}
 
 	// Add workflow if specified
@@ -299,6 +359,8 @@ func (t *SubAgentTool) Execute(ctx context.Context, state tooltypes.State, param
 		return &SubAgentToolResult{
 			err:      errors.Wrap(err, "failed to get executable path").Error(),
 			question: input.Question,
+			workflow: input.Workflow,
+			cwd:      input.Cwd,
 		}
 	}
 
@@ -307,28 +369,45 @@ func (t *SubAgentTool) Execute(ctx context.Context, state tooltypes.State, param
 	if llmConfig, ok := state.GetLLMConfig().(llmtypes.Config); ok {
 		subagentArgs = llmConfig.SubagentArgs
 	}
-	args := BuildSubagentArgs(ctx, subagentArgs, input)
+
+	// Look up workflow fragment for metadata (profile/provider/model)
+	var workflow *fragments.Fragment
+	if input.Workflow != "" && t.workflowEnabled {
+		workflow = t.workflows[input.Workflow]
+	}
+	args := BuildSubagentArgs(ctx, subagentArgs, input, workflow)
 
 	cmd := exec.CommandContext(ctx, exe, args...)
 
-	output, err := cmd.Output()
-	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
+	// Set working directory if specified (use resolved path to prevent TOCTOU issues)
+	if input.Cwd != "" {
+		resolvedCwd, err := filepath.EvalSymlinks(input.Cwd)
+		if err != nil {
 			return &SubAgentToolResult{
-				err:      fmt.Sprintf("Subagent execution failed: %s\nstderr: %s", err, string(exitErr.Stderr)),
+				err:      errors.Wrapf(err, "failed to resolve cwd path: %s", input.Cwd).Error(),
 				question: input.Question,
+				workflow: input.Workflow,
+				cwd:      input.Cwd,
 			}
 		}
+		cmd.Dir = resolvedCwd
+	}
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
 		return &SubAgentToolResult{
-			err:      fmt.Sprintf("Subagent execution failed: %s", err),
+			err:      fmt.Sprintf("Subagent execution failed: %s\noutput: %s", err, string(output)),
 			question: input.Question,
+			workflow: input.Workflow,
+			cwd:      input.Cwd,
 		}
 	}
 
 	return &SubAgentToolResult{
 		result:   strings.TrimSpace(string(output)),
 		question: input.Question,
+		workflow: input.Workflow,
+		cwd:      input.Cwd,
 	}
 }
 
@@ -344,6 +423,8 @@ func (r *SubAgentToolResult) StructuredData() tooltypes.StructuredToolResult {
 	result.Metadata = &tooltypes.SubAgentMetadata{
 		Question: r.question,
 		Response: r.result,
+		Workflow: r.workflow,
+		Cwd:      r.cwd,
 	}
 
 	if r.IsError() {

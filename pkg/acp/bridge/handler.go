@@ -397,7 +397,9 @@ func (g *DefaultTitleGenerator) GenerateTitle(toolName string, input string) str
 			title = fmt.Sprintf("Fetch: %s", url)
 		}
 	case "subagent":
-		if question, ok := params["question"].(string); ok {
+		if workflow, ok := params["workflow"].(string); ok && workflow != "" {
+			title = fmt.Sprintf("Subagent: %s", workflow)
+		} else if question, ok := params["question"].(string); ok {
 			title = fmt.Sprintf("Subagent: %s", question)
 		}
 	case "image_recognition":

@@ -22,6 +22,12 @@ func (r *SubAgentRenderer) RenderCLI(result tools.StructuredToolResult) string {
 	}
 
 	output := "Subagent Response:\n"
+	if meta.Workflow != "" {
+		output += fmt.Sprintf("Workflow: %s\n", meta.Workflow)
+	}
+	if meta.Cwd != "" {
+		output += fmt.Sprintf("Directory: %s\n", meta.Cwd)
+	}
 	if meta.Question != "" {
 		output += fmt.Sprintf("Question: %s\n", meta.Question)
 	}

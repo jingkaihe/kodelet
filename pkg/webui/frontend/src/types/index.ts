@@ -197,6 +197,8 @@ export interface TodoItem {
 export interface SubagentMetadata {
   question: string;
   response?: string;
+  workflow?: string;
+  cwd?: string;
 }
 
 export interface BatchMetadata {
