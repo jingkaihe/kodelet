@@ -253,7 +253,7 @@ class StreamlitACPClient(Client):
         """Record events during load_session to st.session_state.messages."""
         if isinstance(update, UserMessageChunk):
             # New user message = new turn, save previous assistant if any
-            if self.state._current_assistant["content"] or self.state._current_assistant["thinking"]:
+            if self.state._current_assistant["content"] or self.state._current_assistant["thinking"] or self.state._current_assistant["tools"]:
                 st.session_state.messages.append(self.state._current_assistant)
                 self.state._current_assistant = {"role": "assistant", "content": "", "thinking": "", "tools": []}
             content = update.content
@@ -352,13 +352,13 @@ class StreamlitACPClient(Client):
 
 def _finalize_assistant(state: ResponseState):
     """Append any pending assistant message to session state."""
-    if state._current_assistant["content"] or state._current_assistant["thinking"]:
+    if state._current_assistant["content"] or state._current_assistant["thinking"] or state._current_assistant["tools"]:
         st.session_state.messages.append(state._current_assistant)
         state._current_assistant = {"role": "assistant", "content": "", "thinking": "", "tools": []}
 
 
-# 10MB buffer limit for large conversation history
-ACP_BUFFER_LIMIT = 10 * 1024 * 1024
+# 50MB buffer limit for large conversation history
+ACP_BUFFER_LIMIT = 50 * 1024 * 1024
 
 
 async def load_session_history(session_id: str) -> bool:
