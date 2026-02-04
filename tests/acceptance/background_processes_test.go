@@ -1,6 +1,7 @@
 package acceptance
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +14,16 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// killProcessOnPort kills any process listening on the specified port
+func killProcessOnPort(t *testing.T, port int) {
+	cmd := exec.Command("fuser", "-k", fmt.Sprintf("%d/tcp", port))
+	if err := cmd.Run(); err != nil {
+		t.Logf("No process found on port %d (or fuser not available): %v", port, err)
+	} else {
+		t.Logf("Killed process on port %d", port)
+	}
+}
+
 func TestBashToolBackgroundParameter(t *testing.T) {
 	// Create a temporary test directory for file operations
 	testDir := t.TempDir()
@@ -21,6 +32,7 @@ func TestBashToolBackgroundParameter(t *testing.T) {
 		name     string
 		query    string
 		validate func(t *testing.T, output string, testDir string)
+		cleanup  func(t *testing.T)
 	}{
 		{
 			name:  "start simple background process",
@@ -63,6 +75,9 @@ func TestBashToolBackgroundParameter(t *testing.T) {
 
 				helloStr := strings.TrimSpace(string(helloContent))
 				assert.Contains(t, helloStr, "hello world", "Expected hello.txt to contain 'hello world' from curl response")
+			},
+			cleanup: func(t *testing.T) {
+				killProcessOnPort(t, 8080)
 			},
 		},
 		{
@@ -110,6 +125,11 @@ func TestBashToolBackgroundParameter(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
+			// Register cleanup if defined
+			if tc.cleanup != nil {
+				t.Cleanup(func() { tc.cleanup(t) })
+			}
+
 			// Change to test directory for file operations
 			originalDir, _ := os.Getwd()
 			os.Chdir(testDir)
