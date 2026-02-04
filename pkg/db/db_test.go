@@ -34,26 +34,6 @@ func TestOpen_CreatesDirectory(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestEnsureSchemaVersion(t *testing.T) {
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "test.db")
-
-	db, err := Open(context.Background(), dbPath)
-	require.NoError(t, err)
-	defer db.Close()
-
-	err = EnsureSchemaVersion(context.Background(), db)
-	require.NoError(t, err)
-
-	var tableExists bool
-	err = db.QueryRow(`
-		SELECT COUNT(*) > 0 FROM sqlite_master
-		WHERE type='table' AND name='schema_version'
-	`).Scan(&tableExists)
-	require.NoError(t, err)
-	assert.True(t, tableExists)
-}
-
 func TestDefaultDBPath(t *testing.T) {
 	origBasePath := os.Getenv("KODELET_BASE_PATH")
 	defer os.Setenv("KODELET_BASE_PATH", origBasePath)
@@ -96,7 +76,7 @@ func TestMigrationRunner(t *testing.T) {
 
 	migrations := []Migration{
 		{
-			Version:     1,
+			Version:     20240101000001,
 			Description: "Create test table",
 			Up: func(tx *sql.Tx) error {
 				_, err := tx.Exec("CREATE TABLE test_table (id INTEGER PRIMARY KEY)")
@@ -104,7 +84,7 @@ func TestMigrationRunner(t *testing.T) {
 			},
 		},
 		{
-			Version:     2,
+			Version:     20240101000002,
 			Description: "Add column",
 			Up: func(tx *sql.Tx) error {
 				_, err := tx.Exec("ALTER TABLE test_table ADD COLUMN name TEXT")
@@ -113,7 +93,7 @@ func TestMigrationRunner(t *testing.T) {
 		},
 	}
 
-	runner := NewMigrationRunner(db, "test")
+	runner := NewMigrationRunner(db)
 	err = runner.Run(context.Background(), migrations)
 	require.NoError(t, err)
 
@@ -125,10 +105,9 @@ func TestMigrationRunner(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, tableExists)
 
-	var version int
-	err = db.Get(&version, "SELECT MAX(version) FROM schema_migrations WHERE component = 'test'")
+	versions, err := runner.GetAppliedVersions(context.Background())
 	require.NoError(t, err)
-	assert.Equal(t, 2, version)
+	assert.Equal(t, []int64{20240101000001, 20240101000002}, versions)
 }
 
 func TestMigrationRunner_Idempotent(t *testing.T) {
@@ -141,7 +120,7 @@ func TestMigrationRunner_Idempotent(t *testing.T) {
 
 	migrations := []Migration{
 		{
-			Version:     1,
+			Version:     20240101000001,
 			Description: "Create test table",
 			Up: func(tx *sql.Tx) error {
 				_, err := tx.Exec("CREATE TABLE test_table (id INTEGER PRIMARY KEY)")
@@ -150,7 +129,7 @@ func TestMigrationRunner_Idempotent(t *testing.T) {
 		},
 	}
 
-	runner := NewMigrationRunner(db, "test")
+	runner := NewMigrationRunner(db)
 
 	err = runner.Run(context.Background(), migrations)
 	require.NoError(t, err)
@@ -159,12 +138,12 @@ func TestMigrationRunner_Idempotent(t *testing.T) {
 	require.NoError(t, err)
 
 	var count int
-	err = db.Get(&count, "SELECT COUNT(*) FROM schema_migrations WHERE component = 'test'")
+	err = db.Get(&count, "SELECT COUNT(*) FROM schema_migrations")
 	require.NoError(t, err)
 	assert.Equal(t, 1, count)
 }
 
-func TestMigrationRunner_MultipleComponents(t *testing.T) {
+func TestMigrationRunner_OutOfOrder(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
@@ -172,34 +151,85 @@ func TestMigrationRunner_MultipleComponents(t *testing.T) {
 	require.NoError(t, err)
 	defer db.Close()
 
-	migrationsA := []Migration{
-		{Version: 1, Description: "A v1", Up: func(tx *sql.Tx) error {
-			_, err := tx.Exec("CREATE TABLE table_a (id INTEGER PRIMARY KEY)")
-			return err
-		}},
+	// Add migrations out of order - runner should sort by timestamp
+	migrations := []Migration{
+		{
+			Version:     20240101000002,
+			Description: "Second migration",
+			Up: func(tx *sql.Tx) error {
+				_, err := tx.Exec("ALTER TABLE test_table ADD COLUMN name TEXT")
+				return err
+			},
+		},
+		{
+			Version:     20240101000001,
+			Description: "First migration",
+			Up: func(tx *sql.Tx) error {
+				_, err := tx.Exec("CREATE TABLE test_table (id INTEGER PRIMARY KEY)")
+				return err
+			},
+		},
 	}
 
-	migrationsB := []Migration{
-		{Version: 1, Description: "B v1", Up: func(tx *sql.Tx) error {
-			_, err := tx.Exec("CREATE TABLE table_b (id INTEGER PRIMARY KEY)")
-			return err
-		}},
-		{Version: 2, Description: "B v2", Up: func(tx *sql.Tx) error {
-			_, err := tx.Exec("ALTER TABLE table_b ADD COLUMN name TEXT")
-			return err
-		}},
+	runner := NewMigrationRunner(db)
+	err = runner.Run(context.Background(), migrations)
+	require.NoError(t, err)
+
+	versions, err := runner.GetAppliedVersions(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, []int64{20240101000001, 20240101000002}, versions)
+}
+
+func TestMigrationRunner_Rollback(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	db, err := Open(context.Background(), dbPath)
+	require.NoError(t, err)
+	defer db.Close()
+
+	migrations := []Migration{
+		{
+			Version:     20240101000001,
+			Description: "Create test table",
+			Up: func(tx *sql.Tx) error {
+				_, err := tx.Exec("CREATE TABLE test_table (id INTEGER PRIMARY KEY)")
+				return err
+			},
+			Down: func(tx *sql.Tx) error {
+				_, err := tx.Exec("DROP TABLE test_table")
+				return err
+			},
+		},
 	}
 
-	runnerA := NewMigrationRunner(db, "component_a")
-	runnerB := NewMigrationRunner(db, "component_b")
+	runner := NewMigrationRunner(db)
+	err = runner.Run(context.Background(), migrations)
+	require.NoError(t, err)
 
-	require.NoError(t, runnerA.Run(context.Background(), migrationsA))
-	require.NoError(t, runnerB.Run(context.Background(), migrationsB))
+	// Verify table exists
+	var tableExists bool
+	err = db.QueryRow(`
+		SELECT COUNT(*) > 0 FROM sqlite_master
+		WHERE type='table' AND name='test_table'
+	`).Scan(&tableExists)
+	require.NoError(t, err)
+	assert.True(t, tableExists)
 
-	var versionA, versionB int
-	require.NoError(t, db.Get(&versionA, "SELECT MAX(version) FROM schema_migrations WHERE component = 'component_a'"))
-	require.NoError(t, db.Get(&versionB, "SELECT MAX(version) FROM schema_migrations WHERE component = 'component_b'"))
+	// Rollback
+	err = runner.Rollback(context.Background(), migrations)
+	require.NoError(t, err)
 
-	assert.Equal(t, 1, versionA)
-	assert.Equal(t, 2, versionB)
+	// Verify table is gone
+	err = db.QueryRow(`
+		SELECT COUNT(*) > 0 FROM sqlite_master
+		WHERE type='table' AND name='test_table'
+	`).Scan(&tableExists)
+	require.NoError(t, err)
+	assert.False(t, tableExists)
+
+	// Verify migration record is removed
+	versions, err := runner.GetAppliedVersions(context.Background())
+	require.NoError(t, err)
+	assert.Empty(t, versions)
 }

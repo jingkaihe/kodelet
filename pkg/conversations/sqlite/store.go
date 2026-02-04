@@ -12,6 +12,7 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/jingkaihe/kodelet/pkg/db"
+	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/types/conversations"
 )
 
@@ -33,22 +34,14 @@ func NewStore(ctx context.Context, dbPath string) (*Store, error) {
 		db:     sqlDB,
 	}
 
-	if err := store.initializeSchema(); err != nil {
+	// Run all migrations using the shared migration runner
+	runner := db.NewMigrationRunner(sqlDB)
+	if err := runner.Run(ctx, migrations.All()); err != nil {
 		sqlDB.Close()
-		return nil, errors.Wrap(err, "failed to initialize schema")
+		return nil, errors.Wrap(err, "failed to run migrations")
 	}
 
 	return store, nil
-}
-
-// initializeSchema creates the database schema and runs migrations
-func (s *Store) initializeSchema() error {
-	// Run migrations
-	if err := s.runMigrations(); err != nil {
-		return errors.Wrap(err, "failed to run migrations")
-	}
-
-	return nil
 }
 
 // Save persists a conversation record to the database using UPSERT to preserve created_at timestamps

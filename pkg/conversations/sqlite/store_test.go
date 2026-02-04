@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/db"
+	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	conversations "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -418,10 +419,10 @@ func TestStore_SchemaValidation(t *testing.T) {
 	err = store.validateSchema()
 	require.NoError(t, err)
 
-	// Test schema version
-	version, err := store.getCurrentSchemaVersion()
+	// Test migration count matches expected
+	count, err := store.getAppliedMigrationCount(ctx)
 	require.NoError(t, err)
-	assert.Equal(t, CurrentSchemaVersion, version)
+	assert.Equal(t, len(migrations.All()), count)
 }
 
 func TestStore_Migrations(t *testing.T) {
@@ -436,13 +437,13 @@ func TestStore_Migrations(t *testing.T) {
 	require.NoError(t, err)
 	defer store.Close()
 
-	// Check that schema version is current
-	version, err := store.getCurrentSchemaVersion()
+	// Check that all migrations are applied
+	count, err := store.getAppliedMigrationCount(ctx)
 	require.NoError(t, err)
-	assert.Equal(t, CurrentSchemaVersion, version)
+	assert.Equal(t, len(migrations.All()), count)
 
 	// Verify all tables exist
-	tables := []string{"schema_version", "conversations", "conversation_summaries"}
+	tables := []string{"schema_migrations", "conversations", "conversation_summaries", "acp_session_updates"}
 	for _, table := range tables {
 		var exists bool
 		err = store.db.QueryRow(`

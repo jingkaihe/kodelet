@@ -1,4 +1,4 @@
-package session
+package migrations
 
 import (
 	"database/sql"
@@ -7,11 +7,9 @@ import (
 	"github.com/pkg/errors"
 )
 
-const componentName = "acp"
-
-var migrations = []db.Migration{
-	{
-		Version:     1,
+func Migration20240204000001CreateACPSessionUpdates() db.Migration {
+	return db.Migration{
+		Version:     20240204000001,
 		Description: "Create acp_session_updates table",
 		Up: func(tx *sql.Tx) error {
 			if _, err := tx.Exec(`
@@ -41,5 +39,9 @@ var migrations = []db.Migration{
 
 			return nil
 		},
-	},
+		Down: func(tx *sql.Tx) error {
+			_, err := tx.Exec("DROP TABLE IF EXISTS acp_session_updates")
+			return errors.Wrap(err, "failed to drop acp_session_updates table")
+		},
+	}
 }

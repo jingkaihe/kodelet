@@ -12,6 +12,7 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/acp/acptypes"
 	"github.com/jingkaihe/kodelet/pkg/db"
+	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 )
 
 // StoredUpdate represents a stored session update for replay
@@ -108,8 +109,8 @@ func NewStorage(ctx context.Context, opts ...StorageOption) (*Storage, error) {
 	}
 	s.db = sqlDB
 
-	runner := db.NewMigrationRunner(sqlDB, componentName)
-	if err := runner.Run(ctx, migrations); err != nil {
+	runner := db.NewMigrationRunner(sqlDB)
+	if err := runner.Run(ctx, migrations.All()); err != nil {
 		sqlDB.Close()
 		return nil, errors.Wrap(err, "failed to run migrations")
 	}

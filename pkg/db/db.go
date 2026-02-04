@@ -81,18 +81,6 @@ func Configure(ctx context.Context, db *sqlx.DB) error {
 	return nil
 }
 
-// EnsureSchemaVersion creates the schema_version table if it doesn't exist.
-func EnsureSchemaVersion(ctx context.Context, db *sqlx.DB) error {
-	_, err := db.ExecContext(ctx, `
-		CREATE TABLE IF NOT EXISTS schema_version (
-			version INTEGER PRIMARY KEY,
-			applied_at DATETIME NOT NULL,
-			description TEXT
-		)
-	`)
-	return errors.Wrap(err, "failed to create schema_version table")
-}
-
 // VerifyConfiguration checks if the database is properly configured with WAL mode.
 func VerifyConfiguration(db *sqlx.DB) error {
 	var journalMode string
