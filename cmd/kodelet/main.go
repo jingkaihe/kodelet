@@ -156,6 +156,7 @@ func main() {
 	rootCmd.AddCommand(steerCmd)
 	rootCmd.AddCommand(recipeCmd)
 	rootCmd.AddCommand(profileCmd)
+	rootCmd.AddCommand(dbCmd)
 
 	// Initialize telemetry with tracing
 	tracingShutdown, err := initTracing(ctx)
@@ -177,9 +178,12 @@ func main() {
 	// Ensure required external binaries are installed
 	binaries.EnsureDepsInstalled(ctx)
 
-	// Run database migrations once at startup
-	if err := db.RunMigrations(ctx, migrations.All()); err != nil {
-		logger.G(ctx).WithError(err).Warn("Failed to run database migrations")
+	// Run database migrations once at startup (skip for db commands to allow manual control)
+	skipMigrations := len(os.Args) > 1 && os.Args[1] == "db"
+	if !skipMigrations {
+		if err := db.RunMigrations(ctx, migrations.All()); err != nil {
+			logger.G(ctx).WithError(err).Fatal("Failed to run database migrations")
+		}
 	}
 
 	rootCmd = withTracing(rootCmd)

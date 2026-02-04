@@ -7,6 +7,7 @@ import (
 	"github.com/pkg/errors"
 )
 
+// Migration20260204163001AddPerformanceIndexes adds performance indexes for conversations and summaries.
 func Migration20260204163001AddPerformanceIndexes() db.Migration {
 	return db.Migration{
 		Version:     20260204163001,

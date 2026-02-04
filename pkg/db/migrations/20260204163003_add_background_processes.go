@@ -7,6 +7,7 @@ import (
 	"github.com/pkg/errors"
 )
 
+// Migration20260204163003AddBackgroundProcesses adds background_processes column to conversations table.
 func Migration20260204163003AddBackgroundProcesses() db.Migration {
 	return db.Migration{
 		Version:     20260204163003,
@@ -29,7 +30,7 @@ func Migration20260204163003AddBackgroundProcesses() db.Migration {
 			}
 			return nil
 		},
-		Down: func(tx *sql.Tx) error {
+		Down: func(_ *sql.Tx) error {
 			// SQLite doesn't support DROP COLUMN, would need table recreation
 			return nil
 		},

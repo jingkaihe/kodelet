@@ -29,7 +29,6 @@ func TestStorage_AppendAndRead(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "sessions.db")
 	setupTestDB(t, dbPath)
-	setupTestDB(t, dbPath)
 
 	storage, err := NewStorage(context.Background(), WithDBPath(dbPath))
 	require.NoError(t, err)

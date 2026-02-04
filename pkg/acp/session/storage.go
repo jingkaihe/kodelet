@@ -69,6 +69,7 @@ type sessionState struct {
 	pending *pendingUpdate
 }
 
+// Storage handles persistence of ACP session updates using SQLite.
 type Storage struct {
 	dbPath string
 	db     *sqlx.DB
@@ -77,8 +78,10 @@ type Storage struct {
 	sessions   map[acptypes.SessionID]*sessionState
 }
 
+// StorageOption configures a Storage instance.
 type StorageOption func(*Storage)
 
+// WithDBPath sets a custom database path for session storage.
 func WithDBPath(path string) StorageOption {
 	return func(s *Storage) {
 		s.dbPath = path
@@ -126,6 +129,7 @@ func (s *Storage) getOrCreateSession(sessionID acptypes.SessionID) *sessionState
 	return ss
 }
 
+// AppendUpdate appends a session update, merging consecutive text chunks.
 func (s *Storage) AppendUpdate(sessionID acptypes.SessionID, update any) error {
 	ss := s.getOrCreateSession(sessionID)
 
@@ -203,6 +207,7 @@ func (s *Storage) writeUpdate(sessionID acptypes.SessionID, update any) error {
 	return nil
 }
 
+// ReadUpdates reads all updates for a session for replay.
 func (s *Storage) ReadUpdates(sessionID acptypes.SessionID) ([]StoredUpdate, error) {
 	var rows []struct {
 		UpdateData string `db:"update_data"`
@@ -231,6 +236,7 @@ func (s *Storage) ReadUpdates(sessionID acptypes.SessionID) ([]StoredUpdate, err
 	return updates, nil
 }
 
+// Flush writes any pending update for a session to disk.
 func (s *Storage) Flush(sessionID acptypes.SessionID) error {
 	s.sessionsMu.Lock()
 	ss, ok := s.sessions[sessionID]
@@ -246,6 +252,7 @@ func (s *Storage) Flush(sessionID acptypes.SessionID) error {
 	return s.flushPendingLocked(sessionID, ss)
 }
 
+// Delete removes all session updates from storage.
 func (s *Storage) Delete(sessionID acptypes.SessionID) error {
 	s.sessionsMu.Lock()
 	delete(s.sessions, sessionID)
@@ -259,6 +266,7 @@ func (s *Storage) Delete(sessionID acptypes.SessionID) error {
 	return nil
 }
 
+// CloseSession flushes pending updates and removes the session from memory.
 func (s *Storage) CloseSession(sessionID acptypes.SessionID) error {
 	if err := s.Flush(sessionID); err != nil {
 		return errors.Wrap(err, "failed to flush pending update")
@@ -271,6 +279,7 @@ func (s *Storage) CloseSession(sessionID acptypes.SessionID) error {
 	return nil
 }
 
+// Exists checks if a session has any stored updates.
 func (s *Storage) Exists(sessionID acptypes.SessionID) bool {
 	var count int
 	err := s.db.Get(&count, "SELECT COUNT(*) FROM acp_session_updates WHERE session_id = ? LIMIT 1", string(sessionID))
@@ -280,6 +289,7 @@ func (s *Storage) Exists(sessionID acptypes.SessionID) bool {
 	return count > 0
 }
 
+// Close flushes all pending updates and closes the database connection.
 func (s *Storage) Close() error {
 	s.sessionsMu.Lock()
 	for sessionID, ss := range s.sessions {

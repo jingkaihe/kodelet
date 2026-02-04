@@ -9,6 +9,8 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	"github.com/pkg/errors"
+
+	// sqlite driver for database/sql registration
 	_ "modernc.org/sqlite"
 )
 
@@ -96,6 +98,40 @@ func RunMigrations(ctx context.Context, migrations []Migration) error {
 
 	runner := NewMigrationRunner(sqlDB)
 	return runner.Run(ctx, migrations)
+}
+
+// RollbackMigration rolls back the last applied migration.
+func RollbackMigration(ctx context.Context, migrations []Migration) error {
+	dbPath, err := DefaultDBPath()
+	if err != nil {
+		return err
+	}
+
+	sqlDB, err := Open(ctx, dbPath)
+	if err != nil {
+		return err
+	}
+	defer sqlDB.Close()
+
+	runner := NewMigrationRunner(sqlDB)
+	return runner.Rollback(ctx, migrations)
+}
+
+// GetMigrationStatus returns the list of applied migration versions.
+func GetMigrationStatus(ctx context.Context) ([]int64, error) {
+	dbPath, err := DefaultDBPath()
+	if err != nil {
+		return nil, err
+	}
+
+	sqlDB, err := Open(ctx, dbPath)
+	if err != nil {
+		return nil, err
+	}
+	defer sqlDB.Close()
+
+	runner := NewMigrationRunner(sqlDB)
+	return runner.GetAppliedVersions(ctx)
 }
 
 // VerifyConfiguration checks if the database is properly configured with WAL mode.

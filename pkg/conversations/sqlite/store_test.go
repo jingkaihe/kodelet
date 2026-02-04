@@ -19,8 +19,9 @@ import (
 )
 
 // setupTestDB creates a test database with migrations applied
-func setupTestDB(t *testing.T, ctx context.Context, dbPath string) {
+func setupTestDB(t *testing.T, dbPath string) {
 	t.Helper()
+	ctx := context.Background()
 	sqlDB, err := db.Open(ctx, dbPath)
 	require.NoError(t, err)
 	defer sqlDB.Close()
@@ -35,8 +36,7 @@ func TestStore_BasicOperations(t *testing.T) {
 	// Create temporary database file
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test_conversations.db")
-	setupTestDB(t, ctx, dbPath)
-	setupTestDB(t, ctx, dbPath)
+	setupTestDB(t, dbPath)
 
 	// Create store
 	store, err := NewStore(ctx, dbPath)
@@ -116,7 +116,7 @@ func TestStore_Query(t *testing.T) {
 	// Create temporary database file
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test_conversations.db")
-	setupTestDB(t, ctx, dbPath)
+	setupTestDB(t, dbPath)
 
 	// Create store
 	store, err := NewStore(ctx, dbPath)
@@ -236,7 +236,7 @@ func TestStore_DefaultSorting(t *testing.T) {
 	// Create temporary database file
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test_default_sorting.db")
-	setupTestDB(t, ctx, dbPath)
+	setupTestDB(t, dbPath)
 
 	// Create store
 	store, err := NewStore(ctx, dbPath)
@@ -424,7 +424,7 @@ func TestStore_SchemaValidation(t *testing.T) {
 	// Create temporary database file
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test_conversations.db")
-	setupTestDB(t, ctx, dbPath)
+	setupTestDB(t, dbPath)
 
 	// Create store
 	store, err := NewStore(ctx, dbPath)
@@ -447,7 +447,7 @@ func TestStore_Migrations(t *testing.T) {
 	// Create temporary database file
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test_conversations.db")
-	setupTestDB(t, ctx, dbPath)
+	setupTestDB(t, dbPath)
 
 	// Create store - this should run migrations
 	store, err := NewStore(ctx, dbPath)
@@ -479,7 +479,7 @@ func TestStore_WALMode(t *testing.T) {
 	// Create temporary database file
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test_wal.db")
-	setupTestDB(t, ctx, dbPath)
+	setupTestDB(t, dbPath)
 
 	// Create store
 	store, err := NewStore(ctx, dbPath)
@@ -542,7 +542,7 @@ func TestStore_DatabaseIntegration(t *testing.T) {
 	// Create temporary database file
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test_integration.db")
-	setupTestDB(t, ctx, dbPath)
+	setupTestDB(t, dbPath)
 
 	// Create store
 	store, err := NewStore(ctx, dbPath)
@@ -673,7 +673,7 @@ func TestStore_NullHandling(t *testing.T) {
 	// Create temporary database file
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test_null.db")
-	setupTestDB(t, ctx, dbPath)
+	setupTestDB(t, dbPath)
 
 	// Create store
 	store, err := NewStore(ctx, dbPath)
@@ -722,7 +722,7 @@ func TestStore_ConcurrentAccess(t *testing.T) {
 	// Create temporary database file
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test_concurrent.db")
-	setupTestDB(t, ctx, dbPath)
+	setupTestDB(t, dbPath)
 
 	// Create store
 	store, err := NewStore(ctx, dbPath)
@@ -838,7 +838,7 @@ func TestStore_DirectDatabaseAccess(t *testing.T) {
 	// Create temporary database file
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test_direct.db")
-	setupTestDB(t, ctx, dbPath)
+	setupTestDB(t, dbPath)
 
 	// Create store
 	store, err := NewStore(ctx, dbPath)
@@ -933,7 +933,7 @@ func TestStore_TimestampBehavior(t *testing.T) {
 	// Create temporary database file
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test_timestamps.db")
-	setupTestDB(t, ctx, dbPath)
+	setupTestDB(t, dbPath)
 
 	// Create store
 	store, err := NewStore(ctx, dbPath)
@@ -1041,7 +1041,7 @@ func TestStore_BackgroundProcesses_Migration(t *testing.T) {
 	// Create temporary database file
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test_bg_migration.db")
-	setupTestDB(t, ctx, dbPath)
+	setupTestDB(t, dbPath)
 
 	store, err := NewStore(ctx, dbPath)
 	require.NoError(t, err)
@@ -1144,7 +1144,7 @@ func TestStore_ErrorScenarios(t *testing.T) {
 	// Test with valid store for other error scenarios
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test_errors.db")
-	setupTestDB(t, ctx, dbPath)
+	setupTestDB(t, dbPath)
 
 	store, err := NewStore(ctx, dbPath)
 	require.NoError(t, err)

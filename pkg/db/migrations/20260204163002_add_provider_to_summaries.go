@@ -7,6 +7,7 @@ import (
 	"github.com/pkg/errors"
 )
 
+// Migration20260204163002AddProviderToSummaries adds provider column to conversation_summaries table.
 func Migration20260204163002AddProviderToSummaries() db.Migration {
 	return db.Migration{
 		Version:     20260204163002,

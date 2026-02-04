@@ -7,6 +7,7 @@ import (
 	"github.com/pkg/errors"
 )
 
+// Migration20260204163000CreateConversations creates conversations and conversation_summaries tables.
 func Migration20260204163000CreateConversations() db.Migration {
 	return db.Migration{
 		Version:     20260204163000,

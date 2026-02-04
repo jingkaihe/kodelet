@@ -12,7 +12,7 @@ import (
 
 // Migration represents a database migration with timestamp-based versioning (Rails-style)
 type Migration struct {
-	Version     int64  // Timestamp format: YYYYMMDDHHmmss (e.g., 20240204153000)
+	Version     int64 // Timestamp format: YYYYMMDDHHmmss (e.g., 20240204153000)
 	Description string
 	Up          func(*sql.Tx) error
 	Down        func(*sql.Tx) error // Optional rollback function
