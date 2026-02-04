@@ -22,19 +22,17 @@ import sys
 from dataclasses import dataclass, field
 from datetime import datetime
 from shutil import which
-from typing import Any
+from typing import Any, cast
 
-os.environ["STREAMLIT_THEME_BASE"] = "light"
-
-import streamlit as st
-from acp import (
+import streamlit as st_module  # type: ignore[import-untyped]
+from acp import (  # type: ignore[import-not-found]
     PROTOCOL_VERSION,
     Client,
     RequestError,
     spawn_agent_process,
     text_block,
 )
-from acp.schema import (
+from acp.schema import (  # type: ignore[import-not-found]
     AgentMessageChunk,
     AgentPlanUpdate,
     AgentThoughtChunk,
@@ -57,6 +55,9 @@ from acp.schema import (
     WaitForTerminalExitResponse,
     WriteTextFileResponse,
 )
+
+os.environ["STREAMLIT_THEME_BASE"] = "light"
+st: Any = cast(Any, st_module)
 
 CUSTOM_CSS = """
 <style>
@@ -115,6 +116,7 @@ def find_kodelet_binary() -> str:
         return path
     st.error("Could not find `kodelet` in PATH. Please install it first.")
     st.stop()
+    raise SystemExit  # Unreachable, but satisfies type checker
 
 
 @dataclass
@@ -452,7 +454,7 @@ using the **Agent Client Protocol (ACP)**.
 
 
 if __name__ == "__main__":
-    from streamlit.web import cli as stcli
+    from streamlit.web import cli as stcli  # type: ignore[import-not-found]
 
     if st.runtime.exists():
         main()
