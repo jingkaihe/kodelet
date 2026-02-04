@@ -28,7 +28,6 @@ from typing import Any
 os.environ["STREAMLIT_THEME_BASE"] = "light"
 
 import streamlit as st
-
 from acp import (
     PROTOCOL_VERSION,
     Client,
@@ -42,7 +41,6 @@ from acp.schema import (
     AgentThoughtChunk,
     AudioContentBlock,
     AvailableCommandsUpdate,
-    ConfigOptionUpdate,
     CreateTerminalResponse,
     CurrentModeUpdate,
     EmbeddedResourceContentBlock,
@@ -178,7 +176,11 @@ class StreamlitACPClient(Client):
         self.placeholder = placeholder
 
     async def request_permission(
-        self, options: list[PermissionOption], session_id: str, tool_call: ToolCall, **kwargs: Any
+        self,
+        options: list[PermissionOption],
+        session_id: str,
+        tool_call: ToolCall,
+        **kwargs: Any,
     ) -> RequestPermissionResponse:
         raise RequestError.method_not_found("session/request_permission")
 
@@ -188,7 +190,12 @@ class StreamlitACPClient(Client):
         raise RequestError.method_not_found("fs/write_text_file")
 
     async def read_text_file(
-        self, path: str, session_id: str, limit: int | None = None, line: int | None = None, **kwargs: Any
+        self,
+        path: str,
+        session_id: str,
+        limit: int | None = None,
+        line: int | None = None,
+        **kwargs: Any,
     ) -> ReadTextFileResponse:
         raise RequestError.method_not_found("fs/read_text_file")
 
@@ -204,7 +211,9 @@ class StreamlitACPClient(Client):
     ) -> CreateTerminalResponse:
         raise RequestError.method_not_found("terminal/create")
 
-    async def terminal_output(self, session_id: str, terminal_id: str, **kwargs: Any) -> TerminalOutputResponse:
+    async def terminal_output(
+        self, session_id: str, terminal_id: str, **kwargs: Any
+    ) -> TerminalOutputResponse:
         raise RequestError.method_not_found("terminal/output")
 
     async def release_terminal(
@@ -233,7 +242,6 @@ class StreamlitACPClient(Client):
         | AgentPlanUpdate
         | AvailableCommandsUpdate
         | CurrentModeUpdate
-        | ConfigOptionUpdate
         | SessionInfoUpdate,
         **kwargs: Any,
     ) -> None:
@@ -293,8 +301,14 @@ def _render_response(placeholder, state: StreamingState):
         if state.tool_calls:
             with st.expander(f"Tools ({len(state.tool_calls)})", expanded=False):
                 for i, tc in enumerate(state.tool_calls):
-                    status_icon = "⏳" if tc.get("status") == "running" else "✓" if tc.get("status") == "completed" else "•"
-                    st.write(f"**{i+1}. {status_icon} {tc['title']}**")
+                    status_icon = (
+                        "⏳"
+                        if tc.get("status") == "running"
+                        else "✓"
+                        if tc.get("status") == "completed"
+                        else "•"
+                    )
+                    st.write(f"**{i + 1}. {status_icon} {tc['title']}**")
                     if tc.get("input"):
                         import json
 
@@ -321,7 +335,9 @@ def _render_response(placeholder, state: StreamingState):
             st.empty()
 
 
-async def run_acp_prompt(query: str, placeholder, session_id: str | None = None) -> StreamingState:
+async def run_acp_prompt(
+    query: str, placeholder, session_id: str | None = None
+) -> StreamingState:
     """Run a prompt via ACP and stream results."""
     kodelet_path = find_kodelet_binary()
     state = StreamingState()
@@ -401,7 +417,7 @@ def main():
                 if msg.get("tools"):
                     with st.expander(f"Tools ({len(msg['tools'])})", expanded=False):
                         for i, tc in enumerate(msg["tools"]):
-                            st.write(f"**{i+1}. {tc['title']}**")
+                            st.write(f"**{i + 1}. {tc['title']}**")
                             if tc.get("output"):
                                 import json
 
@@ -410,7 +426,10 @@ def main():
                                     st.code(output)
                                 else:
                                     try:
-                                        st.code(json.dumps(output, indent=2), language="json")
+                                        st.code(
+                                            json.dumps(output, indent=2),
+                                            language="json",
+                                        )
                                     except (TypeError, ValueError):
                                         st.code(str(output))
             st.markdown(msg["content"])
