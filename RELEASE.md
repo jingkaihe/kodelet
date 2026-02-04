@@ -1,5 +1,35 @@
 # Kodelet
 
+## 0.2.14.beta (2026-02-04)
+
+### Features
+
+**Database management commands**: New `kodelet db` command for managing database migrations:
+
+```bash
+kodelet db status              # Show migration status with applied/pending indicators
+kodelet db rollback            # Rollback the last migration (with confirmation)
+kodelet db rollback --no-confirm  # Rollback without confirmation
+```
+
+**Streamlit ACP chatbot example**: Added a full-featured Streamlit chatbot at `examples/streamlit-acp/` demonstrating ACP integration with conversation history, thinking visualization, tool call inspection, and image support. Run directly with:
+
+```bash
+uv run https://raw.githubusercontent.com/jingkaihe/kodelet/refs/heads/main/examples/streamlit-acp/main.py
+```
+
+### Bug Fixes
+
+- Fixed assistant message finalization checks to include tools in completion detection
+- Increased ACP buffer limit from default to 50MB to handle large conversation histories
+
+### Internal Changes
+
+- **Unified database migrations**: Migrated to Rails-style timestamp versioning (YYYYMMDDHHmmss) with centralized migration runner in `pkg/db/`
+- **ACP session storage**: Migrated from JSONL files to SQLite for improved reliability and thread safety
+- **Migrations run at startup**: Database migrations now execute once at CLI startup instead of per-component initialization
+- Added process cleanup helper for background process acceptance tests
+
 ## 0.2.12.beta (2026-02-03)
 
 ### Internal Changes
