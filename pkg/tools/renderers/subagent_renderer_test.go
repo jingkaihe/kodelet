@@ -182,4 +182,82 @@ This approach ensures scalability, maintainability, and resilience in your syste
 
 		assert.Contains(t, output, "Error: Invalid metadata type for subagent", "Expected invalid metadata error for nil metadata")
 	})
+
+	t.Run("Subagent response with workflow", func(t *testing.T) {
+		result := tools.StructuredToolResult{
+			ToolName:  "subagent",
+			Success:   true,
+			Timestamp: time.Now(),
+			Metadata: &tools.SubAgentMetadata{
+				Question: "Create a PR",
+				Response: "PR created successfully",
+				Workflow: "github/pr",
+			},
+		}
+
+		output := renderer.RenderCLI(result)
+
+		assert.Contains(t, output, "Workflow: github/pr", "Expected workflow in output")
+		assert.Contains(t, output, "Question: Create a PR", "Expected question in output")
+		assert.Contains(t, output, "PR created successfully", "Expected response in output")
+	})
+
+	t.Run("Subagent response with cwd", func(t *testing.T) {
+		result := tools.StructuredToolResult{
+			ToolName:  "subagent",
+			Success:   true,
+			Timestamp: time.Now(),
+			Metadata: &tools.SubAgentMetadata{
+				Question: "Analyze the code",
+				Response: "Code analysis complete",
+				Cwd:      "/home/user/project",
+			},
+		}
+
+		output := renderer.RenderCLI(result)
+
+		assert.Contains(t, output, "Directory: /home/user/project", "Expected cwd in output")
+		assert.Contains(t, output, "Question: Analyze the code", "Expected question in output")
+		assert.Contains(t, output, "Code analysis complete", "Expected response in output")
+	})
+
+	t.Run("Subagent response with workflow and cwd", func(t *testing.T) {
+		result := tools.StructuredToolResult{
+			ToolName:  "subagent",
+			Success:   true,
+			Timestamp: time.Now(),
+			Metadata: &tools.SubAgentMetadata{
+				Question: "Review changes",
+				Response: "Review complete: LGTM",
+				Workflow: "jingkaihe@skills/code/reviewer",
+				Cwd:      "/tmp/myproject",
+			},
+		}
+
+		output := renderer.RenderCLI(result)
+
+		assert.Contains(t, output, "Workflow: jingkaihe@skills/code/reviewer", "Expected workflow in output")
+		assert.Contains(t, output, "Directory: /tmp/myproject", "Expected cwd in output")
+		assert.Contains(t, output, "Question: Review changes", "Expected question in output")
+		assert.Contains(t, output, "Review complete: LGTM", "Expected response in output")
+	})
+
+	t.Run("Subagent response with workflow only no question", func(t *testing.T) {
+		result := tools.StructuredToolResult{
+			ToolName:  "subagent",
+			Success:   true,
+			Timestamp: time.Now(),
+			Metadata: &tools.SubAgentMetadata{
+				Question: "",
+				Response: "Commit message generated",
+				Workflow: "commit",
+			},
+		}
+
+		output := renderer.RenderCLI(result)
+
+		assert.Contains(t, output, "Workflow: commit", "Expected workflow in output")
+		assert.NotContains(t, output, "Question:", "Should not show empty question")
+		assert.Contains(t, output, "Commit message generated", "Expected response in output")
+	})
 }

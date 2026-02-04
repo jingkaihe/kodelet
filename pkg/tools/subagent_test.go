@@ -232,36 +232,64 @@ func TestSubAgentToolResult_Methods(t *testing.T) {
 }
 
 func TestSubAgentToolResult_StructuredData(t *testing.T) {
-	// Test successful result structured data
-	result := &SubAgentToolResult{
-		result:   "test response",
-		question: "test question",
-	}
+	t.Run("successful result with all fields", func(t *testing.T) {
+		result := &SubAgentToolResult{
+			result:   "test response",
+			question: "test question",
+			workflow: "github/pr",
+			cwd:      "/home/user/project",
+		}
 
-	structuredData := result.StructuredData()
-	assert.Equal(t, "subagent", structuredData.ToolName)
-	assert.True(t, structuredData.Success)
+		structuredData := result.StructuredData()
+		assert.Equal(t, "subagent", structuredData.ToolName)
+		assert.True(t, structuredData.Success)
 
-	var metadata tooltypes.SubAgentMetadata
-	assert.True(t, tooltypes.ExtractMetadata(structuredData.Metadata, &metadata))
-	assert.Equal(t, "test question", metadata.Question)
-	assert.Equal(t, "test response", metadata.Response)
+		var metadata tooltypes.SubAgentMetadata
+		assert.True(t, tooltypes.ExtractMetadata(structuredData.Metadata, &metadata))
+		assert.Equal(t, "test question", metadata.Question)
+		assert.Equal(t, "test response", metadata.Response)
+		assert.Equal(t, "github/pr", metadata.Workflow)
+		assert.Equal(t, "/home/user/project", metadata.Cwd)
+	})
 
-	// Test error result structured data
-	errorResult := &SubAgentToolResult{
-		err:      "some error",
-		question: "test question",
-	}
+	t.Run("successful result without workflow and cwd", func(t *testing.T) {
+		result := &SubAgentToolResult{
+			result:   "test response",
+			question: "test question",
+		}
 
-	errorStructuredData := errorResult.StructuredData()
-	assert.Equal(t, "subagent", errorStructuredData.ToolName)
-	assert.False(t, errorStructuredData.Success)
-	assert.Equal(t, "some error", errorStructuredData.Error)
+		structuredData := result.StructuredData()
+		assert.Equal(t, "subagent", structuredData.ToolName)
+		assert.True(t, structuredData.Success)
 
-	var errorMetadata tooltypes.SubAgentMetadata
-	assert.True(t, tooltypes.ExtractMetadata(errorStructuredData.Metadata, &errorMetadata))
-	assert.Equal(t, "test question", errorMetadata.Question)
-	assert.Empty(t, errorMetadata.Response)
+		var metadata tooltypes.SubAgentMetadata
+		assert.True(t, tooltypes.ExtractMetadata(structuredData.Metadata, &metadata))
+		assert.Equal(t, "test question", metadata.Question)
+		assert.Equal(t, "test response", metadata.Response)
+		assert.Empty(t, metadata.Workflow)
+		assert.Empty(t, metadata.Cwd)
+	})
+
+	t.Run("error result includes workflow and cwd", func(t *testing.T) {
+		errorResult := &SubAgentToolResult{
+			err:      "some error",
+			question: "test question",
+			workflow: "commit",
+			cwd:      "/tmp/project",
+		}
+
+		errorStructuredData := errorResult.StructuredData()
+		assert.Equal(t, "subagent", errorStructuredData.ToolName)
+		assert.False(t, errorStructuredData.Success)
+		assert.Equal(t, "some error", errorStructuredData.Error)
+
+		var errorMetadata tooltypes.SubAgentMetadata
+		assert.True(t, tooltypes.ExtractMetadata(errorStructuredData.Metadata, &errorMetadata))
+		assert.Equal(t, "test question", errorMetadata.Question)
+		assert.Empty(t, errorMetadata.Response)
+		assert.Equal(t, "commit", errorMetadata.Workflow)
+		assert.Equal(t, "/tmp/project", errorMetadata.Cwd)
+	})
 }
 
 func TestBuildSubagentArgs(t *testing.T) {
