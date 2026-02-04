@@ -107,6 +107,40 @@ code, pre { font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace !important;
     padding-bottom: 8px;
     margin-bottom: 16px;
 }
+
+.chat-list { list-style: none; padding: 0; margin: 0; }
+.chat-item {
+    padding: 10px 12px;
+    margin: 4px 0;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.15s ease;
+    border-left: 3px solid transparent;
+}
+.chat-item:hover { background: rgba(217, 119, 87, 0.1); }
+.chat-item.active {
+    background: rgba(217, 119, 87, 0.15);
+    border-left-color: var(--kodelet-orange);
+}
+.chat-item a {
+    text-decoration: none;
+    color: inherit;
+    display: block;
+}
+.chat-preview {
+    font-family: 'Lora', Georgia, serif;
+    font-size: 0.9rem;
+    color: var(--kodelet-dark);
+    line-height: 1.4;
+    margin-bottom: 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.chat-date {
+    font-size: 0.75rem;
+    color: var(--kodelet-mid-gray);
+}
 </style>
 """
 
@@ -461,21 +495,22 @@ def main():
         st.markdown('<div class="sidebar-header">Recent Chats</div>', unsafe_allow_html=True)
 
         conversations = load_conversations(limit=15)
+        chat_items = []
         for convo in conversations:
-            convo_id = convo.get("id", "")
-            preview = convo.get("preview", "No preview")[:60]
-            if len(convo.get("preview", "")) > 60:
+            cid = convo.get("id", "")
+            preview = convo.get("preview", "No preview")[:50]
+            if len(convo.get("preview", "")) > 50:
                 preview += "..."
-            updated = convo.get("updated_at", "")[:10]  # YYYY-MM-DD
-            is_current = st.session_state.session_id == convo_id
-
-            label = f"{'▶ ' if is_current else ''}{preview}"
-            if st.button(label, key=f"convo_{convo_id}", use_container_width=True, disabled=is_current):
-                st.session_state.session_id = convo_id
-                st.session_state.messages = []
-                st.query_params["c"] = convo_id
-                st.rerun()
-            st.caption(f"{updated} · {convo.get('message_count', 0)} msgs")
+            date = convo.get("updated_at", "")[:10]
+            is_active = "active" if cid == st.session_state.session_id else ""
+            chat_items.append(
+                f'<li class="chat-item {is_active}">'
+                f'<a href="?c={cid}" target="_top">'
+                f'<div class="chat-preview">{preview}</div>'
+                f'<div class="chat-date">{date}</div>'
+                f'</a></li>'
+            )
+        st.markdown(f'<ul class="chat-list">{"".join(chat_items)}</ul>', unsafe_allow_html=True)
 
         st.divider()
         if st.session_state.session_id:
