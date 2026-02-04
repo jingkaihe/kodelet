@@ -18,6 +18,7 @@ Usage:
 import asyncio
 import json
 import os
+import subprocess
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -117,6 +118,23 @@ def find_kodelet_binary() -> str:
     st.error("Could not find `kodelet` in PATH. Please install it first.")
     st.stop()
     raise SystemExit  # Unreachable, but satisfies type checker
+
+
+def load_conversations(limit: int = 20) -> list[dict]:
+    """Load recent conversations from kodelet."""
+    try:
+        result = subprocess.run(
+            [find_kodelet_binary(), "conversation", "list", "--limit", str(limit), "--json"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            data = json.loads(result.stdout)
+            return data.get("conversations", [])
+    except (subprocess.TimeoutExpired, json.JSONDecodeError, FileNotFoundError):
+        pass
+    return []
 
 
 @dataclass
@@ -305,6 +323,10 @@ def _finalize_assistant(state: ResponseState):
         state._current_assistant = {"role": "assistant", "content": "", "thinking": "", "tools": []}
 
 
+# 10MB buffer limit for large conversation history
+ACP_BUFFER_LIMIT = 10 * 1024 * 1024
+
+
 async def load_session_history(session_id: str) -> bool:
     """Load session history on page load. Returns True if successful."""
     kodelet_path = find_kodelet_binary()
@@ -312,7 +334,7 @@ async def load_session_history(session_id: str) -> bool:
     client = StreamlitACPClient(state)
 
     try:
-        async with spawn_agent_process(client, kodelet_path, "acp") as (conn, _):
+        async with spawn_agent_process(client, kodelet_path, "acp", transport_kwargs={"limit": ACP_BUFFER_LIMIT}) as (conn, _):
             await conn.initialize(protocol_version=PROTOCOL_VERSION, client_capabilities=None)
             resp = await conn.load_session(session_id=session_id, cwd=os.getcwd(), mcp_servers=[])
             if resp is None:
@@ -330,7 +352,7 @@ async def run_acp_prompt(query: str, container: Any, session_id: str | None = No
     client = StreamlitACPClient(state)
 
     try:
-        async with spawn_agent_process(client, kodelet_path, "acp") as (conn, _):
+        async with spawn_agent_process(client, kodelet_path, "acp", transport_kwargs={"limit": ACP_BUFFER_LIMIT}) as (conn, _):
             await conn.initialize(protocol_version=PROTOCOL_VERSION, client_capabilities=None)
 
             if session_id:
@@ -429,23 +451,31 @@ def main():
 
     # Sidebar
     with st.sidebar:
-        st.markdown('<div class="sidebar-header">About</div>', unsafe_allow_html=True)
-        st.markdown("""
-A Streamlit interface for [kodelet](https://github.com/jingkaihe/kodelet)
-using the **Agent Client Protocol (ACP)**.
-
-**Features**
-- Session continuity via `?c=session_id`
-- Real-time streaming
-- Thinking visualization
-- Tool call inspection
-        """)
-
-        if st.button("New Chat"):
+        if st.button("✨ New Chat", use_container_width=True):
             st.session_state.messages = []
             st.session_state.session_id = None
             st.query_params.clear()
             st.rerun()
+
+        st.divider()
+        st.markdown('<div class="sidebar-header">Recent Chats</div>', unsafe_allow_html=True)
+
+        conversations = load_conversations(limit=15)
+        for convo in conversations:
+            convo_id = convo.get("id", "")
+            preview = convo.get("preview", "No preview")[:60]
+            if len(convo.get("preview", "")) > 60:
+                preview += "..."
+            updated = convo.get("updated_at", "")[:10]  # YYYY-MM-DD
+            is_current = st.session_state.session_id == convo_id
+
+            label = f"{'▶ ' if is_current else ''}{preview}"
+            if st.button(label, key=f"convo_{convo_id}", use_container_width=True, disabled=is_current):
+                st.session_state.session_id = convo_id
+                st.session_state.messages = []
+                st.query_params["c"] = convo_id
+                st.rerun()
+            st.caption(f"{updated} · {convo.get('message_count', 0)} msgs")
 
         st.divider()
         if st.session_state.session_id:
