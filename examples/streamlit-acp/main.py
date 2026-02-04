@@ -324,7 +324,7 @@ class StreamlitACPClient(Client):
             self.state.thinking_placeholder = self.state.container.empty()
         with self.state.thinking_placeholder.container():
             with st.expander("Thinking...", expanded=True):
-                st.text(self.state.thinking)
+                st.markdown(self.state.thinking)
 
     def _render_tools(self):
         if self.state.tools_placeholder is None:
@@ -414,7 +414,7 @@ def render_history_message(msg: dict):
     """Render a historical assistant message."""
     if msg.get("thinking"):
         with st.expander("Thinking", expanded=False):
-            st.text(msg["thinking"])
+            st.markdown(msg["thinking"])
     if msg.get("tools"):
         with st.expander(f"Tools ({len(msg['tools'])})", expanded=False):
             for i, tc in enumerate(msg["tools"]):
@@ -511,11 +511,6 @@ def main():
                 f'</a></li>'
             )
         st.markdown(f'<ul class="chat-list">{"".join(chat_items)}</ul>', unsafe_allow_html=True)
-
-        st.divider()
-        if st.session_state.session_id:
-            st.caption(f"Session: `{st.session_state.session_id[:8]}...`")
-        st.caption(f"Binary: `{find_kodelet_binary()}`")
 
 
 if __name__ == "__main__":
