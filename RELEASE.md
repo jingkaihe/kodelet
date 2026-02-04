@@ -1,5 +1,21 @@
 # Kodelet
 
+## 0.2.15.beta (2026-02-04)
+
+### Features
+
+**Subagent working directory support**: The subagent tool now accepts a `cwd` parameter to specify a working directory for the spawned subagent:
+
+**Workflow profile support**: Workflow fragments can now specify a `profile` in their frontmatter, which overrides any `--profile` in `subagent_args`:
+
+```yaml
+---
+name: Cheap Workflow
+workflow: true
+profile: cheap
+---
+```
+
 ## 0.2.14.beta (2026-02-04)
 
 ### Features
