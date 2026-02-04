@@ -12,7 +12,6 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/jingkaihe/kodelet/pkg/db"
-	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/types/conversations"
 )
 
@@ -22,26 +21,18 @@ type Store struct {
 	db     *sqlx.DB
 }
 
-// NewStore creates a new SQLite-based conversation store
+// NewStore creates a new SQLite-based conversation store.
+// Note: Migrations should be run via db.RunMigrations() at CLI startup before calling this.
 func NewStore(ctx context.Context, dbPath string) (*Store, error) {
 	sqlDB, err := db.Open(ctx, dbPath)
 	if err != nil {
 		return nil, err
 	}
 
-	store := &Store{
+	return &Store{
 		dbPath: dbPath,
 		db:     sqlDB,
-	}
-
-	// Run all migrations using the shared migration runner
-	runner := db.NewMigrationRunner(sqlDB)
-	if err := runner.Run(ctx, migrations.All()); err != nil {
-		sqlDB.Close()
-		return nil, errors.Wrap(err, "failed to run migrations")
-	}
-
-	return store, nil
+	}, nil
 }
 
 // Save persists a conversation record to the database using UPSERT to preserve created_at timestamps

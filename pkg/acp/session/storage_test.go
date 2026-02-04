@@ -7,13 +7,29 @@ import (
 	"testing"
 
 	"github.com/jingkaihe/kodelet/pkg/acp/acptypes"
+	"github.com/jingkaihe/kodelet/pkg/db"
+	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
+// setupTestDB creates a test database with migrations applied
+func setupTestDB(t *testing.T, dbPath string) {
+	t.Helper()
+	ctx := context.Background()
+	sqlDB, err := db.Open(ctx, dbPath)
+	require.NoError(t, err)
+	defer sqlDB.Close()
+
+	runner := db.NewMigrationRunner(sqlDB)
+	require.NoError(t, runner.Run(ctx, migrations.All()))
+}
+
 func TestStorage_AppendAndRead(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "sessions.db")
+	setupTestDB(t, dbPath)
+	setupTestDB(t, dbPath)
 
 	storage, err := NewStorage(context.Background(), WithDBPath(dbPath))
 	require.NoError(t, err)
@@ -50,6 +66,7 @@ func TestStorage_AppendAndRead(t *testing.T) {
 func TestStorage_MergeConsecutiveChunks(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "sessions.db")
+	setupTestDB(t, dbPath)
 
 	storage, err := NewStorage(context.Background(), WithDBPath(dbPath))
 	require.NoError(t, err)
@@ -106,6 +123,7 @@ func TestStorage_MergeConsecutiveChunks(t *testing.T) {
 func TestStorage_NonMergeableContent(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "sessions.db")
+	setupTestDB(t, dbPath)
 
 	storage, err := NewStorage(context.Background(), WithDBPath(dbPath))
 	require.NoError(t, err)
@@ -132,6 +150,7 @@ func TestStorage_NonMergeableContent(t *testing.T) {
 func TestStorage_FlushExplicit(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "sessions.db")
+	setupTestDB(t, dbPath)
 
 	storage, err := NewStorage(context.Background(), WithDBPath(dbPath))
 	require.NoError(t, err)
@@ -168,6 +187,7 @@ func TestStorage_FlushExplicit(t *testing.T) {
 func TestStorage_ReadNonExistent(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "sessions.db")
+	setupTestDB(t, dbPath)
 
 	storage, err := NewStorage(context.Background(), WithDBPath(dbPath))
 	require.NoError(t, err)
@@ -181,6 +201,7 @@ func TestStorage_ReadNonExistent(t *testing.T) {
 func TestStorage_Delete(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "sessions.db")
+	setupTestDB(t, dbPath)
 
 	storage, err := NewStorage(context.Background(), WithDBPath(dbPath))
 	require.NoError(t, err)
@@ -203,6 +224,7 @@ func TestStorage_Delete(t *testing.T) {
 func TestStorage_Exists(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "sessions.db")
+	setupTestDB(t, dbPath)
 
 	storage, err := NewStorage(context.Background(), WithDBPath(dbPath))
 	require.NoError(t, err)
@@ -222,6 +244,7 @@ func TestStorage_Exists(t *testing.T) {
 func TestStorage_Close(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "sessions.db")
+	setupTestDB(t, dbPath)
 
 	storage, err := NewStorage(context.Background(), WithDBPath(dbPath))
 	require.NoError(t, err)
@@ -243,6 +266,7 @@ func TestStorage_Close(t *testing.T) {
 func TestStorage_LargeUpdate(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "sessions.db")
+	setupTestDB(t, dbPath)
 
 	storage, err := NewStorage(context.Background(), WithDBPath(dbPath))
 	require.NoError(t, err)
@@ -274,6 +298,7 @@ func TestStorage_LargeUpdate(t *testing.T) {
 func TestStorage_ConcurrentWritesDifferentSessions(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "sessions.db")
+	setupTestDB(t, dbPath)
 
 	storage, err := NewStorage(context.Background(), WithDBPath(dbPath))
 	require.NoError(t, err)
@@ -315,6 +340,7 @@ func TestStorage_ConcurrentWritesDifferentSessions(t *testing.T) {
 func TestStorage_ConcurrentWritesSameSession(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "sessions.db")
+	setupTestDB(t, dbPath)
 
 	storage, err := NewStorage(context.Background(), WithDBPath(dbPath))
 	require.NoError(t, err)
@@ -350,6 +376,7 @@ func TestStorage_ConcurrentWritesSameSession(t *testing.T) {
 func TestStorage_Persistence(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "sessions.db")
+	setupTestDB(t, dbPath)
 
 	storage1, err := NewStorage(context.Background(), WithDBPath(dbPath))
 	require.NoError(t, err)
@@ -376,6 +403,7 @@ func TestStorage_Persistence(t *testing.T) {
 func TestStorage_MultipleSessions(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "sessions.db")
+	setupTestDB(t, dbPath)
 
 	storage, err := NewStorage(context.Background(), WithDBPath(dbPath))
 	require.NoError(t, err)

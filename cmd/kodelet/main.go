@@ -9,6 +9,8 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/jingkaihe/kodelet/pkg/binaries"
+	"github.com/jingkaihe/kodelet/pkg/db"
+	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	"github.com/spf13/cobra"
@@ -174,6 +176,11 @@ func main() {
 
 	// Ensure required external binaries are installed
 	binaries.EnsureDepsInstalled(ctx)
+
+	// Run database migrations once at startup
+	if err := db.RunMigrations(ctx, migrations.All()); err != nil {
+		logger.G(ctx).WithError(err).Warn("Failed to run database migrations")
+	}
 
 	rootCmd = withTracing(rootCmd)
 	runCmd = withTracing(runCmd)

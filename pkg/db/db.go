@@ -81,6 +81,23 @@ func Configure(ctx context.Context, db *sqlx.DB) error {
 	return nil
 }
 
+// RunMigrations runs the provided database migrations. This should be called once at CLI startup.
+func RunMigrations(ctx context.Context, migrations []Migration) error {
+	dbPath, err := DefaultDBPath()
+	if err != nil {
+		return err
+	}
+
+	sqlDB, err := Open(ctx, dbPath)
+	if err != nil {
+		return err
+	}
+	defer sqlDB.Close()
+
+	runner := NewMigrationRunner(sqlDB)
+	return runner.Run(ctx, migrations)
+}
+
 // VerifyConfiguration checks if the database is properly configured with WAL mode.
 func VerifyConfiguration(db *sqlx.DB) error {
 	var journalMode string

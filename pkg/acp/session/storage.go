@@ -12,7 +12,6 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/acp/acptypes"
 	"github.com/jingkaihe/kodelet/pkg/db"
-	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 )
 
 // StoredUpdate represents a stored session update for replay
@@ -86,6 +85,8 @@ func WithDBPath(path string) StorageOption {
 	}
 }
 
+// NewStorage creates a new SQLite-based session storage.
+// Note: Migrations should be run via db.RunMigrations() at CLI startup before calling this.
 func NewStorage(ctx context.Context, opts ...StorageOption) (*Storage, error) {
 	s := &Storage{
 		sessions: make(map[acptypes.SessionID]*sessionState),
@@ -108,12 +109,6 @@ func NewStorage(ctx context.Context, opts ...StorageOption) (*Storage, error) {
 		return nil, err
 	}
 	s.db = sqlDB
-
-	runner := db.NewMigrationRunner(sqlDB)
-	if err := runner.Run(ctx, migrations.All()); err != nil {
-		sqlDB.Close()
-		return nil, errors.Wrap(err, "failed to run migrations")
-	}
 
 	return s, nil
 }
