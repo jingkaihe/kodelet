@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/db"
 	conversations "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -512,7 +513,7 @@ func TestStore_WALMode(t *testing.T) {
 	assert.Equal(t, "wal-test", loaded.ID)
 
 	// Verify database configuration using the helper function
-	err = verifyDatabaseConfiguration(store.db)
+	err = db.VerifyConfiguration(store.db)
 	require.NoError(t, err)
 }
 

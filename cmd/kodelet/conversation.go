@@ -603,10 +603,10 @@ func deleteConversationCmd(ctx context.Context, id string, config *ConversationD
 		os.Exit(1)
 	}
 
-	// Also clean up ACP session JSONL file if it exists
-	if storage, err := session.NewStorage(); err == nil {
+	// Also clean up ACP session data if it exists
+	if storage, err := session.NewStorage(ctx); err == nil {
 		if err := storage.Delete(acptypes.SessionID(id)); err != nil {
-			logger.G(ctx).WithError(err).Debug("Failed to delete ACP session file")
+			logger.G(ctx).WithError(err).Debug("Failed to delete ACP session data")
 		}
 		storage.Close()
 	}
