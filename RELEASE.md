@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.2.16.beta (2026-02-04)
+
+### Bug Fixes
+
+- Fixed missing git SHA in version output by making build variables (VERSION, GIT_COMMIT, BUILD_TIME) overridable via environment variables
+
 ## 0.2.15.beta (2026-02-04)
 
 ### Features
