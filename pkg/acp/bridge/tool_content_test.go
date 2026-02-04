@@ -409,6 +409,93 @@ func TestToolContentGenerator_GenerateSubAgentContent(t *testing.T) {
 		aContent := content[1]["content"].(map[string]any)
 		assert.Equal(t, "42", aContent["text"])
 	})
+
+	t.Run("subagent with workflow and cwd", func(t *testing.T) {
+		result := &mockToolResult{
+			result: "PR created",
+			structuredData: tooltypes.StructuredToolResult{
+				ToolName:  "subagent",
+				Success:   true,
+				Timestamp: time.Now(),
+				Metadata: &tooltypes.SubAgentMetadata{
+					Question: "Create a PR",
+					Response: "PR #123 created successfully",
+					Workflow: "github/pr",
+					Cwd:      "/tmp/project",
+				},
+			},
+		}
+
+		content := gen.GenerateToolContent(result)
+		require.Len(t, content, 4) // workflow, cwd, question, response
+
+		// Check workflow entry
+		assert.Equal(t, ToolCallContentTypeContent, content[0]["type"])
+		workflowContent := content[0]["content"].(map[string]any)
+		assert.Equal(t, "Workflow: github/pr", workflowContent["text"])
+
+		// Check cwd entry
+		assert.Equal(t, ToolCallContentTypeContent, content[1]["type"])
+		cwdContent := content[1]["content"].(map[string]any)
+		assert.Equal(t, "Directory: /tmp/project", cwdContent["text"])
+
+		// Check question entry
+		assert.Equal(t, ToolCallContentTypeContent, content[2]["type"])
+		qContent := content[2]["content"].(map[string]any)
+		assert.Contains(t, qContent["text"], "Create a PR")
+
+		// Check response entry
+		assert.Equal(t, ToolCallContentTypeContent, content[3]["type"])
+		aContent := content[3]["content"].(map[string]any)
+		assert.Equal(t, "PR #123 created successfully", aContent["text"])
+	})
+
+	t.Run("subagent with workflow only (no question)", func(t *testing.T) {
+		result := &mockToolResult{
+			result: "Commit created",
+			structuredData: tooltypes.StructuredToolResult{
+				ToolName:  "subagent",
+				Success:   true,
+				Timestamp: time.Now(),
+				Metadata: &tooltypes.SubAgentMetadata{
+					Response: "feat: add new feature",
+					Workflow: "commit",
+				},
+			},
+		}
+
+		content := gen.GenerateToolContent(result)
+		require.Len(t, content, 2) // workflow, response
+
+		workflowContent := content[0]["content"].(map[string]any)
+		assert.Equal(t, "Workflow: commit", workflowContent["text"])
+
+		responseContent := content[1]["content"].(map[string]any)
+		assert.Equal(t, "feat: add new feature", responseContent["text"])
+	})
+
+	t.Run("subagent error", func(t *testing.T) {
+		result := &mockToolResult{
+			err: "subagent failed",
+			structuredData: tooltypes.StructuredToolResult{
+				ToolName:  "subagent",
+				Success:   false,
+				Error:     "subagent failed",
+				Timestamp: time.Now(),
+				Metadata: &tooltypes.SubAgentMetadata{
+					Question: "Do something",
+					Workflow: "custom-workflow",
+					Cwd:      "/some/path",
+				},
+			},
+		}
+
+		content := gen.GenerateToolContent(result)
+		require.Len(t, content, 1)
+
+		errContent := content[0]["content"].(map[string]any)
+		assert.Contains(t, errContent["text"], "Subagent error: subagent failed")
+	})
 }
 
 func TestToolContentGenerator_GenerateCodeBlockContent(t *testing.T) {

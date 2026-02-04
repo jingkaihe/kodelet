@@ -379,9 +379,18 @@ func (t *SubAgentTool) Execute(ctx context.Context, state tooltypes.State, param
 
 	cmd := exec.CommandContext(ctx, exe, args...)
 
-	// Set working directory if specified
+	// Set working directory if specified (use resolved path to prevent TOCTOU issues)
 	if input.Cwd != "" {
-		cmd.Dir = input.Cwd
+		resolvedCwd, err := filepath.EvalSymlinks(input.Cwd)
+		if err != nil {
+			return &SubAgentToolResult{
+				err:      errors.Wrapf(err, "failed to resolve cwd path: %s", input.Cwd).Error(),
+				question: input.Question,
+				workflow: input.Workflow,
+				cwd:      input.Cwd,
+			}
+		}
+		cmd.Dir = resolvedCwd
 	}
 
 	output, err := cmd.CombinedOutput()
