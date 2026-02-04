@@ -21,7 +21,6 @@ import json
 import os
 import subprocess
 import sys
-from dataclasses import dataclass, field
 from datetime import datetime
 from shutil import which
 from typing import Any, cast
@@ -37,24 +36,19 @@ from acp import (  # type: ignore[import-not-found]
 )
 from acp.schema import (  # type: ignore[import-not-found]
     AgentMessageChunk,
-    AgentPlanUpdate,
     AgentThoughtChunk,
-    AvailableCommandsUpdate,
     CreateTerminalResponse,
-    CurrentModeUpdate,
     EnvVariable,
     KillTerminalCommandResponse,
     PermissionOption,
     ReadTextFileResponse,
     ReleaseTerminalResponse,
     RequestPermissionResponse,
-    SessionInfoUpdate,
     TerminalOutputResponse,
     TextContentBlock,
     ToolCall,
     ToolCallProgress,
     ToolCallStart,
-    UserMessageChunk,
     WaitForTerminalExitResponse,
     WriteTextFileResponse,
 )
@@ -173,35 +167,24 @@ def load_conversations(limit: int = 20) -> list[dict]:
     return []
 
 
-@dataclass
-class ResponseState:
-    """State for tracking the current response."""
+class ACPClient(Client):
+    """ACP Client that streams responses to a Streamlit placeholder."""
 
-    thinking: str = ""
-    tool_calls: list[dict] = field(default_factory=list)
-    message: str = ""
-    session_id: str | None = None
+    def __init__(self):
+        self.thinking = ""
+        self.message = ""
+        self.tools: list[dict] = []
+        self.placeholder: Any = None
+        self.streaming = False
+        self._thinking_done = False
 
-    # Mode: "off" (ignore), "history" (record to session_state), "live" (render to UI)
-    mode: str = "off"
-
-    # For history reconstruction - accumulates current assistant message
-    _current_assistant: dict = field(
-        default_factory=lambda: {"role": "assistant", "content": "", "thinking": "", "tools": []}
-    )
-
-    # UI placeholders - created lazily in live mode
-    thinking_placeholder: Any = None
-    tools_placeholder: Any = None
-    message_placeholder: Any = None
-    container: Any = None
-
-
-class StreamlitACPClient(Client):
-    """ACP Client that routes updates based on mode: history vs live."""
-
-    def __init__(self, state: ResponseState):
-        self.state = state
+    def start_streaming(self):
+        """Reset accumulators and enable streaming."""
+        self.thinking = ""
+        self.message = ""
+        self.tools = []
+        self._thinking_done = False
+        self.streaming = True
 
     # Required ACP client methods (not implemented for this example)
     async def request_permission(self, options: list[PermissionOption], session_id: str, tool_call: ToolCall, **kwargs: Any) -> RequestPermissionResponse:
@@ -237,175 +220,96 @@ class StreamlitACPClient(Client):
     def on_connect(self, conn: Any) -> None:
         pass
 
-    async def session_update(
-        self,
-        session_id: str,
-        update: UserMessageChunk | AgentMessageChunk | AgentThoughtChunk | ToolCallStart | ToolCallProgress | AgentPlanUpdate | AvailableCommandsUpdate | CurrentModeUpdate | SessionInfoUpdate,
-        **kwargs: Any,
-    ) -> None:
-        if self.state.mode == "off":
+    async def session_update(self, session_id: str, update: Any, **kwargs: Any) -> None:
+        if not self.streaming:
             return
-        if self.state.mode == "history":
-            self._record_history(update)
-            return
-        # Live mode - render to UI
-        self._render_live(update)
 
-    def _record_history(self, update):
-        """Record events during load_session to st.session_state.messages."""
-        if isinstance(update, UserMessageChunk):
-            # New user message = new turn, save previous assistant if any
-            if self.state._current_assistant["content"] or self.state._current_assistant["thinking"] or self.state._current_assistant["tools"]:
-                st.session_state.messages.append(self.state._current_assistant)
-                self.state._current_assistant = {"role": "assistant", "content": "", "thinking": "", "tools": []}
-            content = update.content
-            if isinstance(content, TextContentBlock):
-                st.session_state.messages.append({"role": "user", "content": content.text})
+        if isinstance(update, AgentThoughtChunk) and isinstance(update.content, TextContentBlock):
+            self.thinking += update.content.text
+            self._render()
 
-        elif isinstance(update, AgentThoughtChunk):
-            content = update.content
-            if isinstance(content, TextContentBlock):
-                self.state._current_assistant["thinking"] += content.text
-
-        elif isinstance(update, AgentMessageChunk):
-            content = update.content
-            if isinstance(content, TextContentBlock):
-                self.state._current_assistant["content"] += content.text
+        elif isinstance(update, AgentMessageChunk) and isinstance(update.content, TextContentBlock):
+            self._thinking_done = True
+            self.message += update.content.text
+            self._render()
 
         elif isinstance(update, ToolCallStart):
-            self.state._current_assistant["tools"].append({
-                "id": update.tool_call_id,
-                "title": update.title,
-                "status": "completed",
-                "output": update.raw_output,
-            })
-
-        elif isinstance(update, ToolCallProgress):
-            for tc in self.state._current_assistant["tools"]:
-                if tc["id"] == update.tool_call_id and update.raw_output:
-                    tc["output"] = update.raw_output
-                    break
-
-    def _render_live(self, update):
-        """Render updates to UI placeholders during prompt."""
-        if isinstance(update, AgentThoughtChunk):
-            content = update.content
-            if isinstance(content, TextContentBlock):
-                self.state.thinking += content.text
-                self._render_thinking()
-
-        elif isinstance(update, AgentMessageChunk):
-            content = update.content
-            if isinstance(content, TextContentBlock):
-                self.state.message += content.text
-                self._render_message()
-
-        elif isinstance(update, ToolCallStart):
-            self.state.tool_calls.append({
+            self._thinking_done = True
+            self.tools.append({
                 "id": update.tool_call_id,
                 "title": update.title,
                 "status": update.status,
-                "kind": update.kind,
-                "input": update.raw_input,
                 "output": update.raw_output,
             })
-            self._render_tools()
+            self._render()
 
         elif isinstance(update, ToolCallProgress):
-            for tc in self.state.tool_calls:
+            for tc in self.tools:
                 if tc["id"] == update.tool_call_id:
                     if update.status:
                         tc["status"] = update.status
                     if update.raw_output:
                         tc["output"] = update.raw_output
-                    break
-            self._render_tools()
+            self._render()
 
-    def _render_thinking(self):
-        if self.state.thinking_placeholder is None:
-            self.state.thinking_placeholder = self.state.container.empty()
-        with self.state.thinking_placeholder.container():
-            with st.expander("Thinking...", expanded=True):
-                st.markdown(self.state.thinking)
+    def _render(self):
+        """Render current state to the placeholder."""
+        if not self.placeholder:
+            return
+        with self.placeholder.container():
+            if self.thinking:
+                label = "Thinking" if self._thinking_done else "Thinking..."
+                with st.expander(label, expanded=not self._thinking_done):
+                    st.markdown(self.thinking)
+            if self.tools:
+                with st.expander(f"Tools ({len(self.tools)})", expanded=False):
+                    for i, tc in enumerate(self.tools):
+                        icon = "⏳" if tc.get("status") == "running" else "✓"
+                        st.write(f"**{i + 1}. {icon} {tc['title']}**")
+                        if tc.get("output"):
+                            output = tc["output"]
+                            st.code(json.dumps(output, indent=2) if isinstance(output, dict) else str(output))
+            if self.message:
+                st.markdown(self.message)
 
-    def _render_tools(self):
-        if self.state.tools_placeholder is None:
-            self.state.tools_placeholder = self.state.container.empty()
-        with self.state.tools_placeholder.container():
-            with st.expander(f"Tools ({len(self.state.tool_calls)})", expanded=False):
-                for i, tc in enumerate(self.state.tool_calls):
-                    status_icon = "⏳" if tc.get("status") == "running" else "✓" if tc.get("status") == "completed" else "•"
-                    st.write(f"**{i + 1}. {status_icon} {tc['title']}**")
-                    if tc.get("input"):
-                        try:
-                            st.code(json.dumps(tc["input"], indent=2), language="json")
-                        except (TypeError, ValueError):
-                            st.code(str(tc["input"]))
-                    if tc.get("output"):
-                        st.caption("Result:")
-                        output = tc["output"]
-                        st.code(json.dumps(output, indent=2) if isinstance(output, dict) else str(output))
-
-    def _render_message(self):
-        if self.state.message_placeholder is None:
-            self.state.message_placeholder = self.state.container.empty()
-        self.state.message_placeholder.markdown(self.state.message)
-
-
-def _finalize_assistant(state: ResponseState):
-    """Append any pending assistant message to session state."""
-    if state._current_assistant["content"] or state._current_assistant["thinking"] or state._current_assistant["tools"]:
-        st.session_state.messages.append(state._current_assistant)
-        state._current_assistant = {"role": "assistant", "content": "", "thinking": "", "tools": []}
+    def get_result(self) -> dict:
+        """Return accumulated result as a message dict."""
+        return {"role": "assistant", "content": self.message, "thinking": self.thinking, "tools": self.tools}
 
 
 # 50MB buffer limit for large conversation history
 ACP_BUFFER_LIMIT = 50 * 1024 * 1024
 
 
-async def load_session_history(session_id: str) -> bool:
-    """Load session history on page load. Returns True if successful."""
+async def run_acp_prompt(
+    query: str,
+    placeholder: Any,
+    session_id: str | None = None,
+    images: list[Any] | None = None,
+) -> tuple[dict, str | None]:
+    """Run a prompt via ACP and stream results. Returns (result_dict, session_id)."""
     kodelet_path = find_kodelet_binary()
-    state = ResponseState(mode="history")
-    client = StreamlitACPClient(state)
-
-    try:
-        async with spawn_agent_process(client, kodelet_path, "acp", transport_kwargs={"limit": ACP_BUFFER_LIMIT}) as (conn, _):
-            await conn.initialize(protocol_version=PROTOCOL_VERSION, client_capabilities=None)
-            resp = await conn.load_session(session_id=session_id, cwd=os.getcwd(), mcp_servers=[])
-            if resp is None:
-                return False
-            _finalize_assistant(state)
-            return True
-    except Exception:
-        return False
-
-
-async def run_acp_prompt(query: str, container: Any, session_id: str | None = None, images: list[Any] | None = None) -> ResponseState:
-    """Run a prompt via ACP and stream results."""
-    kodelet_path = find_kodelet_binary()
-    state = ResponseState(container=container)
-    client = StreamlitACPClient(state)
+    client = ACPClient()
+    client.placeholder = placeholder
+    result_session_id = session_id
 
     try:
         async with spawn_agent_process(client, kodelet_path, "acp", transport_kwargs={"limit": ACP_BUFFER_LIMIT}) as (conn, _):
             await conn.initialize(protocol_version=PROTOCOL_VERSION, client_capabilities=None)
 
+            # Load or create session
             if session_id:
-                state.mode = "history"
                 resp = await conn.load_session(session_id=session_id, cwd=os.getcwd(), mcp_servers=[])
-                state.session_id = session_id if resp else None
+                await asyncio.sleep(0)  # Yield to let history callbacks complete
                 if resp is None:
                     session = await conn.new_session(cwd=os.getcwd(), mcp_servers=[])
-                    state.session_id = session.session_id
+                    result_session_id = session.session_id
             else:
                 session = await conn.new_session(cwd=os.getcwd(), mcp_servers=[])
-                state.session_id = session.session_id
+                result_session_id = session.session_id
 
-            _finalize_assistant(state)
-            state.mode = "live"
-
-            # Build prompt content blocks
+            # Build prompt and stream response
+            client.start_streaming()
             prompt_blocks: list[Any] = []
             if images:
                 for img in images:
@@ -413,28 +317,118 @@ async def run_acp_prompt(query: str, container: Any, session_id: str | None = No
                     prompt_blocks.append(image_block(img_data, img.type))
             if query:
                 prompt_blocks.append(text_block(query))
-
-            await conn.prompt(session_id=state.session_id, prompt=prompt_blocks)
+            await conn.prompt(session_id=result_session_id, prompt=prompt_blocks)
 
     except Exception as e:
         st.error(f"ACP error: {e}")
 
-    return state
+    return client.get_result(), result_session_id
 
 
-def render_history_message(msg: dict):
-    """Render a historical assistant message."""
+def render_assistant_message(msg: dict):
+    """Render an assistant message (for history)."""
     if msg.get("thinking"):
         with st.expander("Thinking", expanded=False):
             st.markdown(msg["thinking"])
     if msg.get("tools"):
         with st.expander(f"Tools ({len(msg['tools'])})", expanded=False):
             for i, tc in enumerate(msg["tools"]):
-                st.write(f"**{i + 1}. ✓ {tc['title']}**")
-                if tc.get("output"):
-                    output = tc["output"]
+                title = tc.get("title") or tc.get("name", "Tool")
+                st.write(f"**{i + 1}. ✓ {title}**")
+                if tc.get("output") or tc.get("result"):
+                    output = tc.get("output") or tc.get("result")
                     st.code(json.dumps(output, indent=2) if isinstance(output, dict) else str(output))
-    st.markdown(msg["content"])
+    st.markdown(msg.get("content", ""))
+
+
+async def load_history_via_acp(session_id: str) -> list[dict]:
+    """Load conversation history via ACP session/load."""
+    kodelet_path = find_kodelet_binary()
+    messages: list[dict] = []
+    current_msg: dict | None = None
+
+    class HistoryClient(Client):
+        """Minimal client that records history from session/load."""
+
+        async def request_permission(self, *args: Any, **kwargs: Any) -> RequestPermissionResponse:
+            raise RequestError.method_not_found("session/request_permission")
+
+        async def write_text_file(self, *args: Any, **kwargs: Any) -> WriteTextFileResponse | None:
+            raise RequestError.method_not_found("fs/write_text_file")
+
+        async def read_text_file(self, *args: Any, **kwargs: Any) -> ReadTextFileResponse:
+            raise RequestError.method_not_found("fs/read_text_file")
+
+        async def create_terminal(self, *args: Any, **kwargs: Any) -> CreateTerminalResponse:
+            raise RequestError.method_not_found("terminal/create")
+
+        async def terminal_output(self, *args: Any, **kwargs: Any) -> TerminalOutputResponse:
+            raise RequestError.method_not_found("terminal/output")
+
+        async def release_terminal(self, *args: Any, **kwargs: Any) -> ReleaseTerminalResponse | None:
+            raise RequestError.method_not_found("terminal/release")
+
+        async def wait_for_terminal_exit(self, *args: Any, **kwargs: Any) -> WaitForTerminalExitResponse:
+            raise RequestError.method_not_found("terminal/wait_for_exit")
+
+        async def kill_terminal(self, *args: Any, **kwargs: Any) -> KillTerminalCommandResponse | None:
+            raise RequestError.method_not_found("terminal/kill")
+
+        async def ext_method(self, method: str, params: dict) -> dict:
+            raise RequestError.method_not_found(method)
+
+        async def ext_notification(self, method: str, params: dict) -> None:
+            pass
+
+        def on_connect(self, conn: Any) -> None:
+            pass
+
+        async def session_update(self, session_id: str, update: Any, **kwargs: Any) -> None:
+            nonlocal current_msg
+
+            from acp.schema import UserMessageChunk  # type: ignore[import-not-found]
+
+            # User message = new turn
+            if isinstance(update, UserMessageChunk) and isinstance(update.content, TextContentBlock):
+                if current_msg:
+                    messages.append(current_msg)
+                current_msg = {"role": "user", "content": update.content.text}
+                return
+
+            # Agent content - ensure we have an assistant message
+            if current_msg is None or current_msg["role"] != "assistant":
+                if current_msg:
+                    messages.append(current_msg)
+                current_msg = {"role": "assistant", "content": "", "thinking": "", "tools": []}
+
+            if isinstance(update, AgentThoughtChunk) and isinstance(update.content, TextContentBlock):
+                current_msg["thinking"] += update.content.text
+            elif isinstance(update, AgentMessageChunk) and isinstance(update.content, TextContentBlock):
+                current_msg["content"] += update.content.text
+            elif isinstance(update, ToolCallStart):
+                current_msg["tools"].append({
+                    "id": update.tool_call_id,
+                    "title": update.title,
+                    "output": update.raw_output,
+                })
+            elif isinstance(update, ToolCallProgress):
+                for tc in current_msg["tools"]:
+                    if tc["id"] == update.tool_call_id and update.raw_output:
+                        tc["output"] = update.raw_output
+
+    try:
+        async with spawn_agent_process(HistoryClient(), kodelet_path, "acp", transport_kwargs={"limit": ACP_BUFFER_LIMIT}) as (conn, _):
+            await conn.initialize(protocol_version=PROTOCOL_VERSION, client_capabilities=None)
+            resp = await conn.load_session(session_id=session_id, cwd=os.getcwd(), mcp_servers=[])
+            if resp is None:
+                return []
+            # Append final message
+            if current_msg:
+                messages.append(current_msg)
+    except Exception:
+        return []
+
+    return messages
 
 
 def main():
@@ -450,15 +444,9 @@ def main():
     url_session_id = st.query_params.get("c")
     if url_session_id and st.session_state.session_id != url_session_id:
         st.session_state.session_id = url_session_id
+        st.session_state.messages = load_history_via_cli(url_session_id)
     if st.session_state.session_id and not url_session_id:
         st.query_params["c"] = st.session_state.session_id
-
-    # Load history on page refresh with ?c=session_id
-    if st.session_state.session_id and not st.session_state.messages:
-        with st.spinner("Loading conversation history..."):
-            if not asyncio.run(load_session_history(st.session_state.session_id)):
-                st.session_state.session_id = None
-                st.query_params.clear()
 
     # Greeting
     hour = datetime.now().hour
@@ -469,9 +457,8 @@ def main():
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             if msg["role"] == "assistant":
-                render_history_message(msg)
+                render_assistant_message(msg)
             else:
-                # User message - show images if any
                 if msg.get("images"):
                     for img in msg["images"]:
                         st.image(base64.b64decode(img["data"]))
@@ -480,7 +467,6 @@ def main():
 
     # Handle new input
     if prompt := st.chat_input("Ask kodelet anything...", accept_file="multiple", file_type=["png", "jpg", "jpeg", "gif", "webp"]):
-        # Extract text and files from prompt
         text = prompt.text if hasattr(prompt, "text") else str(prompt)
         files = prompt.files if hasattr(prompt, "files") else []
 
@@ -491,25 +477,19 @@ def main():
                 st.markdown(text)
 
         with st.chat_message("assistant"):
-            container = st.container()
-            state = asyncio.run(run_acp_prompt(text, container, st.session_state.session_id, images=files if files else None))
+            placeholder = st.empty()
+            result, new_session_id = asyncio.run(run_acp_prompt(text, placeholder, st.session_state.session_id, images=files if files else None))
 
-        if state.session_id:
-            st.session_state.session_id = state.session_id
-            st.query_params["c"] = state.session_id
+        if new_session_id:
+            st.session_state.session_id = new_session_id
+            st.query_params["c"] = new_session_id
 
-        # Store user message with images as base64 for history
+        # Store messages in session state
         user_msg: dict[str, Any] = {"role": "user", "content": text}
         if files:
             user_msg["images"] = [{"data": base64.b64encode(f.getvalue()).decode("utf-8"), "type": f.type} for f in files]
         st.session_state.messages.append(user_msg)
-        st.session_state.messages.append({
-            "role": "assistant",
-            "content": state.message or "No response received.",
-            "thinking": state.thinking,
-            "tools": state.tool_calls,
-        })
-        st.rerun()
+        st.session_state.messages.append(result)
 
     # Sidebar
     with st.sidebar:
