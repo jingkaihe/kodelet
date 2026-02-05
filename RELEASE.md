@@ -1,5 +1,13 @@
 # Kodelet
 
+## 0.2.17.beta (2026-02-05)
+
+### Features
+
+- **Anthropic SDK v1.21.0**: Upgraded from v1.19.0, bringing support for new model identifiers
+- **Claude Opus 4.6 support**: Added `claude-opus-4-6` as a new model with pricing, thinking model registration, and updated the `opus-46` alias (replaces `opus-45`)
+- **Removed Claude 3.5 Haiku pricing**: The `claude-3-5-haiku` pricing entry and fallback lookup have been removed. Use `claude-haiku-4-5-20251001` instead.
+
 ## 0.2.16.beta (2026-02-04)
 
 ### Bug Fixes
