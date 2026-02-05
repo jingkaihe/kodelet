@@ -675,7 +675,7 @@ log_level: "info"  # panic, fatal, error, warn, info, debug, trace
 provider: "anthropic"
 model: "claude-sonnet-4-5-20250929"
 max_tokens: 8192
-weak_model: "claude-3-5-haiku-20241022"
+weak_model: "claude-haiku-4-5-20251001"
 weak_model_max_tokens: 8192
 
 # Alternative OpenAI configuration
@@ -748,7 +748,7 @@ Profiles are defined in your configuration files using the `profiles` section. E
 
 # Default profile
 model: "claude-sonnet-4-5-20250929"
-weak_model: "claude-3-5-haiku-20241022"
+weak_model: "claude-haiku-4-5-20251001"
 max_tokens: 16000
 weak_model_max_tokens: 8192
 thinking_budget_tokens: 8000
@@ -785,7 +785,7 @@ profiles:
     # Main agent uses Claude
     provider: "anthropic"
     model: "claude-sonnet-4-5-20250929"
-    weak_model: "claude-3-5-haiku-20241022"
+    weak_model: "claude-haiku-4-5-20251001"
     max_tokens: 16000
     # Subagent uses OpenAI profile for cross-provider support
     subagent_args: "--profile openai-subagent"
@@ -799,8 +799,8 @@ profiles:
 
 # Model aliases work across all profiles
 aliases:
-    haiku-35: claude-3-5-haiku-20241022
-    opus-45: claude-opus-4-5-20251101
+    haiku-45: claude-haiku-4-5-20251001
+    opus-46: claude-opus-4-6
     sonnet-45: claude-sonnet-4-5-20250929
 ```
 
@@ -957,7 +957,7 @@ kodelet run --allowed-commands "ls *,pwd,echo *" "analyze this directory"
 
 Kodelet supports various Anthropic Claude models:
 - `claude-sonnet-4-5-20250929` (recommended for standard tasks)
-- `claude-3-5-haiku-20241022` (recommended for lightweight tasks)
+- `claude-haiku-4-5-20251001` (recommended for lightweight tasks)
 - `claude-opus-4-5-20251101` (most intelligent model for building agents and coding)
 - `claude-opus-4-1-20250805` (high-end model for complex tasks)
 

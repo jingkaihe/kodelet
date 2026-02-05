@@ -100,7 +100,7 @@ var setupCmd = &cobra.Command{
     gemini-flash: gemini-2.5-flash
     gemini-pro: gemini-2.5-pro
     haiku-45: claude-haiku-4-5-20251001
-    opus-45: claude-opus-4-5-20251101
+    opus-46: claude-opus-4-6
     sonnet-45: claude-sonnet-4-5-20250929
 max_tokens: 16000
 model: sonnet-45
@@ -136,7 +136,7 @@ profiles:
         weak_model: gpt-5.1-codex-mini
     premium:
         max_tokens: 16000
-        model: opus-45
+        model: opus-46
         thinking_budget_tokens: 8000
         weak_model: haiku-45
         weak_model_max_tokens: 8192
