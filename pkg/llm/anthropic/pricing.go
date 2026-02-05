@@ -67,11 +67,11 @@ var ModelPricingMap = map[anthropic.Model]ModelPricing{
 		PromptCachingRead:  0.0000005,  // $0.50 per million tokens
 		ContextWindow:      200_000,
 	},
-	anthropic.ModelClaude3_5HaikuLatest: {
-		Input:              0.0000008,  // $0.80 per million tokens
-		Output:             0.000004,   // $4.00 per million tokens
-		PromptCachingWrite: 0.000001,   // $1.00 per million tokens
-		PromptCachingRead:  0.00000008, // $0.08 per million tokens
+	anthropic.ModelClaudeOpus4_6: {
+		Input:              0.000005,   // $5.00 per million tokens
+		Output:             0.000025,   // $25.00 per million tokens
+		PromptCachingWrite: 0.00000625, // $6.25 per million tokens
+		PromptCachingRead:  0.0000005,  // $0.50 per million tokens
 		ContextWindow:      200_000,
 	},
 	anthropic.ModelClaudeHaiku4_5: {
@@ -110,6 +110,8 @@ func getModelPricing(model anthropic.Model) ModelPricing {
 		return ModelPricingMap[anthropic.ModelClaudeSonnet4_5]
 	} else if strings.Contains(lowerModel, "claude-4-sonnet") || strings.Contains(lowerModel, "claude-sonnet-4") {
 		return ModelPricingMap[anthropic.ModelClaudeSonnet4_0]
+	} else if strings.Contains(lowerModel, "claude-opus-4-6") {
+		return ModelPricingMap[anthropic.ModelClaudeOpus4_6]
 	} else if strings.Contains(lowerModel, "claude-opus-4-5") {
 		return ModelPricingMap[anthropic.ModelClaudeOpus4_5_20251101]
 	} else if strings.Contains(lowerModel, "claude-opus-4-1") {
@@ -118,8 +120,6 @@ func getModelPricing(model anthropic.Model) ModelPricing {
 		return ModelPricingMap[anthropic.ModelClaude4Opus20250514]
 	} else if strings.Contains(lowerModel, "claude-haiku-4-5") {
 		return ModelPricingMap[anthropic.ModelClaudeHaiku4_5]
-	} else if strings.Contains(lowerModel, "claude-3-5-haiku") {
-		return ModelPricingMap[anthropic.ModelClaude3_5HaikuLatest]
 	} else if strings.Contains(lowerModel, "claude-3-haiku") {
 		return ModelPricingMap["claude-3-haiku-20240307"]
 	}

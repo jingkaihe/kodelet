@@ -446,14 +446,14 @@ Example `config.yaml`:
 aliases:
     gemini-flash: gemini-2.5-flash
     gemini-pro: gemini-2.5-pro
-    haiku-35: claude-3-5-haiku-20241022
-    opus-45: claude-opus-4-5-20251101
+    haiku-45: claude-haiku-4-5-20251001
+    opus-46: claude-opus-4-6
     sonnet-45: claude-sonnet-4-5-20250929
 max_tokens: 16000
 model: sonnet-45
 profile: default
 thinking_budget_tokens: 8000
-weak_model: haiku-35
+weak_model: haiku-45
 weak_model_max_tokens: 8192
 profiles:
     hybrid:
@@ -461,7 +461,7 @@ profiles:
         model: sonnet-45
         subagent_args: "--profile openai-subagent"
         thinking_budget_tokens: 8000
-        weak_model: haiku-35
+        weak_model: haiku-45
         weak_model_max_tokens: 8192
     openai-subagent:
         allowed_tools:
@@ -481,7 +481,7 @@ profiles:
         weak_model: gpt-5
     premium:
         max_tokens: 16000
-        opus-45: claude-opus-4-5-20251101
+        model: opus-46
         thinking_budget_tokens: 8000
         weak_model: sonnet-45
         weak_model_max_tokens: 8192
@@ -506,7 +506,7 @@ profiles:
 ### Anthropic Claude (Recommended)
 **Models:**
 - `claude-sonnet-4-5-20250929` - Recommended for standard tasks
-- `claude-3-5-haiku-20241022` - Lightweight tasks
+- `claude-haiku-4-5-20251001` - Lightweight tasks
 - `claude-opus-4-1-20250805` - Complex reasoning
 
 **Features:**

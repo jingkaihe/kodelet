@@ -746,6 +746,7 @@ func isThinkingModel(model anthropic.Model) bool {
 		anthropic.ModelClaudeOpus4_0,
 		anthropic.ModelClaudeOpus4_1_20250805,
 		anthropic.ModelClaudeOpus4_5_20251101,
+		anthropic.ModelClaudeOpus4_6,
 		anthropic.ModelClaude4Opus20250514,
 		anthropic.ModelClaudeOpus4_20250514,
 		anthropic.ModelClaude4Opus20250514,
