@@ -57,7 +57,7 @@ func NewRunConfig() *RunConfig {
 		NoSave:             false,
 		Headless:           false,
 		Images:             []string{},
-		MaxTurns:           50,
+		MaxTurns:           0,
 		CompactRatio:       0.8,
 		DisableAutoCompact: false,
 		FragmentName:       "",
@@ -437,7 +437,7 @@ func init() {
 	runCmd.Flags().Bool("headless", defaults.Headless, "Output structured JSON instead of console formatting")
 	runCmd.Flags().Bool("stream-deltas", defaults.StreamDeltas, "Stream partial text deltas in headless mode (requires --headless)")
 	runCmd.Flags().StringSliceP("image", "I", defaults.Images, "Add image input (can be used multiple times)")
-	runCmd.Flags().Int("max-turns", defaults.MaxTurns, "Maximum number of turns within a single message exchange (0 for no limit)")
+	runCmd.Flags().Int("max-turns", defaults.MaxTurns, "Maximum number of agentic turns (0 for no limit)")
 	runCmd.Flags().Float64("compact-ratio", defaults.CompactRatio, "Context window utilization ratio to trigger auto-compact (0.0-1.0)")
 	runCmd.Flags().Bool("disable-auto-compact", defaults.DisableAutoCompact, "Disable auto-compact functionality")
 	runCmd.Flags().StringP("recipe", "r", defaults.FragmentName, "Use a fragment/recipe template")
@@ -496,11 +496,7 @@ func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
 		config.Images = images
 	}
 	if maxTurns, err := cmd.Flags().GetInt("max-turns"); err == nil {
-		// Ensure non-negative values (treat negative as 0/no limit)
-		if maxTurns < 0 {
-			maxTurns = 0
-		}
-		config.MaxTurns = maxTurns
+		config.MaxTurns = max(maxTurns, 0)
 	}
 	if compactRatio, err := cmd.Flags().GetFloat64("compact-ratio"); err == nil {
 		// Validate compact ratio is between 0.0 and 1.0

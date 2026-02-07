@@ -32,6 +32,7 @@ type Session struct {
 	CWD        string
 	MCPServers []acptypes.MCPServer
 
+	maxTurns           int
 	compactRatio       float64
 	disableAutoCompact bool
 
@@ -102,7 +103,7 @@ func (s *Session) HandlePrompt(ctx context.Context, prompt []acptypes.ContentBlo
 	_, err := s.Thread.SendMessage(ctx, message, handler, llmtypes.MessageOpt{
 		PromptCache:        true,
 		Images:             images,
-		MaxTurns:           50,
+		MaxTurns:           s.maxTurns,
 		CompactRatio:       s.compactRatio,
 		DisableAutoCompact: s.disableAutoCompact,
 	})
@@ -133,6 +134,7 @@ type Manager struct {
 	noWorkflows bool
 	noHooks     bool
 
+	maxTurns           int
 	compactRatio       float64
 	disableAutoCompact bool
 
@@ -146,7 +148,7 @@ type Manager struct {
 }
 
 // NewManager creates a new session manager
-func NewManager(provider, model string, maxTokens int, noSkills, noWorkflows, noHooks bool, compactRatio float64, disableAutoCompact bool) *Manager {
+func NewManager(provider, model string, maxTokens int, noSkills, noWorkflows, noHooks bool, maxTurns int, compactRatio float64, disableAutoCompact bool) *Manager {
 	ctx := context.Background()
 	store, _ := conversations.GetConversationStore(ctx)
 
@@ -158,6 +160,7 @@ func NewManager(provider, model string, maxTokens int, noSkills, noWorkflows, no
 		noSkills:           noSkills,
 		noWorkflows:        noWorkflows,
 		noHooks:            noHooks,
+		maxTurns:           maxTurns,
 		compactRatio:       compactRatio,
 		disableAutoCompact: disableAutoCompact,
 		sessions:           make(map[acptypes.SessionID]*Session),
@@ -378,6 +381,7 @@ func (m *Manager) NewSession(ctx context.Context, req acptypes.NewSessionRequest
 		State:              state,
 		CWD:                req.CWD,
 		MCPServers:         req.MCPServers,
+		maxTurns:           m.maxTurns,
 		compactRatio:       m.compactRatio,
 		disableAutoCompact: m.disableAutoCompact,
 	}
@@ -442,6 +446,7 @@ func (m *Manager) LoadSession(ctx context.Context, req acptypes.LoadSessionReque
 		State:              state,
 		CWD:                req.CWD,
 		MCPServers:         req.MCPServers,
+		maxTurns:           m.maxTurns,
 		compactRatio:       m.compactRatio,
 		disableAutoCompact: m.disableAutoCompact,
 	}

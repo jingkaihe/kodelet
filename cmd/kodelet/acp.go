@@ -36,14 +36,16 @@ Example:
 func init() {
 	rootCmd.AddCommand(acpCmd)
 
+	defaults := NewRunConfig()
 	acpCmd.Flags().String("model", "", "LLM model to use")
 	acpCmd.Flags().String("provider", "", "LLM provider (anthropic, openai, google)")
 	acpCmd.Flags().Int("max-tokens", 0, "Maximum tokens for LLM responses")
-	acpCmd.Flags().Bool("no-skills", false, "Disable agentic skills")
-	acpCmd.Flags().Bool("no-workflows", false, "Disable subagent workflows")
-	acpCmd.Flags().Bool("no-hooks", false, "Disable lifecycle hooks")
-	acpCmd.Flags().Float64("compact-ratio", 0.8, "Context window utilization ratio to trigger auto-compact (0.0-1.0)")
-	acpCmd.Flags().Bool("disable-auto-compact", false, "Disable auto-compact functionality")
+	acpCmd.Flags().Bool("no-skills", defaults.NoSkills, "Disable agentic skills")
+	acpCmd.Flags().Bool("no-workflows", false, "Disable subagent workflows") // no RunConfig default — ACP-only flag
+	acpCmd.Flags().Bool("no-hooks", defaults.NoHooks, "Disable lifecycle hooks")
+	acpCmd.Flags().Int("max-turns", defaults.MaxTurns, "Maximum number of agentic turns (0 for no limit)")
+	acpCmd.Flags().Float64("compact-ratio", defaults.CompactRatio, "Context window utilization ratio to trigger auto-compact (0.0-1.0)")
+	acpCmd.Flags().Bool("disable-auto-compact", defaults.DisableAutoCompact, "Disable auto-compact functionality")
 }
 
 func runACP(cmd *cobra.Command, _ []string) error {
@@ -58,6 +60,8 @@ func runACP(cmd *cobra.Command, _ []string) error {
 	noSkills, _ := cmd.Flags().GetBool("no-skills")
 	noWorkflows, _ := cmd.Flags().GetBool("no-workflows")
 	noHooks, _ := cmd.Flags().GetBool("no-hooks")
+	maxTurns, _ := cmd.Flags().GetInt("max-turns")
+	maxTurns = max(maxTurns, 0)
 	compactRatio, _ := cmd.Flags().GetFloat64("compact-ratio")
 	disableAutoCompact, _ := cmd.Flags().GetBool("disable-auto-compact")
 
@@ -68,6 +72,7 @@ func runACP(cmd *cobra.Command, _ []string) error {
 		NoSkills:           noSkills,
 		NoWorkflows:        noWorkflows,
 		NoHooks:            noHooks,
+		MaxTurns:           maxTurns,
 		CompactRatio:       compactRatio,
 		DisableAutoCompact: disableAutoCompact,
 	}

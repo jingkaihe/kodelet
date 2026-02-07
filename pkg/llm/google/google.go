@@ -281,10 +281,7 @@ func (t *Thread) SendMessage(
 
 	// Main interaction loop for handling tool calls
 	turnCount := 0
-	maxTurns := opt.MaxTurns
-	if maxTurns <= 0 {
-		maxTurns = 10 // Default maximum turns
-	}
+	maxTurns := max(opt.MaxTurns, 0)
 
 OUTER:
 	for {
@@ -296,7 +293,7 @@ OUTER:
 			// Check turn limit
 			logger.G(ctx).WithField("turn_count", turnCount).WithField("max_turns", maxTurns).Debug("checking turn limit")
 
-			if turnCount >= maxTurns {
+			if maxTurns > 0 && turnCount >= maxTurns {
 				logger.G(ctx).
 					WithField("turn_count", turnCount).
 					WithField("max_turns", maxTurns).
