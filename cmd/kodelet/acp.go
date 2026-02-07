@@ -42,6 +42,7 @@ func init() {
 	acpCmd.Flags().Bool("no-skills", false, "Disable agentic skills")
 	acpCmd.Flags().Bool("no-workflows", false, "Disable subagent workflows")
 	acpCmd.Flags().Bool("no-hooks", false, "Disable lifecycle hooks")
+	acpCmd.Flags().Int("max-turns", 0, "Maximum number of turns within a single SendMessage call (0 = no limit)")
 	acpCmd.Flags().Float64("compact-ratio", 0.8, "Context window utilization ratio to trigger auto-compact (0.0-1.0)")
 	acpCmd.Flags().Bool("disable-auto-compact", false, "Disable auto-compact functionality")
 }
@@ -58,6 +59,7 @@ func runACP(cmd *cobra.Command, _ []string) error {
 	noSkills, _ := cmd.Flags().GetBool("no-skills")
 	noWorkflows, _ := cmd.Flags().GetBool("no-workflows")
 	noHooks, _ := cmd.Flags().GetBool("no-hooks")
+	maxTurns, _ := cmd.Flags().GetInt("max-turns")
 	compactRatio, _ := cmd.Flags().GetFloat64("compact-ratio")
 	disableAutoCompact, _ := cmd.Flags().GetBool("disable-auto-compact")
 
@@ -68,6 +70,7 @@ func runACP(cmd *cobra.Command, _ []string) error {
 		NoSkills:           noSkills,
 		NoWorkflows:        noWorkflows,
 		NoHooks:            noHooks,
+		MaxTurns:           maxTurns,
 		CompactRatio:       compactRatio,
 		DisableAutoCompact: disableAutoCompact,
 	}

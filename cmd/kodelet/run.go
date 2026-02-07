@@ -57,7 +57,7 @@ func NewRunConfig() *RunConfig {
 		NoSave:             false,
 		Headless:           false,
 		Images:             []string{},
-		MaxTurns:           50,
+		MaxTurns:           0,
 		CompactRatio:       0.8,
 		DisableAutoCompact: false,
 		FragmentName:       "",
