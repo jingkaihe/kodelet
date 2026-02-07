@@ -2,7 +2,7 @@
 
 ## 0.2.18.beta (2026-02-07)
 
-**Configurable max-turns limit**: Added `--max-turns` flag to control the maximum number of agentic interaction turns within a single message call. Set to `0` (now the default) for unlimited turns, or specify a positive integer to cap iterations. Available on both `run` and `acp` commands.
+**Configurable max-turns limit**: Added `--max-turns` flag to control the maximum number of agentic interaction turns within a single message call. Set to `0` (now the default, previously `50`) for unlimited turns, or specify a positive integer to cap iterations. Available on both `run` and `acp` commands.
 
 ## 0.2.17.beta (2026-02-05)
 
