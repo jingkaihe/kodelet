@@ -496,11 +496,7 @@ func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
 		config.Images = images
 	}
 	if maxTurns, err := cmd.Flags().GetInt("max-turns"); err == nil {
-		// Ensure non-negative values (treat negative as 0/no limit)
-		if maxTurns < 0 {
-			maxTurns = 0
-		}
-		config.MaxTurns = maxTurns
+		config.MaxTurns = max(maxTurns, 0)
 	}
 	if compactRatio, err := cmd.Flags().GetFloat64("compact-ratio"); err == nil {
 		// Validate compact ratio is between 0.0 and 1.0

@@ -61,9 +61,7 @@ func runACP(cmd *cobra.Command, _ []string) error {
 	noWorkflows, _ := cmd.Flags().GetBool("no-workflows")
 	noHooks, _ := cmd.Flags().GetBool("no-hooks")
 	maxTurns, _ := cmd.Flags().GetInt("max-turns")
-	if maxTurns < 0 {
-		maxTurns = 0
-	}
+	maxTurns = max(maxTurns, 0)
 	compactRatio, _ := cmd.Flags().GetFloat64("compact-ratio")
 	disableAutoCompact, _ := cmd.Flags().GetBool("disable-auto-compact")
 
