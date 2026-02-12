@@ -319,6 +319,13 @@ subagent_args: ""
 #
 # subagent_args: "--profile cheap-openai"
 
+# Disable Subagent
+# When set to true, the subagent tool is removed from available tools and
+# subagent-related context is excluded from the system prompt.
+# Other tools like web_fetch and image_recognition remain available.
+# Can also be set via the --disable-subagent CLI flag.
+# disable_subagent: true
+
 # Scenario 3: Google Vertex AI for enterprise with thinking capability
 # provider: "google"
 # model: "gemini-2.5-pro"
@@ -414,6 +421,7 @@ tracing:
 # - KODELET_RETRY_BACKOFF_TYPE: Overrides the retry.backoff_type setting (fixed, exponential)
 # - KODELET_ALLOWED_COMMANDS: Comma-separated list of allowed command patterns
 # - KODELET_ALLOWED_TOOLS: Comma-separated list of allowed tools for main agent
+# - KODELET_DISABLE_SUBAGENT: Disables the subagent tool and related system prompt context (true/false)
 # - KODELET_CONTEXT_PATTERNS: Comma-separated list of context file patterns (e.g., "AGENTS.md,README.md")
 # - KODELET_TRACING_ENABLED: Enables/disables tracing
 # - KODELET_TRACING_SAMPLER: Sets the sampling strategy

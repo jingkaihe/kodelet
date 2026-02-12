@@ -732,6 +732,9 @@ kodelet run --provider "openai" --model "gpt-4.1" --max-tokens 4096 --reasoning-
 # Command restriction example
 kodelet run --allowed-commands "ls *,pwd,echo *" "query"
 
+# Disable subagent tool and related system prompt context
+kodelet run --disable-subagent "query"
+
 # Profile override for single command
 kodelet run --profile premium "explain this architecture"
 ```
@@ -1456,6 +1459,16 @@ To run without skills for a single session:
 ```bash
 kodelet run --no-skills "your query"
 ```
+
+### Disabling Subagent
+
+To disable the subagent tool and remove subagent-related context from the system prompt:
+
+```bash
+kodelet run --disable-subagent "your query"
+```
+
+This can also be set via configuration file (`disable_subagent: true`) or environment variable (`KODELET_DISABLE_SUBAGENT=true`). Other tools like `web_fetch` and `image_recognition` remain available when the subagent is disabled.
 
 For detailed skill creation guide, see [docs/SKILLS.md](SKILLS.md).
 
