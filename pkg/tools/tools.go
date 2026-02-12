@@ -80,8 +80,6 @@ var defaultSubAgentTools = []string{
 	"file_edit",
 	"grep_tool",
 	"glob_tool",
-	"todo_read",
-	"todo_write",
 	"web_fetch",
 }
 

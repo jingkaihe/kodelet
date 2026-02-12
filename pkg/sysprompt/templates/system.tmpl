@@ -16,6 +16,6 @@ You are an interactive CLI tool that helps with software engineering and product
 
 {{include "templates/components/task_management.tmpl" .}}
 
-{{include "templates/components/examples/task_management.tmpl" .}}
+{{if .Features.todoToolsEnabled}}{{include "templates/components/examples/task_management.tmpl" .}}{{end}}
 
 {{include "templates/components/context.tmpl" .}}

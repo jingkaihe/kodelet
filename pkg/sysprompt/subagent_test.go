@@ -20,9 +20,6 @@ func TestSubAgentPrompt(t *testing.T) {
 		"Be concise, direct and to the point",
 		"Tool Usage",
 		"invoke multiple INDEPENDENT tools",
-		"Task Management",
-		"todo_write",
-		"todo_read",
 		"System Information",
 		"Current working directory",
 		"Operating system",
@@ -33,8 +30,11 @@ func TestSubAgentPrompt(t *testing.T) {
 	}
 
 	// Subagent prompts should NOT contain subagent tool usage examples (to prevent recursion)
+	// or todo tool references (disabled for subagents)
 	unexpectedFragments := []string{
 		"## Subagent tool usage examples",
+		"todo_write",
+		"todo_read",
 	}
 
 	for _, fragment := range unexpectedFragments {

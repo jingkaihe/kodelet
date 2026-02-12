@@ -207,10 +207,10 @@ func TestOpenAIConditionalSections(t *testing.T) {
 		assert.Contains(t, mainPrompt, "## Planning")
 		assert.Contains(t, mainPrompt, "You have access to an `todo_write` tool")
 
-		// Test subagent (should also have planning section since todoTools is enabled)
+		// Test subagent (todoTools is disabled for subagents)
 		subagentPrompt := SubAgentPrompt("gpt-4", config, contexts)
 		assert.Contains(t, subagentPrompt, "## Planning")
-		assert.Contains(t, subagentPrompt, "You have access to an `todo_write` tool")
+		assert.NotContains(t, subagentPrompt, "You have access to an `todo_write` tool")
 	})
 
 	t.Run("Subagent response examples use proper markdown format", func(t *testing.T) {
