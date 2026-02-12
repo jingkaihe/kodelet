@@ -323,8 +323,13 @@ subagent_args: ""
 # When set to true, the subagent tool is removed from available tools and
 # subagent-related context is excluded from the system prompt.
 # Other tools like web_fetch and image_recognition remain available.
-# Can also be set via the --disable-subagent CLI flag.
+# Can also be set via the --disable-subagent CLI flag or per-profile.
 # disable_subagent: true
+#
+# Example: Profile with subagent disabled
+# profiles:
+#   no-subagent:
+#     disable_subagent: true
 
 # Scenario 3: Google Vertex AI for enterprise with thinking capability
 # provider: "google"
