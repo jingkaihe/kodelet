@@ -768,6 +768,54 @@ func TestWithMainTools(t *testing.T) {
 
 		assert.Empty(t, state.Tools(), "NoToolsMarker should result in no tools")
 	})
+
+	t.Run("DisableSubagent excludes subagent tool", func(t *testing.T) {
+		config := llmtypes.Config{
+			DisableSubagent: true,
+		}
+		state := NewBasicState(ctx, WithLLMConfig(config), WithMainTools())
+
+		toolNames := make([]string, len(state.Tools()))
+		for i, tool := range state.Tools() {
+			toolNames[i] = tool.Name()
+		}
+
+		assert.NotContains(t, toolNames, "subagent", "DisableSubagent should exclude subagent tool")
+		assert.Contains(t, toolNames, "bash", "Other tools should remain")
+		assert.Contains(t, toolNames, "web_fetch", "web_fetch should remain when subagent is disabled")
+		assert.Contains(t, toolNames, "image_recognition", "image_recognition should remain when subagent is disabled")
+	})
+
+	t.Run("DisableSubagent with allowed_tools still excludes subagent", func(t *testing.T) {
+		config := llmtypes.Config{
+			DisableSubagent: true,
+			AllowedTools:    []string{"bash", "file_read", "subagent", "web_fetch"},
+		}
+		state := NewBasicState(ctx, WithLLMConfig(config), WithMainTools())
+
+		toolNames := make([]string, len(state.Tools()))
+		for i, tool := range state.Tools() {
+			toolNames[i] = tool.Name()
+		}
+
+		assert.NotContains(t, toolNames, "subagent", "DisableSubagent should exclude subagent even from allowed_tools")
+		assert.Contains(t, toolNames, "bash")
+		assert.Contains(t, toolNames, "web_fetch")
+	})
+
+	t.Run("DisableSubagent false keeps subagent tool", func(t *testing.T) {
+		config := llmtypes.Config{
+			DisableSubagent: false,
+		}
+		state := NewBasicState(ctx, WithLLMConfig(config), WithMainTools())
+
+		toolNames := make([]string, len(state.Tools()))
+		for i, tool := range state.Tools() {
+			toolNames[i] = tool.Name()
+		}
+
+		assert.Contains(t, toolNames, "subagent", "subagent should remain when DisableSubagent is false")
+	})
 }
 
 func TestGetLLMConfig_ReturnsSubagentArgs(t *testing.T) {

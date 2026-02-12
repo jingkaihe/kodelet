@@ -25,6 +25,17 @@ func SystemPrompt(model string, llmConfig llm.Config, contexts map[string]string
 		config.EnabledFeatures = append(config.EnabledFeatures, "isSubagent")
 	}
 
+	// Remove subagent feature when DisableSubagent is set
+	if llmConfig.DisableSubagent {
+		filtered := make([]string, 0, len(config.EnabledFeatures))
+		for _, f := range config.EnabledFeatures {
+			if f != "subagent" {
+				filtered = append(filtered, f)
+			}
+		}
+		config.EnabledFeatures = filtered
+	}
+
 	updateContextWithConfig(promptCtx, config)
 	promptCtx.BashAllowedCommands = llmConfig.AllowedCommands
 

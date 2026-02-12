@@ -132,6 +132,9 @@ func WithMainTools() BasicStateOption {
 			allowedTools = s.llmConfig.AllowedTools
 		}
 		s.tools = GetMainTools(ctx, allowedTools)
+		if s.llmConfig.DisableSubagent {
+			s.tools = filterOutSubagent(s.tools)
+		}
 		s.configureTools()
 		return nil
 	}

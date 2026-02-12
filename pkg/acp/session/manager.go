@@ -124,19 +124,24 @@ func (s *Session) HandlePrompt(ctx context.Context, prompt []acptypes.ContentBlo
 	return acptypes.StopReasonEndTurn, nil
 }
 
+// ManagerConfig holds configuration for the session Manager.
+type ManagerConfig struct {
+	Provider           string
+	Model              string
+	MaxTokens          int
+	NoSkills           bool
+	NoWorkflows        bool
+	DisableSubagent    bool
+	NoHooks            bool
+	MaxTurns           int
+	CompactRatio       float64
+	DisableAutoCompact bool
+}
+
 // Manager manages ACP sessions
 type Manager struct {
-	id          string // unique manager ID for MCP socket isolation
-	provider    string
-	model       string
-	maxTokens   int
-	noSkills    bool
-	noWorkflows bool
-	noHooks     bool
-
-	maxTurns           int
-	compactRatio       float64
-	disableAutoCompact bool
+	id     string // unique manager ID for MCP socket isolation
+	config ManagerConfig
 
 	sessions map[acptypes.SessionID]*Session
 	store    conversations.ConversationStore
@@ -148,23 +153,15 @@ type Manager struct {
 }
 
 // NewManager creates a new session manager
-func NewManager(provider, model string, maxTokens int, noSkills, noWorkflows, noHooks bool, maxTurns int, compactRatio float64, disableAutoCompact bool) *Manager {
+func NewManager(cfg ManagerConfig) *Manager {
 	ctx := context.Background()
 	store, _ := conversations.GetConversationStore(ctx)
 
 	return &Manager{
-		id:                 convtypes.GenerateID(),
-		provider:           provider,
-		model:              model,
-		maxTokens:          maxTokens,
-		noSkills:           noSkills,
-		noWorkflows:        noWorkflows,
-		noHooks:            noHooks,
-		maxTurns:           maxTurns,
-		compactRatio:       compactRatio,
-		disableAutoCompact: disableAutoCompact,
-		sessions:           make(map[acptypes.SessionID]*Session),
-		store:              store,
+		id:       convtypes.GenerateID(),
+		config:   cfg,
+		sessions: make(map[acptypes.SessionID]*Session),
+		store:    store,
 	}
 }
 
@@ -208,18 +205,19 @@ func (m *Manager) getMCPStateOpts() []tools.BasicStateOption {
 func (m *Manager) buildLLMConfig() llmtypes.Config {
 	config, _ := llm.GetConfigFromViper()
 
-	if m.provider != "" {
-		config.Provider = m.provider
+	if m.config.Provider != "" {
+		config.Provider = m.config.Provider
 	}
-	if m.model != "" {
-		config.Model = m.model
+	if m.config.Model != "" {
+		config.Model = m.config.Model
 	}
-	if m.maxTokens > 0 {
-		config.MaxTokens = m.maxTokens
+	if m.config.MaxTokens > 0 {
+		config.MaxTokens = m.config.MaxTokens
 	}
-	config.NoHooks = m.noHooks
+	config.NoHooks = m.config.NoHooks
+	config.DisableSubagent = m.config.DisableSubagent
 
-	if m.noSkills {
+	if m.config.NoSkills {
 		if config.Skills == nil {
 			config.Skills = &llmtypes.SkillsConfig{}
 		}
@@ -354,12 +352,12 @@ func (m *Manager) NewSession(ctx context.Context, req acptypes.NewSessionRequest
 	stateOpts = append(stateOpts, tools.WithLLMConfig(llmConfig))
 	stateOpts = append(stateOpts, tools.WithMainTools())
 
-	if !m.noSkills {
+	if !m.config.NoSkills {
 		stateOpts = append(stateOpts, tools.WithSkillTool())
 	}
 
 	// Initialize workflows for subagent (if not disabled)
-	if !m.noWorkflows {
+	if !m.config.NoWorkflows && !m.config.DisableSubagent {
 		stateOpts = append(stateOpts, tools.WithSubAgentTool())
 	}
 
@@ -381,9 +379,9 @@ func (m *Manager) NewSession(ctx context.Context, req acptypes.NewSessionRequest
 		State:              state,
 		CWD:                req.CWD,
 		MCPServers:         req.MCPServers,
-		maxTurns:           m.maxTurns,
-		compactRatio:       m.compactRatio,
-		disableAutoCompact: m.disableAutoCompact,
+		maxTurns:           m.config.MaxTurns,
+		compactRatio:       m.config.CompactRatio,
+		disableAutoCompact: m.config.DisableAutoCompact,
 	}
 
 	m.mu.Lock()
@@ -419,12 +417,12 @@ func (m *Manager) LoadSession(ctx context.Context, req acptypes.LoadSessionReque
 	stateOpts = append(stateOpts, tools.WithLLMConfig(llmConfig))
 	stateOpts = append(stateOpts, tools.WithMainTools())
 
-	if !m.noSkills {
+	if !m.config.NoSkills {
 		stateOpts = append(stateOpts, tools.WithSkillTool())
 	}
 
 	// Initialize workflows for subagent (if not disabled)
-	if !m.noWorkflows {
+	if !m.config.NoWorkflows && !m.config.DisableSubagent {
 		stateOpts = append(stateOpts, tools.WithSubAgentTool())
 	}
 
@@ -446,9 +444,9 @@ func (m *Manager) LoadSession(ctx context.Context, req acptypes.LoadSessionReque
 		State:              state,
 		CWD:                req.CWD,
 		MCPServers:         req.MCPServers,
-		maxTurns:           m.maxTurns,
-		compactRatio:       m.compactRatio,
-		disableAutoCompact: m.disableAutoCompact,
+		maxTurns:           m.config.MaxTurns,
+		compactRatio:       m.config.CompactRatio,
+		disableAutoCompact: m.config.DisableAutoCompact,
 	}
 
 	m.mu.Lock()

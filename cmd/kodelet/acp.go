@@ -42,6 +42,7 @@ func init() {
 	acpCmd.Flags().Int("max-tokens", 0, "Maximum tokens for LLM responses")
 	acpCmd.Flags().Bool("no-skills", defaults.NoSkills, "Disable agentic skills")
 	acpCmd.Flags().Bool("no-workflows", false, "Disable subagent workflows") // no RunConfig default — ACP-only flag
+	acpCmd.Flags().Bool("disable-subagent", false, "Disable the subagent tool and remove subagent-related system prompt context")
 	acpCmd.Flags().Bool("no-hooks", defaults.NoHooks, "Disable lifecycle hooks")
 	acpCmd.Flags().Int("max-turns", defaults.MaxTurns, "Maximum number of agentic turns (0 for no limit)")
 	acpCmd.Flags().Float64("compact-ratio", defaults.CompactRatio, "Context window utilization ratio to trigger auto-compact (0.0-1.0)")
@@ -59,6 +60,7 @@ func runACP(cmd *cobra.Command, _ []string) error {
 	maxTokens, _ := cmd.Flags().GetInt("max-tokens")
 	noSkills, _ := cmd.Flags().GetBool("no-skills")
 	noWorkflows, _ := cmd.Flags().GetBool("no-workflows")
+	disableSubagent, _ := cmd.Flags().GetBool("disable-subagent")
 	noHooks, _ := cmd.Flags().GetBool("no-hooks")
 	maxTurns, _ := cmd.Flags().GetInt("max-turns")
 	maxTurns = max(maxTurns, 0)
@@ -71,6 +73,7 @@ func runACP(cmd *cobra.Command, _ []string) error {
 		MaxTokens:          maxTokens,
 		NoSkills:           noSkills,
 		NoWorkflows:        noWorkflows,
+		DisableSubagent:    disableSubagent || viper.GetBool("disable_subagent"),
 		NoHooks:            noHooks,
 		MaxTurns:           maxTurns,
 		CompactRatio:       compactRatio,
