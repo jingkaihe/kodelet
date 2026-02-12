@@ -216,6 +216,14 @@ kodelet run --no-workflows "query"
 kodelet acp --no-workflows
 ```
 
+**Disabling subagent:**
+Removes the subagent tool and subagent-related context from the system prompt. Other tools like `web_fetch` and `image_recognition` remain available.
+```bash
+kodelet run --disable-subagent "query"
+kodelet acp --disable-subagent
+```
+Also configurable via `disable_subagent: true` in config or `KODELET_DISABLE_SUBAGENT=true`.
+
 ### Agent Lifecycle Hooks
 Hooks allow external scripts to observe and control agent behavior for audit logging, security controls, and monitoring.
 

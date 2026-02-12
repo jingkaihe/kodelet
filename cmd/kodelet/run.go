@@ -44,6 +44,7 @@ type RunConfig struct {
 	NoHooks            bool              // Disable agent lifecycle hooks
 	NoMCP              bool              // Disable MCP tools
 	NoTools            bool              // Disable all tools (for simple query-response usage)
+	DisableSubagent    bool              // Disable the subagent tool and remove subagent-related system prompt context
 	ResultOnly         bool              // Only print the final agent message, no intermediate output or usage stats
 	UseWeakModel       bool              // Use weak model for SendMessage
 	Account            string            // Anthropic subscription account alias to use
@@ -68,6 +69,7 @@ func NewRunConfig() *RunConfig {
 		NoHooks:            false,
 		NoMCP:              false,
 		NoTools:            false,
+		DisableSubagent:    false,
 		ResultOnly:         false,
 		UseWeakModel:       false,
 		Account:            "",
@@ -219,6 +221,7 @@ var runCmd = &cobra.Command{
 		}
 
 		llmConfig.NoHooks = config.NoHooks
+		llmConfig.DisableSubagent = config.DisableSubagent || viper.GetBool("disable_subagent")
 		llmConfig.IsSubAgent = config.AsSubagent
 		llmConfig.RecipeName = config.FragmentName
 
@@ -265,7 +268,7 @@ var runCmd = &cobra.Command{
 		stateOpts = append(stateOpts, tools.WithSkillTool())
 
 		// Initialize workflows for subagent (only for main agent, not subagent, and if not disabled)
-		if !config.AsSubagent && !viper.GetBool("no_workflows") {
+		if !config.AsSubagent && !viper.GetBool("no_workflows") && !llmConfig.DisableSubagent {
 			stateOpts = append(stateOpts, tools.WithSubAgentTool())
 		}
 
@@ -447,6 +450,7 @@ func init() {
 	runCmd.Flags().Bool("no-hooks", defaults.NoHooks, "Disable agent lifecycle hooks")
 	runCmd.Flags().Bool("no-mcp", defaults.NoMCP, "Disable MCP tools")
 	runCmd.Flags().Bool("no-tools", defaults.NoTools, "Disable all tools (for simple query-response usage)")
+	runCmd.Flags().Bool("disable-subagent", defaults.DisableSubagent, "Disable the subagent tool and remove subagent-related system prompt context")
 	runCmd.Flags().Bool("result-only", defaults.ResultOnly, "Only print the final agent message, suppressing all intermediate output and usage statistics")
 	runCmd.Flags().Bool("use-weak-model", defaults.UseWeakModel, "Use weak model for processing")
 	runCmd.Flags().String("account", defaults.Account, "Anthropic subscription account alias to use (see 'kodelet accounts list')")
@@ -532,6 +536,10 @@ func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
 
 	if noTools, err := cmd.Flags().GetBool("no-tools"); err == nil {
 		config.NoTools = noTools
+	}
+
+	if disableSubagent, err := cmd.Flags().GetBool("disable-subagent"); err == nil {
+		config.DisableSubagent = disableSubagent
 	}
 
 	if resultOnly, err := cmd.Flags().GetBool("result-only"); err == nil {

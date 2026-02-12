@@ -7,6 +7,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
 func TestGetAvailableToolNames(t *testing.T) {
@@ -283,4 +285,43 @@ func TestGetMainTools_IncludesSubagentTool(t *testing.T) {
 	}
 
 	assert.Contains(t, toolNames, "subagent", "Main tools should include the subagent tool")
+}
+
+func TestFilterOutSubagent(t *testing.T) {
+	t.Run("removes subagent from tool list", func(t *testing.T) {
+		tools := GetMainTools(context.Background(), []string{})
+		filtered := filterOutSubagent(tools)
+
+		toolNames := make([]string, len(filtered))
+		for i, tool := range filtered {
+			toolNames[i] = tool.Name()
+		}
+
+		assert.NotContains(t, toolNames, "subagent")
+		assert.Contains(t, toolNames, "bash")
+		assert.Contains(t, toolNames, "file_read")
+		assert.Contains(t, toolNames, "web_fetch")
+		assert.Contains(t, toolNames, "image_recognition")
+		assert.Equal(t, len(tools)-1, len(filtered))
+	})
+
+	t.Run("preserves all tools when subagent not present", func(t *testing.T) {
+		tools := GetSubAgentTools(context.Background(), []string{})
+		filtered := filterOutSubagent(tools)
+
+		assert.Equal(t, len(tools), len(filtered))
+	})
+
+	t.Run("handles empty tool list", func(t *testing.T) {
+		var tools []tooltypes.Tool
+		filtered := filterOutSubagent(tools)
+
+		assert.Empty(t, filtered)
+	})
+
+	t.Run("handles nil tool list", func(t *testing.T) {
+		filtered := filterOutSubagent(nil)
+
+		assert.Empty(t, filtered)
+	})
 }

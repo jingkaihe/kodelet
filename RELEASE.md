@@ -1,5 +1,20 @@
 # Kodelet
 
+## 0.2.19.beta (2026-02-12)
+
+### Features
+
+**`--disable-subagent` flag**: New flag to completely disable the subagent tool and remove all subagent-related guidance from the system prompt. Available on `run`, `acp`, and as a global persistent flag. Also configurable via `disable_subagent: true` in config.
+
+```bash
+kodelet run --disable-subagent "query"
+```
+
+### Internal Changes
+
+- Disabled `todo_read`/`todo_write` tools for subagents to reduce unnecessary tool overhead
+- Refactored ACP session `Manager` to use a `ManagerConfig` struct instead of positional parameters
+
 ## 0.2.18.beta (2026-02-07)
 
 **Configurable max-turns limit**: Added `--max-turns` flag to control the maximum number of agentic interaction turns within a single message call. Set to `0` (now the default, previously `50`) for unlimited turns, or specify a positive integer to cap iterations. Available on both `run` and `acp` commands.

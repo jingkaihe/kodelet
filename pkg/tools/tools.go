@@ -80,8 +80,6 @@ var defaultSubAgentTools = []string{
 	"file_edit",
 	"grep_tool",
 	"glob_tool",
-	"todo_read",
-	"todo_write",
 	"web_fetch",
 }
 
@@ -229,6 +227,17 @@ func GetSubAgentTools(ctx context.Context, allowedTools []string) []tooltypes.To
 	}
 
 	return GetToolsFromNames(allowedTools)
+}
+
+// filterOutSubagent removes the subagent tool from a tool list
+func filterOutSubagent(tools []tooltypes.Tool) []tooltypes.Tool {
+	filtered := make([]tooltypes.Tool, 0, len(tools))
+	for _, t := range tools {
+		if t.Name() != "subagent" {
+			filtered = append(filtered, t)
+		}
+	}
+	return filtered
 }
 
 var tracer = telemetry.Tracer("kodelet.tools")

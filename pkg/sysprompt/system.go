@@ -20,9 +20,27 @@ func SystemPrompt(model string, llmConfig llm.Config, contexts map[string]string
 	renderer := NewRenderer(TemplateFS)
 	config := NewDefaultConfig().WithModel(model)
 
-	// Add isSubagent feature when running as subagent to exclude subagent tool usage examples
+	// Add isSubagent feature and remove todoTools when running as subagent
 	if llmConfig.IsSubAgent {
 		config.EnabledFeatures = append(config.EnabledFeatures, "isSubagent")
+		filtered := make([]string, 0, len(config.EnabledFeatures))
+		for _, f := range config.EnabledFeatures {
+			if f != "todoTools" {
+				filtered = append(filtered, f)
+			}
+		}
+		config.EnabledFeatures = filtered
+	}
+
+	// Remove subagent feature when DisableSubagent is set
+	if llmConfig.DisableSubagent {
+		filtered := make([]string, 0, len(config.EnabledFeatures))
+		for _, f := range config.EnabledFeatures {
+			if f != "subagent" {
+				filtered = append(filtered, f)
+			}
+		}
+		config.EnabledFeatures = filtered
 	}
 
 	updateContextWithConfig(promptCtx, config)
