@@ -50,6 +50,8 @@ func GetSystemPromptForModel(_ string) (string, error) {
 // Models defines the Codex model categorization for reasoning and non-reasoning models.
 var Models = llm.CustomModels{
 	Reasoning: []string{
+		"gpt-5.3-codex",
+		"gpt-5.3-codex-spark",
 		"gpt-5.2-codex",
 		"gpt-5.2",
 		"gpt-5.1-codex-max",
@@ -61,6 +63,16 @@ var Models = llm.CustomModels{
 // Pricing defines the pricing information for Codex models.
 // Note: Codex subscription pricing is included in the ChatGPT subscription.
 var Pricing = llm.CustomPricing{
+	"gpt-5.3-codex": llm.ModelPricing{
+		Input:         0.0, // Included in subscription
+		Output:        0.0,
+		ContextWindow: 272_000,
+	},
+	"gpt-5.3-codex-spark": llm.ModelPricing{
+		Input:         0.0, // Included in subscription
+		Output:        0.0,
+		ContextWindow: 272_000,
+	},
 	"gpt-5.2-codex": llm.ModelPricing{
 		Input:         0.0, // Included in subscription
 		Output:        0.0,
@@ -87,4 +99,4 @@ var Pricing = llm.CustomPricing{
 const BaseURL = "https://chatgpt.com/backend-api/codex"
 
 // DefaultModel is the default model for Codex.
-const DefaultModel = "gpt-5.1-codex-max"
+const DefaultModel = "gpt-5.3-codex"
