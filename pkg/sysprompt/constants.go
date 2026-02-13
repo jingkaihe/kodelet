@@ -43,6 +43,4 @@ const (
 	// ProviderOpenAIResponses is the identifier for the OpenAI Responses API provider.
 	ProviderOpenAIResponses = "openai-responses"
 
-	// PresetCodex is the identifier for the Codex preset (uses OpenAI provider with Codex auth).
-	PresetCodex = "codex"
 )

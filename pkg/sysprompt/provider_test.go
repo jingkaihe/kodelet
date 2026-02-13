@@ -111,6 +111,21 @@ func TestOpenAIPromptLoading(t *testing.T) {
 		assert.NotEmpty(t, prompt)
 		assert.Contains(t, prompt, "coding agent")
 	})
+
+	t.Run("Codex preset does not use separate sysprompt", func(t *testing.T) {
+		config := llm.Config{
+			Provider: ProviderOpenAI,
+			OpenAI: &llm.OpenAIConfig{
+				Preset: "codex",
+			},
+		}
+		contexts := map[string]string{}
+
+		prompt := SystemPrompt("gpt-5.3-codex", config, contexts)
+		assert.NotEmpty(t, prompt)
+		assert.Contains(t, prompt, "coding agent")
+		assert.NotContains(t, prompt, "You are Codex, based on GPT-5")
+	})
 }
 
 func TestOpenAIConditionalSections(t *testing.T) {

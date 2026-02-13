@@ -4,46 +4,29 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
-func TestGetCodexPrompt(t *testing.T) {
-	prompt, err := GetCodexPrompt()
-	require.NoError(t, err)
-	assert.NotEmpty(t, prompt, "codex prompt should be loaded")
+func TestModels(t *testing.T) {
+	assert.Contains(t, Models.Reasoning, "gpt-5.3-codex")
+	assert.Contains(t, Models.Reasoning, "gpt-5.3-codex-spark")
+	assert.Contains(t, Models.Reasoning, "gpt-5.2-codex")
+	assert.Contains(t, Models.Reasoning, "gpt-5.2")
+	assert.Contains(t, Models.Reasoning, "gpt-5.1-codex-max")
+	assert.Contains(t, Models.Reasoning, "gpt-5.1-codex-mini")
+	assert.Empty(t, Models.NonReasoning)
 }
 
-func TestGetSystemPromptForModel(t *testing.T) {
-	models := []string{
-		"gpt-5.3-codex",
-		"gpt-5.3-codex-spark",
-		"gpt-5.2-codex",
-		"gpt-5.2",
-		"gpt-5.1-codex-max",
-		"gpt-5.1-codex-mini",
+func TestPricing(t *testing.T) {
+	assert.Contains(t, Pricing, "gpt-5.3-codex")
+	assert.Contains(t, Pricing, "gpt-5.3-codex-spark")
+	assert.Contains(t, Pricing, "gpt-5.2-codex")
+	assert.Contains(t, Pricing, "gpt-5.2")
+	assert.Contains(t, Pricing, "gpt-5.1-codex-max")
+	assert.Contains(t, Pricing, "gpt-5.1-codex-mini")
+
+	for _, price := range Pricing {
+		assert.Equal(t, 0.0, price.Input)
+		assert.Equal(t, 0.0, price.Output)
+		assert.Equal(t, 272_000, price.ContextWindow)
 	}
-
-	for _, model := range models {
-		t.Run(model, func(t *testing.T) {
-			got, err := GetSystemPromptForModel(model)
-			require.NoError(t, err)
-
-			want, err := GetCodexPrompt()
-			require.NoError(t, err)
-
-			assert.Equal(t, want, got)
-		})
-	}
-}
-
-func TestPromptCaching(t *testing.T) {
-	// First call loads from embed
-	prompt1, err := GetCodexPrompt()
-	require.NoError(t, err)
-
-	// Second call should return cached value
-	prompt2, err := GetCodexPrompt()
-	require.NoError(t, err)
-
-	assert.Equal(t, prompt1, prompt2)
 }
