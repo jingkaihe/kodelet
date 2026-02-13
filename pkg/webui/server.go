@@ -17,8 +17,10 @@ import (
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/gorilla/mux"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
+	openairesponses "github.com/jingkaihe/kodelet/pkg/llm/openai/responses"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
 	"github.com/sashabaranov/go-openai"
 	"google.golang.org/genai"
@@ -277,7 +279,7 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Convert to web messages with tool call structure preserved
-	webMessages, err := s.convertToWebMessages(response.RawMessages, response.Provider)
+	webMessages, err := s.convertToWebMessages(response.RawMessages, response.Provider, response.ToolResults)
 	if err != nil {
 		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to parse conversation messages", err)
 		return
@@ -300,7 +302,11 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 }
 
 // convertToWebMessages converts raw messages to web messages with tool call structure
-func (s *Server) convertToWebMessages(rawMessages json.RawMessage, provider string) ([]WebMessage, error) {
+func (s *Server) convertToWebMessages(rawMessages json.RawMessage, provider string, toolResults map[string]tooltypes.StructuredToolResult) ([]WebMessage, error) {
+	if provider == "openai-responses" {
+		return s.convertOpenAIResponsesToWebMessages(rawMessages, toolResults)
+	}
+
 	var messages []WebMessage
 
 	// Parse the raw JSON messages
@@ -356,6 +362,64 @@ func (s *Server) convertToWebMessages(rawMessages json.RawMessage, provider stri
 
 		// Skip empty messages (no content, no tool calls, and no thinking text)
 		// pretty much neglecting the user tool call feedback as it is covered by the toolresult block at
+		if webMsg.Content == "" && len(webMsg.ToolCalls) == 0 && webMsg.ThinkingText == "" {
+			continue
+		}
+
+		messages = append(messages, webMsg)
+	}
+
+	return messages, nil
+}
+
+// convertOpenAIResponsesToWebMessages converts OpenAI Responses API stored items into web messages.
+func (s *Server) convertOpenAIResponsesToWebMessages(rawMessages json.RawMessage, toolResults map[string]tooltypes.StructuredToolResult) ([]WebMessage, error) {
+	streamableMessages, err := openairesponses.StreamMessages(rawMessages, toolResults)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to parse OpenAI Responses messages")
+	}
+
+	messages := make([]WebMessage, 0, len(streamableMessages))
+
+	for _, msg := range streamableMessages {
+		webMsg := WebMessage{
+			Role:      msg.Role,
+			Content:   "",
+			ToolCalls: []WebToolCall{},
+		}
+
+		switch msg.Kind {
+		case "text":
+			webMsg.Content = msg.Content
+		case "thinking":
+			webMsg.ThinkingText = msg.Content
+			if webMsg.Role == "" {
+				webMsg.Role = "assistant"
+			}
+		case "tool-use":
+			if webMsg.Role == "" {
+				webMsg.Role = "assistant"
+			}
+
+			arguments := msg.Input
+			if arguments == "" {
+				arguments = "{}"
+			}
+
+			webMsg.ToolCalls = append(webMsg.ToolCalls, WebToolCall{
+				ID: msg.ToolCallID,
+				Function: WebToolCallFunction{
+					Name:      msg.ToolName,
+					Arguments: arguments,
+				},
+			})
+		case "tool-result":
+			// Tool results are rendered separately from ToolResults map.
+			continue
+		default:
+			continue
+		}
+
 		if webMsg.Content == "" && len(webMsg.ToolCalls) == 0 && webMsg.ThinkingText == "" {
 			continue
 		}

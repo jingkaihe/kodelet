@@ -42,5 +42,4 @@ const (
 	ProviderOpenAI = "openai"
 	// ProviderOpenAIResponses is the identifier for the OpenAI Responses API provider.
 	ProviderOpenAIResponses = "openai-responses"
-
 )
