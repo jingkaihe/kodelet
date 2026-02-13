@@ -33,9 +33,6 @@ const (
 
 	// SystemTemplate is the path to the main system prompt template.
 	SystemTemplate = "templates/system.tmpl"
-	// OpenAITemplate is the path to the OpenAI-specific prompt template.
-	OpenAITemplate = "templates/openai_system.tmpl"
-
 	// ProviderAnthropic is the identifier for the Anthropic provider.
 	ProviderAnthropic = "anthropic"
 	// ProviderOpenAI is the identifier for the OpenAI provider.

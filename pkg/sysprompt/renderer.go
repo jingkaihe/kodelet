@@ -112,16 +112,3 @@ func (r *Renderer) RenderSystemPrompt(ctx *PromptContext) (string, error) {
 	return prompt, nil
 }
 
-// RenderOpenAIPrompt renders the OpenAI prompt with system info and contexts appended
-func (r *Renderer) RenderOpenAIPrompt(ctx *PromptContext) (string, error) {
-	prompt, err := r.RenderPrompt(OpenAITemplate, ctx)
-	if err != nil {
-		return "", err
-	}
-
-	prompt += ctx.FormatSystemInfo()
-	prompt += ctx.FormatContexts()
-	prompt += ctx.FormatMCPServers()
-
-	return prompt, nil
-}

@@ -52,13 +52,7 @@ func SystemPrompt(model string, llmConfig llm.Config, contexts map[string]string
 	var err error
 
 	provider := llmConfig.Provider
-
-	switch provider {
-	case ProviderOpenAI, ProviderOpenAIResponses:
-		prompt, err = renderer.RenderOpenAIPrompt(promptCtx)
-	default:
-		prompt, err = renderer.RenderSystemPrompt(promptCtx)
-	}
+	prompt, err = renderer.RenderSystemPrompt(promptCtx)
 
 	if err != nil {
 		ctx := context.Background()
