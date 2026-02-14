@@ -906,17 +906,7 @@ func (t *Thread) SwapContext(_ context.Context, summary string) error {
 
 // CompactContext performs comprehensive context compacting by creating a detailed summary
 func (t *Thread) CompactContext(ctx context.Context) error {
-	compactPrompt, err := fragments.LoadCompactPrompt(ctx)
-	if err != nil {
-		return errors.Wrap(err, "failed to load compact prompt")
-	}
-
-	summary, err := t.runUtilityPrompt(ctx, compactPrompt, false)
-	if err != nil {
-		return errors.Wrap(err, "failed to generate compact summary")
-	}
-
-	return t.SwapContext(ctx, summary)
+	return base.CompactContextWithSummary(ctx, fragments.LoadCompactPrompt, t.runUtilityPrompt, t.SwapContext)
 }
 
 // ShortSummary generates a concise summary of the conversation using a faster model.
@@ -960,24 +950,22 @@ func (t *Thread) GetMessages() ([]llmtypes.Message, error) {
 
 // processImage converts an image path/URL to an OpenAI ChatMessagePart
 func (t *Thread) processImage(imagePath string) (*openai.ChatMessagePart, error) {
-	// Only allow HTTPS URLs for security
-	if strings.HasPrefix(imagePath, "https://") {
-		return t.processImageURL(imagePath)
-	}
-	if strings.HasPrefix(imagePath, "http://") {
+	if base.IsInsecureHTTPURL(imagePath) {
 		// Explicitly reject HTTP URLs for security
 		return nil, fmt.Errorf("only HTTPS URLs are supported for security: %s", imagePath)
 	}
-	if strings.HasPrefix(imagePath, "data:") {
+
+	kind, normalizedPath := base.ResolveImageInputPath(imagePath)
+	switch kind {
+	case base.ImageInputHTTPSURL:
+		return t.processImageURL(normalizedPath)
+	case base.ImageInputDataURL:
 		// Data URLs can be passed directly to OpenAI
-		return t.processImageDataURL(imagePath)
+		return t.processImageDataURL(normalizedPath)
+	default:
+		// Treat as a local file path.
+		return t.processImageFile(normalizedPath)
 	}
-	if filePath, ok := strings.CutPrefix(imagePath, "file://"); ok {
-		// Remove file:// prefix and process as file
-		return t.processImageFile(filePath)
-	}
-	// Treat as a local file path
-	return t.processImageFile(imagePath)
 }
 
 // processImageURL creates an image part from an HTTPS URL

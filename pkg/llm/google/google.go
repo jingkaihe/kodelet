@@ -1059,17 +1059,7 @@ func (t *Thread) SwapContext(_ context.Context, summary string) error {
 
 // CompactContext performs comprehensive context compacting by creating a detailed summary
 func (t *Thread) CompactContext(ctx context.Context) error {
-	compactPrompt, err := fragments.LoadCompactPrompt(ctx)
-	if err != nil {
-		return errors.Wrap(err, "failed to load compact prompt")
-	}
-
-	summary, err := t.runUtilityPrompt(ctx, compactPrompt, false)
-	if err != nil {
-		return errors.Wrap(err, "failed to generate compact summary")
-	}
-
-	return t.SwapContext(ctx, summary)
+	return base.CompactContextWithSummary(ctx, fragments.LoadCompactPrompt, t.runUtilityPrompt, t.SwapContext)
 }
 
 // ShortSummary generates a brief summary of the conversation

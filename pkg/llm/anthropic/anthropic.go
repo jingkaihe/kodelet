@@ -949,17 +949,7 @@ func (t *Thread) SwapContext(_ context.Context, summary string) error {
 
 // CompactContext performs comprehensive context compacting by creating a detailed summary
 func (t *Thread) CompactContext(ctx context.Context) error {
-	compactPrompt, err := fragments.LoadCompactPrompt(ctx)
-	if err != nil {
-		return errors.Wrap(err, "failed to load compact prompt")
-	}
-
-	summary, err := t.runUtilityPrompt(ctx, compactPrompt, false)
-	if err != nil {
-		return errors.Wrap(err, "failed to generate compact summary")
-	}
-
-	return t.SwapContext(ctx, summary)
+	return base.CompactContextWithSummary(ctx, fragments.LoadCompactPrompt, t.runUtilityPrompt, t.SwapContext)
 }
 
 // GetMessages returns the current messages in the thread
@@ -973,19 +963,15 @@ func (t *Thread) GetMessages() ([]llmtypes.Message, error) {
 
 // processImage converts an image path/URL to an Anthropic image content block
 func (t *Thread) processImage(imagePath string) (*anthropic.ContentBlockParamUnion, error) {
-	// Only allow HTTPS URLs for security
-	if strings.HasPrefix(imagePath, "https://") {
-		return t.processImageURL(imagePath)
+	kind, normalizedPath := base.ResolveImageInputPath(imagePath)
+	switch kind {
+	case base.ImageInputHTTPSURL:
+		return t.processImageURL(normalizedPath)
+	case base.ImageInputDataURL:
+		return t.processImageDataURL(normalizedPath)
+	default:
+		return t.processImageFile(normalizedPath)
 	}
-	if strings.HasPrefix(imagePath, "data:") {
-		return t.processImageDataURL(imagePath)
-	}
-	if filePath, ok := strings.CutPrefix(imagePath, "file://"); ok {
-		// Remove file:// prefix and process as file
-		return t.processImageFile(filePath)
-	}
-	// Treat as a local file path
-	return t.processImageFile(imagePath)
 }
 
 func (t *Thread) processImageURL(url string) (*anthropic.ContentBlockParamUnion, error) {
