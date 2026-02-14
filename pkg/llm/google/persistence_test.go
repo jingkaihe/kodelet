@@ -2,8 +2,10 @@ package google
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
@@ -272,4 +274,97 @@ func TestExtractMessagesWithMultipleToolResults(t *testing.T) {
 	// Check final assistant message
 	assert.Equal(t, "assistant", messages[5].Role)
 	assert.Equal(t, "Here's the info you requested.", messages[5].Content)
+}
+
+func TestExtractMessages_UsesStructuredToolResultByCallID(t *testing.T) {
+	rawMessages := `[
+		{
+			"role": "user",
+			"parts": [
+				{
+					"text": "Run command"
+				}
+			]
+		},
+		{
+			"role": "user",
+			"parts": [
+				{
+					"functionResponse": {
+						"name": "bash",
+						"response": {
+							"call_id": "call_abc",
+							"result": "raw-output",
+							"error": false
+						}
+					}
+				}
+			]
+		}
+	]`
+
+	toolResults := map[string]tooltypes.StructuredToolResult{
+		"call_abc": {
+			ToolName:  "bash",
+			Success:   true,
+			Timestamp: time.Now(),
+			Metadata: tooltypes.BashMetadata{
+				Command:  "echo hi",
+				ExitCode: 0,
+				Output:   "structured-marker",
+			},
+		},
+	}
+
+	messages, err := ExtractMessages([]byte(rawMessages), toolResults)
+	require.NoError(t, err)
+	require.Len(t, messages, 2)
+	assert.Contains(t, messages[1].Content, "structured-marker")
+	assert.NotContains(t, messages[1].Content, "raw-output")
+}
+
+func TestExtractMessages_FallsBackToToolNameWhenCallIDMissing(t *testing.T) {
+	rawMessages := `[
+		{
+			"role": "user",
+			"parts": [
+				{
+					"text": "Run command"
+				}
+			]
+		},
+		{
+			"role": "user",
+			"parts": [
+				{
+					"functionResponse": {
+						"name": "bash",
+						"response": {
+							"result": "raw-output-without-call-id",
+							"error": false
+						}
+					}
+				}
+			]
+		}
+	]`
+
+	toolResults := map[string]tooltypes.StructuredToolResult{
+		"bash": {
+			ToolName:  "bash",
+			Success:   true,
+			Timestamp: time.Now(),
+			Metadata: tooltypes.BashMetadata{
+				Command:  "echo fallback",
+				ExitCode: 0,
+				Output:   "tool-name-fallback-marker",
+			},
+		},
+	}
+
+	messages, err := ExtractMessages([]byte(rawMessages), toolResults)
+	require.NoError(t, err)
+	require.Len(t, messages, 2)
+	assert.Contains(t, messages[1].Content, "tool-name-fallback-marker")
+	assert.NotContains(t, messages[1].Content, "raw-output-without-call-id")
 }

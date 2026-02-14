@@ -16,14 +16,11 @@ import (
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/auth"
-	"github.com/jingkaihe/kodelet/pkg/conversations"
-	"github.com/jingkaihe/kodelet/pkg/hooks"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	codexpreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/codex"
 	openaipreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/openai"
 	"github.com/jingkaihe/kodelet/pkg/llm/prompts"
 	"github.com/jingkaihe/kodelet/pkg/logger"
-	"github.com/jingkaihe/kodelet/pkg/osutil"
 	"github.com/jingkaihe/kodelet/pkg/sysprompt"
 	"github.com/jingkaihe/kodelet/pkg/telemetry"
 	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
@@ -94,17 +91,8 @@ func NewThread(config llmtypes.Config) (*Thread, error) {
 
 	log.WithField("model", config.Model).Debug("creating OpenAI Responses API thread")
 
-	// Initialize hook trigger (zero-value if discovery fails or disabled - hooks disabled)
-	var hookTrigger hooks.Trigger
 	conversationID := convtypes.GenerateID()
-	if !config.IsSubAgent && !config.NoHooks {
-		hookManager, err := hooks.NewHookManager()
-		if err != nil {
-			log.WithError(err).Warn("Failed to initialize hook manager, hooks disabled")
-		} else {
-			hookTrigger = hooks.NewTrigger(hookManager, conversationID, config.IsSubAgent, config.RecipeName)
-		}
-	}
+	hookTrigger := base.CreateHookTrigger(context.Background(), config, conversationID)
 
 	// Create the base thread with shared functionality
 	baseThread := base.NewThread(config, conversationID, hookTrigger)
@@ -292,16 +280,7 @@ OUTER:
 			}
 
 			// Check if auto-compact should be triggered
-			if !opt.DisableAutoCompact && t.ShouldAutoCompact(opt.CompactRatio) {
-				logger.G(ctx).WithField("context_utilization",
-					float64(t.GetUsage().CurrentContextWindow)/float64(t.GetUsage().MaxContextWindow)).
-					Info("triggering auto-compact")
-				if err := t.CompactContext(ctx); err != nil {
-					logger.G(ctx).WithError(err).Error("failed to auto-compact context")
-				} else {
-					logger.G(ctx).Info("auto-compact completed successfully")
-				}
-			}
+			t.TryAutoCompact(ctx, opt.DisableAutoCompact, opt.CompactRatio, t.CompactContext)
 
 			logger.G(ctx).WithField("model", model).Debug("starting message exchange")
 			exchangeOutput, toolsUsed, err := t.processMessageExchange(ctx, handler, model, maxTokens, systemPrompt, opt)
@@ -316,25 +295,12 @@ OUTER:
 			turnCount++
 			finalOutput = exchangeOutput
 
-			// Trigger turn_end hook after assistant response is complete
-			if finalOutput != "" {
-				t.HookTrigger.TriggerTurnEnd(ctx, t, finalOutput, turnCount, t.GetRecipeHooks())
-			}
+			base.TriggerTurnEnd(ctx, t.HookTrigger, t, finalOutput, turnCount)
 
 			// If no tools were used, check for hook follow-ups before stopping
 			if !toolsUsed {
-				logger.G(ctx).Debug("no tools used, checking agent_stop hook")
-
-				if messages, err := t.GetMessages(); err == nil {
-					if followUps := t.HookTrigger.TriggerAgentStop(ctx, t, messages, t.GetRecipeHooks()); len(followUps) > 0 {
-						logger.G(ctx).WithField("count", len(followUps)).
-							Info("agent_stop hook returned follow-up messages, continuing conversation")
-						for _, msg := range followUps {
-							t.AddUserMessage(ctx, msg)
-							handler.HandleText(fmt.Sprintf("\n📨 Hook follow-up: %s\n", msg))
-						}
-						continue OUTER
-					}
+				if base.HandleAgentStopFollowUps(ctx, t.HookTrigger, t, handler) {
+					continue OUTER
 				}
 
 				// Turn completed successfully, clear pending items
@@ -588,16 +554,7 @@ func (t *Thread) SwapContext(_ context.Context, summary string) error {
 	// Clear the previous response ID
 	t.lastResponseID = ""
 
-	// heuristic estimation of context window size based on summary length
-	t.EstimateContextWindowFromMessage(summary)
-
-	// Clear stale tool results - they reference tool calls that no longer exist
-	t.ToolResults = make(map[string]tooltypes.StructuredToolResult)
-
-	// Clear file access tracking to start fresh with context retrieval
-	if t.State != nil {
-		t.State.SetFileLastAccess(make(map[string]time.Time))
-	}
+	t.FinalizeSwapContextLocked(summary)
 
 	return nil
 }
@@ -682,15 +639,23 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 	// represented by the compaction item, not the response chain
 	t.lastResponseID = ""
 
-	// Clear stale tool results - they reference tool calls that no longer exist
-	t.ToolResults = make(map[string]tooltypes.StructuredToolResult)
-
-	// Clear file access tracking to start fresh with context retrieval
-	if t.State != nil {
-		t.State.SetFileLastAccess(make(map[string]time.Time))
-	}
+	t.ResetContextStateLocked()
 
 	return nil
+}
+
+func (t *Thread) runUtilityPrompt(ctx context.Context, prompt string, useWeakModel bool) (string, error) {
+	return base.RunUtilityPrompt(ctx,
+		func() (*Thread, error) {
+			return NewThread(t.Config)
+		},
+		func(summaryThread *Thread) {
+			// Copy input items to the summary thread.
+			summaryThread.inputItems = t.inputItems
+		},
+		prompt,
+		useWeakModel,
+	)
 }
 
 // ShortSummary generates a short summary of the conversation using an LLM.
@@ -699,32 +664,14 @@ func (t *Thread) ShortSummary(ctx context.Context) string {
 		return ""
 	}
 
-	// Create a new summary thread
-	summaryThread, err := NewThread(t.Config)
-	if err != nil {
-		logger.G(ctx).WithError(err).Error("failed to create summary thread")
-		return "Could not generate summary."
-	}
-
-	// Copy input items to the summary thread
-	summaryThread.inputItems = t.inputItems
-	summaryThread.EnablePersistence(ctx, false)
-	summaryThread.HookTrigger = hooks.Trigger{} // disable hooks for summary
-
-	handler := &llmtypes.StringCollectorHandler{Silent: true}
-	_, err = summaryThread.SendMessage(ctx, prompts.ShortSummaryPrompt, handler, llmtypes.MessageOpt{
-		UseWeakModel:       true,
-		NoToolUse:          true,
-		DisableAutoCompact: true,
-		DisableUsageLog:    true,
-		NoSaveConversation: true,
-	})
-	if err != nil {
-		logger.G(ctx).WithError(err).Error("failed to generate summary")
-		return "Could not generate summary."
-	}
-
-	return handler.CollectedText()
+	return base.GenerateShortSummary(
+		ctx,
+		prompts.ShortSummaryPrompt,
+		t.runUtilityPrompt,
+		func(err error) {
+			logger.G(ctx).WithError(err).Error("failed to generate summary")
+		},
+	)
 }
 
 // SaveConversation saves the current thread to the conversation store.
@@ -799,7 +746,7 @@ func (t *Thread) loadConversation(ctx context.Context) {
 	t.summary = record.Summary
 	t.State.SetFileLastAccess(record.FileLastAccess)
 	t.SetStructuredToolResults(record.ToolResults)
-	t.restoreBackgroundProcesses(record.BackgroundProcesses)
+	base.RestoreBackgroundProcesses(t.State, record.BackgroundProcesses)
 
 	// Restore lastResponseID from metadata
 	if record.Metadata != nil {
@@ -823,16 +770,25 @@ func (t *Thread) cleanupOrphanedItems() {
 
 		break
 	}
-}
 
-// restoreBackgroundProcesses restores background processes from the conversation record.
-func (t *Thread) restoreBackgroundProcesses(processes []tooltypes.BackgroundProcess) {
-	for _, process := range processes {
-		if osutil.IsProcessAlive(process.PID) {
-			if restoredProcess, err := osutil.ReattachProcess(process); err == nil {
-				t.State.AddBackgroundProcess(restoredProcess)
-			}
+	// Keep persisted history in sync with cleanup logic.
+	for len(t.storedItems) > 0 {
+		lastItem := t.storedItems[len(t.storedItems)-1]
+		if lastItem.Type == "function_call" {
+			t.storedItems = t.storedItems[:len(t.storedItems)-1]
+			continue
 		}
+		break
+	}
+
+	// Pending items can also contain an unfinished tail.
+	for len(t.pendingItems) > 0 {
+		lastItem := t.pendingItems[len(t.pendingItems)-1]
+		if lastItem.OfFunctionCall != nil {
+			t.pendingItems = t.pendingItems[:len(t.pendingItems)-1]
+			continue
+		}
+		break
 	}
 }
 
@@ -1176,28 +1132,6 @@ func ExtractMessages(data []byte, toolResults map[string]tooltypes.StructuredToo
 	}
 
 	return result, nil
-}
-
-// EnablePersistence enables or disables conversation persistence.
-func (t *Thread) EnablePersistence(ctx context.Context, enabled bool) {
-	t.ConversationMu.Lock()
-	defer t.ConversationMu.Unlock()
-
-	t.Persisted = enabled
-
-	if enabled && t.Store == nil {
-		store, err := conversations.GetConversationStore(ctx)
-		if err != nil {
-			logger.G(ctx).WithError(err).Error("Error initializing conversation store")
-			t.Persisted = false
-			return
-		}
-		t.Store = store
-	}
-
-	if enabled && t.Store != nil && t.LoadConversation != nil {
-		t.LoadConversation(ctx)
-	}
 }
 
 // isInvalidPreviousResponseIDError checks if an error is related to an invalid previous_response_id.

@@ -24,16 +24,12 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/jingkaihe/kodelet/pkg/fragments"
-	"github.com/jingkaihe/kodelet/pkg/hooks"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/llm/prompts"
 	"github.com/jingkaihe/kodelet/pkg/logger"
-	"github.com/jingkaihe/kodelet/pkg/osutil"
 	"github.com/jingkaihe/kodelet/pkg/steer"
 	"github.com/jingkaihe/kodelet/pkg/sysprompt"
 	"github.com/jingkaihe/kodelet/pkg/telemetry"
-	"github.com/jingkaihe/kodelet/pkg/tools"
-	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -120,19 +116,8 @@ func NewGoogleThread(config llmtypes.Config) (*Thread, error) {
 		thinkingBudget = configCopy.Google.ThinkingBudget
 	}
 
-	// Initialize hook trigger (zero-value if discovery fails or disabled - hooks disabled)
-	var hookTrigger hooks.Trigger
 	conversationID := convtypes.GenerateID()
-	if !configCopy.IsSubAgent && !configCopy.NoHooks {
-		// Only main agent discovers hooks; subagents inherit from parent
-		// Hooks can be disabled via NoHooks config
-		hookManager, err := hooks.NewHookManager()
-		if err != nil {
-			logger.G(context.Background()).WithError(err).Warn("Failed to initialize hook manager, hooks disabled")
-		} else {
-			hookTrigger = hooks.NewTrigger(hookManager, conversationID, configCopy.IsSubAgent, configCopy.RecipeName)
-		}
-	}
+	hookTrigger := base.CreateHookTrigger(context.Background(), configCopy, conversationID)
 
 	// Create the thread with embedded base.Thread
 	t := &Thread{
@@ -269,15 +254,7 @@ func (t *Thread) SendMessage(
 
 	t.AddUserMessage(ctx, message, opt.Images...)
 
-	if !opt.DisableAutoCompact && t.ShouldAutoCompact(opt.CompactRatio) {
-		logger.G(ctx).WithField("context_utilization", float64(t.GetUsage().CurrentContextWindow)/float64(t.GetUsage().MaxContextWindow)).Info("triggering auto-compact")
-		err := t.CompactContext(ctx)
-		if err != nil {
-			logger.G(ctx).WithError(err).Error("failed to auto-compact context")
-		} else {
-			logger.G(ctx).Info("auto-compact completed successfully")
-		}
-	}
+	t.TryAutoCompact(ctx, opt.DisableAutoCompact, opt.CompactRatio, t.CompactContext)
 
 	// Main interaction loop for handling tool calls
 	turnCount := 0
@@ -318,26 +295,12 @@ OUTER:
 			// Update finalOutput with the most recent output
 			finalOutput = exchangeOutput
 
-			// Trigger turn_end hook after assistant response is complete
-			if finalOutput != "" {
-				t.HookTrigger.TriggerTurnEnd(ctx, t, finalOutput, turnCount, t.GetRecipeHooks())
-			}
+			base.TriggerTurnEnd(ctx, t.HookTrigger, t, finalOutput, turnCount)
 
 			// If no tools were used, check for hook follow-ups before stopping
 			if !toolsUsed {
-				logger.G(ctx).Debug("no tools used, checking agent_stop hook")
-
-				// Trigger agent_stop hook to see if there are follow-up messages
-				if messages, err := t.GetMessages(); err == nil {
-					if followUps := t.HookTrigger.TriggerAgentStop(ctx, t, messages, t.GetRecipeHooks()); len(followUps) > 0 {
-						logger.G(ctx).WithField("count", len(followUps)).Info("agent_stop hook returned follow-up messages, continuing conversation")
-						// Append follow-up messages as user messages and continue
-						for _, msg := range followUps {
-							t.AddUserMessage(ctx, msg)
-							handler.HandleText(fmt.Sprintf("\n📨 Hook follow-up: %s\n", msg))
-						}
-						continue OUTER
-					}
+				if base.HandleAgentStopFollowUps(ctx, t.HookTrigger, t, handler) {
+					continue OUTER
 				}
 
 				break OUTER
@@ -958,26 +921,19 @@ func (t *Thread) executeToolCalls(ctx context.Context, response *Response, handl
 		}
 
 		// Trigger before_tool_call hook
-		toolInput := string(argsJSON)
-		blocked, reason, toolInput := t.HookTrigger.TriggerBeforeToolCall(ctx, t, toolCall.Name, toolInput, toolCall.ID, t.GetRecipeHooks())
-
-		var output tooltypes.ToolResult
-		if blocked {
-			output = tooltypes.NewBlockedToolResult(toolCall.Name, reason)
-		} else {
-			output = tools.RunTool(ctx, t.State, toolCall.Name, toolInput)
-		}
-
-		// Use CLI rendering for consistent output formatting
-		structuredResult := output.StructuredData()
-
-		// Trigger after_tool_call hook
-		if modified := t.HookTrigger.TriggerAfterToolCall(ctx, t, toolCall.Name, toolInput, toolCall.ID, structuredResult, t.GetRecipeHooks()); modified != nil {
-			structuredResult = *modified
-		}
-
-		registry := renderers.NewRendererRegistry()
-		_ = registry.Render(structuredResult) // Render for logging, but pass ToolResult to handler
+		toolExecution := base.ExecuteTool(
+			ctx,
+			t.HookTrigger,
+			t,
+			t.State,
+			t.GetRecipeHooks(),
+			t.RendererRegistry,
+			toolCall.Name,
+			string(argsJSON),
+			toolCall.ID,
+		)
+		output := toolExecution.Result
+		structuredResult := toolExecution.StructuredResult
 
 		handler.HandleToolResult(toolCall.ID, toolCall.Name, output)
 
@@ -1017,13 +973,7 @@ func (t *Thread) hasToolCalls(response *Response) bool {
 
 // tools returns the available tools, filtered by options
 func (t *Thread) tools(opt llmtypes.MessageOpt) []tooltypes.Tool {
-	if opt.NoToolUse {
-		return []tooltypes.Tool{}
-	}
-	if t.State == nil {
-		return []tooltypes.Tool{}
-	}
-	return t.State.Tools()
+	return base.AvailableTools(t.State, opt.NoToolUse)
 }
 
 // GetMessages returns the current messages in the thread
@@ -1076,6 +1026,19 @@ func (t *Thread) convertToStandardMessages() []llmtypes.Message {
 // Note: SetStructuredToolResult, GetStructuredToolResults, SetStructuredToolResults,
 // and ShouldAutoCompact methods are inherited from embedded base.Thread
 
+func (t *Thread) runUtilityPrompt(ctx context.Context, prompt string, useWeakModel bool) (string, error) {
+	return base.RunUtilityPrompt(ctx,
+		func() (*Thread, error) {
+			return NewGoogleThread(t.GetConfig())
+		},
+		func(summaryThread *Thread) {
+			summaryThread.messages = t.messages
+		},
+		prompt,
+		useWeakModel,
+	)
+}
+
 // SwapContext replaces the conversation history with a summary message.
 // This implements the hooks.ContextSwapper interface.
 func (t *Thread) SwapContext(_ context.Context, summary string) error {
@@ -1088,76 +1051,26 @@ func (t *Thread) SwapContext(_ context.Context, summary string) error {
 		}, genai.RoleUser),
 	}
 
-	// Clear stale tool results - they reference tool calls that no longer exist
-	t.ToolResults = make(map[string]tooltypes.StructuredToolResult)
-
-	// Get state reference while under mutex protection
-	state := t.State
-
-	// heuristic estimation of context window size based on summary length
-	t.EstimateContextWindowFromMessage(summary)
-
-	// Clear file access tracking to start fresh with context retrieval
-	if state != nil {
-		state.SetFileLastAccess(make(map[string]time.Time))
-	}
+	t.FinalizeSwapContextLocked(summary)
 
 	return nil
 }
 
 // CompactContext performs comprehensive context compacting by creating a detailed summary
 func (t *Thread) CompactContext(ctx context.Context) error {
-	compactPrompt, err := fragments.LoadCompactPrompt(ctx)
-	if err != nil {
-		return errors.Wrap(err, "failed to load compact prompt")
-	}
-
-	summaryThread, err := NewGoogleThread(t.GetConfig())
-	if err != nil {
-		return errors.Wrap(err, "failed to create summary thread")
-	}
-
-	summaryThread.messages = t.messages
-	summaryThread.EnablePersistence(ctx, false)
-	summaryThread.HookTrigger = hooks.Trigger{}
-
-	handler := &llmtypes.StringCollectorHandler{Silent: true}
-	_, err = summaryThread.SendMessage(ctx, compactPrompt, handler, llmtypes.MessageOpt{
-		UseWeakModel:       false,
-		NoToolUse:          true,
-		DisableAutoCompact: true,
-		DisableUsageLog:    true,
-		NoSaveConversation: true,
-	})
-	if err != nil {
-		return errors.Wrap(err, "failed to generate compact summary")
-	}
-
-	return t.SwapContext(ctx, handler.CollectedText())
+	return base.CompactContextWithSummary(ctx, fragments.LoadCompactPrompt, t.runUtilityPrompt, t.SwapContext)
 }
 
 // ShortSummary generates a brief summary of the conversation
 func (t *Thread) ShortSummary(ctx context.Context) string {
-	summaryThread, err := NewGoogleThread(t.GetConfig())
-	if err != nil {
-		logger.G(ctx).WithError(err).Error("failed to create summary thread")
-		return "Could not generate summary."
-	}
-
-	summaryThread.messages = t.messages
-	summaryThread.EnablePersistence(ctx, false)
-	summaryThread.HookTrigger = hooks.Trigger{} // disable hooks for summary
-
-	handler := &llmtypes.StringCollectorHandler{Silent: true}
-	summaryThread.SendMessage(ctx, prompts.ShortSummaryPrompt, handler, llmtypes.MessageOpt{
-		UseWeakModel:       true,
-		NoToolUse:          true,
-		DisableAutoCompact: true,
-		DisableUsageLog:    true,
-		NoSaveConversation: true,
-	})
-
-	return handler.CollectedText()
+	return base.GenerateShortSummary(
+		ctx,
+		prompts.ShortSummaryPrompt,
+		t.runUtilityPrompt,
+		func(err error) {
+			logger.G(ctx).WithError(err).Error("failed to generate summary")
+		},
+	)
 }
 
 // processPendingSteer processes any pending steering messages
@@ -1238,7 +1151,7 @@ func (t *Thread) loadConversation(ctx context.Context) {
 
 	// Load background processes if state is available
 	if t.State != nil && len(record.BackgroundProcesses) > 0 {
-		t.restoreBackgroundProcesses(record.BackgroundProcesses)
+		base.RestoreBackgroundProcesses(t.State, record.BackgroundProcesses)
 	}
 
 	logger.G(ctx).WithField("conversation_id", t.ConversationID).Debug("loaded conversation from store")
@@ -1273,17 +1186,4 @@ func (t *Thread) updateUsage(metadata *genai.UsageMetadata) {
 	}
 
 	t.Usage.CurrentContextWindow = t.Usage.InputTokens + t.Usage.OutputTokens + t.Usage.CacheReadInputTokens
-}
-
-// restoreBackgroundProcesses restores background processes from the conversation record
-func (t *Thread) restoreBackgroundProcesses(processes []tooltypes.BackgroundProcess) {
-	for _, process := range processes {
-		// Check if process is still alive
-		if osutil.IsProcessAlive(process.PID) {
-			// Reattach to the process
-			if restoredProcess, err := osutil.ReattachProcess(process); err == nil {
-				t.State.AddBackgroundProcess(restoredProcess)
-			}
-		}
-	}
 }

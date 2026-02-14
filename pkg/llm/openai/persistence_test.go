@@ -377,6 +377,56 @@ func TestSaveConversationMessageCleanup(t *testing.T) {
 	}
 }
 
+func TestLoadConversation_CleansOrphanedTrailingToolCall(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "test-key")
+
+	thread, err := NewOpenAIThread(llmtypes.Config{
+		Model: "gpt-4.1",
+	})
+	require.NoError(t, err)
+
+	thread.SetState(tools.NewBasicState(context.Background()))
+
+	rawMessages, err := json.Marshal([]openai.ChatCompletionMessage{
+		{
+			Role:    openai.ChatMessageRoleUser,
+			Content: "List files",
+		},
+		{
+			Role: openai.ChatMessageRoleAssistant,
+			ToolCalls: []openai.ToolCall{
+				{
+					ID:   "call_1",
+					Type: openai.ToolTypeFunction,
+					Function: openai.FunctionCall{
+						Name:      "bash",
+						Arguments: `{"command":"ls"}`,
+					},
+				},
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	record := conversations.ConversationRecord{
+		ID:          "conv-test",
+		Provider:    "openai",
+		RawMessages: rawMessages,
+	}
+
+	thread.Store = &MockConversationStore{LoadedRecord: &record}
+	thread.Persisted = true
+	thread.ConversationID = record.ID
+
+	thread.ConversationMu.Lock()
+	thread.loadConversation(context.Background())
+	thread.ConversationMu.Unlock()
+
+	require.Len(t, thread.messages, 1)
+	assert.Equal(t, openai.ChatMessageRoleUser, thread.messages[0].Role)
+	assert.Equal(t, "List files", thread.messages[0].Content)
+}
+
 func TestStreamMessages_SimpleTextMessage(t *testing.T) {
 	messages := []openai.ChatCompletionMessage{
 		{
