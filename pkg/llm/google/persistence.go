@@ -168,12 +168,20 @@ func ExtractMessages(rawMessages []byte, toolResults map[string]tooltypes.Struct
 			case part.FunctionResponse != nil:
 				result := ""
 				toolName := part.FunctionResponse.Name
+				callID := extractToolCallID(part.FunctionResponse.Response)
 
-				if structuredResult, ok := toolResults[toolName]; ok {
+				// Structured results are keyed by tool call ID at execution time.
+				// Keep a tool-name fallback for older persisted records.
+				structuredResult, ok := toolResults[callID]
+				if !ok {
+					structuredResult, ok = toolResults[toolName]
+				}
+				if ok && (structuredResult.Metadata != nil || structuredResult.Error != "") {
 					if jsonData, err := structuredResult.MarshalJSON(); err == nil {
 						result = string(jsonData)
 					}
-				} else {
+				}
+				if result == "" {
 					if responseJSON, err := json.Marshal(part.FunctionResponse.Response); err == nil {
 						result = string(responseJSON)
 					}
@@ -188,6 +196,20 @@ func ExtractMessages(rawMessages []byte, toolResults map[string]tooltypes.Struct
 	}
 
 	return messages, nil
+}
+
+func extractToolCallID(response map[string]any) string {
+	if response == nil {
+		return ""
+	}
+
+	if rawCallID, ok := response["call_id"]; ok {
+		if callID, ok := rawCallID.(string); ok {
+			return callID
+		}
+	}
+
+	return ""
 }
 
 // DeserializeMessages deserializes raw message bytes into Google GenAI Content objects

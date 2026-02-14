@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -21,11 +22,10 @@ func TestProcessImage(t *testing.T) {
 
 	t.Run("handles http URLs", func(t *testing.T) {
 		url := "http://example.com/image.png"
-		result, err := processImage(url)
+		_, err := processImage(url)
 
-		require.NoError(t, err)
-		require.NotNil(t, result.OfInputImage)
-		assert.Equal(t, url, result.OfInputImage.ImageURL.Value)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "only HTTPS URLs are supported for security")
 	})
 
 	t.Run("handles data URLs from ACP", func(t *testing.T) {
@@ -91,7 +91,19 @@ func TestProcessImage(t *testing.T) {
 		_, err := processImage("/non/existent/path/image.png")
 
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "failed to read image file")
+		assert.Contains(t, err.Error(), "failed to stat image file")
+	})
+
+	t.Run("returns error for oversized local file", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		tmpFile := filepath.Join(tmpDir, "large.png")
+		tooLarge := make([]byte, base.MaxImageFileSize+1)
+		err := os.WriteFile(tmpFile, tooLarge, 0o644)
+		require.NoError(t, err)
+
+		_, err = processImage(tmpFile)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "image file too large")
 	})
 }
 
@@ -99,20 +111,27 @@ func TestGetMimeType(t *testing.T) {
 	tests := []struct {
 		path     string
 		expected string
+		wantErr  bool
 	}{
-		{"/path/to/image.jpg", "image/jpeg"},
-		{"/path/to/image.jpeg", "image/jpeg"},
-		{"/path/to/image.JPG", "image/jpeg"},
-		{"/path/to/image.png", "image/png"},
-		{"/path/to/image.PNG", "image/png"},
-		{"/path/to/image.gif", "image/gif"},
-		{"/path/to/image.webp", "image/webp"},
-		{"/path/to/image.unknown", "image/jpeg"}, // defaults to jpeg
+		{"/path/to/image.jpg", "image/jpeg", false},
+		{"/path/to/image.jpeg", "image/jpeg", false},
+		{"/path/to/image.JPG", "image/jpeg", false},
+		{"/path/to/image.png", "image/png", false},
+		{"/path/to/image.PNG", "image/png", false},
+		{"/path/to/image.gif", "image/gif", false},
+		{"/path/to/image.webp", "image/webp", false},
+		{"/path/to/image.unknown", "", true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.path, func(t *testing.T) {
-			result := getMimeType(tt.path)
+			result, err := getMimeType(tt.path)
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Empty(t, result)
+				return
+			}
+			require.NoError(t, err)
 			assert.Equal(t, tt.expected, result)
 		})
 	}

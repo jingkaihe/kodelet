@@ -108,9 +108,8 @@ func (t *Thread) loadConversation(ctx context.Context) {
 		return
 	}
 
-	t.cleanupOrphanedMessages()
-
 	t.messages = messages
+	t.cleanupOrphanedMessages()
 	t.Usage = &record.Usage
 	t.summary = record.Summary
 	t.State.SetFileLastAccess(record.FileLastAccess)

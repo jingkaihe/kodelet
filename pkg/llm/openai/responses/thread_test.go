@@ -320,6 +320,54 @@ func TestStorageRoundTripWithReasoning(t *testing.T) {
 	assert.Equal(t, "I need to add 2 and 2 together. 2+2=4.", parsedItems[1].Content)
 }
 
+func TestCleanupOrphanedItems_RemovesTrailingFunctionCallFromStorage(t *testing.T) {
+	thread := &Thread{
+		inputItems: []openairesponses.ResponseInputItemUnionParam{
+			{
+				OfMessage: &openairesponses.EasyInputMessageParam{
+					Role: openairesponses.EasyInputMessageRoleUser,
+				},
+			},
+			{
+				OfFunctionCall: &openairesponses.ResponseFunctionToolCallParam{
+					CallID:    "call_orphaned",
+					Name:      "bash",
+					Arguments: `{"command":"ls"}`,
+				},
+			},
+		},
+		storedItems: []StoredInputItem{
+			{
+				Type:    "message",
+				Role:    "user",
+				Content: "list files",
+			},
+			{
+				Type:      "function_call",
+				CallID:    "call_orphaned",
+				Name:      "bash",
+				Arguments: `{"command":"ls"}`,
+			},
+		},
+		pendingItems: []openairesponses.ResponseInputItemUnionParam{
+			{
+				OfFunctionCall: &openairesponses.ResponseFunctionToolCallParam{
+					CallID:    "call_orphaned",
+					Name:      "bash",
+					Arguments: `{"command":"ls"}`,
+				},
+			},
+		},
+	}
+
+	thread.cleanupOrphanedItems()
+
+	require.Len(t, thread.inputItems, 1)
+	require.Len(t, thread.storedItems, 1)
+	assert.Equal(t, "message", thread.storedItems[0].Type)
+	assert.Empty(t, thread.pendingItems)
+}
+
 func TestLoadCustomConfiguration(t *testing.T) {
 	config := llmtypes.Config{
 		OpenAI: &llmtypes.OpenAIConfig{

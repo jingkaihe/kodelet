@@ -823,6 +823,26 @@ func (t *Thread) cleanupOrphanedItems() {
 
 		break
 	}
+
+	// Keep persisted history in sync with cleanup logic.
+	for len(t.storedItems) > 0 {
+		lastItem := t.storedItems[len(t.storedItems)-1]
+		if lastItem.Type == "function_call" {
+			t.storedItems = t.storedItems[:len(t.storedItems)-1]
+			continue
+		}
+		break
+	}
+
+	// Pending items can also contain an unfinished tail.
+	for len(t.pendingItems) > 0 {
+		lastItem := t.pendingItems[len(t.pendingItems)-1]
+		if lastItem.OfFunctionCall != nil {
+			t.pendingItems = t.pendingItems[:len(t.pendingItems)-1]
+			continue
+		}
+		break
+	}
 }
 
 // restoreBackgroundProcesses restores background processes from the conversation record.
