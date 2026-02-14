@@ -18,7 +18,6 @@ import (
 	"github.com/avast/retry-go/v4"
 	"github.com/jingkaihe/kodelet/pkg/auth"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
-	"github.com/jingkaihe/kodelet/pkg/hooks"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/llm/prompts"
 	"github.com/jingkaihe/kodelet/pkg/logger"
@@ -874,6 +873,25 @@ func (t *Thread) updateUsage(usage openai.Usage, model string) {
 	t.Usage.MaxContextWindow = pricing.ContextWindow
 }
 
+func (t *Thread) runUtilityPrompt(ctx context.Context, prompt string, useWeakModel bool) (string, error) {
+	return base.RunPreparedPrompt(ctx,
+		func() (llmtypes.Thread, error) {
+			return NewOpenAIThread(t.GetConfig())
+		},
+		func(thread llmtypes.Thread) error {
+			summaryThread, ok := thread.(*Thread)
+			if !ok {
+				return errors.New("unexpected summary thread type")
+			}
+			summaryThread.messages = t.messages
+			summaryThread.PrepareUtilityMode(ctx)
+			return nil
+		},
+		prompt,
+		base.UtilityPromptOptions(useWeakModel),
+	)
+}
+
 // SwapContext replaces the conversation history with a summary message.
 // This implements the hooks.ContextSwapper interface.
 func (t *Thread) SwapContext(_ context.Context, summary string) error {
@@ -887,19 +905,7 @@ func (t *Thread) SwapContext(_ context.Context, summary string) error {
 		},
 	}
 
-	// Clear stale tool results - they reference tool calls that no longer exist
-	t.ToolResults = make(map[string]tooltypes.StructuredToolResult)
-
-	// Get state reference while under mutex protection
-	state := t.State
-
-	// heuristic estimation of context window size based on summary length
-	t.EstimateContextWindowFromMessage(summary)
-
-	// Clear file access tracking to start fresh with context retrieval
-	if state != nil {
-		state.SetFileLastAccess(make(map[string]time.Time))
-	}
+	t.FinalizeSwapContextLocked(summary)
 
 	return nil
 }
@@ -911,52 +917,23 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 		return errors.Wrap(err, "failed to load compact prompt")
 	}
 
-	summaryThread, err := NewOpenAIThread(t.GetConfig())
-	if err != nil {
-		return errors.Wrap(err, "failed to create summary thread")
-	}
-
-	summaryThread.messages = t.messages
-	summaryThread.EnablePersistence(ctx, false)
-	summaryThread.HookTrigger = hooks.Trigger{}
-
-	handler := &llmtypes.StringCollectorHandler{Silent: true}
-	_, err = summaryThread.SendMessage(ctx, compactPrompt, handler, llmtypes.MessageOpt{
-		UseWeakModel:       false,
-		NoToolUse:          true,
-		DisableAutoCompact: true,
-		DisableUsageLog:    true,
-		NoSaveConversation: true,
-	})
+	summary, err := t.runUtilityPrompt(ctx, compactPrompt, false)
 	if err != nil {
 		return errors.Wrap(err, "failed to generate compact summary")
 	}
 
-	return t.SwapContext(ctx, handler.CollectedText())
+	return t.SwapContext(ctx, summary)
 }
 
 // ShortSummary generates a concise summary of the conversation using a faster model.
 func (t *Thread) ShortSummary(ctx context.Context) string {
-	summaryThread, err := NewOpenAIThread(t.GetConfig())
+	summary, err := t.runUtilityPrompt(ctx, prompts.ShortSummaryPrompt, true)
 	if err != nil {
-		logger.G(ctx).WithError(err).Error("failed to create summary thread")
+		logger.G(ctx).WithError(err).Error("failed to generate summary")
 		return "Could not generate summary."
 	}
 
-	summaryThread.messages = t.messages
-	summaryThread.EnablePersistence(ctx, false)
-	summaryThread.HookTrigger = hooks.Trigger{} // disable hooks for summary
-
-	handler := &llmtypes.StringCollectorHandler{Silent: true}
-	summaryThread.SendMessage(ctx, prompts.ShortSummaryPrompt, handler, llmtypes.MessageOpt{
-		UseWeakModel:       true,
-		NoToolUse:          true,
-		DisableAutoCompact: true,
-		DisableUsageLog:    true,
-		NoSaveConversation: true,
-	})
-
-	return handler.CollectedText()
+	return summary
 }
 
 // GetMessages returns the current messages in the thread

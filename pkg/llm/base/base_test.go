@@ -40,6 +40,19 @@ func (m *mockState) GetLLMConfig() any                                     { ret
 func (m *mockState) LockFile(_ string)                                     {}
 func (m *mockState) UnlockFile(_ string)                                   {}
 
+type trackingState struct {
+	mockState
+	fileLastAccess map[string]time.Time
+}
+
+func (m *trackingState) SetFileLastAccess(fileLastAccess map[string]time.Time) {
+	m.fileLastAccess = fileLastAccess
+}
+
+func (m *trackingState) FileLastAccess() map[string]time.Time {
+	return m.fileLastAccess
+}
+
 func TestNewThread(t *testing.T) {
 	config := llmtypes.Config{
 		Model:     "test-model",
@@ -1255,4 +1268,22 @@ func TestEstimateContextWindowFromMessage(t *testing.T) {
 	expectedTokens := max(len(message)/4, 100)
 	assert.Equal(t, expectedTokens, bt.Usage.CurrentContextWindow)
 	assert.Greater(t, bt.Usage.CurrentContextWindow, 100, "Should be above minimum with this message length")
+}
+
+func TestFinalizeSwapContextLocked(t *testing.T) {
+	bt := NewThread(llmtypes.Config{}, "", hooks.Trigger{})
+	bt.ToolResults["tool-call-1"] = tooltypes.StructuredToolResult{ToolName: "test-tool"}
+
+	state := &trackingState{}
+	bt.SetState(state)
+
+	bt.Mu.Lock()
+	bt.FinalizeSwapContextLocked("A compact summary of earlier conversation content.")
+	bt.Mu.Unlock()
+
+	assert.Empty(t, bt.ToolResults)
+	assert.NotNil(t, bt.ToolResults)
+	assert.NotNil(t, state.fileLastAccess)
+	assert.Empty(t, state.fileLastAccess)
+	assert.GreaterOrEqual(t, bt.GetUsage().CurrentContextWindow, 100)
 }

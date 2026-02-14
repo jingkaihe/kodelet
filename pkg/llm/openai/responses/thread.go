@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/auth"
-	"github.com/jingkaihe/kodelet/pkg/hooks"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	codexpreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/codex"
 	openaipreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/openai"
@@ -555,16 +554,7 @@ func (t *Thread) SwapContext(_ context.Context, summary string) error {
 	// Clear the previous response ID
 	t.lastResponseID = ""
 
-	// heuristic estimation of context window size based on summary length
-	t.EstimateContextWindowFromMessage(summary)
-
-	// Clear stale tool results - they reference tool calls that no longer exist
-	t.ToolResults = make(map[string]tooltypes.StructuredToolResult)
-
-	// Clear file access tracking to start fresh with context retrieval
-	if t.State != nil {
-		t.State.SetFileLastAccess(make(map[string]time.Time))
-	}
+	t.FinalizeSwapContextLocked(summary)
 
 	return nil
 }
@@ -649,15 +639,29 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 	// represented by the compaction item, not the response chain
 	t.lastResponseID = ""
 
-	// Clear stale tool results - they reference tool calls that no longer exist
-	t.ToolResults = make(map[string]tooltypes.StructuredToolResult)
-
-	// Clear file access tracking to start fresh with context retrieval
-	if t.State != nil {
-		t.State.SetFileLastAccess(make(map[string]time.Time))
-	}
+	t.ResetContextStateLocked()
 
 	return nil
+}
+
+func (t *Thread) runUtilityPrompt(ctx context.Context, prompt string, useWeakModel bool) (string, error) {
+	return base.RunPreparedPrompt(ctx,
+		func() (llmtypes.Thread, error) {
+			return NewThread(t.Config)
+		},
+		func(thread llmtypes.Thread) error {
+			summaryThread, ok := thread.(*Thread)
+			if !ok {
+				return errors.New("unexpected summary thread type")
+			}
+			// Copy input items to the summary thread.
+			summaryThread.inputItems = t.inputItems
+			summaryThread.PrepareUtilityMode(ctx)
+			return nil
+		},
+		prompt,
+		base.UtilityPromptOptions(useWeakModel),
+	)
 }
 
 // ShortSummary generates a short summary of the conversation using an LLM.
@@ -666,32 +670,13 @@ func (t *Thread) ShortSummary(ctx context.Context) string {
 		return ""
 	}
 
-	// Create a new summary thread
-	summaryThread, err := NewThread(t.Config)
-	if err != nil {
-		logger.G(ctx).WithError(err).Error("failed to create summary thread")
-		return "Could not generate summary."
-	}
-
-	// Copy input items to the summary thread
-	summaryThread.inputItems = t.inputItems
-	summaryThread.EnablePersistence(ctx, false)
-	summaryThread.HookTrigger = hooks.Trigger{} // disable hooks for summary
-
-	handler := &llmtypes.StringCollectorHandler{Silent: true}
-	_, err = summaryThread.SendMessage(ctx, prompts.ShortSummaryPrompt, handler, llmtypes.MessageOpt{
-		UseWeakModel:       true,
-		NoToolUse:          true,
-		DisableAutoCompact: true,
-		DisableUsageLog:    true,
-		NoSaveConversation: true,
-	})
+	summary, err := t.runUtilityPrompt(ctx, prompts.ShortSummaryPrompt, true)
 	if err != nil {
 		logger.G(ctx).WithError(err).Error("failed to generate summary")
 		return "Could not generate summary."
 	}
 
-	return handler.CollectedText()
+	return summary
 }
 
 // SaveConversation saves the current thread to the conversation store.

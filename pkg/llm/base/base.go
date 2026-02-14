@@ -7,6 +7,7 @@ import (
 	"context"
 	"maps"
 	"sync"
+	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/hooks"
@@ -137,6 +138,27 @@ func (t *Thread) EnablePersistence(ctx context.Context, enabled bool) {
 func (t *Thread) PrepareUtilityMode(ctx context.Context) {
 	t.EnablePersistence(ctx, false)
 	t.HookTrigger = hooks.Trigger{}
+}
+
+// ResetContextStateLocked clears shared state after context replacement/compaction.
+// Caller must hold t.Mu.
+func (t *Thread) ResetContextStateLocked() {
+	// Clear stale tool results - they reference tool calls that no longer exist.
+	t.ToolResults = make(map[string]tooltypes.StructuredToolResult)
+
+	// Clear file access tracking to start fresh with context retrieval.
+	if t.State != nil {
+		t.State.SetFileLastAccess(make(map[string]time.Time))
+	}
+}
+
+// FinalizeSwapContextLocked resets shared state after provider-specific context replacement.
+// Caller must hold t.Mu.
+func (t *Thread) FinalizeSwapContextLocked(summary string) {
+	t.ResetContextStateLocked()
+
+	// Heuristic estimation of context window size based on summary length.
+	t.EstimateContextWindowFromMessage(summary)
 }
 
 // GetUsage returns the current token usage for the thread.
