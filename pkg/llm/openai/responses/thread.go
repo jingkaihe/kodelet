@@ -281,16 +281,7 @@ OUTER:
 			}
 
 			// Check if auto-compact should be triggered
-			if !opt.DisableAutoCompact && t.ShouldAutoCompact(opt.CompactRatio) {
-				logger.G(ctx).WithField("context_utilization",
-					float64(t.GetUsage().CurrentContextWindow)/float64(t.GetUsage().MaxContextWindow)).
-					Info("triggering auto-compact")
-				if err := t.CompactContext(ctx); err != nil {
-					logger.G(ctx).WithError(err).Error("failed to auto-compact context")
-				} else {
-					logger.G(ctx).Info("auto-compact completed successfully")
-				}
-			}
+			t.TryAutoCompact(ctx, opt.DisableAutoCompact, opt.CompactRatio, t.CompactContext)
 
 			logger.G(ctx).WithField("model", model).Debug("starting message exchange")
 			exchangeOutput, toolsUsed, err := t.processMessageExchange(ctx, handler, model, maxTokens, systemPrompt, opt)
@@ -305,25 +296,12 @@ OUTER:
 			turnCount++
 			finalOutput = exchangeOutput
 
-			// Trigger turn_end hook after assistant response is complete
-			if finalOutput != "" {
-				t.HookTrigger.TriggerTurnEnd(ctx, t, finalOutput, turnCount, t.GetRecipeHooks())
-			}
+			base.TriggerTurnEnd(ctx, t.HookTrigger, t, finalOutput, turnCount)
 
 			// If no tools were used, check for hook follow-ups before stopping
 			if !toolsUsed {
-				logger.G(ctx).Debug("no tools used, checking agent_stop hook")
-
-				if messages, err := t.GetMessages(); err == nil {
-					if followUps := t.HookTrigger.TriggerAgentStop(ctx, t, messages, t.GetRecipeHooks()); len(followUps) > 0 {
-						logger.G(ctx).WithField("count", len(followUps)).
-							Info("agent_stop hook returned follow-up messages, continuing conversation")
-						for _, msg := range followUps {
-							t.AddUserMessage(ctx, msg)
-							handler.HandleText(fmt.Sprintf("\n📨 Hook follow-up: %s\n", msg))
-						}
-						continue OUTER
-					}
+				if base.HandleAgentStopFollowUps(ctx, t.HookTrigger, t, handler) {
+					continue OUTER
 				}
 
 				// Turn completed successfully, clear pending items

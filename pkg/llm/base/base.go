@@ -132,6 +132,13 @@ func (t *Thread) EnablePersistence(ctx context.Context, enabled bool) {
 	}
 }
 
+// PrepareUtilityMode configures a thread for internal utility calls such as summary generation.
+// Utility mode disables persistence and lifecycle hooks to avoid side effects.
+func (t *Thread) PrepareUtilityMode(ctx context.Context) {
+	t.EnablePersistence(ctx, false)
+	t.HookTrigger = hooks.Trigger{}
+}
+
 // GetUsage returns the current token usage for the thread.
 // This method is thread-safe and uses mutex locking.
 func (t *Thread) GetUsage() llmtypes.Usage {
@@ -230,6 +237,36 @@ func (t *Thread) ShouldAutoCompact(compactRatio float64) bool {
 
 	utilizationRatio := float64(usage.CurrentContextWindow) / float64(usage.MaxContextWindow)
 	return utilizationRatio >= compactRatio
+}
+
+// TryAutoCompact triggers context compaction when auto-compact conditions are met.
+// compactFn should perform provider-specific compaction logic.
+func (t *Thread) TryAutoCompact(
+	ctx context.Context,
+	disableAutoCompact bool,
+	compactRatio float64,
+	compactFn func(context.Context) error,
+) {
+	if disableAutoCompact || compactFn == nil {
+		return
+	}
+
+	if !t.ShouldAutoCompact(compactRatio) {
+		return
+	}
+
+	usage := t.GetUsage()
+	utilization := 0.0
+	if usage.MaxContextWindow > 0 {
+		utilization = float64(usage.CurrentContextWindow) / float64(usage.MaxContextWindow)
+	}
+	logger.G(ctx).WithField("context_utilization", utilization).Info("triggering auto-compact")
+
+	if err := compactFn(ctx); err != nil {
+		logger.G(ctx).WithError(err).Error("failed to auto-compact context")
+	} else {
+		logger.G(ctx).Info("auto-compact completed successfully")
+	}
 }
 
 // EstimateContextWindowFromMessage estimates the context window size based on message content.
