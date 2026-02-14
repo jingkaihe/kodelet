@@ -58,180 +58,143 @@ func TestSubAgentPrompt_ProviderSelection(t *testing.T) {
 	})
 }
 
-func TestOpenAIPromptLoading(t *testing.T) {
-	t.Run("OpenAI prompt loading from embedded template", func(t *testing.T) {
-		renderer := NewRenderer(TemplateFS)
-		ctx := NewPromptContext(map[string]string{})
-		content, err := renderer.RenderOpenAIPrompt(ctx)
-		assert.NoError(t, err)
-		assert.NotEmpty(t, content)
-		assert.Contains(t, content, "coding agent")
-	})
+func TestUnifiedSystemPrompt_ForOpenAIProvidersAndPresets(t *testing.T) {
+	testCases := []struct {
+		name         string
+		model        string
+		config       llm.Config
+		useSubagent  bool
+		expectsCodex bool
+	}{
+		{
+			name:  "OpenAI provider",
+			model: "gpt-4",
+			config: llm.Config{
+				Provider: ProviderOpenAI,
+			},
+		},
+		{
+			name:  "OpenAI provider subagent",
+			model: "gpt-4",
+			config: llm.Config{
+				Provider: ProviderOpenAI,
+			},
+			useSubagent: true,
+		},
+		{
+			name:  "OpenAI Responses provider",
+			model: "gpt-4",
+			config: llm.Config{
+				Provider: ProviderOpenAIResponses,
+			},
+		},
+		{
+			name:  "OpenAI Responses provider subagent",
+			model: "gpt-4",
+			config: llm.Config{
+				Provider: ProviderOpenAIResponses,
+			},
+			useSubagent: true,
+		},
+		{
+			name:  "OpenAI preset",
+			model: "gpt-4.1",
+			config: llm.Config{
+				Provider: ProviderOpenAI,
+				OpenAI: &llm.OpenAIConfig{
+					Preset: "openai",
+				},
+			},
+		},
+		{
+			name:  "Codex preset",
+			model: "gpt-5.3-codex",
+			config: llm.Config{
+				Provider: ProviderOpenAI,
+				OpenAI: &llm.OpenAIConfig{
+					Preset: "codex",
+				},
+			},
+			expectsCodex: true,
+		},
+	}
 
-	t.Run("OpenAI provider uses embedded OpenAI prompt", func(t *testing.T) {
-		config := llm.Config{
-			Provider: ProviderOpenAI,
-		}
-		contexts := map[string]string{}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			prompt := ""
+			if tc.useSubagent {
+				prompt = SubAgentPrompt(tc.model, tc.config, map[string]string{})
+			} else {
+				prompt = SystemPrompt(tc.model, tc.config, map[string]string{})
+			}
 
-		prompt := SystemPrompt("gpt-4", config, contexts)
-		assert.NotEmpty(t, prompt)
-		assert.Contains(t, prompt, "coding agent")
-	})
-
-	t.Run("OpenAI subagent prompt also uses embedded template", func(t *testing.T) {
-		config := llm.Config{
-			Provider: ProviderOpenAI,
-		}
-		contexts := map[string]string{}
-
-		prompt := SubAgentPrompt("gpt-4", config, contexts)
-		assert.NotEmpty(t, prompt)
-		assert.Contains(t, prompt, "coding agent")
-	})
-
-	t.Run("OpenAI Responses API provider uses embedded OpenAI prompt", func(t *testing.T) {
-		config := llm.Config{
-			Provider: ProviderOpenAIResponses,
-		}
-		contexts := map[string]string{}
-
-		prompt := SystemPrompt("gpt-4", config, contexts)
-		assert.NotEmpty(t, prompt)
-		assert.Contains(t, prompt, "coding agent")
-	})
-
-	t.Run("OpenAI Responses API subagent prompt also uses embedded template", func(t *testing.T) {
-		config := llm.Config{
-			Provider: ProviderOpenAIResponses,
-		}
-		contexts := map[string]string{}
-
-		prompt := SubAgentPrompt("gpt-4", config, contexts)
-		assert.NotEmpty(t, prompt)
-		assert.Contains(t, prompt, "coding agent")
-	})
+			assert.NotEmpty(t, prompt)
+			assert.Contains(t, prompt, "interactive CLI tool")
+			assert.NotContains(t, prompt, "coding agent")
+			if tc.expectsCodex {
+				assert.NotContains(t, prompt, "You are Codex, based on GPT-5")
+			}
+		})
+	}
 }
 
-func TestOpenAIConditionalSections(t *testing.T) {
-	t.Run("Main agent OpenAI prompt includes Subagent Tool Usage section", func(t *testing.T) {
-		config := llm.Config{
-			Provider: ProviderOpenAI,
-		}
-		contexts := map[string]string{}
+func TestPromptTemplateConditionalSections(t *testing.T) {
+	baseConfig := llm.Config{Provider: ProviderOpenAI}
 
-		prompt := SystemPrompt("gpt-4", config, contexts)
+	t.Run("Main agent prompt includes subagent usage examples", func(t *testing.T) {
+		prompt := SystemPrompt("gpt-4", baseConfig, map[string]string{})
 		assert.NotEmpty(t, prompt)
-
-		// Should contain the main agent subagent usage section
-		assert.Contains(t, prompt, "## Subagent Tool Usage")
-		assert.Contains(t, prompt, "ALWAYS prioritize `subagent` for open-ended code search")
-		assert.Contains(t, prompt, "### When to Use Subagent")
-		assert.Contains(t, prompt, "### When NOT to Use Subagent")
-
-		// Should not contain subagent response guidelines
-		assert.NotContains(t, prompt, "## Subagent Response Guidelines")
-		assert.NotContains(t, prompt, "As a subagent, you help with open-ended code search")
+		assert.Contains(t, prompt, "## Subagent tool usage examples")
+		assert.Contains(t, prompt, "The user's request is nuanced and cannot be described in regex")
 	})
 
-	t.Run("Subagent OpenAI prompt includes Subagent Response Guidelines", func(t *testing.T) {
-		config := llm.Config{
-			Provider: ProviderOpenAI,
-		}
-		contexts := map[string]string{}
-
-		prompt := SubAgentPrompt("gpt-4", config, contexts)
+	t.Run("Subagent prompt excludes subagent usage examples", func(t *testing.T) {
+		prompt := SubAgentPrompt("gpt-4", baseConfig, map[string]string{})
 		assert.NotEmpty(t, prompt)
-
-		// Should contain the subagent response guidelines
-		assert.Contains(t, prompt, "## Subagent Response Guidelines")
-		assert.Contains(t, prompt, "As a subagent, you help with open-ended code search")
-		assert.Contains(t, prompt, "Focus on comprehensive analysis")
-		assert.Contains(t, prompt, "Use absolute file paths")
-		assert.Contains(t, prompt, "### Response Structure Examples")
-
-		// Should not contain main agent subagent usage section
-		assert.NotContains(t, prompt, "## Subagent Tool Usage")
-		assert.NotContains(t, prompt, "ALWAYS prioritize `subagent` for open-ended code search")
+		assert.NotContains(t, prompt, "## Subagent tool usage examples")
 	})
 
-	t.Run("Subagent Tool Usage section appears in correct location for main agent", func(t *testing.T) {
-		config := llm.Config{
-			Provider: ProviderOpenAI,
-		}
-		contexts := map[string]string{}
-
-		prompt := SystemPrompt("gpt-4", config, contexts)
+	t.Run("Subagent examples section appears after tools section", func(t *testing.T) {
+		prompt := SystemPrompt("gpt-4", baseConfig, map[string]string{})
 		assert.NotEmpty(t, prompt)
 
-		// Find positions of key sections
-		sharingProgressPos := strings.Index(prompt, "## Sharing progress updates")
-		subagentToolUsagePos := strings.Index(prompt, "## Subagent Tool Usage")
-		presentingWorkPos := strings.Index(prompt, "## Presenting your work and final message")
+		toolsPos := strings.Index(prompt, "# !!!VERY IMPORTANT!!! Tool Usage")
+		subagentExamplesPos := strings.Index(prompt, "## Subagent tool usage examples")
+		taskManagementPos := strings.Index(prompt, "# Task Management")
 
-		// Verify order: Sharing progress updates -> Subagent Tool Usage -> Presenting work
-		assert.Greater(t, subagentToolUsagePos, sharingProgressPos, "Subagent Tool Usage should come after Sharing progress updates")
-		assert.Greater(t, presentingWorkPos, subagentToolUsagePos, "Presenting work should come after Subagent Tool Usage")
+		assert.Greater(t, subagentExamplesPos, toolsPos)
+		assert.Greater(t, taskManagementPos, subagentExamplesPos)
 	})
 
-	t.Run("Template variables are properly substituted in OpenAI prompt", func(t *testing.T) {
-		config := llm.Config{
-			Provider: ProviderOpenAI,
-		}
-		contexts := map[string]string{}
-
-		prompt := SystemPrompt("gpt-4", config, contexts)
+	t.Run("Template variables are substituted", func(t *testing.T) {
+		prompt := SystemPrompt("gpt-4", baseConfig, map[string]string{})
 		assert.NotEmpty(t, prompt)
-
-		// Should contain actual tool names, not template variables
 		assert.Contains(t, prompt, "`subagent`")
 		assert.Contains(t, prompt, "`grep_tool`")
 		assert.Contains(t, prompt, "`glob_tool`")
 		assert.Contains(t, prompt, "`todo_write`")
-
-		// Should not contain unresolved template variables
 		assert.NotContains(t, prompt, "{{.ToolNames.subagent}}")
 		assert.NotContains(t, prompt, "{{.ToolNames.grep}}")
 		assert.NotContains(t, prompt, "{{.ToolNames.glob}}")
 		assert.NotContains(t, prompt, "{{.ToolNames.todo_write}}")
 	})
 
-	t.Run("Planning section is conditional on todoToolsEnabled for OpenAI prompts", func(t *testing.T) {
-		config := llm.Config{
-			Provider: ProviderOpenAI,
-		}
-		contexts := map[string]string{}
+	t.Run("Task management content depends on todo tools flag", func(t *testing.T) {
+		mainPrompt := SystemPrompt("gpt-4", baseConfig, map[string]string{})
+		assert.Contains(t, mainPrompt, "# Task Management")
+		assert.Contains(t, mainPrompt, "You have access to the `todo_write` and `todo_read` tools")
 
-		// Test main agent (should have planning section)
-		mainPrompt := SystemPrompt("gpt-4", config, contexts)
-		assert.Contains(t, mainPrompt, "## Planning")
-		assert.Contains(t, mainPrompt, "You have access to an `todo_write` tool")
-
-		// Test subagent (todoTools is disabled for subagents)
-		subagentPrompt := SubAgentPrompt("gpt-4", config, contexts)
-		assert.Contains(t, subagentPrompt, "## Planning")
-		assert.NotContains(t, subagentPrompt, "You have access to an `todo_write` tool")
+		subagentPrompt := SubAgentPrompt("gpt-4", baseConfig, map[string]string{})
+		assert.Contains(t, subagentPrompt, "# Task Management")
+		assert.NotContains(t, subagentPrompt, "You have access to the `todo_write` and `todo_read` tools")
 	})
 
-	t.Run("Subagent response examples use proper markdown format", func(t *testing.T) {
-		config := llm.Config{
-			Provider: ProviderOpenAI,
-		}
-		contexts := map[string]string{}
-
-		prompt := SubAgentPrompt("gpt-4", config, contexts)
+	t.Run("Subagent examples use XML format", func(t *testing.T) {
+		prompt := SystemPrompt("gpt-4", baseConfig, map[string]string{})
 		assert.NotEmpty(t, prompt)
-
-		// Should contain markdown-formatted examples, not XML
-		assert.Contains(t, prompt, "**Core Authentication**")
-		assert.Contains(t, prompt, "**Critical Issues**")
-		assert.Contains(t, prompt, "**Recommendations**")
-		assert.Contains(t, prompt, "- `/home/user/project/")
-
-		// Should not contain XML-style examples
-		assert.NotContains(t, prompt, "<example>")
-		assert.NotContains(t, prompt, "</example>")
-		assert.NotContains(t, prompt, "<reasoning>")
+		assert.Contains(t, prompt, "<example>")
+		assert.Contains(t, prompt, "</example>")
+		assert.Contains(t, prompt, "<reasoning>")
 	})
 }
 
@@ -270,10 +233,9 @@ func TestDisableSubagent_SystemPrompt(t *testing.T) {
 
 		prompt := SystemPrompt("gpt-4", config, map[string]string{})
 
-		assert.NotContains(t, prompt, "## Subagent Tool Usage")
+		assert.NotContains(t, prompt, "## Subagent tool usage examples")
 		assert.NotContains(t, prompt, "ALWAYS prioritize `subagent`")
-		assert.NotContains(t, prompt, "### When to Use Subagent")
-		assert.Contains(t, prompt, "coding agent", "Basic prompt content should still exist")
+		assert.Contains(t, prompt, "interactive CLI tool", "Basic prompt content should still exist")
 	})
 
 	t.Run("OpenAI prompt includes subagent content when DisableSubagent is false", func(t *testing.T) {
@@ -284,7 +246,7 @@ func TestDisableSubagent_SystemPrompt(t *testing.T) {
 
 		prompt := SystemPrompt("gpt-4", config, map[string]string{})
 
-		assert.Contains(t, prompt, "## Subagent Tool Usage")
+		assert.Contains(t, prompt, "## Subagent tool usage examples")
 		assert.Contains(t, prompt, "ALWAYS prioritize `subagent`")
 	})
 
@@ -296,11 +258,11 @@ func TestDisableSubagent_SystemPrompt(t *testing.T) {
 
 		prompt := SystemPrompt("gpt-4", config, map[string]string{})
 
-		assert.NotContains(t, prompt, "## Subagent Tool Usage")
+		assert.NotContains(t, prompt, "## Subagent tool usage examples")
 		assert.NotContains(t, prompt, "ALWAYS prioritize `subagent`")
 	})
 
-	t.Run("DisableSubagent does not affect subagent response guidelines for actual subagents", func(t *testing.T) {
+	t.Run("DisableSubagent does not affect subagent prompt shape for actual subagents", func(t *testing.T) {
 		config := llm.Config{
 			Provider:        ProviderOpenAI,
 			IsSubAgent:      true,
@@ -309,7 +271,8 @@ func TestDisableSubagent_SystemPrompt(t *testing.T) {
 
 		prompt := SubAgentPrompt("gpt-4", config, map[string]string{})
 
-		assert.Contains(t, prompt, "## Subagent Response Guidelines")
-		assert.NotContains(t, prompt, "## Subagent Tool Usage")
+		assert.NotContains(t, prompt, "## Subagent tool usage examples")
+		assert.Contains(t, prompt, "# !!!VERY IMPORTANT!!! Tool Usage")
+		assert.Contains(t, prompt, "# Task Management")
 	})
 }

@@ -257,6 +257,7 @@ func TestServer_convertToWebMessages(t *testing.T) {
 		name          string
 		rawMessages   json.RawMessage
 		provider      string
+		toolResults   map[string]tools.StructuredToolResult
 		expectedMsgs  int
 		checkToolCall bool
 	}{
@@ -292,17 +293,32 @@ func TestServer_convertToWebMessages(t *testing.T) {
 			provider:     "openai",
 			expectedMsgs: 1,
 		},
+		{
+			name:          "openai responses messages with reasoning and tool calls",
+			rawMessages:   json.RawMessage(`[{"type":"message","role":"user","content":"Hello"},{"type":"reasoning","role":"assistant","content":"Analyzing request"},{"type":"function_call","call_id":"tool-123","name":"TestTool","arguments":"{\"arg\":\"value\"}"},{"type":"function_call_output","call_id":"tool-123","output":"{\"ok\":true}"},{"type":"message","role":"assistant","content":"Done"}]`),
+			provider:      "openai-responses",
+			toolResults:   map[string]tools.StructuredToolResult{"tool-123": {ToolName: "TestTool"}},
+			expectedMsgs:  4,
+			checkToolCall: true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			messages, err := server.convertToWebMessages(tt.rawMessages, tt.provider)
+			messages, err := server.convertToWebMessages(tt.rawMessages, tt.provider, tt.toolResults)
 			require.NoError(t, err)
 			assert.Equal(t, tt.expectedMsgs, len(messages))
 
 			if tt.checkToolCall && len(messages) > 0 {
-				assert.Greater(t, len(messages[0].ToolCalls), 0)
-				assert.Equal(t, "TestTool", messages[0].ToolCalls[0].Function.Name)
+				foundToolCall := false
+				for _, msg := range messages {
+					if len(msg.ToolCalls) > 0 {
+						assert.Equal(t, "TestTool", msg.ToolCalls[0].Function.Name)
+						foundToolCall = true
+						break
+					}
+				}
+				assert.True(t, foundToolCall, "expected at least one message with tool calls")
 			}
 		})
 	}

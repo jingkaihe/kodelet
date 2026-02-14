@@ -2,7 +2,6 @@ package sysprompt
 
 import (
 	"context"
-	"strings"
 
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -52,21 +51,8 @@ func SystemPrompt(model string, llmConfig llm.Config, contexts map[string]string
 	var prompt string
 	var err error
 
-	provider := strings.ToLower(llmConfig.Provider)
-	preset := ""
-	if llmConfig.OpenAI != nil {
-		preset = strings.ToLower(llmConfig.OpenAI.Preset)
-	}
-
-	switch {
-	case preset == PresetCodex:
-		prompt, err = renderer.RenderCodexPrompt(promptCtx, model)
-	case provider == ProviderOpenAI || provider == ProviderOpenAIResponses:
-		prompt, err = renderer.RenderOpenAIPrompt(promptCtx)
-	default:
-		prompt, err = renderer.RenderSystemPrompt(promptCtx)
-	}
-
+	provider := llmConfig.Provider
+	prompt, err = renderer.RenderSystemPrompt(promptCtx)
 	if err != nil {
 		ctx := context.Background()
 		log := logger.G(ctx)

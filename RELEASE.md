@@ -1,5 +1,27 @@
 # Kodelet
 
+## 0.2.20.beta (2026-02-13)
+
+### Breaking Changes
+
+**Codex preset system prompt behavior changed**: The Codex preset no longer uses a separate embedded Codex-specific system prompt. It now uses the standard OpenAI system prompt pipeline.
+
+### Features
+
+- **New Codex models**: Added `gpt-5.3-codex` and `gpt-5.3-codex-spark`
+- **Updated default Codex model**: Default model changed from `gpt-5.1-codex-max` to `gpt-5.3-codex`
+- **Codex status output refresh**: `kodelet codex status` now shows the latest Codex model list and ordering
+
+### Bug Fixes
+
+- **Web UI OpenAI Responses rendering**: Conversation view now correctly renders OpenAI Responses tool-call messages (including reasoning/tool-call flow)
+
+### Internal Changes
+
+- Removed legacy embedded Codex prompt assets and related prompt-loading/caching logic
+- Simplified sysprompt renderer/provider branching around Codex preset handling
+- Updated tests for Codex model/pricing coverage and OpenAI Responses web message conversion
+
 ## 0.2.19.beta (2026-02-12)
 
 ### Features

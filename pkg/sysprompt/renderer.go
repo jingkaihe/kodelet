@@ -5,7 +5,6 @@ import (
 	"strings"
 	"text/template"
 
-	codexpreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/codex"
 	"github.com/pkg/errors"
 )
 
@@ -102,30 +101,6 @@ func (r *Renderer) getTemplate(name string) (*template.Template, error) {
 // RenderSystemPrompt renders the system prompt
 func (r *Renderer) RenderSystemPrompt(ctx *PromptContext) (string, error) {
 	prompt, err := r.RenderPrompt(SystemTemplate, ctx)
-	if err != nil {
-		return "", err
-	}
-
-	prompt += ctx.FormatSystemInfo()
-	prompt += ctx.FormatContexts()
-	prompt += ctx.FormatMCPServers()
-
-	return prompt, nil
-}
-
-// RenderCodexPrompt renders the Codex prompt for a model.
-func (r Renderer) RenderCodexPrompt(_ *PromptContext, model string) (string, error) {
-	prompt, err := codexpreset.GetSystemPromptForModel(model)
-	if err != nil {
-		return "", err
-	}
-
-	return prompt, nil
-}
-
-// RenderOpenAIPrompt renders the OpenAI prompt with system info and contexts appended
-func (r *Renderer) RenderOpenAIPrompt(ctx *PromptContext) (string, error) {
-	prompt, err := r.RenderPrompt(OpenAITemplate, ctx)
 	if err != nil {
 		return "", err
 	}
