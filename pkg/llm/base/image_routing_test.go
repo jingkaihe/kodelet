@@ -60,3 +60,38 @@ func TestIsInsecureHTTPURL(t *testing.T) {
 	assert.False(t, IsInsecureHTTPURL("data:image/png;base64,abc"))
 	assert.False(t, IsInsecureHTTPURL("./a.png"))
 }
+
+func TestRouteImageInput(t *testing.T) {
+	t.Run("https", func(t *testing.T) {
+		result, err := RouteImageInput(
+			"https://example.com/a.png",
+			func(path string) (string, error) { return "https:" + path, nil },
+			func(path string) (string, error) { return "data:" + path, nil },
+			func(path string) (string, error) { return "file:" + path, nil },
+		)
+		assert.NoError(t, err)
+		assert.Equal(t, "https:https://example.com/a.png", result)
+	})
+
+	t.Run("data", func(t *testing.T) {
+		result, err := RouteImageInput(
+			"data:image/png;base64,abc",
+			func(path string) (string, error) { return "https:" + path, nil },
+			func(path string) (string, error) { return "data:" + path, nil },
+			func(path string) (string, error) { return "file:" + path, nil },
+		)
+		assert.NoError(t, err)
+		assert.Equal(t, "data:data:image/png;base64,abc", result)
+	})
+
+	t.Run("file", func(t *testing.T) {
+		result, err := RouteImageInput(
+			"file:///tmp/a.png",
+			func(path string) (string, error) { return "https:" + path, nil },
+			func(path string) (string, error) { return "data:" + path, nil },
+			func(path string) (string, error) { return "file:" + path, nil },
+		)
+		assert.NoError(t, err)
+		assert.Equal(t, "file:/tmp/a.png", result)
+	})
+}

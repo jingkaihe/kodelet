@@ -902,29 +902,28 @@ func (t *Thread) updateUsage(response *anthropic.Message, model anthropic.Model)
 }
 
 func (t *Thread) runUtilityPrompt(ctx context.Context, prompt string, useWeakModel bool) (string, error) {
-	return base.RunPreparedPromptTyped(ctx,
+	return base.RunUtilityPrompt(ctx,
 		func() (*Thread, error) {
 			return NewAnthropicThread(t.GetConfig())
 		},
-		func(summaryThread *Thread) error {
+		func(summaryThread *Thread) {
 			summaryThread.messages = t.messages
-			summaryThread.PrepareUtilityMode(ctx)
-			return nil
 		},
 		prompt,
-		base.UtilityPromptOptions(useWeakModel),
+		useWeakModel,
 	)
 }
 
 // ShortSummary generates a short summary of the conversation using a weak model
 func (t *Thread) ShortSummary(ctx context.Context) string {
-	summary, err := t.runUtilityPrompt(ctx, prompts.ShortSummaryPrompt, true)
-	if err != nil {
-		logger.G(ctx).WithError(err).Error("failed to generate summary")
-		return "Could not generate summary."
-	}
-
-	return summary
+	return base.GenerateShortSummary(
+		ctx,
+		prompts.ShortSummaryPrompt,
+		t.runUtilityPrompt,
+		func(err error) {
+			logger.G(ctx).WithError(err).Error("failed to generate summary")
+		},
+	)
 }
 
 // SwapContext replaces the conversation history with a summary message.
@@ -963,20 +962,12 @@ func (t *Thread) GetMessages() ([]llmtypes.Message, error) {
 
 // processImage converts an image path/URL to an Anthropic image content block
 func (t *Thread) processImage(imagePath string) (*anthropic.ContentBlockParamUnion, error) {
-	kind, normalizedPath := base.ResolveImageInputPath(imagePath)
-	switch kind {
-	case base.ImageInputHTTPSURL:
-		return t.processImageURL(normalizedPath)
-	case base.ImageInputDataURL:
-		return t.processImageDataURL(normalizedPath)
-	default:
-		return t.processImageFile(normalizedPath)
-	}
+	return base.RouteImageInput(imagePath, t.processImageURL, t.processImageDataURL, t.processImageFile)
 }
 
 func (t *Thread) processImageURL(url string) (*anthropic.ContentBlockParamUnion, error) {
-	if !strings.HasPrefix(url, "https://") {
-		return nil, errors.Errorf("only HTTPS URLs are supported for security: %s", url)
+	if err := base.ValidateHTTPSImageURL(url); err != nil {
+		return nil, err
 	}
 
 	block := anthropic.NewImageBlock(anthropic.URLImageSourceParam{
@@ -987,22 +978,10 @@ func (t *Thread) processImageURL(url string) (*anthropic.ContentBlockParamUnion,
 }
 
 func (t *Thread) processImageDataURL(dataURL string) (*anthropic.ContentBlockParamUnion, error) {
-	// Parse data URL format: data:<mediatype>;base64,<data>
-	if !strings.HasPrefix(dataURL, "data:") {
-		return nil, errors.New("invalid data URL: must start with 'data:'")
+	mimeType, base64Data, err := base.ParseBase64DataURL(dataURL)
+	if err != nil {
+		return nil, err
 	}
-
-	// Remove "data:" prefix
-	rest := strings.TrimPrefix(dataURL, "data:")
-
-	// Split by ";base64,"
-	parts := strings.SplitN(rest, ";base64,", 2)
-	if len(parts) != 2 {
-		return nil, errors.New("invalid data URL: must contain ';base64,' separator")
-	}
-
-	mimeType := parts[0]
-	base64Data := parts[1]
 
 	// Validate mime type is a supported image type
 	mediaType, err := mimeTypeToAnthropicMediaType(mimeType)

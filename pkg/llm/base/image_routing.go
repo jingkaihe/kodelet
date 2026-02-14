@@ -33,3 +33,21 @@ func ResolveImageInputPath(imagePath string) (ImageInputKind, string) {
 func IsInsecureHTTPURL(imagePath string) bool {
 	return strings.HasPrefix(imagePath, "http://")
 }
+
+// RouteImageInput routes an image path to the corresponding handler based on input kind.
+func RouteImageInput[T any](
+	imagePath string,
+	handleHTTPSURL func(path string) (T, error),
+	handleDataURL func(path string) (T, error),
+	handleLocalFile func(path string) (T, error),
+) (T, error) {
+	kind, normalizedPath := ResolveImageInputPath(imagePath)
+	switch kind {
+	case ImageInputHTTPSURL:
+		return handleHTTPSURL(normalizedPath)
+	case ImageInputDataURL:
+		return handleDataURL(normalizedPath)
+	default:
+		return handleLocalFile(normalizedPath)
+	}
+}

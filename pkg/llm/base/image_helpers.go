@@ -9,6 +9,37 @@ import (
 	"github.com/pkg/errors"
 )
 
+// ValidateHTTPSImageURL validates that an image URL uses HTTPS.
+func ValidateHTTPSImageURL(url string) error {
+	if !strings.HasPrefix(url, "https://") {
+		return errors.Errorf("only HTTPS URLs are supported for security: %s", url)
+	}
+	return nil
+}
+
+// ValidateDataURLPrefix validates that a string starts with "data:".
+func ValidateDataURLPrefix(dataURL string) error {
+	if !strings.HasPrefix(dataURL, "data:") {
+		return errors.New("invalid data URL: must start with 'data:'")
+	}
+	return nil
+}
+
+// ParseBase64DataURL parses data URLs with the format: data:<mediatype>;base64,<data>.
+func ParseBase64DataURL(dataURL string) (string, string, error) {
+	if err := ValidateDataURLPrefix(dataURL); err != nil {
+		return "", "", err
+	}
+
+	rest := strings.TrimPrefix(dataURL, "data:")
+	parts := strings.SplitN(rest, ";base64,", 2)
+	if len(parts) != 2 {
+		return "", "", errors.New("invalid data URL: must contain ';base64,' separator")
+	}
+
+	return parts[0], parts[1], nil
+}
+
 // ImageMIMETypeFromExtension returns the MIME type for supported image extensions.
 func ImageMIMETypeFromExtension(ext string) (string, error) {
 	switch strings.ToLower(ext) {
@@ -55,4 +86,14 @@ func ReadImageFileAsBase64(filePath string) (string, string, error) {
 	}
 
 	return mimeType, base64.StdEncoding.EncodeToString(imageData), nil
+}
+
+// ReadImageFileAsDataURL validates an image file and returns a data URL.
+func ReadImageFileAsDataURL(filePath string) (string, error) {
+	mimeType, base64Data, err := ReadImageFileAsBase64(filePath)
+	if err != nil {
+		return "", err
+	}
+
+	return "data:" + mimeType + ";base64," + base64Data, nil
 }

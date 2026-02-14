@@ -645,18 +645,16 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 }
 
 func (t *Thread) runUtilityPrompt(ctx context.Context, prompt string, useWeakModel bool) (string, error) {
-	return base.RunPreparedPromptTyped(ctx,
+	return base.RunUtilityPrompt(ctx,
 		func() (*Thread, error) {
 			return NewThread(t.Config)
 		},
-		func(summaryThread *Thread) error {
+		func(summaryThread *Thread) {
 			// Copy input items to the summary thread.
 			summaryThread.inputItems = t.inputItems
-			summaryThread.PrepareUtilityMode(ctx)
-			return nil
 		},
 		prompt,
-		base.UtilityPromptOptions(useWeakModel),
+		useWeakModel,
 	)
 }
 
@@ -666,13 +664,14 @@ func (t *Thread) ShortSummary(ctx context.Context) string {
 		return ""
 	}
 
-	summary, err := t.runUtilityPrompt(ctx, prompts.ShortSummaryPrompt, true)
-	if err != nil {
-		logger.G(ctx).WithError(err).Error("failed to generate summary")
-		return "Could not generate summary."
-	}
-
-	return summary
+	return base.GenerateShortSummary(
+		ctx,
+		prompts.ShortSummaryPrompt,
+		t.runUtilityPrompt,
+		func(err error) {
+			logger.G(ctx).WithError(err).Error("failed to generate summary")
+		},
+	)
 }
 
 // SaveConversation saves the current thread to the conversation store.

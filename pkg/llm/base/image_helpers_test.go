@@ -40,6 +40,39 @@ func TestImageMIMETypeFromExtension(t *testing.T) {
 	}
 }
 
+func TestValidateHTTPSImageURL(t *testing.T) {
+	assert.NoError(t, ValidateHTTPSImageURL("https://example.com/image.png"))
+	assert.Error(t, ValidateHTTPSImageURL("http://example.com/image.png"))
+	assert.Error(t, ValidateHTTPSImageURL("ftp://example.com/image.png"))
+}
+
+func TestValidateDataURLPrefix(t *testing.T) {
+	assert.NoError(t, ValidateDataURLPrefix("data:image/png;base64,abcd"))
+	assert.Error(t, ValidateDataURLPrefix("image/png;base64,abcd"))
+	assert.Error(t, ValidateDataURLPrefix(""))
+}
+
+func TestParseBase64DataURL(t *testing.T) {
+	t.Run("valid", func(t *testing.T) {
+		mimeType, data, err := ParseBase64DataURL("data:image/png;base64,abcd")
+		require.NoError(t, err)
+		assert.Equal(t, "image/png", mimeType)
+		assert.Equal(t, "abcd", data)
+	})
+
+	t.Run("invalid prefix", func(t *testing.T) {
+		_, _, err := ParseBase64DataURL("image/png;base64,abcd")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid data URL")
+	})
+
+	t.Run("missing separator", func(t *testing.T) {
+		_, _, err := ParseBase64DataURL("data:image/png,abcd")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "must contain ';base64,' separator")
+	})
+}
+
 func TestReadImageFileAsBase64(t *testing.T) {
 	tempDir := t.TempDir()
 
@@ -81,4 +114,16 @@ func TestReadImageFileAsBase64(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "image file too large")
 	})
+}
+
+func TestReadImageFileAsDataURL(t *testing.T) {
+	tempDir := t.TempDir()
+	imageData := []byte("fake-image-data")
+	imagePath := filepath.Join(tempDir, "sample.jpg")
+	err := os.WriteFile(imagePath, imageData, 0o644)
+	require.NoError(t, err)
+
+	dataURL, err := ReadImageFileAsDataURL(imagePath)
+	require.NoError(t, err)
+	assert.Equal(t, "data:image/jpeg;base64,"+base64.StdEncoding.EncodeToString(imageData), dataURL)
 }

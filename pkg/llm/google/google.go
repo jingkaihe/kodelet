@@ -1026,17 +1026,15 @@ func (t *Thread) convertToStandardMessages() []llmtypes.Message {
 // and ShouldAutoCompact methods are inherited from embedded base.Thread
 
 func (t *Thread) runUtilityPrompt(ctx context.Context, prompt string, useWeakModel bool) (string, error) {
-	return base.RunPreparedPromptTyped(ctx,
+	return base.RunUtilityPrompt(ctx,
 		func() (*Thread, error) {
 			return NewGoogleThread(t.GetConfig())
 		},
-		func(summaryThread *Thread) error {
+		func(summaryThread *Thread) {
 			summaryThread.messages = t.messages
-			summaryThread.PrepareUtilityMode(ctx)
-			return nil
 		},
 		prompt,
-		base.UtilityPromptOptions(useWeakModel),
+		useWeakModel,
 	)
 }
 
@@ -1064,13 +1062,14 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 
 // ShortSummary generates a brief summary of the conversation
 func (t *Thread) ShortSummary(ctx context.Context) string {
-	summary, err := t.runUtilityPrompt(ctx, prompts.ShortSummaryPrompt, true)
-	if err != nil {
-		logger.G(ctx).WithError(err).Error("failed to generate summary")
-		return "Could not generate summary."
-	}
-
-	return summary
+	return base.GenerateShortSummary(
+		ctx,
+		prompts.ShortSummaryPrompt,
+		t.runUtilityPrompt,
+		func(err error) {
+			logger.G(ctx).WithError(err).Error("failed to generate summary")
+		},
+	)
 }
 
 // processPendingSteer processes any pending steering messages

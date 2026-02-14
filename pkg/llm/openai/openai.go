@@ -872,17 +872,15 @@ func (t *Thread) updateUsage(usage openai.Usage, model string) {
 }
 
 func (t *Thread) runUtilityPrompt(ctx context.Context, prompt string, useWeakModel bool) (string, error) {
-	return base.RunPreparedPromptTyped(ctx,
+	return base.RunUtilityPrompt(ctx,
 		func() (*Thread, error) {
 			return NewOpenAIThread(t.GetConfig())
 		},
-		func(summaryThread *Thread) error {
+		func(summaryThread *Thread) {
 			summaryThread.messages = t.messages
-			summaryThread.PrepareUtilityMode(ctx)
-			return nil
 		},
 		prompt,
-		base.UtilityPromptOptions(useWeakModel),
+		useWeakModel,
 	)
 }
 
@@ -911,13 +909,14 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 
 // ShortSummary generates a concise summary of the conversation using a faster model.
 func (t *Thread) ShortSummary(ctx context.Context) string {
-	summary, err := t.runUtilityPrompt(ctx, prompts.ShortSummaryPrompt, true)
-	if err != nil {
-		logger.G(ctx).WithError(err).Error("failed to generate summary")
-		return "Could not generate summary."
-	}
-
-	return summary
+	return base.GenerateShortSummary(
+		ctx,
+		prompts.ShortSummaryPrompt,
+		t.runUtilityPrompt,
+		func(err error) {
+			logger.G(ctx).WithError(err).Error("failed to generate summary")
+		},
+	)
 }
 
 // GetMessages returns the current messages in the thread
@@ -955,24 +954,19 @@ func (t *Thread) processImage(imagePath string) (*openai.ChatMessagePart, error)
 		return nil, fmt.Errorf("only HTTPS URLs are supported for security: %s", imagePath)
 	}
 
-	kind, normalizedPath := base.ResolveImageInputPath(imagePath)
-	switch kind {
-	case base.ImageInputHTTPSURL:
-		return t.processImageURL(normalizedPath)
-	case base.ImageInputDataURL:
-		// Data URLs can be passed directly to OpenAI
-		return t.processImageDataURL(normalizedPath)
-	default:
-		// Treat as a local file path.
-		return t.processImageFile(normalizedPath)
-	}
+	return base.RouteImageInput(
+		imagePath,
+		t.processImageURL,
+		t.processImageDataURL, // Data URLs can be passed directly to OpenAI.
+		t.processImageFile,    // Treat remaining inputs as local file paths.
+	)
 }
 
 // processImageURL creates an image part from an HTTPS URL
 func (t *Thread) processImageURL(url string) (*openai.ChatMessagePart, error) {
-	// Validate URL format (HTTPS only)
-	if !strings.HasPrefix(url, "https://") {
-		return nil, fmt.Errorf("only HTTPS URLs are supported for security: %s", url)
+	// Validate URL format (HTTPS only).
+	if err := base.ValidateHTTPSImageURL(url); err != nil {
+		return nil, err
 	}
 
 	part := &openai.ChatMessagePart{
@@ -987,9 +981,9 @@ func (t *Thread) processImageURL(url string) (*openai.ChatMessagePart, error) {
 
 // processImageDataURL creates an image part from a data URL
 func (t *Thread) processImageDataURL(dataURL string) (*openai.ChatMessagePart, error) {
-	// Validate data URL format
-	if !strings.HasPrefix(dataURL, "data:") {
-		return nil, fmt.Errorf("invalid data URL: must start with 'data:'")
+	// Validate data URL format.
+	if err := base.ValidateDataURLPrefix(dataURL); err != nil {
+		return nil, err
 	}
 
 	// OpenAI accepts data URLs directly in the URL field
@@ -1005,13 +999,10 @@ func (t *Thread) processImageDataURL(dataURL string) (*openai.ChatMessagePart, e
 
 // processImageFile creates an image part from a local file
 func (t *Thread) processImageFile(filePath string) (*openai.ChatMessagePart, error) {
-	mediaType, base64Data, err := base.ReadImageFileAsBase64(filePath)
+	dataURL, err := base.ReadImageFileAsDataURL(filePath)
 	if err != nil {
 		return nil, err
 	}
-
-	// Create data URL with proper MIME type.
-	dataURL := fmt.Sprintf("data:%s;base64,%s", mediaType, base64Data)
 
 	part := &openai.ChatMessagePart{
 		Type: openai.ChatMessagePartTypeImageURL,
