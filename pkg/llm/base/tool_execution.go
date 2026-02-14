@@ -30,6 +30,7 @@ func ExecuteTool(
 	thread llmtypes.Thread,
 	state tooltypes.State,
 	recipeHooks map[string]llmtypes.HookConfig,
+	rendererRegistry *renderers.RendererRegistry,
 	toolName string,
 	toolInput string,
 	toolCallID string,
@@ -52,8 +53,11 @@ func ExecuteTool(
 		structuredResult = *modified
 	}
 
-	registry := renderers.NewRendererRegistry()
-	renderedOutput := registry.Render(structuredResult)
+	if rendererRegistry == nil {
+		panic("rendererRegistry must not be nil")
+	}
+
+	renderedOutput := rendererRegistry.Render(structuredResult)
 
 	return ToolExecution{
 		Input:            effectiveInput,

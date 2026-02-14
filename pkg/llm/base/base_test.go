@@ -69,6 +69,7 @@ func TestNewThread(t *testing.T) {
 	assert.False(t, bt.Persisted)
 	assert.NotNil(t, bt.Usage)
 	assert.NotNil(t, bt.ToolResults)
+	assert.NotNil(t, bt.RendererRegistry)
 	assert.Len(t, bt.ToolResults, 0)
 }
 

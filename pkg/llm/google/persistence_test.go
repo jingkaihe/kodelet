@@ -322,3 +322,49 @@ func TestExtractMessages_UsesStructuredToolResultByCallID(t *testing.T) {
 	assert.Contains(t, messages[1].Content, "structured-marker")
 	assert.NotContains(t, messages[1].Content, "raw-output")
 }
+
+func TestExtractMessages_FallsBackToToolNameWhenCallIDMissing(t *testing.T) {
+	rawMessages := `[
+		{
+			"role": "user",
+			"parts": [
+				{
+					"text": "Run command"
+				}
+			]
+		},
+		{
+			"role": "user",
+			"parts": [
+				{
+					"functionResponse": {
+						"name": "bash",
+						"response": {
+							"result": "raw-output-without-call-id",
+							"error": false
+						}
+					}
+				}
+			]
+		}
+	]`
+
+	toolResults := map[string]tooltypes.StructuredToolResult{
+		"bash": {
+			ToolName:  "bash",
+			Success:   true,
+			Timestamp: time.Now(),
+			Metadata: tooltypes.BashMetadata{
+				Command:  "echo fallback",
+				ExitCode: 0,
+				Output:   "tool-name-fallback-marker",
+			},
+		},
+	}
+
+	messages, err := ExtractMessages([]byte(rawMessages), toolResults)
+	require.NoError(t, err)
+	require.Len(t, messages, 2)
+	assert.Contains(t, messages[1].Content, "tool-name-fallback-marker")
+	assert.NotContains(t, messages[1].Content, "raw-output-without-call-id")
+}

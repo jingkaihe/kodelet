@@ -12,6 +12,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/hooks"
 	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"go.opentelemetry.io/otel/attribute"
@@ -43,6 +44,7 @@ type Thread struct {
 	Persisted        bool                                      // Whether conversation is being persisted
 	Store            ConversationStore                         // Conversation persistence store
 	ToolResults      map[string]tooltypes.StructuredToolResult // Maps tool_call_id to structured result
+	RendererRegistry *renderers.RendererRegistry               // CLI renderer registry for structured tool results
 	HookTrigger      hooks.Trigger                             // Hook trigger for lifecycle hooks
 	LoadConversation LoadConversationFunc                      // Provider-specific callback for loading conversations
 	RecipeHooks      map[string]llmtypes.HookConfig            // Recipe hook configurations
@@ -59,12 +61,13 @@ func NewThread(
 	hookTrigger hooks.Trigger,
 ) *Thread {
 	return &Thread{
-		Config:         config,
-		ConversationID: conversationID,
-		Persisted:      false,
-		Usage:          &llmtypes.Usage{},
-		ToolResults:    make(map[string]tooltypes.StructuredToolResult),
-		HookTrigger:    hookTrigger,
+		Config:           config,
+		ConversationID:   conversationID,
+		Persisted:        false,
+		Usage:            &llmtypes.Usage{},
+		ToolResults:      make(map[string]tooltypes.StructuredToolResult),
+		RendererRegistry: renderers.NewRendererRegistry(),
+		HookTrigger:      hookTrigger,
 	}
 }
 

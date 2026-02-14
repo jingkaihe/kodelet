@@ -563,6 +563,7 @@ func (t *Thread) processMessageExchange(
 			t,
 			t.State,
 			t.GetRecipeHooks(),
+			t.RendererRegistry,
 			toolCall.Function.Name,
 			toolCall.Function.Arguments,
 			toolCall.ID,

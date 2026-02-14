@@ -420,6 +420,7 @@ func (t *Thread) executeToolsParallel(
 				t,
 				t.State,
 				t.GetRecipeHooks(),
+				t.RendererRegistry,
 				toolName,
 				tb.variant.JSON.Input.Raw(),
 				tb.block.ID,
@@ -962,6 +963,10 @@ func (t *Thread) GetMessages() ([]llmtypes.Message, error) {
 
 // processImage converts an image path/URL to an Anthropic image content block
 func (t *Thread) processImage(imagePath string) (*anthropic.ContentBlockParamUnion, error) {
+	if base.IsInsecureHTTPURL(imagePath) {
+		return nil, errors.Errorf("only HTTPS URLs are supported for security: %s", imagePath)
+	}
+
 	return base.RouteImageInput(imagePath, t.processImageURL, t.processImageDataURL, t.processImageFile)
 }
 

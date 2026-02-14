@@ -319,6 +319,7 @@ func (t *Thread) executeToolCall(
 		t,
 		t.State,
 		t.GetRecipeHooks(),
+		t.RendererRegistry,
 		name,
 		arguments,
 		callID,

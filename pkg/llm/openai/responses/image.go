@@ -1,7 +1,6 @@
 package responses
 
 import (
-	"path/filepath"
 	"strings"
 
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
@@ -46,14 +45,4 @@ func processImage(imagePath string) (responses.ResponseInputContentUnionParam, e
 			}, nil
 		},
 	)
-}
-
-// getMimeType returns the MIME type for an image file based on its extension.
-func getMimeType(path string) (string, error) {
-	ext := strings.ToLower(filepath.Ext(path))
-	mimeType, err := base.ImageMIMETypeFromExtension(ext)
-	if err != nil {
-		return "", errors.Errorf("unsupported image format: %s (supported: .jpg, .jpeg, .png, .gif, .webp)", ext)
-	}
-	return mimeType, nil
 }

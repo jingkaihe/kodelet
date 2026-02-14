@@ -927,6 +927,7 @@ func (t *Thread) executeToolCalls(ctx context.Context, response *Response, handl
 			t,
 			t.State,
 			t.GetRecipeHooks(),
+			t.RendererRegistry,
 			toolCall.Name,
 			string(argsJSON),
 			toolCall.ID,

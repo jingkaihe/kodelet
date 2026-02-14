@@ -106,33 +106,3 @@ func TestProcessImage(t *testing.T) {
 		assert.Contains(t, err.Error(), "image file too large")
 	})
 }
-
-func TestGetMimeType(t *testing.T) {
-	tests := []struct {
-		path     string
-		expected string
-		wantErr  bool
-	}{
-		{"/path/to/image.jpg", "image/jpeg", false},
-		{"/path/to/image.jpeg", "image/jpeg", false},
-		{"/path/to/image.JPG", "image/jpeg", false},
-		{"/path/to/image.png", "image/png", false},
-		{"/path/to/image.PNG", "image/png", false},
-		{"/path/to/image.gif", "image/gif", false},
-		{"/path/to/image.webp", "image/webp", false},
-		{"/path/to/image.unknown", "", true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.path, func(t *testing.T) {
-			result, err := getMimeType(tt.path)
-			if tt.wantErr {
-				require.Error(t, err)
-				assert.Empty(t, result)
-				return
-			}
-			require.NoError(t, err)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}

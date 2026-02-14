@@ -6,7 +6,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-// CompactContextWithSummary loads a compact prompt, runs a utility prompt to produce a summary,
+// CompactContextWithSummary loads a prompt, runs a utility prompt to produce a summary,
 // and swaps context to that summary.
 func CompactContextWithSummary(
 	ctx context.Context,
