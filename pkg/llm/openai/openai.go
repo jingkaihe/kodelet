@@ -26,7 +26,6 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/sysprompt"
 	"github.com/jingkaihe/kodelet/pkg/telemetry"
 	"github.com/jingkaihe/kodelet/pkg/tools"
-	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/jingkaihe/kodelet/pkg/usage"
 	"github.com/pkg/errors"
@@ -244,19 +243,8 @@ func NewOpenAIThread(config llmtypes.Config) (*Thread, error) {
 	// Load custom models and pricing if available
 	customModels, customPricing := loadCustomConfiguration(config)
 
-	// Initialize hook trigger (zero-value if discovery fails or disabled - hooks disabled)
-	var hookTrigger hooks.Trigger
 	conversationID := convtypes.GenerateID()
-	if !config.IsSubAgent && !config.NoHooks {
-		// Only main agent discovers hooks; subagents inherit from parent
-		// Hooks can be disabled via NoHooks config
-		hookManager, err := hooks.NewHookManager()
-		if err != nil {
-			log.WithError(err).Warn("Failed to initialize hook manager, hooks disabled")
-		} else {
-			hookTrigger = hooks.NewTrigger(hookManager, conversationID, config.IsSubAgent, config.RecipeName)
-		}
-	}
+	hookTrigger := base.CreateHookTrigger(context.Background(), config, conversationID)
 
 	// Create the base thread with shared functionality
 	baseThread := base.NewThread(config, conversationID, hookTrigger)
@@ -594,27 +582,18 @@ func (t *Thread) processMessageExchange(
 			attribute.String("tool_name", toolCall.Function.Name),
 		)
 
-		// Trigger before_tool_call hook
-		toolInput := toolCall.Function.Arguments
-		blocked, reason, toolInput := t.HookTrigger.TriggerBeforeToolCall(ctx, t, toolCall.Function.Name, toolInput, toolCall.ID, t.GetRecipeHooks())
-
-		var output tooltypes.ToolResult
-		if blocked {
-			output = tooltypes.NewBlockedToolResult(toolCall.Function.Name, reason)
-		} else {
-			output = tools.RunTool(ctx, t.State, toolCall.Function.Name, toolInput)
-		}
-
-		// Use CLI rendering for consistent output formatting
-		structuredResult := output.StructuredData()
-
-		// Trigger after_tool_call hook
-		if modified := t.HookTrigger.TriggerAfterToolCall(ctx, t, toolCall.Function.Name, toolInput, toolCall.ID, structuredResult, t.GetRecipeHooks()); modified != nil {
-			structuredResult = *modified
-		}
-
-		registry := renderers.NewRendererRegistry()
-		_ = registry.Render(structuredResult) // Render for logging, but pass ToolResult to handler
+		toolExecution := base.ExecuteTool(
+			ctx,
+			t.HookTrigger,
+			t,
+			t.State,
+			t.GetRecipeHooks(),
+			toolCall.Function.Name,
+			toolCall.Function.Arguments,
+			toolCall.ID,
+		)
+		output := toolExecution.Result
+		structuredResult := toolExecution.StructuredResult
 
 		handler.HandleToolResult(toolCall.ID, toolCall.Function.Name, output)
 
@@ -887,10 +866,7 @@ func (t *Thread) createStreamingChatCompletion(ctx context.Context, requestParam
 }
 
 func (t *Thread) tools(opt llmtypes.MessageOpt) []tooltypes.Tool {
-	if opt.NoToolUse {
-		return []tooltypes.Tool{}
-	}
-	return t.State.Tools()
+	return base.AvailableTools(t.State, opt.NoToolUse)
 }
 
 func (t *Thread) updateUsage(usage openai.Usage, model string) {

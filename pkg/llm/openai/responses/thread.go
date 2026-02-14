@@ -16,14 +16,12 @@ import (
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/auth"
-	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/hooks"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	codexpreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/codex"
 	openaipreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/openai"
 	"github.com/jingkaihe/kodelet/pkg/llm/prompts"
 	"github.com/jingkaihe/kodelet/pkg/logger"
-	"github.com/jingkaihe/kodelet/pkg/osutil"
 	"github.com/jingkaihe/kodelet/pkg/sysprompt"
 	"github.com/jingkaihe/kodelet/pkg/telemetry"
 	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
@@ -94,17 +92,8 @@ func NewThread(config llmtypes.Config) (*Thread, error) {
 
 	log.WithField("model", config.Model).Debug("creating OpenAI Responses API thread")
 
-	// Initialize hook trigger (zero-value if discovery fails or disabled - hooks disabled)
-	var hookTrigger hooks.Trigger
 	conversationID := convtypes.GenerateID()
-	if !config.IsSubAgent && !config.NoHooks {
-		hookManager, err := hooks.NewHookManager()
-		if err != nil {
-			log.WithError(err).Warn("Failed to initialize hook manager, hooks disabled")
-		} else {
-			hookTrigger = hooks.NewTrigger(hookManager, conversationID, config.IsSubAgent, config.RecipeName)
-		}
-	}
+	hookTrigger := base.CreateHookTrigger(context.Background(), config, conversationID)
 
 	// Create the base thread with shared functionality
 	baseThread := base.NewThread(config, conversationID, hookTrigger)
@@ -799,7 +788,7 @@ func (t *Thread) loadConversation(ctx context.Context) {
 	t.summary = record.Summary
 	t.State.SetFileLastAccess(record.FileLastAccess)
 	t.SetStructuredToolResults(record.ToolResults)
-	t.restoreBackgroundProcesses(record.BackgroundProcesses)
+	base.RestoreBackgroundProcesses(t.State, record.BackgroundProcesses)
 
 	// Restore lastResponseID from metadata
 	if record.Metadata != nil {
@@ -842,17 +831,6 @@ func (t *Thread) cleanupOrphanedItems() {
 			continue
 		}
 		break
-	}
-}
-
-// restoreBackgroundProcesses restores background processes from the conversation record.
-func (t *Thread) restoreBackgroundProcesses(processes []tooltypes.BackgroundProcess) {
-	for _, process := range processes {
-		if osutil.IsProcessAlive(process.PID) {
-			if restoredProcess, err := osutil.ReattachProcess(process); err == nil {
-				t.State.AddBackgroundProcess(restoredProcess)
-			}
-		}
 	}
 }
 
@@ -1196,28 +1174,6 @@ func ExtractMessages(data []byte, toolResults map[string]tooltypes.StructuredToo
 	}
 
 	return result, nil
-}
-
-// EnablePersistence enables or disables conversation persistence.
-func (t *Thread) EnablePersistence(ctx context.Context, enabled bool) {
-	t.ConversationMu.Lock()
-	defer t.ConversationMu.Unlock()
-
-	t.Persisted = enabled
-
-	if enabled && t.Store == nil {
-		store, err := conversations.GetConversationStore(ctx)
-		if err != nil {
-			logger.G(ctx).WithError(err).Error("Error initializing conversation store")
-			t.Persisted = false
-			return
-		}
-		t.Store = store
-	}
-
-	if enabled && t.Store != nil && t.LoadConversation != nil {
-		t.LoadConversation(ctx)
-	}
 }
 
 // isInvalidPreviousResponseIDError checks if an error is related to an invalid previous_response_id.

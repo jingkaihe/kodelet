@@ -5,10 +5,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/telemetry"
-	"github.com/jingkaihe/kodelet/pkg/tools"
-	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/jingkaihe/kodelet/pkg/usage"
@@ -314,36 +313,19 @@ func (t *Thread) executeToolCall(
 	arguments string,
 	_ llmtypes.MessageHandler,
 ) tooltypes.ToolResult {
-	// Trigger before_tool_call hook
-	blocked, reason, modifiedArgs := t.HookTrigger.TriggerBeforeToolCall(ctx, t, name, arguments, callID, t.GetRecipeHooks())
-	if blocked {
-		return tooltypes.NewBlockedToolResult(name, reason)
-	}
+	toolExecution := base.ExecuteTool(
+		ctx,
+		t.HookTrigger,
+		t,
+		t.State,
+		t.GetRecipeHooks(),
+		name,
+		arguments,
+		callID,
+	)
 
-	// Use modified arguments if hook changed them
-	if modifiedArgs != arguments {
-		arguments = modifiedArgs
-	}
-
-	// Execute the tool using the standard tool runner
-	result := tools.RunTool(ctx, t.State, name, arguments)
-
-	// Get structured data for hook processing
-	structuredData := result.StructuredData()
-
-	// Trigger after_tool_call hook
-	if modified := t.HookTrigger.TriggerAfterToolCall(ctx, t, name, arguments, callID, structuredData, t.GetRecipeHooks()); modified != nil {
-		structuredData = *modified
-	}
-
-	// Store structured result
-	t.SetStructuredToolResult(callID, structuredData)
-
-	// Render for logging
-	registry := renderers.NewRendererRegistry()
-	_ = registry.Render(structuredData)
-
-	return result
+	t.SetStructuredToolResult(callID, toolExecution.StructuredResult)
+	return toolExecution.Result
 }
 
 // updateUsage updates the thread's usage statistics from a response.

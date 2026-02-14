@@ -27,8 +27,6 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/steer"
 	"github.com/jingkaihe/kodelet/pkg/sysprompt"
 	"github.com/jingkaihe/kodelet/pkg/telemetry"
-	"github.com/jingkaihe/kodelet/pkg/tools"
-	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/jingkaihe/kodelet/pkg/usage"
 	"github.com/pkg/errors"
@@ -130,19 +128,8 @@ func NewAnthropicThread(config llmtypes.Config) (*Thread, error) {
 		}
 	}
 
-	// Initialize hook trigger (zero-value if discovery fails or disabled - hooks disabled)
-	var hookTrigger hooks.Trigger
 	conversationID := convtypes.GenerateID()
-	if !config.IsSubAgent && !config.NoHooks {
-		// Only main agent discovers hooks; subagents inherit from parent
-		// Hooks can be disabled via NoHooks config
-		hookManager, err := hooks.NewHookManager()
-		if err != nil {
-			logger.WithError(err).Warn("Failed to initialize hook manager, hooks disabled")
-		} else {
-			hookTrigger = hooks.NewTrigger(hookManager, conversationID, config.IsSubAgent, config.RecipeName)
-		}
-	}
+	hookTrigger := base.CreateHookTrigger(context.Background(), config, conversationID)
 
 	// Create the base thread with shared functionality
 	baseThread := base.NewThread(config, conversationID, hookTrigger)
@@ -453,32 +440,25 @@ func (t *Thread) executeToolsParallel(
 				attribute.Int("tool_index", i),
 			)
 
-			// Trigger before_tool_call hook
-			toolInput := tb.variant.JSON.Input.Raw()
-			blocked, reason, toolInput := t.HookTrigger.TriggerBeforeToolCall(gctx, t, toolName, toolInput, tb.block.ID, t.GetRecipeHooks())
-
-			var output tooltypes.ToolResult
-			if blocked {
-				output = tooltypes.NewBlockedToolResult(toolName, reason)
-			} else {
-				// Tools that need LLM (subagent, image_recognition, web_fetch) now use shell-out
-				// so no subagent context is needed
-				output = tools.RunTool(gctx, t.State, toolName, toolInput)
-			}
+			toolExecution := base.ExecuteTool(
+				gctx,
+				t.HookTrigger,
+				t,
+				t.State,
+				t.GetRecipeHooks(),
+				toolName,
+				tb.variant.JSON.Input.Raw(),
+				tb.block.ID,
+			)
+			toolInput := toolExecution.Input
+			output := toolExecution.Result
 
 			if err := gctx.Err(); err != nil {
 				return err
 			}
 
-			structuredResult := output.StructuredData()
-
-			// Trigger after_tool_call hook
-			if modified := t.HookTrigger.TriggerAfterToolCall(gctx, t, toolName, toolInput, tb.block.ID, structuredResult, t.GetRecipeHooks()); modified != nil {
-				structuredResult = *modified
-			}
-
-			registry := renderers.NewRendererRegistry()
-			renderedOutput := registry.Render(structuredResult)
+			structuredResult := toolExecution.StructuredResult
+			renderedOutput := toolExecution.RenderedOutput
 
 			telemetry.AddEvent(gctx, "tool_execution_complete",
 				attribute.String("tool_name", toolName),
@@ -914,10 +894,7 @@ func (t *Thread) getLastMessagesAttributes(messages []anthropic.MessageParam, la
 }
 
 func (t *Thread) tools(opt llmtypes.MessageOpt) []tooltypes.Tool {
-	if opt.NoToolUse {
-		return []tooltypes.Tool{}
-	}
-	return t.State.Tools()
+	return base.AvailableTools(t.State, opt.NoToolUse)
 }
 
 func (t *Thread) updateUsage(response *anthropic.Message, model anthropic.Model) {

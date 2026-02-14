@@ -28,12 +28,9 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/llm/prompts"
 	"github.com/jingkaihe/kodelet/pkg/logger"
-	"github.com/jingkaihe/kodelet/pkg/osutil"
 	"github.com/jingkaihe/kodelet/pkg/steer"
 	"github.com/jingkaihe/kodelet/pkg/sysprompt"
 	"github.com/jingkaihe/kodelet/pkg/telemetry"
-	"github.com/jingkaihe/kodelet/pkg/tools"
-	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -120,19 +117,8 @@ func NewGoogleThread(config llmtypes.Config) (*Thread, error) {
 		thinkingBudget = configCopy.Google.ThinkingBudget
 	}
 
-	// Initialize hook trigger (zero-value if discovery fails or disabled - hooks disabled)
-	var hookTrigger hooks.Trigger
 	conversationID := convtypes.GenerateID()
-	if !configCopy.IsSubAgent && !configCopy.NoHooks {
-		// Only main agent discovers hooks; subagents inherit from parent
-		// Hooks can be disabled via NoHooks config
-		hookManager, err := hooks.NewHookManager()
-		if err != nil {
-			logger.G(context.Background()).WithError(err).Warn("Failed to initialize hook manager, hooks disabled")
-		} else {
-			hookTrigger = hooks.NewTrigger(hookManager, conversationID, configCopy.IsSubAgent, configCopy.RecipeName)
-		}
-	}
+	hookTrigger := base.CreateHookTrigger(context.Background(), configCopy, conversationID)
 
 	// Create the thread with embedded base.Thread
 	t := &Thread{
@@ -958,26 +944,18 @@ func (t *Thread) executeToolCalls(ctx context.Context, response *Response, handl
 		}
 
 		// Trigger before_tool_call hook
-		toolInput := string(argsJSON)
-		blocked, reason, toolInput := t.HookTrigger.TriggerBeforeToolCall(ctx, t, toolCall.Name, toolInput, toolCall.ID, t.GetRecipeHooks())
-
-		var output tooltypes.ToolResult
-		if blocked {
-			output = tooltypes.NewBlockedToolResult(toolCall.Name, reason)
-		} else {
-			output = tools.RunTool(ctx, t.State, toolCall.Name, toolInput)
-		}
-
-		// Use CLI rendering for consistent output formatting
-		structuredResult := output.StructuredData()
-
-		// Trigger after_tool_call hook
-		if modified := t.HookTrigger.TriggerAfterToolCall(ctx, t, toolCall.Name, toolInput, toolCall.ID, structuredResult, t.GetRecipeHooks()); modified != nil {
-			structuredResult = *modified
-		}
-
-		registry := renderers.NewRendererRegistry()
-		_ = registry.Render(structuredResult) // Render for logging, but pass ToolResult to handler
+		toolExecution := base.ExecuteTool(
+			ctx,
+			t.HookTrigger,
+			t,
+			t.State,
+			t.GetRecipeHooks(),
+			toolCall.Name,
+			string(argsJSON),
+			toolCall.ID,
+		)
+		output := toolExecution.Result
+		structuredResult := toolExecution.StructuredResult
 
 		handler.HandleToolResult(toolCall.ID, toolCall.Name, output)
 
@@ -1017,13 +995,7 @@ func (t *Thread) hasToolCalls(response *Response) bool {
 
 // tools returns the available tools, filtered by options
 func (t *Thread) tools(opt llmtypes.MessageOpt) []tooltypes.Tool {
-	if opt.NoToolUse {
-		return []tooltypes.Tool{}
-	}
-	if t.State == nil {
-		return []tooltypes.Tool{}
-	}
-	return t.State.Tools()
+	return base.AvailableTools(t.State, opt.NoToolUse)
 }
 
 // GetMessages returns the current messages in the thread
@@ -1238,7 +1210,7 @@ func (t *Thread) loadConversation(ctx context.Context) {
 
 	// Load background processes if state is available
 	if t.State != nil && len(record.BackgroundProcesses) > 0 {
-		t.restoreBackgroundProcesses(record.BackgroundProcesses)
+		base.RestoreBackgroundProcesses(t.State, record.BackgroundProcesses)
 	}
 
 	logger.G(ctx).WithField("conversation_id", t.ConversationID).Debug("loaded conversation from store")
@@ -1273,17 +1245,4 @@ func (t *Thread) updateUsage(metadata *genai.UsageMetadata) {
 	}
 
 	t.Usage.CurrentContextWindow = t.Usage.InputTokens + t.Usage.OutputTokens + t.Usage.CacheReadInputTokens
-}
-
-// restoreBackgroundProcesses restores background processes from the conversation record
-func (t *Thread) restoreBackgroundProcesses(processes []tooltypes.BackgroundProcess) {
-	for _, process := range processes {
-		// Check if process is still alive
-		if osutil.IsProcessAlive(process.PID) {
-			// Reattach to the process
-			if restoredProcess, err := osutil.ReattachProcess(process); err == nil {
-				t.State.AddBackgroundProcess(restoredProcess)
-			}
-		}
-	}
 }

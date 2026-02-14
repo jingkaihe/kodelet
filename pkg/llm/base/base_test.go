@@ -113,6 +113,30 @@ func TestIsPersisted(t *testing.T) {
 	assert.True(t, bt.IsPersisted())
 }
 
+func TestCreateHookTrigger_Disabled(t *testing.T) {
+	tests := []llmtypes.Config{
+		{IsSubAgent: true},
+		{NoHooks: true},
+	}
+
+	for _, cfg := range tests {
+		trigger := CreateHookTrigger(context.Background(), cfg, "conv-id")
+		assert.Empty(t, trigger.ConversationID)
+		assert.False(t, trigger.IsSubAgent)
+		assert.Empty(t, trigger.RecipeName)
+	}
+}
+
+func TestRestoreBackgroundProcesses_NilState(t *testing.T) {
+	processes := []tooltypes.BackgroundProcess{
+		{PID: -1},
+	}
+
+	assert.NotPanics(t, func() {
+		RestoreBackgroundProcesses(nil, processes)
+	})
+}
+
 func TestGetUsage(t *testing.T) {
 	bt := NewThread(llmtypes.Config{}, "", hooks.Trigger{})
 

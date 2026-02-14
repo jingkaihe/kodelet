@@ -9,6 +9,7 @@ import (
 	"github.com/pkg/errors"
 	"google.golang.org/genai"
 
+	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/llm/prompts"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
@@ -84,7 +85,7 @@ func (t *Thread) LoadConversationByID(ctx context.Context, conversationID string
 
 	if t.State != nil {
 		t.State.SetFileLastAccess(record.FileLastAccess)
-		t.restoreBackgroundProcesses(record.BackgroundProcesses)
+		base.RestoreBackgroundProcesses(t.State, record.BackgroundProcesses)
 	}
 
 	logger.G(ctx).WithField("conversation_id", conversationID).Info("Loaded conversation")
