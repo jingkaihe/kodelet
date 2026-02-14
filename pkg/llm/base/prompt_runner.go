@@ -14,6 +14,17 @@ func RunPreparedPrompt(
 	prompt string,
 	opt llmtypes.MessageOpt,
 ) (string, error) {
+	return RunPreparedPromptTyped(ctx, createThread, prepareThread, prompt, opt)
+}
+
+// RunPreparedPromptTyped is a typed variant of RunPreparedPrompt that avoids provider-side type assertions.
+func RunPreparedPromptTyped[T llmtypes.Thread](
+	ctx context.Context,
+	createThread func() (T, error),
+	prepareThread func(thread T) error,
+	prompt string,
+	opt llmtypes.MessageOpt,
+) (string, error) {
 	thread, err := createThread()
 	if err != nil {
 		return "", err

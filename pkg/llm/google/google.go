@@ -1026,15 +1026,11 @@ func (t *Thread) convertToStandardMessages() []llmtypes.Message {
 // and ShouldAutoCompact methods are inherited from embedded base.Thread
 
 func (t *Thread) runUtilityPrompt(ctx context.Context, prompt string, useWeakModel bool) (string, error) {
-	return base.RunPreparedPrompt(ctx,
-		func() (llmtypes.Thread, error) {
+	return base.RunPreparedPromptTyped(ctx,
+		func() (*Thread, error) {
 			return NewGoogleThread(t.GetConfig())
 		},
-		func(thread llmtypes.Thread) error {
-			summaryThread, ok := thread.(*Thread)
-			if !ok {
-				return errors.New("unexpected summary thread type")
-			}
+		func(summaryThread *Thread) error {
 			summaryThread.messages = t.messages
 			summaryThread.PrepareUtilityMode(ctx)
 			return nil

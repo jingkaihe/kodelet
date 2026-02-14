@@ -4,13 +4,11 @@ package openai
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -874,15 +872,11 @@ func (t *Thread) updateUsage(usage openai.Usage, model string) {
 }
 
 func (t *Thread) runUtilityPrompt(ctx context.Context, prompt string, useWeakModel bool) (string, error) {
-	return base.RunPreparedPrompt(ctx,
-		func() (llmtypes.Thread, error) {
+	return base.RunPreparedPromptTyped(ctx,
+		func() (*Thread, error) {
 			return NewOpenAIThread(t.GetConfig())
 		},
-		func(thread llmtypes.Thread) error {
-			summaryThread, ok := thread.(*Thread)
-			if !ok {
-				return errors.New("unexpected summary thread type")
-			}
+		func(summaryThread *Thread) error {
 			summaryThread.messages = t.messages
 			summaryThread.PrepareUtilityMode(ctx)
 			return nil
@@ -1023,36 +1017,12 @@ func (t *Thread) processImageDataURL(dataURL string) (*openai.ChatMessagePart, e
 
 // processImageFile creates an image part from a local file
 func (t *Thread) processImageFile(filePath string) (*openai.ChatMessagePart, error) {
-	// Check if file exists
-	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		return nil, fmt.Errorf("image file not found: %s", filePath)
-	}
-
-	// Determine media type from file extension first
-	mediaType, err := getImageMediaType(filepath.Ext(filePath))
+	mediaType, base64Data, err := base.ReadImageFileAsBase64(filePath)
 	if err != nil {
-		return nil, fmt.Errorf("unsupported image format: %s (supported: .jpg, .jpeg, .png, .gif, .webp)", filepath.Ext(filePath))
+		return nil, err
 	}
 
-	// Check file size
-	fileInfo, err := os.Stat(filePath)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to get file info")
-	}
-	if fileInfo.Size() > base.MaxImageFileSize {
-		return nil, fmt.Errorf("image file too large: %d bytes (max: %d bytes)", fileInfo.Size(), base.MaxImageFileSize)
-	}
-
-	// Read and encode the file
-	imageData, err := os.ReadFile(filePath)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to read image file")
-	}
-
-	// Encode to base64
-	base64Data := base64.StdEncoding.EncodeToString(imageData)
-
-	// Create data URL with proper MIME type
+	// Create data URL with proper MIME type.
 	dataURL := fmt.Sprintf("data:%s;base64,%s", mediaType, base64Data)
 
 	part := &openai.ChatMessagePart{
@@ -1067,16 +1037,5 @@ func (t *Thread) processImageFile(filePath string) (*openai.ChatMessagePart, err
 
 // getImageMediaType returns the MIME type for supported image formats
 func getImageMediaType(ext string) (string, error) {
-	switch strings.ToLower(ext) {
-	case ".jpg", ".jpeg":
-		return "image/jpeg", nil
-	case ".png":
-		return "image/png", nil
-	case ".gif":
-		return "image/gif", nil
-	case ".webp":
-		return "image/webp", nil
-	default:
-		return "", errors.New("unsupported format")
-	}
+	return base.ImageMIMETypeFromExtension(ext)
 }

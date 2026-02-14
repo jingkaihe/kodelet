@@ -1,8 +1,6 @@
 package responses
 
 import (
-	"encoding/base64"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -41,29 +39,16 @@ func processImage(imagePath string) (responses.ResponseInputContentUnionParam, e
 		imagePath = filePath
 	}
 
-	// Handle local file
-	fileInfo, err := os.Stat(imagePath)
+	// Handle local file.
+	mimeType, base64Data, err := base.ReadImageFileAsBase64(imagePath)
 	if err != nil {
-		return responses.ResponseInputContentUnionParam{}, errors.Wrap(err, "failed to stat image file")
-	}
-	if fileInfo.Size() > base.MaxImageFileSize {
-		return responses.ResponseInputContentUnionParam{},
-			errors.Errorf("image file too large: %d bytes (max: %d bytes)", fileInfo.Size(), base.MaxImageFileSize)
-	}
-
-	data, err := os.ReadFile(imagePath)
-	if err != nil {
-		return responses.ResponseInputContentUnionParam{}, errors.Wrap(err, "failed to read image file")
-	}
-
-	// Determine MIME type from extension
-	mimeType, err := getMimeType(imagePath)
-	if err != nil {
+		if strings.Contains(err.Error(), "image file not found") {
+			return responses.ResponseInputContentUnionParam{}, errors.Wrap(err, "failed to stat image file")
+		}
 		return responses.ResponseInputContentUnionParam{}, err
 	}
 
-	// Encode to base64 data URL
-	base64Data := base64.StdEncoding.EncodeToString(data)
+	// Encode to base64 data URL.
 	dataURL := "data:" + mimeType + ";base64," + base64Data
 
 	return responses.ResponseInputContentUnionParam{
@@ -76,16 +61,9 @@ func processImage(imagePath string) (responses.ResponseInputContentUnionParam, e
 // getMimeType returns the MIME type for an image file based on its extension.
 func getMimeType(path string) (string, error) {
 	ext := strings.ToLower(filepath.Ext(path))
-	switch ext {
-	case ".jpg", ".jpeg":
-		return "image/jpeg", nil
-	case ".png":
-		return "image/png", nil
-	case ".gif":
-		return "image/gif", nil
-	case ".webp":
-		return "image/webp", nil
-	default:
+	mimeType, err := base.ImageMIMETypeFromExtension(ext)
+	if err != nil {
 		return "", errors.Errorf("unsupported image format: %s (supported: .jpg, .jpeg, .png, .gif, .webp)", ext)
 	}
+	return mimeType, nil
 }

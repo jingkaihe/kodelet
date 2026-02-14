@@ -4,11 +4,8 @@ package anthropic
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -905,15 +902,11 @@ func (t *Thread) updateUsage(response *anthropic.Message, model anthropic.Model)
 }
 
 func (t *Thread) runUtilityPrompt(ctx context.Context, prompt string, useWeakModel bool) (string, error) {
-	return base.RunPreparedPrompt(ctx,
-		func() (llmtypes.Thread, error) {
+	return base.RunPreparedPromptTyped(ctx,
+		func() (*Thread, error) {
 			return NewAnthropicThread(t.GetConfig())
 		},
-		func(thread llmtypes.Thread) error {
-			summaryThread, ok := thread.(*Thread)
-			if !ok {
-				return errors.New("unexpected summary thread type")
-			}
+		func(summaryThread *Thread) error {
 			summaryThread.messages = t.messages
 			summaryThread.PrepareUtilityMode(ctx)
 			return nil
@@ -1056,33 +1049,15 @@ func mimeTypeToAnthropicMediaType(mimeType string) (anthropic.Base64ImageSourceM
 }
 
 func (t *Thread) processImageFile(filePath string) (*anthropic.ContentBlockParamUnion, error) {
-	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		return nil, errors.Errorf("image file not found: %s", filePath)
-	}
-
-	// Determine media type from file extension first
-	mediaType, err := getMediaTypeFromExtension(filepath.Ext(filePath))
+	mimeType, base64Data, err := base.ReadImageFileAsBase64(filePath)
 	if err != nil {
-		return nil, errors.Errorf("unsupported image format: %s (supported: .jpg, .jpeg, .png, .gif, .webp)", filepath.Ext(filePath))
+		return nil, err
 	}
 
-	// Check file size
-	fileInfo, err := os.Stat(filePath)
+	mediaType, err := mimeTypeToAnthropicMediaType(mimeType)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to get file info")
+		return nil, errors.Wrapf(err, "unsupported image mime type: %s", mimeType)
 	}
-	if fileInfo.Size() > base.MaxImageFileSize {
-		return nil, errors.Errorf("image file too large: %d bytes (max: %d bytes)", fileInfo.Size(), base.MaxImageFileSize)
-	}
-
-	// Read and encode the file
-	imageData, err := os.ReadFile(filePath)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to read image file")
-	}
-
-	// Encode to base64
-	base64Data := base64.StdEncoding.EncodeToString(imageData)
 
 	block := anthropic.NewImageBlock(anthropic.Base64ImageSourceParam{
 		Type:      "base64",
@@ -1094,16 +1069,9 @@ func (t *Thread) processImageFile(filePath string) (*anthropic.ContentBlockParam
 
 // getMediaTypeFromExtension returns the Anthropic media type for supported image formats only
 func getMediaTypeFromExtension(ext string) (anthropic.Base64ImageSourceMediaType, error) {
-	switch strings.ToLower(ext) {
-	case ".jpg", ".jpeg":
-		return anthropic.Base64ImageSourceMediaTypeImageJPEG, nil
-	case ".png":
-		return anthropic.Base64ImageSourceMediaTypeImagePNG, nil
-	case ".gif":
-		return anthropic.Base64ImageSourceMediaTypeImageGIF, nil
-	case ".webp":
-		return anthropic.Base64ImageSourceMediaTypeImageWebP, nil
-	default:
-		return "", errors.New("unsupported format")
+	mimeType, err := base.ImageMIMETypeFromExtension(ext)
+	if err != nil {
+		return "", err
 	}
+	return mimeTypeToAnthropicMediaType(mimeType)
 }

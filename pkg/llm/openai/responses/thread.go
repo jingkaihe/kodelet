@@ -645,15 +645,11 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 }
 
 func (t *Thread) runUtilityPrompt(ctx context.Context, prompt string, useWeakModel bool) (string, error) {
-	return base.RunPreparedPrompt(ctx,
-		func() (llmtypes.Thread, error) {
+	return base.RunPreparedPromptTyped(ctx,
+		func() (*Thread, error) {
 			return NewThread(t.Config)
 		},
-		func(thread llmtypes.Thread) error {
-			summaryThread, ok := thread.(*Thread)
-			if !ok {
-				return errors.New("unexpected summary thread type")
-			}
+		func(summaryThread *Thread) error {
 			// Copy input items to the summary thread.
 			summaryThread.inputItems = t.inputItems
 			summaryThread.PrepareUtilityMode(ctx)
