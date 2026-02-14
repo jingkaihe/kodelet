@@ -53,7 +53,6 @@ func SystemPrompt(model string, llmConfig llm.Config, contexts map[string]string
 
 	provider := llmConfig.Provider
 	prompt, err = renderer.RenderSystemPrompt(promptCtx)
-
 	if err != nil {
 		ctx := context.Background()
 		log := logger.G(ctx)

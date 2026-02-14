@@ -111,4 +111,3 @@ func (r *Renderer) RenderSystemPrompt(ctx *PromptContext) (string, error) {
 
 	return prompt, nil
 }
-
