@@ -4,13 +4,11 @@ package openai
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -18,7 +16,6 @@ import (
 	"github.com/avast/retry-go/v4"
 	"github.com/jingkaihe/kodelet/pkg/auth"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
-	"github.com/jingkaihe/kodelet/pkg/hooks"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/llm/prompts"
 	"github.com/jingkaihe/kodelet/pkg/logger"
@@ -26,7 +23,6 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/sysprompt"
 	"github.com/jingkaihe/kodelet/pkg/telemetry"
 	"github.com/jingkaihe/kodelet/pkg/tools"
-	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/jingkaihe/kodelet/pkg/usage"
 	"github.com/pkg/errors"
@@ -244,19 +240,8 @@ func NewOpenAIThread(config llmtypes.Config) (*Thread, error) {
 	// Load custom models and pricing if available
 	customModels, customPricing := loadCustomConfiguration(config)
 
-	// Initialize hook trigger (zero-value if discovery fails or disabled - hooks disabled)
-	var hookTrigger hooks.Trigger
 	conversationID := convtypes.GenerateID()
-	if !config.IsSubAgent && !config.NoHooks {
-		// Only main agent discovers hooks; subagents inherit from parent
-		// Hooks can be disabled via NoHooks config
-		hookManager, err := hooks.NewHookManager()
-		if err != nil {
-			log.WithError(err).Warn("Failed to initialize hook manager, hooks disabled")
-		} else {
-			hookTrigger = hooks.NewTrigger(hookManager, conversationID, config.IsSubAgent, config.RecipeName)
-		}
-	}
+	hookTrigger := base.CreateHookTrigger(context.Background(), config, conversationID)
 
 	// Create the base thread with shared functionality
 	baseThread := base.NewThread(config, conversationID, hookTrigger)
@@ -402,15 +387,7 @@ OUTER:
 			}
 
 			// Check if auto-compact should be triggered before each exchange
-			if !opt.DisableAutoCompact && t.ShouldAutoCompact(opt.CompactRatio) {
-				logger.G(ctx).WithField("context_utilization", float64(t.GetUsage().CurrentContextWindow)/float64(t.GetUsage().MaxContextWindow)).Info("triggering auto-compact")
-				err := t.CompactContext(ctx)
-				if err != nil {
-					logger.G(ctx).WithError(err).Error("failed to auto-compact context")
-				} else {
-					logger.G(ctx).Info("auto-compact completed successfully")
-				}
-			}
+			t.TryAutoCompact(ctx, opt.DisableAutoCompact, opt.CompactRatio, t.CompactContext)
 
 			var exchangeOutput string
 			exchangeOutput, toolsUsed, err := t.processMessageExchange(ctx, handler, model, maxTokens, opt)
@@ -432,26 +409,12 @@ OUTER:
 			// Update finalOutput with the most recent output
 			finalOutput = exchangeOutput
 
-			// Trigger turn_end hook after assistant response is complete
-			if finalOutput != "" {
-				t.HookTrigger.TriggerTurnEnd(ctx, t, finalOutput, turnCount, t.GetRecipeHooks())
-			}
+			base.TriggerTurnEnd(ctx, t.HookTrigger, t, finalOutput, turnCount)
 
 			// If no tools were used, check for hook follow-ups before stopping
 			if !toolsUsed {
-				logger.G(ctx).Debug("no tools used, checking agent_stop hook")
-
-				// Trigger agent_stop hook to see if there are follow-up messages
-				if messages, err := t.GetMessages(); err == nil {
-					if followUps := t.HookTrigger.TriggerAgentStop(ctx, t, messages, t.GetRecipeHooks()); len(followUps) > 0 {
-						logger.G(ctx).WithField("count", len(followUps)).Info("agent_stop hook returned follow-up messages, continuing conversation")
-						// Append follow-up messages as user messages and continue
-						for _, msg := range followUps {
-							t.AddUserMessage(ctx, msg)
-							handler.HandleText(fmt.Sprintf("\n📨 Hook follow-up: %s\n", msg))
-						}
-						continue OUTER
-					}
+				if base.HandleAgentStopFollowUps(ctx, t.HookTrigger, t, handler) {
+					continue OUTER
 				}
 
 				break OUTER
@@ -594,27 +557,19 @@ func (t *Thread) processMessageExchange(
 			attribute.String("tool_name", toolCall.Function.Name),
 		)
 
-		// Trigger before_tool_call hook
-		toolInput := toolCall.Function.Arguments
-		blocked, reason, toolInput := t.HookTrigger.TriggerBeforeToolCall(ctx, t, toolCall.Function.Name, toolInput, toolCall.ID, t.GetRecipeHooks())
-
-		var output tooltypes.ToolResult
-		if blocked {
-			output = tooltypes.NewBlockedToolResult(toolCall.Function.Name, reason)
-		} else {
-			output = tools.RunTool(ctx, t.State, toolCall.Function.Name, toolInput)
-		}
-
-		// Use CLI rendering for consistent output formatting
-		structuredResult := output.StructuredData()
-
-		// Trigger after_tool_call hook
-		if modified := t.HookTrigger.TriggerAfterToolCall(ctx, t, toolCall.Function.Name, toolInput, toolCall.ID, structuredResult, t.GetRecipeHooks()); modified != nil {
-			structuredResult = *modified
-		}
-
-		registry := renderers.NewRendererRegistry()
-		_ = registry.Render(structuredResult) // Render for logging, but pass ToolResult to handler
+		toolExecution := base.ExecuteTool(
+			ctx,
+			t.HookTrigger,
+			t,
+			t.State,
+			t.GetRecipeHooks(),
+			t.RendererRegistry,
+			toolCall.Function.Name,
+			toolCall.Function.Arguments,
+			toolCall.ID,
+		)
+		output := toolExecution.Result
+		structuredResult := toolExecution.StructuredResult
 
 		handler.HandleToolResult(toolCall.ID, toolCall.Function.Name, output)
 
@@ -887,10 +842,7 @@ func (t *Thread) createStreamingChatCompletion(ctx context.Context, requestParam
 }
 
 func (t *Thread) tools(opt llmtypes.MessageOpt) []tooltypes.Tool {
-	if opt.NoToolUse {
-		return []tooltypes.Tool{}
-	}
-	return t.State.Tools()
+	return base.AvailableTools(t.State, opt.NoToolUse)
 }
 
 func (t *Thread) updateUsage(usage openai.Usage, model string) {
@@ -920,6 +872,19 @@ func (t *Thread) updateUsage(usage openai.Usage, model string) {
 	t.Usage.MaxContextWindow = pricing.ContextWindow
 }
 
+func (t *Thread) runUtilityPrompt(ctx context.Context, prompt string, useWeakModel bool) (string, error) {
+	return base.RunUtilityPrompt(ctx,
+		func() (*Thread, error) {
+			return NewOpenAIThread(t.GetConfig())
+		},
+		func(summaryThread *Thread) {
+			summaryThread.messages = t.messages
+		},
+		prompt,
+		useWeakModel,
+	)
+}
+
 // SwapContext replaces the conversation history with a summary message.
 // This implements the hooks.ContextSwapper interface.
 func (t *Thread) SwapContext(_ context.Context, summary string) error {
@@ -933,76 +898,26 @@ func (t *Thread) SwapContext(_ context.Context, summary string) error {
 		},
 	}
 
-	// Clear stale tool results - they reference tool calls that no longer exist
-	t.ToolResults = make(map[string]tooltypes.StructuredToolResult)
-
-	// Get state reference while under mutex protection
-	state := t.State
-
-	// heuristic estimation of context window size based on summary length
-	t.EstimateContextWindowFromMessage(summary)
-
-	// Clear file access tracking to start fresh with context retrieval
-	if state != nil {
-		state.SetFileLastAccess(make(map[string]time.Time))
-	}
+	t.FinalizeSwapContextLocked(summary)
 
 	return nil
 }
 
 // CompactContext performs comprehensive context compacting by creating a detailed summary
 func (t *Thread) CompactContext(ctx context.Context) error {
-	compactPrompt, err := fragments.LoadCompactPrompt(ctx)
-	if err != nil {
-		return errors.Wrap(err, "failed to load compact prompt")
-	}
-
-	summaryThread, err := NewOpenAIThread(t.GetConfig())
-	if err != nil {
-		return errors.Wrap(err, "failed to create summary thread")
-	}
-
-	summaryThread.messages = t.messages
-	summaryThread.EnablePersistence(ctx, false)
-	summaryThread.HookTrigger = hooks.Trigger{}
-
-	handler := &llmtypes.StringCollectorHandler{Silent: true}
-	_, err = summaryThread.SendMessage(ctx, compactPrompt, handler, llmtypes.MessageOpt{
-		UseWeakModel:       false,
-		NoToolUse:          true,
-		DisableAutoCompact: true,
-		DisableUsageLog:    true,
-		NoSaveConversation: true,
-	})
-	if err != nil {
-		return errors.Wrap(err, "failed to generate compact summary")
-	}
-
-	return t.SwapContext(ctx, handler.CollectedText())
+	return base.CompactContextWithSummary(ctx, fragments.LoadCompactPrompt, t.runUtilityPrompt, t.SwapContext)
 }
 
 // ShortSummary generates a concise summary of the conversation using a faster model.
 func (t *Thread) ShortSummary(ctx context.Context) string {
-	summaryThread, err := NewOpenAIThread(t.GetConfig())
-	if err != nil {
-		logger.G(ctx).WithError(err).Error("failed to create summary thread")
-		return "Could not generate summary."
-	}
-
-	summaryThread.messages = t.messages
-	summaryThread.EnablePersistence(ctx, false)
-	summaryThread.HookTrigger = hooks.Trigger{} // disable hooks for summary
-
-	handler := &llmtypes.StringCollectorHandler{Silent: true}
-	summaryThread.SendMessage(ctx, prompts.ShortSummaryPrompt, handler, llmtypes.MessageOpt{
-		UseWeakModel:       true,
-		NoToolUse:          true,
-		DisableAutoCompact: true,
-		DisableUsageLog:    true,
-		NoSaveConversation: true,
-	})
-
-	return handler.CollectedText()
+	return base.GenerateShortSummary(
+		ctx,
+		prompts.ShortSummaryPrompt,
+		t.runUtilityPrompt,
+		func(err error) {
+			logger.G(ctx).WithError(err).Error("failed to generate summary")
+		},
+	)
 }
 
 // GetMessages returns the current messages in the thread
@@ -1035,31 +950,24 @@ func (t *Thread) GetMessages() ([]llmtypes.Message, error) {
 
 // processImage converts an image path/URL to an OpenAI ChatMessagePart
 func (t *Thread) processImage(imagePath string) (*openai.ChatMessagePart, error) {
-	// Only allow HTTPS URLs for security
-	if strings.HasPrefix(imagePath, "https://") {
-		return t.processImageURL(imagePath)
-	}
-	if strings.HasPrefix(imagePath, "http://") {
+	if base.IsInsecureHTTPURL(imagePath) {
 		// Explicitly reject HTTP URLs for security
 		return nil, fmt.Errorf("only HTTPS URLs are supported for security: %s", imagePath)
 	}
-	if strings.HasPrefix(imagePath, "data:") {
-		// Data URLs can be passed directly to OpenAI
-		return t.processImageDataURL(imagePath)
-	}
-	if filePath, ok := strings.CutPrefix(imagePath, "file://"); ok {
-		// Remove file:// prefix and process as file
-		return t.processImageFile(filePath)
-	}
-	// Treat as a local file path
-	return t.processImageFile(imagePath)
+
+	return base.RouteImageInput(
+		imagePath,
+		t.processImageURL,
+		t.processImageDataURL, // Data URLs can be passed directly to OpenAI.
+		t.processImageFile,    // Treat remaining inputs as local file paths.
+	)
 }
 
 // processImageURL creates an image part from an HTTPS URL
 func (t *Thread) processImageURL(url string) (*openai.ChatMessagePart, error) {
-	// Validate URL format (HTTPS only)
-	if !strings.HasPrefix(url, "https://") {
-		return nil, fmt.Errorf("only HTTPS URLs are supported for security: %s", url)
+	// Validate URL format (HTTPS only).
+	if err := base.ValidateHTTPSImageURL(url); err != nil {
+		return nil, err
 	}
 
 	part := &openai.ChatMessagePart{
@@ -1074,9 +982,9 @@ func (t *Thread) processImageURL(url string) (*openai.ChatMessagePart, error) {
 
 // processImageDataURL creates an image part from a data URL
 func (t *Thread) processImageDataURL(dataURL string) (*openai.ChatMessagePart, error) {
-	// Validate data URL format
-	if !strings.HasPrefix(dataURL, "data:") {
-		return nil, fmt.Errorf("invalid data URL: must start with 'data:'")
+	// Validate data URL format.
+	if err := base.ValidateDataURLPrefix(dataURL); err != nil {
+		return nil, err
 	}
 
 	// OpenAI accepts data URLs directly in the URL field
@@ -1092,37 +1000,10 @@ func (t *Thread) processImageDataURL(dataURL string) (*openai.ChatMessagePart, e
 
 // processImageFile creates an image part from a local file
 func (t *Thread) processImageFile(filePath string) (*openai.ChatMessagePart, error) {
-	// Check if file exists
-	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		return nil, fmt.Errorf("image file not found: %s", filePath)
-	}
-
-	// Determine media type from file extension first
-	mediaType, err := getImageMediaType(filepath.Ext(filePath))
+	dataURL, err := base.ReadImageFileAsDataURL(filePath)
 	if err != nil {
-		return nil, fmt.Errorf("unsupported image format: %s (supported: .jpg, .jpeg, .png, .gif, .webp)", filepath.Ext(filePath))
+		return nil, err
 	}
-
-	// Check file size
-	fileInfo, err := os.Stat(filePath)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to get file info")
-	}
-	if fileInfo.Size() > base.MaxImageFileSize {
-		return nil, fmt.Errorf("image file too large: %d bytes (max: %d bytes)", fileInfo.Size(), base.MaxImageFileSize)
-	}
-
-	// Read and encode the file
-	imageData, err := os.ReadFile(filePath)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to read image file")
-	}
-
-	// Encode to base64
-	base64Data := base64.StdEncoding.EncodeToString(imageData)
-
-	// Create data URL with proper MIME type
-	dataURL := fmt.Sprintf("data:%s;base64,%s", mediaType, base64Data)
 
 	part := &openai.ChatMessagePart{
 		Type: openai.ChatMessagePartTypeImageURL,
@@ -1136,16 +1017,5 @@ func (t *Thread) processImageFile(filePath string) (*openai.ChatMessagePart, err
 
 // getImageMediaType returns the MIME type for supported image formats
 func getImageMediaType(ext string) (string, error) {
-	switch strings.ToLower(ext) {
-	case ".jpg", ".jpeg":
-		return "image/jpeg", nil
-	case ".png":
-		return "image/png", nil
-	case ".gif":
-		return "image/gif", nil
-	case ".webp":
-		return "image/webp", nil
-	default:
-		return "", errors.New("unsupported format")
-	}
+	return base.ImageMIMETypeFromExtension(ext)
 }

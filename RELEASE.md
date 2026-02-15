@@ -1,5 +1,21 @@
 # Kodelet
 
+## 0.2.21.beta (2026-02-14)
+
+### Features
+
+- **HTTPS-only image validation**: All LLM providers now reject plain HTTP image URLs for security
+
+### Bug Fixes
+
+- **Persistence cleanup on load**: Fixed orphaned trailing tool calls left in conversation history after loading persisted OpenAI/OpenAI Responses conversations
+- **Google tool result lookup**: Structured tool results now resolve by call ID first (falling back to tool name), fixing incorrect rendering for repeated tool calls
+
+### Internal Changes
+
+- Centralized shared LLM logic (hook triggers, tool execution, auto-compact, image handling, utility prompts, context swap, background process restore) into `pkg/llm/base/`, removing duplicated code across all three providers
+- Removed separate OpenAI system prompt template (`openai_system.tmpl`) — all providers now use the unified `system.tmpl`
+
 ## 0.2.20.beta (2026-02-13)
 
 ### Breaking Changes

@@ -7,10 +7,12 @@ import (
 	"context"
 	"maps"
 	"sync"
+	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/hooks"
 	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"go.opentelemetry.io/otel/attribute"
@@ -42,6 +44,7 @@ type Thread struct {
 	Persisted        bool                                      // Whether conversation is being persisted
 	Store            ConversationStore                         // Conversation persistence store
 	ToolResults      map[string]tooltypes.StructuredToolResult // Maps tool_call_id to structured result
+	RendererRegistry *renderers.RendererRegistry               // CLI renderer registry for structured tool results
 	HookTrigger      hooks.Trigger                             // Hook trigger for lifecycle hooks
 	LoadConversation LoadConversationFunc                      // Provider-specific callback for loading conversations
 	RecipeHooks      map[string]llmtypes.HookConfig            // Recipe hook configurations
@@ -58,12 +61,13 @@ func NewThread(
 	hookTrigger hooks.Trigger,
 ) *Thread {
 	return &Thread{
-		Config:         config,
-		ConversationID: conversationID,
-		Persisted:      false,
-		Usage:          &llmtypes.Usage{},
-		ToolResults:    make(map[string]tooltypes.StructuredToolResult),
-		HookTrigger:    hookTrigger,
+		Config:           config,
+		ConversationID:   conversationID,
+		Persisted:        false,
+		Usage:            &llmtypes.Usage{},
+		ToolResults:      make(map[string]tooltypes.StructuredToolResult),
+		RendererRegistry: renderers.NewRendererRegistry(),
+		HookTrigger:      hookTrigger,
 	}
 }
 
@@ -130,6 +134,34 @@ func (t *Thread) EnablePersistence(ctx context.Context, enabled bool) {
 	if enabled && t.Store != nil && t.LoadConversation != nil {
 		t.LoadConversation(ctx)
 	}
+}
+
+// PrepareUtilityMode configures a thread for internal utility calls such as summary generation.
+// Utility mode disables persistence and lifecycle hooks to avoid side effects.
+func (t *Thread) PrepareUtilityMode(ctx context.Context) {
+	t.EnablePersistence(ctx, false)
+	t.HookTrigger = hooks.Trigger{}
+}
+
+// ResetContextStateLocked clears shared state after context replacement/compaction.
+// Caller must hold t.Mu.
+func (t *Thread) ResetContextStateLocked() {
+	// Clear stale tool results - they reference tool calls that no longer exist.
+	t.ToolResults = make(map[string]tooltypes.StructuredToolResult)
+
+	// Clear file access tracking to start fresh with context retrieval.
+	if t.State != nil {
+		t.State.SetFileLastAccess(make(map[string]time.Time))
+	}
+}
+
+// FinalizeSwapContextLocked resets shared state after provider-specific context replacement.
+// Caller must hold t.Mu.
+func (t *Thread) FinalizeSwapContextLocked(summary string) {
+	t.ResetContextStateLocked()
+
+	// Heuristic estimation of context window size based on summary length.
+	t.EstimateContextWindowFromMessage(summary)
 }
 
 // GetUsage returns the current token usage for the thread.
@@ -230,6 +262,36 @@ func (t *Thread) ShouldAutoCompact(compactRatio float64) bool {
 
 	utilizationRatio := float64(usage.CurrentContextWindow) / float64(usage.MaxContextWindow)
 	return utilizationRatio >= compactRatio
+}
+
+// TryAutoCompact triggers context compaction when auto-compact conditions are met.
+// compactFn should perform provider-specific compaction logic.
+func (t *Thread) TryAutoCompact(
+	ctx context.Context,
+	disableAutoCompact bool,
+	compactRatio float64,
+	compactFn func(context.Context) error,
+) {
+	if disableAutoCompact || compactFn == nil {
+		return
+	}
+
+	if !t.ShouldAutoCompact(compactRatio) {
+		return
+	}
+
+	usage := t.GetUsage()
+	utilization := 0.0
+	if usage.MaxContextWindow > 0 {
+		utilization = float64(usage.CurrentContextWindow) / float64(usage.MaxContextWindow)
+	}
+	logger.G(ctx).WithField("context_utilization", utilization).Info("triggering auto-compact")
+
+	if err := compactFn(ctx); err != nil {
+		logger.G(ctx).WithError(err).Error("failed to auto-compact context")
+	} else {
+		logger.G(ctx).Info("auto-compact completed successfully")
+	}
 }
 
 // EstimateContextWindowFromMessage estimates the context window size based on message content.

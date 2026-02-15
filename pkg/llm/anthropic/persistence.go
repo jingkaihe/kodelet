@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
-	"github.com/jingkaihe/kodelet/pkg/osutil"
+	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -139,20 +139,7 @@ func (t *Thread) loadConversation(ctx context.Context) {
 	// Restore structured tool results
 	t.SetStructuredToolResults(record.ToolResults)
 	// Restore background processes
-	t.restoreBackgroundProcesses(record.BackgroundProcesses)
-}
-
-// restoreBackgroundProcesses restores background processes from the conversation record
-func (t *Thread) restoreBackgroundProcesses(processes []tooltypes.BackgroundProcess) {
-	for _, process := range processes {
-		// Check if process is still alive
-		if osutil.IsProcessAlive(process.PID) {
-			// Reattach to the process
-			if restoredProcess, err := osutil.ReattachProcess(process); err == nil {
-				t.State.AddBackgroundProcess(restoredProcess)
-			}
-		}
-	}
+	base.RestoreBackgroundProcesses(t.State, record.BackgroundProcesses)
 }
 
 // DeserializeMessages deserializes a JSON byte array into Anthropic message parameters
