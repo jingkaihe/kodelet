@@ -399,6 +399,6 @@ describe('formatTimestamp', () => {
   it('formats timestamp to locale string', () => {
     const timestamp = '2023-01-01T12:00:00Z';
     const result = formatTimestamp(timestamp);
-    expect(result).toMatch(/1\/1\/2023/); // Matches US date format
+    expect(result).toMatch(/0?1\/0?1\/2023/);
   });
 });

@@ -74,17 +74,17 @@ run = [
   "cd pkg/webui/frontend && npm install",
 ]
 
-[tasks.eslint]
-description = "Run eslint on frontend code"
+[tasks.frontend-lint]
+description = "Run frontend linter (Biome)"
 run = [
-  "echo 'Running eslint on frontend code...'",
+  "echo 'Running frontend linter (Biome)...'",
   "cd pkg/webui/frontend && npm run lint",
 ]
 
-[tasks.eslint-fix]
-description = "Run eslint with auto-fix on frontend code"
+[tasks.frontend-lint-fix]
+description = "Run frontend linter with auto-fix (Biome)"
 run = [
-  "echo 'Running eslint with auto-fix on frontend code...'",
+  "echo 'Running frontend linter with auto-fix (Biome)...'",
   "cd pkg/webui/frontend && npm run lint:fix",
 ]
 
