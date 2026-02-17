@@ -47,7 +47,7 @@ func TestNewThread(t *testing.T) {
 			config: llmtypes.Config{
 				Provider: "anthropic",
 			},
-			expectedModel: string(anthropic.ModelClaudeSonnet4_5_20250929),
+			expectedModel: "claude-sonnet-4-6",
 			expectedMax:   8192,
 		},
 		{
@@ -284,27 +284,27 @@ func TestResolveModelAlias(t *testing.T) {
 	}{
 		{
 			name:     "resolves existing alias",
-			model:    "sonnet-45",
-			aliases:  map[string]string{"sonnet-45": "claude-sonnet-4-5-20250929"},
-			expected: "claude-sonnet-4-5-20250929",
+			model:    "sonnet-46",
+			aliases:  map[string]string{"sonnet-46": "claude-sonnet-4-6"},
+			expected: "claude-sonnet-4-6",
 		},
 		{
 			name:     "returns original when no alias found",
-			model:    "claude-sonnet-4-5-20250929",
-			aliases:  map[string]string{"sonnet-45": "claude-sonnet-4-5-20250929"},
-			expected: "claude-sonnet-4-5-20250929",
+			model:    "claude-sonnet-4-6",
+			aliases:  map[string]string{"sonnet-46": "claude-sonnet-4-6"},
+			expected: "claude-sonnet-4-6",
 		},
 		{
 			name:     "handles nil aliases map",
-			model:    "claude-sonnet-4-5-20250929",
+			model:    "claude-sonnet-4-6",
 			aliases:  nil,
-			expected: "claude-sonnet-4-5-20250929",
+			expected: "claude-sonnet-4-6",
 		},
 		{
 			name:  "resolves from multiple aliases",
 			model: "gpt41",
 			aliases: map[string]string{
-				"sonnet-45": "claude-sonnet-4-5-20250929",
+				"sonnet-46": "claude-sonnet-4-6",
 				"gpt41":     "gpt-4.1",
 			},
 			expected: "gpt-4.1",
@@ -329,12 +329,12 @@ func TestNewThreadWithAliases(t *testing.T) {
 			name: "resolves Anthropic alias to Claude model",
 			config: llmtypes.Config{
 				Provider: "anthropic",
-				Model:    "sonnet-45",
+				Model:    "sonnet-46",
 				Aliases: map[string]string{
-					"sonnet-45": "claude-sonnet-4-5-20250929",
+					"sonnet-46": "claude-sonnet-4-6",
 				},
 			},
-			description: "should resolve sonnet-45 alias to full Claude model name",
+			description: "should resolve sonnet-46 alias to full Claude model name",
 		},
 		{
 			name: "resolves OpenAI alias to GPT model",
@@ -351,9 +351,9 @@ func TestNewThreadWithAliases(t *testing.T) {
 			name: "uses full model name when no alias exists",
 			config: llmtypes.Config{
 				Provider: "anthropic",
-				Model:    "claude-sonnet-4-5-20250929",
+				Model:    "claude-sonnet-4-6",
 				Aliases: map[string]string{
-					"sonnet-45": "claude-sonnet-4-5-20250929",
+					"sonnet-46": "claude-sonnet-4-6",
 				},
 			},
 			description: "should use original model name when it's not an alias",

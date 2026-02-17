@@ -17,7 +17,7 @@ type PromptConfig struct {
 // the default model and enabled features (subagent and todoTools).
 func NewDefaultConfig() *PromptConfig {
 	return &PromptConfig{
-		Model: "claude-sonnet-4-5-20250929",
+		Model: "claude-sonnet-4-6",
 		EnabledFeatures: []string{
 			"subagent",
 			"todoTools",

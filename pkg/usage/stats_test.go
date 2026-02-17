@@ -67,7 +67,7 @@ func TestLogLLMUsage_NormalCase(t *testing.T) {
 		MaxContextWindow:         8000,
 	}
 
-	model := "claude-sonnet-4-5-20250929"
+	model := "claude-sonnet-4-6"
 	startTime := time.Now().Add(-2 * time.Second) // 2 seconds ago
 	requestOutputTokens := 150
 
@@ -153,7 +153,7 @@ func TestLogLLMUsage_DifferentModels(t *testing.T) {
 		name  string
 		model string
 	}{
-		{"Anthropic Claude", "claude-sonnet-4-5-20250929"},
+		{"Anthropic Claude", "claude-sonnet-4-6"},
 		{"OpenAI GPT", "gpt-4.1"},
 		{"Custom Model", "custom-model-v1"},
 		{"Empty Model", ""},

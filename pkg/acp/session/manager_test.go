@@ -23,7 +23,7 @@ func TestNewManager_WithManagerConfig(t *testing.T) {
 	t.Run("creates manager with all config fields", func(t *testing.T) {
 		cfg := ManagerConfig{
 			Provider:           "anthropic",
-			Model:              "claude-sonnet-4-5-20250929",
+			Model:              "claude-sonnet-4-6",
 			MaxTokens:          4096,
 			NoSkills:           true,
 			NoWorkflows:        true,

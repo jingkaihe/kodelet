@@ -13,7 +13,7 @@ log_format: "json"
 provider: "anthropic"
 
 # Model to use for LLM interactions
-model: "claude-sonnet-4-5-20250929"
+model: "claude-sonnet-4-6"
 
 # Maximum tokens for responses
 max_tokens: 8192
@@ -30,7 +30,7 @@ weak_model_max_tokens: 8192
 # Model aliases for easier reference
 # Allows using short names instead of full model identifiers
 aliases:
-  sonnet-45: "claude-sonnet-4-5-20250929"
+  sonnet-46: "claude-sonnet-4-6"
   haiku-45: "claude-haiku-4-5-20251001"
   opus-46: "claude-opus-4-6"
   gemini-pro: "gemini-2.5-pro"
@@ -44,7 +44,7 @@ aliases:
 profiles:
   premium:
     model: "claude-opus-4-6"
-    weak_model: "claude-sonnet-4-5-20250929"
+    weak_model: "claude-sonnet-4-6"
     max_tokens: 16000
     weak_model_max_tokens: 8192
     thinking_budget_tokens: 8000
@@ -93,7 +93,7 @@ profiles:
 
   mix-n-match:
     provider: "anthropic"
-    model: "sonnet-45"
+    model: "sonnet-46"
     weak_model: "haiku-45"
     max_tokens: 16000
     # Use OpenAI subagent profile for cross-provider support
@@ -431,7 +431,7 @@ tracing:
 # - KODELET_TRACING_ENABLED: Enables/disables tracing
 # - KODELET_TRACING_SAMPLER: Sets the sampling strategy
 # - KODELET_TRACING_RATIO: Sets the sampling ratio
-# - KODELET_ALIASES_*: Define individual aliases (e.g., KODELET_ALIASES_SONNET4=claude-sonnet-4-5-20250929)
+# - KODELET_ALIASES_*: Define individual aliases (e.g., KODELET_ALIASES_SONNET46=claude-sonnet-4-6)
 # - KODELET_COMMIT_COAUTHOR_ENABLED: Enable/disable coauthor attribution in commits
 # - KODELET_COMMIT_COAUTHOR_NAME: Name for coauthor attribution
 # - KODELET_COMMIT_COAUTHOR_EMAIL: Email for coauthor attribution

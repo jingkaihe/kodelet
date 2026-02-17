@@ -456,9 +456,9 @@ aliases:
     gemini-pro: gemini-2.5-pro
     haiku-45: claude-haiku-4-5-20251001
     opus-46: claude-opus-4-6
-    sonnet-45: claude-sonnet-4-5-20250929
+    sonnet-46: claude-sonnet-4-6
 max_tokens: 16000
-model: sonnet-45
+model: sonnet-46
 profile: default
 thinking_budget_tokens: 8000
 weak_model: haiku-45
@@ -466,7 +466,7 @@ weak_model_max_tokens: 8192
 profiles:
     hybrid:
         max_tokens: 16000
-        model: sonnet-45
+        model: sonnet-46
         subagent_args: "--profile openai-subagent"
         thinking_budget_tokens: 8000
         weak_model: haiku-45
@@ -491,7 +491,7 @@ profiles:
         max_tokens: 16000
         model: opus-46
         thinking_budget_tokens: 8000
-        weak_model: sonnet-45
+        weak_model: sonnet-46
         weak_model_max_tokens: 8192
     google:
         max_tokens: 16000
@@ -513,7 +513,7 @@ profiles:
 
 ### Anthropic Claude (Recommended)
 **Models:**
-- `claude-sonnet-4-5-20250929` - Recommended for standard tasks
+- `claude-sonnet-4-6` - Recommended for standard tasks
 - `claude-haiku-4-5-20251001` - Lightweight tasks
 - `claude-opus-4-1-20250805` - Complex reasoning
 

@@ -23,7 +23,7 @@ Example:
   kodelet acp
 
   # With custom model
-  kodelet acp --model claude-sonnet-4-5-20250929
+  kodelet acp --model claude-sonnet-4-6
 
   # Disable skills
   kodelet acp --no-skills

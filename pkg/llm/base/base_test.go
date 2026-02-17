@@ -554,7 +554,7 @@ func TestShouldAutoCompact_ConcurrentAccess(_ *testing.T) {
 
 func TestCreateMessageSpan(t *testing.T) {
 	config := llmtypes.Config{
-		Model:              "claude-sonnet-4-5",
+		Model:              "claude-sonnet-4-6",
 		MaxTokens:          4096,
 		WeakModelMaxTokens: 2048,
 		IsSubAgent:         false,
@@ -578,7 +578,7 @@ func TestCreateMessageSpan(t *testing.T) {
 
 func TestCreateMessageSpan_WithExtraAttributes(t *testing.T) {
 	config := llmtypes.Config{
-		Model:                "claude-sonnet-4-5",
+		Model:                "claude-sonnet-4-6",
 		MaxTokens:            4096,
 		ThinkingBudgetTokens: 1000,
 	}
@@ -1004,7 +1004,7 @@ func TestIsPersisted_Sequential(t *testing.T) {
 // TestNewThread_InitializesAllFields verifies all fields are properly initialized
 func TestNewThread_InitializesAllFields(t *testing.T) {
 	config := llmtypes.Config{
-		Model:                "claude-sonnet-4-5",
+		Model:                "claude-sonnet-4-6",
 		MaxTokens:            8192,
 		WeakModelMaxTokens:   2048,
 		ThinkingBudgetTokens: 1000,
@@ -1175,7 +1175,7 @@ func TestShouldAutoCompact_BoundaryConditions(t *testing.T) {
 // TestCreateMessageSpan_AllCommonAttributes verifies all expected attributes are set
 func TestCreateMessageSpan_AllCommonAttributes(t *testing.T) {
 	config := llmtypes.Config{
-		Model:              "claude-sonnet-4-5",
+		Model:              "claude-sonnet-4-6",
 		MaxTokens:          8192,
 		WeakModelMaxTokens: 2048,
 		IsSubAgent:         true,

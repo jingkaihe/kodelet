@@ -27,7 +27,7 @@ curl -sSL https://raw.githubusercontent.com/jingkaihe/kodelet/main/install.sh | 
 
 ## Choice of LLM
 
-Kodelet supports Anthropic Claude, OpenAI compatible models and Google Gemini. Currently we recommend using Claude Sonnet 4.5 for standard tasks and Claude 3.5 Haiku for lightweight tasks.
+Kodelet supports Anthropic Claude, OpenAI compatible models and Google Gemini. Currently we recommend using Claude Sonnet 4.6 for standard tasks and Claude 4.5 Haiku for lightweight tasks.
 
 ## Development
 

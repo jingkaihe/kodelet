@@ -54,7 +54,7 @@ func (m *mockState) UnlockFile(_ string)                                   {}
 
 func createTestThread() *Thread {
 	config := llmtypes.Config{
-		Model:     "claude-sonnet-4-5",
+		Model:     "claude-sonnet-4-6",
 		MaxTokens: 8192,
 	}
 

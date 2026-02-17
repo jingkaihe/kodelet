@@ -15,7 +15,7 @@ func TestSystemPrompt_ProviderSelection(t *testing.T) {
 		}
 		contexts := map[string]string{}
 
-		prompt := SystemPrompt("claude-sonnet-45", config, contexts)
+		prompt := SystemPrompt("claude-sonnet-46", config, contexts)
 		assert.NotEmpty(t, prompt)
 		assert.Contains(t, prompt, "interactive CLI tool")
 	})
@@ -39,7 +39,7 @@ func TestSubAgentPrompt_ProviderSelection(t *testing.T) {
 		}
 		contexts := map[string]string{}
 
-		prompt := SubAgentPrompt("claude-sonnet-45", config, contexts)
+		prompt := SubAgentPrompt("claude-sonnet-46", config, contexts)
 		assert.NotEmpty(t, prompt)
 		// SubAgentPrompt now delegates to SystemPrompt with IsSubAgent=true
 		assert.Contains(t, prompt, "interactive CLI tool")
@@ -205,7 +205,7 @@ func TestDisableSubagent_SystemPrompt(t *testing.T) {
 			DisableSubagent: true,
 		}
 
-		prompt := SystemPrompt("claude-sonnet-45", config, map[string]string{})
+		prompt := SystemPrompt("claude-sonnet-46", config, map[string]string{})
 
 		assert.NotContains(t, prompt, "ALWAYS prioritize `subagent`")
 		assert.NotContains(t, prompt, "Subagent tool usage examples")
@@ -219,7 +219,7 @@ func TestDisableSubagent_SystemPrompt(t *testing.T) {
 			DisableSubagent: false,
 		}
 
-		prompt := SystemPrompt("claude-sonnet-45", config, map[string]string{})
+		prompt := SystemPrompt("claude-sonnet-46", config, map[string]string{})
 
 		assert.Contains(t, prompt, "ALWAYS prioritize `subagent`")
 		assert.Contains(t, prompt, "Subagent tool usage examples")

@@ -49,7 +49,7 @@ jobs:
           anthropic-api-key: ${{ "{{" }} secrets.ANTHROPIC_API_KEY {{ "}}" }}
           auth-gateway-endpoint: {{ .AuthGatewayEndpoint }}
           kodelet-config: |
-            model: "claude-sonnet-4-5-20250929"
+            model: "claude-sonnet-4-6"
             weak_model: "claude-haiku-4-5-20251001"
             max_tokens: 64000
             weak_model_max_tokens: 8192
