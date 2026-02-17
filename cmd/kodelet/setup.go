@@ -101,9 +101,9 @@ var setupCmd = &cobra.Command{
     gemini-pro: gemini-2.5-pro
     haiku-45: claude-haiku-4-5-20251001
     opus-46: claude-opus-4-6
-    sonnet-45: claude-sonnet-4-5-20250929
+    sonnet-46: claude-sonnet-4-6
 max_tokens: 16000
-model: sonnet-45
+model: sonnet-46
 profile: default
 thinking_budget_tokens: 8000
 weak_model: haiku-45
@@ -111,7 +111,7 @@ weak_model_max_tokens: 8192
 profiles:
     hybrid:
         max_tokens: 16000
-        model: sonnet-45
+        model: sonnet-46
         subagent_args: "--profile openai-subagent"
         thinking_budget_tokens: 8000
         weak_model: haiku-45

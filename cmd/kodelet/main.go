@@ -21,7 +21,7 @@ func init() {
 	viper.SetDefault("max_tokens", 8192)
 	viper.SetDefault("weak_model_max_tokens", 8192)
 	viper.SetDefault("thinking_budget_tokens", 4048)
-	viper.SetDefault("model", anthropic.ModelClaudeSonnet4_5_20250929)
+	viper.SetDefault("model", "claude-sonnet-4-6")
 	viper.SetDefault("weak_model", anthropic.ModelClaudeHaiku4_5_20251001)
 	viper.SetDefault("provider", "anthropic")
 	viper.SetDefault("use_copilot", false)
@@ -100,7 +100,7 @@ func main() {
 
 	rootCmd.PersistentFlags().String("provider", "anthropic", "LLM provider to use (anthropic, openai)")
 	rootCmd.PersistentFlags().Bool("use-copilot", false, "Use GitHub Copilot subscription for OpenAI requests (env: KODELET_USE_COPILOT)")
-	rootCmd.PersistentFlags().String("model", string(anthropic.ModelClaudeSonnet4_5_20250929), "LLM model to use (overrides config)")
+	rootCmd.PersistentFlags().String("model", "claude-sonnet-4-6", "LLM model to use (overrides config)")
 	rootCmd.PersistentFlags().Int("max-tokens", 8192, "Maximum tokens for response (overrides config)")
 	rootCmd.PersistentFlags().Int("thinking-budget-tokens", 4048, "Maximum tokens for thinking capability (overrides config)")
 	rootCmd.PersistentFlags().String("weak-model", string(anthropic.ModelClaudeHaiku4_5_20251001), "Weak model to use (overrides config)")

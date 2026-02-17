@@ -775,7 +775,7 @@ Example:
   kodelet acp
   
   # With custom configuration
-  kodelet acp --model claude-sonnet-4-5-20250929`,
+  kodelet acp --model claude-sonnet-4-6`,
     RunE: runACP,
 }
 

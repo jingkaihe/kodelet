@@ -611,7 +611,7 @@ export KODELET_LOG_LEVEL="info"  # panic, fatal, error, warn, info, debug, trace
 # LLM configuration - Anthropic
 export ANTHROPIC_API_KEY="sk-ant-api..."
 export KODELET_PROVIDER="anthropic"  # Optional, detected from model name
-export KODELET_MODEL="claude-sonnet-4-5-20250929"
+export KODELET_MODEL="claude-sonnet-4-6"
 export KODELET_MAX_TOKENS="8192"
 export KODELET_CACHE_EVERY="5"  # Cache messages every N interactions (0 to disable)
 
@@ -644,7 +644,7 @@ Use `kodelet-config.yaml` in your project root for project-specific settings. Th
 ```yaml
 # Global config (~/.kodelet/config.yaml)
 provider: "anthropic"
-model: "claude-sonnet-4-5-20250929"
+model: "claude-sonnet-4-6"
 max_tokens: 8192
 log_level: "info"
 ```
@@ -673,7 +673,7 @@ log_level: "info"  # panic, fatal, error, warn, info, debug, trace
 
 # Anthropic configuration
 provider: "anthropic"
-model: "claude-sonnet-4-5-20250929"
+model: "claude-sonnet-4-6"
 max_tokens: 8192
 weak_model: "claude-haiku-4-5-20251001"
 weak_model_max_tokens: 8192
@@ -750,7 +750,7 @@ Profiles are defined in your configuration files using the `profiles` section. E
 ```yaml
 
 # Default profile
-model: "claude-sonnet-4-5-20250929"
+model: "claude-sonnet-4-6"
 weak_model: "claude-haiku-4-5-20251001"
 max_tokens: 16000
 weak_model_max_tokens: 8192
@@ -762,7 +762,7 @@ profile: "premium"  # Optional: specify the active profile
 # Profile definitions
 profiles:
   premium:
-    weak_model: "sonnet-45" # alias to "claude-sonnet-4-5-20250929"
+    weak_model: "sonnet-46" # alias to "claude-sonnet-4-6"
     max_tokens: 16000
     weak_model_max_tokens: 8192
     thinking_budget_tokens: 8000
@@ -787,7 +787,7 @@ profiles:
   mix-n-match:
     # Main agent uses Claude
     provider: "anthropic"
-    model: "claude-sonnet-4-5-20250929"
+    model: "claude-sonnet-4-6"
     weak_model: "claude-haiku-4-5-20251001"
     max_tokens: 16000
     # Subagent uses OpenAI profile for cross-provider support
@@ -804,7 +804,7 @@ profiles:
 aliases:
     haiku-45: claude-haiku-4-5-20251001
     opus-46: claude-opus-4-6
-    sonnet-45: claude-sonnet-4-5-20250929
+    sonnet-46: claude-sonnet-4-6
 ```
 
 ### Profile Management Commands
@@ -959,7 +959,7 @@ kodelet run --allowed-commands "ls *,pwd,echo *" "analyze this directory"
 ### Anthropic Claude
 
 Kodelet supports various Anthropic Claude models:
-- `claude-sonnet-4-5-20250929` (recommended for standard tasks)
+- `claude-sonnet-4-6` (recommended for standard tasks)
 - `claude-haiku-4-5-20251001` (recommended for lightweight tasks)
 - `claude-opus-4-5-20251101` (most intelligent model for building agents and coding)
 - `claude-opus-4-1-20250805` (high-end model for complex tasks)

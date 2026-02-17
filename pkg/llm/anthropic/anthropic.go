@@ -54,7 +54,7 @@ func (t *Thread) Provider() string {
 func NewAnthropicThread(config llmtypes.Config) (*Thread, error) {
 	// Apply defaults if not provided
 	if config.Model == "" {
-		config.Model = string(anthropic.ModelClaudeSonnet4_20250514)
+		config.Model = "claude-sonnet-4-6"
 	}
 	if config.MaxTokens == 0 {
 		config.MaxTokens = 8192
@@ -690,7 +690,8 @@ func (t *Thread) shouldUtiliseThinking(model anthropic.Model) bool {
 
 func isThinkingModel(model anthropic.Model) bool {
 	thinkingModels := []anthropic.Model{
-		// sonnet 4.5 models
+		// sonnet 4.6 and 4.5 models
+		"claude-sonnet-4-6",
 		anthropic.ModelClaudeSonnet4_5,
 		anthropic.ModelClaudeSonnet4_5_20250929,
 

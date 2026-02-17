@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.2.22.beta (2026-02-17)
+
+### Features
+
+Added `Claude Sonnet 4.6`
+ 
 ## 0.2.21.beta (2026-02-14)
 
 ### Features

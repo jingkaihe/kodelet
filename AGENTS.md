@@ -77,7 +77,7 @@ export GOOGLE_API_KEY="your-api-key"  # or GOOGLE_CLOUD_PROJECT for Vertex AI
 
 # Common settings
 export KODELET_PROVIDER="anthropic|openai|google"
-export KODELET_MODEL="claude-sonnet-4-5-20250929|gpt-4.1|gemini-2.5-pro"
+export KODELET_MODEL="claude-sonnet-4-6|gpt-4.1|gemini-2.5-pro"
 ```
 
 See [`config.sample.yaml`](./config.sample.yaml) for all options.

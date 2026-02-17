@@ -32,6 +32,13 @@ var ModelPricingMap = map[anthropic.Model]ModelPricing{
 		PromptCachingRead:  0.0000003,  // $0.30 per million tokens
 		ContextWindow:      200_000,
 	},
+	"claude-sonnet-4-6": {
+		Input:              0.000003,   // $3.00 per million tokens
+		Output:             0.000015,   // $15.00 per million tokens
+		PromptCachingWrite: 0.00000375, // $3.75 per million tokens
+		PromptCachingRead:  0.0000003,  // $0.30 per million tokens
+		ContextWindow:      200_000,
+	},
 	anthropic.ModelClaudeSonnet4_5_20250929: {
 		Input:              0.000003,   // $3.00 per million tokens
 		Output:             0.000015,   // $15.00 per million tokens
@@ -106,7 +113,9 @@ func getModelPricing(model anthropic.Model) ModelPricing {
 	}
 	// Try to find a match based on model family
 	lowerModel := strings.ToLower(string(model))
-	if strings.Contains(lowerModel, "claude-sonnet-4-5") {
+	if strings.Contains(lowerModel, "claude-sonnet-4-6") {
+		return ModelPricingMap["claude-sonnet-4-6"]
+	} else if strings.Contains(lowerModel, "claude-sonnet-4-5") {
 		return ModelPricingMap[anthropic.ModelClaudeSonnet4_5]
 	} else if strings.Contains(lowerModel, "claude-4-sonnet") || strings.Contains(lowerModel, "claude-sonnet-4") {
 		return ModelPricingMap[anthropic.ModelClaudeSonnet4_0]
@@ -124,6 +133,6 @@ func getModelPricing(model anthropic.Model) ModelPricing {
 		return ModelPricingMap["claude-3-haiku-20240307"]
 	}
 
-	// Default to Claude Sonnet 4.5 pricing if no match
-	return ModelPricingMap[anthropic.ModelClaudeSonnet4_5_20250929]
+	// Default to Claude Sonnet 4.6 pricing if no match
+	return ModelPricingMap["claude-sonnet-4-6"]
 }

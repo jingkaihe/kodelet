@@ -10,7 +10,7 @@ import (
 )
 
 func TestSubAgentPrompt(t *testing.T) {
-	prompt := SubAgentPrompt("claude-sonnet-4-5-20250929", llm.Config{}, map[string]string{})
+	prompt := SubAgentPrompt("claude-sonnet-4-6", llm.Config{}, map[string]string{})
 
 	// SubAgentPrompt now uses SystemPrompt with IsSubAgent=true
 	// It should contain the main system prompt content
@@ -43,7 +43,7 @@ func TestSubAgentPrompt(t *testing.T) {
 }
 
 func TestSubAgentPromptBashBannedCommands(t *testing.T) {
-	prompt := SubAgentPrompt("claude-sonnet-4-5-20250929", llm.Config{}, map[string]string{})
+	prompt := SubAgentPrompt("claude-sonnet-4-6", llm.Config{}, map[string]string{})
 
 	assert.Contains(t, prompt, "Bash Command Restrictions", "Expected subagent prompt to contain 'Bash Command Restrictions' section")
 	assert.Contains(t, prompt, "Banned Commands", "Expected subagent prompt to contain 'Banned Commands' section")
@@ -61,7 +61,7 @@ func TestSubAgentPromptBashAllowedCommands(t *testing.T) {
 		IsSubAgent:      true,
 	}
 
-	prompt := SubAgentPrompt("claude-sonnet-4-5-20250929", llmConfig, nil)
+	prompt := SubAgentPrompt("claude-sonnet-4-6", llmConfig, nil)
 
 	assert.Contains(t, prompt, "Bash Command Restrictions", "Expected subagent prompt to contain 'Bash Command Restrictions' section")
 	assert.Contains(t, prompt, "Allowed Commands", "Expected subagent prompt to contain 'Allowed Commands' section")
@@ -76,7 +76,7 @@ func TestSubAgentPromptBashAllowedCommands(t *testing.T) {
 
 func TestSubAgentPromptContextConsistency(t *testing.T) {
 	promptCtx := NewPromptContext(nil)
-	config := NewDefaultConfig().WithModel("claude-sonnet-4-5-20250929")
+	config := NewDefaultConfig().WithModel("claude-sonnet-4-6")
 	allowedCommands := []string{"test *", "verify *"}
 	llmConfig := llm.Config{
 		AllowedCommands: allowedCommands,
@@ -91,7 +91,7 @@ func TestSubAgentPromptContextConsistency(t *testing.T) {
 	require.NoError(t, err, "Failed to render system prompt")
 
 	// Subagent prompt is now just SystemPrompt with IsSubAgent=true
-	subagentPrompt := SubAgentPrompt("claude-sonnet-4-5-20250929", llmConfig, nil)
+	subagentPrompt := SubAgentPrompt("claude-sonnet-4-6", llmConfig, nil)
 
 	for _, allowedCmd := range allowedCommands {
 		assert.Contains(t, systemPrompt, allowedCmd, "Expected system prompt to contain allowed command: %q", allowedCmd)
@@ -111,7 +111,7 @@ func TestSubAgentPrompt_WithContexts(t *testing.T) {
 		"/home/user/.kodelet/AGENTS.md": "# User Preferences\nPersonal coding style and preferences.",
 	}
 
-	prompt := SubAgentPrompt("claude-sonnet-4-5-20250929", llm.Config{}, contexts)
+	prompt := SubAgentPrompt("claude-sonnet-4-6", llm.Config{}, contexts)
 
 	assert.Contains(t, prompt, "You are an interactive CLI tool", "Expected subagent introduction")
 	assert.Contains(t, prompt, "Here are some useful context to help you solve the user's problem.", "Expected context introduction")
@@ -129,7 +129,7 @@ func TestSubAgentPrompt_WithContexts(t *testing.T) {
 
 func TestSubAgentPrompt_WithEmptyContexts(t *testing.T) {
 	emptyContexts := map[string]string{}
-	prompt := SubAgentPrompt("claude-sonnet-4-5-20250929", llm.Config{}, emptyContexts)
+	prompt := SubAgentPrompt("claude-sonnet-4-6", llm.Config{}, emptyContexts)
 
 	assert.Contains(t, prompt, "You are an interactive CLI tool", "Expected subagent introduction")
 	assert.Contains(t, prompt, "System Information", "Expected system information section")
@@ -137,7 +137,7 @@ func TestSubAgentPrompt_WithEmptyContexts(t *testing.T) {
 }
 
 func TestSubAgentPrompt_WithNilContexts(t *testing.T) {
-	prompt := SubAgentPrompt("claude-sonnet-4-5-20250929", llm.Config{}, nil)
+	prompt := SubAgentPrompt("claude-sonnet-4-6", llm.Config{}, nil)
 
 	assert.Contains(t, prompt, "You are an interactive CLI tool", "Expected subagent introduction")
 	assert.Contains(t, prompt, "System Information", "Expected system information section")
@@ -149,7 +149,7 @@ func TestSubAgentPrompt_ContextFormattingConsistency(t *testing.T) {
 			"/project/docs/CODING_STYLE.md": "# Coding Style\n\n```go\nfunc Example() {\n    fmt.Println(\"hello\")\n}\n```\n\nUse proper indentation.",
 		}
 
-		prompt := SubAgentPrompt("claude-sonnet-4-5-20250929", llm.Config{}, contexts)
+		prompt := SubAgentPrompt("claude-sonnet-4-6", llm.Config{}, contexts)
 
 		assert.Contains(t, prompt, `<context filename="/project/docs/CODING_STYLE.md", dir="/project/docs">`, "Expected context file with full path")
 		assert.Contains(t, prompt, "# Coding Style", "Expected markdown header")
@@ -182,8 +182,8 @@ func TestSubAgentPrompt_FeatureConsistency(t *testing.T) {
 
 	llmConfig := llm.Config{}
 
-	systemPrompt := SystemPrompt("claude-sonnet-4-5-20250929", llmConfig, contexts)
-	subagentPrompt := SubAgentPrompt("claude-sonnet-4-5-20250929", llmConfig, contexts)
+	systemPrompt := SystemPrompt("claude-sonnet-4-6", llmConfig, contexts)
+	subagentPrompt := SubAgentPrompt("claude-sonnet-4-6", llmConfig, contexts)
 
 	assert.Contains(t, systemPrompt, "# Shared Context", "Expected shared context in system prompt")
 	assert.Contains(t, subagentPrompt, "# Shared Context", "Expected shared context in subagent prompt")
@@ -199,8 +199,8 @@ func TestSubAgentPrompt_FeatureConsistency(t *testing.T) {
 
 func TestSubAgentPrompt_NoSubagentExamples(t *testing.T) {
 	// Verify that subagent prompts don't include subagent tool usage examples (to prevent recursion)
-	systemPrompt := SystemPrompt("claude-sonnet-4-5-20250929", llm.Config{}, nil)
-	subagentPrompt := SubAgentPrompt("claude-sonnet-4-5-20250929", llm.Config{}, nil)
+	systemPrompt := SystemPrompt("claude-sonnet-4-6", llm.Config{}, nil)
+	subagentPrompt := SubAgentPrompt("claude-sonnet-4-6", llm.Config{}, nil)
 
 	// System prompt (not subagent) SHOULD have subagent examples
 	assert.Contains(t, systemPrompt, "## Subagent tool usage examples", "Expected system prompt to contain subagent examples")

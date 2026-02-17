@@ -88,16 +88,16 @@ func TestGetConfigFromViperWithAliases(t *testing.T) {
 			name: "loads aliases from config",
 			configData: map[string]any{
 				"provider":   "anthropic",
-				"model":      "claude-sonnet-4-5-20250929",
+				"model":      "claude-sonnet-4-6",
 				"max_tokens": 8192,
 				"aliases": map[string]any{
-					"sonnet-45": "claude-sonnet-4-5-20250929",
+					"sonnet-46": "claude-sonnet-4-6",
 					"haiku-45":  "claude-haiku-4-5-20251001",
 					"gpt41":     "gpt-4.1",
 				},
 			},
 			expectedAliases: map[string]string{
-				"sonnet-45": "claude-sonnet-4-5-20250929",
+				"sonnet-46": "claude-sonnet-4-6",
 				"haiku-45":  "claude-haiku-4-5-20251001",
 				"gpt41":     "gpt-4.1",
 			},
@@ -107,7 +107,7 @@ func TestGetConfigFromViperWithAliases(t *testing.T) {
 			name: "handles missing aliases config",
 			configData: map[string]any{
 				"provider":   "anthropic",
-				"model":      "claude-sonnet-4-5-20250929",
+				"model":      "claude-sonnet-4-6",
 				"max_tokens": 8192,
 			},
 			expectedAliases: nil,
@@ -156,10 +156,10 @@ func TestConfigAliasIntegrationWithNewThread(t *testing.T) {
 	// Reset viper and set config with alias
 	viper.Reset()
 	viper.Set("provider", "anthropic")
-	viper.Set("model", "sonnet-45") // This is an alias
+	viper.Set("model", "sonnet-46") // This is an alias
 	viper.Set("max_tokens", 8192)
 	viper.Set("aliases", map[string]any{
-		"sonnet-45": "claude-sonnet-4-5-20250929",
+		"sonnet-46": "claude-sonnet-4-6",
 		"haiku-45":  "claude-haiku-4-5-20251001",
 	})
 
