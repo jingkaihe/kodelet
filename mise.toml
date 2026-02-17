@@ -11,6 +11,8 @@ fd = "10.3.0"
 # Development and build tools
 golangci-lint = "latest"
 air = "latest"
+gh = "latest"
+
 "go:github.com/isaacphi/mcp-language-server" = "latest"
 "go:golang.org/x/tools/gopls" = "latest"
 "go:honnef.co/go/tools/cmd/staticcheck" = "latest"
@@ -204,4 +206,3 @@ run = [
   "cd pkg/webui/frontend && npm install",
   "echo 'All dependencies installed successfully!'",
 ]
-
