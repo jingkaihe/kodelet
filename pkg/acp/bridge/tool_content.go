@@ -50,14 +50,19 @@ func (g *ToolContentGenerator) generateBashContent(structured tooltypes.Structur
 	var bgMeta tooltypes.BackgroundBashMetadata
 
 	if tooltypes.ExtractMetadata(structured.Metadata, &bashMeta) {
-		// Error case: wrap in code block
+		// Error case: include command output (stdout/stderr) when available
 		if structured.Error != "" {
+			errText := structured.Error
+			if strings.TrimSpace(bashMeta.Output) != "" {
+				errText = fmt.Sprintf("%s\n\n%s", structured.Error, bashMeta.Output)
+			}
+
 			return []map[string]any{
 				{
 					"type": ToolCallContentTypeContent,
 					"content": map[string]any{
 						"type": acptypes.ContentTypeText,
-						"text": markdownEscape(structured.Error),
+						"text": markdownEscape(errText),
 					},
 				},
 			}
