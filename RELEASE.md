@@ -1,8 +1,10 @@
 # Kodelet
 
-## Unreleased
+## 0.2.23.beta (2026-02-19)
 
 - OpenAI Responses now persists conversation state on each exchange (including error paths), with regression tests to prevent persistence regressions.
+- Patched frontend high-severity transitive vulnerabilities by updating the lockfile to use `sucrase@3.35.1` (removing the vulnerable `glob`/`minimatch` chain).
+- Todo tools are now disabled by default for the main agent, and can be explicitly re-enabled with `--enable-todos` (or `enable_todos: true`).
 
 ## 0.2.22.beta (2026-02-17)
 
