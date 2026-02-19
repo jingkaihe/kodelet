@@ -6,8 +6,15 @@ import (
 	"os"
 	"testing"
 
+	"github.com/jingkaihe/kodelet/pkg/hooks"
+	"github.com/jingkaihe/kodelet/pkg/llm/base"
+	"github.com/jingkaihe/kodelet/pkg/tools"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/openai/openai-go/v3/option"
+	"github.com/openai/openai-go/v3/packages/param"
+	"github.com/openai/openai-go/v3/packages/ssestream"
 	openairesponses "github.com/openai/openai-go/v3/responses"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
@@ -722,4 +729,102 @@ func splitWords(s string) []string {
 		words = append(words, string(current))
 	}
 	return words
+}
+
+type mockResponsesConversationStore struct {
+	savedRecords []convtypes.ConversationRecord
+}
+
+func (m *mockResponsesConversationStore) Save(_ context.Context, record convtypes.ConversationRecord) error {
+	m.savedRecords = append(m.savedRecords, record)
+	return nil
+}
+
+func (*mockResponsesConversationStore) Load(_ context.Context, _ string) (convtypes.ConversationRecord, error) {
+	return convtypes.ConversationRecord{}, nil
+}
+
+func (*mockResponsesConversationStore) Delete(_ context.Context, _ string) error {
+	return nil
+}
+
+func (*mockResponsesConversationStore) Query(_ context.Context, _ convtypes.QueryOptions) (convtypes.QueryResult, error) {
+	return convtypes.QueryResult{}, nil
+}
+
+func (*mockResponsesConversationStore) Close() error {
+	return nil
+}
+
+func TestProcessMessageExchangeSavesConversationPerTurn(t *testing.T) {
+	thread := &Thread{
+		Thread: base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-4.1", IsSubAgent: true}, "conv-test", hooks.Trigger{}),
+	}
+	thread.SetState(tools.NewBasicState(context.Background()))
+
+	store := &mockResponsesConversationStore{}
+	thread.Store = store
+	thread.Persisted = true
+	thread.inputItems = []openairesponses.ResponseInputItemUnionParam{
+		{
+			OfMessage: &openairesponses.EasyInputMessageParam{
+				Role:    openairesponses.EasyInputMessageRoleUser,
+				Content: openairesponses.EasyInputMessageContentUnionParam{OfString: param.NewOpt("hello")},
+			},
+		},
+	}
+	thread.pendingItems = append([]openairesponses.ResponseInputItemUnionParam{}, thread.inputItems...)
+	thread.storedItems = []StoredInputItem{{Type: "message", Role: "user", Content: "hello"}}
+
+	thread.newStreamingFunc = func(_ context.Context, _ openairesponses.ResponseNewParams, _ ...option.RequestOption) *ssestream.Stream[openairesponses.ResponseStreamEventUnion] {
+		return nil
+	}
+	thread.processStreamFunc = func(_ context.Context, _ *ssestream.Stream[openairesponses.ResponseStreamEventUnion], _ llmtypes.MessageHandler) (bool, error) {
+		thread.inputItems = append(thread.inputItems, openairesponses.ResponseInputItemUnionParam{
+			OfMessage: &openairesponses.EasyInputMessageParam{
+				Role:    openairesponses.EasyInputMessageRoleAssistant,
+				Content: openairesponses.EasyInputMessageContentUnionParam{OfString: param.NewOpt("turn")},
+			},
+		})
+		thread.storedItems = append(thread.storedItems, StoredInputItem{Type: "message", Role: "assistant", Content: "turn"})
+		return false, nil
+	}
+
+	handler := &llmtypes.StringCollectorHandler{Silent: true}
+	_, _, err := thread.processMessageExchange(context.Background(), handler, "gpt-4.1", 256, "system", llmtypes.MessageOpt{NoToolUse: true})
+	require.NoError(t, err)
+	assert.Equal(t, 1, len(store.savedRecords))
+}
+
+func TestProcessMessageExchangeSavesConversationOnError(t *testing.T) {
+	thread := &Thread{
+		Thread: base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-4.1", IsSubAgent: true}, "conv-test", hooks.Trigger{}),
+	}
+	thread.SetState(tools.NewBasicState(context.Background()))
+
+	store := &mockResponsesConversationStore{}
+	thread.Store = store
+	thread.Persisted = true
+	thread.inputItems = []openairesponses.ResponseInputItemUnionParam{
+		{
+			OfMessage: &openairesponses.EasyInputMessageParam{
+				Role:    openairesponses.EasyInputMessageRoleUser,
+				Content: openairesponses.EasyInputMessageContentUnionParam{OfString: param.NewOpt("hello")},
+			},
+		},
+	}
+	thread.pendingItems = append([]openairesponses.ResponseInputItemUnionParam{}, thread.inputItems...)
+	thread.storedItems = []StoredInputItem{{Type: "message", Role: "user", Content: "hello"}}
+
+	thread.newStreamingFunc = func(_ context.Context, _ openairesponses.ResponseNewParams, _ ...option.RequestOption) *ssestream.Stream[openairesponses.ResponseStreamEventUnion] {
+		return nil
+	}
+	thread.processStreamFunc = func(_ context.Context, _ *ssestream.Stream[openairesponses.ResponseStreamEventUnion], _ llmtypes.MessageHandler) (bool, error) {
+		return false, errors.New("exchange failed")
+	}
+
+	handler := &llmtypes.StringCollectorHandler{Silent: true}
+	_, _, err := thread.processMessageExchange(context.Background(), handler, "gpt-4.1", 256, "system", llmtypes.MessageOpt{NoToolUse: true})
+	require.Error(t, err)
+	assert.Equal(t, 1, len(store.savedRecords))
 }

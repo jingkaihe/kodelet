@@ -1,5 +1,9 @@
 # Kodelet
 
+## Unreleased
+
+- OpenAI Responses now persists conversation state on each exchange (including error paths), with regression tests to prevent persistence regressions.
+
 ## 0.2.22.beta (2026-02-17)
 
 ### Features

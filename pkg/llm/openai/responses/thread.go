@@ -34,6 +34,7 @@ import (
 	openai "github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
 	"github.com/openai/openai-go/v3/packages/param"
+	"github.com/openai/openai-go/v3/packages/ssestream"
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/openai/openai-go/v3/shared"
 )
@@ -83,6 +84,17 @@ type Thread struct {
 	// isCodex indicates if this thread is using Codex authentication
 	// Some API parameters may not be supported by the Codex API
 	isCodex bool
+
+	processMessageExchangeFunc func(
+		ctx context.Context,
+		handler llmtypes.MessageHandler,
+		model string,
+		maxTokens int,
+		systemPrompt string,
+		opt llmtypes.MessageOpt,
+	) (string, bool, error)
+	newStreamingFunc  func(context.Context, responses.ResponseNewParams, ...option.RequestOption) *ssestream.Stream[responses.ResponseStreamEventUnion]
+	processStreamFunc func(context.Context, *ssestream.Stream[responses.ResponseStreamEventUnion], llmtypes.MessageHandler) (bool, error)
 }
 
 // NewThread creates a new Responses API thread with the given configuration.
@@ -126,6 +138,9 @@ func NewThread(config llmtypes.Config) (*Thread, error) {
 		customPricing:   customPricing,
 		isCodex:         useCodex,
 	}
+	thread.processMessageExchangeFunc = thread.processMessageExchange
+	thread.newStreamingFunc = thread.client.Responses.NewStreaming
+	thread.processStreamFunc = thread.processStream
 
 	// Set the LoadConversation callback for provider-specific loading
 	baseThread.LoadConversation = thread.loadConversation
@@ -283,11 +298,18 @@ OUTER:
 			t.TryAutoCompact(ctx, opt.DisableAutoCompact, opt.CompactRatio, t.CompactContext)
 
 			logger.G(ctx).WithField("model", model).Debug("starting message exchange")
-			exchangeOutput, toolsUsed, err := t.processMessageExchange(ctx, handler, model, maxTokens, systemPrompt, opt)
+			processExchange := t.processMessageExchangeFunc
+			if processExchange == nil {
+				processExchange = t.processMessageExchange
+			}
+			exchangeOutput, toolsUsed, err := processExchange(ctx, handler, model, maxTokens, systemPrompt, opt)
 			if err != nil {
 				if errors.Is(err, context.Canceled) {
 					logger.G(ctx).Info("Request cancelled, stopping kodelet.llm.openai.responses")
 					break OUTER
+				}
+				if t.Persisted && t.Store != nil && !opt.NoSaveConversation {
+					t.SaveConversation(ctx, false)
 				}
 				return "", err
 			}
@@ -380,6 +402,12 @@ func (t *Thread) processMessageExchange(
 	log := logger.G(ctx)
 	var finalOutput string
 
+	saveConversation := func() {
+		if t.Persisted && t.Store != nil && !opt.NoSaveConversation {
+			t.SaveConversation(ctx, false)
+		}
+	}
+
 	// Build tools
 	tools := buildTools(t.State, opt.NoToolUse)
 	log.WithField("tool_count", len(tools)).Debug("built tools for request")
@@ -436,12 +464,21 @@ func (t *Thread) processMessageExchange(
 		WithField("is_codex", t.isCodex).
 		Debug("sending request to Responses API")
 
+	newStreaming := t.newStreamingFunc
+	if newStreaming == nil {
+		newStreaming = t.client.Responses.NewStreaming
+	}
+	processStream := t.processStreamFunc
+	if processStream == nil {
+		processStream = t.processStream
+	}
+
 	// Use streaming API
-	stream := t.client.Responses.NewStreaming(ctx, params)
+	stream := newStreaming(ctx, params)
 	log.Debug("stream created, processing events")
 
 	// Process stream events
-	toolsUsed, err := t.processStream(ctx, stream, handler)
+	toolsUsed, err := processStream(ctx, stream, handler)
 	if err != nil {
 		// Log detailed error information for debugging
 		log.WithError(err).
@@ -464,12 +501,14 @@ func (t *Thread) processMessageExchange(
 			params.PreviousResponseID = param.Opt[string]{} // Clear the param
 
 			// Retry the request
-			stream = t.client.Responses.NewStreaming(ctx, params)
-			toolsUsed, err = t.processStream(ctx, stream, handler)
+			stream = newStreaming(ctx, params)
+			toolsUsed, err = processStream(ctx, stream, handler)
 			if err != nil {
+				saveConversation()
 				return "", false, err
 			}
 		} else {
+			saveConversation()
 			return "", false, err
 		}
 	}
@@ -487,6 +526,8 @@ func (t *Thread) processMessageExchange(
 			}
 		}
 	}
+
+	saveConversation()
 
 	return finalOutput, toolsUsed, nil
 }
