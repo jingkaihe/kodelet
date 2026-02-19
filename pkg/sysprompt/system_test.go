@@ -20,8 +20,6 @@ func TestSystemPrompt(t *testing.T) {
 		"Tool Usage",
 		"invoke multiple INDEPENDENT tools",
 		"Task Management",
-		"todo_write",
-		"todo_read",
 		"Context",
 		"file, it will be automatically loaded",
 		"System Information",
@@ -196,4 +194,21 @@ func TestSystemPrompt_UsesConfiguredContextPatterns(t *testing.T) {
 
 	assert.Contains(t, prompt, "If the current working directory contains a `README.md` file")
 	assert.NotContains(t, prompt, "If the current working directory contains a `AGENTS.md` file")
+}
+
+func TestSystemPrompt_TodoToolsFeatureFlag(t *testing.T) {
+	t.Run("todo tools disabled by default", func(t *testing.T) {
+		prompt := SystemPrompt("claude-sonnet-4-6", llm.Config{}, map[string]string{})
+
+		assert.Contains(t, prompt, "# Task Management")
+		assert.NotContains(t, prompt, "You have access to the `todo_write` and `todo_read` tools")
+		assert.NotContains(t, prompt, "## Task management examples")
+	})
+
+	t.Run("todo tools enabled with flag", func(t *testing.T) {
+		prompt := SystemPrompt("claude-sonnet-4-6", llm.Config{EnableTodos: true}, map[string]string{})
+
+		assert.Contains(t, prompt, "You have access to the `todo_write` and `todo_read` tools")
+		assert.Contains(t, prompt, "## Task management examples")
+	})
 }

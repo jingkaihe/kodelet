@@ -29,6 +29,7 @@ func init() {
 	viper.SetDefault("allowed_commands", []string{})
 	viper.SetDefault("allowed_domains_file", "~/.kodelet/allowed_domains.txt")
 	viper.SetDefault("anthropic_api_access", "auto")
+	viper.SetDefault("enable_todos", false)
 
 	viper.SetDefault("commit.coauthor.enabled", true)
 	viper.SetDefault("commit.coauthor.name", "Kodelet")
@@ -116,6 +117,7 @@ func main() {
 	rootCmd.PersistentFlags().Bool("no-skills", false, "Disable agentic skills")
 	rootCmd.PersistentFlags().Bool("no-workflows", false, "Disable subagent workflows")
 	rootCmd.PersistentFlags().Bool("disable-subagent", false, "Disable the subagent tool and remove subagent-related system prompt context")
+	rootCmd.PersistentFlags().Bool("enable-todos", false, "Enable todo_read and todo_write tools for the main agent")
 	rootCmd.PersistentFlags().StringSlice("context-patterns", []string{"AGENTS.md"}, "Context file patterns to load (e.g. 'AGENTS.md,README.md')")
 
 	viper.BindPFlag("provider", rootCmd.PersistentFlags().Lookup("provider"))
@@ -137,6 +139,7 @@ func main() {
 	viper.BindPFlag("no_skills", rootCmd.PersistentFlags().Lookup("no-skills"))
 	viper.BindPFlag("no_workflows", rootCmd.PersistentFlags().Lookup("no-workflows"))
 	viper.BindPFlag("disable_subagent", rootCmd.PersistentFlags().Lookup("disable-subagent"))
+	viper.BindPFlag("enable_todos", rootCmd.PersistentFlags().Lookup("enable-todos"))
 	viper.BindPFlag("context.patterns", rootCmd.PersistentFlags().Lookup("context-patterns"))
 
 	rootCmd.AddCommand(runCmd)

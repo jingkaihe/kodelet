@@ -59,7 +59,7 @@ func NewPromptContext(contexts map[string]string) *PromptContext {
 
 	features := map[string]bool{
 		"subagentEnabled":  true,
-		"todoToolsEnabled": true,
+		"todoToolsEnabled": false,
 	}
 
 	// Use provided contexts or initialize empty map

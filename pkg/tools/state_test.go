@@ -31,7 +31,7 @@ func TestBasicState(t *testing.T) {
 	assert.True(t, lastAccessed.IsZero())
 
 	tools := s.Tools()
-	mainTools := GetMainTools(context.Background(), []string{})
+	mainTools := GetMainTools(context.Background(), []string{}, false)
 	assert.Equal(t, len(mainTools), len(tools))
 	for i, tool := range tools {
 		assert.Equal(t, mainTools[i].Name(), tool.Name())
@@ -742,6 +742,33 @@ func TestWithMainTools(t *testing.T) {
 		}
 
 		assert.Contains(t, toolNames, "subagent", "Main tools should include subagent")
+	})
+
+	t.Run("todo tools disabled by default", func(t *testing.T) {
+		state := NewBasicState(ctx, WithMainTools())
+
+		toolNames := make([]string, len(state.Tools()))
+		for i, tool := range state.Tools() {
+			toolNames[i] = tool.Name()
+		}
+
+		assert.NotContains(t, toolNames, "todo_read")
+		assert.NotContains(t, toolNames, "todo_write")
+	})
+
+	t.Run("EnableTodos includes todo tools", func(t *testing.T) {
+		config := llmtypes.Config{
+			EnableTodos: true,
+		}
+		state := NewBasicState(ctx, WithLLMConfig(config), WithMainTools())
+
+		toolNames := make([]string, len(state.Tools()))
+		for i, tool := range state.Tools() {
+			toolNames[i] = tool.Name()
+		}
+
+		assert.Contains(t, toolNames, "todo_read")
+		assert.Contains(t, toolNames, "todo_write")
 	})
 
 	t.Run("respects allowed_tools from config", func(t *testing.T) {

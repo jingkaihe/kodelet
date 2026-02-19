@@ -187,10 +187,10 @@ func TestErrorMessageFormat(t *testing.T) {
 func TestGetMainTools_FallsBackOnValidationErrors(t *testing.T) {
 	// Test with invalid tools
 	invalidTools := []string{"unknown_tool", "bash"}
-	tools := GetMainTools(context.Background(), invalidTools)
+	tools := GetMainTools(context.Background(), invalidTools, false)
 
 	// Should fallback to default tools
-	defaultTools := GetMainTools(context.Background(), []string{})
+	defaultTools := GetMainTools(context.Background(), []string{}, false)
 	assert.Equal(t, len(defaultTools), len(tools), "Should fallback to default tools")
 
 	// Verify we got the default tools, not the invalid ones
@@ -221,7 +221,7 @@ func TestGetSubAgentTools_FallsBackOnValidationErrors(t *testing.T) {
 func TestGetMainTools_UsesValidTools(t *testing.T) {
 	// Test with valid tools
 	validTools := []string{"bash", "file_read", "file_write"}
-	tools := GetMainTools(context.Background(), validTools)
+	tools := GetMainTools(context.Background(), validTools, false)
 
 	// Should use the requested tools (plus meta tools)
 	assert.GreaterOrEqual(t, len(tools), len(validTools), "Should include at least the requested tools")
@@ -239,7 +239,7 @@ func TestGetMainTools_UsesValidTools(t *testing.T) {
 
 func TestGetMainTools_NoToolsMarker(t *testing.T) {
 	// Test that NoToolsMarker returns nil (no tools)
-	tools := GetMainTools(context.Background(), []string{NoToolsMarker})
+	tools := GetMainTools(context.Background(), []string{NoToolsMarker}, false)
 
 	assert.Nil(t, tools, "NoToolsMarker should return nil tools")
 	assert.Len(t, tools, 0, "NoToolsMarker should return zero tools")
@@ -277,7 +277,7 @@ func TestGetSubAgentTools_ExcludesSubagentTool(t *testing.T) {
 
 func TestGetMainTools_IncludesSubagentTool(t *testing.T) {
 	// Verify that main tools DO include the subagent tool
-	tools := GetMainTools(context.Background(), []string{})
+	tools := GetMainTools(context.Background(), []string{}, false)
 
 	toolNames := make([]string, len(tools))
 	for i, tool := range tools {
@@ -287,9 +287,48 @@ func TestGetMainTools_IncludesSubagentTool(t *testing.T) {
 	assert.Contains(t, toolNames, "subagent", "Main tools should include the subagent tool")
 }
 
+func TestGetMainTools_TodoToolsToggle(t *testing.T) {
+	t.Run("todo tools disabled by default", func(t *testing.T) {
+		tools := GetMainTools(context.Background(), []string{}, false)
+
+		toolNames := make([]string, len(tools))
+		for i, tool := range tools {
+			toolNames[i] = tool.Name()
+		}
+
+		assert.NotContains(t, toolNames, "todo_read")
+		assert.NotContains(t, toolNames, "todo_write")
+	})
+
+	t.Run("todo tools enabled when flag is true", func(t *testing.T) {
+		tools := GetMainTools(context.Background(), []string{}, true)
+
+		toolNames := make([]string, len(tools))
+		for i, tool := range tools {
+			toolNames[i] = tool.Name()
+		}
+
+		assert.Contains(t, toolNames, "todo_read")
+		assert.Contains(t, toolNames, "todo_write")
+	})
+
+	t.Run("explicit todo tools are filtered out when todos disabled", func(t *testing.T) {
+		tools := GetMainTools(context.Background(), []string{"bash", "todo_read", "todo_write"}, false)
+
+		toolNames := make([]string, len(tools))
+		for i, tool := range tools {
+			toolNames[i] = tool.Name()
+		}
+
+		assert.Contains(t, toolNames, "bash")
+		assert.NotContains(t, toolNames, "todo_read")
+		assert.NotContains(t, toolNames, "todo_write")
+	})
+}
+
 func TestFilterOutSubagent(t *testing.T) {
 	t.Run("removes subagent from tool list", func(t *testing.T) {
-		tools := GetMainTools(context.Background(), []string{})
+		tools := GetMainTools(context.Background(), []string{}, false)
 		filtered := filterOutSubagent(tools)
 
 		toolNames := make([]string, len(filtered))

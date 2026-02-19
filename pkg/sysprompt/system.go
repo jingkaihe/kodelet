@@ -19,6 +19,10 @@ func SystemPrompt(model string, llmConfig llm.Config, contexts map[string]string
 	renderer := NewRenderer(TemplateFS)
 	config := NewDefaultConfig().WithModel(model)
 
+	if llmConfig.EnableTodos {
+		config.EnabledFeatures = append(config.EnabledFeatures, "todoTools")
+	}
+
 	// Add isSubagent feature and remove todoTools when running as subagent
 	if llmConfig.IsSubAgent {
 		config.EnabledFeatures = append(config.EnabledFeatures, "isSubagent")

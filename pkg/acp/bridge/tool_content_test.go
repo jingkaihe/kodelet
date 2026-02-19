@@ -121,7 +121,7 @@ func TestToolContentGenerator_GenerateBashContent(t *testing.T) {
 		assert.Equal(t, ToolCallContentTypeContent, content[0]["type"])
 		errContent := content[0]["content"].(map[string]any)
 		assert.Equal(t, acptypes.ContentTypeText, errContent["type"])
-		assert.Equal(t, "```\ncommand failed\n```", errContent["text"])
+		assert.Equal(t, "```\ncommand failed\n\nerror output\n```", errContent["text"])
 	})
 
 	t.Run("background bash process", func(t *testing.T) {

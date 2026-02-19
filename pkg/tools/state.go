@@ -103,7 +103,7 @@ func NewBasicState(ctx context.Context, opts ...BasicStateOption) *BasicState {
 		if state.llmConfig.AllowedTools != nil {
 			allowedTools = state.llmConfig.AllowedTools
 		}
-		state.tools = GetMainTools(ctx, allowedTools)
+		state.tools = GetMainTools(ctx, allowedTools, state.llmConfig.EnableTodos)
 		state.configureTools()
 	}
 
@@ -131,7 +131,7 @@ func WithMainTools() BasicStateOption {
 		if s.llmConfig.AllowedTools != nil {
 			allowedTools = s.llmConfig.AllowedTools
 		}
-		s.tools = GetMainTools(ctx, allowedTools)
+		s.tools = GetMainTools(ctx, allowedTools, s.llmConfig.EnableTodos)
 		if s.llmConfig.DisableSubagent {
 			s.tools = filterOutSubagent(s.tools)
 		}

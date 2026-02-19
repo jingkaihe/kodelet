@@ -735,6 +735,9 @@ kodelet run --allowed-commands "ls *,pwd,echo *" "query"
 # Disable subagent tool and related system prompt context
 kodelet run --disable-subagent "query"
 
+# Enable todo tools for this run (disabled by default)
+kodelet run --enable-todos "query"
+
 # Profile override for single command
 kodelet run --profile premium "explain this architecture"
 ```
@@ -1469,6 +1472,16 @@ kodelet run --disable-subagent "your query"
 ```
 
 This can also be set via configuration file (`disable_subagent: true`) or environment variable (`KODELET_DISABLE_SUBAGENT=true`). Other tools like `web_fetch` and `image_recognition` remain available when the subagent is disabled.
+
+### Enabling Todo Tools
+
+Todo tools (`todo_read` and `todo_write`) are disabled by default for the main agent. To enable them for a run:
+
+```bash
+kodelet run --enable-todos "your query"
+```
+
+You can also enable them via configuration (`enable_todos: true`) or environment variable (`KODELET_ENABLE_TODOS=true`).
 
 For detailed skill creation guide, see [docs/SKILLS.md](SKILLS.md).
 
