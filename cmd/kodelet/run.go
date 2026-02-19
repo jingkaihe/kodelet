@@ -45,6 +45,7 @@ type RunConfig struct {
 	NoMCP              bool              // Disable MCP tools
 	NoTools            bool              // Disable all tools (for simple query-response usage)
 	DisableSubagent    bool              // Disable the subagent tool and remove subagent-related system prompt context
+	EnableTodos        bool              // Enable todo_read and todo_write tools for the main agent
 	ResultOnly         bool              // Only print the final agent message, no intermediate output or usage stats
 	UseWeakModel       bool              // Use weak model for SendMessage
 	Account            string            // Anthropic subscription account alias to use
@@ -70,6 +71,7 @@ func NewRunConfig() *RunConfig {
 		NoMCP:              false,
 		NoTools:            false,
 		DisableSubagent:    false,
+		EnableTodos:        false,
 		ResultOnly:         false,
 		UseWeakModel:       false,
 		Account:            "",
@@ -222,6 +224,7 @@ var runCmd = &cobra.Command{
 
 		llmConfig.NoHooks = config.NoHooks
 		llmConfig.DisableSubagent = config.DisableSubagent || viper.GetBool("disable_subagent")
+		llmConfig.EnableTodos = config.EnableTodos || viper.GetBool("enable_todos")
 		llmConfig.IsSubAgent = config.AsSubagent
 		llmConfig.RecipeName = config.FragmentName
 
@@ -451,6 +454,7 @@ func init() {
 	runCmd.Flags().Bool("no-mcp", defaults.NoMCP, "Disable MCP tools")
 	runCmd.Flags().Bool("no-tools", defaults.NoTools, "Disable all tools (for simple query-response usage)")
 	runCmd.Flags().Bool("disable-subagent", defaults.DisableSubagent, "Disable the subagent tool and remove subagent-related system prompt context")
+	runCmd.Flags().Bool("enable-todos", defaults.EnableTodos, "Enable todo_read and todo_write tools for the main agent")
 	runCmd.Flags().Bool("result-only", defaults.ResultOnly, "Only print the final agent message, suppressing all intermediate output and usage statistics")
 	runCmd.Flags().Bool("use-weak-model", defaults.UseWeakModel, "Use weak model for processing")
 	runCmd.Flags().String("account", defaults.Account, "Anthropic subscription account alias to use (see 'kodelet accounts list')")
@@ -540,6 +544,10 @@ func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
 
 	if disableSubagent, err := cmd.Flags().GetBool("disable-subagent"); err == nil {
 		config.DisableSubagent = disableSubagent
+	}
+
+	if enableTodos, err := cmd.Flags().GetBool("enable-todos"); err == nil {
+		config.EnableTodos = enableTodos
 	}
 
 	if resultOnly, err := cmd.Flags().GetBool("result-only"); err == nil {

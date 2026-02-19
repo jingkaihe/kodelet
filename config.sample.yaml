@@ -326,6 +326,11 @@ subagent_args: ""
 # Can also be set via the --disable-subagent CLI flag or per-profile.
 # disable_subagent: true
 #
+# Enable Todo Tools
+# Todo tools (todo_read and todo_write) are disabled by default for the main agent.
+# Set enable_todos to true (or pass --enable-todos) to re-enable them.
+# enable_todos: true
+#
 # Example: Profile with subagent disabled
 # profiles:
 #   no-subagent:

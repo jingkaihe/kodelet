@@ -64,12 +64,15 @@ var defaultMainTools = []string{
 	"subagent",
 	"grep_tool",
 	"glob_tool",
-	"todo_read",
-	"todo_write",
 	"web_fetch",
 	"image_recognition",
 	"view_background_processes",
 	"skill",
+}
+
+var todoTools = []string{
+	"todo_read",
+	"todo_write",
 }
 
 // defaultSubAgentTools are the default tools for subagent
@@ -192,19 +195,32 @@ func GetToolsFromNames(toolNames []string) []tooltypes.Tool {
 }
 
 // GetMainTools returns the main tools available for the agent
-func GetMainTools(ctx context.Context, allowedTools []string) []tooltypes.Tool {
+func GetMainTools(ctx context.Context, allowedTools []string, enableTodos bool) []tooltypes.Tool {
 	// Special case: "none" means no tools
 	if len(allowedTools) == 1 && allowedTools[0] == NoToolsMarker {
 		return nil
 	}
 
 	if len(allowedTools) == 0 {
-		allowedTools = defaultMainTools
+		allowedTools = append([]string{}, defaultMainTools...)
+		if enableTodos {
+			allowedTools = append(allowedTools, todoTools...)
+		}
+	} else if !enableTodos {
+		filteredTools := filterOutTodoTools(allowedTools)
+		if len(filteredTools) == 0 {
+			allowedTools = append([]string{}, metaTools...)
+		} else {
+			allowedTools = filteredTools
+		}
 	}
 
 	if err := ValidateTools(allowedTools); err != nil {
 		logger.G(ctx).WithError(err).Warn("Invalid main agent tool configuration, falling back to defaults")
-		allowedTools = defaultMainTools
+		allowedTools = append([]string{}, defaultMainTools...)
+		if enableTodos {
+			allowedTools = append(allowedTools, todoTools...)
+		}
 	}
 
 	return GetToolsFromNames(allowedTools)
@@ -235,6 +251,16 @@ func filterOutSubagent(tools []tooltypes.Tool) []tooltypes.Tool {
 	for _, t := range tools {
 		if t.Name() != "subagent" {
 			filtered = append(filtered, t)
+		}
+	}
+	return filtered
+}
+
+func filterOutTodoTools(toolNames []string) []string {
+	filtered := make([]string, 0, len(toolNames))
+	for _, toolName := range toolNames {
+		if toolName != "todo_read" && toolName != "todo_write" {
+			filtered = append(filtered, toolName)
 		}
 	}
 	return filtered
