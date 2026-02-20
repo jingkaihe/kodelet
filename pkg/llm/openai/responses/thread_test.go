@@ -1096,7 +1096,7 @@ func TestProcessMessageExchangeSavesConversationOnError(t *testing.T) {
 	assert.Equal(t, 1, len(store.savedRecords))
 }
 
-func TestProcessMessageExchangeCodexPassesStreamingOptions(t *testing.T) {
+func TestProcessMessageExchangeCodexUsesDefaultStreamingOptions(t *testing.T) {
 	thread := &Thread{
 		Thread:  base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-5.1-codex"}, "conv-test", hooks.Trigger{}),
 		isCodex: true,
@@ -1125,5 +1125,5 @@ func TestProcessMessageExchangeCodexPassesStreamingOptions(t *testing.T) {
 	handler := &llmtypes.StringCollectorHandler{Silent: true}
 	_, _, err := thread.processMessageExchange(context.Background(), handler, "gpt-5.1-codex", 256, "system", llmtypes.MessageOpt{NoToolUse: true})
 	require.NoError(t, err)
-	assert.Greater(t, streamingOptsCount, 0, "codex streaming should pass request options")
+	assert.Zero(t, streamingOptsCount, "codex streaming should use default request options")
 }

@@ -486,14 +486,8 @@ func (t *Thread) processMessageExchange(
 		processStream = t.processStream
 	}
 
-	// Codex endpoints require SSE response mode for streaming calls.
-	streamingOpts := []option.RequestOption{}
-	if t.isCodex {
-		streamingOpts = append(streamingOpts, option.WithHeader("Accept", "text/event-stream"))
-	}
-
 	// Use streaming API
-	stream := newStreaming(ctx, params, streamingOpts...)
+	stream := newStreaming(ctx, params)
 	log.Debug("stream created, processing events")
 
 	// Process stream events
@@ -520,7 +514,7 @@ func (t *Thread) processMessageExchange(
 			params.PreviousResponseID = param.Opt[string]{} // Clear the param
 
 			// Retry the request
-			stream = newStreaming(ctx, params, streamingOpts...)
+			stream = newStreaming(ctx, params)
 			toolsUsed, err = processStream(ctx, stream, handler)
 			if err != nil {
 				saveConversation()
