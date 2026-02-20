@@ -172,6 +172,273 @@ func TestExtractMessagesWithToolResults(t *testing.T) {
 	assert.Equal(t, "assistant", messages[3].Role)
 }
 
+func TestCompactContextIncludesInstructions(t *testing.T) {
+	thread := &Thread{
+		Thread: base.NewThread(
+			llmtypes.Config{Provider: "openai", Model: "gpt-4.1"},
+			"conv-test",
+			hooks.Trigger{},
+		),
+		inputItems: []openairesponses.ResponseInputItemUnionParam{
+			{
+				OfMessage: &openairesponses.EasyInputMessageParam{
+					Role:    openairesponses.EasyInputMessageRoleUser,
+					Content: openairesponses.EasyInputMessageContentUnionParam{OfString: param.NewOpt("hello")},
+				},
+			},
+		},
+	}
+
+	var captured openairesponses.ResponseCompactParams
+	thread.compactFunc = func(_ context.Context, params openairesponses.ResponseCompactParams, _ ...option.RequestOption) (*openairesponses.CompactedResponse, error) {
+		captured = params
+		return &openairesponses.CompactedResponse{
+			Output: []openairesponses.ResponseOutputItemUnion{
+				{Type: "compaction", EncryptedContent: "enc"},
+			},
+			Usage: openairesponses.ResponseUsage{},
+		}, nil
+	}
+
+	err := thread.CompactContext(context.Background())
+	require.NoError(t, err)
+
+	require.True(t, captured.Instructions.Valid(), "compact request must include instructions")
+	assert.NotEmpty(t, captured.Instructions.Value, "compact request instructions should not be empty")
+}
+
+func TestCompactContextCodexUsesCompactEndpoint(t *testing.T) {
+	thread := &Thread{
+		Thread: base.NewThread(
+			llmtypes.Config{Provider: "openai", Model: "gpt-5.1-codex"},
+			"conv-test",
+			hooks.Trigger{},
+		),
+		isCodex: true,
+		inputItems: []openairesponses.ResponseInputItemUnionParam{
+			{
+				OfMessage: &openairesponses.EasyInputMessageParam{
+					Role:    openairesponses.EasyInputMessageRoleUser,
+					Content: openairesponses.EasyInputMessageContentUnionParam{OfString: param.NewOpt("hello")},
+				},
+			},
+		},
+	}
+
+	compactCalled := false
+	compactOptsCount := 0
+	thread.compactFunc = func(_ context.Context, _ openairesponses.ResponseCompactParams, opts ...option.RequestOption) (*openairesponses.CompactedResponse, error) {
+		compactCalled = true
+		compactOptsCount = len(opts)
+		return &openairesponses.CompactedResponse{
+			Output: []openairesponses.ResponseOutputItemUnion{
+				{Type: "compaction", EncryptedContent: "enc"},
+			},
+			Usage: openairesponses.ResponseUsage{},
+		}, nil
+	}
+
+	fallbackCalled := false
+	thread.compactWithSummaryFunc = func(_ context.Context) error {
+		fallbackCalled = true
+		return nil
+	}
+
+	err := thread.CompactContext(context.Background())
+	require.NoError(t, err)
+	assert.True(t, compactCalled, "compact endpoint should be called for codex")
+	assert.Greater(t, compactOptsCount, 0, "codex compact should pass request options")
+	assert.False(t, fallbackCalled, "summary fallback should not run when compact succeeds")
+}
+
+func TestCompactContextCodexRetriesRawJSONOnNonJSONParseError(t *testing.T) {
+	thread := &Thread{
+		Thread: base.NewThread(
+			llmtypes.Config{Provider: "openai", Model: "gpt-5.1-codex"},
+			"conv-test",
+			hooks.Trigger{},
+		),
+		isCodex: true,
+		inputItems: []openairesponses.ResponseInputItemUnionParam{
+			{
+				OfMessage: &openairesponses.EasyInputMessageParam{
+					Role:    openairesponses.EasyInputMessageRoleUser,
+					Content: openairesponses.EasyInputMessageContentUnionParam{OfString: param.NewOpt("hello")},
+				},
+			},
+		},
+	}
+
+	thread.compactFunc = func(_ context.Context, _ openairesponses.ResponseCompactParams, _ ...option.RequestOption) (*openairesponses.CompactedResponse, error) {
+		return nil, errors.New("expected destination type of 'string' or '[]byte' for responses with content-type '' that is not 'application/json'")
+	}
+
+	rawCalled := false
+	thread.compactRawFunc = func(_ context.Context, _ openairesponses.ResponseCompactParams, _ ...option.RequestOption) (*openairesponses.CompactedResponse, error) {
+		rawCalled = true
+		return &openairesponses.CompactedResponse{
+			Output: []openairesponses.ResponseOutputItemUnion{
+				{Type: "compaction", EncryptedContent: "enc"},
+			},
+			Usage: openairesponses.ResponseUsage{},
+		}, nil
+	}
+
+	fallbackCalled := false
+	thread.compactWithSummaryFunc = func(_ context.Context) error {
+		fallbackCalled = true
+		return nil
+	}
+
+	err := thread.CompactContext(context.Background())
+	require.NoError(t, err)
+	assert.True(t, rawCalled, "raw JSON compact retry should run for codex parse errors")
+	assert.False(t, fallbackCalled, "summary fallback should not run when raw retry succeeds")
+}
+
+func TestCompactContextFallsBackOnCompactError(t *testing.T) {
+	thread := &Thread{
+		Thread: base.NewThread(
+			llmtypes.Config{Provider: "openai", Model: "gpt-4.1"},
+			"conv-test",
+			hooks.Trigger{},
+		),
+		inputItems: []openairesponses.ResponseInputItemUnionParam{
+			{
+				OfMessage: &openairesponses.EasyInputMessageParam{
+					Role:    openairesponses.EasyInputMessageRoleUser,
+					Content: openairesponses.EasyInputMessageContentUnionParam{OfString: param.NewOpt("hello")},
+				},
+			},
+		},
+	}
+
+	thread.compactFunc = func(_ context.Context, _ openairesponses.ResponseCompactParams, _ ...option.RequestOption) (*openairesponses.CompactedResponse, error) {
+		return nil, errors.New("compact endpoint failed")
+	}
+
+	fallbackCalled := false
+	thread.compactWithSummaryFunc = func(_ context.Context) error {
+		fallbackCalled = true
+		return nil
+	}
+
+	err := thread.CompactContext(context.Background())
+	require.NoError(t, err)
+	assert.True(t, fallbackCalled, "summary fallback should run when compact endpoint fails")
+}
+
+func TestCompactContextParsesCodexCompactionSummaryVariant(t *testing.T) {
+	thread := &Thread{
+		Thread: base.NewThread(
+			llmtypes.Config{Provider: "openai", Model: "gpt-5.1-codex"},
+			"conv-test",
+			hooks.Trigger{},
+		),
+		isCodex: true,
+		inputItems: []openairesponses.ResponseInputItemUnionParam{
+			{
+				OfMessage: &openairesponses.EasyInputMessageParam{
+					Role:    openairesponses.EasyInputMessageRoleUser,
+					Content: openairesponses.EasyInputMessageContentUnionParam{OfString: param.NewOpt("hello")},
+				},
+			},
+		},
+	}
+
+	raw := `{
+		"id": "resp_test",
+		"created_at": 1,
+		"object": "response.compaction",
+		"output": [
+			{
+				"id": "msg_1",
+				"type": "message",
+				"role": "user",
+				"status": "completed",
+				"content": [{"type": "input_text", "text": "hello"}]
+			},
+			{
+				"id": "cmp_1",
+				"type": "compaction_summary",
+				"encrypted_content": "enc_value"
+			}
+		],
+		"usage": {
+			"input_tokens": 1,
+			"input_tokens_details": {"cached_tokens": 0},
+			"output_tokens": 1,
+			"output_tokens_details": {"reasoning_tokens": 0},
+			"total_tokens": 2
+		}
+	}`
+	var compacted openairesponses.CompactedResponse
+	require.NoError(t, json.Unmarshal([]byte(raw), &compacted))
+
+	thread.compactFunc = func(_ context.Context, _ openairesponses.ResponseCompactParams, _ ...option.RequestOption) (*openairesponses.CompactedResponse, error) {
+		return &compacted, nil
+	}
+
+	fallbackCalled := false
+	thread.compactWithSummaryFunc = func(_ context.Context) error {
+		fallbackCalled = true
+		return nil
+	}
+
+	err := thread.CompactContext(context.Background())
+	require.NoError(t, err)
+	assert.False(t, fallbackCalled, "summary fallback should not run for valid compaction_summary payload")
+
+	hasCompaction := false
+	userText := ""
+	for _, item := range thread.inputItems {
+		if item.OfCompaction != nil {
+			hasCompaction = true
+			assert.Equal(t, "enc_value", item.OfCompaction.EncryptedContent)
+		}
+		if item.OfMessage != nil && item.OfMessage.Content.OfString.Valid() {
+			userText = item.OfMessage.Content.OfString.Value
+		}
+	}
+	assert.True(t, hasCompaction, "compaction_summary should be converted to compaction input item")
+	assert.Equal(t, "hello", userText)
+}
+
+func TestCompactContextFallsBackWhenCompactOutputUnusable(t *testing.T) {
+	thread := &Thread{
+		Thread: base.NewThread(
+			llmtypes.Config{Provider: "openai", Model: "gpt-4.1"},
+			"conv-test",
+			hooks.Trigger{},
+		),
+		inputItems: []openairesponses.ResponseInputItemUnionParam{
+			{
+				OfMessage: &openairesponses.EasyInputMessageParam{
+					Role:    openairesponses.EasyInputMessageRoleUser,
+					Content: openairesponses.EasyInputMessageContentUnionParam{OfString: param.NewOpt("hello")},
+				},
+			},
+		},
+	}
+
+	thread.compactFunc = func(_ context.Context, _ openairesponses.ResponseCompactParams, _ ...option.RequestOption) (*openairesponses.CompactedResponse, error) {
+		return &openairesponses.CompactedResponse{
+			Output: []openairesponses.ResponseOutputItemUnion{},
+			Usage:  openairesponses.ResponseUsage{},
+		}, nil
+	}
+
+	fallbackCalled := false
+	thread.compactWithSummaryFunc = func(_ context.Context) error {
+		fallbackCalled = true
+		return nil
+	}
+
+	err := thread.CompactContext(context.Background())
+	require.NoError(t, err)
+	assert.True(t, fallbackCalled, "summary fallback should run when compact output is unusable")
+}
+
 func TestStreamMessages(t *testing.T) {
 	inputItems := `[
 		{
@@ -827,4 +1094,36 @@ func TestProcessMessageExchangeSavesConversationOnError(t *testing.T) {
 	_, _, err := thread.processMessageExchange(context.Background(), handler, "gpt-4.1", 256, "system", llmtypes.MessageOpt{NoToolUse: true})
 	require.Error(t, err)
 	assert.Equal(t, 1, len(store.savedRecords))
+}
+
+func TestProcessMessageExchangeCodexPassesStreamingOptions(t *testing.T) {
+	thread := &Thread{
+		Thread:  base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-5.1-codex"}, "conv-test", hooks.Trigger{}),
+		isCodex: true,
+	}
+	thread.SetState(tools.NewBasicState(context.Background()))
+	thread.inputItems = []openairesponses.ResponseInputItemUnionParam{
+		{
+			OfMessage: &openairesponses.EasyInputMessageParam{
+				Role:    openairesponses.EasyInputMessageRoleUser,
+				Content: openairesponses.EasyInputMessageContentUnionParam{OfString: param.NewOpt("hello")},
+			},
+		},
+	}
+	thread.pendingItems = append([]openairesponses.ResponseInputItemUnionParam{}, thread.inputItems...)
+	thread.storedItems = []StoredInputItem{{Type: "message", Role: "user", Content: "hello"}}
+
+	streamingOptsCount := 0
+	thread.newStreamingFunc = func(_ context.Context, _ openairesponses.ResponseNewParams, opts ...option.RequestOption) *ssestream.Stream[openairesponses.ResponseStreamEventUnion] {
+		streamingOptsCount = len(opts)
+		return nil
+	}
+	thread.processStreamFunc = func(_ context.Context, _ *ssestream.Stream[openairesponses.ResponseStreamEventUnion], _ llmtypes.MessageHandler) (bool, error) {
+		return false, nil
+	}
+
+	handler := &llmtypes.StringCollectorHandler{Silent: true}
+	_, _, err := thread.processMessageExchange(context.Background(), handler, "gpt-5.1-codex", 256, "system", llmtypes.MessageOpt{NoToolUse: true})
+	require.NoError(t, err)
+	assert.Greater(t, streamingOptsCount, 0, "codex streaming should pass request options")
 }
