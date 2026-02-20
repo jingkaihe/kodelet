@@ -171,20 +171,25 @@ class ACPClient(Client):
     """ACP Client that streams responses to a Streamlit placeholder."""
 
     def __init__(self):
-        self.thinking = ""
-        self.message = ""
-        self.tools: list[dict] = []
+        self.blocks: list[dict] = []
         self.placeholder: Any = None
         self.streaming = False
-        self._thinking_done = False
+        self.tool_state: dict[str, dict[str, Any]] = {}
 
     def start_streaming(self):
         """Reset accumulators and enable streaming."""
-        self.thinking = ""
-        self.message = ""
-        self.tools = []
-        self._thinking_done = False
+        self.blocks = []
+        self.tool_state = {}
         self.streaming = True
+
+    def _find_tool_entry(self, tool_call_id: str) -> dict | None:
+        for block in reversed(self.blocks):
+            if block["type"] != "tools":
+                continue
+            for tc in block["items"]:
+                if tc["id"] == tool_call_id:
+                    return tc
+        return None
 
     # Required ACP client methods (not implemented for this example)
     async def request_permission(self, options: list[PermissionOption], session_id: str, tool_call: ToolCall, **kwargs: Any) -> RequestPermissionResponse:
@@ -225,60 +230,103 @@ class ACPClient(Client):
             return
 
         if isinstance(update, AgentThoughtChunk) and isinstance(update.content, TextContentBlock):
-            self.thinking += update.content.text
+            if self.blocks and self.blocks[-1]["type"] == "thinking":
+                self.blocks[-1]["content"] += update.content.text
+            else:
+                self.blocks.append({"type": "thinking", "content": update.content.text})
             self._render()
 
         elif isinstance(update, AgentMessageChunk) and isinstance(update.content, TextContentBlock):
-            self._thinking_done = True
-            self.message += update.content.text
+            if self.blocks and self.blocks[-1]["type"] == "message":
+                self.blocks[-1]["content"] += update.content.text
+            else:
+                self.blocks.append({"type": "message", "content": update.content.text})
             self._render()
 
         elif isinstance(update, ToolCallStart):
-            self._thinking_done = True
-            self.tools.append({
-                "id": update.tool_call_id,
-                "title": update.title,
-                "status": update.status,
-                "output": update.raw_output,
-            })
+            existing = self._find_tool_entry(update.tool_call_id)
+            if existing:
+                existing["title"] = update.title or existing.get("title")
+                existing["status"] = update.status if update.status is not None else existing.get("status")
+                if update.raw_output is not None:
+                    existing["output"] = update.raw_output
+                self.tool_state[update.tool_call_id] = dict(existing)
+            else:
+                tool_entry = {
+                    "id": update.tool_call_id,
+                    "title": update.title,
+                    "status": update.status,
+                    "output": update.raw_output,
+                }
+                self.tool_state[update.tool_call_id] = dict(tool_entry)
+                self.blocks.append({"type": "tools", "items": [tool_entry]})
             self._render()
 
         elif isinstance(update, ToolCallProgress):
-            for tc in self.tools:
-                if tc["id"] == update.tool_call_id:
-                    if update.status:
-                        tc["status"] = update.status
-                    if update.raw_output:
-                        tc["output"] = update.raw_output
+            previous = self.tool_state.get(update.tool_call_id, {"id": update.tool_call_id, "title": update.tool_call_id})
+            tool_entry = {
+                "id": update.tool_call_id,
+                "title": getattr(update, "title", None) or previous.get("title") or update.tool_call_id,
+                "status": update.status if getattr(update, "status", None) is not None else previous.get("status"),
+                "output": update.raw_output if update.raw_output is not None else previous.get("output"),
+            }
+            self.tool_state[update.tool_call_id] = dict(tool_entry)
+            existing = self._find_tool_entry(update.tool_call_id)
+            if existing:
+                existing.update(tool_entry)
+            else:
+                self.blocks.append({"type": "tools", "items": [tool_entry]})
             self._render()
 
     def _render(self):
-        """Render current state to the placeholder."""
+        """Render current state to the placeholder, preserving turn order."""
         if not self.placeholder:
             return
         with self.placeholder.container():
-            if self.thinking:
-                label = "Thinking" if self._thinking_done else "Thinking..."
-                with st.expander(label, expanded=not self._thinking_done):
-                    st.markdown(self.thinking)
-            if self.tools:
-                with st.expander(f"Tools ({len(self.tools)})", expanded=False):
-                    for i, tc in enumerate(self.tools):
-                        icon = "⏳" if tc.get("status") == "running" else "✓"
-                        st.write(f"**{i + 1}. {icon} {tc['title']}**")
-                        if tc.get("output"):
-                            output = tc["output"]
-                            st.code(json.dumps(output, indent=2) if isinstance(output, dict) else str(output))
-            if self.message:
-                st.markdown(self.message)
+            for i, block in enumerate(self.blocks):
+                if block["type"] == "thinking":
+                    has_later_content = any(b["type"] != "thinking" for b in self.blocks[i + 1:])
+                    label = "Thinking" if has_later_content else "Thinking..."
+                    with st.expander(label, expanded=not has_later_content):
+                        st.markdown(block["content"])
+                elif block["type"] == "tools":
+                    items = block["items"]
+                    with st.expander(f"Tools ({len(items)})", expanded=False):
+                        for j, tc in enumerate(items):
+                            if tc.get("status") in ("completed",):
+                                icon = "✓"
+                            elif tc.get("status") == "failed":
+                                icon = "✗"
+                            else:
+                                icon = "⏳"
+                            st.write(f"**{j + 1}. {icon} {tc['title']}**")
+                            if tc.get("output"):
+                                output = tc["output"]
+                                st.code(json.dumps(output, indent=2) if isinstance(output, dict) else str(output))
+                elif block["type"] == "message":
+                    st.markdown(block["content"])
 
     def get_result(self) -> dict:
-        """Return accumulated result as a message dict."""
-        return {"role": "assistant", "content": self.message, "thinking": self.thinking, "tools": self.tools}
+        """Return accumulated result as a message dict with ordered blocks."""
+        return {"role": "assistant", "blocks": self.blocks}
 
 
 # 50MB buffer limit for large conversation history
 ACP_BUFFER_LIMIT = 50 * 1024 * 1024
+
+
+def supports_load_session(init_response: Any) -> bool:
+    agent_capabilities = getattr(init_response, "agent_capabilities", None)
+    if agent_capabilities is None:
+        agent_capabilities = getattr(init_response, "agentCapabilities", None)
+    if agent_capabilities is None:
+        return False
+    if isinstance(agent_capabilities, dict):
+        return bool(agent_capabilities.get("load_session") or agent_capabilities.get("loadSession"))
+    return bool(
+        getattr(agent_capabilities, "load_session", None)
+        or getattr(agent_capabilities, "loadSession", None)
+    )
 
 
 async def run_acp_prompt(
@@ -295,13 +343,16 @@ async def run_acp_prompt(
 
     try:
         async with spawn_agent_process(client, kodelet_path, "acp", transport_kwargs={"limit": ACP_BUFFER_LIMIT}) as (conn, _):
-            await conn.initialize(protocol_version=PROTOCOL_VERSION, client_capabilities=None)
+            init_resp = await conn.initialize(protocol_version=PROTOCOL_VERSION, client_capabilities={})
+            can_load_session = supports_load_session(init_resp)
 
             # Load or create session
-            if session_id:
-                resp = await conn.load_session(session_id=session_id, cwd=os.getcwd(), mcp_servers=[])
-                await asyncio.sleep(0)  # Yield to let history callbacks complete
-                if resp is None:
+            if session_id and can_load_session:
+                try:
+                    await conn.load_session(session_id=session_id, cwd=os.getcwd(), mcp_servers=[])
+                    await asyncio.sleep(0)  # Yield to let history callbacks complete
+                    result_session_id = session_id
+                except Exception:
                     session = await conn.new_session(cwd=os.getcwd(), mcp_servers=[])
                     result_session_id = session.session_id
             else:
@@ -326,7 +377,31 @@ async def run_acp_prompt(
 
 
 def render_assistant_message(msg: dict):
-    """Render an assistant message (for history)."""
+    """Render an assistant message (for history), preserving turn order."""
+    if blocks := msg.get("blocks"):
+        for block in blocks:
+            if block["type"] == "thinking":
+                with st.expander("Thinking", expanded=False):
+                    st.markdown(block["content"])
+            elif block["type"] == "tools":
+                items = block["items"]
+                with st.expander(f"Tools ({len(items)})", expanded=False):
+                    for i, tc in enumerate(items):
+                        title = tc.get("title") or tc.get("name", "Tool")
+                        if tc.get("status") in ("completed",):
+                            icon = "✓"
+                        elif tc.get("status") == "failed":
+                            icon = "✗"
+                        else:
+                            icon = "⏳"
+                        st.write(f"**{i + 1}. {icon} {title}**")
+                        if tc.get("output") or tc.get("result"):
+                            output = tc.get("output") or tc.get("result")
+                            st.code(json.dumps(output, indent=2) if isinstance(output, dict) else str(output))
+            elif block["type"] == "message":
+                st.markdown(block["content"])
+        return
+    # Legacy flat format fallback
     if msg.get("thinking"):
         with st.expander("Thinking", expanded=False):
             st.markdown(msg["thinking"])
@@ -346,6 +421,7 @@ async def load_history_via_acp(session_id: str) -> list[dict]:
     kodelet_path = find_kodelet_binary()
     messages: list[dict] = []
     current_msg: dict | None = None
+    current_tool_state: dict[str, dict[str, Any]] = {}
 
     class HistoryClient(Client):
         """Minimal client that records history from session/load."""
@@ -393,32 +469,78 @@ async def load_history_via_acp(session_id: str) -> list[dict]:
                 if current_msg:
                     messages.append(current_msg)
                 current_msg = {"role": "user", "content": update.content.text}
+                current_tool_state = {}
                 return
 
-            # Agent content - ensure we have an assistant message
+            # Agent content - ensure we have an assistant message with blocks
             if current_msg is None or current_msg["role"] != "assistant":
                 if current_msg:
                     messages.append(current_msg)
-                current_msg = {"role": "assistant", "content": "", "thinking": "", "tools": []}
+                current_msg = {"role": "assistant", "blocks": []}
+
+            blocks = current_msg["blocks"]
 
             if isinstance(update, AgentThoughtChunk) and isinstance(update.content, TextContentBlock):
-                current_msg["thinking"] += update.content.text
+                if blocks and blocks[-1]["type"] == "thinking":
+                    blocks[-1]["content"] += update.content.text
+                else:
+                    blocks.append({"type": "thinking", "content": update.content.text})
             elif isinstance(update, AgentMessageChunk) and isinstance(update.content, TextContentBlock):
-                current_msg["content"] += update.content.text
+                if blocks and blocks[-1]["type"] == "message":
+                    blocks[-1]["content"] += update.content.text
+                else:
+                    blocks.append({"type": "message", "content": update.content.text})
             elif isinstance(update, ToolCallStart):
-                current_msg["tools"].append({
+                tool_entry = {
                     "id": update.tool_call_id,
                     "title": update.title,
+                    "status": getattr(update, "status", None),
                     "output": update.raw_output,
-                })
+                }
+                current_tool_state[update.tool_call_id] = dict(tool_entry)
+                existing = None
+                for blk in reversed(blocks):
+                    if blk["type"] != "tools":
+                        continue
+                    for tc in blk["items"]:
+                        if tc["id"] == update.tool_call_id:
+                            existing = tc
+                            break
+                    if existing:
+                        break
+                if existing:
+                    existing.update(tool_entry)
+                else:
+                    blocks.append({"type": "tools", "items": [tool_entry]})
             elif isinstance(update, ToolCallProgress):
-                for tc in current_msg["tools"]:
-                    if tc["id"] == update.tool_call_id and update.raw_output:
-                        tc["output"] = update.raw_output
+                previous = current_tool_state.get(update.tool_call_id, {"id": update.tool_call_id, "title": update.tool_call_id})
+                tool_entry = {
+                    "id": update.tool_call_id,
+                    "title": getattr(update, "title", None) or previous.get("title") or update.tool_call_id,
+                    "status": update.status if getattr(update, "status", None) is not None else previous.get("status"),
+                    "output": update.raw_output if update.raw_output is not None else previous.get("output"),
+                }
+                current_tool_state[update.tool_call_id] = dict(tool_entry)
+                existing = None
+                for blk in reversed(blocks):
+                    if blk["type"] != "tools":
+                        continue
+                    for tc in blk["items"]:
+                        if tc["id"] == update.tool_call_id:
+                            existing = tc
+                            break
+                    if existing:
+                        break
+                if existing:
+                    existing.update(tool_entry)
+                else:
+                    blocks.append({"type": "tools", "items": [tool_entry]})
 
     try:
         async with spawn_agent_process(HistoryClient(), kodelet_path, "acp", transport_kwargs={"limit": ACP_BUFFER_LIMIT}) as (conn, _):
-            await conn.initialize(protocol_version=PROTOCOL_VERSION, client_capabilities=None)
+            init_resp = await conn.initialize(protocol_version=PROTOCOL_VERSION, client_capabilities={})
+            if not supports_load_session(init_resp):
+                return []
             await conn.load_session(session_id=session_id, cwd=os.getcwd(), mcp_servers=[])
             await asyncio.sleep(0)  # Yield to ensure all callbacks complete
             if current_msg:
