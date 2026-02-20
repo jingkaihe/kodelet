@@ -251,14 +251,13 @@ func TestCompactContextCodexUsesCompactEndpoint(t *testing.T) {
 	assert.False(t, fallbackCalled, "summary fallback should not run when compact succeeds")
 }
 
-func TestCompactContextCodexRetriesRawJSONOnNonJSONParseError(t *testing.T) {
+func TestCompactContextUsesRawJSONByDefault(t *testing.T) {
 	thread := &Thread{
 		Thread: base.NewThread(
-			llmtypes.Config{Provider: "openai", Model: "gpt-5.1-codex"},
+			llmtypes.Config{Provider: "openai", Model: "gpt-4.1"},
 			"conv-test",
 			hooks.Trigger{},
 		),
-		isCodex: true,
 		inputItems: []openairesponses.ResponseInputItemUnionParam{
 			{
 				OfMessage: &openairesponses.EasyInputMessageParam{
@@ -269,8 +268,10 @@ func TestCompactContextCodexRetriesRawJSONOnNonJSONParseError(t *testing.T) {
 		},
 	}
 
+	compactCalled := false
 	thread.compactFunc = func(_ context.Context, _ openairesponses.ResponseCompactParams, _ ...option.RequestOption) (*openairesponses.CompactedResponse, error) {
-		return nil, errors.New("expected destination type of 'string' or '[]byte' for responses with content-type '' that is not 'application/json'")
+		compactCalled = true
+		return nil, errors.New("compact endpoint should not be used when raw JSON hook is available")
 	}
 
 	rawCalled := false
@@ -292,8 +293,9 @@ func TestCompactContextCodexRetriesRawJSONOnNonJSONParseError(t *testing.T) {
 
 	err := thread.CompactContext(context.Background())
 	require.NoError(t, err)
-	assert.True(t, rawCalled, "raw JSON compact retry should run for codex parse errors")
-	assert.False(t, fallbackCalled, "summary fallback should not run when raw retry succeeds")
+	assert.True(t, rawCalled, "raw JSON compact should run by default")
+	assert.False(t, compactCalled, "typed compact hook should not run when raw JSON hook is available")
+	assert.False(t, fallbackCalled, "summary fallback should not run when raw compact succeeds")
 }
 
 func TestCompactContextFallsBackOnCompactError(t *testing.T) {

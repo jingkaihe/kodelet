@@ -638,11 +638,6 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 		systemPrompt = sysprompt.SubAgentPrompt(t.Config.Model, t.Config, contexts)
 	}
 
-	compactFn := t.compactFunc
-	if compactFn == nil {
-		compactFn = t.client.Responses.Compact
-	}
-
 	compactParams := responses.ResponseCompactParams{
 		Input: responses.ResponseCompactParamsInputUnion{
 			OfResponseInputItemArray: t.inputItems,
@@ -656,15 +651,26 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 		compactOpts = append(compactOpts, option.WithHeader("Accept", "application/json"))
 	}
 
-	resp, err := compactFn(ctx, compactParams, compactOpts...)
-	if err != nil && t.isCodex && isNonJSONCompactParseError(err) {
-		compactRawFn := t.compactRawFunc
-		if compactRawFn == nil {
-			compactRawFn = t.compactRawJSON
-		}
+	// Use raw JSON compact parsing by default because some backends may omit
+	// JSON content-type on compact responses, which can break typed SDK decode.
+	compactRawFn := t.compactRawFunc
+	if compactRawFn == nil && t.client != nil {
+		compactRawFn = t.compactRawJSON
+	}
 
-		logger.G(ctx).WithError(err).Warn("compact response missing JSON content-type, retrying with raw JSON parsing")
+	var (
+		resp *responses.CompactedResponse
+		err  error
+	)
+	if compactRawFn != nil {
 		resp, err = compactRawFn(ctx, compactParams, compactOpts...)
+	} else {
+		// Fallback for tests that construct Thread manually without client/raw hook.
+		compactFn := t.compactFunc
+		if compactFn == nil {
+			return errors.New("compact function is not initialized")
+		}
+		resp, err = compactFn(ctx, compactParams, compactOpts...)
 	}
 
 	if err != nil {
@@ -768,6 +774,7 @@ func (t *Thread) compactRawJSON(
 	params responses.ResponseCompactParams,
 	opts ...option.RequestOption,
 ) (*responses.CompactedResponse, error) {
+	// Parse compact responses via raw bytes to decouple from SDK content-type handling.
 	if t.client == nil {
 		return nil, errors.New("openai client is not initialized")
 	}
@@ -783,14 +790,6 @@ func (t *Thread) compactRawJSON(
 	}
 
 	return &resp, nil
-}
-
-func isNonJSONCompactParseError(err error) bool {
-	if err == nil {
-		return false
-	}
-
-	return strings.Contains(err.Error(), "expected destination type of 'string' or '[]byte'")
 }
 
 func (t *Thread) runUtilityPrompt(ctx context.Context, prompt string, useWeakModel bool) (string, error) {
