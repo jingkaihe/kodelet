@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/auth"
+	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	codexpreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/codex"
 	openaipreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/openai"
@@ -47,6 +48,13 @@ type Thread struct {
 
 	// client is the OpenAI client for making API calls
 	client *openai.Client
+
+	// compactFunc allows overriding Responses.Compact in tests.
+	compactFunc func(context.Context, responses.ResponseCompactParams, ...option.RequestOption) (*responses.CompactedResponse, error)
+	// compactRawFunc allows overriding raw JSON compact requests in tests.
+	compactRawFunc func(context.Context, responses.ResponseCompactParams, ...option.RequestOption) (*responses.CompactedResponse, error)
+	// compactWithSummaryFunc allows overriding summary-based compaction in tests.
+	compactWithSummaryFunc func(context.Context) error
 
 	// inputItems holds the complete conversation history as Responses API input items
 	// This is used for persistence and display purposes
@@ -141,6 +149,11 @@ func NewThread(config llmtypes.Config) (*Thread, error) {
 	thread.processMessageExchangeFunc = thread.processMessageExchange
 	thread.newStreamingFunc = thread.client.Responses.NewStreaming
 	thread.processStreamFunc = thread.processStream
+	thread.compactFunc = thread.client.Responses.Compact
+	thread.compactRawFunc = thread.compactRawJSON
+	thread.compactWithSummaryFunc = func(ctx context.Context) error {
+		return base.CompactContextWithSummary(ctx, fragments.LoadCompactPrompt, thread.runUtilityPrompt, thread.SwapContext)
+	}
 
 	// Set the LoadConversation callback for provider-specific loading
 	baseThread.LoadConversation = thread.loadConversation
@@ -608,14 +621,64 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 		return nil
 	}
 
-	resp, err := t.client.Responses.Compact(ctx, responses.ResponseCompactParams{
+	compactWithSummary := t.compactWithSummaryFunc
+	if compactWithSummary == nil {
+		compactWithSummary = func(ctx context.Context) error {
+			return base.CompactContextWithSummary(ctx, fragments.LoadCompactPrompt, t.runUtilityPrompt, t.SwapContext)
+		}
+	}
+
+	var contexts map[string]string
+	if t.State != nil {
+		contexts = t.State.DiscoverContexts()
+	}
+
+	systemPrompt := sysprompt.SystemPrompt(t.Config.Model, t.Config, contexts)
+	if t.Config.IsSubAgent {
+		systemPrompt = sysprompt.SubAgentPrompt(t.Config.Model, t.Config, contexts)
+	}
+
+	compactParams := responses.ResponseCompactParams{
 		Input: responses.ResponseCompactParamsInputUnion{
 			OfResponseInputItemArray: t.inputItems,
 		},
-		Model: responses.ResponseCompactParamsModel(t.Config.Model),
-	})
+		Model:        responses.ResponseCompactParamsModel(t.Config.Model),
+		Instructions: param.NewOpt(systemPrompt),
+	}
+
+	compactOpts := []option.RequestOption{}
+	if t.isCodex {
+		compactOpts = append(compactOpts, option.WithHeader("Accept", "application/json"))
+	}
+
+	// Use raw JSON compact parsing by default because some backends may omit
+	// JSON content-type on compact responses, which can break typed SDK decode.
+	compactRawFn := t.compactRawFunc
+	if compactRawFn == nil && t.client != nil {
+		compactRawFn = t.compactRawJSON
+	}
+
+	var (
+		resp *responses.CompactedResponse
+		err  error
+	)
+	if compactRawFn != nil {
+		resp, err = compactRawFn(ctx, compactParams, compactOpts...)
+	} else {
+		// Fallback for tests that construct Thread manually without client/raw hook.
+		compactFn := t.compactFunc
+		if compactFn == nil {
+			return errors.New("compact function is not initialized")
+		}
+		resp, err = compactFn(ctx, compactParams, compactOpts...)
+	}
+
 	if err != nil {
-		return errors.Wrap(err, "failed to compact context")
+		logger.G(ctx).WithError(err).Warn("responses compact endpoint failed, falling back to summary compaction")
+		if fallbackErr := compactWithSummary(ctx); fallbackErr != nil {
+			return errors.Wrapf(fallbackErr, "failed to compact context (responses endpoint error: %v)", err)
+		}
+		return nil
 	}
 
 	// Update usage metrics
@@ -638,9 +701,8 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 				// Extract text content from the message
 				var textContent string
 				for _, content := range msg.Content {
-					if content.Type == "output_text" {
-						textPart := content.AsOutputText()
-						textContent += textPart.Text
+					if content.Type == "output_text" || content.Type == "input_text" {
+						textContent += content.Text
 					}
 				}
 				if textContent != "" {
@@ -661,12 +723,34 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 		case "compaction":
 			// Convert compaction item using the SDK helper
 			compaction := output.AsCompaction()
-			newInputItems = append(newInputItems, responses.ResponseInputItemParamOfCompaction(compaction.EncryptedContent))
+			encryptedContent := compaction.EncryptedContent
+			if encryptedContent == "" {
+				encryptedContent = output.EncryptedContent
+			}
+			newInputItems = append(newInputItems, responses.ResponseInputItemParamOfCompaction(encryptedContent))
 			newStoredItems = append(newStoredItems, StoredInputItem{
 				Type:             "compaction",
-				EncryptedContent: compaction.EncryptedContent,
+				EncryptedContent: encryptedContent,
 			})
+
+		case "compaction_summary":
+			// Codex compact responses currently return this variant name.
+			if output.EncryptedContent != "" {
+				newInputItems = append(newInputItems, responses.ResponseInputItemParamOfCompaction(output.EncryptedContent))
+				newStoredItems = append(newStoredItems, StoredInputItem{
+					Type:             "compaction",
+					EncryptedContent: output.EncryptedContent,
+				})
+			}
 		}
+	}
+
+	if len(newInputItems) == 0 {
+		logger.G(ctx).Warn("responses compact returned no usable items, falling back to summary compaction")
+		if fallbackErr := compactWithSummary(ctx); fallbackErr != nil {
+			return errors.Wrap(fallbackErr, "failed to compact context: empty compact output and summary fallback failed")
+		}
+		return nil
 	}
 
 	// Replace input items with compacted output
@@ -683,6 +767,29 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 	t.ResetContextStateLocked()
 
 	return nil
+}
+
+func (t *Thread) compactRawJSON(
+	ctx context.Context,
+	params responses.ResponseCompactParams,
+	opts ...option.RequestOption,
+) (*responses.CompactedResponse, error) {
+	// Parse compact responses via raw bytes to decouple from SDK content-type handling.
+	if t.client == nil {
+		return nil, errors.New("openai client is not initialized")
+	}
+
+	var body []byte
+	if err := t.client.Post(ctx, "responses/compact", params, &body, opts...); err != nil {
+		return nil, err
+	}
+
+	var resp responses.CompactedResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil, errors.Wrap(err, "failed to parse responses/compact payload")
+	}
+
+	return &resp, nil
 }
 
 func (t *Thread) runUtilityPrompt(ctx context.Context, prompt string, useWeakModel bool) (string, error) {

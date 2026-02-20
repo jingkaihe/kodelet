@@ -1,5 +1,9 @@
 # Kodelet
 
+## 0.2.24.beta (2026-02-20)
+
+- Fixed Codex/OpenAI Responses auto-compact to use native `responses/compact` again (non-summary), with summary fallback only when compact actually fails.
+
 ## 0.2.23.beta (2026-02-19)
 
 - OpenAI Responses now persists conversation state on each exchange (including error paths), with regression tests to prevent persistence regressions.

@@ -255,7 +255,7 @@ func TestCodexHeader(t *testing.T) {
 		headers, err := CodexHeader()
 		require.NoError(t, err)
 		require.NotNil(t, headers)
-		assert.Len(t, headers, 6, "should return 6 request options for OAuth")
+		assert.Len(t, headers, 5, "should return 5 request options for OAuth")
 
 		// Clean up
 		require.NoError(t, os.Remove(authFile))
@@ -308,7 +308,7 @@ func TestCodexHeaderWithCredentials(t *testing.T) {
 
 		headers := CodexHeaderWithCredentials(creds)
 		require.NotNil(t, headers)
-		assert.Len(t, headers, 6, "should return 6 request options for OAuth")
+		assert.Len(t, headers, 5, "should return 5 request options for OAuth")
 	})
 
 	t.Run("API key credentials return API key option", func(t *testing.T) {
@@ -357,8 +357,8 @@ func TestCodexHeaderWithCredentials(t *testing.T) {
 
 		headers := CodexHeaderWithCredentials(creds)
 		require.NotNil(t, headers)
-		// Should return OAuth headers (6 options), not API key (1 option)
-		assert.Len(t, headers, 6, "should use OAuth headers when both are present")
+		// Should return OAuth headers (5 options), not API key (1 option)
+		assert.Len(t, headers, 5, "should use OAuth headers when both are present")
 	})
 }
 

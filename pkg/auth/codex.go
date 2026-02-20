@@ -155,7 +155,6 @@ func CodexHeaderWithCredentials(creds *CodexCredentials) []option.RequestOption 
 			option.WithHeader("ChatGPT-Account-ID", creds.AccountID),
 			option.WithHeader("OpenAI-Beta", "responses=experimental"),
 			option.WithHeader("originator", CodexOriginator),
-			option.WithHeader("Accept", "text/event-stream"),
 		}
 	}
 
