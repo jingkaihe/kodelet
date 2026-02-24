@@ -1,5 +1,9 @@
 # Kodelet
 
+## 0.2.25.beta (2026-02-24)
+
+- Added `openai.manual_cache` session-affinity support for Chat Completions and documented a Fireworks-compatible OpenAI profile example in `config.sample.yaml`.
+
 ## 0.2.24.beta (2026-02-20)
 
 - Fixed Codex/OpenAI Responses auto-compact to use native `responses/compact` again (non-summary), with summary fallback only when compact actually fails.

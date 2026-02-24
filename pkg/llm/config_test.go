@@ -68,6 +68,32 @@ func TestGetConfigFromViperWithCmd_ExplicitContextPatternsOverrideProfile(t *tes
 	assert.Equal(t, []string{"CODING.md", "README.md"}, config.Context.Patterns)
 }
 
+func TestGetConfigFromViperWithProfileOpenAIManualCache(t *testing.T) {
+	originalConfig := viper.AllSettings()
+	defer func() {
+		viper.Reset()
+		for key, value := range originalConfig {
+			viper.Set(key, value)
+		}
+	}()
+
+	viper.Reset()
+	viper.Set("provider", "openai")
+	viper.Set("profile", "cached-openai")
+	viper.Set("profiles", map[string]any{
+		"cached-openai": map[string]any{
+			"openai": map[string]any{
+				"manual_cache": true,
+			},
+		},
+	})
+
+	config, err := GetConfigFromViperWithCmd(nil)
+	require.NoError(t, err)
+	require.NotNil(t, config.OpenAI)
+	assert.True(t, config.OpenAI.ManualCache)
+}
+
 func TestGetConfigFromViperWithAliases(t *testing.T) {
 	// Save original viper state
 	originalConfig := viper.AllSettings()
@@ -197,6 +223,7 @@ func TestGetConfigFromViperOpenAIBasicConfig(t *testing.T) {
 	viper.Set("provider", "openai")
 	viper.Set("openai.preset", "xai")
 	viper.Set("openai.base_url", "https://api.x.ai/v1")
+	viper.Set("openai.manual_cache", true)
 
 	// Execute
 	config, err := GetConfigFromViper()
@@ -206,6 +233,7 @@ func TestGetConfigFromViperOpenAIBasicConfig(t *testing.T) {
 	require.NotNil(t, config.OpenAI, "OpenAI config should not be nil")
 	assert.Equal(t, "xai", config.OpenAI.Preset)
 	assert.Equal(t, "https://api.x.ai/v1", config.OpenAI.BaseURL)
+	assert.True(t, config.OpenAI.ManualCache)
 	assert.Nil(t, config.OpenAI.Models, "Models should be nil when not set")
 	assert.Nil(t, config.OpenAI.Pricing, "Pricing should be nil when not set")
 }

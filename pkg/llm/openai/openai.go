@@ -485,6 +485,8 @@ func (t *Thread) processMessageExchange(
 		}
 	}
 
+	extraHeaders := t.getPromptCacheHeaders(opt)
+
 	// Add a tracing event for API call start
 	telemetry.AddEvent(ctx, "api_call_start",
 		attribute.String("model", model),
@@ -498,7 +500,7 @@ func (t *Thread) processMessageExchange(
 	streamHandler, isStreamingHandler := handler.(llmtypes.StreamingMessageHandler)
 
 	// Make the API request with retry logic (use streaming if handler supports it)
-	response, err := t.createChatCompletionWithRetry(ctx, requestParams, streamHandler, isStreamingHandler)
+	response, err := t.createChatCompletionWithRetry(ctx, requestParams, streamHandler, isStreamingHandler, extraHeaders)
 	if err != nil {
 		return "", false, errors.Wrap(err, "error sending message to OpenAI")
 	}
@@ -642,7 +644,13 @@ func (t *Thread) processPendingSteer(ctx context.Context, requestParams *openai.
 	return nil
 }
 
-func (t *Thread) createChatCompletionWithRetry(ctx context.Context, requestParams openai.ChatCompletionRequest, streamHandler llmtypes.StreamingMessageHandler, isStreamingHandler bool) (openai.ChatCompletionResponse, error) {
+func (t *Thread) createChatCompletionWithRetry(
+	ctx context.Context,
+	requestParams openai.ChatCompletionRequest,
+	streamHandler llmtypes.StreamingMessageHandler,
+	isStreamingHandler bool,
+	extraHeaders map[string]string,
+) (openai.ChatCompletionResponse, error) {
 	var response openai.ChatCompletionResponse
 	var originalErrors []error // Store all errors for better context
 
@@ -664,10 +672,14 @@ func (t *Thread) createChatCompletionWithRetry(ctx context.Context, requestParam
 	err := retry.Do(
 		func() error {
 			var apiErr error
+			client := t.client
+			if len(extraHeaders) > 0 {
+				client = t.chatClientWithHeaders(extraHeaders)
+			}
 			if isStreamingHandler {
-				response, apiErr = t.createStreamingChatCompletion(ctx, requestParams, streamHandler)
+				response, apiErr = t.createStreamingChatCompletionWithClient(ctx, requestParams, streamHandler, client)
 			} else {
-				response, apiErr = t.client.CreateChatCompletion(ctx, requestParams)
+				response, apiErr = client.CreateChatCompletion(ctx, requestParams)
 			}
 			if apiErr != nil {
 				originalErrors = append(originalErrors, apiErr)
@@ -692,16 +704,19 @@ func (t *Thread) createChatCompletionWithRetry(ctx context.Context, requestParam
 	return response, err
 }
 
-// createStreamingChatCompletion handles streaming responses from OpenAI API.
-// It streams content to the handler as it arrives and reconstructs the full response.
-func (t *Thread) createStreamingChatCompletion(ctx context.Context, requestParams openai.ChatCompletionRequest, handler llmtypes.StreamingMessageHandler) (openai.ChatCompletionResponse, error) {
+func (t *Thread) createStreamingChatCompletionWithClient(
+	ctx context.Context,
+	requestParams openai.ChatCompletionRequest,
+	handler llmtypes.StreamingMessageHandler,
+	client *openai.Client,
+) (openai.ChatCompletionResponse, error) {
 	// Enable streaming and request usage info
 	requestParams.Stream = true
 	requestParams.StreamOptions = &openai.StreamOptions{
 		IncludeUsage: true,
 	}
 
-	stream, err := t.client.CreateChatCompletionStream(ctx, requestParams)
+	stream, err := client.CreateChatCompletionStream(ctx, requestParams)
 	if err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
@@ -849,9 +864,22 @@ func (t *Thread) updateUsage(usage openai.Usage, model string) {
 	t.Mu.Lock()
 	defer t.Mu.Unlock()
 
+	cachedTokens := 0
+	if usage.PromptTokensDetails != nil {
+		cachedTokens = usage.PromptTokensDetails.CachedTokens
+	}
+
+	nonCachedInput := usage.PromptTokens - cachedTokens
+	if nonCachedInput < 0 {
+		nonCachedInput = usage.PromptTokens
+	}
+
 	// Track usage statistics
-	t.Usage.InputTokens += usage.PromptTokens
+	t.Usage.InputTokens += nonCachedInput
 	t.Usage.OutputTokens += usage.CompletionTokens
+	if cachedTokens > 0 {
+		t.Usage.CacheReadInputTokens += cachedTokens
+	}
 
 	// Calculate costs based on model pricing (use dynamic pricing method)
 	pricing, found := t.getPricing(model)
@@ -859,13 +887,18 @@ func (t *Thread) updateUsage(usage openai.Usage, model string) {
 		// If no pricing found, use default GPT-4.1 pricing as fallback
 		pricing = llmtypes.ModelPricing{
 			Input:         0.000002,
+			CachedInput:   0.0000005,
 			Output:        0.000008,
 			ContextWindow: 1047576,
 		}
 	}
 
-	// Calculate individual costs
-	t.Usage.InputCost += float64(usage.PromptTokens) * pricing.Input
+	if nonCachedInput > 0 {
+		t.Usage.InputCost += float64(nonCachedInput) * pricing.Input
+	}
+	if cachedTokens > 0 {
+		t.Usage.CacheReadCost += float64(cachedTokens) * pricing.CachedInput
+	}
 	t.Usage.OutputCost += float64(usage.CompletionTokens) * pricing.Output
 
 	t.Usage.CurrentContextWindow = usage.PromptTokens + usage.CompletionTokens
@@ -1018,4 +1051,98 @@ func (t *Thread) processImageFile(filePath string) (*openai.ChatMessagePart, err
 // getImageMediaType returns the MIME type for supported image formats
 func getImageMediaType(ext string) (string, error) {
 	return base.ImageMIMETypeFromExtension(ext)
+}
+
+func (t *Thread) getPromptCacheHeaders(opt llmtypes.MessageOpt) map[string]string {
+	if !opt.PromptCache || t.Config.OpenAI == nil || !t.Config.OpenAI.ManualCache {
+		return nil
+	}
+
+	if t.ConversationID == "" {
+		return nil
+	}
+
+	return map[string]string{
+		"x-session-affinity": t.ConversationID,
+	}
+}
+
+func (t *Thread) chatClientWithHeaders(extraHeaders map[string]string) *openai.Client {
+	if len(extraHeaders) == 0 {
+		return t.client
+	}
+
+	clientConfig := t.buildClientConfig()
+	if clientConfig.HTTPClient == nil {
+		return t.client
+	}
+
+	clientConfig.HTTPClient = &headerInjectingHTTPClient{
+		base:    clientConfig.HTTPClient,
+		headers: extraHeaders,
+	}
+
+	return openai.NewClientWithConfig(clientConfig)
+}
+
+type headerInjectingHTTPClient struct {
+	base    openai.HTTPDoer
+	headers map[string]string
+}
+
+func (h *headerInjectingHTTPClient) Do(req *http.Request) (*http.Response, error) {
+	clonedReq := req.Clone(req.Context())
+	clonedReq.Header = req.Header.Clone()
+
+	for key, value := range h.headers {
+		clonedReq.Header.Set(key, value)
+	}
+
+	return h.base.Do(clonedReq)
+}
+
+func (t *Thread) buildClientConfig() openai.ClientConfig {
+	if t.useCopilot {
+		ctx := context.Background()
+		copilotToken, err := auth.CopilotAccessToken(ctx)
+		if err == nil {
+			clientConfig := openai.DefaultConfig("")
+			clientConfig.HTTPClient = &http.Client{Transport: auth.NewCopilotTransport(copilotToken)}
+
+			if baseURL := os.Getenv("OPENAI_API_BASE"); baseURL != "" {
+				clientConfig.BaseURL = baseURL
+			} else if t.Config.OpenAI != nil {
+				if t.Config.OpenAI.Preset != "" {
+					if presetBaseURL := getPresetBaseURL(t.Config.OpenAI.Preset); presetBaseURL != "" {
+						clientConfig.BaseURL = presetBaseURL
+					}
+				}
+				if t.Config.OpenAI.BaseURL != "" {
+					clientConfig.BaseURL = t.Config.OpenAI.BaseURL
+				}
+			} else {
+				clientConfig.BaseURL = "https://api.githubcopilot.com"
+			}
+
+			return clientConfig
+		}
+	}
+
+	apiKeyEnvVar := GetAPIKeyEnvVar(t.Config)
+	apiKey := os.Getenv(apiKeyEnvVar)
+	clientConfig := openai.DefaultConfig(apiKey)
+	if baseURL := os.Getenv("OPENAI_API_BASE"); baseURL != "" {
+		clientConfig.BaseURL = baseURL
+	} else if t.Config.OpenAI != nil {
+		if t.Config.OpenAI.Preset != "" {
+			if presetBaseURL := getPresetBaseURL(t.Config.OpenAI.Preset); presetBaseURL != "" {
+				clientConfig.BaseURL = presetBaseURL
+			}
+		}
+		if t.Config.OpenAI.BaseURL != "" {
+			clientConfig.BaseURL = t.Config.OpenAI.BaseURL
+		}
+	}
+
+	return clientConfig
 }

@@ -64,6 +64,7 @@ type OpenAIConfig struct {
 	BaseURL         string                  `mapstructure:"base_url" json:"base_url" yaml:"base_url"`                            // Custom API base URL (overrides preset)
 	APIKeyEnvVar    string                  `mapstructure:"api_key_env_var" json:"api_key_env_var" yaml:"api_key_env_var"`       // Environment variable name for API key (defaults to OPENAI_API_KEY)
 	UseResponsesAPI bool                    `mapstructure:"use_responses_api" json:"use_responses_api" yaml:"use_responses_api"` // Use the Responses API instead of Chat Completions API
+	ManualCache     bool                    `mapstructure:"manual_cache" json:"manual_cache" yaml:"manual_cache"`                // Enables manual cache affinity headers for Chat Completions when prompt caching is requested
 	Models          *CustomModels           `mapstructure:"models" json:"models,omitempty" yaml:"models,omitempty"`              // Custom model configuration
 	Pricing         map[string]ModelPricing `mapstructure:"pricing" json:"pricing,omitempty" yaml:"pricing,omitempty"`           // Custom pricing configuration
 }

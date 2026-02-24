@@ -949,3 +949,56 @@ func TestIsRetryableError_EdgeCases(t *testing.T) {
 		assert.False(t, isRetryableError(context.DeadlineExceeded))
 	})
 }
+
+func TestGetPromptCacheHeaders(t *testing.T) {
+	configWithManualCache := llm.Config{OpenAI: &llm.OpenAIConfig{ManualCache: true}}
+	thread := &Thread{Thread: base.NewThread(configWithManualCache, "conv-test", base.CreateHookTrigger(context.Background(), configWithManualCache, "conv-test"))}
+
+	headers := thread.getPromptCacheHeaders(llm.MessageOpt{PromptCache: true})
+	require.NotNil(t, headers)
+	assert.Equal(t, "conv-test", headers["x-session-affinity"])
+
+	thread.SetConversationID("")
+	headersWithoutConversation := thread.getPromptCacheHeaders(llm.MessageOpt{PromptCache: true})
+	assert.Nil(t, headersWithoutConversation)
+
+	thread.SetConversationID("conv-test")
+	noCacheHeaders := thread.getPromptCacheHeaders(llm.MessageOpt{PromptCache: false})
+	assert.Nil(t, noCacheHeaders)
+
+	thread.Config.OpenAI.ManualCache = false
+	headersWithManualCacheDisabled := thread.getPromptCacheHeaders(llm.MessageOpt{PromptCache: true})
+	assert.Nil(t, headersWithManualCacheDisabled)
+
+	thread.Config.OpenAI = nil
+	headersWithoutOpenAIConfig := thread.getPromptCacheHeaders(llm.MessageOpt{PromptCache: true})
+	assert.Nil(t, headersWithoutOpenAIConfig)
+}
+
+func TestUpdateUsageWithCachedTokens(t *testing.T) {
+	thread := &Thread{Thread: base.NewThread(llm.Config{}, "conv-test", base.CreateHookTrigger(context.Background(), llm.Config{}, "conv-test"))}
+	thread.customPricing = llm.CustomPricing{
+		"test-model": {
+			Input:         0.000001,
+			CachedInput:   0.00000025,
+			Output:        0.000002,
+			ContextWindow: 128000,
+		},
+	}
+
+	thread.updateUsage(openai.Usage{
+		PromptTokens:     100,
+		CompletionTokens: 40,
+		PromptTokensDetails: &openai.PromptTokensDetails{
+			CachedTokens: 60,
+		},
+	}, "test-model")
+
+	usage := thread.GetUsage()
+	assert.Equal(t, 40, usage.InputTokens)
+	assert.Equal(t, 60, usage.CacheReadInputTokens)
+	assert.Equal(t, 40, usage.OutputTokens)
+	assert.InDelta(t, 0.00004, usage.InputCost, 1e-12)
+	assert.InDelta(t, 0.000015, usage.CacheReadCost, 1e-12)
+	assert.InDelta(t, 0.00008, usage.OutputCost, 1e-12)
+}

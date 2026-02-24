@@ -75,6 +75,23 @@ profiles:
     openai:
       preset: "xai"
 
+  fireworks:
+    provider: "openai"
+    model: "accounts/fireworks/models/kimi-k2p5"
+    weak_model: "accounts/fireworks/models/kimi-k2p5"
+    max_tokens: 32768
+    weak_model_max_tokens: 8192
+    openai:
+      manual_cache: true
+      base_url: "https://api.fireworks.ai/inference/v1"
+      api_key_env_var: "FIREWORK_API_KEY"
+      pricing:
+        accounts/fireworks/models/kimi-k2p5:
+          input: 0.0000006         # $0.6 per million tokens
+          cached_input: 0.0000001  # $0.1 per million tokens
+          output: 0.000003         # $3 per million tokens
+          context_window: 262000   # 262k tokens
+
   openai-responses:
     provider: "openai"
     model: "gpt-5.2-codex"
@@ -223,6 +240,11 @@ openai:
   # The Responses API offers multi-turn conversations via previous_response_id,
   # native compaction support, and richer streaming events.
   # use_responses_api: true
+
+  # Enable manual prompt-cache affinity for Chat Completions.
+  # When true, kodelet adds x-session-affinity header per conversation,
+  # but only on calls where prompt caching is requested.
+  # manual_cache: true
   # models:
   #   # Models that support reasoning capabilities (o1, o3, grok reasoning models, etc.)
   #   reasoning:
