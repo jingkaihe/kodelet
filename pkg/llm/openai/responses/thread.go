@@ -102,7 +102,7 @@ type Thread struct {
 		opt llmtypes.MessageOpt,
 	) (string, bool, error)
 	newStreamingFunc  func(context.Context, responses.ResponseNewParams, ...option.RequestOption) *ssestream.Stream[responses.ResponseStreamEventUnion]
-	processStreamFunc func(context.Context, *ssestream.Stream[responses.ResponseStreamEventUnion], llmtypes.MessageHandler) (bool, error)
+	processStreamFunc func(context.Context, *ssestream.Stream[responses.ResponseStreamEventUnion], llmtypes.MessageHandler, string, llmtypes.MessageOpt) (bool, error)
 }
 
 // NewThread creates a new Responses API thread with the given configuration.
@@ -491,7 +491,7 @@ func (t *Thread) processMessageExchange(
 	log.Debug("stream created, processing events")
 
 	// Process stream events
-	toolsUsed, err := processStream(ctx, stream, handler)
+	toolsUsed, err := processStream(ctx, stream, handler, model, opt)
 	if err != nil {
 		// Log detailed error information for debugging
 		log.WithError(err).
@@ -515,7 +515,7 @@ func (t *Thread) processMessageExchange(
 
 			// Retry the request
 			stream = newStreaming(ctx, params)
-			toolsUsed, err = processStream(ctx, stream, handler)
+			toolsUsed, err = processStream(ctx, stream, handler, model, opt)
 			if err != nil {
 				saveConversation()
 				return "", false, err

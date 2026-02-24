@@ -27,6 +27,8 @@ func (t *Thread) processStream(
 	ctx context.Context,
 	stream *ssestream.Stream[responses.ResponseStreamEventUnion],
 	handler llmtypes.MessageHandler,
+	model string,
+	opt llmtypes.MessageOpt,
 ) (bool, error) {
 	telemetry.AddEvent(ctx, "stream_processing_started")
 	log := logger.G(ctx)
@@ -289,9 +291,8 @@ func (t *Thread) processStream(
 	if finalResponse != nil {
 		t.updateUsage(finalResponse.Usage)
 
-		// Log usage if this is a main agent
-		if !t.Config.IsSubAgent {
-			usage.LogLLMUsage(ctx, t.GetUsage(), t.Config.Model, apiStartTime, int(finalResponse.Usage.OutputTokens))
+		if !t.Config.IsSubAgent && !opt.DisableUsageLog {
+			usage.LogLLMUsage(ctx, t.GetUsage(), model, apiStartTime, int(finalResponse.Usage.OutputTokens))
 		}
 	}
 

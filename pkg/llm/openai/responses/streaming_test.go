@@ -124,7 +124,7 @@ func TestProcessStreamThinkingEndsBeforeText(t *testing.T) {
 
 	handler := &captureStreamHandler{}
 
-	toolsUsed, err := thread.processStream(context.Background(), stream, handler)
+	toolsUsed, err := thread.processStream(context.Background(), stream, handler, "gpt-4.1", llmtypes.MessageOpt{})
 	require.NoError(t, err)
 	assert.False(t, toolsUsed)
 	assert.Equal(t, []string{

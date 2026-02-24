@@ -1048,7 +1048,7 @@ func TestProcessMessageExchangeSavesConversationPerTurn(t *testing.T) {
 	thread.newStreamingFunc = func(_ context.Context, _ openairesponses.ResponseNewParams, _ ...option.RequestOption) *ssestream.Stream[openairesponses.ResponseStreamEventUnion] {
 		return nil
 	}
-	thread.processStreamFunc = func(_ context.Context, _ *ssestream.Stream[openairesponses.ResponseStreamEventUnion], _ llmtypes.MessageHandler) (bool, error) {
+	thread.processStreamFunc = func(_ context.Context, _ *ssestream.Stream[openairesponses.ResponseStreamEventUnion], _ llmtypes.MessageHandler, _ string, _ llmtypes.MessageOpt) (bool, error) {
 		thread.inputItems = append(thread.inputItems, openairesponses.ResponseInputItemUnionParam{
 			OfMessage: &openairesponses.EasyInputMessageParam{
 				Role:    openairesponses.EasyInputMessageRoleAssistant,
@@ -1088,7 +1088,7 @@ func TestProcessMessageExchangeSavesConversationOnError(t *testing.T) {
 	thread.newStreamingFunc = func(_ context.Context, _ openairesponses.ResponseNewParams, _ ...option.RequestOption) *ssestream.Stream[openairesponses.ResponseStreamEventUnion] {
 		return nil
 	}
-	thread.processStreamFunc = func(_ context.Context, _ *ssestream.Stream[openairesponses.ResponseStreamEventUnion], _ llmtypes.MessageHandler) (bool, error) {
+	thread.processStreamFunc = func(_ context.Context, _ *ssestream.Stream[openairesponses.ResponseStreamEventUnion], _ llmtypes.MessageHandler, _ string, _ llmtypes.MessageOpt) (bool, error) {
 		return false, errors.New("exchange failed")
 	}
 
@@ -1120,7 +1120,7 @@ func TestProcessMessageExchangeCodexUsesDefaultStreamingOptions(t *testing.T) {
 		streamingOptsCount = len(opts)
 		return nil
 	}
-	thread.processStreamFunc = func(_ context.Context, _ *ssestream.Stream[openairesponses.ResponseStreamEventUnion], _ llmtypes.MessageHandler) (bool, error) {
+	thread.processStreamFunc = func(_ context.Context, _ *ssestream.Stream[openairesponses.ResponseStreamEventUnion], _ llmtypes.MessageHandler, _ string, _ llmtypes.MessageOpt) (bool, error) {
 		return false, nil
 	}
 

@@ -1,5 +1,9 @@
 # Kodelet
 
+## Unreleased
+
+- OpenAI Responses weak-model utility summaries no longer emit the `Turn completed` usage log line.
+
 ## 0.2.25.beta (2026-02-24)
 
 - Added `openai.manual_cache` session-affinity support for Chat Completions and documented a Fireworks-compatible OpenAI profile example in `config.sample.yaml`.
