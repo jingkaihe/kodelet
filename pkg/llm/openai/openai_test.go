@@ -951,7 +951,8 @@ func TestIsRetryableError_EdgeCases(t *testing.T) {
 }
 
 func TestGetPromptCacheHeaders(t *testing.T) {
-	thread := &Thread{Thread: base.NewThread(llm.Config{}, "conv-test", base.CreateHookTrigger(context.Background(), llm.Config{}, "conv-test"))}
+	configWithManualCache := llm.Config{OpenAI: &llm.OpenAIConfig{ManualCache: true}}
+	thread := &Thread{Thread: base.NewThread(configWithManualCache, "conv-test", base.CreateHookTrigger(context.Background(), configWithManualCache, "conv-test"))}
 
 	headers := thread.getPromptCacheHeaders(llm.MessageOpt{PromptCache: true})
 	require.NotNil(t, headers)
@@ -961,8 +962,17 @@ func TestGetPromptCacheHeaders(t *testing.T) {
 	headersWithoutConversation := thread.getPromptCacheHeaders(llm.MessageOpt{PromptCache: true})
 	assert.Nil(t, headersWithoutConversation)
 
+	thread.SetConversationID("conv-test")
 	noCacheHeaders := thread.getPromptCacheHeaders(llm.MessageOpt{PromptCache: false})
 	assert.Nil(t, noCacheHeaders)
+
+	thread.Config.OpenAI.ManualCache = false
+	headersWithManualCacheDisabled := thread.getPromptCacheHeaders(llm.MessageOpt{PromptCache: true})
+	assert.Nil(t, headersWithManualCacheDisabled)
+
+	thread.Config.OpenAI = nil
+	headersWithoutOpenAIConfig := thread.getPromptCacheHeaders(llm.MessageOpt{PromptCache: true})
+	assert.Nil(t, headersWithoutOpenAIConfig)
 }
 
 func TestUpdateUsageWithCachedTokens(t *testing.T) {

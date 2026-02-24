@@ -704,12 +704,6 @@ func (t *Thread) createChatCompletionWithRetry(
 	return response, err
 }
 
-// createStreamingChatCompletion handles streaming responses from OpenAI API.
-// It streams content to the handler as it arrives and reconstructs the full response.
-func (t *Thread) createStreamingChatCompletion(ctx context.Context, requestParams openai.ChatCompletionRequest, handler llmtypes.StreamingMessageHandler) (openai.ChatCompletionResponse, error) {
-	return t.createStreamingChatCompletionWithClient(ctx, requestParams, handler, t.client)
-}
-
 func (t *Thread) createStreamingChatCompletionWithClient(
 	ctx context.Context,
 	requestParams openai.ChatCompletionRequest,
@@ -1060,7 +1054,7 @@ func getImageMediaType(ext string) (string, error) {
 }
 
 func (t *Thread) getPromptCacheHeaders(opt llmtypes.MessageOpt) map[string]string {
-	if !opt.PromptCache {
+	if !opt.PromptCache || t.Config.OpenAI == nil || !t.Config.OpenAI.ManualCache {
 		return nil
 	}
 

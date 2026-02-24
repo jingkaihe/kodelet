@@ -223,6 +223,11 @@ openai:
   # The Responses API offers multi-turn conversations via previous_response_id,
   # native compaction support, and richer streaming events.
   # use_responses_api: true
+
+  # Enable manual prompt-cache affinity for Chat Completions.
+  # When true, kodelet adds x-session-affinity header per conversation,
+  # but only on calls where prompt caching is requested.
+  # manual_cache: true
   # models:
   #   # Models that support reasoning capabilities (o1, o3, grok reasoning models, etc.)
   #   reasoning:
