@@ -350,6 +350,9 @@ func (m *Manager) NewSession(ctx context.Context, req acptypes.NewSessionRequest
 
 	var stateOpts []tools.BasicStateOption
 	stateOpts = append(stateOpts, tools.WithLLMConfig(llmConfig))
+	if customManager, err := tools.CreateCustomToolManagerFromViper(ctx); err == nil {
+		stateOpts = append(stateOpts, tools.WithCustomTools(customManager))
+	}
 	stateOpts = append(stateOpts, tools.WithMainTools())
 
 	if !m.config.NoSkills {
@@ -415,6 +418,9 @@ func (m *Manager) LoadSession(ctx context.Context, req acptypes.LoadSessionReque
 
 	var stateOpts []tools.BasicStateOption
 	stateOpts = append(stateOpts, tools.WithLLMConfig(llmConfig))
+	if customManager, err := tools.CreateCustomToolManagerFromViper(ctx); err == nil {
+		stateOpts = append(stateOpts, tools.WithCustomTools(customManager))
+	}
 	stateOpts = append(stateOpts, tools.WithMainTools())
 
 	if !m.config.NoSkills {

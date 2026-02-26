@@ -6,6 +6,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/invopop/jsonschema"
@@ -95,6 +96,12 @@ func getAvailableToolNames() []string {
 	for toolName := range toolRegistry {
 		tools = append(tools, toolName)
 	}
+	if customManager, err := CreateCustomToolManagerFromViper(context.Background()); err == nil {
+		for _, customTool := range customManager.ListTools() {
+			tools = append(tools, customTool.Name())
+		}
+	}
+	sort.Strings(tools)
 	return tools
 }
 
@@ -106,14 +113,36 @@ func getAvailableSubAgentToolNames() []string {
 			tools = append(tools, toolName)
 		}
 	}
+	if customManager, err := CreateCustomToolManagerFromViper(context.Background()); err == nil {
+		for _, customTool := range customManager.ListTools() {
+			if customTool.Name() != "subagent" {
+				tools = append(tools, customTool.Name())
+			}
+		}
+	}
+	sort.Strings(tools)
 	return tools
 }
 
 // ValidateTools validates that all tool names are available
 func ValidateTools(toolNames []string) error {
+	availableCustomTools := map[string]struct{}{}
+	if customManager, err := CreateCustomToolManagerFromViper(context.Background()); err == nil {
+		for _, customTool := range customManager.ListTools() {
+			availableCustomTools[customTool.Name()] = struct{}{}
+			if customImpl, ok := customTool.(*CustomTool); ok {
+				availableCustomTools[customImpl.canonical] = struct{}{}
+				availableCustomTools[strings.Replace(customImpl.canonical, "/", "@", 1)] = struct{}{}
+			}
+		}
+	}
+
 	var unknownTools []string
 	for _, toolName := range toolNames {
 		if _, exists := toolRegistry[toolName]; !exists {
+			if _, customExists := availableCustomTools[toolName]; customExists {
+				continue
+			}
 			unknownTools = append(unknownTools, toolName)
 		}
 	}
@@ -130,6 +159,17 @@ func ValidateTools(toolNames []string) error {
 
 // ValidateSubAgentTools validates that all sub-agent tool names are available
 func ValidateSubAgentTools(toolNames []string) error {
+	availableCustomTools := map[string]struct{}{}
+	if customManager, err := CreateCustomToolManagerFromViper(context.Background()); err == nil {
+		for _, customTool := range customManager.ListTools() {
+			availableCustomTools[customTool.Name()] = struct{}{}
+			if customImpl, ok := customTool.(*CustomTool); ok {
+				availableCustomTools[customImpl.canonical] = struct{}{}
+				availableCustomTools[strings.Replace(customImpl.canonical, "/", "@", 1)] = struct{}{}
+			}
+		}
+	}
+
 	var invalidTools []string
 	var subagentToolFound bool
 
@@ -138,6 +178,9 @@ func ValidateSubAgentTools(toolNames []string) error {
 			subagentToolFound = true
 			invalidTools = append(invalidTools, toolName)
 		} else if _, exists := toolRegistry[toolName]; !exists {
+			if _, customExists := availableCustomTools[toolName]; customExists {
+				continue
+			}
 			invalidTools = append(invalidTools, toolName)
 		}
 	}
@@ -167,6 +210,17 @@ func GetToolsFromNames(toolNames []string) []tooltypes.Tool {
 		return nil
 	}
 
+	customByName := map[string]tooltypes.Tool{}
+	if customManager, err := CreateCustomToolManagerFromViper(context.Background()); err == nil {
+		for _, customTool := range customManager.ListTools() {
+			customByName[customTool.Name()] = customTool
+			if customImpl, ok := customTool.(*CustomTool); ok {
+				customByName[customImpl.canonical] = customTool
+				customByName[strings.Replace(customImpl.canonical, "/", "@", 1)] = customTool
+			}
+		}
+	}
+
 	toolSet := make(map[string]bool)
 	var orderedToolNames []string
 
@@ -191,6 +245,10 @@ func GetToolsFromNames(toolNames []string) []tooltypes.Tool {
 	for _, toolName := range orderedToolNames {
 		if tool, exists := toolRegistry[toolName]; exists {
 			tools = append(tools, tool)
+			continue
+		}
+		if customTool, exists := customByName[toolName]; exists {
+			tools = append(tools, customTool)
 		}
 	}
 

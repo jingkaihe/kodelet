@@ -51,6 +51,21 @@ func TestRecipeDirs(t *testing.T) {
 	assert.Contains(t, dirs, "/home/user/.kodelet/recipes")
 }
 
+func TestToolDirs(t *testing.T) {
+	discovery, err := NewDiscovery(
+		WithBaseDir("/repo"),
+		WithHomeDir("/home/user"),
+	)
+	require.NoError(t, err)
+
+	dirs := discovery.ToolDirs()
+	require.Len(t, dirs, 2)
+	assert.Equal(t, "/repo/tools", dirs[0].Dir)
+	assert.Equal(t, "", dirs[0].Prefix)
+	assert.Equal(t, "/home/user/.kodelet/tools", dirs[1].Dir)
+	assert.Equal(t, "", dirs[1].Prefix)
+}
+
 func TestDiscoverSkillsFromDir(t *testing.T) {
 	tmpDir := t.TempDir()
 
@@ -236,6 +251,10 @@ description: A skill
 	require.NoError(t, os.MkdirAll(recipesDir, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(recipesDir, "my-recipe.md"), []byte("# Recipe"), 0o644))
 
+	toolsDir := filepath.Join(pluginDir, "tools")
+	require.NoError(t, os.MkdirAll(toolsDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(toolsDir, "my-tool"), []byte("#!/bin/sh\necho ok\n"), 0o755))
+
 	discovery, err := NewDiscovery(
 		WithBaseDir(tmpDir),
 		WithHomeDir(tmpDir),
@@ -250,6 +269,7 @@ description: A skill
 	assert.Equal(t, "test-plugin", plugin.Name)
 	assert.Equal(t, []string{"my-skill"}, plugin.Skills)
 	assert.Equal(t, []string{"my-recipe"}, plugin.Recipes)
+	assert.Equal(t, []string{"my-tool"}, plugin.Tools)
 }
 
 func TestDiscoverAll(t *testing.T) {

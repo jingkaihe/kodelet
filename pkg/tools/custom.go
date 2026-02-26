@@ -9,14 +9,17 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"slices"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/invopop/jsonschema"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/osutil"
+	"github.com/jingkaihe/kodelet/pkg/plugins"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
 	"github.com/spf13/viper"
@@ -24,6 +27,14 @@ import (
 )
 
 var _ tooltypes.Tool = &CustomTool{}
+
+const (
+	customToolAliasPrefix  = "custom_tool_"
+	pluginToolAliasPrefix  = "plugin_tool_"
+	customToolSourceLocal  = "local"
+	customToolSourceGlobal = "global"
+	customToolSourcePlugin = "plugin"
+)
 
 // CustomToolDescription represents the JSON structure returned by tool's description command
 type CustomToolDescription struct {
@@ -50,11 +61,28 @@ type CustomTool struct {
 	schema      *jsonschema.Schema
 	timeout     time.Duration
 	maxOutput   int
+	source      string
+	canonical   string
+}
+
+type customToolNameAlias struct {
+	Canonical string
+	Aliases   []string
+}
+
+type customToolDiscoveryDir struct {
+	Path      string
+	Prefix    string
+	Source    string
+	Overwrite bool
 }
 
 // CustomToolManager manages discovery and registration of custom tools
 type CustomToolManager struct {
 	tools     map[string]*CustomTool
+	toolsByID map[string]*CustomTool
+	nameIndex map[string]string
+	rawNames  map[string]string
 	globalDir string
 	localDir  string
 	config    CustomToolConfig
@@ -70,6 +98,9 @@ func NewCustomToolManager() (*CustomToolManager, error) {
 
 	manager := &CustomToolManager{
 		tools:     make(map[string]*CustomTool),
+		toolsByID: make(map[string]*CustomTool),
+		nameIndex: make(map[string]string),
+		rawNames:  make(map[string]string),
 		globalDir: globalDir,
 		localDir:  localDir,
 		config:    config,
@@ -114,6 +145,110 @@ func customToolWhiteListed(toolName string, whiteList []string) bool {
 	return len(whiteList) == 0 || slices.Contains(whiteList, toolName)
 }
 
+func pluginPrefixToCanonical(prefix string) string {
+	trimmed := strings.TrimSuffix(prefix, "/")
+	if trimmed == "" {
+		return ""
+	}
+	return strings.Replace(trimmed, "@", "/", 1)
+}
+
+func sanitizeAliasSegment(segment string) string {
+	segment = strings.TrimSpace(segment)
+	if segment == "" {
+		return "x"
+	}
+	var b strings.Builder
+	for _, r := range segment {
+		switch {
+		case unicode.IsLetter(r), unicode.IsDigit(r):
+			b.WriteRune(unicode.ToLower(r))
+		default:
+			b.WriteRune('_')
+		}
+	}
+	out := strings.Trim(b.String(), "_")
+	if out == "" {
+		return "x"
+	}
+	return out
+}
+
+func sanitizeToolAliasName(name string) string {
+	segments := strings.Split(name, "/")
+	for i, segment := range segments {
+		segments[i] = sanitizeAliasSegment(segment)
+	}
+	result := strings.Join(segments, "_")
+	for strings.Contains(result, "__") {
+		result = strings.ReplaceAll(result, "__", "_")
+	}
+	result = strings.Trim(result, "_")
+	if result == "" {
+		return "tool"
+	}
+	return result
+}
+
+func pluginToolAliasName(canonical string) string {
+	return pluginToolAliasPrefix + sanitizeToolAliasName(canonical)
+}
+
+func localToolAliasName(baseName string) string {
+	return customToolAliasPrefix + sanitizeToolAliasName(baseName)
+}
+
+func normalizeToolIdentifier(name string) string {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return ""
+	}
+	trimmed = strings.TrimPrefix(trimmed, customToolAliasPrefix)
+	trimmed = strings.TrimPrefix(trimmed, pluginToolAliasPrefix)
+	trimmed = strings.Replace(trimmed, "@", "/", 1)
+	return strings.TrimSpace(trimmed)
+}
+
+func canonicalIDForTool(baseName, pluginPrefix string) string {
+	pluginName := pluginPrefixToCanonical(pluginPrefix)
+	if pluginName == "" {
+		return baseName
+	}
+	return pluginName + "/" + baseName
+}
+
+func aliasesForTool(baseName, pluginPrefix string) customToolNameAlias {
+	canonical := canonicalIDForTool(baseName, pluginPrefix)
+	if canonical == baseName {
+		sanitizedBase := sanitizeToolAliasName(baseName)
+		return customToolNameAlias{
+			Canonical: canonical,
+			Aliases: []string{
+				localToolAliasName(baseName),
+				baseName,
+				sanitizedBase,
+				customToolAliasPrefix + sanitizedBase,
+				pluginToolAliasPrefix + sanitizedBase,
+			},
+		}
+	}
+
+	pluginDirName := strings.Replace(canonical, "/", "@", 1)
+	sanitizedCanonical := sanitizeToolAliasName(canonical)
+	return customToolNameAlias{
+		Canonical: canonical,
+		Aliases: []string{
+			pluginToolAliasName(canonical),
+			localToolAliasName(canonical),
+			canonical,
+			pluginDirName,
+			sanitizedCanonical,
+			localToolAliasName(sanitizedCanonical),
+			pluginToolAliasName(sanitizedCanonical),
+		},
+	}
+}
+
 // DiscoverTools scans directories and discovers available custom tools
 func (m *CustomToolManager) DiscoverTools(ctx context.Context) error {
 	if !m.config.Enabled {
@@ -125,37 +260,88 @@ func (m *CustomToolManager) DiscoverTools(ctx context.Context) error {
 	defer m.mu.Unlock()
 
 	m.tools = make(map[string]*CustomTool)
+	m.toolsByID = make(map[string]*CustomTool)
+	m.nameIndex = make(map[string]string)
+	m.rawNames = make(map[string]string)
 
-	if err := m.discoverToolsInDir(ctx, m.globalDir, false); err != nil {
-		logger.G(ctx).WithError(err).WithField("dir", m.globalDir).Warn("failed to discover global custom tools")
+	for _, dirCfg := range m.discoveryDirs() {
+		if err := m.discoverToolsInDir(ctx, dirCfg); err != nil {
+			logger.G(ctx).WithError(err).WithField("dir", dirCfg.Path).Debug("failed to discover custom tools")
+		}
 	}
 
-	// Local tools override global ones with same name
-	if err := m.discoverToolsInDir(ctx, m.localDir, true); err != nil {
-		logger.G(ctx).WithError(err).WithField("dir", m.localDir).Debug("failed to discover local custom tools")
-	}
+	m.syncPrimaryTools()
 
 	logger.G(ctx).WithField("count", len(m.tools)).Debug("discovered custom tools")
 	return nil
 }
 
+func (m *CustomToolManager) discoveryDirs() []customToolDiscoveryDir {
+	var dirs []customToolDiscoveryDir
+
+	addDir := func(path, prefix, source string, overwrite bool) {
+		if strings.TrimSpace(path) == "" {
+			return
+		}
+		dirs = append(dirs, customToolDiscoveryDir{
+			Path:      path,
+			Prefix:    prefix,
+			Source:    source,
+			Overwrite: overwrite,
+		})
+	}
+
+	addDir(m.localDir, "", customToolSourceLocal, false)
+
+	for _, pluginDir := range plugins.ScanPluginSubdirs("./.kodelet/plugins", "tools") {
+		addDir(pluginDir.Dir, pluginDir.Prefix, customToolSourcePlugin, false)
+	}
+
+	addDir(m.globalDir, "", customToolSourceGlobal, false)
+
+	homeDir, err := os.UserHomeDir()
+	if err == nil {
+		globalPluginDir := filepath.Join(homeDir, ".kodelet", "plugins")
+		for _, pluginDir := range plugins.ScanPluginSubdirs(globalPluginDir, "tools") {
+			addDir(pluginDir.Dir, pluginDir.Prefix, customToolSourcePlugin, false)
+		}
+	}
+
+	unique := make([]customToolDiscoveryDir, 0, len(dirs))
+	seen := make(map[string]bool)
+	for _, dir := range dirs {
+		key := dir.Path + "|" + dir.Prefix + "|" + dir.Source
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		unique = append(unique, dir)
+	}
+
+	return unique
+}
+
 // discoverToolsInDir discovers tools in a specific directory
-func (m *CustomToolManager) discoverToolsInDir(ctx context.Context, dir string, override bool) error {
-	if _, err := os.Stat(dir); os.IsNotExist(err) {
+func (m *CustomToolManager) discoverToolsInDir(ctx context.Context, dirCfg customToolDiscoveryDir) error {
+	if _, err := os.Stat(dirCfg.Path); os.IsNotExist(err) {
 		return nil
 	}
 
-	entries, err := os.ReadDir(dir)
+	entries, err := os.ReadDir(dirCfg.Path)
 	if err != nil {
 		return errors.Wrap(err, "failed to read directory")
 	}
+
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].Name() < entries[j].Name()
+	})
 
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
 		}
 
-		execPath := filepath.Join(dir, entry.Name())
+		execPath := filepath.Join(dirCfg.Path, entry.Name())
 
 		info, err := entry.Info()
 		if err != nil {
@@ -172,24 +358,45 @@ func (m *CustomToolManager) discoverToolsInDir(ctx context.Context, dir string, 
 			continue
 		}
 
-		if !customToolWhiteListed(tool.name, m.config.ToolWhiteList) {
+		names := aliasesForTool(tool.name, dirCfg.Prefix)
+		if !customToolWhiteListed(names.Canonical, m.config.ToolWhiteList) && !customToolWhiteListed(tool.name, m.config.ToolWhiteList) {
 			logger.G(ctx).WithField("name", tool.name).Debug("skipping tool, not in whitelist")
 			continue
 		}
 
-		// Check if tool already exists from global dir
-		if _, exists := m.tools[tool.name]; exists && !override {
-			logger.G(ctx).WithField("name", tool.name).Debug("skipping global tool, local version exists")
+		if existing, exists := m.toolsByID[names.Canonical]; exists && !dirCfg.Overwrite {
+			logger.G(ctx).WithFields(map[string]any{
+				"name":     names.Canonical,
+				"existing": existing.execPath,
+				"skipped":  execPath,
+			}).Debug("skipping tool due to precedence")
 			continue
-		} else if exists {
-			logger.G(ctx).WithField("name", tool.name).Debug("overriding global tool with local version")
 		}
 
-		m.tools[tool.name] = tool
-		logger.G(ctx).WithField("name", tool.name).WithField("path", execPath).Debug("registered custom tool")
+		tool.source = dirCfg.Source
+		tool.canonical = names.Canonical
+		m.toolsByID[names.Canonical] = tool
+		for _, alias := range names.Aliases {
+			m.nameIndex[normalizeToolIdentifier(alias)] = names.Canonical
+			m.rawNames[alias] = names.Canonical
+		}
+		logger.G(ctx).WithFields(map[string]any{
+			"name":      names.Canonical,
+			"aliases":   names.Aliases,
+			"path":      execPath,
+			"source":    dirCfg.Source,
+			"overwrite": dirCfg.Overwrite,
+		}).Debug("registered custom tool")
 	}
 
 	return nil
+}
+
+func (m *CustomToolManager) syncPrimaryTools() {
+	m.tools = make(map[string]*CustomTool)
+	for _, tool := range m.toolsByID {
+		m.tools[tool.canonical] = tool
+	}
 }
 
 // validateTool validates a tool by calling its description command
@@ -235,13 +442,18 @@ func (m *CustomToolManager) validateTool(ctx context.Context, execPath string) (
 		return nil, errors.Wrap(err, "failed to parse input schema")
 	}
 
+	maxOutput := m.config.MaxOutputSize
+	if maxOutput == 0 {
+		maxOutput = 102400
+	}
+
 	tool := &CustomTool{
 		execPath:    execPath,
 		name:        desc.Name,
 		description: desc.Description,
 		schema:      &schema,
-		timeout:     m.config.Timeout,
-		maxOutput:   m.config.MaxOutputSize,
+		timeout:     timeout,
+		maxOutput:   maxOutput,
 	}
 
 	return tool, nil
@@ -264,8 +476,21 @@ func (m *CustomToolManager) GetTool(name string) (*CustomTool, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	name = strings.TrimPrefix(name, "custom_tool_")
-	tool, exists := m.tools[name]
+	if tool, ok := m.toolsByID[name]; ok {
+		return tool, true
+	}
+
+	if canonical, ok := m.rawNames[name]; ok {
+		tool, exists := m.toolsByID[canonical]
+		return tool, exists
+	}
+
+	normalized := normalizeToolIdentifier(name)
+	canonical, ok := m.nameIndex[normalized]
+	if !ok {
+		canonical = normalized
+	}
+	tool, exists := m.toolsByID[canonical]
 	return tool, exists
 }
 
@@ -273,11 +498,25 @@ func (m *CustomToolManager) GetTool(name string) (*CustomTool, bool) {
 
 // Name returns the name of the tool
 func (t *CustomTool) Name() string {
-	return fmt.Sprintf("custom_tool_%s", t.name)
+	canonical := t.canonical
+	if canonical == "" {
+		canonical = t.name
+	}
+	if strings.Contains(canonical, "/") {
+		return pluginToolAliasName(canonical)
+	}
+	return localToolAliasName(canonical)
 }
 
 // Description returns the description of the tool
 func (t *CustomTool) Description() string {
+	canonical := t.canonical
+	if canonical == "" {
+		canonical = t.name
+	}
+	if strings.Contains(canonical, "/") {
+		return fmt.Sprintf("[Plugin Tool: %s] %s", canonical, t.description)
+	}
 	return t.description
 }
 
@@ -288,9 +527,15 @@ func (t *CustomTool) GenerateSchema() *jsonschema.Schema {
 
 // TracingKVs returns tracing key-value pairs for observability
 func (t *CustomTool) TracingKVs(_ string) ([]attribute.KeyValue, error) {
+	canonical := t.canonical
+	if canonical == "" {
+		canonical = t.name
+	}
 	return []attribute.KeyValue{
 		attribute.String("tool.type", "custom"),
 		attribute.String("tool.name", t.name),
+		attribute.String("tool.canonical", canonical),
+		attribute.String("tool.source", t.source),
 		attribute.String("tool.exec_path", t.execPath),
 	}, nil
 }
@@ -319,8 +564,10 @@ func (t *CustomTool) Execute(ctx context.Context, _ tooltypes.State, parameters 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return &CustomToolResult{
-			toolName: t.Name(),
-			err:      errors.Wrap(err, "failed to create stdin pipe").Error(),
+			toolName:      t.Name(),
+			canonicalName: t.canonical,
+			source:        t.source,
+			err:           errors.Wrap(err, "failed to create stdin pipe").Error(),
 		}
 	}
 
@@ -337,6 +584,8 @@ func (t *CustomTool) Execute(ctx context.Context, _ tooltypes.State, parameters 
 		if execCtx.Err() == context.DeadlineExceeded {
 			return &CustomToolResult{
 				toolName:      t.Name(),
+				canonicalName: t.canonical,
+				source:        t.source,
 				executionTime: executionTime,
 				err:           fmt.Sprintf("tool execution timed out after %v", t.timeout),
 			}
@@ -349,6 +598,8 @@ func (t *CustomTool) Execute(ctx context.Context, _ tooltypes.State, parameters 
 
 		return &CustomToolResult{
 			toolName:      t.Name(),
+			canonicalName: t.canonical,
+			source:        t.source,
 			executionTime: executionTime,
 			err:           errorMsg,
 		}
@@ -365,6 +616,8 @@ func (t *CustomTool) Execute(ctx context.Context, _ tooltypes.State, parameters 
 		if errMsg, ok := jsonError["error"].(string); ok {
 			return &CustomToolResult{
 				toolName:      t.Name(),
+				canonicalName: t.canonical,
+				source:        t.source,
 				executionTime: executionTime,
 				err:           errMsg,
 			}
@@ -373,6 +626,8 @@ func (t *CustomTool) Execute(ctx context.Context, _ tooltypes.State, parameters 
 
 	return &CustomToolResult{
 		toolName:      t.Name(),
+		canonicalName: t.canonical,
+		source:        t.source,
 		executionTime: executionTime,
 		result:        outputStr,
 	}
@@ -381,6 +636,8 @@ func (t *CustomTool) Execute(ctx context.Context, _ tooltypes.State, parameters 
 // CustomToolResult represents the result of a custom tool execution
 type CustomToolResult struct {
 	toolName      string
+	canonicalName string
+	source        string
 	executionTime time.Duration
 	result        string
 	err           string
@@ -420,6 +677,8 @@ func (r *CustomToolResult) StructuredData() tooltypes.StructuredToolResult {
 		result.Metadata = &tooltypes.CustomToolMetadata{
 			ExecutionTime: r.executionTime,
 			Output:        r.result,
+			CanonicalName: r.canonicalName,
+			Source:        r.source,
 		}
 	}
 

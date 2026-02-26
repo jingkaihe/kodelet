@@ -99,6 +99,8 @@ func processFragment(ctx context.Context, config *RunConfig, args []string) (str
 	customToolsConfig := tools.LoadCustomToolConfig()
 	fragmentArgs["custom_tools_local_dir"] = customToolsConfig.LocalDir
 	fragmentArgs["custom_tools_global_dir"] = customToolsConfig.GlobalDir
+	fragmentArgs["plugin_tools_local_dir"] = "./.kodelet/plugins/*/tools"
+	fragmentArgs["plugin_tools_global_dir"] = "~/.kodelet/plugins/*/tools"
 
 	fragmentConfig := &fragments.Config{
 		FragmentName: config.FragmentName,

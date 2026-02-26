@@ -1119,10 +1119,20 @@ Custom tools are discovered from two directories:
 - Available across all projects
 - Good for general-purpose utilities
 
+**Plugin Tools (Global)**: `~/.kodelet/plugins/<org@repo>/tools/`
+- Installed via `kodelet plugin add`
+- Exposed with canonical ids like `org/repo/tool`
+
 **Local Tools**: `./.kodelet/tools/`
 - Project-specific tools
 - Override global tools with the same name
 - Should be committed to your repository
+
+**Plugin Tools (Local)**: `./.kodelet/plugins/<org@repo>/tools/`
+- Installed via `kodelet plugin add`
+- Higher precedence than global tools
+
+Discovery precedence is: local tools → local plugin tools → global tools → global plugin tools.
 
 ### Custom Tools Configuration
 
@@ -1156,6 +1166,8 @@ custom_tools:
 
 **Tool Whitelisting:**
 The `tool_white_list` configuration allows you to control which custom tools are loaded and available for use. When the whitelist is empty or not specified, all discovered custom tools in the configured directories will be available. When you specify tool names in the whitelist, only those exact tools will be loaded, providing granular control over which tools are accessible in your environment.
+
+For plugin tools, whitelist entries can use either canonical ids (`org/repo/tool`) or the local runtime alias (`plugin_tool_org_repo_tool`).
 
 **Command Line Override:**
 ```bash

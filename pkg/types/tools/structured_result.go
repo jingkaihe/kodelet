@@ -306,6 +306,8 @@ func (m MCPToolMetadata) ToolType() string { return "mcp_tool" }
 type CustomToolMetadata struct {
 	ExecutionTime time.Duration `json:"executionTime"`
 	Output        string        `json:"output"`
+	CanonicalName string        `json:"canonicalName,omitempty"`
+	Source        string        `json:"source,omitempty"`
 }
 
 // ToolType returns the tool type identifier for custom tool execution

@@ -325,6 +325,8 @@ Fragments are discovered from multiple locations with precedence order:
 4. **`~/.kodelet/plugins/<org@repo>/recipes/`** - User-global plugin recipes
 5. **Built-in recipes** - Embedded in the binary (lowest precedence)
 
+Plugin directories use `<org@repo>` on disk, while recipe IDs are exposed as `org/repo/...`.
+
 ### File Naming
 
 Fragments can have two naming patterns:

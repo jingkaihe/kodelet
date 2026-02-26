@@ -171,8 +171,11 @@ func WithExtraMCPTools(tools []tooltypes.Tool) BasicStateOption {
 // WithCustomTools returns an option that configures custom tools
 func WithCustomTools(customManager *CustomToolManager) BasicStateOption {
 	return func(_ context.Context, s *BasicState) error {
-		tools := customManager.ListTools()
-		s.customTools = append(s.customTools, tools...)
+		for _, customTool := range customManager.ListTools() {
+			if customToolAllowedByConfig(customTool, s.llmConfig.AllowedTools) {
+				s.customTools = append(s.customTools, customTool)
+			}
+		}
 		return nil
 	}
 }
@@ -330,6 +333,34 @@ func enforceApplyPatchModeOnResolvedTools(tools []tooltypes.Tool, allowedTools [
 	}
 
 	return filteredTools
+}
+
+func customToolAllowedByConfig(tool tooltypes.Tool, allowedTools []string) bool {
+	if len(allowedTools) == 0 {
+		return true
+	}
+	if len(allowedTools) == 1 && allowedTools[0] == NoToolsMarker {
+		return false
+	}
+
+	customTool, ok := tool.(*CustomTool)
+	if !ok {
+		return true
+	}
+
+	canonicalPluginID := customTool.canonical
+	if canonicalPluginID == "" {
+		canonicalPluginID = customTool.name
+	}
+	pluginDirName := strings.Replace(canonicalPluginID, "/", "@", 1)
+
+	for _, allowed := range allowedTools {
+		if allowed == tool.Name() || allowed == customTool.name || allowed == canonicalPluginID || allowed == pluginDirName {
+			return true
+		}
+	}
+
+	return false
 }
 
 // TodoFilePath returns the path to the todo file

@@ -69,6 +69,8 @@ Hooks are discovered from four locations (earlier takes precedence):
 3. `~/.kodelet/hooks/` - User-global standalone hooks
 4. `~/.kodelet/plugins/<org@repo>/hooks/` - User-global plugin hooks (lowest precedence)
 
+Plugin directories use `<org@repo>` on disk, but exposed names always use `org/repo/...` format.
+
 Only executable files are considered. Directories and non-executable files are skipped.
 
 ### Plugin-based Hook Naming

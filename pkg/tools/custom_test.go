@@ -19,11 +19,17 @@ func TestCustomToolManager_NewCustomToolManager(t *testing.T) {
 	assert.NotNil(t, manager)
 	assert.NotEmpty(t, manager.globalDir)
 	assert.NotEmpty(t, manager.localDir)
+	assert.NotNil(t, manager.toolsByID)
+	assert.NotNil(t, manager.nameIndex)
+	assert.NotNil(t, manager.rawNames)
 }
 
 func TestCustomToolManager_DiscoverTools_NoDirectory(t *testing.T) {
 	manager := &CustomToolManager{
 		tools:     make(map[string]*CustomTool),
+		toolsByID: make(map[string]*CustomTool),
+		nameIndex: make(map[string]string),
+		rawNames:  make(map[string]string),
 		globalDir: "/nonexistent/global",
 		localDir:  "/nonexistent/local",
 		config:    CustomToolConfig{Enabled: true},
@@ -37,8 +43,11 @@ func TestCustomToolManager_DiscoverTools_NoDirectory(t *testing.T) {
 
 func TestCustomToolManager_DiscoverTools_Disabled(t *testing.T) {
 	manager := &CustomToolManager{
-		tools:  make(map[string]*CustomTool),
-		config: CustomToolConfig{Enabled: false},
+		tools:     make(map[string]*CustomTool),
+		toolsByID: make(map[string]*CustomTool),
+		nameIndex: make(map[string]string),
+		rawNames:  make(map[string]string),
+		config:    CustomToolConfig{Enabled: false},
 	}
 
 	ctx := context.Background()
@@ -335,8 +344,10 @@ fi
 func TestCustomTool_InterfaceMethods(t *testing.T) {
 	tool := &CustomTool{
 		name:        "test_tool",
+		canonical:   "test_tool",
 		description: "A test tool",
 		execPath:    "/path/to/tool",
+		source:      "local",
 	}
 
 	// Test Name() - should have prefix
@@ -348,7 +359,7 @@ func TestCustomTool_InterfaceMethods(t *testing.T) {
 	// Test TracingKVs()
 	kvs, err := tool.TracingKVs("{}")
 	assert.NoError(t, err)
-	assert.Len(t, kvs, 3)
+	assert.Len(t, kvs, 5)
 
 	// Test ValidateInput() with valid JSON
 	err = tool.ValidateInput(nil, `{"key": "value"}`)
@@ -359,10 +370,41 @@ func TestCustomTool_InterfaceMethods(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestCustomTool_InterfaceMethods_PluginTool(t *testing.T) {
+	tool := &CustomTool{
+		name:        "waitrose-cli",
+		canonical:   "jingkaihe/skills/waitrose-cli",
+		description: "Plugin tool",
+		execPath:    "/path/to/tool",
+	}
+
+	assert.Equal(t, "plugin_tool_jingkaihe_skills_waitrose_cli", tool.Name())
+	assert.Contains(t, tool.Description(), "[Plugin Tool: jingkaihe/skills/waitrose-cli]")
+
+	kvs, err := tool.TracingKVs("{}")
+	assert.NoError(t, err)
+	assert.Len(t, kvs, 5)
+}
+
+func TestAliasesForTool(t *testing.T) {
+	localAliases := aliasesForTool("my-tool", "")
+	assert.Equal(t, "my-tool", localAliases.Canonical)
+	assert.Contains(t, localAliases.Aliases, "custom_tool_my_tool")
+	assert.Contains(t, localAliases.Aliases, "my-tool")
+
+	pluginAliases := aliasesForTool("waitrose-cli", "jingkaihe/skills/")
+	assert.Equal(t, "jingkaihe/skills/waitrose-cli", pluginAliases.Canonical)
+	assert.Contains(t, pluginAliases.Aliases, "plugin_tool_jingkaihe_skills_waitrose_cli")
+	assert.Contains(t, pluginAliases.Aliases, "jingkaihe/skills/waitrose-cli")
+	assert.Contains(t, pluginAliases.Aliases, "jingkaihe@skills/waitrose-cli")
+}
+
 func TestCustomToolResult_Methods(t *testing.T) {
 	// Test successful result
 	result := &CustomToolResult{
 		toolName:      "custom_tool_test",
+		canonicalName: "test",
+		source:        "local",
 		executionTime: 100 * time.Millisecond,
 		result:        "Success output",
 		err:           "",
@@ -379,10 +421,16 @@ func TestCustomToolResult_Methods(t *testing.T) {
 	assert.Equal(t, "custom_tool_test", structured.ToolName)
 	assert.True(t, structured.Success)
 	assert.NotNil(t, structured.Metadata)
+	meta, ok := structured.Metadata.(*tooltypes.CustomToolMetadata)
+	require.True(t, ok)
+	assert.Equal(t, "test", meta.CanonicalName)
+	assert.Equal(t, "local", meta.Source)
 
 	// Test error result
 	errorResult := &CustomToolResult{
 		toolName:      "custom_tool_test",
+		canonicalName: "test",
+		source:        "local",
 		executionTime: 50 * time.Millisecond,
 		result:        "",
 		err:           "Command failed",
@@ -407,7 +455,29 @@ func TestCustomToolManager_GetTool(t *testing.T) {
 			"test_tool": {
 				name:        "test_tool",
 				description: "A test tool",
+				canonical:   "test_tool",
 			},
+		},
+		toolsByID: map[string]*CustomTool{
+			"test_tool": {
+				name:        "test_tool",
+				description: "A test tool",
+				canonical:   "test_tool",
+			},
+			"jingkaihe/skills/waitrose-cli": {
+				name:        "waitrose-cli",
+				description: "Plugin tool",
+				canonical:   "jingkaihe/skills/waitrose-cli",
+			},
+		},
+		nameIndex: map[string]string{
+			"test_tool": "test_tool",
+			"jingkaihe/skills/waitrose-cli": "jingkaihe/skills/waitrose-cli",
+		},
+		rawNames: map[string]string{
+			"custom_tool_test_tool": "test_tool",
+			"plugin_tool_jingkaihe_skills_waitrose_cli": "jingkaihe/skills/waitrose-cli",
+			"jingkaihe@skills/waitrose-cli":            "jingkaihe/skills/waitrose-cli",
 		},
 	}
 
@@ -424,14 +494,29 @@ func TestCustomToolManager_GetTool(t *testing.T) {
 	// Test getting non-existent tool
 	_, exists = manager.GetTool("nonexistent")
 	assert.False(t, exists)
+
+	// Test plugin aliases
+	tool, exists = manager.GetTool("plugin_tool_jingkaihe_skills_waitrose_cli")
+	assert.True(t, exists)
+	assert.Equal(t, "waitrose-cli", tool.name)
+
+	tool, exists = manager.GetTool("jingkaihe@skills/waitrose-cli")
+	assert.True(t, exists)
+	assert.Equal(t, "waitrose-cli", tool.name)
 }
 
 func TestCustomToolManager_ListTools(t *testing.T) {
 	manager := &CustomToolManager{
 		tools: map[string]*CustomTool{
-			"tool1": {name: "tool1"},
-			"tool2": {name: "tool2"},
+			"tool1": {name: "tool1", canonical: "tool1"},
+			"tool2": {name: "tool2", canonical: "tool2"},
 		},
+		toolsByID: map[string]*CustomTool{
+			"tool1": {name: "tool1", canonical: "tool1"},
+			"tool2": {name: "tool2", canonical: "tool2"},
+		},
+		nameIndex: map[string]string{},
+		rawNames:  map[string]string{},
 	}
 
 	tools := manager.ListTools()
@@ -505,6 +590,9 @@ func TestCustomToolManager_DiscoverTools_WithWhitelist(t *testing.T) {
 	t.Run("Empty whitelist loads all tools", func(t *testing.T) {
 		manager := &CustomToolManager{
 			tools:     make(map[string]*CustomTool),
+			toolsByID: make(map[string]*CustomTool),
+			nameIndex: make(map[string]string),
+			rawNames:  make(map[string]string),
 			globalDir: tempDir,
 			localDir:  "",
 			config: CustomToolConfig{
@@ -525,12 +613,15 @@ func TestCustomToolManager_DiscoverTools_WithWhitelist(t *testing.T) {
 		for i, tool := range tools {
 			toolNames[i] = strings.TrimPrefix(tool.Name(), "custom_tool_")
 		}
-		assert.ElementsMatch(t, []string{"allowed-tool", "blocked-tool", "another-allowed"}, toolNames)
+		assert.ElementsMatch(t, []string{"allowed_tool", "blocked_tool", "another_allowed"}, toolNames)
 	})
 
 	t.Run("Whitelist filters tools correctly", func(t *testing.T) {
 		manager := &CustomToolManager{
 			tools:     make(map[string]*CustomTool),
+			toolsByID: make(map[string]*CustomTool),
+			nameIndex: make(map[string]string),
+			rawNames:  make(map[string]string),
 			globalDir: tempDir,
 			localDir:  "",
 			config: CustomToolConfig{
@@ -551,7 +642,7 @@ func TestCustomToolManager_DiscoverTools_WithWhitelist(t *testing.T) {
 		for i, tool := range tools {
 			toolNames[i] = strings.TrimPrefix(tool.Name(), "custom_tool_")
 		}
-		assert.ElementsMatch(t, []string{"allowed-tool", "another-allowed"}, toolNames)
+		assert.ElementsMatch(t, []string{"allowed_tool", "another_allowed"}, toolNames)
 
 		// Verify blocked tool is not present
 		_, exists := manager.GetTool("blocked-tool")
@@ -561,6 +652,9 @@ func TestCustomToolManager_DiscoverTools_WithWhitelist(t *testing.T) {
 	t.Run("Whitelist with non-existing tools", func(t *testing.T) {
 		manager := &CustomToolManager{
 			tools:     make(map[string]*CustomTool),
+			toolsByID: make(map[string]*CustomTool),
+			nameIndex: make(map[string]string),
+			rawNames:  make(map[string]string),
 			globalDir: tempDir,
 			localDir:  "",
 			config: CustomToolConfig{
@@ -581,7 +675,7 @@ func TestCustomToolManager_DiscoverTools_WithWhitelist(t *testing.T) {
 		for i, tool := range tools {
 			toolNames[i] = strings.TrimPrefix(tool.Name(), "custom_tool_")
 		}
-		assert.ElementsMatch(t, []string{"allowed-tool"}, toolNames)
+		assert.ElementsMatch(t, []string{"allowed_tool"}, toolNames)
 	})
 }
 

@@ -52,6 +52,7 @@ func NewRendererRegistry() *RendererRegistry {
 
 	// Register Custom tools - pattern matches any tool prefixed with "custom_tool_"
 	registry.RegisterPattern("custom_tool_*", &CustomToolRenderer{})
+	registry.RegisterPattern("plugin_tool_*", &CustomToolRenderer{})
 
 	return registry
 }

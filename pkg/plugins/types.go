@@ -16,6 +16,7 @@ const (
 	PluginTypeSkill  PluginType = "skill"
 	PluginTypeRecipe PluginType = "recipe"
 	PluginTypeHook   PluginType = "hook"
+	PluginTypeTool   PluginType = "tool"
 )
 
 // Plugin represents a discoverable plugin (skill or recipe)
@@ -95,6 +96,7 @@ type InstalledPlugin struct {
 	Skills  []string // List of skill names contained in this plugin
 	Recipes []string // List of recipe names contained in this plugin
 	Hooks   []string // List of hook names contained in this plugin
+	Tools   []string // List of tool names contained in this plugin
 }
 
 // PluginDirConfig represents a plugin directory with its prefix for discovery.
@@ -116,7 +118,7 @@ func (c PluginDirConfig) PrefixedName(name string) string {
 // ScanPluginSubdirs scans a plugins directory and returns all plugin subdirectories
 // that contain the specified subdir (e.g., "skills" or "recipes").
 // Each returned PluginDirConfig has the full path to the subdir and a prefix
-// derived from the plugin's directory name (e.g., "org@repo" -> "org@repo/").
+// derived from the plugin's directory name (e.g., "org@repo" -> "org/repo/").
 func ScanPluginSubdirs(pluginsDir, subdir string) []PluginDirConfig {
 	var dirs []PluginDirConfig
 
@@ -138,7 +140,7 @@ func ScanPluginSubdirs(pluginsDir, subdir string) []PluginDirConfig {
 		pluginName := filepath.ToSlash(relPath)
 		dirs = append(dirs, PluginDirConfig{
 			Dir:    targetDir,
-			Prefix: pluginName + "/",
+			Prefix: pluginNameToPrefix(pluginName),
 		})
 
 		return filepath.SkipDir

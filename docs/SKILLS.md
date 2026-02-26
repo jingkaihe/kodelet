@@ -92,6 +92,8 @@ Skills are discovered from multiple locations with the following precedence:
 
 Repository-local skills take precedence over user-global skills with the same name, allowing project-specific customizations.
 
+Plugin directories use `<org@repo>` on disk, but discovered skill IDs use `org/repo/...`.
+
 ### Plugin-based Skills
 
 Skills installed via plugins are prefixed with `org/repo/` to avoid naming conflicts:

@@ -37,14 +37,32 @@ func TestCustomToolRenderer(t *testing.T) {
 			Metadata: &tools.CustomToolMetadata{
 				ExecutionTime: 0,
 				Output:        `{"branch": "main", "commit": "abc123", "uncommitted_changes": 0}`,
+				CanonicalName: "git-info",
 			},
 		}
 
 		output := renderer.RenderCLI(result)
 
-		assert.Contains(t, output, "Custom Tool: git_info")
+		assert.Contains(t, output, "Custom Tool: git_info [git-info]")
 		assert.NotContains(t, output, "executed in") // No execution time shown when 0
 		assert.Contains(t, output, `{"branch": "main"`)
+	})
+
+	t.Run("Plugin tool shows canonical name", func(t *testing.T) {
+		result := tools.StructuredToolResult{
+			ToolName:  "plugin_tool_jingkaihe_skills_waitrose_cli",
+			Success:   true,
+			Timestamp: time.Now(),
+			Metadata: &tools.CustomToolMetadata{
+				ExecutionTime: 10 * time.Millisecond,
+				Output:        "ok",
+				CanonicalName: "jingkaihe/skills/waitrose-cli",
+			},
+		}
+
+		output := renderer.RenderCLI(result)
+
+		assert.Contains(t, output, "Custom Tool: jingkaihe_skills_waitrose_cli [jingkaihe/skills/waitrose-cli]")
 	})
 
 	t.Run("Custom tool with no output", func(t *testing.T) {

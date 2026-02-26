@@ -20,6 +20,7 @@ const (
 	skillsSubdir  = "skills"
 	recipesSubdir = "recipes"
 	hooksSubdir   = "hooks"
+	toolsSubdir   = "tools"
 	kodeletDir    = ".kodelet"
 )
 
@@ -182,6 +183,32 @@ func (d *Discovery) HookDirs() []PluginDirConfig {
 	return dirs
 }
 
+// ToolDirs returns the tool discovery directories with prefix info in precedence order.
+// This is used by the tools package for plugin-based custom tool discovery.
+func (d *Discovery) ToolDirs() []PluginDirConfig {
+	var dirs []PluginDirConfig
+
+	// 1. Repo-local standalone (highest precedence)
+	dirs = append(dirs, PluginDirConfig{
+		Dir:    filepath.Join(d.baseDir, toolsSubdir),
+		Prefix: "",
+	})
+
+	// 2. Repo-local plugins
+	dirs = append(dirs, d.pluginToolDirs(d.baseDir)...)
+
+	// 3. Global standalone
+	dirs = append(dirs, PluginDirConfig{
+		Dir:    filepath.Join(d.homeDir, kodeletDir, toolsSubdir),
+		Prefix: "",
+	})
+
+	// 4. Global plugins (lowest precedence)
+	dirs = append(dirs, d.pluginToolDirs(filepath.Join(d.homeDir, kodeletDir))...)
+
+	return dirs
+}
+
 // pluginHookDirs returns hook directories from all plugins under baseDir
 // Plugin directories use "org@repo" naming format
 func (d *Discovery) pluginHookDirs(baseDir string) []PluginDirConfig {
@@ -200,6 +227,31 @@ func (d *Discovery) pluginHookDirs(baseDir string) []PluginDirConfig {
 		if _, err := os.Stat(hookDir); err == nil {
 			dirs = append(dirs, PluginDirConfig{
 				Dir:    hookDir,
+				Prefix: pluginNameToPrefix(entry.Name()),
+			})
+		}
+	}
+	return dirs
+}
+
+// pluginToolDirs returns tool directories from all plugins under baseDir
+// Plugin directories use "org@repo" naming format
+func (d *Discovery) pluginToolDirs(baseDir string) []PluginDirConfig {
+	pluginsDir := filepath.Join(baseDir, pluginsSubdir)
+	entries, err := os.ReadDir(pluginsDir)
+	if err != nil {
+		return nil
+	}
+
+	var dirs []PluginDirConfig
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		toolDir := filepath.Join(pluginsDir, entry.Name(), toolsSubdir)
+		if _, err := os.Stat(toolDir); err == nil {
+			dirs = append(dirs, PluginDirConfig{
+				Dir:    toolDir,
 				Prefix: pluginNameToPrefix(entry.Name()),
 			})
 		}
@@ -610,10 +662,12 @@ func (d *Discovery) ListInstalledPlugins(global bool) ([]InstalledPlugin, error)
 		skillsDir := filepath.Join(pluginPath, skillsSubdir)
 		recipesDir := filepath.Join(pluginPath, recipesSubdir)
 		hooksDir := filepath.Join(pluginPath, hooksSubdir)
+		toolsDir := filepath.Join(pluginPath, toolsSubdir)
 
 		hasSkills := false
 		hasRecipes := false
 		hasHooks := false
+		hasTools := false
 		if _, err := os.Stat(skillsDir); err == nil {
 			hasSkills = true
 		}
@@ -623,8 +677,11 @@ func (d *Discovery) ListInstalledPlugins(global bool) ([]InstalledPlugin, error)
 		if _, err := os.Stat(hooksDir); err == nil {
 			hasHooks = true
 		}
+		if _, err := os.Stat(toolsDir); err == nil {
+			hasTools = true
+		}
 
-		if !hasSkills && !hasRecipes && !hasHooks {
+		if !hasSkills && !hasRecipes && !hasHooks && !hasTools {
 			continue
 		}
 
@@ -671,6 +728,16 @@ func (d *Discovery) ListInstalledPlugins(global bool) ([]InstalledPlugin, error)
 				for _, hookEntry := range hookEntries {
 					if IsExecutableFile(hookEntry) {
 						plugin.Hooks = append(plugin.Hooks, hookEntry.Name())
+					}
+				}
+			}
+		}
+
+		if hasTools {
+			if toolEntries, err := os.ReadDir(toolsDir); err == nil {
+				for _, toolEntry := range toolEntries {
+					if IsExecutableFile(toolEntry) {
+						plugin.Tools = append(plugin.Tools, toolEntry.Name())
 					}
 				}
 			}

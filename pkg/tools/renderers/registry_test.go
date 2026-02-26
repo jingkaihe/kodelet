@@ -1,6 +1,7 @@
 package renderers
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -70,6 +71,7 @@ func TestRendererRegistry_PatternMatches(t *testing.T) {
 		{"MCP Rename", "mcp_rename_symbol", "MCP Tool: mcp_rename_symbol"},
 		{"MCP Edit", "mcp_edit_file", "MCP Tool: mcp_edit_file"},
 		{"MCP Diagnostics", "mcp_diagnostics", "MCP Tool: mcp_diagnostics"},
+		{"Plugin Tool", "plugin_tool_jingkaihe_skills_waitrose_cli", "Custom Tool: jingkaihe_skills_waitrose_cli"},
 	}
 
 	for _, tt := range tests {
@@ -78,7 +80,9 @@ func TestRendererRegistry_PatternMatches(t *testing.T) {
 				ToolName:  tt.toolName,
 				Success:   true,
 				Timestamp: time.Now(),
-				Metadata: &tools.MCPToolMetadata{
+			}
+			if strings.HasPrefix(tt.toolName, "mcp_") {
+				result.Metadata = &tools.MCPToolMetadata{
 					MCPToolName: tt.toolName,
 					ServerName:  "test-server",
 					Parameters:  map[string]any{"test": "value"},
@@ -86,7 +90,12 @@ func TestRendererRegistry_PatternMatches(t *testing.T) {
 						{Type: "text", Text: "MCP response"},
 					},
 					ContentText: "MCP response",
-				},
+				}
+			} else {
+				result.Metadata = &tools.CustomToolMetadata{
+					ExecutionTime: 100 * time.Millisecond,
+					Output:        "ok",
+				}
 			}
 
 			output := registry.Render(result)

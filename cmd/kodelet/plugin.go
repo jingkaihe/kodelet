@@ -23,7 +23,7 @@ const (
 
 var pluginCmd = &cobra.Command{
 	Use:   "plugin",
-	Short: "Manage kodelet plugins (skills and recipes)",
+	Short: "Manage kodelet plugins (skills, recipes, hooks, tools)",
 	Long:  `Install, list, and remove kodelet plugins from GitHub repositories.`,
 	Run: func(cmd *cobra.Command, _ []string) {
 		cmd.Help()
@@ -36,8 +36,10 @@ var pluginAddCmd = &cobra.Command{
 	Long: `Install plugins from one or more GitHub repositories.
 
 The repository should contain:
-  - skills/<name>/SKILL.md for skills
-  - recipes/<name>.md for recipes
+	- skills/<name>/SKILL.md for skills
+	- recipes/<name>.md for recipes
+	- hooks/<name> (executable) for hooks
+	- tools/<name> (executable) for plugin tools
 
 Examples:
   kodelet plugin add user/repo              # Install all plugins from repo
@@ -92,6 +94,9 @@ Examples:
 			if len(result.Hooks) > 0 {
 				presenter.Success(fmt.Sprintf("Installed hooks: %s", strings.Join(result.Hooks, ", ")))
 			}
+			if len(result.Tools) > 0 {
+				presenter.Success(fmt.Sprintf("Installed tools: %s", strings.Join(result.Tools, ", ")))
+			}
 
 			location := "local (.kodelet/plugins/)"
 			if global {
@@ -121,6 +126,7 @@ type PluginInfo struct {
 	Skills   []SkillInfo  `json:"skills"`
 	Recipes  []RecipeInfo `json:"recipes"`
 	Hooks    []HookInfo   `json:"hooks"`
+	Tools    []ToolInfo   `json:"tools"`
 }
 
 // SkillInfo represents a skill in the JSON output
@@ -137,6 +143,11 @@ type RecipeInfo struct {
 
 // HookInfo represents a hook in the JSON output
 type HookInfo struct {
+	Name string `json:"name"`
+}
+
+// ToolInfo represents a tool in the JSON output
+type ToolInfo struct {
 	Name string `json:"name"`
 }
 
@@ -205,12 +216,12 @@ Examples:
 		}
 
 		tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(tw, "NAME\tLOCATION\tSKILLS\tRECIPES\tHOOKS")
-		fmt.Fprintln(tw, "----\t--------\t------\t-------\t-----")
+		fmt.Fprintln(tw, "NAME\tLOCATION\tSKILLS\tRECIPES\tHOOKS\tTOOLS")
+		fmt.Fprintln(tw, "----\t--------\t------\t-------\t-----\t-----")
 
 		for _, entry := range allPlugins {
 			p := entry.plugin
-			fmt.Fprintf(tw, "%s\t%s\t%d\t%d\t%d\n", p.Name, entry.location, len(p.Skills), len(p.Recipes), len(p.Hooks))
+			fmt.Fprintf(tw, "%s\t%s\t%d\t%d\t%d\t%d\n", p.Name, entry.location, len(p.Skills), len(p.Recipes), len(p.Hooks), len(p.Tools))
 		}
 		tw.Flush()
 
@@ -242,6 +253,7 @@ func outputPluginsJSON(discovery *plugins.Discovery, allPlugins []pluginEntry) e
 			Skills:   make([]SkillInfo, 0, len(p.Skills)),
 			Recipes:  make([]RecipeInfo, 0, len(p.Recipes)),
 			Hooks:    make([]HookInfo, 0, len(p.Hooks)),
+			Tools:    make([]ToolInfo, 0, len(p.Tools)),
 		}
 
 		for _, skillName := range p.Skills {
@@ -264,6 +276,10 @@ func outputPluginsJSON(discovery *plugins.Discovery, allPlugins []pluginEntry) e
 
 		for _, hookName := range p.Hooks {
 			info.Hooks = append(info.Hooks, HookInfo{Name: hookName})
+		}
+
+		for _, toolName := range p.Tools {
+			info.Tools = append(info.Tools, ToolInfo{Name: toolName})
 		}
 
 		output.Plugins = append(output.Plugins, info)
@@ -407,6 +423,14 @@ func outputPluginShowTable(discovery *plugins.Discovery, p *plugins.InstalledPlu
 		for _, hookName := range p.Hooks {
 			fmt.Printf("  • %s\n", hookName)
 		}
+		fmt.Println()
+	}
+
+	if len(p.Tools) > 0 {
+		fmt.Printf("Tools (%d):\n", len(p.Tools))
+		for _, toolName := range p.Tools {
+			fmt.Printf("  • %s\n", toolName)
+		}
 	}
 
 	return nil
@@ -432,6 +456,7 @@ func outputPluginShowJSON(discovery *plugins.Discovery, p *plugins.InstalledPlug
 		Skills:   make([]SkillInfo, 0, len(p.Skills)),
 		Recipes:  make([]RecipeInfo, 0, len(p.Recipes)),
 		Hooks:    make([]HookInfo, 0, len(p.Hooks)),
+		Tools:    make([]ToolInfo, 0, len(p.Tools)),
 	}
 
 	for _, skillName := range p.Skills {
@@ -454,6 +479,10 @@ func outputPluginShowJSON(discovery *plugins.Discovery, p *plugins.InstalledPlug
 
 	for _, hookName := range p.Hooks {
 		info.Hooks = append(info.Hooks, HookInfo{Name: hookName})
+	}
+
+	for _, toolName := range p.Tools {
+		info.Tools = append(info.Tools, ToolInfo{Name: toolName})
 	}
 
 	enc := json.NewEncoder(os.Stdout)

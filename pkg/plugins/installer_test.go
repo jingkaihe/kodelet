@@ -80,9 +80,10 @@ func TestRemoverListPlugins(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	pluginsDir := filepath.Join(tmpDir, "plugins")
-	// Create valid plugins with skills/ or recipes/ subdirectories
+	// Create valid plugins with skills/, recipes/, or tools/ subdirectories
 	require.NoError(t, os.MkdirAll(filepath.Join(pluginsDir, "plugin-a", "skills"), 0o755))
 	require.NoError(t, os.MkdirAll(filepath.Join(pluginsDir, "plugin-b", "recipes"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(pluginsDir, "plugin-c", "tools"), 0o755))
 	// This is not a valid plugin (no skills/ or recipes/)
 	require.NoError(t, os.MkdirAll(filepath.Join(pluginsDir, "not-a-plugin"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(pluginsDir, "file.txt"), []byte("file"), 0o644))
@@ -94,9 +95,10 @@ func TestRemoverListPlugins(t *testing.T) {
 
 	plugins, err := remover.ListPlugins()
 	require.NoError(t, err)
-	assert.Len(t, plugins, 2)
+	assert.Len(t, plugins, 3)
 	assert.Contains(t, plugins, "plugin-a")
 	assert.Contains(t, plugins, "plugin-b")
+	assert.Contains(t, plugins, "plugin-c")
 }
 
 func TestRemoverListPluginsEmptyDir(t *testing.T) {
@@ -119,6 +121,7 @@ func TestRemoverListPluginsOrgRepo(t *testing.T) {
 	// Create org@repo style plugins (flat directory structure)
 	require.NoError(t, os.MkdirAll(filepath.Join(pluginsDir, "jingkaihe@skills", "skills"), 0o755))
 	require.NoError(t, os.MkdirAll(filepath.Join(pluginsDir, "anthropic@skills", "recipes"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(pluginsDir, "tools@pack", "tools"), 0o755))
 
 	remover := &Remover{
 		baseDir: tmpDir,
@@ -127,9 +130,10 @@ func TestRemoverListPluginsOrgRepo(t *testing.T) {
 
 	plugins, err := remover.ListPlugins()
 	require.NoError(t, err)
-	assert.Len(t, plugins, 2)
+	assert.Len(t, plugins, 3)
 	assert.Contains(t, plugins, "jingkaihe/skills")
 	assert.Contains(t, plugins, "anthropic/skills")
+	assert.Contains(t, plugins, "tools/pack")
 }
 
 func TestRemoverRemoveOrgRepo(t *testing.T) {
@@ -410,6 +414,23 @@ func TestInstallerFindRecipesDeepNesting(t *testing.T) {
 	assert.Len(t, recipes, 2)
 }
 
+func TestInstallerFindTools(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	toolsDir := filepath.Join(tmpDir, "tools")
+	require.NoError(t, os.MkdirAll(toolsDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(toolsDir, "tool-a"), []byte("#!/bin/sh\necho a\n"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(toolsDir, "tool-b"), []byte("#!/bin/sh\necho b\n"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(toolsDir, "README.md"), []byte("not executable"), 0o644))
+
+	installer := &Installer{}
+	pluginTools, err := installer.findTools(toolsDir)
+	require.NoError(t, err)
+	assert.Len(t, pluginTools, 2)
+	assert.Contains(t, pluginTools, filepath.Join(toolsDir, "tool-a"))
+	assert.Contains(t, pluginTools, filepath.Join(toolsDir, "tool-b"))
+}
+
 func TestScanPluginSubdirs(t *testing.T) {
 	tmpDir := t.TempDir()
 
@@ -429,8 +450,8 @@ func TestScanPluginSubdirs(t *testing.T) {
 	for _, d := range dirs {
 		prefixes[d.Prefix] = true
 	}
-	assert.True(t, prefixes["org1@repo1/"])
-	assert.True(t, prefixes["org2@repo2/"])
+	assert.True(t, prefixes["org1/repo1/"])
+	assert.True(t, prefixes["org2/repo2/"])
 }
 
 func TestScanPluginSubdirsNonExistentDir(t *testing.T) {
