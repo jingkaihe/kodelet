@@ -552,6 +552,82 @@ func TestStreamMessagesWithReasoning(t *testing.T) {
 	assert.Equal(t, "Hi there!", streamable[2].Content)
 }
 
+func TestExtractMessagesAfterCompaction(t *testing.T) {
+	inputItems := `[
+		{
+			"type": "message",
+			"role": "user",
+			"content": "old user"
+		},
+		{
+			"type": "message",
+			"role": "assistant",
+			"content": "old assistant"
+		},
+		{
+			"type": "compaction",
+			"encrypted_content": "enc"
+		},
+		{
+			"type": "message",
+			"role": "user",
+			"content": "new user"
+		},
+		{
+			"type": "message",
+			"role": "assistant",
+			"content": "new assistant"
+		}
+	]`
+
+	messages, err := ExtractMessages([]byte(inputItems), nil)
+	require.NoError(t, err)
+	require.Len(t, messages, 3)
+
+	assert.Equal(t, "assistant", messages[0].Role)
+	assert.Equal(t, compactedHistoryNotice, messages[0].Content)
+	assert.Equal(t, "user", messages[1].Role)
+	assert.Equal(t, "new user", messages[1].Content)
+	assert.Equal(t, "assistant", messages[2].Role)
+	assert.Equal(t, "new assistant", messages[2].Content)
+}
+
+func TestStreamMessagesAfterCompaction(t *testing.T) {
+	inputItems := `[
+		{
+			"type": "message",
+			"role": "user",
+			"content": "old user"
+		},
+		{
+			"type": "compaction",
+			"encrypted_content": "enc"
+		},
+		{
+			"type": "reasoning",
+			"role": "assistant",
+			"content": "thinking"
+		},
+		{
+			"type": "message",
+			"role": "assistant",
+			"content": "new assistant"
+		}
+	]`
+
+	streamable, err := StreamMessages(json.RawMessage(inputItems), nil)
+	require.NoError(t, err)
+	require.Len(t, streamable, 3)
+
+	assert.Equal(t, "text", streamable[0].Kind)
+	assert.Equal(t, "assistant", streamable[0].Role)
+	assert.Equal(t, compactedHistoryNotice, streamable[0].Content)
+	assert.Equal(t, "thinking", streamable[1].Kind)
+	assert.Equal(t, "text", streamable[2].Kind)
+	assert.Equal(t, "assistant", streamable[2].Role)
+	assert.Equal(t, "new assistant", streamable[2].Content)
+}
+
 func TestStorageRoundTripWithReasoning(t *testing.T) {
 	// Create stored items directly (simulating what happens during streaming)
 	// Items are stored in order: user message -> reasoning -> assistant message

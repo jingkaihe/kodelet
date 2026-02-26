@@ -1230,6 +1230,27 @@ type StreamableMessage struct {
 	Input      string // For tool use (JSON string)
 }
 
+const compactedHistoryNotice = "🗜️ Earlier conversation history was compacted and is hidden."
+
+func itemsForDisplay(items []StoredInputItem) ([]StoredInputItem, bool) {
+	lastCompactionIdx := -1
+	for i, item := range items {
+		if item.Type == "compaction" {
+			lastCompactionIdx = i
+		}
+	}
+
+	if lastCompactionIdx < 0 {
+		return items, false
+	}
+
+	if lastCompactionIdx+1 >= len(items) {
+		return nil, true
+	}
+
+	return items[lastCompactionIdx+1:], true
+}
+
 // StreamMessages parses raw messages into streamable format for conversation streaming.
 func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltypes.StructuredToolResult) ([]StreamableMessage, error) {
 	var items []StoredInputItem
@@ -1237,9 +1258,18 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 		return nil, errors.Wrap(err, "error unmarshaling input items")
 	}
 
-	var streamable []StreamableMessage
+	displayItems, compacted := itemsForDisplay(items)
 
-	for _, item := range items {
+	streamable := make([]StreamableMessage, 0, len(displayItems)+1)
+	if compacted {
+		streamable = append(streamable, StreamableMessage{
+			Kind:    "text",
+			Role:    "assistant",
+			Content: compactedHistoryNotice,
+		})
+	}
+
+	for _, item := range displayItems {
 		switch item.Type {
 		case "reasoning":
 			// Add thinking message
@@ -1301,10 +1331,19 @@ func ExtractMessages(data []byte, toolResults map[string]tooltypes.StructuredToo
 		return nil, errors.Wrap(err, "error unmarshaling input items")
 	}
 
-	result := make([]llmtypes.Message, 0, len(items))
+	displayItems, compacted := itemsForDisplay(items)
+
+	result := make([]llmtypes.Message, 0, len(displayItems)+1)
+	if compacted {
+		result = append(result, llmtypes.Message{
+			Role:    "assistant",
+			Content: compactedHistoryNotice,
+		})
+	}
+
 	registry := renderers.NewRendererRegistry()
 
-	for _, item := range items {
+	for _, item := range displayItems {
 		switch item.Type {
 		case "reasoning":
 			// Add thinking message

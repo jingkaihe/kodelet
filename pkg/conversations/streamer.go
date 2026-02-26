@@ -162,44 +162,57 @@ func (cs *ConversationStreamer) processLiveUpdate(ctx context.Context, conversat
 		return
 	}
 
-	newlyStreamed, err := cs.streamNewMessagesSince(ctx, response, state.streamedEntries, conversationID)
+	newlyStreamed, totalEntries, err := cs.streamNewMessagesSince(ctx, response, state.streamedEntries, conversationID)
 	if err != nil {
 		logger.G(ctx).WithError(err).Error("Failed to stream new messages")
 		return
 	}
 
-	if newlyStreamed > 0 {
-		state.streamedEntries += newlyStreamed
-		state.lastUpdateTime = response.UpdatedAt
-	}
+	state.streamedEntries = totalEntries
+	state.lastUpdateTime = response.UpdatedAt
+
+	logger.G(ctx).
+		WithField("newlyStreamed", newlyStreamed).
+		WithField("totalEntries", totalEntries).
+		Debug("Processed conversation update")
 }
 
 // streamNewMessagesSince streams only the new messages since the last streamed count
-func (cs *ConversationStreamer) streamNewMessagesSince(ctx context.Context, response *GetConversationResponse, alreadyStreamed int, conversationID string) (int, error) {
+func (cs *ConversationStreamer) streamNewMessagesSince(ctx context.Context, response *GetConversationResponse, alreadyStreamed int, conversationID string) (int, int, error) {
 	parser, exists := cs.messageParsers[response.Provider]
 	if !exists {
-		return 0, errors.Errorf("no message parser registered for provider: %s", response.Provider)
+		return 0, 0, errors.Errorf("no message parser registered for provider: %s", response.Provider)
 	}
 
 	streamableMessages, err := parser(response.RawMessages, response.Metadata, response.ToolResults)
 	if err != nil {
-		return 0, errors.Wrap(err, "failed to parse messages")
+		return 0, 0, errors.Wrap(err, "failed to parse messages")
+	}
+
+	totalEntries := len(streamableMessages)
+	startIndex := alreadyStreamed
+	if alreadyStreamed > totalEntries {
+		logger.G(ctx).
+			WithField("alreadyStreamed", alreadyStreamed).
+			WithField("currentEntries", totalEntries).
+			Debug("Detected stream history shrink; rebasing streamed index")
+		startIndex = 0
 	}
 
 	newlyStreamed := 0
-	if len(streamableMessages) > alreadyStreamed {
-		newMessages := streamableMessages[alreadyStreamed:]
+	if totalEntries > startIndex {
+		newMessages := streamableMessages[startIndex:]
 		logger.G(ctx).WithField("newMessageCount", len(newMessages)).Debug("Streaming new messages")
 		for _, msg := range newMessages {
 			entry := cs.convertToStreamEntry(msg, conversationID)
 			if err := cs.outputStreamEntry(entry); err != nil {
-				return newlyStreamed, errors.Wrap(err, "failed to output stream entry")
+				return newlyStreamed, totalEntries, errors.Wrap(err, "failed to output stream entry")
 			}
 			newlyStreamed++
 		}
 	}
 
-	return newlyStreamed, nil
+	return newlyStreamed, totalEntries, nil
 }
 
 // convertToStreamEntry converts a StreamableMessage to a StreamEntry
