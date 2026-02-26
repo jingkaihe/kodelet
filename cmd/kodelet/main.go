@@ -28,6 +28,7 @@ func init() {
 	viper.SetDefault("reasoning_effort", "medium")
 	viper.SetDefault("allowed_commands", []string{})
 	viper.SetDefault("allowed_domains_file", "~/.kodelet/allowed_domains.txt")
+	viper.SetDefault("apply_patch_enabled", false)
 	viper.SetDefault("anthropic_api_access", "auto")
 	viper.SetDefault("enable_todos", false)
 

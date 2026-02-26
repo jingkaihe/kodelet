@@ -103,6 +103,7 @@ func NewBasicState(ctx context.Context, opts ...BasicStateOption) *BasicState {
 		if state.llmConfig.AllowedTools != nil {
 			allowedTools = state.llmConfig.AllowedTools
 		}
+		allowedTools = enforceApplyPatchMode(allowedTools, state.llmConfig.ApplyPatchEnabled, defaultMainTools)
 		state.tools = GetMainTools(ctx, allowedTools, state.llmConfig.EnableTodos)
 		state.configureTools()
 	}
@@ -118,6 +119,7 @@ func WithSubAgentToolsFromConfig() BasicStateOption {
 		if s.llmConfig.AllowedTools != nil {
 			allowedTools = s.llmConfig.AllowedTools
 		}
+		allowedTools = enforceApplyPatchMode(allowedTools, s.llmConfig.ApplyPatchEnabled, defaultSubAgentTools)
 		s.tools = GetSubAgentTools(ctx, allowedTools)
 		s.configureTools()
 		return nil
@@ -131,6 +133,7 @@ func WithMainTools() BasicStateOption {
 		if s.llmConfig.AllowedTools != nil {
 			allowedTools = s.llmConfig.AllowedTools
 		}
+		allowedTools = enforceApplyPatchMode(allowedTools, s.llmConfig.ApplyPatchEnabled, defaultMainTools)
 		s.tools = GetMainTools(ctx, allowedTools, s.llmConfig.EnableTodos)
 		if s.llmConfig.DisableSubagent {
 			s.tools = filterOutSubagent(s.tools)
@@ -262,6 +265,39 @@ func discoverWorkflows(ctx context.Context) map[string]*fragments.Fragment {
 
 	logger.G(ctx).WithField("count", len(workflows)).Debug("Discovered workflows for subagent")
 	return workflows
+}
+
+func enforceApplyPatchMode(allowedTools []string, applyPatchEnabled bool, defaultTools []string) []string {
+	if !applyPatchEnabled {
+		return allowedTools
+	}
+	if len(allowedTools) == 1 && allowedTools[0] == NoToolsMarker {
+		return allowedTools
+	}
+
+	baseTools := allowedTools
+	if len(baseTools) == 0 {
+		baseTools = append([]string{}, defaultTools...)
+	}
+
+	filteredTools := make([]string, 0, len(baseTools))
+	seen := make(map[string]struct{})
+	for _, tool := range baseTools {
+		if tool == "file_write" || tool == "file_edit" {
+			continue
+		}
+		if _, exists := seen[tool]; exists {
+			continue
+		}
+		seen[tool] = struct{}{}
+		filteredTools = append(filteredTools, tool)
+	}
+
+	if _, exists := seen["apply_patch"]; !exists {
+		filteredTools = append(filteredTools, "apply_patch")
+	}
+
+	return filteredTools
 }
 
 // TodoFilePath returns the path to the todo file

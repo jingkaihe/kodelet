@@ -701,6 +701,10 @@ allowed_commands: []  # Empty means use default banned commands
 #   - "git status"
 #   - "git log *"
 
+# Tool behavior configuration
+# Prefer apply_patch workflow and disable file_write/file_edit when enabled
+apply_patch_enabled: false
+
 # MCP configuration
 mcp:
   servers:
@@ -801,6 +805,7 @@ profiles:
     provider: "openai"
     model: "o3"
     reasoning_effort: "high"
+    apply_patch_enabled: true
     allowed_tools: ["file_read", "glob_tool", "grep_tool", "thinking"]
 
 # Model aliases work across all profiles
