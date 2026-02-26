@@ -21,6 +21,31 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func extractInputItemText(item openairesponses.ResponseInputItemUnionParam) string {
+	var text string
+
+	if item.OfMessage != nil {
+		if item.OfMessage.Content.OfString.Valid() {
+			text += item.OfMessage.Content.OfString.Value
+		}
+		for _, part := range item.OfMessage.Content.OfInputItemContentList {
+			if part.OfInputText != nil {
+				text += part.OfInputText.Text
+			}
+		}
+	}
+
+	if item.OfOutputMessage != nil {
+		for _, content := range item.OfOutputMessage.Content {
+			if txt := content.GetText(); txt != nil {
+				text += *txt
+			}
+		}
+	}
+
+	return text
+}
+
 func TestNewThread(t *testing.T) {
 	os.Setenv("XAI_API_KEY", "test-key")
 	defer os.Unsetenv("XAI_API_KEY")
@@ -405,12 +430,156 @@ func TestCompactContextParsesCodexCompactionSummaryVariant(t *testing.T) {
 			hasCompaction = true
 			assert.Equal(t, "enc_value", item.OfCompaction.EncryptedContent)
 		}
-		if item.OfMessage != nil && item.OfMessage.Content.OfString.Valid() {
-			userText = item.OfMessage.Content.OfString.Value
-		}
+		userText += extractInputItemText(item)
 	}
 	assert.True(t, hasCompaction, "compaction_summary should be converted to compaction input item")
 	assert.Equal(t, "hello", userText)
+	require.Len(t, thread.storedItems, 2)
+	assert.Equal(t, "compaction_summary", thread.storedItems[1].Type)
+	assert.NotEmpty(t, thread.storedItems[1].RawItem)
+}
+
+func TestCompactContextPreservesAssistantMessageFromCompactOutput(t *testing.T) {
+	thread := &Thread{
+		Thread: base.NewThread(
+			llmtypes.Config{Provider: "openai", Model: "gpt-4.1"},
+			"conv-test",
+			hooks.Trigger{},
+		),
+		inputItems: []openairesponses.ResponseInputItemUnionParam{
+			{
+				OfMessage: &openairesponses.EasyInputMessageParam{
+					Role:    openairesponses.EasyInputMessageRoleUser,
+					Content: openairesponses.EasyInputMessageContentUnionParam{OfString: param.NewOpt("hello")},
+				},
+			},
+		},
+	}
+
+	raw := `{
+		"id": "resp_test",
+		"created_at": 1,
+		"object": "response.compaction",
+		"output": [
+			{
+				"id": "msg_1",
+				"type": "message",
+				"role": "assistant",
+				"status": "completed",
+				"content": [{"type": "output_text", "text": "Compacted assistant context"}]
+			},
+			{
+				"id": "cmp_1",
+				"type": "compaction",
+				"encrypted_content": "enc_value"
+			}
+		],
+		"usage": {
+			"input_tokens": 1,
+			"input_tokens_details": {"cached_tokens": 0},
+			"output_tokens": 1,
+			"output_tokens_details": {"reasoning_tokens": 0},
+			"total_tokens": 2
+		}
+	}`
+	var compacted openairesponses.CompactedResponse
+	require.NoError(t, json.Unmarshal([]byte(raw), &compacted))
+
+	thread.compactFunc = func(_ context.Context, _ openairesponses.ResponseCompactParams, _ ...option.RequestOption) (*openairesponses.CompactedResponse, error) {
+		return &compacted, nil
+	}
+
+	err := thread.CompactContext(context.Background())
+	require.NoError(t, err)
+	require.Len(t, thread.inputItems, 2)
+	require.Len(t, thread.storedItems, 2)
+
+	messageText := ""
+	if thread.inputItems[0].OfMessage != nil {
+		assert.Equal(t, openairesponses.EasyInputMessageRoleAssistant, thread.inputItems[0].OfMessage.Role)
+	}
+	messageText = extractInputItemText(thread.inputItems[0])
+	assert.Equal(t, "Compacted assistant context", messageText)
+	assert.Equal(t, "message", thread.storedItems[0].Type)
+	assert.Equal(t, "assistant", thread.storedItems[0].Role)
+	assert.Equal(t, "Compacted assistant context", thread.storedItems[0].Content)
+	assert.NotEmpty(t, thread.storedItems[0].RawItem)
+
+	require.NotNil(t, thread.inputItems[1].OfCompaction)
+	assert.Equal(t, "enc_value", thread.inputItems[1].OfCompaction.EncryptedContent)
+	assert.Equal(t, "compaction", thread.storedItems[1].Type)
+	assert.Equal(t, "enc_value", thread.storedItems[1].EncryptedContent)
+	assert.NotEmpty(t, thread.storedItems[1].RawItem)
+}
+
+func TestCompactContextPreservesFunctionCallFromCompactOutput(t *testing.T) {
+	thread := &Thread{
+		Thread: base.NewThread(
+			llmtypes.Config{Provider: "openai", Model: "gpt-4.1"},
+			"conv-test",
+			hooks.Trigger{},
+		),
+		inputItems: []openairesponses.ResponseInputItemUnionParam{
+			{
+				OfMessage: &openairesponses.EasyInputMessageParam{
+					Role:    openairesponses.EasyInputMessageRoleUser,
+					Content: openairesponses.EasyInputMessageContentUnionParam{OfString: param.NewOpt("hello")},
+				},
+			},
+		},
+	}
+
+	raw := `{
+		"id": "resp_test",
+		"created_at": 1,
+		"object": "response.compaction",
+		"output": [
+			{
+				"id": "fc_1",
+				"type": "function_call",
+				"status": "completed",
+				"call_id": "call_123",
+				"name": "bash",
+				"arguments": "{\"command\":\"pwd\"}"
+			},
+			{
+				"id": "cmp_1",
+				"type": "compaction",
+				"encrypted_content": "enc_value"
+			}
+		],
+		"usage": {
+			"input_tokens": 1,
+			"input_tokens_details": {"cached_tokens": 0},
+			"output_tokens": 1,
+			"output_tokens_details": {"reasoning_tokens": 0},
+			"total_tokens": 2
+		}
+	}`
+	var compacted openairesponses.CompactedResponse
+	require.NoError(t, json.Unmarshal([]byte(raw), &compacted))
+
+	thread.compactFunc = func(_ context.Context, _ openairesponses.ResponseCompactParams, _ ...option.RequestOption) (*openairesponses.CompactedResponse, error) {
+		return &compacted, nil
+	}
+
+	err := thread.CompactContext(context.Background())
+	require.NoError(t, err)
+	require.Len(t, thread.inputItems, 2)
+	require.Len(t, thread.storedItems, 2)
+
+	require.NotNil(t, thread.inputItems[0].OfFunctionCall)
+	assert.Equal(t, "call_123", thread.inputItems[0].OfFunctionCall.CallID)
+	assert.Equal(t, "bash", thread.inputItems[0].OfFunctionCall.Name)
+	assert.Equal(t, "{\"command\":\"pwd\"}", thread.inputItems[0].OfFunctionCall.Arguments)
+	assert.Equal(t, "function_call", thread.storedItems[0].Type)
+	assert.Equal(t, "call_123", thread.storedItems[0].CallID)
+	assert.Equal(t, "bash", thread.storedItems[0].Name)
+	assert.Equal(t, "{\"command\":\"pwd\"}", thread.storedItems[0].Arguments)
+	assert.NotEmpty(t, thread.storedItems[0].RawItem)
+
+	require.NotNil(t, thread.inputItems[1].OfCompaction)
+	assert.Equal(t, "enc_value", thread.inputItems[1].OfCompaction.EncryptedContent)
 }
 
 func TestCompactContextFallsBackWhenCompactOutputUnusable(t *testing.T) {
@@ -446,6 +615,24 @@ func TestCompactContextFallsBackWhenCompactOutputUnusable(t *testing.T) {
 	err := thread.CompactContext(context.Background())
 	require.NoError(t, err)
 	assert.True(t, fallbackCalled, "summary fallback should run when compact output is unusable")
+}
+
+func TestFromStoredItemsWithRawCompactionSummary(t *testing.T) {
+	stored := []StoredInputItem{
+		{
+			Type: "compaction_summary",
+			RawItem: json.RawMessage(`{
+				"id": "cmp_1",
+				"type": "compaction_summary",
+				"encrypted_content": "enc_value"
+			}`),
+		},
+	}
+
+	restored := fromStoredItems(stored)
+	require.Len(t, restored, 1)
+	require.NotNil(t, restored[0].OfCompaction)
+	assert.Equal(t, "enc_value", restored[0].OfCompaction.EncryptedContent)
 }
 
 func TestStreamMessages(t *testing.T) {
@@ -582,14 +769,18 @@ func TestExtractMessagesAfterCompaction(t *testing.T) {
 
 	messages, err := ExtractMessages([]byte(inputItems), nil)
 	require.NoError(t, err)
-	require.Len(t, messages, 3)
+	require.Len(t, messages, 5)
 
-	assert.Equal(t, "assistant", messages[0].Role)
-	assert.Equal(t, compactedHistoryNotice, messages[0].Content)
-	assert.Equal(t, "user", messages[1].Role)
-	assert.Equal(t, "new user", messages[1].Content)
+	assert.Equal(t, "user", messages[0].Role)
+	assert.Equal(t, "old user", messages[0].Content)
+	assert.Equal(t, "assistant", messages[1].Role)
+	assert.Equal(t, "old assistant", messages[1].Content)
 	assert.Equal(t, "assistant", messages[2].Role)
-	assert.Equal(t, "new assistant", messages[2].Content)
+	assert.Equal(t, compactedHistoryNotice, messages[2].Content)
+	assert.Equal(t, "user", messages[3].Role)
+	assert.Equal(t, "new user", messages[3].Content)
+	assert.Equal(t, "assistant", messages[4].Role)
+	assert.Equal(t, "new assistant", messages[4].Content)
 }
 
 func TestStreamMessagesAfterCompaction(t *testing.T) {
@@ -617,15 +808,18 @@ func TestStreamMessagesAfterCompaction(t *testing.T) {
 
 	streamable, err := StreamMessages(json.RawMessage(inputItems), nil)
 	require.NoError(t, err)
-	require.Len(t, streamable, 3)
+	require.Len(t, streamable, 4)
 
 	assert.Equal(t, "text", streamable[0].Kind)
-	assert.Equal(t, "assistant", streamable[0].Role)
-	assert.Equal(t, compactedHistoryNotice, streamable[0].Content)
-	assert.Equal(t, "thinking", streamable[1].Kind)
-	assert.Equal(t, "text", streamable[2].Kind)
-	assert.Equal(t, "assistant", streamable[2].Role)
-	assert.Equal(t, "new assistant", streamable[2].Content)
+	assert.Equal(t, "user", streamable[0].Role)
+	assert.Equal(t, "old user", streamable[0].Content)
+	assert.Equal(t, "text", streamable[1].Kind)
+	assert.Equal(t, "assistant", streamable[1].Role)
+	assert.Equal(t, compactedHistoryNotice, streamable[1].Content)
+	assert.Equal(t, "thinking", streamable[2].Kind)
+	assert.Equal(t, "text", streamable[3].Kind)
+	assert.Equal(t, "assistant", streamable[3].Role)
+	assert.Equal(t, "new assistant", streamable[3].Content)
 }
 
 func TestStorageRoundTripWithReasoning(t *testing.T) {

@@ -688,62 +688,52 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 	t.Usage.OutputTokens += int(resp.Usage.OutputTokens)
 	t.Mu.Unlock()
 
-	// Convert output items to input items and storedItems simultaneously
-	// The Compact API returns: user messages + a single compaction item
+	// Convert compacted output items to persisted/input items while preserving
+	// the original output payload for forward compatibility.
 	newInputItems := make([]responses.ResponseInputItemUnionParam, 0, len(resp.Output))
 	newStoredItems := make([]StoredInputItem, 0, len(resp.Output))
 
 	for _, output := range resp.Output {
-		switch output.Type {
-		case "message":
-			// Convert output message to input message
-			msg := output.AsMessage()
-			if msg.Role == "user" {
-				// Extract text content from the message
-				var textContent string
-				for _, content := range msg.Content {
-					if content.Type == "output_text" || content.Type == "input_text" {
-						textContent += content.Text
-					}
-				}
-				if textContent != "" {
-					newInputItems = append(newInputItems, responses.ResponseInputItemUnionParam{
-						OfMessage: &responses.EasyInputMessageParam{
-							Role:    responses.EasyInputMessageRoleUser,
-							Content: responses.EasyInputMessageContentUnionParam{OfString: param.NewOpt(textContent)},
-						},
-					})
-					newStoredItems = append(newStoredItems, StoredInputItem{
-						Type:    "message",
-						Role:    "user",
-						Content: textContent,
-					})
-				}
-			}
-
-		case "compaction":
-			// Convert compaction item using the SDK helper
-			compaction := output.AsCompaction()
-			encryptedContent := compaction.EncryptedContent
-			if encryptedContent == "" {
-				encryptedContent = output.EncryptedContent
-			}
-			newInputItems = append(newInputItems, responses.ResponseInputItemParamOfCompaction(encryptedContent))
-			newStoredItems = append(newStoredItems, StoredInputItem{
-				Type:             "compaction",
-				EncryptedContent: encryptedContent,
-			})
-
-		case "compaction_summary":
-			// Codex compact responses currently return this variant name.
-			if output.EncryptedContent != "" {
-				newInputItems = append(newInputItems, responses.ResponseInputItemParamOfCompaction(output.EncryptedContent))
-				newStoredItems = append(newStoredItems, StoredInputItem{
-					Type:             "compaction",
-					EncryptedContent: output.EncryptedContent,
-				})
+		raw := output.RawJSON()
+		if raw == "" {
+			rawJSON, marshalErr := json.Marshal(output)
+			if marshalErr == nil {
+				raw = string(rawJSON)
 			}
 		}
+
+		storedItem := storedItemFromCompactOutput(output, raw)
+
+		if output.Type == "message" {
+			msg := output.AsMessage()
+			role := strings.TrimSpace(string(msg.Role))
+			parsedRole, ok := parseStoredMessageRole(role)
+			if !ok {
+				logger.G(ctx).WithField("role", role).Debug("Skipping compacted message with unsupported role")
+				continue
+			}
+			if storedItem.Content == "" {
+				continue
+			}
+
+			newInputItems = append(newInputItems, responses.ResponseInputItemUnionParam{
+				OfMessage: &responses.EasyInputMessageParam{
+					Role:    parsedRole,
+					Content: responses.EasyInputMessageContentUnionParam{OfString: param.NewOpt(storedItem.Content)},
+				},
+			})
+			newStoredItems = append(newStoredItems, storedItem)
+			continue
+		}
+
+		inputItem, ok := inputItemFromRawItem(json.RawMessage(raw))
+		if !ok {
+			logger.G(ctx).WithField("type", output.Type).Debug("Skipping unsupported compact output item")
+			continue
+		}
+
+		newInputItems = append(newInputItems, inputItem)
+		newStoredItems = append(newStoredItems, storedItem)
 	}
 
 	if len(newInputItems) == 0 {
@@ -768,6 +758,66 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 	t.ResetContextStateLocked()
 
 	return nil
+}
+
+func storedItemFromCompactOutput(output responses.ResponseOutputItemUnion, raw string) StoredInputItem {
+	item := StoredInputItem{
+		Type:    output.Type,
+		RawItem: json.RawMessage(raw),
+	}
+
+	switch output.Type {
+	case "message":
+		msg := output.AsMessage()
+		item.Role = strings.TrimSpace(string(msg.Role))
+		for _, content := range msg.Content {
+			if content.Type == "output_text" || content.Type == "input_text" {
+				item.Content += content.Text
+			}
+		}
+	case "function_call":
+		call := output.AsFunctionCall()
+		item.CallID = call.CallID
+		item.Name = call.Name
+		item.Arguments = call.Arguments
+	case "function_call_output":
+		item.CallID = output.CallID
+		item.Output = output.Output.OfString
+	case "reasoning":
+		item.Role = "assistant"
+		reasoning := output.AsReasoning()
+		for _, summary := range reasoning.Summary {
+			if item.Content != "" {
+				item.Content += "\n"
+			}
+			item.Content += summary.Text
+		}
+	case "compaction":
+		compaction := output.AsCompaction()
+		item.EncryptedContent = compaction.EncryptedContent
+		if item.EncryptedContent == "" {
+			item.EncryptedContent = output.EncryptedContent
+		}
+	case "compaction_summary":
+		item.EncryptedContent = output.EncryptedContent
+	}
+
+	return item
+}
+
+func parseStoredMessageRole(role string) (responses.EasyInputMessageRole, bool) {
+	switch strings.ToLower(strings.TrimSpace(role)) {
+	case "user":
+		return responses.EasyInputMessageRoleUser, true
+	case "assistant":
+		return responses.EasyInputMessageRoleAssistant, true
+	case "system":
+		return responses.EasyInputMessageRoleSystem, true
+	case "developer":
+		return responses.EasyInputMessageRoleDeveloper, true
+	default:
+		return "", false
+	}
 }
 
 func (t *Thread) compactRawJSON(
@@ -1230,26 +1280,7 @@ type StreamableMessage struct {
 	Input      string // For tool use (JSON string)
 }
 
-const compactedHistoryNotice = "🗜️ Earlier conversation history was compacted and is hidden."
-
-func itemsForDisplay(items []StoredInputItem) ([]StoredInputItem, bool) {
-	lastCompactionIdx := -1
-	for i, item := range items {
-		if item.Type == "compaction" {
-			lastCompactionIdx = i
-		}
-	}
-
-	if lastCompactionIdx < 0 {
-		return items, false
-	}
-
-	if lastCompactionIdx+1 >= len(items) {
-		return nil, true
-	}
-
-	return items[lastCompactionIdx+1:], true
-}
+const compactedHistoryNotice = "Context compacted"
 
 // StreamMessages parses raw messages into streamable format for conversation streaming.
 func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltypes.StructuredToolResult) ([]StreamableMessage, error) {
@@ -1258,18 +1289,9 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 		return nil, errors.Wrap(err, "error unmarshaling input items")
 	}
 
-	displayItems, compacted := itemsForDisplay(items)
+	streamable := make([]StreamableMessage, 0, len(items))
 
-	streamable := make([]StreamableMessage, 0, len(displayItems)+1)
-	if compacted {
-		streamable = append(streamable, StreamableMessage{
-			Kind:    "text",
-			Role:    "assistant",
-			Content: compactedHistoryNotice,
-		})
-	}
-
-	for _, item := range displayItems {
+	for _, item := range items {
 		switch item.Type {
 		case "reasoning":
 			// Add thinking message
@@ -1318,6 +1340,13 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 				ToolCallID: item.CallID,
 				Content:    resultStr,
 			})
+
+		case "compaction", "compaction_summary":
+			streamable = append(streamable, StreamableMessage{
+				Kind:    "text",
+				Role:    "assistant",
+				Content: compactedHistoryNotice,
+			})
 		}
 	}
 
@@ -1331,19 +1360,11 @@ func ExtractMessages(data []byte, toolResults map[string]tooltypes.StructuredToo
 		return nil, errors.Wrap(err, "error unmarshaling input items")
 	}
 
-	displayItems, compacted := itemsForDisplay(items)
-
-	result := make([]llmtypes.Message, 0, len(displayItems)+1)
-	if compacted {
-		result = append(result, llmtypes.Message{
-			Role:    "assistant",
-			Content: compactedHistoryNotice,
-		})
-	}
+	result := make([]llmtypes.Message, 0, len(items))
 
 	registry := renderers.NewRendererRegistry()
 
-	for _, item := range displayItems {
+	for _, item := range items {
 		switch item.Type {
 		case "reasoning":
 			// Add thinking message
@@ -1379,6 +1400,12 @@ func ExtractMessages(data []byte, toolResults map[string]tooltypes.StructuredToo
 			result = append(result, llmtypes.Message{
 				Role:    "assistant",
 				Content: fmt.Sprintf("🔄 Tool result:\n%s", text),
+			})
+
+		case "compaction", "compaction_summary":
+			result = append(result, llmtypes.Message{
+				Role:    "assistant",
+				Content: compactedHistoryNotice,
 			})
 		}
 	}

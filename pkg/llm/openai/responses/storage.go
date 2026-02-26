@@ -4,6 +4,8 @@
 package responses
 
 import (
+	"encoding/json"
+
 	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/responses"
 )
@@ -40,6 +42,10 @@ type StoredInputItem struct {
 
 	// Reasoning fields (when Type == "reasoning")
 	// Reasoning string is stored in Content field with Role == "assistant"
+
+	// RawItem stores the original Responses API item payload when available.
+	// This lets us preserve compact output variants without lossy field mapping.
+	RawItem json.RawMessage `json:"raw_item,omitempty"`
 }
 
 // fromStoredItems converts storage format back to SDK input items for API calls.
@@ -48,6 +54,13 @@ func fromStoredItems(items []StoredInputItem) []responses.ResponseInputItemUnion
 	result := make([]responses.ResponseInputItemUnionParam, 0, len(items))
 
 	for _, item := range items {
+		if item.Type != "message" && len(item.RawItem) > 0 {
+			if inputItem, ok := inputItemFromRawItem(item.RawItem); ok {
+				result = append(result, inputItem)
+				continue
+			}
+		}
+
 		switch item.Type {
 		case "reasoning":
 			// Reasoning is for display only, skip for API calls
@@ -87,4 +100,21 @@ func fromStoredItems(items []StoredInputItem) []responses.ResponseInputItemUnion
 	}
 
 	return result
+}
+
+func inputItemFromRawItem(raw json.RawMessage) (responses.ResponseInputItemUnionParam, bool) {
+	var inputItem responses.ResponseInputItemUnionParam
+	if err := json.Unmarshal(raw, &inputItem); err == nil {
+		return inputItem, true
+	}
+
+	var compactVariant struct {
+		Type             string `json:"type"`
+		EncryptedContent string `json:"encrypted_content"`
+	}
+	if err := json.Unmarshal(raw, &compactVariant); err == nil && compactVariant.Type == "compaction_summary" && compactVariant.EncryptedContent != "" {
+		return responses.ResponseInputItemParamOfCompaction(compactVariant.EncryptedContent), true
+	}
+
+	return responses.ResponseInputItemUnionParam{}, false
 }
