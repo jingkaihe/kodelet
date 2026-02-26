@@ -37,6 +37,6 @@ const (
 	ProviderAnthropic = "anthropic"
 	// ProviderOpenAI is the identifier for the OpenAI provider.
 	ProviderOpenAI = "openai"
-	// ProviderOpenAIResponses is the identifier for the OpenAI Responses API provider.
+	// ProviderOpenAIResponses is the legacy identifier for OpenAI Responses API conversations.
 	ProviderOpenAIResponses = "openai-responses"
 )

@@ -236,7 +236,7 @@ func init() {
 	conversationListCmd.Flags().String("start", listDefaults.StartDate, "Filter conversations after this date (format: YYYY-MM-DD)")
 	conversationListCmd.Flags().String("end", listDefaults.EndDate, "Filter conversations before this date (format: YYYY-MM-DD)")
 	conversationListCmd.Flags().String("search", listDefaults.Search, "Search term to filter conversations")
-	conversationListCmd.Flags().String("provider", listDefaults.Provider, "Filter conversations by LLM provider (anthropic or openai)")
+	conversationListCmd.Flags().String("provider", listDefaults.Provider, "Filter conversations by LLM provider (anthropic, openai, google)")
 	conversationListCmd.Flags().Int("limit", listDefaults.Limit, "Maximum number of conversations to display")
 	conversationListCmd.Flags().Int("offset", listDefaults.Offset, "Offset for pagination")
 	conversationListCmd.Flags().String("sort-by", listDefaults.SortBy, "Field to sort by: updated_at, created_at, or messages")
@@ -400,7 +400,7 @@ type ConversationListOutput struct {
 	Format        OutputFormat
 }
 
-func NewConversationListOutput(summaries []convtypes.ConversationSummary, format OutputFormat) *ConversationListOutput {
+func NewConversationListOutput(summaries []convtypes.ConversationSummary, metadataByID map[string]map[string]any, format OutputFormat) *ConversationListOutput {
 	output := &ConversationListOutput{
 		Conversations: make([]ConversationSummaryOutput, 0, len(summaries)),
 		Format:        format,
@@ -412,19 +412,12 @@ func NewConversationListOutput(summaries []convtypes.ConversationSummary, format
 			preview = summary.Summary
 		}
 
-		// Remove newlines from preview to keep table formatting clean
 		preview = strings.ReplaceAll(preview, "\n", " ")
 		preview = strings.ReplaceAll(preview, "\r", " ")
 
-		provider := summary.Provider
-		switch summary.Provider {
-		case "anthropic":
-			provider = "Anthropic"
-		case "openai", "openai-responses":
-			provider = "OpenAI"
-		case "google":
-			provider = "Google"
-		}
+		metadata := metadataByID[summary.ID]
+		platform, apiMode := extractProviderMetadata(summary.Provider, metadata)
+		provider := formatProviderDisplay(summary.Provider, platform, apiMode)
 
 		output.Conversations = append(output.Conversations, ConversationSummaryOutput{
 			ID:             summary.ID,
@@ -432,6 +425,8 @@ func NewConversationListOutput(summaries []convtypes.ConversationSummary, format
 			UpdatedAt:      summary.UpdatedAt,
 			MessageCount:   summary.MessageCount,
 			Provider:       provider,
+			Platform:       platform,
+			APIMode:        apiMode,
 			Preview:        preview,
 			TotalCost:      summary.Usage.TotalCost(),
 			CurrentContext: summary.Usage.CurrentContextWindow,
@@ -440,6 +435,69 @@ func NewConversationListOutput(summaries []convtypes.ConversationSummary, format
 	}
 
 	return output
+}
+
+func normalizeProviderMetadataString(value any) string {
+	strValue, ok := value.(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(strings.ToLower(strValue))
+}
+
+func extractProviderMetadata(provider string, metadata map[string]any) (string, string) {
+	normalizedProvider := strings.TrimSpace(strings.ToLower(provider))
+
+	platform := ""
+	apiMode := ""
+	if metadata != nil {
+		if platformValue, exists := metadata["platform"]; exists {
+			platform = normalizeProviderMetadataString(platformValue)
+		}
+		if modeValue, exists := metadata["api_mode"]; exists {
+			apiMode = normalizeProviderMetadataString(modeValue)
+		}
+	}
+
+	switch apiMode {
+	case "responses_api", "response":
+		apiMode = "responses"
+	case "chat", "chatcompletions":
+		apiMode = "chat_completions"
+	}
+
+	if normalizedProvider == "openai-responses" && apiMode == "" {
+		apiMode = "responses"
+	}
+
+	return platform, apiMode
+}
+
+func formatProviderDisplay(provider string, platform string, apiMode string) string {
+	normalizedProvider := strings.TrimSpace(strings.ToLower(provider))
+	displayProvider := provider
+	switch normalizedProvider {
+	case "anthropic":
+		displayProvider = "Anthropic"
+	case "openai", "openai-responses":
+		displayProvider = "OpenAI"
+	case "google":
+		displayProvider = "Google"
+	}
+
+	qualifiers := make([]string, 0, 2)
+	if platform != "" {
+		qualifiers = append(qualifiers, platform)
+	}
+	if apiMode != "" {
+		qualifiers = append(qualifiers, apiMode)
+	}
+
+	if len(qualifiers) == 0 {
+		return displayProvider
+	}
+
+	return fmt.Sprintf("%s (%s)", displayProvider, strings.Join(qualifiers, ", "))
 }
 
 func (o *ConversationListOutput) Render(w io.Writer) error {
@@ -515,6 +573,8 @@ type ConversationSummaryOutput struct {
 	UpdatedAt      time.Time `json:"updated_at"`
 	MessageCount   int       `json:"message_count"`
 	Provider       string    `json:"provider"`
+	Platform       string    `json:"platform,omitempty"`
+	APIMode        string    `json:"api_mode,omitempty"`
 	Preview        string    `json:"preview"`
 	TotalCost      float64   `json:"total_cost"`
 	CurrentContext int       `json:"current_context_window"`
@@ -570,11 +630,21 @@ func listConversationsCmd(ctx context.Context, config *ConversationListConfig) {
 		return
 	}
 
+	metadataByID := make(map[string]map[string]any, len(summaries))
+	for _, summary := range summaries {
+		record, loadErr := store.Load(ctx, summary.ID)
+		if loadErr != nil {
+			logger.G(ctx).WithError(loadErr).WithField("conversation_id", summary.ID).Debug("Failed to load conversation metadata for list output")
+			continue
+		}
+		metadataByID[summary.ID] = record.Metadata
+	}
+
 	format := TableFormat
 	if config.JSONOutput {
 		format = JSONFormat
 	}
-	output := NewConversationListOutput(summaries, format)
+	output := NewConversationListOutput(summaries, metadataByID, format)
 	if err := output.Render(os.Stdout); err != nil {
 		presenter.Error(err, "Failed to render conversation list")
 		os.Exit(1)
@@ -617,6 +687,8 @@ func deleteConversationCmd(ctx context.Context, id string, config *ConversationD
 type ConversationShowOutput struct {
 	ID        string             `json:"id"`
 	Provider  string             `json:"provider"`
+	Platform  string             `json:"platform,omitempty"`
+	APIMode   string             `json:"api_mode,omitempty"`
 	Summary   string             `json:"summary,omitempty"`
 	CreatedAt time.Time          `json:"created_at"`
 	UpdatedAt time.Time          `json:"updated_at"`
@@ -638,6 +710,9 @@ func showConversationCmd(ctx context.Context, id string, config *ConversationSho
 		os.Exit(1)
 	}
 
+	platform, apiMode := extractProviderMetadata(record.Provider, record.Metadata)
+	providerDisplay := formatProviderDisplay(record.Provider, platform, apiMode)
+
 	switch config.Format {
 	case "raw":
 		outputJSON, err := json.MarshalIndent(record, "", "  ")
@@ -649,14 +724,16 @@ func showConversationCmd(ctx context.Context, id string, config *ConversationSho
 	case "json":
 		output := ConversationShowOutput{
 			ID:        record.ID,
-			Provider:  record.Provider,
+			Provider:  providerDisplay,
+			Platform:  platform,
+			APIMode:   apiMode,
 			Summary:   record.Summary,
 			CreatedAt: record.CreatedAt,
 			UpdatedAt: record.UpdatedAt,
 			Usage:     record.Usage,
 		}
 		if !config.StatsOnly {
-			messages, err := llm.ExtractMessages(record.Provider, record.RawMessages, record.ToolResults)
+			messages, err := llm.ExtractMessages(record.Provider, record.RawMessages, record.Metadata, record.ToolResults)
 			if err != nil {
 				presenter.Error(err, "Failed to parse conversation messages")
 				os.Exit(1)
@@ -682,13 +759,13 @@ func showConversationCmd(ctx context.Context, id string, config *ConversationSho
 		showHeader := !config.NoHeader
 		showMessages := !config.StatsOnly
 		if showHeader {
-			displayConversationHeader(record)
+			displayConversationHeader(record, providerDisplay, platform, apiMode)
 			if showMessages {
 				fmt.Println()
 			}
 		}
 		if showMessages {
-			messages, err := llm.ExtractMessages(record.Provider, record.RawMessages, record.ToolResults)
+			messages, err := llm.ExtractMessages(record.Provider, record.RawMessages, record.Metadata, record.ToolResults)
 			if err != nil {
 				presenter.Error(err, "Failed to parse conversation messages")
 				os.Exit(1)
@@ -701,10 +778,16 @@ func showConversationCmd(ctx context.Context, id string, config *ConversationSho
 	}
 }
 
-func displayConversationHeader(record convtypes.ConversationRecord) {
+func displayConversationHeader(record convtypes.ConversationRecord, providerDisplay string, platform string, apiMode string) {
 	presenter.Section("Conversation Info")
 	fmt.Printf("ID:        %s\n", record.ID)
-	fmt.Printf("Provider:  %s\n", record.Provider)
+	fmt.Printf("Provider:  %s\n", providerDisplay)
+	if platform != "" {
+		fmt.Printf("Platform:  %s\n", platform)
+	}
+	if apiMode != "" {
+		fmt.Printf("API Mode:  %s\n", apiMode)
+	}
 	fmt.Printf("Created:   %s\n", record.CreatedAt.Format(time.RFC3339))
 	fmt.Printf("Updated:   %s\n", record.UpdatedAt.Format(time.RFC3339))
 
@@ -879,7 +962,7 @@ func validateConversationRecord(data []byte) (*convtypes.ConversationRecord, err
 		record.ToolResults = make(map[string]tools.StructuredToolResult)
 	}
 
-	_, err := llm.ExtractMessages(record.Provider, record.RawMessages, record.ToolResults)
+	_, err := llm.ExtractMessages(record.Provider, record.RawMessages, record.Metadata, record.ToolResults)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to extract messages")
 	}

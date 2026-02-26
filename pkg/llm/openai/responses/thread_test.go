@@ -28,12 +28,15 @@ func TestNewThread(t *testing.T) {
 	config := llmtypes.Config{
 		Provider: "openai",
 		Model:    "gpt-4.1",
+		OpenAI: &llmtypes.OpenAIConfig{
+			Platform: "xai",
+		},
 	}
 
 	thread, err := NewThread(config)
 	require.NoError(t, err)
 	require.NotNil(t, thread)
-	assert.Equal(t, "openai-responses", thread.Provider())
+	assert.Equal(t, "openai", thread.Provider())
 }
 
 func TestNewThreadWithCustomAPIKey(t *testing.T) {
@@ -44,6 +47,7 @@ func TestNewThreadWithCustomAPIKey(t *testing.T) {
 		Provider: "openai",
 		Model:    "gpt-4.1",
 		OpenAI: &llmtypes.OpenAIConfig{
+			Platform:     "fireworks",
 			APIKeyEnvVar: "MY_CUSTOM_API_KEY",
 		},
 	}
@@ -59,6 +63,9 @@ func TestNewThreadWithoutAPIKey(t *testing.T) {
 	config := llmtypes.Config{
 		Provider: "openai",
 		Model:    "gpt-4.1",
+		OpenAI: &llmtypes.OpenAIConfig{
+			Platform: "openai",
+		},
 	}
 
 	_, err := NewThread(config)
@@ -1026,8 +1033,9 @@ func (*mockResponsesConversationStore) Close() error {
 }
 
 func TestProcessMessageExchangeSavesConversationPerTurn(t *testing.T) {
+	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1", IsSubAgent: true, OpenAI: &llmtypes.OpenAIConfig{Platform: "xai"}}
 	thread := &Thread{
-		Thread: base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-4.1", IsSubAgent: true}, "conv-test", hooks.Trigger{}),
+		Thread: base.NewThread(config, "conv-test", hooks.Trigger{}),
 	}
 	thread.SetState(tools.NewBasicState(context.Background()))
 
@@ -1062,12 +1070,16 @@ func TestProcessMessageExchangeSavesConversationPerTurn(t *testing.T) {
 	handler := &llmtypes.StringCollectorHandler{Silent: true}
 	_, _, err := thread.processMessageExchange(context.Background(), handler, "gpt-4.1", 256, "system", llmtypes.MessageOpt{NoToolUse: true})
 	require.NoError(t, err)
-	assert.Equal(t, 1, len(store.savedRecords))
+	require.Equal(t, 1, len(store.savedRecords))
+	assert.Equal(t, "openai", store.savedRecords[0].Provider)
+	assert.Equal(t, "responses", store.savedRecords[0].Metadata["api_mode"])
+	assert.Equal(t, "xai", store.savedRecords[0].Metadata["platform"])
 }
 
 func TestProcessMessageExchangeSavesConversationOnError(t *testing.T) {
+	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1", IsSubAgent: true, OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"}}
 	thread := &Thread{
-		Thread: base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-4.1", IsSubAgent: true}, "conv-test", hooks.Trigger{}),
+		Thread: base.NewThread(config, "conv-test", hooks.Trigger{}),
 	}
 	thread.SetState(tools.NewBasicState(context.Background()))
 
@@ -1095,12 +1107,15 @@ func TestProcessMessageExchangeSavesConversationOnError(t *testing.T) {
 	handler := &llmtypes.StringCollectorHandler{Silent: true}
 	_, _, err := thread.processMessageExchange(context.Background(), handler, "gpt-4.1", 256, "system", llmtypes.MessageOpt{NoToolUse: true})
 	require.Error(t, err)
-	assert.Equal(t, 1, len(store.savedRecords))
+	require.Equal(t, 1, len(store.savedRecords))
+	assert.Equal(t, "openai", store.savedRecords[0].Provider)
+	assert.Equal(t, "responses", store.savedRecords[0].Metadata["api_mode"])
 }
 
 func TestProcessMessageExchangeCodexUsesDefaultStreamingOptions(t *testing.T) {
+	config := llmtypes.Config{Provider: "openai", Model: "gpt-5.1-codex", OpenAI: &llmtypes.OpenAIConfig{Platform: "codex"}}
 	thread := &Thread{
-		Thread:  base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-5.1-codex"}, "conv-test", hooks.Trigger{}),
+		Thread:  base.NewThread(config, "conv-test", hooks.Trigger{}),
 		isCodex: true,
 	}
 	thread.SetState(tools.NewBasicState(context.Background()))
@@ -1128,4 +1143,11 @@ func TestProcessMessageExchangeCodexUsesDefaultStreamingOptions(t *testing.T) {
 	_, _, err := thread.processMessageExchange(context.Background(), handler, "gpt-5.1-codex", 256, "system", llmtypes.MessageOpt{NoToolUse: true})
 	require.NoError(t, err)
 	assert.Zero(t, streamingOptsCount, "codex streaming should use default request options")
+}
+
+func TestRecordUsesResponsesAPI_MetadataDetection(t *testing.T) {
+	assert.True(t, recordUsesResponsesAPI(map[string]any{"api_mode": "responses"}))
+	assert.True(t, recordUsesResponsesAPI(map[string]any{"use_responses_api": true}))
+	assert.False(t, recordUsesResponsesAPI(map[string]any{"api_mode": "chat_completions"}))
+	assert.False(t, recordUsesResponsesAPI(nil))
 }

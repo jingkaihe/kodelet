@@ -118,11 +118,29 @@ func TestServer_handleListConversations(t *testing.T) {
 		listFunc: func(_ context.Context, _ *conversations.ListConversationsRequest) (*conversations.ListConversationsResponse, error) {
 			return &conversations.ListConversationsResponse{
 				Conversations: []convtypes.ConversationSummary{
-					{ID: "1", Summary: "Test 1"},
-					{ID: "2", Summary: "Test 2"},
+					{ID: "1", Summary: "Test 1", Provider: "openai"},
+					{ID: "2", Summary: "Test 2", Provider: "anthropic"},
 				},
 				Total: 2,
 			}, nil
+		},
+		getFunc: func(_ context.Context, id string) (*conversations.GetConversationResponse, error) {
+			switch id {
+			case "1":
+				return &conversations.GetConversationResponse{
+					ID:       "1",
+					Provider: "openai",
+					Metadata: map[string]any{"platform": "fireworks", "api_mode": "chat_completions"},
+				}, nil
+			case "2":
+				return &conversations.GetConversationResponse{
+					ID:       "2",
+					Provider: "anthropic",
+					Metadata: map[string]any{},
+				}, nil
+			default:
+				return nil, errors.New("conversation not found")
+			}
 		},
 	}
 
@@ -144,6 +162,8 @@ func TestServer_handleListConversations(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 2, len(response.Conversations))
 	assert.Equal(t, 2, response.Total)
+	assert.Equal(t, "OpenAI (fireworks, chat_completions)", response.Conversations[0].Provider)
+	assert.Equal(t, "Anthropic", response.Conversations[1].Provider)
 }
 
 func TestServer_handleGetConversation(t *testing.T) {
@@ -154,8 +174,9 @@ func TestServer_handleGetConversation(t *testing.T) {
 				return &conversations.GetConversationResponse{
 					ID:          conversationID,
 					Summary:     "Test conversation",
-					Provider:    "anthropic",
-					RawMessages: json.RawMessage(`[{"role":"user","content":[{"type":"text","text":"hello"}]}]`),
+					Provider:    "openai",
+					Metadata:    map[string]any{"platform": "fireworks", "api_mode": "responses"},
+					RawMessages: json.RawMessage(`[{"type":"message","role":"user","content":"hello"}]`),
 				}, nil
 			}
 			return nil, errors.New("conversation not found")
@@ -180,7 +201,45 @@ func TestServer_handleGetConversation(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, conversationID, response.ID)
 	assert.Equal(t, "Test conversation", response.Summary)
+	assert.Equal(t, "OpenAI (fireworks, responses)", response.Provider)
 	assert.Equal(t, 1, response.MessageCount)
+}
+
+func TestServer_handleGetConversationLegacyOpenAIResponses(t *testing.T) {
+	conversationID := "test-id-legacy"
+	mockService := &mockConversationService{
+		getFunc: func(_ context.Context, id string) (*conversations.GetConversationResponse, error) {
+			if id == conversationID {
+				return &conversations.GetConversationResponse{
+					ID:          conversationID,
+					Summary:     "Legacy Test conversation",
+					Provider:    "openai-responses",
+					Metadata:    map[string]any{},
+					RawMessages: json.RawMessage(`[{"type":"message","role":"user","content":"hello"}]`),
+				}, nil
+			}
+			return nil, errors.New("conversation not found")
+		},
+	}
+
+	server := &Server{
+		conversationService: mockService,
+		router:              mux.NewRouter(),
+	}
+
+	req := httptest.NewRequest("GET", "/api/conversations/"+conversationID, nil)
+	req = mux.SetURLVars(req, map[string]string{"id": conversationID})
+	w := httptest.NewRecorder()
+
+	server.handleGetConversation(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var response WebConversationResponse
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	require.NoError(t, err)
+	assert.Equal(t, conversationID, response.ID)
+	assert.Equal(t, "OpenAI (responses)", response.Provider)
 }
 
 func TestServer_handleDeleteConversation(t *testing.T) {
@@ -248,6 +307,73 @@ func TestServer_handleGetToolResult(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, toolCallID, response.ToolCallID)
 	assert.Equal(t, "TestTool", response.Result.ToolName)
+}
+
+func TestFormatProviderDisplay(t *testing.T) {
+	tests := []struct {
+		name     string
+		provider string
+		platform string
+		apiMode  string
+		expected string
+	}{
+		{
+			name:     "openai with qualifiers",
+			provider: "openai",
+			platform: "fireworks",
+			apiMode:  "chat_completions",
+			expected: "OpenAI (fireworks, chat_completions)",
+		},
+		{
+			name:     "openai responses legacy",
+			provider: "openai-responses",
+			expected: "OpenAI",
+		},
+		{
+			name:     "anthropic",
+			provider: "anthropic",
+			expected: "Anthropic",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, formatProviderDisplay(tt.provider, tt.platform, tt.apiMode))
+		})
+	}
+}
+
+func TestExtractProviderMetadata(t *testing.T) {
+	tests := []struct {
+		name             string
+		provider         string
+		metadata         map[string]any
+		expectedPlatform string
+		expectedAPIMode  string
+	}{
+		{
+			name:             "openai metadata normalized",
+			provider:         "openai",
+			metadata:         map[string]any{"platform": "Fireworks", "api_mode": "responses_api"},
+			expectedPlatform: "fireworks",
+			expectedAPIMode:  "responses",
+		},
+		{
+			name:             "legacy openai responses defaults to responses mode",
+			provider:         "openai-responses",
+			metadata:         map[string]any{},
+			expectedPlatform: "",
+			expectedAPIMode:  "responses",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			platform, apiMode := extractProviderMetadata(tt.provider, tt.metadata)
+			assert.Equal(t, tt.expectedPlatform, platform)
+			assert.Equal(t, tt.expectedAPIMode, apiMode)
+		})
+	}
 }
 
 func TestServer_convertToWebMessages(t *testing.T) {

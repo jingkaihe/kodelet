@@ -2,7 +2,9 @@
 
 ## Unreleased
 
-- OpenAI Responses weak-model utility summaries no longer emit the `Turn completed` usage log line.
+## 0.2.26.beta (2026-02-26)
+
+- Conversation list/show and web UI now display OpenAI-compatible `platform` and `api_mode` metadata when available.
 
 ## 0.2.25.beta (2026-02-24)
 

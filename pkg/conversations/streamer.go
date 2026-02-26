@@ -13,7 +13,7 @@ import (
 )
 
 // MessageParser is a function type that can parse provider-specific raw messages into streamable format
-type MessageParser func(rawMessages json.RawMessage, toolResults map[string]tools.StructuredToolResult) ([]StreamableMessage, error)
+type MessageParser func(rawMessages json.RawMessage, metadata map[string]any, toolResults map[string]tools.StructuredToolResult) ([]StreamableMessage, error)
 
 // StreamEntry represents a single stream entry in the unified JSON format
 type StreamEntry struct {
@@ -125,7 +125,7 @@ func (cs *ConversationStreamer) initializeStream(
 		return nil, errors.Errorf("no message parser registered for provider: %s", response.Provider)
 	}
 
-	messages, err := parser(response.RawMessages, response.ToolResults)
+	messages, err := parser(response.RawMessages, response.Metadata, response.ToolResults)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to parse messages")
 	}
@@ -181,7 +181,7 @@ func (cs *ConversationStreamer) streamNewMessagesSince(ctx context.Context, resp
 		return 0, errors.Errorf("no message parser registered for provider: %s", response.Provider)
 	}
 
-	streamableMessages, err := parser(response.RawMessages, response.ToolResults)
+	streamableMessages, err := parser(response.RawMessages, response.Metadata, response.ToolResults)
 	if err != nil {
 		return 0, errors.Wrap(err, "failed to parse messages")
 	}

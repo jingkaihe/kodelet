@@ -20,6 +20,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	codexpreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/codex"
 	openaipreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/openai"
+	"github.com/jingkaihe/kodelet/pkg/llm/openai/preset/xai"
 	"github.com/jingkaihe/kodelet/pkg/llm/prompts"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/sysprompt"
@@ -164,7 +165,7 @@ func NewThread(config llmtypes.Config) (*Thread, error) {
 
 // Provider returns the provider identifier for this thread.
 func (t *Thread) Provider() string {
-	return "openai-responses"
+	return "openai"
 }
 
 // AddUserMessage adds a user message with optional images to the thread.
@@ -846,12 +847,22 @@ func (t *Thread) SaveConversation(ctx context.Context, summarize bool) error {
 	}
 
 	// Build the conversation record
+	metadata := map[string]any{
+		"model":          t.Config.Model,
+		"lastResponseID": t.lastResponseID,
+		"api_mode":       "responses",
+		"platform":       resolvePlatformName(t.Config),
+	}
+	if t.Config.OpenAI != nil && t.Config.OpenAI.Preset != "" {
+		metadata["preset"] = t.Config.OpenAI.Preset
+	}
+
 	record := convtypes.ConversationRecord{
 		ID:                  t.ConversationID,
 		RawMessages:         inputItemsJSON,
-		Provider:            "openai-responses",
+		Provider:            "openai",
 		Usage:               *t.Usage,
-		Metadata:            map[string]any{"model": t.Config.Model, "lastResponseID": t.lastResponseID},
+		Metadata:            metadata,
 		Summary:             t.summary,
 		CreatedAt:           time.Now(),
 		UpdatedAt:           time.Now(),
@@ -875,9 +886,15 @@ func (t *Thread) loadConversation(ctx context.Context) {
 		return
 	}
 
-	// Check if this is a Responses API conversation
-	if record.Provider != "" && record.Provider != "openai-responses" {
-		return
+	if record.Provider != "" {
+		if record.Provider != "openai-responses" {
+			if record.Provider != "openai" {
+				return
+			}
+			if !recordUsesResponsesAPI(record.Metadata) {
+				return
+			}
+		}
 	}
 
 	// Deserialize from storage format
@@ -942,29 +959,108 @@ func (t *Thread) cleanupOrphanedItems() {
 
 // Helper functions
 
+const defaultOpenAIPlatform = "openai"
+
+func normalizePlatformName(name string) string {
+	return strings.ToLower(strings.TrimSpace(name))
+}
+
+func resolvePlatformName(config llmtypes.Config) string {
+	if config.OpenAI == nil {
+		return defaultOpenAIPlatform
+	}
+
+	if platform := normalizePlatformName(config.OpenAI.Platform); platform != "" {
+		return platform
+	}
+
+	if preset := normalizePlatformName(config.OpenAI.Preset); preset != "" {
+		return preset
+	}
+
+	return defaultOpenAIPlatform
+}
+
+func resolvePresetForLoading(config llmtypes.Config) string {
+	if config.OpenAI == nil {
+		return defaultOpenAIPlatform
+	}
+
+	if platform := normalizePlatformName(config.OpenAI.Platform); platform != "" {
+		return platform
+	}
+
+	if preset := normalizePlatformName(config.OpenAI.Preset); preset != "" {
+		return preset
+	}
+
+	if config.OpenAI.Models == nil && config.OpenAI.Pricing == nil {
+		return defaultOpenAIPlatform
+	}
+
+	return ""
+}
+
+func parseAPIMode(raw string) (llmtypes.OpenAIAPIMode, bool) {
+	normalized := strings.ToLower(strings.TrimSpace(raw))
+	normalized = strings.ReplaceAll(normalized, "-", "_")
+
+	switch normalized {
+	case "chat", "chat_completions", "chatcompletions":
+		return llmtypes.OpenAIAPIModeChatCompletions, true
+	case "responses", "responses_api", "response":
+		return llmtypes.OpenAIAPIModeResponses, true
+	default:
+		return "", false
+	}
+}
+
+func getPresetAPIKeyEnvVar(platform string) string {
+	switch normalizePlatformName(platform) {
+	case "xai":
+		return xai.APIKeyEnvVar
+	default:
+		return openaipreset.APIKeyEnvVar
+	}
+}
+
+func getPresetBaseURL(platform string) string {
+	switch normalizePlatformName(platform) {
+	case "xai":
+		return xai.BaseURL
+	case "codex":
+		return codexpreset.BaseURL
+	case "openai":
+		return openaipreset.BaseURL
+	default:
+		return ""
+	}
+}
+
+func getAPIKeyEnvVar(config llmtypes.Config) string {
+	if config.OpenAI != nil && config.OpenAI.APIKeyEnvVar != "" {
+		return config.OpenAI.APIKeyEnvVar
+	}
+	return getPresetAPIKeyEnvVar(resolvePlatformName(config))
+}
+
+func getBaseURL(config llmtypes.Config) string {
+	if baseURL := os.Getenv("OPENAI_API_BASE"); baseURL != "" {
+		return baseURL
+	}
+	if config.OpenAI != nil && config.OpenAI.BaseURL != "" {
+		return config.OpenAI.BaseURL
+	}
+	return getPresetBaseURL(resolvePlatformName(config))
+}
+
 // loadCustomConfiguration loads custom models and pricing from config.
 // It processes presets first, then applies custom overrides if provided.
 func loadCustomConfiguration(config llmtypes.Config) (map[string]string, map[string]llmtypes.ModelPricing) {
 	customModels := make(map[string]string)
 	customPricing := make(map[string]llmtypes.ModelPricing)
 
-	// Determine which preset to use
-	presetName := ""
-	if config.OpenAI == nil {
-		// No OpenAI config at all, use default preset
-		presetName = "openai"
-	} else if config.OpenAI.Preset != "" {
-		// Explicit preset specified
-		presetName = config.OpenAI.Preset
-	} else {
-		// OpenAI config exists but no preset
-		// Check if we have custom models/pricing, if not, use default preset
-		if config.OpenAI.Models == nil && config.OpenAI.Pricing == nil {
-			presetName = "openai" // Default preset when no custom config
-		}
-	}
-
-	// Load preset if one was determined
+	presetName := resolvePresetForLoading(config)
 	if presetName != "" {
 		presetModels, presetPricing := loadPreset(presetName)
 		for model, category := range presetModels {
@@ -975,14 +1071,11 @@ func loadCustomConfiguration(config llmtypes.Config) (map[string]string, map[str
 		}
 	}
 
-	// Override with custom configuration if provided
 	if config.OpenAI != nil {
 		if config.OpenAI.Models != nil {
-			// Map reasoning models
 			for _, model := range config.OpenAI.Models.Reasoning {
 				customModels[model] = "reasoning"
 			}
-			// Map non-reasoning models
 			for _, model := range config.OpenAI.Models.NonReasoning {
 				customModels[model] = "non-reasoning"
 			}
@@ -1001,7 +1094,7 @@ func loadCustomConfiguration(config llmtypes.Config) (map[string]string, map[str
 // buildClientOptions constructs the OpenAI client options based on authentication mode.
 // Returns the options, whether Codex auth is being used, and any error.
 func buildClientOptions(config llmtypes.Config, log *logrus.Entry) ([]option.RequestOption, bool, error) {
-	useCodex := config.OpenAI != nil && config.OpenAI.Preset == "codex"
+	useCodex := resolvePlatformName(config) == "codex"
 
 	var opts []option.RequestOption
 	var err error
@@ -1015,7 +1108,6 @@ func buildClientOptions(config llmtypes.Config, log *logrus.Entry) ([]option.Req
 		return nil, useCodex, err
 	}
 
-	// Add error logging middleware
 	opts = append(opts, errorLoggingMiddleware(log))
 
 	return opts, useCodex, nil
@@ -1033,11 +1125,7 @@ func buildCodexAuthOptions(log *logrus.Entry) ([]option.RequestOption, error) {
 
 // buildAPIKeyAuthOptions returns client options for standard API key authentication.
 func buildAPIKeyAuthOptions(config llmtypes.Config, log *logrus.Entry) ([]option.RequestOption, error) {
-	apiKeyEnvVar := "OPENAI_API_KEY"
-	if config.OpenAI != nil && config.OpenAI.APIKeyEnvVar != "" {
-		apiKeyEnvVar = config.OpenAI.APIKeyEnvVar
-	}
-
+	apiKeyEnvVar := getAPIKeyEnvVar(config)
 	apiKey := os.Getenv(apiKeyEnvVar)
 	if apiKey == "" {
 		return nil, errors.Errorf("%s environment variable is required", apiKeyEnvVar)
@@ -1045,15 +1133,9 @@ func buildAPIKeyAuthOptions(config llmtypes.Config, log *logrus.Entry) ([]option
 
 	log.WithField("api_key_env_var", apiKeyEnvVar).Debug("using OpenAI API key for Responses API")
 
-	opts := []option.RequestOption{
-		option.WithAPIKey(apiKey),
-	}
-
-	// Add base URL if configured
-	if baseURL := os.Getenv("OPENAI_API_BASE"); baseURL != "" {
+	opts := []option.RequestOption{option.WithAPIKey(apiKey)}
+	if baseURL := getBaseURL(config); baseURL != "" {
 		opts = append(opts, option.WithBaseURL(baseURL))
-	} else if config.OpenAI != nil && config.OpenAI.BaseURL != "" {
-		opts = append(opts, option.WithBaseURL(config.OpenAI.BaseURL))
 	}
 
 	return opts, nil
@@ -1090,9 +1172,11 @@ func errorLoggingMiddleware(log *logrus.Entry) option.RequestOption {
 
 // loadPreset loads a built-in preset configuration for popular providers.
 func loadPreset(presetName string) (map[string]string, map[string]llmtypes.ModelPricing) {
-	switch presetName {
+	switch normalizePlatformName(presetName) {
 	case "openai":
 		return loadPresetFromConfig(openaipreset.Models, openaipreset.Pricing)
+	case "xai":
+		return loadPresetFromConfig(xai.Models, xai.Pricing)
 	case "codex":
 		return loadPresetFromConfig(codexpreset.Models, codexpreset.Pricing)
 	default:
@@ -1116,12 +1200,7 @@ func loadPresetFromConfig(presetModels llmtypes.CustomModels, presetPricing llmt
 
 	// Load pricing
 	for model, p := range presetPricing {
-		pricing[model] = llmtypes.ModelPricing{
-			Input:         p.Input,
-			CachedInput:   p.CachedInput,
-			Output:        p.Output,
-			ContextWindow: p.ContextWindow,
-		}
+		pricing[model] = p
 	}
 
 	return models, pricing
@@ -1291,7 +1370,6 @@ func isInvalidPreviousResponseIDError(err error) bool {
 
 	errStr := err.Error()
 
-	// Check for common error messages related to invalid previous_response_id
 	invalidResponseIDPatterns := []string{
 		"previous_response_id",
 		"response not found",
@@ -1303,6 +1381,28 @@ func isInvalidPreviousResponseIDError(err error) bool {
 	for _, pattern := range invalidResponseIDPatterns {
 		if strings.Contains(strings.ToLower(errStr), pattern) {
 			return true
+		}
+	}
+
+	return false
+}
+
+func recordUsesResponsesAPI(metadata map[string]any) bool {
+	if len(metadata) == 0 {
+		return false
+	}
+
+	if modeRaw, ok := metadata["api_mode"]; ok {
+		if mode, ok := modeRaw.(string); ok {
+			if parsedMode, parsed := parseAPIMode(mode); parsed {
+				return parsedMode == llmtypes.OpenAIAPIModeResponses
+			}
+		}
+	}
+
+	if legacyRaw, ok := metadata["use_responses_api"]; ok {
+		if legacy, ok := legacyRaw.(bool); ok {
+			return legacy
 		}
 	}
 

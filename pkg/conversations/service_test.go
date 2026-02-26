@@ -168,6 +168,7 @@ func TestConversationService_GetConversation(t *testing.T) {
 		Summary:     "Test conversation",
 		Usage:       llm.Usage{InputTokens: 50, OutputTokens: 50},
 		RawMessages: []byte(`[{"role":"user","content":"hello"}]`),
+		Metadata:    map[string]any{"source": "test"},
 		ToolResults: map[string]tools.StructuredToolResult{
 			"tool1": {ToolName: "test-tool"},
 		},
@@ -225,6 +226,7 @@ func TestConversationService_GetConversation(t *testing.T) {
 			assert.NotNil(t, response)
 			assert.Equal(t, testRecord.ID, response.ID)
 			assert.Equal(t, testRecord.Summary, response.Summary)
+			assert.Equal(t, testRecord.Metadata, response.Metadata)
 			assert.Equal(t, 1, response.MessageCount)
 		})
 	}

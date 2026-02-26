@@ -21,7 +21,7 @@ func NewConversationStreamer(ctx context.Context) (streamer *conversations.Conve
 
 	streamer = conversations.NewConversationStreamer(service)
 
-	streamer.RegisterMessageParser("anthropic", func(rawMessages json.RawMessage, toolResults map[string]tooltypes.StructuredToolResult) ([]conversations.StreamableMessage, error) {
+	streamer.RegisterMessageParser("anthropic", func(rawMessages json.RawMessage, _ map[string]any, toolResults map[string]tooltypes.StructuredToolResult) ([]conversations.StreamableMessage, error) {
 		msgs, err := anthropic.StreamMessages(rawMessages, toolResults)
 		if err != nil {
 			return nil, err
@@ -29,7 +29,15 @@ func NewConversationStreamer(ctx context.Context) (streamer *conversations.Conve
 		return convertAnthropicStreamableMessages(msgs), nil
 	})
 
-	streamer.RegisterMessageParser("openai", func(rawMessages json.RawMessage, toolResults map[string]tooltypes.StructuredToolResult) ([]conversations.StreamableMessage, error) {
+	streamer.RegisterMessageParser("openai", func(rawMessages json.RawMessage, metadata map[string]any, toolResults map[string]tooltypes.StructuredToolResult) ([]conversations.StreamableMessage, error) {
+		if openai.RecordUsesResponsesMode(metadata, rawMessages) {
+			msgs, err := openai.StreamResponsesMessages(rawMessages, toolResults)
+			if err != nil {
+				return nil, err
+			}
+			return convertResponsesStreamableMessages(msgs), nil
+		}
+
 		msgs, err := openai.StreamMessages(rawMessages, toolResults)
 		if err != nil {
 			return nil, err
@@ -37,7 +45,7 @@ func NewConversationStreamer(ctx context.Context) (streamer *conversations.Conve
 		return convertOpenAIStreamableMessages(msgs), nil
 	})
 
-	streamer.RegisterMessageParser("openai-responses", func(rawMessages json.RawMessage, toolResults map[string]tooltypes.StructuredToolResult) ([]conversations.StreamableMessage, error) {
+	streamer.RegisterMessageParser("openai-responses", func(rawMessages json.RawMessage, _ map[string]any, toolResults map[string]tooltypes.StructuredToolResult) ([]conversations.StreamableMessage, error) {
 		msgs, err := openai.StreamResponsesMessages(rawMessages, toolResults)
 		if err != nil {
 			return nil, err

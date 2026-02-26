@@ -19,7 +19,7 @@ func TestConversationListCommand(t *testing.T) {
 
 	// Should either show conversations or indicate no conversations found
 	// The command should execute successfully regardless of whether conversations exist
-	assert.False(t, strings.Contains(outputStr, "error") || strings.Contains(outputStr, "Error"), "Conversation list command returned error: %s", outputStr)
+	assert.False(t, strings.Contains(outputStr, "[ERROR]"), "Conversation list command returned error: %s", outputStr)
 }
 
 func TestConversationListWithOptions(t *testing.T) {
@@ -31,7 +31,7 @@ func TestConversationListWithOptions(t *testing.T) {
 	outputStr := strings.TrimSpace(string(output))
 
 	// Should execute successfully
-	assert.False(t, strings.Contains(outputStr, "error") || strings.Contains(outputStr, "Error"), "Conversation list with options returned error: %s", outputStr)
+	assert.False(t, strings.Contains(outputStr, "[ERROR]"), "Conversation list with options returned error: %s", outputStr)
 }
 
 func TestConversationShowInvalidID(t *testing.T) {

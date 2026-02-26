@@ -78,11 +78,14 @@ func SendMessageAndGetText(ctx context.Context, state tooltypes.State, query str
 }
 
 // ExtractMessages parses the raw messages from a conversation record
-func ExtractMessages(provider string, rawMessages []byte, toolResults map[string]tooltypes.StructuredToolResult) ([]llmtypes.Message, error) {
+func ExtractMessages(provider string, rawMessages []byte, metadata map[string]any, toolResults map[string]tooltypes.StructuredToolResult) ([]llmtypes.Message, error) {
 	switch provider {
 	case "anthropic":
 		return anthropic.ExtractMessages(rawMessages, toolResults)
 	case "openai":
+		if openai.RecordUsesResponsesMode(metadata, rawMessages) {
+			return openai.ExtractResponsesMessages(rawMessages, toolResults)
+		}
 		return openai.ExtractMessages(rawMessages, toolResults)
 	case "openai-responses":
 		return openai.ExtractResponsesMessages(rawMessages, toolResults)

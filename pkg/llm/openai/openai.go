@@ -217,21 +217,10 @@ func NewOpenAIThread(config llmtypes.Config) (*Thread, error) {
 		useCopilot = false
 	}
 
-	// Check for custom base URL (environment variable takes precedence)
-	if baseURL := os.Getenv("OPENAI_API_BASE"); baseURL != "" {
-		clientConfig.BaseURL = baseURL
-	} else if config.OpenAI != nil {
-		// Check preset first, then custom base URL
-		if config.OpenAI.Preset != "" {
-			if presetBaseURL := getPresetBaseURL(config.OpenAI.Preset); presetBaseURL != "" {
-				clientConfig.BaseURL = presetBaseURL
-			}
-		}
-		if config.OpenAI.BaseURL != "" {
-			clientConfig.BaseURL = config.OpenAI.BaseURL // Override preset
-		}
+	resolvedBaseURL := GetBaseURL(config)
+	if resolvedBaseURL != "" {
+		clientConfig.BaseURL = resolvedBaseURL
 	} else if useCopilot {
-		// Only set Copilot base URL if no other base URL is configured
 		clientConfig.BaseURL = "https://api.githubcopilot.com"
 	}
 
@@ -1109,17 +1098,9 @@ func (t *Thread) buildClientConfig() openai.ClientConfig {
 			clientConfig := openai.DefaultConfig("")
 			clientConfig.HTTPClient = &http.Client{Transport: auth.NewCopilotTransport(copilotToken)}
 
-			if baseURL := os.Getenv("OPENAI_API_BASE"); baseURL != "" {
-				clientConfig.BaseURL = baseURL
-			} else if t.Config.OpenAI != nil {
-				if t.Config.OpenAI.Preset != "" {
-					if presetBaseURL := getPresetBaseURL(t.Config.OpenAI.Preset); presetBaseURL != "" {
-						clientConfig.BaseURL = presetBaseURL
-					}
-				}
-				if t.Config.OpenAI.BaseURL != "" {
-					clientConfig.BaseURL = t.Config.OpenAI.BaseURL
-				}
+			resolvedBaseURL := GetBaseURL(t.Config)
+			if resolvedBaseURL != "" {
+				clientConfig.BaseURL = resolvedBaseURL
 			} else {
 				clientConfig.BaseURL = "https://api.githubcopilot.com"
 			}
@@ -1131,17 +1112,8 @@ func (t *Thread) buildClientConfig() openai.ClientConfig {
 	apiKeyEnvVar := GetAPIKeyEnvVar(t.Config)
 	apiKey := os.Getenv(apiKeyEnvVar)
 	clientConfig := openai.DefaultConfig(apiKey)
-	if baseURL := os.Getenv("OPENAI_API_BASE"); baseURL != "" {
-		clientConfig.BaseURL = baseURL
-	} else if t.Config.OpenAI != nil {
-		if t.Config.OpenAI.Preset != "" {
-			if presetBaseURL := getPresetBaseURL(t.Config.OpenAI.Preset); presetBaseURL != "" {
-				clientConfig.BaseURL = presetBaseURL
-			}
-		}
-		if t.Config.OpenAI.BaseURL != "" {
-			clientConfig.BaseURL = t.Config.OpenAI.BaseURL
-		}
+	if resolvedBaseURL := GetBaseURL(t.Config); resolvedBaseURL != "" {
+		clientConfig.BaseURL = resolvedBaseURL
 	}
 
 	return clientConfig

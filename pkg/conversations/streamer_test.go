@@ -143,13 +143,14 @@ func TestStreamLiveUpdates_WithHistory(t *testing.T) {
 			ID:          "test-conv-123",
 			Provider:    "test-provider",
 			RawMessages: rawMessages,
+			Metadata:    map[string]any{},
 			ToolResults: toolResults,
 			UpdatedAt:   time.Now(),
 		},
 	}
 
 	streamer := NewConversationStreamer(service)
-	streamer.RegisterMessageParser("test-provider", func(_ json.RawMessage, _ map[string]tools.StructuredToolResult) ([]StreamableMessage, error) {
+	streamer.RegisterMessageParser("test-provider", func(_ json.RawMessage, _ map[string]any, _ map[string]tools.StructuredToolResult) ([]StreamableMessage, error) {
 		return []StreamableMessage{
 			{Kind: "text", Role: "user", Content: "Hello"},
 			{Kind: "text", Role: "assistant", Content: "Hi there"},
@@ -192,6 +193,7 @@ func TestStreamLiveUpdates_ErrorHandling(t *testing.T) {
 				conversation: &GetConversationResponse{
 					ID:        "test-conv",
 					Provider:  "unknown-provider",
+					Metadata:  map[string]any{},
 					UpdatedAt: time.Now(),
 				},
 			},
@@ -204,11 +206,12 @@ func TestStreamLiveUpdates_ErrorHandling(t *testing.T) {
 				conversation: &GetConversationResponse{
 					ID:        "test-conv",
 					Provider:  "error-provider",
+					Metadata:  map[string]any{},
 					UpdatedAt: time.Now(),
 				},
 			},
 			setupStreamer: func(s *ConversationStreamer) {
-				s.RegisterMessageParser("error-provider", func(_ json.RawMessage, _ map[string]tools.StructuredToolResult) ([]StreamableMessage, error) {
+				s.RegisterMessageParser("error-provider", func(_ json.RawMessage, _ map[string]any, _ map[string]tools.StructuredToolResult) ([]StreamableMessage, error) {
 					return nil, fmt.Errorf("parser error")
 				})
 			},
@@ -239,6 +242,7 @@ func TestStreamNewMessagesSince(t *testing.T) {
 		conversation: &GetConversationResponse{
 			ID:       "test-conv",
 			Provider: "test-provider",
+			Metadata: map[string]any{},
 		},
 	}
 
@@ -253,7 +257,7 @@ func TestStreamNewMessagesSince(t *testing.T) {
 		{Kind: "text", Role: "user", Content: "Message 5"},
 	}
 
-	streamer.RegisterMessageParser("test-provider", func(_ json.RawMessage, _ map[string]tools.StructuredToolResult) ([]StreamableMessage, error) {
+	streamer.RegisterMessageParser("test-provider", func(_ json.RawMessage, _ map[string]any, _ map[string]tools.StructuredToolResult) ([]StreamableMessage, error) {
 		return allMessages, nil
 	})
 
@@ -379,13 +383,14 @@ func TestStreamLiveUpdates_HistoryOnly(t *testing.T) {
 			ID:          "test-conv-history",
 			Provider:    "test-provider",
 			RawMessages: rawMessages,
+			Metadata:    map[string]any{},
 			ToolResults: toolResults,
 			UpdatedAt:   time.Now(),
 		},
 	}
 
 	streamer := NewConversationStreamer(service)
-	streamer.RegisterMessageParser("test-provider", func(_ json.RawMessage, _ map[string]tools.StructuredToolResult) ([]StreamableMessage, error) {
+	streamer.RegisterMessageParser("test-provider", func(_ json.RawMessage, _ map[string]any, _ map[string]tools.StructuredToolResult) ([]StreamableMessage, error) {
 		return []StreamableMessage{
 			{Kind: "text", Role: "user", Content: "Hello"},
 			{Kind: "text", Role: "assistant", Content: "Hi there"},

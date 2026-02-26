@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -246,6 +247,10 @@ func TestGetPresetBaseURL(t *testing.T) {
 			expected: "https://api.x.ai/v1",
 		},
 		{
+			preset:   "codex",
+			expected: "https://chatgpt.com/backend-api/codex",
+		},
+		{
 			preset:   "unknown-preset",
 			expected: "",
 		},
@@ -275,6 +280,10 @@ func TestGetPresetAPIKeyEnvVar(t *testing.T) {
 		{
 			preset:   "xai",
 			expected: "XAI_API_KEY",
+		},
+		{
+			preset:   "codex",
+			expected: "OPENAI_API_KEY",
 		},
 		{
 			preset:   "unknown-preset",
@@ -320,6 +329,17 @@ func TestGetAPIKeyEnvVar(t *testing.T) {
 			expected: "OPENAI_API_KEY",
 		},
 		{
+			name: "platform openai uses OPENAI_API_KEY",
+			config: llmtypes.Config{
+				Provider: "openai",
+				Model:    "gpt-4.1",
+				OpenAI: &llmtypes.OpenAIConfig{
+					Platform: "openai",
+				},
+			},
+			expected: "OPENAI_API_KEY",
+		},
+		{
 			name: "xai preset uses XAI_API_KEY",
 			config: llmtypes.Config{
 				Provider: "openai",
@@ -354,6 +374,29 @@ func TestGetAPIKeyEnvVar(t *testing.T) {
 			expected: "MY_CUSTOM_XAI_KEY",
 		},
 		{
+			name: "custom api_key_env_var overrides platform",
+			config: llmtypes.Config{
+				Provider: "openai",
+				Model:    "grok-3",
+				OpenAI: &llmtypes.OpenAIConfig{
+					Platform:     "xai",
+					APIKeyEnvVar: "MY_CUSTOM_XAI_KEY",
+				},
+			},
+			expected: "MY_CUSTOM_XAI_KEY",
+		},
+		{
+			name: "codex preset uses OPENAI_API_KEY",
+			config: llmtypes.Config{
+				Provider: "openai",
+				Model:    "gpt-5.2-codex",
+				OpenAI: &llmtypes.OpenAIConfig{
+					Preset: "codex",
+				},
+			},
+			expected: "OPENAI_API_KEY",
+		},
+		{
 			name: "unknown preset falls back to OPENAI_API_KEY",
 			config: llmtypes.Config{
 				Provider: "openai",
@@ -363,6 +406,17 @@ func TestGetAPIKeyEnvVar(t *testing.T) {
 				},
 			},
 			expected: "OPENAI_API_KEY",
+		},
+		{
+			name: "platform xai uses XAI_API_KEY",
+			config: llmtypes.Config{
+				Provider: "openai",
+				Model:    "grok-3",
+				OpenAI: &llmtypes.OpenAIConfig{
+					Platform: "xai",
+				},
+			},
+			expected: "XAI_API_KEY",
 		},
 		{
 			name: "empty preset with no custom env var falls back to OPENAI_API_KEY",
@@ -381,6 +435,132 @@ func TestGetAPIKeyEnvVar(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result := GetAPIKeyEnvVar(tt.config)
 			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestResolveAPIMode(t *testing.T) {
+	resetEnv := func() {
+		os.Unsetenv("KODELET_OPENAI_API_MODE")
+		os.Unsetenv("KODELET_OPENAI_USE_RESPONSES_API")
+	}
+	resetEnv()
+	defer resetEnv()
+
+	trueValue := true
+	falseValue := false
+
+	tests := []struct {
+		name     string
+		config   llmtypes.Config
+		envMode  string
+		envBool  string
+		expected llmtypes.OpenAIAPIMode
+	}{
+		{
+			name:     "default is chat completions",
+			config:   llmtypes.Config{},
+			expected: llmtypes.OpenAIAPIModeChatCompletions,
+		},
+		{
+			name:     "api_mode responses",
+			config:   llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{APIMode: llmtypes.OpenAIAPIModeResponses}},
+			expected: llmtypes.OpenAIAPIModeResponses,
+		},
+		{
+			name:     "legacy responses_api true",
+			config:   llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{ResponsesAPI: &trueValue}},
+			expected: llmtypes.OpenAIAPIModeResponses,
+		},
+		{
+			name:     "legacy responses_api false",
+			config:   llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{ResponsesAPI: &falseValue}},
+			expected: llmtypes.OpenAIAPIModeChatCompletions,
+		},
+		{
+			name:     "legacy use_responses_api true",
+			config:   llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{UseResponsesAPI: true}},
+			expected: llmtypes.OpenAIAPIModeResponses,
+		},
+		{
+			name:     "env api mode overrides config",
+			config:   llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{APIMode: llmtypes.OpenAIAPIModeChatCompletions}},
+			envMode:  "responses",
+			expected: llmtypes.OpenAIAPIModeResponses,
+		},
+		{
+			name:     "legacy env bool true",
+			config:   llmtypes.Config{},
+			envBool:  "true",
+			expected: llmtypes.OpenAIAPIModeResponses,
+		},
+		{
+			name:     "platform codex always responses",
+			config:   llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{Platform: "codex"}},
+			expected: llmtypes.OpenAIAPIModeResponses,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resetEnv()
+			if tt.envMode != "" {
+				os.Setenv("KODELET_OPENAI_API_MODE", tt.envMode)
+			}
+			if tt.envBool != "" {
+				os.Setenv("KODELET_OPENAI_USE_RESPONSES_API", tt.envBool)
+			}
+
+			assert.Equal(t, tt.expected, resolveAPIMode(tt.config))
+		})
+	}
+}
+
+func TestGetBaseURL(t *testing.T) {
+	os.Unsetenv("OPENAI_API_BASE")
+	defer os.Unsetenv("OPENAI_API_BASE")
+
+	tests := []struct {
+		name     string
+		config   llmtypes.Config
+		envBase  string
+		expected string
+	}{
+		{
+			name:     "default openai base",
+			config:   llmtypes.Config{},
+			expected: "https://api.openai.com/v1",
+		},
+		{
+			name:     "xai platform base",
+			config:   llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{Platform: "xai"}},
+			expected: "https://api.x.ai/v1",
+		},
+		{
+			name:     "codex platform base",
+			config:   llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{Platform: "codex"}},
+			expected: "https://chatgpt.com/backend-api/codex",
+		},
+		{
+			name:     "custom base overrides platform",
+			config:   llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{Platform: "xai", BaseURL: "https://custom.example/v1"}},
+			expected: "https://custom.example/v1",
+		},
+		{
+			name:     "env base overrides everything",
+			config:   llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{BaseURL: "https://custom.example/v1"}},
+			envBase:  "https://env.example/v1",
+			expected: "https://env.example/v1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			os.Unsetenv("OPENAI_API_BASE")
+			if tt.envBase != "" {
+				os.Setenv("OPENAI_API_BASE", tt.envBase)
+			}
+			assert.Equal(t, tt.expected, GetBaseURL(tt.config))
 		})
 	}
 }
@@ -414,6 +594,54 @@ func TestValidateCustomConfiguration(t *testing.T) {
 				},
 			},
 			expectError: false,
+		},
+		{
+			name: "valid preset codex",
+			config: llmtypes.Config{
+				OpenAI: &llmtypes.OpenAIConfig{
+					Preset: "codex",
+				},
+			},
+			expectError: false,
+		},
+		{
+			name: "valid platform without preset",
+			config: llmtypes.Config{
+				OpenAI: &llmtypes.OpenAIConfig{
+					Platform: "fireworks",
+				},
+			},
+			expectError: false,
+		},
+		{
+			name: "platform and preset conflict",
+			config: llmtypes.Config{
+				OpenAI: &llmtypes.OpenAIConfig{
+					Platform: "openai",
+					Preset:   "xai",
+				},
+			},
+			expectError:   true,
+			errorContains: "conflict",
+		},
+		{
+			name: "valid api mode",
+			config: llmtypes.Config{
+				OpenAI: &llmtypes.OpenAIConfig{
+					APIMode: llmtypes.OpenAIAPIModeResponses,
+				},
+			},
+			expectError: false,
+		},
+		{
+			name: "invalid api mode",
+			config: llmtypes.Config{
+				OpenAI: &llmtypes.OpenAIConfig{
+					APIMode: "bad-mode",
+				},
+			},
+			expectError:   true,
+			errorContains: "invalid api_mode",
 		},
 		{
 			name: "invalid preset",
