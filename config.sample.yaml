@@ -180,9 +180,13 @@ allowed_domains_file: "~/.kodelet/allowed_domains.txt"
 # Tool Configuration
 # Tools allowed for main agent (empty means use defaults)
 # Meta tools (file_read, grep_tool, glob_tool, thinking) are always enabled for basic functionality
-# Available tools: bash, file_read, file_write, file_edit, thinking, subagent, grep_tool,
+# Available tools: bash, apply_patch, file_read, file_write, file_edit, thinking, subagent, grep_tool,
 #                  glob_tool, todo_read, todo_write, web_fetch, image_recognition,
 #                  view_background_processes
+# Enable apply_patch-first mode. When true, file_write and file_edit are removed from
+# both main-agent and subagent toolsets, and apply_patch is ensured.
+apply_patch_enabled: false
+
 allowed_tools: []
 # allowed_tools:
 #   - "bash"

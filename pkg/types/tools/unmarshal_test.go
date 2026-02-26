@@ -85,7 +85,7 @@ func TestUnmarshalJSON_SimplifiedRegistry(t *testing.T) {
 func TestMetadataTypeRegistry_Completeness(t *testing.T) {
 	// Test that the registry contains all expected metadata types
 	expectedTypes := []string{
-		"file_read", "file_write", "file_edit",
+		"file_read", "file_write", "file_edit", "apply_patch",
 		"grep_tool", "glob_tool", "bash", "bash_background", "mcp_tool", "todo",
 		"image_recognition", "subagent",
 		"web_fetch", "view_background_processes", "custom_tool",

@@ -214,6 +214,29 @@ func (h *ACPMessageHandler) extractLocations(result tooltypes.ToolResult) []Tool
 			}
 			return []ToolCallLocation{loc}
 		}
+	case "apply_patch":
+		var meta tooltypes.ApplyPatchMetadata
+		if tooltypes.ExtractMetadata(structured.Metadata, &meta) {
+			locations := make([]ToolCallLocation, 0, len(meta.Changes))
+			seen := make(map[string]struct{})
+			for _, change := range meta.Changes {
+				locationPath := change.Path
+				if change.MovePath != "" {
+					locationPath = change.MovePath
+				}
+				if locationPath == "" {
+					continue
+				}
+				if _, ok := seen[locationPath]; ok {
+					continue
+				}
+				seen[locationPath] = struct{}{}
+				locations = append(locations, ToolCallLocation{Path: locationPath})
+			}
+			if len(locations) > 0 {
+				return locations
+			}
+		}
 	case "bash":
 		var meta tooltypes.BashMetadata
 		if tooltypes.ExtractMetadata(structured.Metadata, &meta) && meta.WorkingDir != "" {
@@ -251,6 +274,10 @@ func (h *ACPMessageHandler) extractLocationsFromInput(toolName string, input str
 		}
 	case "file_edit":
 		if path, ok := params["file_path"].(string); ok && path != "" {
+			return []ToolCallLocation{{Path: path}}
+		}
+	case "apply_patch":
+		if path := extractFirstApplyPatchPath(params); path != "" {
 			return []ToolCallLocation{{Path: path}}
 		}
 	}
@@ -302,6 +329,8 @@ func ToACPToolKind(toolName string) acptypes.ToolKind {
 	case "file_read", "grep_tool", "glob_tool":
 		return acptypes.ToolKindRead
 	case "file_write", "file_edit":
+		return acptypes.ToolKindEdit
+	case "apply_patch":
 		return acptypes.ToolKindEdit
 	case "web_fetch":
 		return acptypes.ToolKindFetch
@@ -375,6 +404,12 @@ func (g *DefaultTitleGenerator) GenerateTitle(toolName string, input string) str
 		if path, ok := params["file_path"].(string); ok {
 			title = fmt.Sprintf("Edit: %s", path)
 		}
+	case "apply_patch":
+		if path := extractFirstApplyPatchPath(params); path != "" {
+			title = fmt.Sprintf("Patch: %s", path)
+		} else {
+			title = "Apply patch"
+		}
 	case "bash":
 		if cmd, ok := params["command"].(string); ok {
 			escaped := strings.ReplaceAll(cmd, "`", "\\`")
@@ -413,4 +448,26 @@ func (g *DefaultTitleGenerator) GenerateTitle(toolName string, input string) str
 	}
 
 	return title
+}
+
+func extractFirstApplyPatchPath(params map[string]any) string {
+	rawInput, ok := params["input"].(string)
+	if !ok || rawInput == "" {
+		return ""
+	}
+
+	lines := strings.Split(rawInput, "\n")
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(trimmed, "*** Add File: "):
+			return strings.TrimSpace(strings.TrimPrefix(trimmed, "*** Add File: "))
+		case strings.HasPrefix(trimmed, "*** Delete File: "):
+			return strings.TrimSpace(strings.TrimPrefix(trimmed, "*** Delete File: "))
+		case strings.HasPrefix(trimmed, "*** Update File: "):
+			return strings.TrimSpace(strings.TrimPrefix(trimmed, "*** Update File: "))
+		}
+	}
+
+	return ""
 }

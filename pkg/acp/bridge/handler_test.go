@@ -140,6 +140,7 @@ func TestToACPToolKind(t *testing.T) {
 		{"glob_tool", acptypes.ToolKindRead},
 		{"file_write", acptypes.ToolKindEdit},
 		{"file_edit", acptypes.ToolKindEdit},
+		{"apply_patch", acptypes.ToolKindEdit},
 		{"bash", acptypes.ToolKindOther},           // Currently mapped to other
 		{"code_execution", acptypes.ToolKindOther}, // Currently mapped to other
 		{"web_fetch", acptypes.ToolKindFetch},
@@ -290,6 +291,12 @@ func TestDefaultTitleGenerator_Grep(t *testing.T) {
 	assert.Equal(t, "Grep: func main", title)
 }
 
+func TestDefaultTitleGenerator_ApplyPatch(t *testing.T) {
+	gen := &DefaultTitleGenerator{}
+	title := gen.GenerateTitle("apply_patch", `{"input":"*** Begin Patch\n*** Update File: /tmp/foo.txt\n@@\n-old\n+new\n*** End Patch"}`)
+	assert.Equal(t, "Patch: /tmp/foo.txt", title)
+}
+
 func TestDefaultTitleGenerator_InvalidJSON(t *testing.T) {
 	gen := &DefaultTitleGenerator{}
 	title := gen.GenerateTitle("file_read", "not json")
@@ -335,6 +342,13 @@ func TestACPMessageHandler_HandleToolUse_FollowTheAgent(t *testing.T) {
 			name:         "file_edit with path",
 			toolName:     "file_edit",
 			input:        `{"file_path": "/home/user/edit.go", "old_text": "old", "new_text": "new"}`,
+			expectedPath: "/home/user/edit.go",
+			expectedLine: 0,
+		},
+		{
+			name:         "apply_patch with patch input",
+			toolName:     "apply_patch",
+			input:        `{"input":"*** Begin Patch\n*** Update File: /home/user/edit.go\n@@\n-old\n+new\n*** End Patch"}`,
 			expectedPath: "/home/user/edit.go",
 			expectedLine: 0,
 		},
@@ -410,6 +424,13 @@ func TestExtractLocationsFromInput(t *testing.T) {
 			expectedLine: 0,
 		},
 		{
+			name:         "apply_patch",
+			toolName:     "apply_patch",
+			input:        `{"input":"*** Begin Patch\n*** Add File: /path/to/new.txt\n+hello\n*** End Patch"}`,
+			expectedPath: "/path/to/new.txt",
+			expectedLine: 0,
+		},
+		{
 			name:      "unknown tool",
 			toolName:  "bash",
 			input:     `{"command": "ls"}`,
@@ -453,6 +474,29 @@ func TestExtractLocationsFromInput(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestExtractLocations_ApplyPatchPrefersMovePath(t *testing.T) {
+	handler := NewACPMessageHandler(&mockSender{}, "test-session")
+
+	result := &mockApplyPatchToolResult{
+		changes: []tooltypes.ApplyPatchChange{
+			{
+				Path:      "/repo/old.go",
+				MovePath:  "/repo/new.go",
+				Operation: tooltypes.ApplyPatchOperationUpdate,
+			},
+			{
+				Path:      "/repo/old.go",
+				MovePath:  "/repo/new.go",
+				Operation: tooltypes.ApplyPatchOperationUpdate,
+			},
+		},
+	}
+
+	locations := handler.extractLocations(result)
+	assert.Len(t, locations, 1)
+	assert.Equal(t, "/repo/new.go", locations[0].Path)
 }
 
 func TestACPMessageHandler_MaybeSendPlanUpdate(t *testing.T) {
@@ -573,5 +617,23 @@ func (m *mockNonTodoToolResult) StructuredData() tooltypes.StructuredToolResult 
 	return tooltypes.StructuredToolResult{
 		ToolName: m.toolName,
 		Success:  true,
+	}
+}
+
+type mockApplyPatchToolResult struct {
+	changes []tooltypes.ApplyPatchChange
+}
+
+func (m *mockApplyPatchToolResult) AssistantFacing() string { return "" }
+func (m *mockApplyPatchToolResult) IsError() bool           { return false }
+func (m *mockApplyPatchToolResult) GetError() string        { return "" }
+func (m *mockApplyPatchToolResult) GetResult() string       { return "" }
+func (m *mockApplyPatchToolResult) StructuredData() tooltypes.StructuredToolResult {
+	return tooltypes.StructuredToolResult{
+		ToolName: "apply_patch",
+		Success:  true,
+		Metadata: &tooltypes.ApplyPatchMetadata{
+			Changes: m.changes,
+		},
 	}
 }

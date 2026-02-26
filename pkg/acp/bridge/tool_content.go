@@ -35,6 +35,8 @@ func (g *ToolContentGenerator) GenerateToolContent(result tooltypes.ToolResult) 
 		return g.generateFileWriteContent(structured)
 	case "file_edit":
 		return g.generateFileEditContent(structured)
+	case "apply_patch":
+		return g.generateApplyPatchContent(structured)
 	case "subagent":
 		return g.generateSubAgentContent(structured)
 	case "grep_tool", "glob_tool":
@@ -264,6 +266,55 @@ func (g *ToolContentGenerator) generateFileEditContent(structured tooltypes.Stru
 				"text": fmt.Sprintf("Replaced %d occurrences", meta.ReplacedCount),
 			},
 		})
+	}
+
+	return content
+}
+
+// generateApplyPatchContent generates content for apply_patch results using diff type.
+func (g *ToolContentGenerator) generateApplyPatchContent(structured tooltypes.StructuredToolResult) []map[string]any {
+	var meta tooltypes.ApplyPatchMetadata
+	if !tooltypes.ExtractMetadata(structured.Metadata, &meta) {
+		return g.generateTextContent(structured.Error)
+	}
+
+	if structured.Error != "" {
+		return g.generateTextContent(structured.Error)
+	}
+
+	content := make([]map[string]any, 0, len(meta.Changes)+1)
+	for _, change := range meta.Changes {
+		switch change.Operation {
+		case tooltypes.ApplyPatchOperationAdd:
+			content = append(content, map[string]any{
+				"type":    ToolCallContentTypeDiff,
+				"path":    change.Path,
+				"oldText": nil,
+				"newText": change.NewContent,
+			})
+		case tooltypes.ApplyPatchOperationDelete:
+			content = append(content, map[string]any{
+				"type":    ToolCallContentTypeDiff,
+				"path":    change.Path,
+				"oldText": change.OldContent,
+				"newText": nil,
+			})
+		case tooltypes.ApplyPatchOperationUpdate:
+			path := change.Path
+			if change.MovePath != "" {
+				path = change.MovePath
+			}
+			content = append(content, map[string]any{
+				"type":    ToolCallContentTypeDiff,
+				"path":    path,
+				"oldText": change.OldContent,
+				"newText": change.NewContent,
+			})
+		}
+	}
+
+	if len(content) == 0 {
+		return g.generateTextContent("No files were modified.")
 	}
 
 	return content

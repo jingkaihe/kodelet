@@ -3,6 +3,7 @@ package renderers
 import (
 	"bytes"
 	"fmt"
+	"strings"
 
 	"github.com/aymanbagabas/go-udiff"
 	"github.com/jingkaihe/kodelet/pkg/osutil"
@@ -99,4 +100,50 @@ func (r *FileEditRenderer) RenderCLI(result tools.StructuredToolResult) string {
 	}
 
 	return output.String()
+}
+
+// ApplyPatchRenderer renders apply_patch results.
+type ApplyPatchRenderer struct{}
+
+// RenderCLI renders apply_patch results with a summary and unified diffs.
+func (r *ApplyPatchRenderer) RenderCLI(result tools.StructuredToolResult) string {
+	if !result.Success {
+		return fmt.Sprintf("Error: %s", result.Error)
+	}
+
+	var meta tools.ApplyPatchMetadata
+	if !tools.ExtractMetadata(result.Metadata, &meta) {
+		return "Error: Invalid metadata type for apply_patch"
+	}
+
+	var output bytes.Buffer
+	output.WriteString("Success. Updated the following files:\n")
+	for _, path := range meta.Added {
+		fmt.Fprintf(&output, "A %s\n", path)
+	}
+	for _, path := range meta.Modified {
+		fmt.Fprintf(&output, "M %s\n", path)
+	}
+	for _, path := range meta.Deleted {
+		fmt.Fprintf(&output, "D %s\n", path)
+	}
+
+	for _, change := range meta.Changes {
+		if change.Operation == tools.ApplyPatchOperationUpdate && change.UnifiedDiff != "" {
+			output.WriteString("\n")
+			output.WriteString(change.UnifiedDiff)
+		}
+		if change.Operation == tools.ApplyPatchOperationAdd && change.NewContent != "" {
+			output.WriteString("\n")
+			diff := udiff.Unified(change.Path, change.Path, "", change.NewContent)
+			output.WriteString(diff)
+		}
+		if change.Operation == tools.ApplyPatchOperationDelete && change.OldContent != "" {
+			output.WriteString("\n")
+			diff := udiff.Unified(change.Path, change.Path, change.OldContent, "")
+			output.WriteString(diff)
+		}
+	}
+
+	return strings.TrimSuffix(output.String(), "\n")
 }

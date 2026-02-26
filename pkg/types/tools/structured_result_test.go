@@ -590,6 +590,7 @@ func TestExtractMetadata_AllTypes(t *testing.T) {
 		{"FileReadMetadata", FileReadMetadata{FilePath: "/test"}, &FileReadMetadata{}},
 		{"FileWriteMetadata", FileWriteMetadata{FilePath: "/test"}, &FileWriteMetadata{}},
 		{"FileEditMetadata", FileEditMetadata{FilePath: "/test"}, &FileEditMetadata{}},
+		{"ApplyPatchMetadata", ApplyPatchMetadata{Changes: []ApplyPatchChange{{Path: "/test", Operation: ApplyPatchOperationUpdate}}}, &ApplyPatchMetadata{}},
 
 		{"BashMetadata", BashMetadata{Command: "test"}, &BashMetadata{}},
 		{"BackgroundBashMetadata", BackgroundBashMetadata{Command: "test", PID: 1234, LogPath: "/tmp/log.txt"}, &BackgroundBashMetadata{}},

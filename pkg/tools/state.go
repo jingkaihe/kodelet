@@ -103,7 +103,9 @@ func NewBasicState(ctx context.Context, opts ...BasicStateOption) *BasicState {
 		if state.llmConfig.AllowedTools != nil {
 			allowedTools = state.llmConfig.AllowedTools
 		}
+		allowedTools = enforceApplyPatchMode(allowedTools, state.llmConfig.ApplyPatchEnabled, defaultMainTools)
 		state.tools = GetMainTools(ctx, allowedTools, state.llmConfig.EnableTodos)
+		state.tools = enforceApplyPatchModeOnResolvedTools(state.tools, allowedTools, state.llmConfig.ApplyPatchEnabled)
 		state.configureTools()
 	}
 
@@ -118,7 +120,9 @@ func WithSubAgentToolsFromConfig() BasicStateOption {
 		if s.llmConfig.AllowedTools != nil {
 			allowedTools = s.llmConfig.AllowedTools
 		}
+		allowedTools = enforceApplyPatchMode(allowedTools, s.llmConfig.ApplyPatchEnabled, defaultSubAgentTools)
 		s.tools = GetSubAgentTools(ctx, allowedTools)
+		s.tools = enforceApplyPatchModeOnResolvedTools(s.tools, allowedTools, s.llmConfig.ApplyPatchEnabled)
 		s.configureTools()
 		return nil
 	}
@@ -131,7 +135,9 @@ func WithMainTools() BasicStateOption {
 		if s.llmConfig.AllowedTools != nil {
 			allowedTools = s.llmConfig.AllowedTools
 		}
+		allowedTools = enforceApplyPatchMode(allowedTools, s.llmConfig.ApplyPatchEnabled, defaultMainTools)
 		s.tools = GetMainTools(ctx, allowedTools, s.llmConfig.EnableTodos)
+		s.tools = enforceApplyPatchModeOnResolvedTools(s.tools, allowedTools, s.llmConfig.ApplyPatchEnabled)
 		if s.llmConfig.DisableSubagent {
 			s.tools = filterOutSubagent(s.tools)
 		}
@@ -262,6 +268,68 @@ func discoverWorkflows(ctx context.Context) map[string]*fragments.Fragment {
 
 	logger.G(ctx).WithField("count", len(workflows)).Debug("Discovered workflows for subagent")
 	return workflows
+}
+
+func enforceApplyPatchMode(allowedTools []string, applyPatchEnabled bool, defaultTools []string) []string {
+	if !applyPatchEnabled {
+		return allowedTools
+	}
+	if len(allowedTools) == 1 && allowedTools[0] == NoToolsMarker {
+		return allowedTools
+	}
+
+	baseTools := allowedTools
+	if len(baseTools) == 0 {
+		baseTools = append([]string{}, defaultTools...)
+	}
+
+	filteredTools := make([]string, 0, len(baseTools))
+	seen := make(map[string]struct{})
+	for _, tool := range baseTools {
+		if tool == "file_write" || tool == "file_edit" {
+			continue
+		}
+		if _, exists := seen[tool]; exists {
+			continue
+		}
+		seen[tool] = struct{}{}
+		filteredTools = append(filteredTools, tool)
+	}
+
+	if _, exists := seen["apply_patch"]; !exists {
+		filteredTools = append(filteredTools, "apply_patch")
+	}
+
+	return filteredTools
+}
+
+func enforceApplyPatchModeOnResolvedTools(tools []tooltypes.Tool, allowedTools []string, applyPatchEnabled bool) []tooltypes.Tool {
+	if !applyPatchEnabled {
+		return tools
+	}
+	if len(allowedTools) == 1 && allowedTools[0] == NoToolsMarker {
+		return tools
+	}
+
+	filteredTools := make([]tooltypes.Tool, 0, len(tools))
+	hasApplyPatch := false
+	for _, tool := range tools {
+		switch tool.Name() {
+		case "file_write", "file_edit":
+			continue
+		case "apply_patch":
+			hasApplyPatch = true
+		}
+		filteredTools = append(filteredTools, tool)
+	}
+
+	if !hasApplyPatch {
+		if applyPatchTool, exists := toolRegistry["apply_patch"]; exists {
+			filteredTools = append(filteredTools, applyPatchTool)
+		}
+	}
+
+	return filteredTools
 }
 
 // TodoFilePath returns the path to the todo file

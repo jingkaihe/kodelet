@@ -1,6 +1,8 @@
 # Kodelet
 
-## Unreleased
+## 0.2.27.beta (2026-02-26)
+
+- Added first-class `apply_patch` tool support (backend + web UI rendering), including structured patch parsing and ACP bridge integration.
 
 ## 0.2.26.beta (2026-02-26)
 

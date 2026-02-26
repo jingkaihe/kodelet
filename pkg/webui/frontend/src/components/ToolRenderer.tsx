@@ -3,6 +3,7 @@ import { ToolResult } from '../types';
 import FileReadRenderer from './tool-renderers/FileReadRenderer';
 import FileWriteRenderer from './tool-renderers/FileWriteRenderer';
 import FileEditRenderer from './tool-renderers/FileEditRenderer';
+import ApplyPatchRenderer from './tool-renderers/ApplyPatchRenderer';
 import BashRenderer from './tool-renderers/BashRenderer';
 import GrepRenderer from './tool-renderers/GrepRenderer';
 import GlobRenderer from './tool-renderers/GlobRenderer';
@@ -55,6 +56,8 @@ const ToolRenderer: React.FC<ToolRendererProps> = ({ toolResult }) => {
         return <FileWriteRenderer toolResult={toolResult} />;
       case 'file_edit':
         return <FileEditRenderer toolResult={toolResult} />;
+      case 'apply_patch':
+        return <ApplyPatchRenderer toolResult={toolResult} />;
       case 'bash':
         return <BashRenderer toolResult={toolResult} />;
       case 'grep_tool':

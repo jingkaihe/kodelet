@@ -32,7 +32,7 @@ export interface ToolResult {
   toolName: string;
   success: boolean;
   error?: string;
-  metadata?: FileMetadata | BashMetadata | GrepMetadata | GlobMetadata | WebFetchMetadata | ThinkingMetadata | TodoMetadata | SubagentMetadata | BatchMetadata | ImageRecognitionMetadata | BrowserMetadata | BackgroundProcessMetadata | SkillMetadata | Record<string, unknown>;
+  metadata?: FileMetadata | ApplyPatchMetadata | BashMetadata | GrepMetadata | GlobMetadata | WebFetchMetadata | ThinkingMetadata | TodoMetadata | SubagentMetadata | BatchMetadata | ImageRecognitionMetadata | BrowserMetadata | BackgroundProcessMetadata | SkillMetadata | Record<string, unknown>;
   timestamp?: string;
 }
 
@@ -120,6 +120,22 @@ export interface FileMetadata {
   totalLines?: number;
   remainingLines?: number;
   truncated?: boolean;
+}
+
+export interface ApplyPatchMetadata {
+  changes: ApplyPatchChange[];
+  added?: string[];
+  modified?: string[];
+  deleted?: string[];
+}
+
+export interface ApplyPatchChange {
+  path: string;
+  operation: 'add' | 'delete' | 'update' | string;
+  oldContent?: string;
+  newContent?: string;
+  unifiedDiff?: string;
+  movePath?: string;
 }
 
 export interface BashMetadata {

@@ -121,12 +121,14 @@ profiles:
             - file_read
             - glob_tool
             - grep_tool
+        apply_patch_enabled: true
         model: gpt-5.2-codex
         openai:
             use_responses_api: true
         provider: openai
         reasoning_effort: high
     openai:
+        apply_patch_enabled: true
         max_tokens: 16000
         model: gpt-5.2-codex
         openai:
