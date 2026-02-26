@@ -31,6 +31,7 @@ func GenerateSchema[T any]() *jsonschema.Schema {
 // toolRegistry holds all available tools mapped by their names
 var toolRegistry = map[string]tooltypes.Tool{
 	"bash":                      &BashTool{},
+	"apply_patch":               &ApplyPatchTool{},
 	"file_read":                 &FileReadTool{},
 	"file_write":                &FileWriteTool{},
 	"file_edit":                 &FileEditTool{},
@@ -58,6 +59,7 @@ var metaTools = []string{
 // defaultMainTools are the default tools for main agent
 var defaultMainTools = []string{
 	"bash",
+	"apply_patch",
 	"file_read",
 	"file_write",
 	"file_edit",
@@ -78,6 +80,7 @@ var todoTools = []string{
 // defaultSubAgentTools are the default tools for subagent
 var defaultSubAgentTools = []string{
 	"bash",
+	"apply_patch",
 	"file_read",
 	"file_write",
 	"file_edit",

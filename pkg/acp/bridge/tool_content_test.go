@@ -381,6 +381,59 @@ func TestToolContentGenerator_GenerateFileEditContent(t *testing.T) {
 	})
 }
 
+func TestToolContentGenerator_GenerateApplyPatchContent(t *testing.T) {
+	gen := &ToolContentGenerator{}
+
+	t.Run("multiple changes", func(t *testing.T) {
+		result := &mockToolResult{
+			result: "Success. Updated the following files:\nA /tmp/new.txt\nM /tmp/edit.go\nD /tmp/old.txt",
+			structuredData: tooltypes.StructuredToolResult{
+				ToolName:  "apply_patch",
+				Success:   true,
+				Timestamp: time.Now(),
+				Metadata: &tooltypes.ApplyPatchMetadata{
+					Changes: []tooltypes.ApplyPatchChange{
+						{
+							Path:       "/tmp/new.txt",
+							Operation:  tooltypes.ApplyPatchOperationAdd,
+							NewContent: "hello\n",
+						},
+						{
+							Path:       "/tmp/edit.go",
+							Operation:  tooltypes.ApplyPatchOperationUpdate,
+							OldContent: "old\n",
+							NewContent: "new\n",
+						},
+						{
+							Path:       "/tmp/old.txt",
+							Operation:  tooltypes.ApplyPatchOperationDelete,
+							OldContent: "bye\n",
+						},
+					},
+				},
+			},
+		}
+
+		content := gen.GenerateToolContent(result)
+		require.Len(t, content, 3)
+
+		assert.Equal(t, ToolCallContentTypeDiff, content[0]["type"])
+		assert.Equal(t, "/tmp/new.txt", content[0]["path"])
+		assert.Nil(t, content[0]["oldText"])
+		assert.Equal(t, "hello\n", content[0]["newText"])
+
+		assert.Equal(t, ToolCallContentTypeDiff, content[1]["type"])
+		assert.Equal(t, "/tmp/edit.go", content[1]["path"])
+		assert.Equal(t, "old\n", content[1]["oldText"])
+		assert.Equal(t, "new\n", content[1]["newText"])
+
+		assert.Equal(t, ToolCallContentTypeDiff, content[2]["type"])
+		assert.Equal(t, "/tmp/old.txt", content[2]["path"])
+		assert.Equal(t, "bye\n", content[2]["oldText"])
+		assert.Nil(t, content[2]["newText"])
+	})
+}
+
 func TestToolContentGenerator_GenerateSubAgentContent(t *testing.T) {
 	gen := &ToolContentGenerator{}
 

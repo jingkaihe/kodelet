@@ -228,3 +228,58 @@ func TestFileEditRenderer(t *testing.T) {
 		assert.Contains(t, output, "/test/file.go", "Expected file path in output")
 	})
 }
+
+func TestApplyPatchRenderer(t *testing.T) {
+	renderer := &ApplyPatchRenderer{}
+
+	t.Run("successful apply patch", func(t *testing.T) {
+		result := tools.StructuredToolResult{
+			ToolName:  "apply_patch",
+			Success:   true,
+			Timestamp: time.Now(),
+			Metadata: &tools.ApplyPatchMetadata{
+				Added:    []string{"/tmp/new.txt"},
+				Modified: []string{"/tmp/edit.go"},
+				Deleted:  []string{"/tmp/old.txt"},
+				Changes: []tools.ApplyPatchChange{
+					{
+						Path:       "/tmp/new.txt",
+						Operation:  tools.ApplyPatchOperationAdd,
+						NewContent: "hello\n",
+					},
+					{
+						Path:        "/tmp/edit.go",
+						Operation:   tools.ApplyPatchOperationUpdate,
+						OldContent:  "old\n",
+						NewContent:  "new\n",
+						UnifiedDiff: "@@ -1 +1 @@\n-old\n+new\n",
+					},
+					{
+						Path:       "/tmp/old.txt",
+						Operation:  tools.ApplyPatchOperationDelete,
+						OldContent: "bye\n",
+					},
+				},
+			},
+		}
+
+		output := renderer.RenderCLI(result)
+		assert.Contains(t, output, "Success. Updated the following files:")
+		assert.Contains(t, output, "A /tmp/new.txt")
+		assert.Contains(t, output, "M /tmp/edit.go")
+		assert.Contains(t, output, "D /tmp/old.txt")
+		assert.Contains(t, output, "@@ -1 +1 @@")
+	})
+
+	t.Run("error", func(t *testing.T) {
+		result := tools.StructuredToolResult{
+			ToolName:  "apply_patch",
+			Success:   false,
+			Error:     "parse error",
+			Timestamp: time.Now(),
+		}
+
+		output := renderer.RenderCLI(result)
+		assert.Contains(t, output, "Error: parse error")
+	})
+}

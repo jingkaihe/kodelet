@@ -53,9 +53,10 @@ func (s StructuredToolResult) MarshalJSON() ([]byte, error) {
 
 // metadataTypeRegistry maps metadata type strings to their corresponding Go types
 var metadataTypeRegistry = map[string]reflect.Type{
-	"file_read":  reflect.TypeOf(FileReadMetadata{}),
-	"file_write": reflect.TypeOf(FileWriteMetadata{}),
-	"file_edit":  reflect.TypeOf(FileEditMetadata{}),
+	"file_read":   reflect.TypeOf(FileReadMetadata{}),
+	"file_write":  reflect.TypeOf(FileWriteMetadata{}),
+	"file_edit":   reflect.TypeOf(FileEditMetadata{}),
+	"apply_patch": reflect.TypeOf(ApplyPatchMetadata{}),
 
 	"grep_tool":       reflect.TypeOf(GrepMetadata{}),
 	"glob_tool":       reflect.TypeOf(GlobMetadata{}),
@@ -160,6 +161,36 @@ type Edit struct {
 
 // ToolType returns the tool type identifier for file edit operations
 func (m FileEditMetadata) ToolType() string { return "file_edit" }
+
+// ApplyPatchMetadata contains metadata about an apply_patch operation.
+type ApplyPatchMetadata struct {
+	Changes  []ApplyPatchChange `json:"changes"`
+	Added    []string           `json:"added,omitempty"`
+	Modified []string           `json:"modified,omitempty"`
+	Deleted  []string           `json:"deleted,omitempty"`
+}
+
+// ApplyPatchChange describes one file-level change from an apply_patch invocation.
+type ApplyPatchChange struct {
+	Path        string `json:"path"`
+	Operation   string `json:"operation"` // add|delete|update
+	OldContent  string `json:"oldContent,omitempty"`
+	NewContent  string `json:"newContent,omitempty"`
+	UnifiedDiff string `json:"unifiedDiff,omitempty"`
+	MovePath    string `json:"movePath,omitempty"`
+}
+
+const (
+	// ApplyPatchOperationAdd indicates a file add operation.
+	ApplyPatchOperationAdd = "add"
+	// ApplyPatchOperationDelete indicates a file delete operation.
+	ApplyPatchOperationDelete = "delete"
+	// ApplyPatchOperationUpdate indicates a file update operation.
+	ApplyPatchOperationUpdate = "update"
+)
+
+// ToolType returns the tool type identifier for apply_patch operations.
+func (m ApplyPatchMetadata) ToolType() string { return "apply_patch" }
 
 // Search tool metadata structures
 

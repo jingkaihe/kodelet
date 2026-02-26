@@ -140,6 +140,7 @@ func TestToACPToolKind(t *testing.T) {
 		{"glob_tool", acptypes.ToolKindRead},
 		{"file_write", acptypes.ToolKindEdit},
 		{"file_edit", acptypes.ToolKindEdit},
+		{"apply_patch", acptypes.ToolKindEdit},
 		{"bash", acptypes.ToolKindOther},           // Currently mapped to other
 		{"code_execution", acptypes.ToolKindOther}, // Currently mapped to other
 		{"web_fetch", acptypes.ToolKindFetch},
@@ -290,6 +291,12 @@ func TestDefaultTitleGenerator_Grep(t *testing.T) {
 	assert.Equal(t, "Grep: func main", title)
 }
 
+func TestDefaultTitleGenerator_ApplyPatch(t *testing.T) {
+	gen := &DefaultTitleGenerator{}
+	title := gen.GenerateTitle("apply_patch", `{"input":"*** Begin Patch\n*** Update File: /tmp/foo.txt\n@@\n-old\n+new\n*** End Patch"}`)
+	assert.Equal(t, "Patch: /tmp/foo.txt", title)
+}
+
 func TestDefaultTitleGenerator_InvalidJSON(t *testing.T) {
 	gen := &DefaultTitleGenerator{}
 	title := gen.GenerateTitle("file_read", "not json")
@@ -335,6 +342,13 @@ func TestACPMessageHandler_HandleToolUse_FollowTheAgent(t *testing.T) {
 			name:         "file_edit with path",
 			toolName:     "file_edit",
 			input:        `{"file_path": "/home/user/edit.go", "old_text": "old", "new_text": "new"}`,
+			expectedPath: "/home/user/edit.go",
+			expectedLine: 0,
+		},
+		{
+			name:         "apply_patch with patch input",
+			toolName:     "apply_patch",
+			input:        `{"input":"*** Begin Patch\n*** Update File: /home/user/edit.go\n@@\n-old\n+new\n*** End Patch"}`,
 			expectedPath: "/home/user/edit.go",
 			expectedLine: 0,
 		},
@@ -407,6 +421,13 @@ func TestExtractLocationsFromInput(t *testing.T) {
 			toolName:     "file_edit",
 			input:        `{"file_path": "/path/to/edit.go", "old_text": "a", "new_text": "b"}`,
 			expectedPath: "/path/to/edit.go",
+			expectedLine: 0,
+		},
+		{
+			name:         "apply_patch",
+			toolName:     "apply_patch",
+			input:        `{"input":"*** Begin Patch\n*** Add File: /path/to/new.txt\n+hello\n*** End Patch"}`,
+			expectedPath: "/path/to/new.txt",
 			expectedLine: 0,
 		},
 		{

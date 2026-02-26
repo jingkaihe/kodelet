@@ -20,6 +20,7 @@ func TestRendererRegistry_ExactMatches(t *testing.T) {
 		{"File Read", "file_read", true, false},
 		{"File Write", "file_write", true, false},
 		{"File Edit", "file_edit", true, false},
+		{"Apply Patch", "apply_patch", true, false},
 		{"Glob", "glob_tool", true, false},
 		{"Grep", "grep_tool", true, false},
 		{"Bash", "bash", true, false},
