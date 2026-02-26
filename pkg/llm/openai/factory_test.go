@@ -111,10 +111,10 @@ func TestShouldUseResponsesAPI(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "preset codex forces responses",
+			name: "platform codex forces responses",
 			config: llmtypes.Config{
 				OpenAI: &llmtypes.OpenAIConfig{
-					Preset: "codex",
+					Platform: "codex",
 				},
 			},
 			want: true,

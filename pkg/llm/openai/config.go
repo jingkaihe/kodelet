@@ -26,24 +26,16 @@ func resolvePlatformName(config llmtypes.Config) string {
 		return platform
 	}
 
-	if preset := normalizePlatformName(config.OpenAI.Preset); preset != "" {
-		return preset
-	}
-
 	return defaultOpenAIPlatform
 }
 
-func resolvePresetForLoading(config llmtypes.Config) string {
+func resolvePlatformForLoading(config llmtypes.Config) string {
 	if config.OpenAI == nil {
 		return defaultOpenAIPlatform
 	}
 
 	if platform := normalizePlatformName(config.OpenAI.Platform); platform != "" {
 		return platform
-	}
-
-	if preset := normalizePlatformName(config.OpenAI.Preset); preset != "" {
-		return preset
 	}
 
 	if config.OpenAI.Models == nil && config.OpenAI.Pricing == nil {
@@ -107,17 +99,17 @@ func resolveAPIMode(config llmtypes.Config) llmtypes.OpenAIAPIMode {
 	return llmtypes.OpenAIAPIModeChatCompletions
 }
 
-// loadCustomConfiguration loads custom models and pricing from configuration
-// It processes presets first, then applies custom overrides if provided
+// loadCustomConfiguration loads custom models and pricing from configuration.
+// It loads platform defaults first, then applies custom overrides if provided.
 func loadCustomConfiguration(config llmtypes.Config) (*llmtypes.CustomModels, llmtypes.CustomPricing) {
 	var models *llmtypes.CustomModels
 	var pricing llmtypes.CustomPricing
 
-	presetName := resolvePresetForLoading(config)
-	if presetName != "" {
-		presetModels, presetPricing := loadPreset(presetName)
-		models = presetModels
-		pricing = presetPricing
+	platformName := resolvePlatformForLoading(config)
+	if platformName != "" {
+		platformModels, platformPricing := loadPlatformDefaults(platformName)
+		models = platformModels
+		pricing = platformPricing
 	}
 
 	if config.OpenAI != nil {
@@ -155,22 +147,22 @@ func loadCustomConfiguration(config llmtypes.Config) (*llmtypes.CustomModels, ll
 	return models, pricing
 }
 
-// loadPreset loads a built-in preset configuration for popular providers
-func loadPreset(presetName string) (*llmtypes.CustomModels, llmtypes.CustomPricing) {
-	switch normalizePlatformName(presetName) {
+// loadPlatformDefaults loads built-in defaults for known OpenAI-compatible platforms.
+func loadPlatformDefaults(platformName string) (*llmtypes.CustomModels, llmtypes.CustomPricing) {
+	switch normalizePlatformName(platformName) {
 	case "openai":
-		return loadOpenAIPreset()
+		return loadOpenAIPlatformDefaults()
 	case "xai":
-		return loadXAIGrokPreset()
+		return loadXAIPlatformDefaults()
 	case "codex":
-		return loadCodexPreset()
+		return loadCodexPlatformDefaults()
 	default:
 		return nil, nil
 	}
 }
 
-// loadOpenAIPreset loads the complete OpenAI configuration
-func loadOpenAIPreset() (*llmtypes.CustomModels, llmtypes.CustomPricing) {
+// loadOpenAIPlatformDefaults loads the complete OpenAI platform defaults.
+func loadOpenAIPlatformDefaults() (*llmtypes.CustomModels, llmtypes.CustomPricing) {
 	models := &llmtypes.CustomModels{
 		Reasoning:    openaipreset.Models.Reasoning,
 		NonReasoning: openaipreset.Models.NonReasoning,
@@ -189,8 +181,8 @@ func loadOpenAIPreset() (*llmtypes.CustomModels, llmtypes.CustomPricing) {
 	return models, pricing
 }
 
-// loadXAIGrokPreset loads the complete xAI Grok configuration
-func loadXAIGrokPreset() (*llmtypes.CustomModels, llmtypes.CustomPricing) {
+// loadXAIPlatformDefaults loads the complete xAI platform defaults.
+func loadXAIPlatformDefaults() (*llmtypes.CustomModels, llmtypes.CustomPricing) {
 	models := &llmtypes.CustomModels{
 		Reasoning:    xai.Models.Reasoning,
 		NonReasoning: xai.Models.NonReasoning,
@@ -209,7 +201,7 @@ func loadXAIGrokPreset() (*llmtypes.CustomModels, llmtypes.CustomPricing) {
 	return models, pricing
 }
 
-func loadCodexPreset() (*llmtypes.CustomModels, llmtypes.CustomPricing) {
+func loadCodexPlatformDefaults() (*llmtypes.CustomModels, llmtypes.CustomPricing) {
 	models := &llmtypes.CustomModels{
 		Reasoning:    codexpreset.Models.Reasoning,
 		NonReasoning: codexpreset.Models.NonReasoning,
@@ -228,9 +220,9 @@ func loadCodexPreset() (*llmtypes.CustomModels, llmtypes.CustomPricing) {
 	return models, pricing
 }
 
-// getPresetBaseURL returns the base URL for a given preset
-func getPresetBaseURL(presetName string) string {
-	switch normalizePlatformName(presetName) {
+// getPlatformBaseURL returns the default base URL for a given platform.
+func getPlatformBaseURL(platformName string) string {
+	switch normalizePlatformName(platformName) {
 	case "openai":
 		return openaipreset.BaseURL
 	case "xai":
@@ -242,9 +234,9 @@ func getPresetBaseURL(presetName string) string {
 	}
 }
 
-// getPresetAPIKeyEnvVar returns the environment variable name for the API key for a given preset
-func getPresetAPIKeyEnvVar(presetName string) string {
-	switch normalizePlatformName(presetName) {
+// getPlatformAPIKeyEnvVar returns the default API key environment variable for a given platform.
+func getPlatformAPIKeyEnvVar(platformName string) string {
+	switch normalizePlatformName(platformName) {
 	case "openai", "codex":
 		return openaipreset.APIKeyEnvVar
 	case "xai":
@@ -254,14 +246,14 @@ func getPresetAPIKeyEnvVar(presetName string) string {
 	}
 }
 
-// GetAPIKeyEnvVar returns the API key environment variable name from configuration
-// Priority: custom api_key_env_var > platform default > fallback to OPENAI_API_KEY
+// GetAPIKeyEnvVar returns the API key environment variable name from configuration.
+// Priority: custom api_key_env_var > platform default > fallback to OPENAI_API_KEY.
 func GetAPIKeyEnvVar(config llmtypes.Config) string {
 	if config.OpenAI != nil && config.OpenAI.APIKeyEnvVar != "" {
 		return config.OpenAI.APIKeyEnvVar
 	}
 
-	return getPresetAPIKeyEnvVar(resolvePlatformName(config))
+	return getPlatformAPIKeyEnvVar(resolvePlatformName(config))
 }
 
 // GetBaseURL returns the base URL resolved from environment, config, and platform defaults.
@@ -274,10 +266,10 @@ func GetBaseURL(config llmtypes.Config) string {
 		return config.OpenAI.BaseURL
 	}
 
-	return getPresetBaseURL(resolvePlatformName(config))
+	return getPlatformBaseURL(resolvePlatformName(config))
 }
 
-func isKnownPreset(name string) bool {
+func isBuiltInPlatform(name string) bool {
 	switch normalizePlatformName(name) {
 	case "openai", "xai", "codex":
 		return true
@@ -293,23 +285,9 @@ func validateCustomConfiguration(config llmtypes.Config) error {
 	}
 
 	platform := normalizePlatformName(config.OpenAI.Platform)
-	preset := normalizePlatformName(config.OpenAI.Preset)
 
 	if config.OpenAI.Platform != "" && platform == "" {
 		return fmt.Errorf("platform cannot be empty or whitespace")
-	}
-
-	if config.OpenAI.Preset != "" {
-		if preset == "" {
-			return fmt.Errorf("preset cannot be empty or whitespace")
-		}
-		if !isKnownPreset(preset) {
-			return fmt.Errorf("invalid preset '%s', valid presets are: [openai xai codex]", config.OpenAI.Preset)
-		}
-	}
-
-	if platform != "" && preset != "" && platform != preset {
-		return fmt.Errorf("openai.platform and openai.preset conflict: '%s' != '%s'", config.OpenAI.Platform, config.OpenAI.Preset)
 	}
 
 	if config.OpenAI.APIMode != "" {

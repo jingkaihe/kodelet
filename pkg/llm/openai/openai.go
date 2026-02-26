@@ -35,7 +35,7 @@ import (
 
 var (
 	// ReasoningModels lists OpenAI models that support reasoning capabilities.
-	// These arrays are now managed by the preset system but kept for backward compatibility
+	// These arrays are now managed by platform defaults but kept for backward compatibility
 	// with the IsReasoningModel and IsOpenAIModel functions.
 	ReasoningModels = []string{
 		"o1",

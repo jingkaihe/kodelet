@@ -74,7 +74,7 @@ func TestNewThreadWithoutAPIKey(t *testing.T) {
 }
 
 func TestIsReasoningModelDynamic(t *testing.T) {
-	// Create a thread with the default OpenAI preset loaded
+	// Create a thread with default OpenAI platform defaults loaded.
 	thread := &Thread{
 		customModels: map[string]string{
 			"o1":      "reasoning",
@@ -100,7 +100,7 @@ func TestIsReasoningModelDynamic(t *testing.T) {
 		{"gpt-5", true},
 		{"gpt-4.1", false},
 		{"gpt-4o", false},
-		{"claude-3", false}, // Not in preset, returns false
+		{"claude-3", false}, // Not in loaded defaults, returns false
 	}
 
 	for _, tt := range tests {
@@ -681,13 +681,13 @@ func TestLoadCustomConfiguration(t *testing.T) {
 	assert.Equal(t, 128000, pricing.ContextWindow)
 }
 
-func TestLoadCustomConfigurationDefaultPreset(t *testing.T) {
-	// When no config is provided, the default "openai" preset should be loaded
+func TestLoadCustomConfigurationDefaultPlatform(t *testing.T) {
+	// When no config is provided, default "openai" platform defaults should be loaded.
 	config := llmtypes.Config{}
 
 	customModels, customPricing := loadCustomConfiguration(config)
 
-	// Should load the default OpenAI preset
+	// Should load default OpenAI platform defaults.
 	assert.NotEmpty(t, customModels)
 	assert.NotEmpty(t, customPricing)
 

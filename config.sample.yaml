@@ -73,7 +73,7 @@ profiles:
     max_tokens: 16000
     reasoning_effort: "none"
     openai:
-      preset: "xai"
+      platform: "xai"
 
   fireworks:
     provider: "openai"
@@ -229,10 +229,10 @@ commit:
 # OpenAI-compatible API configuration
 # Supports any OpenAI-compatible provider (xAI, Groq, Together AI, etc.)
 openai:
-  # Option 1: Use a built-in preset (recommended for popular providers)
-  # preset: "xai"  # Built-in preset for xAI's Grok models
+  # Optional platform label used for built-in defaults/metadata (e.g., openai, xai, codex, fireworks)
+  # platform: "xai"
 
-  # Option 2: Custom configuration (overrides preset if both are specified)
+  # Custom endpoint/auth configuration
   # base_url: "https://api.x.ai/v1"  # Custom API endpoint
   # api_key_env_var: "XAI_API_KEY"   # Environment variable name for API key (defaults to OPENAI_API_KEY)
 
@@ -467,7 +467,7 @@ tracing:
 # API Keys:
 # - ANTHROPIC_API_KEY: Required when using the Anthropic provider
 # - OPENAI_API_KEY: Required when using the OpenAI provider (default)
-# - XAI_API_KEY: Required when using the xAI preset
+# - XAI_API_KEY: Required when using the xAI platform
 # - OPENAI_API_BASE: Custom OpenAI API endpoint (overrides config base_url)
 # - GOOGLE_API_KEY: Required when using Google Gemini API
 # - GEMINI_API_KEY: Alternative to GOOGLE_API_KEY for Gemini API

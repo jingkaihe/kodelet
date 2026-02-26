@@ -785,7 +785,7 @@ profiles:
     max_tokens: 16000
     reasoning_effort: "none"
     openai:
-      preset: "xai"
+      platform: "xai"
 
   mix-n-match:
     # Main agent uses Claude

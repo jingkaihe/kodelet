@@ -58,7 +58,7 @@ func TestSubAgentPrompt_ProviderSelection(t *testing.T) {
 	})
 }
 
-func TestUnifiedSystemPrompt_ForOpenAIProvidersAndPresets(t *testing.T) {
+func TestUnifiedSystemPrompt_ForOpenAIProvidersAndPlatforms(t *testing.T) {
 	testCases := []struct {
 		name         string
 		model        string
@@ -97,22 +97,22 @@ func TestUnifiedSystemPrompt_ForOpenAIProvidersAndPresets(t *testing.T) {
 			useSubagent: true,
 		},
 		{
-			name:  "OpenAI preset",
+			name:  "OpenAI platform",
 			model: "gpt-4.1",
 			config: llm.Config{
 				Provider: ProviderOpenAI,
 				OpenAI: &llm.OpenAIConfig{
-					Preset: "openai",
+					Platform: "openai",
 				},
 			},
 		},
 		{
-			name:  "Codex preset",
+			name:  "Codex platform",
 			model: "gpt-5.3-codex",
 			config: llm.Config{
 				Provider: ProviderOpenAI,
 				OpenAI: &llm.OpenAIConfig{
-					Preset: "codex",
+					Platform: "codex",
 				},
 			},
 			expectsCodex: true,

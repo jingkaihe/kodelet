@@ -10,7 +10,7 @@ import (
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
 
-// Define expected OpenAI preset models once to avoid duplication
+// Define expected OpenAI platform defaults once to avoid duplication
 var (
 	expectedOpenAIReasoningModels = []string{
 		"gpt-5.2", "gpt-5.2-pro",
@@ -38,7 +38,7 @@ func TestLoadCustomConfiguration(t *testing.T) {
 		hasPricing bool
 	}{
 		{
-			name:   "no custom config uses openai preset",
+			name:   "no custom config uses openai platform defaults",
 			config: llmtypes.Config{},
 			expected: &llmtypes.CustomModels{
 				Reasoning:    expectedOpenAIReasoningModels,
@@ -48,10 +48,10 @@ func TestLoadCustomConfiguration(t *testing.T) {
 			hasPricing: true,
 		},
 		{
-			name: "explicit openai preset",
+			name: "explicit openai platform",
 			config: llmtypes.Config{
 				OpenAI: &llmtypes.OpenAIConfig{
-					Preset: "openai",
+					Platform: "openai",
 				},
 			},
 			expected: &llmtypes.CustomModels{
@@ -62,10 +62,10 @@ func TestLoadCustomConfiguration(t *testing.T) {
 			hasPricing: true,
 		},
 		{
-			name: "xai preset",
+			name: "xai platform",
 			config: llmtypes.Config{
 				OpenAI: &llmtypes.OpenAIConfig{
-					Preset: "xai",
+					Platform: "xai",
 				},
 			},
 			expected: &llmtypes.CustomModels{
@@ -83,10 +83,10 @@ func TestLoadCustomConfiguration(t *testing.T) {
 			hasPricing: true,
 		},
 		{
-			name: "custom models only (no preset)",
+			name: "custom models only (no platform defaults)",
 			config: llmtypes.Config{
 				OpenAI: &llmtypes.OpenAIConfig{
-					Preset: "", // Explicitly empty preset
+					Platform: "", // Explicitly empty platform
 					Models: &llmtypes.CustomModels{
 						Reasoning:    []string{"custom-reasoning-model"},
 						NonReasoning: []string{"custom-regular-model"},
@@ -98,13 +98,13 @@ func TestLoadCustomConfiguration(t *testing.T) {
 				NonReasoning: []string{"custom-regular-model"},
 			},
 			hasModels:  true,
-			hasPricing: false, // No preset loaded since explicitly empty
+			hasPricing: false, // No platform defaults loaded when platform is explicitly empty
 		},
 		{
-			name: "preset with custom override",
+			name: "xai platform with custom override",
 			config: llmtypes.Config{
 				OpenAI: &llmtypes.OpenAIConfig{
-					Preset: "xai",
+					Platform: "xai",
 					Models: &llmtypes.CustomModels{
 						Reasoning: []string{"custom-override-model"},
 					},
@@ -112,7 +112,7 @@ func TestLoadCustomConfiguration(t *testing.T) {
 			},
 			expected: &llmtypes.CustomModels{
 				Reasoning: []string{"custom-override-model"},
-				// Auto-populated from preset pricing since reasoning was overridden but non-reasoning wasn't
+				// Auto-populated from platform pricing since reasoning was overridden but non-reasoning wasn't
 				NonReasoning: []string{"grok-3", "grok-3-mini", "grok-2-image-1212", "grok-code-fast-1", "grok-4-0709"},
 			},
 			hasModels:  true,
@@ -122,7 +122,7 @@ func TestLoadCustomConfiguration(t *testing.T) {
 			name: "auto-populate non-reasoning models",
 			config: llmtypes.Config{
 				OpenAI: &llmtypes.OpenAIConfig{
-					Preset: "", // Explicitly empty preset to avoid default OpenAI preset loading
+					Platform: "", // Explicitly empty platform to avoid default OpenAI platform loading
 					Models: &llmtypes.CustomModels{
 						Reasoning: []string{"model-a"},
 					},
@@ -163,8 +163,8 @@ func TestLoadCustomConfiguration(t *testing.T) {
 	}
 }
 
-func TestLoadXAIGrokPreset(t *testing.T) {
-	models, pricing := loadXAIGrokPreset()
+func TestLoadXAIPlatformDefaults(t *testing.T) {
+	models, pricing := loadXAIPlatformDefaults()
 
 	require.NotNil(t, models)
 	require.NotNil(t, pricing)
@@ -191,8 +191,8 @@ func TestLoadXAIGrokPreset(t *testing.T) {
 	assert.Equal(t, 131072, grok3MiniPricing.ContextWindow)
 }
 
-func TestLoadOpenAIPreset(t *testing.T) {
-	models, pricing := loadOpenAIPreset()
+func TestLoadOpenAIPlatformDefaults(t *testing.T) {
+	models, pricing := loadOpenAIPlatformDefaults()
 
 	require.NotNil(t, models)
 	require.NotNil(t, pricing)
@@ -233,71 +233,71 @@ func TestLoadOpenAIPreset(t *testing.T) {
 	}
 }
 
-func TestGetPresetBaseURL(t *testing.T) {
+func TestGetPlatformBaseURL(t *testing.T) {
 	tests := []struct {
-		preset   string
+		platform string
 		expected string
 	}{
 		{
-			preset:   "openai",
+			platform: "openai",
 			expected: "https://api.openai.com/v1",
 		},
 		{
-			preset:   "xai",
+			platform: "xai",
 			expected: "https://api.x.ai/v1",
 		},
 		{
-			preset:   "codex",
+			platform: "codex",
 			expected: "https://chatgpt.com/backend-api/codex",
 		},
 		{
-			preset:   "unknown-preset",
+			platform: "fireworks",
 			expected: "",
 		},
 		{
-			preset:   "",
+			platform: "",
 			expected: "",
 		},
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.preset, func(t *testing.T) {
-			result := getPresetBaseURL(tt.preset)
+		t.Run(tt.platform, func(t *testing.T) {
+			result := getPlatformBaseURL(tt.platform)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
 }
 
-func TestGetPresetAPIKeyEnvVar(t *testing.T) {
+func TestGetPlatformAPIKeyEnvVar(t *testing.T) {
 	tests := []struct {
-		preset   string
+		platform string
 		expected string
 	}{
 		{
-			preset:   "openai",
+			platform: "openai",
 			expected: "OPENAI_API_KEY",
 		},
 		{
-			preset:   "xai",
+			platform: "xai",
 			expected: "XAI_API_KEY",
 		},
 		{
-			preset:   "codex",
+			platform: "codex",
 			expected: "OPENAI_API_KEY",
 		},
 		{
-			preset:   "unknown-preset",
-			expected: "OPENAI_API_KEY", // fallback
+			platform: "fireworks",
+			expected: "OPENAI_API_KEY",
 		},
 		{
-			preset:   "",
-			expected: "OPENAI_API_KEY", // fallback
+			platform: "",
+			expected: "OPENAI_API_KEY",
 		},
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.preset, func(t *testing.T) {
-			result := getPresetAPIKeyEnvVar(tt.preset)
+		t.Run(tt.platform, func(t *testing.T) {
+			result := getPlatformAPIKeyEnvVar(tt.platform)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
@@ -318,18 +318,7 @@ func TestGetAPIKeyEnvVar(t *testing.T) {
 			expected: "OPENAI_API_KEY",
 		},
 		{
-			name: "openai preset uses OPENAI_API_KEY",
-			config: llmtypes.Config{
-				Provider: "openai",
-				Model:    "gpt-4.1",
-				OpenAI: &llmtypes.OpenAIConfig{
-					Preset: "openai",
-				},
-			},
-			expected: "OPENAI_API_KEY",
-		},
-		{
-			name: "platform openai uses OPENAI_API_KEY",
+			name: "openai platform uses OPENAI_API_KEY",
 			config: llmtypes.Config{
 				Provider: "openai",
 				Model:    "gpt-4.1",
@@ -340,12 +329,12 @@ func TestGetAPIKeyEnvVar(t *testing.T) {
 			expected: "OPENAI_API_KEY",
 		},
 		{
-			name: "xai preset uses XAI_API_KEY",
+			name: "xai platform uses XAI_API_KEY",
 			config: llmtypes.Config{
 				Provider: "openai",
 				Model:    "grok-3",
 				OpenAI: &llmtypes.OpenAIConfig{
-					Preset: "xai",
+					Platform: "xai",
 				},
 			},
 			expected: "XAI_API_KEY",
@@ -362,18 +351,6 @@ func TestGetAPIKeyEnvVar(t *testing.T) {
 			expected: "MY_CUSTOM_API_KEY",
 		},
 		{
-			name: "custom api_key_env_var overrides preset",
-			config: llmtypes.Config{
-				Provider: "openai",
-				Model:    "grok-3",
-				OpenAI: &llmtypes.OpenAIConfig{
-					Preset:       "xai",
-					APIKeyEnvVar: "MY_CUSTOM_XAI_KEY",
-				},
-			},
-			expected: "MY_CUSTOM_XAI_KEY",
-		},
-		{
 			name: "custom api_key_env_var overrides platform",
 			config: llmtypes.Config{
 				Provider: "openai",
@@ -386,45 +363,34 @@ func TestGetAPIKeyEnvVar(t *testing.T) {
 			expected: "MY_CUSTOM_XAI_KEY",
 		},
 		{
-			name: "codex preset uses OPENAI_API_KEY",
+			name: "codex platform uses OPENAI_API_KEY",
 			config: llmtypes.Config{
 				Provider: "openai",
 				Model:    "gpt-5.2-codex",
 				OpenAI: &llmtypes.OpenAIConfig{
-					Preset: "codex",
+					Platform: "codex",
 				},
 			},
 			expected: "OPENAI_API_KEY",
 		},
 		{
-			name: "unknown preset falls back to OPENAI_API_KEY",
+			name: "unknown platform falls back to OPENAI_API_KEY",
 			config: llmtypes.Config{
 				Provider: "openai",
 				Model:    "some-model",
 				OpenAI: &llmtypes.OpenAIConfig{
-					Preset: "unknown-preset",
+					Platform: "unknown-platform",
 				},
 			},
 			expected: "OPENAI_API_KEY",
 		},
 		{
-			name: "platform xai uses XAI_API_KEY",
-			config: llmtypes.Config{
-				Provider: "openai",
-				Model:    "grok-3",
-				OpenAI: &llmtypes.OpenAIConfig{
-					Platform: "xai",
-				},
-			},
-			expected: "XAI_API_KEY",
-		},
-		{
-			name: "empty preset with no custom env var falls back to OPENAI_API_KEY",
+			name: "empty platform with no custom env var falls back to OPENAI_API_KEY",
 			config: llmtypes.Config{
 				Provider: "openai",
 				Model:    "some-model",
 				OpenAI: &llmtypes.OpenAIConfig{
-					Preset: "",
+					Platform: "",
 				},
 			},
 			expected: "OPENAI_API_KEY",
@@ -578,51 +544,40 @@ func TestValidateCustomConfiguration(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name: "valid preset openai",
+			name: "valid built-in platform openai",
 			config: llmtypes.Config{
 				OpenAI: &llmtypes.OpenAIConfig{
-					Preset: "openai",
+					Platform: "openai",
 				},
 			},
 			expectError: false,
 		},
 		{
-			name: "valid preset xai",
+			name: "valid built-in platform xai",
 			config: llmtypes.Config{
 				OpenAI: &llmtypes.OpenAIConfig{
-					Preset: "xai",
+					Platform: "xai",
 				},
 			},
 			expectError: false,
 		},
 		{
-			name: "valid preset codex",
+			name: "valid built-in platform codex",
 			config: llmtypes.Config{
 				OpenAI: &llmtypes.OpenAIConfig{
-					Preset: "codex",
+					Platform: "codex",
 				},
 			},
 			expectError: false,
 		},
 		{
-			name: "valid platform without preset",
+			name: "valid custom platform fireworks",
 			config: llmtypes.Config{
 				OpenAI: &llmtypes.OpenAIConfig{
 					Platform: "fireworks",
 				},
 			},
 			expectError: false,
-		},
-		{
-			name: "platform and preset conflict",
-			config: llmtypes.Config{
-				OpenAI: &llmtypes.OpenAIConfig{
-					Platform: "openai",
-					Preset:   "xai",
-				},
-			},
-			expectError:   true,
-			errorContains: "conflict",
 		},
 		{
 			name: "valid api mode",
@@ -642,16 +597,6 @@ func TestValidateCustomConfiguration(t *testing.T) {
 			},
 			expectError:   true,
 			errorContains: "invalid api_mode",
-		},
-		{
-			name: "invalid preset",
-			config: llmtypes.Config{
-				OpenAI: &llmtypes.OpenAIConfig{
-					Preset: "invalid-preset",
-				},
-			},
-			expectError:   true,
-			errorContains: "invalid preset",
 		},
 		{
 			name: "valid base URL https",

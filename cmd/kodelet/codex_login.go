@@ -90,7 +90,7 @@ func runCodexLogin(ctx context.Context) error {
 	presenter.Info("You can now use Kodelet with Codex models. Add to your config:")
 	fmt.Println("  provider: openai")
 	fmt.Println("  openai:")
-	fmt.Println("    preset: codex")
+	fmt.Println("    platform: codex")
 
 	return nil
 }

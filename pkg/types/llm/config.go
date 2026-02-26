@@ -71,7 +71,6 @@ const (
 // OpenAIConfig holds OpenAI-specific configuration including support for compatible APIs
 type OpenAIConfig struct {
 	Platform        string                  `mapstructure:"platform" json:"platform" yaml:"platform"`                                    // Canonical platform name for OpenAI-compatible APIs (e.g., openai, xai, codex)
-	Preset          string                  `mapstructure:"preset" json:"preset" yaml:"preset"`                                          // Legacy alias for platform
 	BaseURL         string                  `mapstructure:"base_url" json:"base_url" yaml:"base_url"`                                    // Custom API base URL (overrides platform defaults)
 	APIKeyEnvVar    string                  `mapstructure:"api_key_env_var" json:"api_key_env_var" yaml:"api_key_env_var"`               // Environment variable name for API key (overrides platform default)
 	APIMode         OpenAIAPIMode           `mapstructure:"api_mode" json:"api_mode" yaml:"api_mode"`                                    // Preferred API mode selection (chat_completions or responses)

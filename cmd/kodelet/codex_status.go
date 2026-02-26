@@ -42,7 +42,7 @@ func runCodexStatus() {
 		presenter.Info("Once authenticated, add to your config:")
 		fmt.Println("  provider: openai")
 		fmt.Println("  openai:")
-		fmt.Println("    preset: codex")
+		fmt.Println("    platform: codex")
 		return
 	}
 
@@ -87,7 +87,7 @@ func runCodexStatus() {
 	presenter.Info("You can now use Kodelet with Codex models. Add to your config:")
 	fmt.Println("  provider: openai")
 	fmt.Println("  openai:")
-	fmt.Println("    preset: codex")
+	fmt.Println("    platform: codex")
 	fmt.Println()
 	presenter.Info("Available Codex models:")
 	fmt.Println("  - gpt-5.3-codex (default)")
