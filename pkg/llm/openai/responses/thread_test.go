@@ -769,18 +769,14 @@ func TestExtractMessagesAfterCompaction(t *testing.T) {
 
 	messages, err := ExtractMessages([]byte(inputItems), nil)
 	require.NoError(t, err)
-	require.Len(t, messages, 5)
+	require.Len(t, messages, 3)
 
-	assert.Equal(t, "user", messages[0].Role)
-	assert.Equal(t, "old user", messages[0].Content)
-	assert.Equal(t, "assistant", messages[1].Role)
-	assert.Equal(t, "old assistant", messages[1].Content)
+	assert.Equal(t, "assistant", messages[0].Role)
+	assert.Equal(t, compactedHistoryNotice, messages[0].Content)
+	assert.Equal(t, "user", messages[1].Role)
+	assert.Equal(t, "new user", messages[1].Content)
 	assert.Equal(t, "assistant", messages[2].Role)
-	assert.Equal(t, compactedHistoryNotice, messages[2].Content)
-	assert.Equal(t, "user", messages[3].Role)
-	assert.Equal(t, "new user", messages[3].Content)
-	assert.Equal(t, "assistant", messages[4].Role)
-	assert.Equal(t, "new assistant", messages[4].Content)
+	assert.Equal(t, "new assistant", messages[2].Content)
 }
 
 func TestStreamMessagesAfterCompaction(t *testing.T) {
@@ -808,18 +804,15 @@ func TestStreamMessagesAfterCompaction(t *testing.T) {
 
 	streamable, err := StreamMessages(json.RawMessage(inputItems), nil)
 	require.NoError(t, err)
-	require.Len(t, streamable, 4)
+	require.Len(t, streamable, 3)
 
 	assert.Equal(t, "text", streamable[0].Kind)
-	assert.Equal(t, "user", streamable[0].Role)
-	assert.Equal(t, "old user", streamable[0].Content)
-	assert.Equal(t, "text", streamable[1].Kind)
-	assert.Equal(t, "assistant", streamable[1].Role)
-	assert.Equal(t, compactedHistoryNotice, streamable[1].Content)
-	assert.Equal(t, "thinking", streamable[2].Kind)
-	assert.Equal(t, "text", streamable[3].Kind)
-	assert.Equal(t, "assistant", streamable[3].Role)
-	assert.Equal(t, "new assistant", streamable[3].Content)
+	assert.Equal(t, "assistant", streamable[0].Role)
+	assert.Equal(t, compactedHistoryNotice, streamable[0].Content)
+	assert.Equal(t, "thinking", streamable[1].Kind)
+	assert.Equal(t, "text", streamable[2].Kind)
+	assert.Equal(t, "assistant", streamable[2].Role)
+	assert.Equal(t, "new assistant", streamable[2].Content)
 }
 
 func TestStorageRoundTripWithReasoning(t *testing.T) {
