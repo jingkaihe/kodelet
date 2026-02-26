@@ -64,7 +64,17 @@ const ConversationList: React.FC<ConversationListProps> = ({
                   </div>
                   {conversation.provider && (
                     <div className="badge badge-outline">
-                      Model: <span>{conversation.provider}</span>
+                      Provider: <span>{conversation.provider}</span>
+                    </div>
+                  )}
+                  {conversation.platform && (
+                    <div className="badge badge-outline">
+                      Platform: <span>{conversation.platform}</span>
+                    </div>
+                  )}
+                  {conversation.api_mode && (
+                    <div className="badge badge-outline">
+                      API Mode: <span>{conversation.api_mode}</span>
                     </div>
                   )}
                   {conversation.usage && (

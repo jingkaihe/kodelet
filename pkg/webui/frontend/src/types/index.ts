@@ -59,6 +59,9 @@ export interface Conversation {
   messageCount: number;
   summary?: string;
   provider?: string;
+  platform?: string;
+  api_mode?: string;
+  metadata?: Record<string, unknown>;
   preview?: string;
   firstMessage?: string; // For list view - truncated first user message
   created_at?: string; // Alternative format

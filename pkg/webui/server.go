@@ -229,6 +229,21 @@ func (s *Server) handleListConversations(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	for i := range response.Conversations {
+		summary := &response.Conversations[i]
+		platform, apiMode := extractProviderMetadata(summary.Provider, summary.Metadata)
+		summary.Provider = displayProviderName(summary.Provider)
+		if summary.Metadata == nil {
+			summary.Metadata = make(map[string]any)
+		}
+		if platform != "" {
+			summary.Metadata["platform"] = platform
+		}
+		if apiMode != "" {
+			summary.Metadata["api_mode"] = apiMode
+		}
+	}
+
 	s.writeJSONResponse(w, response)
 }
 
@@ -265,6 +280,55 @@ type WebToolCallFunction struct {
 	Arguments string `json:"arguments"`
 }
 
+func normalizeProviderMetadataString(value any) string {
+	strValue, ok := value.(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(strings.ToLower(strValue))
+}
+
+func extractProviderMetadata(provider string, metadata map[string]any) (string, string) {
+	normalizedProvider := strings.TrimSpace(strings.ToLower(provider))
+
+	platform := ""
+	apiMode := ""
+	if metadata != nil {
+		if platformValue, exists := metadata["platform"]; exists {
+			platform = normalizeProviderMetadataString(platformValue)
+		}
+		if modeValue, exists := metadata["api_mode"]; exists {
+			apiMode = normalizeProviderMetadataString(modeValue)
+		}
+	}
+
+	switch apiMode {
+	case "responses_api", "response":
+		apiMode = "responses"
+	case "chat", "chatcompletions":
+		apiMode = "chat_completions"
+	}
+
+	if normalizedProvider == "openai-responses" && apiMode == "" {
+		apiMode = "responses"
+	}
+
+	return platform, apiMode
+}
+
+func displayProviderName(provider string) string {
+	switch strings.TrimSpace(strings.ToLower(provider)) {
+	case "anthropic":
+		return "Anthropic"
+	case "openai", "openai-responses":
+		return "OpenAI"
+	case "google":
+		return "Google"
+	default:
+		return provider
+	}
+}
+
 // handleGetConversation handles GET /api/conversations/{id}
 func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -278,19 +342,28 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	_, apiMode := extractProviderMetadata(response.Provider, response.Metadata)
+	providerLabel := displayProviderName(response.Provider)
+
+	providerForRender := response.Provider
+	if providerForRender == "openai" && apiMode == "responses" {
+		providerForRender = "openai-responses"
+	}
+
 	// Convert to web messages with tool call structure preserved
-	webMessages, err := s.convertToWebMessages(response.RawMessages, response.Provider, response.ToolResults)
+	webMessages, err := s.convertToWebMessages(response.RawMessages, providerForRender, response.ToolResults)
 	if err != nil {
 		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to parse conversation messages", err)
 		return
 	}
 
 	// Convert to web response format
+
 	webResponse := &WebConversationResponse{
 		ID:           response.ID,
 		CreatedAt:    response.CreatedAt,
 		UpdatedAt:    response.UpdatedAt,
-		Provider:     response.Provider,
+		Provider:     providerLabel,
 		Summary:      response.Summary,
 		Usage:        response.Usage,
 		Messages:     webMessages,

@@ -20,6 +20,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	codexpreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/codex"
 	openaipreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/openai"
+	"github.com/jingkaihe/kodelet/pkg/llm/openai/preset/xai"
 	"github.com/jingkaihe/kodelet/pkg/llm/prompts"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/sysprompt"
@@ -164,7 +165,7 @@ func NewThread(config llmtypes.Config) (*Thread, error) {
 
 // Provider returns the provider identifier for this thread.
 func (t *Thread) Provider() string {
-	return "openai-responses"
+	return "openai"
 }
 
 // AddUserMessage adds a user message with optional images to the thread.
@@ -687,62 +688,52 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 	t.Usage.OutputTokens += int(resp.Usage.OutputTokens)
 	t.Mu.Unlock()
 
-	// Convert output items to input items and storedItems simultaneously
-	// The Compact API returns: user messages + a single compaction item
+	// Convert compacted output items to persisted/input items while preserving
+	// the original output payload for forward compatibility.
 	newInputItems := make([]responses.ResponseInputItemUnionParam, 0, len(resp.Output))
 	newStoredItems := make([]StoredInputItem, 0, len(resp.Output))
 
 	for _, output := range resp.Output {
-		switch output.Type {
-		case "message":
-			// Convert output message to input message
-			msg := output.AsMessage()
-			if msg.Role == "user" {
-				// Extract text content from the message
-				var textContent string
-				for _, content := range msg.Content {
-					if content.Type == "output_text" || content.Type == "input_text" {
-						textContent += content.Text
-					}
-				}
-				if textContent != "" {
-					newInputItems = append(newInputItems, responses.ResponseInputItemUnionParam{
-						OfMessage: &responses.EasyInputMessageParam{
-							Role:    responses.EasyInputMessageRoleUser,
-							Content: responses.EasyInputMessageContentUnionParam{OfString: param.NewOpt(textContent)},
-						},
-					})
-					newStoredItems = append(newStoredItems, StoredInputItem{
-						Type:    "message",
-						Role:    "user",
-						Content: textContent,
-					})
-				}
-			}
-
-		case "compaction":
-			// Convert compaction item using the SDK helper
-			compaction := output.AsCompaction()
-			encryptedContent := compaction.EncryptedContent
-			if encryptedContent == "" {
-				encryptedContent = output.EncryptedContent
-			}
-			newInputItems = append(newInputItems, responses.ResponseInputItemParamOfCompaction(encryptedContent))
-			newStoredItems = append(newStoredItems, StoredInputItem{
-				Type:             "compaction",
-				EncryptedContent: encryptedContent,
-			})
-
-		case "compaction_summary":
-			// Codex compact responses currently return this variant name.
-			if output.EncryptedContent != "" {
-				newInputItems = append(newInputItems, responses.ResponseInputItemParamOfCompaction(output.EncryptedContent))
-				newStoredItems = append(newStoredItems, StoredInputItem{
-					Type:             "compaction",
-					EncryptedContent: output.EncryptedContent,
-				})
+		raw := output.RawJSON()
+		if raw == "" {
+			rawJSON, marshalErr := json.Marshal(output)
+			if marshalErr == nil {
+				raw = string(rawJSON)
 			}
 		}
+
+		storedItem := storedItemFromCompactOutput(output, raw)
+
+		if output.Type == "message" {
+			msg := output.AsMessage()
+			role := strings.TrimSpace(string(msg.Role))
+			parsedRole, ok := parseStoredMessageRole(role)
+			if !ok {
+				logger.G(ctx).WithField("role", role).Debug("Skipping compacted message with unsupported role")
+				continue
+			}
+			if storedItem.Content == "" {
+				continue
+			}
+
+			newInputItems = append(newInputItems, responses.ResponseInputItemUnionParam{
+				OfMessage: &responses.EasyInputMessageParam{
+					Role:    parsedRole,
+					Content: responses.EasyInputMessageContentUnionParam{OfString: param.NewOpt(storedItem.Content)},
+				},
+			})
+			newStoredItems = append(newStoredItems, storedItem)
+			continue
+		}
+
+		inputItem, ok := inputItemFromRawItem(json.RawMessage(raw))
+		if !ok {
+			logger.G(ctx).WithField("type", output.Type).Debug("Skipping unsupported compact output item")
+			continue
+		}
+
+		newInputItems = append(newInputItems, inputItem)
+		newStoredItems = append(newStoredItems, storedItem)
 	}
 
 	if len(newInputItems) == 0 {
@@ -767,6 +758,66 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 	t.ResetContextStateLocked()
 
 	return nil
+}
+
+func storedItemFromCompactOutput(output responses.ResponseOutputItemUnion, raw string) StoredInputItem {
+	item := StoredInputItem{
+		Type:    output.Type,
+		RawItem: json.RawMessage(raw),
+	}
+
+	switch output.Type {
+	case "message":
+		msg := output.AsMessage()
+		item.Role = strings.TrimSpace(string(msg.Role))
+		for _, content := range msg.Content {
+			if content.Type == "output_text" || content.Type == "input_text" {
+				item.Content += content.Text
+			}
+		}
+	case "function_call":
+		call := output.AsFunctionCall()
+		item.CallID = call.CallID
+		item.Name = call.Name
+		item.Arguments = call.Arguments
+	case "function_call_output":
+		item.CallID = output.CallID
+		item.Output = output.Output.OfString
+	case "reasoning":
+		item.Role = "assistant"
+		reasoning := output.AsReasoning()
+		for _, summary := range reasoning.Summary {
+			if item.Content != "" {
+				item.Content += "\n"
+			}
+			item.Content += summary.Text
+		}
+	case "compaction":
+		compaction := output.AsCompaction()
+		item.EncryptedContent = compaction.EncryptedContent
+		if item.EncryptedContent == "" {
+			item.EncryptedContent = output.EncryptedContent
+		}
+	case "compaction_summary":
+		item.EncryptedContent = output.EncryptedContent
+	}
+
+	return item
+}
+
+func parseStoredMessageRole(role string) (responses.EasyInputMessageRole, bool) {
+	switch strings.ToLower(strings.TrimSpace(role)) {
+	case "user":
+		return responses.EasyInputMessageRoleUser, true
+	case "assistant":
+		return responses.EasyInputMessageRoleAssistant, true
+	case "system":
+		return responses.EasyInputMessageRoleSystem, true
+	case "developer":
+		return responses.EasyInputMessageRoleDeveloper, true
+	default:
+		return "", false
+	}
 }
 
 func (t *Thread) compactRawJSON(
@@ -846,12 +897,19 @@ func (t *Thread) SaveConversation(ctx context.Context, summarize bool) error {
 	}
 
 	// Build the conversation record
+	metadata := map[string]any{
+		"model":          t.Config.Model,
+		"lastResponseID": t.lastResponseID,
+		"api_mode":       "responses",
+		"platform":       resolvePlatformName(t.Config),
+	}
+
 	record := convtypes.ConversationRecord{
 		ID:                  t.ConversationID,
 		RawMessages:         inputItemsJSON,
-		Provider:            "openai-responses",
+		Provider:            "openai",
 		Usage:               *t.Usage,
-		Metadata:            map[string]any{"model": t.Config.Model, "lastResponseID": t.lastResponseID},
+		Metadata:            metadata,
 		Summary:             t.summary,
 		CreatedAt:           time.Now(),
 		UpdatedAt:           time.Now(),
@@ -875,9 +933,15 @@ func (t *Thread) loadConversation(ctx context.Context) {
 		return
 	}
 
-	// Check if this is a Responses API conversation
-	if record.Provider != "" && record.Provider != "openai-responses" {
-		return
+	if record.Provider != "" {
+		if record.Provider != "openai-responses" {
+			if record.Provider != "openai" {
+				return
+			}
+			if !recordUsesResponsesAPI(record.Metadata) {
+				return
+			}
+		}
 	}
 
 	// Deserialize from storage format
@@ -942,47 +1006,115 @@ func (t *Thread) cleanupOrphanedItems() {
 
 // Helper functions
 
+const defaultOpenAIPlatform = "openai"
+
+func normalizePlatformName(name string) string {
+	return strings.ToLower(strings.TrimSpace(name))
+}
+
+func resolvePlatformName(config llmtypes.Config) string {
+	if config.OpenAI == nil {
+		return defaultOpenAIPlatform
+	}
+
+	if platform := normalizePlatformName(config.OpenAI.Platform); platform != "" {
+		return platform
+	}
+
+	return defaultOpenAIPlatform
+}
+
+func resolvePlatformForLoading(config llmtypes.Config) string {
+	if config.OpenAI == nil {
+		return defaultOpenAIPlatform
+	}
+
+	if platform := normalizePlatformName(config.OpenAI.Platform); platform != "" {
+		return platform
+	}
+
+	if config.OpenAI.Models == nil && config.OpenAI.Pricing == nil {
+		return defaultOpenAIPlatform
+	}
+
+	return ""
+}
+
+func parseAPIMode(raw string) (llmtypes.OpenAIAPIMode, bool) {
+	normalized := strings.ToLower(strings.TrimSpace(raw))
+	normalized = strings.ReplaceAll(normalized, "-", "_")
+
+	switch normalized {
+	case "chat", "chat_completions", "chatcompletions":
+		return llmtypes.OpenAIAPIModeChatCompletions, true
+	case "responses", "responses_api", "response":
+		return llmtypes.OpenAIAPIModeResponses, true
+	default:
+		return "", false
+	}
+}
+
+func getPlatformAPIKeyEnvVar(platform string) string {
+	switch normalizePlatformName(platform) {
+	case "xai":
+		return xai.APIKeyEnvVar
+	default:
+		return openaipreset.APIKeyEnvVar
+	}
+}
+
+func getPlatformBaseURL(platform string) string {
+	switch normalizePlatformName(platform) {
+	case "xai":
+		return xai.BaseURL
+	case "codex":
+		return codexpreset.BaseURL
+	case "openai":
+		return openaipreset.BaseURL
+	default:
+		return ""
+	}
+}
+
+func getAPIKeyEnvVar(config llmtypes.Config) string {
+	if config.OpenAI != nil && config.OpenAI.APIKeyEnvVar != "" {
+		return config.OpenAI.APIKeyEnvVar
+	}
+	return getPlatformAPIKeyEnvVar(resolvePlatformName(config))
+}
+
+func getBaseURL(config llmtypes.Config) string {
+	if baseURL := os.Getenv("OPENAI_API_BASE"); baseURL != "" {
+		return baseURL
+	}
+	if config.OpenAI != nil && config.OpenAI.BaseURL != "" {
+		return config.OpenAI.BaseURL
+	}
+	return getPlatformBaseURL(resolvePlatformName(config))
+}
+
 // loadCustomConfiguration loads custom models and pricing from config.
-// It processes presets first, then applies custom overrides if provided.
+// It processes platform defaults first, then applies custom overrides if provided.
 func loadCustomConfiguration(config llmtypes.Config) (map[string]string, map[string]llmtypes.ModelPricing) {
 	customModels := make(map[string]string)
 	customPricing := make(map[string]llmtypes.ModelPricing)
 
-	// Determine which preset to use
-	presetName := ""
-	if config.OpenAI == nil {
-		// No OpenAI config at all, use default preset
-		presetName = "openai"
-	} else if config.OpenAI.Preset != "" {
-		// Explicit preset specified
-		presetName = config.OpenAI.Preset
-	} else {
-		// OpenAI config exists but no preset
-		// Check if we have custom models/pricing, if not, use default preset
-		if config.OpenAI.Models == nil && config.OpenAI.Pricing == nil {
-			presetName = "openai" // Default preset when no custom config
-		}
-	}
-
-	// Load preset if one was determined
-	if presetName != "" {
-		presetModels, presetPricing := loadPreset(presetName)
-		for model, category := range presetModels {
+	platformName := resolvePlatformForLoading(config)
+	if platformName != "" {
+		platformModels, platformPricing := loadPlatformDefaults(platformName)
+		for model, category := range platformModels {
 			customModels[model] = category
 		}
-		for model, pricing := range presetPricing {
+		for model, pricing := range platformPricing {
 			customPricing[model] = pricing
 		}
 	}
 
-	// Override with custom configuration if provided
 	if config.OpenAI != nil {
 		if config.OpenAI.Models != nil {
-			// Map reasoning models
 			for _, model := range config.OpenAI.Models.Reasoning {
 				customModels[model] = "reasoning"
 			}
-			// Map non-reasoning models
 			for _, model := range config.OpenAI.Models.NonReasoning {
 				customModels[model] = "non-reasoning"
 			}
@@ -1001,7 +1133,7 @@ func loadCustomConfiguration(config llmtypes.Config) (map[string]string, map[str
 // buildClientOptions constructs the OpenAI client options based on authentication mode.
 // Returns the options, whether Codex auth is being used, and any error.
 func buildClientOptions(config llmtypes.Config, log *logrus.Entry) ([]option.RequestOption, bool, error) {
-	useCodex := config.OpenAI != nil && config.OpenAI.Preset == "codex"
+	useCodex := resolvePlatformName(config) == "codex"
 
 	var opts []option.RequestOption
 	var err error
@@ -1015,7 +1147,6 @@ func buildClientOptions(config llmtypes.Config, log *logrus.Entry) ([]option.Req
 		return nil, useCodex, err
 	}
 
-	// Add error logging middleware
 	opts = append(opts, errorLoggingMiddleware(log))
 
 	return opts, useCodex, nil
@@ -1033,11 +1164,7 @@ func buildCodexAuthOptions(log *logrus.Entry) ([]option.RequestOption, error) {
 
 // buildAPIKeyAuthOptions returns client options for standard API key authentication.
 func buildAPIKeyAuthOptions(config llmtypes.Config, log *logrus.Entry) ([]option.RequestOption, error) {
-	apiKeyEnvVar := "OPENAI_API_KEY"
-	if config.OpenAI != nil && config.OpenAI.APIKeyEnvVar != "" {
-		apiKeyEnvVar = config.OpenAI.APIKeyEnvVar
-	}
-
+	apiKeyEnvVar := getAPIKeyEnvVar(config)
 	apiKey := os.Getenv(apiKeyEnvVar)
 	if apiKey == "" {
 		return nil, errors.Errorf("%s environment variable is required", apiKeyEnvVar)
@@ -1045,15 +1172,9 @@ func buildAPIKeyAuthOptions(config llmtypes.Config, log *logrus.Entry) ([]option
 
 	log.WithField("api_key_env_var", apiKeyEnvVar).Debug("using OpenAI API key for Responses API")
 
-	opts := []option.RequestOption{
-		option.WithAPIKey(apiKey),
-	}
-
-	// Add base URL if configured
-	if baseURL := os.Getenv("OPENAI_API_BASE"); baseURL != "" {
+	opts := []option.RequestOption{option.WithAPIKey(apiKey)}
+	if baseURL := getBaseURL(config); baseURL != "" {
 		opts = append(opts, option.WithBaseURL(baseURL))
-	} else if config.OpenAI != nil && config.OpenAI.BaseURL != "" {
-		opts = append(opts, option.WithBaseURL(config.OpenAI.BaseURL))
 	}
 
 	return opts, nil
@@ -1088,40 +1209,34 @@ func errorLoggingMiddleware(log *logrus.Entry) option.RequestOption {
 	})
 }
 
-// loadPreset loads a built-in preset configuration for popular providers.
-func loadPreset(presetName string) (map[string]string, map[string]llmtypes.ModelPricing) {
-	switch presetName {
+// loadPlatformDefaults loads built-in defaults for known OpenAI-compatible platforms.
+func loadPlatformDefaults(platformName string) (map[string]string, map[string]llmtypes.ModelPricing) {
+	switch normalizePlatformName(platformName) {
 	case "openai":
-		return loadPresetFromConfig(openaipreset.Models, openaipreset.Pricing)
+		return loadPlatformDefaultsFromConfig(openaipreset.Models, openaipreset.Pricing)
+	case "xai":
+		return loadPlatformDefaultsFromConfig(xai.Models, xai.Pricing)
 	case "codex":
-		return loadPresetFromConfig(codexpreset.Models, codexpreset.Pricing)
+		return loadPlatformDefaultsFromConfig(codexpreset.Models, codexpreset.Pricing)
 	default:
 		return nil, nil
 	}
 }
 
-// loadPresetFromConfig converts preset model and pricing configurations into the internal format.
-func loadPresetFromConfig(presetModels llmtypes.CustomModels, presetPricing llmtypes.CustomPricing) (map[string]string, map[string]llmtypes.ModelPricing) {
+// loadPlatformDefaultsFromConfig converts platform model and pricing defaults into the internal format.
+func loadPlatformDefaultsFromConfig(platformModels llmtypes.CustomModels, platformPricing llmtypes.CustomPricing) (map[string]string, map[string]llmtypes.ModelPricing) {
 	models := make(map[string]string)
 	pricing := make(map[string]llmtypes.ModelPricing)
 
-	// Map reasoning models
-	for _, model := range presetModels.Reasoning {
+	for _, model := range platformModels.Reasoning {
 		models[model] = "reasoning"
 	}
-	// Map non-reasoning models
-	for _, model := range presetModels.NonReasoning {
+	for _, model := range platformModels.NonReasoning {
 		models[model] = "non-reasoning"
 	}
 
-	// Load pricing
-	for model, p := range presetPricing {
-		pricing[model] = llmtypes.ModelPricing{
-			Input:         p.Input,
-			CachedInput:   p.CachedInput,
-			Output:        p.Output,
-			ContextWindow: p.ContextWindow,
-		}
+	for model, p := range platformPricing {
+		pricing[model] = p
 	}
 
 	return models, pricing
@@ -1145,7 +1260,7 @@ func (t *Thread) getPricing(model string) llmtypes.ModelPricing {
 	}
 }
 
-// isReasoningModelDynamic checks if a model supports reasoning using the preset configuration.
+// isReasoningModelDynamic checks if a model supports reasoning using loaded platform defaults/config.
 func (t *Thread) isReasoningModelDynamic(model string) bool {
 	if t.customModels != nil {
 		if category, ok := t.customModels[model]; ok {
@@ -1165,6 +1280,27 @@ type StreamableMessage struct {
 	Input      string // For tool use (JSON string)
 }
 
+const compactedHistoryNotice = "Context compacted"
+
+func itemsForDisplay(items []StoredInputItem) ([]StoredInputItem, bool) {
+	lastCompactionIdx := -1
+	for i, item := range items {
+		if item.Type == "compaction" || item.Type == "compaction_summary" {
+			lastCompactionIdx = i
+		}
+	}
+
+	if lastCompactionIdx < 0 {
+		return items, false
+	}
+
+	if lastCompactionIdx+1 >= len(items) {
+		return nil, true
+	}
+
+	return items[lastCompactionIdx+1:], true
+}
+
 // StreamMessages parses raw messages into streamable format for conversation streaming.
 func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltypes.StructuredToolResult) ([]StreamableMessage, error) {
 	var items []StoredInputItem
@@ -1172,9 +1308,18 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 		return nil, errors.Wrap(err, "error unmarshaling input items")
 	}
 
-	var streamable []StreamableMessage
+	displayItems, compacted := itemsForDisplay(items)
 
-	for _, item := range items {
+	streamable := make([]StreamableMessage, 0, len(displayItems)+1)
+	if compacted {
+		streamable = append(streamable, StreamableMessage{
+			Kind:    "text",
+			Role:    "assistant",
+			Content: compactedHistoryNotice,
+		})
+	}
+
+	for _, item := range displayItems {
 		switch item.Type {
 		case "reasoning":
 			// Add thinking message
@@ -1236,10 +1381,19 @@ func ExtractMessages(data []byte, toolResults map[string]tooltypes.StructuredToo
 		return nil, errors.Wrap(err, "error unmarshaling input items")
 	}
 
-	result := make([]llmtypes.Message, 0, len(items))
+	displayItems, compacted := itemsForDisplay(items)
+
+	result := make([]llmtypes.Message, 0, len(displayItems)+1)
+	if compacted {
+		result = append(result, llmtypes.Message{
+			Role:    "assistant",
+			Content: compactedHistoryNotice,
+		})
+	}
+
 	registry := renderers.NewRendererRegistry()
 
-	for _, item := range items {
+	for _, item := range displayItems {
 		switch item.Type {
 		case "reasoning":
 			// Add thinking message
@@ -1291,7 +1445,6 @@ func isInvalidPreviousResponseIDError(err error) bool {
 
 	errStr := err.Error()
 
-	// Check for common error messages related to invalid previous_response_id
 	invalidResponseIDPatterns := []string{
 		"previous_response_id",
 		"response not found",
@@ -1303,6 +1456,28 @@ func isInvalidPreviousResponseIDError(err error) bool {
 	for _, pattern := range invalidResponseIDPatterns {
 		if strings.Contains(strings.ToLower(errStr), pattern) {
 			return true
+		}
+	}
+
+	return false
+}
+
+func recordUsesResponsesAPI(metadata map[string]any) bool {
+	if len(metadata) == 0 {
+		return false
+	}
+
+	if modeRaw, ok := metadata["api_mode"]; ok {
+		if mode, ok := modeRaw.(string); ok {
+			if parsedMode, parsed := parseAPIMode(mode); parsed {
+				return parsedMode == llmtypes.OpenAIAPIModeResponses
+			}
+		}
+	}
+
+	if legacyRaw, ok := metadata["use_responses_api"]; ok {
+		if legacy, ok := legacyRaw.(bool); ok {
+			return legacy
 		}
 	}
 

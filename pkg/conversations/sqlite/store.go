@@ -78,15 +78,16 @@ func (s *Store) Save(ctx context.Context, record conversations.ConversationRecor
 	// Insert or update conversation summary with UPSERT to preserve created_at
 	summaryQuery := `
 		INSERT INTO conversation_summaries (
-			id, message_count, first_message, summary, provider, usage, created_at, updated_at
+			id, message_count, first_message, summary, provider, metadata, usage, created_at, updated_at
 		) VALUES (
-			:id, :message_count, :first_message, :summary, :provider, :usage, :created_at, :updated_at
+			:id, :message_count, :first_message, :summary, :provider, :metadata, :usage, :created_at, :updated_at
 		)
 		ON CONFLICT(id) DO UPDATE SET
 			message_count = excluded.message_count,
 			first_message = excluded.first_message,
 			summary = excluded.summary,
 			provider = excluded.provider,
+			metadata = excluded.metadata,
 			usage = excluded.usage,
 			updated_at = excluded.updated_at
 	`
@@ -183,7 +184,7 @@ func (s *Store) Query(ctx context.Context, options conversations.QueryOptions) (
 
 	// Build main query
 	baseQuery := `SELECT id, message_count, first_message, summary, provider,
-		usage, created_at, updated_at FROM conversation_summaries`
+		metadata, usage, created_at, updated_at FROM conversation_summaries`
 	if len(conditions) > 0 {
 		baseQuery += " WHERE " + strings.Join(conditions, " AND ")
 	}

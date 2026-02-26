@@ -23,7 +23,9 @@ const mockConversations: Conversation[] = [
     updatedAt: '2023-01-04T00:00:00Z',
     messageCount: 3,
     summary: 'Another test conversation summary',
-    provider: 'gpt-4',
+    provider: 'OpenAI',
+    platform: 'fireworks',
+    api_mode: 'chat_completions',
   },
 ];
 
@@ -51,7 +53,9 @@ describe('ConversationList', () => {
     // Verify metadata
     expect(screen.getByText('5')).toBeInTheDocument();
     expect(screen.getByText('3')).toBeInTheDocument();
-    expect(screen.getByText('gpt-4')).toBeInTheDocument();
+    expect(screen.getByText('OpenAI')).toBeInTheDocument();
+    expect(screen.getByText('fireworks')).toBeInTheDocument();
+    expect(screen.getByText('chat_completions')).toBeInTheDocument();
   });
 
   it('handles empty conversation list', () => {

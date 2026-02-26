@@ -4,61 +4,38 @@ package openai
 
 import (
 	"context"
-	"os"
-	"strings"
+	"encoding/json"
 
+	"github.com/jingkaihe/kodelet/pkg/llm/openai/responses"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
-
-	"github.com/jingkaihe/kodelet/pkg/llm/openai/responses"
 )
 
 // NewThread creates a new OpenAI thread based on the configuration.
 // It dispatches between the Chat Completions API and the Responses API
-// based on the UseResponsesAPI configuration setting.
-//
-// The API selection follows this priority:
-// 1. KODELET_OPENAI_USE_RESPONSES_API environment variable (if set)
-// 2. config.OpenAI.UseResponsesAPI configuration setting
-// 3. Default: Chat Completions API
+// based on api_mode with backward-compatible aliases.
 func NewThread(config llmtypes.Config) (llmtypes.Thread, error) {
 	log := logger.G(context.Background())
+	apiMode := resolveAPIMode(config)
 
-	// Check if we should use the Responses API
-	useResponsesAPI := shouldUseResponsesAPI(config)
-
-	log.WithField("use_responses_api", useResponsesAPI).
+	log.WithField("api_mode", apiMode).
+		WithField("platform", resolvePlatformName(config)).
 		WithField("config_openai_set", config.OpenAI != nil).
 		Debug("OpenAI factory dispatching to API implementation")
 
-	if useResponsesAPI {
+	if apiMode == llmtypes.OpenAIAPIModeResponses {
 		log.Debug("using OpenAI Responses API")
 		return responses.NewThread(config)
 	}
 
-	// Default to Chat Completions API
 	log.Debug("using OpenAI Chat Completions API")
 	return NewOpenAIThread(config)
 }
 
 // shouldUseResponsesAPI determines whether to use the Responses API based on configuration.
 func shouldUseResponsesAPI(config llmtypes.Config) bool {
-	// Environment variable takes precedence
-	if envValue := os.Getenv("KODELET_OPENAI_USE_RESPONSES_API"); envValue != "" {
-		return strings.EqualFold(envValue, "true") || envValue == "1"
-	}
-
-	// Check config setting
-	if config.OpenAI != nil {
-		// Codex preset always uses Responses API
-		if config.OpenAI.Preset == "codex" {
-			return true
-		}
-		return config.OpenAI.UseResponsesAPI
-	}
-
-	return false
+	return resolveAPIMode(config) == llmtypes.OpenAIAPIModeResponses
 }
 
 // ExtractResponsesMessages extracts messages from Responses API conversation data.
@@ -71,4 +48,31 @@ func ExtractResponsesMessages(rawMessages []byte, toolResults map[string]tooltyp
 // This is a wrapper around the responses package's StreamMessages function.
 func StreamResponsesMessages(rawMessages []byte, toolResults map[string]tooltypes.StructuredToolResult) ([]responses.StreamableMessage, error) {
 	return responses.StreamMessages(rawMessages, toolResults)
+}
+
+// RecordUsesResponsesMode determines if a conversation should be interpreted using Responses API parsing.
+func RecordUsesResponsesMode(metadata map[string]any, rawMessages []byte) bool {
+	if modeRaw, ok := metadata["api_mode"]; ok {
+		if mode, ok := modeRaw.(string); ok {
+			if parsedMode, parsed := parseAPIMode(mode); parsed {
+				return parsedMode == llmtypes.OpenAIAPIModeResponses
+			}
+		}
+	}
+
+	var generic []map[string]any
+	if err := json.Unmarshal(rawMessages, &generic); err != nil {
+		return false
+	}
+	if len(generic) == 0 {
+		return false
+	}
+	if kind, ok := generic[0]["type"].(string); ok {
+		switch kind {
+		case "message", "reasoning", "function_call", "function_call_output", "compaction", "compaction_summary":
+			return true
+		}
+	}
+
+	return false
 }

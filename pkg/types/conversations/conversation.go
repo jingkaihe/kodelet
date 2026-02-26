@@ -46,6 +46,7 @@ type ConversationSummary struct {
 	FirstMessage string         `json:"firstMessage"`
 	Summary      string         `json:"summary,omitempty"`
 	Provider     string         `json:"provider"`
+	Metadata     map[string]any `json:"metadata,omitempty"`
 	Usage        llmtypes.Usage `json:"usage"`
 	CreatedAt    time.Time      `json:"createdAt"`
 	UpdatedAt    time.Time      `json:"updatedAt"`
@@ -119,6 +120,7 @@ func (cr *ConversationRecord) ToSummary() ConversationSummary {
 		FirstMessage: firstMessage,
 		Summary:      cr.Summary,
 		Provider:     cr.Provider,
+		Metadata:     cr.Metadata,
 		Usage:        cr.Usage,
 		CreatedAt:    cr.CreatedAt,
 		UpdatedAt:    cr.UpdatedAt,

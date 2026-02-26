@@ -86,6 +86,7 @@ type GetConversationResponse struct {
 	Summary      string                                `json:"summary,omitempty"`
 	Usage        llmtypes.Usage                        `json:"usage"`
 	RawMessages  json.RawMessage                       `json:"rawMessages"`
+	Metadata     map[string]any                        `json:"metadata,omitempty"`
 	ToolResults  map[string]tools.StructuredToolResult `json:"toolResults,omitempty"`
 	MessageCount int                                   `json:"messageCount"`
 }
@@ -196,6 +197,7 @@ func (s *ConversationService) GetConversation(ctx context.Context, id string) (*
 		Summary:      record.Summary,
 		Usage:        record.Usage,
 		RawMessages:  record.RawMessages,
+		Metadata:     record.Metadata,
 		ToolResults:  record.ToolResults,
 		MessageCount: messageCount,
 	}

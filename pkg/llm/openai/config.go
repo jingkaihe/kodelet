@@ -2,50 +2,121 @@ package openai
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
+	codexpreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/codex"
 	openaipreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/openai"
 	"github.com/jingkaihe/kodelet/pkg/llm/openai/preset/xai"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
 
-// loadCustomConfiguration loads custom models and pricing from configuration
-// It processes presets first, then applies custom overrides if provided
+const defaultOpenAIPlatform = "openai"
+
+func normalizePlatformName(name string) string {
+	return strings.ToLower(strings.TrimSpace(name))
+}
+
+func resolvePlatformName(config llmtypes.Config) string {
+	if config.OpenAI == nil {
+		return defaultOpenAIPlatform
+	}
+
+	if platform := normalizePlatformName(config.OpenAI.Platform); platform != "" {
+		return platform
+	}
+
+	return defaultOpenAIPlatform
+}
+
+func resolvePlatformForLoading(config llmtypes.Config) string {
+	if config.OpenAI == nil {
+		return defaultOpenAIPlatform
+	}
+
+	if platform := normalizePlatformName(config.OpenAI.Platform); platform != "" {
+		return platform
+	}
+
+	if config.OpenAI.Models == nil && config.OpenAI.Pricing == nil {
+		return defaultOpenAIPlatform
+	}
+
+	return ""
+}
+
+func parseAPIMode(raw string) (llmtypes.OpenAIAPIMode, bool) {
+	normalized := strings.ToLower(strings.TrimSpace(raw))
+	normalized = strings.ReplaceAll(normalized, "-", "_")
+
+	switch normalized {
+	case "chat", "chat_completions", "chatcompletions":
+		return llmtypes.OpenAIAPIModeChatCompletions, true
+	case "responses", "responses_api", "response":
+		return llmtypes.OpenAIAPIModeResponses, true
+	default:
+		return "", false
+	}
+}
+
+func resolveAPIMode(config llmtypes.Config) llmtypes.OpenAIAPIMode {
+	if resolvePlatformName(config) == "codex" {
+		return llmtypes.OpenAIAPIModeResponses
+	}
+
+	if envMode := os.Getenv("KODELET_OPENAI_API_MODE"); envMode != "" {
+		if mode, ok := parseAPIMode(envMode); ok {
+			return mode
+		}
+	}
+
+	if envValue := os.Getenv("KODELET_OPENAI_USE_RESPONSES_API"); envValue != "" {
+		if strings.EqualFold(envValue, "true") || envValue == "1" {
+			return llmtypes.OpenAIAPIModeResponses
+		}
+		return llmtypes.OpenAIAPIModeChatCompletions
+	}
+
+	if config.OpenAI == nil {
+		return llmtypes.OpenAIAPIModeChatCompletions
+	}
+
+	if mode, ok := parseAPIMode(string(config.OpenAI.APIMode)); ok {
+		return mode
+	}
+
+	if config.OpenAI.ResponsesAPI != nil {
+		if *config.OpenAI.ResponsesAPI {
+			return llmtypes.OpenAIAPIModeResponses
+		}
+		return llmtypes.OpenAIAPIModeChatCompletions
+	}
+
+	if config.OpenAI.UseResponsesAPI {
+		return llmtypes.OpenAIAPIModeResponses
+	}
+
+	return llmtypes.OpenAIAPIModeChatCompletions
+}
+
+// loadCustomConfiguration loads custom models and pricing from configuration.
+// It loads platform defaults first, then applies custom overrides if provided.
 func loadCustomConfiguration(config llmtypes.Config) (*llmtypes.CustomModels, llmtypes.CustomPricing) {
 	var models *llmtypes.CustomModels
 	var pricing llmtypes.CustomPricing
 
-	// Determine which preset to use
-	presetName := ""
-	if config.OpenAI == nil {
-		// No OpenAI config at all, use default preset
-		presetName = "openai"
-	} else if config.OpenAI.Preset != "" {
-		// Explicit preset specified
-		presetName = config.OpenAI.Preset
-	} else {
-		// OpenAI config exists but no preset (empty string means no preset)
-		// Check if we have custom models/pricing, if not, use default preset
-		if config.OpenAI.Models == nil && config.OpenAI.Pricing == nil {
-			presetName = "openai" // Default preset when no custom config
-		}
-		// Otherwise, no preset (empty presetName)
+	platformName := resolvePlatformForLoading(config)
+	if platformName != "" {
+		platformModels, platformPricing := loadPlatformDefaults(platformName)
+		models = platformModels
+		pricing = platformPricing
 	}
 
-	// Load preset if one was determined
-	if presetName != "" {
-		presetModels, presetPricing := loadPreset(presetName)
-		models = presetModels
-		pricing = presetPricing
-	}
-
-	// Override with custom configuration if provided
 	if config.OpenAI != nil {
 		if config.OpenAI.Models != nil {
 			if models == nil {
 				models = &llmtypes.CustomModels{}
 			}
-			// If custom models are specified, override the preset completely
 			models.Reasoning = config.OpenAI.Models.Reasoning
 			models.NonReasoning = config.OpenAI.Models.NonReasoning
 		}
@@ -60,7 +131,6 @@ func loadCustomConfiguration(config llmtypes.Config) (*llmtypes.CustomModels, ll
 		}
 	}
 
-	// Auto-populate NonReasoning if not explicitly set
 	if models != nil && len(models.NonReasoning) == 0 && len(models.Reasoning) > 0 && pricing != nil {
 		reasoningSet := make(map[string]bool)
 		for _, model := range models.Reasoning {
@@ -77,27 +147,27 @@ func loadCustomConfiguration(config llmtypes.Config) (*llmtypes.CustomModels, ll
 	return models, pricing
 }
 
-// loadPreset loads a built-in preset configuration for popular providers
-func loadPreset(presetName string) (*llmtypes.CustomModels, llmtypes.CustomPricing) {
-	switch presetName {
+// loadPlatformDefaults loads built-in defaults for known OpenAI-compatible platforms.
+func loadPlatformDefaults(platformName string) (*llmtypes.CustomModels, llmtypes.CustomPricing) {
+	switch normalizePlatformName(platformName) {
 	case "openai":
-		return loadOpenAIPreset()
+		return loadOpenAIPlatformDefaults()
 	case "xai":
-		return loadXAIGrokPreset()
+		return loadXAIPlatformDefaults()
+	case "codex":
+		return loadCodexPlatformDefaults()
 	default:
 		return nil, nil
 	}
 }
 
-// loadOpenAIPreset loads the complete OpenAI configuration
-func loadOpenAIPreset() (*llmtypes.CustomModels, llmtypes.CustomPricing) {
-	// Convert openaipreset.Models to llmtypes.CustomModels
+// loadOpenAIPlatformDefaults loads the complete OpenAI platform defaults.
+func loadOpenAIPlatformDefaults() (*llmtypes.CustomModels, llmtypes.CustomPricing) {
 	models := &llmtypes.CustomModels{
 		Reasoning:    openaipreset.Models.Reasoning,
 		NonReasoning: openaipreset.Models.NonReasoning,
 	}
 
-	// Convert openaipreset.Pricing to llmtypes.CustomPricing
 	pricing := make(llmtypes.CustomPricing)
 	for model, openaiPricing := range openaipreset.Pricing {
 		pricing[model] = llmtypes.ModelPricing{
@@ -111,15 +181,13 @@ func loadOpenAIPreset() (*llmtypes.CustomModels, llmtypes.CustomPricing) {
 	return models, pricing
 }
 
-// loadXAIGrokPreset loads the complete xAI Grok configuration
-func loadXAIGrokPreset() (*llmtypes.CustomModels, llmtypes.CustomPricing) {
-	// Convert xai.Models to llmtypes.CustomModels
+// loadXAIPlatformDefaults loads the complete xAI platform defaults.
+func loadXAIPlatformDefaults() (*llmtypes.CustomModels, llmtypes.CustomPricing) {
 	models := &llmtypes.CustomModels{
 		Reasoning:    xai.Models.Reasoning,
 		NonReasoning: xai.Models.NonReasoning,
 	}
 
-	// Convert xai.Pricing to llmtypes.CustomPricing
 	pricing := make(llmtypes.CustomPricing)
 	for model, xaiPricing := range xai.Pricing {
 		pricing[model] = llmtypes.ModelPricing{
@@ -133,87 +201,116 @@ func loadXAIGrokPreset() (*llmtypes.CustomModels, llmtypes.CustomPricing) {
 	return models, pricing
 }
 
-// getPresetBaseURL returns the base URL for a given preset
-func getPresetBaseURL(presetName string) string {
-	switch presetName {
+func loadCodexPlatformDefaults() (*llmtypes.CustomModels, llmtypes.CustomPricing) {
+	models := &llmtypes.CustomModels{
+		Reasoning:    codexpreset.Models.Reasoning,
+		NonReasoning: codexpreset.Models.NonReasoning,
+	}
+
+	pricing := make(llmtypes.CustomPricing)
+	for model, codexPricing := range codexpreset.Pricing {
+		pricing[model] = llmtypes.ModelPricing{
+			Input:         codexPricing.Input,
+			CachedInput:   codexPricing.CachedInput,
+			Output:        codexPricing.Output,
+			ContextWindow: codexPricing.ContextWindow,
+		}
+	}
+
+	return models, pricing
+}
+
+// getPlatformBaseURL returns the default base URL for a given platform.
+func getPlatformBaseURL(platformName string) string {
+	switch normalizePlatformName(platformName) {
 	case "openai":
 		return openaipreset.BaseURL
 	case "xai":
 		return xai.BaseURL
+	case "codex":
+		return codexpreset.BaseURL
 	default:
 		return ""
 	}
 }
 
-// getPresetAPIKeyEnvVar returns the environment variable name for the API key for a given preset
-func getPresetAPIKeyEnvVar(presetName string) string {
-	switch presetName {
-	case "openai":
+// getPlatformAPIKeyEnvVar returns the default API key environment variable for a given platform.
+func getPlatformAPIKeyEnvVar(platformName string) string {
+	switch normalizePlatformName(platformName) {
+	case "openai", "codex":
 		return openaipreset.APIKeyEnvVar
 	case "xai":
 		return xai.APIKeyEnvVar
 	default:
-		return "OPENAI_API_KEY" // default fallback
+		return "OPENAI_API_KEY"
 	}
 }
 
-// GetAPIKeyEnvVar returns the API key environment variable name from configuration
-// Priority: custom api_key_env_var > preset default > fallback to OPENAI_API_KEY
+// GetAPIKeyEnvVar returns the API key environment variable name from configuration.
+// Priority: custom api_key_env_var > platform default > fallback to OPENAI_API_KEY.
 func GetAPIKeyEnvVar(config llmtypes.Config) string {
-	// Check for custom api_key_env_var first
 	if config.OpenAI != nil && config.OpenAI.APIKeyEnvVar != "" {
 		return config.OpenAI.APIKeyEnvVar
 	}
 
-	// Check preset default
-	if config.OpenAI != nil && config.OpenAI.Preset != "" {
-		return getPresetAPIKeyEnvVar(config.OpenAI.Preset)
+	return getPlatformAPIKeyEnvVar(resolvePlatformName(config))
+}
+
+// GetConfiguredBaseURL returns only explicit base URL overrides from environment or config.
+func GetConfiguredBaseURL(config llmtypes.Config) string {
+	if baseURL := os.Getenv("OPENAI_API_BASE"); baseURL != "" {
+		return baseURL
 	}
 
-	// Fallback to default
-	return "OPENAI_API_KEY"
+	if config.OpenAI != nil && config.OpenAI.BaseURL != "" {
+		return config.OpenAI.BaseURL
+	}
+
+	return ""
+}
+
+// GetBaseURL returns the base URL resolved from environment, config, and platform defaults.
+func GetBaseURL(config llmtypes.Config) string {
+	if configuredBaseURL := GetConfiguredBaseURL(config); configuredBaseURL != "" {
+		return configuredBaseURL
+	}
+
+	return getPlatformBaseURL(resolvePlatformName(config))
 }
 
 // validateCustomConfiguration validates the custom OpenAI configuration
 func validateCustomConfiguration(config llmtypes.Config) error {
 	if config.OpenAI == nil {
-		return nil // No custom configuration to validate
+		return nil
 	}
 
-	// Validate preset name if specified
-	if config.OpenAI.Preset != "" {
-		validPresets := []string{"openai", "xai"}
-		isValidPreset := false
-		for _, preset := range validPresets {
-			if config.OpenAI.Preset == preset {
-				isValidPreset = true
-				break
-			}
-		}
-		if !isValidPreset {
-			return fmt.Errorf("invalid preset '%s', valid presets are: %v", config.OpenAI.Preset, validPresets)
+	platform := normalizePlatformName(config.OpenAI.Platform)
+
+	if config.OpenAI.Platform != "" && platform == "" {
+		return fmt.Errorf("platform cannot be empty or whitespace")
+	}
+
+	if config.OpenAI.APIMode != "" {
+		if _, ok := parseAPIMode(string(config.OpenAI.APIMode)); !ok {
+			return fmt.Errorf("invalid api_mode '%s', valid values are: chat_completions, responses", config.OpenAI.APIMode)
 		}
 	}
 
-	// Validate base URL format if specified
 	if config.OpenAI.BaseURL != "" {
 		if !strings.HasPrefix(config.OpenAI.BaseURL, "http://") && !strings.HasPrefix(config.OpenAI.BaseURL, "https://") {
 			return fmt.Errorf("base_url must start with http:// or https://")
 		}
 	}
 
-	// Validate API key environment variable format if specified
 	if config.OpenAI.APIKeyEnvVar != "" {
 		if strings.TrimSpace(config.OpenAI.APIKeyEnvVar) == "" {
 			return fmt.Errorf("api_key_env_var cannot be empty or whitespace")
 		}
-		// Check for common problematic characters that might cause issues
 		if strings.ContainsAny(config.OpenAI.APIKeyEnvVar, " \t\n\r") {
 			return fmt.Errorf("api_key_env_var cannot contain whitespace characters")
 		}
 	}
 
-	// Validate pricing configuration if specified
 	if config.OpenAI.Pricing != nil {
 		for model, pricing := range config.OpenAI.Pricing {
 			if pricing.Input < 0 {

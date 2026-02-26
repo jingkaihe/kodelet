@@ -219,7 +219,7 @@ func TestDisplayConversationHeader(t *testing.T) {
 	}
 
 	output := captureStdout(t, func() {
-		displayConversationHeader(record)
+		displayConversationHeader(record, record.Provider, "", "")
 	})
 
 	assert.Contains(t, output, "test-conv-123")
@@ -250,7 +250,7 @@ func TestDisplayConversationHeaderWithoutCache(t *testing.T) {
 	}
 
 	output := captureStdout(t, func() {
-		displayConversationHeader(record)
+		displayConversationHeader(record, record.Provider, "", "")
 	})
 
 	assert.Contains(t, output, "test-conv-456")
@@ -275,7 +275,7 @@ func TestDisplayConversationHeaderWithoutSummary(t *testing.T) {
 	}
 
 	output := captureStdout(t, func() {
-		displayConversationHeader(record)
+		displayConversationHeader(record, record.Provider, "", "")
 	})
 
 	assert.Contains(t, output, "test-conv-789")
@@ -338,6 +338,79 @@ func TestConversationShowOutputJSONStatsOnly(t *testing.T) {
 	assert.Contains(t, jsonStr, `"provider": "openai"`)
 	assert.NotContains(t, jsonStr, `"messages"`)
 	assert.NotContains(t, jsonStr, `"summary"`)
+}
+
+func TestDisplayProviderName(t *testing.T) {
+	tests := []struct {
+		name     string
+		provider string
+		expected string
+	}{
+		{
+			name:     "openai provider",
+			provider: "openai",
+			expected: "OpenAI",
+		},
+		{
+			name:     "openai responses legacy provider",
+			provider: "openai-responses",
+			expected: "OpenAI",
+		},
+		{
+			name:     "anthropic provider",
+			provider: "anthropic",
+			expected: "Anthropic",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, displayProviderName(tt.provider))
+		})
+	}
+}
+
+func TestExtractProviderMetadata(t *testing.T) {
+	tests := []struct {
+		name             string
+		provider         string
+		metadata         map[string]any
+		expectedPlatform string
+		expectedAPIMode  string
+	}{
+		{
+			name:     "openai metadata",
+			provider: "openai",
+			metadata: map[string]any{
+				"platform": "Fireworks",
+				"api_mode": "responses_api",
+			},
+			expectedPlatform: "fireworks",
+			expectedAPIMode:  "responses",
+		},
+		{
+			name:             "legacy openai responses provider without metadata",
+			provider:         "openai-responses",
+			metadata:         map[string]any{},
+			expectedPlatform: "",
+			expectedAPIMode:  "responses",
+		},
+		{
+			name:             "non-openai provider",
+			provider:         "anthropic",
+			metadata:         map[string]any{"platform": "x", "api_mode": "chat"},
+			expectedPlatform: "x",
+			expectedAPIMode:  "chat_completions",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			platform, apiMode := extractProviderMetadata(tt.provider, tt.metadata)
+			assert.Equal(t, tt.expectedPlatform, platform)
+			assert.Equal(t, tt.expectedAPIMode, apiMode)
+		})
+	}
 }
 
 func captureStdout(t *testing.T, f func()) string {

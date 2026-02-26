@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -9,7 +10,7 @@ import (
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
 
-// Define expected OpenAI preset models once to avoid duplication
+// Define expected OpenAI platform defaults once to avoid duplication
 var (
 	expectedOpenAIReasoningModels = []string{
 		"gpt-5.2", "gpt-5.2-pro",
@@ -37,7 +38,7 @@ func TestLoadCustomConfiguration(t *testing.T) {
 		hasPricing bool
 	}{
 		{
-			name:   "no custom config uses openai preset",
+			name:   "no custom config uses openai platform defaults",
 			config: llmtypes.Config{},
 			expected: &llmtypes.CustomModels{
 				Reasoning:    expectedOpenAIReasoningModels,
@@ -47,10 +48,10 @@ func TestLoadCustomConfiguration(t *testing.T) {
 			hasPricing: true,
 		},
 		{
-			name: "explicit openai preset",
+			name: "explicit openai platform",
 			config: llmtypes.Config{
 				OpenAI: &llmtypes.OpenAIConfig{
-					Preset: "openai",
+					Platform: "openai",
 				},
 			},
 			expected: &llmtypes.CustomModels{
@@ -61,10 +62,10 @@ func TestLoadCustomConfiguration(t *testing.T) {
 			hasPricing: true,
 		},
 		{
-			name: "xai preset",
+			name: "xai platform",
 			config: llmtypes.Config{
 				OpenAI: &llmtypes.OpenAIConfig{
-					Preset: "xai",
+					Platform: "xai",
 				},
 			},
 			expected: &llmtypes.CustomModels{
@@ -82,10 +83,10 @@ func TestLoadCustomConfiguration(t *testing.T) {
 			hasPricing: true,
 		},
 		{
-			name: "custom models only (no preset)",
+			name: "custom models only (no platform defaults)",
 			config: llmtypes.Config{
 				OpenAI: &llmtypes.OpenAIConfig{
-					Preset: "", // Explicitly empty preset
+					Platform: "", // Explicitly empty platform
 					Models: &llmtypes.CustomModels{
 						Reasoning:    []string{"custom-reasoning-model"},
 						NonReasoning: []string{"custom-regular-model"},
@@ -97,13 +98,13 @@ func TestLoadCustomConfiguration(t *testing.T) {
 				NonReasoning: []string{"custom-regular-model"},
 			},
 			hasModels:  true,
-			hasPricing: false, // No preset loaded since explicitly empty
+			hasPricing: false, // No platform defaults loaded when platform is explicitly empty
 		},
 		{
-			name: "preset with custom override",
+			name: "xai platform with custom override",
 			config: llmtypes.Config{
 				OpenAI: &llmtypes.OpenAIConfig{
-					Preset: "xai",
+					Platform: "xai",
 					Models: &llmtypes.CustomModels{
 						Reasoning: []string{"custom-override-model"},
 					},
@@ -111,7 +112,7 @@ func TestLoadCustomConfiguration(t *testing.T) {
 			},
 			expected: &llmtypes.CustomModels{
 				Reasoning: []string{"custom-override-model"},
-				// Auto-populated from preset pricing since reasoning was overridden but non-reasoning wasn't
+				// Auto-populated from platform pricing since reasoning was overridden but non-reasoning wasn't
 				NonReasoning: []string{"grok-3", "grok-3-mini", "grok-2-image-1212", "grok-code-fast-1", "grok-4-0709"},
 			},
 			hasModels:  true,
@@ -121,7 +122,7 @@ func TestLoadCustomConfiguration(t *testing.T) {
 			name: "auto-populate non-reasoning models",
 			config: llmtypes.Config{
 				OpenAI: &llmtypes.OpenAIConfig{
-					Preset: "", // Explicitly empty preset to avoid default OpenAI preset loading
+					Platform: "", // Explicitly empty platform to avoid default OpenAI platform loading
 					Models: &llmtypes.CustomModels{
 						Reasoning: []string{"model-a"},
 					},
@@ -162,8 +163,8 @@ func TestLoadCustomConfiguration(t *testing.T) {
 	}
 }
 
-func TestLoadXAIGrokPreset(t *testing.T) {
-	models, pricing := loadXAIGrokPreset()
+func TestLoadXAIPlatformDefaults(t *testing.T) {
+	models, pricing := loadXAIPlatformDefaults()
 
 	require.NotNil(t, models)
 	require.NotNil(t, pricing)
@@ -190,8 +191,8 @@ func TestLoadXAIGrokPreset(t *testing.T) {
 	assert.Equal(t, 131072, grok3MiniPricing.ContextWindow)
 }
 
-func TestLoadOpenAIPreset(t *testing.T) {
-	models, pricing := loadOpenAIPreset()
+func TestLoadOpenAIPlatformDefaults(t *testing.T) {
+	models, pricing := loadOpenAIPlatformDefaults()
 
 	require.NotNil(t, models)
 	require.NotNil(t, pricing)
@@ -232,63 +233,71 @@ func TestLoadOpenAIPreset(t *testing.T) {
 	}
 }
 
-func TestGetPresetBaseURL(t *testing.T) {
+func TestGetPlatformBaseURL(t *testing.T) {
 	tests := []struct {
-		preset   string
+		platform string
 		expected string
 	}{
 		{
-			preset:   "openai",
+			platform: "openai",
 			expected: "https://api.openai.com/v1",
 		},
 		{
-			preset:   "xai",
+			platform: "xai",
 			expected: "https://api.x.ai/v1",
 		},
 		{
-			preset:   "unknown-preset",
+			platform: "codex",
+			expected: "https://chatgpt.com/backend-api/codex",
+		},
+		{
+			platform: "fireworks",
 			expected: "",
 		},
 		{
-			preset:   "",
+			platform: "",
 			expected: "",
 		},
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.preset, func(t *testing.T) {
-			result := getPresetBaseURL(tt.preset)
+		t.Run(tt.platform, func(t *testing.T) {
+			result := getPlatformBaseURL(tt.platform)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
 }
 
-func TestGetPresetAPIKeyEnvVar(t *testing.T) {
+func TestGetPlatformAPIKeyEnvVar(t *testing.T) {
 	tests := []struct {
-		preset   string
+		platform string
 		expected string
 	}{
 		{
-			preset:   "openai",
+			platform: "openai",
 			expected: "OPENAI_API_KEY",
 		},
 		{
-			preset:   "xai",
+			platform: "xai",
 			expected: "XAI_API_KEY",
 		},
 		{
-			preset:   "unknown-preset",
-			expected: "OPENAI_API_KEY", // fallback
+			platform: "codex",
+			expected: "OPENAI_API_KEY",
 		},
 		{
-			preset:   "",
-			expected: "OPENAI_API_KEY", // fallback
+			platform: "fireworks",
+			expected: "OPENAI_API_KEY",
+		},
+		{
+			platform: "",
+			expected: "OPENAI_API_KEY",
 		},
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.preset, func(t *testing.T) {
-			result := getPresetAPIKeyEnvVar(tt.preset)
+		t.Run(tt.platform, func(t *testing.T) {
+			result := getPlatformAPIKeyEnvVar(tt.platform)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
@@ -309,23 +318,23 @@ func TestGetAPIKeyEnvVar(t *testing.T) {
 			expected: "OPENAI_API_KEY",
 		},
 		{
-			name: "openai preset uses OPENAI_API_KEY",
+			name: "openai platform uses OPENAI_API_KEY",
 			config: llmtypes.Config{
 				Provider: "openai",
 				Model:    "gpt-4.1",
 				OpenAI: &llmtypes.OpenAIConfig{
-					Preset: "openai",
+					Platform: "openai",
 				},
 			},
 			expected: "OPENAI_API_KEY",
 		},
 		{
-			name: "xai preset uses XAI_API_KEY",
+			name: "xai platform uses XAI_API_KEY",
 			config: llmtypes.Config{
 				Provider: "openai",
 				Model:    "grok-3",
 				OpenAI: &llmtypes.OpenAIConfig{
-					Preset: "xai",
+					Platform: "xai",
 				},
 			},
 			expected: "XAI_API_KEY",
@@ -342,35 +351,46 @@ func TestGetAPIKeyEnvVar(t *testing.T) {
 			expected: "MY_CUSTOM_API_KEY",
 		},
 		{
-			name: "custom api_key_env_var overrides preset",
+			name: "custom api_key_env_var overrides platform",
 			config: llmtypes.Config{
 				Provider: "openai",
 				Model:    "grok-3",
 				OpenAI: &llmtypes.OpenAIConfig{
-					Preset:       "xai",
+					Platform:     "xai",
 					APIKeyEnvVar: "MY_CUSTOM_XAI_KEY",
 				},
 			},
 			expected: "MY_CUSTOM_XAI_KEY",
 		},
 		{
-			name: "unknown preset falls back to OPENAI_API_KEY",
+			name: "codex platform uses OPENAI_API_KEY",
 			config: llmtypes.Config{
 				Provider: "openai",
-				Model:    "some-model",
+				Model:    "gpt-5.2-codex",
 				OpenAI: &llmtypes.OpenAIConfig{
-					Preset: "unknown-preset",
+					Platform: "codex",
 				},
 			},
 			expected: "OPENAI_API_KEY",
 		},
 		{
-			name: "empty preset with no custom env var falls back to OPENAI_API_KEY",
+			name: "unknown platform falls back to OPENAI_API_KEY",
 			config: llmtypes.Config{
 				Provider: "openai",
 				Model:    "some-model",
 				OpenAI: &llmtypes.OpenAIConfig{
-					Preset: "",
+					Platform: "unknown-platform",
+				},
+			},
+			expected: "OPENAI_API_KEY",
+		},
+		{
+			name: "empty platform with no custom env var falls back to OPENAI_API_KEY",
+			config: llmtypes.Config{
+				Provider: "openai",
+				Model:    "some-model",
+				OpenAI: &llmtypes.OpenAIConfig{
+					Platform: "",
 				},
 			},
 			expected: "OPENAI_API_KEY",
@@ -381,6 +401,231 @@ func TestGetAPIKeyEnvVar(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result := GetAPIKeyEnvVar(tt.config)
 			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestResolveAPIMode(t *testing.T) {
+	resetEnv := func() {
+		os.Unsetenv("KODELET_OPENAI_API_MODE")
+		os.Unsetenv("KODELET_OPENAI_USE_RESPONSES_API")
+	}
+	resetEnv()
+	defer resetEnv()
+
+	trueValue := true
+	falseValue := false
+
+	tests := []struct {
+		name     string
+		config   llmtypes.Config
+		envMode  string
+		envBool  string
+		expected llmtypes.OpenAIAPIMode
+	}{
+		{
+			name:     "default is chat completions",
+			config:   llmtypes.Config{},
+			expected: llmtypes.OpenAIAPIModeChatCompletions,
+		},
+		{
+			name:     "api_mode responses",
+			config:   llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{APIMode: llmtypes.OpenAIAPIModeResponses}},
+			expected: llmtypes.OpenAIAPIModeResponses,
+		},
+		{
+			name:     "legacy responses_api true",
+			config:   llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{ResponsesAPI: &trueValue}},
+			expected: llmtypes.OpenAIAPIModeResponses,
+		},
+		{
+			name:     "legacy responses_api false",
+			config:   llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{ResponsesAPI: &falseValue}},
+			expected: llmtypes.OpenAIAPIModeChatCompletions,
+		},
+		{
+			name:     "legacy use_responses_api true",
+			config:   llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{UseResponsesAPI: true}},
+			expected: llmtypes.OpenAIAPIModeResponses,
+		},
+		{
+			name:     "env api mode overrides config",
+			config:   llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{APIMode: llmtypes.OpenAIAPIModeChatCompletions}},
+			envMode:  "responses",
+			expected: llmtypes.OpenAIAPIModeResponses,
+		},
+		{
+			name:     "legacy env bool true",
+			config:   llmtypes.Config{},
+			envBool:  "true",
+			expected: llmtypes.OpenAIAPIModeResponses,
+		},
+		{
+			name:     "platform codex always responses",
+			config:   llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{Platform: "codex"}},
+			expected: llmtypes.OpenAIAPIModeResponses,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resetEnv()
+			if tt.envMode != "" {
+				os.Setenv("KODELET_OPENAI_API_MODE", tt.envMode)
+			}
+			if tt.envBool != "" {
+				os.Setenv("KODELET_OPENAI_USE_RESPONSES_API", tt.envBool)
+			}
+
+			assert.Equal(t, tt.expected, resolveAPIMode(tt.config))
+		})
+	}
+}
+
+func TestGetBaseURL(t *testing.T) {
+	os.Unsetenv("OPENAI_API_BASE")
+	defer os.Unsetenv("OPENAI_API_BASE")
+
+	tests := []struct {
+		name     string
+		config   llmtypes.Config
+		envBase  string
+		expected string
+	}{
+		{
+			name:     "default openai base",
+			config:   llmtypes.Config{},
+			expected: "https://api.openai.com/v1",
+		},
+		{
+			name:     "xai platform base",
+			config:   llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{Platform: "xai"}},
+			expected: "https://api.x.ai/v1",
+		},
+		{
+			name:     "codex platform base",
+			config:   llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{Platform: "codex"}},
+			expected: "https://chatgpt.com/backend-api/codex",
+		},
+		{
+			name:     "custom base overrides platform",
+			config:   llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{Platform: "xai", BaseURL: "https://custom.example/v1"}},
+			expected: "https://custom.example/v1",
+		},
+		{
+			name:     "env base overrides everything",
+			config:   llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{BaseURL: "https://custom.example/v1"}},
+			envBase:  "https://env.example/v1",
+			expected: "https://env.example/v1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			os.Unsetenv("OPENAI_API_BASE")
+			if tt.envBase != "" {
+				os.Setenv("OPENAI_API_BASE", tt.envBase)
+			}
+			assert.Equal(t, tt.expected, GetBaseURL(tt.config))
+		})
+	}
+}
+
+func TestGetConfiguredBaseURL(t *testing.T) {
+	os.Unsetenv("OPENAI_API_BASE")
+	defer os.Unsetenv("OPENAI_API_BASE")
+
+	tests := []struct {
+		name     string
+		config   llmtypes.Config
+		envBase  string
+		expected string
+	}{
+		{
+			name:     "no explicit base url",
+			config:   llmtypes.Config{},
+			expected: "",
+		},
+		{
+			name:     "platform default is not treated as explicit override",
+			config:   llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{Platform: "xai"}},
+			expected: "",
+		},
+		{
+			name:     "config base url override",
+			config:   llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{BaseURL: "https://custom.example/v1"}},
+			expected: "https://custom.example/v1",
+		},
+		{
+			name:     "env base url override",
+			config:   llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{BaseURL: "https://custom.example/v1"}},
+			envBase:  "https://env.example/v1",
+			expected: "https://env.example/v1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			os.Unsetenv("OPENAI_API_BASE")
+			if tt.envBase != "" {
+				os.Setenv("OPENAI_API_BASE", tt.envBase)
+			}
+			assert.Equal(t, tt.expected, GetConfiguredBaseURL(tt.config))
+		})
+	}
+}
+
+func TestResolveClientBaseURL(t *testing.T) {
+	os.Unsetenv("OPENAI_API_BASE")
+	defer os.Unsetenv("OPENAI_API_BASE")
+
+	tests := []struct {
+		name       string
+		config     llmtypes.Config
+		useCopilot bool
+		envBase    string
+		expected   string
+	}{
+		{
+			name:       "copilot uses copilot endpoint by default",
+			config:     llmtypes.Config{},
+			useCopilot: true,
+			expected:   "https://api.githubcopilot.com",
+		},
+		{
+			name:       "copilot ignores platform default endpoint",
+			config:     llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{Platform: "xai"}},
+			useCopilot: true,
+			expected:   "https://api.githubcopilot.com",
+		},
+		{
+			name:       "copilot respects explicit config base override",
+			config:     llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{BaseURL: "https://custom.example/v1"}},
+			useCopilot: true,
+			expected:   "https://custom.example/v1",
+		},
+		{
+			name:       "copilot respects env base override",
+			config:     llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{BaseURL: "https://custom.example/v1"}},
+			useCopilot: true,
+			envBase:    "https://env.example/v1",
+			expected:   "https://env.example/v1",
+		},
+		{
+			name:       "non-copilot uses resolved provider base",
+			config:     llmtypes.Config{},
+			useCopilot: false,
+			expected:   "https://api.openai.com/v1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			os.Unsetenv("OPENAI_API_BASE")
+			if tt.envBase != "" {
+				os.Setenv("OPENAI_API_BASE", tt.envBase)
+			}
+			assert.Equal(t, tt.expected, resolveClientBaseURL(tt.config, tt.useCopilot))
 		})
 	}
 }
@@ -398,32 +643,59 @@ func TestValidateCustomConfiguration(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name: "valid preset openai",
+			name: "valid built-in platform openai",
 			config: llmtypes.Config{
 				OpenAI: &llmtypes.OpenAIConfig{
-					Preset: "openai",
+					Platform: "openai",
 				},
 			},
 			expectError: false,
 		},
 		{
-			name: "valid preset xai",
+			name: "valid built-in platform xai",
 			config: llmtypes.Config{
 				OpenAI: &llmtypes.OpenAIConfig{
-					Preset: "xai",
+					Platform: "xai",
 				},
 			},
 			expectError: false,
 		},
 		{
-			name: "invalid preset",
+			name: "valid built-in platform codex",
 			config: llmtypes.Config{
 				OpenAI: &llmtypes.OpenAIConfig{
-					Preset: "invalid-preset",
+					Platform: "codex",
+				},
+			},
+			expectError: false,
+		},
+		{
+			name: "valid custom platform fireworks",
+			config: llmtypes.Config{
+				OpenAI: &llmtypes.OpenAIConfig{
+					Platform: "fireworks",
+				},
+			},
+			expectError: false,
+		},
+		{
+			name: "valid api mode",
+			config: llmtypes.Config{
+				OpenAI: &llmtypes.OpenAIConfig{
+					APIMode: llmtypes.OpenAIAPIModeResponses,
+				},
+			},
+			expectError: false,
+		},
+		{
+			name: "invalid api mode",
+			config: llmtypes.Config{
+				OpenAI: &llmtypes.OpenAIConfig{
+					APIMode: "bad-mode",
 				},
 			},
 			expectError:   true,
-			errorContains: "invalid preset",
+			errorContains: "invalid api_mode",
 		},
 		{
 			name: "valid base URL https",

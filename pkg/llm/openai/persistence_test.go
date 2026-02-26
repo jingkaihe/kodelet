@@ -377,6 +377,34 @@ func TestSaveConversationMessageCleanup(t *testing.T) {
 	}
 }
 
+func TestSaveConversationMetadataIncludesPlatformAndAPIMode(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "test-key")
+
+	thread, err := NewOpenAIThread(llmtypes.Config{
+		Model: "accounts/fireworks/models/kimi-k2p5",
+		OpenAI: &llmtypes.OpenAIConfig{
+			Platform: "fireworks",
+		},
+	})
+	require.NoError(t, err)
+
+	store := &MockConversationStore{}
+	thread.Store = store
+	thread.Persisted = true
+	thread.ConversationID = "conv-metadata"
+	thread.SetState(tools.NewBasicState(context.Background()))
+	thread.messages = []openai.ChatCompletionMessage{{Role: openai.ChatMessageRoleUser, Content: "hello"}}
+
+	err = thread.SaveConversation(context.Background(), false)
+	require.NoError(t, err)
+	require.NotEmpty(t, store.SavedRecords)
+
+	metadata := store.SavedRecords[len(store.SavedRecords)-1].Metadata
+	assert.Equal(t, "fireworks", metadata["platform"])
+	assert.Equal(t, "chat_completions", metadata["api_mode"])
+	assert.Equal(t, "accounts/fireworks/models/kimi-k2p5", metadata["model"])
+}
+
 func TestLoadConversation_CleansOrphanedTrailingToolCall(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "test-key")
 

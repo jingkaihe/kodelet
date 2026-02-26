@@ -3,6 +3,7 @@ package llm
 import (
 	"testing"
 
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
@@ -221,7 +222,7 @@ func TestGetConfigFromViperOpenAIBasicConfig(t *testing.T) {
 	// Setup
 	viper.Reset()
 	viper.Set("provider", "openai")
-	viper.Set("openai.preset", "xai")
+	viper.Set("openai.platform", "xai")
 	viper.Set("openai.base_url", "https://api.x.ai/v1")
 	viper.Set("openai.manual_cache", true)
 
@@ -231,11 +232,26 @@ func TestGetConfigFromViperOpenAIBasicConfig(t *testing.T) {
 
 	// Verify
 	require.NotNil(t, config.OpenAI, "OpenAI config should not be nil")
-	assert.Equal(t, "xai", config.OpenAI.Preset)
+	assert.Equal(t, "xai", config.OpenAI.Platform)
 	assert.Equal(t, "https://api.x.ai/v1", config.OpenAI.BaseURL)
 	assert.True(t, config.OpenAI.ManualCache)
 	assert.Nil(t, config.OpenAI.Models, "Models should be nil when not set")
 	assert.Nil(t, config.OpenAI.Pricing, "Pricing should be nil when not set")
+}
+
+func TestGetConfigFromViperOpenAIApiModeConfig(t *testing.T) {
+	viper.Reset()
+	viper.Set("provider", "openai")
+	viper.Set("openai.api_mode", "responses")
+	viper.Set("openai.responses_api", true)
+
+	config, err := GetConfigFromViper()
+	require.NoError(t, err)
+	require.NotNil(t, config.OpenAI)
+
+	assert.Equal(t, llmtypes.OpenAIAPIModeResponses, config.OpenAI.APIMode)
+	require.NotNil(t, config.OpenAI.ResponsesAPI)
+	assert.True(t, *config.OpenAI.ResponsesAPI)
 }
 
 func TestGetConfigFromViperOpenAIModelsConfig(t *testing.T) {
@@ -385,7 +401,7 @@ func TestGetConfigFromViperOpenAIFullConfig(t *testing.T) {
 	viper.Set("max_tokens", 4096)
 
 	// Set full OpenAI configuration
-	viper.Set("openai.preset", "custom")
+	viper.Set("openai.platform", "custom")
 	viper.Set("openai.base_url", "https://api.custom.ai/v1")
 	viper.Set("openai.models.reasoning", []string{"o1-preview", "o1-mini"})
 	viper.Set("openai.models.non_reasoning", []string{"gpt-4", "gpt-3.5-turbo"})
@@ -416,7 +432,7 @@ func TestGetConfigFromViperOpenAIFullConfig(t *testing.T) {
 
 	// Verify OpenAI config
 	require.NotNil(t, config.OpenAI, "OpenAI config should not be nil")
-	assert.Equal(t, "custom", config.OpenAI.Preset)
+	assert.Equal(t, "custom", config.OpenAI.Platform)
 	assert.Equal(t, "https://api.custom.ai/v1", config.OpenAI.BaseURL)
 
 	// Verify models config

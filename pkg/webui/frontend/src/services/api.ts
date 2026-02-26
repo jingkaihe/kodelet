@@ -36,6 +36,20 @@ class ApiService {
     return response.json();
   }
 
+  private extractStringMetadataValue(metadata: unknown, key: string): string | undefined {
+    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+      return undefined;
+    }
+
+    const rawValue = (metadata as Record<string, unknown>)[key];
+    if (typeof rawValue !== 'string') {
+      return undefined;
+    }
+
+    const normalized = rawValue.trim().toLowerCase();
+    return normalized || undefined;
+  }
+
   async getConversations(filters: Partial<SearchFilters> = {}): Promise<ConversationListResponse> {
     const params = new URLSearchParams();
 
@@ -54,6 +68,12 @@ class ApiService {
     if (!response.conversations || !Array.isArray(response.conversations)) {
       response.conversations = [];
     }
+
+    response.conversations = response.conversations.map((conversation) => ({
+      ...conversation,
+      platform: conversation.platform ?? this.extractStringMetadataValue(conversation.metadata, 'platform'),
+      api_mode: conversation.api_mode ?? this.extractStringMetadataValue(conversation.metadata, 'api_mode'),
+    }));
 
     return response;
   }

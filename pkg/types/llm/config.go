@@ -58,15 +58,27 @@ type Config struct {
 	RecipeName      string `mapstructure:"recipe_name" json:"recipe_name" yaml:"recipe_name"`                // RecipeName is the active recipe/fragment name for hooks
 }
 
+// OpenAIAPIMode defines which OpenAI-compatible API surface to use.
+type OpenAIAPIMode string
+
+const (
+	// OpenAIAPIModeChatCompletions routes requests via chat completions API.
+	OpenAIAPIModeChatCompletions OpenAIAPIMode = "chat_completions"
+	// OpenAIAPIModeResponses routes requests via responses API.
+	OpenAIAPIModeResponses OpenAIAPIMode = "responses"
+)
+
 // OpenAIConfig holds OpenAI-specific configuration including support for compatible APIs
 type OpenAIConfig struct {
-	Preset          string                  `mapstructure:"preset" json:"preset" yaml:"preset"`                                  // Built-in preset for popular providers (e.g., "xai", "codex")
-	BaseURL         string                  `mapstructure:"base_url" json:"base_url" yaml:"base_url"`                            // Custom API base URL (overrides preset)
-	APIKeyEnvVar    string                  `mapstructure:"api_key_env_var" json:"api_key_env_var" yaml:"api_key_env_var"`       // Environment variable name for API key (defaults to OPENAI_API_KEY)
-	UseResponsesAPI bool                    `mapstructure:"use_responses_api" json:"use_responses_api" yaml:"use_responses_api"` // Use the Responses API instead of Chat Completions API
-	ManualCache     bool                    `mapstructure:"manual_cache" json:"manual_cache" yaml:"manual_cache"`                // Enables manual cache affinity headers for Chat Completions when prompt caching is requested
-	Models          *CustomModels           `mapstructure:"models" json:"models,omitempty" yaml:"models,omitempty"`              // Custom model configuration
-	Pricing         map[string]ModelPricing `mapstructure:"pricing" json:"pricing,omitempty" yaml:"pricing,omitempty"`           // Custom pricing configuration
+	Platform        string                  `mapstructure:"platform" json:"platform" yaml:"platform"`                                    // Canonical platform name for OpenAI-compatible APIs (e.g., openai, xai, codex)
+	BaseURL         string                  `mapstructure:"base_url" json:"base_url" yaml:"base_url"`                                    // Custom API base URL (overrides platform defaults)
+	APIKeyEnvVar    string                  `mapstructure:"api_key_env_var" json:"api_key_env_var" yaml:"api_key_env_var"`               // Environment variable name for API key (overrides platform default)
+	APIMode         OpenAIAPIMode           `mapstructure:"api_mode" json:"api_mode" yaml:"api_mode"`                                    // Preferred API mode selection (chat_completions or responses)
+	UseResponsesAPI bool                    `mapstructure:"use_responses_api" json:"use_responses_api" yaml:"use_responses_api"`         // Legacy bool alias for API mode
+	ResponsesAPI    *bool                   `mapstructure:"responses_api" json:"responses_api,omitempty" yaml:"responses_api,omitempty"` // Legacy bool alias for API mode
+	ManualCache     bool                    `mapstructure:"manual_cache" json:"manual_cache" yaml:"manual_cache"`                        // Enables manual cache affinity headers for Chat Completions when prompt caching is requested
+	Models          *CustomModels           `mapstructure:"models" json:"models,omitempty" yaml:"models,omitempty"`                      // Custom model configuration
+	Pricing         map[string]ModelPricing `mapstructure:"pricing" json:"pricing,omitempty" yaml:"pricing,omitempty"`                   // Custom pricing configuration
 }
 
 // CustomModels holds model categorization for custom configurations

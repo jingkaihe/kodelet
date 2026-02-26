@@ -150,7 +150,7 @@ profiles:
         max_tokens: 16000
         model: grok-code-fast-1
         openai:
-            preset: xai
+            platform: xai
         provider: openai
         reasoning_effort: none
         weak_model: grok-code-fast-1

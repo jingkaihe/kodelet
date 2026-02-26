@@ -13,7 +13,7 @@ This enables access to Codex-optimized models like gpt-5.3-codex.
 To use Codex authentication:
 1. Run 'kodelet codex login' to authenticate with your ChatGPT account
 2. Use 'kodelet codex status' to verify the credentials are detected
-3. Configure openai.preset: codex in your config file`,
+3. Configure openai.platform: codex in your config file`,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		return cmd.Help()
 	},
