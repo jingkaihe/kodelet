@@ -269,15 +269,6 @@ func GetBaseURL(config llmtypes.Config) string {
 	return getPlatformBaseURL(resolvePlatformName(config))
 }
 
-func isBuiltInPlatform(name string) bool {
-	switch normalizePlatformName(name) {
-	case "openai", "xai", "codex":
-		return true
-	default:
-		return false
-	}
-}
-
 // validateCustomConfiguration validates the custom OpenAI configuration
 func validateCustomConfiguration(config llmtypes.Config) error {
 	if config.OpenAI == nil {
