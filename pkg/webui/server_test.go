@@ -118,29 +118,16 @@ func TestServer_handleListConversations(t *testing.T) {
 		listFunc: func(_ context.Context, _ *conversations.ListConversationsRequest) (*conversations.ListConversationsResponse, error) {
 			return &conversations.ListConversationsResponse{
 				Conversations: []convtypes.ConversationSummary{
-					{ID: "1", Summary: "Test 1", Provider: "openai"},
+					{
+						ID:       "1",
+						Summary:  "Test 1",
+						Provider: "openai",
+						Metadata: map[string]any{"platform": "fireworks", "api_mode": "chat_completions"},
+					},
 					{ID: "2", Summary: "Test 2", Provider: "anthropic"},
 				},
 				Total: 2,
 			}, nil
-		},
-		getFunc: func(_ context.Context, id string) (*conversations.GetConversationResponse, error) {
-			switch id {
-			case "1":
-				return &conversations.GetConversationResponse{
-					ID:       "1",
-					Provider: "openai",
-					Metadata: map[string]any{"platform": "fireworks", "api_mode": "chat_completions"},
-				}, nil
-			case "2":
-				return &conversations.GetConversationResponse{
-					ID:       "2",
-					Provider: "anthropic",
-					Metadata: map[string]any{},
-				}, nil
-			default:
-				return nil, errors.New("conversation not found")
-			}
 		},
 	}
 
@@ -162,7 +149,9 @@ func TestServer_handleListConversations(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 2, len(response.Conversations))
 	assert.Equal(t, 2, response.Total)
-	assert.Equal(t, "OpenAI (fireworks, chat_completions)", response.Conversations[0].Provider)
+	assert.Equal(t, "OpenAI", response.Conversations[0].Provider)
+	assert.Equal(t, "fireworks", response.Conversations[0].Metadata["platform"])
+	assert.Equal(t, "chat_completions", response.Conversations[0].Metadata["api_mode"])
 	assert.Equal(t, "Anthropic", response.Conversations[1].Provider)
 }
 
@@ -201,7 +190,7 @@ func TestServer_handleGetConversation(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, conversationID, response.ID)
 	assert.Equal(t, "Test conversation", response.Summary)
-	assert.Equal(t, "OpenAI (fireworks, responses)", response.Provider)
+	assert.Equal(t, "OpenAI", response.Provider)
 	assert.Equal(t, 1, response.MessageCount)
 }
 
@@ -239,7 +228,7 @@ func TestServer_handleGetConversationLegacyOpenAIResponses(t *testing.T) {
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, err)
 	assert.Equal(t, conversationID, response.ID)
-	assert.Equal(t, "OpenAI (responses)", response.Provider)
+	assert.Equal(t, "OpenAI", response.Provider)
 }
 
 func TestServer_handleDeleteConversation(t *testing.T) {
@@ -309,20 +298,16 @@ func TestServer_handleGetToolResult(t *testing.T) {
 	assert.Equal(t, "TestTool", response.Result.ToolName)
 }
 
-func TestFormatProviderDisplay(t *testing.T) {
+func TestDisplayProviderName(t *testing.T) {
 	tests := []struct {
 		name     string
 		provider string
-		platform string
-		apiMode  string
 		expected string
 	}{
 		{
-			name:     "openai with qualifiers",
+			name:     "openai",
 			provider: "openai",
-			platform: "fireworks",
-			apiMode:  "chat_completions",
-			expected: "OpenAI (fireworks, chat_completions)",
+			expected: "OpenAI",
 		},
 		{
 			name:     "openai responses legacy",
@@ -338,7 +323,7 @@ func TestFormatProviderDisplay(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.expected, formatProviderDisplay(tt.provider, tt.platform, tt.apiMode))
+			assert.Equal(t, tt.expected, displayProviderName(tt.provider))
 		})
 	}
 }

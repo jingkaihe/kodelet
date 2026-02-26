@@ -125,6 +125,38 @@ describe('ApiService', () => {
         expect.any(Object)
       );
     });
+
+    it('hydrates platform and api_mode from metadata', async () => {
+      const mockResponse: ConversationListResponse = {
+        conversations: [
+          {
+            id: 'conv-1',
+            createdAt: '2023-01-01T00:00:00Z',
+            updatedAt: '2023-01-02T00:00:00Z',
+            messageCount: 3,
+            provider: 'OpenAI',
+            metadata: {
+              platform: 'fireworks',
+              api_mode: 'chat_completions',
+            },
+          },
+        ],
+        hasMore: false,
+        total: 1,
+        limit: 25,
+        offset: 0,
+      };
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => mockResponse,
+      });
+
+      const result = await apiService.getConversations();
+
+      expect(result.conversations[0].platform).toBe('fireworks');
+      expect(result.conversations[0].api_mode).toBe('chat_completions');
+    });
   });
 
   describe('getConversation', () => {

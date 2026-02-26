@@ -417,14 +417,13 @@ func NewConversationListOutput(summaries []convtypes.ConversationSummary, metada
 
 		metadata := metadataByID[summary.ID]
 		platform, apiMode := extractProviderMetadata(summary.Provider, metadata)
-		provider := formatProviderDisplay(summary.Provider, platform, apiMode)
 
 		output.Conversations = append(output.Conversations, ConversationSummaryOutput{
 			ID:             summary.ID,
 			CreatedAt:      summary.CreatedAt,
 			UpdatedAt:      summary.UpdatedAt,
 			MessageCount:   summary.MessageCount,
-			Provider:       provider,
+			Provider:       displayProviderName(summary.Provider),
 			Platform:       platform,
 			APIMode:        apiMode,
 			Preview:        preview,
@@ -473,31 +472,17 @@ func extractProviderMetadata(provider string, metadata map[string]any) (string, 
 	return platform, apiMode
 }
 
-func formatProviderDisplay(provider string, platform string, apiMode string) string {
-	normalizedProvider := strings.TrimSpace(strings.ToLower(provider))
-	displayProvider := provider
-	switch normalizedProvider {
+func displayProviderName(provider string) string {
+	switch strings.TrimSpace(strings.ToLower(provider)) {
 	case "anthropic":
-		displayProvider = "Anthropic"
+		return "Anthropic"
 	case "openai", "openai-responses":
-		displayProvider = "OpenAI"
+		return "OpenAI"
 	case "google":
-		displayProvider = "Google"
+		return "Google"
+	default:
+		return provider
 	}
-
-	qualifiers := make([]string, 0, 2)
-	if platform != "" {
-		qualifiers = append(qualifiers, platform)
-	}
-	if apiMode != "" {
-		qualifiers = append(qualifiers, apiMode)
-	}
-
-	if len(qualifiers) == 0 {
-		return displayProvider
-	}
-
-	return fmt.Sprintf("%s (%s)", displayProvider, strings.Join(qualifiers, ", "))
 }
 
 func (o *ConversationListOutput) Render(w io.Writer) error {
@@ -528,8 +513,8 @@ func (o *ConversationListOutput) renderJSON(w io.Writer) error {
 func (o *ConversationListOutput) renderTable(w io.Writer) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 
-	fmt.Fprintln(tw, "ID\tCreated\tUpdated\tMessages\tProvider\tCost\tContext\tSummary")
-	fmt.Fprintln(tw, "----\t-------\t-------\t--------\t--------\t----\t-------\t-------")
+	fmt.Fprintln(tw, "ID\tCreated\tUpdated\tMessages\tProvider\tPlatform\tAPI Mode\tCost\tContext\tSummary")
+	fmt.Fprintln(tw, "----\t-------\t-------\t--------\t--------\t--------\t--------\t----\t-------\t-------")
 
 	for _, summary := range o.Conversations {
 		created := summary.CreatedAt.Format(time.RFC3339)
@@ -552,12 +537,23 @@ func (o *ConversationListOutput) renderTable(w io.Writer) error {
 			preview = strings.TrimSpace(preview[:47]) + "..."
 		}
 
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%s\t%s\t%s\t%s\n",
+		platform := summary.Platform
+		if platform == "" {
+			platform = "-"
+		}
+		apiMode := summary.APIMode
+		if apiMode == "" {
+			apiMode = "-"
+		}
+
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			summary.ID,
 			created,
 			updated,
 			summary.MessageCount,
 			summary.Provider,
+			platform,
+			apiMode,
 			costStr,
 			contextStr,
 			preview,
@@ -632,12 +628,7 @@ func listConversationsCmd(ctx context.Context, config *ConversationListConfig) {
 
 	metadataByID := make(map[string]map[string]any, len(summaries))
 	for _, summary := range summaries {
-		record, loadErr := store.Load(ctx, summary.ID)
-		if loadErr != nil {
-			logger.G(ctx).WithError(loadErr).WithField("conversation_id", summary.ID).Debug("Failed to load conversation metadata for list output")
-			continue
-		}
-		metadataByID[summary.ID] = record.Metadata
+		metadataByID[summary.ID] = summary.Metadata
 	}
 
 	format := TableFormat
@@ -711,7 +702,7 @@ func showConversationCmd(ctx context.Context, id string, config *ConversationSho
 	}
 
 	platform, apiMode := extractProviderMetadata(record.Provider, record.Metadata)
-	providerDisplay := formatProviderDisplay(record.Provider, platform, apiMode)
+	providerDisplay := displayProviderName(record.Provider)
 
 	switch config.Format {
 	case "raw":

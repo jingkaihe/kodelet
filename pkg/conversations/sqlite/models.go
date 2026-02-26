@@ -62,6 +62,7 @@ type dbConversationSummary struct {
 	FirstMessage string                    `db:"first_message"`
 	Summary      *string                   `db:"summary"` // NULL in database
 	Provider     string                    `db:"provider"`
+	Metadata     JSONField[map[string]any] `db:"metadata"`
 	Usage        JSONField[llmtypes.Usage] `db:"usage"`
 	CreatedAt    time.Time                 `db:"created_at"`
 	UpdatedAt    time.Time                 `db:"updated_at"`
@@ -102,6 +103,7 @@ func (dbs *dbConversationSummary) ToConversationSummary() conversations.Conversa
 		MessageCount: dbs.MessageCount,
 		FirstMessage: dbs.FirstMessage,
 		Provider:     dbs.Provider,
+		Metadata:     dbs.Metadata.Data,
 		Usage:        dbs.Usage.Data,
 		CreatedAt:    dbs.CreatedAt,
 		UpdatedAt:    dbs.UpdatedAt,
@@ -143,6 +145,7 @@ func fromConversationSummary(summary conversations.ConversationSummary) *dbConve
 		MessageCount: summary.MessageCount,
 		FirstMessage: summary.FirstMessage,
 		Provider:     summary.Provider,
+		Metadata:     JSONField[map[string]any]{Data: summary.Metadata},
 		Usage:        JSONField[llmtypes.Usage]{Data: summary.Usage},
 		CreatedAt:    summary.CreatedAt,
 		UpdatedAt:    summary.UpdatedAt,

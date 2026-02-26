@@ -340,25 +340,16 @@ func TestConversationShowOutputJSONStatsOnly(t *testing.T) {
 	assert.NotContains(t, jsonStr, `"summary"`)
 }
 
-func TestFormatProviderDisplay(t *testing.T) {
+func TestDisplayProviderName(t *testing.T) {
 	tests := []struct {
 		name     string
 		provider string
-		platform string
-		apiMode  string
 		expected string
 	}{
 		{
-			name:     "openai without qualifiers",
+			name:     "openai provider",
 			provider: "openai",
 			expected: "OpenAI",
-		},
-		{
-			name:     "openai with platform and api mode",
-			provider: "openai",
-			platform: "fireworks",
-			apiMode:  "chat_completions",
-			expected: "OpenAI (fireworks, chat_completions)",
 		},
 		{
 			name:     "openai responses legacy provider",
@@ -366,7 +357,7 @@ func TestFormatProviderDisplay(t *testing.T) {
 			expected: "OpenAI",
 		},
 		{
-			name:     "anthropic without qualifiers",
+			name:     "anthropic provider",
 			provider: "anthropic",
 			expected: "Anthropic",
 		},
@@ -374,7 +365,7 @@ func TestFormatProviderDisplay(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.expected, formatProviderDisplay(tt.provider, tt.platform, tt.apiMode))
+			assert.Equal(t, tt.expected, displayProviderName(tt.provider))
 		})
 	}
 }

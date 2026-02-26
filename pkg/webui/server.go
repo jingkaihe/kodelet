@@ -231,13 +231,17 @@ func (s *Server) handleListConversations(w http.ResponseWriter, r *http.Request)
 
 	for i := range response.Conversations {
 		summary := &response.Conversations[i]
-		record, loadErr := s.conversationService.GetConversation(ctx, summary.ID)
-		if loadErr != nil {
-			logger.G(ctx).WithError(loadErr).WithField("conversation_id", summary.ID).Debug("Failed to load conversation metadata for web list")
-			continue
+		platform, apiMode := extractProviderMetadata(summary.Provider, summary.Metadata)
+		summary.Provider = displayProviderName(summary.Provider)
+		if summary.Metadata == nil {
+			summary.Metadata = make(map[string]any)
 		}
-		platform, apiMode := extractProviderMetadata(summary.Provider, record.Metadata)
-		summary.Provider = formatProviderDisplay(summary.Provider, platform, apiMode)
+		if platform != "" {
+			summary.Metadata["platform"] = platform
+		}
+		if apiMode != "" {
+			summary.Metadata["api_mode"] = apiMode
+		}
 	}
 
 	s.writeJSONResponse(w, response)
@@ -312,31 +316,17 @@ func extractProviderMetadata(provider string, metadata map[string]any) (string, 
 	return platform, apiMode
 }
 
-func formatProviderDisplay(provider string, platform string, apiMode string) string {
-	normalizedProvider := strings.TrimSpace(strings.ToLower(provider))
-	displayProvider := provider
-	switch normalizedProvider {
+func displayProviderName(provider string) string {
+	switch strings.TrimSpace(strings.ToLower(provider)) {
 	case "anthropic":
-		displayProvider = "Anthropic"
+		return "Anthropic"
 	case "openai", "openai-responses":
-		displayProvider = "OpenAI"
+		return "OpenAI"
 	case "google":
-		displayProvider = "Google"
+		return "Google"
+	default:
+		return provider
 	}
-
-	qualifiers := make([]string, 0, 2)
-	if platform != "" {
-		qualifiers = append(qualifiers, platform)
-	}
-	if apiMode != "" {
-		qualifiers = append(qualifiers, apiMode)
-	}
-
-	if len(qualifiers) == 0 {
-		return displayProvider
-	}
-
-	return fmt.Sprintf("%s (%s)", displayProvider, strings.Join(qualifiers, ", "))
 }
 
 // handleGetConversation handles GET /api/conversations/{id}
@@ -352,8 +342,8 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	platform, apiMode := extractProviderMetadata(response.Provider, response.Metadata)
-	providerLabel := formatProviderDisplay(response.Provider, platform, apiMode)
+	_, apiMode := extractProviderMetadata(response.Provider, response.Metadata)
+	providerLabel := displayProviderName(response.Provider)
 
 	providerForRender := response.Provider
 	if providerForRender == "openai" && apiMode == "responses" {

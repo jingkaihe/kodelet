@@ -892,6 +892,9 @@ func TestStore_DirectDatabaseAccess(t *testing.T) {
 		MessageCount: 1,
 		FirstMessage: "Direct insert",
 		Summary:      nil, // NULL
+		Metadata: JSONField[map[string]any]{
+			Data: map[string]any{"platform": "fireworks", "api_mode": "chat_completions"},
+		},
 		Usage: JSONField[llmtypes.Usage]{
 			Data: llmtypes.Usage{InputTokens: 100, OutputTokens: 50},
 		},
@@ -901,9 +904,9 @@ func TestStore_DirectDatabaseAccess(t *testing.T) {
 
 	summaryQuery := `
 		INSERT INTO conversation_summaries (
-			id, message_count, first_message, summary, usage, created_at, updated_at
+			id, message_count, first_message, summary, metadata, usage, created_at, updated_at
 		) VALUES (
-			:id, :message_count, :first_message, :summary, :usage, :created_at, :updated_at
+			:id, :message_count, :first_message, :summary, :metadata, :usage, :created_at, :updated_at
 		)
 	`
 

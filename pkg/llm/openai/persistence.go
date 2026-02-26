@@ -64,13 +64,19 @@ func (t *Thread) SaveConversation(ctx context.Context, summarize bool) error {
 		return errors.Wrap(err, "error marshaling messages")
 	}
 
+	metadata := map[string]any{
+		"model":    t.Config.Model,
+		"api_mode": "chat_completions",
+		"platform": resolvePlatformName(t.Config),
+	}
+
 	// Build the conversation record
 	record := convtypes.ConversationRecord{
 		ID:                  t.ConversationID,
 		RawMessages:         messagesJSON,
 		Provider:            "openai",
 		Usage:               *t.Usage,
-		Metadata:            map[string]any{"model": t.Config.Model},
+		Metadata:            metadata,
 		Summary:             t.summary,
 		CreatedAt:           time.Now(),
 		UpdatedAt:           time.Now(),
