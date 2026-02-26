@@ -143,6 +143,17 @@ func (t *Thread) Provider() string {
 	return "openai"
 }
 
+func resolveClientBaseURL(config llmtypes.Config, useCopilot bool) string {
+	if useCopilot {
+		if configuredBaseURL := GetConfiguredBaseURL(config); configuredBaseURL != "" {
+			return configuredBaseURL
+		}
+		return "https://api.githubcopilot.com"
+	}
+
+	return GetBaseURL(config)
+}
+
 // NewOpenAIThread creates a new thread with OpenAI's API
 func NewOpenAIThread(config llmtypes.Config) (*Thread, error) {
 	// Apply defaults if not provided
@@ -217,11 +228,8 @@ func NewOpenAIThread(config llmtypes.Config) (*Thread, error) {
 		useCopilot = false
 	}
 
-	resolvedBaseURL := GetBaseURL(config)
-	if resolvedBaseURL != "" {
+	if resolvedBaseURL := resolveClientBaseURL(config, useCopilot); resolvedBaseURL != "" {
 		clientConfig.BaseURL = resolvedBaseURL
-	} else if useCopilot {
-		clientConfig.BaseURL = "https://api.githubcopilot.com"
 	}
 
 	client := openai.NewClientWithConfig(clientConfig)
@@ -1098,12 +1106,7 @@ func (t *Thread) buildClientConfig() openai.ClientConfig {
 			clientConfig := openai.DefaultConfig("")
 			clientConfig.HTTPClient = &http.Client{Transport: auth.NewCopilotTransport(copilotToken)}
 
-			resolvedBaseURL := GetBaseURL(t.Config)
-			if resolvedBaseURL != "" {
-				clientConfig.BaseURL = resolvedBaseURL
-			} else {
-				clientConfig.BaseURL = "https://api.githubcopilot.com"
-			}
+			clientConfig.BaseURL = resolveClientBaseURL(t.Config, true)
 
 			return clientConfig
 		}
@@ -1112,7 +1115,7 @@ func (t *Thread) buildClientConfig() openai.ClientConfig {
 	apiKeyEnvVar := GetAPIKeyEnvVar(t.Config)
 	apiKey := os.Getenv(apiKeyEnvVar)
 	clientConfig := openai.DefaultConfig(apiKey)
-	if resolvedBaseURL := GetBaseURL(t.Config); resolvedBaseURL != "" {
+	if resolvedBaseURL := resolveClientBaseURL(t.Config, false); resolvedBaseURL != "" {
 		clientConfig.BaseURL = resolvedBaseURL
 	}
 

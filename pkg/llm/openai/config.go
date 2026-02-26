@@ -256,14 +256,23 @@ func GetAPIKeyEnvVar(config llmtypes.Config) string {
 	return getPlatformAPIKeyEnvVar(resolvePlatformName(config))
 }
 
-// GetBaseURL returns the base URL resolved from environment, config, and platform defaults.
-func GetBaseURL(config llmtypes.Config) string {
+// GetConfiguredBaseURL returns only explicit base URL overrides from environment or config.
+func GetConfiguredBaseURL(config llmtypes.Config) string {
 	if baseURL := os.Getenv("OPENAI_API_BASE"); baseURL != "" {
 		return baseURL
 	}
 
 	if config.OpenAI != nil && config.OpenAI.BaseURL != "" {
 		return config.OpenAI.BaseURL
+	}
+
+	return ""
+}
+
+// GetBaseURL returns the base URL resolved from environment, config, and platform defaults.
+func GetBaseURL(config llmtypes.Config) string {
+	if configuredBaseURL := GetConfiguredBaseURL(config); configuredBaseURL != "" {
+		return configuredBaseURL
 	}
 
 	return getPlatformBaseURL(resolvePlatformName(config))

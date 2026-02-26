@@ -531,6 +531,105 @@ func TestGetBaseURL(t *testing.T) {
 	}
 }
 
+func TestGetConfiguredBaseURL(t *testing.T) {
+	os.Unsetenv("OPENAI_API_BASE")
+	defer os.Unsetenv("OPENAI_API_BASE")
+
+	tests := []struct {
+		name     string
+		config   llmtypes.Config
+		envBase  string
+		expected string
+	}{
+		{
+			name:     "no explicit base url",
+			config:   llmtypes.Config{},
+			expected: "",
+		},
+		{
+			name:     "platform default is not treated as explicit override",
+			config:   llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{Platform: "xai"}},
+			expected: "",
+		},
+		{
+			name:     "config base url override",
+			config:   llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{BaseURL: "https://custom.example/v1"}},
+			expected: "https://custom.example/v1",
+		},
+		{
+			name:     "env base url override",
+			config:   llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{BaseURL: "https://custom.example/v1"}},
+			envBase:  "https://env.example/v1",
+			expected: "https://env.example/v1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			os.Unsetenv("OPENAI_API_BASE")
+			if tt.envBase != "" {
+				os.Setenv("OPENAI_API_BASE", tt.envBase)
+			}
+			assert.Equal(t, tt.expected, GetConfiguredBaseURL(tt.config))
+		})
+	}
+}
+
+func TestResolveClientBaseURL(t *testing.T) {
+	os.Unsetenv("OPENAI_API_BASE")
+	defer os.Unsetenv("OPENAI_API_BASE")
+
+	tests := []struct {
+		name       string
+		config     llmtypes.Config
+		useCopilot bool
+		envBase    string
+		expected   string
+	}{
+		{
+			name:       "copilot uses copilot endpoint by default",
+			config:     llmtypes.Config{},
+			useCopilot: true,
+			expected:   "https://api.githubcopilot.com",
+		},
+		{
+			name:       "copilot ignores platform default endpoint",
+			config:     llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{Platform: "xai"}},
+			useCopilot: true,
+			expected:   "https://api.githubcopilot.com",
+		},
+		{
+			name:       "copilot respects explicit config base override",
+			config:     llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{BaseURL: "https://custom.example/v1"}},
+			useCopilot: true,
+			expected:   "https://custom.example/v1",
+		},
+		{
+			name:       "copilot respects env base override",
+			config:     llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{BaseURL: "https://custom.example/v1"}},
+			useCopilot: true,
+			envBase:    "https://env.example/v1",
+			expected:   "https://env.example/v1",
+		},
+		{
+			name:       "non-copilot uses resolved provider base",
+			config:     llmtypes.Config{},
+			useCopilot: false,
+			expected:   "https://api.openai.com/v1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			os.Unsetenv("OPENAI_API_BASE")
+			if tt.envBase != "" {
+				os.Setenv("OPENAI_API_BASE", tt.envBase)
+			}
+			assert.Equal(t, tt.expected, resolveClientBaseURL(tt.config, tt.useCopilot))
+		})
+	}
+}
+
 func TestValidateCustomConfiguration(t *testing.T) {
 	tests := []struct {
 		name          string

@@ -22,8 +22,8 @@ import (
 )
 
 func TestNewThread(t *testing.T) {
-	os.Setenv("OPENAI_API_KEY", "test-key")
-	defer os.Unsetenv("OPENAI_API_KEY")
+	os.Setenv("XAI_API_KEY", "test-key")
+	defer os.Unsetenv("XAI_API_KEY")
 
 	config := llmtypes.Config{
 		Provider: "openai",
