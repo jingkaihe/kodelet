@@ -105,6 +105,7 @@ func NewBasicState(ctx context.Context, opts ...BasicStateOption) *BasicState {
 		}
 		allowedTools = enforceApplyPatchMode(allowedTools, state.llmConfig.ApplyPatchEnabled, defaultMainTools)
 		state.tools = GetMainTools(ctx, allowedTools, state.llmConfig.EnableTodos)
+		state.tools = enforceApplyPatchModeOnResolvedTools(state.tools, allowedTools, state.llmConfig.ApplyPatchEnabled)
 		state.configureTools()
 	}
 
@@ -121,6 +122,7 @@ func WithSubAgentToolsFromConfig() BasicStateOption {
 		}
 		allowedTools = enforceApplyPatchMode(allowedTools, s.llmConfig.ApplyPatchEnabled, defaultSubAgentTools)
 		s.tools = GetSubAgentTools(ctx, allowedTools)
+		s.tools = enforceApplyPatchModeOnResolvedTools(s.tools, allowedTools, s.llmConfig.ApplyPatchEnabled)
 		s.configureTools()
 		return nil
 	}
@@ -135,6 +137,7 @@ func WithMainTools() BasicStateOption {
 		}
 		allowedTools = enforceApplyPatchMode(allowedTools, s.llmConfig.ApplyPatchEnabled, defaultMainTools)
 		s.tools = GetMainTools(ctx, allowedTools, s.llmConfig.EnableTodos)
+		s.tools = enforceApplyPatchModeOnResolvedTools(s.tools, allowedTools, s.llmConfig.ApplyPatchEnabled)
 		if s.llmConfig.DisableSubagent {
 			s.tools = filterOutSubagent(s.tools)
 		}
@@ -295,6 +298,35 @@ func enforceApplyPatchMode(allowedTools []string, applyPatchEnabled bool, defaul
 
 	if _, exists := seen["apply_patch"]; !exists {
 		filteredTools = append(filteredTools, "apply_patch")
+	}
+
+	return filteredTools
+}
+
+func enforceApplyPatchModeOnResolvedTools(tools []tooltypes.Tool, allowedTools []string, applyPatchEnabled bool) []tooltypes.Tool {
+	if !applyPatchEnabled {
+		return tools
+	}
+	if len(allowedTools) == 1 && allowedTools[0] == NoToolsMarker {
+		return tools
+	}
+
+	filteredTools := make([]tooltypes.Tool, 0, len(tools))
+	hasApplyPatch := false
+	for _, tool := range tools {
+		switch tool.Name() {
+		case "file_write", "file_edit":
+			continue
+		case "apply_patch":
+			hasApplyPatch = true
+		}
+		filteredTools = append(filteredTools, tool)
+	}
+
+	if !hasApplyPatch {
+		if applyPatchTool, exists := toolRegistry["apply_patch"]; exists {
+			filteredTools = append(filteredTools, applyPatchTool)
+		}
 	}
 
 	return filteredTools

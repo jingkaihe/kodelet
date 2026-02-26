@@ -132,6 +132,17 @@ func (t *ApplyPatchTool) ValidateInput(_ tooltypes.State, parameters string) err
 
 	for _, hunk := range parsed.hunks {
 		switch hunk.kind {
+		case patchHunkAdd:
+			info, statErr := os.Stat(hunk.path)
+			if statErr == nil {
+				if info.IsDir() {
+					return errors.Errorf("failed to add file %s: already exists and is a directory", hunk.path)
+				}
+				return errors.Errorf("failed to add file %s: already exists", hunk.path)
+			}
+			if !os.IsNotExist(statErr) {
+				return errors.Wrapf(statErr, "failed to stat %s", hunk.path)
+			}
 		case patchHunkDelete:
 			info, statErr := os.Stat(hunk.path)
 			if statErr != nil {
@@ -202,7 +213,16 @@ func applyAddHunk(state tooltypes.State, hunk parsedHunk, result *applyPatchTool
 			return errors.Wrapf(err, "failed to create parent directories for %s", hunk.path)
 		}
 	}
-	if err := os.WriteFile(hunk.path, []byte(hunk.contents), 0o644); err != nil {
+	file, err := os.OpenFile(hunk.path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		if os.IsExist(err) {
+			return errors.Errorf("failed to add file %s: already exists", hunk.path)
+		}
+		return errors.Wrapf(err, "failed to create file %s", hunk.path)
+	}
+	defer file.Close()
+
+	if _, err := file.WriteString(hunk.contents); err != nil {
 		return errors.Wrapf(err, "failed to write file %s", hunk.path)
 	}
 	_ = state.SetFileLastAccessed(hunk.path, time.Now())
@@ -244,15 +264,18 @@ func applyUpdateHunk(state tooltypes.State, hunk parsedHunk, result *applyPatchT
 	}
 
 	targetPath := hunk.path
-	if hunk.movePath != "" {
-		targetPath = hunk.movePath
-		if parent := filepath.Dir(hunk.movePath); parent != "" && parent != "." {
+	movePath := ""
+	isMove := hunk.movePath != "" && hunk.movePath != hunk.path
+	if isMove {
+		movePath = hunk.movePath
+		targetPath = movePath
+		if parent := filepath.Dir(movePath); parent != "" && parent != "." {
 			if mkErr := os.MkdirAll(parent, 0o755); mkErr != nil {
-				return errors.Wrapf(mkErr, "failed to create parent directories for %s", hunk.movePath)
+				return errors.Wrapf(mkErr, "failed to create parent directories for %s", movePath)
 			}
 		}
-		if writeErr := os.WriteFile(hunk.movePath, []byte(newContent), 0o644); writeErr != nil {
-			return errors.Wrapf(writeErr, "failed to write file %s", hunk.movePath)
+		if writeErr := os.WriteFile(movePath, []byte(newContent), 0o644); writeErr != nil {
+			return errors.Wrapf(writeErr, "failed to write file %s", movePath)
 		}
 		if rmErr := os.Remove(hunk.path); rmErr != nil {
 			return errors.Wrapf(rmErr, "failed to remove original %s", hunk.path)
@@ -274,7 +297,7 @@ func applyUpdateHunk(state tooltypes.State, hunk parsedHunk, result *applyPatchT
 		OldContent:  oldContent,
 		NewContent:  newContent,
 		UnifiedDiff: diff,
-		MovePath:    hunk.movePath,
+		MovePath:    movePath,
 	})
 
 	return nil

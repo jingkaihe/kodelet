@@ -746,6 +746,23 @@ func TestWithSubAgentToolsFromConfig(t *testing.T) {
 		assert.NotContains(t, toolNames, "file_write")
 		assert.NotContains(t, toolNames, "file_edit")
 	})
+
+	t.Run("ApplyPatchEnabled still removes file_write and file_edit after fallback", func(t *testing.T) {
+		config := llmtypes.Config{
+			ApplyPatchEnabled: true,
+			AllowedTools:      []string{"file_read", "unknown_tool"},
+		}
+		state := NewBasicState(ctx, WithLLMConfig(config), WithSubAgentToolsFromConfig())
+
+		toolNames := make([]string, len(state.Tools()))
+		for i, tool := range state.Tools() {
+			toolNames[i] = tool.Name()
+		}
+
+		assert.Contains(t, toolNames, "apply_patch")
+		assert.NotContains(t, toolNames, "file_write")
+		assert.NotContains(t, toolNames, "file_edit")
+	})
 }
 
 func TestWithMainTools(t *testing.T) {
@@ -904,6 +921,23 @@ func TestWithMainTools(t *testing.T) {
 		}
 		state := NewBasicState(ctx, WithLLMConfig(config), WithMainTools())
 		assert.Empty(t, state.Tools(), "NoToolsMarker should still disable all tools")
+	})
+
+	t.Run("ApplyPatchEnabled still removes file_write and file_edit after fallback", func(t *testing.T) {
+		config := llmtypes.Config{
+			ApplyPatchEnabled: true,
+			AllowedTools:      []string{"bash", "unknown_tool"},
+		}
+		state := NewBasicState(ctx, WithLLMConfig(config), WithMainTools())
+
+		toolNames := make([]string, len(state.Tools()))
+		for i, tool := range state.Tools() {
+			toolNames[i] = tool.Name()
+		}
+
+		assert.Contains(t, toolNames, "apply_patch")
+		assert.NotContains(t, toolNames, "file_write")
+		assert.NotContains(t, toolNames, "file_edit")
 	})
 }
 

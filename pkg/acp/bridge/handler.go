@@ -220,14 +220,18 @@ func (h *ACPMessageHandler) extractLocations(result tooltypes.ToolResult) []Tool
 			locations := make([]ToolCallLocation, 0, len(meta.Changes))
 			seen := make(map[string]struct{})
 			for _, change := range meta.Changes {
-				if change.Path == "" {
+				locationPath := change.Path
+				if change.MovePath != "" {
+					locationPath = change.MovePath
+				}
+				if locationPath == "" {
 					continue
 				}
-				if _, ok := seen[change.Path]; ok {
+				if _, ok := seen[locationPath]; ok {
 					continue
 				}
-				seen[change.Path] = struct{}{}
-				locations = append(locations, ToolCallLocation{Path: change.Path})
+				seen[locationPath] = struct{}{}
+				locations = append(locations, ToolCallLocation{Path: locationPath})
 			}
 			if len(locations) > 0 {
 				return locations

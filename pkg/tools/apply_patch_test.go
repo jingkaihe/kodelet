@@ -50,6 +50,33 @@ func TestApplyPatchTool_AddFile(t *testing.T) {
 	assert.Equal(t, tooltypes.ApplyPatchOperationAdd, meta.Changes[0].Operation)
 }
 
+func TestApplyPatchTool_AddFileFailsWhenFileExists(t *testing.T) {
+	tmp := t.TempDir()
+	oldWd, _ := os.Getwd()
+	defer os.Chdir(oldWd)
+	require.NoError(t, os.Chdir(tmp))
+
+	existingPath := filepath.Join(tmp, "hello.txt")
+	require.NoError(t, os.WriteFile(existingPath, []byte("existing\n"), 0o644))
+
+	patch := `*** Begin Patch
+*** Add File: hello.txt
++new content
+*** End Patch`
+	params := mustJSON(t, ApplyPatchInput{Input: patch})
+
+	tool := &ApplyPatchTool{}
+	state := NewBasicState(context.Background())
+	result := tool.Execute(context.Background(), state, params)
+
+	require.True(t, result.IsError())
+	assert.Contains(t, result.GetError(), "already exists")
+
+	content, err := os.ReadFile(existingPath)
+	require.NoError(t, err)
+	assert.Equal(t, "existing\n", string(content))
+}
+
 func TestApplyPatchTool_AddEmptyFile(t *testing.T) {
 	tmp := t.TempDir()
 	oldWd, _ := os.Getwd()
@@ -137,6 +164,36 @@ func TestApplyPatchTool_MoveFile(t *testing.T) {
 	assert.True(t, os.IsNotExist(err))
 
 	content, err := os.ReadFile(filepath.Join(tmp, "renamed", "name.txt"))
+	require.NoError(t, err)
+	assert.Equal(t, "line2\n", string(content))
+}
+
+func TestApplyPatchTool_MoveToSamePathIsInPlaceUpdate(t *testing.T) {
+	tmp := t.TempDir()
+	oldWd, _ := os.Getwd()
+	defer os.Chdir(oldWd)
+	require.NoError(t, os.Chdir(tmp))
+
+	filePath := filepath.Join(tmp, "same.txt")
+	require.NoError(t, os.WriteFile(filePath, []byte("line\n"), 0o644))
+
+	patch := `*** Begin Patch
+*** Update File: same.txt
+*** Move to: ./same.txt
+@@
+-line
++line2
+*** End Patch`
+	params := mustJSON(t, ApplyPatchInput{Input: patch})
+
+	tool := &ApplyPatchTool{}
+	state := NewBasicState(context.Background())
+	result := tool.Execute(context.Background(), state, params)
+
+	require.False(t, result.IsError())
+	assert.Contains(t, result.GetResult(), "M "+filePath)
+
+	content, err := os.ReadFile(filePath)
 	require.NoError(t, err)
 	assert.Equal(t, "line2\n", string(content))
 }

@@ -476,6 +476,29 @@ func TestExtractLocationsFromInput(t *testing.T) {
 	}
 }
 
+func TestExtractLocations_ApplyPatchPrefersMovePath(t *testing.T) {
+	handler := NewACPMessageHandler(&mockSender{}, "test-session")
+
+	result := &mockApplyPatchToolResult{
+		changes: []tooltypes.ApplyPatchChange{
+			{
+				Path:      "/repo/old.go",
+				MovePath:  "/repo/new.go",
+				Operation: tooltypes.ApplyPatchOperationUpdate,
+			},
+			{
+				Path:      "/repo/old.go",
+				MovePath:  "/repo/new.go",
+				Operation: tooltypes.ApplyPatchOperationUpdate,
+			},
+		},
+	}
+
+	locations := handler.extractLocations(result)
+	assert.Len(t, locations, 1)
+	assert.Equal(t, "/repo/new.go", locations[0].Path)
+}
+
 func TestACPMessageHandler_MaybeSendPlanUpdate(t *testing.T) {
 	t.Run("sends plan update for todo_write", func(t *testing.T) {
 		sender := &mockSender{}
@@ -594,5 +617,23 @@ func (m *mockNonTodoToolResult) StructuredData() tooltypes.StructuredToolResult 
 	return tooltypes.StructuredToolResult{
 		ToolName: m.toolName,
 		Success:  true,
+	}
+}
+
+type mockApplyPatchToolResult struct {
+	changes []tooltypes.ApplyPatchChange
+}
+
+func (m *mockApplyPatchToolResult) AssistantFacing() string { return "" }
+func (m *mockApplyPatchToolResult) IsError() bool           { return false }
+func (m *mockApplyPatchToolResult) GetError() string        { return "" }
+func (m *mockApplyPatchToolResult) GetResult() string       { return "" }
+func (m *mockApplyPatchToolResult) StructuredData() tooltypes.StructuredToolResult {
+	return tooltypes.StructuredToolResult{
+		ToolName: "apply_patch",
+		Success:  true,
+		Metadata: &tooltypes.ApplyPatchMetadata{
+			Changes: m.changes,
+		},
 	}
 }
