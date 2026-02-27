@@ -1,4 +1,4 @@
-{{define "templates/sections/runtime_system_info.tmpl"}}
+{{- define "templates/sections/runtime_system_info.tmpl" -}}
 # System Information
 Here is the system information:
 <system-information>
@@ -7,9 +7,9 @@ Is this a git repository? {{.IsGitRepo}}
 Operating system: {{.Platform}} {{.OSVersion}}
 Date: {{.Date}}
 </system-information>
-{{end}}
+{{- end -}}
 
-{{define "templates/sections/runtime_loaded_contexts.tmpl"}}
+{{- define "templates/sections/runtime_loaded_contexts.tmpl" -}}
 {{if hasContextEntries .}}Here are some useful context to help you solve the user's problem.
 When you are working in these directories, make sure that you are following the guidelines provided in the context.
 Note that the contexts in $HOME/.kodelet/ are universally applicable.
@@ -18,9 +18,9 @@ Note that the contexts in $HOME/.kodelet/ are universally applicable.
 {{.Content}}
 </context>
 {{end}}{{end}}
-{{end}}
+{{- end -}}
 
-{{define "templates/sections/runtime_mcp_servers.tmpl"}}
+{{- define "templates/sections/runtime_mcp_servers.tmpl" -}}
 {{if hasMCPServers .}}
 # MCP Servers Available
 When using MCP tools in 'code' execution mode, the following MCP servers are available:
@@ -29,7 +29,7 @@ When using MCP tools in 'code' execution mode, the following MCP servers are ava
 
 You can import and use tools from these servers in your TypeScript code within the bash tool. Check the generated TypeScript API in .kodelet/mcp/servers/ for available functions.
 {{end}}
-{{end}}
+{{- end -}}
 
 # Context
 If the current working directory contains a `{{.ActiveContextFile}}` file, it will be automatically loaded as a context. Use it for:

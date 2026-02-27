@@ -21,7 +21,6 @@ func TestSystemPrompt(t *testing.T) {
 		"Be concise, direct and to the point",
 		"Tool Usage",
 		"invoke multiple INDEPENDENT tools",
-		"Task Management",
 		"Context",
 		"file, it will be automatically loaded",
 		"System Information",
@@ -202,7 +201,7 @@ func TestSystemPrompt_TodoToolsFeatureFlag(t *testing.T) {
 	t.Run("todo tools disabled by default", func(t *testing.T) {
 		prompt := SystemPrompt("claude-sonnet-4-6", llm.Config{}, map[string]string{})
 
-		assert.Contains(t, prompt, "# Task Management")
+		assert.NotContains(t, prompt, "# Task Management")
 		assert.NotContains(t, prompt, "You have access to the `todo_write` and `todo_read` tools")
 		assert.NotContains(t, prompt, "## Task management examples")
 	})
@@ -210,6 +209,7 @@ func TestSystemPrompt_TodoToolsFeatureFlag(t *testing.T) {
 	t.Run("todo tools enabled with flag", func(t *testing.T) {
 		prompt := SystemPrompt("claude-sonnet-4-6", llm.Config{EnableTodos: true}, map[string]string{})
 
+		assert.Contains(t, prompt, "# Task Management")
 		assert.Contains(t, prompt, "You have access to the `todo_write` and `todo_read` tools")
 		assert.Contains(t, prompt, "## Task management examples")
 	})

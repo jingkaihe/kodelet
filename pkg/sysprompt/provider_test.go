@@ -166,10 +166,10 @@ func TestPromptTemplateConditionalSections(t *testing.T) {
 
 		toolsPos := strings.Index(prompt, "# Tool Usage")
 		subagentExamplesPos := strings.Index(prompt, "## Subagent tool usage examples")
-		taskManagementPos := strings.Index(prompt, "# Task Management")
+		contextPos := strings.Index(prompt, "# Context")
 
 		assert.Greater(t, subagentExamplesPos, toolsPos)
-		assert.Greater(t, taskManagementPos, subagentExamplesPos)
+		assert.Greater(t, contextPos, subagentExamplesPos)
 	})
 
 	t.Run("Template variables are substituted", func(t *testing.T) {
@@ -186,14 +186,15 @@ func TestPromptTemplateConditionalSections(t *testing.T) {
 
 	t.Run("Task management content depends on todo tools flag", func(t *testing.T) {
 		mainPrompt := SystemPrompt("gpt-4", baseConfig, map[string]string{})
-		assert.Contains(t, mainPrompt, "# Task Management")
+		assert.NotContains(t, mainPrompt, "# Task Management")
 		assert.NotContains(t, mainPrompt, "You have access to the `todo_write` and `todo_read` tools")
 
 		mainPromptWithTodos := SystemPrompt("gpt-4", llm.Config{Provider: providerOpenAI, EnableTodos: true}, map[string]string{})
+		assert.Contains(t, mainPromptWithTodos, "# Task Management")
 		assert.Contains(t, mainPromptWithTodos, "You have access to the `todo_write` and `todo_read` tools")
 
 		subagentPrompt := subagentPrompt("gpt-4", llm.Config{Provider: providerOpenAI, EnableTodos: true}, map[string]string{})
-		assert.Contains(t, subagentPrompt, "# Task Management")
+		assert.NotContains(t, subagentPrompt, "# Task Management")
 		assert.NotContains(t, subagentPrompt, "You have access to the `todo_write` and `todo_read` tools")
 	})
 
@@ -281,6 +282,6 @@ func TestDisableSubagent_SystemPrompt(t *testing.T) {
 
 		assert.NotContains(t, prompt, "## Subagent tool usage examples")
 		assert.Contains(t, prompt, "# Tool Usage")
-		assert.Contains(t, prompt, "# Task Management")
+		assert.NotContains(t, prompt, "# Task Management")
 	})
 }
