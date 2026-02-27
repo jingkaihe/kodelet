@@ -1,0 +1,47 @@
+{{define "templates/sections/runtime_system_info.tmpl"}}
+# System Information
+Here is the system information:
+<system-information>
+Current working directory: {{.WorkingDirectory}}
+Is this a git repository? {{.IsGitRepo}}
+Operating system: {{.Platform}} {{.OSVersion}}
+Date: {{.Date}}
+</system-information>
+{{end}}
+
+{{define "templates/sections/runtime_loaded_contexts.tmpl"}}
+{{if .HasContextEntries}}Here are some useful context to help you solve the user's problem.
+When you are working in these directories, make sure that you are following the guidelines provided in the context.
+Note that the contexts in $HOME/.kodelet/ are universally applicable.
+{{range .ContextEntries}}
+<context filename="{{.Filename}}", dir="{{.Dir}}">
+{{.Content}}
+</context>
+{{end}}{{end}}
+{{end}}
+
+{{define "templates/sections/runtime_mcp_servers.tmpl"}}
+{{if .HasMCPServers}}
+# MCP Servers Available
+When using MCP tools in 'code' execution mode, the following MCP servers are available:
+
+{{.MCPServersCSV}}
+
+You can import and use tools from these servers in your TypeScript code within the bash tool. Check the generated TypeScript API in .kodelet/mcp/servers/ for available functions.
+{{end}}
+{{end}}
+
+# Context
+If the current working directory contains a `{{.ActiveContextFile}}` file, it will be automatically loaded as a context. Use it for:
+* Understanding the structure, organisation and tech stack of the project.
+* Keeping record of commands (for linting, testing, building etc) that you have to use repeatedly.
+* Recording coding style, conventions and preferences of the project.
+
+If you find a new command that you have to use repeatedly, you can add it to the `{{.ActiveContextFile}}` file.
+If you have made any significant changes to the project structure, or modified the tech stack, you should update the `{{.ActiveContextFile}}` file.
+
+{{include "templates/sections/runtime_system_info.tmpl" .}}
+
+{{include "templates/sections/runtime_loaded_contexts.tmpl" .}}
+
+{{include "templates/sections/runtime_mcp_servers.tmpl" .}}

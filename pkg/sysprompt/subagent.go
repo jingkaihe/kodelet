@@ -5,10 +5,7 @@ import (
 )
 
 // SubAgentPrompt generates a subagent prompt for the given model.
-// It delegates to SystemPrompt with IsSubAgent set to true for unified prompt generation.
+// Deprecated: use SystemPrompt with llm.Config.IsSubAgent set to true.
 func SubAgentPrompt(model string, llmConfig llm.Config, contexts map[string]string) string {
-	// Create a copy with IsSubAgent set to true for unified prompt handling
-	subagentConfig := llmConfig
-	subagentConfig.IsSubAgent = true
-	return SystemPrompt(model, subagentConfig, contexts)
+	return BuildPrompt(model, llmConfig, contexts, buildOptions{IsSubagent: true})
 }

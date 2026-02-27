@@ -4,7 +4,7 @@ import "embed"
 
 // TemplateFS contains the embedded template files for system prompts.
 //
-//go:embed templates/*
+//go:embed templates/*.tmpl templates/sections/*.tmpl
 var TemplateFS embed.FS
 
 const (
@@ -33,10 +33,4 @@ const (
 
 	// SystemTemplate is the path to the main system prompt template.
 	SystemTemplate = "templates/system.tmpl"
-	// ProviderAnthropic is the identifier for the Anthropic provider.
-	ProviderAnthropic = "anthropic"
-	// ProviderOpenAI is the identifier for the OpenAI provider.
-	ProviderOpenAI = "openai"
-	// ProviderOpenAIResponses is the legacy identifier for OpenAI Responses API conversations.
-	ProviderOpenAIResponses = "openai-responses"
 )

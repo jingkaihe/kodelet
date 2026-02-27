@@ -14,7 +14,7 @@ func TestConditionalRendering(t *testing.T) {
 
 	t.Run("With all features enabled", func(t *testing.T) {
 		ctx := NewPromptContext(nil)
-		ctx.Features["subagentEnabled"] = true
+		ctx.SubagentEnabled = true
 
 		prompt, err := renderer.RenderSystemPrompt(ctx)
 		require.NoError(t, err, "Failed to render system prompt")
@@ -24,10 +24,8 @@ func TestConditionalRendering(t *testing.T) {
 
 	t.Run("With some features disabled", func(t *testing.T) {
 		ctx := NewPromptContext(nil)
-		ctx.Features["subagentEnabled"] = true
-
-		config := NewDefaultConfig()
-		updateContextWithConfig(ctx, config)
+		ctx.SubagentEnabled = false
+		ctx.TodoToolsEnabled = false
 
 		_, err := renderer.RenderSystemPrompt(ctx)
 		require.NoError(t, err, "Failed to render system prompt")
@@ -41,10 +39,10 @@ func TestRenderer(t *testing.T) {
 
 	t.Run("Component template rendering", func(t *testing.T) {
 		components := []string{
-			"templates/components/tone.tmpl",
-			"templates/components/tools.tmpl",
-			"templates/components/task_management.tmpl",
-			"templates/components/context.tmpl",
+			"templates/sections/behavior.tmpl",
+			"templates/sections/tooling.tmpl",
+			"templates/sections/task_management_examples.tmpl",
+			"templates/sections/context_runtime.tmpl",
 		}
 
 		for _, component := range components {
@@ -56,13 +54,9 @@ func TestRenderer(t *testing.T) {
 	})
 
 	t.Run("Template caching", func(t *testing.T) {
-		_, err := renderer.RenderPrompt(SystemTemplate, ctx)
-		require.NoError(t, err, "Failed to render system template")
-
-		assert.NotEqual(t, 0, len(renderer.cache), "Template was not cached after rendering")
-
-		_, ok := renderer.cache[SystemTemplate]
-		assert.True(t, ok, "Template %s not found in cache", SystemTemplate)
+		require.NoError(t, renderer.parseErr, "Failed to pre-parse templates")
+		require.NotNil(t, renderer.templates, "Expected pre-parsed templates to be initialized")
+		assert.NotNil(t, renderer.templates.Lookup(SystemTemplate), "Expected system template to be pre-parsed")
 	})
 
 	t.Run("Include function", func(t *testing.T) {

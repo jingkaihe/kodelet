@@ -333,12 +333,7 @@ func (t *Thread) processMessageExchange(
 	if t.State != nil {
 		contexts = t.State.DiscoverContexts()
 	}
-	var systemPrompt string
-	if t.Config.IsSubAgent {
-		systemPrompt = sysprompt.SubAgentPrompt(t.Config.Model, t.Config, contexts)
-	} else {
-		systemPrompt = sysprompt.SystemPrompt(t.Config.Model, t.Config, contexts)
-	}
+	systemPrompt := sysprompt.SystemPrompt(t.Config.Model, t.Config, contexts)
 
 	config := &genai.GenerateContentConfig{
 		Temperature:     genai.Ptr(float32(1.0)),

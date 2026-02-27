@@ -49,13 +49,13 @@ func TestSystemPromptBashBannedCommands(t *testing.T) {
 // TestSystemPromptBashAllowedCommands verifies that allowed commands work correctly
 func TestSystemPromptBashAllowedCommands(t *testing.T) {
 	promptCtx := NewPromptContext(nil)
-	config := NewDefaultConfig().WithModel("claude-sonnet-4-6")
+	promptCtx.SubagentEnabled = true
+	promptCtx.TodoToolsEnabled = false
 	allowedCommands := []string{"ls *", "pwd", "git status", "echo *"}
 	llmConfig := &llm.Config{
 		AllowedCommands: allowedCommands,
 	}
 
-	updateContextWithConfig(promptCtx, config)
 	promptCtx.BashAllowedCommands = llmConfig.AllowedCommands
 
 	renderer := NewRenderer(TemplateFS)
@@ -77,12 +77,12 @@ func TestSystemPromptBashAllowedCommands(t *testing.T) {
 func TestSystemPromptBashEmptyAllowedCommands(t *testing.T) {
 	// Empty allowed commands should fall back to banned commands behavior
 	promptCtx := NewPromptContext(nil)
-	config := NewDefaultConfig().WithModel("claude-sonnet-4-6")
+	promptCtx.SubagentEnabled = true
+	promptCtx.TodoToolsEnabled = false
 	llmConfig := &llm.Config{
 		AllowedCommands: []string{},
 	}
 
-	updateContextWithConfig(promptCtx, config)
 	promptCtx.BashAllowedCommands = llmConfig.AllowedCommands
 
 	renderer := NewRenderer(TemplateFS)

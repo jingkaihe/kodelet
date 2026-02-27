@@ -301,12 +301,7 @@ OUTER:
 				contexts = t.State.DiscoverContexts()
 			}
 
-			var systemPrompt string
-			if t.Config.IsSubAgent {
-				systemPrompt = sysprompt.SubAgentPrompt(model, t.Config, contexts)
-			} else {
-				systemPrompt = sysprompt.SystemPrompt(model, t.Config, contexts)
-			}
+			systemPrompt := sysprompt.SystemPrompt(model, t.Config, contexts)
 
 			// Check if auto-compact should be triggered
 			t.TryAutoCompact(ctx, opt.DisableAutoCompact, opt.CompactRatio, t.CompactContext)
@@ -384,6 +379,12 @@ func (t *Thread) applyCodexRestrictions(params *responses.ResponseNewParams) {
 		contexts := t.State.DiscoverContexts()
 
 		promptCtx := sysprompt.NewPromptContext(contexts)
+		patterns := llmtypes.DefaultContextPatterns()
+		if t.Config.Context != nil && len(t.Config.Context.Patterns) > 0 {
+			patterns = t.Config.Context.Patterns
+		}
+		promptCtx.ActiveContextFile = sysprompt.ResolveActiveContextFile(promptCtx.WorkingDirectory, contexts, patterns)
+		promptCtx.WithMCPConfig(t.Config.MCPExecutionMode, t.Config.MCPWorkspaceDir)
 		devMessages := []string{
 			promptCtx.FormatSystemInfo(),
 			promptCtx.FormatContexts(),
@@ -635,9 +636,6 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 	}
 
 	systemPrompt := sysprompt.SystemPrompt(t.Config.Model, t.Config, contexts)
-	if t.Config.IsSubAgent {
-		systemPrompt = sysprompt.SubAgentPrompt(t.Config.Model, t.Config, contexts)
-	}
 
 	compactParams := responses.ResponseCompactParams{
 		Input: responses.ResponseCompactParamsInputUnion{

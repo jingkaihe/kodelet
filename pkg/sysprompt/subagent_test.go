@@ -29,9 +29,10 @@ func TestSubAgentPrompt(t *testing.T) {
 		assert.Contains(t, prompt, fragment, "Expected subagent prompt to contain: %q", fragment)
 	}
 
-	// Subagent prompts should NOT contain subagent tool usage examples (to prevent recursion)
+	// Subagent prompts should NOT contain subagent tool guidance (to prevent recursion)
 	// or todo tool references (disabled for subagents)
 	unexpectedFragments := []string{
+		"ALWAYS prioritize `subagent`",
 		"## Subagent tool usage examples",
 		"todo_write",
 		"todo_read",
@@ -76,13 +77,13 @@ func TestSubAgentPromptBashAllowedCommands(t *testing.T) {
 
 func TestSubAgentPromptContextConsistency(t *testing.T) {
 	promptCtx := NewPromptContext(nil)
-	config := NewDefaultConfig().WithModel("claude-sonnet-4-6")
+	promptCtx.SubagentEnabled = true
+	promptCtx.TodoToolsEnabled = false
 	allowedCommands := []string{"test *", "verify *"}
 	llmConfig := llm.Config{
 		AllowedCommands: allowedCommands,
 	}
 
-	updateContextWithConfig(promptCtx, config)
 	promptCtx.BashAllowedCommands = llmConfig.AllowedCommands
 
 	renderer := NewRenderer(TemplateFS)
@@ -90,7 +91,7 @@ func TestSubAgentPromptContextConsistency(t *testing.T) {
 	systemPrompt, err := renderer.RenderSystemPrompt(promptCtx)
 	require.NoError(t, err, "Failed to render system prompt")
 
-	// Subagent prompt is now just SystemPrompt with IsSubAgent=true
+	// Subagent prompt keeps allowed command behavior but excludes subagent guidance.
 	subagentPrompt := SubAgentPrompt("claude-sonnet-4-6", llmConfig, nil)
 
 	for _, allowedCmd := range allowedCommands {
@@ -100,6 +101,8 @@ func TestSubAgentPromptContextConsistency(t *testing.T) {
 
 	assert.Contains(t, systemPrompt, "Allowed Commands", "Expected system prompt to contain 'Allowed Commands' section")
 	assert.Contains(t, subagentPrompt, "Allowed Commands", "Expected subagent prompt to contain 'Allowed Commands' section")
+	assert.Contains(t, systemPrompt, "ALWAYS prioritize `subagent`", "Expected system prompt to include subagent guidance")
+	assert.NotContains(t, subagentPrompt, "ALWAYS prioritize `subagent`", "Expected subagent prompt to exclude subagent guidance")
 
 	assert.NotContains(t, systemPrompt, "Banned Commands", "Did not expect system prompt to contain 'Banned Commands' section when allowed commands are configured")
 	assert.NotContains(t, subagentPrompt, "Banned Commands", "Did not expect subagent prompt to contain 'Banned Commands' section when allowed commands are configured")

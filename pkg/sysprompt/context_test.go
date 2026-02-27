@@ -39,6 +39,22 @@ func TestFormatContexts(t *testing.T) {
 	})
 }
 
+func TestContextEntries(t *testing.T) {
+	ctx := &PromptContext{
+		ContextFiles: map[string]string{
+			"/z/last.md":  "Last",
+			"/a/first.md": "First",
+		},
+	}
+
+	entries := ctx.ContextEntries()
+	require.Len(t, entries, 2)
+	assert.Equal(t, "/a/first.md", entries[0].Filename)
+	assert.Equal(t, "/a", entries[0].Dir)
+	assert.Equal(t, "First", entries[0].Content)
+	assert.Equal(t, "/z/last.md", entries[1].Filename)
+}
+
 // TestPromptContextActiveContextFile tests the ActiveContextFile field
 func TestPromptContextActiveContextFile(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "sysprompt-active-context-test-*")

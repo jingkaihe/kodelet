@@ -2,11 +2,11 @@ package sysprompt
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -30,7 +30,8 @@ type PromptContext struct {
 	// Active context file name (resolved from configured patterns)
 	ActiveContextFile string
 
-	Features map[string]bool
+	SubagentEnabled  bool
+	TodoToolsEnabled bool
 
 	BashBannedCommands  []string
 	BashAllowedCommands []string
@@ -38,6 +39,12 @@ type PromptContext struct {
 	// MCP tools information
 	MCPExecutionMode string
 	MCPServers       []string // List of available MCP server names
+}
+
+type ContextEntry struct {
+	Filename string
+	Dir      string
+	Content  string
 }
 
 // NewPromptContext creates a new PromptContext with default values
@@ -57,11 +64,6 @@ func NewPromptContext(contexts map[string]string) *PromptContext {
 		"glob":       "glob_tool",
 	}
 
-	features := map[string]bool{
-		"subagentEnabled":  true,
-		"todoToolsEnabled": false,
-	}
-
 	// Use provided contexts or initialize empty map
 	contextFiles := contexts
 	if contextFiles == nil {
@@ -77,7 +79,8 @@ func NewPromptContext(contexts map[string]string) *PromptContext {
 		ToolNames:           toolNames,
 		ContextFiles:        contextFiles,
 		ActiveContextFile:   AgentsMd,
-		Features:            features,
+		SubagentEnabled:     true,
+		TodoToolsEnabled:    false,
 		BashBannedCommands:  tools.BannedCommands,
 		BashAllowedCommands: []string{},
 		MCPExecutionMode:    "",
@@ -94,30 +97,48 @@ func (ctx *PromptContext) WithMCPConfig(executionMode, workspaceDir string) *Pro
 	return ctx
 }
 
-// FormatContexts formats the loaded contexts into a string
-func (ctx *PromptContext) FormatContexts() string {
+func (ctx *PromptContext) ContextEntries() []ContextEntry {
 	if len(ctx.ContextFiles) == 0 {
-		return ""
+		return nil
 	}
 
-	ctxFiles := []string{}
+	entries := make([]ContextEntry, 0, len(ctx.ContextFiles))
+	ctxFiles := make([]string, 0, len(ctx.ContextFiles))
+	sortedFilenames := make([]string, 0, len(ctx.ContextFiles))
+	for filename := range ctx.ContextFiles {
+		sortedFilenames = append(sortedFilenames, filename)
+	}
+	sort.Strings(sortedFilenames)
 
-	prompt := `Here are some useful context to help you solve the user's problem.
-When you are working in these directories, make sure that you are following the guidelines provided in the context.
-Note that the contexts in $HOME/.kodelet/ are universally applicable.
-`
-	for filename, content := range ctx.ContextFiles {
+	for _, filename := range sortedFilenames {
 		ctxFiles = append(ctxFiles, filename)
-		dir := filepath.Dir(filename)
-		prompt += fmt.Sprintf(`
-<context filename="%s", dir="%s">
-%s
-</context>
-`, filename, dir, content)
+		entries = append(entries, ContextEntry{
+			Filename: filename,
+			Dir:      filepath.Dir(filename),
+			Content:  ctx.ContextFiles[filename],
+		})
 	}
 
 	logger.G(context.Background()).WithField("context_files", ctxFiles).Debug("loaded context files")
-	return prompt
+
+	return entries
+}
+
+func (ctx *PromptContext) HasContextEntries() bool {
+	return len(ctx.ContextFiles) > 0
+}
+
+func (ctx *PromptContext) HasMCPServers() bool {
+	return ctx.MCPExecutionMode == "code" && len(ctx.MCPServers) > 0
+}
+
+func (ctx *PromptContext) MCPServersCSV() string {
+	return strings.Join(ctx.MCPServers, ", ")
+}
+
+// FormatContexts formats the loaded contexts into a string
+func (ctx *PromptContext) FormatContexts() string {
+	return ctx.renderSection("templates/sections/runtime_loaded_contexts.tmpl")
 }
 
 // ResolveActiveContextFile selects the best context file name based on configured patterns
@@ -152,16 +173,7 @@ func ResolveActiveContextFile(workingDir string, contexts map[string]string, pat
 
 // FormatSystemInfo formats the system information into a string
 func (ctx *PromptContext) FormatSystemInfo() string {
-	return fmt.Sprintf(`
-# System Information
-Here is the system information:
-<system-information>
-Current working directory: %s
-Is this a git repository? %v
-Operating system: %s %s
-Date: %s
-</system-information>
-`, ctx.WorkingDirectory, ctx.IsGitRepo, ctx.Platform, ctx.OSVersion, ctx.Date)
+	return ctx.renderSection("templates/sections/runtime_system_info.tmpl")
 }
 
 // checkIsGitRepo checks if the given directory is a git repository
@@ -243,16 +255,17 @@ func loadMCPServers(workspaceDir string) []string {
 
 // FormatMCPServers formats the MCP servers information into a string
 func (ctx *PromptContext) FormatMCPServers() string {
-	if ctx.MCPExecutionMode != "code" || len(ctx.MCPServers) == 0 {
+	return ctx.renderSection("templates/sections/runtime_mcp_servers.tmpl")
+}
+
+func (ctx *PromptContext) renderSection(templateName string) string {
+	rendered, err := defaultRenderer.RenderPrompt(templateName, ctx)
+	if err != nil {
+		logger.G(context.Background()).WithError(err).WithField("template", templateName).Warn("failed to render sysprompt context section")
 		return ""
 	}
-
-	var sb strings.Builder
-	sb.WriteString("\n# MCP Servers Available\n")
-	sb.WriteString("When using MCP tools in 'code' execution mode, the following MCP servers are available:\n\n")
-
-	sb.WriteString(strings.Join(ctx.MCPServers, ", "))
-	sb.WriteString("\n\nYou can import and use tools from these servers in your TypeScript code within the bash tool. Check the generated TypeScript API in .kodelet/mcp/servers/ for available functions.\n")
-
-	return sb.String()
+	if strings.TrimSpace(rendered) == "" {
+		return ""
+	}
+	return rendered
 }

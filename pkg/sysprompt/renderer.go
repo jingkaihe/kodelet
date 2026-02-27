@@ -2,6 +2,7 @@ package sysprompt
 
 import (
 	"io/fs"
+	"sort"
 	"strings"
 	"text/template"
 
@@ -11,103 +12,98 @@ import (
 // Renderer provides prompt template rendering capabilities
 type Renderer struct {
 	templateFS fs.FS
-	cache      map[string]*template.Template
+	templates  *template.Template
+	parseErr   error
 }
+
+var defaultRenderer = NewRenderer(TemplateFS)
 
 // NewRenderer creates a new template renderer
 func NewRenderer(fs fs.FS) *Renderer {
-	return &Renderer{
-		templateFS: fs,
-		cache:      make(map[string]*template.Template),
-	}
+	renderer := &Renderer{templateFS: fs}
+	renderer.templates, renderer.parseErr = parseTemplates(fs)
+	return renderer
 }
 
 // RenderPrompt renders a named template with the provided context
 func (r *Renderer) RenderPrompt(name string, ctx *PromptContext) (string, error) {
-	tmpl, err := r.getTemplate(name)
-	if err != nil {
-		return "", errors.Wrapf(err, "failed to get template %s", name)
+	if r.parseErr != nil {
+		return "", errors.Wrap(r.parseErr, "failed to initialize templates")
+	}
+
+	if r.templates.Lookup(name) == nil {
+		return "", errors.Errorf("template %s not found", name)
 	}
 
 	var buf strings.Builder
-	if err := tmpl.Execute(&buf, ctx); err != nil {
+	if err := r.templates.ExecuteTemplate(&buf, name, ctx); err != nil {
 		return "", errors.Wrapf(err, "failed to execute template %s", name)
 	}
 
 	return buf.String(), nil
 }
 
-// getTemplate loads a template from the FS or returns it from cache
-func (r *Renderer) getTemplate(name string) (*template.Template, error) {
-	if tmpl, ok := r.cache[name]; ok {
-		return tmpl, nil
+func parseTemplates(templateFS fs.FS) (*template.Template, error) {
+	templatePaths, err := collectTemplatePaths(templateFS, "templates")
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to collect template paths")
 	}
 
-	baseName := name
-	if idx := strings.LastIndex(name, "/"); idx >= 0 {
-		baseName = name[idx+1:]
-	}
-
-	tmpl := template.New(baseName)
-
-	// We'll need to create a self-reference for the include function
+	templates := template.New("templates")
 	var selfRef *template.Template
-
-	tmpl = tmpl.Funcs(template.FuncMap{
-		"include": func(tplName string, data any) (string, error) {
+	templates = templates.Funcs(template.FuncMap{
+		"include": func(templateName string, data any) (string, error) {
 			var buf strings.Builder
-			err := selfRef.ExecuteTemplate(&buf, tplName, data)
+			err := selfRef.ExecuteTemplate(&buf, templateName, data)
 			return buf.String(), err
 		},
 	})
+	selfRef = templates
 
-	// Set the self reference after template creation
-	selfRef = tmpl
+	for _, path := range templatePaths {
+		content, err := fs.ReadFile(templateFS, path)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to read template file %s", path)
+		}
 
-	content, err := fs.ReadFile(r.templateFS, name)
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to read template file %s", name)
+		_, err = templates.New(path).Parse(string(content))
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to parse template %s", path)
+		}
 	}
 
-	tmpl, err = tmpl.Parse(string(content))
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to parse template %s", name)
+	return templates, nil
+}
+
+func collectTemplatePaths(templateFS fs.FS, dir string) ([]string, error) {
+	if _, err := fs.Stat(templateFS, dir); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
 	}
 
-	err = fs.WalkDir(r.templateFS, "templates/components", func(path string, d fs.DirEntry, err error) error {
+	var paths []string
+	err := fs.WalkDir(templateFS, dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if d.IsDir() {
+		if d.IsDir() || !strings.HasSuffix(path, ".tmpl") {
 			return nil
 		}
 
-		component, err := fs.ReadFile(r.templateFS, path)
-		if err != nil {
-			return err
-		}
-
-		_, err = tmpl.New(path).Parse(string(component))
-		return err
+		paths = append(paths, path)
+		return nil
 	})
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to load component templates")
+		return nil, err
 	}
 
-	r.cache[name] = tmpl
-	return tmpl, nil
+	sort.Strings(paths)
+	return paths, nil
 }
 
 // RenderSystemPrompt renders the system prompt
 func (r *Renderer) RenderSystemPrompt(ctx *PromptContext) (string, error) {
-	prompt, err := r.RenderPrompt(SystemTemplate, ctx)
-	if err != nil {
-		return "", err
-	}
-
-	prompt += ctx.FormatSystemInfo()
-	prompt += ctx.FormatContexts()
-	prompt += ctx.FormatMCPServers()
-
-	return prompt, nil
+	return r.RenderPrompt(SystemTemplate, ctx)
 }

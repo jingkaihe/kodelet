@@ -43,6 +43,18 @@ func TestFormatMCPServers(t *testing.T) {
 	})
 }
 
+func TestMCPTemplateHelpers(t *testing.T) {
+	promptCtx := NewPromptContext(nil)
+	promptCtx.MCPExecutionMode = "code"
+	promptCtx.MCPServers = []string{"grafana", "lsp"}
+
+	assert.True(t, promptCtx.HasMCPServers())
+	assert.Equal(t, "grafana, lsp", promptCtx.MCPServersCSV())
+
+	promptCtx.MCPExecutionMode = "direct"
+	assert.False(t, promptCtx.HasMCPServers())
+}
+
 func TestLoadMCPServers(t *testing.T) {
 	t.Run("Load servers from directory", func(t *testing.T) {
 		// Create temporary workspace directory

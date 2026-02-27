@@ -8,10 +8,16 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+const (
+	providerAnthropic       = "anthropic"
+	providerOpenAI          = "openai"
+	providerOpenAIResponses = "openai-responses"
+)
+
 func TestSystemPrompt_ProviderSelection(t *testing.T) {
 	t.Run("Anthropic provider uses templates", func(t *testing.T) {
 		config := llm.Config{
-			Provider: ProviderAnthropic,
+			Provider: providerAnthropic,
 		}
 		contexts := map[string]string{}
 
@@ -35,7 +41,7 @@ func TestSystemPrompt_ProviderSelection(t *testing.T) {
 func TestSubAgentPrompt_ProviderSelection(t *testing.T) {
 	t.Run("Anthropic provider uses templates", func(t *testing.T) {
 		config := llm.Config{
-			Provider: ProviderAnthropic,
+			Provider: providerAnthropic,
 		}
 		contexts := map[string]string{}
 
@@ -70,14 +76,14 @@ func TestUnifiedSystemPrompt_ForOpenAIProvidersAndPlatforms(t *testing.T) {
 			name:  "OpenAI provider",
 			model: "gpt-4",
 			config: llm.Config{
-				Provider: ProviderOpenAI,
+				Provider: providerOpenAI,
 			},
 		},
 		{
 			name:  "OpenAI provider subagent",
 			model: "gpt-4",
 			config: llm.Config{
-				Provider: ProviderOpenAI,
+				Provider: providerOpenAI,
 			},
 			useSubagent: true,
 		},
@@ -85,14 +91,14 @@ func TestUnifiedSystemPrompt_ForOpenAIProvidersAndPlatforms(t *testing.T) {
 			name:  "OpenAI Responses provider",
 			model: "gpt-4",
 			config: llm.Config{
-				Provider: ProviderOpenAIResponses,
+				Provider: providerOpenAIResponses,
 			},
 		},
 		{
 			name:  "OpenAI Responses provider subagent",
 			model: "gpt-4",
 			config: llm.Config{
-				Provider: ProviderOpenAIResponses,
+				Provider: providerOpenAIResponses,
 			},
 			useSubagent: true,
 		},
@@ -100,7 +106,7 @@ func TestUnifiedSystemPrompt_ForOpenAIProvidersAndPlatforms(t *testing.T) {
 			name:  "OpenAI platform",
 			model: "gpt-4.1",
 			config: llm.Config{
-				Provider: ProviderOpenAI,
+				Provider: providerOpenAI,
 				OpenAI: &llm.OpenAIConfig{
 					Platform: "openai",
 				},
@@ -110,7 +116,7 @@ func TestUnifiedSystemPrompt_ForOpenAIProvidersAndPlatforms(t *testing.T) {
 			name:  "Codex platform",
 			model: "gpt-5.3-codex",
 			config: llm.Config{
-				Provider: ProviderOpenAI,
+				Provider: providerOpenAI,
 				OpenAI: &llm.OpenAIConfig{
 					Platform: "codex",
 				},
@@ -139,7 +145,7 @@ func TestUnifiedSystemPrompt_ForOpenAIProvidersAndPlatforms(t *testing.T) {
 }
 
 func TestPromptTemplateConditionalSections(t *testing.T) {
-	baseConfig := llm.Config{Provider: ProviderOpenAI}
+	baseConfig := llm.Config{Provider: providerOpenAI}
 
 	t.Run("Main agent prompt includes subagent usage examples", func(t *testing.T) {
 		prompt := SystemPrompt("gpt-4", baseConfig, map[string]string{})
@@ -183,10 +189,10 @@ func TestPromptTemplateConditionalSections(t *testing.T) {
 		assert.Contains(t, mainPrompt, "# Task Management")
 		assert.NotContains(t, mainPrompt, "You have access to the `todo_write` and `todo_read` tools")
 
-		mainPromptWithTodos := SystemPrompt("gpt-4", llm.Config{Provider: ProviderOpenAI, EnableTodos: true}, map[string]string{})
+		mainPromptWithTodos := SystemPrompt("gpt-4", llm.Config{Provider: providerOpenAI, EnableTodos: true}, map[string]string{})
 		assert.Contains(t, mainPromptWithTodos, "You have access to the `todo_write` and `todo_read` tools")
 
-		subagentPrompt := SubAgentPrompt("gpt-4", llm.Config{Provider: ProviderOpenAI, EnableTodos: true}, map[string]string{})
+		subagentPrompt := SubAgentPrompt("gpt-4", llm.Config{Provider: providerOpenAI, EnableTodos: true}, map[string]string{})
 		assert.Contains(t, subagentPrompt, "# Task Management")
 		assert.NotContains(t, subagentPrompt, "You have access to the `todo_write` and `todo_read` tools")
 	})
@@ -203,7 +209,7 @@ func TestPromptTemplateConditionalSections(t *testing.T) {
 func TestDisableSubagent_SystemPrompt(t *testing.T) {
 	t.Run("Anthropic prompt excludes subagent content when DisableSubagent is true", func(t *testing.T) {
 		config := llm.Config{
-			Provider:        ProviderAnthropic,
+			Provider:        providerAnthropic,
 			DisableSubagent: true,
 		}
 
@@ -217,7 +223,7 @@ func TestDisableSubagent_SystemPrompt(t *testing.T) {
 
 	t.Run("Anthropic prompt includes subagent content when DisableSubagent is false", func(t *testing.T) {
 		config := llm.Config{
-			Provider:        ProviderAnthropic,
+			Provider:        providerAnthropic,
 			DisableSubagent: false,
 		}
 
@@ -229,7 +235,7 @@ func TestDisableSubagent_SystemPrompt(t *testing.T) {
 
 	t.Run("OpenAI prompt excludes subagent content when DisableSubagent is true", func(t *testing.T) {
 		config := llm.Config{
-			Provider:        ProviderOpenAI,
+			Provider:        providerOpenAI,
 			DisableSubagent: true,
 		}
 
@@ -242,7 +248,7 @@ func TestDisableSubagent_SystemPrompt(t *testing.T) {
 
 	t.Run("OpenAI prompt includes subagent content when DisableSubagent is false", func(t *testing.T) {
 		config := llm.Config{
-			Provider:        ProviderOpenAI,
+			Provider:        providerOpenAI,
 			DisableSubagent: false,
 		}
 
@@ -254,7 +260,7 @@ func TestDisableSubagent_SystemPrompt(t *testing.T) {
 
 	t.Run("OpenAI Responses API excludes subagent content when DisableSubagent is true", func(t *testing.T) {
 		config := llm.Config{
-			Provider:        ProviderOpenAIResponses,
+			Provider:        providerOpenAIResponses,
 			DisableSubagent: true,
 		}
 
@@ -266,7 +272,7 @@ func TestDisableSubagent_SystemPrompt(t *testing.T) {
 
 	t.Run("DisableSubagent does not affect subagent prompt shape for actual subagents", func(t *testing.T) {
 		config := llm.Config{
-			Provider:        ProviderOpenAI,
+			Provider:        providerOpenAI,
 			IsSubAgent:      true,
 			DisableSubagent: false,
 		}
