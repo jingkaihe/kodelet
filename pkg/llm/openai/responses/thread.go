@@ -377,26 +377,14 @@ func (t *Thread) applyCodexRestrictions(params *responses.ResponseNewParams) {
 
 	if t.State != nil {
 		contexts := t.State.DiscoverContexts()
+		promptCtx := sysprompt.BuildRuntimeContext(t.Config, contexts)
 
-		promptCtx := sysprompt.NewPromptContext(contexts)
-		patterns := llmtypes.DefaultContextPatterns()
-		if t.Config.Context != nil && len(t.Config.Context.Patterns) > 0 {
-			patterns = t.Config.Context.Patterns
-		}
-		promptCtx.ActiveContextFile = sysprompt.ResolveActiveContextFile(promptCtx.WorkingDirectory, contexts, patterns)
-		promptCtx.WithMCPConfig(t.Config.MCPExecutionMode, t.Config.MCPWorkspaceDir)
-		promptCtx.Args = t.Config.SyspromptArgs
-
-		renderer, err := sysprompt.RendererForConfig(t.Config)
+		renderer, err := sysprompt.ResolveRendererForConfig(t.Config)
 		if err != nil {
 			logger.G(context.Background()).WithError(err).Warn("failed to load custom sysprompt template for codex runtime sections, using default")
 		}
 
-		devMessages := []string{
-			promptCtx.FormatSystemInfoWithRenderer(renderer),
-			promptCtx.FormatContextsWithRenderer(renderer),
-			promptCtx.FormatMCPServersWithRenderer(renderer),
-		}
+		devMessages := sysprompt.RenderRuntimeSections(promptCtx, renderer)
 
 		// prepend dev messages to params' input
 		for i := len(devMessages) - 1; i >= 0; i-- {

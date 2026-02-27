@@ -50,7 +50,7 @@ func TestSystemPromptBashBannedCommands(t *testing.T) {
 
 // TestSystemPromptBashAllowedCommands verifies that allowed commands work correctly
 func TestSystemPromptBashAllowedCommands(t *testing.T) {
-	promptCtx := NewPromptContext(nil)
+	promptCtx := newPromptContext(nil)
 	promptCtx.SubagentEnabled = true
 	promptCtx.TodoToolsEnabled = false
 	allowedCommands := []string{"ls *", "pwd", "git status", "echo *"}
@@ -78,7 +78,7 @@ func TestSystemPromptBashAllowedCommands(t *testing.T) {
 // TestSystemPromptBashEmptyAllowedCommands verifies behavior with empty allowed commands
 func TestSystemPromptBashEmptyAllowedCommands(t *testing.T) {
 	// Empty allowed commands should fall back to banned commands behavior
-	promptCtx := NewPromptContext(nil)
+	promptCtx := newPromptContext(nil)
 	promptCtx.SubagentEnabled = true
 	promptCtx.TodoToolsEnabled = false
 	llmConfig := &llm.Config{

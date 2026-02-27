@@ -45,7 +45,7 @@ func TestSubAgentPrompt_ProviderSelection(t *testing.T) {
 		}
 		contexts := map[string]string{}
 
-		prompt := SubAgentPrompt("claude-sonnet-46", config, contexts)
+		prompt := subagentPrompt("claude-sonnet-46", config, contexts)
 		assert.NotEmpty(t, prompt)
 		// SubAgentPrompt now delegates to SystemPrompt with IsSubAgent=true
 		assert.Contains(t, prompt, "interactive CLI tool")
@@ -57,7 +57,7 @@ func TestSubAgentPrompt_ProviderSelection(t *testing.T) {
 		}
 		contexts := map[string]string{}
 
-		prompt := SubAgentPrompt("some-model", config, contexts)
+		prompt := subagentPrompt("some-model", config, contexts)
 		assert.NotEmpty(t, prompt)
 		// SubAgentPrompt now delegates to SystemPrompt with IsSubAgent=true
 		assert.Contains(t, prompt, "interactive CLI tool")
@@ -129,7 +129,7 @@ func TestUnifiedSystemPrompt_ForOpenAIProvidersAndPlatforms(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			prompt := ""
 			if tc.useSubagent {
-				prompt = SubAgentPrompt(tc.model, tc.config, map[string]string{})
+				prompt = subagentPrompt(tc.model, tc.config, map[string]string{})
 			} else {
 				prompt = SystemPrompt(tc.model, tc.config, map[string]string{})
 			}
@@ -155,7 +155,7 @@ func TestPromptTemplateConditionalSections(t *testing.T) {
 	})
 
 	t.Run("Subagent prompt excludes subagent usage examples", func(t *testing.T) {
-		prompt := SubAgentPrompt("gpt-4", baseConfig, map[string]string{})
+		prompt := subagentPrompt("gpt-4", baseConfig, map[string]string{})
 		assert.NotEmpty(t, prompt)
 		assert.NotContains(t, prompt, "## Subagent tool usage examples")
 	})
@@ -192,7 +192,7 @@ func TestPromptTemplateConditionalSections(t *testing.T) {
 		mainPromptWithTodos := SystemPrompt("gpt-4", llm.Config{Provider: providerOpenAI, EnableTodos: true}, map[string]string{})
 		assert.Contains(t, mainPromptWithTodos, "You have access to the `todo_write` and `todo_read` tools")
 
-		subagentPrompt := SubAgentPrompt("gpt-4", llm.Config{Provider: providerOpenAI, EnableTodos: true}, map[string]string{})
+		subagentPrompt := subagentPrompt("gpt-4", llm.Config{Provider: providerOpenAI, EnableTodos: true}, map[string]string{})
 		assert.Contains(t, subagentPrompt, "# Task Management")
 		assert.NotContains(t, subagentPrompt, "You have access to the `todo_write` and `todo_read` tools")
 	})
@@ -277,7 +277,7 @@ func TestDisableSubagent_SystemPrompt(t *testing.T) {
 			DisableSubagent: false,
 		}
 
-		prompt := SubAgentPrompt("gpt-4", config, map[string]string{})
+		prompt := subagentPrompt("gpt-4", config, map[string]string{})
 
 		assert.NotContains(t, prompt, "## Subagent tool usage examples")
 		assert.Contains(t, prompt, "# Tool Usage")

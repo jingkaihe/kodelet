@@ -19,7 +19,7 @@ func TestFormatContexts(t *testing.T) {
 			},
 		}
 
-		result := ctx.FormatContexts()
+		result := ctx.formatContexts()
 
 		assert.Contains(t, result, "Here are some useful context")
 		assert.Contains(t, result, `<context filename="AGENTS.md", dir=".">`)
@@ -33,7 +33,7 @@ func TestFormatContexts(t *testing.T) {
 			ContextFiles: map[string]string{},
 		}
 
-		result := ctx.FormatContexts()
+		result := ctx.formatContexts()
 
 		assert.Empty(t, result, "Expected empty string when no contexts are available")
 	})
@@ -47,7 +47,7 @@ func TestContextEntries(t *testing.T) {
 		},
 	}
 
-	entries := ctx.ContextEntries()
+	entries := ctx.contextEntries()
 	require.Len(t, entries, 2)
 	assert.Equal(t, "/a/first.md", entries[0].Filename)
 	assert.Equal(t, "/a", entries[0].Dir)
@@ -73,14 +73,14 @@ func TestPromptContextActiveContextFile(t *testing.T) {
 		require.NoError(t, err)
 		defer os.Remove(AgentsMd)
 
-		ctx := NewPromptContext(nil)
+		ctx := newPromptContext(nil)
 		assert.Equal(t, AgentsMd, ctx.ActiveContextFile, "Expected ActiveContextFile to be AGENTS.md")
 	})
 
 	t.Run("ActiveContextFile defaults to AGENTS.md when no file exists", func(t *testing.T) {
 		os.Remove(AgentsMd)
 
-		ctx := NewPromptContext(nil)
+		ctx := newPromptContext(nil)
 		assert.Equal(t, AgentsMd, ctx.ActiveContextFile, "Expected ActiveContextFile to default to AGENTS.md")
 	})
 }
@@ -93,7 +93,7 @@ func TestResolveActiveContextFile(t *testing.T) {
 		}
 		patterns := []string{"AGENTS.md", "README.md"}
 
-		active := ResolveActiveContextFile(workingDir, contexts, patterns)
+		active := resolveActiveContextFile(workingDir, contexts, patterns)
 
 		assert.Equal(t, "README.md", active)
 	})
@@ -104,7 +104,7 @@ func TestResolveActiveContextFile(t *testing.T) {
 		}
 		patterns := []string{"CODING.md", "README.md"}
 
-		active := ResolveActiveContextFile("", contexts, patterns)
+		active := resolveActiveContextFile("", contexts, patterns)
 
 		assert.Equal(t, "CODING.md", active)
 	})
@@ -112,13 +112,13 @@ func TestResolveActiveContextFile(t *testing.T) {
 	t.Run("falls back to first pattern when no contexts", func(t *testing.T) {
 		patterns := []string{"README.md", "AGENTS.md"}
 
-		active := ResolveActiveContextFile("", nil, patterns)
+		active := resolveActiveContextFile("", nil, patterns)
 
 		assert.Equal(t, "README.md", active)
 	})
 
 	t.Run("defaults to AGENTS.md when no patterns", func(t *testing.T) {
-		active := ResolveActiveContextFile("", nil, nil)
+		active := resolveActiveContextFile("", nil, nil)
 
 		assert.Equal(t, AgentsMd, active)
 	})

@@ -47,10 +47,10 @@ func TestRendererForConfig_CustomTemplate(t *testing.T) {
 		tmplPath := filepath.Join(tmpDir, "custom.tmpl")
 		require.NoError(t, os.WriteFile(tmplPath, []byte("CUSTOM\n{{include \"templates/sections/tooling.tmpl\" .}}"), 0o644))
 
-		renderer, err := RendererForConfig(llmtypes.Config{Sysprompt: tmplPath})
+		renderer, err := rendererForConfig(llmtypes.Config{Sysprompt: tmplPath})
 		require.NoError(t, err)
 
-		ctx := NewPromptContext(nil)
+		ctx := newPromptContext(nil)
 		ctx.SubagentEnabled = true
 		prompt, err := renderer.RenderSystemPrompt(ctx)
 		require.NoError(t, err)
@@ -59,11 +59,11 @@ func TestRendererForConfig_CustomTemplate(t *testing.T) {
 	})
 
 	t.Run("falls back to default renderer when invalid", func(t *testing.T) {
-		renderer, err := RendererForConfig(llmtypes.Config{Sysprompt: "/no/such/file.tmpl"})
+		renderer, err := rendererForConfig(llmtypes.Config{Sysprompt: "/no/such/file.tmpl"})
 		require.Error(t, err)
 		require.NotNil(t, renderer)
 
-		ctx := NewPromptContext(nil)
+		ctx := newPromptContext(nil)
 		prompt, renderErr := renderer.RenderSystemPrompt(ctx)
 		require.NoError(t, renderErr)
 		assert.Contains(t, prompt, "You are an interactive CLI tool")
@@ -74,10 +74,10 @@ func TestRendererForConfig_CustomTemplate(t *testing.T) {
 		tmplPath := filepath.Join(tmpDir, "custom-args.tmpl")
 		require.NoError(t, os.WriteFile(tmplPath, []byte("Project={{default .Args.project \"unknown\"}}\nOwner={{default .Args.owner \"none\"}}"), 0o644))
 
-		renderer, err := RendererForConfig(llmtypes.Config{Sysprompt: tmplPath})
+		renderer, err := rendererForConfig(llmtypes.Config{Sysprompt: tmplPath})
 		require.NoError(t, err)
 
-		ctx := NewPromptContext(nil)
+		ctx := newPromptContext(nil)
 		ctx.Args = map[string]string{"project": "kodelet"}
 		prompt, err := renderer.RenderSystemPrompt(ctx)
 		require.NoError(t, err)
@@ -90,10 +90,10 @@ func TestRendererForConfig_CustomTemplate(t *testing.T) {
 		tmplPath := filepath.Join(tmpDir, "custom-bash.tmpl")
 		require.NoError(t, os.WriteFile(tmplPath, []byte("Echo={{bash \"echo\" \"hello\"}}"), 0o644))
 
-		renderer, err := RendererForConfig(llmtypes.Config{Sysprompt: tmplPath})
+		renderer, err := rendererForConfig(llmtypes.Config{Sysprompt: tmplPath})
 		require.NoError(t, err)
 
-		ctx := NewPromptContext(nil)
+		ctx := newPromptContext(nil)
 		prompt, err := renderer.RenderSystemPrompt(ctx)
 		require.NoError(t, err)
 		assert.Contains(t, prompt, "Echo=hello")

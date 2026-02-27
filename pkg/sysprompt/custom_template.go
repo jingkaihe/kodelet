@@ -10,7 +10,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-func RendererForConfig(llmConfig llm.Config) (*Renderer, error) {
+func rendererForConfig(llmConfig llm.Config) (*Renderer, error) {
 	if strings.TrimSpace(llmConfig.Sysprompt) == "" {
 		return defaultRenderer, nil
 	}

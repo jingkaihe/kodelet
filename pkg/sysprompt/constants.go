@@ -1,3 +1,4 @@
+// Package sysprompt renders system prompts from embedded templates.
 package sysprompt
 
 import "embed"

@@ -12,11 +12,11 @@ import (
 
 func TestFormatMCPServers(t *testing.T) {
 	t.Run("Format with MCP servers in code mode", func(t *testing.T) {
-		promptCtx := NewPromptContext(nil)
+		promptCtx := newPromptContext(nil)
 		promptCtx.MCPExecutionMode = "code"
 		promptCtx.MCPServers = []string{"grafana", "lsp"}
 
-		result := promptCtx.FormatMCPServers()
+		result := promptCtx.formatMCPServers()
 
 		assert.Contains(t, result, "MCP Servers Available")
 		assert.Contains(t, result, "grafana")
@@ -25,34 +25,34 @@ func TestFormatMCPServers(t *testing.T) {
 	})
 
 	t.Run("Empty result when execution mode is not code", func(t *testing.T) {
-		promptCtx := NewPromptContext(nil)
+		promptCtx := newPromptContext(nil)
 		promptCtx.MCPExecutionMode = "direct"
 		promptCtx.MCPServers = []string{"grafana"}
 
-		result := promptCtx.FormatMCPServers()
+		result := promptCtx.formatMCPServers()
 		assert.Empty(t, result)
 	})
 
 	t.Run("Empty result when no servers", func(t *testing.T) {
-		promptCtx := NewPromptContext(nil)
+		promptCtx := newPromptContext(nil)
 		promptCtx.MCPExecutionMode = "code"
 		promptCtx.MCPServers = []string{}
 
-		result := promptCtx.FormatMCPServers()
+		result := promptCtx.formatMCPServers()
 		assert.Empty(t, result)
 	})
 }
 
 func TestMCPTemplateHelpers(t *testing.T) {
-	promptCtx := NewPromptContext(nil)
+	promptCtx := newPromptContext(nil)
 	promptCtx.MCPExecutionMode = "code"
 	promptCtx.MCPServers = []string{"grafana", "lsp"}
 
-	assert.True(t, promptCtx.HasMCPServers())
-	assert.Equal(t, "grafana, lsp", promptCtx.MCPServersCSV())
+	assert.True(t, promptCtx.hasMCPServers())
+	assert.Equal(t, "grafana, lsp", promptCtx.mcpServersCSV())
 
 	promptCtx.MCPExecutionMode = "direct"
-	assert.False(t, promptCtx.HasMCPServers())
+	assert.False(t, promptCtx.hasMCPServers())
 }
 
 func TestLoadMCPServers(t *testing.T) {
@@ -113,7 +113,7 @@ func TestWithMCPConfig(t *testing.T) {
 		testIndex := `export { testTool } from './testTool.js';`
 		require.NoError(t, os.WriteFile(filepath.Join(testDir, "index.ts"), []byte(testIndex), 0o644))
 
-		promptCtx := NewPromptContext(nil)
+		promptCtx := newPromptContext(nil)
 		promptCtx.WithMCPConfig("code", tmpDir)
 
 		assert.Equal(t, "code", promptCtx.MCPExecutionMode)
@@ -124,7 +124,7 @@ func TestWithMCPConfig(t *testing.T) {
 	t.Run("Don't load servers when execution mode is not code", func(t *testing.T) {
 		tmpDir := t.TempDir()
 
-		promptCtx := NewPromptContext(nil)
+		promptCtx := newPromptContext(nil)
 		promptCtx.WithMCPConfig("direct", tmpDir)
 
 		assert.Equal(t, "direct", promptCtx.MCPExecutionMode)
@@ -147,7 +147,7 @@ func TestSystemPromptWithMCPServers(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(testDir, "index.ts"), []byte(testIndex), 0o644))
 
 		// Create prompt context with MCP configuration
-		promptCtx := NewPromptContext(nil)
+		promptCtx := newPromptContext(nil)
 		promptCtx.WithMCPConfig("code", tmpDir)
 
 		renderer := NewRenderer(TemplateFS)
@@ -161,7 +161,7 @@ func TestSystemPromptWithMCPServers(t *testing.T) {
 	})
 
 	t.Run("Don't include MCP servers when execution mode is not code", func(t *testing.T) {
-		promptCtx := NewPromptContext(nil)
+		promptCtx := newPromptContext(nil)
 		promptCtx.WithMCPConfig("direct", ".kodelet/mcp")
 
 		renderer := NewRenderer(TemplateFS)

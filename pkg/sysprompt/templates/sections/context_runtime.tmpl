@@ -10,10 +10,10 @@ Date: {{.Date}}
 {{end}}
 
 {{define "templates/sections/runtime_loaded_contexts.tmpl"}}
-{{if .HasContextEntries}}Here are some useful context to help you solve the user's problem.
+{{if hasContextEntries .}}Here are some useful context to help you solve the user's problem.
 When you are working in these directories, make sure that you are following the guidelines provided in the context.
 Note that the contexts in $HOME/.kodelet/ are universally applicable.
-{{range .ContextEntries}}
+{{range contextEntries .}}
 <context filename="{{.Filename}}", dir="{{.Dir}}">
 {{.Content}}
 </context>
@@ -21,11 +21,11 @@ Note that the contexts in $HOME/.kodelet/ are universally applicable.
 {{end}}
 
 {{define "templates/sections/runtime_mcp_servers.tmpl"}}
-{{if .HasMCPServers}}
+{{if hasMCPServers .}}
 # MCP Servers Available
 When using MCP tools in 'code' execution mode, the following MCP servers are available:
 
-{{.MCPServersCSV}}
+{{mcpServersCSV .}}
 
 You can import and use tools from these servers in your TypeScript code within the bash tool. Check the generated TypeScript API in .kodelet/mcp/servers/ for available functions.
 {{end}}

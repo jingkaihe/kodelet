@@ -42,14 +42,14 @@ type PromptContext struct {
 	MCPServers       []string // List of available MCP server names
 }
 
-type ContextEntry struct {
+type contextEntry struct {
 	Filename string
 	Dir      string
 	Content  string
 }
 
-// NewPromptContext creates a new PromptContext with default values
-func NewPromptContext(contexts map[string]string) *PromptContext {
+// newPromptContext creates a new PromptContext with default values.
+func newPromptContext(contexts map[string]string) *PromptContext {
 	pwd, _ := os.Getwd()
 	isGitRepo := checkIsGitRepo(pwd)
 	platform := runtime.GOOS
@@ -99,12 +99,12 @@ func (ctx *PromptContext) WithMCPConfig(executionMode, workspaceDir string) *Pro
 	return ctx
 }
 
-func (ctx *PromptContext) ContextEntries() []ContextEntry {
+func (ctx *PromptContext) contextEntries() []contextEntry {
 	if len(ctx.ContextFiles) == 0 {
 		return nil
 	}
 
-	entries := make([]ContextEntry, 0, len(ctx.ContextFiles))
+	entries := make([]contextEntry, 0, len(ctx.ContextFiles))
 	ctxFiles := make([]string, 0, len(ctx.ContextFiles))
 	sortedFilenames := make([]string, 0, len(ctx.ContextFiles))
 	for filename := range ctx.ContextFiles {
@@ -114,7 +114,7 @@ func (ctx *PromptContext) ContextEntries() []ContextEntry {
 
 	for _, filename := range sortedFilenames {
 		ctxFiles = append(ctxFiles, filename)
-		entries = append(entries, ContextEntry{
+		entries = append(entries, contextEntry{
 			Filename: filename,
 			Dir:      filepath.Dir(filename),
 			Content:  ctx.ContextFiles[filename],
@@ -126,26 +126,23 @@ func (ctx *PromptContext) ContextEntries() []ContextEntry {
 	return entries
 }
 
-func (ctx *PromptContext) HasContextEntries() bool {
+func (ctx *PromptContext) hasContextEntries() bool {
 	return len(ctx.ContextFiles) > 0
 }
 
-func (ctx *PromptContext) HasMCPServers() bool {
+func (ctx *PromptContext) hasMCPServers() bool {
 	return ctx.MCPExecutionMode == "code" && len(ctx.MCPServers) > 0
 }
 
-func (ctx *PromptContext) MCPServersCSV() string {
+func (ctx *PromptContext) mcpServersCSV() string {
 	return strings.Join(ctx.MCPServers, ", ")
 }
 
-// FormatContexts formats the loaded contexts into a string
-func (ctx *PromptContext) FormatContexts() string {
-	return ctx.FormatContextsWithRenderer(defaultRenderer)
+func (ctx *PromptContext) formatContexts() string {
+	return ctx.formatContextsWithRenderer(defaultRenderer)
 }
 
-// ResolveActiveContextFile selects the best context file name based on configured patterns
-// and the contexts that were actually loaded.
-func ResolveActiveContextFile(workingDir string, contexts map[string]string, patterns []string) string {
+func resolveActiveContextFile(workingDir string, contexts map[string]string, patterns []string) string {
 	if len(patterns) == 0 {
 		return AgentsMd
 	}
@@ -171,11 +168,6 @@ func ResolveActiveContextFile(workingDir string, contexts map[string]string, pat
 	}
 
 	return patterns[0]
-}
-
-// FormatSystemInfo formats the system information into a string
-func (ctx *PromptContext) FormatSystemInfo() string {
-	return ctx.FormatSystemInfoWithRenderer(defaultRenderer)
 }
 
 // checkIsGitRepo checks if the given directory is a git repository
@@ -255,9 +247,8 @@ func loadMCPServers(workspaceDir string) []string {
 	return servers
 }
 
-// FormatMCPServers formats the MCP servers information into a string
-func (ctx *PromptContext) FormatMCPServers() string {
-	return ctx.FormatMCPServersWithRenderer(defaultRenderer)
+func (ctx *PromptContext) formatMCPServers() string {
+	return ctx.formatMCPServersWithRenderer(defaultRenderer)
 }
 
 func (ctx *PromptContext) renderSectionWithRenderer(renderer *Renderer, templateName string) string {
@@ -277,14 +268,14 @@ func (ctx *PromptContext) renderSectionWithRenderer(renderer *Renderer, template
 	return rendered
 }
 
-func (ctx *PromptContext) FormatSystemInfoWithRenderer(renderer *Renderer) string {
+func (ctx *PromptContext) formatSystemInfoWithRenderer(renderer *Renderer) string {
 	return ctx.renderSectionWithRenderer(renderer, "templates/sections/runtime_system_info.tmpl")
 }
 
-func (ctx *PromptContext) FormatContextsWithRenderer(renderer *Renderer) string {
+func (ctx *PromptContext) formatContextsWithRenderer(renderer *Renderer) string {
 	return ctx.renderSectionWithRenderer(renderer, "templates/sections/runtime_loaded_contexts.tmpl")
 }
 
-func (ctx *PromptContext) FormatMCPServersWithRenderer(renderer *Renderer) string {
+func (ctx *PromptContext) formatMCPServersWithRenderer(renderer *Renderer) string {
 	return ctx.renderSectionWithRenderer(renderer, "templates/sections/runtime_mcp_servers.tmpl")
 }
