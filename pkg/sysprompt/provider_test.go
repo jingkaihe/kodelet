@@ -151,7 +151,7 @@ func TestPromptTemplateConditionalSections(t *testing.T) {
 		prompt := SystemPrompt("gpt-4", baseConfig, map[string]string{})
 		assert.NotEmpty(t, prompt)
 		assert.Contains(t, prompt, "## Subagent tool usage examples")
-		assert.Contains(t, prompt, "The user's request is nuanced and cannot be described in regex")
+		assert.Contains(t, prompt, "better handled by `subagent`")
 	})
 
 	t.Run("Subagent prompt excludes subagent usage examples", func(t *testing.T) {
@@ -164,7 +164,7 @@ func TestPromptTemplateConditionalSections(t *testing.T) {
 		prompt := SystemPrompt("gpt-4", baseConfig, map[string]string{})
 		assert.NotEmpty(t, prompt)
 
-		toolsPos := strings.Index(prompt, "# !!!VERY IMPORTANT!!! Tool Usage")
+		toolsPos := strings.Index(prompt, "# Tool Usage")
 		subagentExamplesPos := strings.Index(prompt, "## Subagent tool usage examples")
 		taskManagementPos := strings.Index(prompt, "# Task Management")
 
@@ -280,7 +280,7 @@ func TestDisableSubagent_SystemPrompt(t *testing.T) {
 		prompt := SubAgentPrompt("gpt-4", config, map[string]string{})
 
 		assert.NotContains(t, prompt, "## Subagent tool usage examples")
-		assert.Contains(t, prompt, "# !!!VERY IMPORTANT!!! Tool Usage")
+		assert.Contains(t, prompt, "# Tool Usage")
 		assert.Contains(t, prompt, "# Task Management")
 	})
 }

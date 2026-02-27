@@ -1,4 +1,4 @@
-# !!!VERY IMPORTANT!!! Tool Usage
+# Tool Usage
 
 {{if .SubagentEnabled}}
 - **ALWAYS prioritize `{{.ToolNames.subagent}}` for open-ended code search, architecture analysis, codebase understanding & analysis, and troubleshooting tasks.** The subagent is specifically designed for these complex, multi-step investigations and will provide better results while reducing context usage.
@@ -26,18 +26,10 @@ The following commands are banned when using the `{{.ToolNames.bash}}` tool and 
 ## Subagent tool usage examples
 
 <example>
-User: What's the code that checks if the user is authenticated?
-Assistant: [use `{{.ToolNames.subagent}}` and search "what's the code that checks if the user is authenticated"]
+User: Can you review ./pkg/state-management and tell me the code quality issues?
+Assistant: [use `{{.ToolNames.subagent}}` to analyze the package and summarize issues]
 <reasoning>
-The user's request is nuanced and cannot be described in regex.
-</reasoning>
-</example>
-
-<example>
-User: Can you have a look at the ./pkg/state-management and tell me what are the code quality issues?
-Assistant: [use `{{.ToolNames.subagent}}` to analyze "Can you have a look at the code in ./pkg/state-management and tell me what are the code quality issues? I need to understand the code quality issues in the codebase."]
-<reasoning>
-Code quality analysis requires understanding the codebase and identifying potential issues - subagent excels at this type of analysis.
+This requires broad codebase understanding and is better handled by `{{.ToolNames.subagent}}`.
 </reasoning>
 </example>
 
