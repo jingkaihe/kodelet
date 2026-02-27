@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 
 	"github.com/jingkaihe/kodelet/pkg/fragments"
@@ -342,13 +343,30 @@ func TestBuildSubagentArgs(t *testing.T) {
 
 	t.Run("inherits sysprompt from llm config", func(t *testing.T) {
 		input := &SubAgentInput{Question: "What is foo?"}
+		syspromptPath := filepath.Join(t.TempDir(), "custom.tmpl")
+		ctxWithConfig := context.WithValue(ctx, subagentConfigContextKey{}, llmtypes.Config{Sysprompt: syspromptPath})
+		args := BuildSubagentArgs(ctxWithConfig, "--use-weak-model", input, nil)
+
+		assert.Equal(t, []string{
+			"run", "--result-only", "--as-subagent",
+			"--use-weak-model",
+			"--sysprompt", syspromptPath,
+			"What is foo?",
+		}, args)
+	})
+
+	t.Run("normalizes relative sysprompt to absolute path", func(t *testing.T) {
+		tempDir := t.TempDir()
+		t.Chdir(tempDir)
+
+		input := &SubAgentInput{Question: "What is foo?"}
 		ctxWithConfig := context.WithValue(ctx, subagentConfigContextKey{}, llmtypes.Config{Sysprompt: "./custom.tmpl"})
 		args := BuildSubagentArgs(ctxWithConfig, "--use-weak-model", input, nil)
 
 		assert.Equal(t, []string{
 			"run", "--result-only", "--as-subagent",
 			"--use-weak-model",
-			"--sysprompt", "./custom.tmpl",
+			"--sysprompt", filepath.Join(tempDir, "custom.tmpl"),
 			"What is foo?",
 		}, args)
 	})

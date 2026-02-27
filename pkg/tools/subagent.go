@@ -307,6 +307,20 @@ func containsFlag(args []string, name string) bool {
 	return false
 }
 
+func normalizeSyspromptPath(ctx context.Context, sysprompt string) string {
+	if filepath.IsAbs(sysprompt) {
+		return sysprompt
+	}
+
+	absolutePath, err := filepath.Abs(sysprompt)
+	if err != nil {
+		logger.G(ctx).WithError(err).WithField("sysprompt", sysprompt).Warn("failed to normalize sysprompt path")
+		return sysprompt
+	}
+
+	return absolutePath
+}
+
 // BuildSubagentArgs builds the command-line arguments for spawning a subagent process.
 // This is extracted as a separate function for testability.
 // Returns the complete argument list including the base args, subagent_args from config, and the question.
@@ -330,8 +344,9 @@ func BuildSubagentArgs(ctx context.Context, subagentArgs string, input *SubAgent
 	}
 
 	if llmConfig, ok := ctx.Value(subagentConfigContextKey{}).(llmtypes.Config); ok {
-		if strings.TrimSpace(llmConfig.Sysprompt) != "" && !containsFlag(args, "--sysprompt") {
-			args = append(args, "--sysprompt", llmConfig.Sysprompt)
+		syspromptPath := strings.TrimSpace(llmConfig.Sysprompt)
+		if syspromptPath != "" && !containsFlag(args, "--sysprompt") {
+			args = append(args, "--sysprompt", normalizeSyspromptPath(ctx, syspromptPath))
 		}
 		if len(llmConfig.SyspromptArgs) > 0 && !containsFlag(args, "--sysprompt-arg") {
 			argKeys := make([]string, 0, len(llmConfig.SyspromptArgs))
