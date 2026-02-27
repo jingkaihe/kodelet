@@ -1319,7 +1319,7 @@ func TestProcessMessageExchangeSavesConversationPerTurn(t *testing.T) {
 	thread.newStreamingFunc = func(_ context.Context, _ openairesponses.ResponseNewParams, _ ...option.RequestOption) *ssestream.Stream[openairesponses.ResponseStreamEventUnion] {
 		return nil
 	}
-	thread.processStreamFunc = func(_ context.Context, _ *ssestream.Stream[openairesponses.ResponseStreamEventUnion], _ llmtypes.MessageHandler, _ string, _ llmtypes.MessageOpt) (bool, error) {
+	thread.processStreamFunc = func(_ context.Context, _ *ssestream.Stream[openairesponses.ResponseStreamEventUnion], _ llmtypes.MessageHandler, _ string, _ llmtypes.MessageOpt) (processStreamResult, error) {
 		thread.inputItems = append(thread.inputItems, openairesponses.ResponseInputItemUnionParam{
 			OfMessage: &openairesponses.EasyInputMessageParam{
 				Role:    openairesponses.EasyInputMessageRoleAssistant,
@@ -1327,11 +1327,11 @@ func TestProcessMessageExchangeSavesConversationPerTurn(t *testing.T) {
 			},
 		})
 		thread.storedItems = append(thread.storedItems, StoredInputItem{Type: "message", Role: "assistant", Content: "turn"})
-		return false, nil
+		return processStreamResult{responseCompleted: true}, nil
 	}
 
 	handler := &llmtypes.StringCollectorHandler{Silent: true}
-	_, _, err := thread.processMessageExchange(context.Background(), handler, "gpt-4.1", 256, "system", llmtypes.MessageOpt{NoToolUse: true})
+	_, _, _, err := thread.processMessageExchange(context.Background(), handler, "gpt-4.1", 256, "system", llmtypes.MessageOpt{NoToolUse: true})
 	require.NoError(t, err)
 	require.Equal(t, 1, len(store.savedRecords))
 	assert.Equal(t, "openai", store.savedRecords[0].Provider)
@@ -1363,12 +1363,12 @@ func TestProcessMessageExchangeSavesConversationOnError(t *testing.T) {
 	thread.newStreamingFunc = func(_ context.Context, _ openairesponses.ResponseNewParams, _ ...option.RequestOption) *ssestream.Stream[openairesponses.ResponseStreamEventUnion] {
 		return nil
 	}
-	thread.processStreamFunc = func(_ context.Context, _ *ssestream.Stream[openairesponses.ResponseStreamEventUnion], _ llmtypes.MessageHandler, _ string, _ llmtypes.MessageOpt) (bool, error) {
-		return false, errors.New("exchange failed")
+	thread.processStreamFunc = func(_ context.Context, _ *ssestream.Stream[openairesponses.ResponseStreamEventUnion], _ llmtypes.MessageHandler, _ string, _ llmtypes.MessageOpt) (processStreamResult, error) {
+		return processStreamResult{}, errors.New("exchange failed")
 	}
 
 	handler := &llmtypes.StringCollectorHandler{Silent: true}
-	_, _, err := thread.processMessageExchange(context.Background(), handler, "gpt-4.1", 256, "system", llmtypes.MessageOpt{NoToolUse: true})
+	_, _, _, err := thread.processMessageExchange(context.Background(), handler, "gpt-4.1", 256, "system", llmtypes.MessageOpt{NoToolUse: true})
 	require.Error(t, err)
 	require.Equal(t, 1, len(store.savedRecords))
 	assert.Equal(t, "openai", store.savedRecords[0].Provider)
@@ -1398,14 +1398,43 @@ func TestProcessMessageExchangeCodexUsesDefaultStreamingOptions(t *testing.T) {
 		streamingOptsCount = len(opts)
 		return nil
 	}
-	thread.processStreamFunc = func(_ context.Context, _ *ssestream.Stream[openairesponses.ResponseStreamEventUnion], _ llmtypes.MessageHandler, _ string, _ llmtypes.MessageOpt) (bool, error) {
-		return false, nil
+	thread.processStreamFunc = func(_ context.Context, _ *ssestream.Stream[openairesponses.ResponseStreamEventUnion], _ llmtypes.MessageHandler, _ string, _ llmtypes.MessageOpt) (processStreamResult, error) {
+		return processStreamResult{responseCompleted: true}, nil
 	}
 
 	handler := &llmtypes.StringCollectorHandler{Silent: true}
-	_, _, err := thread.processMessageExchange(context.Background(), handler, "gpt-5.1-codex", 256, "system", llmtypes.MessageOpt{NoToolUse: true})
+	_, _, _, err := thread.processMessageExchange(context.Background(), handler, "gpt-5.1-codex", 256, "system", llmtypes.MessageOpt{NoToolUse: true})
 	require.NoError(t, err)
 	assert.Zero(t, streamingOptsCount, "codex streaming should use default request options")
+}
+
+func TestSendMessageRequiresResponseCompletedEvent(t *testing.T) {
+	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1", IsSubAgent: true}
+	thread := &Thread{
+		Thread:       base.NewThread(config, "conv-test", hooks.Trigger{}),
+		inputItems:   make([]openairesponses.ResponseInputItemUnionParam, 0),
+		pendingItems: make([]openairesponses.ResponseInputItemUnionParam, 0),
+		storedItems:  make([]StoredInputItem, 0),
+	}
+
+	exchangeCalls := 0
+	thread.processMessageExchangeFunc = func(
+		_ context.Context,
+		_ llmtypes.MessageHandler,
+		_ string,
+		_ int,
+		_ string,
+		_ llmtypes.MessageOpt,
+	) (string, bool, bool, error) {
+		exchangeCalls++
+		return "partial", false, false, nil
+	}
+
+	handler := &llmtypes.StringCollectorHandler{Silent: true}
+	_, err := thread.SendMessage(context.Background(), "hello", handler, llmtypes.MessageOpt{NoToolUse: true, MaxTurns: 1})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "response.completed")
+	assert.Equal(t, 1, exchangeCalls)
 }
 
 func TestRecordUsesResponsesAPI_MetadataDetection(t *testing.T) {
