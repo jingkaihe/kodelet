@@ -49,7 +49,7 @@ func promptTemplatePath(model string, llmConfig llmtypes.Config) string {
 	}
 
 	normalizedModel := strings.ToLower(strings.TrimSpace(model))
-	if strings.HasPrefix(normalizedModel, "gpt-") && strings.HasSuffix(normalizedModel, "-codex") {
+	if strings.Contains(normalizedModel, "codex") {
 		return CodexTemplate
 	}
 

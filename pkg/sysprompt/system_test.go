@@ -255,6 +255,13 @@ func TestSystemPrompt_TemplateSelection(t *testing.T) {
 		assert.Contains(t, prompt, "## Personality")
 	})
 
+	t.Run("uses codex template for codex model variants", func(t *testing.T) {
+		prompt := SystemPrompt("gpt-5.3-codex-spark", llm.Config{Provider: "openai"}, nil)
+
+		assert.Contains(t, prompt, "Within this context, Codex refers to the open-source agentic coding interface")
+		assert.Contains(t, prompt, "## Personality")
+	})
+
 	t.Run("keeps default template for non-codex model", func(t *testing.T) {
 		prompt := SystemPrompt("gpt-4.1", llm.Config{Provider: "openai"}, nil)
 
