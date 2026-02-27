@@ -53,7 +53,6 @@ func (r *Renderer) RenderPrompt(name string, ctx *PromptContext) (string, error)
 	if err := r.templates.ExecuteTemplate(&buf, name, ctx); err != nil {
 		return "", errors.Wrapf(err, "failed to execute template %s", name)
 	}
-
 	return buf.String(), nil
 }
 
