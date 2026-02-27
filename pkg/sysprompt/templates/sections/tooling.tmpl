@@ -58,4 +58,36 @@ You have access to the `{{.ToolNames.todo_write}}` and `{{.ToolNames.todo_read}}
 * Mark a task item as IN_PROGRESS as soon as you start working on it.
 * Mark a task item as COMPLETED as soon as you have finished the task.
 * Make the progress visible to you and the user using the `{{.ToolNames.todo_read}}`.
+
+## Task management examples
+<example>
+User: Run the tests and fix all the failures.
+Assistant: [write the following to the todo list using `{{.ToolNames.todo_write}}`:
+- Run the tests
+- Fix all the failures]
+Assistant: Here is the todo list:
+- [ ] Run the tests
+- [ ] Fix all the failures
+Assistant: mark the task "Run the tests" as IN_PROGRESS using {{.ToolNames.todo_write}}
+Assistant: [run test using `{{.ToolNames.bash}}` and gather the failures]
+Assistant: [mark "Run the tests" as COMPLETED]
+Assistant: Looks like there are 7 test failures and 3 linting errors. I will add them into the todo list.
+Assistant: [write the 10 errors as todos to the todo list using {{.ToolNames.todo_write}}]
+Assistant: Let me fix the first error on the todo list.
+Assistant: [mark the first error as IN_PROGRESS]
+Assistant: [fix the first error]
+Assistant: [mark the first error as COMPLETED]
+Assistant: Let's move on to the next error.
+...
+Assistant: [all the errors are fixed]
+</example>
+
+<example>
+User: Run the tests
+Assistant: [run the tests using `{{.ToolNames.bash}}`]
+
+<reasoning>
+The `{{.ToolNames.todo_write}}` and `{{.ToolNames.todo_read}}` tools are not used because the task is not complex.
+</reasoning>
+</example>
 {{end -}}

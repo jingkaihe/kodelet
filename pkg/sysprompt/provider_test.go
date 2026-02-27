@@ -145,8 +145,8 @@ func TestUnifiedSystemPrompt_ForOpenAIProvidersAndPlatforms(t *testing.T) {
 			assert.NotEmpty(t, prompt)
 			assert.Contains(t, prompt, "interactive CLI tool")
 			if tc.expectsCodex {
-				assert.Contains(t, prompt, "## Personality")
-				assert.NotContains(t, prompt, "# Tone and Style")
+				assert.Contains(t, prompt, "Your capabilities:")
+				assert.NotContains(t, prompt, "# Tool Usage")
 			} else {
 				assert.NotContains(t, prompt, "coding agent")
 			}

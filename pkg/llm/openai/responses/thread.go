@@ -440,11 +440,12 @@ func (t *Thread) processMessageExchange(
 
 	// Build request parameters with standard settings
 	params := responses.ResponseNewParams{
-		Model:        model,
-		Input:        responses.ResponseNewParamsInputUnion{OfInputItemList: inputToSend},
-		Instructions: param.NewOpt(systemPrompt),
-		Tools:        tools,
-		Store:        param.NewOpt(true), // Enable server-side conversation state storage
+		Model:          model,
+		Input:          responses.ResponseNewParamsInputUnion{OfInputItemList: inputToSend},
+		Instructions:   param.NewOpt(systemPrompt),
+		Tools:          tools,
+		Store:          param.NewOpt(true), // Enable server-side conversation state storage
+		PromptCacheKey: param.NewOpt(t.ConversationID),
 	}
 
 	// Set previous_response_id for multi-turn conversations

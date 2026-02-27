@@ -37,13 +37,12 @@ func TestRenderer(t *testing.T) {
 	renderer := NewRenderer(TemplateFS)
 	ctx := newPromptContext(nil)
 
-	t.Run("Component template rendering", func(t *testing.T) {
-		components := []string{
-			"templates/sections/behavior.tmpl",
-			"templates/sections/tooling.tmpl",
-			"templates/sections/task_management_examples.tmpl",
-			"templates/sections/context_runtime.tmpl",
-		}
+		t.Run("Component template rendering", func(t *testing.T) {
+			components := []string{
+				"templates/sections/behavior.tmpl",
+				"templates/sections/tooling.tmpl",
+				"templates/sections/context_runtime.tmpl",
+			}
 
 		for _, component := range components {
 			result, err := renderer.RenderPrompt(component, ctx)
