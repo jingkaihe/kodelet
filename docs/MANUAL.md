@@ -745,6 +745,9 @@ kodelet run --enable-todos "query"
 # Use a custom system prompt template
 kodelet run --sysprompt ./sysprompt.tmpl "query"
 
+# Pass custom template args (repeatable)
+kodelet run --sysprompt ./sysprompt.tmpl --sysprompt-arg project=kodelet --sysprompt-arg env=dev "query"
+
 # Profile override for single command
 kodelet run --profile premium "explain this architecture"
 ```
@@ -1501,12 +1504,18 @@ kodelet run --sysprompt ./sysprompt.tmpl "your query"
 
 ```yaml
 sysprompt: "~/.kodelet/sysprompt.tmpl"
+sysprompt_args:
+  project: "kodelet"
+  env: "dev"
 ```
 
-Custom templates use Go template syntax and can reuse built-in sections:
+Custom templates use Go template syntax, can access `.Args.<key>`, and can reuse built-in sections:
 
 ```gotemplate
 You are a focused coding assistant.
+
+Project: {{default .Args.project "unknown"}}
+Branch: {{bash "git" "branch" "--show-current"}}
 
 {{include "templates/sections/behavior.tmpl" .}}
 {{include "templates/sections/tooling.tmpl" .}}

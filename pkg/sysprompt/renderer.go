@@ -1,12 +1,18 @@
 package sysprompt
 
 import (
+	"context"
+	"fmt"
 	"io/fs"
+	"os/exec"
+	"reflect"
 	"slices"
 	"sort"
 	"strings"
 	"text/template"
+	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/pkg/errors"
 )
 
@@ -65,6 +71,8 @@ func parseTemplates(templateFS fs.FS, overrides map[string]string) (*template.Te
 			err := selfRef.ExecuteTemplate(&buf, templateName, data)
 			return buf.String(), err
 		},
+		"bash":    createBashFunc(context.Background()),
+		"default": createDefaultFunc(),
 	})
 	selfRef = templates
 
@@ -98,6 +106,58 @@ func parseTemplates(templateFS fs.FS, overrides map[string]string) (*template.Te
 	}
 
 	return templates, nil
+}
+
+func createBashFunc(ctx context.Context) func(...string) string {
+	return func(args ...string) string {
+		if len(args) == 0 {
+			return "[ERROR: bash function requires at least one argument]"
+		}
+
+		command := args[0]
+		cmdArgs := args[1:]
+
+		logger.G(ctx).WithFields(map[string]any{
+			"command": command,
+			"args":    cmdArgs,
+		}).Debug("executing sysprompt bash command")
+
+		cmdCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+
+		cmd := exec.CommandContext(cmdCtx, command, cmdArgs...)
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			logger.G(ctx).WithFields(map[string]any{
+				"command": command,
+				"args":    cmdArgs,
+			}).WithError(err).Warn("sysprompt bash command failed")
+		}
+
+		return strings.TrimRight(string(output), "\n\r")
+	}
+}
+
+func createDefaultFunc() func(any, string) string {
+	return func(value any, defaultValue string) string {
+		if value == nil {
+			return defaultValue
+		}
+
+		v := reflect.ValueOf(value)
+		if v.Kind() == reflect.Map {
+			if v.IsNil() || v.Len() == 0 {
+				return defaultValue
+			}
+		}
+
+		strValue := fmt.Sprint(value)
+		if strValue == "" || strValue == "<no value>" {
+			return defaultValue
+		}
+
+		return strValue
+	}
 }
 
 func collectTemplatePaths(templateFS fs.FS, dir string) ([]string, error) {

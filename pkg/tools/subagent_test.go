@@ -365,6 +365,32 @@ func TestBuildSubagentArgs(t *testing.T) {
 		}, args)
 	})
 
+	t.Run("inherits sysprompt args from llm config", func(t *testing.T) {
+		input := &SubAgentInput{Question: "What is foo?"}
+		ctxWithConfig := context.WithValue(ctx, subagentConfigContextKey{}, llmtypes.Config{SyspromptArgs: map[string]string{"project": "kodelet", "env": "dev"}})
+		args := BuildSubagentArgs(ctxWithConfig, "--use-weak-model", input, nil)
+
+		assert.Equal(t, []string{
+			"run", "--result-only", "--as-subagent",
+			"--use-weak-model",
+			"--sysprompt-arg", "env=dev",
+			"--sysprompt-arg", "project=kodelet",
+			"What is foo?",
+		}, args)
+	})
+
+	t.Run("does not duplicate sysprompt args when already in subagent_args", func(t *testing.T) {
+		input := &SubAgentInput{Question: "What is foo?"}
+		ctxWithConfig := context.WithValue(ctx, subagentConfigContextKey{}, llmtypes.Config{SyspromptArgs: map[string]string{"project": "kodelet"}})
+		args := BuildSubagentArgs(ctxWithConfig, "--sysprompt-arg project=already", input, nil)
+
+		assert.Equal(t, []string{
+			"run", "--result-only", "--as-subagent",
+			"--sysprompt-arg", "project=already",
+			"What is foo?",
+		}, args)
+	})
+
 	t.Run("with quoted argument in subagent_args", func(t *testing.T) {
 		input := &SubAgentInput{Question: "What is foo?"}
 		args := BuildSubagentArgs(ctx, `--profile "my profile"`, input, nil)

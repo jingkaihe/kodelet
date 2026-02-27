@@ -232,4 +232,17 @@ func TestSystemPrompt_CustomTemplate(t *testing.T) {
 		assert.Contains(t, prompt, "You are an interactive CLI tool")
 		assert.Contains(t, prompt, "# Tool Usage")
 	})
+
+	t.Run("supports sysprompt args in custom template", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		tmplPath := filepath.Join(tmpDir, "sysprompt-args.tmpl")
+		err := os.WriteFile(tmplPath, []byte("Project={{default .Args.project \"unknown\"}}"), 0o644)
+		require.NoError(t, err)
+
+		prompt := SystemPrompt("claude-sonnet-4-6", llm.Config{
+			Sysprompt:     tmplPath,
+			SyspromptArgs: map[string]string{"project": "kodelet"},
+		}, nil)
+		assert.Contains(t, prompt, "Project=kodelet")
+	})
 }

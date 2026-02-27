@@ -333,6 +333,16 @@ func BuildSubagentArgs(ctx context.Context, subagentArgs string, input *SubAgent
 		if strings.TrimSpace(llmConfig.Sysprompt) != "" && !containsFlag(args, "--sysprompt") {
 			args = append(args, "--sysprompt", llmConfig.Sysprompt)
 		}
+		if len(llmConfig.SyspromptArgs) > 0 && !containsFlag(args, "--sysprompt-arg") {
+			argKeys := make([]string, 0, len(llmConfig.SyspromptArgs))
+			for k := range llmConfig.SyspromptArgs {
+				argKeys = append(argKeys, k)
+			}
+			sort.Strings(argKeys)
+			for _, key := range argKeys {
+				args = append(args, "--sysprompt-arg", fmt.Sprintf("%s=%s", key, llmConfig.SyspromptArgs[key]))
+			}
+		}
 	}
 
 	// Add profile from workflow metadata

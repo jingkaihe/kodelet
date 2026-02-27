@@ -65,4 +65,22 @@ func TestRenderer(t *testing.T) {
 		_, err := renderer.RenderSystemPrompt(ctx)
 		assert.NoError(t, err, "Failed to render template with includes")
 	})
+
+	t.Run("Default function", func(t *testing.T) {
+		testRenderer := NewRendererWithTemplateOverride(TemplateFS, map[string]string{
+			"templates/default_func_test.tmpl": `{{default .Args.project "fallback"}}`,
+		})
+		rendered, err := testRenderer.RenderPrompt("templates/default_func_test.tmpl", &PromptContext{Args: map[string]string{}})
+		require.NoError(t, err)
+		assert.Equal(t, "fallback", strings.TrimSpace(rendered))
+	})
+
+	t.Run("Bash function", func(t *testing.T) {
+		testRenderer := NewRendererWithTemplateOverride(TemplateFS, map[string]string{
+			"templates/bash_func_test.tmpl": `{{bash "echo" "ok"}}`,
+		})
+		rendered, err := testRenderer.RenderPrompt("templates/bash_func_test.tmpl", ctx)
+		require.NoError(t, err)
+		assert.Equal(t, "ok", strings.TrimSpace(rendered))
+	})
 }

@@ -34,6 +34,12 @@ weak_model_max_tokens: 8192
 # {{include "templates/sections/context_runtime.tmpl" .}}
 sysprompt: ""
 
+# Arguments available to custom system prompt templates as .Args.<key>
+# sysprompt_args:
+#   project: "kodelet"
+#   env: "dev"
+sysprompt_args: {}
+
 # Model aliases for easier reference
 # Allows using short names instead of full model identifiers
 aliases:

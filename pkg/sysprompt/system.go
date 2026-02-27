@@ -27,6 +27,7 @@ func BuildPrompt(model string, llmConfig llm.Config, contexts map[string]string,
 	promptCtx.SubagentEnabled = !llmConfig.DisableSubagent && !options.IsSubagent
 	promptCtx.TodoToolsEnabled = llmConfig.EnableTodos && !options.IsSubagent
 	promptCtx.BashAllowedCommands = llmConfig.AllowedCommands
+	promptCtx.Args = llmConfig.SyspromptArgs
 
 	// Add MCP configuration to the prompt context
 	promptCtx.WithMCPConfig(llmConfig.MCPExecutionMode, llmConfig.MCPWorkspaceDir)

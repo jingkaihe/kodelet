@@ -385,6 +385,7 @@ func (t *Thread) applyCodexRestrictions(params *responses.ResponseNewParams) {
 		}
 		promptCtx.ActiveContextFile = sysprompt.ResolveActiveContextFile(promptCtx.WorkingDirectory, contexts, patterns)
 		promptCtx.WithMCPConfig(t.Config.MCPExecutionMode, t.Config.MCPWorkspaceDir)
+		promptCtx.Args = t.Config.SyspromptArgs
 
 		renderer, err := sysprompt.RendererForConfig(t.Config)
 		if err != nil {

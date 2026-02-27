@@ -47,6 +47,7 @@ type RunConfig struct {
 	DisableSubagent    bool              // Disable the subagent tool and remove subagent-related system prompt context
 	EnableTodos        bool              // Enable todo_read and todo_write tools for the main agent
 	Sysprompt          string            // Path to custom system prompt template file
+	SyspromptArgs      map[string]string // Arguments passed to custom system prompt template
 	ResultOnly         bool              // Only print the final agent message, no intermediate output or usage stats
 	UseWeakModel       bool              // Use weak model for SendMessage
 	Account            string            // Anthropic subscription account alias to use
@@ -74,6 +75,7 @@ func NewRunConfig() *RunConfig {
 		DisableSubagent:    false,
 		EnableTodos:        false,
 		Sysprompt:          "",
+		SyspromptArgs:      make(map[string]string),
 		ResultOnly:         false,
 		UseWeakModel:       false,
 		Account:            "",
@@ -229,6 +231,9 @@ var runCmd = &cobra.Command{
 		llmConfig.EnableTodos = config.EnableTodos || viper.GetBool("enable_todos")
 		if strings.TrimSpace(config.Sysprompt) != "" {
 			llmConfig.Sysprompt = strings.TrimSpace(config.Sysprompt)
+		}
+		if len(config.SyspromptArgs) > 0 {
+			llmConfig.SyspromptArgs = config.SyspromptArgs
 		}
 		llmConfig.IsSubAgent = config.AsSubagent
 		llmConfig.RecipeName = config.FragmentName
@@ -557,6 +562,10 @@ func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
 
 	if sysprompt, err := cmd.Flags().GetString("sysprompt"); err == nil {
 		config.Sysprompt = sysprompt
+	}
+
+	if syspromptArgs, err := cmd.Flags().GetStringToString("sysprompt-arg"); err == nil {
+		config.SyspromptArgs = syspromptArgs
 	}
 
 	if resultOnly, err := cmd.Flags().GetBool("result-only"); err == nil {

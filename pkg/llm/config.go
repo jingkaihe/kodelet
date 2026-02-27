@@ -68,6 +68,12 @@ func applyExplicitFlagsToViper(cmd *cobra.Command) {
 				viper.Set(viperKey, sliceValue.GetSlice())
 				return
 			}
+			if flag.Value.Type() == "stringToString" {
+				if mapValue, err := cmd.Flags().GetStringToString(flag.Name); err == nil {
+					viper.Set(viperKey, mapValue)
+					return
+				}
+			}
 			viper.Set(viperKey, flag.Value.String())
 		}
 	})
@@ -86,6 +92,7 @@ var explicitFlagKeyOverrides = map[string]string{
 	"tracing-sampler":  "tracing.sampler",
 	"tracing-ratio":    "tracing.ratio",
 	"sysprompt":        "sysprompt",
+	"sysprompt-arg":    "sysprompt_args",
 }
 
 // applyProfileToViper applies profile settings to viper

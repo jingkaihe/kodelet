@@ -29,6 +29,7 @@ type PromptContext struct {
 
 	// Active context file name (resolved from configured patterns)
 	ActiveContextFile string
+	Args              map[string]string
 
 	SubagentEnabled  bool
 	TodoToolsEnabled bool
@@ -79,6 +80,7 @@ func NewPromptContext(contexts map[string]string) *PromptContext {
 		ToolNames:           toolNames,
 		ContextFiles:        contextFiles,
 		ActiveContextFile:   AgentsMd,
+		Args:                map[string]string{},
 		SubagentEnabled:     true,
 		TodoToolsEnabled:    false,
 		BashBannedCommands:  tools.BannedCommands,
