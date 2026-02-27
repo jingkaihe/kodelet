@@ -138,7 +138,7 @@ func (ctx *PromptContext) MCPServersCSV() string {
 
 // FormatContexts formats the loaded contexts into a string
 func (ctx *PromptContext) FormatContexts() string {
-	return ctx.renderSection("templates/sections/runtime_loaded_contexts.tmpl")
+	return ctx.FormatContextsWithRenderer(defaultRenderer)
 }
 
 // ResolveActiveContextFile selects the best context file name based on configured patterns
@@ -173,7 +173,7 @@ func ResolveActiveContextFile(workingDir string, contexts map[string]string, pat
 
 // FormatSystemInfo formats the system information into a string
 func (ctx *PromptContext) FormatSystemInfo() string {
-	return ctx.renderSection("templates/sections/runtime_system_info.tmpl")
+	return ctx.FormatSystemInfoWithRenderer(defaultRenderer)
 }
 
 // checkIsGitRepo checks if the given directory is a git repository
@@ -255,11 +255,16 @@ func loadMCPServers(workspaceDir string) []string {
 
 // FormatMCPServers formats the MCP servers information into a string
 func (ctx *PromptContext) FormatMCPServers() string {
-	return ctx.renderSection("templates/sections/runtime_mcp_servers.tmpl")
+	return ctx.FormatMCPServersWithRenderer(defaultRenderer)
 }
 
-func (ctx *PromptContext) renderSection(templateName string) string {
-	rendered, err := defaultRenderer.RenderPrompt(templateName, ctx)
+func (ctx *PromptContext) renderSectionWithRenderer(renderer *Renderer, templateName string) string {
+	if renderer == nil {
+		logger.G(context.Background()).WithField("template", templateName).Warn("failed to render sysprompt context section")
+		return ""
+	}
+
+	rendered, err := renderer.RenderPrompt(templateName, ctx)
 	if err != nil {
 		logger.G(context.Background()).WithError(err).WithField("template", templateName).Warn("failed to render sysprompt context section")
 		return ""
@@ -268,4 +273,16 @@ func (ctx *PromptContext) renderSection(templateName string) string {
 		return ""
 	}
 	return rendered
+}
+
+func (ctx *PromptContext) FormatSystemInfoWithRenderer(renderer *Renderer) string {
+	return ctx.renderSectionWithRenderer(renderer, "templates/sections/runtime_system_info.tmpl")
+}
+
+func (ctx *PromptContext) FormatContextsWithRenderer(renderer *Renderer) string {
+	return ctx.renderSectionWithRenderer(renderer, "templates/sections/runtime_loaded_contexts.tmpl")
+}
+
+func (ctx *PromptContext) FormatMCPServersWithRenderer(renderer *Renderer) string {
+	return ctx.renderSectionWithRenderer(renderer, "templates/sections/runtime_mcp_servers.tmpl")
 }

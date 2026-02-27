@@ -385,10 +385,16 @@ func (t *Thread) applyCodexRestrictions(params *responses.ResponseNewParams) {
 		}
 		promptCtx.ActiveContextFile = sysprompt.ResolveActiveContextFile(promptCtx.WorkingDirectory, contexts, patterns)
 		promptCtx.WithMCPConfig(t.Config.MCPExecutionMode, t.Config.MCPWorkspaceDir)
+
+		renderer, err := sysprompt.RendererForConfig(t.Config)
+		if err != nil {
+			logger.G(context.Background()).WithError(err).Warn("failed to load custom sysprompt template for codex runtime sections, using default")
+		}
+
 		devMessages := []string{
-			promptCtx.FormatSystemInfo(),
-			promptCtx.FormatContexts(),
-			promptCtx.FormatMCPServers(),
+			promptCtx.FormatSystemInfoWithRenderer(renderer),
+			promptCtx.FormatContextsWithRenderer(renderer),
+			promptCtx.FormatMCPServersWithRenderer(renderer),
 		}
 
 		// prepend dev messages to params' input

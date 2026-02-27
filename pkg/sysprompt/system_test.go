@@ -1,6 +1,8 @@
 package sysprompt
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/jingkaihe/kodelet/pkg/tools"
@@ -210,5 +212,24 @@ func TestSystemPrompt_TodoToolsFeatureFlag(t *testing.T) {
 
 		assert.Contains(t, prompt, "You have access to the `todo_write` and `todo_read` tools")
 		assert.Contains(t, prompt, "## Task management examples")
+	})
+}
+
+func TestSystemPrompt_CustomTemplate(t *testing.T) {
+	t.Run("uses custom template with built-in include", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		tmplPath := filepath.Join(tmpDir, "sysprompt.tmpl")
+		err := os.WriteFile(tmplPath, []byte("CUSTOM-PREFIX\n{{include \"templates/sections/tooling.tmpl\" .}}"), 0o644)
+		require.NoError(t, err)
+
+		prompt := SystemPrompt("claude-sonnet-4-6", llm.Config{Sysprompt: tmplPath}, nil)
+		assert.Contains(t, prompt, "CUSTOM-PREFIX")
+		assert.Contains(t, prompt, "# Tool Usage")
+	})
+
+	t.Run("falls back to default prompt on invalid custom template", func(t *testing.T) {
+		prompt := SystemPrompt("claude-sonnet-4-6", llm.Config{Sysprompt: "/does/not/exist.tmpl"}, nil)
+		assert.Contains(t, prompt, "You are an interactive CLI tool")
+		assert.Contains(t, prompt, "# Tool Usage")
 	})
 }

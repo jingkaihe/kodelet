@@ -85,6 +85,7 @@ var explicitFlagKeyOverrides = map[string]string{
 	"tracing-enabled":  "tracing.enabled",
 	"tracing-sampler":  "tracing.sampler",
 	"tracing-ratio":    "tracing.ratio",
+	"sysprompt":        "sysprompt",
 }
 
 // applyProfileToViper applies profile settings to viper

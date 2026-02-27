@@ -31,10 +31,12 @@ func BuildPrompt(model string, llmConfig llm.Config, contexts map[string]string,
 	// Add MCP configuration to the prompt context
 	promptCtx.WithMCPConfig(llmConfig.MCPExecutionMode, llmConfig.MCPWorkspaceDir)
 
-	var prompt string
-	var err error
+	renderer, err := RendererForConfig(llmConfig)
+	if err != nil {
+		logger.G(context.Background()).WithError(err).Warn("failed to load custom sysprompt template, falling back to default")
+	}
 
-	prompt, err = defaultRenderer.RenderSystemPrompt(promptCtx)
+	prompt, err := renderer.RenderSystemPrompt(promptCtx)
 	if err != nil {
 		ctx := context.Background()
 		log := logger.G(ctx)

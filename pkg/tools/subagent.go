@@ -294,6 +294,19 @@ func stripProfileFlag(args []string) []string {
 	return result
 }
 
+func containsFlag(args []string, name string) bool {
+	if slices.Contains(args, name) {
+		return true
+	}
+	prefix := name + "="
+	for _, arg := range args {
+		if strings.HasPrefix(arg, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 // BuildSubagentArgs builds the command-line arguments for spawning a subagent process.
 // This is extracted as a separate function for testability.
 // Returns the complete argument list including the base args, subagent_args from config, and the question.
@@ -313,6 +326,12 @@ func BuildSubagentArgs(ctx context.Context, subagentArgs string, input *SubAgent
 				parsedArgs = stripProfileFlag(parsedArgs)
 			}
 			args = append(args, parsedArgs...)
+		}
+	}
+
+	if llmConfig, ok := ctx.Value(subagentConfigContextKey{}).(llmtypes.Config); ok {
+		if strings.TrimSpace(llmConfig.Sysprompt) != "" && !containsFlag(args, "--sysprompt") {
+			args = append(args, "--sysprompt", llmConfig.Sysprompt)
 		}
 	}
 
@@ -344,6 +363,8 @@ func BuildSubagentArgs(ctx context.Context, subagentArgs string, input *SubAgent
 	return args
 }
 
+type subagentConfigContextKey struct{}
+
 // Execute runs the sub-agent via shell-out and returns the result
 func (t *SubAgentTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
 	input := &SubAgentInput{}
@@ -366,8 +387,10 @@ func (t *SubAgentTool) Execute(ctx context.Context, state tooltypes.State, param
 
 	// Build command arguments
 	var subagentArgs string
+	ctxWithConfig := ctx
 	if llmConfig, ok := state.GetLLMConfig().(llmtypes.Config); ok {
 		subagentArgs = llmConfig.SubagentArgs
+		ctxWithConfig = context.WithValue(ctx, subagentConfigContextKey{}, llmConfig)
 	}
 
 	// Look up workflow fragment for metadata (profile/provider/model)
@@ -375,7 +398,7 @@ func (t *SubAgentTool) Execute(ctx context.Context, state tooltypes.State, param
 	if input.Workflow != "" && t.workflowEnabled {
 		workflow = t.workflows[input.Workflow]
 	}
-	args := BuildSubagentArgs(ctx, subagentArgs, input, workflow)
+	args := BuildSubagentArgs(ctxWithConfig, subagentArgs, input, workflow)
 
 	cmd := exec.CommandContext(ctx, exe, args...)
 

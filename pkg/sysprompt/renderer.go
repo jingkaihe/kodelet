@@ -2,6 +2,7 @@ package sysprompt
 
 import (
 	"io/fs"
+	"slices"
 	"sort"
 	"strings"
 	"text/template"
@@ -11,17 +12,24 @@ import (
 
 // Renderer provides prompt template rendering capabilities
 type Renderer struct {
-	templateFS fs.FS
-	templates  *template.Template
-	parseErr   error
+	templates *template.Template
+	parseErr  error
 }
 
 var defaultRenderer = NewRenderer(TemplateFS)
 
 // NewRenderer creates a new template renderer
 func NewRenderer(fs fs.FS) *Renderer {
-	renderer := &Renderer{templateFS: fs}
-	renderer.templates, renderer.parseErr = parseTemplates(fs)
+	renderer := &Renderer{}
+	renderer.templates, renderer.parseErr = parseTemplates(fs, nil)
+	return renderer
+}
+
+// NewRendererWithTemplateOverride creates a renderer with custom template overrides.
+// Overrides are keyed by template path (e.g., templates/system.tmpl).
+func NewRendererWithTemplateOverride(fs fs.FS, overrides map[string]string) *Renderer {
+	renderer := &Renderer{}
+	renderer.templates, renderer.parseErr = parseTemplates(fs, overrides)
 	return renderer
 }
 
@@ -43,7 +51,7 @@ func (r *Renderer) RenderPrompt(name string, ctx *PromptContext) (string, error)
 	return buf.String(), nil
 }
 
-func parseTemplates(templateFS fs.FS) (*template.Template, error) {
+func parseTemplates(templateFS fs.FS, overrides map[string]string) (*template.Template, error) {
 	templatePaths, err := collectTemplatePaths(templateFS, "templates")
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to collect template paths")
@@ -61,14 +69,31 @@ func parseTemplates(templateFS fs.FS) (*template.Template, error) {
 	selfRef = templates
 
 	for _, path := range templatePaths {
-		content, err := fs.ReadFile(templateFS, path)
-		if err != nil {
-			return nil, errors.Wrapf(err, "failed to read template file %s", path)
+		content := ""
+		if override, ok := overrides[path]; ok {
+			content = override
+		} else {
+			bytes, err := fs.ReadFile(templateFS, path)
+			if err != nil {
+				return nil, errors.Wrapf(err, "failed to read template file %s", path)
+			}
+			content = string(bytes)
 		}
 
-		_, err = templates.New(path).Parse(string(content))
+		_, err := templates.New(path).Parse(content)
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to parse template %s", path)
+		}
+	}
+
+	for path, content := range overrides {
+		if slices.Contains(templatePaths, path) {
+			continue
+		}
+
+		_, err := templates.New(path).Parse(content)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to parse override template %s", path)
 		}
 	}
 

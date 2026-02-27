@@ -27,6 +27,13 @@ weak_model: "claude-haiku-4-5-20251001"
 # Maximum tokens for weak model responses
 weak_model_max_tokens: 8192
 
+# Custom system prompt template file
+# Supports Go templates and can include built-in sections, e.g.:
+# {{include "templates/sections/behavior.tmpl" .}}
+# {{include "templates/sections/tooling.tmpl" .}}
+# {{include "templates/sections/context_runtime.tmpl" .}}
+sysprompt: ""
+
 # Model aliases for easier reference
 # Allows using short names instead of full model identifiers
 aliases:

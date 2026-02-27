@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/jingkaihe/kodelet/pkg/fragments"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/stretchr/testify/assert"
 	"go.opentelemetry.io/otel/attribute"
 
@@ -335,6 +336,31 @@ func TestBuildSubagentArgs(t *testing.T) {
 			"run", "--result-only", "--as-subagent",
 			"--profile", "openai-subagent",
 			"--use-weak-model",
+			"What is foo?",
+		}, args)
+	})
+
+	t.Run("inherits sysprompt from llm config", func(t *testing.T) {
+		input := &SubAgentInput{Question: "What is foo?"}
+		ctxWithConfig := context.WithValue(ctx, subagentConfigContextKey{}, llmtypes.Config{Sysprompt: "./custom.tmpl"})
+		args := BuildSubagentArgs(ctxWithConfig, "--use-weak-model", input, nil)
+
+		assert.Equal(t, []string{
+			"run", "--result-only", "--as-subagent",
+			"--use-weak-model",
+			"--sysprompt", "./custom.tmpl",
+			"What is foo?",
+		}, args)
+	})
+
+	t.Run("does not duplicate sysprompt when already in subagent_args", func(t *testing.T) {
+		input := &SubAgentInput{Question: "What is foo?"}
+		ctxWithConfig := context.WithValue(ctx, subagentConfigContextKey{}, llmtypes.Config{Sysprompt: "./custom.tmpl"})
+		args := BuildSubagentArgs(ctxWithConfig, "--sysprompt ./already.tmpl", input, nil)
+
+		assert.Equal(t, []string{
+			"run", "--result-only", "--as-subagent",
+			"--sysprompt", "./already.tmpl",
 			"What is foo?",
 		}, args)
 	})
