@@ -246,3 +246,31 @@ func TestSystemPrompt_CustomTemplate(t *testing.T) {
 		assert.Contains(t, prompt, "Project=kodelet")
 	})
 }
+
+func TestSystemPrompt_TemplateSelection(t *testing.T) {
+	t.Run("uses codex template for gpt codex model suffix", func(t *testing.T) {
+		prompt := SystemPrompt("gpt-5.3-codex", llm.Config{Provider: "openai"}, nil)
+
+		assert.Contains(t, prompt, "Within this context, Codex refers to the open-source agentic coding interface")
+		assert.Contains(t, prompt, "## Personality")
+	})
+
+	t.Run("keeps default template for non-codex model", func(t *testing.T) {
+		prompt := SystemPrompt("gpt-4.1", llm.Config{Provider: "openai"}, nil)
+
+		assert.Contains(t, prompt, "Tone and Style")
+		assert.NotContains(t, prompt, "Within this context, Codex refers to the open-source agentic coding interface")
+	})
+
+	t.Run("custom sysprompt still takes precedence", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		tmplPath := filepath.Join(tmpDir, "custom-codex.tmpl")
+		err := os.WriteFile(tmplPath, []byte("CUSTOM-CODEX-TEMPLATE"), 0o644)
+		require.NoError(t, err)
+
+		prompt := SystemPrompt("gpt-5.3-codex", llm.Config{Provider: "openai", Sysprompt: tmplPath}, nil)
+
+		assert.Contains(t, prompt, "CUSTOM-CODEX-TEMPLATE")
+		assert.NotContains(t, prompt, "Within this context, Codex refers to the open-source agentic coding interface")
+	})
+}

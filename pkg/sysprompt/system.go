@@ -2,6 +2,7 @@ package sysprompt
 
 import (
 	"context"
+	"strings"
 
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -27,12 +28,30 @@ func buildPrompt(model string, llmConfig llmtypes.Config, contexts map[string]st
 		logger.G(context.Background()).WithError(err).Warn("failed to load custom sysprompt template, falling back to default")
 	}
 
-	prompt, err := renderer.RenderSystemPrompt(promptCtx)
+	templatePath := promptTemplatePath(model, llmConfig)
+	prompt, err := renderer.RenderTemplate(templatePath, promptCtx)
 	if err != nil {
 		ctx := context.Background()
 		log := logger.G(ctx)
-		log.WithError(err).WithField("provider", llmConfig.Provider).WithField("model", model).Fatal("Error rendering system prompt")
+		log.WithError(err).
+			WithField("provider", llmConfig.Provider).
+			WithField("model", model).
+			WithField("template", templatePath).
+			Fatal("Error rendering system prompt")
 	}
 
 	return prompt
+}
+
+func promptTemplatePath(model string, llmConfig llmtypes.Config) string {
+	if strings.TrimSpace(llmConfig.Sysprompt) != "" {
+		return SystemTemplate
+	}
+
+	normalizedModel := strings.ToLower(strings.TrimSpace(model))
+	if strings.HasPrefix(normalizedModel, "gpt-") && strings.HasSuffix(normalizedModel, "-codex") {
+		return CodexTemplate
+	}
+
+	return SystemTemplate
 }

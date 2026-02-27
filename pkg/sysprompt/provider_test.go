@@ -123,6 +123,14 @@ func TestUnifiedSystemPrompt_ForOpenAIProvidersAndPlatforms(t *testing.T) {
 			},
 			expectsCodex: true,
 		},
+		{
+			name:  "Model suffix codex uses codex template",
+			model: "gpt-5.1-codex",
+			config: llm.Config{
+				Provider: providerOpenAI,
+			},
+			expectsCodex: true,
+		},
 	}
 
 	for _, tc := range testCases {
@@ -138,7 +146,8 @@ func TestUnifiedSystemPrompt_ForOpenAIProvidersAndPlatforms(t *testing.T) {
 			assert.Contains(t, prompt, "interactive CLI tool")
 			assert.NotContains(t, prompt, "coding agent")
 			if tc.expectsCodex {
-				assert.NotContains(t, prompt, "You are Codex, based on GPT-5")
+				assert.Contains(t, prompt, "Within this context, Codex refers to the open-source agentic coding interface")
+				assert.Contains(t, prompt, "## Personality")
 			}
 		})
 	}

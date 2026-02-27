@@ -34,4 +34,6 @@ const (
 
 	// SystemTemplate is the path to the main system prompt template.
 	SystemTemplate = "templates/system.tmpl"
+	// CodexTemplate is the path to the Codex-specific system prompt template.
+	CodexTemplate = "templates/codex.tmpl"
 )

@@ -215,3 +215,8 @@ func collectTemplatePaths(templateFS fs.FS, dir string) ([]string, error) {
 func (r *Renderer) RenderSystemPrompt(ctx *PromptContext) (string, error) {
 	return r.RenderPrompt(SystemTemplate, ctx)
 }
+
+// RenderTemplate renders an arbitrary template with the provided context.
+func (r *Renderer) RenderTemplate(templatePath string, ctx *PromptContext) (string, error) {
+	return r.RenderPrompt(templatePath, ctx)
+}
