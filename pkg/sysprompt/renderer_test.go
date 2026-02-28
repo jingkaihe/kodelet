@@ -14,18 +14,15 @@ func TestConditionalRendering(t *testing.T) {
 
 	t.Run("With all features enabled", func(t *testing.T) {
 		ctx := newPromptContext(nil)
-		ctx.SubagentEnabled = true
 
 		prompt, err := renderer.RenderSystemPrompt(ctx)
 		require.NoError(t, err, "Failed to render system prompt")
 
-		assert.True(t, strings.Contains(prompt, "subagent"), "Expected subagent reference in prompt when subagentEnabled is true")
+		assert.True(t, strings.Contains(prompt, "Context"), "Expected context section in prompt")
 	})
 
 	t.Run("With some features disabled", func(t *testing.T) {
 		ctx := newPromptContext(nil)
-		ctx.SubagentEnabled = false
-		ctx.TodoToolsEnabled = false
 
 		_, err := renderer.RenderSystemPrompt(ctx)
 		require.NoError(t, err, "Failed to render system prompt")
@@ -37,12 +34,11 @@ func TestRenderer(t *testing.T) {
 	renderer := NewRenderer(TemplateFS)
 	ctx := newPromptContext(nil)
 
-		t.Run("Component template rendering", func(t *testing.T) {
-			components := []string{
-				"templates/sections/behavior.tmpl",
-				"templates/sections/tooling.tmpl",
-				"templates/sections/context_runtime.tmpl",
-			}
+	t.Run("Component template rendering", func(t *testing.T) {
+		components := []string{
+			"templates/sections/behavior.tmpl",
+			"templates/sections/context_runtime.tmpl",
+		}
 
 		for _, component := range components {
 			result, err := renderer.RenderPrompt(component, ctx)

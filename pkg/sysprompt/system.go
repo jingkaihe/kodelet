@@ -8,20 +8,13 @@ import (
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
 
-type buildOptions struct {
-	IsSubagent bool
-}
-
 // SystemPrompt generates a system prompt for the given model
 func SystemPrompt(model string, llmConfig llmtypes.Config, contexts map[string]string) string {
-	return buildPrompt(model, llmConfig, contexts, buildOptions{IsSubagent: llmConfig.IsSubAgent})
+	return buildPrompt(model, llmConfig, contexts)
 }
 
-func buildPrompt(model string, llmConfig llmtypes.Config, contexts map[string]string, options buildOptions) string {
+func buildPrompt(model string, llmConfig llmtypes.Config, contexts map[string]string) string {
 	promptCtx := BuildRuntimeContext(llmConfig, contexts)
-	promptCtx.SubagentEnabled = !llmConfig.DisableSubagent && !options.IsSubagent
-	promptCtx.TodoToolsEnabled = llmConfig.EnableTodos && !options.IsSubagent
-	promptCtx.BashAllowedCommands = llmConfig.AllowedCommands
 
 	renderer, err := rendererForConfig(llmConfig)
 	if err != nil {

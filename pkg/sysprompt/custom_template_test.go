@@ -45,17 +45,16 @@ func TestRendererForConfig_CustomTemplate(t *testing.T) {
 	t.Run("renders with custom template override", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		tmplPath := filepath.Join(tmpDir, "custom.tmpl")
-		require.NoError(t, os.WriteFile(tmplPath, []byte("CUSTOM\n{{include \"templates/sections/tooling.tmpl\" .}}"), 0o644))
+		require.NoError(t, os.WriteFile(tmplPath, []byte("CUSTOM\n{{include \"templates/sections/behavior.tmpl\" .}}"), 0o644))
 
 		renderer, err := rendererForConfig(llmtypes.Config{Sysprompt: tmplPath})
 		require.NoError(t, err)
 
 		ctx := newPromptContext(nil)
-		ctx.SubagentEnabled = true
 		prompt, err := renderer.RenderSystemPrompt(ctx)
 		require.NoError(t, err)
 		assert.Contains(t, prompt, "CUSTOM")
-		assert.Contains(t, prompt, "# Tool Usage")
+		assert.Contains(t, prompt, "# Tone and Style")
 	})
 
 	t.Run("falls back to default renderer when invalid", func(t *testing.T) {

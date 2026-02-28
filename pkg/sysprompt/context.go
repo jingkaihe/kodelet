@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/logger"
-	"github.com/jingkaihe/kodelet/pkg/tools"
 )
 
 // PromptContext holds all variables for template rendering
@@ -22,20 +21,12 @@ type PromptContext struct {
 	OSVersion        string
 	Date             string
 
-	ToolNames map[string]string
-
 	// Content contexts (README, AGENTS.md)
 	ContextFiles map[string]string
 
 	// Active context file name (resolved from configured patterns)
 	ActiveContextFile string
 	Args              map[string]string
-
-	SubagentEnabled  bool
-	TodoToolsEnabled bool
-
-	BashBannedCommands  []string
-	BashAllowedCommands []string
 
 	// MCP tools information
 	MCPExecutionMode string
@@ -56,15 +47,6 @@ func newPromptContext(contexts map[string]string) *PromptContext {
 	osVersion := getOSVersion()
 	date := time.Now().Format("2006-01-02")
 
-	toolNames := map[string]string{
-		"todo_write": "todo_write",
-		"todo_read":  "todo_read",
-		"bash":       "bash",
-		"subagent":   "subagent",
-		"grep":       "grep_tool",
-		"glob":       "glob_tool",
-	}
-
 	// Use provided contexts or initialize empty map
 	contextFiles := contexts
 	if contextFiles == nil {
@@ -72,21 +54,16 @@ func newPromptContext(contexts map[string]string) *PromptContext {
 	}
 
 	return &PromptContext{
-		WorkingDirectory:    pwd,
-		IsGitRepo:           isGitRepo,
-		Platform:            platform,
-		OSVersion:           osVersion,
-		Date:                date,
-		ToolNames:           toolNames,
-		ContextFiles:        contextFiles,
-		ActiveContextFile:   AgentsMd,
-		Args:                map[string]string{},
-		SubagentEnabled:     true,
-		TodoToolsEnabled:    false,
-		BashBannedCommands:  tools.BannedCommands,
-		BashAllowedCommands: []string{},
-		MCPExecutionMode:    "",
-		MCPServers:          []string{},
+		WorkingDirectory:  pwd,
+		IsGitRepo:         isGitRepo,
+		Platform:          platform,
+		OSVersion:         osVersion,
+		Date:              date,
+		ContextFiles:      contextFiles,
+		ActiveContextFile: AgentsMd,
+		Args:              map[string]string{},
+		MCPExecutionMode:  "",
+		MCPServers:        []string{},
 	}
 }
 
