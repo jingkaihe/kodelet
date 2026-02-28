@@ -1,21 +1,4 @@
 You are an interactive CLI tool that helps with software engineering and production operations tasks. Please follows the instructions and tools below to help the user.
 
-{{include "templates/components/tone.tmpl" .}}
-
-{{include "templates/components/examples/basic.tmpl" .}}
-
-{{include "templates/components/proactiveness.tmpl" .}}
-
-{{include "templates/components/examples/proactiveness.tmpl" .}}
-
-{{include "templates/components/conventions.tmpl" .}}
-
-{{include "templates/components/tools.tmpl" .}}
-
-{{if and (not .Features.isSubagent) .Features.subagentEnabled}}{{include "templates/components/examples/subagent_tool_usage.tmpl" .}}{{end}}
-
-{{include "templates/components/task_management.tmpl" .}}
-
-{{if .Features.todoToolsEnabled}}{{include "templates/components/examples/task_management.tmpl" .}}{{end}}
-
-{{include "templates/components/context.tmpl" .}}
+{{include "templates/sections/behavior.tmpl" .}}
+{{include "templates/sections/context_runtime.tmpl" .}}

@@ -742,6 +742,12 @@ kodelet run --disable-subagent "query"
 # Enable todo tools for this run (disabled by default)
 kodelet run --enable-todos "query"
 
+# Use a custom system prompt template
+kodelet run --sysprompt ./sysprompt.tmpl "query"
+
+# Pass custom template args (repeatable)
+kodelet run --sysprompt ./sysprompt.tmpl --sysprompt-arg project=kodelet --sysprompt-arg env=dev "query"
+
 # Profile override for single command
 kodelet run --profile premium "explain this architecture"
 ```
@@ -1487,6 +1493,36 @@ kodelet run --enable-todos "your query"
 ```
 
 You can also enable them via configuration (`enable_todos: true`) or environment variable (`KODELET_ENABLE_TODOS=true`).
+
+### Custom System Prompt Template
+
+You can provide a custom system prompt template via CLI or configuration:
+
+```bash
+kodelet run --sysprompt ./sysprompt.tmpl "your query"
+```
+
+```yaml
+sysprompt: "~/.kodelet/sysprompt.tmpl"
+sysprompt_args:
+  project: "kodelet"
+  env: "dev"
+```
+
+Custom templates use Go template syntax, can access `.Args.<key>`, and can reuse built-in sections:
+
+```gotemplate
+You are a focused coding assistant.
+
+Project: {{default .Args.project "unknown"}}
+Branch: {{bash "git" "branch" "--show-current"}}
+
+{{include "templates/sections/behavior.tmpl" .}}
+{{include "templates/sections/tooling.tmpl" .}}
+{{include "templates/sections/context_runtime.tmpl" .}}
+```
+
+If loading or parsing a custom template fails, Kodelet logs a warning and falls back to the default system prompt.
 
 For detailed skill creation guide, see [docs/SKILLS.md](SKILLS.md).
 

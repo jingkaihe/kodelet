@@ -294,6 +294,33 @@ func stripProfileFlag(args []string) []string {
 	return result
 }
 
+func containsFlag(args []string, name string) bool {
+	if slices.Contains(args, name) {
+		return true
+	}
+	prefix := name + "="
+	for _, arg := range args {
+		if strings.HasPrefix(arg, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeSyspromptPath(ctx context.Context, sysprompt string) string {
+	if filepath.IsAbs(sysprompt) {
+		return sysprompt
+	}
+
+	absolutePath, err := filepath.Abs(sysprompt)
+	if err != nil {
+		logger.G(ctx).WithError(err).WithField("sysprompt", sysprompt).Warn("failed to normalize sysprompt path")
+		return sysprompt
+	}
+
+	return absolutePath
+}
+
 // BuildSubagentArgs builds the command-line arguments for spawning a subagent process.
 // This is extracted as a separate function for testability.
 // Returns the complete argument list including the base args, subagent_args from config, and the question.
@@ -313,6 +340,23 @@ func BuildSubagentArgs(ctx context.Context, subagentArgs string, input *SubAgent
 				parsedArgs = stripProfileFlag(parsedArgs)
 			}
 			args = append(args, parsedArgs...)
+		}
+	}
+
+	if llmConfig, ok := ctx.Value(subagentConfigContextKey{}).(llmtypes.Config); ok {
+		syspromptPath := strings.TrimSpace(llmConfig.Sysprompt)
+		if syspromptPath != "" && !containsFlag(args, "--sysprompt") {
+			args = append(args, "--sysprompt", normalizeSyspromptPath(ctx, syspromptPath))
+		}
+		if len(llmConfig.SyspromptArgs) > 0 && !containsFlag(args, "--sysprompt-arg") {
+			argKeys := make([]string, 0, len(llmConfig.SyspromptArgs))
+			for k := range llmConfig.SyspromptArgs {
+				argKeys = append(argKeys, k)
+			}
+			sort.Strings(argKeys)
+			for _, key := range argKeys {
+				args = append(args, "--sysprompt-arg", fmt.Sprintf("%s=%s", key, llmConfig.SyspromptArgs[key]))
+			}
 		}
 	}
 
@@ -344,6 +388,8 @@ func BuildSubagentArgs(ctx context.Context, subagentArgs string, input *SubAgent
 	return args
 }
 
+type subagentConfigContextKey struct{}
+
 // Execute runs the sub-agent via shell-out and returns the result
 func (t *SubAgentTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
 	input := &SubAgentInput{}
@@ -366,8 +412,10 @@ func (t *SubAgentTool) Execute(ctx context.Context, state tooltypes.State, param
 
 	// Build command arguments
 	var subagentArgs string
+	ctxWithConfig := ctx
 	if llmConfig, ok := state.GetLLMConfig().(llmtypes.Config); ok {
 		subagentArgs = llmConfig.SubagentArgs
+		ctxWithConfig = context.WithValue(ctx, subagentConfigContextKey{}, llmConfig)
 	}
 
 	// Look up workflow fragment for metadata (profile/provider/model)
@@ -375,7 +423,7 @@ func (t *SubAgentTool) Execute(ctx context.Context, state tooltypes.State, param
 	if input.Workflow != "" && t.workflowEnabled {
 		workflow = t.workflows[input.Workflow]
 	}
-	args := BuildSubagentArgs(ctx, subagentArgs, input, workflow)
+	args := BuildSubagentArgs(ctxWithConfig, subagentArgs, input, workflow)
 
 	cmd := exec.CommandContext(ctx, exe, args...)
 

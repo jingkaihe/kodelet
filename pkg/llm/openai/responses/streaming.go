@@ -22,14 +22,14 @@ import (
 
 // processStream processes the streaming response from the Responses API.
 // It handles text deltas, tool calls, and response completion.
-// Returns whether tools were used and any error.
+// Returns stream processing outcome and any error.
 func (t *Thread) processStream(
 	ctx context.Context,
 	stream *ssestream.Stream[responses.ResponseStreamEventUnion],
 	handler llmtypes.MessageHandler,
 	model string,
 	opt llmtypes.MessageOpt,
-) (bool, error) {
+) (processStreamResult, error) {
 	telemetry.AddEvent(ctx, "stream_processing_started")
 	log := logger.G(ctx)
 	log.Debug("starting stream processing")
@@ -40,6 +40,8 @@ func (t *Thread) processStream(
 	var toolsUsed bool
 	var contentBlockEnded bool // Track if we've signaled end of content block
 	var thinkingStarted bool   // Track if thinking block has started
+	var responseCompleted bool
+	var responseIncompleteReason string
 
 	// Track pending tool calls
 	pendingToolCalls := make(map[string]*toolCallState)
@@ -49,6 +51,32 @@ func (t *Thread) processStream(
 
 	// Check if handler supports streaming
 	streamHandler, isStreaming := handler.(llmtypes.StreamingMessageHandler)
+	var contentFinalized bool
+
+	finalizeContentBlocks := func() {
+		if contentFinalized {
+			return
+		}
+
+		// Signal end of thinking block for streaming handlers (if not already done)
+		if isStreaming && thinkingStarted {
+			streamHandler.HandleThinkingBlockEnd()
+			thinkingStarted = false
+		}
+
+		// Signal end of text content block for streaming handlers (if not already done)
+		if isStreaming && !contentBlockEnded && currentText.Len() > 0 {
+			streamHandler.HandleContentBlockEnd()
+			contentBlockEnded = true
+		}
+
+		// For non-streaming handlers, send the complete text
+		if !isStreaming && currentText.Len() > 0 {
+			handler.HandleText(currentText.String())
+		}
+
+		contentFinalized = true
+	}
 
 	// Process stream events
 	log.Debug("waiting for stream events")
@@ -235,27 +263,24 @@ func (t *Thread) processStream(
 		case "response.completed":
 			// Response completed
 			finalResponse = &event.Response
+			responseCompleted = true
 			telemetry.AddEvent(ctx, "response_completed",
 				attribute.String("response_id", event.Response.ID),
 				attribute.String("status", string(event.Response.Status)),
 			)
 
-			// Signal end of thinking block for streaming handlers (if not already done)
-			if isStreaming && thinkingStarted {
-				streamHandler.HandleThinkingBlockEnd()
-				thinkingStarted = false
-			}
+			finalizeContentBlocks()
 
-			// Signal end of text content block for streaming handlers (if not already done)
-			if isStreaming && !contentBlockEnded && currentText.Len() > 0 {
-				streamHandler.HandleContentBlockEnd()
-				contentBlockEnded = true
-			}
+		case "response.incomplete":
+			// Response ended but is incomplete (e.g. max_output_tokens/content_filter)
+			finalResponse = &event.Response
+			responseIncompleteReason = event.Response.IncompleteDetails.Reason
+			telemetry.AddEvent(ctx, "response_incomplete",
+				attribute.String("response_id", event.Response.ID),
+				attribute.String("reason", responseIncompleteReason),
+			)
 
-			// For non-streaming handlers, send the complete text
-			if !isStreaming && currentText.Len() > 0 {
-				handler.HandleText(currentText.String())
-			}
+			finalizeContentBlocks()
 
 		case "response.failed", "error":
 			// Handle errors
@@ -263,7 +288,10 @@ func (t *Thread) processStream(
 			if errMsg == "" {
 				errMsg = "Unknown error"
 			}
-			return toolsUsed, errors.New(errMsg)
+			return processStreamResult{
+				toolsUsed:         toolsUsed,
+				responseCompleted: responseCompleted,
+			}, errors.New(errMsg)
 
 		case "response.in_progress", "response.queued":
 			// Status updates - no action needed
@@ -284,7 +312,10 @@ func (t *Thread) processStream(
 				WithField("raw_json", apiErr.RawJSON()).
 				Debug("API error details")
 		}
-		return toolsUsed, errors.Wrap(err, "stream error")
+		return processStreamResult{
+			toolsUsed:         toolsUsed,
+			responseCompleted: responseCompleted,
+		}, errors.Wrap(err, "stream error")
 	}
 
 	// Update usage from final response
@@ -296,7 +327,29 @@ func (t *Thread) processStream(
 		}
 	}
 
-	return toolsUsed, nil
+	if responseIncompleteReason != "" {
+		return processStreamResult{
+			toolsUsed:         toolsUsed,
+			responseCompleted: false,
+		}, errors.Errorf("response incomplete: %s", responseIncompleteReason)
+	}
+
+	if !responseCompleted {
+		return processStreamResult{
+			toolsUsed:         toolsUsed,
+			responseCompleted: false,
+		}, errors.New("response stream ended before response.completed event")
+	}
+
+	return processStreamResult{
+		toolsUsed:         toolsUsed,
+		responseCompleted: true,
+	}, nil
+}
+
+type processStreamResult struct {
+	toolsUsed         bool
+	responseCompleted bool
 }
 
 // toolCallState tracks the state of a pending tool call during streaming.

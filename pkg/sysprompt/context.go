@@ -2,16 +2,15 @@ package sysprompt
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/logger"
-	"github.com/jingkaihe/kodelet/pkg/tools"
 )
 
 // PromptContext holds all variables for template rendering
@@ -22,45 +21,31 @@ type PromptContext struct {
 	OSVersion        string
 	Date             string
 
-	ToolNames map[string]string
-
 	// Content contexts (README, AGENTS.md)
 	ContextFiles map[string]string
 
 	// Active context file name (resolved from configured patterns)
 	ActiveContextFile string
-
-	Features map[string]bool
-
-	BashBannedCommands  []string
-	BashAllowedCommands []string
+	Args              map[string]string
 
 	// MCP tools information
 	MCPExecutionMode string
 	MCPServers       []string // List of available MCP server names
 }
 
-// NewPromptContext creates a new PromptContext with default values
-func NewPromptContext(contexts map[string]string) *PromptContext {
+type contextEntry struct {
+	Filename string
+	Dir      string
+	Content  string
+}
+
+// newPromptContext creates a new PromptContext with default values.
+func newPromptContext(contexts map[string]string) *PromptContext {
 	pwd, _ := os.Getwd()
 	isGitRepo := checkIsGitRepo(pwd)
 	platform := runtime.GOOS
 	osVersion := getOSVersion()
 	date := time.Now().Format("2006-01-02")
-
-	toolNames := map[string]string{
-		"todo_write": "todo_write",
-		"todo_read":  "todo_read",
-		"bash":       "bash",
-		"subagent":   "subagent",
-		"grep":       "grep_tool",
-		"glob":       "glob_tool",
-	}
-
-	features := map[string]bool{
-		"subagentEnabled":  true,
-		"todoToolsEnabled": false,
-	}
 
 	// Use provided contexts or initialize empty map
 	contextFiles := contexts
@@ -69,19 +54,16 @@ func NewPromptContext(contexts map[string]string) *PromptContext {
 	}
 
 	return &PromptContext{
-		WorkingDirectory:    pwd,
-		IsGitRepo:           isGitRepo,
-		Platform:            platform,
-		OSVersion:           osVersion,
-		Date:                date,
-		ToolNames:           toolNames,
-		ContextFiles:        contextFiles,
-		ActiveContextFile:   AgentsMd,
-		Features:            features,
-		BashBannedCommands:  tools.BannedCommands,
-		BashAllowedCommands: []string{},
-		MCPExecutionMode:    "",
-		MCPServers:          []string{},
+		WorkingDirectory:  pwd,
+		IsGitRepo:         isGitRepo,
+		Platform:          platform,
+		OSVersion:         osVersion,
+		Date:              date,
+		ContextFiles:      contextFiles,
+		ActiveContextFile: AgentsMd,
+		Args:              map[string]string{},
+		MCPExecutionMode:  "",
+		MCPServers:        []string{},
 	}
 }
 
@@ -94,35 +76,50 @@ func (ctx *PromptContext) WithMCPConfig(executionMode, workspaceDir string) *Pro
 	return ctx
 }
 
-// FormatContexts formats the loaded contexts into a string
-func (ctx *PromptContext) FormatContexts() string {
+func (ctx *PromptContext) contextEntries() []contextEntry {
 	if len(ctx.ContextFiles) == 0 {
-		return ""
+		return nil
 	}
 
-	ctxFiles := []string{}
+	entries := make([]contextEntry, 0, len(ctx.ContextFiles))
+	ctxFiles := make([]string, 0, len(ctx.ContextFiles))
+	sortedFilenames := make([]string, 0, len(ctx.ContextFiles))
+	for filename := range ctx.ContextFiles {
+		sortedFilenames = append(sortedFilenames, filename)
+	}
+	sort.Strings(sortedFilenames)
 
-	prompt := `Here are some useful context to help you solve the user's problem.
-When you are working in these directories, make sure that you are following the guidelines provided in the context.
-Note that the contexts in $HOME/.kodelet/ are universally applicable.
-`
-	for filename, content := range ctx.ContextFiles {
+	for _, filename := range sortedFilenames {
 		ctxFiles = append(ctxFiles, filename)
-		dir := filepath.Dir(filename)
-		prompt += fmt.Sprintf(`
-<context filename="%s", dir="%s">
-%s
-</context>
-`, filename, dir, content)
+		entries = append(entries, contextEntry{
+			Filename: filename,
+			Dir:      filepath.Dir(filename),
+			Content:  ctx.ContextFiles[filename],
+		})
 	}
 
 	logger.G(context.Background()).WithField("context_files", ctxFiles).Debug("loaded context files")
-	return prompt
+
+	return entries
 }
 
-// ResolveActiveContextFile selects the best context file name based on configured patterns
-// and the contexts that were actually loaded.
-func ResolveActiveContextFile(workingDir string, contexts map[string]string, patterns []string) string {
+func (ctx *PromptContext) hasContextEntries() bool {
+	return len(ctx.ContextFiles) > 0
+}
+
+func (ctx *PromptContext) hasMCPServers() bool {
+	return ctx.MCPExecutionMode == "code" && len(ctx.MCPServers) > 0
+}
+
+func (ctx *PromptContext) mcpServersCSV() string {
+	return strings.Join(ctx.MCPServers, ", ")
+}
+
+func (ctx *PromptContext) formatContexts() string {
+	return ctx.formatContextsWithRenderer(defaultRenderer)
+}
+
+func resolveActiveContextFile(workingDir string, contexts map[string]string, patterns []string) string {
 	if len(patterns) == 0 {
 		return AgentsMd
 	}
@@ -148,20 +145,6 @@ func ResolveActiveContextFile(workingDir string, contexts map[string]string, pat
 	}
 
 	return patterns[0]
-}
-
-// FormatSystemInfo formats the system information into a string
-func (ctx *PromptContext) FormatSystemInfo() string {
-	return fmt.Sprintf(`
-# System Information
-Here is the system information:
-<system-information>
-Current working directory: %s
-Is this a git repository? %v
-Operating system: %s %s
-Date: %s
-</system-information>
-`, ctx.WorkingDirectory, ctx.IsGitRepo, ctx.Platform, ctx.OSVersion, ctx.Date)
 }
 
 // checkIsGitRepo checks if the given directory is a git repository
@@ -241,18 +224,35 @@ func loadMCPServers(workspaceDir string) []string {
 	return servers
 }
 
-// FormatMCPServers formats the MCP servers information into a string
-func (ctx *PromptContext) FormatMCPServers() string {
-	if ctx.MCPExecutionMode != "code" || len(ctx.MCPServers) == 0 {
+func (ctx *PromptContext) formatMCPServers() string {
+	return ctx.formatMCPServersWithRenderer(defaultRenderer)
+}
+
+func (ctx *PromptContext) renderSectionWithRenderer(renderer *Renderer, templateName string) string {
+	if renderer == nil {
+		logger.G(context.Background()).WithField("template", templateName).Warn("failed to render sysprompt context section")
 		return ""
 	}
 
-	var sb strings.Builder
-	sb.WriteString("\n# MCP Servers Available\n")
-	sb.WriteString("When using MCP tools in 'code' execution mode, the following MCP servers are available:\n\n")
+	rendered, err := renderer.RenderPrompt(templateName, ctx)
+	if err != nil {
+		logger.G(context.Background()).WithError(err).WithField("template", templateName).Warn("failed to render sysprompt context section")
+		return ""
+	}
+	if strings.TrimSpace(rendered) == "" {
+		return ""
+	}
+	return rendered
+}
 
-	sb.WriteString(strings.Join(ctx.MCPServers, ", "))
-	sb.WriteString("\n\nYou can import and use tools from these servers in your TypeScript code within the bash tool. Check the generated TypeScript API in .kodelet/mcp/servers/ for available functions.\n")
+func (ctx *PromptContext) formatSystemInfoWithRenderer(renderer *Renderer) string {
+	return ctx.renderSectionWithRenderer(renderer, "templates/sections/runtime_system_info.tmpl")
+}
 
-	return sb.String()
+func (ctx *PromptContext) formatContextsWithRenderer(renderer *Renderer) string {
+	return ctx.renderSectionWithRenderer(renderer, "templates/sections/runtime_loaded_contexts.tmpl")
+}
+
+func (ctx *PromptContext) formatMCPServersWithRenderer(renderer *Renderer) string {
+	return ctx.renderSectionWithRenderer(renderer, "templates/sections/runtime_mcp_servers.tmpl")
 }

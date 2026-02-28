@@ -33,6 +33,8 @@ type Config struct {
 	Retry                RetryConfig        `mapstructure:"retry" json:"retry" yaml:"retry"`                                                    // Retry configuration for API calls
 	MCPExecutionMode     string             `mapstructure:"mcp_execution_mode" json:"mcp_execution_mode" yaml:"mcp_execution_mode"`             // MCP execution mode (code, direct, or empty)
 	MCPWorkspaceDir      string             `mapstructure:"mcp_workspace_dir" json:"mcp_workspace_dir" yaml:"mcp_workspace_dir"`                // MCP workspace directory for code execution mode
+	Sysprompt            string             `mapstructure:"sysprompt" json:"sysprompt,omitempty" yaml:"sysprompt,omitempty"`                    // Sysprompt is the path to a custom system prompt template file
+	SyspromptArgs        map[string]string  `mapstructure:"sysprompt_args" json:"sysprompt_args,omitempty" yaml:"sysprompt_args,omitempty"`     // SyspromptArgs are custom template arguments for system prompt rendering
 
 	// Profile system configuration
 	Profile  string                   `mapstructure:"profile" json:"profile,omitempty" yaml:"profile,omitempty"`    // Active profile name

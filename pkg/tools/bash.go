@@ -36,133 +36,44 @@ var (
 		"cd",
 	}
 
-	descriptionTemplate = `Executes a given bash command in a persistent shell session with timeout.
+	descriptionTemplate = `Run a bash command in a persistent shell session.
 
-Before executing the command, please follow these steps:
-
-# Command Restrictions
+# Restrictions
 {{if .AllowedCommands}}
-## Allowed Commands
-Only the following commands/patterns are allowed:
-{{range .AllowedCommands}}* {{.}}
+Allowed command patterns:
+{{range .AllowedCommands}}- {{.}}
 {{end}}
-Commands not matching these patterns will be rejected.
+Commands outside these patterns are rejected.
 {{else}}
-## Banned Commands
-The following commands are banned and cannot be used:
-{{range .BannedCommands}}* {{.}}
+Banned commands:
+{{range .BannedCommands}}- {{.}}
 {{end}}
 {{end}}
 
-# Important
-* The command argument is required.
-* You must specify a timeout from 10 to 120 seconds (or 0 for no timeout when background=true).
-* You **MUST** use parallel tool calling to execute multiple independent commands together.
-* Please provide a clear and concise description of what this command does in 5-10 words.
-* If the output exceeds 30000 characters, output will be truncated before being returned to you.
-* You **MUST NOT** run commands that require user interaction.
-* When issuing multiple commands, use the ';' or '&&' operator to separate them. Command MUST NOT be multiline.
-* Try to maintain your current working directory throughout the session by using absolute paths and avoid using cd directly. If you need to use cd please wrap it in parentheses.
-* grep_tool and glob_tool are preferred over running grep, egrep and find using the bash tool.
-* DO NOT use heredoc. For any command that requires heredoc, use the "file_write" tool instead.
+# Input
+- command: required single-line bash command
+- description: required, 5-10 words
+- timeout: 10-120 for foreground; 0 when background=true
+- background: optional, default false
 
-# Background Parameter
-* Set background=true to run commands in the background (default is false).
-* Background processes are best suited for:
-  - Running long-running processes (web servers, database servers, etc.)
-  - Running tests or commands that will take a long time
-  - Any process you want to continue running while doing other work
-* When background=true:
-  - The timeout must be 0 (no timeout)
-  - Process output is written to ~/.kodelet/bgpids/{PID}/out.log
-  - The tool returns immediately with the PID and log file location
-  - The process continues running after the tool returns
+# Rules
+- Use parallel tool calling for independent commands.
+- Do not run interactive commands.
+- For multiple commands, use ';' or '&&' on one line.
+- Avoid direct cd; use absolute paths or subshell: (cd /path && cmd).
+- Prefer grep_tool/glob_tool over grep/find in bash.
+- Do not use heredoc; use file_write or apply_patch instead.
 
-# Examples
-<good-example>
-pytest /foo/bar/tests
-</good-example>
+# Background mode
+When background=true:
+- timeout must be 0
+- process runs detached
+- logs: ~/.kodelet/bgpids/{PID}/out.log
+- returns immediately with PID and log path
 
-<bad-example>
-cd /foo/bar && pytest tests
-<reasoning>
-Using cd directly changes the current working directory.
-</reasoning>
-</bad-example>
-
-<good-example>
-(cd /foo/bar && pytest tests)
-<reasoning>
-cd command is wrapped in parentheses thus avoid changing the current working directory.
-</reasoning>
-</good-example>
-
-<good-example>
-apt-get install -y python3-pytest
-</good-example>
-
-<bad-example>
-apt-get install python3-pytest
-<reasoning>
-The command requires user interaction.
-</reasoning>
-</bad-example>
-
-<bad-example>
-tail -f /var/log/nginx/access.log
-<reasoning>
-The command is running in interactive mode.
-</reasoning>
-</bad-example>
-
-<bad-example>
-vim /foo/bar/tests.py
-<reasoning>
-The command is running in interactive mode.
-</reasoning>
-</bad-example>
-
-<good-example>
-echo a; echo b
-</good-example>
-
-<bad-example>
-echo a
-echo b
-<reasoning>
-The command is multiline.
-</reasoning>
-</bad-example>
-
-<bad-example>
-cat <<EOF > /foo/bar/tests.py
-import pytest
-
-def test_foo():
-    assert 1 == 1
-EOF
-<reasoning>
-The command is using heredoc.
-</reasoning>
-</bad-example>
-
-<good-example>
-command: python -m http.server 8000
-background: true
-timeout: 0
-<reasoning>
-Running a web server in the background with no timeout.
-</reasoning>
-</good-example>
-
-<good-example>
-command: gunicorn app:application --bind 0.0.0.0:5000
-background: true
-timeout: 0
-<reasoning>
-Running a gunicorn server in the background.
-</reasoning>
-</good-example>
+Examples:
+- Foreground: (cd /repo && mise run test)
+- Background: command="python -m http.server 8000", background=true, timeout=0
 `
 )
 

@@ -13,21 +13,16 @@ func TestConditionalRendering(t *testing.T) {
 	renderer := NewRenderer(TemplateFS)
 
 	t.Run("With all features enabled", func(t *testing.T) {
-		ctx := NewPromptContext(nil)
-		ctx.Features["subagentEnabled"] = true
+		ctx := newPromptContext(nil)
 
 		prompt, err := renderer.RenderSystemPrompt(ctx)
 		require.NoError(t, err, "Failed to render system prompt")
 
-		assert.True(t, strings.Contains(prompt, "subagent"), "Expected subagent reference in prompt when subagentEnabled is true")
+		assert.True(t, strings.Contains(prompt, "Context"), "Expected context section in prompt")
 	})
 
 	t.Run("With some features disabled", func(t *testing.T) {
-		ctx := NewPromptContext(nil)
-		ctx.Features["subagentEnabled"] = true
-
-		config := NewDefaultConfig()
-		updateContextWithConfig(ctx, config)
+		ctx := newPromptContext(nil)
 
 		_, err := renderer.RenderSystemPrompt(ctx)
 		require.NoError(t, err, "Failed to render system prompt")
@@ -37,14 +32,12 @@ func TestConditionalRendering(t *testing.T) {
 // TestRenderer tests the core functionality of the template renderer
 func TestRenderer(t *testing.T) {
 	renderer := NewRenderer(TemplateFS)
-	ctx := NewPromptContext(nil)
+	ctx := newPromptContext(nil)
 
 	t.Run("Component template rendering", func(t *testing.T) {
 		components := []string{
-			"templates/components/tone.tmpl",
-			"templates/components/tools.tmpl",
-			"templates/components/task_management.tmpl",
-			"templates/components/context.tmpl",
+			"templates/sections/behavior.tmpl",
+			"templates/sections/context_runtime.tmpl",
 		}
 
 		for _, component := range components {
@@ -56,13 +49,9 @@ func TestRenderer(t *testing.T) {
 	})
 
 	t.Run("Template caching", func(t *testing.T) {
-		_, err := renderer.RenderPrompt(SystemTemplate, ctx)
-		require.NoError(t, err, "Failed to render system template")
-
-		assert.NotEqual(t, 0, len(renderer.cache), "Template was not cached after rendering")
-
-		_, ok := renderer.cache[SystemTemplate]
-		assert.True(t, ok, "Template %s not found in cache", SystemTemplate)
+		require.NoError(t, renderer.parseErr, "Failed to pre-parse templates")
+		require.NotNil(t, renderer.templates, "Expected pre-parsed templates to be initialized")
+		assert.NotNil(t, renderer.templates.Lookup(SystemTemplate), "Expected system template to be pre-parsed")
 	})
 
 	t.Run("Include function", func(t *testing.T) {
@@ -70,5 +59,23 @@ func TestRenderer(t *testing.T) {
 		// but we can verify that templates with includes render without errors
 		_, err := renderer.RenderSystemPrompt(ctx)
 		assert.NoError(t, err, "Failed to render template with includes")
+	})
+
+	t.Run("Default function", func(t *testing.T) {
+		testRenderer := NewRendererWithTemplateOverride(TemplateFS, map[string]string{
+			"templates/default_func_test.tmpl": `{{default .Args.project "fallback"}}`,
+		})
+		rendered, err := testRenderer.RenderPrompt("templates/default_func_test.tmpl", &PromptContext{Args: map[string]string{}})
+		require.NoError(t, err)
+		assert.Equal(t, "fallback", strings.TrimSpace(rendered))
+	})
+
+	t.Run("Bash function", func(t *testing.T) {
+		testRenderer := NewRendererWithTemplateOverride(TemplateFS, map[string]string{
+			"templates/bash_func_test.tmpl": `{{bash "echo" "ok"}}`,
+		})
+		rendered, err := testRenderer.RenderPrompt("templates/bash_func_test.tmpl", ctx)
+		require.NoError(t, err)
+		assert.Equal(t, "ok", strings.TrimSpace(rendered))
 	})
 }

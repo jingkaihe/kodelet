@@ -1,5 +1,13 @@
 # Kodelet
 
+## 0.2.30.beta (2026-02-27)
+
+### Features
+
+- Added custom system prompt template support via `--sysprompt` and repeatable `--sysprompt-arg`, plus `sysprompt` / `sysprompt_args` configuration keys.
+- Custom system prompt templates can now reuse built-in template sections and helper functions (`include`, `default`, `bash`) while accepting custom arguments through `.Args`.
+- Refactored sysprompt templates from `templates/components/*` into modular `templates/sections/*` runtime sections.
+
 ## 0.2.27.beta (2026-02-26)
 
 - Added first-class `apply_patch` tool support (backend + web UI rendering), including structured patch parsing and ACP bridge integration.

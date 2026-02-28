@@ -12,6 +12,8 @@ var Models = llm.CustomModels{
 		"gpt-5-mini",
 		"gpt-5-nano",
 		"gpt-5-chat-latest",
+		"gpt-5.3-codex",
+		"gpt-5.2-codex",
 		"gpt-5.1-codex",
 		"gpt-5.1-codex-max",
 		"gpt-5.1-codex-mini",
@@ -47,6 +49,18 @@ var Models = llm.CustomModels{
 
 // Pricing defines the pricing information for all OpenAI models
 var Pricing = llm.CustomPricing{
+	"gpt-5.3-codex": llm.ModelPricing{
+		Input:         0.00000175,  // $1.75 per million tokens
+		CachedInput:   0.000000175, // $0.175 per million tokens
+		Output:        0.000014,    // $14.00 per million tokens
+		ContextWindow: 400_000,
+	},
+	"gpt-5.2-codex": llm.ModelPricing{
+		Input:         0.00000175,  // $1.75 per million tokens
+		CachedInput:   0.000000175, // $0.175 per million tokens
+		Output:        0.000014,    // $14.00 per million tokens
+		ContextWindow: 400_000,
+	},
 	"gpt-5.2": llm.ModelPricing{
 		Input:         0.00000175,  // $1.75 per million tokens
 		CachedInput:   0.000000175, // $0.175 per million tokens

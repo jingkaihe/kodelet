@@ -101,9 +101,9 @@ type Thread struct {
 		maxTokens int,
 		systemPrompt string,
 		opt llmtypes.MessageOpt,
-	) (string, bool, error)
+	) (string, bool, bool, error)
 	newStreamingFunc  func(context.Context, responses.ResponseNewParams, ...option.RequestOption) *ssestream.Stream[responses.ResponseStreamEventUnion]
-	processStreamFunc func(context.Context, *ssestream.Stream[responses.ResponseStreamEventUnion], llmtypes.MessageHandler, string, llmtypes.MessageOpt) (bool, error)
+	processStreamFunc func(context.Context, *ssestream.Stream[responses.ResponseStreamEventUnion], llmtypes.MessageHandler, string, llmtypes.MessageOpt) (processStreamResult, error)
 }
 
 // NewThread creates a new Responses API thread with the given configuration.
@@ -301,12 +301,7 @@ OUTER:
 				contexts = t.State.DiscoverContexts()
 			}
 
-			var systemPrompt string
-			if t.Config.IsSubAgent {
-				systemPrompt = sysprompt.SubAgentPrompt(model, t.Config, contexts)
-			} else {
-				systemPrompt = sysprompt.SystemPrompt(model, t.Config, contexts)
-			}
+			systemPrompt := sysprompt.SystemPrompt(model, t.Config, contexts)
 
 			// Check if auto-compact should be triggered
 			t.TryAutoCompact(ctx, opt.DisableAutoCompact, opt.CompactRatio, t.CompactContext)
@@ -316,7 +311,7 @@ OUTER:
 			if processExchange == nil {
 				processExchange = t.processMessageExchange
 			}
-			exchangeOutput, toolsUsed, err := processExchange(ctx, handler, model, maxTokens, systemPrompt, opt)
+			exchangeOutput, toolsUsed, responseCompleted, err := processExchange(ctx, handler, model, maxTokens, systemPrompt, opt)
 			if err != nil {
 				if errors.Is(err, context.Canceled) {
 					logger.G(ctx).Info("Request cancelled, stopping kodelet.llm.openai.responses")
@@ -326,6 +321,10 @@ OUTER:
 					t.SaveConversation(ctx, false)
 				}
 				return "", err
+			}
+
+			if !responseCompleted {
+				return "", errors.New("response stream ended without response.completed event")
 			}
 
 			turnCount++
@@ -382,13 +381,14 @@ func (t *Thread) applyCodexRestrictions(params *responses.ResponseNewParams) {
 
 	if t.State != nil {
 		contexts := t.State.DiscoverContexts()
+		promptCtx := sysprompt.BuildRuntimeContext(t.Config, contexts)
 
-		promptCtx := sysprompt.NewPromptContext(contexts)
-		devMessages := []string{
-			promptCtx.FormatSystemInfo(),
-			promptCtx.FormatContexts(),
-			promptCtx.FormatMCPServers(),
+		renderer, err := sysprompt.ResolveRendererForConfig(t.Config)
+		if err != nil {
+			logger.G(context.Background()).WithError(err).Warn("failed to load custom sysprompt template for codex runtime sections, using default")
 		}
+
+		devMessages := sysprompt.RenderRuntimeSections(promptCtx, renderer)
 
 		// prepend dev messages to params' input
 		for i := len(devMessages) - 1; i >= 0; i-- {
@@ -412,7 +412,7 @@ func (t *Thread) processMessageExchange(
 	maxTokens int,
 	systemPrompt string,
 	opt llmtypes.MessageOpt,
-) (string, bool, error) {
+) (string, bool, bool, error) {
 	log := logger.G(ctx)
 	var finalOutput string
 
@@ -440,11 +440,12 @@ func (t *Thread) processMessageExchange(
 
 	// Build request parameters with standard settings
 	params := responses.ResponseNewParams{
-		Model:        model,
-		Input:        responses.ResponseNewParamsInputUnion{OfInputItemList: inputToSend},
-		Instructions: param.NewOpt(systemPrompt),
-		Tools:        tools,
-		Store:        param.NewOpt(true), // Enable server-side conversation state storage
+		Model:          model,
+		Input:          responses.ResponseNewParamsInputUnion{OfInputItemList: inputToSend},
+		Instructions:   param.NewOpt(systemPrompt),
+		Tools:          tools,
+		Store:          param.NewOpt(true), // Enable server-side conversation state storage
+		PromptCacheKey: param.NewOpt(t.ConversationID),
 	}
 
 	// Set previous_response_id for multi-turn conversations
@@ -492,7 +493,7 @@ func (t *Thread) processMessageExchange(
 	log.Debug("stream created, processing events")
 
 	// Process stream events
-	toolsUsed, err := processStream(ctx, stream, handler, model, opt)
+	streamResult, err := processStream(ctx, stream, handler, model, opt)
 	if err != nil {
 		// Log detailed error information for debugging
 		log.WithError(err).
@@ -516,14 +517,14 @@ func (t *Thread) processMessageExchange(
 
 			// Retry the request
 			stream = newStreaming(ctx, params)
-			toolsUsed, err = processStream(ctx, stream, handler, model, opt)
+			streamResult, err = processStream(ctx, stream, handler, model, opt)
 			if err != nil {
 				saveConversation()
-				return "", false, err
+				return "", false, false, err
 			}
 		} else {
 			saveConversation()
-			return "", false, err
+			return "", false, false, err
 		}
 	}
 
@@ -543,7 +544,7 @@ func (t *Thread) processMessageExchange(
 
 	saveConversation()
 
-	return finalOutput, toolsUsed, nil
+	return finalOutput, streamResult.toolsUsed, streamResult.responseCompleted, nil
 }
 
 // GetMessages returns the messages from the thread in a common format.
@@ -635,9 +636,6 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 	}
 
 	systemPrompt := sysprompt.SystemPrompt(t.Config.Model, t.Config, contexts)
-	if t.Config.IsSubAgent {
-		systemPrompt = sysprompt.SubAgentPrompt(t.Config.Model, t.Config, contexts)
-	}
 
 	compactParams := responses.ResponseCompactParams{
 		Input: responses.ResponseCompactParamsInputUnion{

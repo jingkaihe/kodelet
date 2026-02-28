@@ -15,6 +15,7 @@ var (
 	expectedOpenAIReasoningModels = []string{
 		"gpt-5.2", "gpt-5.2-pro",
 		"gpt-5", "gpt-5-mini", "gpt-5-nano", "gpt-5-chat-latest",
+		"gpt-5.3-codex", "gpt-5.2-codex",
 		"gpt-5.1-codex", "gpt-5.1-codex-max", "gpt-5.1-codex-mini",
 		"o1", "o1-pro", "o1-mini", "o3", "o3-pro", "o3-mini",
 		"o3-deep-research", "o4-mini", "o4-mini-deep-research",

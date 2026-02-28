@@ -69,6 +69,64 @@ func TestGetConfigFromViperWithCmd_ExplicitContextPatternsOverrideProfile(t *tes
 	assert.Equal(t, []string{"CODING.md", "README.md"}, config.Context.Patterns)
 }
 
+func TestGetConfigFromViperWithCmd_ExplicitSyspromptOverridesProfile(t *testing.T) {
+	originalConfig := viper.AllSettings()
+	defer func() {
+		viper.Reset()
+		for key, value := range originalConfig {
+			viper.Set(key, value)
+		}
+	}()
+
+	viper.Reset()
+	viper.Set("profile", "work")
+	viper.Set("profiles", map[string]any{
+		"work": map[string]any{
+			"sysprompt": "/profile/sysprompt.tmpl",
+		},
+	})
+
+	cmd := &cobra.Command{Use: "test"}
+	cmd.Flags().String("sysprompt", "", "custom system prompt")
+	err := cmd.Flags().Set("sysprompt", "./custom/sysprompt.tmpl")
+	require.NoError(t, err)
+
+	config, err := GetConfigFromViperWithCmd(cmd)
+	require.NoError(t, err)
+	assert.Equal(t, "./custom/sysprompt.tmpl", config.Sysprompt)
+}
+
+func TestGetConfigFromViperWithCmd_ExplicitSyspromptArgsOverrideProfile(t *testing.T) {
+	originalConfig := viper.AllSettings()
+	defer func() {
+		viper.Reset()
+		for key, value := range originalConfig {
+			viper.Set(key, value)
+		}
+	}()
+
+	viper.Reset()
+	viper.Set("profile", "work")
+	viper.Set("profiles", map[string]any{
+		"work": map[string]any{
+			"sysprompt_args": map[string]any{
+				"project": "from-profile",
+			},
+		},
+	})
+
+	cmd := &cobra.Command{Use: "test"}
+	cmd.Flags().StringToString("sysprompt-arg", map[string]string{}, "custom sysprompt args")
+	err := cmd.Flags().Set("sysprompt-arg", "project=from-flag")
+	require.NoError(t, err)
+	err = cmd.Flags().Set("sysprompt-arg", "env=dev")
+	require.NoError(t, err)
+
+	config, err := GetConfigFromViperWithCmd(cmd)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"project": "from-flag", "env": "dev"}, config.SyspromptArgs)
+}
+
 func TestGetConfigFromViperWithProfileOpenAIManualCache(t *testing.T) {
 	originalConfig := viper.AllSettings()
 	defer func() {

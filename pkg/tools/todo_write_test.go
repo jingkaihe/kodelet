@@ -26,9 +26,11 @@ func TestTodoWriteTool_Name(t *testing.T) {
 func TestTodoWriteTool_Description(t *testing.T) {
 	tool := &TodoWriteTool{}
 	desc := tool.Description()
-	assert.Contains(t, desc, "Use TodoWrite tool to create and update a list of todos")
-	assert.Contains(t, desc, "Tool Structure")
-	assert.Contains(t, desc, "Common Use Cases")
+	assert.Contains(t, desc, "Create or update the todo list for the current task")
+	assert.Contains(t, desc, "Input:")
+	assert.Contains(t, desc, "Plan quality:")
+	assert.Contains(t, desc, "Good example:")
+	assert.Contains(t, desc, "Bad example:")
 }
 
 func TestTodoWriteTool_ValidateInput(t *testing.T) {

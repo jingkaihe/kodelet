@@ -2,9 +2,11 @@ package tools
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 
 	"github.com/jingkaihe/kodelet/pkg/fragments"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/stretchr/testify/assert"
 	"go.opentelemetry.io/otel/attribute"
 
@@ -335,6 +337,74 @@ func TestBuildSubagentArgs(t *testing.T) {
 			"run", "--result-only", "--as-subagent",
 			"--profile", "openai-subagent",
 			"--use-weak-model",
+			"What is foo?",
+		}, args)
+	})
+
+	t.Run("inherits sysprompt from llm config", func(t *testing.T) {
+		input := &SubAgentInput{Question: "What is foo?"}
+		syspromptPath := filepath.Join(t.TempDir(), "custom.tmpl")
+		ctxWithConfig := context.WithValue(ctx, subagentConfigContextKey{}, llmtypes.Config{Sysprompt: syspromptPath})
+		args := BuildSubagentArgs(ctxWithConfig, "--use-weak-model", input, nil)
+
+		assert.Equal(t, []string{
+			"run", "--result-only", "--as-subagent",
+			"--use-weak-model",
+			"--sysprompt", syspromptPath,
+			"What is foo?",
+		}, args)
+	})
+
+	t.Run("normalizes relative sysprompt to absolute path", func(t *testing.T) {
+		tempDir := t.TempDir()
+		t.Chdir(tempDir)
+
+		input := &SubAgentInput{Question: "What is foo?"}
+		ctxWithConfig := context.WithValue(ctx, subagentConfigContextKey{}, llmtypes.Config{Sysprompt: "./custom.tmpl"})
+		args := BuildSubagentArgs(ctxWithConfig, "--use-weak-model", input, nil)
+
+		assert.Equal(t, []string{
+			"run", "--result-only", "--as-subagent",
+			"--use-weak-model",
+			"--sysprompt", filepath.Join(tempDir, "custom.tmpl"),
+			"What is foo?",
+		}, args)
+	})
+
+	t.Run("does not duplicate sysprompt when already in subagent_args", func(t *testing.T) {
+		input := &SubAgentInput{Question: "What is foo?"}
+		ctxWithConfig := context.WithValue(ctx, subagentConfigContextKey{}, llmtypes.Config{Sysprompt: "./custom.tmpl"})
+		args := BuildSubagentArgs(ctxWithConfig, "--sysprompt ./already.tmpl", input, nil)
+
+		assert.Equal(t, []string{
+			"run", "--result-only", "--as-subagent",
+			"--sysprompt", "./already.tmpl",
+			"What is foo?",
+		}, args)
+	})
+
+	t.Run("inherits sysprompt args from llm config", func(t *testing.T) {
+		input := &SubAgentInput{Question: "What is foo?"}
+		ctxWithConfig := context.WithValue(ctx, subagentConfigContextKey{}, llmtypes.Config{SyspromptArgs: map[string]string{"project": "kodelet", "env": "dev"}})
+		args := BuildSubagentArgs(ctxWithConfig, "--use-weak-model", input, nil)
+
+		assert.Equal(t, []string{
+			"run", "--result-only", "--as-subagent",
+			"--use-weak-model",
+			"--sysprompt-arg", "env=dev",
+			"--sysprompt-arg", "project=kodelet",
+			"What is foo?",
+		}, args)
+	})
+
+	t.Run("does not duplicate sysprompt args when already in subagent_args", func(t *testing.T) {
+		input := &SubAgentInput{Question: "What is foo?"}
+		ctxWithConfig := context.WithValue(ctx, subagentConfigContextKey{}, llmtypes.Config{SyspromptArgs: map[string]string{"project": "kodelet"}})
+		args := BuildSubagentArgs(ctxWithConfig, "--sysprompt-arg project=already", input, nil)
+
+		assert.Equal(t, []string{
+			"run", "--result-only", "--as-subagent",
+			"--sysprompt-arg", "project=already",
 			"What is foo?",
 		}, args)
 	})

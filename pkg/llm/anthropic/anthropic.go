@@ -280,12 +280,7 @@ OUTER:
 			if t.State != nil {
 				contexts = t.State.DiscoverContexts()
 			}
-			var systemPrompt string
-			if t.Config.IsSubAgent {
-				systemPrompt = sysprompt.SubAgentPrompt(string(model), t.Config, contexts)
-			} else {
-				systemPrompt = sysprompt.SystemPrompt(string(model), t.Config, contexts)
-			}
+			systemPrompt := sysprompt.SystemPrompt(string(model), t.Config, contexts)
 
 			var exchangeOutput string
 			exchangeOutput, toolsUsed, err := t.processMessageExchange(ctx, handler, model, maxTokens, systemPrompt, opt)

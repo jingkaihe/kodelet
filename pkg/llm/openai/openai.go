@@ -371,12 +371,7 @@ OUTER:
 			if t.State != nil {
 				contexts = t.State.DiscoverContexts()
 			}
-			var systemPrompt string
-			if t.Config.IsSubAgent {
-				systemPrompt = sysprompt.SubAgentPrompt(model, t.Config, contexts)
-			} else {
-				systemPrompt = sysprompt.SystemPrompt(model, t.Config, contexts)
-			}
+			systemPrompt := sysprompt.SystemPrompt(model, t.Config, contexts)
 
 			// Update system message content
 			if len(t.messages) > 0 && t.messages[0].Role == openai.ChatMessageRoleSystem {
