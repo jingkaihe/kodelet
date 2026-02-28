@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/invopop/jsonschema"
@@ -117,9 +118,16 @@ func (t *CodeExecutionTool) Execute(ctx context.Context, _ tooltypes.State, para
 		}
 	}
 
-	// Read code from file
-	// CodePath is relative to .kodelet/mcp/ workspace
-	fullPath := filepath.Join(".kodelet", "mcp", input.CodePath)
+	cleanCodePath := filepath.Clean(input.CodePath)
+	if cleanCodePath == "." || filepath.IsAbs(cleanCodePath) || strings.HasPrefix(cleanCodePath, "..") {
+		return &CodeExecutionResult{
+			err:     fmt.Sprintf("invalid code_path %q: must be a relative path inside workspace", input.CodePath),
+			runtime: t.runtime.Name(),
+		}
+	}
+
+	// Read code from file for execution metadata
+	fullPath := filepath.Join(t.runtime.WorkspaceDir(), cleanCodePath)
 	codeBytes, err := os.ReadFile(fullPath)
 	if err != nil {
 		return &CodeExecutionResult{
@@ -130,7 +138,7 @@ func (t *CodeExecutionTool) Execute(ctx context.Context, _ tooltypes.State, para
 	code := string(codeBytes)
 
 	// Execute code
-	output, err := t.runtime.Execute(ctx, code)
+	output, err := t.runtime.Execute(ctx, cleanCodePath)
 	if err != nil {
 		return &CodeExecutionResult{
 			code:    code,

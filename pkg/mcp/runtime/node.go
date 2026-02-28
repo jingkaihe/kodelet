@@ -5,7 +5,6 @@ import (
 	"context"
 	"os"
 	"os/exec"
-	"strings"
 
 	"github.com/pkg/errors"
 )
@@ -24,13 +23,12 @@ func NewNodeRuntime(workspaceDir string, socketPath string) *NodeRuntime {
 	}
 }
 
-// Execute runs TypeScript code using tsx
-func (n *NodeRuntime) Execute(ctx context.Context, code string) (string, error) {
-	// Use tsx to execute TypeScript code from stdin
+// Execute runs a TypeScript/JavaScript file using tsx.
+// codePath can be absolute or relative to workspaceDir.
+func (n *NodeRuntime) Execute(ctx context.Context, codePath string) (string, error) {
 	// npx tsx will auto-install if needed
-	cmd := exec.CommandContext(ctx, "npx", "tsx", "-")
+	cmd := exec.CommandContext(ctx, "npx", "tsx", codePath)
 	cmd.Dir = n.workspaceDir
-	cmd.Stdin = strings.NewReader(code)
 
 	// Set environment variable for MCP RPC socket
 	cmd.Env = append(os.Environ(), "MCP_RPC_SOCKET="+n.socketPath)
@@ -41,6 +39,11 @@ func (n *NodeRuntime) Execute(ctx context.Context, code string) (string, error) 
 	}
 
 	return string(output), nil
+}
+
+// WorkspaceDir returns the runtime workspace directory.
+func (n *NodeRuntime) WorkspaceDir() string {
+	return n.workspaceDir
 }
 
 // Name returns the name of the runtime
