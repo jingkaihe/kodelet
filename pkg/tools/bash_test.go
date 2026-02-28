@@ -33,8 +33,8 @@ func TestBashTool_Name(t *testing.T) {
 func TestBashTool_Description(t *testing.T) {
 	tool := &BashTool{}
 	desc := tool.Description()
-	assert.Contains(t, desc, "Executes a given bash command")
-	assert.Contains(t, desc, "Important")
+	assert.Contains(t, desc, "Run a bash command in a persistent shell session.")
+	assert.Contains(t, desc, "# Input")
 }
 
 func TestBashTool_Description_BannedCommands(t *testing.T) {
@@ -43,17 +43,15 @@ func TestBashTool_Description_BannedCommands(t *testing.T) {
 	desc := tool.Description()
 
 	// Should contain banned commands section
-	assert.Contains(t, desc, "## Banned Commands")
-	assert.Contains(t, desc, "The following commands are banned and cannot be used:")
-	assert.Contains(t, desc, "* vim")
-	assert.Contains(t, desc, "* view")
-	assert.Contains(t, desc, "* less")
-	assert.Contains(t, desc, "* more")
-	assert.Contains(t, desc, "* cd")
+	assert.Contains(t, desc, "Banned commands:")
+	assert.Contains(t, desc, "- vim")
+	assert.Contains(t, desc, "- view")
+	assert.Contains(t, desc, "- less")
+	assert.Contains(t, desc, "- more")
+	assert.Contains(t, desc, "- cd")
 
 	// Should NOT contain allowed commands section
-	assert.NotContains(t, desc, "## Allowed Commands")
-	assert.NotContains(t, desc, "Only the following commands/patterns are allowed:")
+	assert.NotContains(t, desc, "Allowed command patterns:")
 }
 
 func TestBashTool_Description_AllowedCommands(t *testing.T) {
@@ -63,17 +61,15 @@ func TestBashTool_Description_AllowedCommands(t *testing.T) {
 	desc := tool.Description()
 
 	// Should contain allowed commands section
-	assert.Contains(t, desc, "## Allowed Commands")
-	assert.Contains(t, desc, "Only the following commands/patterns are allowed:")
-	assert.Contains(t, desc, "* ls *")
-	assert.Contains(t, desc, "* pwd")
-	assert.Contains(t, desc, "* echo *")
-	assert.Contains(t, desc, "* git status")
-	assert.Contains(t, desc, "Commands not matching these patterns will be rejected.")
+	assert.Contains(t, desc, "Allowed command patterns:")
+	assert.Contains(t, desc, "- ls *")
+	assert.Contains(t, desc, "- pwd")
+	assert.Contains(t, desc, "- echo *")
+	assert.Contains(t, desc, "- git status")
+	assert.Contains(t, desc, "Commands outside these patterns are rejected.")
 
 	// Should NOT contain banned commands section
-	assert.NotContains(t, desc, "## Banned Commands")
-	assert.NotContains(t, desc, "The following commands are banned and cannot be used:")
+	assert.NotContains(t, desc, "Banned commands:")
 }
 
 func TestBashTool_Description_EmptyAllowedCommands(t *testing.T) {
@@ -82,9 +78,9 @@ func TestBashTool_Description_EmptyAllowedCommands(t *testing.T) {
 	desc := tool.Description()
 
 	// Should contain banned commands section since no allowed commands configured
-	assert.Contains(t, desc, "## Banned Commands")
-	assert.Contains(t, desc, "* vim")
-	assert.NotContains(t, desc, "## Allowed Commands")
+	assert.Contains(t, desc, "Banned commands:")
+	assert.Contains(t, desc, "- vim")
+	assert.NotContains(t, desc, "Allowed command patterns:")
 }
 
 func TestBashTool_Description_ConsistentOutput(t *testing.T) {
@@ -93,15 +89,16 @@ func TestBashTool_Description_ConsistentOutput(t *testing.T) {
 	desc := tool.Description()
 
 	// Basic structure should always be present
-	assert.Contains(t, desc, "Executes a given bash command in a persistent shell session with timeout.")
-	assert.Contains(t, desc, "# Command Restrictions")
-	assert.Contains(t, desc, "# Important")
-	assert.Contains(t, desc, "# Background Parameter")
-	assert.Contains(t, desc, "# Examples")
+	assert.Contains(t, desc, "Run a bash command in a persistent shell session.")
+	assert.Contains(t, desc, "# Restrictions")
+	assert.Contains(t, desc, "# Input")
+	assert.Contains(t, desc, "# Rules")
+	assert.Contains(t, desc, "# Background mode")
+	assert.Contains(t, desc, "Examples:")
 
 	// Should be well-formed
 	assert.NotEmpty(t, desc)
-	assert.Greater(t, len(desc), 1000) // Should be a substantial description
+	assert.Greater(t, len(desc), 300) // Should still be substantial
 
 	// Test that multiple calls return the same result
 	desc2 := tool.Description()
@@ -120,11 +117,11 @@ func TestBashTool_Description_SpecialCharacters(t *testing.T) {
 	desc := tool.Description()
 
 	// Should handle special characters in command patterns
-	assert.Contains(t, desc, "## Allowed Commands")
-	assert.Contains(t, desc, "* find . -name '*.go'")
-	assert.Contains(t, desc, "* grep -r \"pattern\" .")
-	assert.Contains(t, desc, "* awk '{print $1}'")
-	assert.Contains(t, desc, "* sed 's/old/new/g'")
+	assert.Contains(t, desc, "Allowed command patterns:")
+	assert.Contains(t, desc, "- find . -name '*.go'")
+	assert.Contains(t, desc, "- grep -r \"pattern\" .")
+	assert.Contains(t, desc, "- awk '{print $1}'")
+	assert.Contains(t, desc, "- sed 's/old/new/g'")
 }
 
 func TestBashTool_Execute_Success(t *testing.T) {
