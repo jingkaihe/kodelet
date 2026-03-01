@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -71,30 +72,26 @@ func (t *ImageRecognitionTool) GenerateSchema() *jsonschema.Schema {
 
 // Description returns the description of the tool.
 func (t *ImageRecognitionTool) Description() string {
-	return `Process and understand images using vision-enabled AI models.
+	return `Analyze an image with a vision model.
 
-## Input
-- image_path: The path to the image to be recognized. It can be a local file 'file:///path/to/image.jpg' or a remote file 'https://example.com/image.jpg'.
-- prompt: The information you want to extract from the image.
+# Input
+- image_path: required image path (local file or HTTPS URL)
+- prompt: required question/instruction for what to extract
 
-## Output
-The output summarizes the information extracted from the image.
+# Rules
+- Supported formats: .jpg, .jpeg, .png, .gif, .webp
+- Max size: 5MB
+- Remote images must use HTTPS
+- Redirects are not followed
+- Use absolute local paths (for example: file:///home/user/pictures/image.jpg)
 
-## Common Use Cases
-* You simply want to understand what is in the image.
-* You are conducting system design and you need to understand the architecture from a diagram.
-* Analyzing screenshots, mockups, or other visual content.
-* Extracting text or data from images.
+# Use when
+- You need details from a screenshot, diagram, photo, or mockup
+- You need OCR-style extraction of visible text
+- You need targeted visual analysis based on a question
 
-## DO NOT use this tool when
-!!!VERY IMPORTANT!!! Do not use this tool when image content has already been shared with you directly through the messages
-
-## Important Notes
-1. Only .jpg, .jpeg, .png, .gif, .webp formats are supported.
-2. The image must be less than 5MB in size.
-3. For security reasons, only HTTPS URLs are supported for remote images.
-4. No URL redirects are followed for security.
-5. File path must be an absolute path to avoid ambiguity. e.g. "file:///home/user/pictures/image.jpg" instead of "./pictures/image.jpg"
+# Do not use when
+- The image content is already provided directly in the chat
 `
 }
 
@@ -136,9 +133,8 @@ func (t *ImageRecognitionTool) validateImagePath(imagePath string) error {
 		if parsedURL.Scheme != "https" {
 			return errors.New("only HTTPS URLs are supported for security")
 		}
-	} else if strings.HasPrefix(imagePath, "file://") {
+	} else if filePath, ok := strings.CutPrefix(imagePath, "file://"); ok {
 		// Validate local file path
-		filePath := strings.TrimPrefix(imagePath, "file://")
 		return t.validateLocalImageFile(filePath)
 	} else {
 		// Treat as local file path
@@ -157,14 +153,7 @@ func (t *ImageRecognitionTool) validateLocalImageFile(filePath string) error {
 	// Check file extension
 	ext := strings.ToLower(filepath.Ext(filePath))
 	supportedFormats := []string{".jpg", ".jpeg", ".png", ".gif", ".webp"}
-	isSupported := false
-	for _, format := range supportedFormats {
-		if ext == format {
-			isSupported = true
-			break
-		}
-	}
-	if !isSupported {
+	if !slices.Contains(supportedFormats, ext) {
 		return errors.Errorf("unsupported image format: %s (supported: %v)", ext, supportedFormats)
 	}
 
@@ -215,21 +204,20 @@ func (t *ImageRecognitionTool) Execute(ctx context.Context, state tooltypes.Stat
 	}
 
 	// Create a prompt for image analysis
-	analysisPrompt := fmt.Sprintf(`Examine the image and respond to the following request.
+	analysisPrompt := fmt.Sprintf(`Examine the image and respond to the request below.
 
 <request>
 %s
 </request>
 
-Focus on directly relevant information for the request above. When describing the image:
-- State observable facts rather than assumptions
-- Note any text, labels, or annotations exactly as shown
-- Describe spatial layout and relationships between elements
-- Highlight technical details if applicable (UI components, architecture patterns, data flows)
-- Explicitly mention anything unclear or ambiguous
+Focus only on information relevant to the request:
+- State observable facts, not assumptions
+- Quote visible text, labels, or annotations exactly when relevant
+- Describe layout and relationships between key elements
+- Highlight technical details when applicable (UI components, architecture patterns, data flows)
+- Clearly note anything unclear or ambiguous
 
-Organize your response to be clear and actionable.`,
-		input.Prompt)
+Keep the response clear and actionable.`, input.Prompt)
 
 	// Build command arguments - no tools needed for image analysis
 	args := []string{"run", "--result-only", "--as-subagent", "--no-tools", "--image", input.ImagePath}

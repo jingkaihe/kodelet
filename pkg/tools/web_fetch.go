@@ -105,91 +105,49 @@ func (t *WebFetchTool) GenerateSchema() *jsonschema.Schema {
 
 // Description returns the description of the tool.
 func (t *WebFetchTool) Description() string {
-	return `Fetches content from a web URL with intelligent content handling.
+	return `Fetch content from a public URL.
 
-## Input
-- url: The URL to fetch content from. HTTPS URLs are required for external domains. HTTP URLs are allowed for localhost/internal addresses (127.0.0.1, ::1, localhost, etc.).
-- prompt: (Optional) Only provided if you want to extract specific information from HTML/Markdown content using AI instead of getting the whole content
+# Input
+- url: required URL to fetch
+- prompt: optional instruction for extracting info from HTML/Markdown pages
 
-## Behavior
-**Scenario 1: Code/Text Content**
-- If the URL contains code, plain text, JSON, XML, or other structured text:
-  - Saves the content to ~/.kodelet/web-archives/{domain_name}/{filename}.{ext}
-  - Returns the full content with line numbers if under 100KB
-  - Returns first 100KB with line numbers and truncation notice if over 100KB
-  - No AI processing is applied
+# Rules
+- Use HTTPS for external domains.
+- HTTP is allowed only for localhost/internal addresses.
+- Redirects are followed only within the same domain (max 10).
+- Binary content types (zip/pdf/image/audio/video/octet-stream) are rejected.
 
-**Scenario 2: HTML/Markdown Content**
-- If the URL contains HTML or Markdown:
-  - **Without prompt**: Converts HTML to Markdown and returns the converted content directly
-  - **With prompt**: Uses AI to extract specific information based on the prompt
-  - Does not save the content to file in either case
+# Behavior
+- Code/text/JSON/XML/etc:
+  - Save to ~/.kodelet/web-archives/{domain}/{filename}.{ext}
+  - Return content with line numbers (truncated if output is too large)
+- HTML/Markdown without prompt:
+  - Return full page content as Markdown (HTML is converted)
+- HTML/Markdown with prompt:
+  - Run AI extraction against page content and return only the extracted result
 
-## Common Use Cases
-* Fetching code files from GitHub or other repositories (saved with line numbers)
-* Downloading configuration files or documentation (saved with line numbers)
-* Converting HTML pages to readable Markdown format (returned directly)
-* Extracting specific information from HTML documentation using AI prompts
-* Analyzing structured data files like JSON or XML (saved with line numbers)
+# Prompt guidance
+Use prompt when:
+- You need specific facts/sections from an HTML/Markdown page
+- The page is large and you do not want full-page output
 
-## Important Notes
-1. Only public URLs that don't require authentication can be accessed
-2. For security reasons, redirects are only followed within the same domain
-3. Code/text files are saved to ~/.kodelet/web-archives/{domain_name}/ directory for future reference
-4. HTML/Markdown content is returned directly (with optional AI processing)
-5. Prompt parameter only affects HTML/Markdown content behavior
+Examples:
+- url: https://docs.example.com/api-reference
+  prompt: List all endpoints with HTTP methods
+- url: https://company.example.com/changelog
+  prompt: Summarize breaking changes in the latest release
 
-## Examples
+Do not use prompt when:
+- You want raw file contents with line numbers
+- You want full-page output
 
-<good-example>
-url: https://raw.githubusercontent.com/user/repo/main/config.yaml
-<reasoning>
-Fetches a code/text file from GitHub and saves it with line numbers for future reference.
-</reasoning>
-</good-example>
+Examples:
+- url: https://raw.githubusercontent.com/user/repo/main/config.yaml
+- url: https://example.com/data.json
 
-<good-example>
-url: https://docs.example.com/api-reference
-<reasoning>
-Converts HTML documentation page to readable Markdown format and returns it directly.
-</reasoning>
-</good-example>
-
-<good-example>
-url: https://docs.example.com/api-reference
-prompt: Extract all API endpoints and their HTTP methods
-<reasoning>
-Uses AI to extract specific information from HTML documentation based on the provided prompt.
-</reasoning>
-</good-example>
-
-<bad-example>
-url: http://external-site.com/file.txt
-<reasoning>
-Only HTTPS URLs are supported for external domains for security reasons.
-</reasoning>
-</bad-example>
-
-<good-example>
-url: http://localhost:8080/api/data
-<reasoning>
-HTTP URLs are allowed for localhost/internal addresses for development convenience.
-</reasoning>
-</good-example>
-
-<bad-example>
-url: https://example.com/download.zip
-<reasoning>
-Binary files like ZIP archives are not supported. Only text-based content can be fetched.
-</reasoning>
-</bad-example>
-
-<bad-example>
-url: https://private-api.com/data
-<reasoning>
-URLs requiring authentication cannot be accessed as only public URLs are supported.
-</reasoning>
-</bad-example>
+# Notes
+- Only public URLs are supported (no auth/session handling).
+- Prompt is ignored for non-HTML/Markdown responses (code/text/JSON/XML).
 `
 }
 
