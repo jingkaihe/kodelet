@@ -1,5 +1,9 @@
 # Kodelet
 
+## 0.2.31.beta (2026-03-01)
+
+Simplified and clarified tool descriptions for `web_fetch`, `image_recognition`, and `code_execution`, including clearer prompt-usage guidance and shorter, more actionable examples.
+
 ## 0.2.30.beta (2026-02-27)
 
 ### Features
