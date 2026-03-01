@@ -440,14 +440,16 @@ func TestWebFetchToolDescription(t *testing.T) {
 	tool := &WebFetchTool{}
 	description := tool.Description()
 
-	// Check that description contains key information about new functionality
-	assert.Contains(t, description, "Scenario 1: Code/Text Content")
-	assert.Contains(t, description, "Scenario 2: HTML/Markdown Content")
-	assert.Contains(t, description, "~/.kodelet/web-archives/")
-	assert.Contains(t, description, "100KB")
-	assert.Contains(t, description, "prompt: (Optional)")
-	assert.Contains(t, description, "Without prompt")
-	assert.Contains(t, description, "With prompt")
+	// Check that description contains key behavior and guidance
+	assert.Contains(t, description, "# Input")
+	assert.Contains(t, description, "url: required URL to fetch")
+	assert.Contains(t, description, "prompt: optional instruction")
+	assert.Contains(t, description, "Code/text/JSON/XML/etc")
+	assert.Contains(t, description, "~/.kodelet/web-archives/{domain}/{filename}.{ext}")
+	assert.Contains(t, description, "HTML/Markdown without prompt")
+	assert.Contains(t, description, "HTML/Markdown with prompt")
+	assert.Contains(t, description, "The page is large")
+	assert.Contains(t, description, "Prompt is ignored for non-HTML/Markdown responses")
 }
 
 func TestWebFetchToolGenerateSchema(t *testing.T) {
