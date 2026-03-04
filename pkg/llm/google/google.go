@@ -1144,11 +1144,6 @@ func (t *Thread) loadConversation(ctx context.Context) {
 		t.State.SetFileLastAccess(record.FileLastAccess)
 	}
 
-	// Load background processes if state is available
-	if t.State != nil && len(record.BackgroundProcesses) > 0 {
-		base.RestoreBackgroundProcesses(t.State, record.BackgroundProcesses)
-	}
-
 	logger.G(ctx).WithField("conversation_id", t.ConversationID).Debug("loaded conversation from store")
 }
 

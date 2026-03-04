@@ -61,7 +61,6 @@ var metadataTypeRegistry = map[string]reflect.Type{
 	"grep_tool":       reflect.TypeOf(GrepMetadata{}),
 	"glob_tool":       reflect.TypeOf(GlobMetadata{}),
 	"bash":            reflect.TypeOf(BashMetadata{}),
-	"bash_background": reflect.TypeOf(BackgroundBashMetadata{}),
 	"mcp_tool":        reflect.TypeOf(MCPToolMetadata{}),
 	"custom_tool":     reflect.TypeOf(CustomToolMetadata{}),
 	"todo":            reflect.TypeOf(TodoMetadata{}),
@@ -69,7 +68,6 @@ var metadataTypeRegistry = map[string]reflect.Type{
 	"image_recognition":         reflect.TypeOf(ImageRecognitionMetadata{}),
 	"subagent":                  reflect.TypeOf(SubAgentMetadata{}),
 	"web_fetch":                 reflect.TypeOf(WebFetchMetadata{}),
-	"view_background_processes": reflect.TypeOf(ViewBackgroundProcessesMetadata{}),
 	"code_execution":            reflect.TypeOf(CodeExecutionMetadata{}),
 	"skill":                     reflect.TypeOf(SkillMetadata{}),
 	"blocked":                   reflect.TypeOf(BlockedMetadata{}),
@@ -264,17 +262,6 @@ type BashMetadata struct {
 // ToolType returns the tool type identifier for bash command execution
 func (m BashMetadata) ToolType() string { return "bash" }
 
-// BackgroundBashMetadata contains metadata about a background bash process
-type BackgroundBashMetadata struct {
-	Command   string    `json:"command"`
-	PID       int       `json:"pid"`
-	LogPath   string    `json:"logPath"`
-	StartTime time.Time `json:"startTime"`
-}
-
-// ToolType returns the tool type identifier for background bash processes
-func (m BackgroundBashMetadata) ToolType() string { return "bash_background" }
-
 // MCP tool metadata
 
 // MCPToolMetadata contains metadata about an MCP tool execution
@@ -385,24 +372,6 @@ type WebFetchMetadata struct {
 
 // ToolType returns the tool type identifier for web fetch operations
 func (m WebFetchMetadata) ToolType() string { return "web_fetch" }
-
-// ViewBackgroundProcessesMetadata contains metadata about viewing background processes
-type ViewBackgroundProcessesMetadata struct {
-	Processes []BackgroundProcessInfo `json:"processes"`
-	Count     int                     `json:"count"`
-}
-
-// BackgroundProcessInfo represents information about a single background process
-type BackgroundProcessInfo struct {
-	PID       int       `json:"pid"`
-	Command   string    `json:"command"`
-	LogPath   string    `json:"logPath"`
-	StartTime time.Time `json:"startTime"`
-	Status    string    `json:"status"` // "running", "stopped"
-}
-
-// ToolType returns the tool type identifier for viewing background processes
-func (m ViewBackgroundProcessesMetadata) ToolType() string { return "view_background_processes" }
 
 // ExtractMetadata is a helper that handles both pointer and value type assertions
 // This is necessary because JSON unmarshaling creates value types, while

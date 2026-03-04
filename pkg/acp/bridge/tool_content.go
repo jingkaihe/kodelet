@@ -25,7 +25,7 @@ func (g *ToolContentGenerator) GenerateToolContent(result tooltypes.ToolResult) 
 	structured := result.StructuredData()
 
 	switch structured.ToolName {
-	case "bash", "bash_background":
+	case "bash":
 		return g.generateBashContent(structured)
 	case "code_execution":
 		return g.generateCodeExecutionContent(structured)
@@ -49,7 +49,6 @@ func (g *ToolContentGenerator) GenerateToolContent(result tooltypes.ToolResult) 
 // generateBashContent generates content for bash command results
 func (g *ToolContentGenerator) generateBashContent(structured tooltypes.StructuredToolResult) []map[string]any {
 	var bashMeta tooltypes.BashMetadata
-	var bgMeta tooltypes.BackgroundBashMetadata
 
 	if tooltypes.ExtractMetadata(structured.Metadata, &bashMeta) {
 		// Error case: include command output (stdout/stderr) when available
@@ -84,19 +83,6 @@ func (g *ToolContentGenerator) generateBashContent(structured tooltypes.Structur
 		}
 
 		return []map[string]any{}
-	}
-
-	// Background processes still show their info
-	if tooltypes.ExtractMetadata(structured.Metadata, &bgMeta) {
-		return []map[string]any{
-			{
-				"type": ToolCallContentTypeContent,
-				"content": map[string]any{
-					"type": acptypes.ContentTypeText,
-					"text": fmt.Sprintf("Background process started (PID: %d)\nLog: %s", bgMeta.PID, bgMeta.LogPath),
-				},
-			},
-		}
 	}
 
 	return g.generateTextContent(structured.Error)

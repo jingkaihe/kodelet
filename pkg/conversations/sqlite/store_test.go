@@ -614,7 +614,6 @@ func TestStore_DatabaseIntegration(t *testing.T) {
 				},
 			},
 		},
-		BackgroundProcesses: []tools.BackgroundProcess{},
 	}
 
 	// Save complex record
@@ -682,19 +681,18 @@ func TestStore_NullHandling(t *testing.T) {
 
 	// Test record with empty/null fields
 	now := time.Now().UTC().Truncate(time.Second)
-	record := conversations.ConversationRecord{
-		ID:                  "null-test",
-		RawMessages:         json.RawMessage(`[]`),
-		Provider:            "anthropic",
-		FileLastAccess:      map[string]time.Time{}, // Empty map
-		Usage:               llmtypes.Usage{},       // Zero values
-		Summary:             "",                     // Empty string (should become NULL)
-		CreatedAt:           now,
-		UpdatedAt:           now,
-		Metadata:            map[string]any{},                        // Empty map
-		ToolResults:         map[string]tools.StructuredToolResult{}, // Empty map
-		BackgroundProcesses: []tools.BackgroundProcess{},             // Empty slice
-	}
+		record := conversations.ConversationRecord{
+			ID:             "null-test",
+			RawMessages:    json.RawMessage(`[]`),
+			Provider:       "anthropic",
+			FileLastAccess: map[string]time.Time{}, // Empty map
+			Usage:          llmtypes.Usage{},       // Zero values
+			Summary:        "",                     // Empty string (should become NULL)
+			CreatedAt:      now,
+			UpdatedAt:      now,
+			Metadata:       map[string]any{},                        // Empty map
+			ToolResults:    map[string]tools.StructuredToolResult{}, // Empty map
+		}
 
 	// Save record
 	err = store.Save(ctx, record)
@@ -712,8 +710,7 @@ func TestStore_NullHandling(t *testing.T) {
 	assert.Equal(t, "", loaded.Summary)          // Should be empty string in domain model
 	assert.NotNil(t, loaded.FileLastAccess)      // Should be empty map, not nil
 	assert.NotNil(t, loaded.Metadata)            // Should be empty map, not nil
-	assert.NotNil(t, loaded.ToolResults)         // Should be empty map, not nil
-	assert.NotNil(t, loaded.BackgroundProcesses) // Should be empty slice, not nil
+		assert.NotNil(t, loaded.ToolResults) // Should be empty map, not nil
 }
 
 func TestStore_ConcurrentAccess(t *testing.T) {
@@ -762,7 +759,6 @@ func TestStore_ConcurrentAccess(t *testing.T) {
 						"recordID":  j,
 					},
 					ToolResults:         map[string]tools.StructuredToolResult{},
-					BackgroundProcesses: []tools.BackgroundProcess{},
 				}
 
 				if err := store.Save(ctx, record); err != nil {
@@ -868,18 +864,15 @@ func TestStore_DirectDatabaseAccess(t *testing.T) {
 		ToolResults: JSONField[map[string]tools.StructuredToolResult]{
 			Data: map[string]tools.StructuredToolResult{},
 		},
-		BackgroundProcesses: JSONField[[]tools.BackgroundProcess]{
-			Data: []tools.BackgroundProcess{},
-		},
 	}
 
 	query := `
 		INSERT INTO conversations (
 			id, raw_messages, provider, file_last_access, usage,
-			summary, created_at, updated_at, metadata, tool_results, background_processes
+			summary, created_at, updated_at, metadata, tool_results
 		) VALUES (
 			:id, :raw_messages, :provider, :file_last_access, :usage,
-			:summary, :created_at, :updated_at, :metadata, :tool_results, :background_processes
+			:summary, :created_at, :updated_at, :metadata, :tool_results
 		)
 	`
 
@@ -923,7 +916,7 @@ func TestStore_DirectDatabaseAccess(t *testing.T) {
 	// Test direct query using sqlx
 	var records []dbConversationRecord
 	err = store.db.Select(&records, `SELECT id, raw_messages, provider, file_last_access, usage,
-		summary, created_at, updated_at, metadata, tool_results, background_processes
+		summary, created_at, updated_at, metadata, tool_results
 		FROM conversations WHERE provider = ?`, "anthropic")
 	require.NoError(t, err)
 	assert.Len(t, records, 1)
@@ -947,13 +940,13 @@ func TestStore_TimestampBehavior(t *testing.T) {
 	originalCreatedAt := time.Now().UTC().Add(-1 * time.Hour) // 1 hour ago
 	originalUpdatedAt := originalCreatedAt
 
-	record := conversations.ConversationRecord{
-		ID:          "timestamp-test",
-		RawMessages: json.RawMessage(`[{"role": "user", "content": [{"type": "text", "text": "Initial message"}]}]`),
-		Provider:    "anthropic",
-		FileLastAccess: map[string]time.Time{
-			"test.txt": originalCreatedAt,
-		},
+		record := conversations.ConversationRecord{
+			ID:          "timestamp-test",
+			RawMessages: json.RawMessage(`[{"role": "user", "content": [{"type": "text", "text": "Initial message"}]}]`),
+			Provider:    "anthropic",
+			FileLastAccess: map[string]time.Time{
+				"test.txt": originalCreatedAt,
+			},
 		Usage: llmtypes.Usage{
 			InputTokens:  100,
 			OutputTokens: 50,
@@ -961,10 +954,9 @@ func TestStore_TimestampBehavior(t *testing.T) {
 		Summary:             "Initial summary",
 		CreatedAt:           originalCreatedAt,
 		UpdatedAt:           originalUpdatedAt,
-		Metadata:            map[string]any{"version": 1},
-		ToolResults:         map[string]tools.StructuredToolResult{},
-		BackgroundProcesses: []tools.BackgroundProcess{},
-	}
+			Metadata:            map[string]any{"version": 1},
+			ToolResults:         map[string]tools.StructuredToolResult{},
+		}
 
 	// Save the record for the first time
 	err = store.Save(ctx, record)
@@ -1035,104 +1027,6 @@ func TestStore_TimestampBehavior(t *testing.T) {
 	summary := summaries[0]
 	assert.Equal(t, firstCreatedAt.Unix(), summary.CreatedAt.Unix(), "Summary CreatedAt should match record CreatedAt")
 	assert.True(t, summary.UpdatedAt.After(secondUpdatedAt), "Summary UpdatedAt should be refreshed")
-}
-
-func TestStore_BackgroundProcesses_Migration(t *testing.T) {
-	// Test that loading conversations after migration properly handles NULL background_processes
-	ctx := context.Background()
-
-	// Create temporary database file
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "test_bg_migration.db")
-	setupTestDB(t, dbPath)
-
-	store, err := NewStore(ctx, dbPath)
-	require.NoError(t, err)
-	defer store.Close()
-
-	// Create a record with background processes
-	now := time.Now().UTC().Truncate(time.Second)
-	record := conversations.ConversationRecord{
-		ID:          "test-with-bg",
-		RawMessages: json.RawMessage(`[{"role": "user", "content": "test"}]`),
-		Provider:    "anthropic",
-		FileLastAccess: map[string]time.Time{
-			"test.txt": now,
-		},
-		Usage: llmtypes.Usage{
-			InputTokens:  50,
-			OutputTokens: 25,
-		},
-		CreatedAt:   now,
-		UpdatedAt:   now,
-		Metadata:    map[string]any{},
-		ToolResults: map[string]tools.StructuredToolResult{},
-		BackgroundProcesses: []tools.BackgroundProcess{
-			{
-				PID:       123,
-				Command:   "test command",
-				LogPath:   "/tmp/test.log",
-				StartTime: now,
-			},
-		},
-	}
-
-	// Save the record
-	err = store.Save(ctx, record)
-	require.NoError(t, err)
-
-	// Load the record
-	loaded, err := store.Load(ctx, "test-with-bg")
-	require.NoError(t, err)
-
-	// Verify background processes are loaded correctly
-	assert.NotNil(t, loaded.BackgroundProcesses)
-	assert.Len(t, loaded.BackgroundProcesses, 1)
-	assert.Equal(t, 123, loaded.BackgroundProcesses[0].PID)
-	assert.Equal(t, "test command", loaded.BackgroundProcesses[0].Command)
-	assert.Equal(t, "/tmp/test.log", loaded.BackgroundProcesses[0].LogPath)
-
-	// Test with record that has empty background processes
-	emptyRecord := conversations.ConversationRecord{
-		ID:                  "test-empty-bg",
-		RawMessages:         json.RawMessage(`[]`),
-		Provider:            "anthropic",
-		FileLastAccess:      map[string]time.Time{},
-		Usage:               llmtypes.Usage{},
-		CreatedAt:           now,
-		UpdatedAt:           now,
-		Metadata:            map[string]any{},
-		ToolResults:         map[string]tools.StructuredToolResult{},
-		BackgroundProcesses: []tools.BackgroundProcess{}, // Empty slice
-	}
-
-	err = store.Save(ctx, emptyRecord)
-	require.NoError(t, err)
-
-	loadedEmpty, err := store.Load(ctx, "test-empty-bg")
-	require.NoError(t, err)
-
-	// Should get empty slice, not nil
-	assert.NotNil(t, loadedEmpty.BackgroundProcesses)
-	assert.Empty(t, loadedEmpty.BackgroundProcesses)
-	assert.Equal(t, []tools.BackgroundProcess{}, loadedEmpty.BackgroundProcesses)
-
-	// Test with record that has nil background processes (simulating old DB record)
-	// We'll directly insert into the database to simulate pre-migration state
-	_, err = store.db.Exec(`
-		INSERT INTO conversations 
-		(id, raw_messages, provider, file_last_access, usage, created_at, updated_at, metadata, tool_results, background_processes)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, "test-null-bg", json.RawMessage(`[]`), "anthropic", `{}`, `{}`, now, now, `{}`, `{}`, nil)
-	require.NoError(t, err)
-
-	loadedNull, err := store.Load(ctx, "test-null-bg")
-	require.NoError(t, err)
-
-	// Should get empty slice, not nil
-	assert.NotNil(t, loadedNull.BackgroundProcesses)
-	assert.Empty(t, loadedNull.BackgroundProcesses)
-	assert.Equal(t, []tools.BackgroundProcess{}, loadedNull.BackgroundProcesses)
 }
 
 func TestStore_ErrorScenarios(t *testing.T) {

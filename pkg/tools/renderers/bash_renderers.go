@@ -11,7 +11,7 @@ import (
 type BashRenderer struct{}
 
 // RenderCLI renders bash command execution results in CLI format, including command details,
-// exit code, execution time, and output for both regular and background processes.
+// exit code, execution time, and output.
 func (r *BashRenderer) RenderCLI(result tools.StructuredToolResult) string {
 	var output strings.Builder
 	if !result.Success {
@@ -22,12 +22,6 @@ func (r *BashRenderer) RenderCLI(result tools.StructuredToolResult) string {
 	var bashMeta tools.BashMetadata
 	if tools.ExtractMetadata(result.Metadata, &bashMeta) {
 		return r.renderBashMetadata(bashMeta, &output)
-	}
-
-	// Try to extract BackgroundBashMetadata
-	var bgBashMeta tools.BackgroundBashMetadata
-	if tools.ExtractMetadata(result.Metadata, &bgBashMeta) {
-		return r.renderBackgroundBashMetadata(bgBashMeta, &output)
 	}
 
 	return "Error: Invalid metadata type for bash"
@@ -47,16 +41,6 @@ func (r *BashRenderer) renderBashMetadata(meta tools.BashMetadata, output *strin
 		output.WriteString("\nOutput:\n")
 		output.WriteString(meta.Output)
 	}
-
-	return output.String()
-}
-
-func (r *BashRenderer) renderBackgroundBashMetadata(meta tools.BackgroundBashMetadata, output *strings.Builder) string {
-	fmt.Fprintf(output, "Background Command: %s\n", meta.Command)
-	fmt.Fprintf(output, "Process ID: %d\n", meta.PID)
-	fmt.Fprintf(output, "Log File: %s\n", meta.LogPath)
-	fmt.Fprintf(output, "Started: %s\n", meta.StartTime.Format("2006-01-02 15:04:05"))
-	output.WriteString("\nThe process is running in the background. Check the log file for output.")
 
 	return output.String()
 }

@@ -12,7 +12,6 @@ import ThinkingRenderer from './tool-renderers/ThinkingRenderer';
 import TodoRenderer from './tool-renderers/TodoRenderer';
 import SubagentRenderer from './tool-renderers/SubagentRenderer';
 import ImageRecognitionRenderer from './tool-renderers/ImageRecognitionRenderer';
-import BackgroundProcessesRenderer from './tool-renderers/BackgroundProcessesRenderer';
 import SkillRenderer from './tool-renderers/SkillRenderer';
 import FallbackRenderer from './tool-renderers/FallbackRenderer';
 
@@ -75,8 +74,6 @@ const ToolRenderer: React.FC<ToolRendererProps> = ({ toolResult }) => {
         return <SubagentRenderer toolResult={toolResult} />;
       case 'image_recognition':
         return <ImageRecognitionRenderer toolResult={toolResult} />;
-      case 'view_background_processes':
-        return <BackgroundProcessesRenderer toolResult={toolResult} />;
       case 'skill':
         return <SkillRenderer toolResult={toolResult} />;
       default:

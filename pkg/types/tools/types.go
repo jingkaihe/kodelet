@@ -6,7 +6,6 @@ package tools
 import (
 	"context"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/invopop/jsonschema"
@@ -152,15 +151,6 @@ type BlockedMetadata struct {
 // ToolType returns the tool type identifier for blocked tools
 func (m BlockedMetadata) ToolType() string { return "blocked" }
 
-// BackgroundProcess represents a process running in the background
-type BackgroundProcess struct {
-	PID       int         `json:"pid"`
-	Command   string      `json:"command"`
-	LogPath   string      `json:"log_path"`
-	StartTime time.Time   `json:"start_time"`
-	Process   *os.Process `json:"-"` // Not serialized
-}
-
 // State defines the interface for managing tool execution state and context
 type State interface {
 	SetFileLastAccessed(path string, lastAccessed time.Time) error
@@ -173,10 +163,6 @@ type State interface {
 	BasicTools() []Tool
 	MCPTools() []Tool
 	Tools() []Tool
-	// Background process management
-	AddBackgroundProcess(process BackgroundProcess) error
-	GetBackgroundProcesses() []BackgroundProcess
-	RemoveBackgroundProcess(pid int) error
 
 	// Context discovery
 	DiscoverContexts() map[string]string

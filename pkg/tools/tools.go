@@ -42,7 +42,6 @@ var toolRegistry = map[string]tooltypes.Tool{
 	"todo_write":                &TodoWriteTool{},
 	"web_fetch":                 &WebFetchTool{},
 	"image_recognition":         &ImageRecognitionTool{},
-	"view_background_processes": &ViewBackgroundProcessesTool{},
 	"skill":                     NewSkillTool(nil, false),
 }
 
@@ -67,7 +66,6 @@ var defaultMainTools = []string{
 	"glob_tool",
 	"web_fetch",
 	"image_recognition",
-	"view_background_processes",
 	"skill",
 }
 

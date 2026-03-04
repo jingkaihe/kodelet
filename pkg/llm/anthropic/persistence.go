@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
-	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -97,7 +96,6 @@ func (t *Thread) SaveConversation(ctx context.Context, summarise bool) error {
 		UpdatedAt:           time.Now(),
 		FileLastAccess:      t.State.FileLastAccess(),
 		ToolResults:         t.GetStructuredToolResults(),
-		BackgroundProcesses: t.State.GetBackgroundProcesses(),
 	}
 
 	// Save the record
@@ -138,8 +136,6 @@ func (t *Thread) loadConversation(ctx context.Context) {
 	t.State.SetFileLastAccess(record.FileLastAccess)
 	// Restore structured tool results
 	t.SetStructuredToolResults(record.ToolResults)
-	// Restore background processes
-	base.RestoreBackgroundProcesses(t.State, record.BackgroundProcesses)
 }
 
 // DeserializeMessages deserializes a JSON byte array into Anthropic message parameters

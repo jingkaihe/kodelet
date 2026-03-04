@@ -913,7 +913,6 @@ func (t *Thread) SaveConversation(ctx context.Context, summarize bool) error {
 		UpdatedAt:           time.Now(),
 		FileLastAccess:      t.State.FileLastAccess(),
 		ToolResults:         t.GetStructuredToolResults(),
-		BackgroundProcesses: t.State.GetBackgroundProcesses(),
 	}
 
 	return t.Store.Save(ctx, record)
@@ -956,7 +955,6 @@ func (t *Thread) loadConversation(ctx context.Context) {
 	t.summary = record.Summary
 	t.State.SetFileLastAccess(record.FileLastAccess)
 	t.SetStructuredToolResults(record.ToolResults)
-	base.RestoreBackgroundProcesses(t.State, record.BackgroundProcesses)
 
 	// Restore lastResponseID from metadata
 	if record.Metadata != nil {

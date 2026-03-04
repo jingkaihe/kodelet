@@ -236,9 +236,6 @@ func (m *mockState) SetTodoFilePath(_ string)                                 {}
 func (m *mockState) BasicTools() []tooltypes.Tool                             { return nil }
 func (m *mockState) MCPTools() []tooltypes.Tool                               { return nil }
 func (m *mockState) Tools() []tooltypes.Tool                                  { return nil }
-func (m *mockState) AddBackgroundProcess(_ tooltypes.BackgroundProcess) error { return nil }
-func (m *mockState) GetBackgroundProcesses() []tooltypes.BackgroundProcess    { return nil }
-func (m *mockState) RemoveBackgroundProcess(_ int) error                      { return nil }
 func (m *mockState) DiscoverContexts() map[string]string                      { return map[string]string{} }
 func (m *mockState) GetLLMConfig() any                                        { return nil }
 func (m *mockState) LockFile(_ string)                                        {}

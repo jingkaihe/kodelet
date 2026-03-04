@@ -238,102 +238,6 @@ echo "Script completed"`
 		assert.Contains(t, output, "Execution Time: 1µs", "Expected microsecond execution time in output")
 	})
 
-	t.Run("Background command output", func(t *testing.T) {
-		result := tools.StructuredToolResult{
-			ToolName:  "bash_background",
-			Success:   true,
-			Timestamp: time.Now(),
-			Metadata: &tools.BackgroundBashMetadata{
-				Command:   "python -m http.server 8000",
-				PID:       12345,
-				LogPath:   "/tmp/.kodelet/12345/out.log",
-				StartTime: time.Date(2023, 1, 1, 10, 30, 45, 0, time.UTC),
-			},
-		}
-
-		output := renderer.RenderCLI(result)
-
-		assert.Contains(t, output, "Background Command: python -m http.server 8000", "Expected background command in output")
-		assert.Contains(t, output, "Process ID: 12345", "Expected process ID in output")
-		assert.Contains(t, output, "Log File: /tmp/.kodelet/12345/out.log", "Expected log file path in output")
-		assert.Contains(t, output, "Started: 2023-01-01 10:30:45", "Expected start time in output")
-		assert.Contains(t, output, "running in the background", "Expected background process message in output")
-		assert.Contains(t, output, "Check the log file for output", "Expected log file instruction in output")
-	})
-
-	t.Run("Background command with error", func(t *testing.T) {
-		result := tools.StructuredToolResult{
-			ToolName:  "bash_background",
-			Success:   false,
-			Error:     "Failed to start background process",
-			Timestamp: time.Now(),
-			Metadata: &tools.BackgroundBashMetadata{
-				Command:   "invalid-command",
-				PID:       0,
-				LogPath:   "",
-				StartTime: time.Now(),
-			},
-		}
-
-		output := renderer.RenderCLI(result)
-
-		assert.Contains(t, output, "Error: Failed to start background process", "Expected error message in output")
-		assert.Contains(t, output, "Background Command: invalid-command", "Expected background command in output")
-		assert.Contains(t, output, "Process ID: 0", "Expected process ID 0 in output")
-	})
-
-	t.Run("Background command with different timestamp format", func(t *testing.T) {
-		result := tools.StructuredToolResult{
-			ToolName:  "bash_background",
-			Success:   true,
-			Timestamp: time.Now(),
-			Metadata: &tools.BackgroundBashMetadata{
-				Command:   "tail -f /var/log/syslog",
-				PID:       99999,
-				LogPath:   "/home/user/.kodelet/99999/out.log",
-				StartTime: time.Date(2023, 12, 25, 23, 59, 59, 0, time.UTC),
-			},
-		}
-
-		output := renderer.RenderCLI(result)
-
-		assert.Contains(t, output, "Started: 2023-12-25 23:59:59", "Expected formatted start time in output")
-		assert.Contains(t, output, "Process ID: 99999", "Expected large process ID in output")
-		assert.Contains(t, output, "/home/user/.kodelet/99999/out.log", "Expected user-specific log path in output")
-	})
-
-	t.Run("Background command with complex command", func(t *testing.T) {
-		result := tools.StructuredToolResult{
-			ToolName:  "bash_background",
-			Success:   true,
-			Timestamp: time.Now(),
-			Metadata: &tools.BackgroundBashMetadata{
-				Command:   `docker run -d -p 8080:80 --name web-server nginx:latest`,
-				PID:       54321,
-				LogPath:   "/tmp/.kodelet/54321/out.log",
-				StartTime: time.Now(),
-			},
-		}
-
-		output := renderer.RenderCLI(result)
-
-		assert.Contains(t, output, "Background Command: docker run -d -p 8080:80 --name web-server nginx:latest", "Expected complex docker command in output")
-		assert.Contains(t, output, "Process ID: 54321", "Expected process ID in output")
-	})
-
-	t.Run("Invalid metadata type for background bash", func(t *testing.T) {
-		result := tools.StructuredToolResult{
-			ToolName:  "bash_background",
-			Success:   true,
-			Timestamp: time.Now(),
-			Metadata:  &tools.FileReadMetadata{}, // Wrong type
-		}
-
-		output := renderer.RenderCLI(result)
-
-		assert.Contains(t, output, "Error: Invalid metadata type for bash", "Expected invalid metadata error")
-	})
-
 	t.Run("Regular bash command still works", func(t *testing.T) {
 		result := tools.StructuredToolResult{
 			ToolName:  "bash",
@@ -354,6 +258,5 @@ echo "Script completed"`
 		assert.Contains(t, output, "Command: echo 'Hello World'", "Expected regular command format")
 		assert.Contains(t, output, "Exit Code: 0", "Expected exit code in output")
 		assert.NotContains(t, output, "Background Command:", "Should not show background format for regular bash")
-		assert.NotContains(t, output, "Process ID:", "Should not show process ID for regular bash")
 	})
 }

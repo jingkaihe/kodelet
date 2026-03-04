@@ -32,7 +32,7 @@ export interface ToolResult {
   toolName: string;
   success: boolean;
   error?: string;
-  metadata?: FileMetadata | ApplyPatchMetadata | BashMetadata | GrepMetadata | GlobMetadata | WebFetchMetadata | ThinkingMetadata | TodoMetadata | SubagentMetadata | BatchMetadata | ImageRecognitionMetadata | BrowserMetadata | BackgroundProcessMetadata | SkillMetadata | Record<string, unknown>;
+  metadata?: FileMetadata | ApplyPatchMetadata | BashMetadata | GrepMetadata | GlobMetadata | WebFetchMetadata | ThinkingMetadata | TodoMetadata | SubagentMetadata | BatchMetadata | ImageRecognitionMetadata | BrowserMetadata | SkillMetadata | Record<string, unknown>;
   timestamp?: string;
 }
 
@@ -144,10 +144,6 @@ export interface BashMetadata {
   exitCode?: number;
   executionTime?: number;
   workingDir?: string;
-  pid?: number;
-  logPath?: string;
-  logFile?: string;
-  startTime?: string;
 }
 
 export interface GrepMetadata {
@@ -246,19 +242,6 @@ export interface BrowserMetadata {
   path?: string;
   dimensions?: string;
   size?: string;
-}
-
-export interface BackgroundProcessMetadata {
-  processes: BackgroundProcess[];
-  processCount?: number;
-}
-
-export interface BackgroundProcess {
-  pid: number;
-  command: string;
-  status: 'running' | 'stopped';
-  startTime?: string;
-  logPath?: string;
 }
 
 export interface SkillMetadata {

@@ -30,11 +30,6 @@ func (m *mockState) FileLastAccess() map[string]time.Time            { return ni
 func (m *mockState) BasicTools() []tooltypes.Tool                    { return nil }
 func (m *mockState) MCPTools() []tooltypes.Tool                      { return nil }
 func (m *mockState) Tools() []tooltypes.Tool                         { return nil }
-func (m *mockState) AddBackgroundProcess(_ tooltypes.BackgroundProcess) error {
-	return nil
-}
-func (m *mockState) GetBackgroundProcesses() []tooltypes.BackgroundProcess { return nil }
-func (m *mockState) RemoveBackgroundProcess(_ int) error                   { return nil }
 func (m *mockState) DiscoverContexts() map[string]string                   { return nil }
 func (m *mockState) GetLLMConfig() any                                     { return nil }
 func (m *mockState) LockFile(_ string)                                     {}
@@ -139,16 +134,6 @@ func TestCreateHookTrigger_Disabled(t *testing.T) {
 		assert.False(t, trigger.IsSubAgent)
 		assert.Empty(t, trigger.RecipeName)
 	}
-}
-
-func TestRestoreBackgroundProcesses_NilState(t *testing.T) {
-	processes := []tooltypes.BackgroundProcess{
-		{PID: -1},
-	}
-
-	assert.NotPanics(t, func() {
-		RestoreBackgroundProcesses(nil, processes)
-	})
 }
 
 func TestGetUsage(t *testing.T) {

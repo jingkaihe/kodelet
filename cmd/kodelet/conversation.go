@@ -1144,7 +1144,6 @@ func forkConversationCmd(ctx context.Context, conversationID string) {
 	forkedRecord.Provider = sourceRecord.Provider
 	forkedRecord.Summary = sourceRecord.Summary
 	forkedRecord.ToolResults = sourceRecord.ToolResults
-	forkedRecord.BackgroundProcesses = sourceRecord.BackgroundProcesses
 
 	// Copy FileLastAccess and Metadata maps
 	if sourceRecord.FileLastAccess != nil {

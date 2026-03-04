@@ -43,44 +43,6 @@ describe('BashRenderer', () => {
     expect(container.firstChild).toBeNull();
   });
 
-  describe('Background Process', () => {
-    it('renders background process with PID', () => {
-      const toolResult = createToolResult({
-        pid: 12345,
-        command: 'npm run dev',
-        logPath: '/var/log/app.log',
-      });
-
-      render(<BashRenderer toolResult={toolResult} />);
-
-      expect(screen.getByText('npm run dev')).toBeInTheDocument();
-      expect(screen.getByText('PID: 12345')).toBeInTheDocument();
-    });
-
-    it('renders log file path', () => {
-      const toolResult = createToolResult({
-        pid: 12345,
-        command: 'npm run dev',
-        logPath: '/var/log/app.log',
-      });
-
-      render(<BashRenderer toolResult={toolResult} />);
-
-      expect(screen.getByText(/Log:.*\/var\/log\/app.log/)).toBeInTheDocument();
-    });
-
-    it('handles missing log path', () => {
-      const toolResult = createToolResult({
-        pid: 12345,
-        command: 'npm run dev',
-      });
-
-      render(<BashRenderer toolResult={toolResult} />);
-
-      expect(screen.getByText(/Log:.*N\/A/)).toBeInTheDocument();
-    });
-  });
-
   describe('Command Execution', () => {
     it('renders command with exit code', () => {
       const toolResult = createToolResult({

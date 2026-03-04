@@ -36,7 +36,6 @@ type ConversationRecord struct {
 	UpdatedAt           time.Time                             `json:"updatedAt"`
 	Metadata            map[string]any                        `json:"metadata,omitempty"`
 	ToolResults         map[string]tools.StructuredToolResult `json:"toolResults,omitempty"`         // Maps tool_call_id to structured result
-	BackgroundProcesses []tools.BackgroundProcess             `json:"backgroundProcesses,omitempty"` // Persistent background processes
 }
 
 // ConversationSummary provides a brief overview of a conversation
@@ -76,7 +75,6 @@ func NewConversationRecord(id string) ConversationRecord {
 		Metadata:            make(map[string]any),
 		FileLastAccess:      make(map[string]time.Time),
 		ToolResults:         make(map[string]tools.StructuredToolResult),
-		BackgroundProcesses: make([]tools.BackgroundProcess, 0),
 	}
 }
 
