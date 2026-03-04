@@ -1,5 +1,9 @@
 # Kodelet
 
+## 0.2.33.beta (2026-03-04)
+
+Removed background process management: the `background` bash parameter, `view_background_processes` tool, and all related persistence/state/UI code have been removed.
+
 ## 0.2.32.beta (2026-03-04)
 
 Made `apply_patch` opt-in so it is only available when `apply_patch_enabled: true` (including when `allowed_tools` explicitly lists it).
