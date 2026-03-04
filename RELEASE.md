@@ -1,5 +1,9 @@
 # Kodelet
 
+## 0.2.34.beta (2026-03-04)
+
+Removed `gopsutil` dependency and all its transitive dependencies (`purego`, `go-ole`, `plan9stats`, `perfstat`, `go-sysconf`, `numcpus`, `wmi`) from the module.
+
 ## 0.2.33.beta (2026-03-04)
 
 Removed background process management: the `background` bash parameter, `view_background_processes` tool, and all related persistence/state/UI code have been removed.
