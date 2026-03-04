@@ -9,7 +9,6 @@ import (
 	"github.com/pkg/errors"
 	"google.golang.org/genai"
 
-	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/llm/prompts"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
@@ -37,25 +36,22 @@ func (t *Thread) SaveConversation(ctx context.Context, summarise bool) error {
 	}
 
 	var fileLastAccess map[string]time.Time
-	var backgroundProcesses []tooltypes.BackgroundProcess
 
 	if t.State != nil {
 		fileLastAccess = t.State.FileLastAccess()
-		backgroundProcesses = t.State.GetBackgroundProcesses()
 	}
 
 	record := convtypes.ConversationRecord{
-		ID:                  t.ConversationID,
-		RawMessages:         rawMessages,
-		Provider:            "google",
-		Usage:               *t.Usage,
-		Metadata:            map[string]any{"model": t.Config.Model, "backend": t.backend},
-		Summary:             summary,
-		CreatedAt:           time.Now(),
-		UpdatedAt:           time.Now(),
-		FileLastAccess:      fileLastAccess,
-		ToolResults:         t.GetStructuredToolResults(),
-		BackgroundProcesses: backgroundProcesses,
+		ID:             t.ConversationID,
+		RawMessages:    rawMessages,
+		Provider:       "google",
+		Usage:          *t.Usage,
+		Metadata:       map[string]any{"model": t.Config.Model, "backend": t.backend},
+		Summary:        summary,
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+		FileLastAccess: fileLastAccess,
+		ToolResults:    t.GetStructuredToolResults(),
 	}
 
 	return t.Store.Save(ctx, record)
@@ -85,7 +81,6 @@ func (t *Thread) LoadConversationByID(ctx context.Context, conversationID string
 
 	if t.State != nil {
 		t.State.SetFileLastAccess(record.FileLastAccess)
-		base.RestoreBackgroundProcesses(t.State, record.BackgroundProcesses)
 	}
 
 	logger.G(ctx).WithField("conversation_id", conversationID).Info("Loaded conversation")

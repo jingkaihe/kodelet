@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
 	"github.com/pkg/errors"
 	"github.com/sashabaranov/go-openai"
@@ -72,17 +71,16 @@ func (t *Thread) SaveConversation(ctx context.Context, summarize bool) error {
 
 	// Build the conversation record
 	record := convtypes.ConversationRecord{
-		ID:                  t.ConversationID,
-		RawMessages:         messagesJSON,
-		Provider:            "openai",
-		Usage:               *t.Usage,
-		Metadata:            metadata,
-		Summary:             t.summary,
-		CreatedAt:           time.Now(),
-		UpdatedAt:           time.Now(),
-		FileLastAccess:      t.State.FileLastAccess(),
-		ToolResults:         t.GetStructuredToolResults(),
-		BackgroundProcesses: t.State.GetBackgroundProcesses(),
+		ID:             t.ConversationID,
+		RawMessages:    messagesJSON,
+		Provider:       "openai",
+		Usage:          *t.Usage,
+		Metadata:       metadata,
+		Summary:        t.summary,
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+		FileLastAccess: t.State.FileLastAccess(),
+		ToolResults:    t.GetStructuredToolResults(),
 	}
 
 	// Save to the store
@@ -121,8 +119,6 @@ func (t *Thread) loadConversation(ctx context.Context) {
 	t.State.SetFileLastAccess(record.FileLastAccess)
 	// Restore structured tool results
 	t.SetStructuredToolResults(record.ToolResults)
-	// Restore background processes
-	base.RestoreBackgroundProcesses(t.State, record.BackgroundProcesses)
 }
 
 // StreamableMessage contains parsed message data for streaming

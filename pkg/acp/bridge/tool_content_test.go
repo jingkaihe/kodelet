@@ -123,31 +123,6 @@ func TestToolContentGenerator_GenerateBashContent(t *testing.T) {
 		assert.Equal(t, acptypes.ContentTypeText, errContent["type"])
 		assert.Equal(t, "```\ncommand failed\n\nerror output\n```", errContent["text"])
 	})
-
-	t.Run("background bash process", func(t *testing.T) {
-		result := &mockToolResult{
-			result: "Process started",
-			structuredData: tooltypes.StructuredToolResult{
-				ToolName:  "bash_background",
-				Success:   true,
-				Timestamp: time.Now(),
-				Metadata: &tooltypes.BackgroundBashMetadata{
-					Command:   "sleep 100",
-					PID:       12345,
-					LogPath:   "/tmp/out.log",
-					StartTime: time.Now(),
-				},
-			},
-		}
-
-		content := gen.GenerateToolContent(result)
-		require.Len(t, content, 1)
-
-		assert.Equal(t, ToolCallContentTypeContent, content[0]["type"])
-		bgContent := content[0]["content"].(map[string]any)
-		assert.Contains(t, bgContent["text"], "PID: 12345")
-		assert.Contains(t, bgContent["text"], "/tmp/out.log")
-	})
 }
 
 func TestToolContentGenerator_GenerateCodeExecutionContent(t *testing.T) {

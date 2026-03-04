@@ -903,17 +903,16 @@ func (t *Thread) SaveConversation(ctx context.Context, summarize bool) error {
 	}
 
 	record := convtypes.ConversationRecord{
-		ID:                  t.ConversationID,
-		RawMessages:         inputItemsJSON,
-		Provider:            "openai",
-		Usage:               *t.Usage,
-		Metadata:            metadata,
-		Summary:             t.summary,
-		CreatedAt:           time.Now(),
-		UpdatedAt:           time.Now(),
-		FileLastAccess:      t.State.FileLastAccess(),
-		ToolResults:         t.GetStructuredToolResults(),
-		BackgroundProcesses: t.State.GetBackgroundProcesses(),
+		ID:             t.ConversationID,
+		RawMessages:    inputItemsJSON,
+		Provider:       "openai",
+		Usage:          *t.Usage,
+		Metadata:       metadata,
+		Summary:        t.summary,
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+		FileLastAccess: t.State.FileLastAccess(),
+		ToolResults:    t.GetStructuredToolResults(),
 	}
 
 	return t.Store.Save(ctx, record)
@@ -956,7 +955,6 @@ func (t *Thread) loadConversation(ctx context.Context) {
 	t.summary = record.Summary
 	t.State.SetFileLastAccess(record.FileLastAccess)
 	t.SetStructuredToolResults(record.ToolResults)
-	base.RestoreBackgroundProcesses(t.State, record.BackgroundProcesses)
 
 	// Restore lastResponseID from metadata
 	if record.Metadata != nil {

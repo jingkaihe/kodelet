@@ -5,7 +5,6 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/hooks"
 	"github.com/jingkaihe/kodelet/pkg/logger"
-	"github.com/jingkaihe/kodelet/pkg/osutil"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
@@ -24,26 +23,6 @@ func CreateHookTrigger(ctx context.Context, config llmtypes.Config, conversation
 	}
 
 	return hooks.NewTrigger(hookManager, conversationID, config.IsSubAgent, config.RecipeName)
-}
-
-// RestoreBackgroundProcesses reattaches alive background processes to state.
-// This is best-effort and silently skips processes that can't be reattached.
-func RestoreBackgroundProcesses(state tooltypes.State, processes []tooltypes.BackgroundProcess) {
-	if state == nil {
-		return
-	}
-
-	for _, process := range processes {
-		if !osutil.IsProcessAlive(process.PID) {
-			continue
-		}
-
-		restoredProcess, err := osutil.ReattachProcess(process)
-		if err != nil {
-			continue
-		}
-		_ = state.AddBackgroundProcess(restoredProcess)
-	}
 }
 
 // AvailableTools returns tools from state while handling disabled tool use and nil state.

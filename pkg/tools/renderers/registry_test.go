@@ -24,14 +24,12 @@ func TestRendererRegistry_ExactMatches(t *testing.T) {
 		{"Glob", "glob_tool", true, false},
 		{"Grep", "grep_tool", true, false},
 		{"Bash", "bash", true, false},
-		{"Background Bash", "bash_background", true, false},
 		{"Todo", "todo_read", true, false},
 		{"Thinking", "thinking", true, false},
 		{"Batch", "batch", true, false},
 		{"Image Recognition", "image_recognition", true, false},
 		{"Subagent", "subagent", true, false},
 		{"Web Fetch", "web_fetch", true, false},
-		{"View Background Processes", "view_background_processes", true, false},
 		{"Code Execution", "code_execution", true, false},
 
 		{"Unknown Tool", "unknown_tool", true, false}, // Should fallback to default

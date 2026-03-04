@@ -11,7 +11,6 @@ const BashRenderer: React.FC<BashRendererProps> = ({ toolResult }) => {
   const meta = toolResult.metadata as BashMetadata;
   if (!meta) return null;
 
-  const isBackground = meta.pid !== undefined;
   const hasOutput = meta.output && meta.output.trim();
   const exitCode = meta.exitCode || 0;
   const isSuccess = exitCode === 0;
@@ -35,20 +34,6 @@ const BashRenderer: React.FC<BashRendererProps> = ({ toolResult }) => {
     div.textContent = text;
     return div.innerHTML;
   };
-
-  if (isBackground) {
-    return (
-      <div className="space-y-2">
-        <div className="flex items-center gap-2 flex-wrap text-xs font-mono text-kodelet-dark/80">
-          <code className="font-medium">{meta.command}</code>
-          <StatusBadge text={`PID: ${meta.pid}`} variant="info" />
-        </div>
-        <div className="text-xs text-kodelet-mid-gray">
-          Log: {meta.logPath || meta.logFile || 'N/A'}
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="space-y-2">

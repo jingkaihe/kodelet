@@ -129,33 +129,4 @@ func TestRendererWithJSONUnmarshal(t *testing.T) {
 		// Should contain todo content
 		assert.Contains(t, output, "Task 1", "Expected todo content in output")
 	})
-
-	t.Run("BackgroundBashRenderer after JSON unmarshal", func(t *testing.T) {
-		original := tools.StructuredToolResult{
-			ToolName:  "bash_background",
-			Success:   true,
-			Timestamp: time.Now(),
-			Metadata: &tools.BackgroundBashMetadata{
-				Command:   "python -m http.server 8000",
-				PID:       12345,
-				LogPath:   "/tmp/.kodelet/12345/out.log",
-				StartTime: time.Date(2023, 1, 1, 10, 30, 45, 0, time.UTC),
-			},
-		}
-
-		data, err := json.Marshal(original)
-		require.NoError(t, err, "Failed to marshal")
-
-		var unmarshaled tools.StructuredToolResult
-		err = json.Unmarshal(data, &unmarshaled)
-		require.NoError(t, err, "Failed to unmarshal")
-
-		output := registry.Render(unmarshaled)
-
-		// Should contain background command details
-		assert.Contains(t, output, "Background Command: python -m http.server 8000", "Expected background command in output")
-		assert.Contains(t, output, "Process ID: 12345", "Expected process ID in output")
-		assert.Contains(t, output, "Log File: /tmp/.kodelet/12345/out.log", "Expected log file path in output")
-		assert.Contains(t, output, "Started: 2023-01-01 10:30:45", "Expected start time in output")
-	})
 }

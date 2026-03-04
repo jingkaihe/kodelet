@@ -35,7 +35,6 @@ func NewRendererRegistry() *RendererRegistry {
 	registry.Register("apply_patch", &ApplyPatchRenderer{})
 
 	registry.Register("bash", &BashRenderer{})
-	registry.Register("bash_background", &BashRenderer{})
 	registry.Register("grep_tool", &GrepRenderer{})
 	registry.Register("glob_tool", &GlobRenderer{})
 	registry.Register("todo_read", &TodoRenderer{})
@@ -43,7 +42,6 @@ func NewRendererRegistry() *RendererRegistry {
 	registry.Register("subagent", &SubAgentRenderer{})
 	registry.Register("image_recognition", &ImageRecognitionRenderer{})
 	registry.Register("web_fetch", &WebFetchRenderer{})
-	registry.Register("view_background_processes", &ViewBackgroundProcessesRenderer{})
 	registry.Register("code_execution", &CodeExecutionRenderer{})
 	registry.Register("skill", &SkillRenderer{})
 

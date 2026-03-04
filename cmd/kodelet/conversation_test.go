@@ -126,7 +126,6 @@ func TestConversationFork(t *testing.T) {
 	forkedRecord.Provider = loadedSource.Provider
 	forkedRecord.Summary = loadedSource.Summary
 	forkedRecord.ToolResults = loadedSource.ToolResults
-	forkedRecord.BackgroundProcesses = loadedSource.BackgroundProcesses
 
 	if loadedSource.FileLastAccess != nil {
 		forkedRecord.FileLastAccess = make(map[string]time.Time)

@@ -30,20 +30,19 @@ func GenerateSchema[T any]() *jsonschema.Schema {
 
 // toolRegistry holds all available tools mapped by their names
 var toolRegistry = map[string]tooltypes.Tool{
-	"bash":                      &BashTool{},
-	"apply_patch":               &ApplyPatchTool{},
-	"file_read":                 &FileReadTool{},
-	"file_write":                &FileWriteTool{},
-	"file_edit":                 &FileEditTool{},
-	"subagent":                  NewSubAgentTool(nil, false),
-	"grep_tool":                 &GrepTool{},
-	"glob_tool":                 &GlobTool{},
-	"todo_read":                 &TodoReadTool{},
-	"todo_write":                &TodoWriteTool{},
-	"web_fetch":                 &WebFetchTool{},
-	"image_recognition":         &ImageRecognitionTool{},
-	"view_background_processes": &ViewBackgroundProcessesTool{},
-	"skill":                     NewSkillTool(nil, false),
+	"bash":              &BashTool{},
+	"apply_patch":       &ApplyPatchTool{},
+	"file_read":         &FileReadTool{},
+	"file_write":        &FileWriteTool{},
+	"file_edit":         &FileEditTool{},
+	"subagent":          NewSubAgentTool(nil, false),
+	"grep_tool":         &GrepTool{},
+	"glob_tool":         &GlobTool{},
+	"todo_read":         &TodoReadTool{},
+	"todo_write":        &TodoWriteTool{},
+	"web_fetch":         &WebFetchTool{},
+	"image_recognition": &ImageRecognitionTool{},
+	"skill":             NewSkillTool(nil, false),
 }
 
 // NoToolsMarker is a special value indicating no tools should be enabled
@@ -67,7 +66,6 @@ var defaultMainTools = []string{
 	"glob_tool",
 	"web_fetch",
 	"image_recognition",
-	"view_background_processes",
 	"skill",
 }
 

@@ -1,19 +1,15 @@
 package tools
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 	"text/template"
 	"time"
 
@@ -53,8 +49,7 @@ Banned commands:
 # Input
 - command: required single-line bash command
 - description: required, 5-10 words
-- timeout: 10-120 for foreground; 0 when background=true
-- background: optional, default false
+- timeout: 10-120
 
 # Rules
 - Use parallel tool calling for independent commands.
@@ -64,16 +59,8 @@ Banned commands:
 - Prefer grep_tool/glob_tool over grep/find in bash.
 - Do not use heredoc; use file_write or apply_patch instead.
 
-# Background mode
-When background=true:
-- timeout must be 0
-- process runs detached
-- logs: ~/.kodelet/bgpids/{PID}/out.log
-- returns immediately with PID and log path
-
 Examples:
-- Foreground: (cd /repo && mise run test)
-- Background: command="python -m http.server 8000", background=true, timeout=0
+- (cd /repo && mise run test)
 `
 )
 
@@ -117,7 +104,6 @@ type BashInput struct {
 	Description string `json:"description" jsonschema:"description=A description of the command to run"`
 	Command     string `json:"command" jsonschema:"description=The bash command to run"`
 	Timeout     int    `json:"timeout" jsonschema:"description=The timeout for the command in seconds. Default: 10"`
-	Background  bool   `json:"background" jsonschema:"description=Whether to run the command in the background. Default: false"`
 }
 
 // GenerateSchema generates the JSON schema for the tool's input parameters
@@ -142,7 +128,6 @@ func (b *BashTool) TracingKVs(parameters string) ([]attribute.KeyValue, error) {
 		attribute.String("command", input.Command),
 		attribute.String("description", input.Description),
 		attribute.Int("timeout", input.Timeout),
-		attribute.Bool("background", input.Background),
 	}, nil
 }
 
@@ -162,15 +147,8 @@ func (b *BashTool) ValidateInput(_ tooltypes.State, parameters string) error {
 		return errors.New("description is required")
 	}
 
-	// For background processes, timeout must be 0 (no timeout)
-	if input.Background {
-		if input.Timeout != 0 {
-			return errors.New("background processes must have timeout=0 (no timeout)")
-		}
-	} else {
-		if input.Timeout < 10 || input.Timeout > 120 {
-			return errors.New("timeout must be between 10 and 120 seconds")
-		}
+	if input.Timeout < 10 || input.Timeout > 120 {
+		return errors.New("timeout must be between 10 and 120 seconds")
 	}
 
 	validateCommand := func(command string) error {
@@ -302,73 +280,18 @@ func (r *BashToolResult) StructuredData() tooltypes.StructuredToolResult {
 	return result
 }
 
-// BackgroundBashToolResult represents the result of a background bash command execution
-type BackgroundBashToolResult struct {
-	command   string
-	pid       int
-	logPath   string
-	startTime time.Time
-	error     string
-}
-
-// GetResult returns information about the background process
-func (r *BackgroundBashToolResult) GetResult() string {
-	return fmt.Sprintf("Process is up and running, output of the process can be viewed at %s", r.logPath)
-}
-
-// GetError returns the error message
-func (r *BackgroundBashToolResult) GetError() string {
-	return r.error
-}
-
-// IsError returns true if the result contains an error
-func (r *BackgroundBashToolResult) IsError() bool {
-	return r.error != ""
-}
-
-// AssistantFacing returns the string representation for the AI assistant
-func (r *BackgroundBashToolResult) AssistantFacing() string {
-	return tooltypes.StringifyToolResult(r.GetResult(), r.GetError())
-}
-
-// StructuredData returns structured metadata about the background process
-func (r *BackgroundBashToolResult) StructuredData() tooltypes.StructuredToolResult {
-	result := tooltypes.StructuredToolResult{
-		ToolName:  "bash_background",
-		Success:   !r.IsError(),
-		Timestamp: time.Now(),
-	}
-
-	// Always populate metadata, even for errors
-	result.Metadata = &tooltypes.BackgroundBashMetadata{
-		Command:   r.command,
-		PID:       r.pid,
-		LogPath:   r.logPath,
-		StartTime: r.startTime,
-	}
-
-	if r.IsError() {
-		result.Error = r.GetError()
-	}
-
-	return result
-}
-
 // Execute runs the bash command and returns the result
 func (b *BashTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
+	_ = state
 	input := &BashInput{}
 	err := json.Unmarshal([]byte(parameters), input)
 	if err != nil {
-		workingDir, _ := os.Getwd()
+		workingDir := ""
 		return &BashToolResult{
 			command:    input.Command,
 			workingDir: workingDir,
 			error:      err.Error(),
 		}
-	}
-
-	if input.Background {
-		return b.executeBackground(state, input)
 	}
 	return b.executeForeground(ctx, input)
 }
@@ -422,164 +345,4 @@ func (b *BashTool) executeForeground(ctx context.Context, input *BashInput) tool
 		executionTime:  executionTime,
 		workingDir:     workingDir,
 	}
-}
-
-func (b *BashTool) executeBackground(state tooltypes.State, input *BashInput) tooltypes.ToolResult {
-	// Create kodelet directory if it doesn't exist
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return &BackgroundBashToolResult{
-			command:   input.Command,
-			startTime: time.Now(),
-			error:     fmt.Sprintf("Failed to get home directory: %v", err),
-		}
-	}
-
-	kodeletDir := filepath.Join(homeDir, ".kodelet")
-	if err := os.MkdirAll(kodeletDir, 0o755); err != nil {
-		return &BackgroundBashToolResult{
-			command:   input.Command,
-			startTime: time.Now(),
-			error:     fmt.Sprintf("Failed to create kodelet directory: %v", err),
-		}
-	}
-
-	// Create the command - no timeout for background processes
-	// Use context.Background() to detach from the current context
-	cmd := exec.Command("bash", "-c", input.Command)
-
-	// Make the process detached from the parent process
-	cmd.SysProcAttr = &osutil.DetachSysProcAttr
-
-	// Setup stdout and stderr pipes before starting
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return &BackgroundBashToolResult{
-			command:   input.Command,
-			startTime: time.Now(),
-			error:     fmt.Sprintf("Failed to create stdout pipe: %v", err),
-		}
-	}
-
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return &BackgroundBashToolResult{
-			command:   input.Command,
-			startTime: time.Now(),
-			error:     fmt.Sprintf("Failed to create stderr pipe: %v", err),
-		}
-	}
-
-	// Start the command
-	if err := cmd.Start(); err != nil {
-		return &BackgroundBashToolResult{
-			command:   input.Command,
-			startTime: time.Now(),
-			error:     fmt.Sprintf("Failed to start command: %v", err),
-		}
-	}
-
-	pid := cmd.Process.Pid
-
-	// Create PID directory
-	pidDir := filepath.Join(kodeletDir, "bgpids", fmt.Sprintf("%d", pid))
-	if err := os.MkdirAll(pidDir, 0o755); err != nil {
-		cmd.Process.Kill()
-		return &BackgroundBashToolResult{
-			command:   input.Command,
-			startTime: time.Now(),
-			error:     fmt.Sprintf("Failed to create PID directory: %v", err),
-		}
-	}
-
-	// Create log file
-	logPath := filepath.Join(pidDir, "out.log")
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
-	if err != nil {
-		cmd.Process.Kill()
-		return &BackgroundBashToolResult{
-			command:   input.Command,
-			startTime: time.Now(),
-			error:     fmt.Sprintf("Failed to create log file: %v", err),
-		}
-	}
-
-	// Add to state tracking
-	startTime := time.Now()
-	backgroundProcess := tooltypes.BackgroundProcess{
-		PID:       pid,
-		Command:   input.Command,
-		LogPath:   logPath,
-		StartTime: startTime,
-		Process:   cmd.Process,
-	}
-
-	if err := state.AddBackgroundProcess(backgroundProcess); err != nil {
-		logFile.Close()
-		cmd.Process.Kill()
-		return &BackgroundBashToolResult{
-			command:   input.Command,
-			startTime: startTime,
-			error:     fmt.Sprintf("Failed to track background process: %v", err),
-		}
-	}
-
-	// Start a goroutine to capture output and wait for completion
-	go func() {
-		defer logFile.Close()
-		defer state.RemoveBackgroundProcess(pid)
-
-		// Use WaitGroup to ensure we capture all output before process exits
-		var wg sync.WaitGroup
-		wg.Add(2)
-
-		// Create a flushing writer for the log file
-		flushingWriter := &flushingWriter{
-			writer: bufio.NewWriter(logFile),
-			file:   logFile,
-		}
-
-		// Copy stdout
-		go func() {
-			defer wg.Done()
-			io.Copy(flushingWriter, stdout)
-		}()
-
-		// Copy stderr
-		go func() {
-			defer wg.Done()
-			io.Copy(flushingWriter, stderr)
-		}()
-
-		// Wait for all output to be copied
-		wg.Wait()
-
-		// Wait for the process to complete and capture exit status
-		if err := cmd.Wait(); err != nil {
-			fmt.Fprintf(flushingWriter, "Process exited with error: %v\n", err)
-		}
-	}()
-
-	return &BackgroundBashToolResult{
-		command:   input.Command,
-		pid:       pid,
-		logPath:   logPath,
-		startTime: startTime,
-	}
-}
-
-// flushingWriter is a wrapper that flushes after each write
-type flushingWriter struct {
-	writer *bufio.Writer
-	file   *os.File
-}
-
-func (fw *flushingWriter) Write(p []byte) (n int, err error) {
-	n, err = fw.writer.Write(p)
-	if err != nil {
-		return n, err
-	}
-	fw.writer.Flush()
-	fw.file.Sync()
-	return n, nil
 }

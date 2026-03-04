@@ -61,20 +61,6 @@ func TestStructuredToolResult_JSONMarshaling(t *testing.T) {
 			},
 		},
 		{
-			name: "BackgroundBashMetadata",
-			result: StructuredToolResult{
-				ToolName:  "bash_background",
-				Success:   true,
-				Timestamp: time.Now(),
-				Metadata: &BackgroundBashMetadata{
-					Command:   "python -m http.server 8000",
-					PID:       12345,
-					LogPath:   "/tmp/.kodelet/12345/out.log",
-					StartTime: time.Date(2023, 1, 1, 10, 0, 0, 0, time.UTC),
-				},
-			},
-		},
-		{
 			name: "GrepMetadata",
 			result: StructuredToolResult{
 				ToolName:  "grep_tool",
@@ -593,14 +579,12 @@ func TestExtractMetadata_AllTypes(t *testing.T) {
 		{"ApplyPatchMetadata", ApplyPatchMetadata{Changes: []ApplyPatchChange{{Path: "/test", Operation: ApplyPatchOperationUpdate}}}, &ApplyPatchMetadata{}},
 
 		{"BashMetadata", BashMetadata{Command: "test"}, &BashMetadata{}},
-		{"BackgroundBashMetadata", BackgroundBashMetadata{Command: "test", PID: 1234, LogPath: "/tmp/log.txt"}, &BackgroundBashMetadata{}},
 		{"GrepMetadata", GrepMetadata{Pattern: "test"}, &GrepMetadata{}},
 		{"GlobMetadata", GlobMetadata{Pattern: "*.go"}, &GlobMetadata{}},
 		{"TodoMetadata", TodoMetadata{Action: "read"}, &TodoMetadata{}},
 		{"SubAgentMetadata", SubAgentMetadata{Question: "test"}, &SubAgentMetadata{}},
 		{"ImageRecognitionMetadata", ImageRecognitionMetadata{ImagePath: "/test.png"}, &ImageRecognitionMetadata{}},
 		{"WebFetchMetadata", WebFetchMetadata{URL: "https://test"}, &WebFetchMetadata{}},
-		{"ViewBackgroundProcessesMetadata", ViewBackgroundProcessesMetadata{Count: 1}, &ViewBackgroundProcessesMetadata{}},
 		{"MCPToolMetadata", MCPToolMetadata{MCPToolName: "test"}, &MCPToolMetadata{}},
 	}
 

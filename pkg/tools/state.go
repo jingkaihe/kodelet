@@ -29,15 +29,14 @@ type contextInfo struct {
 
 // BasicState implements the State interface with basic functionality
 type BasicState struct {
-	lastAccessed        map[string]time.Time
-	backgroundProcesses []tooltypes.BackgroundProcess
-	mu                  sync.RWMutex
-	sessionID           string
-	todoFilePath        string
-	tools               []tooltypes.Tool
-	mcpTools            []tooltypes.Tool
-	customTools         []tooltypes.Tool
-	llmConfig           llmtypes.Config
+	lastAccessed map[string]time.Time
+	mu           sync.RWMutex
+	sessionID    string
+	todoFilePath string
+	tools        []tooltypes.Tool
+	mcpTools     []tooltypes.Tool
+	customTools  []tooltypes.Tool
+	llmConfig    llmtypes.Config
 
 	// Context discovery fields
 	contextCache     map[string]*contextInfo
@@ -452,37 +451,6 @@ func (s *BasicState) Tools() []tooltypes.Tool {
 	tools = append(tools, s.mcpTools...)
 	tools = append(tools, s.customTools...)
 	return tools
-}
-
-// AddBackgroundProcess adds a background process to the state
-func (s *BasicState) AddBackgroundProcess(process tooltypes.BackgroundProcess) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.backgroundProcesses = append(s.backgroundProcesses, process)
-	return nil
-}
-
-// GetBackgroundProcesses returns all background processes
-func (s *BasicState) GetBackgroundProcesses() []tooltypes.BackgroundProcess {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	// Return a copy to avoid race conditions
-	processes := make([]tooltypes.BackgroundProcess, len(s.backgroundProcesses))
-	copy(processes, s.backgroundProcesses)
-	return processes
-}
-
-// RemoveBackgroundProcess removes a background process by PID
-func (s *BasicState) RemoveBackgroundProcess(pid int) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for i, process := range s.backgroundProcesses {
-		if process.PID == pid {
-			s.backgroundProcesses = append(s.backgroundProcesses[:i], s.backgroundProcesses[i+1:]...)
-			return nil
-		}
-	}
-	return errors.Errorf("background process with PID %d not found", pid)
 }
 
 // GetLLMConfig returns the LLM configuration
