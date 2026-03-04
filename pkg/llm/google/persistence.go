@@ -42,16 +42,16 @@ func (t *Thread) SaveConversation(ctx context.Context, summarise bool) error {
 	}
 
 	record := convtypes.ConversationRecord{
-		ID:                  t.ConversationID,
-		RawMessages:         rawMessages,
-		Provider:            "google",
-		Usage:               *t.Usage,
-		Metadata:            map[string]any{"model": t.Config.Model, "backend": t.backend},
-		Summary:             summary,
-		CreatedAt:           time.Now(),
-		UpdatedAt:           time.Now(),
-		FileLastAccess:      fileLastAccess,
-		ToolResults:         t.GetStructuredToolResults(),
+		ID:             t.ConversationID,
+		RawMessages:    rawMessages,
+		Provider:       "google",
+		Usage:          *t.Usage,
+		Metadata:       map[string]any{"model": t.Config.Model, "backend": t.backend},
+		Summary:        summary,
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+		FileLastAccess: fileLastAccess,
+		ToolResults:    t.GetStructuredToolResults(),
 	}
 
 	return t.Store.Save(ctx, record)

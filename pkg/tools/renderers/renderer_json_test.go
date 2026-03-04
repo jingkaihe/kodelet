@@ -129,5 +129,4 @@ func TestRendererWithJSONUnmarshal(t *testing.T) {
 		// Should contain todo content
 		assert.Contains(t, output, "Task 1", "Expected todo content in output")
 	})
-
 }

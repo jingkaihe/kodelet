@@ -903,16 +903,16 @@ func (t *Thread) SaveConversation(ctx context.Context, summarize bool) error {
 	}
 
 	record := convtypes.ConversationRecord{
-		ID:                  t.ConversationID,
-		RawMessages:         inputItemsJSON,
-		Provider:            "openai",
-		Usage:               *t.Usage,
-		Metadata:            metadata,
-		Summary:             t.summary,
-		CreatedAt:           time.Now(),
-		UpdatedAt:           time.Now(),
-		FileLastAccess:      t.State.FileLastAccess(),
-		ToolResults:         t.GetStructuredToolResults(),
+		ID:             t.ConversationID,
+		RawMessages:    inputItemsJSON,
+		Provider:       "openai",
+		Usage:          *t.Usage,
+		Metadata:       metadata,
+		Summary:        t.summary,
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+		FileLastAccess: t.State.FileLastAccess(),
+		ToolResults:    t.GetStructuredToolResults(),
 	}
 
 	return t.Store.Save(ctx, record)

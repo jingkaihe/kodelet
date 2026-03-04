@@ -70,18 +70,18 @@ func (t *Thread) SaveConversation(ctx context.Context, summarize bool) error {
 	}
 
 	// Build the conversation record
-		record := convtypes.ConversationRecord{
-			ID:                  t.ConversationID,
-			RawMessages:         messagesJSON,
-			Provider:            "openai",
-			Usage:               *t.Usage,
-		Metadata:            metadata,
-		Summary:             t.summary,
-		CreatedAt:           time.Now(),
-			UpdatedAt:           time.Now(),
-			FileLastAccess:      t.State.FileLastAccess(),
-			ToolResults:         t.GetStructuredToolResults(),
-		}
+	record := convtypes.ConversationRecord{
+		ID:             t.ConversationID,
+		RawMessages:    messagesJSON,
+		Provider:       "openai",
+		Usage:          *t.Usage,
+		Metadata:       metadata,
+		Summary:        t.summary,
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+		FileLastAccess: t.State.FileLastAccess(),
+		ToolResults:    t.GetStructuredToolResults(),
+	}
 
 	// Save to the store
 	return t.Store.Save(ctx, record)

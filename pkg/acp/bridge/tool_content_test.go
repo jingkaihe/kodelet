@@ -123,7 +123,6 @@ func TestToolContentGenerator_GenerateBashContent(t *testing.T) {
 		assert.Equal(t, acptypes.ContentTypeText, errContent["type"])
 		assert.Equal(t, "```\ncommand failed\n\nerror output\n```", errContent["text"])
 	})
-
 }
 
 func TestToolContentGenerator_GenerateCodeExecutionContent(t *testing.T) {

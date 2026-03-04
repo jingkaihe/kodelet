@@ -42,10 +42,10 @@ func (m *swapContextMockState) FileLastAccess() map[string]time.Time       { ret
 func (m *swapContextMockState) BasicTools() []tooltypes.Tool               { return nil }
 func (m *swapContextMockState) MCPTools() []tooltypes.Tool                 { return nil }
 func (m *swapContextMockState) Tools() []tooltypes.Tool                    { return nil }
-func (m *swapContextMockState) DiscoverContexts() map[string]string                   { return nil }
-func (m *swapContextMockState) GetLLMConfig() any                                     { return nil }
-func (m *swapContextMockState) LockFile(_ string)                                     {}
-func (m *swapContextMockState) UnlockFile(_ string)                                   {}
+func (m *swapContextMockState) DiscoverContexts() map[string]string        { return nil }
+func (m *swapContextMockState) GetLLMConfig() any                          { return nil }
+func (m *swapContextMockState) LockFile(_ string)                          {}
+func (m *swapContextMockState) UnlockFile(_ string)                        {}
 
 func createTestThread() *Thread {
 	config := llmtypes.Config{

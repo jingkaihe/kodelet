@@ -681,18 +681,18 @@ func TestStore_NullHandling(t *testing.T) {
 
 	// Test record with empty/null fields
 	now := time.Now().UTC().Truncate(time.Second)
-		record := conversations.ConversationRecord{
-			ID:             "null-test",
-			RawMessages:    json.RawMessage(`[]`),
-			Provider:       "anthropic",
-			FileLastAccess: map[string]time.Time{}, // Empty map
-			Usage:          llmtypes.Usage{},       // Zero values
-			Summary:        "",                     // Empty string (should become NULL)
-			CreatedAt:      now,
-			UpdatedAt:      now,
-			Metadata:       map[string]any{},                        // Empty map
-			ToolResults:    map[string]tools.StructuredToolResult{}, // Empty map
-		}
+	record := conversations.ConversationRecord{
+		ID:             "null-test",
+		RawMessages:    json.RawMessage(`[]`),
+		Provider:       "anthropic",
+		FileLastAccess: map[string]time.Time{}, // Empty map
+		Usage:          llmtypes.Usage{},       // Zero values
+		Summary:        "",                     // Empty string (should become NULL)
+		CreatedAt:      now,
+		UpdatedAt:      now,
+		Metadata:       map[string]any{},                        // Empty map
+		ToolResults:    map[string]tools.StructuredToolResult{}, // Empty map
+	}
 
 	// Save record
 	err = store.Save(ctx, record)
@@ -707,10 +707,10 @@ func TestStore_NullHandling(t *testing.T) {
 	// Load record and verify empty string is returned
 	loaded, err := store.Load(ctx, "null-test")
 	require.NoError(t, err)
-	assert.Equal(t, "", loaded.Summary)          // Should be empty string in domain model
-	assert.NotNil(t, loaded.FileLastAccess)      // Should be empty map, not nil
-	assert.NotNil(t, loaded.Metadata)            // Should be empty map, not nil
-		assert.NotNil(t, loaded.ToolResults) // Should be empty map, not nil
+	assert.Equal(t, "", loaded.Summary)     // Should be empty string in domain model
+	assert.NotNil(t, loaded.FileLastAccess) // Should be empty map, not nil
+	assert.NotNil(t, loaded.Metadata)       // Should be empty map, not nil
+	assert.NotNil(t, loaded.ToolResults)    // Should be empty map, not nil
 }
 
 func TestStore_ConcurrentAccess(t *testing.T) {
@@ -758,7 +758,7 @@ func TestStore_ConcurrentAccess(t *testing.T) {
 						"routineID": routineID,
 						"recordID":  j,
 					},
-					ToolResults:         map[string]tools.StructuredToolResult{},
+					ToolResults: map[string]tools.StructuredToolResult{},
 				}
 
 				if err := store.Save(ctx, record); err != nil {
@@ -940,23 +940,23 @@ func TestStore_TimestampBehavior(t *testing.T) {
 	originalCreatedAt := time.Now().UTC().Add(-1 * time.Hour) // 1 hour ago
 	originalUpdatedAt := originalCreatedAt
 
-		record := conversations.ConversationRecord{
-			ID:          "timestamp-test",
-			RawMessages: json.RawMessage(`[{"role": "user", "content": [{"type": "text", "text": "Initial message"}]}]`),
-			Provider:    "anthropic",
-			FileLastAccess: map[string]time.Time{
-				"test.txt": originalCreatedAt,
-			},
+	record := conversations.ConversationRecord{
+		ID:          "timestamp-test",
+		RawMessages: json.RawMessage(`[{"role": "user", "content": [{"type": "text", "text": "Initial message"}]}]`),
+		Provider:    "anthropic",
+		FileLastAccess: map[string]time.Time{
+			"test.txt": originalCreatedAt,
+		},
 		Usage: llmtypes.Usage{
 			InputTokens:  100,
 			OutputTokens: 50,
 		},
-		Summary:             "Initial summary",
-		CreatedAt:           originalCreatedAt,
-		UpdatedAt:           originalUpdatedAt,
-			Metadata:            map[string]any{"version": 1},
-			ToolResults:         map[string]tools.StructuredToolResult{},
-		}
+		Summary:     "Initial summary",
+		CreatedAt:   originalCreatedAt,
+		UpdatedAt:   originalUpdatedAt,
+		Metadata:    map[string]any{"version": 1},
+		ToolResults: map[string]tools.StructuredToolResult{},
+	}
 
 	// Save the record for the first time
 	err = store.Save(ctx, record)

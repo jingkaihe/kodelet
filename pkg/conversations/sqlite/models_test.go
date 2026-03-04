@@ -341,16 +341,16 @@ func TestFromConversationRecord_EmptySummary(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 
 	record := conversations.ConversationRecord{
-		ID:                  "test-id",
-		RawMessages:         json.RawMessage(`[]`),
-		Provider:            "anthropic",
-		FileLastAccess:      map[string]time.Time{},
-		Usage:               llmtypes.Usage{},
-		Summary:             "", // Empty summary
-		CreatedAt:           now,
-		UpdatedAt:           now,
-		Metadata:            map[string]any{},
-		ToolResults:         map[string]tools.StructuredToolResult{},
+		ID:             "test-id",
+		RawMessages:    json.RawMessage(`[]`),
+		Provider:       "anthropic",
+		FileLastAccess: map[string]time.Time{},
+		Usage:          llmtypes.Usage{},
+		Summary:        "", // Empty summary
+		CreatedAt:      now,
+		UpdatedAt:      now,
+		Metadata:       map[string]any{},
+		ToolResults:    map[string]tools.StructuredToolResult{},
 	}
 
 	dbRecord := fromConversationRecord(record)
@@ -490,5 +490,4 @@ func TestRoundTripConversion(t *testing.T) {
 		assert.Equal(t, originalResult.Success, convertedResult.Success)
 		assert.Equal(t, originalResult.Timestamp.Format(time.RFC3339), convertedResult.Timestamp.Format(time.RFC3339))
 	}
-
 }

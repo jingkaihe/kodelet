@@ -58,19 +58,19 @@ var metadataTypeRegistry = map[string]reflect.Type{
 	"file_edit":   reflect.TypeOf(FileEditMetadata{}),
 	"apply_patch": reflect.TypeOf(ApplyPatchMetadata{}),
 
-	"grep_tool":       reflect.TypeOf(GrepMetadata{}),
-	"glob_tool":       reflect.TypeOf(GlobMetadata{}),
-	"bash":            reflect.TypeOf(BashMetadata{}),
-	"mcp_tool":        reflect.TypeOf(MCPToolMetadata{}),
-	"custom_tool":     reflect.TypeOf(CustomToolMetadata{}),
-	"todo":            reflect.TypeOf(TodoMetadata{}),
+	"grep_tool":   reflect.TypeOf(GrepMetadata{}),
+	"glob_tool":   reflect.TypeOf(GlobMetadata{}),
+	"bash":        reflect.TypeOf(BashMetadata{}),
+	"mcp_tool":    reflect.TypeOf(MCPToolMetadata{}),
+	"custom_tool": reflect.TypeOf(CustomToolMetadata{}),
+	"todo":        reflect.TypeOf(TodoMetadata{}),
 
-	"image_recognition":         reflect.TypeOf(ImageRecognitionMetadata{}),
-	"subagent":                  reflect.TypeOf(SubAgentMetadata{}),
-	"web_fetch":                 reflect.TypeOf(WebFetchMetadata{}),
-	"code_execution":            reflect.TypeOf(CodeExecutionMetadata{}),
-	"skill":                     reflect.TypeOf(SkillMetadata{}),
-	"blocked":                   reflect.TypeOf(BlockedMetadata{}),
+	"image_recognition": reflect.TypeOf(ImageRecognitionMetadata{}),
+	"subagent":          reflect.TypeOf(SubAgentMetadata{}),
+	"web_fetch":         reflect.TypeOf(WebFetchMetadata{}),
+	"code_execution":    reflect.TypeOf(CodeExecutionMetadata{}),
+	"skill":             reflect.TypeOf(SkillMetadata{}),
+	"blocked":           reflect.TypeOf(BlockedMetadata{}),
 }
 
 // UnmarshalJSON implements custom JSON unmarshaling for StructuredToolResult

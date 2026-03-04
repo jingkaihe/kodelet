@@ -86,16 +86,16 @@ func (t *Thread) SaveConversation(ctx context.Context, summarise bool) error {
 
 	// Create a new conversation record
 	record := convtypes.ConversationRecord{
-		ID:                  t.ConversationID,
-		RawMessages:         rawMessages,
-		Provider:            "anthropic",
-		Usage:               *t.Usage,
-		Metadata:            map[string]any{"model": t.Config.Model},
-		Summary:             t.summary,
-		CreatedAt:           time.Now(),
-		UpdatedAt:           time.Now(),
-		FileLastAccess:      t.State.FileLastAccess(),
-		ToolResults:         t.GetStructuredToolResults(),
+		ID:             t.ConversationID,
+		RawMessages:    rawMessages,
+		Provider:       "anthropic",
+		Usage:          *t.Usage,
+		Metadata:       map[string]any{"model": t.Config.Model},
+		Summary:        t.summary,
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+		FileLastAccess: t.State.FileLastAccess(),
+		ToolResults:    t.GetStructuredToolResults(),
 	}
 
 	// Save the record
