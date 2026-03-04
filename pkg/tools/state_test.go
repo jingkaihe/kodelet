@@ -763,6 +763,22 @@ func TestWithSubAgentToolsFromConfig(t *testing.T) {
 		assert.NotContains(t, toolNames, "file_write")
 		assert.NotContains(t, toolNames, "file_edit")
 	})
+
+	t.Run("ApplyPatchDisabled removes apply_patch from allowed_tools", func(t *testing.T) {
+		config := llmtypes.Config{
+			ApplyPatchEnabled: false,
+			AllowedTools:      []string{"file_read", "apply_patch"},
+		}
+		state := NewBasicState(ctx, WithLLMConfig(config), WithSubAgentToolsFromConfig())
+
+		toolNames := make([]string, len(state.Tools()))
+		for i, tool := range state.Tools() {
+			toolNames[i] = tool.Name()
+		}
+
+		assert.Contains(t, toolNames, "file_read")
+		assert.NotContains(t, toolNames, "apply_patch")
+	})
 }
 
 func TestWithMainTools(t *testing.T) {
@@ -938,6 +954,39 @@ func TestWithMainTools(t *testing.T) {
 		assert.Contains(t, toolNames, "apply_patch")
 		assert.NotContains(t, toolNames, "file_write")
 		assert.NotContains(t, toolNames, "file_edit")
+	})
+
+	t.Run("ApplyPatchDisabled removes apply_patch from defaults", func(t *testing.T) {
+		config := llmtypes.Config{
+			ApplyPatchEnabled: false,
+		}
+		state := NewBasicState(ctx, WithLLMConfig(config), WithMainTools())
+
+		toolNames := make([]string, len(state.Tools()))
+		for i, tool := range state.Tools() {
+			toolNames[i] = tool.Name()
+		}
+
+		assert.NotContains(t, toolNames, "apply_patch")
+		assert.Contains(t, toolNames, "file_write")
+		assert.Contains(t, toolNames, "file_edit")
+	})
+
+	t.Run("ApplyPatchDisabled removes apply_patch from allowed_tools", func(t *testing.T) {
+		config := llmtypes.Config{
+			ApplyPatchEnabled: false,
+			AllowedTools:      []string{"bash", "apply_patch", "file_read"},
+		}
+		state := NewBasicState(ctx, WithLLMConfig(config), WithMainTools())
+
+		toolNames := make([]string, len(state.Tools()))
+		for i, tool := range state.Tools() {
+			toolNames[i] = tool.Name()
+		}
+
+		assert.Contains(t, toolNames, "bash")
+		assert.Contains(t, toolNames, "file_read")
+		assert.NotContains(t, toolNames, "apply_patch")
 	})
 }
 

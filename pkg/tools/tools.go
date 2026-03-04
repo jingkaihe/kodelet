@@ -59,7 +59,6 @@ var metaTools = []string{
 // defaultMainTools are the default tools for main agent
 var defaultMainTools = []string{
 	"bash",
-	"apply_patch",
 	"file_read",
 	"file_write",
 	"file_edit",
@@ -80,7 +79,6 @@ var todoTools = []string{
 // defaultSubAgentTools are the default tools for subagent
 var defaultSubAgentTools = []string{
 	"bash",
-	"apply_patch",
 	"file_read",
 	"file_write",
 	"file_edit",

@@ -304,11 +304,19 @@ func enforceApplyPatchMode(allowedTools []string, applyPatchEnabled bool, defaul
 }
 
 func enforceApplyPatchModeOnResolvedTools(tools []tooltypes.Tool, allowedTools []string, applyPatchEnabled bool) []tooltypes.Tool {
-	if !applyPatchEnabled {
-		return tools
-	}
 	if len(allowedTools) == 1 && allowedTools[0] == NoToolsMarker {
 		return tools
+	}
+
+	if !applyPatchEnabled {
+		filteredTools := make([]tooltypes.Tool, 0, len(tools))
+		for _, tool := range tools {
+			if tool.Name() == "apply_patch" {
+				continue
+			}
+			filteredTools = append(filteredTools, tool)
+		}
+		return filteredTools
 	}
 
 	filteredTools := make([]tooltypes.Tool, 0, len(tools))

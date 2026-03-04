@@ -1,5 +1,9 @@
 # Kodelet
 
+## 0.2.32.beta (2026-03-04)
+
+Made `apply_patch` opt-in so it is only available when `apply_patch_enabled: true` (including when `allowed_tools` explicitly lists it).
+
 ## 0.2.31.beta (2026-03-01)
 
 Simplified and clarified tool descriptions for `web_fetch`, `image_recognition`, and `code_execution`, including clearer prompt-usage guidance and shorter, more actionable examples.
