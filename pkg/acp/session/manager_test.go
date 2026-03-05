@@ -1,16 +1,20 @@
 package session
 
 import (
+	"context"
 	"testing"
 
+	"github.com/jingkaihe/kodelet/pkg/mcp"
+	"github.com/jingkaihe/kodelet/pkg/tools"
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNewManager_WithManagerConfig(t *testing.T) {
 	t.Run("creates manager with default config", func(t *testing.T) {
 		m := NewManager(ManagerConfig{})
 
-		assert.NotEmpty(t, m.id, "Manager should have a generated ID")
 		assert.NotNil(t, m.sessions, "Sessions map should be initialized")
 		assert.Empty(t, m.config.Provider)
 		assert.Empty(t, m.config.Model)
@@ -36,15 +40,7 @@ func TestNewManager_WithManagerConfig(t *testing.T) {
 		m := NewManager(cfg)
 
 		assert.Equal(t, cfg, m.config)
-		assert.NotEmpty(t, m.id)
 		assert.NotNil(t, m.sessions)
-	})
-
-	t.Run("each manager gets a unique ID", func(t *testing.T) {
-		m1 := NewManager(ManagerConfig{})
-		m2 := NewManager(ManagerConfig{})
-
-		assert.NotEqual(t, m1.id, m2.id, "Each manager should get a unique ID")
 	})
 }
 
@@ -116,4 +112,42 @@ func TestManager_BuildLLMConfig(t *testing.T) {
 		llmConfig := m.buildLLMConfig("")
 		assert.False(t, llmConfig.DisableSubagent)
 	})
+}
+
+func TestBuildSessionMCPStateOpts_UsesSessionProjectDirForCodeExecution(t *testing.T) {
+	t.Cleanup(viper.Reset)
+	viper.Set("mcp.execution_mode", "code")
+
+	originalSetup := setupMCPExecutionMode
+	t.Cleanup(func() {
+		setupMCPExecutionMode = originalSetup
+	})
+
+	var (
+		gotSessionID  string
+		gotProjectDir string
+	)
+	setupMCPExecutionMode = func(_ context.Context, manager *tools.MCPManager, sessionID string, projectDir string) (*mcp.ExecutionSetup, error) {
+		gotSessionID = sessionID
+		gotProjectDir = projectDir
+		require.NotNil(t, manager)
+		return &mcp.ExecutionSetup{
+			StateOpts: []tools.BasicStateOption{},
+		}, nil
+	}
+
+	kodeletMCPManager, err := tools.NewMCPManager(tools.MCPConfig{
+		Servers: map[string]tools.MCPServerConfig{},
+	})
+	require.NoError(t, err)
+
+	manager := &Manager{
+		kodeletMCPManager: kodeletMCPManager,
+	}
+
+	opts := manager.buildSessionMCPStateOpts(context.Background(), "session-123", "/tmp/worktree", nil)
+
+	assert.NotNil(t, opts)
+	assert.Equal(t, "session-123", gotSessionID)
+	assert.Equal(t, "/tmp/worktree", gotProjectDir)
 }

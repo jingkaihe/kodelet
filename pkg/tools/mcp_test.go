@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/mark3labs/mcp-go/client"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -375,4 +376,25 @@ func TestNewMCPClient_EnvironmentVariableResolution(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, client)
 	})
+}
+
+func TestMCPManager_Clone(t *testing.T) {
+	original := &MCPManager{
+		clients: map[string]*client.Client{
+			"example": nil,
+		},
+		whiteList: map[string][]string{
+			"example": {"tool-a", "tool-b"},
+		},
+	}
+
+	cloned := original.Clone()
+
+	assert.NotNil(t, cloned)
+	assert.NotSame(t, original, cloned)
+	assert.Equal(t, original.clients, cloned.clients)
+	assert.Equal(t, original.whiteList, cloned.whiteList)
+
+	cloned.whiteList["example"][0] = "changed"
+	assert.Equal(t, "tool-a", original.whiteList["example"][0])
 }

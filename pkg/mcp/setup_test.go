@@ -44,3 +44,27 @@ func TestGetSocketPath_DefaultUsesTempDirAndShortHash(t *testing.T) {
 	assert.Equal(t, filepath.Join(os.TempDir(), "mcp-"+shortHash("20260305T220000-1234567890abcdef")+".sock"), socketPath)
 	assert.LessOrEqual(t, len(socketPath), len(filepath.Join(os.TempDir(), "mcp-")+strings.Repeat("a", shortHashLength)+".sock"))
 }
+
+func TestGetStandaloneSocketPath_DefaultUsesWorkspaceDir(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	projectDir := t.TempDir()
+	socketPath, err := GetStandaloneSocketPath(projectDir)
+	require.NoError(t, err)
+
+	workspaceDir, err := DefaultWorkspaceDir(projectDir)
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(workspaceDir, standaloneSocketFilename), socketPath)
+}
+
+func TestGetStandaloneSocketPath_WithOverride(t *testing.T) {
+	t.Cleanup(viper.Reset)
+	viper.Set("mcp.code_execution.socket_path", "./custom-mcp.sock")
+
+	socketPath, err := GetStandaloneSocketPath("")
+	require.NoError(t, err)
+
+	expected, err := filepath.Abs("./custom-mcp.sock")
+	require.NoError(t, err)
+	assert.Equal(t, expected, socketPath)
+}

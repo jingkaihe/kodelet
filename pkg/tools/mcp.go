@@ -183,6 +183,28 @@ func (m *MCPManager) Merge(other *MCPManager) {
 	}
 }
 
+// Clone returns a shallow copy of the manager so callers can compose per-session
+// views without mutating the shared configured MCP manager.
+func (m *MCPManager) Clone() *MCPManager {
+	if m == nil {
+		return nil
+	}
+
+	clone := &MCPManager{
+		clients:   make(map[string]*client.Client, len(m.clients)),
+		whiteList: make(map[string][]string, len(m.whiteList)),
+	}
+
+	for name, c := range m.clients {
+		clone.clients[name] = c
+	}
+	for name, whiteList := range m.whiteList {
+		clone.whiteList[name] = slices.Clone(whiteList)
+	}
+
+	return clone
+}
+
 // ListMCPToolsIter iterates over all MCP tools from all servers and calls the iter function for each server.
 func (m *MCPManager) ListMCPToolsIter(
 	ctx context.Context,

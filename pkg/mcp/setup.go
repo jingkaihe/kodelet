@@ -26,7 +26,10 @@ type ExecutionSetup struct {
 	StateOpts []tools.BasicStateOption
 }
 
-const shortHashLength = 12
+const (
+	shortHashLength          = 12
+	standaloneSocketFilename = "kodelet-mcp.sock"
+)
 
 // DefaultWorkspaceDir returns the default cache directory for generated MCP code.
 // The cache is isolated per project and stored under ~/.kodelet to keep Kodelet-owned
@@ -74,6 +77,21 @@ func GetSocketPath(sessionID string) (string, error) {
 	}
 
 	return filepath.Join(os.TempDir(), fmt.Sprintf("mcp-%s.sock", shortHash(sessionID))), nil
+}
+
+// GetStandaloneSocketPath returns the default socket path for `kodelet mcp serve`.
+// Standalone servers are isolated per workspace so separate projects can run side by side.
+func GetStandaloneSocketPath(projectDir string) (string, error) {
+	if socketPath := strings.TrimSpace(viper.GetString("mcp.code_execution.socket_path")); socketPath != "" {
+		return filepath.Abs(socketPath)
+	}
+
+	workspaceDir, err := ResolveWorkspaceDir(projectDir)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to resolve MCP workspace directory")
+	}
+
+	return filepath.Join(workspaceDir, standaloneSocketFilename), nil
 }
 
 func shortHash(value string) string {
