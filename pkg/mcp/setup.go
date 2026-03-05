@@ -29,12 +29,12 @@ type ExecutionSetup struct {
 const shortHashLength = 12
 
 // DefaultWorkspaceDir returns the default cache directory for generated MCP code.
-// The cache is isolated per project to avoid polluting the working tree while still
-// keeping generated MCP code stable across sessions.
+// The cache is isolated per project and stored under ~/.kodelet to keep Kodelet-owned
+// artifacts in a single discoverable location.
 func DefaultWorkspaceDir(projectDir string) (string, error) {
-	cacheDir, err := os.UserCacheDir()
+	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		return "", errors.Wrap(err, "failed to resolve user cache directory")
+		return "", errors.Wrap(err, "failed to resolve user home directory")
 	}
 
 	resolvedProjectDir := strings.TrimSpace(projectDir)
@@ -50,7 +50,7 @@ func DefaultWorkspaceDir(projectDir string) (string, error) {
 		return "", errors.Wrap(err, "failed to resolve project directory")
 	}
 
-	return filepath.Join(cacheDir, "kodelet", "mcp", shortHash(absProjectDir)), nil
+	return filepath.Join(homeDir, ".kodelet", "mcp", "cache", shortHash(absProjectDir)), nil
 }
 
 // ResolveWorkspaceDir returns the configured MCP workspace directory, falling back to

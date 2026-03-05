@@ -512,8 +512,7 @@ mcp:
   # Code execution settings (only used when execution_mode = "code")
   code_execution:
     # Directory where MCP tool TypeScript files are generated.
-    # Default: per-project user cache directory (for example:
-    # ~/Library/Caches/kodelet/mcp/<project-hash> on macOS)
+    # Default: ~/.kodelet/mcp/cache/<project-hash>
     # Set explicitly if you want repo-local generated files instead.
     workspace_dir: ""
 

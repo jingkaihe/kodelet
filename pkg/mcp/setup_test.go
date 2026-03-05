@@ -17,9 +17,9 @@ func TestDefaultWorkspaceDir(t *testing.T) {
 	workspaceDir, err := DefaultWorkspaceDir(projectDir)
 	require.NoError(t, err)
 
-	cacheDir, err := os.UserCacheDir()
+	homeDir, err := os.UserHomeDir()
 	require.NoError(t, err)
-	assert.True(t, strings.HasPrefix(workspaceDir, filepath.Join(cacheDir, "kodelet", "mcp")+string(filepath.Separator)))
+	assert.True(t, strings.HasPrefix(workspaceDir, filepath.Join(homeDir, ".kodelet", "mcp", "cache")+string(filepath.Separator)))
 	assert.Len(t, filepath.Base(workspaceDir), shortHashLength)
 }
 
