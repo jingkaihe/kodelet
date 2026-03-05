@@ -1,5 +1,9 @@
 # Kodelet
 
+## 0.3.1.beta (2026-03-05)
+
+Isolated MCP code-generation caches per project under `~/.kodelet/mcp/cache/<project-hash>` and moved per-session sockets to short temp-dir paths, improving concurrent runs, ACP session/project-scoped MCP setup, and avoiding Unix socket path length issues.
+
 ## 0.3.0.beta (2026-03-05)
 
 Added `gpt-5.4` to Codex defaults and corrected `gpt-5.3-codex-spark` to use a `128_000` token context window.
