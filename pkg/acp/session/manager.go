@@ -178,7 +178,7 @@ func (m *Manager) initMCP(ctx context.Context) {
 
 		m.kodeletMCPManager = mcpManager
 
-		mcpSetup, err := mcp.SetupExecutionMode(ctx, mcpManager, m.id)
+		mcpSetup, err := mcp.SetupExecutionMode(ctx, mcpManager, m.id, "")
 		if err != nil && !errors.Is(err, mcp.ErrDirectMode) {
 			logger.G(ctx).WithError(err).Warn("Failed to set up MCP execution mode")
 			return
@@ -202,7 +202,7 @@ func (m *Manager) getMCPStateOpts() []tools.BasicStateOption {
 	return nil
 }
 
-func (m *Manager) buildLLMConfig() llmtypes.Config {
+func (m *Manager) buildLLMConfig(projectDir string) llmtypes.Config {
 	config, _ := llm.GetConfigFromViper()
 
 	if m.config.Provider != "" {
@@ -225,9 +225,10 @@ func (m *Manager) buildLLMConfig() llmtypes.Config {
 	}
 
 	executionMode := viper.GetString("mcp.execution_mode")
-	workspaceDir := viper.GetString("mcp.code_execution.workspace_dir")
-	if workspaceDir == "" {
-		workspaceDir = ".kodelet/mcp"
+	workspaceDir, err := mcp.ResolveWorkspaceDir(projectDir)
+	if err != nil {
+		logger.G(context.Background()).WithError(err).Warn("failed to resolve MCP workspace directory, using empty workspace")
+		workspaceDir = ""
 	}
 	config.MCPExecutionMode = executionMode
 	config.MCPWorkspaceDir = workspaceDir
@@ -288,7 +289,7 @@ func (m *Manager) connectMCPServers(ctx context.Context, servers []acptypes.MCPS
 }
 
 // setupClientMCP sets up client-provided MCP servers with code generation
-func (m *Manager) setupClientMCP(ctx context.Context, servers []acptypes.MCPServer) []tools.BasicStateOption {
+func (m *Manager) setupClientMCP(ctx context.Context, projectDir string, servers []acptypes.MCPServer) []tools.BasicStateOption {
 	if len(servers) == 0 {
 		return nil
 	}
@@ -306,12 +307,13 @@ func (m *Manager) setupClientMCP(ctx context.Context, servers []acptypes.MCPServ
 	if m.mcpSetup != nil && m.kodeletMCPManager != nil {
 		m.kodeletMCPManager.Merge(clientMCPManager)
 
-		workspaceDir := viper.GetString("mcp.code_execution.workspace_dir")
-		if workspaceDir == "" {
-			workspaceDir = ".kodelet/mcp"
+		workspaceDir, err := mcp.ResolveWorkspaceDir(projectDir)
+		if err != nil {
+			logger.G(ctx).WithError(err).Warn("Failed to resolve MCP workspace directory, using direct mode")
+			return []tools.BasicStateOption{tools.WithMCPTools(clientMCPManager)}
 		}
 
-		logger.G(ctx).Info("Regenerating MCP tool TypeScript API with client servers...")
+		logger.G(ctx).WithField("workspace_dir", workspaceDir).Info("Regenerating MCP tool TypeScript API with client servers...")
 		generator := codegen.NewMCPCodeGenerator(m.kodeletMCPManager, workspaceDir)
 		if err := generator.Generate(ctx); err != nil {
 			logger.G(ctx).WithError(err).Warn("Failed to regenerate MCP tool code, using direct mode")
@@ -323,7 +325,7 @@ func (m *Manager) setupClientMCP(ctx context.Context, servers []acptypes.MCPServ
 	}
 
 	// No kodelet MCP or not in code execution mode - set up code execution for client MCP
-	mcpSetup, err := mcp.SetupExecutionMode(ctx, clientMCPManager, m.id)
+	mcpSetup, err := mcp.SetupExecutionMode(ctx, clientMCPManager, m.id, projectDir)
 	if err != nil && !errors.Is(err, mcp.ErrDirectMode) {
 		logger.G(ctx).WithError(err).Warn("Failed to set up MCP execution mode for client servers")
 		return []tools.BasicStateOption{tools.WithMCPTools(clientMCPManager)}
@@ -341,7 +343,7 @@ func (m *Manager) setupClientMCP(ctx context.Context, servers []acptypes.MCPServ
 func (m *Manager) NewSession(ctx context.Context, req acptypes.NewSessionRequest) (*Session, error) {
 	m.initMCP(ctx)
 
-	llmConfig := m.buildLLMConfig()
+	llmConfig := m.buildLLMConfig(req.CWD)
 
 	thread, err := llm.NewThread(llmConfig)
 	if err != nil {
@@ -365,7 +367,7 @@ func (m *Manager) NewSession(ctx context.Context, req acptypes.NewSessionRequest
 		stateOpts = append(stateOpts, mcpOpts...)
 	}
 
-	if clientMCPOpts := m.setupClientMCP(ctx, req.MCPServers); clientMCPOpts != nil {
+	if clientMCPOpts := m.setupClientMCP(ctx, req.CWD, req.MCPServers); clientMCPOpts != nil {
 		stateOpts = append(stateOpts, clientMCPOpts...)
 	}
 
@@ -404,7 +406,7 @@ func (m *Manager) LoadSession(ctx context.Context, req acptypes.LoadSessionReque
 
 	m.initMCP(ctx)
 
-	llmConfig := m.buildLLMConfig()
+	llmConfig := m.buildLLMConfig(req.CWD)
 
 	thread, err := llm.NewThread(llmConfig)
 	if err != nil {
@@ -430,7 +432,7 @@ func (m *Manager) LoadSession(ctx context.Context, req acptypes.LoadSessionReque
 		stateOpts = append(stateOpts, mcpOpts...)
 	}
 
-	if clientMCPOpts := m.setupClientMCP(ctx, req.MCPServers); clientMCPOpts != nil {
+	if clientMCPOpts := m.setupClientMCP(ctx, req.CWD, req.MCPServers); clientMCPOpts != nil {
 		stateOpts = append(stateOpts, clientMCPOpts...)
 	}
 

@@ -3,9 +3,12 @@ package mcp
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/mcp/codegen"
@@ -23,22 +26,59 @@ type ExecutionSetup struct {
 	StateOpts []tools.BasicStateOption
 }
 
+const shortHashLength = 12
+
+// DefaultWorkspaceDir returns the default cache directory for generated MCP code.
+// The cache is isolated per project to avoid polluting the working tree while still
+// keeping generated MCP code stable across sessions.
+func DefaultWorkspaceDir(projectDir string) (string, error) {
+	cacheDir, err := os.UserCacheDir()
+	if err != nil {
+		return "", errors.Wrap(err, "failed to resolve user cache directory")
+	}
+
+	resolvedProjectDir := strings.TrimSpace(projectDir)
+	if resolvedProjectDir == "" {
+		resolvedProjectDir, err = os.Getwd()
+		if err != nil {
+			return "", errors.Wrap(err, "failed to resolve working directory")
+		}
+	}
+
+	absProjectDir, err := filepath.Abs(resolvedProjectDir)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to resolve project directory")
+	}
+
+	return filepath.Join(cacheDir, "kodelet", "mcp", shortHash(absProjectDir)), nil
+}
+
+// ResolveWorkspaceDir returns the configured MCP workspace directory, falling back to
+// the per-project cache directory when no explicit override is provided.
+func ResolveWorkspaceDir(projectDir string) (string, error) {
+	if workspaceDir := strings.TrimSpace(viper.GetString("mcp.code_execution.workspace_dir")); workspaceDir != "" {
+		return filepath.Abs(workspaceDir)
+	}
+
+	return DefaultWorkspaceDir(projectDir)
+}
+
 // GetSocketPath returns the absolute path to the MCP socket file for a given session.
 // Each session gets its own socket to prevent conflicts when multiple kodelet instances
 // run concurrently.
 // The socket path can be explicitly overridden via mcp.code_execution.socket_path config.
 func GetSocketPath(sessionID string) (string, error) {
 	// Check for explicit socket path override first
-	if socketPath := viper.GetString("mcp.code_execution.socket_path"); socketPath != "" {
+	if socketPath := strings.TrimSpace(viper.GetString("mcp.code_execution.socket_path")); socketPath != "" {
 		return filepath.Abs(socketPath)
 	}
 
-	workspaceDir := viper.GetString("mcp.code_execution.workspace_dir")
-	if workspaceDir == "" {
-		workspaceDir = ".kodelet/mcp"
-	}
-	socketPath := filepath.Join(workspaceDir, fmt.Sprintf("mcp-%s.sock", sessionID))
-	return filepath.Abs(socketPath)
+	return filepath.Join(os.TempDir(), fmt.Sprintf("mcp-%s.sock", shortHash(sessionID))), nil
+}
+
+func shortHash(value string) string {
+	hash := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(hash[:])[:shortHashLength]
 }
 
 // fileExists checks if a file exists
@@ -54,15 +94,15 @@ var ErrDirectMode = errors.New("MCP configured for direct mode")
 // Returns ErrDirectMode if execution mode is not "code" or mcpManager is nil.
 // The sessionID is used to create a unique socket path for this session, preventing conflicts
 // when multiple kodelet instances run concurrently.
-func SetupExecutionMode(ctx context.Context, mcpManager *tools.MCPManager, sessionID string) (*ExecutionSetup, error) {
+func SetupExecutionMode(ctx context.Context, mcpManager *tools.MCPManager, sessionID string, projectDir string) (*ExecutionSetup, error) {
 	executionMode := viper.GetString("mcp.execution_mode")
 	if executionMode != "code" {
 		return nil, ErrDirectMode
 	}
 
-	workspaceDir := viper.GetString("mcp.code_execution.workspace_dir")
-	if workspaceDir == "" {
-		workspaceDir = ".kodelet/mcp"
+	workspaceDir, err := ResolveWorkspaceDir(projectDir)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to resolve MCP workspace directory")
 	}
 
 	// Generate MCP tool files if needed
@@ -70,7 +110,7 @@ func SetupExecutionMode(ctx context.Context, mcpManager *tools.MCPManager, sessi
 	clientTSPath := filepath.Join(workspaceDir, "client.ts")
 
 	if regenerateOnStartup || !fileExists(clientTSPath) {
-		logger.G(ctx).Info("Generating MCP tool TypeScript API...")
+		logger.G(ctx).WithField("workspace_dir", workspaceDir).Info("Generating MCP tool TypeScript API...")
 		generator := codegen.NewMCPCodeGenerator(mcpManager, workspaceDir)
 		if err := generator.Generate(ctx); err != nil {
 			return nil, errors.Wrap(err, "failed to generate MCP tool code")

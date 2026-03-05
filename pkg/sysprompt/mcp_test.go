@@ -14,6 +14,7 @@ func TestFormatMCPServers(t *testing.T) {
 	t.Run("Format with MCP servers in code mode", func(t *testing.T) {
 		promptCtx := newPromptContext(nil)
 		promptCtx.MCPExecutionMode = "code"
+		promptCtx.MCPWorkspaceDir = "/tmp/mcp-workspace"
 		promptCtx.MCPServers = []string{"grafana", "lsp"}
 
 		result := promptCtx.formatMCPServers()
@@ -21,7 +22,7 @@ func TestFormatMCPServers(t *testing.T) {
 		assert.Contains(t, result, "MCP Servers Available")
 		assert.Contains(t, result, "grafana")
 		assert.Contains(t, result, "lsp")
-		assert.Contains(t, result, ".kodelet/mcp/servers/")
+		assert.Contains(t, result, "/tmp/mcp-workspace/servers/")
 	})
 
 	t.Run("Empty result when execution mode is not code", func(t *testing.T) {

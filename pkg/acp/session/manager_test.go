@@ -54,7 +54,7 @@ func TestManager_BuildLLMConfig(t *testing.T) {
 			DisableSubagent: true,
 		})
 
-		llmConfig := m.buildLLMConfig()
+		llmConfig := m.buildLLMConfig("")
 		assert.True(t, llmConfig.DisableSubagent)
 	})
 
@@ -63,7 +63,7 @@ func TestManager_BuildLLMConfig(t *testing.T) {
 			NoHooks: true,
 		})
 
-		llmConfig := m.buildLLMConfig()
+		llmConfig := m.buildLLMConfig("")
 		assert.True(t, llmConfig.NoHooks)
 	})
 
@@ -73,7 +73,7 @@ func TestManager_BuildLLMConfig(t *testing.T) {
 			Model:    "gpt-4",
 		})
 
-		llmConfig := m.buildLLMConfig()
+		llmConfig := m.buildLLMConfig("")
 		assert.Equal(t, "openai", llmConfig.Provider)
 		assert.Equal(t, "gpt-4", llmConfig.Model)
 	})
@@ -83,7 +83,7 @@ func TestManager_BuildLLMConfig(t *testing.T) {
 			MaxTokens: 8192,
 		})
 
-		llmConfig := m.buildLLMConfig()
+		llmConfig := m.buildLLMConfig("")
 		assert.Equal(t, 8192, llmConfig.MaxTokens)
 	})
 
@@ -92,7 +92,7 @@ func TestManager_BuildLLMConfig(t *testing.T) {
 			MaxTokens: 0,
 		})
 
-		llmConfig := m.buildLLMConfig()
+		llmConfig := m.buildLLMConfig("")
 		// Zero MaxTokens in ManagerConfig should not force LLM config to 0;
 		// the underlying viper default takes precedence.
 		assert.GreaterOrEqual(t, llmConfig.MaxTokens, 0)
@@ -103,7 +103,7 @@ func TestManager_BuildLLMConfig(t *testing.T) {
 			NoSkills: true,
 		})
 
-		llmConfig := m.buildLLMConfig()
+		llmConfig := m.buildLLMConfig("")
 		assert.NotNil(t, llmConfig.Skills)
 		assert.False(t, llmConfig.Skills.Enabled)
 	})
@@ -113,7 +113,7 @@ func TestManager_BuildLLMConfig(t *testing.T) {
 			DisableSubagent: false,
 		})
 
-		llmConfig := m.buildLLMConfig()
+		llmConfig := m.buildLLMConfig("")
 		assert.False(t, llmConfig.DisableSubagent)
 	})
 }

@@ -511,14 +511,18 @@ mcp:
 
   # Code execution settings (only used when execution_mode = "code")
   code_execution:
-    # Directory where MCP tool TypeScript files are generated
-    workspace_dir: ".kodelet/mcp"
+    # Directory where MCP tool TypeScript files are generated.
+    # Default: per-project user cache directory (for example:
+    # ~/Library/Caches/kodelet/mcp/<project-hash> on macOS)
+    # Set explicitly if you want repo-local generated files instead.
+    workspace_dir: ""
 
     # Whether to regenerate tool files on startup
     regenerate_on_startup: false
 
-    # Note: Socket path is now automatically generated per-session as
-    # {workspace_dir}/mcp-{session-id}.sock to allow concurrent kodelet instances
+    # Note: Socket path is now automatically generated per-session under
+    # the OS temp directory (for example: /tmp/mcp-<session-hash>.sock)
+    # to avoid Unix socket path length limits.
 
   # MCP servers configuration
   # Each server can be either stdio or SSE based

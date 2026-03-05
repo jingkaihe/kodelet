@@ -1,14 +1,15 @@
 Execute TypeScript/JavaScript code with access to MCP tools.
 
 This tool takes two parameters:
-- code_path: Path to the TypeScript/JavaScript file to execute (relative to .kodelet/mcp/)
+- code_path: Path to the TypeScript/JavaScript file to execute (relative to the MCP code workspace)
 - description: optional brief description of what the code does
 
 # Required workflow
-1. Discover available servers in `.kodelet/mcp/servers/`.
-2. Read generated files (`index.ts` + tool files) to get exact schemas.
-3. Write/update scripts in `.kodelet/mcp/` using `file_write` / `file_edit` / `apply_patch`.
-4. Execute using `code_path`.
+1. Discover the MCP code workspace path from the system prompt.
+2. Discover available servers in `<mcp-workspace>/servers/`.
+3. Read generated files (`index.ts` + tool files) to get exact schemas.
+4. Write/update scripts in the MCP code workspace using `file_write` / `file_edit` / `apply_patch`.
+5. Execute using `code_path`.
 
 # Key rules
 - Never guess tool schemas; always read generated files first.
@@ -45,11 +46,11 @@ if (out == null) {
 
 <good-example>
 # Discover and inspect schema first
-file_read .kodelet/mcp/servers/lsp/index.ts
-file_read .kodelet/mcp/servers/lsp/diagnostics.ts
+file_read /absolute/path/to/mcp-workspace/servers/lsp/index.ts
+file_read /absolute/path/to/mcp-workspace/servers/lsp/diagnostics.ts
 
 # Create script
-file_write .kodelet/mcp/check_diagnostics.ts
+file_write /absolute/path/to/mcp-workspace/check_diagnostics.ts
 ```typescript
 import * as lsp from './servers/lsp/index.js';
 const result = await lsp.diagnostics({ filePath: './main.go' });
