@@ -1,5 +1,9 @@
 # Kodelet
 
+## 0.2.35.beta (2026-03-05)
+
+Made bash tool `timeout` parameter explicitly required in tool description and schema to prevent the LLM from omitting it.
+
 ## 0.2.34.beta (2026-03-04)
 
 Removed `gopsutil` dependency and all its transitive dependencies (`purego`, `go-ole`, `plan9stats`, `perfstat`, `go-sysconf`, `numcpus`, `wmi`) from the module.
