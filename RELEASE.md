@@ -1,5 +1,9 @@
 # Kodelet
 
+## 0.3.0.beta (2026-03-05)
+
+Added `gpt-5.4` to Codex defaults and corrected `gpt-5.3-codex-spark` to use a `128_000` token context window.
+
 ## 0.2.35.beta (2026-03-05)
 
 Made bash tool `timeout` parameter explicitly required in tool description and schema to prevent the LLM from omitting it.

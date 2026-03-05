@@ -192,6 +192,42 @@ func TestLoadXAIPlatformDefaults(t *testing.T) {
 	assert.Equal(t, 131072, grok3MiniPricing.ContextWindow)
 }
 
+func TestLoadCodexPlatformDefaults(t *testing.T) {
+	models, pricing := loadCodexPlatformDefaults()
+
+	require.NotNil(t, models)
+	require.NotNil(t, pricing)
+
+	expectedReasoning := []string{
+		"gpt-5.3-codex",
+		"gpt-5.4",
+		"gpt-5.3-codex-spark",
+		"gpt-5.2-codex",
+		"gpt-5.2",
+		"gpt-5.1-codex-max",
+		"gpt-5.1-codex-mini",
+	}
+	assert.ElementsMatch(t, expectedReasoning, models.Reasoning)
+	assert.Empty(t, models.NonReasoning)
+
+	gpt54Pricing, exists := pricing["gpt-5.4"]
+	require.True(t, exists)
+	assert.Equal(t, 0.0, gpt54Pricing.Input)
+	assert.Equal(t, 0.0, gpt54Pricing.Output)
+	assert.Equal(t, 272_000, gpt54Pricing.ContextWindow)
+
+	sparkPricing, exists := pricing["gpt-5.3-codex-spark"]
+	require.True(t, exists)
+	assert.Equal(t, 0.0, sparkPricing.Input)
+	assert.Equal(t, 0.0, sparkPricing.Output)
+	assert.Equal(t, 128_000, sparkPricing.ContextWindow)
+
+	for _, model := range models.Reasoning {
+		_, exists := pricing[model]
+		assert.True(t, exists, "Model %s should have pricing information", model)
+	}
+}
+
 func TestLoadOpenAIPlatformDefaults(t *testing.T) {
 	models, pricing := loadOpenAIPlatformDefaults()
 

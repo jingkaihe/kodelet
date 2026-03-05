@@ -7,6 +7,7 @@ import "github.com/jingkaihe/kodelet/pkg/types/llm"
 var Models = llm.CustomModels{
 	Reasoning: []string{
 		"gpt-5.3-codex",
+		"gpt-5.4",
 		"gpt-5.3-codex-spark",
 		"gpt-5.2-codex",
 		"gpt-5.2",
@@ -24,10 +25,15 @@ var Pricing = llm.CustomPricing{
 		Output:        0.0,
 		ContextWindow: 272_000,
 	},
-	"gpt-5.3-codex-spark": llm.ModelPricing{
+	"gpt-5.4": llm.ModelPricing{
 		Input:         0.0, // Included in subscription
 		Output:        0.0,
 		ContextWindow: 272_000,
+	},
+	"gpt-5.3-codex-spark": llm.ModelPricing{
+		Input:         0.0, // Included in subscription
+		Output:        0.0,
+		ContextWindow: 128_000,
 	},
 	"gpt-5.2-codex": llm.ModelPricing{
 		Input:         0.0, // Included in subscription
@@ -55,4 +61,4 @@ var Pricing = llm.CustomPricing{
 const BaseURL = "https://chatgpt.com/backend-api/codex"
 
 // DefaultModel is the default model for Codex.
-const DefaultModel = "gpt-5.3-codex"
+const DefaultModel = "gpt-5.4"

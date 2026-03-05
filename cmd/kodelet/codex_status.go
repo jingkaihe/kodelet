@@ -19,7 +19,7 @@ This command checks if valid Codex credentials are available at ~/.kodelet/codex
 These credentials are created by running 'kodelet codex login'.
 
 If credentials are found, you can use Kodelet with the Codex provider to access
-ChatGPT-backed models like gpt-5.3-codex, gpt-5.3-codex-spark, gpt-5.2-codex, etc.`,
+ChatGPT-backed models like gpt-5.4, gpt-5.3-codex, gpt-5.3-codex-spark, etc.`,
 	Run: func(_ *cobra.Command, _ []string) {
 		runCodexStatus()
 	},
@@ -90,7 +90,8 @@ func runCodexStatus() {
 	fmt.Println("    platform: codex")
 	fmt.Println()
 	presenter.Info("Available Codex models:")
-	fmt.Println("  - gpt-5.3-codex (default)")
+	fmt.Println("  - gpt-5.4 (default)")
+	fmt.Println("  - gpt-5.3-codex")
 	fmt.Println("  - gpt-5.3-codex-spark")
 	fmt.Println("  - gpt-5.2-codex")
 	fmt.Println("  - gpt-5.2")
