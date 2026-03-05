@@ -49,7 +49,7 @@ Banned commands:
 # Input
 - command: required single-line bash command
 - description: required, 5-10 words
-- timeout: 10-120
+- timeout: required, 10-120
 
 # Rules
 - Use parallel tool calling for independent commands.
@@ -103,7 +103,7 @@ func (b *BashTool) MatchesCommand(command string) bool {
 type BashInput struct {
 	Description string `json:"description" jsonschema:"description=A description of the command to run"`
 	Command     string `json:"command" jsonschema:"description=The bash command to run"`
-	Timeout     int    `json:"timeout" jsonschema:"description=The timeout for the command in seconds. Default: 10"`
+	Timeout     int    `json:"timeout" jsonschema:"description=Timeout in seconds (10-120)"`
 }
 
 // GenerateSchema generates the JSON schema for the tool's input parameters
