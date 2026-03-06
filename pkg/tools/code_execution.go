@@ -26,7 +26,7 @@ type CodeExecutionTool struct {
 
 // CodeExecutionInput represents the input parameters for code execution
 type CodeExecutionInput struct {
-	CodePath    string `json:"code_path" jsonschema:"required,description=Path to the TypeScript/JavaScript file to execute (relative to .kodelet/mcp/)"`
+	CodePath    string `json:"code_path" jsonschema:"required,description=Path to the TypeScript/JavaScript file to execute (relative to the MCP code workspace)"`
 	Description string `json:"description,omitempty" jsonschema:"description=Brief description of what this code does"`
 }
 

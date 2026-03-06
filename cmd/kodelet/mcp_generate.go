@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/jingkaihe/kodelet/pkg/mcp"
 	"github.com/jingkaihe/kodelet/pkg/mcp/codegen"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/jingkaihe/kodelet/pkg/tools"
@@ -71,7 +72,11 @@ Explore the generated API:
 }
 
 func init() {
-	mcpGenerateCmd.Flags().String("output", ".kodelet/mcp", "Output directory for generated files")
+	defaultOutputDir, err := mcp.DefaultWorkspaceDir("")
+	if err != nil {
+		defaultOutputDir = ""
+	}
+	mcpGenerateCmd.Flags().String("output", defaultOutputDir, "Output directory for generated files")
 	mcpGenerateCmd.Flags().String("server", "", "Generate only for specific server")
 	mcpGenerateCmd.Flags().Bool("clean", false, "Clean output directory before generating")
 }

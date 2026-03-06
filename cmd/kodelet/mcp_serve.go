@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/mcp"
 	"github.com/jingkaihe/kodelet/pkg/mcp/rpc"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/jingkaihe/kodelet/pkg/tools"
@@ -22,8 +23,13 @@ type MCPServeConfig struct {
 }
 
 func NewMCPServeConfig() *MCPServeConfig {
+	socketPath, err := mcp.GetStandaloneSocketPath("")
+	if err != nil {
+		socketPath = filepath.Join(os.TempDir(), "kodelet-mcp.sock")
+	}
+
 	return &MCPServeConfig{
-		SocketPath: ".kodelet/mcp/mcp.sock",
+		SocketPath: socketPath,
 	}
 }
 

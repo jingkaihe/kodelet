@@ -257,9 +257,10 @@ var runCmd = &cobra.Command{
 
 		// Check if MCP code execution mode is enabled
 		executionMode := viper.GetString("mcp.execution_mode")
-		workspaceDir := viper.GetString("mcp.code_execution.workspace_dir")
-		if workspaceDir == "" {
-			workspaceDir = ".kodelet/mcp"
+		workspaceDir, err := mcp.ResolveWorkspaceDir("")
+		if err != nil {
+			presenter.Error(err, "Failed to resolve MCP workspace directory")
+			return
 		}
 
 		// Set MCP configuration in llmConfig for system prompt
@@ -293,7 +294,7 @@ var runCmd = &cobra.Command{
 
 		// Set up MCP execution mode
 		if mcpManager != nil {
-			mcpSetup, err := mcp.SetupExecutionMode(ctx, mcpManager, sessionID)
+			mcpSetup, err := mcp.SetupExecutionMode(ctx, mcpManager, sessionID, "")
 			if err != nil && !errors.Is(err, mcp.ErrDirectMode) {
 				presenter.Error(err, "Failed to set up MCP execution mode")
 				return

@@ -30,6 +30,7 @@ type PromptContext struct {
 
 	// MCP tools information
 	MCPExecutionMode string
+	MCPWorkspaceDir  string
 	MCPServers       []string // List of available MCP server names
 }
 
@@ -63,6 +64,7 @@ func newPromptContext(contexts map[string]string) *PromptContext {
 		ActiveContextFile: AgentsMd,
 		Args:              map[string]string{},
 		MCPExecutionMode:  "",
+		MCPWorkspaceDir:   "",
 		MCPServers:        []string{},
 	}
 }
@@ -70,6 +72,7 @@ func newPromptContext(contexts map[string]string) *PromptContext {
 // WithMCPConfig adds MCP configuration to the prompt context
 func (ctx *PromptContext) WithMCPConfig(executionMode, workspaceDir string) *PromptContext {
 	ctx.MCPExecutionMode = executionMode
+	ctx.MCPWorkspaceDir = workspaceDir
 	if executionMode == "code" && workspaceDir != "" {
 		ctx.MCPServers = loadMCPServers(workspaceDir)
 	}

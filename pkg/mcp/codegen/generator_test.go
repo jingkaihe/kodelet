@@ -1,9 +1,12 @@
 package codegen
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestBuildTypeScriptType_NestedArrayOfObjects(t *testing.T) {
@@ -193,4 +196,19 @@ func TestExtractSchemaProperties_NestedArrays(t *testing.T) {
 	assert.True(t, filtersProp.IsArrayOfObjects)
 
 	t.Logf("Generated TypeScript type:\n%s", matchesProp.TypeScriptType)
+}
+
+func TestGenerateClient_UsesWorkspaceRelativeSocketDefault(t *testing.T) {
+	outputDir := t.TempDir()
+	generator := NewMCPCodeGenerator(nil, outputDir)
+
+	err := generator.generateClient()
+	require.NoError(t, err)
+
+	clientTS, err := os.ReadFile(filepath.Join(outputDir, "client.ts"))
+	require.NoError(t, err)
+
+	assert.Contains(t, string(clientTS), "const CURRENT_DIR = path.dirname(fileURLToPath(import.meta.url));")
+	assert.Contains(t, string(clientTS), "path.join(CURRENT_DIR, 'kodelet-mcp.sock')")
+	assert.NotContains(t, string(clientTS), "/tmp/kodelet-mcp.sock")
 }
