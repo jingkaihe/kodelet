@@ -10,6 +10,68 @@ import (
 	"github.com/spf13/cobra"
 )
 
+func recommendedSetupConfigYAML() string {
+	return `aliases:
+    gemini-flash: gemini-2.5-flash
+    gemini-pro: gemini-2.5-pro
+    haiku-45: claude-haiku-4-5-20251001
+    opus-46: claude-opus-4-6
+    sonnet-46: claude-sonnet-4-6
+max_tokens: 16000
+model: sonnet-46
+profile: default
+thinking_budget_tokens: 8000
+weak_model: haiku-45
+weak_model_max_tokens: 8192
+profiles:
+    hybrid:
+        max_tokens: 16000
+        model: sonnet-46
+        subagent_args: "--profile openai-subagent"
+        thinking_budget_tokens: 8000
+        weak_model: haiku-45
+        weak_model_max_tokens: 8192
+    openai-subagent:
+        disable_fs_search_tools: true
+        tool_mode: patch
+        model: gpt-5.2-codex
+        openai:
+            use_responses_api: true
+        provider: openai
+        reasoning_effort: high
+    openai:
+        disable_fs_search_tools: true
+        tool_mode: patch
+        max_tokens: 16000
+        model: gpt-5.2-codex
+        openai:
+            use_responses_api: true
+        provider: openai
+        reasoning_effort: high
+        weak_model: gpt-5.1-codex-mini
+    premium:
+        max_tokens: 64000
+        model: opus-46
+        thinking_budget_tokens: 32000
+        weak_model: haiku-45
+        weak_model_max_tokens: 8192
+    google:
+        max_tokens: 16000
+        model: gemini-pro
+        provider: google
+        weak_model: gemini-flash
+        weak_model_max_tokens: 8192
+    xai:
+        max_tokens: 16000
+        model: grok-code-fast-1
+        openai:
+            platform: xai
+        provider: openai
+        reasoning_effort: none
+        weak_model: grok-code-fast-1
+`
+}
+
 var setupCmd = &cobra.Command{
 	Use:   "setup",
 	Short: "Set up Kodelet configuration",
@@ -96,66 +158,7 @@ var setupCmd = &cobra.Command{
 		}
 
 		// Create config with the excellent defaults
-		configContent := `aliases:
-    gemini-flash: gemini-2.5-flash
-    gemini-pro: gemini-2.5-pro
-    haiku-45: claude-haiku-4-5-20251001
-    opus-46: claude-opus-4-6
-    sonnet-46: claude-sonnet-4-6
-max_tokens: 16000
-model: sonnet-46
-profile: default
-thinking_budget_tokens: 8000
-weak_model: haiku-45
-weak_model_max_tokens: 8192
-profiles:
-    hybrid:
-        max_tokens: 16000
-        model: sonnet-46
-        subagent_args: "--profile openai-subagent"
-        thinking_budget_tokens: 8000
-        weak_model: haiku-45
-        weak_model_max_tokens: 8192
-    openai-subagent:
-        allowed_tools:
-            - glob_tool
-            - grep_tool
-        tool_mode: patch_only
-        model: gpt-5.2-codex
-        openai:
-            use_responses_api: true
-        provider: openai
-        reasoning_effort: high
-    openai:
-        tool_mode: patch_only
-        max_tokens: 16000
-        model: gpt-5.2-codex
-        openai:
-            use_responses_api: true
-        provider: openai
-        reasoning_effort: high
-        weak_model: gpt-5.1-codex-mini
-    premium:
-        max_tokens: 16000
-        model: opus-46
-        thinking_budget_tokens: 8000
-        weak_model: haiku-45
-        weak_model_max_tokens: 8192
-    google:
-        max_tokens: 16000
-        model: gemini-pro
-        provider: google
-        weak_model: gemini-flash
-        weak_model_max_tokens: 8192
-    xai:
-        max_tokens: 16000
-        model: grok-code-fast-1
-        openai:
-            platform: xai
-        provider: openai
-        reasoning_effort: none
-        weak_model: grok-code-fast-1
-`
+		configContent := recommendedSetupConfigYAML()
 
 		err = os.WriteFile(configFile, []byte(configContent), 0o644)
 		if err != nil {

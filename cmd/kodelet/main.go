@@ -117,7 +117,7 @@ func main() {
 	rootCmd.PersistentFlags().String("sysprompt", "", "Path to custom system prompt template file")
 	rootCmd.PersistentFlags().StringToString("sysprompt-arg", map[string]string{}, "Arguments passed to custom system prompt template (e.g. --sysprompt-arg project=kodelet)")
 	rootCmd.PersistentFlags().StringSlice("allowed-tools", []string{}, "Comma-separated list of allowed tools for main agent (e.g. 'bash,file_read,grep_tool')")
-	rootCmd.PersistentFlags().String("tool-mode", "full", "Tool interaction mode (full, patch_only)")
+	rootCmd.PersistentFlags().String("tool-mode", "full", "Tool interaction mode (full, patch, patch_only)")
 	rootCmd.PersistentFlags().String("anthropic-api-access", "auto", "Anthropic API access mode (auto, subscription, api-key)")
 	rootCmd.PersistentFlags().String("profile", "", "Configuration profile to use (overrides config file)")
 	rootCmd.PersistentFlags().Bool("no-skills", false, "Disable agentic skills")

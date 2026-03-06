@@ -766,6 +766,26 @@ func TestWithSubAgentToolsFromConfig(t *testing.T) {
 		assert.NotContains(t, toolNames, "file_edit")
 	})
 
+	t.Run("patch alias with disabled fs search tools keeps bash inspection and apply_patch", func(t *testing.T) {
+		config := llmtypes.Config{
+			ToolMode:             llmtypes.ToolModePatch,
+			DisableFSSearchTools: true,
+		}
+		state := NewBasicState(ctx, WithLLMConfig(config), WithSubAgentToolsFromConfig())
+
+		toolNames := make([]string, len(state.Tools()))
+		for i, tool := range state.Tools() {
+			toolNames[i] = tool.Name()
+		}
+
+		assert.Contains(t, toolNames, "bash")
+		assert.Contains(t, toolNames, "apply_patch")
+		assert.Contains(t, toolNames, "web_fetch")
+		assert.NotContains(t, toolNames, "file_read")
+		assert.NotContains(t, toolNames, "grep_tool")
+		assert.NotContains(t, toolNames, "glob_tool")
+	})
+
 	t.Run("full mode removes apply_patch from allowed_tools", func(t *testing.T) {
 		config := llmtypes.Config{
 			ToolMode:     llmtypes.ToolModeFull,

@@ -162,7 +162,7 @@ This tool is ideal for tasks that involves code searching, architecture analysis
 // Description returns the description of the tool
 func (t *SubAgentTool) Description() string {
 	data := workflowTemplateData{
-		PatchOnly:            t.toolMode == llmtypes.ToolModePatchOnly,
+		PatchOnly:            t.toolMode.IsPatchMode(),
 		DisableFSSearchTools: t.disableFSSearchTools,
 	}
 

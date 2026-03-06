@@ -707,7 +707,8 @@ allowed_commands: []  # Empty means use default banned commands
 # Tool behavior configuration
 # Tool interaction mode
 # - full: standard tool access
-# - patch_only: use apply_patch plus search/navigation tools instead of direct file reads/writes
+# - patch: use apply_patch plus search/navigation tools instead of direct file reads/writes
+# - patch_only: legacy alias for patch
 tool_mode: full
 
 # MCP configuration
@@ -784,9 +785,9 @@ profile: "premium"  # Optional: specify the active profile
 profiles:
   premium:
     weak_model: "sonnet-46" # alias to "claude-sonnet-4-6"
-    max_tokens: 16000
+    max_tokens: 64000
     weak_model_max_tokens: 8192
-    thinking_budget_tokens: 8000
+    thinking_budget_tokens: 32000
 
   openai:
     provider: "openai"
@@ -795,6 +796,8 @@ profiles:
     weak_model: "gpt-4.1-mini"
     max_tokens: 16000
     reasoning_effort: "medium"
+    tool_mode: "patch"
+    disable_fs_search_tools: true
 
   xai:
     provider: "openai"
@@ -819,8 +822,8 @@ profiles:
     provider: "openai"
     model: "o3"
     reasoning_effort: "high"
-    tool_mode: "patch_only"
-    allowed_tools: ["glob_tool", "grep_tool", "thinking"]
+    tool_mode: "patch"
+    disable_fs_search_tools: true
 
 # Model aliases work across all profiles
 aliases:

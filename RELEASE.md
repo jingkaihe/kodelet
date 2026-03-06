@@ -3,6 +3,7 @@
 ## 0.3.2.beta (2026-03-06)
 
 Replaced `apply_patch_enabled` with `tool_mode`, adding `tool_mode: patch_only` to represent apply-patch-only workflows and to disable `file_read`, `file_write`, and `file_edit` together.
+Also provided options to disable `grep` and `glob` tools
 
 ## 0.3.1.beta (2026-03-05)
 

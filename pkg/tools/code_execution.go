@@ -110,7 +110,7 @@ func (t *CodeExecutionTool) Description() string {
 		PatchOnly            bool
 		DisableFSSearchTools bool
 	}{
-		PatchOnly:            t.toolMode == llmtypes.ToolModePatchOnly,
+		PatchOnly:            t.toolMode.IsPatchMode(),
 		DisableFSSearchTools: t.disableFSSearchTools,
 	}
 

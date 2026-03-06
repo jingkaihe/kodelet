@@ -16,9 +16,16 @@ const (
 
 	// ToolModeFull allows the standard direct file tools.
 	ToolModeFull ToolMode = "full"
-	// ToolModePatchOnly restricts file operations to apply_patch plus search/navigation tools.
+	// ToolModePatch restricts file operations to apply_patch plus search/navigation tools.
+	ToolModePatch ToolMode = "patch"
+	// ToolModePatchOnly is a backwards-compatible alias for patch mode.
 	ToolModePatchOnly ToolMode = "patch_only"
 )
+
+// IsPatchMode reports whether the tool mode should use apply_patch-only workflows.
+func (m ToolMode) IsPatchMode() bool {
+	return m == ToolModePatch || m == ToolModePatchOnly
+}
 
 // Config holds the configuration for the LLM client
 type Config struct {
@@ -33,7 +40,7 @@ type Config struct {
 	AllowedCommands      []string           `mapstructure:"allowed_commands" json:"allowed_commands" yaml:"allowed_commands"`                   // AllowedCommands is a list of allowed command patterns for the bash tool
 	AllowedDomainsFile   string             `mapstructure:"allowed_domains_file" json:"allowed_domains_file" yaml:"allowed_domains_file"`       // AllowedDomainsFile is the path to the file containing allowed domains for web_fetch tool
 	AllowedTools         []string           `mapstructure:"allowed_tools" json:"allowed_tools" yaml:"allowed_tools"`                            // AllowedTools is a list of allowed tools for the main agent (empty means use defaults)
-	ToolMode             ToolMode           `mapstructure:"tool_mode" json:"tool_mode" yaml:"tool_mode"`                                        // ToolMode controls file-interaction behavior (e.g. full or patch_only)
+	ToolMode             ToolMode           `mapstructure:"tool_mode" json:"tool_mode" yaml:"tool_mode"`                                        // ToolMode controls file-interaction behavior (e.g. full or patch)
 	AnthropicAPIAccess   AnthropicAPIAccess `mapstructure:"anthropic_api_access" json:"anthropic_api_access" yaml:"anthropic_api_access"`       // AnthropicAPIAccess controls how to authenticate with Anthropic API
 	AnthropicAccount     string             `mapstructure:"anthropic_account" json:"anthropic_account" yaml:"anthropic_account"`                // AnthropicAccount specifies which Anthropic subscription account to use
 	UseCopilot           bool               `mapstructure:"use_copilot" json:"use_copilot" yaml:"use_copilot"`                                  // UseCopilot enables GitHub Copilot subscription for OpenAI requests

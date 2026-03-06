@@ -58,9 +58,9 @@ profiles:
   premium:
     model: "claude-opus-4-6"
     weak_model: "claude-sonnet-4-6"
-    max_tokens: 16000
+    max_tokens: 64000
     weak_model_max_tokens: 8192
-    thinking_budget_tokens: 8000
+    thinking_budget_tokens: 32000
 
   fast:
     model: "haiku-45"
@@ -76,6 +76,8 @@ profiles:
     weak_model: "gpt-5.2-codex-mini"
     max_tokens: 16000
     reasoning_effort: "medium"
+    tool_mode: "patch"
+    disable_fs_search_tools: true
     openai:
       use_responses_api: true
 
@@ -111,6 +113,8 @@ profiles:
     weak_model: "gpt-5.2-codex-mini"
     max_tokens: 16000
     reasoning_effort: "medium"
+    tool_mode: "patch"
+    disable_fs_search_tools: true
     openai:
       use_responses_api: true
 
@@ -134,7 +138,8 @@ profiles:
     provider: "openai"
     model: "o3"
     reasoning_effort: "high"
-    allowed_tools: ["file_read", "glob_tool", "grep_tool", "thinking"]
+    tool_mode: "patch"
+    disable_fs_search_tools: true
 
 # OpenAI specific settings
 # Reasoning effort for OpenAI models (low, medium, high)
@@ -198,8 +203,9 @@ allowed_domains_file: "~/.kodelet/allowed_domains.txt"
 #                  glob_tool, todo_read, todo_write, web_fetch, image_recognition
 # Tool interaction mode.
 # - full: standard tool access
-# - patch_only: removes file_read, file_write, and file_edit from both main-agent and subagent
-#   toolsets, and ensures apply_patch is available.
+# - patch: removes file_read, file_write, and file_edit from both main-agent and subagent
+#   toolsets, and ensures apply_patch is available
+# - patch_only: legacy alias for patch
 tool_mode: full
 
 # Disable built-in filesystem search tools (glob_tool and grep_tool).
@@ -347,6 +353,8 @@ subagent_args: ""
 #     provider: "openai"
 #     model: "gpt-4o-mini"
 #     max_tokens: 2048
+#     tool_mode: "patch"
+#     disable_fs_search_tools: true
 #
 # subagent_args: "--profile openai-subagent"
 

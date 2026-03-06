@@ -270,7 +270,7 @@ func discoverWorkflows(ctx context.Context) map[string]*fragments.Fragment {
 }
 
 func enforceToolMode(allowedTools []string, toolMode llmtypes.ToolMode, defaultTools []string) []string {
-	if toolMode != llmtypes.ToolModePatchOnly {
+	if !toolMode.IsPatchMode() {
 		return allowedTools
 	}
 	if len(allowedTools) == 1 && allowedTools[0] == NoToolsMarker {
@@ -307,7 +307,7 @@ func enforceToolModeOnResolvedTools(tools []tooltypes.Tool, allowedTools []strin
 		return tools
 	}
 
-	if toolMode != llmtypes.ToolModePatchOnly {
+	if !toolMode.IsPatchMode() {
 		filteredTools := make([]tooltypes.Tool, 0, len(tools))
 		for _, tool := range tools {
 			if tool.Name() == "apply_patch" {
