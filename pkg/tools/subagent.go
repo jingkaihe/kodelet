@@ -56,15 +56,24 @@ func (r *SubAgentToolResult) AssistantFacing() string {
 
 // SubAgentTool provides functionality to spawn sub-agents for complex tasks
 type SubAgentTool struct {
-	workflows       map[string]*fragments.Fragment
-	workflowEnabled bool
+	workflows            map[string]*fragments.Fragment
+	workflowEnabled      bool
+	toolMode             llmtypes.ToolMode
+	disableFSSearchTools bool
 }
 
 // NewSubAgentTool creates a new sub-agent tool with discovered workflows
-func NewSubAgentTool(discoveredWorkflows map[string]*fragments.Fragment, workflowEnabled bool) *SubAgentTool {
+func NewSubAgentTool(discoveredWorkflows map[string]*fragments.Fragment, workflowEnabled bool, disableFSSearchTools bool) *SubAgentTool {
+	return NewSubAgentToolWithOptions(discoveredWorkflows, workflowEnabled, llmtypes.ToolModeFull, disableFSSearchTools)
+}
+
+// NewSubAgentToolWithOptions creates a new sub-agent tool with rendering options.
+func NewSubAgentToolWithOptions(discoveredWorkflows map[string]*fragments.Fragment, workflowEnabled bool, toolMode llmtypes.ToolMode, disableFSSearchTools bool) *SubAgentTool {
 	return &SubAgentTool{
-		workflows:       discoveredWorkflows,
-		workflowEnabled: workflowEnabled,
+		workflows:            discoveredWorkflows,
+		workflowEnabled:      workflowEnabled,
+		toolMode:             toolMode,
+		disableFSSearchTools: disableFSSearchTools,
 	}
 }
 
@@ -88,7 +97,9 @@ func (t *SubAgentTool) GenerateSchema() *jsonschema.Schema {
 
 // workflowTemplateData holds the data for rendering workflow descriptions
 type workflowTemplateData struct {
-	Workflows []workflowData
+	Workflows            []workflowData
+	PatchOnly            bool
+	DisableFSSearchTools bool
 }
 
 type workflowData struct {
@@ -113,12 +124,12 @@ This tool is ideal for tasks that involves code searching, architecture analysis
 - cwd: (Optional) Specify when you want the subagent to work in a directory other than the current working directory. Must be an absolute path.
 
 ## Common Use Cases
-* If you want to do multi-turn search using grep_tool and file_read, and you don't know exactly what keywords to use. You should use this subagent tool.
+* If you want to do multi-turn search using {{if .PatchOnly}}{{if .DisableFSSearchTools}}bash plus fd/rg/sed{{else}}grep_tool / glob_tool plus bash inspection{{end}}{{else}}{{if .DisableFSSearchTools}}bash plus fd/rg and file_read{{else}}grep_tool and file_read{{end}}{{end}}, and you don't know exactly what keywords to use. You should use this subagent tool.
 
 ## DO NOT use this tool when:
-* You are 100% sure about the keywords to use. e.g. "[Ll]og" - Use ${grep_tool} instead.
-* You just want to find where certain files or directories are located - Use find command via ${bash} tool instead.
-* You just want to look for the content of a file - Use ${file_read} tool instead.
+* You are 100% sure about the keywords to use. e.g. "[Ll]og" - {{if .DisableFSSearchTools}}Use rg via ${bash} instead.{{else}}Use ${grep_tool} instead.{{end}}
+* You just want to find where certain files or directories are located - {{if .DisableFSSearchTools}}Use fd via ${bash} instead.{{else}}Use find command via ${bash} tool instead.{{end}}
+* You just want to look for the content of a file - {{if .PatchOnly}}Use ${bash} with sed/cat instead.{{else}}Use ${file_read} tool instead.{{end}}
 
 ## Important Notes
 1. The subagent does not have any memory of previous invocations, and you cannot talk to it back and forth. As a result, your question must be concise and to the point.
@@ -150,7 +161,10 @@ This tool is ideal for tasks that involves code searching, architecture analysis
 
 // Description returns the description of the tool
 func (t *SubAgentTool) Description() string {
-	data := workflowTemplateData{}
+	data := workflowTemplateData{
+		PatchOnly:            t.toolMode.IsPatchMode(),
+		DisableFSSearchTools: t.disableFSSearchTools,
+	}
 
 	if t.workflowEnabled && len(t.workflows) > 0 {
 		// Build sorted workflow data

@@ -1,16 +1,19 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
 	"sync"
+	"text/template"
 	"time"
 
 	"github.com/invopop/jsonschema"
 	"github.com/jingkaihe/kodelet/pkg/skills"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
 	"go.opentelemetry.io/otel/attribute"
@@ -18,10 +21,12 @@ import (
 
 // SkillTool provides access to agentic skills
 type SkillTool struct {
-	skills       map[string]*skills.Skill
-	enabled      bool
-	activeSkills map[string]bool
-	mu           sync.RWMutex
+	skills               map[string]*skills.Skill
+	enabled              bool
+	toolMode             llmtypes.ToolMode
+	disableFSSearchTools bool
+	activeSkills         map[string]bool
+	mu                   sync.RWMutex
 }
 
 // SkillInput defines the input parameters for the skill tool
@@ -38,11 +43,18 @@ type SkillToolResult struct {
 }
 
 // NewSkillTool creates a new skill tool with discovered skills
-func NewSkillTool(discoveredSkills map[string]*skills.Skill, enabled bool) *SkillTool {
+func NewSkillTool(discoveredSkills map[string]*skills.Skill, enabled bool, disableFSSearchTools bool) *SkillTool {
+	return NewSkillToolWithOptions(discoveredSkills, enabled, llmtypes.ToolModeFull, disableFSSearchTools)
+}
+
+// NewSkillToolWithOptions creates a new skill tool with rendering options.
+func NewSkillToolWithOptions(discoveredSkills map[string]*skills.Skill, enabled bool, toolMode llmtypes.ToolMode, disableFSSearchTools bool) *SkillTool {
 	return &SkillTool{
-		skills:       discoveredSkills,
-		enabled:      enabled,
-		activeSkills: make(map[string]bool),
+		skills:               discoveredSkills,
+		enabled:              enabled,
+		toolMode:             toolMode,
+		disableFSSearchTools: disableFSSearchTools,
+		activeSkills:         make(map[string]bool),
 	}
 }
 
@@ -69,14 +81,27 @@ func (t *SkillTool) Description() string {
 - This is a BLOCKING REQUIREMENT: invoke the relevant Skill tool BEFORE generating any other response about the task
 - Only use skills listed in "Available Skills" below
 - Do not invoke a skill that is already running
-- Each skill has a directory containing supporting files (references, examples, scripts, templates) that you can read using file_read or glob_tool
+- Each skill has a directory containing supporting files (references, examples, scripts, templates) that you can {{if .PatchOnly}}{{if .DisableFSSearchTools}}inspect using fd/rg/sed/cat via bash{{else}}locate with glob_tool and inspect via bash using sed/cat/rg{{end}}{{else}}read using file_read{{if .DisableFSSearchTools}} or fd via bash{{else}} or glob_tool{{end}}{{end}}
 - Do NOT modify any files in the skill directory - treat skill contents as read-only
-- If you need to modify a script or template from the skill directory, copy it to the working directory first then read it using file_read, and update using file_edit tool
+- If you need to modify a script or template from the skill directory, copy it to the working directory first{{if .PatchOnly}} and update it using apply_patch{{else}} then read it using file_read, and update using file_edit tool{{end}}
 - For Python scripts, use uv for managing dependencies, preferably uv with inline metadata dependencies if the script to run is a single file - do NOT install packages using system pip
 
 ## Available Skills
 
 `)
+
+	tmpl := template.Must(template.New("skill_description").Parse(sb.String()))
+	var rendered bytes.Buffer
+	if err := tmpl.Execute(&rendered, struct {
+		PatchOnly            bool
+		DisableFSSearchTools bool
+	}{
+		PatchOnly:            t.toolMode.IsPatchMode(),
+		DisableFSSearchTools: t.disableFSSearchTools,
+	}); err == nil {
+		sb.Reset()
+		sb.WriteString(rendered.String())
+	}
 
 	if !t.enabled || len(t.skills) == 0 {
 		sb.WriteString("Skills are currently not available.\n")

@@ -472,25 +472,25 @@ profiles:
         weak_model: haiku-45
         weak_model_max_tokens: 8192
     openai-subagent:
-        allowed_tools:
-            - file_read
-            - glob_tool
-            - grep_tool
+        disable_fs_search_tools: true
+        tool_mode: patch
         model: gpt-5.2-codex
         openai:
             use_responses_api: true
         provider: openai
         reasoning_effort: high
     openai:
+        disable_fs_search_tools: true
         max_tokens: 16000
         model: gpt-5
         provider: openai
         reasoning_effort: medium
+        tool_mode: patch
         weak_model: gpt-5
     premium:
-        max_tokens: 16000
+        max_tokens: 64000
         model: opus-46
-        thinking_budget_tokens: 8000
+        thinking_budget_tokens: 32000
         weak_model: sonnet-46
         weak_model_max_tokens: 8192
     google:

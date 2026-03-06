@@ -68,16 +68,17 @@ type Server struct {
 
 // ServerConfig holds configuration for the ACP server
 type ServerConfig struct {
-	Provider           string
-	Model              string
-	MaxTokens          int
-	NoSkills           bool
-	NoWorkflows        bool
-	DisableSubagent    bool
-	NoHooks            bool
-	MaxTurns           int
-	CompactRatio       float64
-	DisableAutoCompact bool
+	Provider             string
+	Model                string
+	MaxTokens            int
+	NoSkills             bool
+	NoWorkflows          bool
+	DisableFSSearchTools bool
+	DisableSubagent      bool
+	NoHooks              bool
+	MaxTurns             int
+	CompactRatio         float64
+	DisableAutoCompact   bool
 }
 
 // Option configures the server
@@ -124,16 +125,17 @@ func NewServer(opts ...Option) *Server {
 	}
 
 	s.sessionManager = session.NewManager(session.ManagerConfig{
-		Provider:           s.config.Provider,
-		Model:              s.config.Model,
-		MaxTokens:          s.config.MaxTokens,
-		NoSkills:           s.config.NoSkills,
-		NoWorkflows:        s.config.NoWorkflows,
-		DisableSubagent:    s.config.DisableSubagent,
-		NoHooks:            s.config.NoHooks,
-		MaxTurns:           s.config.MaxTurns,
-		CompactRatio:       s.config.CompactRatio,
-		DisableAutoCompact: s.config.DisableAutoCompact,
+		Provider:             s.config.Provider,
+		Model:                s.config.Model,
+		MaxTokens:            s.config.MaxTokens,
+		NoSkills:             s.config.NoSkills,
+		NoWorkflows:          s.config.NoWorkflows,
+		DisableFSSearchTools: s.config.DisableFSSearchTools,
+		DisableSubagent:      s.config.DisableSubagent,
+		NoHooks:              s.config.NoHooks,
+		MaxTurns:             s.config.MaxTurns,
+		CompactRatio:         s.config.CompactRatio,
+		DisableAutoCompact:   s.config.DisableAutoCompact,
 	})
 
 	fp, err := fragments.NewFragmentProcessor()

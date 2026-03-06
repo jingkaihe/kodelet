@@ -27,59 +27,61 @@ import (
 )
 
 type RunConfig struct {
-	ResumeConvID       string
-	Follow             bool
-	NoSave             bool
-	Headless           bool              // Use structured JSON output instead of console formatting
-	StreamDeltas       bool              // Stream partial text deltas in headless mode
-	Images             []string          // Image paths or URLs to include with the message
-	MaxTurns           int               // Maximum number of turns within a single SendMessage call
-	CompactRatio       float64           // Ratio of context window at which to trigger auto-compact (0.0-1.0)
-	DisableAutoCompact bool              // Disable auto-compact functionality
-	FragmentName       string            // Name of fragment to use
-	FragmentArgs       map[string]string // Arguments to pass to fragment
-	FragmentDirs       []string          // Additional fragment directories
-	IncludeHistory     bool              // Include historical conversation data in headless streaming
-	NoSkills           bool              // Disable agentic skills
-	NoHooks            bool              // Disable agent lifecycle hooks
-	NoMCP              bool              // Disable MCP tools
-	NoTools            bool              // Disable all tools (for simple query-response usage)
-	DisableSubagent    bool              // Disable the subagent tool and remove subagent-related system prompt context
-	EnableTodos        bool              // Enable todo_read and todo_write tools for the main agent
-	Sysprompt          string            // Path to custom system prompt template file
-	SyspromptArgs      map[string]string // Arguments passed to custom system prompt template
-	ResultOnly         bool              // Only print the final agent message, no intermediate output or usage stats
-	UseWeakModel       bool              // Use weak model for SendMessage
-	Account            string            // Anthropic subscription account alias to use
-	AsSubagent         bool              // Run as subagent (disables subagent tool to prevent recursion)
+	ResumeConvID         string
+	Follow               bool
+	NoSave               bool
+	Headless             bool              // Use structured JSON output instead of console formatting
+	StreamDeltas         bool              // Stream partial text deltas in headless mode
+	Images               []string          // Image paths or URLs to include with the message
+	MaxTurns             int               // Maximum number of turns within a single SendMessage call
+	CompactRatio         float64           // Ratio of context window at which to trigger auto-compact (0.0-1.0)
+	DisableAutoCompact   bool              // Disable auto-compact functionality
+	FragmentName         string            // Name of fragment to use
+	FragmentArgs         map[string]string // Arguments to pass to fragment
+	FragmentDirs         []string          // Additional fragment directories
+	IncludeHistory       bool              // Include historical conversation data in headless streaming
+	NoSkills             bool              // Disable agentic skills
+	NoHooks              bool              // Disable agent lifecycle hooks
+	NoMCP                bool              // Disable MCP tools
+	NoTools              bool              // Disable all tools (for simple query-response usage)
+	DisableFSSearchTools bool              // Disable filesystem search tools (glob_tool and grep_tool)
+	DisableSubagent      bool              // Disable the subagent tool and remove subagent-related system prompt context
+	EnableTodos          bool              // Enable todo_read and todo_write tools for the main agent
+	Sysprompt            string            // Path to custom system prompt template file
+	SyspromptArgs        map[string]string // Arguments passed to custom system prompt template
+	ResultOnly           bool              // Only print the final agent message, no intermediate output or usage stats
+	UseWeakModel         bool              // Use weak model for SendMessage
+	Account              string            // Anthropic subscription account alias to use
+	AsSubagent           bool              // Run as subagent (disables subagent tool to prevent recursion)
 }
 
 func NewRunConfig() *RunConfig {
 	return &RunConfig{
-		ResumeConvID:       "",
-		Follow:             false,
-		NoSave:             false,
-		Headless:           false,
-		Images:             []string{},
-		MaxTurns:           0,
-		CompactRatio:       0.8,
-		DisableAutoCompact: false,
-		FragmentName:       "",
-		FragmentArgs:       make(map[string]string),
-		FragmentDirs:       []string{},
-		IncludeHistory:     false,
-		NoSkills:           false,
-		NoHooks:            false,
-		NoMCP:              false,
-		NoTools:            false,
-		DisableSubagent:    false,
-		EnableTodos:        false,
-		Sysprompt:          "",
-		SyspromptArgs:      make(map[string]string),
-		ResultOnly:         false,
-		UseWeakModel:       false,
-		Account:            "",
-		AsSubagent:         false,
+		ResumeConvID:         "",
+		Follow:               false,
+		NoSave:               false,
+		Headless:             false,
+		Images:               []string{},
+		MaxTurns:             0,
+		CompactRatio:         0.8,
+		DisableAutoCompact:   false,
+		FragmentName:         "",
+		FragmentArgs:         make(map[string]string),
+		FragmentDirs:         []string{},
+		IncludeHistory:       false,
+		NoSkills:             false,
+		NoHooks:              false,
+		NoMCP:                false,
+		NoTools:              false,
+		DisableFSSearchTools: false,
+		DisableSubagent:      false,
+		EnableTodos:          false,
+		Sysprompt:            "",
+		SyspromptArgs:        make(map[string]string),
+		ResultOnly:           false,
+		UseWeakModel:         false,
+		Account:              "",
+		AsSubagent:           false,
 	}
 }
 
@@ -227,6 +229,7 @@ var runCmd = &cobra.Command{
 		}
 
 		llmConfig.NoHooks = config.NoHooks
+		llmConfig.DisableFSSearchTools = config.DisableFSSearchTools || viper.GetBool("disable_fs_search_tools")
 		llmConfig.DisableSubagent = config.DisableSubagent || viper.GetBool("disable_subagent")
 		llmConfig.EnableTodos = config.EnableTodos || viper.GetBool("enable_todos")
 		if strings.TrimSpace(config.Sysprompt) != "" {
@@ -464,6 +467,7 @@ func init() {
 	runCmd.Flags().Bool("no-hooks", defaults.NoHooks, "Disable agent lifecycle hooks")
 	runCmd.Flags().Bool("no-mcp", defaults.NoMCP, "Disable MCP tools")
 	runCmd.Flags().Bool("no-tools", defaults.NoTools, "Disable all tools (for simple query-response usage)")
+	runCmd.Flags().Bool("disable-fs-search-tools", defaults.DisableFSSearchTools, "Disable filesystem search tools (glob_tool and grep_tool)")
 	runCmd.Flags().Bool("disable-subagent", defaults.DisableSubagent, "Disable the subagent tool and remove subagent-related system prompt context")
 	runCmd.Flags().Bool("enable-todos", defaults.EnableTodos, "Enable todo_read and todo_write tools for the main agent")
 	runCmd.Flags().Bool("result-only", defaults.ResultOnly, "Only print the final agent message, suppressing all intermediate output and usage statistics")
@@ -551,6 +555,10 @@ func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
 
 	if noTools, err := cmd.Flags().GetBool("no-tools"); err == nil {
 		config.NoTools = noTools
+	}
+
+	if disableFSSearchTools, err := cmd.Flags().GetBool("disable-fs-search-tools"); err == nil {
+		config.DisableFSSearchTools = disableFSSearchTools
 	}
 
 	if disableSubagent, err := cmd.Flags().GetBool("disable-subagent"); err == nil {

@@ -7,16 +7,19 @@ This tool takes two parameters:
 # Required workflow
 1. Discover the MCP code workspace path from the system prompt.
 2. Discover available servers in `<mcp-workspace>/servers/`.
-3. Read generated files (`index.ts` + tool files) to get exact schemas.
+{{if .PatchOnly}}3. Inspect generated files using shell commands such as `sed`, `cat`, or `rg` via the `bash` tool to get exact schemas.
+4. Create or update scripts in the MCP code workspace using `apply_patch` only.
+{{else}}3. Read generated files (`index.ts` + tool files) to get exact schemas.
 4. Write/update scripts in the MCP code workspace using `file_write` / `file_edit` / `apply_patch`.
-5. Execute using `code_path`.
+{{end}}5. Execute using `code_path`.
 
 # Key rules
-- Never guess tool schemas; always read generated files first.
+- Never guess tool schemas; always inspect generated files first.
 - Use ES module imports with `.js` extension (example: `./servers/lsp/index.js`).
 - Use `console.log()` for output (return values are ignored).
-- Prefer `file_edit` or `apply_patch` for small iterations to save tokens.
-- Keep output focused: filter/summarize large datasets.
+{{if .PatchOnly}}- Use `apply_patch` for all script edits in this mode.
+{{else}}- Prefer `file_edit` or `apply_patch` for small iterations to save tokens.
+{{end}}- Keep output focused: filter/summarize large datasets.
 - Use try/catch for error handling.
 
 # Generic outputs (`[key: string]: any`)
@@ -46,7 +49,17 @@ if (out == null) {
 
 <good-example>
 # Discover and inspect schema first
-file_read /absolute/path/to/mcp-workspace/servers/lsp/index.ts
+{{if .PatchOnly}}bash: (cd /absolute/path/to/mcp-workspace && sed -n '1,120p' servers/lsp/index.ts && sed -n '1,160p' servers/lsp/diagnostics.ts)
+
+# Create script
+apply_patch to create /absolute/path/to/mcp-workspace/check_diagnostics.ts
+with:
+```typescript
+import * as lsp from './servers/lsp/index.js';
+const result = await lsp.diagnostics({ filePath: './main.go' });
+console.log(Array.isArray(result) ? result.slice(0, 5) : result);
+```
+{{else}}file_read /absolute/path/to/mcp-workspace/servers/lsp/index.ts
 file_read /absolute/path/to/mcp-workspace/servers/lsp/diagnostics.ts
 
 # Create script
@@ -56,6 +69,7 @@ import * as lsp from './servers/lsp/index.js';
 const result = await lsp.diagnostics({ filePath: './main.go' });
 console.log(Array.isArray(result) ? result.slice(0, 5) : result);
 ```
+{{end}}
 
 # Execute by path
 code_execution { "code_path": "check_diagnostics.ts" }

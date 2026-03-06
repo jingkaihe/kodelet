@@ -1,5 +1,10 @@
 # Kodelet
 
+## 0.3.2.beta (2026-03-06)
+
+Replaced `apply_patch_enabled` with `tool_mode`, adding `tool_mode: patch_only` to represent apply-patch-only workflows and to disable `file_read`, `file_write`, and `file_edit` together.
+Also provided options to disable `grep` and `glob` tools
+
 ## 0.3.1.beta (2026-03-05)
 
 Isolated MCP code-generation caches per project under `~/.kodelet/mcp/cache/<project-hash>` and moved per-session sockets to short temp-dir paths, improving concurrent runs, ACP session/project-scoped MCP setup, and avoiding Unix socket path length issues.

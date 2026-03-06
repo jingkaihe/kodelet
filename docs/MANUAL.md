@@ -127,6 +127,9 @@ kodelet run --result-only "what is 2+2"      # outputs just: 4
 # Disable all tools (for simple query-response usage)
 kodelet run --no-tools "what is the capital of France?"
 
+# Disable filesystem search tools and use fd/rg via bash instead
+kodelet run --disable-fs-search-tools "find references to SessionManager"
+
 # Headless mode for programmatic use
 kodelet run --headless "your query"          # outputs structured JSON stream
 kodelet run --headless --include-history "query"  # include historical data in stream
@@ -702,8 +705,11 @@ allowed_commands: []  # Empty means use default banned commands
 #   - "git log *"
 
 # Tool behavior configuration
-# Prefer apply_patch workflow and disable file_write/file_edit when enabled
-apply_patch_enabled: false
+# Tool interaction mode
+# - full: standard tool access
+# - patch: use apply_patch plus search/navigation tools instead of direct file reads/writes
+# - patch_only: legacy alias for patch
+tool_mode: full
 
 # MCP configuration
 mcp:
@@ -738,6 +744,9 @@ kodelet run --allowed-commands "ls *,pwd,echo *" "query"
 
 # Disable subagent tool and related system prompt context
 kodelet run --disable-subagent "query"
+
+# Disable filesystem search tools (`glob_tool` and `grep_tool`)
+kodelet run --disable-fs-search-tools "query"
 
 # Enable todo tools for this run (disabled by default)
 kodelet run --enable-todos "query"
@@ -776,9 +785,9 @@ profile: "premium"  # Optional: specify the active profile
 profiles:
   premium:
     weak_model: "sonnet-46" # alias to "claude-sonnet-4-6"
-    max_tokens: 16000
+    max_tokens: 64000
     weak_model_max_tokens: 8192
-    thinking_budget_tokens: 8000
+    thinking_budget_tokens: 32000
 
   openai:
     provider: "openai"
@@ -787,6 +796,8 @@ profiles:
     weak_model: "gpt-4.1-mini"
     max_tokens: 16000
     reasoning_effort: "medium"
+    tool_mode: "patch"
+    disable_fs_search_tools: true
 
   xai:
     provider: "openai"
@@ -811,8 +822,8 @@ profiles:
     provider: "openai"
     model: "o3"
     reasoning_effort: "high"
-    apply_patch_enabled: true
-    allowed_tools: ["file_read", "glob_tool", "grep_tool", "thinking"]
+    tool_mode: "patch"
+    disable_fs_search_tools: true
 
 # Model aliases work across all profiles
 aliases:
@@ -1483,6 +1494,16 @@ kodelet run --disable-subagent "your query"
 ```
 
 This can also be set via configuration file (`disable_subagent: true`) or environment variable (`KODELET_DISABLE_SUBAGENT=true`). Other tools like `web_fetch` and `image_recognition` remain available when the subagent is disabled.
+
+### Disabling Filesystem Search Tools
+
+To disable the built-in filesystem search tools (`glob_tool` and `grep_tool`):
+
+```bash
+kodelet run --disable-fs-search-tools "your query"
+```
+
+This can also be set via configuration file (`disable_fs_search_tools: true`) or environment variable (`KODELET_DISABLE_FS_SEARCH_TOOLS=true`). When enabled, the system prompt instructs the agent to use `fd` and `rg` via the `bash` tool for filesystem search tasks instead.
 
 ### Enabling Todo Tools
 

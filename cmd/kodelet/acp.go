@@ -42,6 +42,7 @@ func init() {
 	acpCmd.Flags().Int("max-tokens", 0, "Maximum tokens for LLM responses")
 	acpCmd.Flags().Bool("no-skills", defaults.NoSkills, "Disable agentic skills")
 	acpCmd.Flags().Bool("no-workflows", false, "Disable subagent workflows") // no RunConfig default — ACP-only flag
+	acpCmd.Flags().Bool("disable-fs-search-tools", defaults.DisableFSSearchTools, "Disable filesystem search tools (glob_tool and grep_tool)")
 	acpCmd.Flags().Bool("disable-subagent", false, "Disable the subagent tool and remove subagent-related system prompt context")
 	acpCmd.Flags().Bool("no-hooks", defaults.NoHooks, "Disable lifecycle hooks")
 	acpCmd.Flags().Int("max-turns", defaults.MaxTurns, "Maximum number of agentic turns (0 for no limit)")
@@ -60,6 +61,7 @@ func runACP(cmd *cobra.Command, _ []string) error {
 	maxTokens, _ := cmd.Flags().GetInt("max-tokens")
 	noSkills, _ := cmd.Flags().GetBool("no-skills")
 	noWorkflows, _ := cmd.Flags().GetBool("no-workflows")
+	disableFSSearchTools, _ := cmd.Flags().GetBool("disable-fs-search-tools")
 	disableSubagent, _ := cmd.Flags().GetBool("disable-subagent")
 	noHooks, _ := cmd.Flags().GetBool("no-hooks")
 	maxTurns, _ := cmd.Flags().GetInt("max-turns")
@@ -68,16 +70,17 @@ func runACP(cmd *cobra.Command, _ []string) error {
 	disableAutoCompact, _ := cmd.Flags().GetBool("disable-auto-compact")
 
 	config := &acp.ServerConfig{
-		Provider:           provider,
-		Model:              model,
-		MaxTokens:          maxTokens,
-		NoSkills:           noSkills,
-		NoWorkflows:        noWorkflows,
-		DisableSubagent:    disableSubagent || viper.GetBool("disable_subagent"),
-		NoHooks:            noHooks,
-		MaxTurns:           maxTurns,
-		CompactRatio:       compactRatio,
-		DisableAutoCompact: disableAutoCompact,
+		Provider:             provider,
+		Model:                model,
+		MaxTokens:            maxTokens,
+		NoSkills:             noSkills,
+		NoWorkflows:          noWorkflows,
+		DisableFSSearchTools: disableFSSearchTools || viper.GetBool("disable_fs_search_tools"),
+		DisableSubagent:      disableSubagent || viper.GetBool("disable_subagent"),
+		NoHooks:              noHooks,
+		MaxTurns:             maxTurns,
+		CompactRatio:         compactRatio,
+		DisableAutoCompact:   disableAutoCompact,
 	}
 
 	server := acp.NewServer(

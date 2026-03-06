@@ -35,20 +35,20 @@ var toolRegistry = map[string]tooltypes.Tool{
 	"file_read":         &FileReadTool{},
 	"file_write":        &FileWriteTool{},
 	"file_edit":         &FileEditTool{},
-	"subagent":          NewSubAgentTool(nil, false),
+	"subagent":          NewSubAgentTool(nil, false, false),
 	"grep_tool":         &GrepTool{},
 	"glob_tool":         &GlobTool{},
 	"todo_read":         &TodoReadTool{},
 	"todo_write":        &TodoWriteTool{},
 	"web_fetch":         &WebFetchTool{},
 	"image_recognition": &ImageRecognitionTool{},
-	"skill":             NewSkillTool(nil, false),
+	"skill":             NewSkillTool(nil, false, false),
 }
 
 // NoToolsMarker is a special value indicating no tools should be enabled
 const NoToolsMarker = "none"
 
-// metaTools are always enabled regardless of configuration
+// metaTools are enabled by default for basic navigation unless feature toggles disable them.
 var metaTools = []string{
 	"file_read",
 	"grep_tool",
@@ -157,8 +157,20 @@ func ValidateSubAgentTools(toolNames []string) error {
 	return nil
 }
 
+func metaToolsWithOptions(disableFSSearchTools bool) []string {
+	if !disableFSSearchTools {
+		return metaTools
+	}
+
+	return filterOutFSSearchTools(metaTools)
+}
+
 // GetToolsFromNames returns a list of tools from the given tool names
 func GetToolsFromNames(toolNames []string) []tooltypes.Tool {
+	return getToolsFromNamesWithOptions(toolNames, false)
+}
+
+func getToolsFromNamesWithOptions(toolNames []string, disableFSSearchTools bool) []tooltypes.Tool {
 	if len(toolNames) == 0 {
 		return nil
 	}
@@ -167,7 +179,7 @@ func GetToolsFromNames(toolNames []string) []tooltypes.Tool {
 	var orderedToolNames []string
 
 	// Always include meta tools first
-	for _, metaTool := range metaTools {
+	for _, metaTool := range metaToolsWithOptions(disableFSSearchTools) {
 		if !toolSet[metaTool] {
 			toolSet[metaTool] = true
 			orderedToolNames = append(orderedToolNames, metaTool)
@@ -191,6 +203,16 @@ func GetToolsFromNames(toolNames []string) []tooltypes.Tool {
 	}
 
 	return tools
+}
+
+func filterOutFSSearchTools(toolNames []string) []string {
+	filtered := make([]string, 0, len(toolNames))
+	for _, toolName := range toolNames {
+		if toolName != "grep_tool" && toolName != "glob_tool" {
+			filtered = append(filtered, toolName)
+		}
+	}
+	return filtered
 }
 
 // GetMainTools returns the main tools available for the agent
@@ -222,7 +244,51 @@ func GetMainTools(ctx context.Context, allowedTools []string, enableTodos bool) 
 		}
 	}
 
-	return GetToolsFromNames(allowedTools)
+	return getToolsFromNamesWithOptions(allowedTools, false)
+}
+
+// GetMainToolsWithOptions returns the main tools available for the agent with feature toggles applied.
+func GetMainToolsWithOptions(ctx context.Context, allowedTools []string, enableTodos bool, disableFSSearchTools bool) []tooltypes.Tool {
+	explicitAllowlist := len(allowedTools) > 0
+	if disableFSSearchTools {
+		allowedTools = filterOutFSSearchTools(allowedTools)
+	}
+	if len(allowedTools) == 1 && allowedTools[0] == NoToolsMarker {
+		return nil
+	}
+
+	if len(allowedTools) == 0 {
+		if !explicitAllowlist {
+			allowedTools = append([]string{}, defaultMainTools...)
+			if enableTodos {
+				allowedTools = append(allowedTools, todoTools...)
+			}
+		}
+	} else if !enableTodos {
+		filteredTools := filterOutTodoTools(allowedTools)
+		if len(filteredTools) == 0 {
+			allowedTools = append([]string{}, metaToolsWithOptions(disableFSSearchTools)...)
+		} else {
+			allowedTools = filteredTools
+		}
+	}
+
+	if disableFSSearchTools {
+		allowedTools = filterOutFSSearchTools(allowedTools)
+	}
+
+	if err := ValidateTools(allowedTools); err != nil {
+		logger.G(ctx).WithError(err).Warn("Invalid main agent tool configuration, falling back to defaults")
+		allowedTools = append([]string{}, defaultMainTools...)
+		if enableTodos {
+			allowedTools = append(allowedTools, todoTools...)
+		}
+		if disableFSSearchTools {
+			allowedTools = filterOutFSSearchTools(allowedTools)
+		}
+	}
+
+	return getToolsFromNamesWithOptions(allowedTools, disableFSSearchTools)
 }
 
 // GetSubAgentTools returns the tools available for sub-agents
@@ -241,7 +307,38 @@ func GetSubAgentTools(ctx context.Context, allowedTools []string) []tooltypes.To
 		allowedTools = defaultSubAgentTools
 	}
 
-	return GetToolsFromNames(allowedTools)
+	return getToolsFromNamesWithOptions(allowedTools, false)
+}
+
+// GetSubAgentToolsWithOptions returns the sub-agent tools with feature toggles applied.
+func GetSubAgentToolsWithOptions(ctx context.Context, allowedTools []string, disableFSSearchTools bool) []tooltypes.Tool {
+	explicitAllowlist := len(allowedTools) > 0
+	if disableFSSearchTools {
+		allowedTools = filterOutFSSearchTools(allowedTools)
+	}
+	if len(allowedTools) == 1 && allowedTools[0] == NoToolsMarker {
+		return nil
+	}
+
+	if len(allowedTools) == 0 {
+		if !explicitAllowlist {
+			allowedTools = append([]string{}, defaultSubAgentTools...)
+		}
+	}
+
+	if disableFSSearchTools {
+		allowedTools = filterOutFSSearchTools(allowedTools)
+	}
+
+	if err := ValidateSubAgentTools(allowedTools); err != nil {
+		logger.G(ctx).WithError(err).Warn("Invalid subagent tool configuration, falling back to defaults")
+		allowedTools = append([]string{}, defaultSubAgentTools...)
+		if disableFSSearchTools {
+			allowedTools = filterOutFSSearchTools(allowedTools)
+		}
+	}
+
+	return getToolsFromNamesWithOptions(allowedTools, disableFSSearchTools)
 }
 
 // filterOutSubagent removes the subagent tool from a tool list

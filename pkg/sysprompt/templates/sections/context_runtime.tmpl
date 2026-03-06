@@ -40,6 +40,11 @@ If the current working directory contains a `{{.ActiveContextFile}}` file, it wi
 If you find a new command that you have to use repeatedly, you can add it to the `{{.ActiveContextFile}}` file.
 If you have made any significant changes to the project structure, or modified the tech stack, you should update the `{{.ActiveContextFile}}` file.
 
+{{if .DisableFSSearchTools}}
+# Filesystem Search Tools
+For filesystem search activities, use `fd` for file discovery and `rg` for content search via the `bash` tool only.
+{{end}}
+
 {{include "templates/sections/runtime_system_info.tmpl" .}}
 
 {{include "templates/sections/runtime_loaded_contexts.tmpl" .}}
