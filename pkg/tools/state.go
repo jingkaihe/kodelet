@@ -465,6 +465,10 @@ func (s *BasicState) configureTools() {
 		switch tool.Name() {
 		case "bash":
 			s.tools[i] = NewBashTool(s.llmConfig.AllowedCommands, s.llmConfig.DisableFSSearchTools)
+		case "code_execution":
+			if codeExecutionTool, ok := tool.(*CodeExecutionTool); ok {
+				s.tools[i] = NewCodeExecutionToolWithOptions(codeExecutionTool.runtime, s.llmConfig.ToolMode, s.llmConfig.DisableFSSearchTools)
+			}
 		case "web_fetch":
 			s.tools[i] = NewWebFetchTool(s.llmConfig.AllowedDomainsFile)
 		}

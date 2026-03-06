@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
@@ -8,10 +9,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"text/template"
 	"time"
 
 	"github.com/invopop/jsonschema"
 	"github.com/jingkaihe/kodelet/pkg/mcp/runtime"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -21,7 +24,9 @@ var codeExecutionDescription string
 
 // CodeExecutionTool enables TypeScript code execution with MCP tool access
 type CodeExecutionTool struct {
-	runtime *runtime.NodeRuntime
+	runtime              *runtime.NodeRuntime
+	toolMode             llmtypes.ToolMode
+	disableFSSearchTools bool
 }
 
 // CodeExecutionInput represents the input parameters for code execution
@@ -80,6 +85,15 @@ func NewCodeExecutionTool(runtime *runtime.NodeRuntime) *CodeExecutionTool {
 	}
 }
 
+// NewCodeExecutionToolWithOptions creates a code execution tool with description rendering options.
+func NewCodeExecutionToolWithOptions(runtime *runtime.NodeRuntime, toolMode llmtypes.ToolMode, disableFSSearchTools bool) *CodeExecutionTool {
+	return &CodeExecutionTool{
+		runtime:              runtime,
+		toolMode:             toolMode,
+		disableFSSearchTools: disableFSSearchTools,
+	}
+}
+
 // Name returns the name of the tool
 func (t *CodeExecutionTool) Name() string {
 	return "code_execution"
@@ -87,7 +101,25 @@ func (t *CodeExecutionTool) Name() string {
 
 // Description returns the description of the tool for the LLM
 func (t *CodeExecutionTool) Description() string {
-	return codeExecutionDescription
+	tmpl, err := template.New("code_execution_description").Parse(codeExecutionDescription)
+	if err != nil {
+		return codeExecutionDescription
+	}
+
+	data := struct {
+		PatchOnly            bool
+		DisableFSSearchTools bool
+	}{
+		PatchOnly:            t.toolMode == llmtypes.ToolModePatchOnly,
+		DisableFSSearchTools: t.disableFSSearchTools,
+	}
+
+	var rendered bytes.Buffer
+	if err := tmpl.Execute(&rendered, data); err != nil {
+		return codeExecutionDescription
+	}
+
+	return rendered.String()
 }
 
 // GenerateSchema generates the JSON schema for the tool's input parameters
