@@ -105,8 +105,8 @@ func NewBasicState(ctx context.Context, opts ...BasicStateOption) *BasicState {
 		allowedTools = enforceToolMode(allowedTools, state.llmConfig.ToolMode, defaultMainTools)
 		state.tools = GetMainToolsWithOptions(ctx, allowedTools, state.llmConfig.EnableTodos, state.llmConfig.DisableFSSearchTools)
 		state.tools = enforceToolModeOnResolvedTools(state.tools, allowedTools, state.llmConfig.ToolMode)
-		state.configureTools()
 	}
+	state.configureTools()
 
 	return state
 }
@@ -188,7 +188,7 @@ func WithLLMConfig(config llmtypes.Config) BasicStateOption {
 func WithSkillTool() BasicStateOption {
 	return func(ctx context.Context, s *BasicState) error {
 		discoveredSkills := discoverSkills(ctx, s.llmConfig)
-		skillTool := NewSkillTool(discoveredSkills, len(discoveredSkills) > 0, s.llmConfig.DisableFSSearchTools)
+		skillTool := NewSkillToolWithOptions(discoveredSkills, len(discoveredSkills) > 0, s.llmConfig.ToolMode, s.llmConfig.DisableFSSearchTools)
 		for i, tool := range s.tools {
 			if tool.Name() == "skill" {
 				s.tools[i] = skillTool
@@ -231,7 +231,7 @@ func discoverSkills(ctx context.Context, llmConfig llmtypes.Config) map[string]*
 func WithSubAgentTool() BasicStateOption {
 	return func(ctx context.Context, s *BasicState) error {
 		discoveredWorkflows := discoverWorkflows(ctx)
-		subagentTool := NewSubAgentTool(discoveredWorkflows, len(discoveredWorkflows) > 0, s.llmConfig.DisableFSSearchTools)
+		subagentTool := NewSubAgentToolWithOptions(discoveredWorkflows, len(discoveredWorkflows) > 0, s.llmConfig.ToolMode, s.llmConfig.DisableFSSearchTools)
 		for i, tool := range s.tools {
 			if tool.Name() == "subagent" {
 				s.tools[i] = subagentTool
@@ -461,18 +461,24 @@ func (s *BasicState) GetLLMConfig() any {
 }
 
 func (s *BasicState) configureTools() {
-	for i, tool := range s.tools {
+	s.tools = s.configureToolSlice(s.tools)
+	s.mcpTools = s.configureToolSlice(s.mcpTools)
+}
+
+func (s *BasicState) configureToolSlice(tools []tooltypes.Tool) []tooltypes.Tool {
+	for i, tool := range tools {
 		switch tool.Name() {
 		case "bash":
-			s.tools[i] = NewBashTool(s.llmConfig.AllowedCommands, s.llmConfig.DisableFSSearchTools)
+			tools[i] = NewBashTool(s.llmConfig.AllowedCommands, s.llmConfig.DisableFSSearchTools)
 		case "code_execution":
 			if codeExecutionTool, ok := tool.(*CodeExecutionTool); ok {
-				s.tools[i] = NewCodeExecutionToolWithOptions(codeExecutionTool.runtime, s.llmConfig.ToolMode, s.llmConfig.DisableFSSearchTools)
+				tools[i] = NewCodeExecutionToolWithOptions(codeExecutionTool.runtime, s.llmConfig.ToolMode, s.llmConfig.DisableFSSearchTools)
 			}
 		case "web_fetch":
-			s.tools[i] = NewWebFetchTool(s.llmConfig.AllowedDomainsFile)
+			tools[i] = NewWebFetchTool(s.llmConfig.AllowedDomainsFile)
 		}
 	}
+	return tools
 }
 
 // DiscoverContexts discovers and returns context information for the current state

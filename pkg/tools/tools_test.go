@@ -355,6 +355,12 @@ func TestGetMainToolsWithOptions_DisableFSSearchTools(t *testing.T) {
 		assert.NotContains(t, toolNames, "glob_tool")
 	})
 
+	t.Run("search-only allowlists do not fall back to defaults", func(t *testing.T) {
+		tools := GetMainToolsWithOptions(context.Background(), []string{"grep_tool", "glob_tool"}, false, true)
+
+		assert.Empty(t, tools)
+	})
+
 	t.Run("fallback after validation still keeps grep and glob disabled", func(t *testing.T) {
 		tools := GetMainToolsWithOptions(context.Background(), []string{"unknown_tool"}, false, true)
 
@@ -397,6 +403,12 @@ func TestGetSubAgentToolsWithOptions_DisableFSSearchTools(t *testing.T) {
 		assert.Contains(t, toolNames, "bash")
 		assert.NotContains(t, toolNames, "grep_tool")
 		assert.NotContains(t, toolNames, "glob_tool")
+	})
+
+	t.Run("search-only allowlists do not fall back to defaults", func(t *testing.T) {
+		tools := GetSubAgentToolsWithOptions(context.Background(), []string{"grep_tool", "glob_tool"}, true)
+
+		assert.Empty(t, tools)
 	})
 
 	t.Run("fallback after validation still keeps grep and glob disabled", func(t *testing.T) {

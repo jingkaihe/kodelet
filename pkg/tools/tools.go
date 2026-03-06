@@ -249,6 +249,7 @@ func GetMainTools(ctx context.Context, allowedTools []string, enableTodos bool) 
 
 // GetMainToolsWithOptions returns the main tools available for the agent with feature toggles applied.
 func GetMainToolsWithOptions(ctx context.Context, allowedTools []string, enableTodos bool, disableFSSearchTools bool) []tooltypes.Tool {
+	explicitAllowlist := len(allowedTools) > 0
 	if disableFSSearchTools {
 		allowedTools = filterOutFSSearchTools(allowedTools)
 	}
@@ -257,9 +258,11 @@ func GetMainToolsWithOptions(ctx context.Context, allowedTools []string, enableT
 	}
 
 	if len(allowedTools) == 0 {
-		allowedTools = append([]string{}, defaultMainTools...)
-		if enableTodos {
-			allowedTools = append(allowedTools, todoTools...)
+		if !explicitAllowlist {
+			allowedTools = append([]string{}, defaultMainTools...)
+			if enableTodos {
+				allowedTools = append(allowedTools, todoTools...)
+			}
 		}
 	} else if !enableTodos {
 		filteredTools := filterOutTodoTools(allowedTools)
@@ -309,6 +312,7 @@ func GetSubAgentTools(ctx context.Context, allowedTools []string) []tooltypes.To
 
 // GetSubAgentToolsWithOptions returns the sub-agent tools with feature toggles applied.
 func GetSubAgentToolsWithOptions(ctx context.Context, allowedTools []string, disableFSSearchTools bool) []tooltypes.Tool {
+	explicitAllowlist := len(allowedTools) > 0
 	if disableFSSearchTools {
 		allowedTools = filterOutFSSearchTools(allowedTools)
 	}
@@ -317,7 +321,9 @@ func GetSubAgentToolsWithOptions(ctx context.Context, allowedTools []string, dis
 	}
 
 	if len(allowedTools) == 0 {
-		allowedTools = append([]string{}, defaultSubAgentTools...)
+		if !explicitAllowlist {
+			allowedTools = append([]string{}, defaultSubAgentTools...)
+		}
 	}
 
 	if disableFSSearchTools {

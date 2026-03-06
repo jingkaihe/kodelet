@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/jingkaihe/kodelet/pkg/skills"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -48,6 +49,15 @@ func TestSkillTool_Description(t *testing.T) {
 		desc := tool.Description()
 		assert.Contains(t, desc, "file_read or fd via bash")
 		assert.NotContains(t, desc, "file_read or glob_tool")
+	})
+
+	t.Run("patch only avoids removed file tools", func(t *testing.T) {
+		tool := NewSkillToolWithOptions(nil, true, llmtypes.ToolModePatchOnly, false)
+		desc := tool.Description()
+		assert.Contains(t, desc, "locate with glob_tool and inspect via bash using sed/cat/rg")
+		assert.Contains(t, desc, "update it using apply_patch")
+		assert.NotContains(t, desc, "read using file_read")
+		assert.NotContains(t, desc, "file_edit tool")
 	})
 }
 

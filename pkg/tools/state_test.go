@@ -8,6 +8,7 @@ import (
 	"time"
 
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -991,6 +992,29 @@ func TestWithMainTools(t *testing.T) {
 		assert.Contains(t, toolNames, "file_read")
 		assert.NotContains(t, toolNames, "apply_patch")
 	})
+}
+
+func TestNewBasicState_ReconfiguresExtraMCPTools(t *testing.T) {
+	ctx := context.Background()
+	state := NewBasicState(
+		ctx,
+		WithLLMConfig(llmtypes.Config{ToolMode: llmtypes.ToolModePatchOnly}),
+		WithMainTools(),
+		WithExtraMCPTools([]tooltypes.Tool{NewCodeExecutionTool(nil)}),
+	)
+
+	var description string
+	for _, tool := range state.Tools() {
+		if tool.Name() == "code_execution" {
+			description = tool.Description()
+			break
+		}
+	}
+
+	require.NotEmpty(t, description)
+	assert.Contains(t, description, "Inspect generated files using shell commands such as `sed`, `cat`, or `rg` via the `bash` tool")
+	assert.Contains(t, description, "Create or update scripts in the MCP code workspace using `apply_patch` only.")
+	assert.NotContains(t, description, "using `file_write` / `file_edit` / `apply_patch`.")
 }
 
 func TestGetLLMConfig_ReturnsSubagentArgs(t *testing.T) {
