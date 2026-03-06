@@ -3,6 +3,9 @@ package llm
 // AnthropicAPIAccess defines the mode for Anthropic API access
 type AnthropicAPIAccess string
 
+// ToolMode defines how the agent can interact with project files.
+type ToolMode string
+
 const (
 	// AnthropicAPIAccessAuto uses subscription auth if available, then falls back to API key
 	AnthropicAPIAccessAuto AnthropicAPIAccess = "auto"
@@ -10,6 +13,11 @@ const (
 	AnthropicAPIAccessSubscription AnthropicAPIAccess = "subscription"
 	// AnthropicAPIAccessAPIKey forces use of API key-based auth only
 	AnthropicAPIAccessAPIKey AnthropicAPIAccess = "api-key"
+
+	// ToolModeFull allows the standard direct file tools.
+	ToolModeFull ToolMode = "full"
+	// ToolModePatchOnly restricts file operations to apply_patch plus search/navigation tools.
+	ToolModePatchOnly ToolMode = "patch_only"
 )
 
 // Config holds the configuration for the LLM client
@@ -25,7 +33,7 @@ type Config struct {
 	AllowedCommands      []string           `mapstructure:"allowed_commands" json:"allowed_commands" yaml:"allowed_commands"`                   // AllowedCommands is a list of allowed command patterns for the bash tool
 	AllowedDomainsFile   string             `mapstructure:"allowed_domains_file" json:"allowed_domains_file" yaml:"allowed_domains_file"`       // AllowedDomainsFile is the path to the file containing allowed domains for web_fetch tool
 	AllowedTools         []string           `mapstructure:"allowed_tools" json:"allowed_tools" yaml:"allowed_tools"`                            // AllowedTools is a list of allowed tools for the main agent (empty means use defaults)
-	ApplyPatchEnabled    bool               `mapstructure:"apply_patch_enabled" json:"apply_patch_enabled" yaml:"apply_patch_enabled"`          // ApplyPatchEnabled enables apply_patch-first mode (disables file_write and file_edit)
+	ToolMode             ToolMode           `mapstructure:"tool_mode" json:"tool_mode" yaml:"tool_mode"`                                        // ToolMode controls file-interaction behavior (e.g. full or patch_only)
 	AnthropicAPIAccess   AnthropicAPIAccess `mapstructure:"anthropic_api_access" json:"anthropic_api_access" yaml:"anthropic_api_access"`       // AnthropicAPIAccess controls how to authenticate with Anthropic API
 	AnthropicAccount     string             `mapstructure:"anthropic_account" json:"anthropic_account" yaml:"anthropic_account"`                // AnthropicAccount specifies which Anthropic subscription account to use
 	UseCopilot           bool               `mapstructure:"use_copilot" json:"use_copilot" yaml:"use_copilot"`                                  // UseCopilot enables GitHub Copilot subscription for OpenAI requests
@@ -55,10 +63,11 @@ type Config struct {
 	Context *ContextConfig `mapstructure:"context" json:"context,omitempty" yaml:"context,omitempty"` // Context configuration for context file discovery
 
 	// Hooks and feature toggle configuration
-	NoHooks         bool   `mapstructure:"no_hooks" json:"no_hooks" yaml:"no_hooks"`                         // NoHooks disables agent lifecycle hooks
-	DisableSubagent bool   `mapstructure:"disable_subagent" json:"disable_subagent" yaml:"disable_subagent"` // DisableSubagent disables the subagent tool and removes subagent-related system prompt context
-	EnableTodos     bool   `mapstructure:"enable_todos" json:"enable_todos" yaml:"enable_todos"`             // EnableTodos enables todo_read and todo_write tools for the main agent
-	RecipeName      string `mapstructure:"recipe_name" json:"recipe_name" yaml:"recipe_name"`                // RecipeName is the active recipe/fragment name for hooks
+	NoHooks              bool   `mapstructure:"no_hooks" json:"no_hooks" yaml:"no_hooks"`                                              // NoHooks disables agent lifecycle hooks
+	DisableFSSearchTools bool   `mapstructure:"disable_fs_search_tools" json:"disable_fs_search_tools" yaml:"disable_fs_search_tools"` // DisableFSSearchTools disables glob_tool and grep_tool and updates prompt/tool guidance accordingly
+	DisableSubagent      bool   `mapstructure:"disable_subagent" json:"disable_subagent" yaml:"disable_subagent"`                      // DisableSubagent disables the subagent tool and removes subagent-related system prompt context
+	EnableTodos          bool   `mapstructure:"enable_todos" json:"enable_todos" yaml:"enable_todos"`                                  // EnableTodos enables todo_read and todo_write tools for the main agent
+	RecipeName           string `mapstructure:"recipe_name" json:"recipe_name" yaml:"recipe_name"`                                     // RecipeName is the active recipe/fragment name for hooks
 }
 
 // OpenAIAPIMode defines which OpenAI-compatible API surface to use.

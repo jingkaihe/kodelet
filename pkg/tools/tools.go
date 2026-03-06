@@ -35,14 +35,14 @@ var toolRegistry = map[string]tooltypes.Tool{
 	"file_read":         &FileReadTool{},
 	"file_write":        &FileWriteTool{},
 	"file_edit":         &FileEditTool{},
-	"subagent":          NewSubAgentTool(nil, false),
+	"subagent":          NewSubAgentTool(nil, false, false),
 	"grep_tool":         &GrepTool{},
 	"glob_tool":         &GlobTool{},
 	"todo_read":         &TodoReadTool{},
 	"todo_write":        &TodoWriteTool{},
 	"web_fetch":         &WebFetchTool{},
 	"image_recognition": &ImageRecognitionTool{},
-	"skill":             NewSkillTool(nil, false),
+	"skill":             NewSkillTool(nil, false, false),
 }
 
 // NoToolsMarker is a special value indicating no tools should be enabled
@@ -193,6 +193,16 @@ func GetToolsFromNames(toolNames []string) []tooltypes.Tool {
 	return tools
 }
 
+func filterOutFSSearchTools(toolNames []string) []string {
+	filtered := make([]string, 0, len(toolNames))
+	for _, toolName := range toolNames {
+		if toolName != "grep_tool" && toolName != "glob_tool" {
+			filtered = append(filtered, toolName)
+		}
+	}
+	return filtered
+}
+
 // GetMainTools returns the main tools available for the agent
 func GetMainTools(ctx context.Context, allowedTools []string, enableTodos bool) []tooltypes.Tool {
 	// Special case: "none" means no tools
@@ -225,6 +235,14 @@ func GetMainTools(ctx context.Context, allowedTools []string, enableTodos bool) 
 	return GetToolsFromNames(allowedTools)
 }
 
+// GetMainToolsWithOptions returns the main tools available for the agent with feature toggles applied.
+func GetMainToolsWithOptions(ctx context.Context, allowedTools []string, enableTodos bool, disableFSSearchTools bool) []tooltypes.Tool {
+	if disableFSSearchTools {
+		allowedTools = filterOutFSSearchTools(allowedTools)
+	}
+	return GetMainTools(ctx, allowedTools, enableTodos)
+}
+
 // GetSubAgentTools returns the tools available for sub-agents
 func GetSubAgentTools(ctx context.Context, allowedTools []string) []tooltypes.Tool {
 	// Special case: "none" means no tools
@@ -242,6 +260,14 @@ func GetSubAgentTools(ctx context.Context, allowedTools []string) []tooltypes.To
 	}
 
 	return GetToolsFromNames(allowedTools)
+}
+
+// GetSubAgentToolsWithOptions returns the sub-agent tools with feature toggles applied.
+func GetSubAgentToolsWithOptions(ctx context.Context, allowedTools []string, disableFSSearchTools bool) []tooltypes.Tool {
+	if disableFSSearchTools {
+		allowedTools = filterOutFSSearchTools(allowedTools)
+	}
+	return GetSubAgentTools(ctx, allowedTools)
 }
 
 // filterOutSubagent removes the subagent tool from a tool list

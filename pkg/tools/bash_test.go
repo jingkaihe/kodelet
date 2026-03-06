@@ -3,6 +3,9 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -32,7 +35,7 @@ func TestBashTool_Description(t *testing.T) {
 
 func TestBashTool_Description_BannedCommands(t *testing.T) {
 	// Test with no allowed commands configured (uses banned commands)
-	tool := NewBashTool([]string{})
+	tool := NewBashTool([]string{}, false)
 	desc := tool.Description()
 
 	// Should contain banned commands section
@@ -50,7 +53,7 @@ func TestBashTool_Description_BannedCommands(t *testing.T) {
 func TestBashTool_Description_AllowedCommands(t *testing.T) {
 	// Test with allowed commands configured
 	allowedCommands := []string{"ls *", "pwd", "echo *", "git status"}
-	tool := NewBashTool(allowedCommands)
+	tool := NewBashTool(allowedCommands, false)
 	desc := tool.Description()
 
 	// Should contain allowed commands section
@@ -65,9 +68,17 @@ func TestBashTool_Description_AllowedCommands(t *testing.T) {
 	assert.NotContains(t, desc, "Banned commands:")
 }
 
+func TestBashTool_Description_DisableFSSearchTools(t *testing.T) {
+	tool := NewBashTool(nil, true)
+	desc := tool.Description()
+
+	assert.Contains(t, desc, "use fd and rg via this tool only")
+	assert.NotContains(t, desc, "Prefer grep_tool/glob_tool over grep/find in bash.")
+}
+
 func TestBashTool_Description_EmptyAllowedCommands(t *testing.T) {
 	// Test with empty allowed commands (should fall back to banned commands)
-	tool := NewBashTool(nil)
+	tool := NewBashTool(nil, false)
 	desc := tool.Description()
 
 	// Should contain banned commands section since no allowed commands configured
@@ -78,7 +89,7 @@ func TestBashTool_Description_EmptyAllowedCommands(t *testing.T) {
 
 func TestBashTool_Description_ConsistentOutput(t *testing.T) {
 	// Test that the description is consistent and contains all expected sections
-	tool := NewBashTool([]string{"test *", "example"})
+	tool := NewBashTool([]string{"test *", "example"}, false)
 	desc := tool.Description()
 
 	// Basic structure should always be present
@@ -105,7 +116,7 @@ func TestBashTool_Description_SpecialCharacters(t *testing.T) {
 		"awk '{print $1}'",
 		"sed 's/old/new/g'",
 	}
-	tool := NewBashTool(allowedCommands)
+	tool := NewBashTool(allowedCommands, false)
 	desc := tool.Description()
 
 	// Should handle special characters in command patterns
@@ -355,7 +366,7 @@ func TestBashTool_GlobPatternMatching(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tool := NewBashTool([]string{tt.pattern})
+			tool := NewBashTool([]string{tt.pattern}, false)
 			result := tool.MatchesCommand(tt.command)
 			assert.Equal(t, tt.expected, result,
 				"BashTool.MatchesCommand(%q) with pattern %q = %v, want %v",
@@ -377,7 +388,7 @@ func TestNewBashTool(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tool := NewBashTool(tt.allowedCommands)
+			tool := NewBashTool(tt.allowedCommands, false)
 			assert.NotNil(t, tool)
 			assert.Equal(t, "bash", tool.Name())
 			assert.Equal(t, tt.allowedCommands, tool.allowedCommands)
@@ -715,7 +726,7 @@ func TestBashTool_ValidateInput_AllowedCommands(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tool := NewBashTool(tt.allowedCommands)
+			tool := NewBashTool(tt.allowedCommands, false)
 			input, _ := json.Marshal(tt.input)
 			err := tool.ValidateInput(NewBasicState(context.TODO()), string(input))
 
@@ -732,7 +743,7 @@ func TestBashTool_ValidateInput_AllowedCommands(t *testing.T) {
 }
 
 func TestBashToolResult_StructuredDataFields(t *testing.T) {
-	tool := NewBashTool(nil)
+	tool := NewBashTool(nil, false)
 	state := NewBasicState(context.TODO())
 
 	t.Run("successful command has all metadata fields", func(t *testing.T) {
@@ -831,4 +842,23 @@ func TestBashToolResult_StructuredDataFields(t *testing.T) {
 		// Verify timeout error message
 		assert.Contains(t, bashResult.error, "Command timed out after 1 seconds")
 	})
+}
+
+func TestBashEnvWithKodeletBin(t *testing.T) {
+	env, err := bashEnvWithKodeletBin()
+	assert.NoError(t, err)
+
+	var pathValue string
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "PATH=") {
+			pathValue = strings.TrimPrefix(kv, "PATH=")
+			break
+		}
+	}
+
+	assert.NotEmpty(t, pathValue)
+	parts := strings.Split(pathValue, string(os.PathListSeparator))
+	homeDir, err := os.UserHomeDir()
+	assert.NoError(t, err)
+	assert.Equal(t, filepath.Join(homeDir, ".kodelet", "bin"), parts[0])
 }

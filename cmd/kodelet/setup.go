@@ -118,17 +118,16 @@ profiles:
         weak_model_max_tokens: 8192
     openai-subagent:
         allowed_tools:
-            - file_read
             - glob_tool
             - grep_tool
-        apply_patch_enabled: true
+        tool_mode: patch_only
         model: gpt-5.2-codex
         openai:
             use_responses_api: true
         provider: openai
         reasoning_effort: high
     openai:
-        apply_patch_enabled: true
+        tool_mode: patch_only
         max_tokens: 16000
         model: gpt-5.2-codex
         openai:

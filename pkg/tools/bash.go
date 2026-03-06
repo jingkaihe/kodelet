@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -56,8 +57,9 @@ Banned commands:
 - Do not run interactive commands.
 - For multiple commands, use ';' or '&&' on one line.
 - Avoid direct cd; use absolute paths or subshell: (cd /path && cmd).
-- Prefer grep_tool/glob_tool over grep/find in bash.
-- Do not use heredoc; use file_write or apply_patch instead.
+{{if .DisableFSSearchTools}}- For filesystem search activities, use fd and rg via this tool only.
+{{else}}- Prefer grep_tool/glob_tool over grep/find in bash.
+{{end}}- Do not use heredoc; use file_write or apply_patch instead.
 
 Examples:
 - (cd /repo && mise run test)
@@ -66,20 +68,22 @@ Examples:
 
 // BashTool executes bash commands with configurable restrictions and timeout support
 type BashTool struct {
-	allowedCommands []string
-	compiledGlobs   []glob.Glob
+	allowedCommands      []string
+	compiledGlobs        []glob.Glob
+	disableFSSearchTools bool
 }
 
 // NewBashTool creates a new BashTool with the specified allowed commands
-func NewBashTool(allowedCommands []string) *BashTool {
+func NewBashTool(allowedCommands []string, disableFSSearchTools bool) *BashTool {
 	globs := make([]glob.Glob, len(allowedCommands))
 	for i, pattern := range allowedCommands {
 		// Compile glob patterns without custom separators (default behavior)
 		globs[i] = glob.MustCompile(pattern)
 	}
 	return &BashTool{
-		allowedCommands: allowedCommands,
-		compiledGlobs:   globs,
+		allowedCommands:      allowedCommands,
+		compiledGlobs:        globs,
+		disableFSSearchTools: disableFSSearchTools,
 	}
 }
 
@@ -210,11 +214,13 @@ func (b *BashTool) Description() string {
 	}
 
 	data := struct {
-		AllowedCommands []string
-		BannedCommands  []string
+		AllowedCommands      []string
+		BannedCommands       []string
+		DisableFSSearchTools bool
 	}{
-		AllowedCommands: b.allowedCommands,
-		BannedCommands:  BannedCommands,
+		AllowedCommands:      b.allowedCommands,
+		BannedCommands:       BannedCommands,
+		DisableFSSearchTools: b.disableFSSearchTools,
 	}
 
 	var buf bytes.Buffer
@@ -305,6 +311,9 @@ func (b *BashTool) executeForeground(ctx context.Context, input *BashInput) tool
 	workingDir, _ := os.Getwd()
 
 	cmd := exec.CommandContext(ctx, "bash", "-c", input.Command)
+	if env, err := bashEnvWithKodeletBin(); err == nil {
+		cmd.Env = env
+	}
 	osutil.SetProcessGroup(cmd)
 	osutil.SetProcessGroupKill(cmd)
 
@@ -345,4 +354,37 @@ func (b *BashTool) executeForeground(ctx context.Context, input *BashInput) tool
 		executionTime:  executionTime,
 		workingDir:     workingDir,
 	}
+}
+
+func bashEnvWithKodeletBin() ([]string, error) {
+	env := os.Environ()
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return env, err
+	}
+
+	kodeletBin := filepath.Join(homeDir, ".kodelet", "bin")
+	pathValue := ""
+	pathIndex := -1
+	for i, kv := range env {
+		if strings.HasPrefix(kv, "PATH=") {
+			pathIndex = i
+			pathValue = strings.TrimPrefix(kv, "PATH=")
+			break
+		}
+	}
+
+	pathParts := []string{kodeletBin}
+	if pathValue != "" {
+		pathParts = append(pathParts, pathValue)
+	}
+	newPath := strings.Join(pathParts, string(os.PathListSeparator))
+
+	if pathIndex >= 0 {
+		env[pathIndex] = "PATH=" + newPath
+	} else {
+		env = append(env, "PATH="+newPath)
+	}
+
+	return env, nil
 }

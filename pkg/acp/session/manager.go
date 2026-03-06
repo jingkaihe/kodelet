@@ -126,16 +126,17 @@ func (s *Session) HandlePrompt(ctx context.Context, prompt []acptypes.ContentBlo
 
 // ManagerConfig holds configuration for the session Manager.
 type ManagerConfig struct {
-	Provider           string
-	Model              string
-	MaxTokens          int
-	NoSkills           bool
-	NoWorkflows        bool
-	DisableSubagent    bool
-	NoHooks            bool
-	MaxTurns           int
-	CompactRatio       float64
-	DisableAutoCompact bool
+	Provider             string
+	Model                string
+	MaxTokens            int
+	NoSkills             bool
+	NoWorkflows          bool
+	DisableFSSearchTools bool
+	DisableSubagent      bool
+	NoHooks              bool
+	MaxTurns             int
+	CompactRatio         float64
+	DisableAutoCompact   bool
 }
 
 // Manager manages ACP sessions
@@ -190,6 +191,7 @@ func (m *Manager) buildLLMConfig(projectDir string) llmtypes.Config {
 		config.MaxTokens = m.config.MaxTokens
 	}
 	config.NoHooks = m.config.NoHooks
+	config.DisableFSSearchTools = m.config.DisableFSSearchTools
 	config.DisableSubagent = m.config.DisableSubagent
 
 	if m.config.NoSkills {

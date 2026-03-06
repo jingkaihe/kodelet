@@ -102,9 +102,9 @@ func NewBasicState(ctx context.Context, opts ...BasicStateOption) *BasicState {
 		if state.llmConfig.AllowedTools != nil {
 			allowedTools = state.llmConfig.AllowedTools
 		}
-		allowedTools = enforceApplyPatchMode(allowedTools, state.llmConfig.ApplyPatchEnabled, defaultMainTools)
-		state.tools = GetMainTools(ctx, allowedTools, state.llmConfig.EnableTodos)
-		state.tools = enforceApplyPatchModeOnResolvedTools(state.tools, allowedTools, state.llmConfig.ApplyPatchEnabled)
+		allowedTools = enforceToolMode(allowedTools, state.llmConfig.ToolMode, defaultMainTools)
+		state.tools = GetMainToolsWithOptions(ctx, allowedTools, state.llmConfig.EnableTodos, state.llmConfig.DisableFSSearchTools)
+		state.tools = enforceToolModeOnResolvedTools(state.tools, allowedTools, state.llmConfig.ToolMode)
 		state.configureTools()
 	}
 
@@ -119,9 +119,9 @@ func WithSubAgentToolsFromConfig() BasicStateOption {
 		if s.llmConfig.AllowedTools != nil {
 			allowedTools = s.llmConfig.AllowedTools
 		}
-		allowedTools = enforceApplyPatchMode(allowedTools, s.llmConfig.ApplyPatchEnabled, defaultSubAgentTools)
-		s.tools = GetSubAgentTools(ctx, allowedTools)
-		s.tools = enforceApplyPatchModeOnResolvedTools(s.tools, allowedTools, s.llmConfig.ApplyPatchEnabled)
+		allowedTools = enforceToolMode(allowedTools, s.llmConfig.ToolMode, defaultSubAgentTools)
+		s.tools = GetSubAgentToolsWithOptions(ctx, allowedTools, s.llmConfig.DisableFSSearchTools)
+		s.tools = enforceToolModeOnResolvedTools(s.tools, allowedTools, s.llmConfig.ToolMode)
 		s.configureTools()
 		return nil
 	}
@@ -134,9 +134,9 @@ func WithMainTools() BasicStateOption {
 		if s.llmConfig.AllowedTools != nil {
 			allowedTools = s.llmConfig.AllowedTools
 		}
-		allowedTools = enforceApplyPatchMode(allowedTools, s.llmConfig.ApplyPatchEnabled, defaultMainTools)
-		s.tools = GetMainTools(ctx, allowedTools, s.llmConfig.EnableTodos)
-		s.tools = enforceApplyPatchModeOnResolvedTools(s.tools, allowedTools, s.llmConfig.ApplyPatchEnabled)
+		allowedTools = enforceToolMode(allowedTools, s.llmConfig.ToolMode, defaultMainTools)
+		s.tools = GetMainToolsWithOptions(ctx, allowedTools, s.llmConfig.EnableTodos, s.llmConfig.DisableFSSearchTools)
+		s.tools = enforceToolModeOnResolvedTools(s.tools, allowedTools, s.llmConfig.ToolMode)
 		if s.llmConfig.DisableSubagent {
 			s.tools = filterOutSubagent(s.tools)
 		}
@@ -188,7 +188,7 @@ func WithLLMConfig(config llmtypes.Config) BasicStateOption {
 func WithSkillTool() BasicStateOption {
 	return func(ctx context.Context, s *BasicState) error {
 		discoveredSkills := discoverSkills(ctx, s.llmConfig)
-		skillTool := NewSkillTool(discoveredSkills, len(discoveredSkills) > 0)
+		skillTool := NewSkillTool(discoveredSkills, len(discoveredSkills) > 0, s.llmConfig.DisableFSSearchTools)
 		for i, tool := range s.tools {
 			if tool.Name() == "skill" {
 				s.tools[i] = skillTool
@@ -231,7 +231,7 @@ func discoverSkills(ctx context.Context, llmConfig llmtypes.Config) map[string]*
 func WithSubAgentTool() BasicStateOption {
 	return func(ctx context.Context, s *BasicState) error {
 		discoveredWorkflows := discoverWorkflows(ctx)
-		subagentTool := NewSubAgentTool(discoveredWorkflows, len(discoveredWorkflows) > 0)
+		subagentTool := NewSubAgentTool(discoveredWorkflows, len(discoveredWorkflows) > 0, s.llmConfig.DisableFSSearchTools)
 		for i, tool := range s.tools {
 			if tool.Name() == "subagent" {
 				s.tools[i] = subagentTool
@@ -269,8 +269,8 @@ func discoverWorkflows(ctx context.Context) map[string]*fragments.Fragment {
 	return workflows
 }
 
-func enforceApplyPatchMode(allowedTools []string, applyPatchEnabled bool, defaultTools []string) []string {
-	if !applyPatchEnabled {
+func enforceToolMode(allowedTools []string, toolMode llmtypes.ToolMode, defaultTools []string) []string {
+	if toolMode != llmtypes.ToolModePatchOnly {
 		return allowedTools
 	}
 	if len(allowedTools) == 1 && allowedTools[0] == NoToolsMarker {
@@ -285,7 +285,7 @@ func enforceApplyPatchMode(allowedTools []string, applyPatchEnabled bool, defaul
 	filteredTools := make([]string, 0, len(baseTools))
 	seen := make(map[string]struct{})
 	for _, tool := range baseTools {
-		if tool == "file_write" || tool == "file_edit" {
+		if tool == "file_read" || tool == "file_write" || tool == "file_edit" {
 			continue
 		}
 		if _, exists := seen[tool]; exists {
@@ -302,12 +302,12 @@ func enforceApplyPatchMode(allowedTools []string, applyPatchEnabled bool, defaul
 	return filteredTools
 }
 
-func enforceApplyPatchModeOnResolvedTools(tools []tooltypes.Tool, allowedTools []string, applyPatchEnabled bool) []tooltypes.Tool {
+func enforceToolModeOnResolvedTools(tools []tooltypes.Tool, allowedTools []string, toolMode llmtypes.ToolMode) []tooltypes.Tool {
 	if len(allowedTools) == 1 && allowedTools[0] == NoToolsMarker {
 		return tools
 	}
 
-	if !applyPatchEnabled {
+	if toolMode != llmtypes.ToolModePatchOnly {
 		filteredTools := make([]tooltypes.Tool, 0, len(tools))
 		for _, tool := range tools {
 			if tool.Name() == "apply_patch" {
@@ -322,7 +322,7 @@ func enforceApplyPatchModeOnResolvedTools(tools []tooltypes.Tool, allowedTools [
 	hasApplyPatch := false
 	for _, tool := range tools {
 		switch tool.Name() {
-		case "file_write", "file_edit":
+		case "file_read", "file_write", "file_edit":
 			continue
 		case "apply_patch":
 			hasApplyPatch = true
@@ -464,7 +464,7 @@ func (s *BasicState) configureTools() {
 	for i, tool := range s.tools {
 		switch tool.Name() {
 		case "bash":
-			s.tools[i] = NewBashTool(s.llmConfig.AllowedCommands)
+			s.tools[i] = NewBashTool(s.llmConfig.AllowedCommands, s.llmConfig.DisableFSSearchTools)
 		case "web_fetch":
 			s.tools[i] = NewWebFetchTool(s.llmConfig.AllowedDomainsFile)
 		}
