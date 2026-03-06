@@ -4,6 +4,7 @@ import (
 	"os"
 
 	"github.com/jingkaihe/kodelet/pkg/acp"
+	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -53,8 +54,27 @@ func init() {
 func runACP(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
 
+	config, err := buildACPServerConfig(cmd)
+	if err != nil {
+		return err
+	}
+
 	logger.SetLogOutput(os.Stderr)
 	logger.SetLogLevel(viper.GetString("log_level"))
+
+	server := acp.NewServer(
+		acp.WithConfig(config),
+		acp.WithContext(ctx),
+	)
+
+	return server.Run()
+}
+
+func buildACPServerConfig(cmd *cobra.Command) (*acp.ServerConfig, error) {
+	llmConfig, err := llm.GetConfigFromViperWithCmd(cmd)
+	if err != nil {
+		return nil, err
+	}
 
 	provider, _ := cmd.Flags().GetString("provider")
 	model, _ := cmd.Flags().GetString("model")
@@ -75,18 +95,13 @@ func runACP(cmd *cobra.Command, _ []string) error {
 		MaxTokens:            maxTokens,
 		NoSkills:             noSkills,
 		NoWorkflows:          noWorkflows,
-		DisableFSSearchTools: disableFSSearchTools || viper.GetBool("disable_fs_search_tools"),
-		DisableSubagent:      disableSubagent || viper.GetBool("disable_subagent"),
+		DisableFSSearchTools: disableFSSearchTools || llmConfig.DisableFSSearchTools,
+		DisableSubagent:      disableSubagent || llmConfig.DisableSubagent,
 		NoHooks:              noHooks,
 		MaxTurns:             maxTurns,
 		CompactRatio:         compactRatio,
 		DisableAutoCompact:   disableAutoCompact,
 	}
 
-	server := acp.NewServer(
-		acp.WithConfig(config),
-		acp.WithContext(ctx),
-	)
-
-	return server.Run()
+	return config, nil
 }

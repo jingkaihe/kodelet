@@ -1,5 +1,10 @@
 # Kodelet
 
+## 0.3.3.beta (2026-03-06)
+
+Fixed `kodelet acp` to respect profile-derived `disable_fs_search_tools` and `disable_subagent` settings, aligning ACP session tool availability with `kodelet run`.
+Added regression tests covering ACP profile-aware config resolution.
+
 ## 0.3.2.beta (2026-03-06)
 
 Replaced `apply_patch_enabled` with `tool_mode`, adding `tool_mode: patch_only` to represent apply-patch-only workflows and to disable `file_read`, `file_write`, and `file_edit` together.
