@@ -106,7 +106,7 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
     return (
       <div className="flex min-h-[50vh] items-center justify-center px-6 py-12">
         <div className="max-w-2xl text-center">
-          <p className="mb-3 text-xs font-heading uppercase tracking-[0.24em] text-kodelet-orange">
+          <p className="eyebrow-label mb-3 text-kodelet-orange">
             Kodelet Chat
           </p>
           <h1 className="mb-4 text-4xl font-heading font-bold tracking-tight text-kodelet-dark md:text-6xl">
@@ -122,7 +122,7 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
   }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-5 px-4 py-6 md:px-8">
+    <div className="mx-auto w-full max-w-5xl space-y-5 px-4 py-6 md:px-8">
       {messages.map((message, index) => {
         const isUser = message.role === 'user';
 
@@ -130,10 +130,8 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
           <article key={`${message.role}-${index}`} className="w-full">
             <div
               className={cn(
-                'w-full rounded-[1.5rem] border shadow-[0_20px_60px_rgba(20,20,19,0.05)]',
-                isUser
-                  ? 'border-kodelet-orange/18 bg-white/92 px-5 py-4'
-                  : 'border-black/8 bg-white/84 px-5 py-5 backdrop-blur'
+                'chat-message-panel w-full rounded-[1.5rem]',
+                isUser ? 'px-5 py-4' : 'px-5 py-5'
               )}
             >
               <div className="mb-4 flex items-center justify-between gap-3">
@@ -152,14 +150,14 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
                     <p className="font-heading text-sm font-semibold tracking-tight text-kodelet-dark">
                       {isUser ? 'You' : 'Kodelet'}
                     </p>
-                    <p className="text-xs uppercase tracking-[0.18em] text-kodelet-mid-gray">
+                    <p className="eyebrow-label text-kodelet-mid-gray">
                       {isUser ? 'Prompt' : isStreaming && index === messages.length - 1 ? 'Streaming' : 'Reply'}
                     </p>
                   </div>
                 </div>
 
                 <button
-                  className="rounded-full border border-black/10 px-3 py-1 text-xs font-heading font-medium text-kodelet-dark transition hover:border-kodelet-orange/30 hover:text-kodelet-orange"
+                  className="panel-action-button px-3 py-2"
                   onClick={() => copyToClipboard(getCopyText(message))}
                   type="button"
                 >
@@ -169,7 +167,7 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
 
               {isUser ? (
                 <div
-                  className="prose prose-sm max-w-none text-kodelet-dark"
+                  className="chat-prose max-w-none text-kodelet-dark"
                   dangerouslySetInnerHTML={{ __html: renderContent(message.content) }}
                 />
               ) : (
@@ -179,7 +177,7 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
                       return (
                         <div
                           key={`thinking-${blockIndex}`}
-                          className="rounded-2xl border border-kodelet-blue/16 bg-kodelet-blue/6 px-4 py-4"
+                          className="chat-subpanel rounded-2xl px-4 py-4"
                         >
                           <div className="mb-3 flex items-center gap-2">
                             <span className="font-heading text-sm font-semibold text-kodelet-blue">
@@ -188,7 +186,7 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
                           </div>
                           {extractContentText(block.content).trim() ? (
                             <div
-                              className="prose prose-sm max-w-none text-kodelet-dark"
+                              className="chat-prose max-w-none text-kodelet-dark"
                               dangerouslySetInnerHTML={{ __html: renderContent(block.content) }}
                             />
                           ) : (
@@ -204,7 +202,7 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
                       return (
                         <details
                           key={`tools-${blockIndex}`}
-                          className="overflow-hidden rounded-2xl border border-black/10 bg-kodelet-light-gray/22"
+                          className="chat-subpanel overflow-hidden rounded-2xl"
                         >
                           <summary className="cursor-pointer list-none px-4 py-3 font-heading text-sm font-semibold text-kodelet-dark">
                             Tools ({block.tools.length})
@@ -246,7 +244,7 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
                     return (
                       <div
                         key={`message-${blockIndex}`}
-                        className="prose prose-sm max-w-none text-kodelet-dark"
+                        className="chat-prose max-w-none text-kodelet-dark"
                         dangerouslySetInnerHTML={{ __html: renderContent(block.content) }}
                       />
                     );

@@ -25,7 +25,7 @@ const ThinkingRenderer: React.FC<ThinkingRendererProps> = ({ toolResult }) => {
         {!showThought && (
           <button
             onClick={() => setShowThought(true)}
-            className="text-kodelet-blue hover:underline"
+            className="tool-action-link"
           >
             Show thinking
           </button>
@@ -34,7 +34,7 @@ const ThinkingRenderer: React.FC<ThinkingRendererProps> = ({ toolResult }) => {
 
       {showThought && (
         <div
-          className="bg-kodelet-light-gray/30 p-2 rounded border border-kodelet-mid-gray/20 prose-enhanced text-sm italic max-h-64 overflow-y-auto"
+          className="tool-detail-panel prose-enhanced max-h-64 overflow-y-auto text-sm italic"
           dangerouslySetInnerHTML={{ __html: formatThoughtContent(meta.thought) }}
         />
       )}

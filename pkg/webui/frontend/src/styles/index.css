@@ -20,6 +20,13 @@
   --kodelet-orange: #d97757;
   --kodelet-blue: #6a9bcc;
   --kodelet-green: #788c5d;
+  --kodelet-shell: #ece5d8;
+  --kodelet-panel: rgba(245, 240, 231, 0.94);
+  --kodelet-panel-soft: rgba(238, 232, 221, 0.78);
+  --font-heading: "Poppins", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "Lora", Georgia, serif;
+  --font-mono: "Monaco", "Menlo", "Ubuntu Mono", monospace;
+  --tracking-eyebrow: 0.18em;
 
   /* Refined shadows */
   --shadow-sm: 0 1px 2px 0 rgb(20 20 19 / 0.05);
@@ -36,13 +43,15 @@
 
 /* Base Typography Styling */
 body {
-  font-family: "Lora", Georgia, serif;
+  font-family: var(--font-body);
+  font-size: 1rem;
+  line-height: 1.75;
   color: var(--kodelet-dark);
-  background:
-    radial-gradient(circle at top left, rgba(217, 119, 87, 0.18), transparent 28%),
-    radial-gradient(circle at top right, rgba(106, 155, 204, 0.16), transparent 25%),
-    linear-gradient(180deg, #f8f6ef 0%, #f3efe5 100%);
+  background: #f2ede3;
   position: relative;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 /* Subtle background texture for depth */
@@ -56,7 +65,7 @@ body::before {
   background-image: var(--noise-texture);
   pointer-events: none;
   z-index: 0;
-  opacity: 0.4;
+  opacity: 0.18;
 }
 
 #root {
@@ -67,7 +76,8 @@ body::before {
 
 button,
 input,
-textarea {
+textarea,
+select {
   font: inherit;
 }
 
@@ -86,10 +96,146 @@ h3,
 h4,
 h5,
 h6 {
-  font-family: "Poppins", Arial, sans-serif;
+  font-family: var(--font-heading);
   font-weight: 600;
   letter-spacing: -0.02em;
   color: var(--kodelet-dark);
+}
+
+.eyebrow-label {
+  font-family: var(--font-heading);
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
+  color: #7a756b;
+}
+
+.meta-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 9999px;
+  border: 1px solid rgba(20, 20, 19, 0.08);
+  background: rgba(255, 255, 255, 0.8);
+  padding: 0.4rem 0.85rem;
+  font-family: var(--font-heading);
+  font-size: 0.7rem;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #6f6a5f;
+}
+
+.surface-panel {
+  border: 1px solid rgba(20, 20, 19, 0.08);
+  background: var(--kodelet-panel);
+  box-shadow: 0 14px 34px rgba(20, 20, 19, 0.05);
+}
+
+.chat-message-panel {
+  border: 1px solid rgba(20, 20, 19, 0.08);
+  background: var(--kodelet-panel);
+  box-shadow: 0 14px 34px rgba(20, 20, 19, 0.05);
+}
+
+.chat-subpanel {
+  border: 1px solid rgba(20, 20, 19, 0.08);
+  background: var(--kodelet-panel-soft);
+}
+
+.panel-action-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  border-radius: 9999px;
+  border: 1px solid rgba(20, 20, 19, 0.1);
+  background: rgba(255, 255, 255, 0.82);
+  padding: 0.45rem 0.9rem;
+  font-family: var(--font-heading);
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--kodelet-dark);
+  transition:
+    border-color 140ms ease,
+    color 140ms ease,
+    background-color 140ms ease,
+    box-shadow 140ms ease,
+    transform 140ms ease;
+}
+
+.panel-action-button:hover {
+  border-color: rgba(217, 119, 87, 0.24);
+  color: var(--kodelet-orange);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 10px 24px rgba(20, 20, 19, 0.08);
+}
+
+.panel-action-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  box-shadow: none;
+}
+
+.tool-action-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-family: var(--font-heading);
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--kodelet-blue);
+  transition: color 140ms ease;
+}
+
+.tool-action-link:hover {
+  color: #547ba6;
+}
+
+.tool-detail-panel {
+  border-radius: 1rem;
+  border: 1px solid rgba(20, 20, 19, 0.08);
+  background: var(--kodelet-panel);
+  padding: 0.9rem 1rem;
+}
+
+.tool-meta-label {
+  font-family: var(--font-heading);
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #7a756b;
+}
+
+.primary-pill-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  padding: 0.72rem 1.1rem;
+  font-family: var(--font-heading);
+  font-size: 0.84rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: white;
+  transition:
+    background-color 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
+}
+
+.primary-pill-button:hover:not(:disabled) {
+  box-shadow: 0 14px 32px rgba(20, 20, 19, 0.14);
 }
 
 h1 {
@@ -116,7 +262,7 @@ h3 {
 
 /* Syntax highlighting adjustments */
 pre code {
-  font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 0.875rem;
   line-height: 1.6;
 }
@@ -146,17 +292,105 @@ code[class*="language-"] {
 }
 
 /* Refined prose styling for markdown content */
-.prose {
+.prose,
+.chat-prose {
   max-width: none;
   color: var(--kodelet-dark);
-  line-height: 1.6;
+  font-family: var(--font-body);
+  font-size: 0.98rem;
+  line-height: 1.75;
 }
 
-.prose p {
-  margin-bottom: 0.875rem;
+.prose > *:first-child,
+.chat-prose > *:first-child,
+.prose-enhanced > *:first-child {
+  margin-top: 0;
 }
 
-.prose pre {
+.prose > *:last-child,
+.chat-prose > *:last-child,
+.prose-enhanced > *:last-child {
+  margin-bottom: 0;
+}
+
+.prose p,
+.chat-prose p {
+  margin-bottom: 0.95rem;
+}
+
+.prose h1,
+.prose h2,
+.prose h3,
+.prose h4,
+.chat-prose h1,
+.chat-prose h2,
+.chat-prose h3,
+.chat-prose h4 {
+  margin: 1.35rem 0 0.65rem;
+  font-family: var(--font-heading);
+  color: var(--kodelet-dark);
+}
+
+.prose h1,
+.chat-prose h1 {
+  font-size: 1.55rem;
+}
+
+.prose h2,
+.chat-prose h2 {
+  font-size: 1.34rem;
+}
+
+.prose h3,
+.chat-prose h3 {
+  font-size: 1.15rem;
+}
+
+.prose ul,
+.prose ol,
+.chat-prose ul,
+.chat-prose ol {
+  margin: 0.9rem 0 1rem;
+  padding-left: 1.4rem;
+}
+
+.prose li,
+.chat-prose li {
+  margin-bottom: 0.4rem;
+}
+
+.prose blockquote,
+.chat-prose blockquote {
+  margin: 1rem 0;
+  border-left: 3px solid rgba(217, 119, 87, 0.32);
+  padding-left: 1rem;
+  color: rgba(20, 20, 19, 0.72);
+  font-style: italic;
+}
+
+.prose a,
+.chat-prose a {
+  color: #547ba6;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.16em;
+}
+
+.prose a:hover,
+.chat-prose a:hover {
+  color: var(--kodelet-orange);
+}
+
+.prose strong,
+.prose b,
+.chat-prose strong,
+.chat-prose b {
+  font-weight: 600;
+  color: var(--kodelet-dark);
+}
+
+.prose pre,
+.chat-prose pre {
   background: linear-gradient(
     135deg,
     var(--kodelet-light-gray) 0%,
@@ -171,16 +405,19 @@ code[class*="language-"] {
   box-shadow: var(--shadow-sm);
 }
 
-.prose code {
+.prose code,
+.chat-prose code {
   background: var(--kodelet-light-gray);
   color: var(--kodelet-dark);
   padding: 0.2rem 0.5rem;
   border-radius: 4px;
   font-size: 0.9rem;
+  font-family: var(--font-mono);
   border: 1px solid var(--kodelet-mid-gray);
 }
 
-.prose pre code {
+.prose pre code,
+.chat-prose pre code {
   background: transparent;
   padding: 0;
   border: none;
@@ -189,24 +426,14 @@ code[class*="language-"] {
 /* Enhanced prose styling for subagent and other technical content */
 .prose-enhanced {
   max-width: none;
-
-  /* Use DaisyUI CSS custom properties for theme compatibility */
-  --tw-prose-body: hsl(var(--bc));
-  --tw-prose-headings: hsl(var(--bc));
-  --tw-prose-links: hsl(var(--p));
-  --tw-prose-bold: hsl(var(--bc));
-  --tw-prose-code: hsl(var(--bc));
-  --tw-prose-pre-code: hsl(var(--bc));
-  --tw-prose-pre-bg: hsl(var(--b3));
-  --tw-prose-borders: hsl(var(--bc) / 0.2);
-  --tw-prose-quotes: hsl(var(--bc) / 0.8);
-
-  /* Improved spacing and typography */
-  line-height: 1.6;
+  color: var(--kodelet-dark);
+  font-family: var(--font-body);
+  font-size: 0.95rem;
+  line-height: 1.72;
 }
 
 .prose-enhanced p {
-  margin-bottom: 1rem;
+  margin-bottom: 0.95rem;
 }
 
 .prose-enhanced h1,
@@ -215,10 +442,11 @@ code[class*="language-"] {
 .prose-enhanced h4,
 .prose-enhanced h5,
 .prose-enhanced h6 {
-  margin-top: 1.5rem;
-  margin-bottom: 0.75rem;
+  margin-top: 1.4rem;
+  margin-bottom: 0.65rem;
+  font-family: var(--font-heading);
   font-weight: 600;
-  color: hsl(var(--bc));
+  color: var(--kodelet-dark);
 }
 
 .prose-enhanced h1 {
@@ -235,23 +463,23 @@ code[class*="language-"] {
 }
 
 .prose-enhanced code {
-  background-color: hsl(var(--b3));
-  color: hsl(var(--bc));
+  background-color: rgba(232, 230, 220, 0.72);
+  color: var(--kodelet-dark);
   padding: 0.125rem 0.375rem;
   border-radius: 0.25rem;
   font-size: 0.875rem;
-  font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
-  border: 1px solid hsl(var(--bc) / 0.1);
+  font-family: var(--font-mono);
+  border: 1px solid rgba(176, 174, 165, 0.22);
 }
 
 .prose-enhanced pre {
-  background-color: hsl(var(--b3));
-  color: hsl(var(--bc));
+  background-color: rgba(232, 230, 220, 0.45);
+  color: var(--kodelet-dark);
   border-radius: 0.5rem;
   padding: 1rem;
   margin: 1rem 0;
   overflow-x: auto;
-  border: 1px solid hsl(var(--bc) / 0.1);
+  border: 1px solid rgba(176, 174, 165, 0.2);
 }
 
 .prose-enhanced pre code {
@@ -272,11 +500,11 @@ code[class*="language-"] {
 }
 
 .prose-enhanced blockquote {
-  border-left: 4px solid hsl(var(--p));
+  border-left: 3px solid rgba(217, 119, 87, 0.32);
   margin: 1rem 0;
   padding-left: 1rem;
   font-style: italic;
-  color: hsl(var(--bc) / 0.8);
+  color: rgba(20, 20, 19, 0.72);
 }
 
 .prose-enhanced table {
@@ -286,7 +514,7 @@ code[class*="language-"] {
 }
 
 .sidebar-section-title {
-  font-family: "Poppins", Arial, sans-serif;
+  font-family: var(--font-heading);
   font-size: 0.9rem;
   font-weight: 600;
   letter-spacing: -0.01em;
@@ -327,7 +555,7 @@ code[class*="language-"] {
 }
 
 .sidebar-action-plus {
-  font-family: "Poppins", Arial, sans-serif;
+  font-family: var(--font-heading);
   font-size: 1.7rem;
   font-weight: 300;
   line-height: 1;
@@ -335,7 +563,7 @@ code[class*="language-"] {
 }
 
 .sidebar-action-label {
-  font-family: "Poppins", Arial, sans-serif;
+  font-family: var(--font-heading);
   font-size: 0.98rem;
   font-weight: 500;
   letter-spacing: -0.015em;
@@ -384,7 +612,7 @@ code[class*="language-"] {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-family: "Poppins", Arial, sans-serif;
+  font-family: var(--font-heading);
   font-size: 0.84rem;
   line-height: 1.25;
   font-weight: 500;
@@ -421,7 +649,7 @@ code[class*="language-"] {
 }
 
 .sidebar-caption code {
-  font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
+  font-family: var(--font-mono);
   color: #5f5a50;
 }
 
@@ -540,7 +768,7 @@ code[class*="language-"] {
 }
 
 .tool-title {
-  font-family: "Poppins", Arial, sans-serif;
+  font-family: var(--font-heading);
   font-size: 0.95rem;
   font-weight: 600;
   color: var(--kodelet-dark);
@@ -548,7 +776,7 @@ code[class*="language-"] {
 }
 
 .tool-subtitle {
-  font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 0.74rem;
   color: #6f6a5f;
   margin-top: 0.2rem;
@@ -566,7 +794,7 @@ code[class*="language-"] {
   display: inline-block;
   border-radius: 999px;
   padding: 0.16rem 0.55rem;
-  font-family: "Poppins", Arial, sans-serif;
+  font-family: var(--font-heading);
   font-size: 0.69rem;
   font-weight: 600;
   border: 1px solid transparent;
@@ -619,7 +847,7 @@ code[class*="language-"] {
 
 .tool-kv-label {
   display: block;
-  font-family: "Poppins", Arial, sans-serif;
+  font-family: var(--font-heading);
   font-size: 0.68rem;
   font-weight: 600;
   letter-spacing: 0.02em;
@@ -636,7 +864,7 @@ code[class*="language-"] {
 }
 
 .tool-kv-value.mono {
-  font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 0.77rem;
 }
 
@@ -651,7 +879,7 @@ code[class*="language-"] {
 }
 
 .tool-item-label {
-  font-family: "Poppins", Arial, sans-serif;
+  font-family: var(--font-heading);
   font-size: 0.84rem;
   font-weight: 600;
   color: var(--kodelet-dark);
@@ -680,7 +908,7 @@ code[class*="language-"] {
   display: block;
   white-space: pre-wrap;
   word-break: break-word;
-  font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 0.78rem;
   line-height: 1.5;
   color: var(--kodelet-dark);
@@ -698,7 +926,7 @@ code[class*="language-"] {
   border: 1px solid rgba(176, 174, 165, 0.2);
   border-radius: 6px;
   padding: 0.24rem 0.45rem;
-  font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 0.76rem;
   color: var(--kodelet-dark);
 }
@@ -747,7 +975,7 @@ code[class*="language-"] {
 }
 
 .tool-terminal-label {
-  font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 0.71rem;
   color: rgba(255, 255, 255, 0.66);
   letter-spacing: 0.01em;
@@ -765,7 +993,7 @@ code[class*="language-"] {
   margin: 0;
   white-space: pre-wrap;
   word-break: break-word;
-  font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 0.78rem;
   line-height: 1.45;
 }
@@ -792,7 +1020,7 @@ code[class*="language-"] {
   grid-template-columns: 1.6rem 1fr;
   gap: 0.5rem;
   padding: 0.22rem 0.55rem;
-  font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 0.76rem;
   line-height: 1.45;
 }
@@ -836,7 +1064,7 @@ code[class*="language-"] {
 .grep-file-header {
   padding: 0.45rem 0.65rem;
   background: rgba(232, 230, 220, 0.55);
-  font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 0.77rem;
   color: var(--kodelet-dark);
 }
@@ -846,7 +1074,7 @@ code[class*="language-"] {
   grid-template-columns: 3rem 1fr;
   gap: 0.55rem;
   padding: 0.18rem 0.65rem;
-  font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 0.76rem;
   line-height: 1.45;
 }
@@ -885,7 +1113,7 @@ code[class*="language-"] {
 }
 
 .tool-file-path {
-  font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 0.76rem;
   color: var(--kodelet-dark);
   word-break: break-word;
@@ -905,22 +1133,24 @@ code[class*="language-"] {
 }
 
 .prose-enhanced th {
-  background-color: hsl(var(--b2));
+  background-color: rgba(232, 230, 220, 0.55);
   font-weight: 600;
 }
 
 .prose-enhanced a {
-  color: hsl(var(--p));
+  color: #547ba6;
   text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.16em;
 }
 
 .prose-enhanced a:hover {
-  color: hsl(var(--pf));
+  color: var(--kodelet-orange);
 }
 
 .prose-enhanced hr {
   border: none;
-  border-top: 1px solid hsl(var(--bc) / 0.2);
+  border-top: 1px solid rgba(20, 20, 19, 0.12);
   margin: 2rem 0;
 }
 
@@ -1149,7 +1379,7 @@ code[class*="language-"] {
 /* Refined button styling */
 button,
 .btn {
-  font-family: "Poppins", Arial, sans-serif;
+  font-family: var(--font-heading);
   font-weight: 500;
   letter-spacing: 0.01em;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);

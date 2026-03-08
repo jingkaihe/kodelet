@@ -22,12 +22,12 @@ export const ToolCard: React.FC<ToolCardProps> = ({
   className = 'bg-kodelet-light-gray/20'
 }) => {
   return (
-    <div className={`${className} border border-kodelet-mid-gray/20 rounded p-3`} role="article">
-      <div className="flex items-center justify-between mb-3">
+    <div className={`${className} rounded-2xl border border-black/10 p-4 shadow-[0_8px_30px_rgba(20,20,19,0.04)]`} role="article">
+      <div className="mb-3 flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <h4 className="font-heading font-semibold text-sm text-kodelet-dark">{title}</h4>
           {badge && (
-            <div className={`px-2 py-0.5 rounded text-xs font-heading font-medium ${badge.className || 'bg-kodelet-blue/10 text-kodelet-blue border border-kodelet-blue/20'}`}>
+            <div className={`inline-flex items-center rounded-full border px-2 py-1 text-[0.68rem] font-heading font-semibold uppercase tracking-[0.12em] ${badge.className || 'border-kodelet-blue/20 bg-kodelet-blue/10 text-kodelet-blue'}`}>
               {badge.text}
             </div>
           )}
@@ -58,7 +58,7 @@ export const Collapsible: React.FC<CollapsibleProps> = ({
   const collapseId = `collapse-${Math.random().toString(36).substr(2, 9)}`;
 
   return (
-    <div className="collapse collapse-arrow bg-kodelet-light/50 border border-kodelet-mid-gray/20 mt-2 rounded" role="region">
+    <div className="collapse collapse-arrow mt-2 rounded-2xl border border-black/8 bg-white/70" role="region">
       <input
         type="checkbox"
         id={collapseId}
@@ -68,12 +68,12 @@ export const Collapsible: React.FC<CollapsibleProps> = ({
       />
       <label
         htmlFor={collapseId}
-        className="collapse-title text-xs font-heading font-medium flex items-center justify-between cursor-pointer"
+        className="collapse-title flex cursor-pointer items-center justify-between text-xs font-heading font-semibold uppercase tracking-[0.08em]"
       >
         <span className="text-kodelet-dark">{title}</span>
         {badge && (
           <div
-            className={`px-2 py-0.5 rounded text-xs font-heading font-medium ${badge.className || 'bg-kodelet-blue/10 text-kodelet-blue border border-kodelet-blue/20'}`}
+            className={`inline-flex items-center rounded-full border px-2 py-1 text-[0.68rem] font-heading font-semibold uppercase tracking-[0.12em] ${badge.className || 'border-kodelet-blue/20 bg-kodelet-blue/10 text-kodelet-blue'}`}
             aria-label={badge.text}
           >
             {badge.text}
@@ -94,7 +94,7 @@ interface CopyButtonProps {
 
 export const CopyButton: React.FC<CopyButtonProps> = ({
   content,
-  className = 'btn-xs'
+  className = ''
 }) => {
   const handleCopy = () => {
     copyToClipboard(content);
@@ -102,7 +102,7 @@ export const CopyButton: React.FC<CopyButtonProps> = ({
 
   return (
     <button
-      className={`btn btn-ghost ${className}`}
+      className={`panel-action-button ${className}`.trim()}
       onClick={handleCopy}
       title="Copy to clipboard"
       aria-label="Copy to clipboard"
@@ -181,7 +181,7 @@ export const MetadataRow: React.FC<MetadataRowProps> = ({ label, value, monospac
 
   return (
     <div className="flex items-center gap-2 text-xs">
-      <strong className="font-heading font-medium text-kodelet-mid-gray">{label}:</strong>
+      <strong className="tool-meta-label">{label}:</strong>
       <span className={`${monospace ? 'font-mono' : 'font-body'} text-kodelet-dark`}>{String(value)}</span>
     </div>
   );
@@ -202,7 +202,7 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ text, variant = 'neutr
   };
 
   return (
-    <span className={`px-1.5 py-0.5 rounded text-xs font-medium border ${variantClasses[variant]}`}>
+    <span className={`inline-flex items-center rounded-full border px-2 py-1 text-[0.68rem] font-heading font-semibold uppercase tracking-[0.12em] ${variantClasses[variant]}`}>
       {text}
     </span>
   );
@@ -226,7 +226,7 @@ export const ExternalLink: React.FC<ExternalLinkProps> = ({ href, children, clas
       href={safeUrl}
       target="_blank"
       rel="noopener noreferrer"
-      className={`link link-hover ${className}`}
+      className={`tool-action-link normal-case tracking-normal ${className}`.trim()}
       aria-label="Open in new tab"
     >
       {children}
@@ -248,4 +248,3 @@ export const ExternalLink: React.FC<ExternalLinkProps> = ({ href, children, clas
     </a>
   );
 };
-

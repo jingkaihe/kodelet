@@ -431,7 +431,7 @@ const ChatPage: React.FC = () => {
           <header className="border-b border-black/8 px-4 py-5 md:px-8">
             <div className="flex items-start gap-4">
               <div className="min-w-0 max-w-5xl flex-1">
-                <p className="text-xs font-heading uppercase tracking-[0.2em] text-kodelet-mid-gray">
+                <p className="eyebrow-label">
                   {conversation ? 'Conversation' : 'Workspace assistant'}
                 </p>
 
@@ -440,24 +440,24 @@ const ChatPage: React.FC = () => {
                     <h2 className="mt-2 text-3xl font-heading font-bold tracking-tight text-kodelet-dark md:text-4xl">
                       {heading}
                     </h2>
-                    <div className="mt-3 flex flex-wrap gap-2 text-xs uppercase tracking-[0.12em] text-kodelet-mid-gray">
+                    <div className="mt-3 flex flex-wrap gap-2 text-kodelet-mid-gray">
                       {conversation.provider ? (
-                        <span className="rounded-full bg-white/80 px-3 py-1">
+                        <span className="meta-chip">
                           {conversation.provider}
                         </span>
                       ) : null}
                       {conversation.id ? (
-                        <span className="rounded-full bg-white/80 px-3 py-1">
+                        <span className="meta-chip">
                           {conversation.id}
                         </span>
                       ) : null}
                       {conversation.updatedAt ? (
-                        <span className="rounded-full bg-white/80 px-3 py-1">
+                        <span className="meta-chip">
                           Updated {formatDate(conversation.updatedAt)}
                         </span>
                       ) : null}
                       {conversation.usage ? (
-                        <span className="rounded-full bg-white/80 px-3 py-1">
+                        <span className="meta-chip">
                           {formatCost(conversation.usage)}
                         </span>
                       ) : null}
@@ -471,14 +471,14 @@ const ChatPage: React.FC = () => {
           <div className="flex-1 overflow-y-auto">
             {conversationLoading ? (
               <div className="flex min-h-[50vh] items-center justify-center px-6 py-12">
-                <div className="rounded-2xl border border-black/8 bg-white/85 px-6 py-5 text-sm text-kodelet-dark/70">
+                <div className="surface-panel rounded-2xl px-6 py-5 text-sm text-kodelet-dark/70">
                   Loading conversation…
                 </div>
               </div>
             ) : conversationError ? (
               <div className="px-4 py-8 md:px-8">
-                <div className="max-w-3xl rounded-3xl border border-kodelet-orange/20 bg-white/85 px-6 py-5 text-kodelet-dark shadow-[0_20px_60px_rgba(20,20,19,0.06)]">
-                  <p className="font-heading text-sm font-semibold uppercase tracking-[0.16em] text-kodelet-orange">
+                <div className="surface-panel max-w-3xl rounded-3xl border-kodelet-orange/20 px-6 py-5 text-kodelet-dark">
+                  <p className="eyebrow-label text-kodelet-orange">
                     Load error
                   </p>
                   <p className="mt-3 text-sm leading-7">{conversationError}</p>
@@ -496,15 +496,15 @@ const ChatPage: React.FC = () => {
             )}
           </div>
 
-          <div className="border-t border-black/8 bg-kodelet-light/85 px-4 py-4 backdrop-blur md:px-8">
-            <div className="mx-auto max-w-5xl">
+          <div className="border-t border-black/8 bg-[color:var(--kodelet-panel-soft)] px-4 py-4 md:px-8">
+            <div className="mx-auto w-full max-w-5xl px-4 md:px-8">
               {streamError ? (
-                <div className="mb-3 rounded-2xl border border-kodelet-orange/20 bg-white/85 px-4 py-3 text-sm text-kodelet-dark">
+                <div className="surface-panel mb-3 rounded-2xl border-kodelet-orange/20 px-4 py-3 text-sm text-kodelet-dark">
                   {streamError}
                 </div>
               ) : null}
 
-              <div className="rounded-[1.75rem] border border-black/10 bg-white/90 p-3 shadow-[0_18px_50px_rgba(20,20,19,0.07)]">
+              <div className="surface-panel w-full rounded-[1.75rem] p-3">
                 <textarea
                   className="min-h-[88px] w-full resize-none border-0 bg-transparent px-3 py-3 font-body text-base leading-7 text-kodelet-dark outline-none placeholder:text-kodelet-dark/40"
                   disabled={sending}
@@ -515,13 +515,13 @@ const ChatPage: React.FC = () => {
                 />
 
                 <div className="flex items-center justify-between gap-3 border-t border-black/8 px-3 pt-3">
-                  <p className="text-xs uppercase tracking-[0.14em] text-kodelet-mid-gray">
+                  <p className="eyebrow-label text-kodelet-mid-gray">
                     Enter to send. Shift + Enter for a new line.
                   </p>
 
                   <button
                     className={cn(
-                      'rounded-full px-4 py-2 font-heading text-sm font-semibold text-white transition',
+                      'primary-pill-button',
                       sending || !draft.trim()
                         ? 'cursor-not-allowed bg-kodelet-mid-gray'
                         : 'bg-kodelet-dark hover:bg-black'
