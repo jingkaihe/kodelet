@@ -44,9 +44,14 @@ const formatToolInput = (input: string): string => {
 interface ChatTranscriptProps {
   messages: ChatRenderMessage[];
   isStreaming: boolean;
+  emptyStateTitle?: string;
 }
 
-const ChatTranscript: React.FC<ChatTranscriptProps> = ({ messages, isStreaming }) => {
+const ChatTranscript: React.FC<ChatTranscriptProps> = ({
+  messages,
+  isStreaming,
+  emptyStateTitle = 'Good morning',
+}) => {
   if (messages.length === 0) {
     return (
       <div className="flex min-h-[50vh] items-center justify-center px-6 py-12">
@@ -55,7 +60,7 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({ messages, isStreaming }
             Kodelet Chat
           </p>
           <h1 className="mb-4 text-4xl font-heading font-bold tracking-tight text-kodelet-dark md:text-6xl">
-            Ship the next idea.
+            {emptyStateTitle}
           </h1>
           <p className="mx-auto max-w-xl text-lg font-body italic leading-8 text-kodelet-dark/70">
             Ask kodelet to inspect the repo, make changes, run tools, and keep the entire

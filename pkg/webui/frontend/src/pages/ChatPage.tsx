@@ -29,6 +29,39 @@ const getGreeting = (): string => {
   return 'Good evening';
 };
 
+const DEFAULT_SIDEBAR_WIDTH = 320;
+const MIN_SIDEBAR_WIDTH = 260;
+const MAX_SIDEBAR_WIDTH = 520;
+const SIDEBAR_WIDTH_STORAGE_KEY = 'kodelet.chat.sidebar.width';
+const SIDEBAR_VISIBLE_STORAGE_KEY = 'kodelet.chat.sidebar.visible';
+
+const clampSidebarWidth = (width: number): number =>
+  Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, width));
+
+const readStoredSidebarWidth = (): number => {
+  if (typeof window === 'undefined') {
+    return DEFAULT_SIDEBAR_WIDTH;
+  }
+
+  const storedWidth = window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY);
+  if (storedWidth === null) {
+    return DEFAULT_SIDEBAR_WIDTH;
+  }
+
+  const parsedWidth = Number(storedWidth);
+  return Number.isFinite(parsedWidth)
+    ? clampSidebarWidth(parsedWidth)
+    : DEFAULT_SIDEBAR_WIDTH;
+};
+
+const readStoredSidebarVisible = (): boolean => {
+  if (typeof window === 'undefined') {
+    return true;
+  }
+
+  return window.localStorage.getItem(SIDEBAR_VISIBLE_STORAGE_KEY) !== 'false';
+};
+
 const ChatPage: React.FC = () => {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
@@ -42,8 +75,12 @@ const ChatPage: React.FC = () => {
   const [conversationError, setConversationError] = useState<string | null>(null);
   const [streamError, setStreamError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const [sidebarVisible, setSidebarVisible] = useState(readStoredSidebarVisible);
+  const [sidebarWidth, setSidebarWidth] = useState(readStoredSidebarWidth);
+  const [isResizingSidebar, setIsResizingSidebar] = useState(false);
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const sidebarResizeStartRef = useRef<{ startX: number; startWidth: number } | null>(null);
 
   const refreshConversations = async () => {
     setSidebarLoading(true);
@@ -70,6 +107,52 @@ const ChatPage: React.FC = () => {
       abortControllerRef.current?.abort();
     };
   }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(SIDEBAR_VISIBLE_STORAGE_KEY, String(sidebarVisible));
+  }, [sidebarVisible]);
+
+  useEffect(() => {
+    window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth));
+  }, [sidebarWidth]);
+
+  useEffect(() => {
+    if (!isResizingSidebar) {
+      return undefined;
+    }
+
+    const previousUserSelect = document.body.style.userSelect;
+    const previousCursor = document.body.style.cursor;
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'col-resize';
+
+    const handleMouseMove = (event: MouseEvent) => {
+      const resizeStart = sidebarResizeStartRef.current;
+      if (!resizeStart) {
+        return;
+      }
+
+      const nextWidth = clampSidebarWidth(
+        resizeStart.startWidth + (event.clientX - resizeStart.startX)
+      );
+      setSidebarWidth(nextWidth);
+    };
+
+    const stopResizing = () => {
+      sidebarResizeStartRef.current = null;
+      setIsResizingSidebar(false);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', stopResizing);
+
+    return () => {
+      document.body.style.userSelect = previousUserSelect;
+      document.body.style.cursor = previousCursor;
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', stopResizing);
+    };
+  }, [isResizingSidebar]);
 
   useEffect(() => {
     if (!conversationId) {
@@ -122,6 +205,25 @@ const ChatPage: React.FC = () => {
 
     setStreamError(null);
     startTransition(() => navigate(`/c/${nextConversationId}`));
+  };
+
+  const handleSidebarToggle = () => {
+    if (sending) {
+      return;
+    }
+
+    setSidebarVisible((currentValue) => !currentValue);
+  };
+
+  const handleSidebarResizeStart = (
+    event: React.MouseEvent<HTMLElement>
+  ) => {
+    event.preventDefault();
+    sidebarResizeStartRef.current = {
+      startX: event.clientX,
+      startWidth: sidebarWidth,
+    };
+    setIsResizingSidebar(true);
   };
 
   const handleSubmit = async () => {
@@ -222,45 +324,142 @@ const ChatPage: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-transparent">
-      <div className="grid min-h-screen grid-cols-1 lg:grid-cols-[320px_minmax(0,1fr)]">
-        <ChatSidebar
-          activeConversationId={conversationId}
-          conversations={conversations}
-          disabled={sending}
-          loading={sidebarLoading}
-          onNewChat={handleNewChat}
-          onSelectConversation={handleSelectConversation}
+      {sidebarVisible ? (
+        <button
+          aria-label="Hide sidebar overlay"
+          className="fixed inset-0 z-30 bg-black/20 lg:hidden"
+          onClick={handleSidebarToggle}
+          type="button"
         />
+      ) : null}
 
-        <main className="relative flex min-h-screen flex-col">
+      <div className={cn('min-h-screen lg:flex', isResizingSidebar && 'select-none')}>
+        {sidebarVisible ? (
+          <div
+            className="fixed inset-y-0 left-0 z-40 w-[min(85vw,360px)] max-w-full shrink-0 lg:static lg:relative lg:z-auto lg:w-[var(--sidebar-width)]"
+            data-testid="chat-sidebar-shell"
+            style={{ '--sidebar-width': `${sidebarWidth}px` } as React.CSSProperties}
+          >
+            <ChatSidebar
+              activeConversationId={conversationId}
+              conversations={conversations}
+              disabled={sending}
+              loading={sidebarLoading}
+              onHide={handleSidebarToggle}
+              onNewChat={handleNewChat}
+              onSelectConversation={handleSelectConversation}
+            />
+
+            <div
+              aria-label="Resize sidebar"
+              aria-orientation="vertical"
+              className={cn(
+                'sidebar-splitter absolute inset-y-0 right-0 z-10 hidden translate-x-1/2 cursor-col-resize items-center justify-center lg:flex',
+                isResizingSidebar && 'is-resizing'
+              )}
+              data-testid="chat-sidebar-resizer"
+              onMouseDown={handleSidebarResizeStart}
+              role="separator"
+              tabIndex={-1}
+            >
+              <span className="sidebar-splitter-rail" />
+              <span className="sidebar-splitter-grip" />
+            </div>
+          </div>
+        ) : null}
+
+        {!sidebarVisible ? (
+          <>
+            <div className="sidebar-collapsed-rail hidden lg:flex" data-testid="sidebar-collapsed-rail">
+              <button
+                aria-label="Show panel"
+                className="sidebar-toggle-button sidebar-toggle-button-collapsed"
+                data-testid="sidebar-attached-toggle"
+                disabled={sending}
+                onClick={handleSidebarToggle}
+                type="button"
+              >
+                <svg
+                  aria-hidden="true"
+                  className="h-4 w-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  xmlns="http://www.w3.org/2000/svg"
+                >
+                  <path
+                    d="m9 6 6 6-6 6"
+                    stroke="currentColor"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="1.8"
+                  />
+                </svg>
+              </button>
+            </div>
+
+            <button
+              aria-label="Show panel"
+              className="sidebar-toggle-button sidebar-toggle-button-mobile lg:hidden"
+              data-testid="sidebar-attached-toggle-mobile"
+              disabled={sending}
+              onClick={handleSidebarToggle}
+              type="button"
+            >
+              <svg
+                aria-hidden="true"
+                className="h-4 w-4"
+                fill="none"
+                viewBox="0 0 24 24"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  d="m9 6 6 6-6 6"
+                  stroke="currentColor"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="1.8"
+                />
+              </svg>
+            </button>
+          </>
+        ) : null}
+
+        <main className="relative flex min-h-screen min-w-0 flex-1 flex-col">
           <header className="border-b border-black/8 px-4 py-5 md:px-8">
-            <div className="max-w-5xl">
-              <p className="mb-2 text-xs font-heading uppercase tracking-[0.2em] text-kodelet-mid-gray">
-                {conversation ? 'Conversation' : 'Workspace assistant'}
-              </p>
-              <h2 className="text-3xl font-heading font-bold tracking-tight text-kodelet-dark md:text-4xl">
-                {heading}
-              </h2>
-              <div className="mt-3 flex flex-wrap gap-2 text-xs uppercase tracking-[0.12em] text-kodelet-mid-gray">
-                {conversation?.provider ? (
-                  <span className="rounded-full bg-white/80 px-3 py-1">
-                    {conversation.provider}
-                  </span>
-                ) : null}
-                {conversation?.id ? (
-                  <span className="rounded-full bg-white/80 px-3 py-1">
-                    {conversation.id}
-                  </span>
-                ) : null}
-                {conversation?.updatedAt ? (
-                  <span className="rounded-full bg-white/80 px-3 py-1">
-                    Updated {formatDate(conversation.updatedAt)}
-                  </span>
-                ) : null}
-                {conversation?.usage ? (
-                  <span className="rounded-full bg-white/80 px-3 py-1">
-                    {formatCost(conversation.usage)}
-                  </span>
+            <div className="flex items-start gap-4">
+              <div className="min-w-0 max-w-5xl flex-1">
+                <p className="text-xs font-heading uppercase tracking-[0.2em] text-kodelet-mid-gray">
+                  {conversation ? 'Conversation' : 'Workspace assistant'}
+                </p>
+
+                {conversation ? (
+                  <>
+                    <h2 className="mt-2 text-3xl font-heading font-bold tracking-tight text-kodelet-dark md:text-4xl">
+                      {heading}
+                    </h2>
+                    <div className="mt-3 flex flex-wrap gap-2 text-xs uppercase tracking-[0.12em] text-kodelet-mid-gray">
+                      {conversation.provider ? (
+                        <span className="rounded-full bg-white/80 px-3 py-1">
+                          {conversation.provider}
+                        </span>
+                      ) : null}
+                      {conversation.id ? (
+                        <span className="rounded-full bg-white/80 px-3 py-1">
+                          {conversation.id}
+                        </span>
+                      ) : null}
+                      {conversation.updatedAt ? (
+                        <span className="rounded-full bg-white/80 px-3 py-1">
+                          Updated {formatDate(conversation.updatedAt)}
+                        </span>
+                      ) : null}
+                      {conversation.usage ? (
+                        <span className="rounded-full bg-white/80 px-3 py-1">
+                          {formatCost(conversation.usage)}
+                        </span>
+                      ) : null}
+                    </div>
+                  </>
                 ) : null}
               </div>
             </div>
@@ -284,7 +483,11 @@ const ChatPage: React.FC = () => {
               </div>
             ) : (
               <>
-                <ChatTranscript isStreaming={sending} messages={messages} />
+                <ChatTranscript
+                  emptyStateTitle={heading}
+                  isStreaming={sending}
+                  messages={messages}
+                />
                 <div ref={transcriptEndRef} />
               </>
             )}

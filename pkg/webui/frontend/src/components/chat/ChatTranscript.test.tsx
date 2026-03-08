@@ -3,6 +3,18 @@ import { describe, expect, it } from 'vitest';
 import ChatTranscript from './ChatTranscript';
 
 describe('ChatTranscript', () => {
+  it('renders the supplied empty-state greeting', () => {
+    render(
+      <ChatTranscript
+        emptyStateTitle="Good afternoon"
+        isStreaming={false}
+        messages={[]}
+      />
+    );
+
+    expect(screen.getByText('Good afternoon')).toBeInTheDocument();
+  });
+
   it('renders thinking blocks as markdown', () => {
     const { container } = render(
       <ChatTranscript

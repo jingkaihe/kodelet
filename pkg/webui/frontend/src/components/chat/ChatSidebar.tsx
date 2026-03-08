@@ -7,6 +7,7 @@ interface ChatSidebarProps {
   activeConversationId: string | null;
   loading: boolean;
   disabled?: boolean;
+  onHide?: () => void;
   onNewChat: () => void;
   onSelectConversation: (conversationId: string) => void;
 }
@@ -25,11 +26,39 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
   activeConversationId,
   loading,
   disabled = false,
+  onHide,
   onNewChat,
   onSelectConversation,
 }) => {
   return (
-    <aside className="border-b border-black/8 bg-kodelet-light-gray px-4 py-5 lg:flex lg:min-h-screen lg:flex-col lg:border-b-0 lg:border-r">
+    <aside className="relative overflow-visible border-b border-black/8 bg-kodelet-light-gray px-4 py-5 lg:flex lg:min-h-screen lg:flex-col lg:border-b-0 lg:border-r">
+      {onHide ? (
+        <button
+          aria-label="Hide panel"
+          className="sidebar-toggle-button sidebar-toggle-button-open"
+          data-testid="sidebar-hide-button"
+          disabled={disabled}
+          onClick={onHide}
+          type="button"
+        >
+          <svg
+            aria-hidden="true"
+            className="h-4 w-4"
+            fill="none"
+            viewBox="0 0 24 24"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <path
+              d="M15 6 9 12l6 6"
+              stroke="currentColor"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth="1.8"
+            />
+          </svg>
+        </button>
+      ) : null}
+
       <div className="min-h-0 flex-1">
         <button
           className="sidebar-action-link"
