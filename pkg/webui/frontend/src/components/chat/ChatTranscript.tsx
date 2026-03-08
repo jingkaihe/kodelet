@@ -41,6 +41,56 @@ const formatToolInput = (input: string): string => {
   }
 };
 
+const extractContentText = (content: string | ContentBlock[] | undefined): string => {
+  if (!content) {
+    return '';
+  }
+
+  if (typeof content === 'string') {
+    return content;
+  }
+
+  return content
+    .map((block) => {
+      if (block.type === 'text') {
+        return block.text || '';
+      }
+
+      if (block.type === 'image') {
+        return '[image]';
+      }
+
+      return '';
+    })
+    .filter(Boolean)
+    .join('\n\n');
+};
+
+const getCopyText = (message: ChatRenderMessage): string => {
+  if (message.role === 'user') {
+    return extractContentText(message.content);
+  }
+
+  return (message.blocks || [])
+    .map((block) => {
+      if (block.type === 'thinking') {
+        return `Thinking\n${extractContentText(block.content)}`.trim();
+      }
+
+      if (block.type === 'message') {
+        return extractContentText(block.content);
+      }
+
+      if (block.type === 'tools') {
+        return `Tools (${block.tools.length})`;
+      }
+
+      return '';
+    })
+    .filter(Boolean)
+    .join('\n\n');
+};
+
 interface ChatTranscriptProps {
   messages: ChatRenderMessage[];
   isStreaming: boolean;
@@ -72,24 +122,18 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
   }
 
   return (
-    <div className="space-y-6 px-4 py-6 md:px-8">
+    <div className="mx-auto max-w-5xl space-y-5 px-4 py-6 md:px-8">
       {messages.map((message, index) => {
         const isUser = message.role === 'user';
 
         return (
-          <article
-            key={`${message.role}-${index}`}
-            className={cn(
-              'flex w-full',
-              isUser ? 'justify-end' : 'justify-start'
-            )}
-          >
+          <article key={`${message.role}-${index}`} className="w-full">
             <div
               className={cn(
-                'w-full max-w-4xl rounded-[1.5rem] border shadow-[0_20px_60px_rgba(20,20,19,0.07)]',
+                'w-full rounded-[1.5rem] border shadow-[0_20px_60px_rgba(20,20,19,0.05)]',
                 isUser
-                  ? 'border-kodelet-orange/20 bg-white/90 px-5 py-4 md:max-w-2xl'
-                  : 'border-black/8 bg-white/88 px-5 py-5 backdrop-blur'
+                  ? 'border-kodelet-orange/18 bg-white/92 px-5 py-4'
+                  : 'border-black/8 bg-white/84 px-5 py-5 backdrop-blur'
               )}
             >
               <div className="mb-4 flex items-center justify-between gap-3">
@@ -116,13 +160,7 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
 
                 <button
                   className="rounded-full border border-black/10 px-3 py-1 text-xs font-heading font-medium text-kodelet-dark transition hover:border-kodelet-orange/30 hover:text-kodelet-orange"
-                  onClick={() =>
-                    copyToClipboard(
-                      typeof message.content === 'string'
-                        ? message.content
-                        : JSON.stringify(message.blocks || [], null, 2)
-                    )
-                  }
+                  onClick={() => copyToClipboard(getCopyText(message))}
                   type="button"
                 >
                   Copy
@@ -139,21 +177,26 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
                   {(message.blocks || []).map((block, blockIndex) => {
                     if (block.type === 'thinking') {
                       return (
-                        <details
+                        <div
                           key={`thinking-${blockIndex}`}
-                          className="overflow-hidden rounded-2xl border border-kodelet-blue/18 bg-kodelet-blue/5"
-                          open={block.inProgress}
+                          className="rounded-2xl border border-kodelet-blue/16 bg-kodelet-blue/6 px-4 py-4"
                         >
-                          <summary className="cursor-pointer list-none px-4 py-3 font-heading text-sm font-semibold text-kodelet-blue">
-                            Thinking{block.inProgress ? '…' : ''}
-                          </summary>
-                          <div className="border-t border-kodelet-blue/12 px-4 py-4">
+                          <div className="mb-3 flex items-center gap-2">
+                            <span className="font-heading text-sm font-semibold text-kodelet-blue">
+                              Thinking{block.inProgress ? '…' : ''}
+                            </span>
+                          </div>
+                          {extractContentText(block.content).trim() ? (
                             <div
                               className="prose prose-sm max-w-none text-kodelet-dark"
                               dangerouslySetInnerHTML={{ __html: renderContent(block.content) }}
                             />
-                          </div>
-                        </details>
+                          ) : (
+                            <p className="text-sm italic text-kodelet-blue/80">
+                              Reasoning in progress…
+                            </p>
+                          )}
+                        </div>
                       );
                     }
 

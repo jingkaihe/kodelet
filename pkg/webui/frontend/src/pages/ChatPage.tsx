@@ -336,7 +336,7 @@ const ChatPage: React.FC = () => {
       <div className={cn('min-h-screen lg:flex', isResizingSidebar && 'select-none')}>
         {sidebarVisible ? (
           <div
-            className="fixed inset-y-0 left-0 z-40 w-[min(85vw,360px)] max-w-full shrink-0 lg:static lg:relative lg:z-auto lg:w-[var(--sidebar-width)]"
+            className="fixed inset-y-0 left-0 z-40 w-[min(85vw,360px)] max-w-full shrink-0 lg:sticky lg:top-0 lg:relative lg:z-auto lg:h-screen lg:self-start lg:w-[var(--sidebar-width)]"
             data-testid="chat-sidebar-shell"
             style={{ '--sidebar-width': `${sidebarWidth}px` } as React.CSSProperties}
           >
@@ -370,7 +370,10 @@ const ChatPage: React.FC = () => {
 
         {!sidebarVisible ? (
           <>
-            <div className="sidebar-collapsed-rail hidden lg:flex" data-testid="sidebar-collapsed-rail">
+            <div
+              className="sidebar-collapsed-rail hidden lg:sticky lg:top-0 lg:flex lg:h-screen lg:self-start"
+              data-testid="sidebar-collapsed-rail"
+            >
               <button
                 aria-label="Show panel"
                 className="sidebar-toggle-button sidebar-toggle-button-collapsed"

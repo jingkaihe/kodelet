@@ -31,7 +31,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
   onSelectConversation,
 }) => {
   return (
-    <aside className="relative overflow-visible border-b border-black/8 bg-kodelet-light-gray px-4 py-5 lg:flex lg:min-h-screen lg:flex-col lg:border-b-0 lg:border-r">
+    <aside className="relative overflow-visible border-b border-black/8 bg-kodelet-light-gray px-6 py-6 lg:flex lg:h-screen lg:flex-col lg:border-b-0 lg:border-r">
       {onHide ? (
         <button
           aria-label="Hide panel"
@@ -59,20 +59,22 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
         </button>
       ) : null}
 
-      <div className="min-h-0 flex-1">
+      <div className="min-h-0 flex-1 pt-8 lg:pt-2">
         <button
           className="sidebar-action-link"
           disabled={disabled}
           onClick={onNewChat}
           type="button"
         >
-          <span className="sidebar-action-plus">+</span>
+          <span className="sidebar-action-icon">
+            <span className="sidebar-action-plus">+</span>
+          </span>
           <span className="sidebar-action-label">New chat</span>
         </button>
 
         <div className="sidebar-section-title">Recents</div>
 
-        <div className="conversation-list max-h-[calc(100vh-12rem)] overflow-y-auto">
+        <div className="conversation-list max-h-[calc(100vh-13.5rem)] overflow-y-auto pr-1">
           {conversations.length === 0 && !loading ? (
             <div className="px-2 py-2 text-sm text-kodelet-dark/65">
               No saved conversations yet.

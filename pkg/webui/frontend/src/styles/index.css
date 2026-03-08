@@ -287,23 +287,25 @@ code[class*="language-"] {
 
 .sidebar-section-title {
   font-family: "Poppins", Arial, sans-serif;
-  font-size: 0.95rem;
-  font-weight: 500;
-  color: #7a756b;
-  margin: 0.2rem 0 0.9rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: #7c766b;
+  margin: 1.35rem 0 0.75rem;
 }
 
 .sidebar-action-link {
   display: flex;
   align-items: center;
-  gap: 0.72rem;
+  gap: 0.95rem;
   width: 100%;
-  padding: 0.5rem 0.2rem 0.9rem;
+  padding: 0.15rem 0 0.95rem;
   text-decoration: none;
   color: #3d3a35;
   background: transparent;
   border: 0;
   text-align: left;
+  border-radius: 16px;
 }
 
 .sidebar-action-link:hover {
@@ -311,26 +313,38 @@ code[class*="language-"] {
   text-decoration: none;
 }
 
-.sidebar-action-plus {
-  display: inline-block;
+.sidebar-action-icon {
+  display: inline-flex;
+  height: 2.4rem;
+  width: 2.4rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  background: rgba(232, 230, 220, 0.82);
   color: var(--kodelet-dark);
-  font-family: "Poppins", Arial, sans-serif;
-  font-size: 1.4rem;
-  line-height: 1;
+  box-shadow: inset 0 0 0 1px rgba(20, 20, 19, 0.04);
   flex-shrink: 0;
+}
+
+.sidebar-action-plus {
+  font-family: "Poppins", Arial, sans-serif;
+  font-size: 1.7rem;
+  font-weight: 300;
+  line-height: 1;
+  transform: translateY(-0.02em);
 }
 
 .sidebar-action-label {
   font-family: "Poppins", Arial, sans-serif;
-  font-size: 0.95rem;
+  font-size: 0.98rem;
   font-weight: 500;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.015em;
 }
 
 .conversation-list {
   display: flex;
   flex-direction: column;
-  gap: 0.06rem;
+  gap: 0.12rem;
   margin-bottom: 0.4rem;
 }
 
@@ -340,25 +354,29 @@ code[class*="language-"] {
   justify-content: space-between;
   gap: 0.5rem;
   width: 100%;
-  padding: 0.42rem 0.72rem;
-  border-radius: 10px;
+  padding: 0.7rem 0.9rem;
+  border-radius: 14px;
   text-decoration: none;
-  color: #3d3a35;
-  transition: background-color 120ms ease, color 120ms ease;
+  color: #4a463f;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease,
+    transform 120ms ease;
   background: transparent;
   border: 0;
   text-align: left;
 }
 
 .conversation-link:hover {
-  background: rgba(232, 230, 220, 0.55);
+  background: rgba(236, 233, 225, 0.82);
   color: var(--kodelet-dark);
   text-decoration: none;
 }
 
 .conversation-link.active {
-  background: rgba(232, 230, 220, 0.88);
+  background: rgba(232, 230, 220, 0.96);
   color: var(--kodelet-dark);
+  box-shadow: inset 0 0 0 1px rgba(20, 20, 19, 0.04);
 }
 
 .conversation-link-title {
@@ -367,18 +385,18 @@ code[class*="language-"] {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-family: "Poppins", Arial, sans-serif;
-  font-size: 0.82rem;
-  line-height: 1.2;
+  font-size: 0.84rem;
+  line-height: 1.25;
   font-weight: 500;
-  letter-spacing: 0;
-  padding-right: 0.45rem;
+  letter-spacing: -0.01em;
+  padding-right: 0.55rem;
 }
 
 .conversation-link-more {
   flex-shrink: 0;
-  color: rgba(61, 58, 53, 0.72);
+  color: rgba(61, 58, 53, 0.56);
   letter-spacing: 0.08em;
-  font-size: 0.86rem;
+  font-size: 0.78rem;
   line-height: 1;
   opacity: 0;
 }
@@ -390,8 +408,8 @@ code[class*="language-"] {
 
 .sidebar-footer {
   border-top: 1px solid rgba(20, 20, 19, 0.08);
-  margin-top: 1rem;
-  padding-top: 0.9rem;
+  margin-top: 1.15rem;
+  padding-top: 0.95rem;
   display: grid;
   gap: 0.35rem;
 }
@@ -412,6 +430,7 @@ code[class*="language-"] {
   min-height: 100vh;
   flex-shrink: 0;
   justify-content: center;
+  align-items: flex-start;
   border-right: 1px solid rgba(20, 20, 19, 0.08);
   background: rgba(250, 249, 245, 0.92);
   backdrop-filter: blur(10px);
@@ -462,7 +481,7 @@ code[class*="language-"] {
 .sidebar-toggle-button-open {
   position: absolute;
   top: 1.25rem;
-  right: -1.375rem;
+  right: -1.5rem;
   z-index: 20;
 }
 
