@@ -48,14 +48,28 @@ const ensureCurrentAssistantMessage = (
   return lastMessage;
 };
 
-const getLastAssistantMessage = (
-  messages: ChatRenderMessage[]
-): ChatRenderMessage | undefined => {
-  const lastMessage = messages[messages.length - 1];
-  if (!lastMessage || lastMessage.role !== 'assistant') {
-    return undefined;
-  }
-  return lastMessage;
+const appendAssistantBlocks = (
+  target: ChatRenderMessage,
+  blocks: ChatAssistantBlock[]
+) => {
+  const targetBlocks = ensureAssistantBlocks(target);
+
+  blocks.forEach((block) => {
+    if (block.type === 'tools') {
+      const lastBlock = targetBlocks[targetBlocks.length - 1];
+      if (lastBlock?.type === 'tools') {
+        lastBlock.tools.push(...block.tools);
+      } else {
+        targetBlocks.push({
+          type: 'tools',
+          tools: [...block.tools],
+        });
+      }
+      return;
+    }
+
+    targetBlocks.push({ ...block });
+  });
 };
 
 const findMatchingBlock = (
@@ -82,24 +96,6 @@ const findMatchingBlock = (
   }
 
   return null;
-};
-
-const shouldCreateNewAssistantMessageForText = (
-  messages: ChatRenderMessage[]
-): boolean => {
-  const lastMessage = getLastAssistantMessage(messages);
-  if (!lastMessage?.blocks?.length) {
-    return false;
-  }
-
-  const hasCompletedMessageBlock = lastMessage.blocks.some(
-    (block: ChatAssistantBlock) => block.type === 'message' && !block.inProgress
-  );
-  const hasStreamingMessageBlock = lastMessage.blocks.some(
-    (block: ChatAssistantBlock) => block.type === 'message' && block.inProgress
-  );
-
-  return hasCompletedMessageBlock && !hasStreamingMessageBlock;
 };
 
 const ensureToolsBlock = (message: ChatRenderMessage): ChatRenderToolCall[] => {
@@ -185,6 +181,12 @@ export const conversationToChatMessages = (
       return chatMessages;
     }
 
+    const previousMessage = chatMessages[chatMessages.length - 1];
+    if (previousMessage?.role === 'assistant') {
+      appendAssistantBlocks(previousMessage, blocks);
+      return chatMessages;
+    }
+
     chatMessages.push({
       role: 'assistant',
       blocks,
@@ -244,10 +246,7 @@ export const applyChatStreamEvent = (
       return nextMessages;
 
     case 'text-delta': {
-      const assistantMessage = ensureCurrentAssistantMessage(
-        nextMessages,
-        shouldCreateNewAssistantMessageForText(nextMessages)
-      );
+      const assistantMessage = ensureCurrentAssistantMessage(nextMessages);
       const blocks = ensureAssistantBlocks(assistantMessage);
       const lastBlock = blocks[blocks.length - 1];
       if (lastBlock?.type !== 'message') {
@@ -339,10 +338,7 @@ export const applyChatStreamEvent = (
         return nextMessages;
       }
 
-      const assistantMessage = ensureCurrentAssistantMessage(
-        nextMessages,
-        shouldCreateNewAssistantMessageForText(nextMessages)
-      );
+      const assistantMessage = ensureCurrentAssistantMessage(nextMessages);
       ensureAssistantBlocks(assistantMessage).push({
         type: 'message',
         content,
