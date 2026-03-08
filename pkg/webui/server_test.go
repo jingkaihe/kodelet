@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gorilla/mux"
@@ -45,6 +46,17 @@ func (m *mockConversationService) DeleteConversation(ctx context.Context, id str
 		return m.deleteFunc(ctx, id)
 	}
 	return nil
+}
+
+type mockChatRunner struct {
+	runFunc func(ctx context.Context, req ChatRequest, sink ChatEventSink) (string, error)
+}
+
+func (m *mockChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatEventSink) (string, error) {
+	if m.runFunc != nil {
+		return m.runFunc(ctx, req, sink)
+	}
+	return "", nil
 }
 
 func (m *mockConversationService) GetToolResult(ctx context.Context, conversationID, toolCallID string) (*conversations.GetToolResultResponse, error) {
@@ -194,6 +206,48 @@ func TestServer_handleGetConversation(t *testing.T) {
 	assert.Equal(t, 1, response.MessageCount)
 }
 
+func TestServer_handleGetConversationPreservesImageContent(t *testing.T) {
+	conversationID := "test-image-conv"
+	mockService := &mockConversationService{
+		getFunc: func(_ context.Context, id string) (*conversations.GetConversationResponse, error) {
+			if id == conversationID {
+				return &conversations.GetConversationResponse{
+					ID:       conversationID,
+					Provider: "google",
+					RawMessages: json.RawMessage(`[
+						{"role":"user","parts":[
+							{"text":"what is in the image?"},
+							{"inlineData":{"data":"aGVsbG8=","mimeType":"image/png"}}
+						]}
+					]`),
+				}, nil
+			}
+			return nil, errors.New("conversation not found")
+		},
+	}
+
+	server := &Server{conversationService: mockService, router: mux.NewRouter()}
+
+	req := httptest.NewRequest("GET", "/api/conversations/"+conversationID, nil)
+	req = mux.SetURLVars(req, map[string]string{"id": conversationID})
+	w := httptest.NewRecorder()
+
+	server.handleGetConversation(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var response WebConversationResponse
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	require.NoError(t, err)
+	require.Len(t, response.Messages, 1)
+
+	contentBytes, err := json.Marshal(response.Messages[0].Content)
+	require.NoError(t, err)
+	assert.Contains(t, string(contentBytes), `"type":"image"`)
+	assert.Contains(t, string(contentBytes), `"media_type":"image/png"`)
+	assert.Contains(t, string(contentBytes), `"data":"aGVsbG8="`)
+}
+
 func TestServer_handleGetConversationLegacyOpenAIResponses(t *testing.T) {
 	conversationID := "test-id-legacy"
 	mockService := &mockConversationService{
@@ -231,6 +285,58 @@ func TestServer_handleGetConversationLegacyOpenAIResponses(t *testing.T) {
 	assert.Equal(t, "OpenAI", response.Provider)
 }
 
+func TestServer_handleGetConversationOpenAIResponsesPreservesImageContent(t *testing.T) {
+	conversationID := "test-openai-responses-image"
+	mockService := &mockConversationService{
+		getFunc: func(_ context.Context, id string) (*conversations.GetConversationResponse, error) {
+			if id == conversationID {
+				return &conversations.GetConversationResponse{
+					ID:       conversationID,
+					Provider: "openai",
+					Metadata: map[string]any{"api_mode": "responses"},
+					RawMessages: json.RawMessage(`[
+						{
+							"type":"message",
+							"role":"user",
+							"content":"what is in the image?",
+							"raw_item":{
+								"role":"user",
+								"content":[
+									{"type":"input_image","image_url":"data:image/png;base64,aGVsbG8="},
+									{"type":"input_text","text":"what is in the image?"}
+								]
+							}
+						}
+					]`),
+				}, nil
+			}
+			return nil, errors.New("conversation not found")
+		},
+	}
+
+	server := &Server{conversationService: mockService, router: mux.NewRouter()}
+
+	req := httptest.NewRequest("GET", "/api/conversations/"+conversationID, nil)
+	req = mux.SetURLVars(req, map[string]string{"id": conversationID})
+	w := httptest.NewRecorder()
+
+	server.handleGetConversation(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var response WebConversationResponse
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	require.NoError(t, err)
+	require.Len(t, response.Messages, 1)
+
+	contentBytes, err := json.Marshal(response.Messages[0].Content)
+	require.NoError(t, err)
+	assert.Contains(t, string(contentBytes), `"type":"image"`)
+	assert.Contains(t, string(contentBytes), `"media_type":"image/png"`)
+	assert.Contains(t, string(contentBytes), `"data":"aGVsbG8="`)
+	assert.Contains(t, string(contentBytes), `"text":"what is in the image?"`)
+}
+
 func TestServer_handleDeleteConversation(t *testing.T) {
 	conversationID := "test-id-123"
 	deleteCalled := false
@@ -256,6 +362,147 @@ func TestServer_handleDeleteConversation(t *testing.T) {
 
 	assert.Equal(t, http.StatusNoContent, w.Code)
 	assert.True(t, deleteCalled)
+}
+
+func TestServer_handleChat(t *testing.T) {
+	var capturedRequest ChatRequest
+
+	server := &Server{
+		conversationService: &mockConversationService{},
+		chatRunner: &mockChatRunner{
+			runFunc: func(_ context.Context, req ChatRequest, sink ChatEventSink) (string, error) {
+				capturedRequest = req
+				err := sink.Send(ChatEvent{
+					Kind:           "conversation",
+					ConversationID: "conv-123",
+					Role:           "assistant",
+				})
+				require.NoError(t, err)
+				return "conv-123", nil
+			},
+		},
+		router: mux.NewRouter(),
+	}
+
+	req := httptest.NewRequest("POST", "/api/chat", strings.NewReader(`{"message":"hello"}`))
+	w := httptest.NewRecorder()
+
+	server.handleChat(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "application/x-ndjson", w.Header().Get("Content-Type"))
+	assert.Equal(t, "hello", capturedRequest.Message)
+
+	lines := strings.Split(strings.TrimSpace(w.Body.String()), "\n")
+	require.Len(t, lines, 2)
+
+	var firstEvent ChatEvent
+	err := json.Unmarshal([]byte(lines[0]), &firstEvent)
+	require.NoError(t, err)
+	assert.Equal(t, "conversation", firstEvent.Kind)
+	assert.Equal(t, "conv-123", firstEvent.ConversationID)
+
+	var doneEvent ChatEvent
+	err = json.Unmarshal([]byte(lines[1]), &doneEvent)
+	require.NoError(t, err)
+	assert.Equal(t, "done", doneEvent.Kind)
+	assert.Equal(t, "conv-123", doneEvent.ConversationID)
+}
+
+func TestServer_handleChatWithImageContent(t *testing.T) {
+	var capturedRequest ChatRequest
+
+	server := &Server{
+		conversationService: &mockConversationService{},
+		chatRunner: &mockChatRunner{
+			runFunc: func(_ context.Context, req ChatRequest, sink ChatEventSink) (string, error) {
+				capturedRequest = req
+				err := sink.Send(ChatEvent{Kind: "conversation", ConversationID: "conv-img", Role: "assistant"})
+				require.NoError(t, err)
+				return "conv-img", nil
+			},
+		},
+		router: mux.NewRouter(),
+	}
+
+	reqBody := `{"message":"describe this image","content":[{"type":"text","text":"describe this image"},{"type":"image","source":{"data":"aGVsbG8=","media_type":"image/png"}}]}`
+	req := httptest.NewRequest("POST", "/api/chat", strings.NewReader(reqBody))
+	w := httptest.NewRecorder()
+
+	server.handleChat(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Len(t, capturedRequest.Content, 2)
+	assert.Equal(t, "image", capturedRequest.Content[1].Type)
+	assert.Equal(t, "image/png", capturedRequest.Content[1].Source.MediaType)
+}
+
+func TestServer_handleChatRunnerError(t *testing.T) {
+	server := &Server{
+		conversationService: &mockConversationService{},
+		chatRunner: &mockChatRunner{
+			runFunc: func(_ context.Context, _ ChatRequest, sink ChatEventSink) (string, error) {
+				err := sink.Send(ChatEvent{
+					Kind:           "conversation",
+					ConversationID: "conv-err",
+					Role:           "assistant",
+				})
+				require.NoError(t, err)
+				return "conv-err", errors.New("boom")
+			},
+		},
+		router: mux.NewRouter(),
+	}
+
+	req := httptest.NewRequest("POST", "/api/chat", strings.NewReader(`{"message":"hello"}`))
+	w := httptest.NewRecorder()
+
+	server.handleChat(w, req)
+
+	lines := strings.Split(strings.TrimSpace(w.Body.String()), "\n")
+	require.Len(t, lines, 2)
+
+	var errorEvent ChatEvent
+	err := json.Unmarshal([]byte(lines[1]), &errorEvent)
+	require.NoError(t, err)
+	assert.Equal(t, "error", errorEvent.Kind)
+	assert.Equal(t, "conv-err", errorEvent.ConversationID)
+	assert.Equal(t, "boom", errorEvent.Error)
+}
+
+func TestServer_handleChatThroughMiddleware(t *testing.T) {
+	server := &Server{
+		conversationService: &mockConversationService{},
+		chatRunner: &mockChatRunner{
+			runFunc: func(_ context.Context, _ ChatRequest, sink ChatEventSink) (string, error) {
+				err := sink.Send(ChatEvent{
+					Kind:           "conversation",
+					ConversationID: "conv-middleware",
+					Role:           "assistant",
+				})
+				require.NoError(t, err)
+				return "conv-middleware", nil
+			},
+		},
+		router: mux.NewRouter(),
+	}
+	server.setupRoutes()
+
+	req := httptest.NewRequest("POST", "/api/chat", strings.NewReader(`{"message":"hello"}`))
+	w := httptest.NewRecorder()
+
+	server.router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	lines := strings.Split(strings.TrimSpace(w.Body.String()), "\n")
+	require.Len(t, lines, 2)
+
+	var firstEvent ChatEvent
+	err := json.Unmarshal([]byte(lines[0]), &firstEvent)
+	require.NoError(t, err)
+	assert.Equal(t, "conversation", firstEvent.Kind)
+	assert.Equal(t, "conv-middleware", firstEvent.ConversationID)
 }
 
 func TestServer_handleGetToolResult(t *testing.T) {

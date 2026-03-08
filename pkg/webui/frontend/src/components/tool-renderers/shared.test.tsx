@@ -83,7 +83,7 @@ describe('CopyButton', () => {
 
     const button = screen.getByRole('button', { name: 'Copy to clipboard' });
     expect(button).toBeInTheDocument();
-    expect(button).toHaveClass('btn', 'btn-ghost', 'btn-xs');
+    expect(button).toHaveClass('panel-action-button');
   });
 
   it('calls copyToClipboard when clicked', () => {
@@ -96,10 +96,10 @@ describe('CopyButton', () => {
   });
 
   it('applies custom className', () => {
-    render(<CopyButton content="Copy me" className="btn-sm" />);
+    render(<CopyButton content="Copy me" className="custom-copy" />);
 
     const button = screen.getByRole('button', { name: 'Copy to clipboard' });
-    expect(button).toHaveClass('btn', 'btn-ghost', 'btn-sm');
+    expect(button).toHaveClass('panel-action-button', 'custom-copy');
   });
 });
 
@@ -191,7 +191,7 @@ describe('ExternalLink', () => {
     );
 
     const link = screen.getByRole('link');
-    expect(link).toHaveClass('link', 'link-hover', 'custom-link');
+    expect(link).toHaveClass('tool-action-link', 'custom-link');
   });
 
   it('handles invalid URL', () => {

@@ -14,9 +14,9 @@ const SkillRenderer: React.FC<SkillRendererProps> = ({ toolResult }) => {
     <div className="space-y-1">
       <div className="flex items-center gap-2 text-xs">
         <StatusBadge text={meta.skillName} variant="success" />
-        <span className="text-kodelet-mid-gray">loaded</span>
+        <span className="tool-meta-label normal-case tracking-normal">loaded</span>
       </div>
-      <div className="text-xs font-mono text-kodelet-dark/70">{meta.directory}</div>
+      <div className="tool-inline-code text-xs">{meta.directory}</div>
     </div>
   );
 };

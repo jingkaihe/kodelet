@@ -220,10 +220,15 @@ func (t *Thread) AddUserMessage(ctx context.Context, message string, imagePaths 
 	// Add to inputItems (for API calls), pendingItems (for next API call), and storedItems (for persistence)
 	t.inputItems = append(t.inputItems, inputItem)
 	t.pendingItems = append(t.pendingItems, inputItem)
+	rawItem, err := json.Marshal(inputItem)
+	if err != nil {
+		logger.G(ctx).WithError(err).Warn("failed to marshal OpenAI Responses user input item for persistence")
+	}
 	t.storedItems = append(t.storedItems, StoredInputItem{
 		Type:    "message",
 		Role:    "user",
 		Content: message,
+		RawItem: rawItem,
 	})
 }
 
@@ -1271,6 +1276,7 @@ type StreamableMessage struct {
 	Kind       string // "text", "tool-use", "tool-result", "thinking"
 	Role       string // "user", "assistant", "system"
 	Content    string // Text content
+	RawItem    json.RawMessage
 	ToolName   string // For tool use/result
 	ToolCallID string // For matching tool results
 	Input      string // For tool use (JSON string)
@@ -1331,11 +1337,21 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 				continue
 			}
 
+			if item.Content == "" && len(item.RawItem) > 0 {
+				streamable = append(streamable, StreamableMessage{
+					Kind:    "text",
+					Role:    item.Role,
+					RawItem: item.RawItem,
+				})
+				continue
+			}
+
 			if item.Content != "" {
 				streamable = append(streamable, StreamableMessage{
 					Kind:    "text",
 					Role:    item.Role,
 					Content: item.Content,
+					RawItem: item.RawItem,
 				})
 			}
 

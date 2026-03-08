@@ -1,7 +1,12 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { ToolResult, ImageRecognitionMetadata } from '../../types';
-import { StatusBadge } from './shared';
 import { getMetadataAny } from './utils';
+import {
+  renderMarkdown,
+  ReferenceToolHeader,
+  ReferenceToolKVGrid,
+  TOOL_ICONS,
+} from './reference';
 
 interface ImageRecognitionRendererProps {
   toolResult: ToolResult;
@@ -9,39 +14,36 @@ interface ImageRecognitionRendererProps {
 
 const ImageRecognitionRenderer: React.FC<ImageRecognitionRendererProps> = ({ toolResult }) => {
   const meta = toolResult.metadata as ImageRecognitionMetadata;
-  const [showAnalysis, setShowAnalysis] = useState(false);
   if (!meta) return null;
 
   const imagePath = getMetadataAny(toolResult, ['imagePath', 'image_path', 'path']) as string;
   const analysis = meta.analysis || meta.result;
+  const dimensions =
+    meta.imageSize?.width && meta.imageSize?.height
+      ? `${meta.imageSize.width} x ${meta.imageSize.height}`
+      : '';
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center gap-2 text-xs">
-        <StatusBadge text="Analyzed" variant="success" />
-        {imagePath && <span className="font-mono text-kodelet-dark/70">{imagePath}</span>}
-      </div>
+      <ReferenceToolHeader
+        badges={[{ text: meta.imageType || 'image', variant: 'success' }]}
+        subtitle={imagePath}
+        title={`${TOOL_ICONS.image_recognition} Image Analysis`}
+      />
 
-      {meta.prompt && (
-        <div className="text-xs text-kodelet-mid-gray">Prompt: {meta.prompt}</div>
-      )}
+      <ReferenceToolKVGrid
+        items={[
+          { label: 'Prompt', value: meta.prompt },
+          { label: 'Dimensions', value: dimensions, monospace: true },
+        ]}
+      />
 
-      {analysis && (
-        <>
-          {!showAnalysis ? (
-            <button
-              onClick={() => setShowAnalysis(true)}
-              className="text-xs text-kodelet-blue hover:underline"
-            >
-              Show analysis
-            </button>
-          ) : (
-            <div className="bg-kodelet-light p-2 rounded border border-kodelet-mid-gray/20 text-sm max-h-64 overflow-y-auto">
-              {analysis}
-            </div>
-          )}
-        </>
-      )}
+      {analysis ? (
+        <div
+          className="prose prose-sm max-w-none text-kodelet-dark"
+          dangerouslySetInnerHTML={{ __html: renderMarkdown(analysis) }}
+        />
+      ) : null}
     </div>
   );
 };

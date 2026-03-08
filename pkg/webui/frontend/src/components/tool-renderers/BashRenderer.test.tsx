@@ -1,199 +1,81 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import BashRenderer from './BashRenderer';
-import { ToolResult, BashMetadata } from '../../types';
-
-// Mock shared components
-interface MockCopyButtonProps {
-  content: string;
-}
-
-interface MockStatusBadgeProps {
-  text: string;
-  variant?: string;
-}
-
-vi.mock('./shared', () => ({
-  CopyButton: ({ content }: MockCopyButtonProps) => (
-    <button data-testid="copy-button" data-content={content}>Copy</button>
-  ),
-  StatusBadge: ({ text, variant }: MockStatusBadgeProps) => (
-    <span data-testid="status-badge" data-variant={variant}>{text}</span>
-  ),
-}));
-
-// Mock utils
-vi.mock('./utils', () => ({
-  formatDuration: (duration: number) => `${duration}ms`,
-}));
+import { BashMetadata, ToolResult } from '../../types';
 
 describe('BashRenderer', () => {
   const createToolResult = (metadata: Partial<BashMetadata>): ToolResult => ({
     toolName: 'bash',
     success: true,
-    error: undefined,
     timestamp: '2023-01-01T00:00:00Z',
     metadata: metadata as BashMetadata,
   });
 
   it('returns null when metadata is missing', () => {
     const toolResult = createToolResult({});
-    const { container } = render(<BashRenderer toolResult={{ ...toolResult, metadata: undefined }} />);
+    const { container } = render(
+      <BashRenderer toolResult={{ ...toolResult, metadata: undefined }} />
+    );
 
     expect(container.firstChild).toBeNull();
   });
 
-  describe('Command Execution', () => {
-    it('renders command with exit code', () => {
-      const toolResult = createToolResult({
-        command: 'ls -la',
-        exitCode: 0,
-        output: 'file1.txt\nfile2.txt',
-      });
-
-      render(<BashRenderer toolResult={toolResult} />);
-
-      expect(screen.getByText('ls -la')).toBeInTheDocument();
-      expect(screen.getByText('Exit 0')).toBeInTheDocument();
+  it('renders command metadata and success badge', () => {
+    const toolResult = createToolResult({
+      command: 'ls -la',
+      exitCode: 0,
+      executionTime: 250,
+      workingDir: '/tmp/work',
+      output: 'file1.txt\nfile2.txt',
     });
 
-    it('shows success variant for exit code 0', () => {
-      const toolResult = createToolResult({
-        command: 'ls',
-        exitCode: 0,
-        output: 'file.txt',
-      });
+    const { container } = render(<BashRenderer toolResult={toolResult} />);
 
-      render(<BashRenderer toolResult={toolResult} />);
+    expect(screen.getByText('ls -la')).toBeInTheDocument();
+    expect(screen.getByText('exit 0')).toBeInTheDocument();
+    expect(screen.getByText('250ms')).toBeInTheDocument();
+    expect(screen.getByText('/tmp/work')).toBeInTheDocument();
+    expect(container.querySelector('.tool-badge-success')).toBeInTheDocument();
+    expect(container.querySelector('.tool-terminal')).toBeInTheDocument();
+  });
 
-      const badge = screen.getByTestId('status-badge');
-      expect(badge).toHaveAttribute('data-variant', 'success');
+  it('renders an error badge for non-zero exits', () => {
+    const toolResult = createToolResult({
+      command: 'invalid-command',
+      exitCode: 127,
+      output: 'command not found',
     });
 
-    it('shows error variant for non-zero exit code', () => {
-      const toolResult = createToolResult({
-        command: 'invalid-command',
-        exitCode: 127,
-        output: 'command not found',
-      });
+    const { container } = render(<BashRenderer toolResult={toolResult} />);
 
-      render(<BashRenderer toolResult={toolResult} />);
+    expect(screen.getByText('exit 127')).toBeInTheDocument();
+    expect(container.querySelector('.tool-badge-error')).toBeInTheDocument();
+  });
 
-      const badge = screen.getByTestId('status-badge');
-      expect(badge).toHaveAttribute('data-variant', 'error');
+  it('shows a note when the command produces no output', () => {
+    const toolResult = createToolResult({
+      command: 'touch newfile.txt',
+      exitCode: 0,
+      output: '   \n\t  ',
     });
 
-    it('shows duration when provided', () => {
-      const toolResult = createToolResult({
-        command: 'echo "test"',
-        executionTime: 250,
-        output: 'test',
-      });
+    render(<BashRenderer toolResult={toolResult} />);
 
-      render(<BashRenderer toolResult={toolResult} />);
+    expect(screen.getByText('Command completed without output.')).toBeInTheDocument();
+  });
 
-      expect(screen.getByText('250ms')).toBeInTheDocument();
+  it('escapes HTML in terminal output', () => {
+    const toolResult = createToolResult({
+      command: 'echo',
+      exitCode: 0,
+      output: '<script>alert("xss")</script>',
     });
 
-    it('shows copy button for output', () => {
-      const toolResult = createToolResult({
-        command: 'echo "test"',
-        output: 'test output',
-        exitCode: 0,
-      });
+    const { container } = render(<BashRenderer toolResult={toolResult} />);
 
-      render(<BashRenderer toolResult={toolResult} />);
-
-      const copyButton = screen.getByTestId('copy-button');
-      expect(copyButton).toHaveAttribute('data-content', 'test output');
-    });
-
-    it('does not show copy button when no output', () => {
-      const toolResult = createToolResult({
-        command: 'echo "test"',
-        output: '',
-        exitCode: 0,
-      });
-
-      render(<BashRenderer toolResult={toolResult} />);
-
-      expect(screen.queryByTestId('copy-button')).not.toBeInTheDocument();
-    });
-
-    it('renders terminal output', () => {
-      const toolResult = createToolResult({
-        command: 'ls',
-        output: 'file1.txt\nfile2.txt\nfile3.txt',
-        exitCode: 0,
-      });
-
-      const { container } = render(<BashRenderer toolResult={toolResult} />);
-
-      const terminalOutput = container.querySelector('.bg-kodelet-dark');
-      expect(terminalOutput).toBeInTheDocument();
-    });
-
-    it('shows "No output" when output is empty', () => {
-      const toolResult = createToolResult({
-        command: 'touch newfile.txt',
-        output: '',
-        exitCode: 0,
-      });
-
-      render(<BashRenderer toolResult={toolResult} />);
-
-      expect(screen.getByText('No output')).toBeInTheDocument();
-    });
-
-    it('handles whitespace-only output as empty', () => {
-      const toolResult = createToolResult({
-        command: 'echo -n',
-        output: '   \n\t  ',
-        exitCode: 0,
-      });
-
-      render(<BashRenderer toolResult={toolResult} />);
-
-      expect(screen.getByText('No output')).toBeInTheDocument();
-    });
-
-    it('escapes HTML in output', () => {
-      const toolResult = createToolResult({
-        command: 'echo',
-        output: '<script>alert("xss")</script>',
-        exitCode: 0,
-      });
-
-      render(<BashRenderer toolResult={toolResult} />);
-
-      expect(screen.queryByText('alert("xss")')).not.toBeInTheDocument();
-      const pre = document.querySelector('pre');
-      expect(pre?.innerHTML).toContain('&lt;script&gt;');
-    });
-
-    it('handles ANSI color codes in output', () => {
-      const ESC = '\u001b';
-      const toolResult = createToolResult({
-        command: 'ls --color',
-        output: `${ESC}[31mError${ESC}[0m: File not found`,
-        exitCode: 1,
-      });
-
-      const { container } = render(<BashRenderer toolResult={toolResult} />);
-
-      const coloredSpan = container.querySelector('.text-red-500');
-      expect(coloredSpan).toBeInTheDocument();
-    });
-
-    it('defaults exit code to 0 when not provided', () => {
-      const toolResult = createToolResult({
-        command: 'echo "test"',
-        output: 'test',
-      });
-
-      render(<BashRenderer toolResult={toolResult} />);
-
-      expect(screen.getByText('Exit 0')).toBeInTheDocument();
-    });
+    expect(screen.queryByText('alert("xss")')).not.toBeInTheDocument();
+    expect(container.querySelector('.tool-terminal-body pre')?.innerHTML).toContain(
+      '&lt;script&gt;'
+    );
   });
 });

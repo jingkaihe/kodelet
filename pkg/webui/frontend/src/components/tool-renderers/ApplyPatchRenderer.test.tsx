@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import ApplyPatchRenderer from './ApplyPatchRenderer';
 import { ToolResult } from '../../types';
 
@@ -19,7 +19,7 @@ describe('ApplyPatchRenderer', () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it('renders summary counts and file paths', () => {
+  it('renders summary badges and changed file list', () => {
     const toolResult = createToolResult({
       added: ['/tmp/new.txt'],
       modified: ['/tmp/edit.txt'],
@@ -29,16 +29,16 @@ describe('ApplyPatchRenderer', () => {
 
     render(<ApplyPatchRenderer toolResult={toolResult} />);
 
-    expect(screen.getByText('3 files')).toBeInTheDocument();
+    expect(screen.getByText('0 changes')).toBeInTheDocument();
     expect(screen.getByText('A 1')).toBeInTheDocument();
     expect(screen.getByText('M 1')).toBeInTheDocument();
     expect(screen.getByText('D 1')).toBeInTheDocument();
-    expect(screen.getByText('/tmp/new.txt')).toBeInTheDocument();
-    expect(screen.getByText('/tmp/edit.txt')).toBeInTheDocument();
-    expect(screen.getByText('/tmp/old.txt')).toBeInTheDocument();
+    expect(screen.getByText('A /tmp/new.txt')).toBeInTheDocument();
+    expect(screen.getByText('M /tmp/edit.txt')).toBeInTheDocument();
+    expect(screen.getByText('D /tmp/old.txt')).toBeInTheDocument();
   });
 
-  it('reveals unified diff details when expanded', () => {
+  it('renders unified diffs inline', () => {
     const toolResult = createToolResult({
       added: [],
       modified: ['/tmp/edit.txt'],
@@ -52,18 +52,19 @@ describe('ApplyPatchRenderer', () => {
       ],
     });
 
-    render(<ApplyPatchRenderer toolResult={toolResult} />);
-    fireEvent.click(screen.getByText('Show diffs (1)'));
+    const { container } = render(<ApplyPatchRenderer toolResult={toolResult} />);
 
-    expect(screen.getAllByText('/tmp/edit.txt')).toHaveLength(2);
-    expect(screen.getByText('Updated')).toBeInTheDocument();
+    expect(screen.getByText('Change: Update')).toBeInTheDocument();
+    expect(screen.getByText('/tmp/edit.txt')).toBeInTheDocument();
     expect(screen.getByText('@@ -1,2 +1,2 @@')).toBeInTheDocument();
-    expect(screen.getByText('-old')).toBeInTheDocument();
-    expect(screen.getByText('+new')).toBeInTheDocument();
+    expect(screen.getByText('old')).toBeInTheDocument();
+    expect(screen.getByText('new')).toBeInTheDocument();
     expect(screen.getByText('context')).toBeInTheDocument();
+    expect(container.querySelector('.diff-line-added')).toBeInTheDocument();
+    expect(container.querySelector('.diff-line-removed')).toBeInTheDocument();
   });
 
-  it('renders fallback diff for add change without unified diff', () => {
+  it('renders fallback diffs when unified diff is unavailable', () => {
     const toolResult = createToolResult({
       changes: [
         {
@@ -74,11 +75,12 @@ describe('ApplyPatchRenderer', () => {
       ],
     });
 
-    render(<ApplyPatchRenderer toolResult={toolResult} />);
-    fireEvent.click(screen.getByText('Show diffs (1)'));
+    const { container } = render(<ApplyPatchRenderer toolResult={toolResult} />);
 
-    expect(screen.getByText('Added')).toBeInTheDocument();
-    expect(screen.getByText('+line1')).toBeInTheDocument();
-    expect(screen.getByText('+line2')).toBeInTheDocument();
+    expect(screen.getByText('Change: Add')).toBeInTheDocument();
+    expect(screen.getByText('/tmp/new.txt')).toBeInTheDocument();
+    expect(screen.getByText('line1')).toBeInTheDocument();
+    expect(screen.getByText('line2')).toBeInTheDocument();
+    expect(container.querySelectorAll('.diff-line-added')).toHaveLength(2);
   });
 });

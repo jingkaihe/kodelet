@@ -31,12 +31,12 @@ const FallbackRenderer: React.FC<FallbackRendererProps> = ({ toolResult }) => {
       {!showRaw ? (
         <button
           onClick={() => setShowRaw(true)}
-          className="text-xs text-kodelet-blue hover:underline"
+          className="tool-action-link"
         >
           Show raw data
         </button>
       ) : (
-        <pre className="text-xs overflow-x-auto bg-kodelet-light p-2 rounded border border-kodelet-light-gray font-mono text-kodelet-dark max-h-48 overflow-y-auto">
+        <pre className="tool-code-block max-h-48 overflow-y-auto text-xs">
           <code>{safeStringify(toolResult.metadata)}</code>
         </pre>
       )}

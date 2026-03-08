@@ -1,7 +1,6 @@
 
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
-import ConversationListPage from './pages/ConversationListPage';
-import ConversationViewPage from './pages/ConversationViewPage';
+import ChatPage from './pages/ChatPage';
 
 function App() {
   return (
@@ -9,10 +8,10 @@ function App() {
       v7_startTransition: true,
       v7_relativeSplatPath: true
     }}>
-      <div className="min-h-screen bg-base-100">
+      <div className="min-h-screen">
         <Routes>
-          <Route path="/" element={<ConversationListPage />} />
-          <Route path="/c/:id" element={<ConversationViewPage />} />
+          <Route path="/" element={<ChatPage />} />
+          <Route path="/c/:id" element={<ChatPage />} />
         </Routes>
       </div>
     </Router>

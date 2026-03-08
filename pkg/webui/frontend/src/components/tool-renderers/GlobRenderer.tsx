@@ -1,6 +1,13 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { ToolResult, GlobMetadata, FileInfo } from '../../types';
-import { StatusBadge } from './shared';
+import {
+  formatReferenceSize,
+  ReferenceFileList,
+  ReferenceToolHeader,
+  ReferenceToolKVGrid,
+  ReferenceToolNote,
+  TOOL_ICONS,
+} from './reference';
 
 interface GlobRendererProps {
   toolResult: ToolResult;
@@ -8,40 +15,43 @@ interface GlobRendererProps {
 
 const GlobRenderer: React.FC<GlobRendererProps> = ({ toolResult }) => {
   const meta = toolResult.metadata as GlobMetadata;
-  const [showAll, setShowAll] = useState(false);
   if (!meta) return null;
 
   const files = meta.files || [];
-  const displayFiles = showAll || files.length <= 10 ? files : files.slice(0, 8);
+  const displayFiles = files.slice(0, 24);
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center gap-2 flex-wrap text-xs font-mono text-kodelet-dark/80">
-        <code className="font-medium">{meta.pattern}</code>
-        <StatusBadge
-          text={`${files.length} files`}
-          variant={meta.truncated ? 'warning' : 'success'}
-        />
-        {meta.path && <span className="text-kodelet-mid-gray">in {meta.path}</span>}
-      </div>
+      <ReferenceToolHeader
+        badges={[
+          {
+            text: `${files.length} entries`,
+            variant: meta.truncated ? 'warning' : 'success',
+          },
+        ]}
+        subtitle={meta.pattern}
+        title={`${TOOL_ICONS.glob_tool} File Discovery`}
+      />
+
+      <ReferenceToolKVGrid items={[{ label: 'Path', value: meta.path, monospace: true }]} />
 
       {files.length > 0 ? (
-        <div className="text-xs font-mono space-y-0.5">
-          {displayFiles.map((file: FileInfo, index: number) => (
-            <div key={index} className="text-kodelet-dark/80">{file.path || file.name}</div>
-          ))}
-          {files.length > 10 && !showAll && (
-            <button
-              onClick={() => setShowAll(true)}
-              className="text-kodelet-blue hover:underline"
-            >
-              +{files.length - 8} more files
-            </button>
-          )}
-        </div>
+        <ReferenceFileList
+          items={displayFiles.map((file: FileInfo) => {
+            const path = file.path || file.name || '';
+            const metaText = [file.type, formatReferenceSize(file.size), file.language]
+              .filter(Boolean)
+              .join(' · ');
+            return { path, meta: metaText || undefined };
+          })}
+        />
       ) : (
         <div className="text-xs text-kodelet-mid-gray">No files found</div>
       )}
+
+      {files.length > 24 ? (
+        <ReferenceToolNote text={`Showing first 24 of ${files.length} matched entries.`} />
+      ) : null}
     </div>
   );
 };

@@ -635,6 +635,29 @@ func TestFromStoredItemsWithRawCompactionSummary(t *testing.T) {
 	assert.Equal(t, "enc_value", restored[0].OfCompaction.EncryptedContent)
 }
 
+func TestFromStoredItemsWithCompactedAssistantRawMessage(t *testing.T) {
+	stored := []StoredInputItem{
+		{
+			Type:    "message",
+			Role:    "assistant",
+			Content: "Compacted assistant context",
+			RawItem: json.RawMessage(`{
+				"id": "msg_1",
+				"type": "message",
+				"role": "assistant",
+				"status": "completed",
+				"content": [{"type": "output_text", "text": "Compacted assistant context"}]
+			}`),
+		},
+	}
+
+	restored := fromStoredItems(stored)
+	require.Len(t, restored, 1)
+	require.NotNil(t, restored[0].OfMessage)
+	assert.Equal(t, openairesponses.EasyInputMessageRoleAssistant, restored[0].OfMessage.Role)
+	assert.Equal(t, "Compacted assistant context", extractInputItemText(restored[0]))
+}
+
 func TestStreamMessages(t *testing.T) {
 	inputItems := `[
 		{
@@ -864,6 +887,46 @@ func TestStorageRoundTripWithReasoning(t *testing.T) {
 	require.Len(t, parsedItems, 3)
 	assert.Equal(t, "reasoning", parsedItems[1].Type)
 	assert.Equal(t, "I need to add 2 and 2 together. 2+2=4.", parsedItems[1].Content)
+}
+
+func TestAddUserMessageWithImagesPersistsRawItem(t *testing.T) {
+	thread := &Thread{
+		inputItems:   make([]openairesponses.ResponseInputItemUnionParam, 0),
+		pendingItems: make([]openairesponses.ResponseInputItemUnionParam, 0),
+		storedItems:  make([]StoredInputItem, 0),
+	}
+
+	thread.AddUserMessage(context.Background(), "what is in the image?", "data:image/png;base64,aGVsbG8=")
+
+	require.Len(t, thread.storedItems, 1)
+	assert.Equal(t, "message", thread.storedItems[0].Type)
+	assert.Equal(t, "user", thread.storedItems[0].Role)
+	assert.Equal(t, "what is in the image?", thread.storedItems[0].Content)
+	require.NotEmpty(t, thread.storedItems[0].RawItem)
+	assert.Contains(t, string(thread.storedItems[0].RawItem), `"type":"input_image"`)
+	assert.Contains(t, string(thread.storedItems[0].RawItem), `"image_url":"data:image/png;base64,aGVsbG8="`)
+
+	restoredItems := fromStoredItems(thread.storedItems)
+	require.Len(t, restoredItems, 1)
+	require.NotNil(t, restoredItems[0].OfMessage)
+	require.Len(t, restoredItems[0].OfMessage.Content.OfInputItemContentList, 2)
+	assert.Equal(t, "data:image/png;base64,aGVsbG8=", restoredItems[0].OfMessage.Content.OfInputItemContentList[0].OfInputImage.ImageURL.Value)
+	assert.Equal(t, "what is in the image?", restoredItems[0].OfMessage.Content.OfInputItemContentList[1].OfInputText.Text)
+
+	streamable, err := StreamMessages(mustJSON(t, thread.storedItems), nil)
+	require.NoError(t, err)
+	require.Len(t, streamable, 1)
+	assert.Equal(t, "text", streamable[0].Kind)
+	assert.Equal(t, "user", streamable[0].Role)
+	assert.Equal(t, "what is in the image?", streamable[0].Content)
+	assert.Contains(t, string(streamable[0].RawItem), `"type":"input_image"`)
+}
+
+func mustJSON(t *testing.T, v any) json.RawMessage {
+	t.Helper()
+	b, err := json.Marshal(v)
+	require.NoError(t, err)
+	return b
 }
 
 func TestCleanupOrphanedItems_RemovesTrailingFunctionCallFromStorage(t *testing.T) {

@@ -105,6 +105,75 @@ export interface ApiError {
   message?: string;
 }
 
+export interface ChatRequest {
+  message: string;
+  content?: ContentBlock[];
+  conversationId?: string;
+}
+
+export interface PendingImageAttachment {
+  id: string;
+  name: string;
+  mediaType: string;
+  data: string;
+  previewUrl: string;
+  size: number;
+}
+
+export interface ChatStreamEvent {
+  kind:
+    | 'conversation'
+    | 'thinking-start'
+    | 'thinking-delta'
+    | 'thinking-end'
+    | 'thinking'
+    | 'text-delta'
+    | 'content-end'
+    | 'text'
+    | 'tool-use'
+    | 'tool-result'
+    | 'done'
+    | 'error';
+  conversation_id?: string;
+  role?: 'user' | 'assistant';
+  delta?: string;
+  content?: string;
+  tool_name?: string;
+  tool_call_id?: string;
+  input?: string;
+  tool_result?: ToolResult;
+  error?: string;
+}
+
+export interface ChatRenderMessage {
+  role: 'user' | 'assistant';
+  content?: string | ContentBlock[];
+  blocks?: ChatAssistantBlock[];
+}
+
+export type ChatAssistantBlock =
+  | {
+      type: 'thinking';
+      content: string;
+      inProgress?: boolean;
+    }
+  | {
+      type: 'message';
+      content: string | ContentBlock[];
+      inProgress?: boolean;
+    }
+  | {
+      type: 'tools';
+      tools: ChatRenderToolCall[];
+    };
+
+export interface ChatRenderToolCall {
+  callId: string;
+  name: string;
+  input: string;
+  result?: ToolResult;
+}
+
 // Tool renderer types
 export interface ToolRenderProps {
   toolResult: ToolResult;
@@ -182,14 +251,18 @@ export interface FileInfo {
   size?: number;
   modTime?: string;
   modified?: string;
+  type?: string;
+  language?: string;
 }
 
 export interface WebFetchMetadata {
   url: string;
   contentType?: string;
+  size?: number;
   savedPath?: string;
   filePath?: string;
   prompt?: string;
+  processedType?: string;
   content?: string;
 }
 
@@ -228,9 +301,14 @@ export interface ImageRecognitionMetadata {
   imagePath?: string;
   image_path?: string;
   path?: string;
+  imageType?: string;
   prompt?: string;
   analysis?: string;
   result?: string;
+  imageSize?: {
+    width?: number;
+    height?: number;
+  };
 }
 
 export interface BrowserMetadata {

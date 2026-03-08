@@ -30,10 +30,10 @@ func NewServeConfig() *ServeConfig {
 
 var serveCmd = &cobra.Command{
 	Use:   "serve",
-	Short: "Start the web UI server for viewing conversations",
-	Long: `Start a local web server that provides a web interface for browsing and viewing 
-your conversation history. The web UI offers an intuitive way to explore conversations
-with syntax highlighting, tool result visualization, and search capabilities.
+	Short: "Start the web UI server for chatting with kodelet",
+	Long: `Start a local web server that provides an interactive chat interface for kodelet.
+The web UI lets you continue conversations, inspect tool activity, and browse recent
+chat history from the browser while still using the same embedded assets in the binary.
 
 The server will be available at http://localhost:8080 by default.`,
 	Run: func(cmd *cobra.Command, _ []string) {

@@ -1,6 +1,8 @@
 // API service layer for Kodelet Web UI
 
 import {
+  ChatRequest,
+  ChatStreamEvent,
   Conversation,
   ConversationListResponse,
   SearchFilters,
@@ -90,6 +92,65 @@ class ApiService {
 
   async getToolResult(conversationId: string, toolCallId: string): Promise<ToolResult> {
     return this.request(`/api/conversations/${conversationId}/tools/${toolCallId}`);
+  }
+
+  async streamChat(
+    request: ChatRequest,
+    options: {
+      signal?: AbortSignal;
+      onEvent: (event: ChatStreamEvent) => void;
+    }
+  ): Promise<void> {
+    const response = await fetch('/api/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(request),
+      signal: options.signal,
+    });
+
+    if (!response.ok) {
+      let error: ApiError;
+      try {
+        error = await response.json();
+      } catch {
+        error = { error: `HTTP ${response.status}` };
+      }
+      throw new Error(error.error || error.message || `HTTP ${response.status}`);
+    }
+
+    if (!response.body) {
+      throw new Error('Streaming response body is unavailable');
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      buffer += decoder.decode(value, { stream: !done });
+
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) {
+          continue;
+        }
+        options.onEvent(JSON.parse(trimmed) as ChatStreamEvent);
+      }
+
+      if (done) {
+        const trimmed = buffer.trim();
+        if (trimmed) {
+          options.onEvent(JSON.parse(trimmed) as ChatStreamEvent);
+        }
+        return;
+      }
+    }
   }
 }
 
