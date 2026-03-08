@@ -726,11 +726,40 @@ const ChatPage: React.FC = () => {
                 <div className="flex items-center justify-between gap-3 border-t border-black/8 px-3 pt-3">
                   <div className="flex items-center gap-3">
                     <button
-                      className="panel-action-button px-3 py-2"
+                      className="composer-attachment-button"
                       disabled={sending}
                       onClick={() => fileInputRef.current?.click()}
                       type="button"
                     >
+                      <svg
+                        aria-hidden="true"
+                        className="h-4 w-4"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        xmlns="http://www.w3.org/2000/svg"
+                      >
+                        <path
+                          d="M12 16.5v-9"
+                          stroke="currentColor"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth="1.7"
+                        />
+                        <path
+                          d="M7.5 12 12 7.5 16.5 12"
+                          stroke="currentColor"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth="1.7"
+                        />
+                        <path
+                          d="M5.5 18.5h13"
+                          stroke="currentColor"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth="1.7"
+                        />
+                      </svg>
                       Add image
                     </button>
                     <p className="eyebrow-label text-kodelet-mid-gray">

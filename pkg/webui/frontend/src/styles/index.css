@@ -208,6 +208,60 @@ h6 {
   box-shadow: none;
 }
 
+.composer-attachment-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  border-radius: 9999px;
+  border: 1px solid rgba(106, 155, 204, 0.18);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(250, 249, 245, 0.9)),
+    rgba(255, 255, 255, 0.88);
+  padding: 0.55rem 0.95rem;
+  font-family: var(--font-heading);
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #5e83ad;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.65),
+    0 8px 22px rgba(106, 155, 204, 0.08);
+  transition:
+    transform 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease,
+    background-color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.composer-attachment-button:hover {
+  transform: translateY(-1px);
+  border-color: rgba(106, 155, 204, 0.28);
+  color: #547ba6;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.72),
+    0 12px 28px rgba(106, 155, 204, 0.12);
+}
+
+.composer-attachment-button:focus-visible {
+  outline: none;
+  border-color: rgba(106, 155, 204, 0.38);
+  box-shadow:
+    0 0 0 4px rgba(106, 155, 204, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.72),
+    0 12px 28px rgba(106, 155, 204, 0.12);
+}
+
+.composer-attachment-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  transform: none;
+  box-shadow: none;
+}
+
 .tool-action-link {
   display: inline-flex;
   align-items: center;
