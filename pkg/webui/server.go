@@ -34,6 +34,7 @@ var embedFS embed.FS
 type Server struct {
 	router              *mux.Router
 	conversationService conversations.ConversationServiceInterface
+	chatRunner          ChatRunner
 	config              *ServerConfig
 	server              *http.Server
 	staticFS            fs.FS
@@ -82,6 +83,7 @@ func NewServer(ctx context.Context, config *ServerConfig) (*Server, error) {
 	s := &Server{
 		router:              mux.NewRouter(),
 		conversationService: conversationService,
+		chatRunner:          NewDefaultChatRunner(),
 		config:              config,
 		staticFS:            staticFS,
 	}
@@ -100,6 +102,7 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/conversations/{id}", s.handleGetConversation).Methods("GET")
 	api.HandleFunc("/conversations/{id}/tools/{toolCallId}", s.handleGetToolResult).Methods("GET")
 	api.HandleFunc("/conversations/{id}", s.handleDeleteConversation).Methods("DELETE")
+	api.HandleFunc("/chat", s.handleChat).Methods("POST")
 
 	// Static assets from the React build
 	s.router.PathPrefix("/assets/").Handler(s.staticFileHandler())
@@ -179,6 +182,12 @@ type responseWriter struct {
 func (rw *responseWriter) WriteHeader(code int) {
 	rw.statusCode = code
 	rw.ResponseWriter.WriteHeader(code)
+}
+
+func (rw *responseWriter) Flush() {
+	if flusher, ok := rw.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
 }
 
 // API Handlers

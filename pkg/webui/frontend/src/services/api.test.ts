@@ -223,4 +223,48 @@ describe('ApiService', () => {
       expect(result).toEqual(mockToolResult);
     });
   });
+
+  describe('streamChat', () => {
+    it('streams newline-delimited chat events', async () => {
+      const onEvent = vi.fn();
+      const encoder = new TextEncoder();
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        body: new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              encoder.encode(
+                '{"kind":"conversation","conversation_id":"conv-123"}\n{"kind":"done","conversation_id":"conv-123"}\n'
+              )
+            );
+            controller.close();
+          },
+        }),
+      });
+
+      await apiService.streamChat(
+        {
+          message: 'hello',
+        },
+        { onEvent }
+      );
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/chat',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({ message: 'hello' }),
+        })
+      );
+      expect(onEvent).toHaveBeenNthCalledWith(1, {
+        kind: 'conversation',
+        conversation_id: 'conv-123',
+      });
+      expect(onEvent).toHaveBeenNthCalledWith(2, {
+        kind: 'done',
+        conversation_id: 'conv-123',
+      });
+    });
+  });
 });

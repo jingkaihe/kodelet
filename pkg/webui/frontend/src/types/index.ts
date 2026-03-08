@@ -105,6 +105,65 @@ export interface ApiError {
   message?: string;
 }
 
+export interface ChatRequest {
+  message: string;
+  conversationId?: string;
+}
+
+export interface ChatStreamEvent {
+  kind:
+    | 'conversation'
+    | 'thinking-start'
+    | 'thinking-delta'
+    | 'thinking-end'
+    | 'thinking'
+    | 'text-delta'
+    | 'content-end'
+    | 'text'
+    | 'tool-use'
+    | 'tool-result'
+    | 'done'
+    | 'error';
+  conversation_id?: string;
+  role?: 'user' | 'assistant';
+  delta?: string;
+  content?: string;
+  tool_name?: string;
+  tool_call_id?: string;
+  input?: string;
+  tool_result?: ToolResult;
+  error?: string;
+}
+
+export interface ChatRenderMessage {
+  role: 'user' | 'assistant';
+  content?: string | ContentBlock[];
+  blocks?: ChatAssistantBlock[];
+}
+
+export type ChatAssistantBlock =
+  | {
+      type: 'thinking';
+      content: string;
+      inProgress?: boolean;
+    }
+  | {
+      type: 'message';
+      content: string | ContentBlock[];
+      inProgress?: boolean;
+    }
+  | {
+      type: 'tools';
+      tools: ChatRenderToolCall[];
+    };
+
+export interface ChatRenderToolCall {
+  callId: string;
+  name: string;
+  input: string;
+  result?: ToolResult;
+}
+
 // Tool renderer types
 export interface ToolRenderProps {
   toolResult: ToolResult;

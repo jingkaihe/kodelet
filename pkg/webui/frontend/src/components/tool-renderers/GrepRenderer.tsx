@@ -1,6 +1,12 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { ToolResult, GrepMetadata, GrepResult, GrepMatch } from '../../types';
-import { StatusBadge } from './shared';
+import {
+  highlightPattern,
+  ReferenceToolHeader,
+  ReferenceToolKVGrid,
+  ReferenceToolNote,
+  TOOL_ICONS,
+} from './reference';
 
 interface GrepRendererProps {
   toolResult: ToolResult;
@@ -8,7 +14,6 @@ interface GrepRendererProps {
 
 const GrepRenderer: React.FC<GrepRendererProps> = ({ toolResult }) => {
   const meta = toolResult.metadata as GrepMetadata;
-  const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set());
   if (!meta) return null;
 
   const results = meta.results || [];
@@ -33,28 +38,6 @@ const GrepRenderer: React.FC<GrepRendererProps> = ({ toolResult }) => {
     return grouped;
   };
 
-  const highlightPattern = (text: string, pattern: string): string => {
-    if (!pattern || !text) return text;
-    try {
-      const regex = new RegExp(`(${pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
-      return text.replace(regex, '<mark class="bg-kodelet-orange/30 text-kodelet-dark px-0.5 rounded">$1</mark>');
-    } catch {
-      return text;
-    }
-  };
-
-  const toggleFile = (file: string) => {
-    setExpandedFiles(prev => {
-      const next = new Set(prev);
-      if (next.has(file)) {
-        next.delete(file);
-      } else {
-        next.add(file);
-      }
-      return next;
-    });
-  };
-
   const getTruncationMessage = (): string | null => {
     if (!meta.truncated) return null;
     switch (meta.truncationReason) {
@@ -72,46 +55,55 @@ const GrepRenderer: React.FC<GrepRendererProps> = ({ toolResult }) => {
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center gap-2 flex-wrap text-xs font-mono text-kodelet-dark/80">
-        <code className="font-medium">{meta.pattern}</code>
-        <StatusBadge
-          text={`${totalMatches} in ${results.length} files`}
-          variant={meta.truncated ? 'warning' : 'success'}
-        />
-        {meta.path && <span className="text-kodelet-mid-gray">in {meta.path}</span>}
-        {truncationMessage && (
-          <StatusBadge text={truncationMessage} variant="warning" />
-        )}
-      </div>
+      <ReferenceToolHeader
+        badges={[
+          {
+            text: `${totalMatches} matches`,
+            variant: meta.truncated ? 'warning' : 'success',
+          },
+          {
+            text: `${results.length} files`,
+            variant: 'info',
+          },
+        ]}
+        subtitle={meta.pattern}
+        title={`${TOOL_ICONS.grep_tool} Search Results`}
+      />
+
+      <ReferenceToolKVGrid
+        items={[
+          { label: 'Path', value: meta.path, monospace: true },
+          { label: 'Include', value: meta.include, monospace: true },
+          { label: 'Truncation', value: meta.truncationReason },
+        ]}
+      />
 
       {results.length > 0 ? (
         <div className="space-y-1">
           {Object.entries(fileGroups).map(([file, matches]) => {
-            const isExpanded = expandedFiles.has(file) || matches.length <= 3;
-            const displayMatches = isExpanded ? matches : matches.slice(0, 2);
-
             return (
-              <div key={file} className="text-xs">
-                <div className="font-mono text-kodelet-dark/70 font-medium">{file}</div>
-                <div className="ml-2 border-l border-kodelet-light-gray pl-2">
-                  {displayMatches.map((match, index) => (
-                    <div key={index} className={`flex gap-2 py-0.5 ${match.isContext ? 'opacity-50' : ''}`}>
-                      <span className="text-kodelet-mid-gray min-w-[3rem] text-right">{match.lineNumber}</span>
-                      <span
-                        className="font-mono text-kodelet-dark"
-                        dangerouslySetInnerHTML={{ __html: match.isContext ? match.content : highlightPattern(match.content, meta.pattern) }}
-                      />
-                    </div>
-                  ))}
-                  {matches.length > 3 && !isExpanded && (
-                    <button
-                      onClick={() => toggleFile(file)}
-                      className="text-kodelet-blue hover:underline"
-                    >
-                      +{matches.length - 2} more
-                    </button>
-                  )}
-                </div>
+              <div className="grep-block" key={file}>
+                <div className="grep-file-header">{file || 'Unknown'}</div>
+                {matches.slice(0, 12).map((match, index) => (
+                  <div
+                    className={match.isContext ? 'grep-line context' : 'grep-line'}
+                    key={index}
+                  >
+                    <span className="grep-line-number">{match.lineNumber}</span>
+                    <span
+                      dangerouslySetInnerHTML={{
+                        __html: match.isContext
+                          ? highlightPattern(match.content, '')
+                          : highlightPattern(match.content, meta.pattern),
+                      }}
+                    />
+                  </div>
+                ))}
+                {matches.length > 12 ? (
+                  <ReferenceToolNote
+                    text={`Showing first 12 of ${matches.length} matches in this file.`}
+                  />
+                ) : null}
               </div>
             );
           })}
@@ -119,6 +111,8 @@ const GrepRenderer: React.FC<GrepRendererProps> = ({ toolResult }) => {
       ) : (
         <div className="text-xs text-kodelet-mid-gray">No matches found</div>
       )}
+
+      {truncationMessage ? <ReferenceToolNote text={truncationMessage} /> : null}
     </div>
   );
 };

@@ -1,6 +1,11 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { ToolResult } from '../../types';
-import { StatusBadge } from './shared';
+import {
+  compactDiffLines,
+  ReferenceDiffBlock,
+  ReferenceToolHeader,
+  TOOL_ICONS,
+} from './reference';
 
 interface FileEditMetadata {
   filePath: string;
@@ -25,7 +30,6 @@ interface FileEditRendererProps {
 
 const FileEditRenderer: React.FC<FileEditRendererProps> = ({ toolResult }) => {
   const meta = toolResult.metadata as FileEditMetadata;
-  const [showDiff, setShowDiff] = useState(false);
   if (!meta) return null;
 
   const edits = meta.edits || [];
@@ -35,25 +39,25 @@ const FileEditRenderer: React.FC<FileEditRendererProps> = ({ toolResult }) => {
   const createUnifiedDiff = (oldText: string, newText: string) => {
     const oldLines = oldText ? oldText.split('\n') : [];
     const newLines = newText ? newText.split('\n') : [];
-    const diffLines: Array<{ type: 'context' | 'removed' | 'added', content: string }> = [];
+    const diffLines: Array<{ kind: 'context' | 'removed' | 'added'; content: string }> = [];
 
     let oldIndex = 0;
     let newIndex = 0;
 
     while (oldIndex < oldLines.length || newIndex < newLines.length) {
       if (oldIndex >= oldLines.length) {
-        diffLines.push({ type: 'added', content: newLines[newIndex] });
+        diffLines.push({ kind: 'added', content: newLines[newIndex] });
         newIndex++;
       } else if (newIndex >= newLines.length) {
-        diffLines.push({ type: 'removed', content: oldLines[oldIndex] });
+        diffLines.push({ kind: 'removed', content: oldLines[oldIndex] });
         oldIndex++;
       } else if (oldLines[oldIndex] === newLines[newIndex]) {
-        diffLines.push({ type: 'context', content: oldLines[oldIndex] });
+        diffLines.push({ kind: 'context', content: oldLines[oldIndex] });
         oldIndex++;
         newIndex++;
       } else {
-        diffLines.push({ type: 'removed', content: oldLines[oldIndex] });
-        diffLines.push({ type: 'added', content: newLines[newIndex] });
+        diffLines.push({ kind: 'removed', content: oldLines[oldIndex] });
+        diffLines.push({ kind: 'added', content: newLines[newIndex] });
         oldIndex++;
         newIndex++;
       }
@@ -67,53 +71,32 @@ const FileEditRenderer: React.FC<FileEditRendererProps> = ({ toolResult }) => {
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center gap-2 flex-wrap text-xs font-mono text-kodelet-dark/80">
-        <span className="font-medium">{meta.filePath}</span>
-        <StatusBadge text={badgeText} variant="info" />
-        {replaceAll && <span className="text-kodelet-mid-gray">(replace all)</span>}
-      </div>
+      <ReferenceToolHeader
+        badges={[
+          { text: badgeText, variant: 'info' },
+          { text: replaceAll ? 'replace all' : 'targeted edit', variant: 'neutral' },
+        ]}
+        subtitle={meta.filePath}
+        title={`${TOOL_ICONS.file_edit} File Edit`}
+      />
 
-      {edits.length > 0 && (
-        <>
-          {!showDiff ? (
-            <button
-              onClick={() => setShowDiff(true)}
-              className="text-xs text-kodelet-blue hover:underline"
-            >
-              Show diff
-            </button>
-          ) : (
-            <div className="space-y-2" style={{ maxHeight: '400px', overflowY: 'auto' }}>
-              {edits.map((edit, index) => {
-                const diffLines = createUnifiedDiff(edit.oldContent || '', edit.newContent || '');
-                return (
-                  <div key={index} className="text-xs font-mono border border-kodelet-light-gray rounded overflow-hidden">
-                    <div className="bg-kodelet-light-gray/50 px-2 py-1 text-kodelet-dark/70">
-                      Lines {edit.startLine}-{edit.endLine}
-                    </div>
-                    <div>
-                      {diffLines.map((line, i) => (
-                        <div
-                          key={i}
-                          className={`px-2 py-0.5 flex ${
-                            line.type === 'removed' ? 'bg-red-50 text-red-700' :
-                            line.type === 'added' ? 'bg-green-50 text-green-700' : ''
-                          }`}
-                        >
-                          <span className="w-4 select-none">
-                            {line.type === 'removed' ? '-' : line.type === 'added' ? '+' : ' '}
-                          </span>
-                          <span className="whitespace-pre">{line.content}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
+      <div className="space-y-3">
+        {edits.map((edit, index) => {
+          const diffLines =
+            edit.oldContent || edit.newContent
+              ? compactDiffLines(createUnifiedDiff(edit.oldContent || '', edit.newContent || ''))
+              : [];
+
+          return (
+            <div key={index} className="space-y-2">
+              <div className="font-heading text-sm font-semibold text-kodelet-dark">
+                Lines {edit.startLine}-{edit.endLine}
+              </div>
+              <ReferenceDiffBlock lines={diffLines} />
             </div>
-          )}
-        </>
-      )}
+          );
+        })}
+      </div>
     </div>
   );
 };

@@ -1,7 +1,12 @@
 import React from 'react';
 import { ToolResult, FileMetadata } from '../../types';
-import { CopyButton, StatusBadge } from './shared';
-import { detectLanguageFromPath } from './utils';
+import {
+  estimateLanguageFromPath,
+  ReferenceToolHeader,
+  ReferenceToolKVGrid,
+  ReferenceToolNote,
+  TOOL_ICONS,
+} from './reference';
 
 interface FileReadRendererProps {
   toolResult: ToolResult;
@@ -11,7 +16,7 @@ const FileReadRenderer: React.FC<FileReadRendererProps> = ({ toolResult }) => {
   const meta = toolResult.metadata as FileMetadata;
   if (!meta) return null;
 
-  const language = meta.language || detectLanguageFromPath(meta.filePath);
+  const language = meta.language || estimateLanguageFromPath(meta.filePath);
   const lines = meta.lines || [];
   const startLine = meta.offset || 1;
   const lineLimit = meta.lineLimit;
@@ -34,30 +39,38 @@ const FileReadRenderer: React.FC<FileReadRendererProps> = ({ toolResult }) => {
   }
 
   const displayLines = lines.slice(0, lastNonEmptyIndex + 1);
-  const fileContent = displayLines.join('\n');
   const maxLineNumber = startLine + displayLines.length - 1;
   const lineNumberWidth = Math.max(4, maxLineNumber.toString().length);
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 flex-wrap text-xs font-mono text-kodelet-dark/80">
-          <span className="font-medium">{meta.filePath}</span>
-          <StatusBadge
-            text={`${displayLines.length} lines`}
-            variant={meta.truncated ? 'warning' : 'success'}
-          />
-          {remainingLines > 0 && <StatusBadge text={`${remainingLines} more`} variant="info" />}
-          {language && <span className="text-kodelet-mid-gray">{language}</span>}
-        </div>
-        <CopyButton content={fileContent} />
-      </div>
+      <ReferenceToolHeader
+        badges={[
+          {
+            text: `${displayLines.length} lines`,
+            variant: meta.truncated ? 'warning' : 'success',
+          },
+          ...(remainingLines > 0
+            ? [{ text: `${remainingLines} more`, variant: 'info' as const }]
+            : []),
+        ]}
+        subtitle={meta.filePath}
+        title={`${TOOL_ICONS.file_read} File Read`}
+      />
 
-      {remainingLines > 0 && (
-        <div className="text-xs text-kodelet-blue font-body">
-          Use offset={startLine + (lineLimit || displayLines.length)} to continue reading
-        </div>
-      )}
+      <ReferenceToolKVGrid
+        items={[
+          { label: 'Language', value: language },
+          { label: 'Offset', value: startLine, monospace: true },
+          { label: 'Line limit', value: lineLimit, monospace: true },
+        ]}
+      />
+
+      {remainingLines > 0 ? (
+        <ReferenceToolNote
+          text={`Use offset=${startLine + (lineLimit || displayLines.length)} to continue reading this file.`}
+        />
+      ) : null}
 
       <div
         className="bg-kodelet-light text-sm font-mono rounded border border-kodelet-light-gray"

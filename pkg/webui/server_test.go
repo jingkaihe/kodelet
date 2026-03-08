@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gorilla/mux"
@@ -45,6 +46,17 @@ func (m *mockConversationService) DeleteConversation(ctx context.Context, id str
 		return m.deleteFunc(ctx, id)
 	}
 	return nil
+}
+
+type mockChatRunner struct {
+	runFunc func(ctx context.Context, req ChatRequest, sink ChatEventSink) (string, error)
+}
+
+func (m *mockChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatEventSink) (string, error) {
+	if m.runFunc != nil {
+		return m.runFunc(ctx, req, sink)
+	}
+	return "", nil
 }
 
 func (m *mockConversationService) GetToolResult(ctx context.Context, conversationID, toolCallID string) (*conversations.GetToolResultResponse, error) {
@@ -256,6 +268,119 @@ func TestServer_handleDeleteConversation(t *testing.T) {
 
 	assert.Equal(t, http.StatusNoContent, w.Code)
 	assert.True(t, deleteCalled)
+}
+
+func TestServer_handleChat(t *testing.T) {
+	var capturedRequest ChatRequest
+
+	server := &Server{
+		conversationService: &mockConversationService{},
+		chatRunner: &mockChatRunner{
+			runFunc: func(_ context.Context, req ChatRequest, sink ChatEventSink) (string, error) {
+				capturedRequest = req
+				err := sink.Send(ChatEvent{
+					Kind:           "conversation",
+					ConversationID: "conv-123",
+					Role:           "assistant",
+				})
+				require.NoError(t, err)
+				return "conv-123", nil
+			},
+		},
+		router: mux.NewRouter(),
+	}
+
+	req := httptest.NewRequest("POST", "/api/chat", strings.NewReader(`{"message":"hello"}`))
+	w := httptest.NewRecorder()
+
+	server.handleChat(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "application/x-ndjson", w.Header().Get("Content-Type"))
+	assert.Equal(t, "hello", capturedRequest.Message)
+
+	lines := strings.Split(strings.TrimSpace(w.Body.String()), "\n")
+	require.Len(t, lines, 2)
+
+	var firstEvent ChatEvent
+	err := json.Unmarshal([]byte(lines[0]), &firstEvent)
+	require.NoError(t, err)
+	assert.Equal(t, "conversation", firstEvent.Kind)
+	assert.Equal(t, "conv-123", firstEvent.ConversationID)
+
+	var doneEvent ChatEvent
+	err = json.Unmarshal([]byte(lines[1]), &doneEvent)
+	require.NoError(t, err)
+	assert.Equal(t, "done", doneEvent.Kind)
+	assert.Equal(t, "conv-123", doneEvent.ConversationID)
+}
+
+func TestServer_handleChatRunnerError(t *testing.T) {
+	server := &Server{
+		conversationService: &mockConversationService{},
+		chatRunner: &mockChatRunner{
+			runFunc: func(_ context.Context, _ ChatRequest, sink ChatEventSink) (string, error) {
+				err := sink.Send(ChatEvent{
+					Kind:           "conversation",
+					ConversationID: "conv-err",
+					Role:           "assistant",
+				})
+				require.NoError(t, err)
+				return "conv-err", errors.New("boom")
+			},
+		},
+		router: mux.NewRouter(),
+	}
+
+	req := httptest.NewRequest("POST", "/api/chat", strings.NewReader(`{"message":"hello"}`))
+	w := httptest.NewRecorder()
+
+	server.handleChat(w, req)
+
+	lines := strings.Split(strings.TrimSpace(w.Body.String()), "\n")
+	require.Len(t, lines, 2)
+
+	var errorEvent ChatEvent
+	err := json.Unmarshal([]byte(lines[1]), &errorEvent)
+	require.NoError(t, err)
+	assert.Equal(t, "error", errorEvent.Kind)
+	assert.Equal(t, "conv-err", errorEvent.ConversationID)
+	assert.Equal(t, "boom", errorEvent.Error)
+}
+
+func TestServer_handleChatThroughMiddleware(t *testing.T) {
+	server := &Server{
+		conversationService: &mockConversationService{},
+		chatRunner: &mockChatRunner{
+			runFunc: func(_ context.Context, _ ChatRequest, sink ChatEventSink) (string, error) {
+				err := sink.Send(ChatEvent{
+					Kind:           "conversation",
+					ConversationID: "conv-middleware",
+					Role:           "assistant",
+				})
+				require.NoError(t, err)
+				return "conv-middleware", nil
+			},
+		},
+		router: mux.NewRouter(),
+	}
+	server.setupRoutes()
+
+	req := httptest.NewRequest("POST", "/api/chat", strings.NewReader(`{"message":"hello"}`))
+	w := httptest.NewRecorder()
+
+	server.router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	lines := strings.Split(strings.TrimSpace(w.Body.String()), "\n")
+	require.Len(t, lines, 2)
+
+	var firstEvent ChatEvent
+	err := json.Unmarshal([]byte(lines[0]), &firstEvent)
+	require.NoError(t, err)
+	assert.Equal(t, "conversation", firstEvent.Kind)
+	assert.Equal(t, "conv-middleware", firstEvent.ConversationID)
 }
 
 func TestServer_handleGetToolResult(t *testing.T) {

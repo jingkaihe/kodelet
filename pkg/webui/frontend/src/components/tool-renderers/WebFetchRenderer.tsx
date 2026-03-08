@@ -1,7 +1,11 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { ToolResult, WebFetchMetadata } from '../../types';
-import { StatusBadge, ExternalLink } from './shared';
-import { escapeUrl } from './utils';
+import {
+  ReferenceToolHeader,
+  ReferenceToolKVGrid,
+  TOOL_ICONS,
+  truncateLines,
+} from './reference';
 
 interface WebFetchRendererProps {
   toolResult: ToolResult;
@@ -9,43 +13,32 @@ interface WebFetchRendererProps {
 
 const WebFetchRenderer: React.FC<WebFetchRendererProps> = ({ toolResult }) => {
   const meta = toolResult.metadata as WebFetchMetadata;
-  const [showContent, setShowContent] = useState(false);
   if (!meta || !meta.url) return null;
 
   const savedPath = meta.savedPath || meta.filePath;
-  const safeUrl = escapeUrl(meta.url);
+  const processedType = 'Fetched';
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center gap-2 text-xs">
-        <StatusBadge text="Fetched" variant="success" />
-        <ExternalLink href={safeUrl} className="font-mono text-kodelet-dark/70 truncate max-w-md">
-          {meta.url}
-        </ExternalLink>
-      </div>
+      <ReferenceToolHeader
+        badges={[{ text: processedType.toLowerCase(), variant: 'success' }]}
+        subtitle={meta.url}
+        title={`${TOOL_ICONS.web_fetch} Web Fetch`}
+      />
 
-      {savedPath && (
-        <div className="text-xs text-kodelet-mid-gray">Saved: {savedPath}</div>
-      )}
+      <ReferenceToolKVGrid
+        items={[
+          { label: 'Content type', value: meta.contentType },
+          { label: 'Saved path', value: savedPath, monospace: true },
+          { label: 'Prompt', value: meta.prompt },
+        ]}
+      />
 
-      {meta.content && (
-        <>
-          {!showContent ? (
-            <button
-              onClick={() => setShowContent(true)}
-              className="text-xs text-kodelet-blue hover:underline"
-            >
-              Show content
-            </button>
-          ) : (
-            <div
-              className="bg-kodelet-light text-xs font-mono p-2 rounded border border-kodelet-light-gray max-h-64 overflow-auto"
-            >
-              <pre className="whitespace-pre-wrap">{meta.content}</pre>
-            </div>
-          )}
-        </>
-      )}
+      {meta.content ? (
+        <pre className="overflow-x-auto rounded-lg border border-kodelet-light-gray bg-kodelet-light p-3 text-xs font-mono text-kodelet-dark">
+          {truncateLines(meta.content, 80)}
+        </pre>
+      ) : null}
     </div>
   );
 };

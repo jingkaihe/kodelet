@@ -1,3 +1,5 @@
+@import url("https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600&family=Poppins:wght@400;500;600;700&display=swap");
+
 /* Import subagent-specific styles */
 @import "./subagent.css";
 
@@ -36,7 +38,10 @@
 body {
   font-family: "Lora", Georgia, serif;
   color: var(--kodelet-dark);
-  background-color: var(--kodelet-light);
+  background:
+    radial-gradient(circle at top left, rgba(217, 119, 87, 0.18), transparent 28%),
+    radial-gradient(circle at top right, rgba(106, 155, 204, 0.16), transparent 25%),
+    linear-gradient(180deg, #f8f6ef 0%, #f3efe5 100%);
   position: relative;
 }
 
@@ -52,6 +57,26 @@ body::before {
   pointer-events: none;
   z-index: 0;
   opacity: 0.4;
+}
+
+#root {
+  min-height: 100vh;
+  position: relative;
+  z-index: 1;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+textarea::placeholder {
+  color: rgba(20, 20, 19, 0.4);
+}
+
+summary::-webkit-details-marker {
+  display: none;
 }
 
 /* Editorial heading styles */
@@ -258,6 +283,422 @@ code[class*="language-"] {
   width: 100%;
   border-collapse: collapse;
   margin: 1rem 0;
+}
+
+.sidebar-section-title {
+  font-family: "Poppins", Arial, sans-serif;
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: #7a756b;
+  margin: 0.2rem 0 0.9rem;
+}
+
+.sidebar-action-link {
+  display: flex;
+  align-items: center;
+  gap: 0.72rem;
+  width: 100%;
+  padding: 0.5rem 0.2rem 0.9rem;
+  text-decoration: none;
+  color: #3d3a35;
+  background: transparent;
+  border: 0;
+  text-align: left;
+}
+
+.sidebar-action-link:hover {
+  color: var(--kodelet-dark);
+  text-decoration: none;
+}
+
+.sidebar-action-plus {
+  display: inline-block;
+  color: var(--kodelet-dark);
+  font-family: "Poppins", Arial, sans-serif;
+  font-size: 1.4rem;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.sidebar-action-label {
+  font-family: "Poppins", Arial, sans-serif;
+  font-size: 0.95rem;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+.conversation-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.06rem;
+  margin-bottom: 0.4rem;
+}
+
+.conversation-link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.42rem 0.72rem;
+  border-radius: 10px;
+  text-decoration: none;
+  color: #3d3a35;
+  transition: background-color 120ms ease, color 120ms ease;
+  background: transparent;
+  border: 0;
+  text-align: left;
+}
+
+.conversation-link:hover {
+  background: rgba(232, 230, 220, 0.55);
+  color: var(--kodelet-dark);
+  text-decoration: none;
+}
+
+.conversation-link.active {
+  background: rgba(232, 230, 220, 0.88);
+  color: var(--kodelet-dark);
+}
+
+.conversation-link-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: "Poppins", Arial, sans-serif;
+  font-size: 0.82rem;
+  line-height: 1.2;
+  font-weight: 500;
+  letter-spacing: 0;
+  padding-right: 0.45rem;
+}
+
+.conversation-link-more {
+  flex-shrink: 0;
+  color: rgba(61, 58, 53, 0.72);
+  letter-spacing: 0.08em;
+  font-size: 0.86rem;
+  line-height: 1;
+  opacity: 0;
+}
+
+.conversation-link.active .conversation-link-more,
+.conversation-link:hover .conversation-link-more {
+  opacity: 1;
+}
+
+.tool-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.75rem;
+  margin-bottom: 0.4rem;
+}
+
+.tool-title {
+  font-family: "Poppins", Arial, sans-serif;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--kodelet-dark);
+  line-height: 1.25;
+}
+
+.tool-subtitle {
+  font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
+  font-size: 0.74rem;
+  color: #6f6a5f;
+  margin-top: 0.2rem;
+  word-break: break-word;
+}
+
+.tool-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  justify-content: flex-end;
+}
+
+.tool-badge {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 0.16rem 0.55rem;
+  font-family: "Poppins", Arial, sans-serif;
+  font-size: 0.69rem;
+  font-weight: 600;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.tool-badge-success {
+  background: rgba(120, 140, 93, 0.12);
+  color: #5f7247;
+  border-color: rgba(120, 140, 93, 0.22);
+}
+
+.tool-badge-info {
+  background: rgba(106, 155, 204, 0.12);
+  color: #537aa5;
+  border-color: rgba(106, 155, 204, 0.22);
+}
+
+.tool-badge-warning {
+  background: rgba(217, 119, 87, 0.12);
+  color: #b15e45;
+  border-color: rgba(217, 119, 87, 0.22);
+}
+
+.tool-badge-error {
+  background: rgba(191, 63, 63, 0.1);
+  color: #a63f3f;
+  border-color: rgba(191, 63, 63, 0.2);
+}
+
+.tool-badge-neutral {
+  background: rgba(176, 174, 165, 0.16);
+  color: #6f6a5f;
+  border-color: rgba(176, 174, 165, 0.24);
+}
+
+.tool-kv-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.45rem 0.75rem;
+  margin: 0.55rem 0 0.35rem;
+}
+
+.tool-kv-item {
+  background: rgba(232, 230, 220, 0.42);
+  border: 1px solid rgba(176, 174, 165, 0.18);
+  border-radius: 8px;
+  padding: 0.45rem 0.6rem;
+}
+
+.tool-kv-label {
+  display: block;
+  font-family: "Poppins", Arial, sans-serif;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: #7a756b;
+  margin-bottom: 0.18rem;
+}
+
+.tool-kv-value {
+  display: block;
+  font-size: 0.84rem;
+  color: var(--kodelet-dark);
+  word-break: break-word;
+}
+
+.tool-kv-value.mono {
+  font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
+  font-size: 0.77rem;
+}
+
+.tool-note {
+  background: rgba(250, 249, 245, 0.95);
+  border-left: 3px solid var(--kodelet-orange);
+  border-radius: 6px;
+  padding: 0.55rem 0.7rem;
+  margin: 0.45rem 0;
+  font-size: 0.83rem;
+  color: #5f5a50;
+}
+
+.tool-terminal {
+  background: #171714;
+  color: #d7e7c5;
+  border-radius: 10px;
+  border: 1px solid rgba(20, 20, 19, 0.14);
+  overflow: hidden;
+  box-shadow: 0 10px 30px rgba(20, 20, 19, 0.08);
+}
+
+.tool-terminal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.02));
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.tool-terminal-lights {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.tool-terminal-light {
+  width: 0.62rem;
+  height: 0.62rem;
+  border-radius: 999px;
+  display: inline-block;
+}
+
+.tool-terminal-light.red {
+  background: #ff5f57;
+}
+
+.tool-terminal-light.yellow {
+  background: #febc2e;
+}
+
+.tool-terminal-light.green {
+  background: #28c840;
+}
+
+.tool-terminal-label {
+  font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
+  font-size: 0.71rem;
+  color: rgba(255, 255, 255, 0.66);
+  letter-spacing: 0.01em;
+}
+
+.tool-terminal-body {
+  background: #171714;
+  color: #d7e7c5;
+  padding: 0.9rem;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.tool-terminal-body pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.tool-terminal-line {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.tool-terminal-separator {
+  color: rgba(215, 231, 197, 0.78);
+  letter-spacing: 0.08em;
+}
+
+.diff-block {
+  border: 1px solid rgba(176, 174, 165, 0.22);
+  border-radius: 10px;
+  overflow: hidden;
+  background: white;
+}
+
+.diff-line {
+  display: grid;
+  grid-template-columns: 1.6rem 1fr;
+  gap: 0.5rem;
+  padding: 0.22rem 0.55rem;
+  font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+
+.diff-line-added {
+  background: rgba(120, 140, 93, 0.1);
+  color: #4f6338;
+}
+
+.diff-line-removed {
+  background: rgba(191, 63, 63, 0.08);
+  color: #8d3e3e;
+}
+
+.diff-line-header {
+  background: rgba(232, 230, 220, 0.7);
+  color: #625d53;
+}
+
+.diff-line-meta {
+  color: #8a857b;
+}
+
+.diff-sign {
+  color: rgba(20, 20, 19, 0.45);
+  user-select: none;
+}
+
+.diff-content {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.grep-block {
+  border: 1px solid rgba(176, 174, 165, 0.18);
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.95);
+}
+
+.grep-file-header {
+  padding: 0.45rem 0.65rem;
+  background: rgba(232, 230, 220, 0.55);
+  font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
+  font-size: 0.77rem;
+  color: var(--kodelet-dark);
+}
+
+.grep-line {
+  display: grid;
+  grid-template-columns: 3rem 1fr;
+  gap: 0.55rem;
+  padding: 0.18rem 0.65rem;
+  font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+
+.grep-line.context {
+  opacity: 0.6;
+}
+
+.grep-line-number {
+  text-align: right;
+  color: #9b968c;
+  user-select: none;
+}
+
+.grep-mark {
+  background: rgba(217, 119, 87, 0.22);
+  color: var(--kodelet-dark);
+  border-radius: 4px;
+  padding: 0 0.12rem;
+}
+
+.tool-file-list {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.tool-file-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: baseline;
+  padding: 0.42rem 0.55rem;
+  border-radius: 8px;
+  background: rgba(232, 230, 220, 0.3);
+  border: 1px solid rgba(176, 174, 165, 0.16);
+}
+
+.tool-file-path {
+  font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
+  font-size: 0.76rem;
+  color: var(--kodelet-dark);
+  word-break: break-word;
+}
+
+.tool-file-meta {
+  color: #857f74;
+  font-size: 0.72rem;
+  white-space: nowrap;
 }
 
 .prose-enhanced th,
