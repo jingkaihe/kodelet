@@ -145,6 +145,32 @@ h6 {
   background: var(--kodelet-panel-soft);
 }
 
+.chat-streaming-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  border-radius: 9999px;
+  padding: 0.55rem 0.9rem;
+  border: 1px solid rgba(106, 155, 204, 0.2);
+  background: rgba(106, 155, 204, 0.08);
+  color: #5e83ad;
+}
+
+.chat-streaming-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 9999px;
+  background: currentColor;
+  animation: kodeletBlink 1.1s ease-in-out infinite;
+}
+
+.chat-streaming-label {
+  font-family: var(--font-heading);
+  font-size: 0.74rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
 .panel-action-button {
   display: inline-flex;
   align-items: center;
@@ -1171,6 +1197,18 @@ code[class*="language-"] {
   to {
     transform: translateX(0);
     opacity: 1;
+  }
+}
+
+@keyframes kodeletBlink {
+  0%,
+  100% {
+    opacity: 0.28;
+    transform: scale(0.92);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
   }
 }
 

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { marked } from 'marked';
 import type { ChatRenderMessage, ContentBlock } from '../../types';
 import ToolRenderer from '../ToolRenderer';
@@ -91,6 +91,15 @@ const getCopyText = (message: ChatRenderMessage): string => {
     .join('\n\n');
 };
 
+const STREAMING_INDICATOR_MESSAGES = [
+  'Following the thread…',
+  'Gathering the next clue…',
+  'Composing the next move…',
+  'Tracing the shape of the answer…',
+  'Pulling the pieces together…',
+  'Working through the details…',
+];
+
 interface ChatTranscriptProps {
   messages: ChatRenderMessage[];
   isStreaming: boolean;
@@ -102,6 +111,37 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
   isStreaming,
   emptyStateTitle = 'Good morning',
 }) => {
+  const [streamingMessageOffset, setStreamingMessageOffset] = useState(0);
+
+  const assistantTurnCount = useMemo(
+    () => messages.filter((message) => message.role === 'assistant').length,
+    [messages]
+  );
+
+  useEffect(() => {
+    setStreamingMessageOffset(0);
+  }, [assistantTurnCount]);
+
+  useEffect(() => {
+    if (!isStreaming) {
+      return undefined;
+    }
+
+    const intervalId = window.setInterval(() => {
+      setStreamingMessageOffset((currentValue) => currentValue + 1);
+    }, 2200);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [isStreaming]);
+
+  const streamingIndicatorMessage =
+    STREAMING_INDICATOR_MESSAGES[
+      (Math.max(assistantTurnCount - 1, 0) + streamingMessageOffset) %
+        STREAMING_INDICATOR_MESSAGES.length
+    ];
+
   if (messages.length === 0) {
     return (
       <div className="flex min-h-[50vh] items-center justify-center px-6 py-12">
@@ -125,6 +165,14 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
     <div className="mx-auto w-full max-w-5xl space-y-5 px-4 py-6 md:px-8">
       {messages.map((message, index) => {
         const isUser = message.role === 'user';
+        const isActiveStreamingAssistant =
+          !isUser && isStreaming && index === messages.length - 1;
+        const hasVisibleInProgressBlock =
+          isActiveStreamingAssistant &&
+          (message.blocks || []).some(
+            (block) =>
+              (block.type === 'thinking' || block.type === 'message') && block.inProgress
+          );
 
         return (
           <article key={`${message.role}-${index}`} className="w-full">
@@ -174,14 +222,24 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
                 <div className="space-y-4">
                   {(message.blocks || []).map((block, blockIndex) => {
                     if (block.type === 'thinking') {
+                      const thinkingLabel =
+                        isActiveStreamingAssistant && block.inProgress
+                          ? streamingIndicatorMessage
+                          : 'Thinking';
+
                       return (
                         <div
                           key={`thinking-${blockIndex}`}
                           className="chat-subpanel rounded-2xl px-4 py-4"
                         >
                           <div className="mb-3 flex items-center gap-2">
-                            <span className="font-heading text-sm font-semibold text-kodelet-blue">
-                              Thinking{block.inProgress ? '…' : ''}
+                            <span
+                              className={cn(
+                                'font-heading text-sm font-semibold text-kodelet-blue',
+                                isActiveStreamingAssistant && block.inProgress && 'animate-pulse'
+                              )}
+                            >
+                              {thinkingLabel}
                             </span>
                           </div>
                           {extractContentText(block.content).trim() ? (
@@ -249,6 +307,13 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
                       />
                     );
                   })}
+
+                  {isActiveStreamingAssistant && !hasVisibleInProgressBlock ? (
+                    <div className="chat-streaming-indicator" aria-label="Kodelet is working">
+                      <span className="chat-streaming-dot" aria-hidden="true" />
+                      <span className="chat-streaming-label">{streamingIndicatorMessage}</span>
+                    </div>
+                  ) : null}
                 </div>
               )}
             </div>

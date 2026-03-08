@@ -38,4 +38,48 @@ describe('ChatTranscript', () => {
     expect(container.querySelector('strong')?.textContent).toBe('Plan');
     expect(screen.getByText('inspect repo')).toBeInTheDocument();
   });
+
+  it('uses the rotating streaming label on in-progress thinking blocks', () => {
+    render(
+      <ChatTranscript
+        isStreaming={true}
+        messages={[
+          {
+            role: 'assistant',
+            blocks: [
+              {
+                type: 'thinking',
+                content: 'Inspecting the repo',
+                inProgress: true,
+              },
+            ],
+          },
+        ]}
+      />
+    );
+
+    expect(screen.getByText('Following the thread…')).toBeInTheDocument();
+  });
+
+  it('shows a streaming thinking indicator between assistant blocks', () => {
+    render(
+      <ChatTranscript
+        isStreaming={true}
+        messages={[
+          {
+            role: 'assistant',
+            blocks: [
+              {
+                type: 'tools',
+                tools: [],
+              },
+            ],
+          },
+        ]}
+      />
+    );
+
+    expect(screen.getByLabelText('Kodelet is working')).toBeInTheDocument();
+    expect(screen.getByText('Following the thread…')).toBeInTheDocument();
+  });
 });
