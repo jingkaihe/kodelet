@@ -26,6 +26,16 @@ export const TOOL_ICONS: Record<string, string> = {
   image_recognition: '◫',
 };
 
+export const normalizeToolName = (toolName: string): string => {
+  if (toolName === 'grep') {
+    return 'grep_tool';
+  }
+  if (toolName === 'glob') {
+    return 'glob_tool';
+  }
+  return toolName;
+};
+
 type ToolBadgeVariant = 'success' | 'info' | 'warning' | 'error' | 'neutral';
 
 const badgeClassName: Record<ToolBadgeVariant, string> = {
@@ -100,6 +110,40 @@ export const ReferenceToolNote: React.FC<{ text?: string | null }> = ({ text }) 
   }
 
   return <div className="tool-note">{text}</div>;
+};
+
+interface ReferenceCodeBlockProps {
+  content: string;
+  language?: string;
+}
+
+export const ReferenceCodeBlock: React.FC<ReferenceCodeBlockProps> = ({
+  content,
+  language,
+}) => (
+  <pre className="tool-code-block">
+    <code className={language ? `language-${language}` : undefined}>{content}</code>
+  </pre>
+);
+
+interface ReferenceCodeListProps {
+  items: string[];
+}
+
+export const ReferenceCodeList: React.FC<ReferenceCodeListProps> = ({ items }) => {
+  if (items.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="tool-code-list">
+      {items.map((item) => (
+        <code className="tool-inline-code" key={item}>
+          {item}
+        </code>
+      ))}
+    </div>
+  );
 };
 
 export const truncateLines = (text: string, maxLines = 60): string => {

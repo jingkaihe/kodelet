@@ -34,7 +34,7 @@ const FileEditRenderer: React.FC<FileEditRendererProps> = ({ toolResult }) => {
 
   const edits = meta.edits || [];
   const replaceAll = meta.replaceAll || false;
-  const replacedCount = meta.replacedCount || meta.actualReplaced || 0;
+  const replacedCount = meta.replacedCount || meta.actualReplaced || edits.length;
 
   const createUnifiedDiff = (oldText: string, newText: string) => {
     const oldLines = oldText ? oldText.split('\n') : [];
@@ -65,15 +65,11 @@ const FileEditRenderer: React.FC<FileEditRendererProps> = ({ toolResult }) => {
     return diffLines;
   };
 
-  const badgeText = replaceAll
-    ? `${replacedCount} replacement${replacedCount !== 1 ? 's' : ''}`
-    : `${edits.length} edit${edits.length !== 1 ? 's' : ''}`;
-
   return (
     <div className="space-y-2">
       <ReferenceToolHeader
         badges={[
-          { text: badgeText, variant: 'info' },
+          { text: `${replacedCount} replacement${replacedCount !== 1 ? 's' : ''}`, variant: 'info' },
           { text: replaceAll ? 'replace all' : 'targeted edit', variant: 'neutral' },
         ]}
         subtitle={meta.filePath}

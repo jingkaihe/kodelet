@@ -29,49 +29,62 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
   onSelectConversation,
 }) => {
   return (
-    <aside className="border-b border-black/8 bg-kodelet-light-gray px-4 py-5 lg:min-h-screen lg:border-b-0 lg:border-r">
-      <button
-        className="sidebar-action-link"
-        disabled={disabled}
-        onClick={onNewChat}
-        type="button"
-      >
-        <span className="sidebar-action-plus">+</span>
-        <span className="sidebar-action-label">New chat</span>
-      </button>
+    <aside className="border-b border-black/8 bg-kodelet-light-gray px-4 py-5 lg:flex lg:min-h-screen lg:flex-col lg:border-b-0 lg:border-r">
+      <div className="min-h-0 flex-1">
+        <button
+          className="sidebar-action-link"
+          disabled={disabled}
+          onClick={onNewChat}
+          type="button"
+        >
+          <span className="sidebar-action-plus">+</span>
+          <span className="sidebar-action-label">New chat</span>
+        </button>
 
-      <div className="sidebar-section-title">Recents</div>
+        <div className="sidebar-section-title">Recents</div>
 
-      <div className="conversation-list max-h-[calc(100vh-8rem)] overflow-y-auto">
-        {conversations.length === 0 && !loading ? (
-          <div className="px-2 py-2 text-sm text-kodelet-dark/65">
-            No saved conversations yet.
+        <div className="conversation-list max-h-[calc(100vh-12rem)] overflow-y-auto">
+          {conversations.length === 0 && !loading ? (
+            <div className="px-2 py-2 text-sm text-kodelet-dark/65">
+              No saved conversations yet.
+            </div>
+          ) : null}
+
+          {loading ? <div className="px-2 py-2 text-sm text-kodelet-dark/65">Loading…</div> : null}
+
+          {conversations.map((conversation) => {
+            const isActive = conversation.id === activeConversationId;
+
+            return (
+              <button
+                key={conversation.id}
+                className={cn(
+                  'conversation-link',
+                  isActive && 'active'
+                )}
+                disabled={disabled}
+                onClick={() => onSelectConversation(conversation.id)}
+                type="button"
+              >
+                <span className="conversation-link-title">
+                  {truncateText(previewConversation(conversation), 80)}
+                </span>
+                <span className="conversation-link-more">•••</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="sidebar-footer">
+        {activeConversationId ? (
+          <div className="sidebar-caption">
+            ID: <code>{activeConversationId}</code>
           </div>
         ) : null}
-
-        {loading ? <div className="px-2 py-2 text-sm text-kodelet-dark/65">Loading…</div> : null}
-
-        {conversations.map((conversation) => {
-          const isActive = conversation.id === activeConversationId;
-
-          return (
-            <button
-              key={conversation.id}
-              className={cn(
-                'conversation-link',
-                isActive && 'active'
-              )}
-              disabled={disabled}
-              onClick={() => onSelectConversation(conversation.id)}
-              type="button"
-            >
-              <span className="conversation-link-title">
-                {truncateText(previewConversation(conversation), 80)}
-              </span>
-              <span className="conversation-link-more">•••</span>
-            </button>
-          );
-        })}
+        <div className="sidebar-caption">
+          Mode: <code>kodelet serve</code>
+        </div>
       </div>
     </aside>
   );

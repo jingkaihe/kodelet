@@ -1,6 +1,8 @@
 import React from 'react';
 import { ToolResult, WebFetchMetadata } from '../../types';
 import {
+  formatReferenceSize,
+  ReferenceCodeBlock,
   ReferenceToolHeader,
   ReferenceToolKVGrid,
   TOOL_ICONS,
@@ -16,12 +18,15 @@ const WebFetchRenderer: React.FC<WebFetchRendererProps> = ({ toolResult }) => {
   if (!meta || !meta.url) return null;
 
   const savedPath = meta.savedPath || meta.filePath;
-  const processedType = 'Fetched';
+  const processedType = meta.processedType || 'fetched';
 
   return (
     <div className="space-y-2">
       <ReferenceToolHeader
-        badges={[{ text: processedType.toLowerCase(), variant: 'success' }]}
+        badges={[
+          { text: processedType.replace('_', ' '), variant: 'success' },
+          { text: formatReferenceSize(meta.size), variant: 'neutral' },
+        ]}
         subtitle={meta.url}
         title={`${TOOL_ICONS.web_fetch} Web Fetch`}
       />
@@ -35,9 +40,7 @@ const WebFetchRenderer: React.FC<WebFetchRendererProps> = ({ toolResult }) => {
       />
 
       {meta.content ? (
-        <pre className="overflow-x-auto rounded-lg border border-kodelet-light-gray bg-kodelet-light p-3 text-xs font-mono text-kodelet-dark">
-          {truncateLines(meta.content, 80)}
-        </pre>
+        <ReferenceCodeBlock content={truncateLines(meta.content, 80)} language="markdown" />
       ) : null}
     </div>
   );

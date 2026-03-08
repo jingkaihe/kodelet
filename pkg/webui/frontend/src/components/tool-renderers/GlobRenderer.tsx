@@ -39,7 +39,7 @@ const GlobRenderer: React.FC<GlobRendererProps> = ({ toolResult }) => {
         <ReferenceFileList
           items={displayFiles.map((file: FileInfo) => {
             const path = file.path || file.name || '';
-            const metaText = [formatReferenceSize(file.size), file.modified || file.modTime]
+            const metaText = [file.type, formatReferenceSize(file.size), file.language]
               .filter(Boolean)
               .join(' · ');
             return { path, meta: metaText || undefined };

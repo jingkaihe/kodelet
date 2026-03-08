@@ -3,8 +3,8 @@ import { ApplyPatchChange, ApplyPatchMetadata, ToolResult } from '../../types';
 import {
   compactDiffLines,
   parseUnifiedDiff,
+  ReferenceCodeList,
   ReferenceDiffBlock,
-  ReferenceFileList,
   ReferenceToolHeader,
   TOOL_ICONS,
 } from './reference';
@@ -75,12 +75,8 @@ const buildDiffLines = (change: ApplyPatchChange): DiffLine[] => {
   });
 };
 
-const changeLabel = (operation: string): string => {
-  if (operation === 'add') return 'Added';
-  if (operation === 'delete') return 'Deleted';
-  if (operation === 'update') return 'Updated';
-  return operation;
-};
+const titleCase = (value: string): string =>
+  value ? `${value.charAt(0).toUpperCase()}${value.slice(1)}` : value;
 
 const ApplyPatchRenderer: React.FC<ApplyPatchRendererProps> = ({ toolResult }) => {
   const meta = toolResult.metadata as ApplyPatchMetadata;
@@ -104,11 +100,11 @@ const ApplyPatchRenderer: React.FC<ApplyPatchRendererProps> = ({ toolResult }) =
       />
 
       {(added.length > 0 || modified.length > 0 || deleted.length > 0) ? (
-        <ReferenceFileList
+        <ReferenceCodeList
           items={[
-            ...added.map((path) => ({ path: `A ${path}` })),
-            ...modified.map((path) => ({ path: `M ${path}` })),
-            ...deleted.map((path) => ({ path: `D ${path}` })),
+            ...added.map((path) => `A ${path}`),
+            ...modified.map((path) => `M ${path}`),
+            ...deleted.map((path) => `D ${path}`),
           ]}
         />
       ) : null}
@@ -132,7 +128,7 @@ const ApplyPatchRenderer: React.FC<ApplyPatchRendererProps> = ({ toolResult }) =
               <ReferenceToolHeader
                 badges={[{ text: change.operation || 'update', variant: 'info' }]}
                 subtitle={displayPath}
-                title={`Change: ${changeLabel(change.operation)}`}
+                title={`Change: ${titleCase(change.operation || 'update')}`}
               />
               <ReferenceDiffBlock lines={diffLines} />
             </div>

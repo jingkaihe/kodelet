@@ -18,17 +18,24 @@ const ImageRecognitionRenderer: React.FC<ImageRecognitionRendererProps> = ({ too
 
   const imagePath = getMetadataAny(toolResult, ['imagePath', 'image_path', 'path']) as string;
   const analysis = meta.analysis || meta.result;
+  const dimensions =
+    meta.imageSize?.width && meta.imageSize?.height
+      ? `${meta.imageSize.width} x ${meta.imageSize.height}`
+      : '';
 
   return (
     <div className="space-y-2">
       <ReferenceToolHeader
-        badges={[{ text: 'image', variant: 'success' }]}
+        badges={[{ text: meta.imageType || 'image', variant: 'success' }]}
         subtitle={imagePath}
         title={`${TOOL_ICONS.image_recognition} Image Analysis`}
       />
 
       <ReferenceToolKVGrid
-        items={[{ label: 'Prompt', value: meta.prompt }]}
+        items={[
+          { label: 'Prompt', value: meta.prompt },
+          { label: 'Dimensions', value: dimensions, monospace: true },
+        ]}
       />
 
       {analysis ? (

@@ -241,14 +241,18 @@ export interface FileInfo {
   size?: number;
   modTime?: string;
   modified?: string;
+  type?: string;
+  language?: string;
 }
 
 export interface WebFetchMetadata {
   url: string;
   contentType?: string;
+  size?: number;
   savedPath?: string;
   filePath?: string;
   prompt?: string;
+  processedType?: string;
   content?: string;
 }
 
@@ -287,9 +291,14 @@ export interface ImageRecognitionMetadata {
   imagePath?: string;
   image_path?: string;
   path?: string;
+  imageType?: string;
   prompt?: string;
   analysis?: string;
   result?: string;
+  imageSize?: {
+    width?: number;
+    height?: number;
+  };
 }
 
 export interface BrowserMetadata {

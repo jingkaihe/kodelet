@@ -3,6 +3,7 @@ import { ToolResult, FileMetadata } from '../../types';
 import {
   estimateLanguageFromPath,
   formatReferenceSize,
+  ReferenceCodeBlock,
   ReferenceToolHeader,
   ReferenceToolKVGrid,
   TOOL_ICONS,
@@ -42,9 +43,7 @@ const FileWriteRenderer: React.FC<FileWriteRendererProps> = ({ toolResult }) => 
       />
 
       {meta.content ? (
-        <pre className="overflow-x-auto rounded-lg border border-kodelet-light-gray bg-kodelet-light p-3 text-xs font-mono text-kodelet-dark">
-          {truncateLines(meta.content, 80)}
-        </pre>
+        <ReferenceCodeBlock content={truncateLines(meta.content, 80)} language={language} />
       ) : null}
     </div>
   );

@@ -388,6 +388,25 @@ code[class*="language-"] {
   opacity: 1;
 }
 
+.sidebar-footer {
+  border-top: 1px solid rgba(20, 20, 19, 0.08);
+  margin-top: 1rem;
+  padding-top: 0.9rem;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.sidebar-caption {
+  color: #7a756b;
+  font-size: 0.77rem;
+  line-height: 1.4;
+}
+
+.sidebar-caption code {
+  font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
+  color: #5f5a50;
+}
+
 .tool-header {
   display: flex;
   justify-content: space-between;
@@ -505,6 +524,59 @@ code[class*="language-"] {
   margin: 0.45rem 0;
   font-size: 0.83rem;
   color: #5f5a50;
+}
+
+.tool-item-label {
+  font-family: "Poppins", Arial, sans-serif;
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--kodelet-dark);
+}
+
+.tool-awaiting {
+  font-size: 0.82rem;
+  color: #6f6a5f;
+}
+
+.tool-code-block {
+  margin: 0;
+  padding: 0.875rem;
+  overflow-x: auto;
+  border-radius: 6px;
+  border: 1px solid var(--kodelet-mid-gray);
+  background: linear-gradient(
+    135deg,
+    var(--kodelet-light-gray) 0%,
+    var(--kodelet-light) 100%
+  );
+  box-shadow: var(--shadow-sm);
+}
+
+.tool-code-block code {
+  display: block;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--kodelet-dark);
+}
+
+.tool-code-list {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.tool-inline-code {
+  display: inline-block;
+  width: fit-content;
+  background: rgba(232, 230, 220, 0.52);
+  border: 1px solid rgba(176, 174, 165, 0.2);
+  border-radius: 6px;
+  padding: 0.24rem 0.45rem;
+  font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
+  font-size: 0.76rem;
+  color: var(--kodelet-dark);
 }
 
 .tool-terminal {

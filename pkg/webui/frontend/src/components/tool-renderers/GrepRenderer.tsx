@@ -17,26 +17,10 @@ const GrepRenderer: React.FC<GrepRendererProps> = ({ toolResult }) => {
   if (!meta) return null;
 
   const results = meta.results || [];
-  const totalMatches = results.reduce((sum, result) => sum + (result.matches ? result.matches.length : 1), 0);
-
-  const groupResultsByFile = (results: GrepResult[]) => {
-    const grouped: Record<string, GrepMatch[]> = {};
-    results.forEach(result => {
-      const file = result.filePath || 'Unknown';
-      if (!grouped[file]) {
-        grouped[file] = [];
-      }
-      if (result.matches) {
-        grouped[file].push(...result.matches);
-      } else {
-        grouped[file].push({
-          lineNumber: result.lineNumber || 0,
-          content: result.content || ''
-        });
-      }
-    });
-    return grouped;
-  };
+  const totalMatches = results.reduce(
+    (sum, result) => sum + (result.matches?.length || (result.content ? 1 : 0)),
+    0
+  );
 
   const getTruncationMessage = (): string | null => {
     if (!meta.truncated) return null;
@@ -50,7 +34,6 @@ const GrepRenderer: React.FC<GrepRendererProps> = ({ toolResult }) => {
     }
   };
 
-  const fileGroups = groupResultsByFile(results);
   const truncationMessage = getTruncationMessage();
 
   return (
@@ -80,10 +63,21 @@ const GrepRenderer: React.FC<GrepRendererProps> = ({ toolResult }) => {
 
       {results.length > 0 ? (
         <div className="space-y-1">
-          {Object.entries(fileGroups).map(([file, matches]) => {
+          {results.map((result: GrepResult, resultIndex: number) => {
+            const file = result.filePath || 'Unknown';
+            const matches: GrepMatch[] =
+              result.matches && result.matches.length > 0
+                ? result.matches
+                : [
+                    {
+                      lineNumber: result.lineNumber || 0,
+                      content: result.content || '',
+                    },
+                  ];
+
             return (
-              <div className="grep-block" key={file}>
-                <div className="grep-file-header">{file || 'Unknown'}</div>
+              <div className="grep-block" key={`${file}-${resultIndex}`}>
+                <div className="grep-file-header">{file}</div>
                 {matches.slice(0, 12).map((match, index) => (
                   <div
                     className={match.isContext ? 'grep-line context' : 'grep-line'}

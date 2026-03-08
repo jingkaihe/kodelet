@@ -2,6 +2,7 @@ import React from 'react';
 import { ToolResult, FileMetadata } from '../../types';
 import {
   estimateLanguageFromPath,
+  ReferenceCodeBlock,
   ReferenceToolHeader,
   ReferenceToolKVGrid,
   ReferenceToolNote,
@@ -39,8 +40,6 @@ const FileReadRenderer: React.FC<FileReadRendererProps> = ({ toolResult }) => {
   }
 
   const displayLines = lines.slice(0, lastNonEmptyIndex + 1);
-  const maxLineNumber = startLine + displayLines.length - 1;
-  const lineNumberWidth = Math.max(4, maxLineNumber.toString().length);
 
   return (
     <div className="space-y-2">
@@ -68,34 +67,11 @@ const FileReadRenderer: React.FC<FileReadRendererProps> = ({ toolResult }) => {
 
       {remainingLines > 0 ? (
         <ReferenceToolNote
-          text={`Use offset=${startLine + (lineLimit || displayLines.length)} to continue reading this file.`}
+          text={`Use offset=${startLine + lines.length} to continue reading this file.`}
         />
       ) : null}
 
-      <div
-        className="bg-kodelet-light text-sm font-mono rounded border border-kodelet-light-gray"
-        style={{ maxHeight: '400px', overflowY: 'auto' }}
-      >
-        <div className="flex p-3">
-          <div className="text-kodelet-mid-gray flex-shrink-0 whitespace-pre select-none text-xs">
-            {displayLines.map((_, index) => {
-              const lineNumber = (startLine + index).toString().padStart(lineNumberWidth, ' ');
-              return (
-                <div key={index} className="min-h-[1.2em] text-right pr-2">
-                  {lineNumber}
-                </div>
-              );
-            })}
-          </div>
-          <div className="flex-grow overflow-x-auto whitespace-pre text-kodelet-dark text-xs">
-            {displayLines.map((line, index) => (
-              <div key={index} className="min-h-[1.2em]">
-                {line === '' ? '\u00A0' : line}
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
+      <ReferenceCodeBlock content={displayLines.join('\n')} language={language} />
     </div>
   );
 };

@@ -3,20 +3,7 @@ import { marked } from 'marked';
 import type { ChatRenderMessage, ContentBlock } from '../../types';
 import ToolRenderer from '../ToolRenderer';
 import { cn, copyToClipboard } from '../../utils';
-
-const TOOL_LABELS: Record<string, string> = {
-  bash: 'Shell Command',
-  file_read: 'File Read',
-  file_write: 'File Write',
-  file_edit: 'File Edit',
-  apply_patch: 'Patch Applied',
-  grep_tool: 'Search Results',
-  glob_tool: 'File Discovery',
-  web_fetch: 'Web Fetch',
-  image_recognition: 'Image Analysis',
-  subagent: 'Subagent',
-  skill: 'Skill',
-};
+import { normalizeToolName, ReferenceCodeBlock, TOOL_LABELS } from '../tool-renderers/reference';
 
 const renderContent = (content: string | ContentBlock[] | undefined): string => {
   if (!content) {
@@ -167,45 +154,44 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({ messages, isStreaming }
 
                     if (block.type === 'tools') {
                       return (
-                        <div key={`tools-${blockIndex}`} className="space-y-3">
-                          {block.tools.map((toolCall) => (
-                            <section
-                              key={toolCall.callId || `${toolCall.name}-${blockIndex}`}
-                              className="overflow-hidden rounded-2xl border border-black/10 bg-kodelet-light-gray/22 p-4"
-                            >
-                              {toolCall.result ? (
-                                <div className="space-y-3">
-                                  <ToolRenderer toolResult={toolCall.result} />
-                                  <div className="font-mono text-[11px] text-kodelet-mid-gray">
-                                    {toolCall.callId}
-                                  </div>
+                        <details
+                          key={`tools-${blockIndex}`}
+                          className="overflow-hidden rounded-2xl border border-black/10 bg-kodelet-light-gray/22"
+                        >
+                          <summary className="cursor-pointer list-none px-4 py-3 font-heading text-sm font-semibold text-kodelet-dark">
+                            Tools ({block.tools.length})
+                          </summary>
+                          <div className="space-y-4 border-t border-black/8 px-4 py-4">
+                            {block.tools.map((toolCall, toolIndex) => {
+                              const normalizedToolName = normalizeToolName(toolCall.name);
+
+                              return (
+                                <div
+                                  key={toolCall.callId || `${toolCall.name}-${blockIndex}`}
+                                  className="space-y-2"
+                                >
+                                  <p className="tool-item-label">
+                                    {toolIndex + 1}. {TOOL_LABELS[normalizedToolName] || normalizedToolName}
+                                  </p>
+
+                                  {toolCall.result ? (
+                                    <ToolRenderer toolResult={toolCall.result} />
+                                  ) : (
+                                    <>
+                                      <p className="tool-awaiting">Awaiting tool result…</p>
+                                      {toolCall.input ? (
+                                        <ReferenceCodeBlock
+                                          content={formatToolInput(toolCall.input)}
+                                          language="json"
+                                        />
+                                      ) : null}
+                                    </>
+                                  )}
                                 </div>
-                              ) : (
-                                <div className="space-y-3">
-                                  <div className="tool-header mb-0">
-                                    <div>
-                                      <div className="tool-title">
-                                        {TOOL_LABELS[toolCall.name] || toolCall.name}
-                                      </div>
-                                      <div className="tool-subtitle">{toolCall.callId}</div>
-                                    </div>
-                                    <div className="tool-badges">
-                                      <span className="tool-badge tool-badge-info">running</span>
-                                    </div>
-                                  </div>
-                                  <details className="rounded-xl border border-black/8 bg-white/80" open={false}>
-                                    <summary className="cursor-pointer list-none px-3 py-2 font-heading text-xs font-semibold uppercase tracking-[0.14em] text-kodelet-mid-gray">
-                                      Input
-                                    </summary>
-                                    <pre className="overflow-x-auto border-t border-black/8 px-3 py-3 font-mono text-xs leading-5 text-kodelet-dark">
-                                      {formatToolInput(toolCall.input)}
-                                    </pre>
-                                  </details>
-                                </div>
-                              )}
-                            </section>
-                          ))}
-                        </div>
+                              );
+                            })}
+                          </div>
+                        </details>
                       );
                     }
 
