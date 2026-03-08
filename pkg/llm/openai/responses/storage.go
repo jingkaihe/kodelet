@@ -144,17 +144,23 @@ func messageInputItemFromRawItem(raw json.RawMessage) (responses.ResponseInputIt
 	}
 
 	contentParts := make(responses.ResponseInputMessageContentListParam, 0, len(parts))
+	hasSupportedPart := false
 	for _, part := range parts {
 		switch part.Type {
-		case "input_text":
+		case "input_text", "output_text":
 			contentParts = append(contentParts, responses.ResponseInputContentUnionParam{
 				OfInputText: &responses.ResponseInputTextParam{Text: part.Text},
 			})
+			hasSupportedPart = true
 		case "input_image":
 			contentParts = append(contentParts, responses.ResponseInputContentUnionParam{
 				OfInputImage: &responses.ResponseInputImageParam{ImageURL: param.NewOpt(part.ImageURL)},
 			})
+			hasSupportedPart = true
 		}
+	}
+	if !hasSupportedPart {
+		return responses.ResponseInputItemUnionParam{}, false
 	}
 
 	return responses.ResponseInputItemUnionParam{

@@ -5,8 +5,8 @@ package webui
 
 import (
 	"context"
-	"encoding/base64"
 	"embed"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -272,12 +272,13 @@ type WebConversationResponse struct {
 
 // WebMessage represents a message with structured tool calls for the web UI
 type WebMessage struct {
-	Role         string            `json:"role"`
-	Content      any               `json:"content"`
-	ToolCalls    []WebToolCall     `json:"toolCalls,omitempty"`
-	ThinkingText string            `json:"thinkingText,omitempty"`
+	Role         string        `json:"role"`
+	Content      any           `json:"content"`
+	ToolCalls    []WebToolCall `json:"toolCalls,omitempty"`
+	ThinkingText string        `json:"thinkingText,omitempty"`
 }
 
+// WebContentBlock represents a typed content block rendered by the web UI.
 type WebContentBlock struct {
 	Type     string          `json:"type"`
 	Text     string          `json:"text,omitempty"`
@@ -285,11 +286,13 @@ type WebContentBlock struct {
 	ImageURL *WebImageURL    `json:"image_url,omitempty"`
 }
 
+// WebImageSource represents inline image data for a web content block.
 type WebImageSource struct {
 	Data      string `json:"data"`
 	MediaType string `json:"media_type"`
 }
 
+// WebImageURL represents a remote image URL for a web content block.
 type WebImageURL struct {
 	URL string `json:"url"`
 }

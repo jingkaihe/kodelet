@@ -184,6 +184,17 @@ func WithLLMConfig(config llmtypes.Config) BasicStateOption {
 	}
 }
 
+// WithSessionID returns an option that binds the state to a specific conversation session.
+func WithSessionID(sessionID string) BasicStateOption {
+	return func(_ context.Context, s *BasicState) error {
+		sessionID = strings.TrimSpace(sessionID)
+		if sessionID != "" {
+			s.sessionID = sessionID
+		}
+		return nil
+	}
+}
+
 // WithSkillTool returns an option that configures the skill tool with discovered skills
 func WithSkillTool() BasicStateOption {
 	return func(ctx context.Context, s *BasicState) error {

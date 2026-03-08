@@ -348,4 +348,46 @@ describe('applyChatStreamEvent', () => {
       ],
     });
   });
+
+  it('renders repeated non-streamed assistant replies in later turns', () => {
+    let messages: ChatRenderMessage[] = [
+      {
+        role: 'user',
+        content: 'first check',
+      },
+      {
+        role: 'assistant',
+        blocks: [
+          {
+            type: 'message',
+            content: 'Done.',
+            inProgress: false,
+          },
+        ],
+      },
+      {
+        role: 'user',
+        content: 'second check',
+      },
+    ];
+
+    messages = applyChatStreamEvent(messages, {
+      kind: 'text',
+      content: 'Done.',
+      conversation_id: 'conv-789',
+      role: 'assistant',
+    });
+
+    expect(messages).toHaveLength(4);
+    expect(messages[3]).toEqual({
+      role: 'assistant',
+      blocks: [
+        {
+          type: 'message',
+          content: 'Done.',
+          inProgress: false,
+        },
+      ],
+    });
+  });
 });

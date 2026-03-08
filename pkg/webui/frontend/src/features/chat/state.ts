@@ -73,25 +73,22 @@ const appendAssistantBlocks = (
 };
 
 const findMatchingBlock = (
-  messages: ChatRenderMessage[],
+  message: ChatRenderMessage | undefined,
   type: 'thinking' | 'message',
   content: string
 ) => {
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const message = messages[i];
-    if (message.role !== 'assistant' || !message.blocks) {
+  if (message?.role !== 'assistant' || !message.blocks) {
+    return null;
+  }
+
+  for (let i = message.blocks.length - 1; i >= 0; i -= 1) {
+    const block = message.blocks[i];
+    if (block.type !== type || typeof block.content !== 'string') {
       continue;
     }
 
-    for (let j = message.blocks.length - 1; j >= 0; j -= 1) {
-      const block = message.blocks[j];
-      if (block.type !== type || typeof block.content !== 'string') {
-        continue;
-      }
-
-      if (block.content === content) {
-        return block;
-      }
+    if (block.content === content) {
+      return block;
     }
   }
 
@@ -311,13 +308,13 @@ export const applyChatStreamEvent = (
         return nextMessages;
       }
 
-      const existingBlock = findMatchingBlock(nextMessages, 'thinking', content);
+      const assistantMessage = ensureCurrentAssistantMessage(nextMessages);
+      const existingBlock = findMatchingBlock(assistantMessage, 'thinking', content);
       if (existingBlock) {
         existingBlock.inProgress = false;
         return nextMessages;
       }
 
-      const assistantMessage = ensureCurrentAssistantMessage(nextMessages);
       ensureAssistantBlocks(assistantMessage).push({
         type: 'thinking',
         content,
@@ -332,13 +329,13 @@ export const applyChatStreamEvent = (
         return nextMessages;
       }
 
-      const existingBlock = findMatchingBlock(nextMessages, 'message', content);
+      const assistantMessage = ensureCurrentAssistantMessage(nextMessages);
+      const existingBlock = findMatchingBlock(assistantMessage, 'message', content);
       if (existingBlock) {
         existingBlock.inProgress = false;
         return nextMessages;
       }
 
-      const assistantMessage = ensureCurrentAssistantMessage(nextMessages);
       ensureAssistantBlocks(assistantMessage).push({
         type: 'message',
         content,

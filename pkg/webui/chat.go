@@ -218,6 +218,7 @@ func buildChatState(
 	customManager *tools.CustomToolManager,
 ) (*tools.BasicState, error) {
 	stateOpts := []tools.BasicStateOption{
+		tools.WithSessionID(sessionID),
 		tools.WithLLMConfig(llmConfig),
 		tools.WithCustomTools(customManager),
 		tools.WithMainTools(),

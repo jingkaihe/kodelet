@@ -635,6 +635,29 @@ func TestFromStoredItemsWithRawCompactionSummary(t *testing.T) {
 	assert.Equal(t, "enc_value", restored[0].OfCompaction.EncryptedContent)
 }
 
+func TestFromStoredItemsWithCompactedAssistantRawMessage(t *testing.T) {
+	stored := []StoredInputItem{
+		{
+			Type:    "message",
+			Role:    "assistant",
+			Content: "Compacted assistant context",
+			RawItem: json.RawMessage(`{
+				"id": "msg_1",
+				"type": "message",
+				"role": "assistant",
+				"status": "completed",
+				"content": [{"type": "output_text", "text": "Compacted assistant context"}]
+			}`),
+		},
+	}
+
+	restored := fromStoredItems(stored)
+	require.Len(t, restored, 1)
+	require.NotNil(t, restored[0].OfMessage)
+	assert.Equal(t, openairesponses.EasyInputMessageRoleAssistant, restored[0].OfMessage.Role)
+	assert.Equal(t, "Compacted assistant context", extractInputItemText(restored[0]))
+}
+
 func TestStreamMessages(t *testing.T) {
 	inputItems := `[
 		{

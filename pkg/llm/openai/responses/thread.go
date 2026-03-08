@@ -1276,7 +1276,7 @@ type StreamableMessage struct {
 	Kind       string // "text", "tool-use", "tool-result", "thinking"
 	Role       string // "user", "assistant", "system"
 	Content    string // Text content
-	RawItem     json.RawMessage
+	RawItem    json.RawMessage
 	ToolName   string // For tool use/result
 	ToolCallID string // For matching tool results
 	Input      string // For tool use (JSON string)
