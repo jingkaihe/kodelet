@@ -5,6 +5,7 @@ package webui
 
 import (
 	"context"
+	"encoding/base64"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -271,10 +272,26 @@ type WebConversationResponse struct {
 
 // WebMessage represents a message with structured tool calls for the web UI
 type WebMessage struct {
-	Role         string        `json:"role"`
-	Content      string        `json:"content"`
-	ToolCalls    []WebToolCall `json:"toolCalls,omitempty"`
-	ThinkingText string        `json:"thinkingText,omitempty"`
+	Role         string            `json:"role"`
+	Content      any               `json:"content"`
+	ToolCalls    []WebToolCall     `json:"toolCalls,omitempty"`
+	ThinkingText string            `json:"thinkingText,omitempty"`
+}
+
+type WebContentBlock struct {
+	Type     string          `json:"type"`
+	Text     string          `json:"text,omitempty"`
+	Source   *WebImageSource `json:"source,omitempty"`
+	ImageURL *WebImageURL    `json:"image_url,omitempty"`
+}
+
+type WebImageSource struct {
+	Data      string `json:"data"`
+	MediaType string `json:"media_type"`
+}
+
+type WebImageURL struct {
+	URL string `json:"url"`
 }
 
 // WebToolCall represents a tool call for the web UI
@@ -405,11 +422,7 @@ func (s *Server) convertToWebMessages(rawMessages json.RawMessage, provider stri
 
 		role, _ := baseMsg["role"].(string)
 
-		webMsg := WebMessage{
-			Role:      role,
-			Content:   "",
-			ToolCalls: []WebToolCall{},
-		}
+		webMsg := WebMessage{Role: role, Content: "", ToolCalls: []WebToolCall{}}
 
 		// Extract tool calls and thinking content based on provider
 		switch provider {
@@ -419,8 +432,8 @@ func (s *Server) convertToWebMessages(rawMessages json.RawMessage, provider stri
 				webMsg.ToolCalls = toolCalls
 			}
 			// Extract thinking content using SDK
-			if textContent, thinkingText, err := s.extractAnthropicContent(rawMsg); err == nil {
-				webMsg.Content = textContent
+			if content, thinkingText, err := s.extractAnthropicContent(rawMsg); err == nil {
+				webMsg.Content = content
 				webMsg.ThinkingText = thinkingText
 			}
 		case "openai":
@@ -428,23 +441,23 @@ func (s *Server) convertToWebMessages(rawMessages json.RawMessage, provider stri
 				webMsg.ToolCalls = toolCalls
 			}
 			// Extract content using SDK for consistency
-			if textContent, err := s.extractOpenAIContent(rawMsg); err == nil {
-				webMsg.Content = textContent
+			if content, err := s.extractOpenAIContent(rawMsg); err == nil {
+				webMsg.Content = content
 			}
 		case "google":
 			if toolCalls, err := s.extractGoogleToolCalls(rawMsg); err == nil {
 				webMsg.ToolCalls = toolCalls
 			}
 			// Extract content and thinking text using Google SDK
-			if textContent, thinkingText, err := s.extractGoogleContent(rawMsg); err == nil {
-				webMsg.Content = textContent
+			if content, thinkingText, err := s.extractGoogleContent(rawMsg); err == nil {
+				webMsg.Content = content
 				webMsg.ThinkingText = thinkingText
 			}
 		}
 
 		// Skip empty messages (no content, no tool calls, and no thinking text)
 		// pretty much neglecting the user tool call feedback as it is covered by the toolresult block at
-		if webMsg.Content == "" && len(webMsg.ToolCalls) == 0 && webMsg.ThinkingText == "" {
+		if isEmptyWebContent(webMsg.Content) && len(webMsg.ToolCalls) == 0 && webMsg.ThinkingText == "" {
 			continue
 		}
 
@@ -472,7 +485,15 @@ func (s *Server) convertOpenAIResponsesToWebMessages(rawMessages json.RawMessage
 
 		switch msg.Kind {
 		case "text":
-			webMsg.Content = msg.Content
+			if msg.RawItem != nil {
+				if content, err := s.extractOpenAIResponsesInputContent(msg.RawItem); err == nil && !isEmptyWebContent(content) {
+					webMsg.Content = content
+				} else {
+					webMsg.Content = msg.Content
+				}
+			} else {
+				webMsg.Content = msg.Content
+			}
 		case "thinking":
 			webMsg.ThinkingText = msg.Content
 			if webMsg.Role == "" {
@@ -512,8 +533,57 @@ func (s *Server) convertOpenAIResponsesToWebMessages(rawMessages json.RawMessage
 	return messages, nil
 }
 
+func (s *Server) extractOpenAIResponsesInputContent(rawMessage json.RawMessage) (any, error) {
+	var inputItem struct {
+		Role    string `json:"role"`
+		Content []struct {
+			Type     string `json:"type"`
+			Text     string `json:"text,omitempty"`
+			ImageURL string `json:"image_url,omitempty"`
+		} `json:"content"`
+	}
+
+	if err := json.Unmarshal(rawMessage, &inputItem); err != nil {
+		return "", errors.Wrap(err, "failed to deserialize OpenAI Responses input item")
+	}
+
+	if len(inputItem.Content) == 0 {
+		return "", nil
+	}
+
+	var textParts []string
+	var contentBlocks []WebContentBlock
+	for _, part := range inputItem.Content {
+		switch part.Type {
+		case "input_text":
+			if part.Text == "" {
+				continue
+			}
+			textParts = append(textParts, part.Text)
+			contentBlocks = append(contentBlocks, WebContentBlock{Type: "text", Text: part.Text})
+		case "input_image":
+			if part.ImageURL == "" {
+				continue
+			}
+			if strings.HasPrefix(part.ImageURL, "data:") {
+				if source, ok := parseDataURL(part.ImageURL); ok {
+					contentBlocks = append(contentBlocks, WebContentBlock{Type: "image", Source: source})
+					continue
+				}
+			}
+
+			contentBlocks = append(contentBlocks, WebContentBlock{
+				Type:     "image",
+				ImageURL: &WebImageURL{URL: part.ImageURL},
+			})
+		}
+	}
+
+	return normalizeWebContent(textParts, contentBlocks), nil
+}
+
 // extractAnthropicContent extracts both text content and thinking blocks using Anthropic SDK
-func (s *Server) extractAnthropicContent(rawMessage json.RawMessage) (string, string, error) {
+func (s *Server) extractAnthropicContent(rawMessage json.RawMessage) (any, string, error) {
 	// Deserialize single message using the Anthropic SDK
 	var anthropicMessage anthropic.MessageParam
 	if err := json.Unmarshal(rawMessage, &anthropicMessage); err != nil {
@@ -521,12 +591,25 @@ func (s *Server) extractAnthropicContent(rawMessage json.RawMessage) (string, st
 	}
 
 	var textParts []string
+	var contentBlocks []WebContentBlock
 	var thinkingText string
 
 	for _, contentBlock := range anthropicMessage.Content {
 		// Handle text blocks
 		if textBlock := contentBlock.OfText; textBlock != nil {
 			textParts = append(textParts, textBlock.Text)
+			contentBlocks = append(contentBlocks, WebContentBlock{Type: "text", Text: textBlock.Text})
+		}
+		if imageBlock := contentBlock.OfImage; imageBlock != nil {
+			if imageBlock.Source.OfBase64 != nil {
+				contentBlocks = append(contentBlocks, WebContentBlock{
+					Type: "image",
+					Source: &WebImageSource{
+						Data:      imageBlock.Source.OfBase64.Data,
+						MediaType: string(imageBlock.Source.OfBase64.MediaType),
+					},
+				})
+			}
 		}
 		// Handle thinking blocks
 		if thinkingBlock := contentBlock.OfThinking; thinkingBlock != nil {
@@ -534,7 +617,7 @@ func (s *Server) extractAnthropicContent(rawMessage json.RawMessage) (string, st
 		}
 	}
 
-	return strings.Join(textParts, "\n"), thinkingText, nil
+	return normalizeWebContent(textParts, contentBlocks), thinkingText, nil
 }
 
 // extractAnthropicToolCalls extracts tool calls from Anthropic content using SDK
@@ -596,7 +679,7 @@ func (s *Server) extractOpenAIToolCalls(rawMessage json.RawMessage) ([]WebToolCa
 }
 
 // extractOpenAIContent extracts content from OpenAI messages using SDK
-func (s *Server) extractOpenAIContent(rawMessage json.RawMessage) (string, error) {
+func (s *Server) extractOpenAIContent(rawMessage json.RawMessage) (any, error) {
 	// Deserialize single message using the OpenAI SDK
 	var openaiMessage openai.ChatCompletionMessage
 	if err := json.Unmarshal(rawMessage, &openaiMessage); err != nil {
@@ -610,14 +693,29 @@ func (s *Server) extractOpenAIContent(rawMessage json.RawMessage) (string, error
 
 	// Handle multimodal content if present
 	var textParts []string
+	var contentBlocks []WebContentBlock
 	for _, part := range openaiMessage.MultiContent {
 		if part.Type == openai.ChatMessagePartTypeText {
 			textParts = append(textParts, part.Text)
+			contentBlocks = append(contentBlocks, WebContentBlock{Type: "text", Text: part.Text})
 		}
-		// Note: Image parts would need special handling for display
+		if part.Type == openai.ChatMessagePartTypeImageURL && part.ImageURL != nil {
+			imageURL := part.ImageURL.URL
+			if strings.HasPrefix(imageURL, "data:") {
+				if source, ok := parseDataURL(imageURL); ok {
+					contentBlocks = append(contentBlocks, WebContentBlock{Type: "image", Source: source})
+					continue
+				}
+			}
+
+			contentBlocks = append(contentBlocks, WebContentBlock{
+				Type:     "image",
+				ImageURL: &WebImageURL{URL: imageURL},
+			})
+		}
 	}
 
-	return strings.Join(textParts, "\n"), nil
+	return normalizeWebContent(textParts, contentBlocks), nil
 }
 
 // handleGetToolResult handles GET /api/conversations/{id}/tools/{toolCallId}
@@ -721,7 +819,7 @@ func (s *Server) Stop() error {
 }
 
 // extractGoogleContent extracts text content and thinking text from Google Content using Google SDK
-func (s *Server) extractGoogleContent(rawMessage json.RawMessage) (string, string, error) {
+func (s *Server) extractGoogleContent(rawMessage json.RawMessage) (any, string, error) {
 	// Deserialize single message using the Google GenAI SDK
 	var googleContent genai.Content
 	if err := json.Unmarshal(rawMessage, &googleContent); err != nil {
@@ -729,6 +827,7 @@ func (s *Server) extractGoogleContent(rawMessage json.RawMessage) (string, strin
 	}
 
 	var textParts []string
+	var contentBlocks []WebContentBlock
 	var thinkingText string
 
 	for _, part := range googleContent.Parts {
@@ -740,11 +839,65 @@ func (s *Server) extractGoogleContent(rawMessage json.RawMessage) (string, strin
 			} else {
 				// Regular text content
 				textParts = append(textParts, part.Text)
+				contentBlocks = append(contentBlocks, WebContentBlock{Type: "text", Text: part.Text})
 			}
+		}
+
+		if part.InlineData != nil {
+			contentBlocks = append(contentBlocks, WebContentBlock{
+				Type: "image",
+				Source: &WebImageSource{
+					Data:      base64.StdEncoding.EncodeToString(part.InlineData.Data),
+					MediaType: part.InlineData.MIMEType,
+				},
+			})
 		}
 	}
 
-	return strings.Join(textParts, "\n"), thinkingText, nil
+	return normalizeWebContent(textParts, contentBlocks), thinkingText, nil
+}
+
+func normalizeWebContent(textParts []string, blocks []WebContentBlock) any {
+	if len(blocks) == 0 {
+		return strings.Join(textParts, "\n")
+	}
+	return blocks
+}
+
+func isEmptyWebContent(content any) bool {
+	switch value := content.(type) {
+	case nil:
+		return true
+	case string:
+		return strings.TrimSpace(value) == ""
+	case []WebContentBlock:
+		return len(value) == 0
+	default:
+		return false
+	}
+}
+
+func parseDataURL(dataURL string) (*WebImageSource, bool) {
+	if !strings.HasPrefix(dataURL, "data:") {
+		return nil, false
+	}
+
+	prefix, data, found := strings.Cut(dataURL, ",")
+	if !found {
+		return nil, false
+	}
+
+	mediaType, hasBase64 := strings.CutPrefix(prefix, "data:")
+	if !hasBase64 {
+		return nil, false
+	}
+
+	mediaType = strings.TrimSuffix(mediaType, ";base64")
+	if mediaType == "" || !strings.HasSuffix(prefix, ";base64") {
+		return nil, false
+	}
+
+	return &WebImageSource{Data: data, MediaType: mediaType}, true
 }
 
 // extractGoogleToolCalls extracts tool calls from Google Content using Google SDK

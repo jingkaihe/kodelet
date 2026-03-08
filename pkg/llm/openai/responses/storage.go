@@ -54,7 +54,14 @@ func fromStoredItems(items []StoredInputItem) []responses.ResponseInputItemUnion
 	result := make([]responses.ResponseInputItemUnionParam, 0, len(items))
 
 	for _, item := range items {
-		if item.Type != "message" && len(item.RawItem) > 0 {
+		if item.Type == "message" && len(item.RawItem) > 0 {
+			if inputItem, ok := messageInputItemFromRawItem(item.RawItem); ok {
+				result = append(result, inputItem)
+				continue
+			}
+		}
+
+		if len(item.RawItem) > 0 {
 			if inputItem, ok := inputItemFromRawItem(item.RawItem); ok {
 				result = append(result, inputItem)
 				continue
@@ -100,6 +107,62 @@ func fromStoredItems(items []StoredInputItem) []responses.ResponseInputItemUnion
 	}
 
 	return result
+}
+
+func messageInputItemFromRawItem(raw json.RawMessage) (responses.ResponseInputItemUnionParam, bool) {
+	var rawMessage struct {
+		Role    string          `json:"role"`
+		Content json.RawMessage `json:"content"`
+	}
+
+	if err := json.Unmarshal(raw, &rawMessage); err != nil {
+		return responses.ResponseInputItemUnionParam{}, false
+	}
+
+	role := responses.EasyInputMessageRole(rawMessage.Role)
+	if role == "" {
+		return responses.ResponseInputItemUnionParam{}, false
+	}
+
+	var stringContent string
+	if err := json.Unmarshal(rawMessage.Content, &stringContent); err == nil {
+		return responses.ResponseInputItemUnionParam{
+			OfMessage: &responses.EasyInputMessageParam{
+				Role:    role,
+				Content: responses.EasyInputMessageContentUnionParam{OfString: param.NewOpt(stringContent)},
+			},
+		}, true
+	}
+
+	var parts []struct {
+		Type     string `json:"type"`
+		Text     string `json:"text,omitempty"`
+		ImageURL string `json:"image_url,omitempty"`
+	}
+	if err := json.Unmarshal(rawMessage.Content, &parts); err != nil {
+		return responses.ResponseInputItemUnionParam{}, false
+	}
+
+	contentParts := make(responses.ResponseInputMessageContentListParam, 0, len(parts))
+	for _, part := range parts {
+		switch part.Type {
+		case "input_text":
+			contentParts = append(contentParts, responses.ResponseInputContentUnionParam{
+				OfInputText: &responses.ResponseInputTextParam{Text: part.Text},
+			})
+		case "input_image":
+			contentParts = append(contentParts, responses.ResponseInputContentUnionParam{
+				OfInputImage: &responses.ResponseInputImageParam{ImageURL: param.NewOpt(part.ImageURL)},
+			})
+		}
+	}
+
+	return responses.ResponseInputItemUnionParam{
+		OfMessage: &responses.EasyInputMessageParam{
+			Role:    role,
+			Content: responses.EasyInputMessageContentUnionParam{OfInputItemContentList: contentParts},
+		},
+	}, true
 }
 
 func inputItemFromRawItem(raw json.RawMessage) (responses.ResponseInputItemUnionParam, bool) {
