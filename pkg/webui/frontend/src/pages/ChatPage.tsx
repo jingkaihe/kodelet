@@ -4,7 +4,12 @@ import ChatSidebar from '../components/chat/ChatSidebar';
 import ChatTranscript from '../components/chat/ChatTranscript';
 import { applyChatStreamEvent, conversationToChatMessages } from '../features/chat/state';
 import apiService from '../services/api';
-import type { ChatStreamEvent, Conversation } from '../types';
+import type {
+  ChatStreamEvent,
+  ContentBlock,
+  Conversation,
+  PendingImageAttachment,
+} from '../types';
 import { cn, formatCost, formatDate, showToast } from '../utils';
 
 const normalizeConversation = (conversation: Conversation): Conversation => ({
@@ -34,6 +39,69 @@ const MIN_SIDEBAR_WIDTH = 260;
 const MAX_SIDEBAR_WIDTH = 520;
 const SIDEBAR_WIDTH_STORAGE_KEY = 'kodelet.chat.sidebar.width';
 const SIDEBAR_VISIBLE_STORAGE_KEY = 'kodelet.chat.sidebar.visible';
+const MAX_IMAGE_ATTACHMENTS = 10;
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const SUPPORTED_IMAGE_TYPES = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/webp',
+]);
+
+const attachmentId = (): string =>
+  typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID()
+    : `attachment-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+const readFileAsDataUrl = (file: File): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        resolve(reader.result);
+        return;
+      }
+      reject(new Error('Failed to read image data'));
+    };
+    reader.onerror = () => reject(reader.error || new Error('Failed to read image data'));
+    reader.readAsDataURL(file);
+  });
+
+const fileToPendingAttachment = async (file: File): Promise<PendingImageAttachment> => {
+  if (!SUPPORTED_IMAGE_TYPES.has(file.type)) {
+    throw new Error('Only PNG, JPEG, GIF, and WebP images are supported');
+  }
+
+  if (file.size > MAX_IMAGE_BYTES) {
+    throw new Error('Each image must be 5MB or smaller');
+  }
+
+  const dataUrl = await readFileAsDataUrl(file);
+  const [, base64 = ''] = dataUrl.split(',', 2);
+
+  return {
+    id: attachmentId(),
+    name: file.name || 'Pasted image',
+    mediaType: file.type,
+    data: base64,
+    previewUrl: dataUrl,
+    size: file.size,
+  };
+};
+
+const buildUserContent = (
+  prompt: string,
+  attachments: PendingImageAttachment[]
+): ContentBlock[] => [
+  ...(prompt ? [{ type: 'text' as const, text: prompt }] : []),
+  ...attachments.map((attachment) => ({
+    type: 'image' as const,
+    source: {
+      data: attachment.data,
+      media_type: attachment.mediaType,
+    },
+  })),
+];
 
 const clampSidebarWidth = (width: number): number =>
   Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, width));
@@ -75,12 +143,15 @@ const ChatPage: React.FC = () => {
   const [conversationError, setConversationError] = useState<string | null>(null);
   const [streamError, setStreamError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const [attachments, setAttachments] = useState<PendingImageAttachment[]>([]);
+  const [dragActive, setDragActive] = useState(false);
   const [sidebarVisible, setSidebarVisible] = useState(readStoredSidebarVisible);
   const [sidebarWidth, setSidebarWidth] = useState(readStoredSidebarWidth);
   const [isResizingSidebar, setIsResizingSidebar] = useState(false);
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const sidebarResizeStartRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const refreshConversations = async () => {
     setSidebarLoading(true);
@@ -107,6 +178,16 @@ const ChatPage: React.FC = () => {
       abortControllerRef.current?.abort();
     };
   }, []);
+
+  useEffect(() => {
+    return () => {
+      attachments.forEach((attachment) => {
+        if (attachment.previewUrl.startsWith('blob:')) {
+          URL.revokeObjectURL(attachment.previewUrl);
+        }
+      });
+    };
+  }, [attachments]);
 
   useEffect(() => {
     window.localStorage.setItem(SIDEBAR_VISIBLE_STORAGE_KEY, String(sidebarVisible));
@@ -228,17 +309,19 @@ const ChatPage: React.FC = () => {
 
   const handleSubmit = async () => {
     const prompt = draft.trim();
-    if (!prompt || sending) {
+    if ((!prompt && attachments.length === 0) || sending) {
       return;
     }
 
     setDraft('');
     setStreamError(null);
+    const attachmentsForSend = attachments;
+    setAttachments([]);
     setMessages((currentMessages) => [
       ...currentMessages,
       {
         role: 'user',
-        content: prompt,
+        content: buildUserContent(prompt, attachmentsForSend),
       },
     ]);
     setSending(true);
@@ -253,6 +336,7 @@ const ChatPage: React.FC = () => {
       await apiService.streamChat(
         {
           message: prompt,
+          content: buildUserContent(prompt, attachmentsForSend),
           conversationId: conversationId || undefined,
         },
         {
@@ -298,6 +382,7 @@ const ChatPage: React.FC = () => {
         return;
       }
 
+      setAttachments(attachmentsForSend);
       const message =
         error instanceof Error ? error.message : 'Failed to send message';
       setStreamError(message);
@@ -313,6 +398,86 @@ const ChatPage: React.FC = () => {
       event.preventDefault();
       void handleSubmit();
     }
+  };
+
+  const appendAttachments = async (files: File[]) => {
+    if (files.length === 0) {
+      return;
+    }
+
+    const remainingSlots = Math.max(MAX_IMAGE_ATTACHMENTS - attachments.length, 0);
+    if (remainingSlots === 0) {
+      showToast(`You can attach up to ${MAX_IMAGE_ATTACHMENTS} images`, 'error');
+      return;
+    }
+
+    try {
+      const nextAttachments = await Promise.all(
+        files.slice(0, remainingSlots).map(fileToPendingAttachment)
+      );
+      setAttachments((currentAttachments) => [...currentAttachments, ...nextAttachments]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to add image';
+      showToast(message, 'error');
+    }
+  };
+
+  const handleFileInputChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || []);
+    await appendAttachments(files);
+    event.target.value = '';
+  };
+
+  const handleRemoveAttachment = (attachmentIdToRemove: string) => {
+    setAttachments((currentAttachments) =>
+      currentAttachments.filter((attachment) => attachment.id !== attachmentIdToRemove)
+    );
+  };
+
+  const handlePaste = async (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = Array.from(event.clipboardData?.items || []);
+    const imageFiles = items
+      .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+      .map((item) => item.getAsFile())
+      .filter((file): file is File => file !== null);
+
+    if (imageFiles.length === 0) {
+      return;
+    }
+
+    event.preventDefault();
+    await appendAttachments(imageFiles);
+  };
+
+  const handleDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+    if (sending) {
+      return;
+    }
+
+    if (Array.from(event.dataTransfer.items || []).some((item) => item.kind === 'file')) {
+      event.preventDefault();
+      setDragActive(true);
+    }
+  };
+
+  const handleDragLeave = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+      setDragActive(false);
+    }
+  };
+
+  const handleDrop = async (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setDragActive(false);
+
+    if (sending) {
+      return;
+    }
+
+    const files = Array.from(event.dataTransfer.files || []).filter((file) =>
+      file.type.startsWith('image/')
+    );
+    await appendAttachments(files);
   };
 
   const heading = useMemo(() => {
@@ -504,29 +669,83 @@ const ChatPage: React.FC = () => {
                 </div>
               ) : null}
 
-              <div className="surface-panel w-full rounded-[1.75rem] p-3">
+              <div
+                className={cn(
+                  'surface-panel w-full rounded-[1.75rem] p-3',
+                  dragActive && 'border-kodelet-blue/35 bg-kodelet-blue/5'
+                )}
+                onDragLeave={handleDragLeave}
+                onDragOver={handleDragOver}
+                onDrop={handleDrop}
+              >
+                <input
+                  accept="image/png,image/jpeg,image/gif,image/webp"
+                  className="hidden"
+                  data-testid="composer-image-input"
+                  multiple
+                  onChange={handleFileInputChange}
+                  ref={fileInputRef}
+                  type="file"
+                />
+
+                {attachments.length > 0 ? (
+                  <div className="mb-3 flex flex-wrap gap-3 px-3 pt-2">
+                    {attachments.map((attachment) => (
+                      <div
+                        key={attachment.id}
+                        className="relative overflow-hidden rounded-2xl border border-black/8 bg-kodelet-light/80 p-2"
+                      >
+                        <img
+                          alt={attachment.name}
+                          className="h-20 w-20 rounded-xl object-cover"
+                          src={attachment.previewUrl}
+                        />
+                        <button
+                          aria-label={`Remove ${attachment.name}`}
+                          className="absolute right-2 top-2 inline-flex h-6 w-6 items-center justify-center rounded-full border border-black/8 bg-white/92 text-xs font-heading font-semibold text-kodelet-dark"
+                          onClick={() => handleRemoveAttachment(attachment.id)}
+                          type="button"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+
                 <textarea
                   className="min-h-[88px] w-full resize-none border-0 bg-transparent px-3 py-3 font-body text-base leading-7 text-kodelet-dark outline-none placeholder:text-kodelet-dark/40"
                   disabled={sending}
                   onChange={(event) => setDraft(event.target.value)}
                   onKeyDown={handleDraftKeyDown}
+                  onPaste={handlePaste}
                   placeholder="Ask kodelet anything..."
                   value={draft}
                 />
 
                 <div className="flex items-center justify-between gap-3 border-t border-black/8 px-3 pt-3">
-                  <p className="eyebrow-label text-kodelet-mid-gray">
-                    Enter to send. Shift + Enter for a new line.
-                  </p>
+                  <div className="flex items-center gap-3">
+                    <button
+                      className="panel-action-button px-3 py-2"
+                      disabled={sending}
+                      onClick={() => fileInputRef.current?.click()}
+                      type="button"
+                    >
+                      Add image
+                    </button>
+                    <p className="eyebrow-label text-kodelet-mid-gray">
+                      Enter to send. Shift + Enter for a new line. Paste or drop images.
+                    </p>
+                  </div>
 
                   <button
                     className={cn(
                       'primary-pill-button',
-                      sending || !draft.trim()
+                      sending || (!draft.trim() && attachments.length === 0)
                         ? 'cursor-not-allowed bg-kodelet-mid-gray'
                         : 'bg-kodelet-dark hover:bg-black'
                     )}
-                    disabled={sending || !draft.trim()}
+                    disabled={sending || (!draft.trim() && attachments.length === 0)}
                     onClick={() => void handleSubmit()}
                     type="button"
                   >

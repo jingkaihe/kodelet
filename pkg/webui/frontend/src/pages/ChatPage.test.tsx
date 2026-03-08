@@ -91,4 +91,71 @@ describe('ChatPage', () => {
       ).toBe('420px')
     );
   });
+
+  it('includes pasted image attachments in the streamed chat request', async () => {
+    mockStreamChat.mockResolvedValue(undefined);
+
+    const fileReaderResult = 'data:image/png;base64,aGVsbG8=';
+    const originalFileReader = window.FileReader;
+
+    class MockFileReader {
+      result: string | ArrayBuffer | null = null;
+      error: DOMException | null = null;
+      onload: null | (() => void) = null;
+      onerror: null | (() => void) = null;
+
+      readAsDataURL() {
+        this.result = fileReaderResult;
+        this.onload?.();
+      }
+    }
+
+    // @ts-expect-error test shim
+    window.FileReader = MockFileReader;
+
+    render(<ChatPage />);
+
+    await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
+
+    const textarea = screen.getByPlaceholderText('Ask kodelet anything...');
+    fireEvent.change(textarea, { target: { value: 'describe this image' } });
+
+    const file = new File(['hello'], 'clipboard.png', { type: 'image/png' });
+    fireEvent.paste(textarea, {
+      clipboardData: {
+        items: [
+          {
+            kind: 'file',
+            type: 'image/png',
+            getAsFile: () => file,
+          },
+        ],
+      },
+      preventDefault: vi.fn(),
+    });
+
+    await waitFor(() => expect(screen.getByAltText('clipboard.png')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => expect(mockStreamChat).toHaveBeenCalled());
+    expect(mockStreamChat).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: 'describe this image',
+        content: expect.arrayContaining([
+          expect.objectContaining({ type: 'text', text: 'describe this image' }),
+          expect.objectContaining({
+            type: 'image',
+            source: expect.objectContaining({
+              data: 'aGVsbG8=',
+              media_type: 'image/png',
+            }),
+          }),
+        ]),
+      }),
+      expect.any(Object)
+    );
+
+    window.FileReader = originalFileReader;
+  });
 });

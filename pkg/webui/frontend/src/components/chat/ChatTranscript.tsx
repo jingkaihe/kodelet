@@ -21,7 +21,9 @@ const renderContent = (content: string | ContentBlock[] | undefined): string => 
       }
 
       if (block.type === 'image') {
-        const imageUrl = block.source?.data || block.image_url?.url;
+        const imageUrl = block.source?.data && block.source?.media_type
+          ? `data:${block.source.media_type};base64,${block.source.data}`
+          : block.image_url?.url;
         if (!imageUrl) {
           return '';
         }

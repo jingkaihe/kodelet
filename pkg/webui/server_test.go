@@ -315,6 +315,34 @@ func TestServer_handleChat(t *testing.T) {
 	assert.Equal(t, "conv-123", doneEvent.ConversationID)
 }
 
+func TestServer_handleChatWithImageContent(t *testing.T) {
+	var capturedRequest ChatRequest
+
+	server := &Server{
+		conversationService: &mockConversationService{},
+		chatRunner: &mockChatRunner{
+			runFunc: func(_ context.Context, req ChatRequest, sink ChatEventSink) (string, error) {
+				capturedRequest = req
+				err := sink.Send(ChatEvent{Kind: "conversation", ConversationID: "conv-img", Role: "assistant"})
+				require.NoError(t, err)
+				return "conv-img", nil
+			},
+		},
+		router: mux.NewRouter(),
+	}
+
+	reqBody := `{"message":"describe this image","content":[{"type":"text","text":"describe this image"},{"type":"image","source":{"data":"aGVsbG8=","media_type":"image/png"}}]}`
+	req := httptest.NewRequest("POST", "/api/chat", strings.NewReader(reqBody))
+	w := httptest.NewRecorder()
+
+	server.handleChat(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Len(t, capturedRequest.Content, 2)
+	assert.Equal(t, "image", capturedRequest.Content[1].Type)
+	assert.Equal(t, "image/png", capturedRequest.Content[1].Source.MediaType)
+}
+
 func TestServer_handleChatRunnerError(t *testing.T) {
 	server := &Server{
 		conversationService: &mockConversationService{},

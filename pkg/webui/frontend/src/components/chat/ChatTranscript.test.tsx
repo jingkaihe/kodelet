@@ -82,4 +82,32 @@ describe('ChatTranscript', () => {
     expect(screen.getByLabelText('Kodelet is working')).toBeInTheDocument();
     expect(screen.getByText('Following the thread…')).toBeInTheDocument();
   });
+
+  it('renders embedded base64 images in user content', () => {
+    render(
+      <ChatTranscript
+        isStreaming={false}
+        messages={[
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: 'what is in the image?' },
+              {
+                type: 'image',
+                source: {
+                  data: 'aGVsbG8=',
+                  media_type: 'image/png',
+                },
+              },
+            ],
+          },
+        ]}
+      />
+    );
+
+    expect(screen.getByAltText('Uploaded content')).toHaveAttribute(
+      'src',
+      'data:image/png;base64,aGVsbG8='
+    );
+  });
 });

@@ -266,5 +266,56 @@ describe('ApiService', () => {
         conversation_id: 'conv-123',
       });
     });
+
+    it('sends multimodal content blocks when provided', async () => {
+      const encoder = new TextEncoder();
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        body: new ReadableStream({
+          start(controller) {
+            controller.enqueue(encoder.encode('{"kind":"done"}\n'));
+            controller.close();
+          },
+        }),
+      });
+
+      await apiService.streamChat(
+        {
+          message: 'describe this image',
+          content: [
+            { type: 'text', text: 'describe this image' },
+            {
+              type: 'image',
+              source: {
+                data: 'aGVsbG8=',
+                media_type: 'image/png',
+              },
+            },
+          ],
+        },
+        { onEvent: vi.fn() }
+      );
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/chat',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({
+            message: 'describe this image',
+            content: [
+              { type: 'text', text: 'describe this image' },
+              {
+                type: 'image',
+                source: {
+                  data: 'aGVsbG8=',
+                  media_type: 'image/png',
+                },
+              },
+            ],
+          }),
+        })
+      );
+    });
   });
 });

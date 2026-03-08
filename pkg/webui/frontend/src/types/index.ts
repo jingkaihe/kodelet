@@ -107,7 +107,17 @@ export interface ApiError {
 
 export interface ChatRequest {
   message: string;
+  content?: ContentBlock[];
   conversationId?: string;
+}
+
+export interface PendingImageAttachment {
+  id: string;
+  name: string;
+  mediaType: string;
+  data: string;
+  previewUrl: string;
+  size: number;
 }
 
 export interface ChatStreamEvent {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	stdErrors "errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -21,8 +22,28 @@ import (
 
 // ChatRequest is the payload for a streamed web chat turn.
 type ChatRequest struct {
-	Message        string `json:"message"`
-	ConversationID string `json:"conversationId,omitempty"`
+	Message        string             `json:"message"`
+	Content        []ChatContentBlock `json:"content,omitempty"`
+	ConversationID string             `json:"conversationId,omitempty"`
+}
+
+// ChatContentBlock represents a multimodal user input block from the web UI.
+type ChatContentBlock struct {
+	Type     string              `json:"type"`
+	Text     string              `json:"text,omitempty"`
+	Source   *ChatImageSource    `json:"source,omitempty"`
+	ImageURL *ChatImageURLSource `json:"image_url,omitempty"`
+}
+
+// ChatImageSource represents embedded image data.
+type ChatImageSource struct {
+	Data      string `json:"data"`
+	MediaType string `json:"media_type"`
+}
+
+// ChatImageURLSource represents URL-based image input.
+type ChatImageURLSource struct {
+	URL string `json:"url"`
 }
 
 // ChatEvent is a single NDJSON event sent to the React chat client.
@@ -59,8 +80,12 @@ func NewDefaultChatRunner() *DefaultChatRunner {
 
 // Run executes a single persisted chat turn and streams events to the sink.
 func (r *DefaultChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatEventSink) (string, error) {
-	message := strings.TrimSpace(req.Message)
-	if message == "" {
+	message, imageInputs, err := normalizeChatRequest(req)
+	if err != nil {
+		return "", err
+	}
+
+	if message == "" && len(imageInputs) == 0 {
 		return "", errors.New("message cannot be empty")
 	}
 
@@ -128,12 +153,61 @@ func (r *DefaultChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatE
 
 	_, err = thread.SendMessage(ctx, message, handler, llmtypes.MessageOpt{
 		PromptCache: true,
+		Images:      imageInputs,
 	})
 	if err != nil {
 		return sessionID, errors.Wrap(err, "failed to process chat message")
 	}
 
 	return sessionID, nil
+}
+
+func normalizeChatRequest(req ChatRequest) (string, []string, error) {
+	message := strings.TrimSpace(req.Message)
+	if len(req.Content) == 0 {
+		return message, nil, nil
+	}
+
+	textParts := make([]string, 0, len(req.Content))
+	imageInputs := make([]string, 0, len(req.Content))
+
+	for _, block := range req.Content {
+		switch block.Type {
+		case "text":
+			if trimmed := strings.TrimSpace(block.Text); trimmed != "" {
+				textParts = append(textParts, trimmed)
+			}
+		case "image":
+			if block.Source != nil {
+				data := strings.TrimSpace(block.Source.Data)
+				mediaType := strings.TrimSpace(block.Source.MediaType)
+				if data == "" || mediaType == "" {
+					return "", nil, errors.New("image source must include data and media_type")
+				}
+				imageInputs = append(imageInputs, fmt.Sprintf("data:%s;base64,%s", mediaType, data))
+				continue
+			}
+
+			if block.ImageURL != nil {
+				url := strings.TrimSpace(block.ImageURL.URL)
+				if url == "" {
+					return "", nil, errors.New("image_url must include url")
+				}
+				imageInputs = append(imageInputs, url)
+				continue
+			}
+
+			return "", nil, errors.New("image block must include source or image_url")
+		default:
+			return "", nil, errors.Errorf("unsupported content block type: %s", block.Type)
+		}
+	}
+
+	if len(textParts) > 0 {
+		message = strings.Join(textParts, "\n\n")
+	}
+
+	return message, imageInputs, nil
 }
 
 func buildChatState(
@@ -325,7 +399,13 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if strings.TrimSpace(req.Message) == "" {
+	message, imageInputs, err := normalizeChatRequest(req)
+	if err != nil {
+		s.writeErrorResponse(w, http.StatusBadRequest, "invalid chat request", err)
+		return
+	}
+
+	if message == "" && len(imageInputs) == 0 {
 		s.writeErrorResponse(w, http.StatusBadRequest, "message cannot be empty", nil)
 		return
 	}
