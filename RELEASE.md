@@ -1,5 +1,9 @@
 # Kodelet
 
+## 0.3.6.beta (2026-03-08)
+
+Support chat through the web UI
+
 ## 0.3.3.beta (2026-03-06)
 
 Fixed `kodelet acp` to respect profile-derived `disable_fs_search_tools` and `disable_subagent` settings, aligning ACP session tool availability with `kodelet run`.
