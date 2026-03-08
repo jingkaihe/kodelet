@@ -437,7 +437,7 @@ const ChatPage: React.FC = () => {
 
                 {conversation ? (
                   <>
-                    <h2 className="mt-2 text-3xl font-heading font-bold tracking-tight text-kodelet-dark md:text-4xl">
+                    <h2 className="balanced-title conversation-title mt-2 text-3xl font-heading font-bold tracking-tight text-kodelet-dark md:text-4xl">
                       {heading}
                     </h2>
                     <div className="mt-3 flex flex-wrap gap-2 text-kodelet-mid-gray">

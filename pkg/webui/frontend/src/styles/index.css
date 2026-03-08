@@ -280,6 +280,18 @@ h3 {
   line-height: 1.4;
 }
 
+.balanced-title {
+  text-wrap: balance;
+}
+
+.conversation-title {
+  max-inline-size: 42ch;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
 /* Line number styling for code blocks */
 .line-number {
   @apply select-none mr-2;
