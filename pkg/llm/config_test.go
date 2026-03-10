@@ -153,6 +153,57 @@ func TestGetConfigFromViperWithProfileOpenAIManualCache(t *testing.T) {
 	assert.True(t, config.OpenAI.ManualCache)
 }
 
+func TestGetConfigFromViperWithProfile_UsesExplicitProfileWithoutMutatingViper(t *testing.T) {
+	originalConfig := viper.AllSettings()
+	defer func() {
+		viper.Reset()
+		for key, value := range originalConfig {
+			viper.Set(key, value)
+		}
+	}()
+
+	viper.Reset()
+	viper.Set("provider", "anthropic")
+	viper.Set("model", "base-model")
+	viper.Set("profile", "current")
+	viper.Set("profiles", map[string]any{
+		"current": map[string]any{
+			"model": "current-model",
+		},
+		"premium": map[string]any{
+			"model": "premium-model",
+		},
+	})
+
+	config, err := GetConfigFromViperWithProfile("premium")
+	require.NoError(t, err)
+	assert.Equal(t, "premium-model", config.Model)
+	assert.Equal(t, "premium", config.Profile)
+	assert.Equal(t, "current", viper.GetString("profile"))
+	assert.Equal(t, "base-model", viper.GetString("model"))
+}
+
+func TestGetConfigFromViperWithProfile_ProfileNotFound(t *testing.T) {
+	originalConfig := viper.AllSettings()
+	defer func() {
+		viper.Reset()
+		for key, value := range originalConfig {
+			viper.Set(key, value)
+		}
+	}()
+
+	viper.Reset()
+	viper.Set("profiles", map[string]any{
+		"work": map[string]any{
+			"model": "work-model",
+		},
+	})
+
+	_, err := GetConfigFromViperWithProfile("missing")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "profile 'missing' not found")
+}
+
 func TestGetConfigFromViperWithAliases(t *testing.T) {
 	// Save original viper state
 	originalConfig := viper.AllSettings()

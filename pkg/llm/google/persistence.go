@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/pkg/errors"
@@ -41,12 +42,17 @@ func (t *Thread) SaveConversation(ctx context.Context, summarise bool) error {
 		fileLastAccess = t.State.FileLastAccess()
 	}
 
+	metadata := map[string]any{"model": t.Config.Model, "backend": t.backend}
+	if profile := strings.TrimSpace(t.Config.Profile); profile != "" {
+		metadata["profile"] = profile
+	}
+
 	record := convtypes.ConversationRecord{
 		ID:             t.ConversationID,
 		RawMessages:    rawMessages,
 		Provider:       "google",
 		Usage:          *t.Usage,
-		Metadata:       map[string]any{"model": t.Config.Model, "backend": t.backend},
+		Metadata:       metadata,
 		Summary:        summary,
 		CreatedAt:      time.Now(),
 		UpdatedAt:      time.Now(),

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	conversationservice "github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/mcp"
@@ -25,6 +26,7 @@ type ChatRequest struct {
 	Message        string             `json:"message"`
 	Content        []ChatContentBlock `json:"content,omitempty"`
 	ConversationID string             `json:"conversationId,omitempty"`
+	Profile        string             `json:"profile,omitempty"`
 }
 
 // ChatContentBlock represents a multimodal user input block from the web UI.
@@ -89,17 +91,10 @@ func (r *DefaultChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatE
 		return "", errors.New("message cannot be empty")
 	}
 
-	llmConfig, err := llm.GetConfigFromViper()
-	if err != nil {
-		return "", errors.Wrap(err, "failed to load configuration")
-	}
-
 	workspaceDir, err := mcp.ResolveWorkspaceDir("")
 	if err != nil {
 		return "", errors.Wrap(err, "failed to resolve MCP workspace directory")
 	}
-	llmConfig.MCPExecutionMode = viper.GetString("mcp.execution_mode")
-	llmConfig.MCPWorkspaceDir = workspaceDir
 
 	customManager, err := tools.CreateCustomToolManagerFromViper(ctx)
 	if err != nil {
@@ -123,6 +118,13 @@ func (r *DefaultChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatE
 	if sessionID == "" {
 		sessionID = convtypes.GenerateID()
 	}
+
+	llmConfig, err := resolveWebChatConfig(ctx, sessionID, strings.TrimSpace(req.Profile))
+	if err != nil {
+		return sessionID, errors.Wrap(err, "failed to load configuration")
+	}
+	llmConfig.MCPExecutionMode = viper.GetString("mcp.execution_mode")
+	llmConfig.MCPWorkspaceDir = workspaceDir
 
 	appState, err := buildChatState(ctx, llmConfig, sessionID, mcpManager, customManager)
 	if err != nil {
@@ -160,6 +162,103 @@ func (r *DefaultChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatE
 	}
 
 	return sessionID, nil
+}
+
+func resolveWebChatConfig(ctx context.Context, conversationID, requestedProfile string) (llmtypes.Config, error) {
+	if strings.TrimSpace(conversationID) == "" {
+		return resolveWebChatConfigForNewConversation(requestedProfile)
+	}
+
+	service, err := conversationservice.GetDefaultConversationService(ctx)
+	if err != nil {
+		return llmtypes.Config{}, errors.Wrap(err, "failed to open conversation service")
+	}
+	defer func() {
+		_ = service.Close()
+	}()
+
+	record, err := service.GetConversation(ctx, conversationID)
+	if err != nil {
+		return resolveWebChatConfigForNewConversation(requestedProfile)
+	}
+
+	return resolveWebChatConfigForExistingConversation(record)
+}
+
+func resolveWebChatConfigForNewConversation(requestedProfile string) (llmtypes.Config, error) {
+	profileName := normalizeRequestedProfile(requestedProfile)
+	if profileName != "" {
+		return llm.GetConfigFromViperWithProfile(profileName)
+	}
+
+	return llm.GetConfigFromViper()
+}
+
+func resolveWebChatConfigForExistingConversation(record *conversationservice.GetConversationResponse) (llmtypes.Config, error) {
+	profileName := ""
+	if record != nil && record.Metadata != nil {
+		if rawProfile, ok := record.Metadata["profile"].(string); ok {
+			profileName = normalizeRequestedProfile(rawProfile)
+		}
+	}
+
+	var (
+		config llmtypes.Config
+		err    error
+	)
+	if profileName != "" {
+		config, err = llm.GetConfigFromViperWithProfile(profileName)
+	} else {
+		config, err = llm.GetConfigFromViper()
+	}
+	if err != nil {
+		return llmtypes.Config{}, err
+	}
+
+	if record == nil {
+		return config, nil
+	}
+
+	if strings.TrimSpace(record.Provider) != "" {
+		config.Provider = strings.TrimSpace(record.Provider)
+	}
+	if record.Metadata != nil {
+		if model, ok := record.Metadata["model"].(string); ok && strings.TrimSpace(model) != "" {
+			config.Model = strings.TrimSpace(model)
+		}
+
+		if strings.EqualFold(config.Provider, "openai") {
+			if config.OpenAI == nil {
+				config.OpenAI = &llmtypes.OpenAIConfig{}
+			}
+			if platform, ok := record.Metadata["platform"].(string); ok && strings.TrimSpace(platform) != "" {
+				config.OpenAI.Platform = strings.TrimSpace(platform)
+			}
+			if apiMode, ok := record.Metadata["api_mode"].(string); ok && strings.TrimSpace(apiMode) != "" {
+				config.OpenAI.APIMode = llmtypes.OpenAIAPIMode(strings.TrimSpace(apiMode))
+			}
+		}
+
+		if strings.EqualFold(config.Provider, "google") {
+			if config.Google == nil {
+				config.Google = &llmtypes.GoogleConfig{}
+			}
+			if backend, ok := record.Metadata["backend"].(string); ok && strings.TrimSpace(backend) != "" {
+				config.Google.Backend = strings.TrimSpace(backend)
+			}
+		}
+	}
+
+	config.Profile = profileName
+	return config, nil
+}
+
+func normalizeRequestedProfile(profile string) string {
+	normalized := strings.TrimSpace(profile)
+	if normalized == "" || strings.EqualFold(normalized, "default") {
+		return ""
+	}
+	return normalized
 }
 
 func normalizeChatRequest(req ChatRequest) (string, []string, error) {

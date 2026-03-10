@@ -906,6 +906,9 @@ func (t *Thread) SaveConversation(ctx context.Context, summarize bool) error {
 		"api_mode":       "responses",
 		"platform":       resolvePlatformName(t.Config),
 	}
+	if profile := strings.TrimSpace(t.Config.Profile); profile != "" {
+		metadata["profile"] = profile
+	}
 
 	record := convtypes.ConversationRecord{
 		ID:             t.ConversationID,

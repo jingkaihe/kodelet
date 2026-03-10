@@ -170,6 +170,84 @@ func applyFragmentRestrictions(llmConfig *llmtypes.Config, fragmentMetadata *fra
 	}
 }
 
+func normalizeConversationProfile(profile string) string {
+	profile = strings.TrimSpace(profile)
+	if profile == "" || strings.EqualFold(profile, "default") {
+		return ""
+	}
+	return profile
+}
+
+func loadResumeConversationConfig(ctx context.Context, cmd *cobra.Command, conversationID string) (llmtypes.Config, error) {
+	if strings.TrimSpace(conversationID) == "" {
+		return llm.GetConfigFromViperWithCmd(cmd)
+	}
+
+	store, err := conversations.GetConversationStore(ctx)
+	if err != nil {
+		return llmtypes.Config{}, errors.Wrap(err, "failed to open conversation store")
+	}
+	defer func() {
+		_ = store.Close()
+	}()
+
+	record, err := store.Load(ctx, conversationID)
+	if err != nil {
+		return llmtypes.Config{}, errors.Wrap(err, "failed to load conversation")
+	}
+
+	profileName := ""
+	if record.Metadata != nil {
+		if rawProfile, ok := record.Metadata["profile"].(string); ok {
+			profileName = normalizeConversationProfile(rawProfile)
+		}
+	}
+
+	var config llmtypes.Config
+	if profileName != "" {
+		config, err = llm.GetConfigFromViperWithProfile(profileName)
+	} else {
+		config, err = llm.GetConfigFromViperWithCmd(cmd)
+	}
+	if err != nil {
+		return llmtypes.Config{}, err
+	}
+
+	if strings.TrimSpace(record.Provider) != "" {
+		config.Provider = strings.TrimSpace(record.Provider)
+	}
+
+	if record.Metadata != nil {
+		if model, ok := record.Metadata["model"].(string); ok && strings.TrimSpace(model) != "" {
+			config.Model = strings.TrimSpace(model)
+		}
+
+		if strings.EqualFold(config.Provider, "openai") {
+			if config.OpenAI == nil {
+				config.OpenAI = &llmtypes.OpenAIConfig{}
+			}
+			if platform, ok := record.Metadata["platform"].(string); ok && strings.TrimSpace(platform) != "" {
+				config.OpenAI.Platform = strings.TrimSpace(platform)
+			}
+			if apiMode, ok := record.Metadata["api_mode"].(string); ok && strings.TrimSpace(apiMode) != "" {
+				config.OpenAI.APIMode = llmtypes.OpenAIAPIMode(strings.TrimSpace(apiMode))
+			}
+		}
+
+		if strings.EqualFold(config.Provider, "google") {
+			if config.Google == nil {
+				config.Google = &llmtypes.GoogleConfig{}
+			}
+			if backend, ok := record.Metadata["backend"].(string); ok && strings.TrimSpace(backend) != "" {
+				config.Google.Backend = strings.TrimSpace(backend)
+			}
+		}
+	}
+
+	config.Profile = profileName
+	return config, nil
+}
+
 var runCmd = &cobra.Command{
 	Use:   "run [query]",
 	Short: "Execute a one-shot query with Kodelet",
@@ -222,7 +300,7 @@ var runCmd = &cobra.Command{
 			return
 		}
 
-		llmConfig, err := llm.GetConfigFromViperWithCmd(cmd)
+		llmConfig, err := loadResumeConversationConfig(ctx, cmd, config.ResumeConvID)
 		if err != nil {
 			presenter.Error(err, "Failed to load configuration")
 			return

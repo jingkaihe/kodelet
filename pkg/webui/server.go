@@ -11,6 +11,9 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -21,9 +24,11 @@ import (
 	openairesponses "github.com/jingkaihe/kodelet/pkg/llm/openai/responses"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
 	"github.com/sashabaranov/go-openai"
+	"github.com/spf13/viper"
 	"google.golang.org/genai"
 )
 
@@ -99,6 +104,7 @@ func NewServer(ctx context.Context, config *ServerConfig) (*Server, error) {
 func (s *Server) setupRoutes() {
 	// API routes
 	api := s.router.PathPrefix("/api").Subrouter()
+	api.HandleFunc("/chat/settings", s.handleGetChatSettings).Methods("GET")
 	api.HandleFunc("/conversations", s.handleListConversations).Methods("GET")
 	api.HandleFunc("/conversations/{id}", s.handleGetConversation).Methods("GET")
 	api.HandleFunc("/conversations/{id}/tools/{toolCallId}", s.handleGetToolResult).Methods("GET")
@@ -257,18 +263,43 @@ func (s *Server) handleListConversations(w http.ResponseWriter, r *http.Request)
 	s.writeJSONResponse(w, response)
 }
 
-// WebConversationResponse represents a conversation response for the web UI
+// WebConversationResponse represents a conversation response for the web UI.
 type WebConversationResponse struct {
-	ID           string       `json:"id"`
-	CreatedAt    time.Time    `json:"createdAt"`
-	UpdatedAt    time.Time    `json:"updatedAt"`
-	Provider     string       `json:"provider"`
-	Summary      string       `json:"summary,omitempty"`
-	Usage        any          `json:"usage"`
-	Messages     []WebMessage `json:"messages"`
-	ToolResults  any          `json:"toolResults,omitempty"`
-	MessageCount int          `json:"messageCount"`
+	ID            string       `json:"id"`
+	CreatedAt     time.Time    `json:"createdAt"`
+	UpdatedAt     time.Time    `json:"updatedAt"`
+	Provider      string       `json:"provider"`
+	Profile       string       `json:"profile,omitempty"`
+	ProfileLocked bool         `json:"profileLocked,omitempty"`
+	Summary       string       `json:"summary,omitempty"`
+	Usage         any          `json:"usage"`
+	Messages      []WebMessage `json:"messages"`
+	ToolResults   any          `json:"toolResults,omitempty"`
+	MessageCount  int          `json:"messageCount"`
 }
+
+// ChatProfileOption represents a selectable profile in the web UI.
+type ChatProfileOption struct {
+	Name   string `json:"name"`
+	Scope  string `json:"scope"`
+	Active bool   `json:"active,omitempty"`
+}
+
+// ChatSettingsResponse contains profile settings for the web chat composer.
+type ChatSettingsResponse struct {
+	CurrentProfile string              `json:"currentProfile,omitempty"`
+	Profiles       []ChatProfileOption `json:"profiles"`
+}
+
+const (
+	webUIBuiltInProfileScope       = "built-in"
+	webUIRepoProfileScope          = "repo"
+	webUIGlobalProfileScope        = "global"
+	webUIRepoOverridesProfileScope = "repo (overrides global)"
+	webUIProfileSourceRepo         = "repo"
+	webUIProfileSourceGlobal       = "global"
+	webUIProfileSourceBoth         = "both"
+)
 
 // WebMessage represents a message with structured tool calls for the web UI
 type WebMessage struct {
@@ -358,6 +389,155 @@ func displayProviderName(provider string) string {
 	}
 }
 
+func resolveConversationProfile(metadata map[string]any) string {
+	if metadata == nil {
+		return ""
+	}
+	rawProfile, ok := metadata["profile"]
+	if !ok {
+		return ""
+	}
+	profile, ok := rawProfile.(string)
+	if !ok {
+		return ""
+	}
+	profile = strings.TrimSpace(profile)
+	if profile == "" || strings.EqualFold(profile, "default") {
+		return ""
+	}
+	return profile
+}
+
+func getGlobalProfiles() map[string]llmtypes.ProfileConfig {
+	v := viper.New()
+	v.SetConfigName("config")
+	v.SetConfigType("yaml")
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	v.AddConfigPath(filepath.Join(homeDir, ".kodelet"))
+
+	if err := v.ReadInConfig(); err != nil {
+		return nil
+	}
+
+	return extractProfiles(v)
+}
+
+func getRepoProfiles() map[string]llmtypes.ProfileConfig {
+	v := viper.New()
+	v.SetConfigName("kodelet-config")
+	v.SetConfigType("yaml")
+	v.AddConfigPath(".")
+
+	if err := v.ReadInConfig(); err != nil {
+		return nil
+	}
+
+	return extractProfiles(v)
+}
+
+func extractProfiles(v *viper.Viper) map[string]llmtypes.ProfileConfig {
+	if !v.IsSet("profiles") {
+		return nil
+	}
+
+	profilesMap := v.GetStringMap("profiles")
+	profiles := make(map[string]llmtypes.ProfileConfig)
+	for name, profileData := range profilesMap {
+		if strings.EqualFold(name, "default") {
+			continue
+		}
+		profileMap, ok := profileData.(map[string]any)
+		if !ok {
+			continue
+		}
+		profiles[name] = llmtypes.ProfileConfig(profileMap)
+	}
+
+	if len(profiles) == 0 {
+		return nil
+	}
+	return profiles
+}
+
+func mergeProfiles(globalProfiles, repoProfiles map[string]llmtypes.ProfileConfig) map[string]string {
+	merged := make(map[string]string)
+
+	for name := range globalProfiles {
+		merged[name] = webUIProfileSourceGlobal
+	}
+
+	for name := range repoProfiles {
+		if _, exists := merged[name]; exists {
+			merged[name] = webUIProfileSourceBoth
+		} else {
+			merged[name] = webUIProfileSourceRepo
+		}
+	}
+
+	return merged
+}
+
+func getWebUIProfileOptions() []ChatProfileOption {
+	globalProfiles := getGlobalProfiles()
+	repoProfiles := getRepoProfiles()
+	mergedProfiles := mergeProfiles(globalProfiles, repoProfiles)
+	activeProfile := strings.TrimSpace(viper.GetString("profile"))
+	if strings.EqualFold(activeProfile, "default") {
+		activeProfile = ""
+	}
+
+	profiles := []ChatProfileOption{{
+		Name:   "default",
+		Scope:  webUIBuiltInProfileScope,
+		Active: activeProfile == "",
+	}}
+
+	names := make([]string, 0, len(mergedProfiles))
+	for name := range mergedProfiles {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	for _, name := range names {
+		source := mergedProfiles[name]
+		scope := webUIRepoProfileScope
+		switch source {
+		case webUIProfileSourceBoth:
+			scope = webUIRepoOverridesProfileScope
+		case webUIProfileSourceGlobal:
+			scope = webUIGlobalProfileScope
+		}
+
+		profiles = append(profiles, ChatProfileOption{
+			Name:   name,
+			Scope:  scope,
+			Active: name == activeProfile,
+		})
+	}
+
+	return profiles
+}
+
+func getCurrentWebUIProfile() string {
+	profile := strings.TrimSpace(viper.GetString("profile"))
+	if profile == "" || strings.EqualFold(profile, "default") {
+		return "default"
+	}
+	return profile
+}
+
+// handleGetChatSettings handles GET /api/chat/settings.
+func (s *Server) handleGetChatSettings(w http.ResponseWriter, _ *http.Request) {
+	s.writeJSONResponse(w, ChatSettingsResponse{
+		CurrentProfile: getCurrentWebUIProfile(),
+		Profiles:       getWebUIProfileOptions(),
+	})
+}
+
 // handleGetConversation handles GET /api/conversations/{id}
 func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -389,15 +569,17 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 	// Convert to web response format
 
 	webResponse := &WebConversationResponse{
-		ID:           response.ID,
-		CreatedAt:    response.CreatedAt,
-		UpdatedAt:    response.UpdatedAt,
-		Provider:     providerLabel,
-		Summary:      response.Summary,
-		Usage:        response.Usage,
-		Messages:     webMessages,
-		ToolResults:  response.ToolResults,
-		MessageCount: len(webMessages),
+		ID:            response.ID,
+		CreatedAt:     response.CreatedAt,
+		UpdatedAt:     response.UpdatedAt,
+		Provider:      providerLabel,
+		Profile:       resolveConversationProfile(response.Metadata),
+		ProfileLocked: response.ID != "",
+		Summary:       response.Summary,
+		Usage:         response.Usage,
+		Messages:      webMessages,
+		ToolResults:   response.ToolResults,
+		MessageCount:  len(webMessages),
 	}
 
 	s.writeJSONResponse(w, webResponse)

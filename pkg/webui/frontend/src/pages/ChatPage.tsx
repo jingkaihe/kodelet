@@ -5,6 +5,7 @@ import ChatTranscript from '../components/chat/ChatTranscript';
 import { applyChatStreamEvent, conversationToChatMessages } from '../features/chat/state';
 import apiService from '../services/api';
 import type {
+  ChatSettings,
   ChatStreamEvent,
   ContentBlock,
   Conversation,
@@ -14,6 +15,10 @@ import { cn, formatCost, formatDate, showToast } from '../utils';
 
 const normalizeConversation = (conversation: Conversation): Conversation => ({
   ...conversation,
+  profile:
+    typeof conversation.profile === 'string' && conversation.profile.trim()
+      ? conversation.profile.trim()
+      : undefined,
   messages: (conversation.messages || []).map((message) => ({
     role: message.role || 'user',
     content: message.content || '',
@@ -137,6 +142,8 @@ const ChatPage: React.FC = () => {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState(() => conversationToChatMessages(null));
+  const [chatSettings, setChatSettings] = useState<ChatSettings>({ profiles: [] });
+  const [selectedProfile, setSelectedProfile] = useState('default');
   const [draft, setDraft] = useState('');
   const [sidebarLoading, setSidebarLoading] = useState(true);
   const [conversationLoading, setConversationLoading] = useState(false);
@@ -171,6 +178,16 @@ const ChatPage: React.FC = () => {
 
   useEffect(() => {
     void refreshConversations();
+
+    void apiService
+      .getChatSettings()
+      .then((settings) => {
+        setChatSettings(settings);
+        setSelectedProfile(settings.currentProfile || 'default');
+      })
+      .catch((error) => {
+        console.error('Failed to load chat settings', error);
+      });
   }, []);
 
   useEffect(() => {
@@ -276,6 +293,7 @@ const ChatPage: React.FC = () => {
     setMessages([]);
     setConversationError(null);
     setStreamError(null);
+    setSelectedProfile(chatSettings.currentProfile || 'default');
     startTransition(() => navigate('/'));
   };
 
@@ -338,6 +356,7 @@ const ChatPage: React.FC = () => {
           message: prompt,
           content: buildUserContent(prompt, attachmentsForSend),
           conversationId: conversationId || undefined,
+          profile: conversationId ? undefined : selectedProfile,
         },
         {
           signal: controller.signal,
@@ -487,6 +506,28 @@ const ChatPage: React.FC = () => {
     return getGreeting();
   }, [conversation?.summary]);
 
+  const currentProfileLabel = useMemo(() => {
+    if (conversationId) {
+      return conversation?.profile || 'default';
+    }
+    return selectedProfile || 'default';
+  }, [conversation?.profile, conversationId, selectedProfile]);
+
+  const availableProfiles = useMemo(() => {
+    const configuredProfiles = chatSettings.profiles || [];
+    if (configuredProfiles.some((profile) => profile.name === currentProfileLabel)) {
+      return configuredProfiles;
+    }
+
+    return [
+      ...configuredProfiles,
+      {
+        name: currentProfileLabel,
+        scope: conversationId ? 'conversation' : 'selected',
+      },
+    ];
+  }, [chatSettings.profiles, conversationId, currentProfileLabel]);
+
   return (
     <div className="min-h-screen bg-transparent">
       {sidebarVisible ? (
@@ -626,6 +667,10 @@ const ChatPage: React.FC = () => {
                           {formatCost(conversation.usage)}
                         </span>
                       ) : null}
+                      <span className="meta-chip">
+                        Profile {currentProfileLabel}
+                        {conversation?.profileLocked ? ' · locked' : ''}
+                      </span>
                     </div>
                   </>
                 ) : null}
@@ -724,7 +769,7 @@ const ChatPage: React.FC = () => {
                 />
 
                 <div className="flex items-center justify-between gap-3 border-t border-black/8 px-3 pt-3">
-                  <div className="flex items-center gap-3">
+                  <div className="flex flex-wrap items-center gap-3">
                     <button
                       className="composer-attachment-button"
                       disabled={sending}
@@ -762,6 +807,21 @@ const ChatPage: React.FC = () => {
                       </svg>
                       Add image
                     </button>
+                    <label className="flex items-center gap-2 text-sm text-kodelet-mid-gray">
+                      <span className="eyebrow-label text-kodelet-mid-gray">Profile</span>
+                      <select
+                        className="rounded-xl border border-black/10 bg-white px-3 py-2 text-sm text-kodelet-dark disabled:bg-kodelet-light/70"
+                        disabled={sending || Boolean(conversationId)}
+                        onChange={(event) => setSelectedProfile(event.target.value)}
+                        value={currentProfileLabel}
+                      >
+                        {availableProfiles.map((profile) => (
+                          <option key={profile.name} value={profile.name}>
+                            {profile.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
                     <p className="eyebrow-label text-kodelet-mid-gray">
                       Enter to send. Shift + Enter for a new line. Paste or drop images.
                     </p>

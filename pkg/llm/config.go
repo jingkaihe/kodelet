@@ -17,11 +17,24 @@ func GetConfigFromViper() (llmtypes.Config, error) {
 	return GetConfigFromViperWithCmd(nil)
 }
 
+// GetConfigFromViperWithProfile loads configuration from Viper while applying the
+// provided profile name instead of the globally active viper profile. This is
+// useful for request-scoped profile selection (for example, in the web UI)
+// without mutating shared process-wide viper state.
+func GetConfigFromViperWithProfile(profileName string) (llmtypes.Config, error) {
+	return getConfigFromViperWithProfileAndCmd(profileName, nil)
+}
+
 // GetConfigFromViperWithCmd loads the LLM configuration from Viper with command context.
 // When a cobra.Command is provided, CLI flags that were explicitly changed take priority
 // over profile settings.
 func GetConfigFromViperWithCmd(cmd *cobra.Command) (llmtypes.Config, error) {
-	config, err := loadViperConfig()
+	return getConfigFromViperWithProfileAndCmd("", cmd)
+}
+
+func getConfigFromViperWithProfileAndCmd(profileName string, cmd *cobra.Command) (llmtypes.Config, error) {
+	settings := cloneSettings(viper.AllSettings())
+	config, err := loadConfigFromSettings(settings)
 	if err != nil {
 		return config, err
 	}
@@ -31,23 +44,33 @@ func GetConfigFromViperWithCmd(cmd *cobra.Command) (llmtypes.Config, error) {
 		delete(config.Profiles, "default")
 	}
 
+	activeProfile := profileName
+	if activeProfile == "" {
+		activeProfile = getActiveProfile()
+	}
+
 	// Apply active profile to viper if set
-	profileName := getActiveProfile()
-	if profileName != "" && config.Profiles != nil {
-		if profile, exists := config.Profiles[profileName]; exists {
-			applyProfileToViper(profile)
+	if activeProfile != "" && config.Profiles != nil {
+		if profile, exists := config.Profiles[activeProfile]; exists {
+			applyProfileToSettings(settings, profile)
+		} else if profileName != "" {
+			return config, errors.Errorf("failed to apply configuration profile: profile '%s' not found", profileName)
 		}
 	}
 
 	// Apply explicitly changed CLI flags to viper (highest priority)
 	if cmd != nil {
-		applyExplicitFlagsToViper(cmd)
+		applyExplicitFlagsToSettings(cmd, settings)
 	}
 
 	// Re-load config with all overrides applied
-	config, err = loadViperConfig()
+	config, err = loadConfigFromSettings(settings)
 	if err != nil {
 		return config, err
+	}
+
+	if activeProfile != "" {
+		config.Profile = activeProfile
 	}
 
 	// Resolve model aliases
@@ -57,24 +80,22 @@ func GetConfigFromViperWithCmd(cmd *cobra.Command) (llmtypes.Config, error) {
 	return config, nil
 }
 
-// applyExplicitFlagsToViper sets explicitly changed CLI flag values in viper
-func applyExplicitFlagsToViper(cmd *cobra.Command) {
+// applyExplicitFlagsToSettings sets explicitly changed CLI flag values into a local settings map.
+func applyExplicitFlagsToSettings(cmd *cobra.Command, settings map[string]any) {
 	cmd.Flags().VisitAll(func(flag *pflag.Flag) {
 		if flag.Changed {
 			viperKey := explicitFlagViperKey(flag.Name)
-			// Must use flag.Value directly, not viper.Get(), because
-			// profile settings use viper.Set() which has highest priority
 			if sliceValue, ok := flag.Value.(pflag.SliceValue); ok {
-				viper.Set(viperKey, sliceValue.GetSlice())
+				setSetting(settings, viperKey, sliceValue.GetSlice())
 				return
 			}
 			if flag.Value.Type() == "stringToString" {
 				if mapValue, err := cmd.Flags().GetStringToString(flag.Name); err == nil {
-					viper.Set(viperKey, mapValue)
+					setSetting(settings, viperKey, mapValue)
 					return
 				}
 			}
-			viper.Set(viperKey, flag.Value.String())
+			setSetting(settings, viperKey, flag.Value.String())
 		}
 	})
 }
@@ -95,20 +116,24 @@ var explicitFlagKeyOverrides = map[string]string{
 	"sysprompt-arg":    "sysprompt_args",
 }
 
-// applyProfileToViper applies profile settings to viper
-func applyProfileToViper(profile llmtypes.ProfileConfig) {
+// applyProfileToSettings applies profile settings to a local settings map.
+func applyProfileToSettings(settings map[string]any, profile llmtypes.ProfileConfig) {
 	for key, value := range profile {
 		if value != nil {
-			viper.Set(key, value)
+			setSetting(settings, key, value)
 		}
 	}
 }
 
-func loadViperConfig() (llmtypes.Config, error) {
+func loadConfigFromSettings(settings map[string]any) (llmtypes.Config, error) {
 	var config llmtypes.Config
+	v := viper.New()
+	for key, value := range settings {
+		v.Set(key, value)
+	}
 
 	// Use viper's automatic unmarshaling with mapstructure tags
-	if err := viper.Unmarshal(&config); err != nil {
+	if err := v.Unmarshal(&config); err != nil {
 		return config, errors.Wrap(err, "failed to unmarshal configuration")
 	}
 
@@ -123,6 +148,57 @@ func loadViperConfig() (llmtypes.Config, error) {
 	}
 
 	return config, nil
+}
+
+func cloneSettings(settings map[string]any) map[string]any {
+	cloned := make(map[string]any, len(settings))
+	for key, value := range settings {
+		cloned[key] = cloneSettingValue(value)
+	}
+	return cloned
+}
+
+func cloneSettingValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return cloneSettings(typed)
+	case map[string]string:
+		cloned := make(map[string]string, len(typed))
+		for k, v := range typed {
+			cloned[k] = v
+		}
+		return cloned
+	case []any:
+		cloned := make([]any, len(typed))
+		for i, item := range typed {
+			cloned[i] = cloneSettingValue(item)
+		}
+		return cloned
+	case []string:
+		return append([]string(nil), typed...)
+	default:
+		return value
+	}
+}
+
+func setSetting(settings map[string]any, key string, value any) {
+	parts := strings.Split(key, ".")
+	if len(parts) == 1 {
+		settings[key] = cloneSettingValue(value)
+		return
+	}
+
+	current := settings
+	for _, part := range parts[:len(parts)-1] {
+		next, ok := current[part].(map[string]any)
+		if !ok || next == nil {
+			next = make(map[string]any)
+			current[part] = next
+		}
+		current = next
+	}
+
+	current[parts[len(parts)-1]] = cloneSettingValue(value)
 }
 
 func getActiveProfile() string {

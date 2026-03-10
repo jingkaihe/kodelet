@@ -1,42 +1,27 @@
-package webui
+package main
 
 import (
 	"context"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
-	"github.com/jingkaihe/kodelet/pkg/tools"
+	"github.com/jingkaihe/kodelet/pkg/db"
+	"github.com/jingkaihe/kodelet/pkg/db/migrations"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestBuildChatState_BindsTodoPathToConversationID(t *testing.T) {
-	customManager, err := tools.NewCustomToolManager()
-	require.NoError(t, err)
-
-	state, err := buildChatState(
-		context.Background(),
-		llmtypes.Config{
-			DisableSubagent: true,
-		},
-		"conv-web-123",
-		nil,
-		customManager,
-	)
-	require.NoError(t, err)
-
-	todoPath, err := state.TodoFilePath()
-	require.NoError(t, err)
-
-	assert.Equal(t, "conv-web-123.json", filepath.Base(todoPath))
-	assert.Equal(t, "todos", filepath.Base(filepath.Dir(todoPath)))
-}
-
-func TestResolveWebChatConfigForExistingConversation_UsesStoredProfileAndMetadata(t *testing.T) {
+func TestLoadResumeConversationConfig_UsesStoredProfileAndMetadata(t *testing.T) {
 	originalSettings := viper.AllSettings()
+	t.Setenv("KODELET_CONVERSATION_STORE_TYPE", "sqlite")
+	basePath := t.TempDir()
+	t.Setenv("KODELET_BASE_PATH", basePath)
 	defer func() {
 		viper.Reset()
 		for key, value := range originalSettings {
@@ -57,9 +42,30 @@ func TestResolveWebChatConfigForExistingConversation_UsesStoredProfileAndMetadat
 		},
 	})
 
-	config, err := resolveWebChatConfigForExistingConversation(&conversations.GetConversationResponse{
-		ID:       "conv-123",
-		Provider: "openai",
+	ctx := context.Background()
+	dbPath := filepath.Join(basePath, "storage.db")
+	sqlDB, err := db.Open(ctx, dbPath)
+	require.NoError(t, err)
+	runner := db.NewMigrationRunner(sqlDB)
+	require.NoError(t, runner.Run(ctx, migrations.All()))
+	require.NoError(t, sqlDB.Close())
+
+	store, err := conversations.NewConversationStore(ctx, &conversations.Config{
+		StoreType: "sqlite",
+		BasePath:  basePath,
+	})
+	require.NoError(t, err)
+	defer func() {
+		_ = store.Close()
+	}()
+
+	conversationID := convtypes.GenerateID()
+	err = store.Save(ctx, convtypes.ConversationRecord{
+		ID:          conversationID,
+		Provider:    "openai",
+		RawMessages: []byte(`[]`),
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
 		Metadata: map[string]any{
 			"profile":  "premium",
 			"model":    "accounts/fireworks/models/kimi-k2",
@@ -68,6 +74,11 @@ func TestResolveWebChatConfigForExistingConversation_UsesStoredProfileAndMetadat
 		},
 	})
 	require.NoError(t, err)
+
+	cmd := &cobra.Command{Use: "run"}
+	config, err := loadResumeConversationConfig(ctx, cmd, conversationID)
+	require.NoError(t, err)
+
 	assert.Equal(t, "premium", config.Profile)
 	assert.Equal(t, "openai", config.Provider)
 	assert.Equal(t, "accounts/fireworks/models/kimi-k2", config.Model)
@@ -76,7 +87,7 @@ func TestResolveWebChatConfigForExistingConversation_UsesStoredProfileAndMetadat
 	assert.Equal(t, llmtypes.OpenAIAPIMode("responses"), config.OpenAI.APIMode)
 }
 
-func TestResolveWebChatConfigForNewConversation_DefaultProfileNameNormalizes(t *testing.T) {
+func TestLoadResumeConversationConfig_DefaultsToCurrentConfigForNewConversation(t *testing.T) {
 	originalSettings := viper.AllSettings()
 	defer func() {
 		viper.Reset()
@@ -89,9 +100,9 @@ func TestResolveWebChatConfigForNewConversation_DefaultProfileNameNormalizes(t *
 	viper.Set("provider", "anthropic")
 	viper.Set("model", "claude-sonnet-4-6")
 
-	config, err := resolveWebChatConfigForNewConversation("default")
+	cmd := &cobra.Command{Use: "run"}
+	config, err := loadResumeConversationConfig(context.Background(), cmd, "")
 	require.NoError(t, err)
 	assert.Equal(t, "anthropic", config.Provider)
 	assert.Equal(t, "claude-sonnet-4-6", config.Model)
-	assert.Empty(t, config.Profile)
 }

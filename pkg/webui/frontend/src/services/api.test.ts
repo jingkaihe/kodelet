@@ -183,6 +183,23 @@ describe('ApiService', () => {
     });
   });
 
+  describe('getChatSettings', () => {
+    it('fetches chat settings', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          currentProfile: 'work',
+          profiles: [{ name: 'default', scope: 'built-in' }],
+        }),
+      });
+
+      const result = await apiService.getChatSettings();
+
+      expect(mockFetch).toHaveBeenCalledWith('/api/chat/settings', expect.any(Object));
+      expect(result.currentProfile).toBe('work');
+    });
+  });
+
   describe('deleteConversation', () => {
     it('sends DELETE request', async () => {
       mockFetch.mockResolvedValueOnce({
@@ -314,6 +331,42 @@ describe('ApiService', () => {
               },
             ],
           }),
+        })
+      );
+    });
+
+    it('sends profile when provided', async () => {
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(
+            encoder.encode(
+              '{"kind":"conversation","conversation_id":"conv-123"}\n{"kind":"done","conversation_id":"conv-123"}\n'
+            )
+          );
+          controller.close();
+        },
+      });
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        body: stream,
+      });
+
+      await apiService.streamChat(
+        {
+          message: 'hello',
+          profile: 'premium',
+        },
+        {
+          onEvent: vi.fn(),
+        }
+      );
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/chat',
+        expect.objectContaining({
+          body: JSON.stringify({ message: 'hello', profile: 'premium' }),
         })
       );
     });

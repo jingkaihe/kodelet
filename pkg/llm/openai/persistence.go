@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
@@ -67,6 +68,9 @@ func (t *Thread) SaveConversation(ctx context.Context, summarize bool) error {
 		"model":    t.Config.Model,
 		"api_mode": "chat_completions",
 		"platform": resolvePlatformName(t.Config),
+	}
+	if profile := strings.TrimSpace(t.Config.Profile); profile != "" {
+		metadata["profile"] = profile
 	}
 
 	// Build the conversation record
