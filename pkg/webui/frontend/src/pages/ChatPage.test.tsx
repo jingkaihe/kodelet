@@ -180,7 +180,7 @@ describe('ChatPage', () => {
 
     await waitFor(() => expect(mockGetChatSettings).toHaveBeenCalled());
 
-    fireEvent.change(screen.getByDisplayValue('work'), {
+    fireEvent.change(screen.getByLabelText('Profile'), {
       target: { value: 'premium' },
     });
 
@@ -219,8 +219,8 @@ describe('ChatPage', () => {
 
     await waitFor(() => expect(mockGetConversation).toHaveBeenCalledWith('conv-123'));
 
-    const profileSelect = screen.getByDisplayValue('premium');
-    expect(profileSelect).toBeDisabled();
+    expect(screen.getByTestId('profile-static-pill')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Profile')).not.toBeInTheDocument();
     expect(screen.getByText('Profile premium · locked')).toBeInTheDocument();
 
     fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {

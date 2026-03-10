@@ -771,7 +771,7 @@ const ChatPage: React.FC = () => {
                 <div className="flex items-center justify-between gap-3 border-t border-black/8 px-3 pt-3">
                   <div className="flex flex-wrap items-center gap-3">
                     <button
-                      className="composer-attachment-button"
+                      className="composer-capsule composer-capsule-accent"
                       disabled={sending}
                       onClick={() => fileInputRef.current?.click()}
                       type="button"
@@ -805,23 +805,55 @@ const ChatPage: React.FC = () => {
                           strokeWidth="1.7"
                         />
                       </svg>
-                      Add image
+                      <span>Add image</span>
                     </button>
-                    <label className="flex items-center gap-2 text-sm text-kodelet-mid-gray">
-                      <span className="eyebrow-label text-kodelet-mid-gray">Profile</span>
-                      <select
-                        className="rounded-xl border border-black/10 bg-white px-3 py-2 text-sm text-kodelet-dark disabled:bg-kodelet-light/70"
-                        disabled={sending || Boolean(conversationId)}
-                        onChange={(event) => setSelectedProfile(event.target.value)}
-                        value={currentProfileLabel}
-                      >
-                        {availableProfiles.map((profile) => (
-                          <option key={profile.name} value={profile.name}>
-                            {profile.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+
+                    {conversationId ? (
+                      <div className="composer-profile-static" data-testid="profile-static-pill">
+                        <div className="composer-profile-copy">
+                          <span className="composer-profile-label">Profile</span>
+                          <span className="composer-profile-value">{currentProfileLabel}</span>
+                        </div>
+                        <span className="composer-profile-lock">Locked</span>
+                      </div>
+                    ) : (
+                      <label className="composer-profile-picker" data-testid="profile-picker">
+                        <span className="composer-profile-copy">
+                          <span className="composer-profile-label">Profile</span>
+                          <span className="composer-profile-value">{currentProfileLabel}</span>
+                        </span>
+                        <select
+                          aria-label="Profile"
+                          className="composer-profile-select"
+                          disabled={sending}
+                          onChange={(event) => setSelectedProfile(event.target.value)}
+                          value={currentProfileLabel}
+                        >
+                          {availableProfiles.map((profile) => (
+                            <option key={profile.name} value={profile.name}>
+                              {profile.name}
+                            </option>
+                          ))}
+                        </select>
+                        <span aria-hidden="true" className="composer-profile-chevron">
+                          <svg
+                            className="h-3.5 w-3.5"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            xmlns="http://www.w3.org/2000/svg"
+                          >
+                            <path
+                              d="m6 9 6 6 6-6"
+                              stroke="currentColor"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth="1.8"
+                            />
+                          </svg>
+                        </span>
+                      </label>
+                    )}
+
                     <p className="eyebrow-label text-kodelet-mid-gray">
                       Enter to send. Shift + Enter for a new line. Paste or drop images.
                     </p>
