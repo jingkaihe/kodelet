@@ -197,15 +197,17 @@ func loadResumeConversationConfig(ctx context.Context, cmd *cobra.Command, conve
 	}
 
 	profileName := ""
+	hasStoredProfile := false
 	if record.Metadata != nil {
 		if rawProfile, ok := record.Metadata["profile"].(string); ok {
+			hasStoredProfile = true
 			profileName = normalizeConversationProfile(rawProfile)
 		}
 	}
 
 	var config llmtypes.Config
-	if profileName != "" {
-		config, err = llm.GetConfigFromViperWithProfile(profileName)
+	if hasStoredProfile {
+		config, err = llm.GetConfigFromViperWithProfileAndCmd(profileName, cmd)
 	} else {
 		config, err = llm.GetConfigFromViperWithCmd(cmd)
 	}
@@ -244,7 +246,11 @@ func loadResumeConversationConfig(ctx context.Context, cmd *cobra.Command, conve
 		}
 	}
 
-	config.Profile = profileName
+	if hasStoredProfile && profileName == "" {
+		config.Profile = "default"
+	} else {
+		config.Profile = profileName
+	}
 	return config, nil
 }
 

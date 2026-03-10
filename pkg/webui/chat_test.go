@@ -76,7 +76,7 @@ func TestResolveWebChatConfigForExistingConversation_UsesStoredProfileAndMetadat
 	assert.Equal(t, llmtypes.OpenAIAPIMode("responses"), config.OpenAI.APIMode)
 }
 
-func TestResolveWebChatConfigForNewConversation_DefaultProfileNameNormalizes(t *testing.T) {
+func TestResolveWebChatConfigForNewConversation_DefaultProfileNameIgnoresActiveProfile(t *testing.T) {
 	originalSettings := viper.AllSettings()
 	defer func() {
 		viper.Reset()
@@ -88,10 +88,50 @@ func TestResolveWebChatConfigForNewConversation_DefaultProfileNameNormalizes(t *
 	viper.Reset()
 	viper.Set("provider", "anthropic")
 	viper.Set("model", "claude-sonnet-4-6")
+	viper.Set("profile", "work")
+	viper.Set("profiles", map[string]any{
+		"work": map[string]any{
+			"provider": "openai",
+			"model":    "gpt-4.1",
+		},
+	})
 
 	config, err := resolveWebChatConfigForNewConversation("default")
 	require.NoError(t, err)
 	assert.Equal(t, "anthropic", config.Provider)
 	assert.Equal(t, "claude-sonnet-4-6", config.Model)
-	assert.Empty(t, config.Profile)
+	assert.Equal(t, "default", config.Profile)
+}
+
+func TestResolveWebChatConfigForExistingConversation_DefaultProfileIgnoresActiveProfile(t *testing.T) {
+	originalSettings := viper.AllSettings()
+	defer func() {
+		viper.Reset()
+		for key, value := range originalSettings {
+			viper.Set(key, value)
+		}
+	}()
+
+	viper.Reset()
+	viper.Set("provider", "anthropic")
+	viper.Set("model", "claude-sonnet-4-6")
+	viper.Set("profile", "work")
+	viper.Set("profiles", map[string]any{
+		"work": map[string]any{
+			"provider": "openai",
+			"model":    "gpt-4.1",
+		},
+	})
+
+	config, err := resolveWebChatConfigForExistingConversation(&conversations.GetConversationResponse{
+		ID:       "conv-default",
+		Provider: "anthropic",
+		Metadata: map[string]any{
+			"profile": "default",
+		},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "anthropic", config.Provider)
+	assert.Equal(t, "claude-sonnet-4-6", config.Model)
+	assert.Equal(t, "default", config.Profile)
 }

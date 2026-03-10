@@ -186,6 +186,16 @@ func resolveWebChatConfig(ctx context.Context, conversationID, requestedProfile 
 }
 
 func resolveWebChatConfigForNewConversation(requestedProfile string) (llmtypes.Config, error) {
+	requestedProfile = strings.TrimSpace(requestedProfile)
+	if strings.EqualFold(requestedProfile, "default") {
+		config, err := llm.GetConfigFromViperWithoutProfile()
+		if err != nil {
+			return llmtypes.Config{}, err
+		}
+		config.Profile = "default"
+		return config, nil
+	}
+
 	profileName := normalizeRequestedProfile(requestedProfile)
 	if profileName != "" {
 		return llm.GetConfigFromViperWithProfile(profileName)
@@ -196,8 +206,10 @@ func resolveWebChatConfigForNewConversation(requestedProfile string) (llmtypes.C
 
 func resolveWebChatConfigForExistingConversation(record *conversationservice.GetConversationResponse) (llmtypes.Config, error) {
 	profileName := ""
+	hasStoredProfile := false
 	if record != nil && record.Metadata != nil {
 		if rawProfile, ok := record.Metadata["profile"].(string); ok {
+			hasStoredProfile = true
 			profileName = normalizeRequestedProfile(rawProfile)
 		}
 	}
@@ -206,7 +218,13 @@ func resolveWebChatConfigForExistingConversation(record *conversationservice.Get
 		config llmtypes.Config
 		err    error
 	)
-	if profileName != "" {
+	if hasStoredProfile {
+		if profileName != "" {
+			config, err = llm.GetConfigFromViperWithProfile(profileName)
+		} else {
+			config, err = llm.GetConfigFromViperWithoutProfile()
+		}
+	} else if profileName != "" {
 		config, err = llm.GetConfigFromViperWithProfile(profileName)
 	} else {
 		config, err = llm.GetConfigFromViper()
@@ -249,7 +267,11 @@ func resolveWebChatConfigForExistingConversation(record *conversationservice.Get
 		}
 	}
 
-	config.Profile = profileName
+	if hasStoredProfile && profileName == "" {
+		config.Profile = "default"
+	} else {
+		config.Profile = profileName
+	}
 	return config, nil
 }
 

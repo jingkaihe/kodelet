@@ -17,23 +17,39 @@ func GetConfigFromViper() (llmtypes.Config, error) {
 	return GetConfigFromViperWithCmd(nil)
 }
 
+// GetConfigFromViperWithoutProfile loads configuration from Viper without
+// applying any active profile from shared process state.
+func GetConfigFromViperWithoutProfile() (llmtypes.Config, error) {
+	return getConfigFromViperWithProfileAndCmd("", nil, true)
+}
+
 // GetConfigFromViperWithProfile loads configuration from Viper while applying the
 // provided profile name instead of the globally active viper profile. This is
 // useful for request-scoped profile selection (for example, in the web UI)
 // without mutating shared process-wide viper state.
 func GetConfigFromViperWithProfile(profileName string) (llmtypes.Config, error) {
-	return getConfigFromViperWithProfileAndCmd(profileName, nil)
+	return getConfigFromViperWithProfileAndCmd(profileName, nil, true)
+}
+
+// GetConfigFromViperWithProfileAndCmd loads configuration from Viper while
+// applying the provided profile name and then re-applying any explicitly
+// changed Cobra flags on top.
+func GetConfigFromViperWithProfileAndCmd(profileName string, cmd *cobra.Command) (llmtypes.Config, error) {
+	return getConfigFromViperWithProfileAndCmd(profileName, cmd, true)
 }
 
 // GetConfigFromViperWithCmd loads the LLM configuration from Viper with command context.
 // When a cobra.Command is provided, CLI flags that were explicitly changed take priority
 // over profile settings.
 func GetConfigFromViperWithCmd(cmd *cobra.Command) (llmtypes.Config, error) {
-	return getConfigFromViperWithProfileAndCmd("", cmd)
+	return getConfigFromViperWithProfileAndCmd("", cmd, false)
 }
 
-func getConfigFromViperWithProfileAndCmd(profileName string, cmd *cobra.Command) (llmtypes.Config, error) {
+func getConfigFromViperWithProfileAndCmd(profileName string, cmd *cobra.Command, ignoreActiveProfile bool) (llmtypes.Config, error) {
 	settings := cloneSettings(viper.AllSettings())
+	if ignoreActiveProfile {
+		delete(settings, "profile")
+	}
 	config, err := loadConfigFromSettings(settings)
 	if err != nil {
 		return config, err
@@ -45,7 +61,7 @@ func getConfigFromViperWithProfileAndCmd(profileName string, cmd *cobra.Command)
 	}
 
 	activeProfile := profileName
-	if activeProfile == "" {
+	if activeProfile == "" && !ignoreActiveProfile {
 		activeProfile = getActiveProfile()
 	}
 

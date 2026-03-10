@@ -183,6 +183,80 @@ func TestGetConfigFromViperWithProfile_UsesExplicitProfileWithoutMutatingViper(t
 	assert.Equal(t, "base-model", viper.GetString("model"))
 }
 
+func TestGetConfigFromViperWithoutProfile_IgnoresActiveProfile(t *testing.T) {
+	originalConfig := viper.AllSettings()
+	defer func() {
+		viper.Reset()
+		for key, value := range originalConfig {
+			viper.Set(key, value)
+		}
+	}()
+
+	viper.Reset()
+	viper.Set("provider", "anthropic")
+	viper.Set("model", "base-model")
+	viper.Set("profile", "work")
+	viper.Set("profiles", map[string]any{
+		"work": map[string]any{
+			"provider": "openai",
+			"model":    "gpt-4.1",
+		},
+	})
+
+	config, err := GetConfigFromViperWithoutProfile()
+	require.NoError(t, err)
+	assert.Equal(t, "anthropic", config.Provider)
+	assert.Equal(t, "base-model", config.Model)
+	assert.Empty(t, config.Profile)
+}
+
+func TestGetConfigFromViperWithProfileAndCmd_ExplicitFlagsOverrideExplicitProfile(t *testing.T) {
+	originalConfig := viper.AllSettings()
+	defer func() {
+		viper.Reset()
+		for key, value := range originalConfig {
+			viper.Set(key, value)
+		}
+	}()
+
+	viper.Reset()
+	viper.Set("profile", "current")
+	viper.Set("profiles", map[string]any{
+		"current": map[string]any{
+			"context": map[string]any{
+				"patterns": []string{"CURRENT.md"},
+			},
+		},
+		"premium": map[string]any{
+			"context": map[string]any{
+				"patterns": []string{"README.md"},
+			},
+			"allowed_tools": []string{"bash"},
+			"tool_mode":     "full",
+		},
+	})
+
+	cmd := &cobra.Command{Use: "test"}
+	cmd.Flags().StringSlice("context-patterns", []string{"AGENTS.md"}, "Context file patterns")
+	err := cmd.Flags().Set("context-patterns", "CODING.md,README.md")
+	require.NoError(t, err)
+	cmd.Flags().StringSlice("allowed-tools", []string{}, "Allowed tools")
+	err = cmd.Flags().Set("allowed-tools", "grep_tool,file_read")
+	require.NoError(t, err)
+	cmd.Flags().String("tool-mode", "full", "Tool mode")
+	err = cmd.Flags().Set("tool-mode", "patch")
+	require.NoError(t, err)
+
+	config, err := GetConfigFromViperWithProfileAndCmd("premium", cmd)
+	require.NoError(t, err)
+
+	assert.Equal(t, "premium", config.Profile)
+	require.NotNil(t, config.Context)
+	assert.Equal(t, []string{"CODING.md", "README.md"}, config.Context.Patterns)
+	assert.Equal(t, []string{"grep_tool", "file_read"}, config.AllowedTools)
+	assert.Equal(t, llmtypes.ToolModePatch, config.ToolMode)
+}
+
 func TestGetConfigFromViperWithProfile_ProfileNotFound(t *testing.T) {
 	originalConfig := viper.AllSettings()
 	defer func() {
